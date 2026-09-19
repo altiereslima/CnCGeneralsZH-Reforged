@@ -6,13 +6,21 @@
 #
 # -peacetime keeps them from fighting, so what is measured is 840 units crossing, not a battle.
 #
+# Seat 1's blocks are offset towards the middle of the map. They used to be offset away from it,
+# which on seed 3 put the tank block's centre at (490,30), on the edge of the map: the half of it
+# that did not fit was piled onto the half that did, and 210 Crusaders sent from there alone
+# stopped 856 times where the same 210 from seat 0's start stopped 72.
+#
+# 2026-09-19, seed 3, spawns fixed: before head-on pass-through the Crusaders stopped 5095 times
+# and arrived on average 5021 frames after the order; after it, 619 and 2736.
+#
 # 2026-09-19: all 840 left and arrived, the orders cost 5.1 and 5.2 ms, logic frame p99 9.25 ms and
 # never over 33.3 ms.
 
 30    spawn   0  AmericaTankCrusader  210  start0:0:400  40
 30    spawn   0  AmericaInfantryRanger  210  start0:400:0  20
-30    spawn   1  ChinaTankBattleMaster  210  start1:0:-400  40
-30    spawn   1  ChinaInfantryRedguard  210  start1:-400:0  20
+30    spawn   1  ChinaTankBattleMaster  210  start1:0:400  40
+30    spawn   1  ChinaInfantryRedguard  210  start1:400:0  20
 90    playermove    0  *      start1
 90    playermove    1  *      start0
 90    arrive  0  AmericaTankCrusader      start1  900

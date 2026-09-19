@@ -4546,7 +4546,10 @@ StateReturnType AIFollowWaypointPathState::onEnter()
 	m_currentWaypoint = ((AIStateMachine *)getMachine())->getGoalWaypoint();
 	AIUpdateInterface *ai = getMachineOwner()->getAI();
 
-	if (m_currentWaypoint == NULL && !m_moveAsGroup)		return STATE_FAILURE;
+	// EA let a group move through with no waypoint and read its location on the next line: a unit
+	// joining an AI team copied a teammate's path state but not its waypoint (joinTeam, from
+	// AIPlayer::checkReadyTeams), and took the game down here
+	if (m_currentWaypoint == NULL)		return STATE_FAILURE;
 
 	getMachine()->setGoalPosition(m_currentWaypoint->getLocation());
 

@@ -326,6 +326,8 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_crowdAim = 0.0f;
 	m_crowdAimValid = FALSE;
 	m_noProgress = 0;
+	m_headOnFrames = 0;
+	m_headOnSeen = FALSE;
 	m_lastProgressPos.zero();
 	m_lastProgressAngle = 0.0f;
 	m_ditherFrom.zero();
@@ -1462,6 +1464,9 @@ Real AIUpdateInterface::calculateMaxBlockedSpeed(Object *other) const
 
 
 //-------------------------------------------------------------------------------------------------
+static const Real HEAD_ON_DOT = -0.5f;					///< facing more than 120 degrees apart is driving at each other
+static const Int  HEAD_ON_PASS_FRAMES = 8;			///< held up head-on this long: pass through
+
 Bool AIUpdateInterface::blockedBy(Object *other)
 /* Returns TRUE if we are blocked from moving by the other object.*/
 {
@@ -1541,6 +1546,18 @@ Bool AIUpdateInterface::blockedBy(Object *other)
 	Real dotProduct = ourDir.x*theirDir.x	+ ourDir.y*theirDir.y;
 	if (getNumFramesBlocked()>LOGICFRAMES_PER_SECOND) {
 		if (dotProduct<=0.0f) return FALSE;  // we are not moving in the same direction.
+	}
+	/* The rule above is EA's way out of a head-on meeting and it never fires: doLocomotor puts
+		 m_blockedFrames back to 1 on every frame the locomotor reports itself unblocked, which a tank
+		 that has finished turning to face its blocker does, so two groups driving into each other
+		 stood nose to nose until the rescue ladder or a step aside broke them up. Traced on 20 BattleMasters meeting 20 Crusaders in the open, the front
+		 pair sat at a speed of 0 for over 200 frames while everybody behind queued on them. This one
+		 counts on its own clock and lets the pair through each other after a quarter of a second. */
+	if (otherMoving && dotProduct <= HEAD_ON_DOT)
+	{
+		m_headOnSeen = TRUE;
+		if (m_headOnFrames > HEAD_ON_PASS_FRAMES)
+			return FALSE;
 	}
 
 	Real collisionAngle = ThePartitionManager->getRelativeAngle2D( obj, &otherPos );
@@ -1687,6 +1704,17 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 			}
 
 			Real maxSpeed = calculateMaxBlockedSpeed(other);
+			// -tracemove <id>: who is in the way, which way he faces against us, and where he sits off our nose,
+			// so a jam can be walked back to the pair at its front one unit at a time
+			if (TheGlobalData->m_traceMoveID > 0 && getObject()->getID() == (ObjectID)TheGlobalData->m_traceMoveID)
+			{
+				const Coord3D *od = other->getUnitDirectionVector2D();
+				const Coord3D *md = getObject()->getUnitDirectionVector2D();
+				DEBUG_LOG(("MOVEBLOCK %d by %d %s at %.0f,%.0f facing %.2f moving %d waiting %d allowed %.3f bearing %.1f\n", TheGameLogic->getFrame(),
+					other->getID(), other->getTemplate()->getName().str(), other->getPosition()->x, other->getPosition()->y,
+					md->x * od->x + md->y * od->y, otherMoving, aiOther->isWaitingForPath(), maxSpeed,
+					ThePartitionManager->getRelativeAngle2D( getObject(), other->getPosition() ) * 180.0f / PI));
+			}
 			if (maxSpeed < m_curMaxBlockedSpeed)
 			{
 				m_curMaxBlockedSpeed = maxSpeed;
@@ -3655,6 +3683,12 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 
 	chooseGoodLocomotorFromCurrentSet();
 
+	if (m_headOnSeen)
+		++m_headOnFrames;
+	else
+		m_headOnFrames = 0;
+	m_headOnSeen = FALSE;
+
 	if (m_isBlocked)
 	{
 		++m_blockedFrames;
@@ -4187,6 +4221,10 @@ void AIUpdateInterface::joinTeam( void )
 		} else {
 			getStateMachine()->setGoalPosition(ai->getGoalPosition());
 		}
+		// a team on a waypoint path is followed along the same path; without it the copied state has no
+		// waypoint to start from
+		if (ai->getStateMachine()->getGoalWaypoint())
+			getStateMachine()->setGoalWaypoint(ai->getStateMachine()->getGoalWaypoint());
 		StateID	state = ai->getCurrentStateID();
 		setLastCommandSource( CMD_FROM_AI );
 		// Match the state.

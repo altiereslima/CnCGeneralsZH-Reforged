@@ -862,6 +862,8 @@ private:
 			until this was pulled out of the crowd model it was only ever asked about units that happened
 			to have been handed a lane by a group order. */
 	Int					m_noProgress;								///< consecutive frames wanting to move, not moving, not turning either.
+	Int					m_headOnFrames;							///< consecutive frames held up by somebody driving straight at us.
+	Bool				m_headOnSeen;								///< a collision this frame was with somebody driving straight at us.
 	Coord3D			m_lastProgressPos;					///< where we were last frame, which is how the above is counted.
 	Real				m_lastProgressAngle;				///< and which way we were pointing, because coming about is progress too.
 	/* Dithering: driving a long way and getting nowhere, which the frame by frame test above cannot
