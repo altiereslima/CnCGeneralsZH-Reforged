@@ -4304,12 +4304,43 @@ void PartitionManager::applyRecordedReveal( const SightingInfo *sighting, Bool r
 }
 
 //-----------------------------------------------------------------------------
-/** The top of whatever stands in a cell: the highest ground in it, or the roof of a building on it if
-	that is higher. Trees and bushes that are objects count, a bridge does not (it is ground to walk
-	on and to see across). A planned building nobody has started is not there yet. */
-static Real sightBlockingHeight( PartitionCell *cell, const Object *looker, const Object *lookerContainer )
+/** The highest standing bridge deck over a cell, or the cell's ground where no deck crosses it. The
+	deck is ground to walk on and to see: judged by the valley floor under it, a bridge over a gorge
+	hid behind the gorge's own edge. Sampled on a 3x3 grid, since a deck is not much wider than a
+	cell and can miss the middle of one it crosses. */
+static Real sightGroundHeight( PartitionCell *cell )
 {
 	Real height = cell->getHiTerrain();
+	Real centerX, centerY;
+	cell->getCellCenterPos( centerX, centerY );
+	const Real halfCell = 0.5f * ThePartitionManager->getCellSize();
+
+	for( Bridge *bridge = TheTerrainLogic->getFirstBridge(); bridge; bridge = bridge->getNext() )
+	{
+		if( bridge->peekBridgeInfo()->curDamageState == BODY_RUBBLE )
+			continue;
+
+		for( Int sampleY = -1; sampleY <= 1; ++sampleY )
+		{
+			for( Int sampleX = -1; sampleX <= 1; ++sampleX )
+			{
+				Coord3D sample;
+				sample.set( centerX + sampleX * halfCell, centerY + sampleY * halfCell, 0.0f );
+				if( bridge->isPointOnBridge( &sample ) )
+					height = max( height, bridge->getBridgeHeight( &sample, NULL ) );
+			}
+		}
+	}
+	return height;
+}
+
+//-----------------------------------------------------------------------------
+/** The top of whatever stands in a cell: the highest ground or bridge deck in it, or the roof of a
+	building on it if that is higher. Trees and bushes that are objects count; the bridge object
+	itself does not, its deck is the ground. A planned building nobody has started is not there yet. */
+static Real sightBlockingHeight( PartitionCell *cell, const Object *looker, const Object *lookerContainer )
+{
+	Real height = sightGroundHeight( cell );
 	for( CellAndObjectIntersection *coi = cell->getFirstCoiInCell(); coi; coi = coi->getNextCoi() )
 	{
 		// a ghost object has no Object behind it

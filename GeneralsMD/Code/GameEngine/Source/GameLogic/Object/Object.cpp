@@ -5236,11 +5236,22 @@ void Object::look()
 				Coord3D eye = *getPosition();
 				eye.z += getGeometryInfo().getMaxHeightAbovePosition();
 
-				// out to the furthest the high ground could carry it; each cell is cut back to its own height
 				m_partitionLastLook->m_where = eye;
 				m_partitionLastLook->m_forWhom = lookingMask;
-				m_partitionLastLook->m_howFar = Weapon_elevatedRange( this, shroudClearingRange, -FLT_MAX );
-				ThePartitionManager->doBlockedShroudReveal( m_partitionLastLook, this, shroudClearingRange );
+
+				// the spy satellite, the radar van scan, the spy drone and the superweapon pings are INERT:
+				// a reveal ability opens its whole circle, behind hills and buildings too
+				if( isKindOf( KINDOF_INERT ) )
+				{
+					m_partitionLastLook->m_howFar = shroudClearingRange;
+					ThePartitionManager->doShroudReveal( eye.x, eye.y, shroudClearingRange, lookingMask );
+				}
+				else
+				{
+					// out to the furthest the high ground could carry it; each cell is cut back to its own height
+					m_partitionLastLook->m_howFar = Weapon_elevatedRange( this, shroudClearingRange, -FLT_MAX );
+					ThePartitionManager->doBlockedShroudReveal( m_partitionLastLook, this, shroudClearingRange );
+				}
 
 	//			DEBUG_LOG(( "A %s looks at %f, %f for %x at range %f\n",
 	//									getTemplate()->getName().str(),
