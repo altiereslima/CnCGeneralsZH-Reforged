@@ -2,18 +2,15 @@
 
 Configure estes GitHub Actions secrets:
 
-- `LZH_LIGHT_URL`
-- `LZH_LIGHT_SHA256`
-- `LZH_LIGHT_TOKEN` (opcional)
 - `PTBR_MEDIA_URL`
 - `PTBR_MEDIA_SHA256`
 - `PTBR_MEDIA_TOKEN` (opcional)
 
 Depois execute **Actions → PT-BR Win32 Build → Run workflow**.
 
-## Bundle LZH-Light
+## Dependências de build
 
-Use `tools/make_lzh_bundle.py` em um checkout que possua o LZH-Light no layout esperado.
+zlib 1.1.4, GameSpy SDK e LZH-Light 1.0 são obtidos automaticamente pelo workflow em versões/commits fixados.
 
 ## Bundle de mídia PT-BR
 

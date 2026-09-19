@@ -16,6 +16,16 @@ ZLIB_URL = "https://zlib.net/fossils/zlib-1.1.4.tar.gz"
 ZLIB_MD5 = "abc405d0bdd3ee22782d7aa20e440f08"
 GAMESPY_REPO = "https://github.com/TheSuperHackers/GamespySDK.git"
 GAMESPY_COMMIT = "b1b77d8f1f30d289b4b4910d305a377f706a0bf7"
+LZH_REPO = "https://github.com/TheSuperHackers/lzhl-1.0.git"
+LZH_COMMIT = "dfd96e2ca64adaddb35dd4ebadd6add7d5586783"
+
+LZH_SOURCE_FILES = [
+    "Huff.cpp", "Lz.cpp", "Lzhl.cpp",
+    "hdec_g.tbl", "hdec_s.tbl", "hdisp.tbl", "henc.tbl",
+]
+LZH_HEADER_FILES = [
+    "_huff.h", "_lz.h", "_lzhl.h", "lzhl.h",
+]
 
 ZLIB_REQUIRED = [
     "adler32.c", "compress.c", "crc32.c", "deflate.c", "gzio.c",
@@ -160,6 +170,86 @@ def install_gamespy(repo: Path, source_override: Path|None):
     # also avoids Windows file-attribute races on .git pack files.
     return {"status":"INSTALLED","path":str(dst),"commit":GAMESPY_COMMIT}
 
+def validate_lzh_flat(path: Path):
+    required=LZH_SOURCE_FILES + LZH_HEADER_FILES
+    missing=[x for x in required if not (path/x).is_file()]
+    if missing:
+        raise RuntimeError("LZH-Light 1.0 inválido: "+", ".join(missing))
+
+def validate_lzh_installed(repo: Path):
+    root=repo/"GeneralsMD/Code/Libraries/Source/Compression/LZHCompress"
+    source=root/"CompLibSource"
+    header=root/"CompLibHeader"
+    missing=[]
+    for x in LZH_SOURCE_FILES:
+        if not (source/x).is_file():
+            missing.append("CompLibSource/"+x)
+    for x in LZH_HEADER_FILES:
+        if not (header/x).is_file():
+            missing.append("CompLibHeader/"+x)
+    if missing:
+        raise RuntimeError("LZH-Light instalado incompleto: "+", ".join(missing))
+    return root
+
+def install_lzh(repo: Path, source_override: Path|None):
+    root=repo/"GeneralsMD/Code/Libraries/Source/Compression/LZHCompress"
+    source_dst=root/"CompLibSource"
+    header_dst=root/"CompLibHeader"
+
+    try:
+        validate_lzh_installed(repo)
+        return {"status":"PRESENT","path":str(root)}
+    except RuntimeError:
+        pass
+
+    if source_override:
+        src=source_override
+        validate_lzh_flat(src)
+        source_dst.mkdir(parents=True,exist_ok=True)
+        header_dst.mkdir(parents=True,exist_ok=True)
+        for name in LZH_SOURCE_FILES:
+            shutil.copy2(src/name,source_dst/name)
+        for name in LZH_HEADER_FILES:
+            shutil.copy2(src/name,header_dst/name)
+        validate_lzh_installed(repo)
+        return {"status":"INSTALLED_FROM_OVERRIDE","path":str(root)}
+
+    git=shutil.which("git")
+    if not git:
+        raise RuntimeError("git não encontrado para instalar LZH-Light 1.0")
+
+    # Clone into the runner temp area and copy only the exact files used by
+    # Reforged.  The source tree never receives .git metadata, avoiding the
+    # Windows pack-file deletion issue seen with GameSpy.
+    temp_root=Path(tempfile.mkdtemp(prefix="zh-lzh-"))
+    clone=temp_root/"lzhl-1.0"
+
+    run([git,"clone","--no-checkout","--filter=blob:none",LZH_REPO,str(clone)])
+    run([git,"checkout",LZH_COMMIT],cwd=clone)
+    head=run([git,"rev-parse","HEAD"],cwd=clone).strip()
+    if head.lower()!=LZH_COMMIT.lower():
+        raise RuntimeError(f"commit LZH-Light inesperado: {head}")
+
+    validate_lzh_flat(clone)
+
+    source_dst.mkdir(parents=True,exist_ok=True)
+    header_dst.mkdir(parents=True,exist_ok=True)
+    for name in LZH_SOURCE_FILES:
+        shutil.copy2(clone/name,source_dst/name)
+    for name in LZH_HEADER_FILES:
+        shutil.copy2(clone/name,header_dst/name)
+
+    validate_lzh_installed(repo)
+    if any((root/x).exists() for x in [".git"]):
+        raise RuntimeError("LZH-Light não deve conter .git na árvore do Reforged")
+
+    return {
+        "status":"INSTALLED",
+        "path":str(root),
+        "repository":LZH_REPO,
+        "commit":LZH_COMMIT,
+    }
+
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--repo",required=True)
@@ -167,6 +257,8 @@ def main():
                     help="fixture/offline override for zlib-1.1.4.tar.gz")
     ap.add_argument("--gamespy-source",default=None,
                     help="fixture/offline override for an already extracted GamespySDK tree")
+    ap.add_argument("--lzh-source",default=None,
+                    help="fixture/offline override for flat LZH-Light 1.0 source tree")
     args=ap.parse_args()
 
     repo=Path(args.repo).resolve()
@@ -175,10 +267,12 @@ def main():
 
     z=install_zlib(repo, Path(args.zlib_archive).resolve() if args.zlib_archive else None)
     g=install_gamespy(repo, Path(args.gamespy_source).resolve() if args.gamespy_source else None)
+    l=install_lzh(repo, Path(args.lzh_source).resolve() if args.lzh_source else None)
 
     print("PUBLIC DEPENDENCIES INSTALL PASS")
     print("zlib:",z)
     print("gamespy:",g)
+    print("lzh:",l)
 
 if __name__=="__main__":
     main()

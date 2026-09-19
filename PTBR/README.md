@@ -11,6 +11,6 @@ Integração PT-BR para um fork de `olcayseygan/CnCGeneralsZH-Reforged`.
 - workflow GitHub Actions.
 
 Os vídeos Bink, texturas localizadas e fontes legadas não ficam no Git. O workflow recebe a mídia
-PT-BR por bundle privado validado por SHA-256.
+PT-BR por bundle privado validado por SHA-256. zlib, GameSpy e LZH-Light são obtidos publicamente em versões fixadas.
 
 Veja `SETUP.md`.

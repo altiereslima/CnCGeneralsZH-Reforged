@@ -40,37 +40,6 @@ jobs:
         run: |
           python PTBR\tools\install_public_dependencies.py --repo .
 
-      - name: Check LZH-Light secret
-        shell: pwsh
-        env:
-          LZH_URL: ${{ secrets.LZH_LIGHT_URL }}
-          LZH_SHA256: ${{ secrets.LZH_LIGHT_SHA256 }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:LZH_URL)) { throw "Missing LZH_LIGHT_URL" }
-          if ([string]::IsNullOrWhiteSpace($env:LZH_SHA256)) { throw "Missing LZH_LIGHT_SHA256" }
-
-      - name: Download private LZH-Light bundle
-        shell: pwsh
-        env:
-          LZH_URL: ${{ secrets.LZH_LIGHT_URL }}
-          LZH_TOKEN: ${{ secrets.LZH_LIGHT_TOKEN }}
-        run: |
-          $headers = @{}
-          if (-not [string]::IsNullOrWhiteSpace($env:LZH_TOKEN)) {
-            $headers["Authorization"] = "Bearer $env:LZH_TOKEN"
-          }
-          Invoke-WebRequest -Uri $env:LZH_URL -Headers $headers -OutFile "$env:RUNNER_TEMP\lzh-light.zip"
-
-      - name: Install and verify LZH-Light
-        shell: pwsh
-        env:
-          LZH_SHA256: ${{ secrets.LZH_LIGHT_SHA256 }}
-        run: |
-          python PTBR\tools\install_lzh_bundle.py `
-            --repo . `
-            --archive "$env:RUNNER_TEMP\lzh-light.zip" `
-            --sha256 "$env:LZH_SHA256"
-
       - name: Check PT-BR media secrets
         shell: pwsh
         env:
