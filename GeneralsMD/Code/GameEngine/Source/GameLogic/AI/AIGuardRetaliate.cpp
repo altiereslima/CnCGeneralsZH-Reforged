@@ -103,6 +103,10 @@ static Bool hasAttackedMeAndICanReturnFire( State *thisState, void* /*userData*/
 		return FALSE;
 	}
 
+	if (!AIGuardRetaliateMachine::canRetaliateFromHere(obj, target)) {
+		return FALSE;
+	}
+
 	CanAttackResult result = obj->getAbleToAttackSpecificObject(ATTACK_NEW_TARGET, target, CMD_FROM_AI);
 	if( result == ATTACKRESULT_POSSIBLE || result == ATTACKRESULT_POSSIBLE_AFTER_MOVING )
 	{
@@ -221,6 +225,27 @@ Bool AIGuardRetaliateMachine::isIdle() const
 }
 
 //--------------------------------------------------------------------------------------
+/** Retaliation picks a target nobody pointed at, so it must not take a unit somewhere the player
+	* did not put it just to get a shot. A rocket buggy parked on a plateau needs line of sight to
+	* fire, and the plateau's own edge hides the low ground: retaliating against a tank down there
+	* drove it to the lip, where it sat unable to fire, and then down the slope. Idle targeting
+	* already asks for sight (CAN_SEE in getNextMoodTarget); retaliation now asks the same. */
+//--------------------------------------------------------------------------------------
+static Bool attackNeedsSight(const Object* attacker)
+{
+	return TheAI->getAiData()->m_attackUsesLineOfSight && attacker->isKindOf(KINDOF_ATTACK_NEEDS_LINE_OF_SIGHT);
+}
+
+/*static*/ Bool AIGuardRetaliateMachine::canRetaliateFromHere(const Object* retaliator, Object* target)
+{
+	if (!attackNeedsSight(retaliator))
+		return true;
+
+	PartitionFilterLineOfSight sight(retaliator);
+	return sight.allow(target);
+}
+
+//--------------------------------------------------------------------------------------
 Bool AIGuardRetaliateMachine::lookForInnerTarget(void)
 {
 	Object* owner = getOwner();
@@ -248,6 +273,7 @@ Bool AIGuardRetaliateMachine::lookForInnerTarget(void)
 	PartitionFilterPossibleToEnter			f6(owner, CMD_FROM_AI);
 	PartitionFilterPossibleToHijack			f7(owner, CMD_FROM_AI);
 	PartitionFilterRejectBuildings			f8( owner );
+	PartitionFilterLineOfSight					filterSight( owner );
 
 	PartitionFilter *filters[16];
 	Int count = 0;
@@ -274,6 +300,9 @@ Bool AIGuardRetaliateMachine::lookForInnerTarget(void)
 		filters[count++] = &f1;
 		filters[count++] = &f2;
 		filters[count++] = &f8; //Different than guard... we won't allow acquiring of structures (unless base defenses)
+		// see canRetaliateFromHere
+		if (attackNeedsSight(owner))
+			filters[count++] = &filterSight;
 	}
 
 	filters[count++] = &filterMapStatus;

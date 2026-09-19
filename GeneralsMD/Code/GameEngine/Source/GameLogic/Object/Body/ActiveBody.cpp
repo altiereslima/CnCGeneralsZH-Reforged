@@ -45,6 +45,7 @@
 #include "GameClient/InGameUI.h"
 #include "GameClient/ParticleSys.h"
 #include "GameLogic/AI.h"
+#include "GameLogic/AIGuardRetaliate.h"
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/Armor.h"
 #include "GameLogic/GameLogic.h"
@@ -762,7 +763,8 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 				//If we have AI and we're mobile, then assist!
 				// A Stinger soldier only looks mobile: it belongs at its site, and retaliating sent it after
 				// whoever had shot a neighbour, several hundred out.
-				if( !them->isKindOf( KINDOF_IMMOBILE ) && !them->isKindOf( KINDOF_SPAWNS_ARE_THE_WEAPONS ))
+				if( !them->isKindOf( KINDOF_IMMOBILE ) && !them->isKindOf( KINDOF_SPAWNS_ARE_THE_WEAPONS ) &&
+						AIGuardRetaliateMachine::canRetaliateFromHere( them, damager ) )
 				{
 					//But only if we can attack it!
 					CanAttackResult result = them->getAbleToAttackSpecificObject( ATTACK_NEW_TARGET, damager, CMD_FROM_AI );
