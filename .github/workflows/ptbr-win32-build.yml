@@ -1,6 +1,9 @@
 name: PT-BR Win32 Build
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       config:
@@ -102,11 +105,24 @@ jobs:
       - name: Apply PT-BR, validate and build Win32
         shell: pwsh
         env:
-          BUILD_CONFIG: ${{ inputs.config }}
-          RUN_TESTS: ${{ inputs.run_tests }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_CONFIG: ${{ inputs.config }}
+          INPUT_RUN_TESTS: ${{ inputs.run_tests }}
         run: |
-          $runnerArgs = @(".", "--config", "$env:BUILD_CONFIG", "--clean")
-          if ($env:RUN_TESTS -ne "true") { $runnerArgs += "--skip-tests" }
+          if ($env:EVENT_NAME -eq "workflow_dispatch") {
+            $buildConfig = $env:INPUT_CONFIG
+            $runTests = $env:INPUT_RUN_TESTS
+          } else {
+            $buildConfig = "Release"
+            $runTests = "true"
+          }
+
+          if ([string]::IsNullOrWhiteSpace($buildConfig)) {
+            $buildConfig = "Release"
+          }
+
+          $runnerArgs = @(".", "--config", "$buildConfig", "--clean")
+          if ($runTests -ne "true") { $runnerArgs += "--skip-tests" }
           python PTBR\tools\run_windows_stage15.py @runnerArgs
 
       - name: Assemble downloadable PT-BR build
@@ -130,7 +146,7 @@ jobs:
       - name: Upload PT-BR build
         uses: actions/upload-artifact@v4
         with:
-          name: ZH-Reforged-PTBR-${{ inputs.config }}-${{ github.run_number }}
+          name: ZH-Reforged-PTBR-${{ github.event_name == 'workflow_dispatch' && inputs.config || 'Release' }}-${{ github.run_number }}
           path: PTBR_STAGE17_ARTIFACT/
           if-no-files-found: error
           retention-days: 14
