@@ -1,0 +1,147 @@
+name: PT-BR Win32 Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: Build configuration
+        required: true
+        default: Release
+        type: choice
+        options: [Release, RelWithDebInfo, Debug]
+      run_tests:
+        description: Run ctest after build
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install public build dependencies
+        shell: pwsh
+        run: |
+          python PTBR\tools\install_public_dependencies.py --repo .
+
+      - name: Check LZH-Light secret
+        shell: pwsh
+        env:
+          LZH_URL: ${{ secrets.LZH_LIGHT_URL }}
+          LZH_SHA256: ${{ secrets.LZH_LIGHT_SHA256 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:LZH_URL)) { throw "Missing LZH_LIGHT_URL" }
+          if ([string]::IsNullOrWhiteSpace($env:LZH_SHA256)) { throw "Missing LZH_LIGHT_SHA256" }
+
+      - name: Download private LZH-Light bundle
+        shell: pwsh
+        env:
+          LZH_URL: ${{ secrets.LZH_LIGHT_URL }}
+          LZH_TOKEN: ${{ secrets.LZH_LIGHT_TOKEN }}
+        run: |
+          $headers = @{}
+          if (-not [string]::IsNullOrWhiteSpace($env:LZH_TOKEN)) {
+            $headers["Authorization"] = "Bearer $env:LZH_TOKEN"
+          }
+          Invoke-WebRequest -Uri $env:LZH_URL -Headers $headers -OutFile "$env:RUNNER_TEMP\lzh-light.zip"
+
+      - name: Install and verify LZH-Light
+        shell: pwsh
+        env:
+          LZH_SHA256: ${{ secrets.LZH_LIGHT_SHA256 }}
+        run: |
+          python PTBR\tools\install_lzh_bundle.py `
+            --repo . `
+            --archive "$env:RUNNER_TEMP\lzh-light.zip" `
+            --sha256 "$env:LZH_SHA256"
+
+      - name: Check PT-BR media secrets
+        shell: pwsh
+        env:
+          MEDIA_URL: ${{ secrets.PTBR_MEDIA_URL }}
+          MEDIA_SHA256: ${{ secrets.PTBR_MEDIA_SHA256 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:MEDIA_URL)) { throw "Missing PTBR_MEDIA_URL" }
+          if ([string]::IsNullOrWhiteSpace($env:MEDIA_SHA256)) { throw "Missing PTBR_MEDIA_SHA256" }
+
+      - name: Download private PT-BR media
+        shell: pwsh
+        env:
+          MEDIA_URL: ${{ secrets.PTBR_MEDIA_URL }}
+          MEDIA_TOKEN: ${{ secrets.PTBR_MEDIA_TOKEN }}
+        run: |
+          $headers = @{}
+          if (-not [string]::IsNullOrWhiteSpace($env:MEDIA_TOKEN)) {
+            $headers["Authorization"] = "Bearer $env:MEDIA_TOKEN"
+          }
+          Invoke-WebRequest -Uri $env:MEDIA_URL -Headers $headers -OutFile "$env:RUNNER_TEMP\ptbr-media.zip"
+
+      - name: Install and verify PT-BR media
+        shell: pwsh
+        env:
+          MEDIA_SHA256: ${{ secrets.PTBR_MEDIA_SHA256 }}
+        run: |
+          python PTBR\tools\install_ptbr_media_bundle.py `
+            --package PTBR `
+            --archive "$env:RUNNER_TEMP\ptbr-media.zip" `
+            --sha256 "$env:MEDIA_SHA256"
+
+      - name: Apply PT-BR, validate and build Win32
+        shell: pwsh
+        env:
+          BUILD_CONFIG: ${{ inputs.config }}
+          RUN_TESTS: ${{ inputs.run_tests }}
+        run: |
+          $runnerArgs = @(".", "--config", "$env:BUILD_CONFIG", "--clean")
+          if ($env:RUN_TESTS -ne "true") { $runnerArgs += "--skip-tests" }
+          python PTBR\tools\run_windows_stage15.py @runnerArgs
+
+      - name: Assemble downloadable PT-BR build
+        shell: pwsh
+        run: |
+          $out = "PTBR_STAGE17_ARTIFACT"
+          New-Item -ItemType Directory -Force "$out\Data\PortugueseBrazil" | Out-Null
+          Copy-Item "GeneralsMD\Run\generals.exe" "$out\generals.exe" -Force
+          if (Test-Path "GeneralsMD\Run\generals.pdb") {
+            Copy-Item "GeneralsMD\Run\generals.pdb" "$out\generals.pdb" -Force
+          }
+          Copy-Item "GeneralsMD\Run\Data\Patch.str" "$out\Data\Patch.str" -Force
+          Copy-Item "GeneralsMD\Run\Data\PortugueseBrazil\*" "$out\Data\PortugueseBrazil\" -Recurse -Force
+          Copy-Item "PTBR_STAGE15_RESULTS\result.json" "$out\STAGE15_BUILD_RESULT.json" -Force
+          @"
+          Zero Hour Reforged PT-BR build.
+          Requires a legally owned compatible Zero Hour/Reforged installation.
+          Base game .big files, mss32.dll and binkw32.dll are not included.
+          "@ | Set-Content "$out\README_INSTALL.txt" -Encoding UTF8
+
+      - name: Upload PT-BR build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZH-Reforged-PTBR-${{ inputs.config }}-${{ github.run_number }}
+          path: PTBR_STAGE17_ARTIFACT/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZH-Reforged-PTBR-logs-${{ github.run_number }}
+          path: |
+            PTBR_STAGE15_RESULTS/
+            build/Testing/Temporary/
+          if-no-files-found: warn
+          retention-days: 14
