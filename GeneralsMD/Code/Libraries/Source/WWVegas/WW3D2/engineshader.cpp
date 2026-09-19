@@ -17,6 +17,7 @@
 */
 
 #include "engineshader.h"
+#include "ffvertex.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -183,7 +184,32 @@ static void write_trees(std::string & hlsl)
 // ffshader's declarations, member for member and in the same order, so a transcribed pixel program
 // is bound with the same constant buffer, the same textures and the same samplers as a generated
 // one.  Reading fewer of them than are declared costs nothing.
-static void write_pixel_preamble(std::string & hlsl)
+// The bumped terrain's own light: the share of it that does not depend on which way the ground
+// faces.  Without one the ratio below divides by nearly nothing on ground turned from the sun.
+static const char * const TERRAIN_BUMP_AMBIENT = "0.4";
+
+// A tangent space normal from the atlas, put into camera space on the frame the coordinate set
+// actually has at this pixel: tangent where u grows, bitangent where v grows.  The same
+// construction ffshader uses for models, as a function because the terrain has two layers.
+static const char * const TERRAIN_BUMP_FUNCTION =
+	"float3 bumped_normal(float3 position, float3 surface, float2 coordinate, float3 texel)\n"
+	"{\n"
+	"    float3 position_dx = ddx(position);\n"
+	"    float3 position_dy = ddy(position);\n"
+	"    float2 coordinate_dx = ddx(coordinate);\n"
+	"    float2 coordinate_dy = ddy(coordinate);\n"
+	"    float3 across_dy = cross(position_dy, surface);\n"
+	"    float3 across_dx = cross(surface, position_dx);\n"
+	"    float3 tangent = across_dy * coordinate_dx.x + across_dx * coordinate_dy.x;\n"
+	"    float3 bitangent = across_dy * coordinate_dx.y + across_dx * coordinate_dy.y;\n"
+	"    float frame_scale = rsqrt(max(max(dot(tangent, tangent), dot(bitangent, bitangent)), 1e-20));\n"
+	"    float3 bump = texel * 2.0 - 1.0;\n"
+	"    bump.xy *= NormalMapParameters.x;\n"
+	"    return normalize((tangent * bump.x + bitangent * bump.y) * frame_scale + surface * bump.z);\n"
+	"}\n"
+	"\n";
+
+static void write_pixel_preamble(std::string & hlsl, bool bumped = false)
 {
 	for (unsigned stage = 0; stage < MAXIMUM_COMBINER_STAGES; ++stage) {
 		char line[128];
@@ -199,8 +225,23 @@ static void write_pixel_preamble(std::string & hlsl)
 		"{\n"
 		"    float4 TextureFactor;\n"
 		"    float4 FogColour;\n"
-		"    float4 AlphaReference;\n"
-		"};\n"
+		"    float4 AlphaReference;\n";
+	if (bumped) {
+		// The whole of DX11BackendClass::PixelConstantBlock up to the sun, in its order.
+		char line[256];
+		snprintf(line, sizeof(line),
+			"    float4 NormalLightDirection[%u];\n"
+			"    float4 NormalLightDiffuse[%u];\n"
+			"    float4 NormalMapParameters;\n"
+			"    float4 TerrainSunDirection;\n",
+			NORMAL_MAPPED_LIGHTS, NORMAL_MAPPED_LIGHTS);
+		hlsl += line;
+	}
+	hlsl += "};\n";
+	if (bumped) {
+		hlsl += "Texture2D NormalMap : register(t4);\n";
+	}
+	hlsl +=
 		"\n"
 		"struct Input\n"
 		"{\n"
@@ -214,10 +255,17 @@ static void write_pixel_preamble(std::string & hlsl)
 		hlsl += line;
 	}
 
+	hlsl += "    float Fog        : FOG;\n";
+	if (bumped) {
+		hlsl += NORMAL_MAPPED_VARYINGS;
+	}
 	hlsl +=
-		"    float Fog        : FOG;\n"
 		"};\n"
-		"\n"
+		"\n";
+	if (bumped) {
+		hlsl += TERRAIN_BUMP_FUNCTION;
+	}
+	hlsl +=
 		"float4 main(Input input) : SV_Target\n"
 		"{\n";
 
@@ -334,9 +382,10 @@ static void write_monochrome(std::string & hlsl)
 // Every ps_1_1 instruction clamps its result to zero and one, so each step saturates and not only
 // the last: a chain that overflows in the middle and comes back down is a different colour with the
 // clamps than without them.
-static void write_multiply_chain(std::string & hlsl, const EngineShaderEntry & entry)
+static void write_multiply_chain(std::string & hlsl, const EngineShaderEntry & entry,
+	bool bumped)
 {
-	write_pixel_preamble(hlsl);
+	write_pixel_preamble(hlsl, bumped);
 
 	hlsl += "    float4 current = saturate(";
 	hlsl += entry.Opening;
@@ -347,6 +396,36 @@ static void write_multiply_chain(std::string & hlsl, const EngineShaderEntry & e
 		hlsl += *step;
 		hlsl += ");\n";
 	}
+
+	if (!bumped) {
+		return;
+	}
+
+	// The vertex colour already carries the light the ground's own slope gets, so the bump is a
+	// ratio on top of it: how much more or less the bumped surface faces the sun than the flat one
+	// the triangle is.  The two layers blend by the same alpha the colours do.
+	char line[1024];
+	snprintf(line, sizeof(line),
+		"    float3 flat_normal = normalize(cross(ddx(input.ViewPosition), ddy(input.ViewPosition)));\n"
+		"    if (dot(flat_normal, input.ViewPosition) > 0.0) { flat_normal = -flat_normal; }\n"
+		"    float3 to_sun = -TerrainSunDirection.xyz;\n"
+		"    float3 near_layer = bumped_normal(input.ViewPosition, flat_normal, input.TexCoord0,"
+		" NormalMap.Sample(Sampler0, input.TexCoord0).xyz);\n"
+		"    float3 far_layer = bumped_normal(input.ViewPosition, flat_normal, input.TexCoord1,"
+		" NormalMap.Sample(Sampler1, input.TexCoord1).xyz);\n"
+		"    float3 surface = normalize(lerp(near_layer, far_layer, input.Diffuse.a));\n"
+		"    float flat_light = %s + (1.0 - %s) * saturate(dot(flat_normal, to_sun));\n"
+		"    float bumped_light = %s + (1.0 - %s) * saturate(dot(surface, to_sun));\n"
+		"    float shade = bumped_light / flat_light;\n"
+		"    current.rgb = saturate(current.rgb * shade);\n",
+		TERRAIN_BUMP_AMBIENT, TERRAIN_BUMP_AMBIENT, TERRAIN_BUMP_AMBIENT, TERRAIN_BUMP_AMBIENT);
+	hlsl += line;
+}
+
+bool EngineShader_Can_Bump(EngineShaderProgram program)
+{
+	return program == ENGINE_SHADER_TERRAIN || program == ENGINE_SHADER_TERRAIN_NOISE
+		|| program == ENGINE_SHADER_TERRAIN_NOISE_2;
 }
 
 static char lowered(char character)
@@ -396,13 +475,16 @@ bool EngineShader_Vertex_Program(EngineShaderProgram program, std::string & hlsl
 }
 
 bool EngineShader_Pixel_Program(EngineShaderProgram program,
-	const PixelPipelineDescription & pipeline, std::string & hlsl)
+	const PixelPipelineDescription & pipeline, std::string & hlsl, bool bumped)
 {
 	hlsl.clear();
+	if (bumped && !EngineShader_Can_Bump(program)) {
+		return false;
+	}
 
 	const EngineShaderEntry * entry = entry_for(program);
 	if (entry != NULL && entry->Opening != NULL) {
-		write_multiply_chain(hlsl, *entry);
+		write_multiply_chain(hlsl, *entry, bumped);
 	}
 	else if (program == ENGINE_SHADER_WATER_TRAPEZOID) {
 		write_trapezoid_water(hlsl);

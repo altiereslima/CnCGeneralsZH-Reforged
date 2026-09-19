@@ -50,17 +50,20 @@ typedef struct {
 
 #define INVERTED_MASK	0x1		//AND this with TBlendTileInfo.inverted to get actual inverted state
 #define FLIPPED_MASK	0x2		//AND this with TBlendTileInfo.inverted to get forced flip state (for horizontal/vertical flips).
-#define TILE_PIXEL_EXTENT 64
+// A terrain tile's side in the atlas.  EA fixed it at 64; a run that draws doubles it, set once
+// before any map loads (W3DDisplay::init).  The shipped images and every map are laid out in 64 pixel tiles,
+// which is SOURCE_TILE_PIXEL_EXTENT, and a source image is read in those and scaled to this one.
+extern Int TheTilePixelExtent;
+#define TILE_PIXEL_EXTENT TheTilePixelExtent
+#define SOURCE_TILE_PIXEL_EXTENT 64
+#define MAX_TILE_PIXEL_EXTENT 128
 #define TILE_BYTES_PER_PIXEL 4
-#define DATA_LEN_BYTES TILE_PIXEL_EXTENT*TILE_PIXEL_EXTENT*TILE_BYTES_PER_PIXEL
-#define DATA_LEN_PIXELS TILE_PIXEL_EXTENT*TILE_PIXEL_EXTENT
-#define TILE_PIXEL_EXTENT_MIP1 32
-#define TILE_PIXEL_EXTENT_MIP2 16
-#define TILE_PIXEL_EXTENT_MIP3 8
-#define TILE_PIXEL_EXTENT_MIP4 4
-#define TILE_PIXEL_EXTENT_MIP5 2
-#define TILE_PIXEL_EXTENT_MIP6 1
-#define TEXTURE_WIDTH 2048 // was 1024 jba
+#define DATA_LEN_BYTES MAX_TILE_PIXEL_EXTENT*MAX_TILE_PIXEL_EXTENT*TILE_BYTES_PER_PIXEL
+// Every mip below the largest, down to one pixel: a third of the largest level, rounded up.
+#define MIP_LEN_BYTES (DATA_LEN_BYTES/3 + TILE_BYTES_PER_PIXEL)
+// The atlas is 32 tiles wide however big a tile is, so a map's layout and the cliff coordinates
+// it stores, which are fractions of this width, come out the same at either extent.
+#define TEXTURE_WIDTH (32*TILE_PIXEL_EXTENT) // was 1024 jba
 
 /** This class holds the bitmap data from the .tga texture files.  It is used to 
 create the D3D texture in the game and 3d windows, and to create DIB data for the 
@@ -73,13 +76,8 @@ protected:
 	// Also, first byte is lower left pixel, not upper left pixel.
 	// so 0,0 is lower left, not upper left.
 	UnsignedByte m_tileData[DATA_LEN_BYTES];
-	/// Mipped down copies of the tile data.
-	UnsignedByte m_tileDataMip32[TILE_PIXEL_EXTENT_MIP1*TILE_PIXEL_EXTENT_MIP1*TILE_BYTES_PER_PIXEL];
-	UnsignedByte m_tileDataMip16[TILE_PIXEL_EXTENT_MIP2*TILE_PIXEL_EXTENT_MIP2*TILE_BYTES_PER_PIXEL];
-	UnsignedByte m_tileDataMip8[TILE_PIXEL_EXTENT_MIP3*TILE_PIXEL_EXTENT_MIP3*TILE_BYTES_PER_PIXEL];
-	UnsignedByte m_tileDataMip4[TILE_PIXEL_EXTENT_MIP4*TILE_PIXEL_EXTENT_MIP4*TILE_BYTES_PER_PIXEL];
-	UnsignedByte m_tileDataMip2[TILE_PIXEL_EXTENT_MIP5*TILE_PIXEL_EXTENT_MIP5*TILE_BYTES_PER_PIXEL];
-	UnsignedByte m_tileDataMip1[TILE_PIXEL_EXTENT_MIP6*TILE_PIXEL_EXTENT_MIP6*TILE_BYTES_PER_PIXEL];
+	/// Mipped down copies of the tile data, each half the side of the one before, packed in order.
+	UnsignedByte m_tileDataMips[MIP_LEN_BYTES];
 
 public:
 	ICoord2D	m_tileLocationInTexture;
@@ -97,9 +95,15 @@ public:
 
 public:
 	UnsignedByte *getDataPtr(void) {return(m_tileData);};
-	static Int dataLen(void) {return(DATA_LEN_BYTES);};
-	
+	static Int dataLen(void) {return(TILE_PIXEL_EXTENT*TILE_PIXEL_EXTENT*TILE_BYTES_PER_PIXEL);};
+
 	void updateMips(void);
+
+	/** The tile was filled at sourceExtent, which is smaller than TILE_PIXEL_EXTENT: stretch it to
+			fill the tile, bilinearly, wrapping at its own edges.  That is right for a texture class of
+			one tile; in a bigger one the neighbour is another tile, so the edge can show a faint seam,
+			which a source image already at the full extent does not have. */
+	void scaleUpFrom(Int sourceExtent);
 
 	Bool hasRGBDataForWidth(Int width);
 	UnsignedByte *getRGBDataForWidth(Int width);

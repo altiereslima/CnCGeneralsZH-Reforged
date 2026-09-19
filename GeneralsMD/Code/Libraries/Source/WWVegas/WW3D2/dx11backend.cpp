@@ -38,6 +38,13 @@ static const char * const ENTRY_POINT = "main";
 static const char * const VERTEX_PROFILE = "vs_4_0";
 static const char * const PIXEL_PROFILE = "ps_4_0";
 
+// How far a normal map tilts the normal (1 is as the map is written), the exponent of the
+// highlight it adds, and how bright that highlight is where the map's alpha is one.  Picked by eye
+// on four tanks and a desert base.
+static const float NORMAL_MAP_STRENGTH = 1.0f;
+static const float NORMAL_MAP_HIGHLIGHT_POWER = 24.0f;
+static const float NORMAL_MAP_HIGHLIGHT_SCALE = 0.5f;
+
 // The three stage counts are one count in three headers.  The vertex constant block is copied
 // wholesale out of the backend's own texture transforms, the generated pixel shader declares one
 // sampler per texture the backend binds, and a mismatch is a silent overrun rather than a build
@@ -192,6 +199,8 @@ DX11BackendClass::DX11BackendClass()
 	, CurrentTargetResource(NULL)
 	, TargetCopy(NULL)
 	, TargetCopyView(NULL)
+	, NormalMap(NULL)
+	, NormalMappedDraws(0)
 	, DrawsMade(0)
 	, DrawsRefused(0)
 	, RefusedNoBuffer(0)
@@ -219,6 +228,7 @@ DX11BackendClass::DX11BackendClass()
 	memset(EngineConstants, 0, sizeof(EngineConstants));
 	memset(MissingTexture, 0, sizeof(MissingTexture));
 	memset(Lights, 0, sizeof(Lights));
+	memset(TerrainSun, 0, sizeof(TerrainSun));
 	memset(MaterialAmbient, 0, sizeof(MaterialAmbient));
 	memset(MaterialDiffuse, 0, sizeof(MaterialDiffuse));
 	memset(MaterialSpecular, 0, sizeof(MaterialSpecular));
@@ -392,6 +402,40 @@ void DX11BackendClass::Set_Texture(unsigned stage, ID3D11ShaderResourceView * te
 	if (stage < DX11_BACKEND_TEXTURE_STAGES) {
 		Textures[stage] = texture;
 	}
+}
+
+void DX11BackendClass::Set_Normal_Map(ID3D11ShaderResourceView * normal_map)
+{
+	NormalMap = normal_map;
+}
+
+// Directional lights only, because the pixel half sums nothing else; a draw under a point light is
+// lit per vertex the way it always was.  A transcribed program is its own lighting.
+bool DX11BackendClass::Normal_Mapped() const
+{
+	if (NormalMap == NULL || Textures[0] == NULL
+		|| VertexProgram != ENGINE_SHADER_NONE || PixelProgram != ENGINE_SHADER_NONE
+		|| RenderStates.Get_Render_State(D3DRS_LIGHTING) == FALSE
+		|| (VertexFormat & D3DFVF_NORMAL) == 0) {
+		return false;
+	}
+	for (unsigned index = 0; index < MAXIMUM_VERTEX_LIGHTS; ++index) {
+		if (Lights[index].Enabled && Lights[index].Type != D3DLIGHT_DIRECTIONAL) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool DX11BackendClass::Terrain_Bumped() const
+{
+	return NormalMap != NULL && Textures[0] != NULL && VertexProgram == ENGINE_SHADER_NONE
+		&& EngineShader_Can_Bump(PixelProgram) && (VertexFormat & D3DFVF_XYZRHW) == 0;
+}
+
+void DX11BackendClass::Set_Terrain_Sun(const float direction[3])
+{
+	memcpy(TerrainSun, direction, sizeof(TerrainSun));
 }
 
 void DX11BackendClass::Set_Vertex_Format(DWORD fvf)
@@ -870,6 +914,7 @@ bool DX11BackendClass::Build_Combiner_Description(CombinerDescription & descript
 		target.TextureBound = Textures[stage] != NULL;
 		description.StageCount = stage + 1;
 	}
+	description.NormalMapped = description.StageCount > 0 && Normal_Mapped();
 	return description.StageCount > 0;
 }
 
@@ -914,6 +959,8 @@ bool DX11BackendClass::Build_Vertex_Description(VertexPipelineDescription & desc
 
 	description.FogEnabled = RenderStates.Get_Render_State(D3DRS_FOGENABLE) != FALSE;
 	description.FogVertexMode = RenderStates.Get_Render_State(D3DRS_FOGVERTEXMODE);
+	description.NormalMapped = (Normal_Mapped()
+		&& StageStates[0][D3DTSS_COLOROP] != D3DTOP_DISABLE) || Terrain_Bumped();
 	return true;
 }
 
@@ -961,9 +1008,11 @@ bool DX11BackendClass::Resolve(Pipeline & pipeline)
 	const std::string vertex_key = (VertexProgram != ENGINE_SHADER_NONE)
 		? std::string(EngineShader_Name(VertexProgram))
 		: VertexShader_Key(vertex_description);
+	const bool terrain_bumped = vertex_description.NormalMapped && PixelProgram != ENGINE_SHADER_NONE;
 	const std::string pixel_key = (PixelProgram != ENGINE_SHADER_NONE)
 		? EngineShader_Name(PixelProgram)
 			+ CombinerShader_Pipeline_Key(combiner_description.PixelPipeline)
+			+ (terrain_bumped ? ":N" : "")
 		: CombinerShader_Key(combiner_description);
 	const std::string key = vertex_key + pixel_key + format;
 
@@ -991,7 +1040,8 @@ bool DX11BackendClass::Resolve(Pipeline & pipeline)
 		return false;
 	}
 	const bool wrote_pixel = (PixelProgram != ENGINE_SHADER_NONE)
-		? EngineShader_Pixel_Program(PixelProgram, combiner_description.PixelPipeline, pixel_hlsl)
+		? EngineShader_Pixel_Program(PixelProgram, combiner_description.PixelPipeline, pixel_hlsl,
+			terrain_bumped)
 		: CombinerShader_Generate(combiner_description, COMBINER_SHADER_TARGET_D3D11, pixel_hlsl);
 	if (!wrote_pixel) {
 		Note_Refusal("the pixel half would not generate this description");
@@ -1217,6 +1267,44 @@ void DX11BackendClass::Upload_Constants()
 	pixel_block.AlphaReference[0] =
 		static_cast<float>(RenderStates.Get_Render_State(D3DRS_ALPHAREF) & 0xff);
 
+	// The normal mapped program's lights, the enabled ones first and in camera space like the
+	// vertex block's.  A slot with no light gets a direction anyway: the highlight normalises the
+	// half vector, and a zero direction there is a NaN that no zero colour cancels.
+	unsigned normal_slot = 0;
+	for (unsigned index = 0; index < MAXIMUM_VERTEX_LIGHTS && normal_slot < NORMAL_MAPPED_LIGHTS;
+			++index) {
+		if (!Lights[index].Enabled) {
+			continue;
+		}
+		float * direction = pixel_block.NormalLightDirection[normal_slot];
+		transform_direction(Lights[index].Direction, View, direction);
+		const float length = sqrtf(direction[0] * direction[0] + direction[1] * direction[1]
+			+ direction[2] * direction[2]);
+		if (length > 0.0f) {
+			direction[0] /= length;
+			direction[1] /= length;
+			direction[2] /= length;
+		}
+		memcpy(pixel_block.NormalLightDiffuse[normal_slot], Lights[index].Diffuse, sizeof(float) * 4);
+		++normal_slot;
+	}
+	for (; normal_slot < NORMAL_MAPPED_LIGHTS; ++normal_slot) {
+		pixel_block.NormalLightDirection[normal_slot][2] = 1.0f;
+	}
+	pixel_block.NormalMapParameters[0] = NORMAL_MAP_STRENGTH;
+	pixel_block.NormalMapParameters[1] = NORMAL_MAP_HIGHLIGHT_POWER;
+	pixel_block.NormalMapParameters[2] = NORMAL_MAP_HIGHLIGHT_SCALE;
+	const float sun[4] = { TerrainSun[0], TerrainSun[1], TerrainSun[2], 0.0f };
+	transform_direction(sun, View, pixel_block.TerrainSunDirection);
+	const float sun_length = sqrtf(pixel_block.TerrainSunDirection[0] * pixel_block.TerrainSunDirection[0]
+		+ pixel_block.TerrainSunDirection[1] * pixel_block.TerrainSunDirection[1]
+		+ pixel_block.TerrainSunDirection[2] * pixel_block.TerrainSunDirection[2]);
+	if (sun_length > 0.0f) {
+		for (unsigned axis = 0; axis < 3; ++axis) {
+			pixel_block.TerrainSunDirection[axis] /= sun_length;
+		}
+	}
+
 	if ((!PixelConstantsHeld
 			|| memcmp(&HeldPixelConstants, &pixel_block, sizeof(pixel_block)) != 0)
 		&& SUCCEEDED(context->Map(PixelConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
@@ -1407,6 +1495,11 @@ void DX11BackendClass::Bind_State_Objects()
 		context->PSSetShaderResources(0, DX11_BACKEND_TEXTURE_STAGES, textures);
 		memcpy(Bound.Textures, textures, sizeof(textures));
 	}
+	// Left bound when the draw does not read it, since only a normal mapped program declares t4.
+	if (NormalMap != NULL && (!known || NormalMap != Bound.NormalMap)) {
+		context->PSSetShaderResources(DX11_BACKEND_TEXTURE_STAGES, 1, &NormalMap);
+		Bound.NormalMap = NormalMap;
+	}
 }
 
 void DX11BackendClass::Bind_Pipeline(const Pipeline & pipeline, ID3D11Buffer * vertices, UINT stride,
@@ -1561,6 +1654,9 @@ bool DX11BackendClass::Draw_Indexed(unsigned index_count, unsigned start_index,
 	context->DrawIndexed(index_count, start_index, base_vertex);
 
 	++DrawsMade;
+	if (Normal_Mapped() || Terrain_Bumped()) {
+		++NormalMappedDraws;
+	}
 	if (CurrentTarget != NULL) {
 		++DrawsIntoTargets;
 		MaskWhileTargeted |= RenderStates.Get_Render_State(D3DRS_COLORWRITEENABLE);

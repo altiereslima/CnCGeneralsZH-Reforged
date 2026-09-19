@@ -87,6 +87,16 @@ DX11BufferTwinClass * Direct3D11_Twin_Index_Buffer(unsigned byte_count, bool dyn
 // first bind and kept on it, so nothing in the loaders has to know this exists.
 void Direct3D11_Mirror_Texture(unsigned stage, struct IDirect3DBaseTexture9 * texture);
 
+// Normal maps: TextureClass looks for a "<name>_nrm.dds" beside every texture it binds at stage
+// zero and hands it over here, null when there is none; the terrain builds its own.  Active is
+// false on a Direct3D 9 run, which has no pixel half to light with.
+bool Direct3D11_Normal_Maps_Active();
+void Direct3D11_Mirror_Normal_Map(struct IDirect3DBaseTexture9 * normal_map);
+
+// The way the sun's light travels, world space, for the bumped terrain.  Set once a frame.
+void Direct3D11_Set_Terrain_Sun(const float direction[3]);
+unsigned long long Direct3D11_Normal_Mapped_Draws();
+
 // The CPU has just written this surface.  The next bind of its texture fills the Direct3D 11 copy
 // again.  A no-op when the backend is not running.
 void Direct3D11_Mark_Surface_Dirty(struct IDirect3DSurface9 * surface);

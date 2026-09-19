@@ -43,45 +43,69 @@ TileData::TileData()
 
 }
 
-#define TILE_PIXEL_EXTENT_MIP1 32
-#define TILE_PIXEL_EXTENT_MIP2 16
-#define TILE_PIXEL_EXTENT_MIP3 8
-#define TILE_PIXEL_EXTENT_MIP4 4
-#define TILE_PIXEL_EXTENT_MIP5 2
-#define TILE_PIXEL_EXTENT_MIP6 1
+Int TheTilePixelExtent = SOURCE_TILE_PIXEL_EXTENT;
 
-Bool TileData::hasRGBDataForWidth(Int width) 
+Bool TileData::hasRGBDataForWidth(Int width)
 {
-	if (width == TILE_PIXEL_EXTENT) return(true);
-	if (width == TILE_PIXEL_EXTENT_MIP1) return(true);
-	if (width == TILE_PIXEL_EXTENT_MIP2) return(true);
-	if (width == TILE_PIXEL_EXTENT_MIP3) return(true);
-	if (width == TILE_PIXEL_EXTENT_MIP4) return(true);
-	if (width == TILE_PIXEL_EXTENT_MIP5) return(true);
-	if (width == TILE_PIXEL_EXTENT_MIP6) return(true);
+	for (Int side = TILE_PIXEL_EXTENT; side >= 1; side /= 2) {
+		if (width == side) return(true);
+	}
 	return(false);
 }
 
-UnsignedByte * TileData::getRGBDataForWidth(Int width) 
+// The mips sit one after another, largest first, so a level starts where the sizes of the levels
+// above it end.  The full size level is m_tileData itself; a width that is no level gets that too.
+UnsignedByte * TileData::getRGBDataForWidth(Int width)
 {
-	// default
-	if (width == TILE_PIXEL_EXTENT_MIP1) return(m_tileDataMip32);
-	if (width == TILE_PIXEL_EXTENT_MIP2) return(m_tileDataMip16);
-	if (width == TILE_PIXEL_EXTENT_MIP3) return(m_tileDataMip8);
-	if (width == TILE_PIXEL_EXTENT_MIP4) return(m_tileDataMip4);
-	if (width == TILE_PIXEL_EXTENT_MIP5) return(m_tileDataMip2);
-	if (width == TILE_PIXEL_EXTENT_MIP6) return(m_tileDataMip1);
+	Int offset = 0;
+	for (Int side = TILE_PIXEL_EXTENT/2; side >= 1; side /= 2) {
+		if (width == side) return(m_tileDataMips + offset);
+		offset += side*side*TILE_BYTES_PER_PIXEL;
+	}
 	return(m_tileData);
 }
 
-void TileData::updateMips(void) 
+void TileData::updateMips(void)
 {
-	doMip(m_tileData, TILE_PIXEL_EXTENT, m_tileDataMip32); 
-	doMip(m_tileDataMip32, TILE_PIXEL_EXTENT_MIP1, m_tileDataMip16); 
-	doMip(m_tileDataMip16, TILE_PIXEL_EXTENT_MIP2, m_tileDataMip8); 
-	doMip(m_tileDataMip8, TILE_PIXEL_EXTENT_MIP3, m_tileDataMip4); 
-	doMip(m_tileDataMip4, TILE_PIXEL_EXTENT_MIP4, m_tileDataMip2); 
-	doMip(m_tileDataMip2, TILE_PIXEL_EXTENT_MIP5, m_tileDataMip1); 
+	UnsignedByte *higher = m_tileData;
+	for (Int side = TILE_PIXEL_EXTENT; side > 1; side /= 2) {
+		UnsignedByte *lower = getRGBDataForWidth(side/2);
+		doMip(higher, side, lower);
+		higher = lower;
+	}
+}
+
+void TileData::scaleUpFrom(Int sourceExtent)
+{
+	const Int extent = TILE_PIXEL_EXTENT;
+	if (sourceExtent >= extent) return;
+
+	UnsignedByte source[SOURCE_TILE_PIXEL_EXTENT*SOURCE_TILE_PIXEL_EXTENT*TILE_BYTES_PER_PIXEL];
+	memcpy(source, m_tileData, sourceExtent*sourceExtent*TILE_BYTES_PER_PIXEL);
+	const Real step = (Real)sourceExtent / (Real)extent;
+	for (Int row = 0; row < extent; ++row) {
+		// Sample at the centre of each destination pixel, so the stretched tile is not shifted
+		// half a source pixel towards its corner.
+		const Real y = (row + 0.5f)*step - 0.5f;
+		const Int y0 = (Int)floorf(y);
+		const Real fy = y - y0;
+		const Int rowA = (y0 + sourceExtent) % sourceExtent;
+		const Int rowB = (y0 + 1) % sourceExtent;
+		for (Int column = 0; column < extent; ++column) {
+			const Real x = (column + 0.5f)*step - 0.5f;
+			const Int x0 = (Int)floorf(x);
+			const Real fx = x - x0;
+			const Int columnA = (x0 + sourceExtent) % sourceExtent;
+			const Int columnB = (x0 + 1) % sourceExtent;
+			for (Int p = 0; p < TILE_BYTES_PER_PIXEL; ++p) {
+				const Real top = source[(rowA*sourceExtent + columnA)*TILE_BYTES_PER_PIXEL + p]*(1 - fx)
+					+ source[(rowA*sourceExtent + columnB)*TILE_BYTES_PER_PIXEL + p]*fx;
+				const Real bottom = source[(rowB*sourceExtent + columnA)*TILE_BYTES_PER_PIXEL + p]*(1 - fx)
+					+ source[(rowB*sourceExtent + columnB)*TILE_BYTES_PER_PIXEL + p]*fx;
+				m_tileData[(row*extent + column)*TILE_BYTES_PER_PIXEL + p] = (UnsignedByte)(top*(1 - fy) + bottom*fy + 0.5f);
+			}
+		}
+	}
 }
 
 

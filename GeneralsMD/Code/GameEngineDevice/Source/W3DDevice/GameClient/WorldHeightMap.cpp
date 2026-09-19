@@ -51,6 +51,7 @@
 #include "W3DDevice/GameClient/HeightMap.h"
 #include "W3DDevice/GameClient/TerrainTex.h"
 #include "W3DDevice/GameClient/W3DShadow.h"
+#include "dx11runtime.h"
 
 #include "Common/file.h"
 
@@ -1041,7 +1042,18 @@ void WorldHeightMap::readTexClass(TXTextureClass *texClass, TileData **tileData)
 		theFile = TheFileSystem->openFile( texClass->name.str(), File::READ|File::BINARY);
 #endif
 	} 
-	else 
+	Int sourceExtent = SOURCE_TILE_PIXEL_EXTENT;
+	if (terrain != NULL && TILE_PIXEL_EXTENT > SOURCE_TILE_PIXEL_EXTENT)
+	{
+		// The same image drawn at the bigger tile, if there is one.  Without it the
+		// shipped image is read and each tile stretched.
+		snprintf( texturePath, ARRAY_SIZE(texturePath), "%s%s", TERRAIN_HD_TGA_DIR_PATH, terrain->getTexture().str() );
+		theFile = TheFileSystem->openFile( texturePath, File::READ|File::BINARY);
+		if (theFile != NULL) {
+			sourceExtent = TILE_PIXEL_EXTENT;
+		}
+	}
+	if (terrain != NULL && theFile == NULL)
 	{
 		snprintf( texturePath, ARRAY_SIZE(texturePath), "%s%s", TERRAIN_TGA_DIR_PATH, terrain->getTexture().str() );
 		theFile = TheFileSystem->openFile( texturePath, File::READ|File::BINARY);
@@ -1050,7 +1062,7 @@ void WorldHeightMap::readTexClass(TXTextureClass *texClass, TileData **tileData)
 	if (theFile != NULL) {
 		GDIFileStream theStream(theFile);
 		InputStream *pStr = &theStream;
-		Int numTiles = WorldHeightMap::countTiles(pStr);
+		Int numTiles = WorldHeightMap::countTiles(pStr, NULL, sourceExtent);
 		theFile->seek(0, File::START);
 		if (numTiles >= texClass->numTiles) { 
 			numTiles = texClass->numTiles;
@@ -1061,7 +1073,7 @@ void WorldHeightMap::readTexClass(TXTextureClass *texClass, TileData **tileData)
 					break;
 				}
 			}
-			WorldHeightMap::readTiles(pStr, tileData+texClass->firstTile, width);						
+			WorldHeightMap::readTiles(pStr, tileData+texClass->firstTile, width, sourceExtent);
 		}
 		theFile->close();
 	}
@@ -1341,7 +1353,7 @@ typedef struct {
 
 
 /// Count how many tiles come in from a targa file.
-Int WorldHeightMap::countTiles(InputStream *pStr, Bool *halfTile)
+Int WorldHeightMap::countTiles(InputStream *pStr, Bool *halfTile, Int sourceExtent)
 {
 	TTargaHeader hdr;
 	if (halfTile) {
@@ -1349,8 +1361,8 @@ Int WorldHeightMap::countTiles(InputStream *pStr, Bool *halfTile)
 	}
 	Int len = pStr->read(&hdr,sizeof(hdr));
 	if (len!=sizeof(hdr)) return(0);
-	Int tileWidth = hdr.imageWidth/TILE_PIXEL_EXTENT;
-	Int tileHeight = hdr.imageHeight/TILE_PIXEL_EXTENT;
+	Int tileWidth = hdr.imageWidth/sourceExtent;
+	Int tileHeight = hdr.imageHeight/sourceExtent;
 
 	if (hdr.colorMapType != 0) {
 		return(0); // we don't do indexed at this time. jba.
@@ -1376,25 +1388,28 @@ Int WorldHeightMap::countTiles(InputStream *pStr, Bool *halfTile)
 	if (tileWidth>=3 && tileHeight >=3) return(9);
 	if (tileWidth>=2 && tileHeight >=2) return(4);
 	if (tileWidth>=1 && tileHeight >=1) return(1);
-	if (halfTile && hdr.imageHeight==TILE_PIXEL_EXTENT/2 && hdr.imageWidth==TILE_PIXEL_EXTENT/2) {
+	if (halfTile && hdr.imageHeight==sourceExtent/2 && hdr.imageWidth==sourceExtent/2) {
 		*halfTile = true;
 		return 1;
 	}
 	return(0);
 }
 /*Break down a .tga file into a collection of tiles.  numRows * numRows total tiles.*/
-Bool WorldHeightMap::readTiles(InputStream *pStr, TileData **tiles, Int numRows)
+Bool WorldHeightMap::readTiles(InputStream *pStr, TileData **tiles, Int numRows, Int sourceExtent)
 {
 	TTargaHeader hdr;
 	pStr->read(&hdr, sizeof(hdr));
-	Int tileWidth = hdr.imageWidth/TILE_PIXEL_EXTENT;
-	Int tileHeight = hdr.imageHeight/TILE_PIXEL_EXTENT; 
+	Int tileWidth = hdr.imageWidth/sourceExtent;
+	Int tileHeight = hdr.imageHeight/sourceExtent;
 
-	if (hdr.imageHeight==TILE_PIXEL_EXTENT/2) {
+	if (hdr.imageHeight==sourceExtent/2) {
 		tileHeight = 1;
 	}
-	if (hdr.imageWidth==TILE_PIXEL_EXTENT/2) {
+	if (hdr.imageWidth==sourceExtent/2) {
 		tileWidth = 1;
+	}
+	if (sourceExtent > TILE_PIXEL_EXTENT) {
+		return(false);
 	}
 
 	if (tileWidth<numRows && tileHeight<numRows) {
@@ -1418,7 +1433,7 @@ Bool WorldHeightMap::readTiles(InputStream *pStr, TileData **tiles, Int numRows)
 	int repeatCount = 0;
 //	Bool read = false;
 	Bool running = false;
-	for (row = 0; row < numRows*TILE_PIXEL_EXTENT; row++) {
+	for (row = 0; row < numRows*sourceExtent; row++) {
 		for (column=0; column<hdr.imageWidth; column++) {
 			UnsignedByte r, g, b, a;
 			if (row < hdr.imageHeight) {
@@ -1447,9 +1462,9 @@ Bool WorldHeightMap::readTiles(InputStream *pStr, TileData **tiles, Int numRows)
 			} else {
 				r = g = b = a = 0;
 			}
-			if (column >= (numRows*TILE_PIXEL_EXTENT)) continue;
-			int tileNdx = (column/TILE_PIXEL_EXTENT) + numRows*(row/TILE_PIXEL_EXTENT);
-			int pixelNdx = (column%TILE_PIXEL_EXTENT) + TILE_PIXEL_EXTENT*(row%TILE_PIXEL_EXTENT);
+			if (column >= (numRows*sourceExtent)) continue;
+			int tileNdx = (column/sourceExtent) + numRows*(row/sourceExtent);
+			int pixelNdx = (column%sourceExtent) + sourceExtent*(row%sourceExtent);
 
 			UnsignedByte *pixel = tiles[tileNdx]->getDataPtr();
 
@@ -1463,6 +1478,7 @@ Bool WorldHeightMap::readTiles(InputStream *pStr, TileData **tiles, Int numRows)
 		DEBUG_ASSERTCRASH(repeatCount==0, ("Invalid tga."));
 	}
 	for (i=0; i<numRows*numRows; i++) {
+		tiles[i]->scaleUpFrom(sourceExtent);
 		tiles[i]->updateMips();
 	}
 	return(true);
@@ -1478,7 +1494,9 @@ Int WorldHeightMap::updateTileTexturePositions(Int *edgeHeight)
 	Int maxHeight = 0;
 	const Int tilesPerRow = TEXTURE_WIDTH/(TILE_PIXEL_EXTENT+TILE_OFFSET);
 
-	Bool availableGrid[tilesPerRow][tilesPerRow];
+	// The width is thirty-two tiles and a gutter each, so a row always holds fewer than 32.
+	const Int MAX_TILES_PER_ROW = 32;
+	Bool availableGrid[MAX_TILES_PER_ROW][MAX_TILES_PER_ROW];
 	Int row, column;
 	for (row=0; row<tilesPerRow; row++) {
 		for (column=0; column<tilesPerRow; column++) {
@@ -2186,6 +2204,15 @@ TextureClass *WorldHeightMap::getTerrainTexture(void)
 		REF_PTR_RELEASE(m_terrainTex);
 		m_terrainTex = MSGNEW("WorldHeightMap_getTerrainTexture") TerrainTextureClass(pow2Height);
 		m_terrainTexHeight = m_terrainTex->update(this);
+		if (Direct3D11_Normal_Maps_Active()) {
+			// The ground's normals, laid out exactly as its colours, so the pixel program
+			// reads both at the same coordinate.  Built from the tiles every load; nothing ships one.
+			TerrainTextureClass *normalTex = MSGNEW("WorldHeightMap_getTerrainTexture")
+				TerrainTextureClass(pow2Height, WW3D_FORMAT_A8R8G8B8);
+			normalTex->updateNormals(this);
+			m_terrainTex->Set_Normal_Map(normalTex);
+			REF_PTR_RELEASE(normalTex);
+		}
 		char buf[64];
 		sprintf(buf, "Base tex height %d\n", pow2Height);
 		DEBUG_LOG((buf));

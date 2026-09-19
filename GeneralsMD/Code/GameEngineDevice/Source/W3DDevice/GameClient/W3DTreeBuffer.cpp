@@ -484,11 +484,13 @@ public:
 void W3DTreeBuffer::updateTexture(void)
 {
 	
-	const Int MAX_TEX_WIDTH = 2048;
+	// Thirty-two tiles across, the way the terrain atlas is, so the bigger tiles fit the
+	// same number of trees.
+	const Int MAX_TEX_WIDTH = 32*TILE_PIXEL_EXTENT;
 
 	Int i, j;
 	Int maxHeight = 0;
-	const Int maxTilesPerRow = MAX_TEX_WIDTH/(TILE_PIXEL_EXTENT);
+	const Int maxTilesPerRow = 32;
 
 	REF_PTR_RELEASE(m_treeTexture);
 

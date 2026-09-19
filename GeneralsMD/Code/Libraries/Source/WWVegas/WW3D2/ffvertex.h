@@ -52,6 +52,14 @@ const unsigned MAXIMUM_VERTEX_STAGES = 4;
 // three, and every register past this one is a register the D3D9 profile does not have to spare.
 const unsigned MAXIMUM_VERTEX_LIGHTS = 4;
 
+// What a normal mapped vertex program writes after the fog factor, and what the pixel program
+// declares after it.  One string in one place because shader model 4 links the two by slot.
+#define NORMAL_MAPPED_VARYINGS \
+	"    float3 ViewPosition : TEXCOORD4;\n" \
+	"    float3 ViewNormal   : TEXCOORD5;\n" \
+	"    float3 LitBase      : TEXCOORD6;\n" \
+	"    float3 LitMaterial  : TEXCOORD7;\n"
+
 // Where each constant sits in the D3D9 profile's register file, which is what
 // SetVertexShaderConstantF is given.  The D3D11 profile puts the same values in one constant buffer
 // in this order instead, so the two halves of the generator share the layout and nothing else.
@@ -123,6 +131,13 @@ struct VertexPipelineDescription
 	// D3DRS_FOGVERTEXMODE: D3DFOG_LINEAR, D3DFOG_EXP or D3DFOG_EXP2.  D3DFOG_NONE with the fog
 	// enabled is table fog, which is the pixel half's business and not this one's.
 	DWORD FogVertexMode;
+
+	// Stage zero's texture has a normal map beside it, so the lights are summed per
+	// pixel instead of here.  The program still lights the vertex, and past the fog factor it also
+	// writes the camera space position and normal and the two halves of the lit colour that do
+	// not depend on the normal, which ffshader reads to light the pixel again.  An unlit one is the
+	// terrain, whose pixel half (engineshader) reads only the position.  Initialised here for a caller that fills the rest field by field.
+	bool NormalMapped = false;
 };
 
 // Which profile the generated text is for.  The two differ in the output semantic and in how the

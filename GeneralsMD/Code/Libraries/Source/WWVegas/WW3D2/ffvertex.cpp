@@ -338,7 +338,7 @@ static void append_input_coordinate_sets(std::string & hlsl, unsigned coordinate
 // What every generated vertex program writes, whatever it was generated from.  Shader model 4
 // links the stages by slot in declaration order, so this structure and ffshader's input structure
 // are one thing in two files: a program that writes a different set links against nothing.
-static void append_output_structure(std::string & hlsl, bool for_d3d11)
+static void append_output_structure(std::string & hlsl, bool for_d3d11, bool normal_mapped)
 {
 	hlsl +=
 		"struct Output\n"
@@ -354,8 +354,11 @@ static void append_output_structure(std::string & hlsl, bool for_d3d11)
 		hlsl += line;
 	}
 
+	hlsl += "    float Fog : FOG;\n";
+	if (normal_mapped) {
+		hlsl += NORMAL_MAPPED_VARYINGS;
+	}
 	hlsl +=
-		"    float Fog : FOG;\n"
 		"};\n"
 		"\n";
 }
@@ -390,7 +393,7 @@ static bool generate_pretransformed(const VertexPipelineDescription & descriptio
 	hlsl +=
 		"};\n"
 		"\n";
-	append_output_structure(hlsl, for_d3d11);
+	append_output_structure(hlsl, for_d3d11, false);
 	hlsl +=
 		"Output main(Input input)\n"
 		"{\n"
@@ -447,6 +450,9 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 	// Lighting needs a normal to light.  D3D9 lights a vertex with no normal as though the normal
 	// were zero, which is black, and no draw in the game asks for that.
 	if (description.LightingEnabled && !has_normal(description.FVF)) {
+		return false;
+	}
+	if (description.NormalMapped && is_pretransformed(description.FVF)) {
 		return false;
 	}
 
@@ -520,6 +526,14 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 			+ ambient + ".rgb * GlobalAmbient.rgb + " + emissive + ".rgb);\n";
 		body += "    output.Diffuse.a = " + diffuse + ".a;\n";
 
+		if (description.NormalMapped) {
+			body += "    output.ViewPosition = view_position.xyz;\n";
+			body += "    output.ViewNormal = view_normal;\n";
+			body += "    output.LitBase = " + ambient + ".rgb * GlobalAmbient.rgb + " + emissive
+				+ ".rgb;\n";
+			body += "    output.LitMaterial = " + diffuse + ".rgb;\n";
+		}
+
 		if (description.SpecularEnabled) {
 			std::string specular;
 			if (!material_source_expression(description.SpecularMaterialSource, "MaterialSpecular",
@@ -568,6 +582,17 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 		body += "    output.Fog = 1.0;\n";
 	}
 
+	// An unlit normal mapped draw is the terrain, whose light is baked into its vertex colour.  The
+	// pixel half only wants the position from it, to rebuild the surface frame; the lit colour it
+	// would otherwise be handed is not used.
+	if (description.NormalMapped && !description.LightingEnabled) {
+		body +=
+			"    output.ViewPosition = view_position.xyz;\n"
+			"    output.ViewNormal = view_normal;\n"
+			"    output.LitBase = float3(0.0, 0.0, 0.0);\n"
+			"    output.LitMaterial = float3(0.0, 0.0, 0.0);\n";
+	}
+
 	const bool for_d3d11 = (target == VERTEX_SHADER_TARGET_D3D11);
 
 	hlsl = "// Generated from a fixed-function vertex pipeline description.  See ffvertex.h.\n";
@@ -603,7 +628,7 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 	hlsl +=
 		"};\n"
 		"\n";
-	append_output_structure(hlsl, for_d3d11);
+	append_output_structure(hlsl, for_d3d11, description.NormalMapped);
 	hlsl +=
 		"Output main(Input input)\n"
 		"{\n"
@@ -651,5 +676,8 @@ std::string VertexShader_Key(const VertexPipelineDescription & description)
 	snprintf(field, sizeof(field), ":F%u,%lu", description.FogEnabled ? 1u : 0u,
 		description.FogEnabled ? description.FogVertexMode : 0ul);
 	key += field;
+	if (description.NormalMapped) {
+		key += ":N";
+	}
 	return key;
 }

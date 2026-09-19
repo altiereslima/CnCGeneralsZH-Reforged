@@ -118,6 +118,8 @@ TextureBaseClass::TextureBaseClass
 :	MipLevelCount(mip_level_count),
 	D3DTexture(NULL),
 	Initialized(false),
+	NormalMap(NULL),
+	NormalMapLooked(false),
    Name(""),
 	FullPath(""),
 	texture_id(unused_texture_id++),
@@ -151,11 +153,12 @@ TextureBaseClass::~TextureBaseClass(void)
 	delete ThumbnailLoadTask;
 	ThumbnailLoadTask=NULL;
 
-	if (D3DTexture) 
+	if (D3DTexture)
 	{
 		D3DTexture->Release();
 		D3DTexture = NULL;
 	}
+	REF_PTR_RELEASE(NormalMap);
 
 	DX8TextureManagerClass::Remove(this);
 }
@@ -997,16 +1000,58 @@ void TextureClass::Apply(unsigned int stage)
 	DX8_RECORD_TEXTURE(this);
 
 	// Set texture itself
-	if (WW3D::Is_Texturing_Enabled()) 
+	if (WW3D::Is_Texturing_Enabled())
 	{
 		DX8Wrapper::Set_DX8_Texture(stage, Peek_D3D_Base_Texture());
 	}
-	else 
+	else
 	{
 		DX8Wrapper::Set_DX8_Texture(stage, NULL);
 	}
 
+	if (stage == 0 && Direct3D11_Normal_Maps_Active())
+	{
+		TextureClass * normal_map = Find_Normal_Map();
+		Direct3D11_Mirror_Normal_Map(normal_map != NULL ? normal_map->Peek_D3D_Base_Texture() : NULL);
+	}
+
 	Filter.Apply(stage);
+}
+
+void TextureClass::Set_Normal_Map(TextureClass * normal_map)
+{
+	REF_PTR_SET(NormalMap, normal_map);
+	NormalMapLooked = true;
+}
+
+TextureClass * TextureClass::Find_Normal_Map()
+{
+	static const char NORMAL_MAP_SUFFIX[] = "_nrm.dds";
+
+	if (!NormalMapLooked)
+	{
+		NormalMapLooked = true;
+		char name[_MAX_PATH];
+		strncpy(name, Get_Texture_Name(), sizeof(name) - sizeof(NORMAL_MAP_SUFFIX));
+		name[sizeof(name) - sizeof(NORMAL_MAP_SUFFIX)] = '\0';
+		char * extension = strrchr(name, '.');
+		if (extension != NULL)
+		{
+			*extension = '\0';
+		}
+		strcat(name, NORMAL_MAP_SUFFIX);
+
+		file_auto_ptr file(_TheFileFactory, name);
+		if (file->Is_Available())
+		{
+			NormalMap = WW3DAssetManager::Get_Instance()->Get_Texture(name);
+		}
+	}
+	if (NormalMap != NULL && !NormalMap->Is_Initialized())
+	{
+		NormalMap->Init();
+	}
+	return NormalMap;
 }
 
 //**********************************************************************************************

@@ -17,6 +17,7 @@
 */
 
 #include "ffshader.h"
+#include "ffvertex.h"
 
 #include <stdio.h>
 
@@ -214,10 +215,54 @@ static bool alpha_test_expression(DWORD function, std::string & expression)
 	}
 }
 
+// The vertex colour lit again with the normal the map gives, written over input.Diffuse before the
+// stages read it, and the highlight the stages add afterwards.  The map carries no tangents and
+// the game's meshes have none either, so the frame is rebuilt per pixel from how the position and
+// the coordinate change across the screen: a tangent is whichever way u grows and a bitangent
+// whichever way v grows, which is the convention the maps are written in and which holds on a
+// mirrored island too.  The light directions are the way the light travels, in camera space.
+static void append_normal_mapped_lighting(std::string & hlsl, unsigned coordinate_set)
+{
+	char line[2048];
+	snprintf(line, sizeof(line),
+		"    float3 surface_normal = normalize(input.ViewNormal);\n"
+		"    float3 position_dx = ddx(input.ViewPosition);\n"
+		"    float3 position_dy = ddy(input.ViewPosition);\n"
+		"    float2 coordinate_dx = ddx(input.TexCoord%u);\n"
+		"    float2 coordinate_dy = ddy(input.TexCoord%u);\n"
+		"    float3 across_dy = cross(position_dy, surface_normal);\n"
+		"    float3 across_dx = cross(surface_normal, position_dx);\n"
+		"    float3 tangent = across_dy * coordinate_dx.x + across_dx * coordinate_dy.x;\n"
+		"    float3 bitangent = across_dy * coordinate_dx.y + across_dx * coordinate_dy.y;\n"
+		"    float frame_scale = rsqrt(max(max(dot(tangent, tangent), dot(bitangent, bitangent)), 1e-20));\n"
+		"    float4 normal_texel = NormalMap.Sample(Sampler0, input.TexCoord%u);\n"
+		"    float3 bump = normal_texel.xyz * 2.0 - 1.0;\n"
+		"    bump.xy *= NormalMapParameters.x;\n"
+		"    float3 bumped = normalize((tangent * bump.x + bitangent * bump.y) * frame_scale"
+		" + surface_normal * bump.z);\n"
+		"    float3 to_eye = normalize(-input.ViewPosition);\n"
+		"    float3 bumped_light = float3(0.0, 0.0, 0.0);\n"
+		"    float3 highlight = float3(0.0, 0.0, 0.0);\n"
+		"    for (int light = 0; light < %u; ++light) {\n"
+		"        float3 to_light = -NormalLightDirection[light].xyz;\n"
+		"        bumped_light += NormalLightDiffuse[light].rgb * saturate(dot(bumped, to_light));\n"
+		"        highlight += NormalLightDiffuse[light].rgb"
+		" * pow(saturate(dot(bumped, normalize(to_light + to_eye))), NormalMapParameters.y);\n"
+		"    }\n"
+		"    highlight *= normal_texel.a * NormalMapParameters.z;\n"
+		"    input.Diffuse.rgb = saturate(input.LitMaterial * bumped_light + input.LitBase);\n",
+		coordinate_set, coordinate_set, coordinate_set, NORMAL_MAPPED_LIGHTS);
+	hlsl += line;
+}
+
 bool CombinerShader_Generate(const CombinerDescription & description, CombinerShaderTarget target,
 	std::string & hlsl)
 {
 	if (description.StageCount == 0 || description.StageCount > MAXIMUM_COMBINER_STAGES) {
+		return false;
+	}
+	if (description.NormalMapped
+		&& (target != COMBINER_SHADER_TARGET_D3D11 || !description.Stages[0].TextureBound)) {
 		return false;
 	}
 
@@ -309,8 +354,20 @@ bool CombinerShader_Generate(const CombinerDescription & description, CombinerSh
 			"{\n"
 			"    float4 TextureFactor;\n"
 			"    float4 FogColour;\n"
-			"    float4 AlphaReference;\n"
-			"};\n";
+			"    float4 AlphaReference;\n";
+		if (description.NormalMapped) {
+			char line[256];
+			snprintf(line, sizeof(line),
+				"    float4 NormalLightDirection[%u];\n"
+				"    float4 NormalLightDiffuse[%u];\n"
+				"    float4 NormalMapParameters;\n",
+				NORMAL_MAPPED_LIGHTS, NORMAL_MAPPED_LIGHTS);
+			hlsl += line;
+		}
+		hlsl += "};\n";
+		if (description.NormalMapped) {
+			hlsl += "Texture2D NormalMap : register(t4);\n";
+		}
 	}
 	else {
 		for (unsigned stage = 0; stage < MAXIMUM_COMBINER_STAGES; ++stage) {
@@ -347,6 +404,9 @@ bool CombinerShader_Generate(const CombinerDescription & description, CombinerSh
 	if (target == COMBINER_SHADER_TARGET_D3D11) {
 		hlsl += "    float Fog        : FOG;\n";
 	}
+	if (description.NormalMapped) {
+		hlsl += NORMAL_MAPPED_VARYINGS;
+	}
 	hlsl +=
 		"};\n"
 		"\n";
@@ -355,9 +415,16 @@ bool CombinerShader_Generate(const CombinerDescription & description, CombinerSh
 		: "float4 main(Input input) : COLOR\n";
 	hlsl +=
 		"{\n"
-		"    float4 texel;\n"
-		"    float4 current = input.Diffuse;\n";
+		"    float4 texel;\n";
+	if (description.NormalMapped) {
+		append_normal_mapped_lighting(hlsl,
+			coordinate_register(description.Stages[0].TextureCoordinateIndex));
+	}
+	hlsl += "    float4 current = input.Diffuse;\n";
 	hlsl += body;
+	if (description.NormalMapped) {
+		hlsl += "    current.rgb = saturate(current.rgb + highlight);\n";
+	}
 
 	if (target == COMBINER_SHADER_TARGET_D3D11
 		&& !CombinerShader_Append_Pixel_Pipeline(description.PixelPipeline, hlsl)) {
@@ -429,5 +496,8 @@ std::string CombinerShader_Key(const CombinerDescription & description)
 	// both, which costs a D3D9 cache entry that generates the same text as another and buys one
 	// cache that is right for either profile.
 	key += CombinerShader_Pipeline_Key(description.PixelPipeline);
+	if (description.NormalMapped) {
+		key += ":N";
+	}
 	return key;
 }

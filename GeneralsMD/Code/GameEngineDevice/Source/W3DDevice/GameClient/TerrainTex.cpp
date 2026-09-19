@@ -68,8 +68,10 @@
 texture of the desired height and mip level. */
 //=============================================================================
 TerrainTextureClass::TerrainTextureClass(int height) :
-	TextureClass(TEXTURE_WIDTH, height, 
-		WW3D_FORMAT_A1R5G5B5, MIP_LEVELS_3 )
+	TextureClass(TEXTURE_WIDTH, height,
+		// The bigger tiles keep eight bits a channel: five would band the detail they bring.
+		TILE_PIXEL_EXTENT > SOURCE_TILE_PIXEL_EXTENT ? WW3D_FORMAT_A8R8G8B8 : WW3D_FORMAT_A1R5G5B5,
+		MIP_LEVELS_3 )
 {
 }
 
@@ -80,20 +82,71 @@ TerrainTextureClass::TerrainTextureClass(int height) :
 texture of the desired height and mip level. */
 //=============================================================================
 TerrainTextureClass::TerrainTextureClass(int height, int width) :
-	TextureClass(width, height, 
+	TextureClass(width, height,
 		WW3D_FORMAT_A1R5G5B5, MIP_LEVELS_ALL )
 {
 }
 
+TerrainTextureClass::TerrainTextureClass(int height, WW3DFormat format) :
+	TextureClass(TEXTURE_WIDTH, height, format, MIP_LEVELS_3 )
+{
+}
+
+int TerrainTextureClass::update(WorldHeightMap *htMap)
+{
+	return fill(htMap, false);
+}
+
+int TerrainTextureClass::updateNormals(WorldHeightMap *htMap)
+{
+	return fill(htMap, true);
+}
+
+// How steep the ground's own detail is made: a brightness step of one across a pixel tilts the
+// normal by this much.  Chosen by eye on the desert and grass tiles; the backend's
+// NORMAL_MAP_STRENGTH scales it again at draw time.
+static const Real TERRAIN_BUMP_DEPTH = 6.0f;
+
+/** One tile's normals, stored the way the tile's own data is (bottom row first), which is what
+	fill turns the right way up.  Brightness stands in for height, so every grain, crack and pebble
+	gets a slope and a flat patch of paint stays flat.  Rows here run against v in the atlas, hence
+	the sign on the green channel.  It wraps at the tile's own edge: right for a class of one tile,
+	a faint seam between the tiles of a bigger one. */
+static void terrainTileNormals(const UnsignedByte *tileBGRA, Int extent, UnsignedByte *normalsBGRA)
+{
+	static Real height[MAX_TILE_PIXEL_EXTENT*MAX_TILE_PIXEL_EXTENT];
+	for (Int pixel = 0; pixel < extent*extent; ++pixel) {
+		const UnsignedByte *source = tileBGRA + pixel*TILE_BYTES_PER_PIXEL;
+		height[pixel] = (0.114f*source[0] + 0.587f*source[1] + 0.299f*source[2]) / 255.0f;
+	}
+	for (Int row = 0; row < extent; ++row) {
+		for (Int column = 0; column < extent; ++column) {
+			const Int left = row*extent + (column + extent - 1) % extent;
+			const Int right = row*extent + (column + 1) % extent;
+			const Int below = ((row + extent - 1) % extent)*extent + column;
+			const Int above = ((row + 1) % extent)*extent + column;
+			const Real slopeU = (height[right] - height[left]) * 0.5f * TERRAIN_BUMP_DEPTH;
+			// The row above in the tile is the row before in the atlas, so v grows downwards here.
+			const Real slopeV = (height[below] - height[above]) * 0.5f * TERRAIN_BUMP_DEPTH;
+			const Real length = sqrtf(slopeU*slopeU + slopeV*slopeV + 1.0f);
+			UnsignedByte *target = normalsBGRA + (row*extent + column)*TILE_BYTES_PER_PIXEL;
+			target[0] = (UnsignedByte)((1.0f/length*0.5f + 0.5f)*255.0f + 0.5f);		// z in blue
+			target[1] = (UnsignedByte)((-slopeV/length*0.5f + 0.5f)*255.0f + 0.5f);	// y in green
+			target[2] = (UnsignedByte)((-slopeU/length*0.5f + 0.5f)*255.0f + 0.5f);	// x in red
+			target[3] = 0xff;
+		}
+	}
+}
 
 //=============================================================================
-// TerrainTextureClass::update
+// TerrainTextureClass::fill
 //=============================================================================
 /** Sets the tile bitmap data into the texture.  The tiles are placed with 4
 	pixel borders around them, so that when the tiles are scaled and bilinearly
-	interpolated, you don't get seams between the tiles.  */
+	interpolated, you don't get seams between the tiles.  With normals, each
+	tile's normals go where its colours would, into a 32 bit texture. */
 //=============================================================================
-int TerrainTextureClass::update(WorldHeightMap *htMap)
+int TerrainTextureClass::fill(WorldHeightMap *htMap, Bool normals)
 {
 	// D3DTexture is our texture;
 
@@ -122,7 +175,8 @@ int TerrainTextureClass::update(WorldHeightMap *htMap)
 	//DEBUG_ASSERTCRASH(tilesPerRow*numRows >= htMap->m_numBitmapTiles, ("Too many tiles."));
 	DEBUG_ASSERTCRASH((Int)surface_desc.Width >= tilePixelExtent*tilesPerRow, ("Bitmap too small."));
 #endif
-	if (surface_desc.Format == D3DFMT_A1R5G5B5) {
+	const Bool fullColour = surface_desc.Format == D3DFMT_A8R8G8B8;
+	if (surface_desc.Format == D3DFMT_A1R5G5B5 || fullColour) {
 #if 0
 		UnsignedInt cellX, cellY;
 		for (cellX = 0; cellX < surface_desc.Width; cellX++) {
@@ -133,16 +187,20 @@ int TerrainTextureClass::update(WorldHeightMap *htMap)
 		}
 #endif
 		Int tileNdx;
-		Int pixelBytes = 2;
+		Int pixelBytes = fullColour ? 4 : 2;
 		for (tileNdx=0; tileNdx < htMap->m_numBitmapTiles; tileNdx++) {
 			TileData *pTile = htMap->getSourceTile(tileNdx);
 			if (!pTile) continue;
 			ICoord2D position = pTile->m_tileLocationInTexture;
 			if (position.x<=0) continue; // all real tile offsets start at 2.  jba.
 
+			static UnsignedByte tileNormals[DATA_LEN_BYTES];
+			if (normals) {
+				terrainTileNormals(pTile->getRGBDataForWidth(tilePixelExtent), tilePixelExtent, tileNormals);
+			}
 			Int i,j;
 			for (j=0; j<tilePixelExtent; j++) {
-				UnsignedByte *pBGR = pTile->getRGBDataForWidth(tilePixelExtent);
+				UnsignedByte *pBGR = normals ? tileNormals : pTile->getRGBDataForWidth(tilePixelExtent);
 				pBGR += (tilePixelExtent-1-j)*TILE_BYTES_PER_PIXEL*tilePixelExtent; // invert to match.
 				Int row = position.y+j;
 				UnsignedByte *pBGRX = ((UnsignedByte*)locked_rect.pBits) +
@@ -151,7 +209,14 @@ int TerrainTextureClass::update(WorldHeightMap *htMap)
 				Int column = position.x;
 				pBGRX += column*pixelBytes;
 				for (i=0; i<tilePixelExtent; i++) {
-					*((Short*)pBGRX) = 0x8000 + ((pBGR[2]>>3)<<10) + ((pBGR[1]>>3)<<5) + (pBGR[0]>>3);
+					if (fullColour) {
+						pBGRX[0] = pBGR[0];
+						pBGRX[1] = pBGR[1];
+						pBGRX[2] = pBGR[2];
+						pBGRX[3] = 0xff;
+					} else {
+						*((Short*)pBGRX) = 0x8000 + ((pBGR[2]>>3)<<10) + ((pBGR[1]>>3)<<5) + (pBGR[0]>>3);
+					}
 					pBGRX +=pixelBytes;
 					pBGR +=TILE_BYTES_PER_PIXEL;
 				}

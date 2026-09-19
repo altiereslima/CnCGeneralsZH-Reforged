@@ -81,6 +81,16 @@ public:
 	void Set_Sampler_State(unsigned sampler, D3DSAMPLERSTATETYPE state, DWORD value);
 	void Set_Texture(unsigned stage, ID3D11ShaderResourceView * texture);
 
+	// The normal map that goes with the texture at stage zero, or null when it has none.  A lit
+	// draw with directional lights only is then lit per pixel through it, and so is the terrain;
+	// every other draw ignores it.
+	void Set_Normal_Map(ID3D11ShaderResourceView * normal_map);
+	unsigned long long Normal_Mapped_Draw_Count() const { return NormalMappedDraws; }
+
+	// The way the sun's light travels, in world space: the terrain has no D3D light of its own, its
+	// light is baked into the vertices, so its bump is shaded against this.
+	void Set_Terrain_Sun(const float direction[3]);
+
 	// The engine bound a texture at this stage that has no D3D11 copy - a render target it drew
 	// into, most often.  Sampling white there paints a full screen quad over the frame, so a draw
 	// that reads one is refused instead.
@@ -236,12 +246,22 @@ private:
 		float LightFields[MAXIMUM_VERTEX_LIGHTS][6][4];
 	};
 
+	// The normal map fields go last: a program that is not normal mapped declares the first three
+	// and nothing else, which a larger buffer serves.
 	struct PixelConstantBlock
 	{
 		float TextureFactor[4];
 		float FogColour[4];
 		float AlphaReference[4];
+		float NormalLightDirection[NORMAL_MAPPED_LIGHTS][4];
+		float NormalLightDiffuse[NORMAL_MAPPED_LIGHTS][4];
+		float NormalMapParameters[4];
+		float TerrainSunDirection[4];
 	};
+	// A model under directional lights, drawn by generated programs.
+	bool Normal_Mapped() const;
+	// The ground, drawn by one of the transcribed terrain programs with its light baked in.
+	bool Terrain_Bumped() const;
 
 	bool Resolve(Pipeline & pipeline);
 	bool Build_Vertex_Description(VertexPipelineDescription & description) const;
@@ -269,6 +289,9 @@ private:
 	DX11SamplerBlockClass Samplers[DX11_BACKEND_TEXTURE_STAGES];
 	DWORD StageStates[DX11_BACKEND_TEXTURE_STAGES][DX11_BACKEND_STAGE_STATES];
 	ID3D11ShaderResourceView * Textures[DX11_BACKEND_TEXTURE_STAGES];
+	ID3D11ShaderResourceView * NormalMap;
+	unsigned long long NormalMappedDraws;
+	float TerrainSun[3];
 
 	DWORD VertexFormat;
 	ID3D11Buffer * StreamBuffer;
@@ -468,6 +491,7 @@ private:
 		ID3D11RasterizerState * Rasterizer;
 		ID3D11SamplerState * Samplers[DX11_BACKEND_TEXTURE_STAGES];
 		ID3D11ShaderResourceView * Textures[DX11_BACKEND_TEXTURE_STAGES];
+		ID3D11ShaderResourceView * NormalMap;
 		ID3D11InputLayout * Layout;
 		ID3D11Buffer * VertexBuffer;
 		UINT VertexStride;

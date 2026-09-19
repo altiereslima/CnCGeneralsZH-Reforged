@@ -457,6 +457,11 @@ W3DDisplay::~W3DDisplay()
 
 	// Same reason as above: WW3D2 has no logging in a shipping build, and a -dx11 run that made no
 	// device at all would otherwise look exactly like one that made a device nothing drew through.
+	if( Direct3D11_Normal_Maps_Active() )
+	{
+		DEBUG_LOG(("NORMALMAPS: %I64u draws lit per pixel\n", Direct3D11_Normal_Mapped_Draws()));
+	}
+
 	if( Direct3D11_Is_Enabled() )
 	{
 		unsigned pipelines = 0;
@@ -1085,6 +1090,9 @@ void W3DDisplay::init( void )
 	Direct3D11_Present_Enable( TheGlobalData->m_direct3D11 != FALSE );
 	Direct3D11_Dump_Programs_To( TheGlobalData->m_direct3D11DumpPath.str() );
 	pushDirect3D11PostChain();
+	// Before any map is read: every tile and the atlas are sized by it.  A headless run draws no
+	// ground, so it keeps EA's tile and the memory.
+	TheTilePixelExtent = TheGlobalData->m_headless ? SOURCE_TILE_PIXEL_EXTENT : MAX_TILE_PIXEL_EXTENT;
 
 	// Same problem, same answer: the filter table is built the moment the device exists and WW3D2
 	// cannot see GlobalData, so the player's texture filtering goes in here. Nothing in the game
@@ -2363,6 +2371,11 @@ AGAIN:
 		{
 			USE_PERF_TIMER(BigAssRenderLoop)
 			static Bool couldRender = true;
+			// The bumped ground is shaded against the first terrain light, the one its
+			// vertex colours were lit by.  A script can change the time of day, so every frame.
+			const Coord3D &sun = TheGlobalData->m_terrainLightPos[0];
+			const float sunDirection[3] = { sun.x, sun.y, sun.z };
+			Direct3D11_Set_Terrain_Sun( sunDirection );
 			if ((TheGlobalData->m_breakTheMovie == FALSE) && (TheGlobalData->m_disableRender == false) && WW3D::Begin_Render( true, true, Vector3( 0.0f, 0.0f, 0.0f ), TheWaterTransparency->m_minWaterOpacity ) == WW3D_ERROR_OK)		
 			{
 				

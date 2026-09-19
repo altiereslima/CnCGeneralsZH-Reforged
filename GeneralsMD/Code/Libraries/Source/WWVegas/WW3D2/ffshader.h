@@ -83,7 +83,17 @@ struct CombinerDescription
 	// Only read when generating for D3D11.  On D3D9 the device still applies both itself around a
 	// bound pixel shader, and generating them there would apply each of them twice.
 	PixelPipelineDescription PixelPipeline;
+
+	// D3D11 only: light the pixel again through the normal map at t4 before the
+	// stages read the diffuse colour, and add a highlight scaled by the map's alpha after them.
+	// The vertex half has to have been generated with the same flag.  Initialised here because
+	// callers fill a description field by field and one written before this existed never sets it.
+	bool NormalMapped = false;
 };
+
+// The normal mapped pixel program reads this many directional lights from its constants.  Slots
+// past the draw's own lights carry no colour and add nothing.
+const unsigned NORMAL_MAPPED_LIGHTS = 4;
 
 // The HLSL for one description, or false when the description names an operation or an argument
 // this does not generate.  A refusal is not a failure: the caller keeps the fixed-function path for

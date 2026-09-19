@@ -30,6 +30,7 @@
 
 #include "test_harness.h"
 
+#include "ffshader.h"
 #include "ffvertex.h"
 
 #include <d3dcommon.h>
@@ -208,4 +209,43 @@ TEST(ffvertexcompile_a_two_stage_program_compiles)
 	CHECK(VertexShader_Generate(description, VERTEX_SHADER_TARGET_D3D11, eleven));
 	CHECK(compiles(compile, nine, D3D9_PROFILE));
 	CHECK(compiles(compile, eleven, D3D11_PROFILE));
+}
+
+// Normal maps: a unit's draw, lit by the game's three directional lights, with both halves
+// generated normal mapped.  The pixel half uses ddx and ddy, which only a pixel profile has, and
+// reads the four values the vertex half writes past the fog factor.
+TEST(ffvertexcompile_a_normal_mapped_pair_compiles_on_d3d11)
+{
+	D3DCompileFunction compile = load_compiler();
+	if (compile == NULL) {
+		printf("  d3dcompiler_47.dll not present, skipping\n");
+		return;
+	}
+
+	VertexPipelineDescription vertex = plain_description();
+	vertex.LightingEnabled = true;
+	vertex.LightCount = 3;
+	for (unsigned index = 0; index < vertex.LightCount; ++index) {
+		vertex.Lights[index].Type = D3DLIGHT_DIRECTIONAL;
+	}
+	vertex.NormalMapped = true;
+
+	CombinerDescription pixel;
+	memset(&pixel, 0, sizeof(pixel));
+	pixel.StageCount = 1;
+	pixel.Stages[0].ColourOperation = D3DTOP_MODULATE;
+	pixel.Stages[0].ColourArgument1 = D3DTA_TEXTURE;
+	pixel.Stages[0].ColourArgument2 = D3DTA_DIFFUSE;
+	pixel.Stages[0].AlphaOperation = D3DTOP_SELECTARG1;
+	pixel.Stages[0].AlphaArgument1 = D3DTA_TEXTURE;
+	pixel.Stages[0].TextureBound = true;
+	pixel.NormalMapped = true;
+
+	std::string vertex_hlsl;
+	std::string pixel_hlsl;
+	CHECK(VertexShader_Generate(vertex, VERTEX_SHADER_TARGET_D3D11, vertex_hlsl));
+	CHECK(CombinerShader_Generate(pixel, COMBINER_SHADER_TARGET_D3D11, pixel_hlsl));
+	CHECK(compiles(compile, vertex_hlsl, D3D11_PROFILE));
+	CHECK(compiles(compile, pixel_hlsl, "ps_4_0"));
+	CHECK(!CombinerShader_Generate(pixel, COMBINER_SHADER_TARGET_D3D9, pixel_hlsl));
 }

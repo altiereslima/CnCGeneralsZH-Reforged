@@ -313,8 +313,12 @@ public:  // modify height value
 		if ((ndx>=0) && (ndx<m_dataSize) && m_data) m_data[ndx]=height;
 	};
 public: // Read tile utilities. jba [7/9/2003]
-	static Bool readTiles(InputStream *pStrm, TileData **tiles, Int numRows);
-	static Int countTiles(InputStream *pStrm, Bool *halfTile=NULL);
+	// sourceExtent is the tile side the image was drawn in: 64 for everything the game ships, 128
+	// for an image from Art/TerrainHD.  The tiles come out at TILE_PIXEL_EXTENT either way.
+	static Bool readTiles(InputStream *pStrm, TileData **tiles, Int numRows,
+		Int sourceExtent=SOURCE_TILE_PIXEL_EXTENT);
+	static Int countTiles(InputStream *pStrm, Bool *halfTile=NULL,
+		Int sourceExtent=SOURCE_TILE_PIXEL_EXTENT);
 
 protected:
 	void setCliffState(Int xIndex, Int yIndex, Bool state);

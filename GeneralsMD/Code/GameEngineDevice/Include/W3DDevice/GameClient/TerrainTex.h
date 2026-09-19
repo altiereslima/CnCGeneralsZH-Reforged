@@ -55,11 +55,18 @@ public:
 		/// Create texture for a height map.
 		TerrainTextureClass(int height, int width);
 
+		/// The atlas's shape in a format of the caller's choosing: the normal atlas.
+		TerrainTextureClass(int height, WW3DFormat format);
+
 		// just use default destructor. ~TerrainTextureClass(void);
 public:
 	int update(WorldHeightMap *htMap); ///< Sets the pixels, and returns the actual height of the texture.
+	/// The same layout filled with each tile's normals instead of its colours.  Needs a 32 bit texture.
+	int updateNormals(WorldHeightMap *htMap);
 	Bool updateFlat(WorldHeightMap *htMap, Int xCell, Int yCell, Int cellWidth, Int pixelsPerCell); ///< Sets the pixels.
 	void setLOD(Int LOD);
+protected:
+	int fill(WorldHeightMap *htMap, Bool normals);
 };
 
 

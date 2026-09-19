@@ -722,7 +722,7 @@ add_lib_test(test_dx11device dx11device)
 add_lib_test(test_dx11state dx11state)
 add_lib_test(test_dx11layout dx11layout)
 add_lib_test(test_ffvertex ffvertex)
-add_lib_test(test_ffvertexcompile ffvertex)
+add_lib_test(test_ffvertexcompile ffvertex ffshader)
 # The generated vertex program run against the fixed-function pipeline it replaces, on a real
 # Direct3D 9 device.  It skips itself on a machine with no device rather than failing.
 add_lib_test(test_ffvertexd3d9 ffvertex d3d9 user32)

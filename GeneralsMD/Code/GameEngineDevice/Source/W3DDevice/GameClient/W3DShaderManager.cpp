@@ -2236,6 +2236,13 @@ Int TerrainShaderPixelShader::set(Int pass)
 	//setup base pass
 	DX8Wrapper::Set_DX8_Texture(0, W3DShaderManager::getShaderTexture(0)->Peek_D3D_Texture());
 	DX8Wrapper::Set_DX8_Texture(1, W3DShaderManager::getShaderTexture(1)->Peek_D3D_Texture());
+	// The atlas is bound here straight to the device, past TextureClass::Apply, so its
+	// normal atlas has to be handed over here too.
+	if (Direct3D11_Normal_Maps_Active())
+	{
+		TextureClass *normalAtlas = W3DShaderManager::getShaderTexture(0)->Peek_Normal_Map();
+		Direct3D11_Mirror_Normal_Map(normalAtlas != NULL ? normalAtlas->Peek_D3D_Base_Texture() : NULL);
+	}
 
 	DX8Wrapper::Set_DX8_Texture_Stage_State( 0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
 	DX8Wrapper::Set_DX8_Texture_Stage_State( 0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
