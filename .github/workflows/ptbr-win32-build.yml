@@ -40,16 +40,31 @@ jobs:
         run: |
           python PTBR\tools\install_public_dependencies.py --repo .
 
-      - name: Check PT-BR media secrets
+      - name: Audit complete build prerequisites
+        shell: pwsh
+        run: |
+          python PTBR\tools\audit_build_prereqs.py --repo .
+
+      - name: Detect optional PT-BR media
+        id: media
         shell: pwsh
         env:
           MEDIA_URL: ${{ secrets.PTBR_MEDIA_URL }}
           MEDIA_SHA256: ${{ secrets.PTBR_MEDIA_SHA256 }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:MEDIA_URL)) { throw "Missing PTBR_MEDIA_URL" }
-          if ([string]::IsNullOrWhiteSpace($env:MEDIA_SHA256)) { throw "Missing PTBR_MEDIA_SHA256" }
+          $hasUrl = -not [string]::IsNullOrWhiteSpace($env:MEDIA_URL)
+          $hasHash = -not [string]::IsNullOrWhiteSpace($env:MEDIA_SHA256)
+          if (-not $hasUrl -and -not $hasHash) {
+            "enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            Write-Host "::notice::PT-BR media not configured; build continues with text and runtime media fallback."
+          } elseif ($hasUrl -xor $hasHash) {
+            throw "Configure both PTBR_MEDIA_URL and PTBR_MEDIA_SHA256, or leave both empty."
+          } else {
+            "enabled=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
 
-      - name: Download private PT-BR media
+      - name: Download optional PT-BR media
+        if: steps.media.outputs.enabled == 'true'
         shell: pwsh
         env:
           MEDIA_URL: ${{ secrets.PTBR_MEDIA_URL }}
@@ -61,7 +76,8 @@ jobs:
           }
           Invoke-WebRequest -Uri $env:MEDIA_URL -Headers $headers -OutFile "$env:RUNNER_TEMP\ptbr-media.zip"
 
-      - name: Install and verify PT-BR media
+      - name: Install and verify optional PT-BR media
+        if: steps.media.outputs.enabled == 'true'
         shell: pwsh
         env:
           MEDIA_SHA256: ${{ secrets.PTBR_MEDIA_SHA256 }}
@@ -90,14 +106,14 @@ jobs:
             $buildConfig = "Release"
           }
 
-          $runnerArgs = @(".", "--config", "$buildConfig", "--clean")
+          $runnerArgs = @(".", "--config", "$buildConfig", "--clean", "--allow-dirty")
           if ($runTests -ne "true") { $runnerArgs += "--skip-tests" }
           python PTBR\tools\run_windows_stage15.py @runnerArgs
 
       - name: Assemble downloadable PT-BR build
         shell: pwsh
         run: |
-          $out = "PTBR_STAGE17_ARTIFACT"
+          $out = "PTBR_BUILD_ARTIFACT"
           New-Item -ItemType Directory -Force "$out\Data\PortugueseBrazil" | Out-Null
           Copy-Item "GeneralsMD\Run\generals.exe" "$out\generals.exe" -Force
           if (Test-Path "GeneralsMD\Run\generals.pdb") {
@@ -116,7 +132,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ZH-Reforged-PTBR-${{ github.event_name == 'workflow_dispatch' && inputs.config || 'Release' }}-${{ github.run_number }}
-          path: PTBR_STAGE17_ARTIFACT/
+          path: PTBR_BUILD_ARTIFACT/
           if-no-files-found: error
           retention-days: 14
 

@@ -1,16 +1,12 @@
 # Zero Hour Reforged — Português (Brasil)
 
-Integração PT-BR para um fork de `olcayseygan/CnCGeneralsZH-Reforged`.
+Integração PT-BR para `CnCGeneralsZH-Reforged`.
 
-## Conteúdo versionado
+O Git contém o overlay textual (`Generals.str`, `Language.ini`), patchers, validadores e workflow.
+zlib, GameSpy, LZH-Light e o stub de Miles são instalados automaticamente em versões fixadas antes
+da compilação.
 
-- `Generals.str` — overlay PT-BR;
-- `Language.ini` — configuração de idioma/fontes;
-- patchers e validadores;
-- runner Windows;
-- workflow GitHub Actions.
-
-Os vídeos Bink, texturas localizadas e fontes legadas não ficam no Git. O workflow recebe a mídia
-PT-BR por bundle privado validado por SHA-256. zlib, GameSpy e LZH-Light são obtidos publicamente em versões fixadas.
+Os BIKs e texturas PT-BR não ficam no Git. Eles são opcionais no CI: se um bundle privado for
+configurado, entram no artifact; caso contrário, a compilação continua e o jogo usa fallback de mídia.
 
 Veja `SETUP.md`.

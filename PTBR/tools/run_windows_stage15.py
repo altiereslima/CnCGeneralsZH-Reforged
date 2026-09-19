@@ -25,6 +25,14 @@ PATCHED_SOURCE_FILES = [
     "GeneralsMD/Code/CMakeLists.txt",
 ]
 
+CORE_LOCALE_FILES=["Generals.str","Language.ini"]
+MEDIA_LOCALE_FILES=[
+    "Movies/EA_LOGO.BIK","Movies/EA_LOGO640.BIK",
+    "Movies/sizzle_review.bik","Movies/sizzle_review640.bik",
+    "Art/Textures/defeated.dds","Art/Textures/gameover.dds",
+    "Art/Textures/GameOver.tga","Art/Textures/victorious.dds",
+]
+
 def now():
     return dt.datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -124,29 +132,32 @@ def backup_sources(repo, out_root):
     (backup/"MANIFEST.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return backup
 
-def check_run_output(repo):
-    run_dir = repo / "GeneralsMD" / "Run"
-    exe = run_dir / "generals.exe"
-    loc = run_dir / "Data" / "PortugueseBrazil"
-    required = [
-        "Generals.str",
-        "Language.ini",
-        "Movies/EA_LOGO.BIK",
-        "Movies/EA_LOGO640.BIK",
-        "Movies/sizzle_review.bik",
-        "Movies/sizzle_review640.bik",
-        "Art/Textures/defeated.dds",
-        "Art/Textures/gameover.dds",
-        "Art/Textures/GameOver.tga",
-        "Art/Textures/victorious.dds",
-    ]
-    missing = [x for x in required if not (loc/x).is_file()]
+def detect_package_media(pkg):
+    loc=pkg/"payload/GeneralsMD/Code/Data/PortugueseBrazil"
+    miss=[x for x in CORE_LOCALE_FILES if not (loc/x).is_file()]
+    if miss:
+        raise RuntimeError("pacote PT-BR sem arquivos essenciais: "+", ".join(miss))
+    present=[x for x in MEDIA_LOCALE_FILES if (loc/x).is_file()]
+    if present and len(present)!=len(MEDIA_LOCALE_FILES):
+        missing=[x for x in MEDIA_LOCALE_FILES if x not in present]
+        raise RuntimeError("pacote de mídia PT-BR parcial: faltando "+", ".join(missing))
+    return len(present)==len(MEDIA_LOCALE_FILES)
+
+def check_run_output(repo,require_media):
+    run_dir=repo/"GeneralsMD/Run"
+    exe=run_dir/"generals.exe"
+    loc=run_dir/"Data/PortugueseBrazil"
+    miss_core=[x for x in CORE_LOCALE_FILES if not (loc/x).is_file()]
+    miss_media=[x for x in MEDIA_LOCALE_FILES if not (loc/x).is_file()]
     return {
-        "generals_exe": str(exe),
-        "generals_exe_exists": exe.is_file(),
-        "locale_dir": str(loc),
-        "locale_missing": missing,
-        "pass": exe.is_file() and not missing,
+        "generals_exe":str(exe),
+        "generals_exe_exists":exe.is_file(),
+        "locale_dir":str(loc),
+        "core_missing":miss_core,
+        "media_required":require_media,
+        "media_missing":miss_media,
+        "media_status":"COMPLETE" if not miss_media else ("OPTIONAL_NOT_INCLUDED" if not require_media else "MISSING_REQUIRED"),
+        "pass":exe.is_file() and not miss_core and (not require_media or not miss_media),
     }
 
 def main():
@@ -168,9 +179,6 @@ def main():
         raise SystemExit("STAGE15: aponte para a raiz do checkout CnCGeneralsZH-Reforged")
 
     result_dir = repo / "PTBR_STAGE15_RESULTS"
-    result_dir.mkdir(parents=True, exist_ok=True)
-    logs = result_dir / "logs"
-    logs.mkdir(exist_ok=True)
     result_path = Path(args.result).resolve() if args.result else result_dir/"result.json"
 
     result = {
@@ -191,6 +199,13 @@ def main():
         if gi["head"] and gi["head"] != EXPECTED_UPSTREAM_HEAD:
             result["git"]["head_warning"] = "HEAD difere do snapshot validado; os validators de anchors decidirão se o patch ainda é compatível."
 
+        media_present=detect_package_media(pkg)
+        result["localized_media_in_package"]=media_present
+
+        result_dir.mkdir(parents=True,exist_ok=True)
+        logs=result_dir/"logs"
+        logs.mkdir(exist_ok=True)
+
         state = source_state(repo)
         result["source_state_before"] = state
 
@@ -205,8 +220,10 @@ def main():
         else:
             raise RuntimeError("estado do fonte não reconhecido; não é seguro aplicar o patch")
 
-        run([sys.executable, str(pkg/"tools/verify_patched_fixture.py"), str(repo)],
-            log=logs/"02_verify_patched_source.log")
+        verify_cmd=[sys.executable,str(pkg/"tools/verify_patched_fixture.py"),str(repo)]
+        if not media_present:
+            verify_cmd.append("--allow-missing-media")
+        run(verify_cmd,log=logs/"02_verify_patched_source.log")
         result["steps"]["verify_patched_source"] = "PASS"
 
         run([sys.executable, str(pkg/"tools/compile_preflight.py"), str(repo)],
@@ -258,7 +275,7 @@ def main():
                     log=logs/"07_ctest.log")
                 result["steps"]["ctest"] = "PASS"
 
-            output = check_run_output(repo)
+            output = check_run_output(repo,require_media=media_present)
             result["run_output"] = output
             if not output["pass"]:
                 raise RuntimeError("build terminou, mas generals.exe ou o payload PT-BR não apareceu em GeneralsMD/Run")

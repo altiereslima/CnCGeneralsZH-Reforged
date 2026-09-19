@@ -1,18 +1,21 @@
 # Setup do fork
 
-Configure estes GitHub Actions secrets:
+Nenhum segredo é necessário para compilar a tradução textual.
+
+O workflow instala automaticamente, em versões/commits fixados:
+
+- zlib 1.1.4;
+- GameSpy SDK;
+- LZH-Light 1.0;
+- stubs públicos do Miles usados apenas para gerar a import library.
+
+A mídia localizada é opcional. Para incluí-la no artifact, configure:
 
 - `PTBR_MEDIA_URL`
 - `PTBR_MEDIA_SHA256`
 - `PTBR_MEDIA_TOKEN` (opcional)
 
-Depois execute **Actions → PT-BR Win32 Build → Run workflow**.
+Se URL e SHA estiverem ambos vazios, o build continua normalmente e o runtime usa fallback de mídia.
+Se somente um deles estiver configurado, o workflow para para denunciar configuração incompleta.
 
-## Dependências de build
-
-zlib 1.1.4, GameSpy SDK e LZH-Light 1.0 são obtidos automaticamente pelo workflow em versões/commits fixados.
-
-## Bundle de mídia PT-BR
-
-Use `tools/make_ptbr_media_bundle.py` apontando para o diretório `PortugueseBrazil` completo.
-Esse bundle contém somente os 4 BIKs e 4 texturas localizadas. Não inclua arquivos `.big`.
+Todo push no `main` dispara o build automaticamente.

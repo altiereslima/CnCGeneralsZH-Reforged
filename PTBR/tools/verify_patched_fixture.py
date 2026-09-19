@@ -1,13 +1,25 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import json, sys
+import argparse, json
 
-def need(text, needle, name):
+CORE_LOCALE_FILES=["Generals.str","Language.ini"]
+MEDIA_LOCALE_FILES=[
+    "Movies/EA_LOGO.BIK","Movies/EA_LOGO640.BIK",
+    "Movies/sizzle_review.bik","Movies/sizzle_review640.bik",
+    "Art/Textures/defeated.dds","Art/Textures/gameover.dds",
+    "Art/Textures/GameOver.tga","Art/Textures/victorious.dds",
+]
+
+def need(text,needle,name):
     if needle not in text:
         raise RuntimeError(f"missing postcondition: {name}")
 
 def main():
-    repo=Path(sys.argv[1]).resolve()
+    ap=argparse.ArgumentParser()
+    ap.add_argument("repo")
+    ap.add_argument("--allow-missing-media",action="store_true")
+    args=ap.parse_args()
+    repo=Path(args.repo).resolve()
     code=repo/"GeneralsMD/Code"
     checks={}
 
@@ -58,13 +70,21 @@ def main():
     checks["cmake_locale_copy"]="PASS"
 
     loc=code/"Data/PortugueseBrazil"
-    req=["Generals.str","Language.ini","Movies/EA_LOGO.BIK","Movies/EA_LOGO640.BIK",
-         "Movies/sizzle_review.bik","Movies/sizzle_review640.bik",
-         "Art/Textures/defeated.dds","Art/Textures/gameover.dds",
-         "Art/Textures/GameOver.tga","Art/Textures/victorious.dds"]
-    miss=[x for x in req if not (loc/x).is_file()]
-    if miss: raise RuntimeError("missing locale payload: "+", ".join(miss))
-    checks["full_locale_payload"]="PASS"
+    miss_core=[x for x in CORE_LOCALE_FILES if not (loc/x).is_file()]
+    if miss_core:
+        raise RuntimeError("missing core locale payload: "+", ".join(miss_core))
+    checks["core_locale_payload"]="PASS"
+
+    present=[x for x in MEDIA_LOCALE_FILES if (loc/x).is_file()]
+    if present and len(present)!=len(MEDIA_LOCALE_FILES):
+        miss=[x for x in MEDIA_LOCALE_FILES if x not in present]
+        raise RuntimeError("partial localized media payload: missing "+", ".join(miss))
+    if len(present)==len(MEDIA_LOCALE_FILES):
+        checks["localized_media_payload"]="PASS"
+    elif args.allow_missing_media:
+        checks["localized_media_payload"]="SKIPPED_OPTIONAL_NOT_PRESENT"
+    else:
+        raise RuntimeError("localized media payload is absent")
 
     print(json.dumps({"status":"PASS","checks":checks},ensure_ascii=False,indent=2))
 

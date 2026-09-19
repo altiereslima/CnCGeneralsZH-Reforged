@@ -18,6 +18,13 @@ GAMESPY_REPO = "https://github.com/TheSuperHackers/GamespySDK.git"
 GAMESPY_COMMIT = "b1b77d8f1f30d289b4b4910d305a377f706a0bf7"
 LZH_REPO = "https://github.com/TheSuperHackers/lzhl-1.0.git"
 LZH_COMMIT = "dfd96e2ca64adaddb35dd4ebadd6add7d5586783"
+THYME_MILES_COMMIT = "ccef1e11c1355c6db577a057c06e7d790f1a0333"
+THYME_MILES_BASE = "https://raw.githubusercontent.com/TheAssemblyArmada/Thyme/" + THYME_MILES_COMMIT + "/deps/miles"
+THYME_MILES_BLOBS = {
+    "miles.c": "cce9969a3639a3dcf55d9e2d25c8f9ff548410f0",
+    "miles.def": "7dd8dedbcc4c5854f298b3891425abc013c1975d",
+    "miles.h": "11f4dfadeee90f218fa58aac0ee66a50ee9e6765",
+}
 
 LZH_SOURCE_FILES = [
     "Huff.cpp", "Lz.cpp", "Lzhl.cpp",
@@ -38,6 +45,13 @@ def md5(path: Path) -> str:
     with path.open("rb") as f:
         for chunk in iter(lambda:f.read(1024*1024), b""):
             h.update(chunk)
+    return h.hexdigest()
+
+def git_blob_sha(path: Path) -> str:
+    data=path.read_bytes()
+    h=hashlib.sha1()
+    h.update(f"blob {len(data)}\\0".encode("ascii"))
+    h.update(data)
     return h.hexdigest()
 
 def safe_extract_tar(archive: Path, dst: Path):
@@ -250,6 +264,50 @@ def install_lzh(repo: Path, source_override: Path|None):
         "commit":LZH_COMMIT,
     }
 
+def validate_miles_stub(path: Path):
+    required=["miles.c","miles.def","miles.h"]
+    missing=[x for x in required if not (path/x).is_file()]
+    if missing:
+        raise RuntimeError("Miles stub incompleto: "+", ".join(missing))
+
+def install_miles_stub(repo: Path, source_override: Path|None):
+    dst=repo/"GeneralsMD/Code/Libraries/Source/WWVegas/Miles6/stub"
+    try:
+        validate_miles_stub(dst)
+        return {"status":"PRESENT","path":str(dst)}
+    except RuntimeError:
+        pass
+
+    dst.mkdir(parents=True,exist_ok=True)
+
+    if source_override:
+        validate_miles_stub(source_override)
+        for name in THYME_MILES_BLOBS:
+            shutil.copy2(source_override/name,dst/name)
+        validate_miles_stub(dst)
+        return {"status":"INSTALLED_FROM_OVERRIDE","path":str(dst)}
+
+    with tempfile.TemporaryDirectory(prefix="zh-miles-") as td:
+        td=Path(td)
+        for name,expected_blob in THYME_MILES_BLOBS.items():
+            temp=td/name
+            download(f"{THYME_MILES_BASE}/{name}",temp)
+            got=git_blob_sha(temp)
+            if got.lower()!=expected_blob.lower():
+                raise RuntimeError(
+                    f"Thyme Miles {name} Git blob SHA inválido: esperado {expected_blob}, obtido {got}"
+                )
+            shutil.copy2(temp,dst/name)
+
+    validate_miles_stub(dst)
+    return {
+        "status":"INSTALLED",
+        "path":str(dst),
+        "repository":"https://github.com/TheAssemblyArmada/Thyme",
+        "commit":THYME_MILES_COMMIT,
+        "verified_git_blobs":THYME_MILES_BLOBS,
+    }
+
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--repo",required=True)
@@ -259,6 +317,8 @@ def main():
                     help="fixture/offline override for an already extracted GamespySDK tree")
     ap.add_argument("--lzh-source",default=None,
                     help="fixture/offline override for flat LZH-Light 1.0 source tree")
+    ap.add_argument("--miles-source",default=None,
+                    help="fixture/offline override containing miles.c, miles.def and miles.h")
     args=ap.parse_args()
 
     repo=Path(args.repo).resolve()
@@ -268,11 +328,13 @@ def main():
     z=install_zlib(repo, Path(args.zlib_archive).resolve() if args.zlib_archive else None)
     g=install_gamespy(repo, Path(args.gamespy_source).resolve() if args.gamespy_source else None)
     l=install_lzh(repo, Path(args.lzh_source).resolve() if args.lzh_source else None)
+    m=install_miles_stub(repo, Path(args.miles_source).resolve() if args.miles_source else None)
 
     print("PUBLIC DEPENDENCIES INSTALL PASS")
     print("zlib:",z)
     print("gamespy:",g)
     print("lzh:",l)
+    print("miles:",m)
 
 if __name__=="__main__":
     main()
