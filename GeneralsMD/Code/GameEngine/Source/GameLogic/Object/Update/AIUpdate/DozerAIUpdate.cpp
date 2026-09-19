@@ -1014,6 +1014,14 @@ static Object *findUnfinishedStructureToContinue( Object *dozer )
 																																		 range, FROM_CENTER_2D, filters );
 	MemoryPoolObjectHolder hold( iter );
 
+	//
+	// A plan this builder was given while it was busy is its queue, and it works through the queue in
+	// the order it was given: the one placed first, which is the one with the lowest id.  A player asked
+	// for exactly that, a string of jobs handed to one builder and done in turn, and the nearest-first
+	// rule below walked the string in whatever order the builder happened to end up next to it.
+	// Anything else unfinished is picked up nearest first, once the queue is empty.
+	//
+	Object *queued = NULL;
 	Object *best = NULL;
 	Real bestDistSqr = 0.0f;
 	for( Object *obj = iter->first(); obj; obj = iter->next() )
@@ -1021,6 +1029,13 @@ static Object *findUnfinishedStructureToContinue( Object *dozer )
 		if( !obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) || obj->testStatus( OBJECT_STATUS_SOLD ) ||
 				obj->isEffectivelyDead() )
 			continue;
+
+		if( obj->getBuilderID() == dozer->getID() && obj->getConstructionPercent() == 0.0f )
+		{
+			if( queued == NULL || obj->getID() < queued->getID() )
+				queued = obj;
+			continue;
+		}
 
 		// somebody already on it?
 		Object *builder = TheGameLogic->findObjectByID( obj->getBuilderID() );
@@ -1040,7 +1055,7 @@ static Object *findUnfinishedStructureToContinue( Object *dozer )
 		}
 	}
 
-	return best;
+	return queued ? queued : best;
 
 }  // end findUnfinishedStructureToContinue
 

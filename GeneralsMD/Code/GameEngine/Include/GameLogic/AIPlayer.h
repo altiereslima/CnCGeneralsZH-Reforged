@@ -316,11 +316,22 @@ protected:
 		* the base from whoever this player is fighting. */
 	virtual void doPower(void);
 
-	Bool enemyDirection(Coord3D *dir);	///< unit vector from this base towards the nearest enemy's best known address
+	/** Hard: the superweapon as soon as it can be bought, and the tech building it waits on before
+		* that, with no clock; as many as the game's rules allow. */
+	virtual void doSuperweapons(void);
 
-	void buyMoneyUnit(void);
+	Bool enemyDirection(Coord3D *dir);	///< unit vector from this base towards the nearest enemy's best known address
+	Bool isHeldExpansion(const Object *warehouse);	///< our supply center stands at it, and it is nearer our base than any enemy's
+	void buildAsap(const ThingTemplate *tmpl);	///< the plan's own unbuilt entry if it has one, otherwise a new spot behind the base
+
+	void buyMoneyUnits(void);
 	Bool placeNear(const ThingTemplate *tmpl, const Coord3D *center, Real innerRadius);	///< a legal, safe spot on a ring round center, queued for a dozer
 	Real knownFirepowerAlongPath(Waypoint *way);	///< what this AI has seen that can shoot, along an approach
+	AsciiString secondApproachLabel(const Coord3D *from, const AsciiString &taken, Int pathSuffix);	///< the quietest other road, or empty
+	void loadGunships(void);	///< the parked wave's infantry boards the gunships at home
+	Real knownFirepowerNear(const Coord3D *pos);	///< what this AI has seen that can shoot, near a point
+	Bool forwardHoldPoint(const AsciiString &approach, Int pathSuffix, const Coord3D *enemyPos, Coord3D *hold);	///< where a wave gathers on its road
+	void sendWave(AIGroup *wave, const AsciiString &approach, Int pathSuffix, Int teams, Real power, UnsignedInt heldFrames);
 
 	virtual void doBaseBuilding(void);
 	virtual void checkReadyTeams(void);
@@ -328,6 +339,8 @@ protected:
 	virtual void doTeamBuilding(void);
 	virtual void doUpgradesAndSkills(void);
 	virtual Object *findDozer(const Coord3D *pos);
+	Object *findNearestDozer(const Coord3D *pos);	///< the nearest dozer, busy or not
+	Bool isPowerThin(void) const;	///< less than one more building's draw left over
 	virtual void queueDozer(void);
 	void computeEnemyComposition( AIEnemyComposition *out, std::vector<AIVisibleEnemy> *army = NULL );	///< what this AI can see the enemy fielding, and optionally which units
 	Real visibleEstateValue( Int playerNdx );					///< what this AI can see that player is worth, in build cost

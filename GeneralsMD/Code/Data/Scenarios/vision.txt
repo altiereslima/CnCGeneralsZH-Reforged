@@ -1,0 +1,22 @@
+# Idle units left standing while an enemy column walks through them.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 2400
+#     -scenario vision -logPrefix vision_
+#
+# A player reported units that did not fire on an enemy walking through their own army. Nobody here
+# is given an order, so every shot the defenders take is one their own scan found. The column is
+# only told to move, never to attack, so the defenders' kills are the whole measurement: the
+# arrive line counts the Red Guard that died on the way through.
+#
+# 2026-09-19, seeds 7-11: the defenders killed 22-23 of the 40. With the shot-claim ledger switched
+# off entirely they killed 24-26, and with only shots in flight counted (no claims) 17-19. The ledger
+# costs a few kills here; it does not leave units blind to an enemy standing among them.
+
+30    spawn   0  AmericaInfantryRanger          24  start0:0:600    18
+30    spawn   0  AmericaTankCrusader            8   start0:0:680    40
+30    spawn   0  AmericaVehicleTomahawk         4   start0:0:520    40
+30    spawn   1  ChinaInfantryRedguard          40  start0:0:1200   18
+60    move    1  *  start0:0:100
+60    arrive  1  ChinaInfantryRedguard  start0:0:100  250

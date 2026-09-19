@@ -102,15 +102,23 @@ void AISkirmishPlayer::processBaseBuilding( void )
 	// Refresh base buildings. Scan through list, if a building is missing,
 	// rebuild it, unless it's rebuild count is zero.
 	//
-	if (m_readyToBuildStructure)
+	// A Hard AI in the dark does not wait out the structure timer for its power plant: a USA whose plants a
+	// superweapon took sat dark for two minutes of logic frames with a plant asked for and money coming in.
+	// Once a second rather than every frame, because a pass walks the whole plan.
+	const Bool darkRush = getSkillProfile()->m_economyBuildings && !m_player->getEnergy()->hasSufficientPower() &&
+		TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND == 0;
+	if (m_readyToBuildStructure || darkRush)
 	{
 		const ThingTemplate *bldgPlan=NULL;
 		BuildListInfo	*bldgInfo = NULL;
-		Bool isPriority = false;	
+		Bool isPriority = false;
+		const Bool rushBigGuns = getSkillProfile()->m_economyBuildings;
+		Bool rushTaken = false;
 		Object *bldg = NULL;
 		const ThingTemplate *powerPlan=NULL;
 		BuildListInfo	*powerInfo = NULL;
 		Bool isUnderPowered = !m_player->getEnergy()->hasSufficientPower();
+		const Bool powerThin = isPowerThin();
 		Bool powerUnderConstruction = false;
 		for( BuildListInfo *info = m_player->getBuildList(); info; info = info->getNext() )
 		{
@@ -205,7 +213,14 @@ void AISkirmishPlayer::processBaseBuilding( void )
 			// A priority entry whose prerequisite is not standing yet was taken all the same, and
 			// buildObjectNow refused it on every pass, so nothing queued behind it went up either: a
 			// China AI asked for a bunker before its barracks and sat on 35,000 until frame 8116.
-			const Bool couldBePriority = info->isPriorityBuild() && !isPriority && m_player->canBuild(curPlan);
+			// A Hard AI puts its superweapon and the tech building it needs ahead of every other priority
+			// entry: the scripts keep seven to twenty of those waiting through a match, one goes up a
+			// pass, and a tech building asked for at frame 1932 was still in that queue at 30000.
+			// A power plant jumps it as well once the margin is thin: the plant doPower asked for ahead
+			// of an outage waited 45 seconds in that queue and the base went dark before it was started.
+			const Bool rushThis = rushBigGuns && (curPlan->isKindOf(KINDOF_FS_SUPERWEAPON) || curPlan->isKindOf(KINDOF_FS_ADVANCED_TECH) ||
+				(powerThin && curPlan->isKindOf(KINDOF_FS_POWER) && !curPlan->isKindOf(KINDOF_CASH_GENERATOR)));
+			const Bool couldBePriority = info->isPriorityBuild() && (!isPriority || (rushThis && !rushTaken)) && m_player->canBuild(curPlan);
 			const Bool couldBePower = powerPlan==NULL && curPlan->isKindOf(KINDOF_FS_POWER) &&
 				!curPlan->isKindOf(KINDOF_CASH_GENERATOR) && (isUnderPowered || info->isAutomaticBuild());
 			const Bool couldBeBuilt = bldgPlan==NULL && info->isAutomaticBuild() && info->isBuildable();
@@ -224,6 +239,7 @@ void AISkirmishPlayer::processBaseBuilding( void )
 				bldgPlan = curPlan;
 				bldgInfo = info;
 				isPriority = true;
+				rushTaken = rushThis;
 			}
 			if (curPlan->isKindOf(KINDOF_FS_POWER)) {
 				if (powerPlan==NULL && !curPlan->isKindOf(KINDOF_CASH_GENERATOR)) {
@@ -275,6 +291,9 @@ void AISkirmishPlayer::processBaseBuilding( void )
 				bldgInfo = powerInfo;
 				DEBUG_LOG(("Forcing build of power plant.\n"));
 			}
+		}
+		if (!m_readyToBuildStructure && bldgPlan != powerPlan) {
+			bldgPlan = NULL;		// the timer is only skipped for the power plant
 		}
 		if (bldgPlan && bldgInfo) {
 #ifdef USE_DOZER
