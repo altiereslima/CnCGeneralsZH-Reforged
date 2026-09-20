@@ -4118,6 +4118,30 @@ static Bool diesUsingItsOwnWeapon( const Object *obj )
 	return FALSE;
 }
 
+/* The states that take a detour for a crate and then carry on with the order they had. Each of
+	 these machines asks checkForCrateToPickup once a cycle and steps into a pick-up state of its own,
+	 which is how a unit that kills something walks over the wreck without losing its place. A unit in
+	 one of them is told about the crate rather than ordered to it, so nothing it was doing is lost -
+	 and that is the only thing the computer's own units are ever in, because the computer keeps every
+	 team on an order and none of them is ever idle. */
+static Bool detoursForACrate( const AIUpdateInterface *ai )
+{
+	switch( ai->getCurrentStateID() )
+	{
+		case AI_GUARD:
+		case AI_GUARD_RETALIATE:
+		case AI_GUARD_TUNNEL_NETWORK:
+		case AI_HUNT:
+		case AI_ATTACK_SQUAD:
+		case AI_ATTACK_MOVE_TO:
+		case AI_ATTACKFOLLOW_WAYPOINT_PATH_AS_INDIVIDUALS:
+		case AI_ATTACKFOLLOW_WAYPOINT_PATH_AS_TEAM:
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
 /** Is anything hostile close enough to this unit to be its problem right now? */
 static Bool hasEnemyInSight( Object *obj )
 {
@@ -4133,18 +4157,23 @@ static Bool hasEnemyInSight( Object *obj )
 	 take it, and drive that one over it by hand, in the middle of the fight that made it.  Nobody
 	 does that, so most salvage on most maps timed out where it fell.
 
-	 Whoever is standing nearest and has nothing else to do goes and takes it, once a second.  A unit
-	 that can still be upgraded off it wins over one that cannot, however far back it is standing,
-	 because the upgrade is worth more than the walk; failing that the nearest idle unit takes the
-	 cash.  Only idle units, and the trip itself makes the unit busy, which is what stops it being
-	 ordered again on the next pass.
+	 Whoever is standing nearest goes and takes it, once a second.  A unit that can still be upgraded
+	 off it wins over one that cannot, however far back it is standing, because the upgrade is worth
+	 more than the walk; failing that the nearest unit takes the cash.
 
-	 Idle is not the same as free, though, which is what the first version of this got wrong.  A line
-	 of infantry dug in across a road is idle, every one of them, and a fight in front of it makes
-	 wrecks: the line walked off to collect them and never came back, and the position was lost to
-	 the crates it had just earned.  So the collector goes and then walks back to the spot it left,
-	 nobody with an enemy in sight leaves at all, and the call radius is short enough that the walk
-	 costs seconds rather than half a minute.
+	 How it is sent depends on what it was doing.  An idle unit is ordered to the crate and then walks
+	 back to the spot it left - idle is not the same as free, which is what the first version of this
+	 got wrong.  A line of infantry dug in across a road is idle, every one of them, and a fight in
+	 front of it makes wrecks: the line walked off to collect them and never came back, and the
+	 position was lost to the crates it had just earned.  So it goes and returns, nobody with an enemy
+	 in sight leaves at all, and the call radius is short enough that the walk costs seconds.
+
+	 A unit that is busy is told about the crate instead, and its own state machine takes the detour
+	 between one cycle and the next and then carries on with the order it had.  That is the path the
+	 computer's units take, and the only one they can: the computer keeps every team on an order, so
+	 not one of its units is ever idle and the whole pass used to walk straight past them.  Measured
+	 on a brutal match: one crate, three of its rebels standing inside a hundred and fifty of it for
+	 thirty-one seconds, none of them idle for a single frame, and the crate timed out where it lay.
 
 	 A dozer and a harvester are left alone: both have a job of their own that earns more than the
 	 crate does.  An aircraft is left alone too, because a crate cannot be claimed from the air, and
@@ -4172,6 +4201,7 @@ static void salvageCrateTick( void )
 
 		Object *collector = NULL;
 		Bool collectorUpgrades = FALSE;
+		Bool collectorIsIdle = FALSE;
 		for( Object *them = iter->first(); them != NULL; them = iter->next() )
 		{
 			if( them->isKindOf( KINDOF_STRUCTURE ) || them->isKindOf( KINDOF_AIRCRAFT ) )
@@ -4181,7 +4211,10 @@ static void salvageCrateTick( void )
 			if( them->isContained() || them->isEffectivelyDead() || them->isNeutralControlled() )
 				continue;
 			AIUpdateInterface *ai = them->getAI();
-			if( ai == NULL || !ai->isIdle() )
+			if( ai == NULL )
+				continue;
+			const Bool idle = ai->isIdle();
+			if( !idle && !detoursForACrate( ai ) )
 				continue;
 			if( diesUsingItsOwnWeapon( them ) )
 				continue;
@@ -4195,6 +4228,7 @@ static void salvageCrateTick( void )
 			{
 				collector = them;
 				collectorUpgrades = upgrades;
+				collectorIsIdle = idle;
 			}
 
 			// the iterator runs near to far, so the first one that can be upgraded is the best answer
@@ -4202,7 +4236,17 @@ static void salvageCrateTick( void )
 				break;
 		}
 
-		if( collector == NULL || hasEnemyInSight( collector ) )
+		if( collector == NULL )
+			continue;
+
+		if( !collectorIsIdle )
+		{
+			// its own machine picks the moment and puts it back on the order it had
+			collector->getAI()->notifyCrate( crate->getID() );
+			continue;
+		}
+
+		if( hasEnemyInSight( collector ) )
 			continue;
 
 		const Coord3D post = *collector->getPosition();

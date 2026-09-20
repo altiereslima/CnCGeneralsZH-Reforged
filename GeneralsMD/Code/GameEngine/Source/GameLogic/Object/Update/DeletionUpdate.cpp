@@ -81,6 +81,15 @@ UnsignedInt DeletionUpdate::calcSleepDelay(UnsignedInt minFrames, UnsignedInt ma
 //-------------------------------------------------------------------------------------------------
 UpdateSleepTime DeletionUpdate::update( void )
 {
+	/* Salvage waits. Every other crate in the game is dropped in front of whoever earned it, but a
+		 salvage crate is the wreck itself and it falls wherever the fight took it, often with nobody
+		 close enough to reach it inside its thirty seconds. That timer threw away most of the salvage
+		 on most maps - four crates from one skirmish, all four still lying untouched when the clock
+		 took them. So it does not run on these: the crate sits where it fell until something drives
+		 over it. */
+	if( getObject()->isSalvageCrate() )
+		return UPDATE_SLEEP_FOREVER;
+
 	// Destroy (NOT kill) if time is up
 #if defined _DEBUG  && defined CRISS_CROSS_GEOMETRY
 	Object *obj = getObject();
