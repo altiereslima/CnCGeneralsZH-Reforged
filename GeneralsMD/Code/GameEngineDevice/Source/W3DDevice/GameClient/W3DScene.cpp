@@ -1150,8 +1150,17 @@ void RTS3DScene::Customized_Render( RenderInfoClass &rinfo )
 	/* The sun's depth pass runs before the frame rather than with the shadows, because it flushes
 		 the mesh renderer and drains the sort lists: run in the middle of a frame it drew the
 		 helicopters' rotor discs into the shadow map instead of onto the screen, and they went
-		 missing from both.  Here nothing is queued yet.  SHADOW-MAP-PLAN.md phase 1. */
-	if (TheW3DVolumetricShadowManager != NULL)
+		 missing from both.  Here nothing is queued yet.  SHADOW-MAP-PLAN.md phase 1.
+
+		 "Here" is the frame's own pass and no other.  A map whose water reflects draws the scene a
+		 second time into the mirror texture, from inside WaterRenderObjClass::Render, which is
+		 itself inside the frame this function started - so that second Customized_Render reached
+		 this line with the whole frame already queued, and the drain took the surf and the
+		 helicopters off the screen and into a depth buffer.  The main menu's shell map is a water
+		 map, which is where it showed.  The guards are the ones queueShadows uses further down. */
+	if (TheW3DVolumetricShadowManager != NULL && m_customPassMode == SCENE_PASS_DEFAULT &&
+		!ShaderClass::Is_Backface_Culling_Inverted() &&
+		Get_Extra_Pass_Polygon_Mode() == EXTRA_PASS_DISABLE)
 		TheW3DVolumetricShadowManager->renderShadowMap(rinfo.Camera);
 
 	Int localPlayerIndex = ThePlayerList ? ThePlayerList->getLocalPlayer()->getPlayerIndex() : 0;
