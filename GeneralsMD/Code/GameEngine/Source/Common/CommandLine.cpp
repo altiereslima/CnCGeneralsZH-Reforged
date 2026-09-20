@@ -923,26 +923,6 @@ Int parseParticleCap(char *args[], int num)
 	 left below are the three switches that exist for looking at the shadows rather than for playing
 	 with them.  SHADOW-MAP-PLAN.md. */
 
-/* -shadowtune <penumbra> <skyfill> <strength> <widest>: the four numbers that decide what a shadow
-	 from the map looks like, from the command line rather than from a rebuild.
-
-	 They are a judgement and not a measurement, so they are settled by looking at the same frame at
-	 several settings, and a rebuild between every picture makes that an afternoon rather than a
-	 pass.  A zero in any position leaves that one at the value the build carries. */
-Int parseShadowTune(char *args[], int num)
-{
-	if (TheWritableGlobalData == NULL || num < 5)
-		return 1;
-
-	TheWritableGlobalData->m_shadowMap = TRUE;
-	TheWritableGlobalData->m_shadowMapOnly = TRUE;
-	TheWritableGlobalData->m_shadowMapPenumbra = (Real)atof( args[ 1 ] );
-	TheWritableGlobalData->m_shadowMapSkyFill = (Real)atof( args[ 2 ] );
-	TheWritableGlobalData->m_shadowMapStrength = (Real)atof( args[ 3 ] );
-	TheWritableGlobalData->m_shadowMapWidest = (Real)atof( args[ 4 ] );
-	return 5;
-}
-
 /* -shadowmapboth: the map and the stencil volumes at once, which is not a picture anybody should
 	 play with.  It exists because the two can only be compared in one frame when both are in it. */
 Int parseShadowMapBoth(char *args[], int num)
@@ -961,21 +941,6 @@ Int parseShadowMapReport(char *args[], int num)
 	{
 		TheWritableGlobalData->m_shadowMap = TRUE;
 		TheWritableGlobalData->m_shadowMapReport = TRUE;
-	}
-	return 1;
-}
-
-/* -shadowmaponly: the map's shadows and nothing else, for looking at one of them at a time.
-
-	 The casters are still registered and still drawn into the map; what stops is the stencil
-	 volumes' own darkening pass over the frame.  Turning the volumes off in the options instead
-	 would take the caster list with them and leave the map empty. */
-Int parseShadowMapOnly(char *args[], int num)
-{
-	if (TheWritableGlobalData)
-	{
-		TheWritableGlobalData->m_shadowMap = TRUE;
-		TheWritableGlobalData->m_shadowMapOnly = TRUE;
 	}
 	return 1;
 }
@@ -2261,9 +2226,7 @@ static CommandLineParam params[] =
 	{ "-smoke", parseSmoke },
 	{ "-particlecap", parseParticleCap },
 	{ "-shadowmapreport", parseShadowMapReport },
-	{ "-shadowmaponly", parseShadowMapOnly },
 	{ "-shadowmapboth", parseShadowMapBoth },
-	{ "-shadowtune", parseShadowTune },
 	{ "-noparticleshadows", parseNoParticleShadows },
 	{ "-quickstart", parseQuickStart },
 
