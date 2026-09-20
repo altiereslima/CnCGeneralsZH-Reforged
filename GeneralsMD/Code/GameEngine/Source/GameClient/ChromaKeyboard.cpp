@@ -253,11 +253,23 @@ Int chromaMoneySegments( UnsignedInt money, Int segments )
 }
 
 //-----------------------------------------------------------------------------
+static Int chromaChannel( Real level )
+{
+	if( level <= 0.0f )
+		return 0;
+	if( level >= 1.0f )
+		return 255;
+	return (Int)(level * 255.0f + 0.5f);
+}
+
+//-----------------------------------------------------------------------------
 static Int chromaColor( Real red, Real green, Real blue )
 {
-	const Int r = (Int)(red * 255.0f + 0.5f);
-	const Int g = (Int)(green * 255.0f + 0.5f);
-	const Int b = (Int)(blue * 255.0f + 0.5f);
+	// Clamped, because an effect's flicker swings a channel past one on purpose
+	// and an unclamped byte would carry over into the colour next to it.
+	const Int r = chromaChannel( red );
+	const Int g = chromaChannel( green );
+	const Int b = chromaChannel( blue );
 	// Chroma wants BGR, not the RGB the rest of the engine speaks.
 	return (b << 16) | (g << 8) | r;
 }
@@ -328,50 +340,74 @@ enum ChromaEffect
 };
 
 static const Int NUKE_EFFECT_FRAMES = LOGICFRAMES_PER_SECOND * 4;
-static const Int LASER_EFFECT_FRAMES = LOGICFRAMES_PER_SECOND * 3;
-static const Int SCUD_EFFECT_FRAMES = LOGICFRAMES_PER_SECOND * 4;
-// Both the nuke and the scud storm are ripples: rings behind rings, running out
-// from where the thing landed.  What separates them is size and how many.  The
-// nuke is one ripple from the middle of the board with long wavelength, so the
-// rings are wide and reach the corners.  The scud storm is a lot of small ones,
-// each no bigger than a few keys, scattered and staggered.
-//
-// Distances are in half-boards: a device is two of these across and about 1.4
-// from its centre to its corner.
-/// Long and fast is what makes it feel heavy: one broad wave rather than a
-/// stack of rings, moving quickly, so the board swells instead of flickering.
-/// The far corner of a keyboard is a little over two units from the top left.
-static const Real NUKE_WAVE_SPEED = 1.0f;			///< how fast the front travels
-static const Real NUKE_WAVE_LENGTH = 1.2f;		///< how far behind the front the crest reaches
-static const Real NUKE_WAVE_FADE = 3.4f;			///< how far out it has dimmed to nothing
-/// Red when it goes off, then white for most of the way across, then orange as
-/// it dies.  Fractions of the effect's own length.  The red needs a stretch of
-/// its own: a ramp that starts turning white immediately is pink by the time the
-/// wave has grown past the one lamp it starts on.
-static const Real NUKE_RED_UNTIL = 0.15f;
-static const Real NUKE_WHITE_FROM = 0.32f;
-static const Real NUKE_ORANGE_FROM = 0.78f;
-static const Real NUKE_HOLD_UNTIL = 0.85f;			///< full brightness until here, then out fast
-static const Real NUKE_ORANGE_GREEN = 0.45f;		///< how much green is left in the orange
+static const Int LASER_EFFECT_FRAMES = LOGICFRAMES_PER_SECOND * 9 / 2;
+static const Int SCUD_EFFECT_FRAMES = LOGICFRAMES_PER_SECOND * 5;
 
-/// Twenty landings across the four seconds, one after another rather than at
-/// random moments, walking out from the top left corner.
-static const Int SCUD_RIPPLE_COUNT = 14;
-/// Short, so that at a quarter second apart only one or two are ever alive and
-/// the salvo reads as shell after shell rather than as one arrival.
-static const Real SCUD_RIPPLE_LIFE = 0.6f;
-/// Slow enough that a ripple takes its whole life to open.  At 1.8 it was fully
-/// open in four tenths of a second, which is a dozen frames: a pop, not a wave.
-static const Real SCUD_RIPPLE_SPEED = 1.2f;
-static const Real SCUD_RIPPLE_WAVELENGTH = 0.26f;
-static const Real SCUD_RIPPLE_REACH = 0.75f;
-/// How far off its slot a landing may drift, as a fraction of the gap between
-/// slots.  Without it the salvo arrives like a metronome.
-static const Real SCUD_LANDING_JITTER = 0.8f;
-/// How far a landing may sit off the line the salvo is walking along.
-static const Real SCUD_SCATTER = 0.55f;
-/// Left lamp to right lamp, in the units the effects are drawn in.
+// Every distance below is in half-widths of the device, measured from its top
+// left lamp: a device is two across, and a keyboard's far corner is a little
+// over two away.  The owner tuned all three of these by eye on the hardware,
+// through a preview that runs the same maths; the numbers are his.
+
+/// Left lamp to right lamp, in those units.
 static const Real ACROSS_EXTENT = 2.0f;
+
+// The nuke.  A thin white shock goes out first and fast.  Behind it comes the
+// body, a long wave in three bands from its front to its back: red, a longer
+// stretch of white, then orange.  The colours breathe.
+static const Real NUKE_SHOCK_SPEED = 3.5f;
+static const Real NUKE_SHOCK_LENGTH = 0.40f;
+static const Real NUKE_BODY_SPEED = 1.3f;
+static const Real NUKE_RED_LENGTH = 0.9f;
+static const Real NUKE_WHITE_LENGTH = 1.1f;
+static const Real NUKE_ORANGE_LENGTH = 0.8f;
+static const Real NUKE_BAND_BLEND = 0.25f;			///< how much of the body a band change is spread over
+static const Real NUKE_LEAD_EDGE = 0.15f;			///< how quickly the front of the body comes up
+static const Real NUKE_TAIL_EDGE = 0.5f;				///< and how slowly its back goes down
+static const Real NUKE_RED_GREEN = 0.05f;			///< the green in the red band
+static const Real NUKE_ORANGE_GREEN = 0.45f;		///< and in the orange one
+static const Real NUKE_NOISE = 0.5f;						///< total swing in brightness
+static const Real NUKE_HUE_NOISE = 0.35f;			///< total swing in hue
+static const Real NUKE_END_FADE_FROM = 0.88f;		///< of the effect's length; out cleanly after this
+
+// The particle cannon.  The beam comes down on the ground, so what the board
+// shows is the spot it lands on: a white point that charges in the top left
+// corner, wanders the keyboard, throws blue rings off itself as it goes, and
+// leaves a blue fire burning down along where it has been.
+static const Real LASER_CHARGE_SECONDS = 0.4f;
+static const Real LASER_ROAM_SECONDS = 3.0f;
+/// Half swings across and down over the roam.  Different, so the two never line
+/// up and the point covers the board without retracing itself.
+static const Real LASER_PASSES_ACROSS = 3.0f;
+static const Real LASER_PASSES_DOWN = 5.0f;
+static const Real LASER_CORE_RADIUS = 0.16f;
+static const Real LASER_GLOW_RADIUS = 0.50f;
+static const Real LASER_GLOW_LEVEL = 0.7f;
+static const Int LASER_TRAIL_SAMPLES = 12;
+static const Real LASER_TRAIL_SECONDS = 1.0f;
+static const Real LASER_TRAIL_RADIUS = 0.30f;
+static const Real LASER_SPRAY_EVERY = 0.12f;
+static const Real LASER_SPRAY_LIFE = 0.45f;
+static const Int LASER_SPRAY_ALIVE = 5;					///< more than life over interval, so none is dropped early
+static const Real LASER_SPRAY_SPEED = 1.5f;
+static const Real LASER_SPRAY_LENGTH = 0.22f;
+static const Real LASER_SPRAY_REACH = 0.70f;
+
+// The scud storm.  Nine missiles, which is what the building fires, landing one
+// after another in no particular place.  Each landing is a flash, a green ring
+// running out from it, and a pool of something left on the ground.
+static const Int SCUD_COUNT = 9;
+static const Real SCUD_FIRST_LANDING = 0.15f;
+static const Real SCUD_LIFE = 1.0f;
+static const Real SCUD_LANDING_JITTER = 0.10f;
+/// Landings keep this far off the left and right edges, as a fraction of the width.
+static const Real SCUD_EDGE_MARGIN = 0.08f;
+static const Real SCUD_FLASH_SECONDS = 0.18f;
+static const Real SCUD_FLASH_RADIUS = 0.35f;
+static const Real SCUD_RING_SPEED = 1.1f;
+static const Real SCUD_RING_LENGTH = 0.30f;
+static const Real SCUD_REACH = 1.0f;
+static const Real SCUD_POOL_RADIUS = 0.45f;
+static const Real SCUD_POOL_LEVEL = 0.35f;
 
 static ChromaEffect s_effect = EFFECT_NONE;
 static UnsignedInt s_effectStartFrame = 0;
@@ -410,20 +446,24 @@ static Int chromaEffectFrames( ChromaEffect effect )
 }
 
 //-----------------------------------------------------------------------------
-/** How bright one ripple is at this distance from where it landed.  Nothing is
-	* lit ahead of the outermost ring, the crests behind it are a cosine in the
-	* distance the ring has already covered, and the whole thing dies off towards
-	* the ripple's reach. */
-static Real chromaRippleIntensity( Real distance, Real radius, Real wavelength, Real reach )
+/** Several lights falling on one lamp.  The brightest wins channel by channel,
+	* which is what lets a white point sit on a blue fire without going grey. */
+struct ChromaLight
 {
-	if( radius <= 0.0f || distance > radius || distance >= reach )
-		return 0.0f;
+	Real red;
+	Real green;
+	Real blue;
+};
 
-	// The plain cosine, not a sharpened one.  Squaring it narrows the crests until
-	// the rings read as a row of dots rather than as water.
-	const Real phase = (radius - distance) / wavelength;
-	const Real crest = 0.5f + 0.5f * cosf( phase * TWO_PI );
-	return crest * (1.0f - distance / reach);
+//-----------------------------------------------------------------------------
+static void chromaLighten( ChromaLight *light, Real red, Real green, Real blue )
+{
+	if( red > light->red )
+		light->red = red;
+	if( green > light->green )
+		light->green = green;
+	if( blue > light->blue )
+		light->blue = blue;
 }
 
 //-----------------------------------------------------------------------------
@@ -455,101 +495,274 @@ static Bool chromaEffectIsLive( UnsignedInt frame )
 }
 
 //-----------------------------------------------------------------------------
-/** The colour a cell takes while an effect is running.  The position comes in
-	* normalised so one set of maths covers a keyboard, a mouse and a fifteen lamp
-	* strip without knowing what shape any of them is. */
+/** A lamp and a moment, as every effect needs them.  The position is in
+	* half-widths from the top left lamp, so one set of maths covers a keyboard, a
+	* mouse and a fifteen lamp strip without knowing what shape any of them is. */
+struct ChromaEffectSample
+{
+	Real across;
+	Real down;
+	Real downExtent;		///< top lamp to bottom lamp, in the same units
+	Int cellIndex;
+	UnsignedInt frame;	///< frames since the launch
+	Real elapsed;				///< the same, in seconds
+	Real life;					///< the same, as a fraction of the effect's length
+};
+
+//-----------------------------------------------------------------------------
+static Real chromaDistance( Real dx, Real dy )
+{
+	return (Real)sqrt( dx * dx + dy * dy );
+}
+
+//-----------------------------------------------------------------------------
+/** Flicker for one lamp, stepped every so many frames rather than every frame,
+	* so it shimmers instead of buzzing.  The salt keeps two flickers on one lamp
+	* from moving together. */
+static Real chromaFlicker( const ChromaEffectSample &sample, UnsignedInt framesPerStep, UnsignedInt salt )
+{
+	return chromaHashUnit( (UnsignedInt)sample.cellIndex * 2654435761u
+												 + (sample.frame / framesPerStep) * 7919u + salt );
+}
+
+//-----------------------------------------------------------------------------
+/** The blue fire the cannon leaves behind it: dark blue through the body, cyan
+	* where it is hottest, and no red anywhere. */
+static void chromaLightenWithBlueFire( ChromaLight *light, Real body )
+{
+	chromaLighten( light, body * body * body * 0.25f, body * body * 0.75f, body );
+}
+
+//-----------------------------------------------------------------------------
+static void chromaNukeLight( const ChromaEffectSample &sample, ChromaLight *light )
+{
+	const Real distance = chromaDistance( sample.across, sample.down );
+
+	// The body.  How far behind its front this lamp sits decides which band it is
+	// in: red at the front, then white, then orange at the back.
+	const Real bodyLength = NUKE_RED_LENGTH + NUKE_WHITE_LENGTH + NUKE_ORANGE_LENGTH;
+	const Real behind = sample.elapsed * NUKE_BODY_SPEED - distance;
+	if( behind > 0.0f && behind < bodyLength )
+	{
+		const Real redEnd = NUKE_RED_LENGTH;
+		const Real whiteEnd = NUKE_RED_LENGTH + NUKE_WHITE_LENGTH;
+		const Real halfBlend = NUKE_BAND_BLEND * 0.5f;
+
+		Real bandGreen;
+		Real bandBlue;
+		if( behind < redEnd - halfBlend )
+		{
+			bandGreen = NUKE_RED_GREEN;
+			bandBlue = 0.0f;
+		}
+		else if( behind < redEnd + halfBlend )
+		{
+			const Real toWhite = (behind - (redEnd - halfBlend)) / NUKE_BAND_BLEND;
+			bandGreen = NUKE_RED_GREEN + toWhite * (1.0f - NUKE_RED_GREEN);
+			bandBlue = toWhite;
+		}
+		else if( behind < whiteEnd - halfBlend )
+		{
+			bandGreen = 1.0f;
+			bandBlue = 1.0f;
+		}
+		else if( behind < whiteEnd + halfBlend )
+		{
+			const Real toOrange = (behind - (whiteEnd - halfBlend)) / NUKE_BAND_BLEND;
+			bandGreen = 1.0f - toOrange * (1.0f - NUKE_ORANGE_GREEN);
+			bandBlue = 1.0f - toOrange;
+		}
+		else
+		{
+			bandGreen = NUKE_ORANGE_GREEN;
+			bandBlue = 0.0f;
+		}
+
+		Real lead = behind / NUKE_LEAD_EDGE;
+		if( lead > 1.0f )
+			lead = 1.0f;
+		Real tail = (bodyLength - behind) / NUKE_TAIL_EDGE;
+		if( tail > 1.0f )
+			tail = 1.0f;
+
+		// Brightness breathes on one flicker and the hue on another.  The hue one
+		// pushes green and blue opposite ways, so white wanders warm and cool
+		// instead of just getting dimmer.
+		const Real noise = 1.0f - NUKE_NOISE * 0.5f + NUKE_NOISE * chromaFlicker( sample, 2, 0 );
+		const Real hue = 1.0f - NUKE_HUE_NOISE * 0.5f + NUKE_HUE_NOISE * chromaFlicker( sample, 3, 40503u );
+		const Real level = lead * tail * noise;
+		chromaLighten( light, level, bandGreen * level * hue, bandBlue * level * (2.0f - hue) );
+	}
+
+	// The shock: thin, white, fast, out in front of all of it.  The fade distance
+	// is past any corner, so it crosses at full strength.
+	static const Real SHOCK_NEVER_FADES = 99.0f;
+	const Real shock = chromaSingleWave( distance, sample.elapsed * NUKE_SHOCK_SPEED,
+																			 NUKE_SHOCK_LENGTH, SHOCK_NEVER_FADES );
+	chromaLighten( light, shock, shock, shock );
+
+	if( sample.life > NUKE_END_FADE_FROM )
+	{
+		const Real ending = 1.0f - (sample.life - NUKE_END_FADE_FROM) / (1.0f - NUKE_END_FADE_FROM);
+		light->red *= ending;
+		light->green *= ending;
+		light->blue *= ending;
+	}
+}
+
+//-----------------------------------------------------------------------------
+/** Where the cannon's spot is this long into its roam.  It starts in the top left
+	* corner and swings across and down at different rates. */
+static void chromaLaserPoint( Real roamTime, Real downExtent, Real *across, Real *down )
+{
+	Real along = roamTime / LASER_ROAM_SECONDS;
+	if( along < 0.0f )
+		along = 0.0f;
+	if( along > 1.0f )
+		along = 1.0f;
+
+	const Real halfTurn = TWO_PI * 0.5f;
+	*across = ACROSS_EXTENT * (0.5f - 0.5f * cosf( along * halfTurn * LASER_PASSES_ACROSS ));
+	*down = downExtent * (0.5f - 0.5f * cosf( along * halfTurn * LASER_PASSES_DOWN ));
+}
+
+//-----------------------------------------------------------------------------
+static void chromaLaserLight( const ChromaEffectSample &sample, ChromaLight *light )
+{
+	const Real roamTime = sample.elapsed - LASER_CHARGE_SECONDS;
+	Real pointAcross;
+	Real pointDown;
+
+	if( roamTime > 0.0f )
+	{
+		// Where the point has been is on fire.  The path has no inverse, so it is
+		// walked backwards a twelfth of a second at a time and the hottest sample
+		// near this lamp wins.
+		Real hottest = 0.0f;
+		for( Int step = 1; step <= LASER_TRAIL_SAMPLES; ++step )
+		{
+			const Real back = (Real)step * (LASER_TRAIL_SECONDS / (Real)LASER_TRAIL_SAMPLES);
+			const Real at = roamTime - back;
+			if( at < 0.0f )
+				break;
+			if( at > LASER_ROAM_SECONDS )
+				continue;
+
+			chromaLaserPoint( at, sample.downExtent, &pointAcross, &pointDown );
+			const Real heat = (1.0f - chromaDistance( sample.across - pointAcross, sample.down - pointDown )
+																/ LASER_TRAIL_RADIUS)
+											* (1.0f - back / LASER_TRAIL_SECONDS);
+			if( heat > hottest )
+				hottest = heat;
+		}
+		if( hottest > 0.0f )
+			chromaLightenWithBlueFire( light, hottest * (0.45f + 0.55f * chromaFlicker( sample, 2, 0 )) );
+
+		// The blue it throws off: a small ring born at the point every so often,
+		// left where it was born while the point moves on.
+		const Real emitting = roamTime < LASER_ROAM_SECONDS ? roamTime : LASER_ROAM_SECONDS;
+		const Int newest = (Int)(emitting / LASER_SPRAY_EVERY);
+		for( Int back = 0; back < LASER_SPRAY_ALIVE && back <= newest; ++back )
+		{
+			const Int ring = newest - back;
+			const Real born = (Real)ring * LASER_SPRAY_EVERY;
+			const Real age = roamTime - born;
+			if( age < 0.0f || age >= LASER_SPRAY_LIFE )
+				continue;
+
+			chromaLaserPoint( born, sample.downExtent, &pointAcross, &pointDown );
+			// One spark per lamp per ring, held for the ring's life, so a ring is
+			// rough round its edge without its roughness crawling.
+			const Real spark = chromaHashUnit( (UnsignedInt)sample.cellIndex * 40503u
+																				 + (UnsignedInt)ring * 7919u );
+			const Real spray = chromaSingleWave( chromaDistance( sample.across - pointAcross,
+																													 sample.down - pointDown ),
+																					 age * LASER_SPRAY_SPEED, LASER_SPRAY_LENGTH,
+																					 LASER_SPRAY_REACH )
+											 * (1.0f - age / LASER_SPRAY_LIFE) * (0.6f + 0.4f * spark);
+			chromaLighten( light, spray * 0.15f, spray * 0.6f, spray );
+		}
+	}
+
+	if( roamTime < LASER_ROAM_SECONDS )
+	{
+		// The point itself: coming up to strength in the corner, then off round
+		// the board with a blue glow about it.
+		const Real strength = roamTime <= 0.0f ? sample.elapsed / LASER_CHARGE_SECONDS : 1.0f;
+		chromaLaserPoint( roamTime, sample.downExtent, &pointAcross, &pointDown );
+		const Real off = chromaDistance( sample.across - pointAcross, sample.down - pointDown );
+
+		const Real glow = (1.0f - off / LASER_GLOW_RADIUS) * LASER_GLOW_LEVEL * strength;
+		chromaLighten( light, glow * 0.1f, glow * 0.4f, glow );
+
+		const Real core = (1.0f - off / LASER_CORE_RADIUS) * strength
+										* (0.8f + 0.2f * chromaFlicker( sample, 1, 40503u ));
+		chromaLighten( light, core, core, core );
+	}
+}
+
+//-----------------------------------------------------------------------------
+static void chromaScudLight( const ChromaEffectSample &sample, ChromaLight *light )
+{
+	const Real effectSeconds = (Real)SCUD_EFFECT_FRAMES / (Real)LOGICFRAMES_PER_SECOND;
+	const Real spacing = (effectSeconds - SCUD_LIFE - SCUD_FIRST_LANDING) / (Real)(SCUD_COUNT - 1);
+
+	for( Int scud = 0; scud < SCUD_COUNT; ++scud )
+	{
+		// One after another, each nudged off its slot so the salvo is a bombardment
+		// and not a metronome.
+		const UnsignedInt scudSeed = s_effectSeed + (UnsignedInt)scud * 0x9e3779b9u;
+		const Real landing = SCUD_FIRST_LANDING + (Real)scud * spacing
+											 + (chromaHashUnit( scudSeed + 2 ) - 0.5f) * 2.0f * SCUD_LANDING_JITTER;
+		const Real age = sample.elapsed - landing;
+		if( age < 0.0f || age >= SCUD_LIFE )
+			continue;
+
+		const Real targetAcross = (SCUD_EDGE_MARGIN + (1.0f - 2.0f * SCUD_EDGE_MARGIN) * chromaHashUnit( scudSeed ))
+														* ACROSS_EXTENT;
+		const Real targetDown = chromaHashUnit( scudSeed + 1 ) * sample.downExtent;
+		const Real distance = chromaDistance( sample.across - targetAcross, sample.down - targetDown );
+		const Real dying = 1.0f - age / SCUD_LIFE;
+
+		if( age < SCUD_FLASH_SECONDS )
+		{
+			const Real flash = (1.0f - age / SCUD_FLASH_SECONDS) * (1.0f - distance / SCUD_FLASH_RADIUS);
+			chromaLighten( light, flash * 0.8f, flash, flash * 0.8f );
+		}
+
+		const Real ring = chromaSingleWave( distance, age * SCUD_RING_SPEED, SCUD_RING_LENGTH, SCUD_REACH )
+										* dying;
+		chromaLighten( light, ring * 0.1f, ring, ring * 0.15f );
+
+		// What is left on the ground, stirring a little as it thins out.
+		const Real pool = (1.0f - distance / SCUD_POOL_RADIUS) * SCUD_POOL_LEVEL * dying
+										* (0.7f + 0.6f * chromaFlicker( sample, 3, 0 ));
+		chromaLighten( light, pool * 0.05f, pool * 0.8f, pool * 0.1f );
+	}
+}
+
+//-----------------------------------------------------------------------------
 static Int chromaEffectColor( Real across, Real down, Real downExtent, Int cellIndex,
 															UnsignedInt frame )
 {
-	const Int duration = chromaEffectFrames( s_effect );
-	const Real elapsed = (Real)(frame - s_effectStartFrame) / (Real)LOGICFRAMES_PER_SECOND;
-	const Real life = (Real)(frame - s_effectStartFrame) / (Real)duration;
-	const Real fade = 1.0f - life;
+	ChromaEffectSample sample;
+	sample.across = across;
+	sample.down = down;
+	sample.downExtent = downExtent;
+	sample.cellIndex = cellIndex;
+	sample.frame = frame - s_effectStartFrame;
+	sample.elapsed = (Real)sample.frame / (Real)LOGICFRAMES_PER_SECOND;
+	sample.life = (Real)sample.frame / (Real)chromaEffectFrames( s_effect );
 
-	if( s_effect == EFFECT_NUKE )
+	ChromaLight light = { 0.0f, 0.0f, 0.0f };
+	switch( s_effect )
 	{
-		// One wave, out of the top left corner, wide enough to reach the far one.
-		const Real distance = (Real)sqrt( across * across + down * down );
-		const Real heat = chromaSingleWave( distance, elapsed * NUKE_WAVE_SPEED,
-																				NUKE_WAVE_LENGTH, NUKE_WAVE_FADE );
-
-		// The colour is on the clock rather than on the brightness: red when it
-		// goes off, white while the wave is crossing, orange as it dies.
-		Real green = 0.0f;
-		Real blue = 0.0f;
-		if( life >= NUKE_ORANGE_FROM )
-		{
-			Real toOrange = (life - NUKE_ORANGE_FROM) / (NUKE_HOLD_UNTIL - NUKE_ORANGE_FROM);
-			if( toOrange > 1.0f )
-				toOrange = 1.0f;
-			green = 1.0f - toOrange * (1.0f - NUKE_ORANGE_GREEN);
-			blue = 1.0f - toOrange;
-		}
-		else if( life >= NUKE_WHITE_FROM )
-		{
-			green = 1.0f;
-			blue = 1.0f;
-		}
-		else if( life >= NUKE_RED_UNTIL )
-		{
-			green = (life - NUKE_RED_UNTIL) / (NUKE_WHITE_FROM - NUKE_RED_UNTIL);
-			blue = green;
-		}
-
-		// It holds its brightness and then goes out fast, rather than dimming the
-		// whole way through and never landing on the orange.
-		Real brightness = heat;
-		if( life > NUKE_HOLD_UNTIL )
-			brightness *= 1.0f - (life - NUKE_HOLD_UNTIL) / (1.0f - NUKE_HOLD_UNTIL);
-
-		return chromaColor( brightness, green * brightness, blue * brightness );
+		case EFFECT_NUKE:		chromaNukeLight( sample, &light ); break;
+		case EFFECT_LASER:	chromaLaserLight( sample, &light ); break;
+		case EFFECT_SCUD:		chromaScudLight( sample, &light ); break;
+		default:						break;
 	}
-
-	if( s_effect == EFFECT_LASER )
-	{
-		// A flame, not a wave: every lamp burns, and the pattern crawls.
-		const UnsignedInt crawl = frame / 2;
-		const Real flicker = chromaHashUnit( (UnsignedInt)cellIndex * 2654435761u + crawl );
-		const Real body = (0.40f + 0.60f * flicker) * fade;
-		// Dark blue through the body, cyan where it burns hardest, no red anywhere.
-		return chromaColor( body * body * body * 0.25f, body * body * 0.75f, body );
-	}
-
-	// A lot of small ripples instead of one big one: rain on water rather than a
-	// single stone, in no particular place and at no particular moment.
-	const Real lastLanding = (Real)duration / (Real)LOGICFRAMES_PER_SECOND - SCUD_RIPPLE_LIFE;
-	Real best = 0.0f;
-	for( Int ripple = 0; ripple < SCUD_RIPPLE_COUNT; ++ripple )
-	{
-		const UnsignedInt rippleSeed = s_effectSeed + (UnsignedInt)ripple * 0x9e3779b9u;
-		// One after another down the salvo, each nudged off its slot so the rhythm
-		// is a bombardment rather than a metronome.
-		const Real spacing = lastLanding / (Real)SCUD_RIPPLE_COUNT;
-		const Real jitter = (chromaHashUnit( rippleSeed + 2 ) - 0.5f) * spacing * SCUD_LANDING_JITTER;
-		const Real age = elapsed - ((Real)ripple * spacing + jitter);
-		if( age < 0.0f || age >= SCUD_RIPPLE_LIFE )
-			continue;
-
-		// The salvo walks out of the top left corner: the first shells land there
-		// and each one after them falls further along the diagonal, scattered
-		// either side of it so the line is a bombardment and not a stripe.
-		const Real walked = (Real)ripple / (Real)(SCUD_RIPPLE_COUNT - 1);
-		const Real originAcross = walked * ACROSS_EXTENT
-														+ (chromaHashUnit( rippleSeed ) - 0.5f) * SCUD_SCATTER;
-		const Real originDown = walked * downExtent
-													+ (chromaHashUnit( rippleSeed + 1 ) - 0.5f) * SCUD_SCATTER;
-		const Real dx = across - originAcross;
-		const Real dy = down - originDown;
-		const Real distance = (Real)sqrt( dx * dx + dy * dy );
-
-		const Real intensity = chromaRippleIntensity( distance, age * SCUD_RIPPLE_SPEED,
-																									SCUD_RIPPLE_WAVELENGTH, SCUD_RIPPLE_REACH )
-												 * (1.0f - age / SCUD_RIPPLE_LIFE);
-		if( intensity > best )
-			best = intensity;
-	}
-	const Real gas = best * fade;
-	return chromaColor( gas * gas * gas * 0.4f, gas, gas * gas * gas * 0.4f );
+	return chromaColor( light.red, light.green, light.blue );
 }
 
 //-----------------------------------------------------------------------------
