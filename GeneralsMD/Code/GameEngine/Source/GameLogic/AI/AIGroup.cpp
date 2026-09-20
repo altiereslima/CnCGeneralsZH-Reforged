@@ -1602,6 +1602,82 @@ static Bool laneSeedIsLeftOf( const LaneSeed& a, const LaneSeed& b )
 		`bias` comes back as the offset of the middle of the drivable span from the centre line, which
 		is what keeps a route running along a wall from spreading into the wall: the room is measured
 		separately on the two sides and the lanes are laid out in the room that exists. */
+/** Ground members take their goals from one flood out of the clicked cell.  Airborne ones used to
+		take the click itself, every one of them, and nothing pushes two hovering helicopters apart:
+		six Comanches sent to one point ended up rotor inside rotor.  They are laid out on rings round
+		the click instead, one in the middle and six to a ring after that, spaced by the widest body
+		among them so the discs clear each other.  The member nearest the click takes the middle and
+		the rest fill outwards, so the one already there does not cross the group to reach a ring. */
+static void spreadAirborneGoals( const Coord3D& clicked, const std::vector<Object *>& members,
+																 std::vector<Coord3D>& goals )
+{
+	// A helicopter's rotor disc is wider than the body its geometry describes, so the clearance is
+	// measured in bodies and taken from the picture: at 2.4 the fuselages cleared and the discs still
+	// cut through each other, at 4 six Comanches sit apart.
+	const Real AIRBORNE_BODY_CLEARANCE = 4.0f;
+	const Int AIRBORNE_SLOTS_PER_RING = 6;
+
+	const Int count = (Int)members.size();
+	goals.assign( count, clicked );
+	if (count < 2)
+		return;
+
+	Real spacing = 0.0f;
+	for (Int i = 0; i < count; i++)
+	{
+		const Real body = members[ i ]->getGeometryInfo().getBoundingCircleRadius();
+		if (body > spacing)
+			spacing = body;
+	}
+	spacing *= AIRBORNE_BODY_CLEARANCE;
+	if (spacing < 1.0f)
+		return;
+
+	// nearest the click first, so the slot in the middle goes to whoever has least distance to give up
+	std::vector<LaneSeed> order;
+	for (Int i = 0; i < count; i++)
+	{
+		LaneSeed seed;
+		seed.obj = members[ i ];
+		const Coord3D *at = members[ i ]->getPosition();
+		// squared: this is only ever sorted on, and the order is the same either way
+		seed.lat = sqr( at->x - clicked.x ) + sqr( at->y - clicked.y );
+		order.push_back( seed );
+	}
+	std::sort( order.begin(), order.end(), laneSeedIsLeftOf );
+
+	for (Int placed = 0; placed < count; placed++)
+	{
+		Int ring = 0;
+		Int taken = 1;												// the middle slot
+		Int firstOfRing = 0;
+		while (placed >= taken)
+		{
+			++ring;
+			firstOfRing = taken;
+			taken += AIRBORNE_SLOTS_PER_RING * ring;
+		}
+
+		Coord3D goal = clicked;
+		if (ring > 0)
+		{
+			const Int slots = AIRBORNE_SLOTS_PER_RING * ring;
+			const Real angle = 2.0f * PI * (Real)(placed - firstOfRing) / (Real)slots;
+			goal.x += Cos( angle ) * spacing * (Real)ring;
+			goal.y += Sin( angle ) * spacing * (Real)ring;
+		}
+
+		for (Int i = 0; i < count; i++)
+		{
+			if (members[ i ] == order[ placed ].obj)
+			{
+				goals[ i ] = goal;
+				break;
+			}
+		}
+	}
+}
+
 static Int crowdRoadLanes( Object *probe, const Coord3D& center, const Coord2D& dir, Real spacing,
 													 Real *bias )
 {
@@ -2034,16 +2110,22 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 		 with a cursor. */
 	std::vector<Object *> floodMembers;
 	std::vector<Coord3D> floodGoals;
+	std::vector<Object *> airMembers;
+	std::vector<Coord3D> airGoals;
 	if (gatherOnPoint)
 	{
 		for (Object *o = iter->first(); o; o = iter->next())
 		{
 			if (o->getAIUpdateInterface()->isDoingGroundMovement())
 				floodMembers.push_back( o );
+			else
+				airMembers.push_back( o );
 		}
 		TheAI->pathfinder()->floodGroupGoals( &goalPos, floodMembers, floodGoals );
+		spreadAirborneGoals( goalPos, airMembers, airGoals );
 	}
 	Int floodCursor = 0;
+	Int airCursor = 0;
 
 	// Works better if you let the near units get the first paths... jba.
 	// Move the ones nearest the goal first.  Reduces collision problems later.
@@ -2067,9 +2149,11 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 		}
 		if (gatherOnPoint)
 		{
-			dest = goalPos;		// airborne members keep the clicked spot and adjust it in their move state
+			dest = goalPos;
 			if (floodCursor < (Int)floodMembers.size() && floodMembers[floodCursor] == theUnit)
 				dest = floodGoals[floodCursor++];
+			else if (airCursor < (Int)airMembers.size() && airMembers[airCursor] == theUnit)
+				dest = airGoals[airCursor++];
 		}
 		else
 			computeIndividualDestination( &dest, &goalPos, theUnit, &center, isFormation );
