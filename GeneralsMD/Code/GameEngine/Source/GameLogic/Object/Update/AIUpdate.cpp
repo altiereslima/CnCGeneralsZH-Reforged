@@ -351,6 +351,8 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_moveOutOfWay2 = INVALID_ID;
 	m_exitProductionRallyPoint.zero();
 	m_hasExitProductionRallyPoint = FALSE;
+	m_salvageReturnPosition.zero();
+	m_hasSalvageReturnPosition = FALSE;
 	m_locomotorSet.clear();
 	m_curLocomotor = NULL;
 	m_curLocomotorSet = LOCOMOTORSET_INVALID;
@@ -1185,6 +1187,18 @@ UpdateSleepTime AIUpdateInterface::update( void )
 			privateAttackMoveToPosition( &rallyPoint, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
 		else
 			privateMoveToPosition( &rallyPoint, CMD_FROM_AI );
+		stRet = STATE_CONTINUE;
+	}
+
+	// A unit that was sent to pick up a salvage crate walks back to the spot it was standing on, so
+	// the line it was part of closes up again instead of drifting to wherever the wrecks fell.  The
+	// crate is reached, and the trip ends, by dropping into idle, which is the same signal the rally
+	// point above waits for.
+	if (m_hasSalvageReturnPosition && getAIStateType() == AI_IDLE)
+	{
+		Coord3D returnPosition = m_salvageReturnPosition;
+		m_hasSalvageReturnPosition = FALSE;
+		privateMoveToPosition( &returnPosition, CMD_FROM_AI );
 		stRet = STATE_CONTINUE;
 	}
 
@@ -4308,6 +4322,11 @@ void AIUpdateInterface::aiDoCommand(const AICommandParms* parms)
 	if (parms->m_cmd != AICMD_FOLLOW_EXITPRODUCTION_PATH)
 		m_hasExitProductionRallyPoint = FALSE;
 
+	// Likewise the walk back from a salvage crate: the player moving the unit somewhere means the
+	// spot it left is no longer where it belongs.  The order that sends it to the crate is given
+	// first and the return position recorded after, so this does not eat its own trip.
+	m_hasSalvageReturnPosition = FALSE;
+
 #ifdef ALLOW_SURRENDER
 	// surrendered items have very limited options, and only via AI cmds
 	if (isSurrendered())
@@ -5081,6 +5100,16 @@ void AIUpdateInterface::friend_setExitProductionRallyPoint( const Coord3D *pos )
 {
 	m_exitProductionRallyPoint = *pos;
 	m_hasExitProductionRallyPoint = TRUE;
+}
+
+//----------------------------------------------------------------------------------------
+/**
+ * Remember the spot to come back to once the salvage crate we were just sent to is collected.
+ */
+void AIUpdateInterface::friend_setSalvageReturnPosition( const Coord3D *pos )
+{
+	m_salvageReturnPosition = *pos;
+	m_hasSalvageReturnPosition = TRUE;
 }
 
 //----------------------------------------------------------------------------------------
@@ -6922,12 +6951,13 @@ void AIUpdateInterface::crc( Xfer *x )
 	* 6: the out-of-bounds xfer of m_guardTargetType is fixed
 	* 11: m_isMoving, which the duplicated m_isSafePath used to stand in place of
 	* 12: m_allowedToChase
-	* 13: m_pathfindFoundNothing */
+	* 13: m_pathfindFoundNothing
+	* 14: the salvage return position and its flag */
 // ------------------------------------------------------------------------------------------------
 void AIUpdateInterface::xfer( Xfer *xfer )
 {
   // version
-  const XferVersion currentVersion = 13;
+  const XferVersion currentVersion = 14;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
  
@@ -7220,6 +7250,13 @@ void AIUpdateInterface::xfer( Xfer *xfer )
 	{
 		// lives from one path search to the move state's next look at it, which a save can fall between
 		xfer->xferBool(&m_pathfindFoundNothing);
+	}
+
+	if (version >= 14)
+	{
+		// a save made while the unit is on its way to a salvage crate owes it the walk back
+		xfer->xferCoord3D(&m_salvageReturnPosition);
+		xfer->xferBool(&m_hasSalvageReturnPosition);
 	}
 
 }  // end xfer

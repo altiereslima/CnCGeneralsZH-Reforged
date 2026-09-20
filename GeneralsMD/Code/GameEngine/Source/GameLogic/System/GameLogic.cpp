@@ -4104,6 +4104,30 @@ static Bool wantsSalvageUpgrade( const Object *obj )
 	return FALSE;
 }
 
+/** A unit that blows itself up with its own weapon spends its whole life on one target, and a crate
+	 is not that target. */
+static Bool diesUsingItsOwnWeapon( const Object *obj )
+{
+	for( Int slot = PRIMARY_WEAPON; slot < WEAPONSLOT_COUNT; ++slot )
+	{
+		const Weapon *weapon = obj->getWeaponInWeaponSlot( (WeaponSlotType)slot );
+		if( weapon != NULL && ( weapon->getTemplate()->getAffectsMask() & WEAPON_KILLS_SELF ) != 0 )
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+/** Is anything hostile close enough to this unit to be its problem right now? */
+static Bool hasEnemyInSight( Object *obj )
+{
+	PartitionFilterAlive alive;
+	PartitionFilterRelationship enemies( obj, PartitionFilterRelationship::ALLOW_ENEMIES );
+	PartitionFilter *filters[] = { &alive, &enemies, NULL };
+
+	return ThePartitionManager->getClosestObject( obj, obj->getVisionRange(), FROM_CENTER_2D, filters ) != NULL;
+}
+
 /* Somebody goes and gets the salvage.  A crate dropped by a wreck is money and a free upgrade lying
 	 on the ground, and the game asked you to notice it, work out which of your units was allowed to
 	 take it, and drive that one over it by hand, in the middle of the fight that made it.  Nobody
@@ -4112,18 +4136,26 @@ static Bool wantsSalvageUpgrade( const Object *obj )
 	 Whoever is standing nearest and has nothing else to do goes and takes it, once a second.  A unit
 	 that can still be upgraded off it wins over one that cannot, however far back it is standing,
 	 because the upgrade is worth more than the walk; failing that the nearest idle unit takes the
-	 cash.  Only idle units, so this never pulls a unit out of a fight or off an order, and the trip
-	 itself makes the unit busy, which is what stops it being ordered again on the next pass.
+	 cash.  Only idle units, and the trip itself makes the unit busy, which is what stops it being
+	 ordered again on the next pass.
+
+	 Idle is not the same as free, though, which is what the first version of this got wrong.  A line
+	 of infantry dug in across a road is idle, every one of them, and a fight in front of it makes
+	 wrecks: the line walked off to collect them and never came back, and the position was lost to
+	 the crates it had just earned.  So the collector goes and then walks back to the spot it left,
+	 nobody with an enemy in sight leaves at all, and the call radius is short enough that the walk
+	 costs seconds rather than half a minute.
 
 	 A dozer and a harvester are left alone: both have a job of their own that earns more than the
-	 crate does.  An aircraft is left alone too, because a crate cannot be claimed from the air. */
+	 crate does.  An aircraft is left alone too, because a crate cannot be claimed from the air, and
+	 so is anything that dies when it fires - a terrorist is worth more than every crate on the map. */
 static void salvageCrateTick( void )
 {
 	const UnsignedInt now = TheGameLogic->getFrame();
 	if( now % LOGICFRAMES_PER_SECOND != 0 )
 		return;
 
-	const Real SALVAGE_CALL_RADIUS = 250.0f;
+	const Real SALVAGE_CALL_RADIUS = 150.0f;
 
 	for( Object *crate = TheGameLogic->getFirstObject(); crate != NULL; crate = crate->getNextObject() )
 	{
@@ -4148,9 +4180,10 @@ static void salvageCrateTick( void )
 				continue;
 			if( them->isContained() || them->isEffectivelyDead() || them->isNeutralControlled() )
 				continue;
-
 			AIUpdateInterface *ai = them->getAI();
 			if( ai == NULL || !ai->isIdle() )
+				continue;
+			if( diesUsingItsOwnWeapon( them ) )
 				continue;
 
 			const Player *owner = them->getControllingPlayer();
@@ -4169,8 +4202,12 @@ static void salvageCrateTick( void )
 				break;
 		}
 
-		if( collector )
-			collector->getAI()->aiMoveToPosition( crate->getPosition(), CMD_FROM_AI );
+		if( collector == NULL || hasEnemyInSight( collector ) )
+			continue;
+
+		const Coord3D post = *collector->getPosition();
+		collector->getAI()->aiMoveToPosition( crate->getPosition(), CMD_FROM_AI );
+		collector->getAI()->friend_setSalvageReturnPosition( &post );
 	}
 }
 

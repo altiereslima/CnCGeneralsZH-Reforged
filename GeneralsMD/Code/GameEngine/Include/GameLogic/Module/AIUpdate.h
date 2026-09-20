@@ -720,6 +720,9 @@ public:
 
 	// this is intended for use ONLY by the production exit modules.
 	void friend_setExitProductionRallyPoint( const Coord3D *pos );
+
+	// this is intended for use ONLY by the salvage collection pass in GameLogic.
+	void friend_setSalvageReturnPosition( const Coord3D *pos );
 #if defined(_DEBUG) || defined(_INTERNAL)	
 	inline const Coord3D *friend_getRequestedDestination() const { return &m_requestedDestination; }
 	inline const Coord3D *friend_getRequestedDestination2() const { return &m_requestedDestination2; }
@@ -897,6 +900,8 @@ private:
 	ObjectID		m_moveOutOfWay2;
 	Coord3D			m_exitProductionRallyPoint;	///< Rally point to attack-move to once we are clear of the producer that just built us.
 	Bool				m_hasExitProductionRallyPoint;	///< True while m_exitProductionRallyPoint is still waiting to be ordered.
+	Coord3D			m_salvageReturnPosition;		///< Where we stood when we were sent to fetch a salvage crate.
+	Bool				m_hasSalvageReturnPosition;	///< True while the walk back to m_salvageReturnPosition is still owed.
 
 	// Locomotors -------------------------------------------------------------------------------------------------
 	enum LocoGoalType	 // Note - written out in save/load xfer, don't change these numbers.  jba.
