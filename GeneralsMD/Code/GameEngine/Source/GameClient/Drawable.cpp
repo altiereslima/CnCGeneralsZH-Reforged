@@ -72,6 +72,7 @@
 #include "GameLogic/ScriptEngine.h"
 #include "GameLogic/Weapon.h"
 
+#include "GameClient/CinemaDirector.h"
 #include "GameClient/Anim2D.h"
 #include "GameClient/Display.h"
 #include "GameClient/DisplayStringManager.h"
@@ -2952,6 +2953,13 @@ Bool Drawable::drawsAnyUIText( void )
 // ------------------------------------------------------------------------------------------------
 void Drawable::drawIconUI( void )
 {
+	/* -cinema takes the interface off, and these are interface: the health bar, the rank chevrons a
+		 promotion puts up, the healing cross, the ammo pips, the capture clock and the captions.  The
+		 gate is here rather than on TheGameLogic's own m_drawIconUI because that one is logic state,
+		 saved with the game and carried in the network snapshot; footage must not touch it. */
+	if( CinemaDirector_hidesHud() )
+		return;
+
 	if( TheGameLogic->getDrawIconUI() && (TheScriptEngine->getFade()==ScriptEngine::FADE_NONE) )
 	{
 		IRegion2D healthBarRegionStorage;

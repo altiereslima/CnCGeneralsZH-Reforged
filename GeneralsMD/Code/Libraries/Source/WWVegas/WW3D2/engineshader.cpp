@@ -407,7 +407,7 @@ static void write_multiply_chain(std::string & hlsl, const EngineShaderEntry & e
 	}
 
 	// The ground is where a shadow is read, so every transcribed program that paints it takes one.
-	hlsl += "    current.rgb *= sun_reaching(input.Position);\n";
+	hlsl += SHADOW_APPLY;
 
 	if (!bumped) {
 		return;

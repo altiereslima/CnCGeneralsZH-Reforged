@@ -123,7 +123,12 @@ const unsigned NORMAL_MAPPED_LIGHTS = 4;
 	"    if (map.x < 0.0 || map.x > 1.0 || map.y < 0.0 || map.y > 1.0) return 1.0;\n" \
 	"    if (sun.z < 0.0 || sun.z > 1.0) return 1.0;\n" \
 	"    float texel = ShadowParameters.x;\n" \
-	"    float bias = ShadowParameters.y;\n" \
+	"    // The bias grows with how fast the depth changes across one pixel.  A fixed one covers a\n" \
+	"    // surface seen from close up and nothing else: pull the camera back and a pixel spans\n" \
+	"    // several world units, the depth across it steps past the bias, and the wall reads as\n" \
+	"    // blocked by itself - a building that goes black as the camera leaves it.\n" \
+	"    float slope = max(abs(ddx(sun.z)), abs(ddy(sun.z)));\n" \
+	"    float bias = ShadowParameters.y + slope * 4.0;\n" \
 	"    float widest = ShadowParameters.w;\n" \
 	"    float narrowest = ShadowSoftness.x;\n" \
 	"\n" \
@@ -173,6 +178,15 @@ const unsigned NORMAL_MAPPED_LIGHTS = 4;
 	"    return 1.0 - strength * (blocked / 25.0);\n" \
 	"}\n" \
 	"\n"
+
+// Putting the shadow on the pixel, which is not a plain multiply.  A pixel that is already dark is
+// dark for a reason - it is under the shroud, or it is the fogged snapshot of a building somebody
+// cannot see - and multiplying that again takes it to black: from a camera far enough out, a
+// building in the fog turned into a black slab.  The shadow therefore only reaches a pixel as far
+// as the pixel is lit, which leaves the sunlit ground exactly as it was.
+#define SHADOW_APPLY \
+	"    float shadow_lit = saturate(dot(current.rgb, float3(0.3333, 0.3333, 0.3333)) * 2.5);\n" \
+	"    current.rgb *= lerp(1.0, sun_reaching(input.Position), shadow_lit);\n"
 
 // The HLSL for one description, or false when the description names an operation or an argument
 // this does not generate.  A refusal is not a failure: the caller keeps the fixed-function path for

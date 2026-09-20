@@ -445,7 +445,7 @@ bool CombinerShader_Generate(const CombinerDescription & description, CombinerSh
 
 	// Before the fog: a shadow is a thing in the world and the fog is between the world and the eye.
 	if (description.ShadowReceiving) {
-		hlsl += "    current.rgb *= sun_reaching(input.Position);\n";
+		hlsl += SHADOW_APPLY;
 	}
 
 	if (target == COMBINER_SHADER_TARGET_D3D11
