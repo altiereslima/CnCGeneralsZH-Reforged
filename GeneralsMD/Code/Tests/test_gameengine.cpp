@@ -13094,6 +13094,72 @@ TEST(chroma_power_meter_empties_as_the_draw_catches_the_supply)
 	CHECK_EQ(chromaPowerSegments(10, 11), CHROMA_POWER_BROWNOUT);
 }
 
+// Where a grid key lands.  This is the decision pressCommandButton used to make inline, pulled
+// out so the keyboard lighting could ask the same question without pressing anything; every
+// row below is what the inline version did, read off it before it was moved.
+TEST(grid_press_follows_the_builders_two_key_chord)
+{
+	const Int NOTHING = ControlBar::SLOT_NOTHING;
+	const Int ARMS = ControlBar::SLOT_ARMS_CHORD;
+	const Int Q = ControlBar::CHORD_SLOT_Q;
+	const Int W = ControlBar::CHORD_SLOT_W;
+	const Int GROUP = ControlBar::CHORD_GROUP_SIZE;
+
+	// no structures on the bar: a slot is a slot, chord or no chord
+	CHECK_EQ(ControlBar::resolveGridPress(0, -1, FALSE, FALSE), 0);
+	CHECK_EQ(ControlBar::resolveGridPress(5, -1, FALSE, FALSE), 5);
+	CHECK_EQ(ControlBar::resolveGridPress(5, 0, FALSE, FALSE), 5);
+
+	// out of range names nothing
+	CHECK_EQ(ControlBar::resolveGridPress(-1, -1, FALSE, FALSE), NOTHING);
+	CHECK_EQ(ControlBar::resolveGridPress(MAX_COMMANDS_PER_SET, -1, TRUE, FALSE), NOTHING);
+
+	// a builder, nothing armed: Q and W arm, a structure's own key does nothing on its own,
+	// and a cell that is not a structure is still one press
+	CHECK_EQ(ControlBar::resolveGridPress(Q, -1, TRUE, TRUE), ARMS);
+	CHECK_EQ(ControlBar::resolveGridPress(W, -1, TRUE, FALSE), ARMS);
+	CHECK_EQ(ControlBar::resolveGridPress(4, -1, TRUE, TRUE), NOTHING);
+	CHECK_EQ(ControlBar::resolveGridPress(4, -1, TRUE, FALSE), 4);
+
+	// armed: the second key is a cell of the first group, shifted into the armed one
+	CHECK_EQ(ControlBar::resolveGridPress(0, 0, TRUE, TRUE), 0);
+	CHECK_EQ(ControlBar::resolveGridPress(3, 0, TRUE, FALSE), 3);
+	CHECK_EQ(ControlBar::resolveGridPress(0, 1, TRUE, TRUE), GROUP);
+	CHECK_EQ(ControlBar::resolveGridPress(3, 1, TRUE, FALSE), GROUP + 3);
+	CHECK_EQ(ControlBar::resolveGridPress(GROUP - 1, 1, TRUE, FALSE), GROUP + GROUP - 1);
+	// a second key from outside the first group's cells is not a cell of any group
+	CHECK_EQ(ControlBar::resolveGridPress(GROUP, 0, TRUE, FALSE), NOTHING);
+	CHECK_EQ(ControlBar::resolveGridPress(GROUP + 2, 1, TRUE, FALSE), NOTHING);
+}
+
+// The generals powers tray: the first key names a row, the second a power in it, and what the
+// keys can reach is what is showing rather than the size of the general's command set.
+TEST(tray_press_names_a_row_and_then_a_power_in_it)
+{
+	const Int NOTHING = ControlBar::SLOT_NOTHING;
+	const Int ARMS = ControlBar::SLOT_ARMS_CHORD;
+	const Int COLS = SPECIAL_POWER_SHORTCUT_COLS;
+
+	// three powers showing is one row: F1 names it, F2 names nothing
+	CHECK_EQ(ControlBar::resolveTrayPress(0, -1, 3), ARMS);
+	CHECK_EQ(ControlBar::resolveTrayPress(1, -1, 3), NOTHING);
+	// four is two rows
+	CHECK_EQ(ControlBar::resolveTrayPress(1, -1, 4), ARMS);
+	CHECK_EQ(ControlBar::resolveTrayPress(2, -1, 4), NOTHING);
+	// none showing, nothing to name
+	CHECK_EQ(ControlBar::resolveTrayPress(0, -1, 0), NOTHING);
+	CHECK_EQ(ControlBar::resolveTrayPress(-1, -1, 3), NOTHING);
+
+	// row armed: the key is a column in it
+	CHECK_EQ(ControlBar::resolveTrayPress(0, 0, 3), 0);
+	CHECK_EQ(ControlBar::resolveTrayPress(2, 0, 3), 2);
+	CHECK_EQ(ControlBar::resolveTrayPress(0, 1, 4), COLS);
+	// the second row of four holds one power, so its second column is nothing
+	CHECK_EQ(ControlBar::resolveTrayPress(1, 1, 4), NOTHING);
+	// and a key past the row's width is nothing however many are showing
+	CHECK_EQ(ControlBar::resolveTrayPress(COLS, 0, 11), NOTHING);
+}
+
 // A bar that has started has to show it.  Rounding a tenth of a charge down to
 // nothing is how a gauge comes to read empty while the thing behind it is
 // running, which is worse than no gauge.

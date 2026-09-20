@@ -171,14 +171,14 @@ static MappableKeyType getGridHotKey( Int slot )
 }  // end getGridHotKey
 
 //-------------------------------------------------------------------------------------------------
-/** Press a command bar button by slot index.  Mirrors HotKeyManager::executeHotKey: a hidden
-	slot does nothing at all, an enabled one gets the same GBM_SELECTED the mouse would send,
-	and a disabled one just makes the rejection noise. */
+/** Which slot a press on the grid key for 'index' lands on with the structure chord as it
+	stands, or SLOT_ARMS_CHORD for a press that would only start one, or SLOT_NOTHING.  Changes
+	nothing: pressCommandButton acts on the answer and peekCommandButtonPress reports it. */
 //-------------------------------------------------------------------------------------------------
-void ControlBar::pressCommandButton( Int index )
+Int ControlBar::resolveGridPress( Int index, Int chordGroup, Bool hasStructures, Bool indexIsStructure )
 {
 	if( index < 0 || index >= MAX_COMMANDS_PER_SET )
-		return;
+		return SLOT_NOTHING;
 
 	//
 	// a builder's structures are reached by a two-key chord so the whole set can stay on
@@ -188,7 +188,35 @@ void ControlBar::pressCommandButton( Int index )
 	// way in: its own letter on its own is the second half of a chord nobody started.  Q and W
 	// are whatever the grid binds to slots 0 and 2, so with W A S D on the camera they are Q and E.
 	//
-	Bool hasStructures = FALSE;
+	if( !hasStructures )
+		return index;
+
+	if( chordGroup < 0 )
+	{
+		if( index == CHORD_SLOT_Q || index == CHORD_SLOT_W )
+			return SLOT_ARMS_CHORD;
+
+		//
+		// Every structure is two keys, and only two.  The key painted on a cell is the *second*
+		// of its pair, so on its own it used to fall through to whatever sits in the slot that
+		// key names - which for a builder is another structure.  So the same building could be
+		// put up either by the chord written on it or by one bare letter nobody wrote anywhere,
+		// and a key pressed after a Q that had already been dropped built something.
+		//
+		return indexIsStructure ? SLOT_NOTHING : index;
+	}
+
+	if( index >= CHORD_GROUP_SIZE )
+		return SLOT_NOTHING;		// the second key must be one of the first group's cells (Q W E R A S D F)
+	index += chordGroup * CHORD_GROUP_SIZE;
+	return index < MAX_COMMANDS_PER_SET ? index : SLOT_NOTHING;
+
+}  // end resolveGridPress
+
+//-------------------------------------------------------------------------------------------------
+Int ControlBar::resolveCommandSlot( Int index, Bool *hasStructures ) const
+{
+	*hasStructures = FALSE;
 	Bool indexIsStructure = FALSE;
 	for( Int i = 0; i < MAX_COMMANDS_PER_SET; i++ )
 	{
@@ -198,47 +226,82 @@ void ControlBar::pressCommandButton( Int index )
 		const CommandButton *c = (const CommandButton *)GadgetButtonGetData( w );
 		if( c == NULL || c->getCommandType() != GUI_COMMAND_DOZER_CONSTRUCT )
 			continue;
-		hasStructures = TRUE;
+		*hasStructures = TRUE;
 		if( i == index )
 			indexIsStructure = TRUE;
 	}
-	if( hasStructures )
-	{
-		if( m_chordGroup < 0 )
-		{
-			if( index == CHORD_SLOT_Q || index == CHORD_SLOT_W )
-			{
-				m_chordGroup = ( index == CHORD_SLOT_Q ) ? 0 : 1;
-				m_chordStartMs = timeGetTime();
-				m_chordDrawableID = m_currentSelectedDrawable ? m_currentSelectedDrawable->getID()
-																										 : INVALID_DRAWABLE_ID;
-				markUIDirty();		// the group that is armed greys the other one out
-				return;
-			}
+	return resolveGridPress( index, m_chordGroup, *hasStructures, indexIsStructure );
 
-			//
-			// Every structure is two keys, and only two.  The key painted on a cell is the *second*
-			// of its pair, so on its own it used to fall through to whatever sits in the slot that
-			// key names - which for a builder is another structure.  So the same building could be
-			// put up either by the chord written on it or by one bare letter nobody wrote anywhere,
-			// and a key pressed after a Q that had already been dropped built something.
-			//
-			if( indexIsStructure )
-				return;
-		}
-		else
+}  // end resolveCommandSlot
+
+//-------------------------------------------------------------------------------------------------
+ControlBar::PressOutcome ControlBar::peekCommandButtonPress( Int index, GameWindow **button )
+{
+	*button = NULL;
+
+	Bool hasStructures = FALSE;
+	const Int slot = resolveCommandSlot( index, &hasStructures );
+	if( slot == SLOT_NOTHING )
+		return PRESS_DOES_NOTHING;
+
+	if( slot == SLOT_ARMS_CHORD )
+	{
+		// the first cell of the group this key would arm that the second key could press
+		const Int first = ( index == CHORD_SLOT_Q ? 0 : 1 ) * CHORD_GROUP_SIZE;
+		for( Int i = first; i < first + CHORD_GROUP_SIZE && i < MAX_COMMANDS_PER_SET; i++ )
 		{
-			Int group = m_chordGroup;
-			dropChord();
-			if( index >= CHORD_GROUP_SIZE )
-				return;		// the second key must be one of the first group's cells (Q W E R A S D F)
-			index += group * CHORD_GROUP_SIZE;
-			if( index >= MAX_COMMANDS_PER_SET )
-				return;
+			GameWindow *w = m_commandWindows[ i ];
+			if( w && !BitTest( w->winGetStatus(), WIN_STATUS_HIDDEN )
+					&& BitTest( w->winGetStatus(), WIN_STATUS_ENABLED ) )
+			{
+				*button = w;
+				break;
+			}
 		}
+		return PRESS_ARMS_CHORD;
 	}
 
-	GameWindow *win = m_commandWindows[ index ];
+	GameWindow *win = m_commandWindows[ slot ];
+	if( win == NULL || BitTest( win->winGetStatus(), WIN_STATUS_HIDDEN ) )
+		return PRESS_DOES_NOTHING;
+
+	*button = win;
+	return BitTest( win->winGetStatus(), WIN_STATUS_ENABLED ) ? PRESS_FIRES : PRESS_IS_REFUSED;
+
+}  // end peekCommandButtonPress
+
+//-------------------------------------------------------------------------------------------------
+/** Press a command bar button by slot index.  Mirrors HotKeyManager::executeHotKey: a hidden
+	slot does nothing at all, an enabled one gets the same GBM_SELECTED the mouse would send,
+	and a disabled one just makes the rejection noise. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::pressCommandButton( Int index )
+{
+	// a press that names no slot at all leaves an armed chord alone
+	if( index < 0 || index >= MAX_COMMANDS_PER_SET )
+		return;
+
+	Bool hasStructures = FALSE;
+	const Int slot = resolveCommandSlot( index, &hasStructures );
+
+	if( slot == SLOT_ARMS_CHORD )
+	{
+		m_chordGroup = ( index == CHORD_SLOT_Q ) ? 0 : 1;
+		m_chordStartMs = timeGetTime();
+		m_chordDrawableID = m_currentSelectedDrawable ? m_currentSelectedDrawable->getID()
+																								 : INVALID_DRAWABLE_ID;
+		markUIDirty();		// the group that is armed greys the other one out
+		return;
+	}
+
+	// an armed chord is spent by its second key whether or not that key found a cell
+	if( hasStructures && m_chordGroup >= 0 )
+		dropChord();
+
+	if( slot == SLOT_NOTHING )
+		return;
+
+	GameWindow *win = m_commandWindows[ slot ];
 	if( win == NULL || BitTest( win->winGetStatus(), WIN_STATUS_HIDDEN ) )
 		return;
 
@@ -4292,6 +4355,81 @@ Int ControlBar::countVisibleSpecialPowerShortcuts( void )
 }  // end countVisibleSpecialPowerShortcuts
 
 //-------------------------------------------------------------------------------------------------
+/** Which tray slot a press on shortcut key 'index' lands on with the row chord as it stands, or
+	SLOT_ARMS_CHORD for a press that names a row, or SLOT_NOTHING.  Changes nothing. */
+//-------------------------------------------------------------------------------------------------
+Int ControlBar::resolveTrayPress( Int index, Int armedRow, Int visibleSlots )
+{
+	if( index < 0 )
+		return SLOT_NOTHING;
+
+	//
+	// what the keys can reach is what is on screen, not the size of the command set the general
+	// could eventually fill: a USA player with three powers has one row, and arming the second
+	// one would swallow the key after it with nothing to spend it on
+	//
+	const Int rows = ( visibleSlots + SPECIAL_POWER_SHORTCUT_COLS - 1 ) / SPECIAL_POWER_SHORTCUT_COLS;
+
+	// nothing pending: this press names a row and stops there
+	if( armedRow < 0 )
+		return index < rows ? SLOT_ARMS_CHORD : SLOT_NOTHING;
+
+	// a row is pending: this press names the power in it
+	const Int slot = armedRow * SPECIAL_POWER_SHORTCUT_COLS + index;
+	if( index >= SPECIAL_POWER_SHORTCUT_COLS || slot >= visibleSlots )
+		return SLOT_NOTHING;
+
+	return slot;
+
+}  // end resolveTrayPress
+
+//-------------------------------------------------------------------------------------------------
+Int ControlBar::resolveSpecialPowerShortcutSlot( Int index )
+{
+	if( m_specialPowerShortcutParent == NULL || m_specialPowerShortcutParent->winIsHidden() )
+		return SLOT_NOTHING;
+
+	const Int slot = resolveTrayPress( index, m_specialPowerShortcutRow, countVisibleSpecialPowerShortcuts() );
+	if( slot < 0 )
+		return slot;
+
+	GameWindow *win = m_specialPowerShortcutButtons[ slot ];
+	return ( win == NULL || win->winIsHidden() ) ? SLOT_NOTHING : slot;
+
+}  // end resolveSpecialPowerShortcutSlot
+
+//-------------------------------------------------------------------------------------------------
+ControlBar::PressOutcome ControlBar::peekSpecialPowerShortcutPress( Int index, GameWindow **button )
+{
+	*button = NULL;
+
+	const Int slot = resolveSpecialPowerShortcutSlot( index );
+	if( slot == SLOT_NOTHING )
+		return PRESS_DOES_NOTHING;
+
+	if( slot == SLOT_ARMS_CHORD )
+	{
+		// the first power in the row this key would name that the second key could fire
+		const Int visible = countVisibleSpecialPowerShortcuts();
+		const Int first = index * SPECIAL_POWER_SHORTCUT_COLS;
+		for( Int i = first; i < first + SPECIAL_POWER_SHORTCUT_COLS && i < visible; i++ )
+		{
+			GameWindow *w = m_specialPowerShortcutButtons[ i ];
+			if( w && !w->winIsHidden() && BitTest( w->winGetStatus(), WIN_STATUS_ENABLED ) )
+			{
+				*button = w;
+				break;
+			}
+		}
+		return PRESS_ARMS_CHORD;
+	}
+
+	*button = m_specialPowerShortcutButtons[ slot ];
+	return BitTest( (*button)->winGetStatus(), WIN_STATUS_ENABLED ) ? PRESS_FIRES : PRESS_IS_REFUSED;
+
+}  // end peekSpecialPowerShortcutPress
+
+//-------------------------------------------------------------------------------------------------
 /** One key cannot reach eleven powers laid out three to a row, so it takes two: the first press
 	* picks the row - F1 the row in the corner, F2 the one above it - and the second picks the power
 	* in it, F1 being the rightmost.  Until a row is picked only the head of each row is labelled,
@@ -4299,40 +4437,28 @@ Int ControlBar::countVisibleSpecialPowerShortcuts( void )
 //-------------------------------------------------------------------------------------------------
 void ControlBar::pressSpecialPowerShortcut( Int index )
 {
+	// a press that cannot reach the tray at all leaves a pending row alone
 	if( index < 0 || m_specialPowerShortcutParent == NULL || m_specialPowerShortcutParent->winIsHidden() )
 		return;
 
-	//
-	// what the keys can reach is what is on screen, not the size of the command set the general
-	// could eventually fill: a USA player with three powers has one row, and arming the second
-	// one would swallow the key after it with nothing to spend it on
-	//
-	const Int visible = countVisibleSpecialPowerShortcuts();
-	const Int rows = ( visible + SPECIAL_POWER_SHORTCUT_COLS - 1 ) / SPECIAL_POWER_SHORTCUT_COLS;
+	const Int slot = resolveSpecialPowerShortcutSlot( index );
 
-	// nothing pending: this press names a row and stops there
-	if( m_specialPowerShortcutRow < 0 )
+	if( slot == SLOT_ARMS_CHORD )
 	{
-		if( index < rows )
-		{
-			m_specialPowerShortcutRow = index;
-			m_specialPowerShortcutRowMs = timeGetTime();
-		}
+		m_specialPowerShortcutRow = index;
+		m_specialPowerShortcutRowMs = timeGetTime();
 		return;
 	}
 
 	//
-	// a row is pending: this press names the power in it, and either way the row is spent - a key
-	// that names no power in that row simply cancels
+	// a row that was pending is spent by this press either way - a key that names no power in
+	// that row simply cancels
 	//
-	const Int slot = m_specialPowerShortcutRow * SPECIAL_POWER_SHORTCUT_COLS + index;
 	clearSpecialPowerShortcutRow();
-	if( index >= SPECIAL_POWER_SHORTCUT_COLS || slot >= visible )
+	if( slot == SLOT_NOTHING )
 		return;
 
 	GameWindow *win = m_specialPowerShortcutButtons[ slot ];
-	if( win == NULL || win->winIsHidden() || m_specialPowerShortcutParent->winIsHidden() )
-		return;
 
 	if( BitTest( win->winGetStatus(), WIN_STATUS_ENABLED ) )
 	{

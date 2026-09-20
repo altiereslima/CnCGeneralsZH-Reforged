@@ -31,6 +31,8 @@
 #include "GameClient/GameWindow.h"
 #include "GameClient/HotKey.h"
 #include "GameClient/InGameUI.h"
+#include "GameClient/Keyboard.h"
+#include "GameClient/MetaEvent.h"
 #include "Common/Energy.h"
 #include "Common/GameCommon.h"
 #include "Common/GlobalData.h"
@@ -322,9 +324,8 @@ static Int chromaReadyColor( UnsignedInt frame, UnsignedInt readySince, Int colo
 	return chromaBlinkIsOn( frame, BLINK_PERIOD_FRAMES ) ? color : COLOR_OFF;
 }
 
-/// When each power last came ready, so the key can announce itself and then stop
-/// shouting.  Zero means it is not ready at all.
-static UnsignedInt s_powerReadySince[ SPECIALPOWER_COUNT ];
+/// When the first superweapon came ready, so the numpad can announce it and then
+/// stop shouting.  Zero means none is.
 static UnsignedInt s_superweaponReadySince = 0;
 
 //-----------------------------------------------------------------------------
@@ -1029,8 +1030,6 @@ struct ChromaProducer
 
 struct ChromaSnapshot
 {
-	Real powerCharge[ SPECIALPOWER_COUNT ];		///< -1 where the player has no such power
-	Bool powerReady[ SPECIALPOWER_COUNT ];
 	Real bestSuperweaponCharge;
 	Bool anySuperweaponReady;
 	ChromaProducer producers[ PRODUCTION_LAMPS ];
@@ -1073,29 +1072,18 @@ static void chromaVisitObject( Object *obj, void *userData )
 			|| obj->isEffectivelyDead() )
 		return;
 
-	const Bool isSuperweapon = obj->isKindOf( KINDOF_FS_SUPERWEAPON );
-	for( BehaviorModule **module = obj->getBehaviorModules(); module && *module; ++module )
+	// Only the superweapons are read here.  The generals powers come off the tray
+	// itself, which already knows which of them are showing and which key reaches
+	// each, neither of which this walk could work out.
+	if( obj->isKindOf( KINDOF_FS_SUPERWEAPON ) )
 	{
-		SpecialPowerModuleInterface *power = (*module)->getSpecialPower();
-		if( power == NULL || power->isScriptOnly() )
-			continue;
-
-		const SpecialPowerTemplate *powerTemplate = power->getSpecialPowerTemplate();
-		if( powerTemplate == NULL )
-			continue;
-
-		const Int type = (Int)powerTemplate->getSpecialPowerType();
-		if( type < 0 || type >= SPECIALPOWER_COUNT )
-			continue;
-
-		const Real charge = power->getPercentReady();
-		if( charge > snapshot->powerCharge[ type ] )
-			snapshot->powerCharge[ type ] = charge;
-		if( power->isReady() )
-			snapshot->powerReady[ type ] = TRUE;
-
-		if( isSuperweapon )
+		for( BehaviorModule **module = obj->getBehaviorModules(); module && *module; ++module )
 		{
+			SpecialPowerModuleInterface *power = (*module)->getSpecialPower();
+			if( power == NULL || power->isScriptOnly() )
+				continue;
+
+			const Real charge = power->getPercentReady();
 			if( charge > snapshot->bestSuperweaponCharge )
 				snapshot->bestSuperweaponCharge = charge;
 			if( power->isReady() )
@@ -1127,11 +1115,6 @@ static const ChromaSnapshot &chromaWalkPlayer( Player *localPlayer, UnsignedInt 
 
 	everWalked = TRUE;
 	lastWalkFrame = frame;
-	for( Int type = 0; type < SPECIALPOWER_COUNT; ++type )
-	{
-		snapshot.powerCharge[ type ] = -1.0f;
-		snapshot.powerReady[ type ] = FALSE;
-	}
 	snapshot.bestSuperweaponCharge = 0.0f;
 	snapshot.anySuperweaponReady = FALSE;
 	snapshot.producerCount = 0;
@@ -1139,13 +1122,6 @@ static const ChromaSnapshot &chromaWalkPlayer( Player *localPlayer, UnsignedInt 
 	if( localPlayer != NULL )
 		localPlayer->iterateObjects( chromaVisitObject, &snapshot );
 
-	for( Int type = 0; type < SPECIALPOWER_COUNT; ++type )
-	{
-		if( !snapshot.powerReady[ type ] )
-			s_powerReadySince[ type ] = 0;
-		else if( s_powerReadySince[ type ] == 0 )
-			s_powerReadySince[ type ] = frame;
-	}
 	if( !snapshot.anySuperweaponReady )
 		s_superweaponReadySince = 0;
 	else if( s_superweaponReadySince == 0 )
@@ -1265,10 +1241,99 @@ static void chromaFillPowerRow( Int *cells, const Energy *energy, UnsignedInt fr
 }
 
 //-----------------------------------------------------------------------------
-/** The command bar, key for key, with the build clock the button is drawing on
-	* screen carried as brightness.  The clock is read straight off the gadget the
-	* control bar already wrote it to, so the keys cannot drift from the buttons. */
-static void chromaFillCommandBar( Int *cells, Int pressable, Int unavailable )
+/** How far round its clock a button is, zero to one, or one for a button that is
+	* drawing no clock.  Read straight off the gadget the control bar already wrote
+	* it to, so a key cannot drift from the button it stands for. */
+static Real chromaButtonClock( GameWindow *button )
+{
+	if( button == NULL || !BitTest( button->winGetStyle(), GWS_PUSH_BUTTON ) )
+		return 1.0f;
+
+	const PushButtonData *buttonData = (const PushButtonData *)button->winGetUserData();
+	if( buttonData == NULL || buttonData->drawClock == NO_CLOCK )
+		return 1.0f;
+	return buttonData->percentClock / 100.0f;
+}
+
+//-----------------------------------------------------------------------------
+/** A key that can be pressed, dimmed by its build clock but never to nothing: a
+	* factory that has just started a tank still takes a second order, and a dark
+	* key says it would not. */
+static Int chromaPressableWithClock( Int pressable, GameWindow *button )
+{
+	static const Real CLOCK_FLOOR = 0.35f;
+	return chromaScale( pressable, CLOCK_FLOOR + (1.0f - CLOCK_FLOOR) * chromaButtonClock( button ) );
+}
+
+//-----------------------------------------------------------------------------
+/** The lamp a bound key lights, or -1 for a key the grid has no lamp for or the
+	* layout has no letter for. */
+static Int chromaCellForBoundKey( MappableKeyType key )
+{
+	if( key >= MK_F1 && key <= MK_F10 )
+		return chromaKeyboardCell( FKEY_ROW, FKEY_FIRST_COLUMN + (key - MK_F1) );
+	if( key == MK_F11 )
+		return chromaKeyboardCell( FKEY_ROW, FKEY_FIRST_COLUMN + 10 );
+	if( key == MK_F12 )
+		return chromaKeyboardCell( FKEY_ROW, FKEY_FIRST_COLUMN + 11 );
+	if( key == MK_NONE || TheKeyboard == NULL )
+		return -1;
+
+	WideChar printable = TheKeyboard->getPrintableKey( (UnsignedByte)key, 0 );
+	if( printable >= L'A' && printable <= L'Z' )
+		printable += L'a' - L'A';
+	return printable > 0 && printable < 128 ? chromaCellForKey( (char)printable ) : -1;
+}
+
+//-----------------------------------------------------------------------------
+// Which lamp each command bar slot and each tray slot answers to under the
+// bindings in force, looked up twice a second rather than per lamp per frame.
+// The player can rebind a slot in Options and change scheme mid-match, so it
+// cannot be looked up once.  Under Legacy nothing is bound to either and every
+// entry is -1, which is right: there the letters in the labels do the work.
+//-----------------------------------------------------------------------------
+static Int s_commandSlotCell[ MAX_COMMANDS_PER_SET ];
+static Int s_shortcutSlotCell[ MAX_SPECIAL_POWER_SHORTCUTS ];
+
+//-----------------------------------------------------------------------------
+static void chromaRefreshBoundCells( UnsignedInt frame )
+{
+	static UnsignedInt lastRefreshFrame = 0;
+	static Bool everRefreshed = FALSE;
+	if( everRefreshed && frame >= lastRefreshFrame
+			&& frame - lastRefreshFrame < (UnsignedInt)WALK_INTERVAL_FRAMES )
+		return;
+
+	everRefreshed = TRUE;
+	lastRefreshFrame = frame;
+	for( Int slot = 0; slot < MAX_COMMANDS_PER_SET; ++slot )
+		s_commandSlotCell[ slot ] = -1;
+	for( Int slot = 0; slot < MAX_SPECIAL_POWER_SHORTCUTS; ++slot )
+		s_shortcutSlotCell[ slot ] = -1;
+	if( TheMetaMap == NULL )
+		return;
+
+	for( const MetaMapRec *rec = TheMetaMap->getFirstMetaMapRec(); rec; rec = rec->m_next )
+	{
+		// only the bare key: the shifted copy of a slot is the same lamp
+		if( rec->m_modState != 0 )
+			continue;
+
+		const Int commandSlot = (Int)rec->m_meta - (Int)GameMessage::MSG_META_COMMAND_SLOT01;
+		if( commandSlot >= 0 && commandSlot < MAX_COMMANDS_PER_SET && s_commandSlotCell[ commandSlot ] < 0 )
+			s_commandSlotCell[ commandSlot ] = chromaCellForBoundKey( rec->m_key );
+
+		const Int shortcutSlot = (Int)rec->m_meta - (Int)GameMessage::MSG_META_SHORTCUT_SLOT01;
+		if( shortcutSlot >= 0 && shortcutSlot < MAX_SPECIAL_POWER_SHORTCUTS && s_shortcutSlotCell[ shortcutSlot ] < 0 )
+			s_shortcutSlotCell[ shortcutSlot ] = chromaCellForBoundKey( rec->m_key );
+	}
+}
+
+//-----------------------------------------------------------------------------
+/** The command bar under Legacy input: the letter marked in each button's label,
+	* which is what HotKeyManager presses it with.  Under Modern that manager holds
+	* no command bar letters at all and this lights nothing. */
+static void chromaFillLabelHotKeys( Int *cells, Int pressable, Int unavailable )
 {
 	for( Int row = CHROMA_FIRST_HOTKEY_ROW; row < CHROMA_KEY_ROW_COUNT; ++row )
 	{
@@ -1281,66 +1346,77 @@ static void chromaFillCommandBar( Int *cells, Int pressable, Int unavailable )
 			if( win == NULL )
 				continue;
 
-			Int color = isPressable ? pressable : unavailable;
-			if( isPressable && BitTest( win->winGetStyle(), GWS_PUSH_BUTTON ) )
-			{
-				const PushButtonData *buttonData = (const PushButtonData *)win->winGetUserData();
-				if( buttonData != NULL && buttonData->drawClock != NO_CLOCK )
-					color = chromaScale( color, buttonData->percentClock / 100.0f );
-			}
-			cells[ chromaCellForKey( keys[ column ] ) ] = color;
+			cells[ chromaCellForKey( keys[ column ] ) ] =
+				isPressable ? chromaPressableWithClock( pressable, win ) : unavailable;
 		}
 	}
 }
 
 //-----------------------------------------------------------------------------
-/** The function row is the generals powers tray, slot for slot, taken from the
-	* same command set the on-screen tray is built from. */
-static void chromaFillPowerTray( Int *cells, Player *localPlayer, const ChromaSnapshot &snapshot,
-																 Int factionColor, UnsignedInt frame )
+/** The command bar under Modern input: the grid keys, with the builder's two key
+	* chord followed.  What a key would do comes from the control bar's own
+	* resolution of the press, so when Q has armed a group the lamps move onto that
+	* group's cells the moment the labels on screen do. */
+static void chromaFillCommandGrid( Int *cells, Int pressable, Int unavailable )
 {
-	const PlayerTemplate *playerTemplate = localPlayer->getPlayerTemplate();
-	if( playerTemplate == NULL || TheControlBar == NULL )
-		return;
-
-	const AsciiString setName = playerTemplate->getSpecialPowerShortcutCommandSet();
-	if( setName.isEmpty() )
-		return;
-
-	const CommandSet *commandSet = TheControlBar->findCommandSet( setName );
-	if( commandSet == NULL )
-		return;
-
-	Int slots = playerTemplate->getSpecialPowerShortcutButtonCount();
-	if( slots > FKEY_COUNT )
-		slots = FKEY_COUNT;
-
-	for( Int slot = 0; slot < slots; ++slot )
+	for( Int slot = 0; slot < MAX_COMMANDS_PER_SET; ++slot )
 	{
-		const CommandButton *button = commandSet->getCommandButton( slot );
-		if( button == NULL )
+		const Int cell = s_commandSlotCell[ slot ];
+		if( cell < 0 )
 			continue;
 
-		const SpecialPowerTemplate *powerTemplate = button->getSpecialPowerTemplate();
-		if( powerTemplate == NULL )
+		GameWindow *button = NULL;
+		switch( TheControlBar->peekCommandButtonPress( slot, &button ) )
+		{
+			case ControlBar::PRESS_FIRES:
+				cells[ cell ] = chromaPressableWithClock( pressable, button );
+				break;
+			case ControlBar::PRESS_ARMS_CHORD:
+				// worth starting only if the group holds something the second key can build
+				cells[ cell ] = button != NULL ? pressable : unavailable;
+				break;
+			case ControlBar::PRESS_IS_REFUSED:
+				cells[ cell ] = unavailable;
+				break;
+			default:
+				break;	// no button behind this key, so it keeps the bed's colour
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+/** The generals powers, on the keys that reach them.  It takes two presses: the
+	* first names a row of the tray and the second a power in that row.  So with
+	* nothing armed, the key of every row that holds a usable power blinks; once a
+	* row is armed the blinking moves onto the keys of the usable powers inside it.
+	* A power still charging shows as far as its clock has got, and a key that
+	* reaches nothing stays the colour of the bed. */
+static void chromaFillPowerTray( Int *cells, Int factionColor, UnsignedInt frame )
+{
+	const Int usable = chromaBlinkIsOn( frame, BLINK_PERIOD_FRAMES ) ? COLOR_WARM_WHITE : COLOR_OFF;
+	const Int nothingUsable = chromaScale( factionColor, AMBIENT_SCALE );
+
+	for( Int slot = 0; slot < MAX_SPECIAL_POWER_SHORTCUTS; ++slot )
+	{
+		const Int cell = s_shortcutSlotCell[ slot ];
+		if( cell < 0 )
 			continue;
 
-		// A power whose promotion has not been bought is not on the tray on screen
-		// and has no business on the key either, which is what made the first two
-		// keys of the row light for powers nobody could use.
-		const ScienceType required = powerTemplate->getRequiredScience();
-		if( required != SCIENCE_INVALID && !localPlayer->hasScience( required ) )
-			continue;
-
-		const Int type = (Int)powerTemplate->getSpecialPowerType();
-		if( type < 0 || type >= SPECIALPOWER_COUNT || snapshot.powerCharge[ type ] < 0.0f )
-			continue;
-
-		const Int cell = chromaKeyboardCell( FKEY_ROW, FKEY_FIRST_COLUMN + slot );
-		if( snapshot.powerReady[ type ] )
-			cells[ cell ] = chromaReadyColor( frame, s_powerReadySince[ type ], COLOR_WARM_WHITE );
-		else
-			cells[ cell ] = chromaScale( factionColor, snapshot.powerCharge[ type ] );
+		GameWindow *button = NULL;
+		switch( TheControlBar->peekSpecialPowerShortcutPress( slot, &button ) )
+		{
+			case ControlBar::PRESS_FIRES:
+				cells[ cell ] = usable;
+				break;
+			case ControlBar::PRESS_ARMS_CHORD:
+				cells[ cell ] = button != NULL ? usable : nothingUsable;
+				break;
+			case ControlBar::PRESS_IS_REFUSED:
+				cells[ cell ] = chromaScale( factionColor, chromaButtonClock( button ) );
+				break;
+			default:
+				break;
+		}
 	}
 }
 
@@ -1551,20 +1627,27 @@ static void chromaFillCells( Int *cells )
 		chromaResetAlerts();
 		s_effect = EFFECT_NONE;
 		s_superweaponReadySince = 0;
-		for( Int type = 0; type < SPECIALPOWER_COUNT; ++type )
-			s_powerReadySince[ type ] = 0;
 		return;
 	}
 
 	chromaUpdateAlerts( localPlayer, frame );
+	chromaRefreshBoundCells( frame );
 	const ChromaSnapshot &snapshot = chromaWalkPlayer( localPlayer, frame );
 
 	const Int pressable = chromaAlarmed( factionColor, alarmData );
 	const Int unavailable = chromaAlarmed( COLOR_OFF, alarmData );
 
-	chromaFillCommandBar( cells, pressable, unavailable );
+	// Two input schemes reach the same buttons by different keys, and only one of
+	// them is live at a time: Legacy registers the letters in the labels and binds
+	// no grid, Modern binds the grid and registers no letters.  Filling from both
+	// lights whichever is real and nothing from the other.
+	chromaFillLabelHotKeys( cells, pressable, unavailable );
+	if( TheControlBar != NULL )
+	{
+		chromaFillCommandGrid( cells, pressable, unavailable );
+		chromaFillPowerTray( cells, factionColor, frame );
+	}
 	chromaFillPowerRow( cells, localPlayer->getEnergy(), frame, alarmData );
-	chromaFillPowerTray( cells, localPlayer, snapshot, factionColor, frame );
 	chromaFillNumpad( cells, snapshot, factionColor, frame );
 	chromaFillProduction( cells, snapshot, factionColor );
 	chromaFillSelection( cells );
