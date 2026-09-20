@@ -7,7 +7,7 @@ O workflow instala automaticamente, em versões/commits fixados:
 - zlib 1.1.4;
 - GameSpy SDK;
 - LZH-Light 1.0;
-- stubs públicos do Miles usados apenas para gerar a import library.
+- stubs públicos do Miles, obtidos por checkout Git de um commit fixado do Thyme, usados apenas para gerar a import library.
 
 A mídia localizada é opcional. Para incluí-la no artifact, configure:
 

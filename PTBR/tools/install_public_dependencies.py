@@ -18,13 +18,9 @@ GAMESPY_REPO = "https://github.com/TheSuperHackers/GamespySDK.git"
 GAMESPY_COMMIT = "b1b77d8f1f30d289b4b4910d305a377f706a0bf7"
 LZH_REPO = "https://github.com/TheSuperHackers/lzhl-1.0.git"
 LZH_COMMIT = "dfd96e2ca64adaddb35dd4ebadd6add7d5586783"
+THYME_REPO = "https://github.com/TheAssemblyArmada/Thyme.git"
 THYME_MILES_COMMIT = "ccef1e11c1355c6db577a057c06e7d790f1a0333"
-THYME_MILES_BASE = "https://raw.githubusercontent.com/TheAssemblyArmada/Thyme/" + THYME_MILES_COMMIT + "/deps/miles"
-THYME_MILES_BLOBS = {
-    "miles.c": "cce9969a3639a3dcf55d9e2d25c8f9ff548410f0",
-    "miles.def": "7dd8dedbcc4c5854f298b3891425abc013c1975d",
-    "miles.h": "11f4dfadeee90f218fa58aac0ee66a50ee9e6765",
-}
+THYME_MILES_FILES = ["miles.c", "miles.def", "miles.h"]
 
 LZH_SOURCE_FILES = [
     "Huff.cpp", "Lz.cpp", "Lzhl.cpp",
@@ -45,13 +41,6 @@ def md5(path: Path) -> str:
     with path.open("rb") as f:
         for chunk in iter(lambda:f.read(1024*1024), b""):
             h.update(chunk)
-    return h.hexdigest()
-
-def git_blob_sha(path: Path) -> str:
-    data=path.read_bytes()
-    h=hashlib.sha1()
-    h.update(f"blob {len(data)}\\0".encode("ascii"))
-    h.update(data)
     return h.hexdigest()
 
 def safe_extract_tar(archive: Path, dst: Path):
@@ -265,8 +254,7 @@ def install_lzh(repo: Path, source_override: Path|None):
     }
 
 def validate_miles_stub(path: Path):
-    required=["miles.c","miles.def","miles.h"]
-    missing=[x for x in required if not (path/x).is_file()]
+    missing=[x for x in THYME_MILES_FILES if not (path/x).is_file()]
     if missing:
         raise RuntimeError("Miles stub incompleto: "+", ".join(missing))
 
@@ -282,30 +270,44 @@ def install_miles_stub(repo: Path, source_override: Path|None):
 
     if source_override:
         validate_miles_stub(source_override)
-        for name in THYME_MILES_BLOBS:
+        for name in THYME_MILES_FILES:
             shutil.copy2(source_override/name,dst/name)
         validate_miles_stub(dst)
         return {"status":"INSTALLED_FROM_OVERRIDE","path":str(dst)}
 
-    with tempfile.TemporaryDirectory(prefix="zh-miles-") as td:
-        td=Path(td)
-        for name,expected_blob in THYME_MILES_BLOBS.items():
-            temp=td/name
-            download(f"{THYME_MILES_BASE}/{name}",temp)
-            got=git_blob_sha(temp)
-            if got.lower()!=expected_blob.lower():
-                raise RuntimeError(
-                    f"Thyme Miles {name} Git blob SHA inválido: esperado {expected_blob}, obtido {got}"
-                )
-            shutil.copy2(temp,dst/name)
+    git=shutil.which("git")
+    if not git:
+        raise RuntimeError("git não encontrado para instalar o stub Miles")
+
+    # Use Git itself as the integrity boundary: clone the repository, checkout the
+    # exact pinned commit and copy only deps/miles.  No raw.githubusercontent
+    # download and no hand-copied per-file hashes are involved.
+    temp_root=Path(tempfile.mkdtemp(prefix="zh-thyme-miles-"))
+    clone=temp_root/"Thyme"
+
+    run([git,"clone","--no-checkout","--filter=blob:none",THYME_REPO,str(clone)])
+    run([git,"checkout",THYME_MILES_COMMIT],cwd=clone)
+    head=run([git,"rev-parse","HEAD"],cwd=clone).strip()
+    if head.lower()!=THYME_MILES_COMMIT.lower():
+        raise RuntimeError(f"commit Thyme inesperado: {head}")
+
+    src=clone/"deps/miles"
+    validate_miles_stub(src)
+    for name in THYME_MILES_FILES:
+        shutil.copy2(src/name,dst/name)
 
     validate_miles_stub(dst)
+    if (dst/".git").exists():
+        raise RuntimeError("stub Miles não deve conter .git na árvore do Reforged")
+
+    # Keep the temporary clone until the hosted runner is destroyed.  This avoids
+    # Windows races/permissions while deleting Git pack files during the job.
     return {
         "status":"INSTALLED",
         "path":str(dst),
-        "repository":"https://github.com/TheAssemblyArmada/Thyme",
+        "repository":THYME_REPO,
         "commit":THYME_MILES_COMMIT,
-        "verified_git_blobs":THYME_MILES_BLOBS,
+        "files":THYME_MILES_FILES,
     }
 
 def main():
