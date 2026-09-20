@@ -49,6 +49,7 @@
 #include "GameLogic/Module/SpecialPowerUpdateModule.h"
 #include "GameLogic/ScriptEngine.h"
 
+#include "GameClient/ChromaKeyboard.h"
 #include "GameClient/Eva.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/ControlBar.h"
@@ -669,6 +670,11 @@ void SpecialPowerModule::aboutToDoSpecialPower( const Coord3D *location )
         TheEva->setShouldPlay(EVA_SuperweaponLaunched_Enemy_Sneak_Attack);
       }
     }
+
+		// The hardware lighting answers a launch the way EVA does, and takes it from
+		// the same place so the two can never end up describing different events.
+		// It stamps a frame on the client side and returns; nothing here changes.
+		chromaSuperweaponLaunched( type );
 	}
 
 	// get module data

@@ -45,6 +45,13 @@ extern void shutdownChromaKeyboard( void );
 	* be called before the first update or the worker is already up. */
 extern void disableChromaKeyboard( void );
 
+/** A superweapon has gone off somewhere the local player is told about, and the
+	* hardware should say so.  Called from the same place EVA is told, so the two
+	* never disagree about what happened; it stamps a frame and returns, and the
+	* effect is drawn on the next client pass.  Takes the SpecialPowerType as an
+	* Int so the header does not drag the enum in behind it. */
+extern void chromaSuperweaponLaunched( Int specialPowerType );
+
 /** Which cell of the six-by-twenty-two Chroma grid a command bar key lights, or
 	* -1 for a key the map does not cover.  Only lower case letters and digits get
 	* an answer, which is all the command bar ever binds. */

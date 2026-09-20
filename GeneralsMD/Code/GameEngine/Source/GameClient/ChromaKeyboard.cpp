@@ -177,6 +177,9 @@ static const Real ALARM_DEPTH_DATA = 0.25f;
 
 /// Half of this many frames lit, half dark.
 static const Int BLINK_PERIOD_FRAMES = 16;
+/// A power announces itself by blinking and then holds steady.  A key that blinks
+/// for the rest of the match stops being news and starts being an irritation.
+static const Int READY_BLINK_FRAMES = LOGICFRAMES_PER_SECOND * 3;
 /// The general's star on screen flashes on a one second cycle; the promotion
 /// lamp keeps to the same one rather than inventing a second rhythm.
 static const Int STAR_PERIOD_FRAMES = LOGICFRAMES_PER_SECOND;
@@ -290,6 +293,215 @@ static Bool chromaBlinkIsOn( UnsignedInt frame, Int periodFrames )
 static Int chromaKeyboardCell( Int row, Int column )
 {
 	return row * KEYBOARD_COLUMNS + column;
+}
+
+//-----------------------------------------------------------------------------
+/** Ready holds the eye for a few seconds and then stops asking for it. */
+static Int chromaReadyColor( UnsignedInt frame, UnsignedInt readySince, Int color )
+{
+	if( readySince == 0 || frame < readySince )
+		return color;
+	if( frame - readySince >= (UnsignedInt)READY_BLINK_FRAMES )
+		return color;
+	return chromaBlinkIsOn( frame, BLINK_PERIOD_FRAMES ) ? color : COLOR_OFF;
+}
+
+/// When each power last came ready, so the key can announce itself and then stop
+/// shouting.  Zero means it is not ready at all.
+static UnsignedInt s_powerReadySince[ SPECIALPOWER_COUNT ];
+static UnsignedInt s_superweaponReadySince = 0;
+
+//-----------------------------------------------------------------------------
+// The superweapon effects.  A launch takes the whole board for a few seconds:
+// nothing else on it matters while a nuke is in the air.
+//-----------------------------------------------------------------------------
+enum ChromaEffect
+{
+	EFFECT_NONE = 0,
+	EFFECT_NUKE,
+	EFFECT_LASER,
+	EFFECT_SCUD
+};
+
+static const Int NUKE_EFFECT_FRAMES = LOGICFRAMES_PER_SECOND * 3;
+static const Int LASER_EFFECT_FRAMES = LOGICFRAMES_PER_SECOND * 3;
+static const Int SCUD_EFFECT_FRAMES = LOGICFRAMES_PER_SECOND * 4;
+/// How far a wave front travels a second, in half-boards.  A device is two of
+/// these across, so the front clears it in about a second and a quarter.
+static const Real WAVE_SPEED = 1.6f;
+/// How wide the lit band around the front is, in the same units.
+static const Real WAVE_WIDTH = 0.45f;
+static const Int SCUD_WAVE_COUNT = 5;
+
+static ChromaEffect s_effect = EFFECT_NONE;
+static UnsignedInt s_effectStartFrame = 0;
+static UnsignedInt s_effectSeed = 0;
+
+//-----------------------------------------------------------------------------
+/** A cheap integer hash, for the flame's flicker and the scud's landing spots.
+	* Not the game's random number generator: that one is logic state, and drawing
+	* from it here would desync every machine that has a keyboard. */
+static UnsignedInt chromaHash( UnsignedInt value )
+{
+	value ^= value >> 16;
+	value *= 0x7feb352du;
+	value ^= value >> 15;
+	value *= 0x846ca68bu;
+	value ^= value >> 16;
+	return value;
+}
+
+//-----------------------------------------------------------------------------
+static Real chromaHashUnit( UnsignedInt value )
+{
+	return (Real)(chromaHash( value ) & 0xFFFF) / 65535.0f;
+}
+
+//-----------------------------------------------------------------------------
+static Int chromaEffectFrames( ChromaEffect effect )
+{
+	switch( effect )
+	{
+		case EFFECT_NUKE:		return NUKE_EFFECT_FRAMES;
+		case EFFECT_LASER:	return LASER_EFFECT_FRAMES;
+		case EFFECT_SCUD:		return SCUD_EFFECT_FRAMES;
+		default:						return 0;
+	}
+}
+
+//-----------------------------------------------------------------------------
+/** How bright the band around a wave front is at this distance from its origin. */
+static Real chromaWaveIntensity( Real distance, Real radius )
+{
+	if( radius <= 0.0f )
+		return 0.0f;
+	const Real offset = distance - radius;
+	const Real band = 1.0f - (offset < 0.0f ? -offset : offset) / WAVE_WIDTH;
+	return band > 0.0f ? band : 0.0f;
+}
+
+//-----------------------------------------------------------------------------
+static Bool chromaEffectIsLive( UnsignedInt frame )
+{
+	if( s_effect == EFFECT_NONE )
+		return FALSE;
+
+	const Int duration = chromaEffectFrames( s_effect );
+	if( frame < s_effectStartFrame || frame - s_effectStartFrame >= (UnsignedInt)duration )
+	{
+		s_effect = EFFECT_NONE;
+		return FALSE;
+	}
+	return TRUE;
+}
+
+//-----------------------------------------------------------------------------
+/** The colour a cell takes while an effect is running.  The position comes in
+	* normalised so one set of maths covers a keyboard, a mouse and a fifteen lamp
+	* strip without knowing what shape any of them is. */
+static Int chromaEffectColor( Real acrossFraction, Real downFraction, Int cellIndex,
+															UnsignedInt frame )
+{
+	const Int duration = chromaEffectFrames( s_effect );
+	const Real elapsed = (Real)(frame - s_effectStartFrame) / (Real)LOGICFRAMES_PER_SECOND;
+	const Real fade = 1.0f - (Real)(frame - s_effectStartFrame) / (Real)duration;
+
+	// Centred coordinates, so the edges of any device sit at about one unit out.
+	const Real across = (acrossFraction - 0.5f) * 2.0f;
+	const Real down = (downFraction - 0.5f) * 2.0f;
+
+	if( s_effect == EFFECT_NUKE )
+	{
+		const Real distance = (Real)sqrt( across * across + down * down );
+		const Real heat = chromaWaveIntensity( distance, elapsed * WAVE_SPEED ) * fade;
+		// Deep red at the edge of the band, orange through it, white only at the
+		// front itself, which is what a fireball does.
+		return chromaColor( heat, heat * heat, heat * heat * heat * heat );
+	}
+
+	if( s_effect == EFFECT_LASER )
+	{
+		// A flame, not a wave: every lamp burns, and the pattern crawls.
+		const UnsignedInt crawl = frame / 2;
+		const Real flicker = chromaHashUnit( (UnsignedInt)cellIndex * 2654435761u + crawl );
+		const Real body = (0.40f + 0.60f * flicker) * fade;
+		// Dark blue through the body, cyan where it burns hardest, no red anywhere.
+		return chromaColor( body * body * body * 0.25f, body * body * 0.75f, body );
+	}
+
+	// The scud storm is a salvo, so it lands in several places, none of them the
+	// middle, and they do not all land at once.
+	Real best = 0.0f;
+	for( Int wave = 0; wave < SCUD_WAVE_COUNT; ++wave )
+	{
+		const UnsignedInt waveSeed = s_effectSeed + (UnsignedInt)wave * 0x9e3779b9u;
+		const Real originAcross = (chromaHashUnit( waveSeed ) - 0.5f) * 2.0f;
+		const Real originDown = (chromaHashUnit( waveSeed + 1 ) - 0.5f) * 2.0f;
+		const Real delay = chromaHashUnit( waveSeed + 2 ) * 0.9f;
+		if( elapsed < delay )
+			continue;
+
+		const Real dx = across - originAcross;
+		const Real dy = down - originDown;
+		const Real distance = (Real)sqrt( dx * dx + dy * dy );
+		const Real intensity = chromaWaveIntensity( distance, (elapsed - delay) * WAVE_SPEED );
+		if( intensity > best )
+			best = intensity;
+	}
+	const Real gas = best * fade;
+	return chromaColor( gas * gas * gas * 0.4f, gas, gas * gas * gas * 0.4f );
+}
+
+//-----------------------------------------------------------------------------
+void chromaSuperweaponLaunched( Int specialPowerType )
+{
+	ChromaEffect effect = EFFECT_NONE;
+	switch( specialPowerType )
+	{
+		case SPECIAL_PARTICLE_UPLINK_CANNON:
+		case SUPW_SPECIAL_PARTICLE_UPLINK_CANNON:
+		case LAZR_SPECIAL_PARTICLE_UPLINK_CANNON:
+			effect = EFFECT_LASER;
+			break;
+
+		case SPECIAL_NEUTRON_MISSILE:
+		case NUKE_SPECIAL_NEUTRON_MISSILE:
+		case SUPW_SPECIAL_NEUTRON_MISSILE:
+			effect = EFFECT_NUKE;
+			break;
+
+		case SPECIAL_SCUD_STORM:
+			effect = EFFECT_SCUD;
+			break;
+
+		default:
+			return;
+	}
+
+	s_effect = effect;
+	s_effectStartFrame = TheGameLogic ? TheGameLogic->getFrame() : 0;
+	s_effectSeed = chromaHash( s_effectStartFrame + (UnsignedInt)specialPowerType );
+}
+
+//-----------------------------------------------------------------------------
+/** Paint the running effect over every device, on top of whatever the layout put
+	* there.  Nothing else on the board matters while a nuke is in the air. */
+static void chromaPaintEffect( Int *cells, UnsignedInt frame )
+{
+	for( Int device = 0; device < CHROMA_DEVICE_COUNT; ++device )
+	{
+		const ChromaDevice &info = CHROMA_DEVICES[ device ];
+		for( Int row = 0; row < info.rows; ++row )
+		{
+			for( Int column = 0; column < info.columns; ++column )
+			{
+				const Real across = info.columns > 1 ? (Real)column / (Real)(info.columns - 1) : 0.5f;
+				const Real down = info.rows > 1 ? (Real)row / (Real)(info.rows - 1) : 0.5f;
+				const Int cell = info.firstCell + row * info.columns + column;
+				cells[ cell ] = chromaEffectColor( across, down, cell, frame );
+			}
+		}
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -604,6 +816,19 @@ static const ChromaSnapshot &chromaWalkPlayer( Player *localPlayer, UnsignedInt 
 
 	if( localPlayer != NULL )
 		localPlayer->iterateObjects( chromaVisitObject, &snapshot );
+
+	for( Int type = 0; type < SPECIALPOWER_COUNT; ++type )
+	{
+		if( !snapshot.powerReady[ type ] )
+			s_powerReadySince[ type ] = 0;
+		else if( s_powerReadySince[ type ] == 0 )
+			s_powerReadySince[ type ] = frame;
+	}
+	if( !snapshot.anySuperweaponReady )
+		s_superweaponReadySince = 0;
+	else if( s_superweaponReadySince == 0 )
+		s_superweaponReadySince = frame;
+
 	return snapshot;
 }
 
@@ -768,7 +993,6 @@ static void chromaFillPowerTray( Int *cells, Player *localPlayer, const ChromaSn
 	if( slots > FKEY_COUNT )
 		slots = FKEY_COUNT;
 
-	const Bool blinkOn = chromaBlinkIsOn( frame, BLINK_PERIOD_FRAMES );
 	for( Int slot = 0; slot < slots; ++slot )
 	{
 		const CommandButton *button = commandSet->getCommandButton( slot );
@@ -779,13 +1003,20 @@ static void chromaFillPowerTray( Int *cells, Player *localPlayer, const ChromaSn
 		if( powerTemplate == NULL )
 			continue;
 
+		// A power whose promotion has not been bought is not on the tray on screen
+		// and has no business on the key either, which is what made the first two
+		// keys of the row light for powers nobody could use.
+		const ScienceType required = powerTemplate->getRequiredScience();
+		if( required != SCIENCE_INVALID && !localPlayer->hasScience( required ) )
+			continue;
+
 		const Int type = (Int)powerTemplate->getSpecialPowerType();
 		if( type < 0 || type >= SPECIALPOWER_COUNT || snapshot.powerCharge[ type ] < 0.0f )
 			continue;
 
 		const Int cell = chromaKeyboardCell( FKEY_ROW, FKEY_FIRST_COLUMN + slot );
 		if( snapshot.powerReady[ type ] )
-			cells[ cell ] = blinkOn ? COLOR_WARM_WHITE : COLOR_OFF;
+			cells[ cell ] = chromaReadyColor( frame, s_powerReadySince[ type ], COLOR_WARM_WHITE );
 		else
 			cells[ cell ] = chromaScale( factionColor, snapshot.powerCharge[ type ] );
 	}
@@ -797,7 +1028,7 @@ static void chromaFillPowerTray( Int *cells, Player *localPlayer, const ChromaSn
 static void chromaFillNumpad( Int *cells, const ChromaSnapshot &snapshot, Int factionColor,
 															UnsignedInt frame )
 {
-	const Bool blinkOn = chromaBlinkIsOn( frame, BLINK_PERIOD_FRAMES );
+	const Int readyColor = chromaReadyColor( frame, s_superweaponReadySince, COLOR_WARM_WHITE );
 	const Int lit = chromaBarSegments( snapshot.bestSuperweaponCharge, NUMPAD_CELLS );
 
 	Int index = 0;
@@ -807,7 +1038,7 @@ static void chromaFillNumpad( Int *cells, const ChromaSnapshot &snapshot, Int fa
 		{
 			Int color;
 			if( snapshot.anySuperweaponReady )
-				color = blinkOn ? COLOR_WARM_WHITE : COLOR_OFF;
+				color = readyColor;
 			else
 				color = index < lit ? factionColor : COLOR_OFF;
 			cells[ chromaKeyboardCell( row, column ) ] = color;
@@ -996,6 +1227,10 @@ static void chromaFillCells( Int *cells )
 	if( !inMatch || localPlayer == NULL || TheHotKeyManager == NULL )
 	{
 		chromaResetAlerts();
+		s_effect = EFFECT_NONE;
+		s_superweaponReadySince = 0;
+		for( Int type = 0; type < SPECIALPOWER_COUNT; ++type )
+			s_powerReadySince[ type ] = 0;
 		return;
 	}
 
@@ -1019,6 +1254,11 @@ static void chromaFillCells( Int *cells )
 	// rather than the logic, so it is set here where the player is in hand.
 	cells[ chromaKeyboardCell( STATUS_ROW, STATUS_RADAR_COLUMN ) ] =
 		localPlayer->hasRadar() ? chromaScale( COLOR_GREEN, AMBIENT_SCALE ) : COLOR_OFF;
+
+	// A superweapon going off takes the lot for a few seconds.  It goes on last
+	// because it is meant to bury everything under it.
+	if( chromaEffectIsLive( frame ) )
+		chromaPaintEffect( cells, frame );
 }
 
 //-----------------------------------------------------------------------------
