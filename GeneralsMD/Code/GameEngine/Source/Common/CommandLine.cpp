@@ -917,41 +917,11 @@ Int parseParticleCap(char *args[], int num)
 	return 2;
 }
 
-/* -shadowmap: draw every shadow caster into the sun's depth buffer as well as its stencil volume.
-
-	 Nothing samples that buffer yet, so on its own this switch changes no pixel of the frame and
-	 costs a second draw of every caster.  That is deliberate: it makes the sun's camera, the box it
-	 covers and the depth pass provable on their own, before anything is read back out of it.
-	 -shadowmapreport then logs what the pass actually left in the buffer, which is the only thing
-	 that tells a pass that drew the world apart from a pass that drew nothing.  Direct3D 11 only;
-	 the map has no Direct3D 9 twin.  SHADOW-MAP-PLAN.md phase 1. */
-Int parseShadowMap(char *args[], int num)
-{
-	if (TheWritableGlobalData)
-	{
-		// The map replaces the volumes rather than joining them: a caster that cast both would cast
-		// twice, once hard and once soft, and the hard one would win every argument.  On by default
-		// since the shadows settled, so this switch only puts back what a -noshadowmap took off.
-		TheWritableGlobalData->m_shadowMap = TRUE;
-		TheWritableGlobalData->m_shadowMapOnly = TRUE;
-	}
-	return 1;
-}
-
-/* -noshadowmap: the stencil volumes back, the way the game drew shadows before the map.
-
-	 It is what a comparison is made against, and it is what somebody types if the new shadows are
-	 wrong on their machine.  A machine with no Direct3D 11 device needs nothing: it fills no map
-	 and keeps the volumes on its own. */
-Int parseNoShadowMap(char *args[], int num)
-{
-	if (TheWritableGlobalData)
-	{
-		TheWritableGlobalData->m_shadowMap = FALSE;
-		TheWritableGlobalData->m_shadowMapOnly = FALSE;
-	}
-	return 1;
-}
+/* The sun's shadow map is how this game draws shadows, and there is no switch for it.  It fills
+	 every frame and the stencil volumes stand down behind it; a machine with no Direct3D 11 device
+	 fills no map and keeps the volumes on its own, which is the whole of the fallback.  What is
+	 left below are the three switches that exist for looking at the shadows rather than for playing
+	 with them.  SHADOW-MAP-PLAN.md. */
 
 /* -shadowtune <penumbra> <skyfill> <strength> <widest>: the four numbers that decide what a shadow
 	 from the map looks like, from the command line rather than from a rebuild.
@@ -2290,8 +2260,6 @@ static CommandLineParam params[] =
 	{ "-particlebounce", parseParticleBounce },
 	{ "-smoke", parseSmoke },
 	{ "-particlecap", parseParticleCap },
-	{ "-shadowmap", parseShadowMap },
-	{ "-noshadowmap", parseNoShadowMap },
 	{ "-shadowmapreport", parseShadowMapReport },
 	{ "-shadowmaponly", parseShadowMapOnly },
 	{ "-shadowmapboth", parseShadowMapBoth },

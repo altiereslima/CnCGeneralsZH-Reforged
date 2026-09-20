@@ -66,8 +66,10 @@ foreach ($case in $cases) {
   $index++
   if ($Only -gt 0 -and $index -ne $Only) { continue }
   $name = "{0:d2}" -f $index
-  $volumes = Shoot $case "$name`_volumes" $null
-  $map = Shoot $case "$name`_map" @('-shadowmap')
+  # The map is how the game draws now, so the pair is the frame as it ships against the frame with
+  # both shadow mechanisms in it, which is the only way left to see the volumes at all.
+  $map = Shoot $case "$name`_map" $null
+  $volumes = Shoot $case "$name`_volumes" @('-shadowmapboth')
   Write-Host "$name $($case.map) $($case.x),$($case.y): $volumes | $map"
 }
 
