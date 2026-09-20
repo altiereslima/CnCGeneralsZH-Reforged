@@ -198,6 +198,16 @@ extern Real Crowd_remaining( const Object *obj );
 		1236 for this. */
 extern Real Crowd_brakeSpeed( Real speed, Real blockerSpeed, Real gap, Int frames );
 
+/** The throttle a unit is allowed this frame, given the one it held last frame.
+
+		A brake is taken the moment it is asked for; coming off one is a ramp.  Every input to the
+		speed cap is read raw once a frame - who is in front of us, how fast he is going, how much air
+		is left - and all three of them flicker: the blocker slips out of the lookahead cone for a
+		frame and the cap jumps back to full speed, the unit lunges, the blocker is inside the cone
+		again and the brake goes back on.  That is a column pumping the pedal several times a second,
+		and it feeds itself, because the unit behind reads our speed and does the same harder. */
+extern Real Crowd_releaseCap( Real held, Real want, Real filter );
+
 /** The inside of a bend counts as being further ahead than it is.
 		A unit on the inside of a turn has the least room and is the easiest to squeeze, so it is
 		let out of the corner first and the outside units, which have room to keep rolling, flow

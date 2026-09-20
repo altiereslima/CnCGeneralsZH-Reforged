@@ -855,6 +855,8 @@ private:
 		 band itself is not: a filter, a stuck count and a half-finished backing-out manoeuvre are all
 		 rebuilt within a second of the load, and a saved one restarts a jam that is over. */
 	Real				m_crowdSepSmooth;						///< low-passedsideways push from the neighbours.
+	Real				m_crowdCap;									///< the speed cap held from last frame: a brake lowers it at once, only a ramp raises it.
+	Bool				m_crowdCapValid;						///< FALSE until there is a held cap to ramp up from.
 	Real				m_crowdAim;									///< low-passeddirection the steering point is taken in, radians.
 	Bool				m_crowdAimValid;						///< FALSEuntil the filter has something to start from.
 	/* Being stuck, and getting out of it.  None of this is part of the crowd model: a unit that has

@@ -521,6 +521,14 @@ Real Crowd_brakeSpeed( Real speed, Real blockerSpeed, Real gap, Int frames )
 }
 
 //-------------------------------------------------------------------------------------------------
+Real Crowd_releaseCap( Real held, Real want, Real filter )
+{
+	if (want <= held)
+		return want;
+	return held + (want - held) * filter;
+}
+
+//-------------------------------------------------------------------------------------------------
 Real Crowd_bendBonus( const CrowdCorridor *corr, Int sample, Real lat )
 {
 	if (corr == NULL || corr->isEmpty())

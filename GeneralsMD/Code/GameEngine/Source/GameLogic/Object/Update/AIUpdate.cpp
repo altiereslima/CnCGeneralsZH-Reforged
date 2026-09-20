@@ -323,6 +323,8 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_crowdQueued = 0;
 	m_crowdSide = 1;
 	m_crowdSepSmooth = 0.0f;
+	m_crowdCap = 0.0f;
+	m_crowdCapValid = FALSE;
 	m_crowdAim = 0.0f;
 	m_crowdAimValid = FALSE;
 	m_noProgress = 0;
@@ -1640,6 +1642,7 @@ static const Int  CROWD_BRAKE_FRAMES	= 8;		///< frames of closing time a brake i
 static const Int  CROWD_FAN_FRAMES	= 12;			///< held up this long before spreading out
 static const Real CROWD_FAN_RATE		= 0.8f;		///< and then sideways at this much a frame
 static const Real CROWD_SEP_FILTER	= 0.13f;	///< how much of a frame's sideways push is believed (~4/sec)
+static const Real CROWD_RELEASE_FILTER	= 0.15f;	///< how fast the throttle comes back once a brake lifts (~half a second to full)
 static const Real CROWD_AIM_CRUISE	= 0.23f;	///< how fast the aim follows the route while driving (~7/sec)
 static const Real CROWD_AIM_URGENT	= 0.67f;	///< and while manoeuvring (~20/sec), where lag is worse than twitch
 static const Real CROWD_AIM_DEAD		= 0.035f;	///< two degrees: hold the wheel still rather than chase the noise
@@ -2340,6 +2343,8 @@ void AIUpdateInterface::crowdReleaseCorridor( void )
 	m_crowdQueued = 0;
 	m_crowdHoldFrame = 0;
 	m_crowdSepSmooth = 0.0f;
+	m_crowdCap = 0.0f;
+	m_crowdCapValid = FALSE;
 	m_crowdAimValid = FALSE;
 	/* The backing-out manoeuvre survives the route.  Being wedged is the one thing a new route does
 		 not cure - the new one starts in the same hole - and a unit that repaths every second while
@@ -3567,8 +3572,25 @@ void AIUpdateInterface::crowdSteer( Coord3D& goalPos, Real& speed )
 
 	goalPos.z = TheTerrainLogic->getGroundHeight( goalPos.x, goalPos.y );
 
-	if (cap < speed)
-		speed = cap;
+	/* Brake now, come off the brake slowly.  Everything above decides the cap from one frame's worth
+		 of neighbours, and that answer is not steady: the blocker slips out of the lookahead cone for
+		 a frame, or drifts a foot sideways past the lane test, and the cap goes from his speed to ours
+		 and back.  The unit lunges and brakes several times a second, the unit behind reads that speed
+		 and does the same harder, and the whole column shunts.  The lane, the sideways push and the
+		 aim are all filtered for exactly this reason; the throttle was the one number still handed to
+		 the locomotor raw. */
+	if (!m_crowdCapValid)
+	{
+		m_crowdCap = cap;
+		m_crowdCapValid = TRUE;
+	}
+	else
+	{
+		m_crowdCap = Crowd_releaseCap( m_crowdCap, cap, CROWD_RELEASE_FILTER );
+	}
+
+	if (m_crowdCap < speed)
+		speed = m_crowdCap;
 
 	if (TheGlobalData->m_showLanes && (now % LOGICFRAMES_PER_SECOND) == 0)
 	{

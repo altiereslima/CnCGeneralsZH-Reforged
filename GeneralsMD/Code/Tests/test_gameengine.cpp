@@ -12027,6 +12027,41 @@ TEST(crowd_brake_only_reads_closing_time)
 	CHECK_NEAR( Crowd_brakeSpeed( full, 0.0f, 0.0f, 0 ), full, 0.0001f );
 }
 
+TEST(crowd_throttle_brakes_at_once_and_releases_slowly)
+{
+	const Real filter = 0.15f;
+	const Real full = 2.0f;
+
+	// a brake is taken whole, however hard it is
+	CHECK_NEAR( Crowd_releaseCap( full, 0.5f, filter ), 0.5f, 0.0001f );
+	CHECK_NEAR( Crowd_releaseCap( full, 0.0f, filter ), 0.0f, 0.0001f );
+	CHECK_NEAR( Crowd_releaseCap( full, full, filter ), full, 0.0001f );
+
+	// coming off one is a ramp, and it never overshoots what was asked for
+	Real held = 0.0f;
+	for (Int frame = 0; frame < 60; frame++)
+	{
+		const Real next = Crowd_releaseCap( held, full, filter );
+		CHECK( next > held );
+		CHECK( next <= full + 0.0001f );
+		held = next;
+	}
+	CHECK_NEAR( held, full, 0.01f );
+
+	/* The thing the ramp is for: a blocker flickering in and out of the lookahead cone every other
+		 frame used to hand the locomotor full speed on every other frame.  Half a second of that must
+		 not average anywhere near full speed. */
+	held = full;
+	Real sum = 0.0f;
+	const Int frames = 15;
+	for (Int frame = 0; frame < frames; frame++)
+	{
+		held = Crowd_releaseCap( held, (frame % 2) ? full : 0.5f, filter );
+		sum += held;
+	}
+	CHECK( sum / (Real)frames < 0.7f );
+}
+
 //-------------------------------------------------------------------------------------------------
 // A shadow request is filled in field by field by whoever makes it, and the debris draw module
 // never touched the name at all.  The shadow manager reads that name the moment its first byte is
