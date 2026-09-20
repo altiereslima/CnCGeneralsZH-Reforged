@@ -63,6 +63,8 @@ static const char CINEMA_COMMENT_CHAR = '#';
 enum { CINEMA_MAX_TOKENS = 3 + 2 * CINEMA_MAX_ROUTE_POINTS };
 static const Real CINEMA_PITCH_LIMIT_DEGREES = 36.0f;	///< View::setPitch clamps to PI/5 either way
 static const Real CINEMA_FOLLOW_RATE = 4.0f;						///< how fast a follow catches up, per second
+static const Real CINEMA_CENTRE_GAIN = 0.5f;						///< share of the framing error taken out each frame
+static const Real CINEMA_CENTRE_LIMIT = 900.0f;					///< a correction larger than this is a bad projection
 static const Real CINEMA_FRAME_MS = 1000.0f / (Real)LOGICFRAMES_PER_SECOND;
 static const Real CINEMA_LETTERBOX_ASPECT = 2.39f;	///< the game's own bars crop to 16:9, which on a 16:9 screen is no bars at all
 
@@ -369,6 +371,8 @@ static Real theCinemaRouteY[ CINEMA_MAX_ROUTE_POINTS ];
 static Int theCinemaRoutePoints = 0;
 static Real theCinemaRouteStart = 0.0f;
 static Real theCinemaRouteLength = 0.0f;
+static Real theCinemaCentreX = 0.0f;				///< what the framing loop is adding to the look point
+static Real theCinemaCentreY = 0.0f;
 static ObjectID theCinemaFollowID = INVALID_ID;
 static Real theCinemaFollowUntil = 0.0f;		///< 0 is for as long as the next shot allows
 static Real theCinemaLastNow = 0.0f;
@@ -654,6 +658,8 @@ static void runShot( const CinemaShot &shot )
 			theCinemaFollowID = obj->getID();
 			theCinemaFollowUntil = (shot.seconds > 0.0f) ? now + shot.seconds : 0.0f;
 			theCinemaPlaceMode = CINEMA_PLACE_FOLLOW;
+			theCinemaCentreX = 0.0f;
+			theCinemaCentreY = 0.0f;
 			break;
 		}
 
@@ -691,6 +697,30 @@ static void runShot( const CinemaShot &shot )
 	}
 }
 
+/** The camera looks at a point on the ground and the tilt swings the picture around it, so a unit
+		standing on that point rides above the middle of the frame, further the steeper the tilt. Rather
+		than work the offset out from the projection, the loop measures it: where the frame's middle
+		lands in the world at the unit's own height is the point the camera should be looking at, and
+		the difference between that and the unit is taken out of the look point a little at a time.
+		It settles in a few frames and stays settled while the tilt or the zoom is still moving. */
+static void cinemaCentreOn( const Coord3D *subject )
+{
+	ICoord2D middle;
+	middle.x = TheTacticalView->getWidth() / 2;
+	middle.y = TheTacticalView->getHeight() / 2;
+
+	Coord3D atMiddle;
+	TheTacticalView->screenToWorldAtZ( &middle, &atMiddle, subject->z );
+
+	const Real missX = subject->x - atMiddle.x;
+	const Real missY = subject->y - atMiddle.y;
+	if (fabs( missX ) > CINEMA_CENTRE_LIMIT || fabs( missY ) > CINEMA_CENTRE_LIMIT)
+		return;
+
+	theCinemaCentreX += missX * CINEMA_CENTRE_GAIN;
+	theCinemaCentreY += missY * CINEMA_CENTRE_GAIN;
+}
+
 /** A followed unit is chased, not pinned: the camera closes a fixed share of the gap every second,
 		so a unit that jinks does not shake the picture and one that dies leaves the camera where it was. */
 static void cinemaChase( Real now )
@@ -712,6 +742,7 @@ static void cinemaChase( Real now )
 	const Real share = (elapsed > 0.0f) ? 1.0f - (Real)exp( -CINEMA_FOLLOW_RATE * elapsed ) : 0.0f;
 	theCinemaStillX += (obj->getPosition()->x - theCinemaStillX) * share;
 	theCinemaStillY += (obj->getPosition()->y - theCinemaStillY) * share;
+	cinemaCentreOn( obj->getPosition() );
 }
 
 void CinemaDirector_update( void )
@@ -744,6 +775,11 @@ void CinemaDirector_update( void )
 			cinemaChase( now );
 		Coord3D look;
 		cinemaPlace( now, &look.x, &look.y );
+		if (theCinemaPlaceMode == CINEMA_PLACE_FOLLOW)
+		{
+			look.x += theCinemaCentreX;
+			look.y += theCinemaCentreY;
+		}
 		look.z = TheTerrainLogic->getGroundHeight( look.x, look.y );
 		TheTacticalView->lookAt( &look );
 		TheTacticalView->setZoom( theCinemaBaseZoom * theCinemaZoom.at( now ) );

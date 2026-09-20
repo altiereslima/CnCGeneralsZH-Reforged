@@ -4,7 +4,6 @@
 #     -autoskirmish 2 -aidiff easy -seed 5 -map "Maps\Golden Oasis\Golden Oasis.map"
 #     -cinema tr_oasis -video 300 690 tr_oasis -maxframes 710
 
-0     letterbox  on
 10    cut        3040 1450 0.75 0 -14
 11    route      12 3040 1330 3040 1210 2980 1130
 11    zoom       0.5 12

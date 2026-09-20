@@ -1,0 +1,17 @@
+# Trailer: the middle of a combined-arms fight, ridden from beside a tank and then pulled up over it.
+# No letterbox: the interface goes, the picture stays the full frame.
+#
+#   generals.exe -borderless -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 2500 -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario trailer_clash
+#     -cinema tr_clash -video 780 1320 tr_clash -maxframes 1340
+
+25    pitch      -6 2
+26    follow     ChinaTankBattleMaster 10
+26    zoom       0.45 5
+31    orbit      40 10
+36    unfollow
+36    zoom       0.9 5
+36    pitch      -18 5
+41    follow     AmericaTankCrusader 6
+44    end

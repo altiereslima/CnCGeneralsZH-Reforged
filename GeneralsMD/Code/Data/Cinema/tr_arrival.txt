@@ -1,0 +1,13 @@
+# Trailer: two hundred mixed units filling the point they were sent to, seen from above the point.
+# They cross the whole of Twilight Flame to get there, so the filming starts at 45 seconds.
+#
+#   generals.exe -borderless -msaa 0 -quickstart -noshellmap -multiInstance
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover -seed 7 -peacetime 20
+#     -scenario trailer_arrival -cinema tr_arrival -video 810 1350 tr_arrival -maxframes 1370
+#
+# 1733,4405 is slot 1's start on that map, which is where the crowd is sent.
+
+27    cut        1135 3900 0.6 0 -30
+28    zoom       0.42 16
+28    orbit      25 16
+45    end

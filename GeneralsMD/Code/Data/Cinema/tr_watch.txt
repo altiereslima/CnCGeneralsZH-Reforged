@@ -9,5 +9,4 @@
 # No camera verb runs, so the camera stays the one -autocamera moves: every six seconds it jumps to
 # wherever the fighting is. The jumps are the cuts.
 
-0     letterbox  on
 558   end

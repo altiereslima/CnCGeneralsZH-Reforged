@@ -1,0 +1,15 @@
+# Trailer: the column narrowing where the map narrows and opening out again on the other side. The
+# camera rides one tank through it, so the lanes go past the frame rather than the frame past them.
+#
+#   generals.exe -borderless -msaa 0 -quickstart -noshellmap -multiInstance
+#     -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover -seed 3 -peacetime 20
+#     -scenario trailer_corridor -cinema tr_corridor -video 900 1440 tr_corridor -maxframes 1460
+
+29    pitch      -10 2
+29    zoom       0.3 3
+30    follow     AmericaTankCrusader 18
+38    orbit      35 10
+48    unfollow
+48    zoom       0.75 4
+48    pitch      -24 4
+52    end
