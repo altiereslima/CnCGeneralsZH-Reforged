@@ -4325,7 +4325,12 @@ void InGameUI::addShiftAttackQueueTail( OrderHint& hint, const std::vector<Order
 	for( std::vector<AttackWaypoint>::const_iterator qit = m_shiftAttackQueue.begin();
 			 qit != m_shiftAttackQueue.end(); ++qit )
 	{
-		if( qit->targetID != INVALID_ID )
+		if( qit->kind == ATTACK_WAYPOINT_GUARD )
+		{
+			hint.kind = ORDER_HINT_GUARD;
+			hint.to = qit->pos;
+		}
+		else if( qit->targetID != INVALID_ID )
 		{
 			// a queued victim is drawn where it stands now rather than where it stood when the player
 			// picked it, so the thread follows a target that is driving away.  One that died while it
@@ -4543,19 +4548,54 @@ void InGameUI::queueAttackWaypoint( const Coord3D *pos, Object *targetObj )
 	AttackWaypoint order;
 	order.pos = *pos;
 	order.targetID = targetObj ? targetObj->getID() : INVALID_ID;
+	order.kind = ATTACK_WAYPOINT_ATTACK;
 
 	// remembered rather than read again when the order goes out: the attack key drops the moment the
 	// first order of the queue is sent, so everything behind it used to lose its force attack
 	order.forceAttack = isForceAttackArmed();
 
-	// who the queue belongs to.  A selection that is not part of the group holding the queue starts
-	// a fresh one rather than adding to whatever the old selection was doing
+	pushShiftAttackOrder( order );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Shift held, guard armed, left click: the group takes up its post once it has finished whatever
+	* the queue already holds - "clear this, then sit on that ridge" in one set of clicks.  A guard
+	* is where the queue stops, because a posted unit has no next point to walk to and nothing after
+	* it would ever come round. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::queueGuardWaypoint( const Coord3D *pos )
+{
+	AttackWaypoint order;
+	order.pos = *pos;
+	order.targetID = INVALID_ID;
+	order.forceAttack = FALSE;
+	order.kind = ATTACK_WAYPOINT_GUARD;
+
+	pushShiftAttackOrder( order );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Put one order on the end of the queue, or start a fresh queue with it.  A selection that is not
+	* part of the group holding the queue starts its own rather than adding to whatever the old
+	* selection was doing. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::pushShiftAttackOrder( const AttackWaypoint& order )
+{
 	std::vector<ObjectID> current;
 	collectSelectedObjectIDs( current );
 
 	if( !m_shiftAttackQueueRunning || !selectionOwnsShiftAttackQueue( current ) )
 	{
 		clearShiftAttackQueue();
+
+		// a guard with nothing in front of it is just a guard, and starting a queue on one would
+		// leave the list waiting on an order that never finishes
+		if( order.kind == ATTACK_WAYPOINT_GUARD )
+		{
+			sendShiftAttackOrder( order );
+			return;
+		}
+
 		m_shiftAttackQueueUnits = current;
 		m_shiftAttackQueueRunning = TRUE;
 		m_shiftAttackQueueActive = order;
@@ -4563,6 +4603,10 @@ void InGameUI::queueAttackWaypoint( const Coord3D *pos, Object *targetObj )
 		sendShiftAttackOrder( order );
 		return;
 	}
+
+	// a guard is terminal, so anything clicked after one would never be reached
+	if( !m_shiftAttackQueue.empty() && m_shiftAttackQueue.back().kind == ATTACK_WAYPOINT_GUARD )
+		return;
 
 	m_shiftAttackQueue.push_back( order );
 }
@@ -4576,6 +4620,7 @@ void InGameUI::clearShiftAttackQueue( void )
 	m_shiftAttackQueueActive.targetID = INVALID_ID;
 	m_shiftAttackQueueActive.pos.zero();
 	m_shiftAttackQueueActive.forceAttack = FALSE;
+	m_shiftAttackQueueActive.kind = ATTACK_WAYPOINT_ATTACK;
 	m_shiftAttackQueueEngagedFrame = 0;
 	m_shiftAttackQueueWaitingForRearm = FALSE;
 	m_shiftAttackQueueWaitingForSelection = FALSE;
@@ -4626,6 +4671,14 @@ void InGameUI::logShiftAttackQueue( const char *why ) const
 //-------------------------------------------------------------------------------------------------
 void InGameUI::sendShiftAttackOrder( const AttackWaypoint& waypoint )
 {
+	if( waypoint.kind == ATTACK_WAYPOINT_GUARD )
+	{
+		GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_DO_GUARD_POSITION );
+		msg->appendLocationArgument( waypoint.pos );
+		msg->appendIntegerArgument( GUARDMODE_GUARD_WITHOUT_PURSUIT );
+		return;
+	}
+
 	if( waypoint.targetID != INVALID_ID )
 	{
 		GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_DO_ATTACK_OBJECT );
@@ -4857,6 +4910,15 @@ void InGameUI::updateShiftAttackQueue( void )
 		}
 
 		sendShiftAttackOrder( next );
+
+		// a post is where the group stays.  Nothing ends a guard, so there is nothing left to wait
+		// for and the queue closes with it rather than watching an order that never finishes
+		if( next.kind == ATTACK_WAYPOINT_GUARD )
+		{
+			logShiftAttackQueue( "guard sent, the list ends on it" );
+			clearShiftAttackQueue();
+			return;
+		}
 
 		m_shiftAttackQueueActive = next;
 		m_shiftAttackQueueEngagedFrame = TheGameLogic->getFrame();

@@ -478,13 +478,21 @@ public:  // ********************************************************************
 	// plain move queue rides on carries no order type, so this is a second queue: an ordinary
 	// message the client sends again once the order before it is over, nothing new for the logic
 	// to learn.
+	enum AttackWaypointKind
+	{
+		ATTACK_WAYPOINT_ATTACK,		///< attack-move to a point, or force-attack a victim
+		ATTACK_WAYPOINT_GUARD			///< post the group here.  A guard never ends, so it ends the queue
+	};
+
 	struct AttackWaypoint
 	{
-		Coord3D		pos;					///< where to attack-move to, or the last known spot of targetID
-		ObjectID	targetID;			///< INVALID_ID for a plain attack-move point, a specific victim otherwise
-		Bool			forceAttack;	///< what the attack key said when it was queued, not when it goes out
+		Coord3D						pos;					///< where to go, or the last known spot of targetID
+		ObjectID					targetID;			///< INVALID_ID for a point, a specific victim otherwise
+		Bool							forceAttack;	///< what the attack key said when it was queued, not when it goes out
+		AttackWaypointKind	kind;					///< which order this entry sends when it reaches the front
 	};
 	void queueAttackWaypoint( const Coord3D *pos, Object *targetObj );
+	void queueGuardWaypoint( const Coord3D *pos );
 	void clearShiftAttackQueue( void );
 	Bool isShiftAttackQueueActive( void ) const { return !m_shiftAttackQueue.empty() || m_shiftAttackQueueRunning; }
 	const std::vector<AttackWaypoint>& getShiftAttackQueue( void ) const { return m_shiftAttackQueue; }
@@ -1088,6 +1096,7 @@ protected:
 	void updateShiftAttackQueue( void );												///< send the next queued attack once the current one is over
 	void addOrderHint( OrderHint& hint, const std::vector<OrderHint>& previous );	///< keep a marker's age across the frame the list is rebuilt on
 	Bool getHeldAircraftOrder( const Object *obj, OrderHintKind& kind, Coord3D& to ) const;	///< the order an aircraft is sitting on until it is airborne
+	void pushShiftAttackOrder( const AttackWaypoint& order );		///< add one order to the queue, or start a queue with it
 	void sendShiftAttackOrder( const AttackWaypoint& waypoint );	///< put one queue entry on the message stream
 	void logShiftAttackQueue( const char *why ) const;						///< one line saying what the queue did and what its group was doing
 	void addShiftAttackQueueTail( OrderHint& hint, const std::vector<OrderHint>& previous );	///< every target still owed, drawn on from where the hint leaves off

@@ -4050,9 +4050,11 @@ static void peaceTimeTick( void )
 	 same goes for the tech buildings a match is fought over - an oil derrick changes hands four
 	 times and spends the rest of the game at a tenth of its health.
 
-	 So they mend themselves.  Two seconds without a hit and the walls go back up, a fixed fraction
+	 So they mend themselves.  Ten seconds without a hit and the walls go back up, a fixed fraction
 	 of full health a second, whether the building is standing empty, holding somebody's riflemen or
-	 flying somebody's flag.
+	 flying somebody's flag.  Slowly, and not while the fight is still going on: at two seconds and
+	 three percent a second a hospital cleared with a flamethrower was whole again before the squad
+	 that cleared it had walked over to it, so taking a building off somebody bought you nothing.
 
 	 Once a second, off the same object walk peace time uses.  Tech buildings and garrisonable
 	 structures are the test; KINDOF_CAPTURABLE is not, because it sits on every faction structure
@@ -4064,8 +4066,8 @@ static void neutralBuildingRepairTick( void )
 	if( now % LOGICFRAMES_PER_SECOND != 0 )
 		return;
 
-	const UnsignedInt quietFrames = 2 * LOGICFRAMES_PER_SECOND;
-	const Real repairFractionPerSecond = 0.03f;
+	const UnsignedInt quietFrames = 10 * LOGICFRAMES_PER_SECOND;
+	const Real repairFractionPerSecond = 0.0125f;
 
 	for( Object *obj = TheGameLogic->getFirstObject(); obj != NULL; obj = obj->getNextObject() )
 	{

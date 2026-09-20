@@ -964,12 +964,20 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 		// queue instead of the plain waypoint path - that path is a bare list of points with no
 		// order type, so it cannot carry an attack.  See InGameUI::queueAttackWaypoint.
 		Bool forceAttackHere = isForceAttackTargeting() && isForceAttackable;
+		Bool queuedGuard = TheInGameUI->isInWaypointMode() && TheInGameUI->isGuardArmed();
 		Bool queuedAttack = TheInGameUI->isInWaypointMode()
 												 && ( TheInGameUI->isInAttackMoveToMode() || forceAttackHere );
 
-		// the guard key posts the selection where it is pointed.  It outranks the queue: a guard has
-		// no next point to walk to, so there is nothing for shift to add it to
-		if( TheInGameUI->isGuardArmed() )
+		// the guard key posts the selection where it is pointed, and under shift it joins the line
+		// of orders as its last one: clear this, then sit there.  A guard never finishes, so nothing
+		// can be queued behind it
+		if( queuedGuard )
+		{
+			msgType = GameMessage::MSG_DO_GUARD_POSITION;
+			if( commandType == DO_COMMAND )
+				TheInGameUI->queueGuardWaypoint( pos );
+		}
+		else if( TheInGameUI->isGuardArmed() )
 		{
 			msgType = GameMessage::MSG_DO_GUARD_POSITION;
 		}
@@ -999,7 +1007,7 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 		{
 			msgType = GameMessage::MSG_DO_MOVETO;
 		}
-		if( commandType == DO_COMMAND && !queuedAttack )
+		if( commandType == DO_COMMAND && !queuedAttack && !queuedGuard )
 		{
 			GameMessage *movemsg = TheMessageStream->appendMessage( msgType );
 			if (msgType == GameMessage::MSG_DO_ATTACK_OBJECT)
