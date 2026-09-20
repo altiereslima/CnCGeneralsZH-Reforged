@@ -42,8 +42,11 @@ static const char * const PIXEL_PROFILE = "ps_4_0";
 // highlight it adds, and how bright that highlight is where the map's alpha is one.  Picked by eye
 // on four tanks and a desert base.
 static const float NORMAL_MAP_STRENGTH = 1.0f;
-static const float NORMAL_MAP_HIGHLIGHT_POWER = 24.0f;
-static const float NORMAL_MAP_HIGHLIGHT_SCALE = 0.5f;
+// The power was 24, which is a lobe narrow enough that a top-down camera over a fixed sun almost
+// never catches it: the gloss map decided what could shine and then nothing did.  Ten is wide
+// enough to catch a hull at the angles this game is actually played at.
+static const float NORMAL_MAP_HIGHLIGHT_POWER = 10.0f;
+static const float NORMAL_MAP_HIGHLIGHT_SCALE = 0.9f;
 
 // The three stage counts are one count in three headers.  The vertex constant block is copied
 // wholesale out of the backend's own texture transforms, the generated pixel shader declares one
