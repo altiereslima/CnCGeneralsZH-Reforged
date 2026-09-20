@@ -1,0 +1,43 @@
+# Trailer: four armies, two to a team, walking into each other in the middle of Twilight Flame.
+# All four seats attack-move on 2450,3650, which sits between the four start positions the map gives
+# a four-player game: 537,3188, 1733,4205, 3196,4103 and 4361,3126. America and the GLA have about
+# 900 units to cover and are there by second 25; the two Chinese seats are twice as far out and
+# arrive around second 45, which is what the shot list films.
+#
+#   generals.exe -borderless -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 2500 -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 4 -teams 2
+#     -takeover -side 0 FactionChina -side 1 FactionAmerica -side 2 FactionGLA -side 3 FactionChina
+#     -seed 7 -scenario trailer_fourway -cinema tr_watch
+#
+# The four-AI match this scene used to be filmed from never produced a fight worth looking at: the
+# busiest cell -autocamera found in eleven minutes held twelve units, and they were parked.
+
+30    spawn      0  ChinaTankBattleMaster           12  start0:0:200     40
+30    spawn      0  ChinaTankGattling               4   start0:260:200   36
+30    spawn      0  ChinaInfantryRedguard           16  start0:-160:320  18
+
+30    spawn      1  AmericaTankCrusader             12  start1:0:200     40
+30    spawn      1  AmericaTankPaladin              4   start1:-260:200  40
+30    spawn      1  AmericaInfantryRanger           16  start1:160:320   18
+
+30    spawn      2  GLATankScorpion                 14  start2:0:-200    36
+30    spawn      2  GLAVehicleTechnical             8   start2:280:-200  30
+30    spawn      2  GLAInfantryRebel                18  start2:-160:-320 18
+
+30    spawn      3  ChinaTankOverlord               4   start3:0:-200    50
+30    spawn      3  ChinaVehicleInfernoCannon       4   start3:-260:-200 40
+30    spawn      3  ChinaInfantryTankHunter         14  start3:160:-320  18
+
+90    attackmove 0  *  2450 3650
+90    attackmove 1  *  2450 3650
+90    attackmove 2  *  2450 3650
+90    attackmove 3  *  2450 3650
+
+1200  spawn      0  ChinaTankBattleMaster           8   start0:0:200     40
+1200  spawn      1  AmericaTankCrusader             8   start1:0:200     40
+1200  spawn      2  GLATankScorpion                 10  start2:0:-200    36
+1200  spawn      3  ChinaVehicleInfernoCannon       4   start3:0:-200    40
+1230  attackmove 0  *  2450 3650
+1230  attackmove 1  *  2450 3650
+1230  attackmove 2  *  2450 3650
+1230  attackmove 3  *  2450 3650
