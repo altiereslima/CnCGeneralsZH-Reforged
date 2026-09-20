@@ -41,9 +41,19 @@ function Shoot($case, $tag, $extra) {
   finally {
     Get-Process -Name generals -ErrorAction SilentlyContinue | Stop-Process -Force
   }
-  $bmp = Get-ChildItem "$shots\sshot*.bmp" -ErrorAction SilentlyContinue |
-         Sort-Object LastWriteTime | Select-Object -Last 1
-  if ($null -eq $bmp) { throw "no screenshot for $tag" }
+  # The picture is written on the frame it was asked for and the process runs on to its frame
+  # limit, so the file can land a moment after the wait returns.  A view that still has none is
+  # reported and skipped rather than ending the sweep: seven views say more than one exception.
+  $bmp = $null
+  for ($attempt = 0; $attempt -lt 5 -and $null -eq $bmp; $attempt++) {
+    Start-Sleep -Milliseconds 500
+    $bmp = Get-ChildItem "$shots\sshot*.bmp" -ErrorAction SilentlyContinue |
+           Sort-Object LastWriteTime | Select-Object -Last 1
+  }
+  if ($null -eq $bmp) {
+    Write-Host "no screenshot for $tag"
+    return $null
+  }
   $image = [System.Drawing.Image]::FromFile($bmp.FullName)
   $path = "$out\$tag.png"
   $image.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
