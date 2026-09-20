@@ -1,0 +1,15 @@
+# Trailer, cold open: thirty inferno cannons shelling a parked column.
+#
+#   generals.exe -borderless -msaa 0 -quickstart -noshellmap -multiInstance -particlecap 2500
+#     -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover
+#     -side 0 FactionChina -side 1 FactionAmerica -seed 1 -scenario fireball
+#     -cinema tr_open -video 60 450 tr_open -maxframes 470
+#
+# The scenario puts the guns at 760,700 and the targets at 760,1000, and opens fire at 2 seconds.
+
+0     letterbox  on
+2     cut        760 1000 0.45 0 -22
+2     orbit      30 12
+2     zoom       0.7 12
+9     move       760 940 5
+14    end

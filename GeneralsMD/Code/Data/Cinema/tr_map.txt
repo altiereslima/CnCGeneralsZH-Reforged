@@ -1,0 +1,14 @@
+# Trailer: a pass across a map the game generated from a seed, with a column crossing it.
+#
+#   generals.exe -borderless -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -randommap 1 2 small -autoskirmish 2 -takeover -seed 1 -peacetime 20 -scenario parade
+#     -cinema tr_map -video 200 620 tr_map -maxframes 640
+#
+# Same map as Cinema\demo.txt: the column forms up round 700,550 and is sent to 1000,1150.
+
+0     letterbox  on
+7     cut        700 550 1.6 0 -8
+8     route      13 850 750 1000 1150
+8     pitch      -26 13
+8     zoom       1.1 13
+21    end

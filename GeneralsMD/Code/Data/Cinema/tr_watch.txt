@@ -1,0 +1,13 @@
+# Trailer: the computer players' own match, framed by -autocamera rather than by a shot list.
+#
+#   generals.exe -borderless -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 2500 -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 4 -teams 2
+#     -aidiff brutal -seed 7 -side 0 FactionChina -side 1 FactionAmerica -side 2 FactionGLA
+#     -side 3 FactionChina -autocamera 6 -cinema tr_watch -video 16200 16740 tr_watch
+#     -maxframes 16760
+#
+# No camera verb runs, so the camera stays the one -autocamera moves: every six seconds it jumps to
+# wherever the fighting is. The jumps are the cuts.
+
+0     letterbox  on
+558   end
