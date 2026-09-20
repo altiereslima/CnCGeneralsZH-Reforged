@@ -124,16 +124,53 @@ const unsigned NORMAL_MAPPED_LIGHTS = 4;
 	"    if (sun.z < 0.0 || sun.z > 1.0) return 1.0;\n" \
 	"    float texel = ShadowParameters.x;\n" \
 	"    float bias = ShadowParameters.y;\n" \
-	"    float radius = ShadowParameters.w;\n" \
+	"    float widest = ShadowParameters.w;\n" \
+	"    float narrowest = ShadowSoftness.x;\n" \
+	"\n" \
+	"    // What is casting the shadow and how far above this pixel it is.  The search is the\n" \
+	"    // widest the filter is allowed to be, because a blocker it does not find is a blocker\n" \
+	"    // whose penumbra never opens.\n" \
+	"    float blocker_depth = 0.0;\n" \
+	"    float blockers = 0.0;\n" \
+	"    for (int sy = -2; sy <= 2; ++sy) {\n" \
+	"        for (int sx = -2; sx <= 2; ++sx) {\n" \
+	"            float2 at = map + float2(sx, sy) * texel * widest * 0.5;\n" \
+	"            float depth = ShadowMap.SampleLevel(ShadowSampler, at, 0).r;\n" \
+	"            if (depth + bias < sun.z) { blocker_depth += depth; blockers += 1.0; }\n" \
+	"        }\n" \
+	"    }\n" \
+	"    if (blockers < 0.5) return 1.0;\n" \
+	"    blocker_depth /= blockers;\n" \
+	"\n" \
+	"    // The gap between the caster and this pixel, in world units, is what opens the filter:\n" \
+	"    // a track on the ground stays hard, a helicopter's shadow spreads.\n" \
+	"    float gap = max(sun.z - blocker_depth, 0.0) * ShadowSoftness.z;\n" \
+	"    float radius = clamp(narrowest + gap * ShadowSoftness.y, narrowest, widest);\n" \
+	"\n" \
+	"    // Five by five rather than three by three: opened up to nine texels, nine taps stand so\n" \
+	"    // far apart that a body as narrow as a helicopter's falls between them and casts nothing.\n" \
+	"    // The grid is turned by an angle taken from the pixel's own place on the screen, which\n" \
+	"    // trades the steps a fixed grid leaves across a wide penumbra for noise the eye reads as\n" \
+	"    // a gradient.\n" \
+	"    float turn = frac(sin(dot(position.xy, float2(12.9898, 78.233))) * 43758.5453) * 6.2831853;\n" \
+	"    float2 turn_cos_sin = float2(cos(turn), sin(turn));\n" \
 	"    float blocked = 0.0;\n" \
-	"    for (int y = -1; y <= 1; ++y) {\n" \
-	"        for (int x = -1; x <= 1; ++x) {\n" \
-	"            float2 at = map + float2(x, y) * texel * radius;\n" \
+	"    for (int y = -2; y <= 2; ++y) {\n" \
+	"        for (int x = -2; x <= 2; ++x) {\n" \
+	"            float2 step = float2(x, y) * 0.5;\n" \
+	"            step = float2(step.x * turn_cos_sin.x - step.y * turn_cos_sin.y,\n" \
+	"                          step.x * turn_cos_sin.y + step.y * turn_cos_sin.x);\n" \
+	"            float2 at = map + step * texel * radius;\n" \
 	"            float depth = ShadowMap.SampleLevel(ShadowSampler, at, 0).r;\n" \
 	"            blocked += (depth + bias < sun.z) ? 1.0 : 0.0;\n" \
 	"        }\n" \
 	"    }\n" \
-	"    return 1.0 - ShadowParameters.z * (blocked / 9.0);\n" \
+	"\n" \
+	"    // The sky is the other light in the scene and it fills a shadow back in the further its\n" \
+	"    // caster is, which is why a shadow from high up reads pale as well as soft.\n" \
+	"    float openness = saturate((radius - narrowest) / max(widest - narrowest, 1e-3));\n" \
+	"    float strength = ShadowParameters.z * (1.0 - ShadowSoftness.w * openness);\n" \
+	"    return 1.0 - strength * (blocked / 25.0);\n" \
 	"}\n" \
 	"\n"
 

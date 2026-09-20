@@ -110,7 +110,16 @@ const Real cosAngleToCare = cos ((0.2 * PI) / 180.0);	//1.5 degree difference
 // decides between a surface shadowing itself in stripes and a shadow lifting off its own caster.
 #define SHADOW_MAP_DEPTH_BIAS 0.0015f
 #define SHADOW_MAP_STRENGTH 0.45f
-#define SHADOW_MAP_FILTER_TEXELS 1.0f
+// How wide the filter may open and how narrow it stays on the ground, in texels of the map, and how
+// much penumbra a unit of gap between a caster and what its shadow falls on is worth.  The last is
+// the number the whole picture turns on: a tank's tracks are on the ground and keep a hard edge, a
+// helicopter twenty metres up spreads.  It is not the sun's own half degree, which at this scale
+// would be under a pixel; it is what the sky filling a shadow back in looks like, chosen against
+// the three panel comparison the plan came from.
+#define SHADOW_MAP_WIDEST_TEXELS 9.0f
+#define SHADOW_MAP_NARROWEST_TEXELS 0.9f
+#define SHADOW_MAP_PENUMBRA_PER_UNIT 0.04f
+#define SHADOW_MAP_SKY_FILL 0.12f
 
 //#define SV_DEBUG
 //#define SV_DEBUG_BOUNDS
@@ -3847,6 +3856,10 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 	DX8Wrapper::Set_DX8_Render_State( D3DRS_ZFUNC, D3DCMP_LESSEQUAL );
 	DX8Wrapper::Set_DX8_Render_State( D3DRS_ALPHABLENDENABLE, FALSE );
 	DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILENABLE, FALSE );
+	/* Back faces only.  What the map holds is then the far side of every caster, which is behind
+		 the surface that receives the light by the thickness of the object: a hull cannot shadow
+		 itself, and the bias has only the map's own texel to cover rather than a whole tank. */
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_CULLMODE, D3DCULL_CW );
 
 	RenderInfoClass sunInfo( sun );
 	Int casters = 0;
@@ -3861,6 +3874,12 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 		++casters;
 	}
 	TheDX8MeshRenderer.Flush();
+	/* A mesh the material system calls translucent goes to the sort lists rather than to the mesh
+		 renderer, and a helicopter's rotor disc is one of them: without this the map holds the
+		 fuselage alone, and a fuselage is too thin a thing to read as a shadow once the filter opens.
+		 Draining them here is safe because the pass runs before the frame queues anything of its
+		 own, so everything in those lists was put there by the loop above. */
+	WW3D::Render_And_Clear_Static_Sort_Lists( sunInfo );
 
 	DX8Wrapper::Set_DX8_Render_State( D3DRS_COLORWRITEENABLE,
 		D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE
@@ -3878,8 +3897,16 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 		 held them during the pass and the frame's as it holds them now: both are already there, in
 		 one convention, and a matrix assembled on this side would have to agree with a layout it
 		 cannot see.  SHADOW-MAP-PLAN.md phase 2. */
+	/* The two conversions the filter needs, both of them the box's own arithmetic.  A texel is this
+		 many world units across, and a unit of depth is the whole of the near to far range, because
+		 an orthographic projection puts depth on a straight line. */
+	const Real worldPerTexel = (2.0f * SHADOW_MAP_HALF_WIDTH) / (Real)SHADOW_MAP_TEXELS;
+	const Real texelsPerUnitOfGap = SHADOW_MAP_PENUMBRA_PER_UNIT / worldPerTexel;
+	const Real unitsPerUnitOfDepth = SHADOW_MAP_FAR_CLIP - SHADOW_MAP_NEAR_CLIP;
+
 	Direct3D11_Set_Shadow_Parameters( SHADOW_MAP_DEPTH_BIAS, SHADOW_MAP_STRENGTH,
-		SHADOW_MAP_FILTER_TEXELS );
+		SHADOW_MAP_WIDEST_TEXELS, SHADOW_MAP_NARROWEST_TEXELS, texelsPerUnitOfGap,
+		unitsPerUnitOfDepth, SHADOW_MAP_SKY_FILL );
 
 	// The report costs a full stall of the pipeline, so it is one line a second rather than one a
 	// frame: what it answers is whether the pass draws the world at all, and that does not change

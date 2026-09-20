@@ -161,7 +161,9 @@ public:
 	// takes a pixel into the sun's clip space is built here rather than handed in: the sun's view
 	// and projection are the ones this held while the map was bound, and the frame's are the ones
 	// it holds when the draw arrives, so both halves are already in one convention.
-	void Set_Shadow_Parameters(float bias, float strength, float radius_in_texels);
+	void Set_Shadow_Parameters(float bias, float strength, float widest_radius_in_texels,
+		float narrowest_radius_in_texels, float texels_per_unit_of_gap, float units_per_unit_of_depth,
+		float sky_fill);
 	void Clear_Shadow_Parameters();
 	bool Shadow_Map_Bound() const { return ShadowMapBound; }
 	ID3D11ShaderResourceView * Shadow_Map() const { return ShadowMapTexture; }
@@ -283,6 +285,10 @@ private:
 		float ShadowFromClip[16];
 		float ShadowParameters[4];
 		float ShadowViewport[4];
+		// The narrowest the filter goes, how many texels it opens per world unit of gap between a
+		// caster and what it falls on, how many world units a unit of depth is, and how much of a
+		// wide shadow the sky fills back in.
+		float ShadowSoftness[4];
 	};
 	// A model under directional lights, drawn by generated programs.
 	bool Normal_Mapped() const;
@@ -359,6 +365,10 @@ private:
 	float ShadowBias;
 	float ShadowStrength;
 	float ShadowRadius;
+	float ShadowNarrowestRadius;
+	float ShadowTexelsPerGap;
+	float ShadowUnitsPerDepth;
+	float ShadowSkyFill;
 	bool ShadowReceiving;
 	// The frame's clip space to the sun's, worked out from a scene view and projection pair and
 	// kept until one of them changes, because an inverse a draw does not need is an inverse nobody

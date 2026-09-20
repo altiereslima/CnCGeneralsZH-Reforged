@@ -375,7 +375,8 @@ bool CombinerShader_Generate(const CombinerDescription & description, CombinerSh
 				// D3D9 matrix and D3D9 stores one by rows.
 				"    row_major float4x4 ShadowFromClip;\n"
 				"    float4 ShadowParameters;\n"
-				"    float4 ShadowViewport;\n";
+				"    float4 ShadowViewport;\n"
+				"    float4 ShadowSoftness;\n";
 		}
 		hlsl += "};\n";
 		if (description.NormalMapped) {

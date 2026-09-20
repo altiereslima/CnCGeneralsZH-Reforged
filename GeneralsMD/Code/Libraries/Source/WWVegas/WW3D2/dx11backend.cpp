@@ -212,6 +212,10 @@ DX11BackendClass::DX11BackendClass()
 	, ShadowBias(0.0f)
 	, ShadowStrength(0.0f)
 	, ShadowRadius(1.0f)
+	, ShadowNarrowestRadius(1.0f)
+	, ShadowTexelsPerGap(0.0f)
+	, ShadowUnitsPerDepth(0.0f)
+	, ShadowSkyFill(0.0f)
 	, ShadowReceiving(false)
 	, NormalMappedDraws(0)
 	, DrawsMade(0)
@@ -501,7 +505,9 @@ void DX11BackendClass::End_Shadow_Map()
 	Forget_Bindings();
 }
 
-void DX11BackendClass::Set_Shadow_Parameters(float bias, float strength, float radius_in_texels)
+void DX11BackendClass::Set_Shadow_Parameters(float bias, float strength,
+	float widest_radius_in_texels, float narrowest_radius_in_texels, float texels_per_unit_of_gap,
+	float units_per_unit_of_depth, float sky_fill)
 {
 	if (ShadowMapTexture == NULL) {
 		Clear_Shadow_Parameters();
@@ -509,7 +515,11 @@ void DX11BackendClass::Set_Shadow_Parameters(float bias, float strength, float r
 	}
 	ShadowBias = bias;
 	ShadowStrength = strength;
-	ShadowRadius = radius_in_texels;
+	ShadowRadius = widest_radius_in_texels;
+	ShadowNarrowestRadius = narrowest_radius_in_texels;
+	ShadowTexelsPerGap = texels_per_unit_of_gap;
+	ShadowUnitsPerDepth = units_per_unit_of_depth;
+	ShadowSkyFill = sky_fill;
 	ShadowReceiving = true;
 }
 
@@ -1611,6 +1621,10 @@ void DX11BackendClass::Upload_Constants()
 			? 1.0f / static_cast<float>(ViewportWidth) : 0.0f;
 		pixel_block.ShadowViewport[1] = (ViewportHeight > 0)
 			? 1.0f / static_cast<float>(ViewportHeight) : 0.0f;
+		pixel_block.ShadowSoftness[0] = ShadowNarrowestRadius;
+		pixel_block.ShadowSoftness[1] = ShadowTexelsPerGap;
+		pixel_block.ShadowSoftness[2] = ShadowUnitsPerDepth;
+		pixel_block.ShadowSoftness[3] = ShadowSkyFill;
 	}
 
 	if ((!PixelConstantsHeld

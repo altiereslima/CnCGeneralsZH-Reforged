@@ -292,10 +292,13 @@ bool Direct3D11_Shadow_Map_Bound()
 	return Active ? Backend.Shadow_Map_Bound() : false;
 }
 
-void Direct3D11_Set_Shadow_Parameters(float bias, float strength, float radius_in_texels)
+void Direct3D11_Set_Shadow_Parameters(float bias, float strength, float widest_radius_in_texels,
+	float narrowest_radius_in_texels, float texels_per_unit_of_gap, float units_per_unit_of_depth,
+	float sky_fill)
 {
 	if (Active) {
-		Backend.Set_Shadow_Parameters(bias, strength, radius_in_texels);
+		Backend.Set_Shadow_Parameters(bias, strength, widest_radius_in_texels,
+			narrowest_radius_in_texels, texels_per_unit_of_gap, units_per_unit_of_depth, sky_fill);
 	}
 }
 

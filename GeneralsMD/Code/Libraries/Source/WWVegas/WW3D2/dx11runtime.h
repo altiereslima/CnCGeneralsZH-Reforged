@@ -112,7 +112,9 @@ std::string Direct3D11_Shadow_Map_Report();
 // sun's clip space, the depth bias that keeps a surface from shadowing itself, how dark a fully
 // blocked pixel goes and how wide the filter reaches, in texels.  Set once a frame, cleared when
 // the frame has no map.
-void Direct3D11_Set_Shadow_Parameters(float bias, float strength, float radius_in_texels);
+void Direct3D11_Set_Shadow_Parameters(float bias, float strength, float widest_radius_in_texels,
+	float narrowest_radius_in_texels, float texels_per_unit_of_gap, float units_per_unit_of_depth,
+	float sky_fill);
 void Direct3D11_Clear_Shadow_Parameters();
 
 // The CPU has just written this surface.  The next bind of its texture fills the Direct3D 11 copy
