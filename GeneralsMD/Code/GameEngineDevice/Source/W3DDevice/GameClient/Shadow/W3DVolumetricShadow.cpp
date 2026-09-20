@@ -3845,6 +3845,20 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 
 	Matrix3D transform;
 	transform.Look_At( focus + toSun * SHADOW_MAP_SUN_DISTANCE, focus, 0.0f );
+
+	/* The box has to sit on whole texels of its own map, or every scroll of the camera slides the
+		 grid under the world by a fraction of a texel and every shadow edge crawls and sparkles.  The
+		 look point is taken into the sun's own frame, rounded to the texel it lands in, and taken back
+		 out: the box then moves in texel steps and a shadow that did not move does not shimmer. */
+	const Real texelWidth = (2.0f * SHADOW_MAP_HALF_WIDTH) / (Real)SHADOW_MAP_TEXELS;
+	Vector3 focusInSun;
+	Matrix3D::Inverse_Transform_Vector( transform, focus, &focusInSun );
+	focusInSun.X = WWMath::Floor( focusInSun.X / texelWidth + 0.5f ) * texelWidth;
+	focusInSun.Y = WWMath::Floor( focusInSun.Y / texelWidth + 0.5f ) * texelWidth;
+	Vector3 snapped;
+	Matrix3D::Transform_Vector( transform, focusInSun, &snapped );
+	transform.Look_At( snapped + toSun * SHADOW_MAP_SUN_DISTANCE, snapped, 0.0f );
+
 	sun.Set_Transform( transform );
 
 	Matrix4x4 projection;
@@ -3872,8 +3886,17 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 	for (W3DVolumetricShadow *shadow = m_shadowList; shadow; shadow = shadow->m_next)
 	{
 		RenderObjClass *robj = shadow->getRenderObject();
-		if (robj == NULL || !robj->Is_Really_Visible() || !shadow->isRenderEnabled()
-			|| shadow->isInvisibleEnabled())
+		if (robj == NULL || !shadow->isRenderEnabled() || shadow->isInvisibleEnabled())
+			continue;
+
+		/* What goes into the map is what stands in the sun's box, not what the tactical camera can
+			 see.  Culling by the camera meant a tank just off the left of the screen stopped casting,
+			 so its shadow blinked out while the shadow of the tank beside it stayed - and scrolling
+			 turned that into a row of shadows flickering along the edge of the frame. */
+		Vector3 inSun;
+		Matrix3D::Inverse_Transform_Vector( transform, robj->Get_Position(), &inSun );
+		const Real reach = SHADOW_MAP_HALF_WIDTH + robj->Get_Bounding_Sphere().Radius;
+		if (inSun.X < -reach || inSun.X > reach || inSun.Y < -reach || inSun.Y > reach)
 			continue;
 
 		robj->Render( sunInfo );
@@ -3922,9 +3945,12 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 	Direct3D11_Set_Shadow_Parameters( SHADOW_MAP_DEPTH_BIAS, strength, widest,
 		SHADOW_MAP_NARROWEST_TEXELS, penumbra / worldPerTexel, unitsPerUnitOfDepth, skyFill );
 
-	// Said last, and only on the way out: everything above can bail, and the volumes have to know
-	// whether this frame's shadows are in the map or still theirs to draw.
-	theShadowMapHoldsTheFrame = (casters > 0);
+	/* Said last, and only on the way out: everything above can bail, and the volumes have to know
+		 whether this frame's shadows are in the map or still theirs to draw.  The count of casters is
+		 not part of that answer.  It was, and a frame that happened to hold none - a camera over open
+		 ground - handed the frame back to the volumes for that one frame, so the whole scene's
+		 shadows changed style and back again as the camera moved. */
+	theShadowMapHoldsTheFrame = TRUE;
 
 	// The report costs a full stall of the pipeline, so it is one line a second rather than one a
 	// frame: what it answers is whether the pass draws the world at all, and that does not change

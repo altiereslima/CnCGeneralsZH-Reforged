@@ -159,10 +159,11 @@ const unsigned NORMAL_MAPPED_LIGHTS = 4;
 	"\n" \
 	"    // Five by five rather than three by three: opened up to nine texels, nine taps stand so\n" \
 	"    // far apart that a body as narrow as a helicopter's falls between them and casts nothing.\n" \
-	"    // The grid is turned by an angle taken from the pixel's own place on the screen, which\n" \
-	"    // trades the steps a fixed grid leaves across a wide penumbra for noise the eye reads as\n" \
-	"    // a gradient.\n" \
-	"    float turn = frac(sin(dot(position.xy, float2(12.9898, 78.233))) * 43758.5453) * 6.2831853;\n" \
+	"    // The grid is turned by an angle, which trades the steps a fixed grid leaves across a wide\n" \
+	"    // penumbra for noise the eye reads as a gradient.  The angle comes from where the pixel is\n" \
+	"    // in the sun's map and not from where it is on the screen: on the screen it swims as soon\n" \
+	"    // as the camera moves, and a shadow that stands still shimmers.\n" \
+	"    float turn = frac(sin(dot(map * 4096.0, float2(12.9898, 78.233))) * 43758.5453) * 6.2831853;\n" \
 	"    float2 turn_cos_sin = float2(cos(turn), sin(turn));\n" \
 	"    float blocked = 0.0;\n" \
 	"    for (int y = -2; y <= 2; ++y) {\n" \
