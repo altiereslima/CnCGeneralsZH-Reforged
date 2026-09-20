@@ -2655,12 +2655,23 @@ void DX8Wrapper::Draw(
 						polygon_count));
 				}
 
-				// The same draw through the Direct3D 11 backend, into its own back buffer.  Only
-				// triangle lists go: a strip or a fan would need its indices rebuilt, and the
-				// engine's own strips are already lists by the time they reach here.
+				// The same draw through the Direct3D 11 backend, into its own back buffer.  Lists
+				// and strips both go: Direct3D 11 has a topology for each.  A strip used to be
+				// dropped here on the belief that nothing reached this point still striped, and
+				// the beach surf did - so with Direct3D 11 presenting, the D3D9 draw above was
+				// skipped and no draw replaced it, and the shell map's waves were drawn nowhere.
+				// A fan is still dropped: Direct3D 11 has no fan topology, and its indices would
+				// have to be rebuilt.
 				if (primitive_type==D3DPT_TRIANGLELIST) {
 					Direct3D11_Draw_Indexed_Triangles(
 						polygon_count*3,
+						start_index+render_state.iba_offset,
+						render_state.index_base_offset+render_state.vba_offset);
+				}
+				else if (primitive_type==D3DPT_TRIANGLESTRIP) {
+					// n indices make n-2 triangles, which is the count the caller passed.
+					Direct3D11_Draw_Indexed_Strip(
+						polygon_count+2,
 						start_index+render_state.iba_offset,
 						render_state.index_base_offset+render_state.vba_offset);
 				}

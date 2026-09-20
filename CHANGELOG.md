@@ -24,6 +24,7 @@ found and fixed â€” EA's own, not port damage.**
 - Briefing and cutscene subtitles hold long enough to read again.
 - The radar's under-attack pulse throbs instead of strobing, and no longer ends early.
 - The main menu surf rolls at its proper pace, not ten times too fast.
+- And it is there at all again. The waves breaking on the main menu's beach had been worked out every frame and then drawn nowhere since v1.0.0, so the shore behind the menu was flat water.
 
 ## The computer opponent builds a base now
 
