@@ -13095,6 +13095,38 @@ TEST(chroma_power_meter_empties_as_the_draw_catches_the_supply)
 	CHECK_EQ(chromaPowerSegments(10, 11), CHROMA_POWER_BROWNOUT);
 }
 
+// A slot cannot be read out of a meta message by subtracting the first message of its run and
+// bounding the answer by the size of the array behind the bar. The command bar's array holds
+// eighteen slots and only fourteen of them have a message, so that sum ran four past the end of
+// the command messages and straight into the shortcut ones: F1 to F4 were filed as command bar
+// slots 14 to 17 and lit from them.
+TEST(chroma_slot_messages_do_not_run_into_each_other)
+{
+	// every command message answers as itself and nothing else
+	for (Int slot = 0; slot < 14; ++slot)
+	{
+		const Int message = (Int)GameMessage::MSG_META_COMMAND_SLOT01 + slot;
+		CHECK_EQ(chromaCommandSlotForMessage(message), slot);
+		CHECK_EQ(chromaShortcutSlotForMessage(message), -1);
+	}
+	for (Int slot = 0; slot < 11; ++slot)
+	{
+		const Int message = (Int)GameMessage::MSG_META_SHORTCUT_SLOT01 + slot;
+		CHECK_EQ(chromaShortcutSlotForMessage(message), slot);
+		CHECK_EQ(chromaCommandSlotForMessage(message), -1);
+	}
+
+	// the runs are exactly as long as the messages, not as long as the arrays
+	CHECK_EQ(chromaCommandSlotForMessage((Int)GameMessage::MSG_META_COMMAND_SLOT14), 13);
+	CHECK_EQ(chromaShortcutSlotForMessage((Int)GameMessage::MSG_META_SHORTCUT_SLOT11), 10);
+	CHECK_EQ(chromaShortcutSlotForMessage((Int)GameMessage::MSG_META_VIEW_COMMAND_CENTER), -1);
+	CHECK(MAX_COMMANDS_PER_SET > 14);	// the array really is bigger than the keys reach
+
+	// and neither run reaches backwards into whatever sits before it
+	CHECK_EQ(chromaCommandSlotForMessage((Int)GameMessage::MSG_META_COMMAND_SLOT01 - 1), -1);
+	CHECK_EQ(chromaShortcutSlotForMessage((Int)GameMessage::MSG_META_SHORTCUT_SLOT01 - 1), -1);
+}
+
 // The two key maps have to agree. chromaCellForKey knows the typing rows by their characters and
 // draws the power meter with them; chromaCellForMappableKey knows the whole board by scancode and
 // places whatever the player has bound. A letter has to come out at the same lamp either way, or a

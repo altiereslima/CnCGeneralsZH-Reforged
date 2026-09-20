@@ -65,6 +65,17 @@ extern Int chromaCellForKey( char key );
 	* character on a key is not the key. */
 extern Int chromaCellForMappableKey( Int key );
 
+/** Which command bar slot, or which generals power tray slot, a meta message
+	* presses; -1 when it presses neither.  Takes the GameMessage::Type as an Int.
+	*
+	* These exist because the slot cannot be worked out by subtracting the first
+	* message of a run and bounding the answer by the size of the array behind the
+	* bar.  The command bar's array holds eighteen and only fourteen of them have
+	* a message, so that sum ran off the end of the command messages and into the
+	* shortcut ones, and put the first four function keys on the command bar. */
+extern Int chromaCommandSlotForMessage( Int metaMessage );
+extern Int chromaShortcutSlotForMessage( Int metaMessage );
+
 /// How many keys the power meter spans, and what it answers once consumption has
 /// passed production and the whole row goes to blinking red instead.
 enum { CHROMA_POWER_SEGMENTS = 10, CHROMA_POWER_BROWNOUT = -1 };

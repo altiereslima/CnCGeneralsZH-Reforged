@@ -1350,8 +1350,34 @@ Int chromaCellForMappableKey( Int key )
 // cannot be looked up once.  Under Legacy nothing is bound to either and every
 // entry is -1, which is right: there the letters in the labels do the work.
 //-----------------------------------------------------------------------------
-static Int s_commandSlotCell[ MAX_COMMANDS_PER_SET ];
-static Int s_shortcutSlotCell[ MAX_SPECIAL_POWER_SHORTCUTS ];
+/// How many slots of each bar a key can actually reach, counted off the messages
+/// themselves rather than off the arrays behind the bars.  The two do not agree:
+/// the command bar holds eighteen slots and only fourteen of them have a key,
+/// the rest being for buttons a map script puts up.  Reading the slot out of a
+/// message and bounding it by eighteen therefore ran four slots past the end of
+/// the command messages and into the shortcut ones, and filed the first four
+/// function keys as command bar slots.
+static const Int COMMAND_SLOTS_WITH_KEYS =
+	(Int)GameMessage::MSG_META_SHORTCUT_SLOT01 - (Int)GameMessage::MSG_META_COMMAND_SLOT01;
+static const Int SHORTCUT_SLOTS_WITH_KEYS =
+	(Int)GameMessage::MSG_META_VIEW_COMMAND_CENTER - (Int)GameMessage::MSG_META_SHORTCUT_SLOT01;
+
+static Int s_commandSlotCell[ COMMAND_SLOTS_WITH_KEYS ];
+static Int s_shortcutSlotCell[ SHORTCUT_SLOTS_WITH_KEYS ];
+
+//-----------------------------------------------------------------------------
+Int chromaCommandSlotForMessage( Int metaMessage )
+{
+	const Int slot = metaMessage - (Int)GameMessage::MSG_META_COMMAND_SLOT01;
+	return slot >= 0 && slot < COMMAND_SLOTS_WITH_KEYS ? slot : -1;
+}
+
+//-----------------------------------------------------------------------------
+Int chromaShortcutSlotForMessage( Int metaMessage )
+{
+	const Int slot = metaMessage - (Int)GameMessage::MSG_META_SHORTCUT_SLOT01;
+	return slot >= 0 && slot < SHORTCUT_SLOTS_WITH_KEYS ? slot : -1;
+}
 
 //-----------------------------------------------------------------------------
 static void chromaRefreshBoundCells( UnsignedInt frame )
@@ -1364,9 +1390,9 @@ static void chromaRefreshBoundCells( UnsignedInt frame )
 
 	everRefreshed = TRUE;
 	lastRefreshFrame = frame;
-	for( Int slot = 0; slot < MAX_COMMANDS_PER_SET; ++slot )
+	for( Int slot = 0; slot < COMMAND_SLOTS_WITH_KEYS; ++slot )
 		s_commandSlotCell[ slot ] = -1;
-	for( Int slot = 0; slot < MAX_SPECIAL_POWER_SHORTCUTS; ++slot )
+	for( Int slot = 0; slot < SHORTCUT_SLOTS_WITH_KEYS; ++slot )
 		s_shortcutSlotCell[ slot ] = -1;
 	if( TheMetaMap == NULL )
 		return;
@@ -1377,12 +1403,12 @@ static void chromaRefreshBoundCells( UnsignedInt frame )
 		if( rec->m_modState != 0 )
 			continue;
 
-		const Int commandSlot = (Int)rec->m_meta - (Int)GameMessage::MSG_META_COMMAND_SLOT01;
-		if( commandSlot >= 0 && commandSlot < MAX_COMMANDS_PER_SET && s_commandSlotCell[ commandSlot ] < 0 )
+		const Int commandSlot = chromaCommandSlotForMessage( (Int)rec->m_meta );
+		if( commandSlot >= 0 && s_commandSlotCell[ commandSlot ] < 0 )
 			s_commandSlotCell[ commandSlot ] = chromaCellForMappableKey( rec->m_key );
 
-		const Int shortcutSlot = (Int)rec->m_meta - (Int)GameMessage::MSG_META_SHORTCUT_SLOT01;
-		if( shortcutSlot >= 0 && shortcutSlot < MAX_SPECIAL_POWER_SHORTCUTS && s_shortcutSlotCell[ shortcutSlot ] < 0 )
+		const Int shortcutSlot = chromaShortcutSlotForMessage( (Int)rec->m_meta );
+		if( shortcutSlot >= 0 && s_shortcutSlotCell[ shortcutSlot ] < 0 )
 			s_shortcutSlotCell[ shortcutSlot ] = chromaCellForMappableKey( rec->m_key );
 	}
 }
@@ -1421,7 +1447,7 @@ static void chromaFillLabelHotKeys( Int *cells, Int pressable, Int unavailable )
 	* group's cells the moment the labels on screen do. */
 static void chromaFillCommandGrid( Int *cells, Int pressable, Int unavailable )
 {
-	for( Int slot = 0; slot < MAX_COMMANDS_PER_SET; ++slot )
+	for( Int slot = 0; slot < COMMAND_SLOTS_WITH_KEYS; ++slot )
 	{
 		const Int cell = s_commandSlotCell[ slot ];
 		if( cell < 0 )
@@ -1457,7 +1483,7 @@ static void chromaFillPowerTray( Int *cells, Int bed, Int factionColor, Unsigned
 {
 	const Int usable = chromaBlinkIsOn( frame, BLINK_PERIOD_FRAMES ) ? COLOR_WARM_WHITE : COLOR_OFF;
 
-	for( Int slot = 0; slot < MAX_SPECIAL_POWER_SHORTCUTS; ++slot )
+	for( Int slot = 0; slot < SHORTCUT_SLOTS_WITH_KEYS; ++slot )
 	{
 		const Int cell = s_shortcutSlotCell[ slot ];
 		if( cell < 0 )
