@@ -1,2 +1,14 @@
+# dist/ is committed, unlike every other vendored library here.
+#
+# It is 5MB, it is our own build rather than a download (Tools/ffmpeg-build.bat made it, and holds
+# only the codecs this game opens), and without it nothing links. Committing it is what makes one
+# build enough on a fresh clone: the alternative is asking everyone to install MSYS2 and nasm to
+# produce the same 3.3MB of DLLs.
+#
+# LGPL: the version, the exact configure line and the build script are in Tools/ffmpeg-build.sh,
+# LICENSE.txt is beside the binaries, the sources are at ffmpeg.org/releases, and the game links
+# these as shared libraries, so they can be replaced with another build of the same soname.
 *
 !.gitignore
+!dist/
+!dist/**
