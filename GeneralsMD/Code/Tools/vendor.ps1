@@ -115,40 +115,73 @@ function Install-GameSpy {
   Step "GamespySDK -> Libraries\Source\GameSpy"
 }
 
-# --- The fork's own upscaled art: every 3D texture at twice its size, the normal maps and the
-# ground. It is not in git because one of the three is a gigabyte, ten times what GitHub takes in a
-# file, and LFS on a fork bills the parent repository. It hangs off a release instead.
+# --- The fork's own upscaled art: every 3D texture at twice its size, the normal maps the models
+# are lit through, and the ground. Not in git - ReforgedTextures.big alone is a gigabyte, ten times
+# what GitHub takes in a file, and LFS in a fork is billed to the parent repository.
 #
-# The game plays without it, at the textures it shipped with, so a download that is not there yet
-# is a note rather than a failure.
-$artRelease = 'https://github.com/olcayseygan/CnCGeneralsZH-Reforged/releases/download/data-v1'
-$art = [ordered]@{
-  'ReforgedTextures.big' = '638baa84af2a3cec326932e1923921c462c6dbf8a6a0d8d53d473a1a46bca670'
-  'ReforgedNormals.big'  = 'f7408d4010187509c7083640ddbe346ec273f1c8efdfcb30b2d9fc3a5830ef42'
-  'ReforgedTerrain.big'  = '8e8081dcefbd8dbd004585bbd38f62de0a8e729fc80134c632f4f22f1a3a2f0d'
+# It comes from the release channel, the same place a player's launcher takes it from, and the
+# channel's own _versions.json carries the sha256 of every file in the newest release. Reading the
+# hash from there rather than pinning it here means regenerating the art does not leave this script
+# lying.
+#
+# This repository is public and does not name the channel. The address comes from ZHR_CHANNEL_URL,
+# or from the launcher checkout beside this one when there is one; with neither, the art step is
+# skipped. The game plays without it, at the textures it shipped with, and
+# experiments/doku-upscale is where the art is made.
+$artPattern = 'Reforged.*\.big$'
+
+function Get-ChannelUrl {
+  if ($env:ZHR_CHANNEL_URL) { return $env:ZHR_CHANNEL_URL.TrimEnd('/') + '/' }
+  $launcher = Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $codeRoot))) 'launcher\update.js'
+  if (Test-Path $launcher) {
+    $match = [regex]::Match((Get-Content $launcher -Raw), "CHANNEL_URL\s*=\s*'([^']+)'")
+    if ($match.Success) { return $match.Groups[1].Value.TrimEnd('/') + '/' }
+  }
+  return $null
 }
 
 function Install-Art {
+  $channelUrl = Get-ChannelUrl
+  if (-not $channelUrl) {
+    Step 'no release channel configured, so the upscaled art is not fetched'
+    Step 'set ZHR_CHANNEL_URL to one, or play at the textures the game shipped with'
+    return
+  }
+
+  $wanted = @()
+  try {
+    $versions = Invoke-RestMethod -Uri "${channelUrl}_versions.json" -UseBasicParsing
+    $release = $versions.game | Select-Object -First 1
+    $wanted = @($release.files | Where-Object { $_.path -match $artPattern })
+  } catch {
+    Step "the release channel is not reachable; skipping the upscaled art"
+    return
+  }
+
+  if ($wanted.Count -eq 0) {
+    Step "the newest release ($($release.version)) carries no upscaled art yet"
+    Step 'the game plays without it, at the textures it shipped with'
+    return
+  }
+
   New-Item -ItemType Directory -Force -Path $runFolder | Out-Null
-  foreach ($name in $art.Keys) {
-    $target = Join-Path $runFolder $name
-    if ((Test-Path $target) -and -not $Force) { continue }
-    $partial = "$target.part"
-    try {
-      Step "downloading $name (this one is large)"
-      Invoke-WebRequest -Uri "$artRelease/$name" -OutFile $partial -UseBasicParsing
-    } catch {
-      Remove-Item $partial -ErrorAction SilentlyContinue
-      Step "$name is not on the release yet; the game will use the textures it shipped with"
+  foreach ($file in $wanted) {
+    $target = Join-Path $runFolder (Split-Path -Leaf $file.path)
+    if ((Test-Path $target) -and -not $Force -and
+        (Get-FileHash $target -Algorithm SHA256).Hash -eq $file.sha256.ToUpper()) {
       continue
     }
-    $hash = (Get-FileHash $partial -Algorithm SHA256).Hash.ToLower()
-    if ($hash -ne $art[$name]) {
+    $partial = "$target.part"
+    Step "downloading $(Split-Path -Leaf $file.path) ($([Math]::Round($file.size / 1MB)) MB)"
+    Invoke-WebRequest -Uri "$channelUrl$($release.folder)/$($file.path -replace '\\','/')" `
+      -OutFile $partial -UseBasicParsing
+    $hash = (Get-FileHash $partial -Algorithm SHA256).Hash
+    if ($hash -ne $file.sha256.ToUpper()) {
       Remove-Item $partial -ErrorAction SilentlyContinue
-      throw "$name downloaded with hash $hash, expected $($art[$name])"
+      throw "$($file.path) downloaded with hash $hash, and the channel says $($file.sha256)"
     }
     Move-Item $partial $target -Force
-    Step "$name -> Run"
+    Step "$(Split-Path -Leaf $file.path) -> Run"
   }
 }
 
