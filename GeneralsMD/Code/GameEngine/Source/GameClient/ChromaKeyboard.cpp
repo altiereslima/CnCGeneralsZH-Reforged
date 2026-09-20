@@ -174,11 +174,15 @@ static const Real AMBIENT_SCALE = 0.22f;			///< the unlit bed of player colour
 static const Real IDLE_PRODUCER_SCALE = 0.15f;	///< a factory that is building nothing
 static const Int UNDER_ATTACK_FRAMES = LOGICFRAMES_PER_SECOND * 4;
 static const Real UNDER_ATTACK_PULSE_HZ = 2.5f;
-/// How far the alarm drags a zone towards red.  The bed, the mouse and anything
-/// carrying no number take the full depth; a gauge takes a quarter of it, so a
-/// brownout stays countable while the base is being shelled.
-static const Real ALARM_DEPTH_EMPTY = 0.75f;
-static const Real ALARM_DEPTH_DATA = 0.25f;
+/// The alarm keeps to the hardware that carries nothing to read: the mouse, which
+/// is under the hand and the hardest thing on the desk to miss, and the strip
+/// down the left edge of the board.  Washing the keys with it as well buried
+/// every one of them under red for four seconds at the exact moment the player
+/// most needs to read the bar, which is the moment the base is being shelled.
+static const Real ALARM_DEPTH = 0.85f;
+/// The column outside escape, tab, caps and shift, which no gauge and no key of
+/// the command bar lives in.
+static const Int ALARM_STRIP_COLUMN = 0;
 
 /// Half of this many frames lit, half dark.
 static const Int BLINK_PERIOD_FRAMES = 16;
@@ -1217,14 +1221,14 @@ static Bool chromaAlertIsLit( Int alert, UnsignedInt frame )
 
 /** The digit row reads as a tank of power that empties, and it keeps to the same
 	* three colours the meter on the command bar uses so the two never disagree. */
-static void chromaFillPowerRow( Int *cells, const Energy *energy, UnsignedInt frame, Real alarm )
+static void chromaFillPowerRow( Int *cells, const Energy *energy, UnsignedInt frame )
 {
 	const Int production = energy->getProduction();
 	const Int consumption = energy->getConsumption();
 	const Int litSegments = chromaPowerSegments( production, consumption );
 	const Int yellowRange = TheGlobalData ? TheGlobalData->m_powerBarYellowRange : 0;
 	const Bool warning = consumption > production - yellowRange && consumption <= production;
-	const Int litColor = chromaAlarmed( warning ? COLOR_YELLOW : COLOR_GREEN, alarm );
+	const Int litColor = warning ? COLOR_YELLOW : COLOR_GREEN;
 	const Int shortColor = chromaBlinkIsOn( frame, BLINK_PERIOD_FRAMES ) ? COLOR_RED : COLOR_OFF;
 
 	const char *digits = CHROMA_KEY_ROWS[ CHROMA_POWER_ROW ];
@@ -1629,15 +1633,36 @@ static void chromaFillAlerts( Int *cells, Player *localPlayer, UnsignedInt frame
 }
 
 //-----------------------------------------------------------------------------
-static void chromaFillMoney( Int *cells, Player *localPlayer, Real alarm )
+static void chromaFillMoney( Int *cells, Player *localPlayer )
 {
 	const UnsignedInt money = localPlayer->getMoney()->countMoney();
 	const Int lit = chromaMoneySegments( money, MOUSEPAD_CELLS );
-	const Int color = chromaAlarmed( COLOR_GREEN, alarm );
 
 	Int *mousepad = cells + MOUSEPAD_FIRST_CELL;
 	for( Int led = 0; led < MOUSEPAD_CELLS; ++led )
-		mousepad[ led ] = led < lit ? color : COLOR_OFF;
+		mousepad[ led ] = led < lit ? COLOR_GREEN : COLOR_OFF;
+}
+
+//-----------------------------------------------------------------------------
+/** The base is being shot at.  It goes on the mouse, which carries nothing to
+	* read and sits under the hand, and on the strip down the left edge of the
+	* board.  Everything else is left alone: this fires exactly when the player
+	* most needs to read the bar, and it used to bury it. */
+static void chromaFillAlarm( Int *cells, Real alarm )
+{
+	if( alarm <= 0.0f )
+		return;
+
+	for( Int row = 0; row < KEYBOARD_ROWS; ++row )
+	{
+		const Int cell = chromaKeyboardCell( row, ALARM_STRIP_COLUMN );
+		cells[ cell ] = chromaAlarmed( cells[ cell ], alarm * ALARM_DEPTH );
+	}
+	for( Int led = 0; led < MOUSE_CELLS; ++led )
+	{
+		Int *cell = cells + MOUSE_FIRST_CELL + led;
+		*cell = chromaAlarmed( *cell, alarm * ALARM_DEPTH );
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -1672,17 +1697,12 @@ static void chromaFillCells( Int *cells )
 			alarm = 0.5f + 0.5f * phase;
 		}
 	}
-	const Real alarmEmpty = alarm * ALARM_DEPTH_EMPTY;
-	const Real alarmData = alarm * ALARM_DEPTH_DATA;
-
 	// With something selected the bar is full of keys worth pressing, and a board
 	// glowing all over is the worst background to read them against, so the bed
 	// goes out and leaves the pressable keys and the gauges lit on black.  With
 	// nothing selected there is nothing to read and the colour comes back.
 	const Bool hasSelection = TheInGameUI != NULL && TheInGameUI->getSelectCount() > 0;
-	const Int bed = chromaAlarmed( hasSelection ? COLOR_OFF
-																							: chromaScale( factionColor, AMBIENT_SCALE ),
-																 alarmEmpty );
+	const Int bed = hasSelection ? COLOR_OFF : chromaScale( factionColor, AMBIENT_SCALE );
 	for( Int cell = 0; cell < CHROMA_CELLS; ++cell )
 		cells[ cell ] = bed;
 
@@ -1698,8 +1718,8 @@ static void chromaFillCells( Int *cells )
 	chromaRefreshBoundCells( frame );
 	const ChromaSnapshot &snapshot = chromaWalkPlayer( localPlayer, frame );
 
-	const Int pressable = chromaAlarmed( factionColor, alarmData );
-	const Int unavailable = chromaAlarmed( COLOR_OFF, alarmData );
+	const Int pressable = factionColor;
+	const Int unavailable = COLOR_OFF;
 
 	// Two input schemes reach the same buttons by different keys, and exactly one
 	// of them is live: Legacy presses the letters in the labels, Modern presses
@@ -1713,13 +1733,14 @@ static void chromaFillCells( Int *cells )
 		chromaFillCommandGrid( cells, pressable, unavailable );
 		chromaFillPowerTray( cells, bed, factionColor, frame );
 	}
-	chromaFillPowerRow( cells, localPlayer->getEnergy(), frame, alarmData );
+	chromaFillPowerRow( cells, localPlayer->getEnergy(), frame );
 	chromaFillNumpad( cells, snapshot, factionColor, frame );
 	chromaFillProduction( cells, snapshot, factionColor );
 	chromaFillSelection( cells );
 	chromaFillMatchState( cells, frame );
 	chromaFillAlerts( cells, localPlayer, frame );
-	chromaFillMoney( cells, localPlayer, alarmData );
+	chromaFillMoney( cells, localPlayer );
+	chromaFillAlarm( cells, alarm );
 
 	// The radar lamp is the one piece of match state that comes off the player
 	// rather than the logic, so it is set here where the player is in hand.

@@ -657,7 +657,7 @@ The whole HUD is on the hardware. Four colours carry it, and they mean the same 
 - Escape says what the match is doing: amber while paused or in a menu, blue through peace time, red when you are out, white when you have won. Beside it, one key for the network and one for whether you still have radar.
 - The two arrows carry your selection: how hurt it is, green through to red, and what rank the unit in front of it holds.
 - The mousepad is your money, a lamp per thousand credits.
-- Everything pulses red while the base is under fire and settles four seconds after the last hit. The gauges only tint, so you can still count your power while it is happening, and the mouse under your hand takes the full pulse.
+- The mouse under your hand pulses red while the base is under fire, along with the strip down the left edge of the keyboard, and settles four seconds after the last hit. The keys themselves are left alone. An alarm that washes the whole board arrives at the one moment you most need to read the bar, and buries it.
 - Nothing to install and nothing to turn on. If Synapse is running it is there; if it is not, the game never mentions it. Options has a switch, and `-nochroma` takes it out of a timed run.
 
 ## The options screen has pages
