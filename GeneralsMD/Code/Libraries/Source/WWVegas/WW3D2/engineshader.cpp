@@ -244,7 +244,9 @@ static void write_pixel_preamble(std::string & hlsl, bool bumped = false)
 		"    row_major float4x4 ShadowFromClip;\n"
 		"    float4 ShadowParameters;\n"
 		"    float4 ShadowViewport;\n"
-		"    float4 ShadowSoftness;\n";
+		"    float4 ShadowSoftness;\n"
+		"    float4 Sky;\n"
+		"    float4 SkyUp;\n";
 	hlsl += "};\n";
 	if (bumped) {
 		hlsl += "Texture2D NormalMap : register(t4);\n";

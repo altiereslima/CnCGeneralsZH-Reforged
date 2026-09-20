@@ -289,6 +289,11 @@ private:
 		// caster and what it falls on, how many world units a unit of depth is, and how much of a
 		// wide shadow the sky fills back in.
 		float ShadowSoftness[4];
+		// What a metal surface mirrors: the map's own light as a sky colour with the share metal
+		// returns in its alpha, and which way up the world is in camera space with the horizon's
+		// share of the zenith colour in its own.
+		float Sky[4];
+		float SkyUp[4];
 	};
 	// A model under directional lights, drawn by generated programs.
 	bool Normal_Mapped() const;

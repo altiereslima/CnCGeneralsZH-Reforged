@@ -48,6 +48,12 @@ static const float NORMAL_MAP_STRENGTH = 1.0f;
 static const float NORMAL_MAP_HIGHLIGHT_POWER = 10.0f;
 static const float NORMAL_MAP_HIGHLIGHT_SCALE = 0.9f;
 
+// How much of the sky a metal surface returns, and how dark the horizon is against straight up.
+// The sun's own dot on a hull is one small spot; the flank of a tank reads as metal because of what
+// it mirrors over its whole area, and from this camera that is nearly all sky.
+static const float SKY_REFLECTION_STRENGTH = 0.35f;
+static const float SKY_HORIZON_SHARE = 0.45f;
+
 // The three stage counts are one count in three headers.  The vertex constant block is copied
 // wholesale out of the backend's own texture transforms, the generated pixel shader declares one
 // sampler per texture the backend binds, and a mismatch is a silent overrun rather than a build
@@ -1629,6 +1635,25 @@ void DX11BackendClass::Upload_Constants()
 		pixel_block.ShadowSoftness[2] = ShadowUnitsPerDepth;
 		pixel_block.ShadowSoftness[3] = ShadowSkyFill;
 	}
+
+	/* The sky a metal surface mirrors.  There is no cubemap: the colour is the map's own sunlight,
+		 which is what makes a night map's metal cold and a desert's warm without anything being
+		 authored, and the direction it is brightest in is straight up in camera space. */
+	const float * sun_colour = Lights[0].Enabled ? Lights[0].Diffuse : NULL;
+	for (unsigned channel = 0; channel < 3; ++channel) {
+		pixel_block.Sky[channel] = (sun_colour != NULL) ? sun_colour[channel] : 1.0f;
+	}
+	pixel_block.Sky[3] = SKY_REFLECTION_STRENGTH;
+	const float world_up[4] = { 0.0f, 0.0f, 1.0f, 0.0f };
+	transform_direction(world_up, View, pixel_block.SkyUp);
+	const float up_length = sqrtf(pixel_block.SkyUp[0] * pixel_block.SkyUp[0]
+		+ pixel_block.SkyUp[1] * pixel_block.SkyUp[1] + pixel_block.SkyUp[2] * pixel_block.SkyUp[2]);
+	if (up_length > 0.0f) {
+		for (unsigned axis = 0; axis < 3; ++axis) {
+			pixel_block.SkyUp[axis] /= up_length;
+		}
+	}
+	pixel_block.SkyUp[3] = SKY_HORIZON_SHARE;
 
 	if ((!PixelConstantsHeld
 			|| memcmp(&HeldPixelConstants, &pixel_block, sizeof(pixel_block)) != 0)
