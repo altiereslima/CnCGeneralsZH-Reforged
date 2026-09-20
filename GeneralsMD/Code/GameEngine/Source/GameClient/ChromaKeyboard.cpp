@@ -31,7 +31,6 @@
 #include "GameClient/GameWindow.h"
 #include "GameClient/HotKey.h"
 #include "GameClient/InGameUI.h"
-#include "GameClient/Keyboard.h"
 #include "GameClient/MetaEvent.h"
 #include "Common/Energy.h"
 #include "Common/GameCommon.h"
@@ -1266,23 +1265,78 @@ static Int chromaPressableWithClock( Int pressable, GameWindow *button )
 }
 
 //-----------------------------------------------------------------------------
-/** The lamp a bound key lights, or -1 for a key the grid has no lamp for or the
-	* layout has no letter for. */
-static Int chromaCellForBoundKey( MappableKeyType key )
+/** Where every bindable key sits on the grid, as runs of keys that are next to
+	* each other on the board.
+	*
+	* A run works because MappableKeyType is DirectInput's scancodes and those are
+	* numbered along the rows of the keyboard: 1 to 0 then minus and equals is one
+	* unbroken count, and so is Q to P then the two brackets.  The alternative,
+	* turning the key into its character and looking the character up, is what was
+	* here and it was wrong twice over: numpad 1 and the 1 above the letters give
+	* the same character and so lit the same lamp, and on a keyboard laid out for
+	* any language but English the character is not the key. */
+struct ChromaKeyRun
 {
-	if( key >= MK_F1 && key <= MK_F10 )
-		return chromaKeyboardCell( FKEY_ROW, FKEY_FIRST_COLUMN + (key - MK_F1) );
-	if( key == MK_F11 )
-		return chromaKeyboardCell( FKEY_ROW, FKEY_FIRST_COLUMN + 10 );
-	if( key == MK_F12 )
-		return chromaKeyboardCell( FKEY_ROW, FKEY_FIRST_COLUMN + 11 );
-	if( key == MK_NONE || TheKeyboard == NULL )
+	Int firstKey;			///< MappableKeyType of the leftmost key
+	Int count;
+	Int row;
+	Int firstColumn;
+};
+
+static const ChromaKeyRun CHROMA_KEY_RUNS[] =
+{
+	{ MK_ESC,					1,	0,	1 },
+	{ MK_F1,					10,	0,	3 },		// F1 to F10
+	{ MK_F11,					2,	0,	13 },		// F11, F12
+
+	{ MK_TICK,				1,	1,	1 },
+	{ MK_1,						12,	1,	2 },		// 1 to 0, minus, equals
+	{ MK_BACKSPACE,		1,	1,	14 },
+	{ MK_INS,					1,	1,	15 },
+	{ MK_HOME,				1,	1,	16 },
+	{ MK_PGUP,				1,	1,	17 },
+	{ MK_KPSLASH,			1,	1,	19 },
+	{ MK_KPMINUS,			1,	1,	21 },
+
+	{ MK_TAB,					1,	2,	1 },
+	{ MK_Q,						12,	2,	2 },		// Q to P, both brackets
+	{ MK_BACKSLASH,		1,	2,	14 },
+	{ MK_DEL,					1,	2,	15 },
+	{ MK_END,					1,	2,	16 },
+	{ MK_PGDN,				1,	2,	17 },
+	{ MK_KP7,					3,	2,	18 },		// 7, 8, 9
+	{ MK_KPPLUS,			1,	2,	21 },
+
+	{ MK_A,						11,	3,	2 },		// A to L, semicolon, apostrophe
+	{ MK_ENTER,				1,	3,	14 },
+	{ MK_KP4,					3,	3,	18 },		// 4, 5, 6
+
+	{ MK_Z,						10,	4,	2 },		// Z to M, comma, period, slash
+	{ MK_UP,					1,	4,	16 },
+	{ MK_KP1,					3,	4,	18 },		// 1, 2, 3
+
+	{ MK_SPACE,				1,	5,	7 },
+	{ MK_LEFT,				1,	5,	15 },
+	{ MK_DOWN,				1,	5,	16 },
+	{ MK_RIGHT,				1,	5,	17 },
+	{ MK_KP0,					1,	5,	18 },
+};
+static const Int CHROMA_KEY_RUN_COUNT = sizeof( CHROMA_KEY_RUNS ) / sizeof( CHROMA_KEY_RUNS[ 0 ] );
+
+//-----------------------------------------------------------------------------
+Int chromaCellForMappableKey( Int key )
+{
+	if( key == MK_NONE )
 		return -1;
 
-	WideChar printable = TheKeyboard->getPrintableKey( (UnsignedByte)key, 0 );
-	if( printable >= L'A' && printable <= L'Z' )
-		printable += L'a' - L'A';
-	return printable > 0 && printable < 128 ? chromaCellForKey( (char)printable ) : -1;
+	for( Int run = 0; run < CHROMA_KEY_RUN_COUNT; ++run )
+	{
+		const ChromaKeyRun &keys = CHROMA_KEY_RUNS[ run ];
+		const Int along = key - keys.firstKey;
+		if( along >= 0 && along < keys.count )
+			return chromaKeyboardCell( keys.row, keys.firstColumn + along );
+	}
+	return -1;
 }
 
 //-----------------------------------------------------------------------------
@@ -1321,18 +1375,22 @@ static void chromaRefreshBoundCells( UnsignedInt frame )
 
 		const Int commandSlot = (Int)rec->m_meta - (Int)GameMessage::MSG_META_COMMAND_SLOT01;
 		if( commandSlot >= 0 && commandSlot < MAX_COMMANDS_PER_SET && s_commandSlotCell[ commandSlot ] < 0 )
-			s_commandSlotCell[ commandSlot ] = chromaCellForBoundKey( rec->m_key );
+			s_commandSlotCell[ commandSlot ] = chromaCellForMappableKey( rec->m_key );
 
 		const Int shortcutSlot = (Int)rec->m_meta - (Int)GameMessage::MSG_META_SHORTCUT_SLOT01;
 		if( shortcutSlot >= 0 && shortcutSlot < MAX_SPECIAL_POWER_SHORTCUTS && s_shortcutSlotCell[ shortcutSlot ] < 0 )
-			s_shortcutSlotCell[ shortcutSlot ] = chromaCellForBoundKey( rec->m_key );
+			s_shortcutSlotCell[ shortcutSlot ] = chromaCellForMappableKey( rec->m_key );
 	}
 }
 
 //-----------------------------------------------------------------------------
 /** The command bar under Legacy input: the letter marked in each button's label,
-	* which is what HotKeyManager presses it with.  Under Modern that manager holds
-	* no command bar letters at all and this lights nothing. */
+	* which is what HotKeyManager presses it with.
+	*
+	* Only under Legacy.  The manager is not the command bar's alone - every screen
+	* that has ever put a labelled button up has registered its letters there and
+	* they stay registered - so under Modern, where the bar binds none of them,
+	* this used to light whatever a menu had left behind. */
 static void chromaFillLabelHotKeys( Int *cells, Int pressable, Int unavailable )
 {
 	for( Int row = CHROMA_FIRST_HOTKEY_ROW; row < CHROMA_KEY_ROW_COUNT; ++row )
@@ -1391,10 +1449,9 @@ static void chromaFillCommandGrid( Int *cells, Int pressable, Int unavailable )
 	* row is armed the blinking moves onto the keys of the usable powers inside it.
 	* A power still charging shows as far as its clock has got, and a key that
 	* reaches nothing stays the colour of the bed. */
-static void chromaFillPowerTray( Int *cells, Int factionColor, UnsignedInt frame )
+static void chromaFillPowerTray( Int *cells, Int bed, Int factionColor, UnsignedInt frame )
 {
 	const Int usable = chromaBlinkIsOn( frame, BLINK_PERIOD_FRAMES ) ? COLOR_WARM_WHITE : COLOR_OFF;
-	const Int nothingUsable = chromaScale( factionColor, AMBIENT_SCALE );
 
 	for( Int slot = 0; slot < MAX_SPECIAL_POWER_SHORTCUTS; ++slot )
 	{
@@ -1409,7 +1466,7 @@ static void chromaFillPowerTray( Int *cells, Int factionColor, UnsignedInt frame
 				cells[ cell ] = usable;
 				break;
 			case ControlBar::PRESS_ARMS_CHORD:
-				cells[ cell ] = button != NULL ? usable : nothingUsable;
+				cells[ cell ] = button != NULL ? usable : bed;
 				break;
 			case ControlBar::PRESS_IS_REFUSED:
 				cells[ cell ] = chromaScale( factionColor, chromaButtonClock( button ) );
@@ -1618,9 +1675,16 @@ static void chromaFillCells( Int *cells )
 	const Real alarmEmpty = alarm * ALARM_DEPTH_EMPTY;
 	const Real alarmData = alarm * ALARM_DEPTH_DATA;
 
-	const Int ambient = chromaAlarmed( chromaScale( factionColor, AMBIENT_SCALE ), alarmEmpty );
+	// With something selected the bar is full of keys worth pressing, and a board
+	// glowing all over is the worst background to read them against, so the bed
+	// goes out and leaves the pressable keys and the gauges lit on black.  With
+	// nothing selected there is nothing to read and the colour comes back.
+	const Bool hasSelection = TheInGameUI != NULL && TheInGameUI->getSelectCount() > 0;
+	const Int bed = chromaAlarmed( hasSelection ? COLOR_OFF
+																							: chromaScale( factionColor, AMBIENT_SCALE ),
+																 alarmEmpty );
 	for( Int cell = 0; cell < CHROMA_CELLS; ++cell )
-		cells[ cell ] = ambient;
+		cells[ cell ] = bed;
 
 	if( !inMatch || localPlayer == NULL || TheHotKeyManager == NULL )
 	{
@@ -1637,15 +1701,17 @@ static void chromaFillCells( Int *cells )
 	const Int pressable = chromaAlarmed( factionColor, alarmData );
 	const Int unavailable = chromaAlarmed( COLOR_OFF, alarmData );
 
-	// Two input schemes reach the same buttons by different keys, and only one of
-	// them is live at a time: Legacy registers the letters in the labels and binds
-	// no grid, Modern binds the grid and registers no letters.  Filling from both
-	// lights whichever is real and nothing from the other.
-	chromaFillLabelHotKeys( cells, pressable, unavailable );
-	if( TheControlBar != NULL )
+	// Two input schemes reach the same buttons by different keys, and exactly one
+	// of them is live: Legacy presses the letters in the labels, Modern presses
+	// the grid.  Whichever is not the player's lights nothing.
+	if( TheGlobalData != NULL && TheGlobalData->isLegacyInput() )
+	{
+		chromaFillLabelHotKeys( cells, pressable, unavailable );
+	}
+	else if( TheControlBar != NULL )
 	{
 		chromaFillCommandGrid( cells, pressable, unavailable );
-		chromaFillPowerTray( cells, factionColor, frame );
+		chromaFillPowerTray( cells, bed, factionColor, frame );
 	}
 	chromaFillPowerRow( cells, localPlayer->getEnergy(), frame, alarmData );
 	chromaFillNumpad( cells, snapshot, factionColor, frame );

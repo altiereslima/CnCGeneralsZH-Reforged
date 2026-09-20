@@ -44,6 +44,7 @@
 #include "Common/Energy.h"
 #include "Common/RandomValue.h"
 #include "GameClient/ChromaKeyboard.h"
+#include "GameClient/MetaEvent.h"
 #include "GameClient/ClickTolerance.h"
 #include "GameClient/KeyDownInfo.h"
 #include "GameClient/GameWindowTransitions.h"
@@ -13092,6 +13093,63 @@ TEST(chroma_power_meter_empties_as_the_draw_catches_the_supply)
 	CHECK_EQ(chromaPowerSegments(100, 99), 1);
 	CHECK_EQ(chromaPowerSegments(10, 10), 0);
 	CHECK_EQ(chromaPowerSegments(10, 11), CHROMA_POWER_BROWNOUT);
+}
+
+// The two key maps have to agree. chromaCellForKey knows the typing rows by their characters and
+// draws the power meter with them; chromaCellForMappableKey knows the whole board by scancode and
+// places whatever the player has bound. A letter has to come out at the same lamp either way, or a
+// bound key lights somewhere its own label is not.
+TEST(chroma_key_maps_agree_on_every_letter_and_digit)
+{
+	static const char LETTERS[] = "qwertyuiopasdfghjklzxcvbnm";
+	static const Int LETTER_KEYS[] = {
+		MK_Q, MK_W, MK_E, MK_R, MK_T, MK_Y, MK_U, MK_I, MK_O, MK_P,
+		MK_A, MK_S, MK_D, MK_F, MK_G, MK_H, MK_J, MK_K, MK_L,
+		MK_Z, MK_X, MK_C, MK_V, MK_B, MK_N, MK_M };
+	for (Int i = 0; LETTERS[i]; ++i)
+	{
+		CHECK(chromaCellForKey(LETTERS[i]) >= 0);
+		CHECK_EQ(chromaCellForMappableKey(LETTER_KEYS[i]), chromaCellForKey(LETTERS[i]));
+	}
+
+	static const char DIGITS[] = "1234567890";
+	static const Int DIGIT_KEYS[] = { MK_1, MK_2, MK_3, MK_4, MK_5, MK_6, MK_7, MK_8, MK_9, MK_0 };
+	for (Int i = 0; DIGITS[i]; ++i)
+		CHECK_EQ(chromaCellForMappableKey(DIGIT_KEYS[i]), chromaCellForKey(DIGITS[i]));
+
+	// The numpad is its own block on the right, and its digits are not the ones above the letters.
+	// Reading the character off the key was what put them on top of each other.
+	CHECK_NE(chromaCellForMappableKey(MK_KP1), chromaCellForMappableKey(MK_1));
+	CHECK_EQ(chromaCellForMappableKey(MK_KP7), 2 * 22 + 18);
+	CHECK_EQ(chromaCellForMappableKey(MK_KP1), 4 * 22 + 18);
+
+	// The function row, which is where the generals powers land
+	CHECK_EQ(chromaCellForMappableKey(MK_F1), 3);
+	CHECK_EQ(chromaCellForMappableKey(MK_F10), 12);
+	CHECK_EQ(chromaCellForMappableKey(MK_F12), 14);
+
+	// A run has to stop at its own end rather than walking into the next one: the key after 0 is
+	// minus, still on the number row, and the key after P is a bracket, still on the Q row.
+	CHECK_EQ(chromaCellForMappableKey(MK_MINUS), 1 * 22 + 12);
+	CHECK_EQ(chromaCellForMappableKey(MK_LBRACKET), 2 * 22 + 12);
+	CHECK_EQ(chromaCellForMappableKey(MK_SEMICOLON), 3 * 22 + 11);
+	CHECK_EQ(chromaCellForMappableKey(MK_COMMA), 4 * 22 + 9);
+
+	CHECK_EQ(chromaCellForMappableKey(MK_NONE), -1);
+
+	// Nothing may share a lamp, or one press would light two keys and another none
+	Int seen[6 * 22];
+	for (Int cell = 0; cell < 6 * 22; ++cell)
+		seen[cell] = 0;
+	for (Int key = 0; key < 256; ++key)
+	{
+		const Int cell = chromaCellForMappableKey(key);
+		if (cell < 0)
+			continue;
+		CHECK(cell < 6 * 22);
+		CHECK_EQ(seen[cell], 0);
+		seen[cell] = 1;
+	}
 }
 
 // Where a grid key lands.  This is the decision pressCommandButton used to make inline, pulled
