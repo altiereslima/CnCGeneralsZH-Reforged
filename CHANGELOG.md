@@ -764,6 +764,13 @@ found and fixed â€” EA's own, not port damage.**
 
 ## Soldiers cast real shadows
 
+- A shadow now softens as the thing casting it leaves the ground. Tracks, feet and crates keep the
+  hard edge they always had, because the shadow starts where the object does; a helicopter's slides
+  out from under it and spreads as it climbs, and pales with the same height, the way the sky fills
+  a shadow back in. The game drew every shadow as one hard silhouette before this, whether it came
+  off a tank's hull or off something twenty metres up, and edges that sharp are the tell that a
+  picture was computed rather than photographed. `-shadowmap` turns it on; without it the old
+  shadows are what you get, and a machine that cannot run the newer picture keeps them.
 - Infantry shadows are built from the pose: arms, head, weapon, moving with him.
 - `UseShadowVolumesForSkins = No` puts the old flat blobs back.
 - Scuds, rockets and falling bombs cast a shadow running along the ground.
