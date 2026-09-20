@@ -74,6 +74,15 @@ if not defined CMAKE (
 echo [build] cmake:  %CMAKE%
 echo [build] config: %CONFIG%
 
+rem --- third-party sources the repository does not carry (zlib, LZH-Light, the DirectX 8 headers
+rem and the GameSpy SDK). Fetches whatever is missing and is a no-op once it is there, so one
+rem build.bat on a fresh clone is enough. ---
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SRC%\Tools\vendor.ps1"
+if !errorlevel! neq 0 (
+    echo [build] ERROR: fetching the third-party sources failed.
+    exit /b 1
+)
+
 rem --- configure (only when the cache is missing) ---
 if not exist "%BUILD%\CMakeCache.txt" (
     echo [build] configuring %SRC% -^> %BUILD%

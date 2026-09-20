@@ -23,6 +23,20 @@ endif()
 set(WW ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/WWVegas)
 set(COMP ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/Compression)
 
+# The third-party sources EA stripped out, which this repository does not carry either.  build.bat
+# fetches them before it configures; say so here rather than let the generator report a missing
+# source file per library.
+foreach(vendored
+    ${COMP}/ZLib/deflate.c
+    ${COMP}/LZHCompress/CompLibSource/Lzhl.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Include/d3d8.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/GameSpy/CMakeLists.txt)
+  if(NOT EXISTS ${vendored})
+    message(FATAL_ERROR
+      "${vendored} is missing. Run Tools\\vendor.ps1 (build.bat does it for you).")
+  endif()
+endforeach()
+
 add_compile_definitions(WIN32 _WINDOWS _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)
 
 # EA's own switch for exactly this situation ("Good for startup problems", Debug.h):
