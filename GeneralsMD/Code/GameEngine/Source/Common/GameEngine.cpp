@@ -91,6 +91,7 @@
 #include "GameLogic/ScriptEngine.h"
 #include "GameLogic/SidesList.h"
 
+#include "GameClient/ChromaKeyboard.h"
 #include "GameClient/CinemaDirector.h"
 #include "GameClient/Display.h"
 #include "GameClient/FXList.h"
@@ -221,6 +222,8 @@ GameEngine::~GameEngine()
 
 	// close the control socket before anything it can reach is torn down
 	ControlServer_shutdown();
+
+	shutdownChromaKeyboard();
 
 	delete TheMapCache;
 	TheMapCache = NULL;
@@ -2137,6 +2140,10 @@ void GameEngine::update( void )
 			}
 
 			TheCDManager->UPDATE();
+
+			// Reads the command bar and the local player, writes a keyboard frame
+			// for the Chroma worker to pick up.  Client only, never touches logic.
+			updateChromaKeyboard();
 		}
 #ifdef DEBUG_LOGGING
 		QueryPerformanceCounter( (LARGE_INTEGER *)&tClientEnd );

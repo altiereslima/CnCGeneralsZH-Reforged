@@ -43,6 +43,7 @@
 #include "GameNetwork/LinkSimulation.h"
 #include "Common/Energy.h"
 #include "Common/RandomValue.h"
+#include "GameClient/ChromaKeyboard.h"
 #include "GameClient/ClickTolerance.h"
 #include "GameClient/KeyDownInfo.h"
 #include "GameClient/GameWindowTransitions.h"
@@ -13024,6 +13025,24 @@ TEST(camera_preferences_default_to_a_finite_map_margin)
 	TheWritableGlobalData = saved;
 	delete scratch;
 }
+// The Razer grid is six rows of twenty-two with the logo strip in column zero and
+// escape, tab, caps and shift in column one, so the top left key the command bar
+// can ever light is the digit 1 at row one, column two.
+TEST(chroma_keys_land_on_the_razer_grid)
+{
+	CHECK_EQ(chromaCellForKey('1'), 1 * 22 + 2);
+	CHECK_EQ(chromaCellForKey('0'), 1 * 22 + 11);
+	CHECK_EQ(chromaCellForKey('q'), 2 * 22 + 2);
+	CHECK_EQ(chromaCellForKey('p'), 2 * 22 + 11);
+	CHECK_EQ(chromaCellForKey('a'), 3 * 22 + 2);
+	CHECK_EQ(chromaCellForKey('l'), 3 * 22 + 10);
+	CHECK_EQ(chromaCellForKey('z'), 4 * 22 + 2);
+	CHECK_EQ(chromaCellForKey('m'), 4 * 22 + 8);
+	// Upper case never reaches here: HotKeyManager lowers every key it stores.
+	CHECK_EQ(chromaCellForKey('Q'), -1);
+	CHECK_EQ(chromaCellForKey(' '), -1);
+}
+
 #include "test_camera_behavior.inc"
 #include "test_production_input.inc"
 #include "test_minimap_input.inc"

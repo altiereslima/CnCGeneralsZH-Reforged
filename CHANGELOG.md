@@ -642,6 +642,13 @@ found and fixed â€” EA's own, not port damage.**
 - Your allies see the smoke and their radar blinks at the spot, and the message area says who sent it. Three seconds later the smoke has cleared, so the call you made a minute ago is never still standing next to the one you are making now. Enemies see none of it.
 - One signal a second per player. Hammering the key gets you the first puff and nothing else, and a teammate who tries it cannot bury your screen in smoke either, because every machine in the game holds everyone to the same limit.
 
+## A Razer keyboard plays along
+
+- The keyboard sits in your own player colour for the whole match, dim enough to be a bed rather than a light show.
+- The command bar is on the keys. Every letter and digit the bar has bound to a button lights up while that button can be pressed, and goes dark the moment it cannot - the moment you cannot afford it, or the thing that builds it is busy. What you can buy is readable without looking away from the fight.
+- The board pulses red while something is shooting at your base, and settles again four seconds after the last hit.
+- Nothing to install and nothing to turn on. If Synapse is running the lighting is there; if it is not, the game never mentions it.
+
 ## The options screen has pages
 
 - Display, graphics, effects, audio, controls, gameplay and network, behind seven buttons across the top. The original screen was one panel with everything on it at once, and it was already full the day it shipped: the language filter, the keyboard button and four camera checkboxes are all still in there, parked off the right edge where nobody can reach them, because there was nowhere left to put them.

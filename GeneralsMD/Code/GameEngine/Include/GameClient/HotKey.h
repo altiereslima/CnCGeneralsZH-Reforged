@@ -101,6 +101,11 @@ public:
 	AsciiString searchHotKey( const AsciiString& label);
 	AsciiString searchHotKey( const UnicodeString& uStr );
 
+	/** Is this key bound to a window at the moment?  When it is, pressable comes
+		* back with the answer executeHotKey would give: the window is showing and
+		* enabled, so the press would land. */
+	Bool findHotKey( const AsciiString& key, Bool *pressable ) const;
+
 private:
 	typedef std::map<AsciiString, HotKey> HotKeyMap;
 	HotKeyMap m_hotKeyMap;
