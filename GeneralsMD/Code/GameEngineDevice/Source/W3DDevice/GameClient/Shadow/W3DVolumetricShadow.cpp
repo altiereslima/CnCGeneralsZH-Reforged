@@ -109,7 +109,7 @@ const Real cosAngleToCare = cos ((0.2 * PI) / 180.0);	//1.5 degree difference
 // fully blocked pixel goes, and how far the filter reaches in texels.  The first is the one that
 // decides between a surface shadowing itself in stripes and a shadow lifting off its own caster.
 #define SHADOW_MAP_DEPTH_BIAS 0.0015f
-#define SHADOW_MAP_STRENGTH 0.65f
+#define SHADOW_MAP_STRENGTH 0.55f
 // How wide the filter may open and how narrow it stays on the ground, in texels of the map, and how
 // much penumbra a unit of gap between a caster and what its shadow falls on is worth.  The last is
 // the number the whole picture turns on: a tank's tracks are on the ground and keep a hard edge, a
