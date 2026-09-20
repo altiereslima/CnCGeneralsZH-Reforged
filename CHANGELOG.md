@@ -1188,7 +1188,7 @@ The whole HUD is on the hardware. Four colours carry it, and they mean the same 
 - Vertical sync works in a window. The option has always been in the menu, and in a window the old
   path ignored it and ran the picture as fast as it could, which is what a screen tears from. It is
   honoured now, so the picture holds to your monitor's refresh rate unless you turn it off.
-- No disc, no registry keys, no retail installer â€” a normal install works.
+- No disc, no registry keys, no retail installer â€” a normal install works. "Please insert the first game CD" used to come up over the startup screen of an install that has no disc to put in, and pressing OK only asked again; Cancel was the one way through to the game. A disc is still read when there is one, and when there is not the game carries on without music instead of standing there asking.
 - The startup screen is this build's own, with the Zero Hour Reforged name on it, so you can see which one you launched before the menu loads.
 - The main menu buttons are there when the menu is. On the first visit they used to stay hidden, pointer and all, until you nudged the mouse or pressed a key, so a freshly started game looked stuck on the background battle. A match started straight from the command line no longer plays those buttons sliding in over its loading screen.
 - The zip installs itself and takes itself back off. `install.bat` asks where the game is, offering
