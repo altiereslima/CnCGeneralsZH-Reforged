@@ -1489,6 +1489,60 @@ Int parseVideo(char *args[], int num)
 	return consumed;
 }
 
+/* -wav <from> <to> [name]: record what the game sounds like over logic frames <from> to <to>.
+	 *
+	 * A movie made by -video has no sound in it: the picture comes from a frame dump and the frames are
+	 * saved as fast as the disk takes them, which is nothing like the speed the mixer plays at.  Sound
+	 * has to come off a second run at the pace a player would hear it, and the two runs line up because
+	 * the same seed and the same shot list play the same match twice.  Everything the game plays goes
+	 * through one mastering voice, so the recording is the finished mix - music, effects, speech, the
+	 * 3D positioning, the lot - written to Videos\<name>.wav next to the save games.  Mux it onto the
+	 * picture afterwards: ffmpeg -i <name>.mp4 -i <name>.wav -c:v copy -shortest <name>_sound.mp4.
+	 *
+	 * The run logs how long the recording took against how long the frames say it should have, which is
+	 * the only thing that can go wrong here: a run that cannot hold 30 frames a second drifts away from
+	 * the picture, and the AUDIO line says by how much before anyone edits with it. */
+Int parseWav(char *args[], int num)
+{
+	if (num < 3)
+	{
+		DEBUG_LOG(("-wav: wants the first and the last logic frame to record, got %d arguments\n", num - 1));
+		return num;
+	}
+
+	Int from = atoi(args[1]);
+	if (from < 1)
+		from = 1;
+	const Int to = atoi(args[2]);
+
+	AsciiString name;
+	name.format("video_%d_%d", from, to);
+	Int consumed = 3;
+	if (num > 3 && args[3][0] != '-')
+	{
+		consumed = 4;
+		if (isVideoNameUsable(args[3]))
+			name = args[3];
+		else
+			DEBUG_LOG(("-wav: '%s' is not a usable name (letters, digits, '-' and '_'), recording as %s\n",
+				args[3], name.str()));
+	}
+
+	if (to < from)
+	{
+		DEBUG_LOG(("-wav: the last frame %d comes before the first frame %d, so nothing is recorded\n", to, from));
+		return consumed;
+	}
+
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_wavStartFrame = from;
+		TheWritableGlobalData->m_wavEndFrame = to;
+		TheWritableGlobalData->m_wavName = name;
+	}
+	return consumed;
+}
+
 /* -autocamera [seconds]: every so often, put the camera wherever the fighting is.
 	 *
 	 * A soak run watches from a free camera that never moves, and a camera that never moves is the
@@ -2307,6 +2361,7 @@ static CommandLineParam params[] =
 	{ "-maxframes", parseMaxGameFrames },
 	{ "-screenshot", parseScreenShot },
 	{ "-video", parseVideo },
+	{ "-wav", parseWav },
 	{ "-msaa", parseMSAA },
 	{ "-d3d9", parseDirect3D9 },
 	{ "-language", parseTextLanguage },

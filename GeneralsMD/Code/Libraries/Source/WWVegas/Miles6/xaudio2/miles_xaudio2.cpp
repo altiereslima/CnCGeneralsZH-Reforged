@@ -19,6 +19,7 @@
 #include <windows.h>
 #include <mmreg.h>
 #include <xaudio2.h>
+#include <xapo.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -737,6 +738,236 @@ DWORD WINAPI serviceThreadMain(LPVOID)
 	return 0;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Capture
+//
+// Everything the game plays ends up in the one mastering voice, so an effect sitting on that voice
+// is the whole soundtrack and nothing else on the machine.  The effect passes the mix through
+// untouched and writes a copy to a WAV file.
+//
+// The file is the tap's own: XAudio2 holds the only other reference, so the destructor runs after
+// the last Process call and there is no window where one thread is writing a file the other has
+// closed.  Nothing is buffered off to another thread either - a write that blocks makes the live
+// output stutter, and nobody is listening to a capture run.
+// ---------------------------------------------------------------------------------------------
+
+const int WAVE_HEADER_BYTES = 44;
+const int WAVE_RIFF_SIZE_OFFSET = 4;
+const int WAVE_DATA_SIZE_OFFSET = 40;
+const int WAVE_FMT_CHUNK_BYTES = 16;
+const int WAVE_PCM_TAG = 1;
+const int CAPTURE_BITS_PER_SAMPLE = 16;
+const float CAPTURE_SAMPLE_SCALE = 32767.0f;
+const int CAPTURE_CONVERSION_SAMPLES = 4096;
+
+void writeLittleU32(FILE *file, unsigned int value)
+{
+	fwrite(&value, sizeof(value), 1, file);
+}
+
+void writeLittleU16(FILE *file, unsigned short value)
+{
+	fwrite(&value, sizeof(value), 1, file);
+}
+
+void writeWaveHeader(FILE *file, unsigned int channels, unsigned int samplesPerSecond,
+	unsigned int dataBytes)
+{
+	const unsigned int blockAlign = channels * (CAPTURE_BITS_PER_SAMPLE / 8);
+	fwrite("RIFF", 1, 4, file);
+	writeLittleU32(file, WAVE_HEADER_BYTES - 8 + dataBytes);
+	fwrite("WAVEfmt ", 1, 8, file);
+	writeLittleU32(file, WAVE_FMT_CHUNK_BYTES);
+	writeLittleU16(file, WAVE_PCM_TAG);
+	writeLittleU16(file, (unsigned short)channels);
+	writeLittleU32(file, samplesPerSecond);
+	writeLittleU32(file, samplesPerSecond * blockAlign);
+	writeLittleU16(file, (unsigned short)blockAlign);
+	writeLittleU16(file, CAPTURE_BITS_PER_SAMPLE);
+	fwrite("data", 1, 4, file);
+	writeLittleU32(file, dataBytes);
+}
+
+class CaptureTap : public IXAPO
+{
+public:
+	CaptureTap(FILE *file, unsigned int channels, unsigned int samplesPerSecond)
+		: m_references(1), m_file(file), m_channels(channels),
+		  m_samplesPerSecond(samplesPerSecond), m_dataBytes(0), m_sizesWrittenAt(0)
+	{
+		writeWaveHeader(m_file, m_channels, m_samplesPerSecond, 0);
+	}
+
+	STDMETHOD(QueryInterface)(REFIID riid, void **object)
+	{
+		if (object == NULL) {
+			return E_POINTER;
+		}
+		if (riid == __uuidof(IXAPO) || riid == __uuidof(IUnknown)) {
+			*object = static_cast<IXAPO *>(this);
+			AddRef();
+			return S_OK;
+		}
+		*object = NULL;
+		return E_NOINTERFACE;
+	}
+
+	STDMETHOD_(ULONG, AddRef)()
+	{
+		return (ULONG)InterlockedIncrement(&m_references);
+	}
+
+	STDMETHOD_(ULONG, Release)()
+	{
+		const LONG left = InterlockedDecrement(&m_references);
+		if (left == 0) {
+			delete this;
+		}
+		return (ULONG)left;
+	}
+
+	STDMETHOD(GetRegistrationProperties)(XAPO_REGISTRATION_PROPERTIES **properties)
+	{
+		XAPO_REGISTRATION_PROPERTIES *copy = (XAPO_REGISTRATION_PROPERTIES *)
+			CoTaskMemAlloc(sizeof(XAPO_REGISTRATION_PROPERTIES));
+		if (copy == NULL) {
+			return E_OUTOFMEMORY;
+		}
+		memset(copy, 0, sizeof(*copy));
+		wcscpy_s(copy->FriendlyName, L"capture");
+		wcscpy_s(copy->CopyrightInfo, L"");
+		copy->MajorVersion = 1;
+		copy->Flags = XAPO_FLAG_CHANNELS_MUST_MATCH | XAPO_FLAG_FRAMERATE_MUST_MATCH
+			| XAPO_FLAG_BITSPERSAMPLE_MUST_MATCH | XAPO_FLAG_BUFFERCOUNT_MUST_MATCH
+			| XAPO_FLAG_INPLACE_SUPPORTED | XAPO_FLAG_INPLACE_REQUIRED;
+		copy->MinInputBufferCount = 1;
+		copy->MaxInputBufferCount = 1;
+		copy->MinOutputBufferCount = 1;
+		copy->MaxOutputBufferCount = 1;
+		*properties = copy;
+		return S_OK;
+	}
+
+	STDMETHOD(IsInputFormatSupported)(const WAVEFORMATEX *, const WAVEFORMATEX *requested,
+		WAVEFORMATEX **supported)
+	{
+		if (supported != NULL) {
+			*supported = const_cast<WAVEFORMATEX *>(requested);
+		}
+		return S_OK;
+	}
+
+	STDMETHOD(IsOutputFormatSupported)(const WAVEFORMATEX *, const WAVEFORMATEX *requested,
+		WAVEFORMATEX **supported)
+	{
+		if (supported != NULL) {
+			*supported = const_cast<WAVEFORMATEX *>(requested);
+		}
+		return S_OK;
+	}
+
+	STDMETHOD(Initialize)(const void *, UINT32)
+	{
+		return S_OK;
+	}
+
+	STDMETHOD_(void, Reset)()
+	{
+	}
+
+	STDMETHOD(LockForProcess)(UINT32, const XAPO_LOCKFORPROCESS_BUFFER_PARAMETERS *, UINT32,
+		const XAPO_LOCKFORPROCESS_BUFFER_PARAMETERS *)
+	{
+		return S_OK;
+	}
+
+	STDMETHOD_(void, UnlockForProcess)()
+	{
+	}
+
+	STDMETHOD_(void, Process)(UINT32, const XAPO_PROCESS_BUFFER_PARAMETERS *input, UINT32,
+		XAPO_PROCESS_BUFFER_PARAMETERS *output, BOOL)
+	{
+		if (output != NULL) {
+			output[0].ValidFrameCount = input[0].ValidFrameCount;
+			output[0].BufferFlags = input[0].BufferFlags;
+		}
+
+		const UINT32 samples = input[0].ValidFrameCount * m_channels;
+		short converted[CAPTURE_CONVERSION_SAMPLES];
+
+		if (input[0].BufferFlags == XAPO_BUFFER_SILENT) {
+			memset(converted, 0, sizeof(converted));
+			for (UINT32 written = 0; written < samples; ) {
+				const UINT32 batch = min(samples - written, (UINT32)CAPTURE_CONVERSION_SAMPLES);
+				writeSamples(converted, batch);
+				written += batch;
+			}
+			return;
+		}
+
+		const float *mix = (const float *)input[0].pBuffer;
+		for (UINT32 read = 0; read < samples; ) {
+			const UINT32 batch = min(samples - read, (UINT32)CAPTURE_CONVERSION_SAMPLES);
+			for (UINT32 index = 0; index < batch; ++index) {
+				const float value = mix[read + index];
+				const float clamped = value > 1.0f ? 1.0f : (value < -1.0f ? -1.0f : value);
+				converted[index] = (short)(clamped * CAPTURE_SAMPLE_SCALE);
+			}
+			writeSamples(converted, batch);
+			read += batch;
+		}
+	}
+
+	STDMETHOD_(UINT32, CalcInputFrames)(UINT32 outputFrameCount)
+	{
+		return outputFrameCount;
+	}
+
+	STDMETHOD_(UINT32, CalcOutputFrames)(UINT32 inputFrameCount)
+	{
+		return inputFrameCount;
+	}
+
+private:
+	~CaptureTap()
+	{
+		writeSizes();
+		fclose(m_file);
+	}
+
+	void writeSamples(const short *samples, UINT32 count)
+	{
+		m_dataBytes += (unsigned int)fwrite(samples, sizeof(short), count, m_file) * sizeof(short);
+
+		// A recording run is usually killed from the script that started it rather than left to shut
+		// down, and a file whose header still says nothing was written is one no editor will open.
+		// Writing the two sizes back once a second costs two seeks and makes a killed run usable.
+		const unsigned int refreshEvery = m_samplesPerSecond * m_channels * sizeof(short);
+		if (m_dataBytes - m_sizesWrittenAt < refreshEvery) {
+			return;
+		}
+		m_sizesWrittenAt = m_dataBytes;
+		writeSizes();
+		fseek(m_file, 0, SEEK_END);
+	}
+
+	void writeSizes()
+	{
+		fseek(m_file, WAVE_RIFF_SIZE_OFFSET, SEEK_SET);
+		writeLittleU32(m_file, WAVE_HEADER_BYTES - 8 + m_dataBytes);
+		fseek(m_file, WAVE_DATA_SIZE_OFFSET, SEEK_SET);
+		writeLittleU32(m_file, m_dataBytes);
+	}
+
+	volatile LONG m_references;
+	FILE *m_file;
+	unsigned int m_channels;
+	unsigned int m_samplesPerSecond;
+	unsigned int m_dataBytes;
+	unsigned int m_sizesWrittenAt;
+};
+
 } // namespace
 
 // =================================================================================================
@@ -790,8 +1021,48 @@ void AILCALL AIL_quick_handles(HDIGDRIVER *pdig, HMDIDRIVER *pmdi, HDLSDEVICE *p
 	if (pdls != NULL) *pdls = NULL;
 }
 
+S32 AILCALL AIL_ex_start_capture(const char *pathname)
+{
+	if (g_engine.master == NULL || pathname == NULL) {
+		return 0;
+	}
+
+	XAUDIO2_VOICE_DETAILS details;
+	g_engine.master->GetVoiceDetails(&details);
+
+	FILE *file = NULL;
+	if (fopen_s(&file, pathname, "wb") != 0 || file == NULL) {
+		return 0;
+	}
+
+	CaptureTap *tap = new CaptureTap(file, details.InputChannels, details.InputSampleRate);
+	XAUDIO2_EFFECT_DESCRIPTOR descriptor;
+	descriptor.pEffect = static_cast<IXAPO *>(tap);
+	descriptor.InitialState = TRUE;
+	descriptor.OutputChannels = details.InputChannels;
+	XAUDIO2_EFFECT_CHAIN chain;
+	chain.EffectCount = 1;
+	chain.pEffectDescriptors = &descriptor;
+
+	const HRESULT result = g_engine.master->SetEffectChain(&chain);
+
+	// the chain holds the reference that matters from here; ours goes, and on a refusal that is
+	// the last one, so the tap closes its own file on the way out
+	tap->Release();
+	return SUCCEEDED(result) ? 1 : 0;
+}
+
+void AILCALL AIL_ex_stop_capture(void)
+{
+	if (g_engine.master != NULL) {
+		g_engine.master->SetEffectChain(NULL);
+	}
+}
+
 void AILCALL AIL_shutdown(void)
 {
+	AIL_ex_stop_capture();
+
 	if (g_engine.serviceThread != NULL) {
 		InterlockedExchange(&g_engine.serviceRunning, 0);
 		WaitForSingleObject(g_engine.serviceThread, 2000);

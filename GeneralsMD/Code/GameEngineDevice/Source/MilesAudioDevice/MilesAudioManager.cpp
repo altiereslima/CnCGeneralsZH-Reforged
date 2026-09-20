@@ -497,9 +497,82 @@ void MilesAudioManager::reset()
 }
 
 //-------------------------------------------------------------------------------------------------
+/** -wav <from> <to> [name]: record the finished mix over a range of logic frames.
+	*
+	* The mixer plays at the speed a person hears, and -video saves frames at the speed the disk takes
+	* them, so one run cannot make both halves of a film.  This is the other run: the same seed and the
+	* same shot list play the same match, and what comes out lines up with the picture as long as the
+	* run held 30 logic frames a second.  That is the one thing worth checking, so the closing line says
+	* how much sound was recorded against how much the picture is going to be.
+	*
+	* A run that is not pacing itself cannot be recorded from at all, which is why -headless and a
+	* lifted frame limit are refused here rather than producing something quietly wrong. */
+static void updateSoundCapture( void )
+{
+	static Bool recording = FALSE;
+	static Bool finished = FALSE;
+	static __int64 startTicks = 0;
+
+	if (TheGlobalData->m_wavEndFrame <= 0 || finished)
+		return;
+	if (TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame())
+		return;
+
+	if (TheGlobalData->m_headless || !TheGlobalData->m_useFpsLimit)
+	{
+		finished = TRUE;
+		DEBUG_LOG(("AUDIO: -wav needs a run that plays at the speed a person hears it, so -headless "
+			"and -noFPSLimit record nothing\n"));
+		return;
+	}
+
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	if (frame < (UnsignedInt)TheGlobalData->m_wavStartFrame)
+		return;
+
+	if (!recording)
+	{
+		char directory[_MAX_PATH];
+		snprintf(directory, ARRAY_SIZE(directory), "%sVideos", TheGlobalData->getPath_UserData().str());
+		CreateDirectoryA(directory, NULL);
+
+		char pathname[_MAX_PATH];
+		snprintf(pathname, ARRAY_SIZE(pathname), "%s\\%s.wav", directory, TheGlobalData->m_wavName.str());
+		if (!AIL_ex_start_capture(pathname))
+		{
+			finished = TRUE;
+			DEBUG_LOG(("AUDIO: nothing could be recorded into %s\n", pathname));
+			return;
+		}
+
+		recording = TRUE;
+		QueryPerformanceCounter((LARGE_INTEGER *)&startTicks);
+		DEBUG_LOG(("AUDIO: recording logic frames %d to %d into %s\n",
+			TheGlobalData->m_wavStartFrame, TheGlobalData->m_wavEndFrame, pathname));
+		return;
+	}
+
+	if (frame <= (UnsignedInt)TheGlobalData->m_wavEndFrame)
+		return;
+
+	finished = TRUE;
+	AIL_ex_stop_capture();
+
+	__int64 nowTicks = 0;
+	__int64 ticksPerSecond = 0;
+	QueryPerformanceCounter((LARGE_INTEGER *)&nowTicks);
+	QueryPerformanceFrequency((LARGE_INTEGER *)&ticksPerSecond);
+	const Real recordedSeconds = (Real)(nowTicks - startTicks) / (Real)ticksPerSecond;
+	const Real pictureSeconds = (Real)(frame - TheGlobalData->m_wavStartFrame) / LOGICFRAMES_PER_SECONDS_REAL;
+	DEBUG_LOG(("AUDIO: recorded %.2f seconds of sound for %.2f seconds of picture, %.2f adrift\n",
+		recordedSeconds, pictureSeconds, recordedSeconds - pictureSeconds));
+}
+
+//-------------------------------------------------------------------------------------------------
 void MilesAudioManager::update()
 {
 	AudioManager::update();
+	updateSoundCapture();
 	setDeviceListenerPosition();
 	processRequestList();
 	processPlayingList();

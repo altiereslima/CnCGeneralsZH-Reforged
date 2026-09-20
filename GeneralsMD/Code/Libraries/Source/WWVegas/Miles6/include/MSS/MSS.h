@@ -224,6 +224,13 @@ HAUDIO    AILCALL AIL_quick_load_and_play(const char *filename, U32 loop_count, 
 void      AILCALL AIL_quick_unload(HAUDIO audio);
 void      AILCALL AIL_quick_set_volume(HAUDIO audio, F32 volume, F32 extravol);
 
+/* ---- capture ----------------------------------------------------------- */
+/* Not Miles.  The fork's own pair: everything the game plays is mixed into one mastering voice, so
+   an effect on that voice is the whole soundtrack and nothing else on the machine.  The caller
+   decides when the recording starts, because only the caller knows what logic frame it is. */
+S32       AILCALL AIL_ex_start_capture(const char *pathname);
+void      AILCALL AIL_ex_stop_capture(void);
+
 /* ---- file format helpers ---------------------------------------------- */
 S32       AILCALL AIL_WAV_info(const void *data, AILSOUNDINFO *info);
 S32       AILCALL AIL_decompress_ADPCM(const AILSOUNDINFO *info, void **outdata, U32 *outsize);

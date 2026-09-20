@@ -427,6 +427,9 @@ public:
 	Int m_videoStartFrame;					///< -video <from> <to> [name]: the first logic frame recorded
 	Int m_videoEndFrame;						///< -video: the last logic frame recorded (0 = no video)
 	AsciiString m_videoName;				///< -video: the recording is Videos\<name>.mp4 next to the save games
+	Int m_wavStartFrame;						///< -wav <from> <to> [name]: the first logic frame of the sound recording
+	Int m_wavEndFrame;							///< -wav: the last logic frame recorded (0 = no sound recording)
+	AsciiString m_wavName;					///< -wav: the recording is Videos\<name>.wav next to the save games
 	Int m_autoCameraSeconds;				///< -autocamera <n>: every n seconds, move the camera to wherever the fighting is (0 = off)
 	Bool m_cameraLookSet;						///< -camera <x> <y>: point the camera at one map position once the match starts
 	Coord2D m_cameraLook;						///< where -camera pointed it
