@@ -189,8 +189,13 @@ const unsigned NORMAL_MAPPED_LIGHTS = 4;
 // cannot see - and multiplying that again takes it to black: from a camera far enough out, a
 // building in the fog turned into a black slab.  The shadow therefore only reaches a pixel as far
 // as the pixel is lit, which leaves the sunlit ground exactly as it was.
+//
+// The threshold has to sit low.  A wall is a darker surface than the desert it stands on, and a
+// gentler one took a good share of the shadow off every building while the ground beside it took
+// all of it, which reads as the two being lit by different suns.  Full shadow from about a sixth
+// of white upward; only what is darker than that is protected.
 #define SHADOW_APPLY \
-	"    float shadow_lit = saturate(dot(current.rgb, float3(0.3333, 0.3333, 0.3333)) * 2.5);\n" \
+	"    float shadow_lit = saturate(dot(current.rgb, float3(0.3333, 0.3333, 0.3333)) * 6.0);\n" \
 	"    current.rgb *= lerp(1.0, sun_reaching(input.Position), shadow_lit);\n"
 
 // The HLSL for one description, or false when the description names an operation or an argument
