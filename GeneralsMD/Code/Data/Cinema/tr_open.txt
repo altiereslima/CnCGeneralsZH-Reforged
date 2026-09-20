@@ -1,13 +1,17 @@
-# Trailer, cold open: the guns firing at the moment the two armies meet, from among them.
+# Trailer, cold open: the moment the two lines meet, held from one side of the contact so both
+# fronts stay in frame. The camera is aimed at the midpoint of the two starts, 1135,3696, which is
+# where the armies run into each other around frame 780.
 #
 #   generals.exe -borderless -msaa 0 -quickstart -noshellmap -observer -multiInstance
 #     -particlecap 2500 -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
 #     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario trailer_clash
-#     -cinema tr_open -video 690 1050 tr_open -maxframes 1070
+#     -cinema tr_open -video 780 1140 tr_open -maxframes 1160
+#
+# No follow. A follow here picked whichever unit of its template happened to be nearest the camera's
+# old look point, which under -observer is the match's opening camera, nowhere near the fight.
 
-22    pitch      -8 2
-22    zoom       0.32 3
-23    follow     ChinaVehicleInfernoCannon 7
-30    follow     AmericaTankCrusader 5
-30    orbit      25 5
-35    end
+25    cut        1135 3696 0.9 -45 -12
+26    zoom       0.62 10
+26    orbit      20 12
+34    pitch      -20 4
+38    end

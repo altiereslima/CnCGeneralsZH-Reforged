@@ -1,17 +1,17 @@
-# Trailer: the middle of a combined-arms fight, ridden from beside a tank and then pulled up over it.
-# No letterbox: the interface goes, the picture stays the full frame.
+# Trailer: the middle of a combined-arms fight, wide enough that both fronts are in one frame, with
+# the second wave from the scenario arriving at frame 930. The look point is the midpoint of the two
+# starts on Twilight Flame, 1135,3696.
 #
 #   generals.exe -borderless -msaa 0 -quickstart -noshellmap -observer -multiInstance
 #     -particlecap 2500 -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
 #     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario trailer_clash
-#     -cinema tr_clash -video 780 1320 tr_clash -maxframes 1340
+#     -cinema tr_clash -video 900 1440 tr_clash -maxframes 1460
+#
+# Heading -45 puts the American line on the left of the frame and the Chinese on the right. Wider
+# than zoom 1.1 and the unexplored ground round the fight comes into shot as black.
 
-25    pitch      -6 2
-26    follow     ChinaTankBattleMaster 10
-26    zoom       0.45 5
-31    orbit      40 10
-36    unfollow
-36    zoom       0.9 5
-36    pitch      -18 5
-41    follow     AmericaTankCrusader 6
-44    end
+29    cut        1135 3696 1.05 -45 -16
+30    zoom       0.8 14
+30    orbit      28 18
+44    pitch      -26 4
+48    end
