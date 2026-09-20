@@ -326,12 +326,25 @@ enum ChromaEffect
 static const Int NUKE_EFFECT_FRAMES = LOGICFRAMES_PER_SECOND * 3;
 static const Int LASER_EFFECT_FRAMES = LOGICFRAMES_PER_SECOND * 3;
 static const Int SCUD_EFFECT_FRAMES = LOGICFRAMES_PER_SECOND * 4;
-/// How far a wave front travels a second, in half-boards.  A device is two of
-/// these across, so the front clears it in about a second and a quarter.
-static const Real WAVE_SPEED = 1.6f;
-/// How wide the lit band around the front is, in the same units.
-static const Real WAVE_WIDTH = 0.45f;
-static const Int SCUD_WAVE_COUNT = 5;
+/// How far the nuke's front travels a second, in half-boards.  A device is two
+/// of these across and about 1.4 from centre to corner, so at this speed the
+/// front takes most of a second and a half to clear it.
+static const Real NUKE_WAVE_SPEED = 1.0f;
+/// How wide the lit band around that front is, in the same units.
+static const Real NUKE_WAVE_WIDTH = 0.60f;
+/// The detonation before the wave, and the ember left behind it.  Without these
+/// the nuke is one thin ring crossing the board in under a second with nothing
+/// either side of it, which is easy to miss entirely.
+static const Real NUKE_FLASH_SECONDS = 0.30f;
+static const Real NUKE_EMBER = 0.40f;
+
+/// The scud storm falls as droplets, not as a wave: a lot of small landings
+/// scattered over the board and spread across the whole four seconds.  Each one
+/// lands bright and small, spreads a little, and goes out.
+static const Int SCUD_DROPLET_COUNT = 14;
+static const Real SCUD_DROPLET_LIFE = 0.9f;
+static const Real SCUD_DROPLET_RADIUS_START = 0.10f;
+static const Real SCUD_DROPLET_RADIUS_END = 0.45f;
 
 static ChromaEffect s_effect = EFFECT_NONE;
 static UnsignedInt s_effectStartFrame = 0;
@@ -371,12 +384,12 @@ static Int chromaEffectFrames( ChromaEffect effect )
 
 //-----------------------------------------------------------------------------
 /** How bright the band around a wave front is at this distance from its origin. */
-static Real chromaWaveIntensity( Real distance, Real radius )
+static Real chromaWaveIntensity( Real distance, Real radius, Real width )
 {
 	if( radius <= 0.0f )
 		return 0.0f;
 	const Real offset = distance - radius;
-	const Real band = 1.0f - (offset < 0.0f ? -offset : offset) / WAVE_WIDTH;
+	const Real band = 1.0f - (offset < 0.0f ? -offset : offset) / width;
 	return band > 0.0f ? band : 0.0f;
 }
 
@@ -413,9 +426,29 @@ static Int chromaEffectColor( Real acrossFraction, Real downFraction, Int cellIn
 	if( s_effect == EFFECT_NUKE )
 	{
 		const Real distance = (Real)sqrt( across * across + down * down );
-		const Real heat = chromaWaveIntensity( distance, elapsed * WAVE_SPEED ) * fade;
-		// Deep red at the edge of the band, orange through it, white only at the
-		// front itself, which is what a fireball does.
+		const Real radius = elapsed * NUKE_WAVE_SPEED;
+		Real heat = chromaWaveIntensity( distance, radius, NUKE_WAVE_WIDTH );
+
+		// Ground the front has already passed keeps an ember, so the board is lit
+		// behind the wave rather than going straight back to black.
+		if( distance < radius )
+		{
+			const Real ember = NUKE_EMBER * (1.0f - distance / radius);
+			if( ember > heat )
+				heat = ember;
+		}
+
+		// The detonation itself, before the wave has gone anywhere.
+		if( elapsed < NUKE_FLASH_SECONDS )
+		{
+			const Real flash = 1.0f - elapsed / NUKE_FLASH_SECONDS;
+			if( flash > heat )
+				heat = flash;
+		}
+
+		heat *= fade;
+		// Deep red where it is weakest, orange through the middle, white only at
+		// the front and the flash, which is what a fireball does.
 		return chromaColor( heat, heat * heat, heat * heat * heat * heat );
 	}
 
@@ -429,22 +462,33 @@ static Int chromaEffectColor( Real acrossFraction, Real downFraction, Int cellIn
 		return chromaColor( body * body * body * 0.25f, body * body * 0.75f, body );
 	}
 
-	// The scud storm is a salvo, so it lands in several places, none of them the
-	// middle, and they do not all land at once.
+	// The scud storm rains down: a lot of small landings, in no particular place
+	// and at no particular moment, each one bright then gone.
+	const Real lastLanding = (Real)duration / (Real)LOGICFRAMES_PER_SECOND - SCUD_DROPLET_LIFE;
 	Real best = 0.0f;
-	for( Int wave = 0; wave < SCUD_WAVE_COUNT; ++wave )
+	for( Int droplet = 0; droplet < SCUD_DROPLET_COUNT; ++droplet )
 	{
-		const UnsignedInt waveSeed = s_effectSeed + (UnsignedInt)wave * 0x9e3779b9u;
-		const Real originAcross = (chromaHashUnit( waveSeed ) - 0.5f) * 2.0f;
-		const Real originDown = (chromaHashUnit( waveSeed + 1 ) - 0.5f) * 2.0f;
-		const Real delay = chromaHashUnit( waveSeed + 2 ) * 0.9f;
-		if( elapsed < delay )
+		const UnsignedInt dropletSeed = s_effectSeed + (UnsignedInt)droplet * 0x9e3779b9u;
+		const Real age = elapsed - chromaHashUnit( dropletSeed + 2 ) * lastLanding;
+		if( age < 0.0f || age >= SCUD_DROPLET_LIFE )
 			continue;
 
+		const Real originAcross = (chromaHashUnit( dropletSeed ) - 0.5f) * 2.0f;
+		const Real originDown = (chromaHashUnit( dropletSeed + 1 ) - 0.5f) * 2.0f;
 		const Real dx = across - originAcross;
 		const Real dy = down - originDown;
 		const Real distance = (Real)sqrt( dx * dx + dy * dy );
-		const Real intensity = chromaWaveIntensity( distance, (elapsed - delay) * WAVE_SPEED );
+
+		// It lands as a point and spreads as it dies, the way a drop hitting a
+		// surface does.
+		const Real life = age / SCUD_DROPLET_LIFE;
+		const Real radius = SCUD_DROPLET_RADIUS_START
+											+ (SCUD_DROPLET_RADIUS_END - SCUD_DROPLET_RADIUS_START) * life;
+		const Real falloff = 1.0f - distance / radius;
+		if( falloff <= 0.0f )
+			continue;
+
+		const Real intensity = falloff * (1.0f - life);
 		if( intensity > best )
 			best = intensity;
 	}
