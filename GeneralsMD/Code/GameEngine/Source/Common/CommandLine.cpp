@@ -929,7 +929,22 @@ Int parseShadowMap(char *args[], int num)
 {
 	if (TheWritableGlobalData)
 	{
+		// The map replaces the volumes rather than joining them: a caster that cast both would cast
+		// twice, once hard and once soft, and the hard one would win every argument.
 		TheWritableGlobalData->m_shadowMap = TRUE;
+		TheWritableGlobalData->m_shadowMapOnly = TRUE;
+	}
+	return 1;
+}
+
+/* -shadowmapboth: the map and the stencil volumes at once, which is not a picture anybody should
+	 play with.  It exists because the two can only be compared in one frame when both are in it. */
+Int parseShadowMapBoth(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_shadowMap = TRUE;
+		TheWritableGlobalData->m_shadowMapOnly = FALSE;
 	}
 	return 1;
 }
@@ -2188,6 +2203,7 @@ static CommandLineParam params[] =
 	{ "-shadowmap", parseShadowMap },
 	{ "-shadowmapreport", parseShadowMapReport },
 	{ "-shadowmaponly", parseShadowMapOnly },
+	{ "-shadowmapboth", parseShadowMapBoth },
 	{ "-noparticleshadows", parseNoParticleShadows },
 	{ "-quickstart", parseQuickStart },
 
