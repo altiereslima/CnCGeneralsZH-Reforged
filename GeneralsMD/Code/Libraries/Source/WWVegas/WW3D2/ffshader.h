@@ -123,12 +123,17 @@ const unsigned NORMAL_MAPPED_LIGHTS = 4;
 	"    if (map.x < 0.0 || map.x > 1.0 || map.y < 0.0 || map.y > 1.0) return 1.0;\n" \
 	"    if (sun.z < 0.0 || sun.z > 1.0) return 1.0;\n" \
 	"    float texel = ShadowParameters.x;\n" \
-	"    // The bias grows with how fast the depth changes across one pixel.  A fixed one covers a\n" \
-	"    // surface seen from close up and nothing else: pull the camera back and a pixel spans\n" \
-	"    // several world units, the depth across it steps past the bias, and the wall reads as\n" \
-	"    // blocked by itself - a building that goes black as the camera leaves it.\n" \
+	"    /* Two ways of keeping a surface from shadowing itself, and they are not the same thing.\n" \
+	"       A depth bias pushes the comparison back, which works and costs the contact: the shadow\n" \
+	"       lifts off the foot of whatever casts it and the building above it looks placed on the\n" \
+	"       ground rather than standing on it.  So most of it is a normal offset instead - the\n" \
+	"       lookup moves sideways, along the surface, by a fraction of a texel - and the depth bias\n" \
+	"       keeps only what the slope across one pixel needs.  Pull the camera back and that slope\n" \
+	"       grows, which is the case a fixed bias cannot cover. */\n" \
+	"    float3 surface = normalize(cross(ddx(sun.xyz), ddy(sun.xyz)));\n" \
+	"    map += surface.xy * texel * ShadowParameters.y * 400.0;\n" \
 	"    float slope = max(abs(ddx(sun.z)), abs(ddy(sun.z)));\n" \
-	"    float bias = ShadowParameters.y + slope * 4.0;\n" \
+	"    float bias = ShadowParameters.y * 0.35 + slope * 1.5;\n" \
 	"    float widest = ShadowParameters.w;\n" \
 	"    float narrowest = ShadowSoftness.x;\n" \
 	"\n" \

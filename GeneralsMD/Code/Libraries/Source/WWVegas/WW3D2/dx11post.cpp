@@ -75,6 +75,13 @@ static const float BLOOM_THRESHOLD = 1.0f;
 static const float BLOOM_INTENSITY = 1.5f;
 static const float TONE_CURVE_KNEE = 0.8f;
 
+// How dark a fully occluded pixel goes, how far a neighbour may be in front before it counts as a
+// different object rather than a corner, and how wide the ring reaches at one unit of depth.  The
+// clip planes come from the frame itself.
+static const float AO_STRENGTH = 0.45f;
+static const float AO_RADIUS = 14.0f;
+static const float AO_SPREAD = 26.0f;
+
 struct PostConstantBlock
 {
 	// One over the size of the texture being sampled, and its size.  Per pass rather than per
@@ -237,6 +244,49 @@ static const char * const SHARPEN_SHADER_BODY =
 	"    return float4(saturate(sharpened), centre.a);\n"
 	"}\n";
 
+// Ambient occlusion out of the frame's own depth, and nothing else.  Every pixel asks a ring of
+// neighbours how much nearer to the eye they are: at the foot of a wall half of them are in front
+// and the pixel comes out dark, on open ground none are and it comes out as it was.  There are no
+// normals here and no random kernel - the ring is fixed and turned by the pixel's place on the
+// screen, which is what keeps twelve taps from banding.
+//
+// It cannot see behind a surface, so a neighbour nearer by more than the radius is ignored: that is
+// a different object in front, not a corner.
+static const char * const AO_SHADER_BODY =
+	"static const int AO_TAPS = 12;\n"
+	"static const float AO_STRENGTH = 0.45;\n"
+	"static const float AO_PI2 = 6.2831853;\n"
+	"\n"
+	"float linear_depth(float2 at)\n"
+	"{\n"
+	"    float raw = Extra.Sample(Sampler, at).r;\n"
+	"    float near_plane = Tuning.x;\n"
+	"    float far_plane = Tuning.y;\n"
+	"    return near_plane * far_plane / max(far_plane - raw * (far_plane - near_plane), 0.0001);\n"
+	"}\n"
+	"\n"
+	"float4 main(VertexOutput input) : SV_TARGET\n"
+	"{\n"
+	"    float3 scene = Source.Sample(Sampler, input.Texture).rgb;\n"
+	"    float centre = linear_depth(input.Texture);\n"
+	"    float radius = Tuning.z;\n"
+	"    if (centre >= Tuning.y * 0.99) return float4(scene, 1.0);\n"
+	"    float turn = frac(sin(dot(input.Position.xy, float2(12.9898, 78.233))) * 43758.5453) * AO_PI2;\n"
+	"    float spread = TexelSize.x * Tuning.w / max(centre, 1.0);\n"
+	"    float occlusion = 0.0;\n"
+	"    for (int tap = 0; tap < AO_TAPS; ++tap)\n"
+	"    {\n"
+	"        float angle = turn + AO_PI2 * (float)tap / (float)AO_TAPS;\n"
+	"        float reach = 0.35 + 0.65 * frac((float)tap * 0.618);\n"
+	"        float2 at = input.Texture + float2(cos(angle), sin(angle)) * spread * reach;\n"
+	"        float neighbour = linear_depth(at);\n"
+	"        float nearer = centre - neighbour;\n"
+	"        occlusion += (nearer > 0.05 && nearer < radius) ? (1.0 - nearer / radius) : 0.0;\n"
+	"    }\n"
+	"    occlusion /= (float)AO_TAPS;\n"
+	"    return float4(scene * (1.0 - saturate(occlusion) * AO_STRENGTH), 1.0);\n"
+	"}\n";
+
 // The bright pass, downsampling as it goes: four taps of the full size frame averaged into one
 // quarter size texel, then the threshold taken off what is left.  What survives is the amount by
 // which something was brighter than white, which is a quantity an eight bit scene target could not
@@ -310,6 +360,8 @@ static const char * simple_effect_body(DX11PostEffect effect)
 		return FXAA_SHADER_BODY;
 	case DX11_POST_SHARPEN:
 		return SHARPEN_SHADER_BODY;
+	case DX11_POST_AO:
+		return AO_SHADER_BODY;
 	default:
 		return COPY_SHADER_BODY;
 	}
@@ -322,6 +374,8 @@ const char * DX11Post_Effect_Name(DX11PostEffect effect)
 		return "fxaa";
 	case DX11_POST_SHARPEN:
 		return "sharpen";
+	case DX11_POST_AO:
+		return "ao";
 	case DX11_POST_BLOOM:
 		return "bloom";
 	default:
@@ -364,6 +418,9 @@ bool DX11Post_Parse_Chain(const char * text, DX11PostEffect effects[DX11_POST_CH
 		else if (name == "sharpen") {
 			effects[count++] = DX11_POST_SHARPEN;
 		}
+		else if (name == "ao") {
+			effects[count++] = DX11_POST_AO;
+		}
 		else if (name == "bloom") {
 			// Bloom decides the format the scene is kept in and hands the frame back in eight bits,
 			// so a chain cannot reach it after something else has already read the scene. Refusing
@@ -388,6 +445,8 @@ DX11PostProcessClass::DX11PostProcessClass()
 	, VertexShader(NULL)
 	, ToneMapShader(NULL)
 	, BloomExtractShader(NULL)
+	, NearPlane(1.0f)
+	, FarPlane(1200.0f)
 	, BloomBlurShader(NULL)
 	, BloomCompositeShader(NULL)
 	, Sampler(NULL)
@@ -727,6 +786,12 @@ void DX11PostProcessClass::Draw_Pass(const PassSetup & pass)
 	block.Tuning[1] = BLOOM_INTENSITY;
 	block.Tuning[2] = TONE_CURVE_KNEE;
 	block.Tuning[3] = 0.0f;
+	if (pass.Occlusion) {
+		block.Tuning[0] = NearPlane;
+		block.Tuning[1] = FarPlane;
+		block.Tuning[2] = AO_RADIUS;
+		block.Tuning[3] = AO_SPREAD;
+	}
 	memcpy(mapped.pData, &block, sizeof(block));
 	context->Unmap(ConstantBuffer, 0);
 
@@ -853,6 +918,10 @@ bool DX11PostProcessClass::Finish(const DX11PostEffect * effects, unsigned count
 	for (unsigned index = first; index < count; ++index) {
 		const bool last = (index + 1 == count);
 		pass.Shader = PixelShaders[effects[index]];
+		// The occlusion pass is the one effect that reads something other than the frame: the
+		// frame's own depth, which the device keeps as a texture as well as a depth buffer.
+		pass.Extra = (effects[index] == DX11_POST_AO) ? Device->Get_Depth_Texture() : NULL;
+		pass.Occlusion = (effects[index] == DX11_POST_AO);
 		pass.Source = source;
 		pass.Destination = last ? back_buffer : ChainTargets[destination].View;
 		Draw_Pass(pass);

@@ -74,6 +74,10 @@ enum DX11PostEffect
 	// is a taste knob and it is not in the default chain.
 	DX11_POST_SHARPEN,
 
+	// Ambient occlusion off the frame's own depth: the darkening a corner traps, which is what puts
+	// a building on the ground rather than over it.  Reads the depth buffer at t1.
+	DX11_POST_AO,
+
 	// Bright things bleed light, and the scene is kept in half floats so that "bright" means
 	// brighter than white rather than close to it.  Several passes rather than one, and it takes
 	// the frame from half float back to eight bits, so it can only be the first effect in a chain.
@@ -163,6 +167,8 @@ private:
 		unsigned SourceHeight;
 		float BlurX;
 		float BlurY;
+		// This pass reads the frame's depth rather than the frame, and wants the clip planes with it.
+		bool Occlusion;
 	};
 
 	bool Create_Shaders();
@@ -198,6 +204,10 @@ private:
 	Target BloomTargets[2];
 
 	DX11PostEffect Chain[DX11_POST_CHAIN_LIMIT];
+	// What the frame's projection is using, so the occlusion pass can turn a depth back into a
+	// distance.  Set by whoever knows the camera; the defaults are the game's own.
+	float NearPlane;
+	float FarPlane;
 	unsigned ChainLength;
 	unsigned Width;
 	unsigned Height;

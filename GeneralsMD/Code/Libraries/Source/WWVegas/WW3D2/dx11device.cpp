@@ -24,7 +24,11 @@ static const DXGI_FORMAT BACK_BUFFER_FORMAT = DXGI_FORMAT_B8G8R8A8_UNORM;
 
 // D24S8 is what the D3D9 device settles on, and the stencil half is not spare: the shadow volumes
 // are drawn with it.
-static const DXGI_FORMAT DEPTH_STENCIL_FORMAT = DXGI_FORMAT_D24_UNORM_S8_UINT;
+// Typeless, because the same surface is written as a depth buffer and read as a texture: the post
+// chain's occlusion pass needs the frame's own depth, and a view says how the bits are read.
+static const DXGI_FORMAT DEPTH_STENCIL_FORMAT = DXGI_FORMAT_R24G8_TYPELESS;
+static const DXGI_FORMAT DEPTH_WRITE_FORMAT = DXGI_FORMAT_D24_UNORM_S8_UINT;
+static const DXGI_FORMAT DEPTH_READ_FORMAT = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
 
 // Feature level 11_0 is the floor.  Below it there are no compute shaders and no unordered access
 // views, which is most of what phase 2 is being done for, and a machine that cannot reach it can
@@ -49,6 +53,7 @@ DX11DeviceClass::DX11DeviceClass()
 	, SceneView(NULL)
 	, DepthStencilView(NULL)
 	, DepthStencilTexture(NULL)
+	, DepthTexture(NULL)
 	, FeatureLevel(D3D_FEATURE_LEVEL_11_0)
 	, Width(0)
 	, Height(0)
@@ -181,12 +186,24 @@ bool DX11DeviceClass::Create_Views()
 	depth.Format = DEPTH_STENCIL_FORMAT;
 	depth.SampleDesc.Count = 1;
 	depth.Usage = D3D11_USAGE_DEFAULT;
-	depth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+	depth.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
 
 	if (FAILED(Device->CreateTexture2D(&depth, NULL, &DepthStencilTexture))) {
 		return false;
 	}
-	if (FAILED(Device->CreateDepthStencilView(DepthStencilTexture, NULL, &DepthStencilView))) {
+	D3D11_DEPTH_STENCIL_VIEW_DESC depth_view;
+	ZeroMemory(&depth_view, sizeof(depth_view));
+	depth_view.Format = DEPTH_WRITE_FORMAT;
+	depth_view.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+	if (FAILED(Device->CreateDepthStencilView(DepthStencilTexture, &depth_view, &DepthStencilView))) {
+		return false;
+	}
+	D3D11_SHADER_RESOURCE_VIEW_DESC depth_read;
+	ZeroMemory(&depth_read, sizeof(depth_read));
+	depth_read.Format = DEPTH_READ_FORMAT;
+	depth_read.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+	depth_read.Texture2D.MipLevels = 1;
+	if (FAILED(Device->CreateShaderResourceView(DepthStencilTexture, &depth_read, &DepthTexture))) {
 		return false;
 	}
 
@@ -214,6 +231,7 @@ void DX11DeviceClass::Release_Views()
 	// Whoever lent it a scene view sized the texture behind it to the buffers that are about to go,
 	// so the loan ends here and the next frame asks for a new one.
 	SceneView = NULL;
+	release_interface(reinterpret_cast<IUnknown **>(&DepthTexture));
 	release_interface(reinterpret_cast<IUnknown **>(&DepthStencilView));
 	release_interface(reinterpret_cast<IUnknown **>(&DepthStencilTexture));
 	release_interface(reinterpret_cast<IUnknown **>(&BackBufferView));

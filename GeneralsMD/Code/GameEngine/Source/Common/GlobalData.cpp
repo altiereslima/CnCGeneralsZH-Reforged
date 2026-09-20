@@ -106,6 +106,7 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "UseShadowDecals",						INI::parseBool,				NULL,			offsetof( GlobalData, m_useShadowDecals ) },
 	{ "ShadowsForProjectiles",						INI::parseBool,				NULL,			offsetof( GlobalData, m_shadowsForProjectiles ) },
 	{ "StartAtMaxZoom",											INI::parseBool,				NULL,			offsetof( GlobalData, m_startAtMaxZoom ) },
+	{ "ContactShadows",										INI::parseBool,				NULL,			offsetof( GlobalData, m_contactShadows ) },
 	{ "ShadowsForProps",									INI::parseBool,				NULL,			offsetof( GlobalData, m_shadowsForProps ) },
 	{ "ShadowsForParticles",						INI::parseBool,				NULL,			offsetof( GlobalData, m_shadowsForParticles ) },
 	{ "TextureReductionFactor",			INI::parseInt,				NULL,			offsetof( GlobalData, m_textureReductionFactor ) },
@@ -651,7 +652,7 @@ GlobalData::GlobalData()
 	m_direct3D11DumpPath.clear();
 	// The Direct3D 11 frame gets every effect the backend has unless -dx11post names a chain of its
 	// own; "-dx11post off" is the faithful 2003 picture that dx11-check.ps1 compares against.
-	m_direct3D11PostChain = "bloom,fxaa,sharpen";
+	m_direct3D11PostChain = "bloom,ao,fxaa,sharpen";
 	m_xResolution = 800;
 	m_yResolution = 600;
 	m_maxShellScreens = 0;
@@ -686,6 +687,7 @@ GlobalData::GlobalData()
 	m_shadowMapSkyFill = 0.0f;
 	m_shadowMapStrength = 0.0f;
 	m_shadowMapWidest = 0.0f;
+	m_contactShadows = TRUE;		//on by default: a building with nothing under it reads as laid on the ground
 	m_textureReductionFactor = -1;
 	m_enableBehindBuildingMarkers = TRUE;
 	m_scriptDebug = FALSE;

@@ -181,6 +181,7 @@ public:
 	Real m_shadowMapPenumbra;			// "-shadowtune": penumbra per world unit of gap under the caster, 0 for the built-in
 	Real m_shadowMapSkyFill;			// how much of a wide shadow the sky fills back in
 	Real m_shadowMapStrength;			// how dark a fully blocked pixel goes
+	Bool m_contactShadows;					// "ContactShadows": the soft patch under a structure's footprint
 	Real m_shadowMapWidest;				// how far the filter may open, in texels
 	Bool m_particleGroundBounce;	// "-particlebounce": terrain collision on for every particle system
 	Real m_smokeThickness;				// "-smoke": how much longer and thicker every smoke system runs, 0 for shipped behaviour

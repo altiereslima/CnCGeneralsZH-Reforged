@@ -1732,6 +1732,7 @@ W3DModelDraw::W3DModelDraw(Thing *thing, const ModuleData* moduleData) : DrawMod
 	m_hexColor = 0;
 	m_renderObject = NULL;
 	m_shadow = NULL;
+	m_contactShadow = NULL;
 	m_shadowEnabled = TRUE;
 	m_hasModelShadow = FALSE;
 	m_terrainDecal = NULL;
@@ -1856,6 +1857,9 @@ void W3DModelDraw::releaseShadows(void)	///< frees all shadow resources used by 
 	if (m_shadow)
 		m_shadow->release();
 	m_shadow = NULL;
+	if (m_contactShadow)
+		m_contactShadow->release();
+	m_contactShadow = NULL;
 }
 
 /** Does this model contain any skinned (bone-deformed) geometry?  Infantry and other animated
@@ -2029,6 +2033,58 @@ void W3DModelDraw::allocateShadows(void)
 			if (m_renderObject->Is_Hidden() || !m_shadowEnabled)
 				m_shadow->enableShadowRender(FALSE);
 		}
+	}
+
+	allocateContactShadow();
+}
+
+// How far the patch reaches past the building's own box, and how dark its middle is.  A patch the
+// size of the footprint stops exactly at the wall and reads as a second slab; a little past it, and
+// soft, is what a corner traps in daylight.
+#define CONTACT_SHADOW_SPREAD 1.25f
+#define CONTACT_SHADOW_OPACITY 110
+
+/** The patch under a structure's footprint.
+
+		A building's own shadow falls to one side and leaves the ground where it stands as bright as
+		the field around it, so the concrete slab reads as a sticker laid over the terrain rather than
+		as something standing on it.  This is the darkening that a corner traps in daylight: a soft
+		blob, the size of the building, sitting under it and kept there.  It is not the building's
+		shadow and it does not move with the sun. */
+void W3DModelDraw::allocateContactShadow(void)
+{
+	// The soft patch is for things that stand still and meet the ground over an area.  A tank has a
+	// shadow and a contact patch would follow it around looking like a stain.
+	const ThingTemplate *tmplate = getDrawable() ? getDrawable()->getTemplate() : NULL;
+	if (m_contactShadow != NULL || m_renderObject == NULL || tmplate == NULL
+			|| TheW3DShadowManager == NULL || !TheGlobalData->m_contactShadows
+			|| !tmplate->isKindOf( KINDOF_STRUCTURE ))
+		return;
+
+	AABoxClass box;
+	m_renderObject->Get_Obj_Space_Bounding_Box( box );
+	const Real width = 2.0f * box.Extent.X * CONTACT_SHADOW_SPREAD;
+	const Real depth = 2.0f * box.Extent.Y * CONTACT_SHADOW_SPREAD;
+	if (width < 1.0f || depth < 1.0f)
+		return;
+
+	Shadow::ShadowTypeInfo contactInfo;
+	strcpy( contactInfo.m_ShadowName, "shadow" );
+	contactInfo.allowUpdates		= FALSE;
+	contactInfo.allowWorldAlign	= TRUE;
+	contactInfo.m_type					= SHADOW_ALPHA_DECAL;
+	contactInfo.m_sizeX					= width;
+	contactInfo.m_sizeY					= depth;
+	contactInfo.m_offsetX				= 0.0f;
+	contactInfo.m_offsetY				= 0.0f;
+
+	m_contactShadow = TheW3DShadowManager->addShadow( m_renderObject, &contactInfo );
+	if (m_contactShadow)
+	{
+		m_contactShadow->setOpacity( CONTACT_SHADOW_OPACITY );
+		m_contactShadow->enableShadowInvisible( m_fullyObscuredByShroud );
+		if (m_renderObject->Is_Hidden() || !m_shadowEnabled)
+			m_contactShadow->enableShadowRender( FALSE );
 	}
 }
 
@@ -2983,6 +3039,9 @@ void W3DModelDraw::nukeCurrentRender(Matrix3D* xform)
 	if (m_shadow)
 		m_shadow->release();
 	m_shadow = NULL;
+	if (m_contactShadow)
+		m_contactShadow->release();
+	m_contactShadow = NULL;
 
 	if(m_terrainDecal)
 		m_terrainDecal->release();

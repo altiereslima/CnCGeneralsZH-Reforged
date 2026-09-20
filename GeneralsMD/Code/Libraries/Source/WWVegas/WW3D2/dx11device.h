@@ -77,6 +77,8 @@ public:
 	ID3D11DeviceContext * Get_Context() const { return Context; }
 	ID3D11RenderTargetView * Get_Back_Buffer_View() const { return BackBufferView; }
 	ID3D11DepthStencilView * Get_Depth_Stencil_View() const { return DepthStencilView; }
+	// The same surface read as a texture, for the pass that wants the frame's own depth.
+	ID3D11ShaderResourceView * Get_Depth_Texture() const { return DepthTexture; }
 
 	// Where the scene goes, which is not always the swap chain.  The post-process chain hands its
 	// own texture's view over here at the top of every frame and the backend binds whatever it
@@ -124,6 +126,7 @@ private:
 	ID3D11RenderTargetView * SceneView;
 	ID3D11DepthStencilView * DepthStencilView;
 	ID3D11Texture2D * DepthStencilTexture;
+	ID3D11ShaderResourceView * DepthTexture;
 
 	D3D_FEATURE_LEVEL FeatureLevel;
 	unsigned Width;
