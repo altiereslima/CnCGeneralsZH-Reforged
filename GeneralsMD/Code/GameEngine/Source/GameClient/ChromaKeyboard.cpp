@@ -28,6 +28,7 @@
 #include "GameClient/ControlBar.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/Gadget.h"
+#include "GameClient/GadgetPushButton.h"
 #include "GameClient/GameWindow.h"
 #include "GameClient/HotKey.h"
 #include "GameClient/InGameUI.h"
@@ -1411,6 +1412,23 @@ static void chromaRefreshBoundCells( UnsignedInt frame )
 		if( shortcutSlot >= 0 && s_shortcutSlotCell[ shortcutSlot ] < 0 )
 			s_shortcutSlotCell[ shortcutSlot ] = chromaCellForMappableKey( rec->m_key );
 	}
+
+	// CHROMADRILL is temporary, and the three blocks that write it come out once
+	// the owner has confirmed the keys light where their labels say.  There is no
+	// way to see this lighting from a script - the hardware is the output - so the
+	// log is the only instrument, and it answers the one question worth asking:
+	// which lamp did each slot get, and what was behind it.
+#if defined(DEBUG_LOGGING)
+	static Bool reported = FALSE;
+	if( !reported )
+	{
+		reported = TRUE;
+		for( Int slot = 0; slot < COMMAND_SLOTS_WITH_KEYS; ++slot )
+			DEBUG_LOG(( "CHROMADRILL: command slot %d -> cell %d\n", slot, s_commandSlotCell[ slot ] ));
+		for( Int slot = 0; slot < SHORTCUT_SLOTS_WITH_KEYS; ++slot )
+			DEBUG_LOG(( "CHROMADRILL: shortcut slot %d -> cell %d\n", slot, s_shortcutSlotCell[ slot ] ));
+	}
+#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -1470,6 +1488,28 @@ static void chromaFillCommandGrid( Int *cells, Int pressable, Int unavailable )
 				break;	// no button behind this key, so it keeps the bed's colour
 		}
 	}
+
+#if defined(DEBUG_LOGGING)
+	static UnsignedInt lastReportFrame = 0;
+	const UnsignedInt now = TheGameLogic ? TheGameLogic->getFrame() : 0;
+	if( now > lastReportFrame + LOGICFRAMES_PER_SECOND * 5 )
+	{
+		lastReportFrame = now;
+		DEBUG_LOG(( "CHROMADRILL: frame %d selected %d\n",
+								now, TheInGameUI ? TheInGameUI->getSelectCount() : -1 ));
+		for( Int slot = 0; slot < COMMAND_SLOTS_WITH_KEYS; ++slot )
+		{
+			GameWindow *button = NULL;
+			const Int outcome = (Int)TheControlBar->peekCommandButtonPress( slot, &button );
+			const Int cell = s_commandSlotCell[ slot ];
+			const CommandButton *command = button ? (const CommandButton *)GadgetButtonGetData( button ) : NULL;
+			DEBUG_LOG(( "CHROMADRILL:   slot %d outcome %d lamp r%dc%d command %s\n",
+									slot, outcome, cell < 0 ? -1 : cell / KEYBOARD_COLUMNS,
+									cell < 0 ? -1 : cell % KEYBOARD_COLUMNS,
+									command ? command->getName().str() : "-" ));
+		}
+	}
+#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -1777,6 +1817,27 @@ static void chromaFillCells( Int *cells )
 	// rather than the logic, so it is set here where the player is in hand.
 	cells[ chromaKeyboardCell( STATUS_ROW, STATUS_RADAR_COLUMN ) ] =
 		localPlayer->hasRadar() ? chromaScale( COLOR_GREEN, AMBIENT_SCALE ) : COLOR_OFF;
+
+#if defined(DEBUG_LOGGING)
+	{
+		static UnsignedInt lastGridFrame = 0;
+		if( frame > lastGridFrame + LOGICFRAMES_PER_SECOND * 5 )
+		{
+			lastGridFrame = frame;
+			for( Int row = 0; row < KEYBOARD_ROWS; ++row )
+			{
+				char line[ 256 ];
+				Int used = _snprintf( line, sizeof( line ), "CHROMADRILL: row %d", row );
+				for( Int column = 0; column < KEYBOARD_COLUMNS; ++column )
+					used += _snprintf( line + used, sizeof( line ) - used, " %06X",
+														 cells[ chromaKeyboardCell( row, column ) ] );
+				_snprintf( line + used, sizeof( line ) - used, "\n" );
+				line[ sizeof( line ) - 1 ] = 0;
+				DEBUG_LOG(( "%s", line ));
+			}
+		}
+	}
+#endif
 
 	// A superweapon going off takes the lot for a few seconds.  It goes on last
 	// because it is meant to bury everything under it.
