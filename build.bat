@@ -14,13 +14,20 @@ rem sources EA stripped and the fork's own art, builds, and copies the exe and e
 rem beside it into GeneralsMD\Run. What it cannot fetch is the game: a Zero Hour install's
 rem *.big go next to generals.exe in GeneralsMD\Run, and the base game's in Run\ZH_Generals.
 rem
-rem The four knobs below are overrides. Every one of them empty is the supported path.
+rem The knobs below are overrides and every one of them empty is the supported path. A machine that
+rem does need one puts its own "set" lines in build.local.bat beside this file, which is
+rem git-ignored and read right after these defaults, rather than editing a tracked file.
 
 set "CMAKE="
 set "VS_EDITIONS=Community Professional Enterprise BuildTools"
 set "GENERATOR=Visual Studio 17 2022"
 set "DEFAULT_CONFIG=Release"
 set "BUILD="
+
+if exist "%~dp0build.local.bat" (
+    echo [build] reading build.local.bat
+    call "%~dp0build.local.bat"
+)
 
 rem Double-clicked from Explorer, the window closes on the last line and nobody reads it.
 rem A double-click passes no arguments and puts this file's own name in the parent command line.

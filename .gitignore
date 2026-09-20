@@ -10,6 +10,9 @@ build-perf/
 __pycache__/
 *.pyc
 
+# Per-machine overrides for build.bat, read after its defaults
+build.local.bat
+
 CLAUDE.md
 AGENTS.md
 
