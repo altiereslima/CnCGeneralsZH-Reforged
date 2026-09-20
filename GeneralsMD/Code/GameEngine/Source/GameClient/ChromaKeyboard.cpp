@@ -134,26 +134,38 @@ static Bool chromaRequest( HINTERNET connection, const char *verb, const char *p
 }
 
 //-----------------------------------------------------------------------------
-/** Ask the Chroma server for a session and write its path into sessionPath.
-	* The host and port are ours, so only the id out of the reply is needed. */
-static Bool chromaOpenSession( HINTERNET connection, char *sessionPath, Int sessionPathBytes )
+/** Ask the Chroma server for a session, and read back the address it wants the
+	* frames on.  That address is not the one the request went to and not a path
+	* under it either: Synapse hands out its own port and its own root, so it has
+	* to be parsed rather than assembled. */
+static Bool chromaOpenSession( HINTERNET connection, char *host, Int hostBytes,
+															 INTERNET_PORT *port, char *path, Int pathBytes )
 {
 	char reply[ 512 ];
 	if( !chromaRequest( connection, "POST", CHROMA_INIT_PATH, CHROMA_INIT_BODY, reply, sizeof( reply ) ) )
 		return FALSE;
 
-	const char *idField = strstr( reply, "\"sessionid\"" );
-	Int sessionId = 0;
-	if( idField == NULL || sscanf( idField, "\"sessionid\" : %d", &sessionId ) != 1 )
-	{
-		if( idField == NULL || sscanf( idField, "\"sessionid\":%d", &sessionId ) != 1 )
-			return FALSE;
-	}
-	if( sessionId <= 0 )
+	const char *uri = strstr( reply, "http://" );
+	if( uri == NULL )
+		return FALSE;
+	uri += strlen( "http://" );
+
+	char parsedHost[ 64 ];
+	char parsedPath[ 128 ];
+	UnsignedShort parsedPort = 0;
+	if( sscanf( uri, "%63[^:/]:%hu%127[^\"]", parsedHost, &parsedPort, parsedPath ) == 3 )
+		*port = (INTERNET_PORT)parsedPort;
+	else if( sscanf( uri, "%63[^:/]%127[^\"]", parsedHost, parsedPath ) == 2 )
+		*port = INTERNET_DEFAULT_HTTP_PORT;
+	else
 		return FALSE;
 
-	_snprintf( sessionPath, sessionPathBytes, "%s/%d/keyboard", CHROMA_INIT_PATH, sessionId );
-	sessionPath[ sessionPathBytes - 1 ] = 0;
+	_snprintf( host, hostBytes, "%s", parsedHost );
+	host[ hostBytes - 1 ] = 0;
+	// Every frame goes to the keyboard under that root; the root itself only
+	// answers the session calls.
+	_snprintf( path, pathBytes, "%s/keyboard", parsedPath );
+	path[ pathBytes - 1 ] = 0;
 	return TRUE;
 }
 
@@ -178,34 +190,45 @@ static DWORD WINAPI chromaWorkerMain( LPVOID )
 {
 	// Big enough for six rows of twenty-two ten-digit numbers and the punctuation.
 	char body[ CHROMA_CELLS * 12 + 64 ];
-	char sessionPath[ 128 ];
+	char sessionHost[ 64 ];
+	char sessionPath[ 160 ];
+	INTERNET_PORT sessionPort = 0;
 	Int sent[ CHROMA_CELLS ];
 	Int grid[ CHROMA_CELLS ];
 
 	HINTERNET internet = InternetOpenA( "ZeroHourReforged", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0 );
-	HINTERNET connection = NULL;
+	HINTERNET handshake = NULL;
 	if( internet != NULL )
 	{
 		DWORD timeout = CHROMA_TIMEOUT_MS;
 		InternetSetOptionA( internet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof( timeout ) );
 		InternetSetOptionA( internet, INTERNET_OPTION_SEND_TIMEOUT, &timeout, sizeof( timeout ) );
 		InternetSetOptionA( internet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof( timeout ) );
-		connection = InternetConnectA( internet, CHROMA_HOST, CHROMA_PORT, NULL, NULL,
-																	 INTERNET_SERVICE_HTTP, 0, 0 );
+		handshake = InternetConnectA( internet, CHROMA_HOST, CHROMA_PORT, NULL, NULL,
+																	INTERNET_SERVICE_HTTP, 0, 0 );
 	}
 
 	// ponytail: one attempt at startup.  Synapse started after the game is not
 	// picked up; retrying on a timer would mean a second piece of state to own.
-	if( connection == NULL || !chromaOpenSession( connection, sessionPath, sizeof( sessionPath ) ) )
+	Bool opened = handshake != NULL
+							&& chromaOpenSession( handshake, sessionHost, sizeof( sessionHost ),
+																		&sessionPort, sessionPath, sizeof( sessionPath ) );
+	if( handshake != NULL )
+		InternetCloseHandle( handshake );
+
+	HINTERNET connection = NULL;
+	if( opened )
+		connection = InternetConnectA( internet, sessionHost, sessionPort, NULL, NULL,
+																	 INTERNET_SERVICE_HTTP, 0, 0 );
+	if( connection == NULL )
 	{
 		DEBUG_LOG(( "Chroma: no Razer server on %s:%d, keyboard lighting is off for this run\n",
 								CHROMA_HOST, (Int)CHROMA_PORT ));
-		if( connection != NULL )
-			InternetCloseHandle( connection );
 		if( internet != NULL )
 			InternetCloseHandle( internet );
 		return 0;
 	}
+	DEBUG_LOG(( "Chroma: session open on %s:%d%s\n", sessionHost, (Int)sessionPort, sessionPath ));
 
 	memset( sent, 0, sizeof( sent ) );
 	DWORD lastSendMs = 0;
@@ -220,7 +243,15 @@ static DWORD WINAPI chromaWorkerMain( LPVOID )
 		if( changed || nowMs - lastSendMs >= CHROMA_KEEPALIVE_MS )
 		{
 			chromaBuildKeyboardBody( grid, body, sizeof( body ) );
-			chromaRequest( connection, "PUT", sessionPath, body, NULL, 0 );
+			// The server answers every frame with a result code, and a refused frame
+			// looks exactly like a working one from here unless it is read back.
+			char reply[ 64 ];
+			const Bool sentOk = chromaRequest( connection, "PUT", sessionPath, body, reply, sizeof( reply ) );
+			if( lastSendMs == 0 )
+			{
+				DEBUG_LOG(( "Chroma: first frame %s, answer %s\n",
+										sentOk ? "sent" : "refused", sentOk ? reply : "none" ));
+			}
 			memcpy( sent, grid, sizeof( sent ) );
 			lastSendMs = nowMs;
 		}
