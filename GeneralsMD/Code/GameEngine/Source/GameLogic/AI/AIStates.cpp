@@ -4539,24 +4539,39 @@ void AIFollowWaypointPathState::loadPostProcess( void )
 }  // end loadPostProcess
 
 //----------------------------------------------------------------------------------------------------------
+/** Pick the waypoint a unit joining a group should start from.  A freshly joined unit has no
+	waypoint of its own, while the rest of its team may already be part-way along the path. */
+const Waypoint *AIFollowWaypointPath_groupInitialWaypoint( const Waypoint *goalWaypoint,
+															 const Waypoint *teamWaypoint )
+{
+	return goalWaypoint ? goalWaypoint : teamWaypoint;
+}
+
+//----------------------------------------------------------------------------------------------------------
 StateReturnType AIFollowWaypointPathState::onEnter()
 {
 	m_appendGoalPosition = false; // not moving off the map at this point.
 	m_priorWaypoint = NULL;
 	m_currentWaypoint = ((AIStateMachine *)getMachine())->getGoalWaypoint();
 	AIUpdateInterface *ai = getMachineOwner()->getAI();
+	Object *obj = getMachineOwner();
 
 	// EA let a group move through with no waypoint and read its location on the next line: a unit
 	// joining an AI team copied a teammate's path state but not its waypoint (joinTeam, from
-	// AIPlayer::checkReadyTeams), and took the game down here
+	// AIPlayer::checkReadyTeams), and took the game down here.  The reinforcement takes up the path
+	// where its team already is rather than failing out of it, which is what refusing the state did
+	// and which left it standing while the rest of the team walked off.  Found by T0T0W.
+	if (m_moveAsGroup)
+	{
+		m_currentWaypoint = AIFollowWaypointPath_groupInitialWaypoint(
+			m_currentWaypoint, obj->getTeam()->getCurrentWaypoint());
+	}
 	if (m_currentWaypoint == NULL)		return STATE_FAILURE;
 
 	getMachine()->setGoalPosition(m_currentWaypoint->getLocation());
 
 	m_framesSleeping = 0;
 	m_groupOffset.x = m_groupOffset.y = 0;
-
-	Object *obj = getMachineOwner();
 /*	Interesting thought experiment.  Didn't work well. jba
 	Real distSqrLimit = 9*obj->getGeometryInfo().getMajorRadius()*obj->getGeometryInfo().getMajorRadius();
 	const Waypoint *way = m_currentWaypoint;
@@ -4590,9 +4605,6 @@ StateReturnType AIFollowWaypointPathState::onEnter()
 			m_groupOffset.x = obj->getPosition()->x - center.x;
 			m_groupOffset.y = obj->getPosition()->y - center.y;
 		}
-	}
-	if (m_currentWaypoint==NULL && m_moveAsGroup) {
-		m_currentWaypoint = obj->getTeam()->getCurrentWaypoint();
 	}
 	// set initial movement goal
 	computeGoal(m_moveAsGroup);
