@@ -13059,6 +13059,32 @@ TEST(chroma_power_meter_empties_as_the_draw_catches_the_supply)
 	CHECK_EQ(chromaPowerSegments(10, 11), CHROMA_POWER_BROWNOUT);
 }
 
+// A bar that has started has to show it.  Rounding a tenth of a charge down to
+// nothing is how a gauge comes to read empty while the thing behind it is
+// running, which is worse than no gauge.
+TEST(chroma_bars_light_a_lamp_as_soon_as_they_are_off_zero)
+{
+	CHECK_EQ(chromaBarSegments(0.0f, 20), 0);
+	CHECK_EQ(chromaBarSegments(-1.0f, 20), 0);
+	CHECK_EQ(chromaBarSegments(0.001f, 20), 1);
+	CHECK_EQ(chromaBarSegments(0.5f, 20), 10);
+	CHECK_EQ(chromaBarSegments(1.0f, 20), 20);
+	// A charge that overshoots its own reload must not run off the end of the grid.
+	CHECK_EQ(chromaBarSegments(2.0f, 20), 20);
+}
+
+// One lamp a thousand credits, and the bar stops at its own length instead of
+// wrapping round and reading poor at thirty thousand.
+TEST(chroma_money_bar_is_a_thousand_credits_a_lamp)
+{
+	CHECK_EQ(chromaMoneySegments(0, 15), 0);
+	CHECK_EQ(chromaMoneySegments(999, 15), 0);
+	CHECK_EQ(chromaMoneySegments(1000, 15), 1);
+	CHECK_EQ(chromaMoneySegments(7500, 15), 7);
+	CHECK_EQ(chromaMoneySegments(15000, 15), 15);
+	CHECK_EQ(chromaMoneySegments(400000, 15), 15);
+}
+
 #include "test_camera_behavior.inc"
 #include "test_production_input.inc"
 #include "test_minimap_input.inc"

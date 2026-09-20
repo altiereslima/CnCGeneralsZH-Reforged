@@ -25,15 +25,30 @@
 
 #include "GameClient/ChromaKeyboard.h"
 #include "GameClient/Color.h"
+#include "GameClient/ControlBar.h"
+#include "GameClient/Drawable.h"
+#include "GameClient/Gadget.h"
+#include "GameClient/GameWindow.h"
 #include "GameClient/HotKey.h"
+#include "GameClient/InGameUI.h"
 #include "Common/Energy.h"
 #include "Common/GameCommon.h"
+#include "Common/GlobalData.h"
+#include "Common/Money.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
+#include "Common/PlayerTemplate.h"
+#include "Common/ScoreKeeper.h"
+#include "Common/SpecialPower.h"
+#include "Common/SpecialPowerType.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
+#include "GameLogic/VictoryConditions.h"
 #include "GameLogic/Module/BehaviorModule.h"
+#include "GameLogic/Module/BodyModule.h"
+#include "GameLogic/Module/ProductionUpdate.h"
 #include "GameLogic/Module/SpecialPowerModule.h"
+#include "GameNetwork/NetworkInterface.h"
 
 //-----------------------------------------------------------------------------
 // The devices, and where each one's cells sit in the single flat array the main
@@ -76,46 +91,101 @@ static const INTERNET_PORT CHROMA_PORT = 54235;
 static const char *CHROMA_INIT_PATH = "/razer/chromasdk";
 static const char *CHROMA_INIT_BODY =
 	"{\"title\":\"Zero Hour Reforged\","
-	"\"description\":\"Command bar, power and superweapons on the hardware\","
+	"\"description\":\"The state of the match on the hardware\","
 	"\"author\":{\"name\":\"Zero Hour Reforged\",\"contact\":\"https://github.com/olcayseygan/CnCGeneralsZH-Reforged\"},"
 	"\"device_supported\":[\"keyboard\",\"mouse\",\"mousepad\"],"
 	"\"category\":\"application\"}";
 
 static const DWORD CHROMA_TIMEOUT_MS = 500;
 static const DWORD CHROMA_SEND_INTERVAL_MS = 100;
-/// The session expires after ten idle seconds, so a still frame is resent well inside that.
+/// The session dies after about ten idle seconds - measured, not assumed - so a
+/// still frame is resent well inside that.
 static const DWORD CHROMA_KEEPALIVE_MS = 4000;
 
-/// The four rows of an ANSI board, in the order their keys sit on it.  Every
-/// command bar hotkey the game hands out is a letter, and the digits carry the
-/// power meter instead, so this is the whole map rather than a subset of one.
+//-----------------------------------------------------------------------------
+// Colours, packed the way the device takes them: blue in the high byte, red in
+// the low one.
+//-----------------------------------------------------------------------------
+static const Int COLOR_OFF = 0x000000;
+static const Int COLOR_GREEN = 0x00FF00;
+static const Int COLOR_YELLOW = 0x00FFFF;
+static const Int COLOR_RED = 0x0000FF;
+static const Int COLOR_AMBER = 0x0080FF;
+static const Int COLOR_WHITE = 0xFFFFFF;
+static const Int COLOR_WARM_WHITE = 0x78DCFF;
+static const Int COLOR_BLUE = 0xFF0000;
+static const Int COLOR_GOLD = 0x00D7FF;
+
+//-----------------------------------------------------------------------------
+// The keyboard grid, zone by zone.  Column zero is the strip down the left of
+// the board and column one is escape, tab, caps and shift, so the typing rows
+// all start at two.  Row zero is the function keys.
+//-----------------------------------------------------------------------------
 static const char *CHROMA_KEY_ROWS[] = { "1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm" };
 static const Int CHROMA_KEY_ROW_COUNT = 4;
-/// Row zero of the table is the digits, which the command bar does not get.
 static const Int CHROMA_POWER_ROW = 0;
 static const Int CHROMA_FIRST_HOTKEY_ROW = 1;
-/// Column zero is the logo strip and column one is escape, tab, caps and shift,
-/// so every one of these four rows starts at two.  Row zero is the function keys.
 static const Int CHROMA_KEY_FIRST_COLUMN = 2;
 static const Int CHROMA_KEY_FIRST_ROW = 1;
 
-/// The numpad is its own block on the right of the same grid.
+static const Int MATCH_STATE_ROW = 0;
+static const Int MATCH_STATE_COLUMN = 1;			///< escape
+
+static const Int FKEY_ROW = 0;
+static const Int FKEY_FIRST_COLUMN = 3;
+static const Int FKEY_COUNT = 12;
+
+static const Int STATUS_ROW = 0;
+static const Int STATUS_NETWORK_COLUMN = 15;	///< print screen
+static const Int STATUS_RADAR_COLUMN = 16;		///< scroll lock
+static const Int STATUS_PAUSED_COLUMN = 17;		///< pause
+
+/// The six lamps of the navigation cluster, insert to page down.
+static const Int ALERT_FIRST_COLUMN = 15;
+static const Int ALERT_TOP_ROW = 1;
+static const Int ALERT_BOTTOM_ROW = 2;
+static const Int ALERTS_PER_ROW = 3;
+
 static const Int NUMPAD_FIRST_ROW = 1;
 static const Int NUMPAD_LAST_ROW = 5;
 static const Int NUMPAD_FIRST_COLUMN = 18;
 static const Int NUMPAD_LAST_COLUMN = 21;
+static const Int NUMPAD_CELLS = (NUMPAD_LAST_ROW - NUMPAD_FIRST_ROW + 1)
+															* (NUMPAD_LAST_COLUMN - NUMPAD_FIRST_COLUMN + 1);
 
+static const Int SELECTION_HEALTH_ROW = 4;		///< the up arrow
+static const Int SELECTION_HEALTH_COLUMN = 16;
+static const Int SELECTION_RANK_ROW = 5;			///< the down arrow
+static const Int SELECTION_RANK_COLUMN = 16;
+
+/// The addressable keys along the bottom row, skipping the ones the grid does
+/// not give a lamp of their own.
+static const Int PRODUCTION_ROW = 5;
+static const Int PRODUCTION_COLUMNS[] = { 1, 2, 3, 7, 11, 12, 13, 14 };
+static const Int PRODUCTION_LAMPS = sizeof( PRODUCTION_COLUMNS ) / sizeof( PRODUCTION_COLUMNS[ 0 ] );
+
+//-----------------------------------------------------------------------------
 static const Real AMBIENT_SCALE = 0.22f;			///< the unlit bed of player colour
-static const Real PRESSABLE_SCALE = 1.0f;			///< a command key that would fire if pressed
+static const Real IDLE_PRODUCER_SCALE = 0.15f;	///< a factory that is building nothing
 static const Int UNDER_ATTACK_FRAMES = LOGICFRAMES_PER_SECOND * 4;
 static const Real UNDER_ATTACK_PULSE_HZ = 2.5f;
-static const Real UNDER_ATTACK_DEPTH = 0.75f;		///< how far the pulse drags the board to red
+/// How far the alarm drags a zone towards red.  The bed, the mouse and anything
+/// carrying no number take the full depth; a gauge takes a quarter of it, so a
+/// brownout stays countable while the base is being shelled.
+static const Real ALARM_DEPTH_EMPTY = 0.75f;
+static const Real ALARM_DEPTH_DATA = 0.25f;
 
 /// Half of this many frames lit, half dark.
 static const Int BLINK_PERIOD_FRAMES = 16;
-/// Walking every building the player owns is not a per-frame job, and a
-/// superweapon's charge does not move fast enough to need one.
-static const Int SUPERWEAPON_SCAN_INTERVAL_FRAMES = 15;
+/// The general's star on screen flashes on a one second cycle; the promotion
+/// lamp keeps to the same one rather than inventing a second rhythm.
+static const Int STAR_PERIOD_FRAMES = LOGICFRAMES_PER_SECOND;
+static const Int ALERT_HOLD_FRAMES = LOGICFRAMES_PER_SECOND * 3;
+/// Walking every object the player owns is not a per-frame job, and neither a
+/// build clock nor a superweapon's charge moves fast enough to need one.
+static const Int WALK_INTERVAL_FRAMES = 15;
+
+static const UnsignedInt MONEY_PER_SEGMENT = 1000;
 
 //-----------------------------------------------------------------------------
 // The main thread writes s_pendingCells, the worker reads it.  One lock over the
@@ -124,9 +194,12 @@ static const Int SUPERWEAPON_SCAN_INTERVAL_FRAMES = 15;
 static CRITICAL_SECTION s_cellLock;
 static Int s_pendingCells[ CHROMA_CELLS ];
 static Bool s_workerRunning = FALSE;
+static Bool s_disabled = FALSE;
 static volatile LONG s_workerShouldStop = 0;
 static HANDLE s_workerThread = NULL;
 
+//-----------------------------------------------------------------------------
+// Pure helpers.
 //-----------------------------------------------------------------------------
 Int chromaCellForKey( char key )
 {
@@ -144,7 +217,36 @@ Int chromaCellForKey( char key )
 }
 
 //-----------------------------------------------------------------------------
-static Int chromaColorFromComponents( Real red, Real green, Real blue )
+Int chromaPowerSegments( Int production, Int consumption )
+{
+	if( production <= 0 )
+		return 0;
+	if( production < consumption )
+		return CHROMA_POWER_BROWNOUT;
+
+	const Real headroom = 1.0f - (Real)consumption / (Real)production;
+	const Int segments = (Int)(headroom * CHROMA_POWER_SEGMENTS + 0.999f);
+	return segments > CHROMA_POWER_SEGMENTS ? CHROMA_POWER_SEGMENTS : segments;
+}
+
+//-----------------------------------------------------------------------------
+Int chromaBarSegments( Real fraction, Int segments )
+{
+	if( fraction <= 0.0f )
+		return 0;
+	const Int lit = (Int)(fraction * segments + 0.999f);
+	return lit > segments ? segments : lit;
+}
+
+//-----------------------------------------------------------------------------
+Int chromaMoneySegments( UnsignedInt money, Int segments )
+{
+	const UnsignedInt lit = money / MONEY_PER_SEGMENT;
+	return lit > (UnsignedInt)segments ? segments : (Int)lit;
+}
+
+//-----------------------------------------------------------------------------
+static Int chromaColor( Real red, Real green, Real blue )
 {
 	const Int r = (Int)(red * 255.0f + 0.5f);
 	const Int g = (Int)(green * 255.0f + 0.5f);
@@ -154,9 +256,40 @@ static Int chromaColorFromComponents( Real red, Real green, Real blue )
 }
 
 //-----------------------------------------------------------------------------
-static Bool chromaBlinkIsOn( UnsignedInt frame )
+static Int chromaScale( Int color, Real scale )
 {
-	return ((frame / (BLINK_PERIOD_FRAMES / 2)) & 1) == 0;
+	const Int b = (Int)(((color >> 16) & 0xFF) * scale);
+	const Int g = (Int)(((color >> 8) & 0xFF) * scale);
+	const Int r = (Int)((color & 0xFF) * scale);
+	return (b << 16) | (g << 8) | r;
+}
+
+//-----------------------------------------------------------------------------
+/** Drag a colour towards red by the alarm depth, keeping whatever of it survives. */
+static Int chromaAlarmed( Int color, Real alarm )
+{
+	if( alarm <= 0.0f )
+		return color;
+
+	const Real keep = 1.0f - alarm;
+	const Int b = (Int)(((color >> 16) & 0xFF) * keep);
+	const Int g = (Int)(((color >> 8) & 0xFF) * keep);
+	Int r = (Int)((color & 0xFF) * keep + alarm * 255.0f);
+	if( r > 255 )
+		r = 255;
+	return (b << 16) | (g << 8) | r;
+}
+
+//-----------------------------------------------------------------------------
+static Bool chromaBlinkIsOn( UnsignedInt frame, Int periodFrames )
+{
+	return ((frame / (periodFrames / 2)) & 1) == 0;
+}
+
+//-----------------------------------------------------------------------------
+static Int chromaKeyboardCell( Int row, Int column )
+{
+	return row * KEYBOARD_COLUMNS + column;
 }
 
 //-----------------------------------------------------------------------------
@@ -348,104 +481,482 @@ static DWORD WINAPI chromaWorkerMain( LPVOID )
 }
 
 //-----------------------------------------------------------------------------
-// The game state side.  Everything below here runs on the main thread.
+// The walk.  Everything below here runs on the main thread.
+//
+// One pass over the player's objects, twice a second, collects every special
+// power's charge and every factory's build clock.  The stock control bar pays a
+// full object walk per shortcut button per frame; this pays one for all of it.
 //-----------------------------------------------------------------------------
-struct SuperweaponScan
+struct ChromaProducer
 {
-	Real bestCharge;			///< 0 to 1, the nearest one to firing
-	Bool anyReady;
+	ObjectID id;
+	Real progress;			///< 0 to 1, or -1 for a factory that is building nothing
+};
+
+struct ChromaSnapshot
+{
+	Real powerCharge[ SPECIALPOWER_COUNT ];		///< -1 where the player has no such power
+	Bool powerReady[ SPECIALPOWER_COUNT ];
+	Real bestSuperweaponCharge;
+	Bool anySuperweaponReady;
+	ChromaProducer producers[ PRODUCTION_LAMPS ];
+	Int producerCount;
 };
 
 //-----------------------------------------------------------------------------
-static void scanOneSuperweapon( Object *obj, void *userData )
+/** Keep the lowest object ids, so a lamp stays with the same factory for the
+	* whole match instead of shuffling every time a building goes up. */
+static void chromaRememberProducer( ChromaSnapshot *snapshot, ObjectID id, Real progress )
 {
-	SuperweaponScan *scan = (SuperweaponScan *)userData;
+	Int slot = snapshot->producerCount;
+	if( slot >= PRODUCTION_LAMPS )
+	{
+		if( id >= snapshot->producers[ PRODUCTION_LAMPS - 1 ].id )
+			return;
+		slot = PRODUCTION_LAMPS - 1;
+	}
+	else
+	{
+		++snapshot->producerCount;
+	}
 
-	if( !obj->isKindOf( KINDOF_FS_SUPERWEAPON )
-			|| obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION )
+	while( slot > 0 && snapshot->producers[ slot - 1 ].id > id )
+	{
+		snapshot->producers[ slot ] = snapshot->producers[ slot - 1 ];
+		--slot;
+	}
+	snapshot->producers[ slot ].id = id;
+	snapshot->producers[ slot ].progress = progress;
+}
+
+//-----------------------------------------------------------------------------
+static void chromaVisitObject( Object *obj, void *userData )
+{
+	ChromaSnapshot *snapshot = (ChromaSnapshot *)userData;
+
+	if( obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION )
 			|| obj->testStatus( OBJECT_STATUS_SOLD )
 			|| obj->isEffectivelyDead() )
 		return;
 
+	const Bool isSuperweapon = obj->isKindOf( KINDOF_FS_SUPERWEAPON );
 	for( BehaviorModule **module = obj->getBehaviorModules(); module && *module; ++module )
 	{
 		SpecialPowerModuleInterface *power = (*module)->getSpecialPower();
 		if( power == NULL || power->isScriptOnly() )
 			continue;
 
+		const SpecialPowerTemplate *powerTemplate = power->getSpecialPowerTemplate();
+		if( powerTemplate == NULL )
+			continue;
+
+		const Int type = (Int)powerTemplate->getSpecialPowerType();
+		if( type < 0 || type >= SPECIALPOWER_COUNT )
+			continue;
+
 		const Real charge = power->getPercentReady();
-		if( charge > scan->bestCharge )
-			scan->bestCharge = charge;
+		if( charge > snapshot->powerCharge[ type ] )
+			snapshot->powerCharge[ type ] = charge;
 		if( power->isReady() )
-			scan->anyReady = TRUE;
+			snapshot->powerReady[ type ] = TRUE;
+
+		if( isSuperweapon )
+		{
+			if( charge > snapshot->bestSuperweaponCharge )
+				snapshot->bestSuperweaponCharge = charge;
+			if( power->isReady() )
+				snapshot->anySuperweaponReady = TRUE;
+		}
+	}
+
+	ProductionUpdateInterface *production = obj->getProductionUpdateInterface();
+	if( production != NULL )
+	{
+		const ProductionEntry *head = production->firstProduction();
+		// getPercentComplete is already a percentage: the control bar hands it
+		// straight to the button clock, which wants 0 to 100.
+		const Real progress = head != NULL ? head->getPercentComplete() / 100.0f : -1.0f;
+		chromaRememberProducer( snapshot, obj->getID(), progress );
 	}
 }
 
 //-----------------------------------------------------------------------------
-/** The most-charged superweapon the local player owns, re-counted twice a second
-	* rather than every frame. */
-static const SuperweaponScan &chromaSuperweaponState( Player *localPlayer, UnsignedInt frame )
+static const ChromaSnapshot &chromaWalkPlayer( Player *localPlayer, UnsignedInt frame )
 {
-	static SuperweaponScan scan = { 0.0f, FALSE };
-	static UnsignedInt lastScanFrame = 0;
+	static ChromaSnapshot snapshot;
+	static UnsignedInt lastWalkFrame = 0;
+	static Bool everWalked = FALSE;
 
-	if( frame >= lastScanFrame && frame - lastScanFrame < (UnsignedInt)SUPERWEAPON_SCAN_INTERVAL_FRAMES )
-		return scan;
+	if( everWalked && frame >= lastWalkFrame
+			&& frame - lastWalkFrame < (UnsignedInt)WALK_INTERVAL_FRAMES )
+		return snapshot;
 
-	lastScanFrame = frame;
-	scan.bestCharge = 0.0f;
-	scan.anyReady = FALSE;
+	everWalked = TRUE;
+	lastWalkFrame = frame;
+	for( Int type = 0; type < SPECIALPOWER_COUNT; ++type )
+	{
+		snapshot.powerCharge[ type ] = -1.0f;
+		snapshot.powerReady[ type ] = FALSE;
+	}
+	snapshot.bestSuperweaponCharge = 0.0f;
+	snapshot.anySuperweaponReady = FALSE;
+	snapshot.producerCount = 0;
+
 	if( localPlayer != NULL )
-		localPlayer->iterateObjects( scanOneSuperweapon, &scan );
-	return scan;
+		localPlayer->iterateObjects( chromaVisitObject, &snapshot );
+	return snapshot;
 }
 
 //-----------------------------------------------------------------------------
-Int chromaPowerSegments( Int production, Int consumption )
+// The alert lamps.  EVA cannot be polled - its flag array is private and is
+// consumed before anyone outside could see it - and the radar's event ring lets
+// only a position escape, so the score counters are what an edge is taken from.
+//-----------------------------------------------------------------------------
+enum ChromaAlert
 {
-	if( production <= 0 )
-		return 0;
-	if( production < consumption )
-		return CHROMA_POWER_BROWNOUT;
+	ALERT_UNIT_LOST = 0,
+	ALERT_BUILDING_LOST,
+	ALERT_UNDER_ATTACK,
+	ALERT_PROMOTION,
+	ALERT_UPGRADE_DONE,
+	ALERT_BUILT,
 
-	const Real headroom = 1.0f - (Real)consumption / (Real)production;
-	const Int segments = (Int)(headroom * CHROMA_POWER_SEGMENTS + 0.999f);
-	return segments > CHROMA_POWER_SEGMENTS ? CHROMA_POWER_SEGMENTS : segments;
+	ALERT_COUNT
+};
+
+struct ChromaAlertState
+{
+	UnsignedInt firedFrame[ ALERT_COUNT ];
+	Int unitsLost;
+	Int buildingsLost;
+	Int unitsBuilt;
+	Int buildingsBuilt;
+	UpgradeMaskType upgrades;
+	Bool haveBaseline;
+};
+
+static ChromaAlertState s_alerts;
+
+//-----------------------------------------------------------------------------
+static Int chromaAlertCell( Int alert )
+{
+	const Int row = alert < ALERTS_PER_ROW ? ALERT_TOP_ROW : ALERT_BOTTOM_ROW;
+	return chromaKeyboardCell( row, ALERT_FIRST_COLUMN + alert % ALERTS_PER_ROW );
 }
 
 //-----------------------------------------------------------------------------
-/** The digit row reads as a tank of power that empties: full green while there is
-	* headroom, down to nothing as consumption catches production, and the whole row
-	* blinking red once it has been passed.  A player with no power plant at all
-	* gets a dark row rather than a full or an empty one. */
-static void chromaFillPowerRow( Int *cells, const Energy *energy, UnsignedInt frame )
+static void chromaUpdateAlerts( Player *localPlayer, UnsignedInt frame )
 {
-	static const Int POWER_LIT = 0x00FF00;			///< green, in the BGR the device takes
-	static const Int POWER_SHORT = 0x0000FF;		///< red
-	static const Int POWER_DARK = 0x000000;
+	ScoreKeeper *score = localPlayer->getScoreKeeper();
+	const Int unitsLost = score->getTotalUnitsLost();
+	const Int buildingsLost = score->getTotalBuildingsLost();
+	const Int unitsBuilt = score->getTotalUnitsBuilt();
+	const Int buildingsBuilt = score->getTotalBuildingsBuilt();
+	const UpgradeMaskType upgrades = localPlayer->getCompletedUpgradeMask();
 
-	const Int litSegments = chromaPowerSegments( energy->getProduction(), energy->getConsumption() );
-	const Bool blinkOn = chromaBlinkIsOn( frame );
+	if( s_alerts.haveBaseline )
+	{
+		if( unitsLost > s_alerts.unitsLost )
+			s_alerts.firedFrame[ ALERT_UNIT_LOST ] = frame;
+		if( buildingsLost > s_alerts.buildingsLost )
+			s_alerts.firedFrame[ ALERT_BUILDING_LOST ] = frame;
+		if( unitsBuilt > s_alerts.unitsBuilt || buildingsBuilt > s_alerts.buildingsBuilt )
+			s_alerts.firedFrame[ ALERT_BUILT ] = frame;
+		if( upgrades != s_alerts.upgrades )
+			s_alerts.firedFrame[ ALERT_UPGRADE_DONE ] = frame;
+	}
+
+	s_alerts.unitsLost = unitsLost;
+	s_alerts.buildingsLost = buildingsLost;
+	s_alerts.unitsBuilt = unitsBuilt;
+	s_alerts.buildingsBuilt = buildingsBuilt;
+	s_alerts.upgrades = upgrades;
+	s_alerts.haveBaseline = TRUE;
+}
+
+//-----------------------------------------------------------------------------
+static void chromaResetAlerts( void )
+{
+	for( Int alert = 0; alert < ALERT_COUNT; ++alert )
+		s_alerts.firedFrame[ alert ] = 0;
+	s_alerts.haveBaseline = FALSE;
+}
+
+//-----------------------------------------------------------------------------
+static Bool chromaAlertIsLit( Int alert, UnsignedInt frame )
+{
+	const UnsignedInt fired = s_alerts.firedFrame[ alert ];
+	return fired > 0 && frame >= fired && frame - fired < (UnsignedInt)ALERT_HOLD_FRAMES;
+}
+
+//-----------------------------------------------------------------------------
+// The zones.
+//-----------------------------------------------------------------------------
+
+/** The digit row reads as a tank of power that empties, and it keeps to the same
+	* three colours the meter on the command bar uses so the two never disagree. */
+static void chromaFillPowerRow( Int *cells, const Energy *energy, UnsignedInt frame, Real alarm )
+{
+	const Int production = energy->getProduction();
+	const Int consumption = energy->getConsumption();
+	const Int litSegments = chromaPowerSegments( production, consumption );
+	const Int yellowRange = TheGlobalData ? TheGlobalData->m_powerBarYellowRange : 0;
+	const Bool warning = consumption > production - yellowRange && consumption <= production;
+	const Int litColor = chromaAlarmed( warning ? COLOR_YELLOW : COLOR_GREEN, alarm );
+	const Int shortColor = chromaBlinkIsOn( frame, BLINK_PERIOD_FRAMES ) ? COLOR_RED : COLOR_OFF;
 
 	const char *digits = CHROMA_KEY_ROWS[ CHROMA_POWER_ROW ];
 	for( Int segment = 0; segment < CHROMA_POWER_SEGMENTS; ++segment )
 	{
-		Int color = POWER_DARK;
+		Int color = COLOR_OFF;
 		if( litSegments == CHROMA_POWER_BROWNOUT )
-			color = blinkOn ? POWER_SHORT : POWER_DARK;
+			color = shortColor;
 		else if( segment < litSegments )
-			color = POWER_LIT;
+			color = litColor;
 		cells[ chromaCellForKey( digits[ segment ] ) ] = color;
 	}
 }
 
 //-----------------------------------------------------------------------------
+/** The command bar, key for key, with the build clock the button is drawing on
+	* screen carried as brightness.  The clock is read straight off the gadget the
+	* control bar already wrote it to, so the keys cannot drift from the buttons. */
+static void chromaFillCommandBar( Int *cells, Int pressable, Int unavailable )
+{
+	for( Int row = CHROMA_FIRST_HOTKEY_ROW; row < CHROMA_KEY_ROW_COUNT; ++row )
+	{
+		const char *keys = CHROMA_KEY_ROWS[ row ];
+		for( Int column = 0; keys[ column ] != 0; ++column )
+		{
+			Bool isPressable = FALSE;
+			const char keyText[ 2 ] = { keys[ column ], 0 };
+			GameWindow *win = TheHotKeyManager->findHotKey( AsciiString( keyText ), &isPressable );
+			if( win == NULL )
+				continue;
+
+			Int color = isPressable ? pressable : unavailable;
+			if( isPressable && BitTest( win->winGetStyle(), GWS_PUSH_BUTTON ) )
+			{
+				const PushButtonData *buttonData = (const PushButtonData *)win->winGetUserData();
+				if( buttonData != NULL && buttonData->drawClock != NO_CLOCK )
+					color = chromaScale( color, buttonData->percentClock / 100.0f );
+			}
+			cells[ chromaCellForKey( keys[ column ] ) ] = color;
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+/** The function row is the generals powers tray, slot for slot, taken from the
+	* same command set the on-screen tray is built from. */
+static void chromaFillPowerTray( Int *cells, Player *localPlayer, const ChromaSnapshot &snapshot,
+																 Int factionColor, UnsignedInt frame )
+{
+	const PlayerTemplate *playerTemplate = localPlayer->getPlayerTemplate();
+	if( playerTemplate == NULL || TheControlBar == NULL )
+		return;
+
+	const AsciiString setName = playerTemplate->getSpecialPowerShortcutCommandSet();
+	if( setName.isEmpty() )
+		return;
+
+	const CommandSet *commandSet = TheControlBar->findCommandSet( setName );
+	if( commandSet == NULL )
+		return;
+
+	Int slots = playerTemplate->getSpecialPowerShortcutButtonCount();
+	if( slots > FKEY_COUNT )
+		slots = FKEY_COUNT;
+
+	const Bool blinkOn = chromaBlinkIsOn( frame, BLINK_PERIOD_FRAMES );
+	for( Int slot = 0; slot < slots; ++slot )
+	{
+		const CommandButton *button = commandSet->getCommandButton( slot );
+		if( button == NULL )
+			continue;
+
+		const SpecialPowerTemplate *powerTemplate = button->getSpecialPowerTemplate();
+		if( powerTemplate == NULL )
+			continue;
+
+		const Int type = (Int)powerTemplate->getSpecialPowerType();
+		if( type < 0 || type >= SPECIALPOWER_COUNT || snapshot.powerCharge[ type ] < 0.0f )
+			continue;
+
+		const Int cell = chromaKeyboardCell( FKEY_ROW, FKEY_FIRST_COLUMN + slot );
+		if( snapshot.powerReady[ type ] )
+			cells[ cell ] = blinkOn ? COLOR_WARM_WHITE : COLOR_OFF;
+		else
+			cells[ cell ] = chromaScale( factionColor, snapshot.powerCharge[ type ] );
+	}
+}
+
+//-----------------------------------------------------------------------------
+/** The numpad fills from the bottom as the nearest superweapon charges, and the
+	* whole block blinks once any of them can fire. */
+static void chromaFillNumpad( Int *cells, const ChromaSnapshot &snapshot, Int factionColor,
+															UnsignedInt frame )
+{
+	const Bool blinkOn = chromaBlinkIsOn( frame, BLINK_PERIOD_FRAMES );
+	const Int lit = chromaBarSegments( snapshot.bestSuperweaponCharge, NUMPAD_CELLS );
+
+	Int index = 0;
+	for( Int row = NUMPAD_LAST_ROW; row >= NUMPAD_FIRST_ROW; --row )
+	{
+		for( Int column = NUMPAD_FIRST_COLUMN; column <= NUMPAD_LAST_COLUMN; ++column )
+		{
+			Int color;
+			if( snapshot.anySuperweaponReady )
+				color = blinkOn ? COLOR_WARM_WHITE : COLOR_OFF;
+			else
+				color = index < lit ? factionColor : COLOR_OFF;
+			cells[ chromaKeyboardCell( row, column ) ] = color;
+			++index;
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+/** One lamp per factory along the bottom row, ordered by object id so a lamp
+	* keeps its building.  Dark is a factory building nothing, which is the thing
+	* worth noticing. */
+static void chromaFillProduction( Int *cells, const ChromaSnapshot &snapshot, Int factionColor )
+{
+	for( Int lamp = 0; lamp < snapshot.producerCount && lamp < PRODUCTION_LAMPS; ++lamp )
+	{
+		const Real progress = snapshot.producers[ lamp ].progress;
+		const Int color = progress < 0.0f ? chromaScale( COLOR_RED, IDLE_PRODUCER_SCALE )
+																			: chromaScale( factionColor, progress );
+		cells[ chromaKeyboardCell( PRODUCTION_ROW, PRODUCTION_COLUMNS[ lamp ] ) ] = color;
+	}
+}
+
+//-----------------------------------------------------------------------------
+/** Two arrow keys carry the selection: how hurt it is, and what rank the one in
+	* front of it holds. */
+static void chromaFillSelection( Int *cells )
+{
+	if( TheInGameUI == NULL || TheInGameUI->getSelectCount() <= 0 )
+		return;
+
+	const DrawableList *selected = TheInGameUI->getAllSelectedLocalDrawables();
+	if( selected == NULL )
+		return;
+
+	Real health = 0.0f;
+	Real maxHealth = 0.0f;
+	VeterancyLevel rank = LEVEL_INVALID;
+	for( DrawableList::const_iterator it = selected->begin(); it != selected->end(); ++it )
+	{
+		const Object *obj = (*it)->getObject();
+		if( obj == NULL || obj->getBodyModule() == NULL )
+			continue;
+
+		health += obj->getBodyModule()->getHealth();
+		maxHealth += obj->getBodyModule()->getMaxHealth();
+		if( rank == LEVEL_INVALID )
+			rank = obj->getVeterancyLevel();
+	}
+
+	if( maxHealth > 0.0f )
+	{
+		const Real fraction = health / maxHealth;
+		cells[ chromaKeyboardCell( SELECTION_HEALTH_ROW, SELECTION_HEALTH_COLUMN ) ] =
+			chromaColor( 1.0f - fraction, fraction, 0.0f );
+	}
+
+	Int rankColor = COLOR_OFF;
+	switch( rank )
+	{
+		case LEVEL_VETERAN:	rankColor = COLOR_GREEN; break;
+		case LEVEL_ELITE:		rankColor = COLOR_BLUE; break;
+		case LEVEL_HEROIC:	rankColor = COLOR_GOLD; break;
+		default:						break;
+	}
+	cells[ chromaKeyboardCell( SELECTION_RANK_ROW, SELECTION_RANK_COLUMN ) ] = rankColor;
+}
+
+//-----------------------------------------------------------------------------
+/** Escape says what the match itself is doing, and the three keys beside the
+	* function row say whether the network, the radar and the clock are healthy. */
+static void chromaFillMatchState( Int *cells, UnsignedInt frame )
+{
+	Int matchColor = COLOR_OFF;
+	if( TheVictoryConditions != NULL && TheVictoryConditions->isLocalDefeat() )
+		matchColor = COLOR_RED;
+	else if( TheVictoryConditions != NULL && TheVictoryConditions->isLocalAlliedVictory() )
+		matchColor = COLOR_WHITE;
+	else if( TheGameLogic->isPeaceTime() )
+		matchColor = chromaBlinkIsOn( frame, STAR_PERIOD_FRAMES ) ? COLOR_BLUE : COLOR_OFF;
+	else if( TheGameLogic->isGamePaused()
+					 || (TheInGameUI != NULL && (TheInGameUI->isQuitMenuVisible() || !TheInGameUI->getInputEnabled())) )
+		matchColor = COLOR_AMBER;
+	cells[ chromaKeyboardCell( MATCH_STATE_ROW, MATCH_STATE_COLUMN ) ] = matchColor;
+
+	Int networkColor = COLOR_OFF;
+	if( TheNetwork != NULL )
+	{
+		networkColor = TheNetwork->isFrameDataReady()
+									 ? chromaScale( COLOR_GREEN, AMBIENT_SCALE )
+									 : (chromaBlinkIsOn( frame, BLINK_PERIOD_FRAMES ) ? COLOR_RED : COLOR_OFF);
+	}
+	cells[ chromaKeyboardCell( STATUS_ROW, STATUS_NETWORK_COLUMN ) ] = networkColor;
+
+	cells[ chromaKeyboardCell( STATUS_ROW, STATUS_PAUSED_COLUMN ) ] =
+		TheGameLogic->isGamePaused() ? COLOR_AMBER : COLOR_OFF;
+}
+
+//-----------------------------------------------------------------------------
+static void chromaFillAlerts( Int *cells, Player *localPlayer, UnsignedInt frame )
+{
+	static const Int ALERT_COLORS[ ALERT_COUNT ] =
+	{
+		COLOR_RED,				// a unit of yours died
+		COLOR_RED,				// a building of yours died
+		COLOR_RED,				// something is shooting at the base
+		COLOR_GOLD,				// a promotion is waiting to be spent
+		COLOR_GREEN,			// an upgrade finished
+		COLOR_WHITE				// something of yours finished building
+	};
+
+	for( Int alert = 0; alert < ALERT_COUNT; ++alert )
+	{
+		if( alert == ALERT_PROMOTION || alert == ALERT_UNDER_ATTACK )
+			continue;
+		cells[ chromaAlertCell( alert ) ] =
+			chromaAlertIsLit( alert, frame ) ? ALERT_COLORS[ alert ] : COLOR_OFF;
+	}
+
+	const UnsignedInt attackedFrame = localPlayer->getAttackedFrame();
+	const Bool underAttack = attackedFrame > 0 && frame >= attackedFrame
+												 && frame - attackedFrame < (UnsignedInt)UNDER_ATTACK_FRAMES;
+	cells[ chromaAlertCell( ALERT_UNDER_ATTACK ) ] =
+		underAttack && chromaBlinkIsOn( frame, BLINK_PERIOD_FRAMES )
+		? ALERT_COLORS[ ALERT_UNDER_ATTACK ] : COLOR_OFF;
+
+	// The general's star on screen flashes on the frame count, not a timer of its
+	// own; the lamp keeps to the same cycle so the two blink together.
+	const Bool promotionWaiting = localPlayer->getSciencePurchasePoints() > 0;
+	cells[ chromaAlertCell( ALERT_PROMOTION ) ] =
+		promotionWaiting && chromaBlinkIsOn( frame, STAR_PERIOD_FRAMES )
+		? ALERT_COLORS[ ALERT_PROMOTION ] : COLOR_OFF;
+}
+
+//-----------------------------------------------------------------------------
+static void chromaFillMoney( Int *cells, Player *localPlayer, Real alarm )
+{
+	const UnsignedInt money = localPlayer->getMoney()->countMoney();
+	const Int lit = chromaMoneySegments( money, MOUSEPAD_CELLS );
+	const Int color = chromaAlarmed( COLOR_GREEN, alarm );
+
+	Int *mousepad = cells + MOUSEPAD_FIRST_CELL;
+	for( Int led = 0; led < MOUSEPAD_CELLS; ++led )
+		mousepad[ led ] = led < lit ? color : COLOR_OFF;
+}
+
+//-----------------------------------------------------------------------------
 static void chromaFillCells( Int *cells )
 {
-	// Warm white for anything about a superweapon, so it is never mistaken for the
-	// green of the power row or the red of the alarm.
-	static const Int SUPERWEAPON_COLOR = 0x0078DCFF;
-
 	Real red = 0.5f, green = 0.5f, blue = 0.5f;
 	Player *localPlayer = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
 	if( localPlayer != NULL )
@@ -456,87 +967,66 @@ static void chromaFillCells( Int *cells )
 		green = g / 255.0f;
 		blue = b / 255.0f;
 	}
+	const Int factionColor = chromaColor( red, green, blue );
 
-	const Bool inGame = TheGameLogic && TheGameLogic->isInGame();
+	// The shell map is a running game as far as GameLogic is concerned, so the
+	// match test has to exclude it or the main menu lights up like a battle.
+	const Bool inMatch = TheGameLogic && TheGameLogic->isInGame() && !TheGameLogic->isInShellGame();
 	const UnsignedInt frame = TheGameLogic ? TheGameLogic->getFrame() : 0;
 
-	// How hard the board is being dragged towards red, zero when nothing is
-	// shooting at us.
 	Real alarm = 0.0f;
-	if( inGame && localPlayer != NULL )
+	if( inMatch && localPlayer != NULL )
 	{
 		const UnsignedInt attackedFrame = localPlayer->getAttackedFrame();
-		if( attackedFrame > 0 && frame - attackedFrame < (UnsignedInt)UNDER_ATTACK_FRAMES )
+		if( attackedFrame > 0 && frame >= attackedFrame
+				&& frame - attackedFrame < (UnsignedInt)UNDER_ATTACK_FRAMES )
 		{
 			const Real seconds = (Real)frame / (Real)LOGICFRAMES_PER_SECOND;
 			const Real phase = sinf( seconds * UNDER_ATTACK_PULSE_HZ * TWO_PI );
-			alarm = UNDER_ATTACK_DEPTH * (0.5f + 0.5f * phase);
+			alarm = 0.5f + 0.5f * phase;
 		}
 	}
+	const Real alarmEmpty = alarm * ALARM_DEPTH_EMPTY;
+	const Real alarmData = alarm * ALARM_DEPTH_DATA;
 
-	const Int ambient = chromaColorFromComponents(
-		red * AMBIENT_SCALE * (1.0f - alarm) + alarm,
-		green * AMBIENT_SCALE * (1.0f - alarm),
-		blue * AMBIENT_SCALE * (1.0f - alarm) );
+	const Int ambient = chromaAlarmed( chromaScale( factionColor, AMBIENT_SCALE ), alarmEmpty );
 	for( Int cell = 0; cell < CHROMA_CELLS; ++cell )
 		cells[ cell ] = ambient;
 
-	// Outside a match there is no command bar, no power and no superweapon to
-	// read, so the flat bed of colour is the whole picture.
-	if( !inGame || localPlayer == NULL || TheHotKeyManager == NULL )
+	if( !inMatch || localPlayer == NULL || TheHotKeyManager == NULL )
+	{
+		chromaResetAlerts();
 		return;
-
-	const Int pressable = chromaColorFromComponents(
-		red * PRESSABLE_SCALE * (1.0f - alarm) + alarm,
-		green * PRESSABLE_SCALE * (1.0f - alarm),
-		blue * PRESSABLE_SCALE * (1.0f - alarm) );
-	const Int unavailable = chromaColorFromComponents( alarm, 0.0f, 0.0f );
-
-	for( Int row = CHROMA_FIRST_HOTKEY_ROW; row < CHROMA_KEY_ROW_COUNT; ++row )
-	{
-		const char *keys = CHROMA_KEY_ROWS[ row ];
-		for( Int column = 0; keys[ column ] != 0; ++column )
-		{
-			Bool isPressable = FALSE;
-			const char keyText[ 2 ] = { keys[ column ], 0 };
-			if( !TheHotKeyManager->findHotKey( AsciiString( keyText ), &isPressable ) )
-				continue;
-
-			cells[ chromaCellForKey( keys[ column ] ) ] = isPressable ? pressable : unavailable;
-		}
 	}
 
-	chromaFillPowerRow( cells, localPlayer->getEnergy(), frame );
+	chromaUpdateAlerts( localPlayer, frame );
+	const ChromaSnapshot &snapshot = chromaWalkPlayer( localPlayer, frame );
 
-	// The numpad blinks while anything of yours can fire, and the mousepad strip
-	// fills up as the nearest one charges.
-	const SuperweaponScan &superweapons = chromaSuperweaponState( localPlayer, frame );
-	const Bool blinkOn = chromaBlinkIsOn( frame );
-	if( superweapons.anyReady )
-	{
-		const Int numpadColor = blinkOn ? SUPERWEAPON_COLOR : 0;
-		for( Int row = NUMPAD_FIRST_ROW; row <= NUMPAD_LAST_ROW; ++row )
-			for( Int column = NUMPAD_FIRST_COLUMN; column <= NUMPAD_LAST_COLUMN; ++column )
-				cells[ row * KEYBOARD_COLUMNS + column ] = numpadColor;
-	}
+	const Int pressable = chromaAlarmed( factionColor, alarmData );
+	const Int unavailable = chromaAlarmed( COLOR_OFF, alarmData );
 
-	Int *mousepad = cells + MOUSEPAD_FIRST_CELL;
-	if( superweapons.anyReady )
-	{
-		for( Int led = 0; led < MOUSEPAD_CELLS; ++led )
-			mousepad[ led ] = blinkOn ? SUPERWEAPON_COLOR : 0;
-	}
-	else if( superweapons.bestCharge > 0.0f )
-	{
-		const Int litLeds = (Int)(superweapons.bestCharge * MOUSEPAD_CELLS + 0.999f);
-		for( Int led = 0; led < MOUSEPAD_CELLS; ++led )
-			mousepad[ led ] = led < litLeds ? pressable : 0;
-	}
+	chromaFillCommandBar( cells, pressable, unavailable );
+	chromaFillPowerRow( cells, localPlayer->getEnergy(), frame, alarmData );
+	chromaFillPowerTray( cells, localPlayer, snapshot, factionColor, frame );
+	chromaFillNumpad( cells, snapshot, factionColor, frame );
+	chromaFillProduction( cells, snapshot, factionColor );
+	chromaFillSelection( cells );
+	chromaFillMatchState( cells, frame );
+	chromaFillAlerts( cells, localPlayer, frame );
+	chromaFillMoney( cells, localPlayer, alarmData );
+
+	// The radar lamp is the one piece of match state that comes off the player
+	// rather than the logic, so it is set here where the player is in hand.
+	cells[ chromaKeyboardCell( STATUS_ROW, STATUS_RADAR_COLUMN ) ] =
+		localPlayer->hasRadar() ? chromaScale( COLOR_GREEN, AMBIENT_SCALE ) : COLOR_OFF;
 }
 
 //-----------------------------------------------------------------------------
 void updateChromaKeyboard( void )
 {
+	if( s_disabled )
+		return;
+
 	if( !s_workerRunning )
 	{
 		InitializeCriticalSection( &s_cellLock );
@@ -545,17 +1035,29 @@ void updateChromaKeyboard( void )
 		if( s_workerThread == NULL )
 		{
 			DeleteCriticalSection( &s_cellLock );
+			s_disabled = TRUE;
 			return;
 		}
 		s_workerRunning = TRUE;
 	}
 
 	Int cells[ CHROMA_CELLS ];
-	chromaFillCells( cells );
+	// The option applies live, so turning it off mid-match has to hand the
+	// hardware back dark rather than freeze it on the last frame.
+	if( TheGlobalData != NULL && !TheGlobalData->m_chromaLighting )
+		memset( cells, 0, sizeof( cells ) );
+	else
+		chromaFillCells( cells );
 
 	EnterCriticalSection( &s_cellLock );
 	memcpy( s_pendingCells, cells, sizeof( s_pendingCells ) );
 	LeaveCriticalSection( &s_cellLock );
+}
+
+//-----------------------------------------------------------------------------
+void disableChromaKeyboard( void )
+{
+	s_disabled = TRUE;
 }
 
 //-----------------------------------------------------------------------------

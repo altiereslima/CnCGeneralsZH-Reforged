@@ -204,6 +204,7 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "ZoomToCursor",							INI::parseBool,				NULL,			offsetof( GlobalData, m_zoomToCursor ) },
 	{ "FormationDrag",						INI::parseBool,				NULL,			offsetof( GlobalData, m_formationDrag ) },
 	{ "ShowAllyCursors",					INI::parseBool,				NULL,			offsetof( GlobalData, m_showAllyCursors ) },
+	{ "ChromaLighting",						INI::parseBool,				NULL,			offsetof( GlobalData, m_chromaLighting ) },
 	{ "ShowHudOverlay",						INI::parseBool,				NULL,			offsetof( GlobalData, m_showHudOverlay ) },
 	{ "ShowPlacementRangeRing",		INI::parseBool,				NULL,			offsetof( GlobalData, m_showPlacementRangeRing ) },
 	{ "WorkersReturnToSupply",		INI::parseBool,				NULL,			offsetof( GlobalData, m_workersReturnToSupply ) },
@@ -1124,6 +1125,7 @@ GlobalData::GlobalData()
 	// the right button no longer scrolls, so a right-drag is free to mean something
 	m_formationDrag = TRUE;
 	m_showAllyCursors = TRUE;
+	m_chromaLighting = TRUE;	//costs nothing on a machine with no Razer server: the handshake fails once
 	m_menuTransitionSpeed = 100;
 	m_textureFilterMode = 2;	// anisotropic; retail shipped bilinear on a 2003 fill-rate budget
 	m_anisotropyLevel = 0;		// whatever the card offers, capped at 16 in _Init_Filters

@@ -644,12 +644,19 @@ found and fixed â€” EA's own, not port damage.**
 
 ## Your Razer hardware plays along
 
-- The keyboard, the mouse and the mousepad all sit in your own player colour for the whole match, dim enough to be a bed rather than a light show.
-- The command bar is on the letter keys. Every letter the bar has bound to a button lights up while that button can be pressed, and goes dark the moment it cannot - the moment you cannot afford it, or the thing that builds it is busy. What you can buy is readable without looking away from the fight.
-- The number row is your power. Ten green keys while nothing is drawing on it, fewer as the base fills up, and the whole row blinking red the moment consumption passes production - the brownout that stops your radar and your defences, announced before you have gone looking for the meter. A faction with no power at all leaves the row dark rather than pretending to be full.
-- The numpad blinks white when a superweapon of yours is ready to fire, and the mousepad fills up as the nearest one charges, so you can see the particle cannon coming without opening anything.
-- Everything pulses red while something is shooting at your base, and settles again four seconds after the last hit. The mouse under your hand pulses with it, which is the one thing you cannot miss.
-- Nothing to install and nothing to turn on. If Synapse is running the lighting is there; if it is not, the game never mentions it. A device you do not own is simply skipped.
+The whole HUD is on the hardware. Four colours carry it, and they mean the same thing everywhere: green is something you have, red is something wrong, white is something ready to fire, and your own player colour is everything else. How bright a key is says how much.
+
+- The command bar is on the letter keys. Every letter the bar has bound lights while that button can be pressed and goes dark the moment it cannot, and a button with a queue dims in step with the clock drawn on it, so the key tells you how far along the tank is.
+- The number row is your power. Green keys while there is headroom, fewer as the base fills up, yellow for the last of it, and the whole row blinking red once consumption passes production. That is the brownout that stops your radar and your defences, and you see it before you have gone looking for the meter. A faction with no power plant leaves the row dark rather than pretending to be full.
+- The function row is your generals powers, key for key with the strip on screen. Each one brightens as it charges and blinks white when it can be used. F7 lit means F7 is worth pressing.
+- The numpad fills from the bottom as your nearest superweapon charges, then the whole block blinks. The particle cannon arrives on your hand, not in a corner of the screen.
+- The bottom row is your factories, one key each, brightening with whatever they are building. A dark key is a factory standing idle, which is the thing nobody notices until the fight is lost.
+- The six keys above the arrows are the news: a unit died, a building died, something is shooting at the base, a promotion is waiting to be spent, an upgrade landed, something of yours finished. Each holds for three seconds and then gets out of the way.
+- Escape says what the match is doing: amber while paused or in a menu, blue through peace time, red when you are out, white when you have won. Beside it, one key for the network and one for whether you still have radar.
+- The two arrows carry your selection: how hurt it is, green through to red, and what rank the unit in front of it holds.
+- The mousepad is your money, a lamp per thousand credits.
+- Everything pulses red while the base is under fire and settles four seconds after the last hit. The gauges only tint, so you can still count your power while it is happening, and the mouse under your hand takes the full pulse.
+- Nothing to install and nothing to turn on. If Synapse is running it is there; if it is not, the game never mentions it. Options has a switch, and `-nochroma` takes it out of a timed run.
 
 ## The options screen has pages
 

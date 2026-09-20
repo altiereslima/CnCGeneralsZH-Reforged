@@ -59,6 +59,7 @@ OPTION_BOOL_ACCESSORS( m_snapCameraRotateTo45 )
 OPTION_BOOL_ACCESSORS( m_zoomToCursor )
 OPTION_BOOL_ACCESSORS( m_formationDrag )
 OPTION_BOOL_ACCESSORS( m_showAllyCursors )
+OPTION_BOOL_ACCESSORS( m_chromaLighting )
 OPTION_INT_ACCESSORS( m_bloomIntensity )
 OPTION_INT_ACCESSORS( m_bloomThreshold )
 OPTION_INT_ACCESSORS( m_menuTransitionSpeed )
@@ -240,6 +241,13 @@ const OptionDef TheOptionCatalog[] =
 	{ "ShowAllyCursors",					"", "",
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_showAllyCursors, set_m_showAllyCursors },
+
+	// The match on Razer hardware: the command bar on the letter keys, power on the digits,
+	// superweapons on the numpad, money on the mousepad.  Off gives the keyboard back to whatever
+	// Synapse wants to do with it, and takes the worker thread with it.
+	{ "ChromaLighting",						"", "",
+		OPTION_BOOL, APPLY_LIVE, 0, 1,
+		get_m_chromaLighting, set_m_chromaLighting },
 
 	// Percent of the speed the menu slides and fades were authored at. 100 is what the artists
 	// drew; higher gets you through the shell faster, and nothing about a menu animation is worth

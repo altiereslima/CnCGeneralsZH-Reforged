@@ -18,11 +18,13 @@
 
 // FILE: ChromaKeyboard.h /////////////////////////////////////////////////////
 //
-// Paints the player's colour onto a Razer keyboard, lights the command bar
-// keys that can be pressed right now, and pulses red while the base is taking
-// fire.  Talks to the Chroma REST server on localhost, so it needs no SDK
-// header, no import library and no DLL beside the exe: with Synapse absent the
-// first request fails and the whole thing goes quiet for the run.
+// Puts the state of the match on Razer hardware: the command bar on the letter
+// keys, power on the digits, the generals powers on the function row, alerts on
+// the navigation cluster, superweapons on the numpad, production along the
+// bottom, and money on the mousepad.  Talks to the Chroma REST server on
+// localhost, so it needs no SDK header, no import library and no DLL beside the
+// exe: with Synapse absent the first request fails and the whole thing goes
+// quiet for the run.
 //
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -31,13 +33,17 @@
 #ifndef __CHROMA_KEYBOARD_H_
 #define __CHROMA_KEYBOARD_H_
 
-/** Read the game state and hand the keyboard its next frame.  Called once per
+/** Read the game state and hand the hardware its next frame.  Called once per
 	* engine update from GameEngine::update; cheap, and never blocks on the
 	* network - the request itself belongs to a worker thread. */
 extern void updateChromaKeyboard( void );
 
-/** Stop the worker thread.  Called from GameEngine::reset on the way out. */
+/** Stop the worker thread.  Called on the way out of GameEngine. */
 extern void shutdownChromaKeyboard( void );
+
+/** Turn the whole thing off for this run, from -nochroma or the option.  Has to
+	* be called before the first update or the worker is already up. */
+extern void disableChromaKeyboard( void );
 
 /** Which cell of the six-by-twenty-two Chroma grid a command bar key lights, or
 	* -1 for a key the map does not cover.  Only lower case letters and digits get
@@ -52,5 +58,14 @@ enum { CHROMA_POWER_SEGMENTS = 10, CHROMA_POWER_BROWNOUT = -1 };
 	* them while nothing is drawing, none at all for a player who has not built a
 	* power plant, and CHROMA_POWER_BROWNOUT once the draw has passed the supply. */
 extern Int chromaPowerSegments( Int production, Int consumption );
+
+/** How many lamps of a bar light for a fraction between zero and one.  Any
+	* fraction above zero lights at least one, so a bar that has started is never
+	* mistaken for a bar that has not. */
+extern Int chromaBarSegments( Real fraction, Int segments );
+
+/** How many lamps of the money bar light.  One lamp is a thousand credits, and
+	* the bar stops at its own length rather than wrapping. */
+extern Int chromaMoneySegments( UnsignedInt money, Int segments );
 
 #endif // __CHROMA_KEYBOARD_H_

@@ -33,6 +33,7 @@
 #include "Common/Version.h"
 #include "GameClient/TerrainVisual.h" // for TERRAIN_LOD_MIN definition
 #include "GameClient/GameText.h"
+#include "GameClient/ChromaKeyboard.h"
 #include "GameNetwork/GameInfo.h" // for the SlotState -autoskirmish hands the AI slots
 #include "GameNetwork/NetworkUtil.h" // for ResolveIP, which -lanip parses its address with
 #include "Common/FileSystem.h"
@@ -932,6 +933,20 @@ Int parseShadowMapBoth(char *args[], int num)
 		TheWritableGlobalData->m_shadowMap = TRUE;
 		TheWritableGlobalData->m_shadowMapOnly = FALSE;
 	}
+	return 1;
+}
+
+/* -nochroma: no Razer lighting for this run.
+
+	 The lighting owns a worker thread and three HTTP round trips every tenth of a second, all of
+	 them off the render thread, but a frame measurement wants none of that in the picture at all. */
+Int parseNoChroma(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_chromaLighting = FALSE;
+	}
+	disableChromaKeyboard();
 	return 1;
 }
 
@@ -2225,6 +2240,7 @@ static CommandLineParam params[] =
 	{ "-particlebounce", parseParticleBounce },
 	{ "-smoke", parseSmoke },
 	{ "-particlecap", parseParticleCap },
+	{ "-nochroma", parseNoChroma },
 	{ "-shadowmapreport", parseShadowMapReport },
 	{ "-shadowmapboth", parseShadowMapBoth },
 	{ "-noparticleshadows", parseNoParticleShadows },
