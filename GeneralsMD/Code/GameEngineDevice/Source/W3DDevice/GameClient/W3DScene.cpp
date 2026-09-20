@@ -52,6 +52,7 @@
 #include "W3DDevice/GameClient/W3DDynamicLight.h"
 #include "W3DDevice/GameClient/W3DGranny.h"
 #include "W3DDevice/GameClient/W3DShadow.h"
+#include "W3DDevice/GameClient/W3DVolumetricShadow.h"
 #include "W3DDevice/GameClient/W3DStatusCircle.h"
 #include "W3DDevice/GameClient/W3DCustomScene.h"
 #include "W3DDevice/GameClient/W3DShroud.h"
@@ -1145,6 +1146,13 @@ void RTS3DScene::Customized_Render( RenderInfoClass &rinfo )
 	RenderObjClass *terrainObject=NULL,*robj;
 	m_translucentObjectsCount = 0;	//start of new frame so no translucent objects
 	m_occludedObjectsCount = 0;
+
+	/* The sun's depth pass runs before the frame rather than with the shadows, because it flushes
+		 the mesh renderer and drains the sort lists: run in the middle of a frame it drew the
+		 helicopters' rotor discs into the shadow map instead of onto the screen, and they went
+		 missing from both.  Here nothing is queued yet.  SHADOW-MAP-PLAN.md phase 1. */
+	if (TheW3DVolumetricShadowManager != NULL)
+		TheW3DVolumetricShadowManager->renderShadowMap(rinfo.Camera);
 
 	Int localPlayerIndex = ThePlayerList ? ThePlayerList->getLocalPlayer()->getPlayerIndex() : 0;
 

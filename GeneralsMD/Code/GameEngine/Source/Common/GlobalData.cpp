@@ -679,6 +679,8 @@ GlobalData::GlobalData()
 	m_startAtMaxZoom = TRUE;		//open a game framed as wide as the player could zoom by hand
 	m_shadowsForProps = TRUE;				//likewise: scenery with no shadow of its own gets one
 	m_shadowsForParticles = TRUE;	//on by default: the shipped INI has no entry for it
+	m_shadowMap = FALSE;					//the sun's depth pass is off until something reads it
+	m_shadowMapReport = FALSE;
 	m_textureReductionFactor = -1;
 	m_enableBehindBuildingMarkers = TRUE;
 	m_scriptDebug = FALSE;

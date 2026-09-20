@@ -275,6 +275,28 @@ unsigned long long Direct3D11_Normal_Mapped_Draws()
 	return Active ? Backend.Normal_Mapped_Draw_Count() : 0;
 }
 
+bool Direct3D11_Begin_Shadow_Map(unsigned size)
+{
+	return Active ? Backend.Begin_Shadow_Map(size) : false;
+}
+
+void Direct3D11_End_Shadow_Map()
+{
+	if (Active) {
+		Backend.End_Shadow_Map();
+	}
+}
+
+bool Direct3D11_Shadow_Map_Bound()
+{
+	return Active ? Backend.Shadow_Map_Bound() : false;
+}
+
+std::string Direct3D11_Shadow_Map_Report()
+{
+	return Active ? Backend.Shadow_Map_Report() : std::string("no Direct3D 11 backend");
+}
+
 void Direct3D11_Mirror_Render_Target(struct IDirect3DSurface9 * surface)
 {
 	if (!Active) {

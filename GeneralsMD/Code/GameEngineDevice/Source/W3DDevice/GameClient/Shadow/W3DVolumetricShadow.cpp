@@ -57,10 +57,15 @@
 #include "WW3D2/statistics.h"
 #include "Common/PerfTimer.h"
 #include "GameLogic/TerrainLogic.h"
+#include "GameLogic/GameLogic.h"
 #include "WW3D2/DX8Caps.h"
 #include "GameClient/Drawable.h"
 #include "wwshade/shdmesh.h"
 #include "wwshade/shdsubmesh.h"
+#include "WW3D2/camera.h"
+#include "WW3D2/dx8renderer.h"
+#include "WW3D2/dx11runtime.h"
+#include "GameClient/View.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -90,6 +95,16 @@ const Real cosAngleToCare = cos ((0.2 * PI) / 180.0);	//1.5 degree difference
 #define MAX_SHADOW_EXTRUSION_UNDER_OBJECT_BEFORE_CLAMP	5.0f		//maximum amount that shadow can reach below object base (z-position) before we clamp it's length to reduce artifacts.
 #define SHADOW_SAMPLING_INTERVAL (MAP_XY_FACTOR * 2.0f)				//stepsize along ray used to find lowest point on terrain within shadow's reach.
 #define OVERHANGING_OBJECT_CLAMP_ANGLE	(80.0f/180.0f*PI)				//for objects that are right on a cliff edge, clamp light angle to cast a nearly vertical shadow.
+
+// The sun's depth buffer and the box it covers.  2048 texels over 1800 world units is about one
+// texel to the metre at the game's own scale, which is finer than the stencil edge it replaces;
+// the box is centred on what the tactical camera looks at and a zoom wider than it loses the
+// shadows at the edge of the screen before it loses anything the player is watching.
+#define SHADOW_MAP_TEXELS 2048
+#define SHADOW_MAP_HALF_WIDTH 900.0f
+#define SHADOW_MAP_SUN_DISTANCE 2000.0f
+#define SHADOW_MAP_NEAR_CLIP 10.0f
+#define SHADOW_MAP_FAR_CLIP 4000.0f
 
 //#define SV_DEBUG
 //#define SV_DEBUG_BOUNDS
@@ -3779,6 +3794,94 @@ void W3DVolumetricShadowManager::renderStencilShadows( void )
 DECLARE_PERF_TIMER(stencilShadows)
 DECLARE_PERF_TIMER(shadowVolumeUpdate)
 DECLARE_PERF_TIMER(shadowVolumeSubmit)
+
+/** The sun's depth pass.  The casters are the ones that cast a volume today, drawn again from the
+		sun into a depth buffer nothing samples yet, so this phase can be proved on its own: with it
+		off the frame is what it was, and with it on the map has the world in it and the frame is
+		still what it was.  The box is square and centred on what the tactical camera is looking at,
+		which is the ground the player can see; a cascade is only worth it once the box has to cover
+		more than one view.  SHADOW-MAP-PLAN.md phase 1. */
+void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
+{
+	if (!TheGlobalData->m_shadowMap || m_shadowList == NULL || TheTacticalView == NULL)
+		return;
+
+	if (!Direct3D11_Begin_Shadow_Map( SHADOW_MAP_TEXELS ))
+		return;
+
+	Coord3D look;
+	TheTacticalView->getPosition( &look );
+	const Vector3 focus( look.x, look.y, TheTerrainLogic->getGroundHeight( look.x, look.y ) );
+
+	Vector3 toSun = TheW3DShadowManager->getLightPosWorld( 0 );
+	toSun.Normalize();
+
+	CameraClass sun;
+	sun.Set_Projection_Type( CameraClass::ORTHO );
+	sun.Set_View_Plane( Vector2( -SHADOW_MAP_HALF_WIDTH, -SHADOW_MAP_HALF_WIDTH ),
+		Vector2( SHADOW_MAP_HALF_WIDTH, SHADOW_MAP_HALF_WIDTH ) );
+	sun.Set_Clip_Planes( SHADOW_MAP_NEAR_CLIP, SHADOW_MAP_FAR_CLIP );
+
+	Matrix3D transform;
+	transform.Look_At( focus + toSun * SHADOW_MAP_SUN_DISTANCE, focus, 0.0f );
+	sun.Set_Transform( transform );
+
+	Matrix4x4 projection;
+	sun.Get_D3D_Projection_Matrix( &projection );
+	DX8Wrapper::Set_Projection_Transform_With_Z_Bias( projection, SHADOW_MAP_NEAR_CLIP,
+		SHADOW_MAP_FAR_CLIP );
+	Matrix3D view;
+	transform.Get_Orthogonal_Inverse( view );
+	DX8Wrapper::Set_Transform( D3DTS_VIEW, view );
+
+	// Depth is the whole point of the pass and colour is the whole cost of it.
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_COLORWRITEENABLE, 0 );
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_ZENABLE, TRUE );
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_ZWRITEENABLE, TRUE );
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_ZFUNC, D3DCMP_LESSEQUAL );
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_ALPHABLENDENABLE, FALSE );
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILENABLE, FALSE );
+
+	RenderInfoClass sunInfo( sun );
+	Int casters = 0;
+	for (W3DVolumetricShadow *shadow = m_shadowList; shadow; shadow = shadow->m_next)
+	{
+		RenderObjClass *robj = shadow->getRenderObject();
+		if (robj == NULL || !robj->Is_Really_Visible() || !shadow->isRenderEnabled()
+			|| shadow->isInvisibleEnabled())
+			continue;
+
+		robj->Render( sunInfo );
+		++casters;
+	}
+	TheDX8MeshRenderer.Flush();
+
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_COLORWRITEENABLE,
+		D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE
+		| D3DCOLORWRITEENABLE_ALPHA );
+
+	Direct3D11_End_Shadow_Map();
+
+	// The frame's own camera, put back: the view, the projection and the viewport all went with the
+	// sun.  Without this everything drawn after the pass is drawn from the sun's seat, which is the
+	// whole picture rather than a corner of it.
+	sceneCamera.Apply();
+
+	// The report costs a full stall of the pipeline, so it is one line a second rather than one a
+	// frame: what it answers is whether the pass draws the world at all, and that does not change
+	// thirty times a second.
+	if (TheGlobalData->m_shadowMapReport && casters > 0)
+	{
+		static UnsignedInt nextReportFrame = 0;
+		const UnsignedInt frame = TheGameLogic ? TheGameLogic->getFrame() : 0;
+		if (frame >= nextReportFrame)
+		{
+			nextReportFrame = frame + LOGICFRAMES_PER_SECOND;
+			DEBUG_LOG(("SHADOWMAP: %d casters, %s\n", casters,
+				Direct3D11_Shadow_Map_Report().c_str()));
+		}
+	}
+}
 
 void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
 {

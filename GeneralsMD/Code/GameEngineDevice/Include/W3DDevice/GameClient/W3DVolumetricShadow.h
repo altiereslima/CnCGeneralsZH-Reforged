@@ -76,6 +76,10 @@ public:
 
 	// rendering
 	void renderShadows( Bool forceStencilFill );
+
+	/// Draw every caster into the sun's depth buffer, before the frame itself is drawn.  Nothing
+	/// reads that buffer yet; SHADOW-MAP-PLAN.md phase 2 is what makes it a shadow.
+	void renderShadowMap( CameraClass &sceneCamera );
 	void ReleaseResources(void);
 	Bool ReAcquireResources(void);
 
@@ -122,6 +126,7 @@ class W3DVolumetricShadow	: public Shadow
 		const W3DShadowGeometry *getGeometry(void) {return m_geometry;}
 
 		void setRenderObject( RenderObjClass	*robj) {assert(m_robj==NULL); m_robj=robj;}
+		RenderObjClass *getRenderObject( void ) {return m_robj;}	///< the mesh this shadow is of, for the sun's depth pass
  		void setRenderObjExtent ( Real extent) { m_robjExtent = extent; }
 
 		// called once per frame, updates shadow volume when necessary

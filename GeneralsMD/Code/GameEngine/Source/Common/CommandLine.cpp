@@ -917,6 +917,33 @@ Int parseParticleCap(char *args[], int num)
 	return 2;
 }
 
+/* -shadowmap: draw every shadow caster into the sun's depth buffer as well as its stencil volume.
+
+	 Nothing samples that buffer yet, so on its own this switch changes no pixel of the frame and
+	 costs a second draw of every caster.  That is deliberate: it makes the sun's camera, the box it
+	 covers and the depth pass provable on their own, before anything is read back out of it.
+	 -shadowmapreport then logs what the pass actually left in the buffer, which is the only thing
+	 that tells a pass that drew the world apart from a pass that drew nothing.  Direct3D 11 only;
+	 the map has no Direct3D 9 twin.  SHADOW-MAP-PLAN.md phase 1. */
+Int parseShadowMap(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_shadowMap = TRUE;
+	}
+	return 1;
+}
+
+Int parseShadowMapReport(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_shadowMap = TRUE;
+		TheWritableGlobalData->m_shadowMapReport = TRUE;
+	}
+	return 1;
+}
+
 /* -noparticleshadows: take the soft blob back off the ground under every particle cloud.
 
 	 ShadowsForParticles is on by default and the shipped INI has no entry for it, so without this
@@ -2143,6 +2170,8 @@ static CommandLineParam params[] =
 	{ "-particlebounce", parseParticleBounce },
 	{ "-smoke", parseSmoke },
 	{ "-particlecap", parseParticleCap },
+	{ "-shadowmap", parseShadowMap },
+	{ "-shadowmapreport", parseShadowMapReport },
 	{ "-noparticleshadows", parseNoParticleShadows },
 	{ "-quickstart", parseQuickStart },
 

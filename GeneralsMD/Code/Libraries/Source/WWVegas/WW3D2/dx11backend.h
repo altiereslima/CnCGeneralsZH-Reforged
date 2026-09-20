@@ -150,6 +150,20 @@ public:
 	// size a target comes in and kept; the engine uses two or three of them in a match.
 	void Set_Render_Target(ID3D11RenderTargetView * target);
 
+	// The sun's own depth buffer, which the caster pass draws into and everything that receives a
+	// shadow samples.  Begin binds it as the only output, takes the viewport with it and clears it;
+	// End puts the back buffer and the viewport back.  The texture is made once, at the first size
+	// asked for.  SHADOW-MAP-PLAN.md phase 1.
+	bool Begin_Shadow_Map(unsigned size);
+	void End_Shadow_Map();
+	bool Shadow_Map_Bound() const { return ShadowMapBound; }
+	ID3D11ShaderResourceView * Shadow_Map() const { return ShadowMapTexture; }
+
+	// What is in the map, read back through a staging copy: how much of it was drawn into and how
+	// near the nearest thing is.  A caster pass that drew nothing leaves a map that is all one
+	// value, and no draw count tells that apart from a pass that drew the world.
+	std::string Shadow_Map_Report();
+
 	// The two draws.  Both resolve the shadow state into a pipeline first, and both return false
 	// when some part of that state has no D3D11 answer, which leaves the draw undone rather than
 	// drawn wrongly.
@@ -311,6 +325,21 @@ private:
 	// What the viewport is, so a pre-transformed vertex can be put back into clip space.
 	unsigned ViewportWidth;
 	unsigned ViewportHeight;
+
+	// The sun's depth buffer and the two views of it: one to draw into, one to sample.  The
+	// viewport the frame was using is kept while it is bound, because the map is square and the
+	// screen is not.
+	ID3D11Texture2D * ShadowMapSurface;
+	ID3D11DepthStencilView * ShadowMapDepth;
+	ID3D11ShaderResourceView * ShadowMapTexture;
+	unsigned ShadowMapSize;
+	bool ShadowMapBound;
+	unsigned ShadowMapSavedWidth;
+	unsigned ShadowMapSavedHeight;
+	// What the frame was drawing into when the pass took the device.  Almost never the back buffer:
+	// the scene goes into a texture and the post chain puts it on the screen, so restoring the back
+	// buffer here left the rest of the frame painting somewhere nobody shows.
+	ID3D11RenderTargetView * ShadowMapSavedTarget;
 
 	float MaterialAmbient[4];
 	float MaterialDiffuse[4];

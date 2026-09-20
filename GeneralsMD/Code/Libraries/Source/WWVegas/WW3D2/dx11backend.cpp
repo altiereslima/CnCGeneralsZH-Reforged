@@ -200,6 +200,14 @@ DX11BackendClass::DX11BackendClass()
 	, TargetCopy(NULL)
 	, TargetCopyView(NULL)
 	, NormalMap(NULL)
+	, ShadowMapSurface(NULL)
+	, ShadowMapDepth(NULL)
+	, ShadowMapTexture(NULL)
+	, ShadowMapSize(0)
+	, ShadowMapBound(false)
+	, ShadowMapSavedWidth(0)
+	, ShadowMapSavedHeight(0)
+	, ShadowMapSavedTarget(NULL)
 	, NormalMappedDraws(0)
 	, DrawsMade(0)
 	, DrawsRefused(0)
@@ -374,7 +382,170 @@ void DX11BackendClass::Shutdown()
 		TargetCopyView = NULL;
 		TargetCopy = NULL;
 	}
+	if (ShadowMapTexture != NULL) {
+		ShadowMapTexture->Release();
+		ShadowMapTexture = NULL;
+	}
+	if (ShadowMapDepth != NULL) {
+		ShadowMapDepth->Release();
+		ShadowMapDepth = NULL;
+	}
+	if (ShadowMapSurface != NULL) {
+		ShadowMapSurface->Release();
+		ShadowMapSurface = NULL;
+	}
+	ShadowMapSize = 0;
+	ShadowMapBound = false;
 	Device = NULL;
+}
+
+/** The sun's depth buffer.  One surface with two views of it, because a depth buffer that is also
+		sampled cannot be made as a depth format: the surface is typeless and each view says how its
+		bits are to be read.  Made at the first size asked for and kept at that size. */
+bool DX11BackendClass::Begin_Shadow_Map(unsigned size)
+{
+	if (Device == NULL || size == 0 || ShadowMapBound) {
+		return false;
+	}
+
+	if (ShadowMapSurface == NULL) {
+		D3D11_TEXTURE2D_DESC description;
+		memset(&description, 0, sizeof(description));
+		description.Width = size;
+		description.Height = size;
+		description.MipLevels = 1;
+		description.ArraySize = 1;
+		description.Format = DXGI_FORMAT_R24G8_TYPELESS;
+		description.SampleDesc.Count = 1;
+		description.Usage = D3D11_USAGE_DEFAULT;
+		description.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+		if (FAILED(Device->Get_Device()->CreateTexture2D(&description, NULL, &ShadowMapSurface))) {
+			Note_Refusal("the device refused the sun's depth buffer");
+			return false;
+		}
+
+		D3D11_DEPTH_STENCIL_VIEW_DESC depth_description;
+		memset(&depth_description, 0, sizeof(depth_description));
+		depth_description.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+		depth_description.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+		if (FAILED(Device->Get_Device()->CreateDepthStencilView(ShadowMapSurface, &depth_description,
+				&ShadowMapDepth))) {
+			Note_Refusal("the device refused a depth view of the sun's depth buffer");
+			ShadowMapSurface->Release();
+			ShadowMapSurface = NULL;
+			return false;
+		}
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC texture_description;
+		memset(&texture_description, 0, sizeof(texture_description));
+		texture_description.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+		texture_description.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		texture_description.Texture2D.MipLevels = 1;
+		if (FAILED(Device->Get_Device()->CreateShaderResourceView(ShadowMapSurface,
+				&texture_description, &ShadowMapTexture))) {
+			Note_Refusal("the device refused a texture view of the sun's depth buffer");
+			ShadowMapDepth->Release();
+			ShadowMapDepth = NULL;
+			ShadowMapSurface->Release();
+			ShadowMapSurface = NULL;
+			return false;
+		}
+
+		ShadowMapSize = size;
+	}
+
+	// The map cannot be read and written at once, and the frame before this one left it bound to
+	// whichever sampler reads it.
+	ID3D11ShaderResourceView * const none[DX11_BACKEND_TEXTURE_STAGES] = { NULL };
+	Device->Get_Context()->PSSetShaderResources(0, DX11_BACKEND_TEXTURE_STAGES, none);
+
+	Device->Get_Context()->OMSetRenderTargets(0, NULL, ShadowMapDepth);
+	Device->Get_Context()->ClearDepthStencilView(ShadowMapDepth,
+		D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+
+	ShadowMapSavedWidth = ViewportWidth;
+	ShadowMapSavedHeight = ViewportHeight;
+	ShadowMapSavedTarget = CurrentTarget;
+	ShadowMapBound = true;
+	Set_Viewport(0, 0, ShadowMapSize, ShadowMapSize);
+	Forget_Bindings();
+	return true;
+}
+
+void DX11BackendClass::End_Shadow_Map()
+{
+	if (!ShadowMapBound) {
+		return;
+	}
+
+	ShadowMapBound = false;
+	// Back to whatever the frame was drawing into, which is a texture the post chain shows and not
+	// the back buffer.
+	Set_Render_Target(ShadowMapSavedTarget);
+	ShadowMapSavedTarget = NULL;
+	if (ShadowMapSavedWidth != 0 && ShadowMapSavedHeight != 0) {
+		Set_Viewport(0, 0, ShadowMapSavedWidth, ShadowMapSavedHeight);
+	}
+	Forget_Bindings();
+}
+
+/** What is in the map, read back once.  A caster pass that drew nothing leaves every texel at the
+		clear value, which no draw count tells apart from a pass that drew the whole world. */
+std::string DX11BackendClass::Shadow_Map_Report()
+{
+	if (ShadowMapSurface == NULL) {
+		return "no shadow map";
+	}
+
+	D3D11_TEXTURE2D_DESC description;
+	ShadowMapSurface->GetDesc(&description);
+	description.Usage = D3D11_USAGE_STAGING;
+	description.BindFlags = 0;
+	description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+	description.MiscFlags = 0;
+
+	ID3D11Texture2D * staging = NULL;
+	if (FAILED(Device->Get_Device()->CreateTexture2D(&description, NULL, &staging))) {
+		return "no staging copy of the shadow map";
+	}
+
+	Device->Get_Context()->CopyResource(staging, ShadowMapSurface);
+
+	std::string answer = "unreadable shadow map";
+	D3D11_MAPPED_SUBRESOURCE mapped;
+	if (SUCCEEDED(Device->Get_Context()->Map(staging, 0, D3D11_MAP_READ, 0, &mapped))) {
+		const unsigned DEPTH_BITS = 24;
+		const float FURTHEST = (float)((1u << DEPTH_BITS) - 1);
+		unsigned drawn = 0;
+		float nearest = 1.0f;
+		double sum = 0.0;
+		for (unsigned row = 0; row < description.Height; ++row) {
+			const unsigned * line = (const unsigned *)((const unsigned char *)mapped.pData
+				+ row * mapped.RowPitch);
+			for (unsigned column = 0; column < description.Width; ++column) {
+				const float depth = (float)(line[column] & 0x00FFFFFF) / FURTHEST;
+				if (depth < 1.0f) {
+					++drawn;
+					sum += depth;
+					if (depth < nearest) {
+						nearest = depth;
+					}
+				}
+			}
+		}
+		Device->Get_Context()->Unmap(staging, 0);
+
+		char line[160];
+		const unsigned texels = description.Width * description.Height;
+		snprintf(line, sizeof(line),
+			"%ux%u, %u texels drawn into (%.1f%%), nearest %.4f, mean %.4f",
+			description.Width, description.Height, drawn, 100.0f * (float)drawn / (float)texels,
+			nearest, (drawn > 0) ? sum / drawn : 1.0);
+		answer = line;
+	}
+
+	staging->Release();
+	return answer;
 }
 
 void DX11BackendClass::Set_Render_State(D3DRENDERSTATETYPE state, DWORD value)
