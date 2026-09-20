@@ -44,4 +44,13 @@ extern void shutdownChromaKeyboard( void );
 	* an answer, which is all the command bar ever binds. */
 extern Int chromaCellForKey( char key );
 
+/// How many keys the power meter spans, and what it answers once consumption has
+/// passed production and the whole row goes to blinking red instead.
+enum { CHROMA_POWER_SEGMENTS = 10, CHROMA_POWER_BROWNOUT = -1 };
+
+/** How many of those keys light for a production and consumption pair: all of
+	* them while nothing is drawing, none at all for a player who has not built a
+	* power plant, and CHROMA_POWER_BROWNOUT once the draw has passed the supply. */
+extern Int chromaPowerSegments( Int production, Int consumption );
+
 #endif // __CHROMA_KEYBOARD_H_

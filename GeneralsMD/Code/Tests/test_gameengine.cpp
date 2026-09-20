@@ -13043,6 +13043,22 @@ TEST(chroma_keys_land_on_the_razer_grid)
 	CHECK_EQ(chromaCellForKey(' '), -1);
 }
 
+// The digit row is a tank that empties: ten green while nothing draws, fewer as
+// the draw catches the supply, and the row goes to blinking red past it.
+TEST(chroma_power_meter_empties_as_the_draw_catches_the_supply)
+{
+	CHECK_EQ(chromaPowerSegments(0, 0), 0);
+	CHECK_EQ(chromaPowerSegments(0, 5), 0);
+	CHECK_EQ(chromaPowerSegments(10, 0), 10);
+	CHECK_EQ(chromaPowerSegments(10, 5), 5);
+	CHECK_EQ(chromaPowerSegments(10, 9), 1);
+	// Every scrap of headroom keeps a key alight, so the row never reads empty
+	// while the base is still fully powered.
+	CHECK_EQ(chromaPowerSegments(100, 99), 1);
+	CHECK_EQ(chromaPowerSegments(10, 10), 0);
+	CHECK_EQ(chromaPowerSegments(10, 11), CHROMA_POWER_BROWNOUT);
+}
+
 #include "test_camera_behavior.inc"
 #include "test_production_input.inc"
 #include "test_minimap_input.inc"

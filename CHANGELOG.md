@@ -642,12 +642,14 @@ found and fixed â€” EA's own, not port damage.**
 - Your allies see the smoke and their radar blinks at the spot, and the message area says who sent it. Three seconds later the smoke has cleared, so the call you made a minute ago is never still standing next to the one you are making now. Enemies see none of it.
 - One signal a second per player. Hammering the key gets you the first puff and nothing else, and a teammate who tries it cannot bury your screen in smoke either, because every machine in the game holds everyone to the same limit.
 
-## A Razer keyboard plays along
+## Your Razer hardware plays along
 
-- The keyboard sits in your own player colour for the whole match, dim enough to be a bed rather than a light show.
-- The command bar is on the keys. Every letter and digit the bar has bound to a button lights up while that button can be pressed, and goes dark the moment it cannot - the moment you cannot afford it, or the thing that builds it is busy. What you can buy is readable without looking away from the fight.
-- The board pulses red while something is shooting at your base, and settles again four seconds after the last hit.
-- Nothing to install and nothing to turn on. If Synapse is running the lighting is there; if it is not, the game never mentions it.
+- The keyboard, the mouse and the mousepad all sit in your own player colour for the whole match, dim enough to be a bed rather than a light show.
+- The command bar is on the letter keys. Every letter the bar has bound to a button lights up while that button can be pressed, and goes dark the moment it cannot - the moment you cannot afford it, or the thing that builds it is busy. What you can buy is readable without looking away from the fight.
+- The number row is your power. Ten green keys while nothing is drawing on it, fewer as the base fills up, and the whole row blinking red the moment consumption passes production - the brownout that stops your radar and your defences, announced before you have gone looking for the meter. A faction with no power at all leaves the row dark rather than pretending to be full.
+- The numpad blinks white when a superweapon of yours is ready to fire, and the mousepad fills up as the nearest one charges, so you can see the particle cannon coming without opening anything.
+- Everything pulses red while something is shooting at your base, and settles again four seconds after the last hit. The mouse under your hand pulses with it, which is the one thing you cannot miss.
+- Nothing to install and nothing to turn on. If Synapse is running the lighting is there; if it is not, the game never mentions it. A device you do not own is simply skipped.
 
 ## The options screen has pages
 
