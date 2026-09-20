@@ -74,7 +74,11 @@ typedef struct BINK
 	unsigned int FrameRateDiv;    /* frame rate denominator */
 } BINK, *HBINK;
 
-typedef int (__stdcall *BINKSNDSYSOPEN)(unsigned int param);
+/* The parameter carries a DirectSound object pointer, so it is pointer sized.  On Win32 that is
+   still four bytes, which is what the retail DLL's _BinkSetSoundSystem@8 expects. */
+#include <stddef.h>
+typedef size_t BINKSNDPARAM;
+typedef int (__stdcall *BINKSNDSYSOPEN)(BINKSNDPARAM param);
 
 HBINK __stdcall BinkOpen(const char *name, unsigned int flags);
 void  __stdcall BinkClose(HBINK bnk);
@@ -87,11 +91,11 @@ int   __stdcall BinkCopyToBuffer(HBINK bnk, void *dest, int destpitch,
                                  unsigned int desty, unsigned int flags);
 int   __stdcall BinkSetVolume(HBINK bnk, unsigned int trackid, int volume);
 void  __stdcall BinkSetSoundTrack(unsigned int total_tracks, unsigned int *tracks);
-int   __stdcall BinkSetSoundSystem(BINKSNDSYSOPEN open, unsigned int param);
-int   __stdcall BinkOpenDirectSound(unsigned int param);
+int   __stdcall BinkSetSoundSystem(BINKSNDSYSOPEN open, BINKSNDPARAM param);
+int   __stdcall BinkOpenDirectSound(BINKSNDPARAM param);
 
 #define BinkSoundUseDirectSound(lpDS) \
-	BinkSetSoundSystem((BINKSNDSYSOPEN)BinkOpenDirectSound, (unsigned int)(lpDS))
+	BinkSetSoundSystem((BINKSNDSYSOPEN)BinkOpenDirectSound, (BINKSNDPARAM)(lpDS))
 
 #ifdef __cplusplus
 }

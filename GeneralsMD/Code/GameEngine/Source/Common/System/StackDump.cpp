@@ -39,7 +39,7 @@
 //*****************************************************************************
 BOOL InitSymbolInfo(void);
 void UninitSymbolInfo(void);
-void MakeStackTrace(DWORD myeip,DWORD myesp,DWORD myebp, int skipFrames, void (*callback)(const char*));
+void MakeStackTrace(DWORD_PTR myeip,DWORD_PTR myesp,DWORD_PTR myebp, int skipFrames, void (*callback)(const char*));
 void GetFunctionDetails(void *pointer, char*name, size_t nameSize, char*filename, size_t filenameSize, unsigned int* linenumber, unsigned int* address);
 void WriteStackLine(void*address, void (*callback)(const char*));
 
@@ -51,9 +51,9 @@ static Bool gsInit=FALSE;
 
 BOOL (__stdcall *gsSymGetLineFromAddr)(
 		IN  HANDLE                  hProcess,
-		IN  DWORD                   dwAddr,
+		IN  DWORD64                 dwAddr,
 		OUT PDWORD                  pdwDisplacement,
-		OUT PIMAGEHLP_LINE          Line
+		OUT PIMAGEHLP_LINE64        Line
 			);
 
 
@@ -76,19 +76,16 @@ void StackDump(void (*callback)(const char*))
 
 	InitSymbolInfo();
 
-	DWORD myeip,myesp,myebp;
+	DWORD_PTR myeip,myesp,myebp;
 
-_asm
-{
-MYEIP1:
- mov eax, MYEIP1
- mov dword ptr [myeip] , eax
- mov eax, esp
- mov dword ptr [myesp] , eax
- mov eax, ebp
- mov dword ptr [myebp] , eax
-}
-
+	// The register set to start the walk from.
+	CONTEXT here;
+	memset(&here, 0, sizeof(here));
+	here.ContextFlags = CONTEXT_FULL;
+	RtlCaptureContext(&here);
+	myeip = here.Rip;
+	myesp = here.Rsp;
+	myebp = here.Rbp;
 
 	MakeStackTrace(myeip,myesp,myebp, 2, callback);
 }
@@ -96,7 +93,7 @@ MYEIP1:
 
 //*****************************************************************************
 //*****************************************************************************
-void StackDumpFromContext(DWORD eip,DWORD esp,DWORD ebp, void (*callback)(const char*))
+void StackDumpFromContext(DWORD_PTR eip,DWORD_PTR esp,DWORD_PTR ebp, void (*callback)(const char*))
 {
 	if (callback == NULL) 
 	{
@@ -124,8 +121,8 @@ BOOL InitSymbolInfo()
 	// We use GetProcAddress to stop link failures at dll loadup
 	HINSTANCE hInstDebugHlp = GetModuleHandle("dbghelp.dll");
 
-	gsSymGetLineFromAddr = (BOOL (__stdcall *)(	IN  HANDLE,IN  DWORD,OUT PDWORD,OUT PIMAGEHLP_LINE))
-							GetProcAddress(hInstDebugHlp , "SymGetLineFromAddr");
+	gsSymGetLineFromAddr = (BOOL (__stdcall *)(	IN  HANDLE,IN  DWORD64,OUT PDWORD,OUT PIMAGEHLP_LINE64))
+							GetProcAddress(hInstDebugHlp , "SymGetLineFromAddr64");
 
 	::SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME | SYMOPT_LOAD_LINES | SYMOPT_OMAP_FIND_NEAREST);
 
@@ -158,11 +155,20 @@ void UninitSymbolInfo(void)
 
 //*****************************************************************************
 //*****************************************************************************
-void MakeStackTrace(DWORD myeip,DWORD myesp,DWORD myebp, int skipFrames, void (*callback)(const char*))
+void MakeStackTrace(DWORD_PTR myeip,DWORD_PTR myesp,DWORD_PTR myebp, int skipFrames, void (*callback)(const char*))
 {
-// STACKFRAME/StackWalk (the 32-bit-only originals) stop after the first frame or two on a
-// current dbghelp.dll (same failure as debug_stack.cpp: ERROR_PARTIAL_COPY), which left every
-// exception dump with a one-line "stack". StackWalk64 with the matching 64-bit callbacks walks.
+// The unwind comes from the exception tables rather than a frame pointer chain, and StackWalk64
+// reads and writes the whole register set to do it: a NULL context walks nowhere.  The three
+// addresses are all a caller hands over, so the rest of the context is captured here and
+// overwritten with them.
+const DWORD machineType = IMAGE_FILE_MACHINE_AMD64;
+CONTEXT walkContext;
+memset(&walkContext, 0, sizeof(walkContext));
+walkContext.ContextFlags = CONTEXT_FULL;
+RtlCaptureContext(&walkContext);
+walkContext.Rip = myeip;
+walkContext.Rsp = myesp;
+walkContext.Rbp = myebp;
 STACKFRAME64    stack_frame;
 BOOL            b_ret = TRUE;
 
@@ -199,11 +205,11 @@ stack_frame.AddrFrame.Offset = myebp;
 			unsigned int skip = skipFrames;
 			while (b_ret&&skip)
 			{
-					b_ret = StackWalk64(    IMAGE_FILE_MACHINE_I386,
+					b_ret = StackWalk64(    machineType,
 											process,
 											thread,
 											&stack_frame,
-											NULL, //&gsContext,
+											&walkContext,
 											NULL,
 											SymFunctionTableAccess64,
 											SymGetModuleBase64,
@@ -215,18 +221,18 @@ stack_frame.AddrFrame.Offset = myebp;
 			while(b_ret&&skip)
 			{
 
-					b_ret = StackWalk64(    IMAGE_FILE_MACHINE_I386,
+					b_ret = StackWalk64(    machineType,
 											process,
 											thread,
 											&stack_frame,
-											NULL, //&gsContext,
+											&walkContext,
 											NULL,
 											SymFunctionTableAccess64,
 											SymGetModuleBase64,
 											NULL);
-					
 
-					
+
+
 					if (b_ret) WriteStackLine((void *) stack_frame.AddrPC.Offset, callback);
 					skip--;
 			}
@@ -259,18 +265,18 @@ void GetFunctionDetails(void *pointer, char*name, size_t nameSize, char*filename
 		*address = 0xFFFFFFFF;
 	}
 
-	ULONG displacement = 0;
+	DWORD64 displacement = 0;
 
     HANDLE process = ::GetCurrentProcess();
 
-    char symbol_buffer[512 + sizeof(IMAGEHLP_SYMBOL)];
+    char symbol_buffer[512 + sizeof(IMAGEHLP_SYMBOL64)];
     memset(symbol_buffer, 0, sizeof(symbol_buffer));
 
-    PIMAGEHLP_SYMBOL psymbol = (PIMAGEHLP_SYMBOL)symbol_buffer;
+    PIMAGEHLP_SYMBOL64 psymbol = (PIMAGEHLP_SYMBOL64)symbol_buffer;
     psymbol->SizeOfStruct = sizeof(symbol_buffer);
     psymbol->MaxNameLength = 512;
 
-    if (SymGetSymFromAddr(process, (DWORD) pointer, &displacement, psymbol))
+    if (SymGetSymFromAddr64(process, (DWORD64)(DWORD_PTR) pointer, &displacement, psymbol))
     {
 		if (name)
 		{
@@ -283,12 +289,12 @@ void GetFunctionDetails(void *pointer, char*name, size_t nameSize, char*filename
 		{
 			// Unsupported for win95/98 at least with my current dbghelp.dll
 
-			IMAGEHLP_LINE line;
+			IMAGEHLP_LINE64 line;
 			memset(&line,0,sizeof(line));
 			line.SizeOfStruct = sizeof(line);
 
-		
-			if (gsSymGetLineFromAddr(process, (DWORD) pointer, &displacement, &line))
+			DWORD lineDisplacement = 0;
+			if (gsSymGetLineFromAddr(process, (DWORD64)(DWORD_PTR) pointer, &lineDisplacement, &line))
 			{
 				if (filename)
 				{
@@ -343,7 +349,15 @@ void FillStackAddresses(void**addresses, unsigned int count, unsigned int skip)
 	// BackTrace does the same job in one call and needs no symbols to do it; the
 	// +1 drops this function's own frame, which the old code also skipped.
 	memset(addresses, 0, count * sizeof(void *));
-	::CaptureStackBackTrace(skip + 1, count, addresses, NULL);
+	const USHORT captured = ::CaptureStackBackTrace(skip + 1, count, addresses, NULL);
+
+	// Reading the count back keeps the call from being the last thing this function does: as a tail
+	// call it drops this frame, and the +1 above then skips the caller's frame instead of this one,
+	// which is how a stack dump came back starting one level too high.
+	if (captured == 0 && count > 0)
+	{
+		addresses[0] = NULL;
+	}
 }
 
 
@@ -528,9 +542,13 @@ void DumpExceptionInfo( unsigned int u, EXCEPTION_POINTERS* e_info )
 	/*
 	** Dump the registers.
 	*/
-	DOUBLE_DEBUG ( ( "Eip:%08X\tEsp:%08X\tEbp:%08X\n", context->Eip, context->Esp, context->Ebp));
-	DOUBLE_DEBUG ( ( "Eax:%08X\tEbx:%08X\tEcx:%08X\n", context->Eax, context->Ebx, context->Ecx));
-	DOUBLE_DEBUG ( ( "Edx:%08X\tEsi:%08X\tEdi:%08X\n", context->Edx, context->Esi, context->Edi));
+	const DWORD_PTR faultPC = context->Rip;
+	DOUBLE_DEBUG ( ( "Rip:%016llX\tRsp:%016llX\tRbp:%016llX\n", context->Rip, context->Rsp, context->Rbp));
+	DOUBLE_DEBUG ( ( "Rax:%016llX\tRbx:%016llX\tRcx:%016llX\n", context->Rax, context->Rbx, context->Rcx));
+	DOUBLE_DEBUG ( ( "Rdx:%016llX\tRsi:%016llX\tRdi:%016llX\n", context->Rdx, context->Rsi, context->Rdi));
+	DOUBLE_DEBUG ( ( "R8 :%016llX\tR9 :%016llX\tR10:%016llX\n", context->R8, context->R9, context->R10));
+	DOUBLE_DEBUG ( ( "R11:%016llX\tR12:%016llX\tR13:%016llX\n", context->R11, context->R12, context->R13));
+	DOUBLE_DEBUG ( ( "R14:%016llX\tR15:%016llX\n", context->R14, context->R15));
 	DOUBLE_DEBUG ( ( "EFlags:%08X \n", context->EFlags));
 	DOUBLE_DEBUG ( ( "CS:%04x  SS:%04x  DS:%04x  ES:%04x  FS:%04x  GS:%04x\n", context->SegCs, context->SegSs, context->SegDs, context->SegEs, context->SegFs, context->SegGs));
 
@@ -539,9 +557,9 @@ void DumpExceptionInfo( unsigned int u, EXCEPTION_POINTERS* e_info )
 	*/
 	char scrap[512];
 	DOUBLE_DEBUG ( ("EIP bytes dump...\n"));
-	wsprintf (scrap, "\nBytes at CS:EIP (%08X)  : ", context->Eip);
+	wsprintf (scrap, "\nBytes at CS:EIP (%p)  : ", (void *)faultPC);
 
-	unsigned char *eip_ptr = (unsigned char *) (context->Eip);
+	unsigned char *eip_ptr = (unsigned char *) faultPC;
 	char bytestr[32];
 
 	for (int c = 0 ; c < 32 ; c++)
@@ -566,7 +584,7 @@ void DumpExceptionInfo( unsigned int u, EXCEPTION_POINTERS* e_info )
 	** already in the log by this point, so a fault in here costs the stack and nothing else.
 	*/
 	DOUBLE_DEBUG (("\nStack Dump:\n"));
-	StackDumpFromContext(context->Eip, context->Esp, context->Ebp, NULL);
+	StackDumpFromContext(context->Rip, context->Rsp, context->Rbp, NULL);
 
   DEBUG_LOG(( "********** END EXCEPTION DUMP ****************\n\n" ));
 }																									 

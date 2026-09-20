@@ -1117,6 +1117,21 @@ found and fixed â€” EA's own, not port damage.**
 
 - The first soldier out of your barracks cost eighteen milliseconds of a thirty-three millisecond frame. A unit's models were read off the disc the moment one of its kind first appeared, and that read landed on whatever frame the unit happened to walk out on. So did the first war factory, the first supply centre, the first of everything. That is why the opening of a match was the part that jerked: the opening of a match is nothing but things appearing for the first time. Everything a match can put on the field is now read during the loading screen, which costs about three seconds there and takes the hitches out of the game. EA wrote that loading pass and left it switched off; the code carries their own comment saying it exists "so that we don't have big pauses when building those objects".
 
+## The game is 64-bit
+
+- The memory ceiling is gone. A 2003 game is a 32-bit program and can never hold more than 4GB of
+  memory no matter how much your machine has, and this one was already at half of that in an
+  eight-player match on a large map: past the line it does not say so, it stalls for a third of a
+  second at a time and then dies. The 64-bit build has no such line.
+- Sound and movies come from the game itself now. The 2003 sound and video libraries are 32-bit and
+  cannot be loaded by a 64-bit program at all, so the build carries its own: Windows' own mixer for
+  sound, and a decoder for the movies that reads the same files the game has always shipped. Nothing
+  about what you hear or watch changes, and the two old libraries are no longer in the download.
+- Your replays still play and your matches still join. The old 32-bit build and this one work out
+  the same game, to the digit: the same match played by both, 3000 frames of computer against
+  computer, ends on the same world with the same checksum. That is what the change was measured
+  against before the 32-bit build was retired.
+
 ## Sound, video, and getting it to start at all
 
 - Audio is real, through the audio library the retail game ships with.

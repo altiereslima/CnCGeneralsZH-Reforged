@@ -38,7 +38,9 @@ void StackDump(void (*callback)(const char*));
 
 // Writes a stackdump (provide a callback : gets called per line)
 // If callback is NULL then will write using OuputDebugString
-void StackDumpFromContext(DWORD eip,DWORD esp,DWORD ebp, void (*callback)(const char*));
+// The three are the instruction, stack and frame pointers of the context to walk, pointer-wide so
+// the same call carries an x64 Rip/Rsp/Rbp.
+void StackDumpFromContext(DWORD_PTR eip,DWORD_PTR esp,DWORD_PTR ebp, void (*callback)(const char*));
 
 // Gets count* addresses from the current stack
 void FillStackAddresses(void**addresses, unsigned int count, unsigned int skip = 0);

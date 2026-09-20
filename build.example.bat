@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 
-rem Build C&C Generals Zero Hour (Win32 x86 only -- x64 is rejected by design).
+rem Build C&C Generals Zero Hour (x64 by default; set PLATFORM=Win32 for the 32-bit build).
 rem
 rem   build.bat                 configure (if needed) + build Release
 rem   build.bat Debug           build another config (Release|RelWithDebInfo|Debug)
@@ -23,9 +23,10 @@ set "CMAKE="
 rem Visual Studio editions to probe for that shipped cmake, in order.
 set "VS_EDITIONS=Community Professional Enterprise BuildTools"
 
-rem CMake generator. Win32 x86 only -- x64 is rejected by the CMakeLists on purpose.
+rem CMake generator. x64 is the shipping build; Win32 still configures and is the reference the
+rem x64 picture and simulation are compared against.
 set "GENERATOR=Visual Studio 17 2022"
-set "PLATFORM=Win32"
+set "PLATFORM=x64"
 
 rem Config used when the command line does not name one.
 set "DEFAULT_CONFIG=Release"
@@ -37,7 +38,8 @@ rem --------------------------- END MACHINE SETTINGS ---------------------------
 
 set "ROOT=%~dp0"
 set "SRC=%ROOT%GeneralsMD\Code"
-if not defined BUILD set "BUILD=%ROOT%build"
+rem One tree per platform, so the two can sit side by side: build64\ and build\.
+if not defined BUILD if /i "%PLATFORM%"=="x64" (set "BUILD=%ROOT%build64") else (set "BUILD=%ROOT%build")
 set "CONFIG=%~1"
 set "ARG2=%~2"
 

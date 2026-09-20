@@ -36,6 +36,23 @@
 //#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
 #endif
 
+/*
+	A 64-bit process reads HKLM\SOFTWARE natively, and the game's installers are 32-bit: what they
+	wrote is under HKLM\SOFTWARE\WOW6432Node, which the native view does not show.  So every read
+	asks for the native view first and the 32-bit one after it, which is where an install path
+	written by Steam's copy of the game actually is.  On Win32 the second open is the same key as
+	the first and costs nothing.
+*/
+static int openForRead(HKEY root, const char *path, HKEY *handle)
+{
+	int returnValue = RegOpenKeyEx( root, path, 0, KEY_READ, handle );
+	if (returnValue != ERROR_SUCCESS)
+	{
+		returnValue = RegOpenKeyEx( root, path, 0, KEY_READ | KEY_WOW64_32KEY, handle );
+	}
+	return returnValue;
+}
+
 Bool  getStringFromRegistry(HKEY root, AsciiString path, AsciiString key, AsciiString& val)
 {
 	HKEY handle;
@@ -44,7 +61,7 @@ Bool  getStringFromRegistry(HKEY root, AsciiString path, AsciiString key, AsciiS
 	unsigned long type;
 	int returnValue;
 
-	if ((returnValue = RegOpenKeyEx( root, path.str(), 0, KEY_READ, &handle )) == ERROR_SUCCESS)
+	if ((returnValue = openForRead( root, path.str(), &handle )) == ERROR_SUCCESS)
 	{
 		returnValue = RegQueryValueEx(handle, key.str(), NULL, &type, (unsigned char *) &buffer, &size);
 		RegCloseKey( handle );
@@ -67,7 +84,7 @@ Bool getUnsignedIntFromRegistry(HKEY root, AsciiString path, AsciiString key, Un
 	unsigned long type;
 	int returnValue;
 
-	if ((returnValue = RegOpenKeyEx( root, path.str(), 0, KEY_READ, &handle )) == ERROR_SUCCESS)
+	if ((returnValue = openForRead( root, path.str(), &handle )) == ERROR_SUCCESS)
 	{
 		returnValue = RegQueryValueEx(handle, key.str(), NULL, &type, (unsigned char *) &buffer, &size);
 		RegCloseKey( handle );

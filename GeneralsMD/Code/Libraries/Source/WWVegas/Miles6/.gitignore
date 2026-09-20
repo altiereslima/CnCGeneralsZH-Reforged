@@ -5,13 +5,11 @@
 # ...and our own hand-written Miles declarations (not EA/RAD code, so they are
 # committed: the real Miles SDK is binary-only and absent, and a fresh clone
 # cannot re-fetch files we wrote ourselves).  MSS/MSS.h is the one true header
-# (reconstructed API surface); Mss.h and stub/mss/mss.h just forward to it.
+# (reconstructed API surface) and Mss.h just forwards to it; xaudio2/ is that
+# API implemented over XAudio2 and FFmpeg, which is what the game links.
 !include/
 !include/Mss.h
 !include/MSS/
 !include/MSS/MSS.h
-!stub/
-!stub/mss/
-!stub/mss/mss.h
-# stub/miles.c, stub/miles.def, stub/cleanup.c stay unvendored: they are
-# re-fetched from Thyme (see CLAUDE.md), with one local patch documented there.
+!xaudio2/
+!xaudio2/miles_xaudio2.cpp

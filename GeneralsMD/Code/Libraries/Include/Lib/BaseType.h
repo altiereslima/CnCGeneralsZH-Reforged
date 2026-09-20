@@ -123,7 +123,10 @@
 //--------------------------------------------------------------------
 typedef float							Real;							// 4 bytes 
 typedef int								Int;							// 4 bytes 
-typedef unsigned int			UnsignedInt;	  	// 4 bytes 
+typedef unsigned int			UnsignedInt;	  	// 4 bytes
+// 4 bytes on Win32, 8 on x64: for the places that carry a pointer through an integer, which the
+// GUI message payloads and a few handle typedefs do.
+typedef size_t						UnsignedIntPtr;		// pointer sized
 typedef unsigned short		UnsignedShort;		// 2 bytes 
 typedef short							Short;					  // 2 bytes 
 typedef unsigned char			UnsignedByte;			// 1 byte		USED TO BE "Byte"
@@ -175,10 +178,12 @@ inline Real deg2rad(Real rad) { return rad * (PI/180); }
 // after this one silently rewrites every use below into an intrinsic that takes
 // a LONG* and the game's bit fields stop compiling.  Not <windows.h>: that also
 // drags in winsock.h, and the device code includes winsock2.h.
-#if defined(_M_IX86) && !defined(_X86_)
-#define _X86_		// windows.h does this before it reaches windef.h, and winnt.h
+#ifndef _AMD64_
+#define _AMD64_		// windows.h does this before it reaches windef.h, and winnt.h
 #endif				// #errors with "No Target Architecture" without it
 #include <windef.h>
+#include <string.h>
+#include <emmintrin.h>
 #undef BitTest
 #define BitTest( x, i ) ( ( (x) & (i) ) != 0 )
 #define BitSet( x, i ) ( (x) |= (i) )
@@ -190,37 +195,29 @@ inline Real deg2rad(Real rad) { return rad * (PI/180); }
 // note, this function depends on the cpu rounding mode, which we set to CHOP every frame, 
 // but apparently tends to be left in unpredictable modes by various system bits of
 // code, so use this function with caution -- it might not round in the way you want.
+//
+// EA's fld/fistp pair, written as cvtss2si: both round in the current mode, which setFPMode pins
+// to nearest.
 __forceinline long fast_float2long_round(float f)
 {
-	long i;
-
-	__asm {
-		fld [f]
-		fistp [i]
-	}
-
-	return i;
+	return _mm_cvtss_si32(_mm_set_ss(f));
 }
 
 // super fast float trunc routine, works always (independent of any FPU modes)
 // code courtesy of Martin Hoffesommer (grin)
+//
+// The same bits EA's asm produced, in C: a mask of 0xff800000 shifted arithmetically right by
+// (exponent - 127) clears the fraction, and an exponent below 127 clears everything.  The shift
+// count keeps the asm's wrap at 32 (sar only reads the low five bits of cl) for the huge values
+// where that matters, so no input changes answer.
 __forceinline float fast_float_trunc(float f)
 {
-  // EDX, not EBX, for the zero: an __asm block has to leave EBX/ESI/EDI the way it
-  // found them, and this one did not.  Where the compiler parks the saved ESP in EBX
-  // (W3DTreeBuffer::doLighting does) the epilogue's "mov esp,ebx" then set ESP to 0
-  // and the next pop faulted -- the crash that ended every run at the main menu.
-  _asm
-  {
-    mov ecx,[f]
-    shr ecx,23
-    mov eax,0xff800000
-    xor edx,edx
-    sub cl,127
-    cmovc eax,edx
-    sar eax,cl
-    and [f],eax
-  }
+  unsigned int bits;
+  memcpy(&bits, &f, sizeof(bits));
+  const unsigned int exponent = (bits >> 23) & 0xff;
+  const int mask = exponent < 127 ? 0 : (int)0xff800000 >> ((exponent - 127) & 31);
+  bits &= (unsigned int)mask;
+  memcpy(&f, &bits, sizeof(f));
   return f;
 }
 

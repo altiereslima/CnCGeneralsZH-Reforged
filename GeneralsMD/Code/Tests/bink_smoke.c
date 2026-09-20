@@ -77,6 +77,20 @@ int main(int argc, char **argv) {
 	fileRate    = rd32(hdr + 28);
 	fileRateDiv = rd32(hdr + 32);
 
+#ifdef BINK_LINKED_PLAYER
+	/* x64 has no BINKW32.DLL to load - the movie player is FFmpeg, linked in.  The checks below
+	   are the same ones, and they are worth more here: every value they compare is now produced
+	   by our own decoder rather than read back out of RAD's. */
+	(void)dllPath;
+	dll = NULL;
+	pOpen          = BinkOpen;
+	pClose         = BinkClose;
+	pDoFrame       = BinkDoFrame;
+	pNextFrame     = BinkNextFrame;
+	pCopy          = BinkCopyToBuffer;
+	pSetSoundTrack = BinkSetSoundTrack;
+	pGetError      = NULL;
+#else
 	/* An absolute path, because a relative one still goes through the DLL search
 	   order - and that starts at this exe's own directory, where the build puts
 	   the no-op stub also called binkw32.dll. */
@@ -97,6 +111,7 @@ int main(int argc, char **argv) {
 		printf("FAIL BINKW32.DLL does not export the decorated names bink.def lists\n");
 		return 1;
 	}
+#endif
 
 	pSetSoundTrack(0, 0);				/* decode silently, no audio device needed */
 	bnk = pOpen(path, BINKPRELOADALL);
@@ -148,7 +163,7 @@ int main(int argc, char **argv) {
 	free(buf32);
 	free(buf24);
 	pClose(bnk);
-	FreeLibrary(dll);
+	if (dll) FreeLibrary(dll);
 
 	printf("%s: %ux%u, %u frames, %u/%u fps - %d failure(s)\n", path, w, h,
 	       fileFrames, fileRate, fileRateDiv, failures);

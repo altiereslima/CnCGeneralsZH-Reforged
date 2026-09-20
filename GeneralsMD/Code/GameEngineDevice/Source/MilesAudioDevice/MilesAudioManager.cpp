@@ -78,10 +78,10 @@ static void AILCALLBACK setSampleCompleted( HSAMPLE sampleCompleted );
 static void AILCALLBACK set3DSampleCompleted( H3DSAMPLE sample3DCompleted );
 static void AILCALLBACK setStreamCompleted( HSTREAM streamCompleted );
 
-static U32 AILCALLBACK streamingFileOpen(char const *fileName, U32 *file_handle);
-static void AILCALLBACK streamingFileClose(U32 fileHandle);
-static S32 AILCALLBACK streamingFileSeek(U32 fileHandle, S32 offset, U32 type);
-static U32 AILCALLBACK streamingFileRead(U32 fileHandle, void *buffer, U32 bytes);
+static U32 AILCALLBACK streamingFileOpen(char const *fileName, AILFILEHANDLE *file_handle);
+static void AILCALLBACK streamingFileClose(AILFILEHANDLE fileHandle);
+static S32 AILCALLBACK streamingFileSeek(AILFILEHANDLE fileHandle, S32 offset, U32 type);
+static U32 AILCALLBACK streamingFileRead(AILFILEHANDLE fileHandle, void *buffer, U32 bytes);
 
 //-------------------------------------------------------------------------------------------------
 /* "Is this sound one of these?", asked of a sound that is already playing or already queued.
@@ -988,7 +988,7 @@ void MilesAudioManager::stopAudioEvent( AudioHandle handle )
 			// found it
 			// Ask it to stop; the next processPlayingList sweep does the Miles side and the free.
 			InterlockedCompareExchange( (volatile long *)&audio->m_status, PS_Stopping, PS_Playing );
-			notifyOfAudioCompletion((UnsignedInt)(audio->m_stream), PAT_Stream);
+			notifyOfAudioCompletion((UnsignedIntPtr)(audio->m_stream), PAT_Stream);
 			break;
 		}
 	}
@@ -1641,7 +1641,7 @@ Bool MilesAudioManager::isCurrentlyPlaying( AudioHandle handle )
 }
 
 //-------------------------------------------------------------------------------------------------
-void MilesAudioManager::notifyOfAudioCompletion( UnsignedInt audioCompleted, UnsignedInt flags )
+void MilesAudioManager::notifyOfAudioCompletion( UnsignedIntPtr audioCompleted, UnsignedInt flags )
 {
 	PlayingAudio *playing = findPlayingAudioFrom(audioCompleted, flags);
 	if (!playing) {
@@ -1705,7 +1705,7 @@ void MilesAudioManager::notifyOfAudioCompletion( UnsignedInt audioCompleted, Uns
 }
 
 //-------------------------------------------------------------------------------------------------
-PlayingAudio *MilesAudioManager::findPlayingAudioFrom( UnsignedInt audioCompleted, UnsignedInt flags )
+PlayingAudio *MilesAudioManager::findPlayingAudioFrom( UnsignedIntPtr audioCompleted, UnsignedInt flags )
 {
 	// Miles calls in here from its own timer thread when a sample finishes, so every walk of these
 	// lists is guarded against the main thread taking an element out from under it.
@@ -3162,48 +3162,44 @@ void MilesAudioManager::friend_forcePlayAudioEventRTS(const AudioEventRTS* event
 //-------------------------------------------------------------------------------------------------
 void AILCALLBACK setSampleCompleted( HSAMPLE sampleCompleted )
 {
-	TheAudio->notifyOfAudioCompletion((UnsignedInt) sampleCompleted, PAT_Sample);
+	TheAudio->notifyOfAudioCompletion((UnsignedIntPtr) sampleCompleted, PAT_Sample);
 }
 
 //-------------------------------------------------------------------------------------------------
 void AILCALLBACK set3DSampleCompleted( H3DSAMPLE sample3DCompleted )
 {
-	TheAudio->notifyOfAudioCompletion((UnsignedInt) sample3DCompleted, PAT_3DSample);
+	TheAudio->notifyOfAudioCompletion((UnsignedIntPtr) sample3DCompleted, PAT_3DSample);
 }
 
 //-------------------------------------------------------------------------------------------------
 void AILCALLBACK setStreamCompleted( HSTREAM streamCompleted )
 {
-	TheAudio->notifyOfAudioCompletion((UnsignedInt) streamCompleted, PAT_Stream);
+	TheAudio->notifyOfAudioCompletion((UnsignedIntPtr) streamCompleted, PAT_Stream);
 }
 
 //-------------------------------------------------------------------------------------------------
-U32 AILCALLBACK streamingFileOpen(char const *fileName, U32 *file_handle)
+U32 AILCALLBACK streamingFileOpen(char const *fileName, AILFILEHANDLE *file_handle)
 {
-#if defined(_DEBUG) || defined(_INTERNAL)
-	if (sizeof(U32) != sizeof(File*)) {
-		RELEASE_CRASH(("streamingFileOpen - This function requires work in order to compile on non 32-bit platforms.\n"));
-	}
-#endif
-
-	(*file_handle) = (U32) TheFileSystem->openFile(fileName, File::READ | File::STREAMING);
+	// The handle is a File*, so it is pointer sized - the cast to a 32-bit U32 that used to be here
+	// threw half of every pointer away and was guarded by a debug-only crash saying as much.
+	(*file_handle) = (AILFILEHANDLE) TheFileSystem->openFile(fileName, File::READ | File::STREAMING);
 	return ((*file_handle) != 0);
 }
 
 //-------------------------------------------------------------------------------------------------
-void AILCALLBACK streamingFileClose(U32 fileHandle)
+void AILCALLBACK streamingFileClose(AILFILEHANDLE fileHandle)
 {
 	((File*) fileHandle)->close();
 }
 
 //-------------------------------------------------------------------------------------------------
-S32 AILCALLBACK streamingFileSeek(U32 fileHandle, S32 offset, U32 type)
+S32 AILCALLBACK streamingFileSeek(AILFILEHANDLE fileHandle, S32 offset, U32 type)
 {
 	return ((File*) fileHandle)->seek(offset, (File::seekMode) type);
 }
 
 //-------------------------------------------------------------------------------------------------
-U32 AILCALLBACK streamingFileRead(U32 file_handle, void *buffer, U32 bytes)
+U32 AILCALLBACK streamingFileRead(AILFILEHANDLE file_handle, void *buffer, U32 bytes)
 {
 	return ((File*) file_handle)->read(buffer, bytes);
 }

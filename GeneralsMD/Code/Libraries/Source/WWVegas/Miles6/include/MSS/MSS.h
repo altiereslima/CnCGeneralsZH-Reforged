@@ -110,10 +110,13 @@ typedef struct _AILSOUNDINFO
 typedef void (AILCALLBACK *AILSAMPLECB)   (HSAMPLE sample);
 typedef void (AILCALLBACK *AIL3DSAMPLECB) (H3DSAMPLE sample);
 typedef void (AILCALLBACK *AILSTREAMCB)   (HSTREAM stream);
-typedef U32  (AILCALLBACK *AILFILEOPENCB) (const char *filename, U32 *file_handle);
-typedef void (AILCALLBACK *AILFILECLOSECB)(U32 file_handle);
-typedef S32  (AILCALLBACK *AILFILESEEKCB) (U32 file_handle, S32 offset, U32 type);
-typedef U32  (AILCALLBACK *AILFILEREADCB) (U32 file_handle, void *buffer, U32 bytes);
+/* The file handle is whatever the host wants it to be and this game puts a File* in it, so it is
+   pointer sized.  On Win32 that is the U32 the retail DLL's ABI expects; x64 needs all 64 bits. */
+typedef UINT_PTR AILFILEHANDLE;
+typedef U32  (AILCALLBACK *AILFILEOPENCB) (const char *filename, AILFILEHANDLE *file_handle);
+typedef void (AILCALLBACK *AILFILECLOSECB)(AILFILEHANDLE file_handle);
+typedef S32  (AILCALLBACK *AILFILESEEKCB) (AILFILEHANDLE file_handle, S32 offset, U32 type);
+typedef U32  (AILCALLBACK *AILFILEREADCB) (AILFILEHANDLE file_handle, void *buffer, U32 bytes);
 
 /* Thyme's stub miles.c spells the same callback types this way. */
 typedef AILSAMPLECB    AIL_sample_callback;

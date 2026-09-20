@@ -563,25 +563,13 @@ TEST(stackdump_walks_the_callers)
 	CHECK( strstr( s_stackText, "stackdump_walks_the_callers" ) != NULL );
 }
 
-/* Two __asm blocks in headers everything includes wrote to registers that belong
-   to the caller.  fast_float_trunc's "xor ebx,ebx" is what killed every run at the
-   main menu: W3DTreeBuffer::doLighting keeps its saved ESP in EBX, so the epilogue's
-   "mov esp,ebx" set ESP to zero and the following pop faulted.  The witnesses below
-   put a sentinel in each register, run the block, and read the register back. */
-static unsigned truncEbxWitness( float f )
-{
-	unsigned ebxOut;
-	volatile float t;
-	__asm mov ebx, 0x0BADF00D
-	t = fast_float_trunc( f );
-	__asm mov ebxOut, ebx
-	(void)t;
-	return ebxOut;
-}
-
+/* fast_float_trunc was an __asm block in a header everything includes, and it wrote to registers
+   that belong to the caller: its "xor ebx,ebx" is what killed every run at the main menu, because
+   W3DTreeBuffer::doLighting keeps its saved ESP in EBX and the epilogue's "mov esp,ebx" then set
+   ESP to zero.  A witness used to plant a sentinel in EBX around the call and read it back; the
+   function is C now, so what is left to check is that it still truncates the way the assembly did. */
 TEST(fast_float_trunc_leaves_ebx_alone)
 {
-	CHECK_EQ( truncEbxWitness( 3.75f ), 0x0BADF00D );
 	CHECK_NEAR( fast_float_trunc( 3.75f ), 3.0f, 0.0001f );
 	CHECK_NEAR( fast_float_trunc( -3.75f ), -3.0f, 0.0001f );
 }
@@ -680,40 +668,14 @@ TEST(real_to_int_does_not_care_what_rounding_mode_it_is_called_in)
 	_controlfp( callersMode, _MCW_PC | _MCW_RC );
 }
 
-/* The length is a parameter and not a strlen() call on purpose: anything the compiler
-   emits between the two blocks below is free to use these registers itself, so the
-   witness only stays honest while the call is the only thing in between. */
-static void crcRegisterWitness( const char *text, Int len, unsigned *ebxOut, unsigned *esiOut, unsigned *ediOut )
-{
-	CRC crc;
-	__asm
-	{
-		mov ebx, 0x0BADF00D
-		mov esi, 0x0BADBEEF
-		mov edi, 0x0BADCAFE
-	}
-	crc.computeCRC( text, len );
-	__asm
-	{
-		mov eax, ebxOut
-		mov dword ptr [eax], ebx
-		mov eax, esiOut
-		mov dword ptr [eax], esi
-		mov eax, ediOut
-		mov dword ptr [eax], edi
-	}
-}
-
+/* computeCRC was assembly that used EBX, ESI and EDI without handing them back, and a witness here
+   planted sentinels in the three around the call.  The function is C now.  What still matters is
+   the number it produces: it goes into every multiplayer and replay checksum, so it is checked
+   against the arithmetic EA documented in the header. */
 TEST(crc_computecrc_leaves_the_callee_saved_registers_alone)
 {
 	const char *text = "the quick brown fox";
-	unsigned ebxOut = 0, esiOut = 0, ediOut = 0;
-	crcRegisterWitness( text, (Int)strlen( text ), &ebxOut, &esiOut, &ediOut );
-	CHECK_EQ( ebxOut, 0x0BADF00D );
-	CHECK_EQ( esiOut, 0x0BADBEEF );
-	CHECK_EQ( ediOut, 0x0BADCAFE );
 
-	/* ...and it still computes what the C++ version in the header's comment does. */
 	UnsignedInt expected = 0;
 	for( const UnsignedByte *p = (const UnsignedByte *)text; *p; ++p )
 	{
@@ -3304,17 +3266,20 @@ TEST(setfpmode_pins_the_control_word_from_whatever_it_finds)
 	// the mode the simulation runs in: 24-bit precision, round to nearest
 	setFPMode();
 	CHECK_EQ( getFPMode(), expectedFPMode() );
-	CHECK_EQ( getFPMode() & _MCW_PC, (UnsignedInt)(_PC_24 & _MCW_PC) );
+	// x64 has no x87 precision field: SSE rounds at the declared width instead, and _controlfp
+	// fails fast on a mask that names _MCW_PC there.  FP_MODE_FIELDS is what setFPMode owns.
+	if( FP_MODE_FIELDS & _MCW_PC )
+		CHECK_EQ( getFPMode() & _MCW_PC, (UnsignedInt)(_PC_24 & _MCW_PC) );
 	CHECK_EQ( getFPMode() & _MCW_RC, (UnsignedInt)(_RC_NEAR & _MCW_RC) );
 
 	// what a driver that grabbed the FPU and never gave it back looks like
-	_controlfp( _PC_64 | _RC_CHOP, _MCW_PC | _MCW_RC );
+	_controlfp( (_PC_64 | _RC_CHOP) & FP_MODE_FIELDS, FP_MODE_FIELDS );
 	CHECK_NE( getFPMode(), expectedFPMode() );
 	setFPMode();
 	CHECK_EQ( getFPMode(), expectedFPMode() );
 
 	// and the other direction, so this is not just "setFPMode lowers the precision"
-	_controlfp( _PC_53 | _RC_UP, _MCW_PC | _MCW_RC );
+	_controlfp( (_PC_53 | _RC_UP) & FP_MODE_FIELDS, FP_MODE_FIELDS );
 	CHECK_NE( getFPMode(), expectedFPMode() );
 	setFPMode();
 	CHECK_EQ( getFPMode(), expectedFPMode() );
@@ -3323,7 +3288,7 @@ TEST(setfpmode_pins_the_control_word_from_whatever_it_finds)
 	setFPMode();
 	CHECK_EQ( getFPMode(), expectedFPMode() );
 
-	_controlfp( entry, _MCW_PC | _MCW_RC );
+	_controlfp( entry, FP_MODE_FIELDS );
 }
 
 TEST(setfpmode_leaves_the_exception_mask_in_a_known_state)
@@ -5457,13 +5422,15 @@ TEST(the_simulation_math_fingerprint_is_the_machines_math_and_not_the_callers_fp
 	CHECK( fromSimulationMode != 0 );
 	CHECK_EQ( SimulationMathCrc::calculate(), fromSimulationMode );
 
-	_controlfp( _PC_53, _MCW_PC );
+	// Some mode that is not the simulation's.  EA's own worry was the 53-bit precision a driver
+	// leaves behind; there is no precision field any more, so this is the rounding mode instead.
+	_controlfp( _RC_UP, _MCW_RC );
 	const UnsignedInt modeIn53 = getFPMode();
 	CHECK( modeIn53 != expectedFPMode() );
 	CHECK_EQ( SimulationMathCrc::calculate(), fromSimulationMode );
 	CHECK_EQ( getFPMode(), modeIn53 );	// and the caller's mode is still the caller's
 
-	_controlfp( _PC_64 | _RC_CHOP, _MCW_PC | _MCW_RC );
+	_controlfp( (_PC_64 | _RC_CHOP) & FP_MODE_FIELDS, FP_MODE_FIELDS );
 	const UnsignedInt modeInChop = getFPMode();
 	CHECK( modeInChop != expectedFPMode() );
 	CHECK_EQ( SimulationMathCrc::calculate(), fromSimulationMode );

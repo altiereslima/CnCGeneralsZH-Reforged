@@ -22,7 +22,7 @@
 // $Revision: #3 $
 // $DateTime: 2003/07/09 10:57:23 $
 //
-// ©2003 Electronic Arts
+// ï¿½2003 Electronic Arts
 //
 // Internal header
 //////////////////////////////////////////////////////////////////////////////
@@ -50,23 +50,13 @@ class ProfileFastCS
 	{
 		volatile unsigned& nFlag=m_Flag;
 
-		#define ts_lock _emit 0xF0
-		DASSERT(((unsigned)&nFlag % 4) == 0);
-
-		__asm mov ebx, [nFlag]
-		__asm ts_lock
-		__asm bts dword ptr [ebx], 0
-		__asm jc The_Bit_Was_Previously_Set_So_Try_Again
+		// EA's "lock bts" spin, written with the intrinsic that compiles to the same instruction.
+		while (_interlockedbittestandset((volatile long *)&nFlag, 0))
+		{
+			if (testEvent)
+				::WaitForSingleObject(testEvent,1);
+		}
 		return;
-
-	The_Bit_Was_Previously_Set_So_Try_Again:
-    // can't use SwitchToThread() here because Win9X doesn't have it!
-    if (testEvent)
-		  ::WaitForSingleObject(testEvent,1);
-		__asm mov ebx, [nFlag]
-		__asm ts_lock
-		__asm bts dword ptr [ebx], 0
-		__asm jc  The_Bit_Was_Previously_Set_So_Try_Again
 	}
 
 	void ThreadSafeClearFlag()
@@ -109,17 +99,7 @@ void ProfileFreeMemory(void *ptr);
 
 __forceinline void ProfileGetTime(__int64 &t)
 {
-  _asm
-  {
-    mov ecx,[t]
-    push eax
-    push edx
-    rdtsc
-    mov [ecx],eax
-    mov [ecx+4],edx
-    pop edx
-    pop eax
-  };
+  t = (__int64)__rdtsc();
 }
 
 #endif // INTERNAL_H

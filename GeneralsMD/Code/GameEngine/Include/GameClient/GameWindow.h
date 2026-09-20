@@ -75,7 +75,9 @@ enum { WIN_COLOR_UNDEFINED = GAME_COLOR_UNDEFINED };
 
 // WindowMsgData --------------------------------------------------------------
 //-----------------------------------------------------------------------------
-typedef UnsignedInt WindowMsgData;
+// Half the GUI passes pointers through this - a window, a UnicodeString, a Bool to write back -
+// so it is pointer sized, not four bytes.  On Win32 that is the same UnsignedInt it always was.
+typedef UnsignedIntPtr WindowMsgData;
 
 //-----------------------------------------------------------------------------
 enum WindowMsgHandledType { MSG_IGNORED, MSG_HANDLED };

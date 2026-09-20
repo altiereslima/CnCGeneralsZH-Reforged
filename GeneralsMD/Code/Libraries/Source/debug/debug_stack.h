@@ -59,7 +59,8 @@ public:
     unsigned m_numAddr;
 
     /// addresses
-    unsigned m_addr[MAX_ADDR];
+    // Code addresses, so pointer sized rather than four bytes.
+    size_t m_addr[MAX_ADDR];
 
   public:
     explicit Signature(void): m_numAddr(0) {}
@@ -81,7 +82,7 @@ public:
       \param n index, 0..Size()-1
       \return signature address
     */
-    unsigned GetAddress(int n) const;
+    size_t GetAddress(int n) const;
 
     /**
       \brief Strong ordering operator.
@@ -113,7 +114,7 @@ public:
       \param buf return buffer
       \param bufSize size of return buffer, minimum is 64 bytes (256 recommended)
     */
-    static void GetSymbol(unsigned addr, char *buf, unsigned bufSize);
+    static void GetSymbol(size_t addr, char *buf, unsigned bufSize);
     
     /**
       \brief Determines symbol for given address.
@@ -130,7 +131,7 @@ public:
       \param line line number, may be NULL
       \param relLine relative address within line, may be NULL
     */
-    static void GetSymbol(unsigned addr,
+    static void GetSymbol(size_t addr,
                           char *bufMod, unsigned sizeMod, unsigned *relMod,
                           char *bufSym, unsigned sizeSym, unsigned *relSym,
                           char *bufFile, unsigned sizeFile, unsigned *line, unsigned *relLine);

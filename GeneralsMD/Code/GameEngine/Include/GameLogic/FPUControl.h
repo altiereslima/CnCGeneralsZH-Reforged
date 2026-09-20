@@ -33,6 +33,13 @@
 #define __FPUCONTROL_H__
 
 #include "Lib/BaseType.h"
+#include <float.h>
+
+/** The control word fields setFPMode owns.  There is no x87 precision field to pin any more, and
+	* the CRT fails fast on any _controlfp call whose mask names _MCW_PC, so the rounding mode is
+	* the whole of it.  SSE arithmetic rounds at the declared width, which is what the 24-bit
+	* precision setting bought the x87. */
+#define FP_MODE_FIELDS ( _MCW_RC )
 
 /**
   * setFPMode sets the FPU internal precision and rounding mode.  As DirectX is not guaranteed to

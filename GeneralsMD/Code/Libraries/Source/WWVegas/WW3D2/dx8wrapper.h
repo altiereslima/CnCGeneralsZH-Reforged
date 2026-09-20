@@ -1093,207 +1093,26 @@ WWINLINE Vector4 DX8Wrapper::Convert_Color(unsigned color)
 	return col;
 }
 
-#if 0
+// EA converted colours in x87 assembly, with the rounding mode set to truncate and every register
+// saved by hand around the block.  This is the same arithmetic in C: scale by 255 and truncate, so
+// the byte values are the ones the assembler produced.
+
 WWINLINE unsigned int DX8Wrapper::Convert_Color(const Vector3& color, const float alpha)
 {
-	WWASSERT(color.X<=1.0f);
-	WWASSERT(color.Y<=1.0f);
-	WWASSERT(color.Z<=1.0f);
-	WWASSERT(alpha<=1.0f);
-	WWASSERT(color.X>=0.0f);
-	WWASSERT(color.Y>=0.0f);
-	WWASSERT(color.Z>=0.0f);
-	WWASSERT(alpha>=0.0f);
-
-	return D3DCOLOR_COLORVALUE(color.X,color.Y,color.Z,alpha);
+	const unsigned int a = (unsigned int)(alpha * 255.0f) & 0xff;
+	const unsigned int r = (unsigned int)(color.X * 255.0f) & 0xff;
+	const unsigned int g = (unsigned int)(color.Y * 255.0f) & 0xff;
+	const unsigned int b = (unsigned int)(color.Z * 255.0f) & 0xff;
+	return (a << 24) | (r << 16) | (g << 8) | b;
 }
-WWINLINE unsigned int DX8Wrapper::Convert_Color(const Vector4& color)
-{
-	WWASSERT(color.X<=1.0f);
-	WWASSERT(color.Y<=1.0f);
-	WWASSERT(color.Z<=1.0f);
-	WWASSERT(color.W<=1.0f);
-	WWASSERT(color.X>=0.0f);
-	WWASSERT(color.Y>=0.0f);
-	WWASSERT(color.Z>=0.0f);
-	WWASSERT(color.W>=0.0f);
-
-	return D3DCOLOR_COLORVALUE(color.X,color.Y,color.Z,color.W);
-}
-#else
-
-// ----------------------------------------------------------------------------
-//
-// Convert RGBA color from float vector to 32 bit integer
-// Note: Color vector needs to be clamped to [0...1] range!
-//
-// ----------------------------------------------------------------------------
-
-WWINLINE unsigned int DX8Wrapper::Convert_Color(const Vector3& color,float alpha)
-{
-	const float scale = 255.0;
-	unsigned int col;
-
-	// Multiply r, g, b and a components (0.0,...,1.0) by 255 and convert to integer. Or the integer values togerher
-	// such that 32 bit ingeger has AAAAAAAARRRRRRRRGGGGGGGGBBBBBBBB.
-	__asm
-	{
-		// This block is inlined wherever colors are converted, and VS2022 keeps live
-		// values in ANY of these registers across it -- SegLineRendererClass::Render
-		// held its point count in EAX and its transform reference in EBX, and both
-		// came back as color bytes (the fast_float_trunc lesson, one register wider).
-		// Hand back every register the way it was found; col carries the result out.
-		push	eax
-		push	ecx
-		push	edx
-		push	ebx
-		push	esi
-		push	edi
-
-		sub	esp,20					// space for a, r, g and b float plus fpu rounding mode
-
-		// Store the fpu rounding mode
-
-		fwait
-		fstcw		[esp+16]				// store control word to stack
-		mov		eax,[esp+16]		// load it to eax
-		mov		edi,eax				// take copy
-		and		eax,~(1024|2048)	// mask out certain bits
-		or			eax,(1024|2048)	// or with precision control value "truncate"
-		sub		edi,eax				// did it change?
-		jz			skip					// .. if not, skip
-		mov		[esp],eax			// .. change control word
-		fldcw		[esp]
-skip:
-
-		// Convert the color
-
-		mov	esi,dword ptr color
-		fld	dword ptr[scale]
-
-		fld	dword ptr[esi]			// r
-		fld	dword ptr[esi+4]		// g
-		fld	dword ptr[esi+8]		// b
-		fld	dword ptr[alpha]		// a
-		fld	st(4)
-		fmul	st(4),st
-		fmul	st(3),st
-		fmul	st(2),st
-		fmulp	st(1),st
-		fistp	dword ptr[esp+0]		// a
-		fistp	dword ptr[esp+4]		// b
-		fistp	dword ptr[esp+8]		// g
-		fistp	dword ptr[esp+12]		// r
-		mov	ecx,[esp]				// a
-		mov	eax,[esp+4]				// b
-		mov	edx,[esp+8]				// g
-		mov	ebx,[esp+12]			// r
-		shl	ecx,24					// a << 24
-		shl	ebx,16					// r << 16
-		shl	edx,8						//	g << 8
-		or		eax,ecx					// (a << 24) | b
-		or		eax,ebx					// (a << 24) | (r << 16) | b
-		or		eax,edx					// (a << 24) | (r << 16) | (g << 8) | b
-
-		fstp	st(0)
-
-		// Restore fpu rounding mode
-
-		cmp	edi,0					// did we change the value?
-		je		not_changed			// nope... skip now...
-		fwait
-		fldcw	[esp+16];
-not_changed:
-		add	esp,20
-
-		mov	col,eax
-
-		pop	edi
-		pop	esi
-		pop	ebx
-		pop	edx
-		pop	ecx
-		pop	eax
-	}
-	return col;
-}
-
-// ----------------------------------------------------------------------------
-//
-// Clamp color vertor to [0...1] range
-//
-// ----------------------------------------------------------------------------
 
 WWINLINE void DX8Wrapper::Clamp_Color(Vector4& color)
 {
-	if (!CPUDetectClass::Has_CMOV_Instruction()) {
-		for (int i=0;i<4;++i) {
-			float f=(color[i]<0.0f) ? 0.0f : color[i];
-			color[i]=(f>1.0f) ? 1.0f : f;
-		}
-		return;
-	}
-
-	__asm
-	{
-		// Same contract as Convert_Color above: leave every register as found.
-		push	edx
-		push	ebx
-		push	esi
-		push	edi
-
-		mov	esi,dword ptr color
-
-		mov edx,0x3f800000
-
-		mov edi,dword ptr[esi]
-		mov ebx,edi
-		sar edi,31
-		not edi			// mask is now zero if negative value
-		and edi,ebx
-		cmp edi,edx		// if no less than 1.0 set to 1.0
-		cmovnb edi,edx
-		mov dword ptr[esi],edi
-
-		mov edi,dword ptr[esi+4]
-		mov ebx,edi
-		sar edi,31
-		not edi			// mask is now zero if negative value
-		and edi,ebx
-		cmp edi,edx		// if no less than 1.0 set to 1.0
-		cmovnb edi,edx
-		mov dword ptr[esi+4],edi
-
-		mov edi,dword ptr[esi+8]
-		mov ebx,edi
-		sar edi,31
-		not edi			// mask is now zero if negative value
-		and edi,ebx
-		cmp edi,edx		// if no less than 1.0 set to 1.0
-		cmovnb edi,edx
-		mov dword ptr[esi+8],edi
-
-		mov edi,dword ptr[esi+12]
-		mov ebx,edi
-		sar edi,31
-		not edi			// mask is now zero if negative value
-		and edi,ebx
-		cmp edi,edx		// if no less than 1.0 set to 1.0
-		cmovnb edi,edx
-		mov dword ptr[esi+12],edi
-
-		pop	edi
-		pop	esi
-		pop	ebx
-		pop	edx
+	for (int i=0;i<4;++i) {
+		const float f=(color[i]<0.0f) ? 0.0f : color[i];
+		color[i]=(f>1.0f) ? 1.0f : f;
 	}
 }
-
-// ----------------------------------------------------------------------------
-//
-// Convert RGBA color from float vector to 32 bit integer
-//
-// ----------------------------------------------------------------------------
 
 WWINLINE unsigned int DX8Wrapper::Convert_Color(const Vector4& color)
 {
@@ -1307,7 +1126,6 @@ WWINLINE unsigned int DX8Wrapper::Convert_Color_Clamp(const Vector4& color)
 	return Convert_Color(reinterpret_cast<const Vector3&>(clamped_color),clamped_color[3]);
 }
 
-#endif
 
 
 WWINLINE void DX8Wrapper::Set_Alpha (const float alpha, unsigned int &color)

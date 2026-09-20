@@ -1799,7 +1799,9 @@ WindowMsgHandledType GadgetListBoxSystem( GameWindow *window, UnsignedInt msg,
 		{
 			
 			if( list->multiSelect )
-				*(Int*)mData2 = (Int)list->selections;
+				// A multi-select box hands back its own -1 terminated array of indices rather than
+				// copying it, so what lands in the caller's buffer is a pointer and needs all of it.
+				*(UnsignedIntPtr*)mData2 = (UnsignedIntPtr)list->selections;
 			else
 				*(Int*)mData2 = list->selectPos;
 

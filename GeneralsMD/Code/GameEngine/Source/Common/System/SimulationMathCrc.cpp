@@ -119,7 +119,7 @@ static UnsignedInt runInSimulationFPMode( void (*pass)( XferCRC & ), const char 
 
 	pass( xfer );
 
-	_controlfp( callersMode, _MCW_PC | _MCW_RC );
+	_controlfp( callersMode, FP_MODE_FIELDS );
 
 	xfer.close();
 

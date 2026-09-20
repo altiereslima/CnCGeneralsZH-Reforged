@@ -54,7 +54,7 @@ public:
 	virtual void closeDevice( void ) {}
 	virtual void *getDevice( void ) { return NULL; }
 
-	virtual void notifyOfAudioCompletion( UnsignedInt, UnsignedInt ) {}
+	virtual void notifyOfAudioCompletion( UnsignedIntPtr, UnsignedInt ) {}
 
 	/* One provider named "Software" keeps the options screen from showing an
 	   empty list; selecting it is a no-op. */

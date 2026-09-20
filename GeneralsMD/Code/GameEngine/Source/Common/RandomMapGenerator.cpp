@@ -4086,7 +4086,7 @@ void RMGLayout::build( const RandomMapSettings& settings )
 	buildTerrainClasses( perm );
 	buildBlends();
 
-	_controlfp( callersFPMode, _MCW_PC | _MCW_RC );
+	_controlfp( callersFPMode, FP_MODE_FIELDS );
 }
 
 //-----------------------------------------------------------------------------

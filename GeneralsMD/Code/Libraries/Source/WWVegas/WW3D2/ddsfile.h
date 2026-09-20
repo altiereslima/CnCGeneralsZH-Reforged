@@ -143,7 +143,11 @@ struct LegacyDDSURFACEDESC2 {
 	};
 	unsigned AlphaBitDepth;
 	unsigned Reserved;
-	void* Surface;
+	// This whole struct is read straight out of the .dds file, where the field is the four bytes
+	// DirectDraw once kept a surface pointer in.  As a void* it grew to eight on x64 and pushed
+	// every field below it out of place: the pixel format came back as rubbish and the header said
+	// the texture was zero pixels high.
+	unsigned Surface;
 	union
 	{
 		LegacyDDCOLORKEY CKDestOverlay;
