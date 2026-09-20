@@ -355,7 +355,11 @@ bool CombinerShader_Generate(const CombinerDescription & description, CombinerSh
 			"    float4 TextureFactor;\n"
 			"    float4 FogColour;\n"
 			"    float4 AlphaReference;\n";
-		if (description.NormalMapped) {
+		// A shader declares a prefix of the block the backend uploads, so a field is found by what
+		// comes before it and not by its name.  The shadow fields sit behind the normal mapped ones
+		// and the terrain's sun, so a program that reads them has to declare those too, used or
+		// not: without them a shadow matrix lands where the first light's direction is.
+		if (description.NormalMapped || description.ShadowReceiving) {
 			char line[256];
 			snprintf(line, sizeof(line),
 				"    float4 NormalLightDirection[%u];\n"
@@ -364,9 +368,21 @@ bool CombinerShader_Generate(const CombinerDescription & description, CombinerSh
 				NORMAL_MAPPED_LIGHTS, NORMAL_MAPPED_LIGHTS);
 			hlsl += line;
 		}
+		if (description.ShadowReceiving) {
+			hlsl +=
+				"    float4 TerrainSunDirection;\n"
+				// row_major for the reason the vertex half gives: every matrix the engine has is a
+				// D3D9 matrix and D3D9 stores one by rows.
+				"    row_major float4x4 ShadowFromClip;\n"
+				"    float4 ShadowParameters;\n"
+				"    float4 ShadowViewport;\n";
+		}
 		hlsl += "};\n";
 		if (description.NormalMapped) {
 			hlsl += "Texture2D NormalMap : register(t4);\n";
+		}
+		if (description.ShadowReceiving) {
+			hlsl += SHADOW_SAMPLING;
 		}
 	}
 	else {
@@ -424,6 +440,11 @@ bool CombinerShader_Generate(const CombinerDescription & description, CombinerSh
 	hlsl += body;
 	if (description.NormalMapped) {
 		hlsl += "    current.rgb = saturate(current.rgb + highlight);\n";
+	}
+
+	// Before the fog: a shadow is a thing in the world and the fog is between the world and the eye.
+	if (description.ShadowReceiving) {
+		hlsl += "    current.rgb *= sun_reaching(input.Position);\n";
 	}
 
 	if (target == COMBINER_SHADER_TARGET_D3D11
@@ -498,6 +519,9 @@ std::string CombinerShader_Key(const CombinerDescription & description)
 	key += CombinerShader_Pipeline_Key(description.PixelPipeline);
 	if (description.NormalMapped) {
 		key += ":N";
+	}
+	if (description.ShadowReceiving) {
+		key += ":S";
 	}
 	return key;
 }

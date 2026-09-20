@@ -944,6 +944,21 @@ Int parseShadowMapReport(char *args[], int num)
 	return 1;
 }
 
+/* -shadowmaponly: the map's shadows and nothing else, for looking at one of them at a time.
+
+	 The casters are still registered and still drawn into the map; what stops is the stencil
+	 volumes' own darkening pass over the frame.  Turning the volumes off in the options instead
+	 would take the caster list with them and leave the map empty. */
+Int parseShadowMapOnly(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_shadowMap = TRUE;
+		TheWritableGlobalData->m_shadowMapOnly = TRUE;
+	}
+	return 1;
+}
+
 /* -noparticleshadows: take the soft blob back off the ground under every particle cloud.
 
 	 ShadowsForParticles is on by default and the shipped INI has no entry for it, so without this
@@ -2172,6 +2187,7 @@ static CommandLineParam params[] =
 	{ "-particlecap", parseParticleCap },
 	{ "-shadowmap", parseShadowMap },
 	{ "-shadowmapreport", parseShadowMapReport },
+	{ "-shadowmaponly", parseShadowMapOnly },
 	{ "-noparticleshadows", parseNoParticleShadows },
 	{ "-quickstart", parseQuickStart },
 

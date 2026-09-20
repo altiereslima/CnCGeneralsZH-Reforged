@@ -681,6 +681,7 @@ GlobalData::GlobalData()
 	m_shadowsForParticles = TRUE;	//on by default: the shipped INI has no entry for it
 	m_shadowMap = FALSE;					//the sun's depth pass is off until something reads it
 	m_shadowMapReport = FALSE;
+	m_shadowMapOnly = FALSE;
 	m_textureReductionFactor = -1;
 	m_enableBehindBuildingMarkers = TRUE;
 	m_scriptDebug = FALSE;

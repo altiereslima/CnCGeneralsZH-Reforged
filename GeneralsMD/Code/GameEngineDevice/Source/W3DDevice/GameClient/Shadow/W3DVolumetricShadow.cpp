@@ -105,6 +105,12 @@ const Real cosAngleToCare = cos ((0.2 * PI) / 180.0);	//1.5 degree difference
 #define SHADOW_MAP_SUN_DISTANCE 2000.0f
 #define SHADOW_MAP_NEAR_CLIP 10.0f
 #define SHADOW_MAP_FAR_CLIP 4000.0f
+// How far a surface has to be behind what the map holds before it counts as shadowed, how dark a
+// fully blocked pixel goes, and how far the filter reaches in texels.  The first is the one that
+// decides between a surface shadowing itself in stripes and a shadow lifting off its own caster.
+#define SHADOW_MAP_DEPTH_BIAS 0.0015f
+#define SHADOW_MAP_STRENGTH 0.45f
+#define SHADOW_MAP_FILTER_TEXELS 1.0f
 
 //#define SV_DEBUG
 //#define SV_DEBUG_BOUNDS
@@ -3867,6 +3873,14 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 	// whole picture rather than a corner of it.
 	sceneCamera.Apply();
 
+	/* And what turns the map into a shadow.  The matrix that takes a pixel from the frame's clip
+		 space into the sun's is built in the backend, out of the sun's own view and projection as it
+		 held them during the pass and the frame's as it holds them now: both are already there, in
+		 one convention, and a matrix assembled on this side would have to agree with a layout it
+		 cannot see.  SHADOW-MAP-PLAN.md phase 2. */
+	Direct3D11_Set_Shadow_Parameters( SHADOW_MAP_DEPTH_BIAS, SHADOW_MAP_STRENGTH,
+		SHADOW_MAP_FILTER_TEXELS );
+
 	// The report costs a full stall of the pipeline, so it is one line a second rather than one a
 	// frame: what it answers is whether the pass draws the world at all, and that does not change
 	// thirty times a second.
@@ -3888,6 +3902,12 @@ void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
 	USE_PERF_TIMER(stencilShadows)
 	W3DVolumetricShadow *shadow;
 	Int numRenderedShadows = 0;
+
+	/* -shadowmaponly leaves the casters registered, and so in the sun's map, while taking the
+		 volumes' own darkening off the frame.  Turning the volumes off in the options instead would
+		 stop the casters being registered at all and leave the map with nothing in it. */
+	if (TheGlobalData->m_shadowMapOnly)
+		return;
 
  	AABoxClass bbox;
 	SphereClass bsphere;

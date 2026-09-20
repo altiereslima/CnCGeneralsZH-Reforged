@@ -177,6 +177,7 @@ public:
 	Bool m_shadowsForParticles;		// "ShadowsForParticles": big alpha-blended particle clouds drop a soft blob on the ground
 	Bool m_shadowMap;							// "-shadowmap": draw the casters into the sun's depth buffer as well
 	Bool m_shadowMapReport;				// "-shadowmapreport": log what ended up in that buffer, once a second
+	Bool m_shadowMapOnly;					// "-shadowmaponly": the map's shadows with the stencil volumes' own darkening off
 	Bool m_particleGroundBounce;	// "-particlebounce": terrain collision on for every particle system
 	Real m_smokeThickness;				// "-smoke": how much longer and thicker every smoke system runs, 0 for shipped behaviour
 	Int  m_particleCapOverride;		// "-particlecap": stand in for the options slider's MaxParticleCount, 0 to use it

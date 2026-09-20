@@ -292,6 +292,20 @@ bool Direct3D11_Shadow_Map_Bound()
 	return Active ? Backend.Shadow_Map_Bound() : false;
 }
 
+void Direct3D11_Set_Shadow_Parameters(float bias, float strength, float radius_in_texels)
+{
+	if (Active) {
+		Backend.Set_Shadow_Parameters(bias, strength, radius_in_texels);
+	}
+}
+
+void Direct3D11_Clear_Shadow_Parameters()
+{
+	if (Active) {
+		Backend.Clear_Shadow_Parameters();
+	}
+}
+
 std::string Direct3D11_Shadow_Map_Report()
 {
 	return Active ? Backend.Shadow_Map_Report() : std::string("no Direct3D 11 backend");

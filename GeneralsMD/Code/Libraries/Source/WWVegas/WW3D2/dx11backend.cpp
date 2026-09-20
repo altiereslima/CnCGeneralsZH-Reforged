@@ -208,6 +208,11 @@ DX11BackendClass::DX11BackendClass()
 	, ShadowMapSavedWidth(0)
 	, ShadowMapSavedHeight(0)
 	, ShadowMapSavedTarget(NULL)
+	, ShadowMapSampler(NULL)
+	, ShadowBias(0.0f)
+	, ShadowStrength(0.0f)
+	, ShadowRadius(1.0f)
+	, ShadowReceiving(false)
 	, NormalMappedDraws(0)
 	, DrawsMade(0)
 	, DrawsRefused(0)
@@ -394,6 +399,10 @@ void DX11BackendClass::Shutdown()
 		ShadowMapSurface->Release();
 		ShadowMapSurface = NULL;
 	}
+	if (ShadowMapSampler != NULL) {
+		ShadowMapSampler->Release();
+		ShadowMapSampler = NULL;
+	}
 	ShadowMapSize = 0;
 	ShadowMapBound = false;
 	Device = NULL;
@@ -479,6 +488,9 @@ void DX11BackendClass::End_Shadow_Map()
 	}
 
 	ShadowMapBound = false;
+	// What the sun was looking through, kept for the draws that will read the map.
+	multiply(View, Projection, SunViewProjection);
+	ShadowFromClipValid = false;
 	// Back to whatever the frame was drawing into, which is a texture the post chain shows and not
 	// the back buffer.
 	Set_Render_Target(ShadowMapSavedTarget);
@@ -487,6 +499,72 @@ void DX11BackendClass::End_Shadow_Map()
 		Set_Viewport(0, 0, ShadowMapSavedWidth, ShadowMapSavedHeight);
 	}
 	Forget_Bindings();
+}
+
+void DX11BackendClass::Set_Shadow_Parameters(float bias, float strength, float radius_in_texels)
+{
+	if (ShadowMapTexture == NULL) {
+		Clear_Shadow_Parameters();
+		return;
+	}
+	ShadowBias = bias;
+	ShadowStrength = strength;
+	ShadowRadius = radius_in_texels;
+	ShadowReceiving = true;
+}
+
+void DX11BackendClass::Clear_Shadow_Parameters()
+{
+	ShadowReceiving = false;
+	ShadowFromClipValid = false;
+}
+
+/** The inverse of a four by four, by cofactors.  Nothing else in the backend needed one: every
+		other matrix it holds arrives ready to use, and this is the one journey that goes the other
+		way, out of the frame's clip space and back into the world. */
+static bool invert(const float in[16], float out[16])
+{
+	const float a00 = in[0],  a01 = in[1],  a02 = in[2],  a03 = in[3];
+	const float a10 = in[4],  a11 = in[5],  a12 = in[6],  a13 = in[7];
+	const float a20 = in[8],  a21 = in[9],  a22 = in[10], a23 = in[11];
+	const float a30 = in[12], a31 = in[13], a32 = in[14], a33 = in[15];
+
+	const float b00 = a00 * a11 - a01 * a10;
+	const float b01 = a00 * a12 - a02 * a10;
+	const float b02 = a00 * a13 - a03 * a10;
+	const float b03 = a01 * a12 - a02 * a11;
+	const float b04 = a01 * a13 - a03 * a11;
+	const float b05 = a02 * a13 - a03 * a12;
+	const float b06 = a20 * a31 - a21 * a30;
+	const float b07 = a20 * a32 - a22 * a30;
+	const float b08 = a20 * a33 - a23 * a30;
+	const float b09 = a21 * a32 - a22 * a31;
+	const float b10 = a21 * a33 - a23 * a31;
+	const float b11 = a22 * a33 - a23 * a32;
+
+	const float determinant = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+	if (determinant > -1e-12f && determinant < 1e-12f) {
+		return false;
+	}
+	const float scale = 1.0f / determinant;
+
+	out[0]  = ( a11 * b11 - a12 * b10 + a13 * b09) * scale;
+	out[1]  = (-a01 * b11 + a02 * b10 - a03 * b09) * scale;
+	out[2]  = ( a31 * b05 - a32 * b04 + a33 * b03) * scale;
+	out[3]  = (-a21 * b05 + a22 * b04 - a23 * b03) * scale;
+	out[4]  = (-a10 * b11 + a12 * b08 - a13 * b07) * scale;
+	out[5]  = ( a00 * b11 - a02 * b08 + a03 * b07) * scale;
+	out[6]  = (-a30 * b05 + a32 * b02 - a33 * b01) * scale;
+	out[7]  = ( a20 * b05 - a22 * b02 + a23 * b01) * scale;
+	out[8]  = ( a10 * b10 - a11 * b08 + a13 * b06) * scale;
+	out[9]  = (-a00 * b10 + a01 * b08 - a03 * b06) * scale;
+	out[10] = ( a30 * b04 - a31 * b02 + a33 * b00) * scale;
+	out[11] = (-a20 * b04 + a21 * b02 - a23 * b00) * scale;
+	out[12] = (-a10 * b09 + a11 * b07 - a12 * b06) * scale;
+	out[13] = ( a00 * b09 - a01 * b07 + a02 * b06) * scale;
+	out[14] = (-a30 * b03 + a31 * b01 - a32 * b00) * scale;
+	out[15] = ( a20 * b03 - a21 * b01 + a22 * b00) * scale;
+	return true;
 }
 
 /** What is in the map, read back once.  A caster pass that drew nothing leaves every texel at the
@@ -1086,7 +1164,40 @@ bool DX11BackendClass::Build_Combiner_Description(CombinerDescription & descript
 		description.StageCount = stage + 1;
 	}
 	description.NormalMapped = description.StageCount > 0 && Normal_Mapped();
+	description.ShadowReceiving = description.StageCount > 0 && Shadow_Receiving();
 	return description.StageCount > 0;
+}
+
+/** Which draws take a shadow.  The world's, and only while the sun's map holds this frame's casters:
+		a screen space quad has no place in the world to look up, a draw that is adding light to the
+		frame rather than painting it would come out darker rather than shadowed, and the pass that
+		fills the map must not shadow itself. */
+bool DX11BackendClass::Shadow_Receiving() const
+{
+	if (!ShadowReceiving || ShadowMapBound || ShadowMapTexture == NULL) {
+		return false;
+	}
+	// A transcribed terrain or road program takes one too: the ground is where a shadow is seen,
+	// and those programs carry the sampling whether a frame has a map or not.  The water and the
+	// trees keep their own shadows for now.
+	if (PixelProgram != ENGINE_SHADER_NONE && !EngineShader_Paints_Ground(PixelProgram)) {
+		return false;
+	}
+	if (VertexProgram != ENGINE_SHADER_NONE && PixelProgram == ENGINE_SHADER_NONE) {
+		return false;
+	}
+	if ((VertexFormat & D3DFVF_XYZRHW) != 0) {
+		return false;		// already in screen space: the interface, the filters, the darkening quad
+	}
+	if (RenderStates.Get_Render_State(D3DRS_ALPHABLENDENABLE) != FALSE) {
+		const DWORD source = RenderStates.Get_Render_State(D3DRS_SRCBLEND);
+		const DWORD destination = RenderStates.Get_Render_State(D3DRS_DESTBLEND);
+		if (destination == D3DBLEND_ONE || source == D3DBLEND_ONE
+			|| destination == D3DBLEND_DESTCOLOR || source == D3DBLEND_DESTCOLOR) {
+			return false;	// additive and multiplicative passes: fire, glow, the shadows themselves
+		}
+	}
+	return true;
 }
 
 bool DX11BackendClass::Build_Vertex_Description(VertexPipelineDescription & description) const
@@ -1476,6 +1587,32 @@ void DX11BackendClass::Upload_Constants()
 		}
 	}
 
+	if (ShadowReceiving) {
+		if (!ShadowFromClipValid
+			|| memcmp(ShadowFromClipView, View, sizeof(View)) != 0
+			|| memcmp(ShadowFromClipProjection, Projection, sizeof(Projection)) != 0) {
+			float scene_clip[16];
+			float clip_to_world[16];
+			multiply(View, Projection, scene_clip);
+			if (invert(scene_clip, clip_to_world)) {
+				multiply(clip_to_world, SunViewProjection, ShadowFromClip);
+				memcpy(ShadowFromClipView, View, sizeof(View));
+				memcpy(ShadowFromClipProjection, Projection, sizeof(Projection));
+				ShadowFromClipValid = true;
+			}
+		}
+		memcpy(pixel_block.ShadowFromClip, ShadowFromClip, sizeof(pixel_block.ShadowFromClip));
+		pixel_block.ShadowParameters[0] = (ShadowMapSize > 0)
+			? 1.0f / static_cast<float>(ShadowMapSize) : 0.0f;
+		pixel_block.ShadowParameters[1] = ShadowBias;
+		pixel_block.ShadowParameters[2] = ShadowStrength;
+		pixel_block.ShadowParameters[3] = ShadowRadius;
+		pixel_block.ShadowViewport[0] = (ViewportWidth > 0)
+			? 1.0f / static_cast<float>(ViewportWidth) : 0.0f;
+		pixel_block.ShadowViewport[1] = (ViewportHeight > 0)
+			? 1.0f / static_cast<float>(ViewportHeight) : 0.0f;
+	}
+
 	if ((!PixelConstantsHeld
 			|| memcmp(&HeldPixelConstants, &pixel_block, sizeof(pixel_block)) != 0)
 		&& SUCCEEDED(context->Map(PixelConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
@@ -1670,6 +1807,26 @@ void DX11BackendClass::Bind_State_Objects()
 	if (NormalMap != NULL && (!known || NormalMap != Bound.NormalMap)) {
 		context->PSSetShaderResources(DX11_BACKEND_TEXTURE_STAGES, 1, &NormalMap);
 		Bound.NormalMap = NormalMap;
+	}
+
+	// The sun's map at t5 with a sampler of its own at s5, clamped so a pixel past the edge of the
+	// box reads the edge rather than wrapping the far side of the map over it.
+	if (ShadowReceiving && ShadowMapTexture != NULL) {
+		if (ShadowMapSampler == NULL) {
+			D3D11_SAMPLER_DESC description;
+			memset(&description, 0, sizeof(description));
+			description.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+			description.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+			description.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+			description.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+			description.ComparisonFunc = D3D11_COMPARISON_NEVER;
+			description.MaxLOD = D3D11_FLOAT32_MAX;
+			Device->Get_Device()->CreateSamplerState(&description, &ShadowMapSampler);
+		}
+		context->PSSetShaderResources(DX11_BACKEND_TEXTURE_STAGES + 1, 1, &ShadowMapTexture);
+		if (ShadowMapSampler != NULL) {
+			context->PSSetSamplers(DX11_BACKEND_TEXTURE_STAGES + 1, 1, &ShadowMapSampler);
+		}
 	}
 }
 

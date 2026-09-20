@@ -226,8 +226,9 @@ static void write_pixel_preamble(std::string & hlsl, bool bumped = false)
 		"    float4 TextureFactor;\n"
 		"    float4 FogColour;\n"
 		"    float4 AlphaReference;\n";
-	if (bumped) {
-		// The whole of DX11BackendClass::PixelConstantBlock up to the sun, in its order.
+	{
+		// The whole of DX11BackendClass::PixelConstantBlock up to the sun, in its order.  Declared
+		// whether this program lights with it or not, because what follows is found by offset.
 		char line[256];
 		snprintf(line, sizeof(line),
 			"    float4 NormalLightDirection[%u];\n"
@@ -237,10 +238,17 @@ static void write_pixel_preamble(std::string & hlsl, bool bumped = false)
 			NORMAL_MAPPED_LIGHTS, NORMAL_MAPPED_LIGHTS);
 		hlsl += line;
 	}
+	// The shadow fields close the block, in the backend's order, and every transcribed program
+	// declares them whether it reads them or not: a field is found by what comes before it.
+	hlsl +=
+		"    row_major float4x4 ShadowFromClip;\n"
+		"    float4 ShadowParameters;\n"
+		"    float4 ShadowViewport;\n";
 	hlsl += "};\n";
 	if (bumped) {
 		hlsl += "Texture2D NormalMap : register(t4);\n";
 	}
+	hlsl += SHADOW_SAMPLING;
 	hlsl +=
 		"\n"
 		"struct Input\n"
@@ -397,6 +405,9 @@ static void write_multiply_chain(std::string & hlsl, const EngineShaderEntry & e
 		hlsl += ");\n";
 	}
 
+	// The ground is where a shadow is read, so every transcribed program that paints it takes one.
+	hlsl += "    current.rgb *= sun_reaching(input.Position);\n";
+
 	if (!bumped) {
 		return;
 	}
@@ -420,6 +431,14 @@ static void write_multiply_chain(std::string & hlsl, const EngineShaderEntry & e
 		"    current.rgb = saturate(current.rgb * shade);\n",
 		TERRAIN_BUMP_AMBIENT, TERRAIN_BUMP_AMBIENT, TERRAIN_BUMP_AMBIENT, TERRAIN_BUMP_AMBIENT);
 	hlsl += line;
+}
+
+bool EngineShader_Paints_Ground(EngineShaderProgram program)
+{
+	return program == ENGINE_SHADER_TERRAIN || program == ENGINE_SHADER_TERRAIN_NOISE
+		|| program == ENGINE_SHADER_TERRAIN_NOISE_2 || program == ENGINE_SHADER_FLAT_TERRAIN
+		|| program == ENGINE_SHADER_FLAT_TERRAIN_BASE || program == ENGINE_SHADER_FLAT_TERRAIN_NOISE
+		|| program == ENGINE_SHADER_FLAT_TERRAIN_NOISE_2 || program == ENGINE_SHADER_ROAD_NOISE_2;
 }
 
 bool EngineShader_Can_Bump(EngineShaderProgram program)

@@ -89,11 +89,53 @@ struct CombinerDescription
 	// The vertex half has to have been generated with the same flag.  Initialised here because
 	// callers fill a description field by field and one written before this existed never sets it.
 	bool NormalMapped = false;
+
+	// D3D11 only: take the pixel back out of clip space, look it up in the sun's depth buffer at t5
+	// and darken it by how much of the filter comes back blocked.  No vertex half is involved: the
+	// position comes from SV_Position and one matrix, which is what keeps this off the varyings the
+	// two generators have to agree on.  SHADOW-MAP-PLAN.md phase 2.
+	bool ShadowReceiving = false;
 };
 
 // The normal mapped pixel program reads this many directional lights from its constants.  Slots
 // past the draw's own lights carry no colour and add nothing.
 const unsigned NORMAL_MAPPED_LIGHTS = 4;
+
+// How much of the sun reaches a pixel, shared by the generated programs and the transcribed ones so
+// the two cannot drift.  The pixel is taken back out of clip space by one matrix, which lands it in
+// the sun's own clip space, and the filter is a square of taps around it: the share that come back
+// blocked is the share of the light that is missing.  ShadowParameters is the map's texel size, the
+// depth bias, how dark a fully blocked pixel goes and the radius in texels; a strength of zero is a
+// frame with no shadow map and every pixel in full sun.  SHADOW-MAP-PLAN.md phase 2.
+#define SHADOW_SAMPLING \
+	"Texture2D ShadowMap : register(t5);\n" \
+	"SamplerState ShadowSampler : register(s5);\n" \
+	"\n" \
+	"float sun_reaching(float4 position)\n" \
+	"{\n" \
+	"    if (ShadowParameters.z <= 0.0) return 1.0;\n" \
+	"    float2 ndc = float2(position.x * ShadowViewport.x * 2.0 - 1.0,\n" \
+	"                        1.0 - position.y * ShadowViewport.y * 2.0);\n" \
+	"    float4 sun = mul(float4(ndc, position.z, 1.0), ShadowFromClip);\n" \
+	"    if (sun.w <= 0.0) return 1.0;\n" \
+	"    sun /= sun.w;\n" \
+	"    float2 map = float2(0.5 * sun.x + 0.5, 0.5 - 0.5 * sun.y);\n" \
+	"    if (map.x < 0.0 || map.x > 1.0 || map.y < 0.0 || map.y > 1.0) return 1.0;\n" \
+	"    if (sun.z < 0.0 || sun.z > 1.0) return 1.0;\n" \
+	"    float texel = ShadowParameters.x;\n" \
+	"    float bias = ShadowParameters.y;\n" \
+	"    float radius = ShadowParameters.w;\n" \
+	"    float blocked = 0.0;\n" \
+	"    for (int y = -1; y <= 1; ++y) {\n" \
+	"        for (int x = -1; x <= 1; ++x) {\n" \
+	"            float2 at = map + float2(x, y) * texel * radius;\n" \
+	"            float depth = ShadowMap.SampleLevel(ShadowSampler, at, 0).r;\n" \
+	"            blocked += (depth + bias < sun.z) ? 1.0 : 0.0;\n" \
+	"        }\n" \
+	"    }\n" \
+	"    return 1.0 - ShadowParameters.z * (blocked / 9.0);\n" \
+	"}\n" \
+	"\n"
 
 // The HLSL for one description, or false when the description names an operation or an argument
 // this does not generate.  A refusal is not a failure: the caller keeps the fixed-function path for
