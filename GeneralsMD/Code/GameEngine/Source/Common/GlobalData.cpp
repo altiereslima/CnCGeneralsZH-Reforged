@@ -680,9 +680,9 @@ GlobalData::GlobalData()
 	m_startAtMaxZoom = TRUE;		//open a game framed as wide as the player could zoom by hand
 	m_shadowsForProps = TRUE;				//likewise: scenery with no shadow of its own gets one
 	m_shadowsForParticles = TRUE;	//on by default: the shipped INI has no entry for it
-	m_shadowMap = FALSE;					//the sun's depth pass is off until something reads it
+	m_shadowMap = TRUE;						//the sun's own shadows are what the game draws with now
+	m_shadowMapOnly = TRUE;				//and they replace the stencil volumes rather than joining them
 	m_shadowMapReport = FALSE;
-	m_shadowMapOnly = FALSE;
 	m_shadowMapPenumbra = 0.0f;		//zero anywhere here means the built-in value stands
 	m_shadowMapSkyFill = 0.0f;
 	m_shadowMapStrength = 0.0f;

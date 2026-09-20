@@ -121,6 +121,10 @@ const Real cosAngleToCare = cos ((0.2 * PI) / 180.0);	//1.5 degree difference
 #define SHADOW_MAP_PENUMBRA_PER_UNIT 0.04f
 #define SHADOW_MAP_SKY_FILL 0.12f
 
+// Whether the sun's map took this frame.  The volumes read it to know whether to stand down, and it
+// is false on a machine with no Direct3D 11 device, which is what keeps that machine's shadows.
+static Bool theShadowMapHoldsTheFrame = FALSE;
+
 //#define SV_DEBUG
 //#define SV_DEBUG_BOUNDS
 
@@ -3818,11 +3822,13 @@ DECLARE_PERF_TIMER(shadowVolumeSubmit)
 		more than one view.  SHADOW-MAP-PLAN.md phase 1. */
 void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 {
+	theShadowMapHoldsTheFrame = FALSE;
+
 	if (!TheGlobalData->m_shadowMap || m_shadowList == NULL || TheTacticalView == NULL)
 		return;
 
 	if (!Direct3D11_Begin_Shadow_Map( SHADOW_MAP_TEXELS ))
-		return;
+		return;		//no Direct3D 11 device, or it refused the surface: the volumes keep the frame
 
 	Coord3D look;
 	TheTacticalView->getPosition( &look );
@@ -3916,6 +3922,10 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 	Direct3D11_Set_Shadow_Parameters( SHADOW_MAP_DEPTH_BIAS, strength, widest,
 		SHADOW_MAP_NARROWEST_TEXELS, penumbra / worldPerTexel, unitsPerUnitOfDepth, skyFill );
 
+	// Said last, and only on the way out: everything above can bail, and the volumes have to know
+	// whether this frame's shadows are in the map or still theirs to draw.
+	theShadowMapHoldsTheFrame = (casters > 0);
+
 	// The report costs a full stall of the pipeline, so it is one line a second rather than one a
 	// frame: what it answers is whether the pass draws the world at all, and that does not change
 	// thirty times a second.
@@ -3938,10 +3948,11 @@ void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
 	W3DVolumetricShadow *shadow;
 	Int numRenderedShadows = 0;
 
-	/* -shadowmaponly leaves the casters registered, and so in the sun's map, while taking the
-		 volumes' own darkening off the frame.  Turning the volumes off in the options instead would
-		 stop the casters being registered at all and leave the map with nothing in it. */
-	if (TheGlobalData->m_shadowMapOnly)
+	/* The volumes stand down only where the sun's map has actually taken this frame.  The casters
+		 stay registered either way, which is what keeps them in the map; what stops is the volumes'
+		 own darkening pass.  A machine with no Direct3D 11 device fills no map and keeps the volumes,
+		 so nobody ends up with no shadows at all. */
+	if (TheGlobalData->m_shadowMapOnly && theShadowMapHoldsTheFrame)
 		return;
 
  	AABoxClass bbox;

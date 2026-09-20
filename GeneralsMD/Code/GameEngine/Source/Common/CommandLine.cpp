@@ -930,9 +930,25 @@ Int parseShadowMap(char *args[], int num)
 	if (TheWritableGlobalData)
 	{
 		// The map replaces the volumes rather than joining them: a caster that cast both would cast
-		// twice, once hard and once soft, and the hard one would win every argument.
+		// twice, once hard and once soft, and the hard one would win every argument.  On by default
+		// since the shadows settled, so this switch only puts back what a -noshadowmap took off.
 		TheWritableGlobalData->m_shadowMap = TRUE;
 		TheWritableGlobalData->m_shadowMapOnly = TRUE;
+	}
+	return 1;
+}
+
+/* -noshadowmap: the stencil volumes back, the way the game drew shadows before the map.
+
+	 It is what a comparison is made against, and it is what somebody types if the new shadows are
+	 wrong on their machine.  A machine with no Direct3D 11 device needs nothing: it fills no map
+	 and keeps the volumes on its own. */
+Int parseNoShadowMap(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_shadowMap = FALSE;
+		TheWritableGlobalData->m_shadowMapOnly = FALSE;
 	}
 	return 1;
 }
@@ -2275,6 +2291,7 @@ static CommandLineParam params[] =
 	{ "-smoke", parseSmoke },
 	{ "-particlecap", parseParticleCap },
 	{ "-shadowmap", parseShadowMap },
+	{ "-noshadowmap", parseNoShadowMap },
 	{ "-shadowmapreport", parseShadowMapReport },
 	{ "-shadowmaponly", parseShadowMapOnly },
 	{ "-shadowmapboth", parseShadowMapBoth },
