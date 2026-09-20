@@ -682,6 +682,10 @@ GlobalData::GlobalData()
 	m_shadowMap = FALSE;					//the sun's depth pass is off until something reads it
 	m_shadowMapReport = FALSE;
 	m_shadowMapOnly = FALSE;
+	m_shadowMapPenumbra = 0.0f;		//zero anywhere here means the built-in value stands
+	m_shadowMapSkyFill = 0.0f;
+	m_shadowMapStrength = 0.0f;
+	m_shadowMapWidest = 0.0f;
 	m_textureReductionFactor = -1;
 	m_enableBehindBuildingMarkers = TRUE;
 	m_scriptDebug = FALSE;

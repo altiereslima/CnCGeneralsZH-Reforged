@@ -937,6 +937,26 @@ Int parseShadowMap(char *args[], int num)
 	return 1;
 }
 
+/* -shadowtune <penumbra> <skyfill> <strength> <widest>: the four numbers that decide what a shadow
+	 from the map looks like, from the command line rather than from a rebuild.
+
+	 They are a judgement and not a measurement, so they are settled by looking at the same frame at
+	 several settings, and a rebuild between every picture makes that an afternoon rather than a
+	 pass.  A zero in any position leaves that one at the value the build carries. */
+Int parseShadowTune(char *args[], int num)
+{
+	if (TheWritableGlobalData == NULL || num < 5)
+		return 1;
+
+	TheWritableGlobalData->m_shadowMap = TRUE;
+	TheWritableGlobalData->m_shadowMapOnly = TRUE;
+	TheWritableGlobalData->m_shadowMapPenumbra = (Real)atof( args[ 1 ] );
+	TheWritableGlobalData->m_shadowMapSkyFill = (Real)atof( args[ 2 ] );
+	TheWritableGlobalData->m_shadowMapStrength = (Real)atof( args[ 3 ] );
+	TheWritableGlobalData->m_shadowMapWidest = (Real)atof( args[ 4 ] );
+	return 5;
+}
+
 /* -shadowmapboth: the map and the stencil volumes at once, which is not a picture anybody should
 	 play with.  It exists because the two can only be compared in one frame when both are in it. */
 Int parseShadowMapBoth(char *args[], int num)
@@ -2258,6 +2278,7 @@ static CommandLineParam params[] =
 	{ "-shadowmapreport", parseShadowMapReport },
 	{ "-shadowmaponly", parseShadowMapOnly },
 	{ "-shadowmapboth", parseShadowMapBoth },
+	{ "-shadowtune", parseShadowTune },
 	{ "-noparticleshadows", parseNoParticleShadows },
 	{ "-quickstart", parseQuickStart },
 

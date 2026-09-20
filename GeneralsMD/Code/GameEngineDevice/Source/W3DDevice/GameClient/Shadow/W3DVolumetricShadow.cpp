@@ -3901,12 +3901,20 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 		 many world units across, and a unit of depth is the whole of the near to far range, because
 		 an orthographic projection puts depth on a straight line. */
 	const Real worldPerTexel = (2.0f * SHADOW_MAP_HALF_WIDTH) / (Real)SHADOW_MAP_TEXELS;
-	const Real texelsPerUnitOfGap = SHADOW_MAP_PENUMBRA_PER_UNIT / worldPerTexel;
 	const Real unitsPerUnitOfDepth = SHADOW_MAP_FAR_CLIP - SHADOW_MAP_NEAR_CLIP;
 
-	Direct3D11_Set_Shadow_Parameters( SHADOW_MAP_DEPTH_BIAS, SHADOW_MAP_STRENGTH,
-		SHADOW_MAP_WIDEST_TEXELS, SHADOW_MAP_NARROWEST_TEXELS, texelsPerUnitOfGap,
-		unitsPerUnitOfDepth, SHADOW_MAP_SKY_FILL );
+	// -shadowtune overrules any of the four that it was given; a zero leaves the build's own.
+	const Real penumbra = (TheGlobalData->m_shadowMapPenumbra > 0.0f)
+		? TheGlobalData->m_shadowMapPenumbra : SHADOW_MAP_PENUMBRA_PER_UNIT;
+	const Real skyFill = (TheGlobalData->m_shadowMapSkyFill > 0.0f)
+		? TheGlobalData->m_shadowMapSkyFill : SHADOW_MAP_SKY_FILL;
+	const Real strength = (TheGlobalData->m_shadowMapStrength > 0.0f)
+		? TheGlobalData->m_shadowMapStrength : SHADOW_MAP_STRENGTH;
+	const Real widest = (TheGlobalData->m_shadowMapWidest > 0.0f)
+		? TheGlobalData->m_shadowMapWidest : SHADOW_MAP_WIDEST_TEXELS;
+
+	Direct3D11_Set_Shadow_Parameters( SHADOW_MAP_DEPTH_BIAS, strength, widest,
+		SHADOW_MAP_NARROWEST_TEXELS, penumbra / worldPerTexel, unitsPerUnitOfDepth, skyFill );
 
 	// The report costs a full stall of the pipeline, so it is one line a second rather than one a
 	// frame: what it answers is whether the pass draws the world at all, and that does not change
