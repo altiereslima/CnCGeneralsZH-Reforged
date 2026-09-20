@@ -1126,7 +1126,9 @@ found and fixed â€” EA's own, not port damage.**
 - Sound and movies come from the game itself now. The 2003 sound and video libraries are 32-bit and
   cannot be loaded by a 64-bit program at all, so the build carries its own: Windows' own mixer for
   sound, and a decoder for the movies that reads the same files the game has always shipped. Nothing
-  about what you hear or watch changes, and the two old libraries are no longer in the download.
+  about what you hear or watch changes, and the two old libraries are no longer in the download. The
+  decoder was built for this game and holds only the formats it opens, so it adds 3MB rather than
+  the 123MB a general-purpose one would.
 - Your replays still play and your matches still join. The old 32-bit build and this one work out
   the same game, to the digit: the same match played by both, 3000 frames of computer against
   computer, ends on the same world with the same checksum. That is what the change was measured
