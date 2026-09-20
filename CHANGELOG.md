@@ -41,6 +41,14 @@ found and fixed â€” EA's own, not port damage.**
 - Nor does it know which start position you took. It used to read that straight off the lobby, for every player, from the first second. Now it works it out: each position it has not looked at is a suspect, and the odds are simply how many opponents are still unaccounted for over how many places they could be - three of you on an eight-position map is 3 in 7 for each. Every empty position its scout crosses off makes the rest likelier, 3 in 6, then 3 in 5. When the numbers meet, it stops looking: three opponents with three places left to be is not a guess, and walking over to confirm it would waste the trip. On a two-player map that is true from the start, so nothing changed there - it never wastes a second hunting for an address it can work out by subtraction. Where it has not worked you out yet, it attacks the position you are most likely to be on, and finds out on arrival.
 - Nor does it read your base off the map. Where your base is, what it is worth, which supply dock to expand to and where to aim a superweapon all came off a walk of your object list, in the shroud, from the first second of the match. The computer now only counts what it can see, plus the buildings it has already found - buildings do not walk away. Before it has scouted you, all it knows is where you started, which is on the map preview anyway.
 
+## Superweapons that go where the damage is
+
+- The computer picked its superweapon target by adding up what your things cost inside the blast, so a supply stash outranked the tank column parked next to it. Anything that can shoot back is now worth several times its price, and base defences and massed armour are what the shot goes looking for.
+- It could only aim inside the rectangle your buildings sit in. An attack wave sitting on its doorstep was never a target at all; now your army counts wherever it is standing.
+- Two silos ready on the same second fired at the same spot, because nothing that was already in the air was on the map yet. A spot that has just been aimed at is worth nothing to the next shot and climbs back over ten minutes, so the salvo spreads across your base instead of digging one crater.
+- Measured over a half-hour match: a Particle Cannon that fired at the identical spot three times running now spreads six shots over five parts of the map, and comes back to the first one at the end, when what you rebuilt there is worth twice what it killed.
+- The spy satellite goes through the same targeting, and it was scanning one cell of one base seventeen times a match. It sweeps now.
+
 ## Generals powers the computer actually meant to buy
 
 - It spent every promotion point the moment it had one, on whatever in its list happened to be cheap enough. The strong three-point ability at the end of the list was never reached, because the points were always already gone.

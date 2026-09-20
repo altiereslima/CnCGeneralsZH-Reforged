@@ -9073,6 +9073,45 @@ TEST(retreat_ratio_measures_the_exchange_not_the_health_bar)
 }
 
 
+/** A superweapon takes seconds to arrive and everything it is about to kill stands there the whole
+	 time, so the scan that picks the target says the same thing to the second silo and to the next
+	 script pass.  Two AIs with three Scud Storms between them put all three in one crater. */
+TEST(a_superweapon_does_not_aim_where_one_is_already_falling)
+{
+	const Real RADIUS_SQR = 100.0f * 100.0f;
+	const UnsignedInt WINDOW = 60 * LOGICFRAMES_PER_SECOND;
+
+	// the spot one is falling on right now is worth nothing to the next one
+	CHECK_NEAR( 0.0f, aiStrikeFade( 0.0f, RADIUS_SQR, 0, WINDOW ), 0.0001f );
+
+	// and it comes back, so ground he has rebuilt on is a target again rather than banned forever
+	CHECK_NEAR( 0.5f, aiStrikeFade( 0.0f, RADIUS_SQR, WINDOW/2, WINDOW ), 0.0001f );
+	CHECK_NEAR( 1.0f, aiStrikeFade( 0.0f, RADIUS_SQR, WINDOW, WINDOW ), 0.0001f );
+	CHECK_NEAR( 1.0f, aiStrikeFade( 0.0f, RADIUS_SQR, 10*WINDOW, WINDOW ), 0.0001f );
+
+	// the rest of his base is not in that crater, whatever is landing in it
+	CHECK_NEAR( 1.0f, aiStrikeFade( RADIUS_SQR, RADIUS_SQR, 0, WINDOW ), 0.0001f );
+	CHECK_NEAR( 1.0f, aiStrikeFade( 4.0f*RADIUS_SQR, RADIUS_SQR, 0, WINDOW ), 0.0001f );
+
+	//
+	// The grading is what moves the next shot, and a flat fade is the version that did not: taking
+	// the same amount off every point in the blast leaves them in the same order, so the scan hands
+	// back the same winner and only the number changes. Half a radius off the crater keeps half its
+	// worth, so the second shot slides over and covers ground the first one did not.
+	//
+	CHECK_NEAR( 0.5f, aiStrikeFade( 0.25f*RADIUS_SQR, RADIUS_SQR, 0, WINDOW ), 0.0001f );
+	CHECK( aiStrikeFade( 0.0f, RADIUS_SQR, 0, WINDOW ) < aiStrikeFade( 0.25f*RADIUS_SQR, RADIUS_SQR, 0, WINDOW ) );
+	CHECK( aiStrikeFade( 0.25f*RADIUS_SQR, RADIUS_SQR, 0, WINDOW ) < aiStrikeFade( 0.81f*RADIUS_SQR, RADIUS_SQR, 0, WINDOW ) );
+
+	// ... and both halves of it fade together: older and further off are both worth more
+	CHECK( aiStrikeFade( 0.25f*RADIUS_SQR, RADIUS_SQR, 0, WINDOW )
+				 < aiStrikeFade( 0.25f*RADIUS_SQR, RADIUS_SQR, WINDOW/2, WINDOW ) );
+
+	// no window is no memory: this is what every caller that does not want the fade gets
+	CHECK_NEAR( 1.0f, aiStrikeFade( 0.0f, RADIUS_SQR, 0, 0 ), 0.0001f );
+}
+
+
 /** AIPlayer.cpp: who the retreat is allowed to order home.  Aircraft are not: a move order is what
 	 starts a jet's or a helicopter's own round trip, so one handed to a parked aircraft every
 	 decision interval took it off the deck, flew it at the base centre, idled it and landed it

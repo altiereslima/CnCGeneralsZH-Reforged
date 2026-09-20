@@ -307,6 +307,13 @@ m_role(AIROLE_AGGRESSIVE)
 	}
 	m_heldSince = 0;
 
+	for( Int strike = 0; strike < MAX_REMEMBERED_STRIKES; ++strike )
+	{
+		m_strikeAim[ strike ].zero();
+		m_strikeFrame[ strike ] = 0;		// 0 == nothing aimed here yet, which fades nothing
+	}
+	m_strikeNext = 0;
+
 	m_frameLastBuildingBuilt = TheGameLogic->getFrame();
 	p->setCanBuildUnits(false); // turn off ai production by default.
 
@@ -1564,6 +1571,68 @@ void AIPlayer::onUnitProduced( Object *factory, Object *unit )
 	m_teamDelay = 0; // Cause the update queues & selection to happen immediately.
 }
 
+/** How long a spot stays spoken for after a superweapon has been aimed at it.
+	*
+	* It has to outlast a recharge or it buys nothing: the first cut was a minute, and the spy
+	* satellite - which goes through this same script action - recharges in 1801 frames and found
+	* its memory expired by one frame every single time, so it scanned the identical cell of the
+	* identical base seventeen times in a match.  One recharge is not enough either: a Particle
+	* Uplink Cannon comes back in 8400 frames and at a window of 9000 the crater has recovered 93%
+	* of its worth, which moves nothing - measured, three shots into the same spot.  Two recharges
+	* is the number, so the shot after this one has to find somewhere half as good before it will
+	* come back here.
+	*
+	* Coming back is deliberate.  The same three shots were at a cluster he kept rebuilding, worth
+	* 6859, then 7300, then 8900 - a target that grows back past the fade is one worth hitting
+	* again, and the fade recovering the whole way is what allows it. */
+enum { SUPERWEAPON_REAIM_FRAMES = 600 * LOGICFRAMES_PER_SECOND };
+
+//----------------------------------------------------------------------------------------------------------
+/** What a superweapon aimed at this spot is worth to this player right now.
+ *
+ * The score itself is EA's - the price of everything inside the blast - and the fade on top of it
+ * is what stops the salvo. A negative score belongs to a sneak attack, which reads defended ground
+ * as a cost rather than a prize; fading that would flatter exactly the ground it is avoiding.
+ */
+//----------------------------------------------------------------------------------------------------------
+Int AIPlayer::superweaponScore( Coord3D *center, Int playerNdx, Real radius, Bool targetMilitaryUnits )
+{
+	const Int value = getPlayerSuperweaponValue( center, playerNdx, radius, targetMilitaryUnits, m_player->getPlayerIndex() );
+	if( value <= 0 )
+		return value;
+
+	const UnsignedInt now = TheGameLogic->getFrame();
+	Real worth = 1.0f;
+	for( Int strike = 0; strike < MAX_REMEMBERED_STRIKES; ++strike )
+	{
+		if( m_strikeFrame[ strike ] == 0 )
+			continue;
+
+		const Real dx = center->x - m_strikeAim[ strike ].x;
+		const Real dy = center->y - m_strikeAim[ strike ].y;
+		const Real fade = aiStrikeFade( dx*dx + dy*dy, sqr( radius ), now - m_strikeFrame[ strike ],
+																		SUPERWEAPON_REAIM_FRAMES );
+		if( fade < worth )
+			worth = fade;			// the freshest shot covering this spot decides
+	}
+
+	return REAL_TO_INT( value * worth );
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** Remember a spot the next shot should leave alone.
+ *
+ * ponytail: recorded where the target is picked rather than where the shot leaves the silo - the
+ * one caller fires immediately after a successful compute, and nothing else in the tree aims one.
+ */
+//----------------------------------------------------------------------------------------------------------
+void AIPlayer::noteSuperweaponAim( const Coord3D *pos )
+{
+	m_strikeAim[ m_strikeNext ] = *pos;
+	m_strikeFrame[ m_strikeNext ] = TheGameLogic->getFrame();
+	m_strikeNext = (m_strikeNext + 1) % MAX_REMEMBERED_STRIKES;
+}
+
 //----------------------------------------------------------------------------------------------------------
 /**
  * Find a good spot to fire a superweapon.
@@ -1661,11 +1730,55 @@ Bool AIPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *power, Coord
 			pos.x = bounds.lo.x + ( bounds.width() * xIndex ) / xCount;
 			pos.y = bounds.lo.y + ( bounds.height() * yIndex ) / yCount;
 			pos.z = 0;
-			Int curCash = getPlayerSuperweaponValue( &pos, playerNdx, 2*weaponRadius, targetMilitaryUnits, m_player->getPlayerIndex() );
-			if ( curCash > cash) 
+			Int curCash = superweaponScore( &pos, playerNdx, 2*weaponRadius, targetMilitaryUnits );
+			if ( curCash > cash)
 			{
 				cash = curCash;
 				bestPos = pos;
+			}
+		}
+	}
+
+	//
+	// An army is a threat point wherever it happens to be standing, and the grid above only covers
+	// the ground his buildings are on: getPlayerStructureBounds measures structures, so the wave
+	// parked on our own doorstep was never a candidate at all - the AI could only ever shoot at
+	// real estate. Offer what we can see of his army as centres too and let the same score choose.
+	// ponytail: a value pass per armed unit, which is only paid on a frame a superweapon is ready.
+	//
+	Player *enemy = ThePlayerList->getNthPlayer( playerNdx );
+	if( targetMilitaryUnits && enemy != NULL )
+	{
+		const Int observerNdx = m_player->getPlayerIndex();
+		Player::PlayerTeamList::const_iterator teamIt;
+		for( teamIt = enemy->getPlayerTeams()->begin(); teamIt != enemy->getPlayerTeams()->end(); ++teamIt )
+		{
+			for( DLINK_ITERATOR<Team> instanceIt = (*teamIt)->iterate_TeamInstanceList(); !instanceIt.done(); instanceIt.advance() )
+			{
+				Team *team = instanceIt.cur();
+				if( !team )
+					continue;
+				for( DLINK_ITERATOR<Object> memberIt = team->iterate_TeamMemberList(); !memberIt.done(); memberIt.advance() )
+				{
+					Object *pObj = memberIt.cur();
+					if( !pObj || pObj->isKindOf( KINDOF_STRUCTURE ) )
+						continue;			// his buildings are what the grid above already walked
+					if( !pObj->isKindOf( KINDOF_CAN_ATTACK ) )
+						continue;			// a harvester is not a threat point; it is already worth its price in the grid
+					if( pObj->isSignificantlyAboveTerrain() )
+						continue;			// same rule as the value function: nothing is aimed at a plane in the air
+					if( !observerKnowsAbout( pObj, observerNdx ) )
+						continue;
+
+					Coord3D pos = *pObj->getPosition();
+					pos.z = 0;
+					Int curCash = superweaponScore( &pos, playerNdx, 2*weaponRadius, targetMilitaryUnits );
+					if( curCash > cash )
+					{
+						cash = curCash;
+						bestPos = pos;
+					}
+				}
 			}
 		}
 	}
@@ -1683,7 +1796,7 @@ Bool AIPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *power, Coord
 			pos.x = bestPos.x + (x-5)*(weaponRadius/10);
 			pos.y = bestPos.y + (y-5)*(weaponRadius/10);	// was (x-5): only the diagonal was scanned
 			pos.z = 0;
-			Int curCash = getPlayerSuperweaponValue( &pos, playerNdx, weaponRadius, targetMilitaryUnits, m_player->getPlayerIndex() );
+			Int curCash = superweaponScore( &pos, playerNdx, weaponRadius, targetMilitaryUnits );
 			if ( curCash > cash) 
 			{
 				cash = curCash;
@@ -1707,11 +1820,21 @@ Bool AIPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *power, Coord
 
   success = ( cash > -1 );
 
+	if( success )
+	{
+		DEBUG_LOG(("AI SUPERWEAPON frame %d player %d aims '%s' at (%.0f,%.0f), worth %d\n", TheGameLogic->getFrame(),
+			m_player->getPlayerIndex(), power->getName().str(), veryBestPos.x, veryBestPos.y, cash));
+		noteSuperweaponAim( &veryBestPos );
+	}
+
 
   return success;
 
 
 }
+
+/** How much an armed target is worth on top of its price, so the shot goes where the threat is. */
+const Real SUPERWEAPON_THREAT_WEIGHT = 2.0f;
 
 //----------------------------------------------------------------------------------------------------------
 /**
@@ -1790,9 +1913,19 @@ Int AIPlayer::getPlayerSuperweaponValue(Coord3D *center, Int playerNdx, Real rad
 						else
 							value = value / 10; // Superweapons cannot be killed by any superweapon, so we don't want to target them as highly. jba.
 					}
+					//
+					// What a superweapon is for. Price alone ranks a supply stash above the tank
+					// column parked beside it, which is why these shots landed in the money and not
+					// in the army. What can shoot is worth several times its price to be rid of:
+					// aiCombatPower reads ThingTemplate's ThreatValue where the data sets it and
+					// falls back on cost, the same weighing the retreat and the counter score use.
+					//
+					if( includeMilitaryUnits )
+						value += aiCombatPower( pObj ) * SUPERWEAPON_THREAT_WEIGHT;
+
 					if( applyNegValue )
 					{
-						cash -= factor * value * 5.0f; //Extremely undesired 
+						cash -= factor * value * 5.0f; //Extremely undesired
 					}
 					else
 					{
@@ -6761,7 +6894,7 @@ void AIPlayer::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 6;		// 2: scout  3: rung and role  4: scouting stamps  5: the capturer  6: parked waves
+	XferVersion currentVersion = 7;		// 2: scout  3: rung and role  4: scouting stamps  5: the capturer  6: parked waves  7: superweapon aims
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -6959,6 +7092,16 @@ void AIPlayer::xfer( Xfer *xfer )
 			xfer->xferInt( &m_heldSuffix[ held ] );
 		}
 		xfer->xferUnsignedInt( &m_heldSince );
+	}
+	// where the last shots were aimed, so a loaded game does not put the next one in the same crater
+	if( version >= 7 )
+	{
+		for( Int strike = 0; strike < MAX_REMEMBERED_STRIKES; ++strike )
+		{
+			xfer->xferCoord3D( &m_strikeAim[ strike ] );
+			xfer->xferUnsignedInt( &m_strikeFrame[ strike ] );
+		}
+		xfer->xferInt( &m_strikeNext );
 	}
 
 	// the ladder rung and the role, which are rolled once and must come back the same way

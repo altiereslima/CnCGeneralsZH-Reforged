@@ -403,7 +403,11 @@ protected:
 	Object *findSupplyCenter(Int minSupplies);
 	void getPlayerStructureBounds(Region2D *bounds, Int playerNdx, Bool conservative = FALSE, Int observerNdx = -1 );
 
-protected:	 
+	/// what a superweapon aimed here is worth, with the shots already on their way taken off
+	Int superweaponScore( Coord3D *center, Int playerNdx, Real radius, Bool targetMilitaryUnits );
+	void noteSuperweaponAim( const Coord3D *pos );	///< remember a spot, so the next shot goes elsewhere
+
+protected:
 
 	Player *m_player;									///< the Player we represent
 
@@ -475,6 +479,13 @@ protected:
 	AsciiString	m_heldLabel[ MAX_HELD_TEAMS ];		///< the approach the script asked for
 	Int					m_heldSuffix[ MAX_HELD_TEAMS ];		///< the enemy start index its path name ends in
 	UnsignedInt	m_heldSince;											///< frame the first of the parked teams arrived
+
+	/** Where the last few superweapons were aimed, so the next one does not land in the same crater
+		* while the one before it is still in the air. */
+	enum { MAX_REMEMBERED_STRIKES = 4 };
+	Coord3D			m_strikeAim[ MAX_REMEMBERED_STRIKES ];
+	UnsignedInt	m_strikeFrame[ MAX_REMEMBERED_STRIKES ];	///< frame each was aimed; 0 == slot never used
+	Int					m_strikeNext;											///< slot the next aim is written to
 };
 
 #endif // _AI_PLAYER_H_

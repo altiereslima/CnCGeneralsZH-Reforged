@@ -330,6 +330,19 @@ Real aiStartOccupiedOdds( Int unlocatedEnemies, Int uncheckedPositions );
 	* building in the way. */
 Bool aiIsIncomeNotATarget( Bool isTechBuilding, Bool isCapturable, Bool isTechBaseDefense );
 
+/** What a superweapon target is still worth, given one shot already aimed at it - 1.0 untouched,
+	* 0.0 right on top of a shot aimed this frame, climbing back over 'window' frames and with
+	* distance from that shot.
+	*
+	* A superweapon is in the air for several seconds and everything it is about to kill is standing
+	* the whole time, so a scan that reads the object list hands every ready superweapon, and every
+	* script pass until the first one lands, the identical point: three nukes in one crater.  The
+	* recovery is deliberately gradual rather than a ban - the ground an enemy rebuilt on is worth
+	* hitting again, and a base with nothing else left in it should still be shot at.
+	*
+	* Two shots further apart than the blast radius do not cover the same ground, so nothing fades. */
+Real aiStrikeFade( Real distanceSqr, Real radiusSqr, UnsignedInt age, UnsignedInt window );
+
 /** How attractive an enemy player is to go after, as a cost - lower is better, and it is a squared
 	* distance with the other terms folded into it so the units stay comparable.
 	*

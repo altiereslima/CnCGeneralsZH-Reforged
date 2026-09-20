@@ -1114,6 +1114,31 @@ Real aiRetreatRatio( Real myHealth, Real myPower, Real enemyHealth, Real enemyPo
 }
 
 //-------------------------------------------------------------------------------------------------
+/** What a spot is still worth to aim a superweapon at, after one already aimed near it.
+	*
+	* Nothing outside the blast fades, and nothing older than the window does.  Inside both, how much
+	* the two shots overlap decides: on top of the old aim the worth is the share of the window that
+	* has passed, at the rim it is untouched, and it slides between the two.
+	*
+	* The grading is the part that does the work, and the flat version that came first is why.  A
+	* fade that took the same amount off every point inside the blast left the ranking among them
+	* exactly as it was, so the second shot picked the same winner as the first and only the
+	* reported worth moved - measured, seventeen scans of one cell in one match.  Grading it makes
+	* the next shot slide off the crater and cover ground the last one did not. */
+//-------------------------------------------------------------------------------------------------
+Real aiStrikeFade( Real distanceSqr, Real radiusSqr, UnsignedInt age, UnsignedInt window )
+{
+	if( window == 0 || age >= window )
+		return 1.0f;
+	if( radiusSqr <= 0.0f || distanceSqr >= radiusSqr )
+		return 1.0f;
+
+	const Real overlap = 1.0f - sqrt( distanceSqr / radiusSqr );		// 1 on top of the old aim, 0 at the rim
+	const Real recovered = INT_TO_REAL( age ) / INT_TO_REAL( window );
+	return 1.0f - overlap * (1.0f - recovered);
+}
+
+//-------------------------------------------------------------------------------------------------
 Bool aiShouldMass( Real waitingThreat, Real enemyVisibleThreat, Real massFraction,
 									 Bool timeExpired, Bool baseUnderAttack )
 {
