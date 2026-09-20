@@ -323,7 +323,7 @@ enum ChromaEffect
 	EFFECT_SCUD
 };
 
-static const Int NUKE_EFFECT_FRAMES = LOGICFRAMES_PER_SECOND * 3;
+static const Int NUKE_EFFECT_FRAMES = LOGICFRAMES_PER_SECOND * 4;
 static const Int LASER_EFFECT_FRAMES = LOGICFRAMES_PER_SECOND * 3;
 static const Int SCUD_EFFECT_FRAMES = LOGICFRAMES_PER_SECOND * 4;
 // Both the nuke and the scud storm are ripples: rings behind rings, running out
@@ -334,17 +334,24 @@ static const Int SCUD_EFFECT_FRAMES = LOGICFRAMES_PER_SECOND * 4;
 //
 // Distances are in half-boards: a device is two of these across and about 1.4
 // from its centre to its corner.
-static const Real NUKE_RIPPLE_SPEED = 1.0f;			///< how fast the outermost ring travels
-static const Real NUKE_RIPPLE_WAVELENGTH = 0.55f;	///< ring to ring
-static const Real NUKE_RIPPLE_REACH = 1.8f;			///< where the rings have died away
+/// Long and fast is what makes it feel heavy: a ring nearly a whole half-board
+/// wide, moving quickly, so the board swells rather than flickers.
+static const Real NUKE_RIPPLE_SPEED = 2.0f;			///< how fast the outermost ring travels
+static const Real NUKE_RIPPLE_WAVELENGTH = 0.75f;	///< ring to ring
+static const Real NUKE_RIPPLE_REACH = 1.5f;			///< where the rings have died away
 /// The detonation, before the first ring has gone anywhere.
-static const Real NUKE_FLASH_SECONDS = 0.30f;
+static const Real NUKE_FLASH_SECONDS = 0.45f;
 
-static const Int SCUD_RIPPLE_COUNT = 14;
-static const Real SCUD_RIPPLE_LIFE = 1.1f;
-static const Real SCUD_RIPPLE_SPEED = 0.55f;
-static const Real SCUD_RIPPLE_WAVELENGTH = 0.16f;
-static const Real SCUD_RIPPLE_REACH = 0.55f;
+/// Twenty landings across the four seconds, one after another rather than at
+/// random moments, each one quick and a little wider than a key cluster.
+static const Int SCUD_RIPPLE_COUNT = 20;
+static const Real SCUD_RIPPLE_LIFE = 0.8f;
+static const Real SCUD_RIPPLE_SPEED = 1.8f;
+static const Real SCUD_RIPPLE_WAVELENGTH = 0.26f;
+static const Real SCUD_RIPPLE_REACH = 0.75f;
+/// How far off its slot a landing may drift, as a fraction of the gap between
+/// slots.  Without it the salvo arrives like a metronome.
+static const Real SCUD_LANDING_JITTER = 0.8f;
 
 static ChromaEffect s_effect = EFFECT_NONE;
 static UnsignedInt s_effectStartFrame = 0;
@@ -392,10 +399,11 @@ static Real chromaRippleIntensity( Real distance, Real radius, Real wavelength, 
 	if( radius <= 0.0f || distance > radius || distance >= reach )
 		return 0.0f;
 
+	// The plain cosine, not a sharpened one.  Squaring it narrows the crests until
+	// the rings read as a row of dots rather than as water.
 	const Real phase = (radius - distance) / wavelength;
 	const Real crest = 0.5f + 0.5f * cosf( phase * TWO_PI );
-	// Squared, so the rings read as rings instead of as a soft gradient.
-	return crest * crest * (1.0f - distance / reach);
+	return crest * (1.0f - distance / reach);
 }
 
 //-----------------------------------------------------------------------------
@@ -417,16 +425,11 @@ static Bool chromaEffectIsLive( UnsignedInt frame )
 /** The colour a cell takes while an effect is running.  The position comes in
 	* normalised so one set of maths covers a keyboard, a mouse and a fifteen lamp
 	* strip without knowing what shape any of them is. */
-static Int chromaEffectColor( Real acrossFraction, Real downFraction, Int cellIndex,
-															UnsignedInt frame )
+static Int chromaEffectColor( Real across, Real down, Int cellIndex, UnsignedInt frame )
 {
 	const Int duration = chromaEffectFrames( s_effect );
 	const Real elapsed = (Real)(frame - s_effectStartFrame) / (Real)LOGICFRAMES_PER_SECOND;
 	const Real fade = 1.0f - (Real)(frame - s_effectStartFrame) / (Real)duration;
-
-	// Centred coordinates, so the edges of any device sit at about one unit out.
-	const Real across = (acrossFraction - 0.5f) * 2.0f;
-	const Real down = (downFraction - 0.5f) * 2.0f;
 
 	if( s_effect == EFFECT_NUKE )
 	{
@@ -466,7 +469,11 @@ static Int chromaEffectColor( Real acrossFraction, Real downFraction, Int cellIn
 	for( Int ripple = 0; ripple < SCUD_RIPPLE_COUNT; ++ripple )
 	{
 		const UnsignedInt rippleSeed = s_effectSeed + (UnsignedInt)ripple * 0x9e3779b9u;
-		const Real age = elapsed - chromaHashUnit( rippleSeed + 2 ) * lastLanding;
+		// One after another down the salvo, each nudged off its slot so the rhythm
+		// is a bombardment rather than a metronome.
+		const Real spacing = lastLanding / (Real)SCUD_RIPPLE_COUNT;
+		const Real jitter = (chromaHashUnit( rippleSeed + 2 ) - 0.5f) * spacing * SCUD_LANDING_JITTER;
+		const Real age = elapsed - ((Real)ripple * spacing + jitter);
 		if( age < 0.0f || age >= SCUD_RIPPLE_LIFE )
 			continue;
 
@@ -519,18 +526,27 @@ void chromaSuperweaponLaunched( Int specialPowerType )
 
 //-----------------------------------------------------------------------------
 /** Paint the running effect over every device, on top of whatever the layout put
-	* there.  Nothing else on the board matters while a nuke is in the air. */
+	* there.  Nothing else on the board matters while a nuke is in the air.
+	*
+	* Both axes are divided by the same number, which is the half width.  Dividing
+	* each axis by its own extent instead stretches a keyboard's six rows to the
+	* same span as its twenty-two columns, and a ripple drawn in those coordinates
+	* jumps four rings per row: it comes out as a grid of dots rather than as a
+	* wave.  Keys are about square, so one step across and one step down have to
+	* be worth the same. */
 static void chromaPaintEffect( Int *cells, UnsignedInt frame )
 {
 	for( Int device = 0; device < CHROMA_DEVICE_COUNT; ++device )
 	{
 		const ChromaDevice &info = CHROMA_DEVICES[ device ];
+		const Real halfWidth = (Real)(info.columns - 1) * 0.5f;
+		const Real halfHeight = (Real)(info.rows - 1) * 0.5f;
 		for( Int row = 0; row < info.rows; ++row )
 		{
 			for( Int column = 0; column < info.columns; ++column )
 			{
-				const Real across = info.columns > 1 ? (Real)column / (Real)(info.columns - 1) : 0.5f;
-				const Real down = info.rows > 1 ? (Real)row / (Real)(info.rows - 1) : 0.5f;
+				const Real across = halfWidth > 0.0f ? ((Real)column - halfWidth) / halfWidth : 0.0f;
+				const Real down = halfWidth > 0.0f ? ((Real)row - halfHeight) / halfWidth : 0.0f;
 				const Int cell = info.firstCell + row * info.columns + column;
 				cells[ cell ] = chromaEffectColor( across, down, cell, frame );
 			}
