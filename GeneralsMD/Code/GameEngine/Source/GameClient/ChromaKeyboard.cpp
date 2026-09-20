@@ -1633,21 +1633,26 @@ static void chromaFillAlerts( Int *cells, Player *localPlayer, UnsignedInt frame
 }
 
 //-----------------------------------------------------------------------------
-static void chromaFillMoney( Int *cells, Player *localPlayer )
+static void chromaFillMoney( Int *cells, Player *localPlayer, Real alarm )
 {
 	const UnsignedInt money = localPlayer->getMoney()->countMoney();
 	const Int lit = chromaMoneySegments( money, MOUSEPAD_CELLS );
+	// The pad joins the alarm on the lamps the money has not reached, which leaves
+	// the count readable while it pulses: a green lamp and a red one are still two
+	// different lamps, where a pad tinted end to end is one long smear.
+	const Int dark = chromaAlarmed( COLOR_OFF, alarm * ALARM_DEPTH );
 
 	Int *mousepad = cells + MOUSEPAD_FIRST_CELL;
 	for( Int led = 0; led < MOUSEPAD_CELLS; ++led )
-		mousepad[ led ] = led < lit ? COLOR_GREEN : COLOR_OFF;
+		mousepad[ led ] = led < lit ? COLOR_GREEN : dark;
 }
 
 //-----------------------------------------------------------------------------
 /** The base is being shot at.  It goes on the mouse, which carries nothing to
 	* read and sits under the hand, and on the strip down the left edge of the
-	* board.  Everything else is left alone: this fires exactly when the player
-	* most needs to read the bar, and it used to bury it. */
+	* board.  The mousepad takes it too, in chromaFillMoney, on the lamps the money
+	* bar has not reached.  The keys are left alone: this fires exactly when the
+	* player most needs to read the bar, and it used to bury it. */
 static void chromaFillAlarm( Int *cells, Real alarm )
 {
 	if( alarm <= 0.0f )
@@ -1739,7 +1744,7 @@ static void chromaFillCells( Int *cells )
 	chromaFillSelection( cells );
 	chromaFillMatchState( cells, frame );
 	chromaFillAlerts( cells, localPlayer, frame );
-	chromaFillMoney( cells, localPlayer );
+	chromaFillMoney( cells, localPlayer, alarm );
 	chromaFillAlarm( cells, alarm );
 
 	// The radar lamp is the one piece of match state that comes off the player
