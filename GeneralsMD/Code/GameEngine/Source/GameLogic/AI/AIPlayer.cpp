@@ -1925,10 +1925,60 @@ Bool AIPlayer::isPossibleToBuildTeam( TeamPrototype *proto, Bool requireIdleFact
 /** Check if this team is buildable, doesn't exceed maximum limits, meets conditions, 
 	* and isn't under construction. */
 // ------------------------------------------------------------------------------------------------
+/** How many money units are worth owning.  An internet center holds four, and one working outside
+	it earns the same, so a couple over that covers a center being rebuilt.  Everything past this is
+	a barracks slot the army wanted and 625 that did not buy a tank. */
+static const Int MAX_MONEY_UNITS = 6;
+
+static void countMoneyUnit( Object *obj, void *userData )
+{
+	if( obj->isKindOf( KINDOF_MONEY_HACKER ) && !obj->isEffectivelyDead() )
+		(*(Int *)userData)++;
+}
+
+/** How many money units this player has standing, dead ones excluded.  Counted rather than tracked:
+	a hacker dies, is captured, or walks into a transport, and a running tally would drift. */
+Int AIPlayer::countMoneyUnits( void ) const
+{
+	Int count = 0;
+	m_player->iterateObjects( countMoneyUnit, &count );
+	return count;
+}
+
+/** Is every unit this team asks for a money unit?  The shipped skirmish scripts give China's hacker
+	team a production priority of 1000, which no other team can be scored above, so once it is
+	buildable it wins every selection it is offered - fifteen of thirty-five on seed 11. */
+static Bool isMoneyUnitTeam( const TeamPrototype *proto )
+{
+	const TeamTemplateInfo *info = proto->getTemplateInfo();
+	Int named = 0;
+	for( Int i = 0; i < info->m_numUnitsInfo; ++i )
+	{
+		const ThingTemplate *unit = TheThingFactory->findTemplate( info->m_unitsInfo[ i ].unitThingName, FALSE );
+		if( unit == NULL )
+			continue;			// a map's team naming a unit this game does not have
+		if( !unit->isKindOf( KINDOF_MONEY_HACKER ) )
+			return FALSE;
+		++named;
+	}
+	return named > 0;
+}
+
+/** A team of nothing but hackers spends against the same cap the direct purchase does, or the two
+	of them together bury a barracks under money units all match. */
+Bool AIPlayer::hasEnoughMoneyUnitsFor( TeamPrototype *proto ) const
+{
+	return isMoneyUnitTeam( proto ) && countMoneyUnits() >= MAX_MONEY_UNITS;
+}
+
 Bool AIPlayer::isAGoodIdeaToBuildTeam( TeamPrototype *proto )
 {
 	// Check condition.
 	if (!proto->evaluateProductionCondition()) {
+		return false;
+	}
+
+	if (hasEnoughMoneyUnitsFor(proto)) {
 		return false;
 	}
 	// check build limit
@@ -4429,6 +4479,7 @@ static void findInternetCenterWithRoom( Object *obj, void *userData )
 /** How near the quiet spot a hacker has to be before it sits down there. */
 static const Real HACK_SPOT_RADIUS = 120.0f;
 
+
 /** A hacker standing about is income nobody switched on.  It used to switch on wherever it stood,
 	* which was the barracks' rally point, and a player watched China's hackers sit down at the front of
 	* its base and get shot. */
@@ -4903,11 +4954,21 @@ void AIPlayer::doSuperweapons( void )
 /** A money unit from every factory that trains one and has at most one thing in its queue.  An
 	* idle-only rule measured as two hackers in a whole match, because a barracks feeding the army is
 	* never idle; one slot behind the army's unit is a delay the army does not notice.  It used to be
-	* one factory a pass; the owner's call is that a Hard China never falls behind on hackers. */
+	* one factory a pass; the owner's call is that a Hard China never falls behind on hackers.
+	*
+	* With a cap, because nothing counted them.  A Hard Tank General trained 67 of them over 20,000
+	* frames on seed 11, about two thirds of everything it spent, and a player watching it from the
+	* other side of the map reported that China's tank general builds nothing but infantry.  A hacker
+	* earns only while it is sitting still and working, an internet center holds four, and past a
+	* handful the next one is a rifleman with no rifle standing in a barracks queue the army wants. */
 //----------------------------------------------------------------------------------------------------------
 void AIPlayer::buyMoneyUnits( void )
 {
 	const Int MAX_QUEUED_AHEAD = 1;
+	Int owned = countMoneyUnits();
+	if( owned >= MAX_MONEY_UNITS )
+		return;
+
 	for( BuildListInfo *info = m_player->getBuildList(); info; info = info->getNext() )
 	{
 		Object *factory = TheGameLogic->findObjectByID( info->getObjectID() );
@@ -4918,8 +4979,13 @@ void AIPlayer::buyMoneyUnits( void )
 			continue;
 		const ThingTemplate *moneyUnit = buildableOfKind( factory, GUI_COMMAND_UNIT_BUILD, KINDOF_MONEY_HACKER );
 		if( moneyUnit && pu->queueCreateUnit( moneyUnit, pu->requestUniqueUnitID() ) )
-			DEBUG_LOG(("AI ECONOMY frame %d player %d trains '%s', %d in the bank\n", TheGameLogic->getFrame(),
-				m_player->getPlayerIndex(), moneyUnit->getName().str(), m_player->getMoney()->countMoney()));
+		{
+			DEBUG_LOG(("AI ECONOMY frame %d player %d trains '%s', %d in the bank, %d money units\n",
+				TheGameLogic->getFrame(), m_player->getPlayerIndex(), moneyUnit->getName().str(),
+				m_player->getMoney()->countMoney(), owned + 1));
+			if( ++owned >= MAX_MONEY_UNITS )
+				return;
+		}
 	}
 }
 

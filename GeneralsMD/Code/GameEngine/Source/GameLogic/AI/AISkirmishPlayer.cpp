@@ -396,6 +396,10 @@ Bool AISkirmishPlayer::isAGoodIdeaToBuildTeam( TeamPrototype *proto )
 	if (!proto->evaluateProductionCondition()) {
 		return false;
 	}
+
+	if (hasEnoughMoneyUnitsFor(proto)) {
+		return false;
+	}
 	// check build limit, which a hoard raises for attack teams; defence teams keep the data's
 	const TeamTemplateInfo *info = proto->getTemplateInfo();
 	Int allowedInstances = info->m_maxInstances;

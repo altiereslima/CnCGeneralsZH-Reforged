@@ -325,6 +325,8 @@ protected:
 	void buildAsap(const ThingTemplate *tmpl);	///< the plan's own unbuilt entry if it has one, otherwise a new spot behind the base
 
 	void buyMoneyUnits(void);
+	Int countMoneyUnits(void) const;	///< money units of this player's that are still standing
+	Bool hasEnoughMoneyUnitsFor(TeamPrototype *proto) const;	///< this team is all hackers and the cap is reached
 	Bool placeNear(const ThingTemplate *tmpl, const Coord3D *center, Real innerRadius);	///< a legal, safe spot on a ring round center, queued for a dozer
 	Real knownFirepowerAlongPath(Waypoint *way);	///< what this AI has seen that can shoot, along an approach
 	AsciiString secondApproachLabel(const Coord3D *from, const AsciiString &taken, Int pathSuffix);	///< the quietest other road, or empty
