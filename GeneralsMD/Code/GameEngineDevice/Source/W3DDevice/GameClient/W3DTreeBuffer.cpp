@@ -1427,11 +1427,19 @@ void W3DTreeBuffer::removeTreesForConstruction(const Coord3D* pos, const Geometr
 //=============================================================================
 /** Adds a type of tree (model & texture). */
 //=============================================================================
+//
+// Every failure below returns -1, which is what addTree's "if (treeType<0)" already reads as "do
+// not add this tree".  They used to return 0: a valid index, and when the failing type was the
+// first one on the map, an index at a slot whose m_data was still null.  The tree was added anyway
+// and put in the area partition, and the first unit to drive within its radius dereferenced that
+// null in unitMoved - the access violation at 0x10 (m_framesToMoveOutward) a player hit with the
+// base game's W3D.big not loaded, so every tree model on the map was missing.
+//=============================================================================
 Int W3DTreeBuffer::addTreeType(const W3DTreeDrawModuleData *data)
 {
 	if (m_numTreeTypes>=MAX_TYPES) {
 		DEBUG_CRASH(("Too many kinds of trees in map.  Reduce kinds of trees, or raise tree limit. jba."));
-		return 0;
+		return -1;
 	}
 	m_needToUpdateTexture = true;
 
@@ -1441,7 +1449,7 @@ Int W3DTreeBuffer::addTreeType(const W3DTreeDrawModuleData *data)
 
 	if (robj==NULL) {
 		DEBUG_CRASH(("Unable to find model for tree %s\n", data->m_modelName.str()));
-		return 0;
+		return -1;
 	}
 	AABoxClass box;
 
@@ -1450,19 +1458,34 @@ Int W3DTreeBuffer::addTreeType(const W3DTreeDrawModuleData *data)
 	if (robj->Class_ID() == RenderObjClass::CLASSID_HLOD) {
 		RenderObjClass *hlod = robj;
 		robj = hlod->Get_Sub_Object(0);
+		// An HLOD with nothing in it answers this with NULL, and the bone transform below read
+		// straight off it.  The model comes out of a big file the player supplies, so an empty one
+		// is a thing that arrives rather than a thing that cannot happen.
+		if (robj==NULL) {
+			DEBUG_CRASH(("Tree %s is an empty hierarchy.\n", data->m_modelName.str()));
+			REF_PTR_RELEASE(hlod);
+			return -1;
+		}
 		const Matrix3D xfm = robj->Get_Bone_Transform(0);
 		xfm.Get_Translation(&offset);
 		REF_PTR_RELEASE(hlod);
 	}
 
-	if (robj->Class_ID() == RenderObjClass::CLASSID_MESH)
+	if (robj->Class_ID() == RenderObjClass::CLASSID_MESH) {
 		m_treeTypes[m_numTreeTypes].m_mesh = (MeshClass*)robj;
+	} else {
+		// m_mesh takes over the reference Create_Render_Obj (or Get_Sub_Object) handed us; every
+		// other class walks out of this function and has to give it back.  A map full of trees the
+		// asset manager answers with the wrong class leaked one render object per tree, because
+		// addTreeType is called again for every instance of a type that never got added.
+		REF_PTR_RELEASE(robj);
+	}
 
 	DEBUG_LOG(("TREETYPE %d: %s\n", m_numTreeTypes, data->m_modelName.str()));
 
 	if (m_treeTypes[m_numTreeTypes].m_mesh==NULL) {
 		DEBUG_CRASH(("Tree %s is not simple mesh. Tell artist to re-export. Don't Ignore!!!\n", data->m_modelName.str()));
-		return 0;
+		return -1;
 	}
 
 	Int numVertex = m_treeTypes[m_numTreeTypes].m_mesh->Peek_Model()->Get_Vertex_Count();
