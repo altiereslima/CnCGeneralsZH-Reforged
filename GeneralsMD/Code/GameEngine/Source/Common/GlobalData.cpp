@@ -44,6 +44,7 @@
 #include "Common/FileSystem.h"
 #include "Common/GameAudio.h"
 #include "Common/INI.h"
+#include "Common/Monitors.h"
 #include "Common/OptionsCatalog.h"
 #include "Common/registry.h"
 #include "Common/UserPreferences.h"
@@ -1444,6 +1445,7 @@ void GlobalData::parseGameDataDefinition( INI* ini )
 
 	TheWritableGlobalData->m_xResolution = xres;
 	TheWritableGlobalData->m_yResolution = yres;
+	TheWritableGlobalData->m_monitor = optionPref["Monitor"];
 
 	// Everything in TheOptionCatalog, in one pass, and last: a row is allowed to overwrite what the
 	// hand-written block above just read.  This is also why the catalog is read here and not in
@@ -1477,8 +1479,9 @@ void applyWindowMode( void )
 
 	if( mode == WINDOW_MODE_BORDERLESS )
 	{
-		TheWritableGlobalData->m_xResolution = ::GetSystemMetrics( SM_CXSCREEN );
-		TheWritableGlobalData->m_yResolution = ::GetSystemMetrics( SM_CYSCREEN );
+		const MonitorEntry monitor = findMonitor( TheWritableGlobalData->m_monitor.str() );
+		TheWritableGlobalData->m_xResolution = monitor.rect.right - monitor.rect.left;
+		TheWritableGlobalData->m_yResolution = monitor.rect.bottom - monitor.rect.top;
 
 		// there is no desktop left around a borderless window to park the cursor on, so scrolling at
 		// the edge is the only way the mouse moves the camera

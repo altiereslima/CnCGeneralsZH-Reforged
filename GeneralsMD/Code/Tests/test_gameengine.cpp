@@ -63,6 +63,7 @@
 #include "Common/CommandLine.h"
 #include "Common/GlobalData.h"
 #include "Common/EarlyOptions.h"
+#include "Common/Monitors.h"
 #include "Common/OptionsCatalog.h"
 #include "Common/SubsystemInterface.h"
 #include "GameClient/GameText.h"
@@ -11384,6 +11385,60 @@ TEST(window_mode_derives_the_boolean_the_device_layer_reads)
 	CHECK_EQ( TheGlobalData->m_xResolution, (Int)::GetSystemMetrics( SM_CXSCREEN ) );
 	CHECK_EQ( TheGlobalData->m_yResolution, (Int)::GetSystemMetrics( SM_CYSCREEN ) );
 	CHECK_EQ( (Int)TheGlobalData->m_edgeScrollInWindowedMode, 1 );
+
+	TheWritableGlobalData = saved;
+	delete scratch;
+}
+
+/* The monitor list and the sizes each monitor offers, read off whatever desktop the test runs on.
+	 On a machine with one monitor everything below is about that one. */
+TEST(borderless_covers_the_monitor_options_ini_names)
+{
+	MonitorEntry monitors[ MAX_MONITOR_ENTRIES ];
+	const int count = listMonitors( monitors, MAX_MONITOR_ENTRIES );
+	CHECK( count >= 1 );
+
+	// the one checked below is a secondary where the machine has one
+	int primaries = 0;
+	MonitorEntry chosen = monitors[ 0 ];
+	for( int index = 0; index < count; ++index )
+	{
+		primaries += monitors[ index ].primary ? 1 : 0;
+		if( !monitors[ index ].primary )
+			chosen = monitors[ index ];
+		if( index > 0 )
+			CHECK( monitors[ index - 1 ].number < monitors[ index ].number );
+	}
+	CHECK_EQ( primaries, 1 );
+
+	// an empty name and a name nothing answers to both mean the primary
+	CHECK( findMonitor( "" ).primary );
+	CHECK( findMonitor( "\\\\.\\DISPLAY999" ).primary );
+	CHECK_STR( findMonitor( chosen.device ).device, chosen.device );
+
+	// every size once, smallest first, none under the floor the layouts are drawn for
+	DisplayModeEntry modes[ MAX_DISPLAY_MODE_ENTRIES ];
+	const int modeCount = listDisplayModes( chosen.device, modes, MAX_DISPLAY_MODE_ENTRIES );
+	CHECK( modeCount >= 1 );
+	for( int index = 0; index < modeCount; ++index )
+	{
+		CHECK( modes[ index ].width >= MIN_DISPLAY_MODE_WIDTH );
+		CHECK( modes[ index ].height >= MIN_DISPLAY_MODE_HEIGHT );
+		if( index > 0 )
+			CHECK( modes[ index - 1 ].width < modes[ index ].width
+						 || ( modes[ index - 1 ].width == modes[ index ].width
+									&& modes[ index - 1 ].height < modes[ index ].height ) );
+	}
+
+	GlobalData *saved = TheWritableGlobalData;
+	GlobalData *scratch = NEW GlobalData;
+	TheWritableGlobalData = scratch;
+
+	scratch->m_monitor = chosen.device;
+	scratch->m_windowMode = WINDOW_MODE_BORDERLESS;
+	applyWindowMode();
+	CHECK_EQ( TheGlobalData->m_xResolution, (Int)( chosen.rect.right - chosen.rect.left ) );
+	CHECK_EQ( TheGlobalData->m_yResolution, (Int)( chosen.rect.bottom - chosen.rect.top ) );
 
 	TheWritableGlobalData = saved;
 	delete scratch;

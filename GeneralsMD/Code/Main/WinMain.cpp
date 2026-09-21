@@ -52,6 +52,7 @@
 #include "Common/EarlyCommandLine.h"
 #include "Common/EarlyOptions.h"
 #include "Common/Errors.h"
+#include "Common/Monitors.h"
 #include "Common/GameMemory.h"
 #include "Common/INIException.h"
 #include "Common/SafeDisc/CdaPfn.h"
@@ -498,7 +499,10 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message,
 					// Put it at the origin instead.
 					//
 					if (ApplicationIsBorderless)
-						::SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+					{
+						const RECT screen = findMonitor(TheGlobalData ? TheGlobalData->m_monitor.str() : "").rect;
+						::SetWindowPos(hWnd, NULL, screen.left, screen.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+					}
 				}
 				break;
 
@@ -818,11 +822,17 @@ static Bool initializeAppWindows( HINSTANCE hInstance, Int nCmdShow, Bool runWin
 
 	gInitializing = true;
 
+	// Born in the middle of the monitor Options.ini names, so the splash and then the game are on it
+	// from the first frame.  The engine cannot say which that is yet.
+	char savedMonitor[CCHDEVICENAME];
+	findEarlyOptionValue( "Monitor", savedMonitor, sizeof( savedMonitor ) );
+	const RECT screen = findMonitor( savedMonitor ).rect;
+
   HWND hWnd = CreateWindow( TEXT("Game Window"),
                             TEXT("Command and Conquer Generals"),
-                            windowStyle, 
-														(GetSystemMetrics( SM_CXSCREEN ) / 2) - (startWidth / 2), // original position X
-														(GetSystemMetrics( SM_CYSCREEN ) / 2) - (startHeight / 2),// original position Y
+                            windowStyle,
+														(screen.left + screen.right) / 2 - (startWidth / 2), // original position X
+														(screen.top + screen.bottom) / 2 - (startHeight / 2),// original position Y
 														// Lorenzen nudged the window higher
 														// so the constantdebug report would 
 														// not get obliterated by assert windows, thank you.

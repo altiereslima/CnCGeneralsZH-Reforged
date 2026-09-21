@@ -563,7 +563,15 @@ GUI:WindowMode2
 END
 
 TOOLTIP:WindowMode
-"Fullscreen takes the display mode, borderless covers it with a window and alt-tabs instantly. Borderless picks the resolution itself, so the list on the left is yours in the other two."
+"Fullscreen takes the display mode, borderless covers it with a window and alt-tabs instantly. Borderless takes the monitor's own resolution, so the list above is yours in the other two."
+END
+
+GUI:Monitor
+"Monitor"
+END
+
+TOOLTIP:Monitor
+"The monitor the game plays on. The resolution list below holds the sizes this monitor can show. Applied when you Accept."
 END
 
 GUI:MSAA

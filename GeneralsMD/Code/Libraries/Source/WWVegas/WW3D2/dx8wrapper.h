@@ -599,6 +599,9 @@ public:
 	// mode and gamma back and minimises the window, which is what leaving the game does; true puts
 	// the game's back.  A windowed game, or one Direct3D 9 presents, only gets the desktop restored.
 	static void Apply_Fullscreen_Display(bool shown);
+	// The monitor that display mode and window go on, as its GDI device name.  WW3D2 cannot see
+	// GlobalData, so the app layer pushes it in before the device is made or reset, like the vsync.
+	static void Set_Requested_Monitor(const char * device);
 
 	static const DX8Caps*	Get_Current_Caps() { WWASSERT(CurrentCaps); return CurrentCaps; }
 

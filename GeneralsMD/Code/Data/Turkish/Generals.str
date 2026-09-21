@@ -15138,7 +15138,15 @@ GUI:WindowMode2
 END
 
 TOOLTIP:WindowMode
-"Tam ekran, görüntü modunu devralır; kenarlıksız, ekranı bir pencereyle kaplar ve alt-tab anında gerçekleşir. Kenarlıksız çözünürlüğü kendisi seçer; diğer iki modda soldaki listeden siz seçersiniz."
+"Tam ekran, görüntü modunu devralır; kenarlıksız, ekranı bir pencereyle kaplar ve alt-tab anında gerçekleşir. Kenarlıksız monitörün kendi çözünürlüğünü alır; diğer iki modda yukarıdaki listeden siz seçersiniz."
+END
+
+GUI:Monitor
+"Monitör"
+END
+
+TOOLTIP:Monitor
+"Oyunun oynandığı monitör. Alttaki çözünürlük listesi bu monitörün gösterebildiği boyutları içerir. Kabul Et'e bastığınızda uygulanır."
 END
 
 GUI:MSAA
