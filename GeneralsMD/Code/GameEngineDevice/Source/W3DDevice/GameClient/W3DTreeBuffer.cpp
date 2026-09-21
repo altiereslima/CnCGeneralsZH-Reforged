@@ -2108,8 +2108,10 @@ void W3DTreeBuffer::drawTrees(CameraClass * camera, RefRenderObjListIterator *pD
 	// so with volume shadows picked trees were the one thing in the scene standing on nothing.
 	Bool drawShadows = TheGlobalData->m_useShadowDecals || TheGlobalData->m_useShadowVolumes;
 	// The silhouette pass needs the vertex shader, since flattening the tree onto the ground is the
-	// shader's own sway arithmetic with different constants.  Hardware without one keeps the blob.
-	Bool silhouetteShadows = drawShadows && m_dwTreeVertexShader != 0 && TheW3DShadowManager != NULL;
+	// shader's own sway arithmetic with different constants.  Hardware without one keeps the blob,
+	// and so does classic graphics, because the blob is what every tree had in 2003.
+	Bool silhouetteShadows = drawShadows && m_dwTreeVertexShader != 0 && TheW3DShadowManager != NULL &&
+		!TheGlobalData->m_classicGraphics;
 
 	// Draw tree shadows.
 	// Trees are batched vertices with no render object of their own, so the one shared blob decal

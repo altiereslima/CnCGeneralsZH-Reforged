@@ -1964,10 +1964,12 @@ static Bool fillShadowInfoFromTemplate(const ThingTemplate *tmplate, Shadow::Sha
 	tree's triangles on the ground has nothing of theirs to lay, and all they ever had was the round
 	decal their template asks for.  The tree buffer takes their meshes over instead.
 
-	The test is the template's own words: shrubbery, fixed in place, asking for a decal. */
+	The test is the template's own words: shrubbery, fixed in place, asking for a decal.  Classic
+	graphics keeps the decal, which is what a palm stood on in 2003. */
 static Bool wantsModelShadow(const ThingTemplate *tmplate)
 {
 	return tmplate->getShadowType() == SHADOW_DECAL &&
+					!TheGlobalData->m_classicGraphics &&
 					TheGlobalData->m_shadowsForProps &&
 					(TheGlobalData->m_useShadowDecals || TheGlobalData->m_useShadowVolumes) &&
 					tmplate->isKindOf(KINDOF_SHRUBBERY) &&
