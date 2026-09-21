@@ -152,9 +152,11 @@ void DeepCRCSanityCheck::reset(void)
 	static Int timesThrough = 0;
 	static UnsignedInt lastCRC = 0;
 
-	AsciiString fname;
-	fname.format("%sCRCAfter%dMaps.dat", TheGlobalData->getPath_UserData().str(), timesThrough);
-	UnsignedInt thisCRC = TheGameLogic->getCRC( CRC_RECALC, fname );
+	// EA wrote the whole deep CRC out to CRCAfter<n>Maps.dat in the user data folder here, on every
+	// player's machine, for a comparison only this function makes and only against the number.  A
+	// folder that refused the write threw out of the shell map's first frame as "Uncaught exception
+	// in WinMain"; the number alone is all the check needs.
+	UnsignedInt thisCRC = TheGameLogic->getCRC( CRC_RECALC );
 
 	DEBUG_LOG(("DeepCRCSanityCheck: CRC is %X\n", thisCRC));
 	DEBUG_ASSERTCRASH(timesThrough == 0 || thisCRC == lastCRC,

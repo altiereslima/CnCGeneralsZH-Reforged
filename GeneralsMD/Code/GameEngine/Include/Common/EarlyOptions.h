@@ -97,18 +97,44 @@ inline bool findDocumentsFolderA( char *out, size_t outSize )
 	return true;
 }
 
+/** Whether a file can be created in this directory, which is made first if it is missing.
+	*
+	* Windows' Controlled Folder Access, the ransomware protection in Defender, refuses an unknown
+	* program any write under Documents, and a new generals.exe is an unknown program.  The first
+	* write the game makes there is a debugging CRC file just after the shell map loads, and it
+	* threw; the crash report meant to explain that could not be written either, so v2.0.0 players
+	* got "Technical Difficulties" five seconds in with nothing to send.  The probe deletes itself. */
+inline bool isDirectoryWritable( const char *directory )
+{
+	::CreateDirectoryA( directory, NULL );
+
+	char probe[MAX_PATH * 2];
+	if (::_snprintf( probe, sizeof( probe ), "%szhr-write-test.tmp", directory ) < 0)
+		return false;
+	probe[sizeof( probe ) - 1] = 0;
+
+	HANDLE file = ::CreateFileA( probe, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+		FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, NULL );
+	if (file == INVALID_HANDLE_VALUE)
+		return false;
+	::CloseHandle( file );
+	return true;
+}
+
 /** The directory the game keeps Options.ini, replays and save games in.
 	*
-	* GlobalData works this out the same way at startup (Documents plus a leaf name the installer
-	* writes into the registry), but it does it far too late to help WinMain.  Both defaults have to
-	* match GlobalData.cpp's or the two read different files. */
+	* Documents plus a leaf name the installer writes into the registry.  WinMain needs it before
+	* the engine exists and GlobalData sets m_userDataDir from it, so the two cannot disagree.  When
+	* nothing can be written there the same leaf under %LOCALAPPDATA% is used instead, which no
+	* folder protection covers; the settings the player had in Documents are then left behind, but
+	* a game that cannot save settings could not have kept them anyway. */
 inline bool findUserDataDirectory( char *out, size_t outSize )
 {
 	if (outSize == 0)
 		return false;
 	out[0] = 0;
 
-	char documents[MAX_PATH];
+	char documents[MAX_PATH * 2];
 	if (!findDocumentsFolderA( documents, sizeof( documents ) ))
 		return false;
 
@@ -149,6 +175,31 @@ inline bool findUserDataDirectory( char *out, size_t outSize )
 		return false;
 	}
 	out[outSize - 1] = 0;
+
+	// The answer is worked out once a process: WinMain and GlobalData both ask, and a probe that
+	// passed the first time and failed the second would split them between two folders.
+	static char s_chosen[MAX_PATH * 2] = "";
+	if (s_chosen[0] == 0)
+	{
+		::strncpy( s_chosen, out, sizeof( s_chosen ) - 1 );
+		const char *localAppData = ::getenv( "LOCALAPPDATA" );
+		if (!isDirectoryWritable( out ) && localAppData != NULL && localAppData[0] != 0)
+		{
+			char fallback[MAX_PATH * 2];
+			if (::_snprintf( fallback, sizeof( fallback ), "%s\\%s\\", localAppData, leaf ) >= 0)
+			{
+				fallback[sizeof( fallback ) - 1] = 0;
+				if (isDirectoryWritable( fallback ))
+					::strncpy( s_chosen, fallback, sizeof( s_chosen ) - 1 );
+			}
+		}
+	}
+	if (::strlen( s_chosen ) + 1 > outSize)
+	{
+		out[0] = 0;
+		return false;
+	}
+	::strcpy( out, s_chosen );
 	return true;
 }
 

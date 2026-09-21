@@ -39,7 +39,7 @@
 #define DEFINE_PANNING_NAMES
 
 #include "Common/CRC.h"
-#include "Common/EarlyOptions.h"	// findDocumentsFolderA
+#include "Common/EarlyOptions.h"	// findUserDataDirectory
 #include "Common/File.h"
 #include "Common/FileSystem.h"
 #include "Common/GameAudio.h"
@@ -1227,34 +1227,14 @@ GlobalData::GlobalData()
 
 	m_keyboardCameraRotateSpeed = 0.1f;
 
-  // Set user data directory based on registry settings instead of INI parameters. This allows us to 
-  // localize the leaf name.
-  // A redirected Documents folder can sit at a path longer than MAX_PATH, and the shell call this
-  // used to make simply fails there - see findDocumentsFolderA. The buffer is generous for the same
-  // reason.
+  // Documents plus the registry's leaf name, or the same leaf under %LOCALAPPDATA% when nothing can
+  // be written under Documents - see findUserDataDirectory, which WinMain asks the same question of.
+  // A redirected Documents folder can sit at a path longer than MAX_PATH, so the buffer is generous.
   char temp[1024];
-  if (findDocumentsFolderA(temp, sizeof(temp)))
+  if (findUserDataDirectory(temp, sizeof(temp)))
   {
-    AsciiString myDocumentsDirectory = temp;
-
-    if (myDocumentsDirectory.getCharAt(myDocumentsDirectory.getLength() -1) != '\\')
-      myDocumentsDirectory.concat( '\\' );
-
-    AsciiString leafName;
-    
-    if ( !GetStringFromRegistry( "", "UserDataLeafName", leafName ) )
-    {
-      // Use something, anything
-      // [MH] had to remove this, otherwise mapcache build step won't run... DEBUG_CRASH( ( "Could not find registry key UserDataLeafName; defaulting to \"Command and Conquer Generals Zero Hour Data\" " ) );
-      leafName = "Command and Conquer Generals Zero Hour Data";
-    }
-
-    myDocumentsDirectory.concat( leafName );
-    if (myDocumentsDirectory.getCharAt( myDocumentsDirectory.getLength() - 1) != '\\')
-      myDocumentsDirectory.concat( '\\' );
-
-    CreateDirectory(myDocumentsDirectory.str(), NULL);
-    m_userDataDir = myDocumentsDirectory;
+    m_userDataDir = temp;
+    DEBUG_LOG(("User data folder: %s\n", temp));
   }
   else
   {

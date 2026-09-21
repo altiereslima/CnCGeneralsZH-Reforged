@@ -834,7 +834,7 @@ The whole HUD is on the hardware. Four colours carry it, and they mean the same 
   a shadow back in. The game drew every shadow as one hard silhouette before this, whether it came
   off a tank's hull or off something twenty metres up, and edges that sharp are the tell that a
   picture was computed rather than photographed. This is what the game draws with now; a machine
-  that cannot run the newer picture keeps the old shadows on its own, and `-noshadowmap` puts them
+  that cannot run the newer picture keeps the old shadows on its own, and Classic Graphics puts them
   back on any machine.
 - A hovering helicopter has its shadow back, rotor blades and all. The softening spread a
   Comanche's thin body so wide that nothing of it was left on the ground, and the spinning blades
@@ -937,6 +937,8 @@ The whole HUD is on the hardware. Four colours carry it, and they mean the same 
 - A unit can no longer load into a vehicle that no longer exists.
 - Selling or losing an airfield under a jet on its takeoff roll no longer takes the game down. The jet takes off.
 - A looping sound coming round for its next pass no longer takes the game down. v2.0.0 lifted unit replies over the battle, and the check for whether a sound is a reply read a part of the sound that a looping one can have lost by then. A player's skirmish ended on "Technical Difficulties" twelve hundred frames in. A sound with nothing to say about itself now plays at the effects volume.
+- The game starts on a machine that will not let it write to Documents. Windows' ransomware protection refuses a program it does not know yet, and a new 64-bit generals.exe is exactly that, so for some players v2.0.0 showed "Technical Difficulties" five seconds after every start: the first file the game wrote there was a leftover debugging file EA's code saved at the main menu, and when that failed nothing else could be written either, the crash report included. The debugging file is gone, and when Documents refuses the game, it keeps its settings, replays and saves in the same folder under your local application data instead.
+- A network game with a computer player no longer falls apart because two players' processors do the maths slightly differently. v2.0.0 is the first 64-bit build, and the 64-bit Windows runtime picks between two versions of a logarithm depending on the processor, one bit apart. The computer player's unit choice used one, so two machines could see it buy different units. Every machine uses the same one now.
 - When the game does go down, the reason and where it happened are written into the game log beside the game as well as into the crash file under Documents. Two players on v2.0.0 saw "Technical Difficulties" and their crash file never turned up, so the report that reached us said nothing about why.
 - A Particle Uplink Cannon fired by a script along a path no longer crashes at the path's last waypoint.
 - A damage effect whose attacker died first no longer crashes the game, and neither does a flash-bang into a building with fewer soldiers than it was meant to kill.
