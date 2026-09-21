@@ -63,6 +63,7 @@ static void drawFramerateBar(void);
 
 #include "GameClient/Drawable.h"
 #include "GameClient/GameText.h"
+#include "GameClient/GameConsole.h"
 #include "GameClient/GraphDraw.h"
 #include "GameClient/Line2D.h"
 #include "GameClient/Mouse.h"
@@ -2497,6 +2498,10 @@ AGAIN:
 				TheGraphDraw->render();
 				TheGraphDraw->clear();
 #endif
+				// last of the 2D overlays, so the console covers everything it drops over
+				if( TheGameConsole )
+					TheGameConsole->render();
+
 				if (s_screenShotPending)
 				{
 					s_screenShotPending = FALSE;

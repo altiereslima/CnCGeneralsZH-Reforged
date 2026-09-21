@@ -654,6 +654,13 @@ found and fixed â€” EA's own, not port damage.**
 - Your allies see the smoke and their radar blinks at the spot, and the message area says who sent it. Three seconds later the smoke has cleared, so the call you made a minute ago is never still standing next to the one you are making now. Enemies see none of it.
 - One signal a second per player. Hammering the key gets you the first puff and nothing else, and a teammate who tries it cannot bury your screen in smoke either, because every machine in the game holds everyone to the same limit.
 
+## A console, on the key above Tab
+
+- Press the key above Tab and a black panel drops over the top of the screen with a prompt waiting at the bottom of it. Type into it and the game ignores the keys it would otherwise have read as orders, so a word starting with Q does not queue a tank. Escape or the same key again puts it away.
+- `help` lists what it takes, `clear` empties it, `echo` says a line back. The up and down arrows walk back through the last thirty-two things you typed.
+- It opens in the main menu as well as in a match. Nothing it does yet touches the rules of a game, so it is safe to leave open while one runs.
+- The general's promotion screen moved off that key onto the backslash beside it.
+
 ## Your Razer hardware plays along
 
 The whole HUD is on the hardware. Four colours carry it, and they mean the same thing everywhere: green is something you have, red is something wrong, white is something ready to fire, and your own player colour is everything else. How bright a key is says how much.

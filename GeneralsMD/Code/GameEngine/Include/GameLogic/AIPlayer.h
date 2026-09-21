@@ -307,6 +307,12 @@ protected:
 	void queueCapturer(void);						///< ... or build the cheapest thing that can take one
 	void queueSupportUnit(const ThingTemplate *tmpl, const char *what);	///< one cheap unit, outside the team system
 
+	/** The enemy's tanks are worth more taken than shot: one hijacker walks off with one, and Black
+		* Lotus shuts one down for nothing.  Neither had ever been used by a computer player. */
+	virtual void doHijack(void);
+	Object *findHijacker(void);					///< a unit of ours that takes a vehicle by walking into it
+	Object *nearestStealableVehicle(const Coord3D *from, Real reach);	///< the closest enemy vehicle in sight; reach <= 0 is the map
+
 	/** Past the hoard, buy what the build list never had: another production building beside the last
 		* expansion when every one of a kind is busy, another income building when production keeps up,
 		* and money units (China's hackers) from any factory standing idle. */
@@ -425,6 +431,8 @@ protected:
 	UnsignedInt m_startIntelFrame;			///< frame the above was last brought up to date
 	ObjectID	m_capturerID;						///< the unit currently out taking tech buildings for us
 	Int				m_captureTimer;					///< frames until the next look for something to capture
+	ObjectID	m_hijackerID;						///< the thief currently out after an enemy vehicle
+	Int				m_hijackTimer;					///< frames until the next look for a vehicle to take
 	Int				m_retreatTimer;					///< frames until the next look at how the fights are going
 	Int				m_expandTimer;					///< frames until the next look for somewhere to expand to
 

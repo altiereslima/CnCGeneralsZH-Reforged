@@ -68,6 +68,7 @@
 #include "GameLogic/PartitionManager.h"
 #include "Common/ActionManager.h"				// canCaptureBuilding, for the tech buildings
 #include "GameLogic/Module/SpecialPowerModule.h"	// ... and the module that does it
+#include "GameLogic/Module/CollideModule.h"	// ... and the collide that takes a vehicle by touching it
 #include "GameLogic/Module/ContainModule.h"
 #include "GameLogic/Module/JetAIUpdate.h"		// a Comanche is a jet with no runway
 #include <map>
@@ -185,6 +186,10 @@ static const Int SCOUT_CHECK_RATE = 2 * LOGICFRAMES_PER_SECOND;
 	* this is a check, not a re-path. */
 static const Int CAPTURE_CHECK_RATE = 5 * LOGICFRAMES_PER_SECOND;
 
+/** How often the AI looks for a vehicle to take.  Same rhythm as the capture check, and the target
+	* has to be in sight, so a faster clock would only re-order what is already walking. */
+static const Int HIJACK_CHECK_RATE = 5 * LOGICFRAMES_PER_SECOND;
+
 #ifdef DEBUG_LOGGING
 /** Milliseconds between two performance counter readings.  Used by the per-job AI profile below and
 	* by the sub-timers inside processBaseBuilding, which is why it lives up here. */
@@ -298,6 +303,8 @@ m_role(AIROLE_AGGRESSIVE)
 	m_startIntelFrame = 0;
 	m_capturerID = INVALID_ID;
 	m_captureTimer = 1;
+	m_hijackerID = INVALID_ID;
+	m_hijackTimer = 1;
 
 	for( Int held = 0; held < MAX_HELD_TEAMS; ++held )
 	{
@@ -377,6 +384,7 @@ m_role(AIROLE_AGGRESSIVE)
 	const Int SPREAD = 2 * LOGICFRAMES_PER_SECOND;
 	m_expandTimer += computeUpdatePhase( playerIndex, SPREAD );
 	m_captureTimer += computeUpdatePhase( playerIndex, SPREAD );
+	m_hijackTimer += computeUpdatePhase( playerIndex, SPREAD );
 	m_retreatTimer += computeUpdatePhase( playerIndex, SPREAD );
 	// The scout check's own cycle is already only two seconds, so its full cycle is the window.
 	m_scoutTimer += computeUpdatePhase( playerIndex, SCOUT_CHECK_RATE );
@@ -4250,6 +4258,7 @@ void AIPlayer::update( void )
 	AI_PHASE( AIP_RETREAT, doRetreats() );					// Break off the fights we are losing.
 	AI_PHASE( AIP_EXPAND,  doExpansion() );					// Go and take the money that is lying around.
 	AI_PHASE( AIP_CAPTURE, doCapture() );						// ... and the money that is standing around.
+	AI_PHASE( AIP_CAPTURE, doHijack() );						// Take the enemy's tanks rather than shoot them.
 	AI_PHASE( AIP_ECONOMY, doEconomy() );						// ... and the money sitting in the bank.
 	AI_PHASE( AIP_POWER,   doPower() );							// Keep the lights on, and out of reach.
 	AI_PHASE( AIP_ECONOMY, doSuperweapons() );			// The big guns, as soon as they can be bought.
@@ -5945,6 +5954,8 @@ Object *AIPlayer::findScout( void )
 			continue;
 		if( obj->getAI() == NULL )
 			continue;
+		if( obj->getID() == m_capturerID || obj->getID() == m_hijackerID )
+			continue;		// it has a job; two owners giving one unit orders is how both jobs stall
 
 		Bool alreadyScouting = FALSE;
 		for( Int slot = 0; slot < MAX_AI_SCOUTS; ++slot )
@@ -6584,6 +6595,255 @@ void AIPlayer::queueCapturer( void )
 	queueSupportUnit( cheapestCapturerTemplate( m_player ), "CAPTURE" );
 }
 
+/** How far a vehicle hacker will go for a target.  About a unit's sight: Black Lotus shuts a tank
+	* down for a few seconds, which is worth nothing if she spends a minute walking to it and dies
+	* standing next to it. */
+static const Real VEHICLE_HACK_REACH = 250.0f;
+
+//----------------------------------------------------------------------------------------------------------
+/** This one takes a vehicle by walking into it.  Asked of the object rather than of a faction table,
+	* so it lands on the GLA Hijacker and on anything a mod gave the same collide to. */
+static Bool carriesHijackModule( const Object *obj )
+{
+	for( BehaviorModule **m = obj->getBehaviorModules(); *m; ++m )
+	{
+		const CollideModuleInterface *collide = (*m)->getCollide();
+		if( collide && collide->isHijackedVehicleCrateCollide() )
+			return TRUE;
+	}
+	return FALSE;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** The cheapest thing this player can build that can do it.  The module list is the test here too -
+	* the hijack has no command button to read, because the player just clicks the tank. */
+static const ThingTemplate *cheapestHijackerTemplate( Player *player )
+{
+	const ThingTemplate *best = NULL;
+	Int bestCost = 0;
+
+	for( const ThingTemplate *t = TheThingFactory->firstTemplate(); t; t = t->friend_getNextTemplate() )
+	{
+		if( !t->isKindOf( KINDOF_INFANTRY ) || !player->canBuild( t ) )
+			continue;
+
+		const Int cost = t->calcCostToBuild( player );
+		if( cost <= 0 || (best != NULL && cost >= bestCost) )
+			continue;
+
+		Bool canHijack = FALSE;
+		const ModuleInfo &modules = t->getBehaviorModuleInfo();
+		for( Int i = 0; i < modules.getCount(); ++i )
+		{
+			if( modules.getNthName( i ).compareNoCase( "ConvertToHijackedVehicleCrateCollide" ) == 0 )
+				canHijack = TRUE;
+		}
+		if( !canHijack )
+			continue;
+
+		best = t;
+		bestCost = cost;
+	}
+	return best;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * A thief of ours with nothing to do.  Default team only, the same rule findCapturer and findScout
+ * follow: one that arrived with an attack team has a job already.
+ */
+Object *AIPlayer::findHijacker( void )
+{
+	Team *team = m_player->getDefaultTeam();
+	if( team == NULL )
+		return NULL;
+
+	for( DLINK_ITERATOR<Object> iter = team->iterate_TeamMemberList(); !iter.done(); iter.advance() )
+	{
+		Object *obj = iter.cur();
+		if( obj == NULL || obj->isEffectivelyDead() || obj->isContained() || obj->getAI() == NULL )
+			continue;
+		if( obj->getID() == m_capturerID )
+			continue;			// out taking a derrick
+		if( !carriesHijackModule( obj ) )
+			continue;
+
+		Bool busy = FALSE;
+		for( Int slot = 0; slot < MAX_AI_SCOUTS; ++slot )
+			if( m_scoutID[ slot ] == obj->getID() )
+				busy = TRUE;			// the map still has to be looked at
+		if( busy )
+			continue;
+
+		return obj;
+	}
+	return NULL;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * The closest enemy vehicle in sight, or none within reach.  reach <= 0 is the whole map.
+ *
+ * A vehicle goes back to SHROUDED the moment our vision leaves it, so observerKnowsAbout reads here
+ * as "we can see it now" - the only honest rule for a target that drives off while we walk to it.
+ *
+ * Nearest, not richest: a thief walks, and the Humvee it reaches is worth more than the Overlord it
+ * dies halfway to.
+ */
+Object *AIPlayer::nearestStealableVehicle( const Coord3D *from, Real reach )
+{
+	if( ThePlayerList == NULL || from == NULL )
+		return NULL;
+
+	const Int myNdx = m_player->getPlayerIndex();
+	const Real reachSqr = reach * reach;
+	Object *best = NULL;
+	Real bestDistSqr = 0.0f;
+
+	const Int playerCount = ThePlayerList->getPlayerCount();
+	for( Int i = 0; i < playerCount; ++i )
+	{
+		Player *p = ThePlayerList->getNthPlayer( i );
+		if( p == NULL || p == m_player )
+			continue;
+		if( m_player->getRelationship( p->getDefaultTeam() ) != ENEMIES )
+			continue;			// a civilian's parked car is not a prize, and an ally's tank is not either
+
+		for( Player::PlayerTeamList::const_iterator it = p->getPlayerTeams()->begin();
+				 it != p->getPlayerTeams()->end(); ++it )
+		{
+			for( DLINK_ITERATOR<Team> teamIter = (*it)->iterate_TeamInstanceList(); !teamIter.done(); teamIter.advance() )
+			{
+				Team *team = teamIter.cur();
+				if( team == NULL )
+					continue;
+
+				for( DLINK_ITERATOR<Object> objIter = team->iterate_TeamMemberList(); !objIter.done(); objIter.advance() )
+				{
+					Object *obj = objIter.cur();
+					if( obj == NULL || obj->isEffectivelyDead() || obj->isContained() )
+						continue;
+					if( !obj->isKindOf( KINDOF_VEHICLE ) )
+						continue;
+					if( obj->isKindOf( KINDOF_AIRCRAFT ) || obj->isKindOf( KINDOF_DRONE ) )
+						continue;			// neither a hijacker nor a hacker is allowed either of those
+					if( !observerKnowsAbout( obj, myNdx ) )
+						continue;
+
+					const Coord3D *at = obj->getPosition();
+					const Real dx = at->x - from->x;
+					const Real dy = at->y - from->y;
+					const Real distSqr = dx*dx + dy*dy;
+					if( reach > 0.0f && distSqr > reachSqr )
+						continue;
+					if( best == NULL || distSqr < bestDistSqr )
+					{
+						best = obj;
+						bestDistSqr = distSqr;
+					}
+				}
+			}
+		}
+	}
+	return best;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** Black Lotus, or whoever else the data gave the vehicle hack to, standing about with it ready. */
+static void findIdleVehicleHacker( Object *obj, void *userData )
+{
+	Object **hacker = (Object **)userData;
+	if( *hacker || obj->isEffectivelyDead() || obj->isContained() )
+		return;
+	if( !obj->hasSpecialPower( SPECIAL_BLACKLOTUS_DISABLE_VEHICLE_HACK ) )
+		return;
+	if( obj->testStatus( OBJECT_STATUS_IS_USING_ABILITY ) )
+		return;
+	AIUpdateInterface *ai = obj->getAI();
+	if( ai == NULL || !ai->isIdle() )
+		return;
+	*hacker = obj;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * Take the enemy's vehicles instead of shooting at them.
+ *
+ * A hijacker costs a few hundred and walks off with a tank, and no computer player had ever built
+ * one: the skirmish scripts name their teams by template and not one of the shipped teams asks for
+ * it.  So one thief at a time, bought out of spare change the way the capturer is, and only while
+ * there is something in sight to take.  It is the same money argument as the derrick - the cheapest
+ * unit in the game trading itself for the most expensive one on the field.
+ *
+ * The vehicle hack rides along here because it is the same decision made for free: Black Lotus
+ * arrives with the script's teams already, her hack costs nothing and sits ready most of the match,
+ * and the AI has never once used it.  She only takes what is already in front of her.
+ */
+void AIPlayer::doHijack( void )
+{
+	if( --m_hijackTimer > 0 )
+		return;
+	m_hijackTimer = HIJACK_CHECK_RATE;
+
+	if( m_player == NULL || !m_player->isPlayableSide() )
+		return;
+
+	Object *hacker = NULL;
+	m_player->iterateObjects( findIdleVehicleHacker, &hacker );
+	if( hacker )
+	{
+		Object *victim = nearestStealableVehicle( hacker->getPosition(), VEHICLE_HACK_REACH );
+		SpecialPowerModuleInterface *mod = hacker->findSpecialPowerModuleInterface( SPECIAL_BLACKLOTUS_DISABLE_VEHICLE_HACK );
+		if( victim && mod && TheActionManager->canDisableVehicleViaHacking( hacker, victim, CMD_FROM_AI ) )
+		{
+			mod->doSpecialPowerAtObject( victim, 0 );
+			DEBUG_LOG(("AI player %d hacks a '%s'\n", m_player->getPlayerIndex(),
+								 victim->getTemplate()->getName().str()));
+		}
+	}
+
+	Object *thief = TheGameLogic->findObjectByID( m_hijackerID );
+	if( thief && (thief->isEffectivelyDead() || thief->getControllingPlayer() != m_player) )
+		thief = NULL;			// dead, or it is sitting in the tank it took and is somebody else's problem
+	if( thief == NULL )
+	{
+		m_hijackerID = INVALID_ID;
+		thief = findHijacker();
+		if( thief )
+			m_hijackerID = thief->getID();
+	}
+
+	Coord3D from = m_baseCenter;
+	if( thief )
+		from = *thief->getPosition();
+
+	Object *target = nearestStealableVehicle( &from, 0.0f );
+	if( target == NULL )
+		return;			// nothing in sight; the thief waits where it is rather than walk into the fog
+
+	if( thief == NULL )
+	{
+		// only pay for one when there is something to spend it on
+		queueSupportUnit( cheapestHijackerTemplate( m_player ), "HIJACK" );
+		return;
+	}
+
+	AIUpdateInterface *ai = thief->getAI();
+	if( ai == NULL || !ai->isIdle() )
+		return;			// still on its way to the last one
+
+	//
+	// canHijackVehicle refuses through the shroud, and aiEnter is the same order the player's click
+	// ends up as: the walk is the attack, and the collide module does the rest on contact.
+	//
+	if( TheActionManager->canHijackVehicle( thief, target, CMD_FROM_AI ) )
+	{
+		ai->aiEnter( target, CMD_FROM_AI );
+		DEBUG_LOG(("AI player %d sends a '%s' after a '%s'\n", m_player->getPlayerIndex(),
+							 thief->getTemplate()->getName().str(), target->getTemplate()->getName().str()));
+	}
+}
+
 //----------------------------------------------------------------------------------------------------------
 /**
  * Keep one unit looking at the map.  Cheap by construction: one unit, ordered only when it has
@@ -6894,7 +7154,7 @@ void AIPlayer::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 7;		// 2: scout  3: rung and role  4: scouting stamps  5: the capturer  6: parked waves  7: superweapon aims
+	XferVersion currentVersion = 8;		// 2: scout  3: rung and role  4: scouting stamps  5: the capturer  6: parked waves  7: superweapon aims  8: the hijacker
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -7080,6 +7340,12 @@ void AIPlayer::xfer( Xfer *xfer )
 	{
 		xfer->xferObjectID( &m_capturerID );
 		xfer->xferInt( &m_captureTimer );
+	}
+	// the thief, for the same reason: a loaded game does not buy a second one
+	if( version >= 8 )
+	{
+		xfer->xferObjectID( &m_hijackerID );
+		xfer->xferInt( &m_hijackTimer );
 	}
 	// the attack teams parked at the staging point, so a loaded game sends the same wave
 	if( version >= 6 )
