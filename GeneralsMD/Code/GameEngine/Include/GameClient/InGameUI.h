@@ -1179,13 +1179,13 @@ protected:
 	void drawSkillStrip( void );					///< the watched player's bought promotions, under those
 
 	//
-	// The scoreboard on Tab: every seat in the match, your side in full and the other side by name
-	// and team only.  Drawn over everything, like the clock plate, from a pool of strings that are
+	// The scoreboard on Tab: every seat in the match, your side in full rows and the other side as
+	// name chips.  Drawn over everything, like the clock plate, from a pool of strings that are
 	// handed out in the same order every frame so each keeps its font and its text texture.
 	//
 	enum { SCOREBOARD_STRING_COUNT = 160 };
 	DisplayString *scoreboardString( GameFont *font, const UnicodeString &text, Int wrapWidth = 0 );
-	void drawScoreboardRow( Player *player, const GameSlot *slot, Bool detailed, GameFont *bodyFont, GameFont *smallFont,
+	void drawScoreboardRow( Player *player, const GameSlot *slot, Bool withTeam, GameFont *bodyFont, GameFont *smallFont,
 													Int left, Int top, Int rowHeight );
 	Bool												m_scoreboardOpen;
 	Int													m_scoreboardStringsUsed;	///< handed out so far this frame

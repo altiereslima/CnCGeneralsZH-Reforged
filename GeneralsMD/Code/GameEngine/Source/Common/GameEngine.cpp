@@ -68,6 +68,7 @@
 #include "Common/TerrainTypes.h"
 #include "Common/Upgrade.h"
 #include "Common/UserPreferences.h"
+#include "Common/SkirmishPreferences.h"
 #include "Common/Xfer.h"
 #include "Common/XferCRC.h"
 #include "Common/GameLOD.h"
@@ -428,8 +429,9 @@ static void startAutoSkirmish( Int numPlayersWanted )
 	const Bool fixedStartPositions = !TheGlobalData->m_scenarioFile.isEmpty();
 
 	const Bool observing = TheGlobalData->m_autoSkirmishObserver;
-	UnicodeString localName;
-	localName.translate( AsciiString( "Player" ) );
+	// the name the skirmish menu would have put in the seat: the one saved there, else the machine's
+	SkirmishPreferences preferences;
+	const UnicodeString localName = preferences.getUserName();
 	for( Int i = 0; i < numPlayers; i++ )
 	{
 		GameSlot slot;
