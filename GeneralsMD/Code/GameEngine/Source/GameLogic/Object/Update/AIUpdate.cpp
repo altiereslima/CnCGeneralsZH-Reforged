@@ -1673,6 +1673,7 @@ static const Int  STUCK_BACKOUT_FRAMES	= 66;	///< how long a backing-out manoeuv
 static const Int  STUCK_COOL_FRAMES	= 90;			///< no second drastic thing inside this, or a wedged pair rock forever
 static const Int  STUCK_CYCLE_FRAMES	= 150;	///< five seconds past the last rung: run the whole ladder again
 static const Int  STUCK_DITHER_FRAMES	= 90;		///< three seconds is long enough to tell a shuffle from a corner
+static const Real STUCK_BRIDGE_NEAR	= PATHFIND_CELL_SIZE_F * 20.0f;	///< a unit shaking this close to a deck on its route is at the ramp
 static const Real STUCK_DITHER_RATIO	= 0.3f;	///< gained less than this much of the ground it covered
 static const Int  CROWD_MERGE_FRAMES	= 45;		///< a second and a half: how far ahead a merge is worth noticing
 static const Int  CROWD_TTC_FRAMES	= 21;			///< closing this fast on somebody counts as being in our way, wherever it sits
@@ -2689,6 +2690,28 @@ void AIUpdateInterface::updateProgress( void )
 			 before. */
 		if (AIUpdate_isDithering( net, m_ditherTravel, body ))
 			Pathfinder::bumpDither();
+
+		/* The one case that is acted on: a unit on the ground beside or underneath a bridge its route
+			 goes over, shaking on the spot.  It came in beside the ramp rather than onto it and is
+			 pressing against the side of the ramp at full throttle for a spot on the deck: it moves
+			 every frame, so no count of stuck frames ever rises for it, and it covers too little ground
+			 to read as dithering either.  Two of twenty Crusaders over the long bridge on Golden Oasis
+			 never got across for that.  A route asked for from where it stands leads it round to the
+			 ramp. */
+		const Bool shaking = net < body * 0.25f && m_ditherTravel > body;
+		if (shaking && self->getLayer() == LAYER_GROUND && m_path != NULL && now >= m_rescueCool)
+		{
+			for (const PathNode *node = m_path->getFirstNode(); node != NULL; node = node->getNextOptimized())
+			{
+				const Real dx = node->getPosition()->x - myPos->x;
+				const Real dy = node->getPosition()->y - myPos->y;
+				if (node->getLayer() > LAYER_GROUND && dx * dx + dy * dy < STUCK_BRIDGE_NEAR * STUCK_BRIDGE_NEAR)
+				{
+					crowdRepath();
+					break;
+				}
+			}
+		}
 
 		m_ditherFrame = now;
 		m_ditherFrom = *myPos;
@@ -3868,7 +3891,7 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 						}
 						Coord3D goalPos;
 						Real onPathDistToGoal;
-						if (!isDoingGroundMovement()) 
+						if (!isDoingGroundMovement())
 						{
 							// airborne locomotor.  Get the goal and distance direct to the goal, don't consider obstacles.
 							onPathDistToGoal = getPath()->computeFlightDistToGoal(getObject()->getPosition(), goalPos);
