@@ -397,13 +397,11 @@ void W3DInGameUI::reset( void )
 //-------------------------------------------------------------------------------------------------
 void W3DInGameUI::draw( void )
 {
-	// -cinema: none of the interface, only the windows - the control bar is already hidden, and
-	// what is left on the window list is the menu somebody opened on purpose
+	// -cinema: none of the interface and none of the windows either.  Painting the window list let a
+	// star banner slide in at the top right of an observer's footage (twice in trailer_chaos, frames
+	// 930 and 1230), and nothing on the list belongs in a shot.  The letterbox is the display's own.
 	if( CinemaDirector_hidesHud() )
-	{
-		TheWindowManager->winRepaint();
 		return;
-	}
 
 	preDraw();
 
