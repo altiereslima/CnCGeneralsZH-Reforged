@@ -1,0 +1,24 @@
+# Five frames of one angry mob crossing open ground and hitting a Ranger platoon, for looking at
+# what the formation does rather than for watching.  Runs with -scenario mobopen, which puts the
+# mobs at 700,550 and the Rangers at 1000,1150 on the small generated map and sends the mobs at
+# them on frame 120.
+#
+#   generals.exe -borderless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionGLA -side 1 FactionAmerica -seed 1 -maxframes 1800
+#     -scenario mobopen -cinema mobwatch -logPrefix mobopenshots_
+#
+# The camera rides the nexus, so the mob stays in frame whatever the march does with it and the
+# five pictures are comparable to each other and to the same five off another build.  Zoom 1.4
+# holds about 600 map units across a 1920 frame, which is the mob plus the ground it has lost its
+# stragglers onto; 0.65 held 275 and the mob walked out of the sides of it.  Pitch -20 is steep
+# enough to read who is standing where.  Seconds are logic frames over 30.
+
+0     cut     700 550 1.4 -45 -20
+2     follow  GLAInfantryAngryMobNexus
+
+16.67 shot    # frame 500, mid-march, nothing shooting yet
+23.33 shot    # frame 700, the leading members reach the Rangers
+35.0  shot    # frame 1050, the two sides mixed
+41.67 shot    # frame 1250, the fight at its loudest
+55.0  shot    # frame 1650, decided, no particles left

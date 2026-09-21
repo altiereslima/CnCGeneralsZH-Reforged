@@ -1,0 +1,25 @@
+# The same fight as mobattack.txt, moved onto ground with nothing on it.
+#
+# mobattack.txt marches from 760,920 to 1400,1400 on Alpine Assault, and that line runs straight
+# down a town street: between the houses the mob is in single file whatever the formation code
+# wants, so a picture taken there says nothing about the formation.  This one uses the small
+# generated map the cinema demo uses, whose middle is open grass, and the coordinates are the ones
+# parade.txt already walks 80 units across.
+#
+#   generals.exe -borderless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionGLA -side 1 FactionAmerica -seed 1 -maxframes 1800
+#     -scenario mobopen -cinema mobwatch -logPrefix mobopen_
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn      0  GLAInfantryAngryMobNexus   3  700 550   60
+30    spawn      1  AmericaInfantryRanger     15  1000 1150 40
+
+120   attackmove 0  GLAInfantryAngryMobNexus      1000 1150
+
+# Counted from the frame the march starts, so the total is the whole mob rather than the survivors.
+121   arrive     0  *  1000 1150 250
+
+# The same count taken again after the shooting stops, which is how many of the mob is left.
+1650  arrive     0  *  1000 1150 250
