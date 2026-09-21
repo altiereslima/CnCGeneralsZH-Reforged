@@ -648,6 +648,7 @@ found and fixed â€” EA's own, not port damage.**
 - The colour reaches everything: the tint on the models, the radar, health bars, selection rings, the score screen, the money that floats up from a supply drop.
 - Your screen only. Nobody else in the match sees your choice, nothing about the game itself changes, and two people in the same game can run different settings. Original is the default and nothing changes until you pick something else.
 - Switch it mid-match and the map repaints itself. So does the picture when an alliance is made or broken by a map script.
+- A building being captured flashes in the capturer's colour from the setting too. It used to blink in the capturer's original colour while that player's units, radar dots and capture clock showed the new one. The flash on a selected unit and the flashes a mission script asks for follow the setting the same way.
 - The player names on an observer's command bar follow the setting as well. They used to keep whatever colour they were given when the bar first filled, which was sometimes black.
 ## You can see where your ally is pointing
 

@@ -1365,7 +1365,7 @@ void Drawable::updateDrawable( void )
 		if (m_flashCount > 0  && (TheGameClient->getFrame() % DRAWABLE_FRAMES_PER_FLASH) == 0)
 		{
 			RGBColor tmp;
-			tmp.setFromInt(m_flashColor);
+			tmp.setFromInt(clientColor(m_flashColor));
 			colorFlash(&tmp);
 			m_flashCount--;
 		}
@@ -1494,7 +1494,7 @@ void Drawable::flashAsSelected( const RGBColor *color ) ///< drawable takes care
 		{
 			RGBColor tempColor; 
 			if (TheGlobalData->m_selectionFlashHouseColor)
-				tempColor.setFromInt(obj->getIndicatorColor());
+				tempColor.setFromInt(clientColor(obj->getIndicatorColor()));
 			else
 				tempColor.setFromInt(0xffffffff);//white
 
