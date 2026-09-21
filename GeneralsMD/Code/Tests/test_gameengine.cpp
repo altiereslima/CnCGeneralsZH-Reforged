@@ -12908,6 +12908,18 @@ TEST(scenario_parses_the_order_lines)
 
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "900 stop 2 *", &action ), (Int)SCENARIO_PARSE_OK );
 	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_STOP );
+
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "700 power 1 GLAScudStorm start0:0:300", &action ),
+						(Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_POWER );
+	CHECK_STR( action.selector.str(), "GLAScudStorm" );
+	CHECK_EQ( action.atStart, 0 );
+	CHECK_NEAR( action.at.y, 300.0f, 0.01f );
+	CHECK_EQ( (Int)action.targetSelector.isEmpty(), 1 );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "700 power 0 AmericaCommandCenter 900 900 SuperweaponA10ThunderboltMissileStrike", &action ),
+						(Int)SCENARIO_PARSE_OK );
+	CHECK_STR( action.targetSelector.str(), "SuperweaponA10ThunderboltMissileStrike" );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "700 power 1 GLAScudStorm", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
 }
 
 TEST(scenario_ignores_comments_and_blank_lines)

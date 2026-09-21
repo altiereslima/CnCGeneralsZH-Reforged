@@ -1,0 +1,78 @@
+# Trailer: three armies, the air over them and three superweapons, all inside one ten-second shot.
+# America, China and the GLA each attack-move on 1135,3696, the midpoint of the two 2-player starts
+# on Twilight Flame (see docs/reference/UI-MAP.md). Every seat is an enemy of every other.
+# The superweapons and the command centers whose general's powers bring the aircraft in sit back at
+# the start positions, powered, and are fired with the power verb so they need no charge time.
+#
+#   generals.exe -borderless -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 5000 -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 3 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA -seed 7
+#     -scenario trailer_chaos -cinema tr_chaos -video 930 1229 tr_chaos -maxframes 1250
+#
+# The shot is frames 930 to 1229, ten seconds at 30 a second.
+
+# --- the buildings, far out of frame -------------------------------------------------------
+10    spawn      0  AmericaParticleCannonUplink     1   start0:0:-200
+10    spawn      0  AmericaPowerPlant               3   start0:-260:40    90
+10    spawn      0  AmericaCommandCenter            1   start0:240:60
+10    spawn      1  ChinaNuclearMissileLauncher     1   start1:0:200
+10    spawn      1  ChinaPowerPlant                 3   start1:260:-40    90
+10    spawn      1  ChinaCommandCenter              1   start1:-260:60
+10    spawn      2  GLAScudStorm                    1   start2:0:200
+10    spawn      2  GLACommandCenter                1   start2:-260:0
+
+# --- the armies ----------------------------------------------------------------------------
+30    spawn      0  AmericaTankCrusader             12  790 3420   36
+30    spawn      0  AmericaTankPaladin              6   700 3520   40
+30    spawn      0  AmericaVehicleTomahawk          4   690 3380   40
+30    spawn      0  AmericaTankMicrowave            3   860 3330   40
+30    spawn      0  AmericaInfantryRanger           16  880 3480   18
+30    spawn      0  AmericaVehicleComanche          6   700 3300   60
+30    spawn      0  AmericaJetRaptor                4   640 3250   70
+
+30    spawn      1  ChinaTankOverlord               5   1480 3980  50
+30    spawn      1  ChinaTankBattleMaster           10  1400 4040  40
+30    spawn      1  ChinaTankGattling               5   1560 3900  36
+30    spawn      1  ChinaTankDragon                 4   1380 3920  36
+30    spawn      1  ChinaVehicleInfernoCannon       4   1540 4060  40
+30    spawn      1  ChinaInfantryRedguard           16  1330 4010  18
+30    spawn      1  ChinaVehicleHelix               3   1600 4050  60
+30    spawn      1  ChinaJetMIG                     4   1650 4120  70
+
+30    spawn      2  GLATankScorpion                 10  1460 3400  36
+30    spawn      2  GLATankMarauder                 5   1540 3440  40
+30    spawn      2  GLAVehicleRocketBuggy           6   1400 3330  32
+30    spawn      2  GLAVehicleQuadCannon            4   1520 3330  36
+30    spawn      2  GLAVehicleToxinTruck            3   1600 3380  36
+30    spawn      2  GLAVehicleTechnical             6   1380 3460  30
+30    spawn      2  GLAInfantryRebel                16  1450 3500  18
+
+60    attackmove 0  *  1135 3696
+60    attackmove 1  *  1135 3696
+60    attackmove 2  *  1135 3696
+
+# --- the second wave, so the fight is still being fed while the camera rolls --------------
+600   spawn      0  AmericaTankCrusader             8   790 3420   36
+600   spawn      0  AmericaTankPaladin              4   700 3520   40
+600   spawn      1  ChinaTankBattleMaster           8   1400 4040  40
+600   spawn      1  ChinaTankOverlord               3   1480 3980  50
+600   spawn      2  GLATankScorpion                 8   1460 3400  36
+600   spawn      2  GLATankMarauder                 3   1540 3440  40
+630   attackmove 0  *  1135 3696
+630   attackmove 1  *  1135 3696
+630   attackmove 2  *  1135 3696
+
+# --- the sky -------------------------------------------------------------------------------
+# A general's power reaches the target about 400 frames after it is called, flying in from the map
+# edge, so these are called well before the shot.
+450   power      0  AmericaCommandCenter  1135 3696  SuperweaponSpectreGunship
+560   power      0  AmericaCommandCenter  980 3600   SuperweaponA10ThunderboltMissileStrike
+640   power      1  ChinaCommandCenter    1300 3700  Early_SuperweaponChinaCarpetBomb
+700   power      2  GLACommandCenter      1150 3560  SuperweaponAnthraxBomb
+
+# --- the superweapons ----------------------------------------------------------------------
+# The beam touches down 75 frames after the call and stays 300: frames 930 to 1230, the whole shot.
+# The nuke took 170 frames from this silo in the first probe, the SCUDs about 130.
+855   power      0  AmericaParticleCannonUplink  1080 3740
+830   power      1  ChinaNuclearMissileLauncher  1060 3790
+930   power      2  GLAScudStorm                 1200 3640

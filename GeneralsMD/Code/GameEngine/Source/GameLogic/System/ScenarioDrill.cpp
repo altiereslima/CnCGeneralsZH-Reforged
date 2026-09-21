@@ -39,9 +39,11 @@
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/BehaviorModule.h"
 #include "GameLogic/Module/CreateModule.h"
+#include "GameLogic/Module/SpecialPowerModule.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/ScenarioDrill.h"
 #include "GameLogic/TerrainLogic.h"
+#include "GameClient/ControlBar.h"	// COMMAND_FIRED_BY_SCRIPT, the flag every script-fired power carries
 #include "GameClient/ParticleSys.h"
 
 #include <algorithm>
@@ -169,6 +171,8 @@ static Bool parseActionType( const AsciiString &token, ScenarioActionType *actio
 		*action = SCENARIO_ACTION_ARRIVE;
 	else if (token == "particles")
 		*action = SCENARIO_ACTION_PARTICLES;
+	else if (token == "power")
+		*action = SCENARIO_ACTION_POWER;
 	else
 		return FALSE;
 
@@ -244,6 +248,7 @@ static Int tokensNeededFor( ScenarioActionType action )
 		case SCENARIO_ACTION_PARTICLES:		return SCENARIO_TOKENS_SPAWN;
 		case SCENARIO_ACTION_MOVE:				return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_PLAYERMOVE:	return SCENARIO_TOKENS_MOVE;
+		case SCENARIO_ACTION_POWER:				return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_ATTACKMOVE:	return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_ATTACK:			return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_ENTER:				return SCENARIO_TOKENS_ATTACK;
@@ -312,6 +317,7 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 		case SCENARIO_ACTION_PLAYERMOVE:
 		case SCENARIO_ACTION_ATTACKMOVE:
 		case SCENARIO_ACTION_ARRIVE:
+		case SCENARIO_ACTION_POWER:
 		{
 			Int next = SCENARIO_ORDER_POSITION_TOKEN;
 			const ScenarioParseResult position = parseScenarioPosition( tokens, count, &next, action );
@@ -319,6 +325,8 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 				return position;
 			if (actionType == SCENARIO_ACTION_ARRIVE && count > next)
 				action->radius = (Real)atof( tokens[ next ].str() );
+			if (actionType == SCENARIO_ACTION_POWER && count > next)
+				action->targetSelector = tokens[ next ];	// fire only the power of this name
 			break;
 		}
 
@@ -864,6 +872,44 @@ void ScenarioDrill_logArrivals( void )
 	}
 }
 
+/** Fire every special power the first matching building of this seat carries, at the position, the
+	  way a map script's "fire special power at waypoint" does.  A script fire does not wait for the
+	  countdown, so a superweapon spawned a second ago goes off; it still needs power and must not be
+	  disabled, which is what the refusal line reports. */
+static Bool executePower( const ScenarioAction &action, Player *player, const Coord3D &target )
+{
+	Object *obj = findFirstMatching( player, action.selector );
+	if (obj == NULL)
+	{
+		DEBUG_LOG(("SCENARIO: frame %d power: slot %d owns nothing matching '%s'\n",
+							 action.frame, action.slot, action.selector.str()));
+		return FALSE;
+	}
+
+	if (obj->isDisabled())
+	{
+		DEBUG_LOG(("SCENARIO: frame %d power: '%s' is disabled (no power?)\n",
+							 action.frame, action.selector.str()));
+		return FALSE;
+	}
+
+	Int fired = 0;
+	for( BehaviorModule **m = obj->getBehaviorModules(); *m; ++m )
+	{
+		SpecialPowerModuleInterface *power = (*m)->getSpecialPower();
+		if (power == NULL)
+			continue;
+		if (!action.targetSelector.isEmpty() && power->getPowerName() != action.targetSelector)
+			continue;
+		power->doSpecialPowerAtLocation( &target, INVALID_ANGLE, COMMAND_FIRED_BY_SCRIPT );
+		++fired;
+	}
+
+	DEBUG_LOG(("SCENARIO: frame %d power slot %d '%s' fired %d at (%.0f,%.0f)\n",
+						 action.frame, action.slot, action.selector.str(), fired, target.x, target.y));
+	return fired > 0;
+}
+
 static Bool executeOrder( const ScenarioAction &action, Player *player, const Coord3D &dest )
 {
 	AIGroup *group = TheAI->createGroup();
@@ -937,6 +983,7 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 		case SCENARIO_ACTION_SPAWN:
 		case SCENARIO_ACTION_ARRIVE:
 		case SCENARIO_ACTION_PARTICLES:
+		case SCENARIO_ACTION_POWER:
 			ordered = FALSE;		// handled before the group is built
 			break;
 	}
@@ -966,6 +1013,9 @@ Bool ScenarioDrill_execute( const ScenarioAction &action )
 
 	if (action.action == SCENARIO_ACTION_ARRIVE)
 		return executeArrive( action, player, position );
+
+	if (action.action == SCENARIO_ACTION_POWER)
+		return executePower( action, player, position );
 
 	return executeOrder( action, player, position );
 }
