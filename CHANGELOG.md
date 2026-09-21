@@ -445,6 +445,7 @@ found and fixed â€” EA's own, not port damage.**
 - A charge bar now says how many seconds are left.
 - Aircraft always show how many attack runs they have left.
 - The corner readout separates game time from real time, and sim rate from fps. It also says DX11 or DX9 after the frame rate, which is what your machine is actually drawing with: a graphics card that cannot start Direct3D 11 falls back to 9 without a word, and a frame rate means nothing until you know which of the two it belongs to.
+- Your computer's own clock leads that readout, so you can see the time without leaving the match.
 - Pausing stops both clocks.
 - Watching a match, the strip becomes every player's queue at once: one row each, bordered in that player's colour, showing the three that land soonest and a count of the rest. Buildings going up on the ground are in those rows too, so a player answering an attack with three war factories is visible while the concrete is still wet, and eight players fit on one screen because a row is three pictures wide.
 - Every row and every countdown stands in real metal, cut from the same tray the general's powers sit in down in the corner - the side your command bar is showing. Watching a match there is no bar of your own, so both strips used to fall back to a flat black box for the whole match; now they wear the metal of the player you are watching, and follow it when you switch seats.
@@ -664,6 +665,14 @@ found and fixed â€” EA's own, not port damage.**
 - It opens in the main menu as well as in a match. Nothing it does yet touches the rules of a game, so it is safe to leave open while one runs.
 - The general's promotion screen moved off that key onto the backslash beside it.
 - One press is one letter. Holding a key repeats it, and the game timed that wait in frames: a third of a second at the 30 frames a second it was written for, 70 milliseconds on a 144 Hz screen, which is shorter than an ordinary keypress. It waits 0.4 seconds now whatever the frame rate, in the console, the chat box and every text field.
+
+## A scoreboard on Tab
+
+- Tab opens a scoreboard over the top of the screen and closes it again. Your side is listed first under its own heading and the enemy under theirs. With a group selected, Tab still steps through the units in it as before, so the scoreboard wants one unit or none selected.
+- Every row on your side has the general's face on the left and the general's name under the player's. Beside them: team, rank, money in the bank, income per minute, kills and losses, every promotion bought with the level it has reached written on its corner, and the unit that player has built the most of.
+- An enemy row is a name and a team and nothing more. What they are playing and what they have in the bank is theirs to know.
+- Watching a match, everybody gets the full row.
+- The diplomacy screen, where you mute a player, is still on the command bar's button.
 
 ## Your Razer hardware plays along
 

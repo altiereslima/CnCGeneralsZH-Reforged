@@ -87,6 +87,8 @@
 
 #include "GameLogic/AI.h"
 #include "GameLogic/AIGuard.h"
+#include "GameLogic/VictoryConditions.h"
+#include "GameNetwork/GameInfo.h"
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/AIStateMachine.h"
 #include "GameLogic/Module/AIUpdate.h"
@@ -1186,6 +1188,10 @@ InGameUI::InGameUI()
 	m_hudTogglesBottom = 0;
 	for( Int toggleRow = 0; toggleRow < HUD_TOGGLE_ROWS; toggleRow++ )
 		m_hudToggleStrings[ toggleRow ] = NULL;
+	m_scoreboardOpen = FALSE;
+	m_scoreboardStringsUsed = 0;
+	for( Int scoreboardString = 0; scoreboardString < SCOREBOARD_STRING_COUNT; scoreboardString++ )
+		m_scoreboardStrings[ scoreboardString ] = NULL;
 	for( Int stripSeconds = 0; stripSeconds < STRIP_SECONDS_STRINGS; stripSeconds++ )
 		m_stripSecondsString[ stripSeconds ] = NULL;
 	for( Int stripQuantity = 0; stripQuantity < STRIP_QUANTITY_STRINGS; stripQuantity++ )
@@ -3296,6 +3302,7 @@ void InGameUI::unregisterWindowLayout( WindowLayout *layout )
 void InGameUI::reset( void )
 {
 	m_isQuitMenuVisible = FALSE;
+	m_scoreboardOpen = FALSE;
 	m_inputEnabled = true;
 	// reset the command bar
 	TheControlBar->reset();
@@ -8400,8 +8407,13 @@ void InGameUI::drawHudOverlay( void )
 	m_hudLastDrawMs = nowMs;
 	UnsignedInt realSecs = (nowMs - m_hudRealClockBaseMs) / 1000;
 
+	// the machine's own clock first, for a player who wants to know when to stop
+	SYSTEMTIME wallClock;
+	GetLocalTime( &wallClock );
+
 	UnicodeString text;
-	text.format( L"%02d:%02d:%02d(%02d:%02d:%02d)   %dhz(%dfps) %s",
+	text.format( L"%02d:%02d   %02d:%02d:%02d(%02d:%02d:%02d)   %dhz(%dfps) %s",
+							 wallClock.wHour, wallClock.wMinute,
 							 gameSecs / 3600, (gameSecs / 60) % 60, gameSecs % 60,
 							 realSecs / 3600, (realSecs / 60) % 60, realSecs % 60,
 							 REAL_TO_INT( m_hudLogicHz + 0.5f ), REAL_TO_INT( m_hudFps + 0.5f ),
@@ -9127,9 +9139,10 @@ static Int gatherSkillCameos( const Player *player, const AsciiString &setName,
 	*
 	* A level that a later level of the same power has replaced is left out: Artillery Barrage 3 is
 	* one cameo, not three of the same picture in a row.  "Replaced" is the science's own
-	* prerequisite list, so the second level asking for the first is what hides the first. */
+	* prerequisite list, so the second level asking for the first is what hides the first.  The
+	* same walk down that list, counted, is the level written into levels beside each cameo. */
 //-------------------------------------------------------------------------------------------------
-static Int gatherPlayerSkills( const Player *player, const Image **icons, Int count, Int max )
+static Int gatherPlayerSkills( const Player *player, const Image **icons, Int *levels, Int count, Int max )
 {
 	const PlayerTemplate *playerTemplate = player->getPlayerTemplate();
 	if( playerTemplate == NULL )
@@ -9150,8 +9163,24 @@ static Int gatherPlayerSkills( const Player *player, const Image **icons, Int co
 		for( Int later = 0; later < bought && !replaced; later++ )
 			replaced = TheScienceStore->isDirectPrereq( skills[ i ].science, skills[ later ].science );
 
-		if( !replaced )
-			icons[ count++ ] = skills[ i ].cameo;
+		if( replaced )
+			continue;
+
+		Int level = 1;
+		Int current = i;
+		for( Int earlier = 0; earlier < bought; earlier++ )
+		{
+			if( TheScienceStore->isDirectPrereq( skills[ earlier ].science, skills[ current ].science ) )
+			{
+				level++;
+				current = earlier;
+				earlier = -1;		// start over from the level below
+			}
+		}
+
+		icons[ count ] = skills[ i ].cameo;
+		levels[ count ] = level;
+		count++;
 	}
 
 	return count;
@@ -9181,6 +9210,7 @@ void InGameUI::drawSkillStrip( void )
 		return;
 
 	const Image *icons[ SKILL_STRIP_MAX ];
+	Int levels[ SKILL_STRIP_MAX ];
 	Color rowColor[ SKILL_STRIP_ROWS ];
 	Int rowCount[ SKILL_STRIP_ROWS ];
 	Int rows = 0;
@@ -9188,7 +9218,7 @@ void InGameUI::drawSkillStrip( void )
 	Player *selected = TheControlBar->getSelectedPlayer();
 	if( selected )
 	{
-		const Int count = gatherPlayerSkills( selected, icons, 0, SKILL_STRIP_MAX );
+		const Int count = gatherPlayerSkills( selected, icons, levels, 0, SKILL_STRIP_MAX );
 		const Color color = clientPlayerColor( selected );
 
 		while( rows * SKILL_STRIP_COLS < count && rows < SKILL_STRIP_ROWS )
@@ -9209,7 +9239,7 @@ void InGameUI::drawSkillStrip( void )
 
 			// a row is one player's, so his own run stops at the end of it rather than running on
 			const Int start = rows * SKILL_STRIP_COLS;
-			const Int count = gatherPlayerSkills( player, icons, start, start + SKILL_STRIP_COLS );
+			const Int count = gatherPlayerSkills( player, icons, levels, start, start + SKILL_STRIP_COLS );
 			if( count == start )
 				continue;						// nothing bought yet: no row rather than an empty one
 
@@ -9292,6 +9322,296 @@ void InGameUI::drawSkillStrip( void )
 	}
 
 	TheDisplay->endBatch2D();
+}
+
+//-------------------------------------------------------------------------------------------------
+// The scoreboard's layout, in the 800x600 units the strips are measured in.  Every x is from the
+// panel's left edge.
+//-------------------------------------------------------------------------------------------------
+enum
+{
+	SCOREBOARD_POINT_SIZE					= 10,
+	SCOREBOARD_SMALL_POINT_SIZE		= 8,
+	SCOREBOARD_WIDTH							= 720,
+	SCOREBOARD_TOP								= 36,
+	SCOREBOARD_PAD								= 6,
+	SCOREBOARD_ROW_HEIGHT					= 30,
+	SCOREBOARD_PORTRAIT_WIDTH			= 36,
+	SCOREBOARD_PORTRAIT_HEIGHT		= 28,
+	SCOREBOARD_CAMEO_WIDTH				= 22,
+	SCOREBOARD_CAMEO_HEIGHT				= 17,
+	SCOREBOARD_CAMEO_STEP					= 24,
+	SCOREBOARD_POWERS_SHOWN				= 7,
+	SCOREBOARD_NAME_X							= 48,
+	SCOREBOARD_TEAM_X							= 200,
+	SCOREBOARD_LEVEL_X						= 250,
+	SCOREBOARD_MONEY_X						= 294,
+	SCOREBOARD_PER_MINUTE_X				= 344,
+	SCOREBOARD_KILLS_X						= 400,
+	SCOREBOARD_DEATHS_X						= 428,
+	SCOREBOARD_POWERS_X						= 456,
+	SCOREBOARD_FAVOURITE_X				= 626,
+	SCOREBOARD_FAVOURITE_NAME_X		= 652,
+	SCOREBOARD_SECTIONS						= 2,
+	SECONDS_PER_MINUTE						= 60
+};
+
+static const Color SCOREBOARD_PANEL_COLOR = GameMakeColor( 0, 0, 0, 205 );
+static const Color SCOREBOARD_EDGE_COLOR = GameMakeColor( 110, 110, 110, 255 );
+static const Color SCOREBOARD_HEADING_COLOR = GameMakeColor( 150, 150, 150, 255 );
+static const Color SCOREBOARD_ALLIES_COLOR = GameMakeColor( 110, 210, 110, 255 );
+static const Color SCOREBOARD_ENEMIES_COLOR = GameMakeColor( 220, 90, 80, 255 );
+static const Color SCOREBOARD_VALUE_COLOR = GameMakeColor( 235, 235, 235, 255 );
+static const Color SCOREBOARD_GENERAL_COLOR = GameMakeColor( 170, 170, 170, 255 );
+static const Color SCOREBOARD_DEFEATED_COLOR = GameMakeColor( 110, 110, 110, 255 );
+static const Color SCOREBOARD_BADGE_COLOR = GameMakeColor( 0, 0, 0, 200 );
+static const Color SCOREBOARD_SHADOW_COLOR = GameMakeColor( 0, 0, 0, 255 );
+
+struct ScoreboardColumn
+{
+	const char *label;
+	Int x;
+};
+
+static const ScoreboardColumn TheScoreboardColumns[] =
+{
+	{ "GUI:ScoreboardPlayer",			SCOREBOARD_NAME_X },
+	{ "GUI:ScoreboardTeam",				SCOREBOARD_TEAM_X },
+	{ "GUI:ScoreboardLevel",			SCOREBOARD_LEVEL_X },
+	{ "GUI:ScoreboardMoney",			SCOREBOARD_MONEY_X },
+	{ "GUI:ScoreboardPerMinute",	SCOREBOARD_PER_MINUTE_X },
+	{ "GUI:ScoreboardKills",			SCOREBOARD_KILLS_X },
+	{ "GUI:ScoreboardDeaths",			SCOREBOARD_DEATHS_X },
+	{ "GUI:ScoreboardPowers",			SCOREBOARD_POWERS_X },
+	{ "GUI:ScoreboardFavourite",	SCOREBOARD_FAVOURITE_X }
+};
+
+//-------------------------------------------------------------------------------------------------
+/** The next string out of the scoreboard's pool.  They are handed out in the same order every
+	* frame, so a string keeps its font and its text from one frame to the next and is only rebuilt
+	* when a number on it changes. */
+//-------------------------------------------------------------------------------------------------
+DisplayString *InGameUI::scoreboardString( GameFont *font, const UnicodeString &text, Int wrapWidth )
+{
+	DEBUG_ASSERTCRASH( m_scoreboardStringsUsed < SCOREBOARD_STRING_COUNT,
+										 ("scoreboard wants string %d of %d", m_scoreboardStringsUsed, SCOREBOARD_STRING_COUNT) );
+
+	DisplayString *&string = m_scoreboardStrings[ m_scoreboardStringsUsed++ ];
+	if( string == NULL )
+		string = TheDisplayStringManager->newDisplayString();
+
+	string->setFont( font );
+	string->setWordWrap( wrapWidth );
+	string->setText( text );
+	return string;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** One seat.  An enemy is its name and its team and nothing else: its general, its money and its
+	* promotions are for its own side to know.  Your own side, and everybody when you are watching,
+	* gets the whole row: the general's face and name, the rank, the bank, the income, the kills and
+	* losses, every promotion bought at the level it was bought to, and the unit built most. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::drawScoreboardRow( Player *player, const GameSlot *slot, Bool detailed, GameFont *bodyFont,
+																	GameFont *smallFont, Int left, Int top, Int rowHeight )
+{
+	const Bool defeated = TheVictoryConditions->hasSinglePlayerBeenDefeated( player );
+	const Color nameColor = defeated ? SCOREBOARD_DEFEATED_COLOR : clientPlayerColor( player );
+	const Int middle = top + rowHeight / 2;
+	const Int nameX = left + stripPixels( SCOREBOARD_NAME_X );
+
+	DisplayString *name = scoreboardString( bodyFont, slot->getName() );
+	if( detailed )
+	{
+		const Int portraitW = stripPixels( SCOREBOARD_PORTRAIT_WIDTH );
+		const Int portraitH = stripPixels( SCOREBOARD_PORTRAIT_HEIGHT );
+		const Int portraitX = left + stripPixels( SCOREBOARD_PAD );
+		const Int portraitY = middle - portraitH / 2;
+
+		// a mod's general can come without a face; the frame still says whose seat it is
+		const Image *portrait = player->getPlayerTemplate()->getEnabledImage();
+		if( portrait )
+			TheDisplay->drawImage( portrait, portraitX, portraitY, portraitX + portraitW, portraitY + portraitH );
+		TheDisplay->drawOpenRect( portraitX, portraitY, portraitW, portraitH, 1.0f, nameColor );
+
+		name->draw( nameX, middle - bodyFont->height, nameColor, SCOREBOARD_SHADOW_COLOR );
+		scoreboardString( smallFont, player->getPlayerTemplate()->getDisplayName() )->draw( nameX, middle,
+																										SCOREBOARD_GENERAL_COLOR, SCOREBOARD_SHADOW_COLOR );
+	}
+	else
+	{
+		name->draw( nameX, middle - bodyFont->height / 2, nameColor, SCOREBOARD_SHADOW_COLOR );
+	}
+
+	// the lobby's own team label, the one the diplomacy screen wore
+	AsciiString teamLabel;
+	teamLabel.format( "Team:%d", slot->getTeamNumber() + 1 );
+	if( slot->isAI() && slot->getTeamNumber() == -1 )
+		teamLabel = "Team:AI";
+	scoreboardString( bodyFont, TheGameText->fetch( teamLabel ) )->draw( left + stripPixels( SCOREBOARD_TEAM_X ),
+																								middle - bodyFont->height / 2, nameColor, SCOREBOARD_SHADOW_COLOR );
+
+	if( !detailed )
+		return;
+
+	ScoreKeeper *score = player->getScoreKeeper();
+	const Int seconds = TheGameLogic->getFrame() / LOGICFRAMES_PER_SECOND;
+	const Int perMinute = seconds > 0 ? score->getTotalMoneyEarned() * SECONDS_PER_MINUTE / seconds : 0;
+
+	const Int values[] =
+	{
+		player->getRankLevel(),
+		(Int)player->getMoney()->countMoney(),
+		perMinute,
+		score->getTotalUnitsDestroyed() + score->getTotalBuildingsDestroyed(),
+		score->getTotalUnitsLost() + score->getTotalBuildingsLost()
+	};
+	const Int valueX[] =
+	{
+		SCOREBOARD_LEVEL_X, SCOREBOARD_MONEY_X, SCOREBOARD_PER_MINUTE_X, SCOREBOARD_KILLS_X, SCOREBOARD_DEATHS_X
+	};
+
+	UnicodeString text;
+	for( Int value = 0; value < (Int)ARRAY_SIZE( values ); value++ )
+	{
+		text.format( L"%d", values[ value ] );
+		scoreboardString( bodyFont, text )->draw( left + stripPixels( valueX[ value ] ), middle - bodyFont->height / 2,
+																							SCOREBOARD_VALUE_COLOR, SCOREBOARD_SHADOW_COLOR );
+	}
+
+	const Int cameoW = stripPixels( SCOREBOARD_CAMEO_WIDTH );
+	const Int cameoH = stripPixels( SCOREBOARD_CAMEO_HEIGHT );
+	const Int cameoY = middle - cameoH / 2;
+
+	// each promotion once, at the level it has reached, the level in its bottom right corner
+	const Image *powers[ SCOREBOARD_POWERS_SHOWN ];
+	Int levels[ SCOREBOARD_POWERS_SHOWN ];
+	const Int powerCount = gatherPlayerSkills( player, powers, levels, 0, SCOREBOARD_POWERS_SHOWN );
+	for( Int power = 0; power < powerCount; power++ )
+	{
+		const Int x = left + stripPixels( SCOREBOARD_POWERS_X + power * SCOREBOARD_CAMEO_STEP );
+		TheDisplay->drawImage( powers[ power ], x, cameoY, x + cameoW, cameoY + cameoH );
+
+		text.format( L"%d", levels[ power ] );
+		DisplayString *level = scoreboardString( smallFont, text );
+		Int levelW = 0, levelH = 0;
+		level->getSize( &levelW, &levelH );
+		TheDisplay->drawFillRect( x + cameoW - levelW - 1, cameoY + cameoH - levelH, levelW + 1, levelH,
+															SCOREBOARD_BADGE_COLOR );
+		level->draw( x + cameoW - levelW, cameoY + cameoH - levelH, SCOREBOARD_VALUE_COLOR, SCOREBOARD_SHADOW_COLOR );
+	}
+
+	const ThingTemplate *favourite = score->getMostBuiltUnit();
+	if( favourite == NULL )
+		return;
+
+	const Int favouriteX = left + stripPixels( SCOREBOARD_FAVOURITE_X );
+	const Image *cameo = favourite->getButtonImage();
+	if( cameo )
+		TheDisplay->drawImage( cameo, favouriteX, cameoY, favouriteX + cameoW, cameoY + cameoH );
+
+	DisplayString *favouriteName = scoreboardString( smallFont, favourite->getDisplayName(),
+																stripPixels( SCOREBOARD_WIDTH - SCOREBOARD_FAVOURITE_NAME_X - SCOREBOARD_PAD ) );
+	Int favouriteW = 0, favouriteH = 0;
+	favouriteName->getSize( &favouriteW, &favouriteH );
+	favouriteName->draw( left + stripPixels( SCOREBOARD_FAVOURITE_NAME_X ), middle - favouriteH / 2,
+											 SCOREBOARD_VALUE_COLOR, SCOREBOARD_SHADOW_COLOR );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The scoreboard on Tab, laid out the way Dota lays out its own: your side on top under its own
+	* heading, the other side under it.  Watching a match there are no sides to keep secrets from,
+	* so everybody gets a full row and there are no headings. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::drawScoreboard( void )
+{
+	if( !m_scoreboardOpen || TheGameInfo == NULL )
+		return;
+	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+		return;
+
+	Player *local = ThePlayerList->getLocalPlayer();
+	const Bool watching = local->isPlayerObserver();
+
+	Player *players[ MAX_SLOTS ];
+	const GameSlot *slots[ MAX_SLOTS ];
+	Bool allied[ MAX_SLOTS ];
+	Int seats = 0;
+	Int sectionSeats[ SCOREBOARD_SECTIONS ] = { 0, 0 };
+	for( Int slotNum = 0; slotNum < MAX_SLOTS; slotNum++ )
+	{
+		const GameSlot *slot = TheGameInfo->getConstSlot( slotNum );
+		if( !slot->isOccupied() )
+			continue;
+
+		AsciiString playerName;
+		playerName.format( "player%d", slotNum );
+		Player *player = ThePlayerList->findPlayerWithNameKey( NAMEKEY( playerName ) );
+		if( player->isPlayerObserver() )
+			continue;
+
+		players[ seats ] = player;
+		slots[ seats ] = slot;
+		allied[ seats ] = watching || player == local || local->getRelationship( player->getDefaultTeam() ) == ALLIES;
+		sectionSeats[ allied[ seats ] ? 0 : 1 ]++;
+		seats++;
+	}
+
+	GameFont *bodyFont = TheFontLibrary->getFont( m_superweaponNormalFont,
+												TheGlobalLanguageData->adjustFontSize( SCOREBOARD_POINT_SIZE ), TRUE );
+	GameFont *smallFont = TheFontLibrary->getFont( m_superweaponNormalFont,
+												TheGlobalLanguageData->adjustFontSize( SCOREBOARD_SMALL_POINT_SIZE ), FALSE );
+
+	const Int pad = stripPixels( SCOREBOARD_PAD );
+	const Int rowHeight = stripPixels( SCOREBOARD_ROW_HEIGHT );
+	const Int width = stripPixels( SCOREBOARD_WIDTH );
+	const Int left = ( TheDisplay->getWidth() - width ) / 2;
+	const Int top = stripPixels( SCOREBOARD_TOP );
+
+	Int headings = 0;
+	for( Int section = 0; section < SCOREBOARD_SECTIONS && !watching; section++ )
+	{
+		if( sectionSeats[ section ] > 0 )
+			headings++;
+	}
+	const Int height = pad + smallFont->height + pad + headings * ( bodyFont->height + pad ) + seats * rowHeight + pad;
+
+	m_scoreboardStringsUsed = 0;
+	TheDisplay->drawFillRect( left, top, width, height, SCOREBOARD_PANEL_COLOR );
+	TheDisplay->drawOpenRect( left, top, width, height, 1.0f, SCOREBOARD_EDGE_COLOR );
+
+	Int y = top + pad;
+	for( Int column = 0; column < (Int)ARRAY_SIZE( TheScoreboardColumns ); column++ )
+	{
+		scoreboardString( smallFont, TheGameText->fetch( TheScoreboardColumns[ column ].label ) )->draw(
+			left + stripPixels( TheScoreboardColumns[ column ].x ), y, SCOREBOARD_HEADING_COLOR, SCOREBOARD_SHADOW_COLOR );
+	}
+	y += smallFont->height + pad;
+
+	static const char *const sectionHeadings[ SCOREBOARD_SECTIONS ] = { "GUI:ScoreboardAllies", "GUI:ScoreboardEnemies" };
+	static const Color sectionColors[ SCOREBOARD_SECTIONS ] = { SCOREBOARD_ALLIES_COLOR, SCOREBOARD_ENEMIES_COLOR };
+	for( Int section = 0; section < SCOREBOARD_SECTIONS; section++ )
+	{
+		if( sectionSeats[ section ] == 0 )
+			continue;
+
+		const Bool alliedSection = section == 0;
+		if( !watching )
+		{
+			scoreboardString( bodyFont, TheGameText->fetch( sectionHeadings[ section ] ) )->draw( left + pad, y,
+																		sectionColors[ section ], SCOREBOARD_SHADOW_COLOR );
+			y += bodyFont->height + pad;
+		}
+
+		for( Int seat = 0; seat < seats; seat++ )
+		{
+			if( allied[ seat ] != alliedSection )
+				continue;
+
+			drawScoreboardRow( players[ seat ], slots[ seat ], alliedSection, bodyFont, smallFont, left, y, rowHeight );
+			y += rowHeight;
+		}
+	}
 }
 
 //-------------------------------------------------------------------------------------------------

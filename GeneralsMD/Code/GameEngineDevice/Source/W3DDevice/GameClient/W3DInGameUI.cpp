@@ -496,7 +496,8 @@ void W3DInGameUI::draw( void )
 	// the peace time clock across the top middle, and the clock plate in the corner beside it
 	drawPeaceTimer();
 	drawHudOverlay();
-	
+	drawScoreboard();
+
 #ifdef EXTENDED_STATS
 	}
 #endif

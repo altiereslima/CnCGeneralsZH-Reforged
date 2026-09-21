@@ -61,6 +61,9 @@ class Anim2DTemplate;
 class Anim2D;
 class Shadow;
 class Image;
+class GameFont;
+class GameSlot;
+class Player;
 enum LegalBuildCode;
 enum KindOfType;
 enum ShadowType;
@@ -384,6 +387,8 @@ public:  // ********************************************************************
 	virtual void message( UnicodeString format, ... );				  ///< display a message to the user
 	virtual void message( AsciiString stringManagerLabel, ... );///< display a message to the user
 	virtual void toggleMessages( void ) { m_messagesOn = 1 - m_messagesOn; }	///< toggle messages on/off
+	void toggleScoreboard( void ) { m_scoreboardOpen = !m_scoreboardOpen; }	///< the Tab scoreboard, on or off
+	void drawScoreboard( void );																						///< that scoreboard, over everything
 	virtual Bool isMessagesOn( void ) { return m_messagesOn; }	///< are the display messages on
 	void freeMessageResources( void );				///< free resources for the ui messages
 	Color getMessageColor(Bool altColor) { return (altColor)?m_messageColor2:m_messageColor1; }
@@ -1172,6 +1177,19 @@ protected:
 	void addSuperweaponIcon( const Image *image, Int seconds, Int percent, Bool ready, Color color );
 	void drawSuperweaponStrip( void );		///< those icons, top right, soonest at the right hand end
 	void drawSkillStrip( void );					///< the watched player's bought promotions, under those
+
+	//
+	// The scoreboard on Tab: every seat in the match, your side in full and the other side by name
+	// and team only.  Drawn over everything, like the clock plate, from a pool of strings that are
+	// handed out in the same order every frame so each keeps its font and its text texture.
+	//
+	enum { SCOREBOARD_STRING_COUNT = 160 };
+	DisplayString *scoreboardString( GameFont *font, const UnicodeString &text, Int wrapWidth = 0 );
+	void drawScoreboardRow( Player *player, const GameSlot *slot, Bool detailed, GameFont *bodyFont, GameFont *smallFont,
+													Int left, Int top, Int rowHeight );
+	Bool												m_scoreboardOpen;
+	Int													m_scoreboardStringsUsed;	///< handed out so far this frame
+	DisplayString *							m_scoreboardStrings[ SCOREBOARD_STRING_COUNT ];
 
 	//
 	// The drop-down in the top left corner that switches the strips on and off.  Row 0 is its header,

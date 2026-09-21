@@ -1029,3 +1029,48 @@ END
 GUI:HudSuperweaponStrip
 "Superweapon timers"
 END
+
+// the scoreboard on Tab
+GUI:ScoreboardAllies
+"YOUR SIDE"
+END
+
+GUI:ScoreboardEnemies
+"ENEMIES"
+END
+
+GUI:ScoreboardPlayer
+"PLAYER"
+END
+
+GUI:ScoreboardTeam
+"TEAM"
+END
+
+GUI:ScoreboardLevel
+"RANK"
+END
+
+GUI:ScoreboardMoney
+"MONEY"
+END
+
+GUI:ScoreboardPerMinute
+"PER MIN"
+END
+
+GUI:ScoreboardKills
+"K"
+END
+
+GUI:ScoreboardDeaths
+"D"
+END
+
+GUI:ScoreboardPowers
+"POWERS"
+END
+
+GUI:ScoreboardFavourite
+"FAVOURITE"
+END
