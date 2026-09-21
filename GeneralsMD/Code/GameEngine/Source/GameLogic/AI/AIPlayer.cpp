@@ -6600,6 +6600,32 @@ void AIPlayer::queueCapturer( void )
 	* standing next to it. */
 static const Real VEHICLE_HACK_REACH = 250.0f;
 
+/** How far a thief will go for one, measured from the thief, or from the base while we have none.
+	* Wider than the hack, because the prize is permanent and the walk is the whole plan.  Not the
+	* whole map, which is what the first draft allowed: with the shroud not yet up on frame 7, every
+	* computer player in the match went shopping for a hijacker to send at an enemy dozer standing on
+	* the far side of it. */
+static const Real HIJACK_REACH = 700.0f;
+
+/** Could this player buy this unit if it were asking a factory right now?
+	*
+	* A computer player keeps canBuildUnits false between team orders, and allowedToBuild refuses
+	* every non-structure while it is, so a plain canBuild here answers "no" for a reason that has
+	* nothing to do with the unit: a Toxin General with a barracks, an arms dealer and 17,000 in the
+	* bank reported no buildable hijacker on every pass of a fifteen-thousand-frame match.
+	* queueSupportUnit flips the same flag around its own factory lookup; this is that trick moved to
+	* the question in front of it.  cheapestScoutTemplate and cheapestCapturerTemplate ask without it
+	* and so find their unit only on the passes where the flag happens to be up - left as they are
+	* because both were measured with that in them. */
+static Bool couldBuildUnit( Player *player, const ThingTemplate *tmpl )
+{
+	const Bool wasAllowed = player->getCanBuildUnits();
+	player->setCanBuildUnits( TRUE );
+	const Bool answer = player->canBuild( tmpl );
+	player->setCanBuildUnits( wasAllowed );
+	return answer;
+}
+
 //----------------------------------------------------------------------------------------------------------
 /** This one takes a vehicle by walking into it.  Asked of the object rather than of a faction table,
 	* so it lands on the GLA Hijacker and on anything a mod gave the same collide to. */
@@ -6624,7 +6650,7 @@ static const ThingTemplate *cheapestHijackerTemplate( Player *player )
 
 	for( const ThingTemplate *t = TheThingFactory->firstTemplate(); t; t = t->friend_getNextTemplate() )
 	{
-		if( !t->isKindOf( KINDOF_INFANTRY ) || !player->canBuild( t ) )
+		if( !t->isKindOf( KINDOF_INFANTRY ) || !couldBuildUnit( player, t ) )
 			continue;
 
 		const Int cost = t->calcCostToBuild( player );
@@ -6682,7 +6708,7 @@ Object *AIPlayer::findHijacker( void )
 
 //----------------------------------------------------------------------------------------------------------
 /**
- * The closest enemy vehicle in sight, or none within reach.  reach <= 0 is the whole map.
+ * The closest enemy vehicle in sight, or none within reach.
  *
  * A vehicle goes back to SHROUDED the moment our vision leaves it, so observerKnowsAbout reads here
  * as "we can see it now" - the only honest rule for a target that drives off while we walk to it.
@@ -6734,7 +6760,7 @@ Object *AIPlayer::nearestStealableVehicle( const Coord3D *from, Real reach )
 					const Real dx = at->x - from->x;
 					const Real dy = at->y - from->y;
 					const Real distSqr = dx*dx + dy*dy;
-					if( reach > 0.0f && distSqr > reachSqr )
+					if( distSqr > reachSqr )
 						continue;
 					if( best == NULL || distSqr < bestDistSqr )
 					{
@@ -6817,13 +6843,16 @@ void AIPlayer::doHijack( void )
 	if( thief )
 		from = *thief->getPosition();
 
-	Object *target = nearestStealableVehicle( &from, 0.0f );
+	Object *target = nearestStealableVehicle( &from, HIJACK_REACH );
 	if( target == NULL )
-		return;			// nothing in sight; the thief waits where it is rather than walk into the fog
+		return;			// nothing in reach; the thief waits where it is rather than walk into the fog
 
 	if( thief == NULL )
 	{
-		// only pay for one when there is something to spend it on
+		// Only pay for one when there is something to spend it on.  It shares the one support-unit
+		// slot with the scout and the capturer, so a match that keeps losing scouts keeps the thief
+		// waiting - which is the right order of priorities and the reason there is never more than
+		// one of these walking about.
 		queueSupportUnit( cheapestHijackerTemplate( m_player ), "HIJACK" );
 		return;
 	}
