@@ -1,0 +1,17 @@
+# Trailer section 1: the trailer_corridor column with six Overlords added at its head, so the
+# forest shot 1.4 has an Overlord to fill the frame. Same seat, same order, same frame.
+#
+#   generals.exe -win -xres 2560 -yres 1440 -borderless -msaa 0 -quickstart -noshellmap -observer
+#     -multiInstance -map "Maps\ForgottenForestZH\ForgottenForestZH.map" -autoskirmish 2 -takeover
+#     -seed 3 -peacetime 20 -scenario trailer_intro -cinema tr_intro_forest
+
+30    spawn       0  AmericaTankCrusader             34  start0:0:300    40
+30    spawn       0  AmericaTankPaladin              10  start0:-300:300 40
+30    spawn       0  AmericaVehicleHumvee            12  start0:300:300  34
+30    spawn       0  AmericaInfantryRanger           26  start0:0:460    18
+30    spawn       0  AmericaInfantryMissileDefender  12  start0:300:460  18
+30    spawn       0  ChinaTankOverlord                6  start0:0:120    60
+
+90    playermove  0  *  start1
+90    arrive      0  AmericaTankCrusader  start1  300
+90    arrive      0  ChinaTankOverlord    start1  300
