@@ -234,3 +234,20 @@ inline int getEarlyOptionInt( const char *key, int defaultValue, int lo, int hi 
 		return hi;
 	return parsed;
 }
+
+/** A stored yes or no, read as leniently as the options catalog reads it, so the two never disagree
+	* about the same line of the file. */
+inline bool isEarlyOptionYes( const char *value )
+{
+	return ::_stricmp( value, "yes" ) == 0 || ::_stricmp( value, "true" ) == 0
+		|| ::_stricmp( value, "on" ) == 0 || ::_stricmp( value, "y" ) == 0
+		|| ::_stricmp( value, "t" ) == 0 || ::_stricmp( value, "1" ) == 0;
+}
+
+inline bool getEarlyOptionBool( const char *key, bool defaultValue )
+{
+	char value[64];
+	if (!findEarlyOptionValue( key, value, sizeof( value ) ))
+		return defaultValue;
+	return isEarlyOptionYes( value );
+}

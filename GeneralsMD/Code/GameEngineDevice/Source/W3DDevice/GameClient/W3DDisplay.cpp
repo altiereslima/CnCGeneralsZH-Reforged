@@ -1091,9 +1091,14 @@ void W3DDisplay::init( void )
 	Direct3D11_Present_Enable( TheGlobalData->m_direct3D11 != FALSE );
 	Direct3D11_Dump_Programs_To( TheGlobalData->m_direct3D11DumpPath.str() );
 	pushDirect3D11PostChain();
+	// Classic graphics is read here once and not again: a texture that has looked for its normal
+	// map keeps the answer, and a tile size cannot change under a loaded map.  The menu says the
+	// setting waits for the next launch.
+	Direct3D11_Normal_Maps_Enable( !TheGlobalData->m_classicGraphics );
 	// Before any map is read: every tile and the atlas are sized by it.  A headless run draws no
-	// ground, so it keeps EA's tile and the memory.
-	TheTilePixelExtent = TheGlobalData->m_headless ? SOURCE_TILE_PIXEL_EXTENT : MAX_TILE_PIXEL_EXTENT;
+	// ground, so it keeps EA's tile and the memory, and classic graphics keeps EA's tile to look it.
+	TheTilePixelExtent = (TheGlobalData->m_headless || TheGlobalData->m_classicGraphics)
+		? SOURCE_TILE_PIXEL_EXTENT : MAX_TILE_PIXEL_EXTENT;
 
 	// Same problem, same answer: the filter table is built the moment the device exists and WW3D2
 	// cannot see GlobalData, so the player's texture filtering goes in here. Nothing in the game

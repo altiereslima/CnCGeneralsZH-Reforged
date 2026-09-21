@@ -15205,6 +15205,14 @@ TOOLTIP:VSync
 "Görüntüyü monitöre eşler, böylece ekran yırtılmaz. Kapalıyken görüntü, bilgisayarın çizebildiği kadar hızlı akar. Kabul Et'e bastığınızda uygulanır."
 END
 
+GUI:ClassicGraphics
+"Klasik Grafikler"
+END
+
+TOOLTIP:ClassicGraphics
+"Oyunun 2003'teki görünümü: kendi kaplamaları ve zemini, eski keskin gölgeler, kabartma ayrıntısı yok, parlama ve keskinleştirme yok. Kapalıyken Reforged. Oyun bir sonraki açılışında geçerli olur."
+END
+
 GUI:InfantryShadows
 "Piyade Gölgeleri"
 END

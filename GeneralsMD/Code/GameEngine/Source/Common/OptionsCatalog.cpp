@@ -68,6 +68,7 @@ OPTION_INT_ACCESSORS( m_anisotropyLevel )
 OPTION_INT_ACCESSORS( m_windowMode )
 OPTION_INT_ACCESSORS( m_msaaLevel )
 OPTION_BOOL_ACCESSORS( m_vsync )
+OPTION_BOOL_ACCESSORS( m_classicGraphics )
 OPTION_INT_ACCESSORS( m_healthBarMode )
 OPTION_INT_ACCESSORS( m_playerColorScheme )
 OPTION_INT_ACCESSORS( m_textLanguage )
@@ -313,6 +314,14 @@ const OptionDef TheOptionCatalog[] =
 	{ "VSync",										OPT_WND( "CheckVSync" ), "GUI:VSync",
 		OPTION_BOOL, APPLY_DEVICE_RESET, 0, 1,
 		get_m_vsync, set_m_vsync },
+
+	// Classic or Reforged.  Classic is the picture the game shipped with: its own textures, EA's
+	// ground tile, no normal maps, the stencil shadows and no post effects.  The upscaled archives
+	// are mounted before GlobalData exists, so Win32BIGFileSystem reads this key out of Options.ini
+	// itself, and everything else takes it once while the device starts.
+	{ "ClassicGraphics",					OPT_WND( "CheckClassicGraphics" ), "GUI:ClassicGraphics",
+		OPTION_BOOL, APPLY_RESTART, 0, 1,
+		get_m_classicGraphics, set_m_classicGraphics },
 
 	// Who wears a health bar: everyone, everyone hurt, only the selection, or nobody.  Read every
 	// frame by the drawable that is about to draw one, so changing it shows immediately.

@@ -31,6 +31,7 @@ static bool Requested = false;
 static bool PresentRequested = false;
 static bool VSyncRequested = false;
 static bool Active = false;
+static bool NormalMapsEnabled = true;
 static DX11DeviceClass Device;
 static DX11BackendClass Backend;
 static DX11PostProcessClass Post;
@@ -248,9 +249,14 @@ void Direct3D11_Mirror_Texture(unsigned stage, struct IDirect3DBaseTexture9 * te
 	}
 }
 
+void Direct3D11_Normal_Maps_Enable(bool enabled)
+{
+	NormalMapsEnabled = enabled;
+}
+
 bool Direct3D11_Normal_Maps_Active()
 {
-	return Active;
+	return Active && NormalMapsEnabled;
 }
 
 void Direct3D11_Mirror_Normal_Map(struct IDirect3DBaseTexture9 * normal_map)

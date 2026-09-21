@@ -11472,6 +11472,22 @@ TEST(early_options_reads_the_same_file_userpreferences_writes)
 	::fclose( fp );
 }
 
+/** ClassicGraphics is read twice: by the archive mount, before the engine exists, and by the options
+	 catalog.  If they disagreed about a hand-edited "true", the game would draw EA's tile over the
+	 upscaled art or the other way round. */
+TEST(early_options_reads_a_yes_the_way_the_catalog_does)
+{
+	CHECK( isEarlyOptionYes( "yes" ) );
+	CHECK( isEarlyOptionYes( "YES" ) );
+	CHECK( isEarlyOptionYes( "true" ) );
+	CHECK( isEarlyOptionYes( "on" ) );
+	CHECK( isEarlyOptionYes( "1" ) );
+	CHECK( !isEarlyOptionYes( "no" ) );
+	CHECK( !isEarlyOptionYes( "0" ) );
+	CHECK( !isEarlyOptionYes( "" ) );
+	CHECK( !isEarlyOptionYes( "yess" ) );
+}
+
 /** The tab strip's hit test.  Nothing in the shipped game uses the tab control, so its arithmetic
 	 has never run against a real click; the settings screen is the first layout to use it. */
 TEST(a_click_on_the_tab_strip_names_the_tab_under_it)

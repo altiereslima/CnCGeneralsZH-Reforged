@@ -38,6 +38,7 @@
 #include "Win32Device/Common/Win32BIGFile.h"
 #include "Win32Device/Common/Win32BIGFileSystem.h"
 #include "Common/registry.h"
+#include "Common/EarlyOptions.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -87,11 +88,26 @@ Win32BIGFileSystem::Win32BIGFileSystem() : ArchiveFileSystem() {
 Win32BIGFileSystem::~Win32BIGFileSystem() {
 }
 
+// The classic graphics setting, read out of Options.ini before anything mounts: the archives go in
+// long before GlobalData exists, and the fork's upscaled art is the one thing classic has to keep
+// out of the directory tree rather than switch off afterwards.
+static Bool theClassicGraphics = FALSE;
+static const char REFORGED_ARCHIVE_PREFIX[] = "Reforged";
+
+static Bool isReforgedArchive(const AsciiString &path)
+{
+	const char *name = strrchr(path.str(), '\\');
+	name = (name != NULL) ? name + 1 : path.str();
+	return _strnicmp(name, REFORGED_ARCHIVE_PREFIX, sizeof(REFORGED_ARCHIVE_PREFIX) - 1) == 0;
+}
+
 void Win32BIGFileSystem::init() {
 	DEBUG_ASSERTCRASH(TheLocalFileSystem != NULL, ("TheLocalFileSystem must be initialized before TheArchiveFileSystem."));
 	if (TheLocalFileSystem == NULL) {
 		return;
 	}
+
+	theClassicGraphics = getEarlyOptionBool("ClassicGraphics", false);
 
 	//
 	// The exe's own directory and no further down.  This used to walk every subdirectory under it,
@@ -303,6 +319,12 @@ Bool Win32BIGFileSystem::loadBigFilesFromDirectory(AsciiString dir, AsciiString 
 	Bool actuallyAdded = FALSE;
 	FilenameListIter it = filenameList.begin();
 	while (it != filenameList.end()) {
+		if (theClassicGraphics && isReforgedArchive(*it)) {
+			DEBUG_LOG(("Win32BIGFileSystem::loadBigFilesFromDirectory - classic graphics, leaving %s out.\n", (*it).str()));
+			it++;
+			continue;
+		}
+
 		ArchiveFile *archiveFile = openArchiveFile((*it).str());
 
 		if (archiveFile != NULL) {

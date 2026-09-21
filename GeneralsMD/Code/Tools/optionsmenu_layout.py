@@ -128,6 +128,7 @@ NEW_CONTROLS = [
     (LABEL,  "LabelWindowMode",        "GUI:WindowMode"),
     (COMBO,  "ComboBoxWindowMode",     None),
     (CHECK,  "CheckVSync",             "GUI:VSync"),
+    (CHECK,  "CheckClassicGraphics",   "GUI:ClassicGraphics"),
     (LABEL,  "LabelMSAA",              "GUI:MSAA"),
     (COMBO,  "ComboBoxMSAA",           None),
     (LABEL,  "LabelBloom",             "GUI:Bloom"),
@@ -218,6 +219,7 @@ GROUP_LAYOUT = [
         setting("GammaLabel", "SliderGamma", "ValueGamma")]),
 
     ("PageGraphics", 0, "GUI:OptionsGroupDetail", [
+        ("check", "CheckClassicGraphics"),
         setting("DetailLabel", "ComboBoxDetail"),
         setting("LabelTextureResolution", "LowResSlider", "ValueTextureResolution"),
         setting("LabelParticleCap", "ParticleCapSlider", "ValueParticleCap")]),

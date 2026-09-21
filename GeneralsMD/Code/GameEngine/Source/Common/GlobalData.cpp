@@ -681,6 +681,7 @@ GlobalData::GlobalData()
 	m_startAtMaxZoom = TRUE;		//open a game framed as wide as the player could zoom by hand
 	m_shadowsForProps = TRUE;				//likewise: scenery with no shadow of its own gets one
 	m_shadowsForParticles = TRUE;	//on by default: the shipped INI has no entry for it
+	m_classicGraphics = FALSE;
 	m_shadowMap = TRUE;						//the sun's own shadows are what the game draws with now
 	m_shadowMapOnly = TRUE;				//and they replace the stencil volumes rather than joining them
 	m_shadowMapReport = FALSE;
@@ -1450,6 +1451,15 @@ void GlobalData::parseGameDataDefinition( INI* ini )
 	// TheWritableGlobalData is being constructed, which is before parseCommandLine, so the command
 	// line still wins over the preferences file.  setOptionPreferences runs after it and would not.
 	loadOptionsFromPreferences( optionPref );
+
+	// Classic graphics takes the stencil shadows and the unfiltered picture back here, before the
+	// command line, so -dx11post still names a chain for the one run it is given.  The rest of the
+	// setting is read where the device starts and where the archives mount.
+	if (TheWritableGlobalData->m_classicGraphics)
+	{
+		TheWritableGlobalData->m_shadowMap = FALSE;
+		TheWritableGlobalData->m_direct3D11PostChain = "off";
+	}
 
 	applyWindowMode();
 }

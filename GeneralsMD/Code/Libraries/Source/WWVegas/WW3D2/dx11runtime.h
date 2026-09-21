@@ -91,7 +91,9 @@ void Direct3D11_Mirror_Texture(unsigned stage, struct IDirect3DBaseTexture9 * te
 
 // Normal maps: TextureClass looks for a "<name>_nrm.dds" beside every texture it binds at stage
 // zero and hands it over here, null when there is none; the terrain builds its own.  Active is
-// false on a Direct3D 9 run, which has no pixel half to light with.
+// false on a Direct3D 9 run, which has no pixel half to light with, and after the classic graphics
+// setting turned them off, which it does once, before the first texture is bound.
+void Direct3D11_Normal_Maps_Enable(bool enabled);
 bool Direct3D11_Normal_Maps_Active();
 void Direct3D11_Mirror_Normal_Map(struct IDirect3DBaseTexture9 * normal_map);
 

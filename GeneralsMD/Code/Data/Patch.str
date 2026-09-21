@@ -646,6 +646,14 @@ TOOLTIP:VSync
 "Holds the picture to the monitor so it does not tear. Off, the picture runs as fast as the machine draws. Applied when you Accept."
 END
 
+GUI:ClassicGraphics
+"Classic Graphics"
+END
+
+TOOLTIP:ClassicGraphics
+"The game as it looked in 2003: its own textures and ground, the old hard shadows, no bump detail and no glow or sharpening. Off is Reforged. Takes effect the next time the game starts."
+END
+
 GUI:InfantryShadows
 "Infantry Shadows"
 END
