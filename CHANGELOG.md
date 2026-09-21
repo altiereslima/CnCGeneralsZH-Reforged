@@ -1112,6 +1112,12 @@ The whole HUD is on the hardware. Four colours carry it, and they mean the same 
   brutal battles on Twilight Flame, units spent 8% less time wedged and 4% less time blocked, with 14%
   more new routes actually planned. One of those twenty went the other way: a unit sat stuck for most
   of the match, and why is not known yet.
+- An Angry Mob arrives with everyone it set off with. The mob is ten people following one invisible
+  leader, and every one of them used to walk at the exact spot that leader was headed for, so they
+  all arrived on the same square and spent the trip shoving each other off it. Anyone who fell too
+  far behind died on the spot, which is why a mob that walked around a building turned up four men
+  short. Each member now has its own place in the crowd and holds it, whoever gets ahead eases off
+  rather than arriving alone, whoever falls behind runs, and nobody dies for being last.
 
 ## Long orders stopped hitching
 
