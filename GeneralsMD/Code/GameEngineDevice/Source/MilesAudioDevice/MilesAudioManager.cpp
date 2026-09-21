@@ -2167,8 +2167,11 @@ Real MilesAudioManager::getVoiceMixedVolume( const AudioEventRTS *event, Real sl
 {
 	static const Real VOICE_BOOST = 1.6f;
 
+	// A sound can reach here with no info (see audioIsType): v2.0.0 read m_type through it and a
+	// looping sound's next pass died at address 0x40 on the XAudio2 service thread.
+	const AudioEventInfo *info = event->getAudioEventInfo();
 	const Real eventVolume = event->getVolume() * event->getVolumeShift();
-	if (event->getAudioEventInfo()->m_type & ST_VOICE) {
+	if (info != NULL && (info->m_type & ST_VOICE)) {
 		return min( 1.0f, eventVolume * max( sliderVolume, m_speechVolume ) * VOICE_BOOST );
 	}
 

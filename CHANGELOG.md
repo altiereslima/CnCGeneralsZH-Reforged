@@ -936,6 +936,8 @@ The whole HUD is on the hardware. Four colours carry it, and they mean the same 
 - Blowing up a full transport is survivable now, in every remaining variant.
 - A unit can no longer load into a vehicle that no longer exists.
 - Selling or losing an airfield under a jet on its takeoff roll no longer takes the game down. The jet takes off.
+- A looping sound coming round for its next pass no longer takes the game down. v2.0.0 lifted unit replies over the battle, and the check for whether a sound is a reply read a part of the sound that a looping one can have lost by then. A player's skirmish ended on "Technical Difficulties" twelve hundred frames in. A sound with nothing to say about itself now plays at the effects volume.
+- When the game does go down, the reason and where it happened are written into the game log beside the game as well as into the crash file under Documents. Two players on v2.0.0 saw "Technical Difficulties" and their crash file never turned up, so the report that reached us said nothing about why.
 - A Particle Uplink Cannon fired by a script along a path no longer crashes at the path's last waypoint.
 - A damage effect whose attacker died first no longer crashes the game, and neither does a flash-bang into a building with fewer soldiers than it was meant to kill.
 - A disguised bomb truck losing its disguise used to rebuild itself onto the image it had just thrown away. It gets a fresh one now.

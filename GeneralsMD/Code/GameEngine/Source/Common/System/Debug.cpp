@@ -705,6 +705,11 @@ double SimpleProfiler::getAverageTime()
 
 	static FILE *theReleaseCrashLogFile = NULL;
 
+	/* Everything the crash file gets goes into DebugLogFile.txt as well.  The crash file lives under
+		 Documents and is opened through an ANSI path in a MAX_PATH buffer, so a redirected or non-ASCII
+		 Documents folder loses it, and two players on v2.0.0 sent reports with the "Technical
+		 Difficulties" box on screen and no crash file at all.  The log sits beside the exe and the
+		 launcher always sends its tail. */
 	static void releaseCrashLogOutput(const char *buffer)
 	{
 		if (theReleaseCrashLogFile)
@@ -712,6 +717,38 @@ double SimpleProfiler::getAverageTime()
 			fprintf(theReleaseCrashLogFile, "%s", buffer);	// note, no \n (should be there already)
 			fflush(theReleaseCrashLogFile);
 		}
+#ifdef DEBUG_LOGGING
+		if (theLogFile)
+		{
+			fprintf(theLogFile, "%s", buffer);
+			fflush(theLogFile);
+		}
+#endif
+	}
+
+	static const int RELEASECRASH_STACK_SIZE = 12;
+	// 1, not 6: FillStackAddresses drops its own frame itself now, so 6 skipped
+	// past everything the game did and logged two ntdll frames instead.
+	static const int RELEASECRASH_STACK_SKIP = 1;
+
+	static void releaseCrashStackOutput(void)
+	{
+		void* stacktrace[RELEASECRASH_STACK_SIZE];
+		::FillStackAddresses(stacktrace, RELEASECRASH_STACK_SIZE, RELEASECRASH_STACK_SKIP);
+		::StackDumpFromAddresses(stacktrace, RELEASECRASH_STACK_SIZE, releaseCrashLogOutput);
+	}
+
+	/// The reason and the registers go into the log before the crash file is even opened.
+	static void releaseCrashToLog(const char *reason)
+	{
+#ifdef DEBUG_LOGGING
+		if (theLogFile)
+		{
+			fprintf(theLogFile, "\nRelease Crash at %s; Reason %s\n\nLast error:\n%s\n\nCurrent stack:\n",
+				getCurrentTimeString(), reason, g_LastErrorDump.str());
+			fflush(theLogFile);
+		}
+#endif
 	}
 
 void ReleaseCrash(const char *reason)
@@ -721,6 +758,7 @@ void ReleaseCrash(const char *reason)
 	if (theLogFile)
 		fflush(theLogFile);
 #endif
+	releaseCrashToLog(reason);
 
 	/// do additional reporting on the crash, if possible
 
@@ -768,14 +806,14 @@ void ReleaseCrash(const char *reason)
 		fprintf(theReleaseCrashLogFile, "\nLast error:\n%s\n\nCurrent stack:\n", g_LastErrorDump.str());
 		// The stack walk below can fault, and the reason and the registers above it must survive that.
 		fflush(theReleaseCrashLogFile);
-		const int STACKTRACE_SIZE	= 12;
-		// 1, not 6: FillStackAddresses drops its own frame itself now, so 6 skipped
-		// past everything the game did and logged two ntdll frames instead.
-		const int STACKTRACE_SKIP = 1;
-		void* stacktrace[STACKTRACE_SIZE];
-		::FillStackAddresses(stacktrace, STACKTRACE_SIZE, STACKTRACE_SKIP);
-		::StackDumpFromAddresses(stacktrace, STACKTRACE_SIZE, releaseCrashLogOutput);
-
+	}
+	else
+	{
+		DEBUG_LOG(("ReleaseCrash - could not write %s\n", curbuf));
+	}
+	releaseCrashStackOutput();
+	if (theReleaseCrashLogFile)
+	{
 		fflush(theReleaseCrashLogFile);
 		fclose(theReleaseCrashLogFile);
 		theReleaseCrashLogFile = NULL;
@@ -826,6 +864,7 @@ void ReleaseCrashLocalized(const AsciiString& p, const AsciiString& m)
 		return;
 	}
 
+	releaseCrashToLog(m.str());
 	UnicodeString prompt = TheGameText->fetch(p);
 	UnicodeString mesg = TheGameText->fetch(m);
 
@@ -876,18 +915,17 @@ void ReleaseCrashLocalized(const AsciiString& p, const AsciiString& m)
 	theReleaseCrashLogFile = fopen(curbuf, "w");
 	if (theReleaseCrashLogFile)
 	{
-		fprintf(theReleaseCrashLogFile, "Release Crash at %s; Reason %s\n", getCurrentTimeString(), mesg.str());
+		fprintf(theReleaseCrashLogFile, "Release Crash at %s; Reason %ls\n", getCurrentTimeString(), mesg.str());
 		if (hadPreviousCrashLog && rotated != 0)
 			fprintf(theReleaseCrashLogFile, "(the previous crash report could not be rotated aside; %s is older than it looks)\n", prevbuf);
-
-		const int STACKTRACE_SIZE	= 12;
-		// 1, not 6: FillStackAddresses drops its own frame itself now, so 6 skipped
-		// past everything the game did and logged two ntdll frames instead.
-		const int STACKTRACE_SKIP = 1;
-		void* stacktrace[STACKTRACE_SIZE];
-		::FillStackAddresses(stacktrace, STACKTRACE_SIZE, STACKTRACE_SKIP);
-		::StackDumpFromAddresses(stacktrace, STACKTRACE_SIZE, releaseCrashLogOutput);
-
+	}
+	else
+	{
+		DEBUG_LOG(("ReleaseCrashLocalized - could not write %s\n", curbuf));
+	}
+	releaseCrashStackOutput();
+	if (theReleaseCrashLogFile)
+	{
 		fflush(theReleaseCrashLogFile);
 		fclose(theReleaseCrashLogFile);
 		theReleaseCrashLogFile = NULL;
