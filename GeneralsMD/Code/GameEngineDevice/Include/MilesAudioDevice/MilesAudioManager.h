@@ -292,7 +292,9 @@ class MilesAudioManager : public AudioManager
 		H3DSAMPLE getFirst3DSample( AudioEventRTS *event );
 
 		void adjustPlayingVolume( PlayingAudio *audio );
-		
+		Bool isAnyVoicePlaying( void ) const;
+		Real getVoiceDuckFactor( const AudioEventRTS *event ) const;	///< under 1 for anything that is not a unit's reply while one plays
+
 		void stopAllSpeech( void );
 		
 	protected:
@@ -312,6 +314,7 @@ class MilesAudioManager : public AudioManager
 		HDIGDRIVER m_digitalHandle;
 		H3DPOBJECT m_listener;
 		HPROVIDER m_delayFilter;
+		Bool m_voiceDucking;	///< a unit's reply is playing and every other sound is held under it
 
 		// This is a list of all handles that are forcibly played. They always play as UI sounds.
 		std::list<HAUDIO> m_audioForcePlayed;

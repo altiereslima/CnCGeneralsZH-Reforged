@@ -110,6 +110,7 @@ MilesAudioManager::MilesAudioManager() :
 	m_num3DSamples(0),
 	m_numStreams(0),
 	m_delayFilter(NULL),
+	m_voiceDucking(FALSE),
 	m_binkHandle(NULL),
 	m_pref3DProvider(AsciiString::TheEmptyString),
 	m_prefSpeaker(AsciiString::TheEmptyString)
@@ -1433,10 +1434,10 @@ void MilesAudioManager::adjustPlayingVolume( PlayingAudio *audio )
 	Real pan;
 	if (audio->m_type == PAT_Sample) {
 		AIL_sample_volume_pan(audio->m_sample, NULL, &pan);
-		AIL_set_sample_volume_pan(audio->m_sample, m_soundVolume * desiredVolume, pan);
+		AIL_set_sample_volume_pan(audio->m_sample, m_soundVolume * desiredVolume * getVoiceDuckFactor(audio->m_audioEventRTS), pan);
 
-	} else if (audio->m_type == PAT_3DSample) { 
-		AIL_set_3D_sample_volume(audio->m_3DSample, m_sound3DVolume * desiredVolume);
+	} else if (audio->m_type == PAT_3DSample) {
+		AIL_set_3D_sample_volume(audio->m_3DSample, m_sound3DVolume * desiredVolume * getVoiceDuckFactor(audio->m_audioEventRTS));
 
 	} else if (audio->m_type == PAT_Stream) {
 		AIL_stream_volume_pan(audio->m_stream, NULL, &pan);
@@ -1474,7 +1475,7 @@ void MilesAudioManager::stopAllSpeech( void )
 void MilesAudioManager::initFilters( HSAMPLE sample, const AudioEventRTS *event )
 {
 	// set the sample volume
-	Real volume = event->getVolume() * event->getVolumeShift() * m_soundVolume;
+	Real volume = event->getVolume() * event->getVolumeShift() * m_soundVolume * getVoiceDuckFactor(event);
 	AIL_set_sample_volume_pan(sample, volume, 0.5f);
 
 	// pitch shift
@@ -1502,7 +1503,7 @@ void MilesAudioManager::initFilters( HSAMPLE sample, const AudioEventRTS *event 
 void MilesAudioManager::initFilters3D( H3DSAMPLE sample, const AudioEventRTS *event, const Coord3D *pos )
 {
 	// set the sample volume
-	Real volume = event->getVolume() * event->getVolumeShift() * m_sound3DVolume;
+	Real volume = event->getVolume() * event->getVolumeShift() * m_sound3DVolume * getVoiceDuckFactor(event);
 	AIL_set_3D_sample_volume(sample, volume);
 
 	// pitch shift
@@ -2160,6 +2161,39 @@ Bool MilesAudioManager::isObjectPlayingVoice( UnsignedInt objID ) const
 }
 
 //-------------------------------------------------------------------------------------------------
+Bool MilesAudioManager::isAnyVoicePlaying( void ) const
+{
+	std::list<PlayingAudio *>::const_iterator it;
+	for ( it = m_playingSounds.begin(); it != m_playingSounds.end(); ++it ) {
+		if ((*it)->isPlaying() && (*it)->m_audioEventRTS->getAudioEventInfo()->m_type & ST_VOICE) {
+			return true;
+		}
+	}
+
+	for ( it = m_playing3DSounds.begin(); it != m_playing3DSounds.end(); ++it ) {
+		if ((*it)->isPlaying() && (*it)->m_audioEventRTS->getAudioEventInfo()->m_type & ST_VOICE) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A unit's reply is one short line, and in a fight it was lost under the guns: every other sound
+	* is held about 5dB down for as long as one is playing. Music and speech streams are left alone. */
+Real MilesAudioManager::getVoiceDuckFactor( const AudioEventRTS *event ) const
+{
+	static const Real VOICE_DUCK_FACTOR = 0.55f;
+
+	if (!m_voiceDucking || (event->getAudioEventInfo()->m_type & ST_VOICE)) {
+		return 1.0f;
+	}
+
+	return VOICE_DUCK_FACTOR;
+}
+
+//-------------------------------------------------------------------------------------------------
 AudioEventRTS* MilesAudioManager::findLowestPrioritySound( AudioEventRTS *event )
 {
 	AudioPriority priority = event->getAudioEventInfo()->m_priority;
@@ -2435,6 +2469,13 @@ void MilesAudioManager::processPlayingList( void )
 	// same lists from notifyOfAudioCompletion.
 	std::list<PlayingAudio *>::iterator it;
 	PlayingAudio *playing;
+
+	// a reply starting or ending re-levels everything already playing
+	const Bool voicePlaying = isAnyVoicePlaying();
+	if (voicePlaying != m_voiceDucking) {
+		m_voiceDucking = voicePlaying;
+		m_volumeHasChanged = true;
+	}
 
 	for (it = m_playingSounds.begin(); it != m_playingSounds.end(); ++it) {
 		playing = (*it);
