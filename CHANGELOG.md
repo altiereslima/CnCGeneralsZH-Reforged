@@ -661,6 +661,7 @@ found and fixed â€” EA's own, not port damage.**
 - `help` lists what it takes, `clear` empties it, `echo` says a line back. The up and down arrows walk back through the last thirty-two things you typed.
 - It opens in the main menu as well as in a match. Nothing it does yet touches the rules of a game, so it is safe to leave open while one runs.
 - The general's promotion screen moved off that key onto the backslash beside it.
+- One press is one letter. Holding a key repeats it, and the game timed that wait in frames: a third of a second at the 30 frames a second it was written for, 70 milliseconds on a 144 Hz screen, which is shorter than an ordinary keypress. It waits 0.4 seconds now whatever the frame rate, in the console, the chat box and every text field.
 
 ## Your Razer hardware plays along
 
