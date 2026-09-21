@@ -833,6 +833,10 @@ The whole HUD is on the hardware. Four colours carry it, and they mean the same 
   picture was computed rather than photographed. This is what the game draws with now; a machine
   that cannot run the newer picture keeps the old shadows on its own, and `-noshadowmap` puts them
   back on any machine.
+- A hovering helicopter has its shadow back, rotor blades and all. The softening spread a
+  Comanche's thin body so wide that nothing of it was left on the ground, and the spinning blades
+  never reached the shadow at all. Now the blades turn in the shadow as a star under the fuselage,
+  still softer than a tank's.
 - A building stands on the ground instead of sitting on top of it. There is a soft patch under every
   structure's footprint, the darkening a corner traps in daylight, and the shadow it casts starts at
   its own wall rather than a step away from it. The frame's corners and creases get the same

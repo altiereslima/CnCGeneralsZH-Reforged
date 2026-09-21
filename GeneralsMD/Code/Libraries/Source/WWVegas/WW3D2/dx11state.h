@@ -59,6 +59,11 @@ public:
 	void Set_Render_State(D3DRENDERSTATETYPE state, DWORD value);
 	DWORD Get_Render_State(D3DRENDERSTATETYPE state) const;
 
+	// While the sun's depth pass draws, every caster writes depth whatever its material says, and a
+	// see-through one writes it only where its texture is solid.  The states the engine set are
+	// kept underneath and come back as they were when the pass ends.
+	void Set_Shadow_Caster_Pass(bool casting);
+
 	void Build_Blend_Description(D3D11_BLEND_DESC & description) const;
 	void Build_Depth_Stencil_Description(D3D11_DEPTH_STENCIL_DESC & description) const;
 	void Build_Rasterizer_Description(D3D11_RASTERIZER_DESC & description) const;
@@ -70,6 +75,7 @@ public:
 
 private:
 	DWORD RenderStates[RENDER_STATE_COUNT];
+	bool ShadowCasterPass;
 };
 
 // D3D9 sets a sampler one state at a time the way it sets a render state; D3D11 wants a sampler

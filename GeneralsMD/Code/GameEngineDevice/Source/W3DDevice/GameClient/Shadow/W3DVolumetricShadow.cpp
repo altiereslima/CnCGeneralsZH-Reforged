@@ -65,6 +65,7 @@
 #include "WW3D2/camera.h"
 #include "WW3D2/dx8renderer.h"
 #include "WW3D2/dx11runtime.h"
+#include "WW3D2/sortingrenderer.h"
 #include "GameClient/View.h"
 
 #ifdef _INTERNAL
@@ -114,11 +115,12 @@ const Real cosAngleToCare = cos ((0.2 * PI) / 180.0);	//1.5 degree difference
 // much penumbra a unit of gap between a caster and what its shadow falls on is worth.  The last is
 // the number the whole picture turns on: a tank's tracks are on the ground and keep a hard edge, a
 // helicopter twenty metres up spreads.  It is not the sun's own half degree, which at this scale
-// would be under a pixel; it is what the sky filling a shadow back in looks like, chosen against
-// the three panel comparison the plan came from.
+// would be under a pixel; it is what the sky filling a shadow back in looks like.  It was 0.04,
+// chosen on a frame of tanks, and a Comanche hovering 150 units up then cast nothing at all: the
+// filter spread a fuselage four units wide over fourteen.  At 0.01 its blades read as a star.
 #define SHADOW_MAP_WIDEST_TEXELS 9.0f
 #define SHADOW_MAP_NARROWEST_TEXELS 0.9f
-#define SHADOW_MAP_PENUMBRA_PER_UNIT 0.04f
+#define SHADOW_MAP_PENUMBRA_PER_UNIT 0.01f
 #define SHADOW_MAP_SKY_FILL 0.12f
 
 // Whether the sun's map took this frame.  The volumes read it to know whether to stand down, and it
@@ -3909,6 +3911,11 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 		 Draining them here is safe because the pass runs before the frame queues anything of its
 		 own, so everything in those lists was put there by the loop above. */
 	WW3D::Render_And_Clear_Static_Sort_Lists( sunInfo );
+	/* And the rotor itself goes further still: its mesh carries the SORT flag, so the mesh renderer
+		 hands it to the sorting renderer, which holds it for the end of the scene and would draw it
+		 onto the screen rather than into the map.  The backend writes depth for a blended caster
+		 while the pass runs and cuts it at its alpha, which keeps the blades. */
+	SortingRendererClass::Flush();
 
 	DX8Wrapper::Set_DX8_Render_State( D3DRS_COLORWRITEENABLE,
 		D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE

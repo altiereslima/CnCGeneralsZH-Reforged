@@ -418,6 +418,7 @@ void DX11BackendClass::Shutdown()
 	}
 	ShadowMapSize = 0;
 	ShadowMapBound = false;
+	RenderStates.Set_Shadow_Caster_Pass(false);
 	Device = NULL;
 }
 
@@ -489,6 +490,7 @@ bool DX11BackendClass::Begin_Shadow_Map(unsigned size)
 	ShadowMapSavedHeight = ViewportHeight;
 	ShadowMapSavedTarget = CurrentTarget;
 	ShadowMapBound = true;
+	RenderStates.Set_Shadow_Caster_Pass(true);
 	Set_Viewport(0, 0, ShadowMapSize, ShadowMapSize);
 	Forget_Bindings();
 	return true;
@@ -501,6 +503,7 @@ void DX11BackendClass::End_Shadow_Map()
 	}
 
 	ShadowMapBound = false;
+	RenderStates.Set_Shadow_Caster_Pass(false);
 	// What the sun was looking through, kept for the draws that will read the map.
 	multiply(View, Projection, SunViewProjection);
 	ShadowFromClipValid = false;
