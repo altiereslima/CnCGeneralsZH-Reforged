@@ -450,7 +450,7 @@ found and fixed â€” EA's own, not port damage.**
 - Timings everywhere: buildings, queues, superweapon charge, upgrades being researched.
 - A charge bar now says how many seconds are left.
 - Aircraft always show how many attack runs they have left.
-- The corner readout separates game time from real time, and sim rate from fps. It also says DX11 or DX9 after the frame rate, which is what your machine is actually drawing with: a graphics card that cannot start Direct3D 11 falls back to 9 without a word, and a frame rate means nothing until you know which of the two it belongs to.
+- The corner readout separates game time from real time, and sim rate from fps. It also says DX11 or DX9 after the frame rate, which is what your machine is actually drawing with: a graphics card that cannot start Direct3D 11 falls back to 9 without a word, and a frame rate means nothing until you know which of the two it belongs to. The 64-bit game writes x64 after it, so a screenshot says which build took it.
 - Your computer's own clock leads that readout, so you can see the time without leaving the match.
 - Pausing stops both clocks.
 - Watching a match, the strip becomes every player's queue at once: one row each, bordered in that player's colour, showing the three that land soonest and a count of the rest. Buildings going up on the ground are in those rows too, so a player answering an attack with three war factories is visible while the concrete is still wet, and eight players fit on one screen because a row is three pictures wide.

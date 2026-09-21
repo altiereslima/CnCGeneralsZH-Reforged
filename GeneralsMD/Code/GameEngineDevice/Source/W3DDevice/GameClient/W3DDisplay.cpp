@@ -4052,10 +4052,15 @@ void W3DDisplay::toggleMovieCapture(void)
 }
 
 /** Asks the device rather than the switch: a machine that cannot make a Direct3D 11 device carries
-	* on with Direct3D 9 whatever -d3d9 said, and the corner has to name what is actually drawing. */
+	* on with Direct3D 9 whatever -d3d9 said, and the corner has to name what is actually drawing.
+	* A 64-bit exe says so beside it. */
 const wchar_t *W3DDisplay::getRendererName(void) const
 {
+#ifdef _WIN64
+	return Direct3D11_Is_Active() ? L"DX11 x64" : L"DX9 x64";
+#else
 	return Direct3D11_Is_Active() ? L"DX11" : L"DX9";
+#endif
 }
 
 
