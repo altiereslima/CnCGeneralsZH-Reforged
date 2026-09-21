@@ -78,9 +78,10 @@ function Shoot($c, $tag, $extra) {
   $arguments = @('-win','-xres','1280','-yres','720','-quickstart','-noshellmap','-multiInstance',
     '-msaa','0','-dx11post','off','-map',"`"Maps\$($c.map)\$($c.map).map`"",'-autoskirmish','4','-aidiff','easy',
     '-seed','5','-maxframes',($c.f+80),'-screenshot',$c.f,'-camera',$c.x,$c.y,
-    '-logPrefix',"dx11chk_$tag`_") + $extra + $Extra
+    '-logPrefix',"dx11chk_$tag`_",'-turbo') + $extra + $Extra
   try {
     $process = Start-Process (Join-Path $run 'generals.exe') -ArgumentList $arguments -WorkingDirectory $run -PassThru
+    $process.PriorityClass = 'AboveNormal'
     $null = $process.WaitForExit(900000)
   }
   finally {

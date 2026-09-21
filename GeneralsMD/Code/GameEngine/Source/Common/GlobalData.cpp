@@ -706,6 +706,7 @@ GlobalData::GlobalData()
 	m_unitLimit = FALSE;						// no unit limit unless -unitlimit asks for one
 	m_autoSkirmishObserver = FALSE;
 	m_headless = FALSE;
+	m_turbo = FALSE;
 	m_maxGameFrames = 0; // run until the match ends
 	m_screenShotFrame = 0; // take no picture unless -screenshot asks for one
 	m_videoStartFrame = 0;

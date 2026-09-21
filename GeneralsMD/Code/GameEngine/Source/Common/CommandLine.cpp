@@ -1529,6 +1529,22 @@ Int parseWav(char *args[], int num)
 	return consumed;
 }
 
+/* -turbo: a run that draws plays its match as fast as the machine draws it, one logic frame a pass,
+	 the branch -headless and -video already take.  A -screenshot at frame 3000 otherwise waits 100
+	 seconds of wall clock at 30 logic frames a second for a picture that only needs frame 3000 to be
+	 reached.  The logic is identical frame for frame (same HEADLESS CRC), and a turbo shot repeats
+	 itself, but it is not the paced shot: the cloud shadows scroll on the wall clock, and the two
+	 differ on 7% of the pixels.  Compare turbo with turbo.  Ignored in a network game, whose clock
+	 is the network's, and under -wav, which has to run at the speed a person hears. */
+Int parseTurbo(char *args[], int)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_turbo = TRUE;
+	}
+	return 1;
+}
+
 /* -autocamera [seconds]: every so often, put the camera wherever the fighting is.
 	 *
 	 * A soak run watches from a free camera that never moves, and a camera that never moves is the
@@ -2347,6 +2363,7 @@ static CommandLineParam params[] =
 	{ "-screenshot", parseScreenShot },
 	{ "-video", parseVideo },
 	{ "-wav", parseWav },
+	{ "-turbo", parseTurbo },
 	{ "-msaa", parseMSAA },
 	{ "-d3d9", parseDirect3D9 },
 	{ "-language", parseTextLanguage },

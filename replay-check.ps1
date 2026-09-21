@@ -63,6 +63,7 @@ function Invoke-Run([string[]] $extra, [string] $prefix)
 	$args = @("-headless", "-quickstart", "-noshellmap", "-multiInstance", "-noFPSLimit",
 						"-maxframes", $MaxFrames, "-logPrefix", $prefix) + $extra + $ExtraArgs
 	$proc = Start-Process -FilePath $exePath -ArgumentList $args -WorkingDirectory $RunDir -PassThru
+	$proc.PriorityClass = 'AboveNormal'
 	$proc.WaitForExit()
 	$log = Join-Path $RunDir "$($prefix)DebugLogFile.txt"
 	if (-not (Test-Path $log)) { return $null }

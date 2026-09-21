@@ -31,11 +31,12 @@ function Shoot($case, $tag, $extra) {
   $arguments = @('-win','-xres','1280','-yres','720','-quickstart','-noshellmap','-multiInstance',
     '-msaa','0','-dx11post','off','-map',"`"Maps\$($case.map)\$($case.map).map`"",
     '-autoskirmish','4','-aidiff','easy','-seed','5','-maxframes',($case.f+80),
-    '-screenshot',$case.f,'-camera',$case.x,$case.y,'-logPrefix',"shd_$tag`_")
+    '-screenshot',$case.f,'-camera',$case.x,$case.y,'-logPrefix',"shd_$tag`_",'-turbo')
   if ($extra) { $arguments += $extra }
   try {
     $process = Start-Process (Join-Path $run "generals.exe") -ArgumentList $arguments `
       -WorkingDirectory $run -PassThru
+    $process.PriorityClass = 'AboveNormal'
     $null = $process.WaitForExit(900000)
   }
   finally {

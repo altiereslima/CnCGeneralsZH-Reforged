@@ -424,6 +424,7 @@ public:
 	Int m_autoSkirmishAIState;				///< SlotState the AI slots of an auto-started skirmish get (-aidiff)
 	Bool m_autoSkirmishObserver;			///< -observer: the local slot of an auto-started skirmish watches instead of playing
 	Bool m_headless;							///< -headless: never draw a frame, never pace the logic tick, quit when the match ends
+	Bool m_turbo;									///< -turbo: draw, but run one logic frame a pass instead of pacing it to the wall clock
 	Int m_autoSkirmishAIStateOdd;		///< -aidiff2 <name>: rung for the odd-numbered slots (0 = same as -aidiff)
 	Int m_autoSkirmishTeams;				///< -teams <n>: split the auto-skirmish slots into n allied teams (0 or 1 = free-for-all)
 	Int m_peaceTime;								///< -peacetime <n>: the lobby's peace time, in minutes, for an -autoskirmish run
