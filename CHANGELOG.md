@@ -1211,7 +1211,7 @@ The whole HUD is on the hardware. Four colours carry it, and they mean the same 
 
 - Audio is real, through the audio library the retail game ships with.
 - A death cry plays to the end. So does "construction complete", and the tail of a gun. Telling a sound to stop used to cut it off that frame, where the 2003 game let it finish and only kept it from repeating; our own fix for the audio thread broke that, and it is put back. A looping sound caught in the pause between two plays can be stopped too, instead of carrying on after whatever made it is gone.
-- Your units answer you over the battle. A reply plays at whichever of the effects and voice sliders is higher, lifted again on top of that, and while it plays every other sound and the music drop to under a third, then come back when the line is finished. "Moving out" is heard in the middle of an artillery duel. EVA and briefings stay where the voice slider puts them.
+- Your units answer you over the battle. A reply plays at whichever of the effects and voice sliders is higher, lifted again on top of that, so "Moving out" is heard in the middle of an artillery duel. Nothing else is turned down to make room for it. EVA and briefings stay where the voice slider puts them.
 - Movies follow the voice volume slider. The volume was handed to the video before it was ready to take it, so every movie played at full level, and moving the slider while one was playing changed nothing.
 - A sound at the edge of its range can fade out instead of stopping dead. The volume curve never
   actually reaches zero, so a sound you are walking away from was cut off mid-note at the maximum

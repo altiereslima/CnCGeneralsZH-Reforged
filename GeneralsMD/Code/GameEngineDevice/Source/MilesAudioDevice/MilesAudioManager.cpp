@@ -110,7 +110,6 @@ MilesAudioManager::MilesAudioManager() :
 	m_num3DSamples(0),
 	m_numStreams(0),
 	m_delayFilter(NULL),
-	m_voiceDucking(FALSE),
 	m_binkHandle(NULL),
 	m_pref3DProvider(AsciiString::TheEmptyString),
 	m_prefSpeaker(AsciiString::TheEmptyString)
@@ -2161,41 +2160,16 @@ Bool MilesAudioManager::isObjectPlayingVoice( UnsignedInt objID ) const
 }
 
 //-------------------------------------------------------------------------------------------------
-Bool MilesAudioManager::isAnyVoicePlaying( void ) const
-{
-	std::list<PlayingAudio *>::const_iterator it;
-	for ( it = m_playingSounds.begin(); it != m_playingSounds.end(); ++it ) {
-		if ((*it)->isPlaying() && (*it)->m_audioEventRTS->getAudioEventInfo()->m_type & ST_VOICE) {
-			return true;
-		}
-	}
-
-	for ( it = m_playing3DSounds.begin(); it != m_playing3DSounds.end(); ++it ) {
-		if ((*it)->isPlaying() && (*it)->m_audioEventRTS->getAudioEventInfo()->m_type & ST_VOICE) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-//-------------------------------------------------------------------------------------------------
 /** A unit's reply is one short line, and in a fight it was lost under the guns.  It plays at the
-	* louder of the effects and voice sliders, lifted again on top of that up to full scale, and while
-	* one is playing every other sound and the music drop to under a third, so the reply sits in front
-	* of everything.  EVA and briefing speech is left where the voice slider puts it. */
+	* louder of the effects and voice sliders, lifted again on top of that up to full scale.  Nothing
+	* else is turned down for it.  EVA and briefing speech is left where the voice slider puts it. */
 Real MilesAudioManager::getVoiceMixedVolume( const AudioEventRTS *event, Real sliderVolume ) const
 {
 	static const Real VOICE_BOOST = 1.6f;
-	static const Real VOICE_DUCK_FACTOR = 0.3f;
 
 	const Real eventVolume = event->getVolume() * event->getVolumeShift();
 	if (event->getAudioEventInfo()->m_type & ST_VOICE) {
 		return min( 1.0f, eventVolume * max( sliderVolume, m_speechVolume ) * VOICE_BOOST );
-	}
-
-	if (m_voiceDucking) {
-		return eventVolume * sliderVolume * VOICE_DUCK_FACTOR;
 	}
 
 	return eventVolume * sliderVolume;
@@ -2477,13 +2451,6 @@ void MilesAudioManager::processPlayingList( void )
 	// same lists from notifyOfAudioCompletion.
 	std::list<PlayingAudio *>::iterator it;
 	PlayingAudio *playing;
-
-	// a reply starting or ending re-levels everything already playing
-	const Bool voicePlaying = isAnyVoicePlaying();
-	if (voicePlaying != m_voiceDucking) {
-		m_voiceDucking = voicePlaying;
-		m_volumeHasChanged = true;
-	}
 
 	for (it = m_playingSounds.begin(); it != m_playingSounds.end(); ++it) {
 		playing = (*it);
