@@ -2068,6 +2068,15 @@ static Bool reachViewHits( const ReachView &view, Real x, Real y )
 	return !view.blocked[ ray * view.rings + ring ];
 }
 
+/// a structure whose reach and blind spots the local player is shown: their own, an ally's, or any to
+/// an observer.  An enemy defence keeps both to itself, so they are found out by losing units to it.
+static Bool reachRevealedToLocal( const Object *obj )
+{
+	const Player *local = ThePlayerList->getLocalPlayer();
+	return obj->getControllingPlayer() == local || local->isPlayerObserver()
+		|| local->getRelationship( obj->getTeam() ) == ALLIES;
+}
+
 //-------------------------------------------------------------------------------------------------
 /** Every structure on the map as the reach drawing sees it, gathered once a frame.  A building going
 	* up or coming down changes what a defence can see past, and one coming out of the fog changes which
@@ -2081,7 +2090,7 @@ struct StructureKey
 	ObjectID id;
 	Coord3D position;
 	const Player *owner;
-	Bool reachShown;		///< armed and not hidden from the local player, so its circle is drawn
+	Bool reachShown;		///< armed, revealed to the local player and out of the fog, so its circle is drawn
 
 	Bool operator==( const StructureKey &other ) const
 	{
@@ -2113,7 +2122,7 @@ static void refreshStructureKeys( void )
 		key.id = obj->getID();
 		key.position = *obj->getPosition();
 		key.owner = obj->getControllingPlayer();
-		key.reachShown = templateReach( obj->getTemplate() ) > 0.0f
+		key.reachShown = templateReach( obj->getTemplate() ) > 0.0f && reachRevealedToLocal( obj )
 			&& ( key.owner == local || obj->getShroudedStatus( local->getPlayerIndex() ) < OBJECTSHROUD_FOGGED );
 		keys.push_back( key );
 	}
@@ -2242,13 +2251,12 @@ static const ReachView &guardView( const Object *obj )
 //-------------------------------------------------------------------------------------------------
 static void clearGuardedBlindSpots( ReachView &pending )
 {
-	const Player *local = ThePlayerList->getLocalPlayer();
 	std::vector< const ReachView * > guards;
 	for( size_t k = 0; k < theStructureKeys.size(); k++ )
 	{
 		const StructureKey &key = theStructureKeys[ k ];
 		const Object *obj = TheGameLogic->findObjectByID( key.id );
-		if( key.owner != local && local->getRelationship( obj->getTeam() ) != ALLIES )
+		if( !reachRevealedToLocal( obj ) )
 			continue;
 
 		const Real flatReach = templateReach( obj->getTemplate() );
@@ -2307,7 +2315,7 @@ static const BlindSpotShade &selectedBlindSpotShade( const Object *obj )
 
 //-------------------------------------------------------------------------------------------------
 /** The ground a defence could not shoot into, darkened inside its reach: the one on the cursor while
-	* it is being sited, and every selected one.
+	* it is being sited, and every selected one of the local player's or an ally's.
 	*
 	* A defence that needs a line of sight - a Patriot battery, a Gattling Cannon, a Fire Base - does
 	* not fire through a building, and cannot pick a target a hill hides from it.  Both rules are the
@@ -2349,7 +2357,7 @@ void InGameUI::drawBlindSpots( void )
 		const Object *obj = (*it)->getObject();
 		if( obj == NULL || !obj->isKindOf( KINDOF_STRUCTURE ) || templateReach( obj->getTemplate() ) <= 0.0f )
 			continue;
-		if( !templateNeedsLineOfSight( obj->getTemplate() ) )
+		if( !templateNeedsLineOfSight( obj->getTemplate() ) || !reachRevealedToLocal( obj ) )
 			continue;
 
 		refreshStructureKeys();
@@ -2539,13 +2547,13 @@ static void drawReachSegment( const ReachSegment &segment, const Player *owner )
 
 //-------------------------------------------------------------------------------------------------
 /** While a structure is on the cursor, the reach of every armed building in sight: yours, your
-	* allies', the enemy's you can currently see, and the one on the cursor if it is armed.
+	* allies', and the one on the cursor if it is armed.  An enemy's is never drawn.
 	*
 	* Each circle is exactly the distance a shot is allowed at: the weapon range the game tests with,
 	* measured from the edge of the shooter's bounding circle, so from the centre it is that range
 	* plus the bounding radius.  Each is drawn in its owner's colour.  Where one player's circles
 	* overlap they are one area: the thin outline leaves out every stretch of a circle that runs inside
-	* another of the same player's, cutting it where the two cross.  An enemy building under fog is
+	* another of the same player's, cutting it where the two cross.  An ally's building under fog is
 	* skipped, so the circles tell nothing the map does not. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawPlacementReach( void )
@@ -2558,7 +2566,8 @@ void InGameUI::drawPlacementReach( void )
 	for( DrawableListCIt it = m_selectedDrawables.begin(); it != m_selectedDrawables.end() && !armedSelected; ++it )
 	{
 		const Object *obj = (*it)->getObject();
-		armedSelected = obj && obj->isKindOf( KINDOF_STRUCTURE ) && templateReach( obj->getTemplate() ) > 0.0f;
+		armedSelected = obj && obj->isKindOf( KINDOF_STRUCTURE ) && templateReach( obj->getTemplate() ) > 0.0f
+			&& reachRevealedToLocal( obj );
 	}
 	if( m_pendingPlaceType == NULL && !armedSelected )
 		return;
