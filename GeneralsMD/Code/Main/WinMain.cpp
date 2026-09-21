@@ -1026,6 +1026,13 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 {
 	checkProtection();
 
+	// The x64 C runtime answers log, exp, pow and the trig functions from an FMA3 routine on a CPU
+	// that has FMA3 and a plain SSE2 one on a CPU that does not, and the two differ in the last bit.
+	// Logic routes its trig through DetTrig, but the computer player's matchup score takes a log(),
+	// and one bit there is a different unit bought and a network game that falls apart.  One path
+	// for every machine; v1.1.4 was a 32-bit build and never had the choice.
+	_set_FMA3_enable( 0 );
+
 #ifdef _PROFILE
   Profile::StartRange("init");
 #endif
