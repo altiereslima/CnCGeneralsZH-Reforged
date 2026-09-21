@@ -788,6 +788,7 @@ The whole HUD is on the hardware. Four colours carry it, and they mean the same 
 - The zoom-out ceiling is the same for everyone; no setting buys you a wider view.
 - The wheel covers that whole range in about six notches instead of thirty-eight.
 - Zoom toward the cursor works; the spot under your pointer stays there.
+- Zoomed in over uneven ground, the camera holds still. Keeping the spot under the pointer moved the camera over different ground, the camera then settled to a new height, which moved it again, and on hilly ground that went on forever as a slow rocking forward and back.
 - The camera stays above the ground. Zoomed in on a slope it used to end up inside the hill it was looking over, and the world opened up along the near plane.
 - The far edge of the view opens with the height, instead of stopping at a distance fixed for the stock zoom - which is what put black beyond the terrain when you zoom out past it.
 - The box on the radar follows the camera when you pan. It only ever redrew itself when the zoom or the angle changed, so scrolling left it behind.

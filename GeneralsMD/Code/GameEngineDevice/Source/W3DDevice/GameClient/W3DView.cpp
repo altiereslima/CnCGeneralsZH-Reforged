@@ -196,6 +196,7 @@ W3DView::W3DView()
 
 	m_recalcCamera = false;
 	m_zoomAnchorValid = false;
+	m_zoomAnchorTerrainHeight = 0.0f;
 	m_scrollWheelHeight = 0.0f;
 
 }  // end W3DView
@@ -1492,7 +1493,14 @@ void W3DView::update(void)
 	 * underground or higher than the max allowed height.  When the camera is at rest (not
 	 * scrolling), the zoom will move toward matching the desired height.
 	 */
-	m_terrainHeightUnderCamera = getHeightAroundPos(m_pos.x, m_pos.y);
+	//
+	// While a wheel zoom is held on the cursor, the ground height is the one under the camera when
+	// the wheel turned.  Read afresh, it closed a loop: the settle moved the zoom, holdZoomAnchor
+	// moved the camera to keep the cursor's ground still, the camera stood over other ground, the
+	// highest of the five samples jumped, and the settle went the other way.  Zoomed in on uneven
+	// ground that never stopped, and the camera rocked forward and back.
+	//
+	m_terrainHeightUnderCamera = m_zoomAnchorValid ? m_zoomAnchorTerrainHeight : getHeightAroundPos(m_pos.x, m_pos.y);
 	m_currentHeightAboveGround = m_cameraOffset.z * m_zoom - m_terrainHeightUnderCamera;
 	const Real zoomBeforeSettle = m_zoom;
 	//
@@ -2731,6 +2739,7 @@ void W3DView::anchorZoomAt( const ICoord2D *pixel )
 {
 	m_zoomAnchorPixel = *pixel;
 	m_zoomAnchorValid = screenToTerrain( pixel, &m_zoomAnchorWorld );
+	m_zoomAnchorTerrainHeight = getHeightAroundPos( m_pos.x, m_pos.y );
 }
 
 //-------------------------------------------------------------------------------------------------
