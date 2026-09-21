@@ -293,7 +293,7 @@ class MilesAudioManager : public AudioManager
 
 		void adjustPlayingVolume( PlayingAudio *audio );
 		Bool isAnyVoicePlaying( void ) const;
-		Real getVoiceDuckFactor( const AudioEventRTS *event ) const;	///< under 1 for anything that is not a unit's reply while one plays
+		Real getVoiceMixedVolume( const AudioEventRTS *event, Real sliderVolume ) const;	///< a unit's reply lifted, everything else held under it while one plays
 
 		void stopAllSpeech( void );
 		

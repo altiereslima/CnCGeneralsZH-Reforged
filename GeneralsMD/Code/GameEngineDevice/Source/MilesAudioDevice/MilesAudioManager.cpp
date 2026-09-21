@@ -1434,15 +1434,15 @@ void MilesAudioManager::adjustPlayingVolume( PlayingAudio *audio )
 	Real pan;
 	if (audio->m_type == PAT_Sample) {
 		AIL_sample_volume_pan(audio->m_sample, NULL, &pan);
-		AIL_set_sample_volume_pan(audio->m_sample, m_soundVolume * desiredVolume * getVoiceDuckFactor(audio->m_audioEventRTS), pan);
+		AIL_set_sample_volume_pan(audio->m_sample, getVoiceMixedVolume(audio->m_audioEventRTS, m_soundVolume), pan);
 
 	} else if (audio->m_type == PAT_3DSample) {
-		AIL_set_3D_sample_volume(audio->m_3DSample, m_sound3DVolume * desiredVolume * getVoiceDuckFactor(audio->m_audioEventRTS));
+		AIL_set_3D_sample_volume(audio->m_3DSample, getVoiceMixedVolume(audio->m_audioEventRTS, m_sound3DVolume));
 
 	} else if (audio->m_type == PAT_Stream) {
 		AIL_stream_volume_pan(audio->m_stream, NULL, &pan);
 		if (audioIsType(audio->m_audioEventRTS, AT_Music)) {
-			AIL_set_stream_volume_pan(audio->m_stream, m_musicVolume * desiredVolume, pan);
+			AIL_set_stream_volume_pan(audio->m_stream, getVoiceMixedVolume(audio->m_audioEventRTS, m_musicVolume), pan);
 			
 		} else {
 			AIL_set_stream_volume_pan(audio->m_stream, m_speechVolume * desiredVolume, pan);
@@ -1475,7 +1475,7 @@ void MilesAudioManager::stopAllSpeech( void )
 void MilesAudioManager::initFilters( HSAMPLE sample, const AudioEventRTS *event )
 {
 	// set the sample volume
-	Real volume = event->getVolume() * event->getVolumeShift() * m_soundVolume * getVoiceDuckFactor(event);
+	Real volume = getVoiceMixedVolume(event, m_soundVolume);
 	AIL_set_sample_volume_pan(sample, volume, 0.5f);
 
 	// pitch shift
@@ -1503,7 +1503,7 @@ void MilesAudioManager::initFilters( HSAMPLE sample, const AudioEventRTS *event 
 void MilesAudioManager::initFilters3D( H3DSAMPLE sample, const AudioEventRTS *event, const Coord3D *pos )
 {
 	// set the sample volume
-	Real volume = event->getVolume() * event->getVolumeShift() * m_sound3DVolume * getVoiceDuckFactor(event);
+	Real volume = getVoiceMixedVolume(event, m_sound3DVolume);
 	AIL_set_3D_sample_volume(sample, volume);
 
 	// pitch shift
@@ -2180,17 +2180,25 @@ Bool MilesAudioManager::isAnyVoicePlaying( void ) const
 }
 
 //-------------------------------------------------------------------------------------------------
-/** A unit's reply is one short line, and in a fight it was lost under the guns: every other sound
-	* is held about 5dB down for as long as one is playing. Music and speech streams are left alone. */
-Real MilesAudioManager::getVoiceDuckFactor( const AudioEventRTS *event ) const
+/** A unit's reply is one short line, and in a fight it was lost under the guns.  It plays at the
+	* louder of the effects and voice sliders, lifted again on top of that up to full scale, and while
+	* one is playing every other sound and the music drop to under a third, so the reply sits in front
+	* of everything.  EVA and briefing speech is left where the voice slider puts it. */
+Real MilesAudioManager::getVoiceMixedVolume( const AudioEventRTS *event, Real sliderVolume ) const
 {
-	static const Real VOICE_DUCK_FACTOR = 0.55f;
+	static const Real VOICE_BOOST = 1.6f;
+	static const Real VOICE_DUCK_FACTOR = 0.3f;
 
-	if (!m_voiceDucking || (event->getAudioEventInfo()->m_type & ST_VOICE)) {
-		return 1.0f;
+	const Real eventVolume = event->getVolume() * event->getVolumeShift();
+	if (event->getAudioEventInfo()->m_type & ST_VOICE) {
+		return min( 1.0f, eventVolume * max( sliderVolume, m_speechVolume ) * VOICE_BOOST );
 	}
 
-	return VOICE_DUCK_FACTOR;
+	if (m_voiceDucking) {
+		return eventVolume * sliderVolume * VOICE_DUCK_FACTOR;
+	}
+
+	return eventVolume * sliderVolume;
 }
 
 //-------------------------------------------------------------------------------------------------
