@@ -1024,9 +1024,43 @@ void TextureClass::Set_Normal_Map(TextureClass * normal_map)
 	NormalMapLooked = true;
 }
 
+bool Texture_Name_Is_Damage_State(const char * name)
+{
+	static const char STATE_LETTERS[] = "desgnr";
+	static const size_t LONGEST_STATE_TAG = 4;
+
+	const char * tag = strrchr(name, '_');
+	if (tag == NULL)
+	{
+		return false;
+	}
+	++tag;
+
+	size_t length = 0;
+	bool damaged = false;
+	for (; tag[length] != '\0' && tag[length] != '.'; ++length)
+	{
+		const char letter = (char)tolower((unsigned char)tag[length]);
+		if (strchr(STATE_LETTERS, letter) == NULL)
+		{
+			return false;
+		}
+		damaged = damaged || letter == 'd' || letter == 'e';
+	}
+	return damaged && length <= LONGEST_STATE_TAG;
+}
+
 TextureClass * TextureClass::Find_Normal_Map()
 {
 	static const char NORMAL_MAP_SUFFIX[] = "_nrm.dds";
+
+	// A damage state is a separate texture a quarter the size of the building's own, so its normal
+	// map spread a texel of relief over a whole panel: the damaged walls lit up as black and white
+	// marble.  It draws flat, as it did in 2003.
+	if (!NormalMapLooked && Texture_Name_Is_Damage_State(Get_Texture_Name()))
+	{
+		NormalMapLooked = true;
+	}
 
 	if (!NormalMapLooked)
 	{

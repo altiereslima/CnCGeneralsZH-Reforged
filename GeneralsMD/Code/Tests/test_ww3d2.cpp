@@ -1729,3 +1729,24 @@ TEST(sorting_depth_key_orders_the_way_the_depths_do)
 	/* the same depth twice is the same key, which is what keeps equal depths in pooled order */
 	CHECK_EQ( SortingRendererClass::_Depth_Sort_Key( 3.25f ), SortingRendererClass::_Depth_Sort_Key( 3.25f ) );
 }
+
+// ---------------------------------------------------------------------------------------------
+// A building's damage states are separate low resolution textures, and their normal maps drew the
+// damaged walls as marble.  Which names count as one decides which textures lose the relief.
+// ---------------------------------------------------------------------------------------------
+#include "texture.h"
+
+TEST(damage_state_textures_are_told_apart_by_their_suffix)
+{
+	CHECK( Texture_Name_Is_Damage_State( "ubarfrccmd_d.dds" ) );
+	CHECK( Texture_Name_Is_Damage_State( "ubarfrccmd_E.tga" ) );
+	CHECK( Texture_Name_Is_Damage_State( "abbarracks_dn.dds" ) );
+	CHECK( Texture_Name_Is_Damage_State( "abbarracks_dsg.dds" ) );
+	CHECK( Texture_Name_Is_Damage_State( "cbhouse_esn" ) );
+
+	CHECK( !Texture_Name_Is_Damage_State( "ubarfrccmd.dds" ) );
+	CHECK( !Texture_Name_Is_Damage_State( "ubarfrccmd_n.dds" ) );
+	CHECK( !Texture_Name_Is_Damage_State( "ubarfrccmd_sng.dds" ) );
+	CHECK( !Texture_Name_Is_Damage_State( "avcrusader_tread.dds" ) );
+	CHECK( !Texture_Name_Is_Damage_State( "cbtree_dead.dds" ) );
+}

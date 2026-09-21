@@ -493,6 +493,10 @@ protected:
 	int Depth;
 };
 
+// Is this texture file one of a building's damage states - "<name>_d", "_e", or the night, snow
+// and garrison copies of those, "_dn", "_es", "_dsg" and the rest?  Those carry no normal map.
+bool Texture_Name_Is_Damage_State(const char * name);
+
 // Utility functions for loading and saving texture descriptions from/to W3D files
 TextureClass *Load_Texture(ChunkLoadClass & cload);
 void Save_Texture(TextureClass * texture, ChunkSaveClass & csave);
