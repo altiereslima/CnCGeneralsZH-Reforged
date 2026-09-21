@@ -1,0 +1,29 @@
+# The fight in between, where arriving together is worth something or it is not.
+#
+# mobwin.txt is six Rangers, which the mob beats whether it arrives as a body or in ones and twos.
+# mobopen.txt is fifteen, which wipe it either way. Neither says what holding formation buys,
+# because neither fight is close enough for the arrival order to decide it. Ten Rangers is the
+# platoon that costs the mob its nexuses about as often as it does not, so the question this asks
+# is whether a mob that arrives all at once wins fights the old strung-out one lost.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionGLA -side 1 FactionAmerica -seed 1 -maxframes 1800
+#     -scenario mobclose -logPrefix mobclose_
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn      0  GLAInfantryAngryMobNexus   3  700 550   60
+30    spawn      1  AmericaInfantryRanger     10  1000 1150 40
+
+120   attackmove 0  GLAInfantryAngryMobNexus      1000 1150
+
+# The whole mob, counted from the frame the march starts, with the spread between the first and the
+# last arrival standing for how much of a body it still is when it gets there.
+121   arrive     0  *  1000 1150 250
+
+# Both sides over the end of the fight. Who is left standing is the only thing that decides whether
+# the extra bodies the formation costs were worth spending.
+1650  arrive     0  *  1000 1150 250
+1650  arrive     1  *  1000 1150 250
+1650  arrive     0  GLAInfantryAngryMobNexus  1000 1150 250

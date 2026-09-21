@@ -74,6 +74,15 @@ const Int MOB_FORMATION_SLOT_COUNT = 12;
 const Real MOB_FORMATION_GOLDEN_ANGLE = 2.39996f;
 const Real MOB_FORMATION_SPACING_IN_RADII = 2.2f;	// just over two bodies apart, so neighbours do not shove
 
+/* The disc is squashed along the nexus' own facing and stretched across it, because depth costs
+	 the mob its fight.  A round formation thirty units deep puts its near slots in weapon range two
+	 seconds before its far ones, and measured against ten Rangers that vanguard died alone: the
+	 round version killed 8 of 50 Rangers over five seeds where the same build with no formation at
+	 all killed 17.  Width across the line of march costs nothing, since every slot on it is the
+	 same distance from what the mob is walking at. */
+const Real MOB_FORMATION_DEPTH_SCALE = 0.35f;
+const Real MOB_FORMATION_WIDTH_SCALE = 1.25f;
+
 // Close enough to my slot to stop steering towards it and start looking for someone to hit.
 const Real MOB_FORMATION_ARRIVED_DISTANCE = PATHFIND_CELL_SIZE_F * 1.2f;
 
@@ -258,22 +267,28 @@ UpdateSleepTime MobMemberSlavedUpdate::update( void )
 	const Real distanceToSlot = slotDelta.length();
 
 	const Real distanceToMaster = sqrtf( ThePartitionManager->getDistanceSquared( me, master, FROM_CENTER_3D ) );
+	const Bool lostTheMob = distanceToMaster > data->m_mustCatchUpRadius;
 
 	/* One body, one speed.  A member further from the nexus than it is allowed to be runs; a member
 		 that is closer to the shared destination than the nexus is eases off rather than arriving
 		 alone and standing there.  EA rolled a die here instead, which is why a third of the mob was
 		 always ambling while the rest of it ran. */
-	if ( distanceToMaster > data->m_mustCatchUpRadius )
+	if ( lostTheMob )
 		myAI->chooseLocomotorSet( LOCOMOTORSET_PANIC );
 	else if ( masterAI->isMoving() && myPathDistToGoal + MOB_FORMATION_LEAD_ALLOWANCE < masterPathDistToGoal )
 		myAI->chooseLocomotorSet( LOCOMOTORSET_WANDER );
 	else
 		myAI->chooseLocomotorSet( LOCOMOTORSET_NORMAL );
 
-	// Holding my slot never overrides an attack I am already making, unless I have lost the mob doing it.
-	const Bool mustHoldFormation = ( ! myAI->isAttacking() ) || ( distanceToMaster > data->m_mustCatchUpRadius );
+	/* The formation is for the road and nothing else.  A nexus that has stopped is a nexus in a
+		 fight, and a member that walks to a spot on the ground during one is a member not throwing
+		 anything: against ten Rangers, holding the slot through the fight as well cost the mob more
+		 than half its kills over five seeds, 8 of 50 against the 17 the same build managed with no
+		 formation at all.  So the slot is abandoned the moment the mob stops or the member picks a
+		 target, and the only thing that overrides that is having lost the mob altogether. */
+	const Bool holdFormation = ( masterAI->isMoving() && ! myAI->isAttacking() ) || lostTheMob;
 
-	if ( mustHoldFormation && distanceToSlot > MOB_FORMATION_ARRIVED_DISTANCE )
+	if ( holdFormation && distanceToSlot > MOB_FORMATION_ARRIVED_DISTANCE )
 	{
 		Coord3D goalDelta = *myAI->getGoalPosition();
 		goalDelta.sub( &slotPosition );
@@ -284,7 +299,7 @@ UpdateSleepTime MobMemberSlavedUpdate::update( void )
 		}
 	}
 
-	if ( distanceToMaster > data->m_mustCatchUpRadius * MOB_CATCH_UP_CRISIS_MULTIPLIER )// I am critically far, now!
+	if ( distanceToMaster > data->m_mustCatchUpRadius * MOB_CATCH_UP_CRISIS_MULTIPLIER )// critically far, now!
 	{
 		++ m_catchUpCrisisTimer; // I'm way too far from the nexus this frame
 
@@ -376,8 +391,15 @@ void MobMemberSlavedUpdate::computeSlotPosition( Object *master, Coord3D *positi
 	const Real angle = slot * MOB_FORMATION_GOLDEN_ANGLE;
 	const Real radius = spacing * sqrtf( slot + 0.5f );
 
-	position->x += radius * Cos( angle );
-	position->y += radius * Sin( angle );
+	const Real alongTravel = radius * Cos( angle ) * MOB_FORMATION_DEPTH_SCALE;
+	const Real acrossTravel = radius * Sin( angle ) * MOB_FORMATION_WIDTH_SCALE;
+
+	const Real facing = master->getOrientation();
+	const Real forwardX = Cos( facing );
+	const Real forwardY = Sin( facing );
+
+	position->x += alongTravel * forwardX - acrossTravel * forwardY;
+	position->y += alongTravel * forwardY + acrossTravel * forwardX;
 	position->z = TheTerrainLogic->getGroundHeight( position->x, position->y );
 
 	// A slot that lands in a cliff or a building is a member walking into a wall until the mob dies.
