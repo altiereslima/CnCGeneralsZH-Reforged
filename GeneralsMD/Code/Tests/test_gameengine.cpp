@@ -6453,21 +6453,18 @@ TEST(a_base_can_be_planned_into_fog_but_not_into_shroud)
 
 /** A plan is not a scout.  A structure that has been placed but not started opens no shroud at all,
 	 so drawing a base out into the fog cannot be used to see what is standing there.  Once the
-	 builder arrives EA's own rule takes over - the structure sees itself and no further - and a
-	 finished building goes back to the sight its template gives it. */
+	 builder arrives the structure sees as far as its template says, finished or not. */
 TEST(a_planned_structure_opens_no_shroud_until_the_work_starts)
 {
 	const Real templateRange = 300.0f;
-	const Real boundingRadius = 40.0f;
 
-	CHECK_NEAR( Object_shroudClearingRange( templateRange, TRUE, 0.0f, boundingRadius ), 0.0f, 0.0001f );
-	CHECK_NEAR( Object_shroudClearingRange( templateRange, TRUE, 0.1f, boundingRadius ), boundingRadius, 0.0001f );
-	CHECK_NEAR( Object_shroudClearingRange( templateRange, TRUE, 99.9f, boundingRadius ), boundingRadius, 0.0001f );
-	CHECK_NEAR( Object_shroudClearingRange( templateRange, FALSE, CONSTRUCTION_COMPLETE, boundingRadius ),
-							templateRange, 0.0001f );
+	CHECK_NEAR( Object_shroudClearingRange( templateRange, TRUE, 0.0f ), 0.0f, 0.0001f );
+	CHECK_NEAR( Object_shroudClearingRange( templateRange, TRUE, 0.1f ), templateRange, 0.0001f );
+	CHECK_NEAR( Object_shroudClearingRange( templateRange, TRUE, 99.9f ), templateRange, 0.0001f );
+	CHECK_NEAR( Object_shroudClearingRange( templateRange, FALSE, CONSTRUCTION_COMPLETE ), templateRange, 0.0001f );
 
 	// a structure that clears no shroud at all is not the same as one with no vision by template
-	CHECK_NEAR( Object_shroudClearingRange( 0.0f, FALSE, CONSTRUCTION_COMPLETE, boundingRadius ), 0.0f, 0.0001f );
+	CHECK_NEAR( Object_shroudClearingRange( 0.0f, FALSE, CONSTRUCTION_COMPLETE ), 0.0f, 0.0001f );
 }
 
 /** A unit sees half as far again as its longest weapon reaches. Artillery that outranges its own sight

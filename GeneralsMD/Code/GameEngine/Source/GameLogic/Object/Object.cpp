@@ -5189,9 +5189,11 @@ void Object::look()
 			// Otherwise we'd just have enclosingContainer control looking which is the 'correct' answer.
 
 			// applied here and not in getShroudClearingRange, so the sight bonuses that multiply the
-			// stored range and later divide it back out never bake the weapon cap into it
+			// stored range and later divide it back out never bake the weapon cap into it.  A dozer or
+			// a worker carries a mine-clearing weapon a few feet long, and capped by it the builder
+			// was blind: it keeps its template's sight
 			Real shroudClearingRange = getShroudClearingRange();
-			if( !isKindOf( KINDOF_STRUCTURE ) )
+			if( !isKindOf( KINDOF_STRUCTURE ) && !isKindOf( KINDOF_DOZER ) )
 				shroudClearingRange = Object_armedShroudClearingRange( shroudClearingRange, getLargestWeaponRange() );
 
 			if( shroudClearingRange > 0.0f )
@@ -5404,8 +5406,7 @@ void Object::setVisionRange( Real newVisionRange )
 /** A structure that has only been planned - it stands on the map at zero percent and its builder is
 	* still walking over - is not there yet as far as sight is concerned, so it opens no shroud: a base
 	* can be laid out into fog without the plan itself scouting the ground it sits on.  Once the
-	* builder arrives and the first percent goes in, EA's rule takes over and the structure sees
-	* itself and no further. */
+	* builder arrives and the first percent goes in, the structure sees its full range. */
 //-------------------------------------------------------------------------------------------------
 Bool Object_isAwaitingBuilder( Bool underConstruction, Real constructionPercent )
 {
@@ -5426,14 +5427,14 @@ Bool Object_constructionFootprintGoesDown( Bool underConstruction, Real wasPerce
 }
 
 //-------------------------------------------------------------------------------------------------
-Real Object_shroudClearingRange( Real ownRange, Bool underConstruction, Real constructionPercent,
-																 Real boundingCircleRadius )
+/** EA held a structure going up to its own footprint, so a base built out into the fog stood blind
+	* until the last percent went in and a builder on the site saw further than the site did.  Once
+	* the work has started it sees what it will see finished. */
+//-------------------------------------------------------------------------------------------------
+Real Object_shroudClearingRange( Real ownRange, Bool underConstruction, Real constructionPercent )
 {
 	if( Object_isAwaitingBuilder( underConstruction, constructionPercent ) )
 		return 0.0f;
-
-	if( underConstruction )
-		return boundingCircleRadius;
 
 	return ownRange;
 }
@@ -5496,8 +5497,7 @@ Real Object::getShroudClearingRange() const
 {
 	Real shroudClearingRange = Object_shroudClearingRange( m_shroudClearingRange,
 																												 getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ),
-																												 m_constructionPercent,
-																												 getGeometryInfo().getBoundingCircleRadius() );
+																												 m_constructionPercent );
 
 #if defined(_DEBUG) || defined(_INTERNAL)
 	if (TheGlobalData->m_debugVisibility) 

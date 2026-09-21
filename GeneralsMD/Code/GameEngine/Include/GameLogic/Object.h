@@ -171,8 +171,7 @@ extern Bool Object_constructionFootprintGoesDown( Bool underConstruction, Real w
 																								  Real nowPercent );
 
 ///< how far a structure clears shroud, given where it is in its construction
-extern Real Object_shroudClearingRange( Real ownRange, Bool underConstruction, Real constructionPercent,
-																				Real boundingCircleRadius );
+extern Real Object_shroudClearingRange( Real ownRange, Bool underConstruction, Real constructionPercent );
 
 ///< how far an armed unit clears shroud: no further than half as far again as its longest weapon reaches
 extern Real Object_armedShroudClearingRange( Real clearingRange, Real largestWeaponRange );
