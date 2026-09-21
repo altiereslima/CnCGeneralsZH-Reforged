@@ -1652,6 +1652,7 @@ static const Real CROWD_PASS_CLEAR	= 6.0f;		///< room a passing lane leaves besi
 static const Real CROWD_PASS_TIGHT	= 1.5f;		///< and the room it settles for rather than queue
 static const Int  CROWD_PASS_RETRY	= 10;			///< queued this long: ask to pass again, hold or no hold
 static const Real CROWD_TAPER_DIST	= PATHFIND_CELL_SIZE_F * 8.0f;	///< the band closes over the last of the route
+static const Real CROWD_PLAN_END_SLACK	= PATHFIND_CELL_SIZE_F * 3.0f;	///< how far the move state may move a planned route's end and it still be the same order
 static const Int  CROWD_BRAKE_FRAMES	= 8;		///< frames of closing time a brake is allowed to read
 static const Int  CROWD_FAN_FRAMES	= 12;			///< held up this long before spreading out
 static const Real CROWD_FAN_RATE		= 0.8f;		///< and then sideways at this much a frame
@@ -1966,6 +1967,10 @@ Bool AIUpdateInterface::computePath( PathfindServicesInterface *pathServices, Co
 		destroyPath();
 	}
 
+	// the group's plan is for the path this order asks for and no other, whichever way it is answered
+	CrowdRoute planned;
+	planned.swap( m_crowdPlanned );
+
 	if (canComputeQuickPath())
 	{
 		return computeQuickPath(destination);
@@ -2010,8 +2015,15 @@ Bool AIUpdateInterface::computePath( PathfindServicesInterface *pathServices, Co
 		return computeQuickPath(destination);
 	}
 
+	if (!planned.empty() && !m_isBlockedAndStuck)
+		theNewPath = crowdPlannedPath( planned, originalDestination );
+
 	PathfindLayerEnum destinationLayer = TheTerrainLogic->getLayerForDestination(destination);
-	if (TheAI->pathfinder()->validMovementPosition( getObject()->getCrusherLevel()>0, destinationLayer, m_locomotorSet, destination ) == FALSE)
+	if (theNewPath != NULL)
+	{
+		// the lane the group planned for us: see setPlannedCrowdRoute
+	}
+	else if (TheAI->pathfinder()->validMovementPosition( getObject()->getCrusherLevel()>0, destinationLayer, m_locomotorSet, destination ) == FALSE)
 	{
 		theNewPath = NULL;
 	}
@@ -2079,6 +2091,37 @@ Bool AIUpdateInterface::computePath( PathfindServicesInterface *pathServices, Co
 		return TRUE;
 
 	return FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The route the group planned for this unit, as a path from where the unit is now.
+
+		The plan was laid at order time from where the unit stood then, and the path is asked for a
+		frame or several later, so two things are checked again rather than trusted: the first leg,
+		from here, and the end, which the move state may have nudged onto free ground since.  A plan
+		that fails either is dropped for a search, which is what the unit would have had anyway. */
+//-------------------------------------------------------------------------------------------------
+Path *AIUpdateInterface::crowdPlannedPath( const CrowdRoute& planned, const Coord3D& destination )
+{
+	Object *self = getObject();
+	const CrowdRoutePoint& last = planned.back();
+	const Real endDx = last.pos.x - destination.x;
+	const Real endDy = last.pos.y - destination.y;
+	if (endDx * endDx + endDy * endDy > CROWD_PLAN_END_SLACK * CROWD_PLAN_END_SLACK)
+		return NULL;					// a different order from the one this was planned for
+
+	const Coord3D *myPos = self->getPosition();
+	if (!TheAI->pathfinder()->isLinePassable( self, m_locomotorSet.getValidSurfaces(), self->getLayer(),
+				*myPos, planned.front().pos, false, true ))
+		return NULL;
+
+	Path *path = newInstance( Path );
+	path->markOptimized();
+	path->appendNode( myPos, self->getLayer() );
+	for (Int k = 0; k + 1 < (Int)planned.size(); k++)
+		path->appendNode( &planned[ k ].pos, planned[ k ].layer );
+	path->appendNode( &destination, TheTerrainLogic->getLayerForDestination( &destination ) );
+	return path;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2371,7 +2414,7 @@ void AIUpdateInterface::crowdReleaseCorridor( void )
 		 gate at the top of crowdSteer wants one.  So the slot re-arms itself: the offset is zero
 		 because the new route starts under the unit's own tracks, and the per-frame fit takes it back
 		 out to its own lane within a few frames.  Only the next order clears it (clearCrowdLane). */
-	if (m_crowdLaneOf > 1)
+	if (m_crowdLaneOf >= 1)		// 1 is a member driving a lane its group planned: see setPlannedCrowdRoute
 	{
 		m_pendingCrowdLat = 0.0f;
 		m_hasPendingCrowdLat = TRUE;
@@ -6957,7 +7000,7 @@ void AIUpdateInterface::crc( Xfer *x )
 void AIUpdateInterface::xfer( Xfer *xfer )
 {
   // version
-  const XferVersion currentVersion = 14;
+  const XferVersion currentVersion = 15;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
  
@@ -7257,6 +7300,22 @@ void AIUpdateInterface::xfer( Xfer *xfer )
 		// a save made while the unit is on its way to a salvage crate owes it the walk back
 		xfer->xferCoord3D(&m_salvageReturnPosition);
 		xfer->xferBool(&m_hasSalvageReturnPosition);
+	}
+
+	if (version >= 15)
+	{
+		// a group's planned lane, which a save can fall between the order and the path it is for
+		UnsignedShort corners = (UnsignedShort)m_crowdPlanned.size();
+		xfer->xferUnsignedShort(&corners);
+		if (xfer->getXferMode() == XFER_LOAD)
+			m_crowdPlanned.resize( corners );
+		for (Int k = 0; k < (Int)corners; k++)
+		{
+			xfer->xferCoord3D(&m_crowdPlanned[ k ].pos);
+			Int layer = (Int)m_crowdPlanned[ k ].layer;
+			xfer->xferInt(&layer);
+			m_crowdPlanned[ k ].layer = (PathfindLayerEnum)layer;
+		}
 	}
 
 }  // end xfer
