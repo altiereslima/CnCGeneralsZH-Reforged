@@ -677,22 +677,16 @@ void DX11BackendClass::Set_Normal_Map(ID3D11ShaderResourceView * normal_map)
 	NormalMap = normal_map;
 }
 
-// Directional lights only, because the pixel half sums nothing else; a draw under a point light is
-// lit per vertex the way it always was.  A transcribed program is its own lighting.
+// The pixel half bumps the directional lights; a point or spot light is summed per vertex into the
+// base it adds to (ffvertex.cpp).  It used to turn the whole draw back to per-vertex lighting, so a
+// tank lost its relief every time its own gun flashed, and anything next to an explosion or a fire
+// went flat with it.  A transcribed program is its own lighting.
 bool DX11BackendClass::Normal_Mapped() const
 {
-	if (NormalMap == NULL || Textures[0] == NULL
-		|| VertexProgram != ENGINE_SHADER_NONE || PixelProgram != ENGINE_SHADER_NONE
-		|| RenderStates.Get_Render_State(D3DRS_LIGHTING) == FALSE
-		|| (VertexFormat & D3DFVF_NORMAL) == 0) {
-		return false;
-	}
-	for (unsigned index = 0; index < MAXIMUM_VERTEX_LIGHTS; ++index) {
-		if (Lights[index].Enabled && Lights[index].Type != D3DLIGHT_DIRECTIONAL) {
-			return false;
-		}
-	}
-	return true;
+	return NormalMap != NULL && Textures[0] != NULL
+		&& VertexProgram == ENGINE_SHADER_NONE && PixelProgram == ENGINE_SHADER_NONE
+		&& RenderStates.Get_Render_State(D3DRS_LIGHTING) != FALSE
+		&& (VertexFormat & D3DFVF_NORMAL) != 0;
 }
 
 bool DX11BackendClass::Terrain_Bumped() const
@@ -1568,13 +1562,14 @@ void DX11BackendClass::Upload_Constants()
 	pixel_block.AlphaReference[0] =
 		static_cast<float>(RenderStates.Get_Render_State(D3DRS_ALPHAREF) & 0xff);
 
-	// The normal mapped program's lights, the enabled ones first and in camera space like the
-	// vertex block's.  A slot with no light gets a direction anyway: the highlight normalises the
-	// half vector, and a zero direction there is a NaN that no zero colour cancels.
+	// The normal mapped program's lights, the enabled directional ones first and in camera space
+	// like the vertex block's; a point or spot light is already in the vertex colour it adds to.  A
+	// slot with no light gets a direction anyway: the highlight normalises the half vector, and a
+	// zero direction there is a NaN that no zero colour cancels.
 	unsigned normal_slot = 0;
 	for (unsigned index = 0; index < MAXIMUM_VERTEX_LIGHTS && normal_slot < NORMAL_MAPPED_LIGHTS;
 			++index) {
-		if (!Lights[index].Enabled) {
+		if (!Lights[index].Enabled || Lights[index].Type != D3DLIGHT_DIRECTIONAL) {
 			continue;
 		}
 		float * direction = pixel_block.NormalLightDirection[normal_slot];

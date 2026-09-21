@@ -119,6 +119,25 @@ TEST(ffvertex_a_point_light_attenuates_and_stops_at_its_range)
 	CHECK(!contains(hlsl, "spot_cosine"));
 }
 
+// A normal mapped draw bumps its directional lights per pixel.  A gun flash or a fire is a point
+// light, and it used to send the whole draw back to vertex lighting; now it rides in the base.
+TEST(ffvertex_a_normal_mapped_draw_carries_its_point_lights_in_the_base)
+{
+	VertexPipelineDescription description = plain_description();
+	description.LightingEnabled = true;
+	description.NormalMapped = true;
+	description.LightCount = 2;
+	description.Lights[0].Type = D3DLIGHT_DIRECTIONAL;
+	description.Lights[1].Type = D3DLIGHT_POINT;
+
+	std::string hlsl;
+	CHECK(VertexShader_Generate(description, VERTEX_SHADER_TARGET_D3D11, hlsl));
+	CHECK(contains(hlsl, "diffuse_light += Light0Diffuse.rgb"));
+	CHECK(contains(hlsl, "local_light += Light1Diffuse.rgb"));
+	CHECK(contains(hlsl, "diffuse_light += local_light;"));
+	CHECK(contains(hlsl, ".rgb * local_light + "));
+}
+
 TEST(ffvertex_a_spot_light_adds_the_cone_to_the_point_light_terms)
 {
 	VertexPipelineDescription description = plain_description();
