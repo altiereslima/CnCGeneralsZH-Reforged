@@ -4184,6 +4184,7 @@ void Drawable::drawCaptureProgress( void )
 // ------------------------------------------------------------------------------------------------
 /** Draw health bar information for drawable */
 // ------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
 void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 {
 	if (!healthBarRegion)
@@ -4217,7 +4218,10 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		// building is worth capturing, bridges are STRUCTURE too - and so does anything that can
 		// move.
 		//
+		// A booby trap has one hit point and cannot be shot, so its bar was a full green line
+		// forever, over something that is meant to be hidden.
 		if( obj->isKindOf( KINDOF_PROJECTILE ) ||
+				obj->isKindOf( KINDOF_BOOBY_TRAP ) ||
 				obj->isKindOf( KINDOF_INERT ) ||
 				obj->isKindOf( KINDOF_CLEANUP_HAZARD ) ||
 				obj->isKindOf( KINDOF_UNATTACKABLE ) ||
