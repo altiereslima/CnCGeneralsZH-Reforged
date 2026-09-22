@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<!--
+  The spectator's drop-down in the top left corner of a match.  The game reads a small part of
+  HTML (see GameClient/HtmlPanel.h): <details> and <summary>, <label>, <input type="checkbox">
+  and loose text, one row each.  name= is an Options.ini key from OptionsCatalog.cpp that holds
+  yes or no; data-text= is a string table label the game shows instead of the words between the
+  tags.  <head> is skipped, so the style below is only for opening this file in a browser.
+  Edit the copy under Run/Window/Html and the next match reads it.
+-->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>HUD toggles</title>
+  <style>
+    body { background: #333; color: #eee; font: 12px sans-serif; }
+    label { display: block; }
+  </style>
+</head>
+<body>
+  <details>
+    <summary data-text="GUI:HudToggles">Strips</summary>
+    <label data-text="GUI:HudProductionStrip"><input type="checkbox" name="ShowProductionStrip"> Production queue</label>
+    <label data-text="GUI:HudSkillStrip"><input type="checkbox" name="ShowSkillStrip"> Generals' promotions</label>
+    <label data-text="GUI:HudSuperweaponStrip"><input type="checkbox" name="ShowSuperweaponStrip"> Superweapon timers</label>
+  </details>
+</body>
+</html>

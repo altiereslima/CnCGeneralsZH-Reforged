@@ -46,6 +46,7 @@
 #include "GameClient/ChromaKeyboard.h"
 #include "GameClient/MetaEvent.h"
 #include "GameClient/ClickTolerance.h"
+#include "GameClient/HtmlPanel.h"
 #include "GameClient/KeyDownInfo.h"
 #include "GameClient/GameWindowTransitions.h"
 #include "GameLogic/ScenarioDrill.h"
@@ -13524,6 +13525,98 @@ TEST(chroma_money_bar_is_a_thousand_credits_a_lamp)
 	CHECK_EQ(chromaMoneySegments(7500, 15), 7);
 	CHECK_EQ(chromaMoneySegments(15000, 15), 15);
 	CHECK_EQ(chromaMoneySegments(400000, 15), 15);
+}
+
+// A page reads as the column a browser would show: the summary first, the rows of its details
+// under it and hidden while it is closed, and the head never a row even though it holds words.
+TEST(html_panel_reads_details_labels_and_loose_text)
+{
+	const std::string page =
+		"<!DOCTYPE html><html><head><title>Not a row</title><style>label { display: block; }</style></head>"
+		"<body><!-- nor this -->"
+		"<details><SUMMARY data-text=\"GUI:Top\">Top</SUMMARY>"
+		"<label><input type=checkbox name='First'>  First &amp;\n  one </label>"
+		"<details open><summary>Inner</summary><input type=\"checkbox\" name=\"Second\"></details>"
+		"Words a < b</details>"
+		"<p>Out<b>side</b></p></body></html>";
+
+	std::vector< HtmlRow > rows;
+	HtmlPanel_buildRows( page, rows );
+
+	CHECK_EQ( (Int)rows.size(), 6 );
+	if( rows.size() != 6 )
+		return;
+
+	CHECK_EQ( (Int)rows[ 0 ].kind, (Int)HTML_ROW_SUMMARY );
+	CHECK( rows[ 0 ].textKey == "GUI:Top" );
+	CHECK_EQ( rows[ 0 ].owner, -1 );
+	CHECK( !rows[ 0 ].open );
+
+	CHECK_EQ( (Int)rows[ 1 ].kind, (Int)HTML_ROW_CHECKBOX );
+	CHECK( rows[ 1 ].name == "First" );
+	CHECK( rows[ 1 ].text == "First & one" );
+	CHECK_EQ( rows[ 1 ].owner, 0 );
+
+	CHECK_EQ( (Int)rows[ 2 ].kind, (Int)HTML_ROW_SUMMARY );
+	CHECK( rows[ 2 ].text == "Inner" );
+	CHECK_EQ( rows[ 2 ].owner, 0 );
+	CHECK( rows[ 2 ].open );
+
+	CHECK_EQ( (Int)rows[ 3 ].kind, (Int)HTML_ROW_CHECKBOX );
+	CHECK( rows[ 3 ].name == "Second" );
+	CHECK_EQ( rows[ 3 ].owner, 2 );
+
+	CHECK_EQ( (Int)rows[ 4 ].kind, (Int)HTML_ROW_TEXT );
+	CHECK( rows[ 4 ].text == "Words a < b" );
+	CHECK_EQ( rows[ 4 ].owner, 0 );
+
+	CHECK( rows[ 5 ].text == "Outside" );
+	CHECK_EQ( rows[ 5 ].owner, -1 );
+
+	// the outer details is closed, so only its summary and what lies outside it are shown
+	CHECK( HtmlPanel_isRowShown( rows, 0 ) );
+	CHECK( !HtmlPanel_isRowShown( rows, 1 ) );
+	CHECK( !HtmlPanel_isRowShown( rows, 3 ) );
+	CHECK( HtmlPanel_isRowShown( rows, 5 ) );
+
+	rows[ 0 ].open = TRUE;
+	CHECK( HtmlPanel_isRowShown( rows, 1 ) );
+	CHECK( HtmlPanel_isRowShown( rows, 3 ) );
+	rows[ 2 ].open = FALSE;
+	CHECK( !HtmlPanel_isRowShown( rows, 3 ) );
+}
+
+// The spectator's drop-down is the shipped page.  A check box whose name is not an on/off option
+// would draw as words with nothing to flip, and only a match would show it.
+TEST(the_hud_toggles_page_binds_only_on_off_options)
+{
+	FILE *fp = fopen( HUD_TOGGLES_HTML, "rb" );
+	CHECK( fp != NULL );
+	if( fp == NULL )
+		return;
+
+	std::string page;
+	char chunk[ 1024 ];
+	size_t got = 0;
+	while( ( got = fread( chunk, 1, sizeof( chunk ), fp ) ) > 0 )
+		page.append( chunk, got );
+	fclose( fp );
+
+	std::vector< HtmlRow > rows;
+	HtmlPanel_buildRows( page, rows );
+
+	Int checkboxes = 0;
+	for( size_t row = 0; row < rows.size(); row++ )
+	{
+		if( rows[ row ].kind != HTML_ROW_CHECKBOX )
+			continue;
+		checkboxes++;
+		const OptionDef *option = findOptionDef( rows[ row ].name.c_str() );
+		CHECK( option != NULL );
+		CHECK( option != NULL && option->kind == OPTION_BOOL );
+	}
+	CHECK_EQ( checkboxes, 3 );
+	CHECK( !rows.empty() && rows[ 0 ].kind == HTML_ROW_SUMMARY );
 }
 
 #include "test_camera_behavior.inc"

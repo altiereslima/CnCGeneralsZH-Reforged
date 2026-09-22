@@ -43,6 +43,7 @@
 #include "Common/SubsystemInterface.h"
 #include "Common/UnicodeString.h"
 #include "GameClient/DisplayString.h"
+#include "GameClient/HtmlPanel.h"
 #include "GameClient/Mouse.h"
 #include "GameClient/RadiusDecal.h"
 #include "GameClient/View.h"
@@ -1192,17 +1193,18 @@ protected:
 	DisplayString *							m_scoreboardStrings[ SCOREBOARD_STRING_COUNT ];
 
 	//
-	// The drop-down in the top left corner that switches the strips on and off.  Row 0 is its header,
-	// the rest are one check box each.
+	// The drop-down in the top left corner that switches the strips on and off, read from
+	// Window/Html/HudToggles.html: one row per summary, check box or line of words in it.
 	//
-	enum { HUD_TOGGLE_ROWS = 4 };
+	void loadHudToggles( void );
+	void freeHudToggleStrings( void );
 	void drawHudToggles( void );
 	Bool handleHudTogglesClick( const ICoord2D *mouse, Bool act );	///< TRUE when the click landed on it
-	Bool												m_hudTogglesOpen;
-	Int													m_hudToggleRowsShown;		///< rows drawn this frame, header included
+	Bool												m_hudTogglesLoaded;			///< read once a match, so an edited page shows in the next one
 	Int													m_hudTogglesBottom;			///< its bottom edge, so the message list starts under it
-	IRegion2D										m_hudToggleRects[ HUD_TOGGLE_ROWS ];
-	DisplayString *							m_hudToggleStrings[ HUD_TOGGLE_ROWS ];
+	std::vector< HtmlRow >			m_hudToggleRows;
+	std::vector< IRegion2D >		m_hudToggleRects;				///< each row's place this frame, empty while it is hidden
+	std::vector< DisplayString * >	m_hudToggleStrings;
 
 	Bool												m_placementRangeRingUp;	///< the structure on the cursor is armed, so its reach is drawn
 	Real												m_placementRingRadius;	///< how far from its centre it hits

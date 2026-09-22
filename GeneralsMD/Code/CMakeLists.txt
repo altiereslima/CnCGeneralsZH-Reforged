@@ -770,10 +770,12 @@ set_target_properties(test_gameengine PROPERTIES CXX_STANDARD 17)
 # fxlist_reforged_ini_parses_and_keeps_its_light runs the fork's own FXList file through the real
 # INI parser, so it needs the tracked master rather than whatever sits in Run/.
 # the_options_menu_buttons_all_wear_one_font reads the tracked layout master, not Run/'s copy.
+# the_hud_toggles_page_binds_only_on_off_options reads the tracked page master the same way.
 target_compile_definitions(test_gameengine PRIVATE
   GAMEENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/GameEngine"
   FXLIST_REFORGED_INI="${CMAKE_CURRENT_SOURCE_DIR}/Data/INI/FXListReforged.ini"
   OPTIONS_MENU_WND="${CMAKE_CURRENT_SOURCE_DIR}/Data/Window/Menus/OptionsMenu.wnd"
+  HUD_TOGGLES_HTML="${CMAKE_CURRENT_SOURCE_DIR}/Data/Window/Html/HudToggles.html"
   PLATE_TEXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Data/Art/Textures")
 
 # The three hand-written self-checks predate the harness; run them from ctest
