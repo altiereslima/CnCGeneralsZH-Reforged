@@ -269,6 +269,11 @@ Object *TunnelTracker::findQuietTunnelNear( const Coord3D *pos ) const
 		if( tunnel == NULL || tunnel->isEffectivelyDead() )
 			continue;
 
+		// a tunnel joins the network the frame its foundation is laid, so a ghost nobody has built
+		// yet, or one being sold, is on the list too; a unit sent there walked into the scaffolding
+		if( tunnel->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) || tunnel->testStatus( OBJECT_STATUS_SOLD ) )
+			continue;
+
 		// the stamp starts at 0xffffffff, which the sum wraps to just under the window
 		if( tunnel->getBodyModule()->getLastDamageTimestamp() + TUNNEL_UNDER_FIRE_FRAMES > now )
 			continue;
