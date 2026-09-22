@@ -134,6 +134,7 @@ public:
 	void notifyOthersOfCurrentFrame(Int frame);
 	void sendFrameDataToPlayer(UnsignedInt playerID, UnsignedInt startingFrame);
 	void sendSingleFrameToPlayer(UnsignedInt playerID, UnsignedInt frame);
+	void sendSlotFrameToPlayer(UnsignedInt playerID, UnsignedInt slot, UnsignedInt frame);
 	void notifyOthersOfNewFrame(UnsignedInt frame);
 
 	UnsignedInt getNextPacketRouterSlot(UnsignedInt playerID); ///< returns the packet router player that comes after the given player.
@@ -193,6 +194,7 @@ private:
 
 	Transport *m_transport;
 	UnsignedInt m_localSlot;
+	Int m_lastFrameTickSent;															///< the newest frame processFrameTick has announced; its command count is final
 	UnsignedInt m_packetRouterSlot;
 	UnsignedInt m_packetRouterFallback[MAX_SLOTS];
 	UnsignedInt m_localAddr;
