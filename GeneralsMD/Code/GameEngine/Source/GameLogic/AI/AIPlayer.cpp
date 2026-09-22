@@ -4492,6 +4492,9 @@ static const Real DEFENSE_STANDOFF = 1.0f;
 static const Int ARMY_PER_DEFENSE = 4;
 static const Int DEFENSES_PER_SUPERWEAPON = 4;
 
+/** Dozers a Hard AI trains on its own when every one it has is on a building. */
+static const Int MAX_ECONOMY_DOZERS = 4;
+
 /** Tries on each ring when looking for somewhere to put a purchase down.  Every try is a legality
 	* check that costs about a millisecond, so this bounds the spike rather than the search. */
 static const Int PLACEMENT_ANGLES = 12;
@@ -4638,6 +4641,23 @@ static void findAnyDozer( Object *obj, void *userData )
 	Object **dozer = (Object **)userData;
 	if( *dozer == NULL && obj->isKindOf( KINDOF_DOZER ) && !obj->isEffectivelyDead() )
 		*dozer = obj;
+}
+
+struct DozerTally
+{
+	Int dozers;
+	Int building;
+};
+
+static void tallyDozer( Object *obj, void *userData )
+{
+	DozerTally *tally = (DozerTally *)userData;
+	if( !obj->isKindOf( KINDOF_DOZER ) || obj->isEffectivelyDead() || obj->getAI() == NULL )
+		return;
+	++tally->dozers;
+	DozerAIInterface *dozerAI = obj->getAI()->getDozerAIInterface();
+	if( dozerAI && dozerAI->isTaskPending( DOZER_TASK_BUILD ) )
+		++tally->building;
 }
 
 /** A purchase of this kind is already on the build list and waiting for a dozer.  Asked per template
@@ -4877,6 +4897,16 @@ void AIPlayer::doEconomy( void )
 
 	if( !m_player->getCanBuildBase() || !m_baseCenterSet )
 		return;
+
+	/* Base building only ever asked for a dozer when it had none, so a Hard AI played the whole match
+		 on two, and everything bought below waited in one line for them: nine base-building passes in
+		 ten found both on a job. Four China Tank AIs on Twilight Flame, seeds 7 to 9, free-for-all and
+		 2v2, 18,000 frames: 8 of the 24 never put up a war factory and never attacked. With this, none,
+		 39 attack waves became 82, and each spent 67,000 instead of 45,000. */
+	DozerTally dozers = { 0, 0 };
+	m_player->iterateObjects( tallyDozer, &dozers );
+	if( dozers.dozers > 0 && dozers.building == dozers.dozers && dozers.dozers < MAX_ECONOMY_DOZERS )
+		queueDozer();
 
 	// any dozer will do to read the buttons from: an idle one is what builds it, and that is later
 	Object *dozer = NULL;
