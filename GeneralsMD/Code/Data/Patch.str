@@ -870,6 +870,14 @@ TOOLTIP:WasdCamera
 "W A S D move the camera. F attacks, G stops, H attack-moves, J guards and K holds position, and the command bar's top row reads Q E R T Y U I. Modern input only."
 END
 
+GUI:ChromaLighting
+"Razer Chroma Lighting"
+END
+
+TOOLTIP:ChromaLighting
+"During a match, a Razer keyboard, mouse and mousepad show the command bar, power, superweapons and money. In the menus Synapse keeps its own lighting."
+END
+
 GUI:OrderLines
 "Order Lines"
 END

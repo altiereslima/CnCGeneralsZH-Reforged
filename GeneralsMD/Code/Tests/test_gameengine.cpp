@@ -13317,8 +13317,11 @@ TEST(chroma_keys_land_on_the_razer_grid)
 	CHECK_EQ(chromaCellForKey('p'), 2 * 22 + 11);
 	CHECK_EQ(chromaCellForKey('a'), 3 * 22 + 2);
 	CHECK_EQ(chromaCellForKey('l'), 3 * 22 + 10);
-	CHECK_EQ(chromaCellForKey('z'), 4 * 22 + 2);
-	CHECK_EQ(chromaCellForKey('m'), 4 * 22 + 8);
+	// Z's row starts a column later: column two is the ISO key between left shift and Z, which
+	// RZKEY_Z = 0x0403 says.  At column two every key of the command bar's second row lit the lamp
+	// one to its left, and Z's lit a key most boards do not have.
+	CHECK_EQ(chromaCellForKey('z'), 4 * 22 + 3);
+	CHECK_EQ(chromaCellForKey('m'), 4 * 22 + 9);
 	// Upper case never reaches here: HotKeyManager lowers every key it stores.
 	CHECK_EQ(chromaCellForKey('Q'), -1);
 	CHECK_EQ(chromaCellForKey(' '), -1);
@@ -13399,6 +13402,7 @@ TEST(chroma_key_maps_agree_on_every_letter_and_digit)
 	CHECK_NE(chromaCellForMappableKey(MK_KP1), chromaCellForMappableKey(MK_1));
 	CHECK_EQ(chromaCellForMappableKey(MK_KP7), 2 * 22 + 18);
 	CHECK_EQ(chromaCellForMappableKey(MK_KP1), 4 * 22 + 18);
+	CHECK_EQ(chromaCellForMappableKey(MK_KP0), 5 * 22 + 19);	// RZKEY_NUMPAD0 = 0x0513
 
 	// The function row, which is where the generals powers land
 	CHECK_EQ(chromaCellForMappableKey(MK_F1), 3);
@@ -13410,7 +13414,8 @@ TEST(chroma_key_maps_agree_on_every_letter_and_digit)
 	CHECK_EQ(chromaCellForMappableKey(MK_MINUS), 1 * 22 + 12);
 	CHECK_EQ(chromaCellForMappableKey(MK_LBRACKET), 2 * 22 + 12);
 	CHECK_EQ(chromaCellForMappableKey(MK_SEMICOLON), 3 * 22 + 11);
-	CHECK_EQ(chromaCellForMappableKey(MK_COMMA), 4 * 22 + 9);
+	CHECK_EQ(chromaCellForMappableKey(MK_COMMA), 4 * 22 + 10);
+	CHECK_EQ(chromaCellForMappableKey(MK_SLASH), 4 * 22 + 12);
 
 	CHECK_EQ(chromaCellForMappableKey(MK_NONE), -1);
 

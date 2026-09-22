@@ -244,9 +244,9 @@ const OptionDef TheOptionCatalog[] =
 		get_m_showAllyCursors, set_m_showAllyCursors },
 
 	// The match on Razer hardware: the command bar on the letter keys, power on the digits,
-	// superweapons on the numpad, money on the mousepad.  Off gives the keyboard back to whatever
-	// Synapse wants to do with it, and takes the worker thread with it.
-	{ "ChromaLighting",						"", "",
+	// superweapons on the numpad, money on the mousepad.  Only during a match; off, and in every
+	// menu, the keyboard goes back to whatever Synapse wants to do with it.  On Options > Controls.
+	{ "ChromaLighting",						OPT_WND( "CheckChromaLighting" ), "GUI:ChromaLighting",
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_chromaLighting, set_m_chromaLighting },
 

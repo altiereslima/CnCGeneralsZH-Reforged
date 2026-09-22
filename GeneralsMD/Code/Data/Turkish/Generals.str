@@ -15429,6 +15429,14 @@ TOOLTIP:WasdCamera
 "W A S D kamerayı gezdirir. F saldırır, G durdurur, H saldırarak ilerler, J gözcü koyar, K konumu korur; komut çubuğunun üst sırası Q E R T Y U I olur. Yalnızca Modern girişte."
 END
 
+GUI:ChromaLighting
+"Razer Chroma Işıkları"
+END
+
+TOOLTIP:ChromaLighting
+"Maç sırasında Razer klavye, fare ve mousepad komut çubuğunu, elektriği, süper silahları ve parayı gösterir. Menülerde Synapse kendi ışığını yakar."
+END
+
 GUI:OrderLines
 "Emir Çizgileri"
 END

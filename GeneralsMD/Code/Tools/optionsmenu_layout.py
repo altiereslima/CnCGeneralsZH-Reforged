@@ -164,6 +164,7 @@ NEW_CONTROLS = [
     (LABEL,  "LabelInputScheme",       "GUI:InputScheme"),
     (COMBO,  "ComboBoxInputScheme",    None),
     (CHECK,  "CheckWasdCamera",        "GUI:WasdCamera"),
+    (CHECK,  "CheckChromaLighting",    "GUI:ChromaLighting"),
 ]
 
 # A slider on its own says nothing about where it stands, so each one has a readout beside it that
@@ -266,7 +267,8 @@ GROUP_LAYOUT = [
         ("check", "CheckDoubleClickAttackMove")]),
     ("PageControls", 2, "GUI:OptionsGroupInput", [
         setting("LabelInputScheme", "ComboBoxInputScheme"),
-        ("check", "CheckWasdCamera")]),
+        ("check", "CheckWasdCamera"),
+        ("check", "CheckChromaLighting")]),
 
     ("PageGameplay", 0, "GUI:OptionsGroupBattlefield", [
         setting("LabelHealthBars", "ComboBoxHealthBars"),

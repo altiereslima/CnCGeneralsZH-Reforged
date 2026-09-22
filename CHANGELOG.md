@@ -712,7 +712,9 @@ The whole HUD is on the hardware. Four colours carry it, and they mean the same 
 - The two arrows carry your selection: how hurt it is, green through to red, and what rank the unit in front of it holds.
 - The mousepad is your money, a lamp per thousand credits.
 - The mouse under your hand pulses red while the base is under fire, along with the strip down the left edge of the keyboard, and settles four seconds after the last hit. The keys themselves are left alone. An alarm that washes the whole board arrives at the one moment you most need to read the bar, and buries it.
-- Nothing to install and nothing to turn on. If Synapse is running it is there; if it is not, the game never mentions it. Options has a switch, and `-nochroma` takes it out of a timed run.
+- Nothing to install and nothing to turn on. If Synapse is running it is there; if it is not, the game never mentions it, and a Synapse you start mid-session is picked up within five seconds. The switch is a check box on Options > Controls, and `-nochroma` takes it out of a timed run.
+- It is only there while you play. The main menu, the lobby and the score screen leave the board to whatever Synapse draws on your desktop, and so does turning the box off mid-match.
+- The command bar's second row, Z through M, used to light the key one to the left of the one that presses it, and Z lit nothing on most boards. Every key of that row now lights itself.
 
 ## The options screen has pages
 
