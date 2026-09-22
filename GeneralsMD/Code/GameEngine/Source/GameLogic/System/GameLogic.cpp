@@ -1170,7 +1170,14 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 		 is written. */
 	if (isInMultiplayerGame())
 	{
-		TheWritableGlobalData->m_scenarioFile.clear();		// -scenario
+		/* A -netgame match is the exception for -scenario: it has no lobby, every machine in it was
+			 started from a script with the same command line, and a busy network game is the one load
+			 the multiplayer catch-up could not otherwise be tested under.  Only one that actually
+			 started, though: a -netgame that failed its own checks leaves this copy at the menus, and
+			 a LAN lobby joined from there is an ordinary match.  The file itself is agreed on by
+			 nobody, so this stays a test route; a replay of it needs the same -scenario again. */
+		if (!TheGlobalData->m_netGameStarted)
+			TheWritableGlobalData->m_scenarioFile.clear();		// -scenario
 		TheWritableGlobalData->m_peaceTime = 0;						// -peacetime, and the host's options string is read below
 		TheWritableGlobalData->m_unitLimit = FALSE;						// -unitlimit, the same
 	}

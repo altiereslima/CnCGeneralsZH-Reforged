@@ -805,10 +805,12 @@ Bool Network::timeForNewFrame() {
 
 //		if (m_nextFrameTime + frameDelay < curTime) {
 		/* GameEngine::update pays this debt back with logic frames run between two pictures, up to
-			 the same cap the single player pacer keeps.  EA forgave it past two frames, when a pass
+			 the same count the single player pacer keeps.  EA forgave it past two frames, when a pass
 			 only ever ran one; a slow picture then lost the frames it owed and the whole room slowed
-			 down to its rate. */
-		if ((m_nextFrameTime + (GameEngine_logicCatchupMaxFrames(m_frameRate) * frameDelay)) < curTime) {
+			 down to its rate.  The count comes from the game speed and not from the room's rate: tied
+			 to the room, a room that slowed down could pay back less and slowed down further, and a
+			 250ms picture took two machines from 30 frames a second to 4. */
+		if ((m_nextFrameTime + (GameEngine_logicCatchupMaxFrames(TheGlobalData->m_framesPerSecondLimit) * frameDelay)) < curTime) {
 			// If we get too far behind on our framerate we need to reset the nextFrameTime thing.
 			m_nextFrameTime = curTime;
 //			DEBUG_LOG(("Initializing m_nextFrameTime to %I64d\n", m_nextFrameTime));

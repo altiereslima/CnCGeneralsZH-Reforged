@@ -589,6 +589,27 @@ static void handleCommand( const AsciiString &command )
 		return;
 	}
 
+	/* The quit menu's Exit, which in a network game is the other half of "quit": the process goes
+		 on, the player surrenders and the match is left through the network, so everybody else sees
+		 a player leave on an agreed frame rather than a connection drop. exitQuitMenu in QuitMenu.cpp
+		 posts the same two messages. */
+	if (command == "leave")
+	{
+		if (TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame())
+		{
+			replyError( "leave needs a match in progress" );
+			return;
+		}
+		if (TheGameLogic->isInMultiplayerGame() && !TheGameLogic->isInSkirmishGame())
+		{
+			GameMessage *surrender = TheMessageStream->appendMessage( GameMessage::MSG_SELF_DESTRUCT );
+			surrender->appendBooleanArgument( TRUE );
+		}
+		TheMessageStream->appendMessage( GameMessage::MSG_CLEAR_GAME_DATA );
+		replyOk( "\"leaving\":true" );
+		return;
+	}
+
 	/* key <KEY_name> [ALT] [CTRL] [SHIFT]
 		 One press and release, carried the way Keyboard.cpp carries a real one, so the command map, the
 		 translators and whatever network message sits behind them all see a key.  The keyboard itself

@@ -2013,7 +2013,11 @@ Int parseSlowFrame(char *args[], int num)
 /* -drawdelay <ms> sleeps that long in every client pass, which is what a weak graphics card looks
 	 like to the engine: the picture takes longer while the logic frame costs what it always did.
 	 A network game paces itself on the slowest machine in the room, so the question "does one slow
-	 renderer slow everybody" needs a slow renderer on this machine, next to a fast one. */
+	 renderer slow everybody" needs a slow renderer on this machine, next to a fast one.
+
+	 An optional second number adds up to that much more, different on every pass, because a real
+	 card does not take the same time twice and a network catch-up that runs a varying number of
+	 logic frames per picture is the case worth testing. */
 Int parseDrawDelay(char *args[], int num)
 {
 	if (TheWritableGlobalData && num > 1 && args[1])
@@ -2021,6 +2025,11 @@ Int parseDrawDelay(char *args[], int num)
 		const Int ms = atoi(args[1]);
 		if (ms > 0)
 			TheWritableGlobalData->m_drawDelayMS = ms;
+		if (num > 2 && args[2] && isdigit((unsigned char)args[2][0]))
+		{
+			TheWritableGlobalData->m_drawDelayJitterMS = atoi(args[2]);
+			return 3;
+		}
 		return 2;
 	}
 	return 1;

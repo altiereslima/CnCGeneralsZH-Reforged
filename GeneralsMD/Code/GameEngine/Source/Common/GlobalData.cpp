@@ -723,6 +723,7 @@ GlobalData::GlobalData()
 	m_traceMoveID = 0; // no movement trace
 	m_slowFrameMS = 20.0f; // a frame worth a line in the log; -slowframe lowers it for a hunt
 	m_drawDelayMS = 0; // client passes run as fast as the machine does unless -drawdelay slows them
+	m_drawDelayJitterMS = 0;
 	m_showLanes = FALSE; // the lane overlay is a diagnostic, off unless -showlanes asks for it
 	m_uiDrill = 0; // nobody presses the minimise button; -uidrill is how a script presses it
 	m_resDrillFrame = 0; // the resolution stays where it started unless -resdrill changes it mid-match
@@ -737,6 +738,7 @@ GlobalData::GlobalData()
 	for( Int slot = 0; slot < MAX_PLAYER_COUNT; slot++ )
 		m_autoSkirmishSide[ slot ].clear(); // every faction still comes out of the seed unless -side names one
 	m_netGameHosts.clear(); // no network game from the command line
+	m_netGameStarted = FALSE;
 	m_netGameLocalSlot = 0;
 	m_lanPlayerName.clear(); // the lobby name comes out of the preferences unless -lanname says otherwise
 	m_lanLobbyOnStart = FALSE;

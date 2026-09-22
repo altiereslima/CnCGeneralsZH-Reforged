@@ -580,6 +580,7 @@ static void startAutoNetGame( void )
 
 	TheLAN->StartAutomatedGame( mapName, TheGlobalData->m_fixedSeed, slotIPs, numSlots,
 		TheGlobalData->m_netGameLocalSlot );
+	TheWritableGlobalData->m_netGameStarted = TRUE;
 }
 
 /** -----------------------------------------------------------------------------------------------
@@ -2137,7 +2138,15 @@ void GameEngine::update( void )
 #endif
 			TheGameClient->UPDATE();
 			if (TheGlobalData->m_drawDelayMS > 0)
-				::Sleep( TheGlobalData->m_drawDelayMS );
+			{
+				// The jitter is the performance counter's low bits: client side, and no random stream
+				// either half of the game draws from is touched.
+				Int64 now;
+				QueryPerformanceCounter( (LARGE_INTEGER *)&now );
+				const Int jitter = TheGlobalData->m_drawDelayJitterMS > 0
+					? (Int)( now % ( TheGlobalData->m_drawDelayJitterMS + 1 ) ) : 0;
+				::Sleep( TheGlobalData->m_drawDelayMS + jitter );
+			}
 			TheMessageStream->propagateMessages();
 
 			if (TheNetwork != NULL)
@@ -2256,7 +2265,7 @@ void GameEngine::update( void )
 			// frame that is itself over budget cannot pull the loop into a spiral.
 			Int logicTicksThisPass = 0;
 			const Int maxTicksThisPass = GameEngine_logicCatchupMaxFrames(
-				networkPaced ? (Int)TheNetwork->getFrameRate() : m_maxFPS );
+				networkPaced ? TheGlobalData->m_framesPerSecondLimit : m_maxFPS );
 			/* Bounded by the clock as well as by the count - see LOGIC_CATCHUP_BUDGET_MS.  Three
 				 25ms ticks back to back with no picture in between is the 113ms freeze; one of them
 				 plus the render is a dropped frame nobody files a bug about. */

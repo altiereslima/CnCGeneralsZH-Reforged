@@ -446,6 +446,7 @@ public:
 	Int m_traceMoveID;							///< -tracemove [id]: log one movement line a frame for this object (0 = off, -1 = the first unit that gets blocked)
 	Real m_slowFrameMS;							///< -slowframe <ms>: a logic frame over this long logs its own breakdown (default 20)
 	Int m_drawDelayMS;							///< -drawdelay <ms>: sleep this long in every client pass, a slow graphics card on demand (0 = off)
+	Int m_drawDelayJitterMS;				///< -drawdelay <ms> <jitter>: up to this much more, different every pass
 	Bool m_showLanes;							///< -showlanes: draw every moving unit's route, the lane it was handed and the offset it kept
 	Int m_uiDrill;								///< -uidrill <n>: every n frames, minimise the command bar and re-apply its scheme, logging where it landed (0 = off)
 	Int m_resDrillFrame;					///< -resdrill <frame> [w] [h]: change the resolution at that logic frame, from inside a running match (0 = off)
@@ -459,6 +460,7 @@ public:
 	Bool m_autoSkirmishTakeover;		///< -takeover: give every -autoskirmish slot a driverless human seat, so nothing thinks unless a scenario says so
 	AsciiString m_autoSkirmishSide[ MAX_PLAYER_COUNT ];	///< -side <slot> <faction>: name that slot's faction instead of drawing it from the seed
 	AsciiString m_netGameHosts;				///< -netgame <ip>[,<ip>...]: the slot list of a LAN game started from the command line (empty = off)
+	Bool m_netGameStarted;						///< that -netgame passed its checks and StartAutomatedGame ran, so every seat has this command line
 	Int m_netGameLocalSlot;						///< -netslot <n>: which of those addresses this copy of the game is
 	AsciiString m_lanPlayerName;			///< -lanname <name>: the name this copy takes in the LAN lobby (empty = the one in the preferences)
 	Bool m_lanLobbyOnStart;						///< -lanlobby: open the LAN lobby instead of stopping at the main menu
