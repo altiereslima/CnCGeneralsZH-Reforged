@@ -72,6 +72,7 @@ public:
 	void sendLocalGameMessage(GameMessage *msg, UnsignedInt frame);
 	void sendCommand(NetCommandMsg *msg);
 	Bool allCommandsReady(UnsignedInt frame, Bool justTesting = FALSE);
+	UnsignedInt countFramesReady(UnsignedInt fromFrame, UnsignedInt maxFrames);	///< Consecutive frames from fromFrame whose commands are all in, without asking for a resend.
 	void handleAllCommandsReady(void);
 	NetCommandList *getFrameCommandList(UnsignedInt frame);
 //	void AddConnection(User *user, UnsignedInt slot);

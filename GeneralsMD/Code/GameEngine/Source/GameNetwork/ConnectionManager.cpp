@@ -1639,6 +1639,26 @@ Int commandsReadyDebugSpewage = 0;
 /**
  * Returns true if all the commands for the given frame are ready to be executed.
  */
+/**
+ * How many frames the room could play right now without waiting, counted from fromFrame.  A read
+ * only: allCommandsReady asks for a resend when it finds a frame in a bad state, and this is for a
+ * readout, which must not change what goes on the wire.
+ */
+UnsignedInt ConnectionManager::countFramesReady(UnsignedInt fromFrame, UnsignedInt maxFrames) {
+	for (UnsignedInt ready = 0; ready < maxFrames; ++ready) {
+		const UnsignedInt frame = fromFrame + ready;
+		for (Int i = 0; i < MAX_SLOTS; ++i) {
+			if ((m_frameData[i] == NULL) || m_frameData[i]->getIsQuitting()) {
+				continue;
+			}
+			if (m_frameData[i]->getFrameCommandCount(frame) != m_frameData[i]->getCommandCount(frame)) {
+				return ready;
+			}
+		}
+	}
+	return maxFrames;
+}
+
 Bool ConnectionManager::allCommandsReady(UnsignedInt frame, Bool justTesting /* = FALSE */) {
 	Bool retval = TRUE;
 	/* Read after the loop, and the loop can exit before ever assigning it. */

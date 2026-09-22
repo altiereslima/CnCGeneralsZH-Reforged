@@ -121,6 +121,7 @@ public:
 	inline UnsignedInt getRunAhead(void) { return m_runAhead; }
 	inline UnsignedInt getFrameRate(void) { return m_frameRate; }
 	UnsignedInt getPacketArrivalCushion(void);								///< Returns the smallest packet arrival cushion since this was last called.
+	UnsignedInt getFramesReady(void) { return m_conMgr->countFramesReady(TheGameLogic->getFrame(), m_runAhead); }
 	Bool isFrameDataReady( void );
 	Bool isPacingLogicFrames( void );
 	void parseUserList( const GameInfo *game );

@@ -8428,6 +8428,21 @@ void InGameUI::drawHudOverlay( void )
 							 REAL_TO_INT( m_hudLogicHz + 0.5f ), REAL_TO_INT( m_hudFps + 0.5f ),
 							 TheDisplay->getRendererName() );
 
+	UnicodeString frameText;
+	frameText.format( L"   frame %d", (Int)logicFrame );
+	text.concat( frameText );
+
+	// in a network game, how far ahead the room can play without waiting on anybody, out of the
+	// input delay it is running with, and the frame rate the slowest machine has set for everyone:
+	// ready falling to 0 is the stall, seen before it is felt
+	if( TheNetwork != NULL )
+	{
+		UnicodeString netText;
+		netText.format( L"   ready %d/%d   room %dfps", (Int)TheNetwork->getFramesReady(),
+										(Int)TheNetwork->getRunAhead(), (Int)TheNetwork->getFrameRate() );
+		text.concat( netText );
+	}
+
 	// the lobby's unit limit, as this player's own share and not the match total: what stands and
 	// what is queued, against the number the production queue refuses at
 	const UnsignedInt unitCap = TheGameLogic->getUnitCap();
