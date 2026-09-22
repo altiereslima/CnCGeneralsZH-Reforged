@@ -4943,9 +4943,9 @@ void AIPlayer::doEconomy( void )
 static const Real TUNNEL_COVER_RADIUS = 350.0f;
 
 /** How far out along the line to the nearest enemy the forward tunnel goes, as a share of the way.
-	* A wave sets off from the edge of its own base, and a shortcut has to save 30% of the walk
-	* (TunnelTracker::findTunnelShortcut), so an exit short of the enemy's doorstep never beats walking:
-	* at 0.45 not one wave in four matches went underground. */
+	* A wave sets off from the edge of its own base, and an exit short of the enemy's doorstep saves
+	* little or nothing over walking (TunnelTracker::findTunnelShortcut): at 0.45, when a shortcut still
+	* had to save 30% of the walk, not one wave in four matches went underground. */
 static const Real FORWARD_TUNNEL_SHARE = 0.75f;
 
 /** A tunnel network the builder can put up right now, off its own buttons.  The tunnel carries
