@@ -572,6 +572,7 @@ static void updateSoundCapture( void )
 void MilesAudioManager::update()
 {
 	AudioManager::update();
+	processCompletedAudio();
 	updateSoundCapture();
 	setDeviceListenerPosition();
 	processRequestList();
@@ -1711,6 +1712,45 @@ Bool MilesAudioManager::isCurrentlyPlaying( AudioHandle handle )
 	}
 
 	return false;
+}
+
+//-------------------------------------------------------------------------------------------------
+void MilesAudioManager::queueAudioCompletion( UnsignedIntPtr audioCompleted, UnsignedInt flags )
+{
+	CriticalSectionClass::LockClass lock(m_completedAudioCS);
+	CompletedAudio completed;
+	completed.handle = audioCompleted;
+	completed.flags = flags;
+	completed.startsAtCompletion = m_audioStarts[audioCompleted];
+	m_completedAudio.push_back(completed);
+}
+
+//-------------------------------------------------------------------------------------------------
+void MilesAudioManager::noteAudioStarted( UnsignedIntPtr handle )
+{
+	CriticalSectionClass::LockClass lock(m_completedAudioCS);
+	++m_audioStarts[handle];
+}
+
+//-------------------------------------------------------------------------------------------------
+void MilesAudioManager::processCompletedAudio( void )
+{
+	std::list<CompletedAudio> completedAudio;
+	{
+		CriticalSectionClass::LockClass lock(m_completedAudioCS);
+		completedAudio.swap(m_completedAudio);
+	}
+
+	for (std::list<CompletedAudio>::const_iterator it = completedAudio.begin(); it != completedAudio.end(); ++it) {
+		Bool restartedSince;
+		{
+			CriticalSectionClass::LockClass lock(m_completedAudioCS);
+			restartedSince = m_audioStarts[it->handle] != it->startsAtCompletion;
+		}
+		if (!restartedSince) {
+			notifyOfAudioCompletion(it->handle, it->flags);
+		}
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2991,6 +3031,7 @@ void MilesAudioManager::playStream( AudioEventRTS *event, HSTREAM stream )
 	}
 
 	AIL_register_stream_callback(stream, setStreamCompleted);
+	noteAudioStarted((UnsignedIntPtr) stream);	// before the start: a stream that ends at once still counts as this one
 	AIL_start_stream(stream);
 	if (event->getAudioEventInfo()->m_soundType == AT_Music) {
 		// Need to stop/fade out the old music here.
@@ -3013,6 +3054,7 @@ void *MilesAudioManager::playSample( AudioEventRTS *event, HSAMPLE sample )
 		AIL_set_sample_file(sample, fileBuffer, 0);
 
 		// Start playback
+		noteAudioStarted((UnsignedIntPtr) sample);
 		AIL_start_sample(sample);
 	}
 
@@ -3047,6 +3089,7 @@ void *MilesAudioManager::playSample3D( AudioEventRTS *event, H3DSAMPLE sample3D 
 			initFilters3D(sample3D, event, pos);
 			
 			// Start playback
+			noteAudioStarted((UnsignedIntPtr) sample3D);
 			AIL_start_3D_sample(sample3D);
 		}
 		return fileBuffer;
@@ -3254,19 +3297,19 @@ void MilesAudioManager::friend_forcePlayAudioEventRTS(const AudioEventRTS* event
 //-------------------------------------------------------------------------------------------------
 void AILCALLBACK setSampleCompleted( HSAMPLE sampleCompleted )
 {
-	TheAudio->notifyOfAudioCompletion((UnsignedIntPtr) sampleCompleted, PAT_Sample);
+	static_cast<MilesAudioManager *>(TheAudio)->queueAudioCompletion((UnsignedIntPtr) sampleCompleted, PAT_Sample);
 }
 
 //-------------------------------------------------------------------------------------------------
 void AILCALLBACK set3DSampleCompleted( H3DSAMPLE sample3DCompleted )
 {
-	TheAudio->notifyOfAudioCompletion((UnsignedIntPtr) sample3DCompleted, PAT_3DSample);
+	static_cast<MilesAudioManager *>(TheAudio)->queueAudioCompletion((UnsignedIntPtr) sample3DCompleted, PAT_3DSample);
 }
 
 //-------------------------------------------------------------------------------------------------
 void AILCALLBACK setStreamCompleted( HSTREAM streamCompleted )
 {
-	TheAudio->notifyOfAudioCompletion((UnsignedIntPtr) streamCompleted, PAT_Stream);
+	static_cast<MilesAudioManager *>(TheAudio)->queueAudioCompletion((UnsignedIntPtr) streamCompleted, PAT_Stream);
 }
 
 //-------------------------------------------------------------------------------------------------

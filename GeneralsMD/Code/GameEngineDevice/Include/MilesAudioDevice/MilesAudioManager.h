@@ -24,6 +24,8 @@
 #include "Common/GameAudio.h"
 #include "MSS/MSS.h"
 #include "mutex.h"
+#include <list>
+#include <map>
 
 class AudioEventRTS;
 
@@ -342,6 +344,30 @@ class MilesAudioManager : public AudioManager
 		CriticalSectionClass m_playing3DSoundsCS;
 		CriticalSectionClass m_playingStreamsCS;
 		CriticalSectionClass m_fadingAudioCS;
+
+	public:
+		/// Called by the audio thread when a sample or stream runs out; handled on the next update.
+		void queueAudioCompletion( UnsignedIntPtr audioCompleted, UnsignedInt flags );
+
+	protected:
+		/* The finished-sound callback used to run the whole completion - the next loop, the decay,
+			 the stop - on the XAudio2 service thread, holding a PlayingAudio and its AudioEventRTS that
+			 the main thread was free to delete at the same moment.  v2.0.0 and v2.0.1 players crashed
+			 in it reading freed memory.  The thread now only writes the handle down, and the main
+			 thread, the one that frees those objects, does the rest at the top of update().  A handle
+			 is remembered with how many times it had been started when it finished, so a completion
+			 that arrives after the sample was handed to another sound is dropped, not applied to it. */
+		struct CompletedAudio
+		{
+			UnsignedIntPtr handle;
+			UnsignedInt flags;
+			UnsignedInt startsAtCompletion;
+		};
+		void noteAudioStarted( UnsignedIntPtr handle );
+		void processCompletedAudio( void );
+		std::list<CompletedAudio> m_completedAudio;
+		std::map<UnsignedIntPtr, UnsignedInt> m_audioStarts;
+		CriticalSectionClass m_completedAudioCS;
 
 		AudioFileCache *m_audioCache;
 		PlayingAudio *m_binkHandle;
