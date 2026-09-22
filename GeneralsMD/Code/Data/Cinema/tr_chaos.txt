@@ -1,0 +1,17 @@
+# Trailer: the trailer_chaos fight, ten seconds, frames 930 to 1229. Filmed twice for a morph, once
+# with ClassicGraphics = yes in Options.ini and once without; everything else identical.
+#
+#   generals.exe -borderless -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 5000 -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 3 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA -seed 7
+#     -scenario trailer_chaos -cinema tr_chaos -video 930 1229 tr_chaos -maxframes 1250
+#
+# Aimed at 1075,3775, between the particle beam (1080,3740) and the nuke (1060,3790), because the
+# fight sits there and not on the midpoint the armies were sent to. Pitch 0: at +8 the top sixth of
+# the frame was black past the map edge. A slow push-in and a 20 degree turn over the whole ten
+# seconds, so the first and last frames are the same place seen slightly apart.
+
+30    cut        1075 3775 0.85 -45 0
+31    zoom       0.7 10
+31    orbit      20 10
+42    end

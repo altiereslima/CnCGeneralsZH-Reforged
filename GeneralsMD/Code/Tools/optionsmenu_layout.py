@@ -89,6 +89,10 @@ ADVANCED_KEEP = GRAPHICS_CHECKS + ["CheckUnlockFPS", "LowResSlider", "ParticleCa
 # swaying trees are a GameLOD.ini field like the popup's boxes, so they save under Custom with them.
 MENU_CHECKS = ["CheckTreeSway"]
 
+# Combo boxes OptionsMenu.cpp fills in by name for the same reason: the monitors on the desktop are
+# not a range a catalog row can describe.
+MENU_COMBOS = ["ComboBoxMonitor"]
+
 # The catalog's shadow rows, which stood in GameData.ini with no control until the Effects page.
 SHADOW_CHECKS = ["Check3DShadows", "Check2DShadows", "CheckInfantryShadows",
                  "CheckProjectileShadows", "CheckPropShadows", "CheckParticleShadows"]
@@ -125,9 +129,12 @@ CHECK, LABEL, COMBO, SLIDER = "Retaliation", "DetailLabel", "ComboBoxDetail", "S
 # The fork's own controls.  Where they stand is decided below with everything else.
 #   (template, name, text key)
 NEW_CONTROLS = [
+    (LABEL,  "LabelMonitor",           "GUI:Monitor"),
+    (COMBO,  "ComboBoxMonitor",        None),
     (LABEL,  "LabelWindowMode",        "GUI:WindowMode"),
     (COMBO,  "ComboBoxWindowMode",     None),
     (CHECK,  "CheckVSync",             "GUI:VSync"),
+    (CHECK,  "CheckClassicGraphics",   "GUI:ClassicGraphics"),
     (LABEL,  "LabelMSAA",              "GUI:MSAA"),
     (COMBO,  "ComboBoxMSAA",           None),
     (LABEL,  "LabelBloom",             "GUI:Bloom"),
@@ -211,6 +218,7 @@ def setting(label, control, readout=None):
 #   (page, column, heading key, items)
 GROUP_LAYOUT = [
     ("PageDisplay",  0, "GUI:OptionsGroupScreen", [
+        setting("LabelMonitor", "ComboBoxMonitor"),
         setting("ResolutionLabel", "ComboBoxResolution"),
         setting("LabelWindowMode", "ComboBoxWindowMode"),
         ("check", "CheckVSync")]),
@@ -218,6 +226,7 @@ GROUP_LAYOUT = [
         setting("GammaLabel", "SliderGamma", "ValueGamma")]),
 
     ("PageGraphics", 0, "GUI:OptionsGroupDetail", [
+        ("check", "CheckClassicGraphics"),
         setting("DetailLabel", "ComboBoxDetail"),
         setting("LabelTextureResolution", "LowResSlider", "ValueTextureResolution"),
         setting("LabelParticleCap", "ParticleCapSlider", "ValueParticleCap")]),
@@ -644,9 +653,13 @@ def selfcheck():
         if key not in keys:
             problems.append("caption %s is not in Patch.str" % key)
 
-    for name in READOUTS + GRAPHICS_CHECKS + MENU_CHECKS:
+    for name in READOUTS + GRAPHICS_CHECKS + MENU_CHECKS + MENU_COMBOS:
         if name not in controls:
             problems.append("OptionsMenu.wnd has no %s, which OptionsMenu.cpp fills in" % name)
+    for name in MENU_COMBOS:
+        for key in ("GUI:%s" % setting_of(name), "TOOLTIP:%s" % setting_of(name)):
+            if key not in keys:
+                problems.append("%s needs %s in Patch.str" % (name, key))
     if ADVANCED in controls:
         problems.append("OptionsMenu.wnd still carries %s; its controls are on the Graphics page"
                         % ADVANCED)

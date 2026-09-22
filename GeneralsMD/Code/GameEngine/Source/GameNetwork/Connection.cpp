@@ -98,6 +98,17 @@ time_t Connection_retryDelayFor( time_t baseRetryMS, Int numTimesSent )
 	return delay;
 }
 
+Bool Connection_isRedundantCopyDue( time_t curTime, time_t timeLastOnWire, Int copiesSent )
+{
+	if (timeLastOnWire == -1) {
+		return FALSE;
+	}
+	if (copiesSent >= CONNECTION_REDUNDANT_COPIES) {
+		return FALSE;
+	}
+	return (curTime - timeLastOnWire) >= CONNECTION_REDUNDANT_SPACING_MS;
+}
+
 /**
  * The constructor.
  */
@@ -394,6 +405,8 @@ UnsignedInt Connection::doSend() {
 
 		if (msg != NULL) {
 			DEBUG_LOG(("didn't finish sending all commands in connection\n"));
+		} else {
+			addRedundantCopies(packet, curtime);
 		}
 
 		++numpackets;
@@ -411,6 +424,26 @@ UnsignedInt Connection::doSend() {
 	}
 
 	return numpackets;
+}
+
+/**
+ * Fill what is left of the last packet of a send with copies of the synchronized commands still
+ * waiting for their ack.  They only ever ride behind everything that was due, so a copy never
+ * pushes a first send into the next packet.  See CONNECTION_REDUNDANT_COPIES.
+ */
+void Connection::addRedundantCopies(NetPacket *packet, time_t curTime) {
+	for (NetCommandRef *ref = m_netCommandList->getFirstMessage(); ref != NULL; ref = ref->getNext()) {
+		if (!IsCommandSynchronized(ref->getCommand()->getNetCommandType())) {
+			continue;
+		}
+		if (!Connection_isRedundantCopyDue(curTime, ref->getTimeLastOnWire(), ref->getNumCopiesSent())) {
+			continue;
+		}
+		if (!packet->addCommand(ref)) {
+			return;
+		}
+		ref->markCopied(curTime);
+	}
 }
 
 NetCommandRef * Connection::processAck(NetAckStage1CommandMsg *msg) {

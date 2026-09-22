@@ -180,6 +180,28 @@ Int ScoreKeeper::getTotalObjectsBuilt( const ThingTemplate *pTemplate )
 	return count;
 }
 
+//-------------------------------------------------------------------------------------------------
+/** The fighting unit this player has built most of, for the scoreboard.  Workers, dozers and
+	* supply trucks are left out: every base builds a pile of them and none of them is a choice. */
+const ThingTemplate *ScoreKeeper::getMostBuiltUnit( void ) const
+{
+	const ThingTemplate *mostBuilt = NULL;
+	Int mostCount = 0;
+	for (ObjectCountMap::const_iterator it = m_objectsBuilt.begin(); it != m_objectsBuilt.end(); ++it)
+	{
+		const ThingTemplate *theTemplate = it->first;
+		if (theTemplate->isKindOf(KINDOF_STRUCTURE) || theTemplate->isKindOf(KINDOF_DOZER) || theTemplate->isKindOf(KINDOF_HARVESTER))
+			continue;
+
+		if (it->second > mostCount)
+		{
+			mostBuilt = theTemplate;
+			mostCount = it->second;
+		}
+	}
+	return mostBuilt;
+}
+
 
 void ScoreKeeper::removeObjectBuilt( const Object *o)
 {

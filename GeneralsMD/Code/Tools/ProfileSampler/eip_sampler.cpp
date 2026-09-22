@@ -118,7 +118,7 @@ std::string module_of(HANDLE proc, DWORD64 addr)
 	return mi.ModuleName;
 }
 
-void report(HANDLE proc, const std::map<DWORD, unsigned long long> &hits,
+void report(HANDLE proc, const std::map<DWORD64, unsigned long long> &hits,
 	unsigned long long total, const char *title)
 {
 	std::map<std::string, Bucket> by_symbol;
@@ -138,8 +138,8 @@ void report(HANDLE proc, const std::map<DWORD, unsigned long long> &hits,
 			key = sym->Name;
 		} else {
 			char raw[96];
-			sprintf_s(raw, "%s!0x%08lx", module_of(proc, addr).c_str(),
-				static_cast<unsigned long>(addr));
+			sprintf_s(raw, "%s!0x%08llx", module_of(proc, addr).c_str(),
+				static_cast<unsigned long long>(addr));
 			key = raw;
 		}
 
@@ -192,7 +192,13 @@ void report(HANDLE proc, const std::map<DWORD, unsigned long long> &hits,
 // still suspended, since it is moving the moment the thread resumes.
 const size_t CALLER_DEPTH = 6;
 const size_t CALLER_ROWS_SHOWN = 25;
-using CallerChain = std::array<DWORD, CALLER_DEPTH>;
+using CallerChain = std::array<DWORD64, CALLER_DEPTH>;
+
+// The sampler is built for the game's architecture: an x64 sampler reads an x64 game.
+#define CONTEXT_PC Rip
+#define CONTEXT_FRAME Rbp
+#define CONTEXT_STACK Rsp
+const DWORD SAMPLED_MACHINE = IMAGE_FILE_MACHINE_AMD64;
 
 std::string symbol_name(HANDLE proc, DWORD64 addr, std::map<DWORD64, std::string> &cache)
 {
@@ -212,7 +218,7 @@ std::string symbol_name(HANDLE proc, DWORD64 addr, std::map<DWORD64, std::string
 		name = sym->Name;
 	} else {
 		char raw[32];
-		sprintf_s(raw, "0x%08lx", static_cast<unsigned long>(addr));
+		sprintf_s(raw, "0x%08llx", static_cast<unsigned long long>(addr));
 		name = raw;
 	}
 	cache[addr] = name;
@@ -223,20 +229,20 @@ CallerChain walk_callers(HANDLE proc, HANDLE thread, CONTEXT ctx)
 {
 	CallerChain chain = {};
 	STACKFRAME64 frame = {};
-	frame.AddrPC.Offset = ctx.Eip;
+	frame.AddrPC.Offset = ctx.CONTEXT_PC;
 	frame.AddrPC.Mode = AddrModeFlat;
-	frame.AddrFrame.Offset = ctx.Ebp;
+	frame.AddrFrame.Offset = ctx.CONTEXT_FRAME;
 	frame.AddrFrame.Mode = AddrModeFlat;
-	frame.AddrStack.Offset = ctx.Esp;
+	frame.AddrStack.Offset = ctx.CONTEXT_STACK;
 	frame.AddrStack.Mode = AddrModeFlat;
 
 	for (size_t depth = 0; depth < CALLER_DEPTH; ++depth) {
-		const BOOL walked = StackWalk64(IMAGE_FILE_MACHINE_I386, proc, thread, &frame, &ctx, nullptr,
+		const BOOL walked = StackWalk64(SAMPLED_MACHINE, proc, thread, &frame, &ctx, nullptr,
 			SymFunctionTableAccess64, SymGetModuleBase64, nullptr);
 		if (!walked || frame.AddrPC.Offset == 0) {
 			break;
 		}
-		chain[depth] = static_cast<DWORD>(frame.AddrPC.Offset);
+		chain[depth] = frame.AddrPC.Offset;
 	}
 	return chain;
 }
@@ -352,7 +358,7 @@ int main(int argc, char **argv)
 	// turn "1 kHz" into 64 Hz.
 	timeBeginPeriod(1);
 
-	std::vector<std::map<DWORD, unsigned long long>> hits(handles.size());
+	std::vector<std::map<DWORD64, unsigned long long>> hits(handles.size());
 	std::vector<unsigned long long> totals(handles.size(), 0);
 	std::vector<CallerChain> chains;
 	unsigned long long missed = 0;
@@ -376,7 +382,7 @@ int main(int argc, char **argv)
 			CONTEXT ctx = {};
 			ctx.ContextFlags = caller_filter ? CONTEXT_FULL : CONTEXT_CONTROL;
 			if (GetThreadContext(handles[i], &ctx)) {
-				++hits[i][ctx.Eip];
+				++hits[i][ctx.CONTEXT_PC];
 				++totals[i];
 				if (caller_filter && i == 0) {
 					chains.push_back(walk_callers(proc, handles[i], ctx));

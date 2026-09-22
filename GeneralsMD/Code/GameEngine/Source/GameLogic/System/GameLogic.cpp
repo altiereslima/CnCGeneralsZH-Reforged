@@ -1170,7 +1170,14 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 		 is written. */
 	if (isInMultiplayerGame())
 	{
-		TheWritableGlobalData->m_scenarioFile.clear();		// -scenario
+		/* A -netgame match is the exception for -scenario: it has no lobby, every machine in it was
+			 started from a script with the same command line, and a busy network game is the one load
+			 the multiplayer catch-up could not otherwise be tested under.  Only one that actually
+			 started, though: a -netgame that failed its own checks leaves this copy at the menus, and
+			 a LAN lobby joined from there is an ordinary match.  The file itself is agreed on by
+			 nobody, so this stays a test route; a replay of it needs the same -scenario again. */
+		if (!TheGlobalData->m_netGameStarted)
+			TheWritableGlobalData->m_scenarioFile.clear();		// -scenario
 		TheWritableGlobalData->m_peaceTime = 0;						// -peacetime, and the host's options string is read below
 		TheWritableGlobalData->m_unitLimit = FALSE;						// -unitlimit, the same
 	}
@@ -2527,6 +2534,7 @@ void GameLogic::loadMapINI( AsciiString mapName )
 	if (TheFileSystem->doesFileExist(fullFledgeFilename)) {
 		DEBUG_LOG(("Loading map.ini\n"));
 		INI ini;
+		ini.setSkipUnknownFields( TRUE );
 		ini.load( AsciiString(fullFledgeFilename), INI_LOAD_CREATE_OVERRIDES, NULL );
 	}
 
@@ -2534,6 +2542,7 @@ void GameLogic::loadMapINI( AsciiString mapName )
 	if (TheFileSystem->doesFileExist(fullFledgeFilename)) {
 		DEBUG_LOG(("Loading solo.ini\n"));
 		INI ini;
+		ini.setSkipUnknownFields( TRUE );
 		ini.load( AsciiString(fullFledgeFilename), INI_LOAD_CREATE_OVERRIDES, NULL );
 	}
 	
@@ -4050,9 +4059,11 @@ static void peaceTimeTick( void )
 	 same goes for the tech buildings a match is fought over - an oil derrick changes hands four
 	 times and spends the rest of the game at a tenth of its health.
 
-	 So they mend themselves.  Two seconds without a hit and the walls go back up, a fixed fraction
+	 So they mend themselves.  Ten seconds without a hit and the walls go back up, a fixed fraction
 	 of full health a second, whether the building is standing empty, holding somebody's riflemen or
-	 flying somebody's flag.
+	 flying somebody's flag.  Slowly, and not while the fight is still going on: at two seconds and
+	 three percent a second a hospital cleared with a flamethrower was whole again before the squad
+	 that cleared it had walked over to it, so taking a building off somebody bought you nothing.
 
 	 Once a second, off the same object walk peace time uses.  Tech buildings and garrisonable
 	 structures are the test; KINDOF_CAPTURABLE is not, because it sits on every faction structure
@@ -4064,8 +4075,8 @@ static void neutralBuildingRepairTick( void )
 	if( now % LOGICFRAMES_PER_SECOND != 0 )
 		return;
 
-	const UnsignedInt quietFrames = 2 * LOGICFRAMES_PER_SECOND;
-	const Real repairFractionPerSecond = 0.03f;
+	const UnsignedInt quietFrames = 10 * LOGICFRAMES_PER_SECOND;
+	const Real repairFractionPerSecond = 0.0125f;
 
 	for( Object *obj = TheGameLogic->getFirstObject(); obj != NULL; obj = obj->getNextObject() )
 	{
@@ -4102,26 +4113,87 @@ static Bool wantsSalvageUpgrade( const Object *obj )
 	return FALSE;
 }
 
+/** A unit that blows itself up with its own weapon spends its whole life on one target, and a crate
+	 is not that target. */
+static Bool diesUsingItsOwnWeapon( const Object *obj )
+{
+	for( Int slot = PRIMARY_WEAPON; slot < WEAPONSLOT_COUNT; ++slot )
+	{
+		const Weapon *weapon = obj->getWeaponInWeaponSlot( (WeaponSlotType)slot );
+		if( weapon != NULL && ( weapon->getTemplate()->getAffectsMask() & WEAPON_KILLS_SELF ) != 0 )
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+/* The states that take a detour for a crate and then carry on with the order they had. Each of
+	 these machines asks checkForCrateToPickup once a cycle and steps into a pick-up state of its own,
+	 which is how a unit that kills something walks over the wreck without losing its place. A unit in
+	 one of them is told about the crate rather than ordered to it, so nothing it was doing is lost -
+	 and that is the only thing the computer's own units are ever in, because the computer keeps every
+	 team on an order and none of them is ever idle. */
+static Bool detoursForACrate( const AIUpdateInterface *ai )
+{
+	switch( ai->getCurrentStateID() )
+	{
+		case AI_GUARD:
+		case AI_GUARD_RETALIATE:
+		case AI_GUARD_TUNNEL_NETWORK:
+		case AI_HUNT:
+		case AI_ATTACK_SQUAD:
+		case AI_ATTACK_MOVE_TO:
+		case AI_ATTACKFOLLOW_WAYPOINT_PATH_AS_INDIVIDUALS:
+		case AI_ATTACKFOLLOW_WAYPOINT_PATH_AS_TEAM:
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+/** Is anything hostile close enough to this unit to be its problem right now? */
+static Bool hasEnemyInSight( Object *obj )
+{
+	PartitionFilterAlive alive;
+	PartitionFilterRelationship enemies( obj, PartitionFilterRelationship::ALLOW_ENEMIES );
+	PartitionFilter *filters[] = { &alive, &enemies, NULL };
+
+	return ThePartitionManager->getClosestObject( obj, obj->getVisionRange(), FROM_CENTER_2D, filters ) != NULL;
+}
+
 /* Somebody goes and gets the salvage.  A crate dropped by a wreck is money and a free upgrade lying
 	 on the ground, and the game asked you to notice it, work out which of your units was allowed to
 	 take it, and drive that one over it by hand, in the middle of the fight that made it.  Nobody
 	 does that, so most salvage on most maps timed out where it fell.
 
-	 Whoever is standing nearest and has nothing else to do goes and takes it, once a second.  A unit
-	 that can still be upgraded off it wins over one that cannot, however far back it is standing,
-	 because the upgrade is worth more than the walk; failing that the nearest idle unit takes the
-	 cash.  Only idle units, so this never pulls a unit out of a fight or off an order, and the trip
-	 itself makes the unit busy, which is what stops it being ordered again on the next pass.
+	 Whoever is standing nearest goes and takes it, once a second.  A unit that can still be upgraded
+	 off it wins over one that cannot, however far back it is standing, because the upgrade is worth
+	 more than the walk; failing that the nearest unit takes the cash.
+
+	 How it is sent depends on what it was doing.  An idle unit is ordered to the crate and then walks
+	 back to the spot it left - idle is not the same as free, which is what the first version of this
+	 got wrong.  A line of infantry dug in across a road is idle, every one of them, and a fight in
+	 front of it makes wrecks: the line walked off to collect them and never came back, and the
+	 position was lost to the crates it had just earned.  So it goes and returns, nobody with an enemy
+	 in sight leaves at all, and the call radius is short enough that the walk costs seconds.
+
+	 A unit that is busy is told about the crate instead, and its own state machine takes the detour
+	 between one cycle and the next and then carries on with the order it had.  That is the path the
+	 computer's units take, and the only one they can: the computer keeps every team on an order, so
+	 not one of its units is ever idle and the whole pass used to walk straight past them.  Measured
+	 on a brutal match: one crate, three of its rebels standing inside a hundred and fifty of it for
+	 thirty-one seconds, none of them idle for a single frame, and the crate timed out where it lay.
 
 	 A dozer and a harvester are left alone: both have a job of their own that earns more than the
-	 crate does.  An aircraft is left alone too, because a crate cannot be claimed from the air. */
+	 crate does.  An aircraft is left alone too, because a crate cannot be claimed from the air, and
+	 so is anything that dies when it fires - a terrorist is worth more than every crate on the map. */
 static void salvageCrateTick( void )
 {
 	const UnsignedInt now = TheGameLogic->getFrame();
 	if( now % LOGICFRAMES_PER_SECOND != 0 )
 		return;
 
-	const Real SALVAGE_CALL_RADIUS = 250.0f;
+	const Real SALVAGE_CALL_RADIUS = 150.0f;
 
 	for( Object *crate = TheGameLogic->getFirstObject(); crate != NULL; crate = crate->getNextObject() )
 	{
@@ -4138,6 +4210,7 @@ static void salvageCrateTick( void )
 
 		Object *collector = NULL;
 		Bool collectorUpgrades = FALSE;
+		Bool collectorIsIdle = FALSE;
 		for( Object *them = iter->first(); them != NULL; them = iter->next() )
 		{
 			if( them->isKindOf( KINDOF_STRUCTURE ) || them->isKindOf( KINDOF_AIRCRAFT ) )
@@ -4146,9 +4219,13 @@ static void salvageCrateTick( void )
 				continue;
 			if( them->isContained() || them->isEffectivelyDead() || them->isNeutralControlled() )
 				continue;
-
 			AIUpdateInterface *ai = them->getAI();
-			if( ai == NULL || !ai->isIdle() )
+			if( ai == NULL )
+				continue;
+			const Bool idle = ai->isIdle();
+			if( !idle && !detoursForACrate( ai ) )
+				continue;
+			if( diesUsingItsOwnWeapon( them ) )
 				continue;
 
 			const Player *owner = them->getControllingPlayer();
@@ -4160,6 +4237,7 @@ static void salvageCrateTick( void )
 			{
 				collector = them;
 				collectorUpgrades = upgrades;
+				collectorIsIdle = idle;
 			}
 
 			// the iterator runs near to far, so the first one that can be upgraded is the best answer
@@ -4167,8 +4245,22 @@ static void salvageCrateTick( void )
 				break;
 		}
 
-		if( collector )
-			collector->getAI()->aiMoveToPosition( crate->getPosition(), CMD_FROM_AI );
+		if( collector == NULL )
+			continue;
+
+		if( !collectorIsIdle )
+		{
+			// its own machine picks the moment and puts it back on the order it had
+			collector->getAI()->notifyCrate( crate->getID() );
+			continue;
+		}
+
+		if( hasEnemyInSight( collector ) )
+			continue;
+
+		const Coord3D post = *collector->getPosition();
+		collector->getAI()->aiMoveToPosition( crate->getPosition(), CMD_FROM_AI );
+		collector->getAI()->friend_setSalvageReturnPosition( &post );
 	}
 }
 

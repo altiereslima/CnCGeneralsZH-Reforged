@@ -36,6 +36,8 @@
 
 #include <windows.h>
 
+#include <string>
+
 class DX11BackendClass;
 class DX11BufferTwinClass;
 class DX11DeviceClass;
@@ -89,13 +91,33 @@ void Direct3D11_Mirror_Texture(unsigned stage, struct IDirect3DBaseTexture9 * te
 
 // Normal maps: TextureClass looks for a "<name>_nrm.dds" beside every texture it binds at stage
 // zero and hands it over here, null when there is none; the terrain builds its own.  Active is
-// false on a Direct3D 9 run, which has no pixel half to light with.
+// false on a Direct3D 9 run, which has no pixel half to light with, and after the classic graphics
+// setting turned them off, which it does once, before the first texture is bound.
+void Direct3D11_Normal_Maps_Enable(bool enabled);
 bool Direct3D11_Normal_Maps_Active();
 void Direct3D11_Mirror_Normal_Map(struct IDirect3DBaseTexture9 * normal_map);
 
 // The way the sun's light travels, world space, for the bumped terrain.  Set once a frame.
 void Direct3D11_Set_Terrain_Sun(const float direction[3]);
 unsigned long long Direct3D11_Normal_Mapped_Draws();
+
+// The sun's depth buffer.  Between Begin and End every draw lands in it and nowhere else, which is
+// how the caster pass is written without the engine knowing what a render target is.  False from
+// Begin means there is no Direct3D 11 backend or the device refused the surface, and the caller
+// draws nothing rather than drawing the casters over the frame.  SHADOW-MAP-PLAN.md.
+bool Direct3D11_Begin_Shadow_Map(unsigned size);
+void Direct3D11_End_Shadow_Map();
+bool Direct3D11_Shadow_Map_Bound();
+std::string Direct3D11_Shadow_Map_Report();
+
+// What turns the map into a shadow: the matrix that takes a pixel's clip space position into the
+// sun's clip space, the depth bias that keeps a surface from shadowing itself, how dark a fully
+// blocked pixel goes and how wide the filter reaches, in texels.  Set once a frame, cleared when
+// the frame has no map.
+void Direct3D11_Set_Shadow_Parameters(float bias, float strength, float widest_radius_in_texels,
+	float narrowest_radius_in_texels, float texels_per_unit_of_gap, float units_per_unit_of_depth,
+	float sky_fill);
+void Direct3D11_Clear_Shadow_Parameters();
 
 // The CPU has just written this surface.  The next bind of its texture fills the Direct3D 11 copy
 // again.  A no-op when the backend is not running.

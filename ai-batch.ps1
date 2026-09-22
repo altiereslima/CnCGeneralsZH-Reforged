@@ -124,6 +124,7 @@ for ($i = 0; $i -lt $Runs; $i++) {
 	Write-Host ("[{0,3}/{1}] seed {2} {3} ... " -f ($i + 1), $Runs, $seed, $where) -NoNewline
 	$sw = [Diagnostics.Stopwatch]::StartNew()
 	$proc = Start-Process -FilePath $exePath -ArgumentList $args -WorkingDirectory $RunDir -PassThru
+	$proc.PriorityClass = 'AboveNormal'
 	if (-not $proc.WaitForExit($TimeoutMinutes * 60 * 1000)) {
 		$proc.Kill()
 		Write-Host "KILLED (wedged past $TimeoutMinutes min)"

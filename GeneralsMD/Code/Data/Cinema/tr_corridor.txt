@@ -1,0 +1,19 @@
+# Trailer: the column narrowing where Alpine Assault narrows, at the town in the middle of the map.
+# The camera travels down the line of march at about the speed the tanks make, so the lanes form and
+# re-form inside a held frame instead of the frame chasing one tank.
+#
+#   generals.exe -borderless -msaa 0 -quickstart -noshellmap -multiInstance
+#     -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover -seed 3 -peacetime 20
+#     -scenario trailer_corridor -cinema tr_corridor -video 300 660 tr_corridor -maxframes 680
+#
+# The column spawns around 1363,2266, is ordered off at frame 90 and is sent to 1063,428. It clears
+# the town by second 28, so the old list, which started filming at second 30, was pointed at the
+# ground behind it. The camera drifts about half as fast as the tanks and lets them come through the
+# frame; running it at their own speed put the camera in front of the column by second 20.
+
+9     cut        1310 1960 1.0 -45 -14
+10    route      12 1260 1780 1210 1620
+10    zoom       0.85 10
+10    orbit      22 12
+20    pitch      -24 2
+22    end

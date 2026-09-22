@@ -37,6 +37,7 @@
 #include "Common/Xfer.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/ParticleSys.h"
+#include "GameLogic/AI.h"
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/Damage.h"
 #include "GameLogic/GameLogic.h"
@@ -62,10 +63,40 @@
 #endif
 
 
-#define STRAY_MULTIPLIER 2.0f // Multiplier from stating diestance from tunnel, to max distance from
+/* Where a member stands inside the mob.  The slot comes from the member's own object id, which is
+	 handed out in creation order and is the same number on every machine, so ten members spawned in
+	 a row take ten different slots and keep them for as long as they live.  The slots sit on a
+	 sunflower spiral - turn by the golden angle, step out by the square root of the slot number -
+	 which spreads any number of them evenly over a disc without any ring bookkeeping.  Before this,
+	 every member pathed to the one point the nexus was headed for, arrived on top of its
+	 neighbours, and spent the rest of the trip being shoved around by the pathfinder. */
+const Int MOB_FORMATION_SLOT_COUNT = 12;
+const Real MOB_FORMATION_GOLDEN_ANGLE = 2.39996f;
+const Real MOB_FORMATION_SPACING_IN_RADII = 2.2f;	// just over two bodies apart, so neighbours do not shove
 
-const Real CLOSE_ENOUGH = 15;				// Our moveTo commands and pathfinding can't handle people in the way, so quit trying to hump someone on your spot
-const Real CLOSE_ENOUGH_SQR = (CLOSE_ENOUGH * CLOSE_ENOUGH);
+/* The disc is squashed along the nexus' own facing and stretched across it, because depth costs
+	 the mob its fight.  A round formation thirty units deep puts its near slots in weapon range two
+	 seconds before its far ones, and measured against ten Rangers that vanguard died alone: the
+	 round version killed 8 of 50 Rangers over five seeds where the same build with no formation at
+	 all killed 17.  Width across the line of march costs nothing, since every slot on it is the
+	 same distance from what the mob is walking at. */
+const Real MOB_FORMATION_DEPTH_SCALE = 0.35f;
+const Real MOB_FORMATION_WIDTH_SCALE = 1.25f;
+
+// Close enough to my slot to stop steering towards it and start looking for someone to hit.
+const Real MOB_FORMATION_ARRIVED_DISTANCE = PATHFIND_CELL_SIZE_F * 1.2f;
+
+// How far my slot has to have moved before it is worth spending another path on it.
+const Real MOB_FORMATION_REPATH_DISTANCE = PATHFIND_CELL_SIZE_F * 5.0f;
+
+// How far ahead of the nexus I may get before I ease off and let it catch up.
+const Real MOB_FORMATION_LEAD_ALLOWANCE = 25.0f;
+
+// Beyond this multiple of the catch-up radius I have lost the mob and stop being subtle about it.
+const Real MOB_CATCH_UP_CRISIS_MULTIPLIER = 3.0f;
+
+// The fraction of CatchUpCrisisBailTime after which I give up on my slot and walk at the nexus.
+const UnsignedInt MOB_CATCH_UP_CRISIS_DIVISOR = 3;
 
 /* How often a mob member reconsiders where it is standing.  EA already ran the expensive half of
 	 update() once every sixteen frames; what it did not do was sleep, so the module was still
@@ -228,98 +259,66 @@ UpdateSleepTime MobMemberSlavedUpdate::update( void )
 	Real myPathDistToGoal = myAI->getLocomotorDistanceToGoal();
 
 
-	Real catchUpRadiusSquared = ThePartitionManager->getDistanceSquared( me, master, FROM_CENTER_3D );
-	// I'm too far from the nexus... I need to catch up now!
-	if( catchUpRadiusSquared > sqr( data->m_mustCatchUpRadius ) )
+	Coord3D slotPosition;
+	computeSlotPosition( master, &slotPosition );
+
+	Coord3D slotDelta = slotPosition;
+	slotDelta.sub( me->getPosition() );
+	const Real distanceToSlot = slotDelta.length();
+
+	const Real distanceToMaster = sqrtf( ThePartitionManager->getDistanceSquared( me, master, FROM_CENTER_3D ) );
+	const Bool lostTheMob = distanceToMaster > data->m_mustCatchUpRadius;
+
+	/* One body, one speed.  A member further from the nexus than it is allowed to be runs; a member
+		 that is closer to the shared destination than the nexus is eases off rather than arriving
+		 alone and standing there.  EA rolled a die here instead, which is why a third of the mob was
+		 always ambling while the rest of it ran. */
+	if ( lostTheMob )
+		myAI->chooseLocomotorSet( LOCOMOTORSET_PANIC );
+	else if ( masterAI->isMoving() && myPathDistToGoal + MOB_FORMATION_LEAD_ALLOWANCE < masterPathDistToGoal )
+		myAI->chooseLocomotorSet( LOCOMOTORSET_WANDER );
+	else
+		myAI->chooseLocomotorSet( LOCOMOTORSET_NORMAL );
+
+	/* The formation is for the road and nothing else.  A nexus that has stopped is a nexus in a
+		 fight, and a member that walks to a spot on the ground during one is a member not throwing
+		 anything: against ten Rangers, holding the slot through the fight as well cost the mob more
+		 than half its kills over five seeds, 8 of 50 against the 17 the same build managed with no
+		 formation at all.  So the slot is abandoned the moment the mob stops or the member picks a
+		 target, and the only thing that overrides that is having lost the mob altogether. */
+	const Bool holdFormation = ( masterAI->isMoving() && ! myAI->isAttacking() ) || lostTheMob;
+
+	if ( holdFormation && distanceToSlot > MOB_FORMATION_ARRIVED_DISTANCE )
 	{
+		Coord3D goalDelta = *myAI->getGoalPosition();
+		goalDelta.sub( &slotPosition );
 
-		if ( masterAI->isMoving() )// master is on the move
+		if ( goalDelta.length() > MOB_FORMATION_REPATH_DISTANCE )// only if I am not headed there already
 		{
-			if ( masterPathDistToGoal > myPathDistToGoal ) // I'm getting ahead of master, need to slow down
-				myAI->chooseLocomotorSet(LOCOMOTORSET_WANDER);
-			else
-				myAI->chooseLocomotorSet(LOCOMOTORSET_PANIC); // I'm lagging, so I need to snap to it!
-
-			Coord3D nuPos = *masterAI->getGoalPosition();
-
-			if ( nuPos.length() < 1.0f ) //if a nasty error has sent me to map origin
-			{
-				myAI->aiMoveToPosition( master->getPosition(), CMD_FROM_AI ); // NASTY BEEHIVE EFFECT
-			}
-			else 
-			{
-				Coord3D goalDelta = *myAI->getGoalPosition();
-				goalDelta.sub( &nuPos );
-
-				if ( goalDelta.length() > 5.0f * PATHFIND_CELL_SIZE_F )// only if I am not headed there already
-				{
-					myAI->aiMoveToPosition( &nuPos, CMD_FROM_AI ); // Whither thou goest... THis causes the mob to reconverge
-				}
-			}
-				
-																															// on the fly, instead of doubling back to reconverge
+			myAI->aiMoveToPosition( &slotPosition, CMD_FROM_AI );
 		}
-		else // master is still, so let's re group in a hurry
+	}
+
+	if ( distanceToMaster > data->m_mustCatchUpRadius * MOB_CATCH_UP_CRISIS_MULTIPLIER )// critically far, now!
+	{
+		++ m_catchUpCrisisTimer; // I'm way too far from the nexus this frame
+
+		/* EA killed the member on this timer.  That is the straggler dying for the crime of having
+			 had a building in the way, and it is why a mob that walked past a wall arrived four men
+			 short.  It gives up on its slot and walks straight at the nexus instead, which is what
+			 CatchUpCrisisBailTime says it does in the first place. */
+		if ( m_catchUpCrisisTimer > data->m_catchUpCrisisBailTime / MOB_CATCH_UP_CRISIS_DIVISOR )
 		{
-			myAI->chooseLocomotorSet(LOCOMOTORSET_PANIC);
 			myAI->aiMoveToPosition( master->getPosition(), CMD_FROM_AI );
-
 		}
-
-
-
-		if (catchUpRadiusSquared > sqr( data->m_mustCatchUpRadius * 3))// I am critically far, now!
-		{
-			++ m_catchUpCrisisTimer; // I'm way too far from the nexus this frame
-
-			if ( m_catchUpCrisisTimer > data->m_catchUpCrisisBailTime)
-			{
-				me->kill();
-				return UPDATE_SLEEP_FOREVER;
-
-				// Here is the rethink:
-				// If the nexus has outrun me to the target by so much, //
-				// lets make the nexus come to me, and try to return to where I find it
-//				Coord3D masterPosition = *master->getPosition();
-//				master->setPosition( me->getPosition() );
-//				if ( ! masterAI->isMoving() )
-//				{
-//					masterAI->aiMoveToPosition( &masterPosition, CMD_FROM_AI );
-//				}
-//				m_catchUpCrisisTimer = 0;
-			}
-			else if ( m_catchUpCrisisTimer > data->m_catchUpCrisisBailTime/3 )
-			{
-				myAI->aiMoveToPosition( master->getPosition(), CMD_FROM_AI ); // NASTY BEEHIVE EFFECT
-			}
-		}
-
-
 	}
-	else if ( myAI->isMoving() ) // we're all on a trip, together
-	{
-
-		m_catchUpCrisisTimer = 0; // I'm not too far from the nexus this frame
-
-		Int seed = GameLogicRandomValue( 0, 10 );
-		if ( seed == 1 ) 
-			myAI->chooseLocomotorSet(LOCOMOTORSET_WANDER);
-		else if ( seed == 2 ) 
-			myAI->chooseLocomotorSet(LOCOMOTORSET_PANIC); 
-		else if ( seed == 3 ) 
-			myAI->chooseLocomotorSet(LOCOMOTORSET_NORMAL); 
-	//	else if ( seed >= 5 ) // go towards mommy's goal
-	//	{
-	//		Coord3D destination = *me->getPosition();
-	//		TheAI->pathfinder()->adjustToPossibleDestination(me, myAI->getLocomotorSet(), &destination);
-	//		myAI->aiMoveToPosition( &destination, CMD_FROM_AI ); // reconverge
-	//	}
-		
-	}
-	else // give me something to do while I'm standing here...
+	else
 	{
 		m_catchUpCrisisTimer = 0; // I'm not too far from the nexus this frame
+	}
 
+	if ( ! myAI->isMoving() ) // give me something to do while I'm standing here...
+	{
 		SpawnBehaviorInterface *spawnerBehavior = master->getSpawnBehaviorInterface();
 
 		if ( spawnerBehavior ) // if I have a mommy
@@ -372,28 +371,39 @@ UpdateSleepTime MobMemberSlavedUpdate::update( void )
 
 
 //-------------------------------------------------------------------------------------------------
-// We are too far from nexus, so we need to catch-up
+// Where I stand in the mob: my own place around wherever the mob as a whole is going.
 //-------------------------------------------------------------------------------------------------
-void MobMemberSlavedUpdate::doCatchUpLogic( Coord3D *pos )
+void MobMemberSlavedUpdate::computeSlotPosition( Object *master, Coord3D *position )
 {
-	Coord3D nuPos;
-	const MobMemberSlavedUpdateModuleData* data = getMobMemberSlavedUpdateModuleData();
-	// recalc where we want to be if we wander around
-	Real randomDirection = GameLogicRandomValue( 0, 2*PI );
-	Real randomRadius = GameLogicRandomValue( 0, data->m_noNeedToCatchUpRadius );
-	nuPos.set(pos);
-	nuPos.x += randomRadius * Cos( randomDirection );
-	nuPos.y += randomRadius * Sin( randomDirection );
-	nuPos.z = TheTerrainLogic->getGroundHeight( nuPos.x, nuPos.y );
+	Object *me = getObject();
+	AIUpdateInterface *myAI = me->getAIUpdateInterface();
+	AIUpdateInterface *masterAI = master->getAIUpdateInterface();
 
-	AIUpdateInterface *ai = getObject()->getAIUpdateInterface();
-	if( ai )
+	*position = masterAI->isMoving() ? *masterAI->getGoalPosition() : *master->getPosition();
+
+	if ( position->length() < 1.0f ) // a nasty error has sent the nexus to map origin
 	{
-		ai->aiMoveToPosition( &nuPos, CMD_FROM_AI );
+		*position = *master->getPosition();
 	}
 
-	setMobState(MOB_STATE_CATCHING_UP);
+	const Int slot = ((Int)me->getID()) % MOB_FORMATION_SLOT_COUNT;
+	const Real spacing = me->getGeometryInfo().getBoundingCircleRadius() * MOB_FORMATION_SPACING_IN_RADII;
+	const Real angle = slot * MOB_FORMATION_GOLDEN_ANGLE;
+	const Real radius = spacing * sqrtf( slot + 0.5f );
 
+	const Real alongTravel = radius * Cos( angle ) * MOB_FORMATION_DEPTH_SCALE;
+	const Real acrossTravel = radius * Sin( angle ) * MOB_FORMATION_WIDTH_SCALE;
+
+	const Real facing = master->getOrientation();
+	const Real forwardX = Cos( facing );
+	const Real forwardY = Sin( facing );
+
+	position->x += alongTravel * forwardX - acrossTravel * forwardY;
+	position->y += alongTravel * forwardY + acrossTravel * forwardX;
+	position->z = TheTerrainLogic->getGroundHeight( position->x, position->y );
+
+	// A slot that lands in a cliff or a building is a member walking into a wall until the mob dies.
+	TheAI->pathfinder()->adjustToPossibleDestination( me, myAI->getLocomotorSet(), position );
 }
 
 

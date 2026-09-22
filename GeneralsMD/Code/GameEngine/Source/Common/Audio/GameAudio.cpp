@@ -235,33 +235,22 @@ void AudioManager::init()
 	// do the miscellaneous sound files last so that we find the audioeventrts associated with the events.
 	ini.load( AsciiString( "Data\\INI\\MiscAudio.ini" ), INI_LOAD_OVERWRITE, NULL);
 	
-	// determine if one of the music tracks exists. Since their now BIGd, one implies all.
-	// If they don't exist, then attempt to load them from the CD. 
-	if (!isMusicAlreadyLoaded()) 
+	//
+	// One music track existing implies all, since they are BIGd, and when none does the retail
+	// disc may still have them: the music shipped on CD 1.  So the disc is still read.
+	//
+	// What is gone is the loop that used to sit around this read.  A system-modal "Please insert
+	// the first game CD" came up over the splash screen, OK asked again forever and only Cancel
+	// let the game start - and no digital install can ever satisfy it, because there is no disc to
+	// insert and the missing music is the base game's Music.big, not a CD.  Music is not something
+	// the game needs to run: the audio manager plays nothing when it has nothing, which is the call
+	// GameEngine::init already makes two lines after this returns.
+	//
+	if (!isMusicAlreadyLoaded())
 	{
-		m_musicPlayingFromCD = TRUE;
-		while (TRUE) 
-		{
-			// @todo Unload any files from CD first. - jkmcd
-
-			TheFileSystem->loadMusicFilesFromCD();
-			if (isMusicAlreadyLoaded()) 
-			{
-				break;
-			}
-			// We loop infinitely on the splash screen if we don't allow breaking out of this loop.
-//#if !defined( _DEBUG ) && !defined( _INTERNAL )
-			else
-			{
-				// Display the warning.
-				
-				if (OSDisplayWarningBox("GUI:InsertCDPrompt", "GUI:InsertCDMessage", OSDBT_OK | OSDBT_CANCEL, OSDOF_SYSTEMMODAL | OSDOF_EXCLAMATIONICON) == OSDBT_CANCEL) {
-					//TheGameEngine->setQuitting(TRUE);  // Can't do this to WorldBuilder
-					break;
-				}
-			}
-//#endif
-		}
+		// @todo Unload any files from CD first. - jkmcd
+		TheFileSystem->loadMusicFilesFromCD();
+		m_musicPlayingFromCD = isMusicAlreadyLoaded();
 	}
 	
 	m_music = NEW MusicManager;

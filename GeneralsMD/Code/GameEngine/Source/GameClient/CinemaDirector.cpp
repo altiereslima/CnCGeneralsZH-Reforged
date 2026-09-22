@@ -63,7 +63,11 @@ static const char CINEMA_COMMENT_CHAR = '#';
 enum { CINEMA_MAX_TOKENS = 3 + 2 * CINEMA_MAX_ROUTE_POINTS };
 static const Real CINEMA_PITCH_LIMIT_DEGREES = 36.0f;	///< View::setPitch clamps to PI/5 either way
 static const Real CINEMA_FOLLOW_RATE = 4.0f;						///< how fast a follow catches up, per second
+static const Real CINEMA_CENTRE_GAIN = 0.5f;						///< share of the framing error taken out each frame
+static const Real CINEMA_CENTRE_LIMIT = 900.0f;					///< a correction larger than this is a bad projection
 static const Real CINEMA_FRAME_MS = 1000.0f / (Real)LOGICFRAMES_PER_SECOND;
+static const Real CINEMA_CLOCK_PULL = 0.05f;						///< share of the gap to the logic clock closed each pass
+static const Real CINEMA_CLOCK_SNAP_SECONDS = 0.5f;			///< further behind than this and the camera clock jumps to the logic one
 static const Real CINEMA_LETTERBOX_ASPECT = 2.39f;	///< the game's own bars crop to 16:9, which on a 16:9 screen is no bars at all
 
 // ------------------------------------------------------------------------------------------------
@@ -369,6 +373,8 @@ static Real theCinemaRouteY[ CINEMA_MAX_ROUTE_POINTS ];
 static Int theCinemaRoutePoints = 0;
 static Real theCinemaRouteStart = 0.0f;
 static Real theCinemaRouteLength = 0.0f;
+static Real theCinemaCentreX = 0.0f;				///< what the framing loop is adding to the look point
+static Real theCinemaCentreY = 0.0f;
 static ObjectID theCinemaFollowID = INVALID_ID;
 static Real theCinemaFollowUntil = 0.0f;		///< 0 is for as long as the next shot allows
 static Real theCinemaLastNow = 0.0f;
@@ -377,6 +383,9 @@ static CinemaTween theCinemaAngle;
 static CinemaTween theCinemaPitch;
 static UnsignedInt theCinemaSeenFrame = 0;
 static DWORD theCinemaSeenFrameAt = 0;
+static Bool theCinemaClockStarted = FALSE;
+static Real theCinemaClock = 0.0f;
+static DWORD theCinemaClockWall = 0;
 
 static Bool cinemaShotIsEarlier( const CinemaShot &left, const CinemaShot &right )
 {
@@ -442,9 +451,12 @@ static void loadCinema( void )
 	DEBUG_LOG(("CINEMA: loaded '%s', %d shots, %d lines refused\n", path.str(), (Int)theCinemaShots.size(), refused));
 }
 
-/** The shot list's clock in seconds. Between logic frames it runs on from the last one by the wall
-		clock, capped at one frame, so a camera does not move in 30Hz steps on a faster display; while a
-		-video range is being recorded it is the logic frame alone, because that is what each picture is. */
+/** The shot list's clock in seconds. While a -video range is being recorded it is the logic frame
+		alone, because that is what each picture is. Otherwise it runs on the wall clock and is pulled a
+		little towards the logic frame every pass. Read straight off the logic frame, plus the wall time
+		since that frame arrived, it restarted from nothing whenever a frame came in, stood still at the
+		cap when one came in late and leapt when a catch-up ran two at once, and the camera went in
+		lurches that turned the stomach of whoever watched the window. */
 static Real cinemaNow( void )
 {
 	const UnsignedInt frame = TheGameLogic->getFrame();
@@ -454,15 +466,31 @@ static Real cinemaNow( void )
 		theCinemaSeenFrame = frame;
 		theCinemaSeenFrameAt = wall;
 	}
-	Real fraction = 0.0f;
 	const Bool recording = TheGlobalData->m_videoEndFrame > 0;
-	if (!recording && !TheGameLogic->isGamePaused())
+	const Bool paused = TheGameLogic->isGamePaused();
+	Real fraction = 0.0f;
+	if (!recording && !paused)
 	{
 		fraction = (Real)(wall - theCinemaSeenFrameAt) / CINEMA_FRAME_MS;
 		if (fraction > 1.0f)
 			fraction = 1.0f;
 	}
-	return ((Real)frame + fraction) / (Real)LOGICFRAMES_PER_SECOND;
+	const Real logicNow = ((Real)frame + fraction) / (Real)LOGICFRAMES_PER_SECOND;
+
+	const Real wallSeconds = (Real)(wall - theCinemaClockWall) / 1000.0f;
+	theCinemaClockWall = wall;
+	if (recording || !theCinemaClockStarted || logicNow - theCinemaClock > CINEMA_CLOCK_SNAP_SECONDS)
+	{
+		theCinemaClockStarted = TRUE;
+		theCinemaClock = logicNow;
+		return theCinemaClock;
+	}
+	const Real advanced = paused ? theCinemaClock : theCinemaClock + wallSeconds;
+	const Real pulled = advanced + (logicNow - advanced) * CINEMA_CLOCK_PULL;
+	// a stalled logic frame slows the camera down to a stop; it never winds it back
+	if (pulled > theCinemaClock)
+		theCinemaClock = pulled;
+	return theCinemaClock;
 }
 
 static void cinemaPlace( Real now, Real *x, Real *y )
@@ -654,6 +682,8 @@ static void runShot( const CinemaShot &shot )
 			theCinemaFollowID = obj->getID();
 			theCinemaFollowUntil = (shot.seconds > 0.0f) ? now + shot.seconds : 0.0f;
 			theCinemaPlaceMode = CINEMA_PLACE_FOLLOW;
+			theCinemaCentreX = 0.0f;
+			theCinemaCentreY = 0.0f;
 			break;
 		}
 
@@ -691,6 +721,32 @@ static void runShot( const CinemaShot &shot )
 	}
 }
 
+/** The camera looks at a point on the ground and the tilt swings the picture around it, so a unit
+		standing on that point rides above the middle of the frame, further the steeper the tilt. Rather
+		than work the offset out from the projection, the loop measures it: where the frame's middle
+		lands in the world at the unit's own height is the point the camera should be looking at, and
+		the difference between that and the chased point is taken out of the look point a little at a
+		time. It settles in a few frames and stays settled while the tilt or the zoom is still moving.
+		It aims at the chased point and not at the unit: aimed at the unit it also took out the chase's
+		lag, pinned the camera to the unit and put every 30Hz step and every jink back into the picture. */
+static void cinemaCentreOn( Real chasedX, Real chasedY, Real height )
+{
+	ICoord2D middle;
+	middle.x = TheTacticalView->getWidth() / 2;
+	middle.y = TheTacticalView->getHeight() / 2;
+
+	Coord3D atMiddle;
+	TheTacticalView->screenToWorldAtZ( &middle, &atMiddle, height );
+
+	const Real missX = chasedX - atMiddle.x;
+	const Real missY = chasedY - atMiddle.y;
+	if (fabs( missX ) > CINEMA_CENTRE_LIMIT || fabs( missY ) > CINEMA_CENTRE_LIMIT)
+		return;
+
+	theCinemaCentreX += missX * CINEMA_CENTRE_GAIN;
+	theCinemaCentreY += missY * CINEMA_CENTRE_GAIN;
+}
+
 /** A followed unit is chased, not pinned: the camera closes a fixed share of the gap every second,
 		so a unit that jinks does not shake the picture and one that dies leaves the camera where it was. */
 static void cinemaChase( Real now )
@@ -712,6 +768,7 @@ static void cinemaChase( Real now )
 	const Real share = (elapsed > 0.0f) ? 1.0f - (Real)exp( -CINEMA_FOLLOW_RATE * elapsed ) : 0.0f;
 	theCinemaStillX += (obj->getPosition()->x - theCinemaStillX) * share;
 	theCinemaStillY += (obj->getPosition()->y - theCinemaStillY) * share;
+	cinemaCentreOn( theCinemaStillX, theCinemaStillY, obj->getPosition()->z );
 }
 
 void CinemaDirector_update( void )
@@ -744,6 +801,11 @@ void CinemaDirector_update( void )
 			cinemaChase( now );
 		Coord3D look;
 		cinemaPlace( now, &look.x, &look.y );
+		if (theCinemaPlaceMode == CINEMA_PLACE_FOLLOW)
+		{
+			look.x += theCinemaCentreX;
+			look.y += theCinemaCentreY;
+		}
 		look.z = TheTerrainLogic->getGroundHeight( look.x, look.y );
 		TheTacticalView->lookAt( &look );
 		TheTacticalView->setZoom( theCinemaBaseZoom * theCinemaZoom.at( now ) );

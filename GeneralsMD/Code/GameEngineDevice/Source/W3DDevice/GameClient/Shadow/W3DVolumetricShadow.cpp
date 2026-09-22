@@ -57,10 +57,16 @@
 #include "WW3D2/statistics.h"
 #include "Common/PerfTimer.h"
 #include "GameLogic/TerrainLogic.h"
+#include "GameLogic/GameLogic.h"
 #include "WW3D2/DX8Caps.h"
 #include "GameClient/Drawable.h"
 #include "wwshade/shdmesh.h"
 #include "wwshade/shdsubmesh.h"
+#include "WW3D2/camera.h"
+#include "WW3D2/dx8renderer.h"
+#include "WW3D2/dx11runtime.h"
+#include "WW3D2/sortingrenderer.h"
+#include "GameClient/View.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -90,6 +96,39 @@ const Real cosAngleToCare = cos ((0.2 * PI) / 180.0);	//1.5 degree difference
 #define MAX_SHADOW_EXTRUSION_UNDER_OBJECT_BEFORE_CLAMP	5.0f		//maximum amount that shadow can reach below object base (z-position) before we clamp it's length to reduce artifacts.
 #define SHADOW_SAMPLING_INTERVAL (MAP_XY_FACTOR * 2.0f)				//stepsize along ray used to find lowest point on terrain within shadow's reach.
 #define OVERHANGING_OBJECT_CLAMP_ANGLE	(80.0f/180.0f*PI)				//for objects that are right on a cliff edge, clamp light angle to cast a nearly vertical shadow.
+
+// The sun's depth buffer and the box it covers.  2048 texels over 1800 world units is about one
+// texel to the metre at the game's own scale, which is finer than the stencil edge it replaces;
+// the box is centred on what the tactical camera looks at and a zoom wider than it loses the
+// shadows at the edge of the screen before it loses anything the player is watching.
+#define SHADOW_MAP_TEXELS 2048
+#define SHADOW_MAP_HALF_WIDTH 900.0f
+#define SHADOW_MAP_SUN_DISTANCE 2000.0f
+#define SHADOW_MAP_NEAR_CLIP 10.0f
+#define SHADOW_MAP_FAR_CLIP 4000.0f
+// How far a surface has to be behind what the map holds before it counts as shadowed, how dark a
+// fully blocked pixel goes, and how far the filter reaches in texels.  The first is the one that
+// decides between a surface shadowing itself in stripes and a shadow lifting off its own caster.
+#define SHADOW_MAP_DEPTH_BIAS 0.0015f
+// 0.55 was picked on a frame with one base in it; over fourteen buildings a wide shadow on the
+// ground read at a quarter of the sunlit sand, black in front of every wall, and the owner took
+// 0.45 from three panels of the same base on 2026-09-21.
+#define SHADOW_MAP_STRENGTH 0.45f
+// How wide the filter may open and how narrow it stays on the ground, in texels of the map, and how
+// much penumbra a unit of gap between a caster and what its shadow falls on is worth.  The last is
+// the number the whole picture turns on: a tank's tracks are on the ground and keep a hard edge, a
+// helicopter twenty metres up spreads.  It is not the sun's own half degree, which at this scale
+// would be under a pixel; it is what the sky filling a shadow back in looks like.  It was 0.04,
+// chosen on a frame of tanks, and a Comanche hovering 150 units up then cast nothing at all: the
+// filter spread a fuselage four units wide over fourteen.  At 0.01 its blades read as a star.
+#define SHADOW_MAP_WIDEST_TEXELS 9.0f
+#define SHADOW_MAP_NARROWEST_TEXELS 0.9f
+#define SHADOW_MAP_PENUMBRA_PER_UNIT 0.01f
+#define SHADOW_MAP_SKY_FILL 0.12f
+
+// Whether the sun's map took this frame.  The volumes read it to know whether to stand down, and it
+// is false on a machine with no Direct3D 11 device, which is what keeps that machine's shadows.
+static Bool theShadowMapHoldsTheFrame = FALSE;
 
 //#define SV_DEBUG
 //#define SV_DEBUG_BOUNDS
@@ -3780,11 +3819,177 @@ DECLARE_PERF_TIMER(stencilShadows)
 DECLARE_PERF_TIMER(shadowVolumeUpdate)
 DECLARE_PERF_TIMER(shadowVolumeSubmit)
 
+/** The sun's depth pass.  The casters are the ones that cast a volume today, drawn again from the
+		sun into a depth buffer nothing samples yet, so this phase can be proved on its own: with it
+		off the frame is what it was, and with it on the map has the world in it and the frame is
+		still what it was.  The box is square and centred on what the tactical camera is looking at,
+		which is the ground the player can see; a cascade is only worth it once the box has to cover
+		more than one view.  SHADOW-MAP-PLAN.md phase 1. */
+void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
+{
+	theShadowMapHoldsTheFrame = FALSE;
+
+	if (!TheGlobalData->m_shadowMap || m_shadowList == NULL || TheTacticalView == NULL)
+		return;
+
+	if (!Direct3D11_Begin_Shadow_Map( SHADOW_MAP_TEXELS ))
+		return;		//no Direct3D 11 device, or it refused the surface: the volumes keep the frame
+
+	Coord3D look;
+	TheTacticalView->getPosition( &look );
+	const Vector3 focus( look.x, look.y, TheTerrainLogic->getGroundHeight( look.x, look.y ) );
+
+	Vector3 toSun = TheW3DShadowManager->getLightPosWorld( 0 );
+	toSun.Normalize();
+
+	CameraClass sun;
+	sun.Set_Projection_Type( CameraClass::ORTHO );
+	sun.Set_View_Plane( Vector2( -SHADOW_MAP_HALF_WIDTH, -SHADOW_MAP_HALF_WIDTH ),
+		Vector2( SHADOW_MAP_HALF_WIDTH, SHADOW_MAP_HALF_WIDTH ) );
+	sun.Set_Clip_Planes( SHADOW_MAP_NEAR_CLIP, SHADOW_MAP_FAR_CLIP );
+
+	Matrix3D transform;
+	transform.Look_At( focus + toSun * SHADOW_MAP_SUN_DISTANCE, focus, 0.0f );
+
+	/* The box has to sit on whole texels of its own map, or every scroll of the camera slides the
+		 grid under the world by a fraction of a texel and every shadow edge crawls and sparkles.  The
+		 look point is taken into the sun's own frame, rounded to the texel it lands in, and taken back
+		 out: the box then moves in texel steps and a shadow that did not move does not shimmer. */
+	const Real texelWidth = (2.0f * SHADOW_MAP_HALF_WIDTH) / (Real)SHADOW_MAP_TEXELS;
+	Vector3 focusInSun;
+	Matrix3D::Inverse_Transform_Vector( transform, focus, &focusInSun );
+	focusInSun.X = WWMath::Floor( focusInSun.X / texelWidth + 0.5f ) * texelWidth;
+	focusInSun.Y = WWMath::Floor( focusInSun.Y / texelWidth + 0.5f ) * texelWidth;
+	Vector3 snapped;
+	Matrix3D::Transform_Vector( transform, focusInSun, &snapped );
+	transform.Look_At( snapped + toSun * SHADOW_MAP_SUN_DISTANCE, snapped, 0.0f );
+
+	sun.Set_Transform( transform );
+
+	Matrix4x4 projection;
+	sun.Get_D3D_Projection_Matrix( &projection );
+	DX8Wrapper::Set_Projection_Transform_With_Z_Bias( projection, SHADOW_MAP_NEAR_CLIP,
+		SHADOW_MAP_FAR_CLIP );
+	Matrix3D view;
+	transform.Get_Orthogonal_Inverse( view );
+	DX8Wrapper::Set_Transform( D3DTS_VIEW, view );
+
+	// Depth is the whole point of the pass and colour is the whole cost of it.
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_COLORWRITEENABLE, 0 );
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_ZENABLE, TRUE );
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_ZWRITEENABLE, TRUE );
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_ZFUNC, D3DCMP_LESSEQUAL );
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_ALPHABLENDENABLE, FALSE );
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILENABLE, FALSE );
+	/* Back faces only.  What the map holds is then the far side of every caster, which is behind
+		 the surface that receives the light by the thickness of the object: a hull cannot shadow
+		 itself, and the bias has only the map's own texel to cover rather than a whole tank. */
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_CULLMODE, D3DCULL_CW );
+
+	RenderInfoClass sunInfo( sun );
+	Int casters = 0;
+	for (W3DVolumetricShadow *shadow = m_shadowList; shadow; shadow = shadow->m_next)
+	{
+		RenderObjClass *robj = shadow->getRenderObject();
+		if (robj == NULL || !shadow->isRenderEnabled() || shadow->isInvisibleEnabled())
+			continue;
+
+		/* What goes into the map is what stands in the sun's box, not what the tactical camera can
+			 see.  Culling by the camera meant a tank just off the left of the screen stopped casting,
+			 so its shadow blinked out while the shadow of the tank beside it stayed - and scrolling
+			 turned that into a row of shadows flickering along the edge of the frame. */
+		Vector3 inSun;
+		Matrix3D::Inverse_Transform_Vector( transform, robj->Get_Position(), &inSun );
+		const Real reach = SHADOW_MAP_HALF_WIDTH + robj->Get_Bounding_Sphere().Radius;
+		if (inSun.X < -reach || inSun.X > reach || inSun.Y < -reach || inSun.Y > reach)
+			continue;
+
+		robj->Render( sunInfo );
+		++casters;
+	}
+	TheDX8MeshRenderer.Flush();
+	/* A mesh the material system calls translucent goes to the sort lists rather than to the mesh
+		 renderer, and a helicopter's rotor disc is one of them: without this the map holds the
+		 fuselage alone, and a fuselage is too thin a thing to read as a shadow once the filter opens.
+		 Draining them here is safe because the pass runs before the frame queues anything of its
+		 own, so everything in those lists was put there by the loop above. */
+	WW3D::Render_And_Clear_Static_Sort_Lists( sunInfo );
+	/* And the rotor itself goes further still: its mesh carries the SORT flag, so the mesh renderer
+		 hands it to the sorting renderer, which holds it for the end of the scene and would draw it
+		 onto the screen rather than into the map.  The backend writes depth for a blended caster
+		 while the pass runs and cuts it at its alpha, which keeps the blades. */
+	SortingRendererClass::Flush();
+
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_COLORWRITEENABLE,
+		D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE
+		| D3DCOLORWRITEENABLE_ALPHA );
+
+	Direct3D11_End_Shadow_Map();
+
+	// The frame's own camera, put back: the view, the projection and the viewport all went with the
+	// sun.  Without this everything drawn after the pass is drawn from the sun's seat, which is the
+	// whole picture rather than a corner of it.
+	sceneCamera.Apply();
+
+	/* And what turns the map into a shadow.  The matrix that takes a pixel from the frame's clip
+		 space into the sun's is built in the backend, out of the sun's own view and projection as it
+		 held them during the pass and the frame's as it holds them now: both are already there, in
+		 one convention, and a matrix assembled on this side would have to agree with a layout it
+		 cannot see.  SHADOW-MAP-PLAN.md phase 2. */
+	/* The two conversions the filter needs, both of them the box's own arithmetic.  A texel is this
+		 many world units across, and a unit of depth is the whole of the near to far range, because
+		 an orthographic projection puts depth on a straight line. */
+	const Real worldPerTexel = (2.0f * SHADOW_MAP_HALF_WIDTH) / (Real)SHADOW_MAP_TEXELS;
+	const Real unitsPerUnitOfDepth = SHADOW_MAP_FAR_CLIP - SHADOW_MAP_NEAR_CLIP;
+
+	// -shadowtune overrules any of the four that it was given; a zero leaves the build's own.
+	const Real penumbra = (TheGlobalData->m_shadowMapPenumbra > 0.0f)
+		? TheGlobalData->m_shadowMapPenumbra : SHADOW_MAP_PENUMBRA_PER_UNIT;
+	const Real skyFill = (TheGlobalData->m_shadowMapSkyFill > 0.0f)
+		? TheGlobalData->m_shadowMapSkyFill : SHADOW_MAP_SKY_FILL;
+	const Real strength = (TheGlobalData->m_shadowMapStrength > 0.0f)
+		? TheGlobalData->m_shadowMapStrength : SHADOW_MAP_STRENGTH;
+	const Real widest = (TheGlobalData->m_shadowMapWidest > 0.0f)
+		? TheGlobalData->m_shadowMapWidest : SHADOW_MAP_WIDEST_TEXELS;
+
+	Direct3D11_Set_Shadow_Parameters( SHADOW_MAP_DEPTH_BIAS, strength, widest,
+		SHADOW_MAP_NARROWEST_TEXELS, penumbra / worldPerTexel, unitsPerUnitOfDepth, skyFill );
+
+	/* Said last, and only on the way out: everything above can bail, and the volumes have to know
+		 whether this frame's shadows are in the map or still theirs to draw.  The count of casters is
+		 not part of that answer.  It was, and a frame that happened to hold none - a camera over open
+		 ground - handed the frame back to the volumes for that one frame, so the whole scene's
+		 shadows changed style and back again as the camera moved. */
+	theShadowMapHoldsTheFrame = TRUE;
+
+	// The report costs a full stall of the pipeline, so it is one line a second rather than one a
+	// frame: what it answers is whether the pass draws the world at all, and that does not change
+	// thirty times a second.
+	if (TheGlobalData->m_shadowMapReport && casters > 0)
+	{
+		static UnsignedInt nextReportFrame = 0;
+		const UnsignedInt frame = TheGameLogic ? TheGameLogic->getFrame() : 0;
+		if (frame >= nextReportFrame)
+		{
+			nextReportFrame = frame + LOGICFRAMES_PER_SECOND;
+			DEBUG_LOG(("SHADOWMAP: %d casters, %s\n", casters,
+				Direct3D11_Shadow_Map_Report().c_str()));
+		}
+	}
+}
+
 void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
 {
 	USE_PERF_TIMER(stencilShadows)
 	W3DVolumetricShadow *shadow;
 	Int numRenderedShadows = 0;
+
+	/* The volumes stand down only where the sun's map has actually taken this frame.  The casters
+		 stay registered either way, which is what keeps them in the map; what stops is the volumes'
+		 own darkening pass.  A machine with no Direct3D 11 device fills no map and keeps the volumes,
+		 so nobody ends up with no shadows at all. */
+	if (TheGlobalData->m_shadowMapOnly && theShadowMapHoldsTheFrame)
+		return;
 
  	AABoxClass bbox;
 	SphereClass bsphere;

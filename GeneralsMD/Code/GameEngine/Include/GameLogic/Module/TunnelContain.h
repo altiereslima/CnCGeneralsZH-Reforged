@@ -121,6 +121,7 @@ public:
 	virtual const ContainedItemsList* getContainedItemsList() const;
 	virtual Bool isContained( const Object *obj ) const;	
 	virtual Bool isDisplayedOnControlBar() const { return TRUE; } ///< Does this container display its contents on the ControlBar?
+	virtual Bool getContainerPipsToShow( Int& numTotal, Int& numFull );	///< the ones staying inside; see TunnelTracker::getResidentCount
 	virtual Bool isKickOutOnCapture(){ return FALSE; }///< Caves and Tunnels don't kick out on capture.
 
 	// override the onDie we inherit from OpenContain

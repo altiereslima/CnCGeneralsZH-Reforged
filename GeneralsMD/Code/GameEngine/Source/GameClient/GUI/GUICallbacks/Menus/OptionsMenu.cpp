@@ -38,6 +38,7 @@
 #include "Common/GameEngine.h"
 #include "Common/UserPreferences.h"
 #include "Common/GameLOD.h"
+#include "Common/Monitors.h"
 #include "Common/OptionsCatalog.h"
 #include "Common/Registry.h"
 #include "Common/Version.h"
@@ -94,7 +95,18 @@ static NameKeyType    comboBoxAntiAliasingID   = NAMEKEY_INVALID;
 static GameWindow *   comboBoxAntiAliasing     = NULL;
 
 static NameKeyType    comboBoxResolutionID      = NAMEKEY_INVALID;
-static GameWindow *   comboBoxResolution       = NULL; 
+static GameWindow *   comboBoxResolution       = NULL;
+
+static NameKeyType    comboBoxMonitorID         = NAMEKEY_INVALID;
+static GameWindow *   comboBoxMonitor          = NULL;
+
+// What the two display lists hold, entry for entry: the monitors on the desktop, and the sizes the
+// monitor picked in the first list offers.  Filled when the menu opens and, for the sizes, again
+// whenever another monitor is picked.
+static MonitorEntry			menuMonitors[MAX_MONITOR_ENTRIES];
+static Int							menuMonitorCount = 0;
+static DisplayModeEntry	menuModes[MAX_DISPLAY_MODE_ENTRIES];
+static Int							menuModeCount = 0;
 
 static NameKeyType    comboBoxDetailID      = NAMEKEY_INVALID;
 static GameWindow *   comboBoxDetail        = NULL; 
@@ -884,24 +896,6 @@ static void setDefaults( void )
 	}
 	
 	//-------------------------------------------------------------------------------------------------
-	// Resolution
-	//Find index of 800x600 mode.
-	if (modifyDisplaySettings && ((TheGameLogic->isInGame() == FALSE) || (TheGameLogic->isInShellGame() == TRUE)  && !TheGameSpyInfo)) {
-		Int numResolutions = TheDisplay->getDisplayModeCount();
-		Int defaultResIndex=0;
-		for( Int i = 0; i < numResolutions; ++i )
-		{	Int xres,yres,bitDepth;
-			TheDisplay->getDisplayModeDescription(i,&xres,&yres,&bitDepth);
-			if (xres == 800 && yres == 600)	//keep track of default mode in case we need it.
-			{	defaultResIndex=i;
-				break;
-			}
-		}
-		GadgetComboBoxSetSelectedPos( comboBoxResolution, defaultResIndex );	//should be 800x600 (our lowest supported mode)
-	}
-
-
-	//-------------------------------------------------------------------------------------------------
 	// Mouse Mode
 	GadgetCheckBoxSetChecked(checkRetaliation, TRUE );
 	GadgetCheckBoxSetChecked( checkDoubleClickAttackMove, FALSE );
@@ -1106,6 +1100,78 @@ static void readCatalogWidgets( void )
 	}
 }
 
+static const Color MENU_ENTRY_COLOR = GameMakeColor( 255, 255, 255, 255 );
+
+//-------------------------------------------------------------------------------------------------
+/** The monitor picked in the monitor list. */
+//-------------------------------------------------------------------------------------------------
+static MonitorEntry selectedMonitor( void )
+{
+	Int index = -1;
+	GadgetComboBoxGetSelectedPos( comboBoxMonitor, &index );
+	if( index >= 0 && index < menuMonitorCount )
+		return menuMonitors[ index ];
+	return findMonitor( TheGlobalData->m_monitor.str() );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Fill the resolution list with the sizes this monitor offers, and pick the one asked for.  A
+	* monitor that does not have it gets its own desktop size instead, which is the one size every
+	* monitor is sure to show well. */
+//-------------------------------------------------------------------------------------------------
+static void fillResolutionList( const MonitorEntry &monitor, Int wantedWidth, Int wantedHeight )
+{
+	const Int desktopWidth = monitor.rect.right - monitor.rect.left;
+	const Int desktopHeight = monitor.rect.bottom - monitor.rect.top;
+
+	menuModeCount = listDisplayModes( monitor.device, menuModes, MAX_DISPLAY_MODE_ENTRIES );
+	GadgetComboBoxReset( comboBoxResolution );
+
+	Int wanted = -1;
+	Int desktop = 0;
+	for( Int index = 0; index < menuModeCount; ++index )
+	{
+		const DisplayModeEntry &mode = menuModes[ index ];
+		UnicodeString text;
+		text.format( L"%d x %d", mode.width, mode.height );
+		GadgetComboBoxAddEntry( comboBoxResolution, text, MENU_ENTRY_COLOR );
+
+		if( mode.width == wantedWidth && mode.height == wantedHeight )
+			wanted = index;
+		if( mode.width == desktopWidth && mode.height == desktopHeight )
+			desktop = index;
+	}
+	GadgetComboBoxSetSelectedPos( comboBoxResolution, wanted >= 0 ? wanted : desktop );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Every monitor on the desktop, by its number and the name it gives itself, with the one the game
+	* is on picked. */
+//-------------------------------------------------------------------------------------------------
+static void fillMonitorList( void )
+{
+	const MonitorEntry current = findMonitor( TheGlobalData->m_monitor.str() );
+
+	menuMonitorCount = listMonitors( menuMonitors, MAX_MONITOR_ENTRIES );
+	GadgetComboBoxReset( comboBoxMonitor );
+
+	Int selected = 0;
+	for( Int index = 0; index < menuMonitorCount; ++index )
+	{
+		const MonitorEntry &monitor = menuMonitors[ index ];
+		UnicodeString text;
+		if( monitor.name[ 0 ] )
+			text.format( L"%d: %hs", monitor.number, monitor.name );
+		else
+			text.format( L"%d", monitor.number );
+		GadgetComboBoxAddEntry( comboBoxMonitor, text, MENU_ENTRY_COLOR );
+
+		if( ::_stricmp( monitor.device, current.device ) == 0 )
+			selected = index;
+	}
+	GadgetComboBoxSetSelectedPos( comboBoxMonitor, selected );
+}
+
 //-------------------------------------------------------------------------------------------------
 /** Borderless fullscreen takes the desktop's resolution and nothing else, so while it is the
 	* selected mode the resolution list has no say and says so by going grey.  Fullscreen and
@@ -1153,10 +1219,14 @@ static void saveOptions( void )
 	// which of the three the window is wearing right now, before the controls overwrite it
 	const Int oldWindowMode = TheGlobalData->m_windowMode;
 	const Bool oldVSync = TheGlobalData->m_vsync;
+	const MonitorEntry oldMonitor = findMonitor( TheGlobalData->m_monitor.str() );
 
 	//-------------------------------------------------------------------------------------------------
 	// The catalog's controls, read back into GlobalData before the pass below writes GlobalData out.
+	// The monitor goes in with them, because a borderless window takes its size from it.
 	readCatalogWidgets();
+	const MonitorEntry monitor = selectedMonitor();
+	TheWritableGlobalData->m_monitor = monitor.device;
 
 	//
 	// A catalog row writes its own GlobalData field and nothing else, so the window mode is a raw
@@ -1329,9 +1399,11 @@ static void saveOptions( void )
 	xres = TheGlobalData->m_xResolution;
 	yres = TheGlobalData->m_yResolution;
 	bitDepth = TheDisplay->getBitDepth();
-	if( TheGlobalData->m_windowMode != WINDOW_MODE_BORDERLESS
-			&& index >= 0 && index < TheDisplay->getDisplayModeCount() )
-		TheDisplay->getDisplayModeDescription( index, &xres, &yres, &bitDepth );
+	if( TheGlobalData->m_windowMode != WINDOW_MODE_BORDERLESS && index >= 0 && index < menuModeCount )
+	{
+		xres = menuModes[ index ].width;
+		yres = menuModes[ index ].height;
+	}
 
 	//
 	// Not the windowed flag: borderless and windowed are both windowed devices, and a switch between
@@ -1340,13 +1412,21 @@ static void saveOptions( void )
 	const Bool sizeChanged = ( oldDispSettings.xRes != xres || oldDispSettings.yRes != yres );
 	const Bool modeChanged = ( oldWindowMode != TheGlobalData->m_windowMode );
 	const Bool vsyncChanged = ( oldVSync != TheGlobalData->m_vsync );
+	const Bool monitorChanged = ( ::_stricmp( oldMonitor.device, monitor.device ) != 0 );
 
-	if( sizeChanged || modeChanged || vsyncChanged )
+	if( sizeChanged || modeChanged || vsyncChanged || monitorChanged )
 	{
-		if (TheDisplay->setDisplayMode(xres,yres,bitDepth,TheGlobalData->m_windowed))
+		if( !TheDisplay->setDisplayMode( xres, yres, bitDepth, TheGlobalData->m_windowed ) )
+		{
+			// the game is still where it was, so the window's next move must not go anywhere else
+			TheWritableGlobalData->m_monitor = oldMonitor.device;
+			applyWindowMode();
+		}
+		else
 		{
 			TheWritableGlobalData->m_xResolution = xres;
 			TheWritableGlobalData->m_yResolution = yres;
+			(*pref)["Monitor"] = monitor.device;
 
 			TheHeaderTemplateManager->headerNotifyResolutionChange();
 			TheMouse->mouseNotifyResolutionChange();
@@ -1673,19 +1753,22 @@ void ResolutionDrillApply( Int xres, Int yres )
 	const Int wasY = TheDisplay->getHeight();
 	const Int bitDepth = TheDisplay->getBitDepth();
 
-	// With no size asked for, take the first mode the device offers that is not the one on screen.
+	// The list the options menu is about to show, which is the monitor the game is on.
+	DisplayModeEntry modes[ MAX_DISPLAY_MODE_ENTRIES ];
+	const Int modeCount = listDisplayModes( findMonitor( TheGlobalData->m_monitor.str() ).device,
+																					modes, MAX_DISPLAY_MODE_ENTRIES );
+
+	// With no size asked for, take the first mode the monitor offers that is not the one on screen.
 	// A drill that had to be told the monitor's modes would be a drill nobody runs on a new machine.
 	if( xres <= 0 || yres <= 0 )
 	{
 		xres = yres = 0;
-		for( Int i = 0; i < TheDisplay->getDisplayModeCount(); i++ )
+		for( Int i = 0; i < modeCount; i++ )
 		{
-			Int mx, my, mb;
-			TheDisplay->getDisplayModeDescription( i, &mx, &my, &mb );
-			if( mx >= 800 && my >= 600 && ( mx != wasX || my != wasY ) )
+			if( modes[ i ].width != wasX || modes[ i ].height != wasY )
 			{
-				xres = mx;
-				yres = my;
+				xres = modes[ i ].width;
+				yres = modes[ i ].height;
 				break;
 			}
 		}
@@ -1697,14 +1780,12 @@ void ResolutionDrillApply( Int xres, Int yres )
 		return;
 	}
 
-	// which entry of the dropdown that is: the combo is filled straight off the device's mode list,
-	// so the entry index and the mode index are the same number
+	// which entry of the dropdown that is: the combo is filled straight off the same list, so the
+	// entry index and the mode index are the same number
 	Int modeIndex = -1;
-	for( Int m = 0; m < TheDisplay->getDisplayModeCount(); m++ )
+	for( Int m = 0; m < modeCount; m++ )
 	{
-		Int mx, my, mb;
-		TheDisplay->getDisplayModeDescription( m, &mx, &my, &mb );
-		if( mx == xres && my == yres )
+		if( modes[ m ].width == xres && modes[ m ].height == yres )
 		{
 			modeIndex = m;
 			break;
@@ -1712,7 +1793,7 @@ void ResolutionDrillApply( Int xres, Int yres )
 	}
 	if( modeIndex < 0 )
 	{
-		DEBUG_LOG(("RESDRILL: %dx%d is not a mode this device offers\n", xres, yres));
+		DEBUG_LOG(("RESDRILL: %dx%d is not a mode this monitor offers\n", xres, yres));
 		return;
 	}
 
@@ -2084,6 +2165,8 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 	comboBoxAntiAliasing   = TheWindowManager->winGetWindowFromId( NULL, comboBoxAntiAliasingID );
 	comboBoxResolutionID   = TheNameKeyGenerator->nameToKey( AsciiString( "OptionsMenu.wnd:ComboBoxResolution" ) );
 	comboBoxResolution     = TheWindowManager->winGetWindowFromId( NULL, comboBoxResolutionID );
+	comboBoxMonitorID      = TheNameKeyGenerator->nameToKey( AsciiString( "OptionsMenu.wnd:ComboBoxMonitor" ) );
+	comboBoxMonitor        = TheWindowManager->winGetWindowFromId( NULL, comboBoxMonitorID );
 	comboBoxDetailID			 = TheNameKeyGenerator->nameToKey( AsciiString( "OptionsMenu.wnd:ComboBoxDetail" ) );
 	comboBoxDetail		   = TheWindowManager->winGetWindowFromId( NULL, comboBoxDetailID );
 
@@ -2312,45 +2395,9 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 	}
 	GadgetComboBoxSetSelectedPos(comboBoxAntiAliasing, val);
 
-	// get resolution from saved preferences file
-	AsciiString selectedResolution = (*pref) ["Resolution"];
-	Int selectedXRes=800,selectedYRes=600;
-	Int selectedResIndex=-1;
-	Int defaultResIndex=0;	//index of default video mode that should always exist
-	if (!selectedResolution.isEmpty())
-	{	//try to parse 2 integers out of string
-		if (sscanf(selectedResolution.str(),"%d%d", &selectedXRes, &selectedYRes) != 2)
-		{	selectedXRes=800; selectedYRes=600;
-		}
-	}
-
-	// populate resolution modes
-	GadgetComboBoxReset(comboBoxResolution);
-	Int numResolutions = TheDisplay->getDisplayModeCount();
-	// i is used after the loop; VC6 for-scope let it escape.
-	Int i;
-	for( i = 0; i < numResolutions; ++i )
-	{	Int xres,yres,bitDepth;
-		TheDisplay->getDisplayModeDescription(i,&xres,&yres,&bitDepth);
-		str.format(L"%d x %d",xres,yres);
-		GadgetComboBoxAddEntry( comboBoxResolution, str, color);
-		if (xres == 800 && yres == 600)	//keep track of default mode in case we need it.
-			defaultResIndex=i;
-		if (xres == selectedXRes && yres == selectedYRes)
-			selectedResIndex=i;
-	}
-
-	if (selectedResIndex == -1)	//check if saved mode no longer available
-	{	//pick default resolution
-		selectedXRes = 800;
-		selectedXRes = 600;
-		selectedResIndex = defaultResIndex;
-	}
-
-	TheWritableGlobalData->m_xResolution = selectedXRes;
-	TheWritableGlobalData->m_yResolution = selectedYRes;
-
-	GadgetComboBoxSetSelectedPos( comboBoxResolution, selectedResIndex );
+	// the monitor the game is on, and the size it is showing there
+	fillMonitorList();
+	fillResolutionList( selectedMonitor(), TheDisplay->getWidth(), TheDisplay->getHeight() );
 
 	// set the display detail
 	GadgetComboBoxReset(comboBoxDetail);
@@ -2716,6 +2763,16 @@ WindowMsgHandledType OptionsMenuSystem( GameWindow *window, UnsignedInt msg,
 					Int index = CUSTOMDETAIL;
 					GadgetComboBoxGetSelectedPos( comboBoxDetail, &index );
 					showDetailPreset( index );
+				}
+				else if( controlID == comboBoxMonitorID )
+				{
+					// another monitor offers other sizes; keep the picked one where it has it
+					Int index = -1;
+					GadgetComboBoxGetSelectedPos( comboBoxResolution, &index );
+					const Bool picked = ( index >= 0 && index < menuModeCount );
+					fillResolutionList( selectedMonitor(),
+															picked ? menuModes[ index ].width : TheDisplay->getWidth(),
+															picked ? menuModes[ index ].height : TheDisplay->getHeight() );
 				}
 				else if( isDetailPresetCatalogControl( control ) )
 				{

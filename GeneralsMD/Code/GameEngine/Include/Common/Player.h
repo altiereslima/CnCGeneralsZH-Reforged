@@ -67,6 +67,25 @@
 
 // ----------------------------------------------------------------------------------------------
 
+/// what a MSG_CHEAT asks for.  The first five act once, the rest toggle a bit on the Player.
+enum CheatKind
+{
+	CHEAT_MONEY,
+	CHEAT_GENERAL_POINTS,
+	CHEAT_RANK_UP,
+	CHEAT_HEROIC,
+	CHEAT_REVEAL_MAP,
+	CHEAT_INFINITE_POWER,
+	CHEAT_NO_COOLDOWN,
+	CHEAT_GOD_MODE,
+	CHEAT_INSTANT_BUILD,
+	CHEAT_ONE_HIT_KILL,
+
+	CHEAT_KIND_COUNT
+};
+
+// ----------------------------------------------------------------------------------------------
+
 class BuildListInfo;
 class PolygonTrigger;
 class ThingTemplate;
@@ -439,11 +458,13 @@ public:
 
 #endif
 
-#if defined(_DEBUG) || defined(_INTERNAL) || defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
+	/// the console's single-player cheats; only the toggles are kept here, the one-shots just act
+	Bool hasCheat( CheatKind kind ) const { return BitTest( m_cheats, 1 << kind ); }
+	void toggleCheat( CheatKind kind ) { m_cheats ^= 1 << kind; }
+
 	/// No time building cheat key
-	void toggleInstantBuild(){ m_DEMO_instantBuild = !m_DEMO_instantBuild; }
-	Bool buildsInstantly() const { return m_DEMO_instantBuild; }
-#endif
+	void toggleInstantBuild(){ toggleCheat( CHEAT_INSTANT_BUILD ); }
+	Bool buildsInstantly() const { return hasCheat( CHEAT_INSTANT_BUILD ); }
 
 	///< Power just changed at all.  Didn't make two functions so you can't forget to undo something you didin one of them.
 	///< @todo Can't do edge trigger until after demo; make things check for power on creation
@@ -919,9 +940,7 @@ private:
 	Bool									m_DEMO_freeBuild;				///< Can I build everything for no money?
 #endif
 
-#if defined(_DEBUG) || defined(_INTERNAL) || defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
-	Bool									m_DEMO_instantBuild;		///< Can I build anything in one frame?
-#endif
+	UnsignedInt						m_cheats;								///< one bit per toggled CheatKind; not saved, a load starts clean
 
 	ScoreKeeper						m_scoreKeeper;					///< The local scorekeeper for this player
 

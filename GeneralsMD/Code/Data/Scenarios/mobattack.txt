@@ -1,0 +1,27 @@
+# Three angry mobs march across Alpine Assault and fight a platoon at the other end.
+#
+# mob100.txt marches mobs at empty ground, which says what the formation costs but nothing about
+# what it does when the shooting starts. A mob member stops holding its place the moment it picks a
+# target of its own, and the question this answers is whether the crowd that arrives is still a
+# crowd afterwards: who breaks off, how far, and how many of the thirty-three come home.
+#
+#   generals.exe -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover
+#     -side 0 FactionGLA -side 1 FactionAmerica -seed 1 -maxframes 1800
+#     -scenario mobattack -screenshot <frame> -camera <x> <y> -logPrefix mobattack_
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn      0  GLAInfantryAngryMobNexus   3  760 920   90
+30    spawn      1  AmericaInfantryRanger     15  1400 1400 30
+
+120   attackmove 0  GLAInfantryAngryMobNexus      1400 1400
+
+# Everything seat 0 owns, nexuses and members alike, counted from the frame the march starts, so
+# the total is the whole mob and not the survivors.  "first after" is the frame the leading member
+# reached the Rangers, "last after" the frame the slowest one did, and the gap between them is the
+# formation's cohesion measured in frames.
+121   arrive     0  *  1400 1400 250
+
+# The same set counted again over the end of the fight, which says where the survivors stand.
+1500  arrive     0  *  1400 1400 250

@@ -734,6 +734,30 @@ public:
 		TRUE when there was one to forget. */
 	Bool clearSpecialPowerShortcutRow( void );
 
+	/** What a press would do this instant, for whoever shows the bar somewhere other than the
+		screen - the hardware lighting is the one that does.  These run the same resolution the two
+		press calls above run, chords and all, and stop short of pressing: a second copy of that
+		logic kept elsewhere is a copy that goes stale, and this file has been bitten by one already.
+		button comes back as the window the press would reach.  For a press that only arms a chord
+		it is the first window in the armed group that would take the second key, or NULL when the
+		group holds nothing to press, so a caller can tell a chord worth starting from an empty one. */
+	enum PressOutcome
+	{
+		PRESS_DOES_NOTHING,		///< no button behind this key right now
+		PRESS_ARMS_CHORD,			///< first half of a two key chord
+		PRESS_IS_REFUSED,			///< a button is there and it is disabled
+		PRESS_FIRES						///< the button would take it
+	};
+	PressOutcome peekCommandButtonPress( Int index, GameWindow **button );
+	PressOutcome peekSpecialPowerShortcutPress( Int index, GameWindow **button );
+
+	/** Where a press lands: a slot index, or one of these two.  The two functions below are the
+		whole decision and touch no window, so the tests can hold every row of it; the press calls
+		and the peek calls gather what is on the bar and ask them. */
+	enum { SLOT_NOTHING = -1, SLOT_ARMS_CHORD = -2 };
+	static Int resolveGridPress( Int index, Int chordGroup, Bool hasStructures, Bool indexIsStructure );
+	static Int resolveTrayPress( Int index, Int armedRow, Int visibleSlots );
+
 	/** The promotion screen answers the group keys while it is open: 1 to 5 name its five columns.
 		A promotion point is spent for good, so it takes two presses like the general's powers do -
 		the first marks the next science the column will sell you, the same key again buys it.  A
@@ -1087,7 +1111,12 @@ protected:
 	void updateSpecialPowerShortcut( void );
 	void arrangeSpecialPowerShortcutGrid( void );	///< re-lay the layout's single column as rows of SPECIAL_POWER_SHORTCUT_COLS
 	Int countVisibleSpecialPowerShortcuts( void );	///< how many slots carry a power right now, which is not the command set's size
-	
+
+	/** Where a press lands with the chords as they stand.  The press calls and the peek calls both
+		go through these, which is the point of them. */
+	Int resolveCommandSlot( Int index, Bool *hasStructures ) const;
+	Int resolveSpecialPowerShortcutSlot( Int index );
+
 	static const Image* calculateVeterancyOverlayForThing( const ThingTemplate *thingTemplate );
 	static const Image* calculateVeterancyOverlayForObject( const Object *obj );
 

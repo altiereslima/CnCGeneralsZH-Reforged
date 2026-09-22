@@ -250,6 +250,17 @@ static void append_normal_mapped_lighting(std::string & hlsl, unsigned coordinat
 		" * pow(saturate(dot(bumped, normalize(to_light + to_eye))), NormalMapParameters.y);\n"
 		"    }\n"
 		"    highlight *= normal_texel.a * NormalMapParameters.z;\n"
+		/* What makes metal read as metal from a camera this far out is not the sun's own dot on it,
+			 which is one small spot, but the sky it mirrors over its whole flank.  There is no cubemap
+			 here and none is needed: the sky over this game is a gradient and a sun, so the mirrored
+			 direction is turned into a colour rather than looked up.  Sky.rgb is the map's own light,
+			 Sky.a how much of it metal returns, and the share grows towards the grazing angles where a
+			 real surface turns into a mirror.  The gloss map gates it, so cloth and sand get none. */
+		"    float3 mirrored = reflect(-to_eye, bumped);\n"
+		"    float sky_height = saturate(dot(mirrored, SkyUp.xyz) * 0.5 + 0.5);\n"
+		"    float3 sky = lerp(Sky.rgb * SkyUp.w, Sky.rgb, sky_height);\n"
+		"    float grazing = pow(1.0 - saturate(dot(bumped, to_eye)), 4.0);\n"
+		"    highlight += sky * Sky.a * normal_texel.a * (0.3 + 0.7 * grazing);\n"
 		"    input.Diffuse.rgb = saturate(input.LitMaterial * bumped_light + input.LitBase);\n",
 		coordinate_set, coordinate_set, coordinate_set, NORMAL_MAPPED_LIGHTS);
 	hlsl += line;
@@ -355,7 +366,11 @@ bool CombinerShader_Generate(const CombinerDescription & description, CombinerSh
 			"    float4 TextureFactor;\n"
 			"    float4 FogColour;\n"
 			"    float4 AlphaReference;\n";
-		if (description.NormalMapped) {
+		// A shader declares a prefix of the block the backend uploads, so a field is found by what
+		// comes before it and not by its name.  The shadow fields sit behind the normal mapped ones
+		// and the terrain's sun, so a program that reads them has to declare those too, used or
+		// not: without them a shadow matrix lands where the first light's direction is.
+		if (description.NormalMapped || description.ShadowReceiving) {
 			char line[256];
 			snprintf(line, sizeof(line),
 				"    float4 NormalLightDirection[%u];\n"
@@ -364,9 +379,26 @@ bool CombinerShader_Generate(const CombinerDescription & description, CombinerSh
 				NORMAL_MAPPED_LIGHTS, NORMAL_MAPPED_LIGHTS);
 			hlsl += line;
 		}
+		if (description.NormalMapped || description.ShadowReceiving) {
+			hlsl +=
+				"    float4 TerrainSunDirection;\n"
+				// row_major for the reason the vertex half gives: every matrix the engine has is a
+				// D3D9 matrix and D3D9 stores one by rows.
+				"    row_major float4x4 ShadowFromClip;\n"
+				"    float4 ShadowParameters;\n"
+				"    float4 ShadowViewport;\n"
+				"    float4 ShadowSoftness;\n"
+				// The sky a metal surface mirrors, and which way up it is in camera space.  Last in
+				// the block, so a program that wants it declares everything in front of it.
+				"    float4 Sky;\n"
+				"    float4 SkyUp;\n";
+		}
 		hlsl += "};\n";
 		if (description.NormalMapped) {
 			hlsl += "Texture2D NormalMap : register(t4);\n";
+		}
+		if (description.ShadowReceiving) {
+			hlsl += SHADOW_SAMPLING;
 		}
 	}
 	else {
@@ -424,6 +456,11 @@ bool CombinerShader_Generate(const CombinerDescription & description, CombinerSh
 	hlsl += body;
 	if (description.NormalMapped) {
 		hlsl += "    current.rgb = saturate(current.rgb + highlight);\n";
+	}
+
+	// Before the fog: a shadow is a thing in the world and the fog is between the world and the eye.
+	if (description.ShadowReceiving) {
+		hlsl += SHADOW_APPLY;
 	}
 
 	if (target == COMBINER_SHADER_TARGET_D3D11
@@ -498,6 +535,9 @@ std::string CombinerShader_Key(const CombinerDescription & description)
 	key += CombinerShader_Pipeline_Key(description.PixelPipeline);
 	if (description.NormalMapped) {
 		key += ":N";
+	}
+	if (description.ShadowReceiving) {
+		key += ":S";
 	}
 	return key;
 }

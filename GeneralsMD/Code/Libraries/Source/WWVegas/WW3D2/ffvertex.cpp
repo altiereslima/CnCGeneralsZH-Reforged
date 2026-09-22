@@ -102,7 +102,7 @@ static bool material_source_expression(DWORD source, const char * material_const
 	}
 }
 
-static void append_light(std::string & body, unsigned index, DWORD type)
+static void append_light(std::string & body, unsigned index, DWORD type, const char * accumulator)
 {
 	char line[1024];
 
@@ -147,8 +147,8 @@ static void append_light(std::string & body, unsigned index, DWORD type)
 
 	snprintf(line, sizeof(line),
 		"        float lambert = max(dot(view_normal, to_light), 0.0);\n"
-		"        diffuse_light += Light%uDiffuse.rgb * lambert * attenuation;\n",
-		index);
+		"        %s += Light%uDiffuse.rgb * lambert * attenuation;\n",
+		accumulator, index);
 	body += line;
 
 	// The specular term is Blinn's half vector, which is what D3D9's fixed-function pipeline uses
@@ -504,11 +504,17 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 		//
 		// A light's own ambient is not in that second sum because DX11BackendClass::Set_Light does
 		// not carry one; every light W3D creates leaves it black.
+		// A normal mapped draw lights its directional lights per pixel.  A point or spot light - the
+		// flash of a gun, the glow of a fire - stays per vertex and is summed on its own, so it can
+		// be handed to the pixel half as part of the base it adds the bumped light to.
 		body += "    float3 diffuse_light = float3(0.0, 0.0, 0.0);\n";
+		body += "    float3 local_light = float3(0.0, 0.0, 0.0);\n";
 		body += "    float3 specular_light = float3(0.0, 0.0, 0.0);\n";
 		for (unsigned index = 0; index < description.LightCount; ++index) {
-			append_light(body, index, description.Lights[index].Type);
+			const DWORD type = description.Lights[index].Type;
+			append_light(body, index, type, type == D3DLIGHT_DIRECTIONAL ? "diffuse_light" : "local_light");
 		}
+		body += "    diffuse_light += local_light;\n";
 
 		std::string diffuse;
 		std::string ambient;
@@ -529,8 +535,8 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 		if (description.NormalMapped) {
 			body += "    output.ViewPosition = view_position.xyz;\n";
 			body += "    output.ViewNormal = view_normal;\n";
-			body += "    output.LitBase = " + ambient + ".rgb * GlobalAmbient.rgb + " + emissive
-				+ ".rgb;\n";
+			body += "    output.LitBase = " + diffuse + ".rgb * local_light + " + ambient
+				+ ".rgb * GlobalAmbient.rgb + " + emissive + ".rgb;\n";
 			body += "    output.LitMaterial = " + diffuse + ".rgb;\n";
 		}
 

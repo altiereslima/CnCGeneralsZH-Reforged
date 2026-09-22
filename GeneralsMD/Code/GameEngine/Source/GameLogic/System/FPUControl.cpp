@@ -41,28 +41,26 @@ void setFPMode( void )
 		 state rather than only the two fields written below. */
 	_fpreset();
 
-	/* Rounding to nearest, and 24-bit (single) precision.  The precision could be anything as long
-		 as it is the same everywhere; 24 bits is what Direct3D leaves behind anyway, so asking for
-		 it costs nothing and removes one way for the two to disagree.
+	/* Rounding to nearest.  EA also asked for 24-bit precision here, which was the x87's way of
+		 computing a float at a float's width; SSE does that by itself and the field is gone.
 
 		 EA read the current word with _statusfp(), which returns the *status* word - the sticky
 		 exception flags - not the control word.  It happened to be harmless, because the mask below
-		 keeps everything except the precision and rounding fields and no status flag lands in
-		 either.  _controlfp(0, 0) is what they meant: it reads the control word without writing. */
+		 keeps everything except the rounding field and no status flag lands in it.
+		 _controlfp(0, 0) is what they meant: it reads the control word without writing. */
 	UnsignedInt curVal = _controlfp( 0, 0 );
 	UnsignedInt newVal = curVal;
 	newVal = (newVal & ~_MCW_RC) | (_RC_NEAR & _MCW_RC);
-	newVal = (newVal & ~_MCW_PC) | (_PC_24   & _MCW_PC);
 
-	_controlfp( newVal, _MCW_PC | _MCW_RC );
+	_controlfp( newVal & FP_MODE_FIELDS, FP_MODE_FIELDS );
 }
 
 UnsignedInt getFPMode( void )
 {
-	return _controlfp( 0, 0 ) & (_MCW_PC | _MCW_RC);
+	return _controlfp( 0, 0 ) & FP_MODE_FIELDS;
 }
 
 UnsignedInt expectedFPMode( void )
 {
-	return (_PC_24 & _MCW_PC) | (_RC_NEAR & _MCW_RC);
+	return (_RC_NEAR & _MCW_RC) & FP_MODE_FIELDS;
 }

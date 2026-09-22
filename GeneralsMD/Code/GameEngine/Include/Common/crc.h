@@ -66,54 +66,18 @@ public:
     if (!buf||len<1)
       return;
     
-    /* C++ version left in for reference purposes
-	  for (UnsignedByte *uintPtr=(UnsignedByte *)buf;len>0;len--,uintPtr++)
+    // EA wrote this in assembly and kept the C++ it was verified against in a comment; the
+    // assembly is gone and this is that C++.  shl sets the carry from the top bit and adc adds it
+    // back with the data byte, which is exactly the two lines below.  Every multiplayer and replay
+    // CRC in the game goes through here, so it has to stay bit identical: 32-bit wraparound
+    // arithmetic on UnsignedInt is what does that.
+    for (const UnsignedByte *bytePtr=(const UnsignedByte *)buf; len>0; --len, ++bytePtr)
     {
-    	int hibit;
-    	if (crc & 0x80000000) 
-      {
-		    hibit = 1;
-	    } 
-      else 
-      {
-		    hibit = 0;
-	    }
-
-	    crc <<= 1;
-	    crc += *uintPtr;
-	    crc += hibit;
+      const UnsignedInt hibit = (crc & 0x80000000) ? 1 : 0;
+      crc <<= 1;
+      crc += *bytePtr;
+      crc += hibit;
     }
-    */
-
-    // ASM version, verified by comparing resulting data with C++ version data
-    unsigned *crcPtr=&crc;
-    // Same rule as fast_float_trunc in BaseType.h: EBX, ESI and EDI belong to the
-    // caller, and this block uses all three.  Nothing has crashed on it yet, but that
-    // is luck -- whichever of them the compiler happens to hold a live value in is
-    // gone when the block ends.
-    _asm
-    {
-      push ebx
-      push esi
-      push edi
-      mov esi,[buf]
-      mov ecx,[len]
-      dec ecx
-      mov edi,[crcPtr]
-      mov ebx,dword ptr [edi]
-      xor eax,eax
-    lp:
-      mov al,byte ptr [esi]
-      shl ebx,1
-      inc esi
-      adc ebx,eax
-      dec ecx
-      jns lp
-      mov dword ptr [edi],ebx
-      pop edi
-      pop esi
-      pop ebx
-    };
   }
 
   /// Clears the CRC to 0

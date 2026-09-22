@@ -22,7 +22,7 @@
 // $Revision: #1 $
 // $DateTime: 2003/07/03 11:55:26 $
 //
-// ©2003 Electronic Arts
+// ï¿½2003 Electronic Arts
 //
 // Unhandled exception handler
 //////////////////////////////////////////////////////////////////////////////
@@ -105,12 +105,18 @@ const char *DebugExceptionhandler::GetExceptionType(struct _EXCEPTION_POINTERS *
   #undef EX
 }
 
+// The faulting instruction's address.
+static size_t ContextIP(const struct _CONTEXT &ctx)
+{
+  return (size_t)ctx.Rip;
+}
+
 void DebugExceptionhandler::LogExceptionLocation(Debug &dbg, struct _EXCEPTION_POINTERS *exptr)
 {
   struct _CONTEXT &ctx=*exptr->ContextRecord;
 
   char buf[512];
-  DebugStackwalk::Signature::GetSymbol(ctx.Eip,buf,sizeof(buf));
+  DebugStackwalk::Signature::GetSymbol(ContextIP(ctx),buf,sizeof(buf));
   dbg << "Exception occured at\n" << buf << ".";
 }
 
@@ -120,70 +126,30 @@ void DebugExceptionhandler::LogRegisters(Debug &dbg, struct _EXCEPTION_POINTERS 
 
   dbg << Debug::FillChar('0')
       << Debug::Hex()
-      <<  "EAX:" << Debug::Width(8) << ctx.Eax 
-      << " EBX:" << Debug::Width(8) << ctx.Ebx
-      << " ECX:" << Debug::Width(8) << ctx.Ecx << "\n"
-      <<  "EDX:" << Debug::Width(8) << ctx.Edx 
-      << " ESI:" << Debug::Width(8) << ctx.Esi
-      << " EDI:" << Debug::Width(8) << ctx.Edi << "\n"
-      <<  "EIP:" << Debug::Width(8) << ctx.Eip 
-      << " ESP:" << Debug::Width(8) << ctx.Esp
-      << " EBP:" << Debug::Width(8) << ctx.Ebp << "\n"
-      <<  "Flags:" << Debug::Bin() << Debug::Width(32) << ctx.EFlags << Debug::Hex() << "\n"
-      <<  "CS:" << Debug::Width(4) << ctx.SegCs
-      << " DS:" << Debug::Width(4) << ctx.SegDs
-      << " SS:" << Debug::Width(4) << ctx.SegSs
-      << "\nES:" << Debug::Width(4) << ctx.SegEs
-      << " FS:" << Debug::Width(4) << ctx.SegFs
-      << " GS:" << Debug::Width(4) << ctx.SegGs << "\n" << Debug::FillChar() << Debug::Dec();
+      <<  "RIP:" << Debug::Width(16) << ctx.Rip
+      << " RSP:" << Debug::Width(16) << ctx.Rsp
+      << " RBP:" << Debug::Width(16) << ctx.Rbp << "\n"
+      <<  "RAX:" << Debug::Width(16) << ctx.Rax
+      << " RBX:" << Debug::Width(16) << ctx.Rbx
+      << " RCX:" << Debug::Width(16) << ctx.Rcx << "\n"
+      <<  "RDX:" << Debug::Width(16) << ctx.Rdx
+      << " RSI:" << Debug::Width(16) << ctx.Rsi
+      << " RDI:" << Debug::Width(16) << ctx.Rdi << "\n"
+      << Debug::Dec() << Debug::FillChar(' ');
 }
 
 void DebugExceptionhandler::LogFPURegisters(Debug &dbg, struct _EXCEPTION_POINTERS *exptr)
 {
   struct _CONTEXT &ctx=*exptr->ContextRecord;
 
-  if (!(ctx.ContextFlags&CONTEXT_FLOATING_POINT))
-  {
-    dbg << "FP registers not available\n";
-    return;
-  }
-
-  FLOATING_SAVE_AREA &flt=ctx.FloatSave;
-  dbg << Debug::Bin() << Debug::FillChar('0')
-      << "CW:" << Debug::Width(16) << (flt.ControlWord&0xffff) << "\n"
-      << "SW:" << Debug::Width(16) << (flt.StatusWord&0xffff) << "\n"
-      << "TW:" << Debug::Width(16) << (flt.TagWord&0xffff) << "\n"
-      << Debug::Hex() 
-      << "ErrOfs:      " << Debug::Width(8) << flt.ErrorOffset
-      << " ErrSel:  "    << Debug::Width(8) << flt.ErrorSelector << "\n"
-      << "DataOfs:     " << Debug::Width(8) << flt.DataOffset
-      << " DataSel: "    << Debug::Width(8) << flt.DataSelector << "\n"
-      // Cr0NpxState was renamed to Spare0 in the modern Windows SDK's
-      // _FLOATING_SAVE_AREA; same offset, same contents.
-      << "Cr0NpxState: " << Debug::Width(8) << flt.Spare0 << "\n";
-
-  for (unsigned k=0;k<SIZE_OF_80387_REGISTERS/10;++k)
-  {
-    dbg << Debug::Dec() << "ST(" << k << ") ";
-    dbg.SetPrefixAndRadix("",16);
-
-    BYTE *value=flt.RegisterArea+k*10;
-    for (unsigned i=0;i<10;i++)
-      dbg << Debug::Width(2) << value[i];
-
-    double fpVal;
-
-    // convert from temporary real (10 byte) to double
-    _asm
-    {
-      mov eax,value
-      fld tbyte ptr [eax]
-      fstp qword ptr [fpVal]
-    }
-
-    dbg << " " << fpVal << "\n";
-  }
-  dbg << Debug::FillChar() << Debug::Dec();
+  // There is no x87 save area to walk: every float the game computes is in an SSE register, and
+  // the four the calling convention passes arguments in are the ones worth naming.
+  dbg << Debug::FillChar('0') << Debug::Hex()
+      <<  "XMM0:" << Debug::Width(16) << ctx.Xmm0.Low
+      << " XMM1:" << Debug::Width(16) << ctx.Xmm1.Low << "\n"
+      <<  "XMM2:" << Debug::Width(16) << ctx.Xmm2.Low
+      << " XMM3:" << Debug::Width(16) << ctx.Xmm3.Low << "\n"
+      << Debug::Dec() << Debug::FillChar(' ');
 }
 
 // include exception dialog box
@@ -198,7 +164,7 @@ static char regInfo[1024],verInfo[256];
 // and this saves us from doing a stack walk twice
 static DebugStackwalk::Signature sig;
 
-static BOOL CALLBACK ExceptionDlgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+static INT_PTR CALLBACK ExceptionDlgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
   switch(uMsg)
   {
@@ -243,7 +209,7 @@ static BOOL CALLBACK ExceptionDlgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 
   // address
   struct _CONTEXT &ctx=*exPtrs->ContextRecord;
-  DebugStackwalk::Signature::GetSymbol(ctx.Eip,regInfo,sizeof(regInfo));
+  DebugStackwalk::Signature::GetSymbol(ContextIP(ctx),regInfo,sizeof(regInfo));
   SendDlgItemMessage(hWnd,102,WM_SETTEXT,0,(LPARAM)regInfo);
 
   // stack 
@@ -393,7 +359,7 @@ LONG __stdcall DebugExceptionhandler::ExceptionFilter(struct _EXCEPTION_POINTERS
   dbg.m_stackWalk.StackWalk(sig,pExPtrs->ContextRecord);
   dbg << sig << "\n";
 
-  dbg << "Bytes around EIP:" << Debug::MemDump::Char(((char *)(pExPtrs->ContextRecord->Eip))-32,80);
+  dbg << "Bytes around EIP:" << Debug::MemDump::Char(((char *)(pExPtrs->ExceptionRecord->ExceptionAddress))-32,80);
 
   dbg.FlushOutput();
 

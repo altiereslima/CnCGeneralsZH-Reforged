@@ -10,8 +10,8 @@ build-perf/
 __pycache__/
 *.pyc
 
-# Local copy of build.example.bat, tweaked per machine
-build.bat
+# Per-machine overrides for build.bat, read after its defaults
+build.local.bat
 
 CLAUDE.md
 AGENTS.md
@@ -22,3 +22,4 @@ AGENTS.md
 # Layouts pulled out of WindowZH.big to feed Tools/optionsmenu_layout.py. That is game data and
 # does not belong in the repo; re-extract it with Tools/bigfile.py when a layout has to be redone.
 **/Tools/wnd/
+build64/

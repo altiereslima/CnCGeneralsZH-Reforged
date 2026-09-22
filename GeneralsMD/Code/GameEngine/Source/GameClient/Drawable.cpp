@@ -72,6 +72,7 @@
 #include "GameLogic/ScriptEngine.h"
 #include "GameLogic/Weapon.h"
 
+#include "GameClient/CinemaDirector.h"
 #include "GameClient/Anim2D.h"
 #include "GameClient/Display.h"
 #include "GameClient/DisplayStringManager.h"
@@ -1364,7 +1365,7 @@ void Drawable::updateDrawable( void )
 		if (m_flashCount > 0  && (TheGameClient->getFrame() % DRAWABLE_FRAMES_PER_FLASH) == 0)
 		{
 			RGBColor tmp;
-			tmp.setFromInt(m_flashColor);
+			tmp.setFromInt(clientColor(m_flashColor));
 			colorFlash(&tmp);
 			m_flashCount--;
 		}
@@ -1493,7 +1494,7 @@ void Drawable::flashAsSelected( const RGBColor *color ) ///< drawable takes care
 		{
 			RGBColor tempColor; 
 			if (TheGlobalData->m_selectionFlashHouseColor)
-				tempColor.setFromInt(obj->getIndicatorColor());
+				tempColor.setFromInt(clientColor(obj->getIndicatorColor()));
 			else
 				tempColor.setFromInt(0xffffffff);//white
 
@@ -2952,6 +2953,13 @@ Bool Drawable::drawsAnyUIText( void )
 // ------------------------------------------------------------------------------------------------
 void Drawable::drawIconUI( void )
 {
+	/* -cinema takes the interface off, and these are interface: the health bar, the rank chevrons a
+		 promotion puts up, the healing cross, the ammo pips, the capture clock and the captions.  The
+		 gate is here rather than on TheGameLogic's own m_drawIconUI because that one is logic state,
+		 saved with the game and carried in the network snapshot; footage must not touch it. */
+	if( CinemaDirector_hidesHud() )
+		return;
+
 	if( TheGameLogic->getDrawIconUI() && (TheScriptEngine->getFade()==ScriptEngine::FADE_NONE) )
 	{
 		IRegion2D healthBarRegionStorage;
@@ -4176,6 +4184,7 @@ void Drawable::drawCaptureProgress( void )
 // ------------------------------------------------------------------------------------------------
 /** Draw health bar information for drawable */
 // ------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
 void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 {
 	if (!healthBarRegion)
@@ -4209,7 +4218,10 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		// building is worth capturing, bridges are STRUCTURE too - and so does anything that can
 		// move.
 		//
+		// A booby trap has one hit point and cannot be shot, so its bar was a full green line
+		// forever, over something that is meant to be hidden.
 		if( obj->isKindOf( KINDOF_PROJECTILE ) ||
+				obj->isKindOf( KINDOF_BOOBY_TRAP ) ||
 				obj->isKindOf( KINDOF_INERT ) ||
 				obj->isKindOf( KINDOF_CLEANUP_HAZARD ) ||
 				obj->isKindOf( KINDOF_UNATTACKABLE ) ||

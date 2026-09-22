@@ -78,10 +78,10 @@ static void AILCALLBACK setSampleCompleted( HSAMPLE sampleCompleted );
 static void AILCALLBACK set3DSampleCompleted( H3DSAMPLE sample3DCompleted );
 static void AILCALLBACK setStreamCompleted( HSTREAM streamCompleted );
 
-static U32 AILCALLBACK streamingFileOpen(char const *fileName, U32 *file_handle);
-static void AILCALLBACK streamingFileClose(U32 fileHandle);
-static S32 AILCALLBACK streamingFileSeek(U32 fileHandle, S32 offset, U32 type);
-static U32 AILCALLBACK streamingFileRead(U32 fileHandle, void *buffer, U32 bytes);
+static U32 AILCALLBACK streamingFileOpen(char const *fileName, AILFILEHANDLE *file_handle);
+static void AILCALLBACK streamingFileClose(AILFILEHANDLE fileHandle);
+static S32 AILCALLBACK streamingFileSeek(AILFILEHANDLE fileHandle, S32 offset, U32 type);
+static U32 AILCALLBACK streamingFileRead(AILFILEHANDLE fileHandle, void *buffer, U32 bytes);
 
 //-------------------------------------------------------------------------------------------------
 /* "Is this sound one of these?", asked of a sound that is already playing or already queued.
@@ -497,9 +497,83 @@ void MilesAudioManager::reset()
 }
 
 //-------------------------------------------------------------------------------------------------
+/** -wav <from> <to> [name]: record the finished mix over a range of logic frames.
+	*
+	* The mixer plays at the speed a person hears, and -video saves frames at the speed the disk takes
+	* them, so one run cannot make both halves of a film.  This is the other run: the same seed and the
+	* same shot list play the same match, and what comes out lines up with the picture as long as the
+	* run held 30 logic frames a second.  That is the one thing worth checking, so the closing line says
+	* how much sound was recorded against how much the picture is going to be.
+	*
+	* A run that is not pacing itself cannot be recorded from at all, which is why -headless and a
+	* lifted frame limit are refused here rather than producing something quietly wrong. */
+static void updateSoundCapture( void )
+{
+	static Bool recording = FALSE;
+	static Bool finished = FALSE;
+	static __int64 startTicks = 0;
+
+	if (TheGlobalData->m_wavEndFrame <= 0 || finished)
+		return;
+	if (TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame())
+		return;
+
+	if (TheGlobalData->m_headless || !TheGlobalData->m_useFpsLimit)
+	{
+		finished = TRUE;
+		DEBUG_LOG(("AUDIO: -wav needs a run that plays at the speed a person hears it, so -headless "
+			"and -noFPSLimit record nothing\n"));
+		return;
+	}
+
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	if (frame < (UnsignedInt)TheGlobalData->m_wavStartFrame)
+		return;
+
+	if (!recording)
+	{
+		char directory[_MAX_PATH];
+		snprintf(directory, ARRAY_SIZE(directory), "%sVideos", TheGlobalData->getPath_UserData().str());
+		CreateDirectoryA(directory, NULL);
+
+		char pathname[_MAX_PATH];
+		snprintf(pathname, ARRAY_SIZE(pathname), "%s\\%s.wav", directory, TheGlobalData->m_wavName.str());
+		if (!AIL_ex_start_capture(pathname))
+		{
+			finished = TRUE;
+			DEBUG_LOG(("AUDIO: nothing could be recorded into %s\n", pathname));
+			return;
+		}
+
+		recording = TRUE;
+		QueryPerformanceCounter((LARGE_INTEGER *)&startTicks);
+		DEBUG_LOG(("AUDIO: recording logic frames %d to %d into %s\n",
+			TheGlobalData->m_wavStartFrame, TheGlobalData->m_wavEndFrame, pathname));
+		return;
+	}
+
+	if (frame <= (UnsignedInt)TheGlobalData->m_wavEndFrame)
+		return;
+
+	finished = TRUE;
+	AIL_ex_stop_capture();
+
+	__int64 nowTicks = 0;
+	__int64 ticksPerSecond = 0;
+	QueryPerformanceCounter((LARGE_INTEGER *)&nowTicks);
+	QueryPerformanceFrequency((LARGE_INTEGER *)&ticksPerSecond);
+	const Real recordedSeconds = (Real)(nowTicks - startTicks) / (Real)ticksPerSecond;
+	const Real pictureSeconds = (Real)(frame - TheGlobalData->m_wavStartFrame) / LOGICFRAMES_PER_SECONDS_REAL;
+	DEBUG_LOG(("AUDIO: recorded %.2f seconds of sound for %.2f seconds of picture, %.2f adrift\n",
+		recordedSeconds, pictureSeconds, recordedSeconds - pictureSeconds));
+}
+
+//-------------------------------------------------------------------------------------------------
 void MilesAudioManager::update()
 {
 	AudioManager::update();
+	processCompletedAudio();
+	updateSoundCapture();
 	setDeviceListenerPosition();
 	processRequestList();
 	processPlayingList();
@@ -988,7 +1062,7 @@ void MilesAudioManager::stopAudioEvent( AudioHandle handle )
 			// found it
 			// Ask it to stop; the next processPlayingList sweep does the Miles side and the free.
 			InterlockedCompareExchange( (volatile long *)&audio->m_status, PS_Stopping, PS_Playing );
-			notifyOfAudioCompletion((UnsignedInt)(audio->m_stream), PAT_Stream);
+			notifyOfAudioCompletion((UnsignedIntPtr)(audio->m_stream), PAT_Stream);
 			break;
 		}
 	}
@@ -1360,15 +1434,15 @@ void MilesAudioManager::adjustPlayingVolume( PlayingAudio *audio )
 	Real pan;
 	if (audio->m_type == PAT_Sample) {
 		AIL_sample_volume_pan(audio->m_sample, NULL, &pan);
-		AIL_set_sample_volume_pan(audio->m_sample, m_soundVolume * desiredVolume, pan);
+		AIL_set_sample_volume_pan(audio->m_sample, getVoiceMixedVolume(audio->m_audioEventRTS, m_soundVolume), pan);
 
-	} else if (audio->m_type == PAT_3DSample) { 
-		AIL_set_3D_sample_volume(audio->m_3DSample, m_sound3DVolume * desiredVolume);
+	} else if (audio->m_type == PAT_3DSample) {
+		AIL_set_3D_sample_volume(audio->m_3DSample, getVoiceMixedVolume(audio->m_audioEventRTS, m_sound3DVolume));
 
 	} else if (audio->m_type == PAT_Stream) {
 		AIL_stream_volume_pan(audio->m_stream, NULL, &pan);
 		if (audioIsType(audio->m_audioEventRTS, AT_Music)) {
-			AIL_set_stream_volume_pan(audio->m_stream, m_musicVolume * desiredVolume, pan);
+			AIL_set_stream_volume_pan(audio->m_stream, getVoiceMixedVolume(audio->m_audioEventRTS, m_musicVolume), pan);
 			
 		} else {
 			AIL_set_stream_volume_pan(audio->m_stream, m_speechVolume * desiredVolume, pan);
@@ -1401,7 +1475,7 @@ void MilesAudioManager::stopAllSpeech( void )
 void MilesAudioManager::initFilters( HSAMPLE sample, const AudioEventRTS *event )
 {
 	// set the sample volume
-	Real volume = event->getVolume() * event->getVolumeShift() * m_soundVolume;
+	Real volume = getVoiceMixedVolume(event, m_soundVolume);
 	AIL_set_sample_volume_pan(sample, volume, 0.5f);
 
 	// pitch shift
@@ -1429,7 +1503,7 @@ void MilesAudioManager::initFilters( HSAMPLE sample, const AudioEventRTS *event 
 void MilesAudioManager::initFilters3D( H3DSAMPLE sample, const AudioEventRTS *event, const Coord3D *pos )
 {
 	// set the sample volume
-	Real volume = event->getVolume() * event->getVolumeShift() * m_sound3DVolume;
+	Real volume = getVoiceMixedVolume(event, m_sound3DVolume);
 	AIL_set_3D_sample_volume(sample, volume);
 
 	// pitch shift
@@ -1641,7 +1715,46 @@ Bool MilesAudioManager::isCurrentlyPlaying( AudioHandle handle )
 }
 
 //-------------------------------------------------------------------------------------------------
-void MilesAudioManager::notifyOfAudioCompletion( UnsignedInt audioCompleted, UnsignedInt flags )
+void MilesAudioManager::queueAudioCompletion( UnsignedIntPtr audioCompleted, UnsignedInt flags )
+{
+	CriticalSectionClass::LockClass lock(m_completedAudioCS);
+	CompletedAudio completed;
+	completed.handle = audioCompleted;
+	completed.flags = flags;
+	completed.startsAtCompletion = m_audioStarts[audioCompleted];
+	m_completedAudio.push_back(completed);
+}
+
+//-------------------------------------------------------------------------------------------------
+void MilesAudioManager::noteAudioStarted( UnsignedIntPtr handle )
+{
+	CriticalSectionClass::LockClass lock(m_completedAudioCS);
+	++m_audioStarts[handle];
+}
+
+//-------------------------------------------------------------------------------------------------
+void MilesAudioManager::processCompletedAudio( void )
+{
+	std::list<CompletedAudio> completedAudio;
+	{
+		CriticalSectionClass::LockClass lock(m_completedAudioCS);
+		completedAudio.swap(m_completedAudio);
+	}
+
+	for (std::list<CompletedAudio>::const_iterator it = completedAudio.begin(); it != completedAudio.end(); ++it) {
+		Bool restartedSince;
+		{
+			CriticalSectionClass::LockClass lock(m_completedAudioCS);
+			restartedSince = m_audioStarts[it->handle] != it->startsAtCompletion;
+		}
+		if (!restartedSince) {
+			notifyOfAudioCompletion(it->handle, it->flags);
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+void MilesAudioManager::notifyOfAudioCompletion( UnsignedIntPtr audioCompleted, UnsignedInt flags )
 {
 	PlayingAudio *playing = findPlayingAudioFrom(audioCompleted, flags);
 	if (!playing) {
@@ -1705,7 +1818,7 @@ void MilesAudioManager::notifyOfAudioCompletion( UnsignedInt audioCompleted, Uns
 }
 
 //-------------------------------------------------------------------------------------------------
-PlayingAudio *MilesAudioManager::findPlayingAudioFrom( UnsignedInt audioCompleted, UnsignedInt flags )
+PlayingAudio *MilesAudioManager::findPlayingAudioFrom( UnsignedIntPtr audioCompleted, UnsignedInt flags )
 {
 	// Miles calls in here from its own timer thread when a sample finishes, so every walk of these
 	// lists is guarded against the main thread taking an element out from under it.
@@ -2084,6 +2197,25 @@ Bool MilesAudioManager::isObjectPlayingVoice( UnsignedInt objID ) const
 	}
 
 	return false;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A unit's reply is one short line, and in a fight it was lost under the guns.  It plays at the
+	* louder of the effects and voice sliders, lifted again on top of that up to full scale.  Nothing
+	* else is turned down for it.  EVA and briefing speech is left where the voice slider puts it. */
+Real MilesAudioManager::getVoiceMixedVolume( const AudioEventRTS *event, Real sliderVolume ) const
+{
+	static const Real VOICE_BOOST = 1.6f;
+
+	// A sound can reach here with no info (see audioIsType): v2.0.0 read m_type through it and a
+	// looping sound's next pass died at address 0x40 on the XAudio2 service thread.
+	const AudioEventInfo *info = event->getAudioEventInfo();
+	const Real eventVolume = event->getVolume() * event->getVolumeShift();
+	if (info != NULL && (info->m_type & ST_VOICE)) {
+		return min( 1.0f, eventVolume * max( sliderVolume, m_speechVolume ) * VOICE_BOOST );
+	}
+
+	return eventVolume * sliderVolume;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2899,6 +3031,7 @@ void MilesAudioManager::playStream( AudioEventRTS *event, HSTREAM stream )
 	}
 
 	AIL_register_stream_callback(stream, setStreamCompleted);
+	noteAudioStarted((UnsignedIntPtr) stream);	// before the start: a stream that ends at once still counts as this one
 	AIL_start_stream(stream);
 	if (event->getAudioEventInfo()->m_soundType == AT_Music) {
 		// Need to stop/fade out the old music here.
@@ -2921,6 +3054,7 @@ void *MilesAudioManager::playSample( AudioEventRTS *event, HSAMPLE sample )
 		AIL_set_sample_file(sample, fileBuffer, 0);
 
 		// Start playback
+		noteAudioStarted((UnsignedIntPtr) sample);
 		AIL_start_sample(sample);
 	}
 
@@ -2955,6 +3089,7 @@ void *MilesAudioManager::playSample3D( AudioEventRTS *event, H3DSAMPLE sample3D 
 			initFilters3D(sample3D, event, pos);
 			
 			// Start playback
+			noteAudioStarted((UnsignedIntPtr) sample3D);
 			AIL_start_3D_sample(sample3D);
 		}
 		return fileBuffer;
@@ -3162,48 +3297,44 @@ void MilesAudioManager::friend_forcePlayAudioEventRTS(const AudioEventRTS* event
 //-------------------------------------------------------------------------------------------------
 void AILCALLBACK setSampleCompleted( HSAMPLE sampleCompleted )
 {
-	TheAudio->notifyOfAudioCompletion((UnsignedInt) sampleCompleted, PAT_Sample);
+	static_cast<MilesAudioManager *>(TheAudio)->queueAudioCompletion((UnsignedIntPtr) sampleCompleted, PAT_Sample);
 }
 
 //-------------------------------------------------------------------------------------------------
 void AILCALLBACK set3DSampleCompleted( H3DSAMPLE sample3DCompleted )
 {
-	TheAudio->notifyOfAudioCompletion((UnsignedInt) sample3DCompleted, PAT_3DSample);
+	static_cast<MilesAudioManager *>(TheAudio)->queueAudioCompletion((UnsignedIntPtr) sample3DCompleted, PAT_3DSample);
 }
 
 //-------------------------------------------------------------------------------------------------
 void AILCALLBACK setStreamCompleted( HSTREAM streamCompleted )
 {
-	TheAudio->notifyOfAudioCompletion((UnsignedInt) streamCompleted, PAT_Stream);
+	static_cast<MilesAudioManager *>(TheAudio)->queueAudioCompletion((UnsignedIntPtr) streamCompleted, PAT_Stream);
 }
 
 //-------------------------------------------------------------------------------------------------
-U32 AILCALLBACK streamingFileOpen(char const *fileName, U32 *file_handle)
+U32 AILCALLBACK streamingFileOpen(char const *fileName, AILFILEHANDLE *file_handle)
 {
-#if defined(_DEBUG) || defined(_INTERNAL)
-	if (sizeof(U32) != sizeof(File*)) {
-		RELEASE_CRASH(("streamingFileOpen - This function requires work in order to compile on non 32-bit platforms.\n"));
-	}
-#endif
-
-	(*file_handle) = (U32) TheFileSystem->openFile(fileName, File::READ | File::STREAMING);
+	// The handle is a File*, so it is pointer sized - the cast to a 32-bit U32 that used to be here
+	// threw half of every pointer away and was guarded by a debug-only crash saying as much.
+	(*file_handle) = (AILFILEHANDLE) TheFileSystem->openFile(fileName, File::READ | File::STREAMING);
 	return ((*file_handle) != 0);
 }
 
 //-------------------------------------------------------------------------------------------------
-void AILCALLBACK streamingFileClose(U32 fileHandle)
+void AILCALLBACK streamingFileClose(AILFILEHANDLE fileHandle)
 {
 	((File*) fileHandle)->close();
 }
 
 //-------------------------------------------------------------------------------------------------
-S32 AILCALLBACK streamingFileSeek(U32 fileHandle, S32 offset, U32 type)
+S32 AILCALLBACK streamingFileSeek(AILFILEHANDLE fileHandle, S32 offset, U32 type)
 {
 	return ((File*) fileHandle)->seek(offset, (File::seekMode) type);
 }
 
 //-------------------------------------------------------------------------------------------------
-U32 AILCALLBACK streamingFileRead(U32 file_handle, void *buffer, U32 bytes)
+U32 AILCALLBACK streamingFileRead(AILFILEHANDLE file_handle, void *buffer, U32 bytes)
 {
 	return ((File*) file_handle)->read(buffer, bytes);
 }

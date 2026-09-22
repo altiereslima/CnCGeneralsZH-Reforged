@@ -246,6 +246,11 @@ public:
 	inline AsciiString getFilename( void ) const { return m_filename; }
 	inline INILoadType getLoadType( void ) const { return m_loadType; }
 	inline UnsignedInt getLineNum( void ) const { return m_lineNum; }
+
+	/** A map.ini is written by a map maker, often against another mod's objects, and one field
+		this game does not know used to end the match before it started. Set, an unknown field
+		name is logged and its line skipped instead of throwing. */
+	inline void setSkipUnknownFields( Bool skip ) { m_skipUnknownFields = skip; }
 	inline const char *getSeps( void ) const { return m_seps; }
 	inline const char *getSepsPercent( void ) const { return m_sepsPercent; }
 	inline const char *getSepsColon( void ) const { return m_sepsColon; }
@@ -410,6 +415,7 @@ protected:
 	const char *m_sepsQuote;									///< token to represent a quoted ascii string
 	const char *m_blockEndToken;							///< token to represent end of data block
 	Bool m_endOfFile;													///< TRUE when we've hit EOF
+	Bool m_skipUnknownFields;									///< log and skip an unknown field instead of throwing
 #if defined(_DEBUG) || defined(_INTERNAL)
 	char m_curBlockStart[ INI_MAX_CHARS_PER_LINE ];	///< first line of cur block
 #endif

@@ -67,8 +67,6 @@ public:
 	virtual void setWidth( UnsignedInt width );
 	virtual void setHeight( UnsignedInt height );
 	virtual Bool setDisplayMode( UnsignedInt xres, UnsignedInt yres, UnsignedInt bitdepth, Bool windowed );
-	virtual Int getDisplayModeCount(void);	///<return number of display modes/resolutions supported by video card.
-	virtual void getDisplayModeDescription(Int modeIndex, Int *xres, Int *yres, Int *bitDepth);	///<return description of mode
  	virtual void setGamma(Real gamma, Real bright, Real contrast, Bool calibrate);
 	virtual void doSmartAssetPurgeAndPreload(const char* usageFileName);
 #if defined(_DEBUG) || defined(_INTERNAL)

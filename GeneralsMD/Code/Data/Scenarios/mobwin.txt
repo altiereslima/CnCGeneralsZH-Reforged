@@ -1,0 +1,28 @@
+# mobopen.txt with a platoon the mob can beat, for the one picture that staging cannot take.
+#
+# Three angry mobs against fifteen Rangers on open ground lose every member and both nexuses, on
+# this build and on the one before it alike, so "are the survivors back around their nexus" has no
+# picture in it: there are none.  Six Rangers leaves the mob standing.
+#
+#   generals.exe -borderless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionGLA -side 1 FactionAmerica -seed 1 -maxframes 1800
+#     -scenario mobwin -cinema mobwatch -logPrefix mobwin_
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn      0  GLAInfantryAngryMobNexus   3  700 550   60
+30    spawn      1  AmericaInfantryRanger      6  1000 1150 40
+
+120   attackmove 0  GLAInfantryAngryMobNexus      1000 1150
+
+121   arrive     0  *  1000 1150 250
+
+# Both sides counted over the end of the fight: how much mob is left, and how much platoon.  The
+# mob losing more members is only a loss if it did not buy anything with them.
+1650  arrive     0  *  1000 1150 250
+1650  arrive     1  *  1000 1150 250
+
+# The nexuses on their own.  A mob whose nexus is dead stops making members, so a smaller total is
+# two different stories depending on whether all three are still standing.
+1650  arrive     0  GLAInfantryAngryMobNexus  1000 1150 250

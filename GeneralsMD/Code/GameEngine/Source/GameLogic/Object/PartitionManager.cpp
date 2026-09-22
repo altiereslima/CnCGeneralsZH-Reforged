@@ -1286,6 +1286,31 @@ void PartitionCell::invalidateShroudedStatusForAllCois(Int playerIndex)
 }
 
 //-----------------------------------------------------------------------------
+/** Called only from the logic's own look and shroud edges, never from the local player's display
+	* refresh, so every machine keeps the same memories on the same frame.  Only a cell leaving sight
+	* can take the last of a structure out of view, so that is the one edge that remembers; shroud
+	* laid over a cell nobody was looking at never makes a player remember a building they did not
+	* see.  Shroud laid over all of it wipes the memory, as it wipes the ghost. */
+//-----------------------------------------------------------------------------
+void PartitionCell::updateSeenStructures(Int playerIndex, CellShroudStatus oldShroud, CellShroudStatus newShroud)
+{
+	for (CellAndObjectIntersection* coi = m_firstCoiInCell; coi; coi = coi->getNextCoi())
+	{
+		PartitionData *module = coi->getModule();
+		Object *object = module->getObject();
+
+		// a module holding only a ghost has no object left to remember
+		if (object == NULL || !object->isKindOf(KINDOF_STRUCTURE) || object->isKindOf(KINDOF_ALWAYS_VISIBLE))
+			continue;
+
+		if (newShroud == CELLSHROUD_CLEAR || module->isFullyShroudedFor(playerIndex))
+			object->forgetAsSeenBy(playerIndex);
+		else if (oldShroud == CELLSHROUD_CLEAR && !module->isInSightOf(playerIndex))
+			object->rememberAsSeenBy(playerIndex);
+	}
+}
+
+//-----------------------------------------------------------------------------
 void PartitionCell::addLooker(Int playerIndex)
 {
 	CellShroudStatus oldShroud = getShroudStatusForPlayer( playerIndex );
@@ -1294,9 +1319,9 @@ void PartitionCell::addLooker(Int playerIndex)
 
 	CellShroudStatus newShroud = getShroudStatusForPlayer( playerIndex );
 
-//	DEBUG_LOG(( "ADD    %d, %d.  CS = %d, AS = %d for player %d.\n", 
-//							m_cellX, 
-//							m_cellY, 
+//	DEBUG_LOG(( "ADD    %d, %d.  CS = %d, AS = %d for player %d.\n",
+//							m_cellX,
+//							m_cellY,
 //							m_shroudLevel[playerIndex].m_currentShroud,
 //							m_shroudLevel[playerIndex].m_activeShroudLevel,
 //							playerIndex
@@ -1306,6 +1331,7 @@ void PartitionCell::addLooker(Int playerIndex)
 	{
 		// On an edge trigger, tell all objects to think about their shroudedness
 		invalidateShroudedStatusForAllCois( playerIndex );
+		updateSeenStructures( playerIndex, oldShroud, newShroud );
 
 		if( playerIndex == ThePlayerList->getLocalPlayer()->getPlayerIndex() )
 		{
@@ -1330,9 +1356,9 @@ void PartitionCell::removeLooker(Int playerIndex)
 	}
 	CellShroudStatus newShroud = getShroudStatusForPlayer( playerIndex );
 
-//	DEBUG_LOG(( "REMOVE %d, %d.  CS = %d, AS = %d for player %d.\n", 
-//							m_cellX, 
-//							m_cellY, 
+//	DEBUG_LOG(( "REMOVE %d, %d.  CS = %d, AS = %d for player %d.\n",
+//							m_cellX,
+//							m_cellY,
 //							m_shroudLevel[playerIndex].m_currentShroud,
 //							m_shroudLevel[playerIndex].m_activeShroudLevel,
 //							playerIndex
@@ -1342,6 +1368,7 @@ void PartitionCell::removeLooker(Int playerIndex)
 	{
 		// On an edge trigger, tell all objects to think about their shroudedness
 		invalidateShroudedStatusForAllCois( playerIndex );
+		updateSeenStructures( playerIndex, oldShroud, newShroud );
 
 		if( playerIndex == ThePlayerList->getLocalPlayer()->getPlayerIndex() )
 		{
@@ -1369,6 +1396,7 @@ void PartitionCell::addShrouder( Int playerIndex )
 	{
 		// On an edge trigger, tell all objects to think about their shroudedness
 		invalidateShroudedStatusForAllCois( playerIndex );
+		updateSeenStructures( playerIndex, oldShroud, newShroud );
 
 		// and update the client if we are on the local player
 		if( playerIndex == ThePlayerList->getLocalPlayer()->getPlayerIndex() )
@@ -1609,6 +1637,30 @@ Int PartitionData::getControllingPlayerIndex() const
 	DEBUG_CRASH(("this should never happen"));
 	throw ERROR_BUG;
 	return 0;
+}
+
+//-----------------------------------------------------------------------------
+Bool PartitionData::isInSightOf(Int playerIndex)
+{
+	CellAndObjectIntersection* coi = m_coiArray;
+	for (Int i = m_coiInUseCount; i; --i, ++coi)
+	{
+		if (coi->getCell()->getShroudStatusForPlayer(playerIndex) == CELLSHROUD_CLEAR)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
+Bool PartitionData::isFullyShroudedFor(Int playerIndex)
+{
+	CellAndObjectIntersection* coi = m_coiArray;
+	for (Int i = m_coiInUseCount; i; --i, ++coi)
+	{
+		if (coi->getCell()->getShroudStatusForPlayer(playerIndex) != CELLSHROUD_SHROUDED)
+			return FALSE;
+	}
+	return TRUE;
 }
 
 //-----------------------------------------------------------------------------

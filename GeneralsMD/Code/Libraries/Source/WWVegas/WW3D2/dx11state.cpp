@@ -133,9 +133,20 @@ D3D11_FILL_MODE DX11State_Translate_Fill_Mode(DWORD d3d9_fill_mode)
 	}
 }
 
+// Where a see-through caster counts as solid in the sun's depth pass, as an eight bit alpha level.
+// A spinning rotor is a set of faint translucent blades rather than a disc: at 0x50 not one blade
+// of a Comanche's rotor reached the map, at 0x08 it casts the star the stencil volumes drew.
+static const DWORD SHADOW_CASTER_ALPHA_REFERENCE = 0x08;
+
 DX11StateBlockClass::DX11StateBlockClass()
+	: ShadowCasterPass(false)
 {
 	Reset_To_Defaults();
+}
+
+void DX11StateBlockClass::Set_Shadow_Caster_Pass(bool casting)
+{
+	ShadowCasterPass = casting;
 }
 
 void DX11StateBlockClass::Reset_To_Defaults()
@@ -177,10 +188,33 @@ void DX11StateBlockClass::Set_Render_State(D3DRENDERSTATETYPE state, DWORD value
 
 DWORD DX11StateBlockClass::Get_Render_State(D3DRENDERSTATETYPE state) const
 {
-	if (static_cast<unsigned>(state) < RENDER_STATE_COUNT) {
+	if (static_cast<unsigned>(state) >= RENDER_STATE_COUNT) {
+		return 0;
+	}
+	if (!ShadowCasterPass) {
 		return RenderStates[state];
 	}
-	return 0;
+
+	// A material that blends turns off its own depth writes, which is right on the screen and left
+	// a helicopter's rotor out of the sun's map altogether.  One that adds light casts nothing.
+	const bool blended = RenderStates[D3DRS_ALPHABLENDENABLE] != FALSE;
+	const bool adds_light = blended
+		&& (RenderStates[D3DRS_DESTBLEND] == D3DBLEND_ONE || RenderStates[D3DRS_SRCBLEND] == D3DBLEND_ONE);
+	switch (state) {
+	case D3DRS_ZWRITEENABLE:
+		return TRUE;
+	case D3DRS_ALPHATESTENABLE:
+		return blended ? TRUE : RenderStates[state];
+	case D3DRS_ALPHAFUNC:
+		if (!blended) {
+			return RenderStates[state];
+		}
+		return adds_light ? D3DCMP_NEVER : D3DCMP_GREATEREQUAL;
+	case D3DRS_ALPHAREF:
+		return blended ? SHADOW_CASTER_ALPHA_REFERENCE : RenderStates[state];
+	default:
+		return RenderStates[state];
+	}
 }
 
 void DX11StateBlockClass::Build_Blend_Description(D3D11_BLEND_DESC & description) const
@@ -214,7 +248,7 @@ void DX11StateBlockClass::Build_Depth_Stencil_Description(D3D11_DEPTH_STENCIL_DE
 	memset(&description, 0, sizeof(description));
 
 	description.DepthEnable = (RenderStates[D3DRS_ZENABLE] != D3DZB_FALSE) ? TRUE : FALSE;
-	description.DepthWriteMask = (RenderStates[D3DRS_ZWRITEENABLE] != FALSE)
+	description.DepthWriteMask = (Get_Render_State(D3DRS_ZWRITEENABLE) != FALSE)
 		? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
 	description.DepthFunc = DX11State_Translate_Comparison(RenderStates[D3DRS_ZFUNC]);
 

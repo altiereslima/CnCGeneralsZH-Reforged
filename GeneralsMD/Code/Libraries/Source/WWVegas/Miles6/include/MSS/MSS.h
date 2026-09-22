@@ -110,10 +110,13 @@ typedef struct _AILSOUNDINFO
 typedef void (AILCALLBACK *AILSAMPLECB)   (HSAMPLE sample);
 typedef void (AILCALLBACK *AIL3DSAMPLECB) (H3DSAMPLE sample);
 typedef void (AILCALLBACK *AILSTREAMCB)   (HSTREAM stream);
-typedef U32  (AILCALLBACK *AILFILEOPENCB) (const char *filename, U32 *file_handle);
-typedef void (AILCALLBACK *AILFILECLOSECB)(U32 file_handle);
-typedef S32  (AILCALLBACK *AILFILESEEKCB) (U32 file_handle, S32 offset, U32 type);
-typedef U32  (AILCALLBACK *AILFILEREADCB) (U32 file_handle, void *buffer, U32 bytes);
+/* The file handle is whatever the host wants it to be and this game puts a File* in it, so it is
+   pointer sized.  On Win32 that is the U32 the retail DLL's ABI expects; x64 needs all 64 bits. */
+typedef UINT_PTR AILFILEHANDLE;
+typedef U32  (AILCALLBACK *AILFILEOPENCB) (const char *filename, AILFILEHANDLE *file_handle);
+typedef void (AILCALLBACK *AILFILECLOSECB)(AILFILEHANDLE file_handle);
+typedef S32  (AILCALLBACK *AILFILESEEKCB) (AILFILEHANDLE file_handle, S32 offset, U32 type);
+typedef U32  (AILCALLBACK *AILFILEREADCB) (AILFILEHANDLE file_handle, void *buffer, U32 bytes);
 
 /* Thyme's stub miles.c spells the same callback types this way. */
 typedef AILSAMPLECB    AIL_sample_callback;
@@ -220,6 +223,13 @@ AILSTREAMCB AILCALL AIL_register_stream_callback(HSTREAM stream, AILSTREAMCB cal
 HAUDIO    AILCALL AIL_quick_load_and_play(const char *filename, U32 loop_count, S32 wait_request);
 void      AILCALL AIL_quick_unload(HAUDIO audio);
 void      AILCALL AIL_quick_set_volume(HAUDIO audio, F32 volume, F32 extravol);
+
+/* ---- capture ----------------------------------------------------------- */
+/* Not Miles.  The fork's own pair: everything the game plays is mixed into one mastering voice, so
+   an effect on that voice is the whole soundtrack and nothing else on the machine.  The caller
+   decides when the recording starts, because only the caller knows what logic frame it is. */
+S32       AILCALL AIL_ex_start_capture(const char *pathname);
+void      AILCALL AIL_ex_stop_capture(void);
 
 /* ---- file format helpers ---------------------------------------------- */
 S32       AILCALL AIL_WAV_info(const void *data, AILSOUNDINFO *info);

@@ -196,6 +196,7 @@ INI::INI( void )
 	m_sepsQuote					= "\"\n=";				///< stop at " = EOL
 	m_blockEndToken			= "END";
 	m_endOfFile					= FALSE;
+	m_skipUnknownFields	= FALSE;
 	m_buffer[0]					= 0;
 #if defined(_DEBUG) || defined(_INTERNAL)
 	m_curBlockStart[0]	= 0;
@@ -1547,7 +1548,12 @@ void INI::initFromINIMulti( void *what, const MultiIniFieldParse& parseTableList
 					}
 				}
 
-				if (!found)
+				if (!found && m_skipUnknownFields)
+				{
+					DEBUG_LOG(("[LINE: %d - FILE: '%s'] skipping unknown field '%s'\n",
+										 INI::getLineNum(), INI::getFilename().str(), field));
+				}
+				else if (!found)
 				{
 					DEBUG_ASSERTCRASH( 0, ("[LINE: %d - FILE: '%s'] Unknown field '%s' in block '%s'\n",
 														 INI::getLineNum(), INI::getFilename().str(), field, m_curBlockStart) );

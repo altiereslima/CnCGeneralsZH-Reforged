@@ -93,6 +93,11 @@ extern Real ControlBarUniformScale( void );
 	* bar itself is laid out at. */
 static const Real BADGE_DESIGN_POINTS = 7.0f;
 
+/** The queue count is the one marking a player reads at a glance in the middle of a fight - how
+	* many more of these are still coming - and at seven points against a busy cameo it was a smudge
+	* nobody found without looking for it.  It gets its own size, and an opaque plate under it. */
+static const Real COUNT_BADGE_DESIGN_POINTS = 11.0f;
+
 // getBadgeFont ===============================================================
 /** The font the corner markings wear.
 	*
@@ -107,13 +112,13 @@ static const Real BADGE_DESIGN_POINTS = 7.0f;
 	* grew away from the buttons it sits on.  At 2560x1080 the markings came out half again too big.
 	* One design size, times the bar's own scale, and a cameo looks the same on every monitor. */
 //=============================================================================
-static GameFont *getBadgeFont( GameWindow *window )
+static GameFont *getBadgeFont( GameWindow *window, Real designPoints = BADGE_DESIGN_POINTS )
 {
 	GameFont *font = window->winGetFont();
 	if( font == NULL )
 		return NULL;
 
-	Int pointSize = REAL_TO_INT_FLOOR( BADGE_DESIGN_POINTS * ControlBarUniformScale() );
+	Int pointSize = REAL_TO_INT_FLOOR( designPoints * ControlBarUniformScale() );
 	if( pointSize < 6 )
 		pointSize = 6;
 
@@ -250,7 +255,7 @@ static void drawCountBadge( GameWindow *window, Int count )
 
 	UnicodeString text;
 	text.format( L"%d", count );
-	DisplayString *badge = badgeString( text, getBadgeFont( window ) );
+	DisplayString *badge = badgeString( text, getBadgeFont( window, COUNT_BADGE_DESIGN_POINTS ) );
 	if( badge == NULL )
 		return;
 
@@ -265,9 +270,10 @@ static void drawCountBadge( GameWindow *window, Int count )
 	textPos.x = origin.x + size.x - plateWidth + 2;
 	textPos.y = origin.y + size.y - height;
 
-	// same translucent plate the shortcut letter wears - button art can be any colour
+	// a solid plate rather than the shortcut letter's translucent one: this number has to be legible
+	// over whatever cameo is underneath it without the player stopping to look for it
 	TheDisplay->drawFillRect( textPos.x - 2, textPos.y, plateWidth, height,
-														GameMakeColor( 0, 0, 0, 160 ) );
+														GameMakeColor( 0, 0, 0, 230 ) );
 	badge->draw( textPos.x, textPos.y, GameMakeColor( 255, 255, 255, 255 ),
 							 GameMakeColor( 0, 0, 0, 255 ) );
 

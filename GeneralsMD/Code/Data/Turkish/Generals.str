@@ -15138,7 +15138,15 @@ GUI:WindowMode2
 END
 
 TOOLTIP:WindowMode
-"Tam ekran, görüntü modunu devralır; kenarlıksız, ekranı bir pencereyle kaplar ve alt-tab anında gerçekleşir. Kenarlıksız çözünürlüğü kendisi seçer; diğer iki modda soldaki listeden siz seçersiniz."
+"Tam ekran, görüntü modunu devralır; kenarlıksız, ekranı bir pencereyle kaplar ve alt-tab anında gerçekleşir. Kenarlıksız monitörün kendi çözünürlüğünü alır; diğer iki modda yukarıdaki listeden siz seçersiniz."
+END
+
+GUI:Monitor
+"Monitör"
+END
+
+TOOLTIP:Monitor
+"Oyunun oynandığı monitör. Alttaki çözünürlük listesi bu monitörün gösterebildiği boyutları içerir. Kabul Et'e bastığınızda uygulanır."
 END
 
 GUI:MSAA
@@ -15203,6 +15211,14 @@ END
 
 TOOLTIP:VSync
 "Görüntüyü monitöre eşler, böylece ekran yırtılmaz. Kapalıyken görüntü, bilgisayarın çizebildiği kadar hızlı akar. Kabul Et'e bastığınızda uygulanır."
+END
+
+GUI:ClassicGraphics
+"Klasik Grafikler"
+END
+
+TOOLTIP:ClassicGraphics
+"Oyunun 2003'teki görünümü: kendi kaplamaları ve zemini, eski keskin gölgeler, kabartma ayrıntısı yok, parlama ve keskinleştirme yok. Kapalıyken Reforged. Oyun bir sonraki açılışında geçerli olur."
 END
 
 GUI:InfantryShadows
@@ -15559,4 +15575,48 @@ END
 
 GUI:HudSuperweaponStrip
 "Süper silah sayaçları"
+END
+
+GUI:ScoreboardAllies
+"TAKIMIN"
+END
+
+GUI:ScoreboardEnemies
+"DÜŞMANLAR"
+END
+
+GUI:ScoreboardPlayer
+"OYUNCU"
+END
+
+GUI:ScoreboardTeam
+"TAKIM"
+END
+
+GUI:ScoreboardLevel
+"RÜTBE"
+END
+
+GUI:ScoreboardMoney
+"PARA"
+END
+
+GUI:ScoreboardPerMinute
+"DAKİKADA"
+END
+
+GUI:ScoreboardKills
+"K"
+END
+
+GUI:ScoreboardDeaths
+"D"
+END
+
+GUI:ScoreboardPowers
+"YETENEKLER"
+END
+
+GUI:ScoreboardFavourite
+"FAVORİ"
 END

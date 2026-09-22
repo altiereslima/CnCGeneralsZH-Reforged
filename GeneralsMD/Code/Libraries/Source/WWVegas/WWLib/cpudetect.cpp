@@ -23,6 +23,7 @@
 #include "mpu.h"
 #pragma warning (disable : 4201)	// Nonstandard extension - nameless struct
 #include <windows.h>
+#include <intrin.h>
 #include "systimer.h"
 
 #ifdef _UNIX
@@ -123,46 +124,18 @@ const char* CPUDetectClass::Get_Processor_Manufacturer_Name()
 	return ManufacturerNames[ProcessorManufacturer];
 }
 
-#define ASM_RDTSC _asm _emit 0x0f _asm _emit 0x31
-
 static unsigned Calculate_Processor_Speed(__int64& ticks_per_second)
 {
-	struct {
-		unsigned timer0_h;
-		unsigned timer0_l;
-		unsigned timer1_h;
-		unsigned timer1_l;
-	} Time;
-
-#ifdef WIN32
-   __asm {
-      ASM_RDTSC;
-      mov Time.timer0_h, eax
-      mov Time.timer0_l, edx
-   }
-#elif defined(_UNIX)
-      __asm__("rdtsc");
-      __asm__("mov %eax, __Time.timer1_h");
-      __asm__("mov %edx, __Time.timer1_l");
-#endif
+	const unsigned __int64 timer0=__rdtsc();
+	unsigned __int64 timer1=timer0;
 
 	unsigned start=TIMEGETTIME();
 	unsigned elapsed;
 	while ((elapsed=TIMEGETTIME()-start)<200) {
-#ifdef WIN32
-      __asm {
-         ASM_RDTSC;
-         mov Time.timer1_h, eax
-         mov Time.timer1_l, edx
-      }
-#elif defined(_UNIX)
-      __asm__ ("rdtsc");
-      __asm__("mov %eax, __Time.timer1_h");
-      __asm__("mov %edx, __Time.timer1_l");
-#endif
+		timer1=__rdtsc();
 	}
 
-	__int64 t=*(__int64*)&Time.timer1_h-*(__int64*)&Time.timer0_h;
+	__int64 t=(__int64)(timer1-timer0);
 	ticks_per_second=(__int64)((1000.0/(double)elapsed)*(double)t);	// Ticks per second
 	return unsigned((double)t/(double)(elapsed*1000));
 }
@@ -820,54 +793,9 @@ void CPUDetectClass::Init_Processor_String()
 
 void CPUDetectClass::Init_CPUID_Instruction()
 {
-	unsigned long cpuid_available=0;
-
-   // The pushfd/popfd commands are done using emits
-   // because CodeWarrior seems to have problems with
-   // the command (huh?)
-
-#ifdef WIN32
-   __asm
-   {
-      mov cpuid_available, 0	// clear flag
-      push ebx
-      pushfd
-      pop eax
-      mov ebx, eax
-      xor eax, 0x00200000
-      push eax
-      popfd
-      pushfd
-      pop eax
-      xor eax, ebx
-      je done
-      mov cpuid_available, 1
-   done:
-      push ebx
-      popfd
-      pop ebx
-   }
-#elif defined(_UNIX)
-     __asm__(" mov $0, __cpuid_available");  // clear flag
-     __asm__(" push %ebx");
-     __asm__(" pushfd");
-     __asm__(" pop %eax");
-     __asm__(" mov %eax, %ebx");
-     __asm__(" xor 0x00200000, %eax");
-     __asm__(" push %eax");
-     __asm__(" popfd");
-     __asm__(" pushfd");
-     __asm__(" pop %eax");
-     __asm__(" xor %ebx, %eax");
-     __asm__(" je done");
-     __asm__(" mov $1, __cpuid_available");
-     goto done;  // just to shut the compiler up
-   done:
-     __asm__(" push %ebx");
-     __asm__(" popfd");
-     __asm__(" pop %ebx");
-#endif
-	HasCPUIDInstruction=!!cpuid_available;
+	// EA toggled EFLAGS.ID to find out.  Every processor that runs SSE2 code, which both builds
+	// require, has CPUID.
+	HasCPUIDInstruction=true;
 }
 
 void CPUDetectClass::Init_Processor_Features()
@@ -969,44 +897,14 @@ bool CPUDetectClass::CPUID(
 {
 	if (!Has_CPUID_Instruction()) return false;	// Most processors since 486 have CPUID...
 
-	unsigned u_eax;
-	unsigned u_ebx;
-	unsigned u_ecx;
-	unsigned u_edx;
+	// ECX is zeroed like EA's asm did: leaf 4's cache walk reads it as the sub-leaf.
+	int registers[4];
+	__cpuidex(registers, (int)cpuid_type, 0);
 
-#ifdef WIN32
-   __asm
-   {
-      pushad
-      mov	eax, [cpuid_type]
-      xor	ebx, ebx
-      xor	ecx, ecx
-      xor	edx, edx
-      cpuid
-      mov	[u_eax], eax
-      mov	[u_ebx], ebx
-      mov	[u_ecx], ecx
-      mov	[u_edx], edx
-      popad
-   }
-#elif defined(_UNIX)
-   __asm__("pusha");
-   __asm__("mov	__cpuid_type, %eax");
-   __asm__("xor	%ebx, %ebx");
-   __asm__("xor	%ecx, %ecx");
-   __asm__("xor	%edx, %edx");
-   __asm__("cpuid");
-   __asm__("mov	%eax, __u_eax");
-   __asm__("mov	%ebx, __u_ebx");
-   __asm__("mov	%ecx, __u_ecx");
-   __asm__("mov	%edx, __u_edx");
-   __asm__("popa");
-#endif
-
-	u_eax_=u_eax;
-	u_ebx_=u_ebx;
-	u_ecx_=u_ecx;
-	u_edx_=u_edx;
+	u_eax_=(unsigned)registers[0];
+	u_ebx_=(unsigned)registers[1];
+	u_ecx_=(unsigned)registers[2];
+	u_edx_=(unsigned)registers[3];
 
 	return true;
 }
@@ -1031,7 +929,9 @@ void CPUDetectClass::Init_Processor_Log()
 		(OSVersionBuildNumber&0xff0000)>>16,
 		(OSVersionBuildNumber&0xffff)));
 #ifdef WIN32
-   SYSLOG(("OS-Info: %s\r\n", OSVersionExtraInfo));
+   // Peek_Buffer, not the object: a StringClass handed to a varargs %s is passed by address on x64
+   // and the formatter then reads the object as if it were the characters.
+   SYSLOG(("OS-Info: %s\r\n", OSVersionExtraInfo.Peek_Buffer()));
 #elif defined(_UNIX)
    SYSLOG(("OS-Info: %s\r\n", OSVersionExtraInfo.Peek_Buffer()));
 #endif
@@ -1046,7 +946,7 @@ void CPUDetectClass::Init_Processor_Log()
 	case 3: cpu_type="*Intel Reserved*"; break;
 	}
 #ifdef WIN32
-   SYSLOG(("Processor type: %s\r\n", cpu_type));
+   SYSLOG(("Processor type: %s\r\n", cpu_type.Peek_Buffer()));
 #elif defined(_UNIX)
    SYSLOG(("Processor type: %s\r\n", cpu_type.Peek_Buffer()));
 #endif

@@ -1,0 +1,9 @@
+# core.autocrlf is on here and the tree is CRLF, which is right for the sources. A shell script is
+# not: MSYS2's bash reads the carriage returns as part of the command and the build dies on the
+# first line. Tools/ffmpeg-build.sh is the one that matters, and any other shell script would want
+# the same.
+*.sh text eol=lf
+
+# FFmpeg's own files, committed as they came out of its build: no line ending conversion on the
+# headers, and the DLLs and import libraries are binary.
+GeneralsMD/Code/Libraries/Source/FFmpeg/dist/** -text

@@ -356,6 +356,7 @@ public:
 	virtual void setShadowsEnabled(Bool enable);
 	virtual void releaseShadows(void);	///< frees all shadow resources used by this module - used by Options screen.
 	virtual void allocateShadows(void); ///< create shadow resources if not already present. Used by Options screen.
+	void allocateContactShadow(void);		///< the soft patch under a structure, which is what stands it on the ground
 	Bool registerModelShadow(void);			///< hand this model's shape to the tree buffer to cast; TRUE if it took it
 	void unregisterModelShadow(void);		///< take it back when the model changes or the drawable goes
 
@@ -504,6 +505,7 @@ private:
 	Bool													m_hasModelShadow;	///< this drawable's shape is being cast by the tree buffer, so it wants no decal of its own
 	RenderObjClass*								m_renderObject;										///< W3D Render object for this drawable
 	Shadow*												m_shadow;													///< Updates/Renders shadows of this object
+	Shadow*												m_contactShadow;									///< the soft patch under a structure's footprint, which is what makes it stand on the ground rather than sit on it
 	Shadow*												m_terrainDecal;
 	TerrainTracksRenderObjClass*	m_trackRenderObject;							///< This is rendered under object
 	ParticleSystemIDVec						m_particleSystemIDs;							///< The ID numbers of the particle systems currently running.

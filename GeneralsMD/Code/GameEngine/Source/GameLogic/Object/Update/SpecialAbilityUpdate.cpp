@@ -45,6 +45,7 @@
 #include "GameClient/FXList.h"
 #include "GameClient/Eva.h"
 #include "GameClient/InGameUI.h"
+#include "GameClient/PlayerColorScheme.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/GameText.h"
 
@@ -1266,7 +1267,9 @@ Bool SpecialAbilityUpdate::continuePreparation()
           {
 
             RGBColor myHouseColor; 
-            myHouseColor.setFromInt( getObject()->getIndicatorColor() );
+            // the colour the capturer is drawn in on this screen, which the colour scheme option may
+            // have changed; it only tints the flash, so nothing in the simulation reads it
+            myHouseColor.setFromInt( clientColor( getObject()->getIndicatorColor() ) );
 
             Real saturation = TheGlobalData->m_selectionFlashSaturationFactor;
             targetDraw->saturateRGB( myHouseColor, saturation );

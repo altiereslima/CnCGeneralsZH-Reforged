@@ -52,6 +52,7 @@
 #include "Common/EarlyCommandLine.h"
 #include "Common/EarlyOptions.h"
 #include "Common/Errors.h"
+#include "Common/Monitors.h"
 #include "Common/GameMemory.h"
 #include "Common/INIException.h"
 #include "Common/SafeDisc/CdaPfn.h"
@@ -498,7 +499,10 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message,
 					// Put it at the origin instead.
 					//
 					if (ApplicationIsBorderless)
-						::SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+					{
+						const RECT screen = findMonitor(TheGlobalData ? TheGlobalData->m_monitor.str() : "").rect;
+						::SetWindowPos(hWnd, NULL, screen.left, screen.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+					}
 				}
 				break;
 
@@ -818,11 +822,17 @@ static Bool initializeAppWindows( HINSTANCE hInstance, Int nCmdShow, Bool runWin
 
 	gInitializing = true;
 
+	// Born in the middle of the monitor Options.ini names, so the splash and then the game are on it
+	// from the first frame.  The engine cannot say which that is yet.
+	char savedMonitor[CCHDEVICENAME];
+	findEarlyOptionValue( "Monitor", savedMonitor, sizeof( savedMonitor ) );
+	const RECT screen = findMonitor( savedMonitor ).rect;
+
   HWND hWnd = CreateWindow( TEXT("Game Window"),
                             TEXT("Command and Conquer Generals"),
-                            windowStyle, 
-														(GetSystemMetrics( SM_CXSCREEN ) / 2) - (startWidth / 2), // original position X
-														(GetSystemMetrics( SM_CYSCREEN ) / 2) - (startHeight / 2),// original position Y
+                            windowStyle,
+														(screen.left + screen.right) / 2 - (startWidth / 2), // original position X
+														(screen.top + screen.bottom) / 2 - (startHeight / 2),// original position Y
 														// Lorenzen nudged the window higher
 														// so the constantdebug report would 
 														// not get obliterated by assert windows, thank you.
@@ -1015,6 +1025,18 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
                       LPSTR lpCmdLine, Int nCmdShow )
 {
 	checkProtection();
+
+	// The x64 C runtime answers log, exp, pow and the trig functions from an FMA3 routine on a CPU
+	// that has FMA3 and a plain SSE2 one on a CPU that does not, and the two differ in the last bit.
+	// Logic routes its trig through DetTrig, but the computer player's matchup score takes a log(),
+	// and one bit there is a different unit bought and a network game that falls apart.  One path
+	// for every machine; v1.1.4 was a 32-bit build and never had the choice.
+	_set_FMA3_enable( 0 );
+
+	// Without this Windows scales the whole window by the display's scaling setting, so at 125% a
+	// 1920x1080 game on a 1920x1080 screen is drawn 2400x1350 and hangs off the bottom right.  The
+	// game sizes everything in real pixels, which is what DPI awareness hands it.
+	::SetProcessDPIAware();
 
 #ifdef _PROFILE
   Profile::StartRange("init");

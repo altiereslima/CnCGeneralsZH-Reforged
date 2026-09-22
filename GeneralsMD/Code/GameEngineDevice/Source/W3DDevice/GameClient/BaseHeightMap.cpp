@@ -759,10 +759,13 @@ bool BaseHeightMapRenderObjClass::Cast_Ray(RayCollisionTestClass & raytest)
 
 		if (CollisionMath::Collide(lineseg,hbox,&result))
 		{	//ray intersects terrain or starts inside the terrain.
+			// StartBad means the ray already begins inside the box, so there is nothing to clip and
+			// P0 stands as it is.  Treating it as a failure left hasP0 false and threw the whole cast
+			// away, which is what a camera zoomed below the box ceiling did to every ground click.
+			hasP0 = true;
 			if (!result.StartBad)	//check if start point inside terrain
 			{
 				newP0 = P0 != result.ContactPoint;
-				hasP0 = true;
 				P0 = result.ContactPoint;			//make intersection point the new start of the ray.
 			}
 
@@ -772,19 +775,17 @@ bool BaseHeightMapRenderObjClass::Cast_Ray(RayCollisionTestClass & raytest)
 			result.StartBad=false;
 			lineseg2.Set(lineseg.Get_P1(),lineseg.Get_P0());	//reverse line segment
 			if (CollisionMath::Collide(lineseg2,hbox,&result))
-			{	if (!result.StartBad)	//check if end point inside terrain
+			{	hasP1 = true;
+				if (!result.StartBad)	//check if end point inside terrain
 				{
 					newP1 = P1 != result.ContactPoint;
-					hasP1 = true;
 					P1 = result.ContactPoint;	//make intersection point the new end pont of ray
 				}
 			}
 		}
 
-		// Narrowing has stopped moving the ends, so another pass would search the same box.  The
-		// old test broke on the box missing instead, which let a first pass that hit nothing on
-		// p>0 carry the previous pass's cell range into the triangle search below.
-		if (!newP0 || !newP1)
+		// The ray never reached the box, so there is no cell range to search.
+		if (!hasP0 || !hasP1)
 			break;
 
 		// Take the 2D bounding box of ray and check heights
@@ -820,6 +821,12 @@ bool BaseHeightMapRenderObjClass::Cast_Ray(RayCollisionTestClass & raytest)
 		Vector3 maxPt(MAP_XY_FACTOR*(EndCellX+1), MAP_XY_FACTOR*(EndCellY+1), MAP_HEIGHT_SCALE*(maxHt+1));
 		MinMaxAABoxClass mmbox(minPt, maxPt);
 		hbox.Init(mmbox);
+
+		// Narrowing has stopped moving the ends, so another pass would search the same box.  The
+		// cell range above is computed first either way, so an end that needed no clipping still
+		// leaves a range behind instead of the previous pass's.
+		if (!newP0 && !newP1)
+			break;
 	}
 
 	// Neither end was ever placed on the terrain box, so there is nothing to search.

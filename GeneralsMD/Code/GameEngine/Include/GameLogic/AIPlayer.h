@@ -307,6 +307,12 @@ protected:
 	void queueCapturer(void);						///< ... or build the cheapest thing that can take one
 	void queueSupportUnit(const ThingTemplate *tmpl, const char *what);	///< one cheap unit, outside the team system
 
+	/** The enemy's tanks are worth more taken than shot: one hijacker walks off with one, and Black
+		* Lotus shuts one down for nothing.  Neither had ever been used by a computer player. */
+	virtual void doHijack(void);
+	Object *findHijacker(void);					///< a unit of ours that takes a vehicle by walking into it
+	Object *nearestStealableVehicle(const Coord3D *from, Real reach);	///< the closest enemy vehicle in sight; reach <= 0 is the map
+
 	/** Past the hoard, buy what the build list never had: another production building beside the last
 		* expansion when every one of a kind is busy, another income building when production keeps up,
 		* and money units (China's hackers) from any factory standing idle. */
@@ -322,9 +328,12 @@ protected:
 
 	Bool enemyDirection(Coord3D *dir);	///< unit vector from this base towards the nearest enemy's best known address
 	Bool isHeldExpansion(const Object *warehouse);	///< our supply center stands at it, and it is nearer our base than any enemy's
+	void doTunnels(Object *dozer);	///< a tunnel at home, at the held expansion and far out on the next wave's road
 	void buildAsap(const ThingTemplate *tmpl);	///< the plan's own unbuilt entry if it has one, otherwise a new spot behind the base
 
 	void buyMoneyUnits(void);
+	Int countMoneyUnits(void) const;	///< money units of this player's that are still standing
+	Bool hasEnoughMoneyUnitsFor(TeamPrototype *proto) const;	///< this team is all hackers and the cap is reached
 	Bool placeNear(const ThingTemplate *tmpl, const Coord3D *center, Real innerRadius);	///< a legal, safe spot on a ring round center, queued for a dozer
 	Real knownFirepowerAlongPath(Waypoint *way);	///< what this AI has seen that can shoot, along an approach
 	AsciiString secondApproachLabel(const Coord3D *from, const AsciiString &taken, Int pathSuffix);	///< the quietest other road, or empty
@@ -332,6 +341,7 @@ protected:
 	Real knownFirepowerNear(const Coord3D *pos);	///< what this AI has seen that can shoot, near a point
 	Bool forwardHoldPoint(const AsciiString &approach, Int pathSuffix, const Coord3D *enemyPos, Coord3D *hold);	///< where a wave gathers on its road
 	void sendWave(AIGroup *wave, const AsciiString &approach, Int pathSuffix, Int teams, Real power, UnsignedInt heldFrames);
+	void sendWaveThroughTunnels(AIGroup *wave, const Coord3D *center, Waypoint *way);	///< whoever can goes by tunnel when the path is the long way round
 
 	virtual void doBaseBuilding(void);
 	virtual void checkReadyTeams(void);
@@ -401,7 +411,11 @@ protected:
 	Object *findSupplyCenter(Int minSupplies);
 	void getPlayerStructureBounds(Region2D *bounds, Int playerNdx, Bool conservative = FALSE, Int observerNdx = -1 );
 
-protected:	 
+	/// what a superweapon aimed here is worth, with the shots already on their way taken off
+	Int superweaponScore( Coord3D *center, Int playerNdx, Real radius, Bool targetMilitaryUnits );
+	void noteSuperweaponAim( const Coord3D *pos );	///< remember a spot, so the next shot goes elsewhere
+
+protected:
 
 	Player *m_player;									///< the Player we represent
 
@@ -419,6 +433,8 @@ protected:
 	UnsignedInt m_startIntelFrame;			///< frame the above was last brought up to date
 	ObjectID	m_capturerID;						///< the unit currently out taking tech buildings for us
 	Int				m_captureTimer;					///< frames until the next look for something to capture
+	ObjectID	m_hijackerID;						///< the thief currently out after an enemy vehicle
+	Int				m_hijackTimer;					///< frames until the next look for a vehicle to take
 	Int				m_retreatTimer;					///< frames until the next look at how the fights are going
 	Int				m_expandTimer;					///< frames until the next look for somewhere to expand to
 
@@ -433,12 +449,16 @@ protected:
 
 	Int			m_frameLastBuildingBuilt;	///< When we built the last building.
 
-	/* Where buildStructureWithDozer's search for somewhere to put a building had got to when it ran
-		 out of its per-frame budget, and the spot it was searching around.  Deliberately not xferred:
-		 both machines in a network game compute them the same way from the same frames, and a
-		 savegame that restarts a half-finished scan loses nothing but a few frames of searching. */
-	Real		m_buildProbeOffset;
-	Int			m_buildProbeSkip;		///< position pairs of the ring at m_buildProbeOffset already tried
+	/* Where buildStructureWithDozer's flood fill for somewhere to put a building had got to when it
+		 ran out of its per-frame budget, and which building and spot it was searching for.  Not
+		 xferred: both machines in a network game compute them the same way from the same frames.  A
+		 savegame loaded half way through a search floods again from the start, so the building can
+		 go up a few frames later, or on another cell, than it would have in the game that never
+		 saved.  Network games are not saved, so nothing has to match that. */
+	std::vector<ICoord2D> m_buildSearchCells;	///< every pathfind cell reached so far, in the order reached
+	Int			m_buildSearchNext;								///< first entry of m_buildSearchCells not yet expanded
+	std::vector<UnsignedByte> m_buildSearchSeen;	///< one flag per cell of the square the search may cover
+	const ThingTemplate *m_buildSearchPlan;		///< the building whose footprint the search is trying
 	Coord3D m_buildProbePos;
 
 	GameDifficulty m_difficulty;
@@ -473,6 +493,13 @@ protected:
 	AsciiString	m_heldLabel[ MAX_HELD_TEAMS ];		///< the approach the script asked for
 	Int					m_heldSuffix[ MAX_HELD_TEAMS ];		///< the enemy start index its path name ends in
 	UnsignedInt	m_heldSince;											///< frame the first of the parked teams arrived
+
+	/** Where the last few superweapons were aimed, so the next one does not land in the same crater
+		* while the one before it is still in the air. */
+	enum { MAX_REMEMBERED_STRIKES = 4 };
+	Coord3D			m_strikeAim[ MAX_REMEMBERED_STRIKES ];
+	UnsignedInt	m_strikeFrame[ MAX_REMEMBERED_STRIKES ];	///< frame each was aimed; 0 == slot never used
+	Int					m_strikeNext;											///< slot the next aim is written to
 };
 
 #endif // _AI_PLAYER_H_

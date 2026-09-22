@@ -83,8 +83,11 @@ int RLEEngine::Compress(void const * source, void * dest, int length) const
 			/*
 			**	Count the number of transparent pixels in this run.
 			*/
+			// The bound is tested before the byte, and against the bytes left rather than one past
+			// them: the other way round this walked off the end of the source and counted whatever
+			// followed it, so a buffer of nothing but zeroes encoded a run longer than itself.
 			int runcount = 0;
-			while (sptr[runcount] == '\0' && runcount <= length) {
+			while (runcount < length && sptr[runcount] == '\0') {
 				runcount++;
 			}
 

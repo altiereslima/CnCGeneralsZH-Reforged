@@ -1,0 +1,17 @@
+# Trailer: two hundred mixed units sent to one point on Twilight Flame, which they fill as a crowd
+# rather than a queue.
+#
+#   generals.exe -borderless -msaa 0 -quickstart -noshellmap -multiInstance
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover -seed 7 -peacetime 20
+#     -scenario trailer_arrival -cinema tr_arrival -video 420 960 tr_arrival -maxframes 980
+#
+# Slot 1's start is 1733,4405 on that map, which is where the crowd is sent and where the camera is.
+
+30    spawn       0  AmericaTankCrusader             70  start0:0:300    40
+30    spawn       0  AmericaVehicleHumvee            30  start0:-320:300 34
+30    spawn       0  AmericaTankPaladin              20  start0:320:300  40
+30    spawn       0  AmericaInfantryRanger           60  start0:0:520    18
+30    spawn       0  AmericaInfantryMissileDefender  20  start0:320:520  18
+
+90    playermove  0  *  1135 3900
+90    arrive      0  AmericaTankCrusader  1135 3900  450

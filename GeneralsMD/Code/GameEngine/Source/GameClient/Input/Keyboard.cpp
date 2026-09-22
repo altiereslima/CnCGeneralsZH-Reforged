@@ -150,7 +150,7 @@ void Keyboard::updateKeys( void )
 
 		m_keyStatus[ m_keys[ index ].key ].state = m_keys[ index ].state;
 		m_keyStatus[ m_keys[ index ].key ].status = m_keys[ index ].status;
-		m_keyStatus[ m_keys[ index ].key ].sequence = m_inputFrame;
+		m_keyStatus[ m_keys[ index ].key ].sequence = timeGetTime();
 
 		// prevent ALT-TAB from causing a TAB event
 		if( m_keys[ index ].key == KEY_TAB )
@@ -222,6 +222,8 @@ Bool Keyboard::checkKeyRepeat( void )
 	while( m_keys[ index ].key != KEY_NONE )
 		index++;
 
+	const UnsignedInt nowMs = timeGetTime();
+
 	// Scan Keyboard status array for first key down
 	// long enough to repeat
 	for( key = 0; key < 256; key++ )
@@ -230,7 +232,7 @@ Bool Keyboard::checkKeyRepeat( void )
 		if( BitTest( m_keyStatus[ key ].state, KEY_STATE_DOWN ) )
 		{
 
-			if( (m_inputFrame - m_keyStatus[ key ].sequence) > Keyboard::KEY_REPEAT_DELAY )
+			if( (nowMs - m_keyStatus[ key ].sequence) > Keyboard::KEY_REPEAT_DELAY_MS )
 			{
 				// Add key to this frame
 				m_keys[ index ].key = (UnsignedByte)key;
@@ -245,10 +247,10 @@ Bool Keyboard::checkKeyRepeat( void )
 				// (own counter: this loop used to reuse `index`, the live write cursor into
 				// m_keys, and only got away with it because of the break below.)
 				for( Int resetIndex = 0; resetIndex < NUM_KEYS; resetIndex++ )
-					m_keyStatus[ resetIndex ].sequence = m_inputFrame;
+					m_keyStatus[ resetIndex ].sequence = nowMs;
 
-				// Set repeated key so it will repeat again in two frames
-				m_keyStatus[ key ].sequence = m_inputFrame - (Keyboard::KEY_REPEAT_DELAY + 2);
+				// Set repeated key so it will repeat again one interval from now
+				m_keyStatus[ key ].sequence = nowMs - (Keyboard::KEY_REPEAT_DELAY_MS - Keyboard::KEY_REPEAT_INTERVAL_MS);
 
 				retVal = TRUE;
 				break;  // exit for key

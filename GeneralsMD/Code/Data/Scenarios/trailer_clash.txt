@@ -1,0 +1,45 @@
+# Trailer: a combined-arms fight where both sides shoot back, fed by two more waves so it does not
+# end after the first clash.
+#
+#   generals.exe -borderless -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 2500 -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario trailer_clash
+#     -cinema tr_clash -video 780 1320 tr_clash -maxframes 1340
+#
+# The two starts are about 1570 units apart, so the armies meet around frame 780.
+
+30    spawn      0  AmericaTankCrusader             14  start0:0:260     40
+30    spawn      0  AmericaTankPaladin              6   start0:-260:260  40
+30    spawn      0  AmericaVehicleHumvee            8   start0:300:260   34
+30    spawn      0  AmericaVehicleTomahawk          6   start0:0:120     40
+30    spawn      0  AmericaInfantryRanger           20  start0:-120:380  18
+30    spawn      0  AmericaInfantryMissileDefender  10  start0:180:380   18
+30    spawn      0  AmericaVehicleComanche          4   start0:-400:200  60
+
+30    spawn      1  ChinaTankBattleMaster           16  start1:0:-260    40
+30    spawn      1  ChinaTankOverlord               4   start1:-260:-260 50
+30    spawn      1  ChinaTankGattling               8   start1:300:-260  36
+30    spawn      1  ChinaTankDragon                 6   start1:-380:-180 36
+30    spawn      1  ChinaVehicleInfernoCannon       6   start1:0:-120    40
+30    spawn      1  ChinaInfantryRedguard           24  start1:-120:-380 18
+30    spawn      1  ChinaInfantryTankHunter         10  start1:180:-380  18
+30    spawn      1  ChinaVehicleHelix               2   start1:420:-200  60
+
+60    attackmove 0  *  start1
+60    attackmove 1  *  start0
+
+900   spawn      0  AmericaTankCrusader             10  start0:0:260     40
+900   spawn      0  AmericaInfantryRanger           14  start0:-120:380  18
+900   spawn      0  AmericaVehicleHumvee            6   start0:300:260   34
+900   spawn      1  ChinaTankBattleMaster           12  start1:0:-260    40
+900   spawn      1  ChinaInfantryRedguard           16  start1:-120:-380 18
+900   spawn      1  ChinaTankGattling               6   start1:300:-260  36
+930   attackmove 0  *  start1
+930   attackmove 1  *  start0
+
+1500  spawn      0  AmericaTankPaladin              8   start0:-260:260  40
+1500  spawn      0  AmericaVehicleTomahawk          4   start0:0:120     40
+1500  spawn      1  ChinaTankOverlord               4   start1:-260:-260 50
+1500  spawn      1  ChinaVehicleInfernoCannon       4   start1:0:-120    40
+1530  attackmove 0  *  start1
+1530  attackmove 1  *  start0

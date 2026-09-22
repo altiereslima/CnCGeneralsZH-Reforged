@@ -64,10 +64,10 @@ enum
 	/// a lane taken to get round somebody is held this long, so it cannot flap side to side
 	CROWD_HOLD_FRAMES			= 45,
 
-	/* How many samples either side of a bridge lose their band as well, so the approach funnels in.
-		 Six cells and not four: a unit that is still a lane wide of the centre when the band shuts is
-		 a unit arriving at the abutment sideways, and the sideways step is rate-limited to a quarter
-		 of its speed.  The funnel has to be longer than the time that step takes. */
+	/* How many samples either side of a bridge are held to the deck's width, so the approach funnels
+		 in.  Six cells and not four: a unit that is still a lane wide of the deck when the band shuts
+		 is a unit arriving at the abutment sideways, and the sideways step is rate-limited to a
+		 quarter of its speed.  The funnel has to be longer than the time that step takes. */
 	CROWD_BRIDGE_SEAL			= 6,
 
 	/// how far ahead of itself a unit steers, in cells, before its own body length is added
@@ -87,6 +87,22 @@ enum
 		capped at CROWD_MAX_LANES, and never more lanes than there are bodies to put in them
 		(`members` of 0 means the caller counts them itself). */
 extern Int Crowd_laneCount( Real span, Real spacing, Int members );
+
+/// one corner of a route, and the deck it is on
+struct CrowdRoutePoint
+{
+	Coord3D						pos;
+	PathfindLayerEnum	layer;
+};
+typedef std::vector<CrowdRoutePoint> CrowdRoute;
+
+/// the optimized corners of `path`, first to last
+extern void Crowd_routeFromPath( Path *path, CrowdRoute *out );
+
+/** Where a lane `offset` left of a route turns at the corner `c` between `a` and `b`: along the
+		bisector of the two legs' left normals, as far as keeps both legs `offset` away, and never
+		more than twice `offset` however sharp the turn.  FALSE for a leg of no length. */
+extern Bool Crowd_laneCorner( const Coord3D& a, const Coord3D& c, const Coord3D& b, Real offset, Coord2D *shift );
 
 /**
  * A route, sampled, with the width of the drivable ground either side of every sample.
@@ -162,10 +178,11 @@ public:
 	void buildForTest( const Coord3D *pts, Int count, Real halfWidth,
 										 const PathfindLayerEnum *layers = NULL, const Real *halfWidths = NULL );
 
-	/// close the band on every bridge deck and on the ground either side of one
+	/// hold the ground either side of every bridge deck to a funnel onto the deck's own width
 	void sealBridges( void );
 
 private:
+	void holdApproach( Int end, Int step );		///< see sealBridges
 	/// the sample at or before `along`, with the fraction of the way to the next one
 	Int bracket( Real along, Real *frac ) const;
 
@@ -197,6 +214,16 @@ extern Real Crowd_remaining( const Object *obj );
 		braking cost 3518 blocked unit-frames a match and braking behind parked allies 16593, against
 		1236 for this. */
 extern Real Crowd_brakeSpeed( Real speed, Real blockerSpeed, Real gap, Int frames );
+
+/** The throttle a unit is allowed this frame, given the one it held last frame.
+
+		A brake is taken the moment it is asked for; coming off one is a ramp.  Every input to the
+		speed cap is read raw once a frame - who is in front of us, how fast he is going, how much air
+		is left - and all three of them flicker: the blocker slips out of the lookahead cone for a
+		frame and the cap jumps back to full speed, the unit lunges, the blocker is inside the cone
+		again and the brake goes back on.  That is a column pumping the pedal several times a second,
+		and it feeds itself, because the unit behind reads our speed and does the same harder. */
+extern Real Crowd_releaseCap( Real held, Real want, Real filter );
 
 /** The inside of a bend counts as being further ahead than it is.
 		A unit on the inside of a turn has the least room and is the easiest to squeeze, so it is

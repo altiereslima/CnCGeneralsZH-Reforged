@@ -87,7 +87,9 @@ struct KeyboardIO
 class Keyboard : public SubsystemInterface
 {
 
-	enum { KEY_REPEAT_DELAY = 10 };
+	// wall clock, not input frames: ten frames was a third of a second at the 30 fps the game
+	// was written for and 70ms at 144, shorter than an ordinary keypress
+	enum { KEY_REPEAT_DELAY_MS = 400, KEY_REPEAT_INTERVAL_MS = 40 };
 
 public:
 

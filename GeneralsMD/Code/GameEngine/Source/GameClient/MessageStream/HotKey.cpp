@@ -167,6 +167,21 @@ void HotKeyManager::addHotKey( GameWindow *win, const AsciiString& keyIn)
 }
 
 //-----------------------------------------------------------------------------
+GameWindow *HotKeyManager::findHotKey( const AsciiString& keyIn, Bool *pressable ) const
+{
+	AsciiString key = keyIn;
+	key.toLower();
+	HotKeyMap::const_iterator it = m_hotKeyMap.find(key);
+	if( it == m_hotKeyMap.end() || it->second.m_win == NULL )
+		return NULL;
+
+	GameWindow *win = it->second.m_win;
+	const UnsignedInt status = win->winGetStatus();
+	*pressable = !BitTest( status, WIN_STATUS_HIDDEN ) && BitTest( status, WIN_STATUS_ENABLED );
+	return win;
+}
+
+//-----------------------------------------------------------------------------
 Bool HotKeyManager::executeHotKey( const AsciiString& keyIn )
 {
 	AsciiString key = keyIn;

@@ -293,6 +293,34 @@ TEST(dx11state_a_fresh_sampler_block_is_the_d3d9_default_sampler)
 	CHECK_EQ(description.MaxAnisotropy, 1u);
 }
 
+// A helicopter's rotor is a blended material with its depth writes off, and in the sun's depth pass
+// that left it out of the map.  The pass writes depth for everything and cuts a blended caster at
+// its alpha; one that adds light casts nothing; and the material's own states are untouched after.
+TEST(dx11state_the_shadow_caster_pass_writes_depth_for_a_blended_caster)
+{
+	DX11StateBlockClass block;
+	block.Set_Render_State(D3DRS_ALPHABLENDENABLE, TRUE);
+	block.Set_Render_State(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+	block.Set_Render_State(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+	block.Set_Render_State(D3DRS_ZWRITEENABLE, FALSE);
+
+	block.Set_Shadow_Caster_Pass(true);
+	D3D11_DEPTH_STENCIL_DESC depth;
+	block.Build_Depth_Stencil_Description(depth);
+	CHECK_EQ(depth.DepthWriteMask, D3D11_DEPTH_WRITE_MASK_ALL);
+	CHECK_EQ(block.Get_Render_State(D3DRS_ALPHATESTENABLE), (DWORD)TRUE);
+	CHECK_EQ(block.Get_Render_State(D3DRS_ALPHAFUNC), (DWORD)D3DCMP_GREATEREQUAL);
+	CHECK(block.Get_Render_State(D3DRS_ALPHAREF) > 0u);
+
+	block.Set_Render_State(D3DRS_DESTBLEND, D3DBLEND_ONE);
+	CHECK_EQ(block.Get_Render_State(D3DRS_ALPHAFUNC), (DWORD)D3DCMP_NEVER);
+
+	block.Set_Shadow_Caster_Pass(false);
+	block.Build_Depth_Stencil_Description(depth);
+	CHECK_EQ(depth.DepthWriteMask, D3D11_DEPTH_WRITE_MASK_ZERO);
+	CHECK_EQ(block.Get_Render_State(D3DRS_ALPHATESTENABLE), (DWORD)FALSE);
+}
+
 // A state above the block's range is one D3D11 has nowhere to put anyway.  Writing it must not
 // walk off the end of the array, and reading it back reads zero rather than whatever was there.
 TEST(dx11state_a_state_outside_the_block_is_dropped_not_written_past_the_end)

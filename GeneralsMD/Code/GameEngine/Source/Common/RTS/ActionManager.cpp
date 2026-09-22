@@ -77,9 +77,89 @@ ActionManager *TheActionManager = NULL;
 // LOCAL //////////////////////////////////////////////////////////////////////////////////////////
 
 // ------------------------------------------------------------------------------------------------
+/** A player's own order against a structure out of their sight is judged on what they last saw of
+	* it, so neither the cursor nor the unit on its way gives away what has changed there.  The unit
+	* finds out once it can see the place, and the memory is gone by then.  The AI and scripts see
+	* the real thing, as they always have. */
 // ------------------------------------------------------------------------------------------------
-static Bool appearsToContainFriendlies(const Object* obj, const Object* otherObject)
+static const ObjectSeenState *seenStateForOrder( const Object *source, const Object *target, CommandSourceType commandSource )
 {
+	const Player *asker = source->getControllingPlayer();
+	if( !ActionManager_orderReadsMemory( commandSource, asker->getPlayerType() == PLAYER_HUMAN ) )
+		return NULL;
+
+	return target->getSeenStateFor( asker->getPlayerIndex() );
+}
+
+// ------------------------------------------------------------------------------------------------
+Bool ActionManager_orderReadsMemory( CommandSourceType commandSource, Bool humanAsker )
+{
+	return commandSource == CMD_FROM_PLAYER && humanAsker;
+}
+
+// ------------------------------------------------------------------------------------------------
+/** NULL when there is no memory, or its team has since been disbanded and there is nothing left to
+	* compare against but the live one. */
+// ------------------------------------------------------------------------------------------------
+static const Team *teamAsSeen( const Object *source, const Object *target, CommandSourceType commandSource )
+{
+	const ObjectSeenState *seen = seenStateForOrder( source, target, commandSource );
+	return seen ? TheTeamFactory->findTeamByID( seen->teamID ) : NULL;
+}
+
+// ------------------------------------------------------------------------------------------------
+static Relationship relationshipAsSeen( const Object *source, const Object *target, CommandSourceType commandSource )
+{
+	const Team *seenTeam = teamAsSeen( source, target, commandSource );
+	if( seenTeam == NULL || source->getIsUndetectedDefector() )
+		return source->getRelationship( target );
+
+	return source->getTeam()->getRelationship( seenTeam );
+}
+
+// ------------------------------------------------------------------------------------------------
+static const Player *ownerAsSeen( const Object *source, const Object *target, CommandSourceType commandSource )
+{
+	const Team *seenTeam = teamAsSeen( source, target, commandSource );
+	return seenTeam ? seenTeam->getControllingPlayer() : target->getControllingPlayer();
+}
+
+// ------------------------------------------------------------------------------------------------
+static Int nonStealthOccupantsAsSeen( const Object *source, const Object *target, CommandSourceType commandSource,
+																			const ContainModuleInterface *contain )
+{
+	const ObjectSeenState *seen = seenStateForOrder( source, target, commandSource );
+	if( seen )
+		return seen->nonStealthOccupants;
+
+	return contain->getContainCount() - contain->getStealthUnitsContained();
+}
+
+// ------------------------------------------------------------------------------------------------
+static Bool atFullHealthAsSeen( const Object *source, const Object *target, CommandSourceType commandSource )
+{
+	const ObjectSeenState *seen = seenStateForOrder( source, target, commandSource );
+	if( seen )
+		return seen->atFullHealth;
+
+	const BodyModuleInterface *body = target->getBodyModule();
+	return body->getHealth() == body->getMaxHealth();
+}
+
+// ------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
+static Bool appearsToContainFriendlies(const Object* obj, const Object* otherObject, CommandSourceType commandSource)
+{
+	const ObjectSeenState *seen = seenStateForOrder( obj, otherObject, commandSource );
+	if( seen )
+	{
+		if( seen->apparentPlayerIndex == ObjectSeenState::NO_APPARENT_PLAYER )
+			return FALSE;
+
+		const Player *seenPlayer = ThePlayerList->getNthPlayer( seen->apparentPlayerIndex );
+		return obj->getTeam()->getRelationship( seenPlayer->getDefaultTeam() ) != ENEMIES;
+	}
+
 	// check if the object is a container containing stealth units tricking
 	// the player into thinking it isn't actually an enemy.
 	const ContainModuleInterface *otherContain = otherObject->getContain();
@@ -110,7 +190,9 @@ static Bool isObjectShroudedForAction ( const Object *source, const Object *targ
 	
 	// the asking player is human
 	// the asking impetus is not from a script
-	// and the target object is Fogged or worse
+	// and the player neither sees the target nor remembers it.  Fog alone does not stop the order: what
+	// the player last saw there is what they click on, and whether the enter, capture or hack still
+	// works is decided when the unit can see it.
 
 	if( source && target && source->getControllingPlayer() ) 
 	{
@@ -126,7 +208,7 @@ static Bool isObjectShroudedForAction ( const Object *source, const Object *targ
 
 		return ActionManager_shroudHidesTarget( source->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN,
 																						commandSource == CMD_FROM_SCRIPT,
-																						target->getShroudedStatus( source->getControllingPlayer()->getPlayerIndex() ) >= OBJECTSHROUD_FOGGED,
+																						target->isUnknownTo( source->getControllingPlayer()->getPlayerIndex() ),
 																						ownPlacementSilhouette );
 	}
 
@@ -135,13 +217,13 @@ static Bool isObjectShroudedForAction ( const Object *source, const Object *targ
 
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
-Bool ActionManager_shroudHidesTarget( Bool humanSource, Bool fromScript, Bool targetFoggedOrWorse,
+Bool ActionManager_shroudHidesTarget( Bool humanSource, Bool fromScript, Bool targetShrouded,
 																			Bool ownPlacementSilhouette )
 {
 	if( ownPlacementSilhouette )
 		return FALSE;
 
-	return humanSource && !fromScript && targetFoggedOrWorse;
+	return humanSource && !fromScript && targetShrouded;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -169,7 +251,7 @@ Bool ActionManager::canGetRepairedAt( const Object *obj, const Object *repairDes
 	if( obj == NULL || repairDest == NULL )
 		return FALSE;
 
-	Relationship r = obj->getRelationship(repairDest);
+	Relationship r = relationshipAsSeen(obj, repairDest, commandSource);
 
 	// only available by our allies
 	if( r != ALLIES )
@@ -227,7 +309,7 @@ Bool ActionManager::canGetRepairedAt( const Object *obj, const Object *repairDes
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
 // note that "dest" is typically a building...
-Bool ActionManager::canTransferSuppliesAt( const Object *obj, const Object *transferDest ) 
+Bool ActionManager::canTransferSuppliesAt( const Object *obj, const Object *transferDest, CommandSourceType commandSource )
 {
 
 	// sanity
@@ -260,16 +342,22 @@ Bool ActionManager::canTransferSuppliesAt( const Object *obj, const Object *tran
 	// If it is a warehouse, it must have boxes left and not be an enemy
 	static const NameKeyType key_warehouseUpdate = NAMEKEY("SupplyWarehouseDockUpdate");
 	SupplyWarehouseDockUpdate *warehouseModule = (SupplyWarehouseDockUpdate*)transferDest->findUpdateModule( key_warehouseUpdate );
+	const ObjectSeenState *seen = seenStateForOrder( obj, transferDest, commandSource );
 	if( warehouseModule )
-		if( warehouseModule->getBoxesStored() == 0 || transferDest->getRelationship( obj ) == ENEMIES )
+	{
+		Bool exhausted = seen ? seen->suppliesExhausted : warehouseModule->getBoxesStored() == 0;
+		const Team *seenTeam = teamAsSeen( obj, transferDest, commandSource );
+		Relationship warehouseToTruck = seenTeam ? seenTeam->getRelationship( obj->getTeam() ) : transferDest->getRelationship( obj );
+		if( exhausted || warehouseToTruck == ENEMIES )
 			return FALSE;
+	}
 
 	// if it is a supply center, I must have boxes, and must be controlled by the same player
 	// (not merely an ally... otherwise you may find yourself funding your allies. ick.)
 	static const NameKeyType key_centerUpdate = NAMEKEY("SupplyCenterDockUpdate");
 	SupplyCenterDockUpdate *centerModule = (SupplyCenterDockUpdate*)transferDest->findUpdateModule( key_centerUpdate );
 	if( centerModule  )
-		if( supplyTruck->getNumberBoxes() == 0  || transferDest->getControllingPlayer() != obj->getControllingPlayer() )
+		if( supplyTruck->getNumberBoxes() == 0  || ownerAsSeen( obj, transferDest, commandSource ) != obj->getControllingPlayer() )
 			return FALSE;
 
 	// if he is not a warehouse or a center, then shut the hell up
@@ -292,7 +380,7 @@ Bool ActionManager::canTransferSuppliesAt( const Object *obj, const Object *tran
 	if( objPlayer )
 	{
 		if( objPlayer->getPlayerType() == PLAYER_HUMAN && 
-			transferDest->getShroudedStatus( objPlayer->getPlayerIndex() ) == OBJECTSHROUD_SHROUDED )
+			transferDest->isUnknownTo( objPlayer->getPlayerIndex() ) )
 		{
 			return FALSE;
 		}
@@ -326,7 +414,7 @@ Bool ActionManager::canDockAt( const Object *obj, const Object *dockDest, Comman
 */
 
 	// transferring supplies is a valid docking action
-	if( canTransferSuppliesAt( obj, dockDest ) == TRUE )
+	if( canTransferSuppliesAt( obj, dockDest, commandSource ) == TRUE )
 		return TRUE;
 
 	// units and infantry can dock with a railed transport
@@ -354,7 +442,7 @@ Bool ActionManager::canGetHealedAt( const Object *obj, const Object *healDest, C
 	if( obj == NULL || healDest == NULL )
 		return FALSE;
 
-	Relationship r = obj->getRelationship(healDest);
+	Relationship r = relationshipAsSeen(obj, healDest, commandSource);
 
 	// only available by our allies
 	if( r != ALLIES )
@@ -406,7 +494,7 @@ Bool ActionManager::canRepairObject( const Object *obj, const Object *objectToRe
 	if( obj == NULL || objectToRepair == NULL )
 		return FALSE;
 
-	Relationship r = obj->getRelationship(objectToRepair);
+	Relationship r = relationshipAsSeen(obj, objectToRepair, commandSource);
 
 	// you can only repair allies, we ignore this restriction for bridges
 	// srj sez: nope, allow neutral too, so civ bldgs can be repaired
@@ -445,11 +533,8 @@ Bool ActionManager::canRepairObject( const Object *obj, const Object *objectToRe
 	if( objectToRepair->isKindOf( KINDOF_STRUCTURE ) == FALSE )
 		return FALSE;
 
-	// get the body module from the object to repair
-	BodyModuleInterface *body = objectToRepair->getBodyModule();
-
 	// buildings that are at full health cannot be repaired
-	if( body->getHealth() == body->getMaxHealth() )
+	if( atFullHealthAsSeen( obj, objectToRepair, commandSource ) )
 		return FALSE;
 
 	// if the target is in the shroud, we can't do anything
@@ -708,13 +793,14 @@ Bool ActionManager::canEnterObject( const Object *obj, const Object *objectToEnt
 	}
 	else
 	{
-		Bool checkCapacity = (mode == CHECK_CAPACITY);
-		Int containCount = contain->getContainCount();
+		// in the fog capacity is not checked: a house that filled up while nobody was watching would
+		// turn the cursor away and give it up.  The unit finds out at the door.
+		Bool checkCapacity = (mode == CHECK_CAPACITY) && seenStateForOrder(obj, objectToEnter, commandSource) == NULL;
 		Int stealthContainCount = contain->getStealthUnitsContained();
-		Int nonStealthContainCount = containCount - stealthContainCount;
+		Int nonStealthContainCount = nonStealthOccupantsAsSeen(obj, objectToEnter, commandSource, contain);
 
 		// not ours... must do special checks.
-		if (objectToEnter->getControllingPlayer() != obj->getControllingPlayer())
+		if (ownerAsSeen(obj, objectToEnter, commandSource) != obj->getControllingPlayer())
 		{
 			// not empty... can't do it.
 			if (nonStealthContainCount > 0)
@@ -991,7 +1077,7 @@ Bool ActionManager::canSabotageBuilding( const Object *obj, const Object *object
 		return FALSE;
 	}
 
-	Relationship r = obj->getRelationship(objectToSabotage);
+	Relationship r = relationshipAsSeen(obj, objectToSabotage, commandSource);
 	//Only sabotage enemy objects
 	if( r != ENEMIES )
 	{
@@ -1119,7 +1205,7 @@ Bool ActionManager::canCaptureBuilding( const Object *obj, const Object *objectT
 	if (isObjectShroudedForAction(obj, objectToCapture, commandSource))
 		return FALSE;
 
-	Relationship r = obj->getRelationship(objectToCapture);
+	Relationship r = relationshipAsSeen(obj, objectToCapture, commandSource);
 
 	// ensure that it's capturable, and not allied
 	// exception: we can always capture enemy bldgs, regardless of kindof
@@ -1139,16 +1225,13 @@ Bool ActionManager::canCaptureBuilding( const Object *obj, const Object *objectT
 	ContainModuleInterface *contain = objectToCapture->getContain();
 	if (contain != NULL && contain->isGarrisonable())
 	{
-		Int containCount = contain->getContainCount();
-		Int stealthContainCount = contain->getStealthUnitsContained();
-		Int nonStealthContainCount = containCount - stealthContainCount;
-		if (nonStealthContainCount > 0)
+		if (nonStealthOccupantsAsSeen(obj, objectToCapture, commandSource, contain) > 0)
 			return FALSE;
 	}
 
 	// Also check if the object is a container containing stealth units, tricking
 	// the player into thinking it isn't actually an enemy.
-	if (appearsToContainFriendlies(obj, objectToCapture))
+	if (appearsToContainFriendlies(obj, objectToCapture, commandSource))
 		return FALSE;
 
   return TRUE;
@@ -1204,7 +1287,7 @@ Bool ActionManager::canDisableVehicleViaHacking( const Object *obj, const Object
 	if (isObjectShroudedForAction(obj, objectToHack, commandSource))
 		return FALSE;
 
-	Relationship r = obj->getRelationship(objectToHack);
+	Relationship r = relationshipAsSeen(obj, objectToHack, commandSource);
 
 	// Make sure object is an enemy
 	if( r == ENEMIES )
@@ -1226,7 +1309,7 @@ Bool ActionManager::canDisableVehicleViaHacking( const Object *obj, const Object
 
 		//Also check if the object is a container containing stealth units tricking
 		//the player into thinking it isn't actually an enemy.
-		if (appearsToContainFriendlies(obj, objectToHack))
+		if (appearsToContainFriendlies(obj, objectToHack, commandSource))
 			return FALSE;
 
 		return TRUE;
@@ -1322,7 +1405,7 @@ Bool ActionManager::canStealCashViaHacking( const Object *obj, const Object *obj
 	if (isObjectShroudedForAction(obj, objectToHack, commandSource))
 		return FALSE;
 
-	Relationship r = obj->getRelationship(objectToHack);
+	Relationship r = relationshipAsSeen(obj, objectToHack, commandSource);
 
 	// Make sure object is an enemy
 	if( r == ENEMIES )
@@ -1356,7 +1439,7 @@ Bool ActionManager::canStealCashViaHacking( const Object *obj, const Object *obj
 
 		//Also check if the object is a container containing stealth units tricking
 		//the player into thinking it isn't actually an enemy.
-		if (appearsToContainFriendlies(obj, objectToHack))
+		if (appearsToContainFriendlies(obj, objectToHack, commandSource))
 			return FALSE;
 
 		return TRUE;
@@ -1394,7 +1477,7 @@ Bool ActionManager::canDisableBuildingViaHacking( const Object *obj, const Objec
 	if (isObjectShroudedForAction(obj, objectToHack, commandSource))
 		return FALSE;
 
-	Relationship r = obj->getRelationship(objectToHack);
+	Relationship r = relationshipAsSeen(obj, objectToHack, commandSource);
 
 	// Make sure object is an enemy
 	if( r != ENEMIES )
@@ -1429,7 +1512,7 @@ Bool ActionManager::canDisableBuildingViaHacking( const Object *obj, const Objec
 
 	//Also check if the object is a container containing stealth units tricking
 	//the player into thinking it isn't actually an enemy.
-	if (appearsToContainFriendlies(obj, objectToHack))
+	if (appearsToContainFriendlies(obj, objectToHack, commandSource))
 		return FALSE;
 
 	return TRUE;
@@ -1682,7 +1765,7 @@ Bool ActionManager::canDoSpecialPowerAtObject( const Object *obj, const Object *
 		return FALSE;
 	}
 
-	Relationship r = obj->getRelationship(target);
+	Relationship r = relationshipAsSeen(obj, target, commandSource);
 	
 	SpecialPowerModuleInterface *mod = obj->getSpecialPowerModule( spTemplate );
 	if( mod )
@@ -1706,7 +1789,7 @@ Bool ActionManager::canDoSpecialPowerAtObject( const Object *obj, const Object *
 				return false;
 
 			case SPECIAL_BATTLESHIP_BOMBARDMENT:
-				if( obj->getRelationship( target ) != ALLIES )
+				if( r != ALLIES )
 				{
 					return TRUE;
 				}

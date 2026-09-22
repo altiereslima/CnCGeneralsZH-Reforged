@@ -318,17 +318,38 @@ Int WaterTracksObj::render(DX8VertexBufferClass	*vertexBuffer, Int batchStart)
 	Real	widthFrac;
 	Real	heightFrac;
 
+	/* This is the one place in the tree that locks the Direct3D 9 buffer itself instead of going
+		 through VertexBufferClass's lock classes, and those classes are where the Direct3D 11 twin
+		 of a buffer is written.  So under the Direct3D 11 backend the waves were sent to the card
+		 out of a twin nothing had ever filled: the draws were made, none were refused, and the surf
+		 was missing from the shell map's beach while Direct3D 9 still drew it.  The lock keeps its
+		 own NOOVERWRITE/DISCARD flags - this is a dynamic buffer written every frame - so the twin
+		 is opened by hand here rather than by swapping in AppendLockClass, which locks with none. */
+	const unsigned vertexSize = vertexBuffer->FVF_Info().Get_FVF_Size();
+	const unsigned byteCount = m_x*m_y*vertexSize;
+	unsigned byteOffset;
+	unsigned lockFlags;
+
 	if (batchStart < (WATER_VB_PAGES*WATER_STRIP_X*WATER_STRIP_Y-m_x*m_y))
 	{	//we have room in current VB, append new verts
-		if(vertexBuffer->Get_DX8_Vertex_Buffer()->Lock(batchStart*vertexBuffer->FVF_Info().Get_FVF_Size(),m_x*m_y*vertexBuffer->FVF_Info().Get_FVF_Size(),(void**)&vb,D3DLOCK_NOOVERWRITE) != D3D_OK)
+		byteOffset = batchStart*vertexSize;
+		lockFlags = D3DLOCK_NOOVERWRITE;
+		if(vertexBuffer->Get_DX8_Vertex_Buffer()->Lock(byteOffset,byteCount,(void**)&vb,lockFlags) != D3D_OK)
 			return batchStart;
 	}
 	else
 	{	//ran out of room in last VB, request a substitute VB.
-		if(vertexBuffer->Get_DX8_Vertex_Buffer()->Lock(0,m_x*m_y*vertexBuffer->FVF_Info().Get_FVF_Size(),(void**)&vb,D3DLOCK_DISCARD) != D3D_OK)
+		byteOffset = 0;
+		lockFlags = D3DLOCK_DISCARD;
+		if(vertexBuffer->Get_DX8_Vertex_Buffer()->Lock(byteOffset,byteCount,(void**)&vb,lockFlags) != D3D_OK)
 			return batchStart;
 		batchStart=0;	//reset start of page to first vertex
 	}
+
+	DX11BufferLockClass dx11Lock;
+	void *mirror = dx11Lock.Begin(vertexBuffer->Get_DX11_Twin(),vb,byteOffset,byteCount,lockFlags);
+	if (mirror)
+		vb = (VertexFormatXYZDUV1 *)mirror;
 
 	//Adjust wave position in a non-linear way so that it slows down as it hits the target.  Using 1/4 sine wave
 	//seems to work okay since it maxes out at 1.0 at our final position.
@@ -481,6 +502,7 @@ Int WaterTracksObj::render(DX8VertexBufferClass	*vertexBuffer, Int batchStart)
 	vb->v1=1.0f;
 	vb++;
 
+	dx11Lock.End();
 	vertexBuffer->Get_DX8_Vertex_Buffer()->Unlock();
 
 	Int idxCount=(m_y-1)*(m_x*2+2) - 2;	//index count

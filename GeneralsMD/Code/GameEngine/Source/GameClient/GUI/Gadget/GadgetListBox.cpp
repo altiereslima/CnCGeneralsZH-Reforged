@@ -1504,26 +1504,21 @@ WindowMsgHandledType GadgetListBoxSystem( GameWindow *window, UnsignedInt msg,
 				if( list->autoScroll )
 				{
 
+					// we use -1 because insertPos was increased in addEntry
+					const Int shownRow = ( row == -1 ) ? ( list->insertPos - 1 ) : row;
 					while( TRUE )
 					{
 						// If off bottom of screen, scroll and try again.
-						// we use -1 because insertPos was increased in addEntry
-						if( row == -1 )
-						{
-							if( list->listData[(list->insertPos - 1)].listHeight >= 
-									(list->displayPos + list->displayHeight) )
-								adjustDisplay( window, 1, TRUE );
-							else
-								break;
-						}
-						else 
-						{
-							if( list->listData[( row )].listHeight >= 
-									(list->displayPos + list->displayHeight) )
-								adjustDisplay( window, 1, TRUE );
-							else
-								break;
-						}
+						if( list->listData[ shownRow ].listHeight < ( list->displayPos + list->displayHeight ) )
+							break;
+
+						/* An entry taller than the box never fits however far it scrolls, and EA's loop
+							 then spun forever: the disconnect screen on a 100x100 headless window froze
+							 both surviving machines of a network game the moment a player dropped. */
+						const Int displayPosBefore = list->displayPos;
+						adjustDisplay( window, 1, TRUE );
+						if( list->displayPos == displayPosBefore )
+							break;
 					}
 
 				}
@@ -1799,7 +1794,9 @@ WindowMsgHandledType GadgetListBoxSystem( GameWindow *window, UnsignedInt msg,
 		{
 			
 			if( list->multiSelect )
-				*(Int*)mData2 = (Int)list->selections;
+				// A multi-select box hands back its own -1 terminated array of indices rather than
+				// copying it, so what lands in the caller's buffer is a pointer and needs all of it.
+				*(UnsignedIntPtr*)mData2 = (UnsignedIntPtr)list->selections;
 			else
 				*(Int*)mData2 = list->selectPos;
 

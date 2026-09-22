@@ -291,6 +291,7 @@ private:
 	Bool m_zoomAnchorValid;													///< a wheel zoom is holding the ground under the cursor
 	ICoord2D m_zoomAnchorPixel;											///< the pixel the wheel was spun over
 	Coord3D m_zoomAnchorWorld;											///< the ground that has to stay under it
+	Real m_zoomAnchorTerrainHeight;									///< the ground height the zoom settles against while it is held
 	void holdZoomAnchor( Bool zoomMoved );					///< move the camera so the anchored ground is back under its pixel
 
 	Bool isDoingScriptedCamera( void ) const;				///< True while any scripted camera movement owns the view

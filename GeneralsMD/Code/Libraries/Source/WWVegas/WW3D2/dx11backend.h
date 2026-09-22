@@ -150,6 +150,29 @@ public:
 	// size a target comes in and kept; the engine uses two or three of them in a match.
 	void Set_Render_Target(ID3D11RenderTargetView * target);
 
+	// The sun's own depth buffer, which the caster pass draws into and everything that receives a
+	// shadow samples.  Begin binds it as the only output, takes the viewport with it and clears it;
+	// End puts the back buffer and the viewport back.  The texture is made once, at the first size
+	// asked for.  SHADOW-MAP-PLAN.md phase 1.
+	bool Begin_Shadow_Map(unsigned size);
+	void End_Shadow_Map();
+
+	// The filter's own numbers, set once a frame by the pass that fills the map.  The matrix that
+	// takes a pixel into the sun's clip space is built here rather than handed in: the sun's view
+	// and projection are the ones this held while the map was bound, and the frame's are the ones
+	// it holds when the draw arrives, so both halves are already in one convention.
+	void Set_Shadow_Parameters(float bias, float strength, float widest_radius_in_texels,
+		float narrowest_radius_in_texels, float texels_per_unit_of_gap, float units_per_unit_of_depth,
+		float sky_fill);
+	void Clear_Shadow_Parameters();
+	bool Shadow_Map_Bound() const { return ShadowMapBound; }
+	ID3D11ShaderResourceView * Shadow_Map() const { return ShadowMapTexture; }
+
+	// What is in the map, read back through a staging copy: how much of it was drawn into and how
+	// near the nearest thing is.  A caster pass that drew nothing leaves a map that is all one
+	// value, and no draw count tells that apart from a pass that drew the world.
+	std::string Shadow_Map_Report();
+
 	// The two draws.  Both resolve the shadow state into a pipeline first, and both return false
 	// when some part of that state has no D3D11 answer, which leaves the draw undone rather than
 	// drawn wrongly.
@@ -257,11 +280,27 @@ private:
 		float NormalLightDiffuse[NORMAL_MAPPED_LIGHTS][4];
 		float NormalMapParameters[4];
 		float TerrainSunDirection[4];
+		// Clip space to the sun's clip space, and the filter's own numbers: texel size, depth bias,
+		// how dark a fully blocked pixel goes, and the radius in texels.
+		float ShadowFromClip[16];
+		float ShadowParameters[4];
+		float ShadowViewport[4];
+		// The narrowest the filter goes, how many texels it opens per world unit of gap between a
+		// caster and what it falls on, how many world units a unit of depth is, and how much of a
+		// wide shadow the sky fills back in.
+		float ShadowSoftness[4];
+		// What a metal surface mirrors: the map's own light as a sky colour with the share metal
+		// returns in its alpha, and which way up the world is in camera space with the horizon's
+		// share of the zenith colour in its own.
+		float Sky[4];
+		float SkyUp[4];
 	};
 	// A model under directional lights, drawn by generated programs.
 	bool Normal_Mapped() const;
 	// The ground, drawn by one of the transcribed terrain programs with its light baked in.
 	bool Terrain_Bumped() const;
+	// A draw that is painting the world and can take a shadow from the sun's map.
+	bool Shadow_Receiving() const;
 
 	bool Resolve(Pipeline & pipeline);
 	bool Build_Vertex_Description(VertexPipelineDescription & description) const;
@@ -311,6 +350,38 @@ private:
 	// What the viewport is, so a pre-transformed vertex can be put back into clip space.
 	unsigned ViewportWidth;
 	unsigned ViewportHeight;
+
+	// The sun's depth buffer and the two views of it: one to draw into, one to sample.  The
+	// viewport the frame was using is kept while it is bound, because the map is square and the
+	// screen is not.
+	ID3D11Texture2D * ShadowMapSurface;
+	ID3D11DepthStencilView * ShadowMapDepth;
+	ID3D11ShaderResourceView * ShadowMapTexture;
+	unsigned ShadowMapSize;
+	bool ShadowMapBound;
+	unsigned ShadowMapSavedWidth;
+	unsigned ShadowMapSavedHeight;
+	// What the frame was drawing into when the pass took the device.  Almost never the back buffer:
+	// the scene goes into a texture and the post chain puts it on the screen, so restoring the back
+	// buffer here left the rest of the frame painting somewhere nobody shows.
+	ID3D11RenderTargetView * ShadowMapSavedTarget;
+	ID3D11SamplerState * ShadowMapSampler;
+	float SunViewProjection[16];		///< what the sun was looking through while the map was filled
+	float ShadowBias;
+	float ShadowStrength;
+	float ShadowRadius;
+	float ShadowNarrowestRadius;
+	float ShadowTexelsPerGap;
+	float ShadowUnitsPerDepth;
+	float ShadowSkyFill;
+	bool ShadowReceiving;
+	// The frame's clip space to the sun's, worked out from a scene view and projection pair and
+	// kept until one of them changes, because an inverse a draw does not need is an inverse nobody
+	// should pay for.
+	float ShadowFromClip[16];
+	float ShadowFromClipView[16];
+	float ShadowFromClipProjection[16];
+	bool ShadowFromClipValid;
 
 	float MaterialAmbient[4];
 	float MaterialDiffuse[4];

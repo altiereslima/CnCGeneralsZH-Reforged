@@ -47,10 +47,10 @@ Bool DecompressFile		(char *infile, char *outfile)
 	char *outBlock	= NULL;
 	LZHL_DHANDLE decompress;
 	Int ok = 0;
-	UnsignedInt srcSz, dstSz;
+	size_t srcSz, dstSz;
 
 	// Parameter checking
-	 
+
 	if (( infile == NULL ) || ( outfile == NULL ))
 		return FALSE;
 
@@ -224,7 +224,7 @@ Bool DecompressMemory		(void *inBufferVoid, Int inSize, void *outBufferVoid, Int
 	UnsignedInt	rawSize = 0, compressedSize = 0;
 	LZHL_DHANDLE decompress;
 	Int ok = 0;
-	UnsignedInt srcSz, dstSz;
+	size_t srcSz, dstSz;
 
 	// Parameter checking
 	 

@@ -35,6 +35,7 @@
 #include "Common/Player.h"
 #include "Common/SpecialPower.h"
 #include "Common/ThingTemplate.h"
+#include "Common/TunnelTracker.h"
 #include "Common/Upgrade.h"
 #include "Common/Xfer.h"
 #include "Common/XferCRC.h"
@@ -57,6 +58,7 @@
 #include "GameLogic/Module/StealthUpdate.h"
 #include "GameLogic/Module/SpecialPowerUpdateModule.h"
 #include "GameLogic/ObjectIter.h"
+#include "GameLogic/PartitionManager.h"
 #include "GameLogic/TerrainLogic.h"
 
 #ifdef _INTERNAL
@@ -1602,6 +1604,82 @@ static Bool laneSeedIsLeftOf( const LaneSeed& a, const LaneSeed& b )
 		`bias` comes back as the offset of the middle of the drivable span from the centre line, which
 		is what keeps a route running along a wall from spreading into the wall: the room is measured
 		separately on the two sides and the lanes are laid out in the room that exists. */
+/** Ground members take their goals from one flood out of the clicked cell.  Airborne ones used to
+		take the click itself, every one of them, and nothing pushes two hovering helicopters apart:
+		six Comanches sent to one point ended up rotor inside rotor.  They are laid out on rings round
+		the click instead, one in the middle and six to a ring after that, spaced by the widest body
+		among them so the discs clear each other.  The member nearest the click takes the middle and
+		the rest fill outwards, so the one already there does not cross the group to reach a ring. */
+static void spreadAirborneGoals( const Coord3D& clicked, const std::vector<Object *>& members,
+																 std::vector<Coord3D>& goals )
+{
+	// A helicopter's rotor disc is wider than the body its geometry describes, so the clearance is
+	// measured in bodies and taken from the picture: at 2.4 the fuselages cleared and the discs still
+	// cut through each other, at 4 six Comanches sit apart.
+	const Real AIRBORNE_BODY_CLEARANCE = 4.0f;
+	const Int AIRBORNE_SLOTS_PER_RING = 6;
+
+	const Int count = (Int)members.size();
+	goals.assign( count, clicked );
+	if (count < 2)
+		return;
+
+	Real spacing = 0.0f;
+	for (Int i = 0; i < count; i++)
+	{
+		const Real body = members[ i ]->getGeometryInfo().getBoundingCircleRadius();
+		if (body > spacing)
+			spacing = body;
+	}
+	spacing *= AIRBORNE_BODY_CLEARANCE;
+	if (spacing < 1.0f)
+		return;
+
+	// nearest the click first, so the slot in the middle goes to whoever has least distance to give up
+	std::vector<LaneSeed> order;
+	for (Int i = 0; i < count; i++)
+	{
+		LaneSeed seed;
+		seed.obj = members[ i ];
+		const Coord3D *at = members[ i ]->getPosition();
+		// squared: this is only ever sorted on, and the order is the same either way
+		seed.lat = sqr( at->x - clicked.x ) + sqr( at->y - clicked.y );
+		order.push_back( seed );
+	}
+	std::sort( order.begin(), order.end(), laneSeedIsLeftOf );
+
+	for (Int placed = 0; placed < count; placed++)
+	{
+		Int ring = 0;
+		Int taken = 1;												// the middle slot
+		Int firstOfRing = 0;
+		while (placed >= taken)
+		{
+			++ring;
+			firstOfRing = taken;
+			taken += AIRBORNE_SLOTS_PER_RING * ring;
+		}
+
+		Coord3D goal = clicked;
+		if (ring > 0)
+		{
+			const Int slots = AIRBORNE_SLOTS_PER_RING * ring;
+			const Real angle = 2.0f * PI * (Real)(placed - firstOfRing) / (Real)slots;
+			goal.x += Cos( angle ) * spacing * (Real)ring;
+			goal.y += Sin( angle ) * spacing * (Real)ring;
+		}
+
+		for (Int i = 0; i < count; i++)
+		{
+			if (members[ i ] == order[ placed ].obj)
+			{
+				goals[ i ] = goal;
+				break;
+			}
+		}
+	}
+}
+
 static Int crowdRoadLanes( Object *probe, const Coord3D& center, const Coord2D& dir, Real spacing,
 													 Real *bias )
 {
@@ -1637,6 +1715,166 @@ static void crowdClearLanes( std::list<Object *>& members )
 		if (ai != NULL)
 			ai->clearCrowdLane();
 	}
+}
+
+static const Int CROWD_TRUNK_DIAMETER = 6;			///< the widest the group's route is searched at, in cells
+static const Int CROWD_PLAN_STEPS = 4;					///< a lane closes to the group's line in quarters
+
+/** One member's lane of the group's route: every corner of `trunk` moved `offset` to its left,
+		and then the member's own spot at the end.
+
+		The corner moves along the bisector of the two legs that meet there, as far as keeps both legs
+		`offset` from the group's, so the lane runs parallel to the route through the turn and the
+		outside lane goes round the outside of it.  Corners behind the member are skipped, so the
+		front of the group does not drive back to the start.  Returns FALSE when the lane cannot be
+		laid, and the member searches for its own path.
+
+		Where the whole offset does not fit - a wall, a building - the lane closes towards the group's
+		line in quarters, and it closes over three corners, never one: each corner is held to the
+		narrowest of itself and its two neighbours.  Measured corner by corner alone, a lane down a
+		street took the full offset, half, the full offset again and none, one after the other, and a
+		tank steered down that zigzag slows for every kink in it: the town crossing arrived 7% later on
+		average for that alone. */
+static Bool crowdPlanLane( Object *unit, const CrowdRoute& trunk, Real offset, const Coord3D& goal, CrowdRoute *out )
+{
+	out->clear();
+
+	AIUpdateInterface *ai = unit->getAIUpdateInterface();
+	const LocomotorSet& loco = ai->getLocomotorSet();
+	const LocomotorSurfaceTypeMask surfaces = loco.getValidSurfaces();
+	const Bool crusher = unit->getCrusherLevel() > 0;
+	Pathfinder *pf = TheAI->pathfinder();
+
+	//--- how far each corner can move out on its own ------------------------------------------------
+	const Int corners = (Int)trunk.size();
+	std::vector<Coord2D> shifts( corners );
+	std::vector<Int> fits( corners, CROWD_PLAN_STEPS );
+	for (Int k = 1; k + 1 < corners; k++)
+	{
+		const CrowdRoutePoint& a = trunk[ k - 1 ];
+		const CrowdRoutePoint& c = trunk[ k ];
+		const CrowdRoutePoint& b = trunk[ k + 1 ];
+		fits[ k ] = 0;
+		shifts[ k ].x = 0.0f;
+		shifts[ k ].y = 0.0f;
+
+		// a corner beside a deck edge stays on the group's line: see the chain below
+		if (a.layer != c.layer || b.layer != c.layer)
+			continue;
+		if (!Crowd_laneCorner( a.pos, c.pos, b.pos, offset, &shifts[ k ] ))
+			continue;
+
+		for (Int q = CROWD_PLAN_STEPS; q > 0; q--)
+		{
+			Coord3D p = c.pos;
+			p.x += shifts[ k ].x * (Real)q / (Real)CROWD_PLAN_STEPS;
+			p.y += shifts[ k ].y * (Real)q / (Real)CROWD_PLAN_STEPS;
+			p.z = TheTerrainLogic->getLayerHeight( p.x, p.y, c.layer );
+			if (pf->validMovementPosition( crusher, c.layer, loco, &p )
+						&& pf->isLinePassable( unit, surfaces, c.layer, c.pos, p, false, true ))
+			{
+				fits[ k ] = q;
+				break;
+			}
+		}
+	}
+
+	//--- and no wider at a corner than at either neighbour ------------------------------------------
+	std::vector<Int> shares( fits );
+	for (Int k = 1; k + 1 < corners; k++)
+	{
+		if (fits[ k - 1 ] < shares[ k ]) shares[ k ] = fits[ k - 1 ];
+		if (fits[ k + 1 ] < shares[ k ]) shares[ k ] = fits[ k + 1 ];
+	}
+
+	//--- then the lane itself, leg by leg from where the member stands -------------------------------
+	Coord3D prev = *unit->getPosition();
+	PathfindLayerEnum prevLayer = unit->getLayer();
+	Int prevCorner = -1;				// which of the group's corners prev was laid off, if any
+	for (Int k = 1; k + 1 < corners; k++)
+	{
+		const CrowdRoutePoint& a = trunk[ k - 1 ];
+		const CrowdRoutePoint& c = trunk[ k ];
+
+		Coord2D in;
+		in.x = c.pos.x - a.pos.x;
+		in.y = c.pos.y - a.pos.y;
+		if ((c.pos.x - prev.x) * in.x + (c.pos.y - prev.y) * in.y <= 0.0f)
+			continue;						// already past it
+
+		/* A leg that changes deck is driven as the group drives it or not at all.  Nothing checks a
+			 straight line from one deck to another, and a lane leaving the approach a body width off the
+			 group's line reaches the abutment across the riverbank beside it. */
+		const Bool changesDeck = prevLayer != c.layer;
+		Bool placed = FALSE;
+		for (Int q = changesDeck ? 0 : shares[ k ]; q >= 0 && !placed; q--)
+		{
+			CrowdRoutePoint p;
+			p.layer = c.layer;
+			p.pos = c.pos;
+			p.pos.x += shifts[ k ].x * (Real)q / (Real)CROWD_PLAN_STEPS;
+			p.pos.y += shifts[ k ].y * (Real)q / (Real)CROWD_PLAN_STEPS;
+			p.pos.z = TheTerrainLogic->getLayerHeight( p.pos.x, p.pos.y, p.layer );
+
+			// the group's own leg, corner to corner, is the wide search's answer and is not asked again:
+			// that search measures clearance by diameter, and a straight-line test by body can refuse it
+			const Bool groupLeg = q == 0 && prev.x == a.pos.x && prev.y == a.pos.y;
+			if (!groupLeg && (changesDeck
+						|| !pf->isLinePassable( unit, surfaces, p.layer, prev, p.pos, false, true )))
+				continue;
+			out->push_back( p );
+			prev = p.pos;
+			prevLayer = p.layer;
+			prevCorner = k;
+			placed = TRUE;
+		}
+
+		/* Nothing on this corner can be driven to from where the lane is, so the lane closes up to
+			 the group's previous corner first and takes this one from there - the outside lane at a gate
+			 between two fences, which it goes through behind the others and opens out again after.
+			 Stepping back in to the corner the lane was laid off is the leg the first pass already
+			 measured out from it, so it is not asked again; from anywhere else it is. */
+		if (!placed && a.layer == prevLayer
+					&& (prevCorner == k - 1 || pf->isLinePassable( unit, surfaces, a.layer, prev, a.pos, false, true )))
+		{
+			out->push_back( a );
+			out->push_back( c );
+			prev = c.pos;
+			prevLayer = c.layer;
+			prevCorner = k;
+			placed = TRUE;
+		}
+		if (!placed)
+			return FALSE;
+	}
+
+	/* The route runs on to the click, and a member whose own spot is short of the click, or off to
+		 one side of it, stops at the corner nearest its spot: driving the lane to its end and then back
+		 sent a tank two hundred feet past its place and round again. */
+	while (out->size() >= 2)
+	{
+		const Coord3D& last = out->back().pos;
+		const Coord3D& before = (*out)[ out->size() - 2 ].pos;
+		const Real lastSqr = (last.x - goal.x) * (last.x - goal.x) + (last.y - goal.y) * (last.y - goal.y);
+		const Real beforeSqr = (before.x - goal.x) * (before.x - goal.x) + (before.y - goal.y) * (before.y - goal.y);
+		if (beforeSqr >= lastSqr)
+			break;
+		out->pop_back();
+	}
+
+	// home: the member's own spot round the click, from the last corner it can see it from
+	const PathfindLayerEnum goalLayer = TheTerrainLogic->getLayerForDestination( &goal );
+	while (!out->empty() && (out->back().layer != goalLayer
+				|| !pf->isLinePassable( unit, surfaces, goalLayer, out->back().pos, goal, false, true )))
+		out->pop_back();
+	if (out->empty())
+		return FALSE;
+
+	CrowdRoutePoint home;
+	home.pos = goal;
+	home.layer = goalLayer;
+	out->push_back( home );
+	return TRUE;
 }
 
 /** Hand every member of a group the distance it should sit off the centre of the road, for the
@@ -1947,6 +2185,12 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 	const Coord3D groupCenter = center;
 	Bool spreadLanes = groupDir.length() > 1.0f;
 	crowdClearLanes( m_memberList );	// this order replaces the last one, spread or no spread
+
+	// the group's one route and every member's place across it, for crowdPlanLane below
+	CrowdRoute trunkRoute;
+	std::vector<Object *> laneMembers;
+	std::vector<Real> laneOffsets;
+	Real laneSpacing = 0.0f;
 	if (spreadLanes)
 	{
 		groupDir.normalize();
@@ -2006,6 +2250,11 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 					 it carries rather than as many as its car park did. */
 				across[i].obj->getAIUpdateInterface()->setPendingCrowdLane( i, count, spacing );
 
+				// centred on the group's route, which its wide search already put in the middle of the road
+				laneMembers.push_back( across[i].obj );
+				laneOffsets.push_back( ((Real)lane - (Real)(lanes - 1) * 0.5f) * spacing );
+				laneSpacing = spacing;
+
 				if (TheGlobalData->m_showLanes)
 				{
 					DEBUG_LOG(("SHOWLANES   unit %d lat=%.1f lane %d/%d offset=%.1f u=%.2f\n",
@@ -2034,16 +2283,96 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 		 with a cursor. */
 	std::vector<Object *> floodMembers;
 	std::vector<Coord3D> floodGoals;
+	std::vector<Object *> airMembers;
+	std::vector<Coord3D> airGoals;
 	if (gatherOnPoint)
 	{
 		for (Object *o = iter->first(); o; o = iter->next())
 		{
 			if (o->getAIUpdateInterface()->isDoingGroundMovement())
 				floodMembers.push_back( o );
+			else
+				airMembers.push_back( o );
 		}
 		TheAI->pathfinder()->floodGroupGoals( &goalPos, floodMembers, floodGoals );
+		spreadAirborneGoals( goalPos, airMembers, airGoals );
+
+		/* The route every vehicle's lane is laid across: see setPlannedCrowdRoute.  Retail's group
+			 trunk, the wide search that keeps a column clear of walls, from the middle of the group,
+			 where the lane offsets were measured.  Narrower when that finds nothing, and aimed at the
+			 first free cell the flood handed out when the click itself is on a building. */
+		if (!laneMembers.empty())
+		{
+			// from the member standing nearest the middle: the middle itself can be a cliff edge or a
+			// rock, which the search starts from as ground nothing else is connected to
+			Object *trunkUnit = NULL;
+			Real bestSqr = 1.0e30f;
+			for (Int m = 0; m < (Int)laneMembers.size(); m++)
+			{
+				const Coord3D *p = laneMembers[m]->getPosition();
+				const Real d = (p->x - groupCenter.x) * (p->x - groupCenter.x) + (p->y - groupCenter.y) * (p->y - groupCenter.y);
+				if (d < bestSqr && !laneMembers[m]->isKindOf( KINDOF_INFANTRY ))
+				{
+					bestSqr = d;
+					trunkUnit = laneMembers[m];
+				}
+			}
+			const Coord3D trunkStart = (trunkUnit != NULL) ? *trunkUnit->getPosition() : groupCenter;
+
+			Path *trunk = NULL;
+			for (Int attempt = 0; attempt < 2 && trunk == NULL; attempt++)
+			{
+				const Coord3D *aim = (attempt == 0) ? pos : (floodGoals.empty() ? NULL : &floodGoals[0]);
+				if (aim == NULL)
+					break;
+				for (Int diameter = CROWD_TRUNK_DIAMETER; diameter >= 2 && trunk == NULL; diameter -= 2)
+					trunk = TheAI->pathfinder()->findGroundPath( &trunkStart, aim, diameter, false );
+			}
+			if (trunk != NULL)
+			{
+				Crowd_routeFromPath( trunk, &trunkRoute );
+				trunk->deleteInstance();
+
+				/* Not over a bridge.  Every lane has to close to the group's line to get onto a deck, and
+					 closing them all at the corner before it sends the whole group at one point at once:
+					 twenty Crusaders over the Kandahar bridge on Golden Oasis took 2.3 times the blocked
+					 frames their own paths do, and one of them never got across. */
+				for (Int k = 0; k < (Int)trunkRoute.size(); k++)
+				{
+					if (trunkRoute[k].layer > LAYER_GROUND)
+					{
+						trunkRoute.clear();
+						break;
+					}
+				}
+			}
+			if (TheGlobalData->m_showLanes)
+			{
+				Real routeLen = 0.0f;
+				for (Int k = 1; k < (Int)trunkRoute.size(); k++)
+				{
+					const Real dx = trunkRoute[k].pos.x - trunkRoute[k-1].pos.x;
+					const Real dy = trunkRoute[k].pos.y - trunkRoute[k-1].pos.y;
+					routeLen += (Real)sqrt( dx * dx + dy * dy );
+				}
+				const Real sx = pos->x - trunkStart.x, sy = pos->y - trunkStart.y;
+				DEBUG_LOG(("SHOWLANES group route: %d corners, %.0f long against %.0f straight\n", (Int)trunkRoute.size(),
+					routeLen, (Real)sqrt( sx * sx + sy * sy )));
+			}
+		}
 	}
 	Int floodCursor = 0;
+	Int airCursor = 0;
+
+	// through the tunnel network when that is shorter; see TunnelTracker::findTunnelShortcut
+	Object *tunnelEntrance = NULL;
+	if (gatherOnPoint && iter->first() != NULL)
+	{
+		const Real walkX = goalPos.x - groupCenter.x;
+		const Real walkY = goalPos.y - groupCenter.y;
+		tunnelEntrance = iter->first()->getControllingPlayer()->getTunnelSystem()->findTunnelShortcut( &groupCenter, &goalPos,
+			(Real)sqrt( walkX * walkX + walkY * walkY ) );
+	}
 
 	// Works better if you let the near units get the first paths... jba.
 	// Move the ones nearest the goal first.  Reduces collision problems later.
@@ -2067,9 +2396,40 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 		}
 		if (gatherOnPoint)
 		{
-			dest = goalPos;		// airborne members keep the clicked spot and adjust it in their move state
+			dest = goalPos;
 			if (floodCursor < (Int)floodMembers.size() && floodMembers[floodCursor] == theUnit)
 				dest = floodGoals[floodCursor++];
+			else if (airCursor < (Int)airMembers.size() && airMembers[airCursor] == theUnit)
+				dest = airGoals[airCursor++];
+
+			if (tunnelEntrance != NULL && ai->takeTunnelTrip( tunnelEntrance, &dest, TUNNEL_TRIP_MOVE, cmdSource ))
+			{
+				ai->clearCrowdLane();
+				continue;
+			}
+
+			// a vehicle drives its lane of the group's route; a foot soldier walks through the crowd
+			if (!trunkRoute.empty() && !theUnit->isKindOf( KINDOF_INFANTRY ) && ai->isDoingGroundMovement())
+			{
+				for (Int m = 0; m < (Int)laneMembers.size(); m++)
+				{
+					if (laneMembers[m] != theUnit)
+						continue;
+					CrowdRoute lane;
+					const Bool laid = crowdPlanLane( theUnit, trunkRoute, laneOffsets[m], dest, &lane );
+					if (TheGlobalData->m_showLanes)
+						DEBUG_LOG(("SHOWLANES plan: unit %d offset %.1f %s, %d corners of %d\n", theUnit->getID(),
+							laneOffsets[m], laid ? "laid" : "refused", (Int)lane.size(), (Int)trunkRoute.size()));
+					if (laid)
+					{
+						ai->setPlannedCrowdRoute( lane );
+						// the lane is the path itself now, so the band rides its centre and nothing re-fits it
+						ai->setPendingCrowdLat( 0.0f );
+						ai->setPendingCrowdLane( 0, 1, laneSpacing );
+					}
+					break;
+				}
+			}
 		}
 		else
 			computeIndividualDestination( &dest, &goalPos, theUnit, &center, isFormation );
@@ -2699,6 +3059,18 @@ void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire,
 		 across a map drove there in single file while the same group told to walk there spread out. */
 	crowdSeedLanes( m_memberList, center, pos );
 
+	// through the tunnel network when that is shorter, and fighting again from the far mouth; see
+	// TunnelTracker::findTunnelShortcut.  A player's order or a computer's, never a script's: a mission
+	// script sends its units the way the mission was written for.
+	Object *tunnelEntrance = NULL;
+	if ((cmdSource == CMD_FROM_PLAYER || cmdSource == CMD_FROM_AI) && !m_memberList.empty())
+	{
+		const Real walkX = pos->x - center.x;
+		const Real walkY = pos->y - center.y;
+		tunnelEntrance = m_memberList.front()->getControllingPlayer()->getTunnelSystem()->findTunnelShortcut( &center, pos,
+			(Real)sqrt( walkX * walkX + walkY * walkY ) );
+	}
+
 	// path the members closest to the goal first; it leaves fewer of them to collide on arrival.
 	MemoryPoolObjectHolder iterHolder;
 	SimpleObjectIterator *iter = newInstance(SimpleObjectIterator);
@@ -2745,6 +3117,13 @@ void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire,
 			dest = goalPos;
 		else
 			computeIndividualDestination( &dest, &goalPos, theUnit, &center, FALSE );
+
+		const TunnelTripEnd tripEnd = theUnit->isAbleToAttack() ? TUNNEL_TRIP_ATTACK_MOVE : TUNNEL_TRIP_MOVE;
+		if (tunnelEntrance != NULL && ai->takeTunnelTrip( tunnelEntrance, &dest, tripEnd, cmdSource ))
+		{
+			ai->clearCrowdLane();
+			continue;
+		}
 
 		// the speed of the slowest member is picked up by AIAttackMoveToState::onEnter, which runs
 		// inside this order - the move state resets the desired speed, so it cannot be set here.

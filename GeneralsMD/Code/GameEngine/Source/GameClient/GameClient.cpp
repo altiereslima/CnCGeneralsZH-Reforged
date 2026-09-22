@@ -57,6 +57,7 @@
 #include "GameClient/PlayerColorScheme.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/GlobalLanguage.h"
+#include "GameClient/GameConsole.h"
 #include "GameClient/GraphDraw.h"
 #include "GameClient/GUICommandTranslator.h"
 #include "GameClient/HeaderTemplate.h"
@@ -177,6 +178,9 @@ GameClient::GameClient()
 //-------------------------------------------------------------------------------------------------
 GameClient::~GameClient()
 {
+	delete TheGameConsole;
+	TheGameConsole = NULL;
+
 #ifdef PERF_TIMERS
 	delete TheGraphDraw;
 	TheGraphDraw = NULL;
@@ -347,6 +351,8 @@ void GameClient::init( void )
 		//
 
 		// since we only allocate one of each, don't bother pooling 'em
+		// ahead of the window system, so the console owns the key above Tab and every key it types
+		m_translators[ m_numTranslators++ ] =	TheMessageStream->attachTranslator( MSGNEW("GameClientSubsystem") GameConsoleTranslator, 5 );
 		m_translators[ m_numTranslators++ ] =	TheMessageStream->attachTranslator( MSGNEW("GameClientSubsystem") WindowTranslator,     10 );
 		m_translators[ m_numTranslators++ ] =	TheMessageStream->attachTranslator( MSGNEW("GameClientSubsystem") MetaEventTranslator,	20 );
 		m_translators[ m_numTranslators++ ] =	TheMessageStream->attachTranslator( MSGNEW("GameClientSubsystem") HotKeyTranslator,	25 );
@@ -495,6 +501,8 @@ void GameClient::init( void )
 #ifdef PERF_TIMERS
 	TheGraphDraw = new GraphDraw;
 #endif
+
+	TheGameConsole = new GameConsole;
 
 }  // end init
 

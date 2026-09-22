@@ -134,27 +134,32 @@ stencil volumes were both built and measured, then reverted, and CHANGELOG says 
 
 ## Build it
 
-Win32 x86 only. The code is full of 32-bit inline assembly, and an x64 configure is refused on
-purpose. Visual Studio 2022 with the Desktop C++ workload is enough.
+Double-click `build.bat`. That is the whole thing on a clone that has never been built: it finds
+cmake, fetches what EA stripped and what GitHub will not hold, configures, builds, and copies the
+exe and the five FFmpeg DLLs into `GeneralsMD/Run/`. Three minutes on a 2024 desktop. Visual Studio
+2022 with the Desktop C++ workload is the one prerequisite.
+
+x64 only. The 32-bit build and the last of the inline assembly went in September 2026, and `-A
+Win32` is now a configure error.
 
 ```console
-cmake -S GeneralsMD/Code -B build -G "Visual Studio 17 2022" -A Win32
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
+build.bat                    :: Release
+build.bat Release test       :: and run the 39 test binaries
+build.bat Release generals   :: just the game
+build.bat clean              :: throw the build tree away first
 ```
 
-`build.example.bat` wraps all three. Copy it to `build.bat` and fill in the paths for your machine.
+What `build.bat` fetches for you, into places the repository leaves empty: zlib 1.1.4, LZH-Light
+1.0, a minimal DirectX 8 SDK, the GameSpy SDK, and the fork's own upscaled art from this
+repository's `art-latest` release, checked against the sha256 in its `art.json`. Nothing to fill in
+first, and running it again costs a directory check per library. STLport, the 3ds Max 4 SDK, NVASM
+and SafeDisc are not needed. Neither are the Miles and Bink SDKs: sound and video are compiled into
+the exe over XAudio2 and FFmpeg, and the retail `mss32.dll` and `BINKW32.DLL` are 32-bit images
+this process could not load anyway.
 
-The build copies `generals.exe` into `GeneralsMD/Run/`, which is the only place the game starts. Put
-your Zero Hour `*.big` files next to it and the base game's `*.big` files in `Run/ZH_Generals/`,
-since Zero Hour is not standalone and mounts both.
-
-> [!IMPORTANT]
-> EA stripped some third-party sources, and they are not committed here either. Drop in zlib 1.1.4,
-> LZH-Light 1.0, a minimal DirectX 8 SDK and the GameSpy SDK before the first build. STLport, the
-> 3ds Max 4 SDK, NVASM, the Miles and Bink SDKs and SafeDisc are not needed: sound and video run
-> through the `mss32.dll` and `binkw32.dll` your own install already has. The stub DLLs of the same
-> names in `build/Release/` are link libraries only, and copying one into `Run/` silences the game.
+What it cannot fetch is the game. Put your Zero Hour `*.big` files next to `generals.exe` in
+`GeneralsMD/Run/` and the base game's in `Run/ZH_Generals/`, since Zero Hour is not standalone and
+mounts both.
 
 The launcher is a separate Electron project,
 [olcayseygan/zhr-launcher](https://github.com/olcayseygan/zhr-launcher).

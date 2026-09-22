@@ -47,6 +47,7 @@
 #include "Common/Recorder.h"
 #include "Common/SpecialPower.h"
 #include "Common/StatsCollector.h"
+#include "Common/Team.h"
 #include "Common/ThingTemplate.h"
 #include "Common/GameLOD.h"
 
@@ -964,12 +965,20 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 		// queue instead of the plain waypoint path - that path is a bare list of points with no
 		// order type, so it cannot carry an attack.  See InGameUI::queueAttackWaypoint.
 		Bool forceAttackHere = isForceAttackTargeting() && isForceAttackable;
+		Bool queuedGuard = TheInGameUI->isInWaypointMode() && TheInGameUI->isGuardArmed();
 		Bool queuedAttack = TheInGameUI->isInWaypointMode()
 												 && ( TheInGameUI->isInAttackMoveToMode() || forceAttackHere );
 
-		// the guard key posts the selection where it is pointed.  It outranks the queue: a guard has
-		// no next point to walk to, so there is nothing for shift to add it to
-		if( TheInGameUI->isGuardArmed() )
+		// the guard key posts the selection where it is pointed, and under shift it joins the line
+		// of orders as its last one: clear this, then sit there.  A guard never finishes, so nothing
+		// can be queued behind it
+		if( queuedGuard )
+		{
+			msgType = GameMessage::MSG_DO_GUARD_POSITION;
+			if( commandType == DO_COMMAND )
+				TheInGameUI->queueGuardWaypoint( pos );
+		}
+		else if( TheInGameUI->isGuardArmed() )
 		{
 			msgType = GameMessage::MSG_DO_GUARD_POSITION;
 		}
@@ -999,7 +1008,7 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 		{
 			msgType = GameMessage::MSG_DO_MOVETO;
 		}
-		if( commandType == DO_COMMAND && !queuedAttack )
+		if( commandType == DO_COMMAND && !queuedAttack && !queuedGuard )
 		{
 			GameMessage *movemsg = TheMessageStream->appendMessage( msgType );
 			if (msgType == GameMessage::MSG_DO_ATTACK_OBJECT)
@@ -1699,7 +1708,12 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 			//This case prevents rebels from using tranq darts on allies.
 			if( obj && BitTest( command->getOptions(), COMMAND_OPTION_NEED_OBJECT_TARGET ) )
 			{
-				Relationship relationship = ThePlayerList->getLocalPlayer()->getRelationship( obj->getTeam() );
+				// a building out of sight is judged on who held it when it was last seen, the way
+				// the ActionManager judges the order itself
+				const Player *localPlayer = ThePlayerList->getLocalPlayer();
+				const ObjectSeenState *seen = obj->getSeenStateFor( localPlayer->getPlayerIndex() );
+				const Team *seenTeam = seen ? TheTeamFactory->findTeamByID( seen->teamID ) : NULL;
+				Relationship relationship = localPlayer->getRelationship( seenTeam ? seenTeam : obj->getTeam() );
 				switch( relationship )
 				{
 					case ALLIES:
@@ -3325,7 +3339,13 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_DIPLOMACY:
-			if (TheGameLogic->isInGame() && !TheGameLogic->isInShellGame())
+			// Tab is the scoreboard in any game that has seats; the diplomacy screen, with its mute
+			// buttons, stays on the command bar's own button
+			if (TheGameLogic->isInGame() && !TheGameLogic->isInShellGame() && TheGameInfo)
+			{
+				TheInGameUI->toggleScoreboard();
+			}
+			else if (TheGameLogic->isInGame() && !TheGameLogic->isInShellGame())
 			{
 				ToggleDiplomacy( FALSE );
 			}

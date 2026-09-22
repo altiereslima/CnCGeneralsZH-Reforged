@@ -33,6 +33,7 @@
 #include "Common/Version.h"
 #include "GameClient/TerrainVisual.h" // for TERRAIN_LOD_MIN definition
 #include "GameClient/GameText.h"
+#include "GameClient/ChromaKeyboard.h"
 #include "GameNetwork/GameInfo.h" // for the SlotState -autoskirmish hands the AI slots
 #include "GameNetwork/NetworkUtil.h" // for ResolveIP, which -lanip parses its address with
 #include "Common/FileSystem.h"
@@ -917,6 +918,48 @@ Int parseParticleCap(char *args[], int num)
 	return 2;
 }
 
+/* The sun's shadow map is how this game draws shadows, and there is no switch for it.  It fills
+	 every frame and the stencil volumes stand down behind it; a machine with no Direct3D 11 device
+	 fills no map and keeps the volumes on its own, which is the whole of the fallback.  What is
+	 left below are the three switches that exist for looking at the shadows rather than for playing
+	 with them.  SHADOW-MAP-PLAN.md. */
+
+/* -shadowmapboth: the map and the stencil volumes at once, which is not a picture anybody should
+	 play with.  It exists because the two can only be compared in one frame when both are in it. */
+Int parseShadowMapBoth(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_shadowMap = TRUE;
+		TheWritableGlobalData->m_shadowMapOnly = FALSE;
+	}
+	return 1;
+}
+
+/* -nochroma: no Razer lighting for this run.
+
+	 The lighting owns a worker thread and three HTTP round trips every tenth of a second, all of
+	 them off the render thread, but a frame measurement wants none of that in the picture at all. */
+Int parseNoChroma(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_chromaLighting = FALSE;
+	}
+	disableChromaKeyboard();
+	return 1;
+}
+
+Int parseShadowMapReport(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_shadowMap = TRUE;
+		TheWritableGlobalData->m_shadowMapReport = TRUE;
+	}
+	return 1;
+}
+
 /* -noparticleshadows: take the soft blob back off the ground under every particle cloud.
 
 	 ShadowsForParticles is on by default and the shipped INI has no entry for it, so without this
@@ -1432,6 +1475,76 @@ Int parseVideo(char *args[], int num)
 	return consumed;
 }
 
+/* -wav <from> <to> [name]: record what the game sounds like over logic frames <from> to <to>.
+	 *
+	 * A movie made by -video has no sound in it: the picture comes from a frame dump and the frames are
+	 * saved as fast as the disk takes them, which is nothing like the speed the mixer plays at.  Sound
+	 * has to come off a second run at the pace a player would hear it, and the two runs line up because
+	 * the same seed and the same shot list play the same match twice.  Everything the game plays goes
+	 * through one mastering voice, so the recording is the finished mix - music, effects, speech, the
+	 * 3D positioning, the lot - written to Videos\<name>.wav next to the save games.  Mux it onto the
+	 * picture afterwards: ffmpeg -i <name>.mp4 -i <name>.wav -c:v copy -shortest <name>_sound.mp4.
+	 *
+	 * The run logs how long the recording took against how long the frames say it should have, which is
+	 * the only thing that can go wrong here: a run that cannot hold 30 frames a second drifts away from
+	 * the picture, and the AUDIO line says by how much before anyone edits with it. */
+Int parseWav(char *args[], int num)
+{
+	if (num < 3)
+	{
+		DEBUG_LOG(("-wav: wants the first and the last logic frame to record, got %d arguments\n", num - 1));
+		return num;
+	}
+
+	Int from = atoi(args[1]);
+	if (from < 1)
+		from = 1;
+	const Int to = atoi(args[2]);
+
+	AsciiString name;
+	name.format("video_%d_%d", from, to);
+	Int consumed = 3;
+	if (num > 3 && args[3][0] != '-')
+	{
+		consumed = 4;
+		if (isVideoNameUsable(args[3]))
+			name = args[3];
+		else
+			DEBUG_LOG(("-wav: '%s' is not a usable name (letters, digits, '-' and '_'), recording as %s\n",
+				args[3], name.str()));
+	}
+
+	if (to < from)
+	{
+		DEBUG_LOG(("-wav: the last frame %d comes before the first frame %d, so nothing is recorded\n", to, from));
+		return consumed;
+	}
+
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_wavStartFrame = from;
+		TheWritableGlobalData->m_wavEndFrame = to;
+		TheWritableGlobalData->m_wavName = name;
+	}
+	return consumed;
+}
+
+/* -turbo: a run that draws plays its match as fast as the machine draws it, one logic frame a pass,
+	 the branch -headless and -video already take.  A -screenshot at frame 3000 otherwise waits 100
+	 seconds of wall clock at 30 logic frames a second for a picture that only needs frame 3000 to be
+	 reached.  The logic is identical frame for frame (same HEADLESS CRC), and a turbo shot repeats
+	 itself, but it is not the paced shot: the cloud shadows scroll on the wall clock, and the two
+	 differ on 7% of the pixels.  Compare turbo with turbo.  Ignored in a network game, whose clock
+	 is the network's, and under -wav, which has to run at the speed a person hears. */
+Int parseTurbo(char *args[], int)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_turbo = TRUE;
+	}
+	return 1;
+}
+
 /* -autocamera [seconds]: every so often, put the camera wherever the fighting is.
 	 *
 	 * A soak run watches from a free camera that never moves, and a camera that never moves is the
@@ -1897,6 +2010,31 @@ Int parseSlowFrame(char *args[], int num)
 	return 1;
 }
 
+/* -drawdelay <ms> sleeps that long in every client pass, which is what a weak graphics card looks
+	 like to the engine: the picture takes longer while the logic frame costs what it always did.
+	 A network game paces itself on the slowest machine in the room, so the question "does one slow
+	 renderer slow everybody" needs a slow renderer on this machine, next to a fast one.
+
+	 An optional second number adds up to that much more, different on every pass, because a real
+	 card does not take the same time twice and a network catch-up that runs a varying number of
+	 logic frames per picture is the case worth testing. */
+Int parseDrawDelay(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1 && args[1])
+	{
+		const Int ms = atoi(args[1]);
+		if (ms > 0)
+			TheWritableGlobalData->m_drawDelayMS = ms;
+		if (num > 2 && args[2] && isdigit((unsigned char)args[2][0]))
+		{
+			TheWritableGlobalData->m_drawDelayJitterMS = atoi(args[2]);
+			return 3;
+		}
+		return 2;
+	}
+	return 1;
+}
+
 /* -netgame <ip>[,<ip>...] starts a LAN game against those addresses with no lobby in front of it,
 	 and -netslot <n> says which of them this copy is.  Every machine is given the same slot list in
 	 the same order, which is all the lobby ever agreed on: the slot list, the map and the seed.  A
@@ -2143,6 +2281,9 @@ static CommandLineParam params[] =
 	{ "-particlebounce", parseParticleBounce },
 	{ "-smoke", parseSmoke },
 	{ "-particlecap", parseParticleCap },
+	{ "-nochroma", parseNoChroma },
+	{ "-shadowmapreport", parseShadowMapReport },
+	{ "-shadowmapboth", parseShadowMapBoth },
 	{ "-noparticleshadows", parseNoParticleShadows },
 	{ "-quickstart", parseQuickStart },
 
@@ -2246,6 +2387,8 @@ static CommandLineParam params[] =
 	{ "-maxframes", parseMaxGameFrames },
 	{ "-screenshot", parseScreenShot },
 	{ "-video", parseVideo },
+	{ "-wav", parseWav },
+	{ "-turbo", parseTurbo },
 	{ "-msaa", parseMSAA },
 	{ "-d3d9", parseDirect3D9 },
 	{ "-language", parseTextLanguage },
@@ -2255,6 +2398,7 @@ static CommandLineParam params[] =
 	{ "-camera", parseCameraLook },
 	{ "-tracemove", parseTraceMove },
 	{ "-slowframe", parseSlowFrame },
+	{ "-drawdelay", parseDrawDelay },
 	{ "-teams", parseTeams },
 	{ "-peacetime", parsePeaceTime },
 	{ "-unitlimit", parseUnitLimit },

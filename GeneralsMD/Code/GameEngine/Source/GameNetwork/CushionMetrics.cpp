@@ -83,6 +83,28 @@ Int selfSlugThreshold( Int runAhead, UnsignedInt slackPercent )
 	return threshold;
 }
 
+Real roomLatencySum( const Real latencies[], const Bool connected[], Int numSlots, Int routerSlot )
+{
+	Real worst = 0.0f;
+	Real secondWorst = 0.0f;
+	for( Int slot = 0; slot < numSlots; ++slot )
+	{
+		if( slot == routerSlot || !connected[slot] )
+			continue;
+
+		if( latencies[slot] > worst )
+		{
+			secondWorst = worst;
+			worst = latencies[slot];
+		}
+		else if( latencies[slot] > secondWorst )
+		{
+			secondWorst = latencies[slot];
+		}
+	}
+	return worst + secondWorst;
+}
+
 Int computeRunAhead( Real latencySumSeconds, Int fps, UnsignedInt slackPercent,
 										 Int minRunAhead, Int maxRunAhead )
 {
@@ -91,7 +113,7 @@ Int computeRunAhead( Real latencySumSeconds, Int fps, UnsignedInt slackPercent,
 	if( fps < 1 )
 		fps = 1;			// the room rate is floored long before it gets here, but the division below is real
 
-	/* getMaximumLatency() sums the two worst average round trips, so half of it is the one-way trip
+	/* roomLatencySum() sums the two worst average round trips, so half of it is the one-way trip
 		 a command has to survive.  Rounded up, where EA truncated: a 150 ms round trip truncates to
 		 two frames - 66 ms - to cover 75 ms of wire, and a run-ahead shorter than the trip itself is
 		 not a tight window, it is a stall on every command that uses it.  Nobody ever saw that

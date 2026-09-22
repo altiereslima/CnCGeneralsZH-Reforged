@@ -1,0 +1,16 @@
+# Long bridge crossing.
+#
+# Twenty tanks, one right click, over the long bridge in the east of Golden Oasis, whose deck runs
+# from 2637,1165 to 2948,1550 and is about twelve cells wide: three Crusaders abreast. The start and
+# the goal sit 350 units back from each end of the deck, on its line. bridgecross.txt is the short
+# Kandahar bridge; this one is long enough that a group either spreads across the deck or spends
+# the whole crossing in single file.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Golden Oasis\Golden Oasis.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 4000
+#     -scenario bridgelong -logPrefix bridgelong_
+
+30    spawn       0  AmericaTankCrusader  20  2417 893  40
+60    playermove  0  AmericaTankCrusader  3168 1822
+60    arrive      0  AmericaTankCrusader  3168 1822  200

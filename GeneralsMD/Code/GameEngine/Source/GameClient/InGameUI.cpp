@@ -47,6 +47,7 @@
 #include "Common/Team.h"
 #include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
+#include "Common/TunnelTracker.h"
 #include "Common/BuildAssistant.h"
 #include "Common/Recorder.h"
 #include "Common/BuildAssistant.h"
@@ -87,6 +88,8 @@
 
 #include "GameLogic/AI.h"
 #include "GameLogic/AIGuard.h"
+#include "GameLogic/VictoryConditions.h"
+#include "GameNetwork/GameInfo.h"
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/AIStateMachine.h"
 #include "GameLogic/Module/AIUpdate.h"
@@ -1186,6 +1189,10 @@ InGameUI::InGameUI()
 	m_hudTogglesBottom = 0;
 	for( Int toggleRow = 0; toggleRow < HUD_TOGGLE_ROWS; toggleRow++ )
 		m_hudToggleStrings[ toggleRow ] = NULL;
+	m_scoreboardOpen = FALSE;
+	m_scoreboardStringsUsed = 0;
+	for( Int scoreboardString = 0; scoreboardString < SCOREBOARD_STRING_COUNT; scoreboardString++ )
+		m_scoreboardStrings[ scoreboardString ] = NULL;
 	for( Int stripSeconds = 0; stripSeconds < STRIP_SECONDS_STRINGS; stripSeconds++ )
 		m_stripSecondsString[ stripSeconds ] = NULL;
 	for( Int stripQuantity = 0; stripQuantity < STRIP_QUANTITY_STRINGS; stripQuantity++ )
@@ -2062,6 +2069,15 @@ static Bool reachViewHits( const ReachView &view, Real x, Real y )
 	return !view.blocked[ ray * view.rings + ring ];
 }
 
+/// a structure whose reach and blind spots the local player is shown: their own, an ally's, or any to
+/// an observer.  An enemy defence keeps both to itself, so they are found out by losing units to it.
+static Bool reachRevealedToLocal( const Object *obj )
+{
+	const Player *local = ThePlayerList->getLocalPlayer();
+	return obj->getControllingPlayer() == local || local->isPlayerObserver()
+		|| local->getRelationship( obj->getTeam() ) == ALLIES;
+}
+
 //-------------------------------------------------------------------------------------------------
 /** Every structure on the map as the reach drawing sees it, gathered once a frame.  A building going
 	* up or coming down changes what a defence can see past, and one coming out of the fog changes which
@@ -2075,7 +2091,7 @@ struct StructureKey
 	ObjectID id;
 	Coord3D position;
 	const Player *owner;
-	Bool reachShown;		///< armed and not hidden from the local player, so its circle is drawn
+	Bool reachShown;		///< armed, revealed to the local player and out of the fog, so its circle is drawn
 
 	Bool operator==( const StructureKey &other ) const
 	{
@@ -2107,7 +2123,7 @@ static void refreshStructureKeys( void )
 		key.id = obj->getID();
 		key.position = *obj->getPosition();
 		key.owner = obj->getControllingPlayer();
-		key.reachShown = templateReach( obj->getTemplate() ) > 0.0f
+		key.reachShown = templateReach( obj->getTemplate() ) > 0.0f && reachRevealedToLocal( obj )
 			&& ( key.owner == local || obj->getShroudedStatus( local->getPlayerIndex() ) < OBJECTSHROUD_FOGGED );
 		keys.push_back( key );
 	}
@@ -2236,13 +2252,12 @@ static const ReachView &guardView( const Object *obj )
 //-------------------------------------------------------------------------------------------------
 static void clearGuardedBlindSpots( ReachView &pending )
 {
-	const Player *local = ThePlayerList->getLocalPlayer();
 	std::vector< const ReachView * > guards;
 	for( size_t k = 0; k < theStructureKeys.size(); k++ )
 	{
 		const StructureKey &key = theStructureKeys[ k ];
 		const Object *obj = TheGameLogic->findObjectByID( key.id );
-		if( key.owner != local && local->getRelationship( obj->getTeam() ) != ALLIES )
+		if( !reachRevealedToLocal( obj ) )
 			continue;
 
 		const Real flatReach = templateReach( obj->getTemplate() );
@@ -2301,7 +2316,7 @@ static const BlindSpotShade &selectedBlindSpotShade( const Object *obj )
 
 //-------------------------------------------------------------------------------------------------
 /** The ground a defence could not shoot into, darkened inside its reach: the one on the cursor while
-	* it is being sited, and every selected one.
+	* it is being sited, and every selected one of the local player's or an ally's.
 	*
 	* A defence that needs a line of sight - a Patriot battery, a Gattling Cannon, a Fire Base - does
 	* not fire through a building, and cannot pick a target a hill hides from it.  Both rules are the
@@ -2343,7 +2358,7 @@ void InGameUI::drawBlindSpots( void )
 		const Object *obj = (*it)->getObject();
 		if( obj == NULL || !obj->isKindOf( KINDOF_STRUCTURE ) || templateReach( obj->getTemplate() ) <= 0.0f )
 			continue;
-		if( !templateNeedsLineOfSight( obj->getTemplate() ) )
+		if( !templateNeedsLineOfSight( obj->getTemplate() ) || !reachRevealedToLocal( obj ) )
 			continue;
 
 		refreshStructureKeys();
@@ -2533,13 +2548,13 @@ static void drawReachSegment( const ReachSegment &segment, const Player *owner )
 
 //-------------------------------------------------------------------------------------------------
 /** While a structure is on the cursor, the reach of every armed building in sight: yours, your
-	* allies', the enemy's you can currently see, and the one on the cursor if it is armed.
+	* allies', and the one on the cursor if it is armed.  An enemy's is never drawn.
 	*
 	* Each circle is exactly the distance a shot is allowed at: the weapon range the game tests with,
 	* measured from the edge of the shooter's bounding circle, so from the centre it is that range
 	* plus the bounding radius.  Each is drawn in its owner's colour.  Where one player's circles
 	* overlap they are one area: the thin outline leaves out every stretch of a circle that runs inside
-	* another of the same player's, cutting it where the two cross.  An enemy building under fog is
+	* another of the same player's, cutting it where the two cross.  An ally's building under fog is
 	* skipped, so the circles tell nothing the map does not. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawPlacementReach( void )
@@ -2552,7 +2567,8 @@ void InGameUI::drawPlacementReach( void )
 	for( DrawableListCIt it = m_selectedDrawables.begin(); it != m_selectedDrawables.end() && !armedSelected; ++it )
 	{
 		const Object *obj = (*it)->getObject();
-		armedSelected = obj && obj->isKindOf( KINDOF_STRUCTURE ) && templateReach( obj->getTemplate() ) > 0.0f;
+		armedSelected = obj && obj->isKindOf( KINDOF_STRUCTURE ) && templateReach( obj->getTemplate() ) > 0.0f
+			&& reachRevealedToLocal( obj );
 	}
 	if( m_pendingPlaceType == NULL && !armedSelected )
 		return;
@@ -3296,6 +3312,7 @@ void InGameUI::unregisterWindowLayout( WindowLayout *layout )
 void InGameUI::reset( void )
 {
 	m_isQuitMenuVisible = FALSE;
+	m_scoreboardOpen = FALSE;
 	m_inputEnabled = true;
 	// reset the command bar
 	TheControlBar->reset();
@@ -4107,6 +4124,28 @@ void InGameUI::collectOrderHints( void )
 				break;
 
 			case AI_ENTER:
+			{
+				// An order that is going through the tunnels is still the order it was: one thread in its
+				// colour to the mouth it goes down and one from the mouth it comes up at to where it was
+				// sent.  The far mouth is worked out the way the unit will work it out when it gets there.
+				const Object *entrance = ai->getGoalObject();
+				if( ai->hasTunnelTrip() && entrance != NULL )
+				{
+					hint.kind = ( ai->getTunnelTripEnd() == TUNNEL_TRIP_ATTACK_MOVE ) ? ORDER_HINT_ATTACK_MOVE : ORDER_HINT_MOVE;
+					hint.from = *obj->getPosition();
+					hint.to = *entrance->getPosition();
+					addOrderHint( hint, previous );
+
+					const Object *exit = local->getTunnelSystem()->findQuietTunnelNear( ai->getTunnelTripGoal() );
+					hint.from = ( exit != NULL ) ? *exit->getPosition() : hint.to;
+					hint.to = *ai->getTunnelTripGoal();
+					addOrderHint( hint, previous );
+					continue;
+				}
+				hint.kind = ORDER_HINT_ENTER;
+				break;
+			}
+
 			case AI_RAPPEL_INTO:
 			case AI_COMBATDROP:
 				hint.kind = ORDER_HINT_ENTER;
@@ -4325,7 +4364,12 @@ void InGameUI::addShiftAttackQueueTail( OrderHint& hint, const std::vector<Order
 	for( std::vector<AttackWaypoint>::const_iterator qit = m_shiftAttackQueue.begin();
 			 qit != m_shiftAttackQueue.end(); ++qit )
 	{
-		if( qit->targetID != INVALID_ID )
+		if( qit->kind == ATTACK_WAYPOINT_GUARD )
+		{
+			hint.kind = ORDER_HINT_GUARD;
+			hint.to = qit->pos;
+		}
+		else if( qit->targetID != INVALID_ID )
 		{
 			// a queued victim is drawn where it stands now rather than where it stood when the player
 			// picked it, so the thread follows a target that is driving away.  One that died while it
@@ -4543,19 +4587,54 @@ void InGameUI::queueAttackWaypoint( const Coord3D *pos, Object *targetObj )
 	AttackWaypoint order;
 	order.pos = *pos;
 	order.targetID = targetObj ? targetObj->getID() : INVALID_ID;
+	order.kind = ATTACK_WAYPOINT_ATTACK;
 
 	// remembered rather than read again when the order goes out: the attack key drops the moment the
 	// first order of the queue is sent, so everything behind it used to lose its force attack
 	order.forceAttack = isForceAttackArmed();
 
-	// who the queue belongs to.  A selection that is not part of the group holding the queue starts
-	// a fresh one rather than adding to whatever the old selection was doing
+	pushShiftAttackOrder( order );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Shift held, guard armed, left click: the group takes up its post once it has finished whatever
+	* the queue already holds - "clear this, then sit on that ridge" in one set of clicks.  A guard
+	* is where the queue stops, because a posted unit has no next point to walk to and nothing after
+	* it would ever come round. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::queueGuardWaypoint( const Coord3D *pos )
+{
+	AttackWaypoint order;
+	order.pos = *pos;
+	order.targetID = INVALID_ID;
+	order.forceAttack = FALSE;
+	order.kind = ATTACK_WAYPOINT_GUARD;
+
+	pushShiftAttackOrder( order );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Put one order on the end of the queue, or start a fresh queue with it.  A selection that is not
+	* part of the group holding the queue starts its own rather than adding to whatever the old
+	* selection was doing. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::pushShiftAttackOrder( const AttackWaypoint& order )
+{
 	std::vector<ObjectID> current;
 	collectSelectedObjectIDs( current );
 
 	if( !m_shiftAttackQueueRunning || !selectionOwnsShiftAttackQueue( current ) )
 	{
 		clearShiftAttackQueue();
+
+		// a guard with nothing in front of it is just a guard, and starting a queue on one would
+		// leave the list waiting on an order that never finishes
+		if( order.kind == ATTACK_WAYPOINT_GUARD )
+		{
+			sendShiftAttackOrder( order );
+			return;
+		}
+
 		m_shiftAttackQueueUnits = current;
 		m_shiftAttackQueueRunning = TRUE;
 		m_shiftAttackQueueActive = order;
@@ -4563,6 +4642,10 @@ void InGameUI::queueAttackWaypoint( const Coord3D *pos, Object *targetObj )
 		sendShiftAttackOrder( order );
 		return;
 	}
+
+	// a guard is terminal, so anything clicked after one would never be reached
+	if( !m_shiftAttackQueue.empty() && m_shiftAttackQueue.back().kind == ATTACK_WAYPOINT_GUARD )
+		return;
 
 	m_shiftAttackQueue.push_back( order );
 }
@@ -4576,6 +4659,7 @@ void InGameUI::clearShiftAttackQueue( void )
 	m_shiftAttackQueueActive.targetID = INVALID_ID;
 	m_shiftAttackQueueActive.pos.zero();
 	m_shiftAttackQueueActive.forceAttack = FALSE;
+	m_shiftAttackQueueActive.kind = ATTACK_WAYPOINT_ATTACK;
 	m_shiftAttackQueueEngagedFrame = 0;
 	m_shiftAttackQueueWaitingForRearm = FALSE;
 	m_shiftAttackQueueWaitingForSelection = FALSE;
@@ -4626,6 +4710,14 @@ void InGameUI::logShiftAttackQueue( const char *why ) const
 //-------------------------------------------------------------------------------------------------
 void InGameUI::sendShiftAttackOrder( const AttackWaypoint& waypoint )
 {
+	if( waypoint.kind == ATTACK_WAYPOINT_GUARD )
+	{
+		GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_DO_GUARD_POSITION );
+		msg->appendLocationArgument( waypoint.pos );
+		msg->appendIntegerArgument( GUARDMODE_GUARD_WITHOUT_PURSUIT );
+		return;
+	}
+
 	if( waypoint.targetID != INVALID_ID )
 	{
 		GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_DO_ATTACK_OBJECT );
@@ -4857,6 +4949,15 @@ void InGameUI::updateShiftAttackQueue( void )
 		}
 
 		sendShiftAttackOrder( next );
+
+		// a post is where the group stays.  Nothing ends a guard, so there is nothing left to wait
+		// for and the queue closes with it rather than watching an order that never finishes
+		if( next.kind == ATTACK_WAYPOINT_GUARD )
+		{
+			logShiftAttackQueue( "guard sent, the list ends on it" );
+			clearShiftAttackQueue();
+			return;
+		}
 
 		m_shiftAttackQueueActive = next;
 		m_shiftAttackQueueEngagedFrame = TheGameLogic->getFrame();
@@ -8338,12 +8439,32 @@ void InGameUI::drawHudOverlay( void )
 	m_hudLastDrawMs = nowMs;
 	UnsignedInt realSecs = (nowMs - m_hudRealClockBaseMs) / 1000;
 
+	// the machine's own clock first, for a player who wants to know when to stop
+	SYSTEMTIME wallClock;
+	GetLocalTime( &wallClock );
+
 	UnicodeString text;
-	text.format( L"%02d:%02d:%02d(%02d:%02d:%02d)   %dhz(%dfps) %s",
+	text.format( L"%02d:%02d   %02d:%02d:%02d(%02d:%02d:%02d)   %dhz(%dfps) %s",
+							 wallClock.wHour, wallClock.wMinute,
 							 gameSecs / 3600, (gameSecs / 60) % 60, gameSecs % 60,
 							 realSecs / 3600, (realSecs / 60) % 60, realSecs % 60,
 							 REAL_TO_INT( m_hudLogicHz + 0.5f ), REAL_TO_INT( m_hudFps + 0.5f ),
 							 TheDisplay->getRendererName() );
+
+	UnicodeString frameText;
+	frameText.format( L"   frame %d", (Int)logicFrame );
+	text.concat( frameText );
+
+	// in a network game, how far ahead the room can play without waiting on anybody, out of the
+	// input delay it is running with, and the frame rate the slowest machine has set for everyone:
+	// ready falling to 0 is the stall, seen before it is felt
+	if( TheNetwork != NULL )
+	{
+		UnicodeString netText;
+		netText.format( L"   ready %d/%d   room %dfps", (Int)TheNetwork->getFramesReady(),
+										(Int)TheNetwork->getRunAhead(), (Int)TheNetwork->getFrameRate() );
+		text.concat( netText );
+	}
 
 	// the lobby's unit limit, as this player's own share and not the match total: what stands and
 	// what is queued, against the number the production queue refuses at
@@ -9088,8 +9209,11 @@ static Int gatherPlayerSkills( const Player *player, const Image **icons, Int co
 		for( Int later = 0; later < bought && !replaced; later++ )
 			replaced = TheScienceStore->isDirectPrereq( skills[ i ].science, skills[ later ].science );
 
-		if( !replaced )
-			icons[ count++ ] = skills[ i ].cameo;
+		if( replaced )
+			continue;
+
+		icons[ count ] = skills[ i ].cameo;
+		count++;
 	}
 
 	return count;
@@ -9230,6 +9354,380 @@ void InGameUI::drawSkillStrip( void )
 	}
 
 	TheDisplay->endBatch2D();
+}
+
+//-------------------------------------------------------------------------------------------------
+// The scoreboard's layout, in the 800x600 units the strips are measured in.  Every x is from the
+// panel's inner left edge; a number column's x is its right edge, so digits line up by their last
+// place.  Spacing comes in 4, 8, 12 and 16, heights in 20 and 32.  The favourite unit has a fixed
+// column of its own before the promotions, which are the one run of variable length and so go last.
+//-------------------------------------------------------------------------------------------------
+enum
+{
+	SCOREBOARD_POINT_SIZE					= 10,
+	SCOREBOARD_SMALL_POINT_SIZE		= 8,
+	SCOREBOARD_WIDTH							= 784,
+	SCOREBOARD_TOP								= 36,
+	SCOREBOARD_PAD								= 8,
+	SCOREBOARD_SECTION_GAP				= 4,
+	SCOREBOARD_HEADER_HEIGHT			= 20,
+	SCOREBOARD_ROW_HEIGHT					= 32,
+	SCOREBOARD_CHIP_HEIGHT				= 20,
+	SCOREBOARD_CHIPS_PER_LINE			= 4,
+	SCOREBOARD_STRIPE_WIDTH				= 4,
+	SCOREBOARD_TEXT_INSET					= 12,
+	SCOREBOARD_PORTRAIT_WIDTH			= 32,
+	SCOREBOARD_PORTRAIT_HEIGHT		= 24,
+	SCOREBOARD_CAMEO_WIDTH				= 18,
+	SCOREBOARD_CAMEO_HEIGHT				= 14,
+	SCOREBOARD_CAMEO_STEP					= 20,
+	SCOREBOARD_POWERS_SHOWN				= 7,
+	SCOREBOARD_NAME_X							= 52,
+	SCOREBOARD_TEAM_X							= 188,
+	SCOREBOARD_LEVEL_RIGHT				= 260,
+	SCOREBOARD_MONEY_RIGHT				= 332,
+	SCOREBOARD_PER_MINUTE_RIGHT		= 392,
+	SCOREBOARD_KILLS_RIGHT				= 428,
+	SCOREBOARD_DEATHS_RIGHT				= 464,
+	SCOREBOARD_FAVOURITE_X				= 480,
+	SCOREBOARD_FAVOURITE_NAME_X		= 504,
+	SCOREBOARD_FAVOURITE_NAME_WIDTH	= 118,
+	SCOREBOARD_POWERS_X						= 630,
+	SCOREBOARD_SECTIONS						= 2,
+	SECONDS_PER_MINUTE						= 60
+};
+
+static const Color SCOREBOARD_PANEL_COLOR = GameMakeColor( 10, 12, 16, 215 );
+static const Color SCOREBOARD_ZEBRA_COLOR = GameMakeColor( 255, 255, 255, 14 );
+static const Color SCOREBOARD_OWN_ROW_COLOR = GameMakeColor( 255, 255, 255, 36 );
+static const Color SCOREBOARD_EDGE_COLOR = GameMakeColor( 90, 96, 104, 255 );
+static const Color SCOREBOARD_HEADING_COLOR = GameMakeColor( 160, 166, 174, 255 );
+static const Color SCOREBOARD_ALLIES_COLOR = GameMakeColor( 110, 210, 110, 255 );
+static const Color SCOREBOARD_ENEMIES_COLOR = GameMakeColor( 230, 100, 90, 255 );
+static const Color SCOREBOARD_ALLIES_BAND_COLOR = GameMakeColor( 60, 150, 70, 70 );
+static const Color SCOREBOARD_ENEMIES_BAND_COLOR = GameMakeColor( 180, 50, 40, 70 );
+static const Color SCOREBOARD_VALUE_COLOR = GameMakeColor( 235, 235, 235, 255 );
+static const Color SCOREBOARD_GENERAL_COLOR = GameMakeColor( 170, 174, 180, 255 );
+static const Color SCOREBOARD_DEFEATED_COLOR = GameMakeColor( 150, 150, 150, 255 );
+static const Color SCOREBOARD_NAME_COLOR = GameMakeColor( 245, 245, 245, 255 );
+static const Color SCOREBOARD_SHADOW_COLOR = GameMakeColor( 0, 0, 0, 255 );
+
+enum ScoreboardAlign { SCOREBOARD_ALIGN_LEFT, SCOREBOARD_ALIGN_RIGHT };
+
+struct ScoreboardColumn
+{
+	const char *label;
+	Int x;
+	ScoreboardAlign align;
+};
+
+// the team column is only on the observer's board: a player's board already splits by side
+static const ScoreboardColumn TheScoreboardTeamColumn = { "GUI:ScoreboardTeam", SCOREBOARD_TEAM_X, SCOREBOARD_ALIGN_LEFT };
+static const ScoreboardColumn TheScoreboardColumns[] =
+{
+	{ "GUI:ScoreboardLevel",			SCOREBOARD_LEVEL_RIGHT,				SCOREBOARD_ALIGN_RIGHT },
+	{ "GUI:ScoreboardMoney",			SCOREBOARD_MONEY_RIGHT,				SCOREBOARD_ALIGN_RIGHT },
+	{ "GUI:ScoreboardPerMinute",	SCOREBOARD_PER_MINUTE_RIGHT,	SCOREBOARD_ALIGN_RIGHT },
+	{ "GUI:ScoreboardKills",			SCOREBOARD_KILLS_RIGHT,				SCOREBOARD_ALIGN_RIGHT },
+	{ "GUI:ScoreboardDeaths",			SCOREBOARD_DEATHS_RIGHT,			SCOREBOARD_ALIGN_RIGHT },
+	{ "GUI:ScoreboardPowers",			SCOREBOARD_POWERS_X,					SCOREBOARD_ALIGN_LEFT },
+	{ "GUI:ScoreboardFavourite",	SCOREBOARD_FAVOURITE_X,				SCOREBOARD_ALIGN_LEFT }
+};
+
+//-------------------------------------------------------------------------------------------------
+/** The next string out of the scoreboard's pool.  They are handed out in the same order every
+	* frame, so a string keeps its font and its text from one frame to the next and is only rebuilt
+	* when a number on it changes. */
+//-------------------------------------------------------------------------------------------------
+DisplayString *InGameUI::scoreboardString( GameFont *font, const UnicodeString &text, Int wrapWidth )
+{
+	DEBUG_ASSERTCRASH( m_scoreboardStringsUsed < SCOREBOARD_STRING_COUNT,
+										 ("scoreboard wants string %d of %d", m_scoreboardStringsUsed, SCOREBOARD_STRING_COUNT) );
+
+	DisplayString *&string = m_scoreboardStrings[ m_scoreboardStringsUsed++ ];
+	if( string == NULL )
+		string = TheDisplayStringManager->newDisplayString();
+
+	string->setFont( font );
+	string->setWordWrap( wrapWidth );
+	string->setText( text );
+	return string;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Draw a string with its left edge, or its right edge, on x and its middle on middle. */
+//-------------------------------------------------------------------------------------------------
+static void drawScoreboardText( DisplayString *string, Int x, Int middle, ScoreboardAlign align, Color color )
+{
+	Int width = 0, height = 0;
+	string->getSize( &width, &height );
+	string->draw( align == SCOREBOARD_ALIGN_RIGHT ? x - width : x, middle - height / 2, color, SCOREBOARD_SHADOW_COLOR );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A line through a defeated player's name, so being out is said by more than the grey. */
+//-------------------------------------------------------------------------------------------------
+static void strikeScoreboardName( DisplayString *name, Int x, Int middle )
+{
+	Int width = 0, height = 0;
+	name->getSize( &width, &height );
+	TheDisplay->drawLine( x, middle, x + width, middle, 1.0f, SCOREBOARD_DEFEATED_COLOR );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The lobby's own team label, the one the diplomacy screen wore. */
+//-------------------------------------------------------------------------------------------------
+static UnicodeString scoreboardTeamLabel( const GameSlot *slot )
+{
+	AsciiString teamLabel;
+	teamLabel.format( "Team:%d", slot->getTeamNumber() + 1 );
+	if( slot->isAI() && slot->getTeamNumber() == -1 )
+		teamLabel = "Team:AI";
+	return TheGameText->fetch( teamLabel );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** One seat in full, on your own side or on the observer's board: a stripe of the player's colour,
+	* the general's face and name, the rank, the bank, the income, the kills and losses, every
+	* promotion bought at the level it was bought to, and the unit built most. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::drawScoreboardRow( Player *player, const GameSlot *slot, Bool withTeam, GameFont *bodyFont,
+																	GameFont *smallFont, Int left, Int top, Int rowHeight )
+{
+	const Bool defeated = TheVictoryConditions->hasSinglePlayerBeenDefeated( player );
+	const Color seatColor = defeated ? SCOREBOARD_DEFEATED_COLOR : clientPlayerColor( player );
+	const Color nameColor = defeated ? SCOREBOARD_DEFEATED_COLOR : SCOREBOARD_NAME_COLOR;
+	const Color valueColor = defeated ? SCOREBOARD_DEFEATED_COLOR : SCOREBOARD_VALUE_COLOR;
+	const Int middle = top + rowHeight / 2;
+	const Int nameX = left + stripPixels( SCOREBOARD_NAME_X );
+
+	TheDisplay->drawFillRect( left, top, stripPixels( SCOREBOARD_STRIPE_WIDTH ), rowHeight, seatColor );
+
+	const Int portraitW = stripPixels( SCOREBOARD_PORTRAIT_WIDTH );
+	const Int portraitH = stripPixels( SCOREBOARD_PORTRAIT_HEIGHT );
+	const Int portraitX = left + stripPixels( SCOREBOARD_TEXT_INSET );
+	const Int portraitY = middle - portraitH / 2;
+
+	// a mod's general can come without a face; the frame still says whose seat it is
+	const Image *portrait = player->getPlayerTemplate()->getEnabledImage();
+	if( portrait )
+		TheDisplay->drawImage( portrait, portraitX, portraitY, portraitX + portraitW, portraitY + portraitH );
+	TheDisplay->drawOpenRect( portraitX, portraitY, portraitW, portraitH, 1.0f, seatColor );
+
+	DisplayString *name = scoreboardString( bodyFont, slot->getName() );
+	name->draw( nameX, middle - bodyFont->height, nameColor, SCOREBOARD_SHADOW_COLOR );
+	if( defeated )
+		strikeScoreboardName( name, nameX, middle - bodyFont->height / 2 );
+	scoreboardString( smallFont, player->getPlayerTemplate()->getDisplayName() )->draw( nameX, middle,
+																									SCOREBOARD_GENERAL_COLOR, SCOREBOARD_SHADOW_COLOR );
+
+	if( withTeam )
+		drawScoreboardText( scoreboardString( smallFont, scoreboardTeamLabel( slot ) ), left + stripPixels( SCOREBOARD_TEAM_X ),
+												middle, SCOREBOARD_ALIGN_LEFT, SCOREBOARD_GENERAL_COLOR );
+
+	ScoreKeeper *score = player->getScoreKeeper();
+	const Int seconds = TheGameLogic->getFrame() / LOGICFRAMES_PER_SECOND;
+	const Int perMinute = seconds > 0 ? score->getTotalMoneyEarned() * SECONDS_PER_MINUTE / seconds : 0;
+
+	const Int values[] =
+	{
+		player->getRankLevel(),
+		(Int)player->getMoney()->countMoney(),
+		perMinute,
+		score->getTotalUnitsDestroyed() + score->getTotalBuildingsDestroyed(),
+		score->getTotalUnitsLost() + score->getTotalBuildingsLost()
+	};
+	const Int valueRight[] =
+	{
+		SCOREBOARD_LEVEL_RIGHT, SCOREBOARD_MONEY_RIGHT, SCOREBOARD_PER_MINUTE_RIGHT, SCOREBOARD_KILLS_RIGHT, SCOREBOARD_DEATHS_RIGHT
+	};
+
+	UnicodeString text;
+	for( Int value = 0; value < (Int)ARRAY_SIZE( values ); value++ )
+	{
+		text.format( L"%d", values[ value ] );
+		drawScoreboardText( scoreboardString( bodyFont, text ), left + stripPixels( valueRight[ value ] ), middle,
+												SCOREBOARD_ALIGN_RIGHT, valueColor );
+	}
+
+	const Int cameoW = stripPixels( SCOREBOARD_CAMEO_WIDTH );
+	const Int cameoH = stripPixels( SCOREBOARD_CAMEO_HEIGHT );
+	const Int cameoY = middle - cameoH / 2;
+
+	// each promotion once, at the level it has reached: a higher level is its own picture
+	const Image *powers[ SCOREBOARD_POWERS_SHOWN ];
+	const Int powerCount = gatherPlayerSkills( player, powers, 0, SCOREBOARD_POWERS_SHOWN );
+	for( Int power = 0; power < powerCount; power++ )
+	{
+		const Int x = left + stripPixels( SCOREBOARD_POWERS_X + power * SCOREBOARD_CAMEO_STEP );
+		TheDisplay->drawImage( powers[ power ], x, cameoY, x + cameoW, cameoY + cameoH );
+	}
+
+	const ThingTemplate *favourite = score->getMostBuiltUnit();
+	if( favourite == NULL )
+		return;
+
+	const Int favouriteX = left + stripPixels( SCOREBOARD_FAVOURITE_X );
+	const Image *cameo = favourite->getButtonImage();
+	if( cameo )
+		TheDisplay->drawImage( cameo, favouriteX, cameoY, favouriteX + cameoW, cameoY + cameoH );
+
+	DisplayString *favouriteName = scoreboardString( smallFont, favourite->getDisplayName(),
+																stripPixels( SCOREBOARD_FAVOURITE_NAME_WIDTH ) );
+	drawScoreboardText( favouriteName, left + stripPixels( SCOREBOARD_FAVOURITE_NAME_X ), middle, SCOREBOARD_ALIGN_LEFT,
+											valueColor );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The scoreboard on Tab, laid out the way Dota lays out its own: each side is a block under a
+	* band of its own colour, the band carrying the side's name and how many of its seats are still
+	* standing.  Your side is a table with your own row lit; the enemy is a grid of name chips under
+	* it.  Watching a match there are no sides to keep secrets from, so there is one table, every
+	* row in full and a team column to say who is with whom. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::drawScoreboard( void )
+{
+	if( !m_scoreboardOpen || TheGameInfo == NULL )
+		return;
+	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+		return;
+
+	Player *local = ThePlayerList->getLocalPlayer();
+	const Bool watching = local->isPlayerObserver();
+
+	Player *players[ MAX_SLOTS ];
+	const GameSlot *slots[ MAX_SLOTS ];
+	Bool allied[ MAX_SLOTS ];
+	Int seats = 0;
+	Int sectionSeats[ SCOREBOARD_SECTIONS ] = { 0, 0 };
+	Int sectionStanding[ SCOREBOARD_SECTIONS ] = { 0, 0 };
+	for( Int slotNum = 0; slotNum < MAX_SLOTS; slotNum++ )
+	{
+		const GameSlot *slot = TheGameInfo->getConstSlot( slotNum );
+		if( !slot->isOccupied() )
+			continue;
+
+		AsciiString playerName;
+		playerName.format( "player%d", slotNum );
+		Player *player = ThePlayerList->findPlayerWithNameKey( NAMEKEY( playerName ) );
+		if( player->isPlayerObserver() )
+			continue;
+
+		players[ seats ] = player;
+		slots[ seats ] = slot;
+		allied[ seats ] = watching || player == local || local->getRelationship( player->getDefaultTeam() ) == ALLIES;
+		const Int section = allied[ seats ] ? 0 : 1;
+		sectionSeats[ section ]++;
+		if( !TheVictoryConditions->hasSinglePlayerBeenDefeated( player ) )
+			sectionStanding[ section ]++;
+		seats++;
+	}
+
+	GameFont *bodyFont = TheFontLibrary->getFont( m_superweaponNormalFont,
+												TheGlobalLanguageData->adjustFontSize( SCOREBOARD_POINT_SIZE ), TRUE );
+	GameFont *smallFont = TheFontLibrary->getFont( m_superweaponNormalFont,
+												TheGlobalLanguageData->adjustFontSize( SCOREBOARD_SMALL_POINT_SIZE ), FALSE );
+
+	const Int pad = stripPixels( SCOREBOARD_PAD );
+	const Int sectionGap = stripPixels( SCOREBOARD_SECTION_GAP );
+	const Int headerHeight = stripPixels( SCOREBOARD_HEADER_HEIGHT );
+	const Int rowHeight = stripPixels( SCOREBOARD_ROW_HEIGHT );
+	const Int chipHeight = stripPixels( SCOREBOARD_CHIP_HEIGHT );
+	const Int width = stripPixels( SCOREBOARD_WIDTH );
+	const Int left = ( TheDisplay->getWidth() - width ) / 2;
+	const Int top = stripPixels( SCOREBOARD_TOP );
+	const Int innerLeft = left + pad;
+	const Int innerWidth = width - 2 * pad;
+	const Int inset = stripPixels( SCOREBOARD_TEXT_INSET );
+	const Int chipWidth = innerWidth / SCOREBOARD_CHIPS_PER_LINE;
+	const Int chipLines = ( sectionSeats[ 1 ] + SCOREBOARD_CHIPS_PER_LINE - 1 ) / SCOREBOARD_CHIPS_PER_LINE;
+
+	Int height = pad + headerHeight + sectionSeats[ 0 ] * rowHeight + pad;
+	if( sectionSeats[ 1 ] > 0 )
+		height += sectionGap + headerHeight + chipLines * chipHeight;
+
+	m_scoreboardStringsUsed = 0;
+	TheDisplay->drawFillRect( left, top, width, height, SCOREBOARD_PANEL_COLOR );
+	TheDisplay->drawOpenRect( left, top, width, height, 1.0f, SCOREBOARD_EDGE_COLOR );
+
+	// your side, or everybody: the band with the labels, then a row a seat, your own one lit
+	Int y = top + pad;
+	const Int bandMiddle = y + headerHeight / 2;
+	UnicodeString text;
+	TheDisplay->drawFillRect( innerLeft, y, innerWidth, headerHeight, watching ? SCOREBOARD_ZEBRA_COLOR : SCOREBOARD_ALLIES_BAND_COLOR );
+	if( watching )
+	{
+		drawScoreboardText( scoreboardString( smallFont, TheGameText->fetch( "GUI:ScoreboardPlayer" ) ),
+												innerLeft + stripPixels( SCOREBOARD_NAME_X ), bandMiddle, SCOREBOARD_ALIGN_LEFT, SCOREBOARD_HEADING_COLOR );
+		drawScoreboardText( scoreboardString( smallFont, TheGameText->fetch( TheScoreboardTeamColumn.label ) ),
+												innerLeft + stripPixels( TheScoreboardTeamColumn.x ), bandMiddle, SCOREBOARD_ALIGN_LEFT, SCOREBOARD_HEADING_COLOR );
+	}
+	else
+	{
+		text.format( L"%s  %d/%d", TheGameText->fetch( "GUI:ScoreboardAllies" ).str(), sectionStanding[ 0 ], sectionSeats[ 0 ] );
+		drawScoreboardText( scoreboardString( bodyFont, text ), innerLeft + stripPixels( SCOREBOARD_TEXT_INSET ), bandMiddle,
+												SCOREBOARD_ALIGN_LEFT, SCOREBOARD_ALLIES_COLOR );
+	}
+	for( Int column = 0; column < (Int)ARRAY_SIZE( TheScoreboardColumns ); column++ )
+	{
+		drawScoreboardText( scoreboardString( smallFont, TheGameText->fetch( TheScoreboardColumns[ column ].label ) ),
+												innerLeft + stripPixels( TheScoreboardColumns[ column ].x ), bandMiddle,
+												TheScoreboardColumns[ column ].align, SCOREBOARD_HEADING_COLOR );
+	}
+	y += headerHeight;
+
+	Int row = 0;
+	for( Int seat = 0; seat < seats; seat++ )
+	{
+		if( !allied[ seat ] )
+			continue;
+
+		if( players[ seat ] == local )
+			TheDisplay->drawFillRect( innerLeft, y, innerWidth, rowHeight, SCOREBOARD_OWN_ROW_COLOR );
+		else if( row % 2 == 1 )
+			TheDisplay->drawFillRect( innerLeft, y, innerWidth, rowHeight, SCOREBOARD_ZEBRA_COLOR );
+		row++;
+		drawScoreboardRow( players[ seat ], slots[ seat ], watching, bodyFont, smallFont, innerLeft, y, rowHeight );
+		y += rowHeight;
+	}
+
+	if( sectionSeats[ 1 ] == 0 )
+		return;
+
+	// the enemy: its band, then its seats as chips, four to a line.  A chip is a colour, a name and
+	// a team and nothing else: the enemy's general, money and promotions are for its own side to
+	// know, and a full row of empty columns would only be a row of things you are not told.
+	y += sectionGap;
+	TheDisplay->drawFillRect( innerLeft, y, innerWidth, headerHeight, SCOREBOARD_ENEMIES_BAND_COLOR );
+	text.format( L"%s  %d/%d", TheGameText->fetch( "GUI:ScoreboardEnemies" ).str(), sectionStanding[ 1 ], sectionSeats[ 1 ] );
+	drawScoreboardText( scoreboardString( bodyFont, text ), innerLeft + stripPixels( SCOREBOARD_TEXT_INSET ), y + headerHeight / 2,
+											SCOREBOARD_ALIGN_LEFT, SCOREBOARD_ENEMIES_COLOR );
+	y += headerHeight;
+
+	Int chip = 0;
+	for( Int seat = 0; seat < seats; seat++ )
+	{
+		if( allied[ seat ] )
+			continue;
+
+		const Int chipLeft = innerLeft + ( chip % SCOREBOARD_CHIPS_PER_LINE ) * chipWidth;
+		const Int chipTop = y + ( chip / SCOREBOARD_CHIPS_PER_LINE ) * chipHeight;
+		const Int chipMiddle = chipTop + chipHeight / 2;
+		if( ( chip / SCOREBOARD_CHIPS_PER_LINE + chip ) % 2 == 1 )
+			TheDisplay->drawFillRect( chipLeft, chipTop, chipWidth, chipHeight, SCOREBOARD_ZEBRA_COLOR );
+		chip++;
+
+		const Bool defeated = TheVictoryConditions->hasSinglePlayerBeenDefeated( players[ seat ] );
+		TheDisplay->drawFillRect( chipLeft, chipTop, stripPixels( SCOREBOARD_STRIPE_WIDTH ), chipHeight,
+															defeated ? SCOREBOARD_DEFEATED_COLOR : clientPlayerColor( players[ seat ] ) );
+		drawScoreboardText( scoreboardString( smallFont, scoreboardTeamLabel( slots[ seat ] ) ), chipLeft + chipWidth - inset,
+												chipMiddle, SCOREBOARD_ALIGN_RIGHT, SCOREBOARD_GENERAL_COLOR );
+		DisplayString *name = scoreboardString( bodyFont, slots[ seat ]->getName() );
+		drawScoreboardText( name, chipLeft + inset, chipMiddle, SCOREBOARD_ALIGN_LEFT,
+												defeated ? SCOREBOARD_DEFEATED_COLOR : SCOREBOARD_NAME_COLOR );
+		if( defeated )
+			strikeScoreboardName( name, chipLeft + inset, chipMiddle );
+	}
 }
 
 //-------------------------------------------------------------------------------------------------

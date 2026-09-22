@@ -13,13 +13,29 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 project(GeneralsMD CXX C)
 
-# Win32 only: the code is full of 32-bit inline __asm, which MSVC x64 rejects outright.
-if(MSVC AND NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
-  message(FATAL_ERROR "Configure for Win32: cmake -A Win32")
+# x64 only.  The 32-bit build was dropped once this one was proven against it: same simulation to
+# the bit, same picture to within sub-pixel sampling, and sound and video of its own that do not
+# depend on the two 32-bit DLLs the game shipped with.  Nothing here is written for x86 any more.
+if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+  message(FATAL_ERROR "Configure for x64: cmake -A x64")
 endif()
 
 set(WW ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/WWVegas)
 set(COMP ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/Compression)
+
+# The third-party sources EA stripped out, which this repository does not carry either.  build.bat
+# fetches them before it configures; say so here rather than let the generator report a missing
+# source file per library.
+foreach(vendored
+    ${COMP}/ZLib/deflate.c
+    ${COMP}/LZHCompress/CompLibSource/Lzhl.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Include/d3d8.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/GameSpy/CMakeLists.txt)
+  if(NOT EXISTS ${vendored})
+    message(FATAL_ERROR
+      "${vendored} is missing. Run Tools\\vendor.ps1 (build.bat does it for you).")
+  endif()
+endforeach()
 
 add_compile_definitions(WIN32 _WINDOWS _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)
 
@@ -58,13 +74,10 @@ if(MSVC)
   # sources in a single project and was the long pole.  /FS above is what makes this
   # safe - the PDB writes are serialized in the compilers.
   add_compile_options(/MP)
-  # /arch:SSE2 is already the 32-bit default on this compiler; it is written down because
-  # the simulation now depends on it.  x87 carries 80-bit intermediates whose spills round
-  # a second time, and FPUControl.cpp pins the control word to 24-bit precision, which would
-  # cut the double-precision argument reduction in WWMath/dettrig.cpp down to float and give
-  # a different angle on a machine that spilled at a different point.  SSE2 arithmetic is
-  # done at the declared width, so every machine gets the same bits.  See dettrig.h.
-  add_compile_options(/arch:SSE2)
+  # There is no /arch:SSE2 here and none is needed: x64 has no x87 code generation at all, so
+  # every float is computed at its declared width and every machine gets the same bits.  That is
+  # what the 32-bit build had to ask for explicitly, and why it pinned the x87 precision control.
+  # See dettrig.h and FPUControl.h.
   add_link_options(/DEBUG)
 endif()
 
@@ -535,28 +548,30 @@ file(GLOB_RECURSE GAMEENGINEDEVICE_SOURCES ${GED}/Source/*.cpp)
 # shipping build uses the Win32 message mouse instead).
 list(REMOVE_ITEM GAMEENGINEDEVICE_SOURCES
   ${GED}/Source/Win32Device/GameClient/Win32DIMouse.cpp)
-# Miles is binary-only too, but the game ships mss32.dll and it exports
-# decorated stdcall names (_AIL_startup@0, ...), so MilesAudioManager can bind
-# to the real DLL through an import library - real audio, no SDK.  Thyme's
-# recipe: build a no-op stub as mss32.dll from miles.c + miles.def (the def
-# mirrors the shipped DLL's export table); linking against the stub's import
-# lib makes the exe resolve those names from whatever mss32.dll sits next to
-# it at runtime - the game's real one.  (`lib /def` alone can't produce this
-# import lib: it prepends a second underscore to the already-decorated names.)
-# Bink is binary-only too, and the same trick works: the game ships BINKW32.DLL
-# and it exports decorated stdcall names (_BinkOpen@8, ...), so BinkVideoPlayer
-# binds to the real DLL through the import library of a no-op stub built as
-# binkw32.dll.  Real movies, no SDK.  The stub dll in build/Release/ must never
-# be copied to Run/ - the loader has to find the game's own BINKW32.DLL there.
-add_library(binkstub SHARED
-  ${WW}/Bink/stub/bink.c ${WW}/Bink/stub/bink.def)
-set_target_properties(binkstub PROPERTIES OUTPUT_NAME binkw32)
-target_include_directories(binkstub PRIVATE ${WW}/Bink/include)
+# Sound and video are the game's own.  Miles and Bink were binary-only, and the DLLs the retail
+# game ships are 32-bit, so there is nothing for a 64-bit exe to bind to: what it links instead is
+# those two APIs written over XAudio2 and FFmpeg.  FFmpeg decodes binkvideo and binkaudio natively,
+# so the .bik files on disk play as they are, and swscale converts each frame into whatever surface
+# format the video player asks for.  MilesAudioManager.cpp and BinkVideoPlayer.cpp are unchanged and
+# still call AIL_* and Bink*; the reconstructed headers in Miles6/include and Bink/include are still
+# the declarations.  miles_smoke and bink_smoke are the checks.
+set(FFMPEG_DIR ${LIBSRC}/FFmpeg/dist)
+if(NOT EXISTS ${FFMPEG_DIR}/include)
+  message(FATAL_ERROR
+    "FFmpeg is missing from Libraries/Source/FFmpeg/dist - see the vendored-libs rule.")
+endif()
 
-add_library(milesstub SHARED
-  ${WW}/Miles6/stub/miles.c ${WW}/Miles6/stub/miles.def)
-set_target_properties(milesstub PROPERTIES OUTPUT_NAME mss32)
-target_include_directories(milesstub PRIVATE ${WW}/Miles6/stub ${WW}/Miles6/include)
+set(FFMPEG_CORE
+  ${FFMPEG_DIR}/lib/avformat.lib ${FFMPEG_DIR}/lib/avcodec.lib ${FFMPEG_DIR}/lib/avutil.lib
+  ${FFMPEG_DIR}/lib/swresample.lib)
+
+add_library(binkvideo STATIC ${WW}/Bink/ffmpeg/bink_ffmpeg.cpp)
+target_include_directories(binkvideo PRIVATE ${WW}/Bink/include ${FFMPEG_DIR}/include)
+target_link_libraries(binkvideo PRIVATE ${FFMPEG_CORE} ${FFMPEG_DIR}/lib/swscale.lib xaudio2)
+
+add_library(milesaudio STATIC ${WW}/Miles6/xaudio2/miles_xaudio2.cpp)
+target_include_directories(milesaudio PRIVATE ${WW}/Miles6/include ${FFMPEG_DIR}/include)
+target_link_libraries(milesaudio PRIVATE ${FFMPEG_CORE} xaudio2)
 
 add_library(gameenginedevice STATIC ${GAMEENGINEDEVICE_SOURCES})
 
@@ -564,7 +579,7 @@ target_include_directories(gameenginedevice PUBLIC
   ${GED}/Include ${STUBS} ${CMAKE_CURRENT_SOURCE_DIR}/Main
   ${WW}/Miles6/include ${WW}/Bink/include)
 set_target_properties(gameenginedevice PROPERTIES CXX_STANDARD 17)
-target_link_libraries(gameenginedevice PUBLIC gameengine ww3d2 milesstub binkstub)
+target_link_libraries(gameenginedevice PUBLIC gameengine ww3d2 milesaudio binkvideo)
 
 # ---- generals.exe ---------------------------------------------------------
 # BuildVersion.h and GeneratedVersion.h are normally written by Tools/
@@ -575,10 +590,10 @@ target_link_libraries(gameenginedevice PUBLIC gameengine ww3d2 milesstub binkstu
 set(GENERATED ${CMAKE_CURRENT_BINARY_DIR}/generated)
 file(WRITE ${GENERATED}/BuildVersion.h
 "// Generated by CMake, standing in for Tools/buildVersionUpdate.\n"
-"#define VERSION_STRING \"v1.1.4\"\n"
-"#define VERSION_MAJOR 1\n"
+"#define VERSION_STRING \"v2.1.0\"\n"
+"#define VERSION_MAJOR 2\n"
 "#define VERSION_MINOR 1\n"
-"#define VERSION_BUILDNUM 4\n")
+"#define VERSION_BUILDNUM 0\n")
 file(WRITE ${GENERATED}/GeneratedVersion.h
 "// Generated by CMake, standing in for Tools/versionUpdate.\n"
 "#define LOCAL_BUILD_STRING \"0\"\n"
@@ -592,20 +607,9 @@ target_include_directories(generals PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Main ${G
 # A .map turns the "fault offset" in the Windows Application Error event into a
 # function name without a debugger: find the last entry whose RVA is <= the offset.
 target_link_options(generals PRIVATE /MAP)
-# A 32-bit process gets 2GB of user address space by default; this asks for the
-# whole 4GB, which 64-bit Windows hands over with no /3GB switch and no reboot.
-# 4GB is the ceiling and there is no way past it here - the pointer is 32 bits,
-# and x64 is rejected by this port on purpose (the code is full of 32-bit __asm).
-#
-# Measured need: an eight-player Merciless match on Twilight Flame peaks at 978MB
-# of virtual address space, so it is at half the old limit already, and a 2003
-# engine walking into that wall does not report it - it stalls for a third of a
-# second at a time and then dies inside ntdll's heap.
-#
-# The classic risk is code that treats a pointer as a signed 32-bit int, which
-# only breaks once an allocation lands above 2GB. Nothing here is known to; if a
-# pointer-signedness bug ever surfaces, this is the first line to suspect.
-target_link_options(generals PRIVATE /LARGEADDRESSAWARE)
+# /LARGEADDRESSAWARE used to be here, asking 64-bit Windows for the whole 4GB a 32-bit process can
+# address.  An eight-player Merciless match on Twilight Flame was already at 978MB of it.  The
+# ceiling it was working against does not exist in this build.
 set_target_properties(generals PROPERTIES CXX_STANDARD 17)
 target_link_libraries(generals PRIVATE gameenginedevice
   winmm dsound wsock32 ole32 oleaut32 uuid)
@@ -674,6 +678,15 @@ add_custom_command(TARGET generals POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory
           ${CMAKE_CURRENT_SOURCE_DIR}/Data/Cinema
           ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Cinema)
+
+# The audio and video backends decode with FFmpeg, so its DLLs have to sit next to the exe.  These
+# are the five the two backends link against; avdevice and avfilter are not used.
+set(FFMPEG_RUNTIME
+  ${FFMPEG_DIR}/bin/avcodec-62.dll ${FFMPEG_DIR}/bin/avformat-62.dll ${FFMPEG_DIR}/bin/avutil-60.dll
+  ${FFMPEG_DIR}/bin/swresample-6.dll ${FFMPEG_DIR}/bin/swscale-9.dll)
+add_custom_command(TARGET generals POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          ${FFMPEG_RUNTIME} ${CMAKE_CURRENT_SOURCE_DIR}/../Run/)
 
 # ===========================================================================
 # Tests.  Run with:  ctest --test-dir build -C Release --output-on-failure
@@ -775,12 +788,24 @@ add_test(NAME compression_selfcheck COMMAND compression_selfcheck)
 add_test(NAME dx9_smoke COMMAND dx9_smoke)
 add_test(NAME dx9_smoke_msaa COMMAND dx9_smoke -msaa 4)
 
-# bink_smoke validates the hand-reconstructed Bink ABI against the real
-# BINKW32.DLL the game ships - it loads that DLL by path, so it does not link
-# binkstub and it has to run from Run/.  Without game data it prints "skip".
+# bink_smoke decodes a real .bik with the player this build links and compares what comes out
+# against the values read straight from the file's own header, so a wrong field offset or a wrong
+# surface constant shows up as a mismatch.  It runs from Run/, where the movies and the FFmpeg DLLs
+# are; without game data it prints "skip".
 add_executable(bink_smoke ${TESTS}/bink_smoke.c)
 target_include_directories(bink_smoke PRIVATE ${WW}/Bink/include)
-add_test(NAME bink_smoke COMMAND bink_smoke
+target_compile_definitions(bink_smoke PRIVATE BINK_LINKED_PLAYER)
+target_link_libraries(bink_smoke PRIVATE binkvideo)
+add_test(NAME bink_smoke COMMAND bink_smoke Data/Movies/GC_Background.bik
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../Run)
+
+# miles_smoke plays a tone through the audio backend and waits for the end-of-sample callback,
+# which only arrives once a voice has played the buffer out.
+add_executable(miles_smoke ${TESTS}/miles_smoke.cpp)
+target_include_directories(miles_smoke PRIVATE ${WW}/Miles6/include)
+target_link_libraries(miles_smoke PRIVATE milesaudio)
+# From Run/, where the FFmpeg DLLs the backend decodes with are.
+add_test(NAME miles_smoke COMMAND miles_smoke
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../Run)
 
 # Tools/bigfile.py reads and writes the game's BIG archives (that is how the shipped INIs

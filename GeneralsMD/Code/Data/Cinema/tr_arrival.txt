@@ -1,0 +1,15 @@
+# Trailer: two hundred mixed units filling the point they were sent to. The camera sits over the
+# destination, 1135,3900 on Twilight Flame, wide enough to hold the column that is still arriving
+# and the crowd that has already packed itself in.
+#
+#   generals.exe -borderless -msaa 0 -quickstart -noshellmap -multiInstance
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover -seed 7 -peacetime 20
+#     -scenario trailer_arrival -cinema tr_arrival -video 810 1350 tr_arrival -maxframes 1370
+#
+# They come in from around 537,3600, so heading -45 has them walking into frame from the left.
+
+26    cut        1080 3860 1.0 -45 -14
+27    zoom       0.85 14
+27    orbit      22 16
+43    pitch      -24 3
+45    end

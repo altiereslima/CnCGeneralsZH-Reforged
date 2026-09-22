@@ -39,11 +39,12 @@
 #define DEFINE_PANNING_NAMES
 
 #include "Common/CRC.h"
-#include "Common/EarlyOptions.h"	// findDocumentsFolderA
+#include "Common/EarlyOptions.h"	// findUserDataDirectory
 #include "Common/File.h"
 #include "Common/FileSystem.h"
 #include "Common/GameAudio.h"
 #include "Common/INI.h"
+#include "Common/Monitors.h"
 #include "Common/OptionsCatalog.h"
 #include "Common/registry.h"
 #include "Common/UserPreferences.h"
@@ -106,6 +107,7 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "UseShadowDecals",						INI::parseBool,				NULL,			offsetof( GlobalData, m_useShadowDecals ) },
 	{ "ShadowsForProjectiles",						INI::parseBool,				NULL,			offsetof( GlobalData, m_shadowsForProjectiles ) },
 	{ "StartAtMaxZoom",											INI::parseBool,				NULL,			offsetof( GlobalData, m_startAtMaxZoom ) },
+	{ "ContactShadows",										INI::parseBool,				NULL,			offsetof( GlobalData, m_contactShadows ) },
 	{ "ShadowsForProps",									INI::parseBool,				NULL,			offsetof( GlobalData, m_shadowsForProps ) },
 	{ "ShadowsForParticles",						INI::parseBool,				NULL,			offsetof( GlobalData, m_shadowsForParticles ) },
 	{ "TextureReductionFactor",			INI::parseInt,				NULL,			offsetof( GlobalData, m_textureReductionFactor ) },
@@ -203,6 +205,7 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "ZoomToCursor",							INI::parseBool,				NULL,			offsetof( GlobalData, m_zoomToCursor ) },
 	{ "FormationDrag",						INI::parseBool,				NULL,			offsetof( GlobalData, m_formationDrag ) },
 	{ "ShowAllyCursors",					INI::parseBool,				NULL,			offsetof( GlobalData, m_showAllyCursors ) },
+	{ "ChromaLighting",						INI::parseBool,				NULL,			offsetof( GlobalData, m_chromaLighting ) },
 	{ "ShowHudOverlay",						INI::parseBool,				NULL,			offsetof( GlobalData, m_showHudOverlay ) },
 	{ "ShowPlacementRangeRing",		INI::parseBool,				NULL,			offsetof( GlobalData, m_showPlacementRangeRing ) },
 	{ "WorkersReturnToSupply",		INI::parseBool,				NULL,			offsetof( GlobalData, m_workersReturnToSupply ) },
@@ -651,7 +654,7 @@ GlobalData::GlobalData()
 	m_direct3D11DumpPath.clear();
 	// The Direct3D 11 frame gets every effect the backend has unless -dx11post names a chain of its
 	// own; "-dx11post off" is the faithful 2003 picture that dx11-check.ps1 compares against.
-	m_direct3D11PostChain = "bloom,fxaa,sharpen";
+	m_direct3D11PostChain = "bloom,ao,fxaa,sharpen";
 	m_xResolution = 800;
 	m_yResolution = 600;
 	m_maxShellScreens = 0;
@@ -679,6 +682,15 @@ GlobalData::GlobalData()
 	m_startAtMaxZoom = TRUE;		//open a game framed as wide as the player could zoom by hand
 	m_shadowsForProps = TRUE;				//likewise: scenery with no shadow of its own gets one
 	m_shadowsForParticles = TRUE;	//on by default: the shipped INI has no entry for it
+	m_classicGraphics = FALSE;
+	m_shadowMap = TRUE;						//the sun's own shadows are what the game draws with now
+	m_shadowMapOnly = TRUE;				//and they replace the stencil volumes rather than joining them
+	m_shadowMapReport = FALSE;
+	m_shadowMapPenumbra = 0.0f;		//zero anywhere here means the built-in value stands
+	m_shadowMapSkyFill = 0.0f;
+	m_shadowMapStrength = 0.0f;
+	m_shadowMapWidest = 0.0f;
+	m_contactShadows = TRUE;		//on by default: a building with nothing under it reads as laid on the ground
 	m_textureReductionFactor = -1;
 	m_enableBehindBuildingMarkers = TRUE;
 	m_scriptDebug = FALSE;
@@ -696,16 +708,22 @@ GlobalData::GlobalData()
 	m_unitLimit = FALSE;						// no unit limit unless -unitlimit asks for one
 	m_autoSkirmishObserver = FALSE;
 	m_headless = FALSE;
+	m_turbo = FALSE;
 	m_maxGameFrames = 0; // run until the match ends
 	m_screenShotFrame = 0; // take no picture unless -screenshot asks for one
 	m_videoStartFrame = 0;
 	m_videoEndFrame = 0; // record nothing unless -video asks for a range
 	m_videoName.clear();
+	m_wavStartFrame = 0;
+	m_wavEndFrame = 0; // record no sound unless -wav asks for a range
+	m_wavName.clear();
 	m_autoCameraSeconds = 0; // the camera stays where it was put
 	m_cameraLookSet = FALSE; // -camera not given: the map decides where the view starts
 	m_cameraLook.x = m_cameraLook.y = 0.0f;
 	m_traceMoveID = 0; // no movement trace
 	m_slowFrameMS = 20.0f; // a frame worth a line in the log; -slowframe lowers it for a hunt
+	m_drawDelayMS = 0; // client passes run as fast as the machine does unless -drawdelay slows them
+	m_drawDelayJitterMS = 0;
 	m_showLanes = FALSE; // the lane overlay is a diagnostic, off unless -showlanes asks for it
 	m_uiDrill = 0; // nobody presses the minimise button; -uidrill is how a script presses it
 	m_resDrillFrame = 0; // the resolution stays where it started unless -resdrill changes it mid-match
@@ -720,6 +738,7 @@ GlobalData::GlobalData()
 	for( Int slot = 0; slot < MAX_PLAYER_COUNT; slot++ )
 		m_autoSkirmishSide[ slot ].clear(); // every faction still comes out of the seed unless -side names one
 	m_netGameHosts.clear(); // no network game from the command line
+	m_netGameStarted = FALSE;
 	m_netGameLocalSlot = 0;
 	m_lanPlayerName.clear(); // the lobby name comes out of the preferences unless -lanname says otherwise
 	m_lanLobbyOnStart = FALSE;
@@ -1112,6 +1131,7 @@ GlobalData::GlobalData()
 	// the right button no longer scrolls, so a right-drag is free to mean something
 	m_formationDrag = TRUE;
 	m_showAllyCursors = TRUE;
+	m_chromaLighting = TRUE;	//costs nothing on a machine with no Razer server: the handshake fails once
 	m_menuTransitionSpeed = 100;
 	m_textureFilterMode = 2;	// anisotropic; retail shipped bilinear on a 2003 fill-rate budget
 	m_anisotropyLevel = 0;		// whatever the card offers, capped at 16 in _Init_Filters
@@ -1210,34 +1230,14 @@ GlobalData::GlobalData()
 
 	m_keyboardCameraRotateSpeed = 0.1f;
 
-  // Set user data directory based on registry settings instead of INI parameters. This allows us to 
-  // localize the leaf name.
-  // A redirected Documents folder can sit at a path longer than MAX_PATH, and the shell call this
-  // used to make simply fails there - see findDocumentsFolderA. The buffer is generous for the same
-  // reason.
+  // Documents plus the registry's leaf name, or the same leaf under %LOCALAPPDATA% when nothing can
+  // be written under Documents - see findUserDataDirectory, which WinMain asks the same question of.
+  // A redirected Documents folder can sit at a path longer than MAX_PATH, so the buffer is generous.
   char temp[1024];
-  if (findDocumentsFolderA(temp, sizeof(temp)))
+  if (findUserDataDirectory(temp, sizeof(temp)))
   {
-    AsciiString myDocumentsDirectory = temp;
-
-    if (myDocumentsDirectory.getCharAt(myDocumentsDirectory.getLength() -1) != '\\')
-      myDocumentsDirectory.concat( '\\' );
-
-    AsciiString leafName;
-    
-    if ( !GetStringFromRegistry( "", "UserDataLeafName", leafName ) )
-    {
-      // Use something, anything
-      // [MH] had to remove this, otherwise mapcache build step won't run... DEBUG_CRASH( ( "Could not find registry key UserDataLeafName; defaulting to \"Command and Conquer Generals Zero Hour Data\" " ) );
-      leafName = "Command and Conquer Generals Zero Hour Data";
-    }
-
-    myDocumentsDirectory.concat( leafName );
-    if (myDocumentsDirectory.getCharAt( myDocumentsDirectory.getLength() - 1) != '\\')
-      myDocumentsDirectory.concat( '\\' );
-
-    CreateDirectory(myDocumentsDirectory.str(), NULL);
-    m_userDataDir = myDocumentsDirectory;
+    m_userDataDir = temp;
+    DEBUG_LOG(("User data folder: %s\n", temp));
   }
   else
   {
@@ -1428,6 +1428,7 @@ void GlobalData::parseGameDataDefinition( INI* ini )
 
 	TheWritableGlobalData->m_xResolution = xres;
 	TheWritableGlobalData->m_yResolution = yres;
+	TheWritableGlobalData->m_monitor = optionPref["Monitor"];
 
 	// Everything in TheOptionCatalog, in one pass, and last: a row is allowed to overwrite what the
 	// hand-written block above just read.  This is also why the catalog is read here and not in
@@ -1435,6 +1436,15 @@ void GlobalData::parseGameDataDefinition( INI* ini )
 	// TheWritableGlobalData is being constructed, which is before parseCommandLine, so the command
 	// line still wins over the preferences file.  setOptionPreferences runs after it and would not.
 	loadOptionsFromPreferences( optionPref );
+
+	// Classic graphics takes the stencil shadows and the unfiltered picture back here, before the
+	// command line, so -dx11post still names a chain for the one run it is given.  The rest of the
+	// setting is read where the device starts and where the archives mount.
+	if (TheWritableGlobalData->m_classicGraphics)
+	{
+		TheWritableGlobalData->m_shadowMap = FALSE;
+		TheWritableGlobalData->m_direct3D11PostChain = "off";
+	}
 
 	applyWindowMode();
 }
@@ -1452,8 +1462,9 @@ void applyWindowMode( void )
 
 	if( mode == WINDOW_MODE_BORDERLESS )
 	{
-		TheWritableGlobalData->m_xResolution = ::GetSystemMetrics( SM_CXSCREEN );
-		TheWritableGlobalData->m_yResolution = ::GetSystemMetrics( SM_CYSCREEN );
+		const MonitorEntry monitor = findMonitor( TheWritableGlobalData->m_monitor.str() );
+		TheWritableGlobalData->m_xResolution = monitor.rect.right - monitor.rect.left;
+		TheWritableGlobalData->m_yResolution = monitor.rect.bottom - monitor.rect.top;
 
 		// there is no desktop left around a borderless window to park the cursor on, so scrolling at
 		// the edge is the only way the mouse moves the camera

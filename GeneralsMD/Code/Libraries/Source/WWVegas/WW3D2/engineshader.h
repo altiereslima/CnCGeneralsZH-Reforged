@@ -94,6 +94,10 @@ bool EngineShader_Pixel_Program(EngineShaderProgram program,
 // Whether a program is one bumped can be asked of.
 bool EngineShader_Can_Bump(EngineShaderProgram program);
 
+// Which transcribed programs paint the ground, and so read the sun's shadow map.  The water and
+// the trees are not among them: both have shadows of their own.
+bool EngineShader_Paints_Ground(EngineShaderProgram program);
+
 // What the pipeline cache keys this program under and what the dump calls its file.
 const char * EngineShader_Name(EngineShaderProgram program);
 

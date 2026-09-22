@@ -18,6 +18,14 @@ $shots = "$env:USERPROFILE\Documents\Command and Conquer Generals Zero Hour Data
 $tmp = Join-Path $env:TEMP "treecheck"
 if (-not (Test-Path $tmp)) { $null = New-Item -ItemType Directory $tmp }
 
+# -turbo cuts a view from about 90 seconds to about 25, but the cloud shadows scroll on the wall
+# clock, so a turbo shot and a paced one of the same frame differ on 7% of the pixels.  Both builds
+# have to run the same way: turbo when the reference build knows the switch, paced when it does not.
+$baseExe = Join-Path $run 'generals_base.exe'
+$pace = @()
+if (Select-String -Path $baseExe -Pattern '-turbo' -SimpleMatch -Quiet) { $pace = @('-turbo') }
+else { "generals_base.exe predates -turbo: both builds run paced, about 90 seconds a view" }
+
 $cases = @(
   @{map='Flash Effect';       x='1200'; y='945';  f=400},
   @{map='Flash Effect';       x='1816'; y='1861'; f=1200},
@@ -46,9 +54,10 @@ function Shoot($exe, $c, $tag) {
   Get-ChildItem "$shots\sshot*.bmp" -ErrorAction SilentlyContinue | Remove-Item -Force
   $args = @('-win','-xres','1280','-yres','720','-quickstart','-noshellmap','-multiInstance','-msaa','0','-dx11post','off',
             '-map',"`"Maps\$($c.map)\$($c.map).map`"",'-autoskirmish','4','-aidiff','easy','-seed','5',
-            '-maxframes',($c.f+80),'-screenshot',$c.f,'-camera',$c.x,$c.y,'-logPrefix',"chk_$tag`_")
+            '-maxframes',($c.f+80),'-screenshot',$c.f,'-camera',$c.x,$c.y,'-logPrefix',"chk_$tag`_") + $pace
   try {
     $p = Start-Process (Join-Path $run $exe) -ArgumentList $args -WorkingDirectory $run -PassThru
+    $p.PriorityClass = 'AboveNormal'
     $null = $p.WaitForExit(900000)
   }
   finally {

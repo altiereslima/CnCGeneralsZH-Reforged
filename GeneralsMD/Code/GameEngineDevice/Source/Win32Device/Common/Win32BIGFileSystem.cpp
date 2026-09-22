@@ -27,6 +27,7 @@
 /////////////////////////////////////////////////////////////
 
 #include <winsock2.h>
+#include <windows.h>	// MessageBox, for the one thing a player has to be told before the menu
 #include "Common/AudioAffect.h"
 #include "Common/ArchiveFile.h"
 #include "Common/ArchiveFileSystem.h"
@@ -37,6 +38,7 @@
 #include "Win32Device/Common/Win32BIGFile.h"
 #include "Win32Device/Common/Win32BIGFileSystem.h"
 #include "Common/registry.h"
+#include "Common/EarlyOptions.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -46,10 +48,64 @@
 
 static const char *BIGFileIdentifier = "BIGF";
 
+// What makes a folder the base game's.  Textures.big is where the shell map's ground comes from,
+// and an uninstalled copy takes it away while leaving its registry key behind.
+static const char *const BASE_GAME_ARCHIVE = "Textures.big";
+
+// Where to look when the registry does not say.  Steam writes no key and installs the two games as
+// sibling folders under steamapps\common (apps 2229870 and 2732960), so the base game is one folder
+// over; a copied-over install puts the same bigs in ZH_Generals next to the exe.  The First Decade
+// does the same with its own folder name, and registers the collection's root folder as the base
+// game's InstallPath, so a player on v2.0.1 got "no base game archives" with Generals one folder
+// over.
+static const char *const BASE_GAME_DIRECTORIES[] = {
+	"ZH_Generals\\",
+	"..\\Command & Conquer Generals\\",
+	"..\\Command & Conquer(tm) Generals\\",
+};
+
+// The folder inside the First Decade's registered root that holds the base game.
+static const char FIRST_DECADE_GENERALS_FOLDER[] = "Command & Conquer(tm) Generals\\";
+
+static Bool holdsBaseGameArchives(const char *directory)
+{
+	AsciiString archive = directory;
+	archive.concat(BASE_GAME_ARCHIVE);
+	return TheLocalFileSystem->doesFileExist(archive.str());
+}
+
+// The game starts without the base archives and then looks and sounds broken: magenta ground and
+// water, "Missing Audio File" for half the sound effects, no music and no tree models.  None of
+// that names its own cause, and a player staring at a pink main menu has nothing to go on, so it is
+// said here - before the menu, in the one place that knows.
+static void reportMissingBaseGame(void)
+{
+	DEBUG_LOG(("Win32BIGFileSystem::init - no base game archives anywhere; most of the art and audio will be missing.\n"));
+	::MessageBox(NULL,
+		"Zero Hour shares most of its artwork, sound effects and music with Command & Conquer Generals, "
+		"and none of the base game's .big files could be found.\n\n"
+		"Install Generals, or copy its .big files into a folder named ZH_Generals next to generals.exe.",
+		"Zero Hour Reforged",
+		MB_OK | MB_ICONWARNING | MB_TASKMODAL);
+}
+
 Win32BIGFileSystem::Win32BIGFileSystem() : ArchiveFileSystem() {
 }
 
 Win32BIGFileSystem::~Win32BIGFileSystem() {
+}
+
+// The classic graphics setting, read out of Options.ini before anything mounts: the archives go in
+// long before GlobalData exists, and the fork's upscaled art is the one thing classic has to keep
+// out of the directory tree rather than switch off afterwards.
+static Bool theClassicGraphics = FALSE;
+static const char REFORGED_ARCHIVE_PREFIX[] = "Reforged";
+
+static Bool isReforgedArchive(const AsciiString &path)
+{
+	const char *name = strrchr(path.str(), '\\');
+	name = (name != NULL) ? name + 1 : path.str();
+	return _strnicmp(name, REFORGED_ARCHIVE_PREFIX, sizeof(REFORGED_ARCHIVE_PREFIX) - 1) == 0;
 }
 
 void Win32BIGFileSystem::init() {
@@ -57,6 +113,8 @@ void Win32BIGFileSystem::init() {
 	if (TheLocalFileSystem == NULL) {
 		return;
 	}
+
+	theClassicGraphics = getEarlyOptionBool("ClassicGraphics", false);
 
 	//
 	// The exe's own directory and no further down.  This used to walk every subdirectory under it,
@@ -74,35 +132,54 @@ void Win32BIGFileSystem::init() {
 	// unreachable.  Re-load the patch archives with overwrite so they win, like retail.
 	loadBigFilesFromDirectory("", "Patch*.big", TRUE, FALSE);
 
-    // load original Generals assets
-    AsciiString installPath;
-    GetStringFromGeneralsRegistry("", "InstallPath", installPath );
-    //@todo this will need to be ramped up to a crash for release
-#ifndef _INTERNAL
-    // had to make this non-internal only, otherwise we can't autobuild
-    // GeneralsZH...
-    DEBUG_ASSERTCRASH(installPath != "", ("Be 1337! Go install Generals!"));
-#endif
-    // Zero Hour is not standalone: the base game's bigs carry most of the art,
-    // audio and the music tracks, and the CD check in AudioManager::init spins
-    // on a "Missing CD" prompt without them.  A retail install registers the
-    // key above; the Steam build does not, it ships the base game's bigs in a
-    // ZH_Generals subdirectory next to the exe instead.  Fall back to that
-    // layout so a copied-over Steam install works with no registry writes.
-    //
-    // A registered folder that holds no Textures.big gets the same fallback.  An uninstalled
-    // retail or First Decade copy leaves its key behind, and trusting it loaded no base archive
-    // at all: the water and the ground came up magenta and black on the shell map.
-    AsciiString baseTextures = installPath;
-    baseTextures.concat("Textures.big");
-    if (installPath=="" || !TheLocalFileSystem->doesFileExist(baseTextures.str()))
+    // Zero Hour is not standalone: the base game's bigs carry most of the art, the sound effects
+    // and the music.  A retail install registers the key below and Steam registers nothing, so a
+    // folder that holds Textures.big is what this looks for rather than a key that exists.  The
+    // pass above already loaded whatever sits next to the exe, so there is only something to fetch
+    // when the base archives are not already there.
+    if (!holdsBaseGameArchives(""))
     {
-      DEBUG_LOG(("Win32BIGFileSystem::init - no base game archives in the registered folder '%s', trying ZH_Generals\\\n", installPath.str()));
-      installPath = "ZH_Generals\\";
+      AsciiString installPath;
+      GetStringFromGeneralsRegistry("", "InstallPath", installPath );
+      if (!installPath.isEmpty() && !installPath.endsWith("\\"))
+      {
+        installPath.concat("\\");
+      }
+      if (!installPath.isEmpty() && !holdsBaseGameArchives(installPath.str()))
+      {
+        AsciiString firstDecade = installPath;
+        firstDecade.concat(FIRST_DECADE_GENERALS_FOLDER);
+        if (holdsBaseGameArchives(firstDecade.str()))
+        {
+          installPath = firstDecade;
+        }
+      }
+      // An uninstalled retail or First Decade copy leaves its key behind, and trusting it loaded
+      // no base archive at all: the water and the ground came up magenta and black on the shell map.
+      if (installPath.isEmpty() || !holdsBaseGameArchives(installPath.str()))
+      {
+        DEBUG_LOG(("Win32BIGFileSystem::init - no base game archives in the registered folder '%s'\n", installPath.str()));
+        installPath.clear();
+        for (Int i = 0; i < (Int)ARRAY_SIZE(BASE_GAME_DIRECTORIES) && installPath.isEmpty(); i++)
+        {
+          if (holdsBaseGameArchives(BASE_GAME_DIRECTORIES[i]))
+          {
+            installPath = BASE_GAME_DIRECTORIES[i];
+          }
+        }
+      }
+      if (installPath.isEmpty())
+      {
+        reportMissingBaseGame();
+      }
+      else
+      {
+        // Loaded second on purpose: loadIntoDirectoryTree does not overwrite, so the
+        // Zero Hour bigs already in the tree win over the base game's copies.
+        DEBUG_LOG(("Win32BIGFileSystem::init - loading the base game's archives from '%s'\n", installPath.str()));
+        loadBigFilesFromDirectory(installPath, "*.big");
+      }
     }
-    // Loaded second on purpose: loadIntoDirectoryTree does not overwrite, so the
-    // Zero Hour bigs already in the tree win over the base game's copies.
-    loadBigFilesFromDirectory(installPath, "*.big");
 
     // ... except where that costs resolution: a number of the base game's textures were shipped
     // downscaled in TexturesZH.big, and load order alone made those the ones the game uses.
@@ -258,6 +335,12 @@ Bool Win32BIGFileSystem::loadBigFilesFromDirectory(AsciiString dir, AsciiString 
 	Bool actuallyAdded = FALSE;
 	FilenameListIter it = filenameList.begin();
 	while (it != filenameList.end()) {
+		if (theClassicGraphics && isReforgedArchive(*it)) {
+			DEBUG_LOG(("Win32BIGFileSystem::loadBigFilesFromDirectory - classic graphics, leaving %s out.\n", (*it).str()));
+			it++;
+			continue;
+		}
+
 		ArchiveFile *archiveFile = openArchiveFile((*it).str());
 
 		if (archiveFile != NULL) {

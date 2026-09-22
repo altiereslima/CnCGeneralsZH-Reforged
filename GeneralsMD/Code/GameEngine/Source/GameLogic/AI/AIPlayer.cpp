@@ -40,6 +40,7 @@
 #include "Common/PlayerList.h"
 #include "Common/BuildAssistant.h"
 #include "Common/ThingTemplate.h"
+#include "Common/TunnelTracker.h"
 #include "Common/Upgrade.h"
 #include "Common/WellKnownKeys.h"
 #include "Common/Xfer.h"
@@ -68,6 +69,7 @@
 #include "GameLogic/PartitionManager.h"
 #include "Common/ActionManager.h"				// canCaptureBuilding, for the tech buildings
 #include "GameLogic/Module/SpecialPowerModule.h"	// ... and the module that does it
+#include "GameLogic/Module/CollideModule.h"	// ... and the collide that takes a vehicle by touching it
 #include "GameLogic/Module/ContainModule.h"
 #include "GameLogic/Module/JetAIUpdate.h"		// a Comanche is a jet with no runway
 #include <map>
@@ -84,12 +86,12 @@
 
 /** Does 'observerNdx' know this thing is there?
 	*
-	* The partition manager already draws exactly the line wanted here.  A player's shroud status for
-	* an object is SHROUDED until that player has seen it; once seen, an *immobile* object stays
-	* FOGGED when the vision leaves it (PartitionData::friend_calcActualShroudedStatus) while anything
-	* that can move goes back to SHROUDED.  So "not SHROUDED" already means "I can see it now, or it
-	* is a building I have seen and buildings do not walk away" - which is the whole information model
-	* the AI needs, with no memory of its own to keep, save or desync.
+	* "I can see it now, or it is a building I have seen and buildings do not walk away" - which is
+	* the whole information model the AI needs.  Object::isUnknownTo draws that line from the cells
+	* and each structure's memory of who last saw it, both kept on the logic's own frames.  It used to
+	* be getShroudedStatus != SHROUDED, which draws the same line but decides "has seen it" from
+	* whichever code happens to ask while the building is in view: the drawing loop, run for every
+	* player only on an observer's machine, so two machines could think different things.
 	*
 	* observerNdx < 0 is the old omniscient answer, for callers that are not one player's thinking. */
 static Bool observerKnowsAbout( const Object *obj, Int observerNdx )
@@ -98,7 +100,7 @@ static Bool observerKnowsAbout( const Object *obj, Int observerNdx )
 		return FALSE;
 	if( observerNdx < 0 )
 		return TRUE;
-	return obj->getShroudedStatus( observerNdx ) != OBJECTSHROUD_SHROUDED;
+	return !obj->isUnknownTo( observerNdx );
 }
 
 /** What a unit is worth in a fight, for every decision here that has to weigh one force against
@@ -184,6 +186,10 @@ static const Int SCOUT_CHECK_RATE = 2 * LOGICFRAMES_PER_SECOND;
 /** How often the AI looks for something to capture.  It only ever gets an order when it is idle, so
 	* this is a check, not a re-path. */
 static const Int CAPTURE_CHECK_RATE = 5 * LOGICFRAMES_PER_SECOND;
+
+/** How often the AI looks for a vehicle to take.  Same rhythm as the capture check, and the target
+	* has to be in sight, so a faster clock would only re-order what is already walking. */
+static const Int HIJACK_CHECK_RATE = 5 * LOGICFRAMES_PER_SECOND;
 
 #ifdef DEBUG_LOGGING
 /** Milliseconds between two performance counter readings.  Used by the per-job AI profile below and
@@ -277,8 +283,8 @@ m_supplySourceAttackCheckFrame(0),
 m_attackedSupplyCenter(INVALID_ID),
 m_teamSeconds(10),
 m_curWarehouseID(INVALID_ID),
-m_buildProbeOffset(0.0f),
-m_buildProbeSkip(0),
+m_buildSearchNext(0),
+m_buildSearchPlan(NULL),
 m_scoutTimer(1),
 m_retreatTimer(1),
 m_expandTimer(1),
@@ -298,6 +304,8 @@ m_role(AIROLE_AGGRESSIVE)
 	m_startIntelFrame = 0;
 	m_capturerID = INVALID_ID;
 	m_captureTimer = 1;
+	m_hijackerID = INVALID_ID;
+	m_hijackTimer = 1;
 
 	for( Int held = 0; held < MAX_HELD_TEAMS; ++held )
 	{
@@ -306,6 +314,13 @@ m_role(AIROLE_AGGRESSIVE)
 		m_heldSuffix[ held ] = 0;
 	}
 	m_heldSince = 0;
+
+	for( Int strike = 0; strike < MAX_REMEMBERED_STRIKES; ++strike )
+	{
+		m_strikeAim[ strike ].zero();
+		m_strikeFrame[ strike ] = 0;		// 0 == nothing aimed here yet, which fades nothing
+	}
+	m_strikeNext = 0;
 
 	m_frameLastBuildingBuilt = TheGameLogic->getFrame();
 	p->setCanBuildUnits(false); // turn off ai production by default.
@@ -370,6 +385,7 @@ m_role(AIROLE_AGGRESSIVE)
 	const Int SPREAD = 2 * LOGICFRAMES_PER_SECOND;
 	m_expandTimer += computeUpdatePhase( playerIndex, SPREAD );
 	m_captureTimer += computeUpdatePhase( playerIndex, SPREAD );
+	m_hijackTimer += computeUpdatePhase( playerIndex, SPREAD );
 	m_retreatTimer += computeUpdatePhase( playerIndex, SPREAD );
 	// The scout check's own cycle is already only two seconds, so its full cycle is the window.
 	m_scoutTimer += computeUpdatePhase( playerIndex, SCOUT_CHECK_RATE );
@@ -818,6 +834,42 @@ Object *AIPlayer::buildStructureNow(const ThingTemplate *bldgPlan, BuildListInfo
 	return bldg;
 }
 
+/** How far buildStructureWithDozer's flood fill may reach from the build list spot, in pathfind
+	* cells either way: half the width of the square rings it replaced. */
+static const Int BUILD_SEARCH_CELLS = 5;
+static const Int SKIRMISH_BUILD_SEARCH_CELLS = 60;
+static const Int BUILD_PROBES_PER_FRAME = 32;			///< isLocationLegalToBuild calls one frame may spend
+static const Int BUILD_EXPANSIONS_PER_FRAME = 512;	///< cells one frame may take off the flood's queue
+
+// ------------------------------------------------------------------------------------------------
+/** Whether the building search may flood through a cell: ground a vehicle could cross, the AI's own
+	* or anyone's structure standing on it, or the deck of a bridge that is still up over water or a
+	* cliff. worldPos is the cell's position in the world, for the bridge test. */
+// ------------------------------------------------------------------------------------------------
+static Bool isBuildSearchWalkable( Int cellX, Int cellY, const Coord3D *worldPos )
+{
+	const PathfindCell *cell = TheAI->pathfinder()->getCell( LAYER_GROUND, cellX, cellY );
+	if( cell == NULL )
+		return FALSE;		// off the map
+
+	switch( cell->getType() )
+	{
+		case PathfindCell::CELL_CLEAR:
+		case PathfindCell::CELL_RUBBLE:
+		case PathfindCell::CELL_OBSTACLE:
+			return TRUE;
+		default:
+			break;
+	}
+
+	for( Bridge *bridge = TheTerrainLogic->getFirstBridge(); bridge; bridge = bridge->getNext() )
+	{
+		if( bridge->peekBridgeInfo()->curDamageState != BODY_RUBBLE && bridge->isPointOnBridge( worldPos ) )
+			return TRUE;
+	}
+	return FALSE;
+}
+
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
 Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildListInfo *info)
@@ -886,152 +938,94 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 			bldgName.concat(" - Dozer unable to place.  Attempting to adjust position.");
 			TheScriptEngine->AppendDebugMessage(bldgName, false);
 
-			// try to fix.
-			Real posOffset;
+			/* The spot in the build list is taken, so this floods outwards from it one pathfind cell
+				 at a time, nearest first, and takes the first cell where the building fits. The square
+				 rings it replaced took the first legal position on a ring, and that could be the far
+				 side of a cliff or a river from the base: close in a straight line, a long drive round.
+				 The flood only walks ground joined to the spot - clear ground, rubble, structures
+				 standing on it, and bridges that are still up - so nearest means nearest by the ground.
+
+				 Every position tried is a call to isLocationLegalToBuild, a partition query and a
+				 terrain sample, and a whole search in one frame was measured at 46ms in a four-player
+				 match. So each frame gets a budget of positions and cells, and the queue is kept
+				 between frames: the cells come off it in the same order whichever frame runs them, so
+				 the spot it settles on is the spot it would have found in one go. The budget counts
+				 positions and not milliseconds, because a stopwatch would try a different number of
+				 them on a slower machine and the two would desync.
+
+				 When nothing fits, EA settled for the original spot, checked with
+				 NO_ENEMY_OBJECT_OVERLAP alone. That option skips every structure that is not an
+				 enemy's, the AI's own buildings included, and it is how a base grew buildings inside
+				 buildings. No spot now means no building this pass; the next pass floods again with
+				 whatever has been sold or destroyed since. */
+			static const Int NEIGHBOURS[8][2] = { {1,0}, {-1,0}, {0,1}, {0,-1}, {1,1}, {-1,1}, {1,-1}, {-1,-1} };
+			const Int searchRadius = isSkirmishAI() ? SKIRMISH_BUILD_SEARCH_CELLS : BUILD_SEARCH_CELLS;
+			const Int searchWidth = 2*searchRadius + 1;
+			const Int probeStride = isSkirmishAI() ? 2 : 1;		// the rings tried every other cell for a skirmish AI too
+			ICoord2D origin;
+			TheAI->pathfinder()->worldToCell(&pos, &origin);
+			if (m_buildSearchCells.empty() || m_buildSearchPlan != bldgPlan ||
+					m_buildProbePos.x != pos.x || m_buildProbePos.y != pos.y) {
+				m_buildSearchPlan = bldgPlan;
+				m_buildProbePos = pos;
+				m_buildSearchCells.clear();
+				m_buildSearchCells.push_back(origin);
+				m_buildSearchNext = 0;
+				m_buildSearchSeen.assign(searchWidth*searchWidth, 0);
+				m_buildSearchSeen[searchRadius*searchWidth + searchRadius] = 1;
+			}
+
 			Bool valid = false;
-			// Wiggle it a little :)
-			Real limit = 10*PATHFIND_CELL_SIZE_F;
-			if (isSkirmishAI()) {
-				limit = 120*PATHFIND_CELL_SIZE_F;
-			}
 			Coord3D newPos = pos;
-
-			/* One ring of that wiggle per logic frame.
-
-				 The spot in the build list is taken, so this walks a square ring outwards looking for
-				 one that is not, and for a skirmish AI it walks it 120 pathfind cells out - most of a
-				 generated map. Every position costs a call to isLocationLegalToBuild, which is a
-				 partition query for overlapping objects and a zone check for a route to it, and the
-				 rings get longer the further out they go: 3,720 of them by the outermost, 46ms in one
-				 logic frame, measured, and the worst frame of a four-player Twilight Flame match.
-				 It is rare - four such frames in 55,876 - and that is exactly what a stutter is.
-
-				 So the scan gets a budget and remembers where it was. It stops at the end of whichever
-				 ring takes it past BUILD_PROBES_PER_FRAME positions, asks to be called again next
-				 frame, and carries on from that ring; the positions are tried in the same order they
-				 always were, so the spot it settles on is the spot it would have found in one go. The
-				 budget counts positions rather than milliseconds on purpose: a stopwatch would test a
-				 different number of them on a slower machine, and the two would desync.
-
-				 A ring is finished once started rather than resumed part way through, which keeps the
-				 whole of the state in one number.
-
-				 The budget is small because the positions are not equally expensive. The rings near
-				 the base are the dear ones - the partition query there comes back full of the
-				 player's own buildings, and a position that gets past it pays for the terrain
-				 sampling as well - while the outer rings are mostly off the map and are rejected on
-				 the first line. A budget of 100 left a 19.7ms frame made of about 120 inner
-				 positions; at 32 the first frame walks three rings and the worst frame this can cost
-				 is either those, or one whole outer ring of 240 cheap ones.
-
-				 That last claim was wrong. A four-player match on 2026-09-15 spent 20 to 37ms of eight
-				 logic frames in a row here, and a timer put inside the loop showed why: the budget was
-				 only checked between rings, and a ring 72 to 104 cells out holds 152 to 216 positions,
-				 every one of them finished once started. So the budget is checked before every pair
-				 of positions now, and the pair it stopped at is kept beside the ring, which is still
-				 the same order and still the same spot. */
-			const Int BUILD_PROBES_PER_FRAME = 32;
 			Int probes = 0;
-			Bool outOfBudget = false;
-			Real firstOffset = 0;
-			Int skipPairs = 0;
-			if ((m_buildProbeOffset > 0 || m_buildProbeSkip > 0) &&
-					m_buildProbePos.x == pos.x && m_buildProbePos.y == pos.y) {
-				firstOffset = m_buildProbeOffset;		// same spot as last frame: carry on from there
-				skipPairs = m_buildProbeSkip;				// ... from the pair it stopped at inside that ring
-			}
-			m_buildProbePos = pos;
-			m_buildProbeOffset = 0;
-			m_buildProbeSkip = 0;
-
-			for (posOffset = firstOffset; posOffset<limit; posOffset += 2*PATHFIND_CELL_SIZE_F) {
-				const Real ringOffset = posOffset;
-				Int pair = 0;
-				if (probes >= BUILD_PROBES_PER_FRAME) {
-					// out of budget with rings left to walk: pick this one up again next frame
-					m_buildProbeOffset = posOffset;
-					outOfBudget = true;
-					break;
-				}
-				if (isSkirmishAI()) {
-					posOffset += 2*PATHFIND_CELL_SIZE_F;
-				}
-				Real offset = posOffset/2;
-				Real xPos, yPos;
-				yPos = pos.y-offset;
-				for (xPos = pos.x-offset; xPos <= pos.x+offset; xPos+=PATHFIND_CELL_SIZE_F) {
-					if (isSkirmishAI()) xPos += PATHFIND_CELL_SIZE_F;
-					if (skipPairs > 0) { --skipPairs; ++pair; continue; }		// tried last frame
-					if (probes >= BUILD_PROBES_PER_FRAME) {
-						m_buildProbeOffset = ringOffset;
-						m_buildProbeSkip = pair;
-						outOfBudget = true;
-						break;
+			Int expansions = 0;
+			while (m_buildSearchNext < (Int)m_buildSearchCells.size() &&
+					probes < BUILD_PROBES_PER_FRAME && expansions < BUILD_EXPANSIONS_PER_FRAME) {
+				const ICoord2D cell = m_buildSearchCells[m_buildSearchNext++];
+				++expansions;
+				const Int dx = cell.x - origin.x;
+				const Int dy = cell.y - origin.y;
+				for (Int n = 0; n < 8; ++n) {
+					const Int nx = dx + NEIGHBOURS[n][0];
+					const Int ny = dy + NEIGHBOURS[n][1];
+					if (abs(nx) > searchRadius || abs(ny) > searchRadius) continue;
+					UnsignedByte &seen = m_buildSearchSeen[(ny + searchRadius)*searchWidth + nx + searchRadius];
+					if (seen) continue;
+					seen = 1;
+					Coord3D neighbourPos = pos;
+					neighbourPos.x += nx*PATHFIND_CELL_SIZE_F;
+					neighbourPos.y += ny*PATHFIND_CELL_SIZE_F;
+					if (isBuildSearchWalkable(origin.x + nx, origin.y + ny, &neighbourPos)) {
+						ICoord2D next;
+						next.x = origin.x + nx;
+						next.y = origin.y + ny;
+						m_buildSearchCells.push_back(next);
 					}
-					++pair;
-					probes += 2;
-					newPos.x = xPos;
-					newPos.y = yPos;
-					valid = TheBuildAssistant->isLocationLegalToBuild( &newPos, bldgPlan, angle,
-																							 BuildAssistant::CLEAR_PATH |
-																							 BuildAssistant::TERRAIN_RESTRICTIONS |
-																							 BuildAssistant::NO_OBJECT_OVERLAP,
-																							 dozer, m_player ) == LBC_OK;
-					if (valid) break;
-					newPos.y = yPos+posOffset;
-					valid = TheBuildAssistant->isLocationLegalToBuild( &newPos, bldgPlan, angle,
-																							 BuildAssistant::CLEAR_PATH |
-																							 BuildAssistant::TERRAIN_RESTRICTIONS |
-																							 BuildAssistant::NO_OBJECT_OVERLAP,
-																							 dozer, m_player ) == LBC_OK;
 				}
-				if (valid || outOfBudget) break;
-				xPos = pos.x-offset;
-				for (yPos = pos.y-offset; yPos <= pos.y+offset; yPos+=PATHFIND_CELL_SIZE_F) {
-					if (isSkirmishAI()) yPos += PATHFIND_CELL_SIZE_F;
-					if (skipPairs > 0) { --skipPairs; ++pair; continue; }		// tried last frame
-					if (probes >= BUILD_PROBES_PER_FRAME) {
-						m_buildProbeOffset = ringOffset;
-						m_buildProbeSkip = pair;
-						outOfBudget = true;
-						break;
-					}
-					++pair;
-					probes += 2;
-					newPos.x = xPos;
-					newPos.y = yPos;
-					valid = TheBuildAssistant->isLocationLegalToBuild( &newPos, bldgPlan, angle,
-																							 BuildAssistant::CLEAR_PATH |
-																							 BuildAssistant::TERRAIN_RESTRICTIONS |
-																							 BuildAssistant::NO_OBJECT_OVERLAP,
-																							 dozer, m_player ) == LBC_OK;
-					if (valid) break;
-					newPos.x = xPos+posOffset;
-					valid = TheBuildAssistant->isLocationLegalToBuild( &newPos, bldgPlan, angle,
-																							 BuildAssistant::CLEAR_PATH |
-																							 BuildAssistant::TERRAIN_RESTRICTIONS |
-																							 BuildAssistant::NO_OBJECT_OVERLAP,
-																							 dozer, m_player ) == LBC_OK;
-				}
-				if (valid || outOfBudget) break;
+				if ((dx == 0 && dy == 0) || dx % probeStride != 0 || dy % probeStride != 0) continue;
+				if (TheAI->pathfinder()->getCell(LAYER_GROUND, cell.x, cell.y)->getType() != PathfindCell::CELL_CLEAR) continue;
+				newPos.x = pos.x + dx*PATHFIND_CELL_SIZE_F;
+				newPos.y = pos.y + dy*PATHFIND_CELL_SIZE_F;
+				++probes;
+				valid = TheBuildAssistant->isLocationLegalToBuild( &newPos, bldgPlan, angle,
+																						 BuildAssistant::CLEAR_PATH |
+																						 BuildAssistant::TERRAIN_RESTRICTIONS |
+																						 BuildAssistant::NO_OBJECT_OVERLAP,
+																						 dozer, m_player ) == LBC_OK;
+				if (valid) break;
 			}
-			if (valid) pos = newPos;
-			if (!valid && outOfBudget) {
-				/* Out of budget with the search unfinished. The fallback below settles for the
-					 original spot, and taking it here would be answering a question this frame has not
-					 finished asking. */
-				TheTerrainVisual->removeAllBibs();	// isLocationLegalToBuild adds bib feedback
-				m_buildDelay = 1;		// try again next frame; doBaseBuilding leaves any value >= 1 alone
-				return NULL;
+			const Bool searchUnfinished = !valid && m_buildSearchNext < (Int)m_buildSearchCells.size();
+			if (!searchUnfinished) {
+				m_buildSearchCells.clear();		// found, or every reachable cell tried: the next search starts over
 			}
 			if (!valid) {
-				valid = TheBuildAssistant->isLocationLegalToBuild( &pos, bldgPlan, angle,
-																						 BuildAssistant::NO_ENEMY_OBJECT_OVERLAP,
-																						 dozer, m_player ) == LBC_OK;
-				if (!valid) {
-					return NULL;
+				TheTerrainVisual->removeAllBibs();	// isLocationLegalToBuild adds bib feedback
+				if (searchUnfinished) {
+					m_buildDelay = 1;		// try again next frame; doBaseBuilding leaves any value >= 1 alone
 				}
+				return NULL;
 			}
+			pos = newPos;
 
 	}
 
@@ -1564,6 +1558,68 @@ void AIPlayer::onUnitProduced( Object *factory, Object *unit )
 	m_teamDelay = 0; // Cause the update queues & selection to happen immediately.
 }
 
+/** How long a spot stays spoken for after a superweapon has been aimed at it.
+	*
+	* It has to outlast a recharge or it buys nothing: the first cut was a minute, and the spy
+	* satellite - which goes through this same script action - recharges in 1801 frames and found
+	* its memory expired by one frame every single time, so it scanned the identical cell of the
+	* identical base seventeen times in a match.  One recharge is not enough either: a Particle
+	* Uplink Cannon comes back in 8400 frames and at a window of 9000 the crater has recovered 93%
+	* of its worth, which moves nothing - measured, three shots into the same spot.  Two recharges
+	* is the number, so the shot after this one has to find somewhere half as good before it will
+	* come back here.
+	*
+	* Coming back is deliberate.  The same three shots were at a cluster he kept rebuilding, worth
+	* 6859, then 7300, then 8900 - a target that grows back past the fade is one worth hitting
+	* again, and the fade recovering the whole way is what allows it. */
+enum { SUPERWEAPON_REAIM_FRAMES = 600 * LOGICFRAMES_PER_SECOND };
+
+//----------------------------------------------------------------------------------------------------------
+/** What a superweapon aimed at this spot is worth to this player right now.
+ *
+ * The score itself is EA's - the price of everything inside the blast - and the fade on top of it
+ * is what stops the salvo. A negative score belongs to a sneak attack, which reads defended ground
+ * as a cost rather than a prize; fading that would flatter exactly the ground it is avoiding.
+ */
+//----------------------------------------------------------------------------------------------------------
+Int AIPlayer::superweaponScore( Coord3D *center, Int playerNdx, Real radius, Bool targetMilitaryUnits )
+{
+	const Int value = getPlayerSuperweaponValue( center, playerNdx, radius, targetMilitaryUnits, m_player->getPlayerIndex() );
+	if( value <= 0 )
+		return value;
+
+	const UnsignedInt now = TheGameLogic->getFrame();
+	Real worth = 1.0f;
+	for( Int strike = 0; strike < MAX_REMEMBERED_STRIKES; ++strike )
+	{
+		if( m_strikeFrame[ strike ] == 0 )
+			continue;
+
+		const Real dx = center->x - m_strikeAim[ strike ].x;
+		const Real dy = center->y - m_strikeAim[ strike ].y;
+		const Real fade = aiStrikeFade( dx*dx + dy*dy, sqr( radius ), now - m_strikeFrame[ strike ],
+																		SUPERWEAPON_REAIM_FRAMES );
+		if( fade < worth )
+			worth = fade;			// the freshest shot covering this spot decides
+	}
+
+	return REAL_TO_INT( value * worth );
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** Remember a spot the next shot should leave alone.
+ *
+ * ponytail: recorded where the target is picked rather than where the shot leaves the silo - the
+ * one caller fires immediately after a successful compute, and nothing else in the tree aims one.
+ */
+//----------------------------------------------------------------------------------------------------------
+void AIPlayer::noteSuperweaponAim( const Coord3D *pos )
+{
+	m_strikeAim[ m_strikeNext ] = *pos;
+	m_strikeFrame[ m_strikeNext ] = TheGameLogic->getFrame();
+	m_strikeNext = (m_strikeNext + 1) % MAX_REMEMBERED_STRIKES;
+}
+
 //----------------------------------------------------------------------------------------------------------
 /**
  * Find a good spot to fire a superweapon.
@@ -1661,11 +1717,55 @@ Bool AIPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *power, Coord
 			pos.x = bounds.lo.x + ( bounds.width() * xIndex ) / xCount;
 			pos.y = bounds.lo.y + ( bounds.height() * yIndex ) / yCount;
 			pos.z = 0;
-			Int curCash = getPlayerSuperweaponValue( &pos, playerNdx, 2*weaponRadius, targetMilitaryUnits, m_player->getPlayerIndex() );
-			if ( curCash > cash) 
+			Int curCash = superweaponScore( &pos, playerNdx, 2*weaponRadius, targetMilitaryUnits );
+			if ( curCash > cash)
 			{
 				cash = curCash;
 				bestPos = pos;
+			}
+		}
+	}
+
+	//
+	// An army is a threat point wherever it happens to be standing, and the grid above only covers
+	// the ground his buildings are on: getPlayerStructureBounds measures structures, so the wave
+	// parked on our own doorstep was never a candidate at all - the AI could only ever shoot at
+	// real estate. Offer what we can see of his army as centres too and let the same score choose.
+	// ponytail: a value pass per armed unit, which is only paid on a frame a superweapon is ready.
+	//
+	Player *enemy = ThePlayerList->getNthPlayer( playerNdx );
+	if( targetMilitaryUnits && enemy != NULL )
+	{
+		const Int observerNdx = m_player->getPlayerIndex();
+		Player::PlayerTeamList::const_iterator teamIt;
+		for( teamIt = enemy->getPlayerTeams()->begin(); teamIt != enemy->getPlayerTeams()->end(); ++teamIt )
+		{
+			for( DLINK_ITERATOR<Team> instanceIt = (*teamIt)->iterate_TeamInstanceList(); !instanceIt.done(); instanceIt.advance() )
+			{
+				Team *team = instanceIt.cur();
+				if( !team )
+					continue;
+				for( DLINK_ITERATOR<Object> memberIt = team->iterate_TeamMemberList(); !memberIt.done(); memberIt.advance() )
+				{
+					Object *pObj = memberIt.cur();
+					if( !pObj || pObj->isKindOf( KINDOF_STRUCTURE ) )
+						continue;			// his buildings are what the grid above already walked
+					if( !pObj->isKindOf( KINDOF_CAN_ATTACK ) )
+						continue;			// a harvester is not a threat point; it is already worth its price in the grid
+					if( pObj->isSignificantlyAboveTerrain() )
+						continue;			// same rule as the value function: nothing is aimed at a plane in the air
+					if( !observerKnowsAbout( pObj, observerNdx ) )
+						continue;
+
+					Coord3D pos = *pObj->getPosition();
+					pos.z = 0;
+					Int curCash = superweaponScore( &pos, playerNdx, 2*weaponRadius, targetMilitaryUnits );
+					if( curCash > cash )
+					{
+						cash = curCash;
+						bestPos = pos;
+					}
+				}
 			}
 		}
 	}
@@ -1683,7 +1783,7 @@ Bool AIPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *power, Coord
 			pos.x = bestPos.x + (x-5)*(weaponRadius/10);
 			pos.y = bestPos.y + (y-5)*(weaponRadius/10);	// was (x-5): only the diagonal was scanned
 			pos.z = 0;
-			Int curCash = getPlayerSuperweaponValue( &pos, playerNdx, weaponRadius, targetMilitaryUnits, m_player->getPlayerIndex() );
+			Int curCash = superweaponScore( &pos, playerNdx, weaponRadius, targetMilitaryUnits );
 			if ( curCash > cash) 
 			{
 				cash = curCash;
@@ -1707,11 +1807,21 @@ Bool AIPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *power, Coord
 
   success = ( cash > -1 );
 
+	if( success )
+	{
+		DEBUG_LOG(("AI SUPERWEAPON frame %d player %d aims '%s' at (%.0f,%.0f), worth %d\n", TheGameLogic->getFrame(),
+			m_player->getPlayerIndex(), power->getName().str(), veryBestPos.x, veryBestPos.y, cash));
+		noteSuperweaponAim( &veryBestPos );
+	}
+
 
   return success;
 
 
 }
+
+/** How much an armed target is worth on top of its price, so the shot goes where the threat is. */
+const Real SUPERWEAPON_THREAT_WEIGHT = 2.0f;
 
 //----------------------------------------------------------------------------------------------------------
 /**
@@ -1790,9 +1900,19 @@ Int AIPlayer::getPlayerSuperweaponValue(Coord3D *center, Int playerNdx, Real rad
 						else
 							value = value / 10; // Superweapons cannot be killed by any superweapon, so we don't want to target them as highly. jba.
 					}
+					//
+					// What a superweapon is for. Price alone ranks a supply stash above the tank
+					// column parked beside it, which is why these shots landed in the money and not
+					// in the army. What can shoot is worth several times its price to be rid of:
+					// aiCombatPower reads ThingTemplate's ThreatValue where the data sets it and
+					// falls back on cost, the same weighing the retreat and the counter score use.
+					//
+					if( includeMilitaryUnits )
+						value += aiCombatPower( pObj ) * SUPERWEAPON_THREAT_WEIGHT;
+
 					if( applyNegValue )
 					{
-						cash -= factor * value * 5.0f; //Extremely undesired 
+						cash -= factor * value * 5.0f; //Extremely undesired
 					}
 					else
 					{
@@ -1925,10 +2045,60 @@ Bool AIPlayer::isPossibleToBuildTeam( TeamPrototype *proto, Bool requireIdleFact
 /** Check if this team is buildable, doesn't exceed maximum limits, meets conditions, 
 	* and isn't under construction. */
 // ------------------------------------------------------------------------------------------------
+/** How many money units are worth owning.  An internet center holds four, and one working outside
+	it earns the same, so a couple over that covers a center being rebuilt.  Everything past this is
+	a barracks slot the army wanted and 625 that did not buy a tank. */
+static const Int MAX_MONEY_UNITS = 6;
+
+static void countMoneyUnit( Object *obj, void *userData )
+{
+	if( obj->isKindOf( KINDOF_MONEY_HACKER ) && !obj->isEffectivelyDead() )
+		(*(Int *)userData)++;
+}
+
+/** How many money units this player has standing, dead ones excluded.  Counted rather than tracked:
+	a hacker dies, is captured, or walks into a transport, and a running tally would drift. */
+Int AIPlayer::countMoneyUnits( void ) const
+{
+	Int count = 0;
+	m_player->iterateObjects( countMoneyUnit, &count );
+	return count;
+}
+
+/** Is every unit this team asks for a money unit?  The shipped skirmish scripts give China's hacker
+	team a production priority of 1000, which no other team can be scored above, so once it is
+	buildable it wins every selection it is offered - fifteen of thirty-five on seed 11. */
+static Bool isMoneyUnitTeam( const TeamPrototype *proto )
+{
+	const TeamTemplateInfo *info = proto->getTemplateInfo();
+	Int named = 0;
+	for( Int i = 0; i < info->m_numUnitsInfo; ++i )
+	{
+		const ThingTemplate *unit = TheThingFactory->findTemplate( info->m_unitsInfo[ i ].unitThingName, FALSE );
+		if( unit == NULL )
+			continue;			// a map's team naming a unit this game does not have
+		if( !unit->isKindOf( KINDOF_MONEY_HACKER ) )
+			return FALSE;
+		++named;
+	}
+	return named > 0;
+}
+
+/** A team of nothing but hackers spends against the same cap the direct purchase does, or the two
+	of them together bury a barracks under money units all match. */
+Bool AIPlayer::hasEnoughMoneyUnitsFor( TeamPrototype *proto ) const
+{
+	return isMoneyUnitTeam( proto ) && countMoneyUnits() >= MAX_MONEY_UNITS;
+}
+
 Bool AIPlayer::isAGoodIdeaToBuildTeam( TeamPrototype *proto )
 {
 	// Check condition.
 	if (!proto->evaluateProductionCondition()) {
+		return false;
+	}
+
+	if (hasEnoughMoneyUnitsFor(proto)) {
 		return false;
 	}
 	// check build limit
@@ -4067,6 +4237,7 @@ void AIPlayer::update( void )
 	AI_PHASE( AIP_RETREAT, doRetreats() );					// Break off the fights we are losing.
 	AI_PHASE( AIP_EXPAND,  doExpansion() );					// Go and take the money that is lying around.
 	AI_PHASE( AIP_CAPTURE, doCapture() );						// ... and the money that is standing around.
+	AI_PHASE( AIP_CAPTURE, doHijack() );						// Take the enemy's tanks rather than shoot them.
 	AI_PHASE( AIP_ECONOMY, doEconomy() );						// ... and the money sitting in the bank.
 	AI_PHASE( AIP_POWER,   doPower() );							// Keep the lights on, and out of reach.
 	AI_PHASE( AIP_ECONOMY, doSuperweapons() );			// The big guns, as soon as they can be bought.
@@ -4429,6 +4600,7 @@ static void findInternetCenterWithRoom( Object *obj, void *userData )
 /** How near the quiet spot a hacker has to be before it sits down there. */
 static const Real HACK_SPOT_RADIUS = 120.0f;
 
+
 /** A hacker standing about is income nobody switched on.  It used to switch on wherever it stood,
 	* which was the barracks' rally point, and a player watched China's hackers sit down at the front of
 	* its base and get shot. */
@@ -4686,6 +4858,17 @@ void AIPlayer::doEconomy( void )
 	if( !m_player->getEnergy()->hasSufficientPower() )
 		return;
 
+	// a tunnel pays back in the time every wave and every retreat saves, so it does not wait for the
+	// hoard: behind it, it was bought once in four matches, since an economy that works spends the
+	// bank down to the threshold on the army
+	if( m_player->getCanBuildBase() && m_baseCenterSet )
+	{
+		Object *dozer = NULL;
+		m_player->iterateObjects( findAnyDozer, &dozer );
+		if( dozer )
+			doTunnels( dozer );
+	}
+
 	// hackers and the buildings that pay out on a timer earn their price back, so they only wait for
 	// the hoard threshold, and each of them is bought on every pass the bank allows one ...
 	if( m_player->getMoney()->countMoney() <= profile->m_cashHoardThreshold )
@@ -4753,6 +4936,136 @@ void AIPlayer::doEconomy( void )
 			return;
 		if( placeNear( tmpl, &m_baseCenter, m_baseRadius ) )
 			return;
+	}
+}
+
+/** How near a point one of this player's tunnels has to stand to count as covering it. */
+static const Real TUNNEL_COVER_RADIUS = 350.0f;
+
+/** How far out along the line to the nearest enemy the forward tunnel goes, as a share of the way.
+	* A wave sets off from the edge of its own base, and a shortcut has to save 30% of the walk
+	* (TunnelTracker::findTunnelShortcut), so an exit short of the enemy's doorstep never beats walking:
+	* at 0.45 not one wave in four matches went underground. */
+static const Real FORWARD_TUNNEL_SHARE = 0.75f;
+
+/** A tunnel network the builder can put up right now, off its own buttons.  The tunnel carries
+	* FS_BASE_DEFENSE like the guns, so the kind cannot tell them apart; the module can. */
+static const ThingTemplate *buildableTunnel( Object *builder )
+{
+	const CommandSet *commandSet = TheControlBar->findCommandSet( builder->getCommandSetString() );
+	if( commandSet == NULL )
+		return NULL;
+
+	for( Int i = 0; i < MAX_COMMANDS_PER_SET; ++i )
+	{
+		const CommandButton *button = commandSet->getCommandButton( i );
+		if( button == NULL || button->getCommandType() != GUI_COMMAND_DOZER_CONSTRUCT )
+			continue;
+		const ThingTemplate *tmpl = button->getThingTemplate();
+		if( tmpl == NULL || TheBuildAssistant->canMakeUnit( builder, tmpl ) != CANMAKE_OK )
+			continue;
+		const ModuleInfo &modules = tmpl->getBehaviorModuleInfo();
+		for( Int m = 0; m < modules.getCount(); ++m )
+		{
+			if( modules.getNthName( m ).compareNoCase( "TunnelContain" ) == 0 )
+				return tmpl;
+		}
+	}
+	return NULL;
+}
+
+static Bool hasTunnelNear( Player *player, const Coord3D *spot )
+{
+	const std::list<ObjectID> *tunnels = player->getTunnelSystem()->getContainerList();
+	for( std::list<ObjectID>::const_iterator it = tunnels->begin(); it != tunnels->end(); ++it )
+	{
+		const Object *tunnel = TheGameLogic->findObjectByID( *it );
+		if( tunnel && sqr( tunnel->getPosition()->x - spot->x ) + sqr( tunnel->getPosition()->y - spot->y ) <= sqr( TUNNEL_COVER_RADIUS ) )
+			return TRUE;
+	}
+	return FALSE;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** A GLA computer makes a habit of tunnels at the places that matter: one at home, one at the
+	* expansion it holds, and one on the road the next wave takes, three quarters of the way along.
+	* The move orders, waves and retreats take a tunnel when it is the shorter way
+	* (TunnelTracker::findTunnelShortcut), and with these three a wave goes underground at home and comes
+	* up outside the enemy's base, and a beaten team near the front comes up at home.  One is asked for
+	* a pass, the nearest to home first; the forward one only where nothing this AI has seen can shoot.
+	* There is no cap: the spots are fixed, one a road, and a spot with a tunnel near it asks for none. */
+//----------------------------------------------------------------------------------------------------------
+void AIPlayer::doTunnels( Object *dozer )
+{
+	const ThingTemplate *tunnel = buildableTunnel( dozer );
+	if( tunnel == NULL || priorityBuildPending( m_player, tunnel ) )
+		return;
+
+	const Int MAX_SPOTS = 3;
+	Coord3D spots[ MAX_SPOTS ];
+	Real innerRadius[ MAX_SPOTS ];
+	Int count = 0;
+
+	// at home, out of the middle, which the production buildings have taken
+	spots[ count ] = m_baseCenter;
+	innerRadius[ count++ ] = 0.5f * m_baseRadius;
+
+	const Object *warehouse = TheGameLogic->findObjectByID( m_curWarehouseID );
+	if( warehouse && isHeldExpansion( warehouse ) )
+	{
+		spots[ count ] = *warehouse->getPosition();
+		innerRadius[ count++ ] = warehouse->getGeometryInfo().getBoundingCircleRadius();
+	}
+
+	// on the road the parked wave is about to take, which the script chose knowing where the enemy is;
+	// this AI's own guess can be an empty start position for most of a match on a four-start map.  A
+	// wave parks for seconds at a time, so with nobody parked the last road taken stands in for it
+	Int road = -1;
+	for( Int held = 0; held < MAX_HELD_TEAMS; ++held )
+	{
+		if( m_heldLabel[ held ].isEmpty() )
+			continue;
+		if( road < 0 || m_heldUsed[ held ] )
+			road = held;
+		if( m_heldUsed[ held ] )
+			break;
+	}
+	Waypoint *start = NULL;
+	if( road >= 0 )
+	{
+		AsciiString pathLabel;
+		pathLabel.format( "%s%d", m_heldLabel[ road ].str(), m_heldSuffix[ road ] );
+		start = TheTerrainLogic->getClosestWaypointOnPath( &m_baseCenter, pathLabel );
+	}
+	Waypoint *end = start;
+	for( Int step = 0; end != NULL && end->getNumLinks() > 0 && step < APPROACH_MAX_WAYPOINTS; ++step )
+		end = end->getLink( 0 );
+	if( end != NULL )
+	{
+		const Real reach = FORWARD_TUNNEL_SHARE * sqrt( sqr( end->getLocation()->x - m_baseCenter.x ) + sqr( end->getLocation()->y - m_baseCenter.y ) );
+		Waypoint *way = start;
+		for( Int step = 0; way != NULL && step < APPROACH_MAX_WAYPOINTS; ++step )
+		{
+			const Coord3D *at = way->getLocation();
+			if( sqr( at->x - m_baseCenter.x ) + sqr( at->y - m_baseCenter.y ) >= sqr( reach ) )
+			{
+				if( reach > m_baseRadius && knownFirepowerNear( at ) <= 0.0f )
+				{
+					spots[ count ] = *at;
+					innerRadius[ count++ ] = 0.0f;
+				}
+				break;
+			}
+			way = (way->getNumLinks() > 0) ? way->getLink( 0 ) : NULL;
+		}
+	}
+
+	for( Int i = 0; i < count; ++i )
+	{
+		if( hasTunnelNear( m_player, &spots[ i ] ) )
+			continue;
+		placeNear( tunnel, &spots[ i ], innerRadius[ i ] );
+		return;
 	}
 }
 
@@ -4903,11 +5216,21 @@ void AIPlayer::doSuperweapons( void )
 /** A money unit from every factory that trains one and has at most one thing in its queue.  An
 	* idle-only rule measured as two hackers in a whole match, because a barracks feeding the army is
 	* never idle; one slot behind the army's unit is a delay the army does not notice.  It used to be
-	* one factory a pass; the owner's call is that a Hard China never falls behind on hackers. */
+	* one factory a pass; the owner's call is that a Hard China never falls behind on hackers.
+	*
+	* With a cap, because nothing counted them.  A Hard Tank General trained 67 of them over 20,000
+	* frames on seed 11, about two thirds of everything it spent, and a player watching it from the
+	* other side of the map reported that China's tank general builds nothing but infantry.  A hacker
+	* earns only while it is sitting still and working, an internet center holds four, and past a
+	* handful the next one is a rifleman with no rifle standing in a barracks queue the army wants. */
 //----------------------------------------------------------------------------------------------------------
 void AIPlayer::buyMoneyUnits( void )
 {
 	const Int MAX_QUEUED_AHEAD = 1;
+	Int owned = countMoneyUnits();
+	if( owned >= MAX_MONEY_UNITS )
+		return;
+
 	for( BuildListInfo *info = m_player->getBuildList(); info; info = info->getNext() )
 	{
 		Object *factory = TheGameLogic->findObjectByID( info->getObjectID() );
@@ -4918,8 +5241,13 @@ void AIPlayer::buyMoneyUnits( void )
 			continue;
 		const ThingTemplate *moneyUnit = buildableOfKind( factory, GUI_COMMAND_UNIT_BUILD, KINDOF_MONEY_HACKER );
 		if( moneyUnit && pu->queueCreateUnit( moneyUnit, pu->requestUniqueUnitID() ) )
-			DEBUG_LOG(("AI ECONOMY frame %d player %d trains '%s', %d in the bank\n", TheGameLogic->getFrame(),
-				m_player->getPlayerIndex(), moneyUnit->getName().str(), m_player->getMoney()->countMoney()));
+		{
+			DEBUG_LOG(("AI ECONOMY frame %d player %d trains '%s', %d in the bank, %d money units\n",
+				TheGameLogic->getFrame(), m_player->getPlayerIndex(), moneyUnit->getName().str(),
+				m_player->getMoney()->countMoney(), owned + 1));
+			if( ++owned >= MAX_MONEY_UNITS )
+				return;
+		}
 	}
 }
 
@@ -5483,8 +5811,48 @@ void AIPlayer::sendWave( AIGroup *wave, const AsciiString &approach, Int pathSuf
 	Waypoint *way = TheTerrainLogic->getClosestWaypointOnPath( &center, pathLabel );
 	DEBUG_LOG(("AI WAVE frame %d player %d sends %d teams, %d units, %.0f power, after %d s, down %s\n", TheGameLogic->getFrame(),
 		m_player->getPlayerIndex(), teams, wave->getCount(), power, heldFrames / LOGICFRAMES_PER_SECOND, pathLabel.str()));
-	if( way )
-		wave->groupFollowWaypointPathAsTeam( way, CMD_FROM_AI );
+	if( way == NULL )
+		return;
+
+	wave->groupFollowWaypointPathAsTeam( way, CMD_FROM_AI );
+	sendWaveThroughTunnels( wave, &center, way );
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** A GLA wave whose tunnels come up nearer the end of its approach path than the path itself goes
+	* takes them, the way a player's move order does (TunnelTracker::findTunnelShortcut), and comes up
+	* fighting.  The path is ordered first and the tunnel replaces it for whoever can go in, so a
+	* member that cannot - an aircraft, anything the tunnel refuses - still has the path. */
+//----------------------------------------------------------------------------------------------------------
+static const Int WAVE_PATH_MAX_POINTS = 256;	///< a path that links back on itself stops being walked here
+
+void AIPlayer::sendWaveThroughTunnels( AIGroup *wave, const Coord3D *center, Waypoint *way )
+{
+	Real walk = (Real)sqrt( sqr( way->getLocation()->x - center->x ) + sqr( way->getLocation()->y - center->y ) );
+	Waypoint *end = way;
+	for( Int i = 0; i < WAVE_PATH_MAX_POINTS && end->getNumLinks() > 0; ++i )
+	{
+		Waypoint *next = end->getLink( 0 );
+		walk += (Real)sqrt( sqr( next->getLocation()->x - end->getLocation()->x ) + sqr( next->getLocation()->y - end->getLocation()->y ) );
+		end = next;
+	}
+
+	Object *entrance = m_player->getTunnelSystem()->findTunnelShortcut( center, end->getLocation(), walk );
+	if( entrance == NULL )
+		return;
+
+	// a copy: a member that goes into the tunnel leaves the group
+	Int sent = 0;
+	const Int waveSize = wave->getCount();
+	const VecObjectID members = wave->getAllIDs();
+	for( VecObjectID::const_iterator it = members.begin(); it != members.end(); ++it )
+	{
+		Object *obj = TheGameLogic->findObjectByID( *it );
+		if( obj && obj->getAI() && obj->getAI()->takeTunnelTrip( entrance, end->getLocation(), TUNNEL_TRIP_ATTACK_MOVE, CMD_FROM_AI ) )
+			++sent;
+	}
+	DEBUG_LOG(("AI WAVE frame %d player %d sends %d of %d units through tunnel %d, the path is %.0f long\n", TheGameLogic->getFrame(),
+		m_player->getPlayerIndex(), sent, waveSize, entrance->getID(), walk));
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -5656,8 +6024,16 @@ void AIPlayer::doRetreats( void )
 			//
 			// Losing.  The whole team goes home if this rung knows how; otherwise the members that
 			// are personally finished go, which saves the units that would otherwise die inside a
-			// fight the team as a whole is still winning.
+			// fight the team as a whole is still winning.  Through the tunnels, when there is one
+			// near the fight and one near home.
 			//
+			const Real homeX = m_baseCenter.x - centre.x;
+			const Real homeY = m_baseCenter.y - centre.y;
+			Object *homeTunnel = m_player->getTunnelSystem()->findTunnelShortcut( &centre, &m_baseCenter,
+				(Real)sqrt( homeX * homeX + homeY * homeY ) );
+			if( homeTunnel )
+				DEBUG_LOG(("AI RETREAT frame %d player %d falls back through tunnel %d\n", TheGameLogic->getFrame(),
+					m_player->getPlayerIndex(), homeTunnel->getID()));
 			for( DLINK_ITERATOR<Object> objIter = team->iterate_TeamMemberList(); !objIter.done(); objIter.advance() )
 			{
 				Object *obj = objIter.cur();
@@ -5675,7 +6051,12 @@ void AIPlayer::doRetreats( void )
 						continue;
 				}
 
-				obj->getAI()->aiMoveToPosition( &m_baseCenter, CMD_FROM_AI );
+				// one already on its way down a tunnel is on its way home; ordering it again would turn it
+				// round at the mouth
+				if( obj->getAI()->hasTunnelTrip() )
+					continue;
+				if( homeTunnel == NULL || !obj->getAI()->takeTunnelTrip( homeTunnel, &m_baseCenter, TUNNEL_TRIP_MOVE, CMD_FROM_AI ) )
+					obj->getAI()->aiMoveToPosition( &m_baseCenter, CMD_FROM_AI );
 			}
 		}
 	}
@@ -5746,6 +6127,8 @@ Object *AIPlayer::findScout( void )
 			continue;
 		if( obj->getAI() == NULL )
 			continue;
+		if( obj->getID() == m_capturerID || obj->getID() == m_hijackerID )
+			continue;		// it has a job; two owners giving one unit orders is how both jobs stall
 
 		Bool alreadyScouting = FALSE;
 		for( Int slot = 0; slot < MAX_AI_SCOUTS; ++slot )
@@ -6385,6 +6768,284 @@ void AIPlayer::queueCapturer( void )
 	queueSupportUnit( cheapestCapturerTemplate( m_player ), "CAPTURE" );
 }
 
+/** How far a vehicle hacker will go for a target.  About a unit's sight: Black Lotus shuts a tank
+	* down for a few seconds, which is worth nothing if she spends a minute walking to it and dies
+	* standing next to it. */
+static const Real VEHICLE_HACK_REACH = 250.0f;
+
+/** How far a thief will go for one, measured from the thief, or from the base while we have none.
+	* Wider than the hack, because the prize is permanent and the walk is the whole plan.  Not the
+	* whole map, which is what the first draft allowed: with the shroud not yet up on frame 7, every
+	* computer player in the match went shopping for a hijacker to send at an enemy dozer standing on
+	* the far side of it. */
+static const Real HIJACK_REACH = 700.0f;
+
+/** Could this player buy this unit if it were asking a factory right now?
+	*
+	* A computer player keeps canBuildUnits false between team orders, and allowedToBuild refuses
+	* every non-structure while it is, so a plain canBuild here answers "no" for a reason that has
+	* nothing to do with the unit: a Toxin General with a barracks, an arms dealer and 17,000 in the
+	* bank reported no buildable hijacker on every pass of a fifteen-thousand-frame match.
+	* queueSupportUnit flips the same flag around its own factory lookup; this is that trick moved to
+	* the question in front of it.  cheapestScoutTemplate and cheapestCapturerTemplate ask without it
+	* and so find their unit only on the passes where the flag happens to be up - left as they are
+	* because both were measured with that in them. */
+static Bool couldBuildUnit( Player *player, const ThingTemplate *tmpl )
+{
+	const Bool wasAllowed = player->getCanBuildUnits();
+	player->setCanBuildUnits( TRUE );
+	const Bool answer = player->canBuild( tmpl );
+	player->setCanBuildUnits( wasAllowed );
+	return answer;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** This one takes a vehicle by walking into it.  Asked of the object rather than of a faction table,
+	* so it lands on the GLA Hijacker and on anything a mod gave the same collide to. */
+static Bool carriesHijackModule( const Object *obj )
+{
+	for( BehaviorModule **m = obj->getBehaviorModules(); *m; ++m )
+	{
+		const CollideModuleInterface *collide = (*m)->getCollide();
+		if( collide && collide->isHijackedVehicleCrateCollide() )
+			return TRUE;
+	}
+	return FALSE;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** The cheapest thing this player can build that can do it.  The module list is the test here too -
+	* the hijack has no command button to read, because the player just clicks the tank. */
+static const ThingTemplate *cheapestHijackerTemplate( Player *player )
+{
+	const ThingTemplate *best = NULL;
+	Int bestCost = 0;
+
+	for( const ThingTemplate *t = TheThingFactory->firstTemplate(); t; t = t->friend_getNextTemplate() )
+	{
+		if( !t->isKindOf( KINDOF_INFANTRY ) || !couldBuildUnit( player, t ) )
+			continue;
+
+		const Int cost = t->calcCostToBuild( player );
+		if( cost <= 0 || (best != NULL && cost >= bestCost) )
+			continue;
+
+		Bool canHijack = FALSE;
+		const ModuleInfo &modules = t->getBehaviorModuleInfo();
+		for( Int i = 0; i < modules.getCount(); ++i )
+		{
+			if( modules.getNthName( i ).compareNoCase( "ConvertToHijackedVehicleCrateCollide" ) == 0 )
+				canHijack = TRUE;
+		}
+		if( !canHijack )
+			continue;
+
+		best = t;
+		bestCost = cost;
+	}
+	return best;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * A thief of ours with nothing to do.  Default team only, the same rule findCapturer and findScout
+ * follow: one that arrived with an attack team has a job already.
+ */
+Object *AIPlayer::findHijacker( void )
+{
+	Team *team = m_player->getDefaultTeam();
+	if( team == NULL )
+		return NULL;
+
+	for( DLINK_ITERATOR<Object> iter = team->iterate_TeamMemberList(); !iter.done(); iter.advance() )
+	{
+		Object *obj = iter.cur();
+		if( obj == NULL || obj->isEffectivelyDead() || obj->isContained() || obj->getAI() == NULL )
+			continue;
+		if( obj->getID() == m_capturerID )
+			continue;			// out taking a derrick
+		if( !carriesHijackModule( obj ) )
+			continue;
+
+		Bool busy = FALSE;
+		for( Int slot = 0; slot < MAX_AI_SCOUTS; ++slot )
+			if( m_scoutID[ slot ] == obj->getID() )
+				busy = TRUE;			// the map still has to be looked at
+		if( busy )
+			continue;
+
+		return obj;
+	}
+	return NULL;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * The closest enemy vehicle in sight, or none within reach.
+ *
+ * A vehicle goes back to SHROUDED the moment our vision leaves it, so observerKnowsAbout reads here
+ * as "we can see it now" - the only honest rule for a target that drives off while we walk to it.
+ *
+ * Nearest, not richest: a thief walks, and the Humvee it reaches is worth more than the Overlord it
+ * dies halfway to.
+ */
+Object *AIPlayer::nearestStealableVehicle( const Coord3D *from, Real reach )
+{
+	if( ThePlayerList == NULL || from == NULL )
+		return NULL;
+
+	const Int myNdx = m_player->getPlayerIndex();
+	const Real reachSqr = reach * reach;
+	Object *best = NULL;
+	Real bestDistSqr = 0.0f;
+
+	const Int playerCount = ThePlayerList->getPlayerCount();
+	for( Int i = 0; i < playerCount; ++i )
+	{
+		Player *p = ThePlayerList->getNthPlayer( i );
+		if( p == NULL || p == m_player )
+			continue;
+		if( m_player->getRelationship( p->getDefaultTeam() ) != ENEMIES )
+			continue;			// a civilian's parked car is not a prize, and an ally's tank is not either
+
+		for( Player::PlayerTeamList::const_iterator it = p->getPlayerTeams()->begin();
+				 it != p->getPlayerTeams()->end(); ++it )
+		{
+			for( DLINK_ITERATOR<Team> teamIter = (*it)->iterate_TeamInstanceList(); !teamIter.done(); teamIter.advance() )
+			{
+				Team *team = teamIter.cur();
+				if( team == NULL )
+					continue;
+
+				for( DLINK_ITERATOR<Object> objIter = team->iterate_TeamMemberList(); !objIter.done(); objIter.advance() )
+				{
+					Object *obj = objIter.cur();
+					if( obj == NULL || obj->isEffectivelyDead() || obj->isContained() )
+						continue;
+					if( !obj->isKindOf( KINDOF_VEHICLE ) )
+						continue;
+					if( obj->isKindOf( KINDOF_AIRCRAFT ) || obj->isKindOf( KINDOF_DRONE ) )
+						continue;			// neither a hijacker nor a hacker is allowed either of those
+					if( !observerKnowsAbout( obj, myNdx ) )
+						continue;
+
+					const Coord3D *at = obj->getPosition();
+					const Real dx = at->x - from->x;
+					const Real dy = at->y - from->y;
+					const Real distSqr = dx*dx + dy*dy;
+					if( distSqr > reachSqr )
+						continue;
+					if( best == NULL || distSqr < bestDistSqr )
+					{
+						best = obj;
+						bestDistSqr = distSqr;
+					}
+				}
+			}
+		}
+	}
+	return best;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** Black Lotus, or whoever else the data gave the vehicle hack to, standing about with it ready. */
+static void findIdleVehicleHacker( Object *obj, void *userData )
+{
+	Object **hacker = (Object **)userData;
+	if( *hacker || obj->isEffectivelyDead() || obj->isContained() )
+		return;
+	if( !obj->hasSpecialPower( SPECIAL_BLACKLOTUS_DISABLE_VEHICLE_HACK ) )
+		return;
+	if( obj->testStatus( OBJECT_STATUS_IS_USING_ABILITY ) )
+		return;
+	AIUpdateInterface *ai = obj->getAI();
+	if( ai == NULL || !ai->isIdle() )
+		return;
+	*hacker = obj;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * Take the enemy's vehicles instead of shooting at them.
+ *
+ * A hijacker costs a few hundred and walks off with a tank, and no computer player had ever built
+ * one: the skirmish scripts name their teams by template and not one of the shipped teams asks for
+ * it.  So one thief at a time, bought out of spare change the way the capturer is, and only while
+ * there is something in sight to take.  It is the same money argument as the derrick - the cheapest
+ * unit in the game trading itself for the most expensive one on the field.
+ *
+ * The vehicle hack rides along here because it is the same decision made for free: Black Lotus
+ * arrives with the script's teams already, her hack costs nothing and sits ready most of the match,
+ * and the AI has never once used it.  She only takes what is already in front of her.
+ */
+void AIPlayer::doHijack( void )
+{
+	if( --m_hijackTimer > 0 )
+		return;
+	m_hijackTimer = HIJACK_CHECK_RATE;
+
+	if( m_player == NULL || !m_player->isPlayableSide() )
+		return;
+
+	Object *hacker = NULL;
+	m_player->iterateObjects( findIdleVehicleHacker, &hacker );
+	if( hacker )
+	{
+		Object *victim = nearestStealableVehicle( hacker->getPosition(), VEHICLE_HACK_REACH );
+		SpecialPowerModuleInterface *mod = hacker->findSpecialPowerModuleInterface( SPECIAL_BLACKLOTUS_DISABLE_VEHICLE_HACK );
+		if( victim && mod && TheActionManager->canDisableVehicleViaHacking( hacker, victim, CMD_FROM_AI ) )
+		{
+			mod->doSpecialPowerAtObject( victim, 0 );
+			DEBUG_LOG(("AI player %d hacks a '%s'\n", m_player->getPlayerIndex(),
+								 victim->getTemplate()->getName().str()));
+		}
+	}
+
+	Object *thief = TheGameLogic->findObjectByID( m_hijackerID );
+	if( thief && (thief->isEffectivelyDead() || thief->getControllingPlayer() != m_player) )
+		thief = NULL;			// dead, or it is sitting in the tank it took and is somebody else's problem
+	if( thief == NULL )
+	{
+		m_hijackerID = INVALID_ID;
+		thief = findHijacker();
+		if( thief )
+			m_hijackerID = thief->getID();
+	}
+
+	Coord3D from = m_baseCenter;
+	if( thief )
+		from = *thief->getPosition();
+
+	Object *target = nearestStealableVehicle( &from, HIJACK_REACH );
+	if( target == NULL )
+		return;			// nothing in reach; the thief waits where it is rather than walk into the fog
+
+	if( thief == NULL )
+	{
+		// Only pay for one when there is something to spend it on.  It shares the one support-unit
+		// slot with the scout and the capturer, so a match that keeps losing scouts keeps the thief
+		// waiting - which is the right order of priorities and the reason there is never more than
+		// one of these walking about.
+		queueSupportUnit( cheapestHijackerTemplate( m_player ), "HIJACK" );
+		return;
+	}
+
+	AIUpdateInterface *ai = thief->getAI();
+	if( ai == NULL || !ai->isIdle() )
+		return;			// still on its way to the last one
+
+	//
+	// canHijackVehicle refuses through the shroud, and aiEnter is the same order the player's click
+	// ends up as: the walk is the attack, and the collide module does the rest on contact.
+	//
+	if( TheActionManager->canHijackVehicle( thief, target, CMD_FROM_AI ) )
+	{
+		ai->aiEnter( target, CMD_FROM_AI );
+		DEBUG_LOG(("AI player %d sends a '%s' after a '%s'\n", m_player->getPlayerIndex(),
+							 thief->getTemplate()->getName().str(), target->getTemplate()->getName().str()));
+	}
+}
+
 //----------------------------------------------------------------------------------------------------------
 /**
  * Keep one unit looking at the map.  Cheap by construction: one unit, ordered only when it has
@@ -6695,7 +7356,7 @@ void AIPlayer::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 6;		// 2: scout  3: rung and role  4: scouting stamps  5: the capturer  6: parked waves
+	XferVersion currentVersion = 8;		// 2: scout  3: rung and role  4: scouting stamps  5: the capturer  6: parked waves  7: superweapon aims  8: the hijacker
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -6882,6 +7543,12 @@ void AIPlayer::xfer( Xfer *xfer )
 		xfer->xferObjectID( &m_capturerID );
 		xfer->xferInt( &m_captureTimer );
 	}
+	// the thief, for the same reason: a loaded game does not buy a second one
+	if( version >= 8 )
+	{
+		xfer->xferObjectID( &m_hijackerID );
+		xfer->xferInt( &m_hijackTimer );
+	}
 	// the attack teams parked at the staging point, so a loaded game sends the same wave
 	if( version >= 6 )
 	{
@@ -6893,6 +7560,16 @@ void AIPlayer::xfer( Xfer *xfer )
 			xfer->xferInt( &m_heldSuffix[ held ] );
 		}
 		xfer->xferUnsignedInt( &m_heldSince );
+	}
+	// where the last shots were aimed, so a loaded game does not put the next one in the same crater
+	if( version >= 7 )
+	{
+		for( Int strike = 0; strike < MAX_REMEMBERED_STRIKES; ++strike )
+		{
+			xfer->xferCoord3D( &m_strikeAim[ strike ] );
+			xfer->xferUnsignedInt( &m_strikeFrame[ strike ] );
+		}
+		xfer->xferInt( &m_strikeNext );
 	}
 
 	// the ladder rung and the role, which are rolled once and must come back the same way

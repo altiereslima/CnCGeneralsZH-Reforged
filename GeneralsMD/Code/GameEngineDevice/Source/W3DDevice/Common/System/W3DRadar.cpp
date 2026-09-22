@@ -348,12 +348,15 @@ void W3DRadar::drawLandmarkIcon( Int pixelX, Int pixelY, Int width, Int height,
 }  // end drawLandmarkIcon
 
 //-------------------------------------------------------------------------------------------------
-/** Collect the landmarks out of one radar object list.  The shroud is deliberately not read here:
-	* a supply pile and an oil derrick stand where the map maker put them, and the lobby map preview
-	* has already shown where the money is. */
+/** Collect the landmarks out of one radar object list.  Ground the player has never been to keeps
+	* its markers to itself: a dollar sign over unexplored country is a scouting report nobody paid
+	* for.  Once a place has been seen, its marker stays through the fog, because a supply pile and
+	* an oil derrick do not walk away. */
 //-------------------------------------------------------------------------------------------------
 void W3DRadar::collectLandmarks( const RadarObject *listHead )
 {
+	const Player *localPlayer = ThePlayerList->getLocalPlayer();
+	const Int localPlayerIndex = localPlayer ? localPlayer->getPlayerIndex() : 0;
 
 	for( const RadarObject *rObj = listHead; rObj; rObj = rObj->friend_getNext() )
 	{
@@ -361,6 +364,9 @@ void W3DRadar::collectLandmarks( const RadarObject *listHead )
 		const Object *obj = rObj->friend_getObject();
 		const RadarLandmarkType type = Radar::landmarkTypeOf( obj );
 		if( type == RADAR_LANDMARK_NONE )
+			continue;
+
+		if( obj->getShroudedStatus( localPlayerIndex ) >= OBJECTSHROUD_SHROUDED )
 			continue;
 
 		RadarLandmark landmark;

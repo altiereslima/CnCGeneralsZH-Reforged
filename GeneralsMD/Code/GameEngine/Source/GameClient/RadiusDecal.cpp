@@ -32,6 +32,7 @@
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "Common/Xfer.h"
+#include "GameClient/CinemaDirector.h"
 #include "GameClient/PlayerColorScheme.h"
 #include "GameClient/RadiusDecal.h"
 #include "GameClient/Shadow.h"
@@ -202,13 +203,13 @@ void RadiusDecal::update()
 		Real theta = (2*PI) * (Real)(now % m_template->m_opacityThrobTime) / (Real)m_template->m_opacityThrobTime;
 		Real percent = 0.5f * (Sin(theta) + 1.0f);
 		Int opac;
-		if( TheGameLogic->getDrawIconUI() )
+		if( TheGameLogic->getDrawIconUI() && !CinemaDirector_hidesHud() )
 		{
 			opac = REAL_TO_INT((m_template->m_minOpacity + percent * (m_template->m_maxOpacity - m_template->m_minOpacity)) * 255.0f);
 		}
 		else
 		{
-			//Scripts turned this off, so don't show them!
+			//Scripts turned this off, or -cinema did, so don't show them!
 			opac = 0;
 		}
 		m_decal->setOpacity(opac);

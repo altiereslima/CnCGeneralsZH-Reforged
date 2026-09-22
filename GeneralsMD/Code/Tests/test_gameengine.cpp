@@ -43,6 +43,8 @@
 #include "GameNetwork/LinkSimulation.h"
 #include "Common/Energy.h"
 #include "Common/RandomValue.h"
+#include "GameClient/ChromaKeyboard.h"
+#include "GameClient/MetaEvent.h"
 #include "GameClient/ClickTolerance.h"
 #include "GameClient/KeyDownInfo.h"
 #include "GameClient/GameWindowTransitions.h"
@@ -61,6 +63,7 @@
 #include "Common/CommandLine.h"
 #include "Common/GlobalData.h"
 #include "Common/EarlyOptions.h"
+#include "Common/Monitors.h"
 #include "Common/OptionsCatalog.h"
 #include "Common/SubsystemInterface.h"
 #include "GameClient/GameText.h"
@@ -485,6 +488,39 @@ TEST(ini_unknown_block_aborts_the_file)
 	remove( TEST_INI );
 }
 
+/* A map.ini from a player's map folder named a ThreatLevel field on an Object, which Zero Hour has
+   never had, and the match crashed while loading.  GameLogic loads map.ini with unknown fields
+   skipped; every other file still throws on one. */
+TEST(ini_unknown_field_is_skipped_only_when_asked)
+{
+	CHECK( bootOnce() );
+
+	writeFile( TEST_INI,
+		"WaterSet EVENING\r\n"
+		"  ThreatLevel = 3\r\n"
+		"  WaterRepeatCount = 6\r\n"
+		"End\r\n" );
+
+	WaterSettings[ TIME_OF_DAY_EVENING ].m_waterRepeatCount = -1;
+	CHECK( loadIni( TEST_INI ) == FALSE );
+
+	Bool threw = FALSE;
+	INI ini;
+	ini.setSkipUnknownFields( TRUE );
+	try
+	{
+		ini.load( AsciiString( TEST_INI ), INI_LOAD_OVERWRITE, NULL );
+	}
+	catch( ... )
+	{
+		threw = TRUE;
+	}
+	CHECK( threw == FALSE );
+	CHECK_EQ( WaterSettings[ TIME_OF_DAY_EVENING ].m_waterRepeatCount, 6 );
+
+	remove( TEST_INI );
+}
+
 /* Data\INI\FXListReforged.ini is the fork's own explosion light: 89 of EA's FXLists, each repeated
 	 whole with one LightPulse added.  Whole, because FXListStore::parseFXListDefinition clears an
 	 entry before re-reading it - a half-copied block does not add a light, it deletes an explosion.
@@ -563,25 +599,13 @@ TEST(stackdump_walks_the_callers)
 	CHECK( strstr( s_stackText, "stackdump_walks_the_callers" ) != NULL );
 }
 
-/* Two __asm blocks in headers everything includes wrote to registers that belong
-   to the caller.  fast_float_trunc's "xor ebx,ebx" is what killed every run at the
-   main menu: W3DTreeBuffer::doLighting keeps its saved ESP in EBX, so the epilogue's
-   "mov esp,ebx" set ESP to zero and the following pop faulted.  The witnesses below
-   put a sentinel in each register, run the block, and read the register back. */
-static unsigned truncEbxWitness( float f )
-{
-	unsigned ebxOut;
-	volatile float t;
-	__asm mov ebx, 0x0BADF00D
-	t = fast_float_trunc( f );
-	__asm mov ebxOut, ebx
-	(void)t;
-	return ebxOut;
-}
-
+/* fast_float_trunc was an __asm block in a header everything includes, and it wrote to registers
+   that belong to the caller: its "xor ebx,ebx" is what killed every run at the main menu, because
+   W3DTreeBuffer::doLighting keeps its saved ESP in EBX and the epilogue's "mov esp,ebx" then set
+   ESP to zero.  A witness used to plant a sentinel in EBX around the call and read it back; the
+   function is C now, so what is left to check is that it still truncates the way the assembly did. */
 TEST(fast_float_trunc_leaves_ebx_alone)
 {
-	CHECK_EQ( truncEbxWitness( 3.75f ), 0x0BADF00D );
 	CHECK_NEAR( fast_float_trunc( 3.75f ), 3.0f, 0.0001f );
 	CHECK_NEAR( fast_float_trunc( -3.75f ), -3.0f, 0.0001f );
 }
@@ -680,40 +704,14 @@ TEST(real_to_int_does_not_care_what_rounding_mode_it_is_called_in)
 	_controlfp( callersMode, _MCW_PC | _MCW_RC );
 }
 
-/* The length is a parameter and not a strlen() call on purpose: anything the compiler
-   emits between the two blocks below is free to use these registers itself, so the
-   witness only stays honest while the call is the only thing in between. */
-static void crcRegisterWitness( const char *text, Int len, unsigned *ebxOut, unsigned *esiOut, unsigned *ediOut )
-{
-	CRC crc;
-	__asm
-	{
-		mov ebx, 0x0BADF00D
-		mov esi, 0x0BADBEEF
-		mov edi, 0x0BADCAFE
-	}
-	crc.computeCRC( text, len );
-	__asm
-	{
-		mov eax, ebxOut
-		mov dword ptr [eax], ebx
-		mov eax, esiOut
-		mov dword ptr [eax], esi
-		mov eax, ediOut
-		mov dword ptr [eax], edi
-	}
-}
-
+/* computeCRC was assembly that used EBX, ESI and EDI without handing them back, and a witness here
+   planted sentinels in the three around the call.  The function is C now.  What still matters is
+   the number it produces: it goes into every multiplayer and replay checksum, so it is checked
+   against the arithmetic EA documented in the header. */
 TEST(crc_computecrc_leaves_the_callee_saved_registers_alone)
 {
 	const char *text = "the quick brown fox";
-	unsigned ebxOut = 0, esiOut = 0, ediOut = 0;
-	crcRegisterWitness( text, (Int)strlen( text ), &ebxOut, &esiOut, &ediOut );
-	CHECK_EQ( ebxOut, 0x0BADF00D );
-	CHECK_EQ( esiOut, 0x0BADBEEF );
-	CHECK_EQ( ediOut, 0x0BADCAFE );
 
-	/* ...and it still computes what the C++ version in the header's comment does. */
 	UnsignedInt expected = 0;
 	for( const UnsignedByte *p = (const UnsignedByte *)text; *p; ++p )
 	{
@@ -1382,6 +1380,27 @@ TEST(attack_move_turns_on_whoever_is_shooting_it)
 	CHECK( !AIAttackMove_shouldRetaliate( 0, 0, WINDOW, false, true ) );
 	CHECK( !AIAttackMove_shouldRetaliate( 0xffffffff, 10, WINDOW, false, true ) );
 	CHECK( !AIAttackMove_shouldRetaliate( 0xffffffff, 0xfffffff0, WINDOW, false, true ) );
+}
+
+/* AIStates.cpp: joinTeam clears a reinforcement's own waypoint before copying the state of a unit
+   already in its team.  If that state follows a waypoint path as a group, the reinforcement has to
+   pick up the team's current waypoint before the state reads its location.  Found by T0T0W. */
+extern const Waypoint *AIFollowWaypointPath_groupInitialWaypoint( const Waypoint *goalWaypoint,
+																																	const Waypoint *teamWaypoint );
+
+TEST(a_reinforcement_joins_the_waypoint_path_its_team_is_following)
+{
+	const Waypoint *ownWaypoint = (const Waypoint *)0x100;
+	const Waypoint *teamWaypoint = (const Waypoint *)0x200;
+
+	/* An explicit order stays authoritative; joining must not rewind the unit to the team's point. */
+	CHECK_EQ( AIFollowWaypointPath_groupInitialWaypoint( ownWaypoint, teamWaypoint ), ownWaypoint );
+
+	/* This is the crash case: joinTeam left no local goal, but the active team has one. */
+	CHECK_EQ( AIFollowWaypointPath_groupInitialWaypoint( NULL, teamWaypoint ), teamWaypoint );
+
+	/* A team whose path has ended has nothing safe to dereference; the state must fail instead. */
+	CHECK( AIFollowWaypointPath_groupInitialWaypoint( NULL, NULL ) == NULL );
 }
 
 /* BitFlags used to be templated on the bit count alone, and its name table is a static
@@ -3142,6 +3161,25 @@ TEST(connection_retry_backs_off_when_a_command_keeps_going_unacked)
 	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 0 ), 200 );
 }
 
+extern Bool Connection_isRedundantCopyDue( time_t curTime, time_t timeLastOnWire, Int copiesSent );
+
+TEST(connection_redundant_copies_follow_a_send_spaced_and_counted)
+{
+	/* Nothing to copy before the first real send; that one goes out through the ordinary path. */
+	CHECK( !Connection_isRedundantCopyDue( 1000, -1, 0 ) );
+
+	/* Not in the packet the command just went out in, nor one right behind it: two copies inside
+	   the same few milliseconds die in the same burst. */
+	CHECK( !Connection_isRedundantCopyDue( 1000, 1000, 0 ) );
+	CHECK( !Connection_isRedundantCopyDue( 1000 + CONNECTION_REDUNDANT_SPACING_MS - 1, 1000, 0 ) );
+	CHECK( Connection_isRedundantCopyDue( 1000 + CONNECTION_REDUNDANT_SPACING_MS, 1000, 0 ) );
+
+	/* The count is the bandwidth bound: every copy past it is refused however long the ack takes,
+	   and the retry timer takes over from there. */
+	CHECK( Connection_isRedundantCopyDue( 5000, 1000, CONNECTION_REDUNDANT_COPIES - 1 ) );
+	CHECK( !Connection_isRedundantCopyDue( 5000, 1000, CONNECTION_REDUNDANT_COPIES ) );
+}
+
 // ------------------------------------------------------------------------------------------------
 // CRCSnapshotRing - the evidence a mismatch report is missing.  A mismatch is detected several
 // frames after the frame it happened on, so the ring has to still hold that frame when asked, and
@@ -3304,17 +3342,20 @@ TEST(setfpmode_pins_the_control_word_from_whatever_it_finds)
 	// the mode the simulation runs in: 24-bit precision, round to nearest
 	setFPMode();
 	CHECK_EQ( getFPMode(), expectedFPMode() );
-	CHECK_EQ( getFPMode() & _MCW_PC, (UnsignedInt)(_PC_24 & _MCW_PC) );
+	// x64 has no x87 precision field: SSE rounds at the declared width instead, and _controlfp
+	// fails fast on a mask that names _MCW_PC there.  FP_MODE_FIELDS is what setFPMode owns.
+	if( FP_MODE_FIELDS & _MCW_PC )
+		CHECK_EQ( getFPMode() & _MCW_PC, (UnsignedInt)(_PC_24 & _MCW_PC) );
 	CHECK_EQ( getFPMode() & _MCW_RC, (UnsignedInt)(_RC_NEAR & _MCW_RC) );
 
 	// what a driver that grabbed the FPU and never gave it back looks like
-	_controlfp( _PC_64 | _RC_CHOP, _MCW_PC | _MCW_RC );
+	_controlfp( (_PC_64 | _RC_CHOP) & FP_MODE_FIELDS, FP_MODE_FIELDS );
 	CHECK_NE( getFPMode(), expectedFPMode() );
 	setFPMode();
 	CHECK_EQ( getFPMode(), expectedFPMode() );
 
 	// and the other direction, so this is not just "setFPMode lowers the precision"
-	_controlfp( _PC_53 | _RC_UP, _MCW_PC | _MCW_RC );
+	_controlfp( (_PC_53 | _RC_UP) & FP_MODE_FIELDS, FP_MODE_FIELDS );
 	CHECK_NE( getFPMode(), expectedFPMode() );
 	setFPMode();
 	CHECK_EQ( getFPMode(), expectedFPMode() );
@@ -3323,7 +3364,7 @@ TEST(setfpmode_pins_the_control_word_from_whatever_it_finds)
 	setFPMode();
 	CHECK_EQ( getFPMode(), expectedFPMode() );
 
-	_controlfp( entry, _MCW_PC | _MCW_RC );
+	_controlfp( entry, FP_MODE_FIELDS );
 }
 
 TEST(setfpmode_leaves_the_exception_mask_in_a_known_state)
@@ -4103,6 +4144,27 @@ TEST(the_run_ahead_covers_the_trip_it_is_sized_for)
 	}
 }
 
+TEST(the_router_is_not_a_leg_of_any_trip)
+{
+	/* Two players, slot 0 the router: both measure the same 0.22 s round trip.  The one trip in the
+		 room is guest to router, half of it.  EA summed both and gave the room a whole round trip. */
+	Real two[2] = { 0.22f, 0.22f };
+	Bool twoConnected[2] = { TRUE, TRUE };
+	CHECK_NEAR( roomLatencySum( two, twoConnected, 2, 0 ), 0.22f, 0.0001f );
+	CHECK( computeRunAhead( roomLatencySum( two, twoConnected, 2, 0 ), 30, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 )
+				 < computeRunAhead( 0.44f, 30, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 ) );
+
+	/* Three: the worst trip is the two guests through the router, both of their legs.  The router's
+		 own figure is left out even when it is the largest. */
+	Real three[3] = { 0.50f, 0.30f, 0.20f };
+	Bool threeConnected[3] = { TRUE, TRUE, TRUE };
+	CHECK_NEAR( roomLatencySum( three, threeConnected, 3, 0 ), 0.50f, 0.0001f );
+
+	/* a guest who has left is not a leg either */
+	threeConnected[1] = FALSE;
+	CHECK_NEAR( roomLatencySum( three, threeConnected, 3, 0 ), 0.20f, 0.0001f );
+}
+
 /* Measured in a real LAN match: the host lost one FRAMEINFO packet, sat on the frame for twenty
 	 seconds, and its own latency samples came back as 1.79 s and then 7.64 s on a link whose srtt was
 	 51 ms.  The run-ahead sized on them went 5 -> 29 -> 64 frames, which is 2.1 seconds of input
@@ -4112,7 +4174,8 @@ TEST(a_stalled_frame_is_not_filed_as_round_trip_time)
 	/* an ordinary link passes through untouched - the clamp must not be a tax on healthy games */
 	CHECK_NEAR( sanitizeLatencySample( 0.051f, MAX_PLAUSIBLE_LATENCY_SECONDS ), 0.051f, 0.0001f );
 	CHECK_NEAR( sanitizeLatencySample( 0.300f, MAX_PLAUSIBLE_LATENCY_SECONDS ), 0.300f, 0.0001f );
-	CHECK( MAX_PLAUSIBLE_LATENCY_SECONDS <= 0.5f );		// a slower link than this is not a game
+	CHECK( MAX_PLAUSIBLE_LATENCY_SECONDS <= 0.8f );		// a slower link than this is not a game
+	CHECK_NEAR( sanitizeLatencySample( 0.450f, MAX_PLAUSIBLE_LATENCY_SECONDS ), 0.450f, 0.0001f );	// a 300 ms ping, measured
 	CHECK_NEAR( sanitizeLatencySample( MAX_PLAUSIBLE_LATENCY_SECONDS, MAX_PLAUSIBLE_LATENCY_SECONDS ),
 							MAX_PLAUSIBLE_LATENCY_SECONDS, 0.0001f );
 
@@ -4131,7 +4194,7 @@ TEST(a_stalled_frame_is_not_filed_as_round_trip_time)
 								 + sanitizeLatencySample( 1.785224f, MAX_PLAUSIBLE_LATENCY_SECONDS );
 	Int runAhead = computeRunAhead( clamped, 30, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 );
 	CHECK( runAhead < 64 );
-	CHECK( runAhead <= 18 );			// 0.6 s at 30 Hz, and only with both players at the ceiling
+	CHECK( runAhead <= 29 );			// 0.97 s at 30 Hz, and only with both players at the ceiling
 	CHECK( runAhead <= (Int)(MAX_PLAUSIBLE_LATENCY_SECONDS * 30.0f * 1.2f) + RUNAHEAD_JITTER_FRAMES );
 
 	/* a LAN is untouched by any of this */
@@ -5457,13 +5520,15 @@ TEST(the_simulation_math_fingerprint_is_the_machines_math_and_not_the_callers_fp
 	CHECK( fromSimulationMode != 0 );
 	CHECK_EQ( SimulationMathCrc::calculate(), fromSimulationMode );
 
-	_controlfp( _PC_53, _MCW_PC );
+	// Some mode that is not the simulation's.  EA's own worry was the 53-bit precision a driver
+	// leaves behind; there is no precision field any more, so this is the rounding mode instead.
+	_controlfp( _RC_UP, _MCW_RC );
 	const UnsignedInt modeIn53 = getFPMode();
 	CHECK( modeIn53 != expectedFPMode() );
 	CHECK_EQ( SimulationMathCrc::calculate(), fromSimulationMode );
 	CHECK_EQ( getFPMode(), modeIn53 );	// and the caller's mode is still the caller's
 
-	_controlfp( _PC_64 | _RC_CHOP, _MCW_PC | _MCW_RC );
+	_controlfp( (_PC_64 | _RC_CHOP) & FP_MODE_FIELDS, FP_MODE_FIELDS );
 	const UnsignedInt modeInChop = getFPMode();
 	CHECK( modeInChop != expectedFPMode() );
 	CHECK_EQ( SimulationMathCrc::calculate(), fromSimulationMode );
@@ -6463,21 +6528,18 @@ TEST(a_base_can_be_planned_into_fog_but_not_into_shroud)
 
 /** A plan is not a scout.  A structure that has been placed but not started opens no shroud at all,
 	 so drawing a base out into the fog cannot be used to see what is standing there.  Once the
-	 builder arrives EA's own rule takes over - the structure sees itself and no further - and a
-	 finished building goes back to the sight its template gives it. */
+	 builder arrives the structure sees as far as its template says, finished or not. */
 TEST(a_planned_structure_opens_no_shroud_until_the_work_starts)
 {
 	const Real templateRange = 300.0f;
-	const Real boundingRadius = 40.0f;
 
-	CHECK_NEAR( Object_shroudClearingRange( templateRange, TRUE, 0.0f, boundingRadius ), 0.0f, 0.0001f );
-	CHECK_NEAR( Object_shroudClearingRange( templateRange, TRUE, 0.1f, boundingRadius ), boundingRadius, 0.0001f );
-	CHECK_NEAR( Object_shroudClearingRange( templateRange, TRUE, 99.9f, boundingRadius ), boundingRadius, 0.0001f );
-	CHECK_NEAR( Object_shroudClearingRange( templateRange, FALSE, CONSTRUCTION_COMPLETE, boundingRadius ),
-							templateRange, 0.0001f );
+	CHECK_NEAR( Object_shroudClearingRange( templateRange, TRUE, 0.0f ), 0.0f, 0.0001f );
+	CHECK_NEAR( Object_shroudClearingRange( templateRange, TRUE, 0.1f ), templateRange, 0.0001f );
+	CHECK_NEAR( Object_shroudClearingRange( templateRange, TRUE, 99.9f ), templateRange, 0.0001f );
+	CHECK_NEAR( Object_shroudClearingRange( templateRange, FALSE, CONSTRUCTION_COMPLETE ), templateRange, 0.0001f );
 
 	// a structure that clears no shroud at all is not the same as one with no vision by template
-	CHECK_NEAR( Object_shroudClearingRange( 0.0f, FALSE, CONSTRUCTION_COMPLETE, boundingRadius ), 0.0f, 0.0001f );
+	CHECK_NEAR( Object_shroudClearingRange( 0.0f, FALSE, CONSTRUCTION_COMPLETE ), 0.0f, 0.0001f );
 }
 
 /** A unit sees half as far again as its longest weapon reaches. Artillery that outranges its own sight
@@ -6621,19 +6683,32 @@ TEST(the_stop_key_cancels_a_building_that_is_still_going_up)
 	CHECK( Command_stopMeansCancelConstruction( 0, FALSE, FALSE ) == FALSE );	// nothing selected
 }
 
-/** The plan sits in fog on its owner's screen on purpose, and the fog gate on orders would then
-	 refuse every click on it: no build cursor, no resume, nothing but selection.  A player's own
+/** A player's own plan can sit in shroud on its owner's screen, and the shroud gate on orders would
+	 then refuse every click on it: no build cursor, no resume, nothing but selection.  A player's own
 	 plan is never hidden from that player's own builders.  Everything else the gate does is
-	 untouched - an enemy in fog is still out of reach, the AI and scripts still ignore the gate
-	 entirely. */
-TEST(the_fog_never_hides_your_own_plan_from_your_own_builder)
+	 untouched - anything else in shroud is still out of reach, the AI and scripts still ignore the
+	 gate entirely.  Fog is not shroud and never reaches the gate: a fogged building can be entered,
+	 captured or docked at, and the unit finds out on arrival whether it still can. */
+TEST(the_shroud_never_hides_your_own_plan_from_your_own_builder)
 {
 	CHECK( ActionManager_shroudHidesTarget( TRUE, FALSE, TRUE, TRUE ) == FALSE );		// your own plan
-	CHECK( ActionManager_shroudHidesTarget( TRUE, FALSE, TRUE, FALSE ) == TRUE );		// anything else fogged
+	CHECK( ActionManager_shroudHidesTarget( TRUE, FALSE, TRUE, FALSE ) == TRUE );		// anything else shrouded
 
 	CHECK( ActionManager_shroudHidesTarget( TRUE, TRUE, TRUE, FALSE ) == FALSE );		// from a script
 	CHECK( ActionManager_shroudHidesTarget( FALSE, FALSE, TRUE, FALSE ) == FALSE );	// asked by the AI
 	CHECK( ActionManager_shroudHidesTarget( TRUE, FALSE, FALSE, FALSE ) == FALSE );	// in plain sight
+}
+
+/** A player clicking a building in the fog is judged on what they last saw there, so the cursor and
+	 the walk over give nothing away.  The AI and scripts keep seeing the real building: were they
+	 judged on memory too, every computer game would play differently and every replay recorded
+	 before would stop matching. */
+TEST(only_a_players_own_click_is_judged_on_what_they_last_saw)
+{
+	CHECK( ActionManager_orderReadsMemory( CMD_FROM_PLAYER, TRUE ) == TRUE );
+	CHECK( ActionManager_orderReadsMemory( CMD_FROM_PLAYER, FALSE ) == FALSE );	// a computer player's group order
+	CHECK( ActionManager_orderReadsMemory( CMD_FROM_AI, TRUE ) == FALSE );			// a human's unit acting on its own
+	CHECK( ActionManager_orderReadsMemory( CMD_FROM_SCRIPT, TRUE ) == FALSE );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -9083,6 +9158,45 @@ TEST(retreat_ratio_measures_the_exchange_not_the_health_bar)
 }
 
 
+/** A superweapon takes seconds to arrive and everything it is about to kill stands there the whole
+	 time, so the scan that picks the target says the same thing to the second silo and to the next
+	 script pass.  Two AIs with three Scud Storms between them put all three in one crater. */
+TEST(a_superweapon_does_not_aim_where_one_is_already_falling)
+{
+	const Real RADIUS_SQR = 100.0f * 100.0f;
+	const UnsignedInt WINDOW = 60 * LOGICFRAMES_PER_SECOND;
+
+	// the spot one is falling on right now is worth nothing to the next one
+	CHECK_NEAR( 0.0f, aiStrikeFade( 0.0f, RADIUS_SQR, 0, WINDOW ), 0.0001f );
+
+	// and it comes back, so ground he has rebuilt on is a target again rather than banned forever
+	CHECK_NEAR( 0.5f, aiStrikeFade( 0.0f, RADIUS_SQR, WINDOW/2, WINDOW ), 0.0001f );
+	CHECK_NEAR( 1.0f, aiStrikeFade( 0.0f, RADIUS_SQR, WINDOW, WINDOW ), 0.0001f );
+	CHECK_NEAR( 1.0f, aiStrikeFade( 0.0f, RADIUS_SQR, 10*WINDOW, WINDOW ), 0.0001f );
+
+	// the rest of his base is not in that crater, whatever is landing in it
+	CHECK_NEAR( 1.0f, aiStrikeFade( RADIUS_SQR, RADIUS_SQR, 0, WINDOW ), 0.0001f );
+	CHECK_NEAR( 1.0f, aiStrikeFade( 4.0f*RADIUS_SQR, RADIUS_SQR, 0, WINDOW ), 0.0001f );
+
+	//
+	// The grading is what moves the next shot, and a flat fade is the version that did not: taking
+	// the same amount off every point in the blast leaves them in the same order, so the scan hands
+	// back the same winner and only the number changes. Half a radius off the crater keeps half its
+	// worth, so the second shot slides over and covers ground the first one did not.
+	//
+	CHECK_NEAR( 0.5f, aiStrikeFade( 0.25f*RADIUS_SQR, RADIUS_SQR, 0, WINDOW ), 0.0001f );
+	CHECK( aiStrikeFade( 0.0f, RADIUS_SQR, 0, WINDOW ) < aiStrikeFade( 0.25f*RADIUS_SQR, RADIUS_SQR, 0, WINDOW ) );
+	CHECK( aiStrikeFade( 0.25f*RADIUS_SQR, RADIUS_SQR, 0, WINDOW ) < aiStrikeFade( 0.81f*RADIUS_SQR, RADIUS_SQR, 0, WINDOW ) );
+
+	// ... and both halves of it fade together: older and further off are both worth more
+	CHECK( aiStrikeFade( 0.25f*RADIUS_SQR, RADIUS_SQR, 0, WINDOW )
+				 < aiStrikeFade( 0.25f*RADIUS_SQR, RADIUS_SQR, WINDOW/2, WINDOW ) );
+
+	// no window is no memory: this is what every caller that does not want the fade gets
+	CHECK_NEAR( 1.0f, aiStrikeFade( 0.0f, RADIUS_SQR, 0, 0 ), 0.0001f );
+}
+
+
 /** AIPlayer.cpp: who the retreat is allowed to order home.  Aircraft are not: a move order is what
 	 starts a jet's or a helicopter's own round trip, so one handed to a parked aircraft every
 	 decision interval took it off the deck, flew it at the base centre, idled it and landed it
@@ -11363,6 +11477,60 @@ TEST(window_mode_derives_the_boolean_the_device_layer_reads)
 	delete scratch;
 }
 
+/* The monitor list and the sizes each monitor offers, read off whatever desktop the test runs on.
+	 On a machine with one monitor everything below is about that one. */
+TEST(borderless_covers_the_monitor_options_ini_names)
+{
+	MonitorEntry monitors[ MAX_MONITOR_ENTRIES ];
+	const int count = listMonitors( monitors, MAX_MONITOR_ENTRIES );
+	CHECK( count >= 1 );
+
+	// the one checked below is a secondary where the machine has one
+	int primaries = 0;
+	MonitorEntry chosen = monitors[ 0 ];
+	for( int index = 0; index < count; ++index )
+	{
+		primaries += monitors[ index ].primary ? 1 : 0;
+		if( !monitors[ index ].primary )
+			chosen = monitors[ index ];
+		if( index > 0 )
+			CHECK( monitors[ index - 1 ].number < monitors[ index ].number );
+	}
+	CHECK_EQ( primaries, 1 );
+
+	// an empty name and a name nothing answers to both mean the primary
+	CHECK( findMonitor( "" ).primary );
+	CHECK( findMonitor( "\\\\.\\DISPLAY999" ).primary );
+	CHECK_STR( findMonitor( chosen.device ).device, chosen.device );
+
+	// every size once, smallest first, none under the floor the layouts are drawn for
+	DisplayModeEntry modes[ MAX_DISPLAY_MODE_ENTRIES ];
+	const int modeCount = listDisplayModes( chosen.device, modes, MAX_DISPLAY_MODE_ENTRIES );
+	CHECK( modeCount >= 1 );
+	for( int index = 0; index < modeCount; ++index )
+	{
+		CHECK( modes[ index ].width >= MIN_DISPLAY_MODE_WIDTH );
+		CHECK( modes[ index ].height >= MIN_DISPLAY_MODE_HEIGHT );
+		if( index > 0 )
+			CHECK( modes[ index - 1 ].width < modes[ index ].width
+						 || ( modes[ index - 1 ].width == modes[ index ].width
+									&& modes[ index - 1 ].height < modes[ index ].height ) );
+	}
+
+	GlobalData *saved = TheWritableGlobalData;
+	GlobalData *scratch = NEW GlobalData;
+	TheWritableGlobalData = scratch;
+
+	scratch->m_monitor = chosen.device;
+	scratch->m_windowMode = WINDOW_MODE_BORDERLESS;
+	applyWindowMode();
+	CHECK_EQ( TheGlobalData->m_xResolution, (Int)( chosen.rect.right - chosen.rect.left ) );
+	CHECK_EQ( TheGlobalData->m_yResolution, (Int)( chosen.rect.bottom - chosen.rect.top ) );
+
+	TheWritableGlobalData = saved;
+	delete scratch;
+}
+
 TEST(window_mode_survives_a_round_trip_through_options_ini)
 {
 	GlobalData *saved = TheWritableGlobalData;
@@ -11444,6 +11612,22 @@ TEST(early_options_reads_the_same_file_userpreferences_writes)
 	CHECK( findEarlyOptionValueIn( fp, "WindowMode", value, sizeof( value ) ) );
 	CHECK_STR( value, "1" );	// last one wins, the way the engine's own loader resolves it
 	::fclose( fp );
+}
+
+/** ClassicGraphics is read twice: by the archive mount, before the engine exists, and by the options
+	 catalog.  If they disagreed about a hand-edited "true", the game would draw EA's tile over the
+	 upscaled art or the other way round. */
+TEST(early_options_reads_a_yes_the_way_the_catalog_does)
+{
+	CHECK( isEarlyOptionYes( "yes" ) );
+	CHECK( isEarlyOptionYes( "YES" ) );
+	CHECK( isEarlyOptionYes( "true" ) );
+	CHECK( isEarlyOptionYes( "on" ) );
+	CHECK( isEarlyOptionYes( "1" ) );
+	CHECK( !isEarlyOptionYes( "no" ) );
+	CHECK( !isEarlyOptionYes( "0" ) );
+	CHECK( !isEarlyOptionYes( "" ) );
+	CHECK( !isEarlyOptionYes( "yess" ) );
 }
 
 /** The tab strip's hit test.  Nothing in the shipped game uses the tab control, so its arithmetic
@@ -11810,53 +11994,58 @@ TEST(crowd_corridor_steering_point_slides_instead_of_hopping)
 	CHECK_NEAR( ends.x, pts[ 5 ].x, 0.001f );
 }
 
-TEST(crowd_corridor_has_no_band_on_a_bridge_or_at_its_approaches)
+TEST(a_bridge_keeps_its_width_and_its_approach_funnels_onto_it)
 {
-	/* A bridge deck is not road with room either side of it, and the ground beside a bridge is a
-		 riverbank.  A lane held across either one drives the unit off the side, and a lane held on the
-		 approach arrives beside the abutment instead of at the entrance - which is a unit that never
-		 gets onto the bridge and a queue behind it that never gets anywhere.  The band closes over the
-		 deck and for CROWD_BRIDGE_SEAL samples each side of it. */
+	/* A deck is a road: the band on it is what its own layer measured, so a group goes over three
+		 abreast where the bridge carries three.  The riverbank either side of the ramp is a field, and a
+		 lane held a field's width off the centre arrives beside the entrance, against the end of the
+		 railing.  So for CROWD_BRIDGE_SEAL samples before and after the deck the ground is held to
+		 the deck's width at the ramp. */
 	Coord3D pts[ 20 ];
 	PathfindLayerEnum layers[ 20 ];
+	Real width[ 20 ];
 	for (Int k = 0; k < 20; k++)
 	{
 		pts[ k ].x = (Real)k * 10.0f;
 		pts[ k ].y = 0.0f;
 		pts[ k ].z = 0.0f;
 		layers[ k ] = LAYER_GROUND;
+		width[ k ] = 60.0f;					// open bank
 	}
-	layers[ 10 ] = (PathfindLayerEnum)2;		// the deck: three samples of it, out over the water
-	layers[ 11 ] = (PathfindLayerEnum)2;
-	layers[ 12 ] = (PathfindLayerEnum)2;
+	for (Int k = 10; k <= 12; k++)
+	{
+		layers[ k ] = (PathfindLayerEnum)2;		// the deck: three samples of it, out over the water
+		width[ k ] = 10.0f;
+	}
+	width[ 8 ] = 5.0f;						// and a rock on the bank, narrower than the deck
 
 	CrowdCorridor corr;
-	corr.buildForTest( pts, 20, 15.0f, layers );
-	CHECK_EQ( corr.count(), 20 );
-
-	// open road, far from the bridge either side: the band is what it was built with
-	CHECK_NEAR( corr.at( 0 ).left, 15.0f, 0.001f );
-	CHECK_NEAR( corr.at( 5 ).right, 15.0f, 0.001f );
-	CHECK_NEAR( corr.at( 19 ).left, 15.0f, 0.001f );
-
+	corr.buildForTest( pts, 20, 0.0f, layers, width );
 	corr.sealBridges();
 
-	const Int sealLo = 10 - (Int)CROWD_BRIDGE_SEAL;
-	const Int sealHi = 12 + (Int)CROWD_BRIDGE_SEAL;
-
-	// the deck itself, and the sealed samples each side of it
-	for (Int k = sealLo; k <= sealHi; k++)
+	// the deck keeps its own width
+	for (Int k = 10; k <= 12; k++)
 	{
-		CHECK_NEAR( corr.at( k ).left, 0.0f, 0.001f );
-		CHECK_NEAR( corr.at( k ).right, 0.0f, 0.001f );
-		CHECK_NEAR( corr.clampLat( k, 12.0f ), 0.0f, 0.001f );
-		CHECK_NEAR( corr.clampLatAt( corr.at( k ).along, -12.0f ), 0.0f, 0.001f );
+		CHECK_NEAR( corr.at( k ).left, 10.0f, 0.001f );
+		CHECK_NEAR( corr.at( k ).right, 10.0f, 0.001f );
 	}
 
-	// and the road on either side of that stretch keeps its band
-	CHECK_NEAR( corr.at( sealLo - 1 ).left, 15.0f, 0.001f );
-	CHECK_NEAR( corr.at( sealHi + 1 ).right, 15.0f, 0.001f );
-	CHECK_NEAR( corr.clampLat( sealLo - 1, 12.0f ), 12.0f, 0.001f );
+	// the approach at both ends is the deck's width, and a lane on it is cut to that
+	const Int sealLo = 10 - (Int)CROWD_BRIDGE_SEAL;
+	const Int sealHi = 12 + (Int)CROWD_BRIDGE_SEAL;
+	for (Int k = sealLo; k < 10; k++)
+	{
+		if (k != 8)
+			CHECK_NEAR( corr.at( k ).left, 10.0f, 0.001f );
+	}
+	for (Int k = 13; k <= sealHi; k++)
+		CHECK_NEAR( corr.at( k ).right, 10.0f, 0.001f );
+	CHECK_NEAR( corr.clampLat( 9, 40.0f ), 10.0f, 0.001f );
+
+	// it never widens anything, and the bank past the approach keeps its own band
+	CHECK_NEAR( corr.at( 8 ).left, 5.0f, 0.001f );
+	CHECK_NEAR( corr.at( sealLo - 1 ).left, 60.0f, 0.001f );
+	CHECK_NEAR( corr.at( sealHi + 1 ).right, 60.0f, 0.001f );
 
 	// a route with no bridge on it is untouched
 	CrowdCorridor plain;
@@ -11990,6 +12179,40 @@ TEST(a_group_is_never_more_than_five_lanes_wide)
 	CHECK_EQ( Crowd_laneCount( -50.0f, body, 4 ), 1 );
 }
 
+TEST(a_lane_goes_round_the_outside_of_a_turn_parallel_to_the_route)
+{
+	Coord3D a, c, b;
+	a.set( 0.0f, 0.0f, 0.0f );
+	c.set( 100.0f, 0.0f, 0.0f );
+	Coord2D shift;
+
+	// straight on: the lane is the plain left normal, no stretch
+	b.set( 200.0f, 0.0f, 0.0f );
+	CHECK( Crowd_laneCorner( a, c, b, 10.0f, &shift ) );
+	CHECK_NEAR( shift.x, 0.0f, 0.001f );
+	CHECK_NEAR( shift.y, 10.0f, 0.001f );
+
+	// a right-angle turn to the right: the left lane is the outside one, and its corner sits out on
+	// the diagonal, ten from both legs - the red line of the owner's drawing, not the tip of the wall
+	b.set( 100.0f, -100.0f, 0.0f );
+	CHECK( Crowd_laneCorner( a, c, b, 10.0f, &shift ) );
+	CHECK_NEAR( shift.x, 10.0f, 0.001f );
+	CHECK_NEAR( shift.y, 10.0f, 0.001f );
+
+	// the right lane of the same turn is the inside one, pulled in off the tip by the same ten
+	CHECK( Crowd_laneCorner( a, c, b, -10.0f, &shift ) );
+	CHECK_NEAR( shift.x, -10.0f, 0.001f );
+	CHECK_NEAR( shift.y, -10.0f, 0.001f );
+
+	// a hairpin stretches the offset no further than twice
+	b.set( 0.0f, -1.0f, 0.0f );
+	CHECK( Crowd_laneCorner( a, c, b, 10.0f, &shift ) );
+	CHECK( shift.length() <= 20.001f );
+
+	// a leg of no length has no direction to be beside
+	CHECK( !Crowd_laneCorner( a, a, b, 10.0f, &shift ) );
+}
+
 TEST(a_turn_costs_what_the_hull_takes_to_swing_it)
 {
 	// chassis is the cost of one radian: a hull that drives 40 units while turning one radian
@@ -12036,6 +12259,41 @@ TEST(crowd_brake_only_reads_closing_time)
 
 	// a zero window is the rule switched off, not a division by zero
 	CHECK_NEAR( Crowd_brakeSpeed( full, 0.0f, 0.0f, 0 ), full, 0.0001f );
+}
+
+TEST(crowd_throttle_brakes_at_once_and_releases_slowly)
+{
+	const Real filter = 0.15f;
+	const Real full = 2.0f;
+
+	// a brake is taken whole, however hard it is
+	CHECK_NEAR( Crowd_releaseCap( full, 0.5f, filter ), 0.5f, 0.0001f );
+	CHECK_NEAR( Crowd_releaseCap( full, 0.0f, filter ), 0.0f, 0.0001f );
+	CHECK_NEAR( Crowd_releaseCap( full, full, filter ), full, 0.0001f );
+
+	// coming off one is a ramp, and it never overshoots what was asked for
+	Real held = 0.0f;
+	for (Int frame = 0; frame < 60; frame++)
+	{
+		const Real next = Crowd_releaseCap( held, full, filter );
+		CHECK( next > held );
+		CHECK( next <= full + 0.0001f );
+		held = next;
+	}
+	CHECK_NEAR( held, full, 0.01f );
+
+	/* The thing the ramp is for: a blocker flickering in and out of the lookahead cone every other
+		 frame used to hand the locomotor full speed on every other frame.  Half a second of that must
+		 not average anywhere near full speed. */
+	held = full;
+	Real sum = 0.0f;
+	const Int frames = 15;
+	for (Int frame = 0; frame < frames; frame++)
+	{
+		held = Crowd_releaseCap( held, (frame % 2) ? full : 0.5f, filter );
+		sum += held;
+	}
+	CHECK( sum / (Real)frames < 0.7f );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -12737,6 +12995,18 @@ TEST(scenario_parses_the_order_lines)
 
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "900 stop 2 *", &action ), (Int)SCENARIO_PARSE_OK );
 	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_STOP );
+
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "700 power 1 GLAScudStorm start0:0:300", &action ),
+						(Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_POWER );
+	CHECK_STR( action.selector.str(), "GLAScudStorm" );
+	CHECK_EQ( action.atStart, 0 );
+	CHECK_NEAR( action.at.y, 300.0f, 0.01f );
+	CHECK_EQ( (Int)action.targetSelector.isEmpty(), 1 );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "700 power 0 AmericaCommandCenter 900 900 SuperweaponA10ThunderboltMissileStrike", &action ),
+						(Int)SCENARIO_PARSE_OK );
+	CHECK_STR( action.targetSelector.str(), "SuperweaponA10ThunderboltMissileStrike" );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "700 power 1 GLAScudStorm", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
 }
 
 TEST(scenario_ignores_comments_and_blank_lines)
@@ -13036,6 +13306,221 @@ TEST(camera_preferences_default_to_a_finite_map_margin)
 	TheWritableGlobalData = saved;
 	delete scratch;
 }
+// The Razer grid is six rows of twenty-two with the logo strip in column zero and
+// escape, tab, caps and shift in column one, so the top left key the command bar
+// can ever light is the digit 1 at row one, column two.
+TEST(chroma_keys_land_on_the_razer_grid)
+{
+	CHECK_EQ(chromaCellForKey('1'), 1 * 22 + 2);
+	CHECK_EQ(chromaCellForKey('0'), 1 * 22 + 11);
+	CHECK_EQ(chromaCellForKey('q'), 2 * 22 + 2);
+	CHECK_EQ(chromaCellForKey('p'), 2 * 22 + 11);
+	CHECK_EQ(chromaCellForKey('a'), 3 * 22 + 2);
+	CHECK_EQ(chromaCellForKey('l'), 3 * 22 + 10);
+	CHECK_EQ(chromaCellForKey('z'), 4 * 22 + 2);
+	CHECK_EQ(chromaCellForKey('m'), 4 * 22 + 8);
+	// Upper case never reaches here: HotKeyManager lowers every key it stores.
+	CHECK_EQ(chromaCellForKey('Q'), -1);
+	CHECK_EQ(chromaCellForKey(' '), -1);
+}
+
+// The digit row is a tank that empties: ten green while nothing draws, fewer as
+// the draw catches the supply, and the row goes to blinking red past it.
+TEST(chroma_power_meter_empties_as_the_draw_catches_the_supply)
+{
+	CHECK_EQ(chromaPowerSegments(0, 0), 0);
+	CHECK_EQ(chromaPowerSegments(0, 5), 0);
+	CHECK_EQ(chromaPowerSegments(10, 0), 10);
+	CHECK_EQ(chromaPowerSegments(10, 5), 5);
+	CHECK_EQ(chromaPowerSegments(10, 9), 1);
+	// Every scrap of headroom keeps a key alight, so the row never reads empty
+	// while the base is still fully powered.
+	CHECK_EQ(chromaPowerSegments(100, 99), 1);
+	CHECK_EQ(chromaPowerSegments(10, 10), 0);
+	CHECK_EQ(chromaPowerSegments(10, 11), CHROMA_POWER_BROWNOUT);
+}
+
+// A slot cannot be read out of a meta message by subtracting the first message of its run and
+// bounding the answer by the size of the array behind the bar. The command bar's array holds
+// eighteen slots and only fourteen of them have a message, so that sum ran four past the end of
+// the command messages and straight into the shortcut ones: F1 to F4 were filed as command bar
+// slots 14 to 17 and lit from them.
+TEST(chroma_slot_messages_do_not_run_into_each_other)
+{
+	// every command message answers as itself and nothing else
+	for (Int slot = 0; slot < 14; ++slot)
+	{
+		const Int message = (Int)GameMessage::MSG_META_COMMAND_SLOT01 + slot;
+		CHECK_EQ(chromaCommandSlotForMessage(message), slot);
+		CHECK_EQ(chromaShortcutSlotForMessage(message), -1);
+	}
+	for (Int slot = 0; slot < 11; ++slot)
+	{
+		const Int message = (Int)GameMessage::MSG_META_SHORTCUT_SLOT01 + slot;
+		CHECK_EQ(chromaShortcutSlotForMessage(message), slot);
+		CHECK_EQ(chromaCommandSlotForMessage(message), -1);
+	}
+
+	// the runs are exactly as long as the messages, not as long as the arrays
+	CHECK_EQ(chromaCommandSlotForMessage((Int)GameMessage::MSG_META_COMMAND_SLOT14), 13);
+	CHECK_EQ(chromaShortcutSlotForMessage((Int)GameMessage::MSG_META_SHORTCUT_SLOT11), 10);
+	CHECK_EQ(chromaShortcutSlotForMessage((Int)GameMessage::MSG_META_VIEW_COMMAND_CENTER), -1);
+	CHECK(MAX_COMMANDS_PER_SET > 14);	// the array really is bigger than the keys reach
+
+	// and neither run reaches backwards into whatever sits before it
+	CHECK_EQ(chromaCommandSlotForMessage((Int)GameMessage::MSG_META_COMMAND_SLOT01 - 1), -1);
+	CHECK_EQ(chromaShortcutSlotForMessage((Int)GameMessage::MSG_META_SHORTCUT_SLOT01 - 1), -1);
+}
+
+// The two key maps have to agree. chromaCellForKey knows the typing rows by their characters and
+// draws the power meter with them; chromaCellForMappableKey knows the whole board by scancode and
+// places whatever the player has bound. A letter has to come out at the same lamp either way, or a
+// bound key lights somewhere its own label is not.
+TEST(chroma_key_maps_agree_on_every_letter_and_digit)
+{
+	static const char LETTERS[] = "qwertyuiopasdfghjklzxcvbnm";
+	static const Int LETTER_KEYS[] = {
+		MK_Q, MK_W, MK_E, MK_R, MK_T, MK_Y, MK_U, MK_I, MK_O, MK_P,
+		MK_A, MK_S, MK_D, MK_F, MK_G, MK_H, MK_J, MK_K, MK_L,
+		MK_Z, MK_X, MK_C, MK_V, MK_B, MK_N, MK_M };
+	for (Int i = 0; LETTERS[i]; ++i)
+	{
+		CHECK(chromaCellForKey(LETTERS[i]) >= 0);
+		CHECK_EQ(chromaCellForMappableKey(LETTER_KEYS[i]), chromaCellForKey(LETTERS[i]));
+	}
+
+	static const char DIGITS[] = "1234567890";
+	static const Int DIGIT_KEYS[] = { MK_1, MK_2, MK_3, MK_4, MK_5, MK_6, MK_7, MK_8, MK_9, MK_0 };
+	for (Int i = 0; DIGITS[i]; ++i)
+		CHECK_EQ(chromaCellForMappableKey(DIGIT_KEYS[i]), chromaCellForKey(DIGITS[i]));
+
+	// The numpad is its own block on the right, and its digits are not the ones above the letters.
+	// Reading the character off the key was what put them on top of each other.
+	CHECK_NE(chromaCellForMappableKey(MK_KP1), chromaCellForMappableKey(MK_1));
+	CHECK_EQ(chromaCellForMappableKey(MK_KP7), 2 * 22 + 18);
+	CHECK_EQ(chromaCellForMappableKey(MK_KP1), 4 * 22 + 18);
+
+	// The function row, which is where the generals powers land
+	CHECK_EQ(chromaCellForMappableKey(MK_F1), 3);
+	CHECK_EQ(chromaCellForMappableKey(MK_F10), 12);
+	CHECK_EQ(chromaCellForMappableKey(MK_F12), 14);
+
+	// A run has to stop at its own end rather than walking into the next one: the key after 0 is
+	// minus, still on the number row, and the key after P is a bracket, still on the Q row.
+	CHECK_EQ(chromaCellForMappableKey(MK_MINUS), 1 * 22 + 12);
+	CHECK_EQ(chromaCellForMappableKey(MK_LBRACKET), 2 * 22 + 12);
+	CHECK_EQ(chromaCellForMappableKey(MK_SEMICOLON), 3 * 22 + 11);
+	CHECK_EQ(chromaCellForMappableKey(MK_COMMA), 4 * 22 + 9);
+
+	CHECK_EQ(chromaCellForMappableKey(MK_NONE), -1);
+
+	// Nothing may share a lamp, or one press would light two keys and another none
+	Int seen[6 * 22];
+	for (Int cell = 0; cell < 6 * 22; ++cell)
+		seen[cell] = 0;
+	for (Int key = 0; key < 256; ++key)
+	{
+		const Int cell = chromaCellForMappableKey(key);
+		if (cell < 0)
+			continue;
+		CHECK(cell < 6 * 22);
+		CHECK_EQ(seen[cell], 0);
+		seen[cell] = 1;
+	}
+}
+
+// Where a grid key lands.  This is the decision pressCommandButton used to make inline, pulled
+// out so the keyboard lighting could ask the same question without pressing anything; every
+// row below is what the inline version did, read off it before it was moved.
+TEST(grid_press_follows_the_builders_two_key_chord)
+{
+	const Int NOTHING = ControlBar::SLOT_NOTHING;
+	const Int ARMS = ControlBar::SLOT_ARMS_CHORD;
+	const Int Q = ControlBar::CHORD_SLOT_Q;
+	const Int W = ControlBar::CHORD_SLOT_W;
+	const Int GROUP = ControlBar::CHORD_GROUP_SIZE;
+
+	// no structures on the bar: a slot is a slot, chord or no chord
+	CHECK_EQ(ControlBar::resolveGridPress(0, -1, FALSE, FALSE), 0);
+	CHECK_EQ(ControlBar::resolveGridPress(5, -1, FALSE, FALSE), 5);
+	CHECK_EQ(ControlBar::resolveGridPress(5, 0, FALSE, FALSE), 5);
+
+	// out of range names nothing
+	CHECK_EQ(ControlBar::resolveGridPress(-1, -1, FALSE, FALSE), NOTHING);
+	CHECK_EQ(ControlBar::resolveGridPress(MAX_COMMANDS_PER_SET, -1, TRUE, FALSE), NOTHING);
+
+	// a builder, nothing armed: Q and W arm, a structure's own key does nothing on its own,
+	// and a cell that is not a structure is still one press
+	CHECK_EQ(ControlBar::resolveGridPress(Q, -1, TRUE, TRUE), ARMS);
+	CHECK_EQ(ControlBar::resolveGridPress(W, -1, TRUE, FALSE), ARMS);
+	CHECK_EQ(ControlBar::resolveGridPress(4, -1, TRUE, TRUE), NOTHING);
+	CHECK_EQ(ControlBar::resolveGridPress(4, -1, TRUE, FALSE), 4);
+
+	// armed: the second key is a cell of the first group, shifted into the armed one
+	CHECK_EQ(ControlBar::resolveGridPress(0, 0, TRUE, TRUE), 0);
+	CHECK_EQ(ControlBar::resolveGridPress(3, 0, TRUE, FALSE), 3);
+	CHECK_EQ(ControlBar::resolveGridPress(0, 1, TRUE, TRUE), GROUP);
+	CHECK_EQ(ControlBar::resolveGridPress(3, 1, TRUE, FALSE), GROUP + 3);
+	CHECK_EQ(ControlBar::resolveGridPress(GROUP - 1, 1, TRUE, FALSE), GROUP + GROUP - 1);
+	// a second key from outside the first group's cells is not a cell of any group
+	CHECK_EQ(ControlBar::resolveGridPress(GROUP, 0, TRUE, FALSE), NOTHING);
+	CHECK_EQ(ControlBar::resolveGridPress(GROUP + 2, 1, TRUE, FALSE), NOTHING);
+}
+
+// The generals powers tray: the first key names a row, the second a power in it, and what the
+// keys can reach is what is showing rather than the size of the general's command set.
+TEST(tray_press_names_a_row_and_then_a_power_in_it)
+{
+	const Int NOTHING = ControlBar::SLOT_NOTHING;
+	const Int ARMS = ControlBar::SLOT_ARMS_CHORD;
+	const Int COLS = SPECIAL_POWER_SHORTCUT_COLS;
+
+	// three powers showing is one row: F1 names it, F2 names nothing
+	CHECK_EQ(ControlBar::resolveTrayPress(0, -1, 3), ARMS);
+	CHECK_EQ(ControlBar::resolveTrayPress(1, -1, 3), NOTHING);
+	// four is two rows
+	CHECK_EQ(ControlBar::resolveTrayPress(1, -1, 4), ARMS);
+	CHECK_EQ(ControlBar::resolveTrayPress(2, -1, 4), NOTHING);
+	// none showing, nothing to name
+	CHECK_EQ(ControlBar::resolveTrayPress(0, -1, 0), NOTHING);
+	CHECK_EQ(ControlBar::resolveTrayPress(-1, -1, 3), NOTHING);
+
+	// row armed: the key is a column in it
+	CHECK_EQ(ControlBar::resolveTrayPress(0, 0, 3), 0);
+	CHECK_EQ(ControlBar::resolveTrayPress(2, 0, 3), 2);
+	CHECK_EQ(ControlBar::resolveTrayPress(0, 1, 4), COLS);
+	// the second row of four holds one power, so its second column is nothing
+	CHECK_EQ(ControlBar::resolveTrayPress(1, 1, 4), NOTHING);
+	// and a key past the row's width is nothing however many are showing
+	CHECK_EQ(ControlBar::resolveTrayPress(COLS, 0, 11), NOTHING);
+}
+
+// A bar that has started has to show it.  Rounding a tenth of a charge down to
+// nothing is how a gauge comes to read empty while the thing behind it is
+// running, which is worse than no gauge.
+TEST(chroma_bars_light_a_lamp_as_soon_as_they_are_off_zero)
+{
+	CHECK_EQ(chromaBarSegments(0.0f, 20), 0);
+	CHECK_EQ(chromaBarSegments(-1.0f, 20), 0);
+	CHECK_EQ(chromaBarSegments(0.001f, 20), 1);
+	CHECK_EQ(chromaBarSegments(0.5f, 20), 10);
+	CHECK_EQ(chromaBarSegments(1.0f, 20), 20);
+	// A charge that overshoots its own reload must not run off the end of the grid.
+	CHECK_EQ(chromaBarSegments(2.0f, 20), 20);
+}
+
+// One lamp a thousand credits, and the bar stops at its own length instead of
+// wrapping round and reading poor at thirty thousand.
+TEST(chroma_money_bar_is_a_thousand_credits_a_lamp)
+{
+	CHECK_EQ(chromaMoneySegments(0, 15), 0);
+	CHECK_EQ(chromaMoneySegments(999, 15), 0);
+	CHECK_EQ(chromaMoneySegments(1000, 15), 1);
+	CHECK_EQ(chromaMoneySegments(7500, 15), 7);
+	CHECK_EQ(chromaMoneySegments(15000, 15), 15);
+	CHECK_EQ(chromaMoneySegments(400000, 15), 15);
+}
+
 #include "test_camera_behavior.inc"
 #include "test_production_input.inc"
 #include "test_minimap_input.inc"

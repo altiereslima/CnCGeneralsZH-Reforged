@@ -61,8 +61,15 @@ enum CanEnterType
 //-------------------------------------------------------------------------------------------------
 /** Does what the asking player can see of a target stop them ordering something done to it? */
 //-------------------------------------------------------------------------------------------------
-extern Bool ActionManager_shroudHidesTarget( Bool humanSource, Bool fromScript, Bool targetFoggedOrWorse,
+extern Bool ActionManager_shroudHidesTarget( Bool humanSource, Bool fromScript, Bool targetShrouded,
 																						 Bool ownPlacementSilhouette );
+
+//-------------------------------------------------------------------------------------------------
+/** Is this order judged on the asker's memory of a structure out of their sight, rather than on
+	* the structure as it is?  Only a human's own clicks are; the AI and scripts always saw the truth,
+	* and changing what they see would change every AI game and replay. */
+//-------------------------------------------------------------------------------------------------
+extern Bool ActionManager_orderReadsMemory( CommandSourceType commandSource, Bool humanAsker );
 
 class ActionManager : public SubsystemInterface
 {
@@ -78,7 +85,7 @@ public:
 
 	//Single unit to unit check
 	Bool canGetRepairedAt( const Object *obj, const Object *repairDest, CommandSourceType commandSource );
-	Bool canTransferSuppliesAt( const Object *obj, const Object *transferDest );
+	Bool canTransferSuppliesAt( const Object *obj, const Object *transferDest, CommandSourceType commandSource );
 	Bool canDockAt( const Object *obj, const Object *dockDest, CommandSourceType commandSource );
 	Bool canGetHealedAt( const Object *obj, const Object *healDest, CommandSourceType commandSource );
 	Bool canRepairObject( const Object *obj, const Object *objectToRepair, CommandSourceType commandSource );

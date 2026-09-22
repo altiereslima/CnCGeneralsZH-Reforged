@@ -1,0 +1,13 @@
+# Trailer: palm shadows on the dunes, the position UI-MAP.md records for object trees.
+#
+#   generals.exe -borderless -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -autoskirmish 2 -aidiff easy -seed 5 -map "Maps\Golden Oasis\Golden Oasis.map"
+#     -cinema tr_palms -video 300 690 tr_palms -maxframes 710
+#
+# 2643,3580 is the palm stand; 3040,900 is the oasis water and its stone bridge.
+
+10    cut        2643 3580 0.9 0 -18
+11    zoom       0.55 12
+11    orbit      35 12
+19    pitch      -30 4
+23    end

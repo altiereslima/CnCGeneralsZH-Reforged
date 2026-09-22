@@ -44,6 +44,7 @@ static void drawFramerateBar(void);
 #include "Common/ThingFactory.h"
 #include "Common/GameEngine.h"
 #include "Common/GlobalData.h"
+#include "Common/Monitors.h"
 #include "Common/OptionsCatalog.h"
 #include "dx8wrapper.h"
 #include "ffprobe.h"
@@ -63,6 +64,7 @@ static void drawFramerateBar(void);
 
 #include "GameClient/Drawable.h"
 #include "GameClient/GameText.h"
+#include "GameClient/GameConsole.h"
 #include "GameClient/GraphDraw.h"
 #include "GameClient/Line2D.h"
 #include "GameClient/Mouse.h"
@@ -593,9 +595,6 @@ W3DDisplay::~W3DDisplay()
 
 }  // end ~W3DDisplay
 
-#define MIN_DISPLAY_RESOLUTION_X	800
-#define MIN_DISPLAY_RESOLUTOIN_Y	600
-
 
 Bool IS_FOUR_BY_THREE_ASPECT( Real x, Real y )
 {
@@ -607,67 +606,6 @@ Bool IS_FOUR_BY_THREE_ASPECT( Real x, Real y )
   
 }
 
-
-/*Return number of screen modes supported by the current device*/
-Int W3DDisplay::getDisplayModeCount(void)
-{
-	const RenderDeviceDescClass &devDesc=WW3D::Get_Render_Device_Desc(0);
-	const DynamicVectorClass <ResolutionDescClass> &resolutions=devDesc.Enumerate_Resolutions();
-
-	Int numResolutions=0;
-/*	Bool needStencil=false;
-	Bool needDestinationAlpha=false;
-	Int minBitDepth=16;
-	
-	//Walk through all resolutions and determine which ones are compatible with other settings
-	//chosen by user.  For example, 32-bit may be required for shadows, occlusion, soft water edge, etc.
-	if (TheGlobalData->m_useShadowVolumes || (TheGlobalData->m_enableBehindBuildingMarkers && TheGameLogic->getShowBehindBuildingMarkers()))
-		needStencil=true;
-
-	if (TheGlobalData->m_showSoftWaterEdge)
-	{	minBitDepth=32;
-	}
-*/
-	for (int res = 0; res < resolutions.Count ();  res ++)
-	{
-		// Is this the resolution we are looking for?
-		// Widescreen (PLAN.md Phase 6): the 4:3-only filter is gone - the camera
-		// now widens its FOV per aspect (W3DView::setWidth), so any mode the
-		// device offers above the floor is playable.
-		if (resolutions[res].BitDepth >= 24 && resolutions[res].Width >= MIN_DISPLAY_RESOLUTION_X
-      && resolutions[res].Height >= MIN_DISPLAY_RESOLUTOIN_Y )
-		{
-			numResolutions++;
-		}
-	}
-
-	return numResolutions;
-}
-
-void W3DDisplay::getDisplayModeDescription(Int modeIndex, Int *xres, Int *yres, Int *bitDepth)
-{
-	Int numResolutions=0;
-	const RenderDeviceDescClass &devDesc=WW3D::Get_Render_Device_Desc(0);
-	const DynamicVectorClass <ResolutionDescClass> &resolutions=devDesc.Enumerate_Resolutions();
-
-	for (int res = 0; res < resolutions.Count ();  res ++)
-	{
-		// Is this the resolution we are looking for?
-		// Same filter as getDisplayModeCount - the two must agree or indices shift.
-		if ( resolutions[res].BitDepth >= 24 && resolutions[res].Width >= MIN_DISPLAY_RESOLUTION_X
-      && resolutions[res].Height >= MIN_DISPLAY_RESOLUTOIN_Y )
-		{
-			if (numResolutions == modeIndex)
-			{	//found the mode
-				*xres=resolutions[res].Width;
-				*yres=resolutions[res].Height;
-				*bitDepth=resolutions[res].BitDepth;
-				return;
-			}
-			numResolutions++;
-		}
-	}
-}
 
 void W3DDisplay::setGamma(Real gamma, Real bright, Real contrast, Bool calibrate)
 {
@@ -713,6 +651,14 @@ void Reset_D3D_Device(bool active)
 }
 
 //=============================================================================
+/** The monitor Options.ini names, or the primary. */
+//=============================================================================
+static MonitorEntry chosenMonitor( void )
+{
+	return findMonitor( TheGlobalData ? TheGlobalData->m_monitor.str() : "" );
+}
+
+//=============================================================================
 /** Dress the application window for one WindowModeType, while the game is running.
 	*
 	* WinMain picks this style once, before the engine exists, out of the command line and
@@ -743,19 +689,20 @@ static void applyWindowFrame( Int mode )
 
 	//
 	// The resize that follows keeps the top left corner where it is (SWP_NOMOVE), so a window that
-	// is about to cover the display is put at the origin now - otherwise it hangs off the bottom
-	// right by however far down the screen it happened to be sitting.
+	// is about to cover the display is put at the monitor's corner now - otherwise it hangs off the
+	// bottom right by however far down the screen it happened to be sitting.
 	//
-	const UINT move = ( mode == WINDOW_MODE_WINDOWED ) ? SWP_NOMOVE : 0;
+	const RECT screen = chosenMonitor().rect;
+	const UINT move =( mode == WINDOW_MODE_WINDOWED ) ? SWP_NOMOVE : 0;
 	::SetWindowPos( ApplicationHWnd,
 									( mode == WINDOW_MODE_WINDOWED ) ? HWND_TOP : HWND_TOPMOST,
-									0, 0, 0, 0, SWP_NOSIZE | SWP_FRAMECHANGED | move );
+									screen.left, screen.top, 0, 0, SWP_NOSIZE | SWP_FRAMECHANGED | move );
 }
 
 //=============================================================================
 /** Give the window a client area exactly this big, wearing whatever frame it now has.  A plain
-	* window goes back to the middle of the screen, where one is born; a borderless one covers the
-	* display from the origin. Fullscreen is not our business - D3D owns that window. */
+	* window goes back to the middle of its monitor, where one is born; a borderless one covers the
+	* monitor from its corner. Fullscreen is not our business - D3D owns that window. */
 //=============================================================================
 static void sizeWindowToClient( Int mode, Int width, Int height )
 {
@@ -776,11 +723,12 @@ static void sizeWindowToClient( Int mode, Int width, Int height )
 	const Int outerW = rect.right - rect.left;
 	const Int outerH = rect.bottom - rect.top;
 
-	Int x = 0, y = 0;
+	const RECT screen = chosenMonitor().rect;
+	Int x = screen.left, y = screen.top;
 	if( mode == WINDOW_MODE_WINDOWED )
 	{
-		x = ( ::GetSystemMetrics( SM_CXSCREEN ) - outerW ) / 2;
-		y = ( ::GetSystemMetrics( SM_CYSCREEN ) - outerH ) / 2;
+		x += ( screen.right - screen.left - outerW ) / 2;
+		y += ( screen.bottom - screen.top - outerH ) / 2;
 	}
 
 	::SetWindowPos( ApplicationHWnd,
@@ -809,13 +757,15 @@ Bool W3DDisplay::setDisplayMode( UnsignedInt xres, UnsignedInt yres, UnsignedInt
 	extern Bool ApplicationIsBorderless;
 
 	// WW3D2 cannot see GlobalData, so a vsync change has to be pushed in before the reset below
-	// the way the sample count is pushed in before the device exists.
+	// the way the sample count is pushed in before the device exists.  The monitor too: a fullscreen
+	// game changes that monitor's mode and nobody else's.
 	if( TheGlobalData )
 	{
 		DX8Wrapper::Set_Requested_VSync( TheGlobalData->m_vsync != FALSE );
 		Direct3D11_Set_VSync( TheGlobalData->m_vsync != FALSE );
 		pushDirect3D11PostChain();
 	}
+	DX8Wrapper::Set_Requested_Monitor( chosenMonitor().device );
 
 	//
 	// Which of the three the window is wearing, and which it is being asked for.  The test cannot be
@@ -893,6 +843,9 @@ Bool W3DDisplay::setDisplayMode( UnsignedInt xres, UnsignedInt yres, UnsignedInt
 
 	if (WW3D_ERROR_OK == WW3D::Set_Device_Resolution(xres,yres,bitdepth,windowed,true))
 	{
+		// the resize above keeps the window's corner, which is on the old monitor when the options
+		// menu has just picked another one
+		sizeWindowToClient( mode, xres, yres );
 		Render2DClass::Set_Screen_Resolution(RectClass(0, 0, xres, yres));
 		Display::setDisplayMode(xres, yres, bitdepth, windowed);
 		return TRUE;
@@ -1081,6 +1034,7 @@ void W3DDisplay::init( void )
 		? 0 : msaaSamplesForLevel( TheGlobalData->m_msaaLevel ) );
 	DX8Wrapper::Set_Requested_VSync( TheGlobalData->m_vsync != FALSE );
 	Direct3D11_Set_VSync( TheGlobalData->m_vsync != FALSE );
+	DX8Wrapper::Set_Requested_Monitor( chosenMonitor().device );
 
 	// Same reason: WW3D2 cannot see GlobalData, so the backend choice is pushed in from here.  The
 	// fixed-function probe and the generated combiner shaders are always on.
@@ -1090,9 +1044,14 @@ void W3DDisplay::init( void )
 	Direct3D11_Present_Enable( TheGlobalData->m_direct3D11 != FALSE );
 	Direct3D11_Dump_Programs_To( TheGlobalData->m_direct3D11DumpPath.str() );
 	pushDirect3D11PostChain();
+	// Classic graphics is read here once and not again: a texture that has looked for its normal
+	// map keeps the answer, and a tile size cannot change under a loaded map.  The menu says the
+	// setting waits for the next launch.
+	Direct3D11_Normal_Maps_Enable( !TheGlobalData->m_classicGraphics );
 	// Before any map is read: every tile and the atlas are sized by it.  A headless run draws no
-	// ground, so it keeps EA's tile and the memory.
-	TheTilePixelExtent = TheGlobalData->m_headless ? SOURCE_TILE_PIXEL_EXTENT : MAX_TILE_PIXEL_EXTENT;
+	// ground, so it keeps EA's tile and the memory, and classic graphics keeps EA's tile to look it.
+	TheTilePixelExtent = (TheGlobalData->m_headless || TheGlobalData->m_classicGraphics)
+		? SOURCE_TILE_PIXEL_EXTENT : MAX_TILE_PIXEL_EXTENT;
 
 	// Same problem, same answer: the filter table is built the moment the device exists and WW3D2
 	// cannot see GlobalData, so the player's texture filtering goes in here. Nothing in the game
@@ -2497,6 +2456,10 @@ AGAIN:
 				TheGraphDraw->render();
 				TheGraphDraw->clear();
 #endif
+				// last of the 2D overlays, so the console covers everything it drops over
+				if( TheGameConsole )
+					TheGameConsole->render();
+
 				if (s_screenShotPending)
 				{
 					s_screenShotPending = FALSE;
@@ -4047,10 +4010,15 @@ void W3DDisplay::toggleMovieCapture(void)
 }
 
 /** Asks the device rather than the switch: a machine that cannot make a Direct3D 11 device carries
-	* on with Direct3D 9 whatever -d3d9 said, and the corner has to name what is actually drawing. */
+	* on with Direct3D 9 whatever -d3d9 said, and the corner has to name what is actually drawing.
+	* A 64-bit exe says so beside it. */
 const wchar_t *W3DDisplay::getRendererName(void) const
 {
+#ifdef _WIN64
+	return Direct3D11_Is_Active() ? L"DX11 x64" : L"DX9 x64";
+#else
 	return Direct3D11_Is_Active() ? L"DX11" : L"DX9";
+#endif
 }
 
 

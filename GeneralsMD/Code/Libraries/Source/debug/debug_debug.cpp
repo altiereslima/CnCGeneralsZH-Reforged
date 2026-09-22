@@ -31,6 +31,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <new>      // needed for placement new prototype
+#include <stdint.h>
+#include <intrin.h>
 
 // a little dummy variable that makes the linker actually include
 // us...
@@ -43,11 +45,14 @@ bool __DebugIncludeInLink1;
 // .CRT$XCZ. We jam in our own two functions at the very beginning
 // and end of this list (B and Y respectively since the A and Z segments
 // contain list delimiters).
-#pragma data_seg(".CRT$XCB")
-void *Debug::PreStatic=&Debug::PreStaticInit;
-#pragma data_seg(".CRT$XCY")
-void *Debug::PostStatic=&Debug::PostStaticInit;
-#pragma data_seg()
+// data_seg makes these sections writable, and on x64 the CRT's own .CRT sections are read only:
+// the linker warns (LNK4078) and the mismatched section is dropped from the initializer walk, so
+// neither of these ran and every Debug field stayed zero - including the radix that _itoa divides
+// by.  Declaring the section read only puts them back in the list.
+#pragma section(".CRT$XCB", long, read)
+#pragma section(".CRT$XCY", long, read)
+__declspec(allocate(".CRT$XCB")) void *Debug::PreStatic=&Debug::PreStaticInit;
+__declspec(allocate(".CRT$XCY")) void *Debug::PostStatic=&Debug::PostStaticInit;
 
 Debug::LogDescription::LogDescription(const char *fileOrGroup, const char *description)
 {
@@ -278,13 +283,8 @@ bool Debug::SkipNext(void)
 
   // do not implement this function inline, we do need
   // a valid frame pointer here!
-  unsigned help;
-  _asm 
-  {
-    mov eax,[ebp+4]   // return address
-    mov help,eax
-  };
-  curStackFrame=help;
+  // The return address is only a hash key for the frame table, so on x64 its low 32 bits do.
+  curStackFrame=(unsigned)(uintptr_t)_ReturnAddress();
 
   // do we know if to skip the following code?
   FrameHashEntry *e=Instance.LookupFrame(curStackFrame);
@@ -395,7 +395,7 @@ bool Debug::AssertDone(void)
           }
           break;
         case IDRETRY:
-          _asm int 0x03
+          __debugbreak();
           break;
         default:
           ((void)0);
@@ -663,7 +663,7 @@ bool Debug::CrashDone(bool die)
             }
             break;
           case IDRETRY:
-            _asm int 0x03
+            __debugbreak();
             break;
           default:
             ((void)0);

@@ -141,6 +141,8 @@ public:
 	Bool m_windowed;
 	Int m_windowMode;					///< WindowModeType: fullscreen, borderless or windowed.  m_windowed
 														///< is derived from it and is what the device layer reads.
+	AsciiString m_monitor;		///< the monitor the game is on, as its GDI device name ("\\.\DISPLAY2");
+														///< empty is the primary.  See Common/Monitors.h.
 	Int m_msaaLevel;					///< multisampling, as an index into the levels the options menu offers
 	Bool m_vsync;						///< wait for the monitor; off is the uncapped picture the frame-rate cap removal shipped
 	Bool m_direct3D11;			///< draw and present through the Direct3D 11 backend; -d3d9 and -headless turn it off
@@ -175,6 +177,15 @@ public:
 	Bool m_startAtMaxZoom;					// "StartAtMaxZoom": a game opens as far out as the wheel goes, not at the map's own default
 	Bool m_shadowsForProps;				// "ShadowsForProps": fences, rubbish, shrubs - scenery the art gave no shadow at all
 	Bool m_shadowsForParticles;		// "ShadowsForParticles": big alpha-blended particle clouds drop a soft blob on the ground
+	Bool m_classicGraphics;				// "ClassicGraphics": the game's own art, tile, shadows and picture; read at startup
+	Bool m_shadowMap;							// "-shadowmap": draw the casters into the sun's depth buffer as well
+	Bool m_shadowMapReport;				// "-shadowmapreport": log what ended up in that buffer, once a second
+	Bool m_shadowMapOnly;					// "-shadowmaponly": the map's shadows with the stencil volumes' own darkening off
+	Real m_shadowMapPenumbra;			// "-shadowtune": penumbra per world unit of gap under the caster, 0 for the built-in
+	Real m_shadowMapSkyFill;			// how much of a wide shadow the sky fills back in
+	Real m_shadowMapStrength;			// how dark a fully blocked pixel goes
+	Bool m_contactShadows;					// "ContactShadows": the soft patch under a structure's footprint
+	Real m_shadowMapWidest;				// how far the filter may open, in texels
 	Bool m_particleGroundBounce;	// "-particlebounce": terrain collision on for every particle system
 	Real m_smokeThickness;				// "-smoke": how much longer and thicker every smoke system runs, 0 for shipped behaviour
 	Int  m_particleCapOverride;		// "-particlecap": stand in for the options slider's MaxParticleCount, 0 to use it
@@ -395,6 +406,7 @@ public:
 	Bool m_zoomToCursor;				///< the mouse wheel zooms toward whatever the cursor is over
 	Bool m_formationDrag;				///< dragging the right button spreads the selection along the line drawn
 	Bool m_showAllyCursors;				///< in a network game, draw where each ally's mouse is pointing
+	Bool m_chromaLighting;				///< put the state of the match on Razer hardware
 	Int m_menuTransitionSpeed;			///< percent of the authored speed the menus slide and fade at; 100 = as drawn
 	Int m_textureFilterMode;			///< 0 bilinear, 1 trilinear, 2 anisotropic
 	Int m_anisotropyLevel;				///< samples anisotropic filtering may take; 0 = whatever the card offers
@@ -415,6 +427,7 @@ public:
 	Int m_autoSkirmishAIState;				///< SlotState the AI slots of an auto-started skirmish get (-aidiff)
 	Bool m_autoSkirmishObserver;			///< -observer: the local slot of an auto-started skirmish watches instead of playing
 	Bool m_headless;							///< -headless: never draw a frame, never pace the logic tick, quit when the match ends
+	Bool m_turbo;									///< -turbo: draw, but run one logic frame a pass instead of pacing it to the wall clock
 	Int m_autoSkirmishAIStateOdd;		///< -aidiff2 <name>: rung for the odd-numbered slots (0 = same as -aidiff)
 	Int m_autoSkirmishTeams;				///< -teams <n>: split the auto-skirmish slots into n allied teams (0 or 1 = free-for-all)
 	Int m_peaceTime;								///< -peacetime <n>: the lobby's peace time, in minutes, for an -autoskirmish run
@@ -424,11 +437,16 @@ public:
 	Int m_videoStartFrame;					///< -video <from> <to> [name]: the first logic frame recorded
 	Int m_videoEndFrame;						///< -video: the last logic frame recorded (0 = no video)
 	AsciiString m_videoName;				///< -video: the recording is Videos\<name>.mp4 next to the save games
+	Int m_wavStartFrame;						///< -wav <from> <to> [name]: the first logic frame of the sound recording
+	Int m_wavEndFrame;							///< -wav: the last logic frame recorded (0 = no sound recording)
+	AsciiString m_wavName;					///< -wav: the recording is Videos\<name>.wav next to the save games
 	Int m_autoCameraSeconds;				///< -autocamera <n>: every n seconds, move the camera to wherever the fighting is (0 = off)
 	Bool m_cameraLookSet;						///< -camera <x> <y>: point the camera at one map position once the match starts
 	Coord2D m_cameraLook;						///< where -camera pointed it
 	Int m_traceMoveID;							///< -tracemove [id]: log one movement line a frame for this object (0 = off, -1 = the first unit that gets blocked)
 	Real m_slowFrameMS;							///< -slowframe <ms>: a logic frame over this long logs its own breakdown (default 20)
+	Int m_drawDelayMS;							///< -drawdelay <ms>: sleep this long in every client pass, a slow graphics card on demand (0 = off)
+	Int m_drawDelayJitterMS;				///< -drawdelay <ms> <jitter>: up to this much more, different every pass
 	Bool m_showLanes;							///< -showlanes: draw every moving unit's route, the lane it was handed and the offset it kept
 	Int m_uiDrill;								///< -uidrill <n>: every n frames, minimise the command bar and re-apply its scheme, logging where it landed (0 = off)
 	Int m_resDrillFrame;					///< -resdrill <frame> [w] [h]: change the resolution at that logic frame, from inside a running match (0 = off)
@@ -442,6 +460,7 @@ public:
 	Bool m_autoSkirmishTakeover;		///< -takeover: give every -autoskirmish slot a driverless human seat, so nothing thinks unless a scenario says so
 	AsciiString m_autoSkirmishSide[ MAX_PLAYER_COUNT ];	///< -side <slot> <faction>: name that slot's faction instead of drawing it from the seed
 	AsciiString m_netGameHosts;				///< -netgame <ip>[,<ip>...]: the slot list of a LAN game started from the command line (empty = off)
+	Bool m_netGameStarted;						///< that -netgame passed its checks and StartAutomatedGame ran, so every seat has this command line
 	Int m_netGameLocalSlot;						///< -netslot <n>: which of those addresses this copy of the game is
 	AsciiString m_lanPlayerName;			///< -lanname <name>: the name this copy takes in the LAN lobby (empty = the one in the preferences)
 	Bool m_lanLobbyOnStart;						///< -lanlobby: open the LAN lobby instead of stopping at the main menu

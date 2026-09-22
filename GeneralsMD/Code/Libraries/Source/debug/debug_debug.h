@@ -34,7 +34,8 @@
 
 // this makes sure that whenever this header is included
 // the accompanying OBJ file is linked in as well
-#pragma comment(linker,"/include:___DebugIncludeInLink1")
+// x86 prefixes an underscore onto every C symbol; x64 does not, so the name to force in differs.
+#  pragma comment(linker,"/include:__DebugIncludeInLink1")
 
 /**
   \class Debug debug.h <rts/debug.h>

@@ -42,6 +42,7 @@
 #include "Common/Team.h"
 #include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
+#include "Common/TunnelTracker.h"
 #include "Common/Upgrade.h"
 #include "Common/PerfTimer.h"
 #include "Common/UnitTimings.h"
@@ -323,6 +324,8 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_crowdQueued = 0;
 	m_crowdSide = 1;
 	m_crowdSepSmooth = 0.0f;
+	m_crowdCap = 0.0f;
+	m_crowdCapValid = FALSE;
 	m_crowdAim = 0.0f;
 	m_crowdAimValid = FALSE;
 	m_noProgress = 0;
@@ -349,6 +352,11 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_moveOutOfWay2 = INVALID_ID;
 	m_exitProductionRallyPoint.zero();
 	m_hasExitProductionRallyPoint = FALSE;
+	m_salvageReturnPosition.zero();
+	m_hasSalvageReturnPosition = FALSE;
+	m_tunnelTripGoal.zero();
+	m_hasTunnelTrip = FALSE;
+	m_tunnelTripEnd = TUNNEL_TRIP_MOVE;
 	m_locomotorSet.clear();
 	m_curLocomotor = NULL;
 	m_curLocomotorSet = LOCOMOTORSET_INVALID;
@@ -1179,10 +1187,58 @@ UpdateSleepTime AIUpdateInterface::update( void )
 	{
 		Coord3D rallyPoint = m_exitProductionRallyPoint;
 		m_hasExitProductionRallyPoint = FALSE;
-		if (getObject()->isAbleToAttack() && hasFightingWeapon(getObject()))
-			privateAttackMoveToPosition( &rallyPoint, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+		const Bool fights = getObject()->isAbleToAttack() && hasFightingWeapon(getObject());
+
+		// a rally point across the map is reached through the tunnels when they are shorter
+		const Real walkX = rallyPoint.x - getObject()->getPosition()->x;
+		const Real walkY = rallyPoint.y - getObject()->getPosition()->y;
+		Object *entrance = getObject()->getControllingPlayer()->getTunnelSystem()->findTunnelShortcut( getObject()->getPosition(),
+			&rallyPoint, (Real)sqrt( walkX * walkX + walkY * walkY ) );
+		const Bool tunnelled = entrance != NULL
+			&& takeTunnelTrip( entrance, &rallyPoint, fights ? TUNNEL_TRIP_ATTACK_MOVE : TUNNEL_TRIP_MOVE, CMD_FROM_AI );
+		if (!tunnelled)
+		{
+			if (fights)
+				privateAttackMoveToPosition( &rallyPoint, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+			else
+				privateMoveToPosition( &rallyPoint, CMD_FROM_AI );
+		}
+		stRet = STATE_CONTINUE;
+	}
+
+	// A unit that was sent to pick up a salvage crate walks back to the spot it was standing on, so
+	// the line it was part of closes up again instead of drifting to wherever the wrecks fell.  The
+	// crate is reached, and the trip ends, by dropping into idle, which is the same signal the rally
+	// point above waits for.
+	if (m_hasSalvageReturnPosition && getAIStateType() == AI_IDLE)
+	{
+		Coord3D returnPosition = m_salvageReturnPosition;
+		m_hasSalvageReturnPosition = FALSE;
+		privateMoveToPosition( &returnPosition, CMD_FROM_AI );
+		stRet = STATE_CONTINUE;
+	}
+
+	// A move order that a tunnel shortened: idle inside the network means the enter just finished, so
+	// leave by the mouth nearest the goal; idle outside means the exit is done, or the enter gave up,
+	// and either way what is left is the walk to the goal.
+	if (m_hasTunnelTrip && getAIStateType() == AI_IDLE)
+	{
+		Object *me = getObject();
+		Object *tunnel = me->getContainedBy();
+		if (tunnel != NULL && tunnel->getContain()->isTunnelContain())
+		{
+			Object *exit = me->getControllingPlayer()->getTunnelSystem()->findQuietTunnelNear( &m_tunnelTripGoal );
+			privateExit( exit != NULL ? exit : tunnel, CMD_FROM_AI );
+		}
 		else
-			privateMoveToPosition( &rallyPoint, CMD_FROM_AI );
+		{
+			Coord3D goal = m_tunnelTripGoal;
+			m_hasTunnelTrip = FALSE;
+			if (m_tunnelTripEnd == TUNNEL_TRIP_ATTACK_MOVE && me->isAbleToAttack() && hasFightingWeapon(me))
+				privateAttackMoveToPosition( &goal, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+			else
+				privateMoveToPosition( &goal, CMD_FROM_AI );
+		}
 		stRet = STATE_CONTINUE;
 	}
 
@@ -1636,10 +1692,12 @@ static const Real CROWD_PASS_CLEAR	= 6.0f;		///< room a passing lane leaves besi
 static const Real CROWD_PASS_TIGHT	= 1.5f;		///< and the room it settles for rather than queue
 static const Int  CROWD_PASS_RETRY	= 10;			///< queued this long: ask to pass again, hold or no hold
 static const Real CROWD_TAPER_DIST	= PATHFIND_CELL_SIZE_F * 8.0f;	///< the band closes over the last of the route
+static const Real CROWD_PLAN_END_SLACK	= PATHFIND_CELL_SIZE_F * 3.0f;	///< how far the move state may move a planned route's end and it still be the same order
 static const Int  CROWD_BRAKE_FRAMES	= 8;		///< frames of closing time a brake is allowed to read
 static const Int  CROWD_FAN_FRAMES	= 12;			///< held up this long before spreading out
 static const Real CROWD_FAN_RATE		= 0.8f;		///< and then sideways at this much a frame
 static const Real CROWD_SEP_FILTER	= 0.13f;	///< how much of a frame's sideways push is believed (~4/sec)
+static const Real CROWD_RELEASE_FILTER	= 0.15f;	///< how fast the throttle comes back once a brake lifts (~half a second to full)
 static const Real CROWD_AIM_CRUISE	= 0.23f;	///< how fast the aim follows the route while driving (~7/sec)
 static const Real CROWD_AIM_URGENT	= 0.67f;	///< and while manoeuvring (~20/sec), where lag is worse than twitch
 static const Real CROWD_AIM_DEAD		= 0.035f;	///< two degrees: hold the wheel still rather than chase the noise
@@ -1655,6 +1713,7 @@ static const Int  STUCK_BACKOUT_FRAMES	= 66;	///< how long a backing-out manoeuv
 static const Int  STUCK_COOL_FRAMES	= 90;			///< no second drastic thing inside this, or a wedged pair rock forever
 static const Int  STUCK_CYCLE_FRAMES	= 150;	///< five seconds past the last rung: run the whole ladder again
 static const Int  STUCK_DITHER_FRAMES	= 90;		///< three seconds is long enough to tell a shuffle from a corner
+static const Real STUCK_BRIDGE_NEAR	= PATHFIND_CELL_SIZE_F * 20.0f;	///< a unit shaking this close to a deck on its route is at the ramp
 static const Real STUCK_DITHER_RATIO	= 0.3f;	///< gained less than this much of the ground it covered
 static const Int  CROWD_MERGE_FRAMES	= 45;		///< a second and a half: how far ahead a merge is worth noticing
 static const Int  CROWD_TTC_FRAMES	= 21;			///< closing this fast on somebody counts as being in our way, wherever it sits
@@ -1949,6 +2008,10 @@ Bool AIUpdateInterface::computePath( PathfindServicesInterface *pathServices, Co
 		destroyPath();
 	}
 
+	// the group's plan is for the path this order asks for and no other, whichever way it is answered
+	CrowdRoute planned;
+	planned.swap( m_crowdPlanned );
+
 	if (canComputeQuickPath())
 	{
 		return computeQuickPath(destination);
@@ -1993,8 +2056,15 @@ Bool AIUpdateInterface::computePath( PathfindServicesInterface *pathServices, Co
 		return computeQuickPath(destination);
 	}
 
+	if (!planned.empty() && !m_isBlockedAndStuck)
+		theNewPath = crowdPlannedPath( planned, originalDestination );
+
 	PathfindLayerEnum destinationLayer = TheTerrainLogic->getLayerForDestination(destination);
-	if (TheAI->pathfinder()->validMovementPosition( getObject()->getCrusherLevel()>0, destinationLayer, m_locomotorSet, destination ) == FALSE)
+	if (theNewPath != NULL)
+	{
+		// the lane the group planned for us: see setPlannedCrowdRoute
+	}
+	else if (TheAI->pathfinder()->validMovementPosition( getObject()->getCrusherLevel()>0, destinationLayer, m_locomotorSet, destination ) == FALSE)
 	{
 		theNewPath = NULL;
 	}
@@ -2062,6 +2132,37 @@ Bool AIUpdateInterface::computePath( PathfindServicesInterface *pathServices, Co
 		return TRUE;
 
 	return FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The route the group planned for this unit, as a path from where the unit is now.
+
+		The plan was laid at order time from where the unit stood then, and the path is asked for a
+		frame or several later, so two things are checked again rather than trusted: the first leg,
+		from here, and the end, which the move state may have nudged onto free ground since.  A plan
+		that fails either is dropped for a search, which is what the unit would have had anyway. */
+//-------------------------------------------------------------------------------------------------
+Path *AIUpdateInterface::crowdPlannedPath( const CrowdRoute& planned, const Coord3D& destination )
+{
+	Object *self = getObject();
+	const CrowdRoutePoint& last = planned.back();
+	const Real endDx = last.pos.x - destination.x;
+	const Real endDy = last.pos.y - destination.y;
+	if (endDx * endDx + endDy * endDy > CROWD_PLAN_END_SLACK * CROWD_PLAN_END_SLACK)
+		return NULL;					// a different order from the one this was planned for
+
+	const Coord3D *myPos = self->getPosition();
+	if (!TheAI->pathfinder()->isLinePassable( self, m_locomotorSet.getValidSurfaces(), self->getLayer(),
+				*myPos, planned.front().pos, false, true ))
+		return NULL;
+
+	Path *path = newInstance( Path );
+	path->markOptimized();
+	path->appendNode( myPos, self->getLayer() );
+	for (Int k = 0; k + 1 < (Int)planned.size(); k++)
+		path->appendNode( &planned[ k ].pos, planned[ k ].layer );
+	path->appendNode( &destination, TheTerrainLogic->getLayerForDestination( &destination ) );
+	return path;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2340,6 +2441,8 @@ void AIUpdateInterface::crowdReleaseCorridor( void )
 	m_crowdQueued = 0;
 	m_crowdHoldFrame = 0;
 	m_crowdSepSmooth = 0.0f;
+	m_crowdCap = 0.0f;
+	m_crowdCapValid = FALSE;
 	m_crowdAimValid = FALSE;
 	/* The backing-out manoeuvre survives the route.  Being wedged is the one thing a new route does
 		 not cure - the new one starts in the same hole - and a unit that repaths every second while
@@ -2352,7 +2455,7 @@ void AIUpdateInterface::crowdReleaseCorridor( void )
 		 gate at the top of crowdSteer wants one.  So the slot re-arms itself: the offset is zero
 		 because the new route starts under the unit's own tracks, and the per-frame fit takes it back
 		 out to its own lane within a few frames.  Only the next order clears it (clearCrowdLane). */
-	if (m_crowdLaneOf > 1)
+	if (m_crowdLaneOf >= 1)		// 1 is a member driving a lane its group planned: see setPlannedCrowdRoute
 	{
 		m_pendingCrowdLat = 0.0f;
 		m_hasPendingCrowdLat = TRUE;
@@ -2627,6 +2730,28 @@ void AIUpdateInterface::updateProgress( void )
 			 before. */
 		if (AIUpdate_isDithering( net, m_ditherTravel, body ))
 			Pathfinder::bumpDither();
+
+		/* The one case that is acted on: a unit on the ground beside or underneath a bridge its route
+			 goes over, shaking on the spot.  It came in beside the ramp rather than onto it and is
+			 pressing against the side of the ramp at full throttle for a spot on the deck: it moves
+			 every frame, so no count of stuck frames ever rises for it, and it covers too little ground
+			 to read as dithering either.  Two of twenty Crusaders over the long bridge on Golden Oasis
+			 never got across for that.  A route asked for from where it stands leads it round to the
+			 ramp. */
+		const Bool shaking = net < body * 0.25f && m_ditherTravel > body;
+		if (shaking && self->getLayer() == LAYER_GROUND && m_path != NULL && now >= m_rescueCool)
+		{
+			for (const PathNode *node = m_path->getFirstNode(); node != NULL; node = node->getNextOptimized())
+			{
+				const Real dx = node->getPosition()->x - myPos->x;
+				const Real dy = node->getPosition()->y - myPos->y;
+				if (node->getLayer() > LAYER_GROUND && dx * dx + dy * dy < STUCK_BRIDGE_NEAR * STUCK_BRIDGE_NEAR)
+				{
+					crowdRepath();
+					break;
+				}
+			}
+		}
 
 		m_ditherFrame = now;
 		m_ditherFrom = *myPos;
@@ -3567,8 +3692,25 @@ void AIUpdateInterface::crowdSteer( Coord3D& goalPos, Real& speed )
 
 	goalPos.z = TheTerrainLogic->getGroundHeight( goalPos.x, goalPos.y );
 
-	if (cap < speed)
-		speed = cap;
+	/* Brake now, come off the brake slowly.  Everything above decides the cap from one frame's worth
+		 of neighbours, and that answer is not steady: the blocker slips out of the lookahead cone for
+		 a frame, or drifts a foot sideways past the lane test, and the cap goes from his speed to ours
+		 and back.  The unit lunges and brakes several times a second, the unit behind reads that speed
+		 and does the same harder, and the whole column shunts.  The lane, the sideways push and the
+		 aim are all filtered for exactly this reason; the throttle was the one number still handed to
+		 the locomotor raw. */
+	if (!m_crowdCapValid)
+	{
+		m_crowdCap = cap;
+		m_crowdCapValid = TRUE;
+	}
+	else
+	{
+		m_crowdCap = Crowd_releaseCap( m_crowdCap, cap, CROWD_RELEASE_FILTER );
+	}
+
+	if (m_crowdCap < speed)
+		speed = m_crowdCap;
 
 	if (TheGlobalData->m_showLanes && (now % LOGICFRAMES_PER_SECOND) == 0)
 	{
@@ -3789,7 +3931,7 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 						}
 						Coord3D goalPos;
 						Real onPathDistToGoal;
-						if (!isDoingGroundMovement()) 
+						if (!isDoingGroundMovement())
 						{
 							// airborne locomotor.  Get the goal and distance direct to the goal, don't consider obstacles.
 							onPathDistToGoal = getPath()->computeFlightDistToGoal(getObject()->getPosition(), goalPos);
@@ -4285,6 +4427,16 @@ void AIUpdateInterface::aiDoCommand(const AICommandParms* parms)
 	// which is the leg that precedes it.
 	if (parms->m_cmd != AICMD_FOLLOW_EXITPRODUCTION_PATH)
 		m_hasExitProductionRallyPoint = FALSE;
+
+	// Likewise the walk back from a salvage crate: the player moving the unit somewhere means the
+	// spot it left is no longer where it belongs.  The order that sends it to the crate is given
+	// first and the return position recorded after, so this does not eat its own trip.
+	m_hasSalvageReturnPosition = FALSE;
+
+	// A tunnel trip drives itself with AI orders - the exit, the step out of the door - so only an
+	// order from somebody else ends it.
+	if (parms->m_cmdSource != CMD_FROM_AI)
+		m_hasTunnelTrip = FALSE;
 
 #ifdef ALLOW_SURRENDER
 	// surrendered items have very limited options, and only via AI cmds
@@ -5059,6 +5211,34 @@ void AIUpdateInterface::friend_setExitProductionRallyPoint( const Coord3D *pos )
 {
 	m_exitProductionRallyPoint = *pos;
 	m_hasExitProductionRallyPoint = TRUE;
+}
+
+//----------------------------------------------------------------------------------------
+/**
+ * Remember the spot to come back to once the salvage crate we were just sent to is collected.
+ */
+void AIUpdateInterface::friend_setSalvageReturnPosition( const Coord3D *pos )
+{
+	m_salvageReturnPosition = *pos;
+	m_hasSalvageReturnPosition = TRUE;
+}
+
+//----------------------------------------------------------------------------------------
+/**
+ * Turn an order to go to `goal` into an enter into `entrance`.  update() takes it from there: out of
+ * the mouth nearest the goal, then the last leg to it.
+ */
+Bool AIUpdateInterface::takeTunnelTrip( Object *entrance, const Coord3D *goal, TunnelTripEnd end, CommandSourceType cmdSource )
+{
+	if (!isDoingGroundMovement() || !TheActionManager->canEnterObject( getObject(), entrance, cmdSource, DONT_CHECK_CAPACITY ))
+		return FALSE;
+
+	// a player's enter ends any trip (aiDoCommand), so the trip is set after it
+	aiEnter( entrance, cmdSource );
+	m_tunnelTripGoal = *goal;
+	m_tunnelTripEnd = end;
+	m_hasTunnelTrip = TRUE;
+	return TRUE;
 }
 
 //----------------------------------------------------------------------------------------
@@ -6900,12 +7080,15 @@ void AIUpdateInterface::crc( Xfer *x )
 	* 6: the out-of-bounds xfer of m_guardTargetType is fixed
 	* 11: m_isMoving, which the duplicated m_isSafePath used to stand in place of
 	* 12: m_allowedToChase
-	* 13: m_pathfindFoundNothing */
+	* 13: m_pathfindFoundNothing
+	* 14: the salvage return position and its flag
+	* 16: the tunnel trip's goal and its flag
+	* 17: how the tunnel trip's last leg is walked */
 // ------------------------------------------------------------------------------------------------
 void AIUpdateInterface::xfer( Xfer *xfer )
 {
   // version
-  const XferVersion currentVersion = 13;
+  const XferVersion currentVersion = 17;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
  
@@ -7198,6 +7381,44 @@ void AIUpdateInterface::xfer( Xfer *xfer )
 	{
 		// lives from one path search to the move state's next look at it, which a save can fall between
 		xfer->xferBool(&m_pathfindFoundNothing);
+	}
+
+	if (version >= 14)
+	{
+		// a save made while the unit is on its way to a salvage crate owes it the walk back
+		xfer->xferCoord3D(&m_salvageReturnPosition);
+		xfer->xferBool(&m_hasSalvageReturnPosition);
+	}
+
+	if (version >= 15)
+	{
+		// a group's planned lane, which a save can fall between the order and the path it is for
+		UnsignedShort corners = (UnsignedShort)m_crowdPlanned.size();
+		xfer->xferUnsignedShort(&corners);
+		if (xfer->getXferMode() == XFER_LOAD)
+			m_crowdPlanned.resize( corners );
+		for (Int k = 0; k < (Int)corners; k++)
+		{
+			xfer->xferCoord3D(&m_crowdPlanned[ k ].pos);
+			Int layer = (Int)m_crowdPlanned[ k ].layer;
+			xfer->xferInt(&layer);
+			m_crowdPlanned[ k ].layer = (PathfindLayerEnum)layer;
+		}
+	}
+
+	if (version >= 16)
+	{
+		// a save made between a tunnel's enter and the walk out of the far mouth owes the rest of the trip
+		xfer->xferCoord3D(&m_tunnelTripGoal);
+		xfer->xferBool(&m_hasTunnelTrip);
+	}
+
+	if (version >= 17)
+	{
+		// a computer's wave comes out fighting, a move order does not
+		Int end = (Int)m_tunnelTripEnd;
+		xfer->xferInt(&end);
+		m_tunnelTripEnd = (TunnelTripEnd)end;
 	}
 
 }  // end xfer

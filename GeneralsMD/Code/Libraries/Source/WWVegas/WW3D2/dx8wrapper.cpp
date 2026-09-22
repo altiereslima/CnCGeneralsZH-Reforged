@@ -877,12 +877,35 @@ static bool GameGammaSet = false;
 static D3DGAMMARAMP DesktopGammaRamp;
 static D3DGAMMARAMP GameGammaRamp;
 
+// The monitor all of that happens on, as its GDI device name ("\\.\DISPLAY2").  Empty until the app
+// layer pushes one in, and then the primary's DC and the primary's mode are what a null name gets.
+static char RequestedMonitor[CCHDEVICENAME] = "";
+
+// A gamma ramp belongs to one monitor.  The whole-screen DC GetDC(NULL) hands out sets the primary's,
+// so a game on another monitor would move the brightness of the one it is not on.
+static HDC create_monitor_dc()
+{
+	return CreateDCA(RequestedMonitor[0] ? RequestedMonitor : "DISPLAY", NULL, NULL, NULL);
+}
+
 static void set_desktop_gamma(D3DGAMMARAMP * ramp)
 {
-	HDC hdc = GetDC(NULL);
+	HDC hdc = create_monitor_dc();
 	if (hdc) {
 		SetDeviceGammaRamp(hdc, ramp);
-		ReleaseDC(NULL, hdc);
+		DeleteDC(hdc);
+	}
+}
+
+static void save_desktop_gamma()
+{
+	if (DesktopGammaSaved) {
+		return;
+	}
+	HDC hdc = create_monitor_dc();
+	if (hdc) {
+		DesktopGammaSaved = GetDeviceGammaRamp(hdc, &DesktopGammaRamp) != FALSE;
+		DeleteDC(hdc);
 	}
 }
 
@@ -897,6 +920,19 @@ static void restore_desktop_display()
 	}
 }
 
+void DX8Wrapper::Set_Requested_Monitor(const char * device)
+{
+	if (strcmp(device, RequestedMonitor) == 0) {
+		return;
+	}
+	// The monitor being left gets its own mode and ramp back before the game takes another one, and
+	// the next ramp saved is the new monitor's.
+	restore_desktop_display();
+	DesktopGammaSaved = false;
+	strncpy(RequestedMonitor, device, sizeof(RequestedMonitor) - 1);
+	RequestedMonitor[sizeof(RequestedMonitor) - 1] = 0;
+}
+
 void DX8Wrapper::Apply_Fullscreen_Display(bool shown)
 {
 	const bool owns_display = !IsWindowed && Direct3D11_Present_Is_Enabled();
@@ -908,23 +944,36 @@ void DX8Wrapper::Apply_Fullscreen_Display(bool shown)
 		return;
 	}
 
-	DEVMODE mode;
+	const char * monitor = RequestedMonitor[0] ? RequestedMonitor : NULL;
+	DEVMODEA mode;
 	ZeroMemory(&mode, sizeof(mode));
 	mode.dmSize = sizeof(mode);
 	mode.dmPelsWidth = ResolutionWidth;
 	mode.dmPelsHeight = ResolutionHeight;
 	mode.dmBitsPerPel = BitDepth;
 	mode.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL;
-	if (ChangeDisplaySettingsEx(NULL, &mode, NULL, CDS_FULLSCREEN, NULL) == DISP_CHANGE_SUCCESSFUL) {
+	if (ChangeDisplaySettingsExA(monitor, &mode, NULL, CDS_FULLSCREEN, NULL) == DISP_CHANGE_SUCCESSFUL) {
 		DisplayModeChanged = true;
+	}
+
+	// Only the primary starts at the desktop's origin, and a monitor can move when its mode changes,
+	// so where it starts is asked after the change.
+	DEVMODEA current;
+	ZeroMemory(&current, sizeof(current));
+	current.dmSize = sizeof(current);
+	POINT origin = { 0, 0 };
+	if (monitor && EnumDisplaySettingsExA(monitor, ENUM_CURRENT_SETTINGS, &current, 0)) {
+		origin.x = current.dmPosition.x;
+		origin.y = current.dmPosition.y;
 	}
 
 	if (::IsIconic(_Hwnd)) {
 		::ShowWindow(_Hwnd, SW_RESTORE);
 	}
-	::SetWindowPos(_Hwnd, HWND_TOPMOST, 0, 0, ResolutionWidth, ResolutionHeight, SWP_SHOWWINDOW);
+	::SetWindowPos(_Hwnd, HWND_TOPMOST, origin.x, origin.y, ResolutionWidth, ResolutionHeight, SWP_SHOWWINDOW);
 
 	if (GameGammaSet) {
+		save_desktop_gamma();	// the monitor may have changed since the game's ramp was last set
 		set_desktop_gamma(&GameGammaRamp);
 	}
 }
@@ -2655,12 +2704,23 @@ void DX8Wrapper::Draw(
 						polygon_count));
 				}
 
-				// The same draw through the Direct3D 11 backend, into its own back buffer.  Only
-				// triangle lists go: a strip or a fan would need its indices rebuilt, and the
-				// engine's own strips are already lists by the time they reach here.
+				// The same draw through the Direct3D 11 backend, into its own back buffer.  Lists
+				// and strips both go: Direct3D 11 has a topology for each.  A strip used to be
+				// dropped here on the belief that nothing reached this point still striped, and
+				// the beach surf did - so with Direct3D 11 presenting, the D3D9 draw above was
+				// skipped and no draw replaced it, and the shell map's waves were drawn nowhere.
+				// A fan is still dropped: Direct3D 11 has no fan topology, and its indices would
+				// have to be rebuilt.
 				if (primitive_type==D3DPT_TRIANGLELIST) {
 					Direct3D11_Draw_Indexed_Triangles(
 						polygon_count*3,
+						start_index+render_state.iba_offset,
+						render_state.index_base_offset+render_state.vba_offset);
+				}
+				else if (primitive_type==D3DPT_TRIANGLESTRIP) {
+					// n indices make n-2 triangles, which is the count the caller passed.
+					Direct3D11_Draw_Indexed_Strip(
+						polygon_count+2,
 						start_index+render_state.iba_offset,
 						render_state.index_base_offset+render_state.vba_offset);
 				}
@@ -4292,13 +4352,7 @@ void DX8Wrapper::Set_Gamma(float gamma,float bright,float contrast,bool calibrat
 		// A windowed Direct3D 9 device ignores its gamma ramp, so the fullscreen display under the
 		// Direct3D 11 picture sets the desktop's, keeps the desktop's own to give back on the way out,
 		// and puts the game's on again when the game comes back.
-		if (!DesktopGammaSaved) {
-			HDC hdc = GetDC(NULL);
-			if (hdc) {
-				DesktopGammaSaved = GetDeviceGammaRamp(hdc, &DesktopGammaRamp) != FALSE;
-				ReleaseDC(NULL, hdc);
-			}
-		}
+		save_desktop_gamma();
 		GameGammaRamp = ramp;
 		GameGammaSet = true;
 		set_desktop_gamma(&GameGammaRamp);

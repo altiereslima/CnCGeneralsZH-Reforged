@@ -42,8 +42,17 @@ static const char * const PIXEL_PROFILE = "ps_4_0";
 // highlight it adds, and how bright that highlight is where the map's alpha is one.  Picked by eye
 // on four tanks and a desert base.
 static const float NORMAL_MAP_STRENGTH = 1.0f;
-static const float NORMAL_MAP_HIGHLIGHT_POWER = 24.0f;
-static const float NORMAL_MAP_HIGHLIGHT_SCALE = 0.5f;
+// The power was 24, which is a lobe narrow enough that a top-down camera over a fixed sun almost
+// never catches it: the gloss map decided what could shine and then nothing did.  Ten is wide
+// enough to catch a hull at the angles this game is actually played at.
+static const float NORMAL_MAP_HIGHLIGHT_POWER = 10.0f;
+static const float NORMAL_MAP_HIGHLIGHT_SCALE = 0.9f;
+
+// How much of the sky a metal surface returns, and how dark the horizon is against straight up.
+// The sun's own dot on a hull is one small spot; the flank of a tank reads as metal because of what
+// it mirrors over its whole area, and from this camera that is nearly all sky.
+static const float SKY_REFLECTION_STRENGTH = 0.35f;
+static const float SKY_HORIZON_SHARE = 0.45f;
 
 // The three stage counts are one count in three headers.  The vertex constant block is copied
 // wholesale out of the backend's own texture transforms, the generated pixel shader declares one
@@ -200,6 +209,23 @@ DX11BackendClass::DX11BackendClass()
 	, TargetCopy(NULL)
 	, TargetCopyView(NULL)
 	, NormalMap(NULL)
+	, ShadowMapSurface(NULL)
+	, ShadowMapDepth(NULL)
+	, ShadowMapTexture(NULL)
+	, ShadowMapSize(0)
+	, ShadowMapBound(false)
+	, ShadowMapSavedWidth(0)
+	, ShadowMapSavedHeight(0)
+	, ShadowMapSavedTarget(NULL)
+	, ShadowMapSampler(NULL)
+	, ShadowBias(0.0f)
+	, ShadowStrength(0.0f)
+	, ShadowRadius(1.0f)
+	, ShadowNarrowestRadius(1.0f)
+	, ShadowTexelsPerGap(0.0f)
+	, ShadowUnitsPerDepth(0.0f)
+	, ShadowSkyFill(0.0f)
+	, ShadowReceiving(false)
 	, NormalMappedDraws(0)
 	, DrawsMade(0)
 	, DrawsRefused(0)
@@ -374,7 +400,252 @@ void DX11BackendClass::Shutdown()
 		TargetCopyView = NULL;
 		TargetCopy = NULL;
 	}
+	if (ShadowMapTexture != NULL) {
+		ShadowMapTexture->Release();
+		ShadowMapTexture = NULL;
+	}
+	if (ShadowMapDepth != NULL) {
+		ShadowMapDepth->Release();
+		ShadowMapDepth = NULL;
+	}
+	if (ShadowMapSurface != NULL) {
+		ShadowMapSurface->Release();
+		ShadowMapSurface = NULL;
+	}
+	if (ShadowMapSampler != NULL) {
+		ShadowMapSampler->Release();
+		ShadowMapSampler = NULL;
+	}
+	ShadowMapSize = 0;
+	ShadowMapBound = false;
+	RenderStates.Set_Shadow_Caster_Pass(false);
 	Device = NULL;
+}
+
+/** The sun's depth buffer.  One surface with two views of it, because a depth buffer that is also
+		sampled cannot be made as a depth format: the surface is typeless and each view says how its
+		bits are to be read.  Made at the first size asked for and kept at that size. */
+bool DX11BackendClass::Begin_Shadow_Map(unsigned size)
+{
+	if (Device == NULL || size == 0 || ShadowMapBound) {
+		return false;
+	}
+
+	if (ShadowMapSurface == NULL) {
+		D3D11_TEXTURE2D_DESC description;
+		memset(&description, 0, sizeof(description));
+		description.Width = size;
+		description.Height = size;
+		description.MipLevels = 1;
+		description.ArraySize = 1;
+		description.Format = DXGI_FORMAT_R24G8_TYPELESS;
+		description.SampleDesc.Count = 1;
+		description.Usage = D3D11_USAGE_DEFAULT;
+		description.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+		if (FAILED(Device->Get_Device()->CreateTexture2D(&description, NULL, &ShadowMapSurface))) {
+			Note_Refusal("the device refused the sun's depth buffer");
+			return false;
+		}
+
+		D3D11_DEPTH_STENCIL_VIEW_DESC depth_description;
+		memset(&depth_description, 0, sizeof(depth_description));
+		depth_description.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+		depth_description.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+		if (FAILED(Device->Get_Device()->CreateDepthStencilView(ShadowMapSurface, &depth_description,
+				&ShadowMapDepth))) {
+			Note_Refusal("the device refused a depth view of the sun's depth buffer");
+			ShadowMapSurface->Release();
+			ShadowMapSurface = NULL;
+			return false;
+		}
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC texture_description;
+		memset(&texture_description, 0, sizeof(texture_description));
+		texture_description.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+		texture_description.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		texture_description.Texture2D.MipLevels = 1;
+		if (FAILED(Device->Get_Device()->CreateShaderResourceView(ShadowMapSurface,
+				&texture_description, &ShadowMapTexture))) {
+			Note_Refusal("the device refused a texture view of the sun's depth buffer");
+			ShadowMapDepth->Release();
+			ShadowMapDepth = NULL;
+			ShadowMapSurface->Release();
+			ShadowMapSurface = NULL;
+			return false;
+		}
+
+		ShadowMapSize = size;
+	}
+
+	// The map cannot be read and written at once, and the frame before this one left it bound to
+	// whichever sampler reads it.
+	ID3D11ShaderResourceView * const none[DX11_BACKEND_TEXTURE_STAGES] = { NULL };
+	Device->Get_Context()->PSSetShaderResources(0, DX11_BACKEND_TEXTURE_STAGES, none);
+
+	Device->Get_Context()->OMSetRenderTargets(0, NULL, ShadowMapDepth);
+	Device->Get_Context()->ClearDepthStencilView(ShadowMapDepth,
+		D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+
+	ShadowMapSavedWidth = ViewportWidth;
+	ShadowMapSavedHeight = ViewportHeight;
+	ShadowMapSavedTarget = CurrentTarget;
+	ShadowMapBound = true;
+	RenderStates.Set_Shadow_Caster_Pass(true);
+	Set_Viewport(0, 0, ShadowMapSize, ShadowMapSize);
+	Forget_Bindings();
+	return true;
+}
+
+void DX11BackendClass::End_Shadow_Map()
+{
+	if (!ShadowMapBound) {
+		return;
+	}
+
+	ShadowMapBound = false;
+	RenderStates.Set_Shadow_Caster_Pass(false);
+	// What the sun was looking through, kept for the draws that will read the map.
+	multiply(View, Projection, SunViewProjection);
+	ShadowFromClipValid = false;
+	// Back to whatever the frame was drawing into, which is a texture the post chain shows and not
+	// the back buffer.
+	Set_Render_Target(ShadowMapSavedTarget);
+	ShadowMapSavedTarget = NULL;
+	if (ShadowMapSavedWidth != 0 && ShadowMapSavedHeight != 0) {
+		Set_Viewport(0, 0, ShadowMapSavedWidth, ShadowMapSavedHeight);
+	}
+	Forget_Bindings();
+}
+
+void DX11BackendClass::Set_Shadow_Parameters(float bias, float strength,
+	float widest_radius_in_texels, float narrowest_radius_in_texels, float texels_per_unit_of_gap,
+	float units_per_unit_of_depth, float sky_fill)
+{
+	if (ShadowMapTexture == NULL) {
+		Clear_Shadow_Parameters();
+		return;
+	}
+	ShadowBias = bias;
+	ShadowStrength = strength;
+	ShadowRadius = widest_radius_in_texels;
+	ShadowNarrowestRadius = narrowest_radius_in_texels;
+	ShadowTexelsPerGap = texels_per_unit_of_gap;
+	ShadowUnitsPerDepth = units_per_unit_of_depth;
+	ShadowSkyFill = sky_fill;
+	ShadowReceiving = true;
+}
+
+void DX11BackendClass::Clear_Shadow_Parameters()
+{
+	ShadowReceiving = false;
+	ShadowFromClipValid = false;
+}
+
+/** The inverse of a four by four, by cofactors.  Nothing else in the backend needed one: every
+		other matrix it holds arrives ready to use, and this is the one journey that goes the other
+		way, out of the frame's clip space and back into the world. */
+static bool invert(const float in[16], float out[16])
+{
+	const float a00 = in[0],  a01 = in[1],  a02 = in[2],  a03 = in[3];
+	const float a10 = in[4],  a11 = in[5],  a12 = in[6],  a13 = in[7];
+	const float a20 = in[8],  a21 = in[9],  a22 = in[10], a23 = in[11];
+	const float a30 = in[12], a31 = in[13], a32 = in[14], a33 = in[15];
+
+	const float b00 = a00 * a11 - a01 * a10;
+	const float b01 = a00 * a12 - a02 * a10;
+	const float b02 = a00 * a13 - a03 * a10;
+	const float b03 = a01 * a12 - a02 * a11;
+	const float b04 = a01 * a13 - a03 * a11;
+	const float b05 = a02 * a13 - a03 * a12;
+	const float b06 = a20 * a31 - a21 * a30;
+	const float b07 = a20 * a32 - a22 * a30;
+	const float b08 = a20 * a33 - a23 * a30;
+	const float b09 = a21 * a32 - a22 * a31;
+	const float b10 = a21 * a33 - a23 * a31;
+	const float b11 = a22 * a33 - a23 * a32;
+
+	const float determinant = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+	if (determinant > -1e-12f && determinant < 1e-12f) {
+		return false;
+	}
+	const float scale = 1.0f / determinant;
+
+	out[0]  = ( a11 * b11 - a12 * b10 + a13 * b09) * scale;
+	out[1]  = (-a01 * b11 + a02 * b10 - a03 * b09) * scale;
+	out[2]  = ( a31 * b05 - a32 * b04 + a33 * b03) * scale;
+	out[3]  = (-a21 * b05 + a22 * b04 - a23 * b03) * scale;
+	out[4]  = (-a10 * b11 + a12 * b08 - a13 * b07) * scale;
+	out[5]  = ( a00 * b11 - a02 * b08 + a03 * b07) * scale;
+	out[6]  = (-a30 * b05 + a32 * b02 - a33 * b01) * scale;
+	out[7]  = ( a20 * b05 - a22 * b02 + a23 * b01) * scale;
+	out[8]  = ( a10 * b10 - a11 * b08 + a13 * b06) * scale;
+	out[9]  = (-a00 * b10 + a01 * b08 - a03 * b06) * scale;
+	out[10] = ( a30 * b04 - a31 * b02 + a33 * b00) * scale;
+	out[11] = (-a20 * b04 + a21 * b02 - a23 * b00) * scale;
+	out[12] = (-a10 * b09 + a11 * b07 - a12 * b06) * scale;
+	out[13] = ( a00 * b09 - a01 * b07 + a02 * b06) * scale;
+	out[14] = (-a30 * b03 + a31 * b01 - a32 * b00) * scale;
+	out[15] = ( a20 * b03 - a21 * b01 + a22 * b00) * scale;
+	return true;
+}
+
+/** What is in the map, read back once.  A caster pass that drew nothing leaves every texel at the
+		clear value, which no draw count tells apart from a pass that drew the whole world. */
+std::string DX11BackendClass::Shadow_Map_Report()
+{
+	if (ShadowMapSurface == NULL) {
+		return "no shadow map";
+	}
+
+	D3D11_TEXTURE2D_DESC description;
+	ShadowMapSurface->GetDesc(&description);
+	description.Usage = D3D11_USAGE_STAGING;
+	description.BindFlags = 0;
+	description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+	description.MiscFlags = 0;
+
+	ID3D11Texture2D * staging = NULL;
+	if (FAILED(Device->Get_Device()->CreateTexture2D(&description, NULL, &staging))) {
+		return "no staging copy of the shadow map";
+	}
+
+	Device->Get_Context()->CopyResource(staging, ShadowMapSurface);
+
+	std::string answer = "unreadable shadow map";
+	D3D11_MAPPED_SUBRESOURCE mapped;
+	if (SUCCEEDED(Device->Get_Context()->Map(staging, 0, D3D11_MAP_READ, 0, &mapped))) {
+		const unsigned DEPTH_BITS = 24;
+		const float FURTHEST = (float)((1u << DEPTH_BITS) - 1);
+		unsigned drawn = 0;
+		float nearest = 1.0f;
+		double sum = 0.0;
+		for (unsigned row = 0; row < description.Height; ++row) {
+			const unsigned * line = (const unsigned *)((const unsigned char *)mapped.pData
+				+ row * mapped.RowPitch);
+			for (unsigned column = 0; column < description.Width; ++column) {
+				const float depth = (float)(line[column] & 0x00FFFFFF) / FURTHEST;
+				if (depth < 1.0f) {
+					++drawn;
+					sum += depth;
+					if (depth < nearest) {
+						nearest = depth;
+					}
+				}
+			}
+		}
+		Device->Get_Context()->Unmap(staging, 0);
+
+		char line[160];
+		const unsigned texels = description.Width * description.Height;
+		snprintf(line, sizeof(line),
+			"%ux%u, %u texels drawn into (%.1f%%), nearest %.4f, mean %.4f",
+			description.Width, description.Height, drawn, 100.0f * (float)drawn / (float)texels,
+			nearest, (drawn > 0) ? sum / drawn : 1.0);
+		answer = line;
+	}
+
+	staging->Release();
+	return answer;
 }
 
 void DX11BackendClass::Set_Render_State(D3DRENDERSTATETYPE state, DWORD value)
@@ -409,22 +680,16 @@ void DX11BackendClass::Set_Normal_Map(ID3D11ShaderResourceView * normal_map)
 	NormalMap = normal_map;
 }
 
-// Directional lights only, because the pixel half sums nothing else; a draw under a point light is
-// lit per vertex the way it always was.  A transcribed program is its own lighting.
+// The pixel half bumps the directional lights; a point or spot light is summed per vertex into the
+// base it adds to (ffvertex.cpp).  It used to turn the whole draw back to per-vertex lighting, so a
+// tank lost its relief every time its own gun flashed, and anything next to an explosion or a fire
+// went flat with it.  A transcribed program is its own lighting.
 bool DX11BackendClass::Normal_Mapped() const
 {
-	if (NormalMap == NULL || Textures[0] == NULL
-		|| VertexProgram != ENGINE_SHADER_NONE || PixelProgram != ENGINE_SHADER_NONE
-		|| RenderStates.Get_Render_State(D3DRS_LIGHTING) == FALSE
-		|| (VertexFormat & D3DFVF_NORMAL) == 0) {
-		return false;
-	}
-	for (unsigned index = 0; index < MAXIMUM_VERTEX_LIGHTS; ++index) {
-		if (Lights[index].Enabled && Lights[index].Type != D3DLIGHT_DIRECTIONAL) {
-			return false;
-		}
-	}
-	return true;
+	return NormalMap != NULL && Textures[0] != NULL
+		&& VertexProgram == ENGINE_SHADER_NONE && PixelProgram == ENGINE_SHADER_NONE
+		&& RenderStates.Get_Render_State(D3DRS_LIGHTING) != FALSE
+		&& (VertexFormat & D3DFVF_NORMAL) != 0;
 }
 
 bool DX11BackendClass::Terrain_Bumped() const
@@ -915,7 +1180,40 @@ bool DX11BackendClass::Build_Combiner_Description(CombinerDescription & descript
 		description.StageCount = stage + 1;
 	}
 	description.NormalMapped = description.StageCount > 0 && Normal_Mapped();
+	description.ShadowReceiving = description.StageCount > 0 && Shadow_Receiving();
 	return description.StageCount > 0;
+}
+
+/** Which draws take a shadow.  The world's, and only while the sun's map holds this frame's casters:
+		a screen space quad has no place in the world to look up, a draw that is adding light to the
+		frame rather than painting it would come out darker rather than shadowed, and the pass that
+		fills the map must not shadow itself. */
+bool DX11BackendClass::Shadow_Receiving() const
+{
+	if (!ShadowReceiving || ShadowMapBound || ShadowMapTexture == NULL) {
+		return false;
+	}
+	// A transcribed terrain or road program takes one too: the ground is where a shadow is seen,
+	// and those programs carry the sampling whether a frame has a map or not.  The water and the
+	// trees keep their own shadows for now.
+	if (PixelProgram != ENGINE_SHADER_NONE && !EngineShader_Paints_Ground(PixelProgram)) {
+		return false;
+	}
+	if (VertexProgram != ENGINE_SHADER_NONE && PixelProgram == ENGINE_SHADER_NONE) {
+		return false;
+	}
+	if ((VertexFormat & D3DFVF_XYZRHW) != 0) {
+		return false;		// already in screen space: the interface, the filters, the darkening quad
+	}
+	if (RenderStates.Get_Render_State(D3DRS_ALPHABLENDENABLE) != FALSE) {
+		const DWORD source = RenderStates.Get_Render_State(D3DRS_SRCBLEND);
+		const DWORD destination = RenderStates.Get_Render_State(D3DRS_DESTBLEND);
+		if (destination == D3DBLEND_ONE || source == D3DBLEND_ONE
+			|| destination == D3DBLEND_DESTCOLOR || source == D3DBLEND_DESTCOLOR) {
+			return false;	// additive and multiplicative passes: fire, glow, the shadows themselves
+		}
+	}
+	return true;
 }
 
 bool DX11BackendClass::Build_Vertex_Description(VertexPipelineDescription & description) const
@@ -1267,13 +1565,14 @@ void DX11BackendClass::Upload_Constants()
 	pixel_block.AlphaReference[0] =
 		static_cast<float>(RenderStates.Get_Render_State(D3DRS_ALPHAREF) & 0xff);
 
-	// The normal mapped program's lights, the enabled ones first and in camera space like the
-	// vertex block's.  A slot with no light gets a direction anyway: the highlight normalises the
-	// half vector, and a zero direction there is a NaN that no zero colour cancels.
+	// The normal mapped program's lights, the enabled directional ones first and in camera space
+	// like the vertex block's; a point or spot light is already in the vertex colour it adds to.  A
+	// slot with no light gets a direction anyway: the highlight normalises the half vector, and a
+	// zero direction there is a NaN that no zero colour cancels.
 	unsigned normal_slot = 0;
 	for (unsigned index = 0; index < MAXIMUM_VERTEX_LIGHTS && normal_slot < NORMAL_MAPPED_LIGHTS;
 			++index) {
-		if (!Lights[index].Enabled) {
+		if (!Lights[index].Enabled || Lights[index].Type != D3DLIGHT_DIRECTIONAL) {
 			continue;
 		}
 		float * direction = pixel_block.NormalLightDirection[normal_slot];
@@ -1304,6 +1603,55 @@ void DX11BackendClass::Upload_Constants()
 			pixel_block.TerrainSunDirection[axis] /= sun_length;
 		}
 	}
+
+	if (ShadowReceiving) {
+		if (!ShadowFromClipValid
+			|| memcmp(ShadowFromClipView, View, sizeof(View)) != 0
+			|| memcmp(ShadowFromClipProjection, Projection, sizeof(Projection)) != 0) {
+			float scene_clip[16];
+			float clip_to_world[16];
+			multiply(View, Projection, scene_clip);
+			if (invert(scene_clip, clip_to_world)) {
+				multiply(clip_to_world, SunViewProjection, ShadowFromClip);
+				memcpy(ShadowFromClipView, View, sizeof(View));
+				memcpy(ShadowFromClipProjection, Projection, sizeof(Projection));
+				ShadowFromClipValid = true;
+			}
+		}
+		memcpy(pixel_block.ShadowFromClip, ShadowFromClip, sizeof(pixel_block.ShadowFromClip));
+		pixel_block.ShadowParameters[0] = (ShadowMapSize > 0)
+			? 1.0f / static_cast<float>(ShadowMapSize) : 0.0f;
+		pixel_block.ShadowParameters[1] = ShadowBias;
+		pixel_block.ShadowParameters[2] = ShadowStrength;
+		pixel_block.ShadowParameters[3] = ShadowRadius;
+		pixel_block.ShadowViewport[0] = (ViewportWidth > 0)
+			? 1.0f / static_cast<float>(ViewportWidth) : 0.0f;
+		pixel_block.ShadowViewport[1] = (ViewportHeight > 0)
+			? 1.0f / static_cast<float>(ViewportHeight) : 0.0f;
+		pixel_block.ShadowSoftness[0] = ShadowNarrowestRadius;
+		pixel_block.ShadowSoftness[1] = ShadowTexelsPerGap;
+		pixel_block.ShadowSoftness[2] = ShadowUnitsPerDepth;
+		pixel_block.ShadowSoftness[3] = ShadowSkyFill;
+	}
+
+	/* The sky a metal surface mirrors.  There is no cubemap: the colour is the map's own sunlight,
+		 which is what makes a night map's metal cold and a desert's warm without anything being
+		 authored, and the direction it is brightest in is straight up in camera space. */
+	const float * sun_colour = Lights[0].Enabled ? Lights[0].Diffuse : NULL;
+	for (unsigned channel = 0; channel < 3; ++channel) {
+		pixel_block.Sky[channel] = (sun_colour != NULL) ? sun_colour[channel] : 1.0f;
+	}
+	pixel_block.Sky[3] = SKY_REFLECTION_STRENGTH;
+	const float world_up[4] = { 0.0f, 0.0f, 1.0f, 0.0f };
+	transform_direction(world_up, View, pixel_block.SkyUp);
+	const float up_length = sqrtf(pixel_block.SkyUp[0] * pixel_block.SkyUp[0]
+		+ pixel_block.SkyUp[1] * pixel_block.SkyUp[1] + pixel_block.SkyUp[2] * pixel_block.SkyUp[2]);
+	if (up_length > 0.0f) {
+		for (unsigned axis = 0; axis < 3; ++axis) {
+			pixel_block.SkyUp[axis] /= up_length;
+		}
+	}
+	pixel_block.SkyUp[3] = SKY_HORIZON_SHARE;
 
 	if ((!PixelConstantsHeld
 			|| memcmp(&HeldPixelConstants, &pixel_block, sizeof(pixel_block)) != 0)
@@ -1499,6 +1847,26 @@ void DX11BackendClass::Bind_State_Objects()
 	if (NormalMap != NULL && (!known || NormalMap != Bound.NormalMap)) {
 		context->PSSetShaderResources(DX11_BACKEND_TEXTURE_STAGES, 1, &NormalMap);
 		Bound.NormalMap = NormalMap;
+	}
+
+	// The sun's map at t5 with a sampler of its own at s5, clamped so a pixel past the edge of the
+	// box reads the edge rather than wrapping the far side of the map over it.
+	if (ShadowReceiving && ShadowMapTexture != NULL) {
+		if (ShadowMapSampler == NULL) {
+			D3D11_SAMPLER_DESC description;
+			memset(&description, 0, sizeof(description));
+			description.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+			description.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+			description.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+			description.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+			description.ComparisonFunc = D3D11_COMPARISON_NEVER;
+			description.MaxLOD = D3D11_FLOAT32_MAX;
+			Device->Get_Device()->CreateSamplerState(&description, &ShadowMapSampler);
+		}
+		context->PSSetShaderResources(DX11_BACKEND_TEXTURE_STAGES + 1, 1, &ShadowMapTexture);
+		if (ShadowMapSampler != NULL) {
+			context->PSSetSamplers(DX11_BACKEND_TEXTURE_STAGES + 1, 1, &ShadowMapSampler);
+		}
 	}
 }
 

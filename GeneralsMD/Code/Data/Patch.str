@@ -563,7 +563,15 @@ GUI:WindowMode2
 END
 
 TOOLTIP:WindowMode
-"Fullscreen takes the display mode, borderless covers it with a window and alt-tabs instantly. Borderless picks the resolution itself, so the list on the left is yours in the other two."
+"Fullscreen takes the display mode, borderless covers it with a window and alt-tabs instantly. Borderless takes the monitor's own resolution, so the list above is yours in the other two."
+END
+
+GUI:Monitor
+"Monitor"
+END
+
+TOOLTIP:Monitor
+"The monitor the game plays on. The resolution list below holds the sizes this monitor can show. Applied when you Accept."
 END
 
 GUI:MSAA
@@ -644,6 +652,14 @@ END
 
 TOOLTIP:VSync
 "Holds the picture to the monitor so it does not tear. Off, the picture runs as fast as the machine draws. Applied when you Accept."
+END
+
+GUI:ClassicGraphics
+"Classic Graphics"
+END
+
+TOOLTIP:ClassicGraphics
+"The game as it looked in 2003: its own textures and ground, the old hard shadows, no bump detail and no glow or sharpening. Off is Reforged. Takes effect the next time the game starts."
 END
 
 GUI:InfantryShadows
@@ -1028,4 +1044,49 @@ END
 
 GUI:HudSuperweaponStrip
 "Superweapon timers"
+END
+
+// the scoreboard on Tab
+GUI:ScoreboardAllies
+"YOUR SIDE"
+END
+
+GUI:ScoreboardEnemies
+"ENEMIES"
+END
+
+GUI:ScoreboardPlayer
+"PLAYER"
+END
+
+GUI:ScoreboardTeam
+"TEAM"
+END
+
+GUI:ScoreboardLevel
+"RANK"
+END
+
+GUI:ScoreboardMoney
+"MONEY"
+END
+
+GUI:ScoreboardPerMinute
+"PER MIN"
+END
+
+GUI:ScoreboardKills
+"K"
+END
+
+GUI:ScoreboardDeaths
+"D"
+END
+
+GUI:ScoreboardPowers
+"POWERS"
+END
+
+GUI:ScoreboardFavourite
+"FAVOURITE"
 END

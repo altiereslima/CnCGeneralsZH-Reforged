@@ -197,6 +197,7 @@ void ConnectionManager::init()
 	m_keepAliveNextSlot = 0;
 
 	m_localSlot = -1;
+	m_lastFrameTickSent = -1;
 #ifdef MEMORYPOOL_DEBUG
 	TheMemoryPoolFactory->debugSetInitFillerIndex(m_localSlot);
 #endif
@@ -294,6 +295,7 @@ void ConnectionManager::reset()
 	m_netCommandWrapperList->reset();
 
 	m_localSlot = -1;
+	m_lastFrameTickSent = -1;
 #ifdef MEMORYPOOL_DEBUG
 	TheMemoryPoolFactory->debugSetInitFillerIndex(m_localSlot);
 #endif
@@ -1435,24 +1437,13 @@ void ConnectionManager::updateRunAhead(Int oldRunAhead, Int frameRate, Bool didS
 }
 
 Real ConnectionManager::getMaximumLatency() {
-	// This works for 2 player games because the latency for the packet router is always 0.
-	Real lat1 = 0.0;
-	Real lat2 = 0.0;
-
+	// EA: "This works for 2 player games because the latency for the packet router is always 0."
+	// It is not, so it is left out by name - see roomLatencySum.
+	Bool connected[MAX_SLOTS];
 	for (Int i = 0; i < MAX_SLOTS; ++i) {
-		if (isPlayerConnected(i)) {
-			if (m_latencyAverages[i] != 0.0) {
-				if (m_latencyAverages[i] > lat1) {
-					lat2 = lat1;
-					lat1 = m_latencyAverages[i];
-				} else if (m_latencyAverages[i] > lat2) {
-					lat2 = m_latencyAverages[i];
-				}
-			}
-		}
+		connected[i] = isPlayerConnected(i);
 	}
-
-	return (lat1 + lat2);
+	return roomLatencySum(m_latencyAverages, connected, MAX_SLOTS, m_packetRouterSlot);
 }
 
 void ConnectionManager::getMinimumFps(Int &minFps, Int &minFpsPlayer) {
@@ -1500,6 +1491,8 @@ void ConnectionManager::processFrameTick(UnsignedInt frame) {
 	msg->setPlayerID(m_localSlot);
 
 	m_frameMetrics.doPerFrameMetrics(frame);
+	if ((Int)frame > m_lastFrameTickSent)
+		m_lastFrameTickSent = (Int)frame;
 
 	DEBUG_LOG(("ConnectionManager::processFrameTick - sending frame info for frame %d, ID %d, command count %d\n", frame, msg->getID(), commandCount));
 
@@ -1635,6 +1628,26 @@ Int commandsReadyDebugSpewage = 0;
 /**
  * Returns true if all the commands for the given frame are ready to be executed.
  */
+/**
+ * How many frames the room could play right now without waiting, counted from fromFrame.  A read
+ * only: allCommandsReady asks for a resend when it finds a frame in a bad state, and this is for a
+ * readout, which must not change what goes on the wire.
+ */
+UnsignedInt ConnectionManager::countFramesReady(UnsignedInt fromFrame, UnsignedInt maxFrames) {
+	for (UnsignedInt ready = 0; ready < maxFrames; ++ready) {
+		const UnsignedInt frame = fromFrame + ready;
+		for (Int i = 0; i < MAX_SLOTS; ++i) {
+			if ((m_frameData[i] == NULL) || m_frameData[i]->getIsQuitting()) {
+				continue;
+			}
+			if (m_frameData[i]->getFrameCommandCount(frame) != m_frameData[i]->getCommandCount(frame)) {
+				return ready;
+			}
+		}
+	}
+	return maxFrames;
+}
+
 Bool ConnectionManager::allCommandsReady(UnsignedInt frame, Bool justTesting /* = FALSE */) {
 	Bool retval = TRUE;
 	/* Read after the loop, and the loop can exit before ever assigning it. */
@@ -2582,6 +2595,18 @@ void ConnectionManager::sendFrameDataToPlayer(UnsignedInt playerID, UnsignedInt 
 	for (UnsignedInt frame = startingFrame; frame < TheGameLogic->getFrame(); ++frame) {
 		sendSingleFrameToPlayer(playerID, frame);
 	}
+
+	/* EA stopped at the frame this machine is on, which is enough for a player who fell behind and
+		 nothing for one on the same frame: when both machines lose the other's frame info for the
+		 frame they are both on, each asks, each finds nothing below its own frame to send, and the
+		 match hangs until the disconnect screen.  -latAvg 120 -packetloss 5 did it at frame 30 on the
+		 retail pacing as well as with the network catch-up.  Our own frames from here up to the last
+		 one announced are final - processFrameTick only runs once no command can land on that frame
+		 any more - so those go too.  Other players' frames past ours are not ours to vouch for. */
+	const Int firstUnplayed = ((Int)startingFrame > (Int)TheGameLogic->getFrame()) ? (Int)startingFrame : (Int)TheGameLogic->getFrame();
+	for (Int frame = firstUnplayed; frame <= m_lastFrameTickSent; ++frame) {
+		sendSlotFrameToPlayer(playerID, m_localSlot, frame);
+	}
 	DEBUG_LOG(("ConnectionManager::sendFrameDataToPlayer - done sending commands to player %d\n", playerID));
 }
 
@@ -2591,33 +2616,39 @@ void ConnectionManager::sendSingleFrameToPlayer(UnsignedInt playerID, UnsignedIn
 		return;
 	}
 
-	UnsignedByte relay = 1 << playerID;
-
 	DEBUG_LOG(("ConnectionManager::sendFrameDataToPlayer - sending data for frame %d\n", frame));
 	for (Int i = 0; i < MAX_SLOTS; ++i) {
 		if ((m_frameData[i] != NULL) && (i != playerID)) { // no need to send his own commands to him.
-			NetCommandList *list = m_frameData[i]->getFrameCommandList(frame);
-			if (list != NULL) {
-				NetCommandRef *ref = list->getFirstMessage();
-				while (ref != NULL) {
-					DEBUG_LOG(("ConnectionManager::sendFrameDataToPlayer - sending command %d from player %d to player %d using relay 0x%x\n", ref->getCommand()->getID(), i, playerID, relay));
-					sendLocalCommandDirect(ref->getCommand(), relay);
-					ref = ref->getNext();
-				}
-			}
-			UnsignedInt frameCommandCount = m_frameData[i]->getFrameCommandCount(frame);
-			NetFrameCommandMsg *msg = newInstance(NetFrameCommandMsg);
-			msg->setExecutionFrame(frame);
-			msg->setCommandCount(frameCommandCount);
-			if (DoesCommandRequireACommandID(msg->getNetCommandType())) {
-				msg->setID(GenerateNextCommandID());
-			}
-			msg->setPlayerID(i);
-			DEBUG_LOG(("ConnectionManager::sendFrameDataToPlayer - sending frame info from player %d to player %d for frame %d with command count %d and ID %d and relay %d\n", i, playerID, msg->getExecutionFrame(), msg->getCommandCount(), msg->getID(), relay));
-			sendLocalCommandDirect(msg, relay);
-			msg->detach();
+			sendSlotFrameToPlayer(playerID, i, frame);
 		}
 	}
+}
+
+/** One slot's commands for one frame, then its frame info, the way sendSingleFrameToPlayer always
+		sent every slot's. */
+void ConnectionManager::sendSlotFrameToPlayer(UnsignedInt playerID, UnsignedInt slot, UnsignedInt frame) {
+	UnsignedByte relay = 1 << playerID;
+
+	NetCommandList *list = m_frameData[slot]->getFrameCommandList(frame);
+	if (list != NULL) {
+		NetCommandRef *ref = list->getFirstMessage();
+		while (ref != NULL) {
+			DEBUG_LOG(("ConnectionManager::sendFrameDataToPlayer - sending command %d from player %d to player %d using relay 0x%x\n", ref->getCommand()->getID(), slot, playerID, relay));
+			sendLocalCommandDirect(ref->getCommand(), relay);
+			ref = ref->getNext();
+		}
+	}
+	UnsignedInt frameCommandCount = m_frameData[slot]->getFrameCommandCount(frame);
+	NetFrameCommandMsg *msg = newInstance(NetFrameCommandMsg);
+	msg->setExecutionFrame(frame);
+	msg->setCommandCount(frameCommandCount);
+	if (DoesCommandRequireACommandID(msg->getNetCommandType())) {
+		msg->setID(GenerateNextCommandID());
+	}
+	msg->setPlayerID(slot);
+	DEBUG_LOG(("ConnectionManager::sendFrameDataToPlayer - sending frame info from player %d to player %d for frame %d with command count %d and ID %d and relay %d\n", slot, playerID, msg->getExecutionFrame(), msg->getCommandCount(), msg->getID(), relay));
+	sendLocalCommandDirect(msg, relay);
+	msg->detach();
 }
 
 UnsignedInt ConnectionManager::getNextPacketRouterSlot(UnsignedInt playerID) {

@@ -1,0 +1,19 @@
+# Trailer: four armies, two to a team, in one fight on Twilight Flame. The look point is the
+# ground all four are attack-moving on, 2450,3650.
+#
+#   generals.exe -borderless -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 2500 -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 4 -teams 2
+#     -takeover -side 0 FactionChina -side 1 FactionAmerica -side 2 FactionGLA -side 3 FactionChina
+#     -seed 7 -scenario trailer_fourway -cinema tr_watch -video 1350 1890 tr_watch -maxframes 1910
+#
+# This used to be the four computer players' own match framed by -autocamera, and neither half of
+# that worked. -autocamera scores a 16 by 16 grid of cells by units times sides squared and looks at
+# the centre of the best cell, so the camera lands up to 150 units off what it picked; and on this
+# seed the best cell in eleven minutes of brutal AI held twelve units, parked, not shooting. The
+# fight is staged now, like the other trailer scenes, and the four seats are the four colours.
+
+44    cut        2450 3650 1.05 -45 -16
+45    zoom       0.8 14
+45    orbit      28 17
+60    pitch      -26 3
+63    end

@@ -101,6 +101,12 @@ public:
 	AsciiString searchHotKey( const AsciiString& label);
 	AsciiString searchHotKey( const UnicodeString& uStr );
 
+	/** The window this key is bound to at the moment, or NULL for a key nothing
+		* claims.  When there is one, pressable comes back with the answer
+		* executeHotKey would give: the window is showing and enabled, so the press
+		* would land. */
+	GameWindow *findHotKey( const AsciiString& key, Bool *pressable ) const;
+
 private:
 	typedef std::map<AsciiString, HotKey> HotKeyMap;
 	HotKeyMap m_hotKeyMap;

@@ -95,6 +95,7 @@ public:
 	Int getTotalTechBuildingsCaptured( void ) { return m_totalTechBuildingsCaptured; }
 	Int getTotalFactionBuildingsCaptured( void ) { return m_totalFactionBuildingsCaptured; }
 	Int getTotalObjectsBuilt( const ThingTemplate *pTemplate ); // get a count of objects built matching a specific thing template
+	const ThingTemplate *getMostBuiltUnit( void ) const;	///< the fighting unit built most often, or NULL before the first
 
 	// for battle honor calculation.  done once at the end of each online game
 	Int getTotalUnitsBuilt( KindOfMaskType validMask, KindOfMaskType invalidMask );

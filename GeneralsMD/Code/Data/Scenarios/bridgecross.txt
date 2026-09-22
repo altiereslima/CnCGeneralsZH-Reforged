@@ -1,0 +1,18 @@
+# Bridge crossing.
+#
+# Twenty tanks, one order, over the Kandahar bridge on Golden Oasis that runs from 1826,1410 to
+# 1688,1585: how long the last of them takes to reach the far bank. The start and the goal sit 350
+# units back from each end of the deck, on its line, so the route has to go over it. The order is a
+# playermove, a right click: a script move takes retail's column branch and never reaches the crowd
+# model that decides how many abreast go over.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Golden Oasis\Golden Oasis.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 3000
+#     -scenario bridgecross -logPrefix bridge_
+#
+# then grep the log for HEADLESS ARRIVE. Add -showlanes for the crowd model's own trail.
+
+30    spawn   0  AmericaTankCrusader  20  2043 1136  40
+60    playermove  0  AmericaTankCrusader  1471 1859
+60    arrive  0  AmericaTankCrusader      1471 1859  200

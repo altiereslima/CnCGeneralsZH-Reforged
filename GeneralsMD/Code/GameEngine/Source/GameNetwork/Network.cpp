@@ -121,6 +121,7 @@ public:
 	inline UnsignedInt getRunAhead(void) { return m_runAhead; }
 	inline UnsignedInt getFrameRate(void) { return m_frameRate; }
 	UnsignedInt getPacketArrivalCushion(void);								///< Returns the smallest packet arrival cushion since this was last called.
+	UnsignedInt getFramesReady(void) { return m_conMgr->countFramesReady(TheGameLogic->getFrame(), m_runAhead); }
 	Bool isFrameDataReady( void );
 	Bool isPacingLogicFrames( void );
 	void parseUserList( const GameInfo *game );
@@ -192,6 +193,7 @@ protected:
 	void RelayCommandsToCommandList(UnsignedInt frame);						///< Put the commands for the given frame onto TheCommandList.
 	Bool isTransferCommand(GameMessage *msg);											///< Is this a command that needs to be transfered to the other clients?
 	Bool processCommand(GameMessage *msg);												///< Whatever needs to be done as a result of this command, do it now.
+	Bool noteLogicFrameAdvance();																	///< Send frame info for every frame the logic has moved past; FALSE while still in pregame.
 	void processFrameSynchronizedNetCommand(NetCommandRef *msg);	///< If there is a network command that needs to be executed at the same frame number on all clients, it happens here.
 	void processRunAheadCommand(NetRunAheadCommandMsg *msg);			///< Do what needs to be done when we get a new run ahead command.
 	void processDestroyPlayerCommand(NetDestroyPlayerCommandMsg *msg);	///< Do what needs to be done when we need to destroy a player.
@@ -506,7 +508,41 @@ Int Network::getExecutionFrame() {
  * send our info for the last frame to the other players.
  * Return true if the message should be "eaten" by the network.
  */
-Bool Network::processCommand(GameMessage *msg) 
+Bool Network::processCommand(GameMessage *msg)
+{
+	if (!noteLogicFrameAdvance())
+		return FALSE;
+
+	// Are we leaving the game?
+	// This has to happen after the check to see if this is the start of a new logic frame.
+	// The reason is that we have to send all the frame info packets necessary to get to the
+	// frame where everyone else is going to see that we left.
+	if ((msg->getType() == GameMessage::MSG_CLEAR_GAME_DATA) && (m_localStatus == NETLOCALSTATUS_INGAME)) {
+		Int executionFrame = getExecutionFrame();
+		DEBUG_LOG(("Network::processCommand - local player leaving, executionFrame = %d, player leaving on frame %d\n", executionFrame, executionFrame+1));
+
+		m_conMgr->handleLocalPlayerLeaving(executionFrame+1);
+		m_conMgr->processFrameTick(executionFrame); // This is the last command we will execute, so send the command count.
+																								// Also, we are guaranteed not to send any more commands for this frame
+																								// since the local status will change to "Leaving" so we don't have to
+																								// worry about messing up the other players.
+		m_conMgr->processFrameTick(executionFrame+1); // since we send it for executionFrame+1, we need to process both ticks
+		m_lastFrameCompleted = executionFrame;
+		DEBUG_LOG(("Network::processCommand - player leaving on frame %d\n", executionFrame));
+		m_localStatus = NETLOCALSTATUS_LEAVING;
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/**
+ * EA sent the frame info packets from processCommand, which only runs for a message on
+ * TheCommandList, and relied on the client's MSG_FRAME_TICK always being there.  It is, once per
+ * client pass - but a pass that is catching up runs several logic frames between two of them, and
+ * the frames it ran would go unannounced until the next picture.  update() calls this as well, so
+ * the announcement follows the logic frame rather than the render pass.
+ */
+Bool Network::noteLogicFrameAdvance()
 {
 	if ((m_lastFrame != TheGameLogic->getFrame()) || (m_localStatus == NETLOCALSTATUS_PREGAME)) {
 		// If this is the start of a new game logic frame, then tell the connection manager that the last
@@ -541,27 +577,7 @@ Bool Network::processCommand(GameMessage *msg)
 		//DEBUG_LOG(("Next Execution Frame - %d, last frame completed - %d\n", getExecutionFrame(), m_lastFrameCompleted));
 		m_lastFrame = TheGameLogic->getFrame();
 	}
-
-	// Are we leaving the game?
-	// This has to happen after the check to see if this is the start of a new logic frame.
-	// The reason is that we have to send all the frame info packets necessary to get to the
-	// frame where everyone else is going to see that we left.
-	if ((msg->getType() == GameMessage::MSG_CLEAR_GAME_DATA) && (m_localStatus == NETLOCALSTATUS_INGAME)) {
-		Int executionFrame = getExecutionFrame();
-		DEBUG_LOG(("Network::processCommand - local player leaving, executionFrame = %d, player leaving on frame %d\n", executionFrame, executionFrame+1));
-
-		m_conMgr->handleLocalPlayerLeaving(executionFrame+1);
-		m_conMgr->processFrameTick(executionFrame); // This is the last command we will execute, so send the command count.
-																								// Also, we are guaranteed not to send any more commands for this frame
-																								// since the local status will change to "Leaving" so we don't have to
-																								// worry about messing up the other players.
-		m_conMgr->processFrameTick(executionFrame+1); // since we send it for executionFrame+1, we need to process both ticks
-		m_lastFrameCompleted = executionFrame;
-		DEBUG_LOG(("Network::processCommand - player leaving on frame %d\n", executionFrame));
-		m_localStatus = NETLOCALSTATUS_LEAVING;
-		return TRUE;
-	}
-	return FALSE;
+	return TRUE;
 }
 
 /**
@@ -651,6 +667,16 @@ void Network::processRunAheadCommand(NetRunAheadCommandMsg *msg) {
 	m_frameRate = msg->getFrameRate();
 	time_t frameGrouping = (1000 * m_runAhead) / m_frameRate; // number of miliseconds between packet sends
 	frameGrouping = frameGrouping / 2; // since we only want the latency for one way to be a factor.
+	/* No longer than one logic frame.  Every send waits out the grouping, acks included, so every
+		 round trip the game measures carries up to two of them - and the measured round trip is what
+		 sizes the run-ahead, which sizes the grouping.  On a 50 ms link losing 2% of its packets
+		 three seats measured 0.95 s, the retry timeout grew to 832 ms and the room fell from 30 frames
+		 a second to 12.  EA's half a run-ahead was for a 2003 modem; a frame's orders fit one
+		 datagram now, and one per frame per peer is nothing. */
+	const time_t oneLogicFrameMS = 1000 / m_frameRate;
+	if (frameGrouping > oneLogicFrameMS) {
+		frameGrouping = oneLogicFrameMS;
+	}
 //	DEBUG_LOG(("Network::processRunAheadCommand - trying to set frame grouping to %d.  run ahead = %d, m_frameRate = %d\n", frameGrouping, m_runAhead, m_frameRate));
 	if (frameGrouping < 1) {
 		frameGrouping = 1; // Having a value less than 1 doesn't make sense.
@@ -702,6 +728,7 @@ void Network::update( void )
 	}
 #endif
 
+	noteLogicFrameAdvance();
 	GetCommandsFromCommandList(); // Remove commands from TheCommandList and send them to the connection manager.
 	if (m_conMgr != NULL) {
 		if (m_localStatus == NETLOCALSTATUS_INGAME) {
@@ -788,7 +815,13 @@ Bool Network::timeForNewFrame() {
 //		DEBUG_LOG(("Allowing a new frame, frameDelay = %I64d, curTime - m_nextFrameTime = %I64d\n", frameDelay, curTime - m_nextFrameTime));
 
 //		if (m_nextFrameTime + frameDelay < curTime) {
-		if ((m_nextFrameTime + (2 * frameDelay)) < curTime) {
+		/* GameEngine::update pays this debt back with logic frames run between two pictures, up to
+			 the same count the single player pacer keeps.  EA forgave it past two frames, when a pass
+			 only ever ran one; a slow picture then lost the frames it owed and the whole room slowed
+			 down to its rate.  The count comes from the game speed and not from the room's rate: tied
+			 to the room, a room that slowed down could pay back less and slowed down further, and a
+			 250ms picture took two machines from 30 frames a second to 4. */
+		if ((m_nextFrameTime + (GameEngine_logicCatchupMaxFrames(TheGlobalData->m_framesPerSecondLimit) * frameDelay)) < curTime) {
 			// If we get too far behind on our framerate we need to reset the nextFrameTime thing.
 			m_nextFrameTime = curTime;
 //			DEBUG_LOG(("Initializing m_nextFrameTime to %I64d\n", m_nextFrameTime));

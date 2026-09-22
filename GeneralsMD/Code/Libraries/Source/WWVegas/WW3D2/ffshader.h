@@ -89,11 +89,115 @@ struct CombinerDescription
 	// The vertex half has to have been generated with the same flag.  Initialised here because
 	// callers fill a description field by field and one written before this existed never sets it.
 	bool NormalMapped = false;
+
+	// D3D11 only: take the pixel back out of clip space, look it up in the sun's depth buffer at t5
+	// and darken it by how much of the filter comes back blocked.  No vertex half is involved: the
+	// position comes from SV_Position and one matrix, which is what keeps this off the varyings the
+	// two generators have to agree on.  SHADOW-MAP-PLAN.md phase 2.
+	bool ShadowReceiving = false;
 };
 
 // The normal mapped pixel program reads this many directional lights from its constants.  Slots
 // past the draw's own lights carry no colour and add nothing.
 const unsigned NORMAL_MAPPED_LIGHTS = 4;
+
+// How much of the sun reaches a pixel, shared by the generated programs and the transcribed ones so
+// the two cannot drift.  The pixel is taken back out of clip space by one matrix, which lands it in
+// the sun's own clip space, and the filter is a square of taps around it: the share that come back
+// blocked is the share of the light that is missing.  ShadowParameters is the map's texel size, the
+// depth bias, how dark a fully blocked pixel goes and the radius in texels; a strength of zero is a
+// frame with no shadow map and every pixel in full sun.  SHADOW-MAP-PLAN.md phase 2.
+#define SHADOW_SAMPLING \
+	"Texture2D ShadowMap : register(t5);\n" \
+	"SamplerState ShadowSampler : register(s5);\n" \
+	"\n" \
+	"float sun_reaching(float4 position)\n" \
+	"{\n" \
+	"    if (ShadowParameters.z <= 0.0) return 1.0;\n" \
+	"    float2 ndc = float2(position.x * ShadowViewport.x * 2.0 - 1.0,\n" \
+	"                        1.0 - position.y * ShadowViewport.y * 2.0);\n" \
+	"    float4 sun = mul(float4(ndc, position.z, 1.0), ShadowFromClip);\n" \
+	"    if (sun.w <= 0.0) return 1.0;\n" \
+	"    sun /= sun.w;\n" \
+	"    float2 map = float2(0.5 * sun.x + 0.5, 0.5 - 0.5 * sun.y);\n" \
+	"    if (map.x < 0.0 || map.x > 1.0 || map.y < 0.0 || map.y > 1.0) return 1.0;\n" \
+	"    if (sun.z < 0.0 || sun.z > 1.0) return 1.0;\n" \
+	"    float texel = ShadowParameters.x;\n" \
+	"    /* Two ways of keeping a surface from shadowing itself, and they are not the same thing.\n" \
+	"       A depth bias pushes the comparison back, which works and costs the contact: the shadow\n" \
+	"       lifts off the foot of whatever casts it and the building above it looks placed on the\n" \
+	"       ground rather than standing on it.  So most of it is a normal offset instead - the\n" \
+	"       lookup moves sideways, along the surface, by a fraction of a texel - and the depth bias\n" \
+	"       keeps only what the slope across one pixel needs.  Pull the camera back and that slope\n" \
+	"       grows, which is the case a fixed bias cannot cover. */\n" \
+	"    float3 surface = normalize(cross(ddx(sun.xyz), ddy(sun.xyz)));\n" \
+	"    map += surface.xy * texel * ShadowParameters.y * 400.0;\n" \
+	"    float slope = max(abs(ddx(sun.z)), abs(ddy(sun.z)));\n" \
+	"    float bias = ShadowParameters.y * 0.35 + slope * 1.5;\n" \
+	"    float widest = ShadowParameters.w;\n" \
+	"    float narrowest = ShadowSoftness.x;\n" \
+	"\n" \
+	"    // What is casting the shadow and how far above this pixel it is.  The search is the\n" \
+	"    // widest the filter is allowed to be, because a blocker it does not find is a blocker\n" \
+	"    // whose penumbra never opens.\n" \
+	"    float blocker_depth = 0.0;\n" \
+	"    float blockers = 0.0;\n" \
+	"    for (int sy = -2; sy <= 2; ++sy) {\n" \
+	"        for (int sx = -2; sx <= 2; ++sx) {\n" \
+	"            float2 at = map + float2(sx, sy) * texel * widest * 0.5;\n" \
+	"            float depth = ShadowMap.SampleLevel(ShadowSampler, at, 0).r;\n" \
+	"            if (depth + bias < sun.z) { blocker_depth += depth; blockers += 1.0; }\n" \
+	"        }\n" \
+	"    }\n" \
+	"    if (blockers < 0.5) return 1.0;\n" \
+	"    blocker_depth /= blockers;\n" \
+	"\n" \
+	"    // The gap between the caster and this pixel, in world units, is what opens the filter:\n" \
+	"    // a track on the ground stays hard, a helicopter's shadow spreads.\n" \
+	"    float gap = max(sun.z - blocker_depth, 0.0) * ShadowSoftness.z;\n" \
+	"    float radius = clamp(narrowest + gap * ShadowSoftness.y, narrowest, widest);\n" \
+	"\n" \
+	"    // Five by five rather than three by three: opened up to nine texels, nine taps stand so\n" \
+	"    // far apart that a body as narrow as a helicopter's falls between them and casts nothing.\n" \
+	"    // The grid is turned by an angle, which trades the steps a fixed grid leaves across a wide\n" \
+	"    // penumbra for noise the eye reads as a gradient.  The angle comes from where the pixel is\n" \
+	"    // in the sun's map and not from where it is on the screen: on the screen it swims as soon\n" \
+	"    // as the camera moves, and a shadow that stands still shimmers.\n" \
+	"    float turn = frac(sin(dot(map * 4096.0, float2(12.9898, 78.233))) * 43758.5453) * 6.2831853;\n" \
+	"    float2 turn_cos_sin = float2(cos(turn), sin(turn));\n" \
+	"    float blocked = 0.0;\n" \
+	"    for (int y = -2; y <= 2; ++y) {\n" \
+	"        for (int x = -2; x <= 2; ++x) {\n" \
+	"            float2 step = float2(x, y) * 0.5;\n" \
+	"            step = float2(step.x * turn_cos_sin.x - step.y * turn_cos_sin.y,\n" \
+	"                          step.x * turn_cos_sin.y + step.y * turn_cos_sin.x);\n" \
+	"            float2 at = map + step * texel * radius;\n" \
+	"            float depth = ShadowMap.SampleLevel(ShadowSampler, at, 0).r;\n" \
+	"            blocked += (depth + bias < sun.z) ? 1.0 : 0.0;\n" \
+	"        }\n" \
+	"    }\n" \
+	"\n" \
+	"    // The sky is the other light in the scene and it fills a shadow back in the further its\n" \
+	"    // caster is, which is why a shadow from high up reads pale as well as soft.\n" \
+	"    float openness = saturate((radius - narrowest) / max(widest - narrowest, 1e-3));\n" \
+	"    float strength = ShadowParameters.z * (1.0 - ShadowSoftness.w * openness);\n" \
+	"    return 1.0 - strength * (blocked / 25.0);\n" \
+	"}\n" \
+	"\n"
+
+// Putting the shadow on the pixel, which is not a plain multiply.  A pixel that is already dark is
+// dark for a reason - it is under the shroud, or it is the fogged snapshot of a building somebody
+// cannot see - and multiplying that again takes it to black: from a camera far enough out, a
+// building in the fog turned into a black slab.  The shadow therefore only reaches a pixel as far
+// as the pixel is lit, which leaves the sunlit ground exactly as it was.
+//
+// The threshold has to sit low.  A wall is a darker surface than the desert it stands on, and a
+// gentler one took a good share of the shadow off every building while the ground beside it took
+// all of it, which reads as the two being lit by different suns.  Full shadow from about a sixth
+// of white upward; only what is darker than that is protected.
+#define SHADOW_APPLY \
+	"    float shadow_lit = saturate(dot(current.rgb, float3(0.3333, 0.3333, 0.3333)) * 6.0);\n" \
+	"    current.rgb *= lerp(1.0, sun_reaching(input.Position), shadow_lit);\n"
 
 // The HLSL for one description, or false when the description names an operation or an argument
 // this does not generate.  A refusal is not a failure: the caller keeps the fixed-function path for

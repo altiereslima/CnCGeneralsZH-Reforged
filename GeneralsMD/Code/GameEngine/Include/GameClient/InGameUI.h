@@ -61,6 +61,9 @@ class Anim2DTemplate;
 class Anim2D;
 class Shadow;
 class Image;
+class GameFont;
+class GameSlot;
+class Player;
 enum LegalBuildCode;
 enum KindOfType;
 enum ShadowType;
@@ -384,6 +387,8 @@ public:  // ********************************************************************
 	virtual void message( UnicodeString format, ... );				  ///< display a message to the user
 	virtual void message( AsciiString stringManagerLabel, ... );///< display a message to the user
 	virtual void toggleMessages( void ) { m_messagesOn = 1 - m_messagesOn; }	///< toggle messages on/off
+	void toggleScoreboard( void ) { m_scoreboardOpen = !m_scoreboardOpen; }	///< the Tab scoreboard, on or off
+	void drawScoreboard( void );																						///< that scoreboard, over everything
 	virtual Bool isMessagesOn( void ) { return m_messagesOn; }	///< are the display messages on
 	void freeMessageResources( void );				///< free resources for the ui messages
 	Color getMessageColor(Bool altColor) { return (altColor)?m_messageColor2:m_messageColor1; }
@@ -478,13 +483,21 @@ public:  // ********************************************************************
 	// plain move queue rides on carries no order type, so this is a second queue: an ordinary
 	// message the client sends again once the order before it is over, nothing new for the logic
 	// to learn.
+	enum AttackWaypointKind
+	{
+		ATTACK_WAYPOINT_ATTACK,		///< attack-move to a point, or force-attack a victim
+		ATTACK_WAYPOINT_GUARD			///< post the group here.  A guard never ends, so it ends the queue
+	};
+
 	struct AttackWaypoint
 	{
-		Coord3D		pos;					///< where to attack-move to, or the last known spot of targetID
-		ObjectID	targetID;			///< INVALID_ID for a plain attack-move point, a specific victim otherwise
-		Bool			forceAttack;	///< what the attack key said when it was queued, not when it goes out
+		Coord3D						pos;					///< where to go, or the last known spot of targetID
+		ObjectID					targetID;			///< INVALID_ID for a point, a specific victim otherwise
+		Bool							forceAttack;	///< what the attack key said when it was queued, not when it goes out
+		AttackWaypointKind	kind;					///< which order this entry sends when it reaches the front
 	};
 	void queueAttackWaypoint( const Coord3D *pos, Object *targetObj );
+	void queueGuardWaypoint( const Coord3D *pos );
 	void clearShiftAttackQueue( void );
 	Bool isShiftAttackQueueActive( void ) const { return !m_shiftAttackQueue.empty() || m_shiftAttackQueueRunning; }
 	const std::vector<AttackWaypoint>& getShiftAttackQueue( void ) const { return m_shiftAttackQueue; }
@@ -1088,6 +1101,7 @@ protected:
 	void updateShiftAttackQueue( void );												///< send the next queued attack once the current one is over
 	void addOrderHint( OrderHint& hint, const std::vector<OrderHint>& previous );	///< keep a marker's age across the frame the list is rebuilt on
 	Bool getHeldAircraftOrder( const Object *obj, OrderHintKind& kind, Coord3D& to ) const;	///< the order an aircraft is sitting on until it is airborne
+	void pushShiftAttackOrder( const AttackWaypoint& order );		///< add one order to the queue, or start a queue with it
 	void sendShiftAttackOrder( const AttackWaypoint& waypoint );	///< put one queue entry on the message stream
 	void logShiftAttackQueue( const char *why ) const;						///< one line saying what the queue did and what its group was doing
 	void addShiftAttackQueueTail( OrderHint& hint, const std::vector<OrderHint>& previous );	///< every target still owed, drawn on from where the hint leaves off
@@ -1163,6 +1177,19 @@ protected:
 	void addSuperweaponIcon( const Image *image, Int seconds, Int percent, Bool ready, Color color );
 	void drawSuperweaponStrip( void );		///< those icons, top right, soonest at the right hand end
 	void drawSkillStrip( void );					///< the watched player's bought promotions, under those
+
+	//
+	// The scoreboard on Tab: every seat in the match, your side in full rows and the other side as
+	// name chips.  Drawn over everything, like the clock plate, from a pool of strings that are
+	// handed out in the same order every frame so each keeps its font and its text texture.
+	//
+	enum { SCOREBOARD_STRING_COUNT = 160 };
+	DisplayString *scoreboardString( GameFont *font, const UnicodeString &text, Int wrapWidth = 0 );
+	void drawScoreboardRow( Player *player, const GameSlot *slot, Bool withTeam, GameFont *bodyFont, GameFont *smallFont,
+													Int left, Int top, Int rowHeight );
+	Bool												m_scoreboardOpen;
+	Int													m_scoreboardStringsUsed;	///< handed out so far this frame
+	DisplayString *							m_scoreboardStrings[ SCOREBOARD_STRING_COUNT ];
 
 	//
 	// The drop-down in the top left corner that switches the strips on and off.  Row 0 is its header,

@@ -36,6 +36,7 @@
 #include "GameLogic/AIStateMachine.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/LocomotorSet.h"
+#include "GameLogic/CrowdModel.h"
 
 class AIGroup;
 class AIStateMachine;
@@ -96,6 +97,15 @@ enum GuardTargetType
 	GUARDTARGET_OBJECT,		// Guard an object
 	GUARDTARGET_AREA,			// Guard a Polygon trigger
 	GUARDTARGET_NONE				// Currently not guarding
+};
+
+//-------------------------------------------------------------------------------------------------
+// How a unit that went through the tunnel network walks from the far mouth to where it was sent.
+// Written out in save/load xfer, don't change these numbers.
+enum TunnelTripEnd
+{
+	TUNNEL_TRIP_MOVE = 0,					// a move order: walk there
+	TUNNEL_TRIP_ATTACK_MOVE = 1		// a computer's attack: fight whatever is on the way
 };
 
 #ifdef DEFINE_LOCOMOTORSET_NAMES
@@ -524,7 +534,20 @@ public:
 			unit sent off on its own would still be riding the lane it was given as part of a group
 			that has since dispersed. */
 	void clearCrowdLane( void )
-		{ m_crowdLaneIdx = 0; m_crowdLaneOf = 0; m_crowdLaneSpace = 0.0f; m_hasPendingCrowdLat = FALSE; }
+		{ m_crowdLaneIdx = 0; m_crowdLaneOf = 0; m_crowdLaneSpace = 0.0f; m_hasPendingCrowdLat = FALSE; m_crowdPlanned.clear(); }
+
+	/** The route this member's next path is to be, planned by its group rather than searched for.
+
+			Each member's own search finds the shortest way from where it stands, and the shortest way
+			round the end of a wall is past the end of the wall, so every member of a group comes round
+			a corner over the same point and the group turns it in single file. The group plans one
+			route instead and hands each member that route moved sideways by its lane, corners and all,
+			so the outside lane takes the outside of the turn. It is the member's path, not a hint
+			beside one: the path that is followed, the path progress is measured against and the path
+			the band is built on are the same thing. It is used once, for the path the order asks for;
+			any later repath is the pathfinder's. A member whose planned lane could not be laid clear of
+			the ground has none, and searches for its own. */
+	void setPlannedCrowdRoute( const CrowdRoute& route ) { m_crowdPlanned = route; }
 	Real getCrowdLat( void ) const { return m_crowdLat; }
 	const CrowdCorridor *getCrowdCorridor( void ) const { return m_corridor; }
 	/** Which sample of its own band the unit was beside last frame.  Priority between two units is
@@ -720,6 +743,16 @@ public:
 
 	// this is intended for use ONLY by the production exit modules.
 	void friend_setExitProductionRallyPoint( const Coord3D *pos );
+
+	// this is intended for use ONLY by the salvage collection pass in GameLogic.
+	void friend_setSalvageReturnPosition( const Coord3D *pos );
+
+	/** Down `entrance`, out of the mouth nearest `goal`, and on to `goal` the way `end` says.  FALSE,
+			and nothing ordered, for a unit that cannot go into a tunnel. */
+	Bool takeTunnelTrip( Object *entrance, const Coord3D *goal, TunnelTripEnd end, CommandSourceType cmdSource );
+	Bool hasTunnelTrip() const { return m_hasTunnelTrip; }	///< on its way through the tunnel network to a move order's goal
+	const Coord3D *getTunnelTripGoal() const { return &m_tunnelTripGoal; }	///< where the trip ends, once out of the far mouth
+	TunnelTripEnd getTunnelTripEnd() const { return m_tunnelTripEnd; }	///< how the leg from the far mouth is walked
 #if defined(_DEBUG) || defined(_INTERNAL)	
 	inline const Coord3D *friend_getRequestedDestination() const { return &m_requestedDestination; }
 	inline const Coord3D *friend_getRequestedDestination2() const { return &m_requestedDestination2; }
@@ -767,6 +800,7 @@ private:
 
 	/// throw the measured band away; the next frame that needs one measures the new route
 	void crowdReleaseCorridor( void );
+	Path *crowdPlannedPath( const CrowdRoute& planned, const Coord3D& destination );	///< the planned route as a path from here, or NULL if it no longer fits
 
 	/** Is this unit getting anywhere?  One test, once a frame, for every unit that is trying to
 			drive somewhere, and the only place m_noProgress is written. */
@@ -851,10 +885,13 @@ private:
 	Int					m_crowdSample;							///< whichsample of the band we were beside last frame (search hint; -1 = no band).
 	Int					m_crowdQueued;							///< consecutiveframes spent braking or stuck behind somebody.
 	Int					m_crowdSide;								///< whichside we prefer to pass on, +1 left, -1 right.
+	CrowdRoute	m_crowdPlanned;							///< the path the group planned for us, waiting for the move to ask for one; empty = search.
 	/* The rest of the crowd state is transient and deliberately not saved, for the same reason the
 		 band itself is not: a filter, a stuck count and a half-finished backing-out manoeuvre are all
 		 rebuilt within a second of the load, and a saved one restarts a jam that is over. */
 	Real				m_crowdSepSmooth;						///< low-passedsideways push from the neighbours.
+	Real				m_crowdCap;									///< the speed cap held from last frame: a brake lowers it at once, only a ramp raises it.
+	Bool				m_crowdCapValid;						///< FALSE until there is a held cap to ramp up from.
 	Real				m_crowdAim;									///< low-passeddirection the steering point is taken in, radians.
 	Bool				m_crowdAimValid;						///< FALSEuntil the filter has something to start from.
 	/* Being stuck, and getting out of it.  None of this is part of the crowd model: a unit that has
@@ -895,6 +932,11 @@ private:
 	ObjectID		m_moveOutOfWay2;
 	Coord3D			m_exitProductionRallyPoint;	///< Rally point to attack-move to once we are clear of the producer that just built us.
 	Bool				m_hasExitProductionRallyPoint;	///< True while m_exitProductionRallyPoint is still waiting to be ordered.
+	Coord3D			m_salvageReturnPosition;		///< Where we stood when we were sent to fetch a salvage crate.
+	Bool				m_hasSalvageReturnPosition;	///< True while the walk back to m_salvageReturnPosition is still owed.
+	Coord3D			m_tunnelTripGoal;						///< Where a move order sent us before a tunnel shortened the way there.
+	Bool				m_hasTunnelTrip;						///< True from the order to enter a tunnel until the walk from the exit to m_tunnelTripGoal is ordered.
+	TunnelTripEnd	m_tunnelTripEnd;					///< How the last leg from the far mouth to m_tunnelTripGoal is walked.
 
 	// Locomotors -------------------------------------------------------------------------------------------------
 	enum LocoGoalType	 // Note - written out in save/load xfer, don't change these numbers.  jba.

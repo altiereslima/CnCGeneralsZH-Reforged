@@ -379,6 +379,13 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 			&& TheGameLogic->peaceTimeForbids( damager, obj ) )
 		return;
 
+	// God mode stops every hit but an explicit kill (a script, a sale) and a unit's own suicide
+	// weapon, so a terrorist or a demo trap still goes off.
+	Player *victimPlayer = obj->getControllingPlayer();
+	if( damageInfo->in.m_damageType != DAMAGE_HEALING && !damageInfo->in.m_kill && damager != obj
+			&& victimPlayer && victimPlayer->hasCheat( CHEAT_GOD_MODE ) )
+		return;
+
 	Bool alreadyHandled = FALSE;
 	Bool allowModifier = TRUE;
 	Real amount = m_curArmor.adjustDamage(damageInfo->in.m_damageType, damageInfo->in.m_amount);
@@ -550,6 +557,12 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 			// And remember not to adjust unresistable damage, just like the armor code can't.
 			amount *= m_damageScalar;
 		}
+
+		// one hit kill: anything that got through the armour at all takes the whole bar
+		Player *damagerPlayer = damager ? damager->getControllingPlayer() : NULL;
+		if( amount > 0.0f && damagerPlayer && damagerPlayer != victimPlayer
+				&& damagerPlayer->hasCheat( CHEAT_ONE_HIT_KILL ) )
+			amount = m_maxHealth;
 	}
 
 	// sanity check the damage value -- can't apply negative damage

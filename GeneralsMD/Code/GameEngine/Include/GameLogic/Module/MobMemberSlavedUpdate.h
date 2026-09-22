@@ -109,8 +109,6 @@ public:
 	virtual void onObjectCreated();
 	virtual Bool isSelfTasking() const { return m_isSelfTasking; };
 
-	void doCatchUpLogic( Coord3D *pinnedPosition );
-
 	void setMobState( MobStates state ) { m_mobState = state; };
 	MobStates getMobState( void ) { return m_mobState; };
 
@@ -118,6 +116,7 @@ public:
 	virtual UpdateSleepTime update();	///< Deciding whether or not to make new guys
 
 private:
+	void computeSlotPosition( Object *master, Coord3D *position );	///< My own standing place inside the mob
 	void startSlavedEffects( const Object *slaver );	///< We have been marked as Slaved, so we can't be selected or move too far or other stuff
 	void stopSlavedEffects();		///< We are no longer slaved.
 

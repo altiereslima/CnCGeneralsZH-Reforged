@@ -31,6 +31,7 @@ static bool Requested = false;
 static bool PresentRequested = false;
 static bool VSyncRequested = false;
 static bool Active = false;
+static bool NormalMapsEnabled = true;
 static DX11DeviceClass Device;
 static DX11BackendClass Backend;
 static DX11PostProcessClass Post;
@@ -248,9 +249,14 @@ void Direct3D11_Mirror_Texture(unsigned stage, struct IDirect3DBaseTexture9 * te
 	}
 }
 
+void Direct3D11_Normal_Maps_Enable(bool enabled)
+{
+	NormalMapsEnabled = enabled;
+}
+
 bool Direct3D11_Normal_Maps_Active()
 {
-	return Active;
+	return Active && NormalMapsEnabled;
 }
 
 void Direct3D11_Mirror_Normal_Map(struct IDirect3DBaseTexture9 * normal_map)
@@ -273,6 +279,45 @@ void Direct3D11_Set_Terrain_Sun(const float direction[3])
 unsigned long long Direct3D11_Normal_Mapped_Draws()
 {
 	return Active ? Backend.Normal_Mapped_Draw_Count() : 0;
+}
+
+bool Direct3D11_Begin_Shadow_Map(unsigned size)
+{
+	return Active ? Backend.Begin_Shadow_Map(size) : false;
+}
+
+void Direct3D11_End_Shadow_Map()
+{
+	if (Active) {
+		Backend.End_Shadow_Map();
+	}
+}
+
+bool Direct3D11_Shadow_Map_Bound()
+{
+	return Active ? Backend.Shadow_Map_Bound() : false;
+}
+
+void Direct3D11_Set_Shadow_Parameters(float bias, float strength, float widest_radius_in_texels,
+	float narrowest_radius_in_texels, float texels_per_unit_of_gap, float units_per_unit_of_depth,
+	float sky_fill)
+{
+	if (Active) {
+		Backend.Set_Shadow_Parameters(bias, strength, widest_radius_in_texels,
+			narrowest_radius_in_texels, texels_per_unit_of_gap, units_per_unit_of_depth, sky_fill);
+	}
+}
+
+void Direct3D11_Clear_Shadow_Parameters()
+{
+	if (Active) {
+		Backend.Clear_Shadow_Parameters();
+	}
+}
+
+std::string Direct3D11_Shadow_Map_Report()
+{
+	return Active ? Backend.Shadow_Map_Report() : std::string("no Direct3D 11 backend");
 }
 
 void Direct3D11_Mirror_Render_Target(struct IDirect3DSurface9 * surface)

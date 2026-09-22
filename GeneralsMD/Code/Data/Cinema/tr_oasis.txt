@@ -1,0 +1,13 @@
+# Trailer: a low pass over the oasis, off the water and onto the stone bridge, for the ground
+# detail. It used to run the other way and spent its last four seconds on open water with nothing
+# in it at all.
+#
+#   generals.exe -borderless -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -autoskirmish 2 -aidiff easy -seed 5 -map "Maps\Golden Oasis\Golden Oasis.map"
+#     -cinema tr_oasis -video 300 690 tr_oasis -maxframes 710
+
+10    cut        2990 1130 0.5 0 -14
+11    route      12 3040 1240 3040 1360 3040 1470
+11    zoom       0.75 12
+19    orbit      -30 5
+23    end
