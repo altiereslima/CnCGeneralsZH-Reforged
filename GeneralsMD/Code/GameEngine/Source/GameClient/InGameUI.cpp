@@ -1198,9 +1198,8 @@ InGameUI::InGameUI()
 	m_spectatorLeadFrame = 0;
 	m_hudTogglesBottom = 0;
 	m_scoreboardOpen = FALSE;
-	m_scoreboardStringsUsed = 0;
-	for( Int scoreboardString = 0; scoreboardString < SCOREBOARD_STRING_COUNT; scoreboardString++ )
-		m_scoreboardStrings[ scoreboardString ] = NULL;
+	m_scoreboardOverlay = NULL;
+	m_scoreboardPageLoaded = FALSE;
 	for( Int stripSeconds = 0; stripSeconds < STRIP_SECONDS_STRINGS; stripSeconds++ )
 		m_stripSecondsString[ stripSeconds ] = NULL;
 	for( Int stripQuantity = 0; stripQuantity < STRIP_QUANTITY_STRINGS; stripQuantity++ )
@@ -1318,6 +1317,8 @@ InGameUI::~InGameUI()
 
 	delete m_spectatorOverlay;
 	m_spectatorOverlay = NULL;
+	delete m_scoreboardOverlay;
+	m_scoreboardOverlay = NULL;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1773,6 +1774,25 @@ enum
 	TWO_TEAMS									= 2,
 	PERCENT										= 100
 };
+
+//-------------------------------------------------------------------------------------------------
+/** Read a page under Window/Html into `page`, empty when it is not there: a missing page draws
+	* nothing rather than stopping the match. */
+//-------------------------------------------------------------------------------------------------
+static void readHtmlPage( const char *path, std::string &page )
+{
+	page.clear();
+	File *file = TheFileSystem->openFile( path, File::READ | File::BINARY );
+	if( file == NULL )
+	{
+		DEBUG_LOG(( "Html page: %s is missing, so nothing is drawn in its place\n", path ));
+		return;
+	}
+	const Int size = file->size();
+	char *text = file->readEntireAndClose();
+	page.assign( text, size );
+	delete [] text;
+}
 
 //-------------------------------------------------------------------------------------------------
 /** Is the local player watching rather than playing - an observer, or knocked out and stayed? */
@@ -2295,17 +2315,7 @@ void InGameUI::drawSpectatorPage( void )
 	if( !m_spectatorPageLoaded )
 	{
 		m_spectatorPageLoaded = TRUE;
-		m_spectatorPage.clear();
-		File *file = TheFileSystem->openFile( SPECTATOR_PAGE, File::READ | File::BINARY );
-		if( file == NULL )
-		{
-			DEBUG_LOG(( "Spectator page: %s is missing, so nothing is drawn over the battlefield\n", SPECTATOR_PAGE ));
-			return;
-		}
-		const Int size = file->size();
-		char *page = file->readEntireAndClose();
-		m_spectatorPage.assign( page, size );
-		delete [] page;
+		readHtmlPage( SPECTATOR_PAGE, m_spectatorPage );
 	}
 	if( m_spectatorPage.empty() )
 		return;
@@ -3854,6 +3864,7 @@ void InGameUI::reset( void )
 {
 	m_isQuitMenuVisible = FALSE;
 	m_scoreboardOpen = FALSE;
+	m_scoreboardPageLoaded = FALSE;
 	m_spectatorPageLoaded = FALSE;
 	m_spectatorFlipped.clear();
 	m_spectatorPicked.clear();
@@ -9914,124 +9925,6 @@ void InGameUI::drawSkillStrip( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-// The scoreboard's layout, in the 800x600 units the strips are measured in.  Every x is from the
-// panel's inner left edge; a number column's x is its right edge, so digits line up by their last
-// place.  Spacing comes in 4, 8, 12 and 16, heights in 20 and 32.  The favourite unit has a fixed
-// column of its own before the promotions, which are the one run of variable length and so go last.
-//-------------------------------------------------------------------------------------------------
-enum
-{
-	SCOREBOARD_POINT_SIZE					= 10,
-	SCOREBOARD_SMALL_POINT_SIZE		= 8,
-	SCOREBOARD_WIDTH							= 784,
-	SCOREBOARD_TOP								= 36,
-	SCOREBOARD_PAD								= 8,
-	SCOREBOARD_SECTION_GAP				= 4,
-	SCOREBOARD_HEADER_HEIGHT			= 20,
-	SCOREBOARD_ROW_HEIGHT					= 32,
-	SCOREBOARD_CHIP_HEIGHT				= 20,
-	SCOREBOARD_CHIPS_PER_LINE			= 4,
-	SCOREBOARD_STRIPE_WIDTH				= 4,
-	SCOREBOARD_TEXT_INSET					= 12,
-	SCOREBOARD_PORTRAIT_WIDTH			= 32,
-	SCOREBOARD_PORTRAIT_HEIGHT		= 24,
-	SCOREBOARD_CAMEO_WIDTH				= 18,
-	SCOREBOARD_CAMEO_HEIGHT				= 14,
-	SCOREBOARD_CAMEO_STEP					= 20,
-	SCOREBOARD_POWERS_SHOWN				= 7,
-	SCOREBOARD_NAME_X							= 52,
-	SCOREBOARD_TEAM_X							= 188,
-	SCOREBOARD_LEVEL_RIGHT				= 260,
-	SCOREBOARD_MONEY_RIGHT				= 332,
-	SCOREBOARD_PER_MINUTE_RIGHT		= 392,
-	SCOREBOARD_KILLS_RIGHT				= 428,
-	SCOREBOARD_DEATHS_RIGHT				= 464,
-	SCOREBOARD_FAVOURITE_X				= 480,
-	SCOREBOARD_FAVOURITE_NAME_X		= 504,
-	SCOREBOARD_FAVOURITE_NAME_WIDTH	= 118,
-	SCOREBOARD_POWERS_X						= 630,
-	SCOREBOARD_SECTIONS						= 2,
-	SECONDS_PER_MINUTE						= 60
-};
-
-static const Color SCOREBOARD_PANEL_COLOR = GameMakeColor( 10, 12, 16, 215 );
-static const Color SCOREBOARD_ZEBRA_COLOR = GameMakeColor( 255, 255, 255, 14 );
-static const Color SCOREBOARD_OWN_ROW_COLOR = GameMakeColor( 255, 255, 255, 36 );
-static const Color SCOREBOARD_EDGE_COLOR = GameMakeColor( 90, 96, 104, 255 );
-static const Color SCOREBOARD_HEADING_COLOR = GameMakeColor( 160, 166, 174, 255 );
-static const Color SCOREBOARD_ALLIES_COLOR = GameMakeColor( 110, 210, 110, 255 );
-static const Color SCOREBOARD_ENEMIES_COLOR = GameMakeColor( 230, 100, 90, 255 );
-static const Color SCOREBOARD_ALLIES_BAND_COLOR = GameMakeColor( 60, 150, 70, 70 );
-static const Color SCOREBOARD_ENEMIES_BAND_COLOR = GameMakeColor( 180, 50, 40, 70 );
-static const Color SCOREBOARD_VALUE_COLOR = GameMakeColor( 235, 235, 235, 255 );
-static const Color SCOREBOARD_GENERAL_COLOR = GameMakeColor( 170, 174, 180, 255 );
-static const Color SCOREBOARD_DEFEATED_COLOR = GameMakeColor( 150, 150, 150, 255 );
-static const Color SCOREBOARD_NAME_COLOR = GameMakeColor( 245, 245, 245, 255 );
-static const Color SCOREBOARD_SHADOW_COLOR = GameMakeColor( 0, 0, 0, 255 );
-
-enum ScoreboardAlign { SCOREBOARD_ALIGN_LEFT, SCOREBOARD_ALIGN_RIGHT };
-
-struct ScoreboardColumn
-{
-	const char *label;
-	Int x;
-	ScoreboardAlign align;
-};
-
-// the team column is only on the observer's board: a player's board already splits by side
-static const ScoreboardColumn TheScoreboardTeamColumn = { "GUI:ScoreboardTeam", SCOREBOARD_TEAM_X, SCOREBOARD_ALIGN_LEFT };
-static const ScoreboardColumn TheScoreboardColumns[] =
-{
-	{ "GUI:ScoreboardLevel",			SCOREBOARD_LEVEL_RIGHT,				SCOREBOARD_ALIGN_RIGHT },
-	{ "GUI:ScoreboardMoney",			SCOREBOARD_MONEY_RIGHT,				SCOREBOARD_ALIGN_RIGHT },
-	{ "GUI:ScoreboardPerMinute",	SCOREBOARD_PER_MINUTE_RIGHT,	SCOREBOARD_ALIGN_RIGHT },
-	{ "GUI:ScoreboardKills",			SCOREBOARD_KILLS_RIGHT,				SCOREBOARD_ALIGN_RIGHT },
-	{ "GUI:ScoreboardDeaths",			SCOREBOARD_DEATHS_RIGHT,			SCOREBOARD_ALIGN_RIGHT },
-	{ "GUI:ScoreboardPowers",			SCOREBOARD_POWERS_X,					SCOREBOARD_ALIGN_LEFT },
-	{ "GUI:ScoreboardFavourite",	SCOREBOARD_FAVOURITE_X,				SCOREBOARD_ALIGN_LEFT }
-};
-
-//-------------------------------------------------------------------------------------------------
-/** The next string out of the scoreboard's pool.  They are handed out in the same order every
-	* frame, so a string keeps its font and its text from one frame to the next and is only rebuilt
-	* when a number on it changes. */
-//-------------------------------------------------------------------------------------------------
-DisplayString *InGameUI::scoreboardString( GameFont *font, const UnicodeString &text, Int wrapWidth )
-{
-	DEBUG_ASSERTCRASH( m_scoreboardStringsUsed < SCOREBOARD_STRING_COUNT,
-										 ("scoreboard wants string %d of %d", m_scoreboardStringsUsed, SCOREBOARD_STRING_COUNT) );
-
-	DisplayString *&string = m_scoreboardStrings[ m_scoreboardStringsUsed++ ];
-	if( string == NULL )
-		string = TheDisplayStringManager->newDisplayString();
-
-	string->setFont( font );
-	string->setWordWrap( wrapWidth );
-	string->setText( text );
-	return string;
-}
-
-//-------------------------------------------------------------------------------------------------
-/** Draw a string with its left edge, or its right edge, on x and its middle on middle. */
-//-------------------------------------------------------------------------------------------------
-static void drawScoreboardText( DisplayString *string, Int x, Int middle, ScoreboardAlign align, Color color )
-{
-	Int width = 0, height = 0;
-	string->getSize( &width, &height );
-	string->draw( align == SCOREBOARD_ALIGN_RIGHT ? x - width : x, middle - height / 2, color, SCOREBOARD_SHADOW_COLOR );
-}
-
-//-------------------------------------------------------------------------------------------------
-/** A line through a defeated player's name, so being out is said by more than the grey. */
-//-------------------------------------------------------------------------------------------------
-static void strikeScoreboardName( DisplayString *name, Int x, Int middle )
-{
-	Int width = 0, height = 0;
-	name->getSize( &width, &height );
-	TheDisplay->drawLine( x, middle, x + width, middle, 1.0f, SCOREBOARD_DEFEATED_COLOR );
-}
-
-//-------------------------------------------------------------------------------------------------
 /** The lobby's own team label, the one the diplomacy screen wore. */
 //-------------------------------------------------------------------------------------------------
 static UnicodeString scoreboardTeamLabel( const GameSlot *slot )
@@ -10043,104 +9936,58 @@ static UnicodeString scoreboardTeamLabel( const GameSlot *slot )
 	return TheGameText->fetch( teamLabel );
 }
 
-//-------------------------------------------------------------------------------------------------
-/** One seat in full, on your own side or on the observer's board: a stripe of the player's colour,
-	* the general's face and name, the rank, the bank, the income, the kills and losses, every
-	* promotion bought at the level it was bought to, and the unit built most. */
-//-------------------------------------------------------------------------------------------------
-void InGameUI::drawScoreboardRow( Player *player, const GameSlot *slot, Bool withTeam, GameFont *bodyFont,
-																	GameFont *smallFont, Int left, Int top, Int rowHeight )
+static const char *const SCOREBOARD_PAGE = "Window\\Html\\Scoreboard.html";
+enum { SCOREBOARD_SKILLS_SHOWN = 7 };	///< promotions on one row, each once at the level it has reached
+
+/** One seat on the scoreboard page.  `full` is whether the local player may see the numbers: his
+	* own side, or everybody when watching.  An enemy is a name, a colour and a team. */
+static HtmlValues scoreboardSeat( Player *player, const GameSlot *slot, Bool full, Bool own )
 {
-	const Bool defeated = TheVictoryConditions->hasSinglePlayerBeenDefeated( player );
-	const Color seatColor = defeated ? SCOREBOARD_DEFEATED_COLOR : clientPlayerColor( player );
-	const Color nameColor = defeated ? SCOREBOARD_DEFEATED_COLOR : SCOREBOARD_NAME_COLOR;
-	const Color valueColor = defeated ? SCOREBOARD_DEFEATED_COLOR : SCOREBOARD_VALUE_COLOR;
-	const Int middle = top + rowHeight / 2;
-	const Int nameX = left + stripPixels( SCOREBOARD_NAME_X );
+	const PlayerTemplate *side = player->getPlayerTemplate();
+	const Image *portrait = side ? side->getEnabledImage() : NULL;
 
-	TheDisplay->drawFillRect( left, top, stripPixels( SCOREBOARD_STRIPE_WIDTH ), rowHeight, seatColor );
+	HtmlValues seat;
+	seat[ "kind" ] = "seat";
+	seat[ "name" ] = WideCharStringToMultiByte( slot->getName().str() );
+	seat[ "color" ] = cssColor( clientPlayerColor( player ) );
+	seat[ "team" ] = WideCharStringToMultiByte( scoreboardTeamLabel( slot ).str() );
+	seat[ "state" ] = std::string( full ? "full" : "hidden" ) + ( own ? " own" : "" )
+									+ ( TheVictoryConditions->hasSinglePlayerBeenDefeated( player ) ? " defeated" : "" );
+	if( !full )
+		return seat;
 
-	const Int portraitW = stripPixels( SCOREBOARD_PORTRAIT_WIDTH );
-	const Int portraitH = stripPixels( SCOREBOARD_PORTRAIT_HEIGHT );
-	const Int portraitX = left + stripPixels( SCOREBOARD_TEXT_INSET );
-	const Int portraitY = middle - portraitH / 2;
-
-	// a mod's general can come without a face; the frame still says whose seat it is
-	const Image *portrait = player->getPlayerTemplate()->getEnabledImage();
-	if( portrait )
-		TheDisplay->drawImage( portrait, portraitX, portraitY, portraitX + portraitW, portraitY + portraitH );
-	TheDisplay->drawOpenRect( portraitX, portraitY, portraitW, portraitH, 1.0f, seatColor );
-
-	DisplayString *name = scoreboardString( bodyFont, slot->getName() );
-	name->draw( nameX, middle - bodyFont->height, nameColor, SCOREBOARD_SHADOW_COLOR );
-	if( defeated )
-		strikeScoreboardName( name, nameX, middle - bodyFont->height / 2 );
-	scoreboardString( smallFont, player->getPlayerTemplate()->getDisplayName() )->draw( nameX, middle,
-																									SCOREBOARD_GENERAL_COLOR, SCOREBOARD_SHADOW_COLOR );
-
-	if( withTeam )
-		drawScoreboardText( scoreboardString( smallFont, scoreboardTeamLabel( slot ) ), left + stripPixels( SCOREBOARD_TEAM_X ),
-												middle, SCOREBOARD_ALIGN_LEFT, SCOREBOARD_GENERAL_COLOR );
+	seat[ "portrait" ] = portrait ? portrait->getName().str() : "";
+	seat[ "general" ] = side ? WideCharStringToMultiByte( side->getDisplayName().str() ) : "";
 
 	ScoreKeeper *score = player->getScoreKeeper();
-	const Int seconds = TheGameLogic->getFrame() / LOGICFRAMES_PER_SECOND;
-	const Int perMinute = seconds > 0 ? score->getTotalMoneyEarned() * SECONDS_PER_MINUTE / seconds : 0;
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	seat[ "rank" ] = std::to_string( player->getRankLevel() );
+	seat[ "cash" ] = std::to_string( player->getMoney()->countMoney() );
+	seat[ "income" ] = std::to_string( frame > 0 ? (Int)( (Int64)score->getTotalMoneyEarned() * FRAMES_PER_MINUTE / frame ) : 0 );
+	seat[ "kills" ] = std::to_string( score->getTotalUnitsDestroyed() + score->getTotalBuildingsDestroyed() );
+	seat[ "losses" ] = std::to_string( score->getTotalUnitsLost() + score->getTotalBuildingsLost() );
 
-	const Int values[] =
-	{
-		player->getRankLevel(),
-		(Int)player->getMoney()->countMoney(),
-		perMinute,
-		score->getTotalUnitsDestroyed() + score->getTotalBuildingsDestroyed(),
-		score->getTotalUnitsLost() + score->getTotalBuildingsLost()
-	};
-	const Int valueRight[] =
-	{
-		SCOREBOARD_LEVEL_RIGHT, SCOREBOARD_MONEY_RIGHT, SCOREBOARD_PER_MINUTE_RIGHT, SCOREBOARD_KILLS_RIGHT, SCOREBOARD_DEATHS_RIGHT
-	};
-
-	UnicodeString text;
-	for( Int value = 0; value < (Int)ARRAY_SIZE( values ); value++ )
-	{
-		text.format( L"%d", values[ value ] );
-		drawScoreboardText( scoreboardString( bodyFont, text ), left + stripPixels( valueRight[ value ] ), middle,
-												SCOREBOARD_ALIGN_RIGHT, valueColor );
-	}
-
-	const Int cameoW = stripPixels( SCOREBOARD_CAMEO_WIDTH );
-	const Int cameoH = stripPixels( SCOREBOARD_CAMEO_HEIGHT );
-	const Int cameoY = middle - cameoH / 2;
-
-	// each promotion once, at the level it has reached: a higher level is its own picture
-	const Image *powers[ SCOREBOARD_POWERS_SHOWN ];
-	const Int powerCount = gatherPlayerSkills( player, powers, 0, SCOREBOARD_POWERS_SHOWN );
-	for( Int power = 0; power < powerCount; power++ )
-	{
-		const Int x = left + stripPixels( SCOREBOARD_POWERS_X + power * SCOREBOARD_CAMEO_STEP );
-		TheDisplay->drawImage( powers[ power ], x, cameoY, x + cameoW, cameoY + cameoH );
-	}
+	const Image *skills[ SCOREBOARD_SKILLS_SHOWN ];
+	const Int skillCount = gatherPlayerSkills( player, skills, 0, SCOREBOARD_SKILLS_SHOWN );
+	for( Int skill = 0; skill < skillCount; skill++ )
+		seat[ "skill" + std::to_string( skill ) ] = skills[ skill ]->getName().str();
 
 	const ThingTemplate *favourite = score->getMostBuiltUnit();
-	if( favourite == NULL )
-		return;
-
-	const Int favouriteX = left + stripPixels( SCOREBOARD_FAVOURITE_X );
-	const Image *cameo = favourite->getButtonImage();
-	if( cameo )
-		TheDisplay->drawImage( cameo, favouriteX, cameoY, favouriteX + cameoW, cameoY + cameoH );
-
-	DisplayString *favouriteName = scoreboardString( smallFont, favourite->getDisplayName(),
-																stripPixels( SCOREBOARD_FAVOURITE_NAME_WIDTH ) );
-	drawScoreboardText( favouriteName, left + stripPixels( SCOREBOARD_FAVOURITE_NAME_X ), middle, SCOREBOARD_ALIGN_LEFT,
-											valueColor );
+	if( favourite && favourite->getButtonImage() )
+	{
+		seat[ "favourite" ] = favourite->getButtonImage()->getName().str();
+		seat[ "favouritename" ] = WideCharStringToMultiByte( favourite->getDisplayName().str() );
+	}
+	return seat;
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The scoreboard on Tab, laid out the way Dota lays out its own: each side is a block under a
-	* band of its own colour, the band carrying the side's name and how many of its seats are still
-	* standing.  Your side is a table with your own row lit; the enemy is a grid of name chips under
-	* it.  Watching a match there are no sides to keep secrets from, so there is one table, every
-	* row in full and a team column to say who is with whom. */
+/** The scoreboard on Tab, Window/Html/Scoreboard.html, docked to the left the way Dota docks its
+	* own.  A player sees two sections, his side in full and the enemy as names and teams, because
+	* the enemy's general, money and promotions are for its own side to know.  A watcher sees one
+	* section a team, every seat in full.  Every section opens with a band of kind "band" carrying
+	* its {{label}}, how many seats are {{standing}} of {{seats}}, and {{side}} "allies", "enemies"
+	* or "team". */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawScoreboard( void )
 {
@@ -10149,15 +9996,26 @@ void InGameUI::drawScoreboard( void )
 	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
 		return;
 
+	if( !m_scoreboardPageLoaded )
+	{
+		m_scoreboardPageLoaded = TRUE;
+		readHtmlPage( SCOREBOARD_PAGE, m_scoreboardPage );
+	}
+	if( m_scoreboardPage.empty() )
+		return;
+	if( m_scoreboardOverlay == NULL )
+		m_scoreboardOverlay = new HtmlOverlay( m_superweaponNormalFont );
+
 	Player *local = ThePlayerList->getLocalPlayer();
 	const Bool watching = local->isPlayerObserver();
 
-	Player *players[ MAX_SLOTS ];
-	const GameSlot *slots[ MAX_SLOTS ];
-	Bool allied[ MAX_SLOTS ];
-	Int seats = 0;
-	Int sectionSeats[ SCOREBOARD_SECTIONS ] = { 0, 0 };
-	Int sectionStanding[ SCOREBOARD_SECTIONS ] = { 0, 0 };
+	struct Seat
+	{
+		Player *player;
+		const GameSlot *slot;
+		Int section;		///< 0 your side and 1 the enemy's, or the lobby team when watching
+	};
+	std::vector< Seat > seats;
 	for( Int slotNum = 0; slotNum < MAX_SLOTS; slotNum++ )
 	{
 		const GameSlot *slot = TheGameInfo->getConstSlot( slotNum );
@@ -10167,124 +10025,56 @@ void InGameUI::drawScoreboard( void )
 		AsciiString playerName;
 		playerName.format( "player%d", slotNum );
 		Player *player = ThePlayerList->findPlayerWithNameKey( NAMEKEY( playerName ) );
-		if( player->isPlayerObserver() )
+		if( player == NULL || player->isPlayerObserver() )
 			continue;
 
-		players[ seats ] = player;
-		slots[ seats ] = slot;
-		allied[ seats ] = watching || player == local || local->getRelationship( player->getDefaultTeam() ) == ALLIES;
-		const Int section = allied[ seats ] ? 0 : 1;
-		sectionSeats[ section ]++;
-		if( !TheVictoryConditions->hasSinglePlayerBeenDefeated( player ) )
-			sectionStanding[ section ]++;
-		seats++;
+		const Bool allied = player == local || local->getRelationship( player->getDefaultTeam() ) == ALLIES;
+		Seat seat = { player, slot, watching ? slot->getTeamNumber() : ( allied ? 0 : 1 ) };
+		seats.push_back( seat );
 	}
+	std::stable_sort( seats.begin(), seats.end(), []( const Seat &a, const Seat &b ) { return a.section < b.section; } );
 
-	GameFont *bodyFont = TheFontLibrary->getFont( m_superweaponNormalFont,
-												TheGlobalLanguageData->adjustFontSize( SCOREBOARD_POINT_SIZE ), TRUE );
-	GameFont *smallFont = TheFontLibrary->getFont( m_superweaponNormalFont,
-												TheGlobalLanguageData->adjustFontSize( SCOREBOARD_SMALL_POINT_SIZE ), FALSE );
-
-	const Int pad = stripPixels( SCOREBOARD_PAD );
-	const Int sectionGap = stripPixels( SCOREBOARD_SECTION_GAP );
-	const Int headerHeight = stripPixels( SCOREBOARD_HEADER_HEIGHT );
-	const Int rowHeight = stripPixels( SCOREBOARD_ROW_HEIGHT );
-	const Int chipHeight = stripPixels( SCOREBOARD_CHIP_HEIGHT );
-	const Int width = stripPixels( SCOREBOARD_WIDTH );
-	const Int left = ( TheDisplay->getWidth() - width ) / 2;
-	const Int top = stripPixels( SCOREBOARD_TOP );
-	const Int innerLeft = left + pad;
-	const Int innerWidth = width - 2 * pad;
-	const Int inset = stripPixels( SCOREBOARD_TEXT_INSET );
-	const Int chipWidth = innerWidth / SCOREBOARD_CHIPS_PER_LINE;
-	const Int chipLines = ( sectionSeats[ 1 ] + SCOREBOARD_CHIPS_PER_LINE - 1 ) / SCOREBOARD_CHIPS_PER_LINE;
-
-	Int height = pad + headerHeight + sectionSeats[ 0 ] * rowHeight + pad;
-	if( sectionSeats[ 1 ] > 0 )
-		height += sectionGap + headerHeight + chipLines * chipHeight;
-
-	m_scoreboardStringsUsed = 0;
-	TheDisplay->drawFillRect( left, top, width, height, SCOREBOARD_PANEL_COLOR );
-	TheDisplay->drawOpenRect( left, top, width, height, 1.0f, SCOREBOARD_EDGE_COLOR );
-
-	// your side, or everybody: the band with the labels, then a row a seat, your own one lit
-	Int y = top + pad;
-	const Int bandMiddle = y + headerHeight / 2;
-	UnicodeString text;
-	TheDisplay->drawFillRect( innerLeft, y, innerWidth, headerHeight, watching ? SCOREBOARD_ZEBRA_COLOR : SCOREBOARD_ALLIES_BAND_COLOR );
-	if( watching )
+	HtmlLists lists;
+	std::vector< HtmlValues > &rows = lists[ "seats" ];
+	for( size_t first = 0; first < seats.size(); )
 	{
-		drawScoreboardText( scoreboardString( smallFont, TheGameText->fetch( "GUI:ScoreboardPlayer" ) ),
-												innerLeft + stripPixels( SCOREBOARD_NAME_X ), bandMiddle, SCOREBOARD_ALIGN_LEFT, SCOREBOARD_HEADING_COLOR );
-		drawScoreboardText( scoreboardString( smallFont, TheGameText->fetch( TheScoreboardTeamColumn.label ) ),
-												innerLeft + stripPixels( TheScoreboardTeamColumn.x ), bandMiddle, SCOREBOARD_ALIGN_LEFT, SCOREBOARD_HEADING_COLOR );
-	}
-	else
-	{
-		text.format( L"%s  %d/%d", TheGameText->fetch( "GUI:ScoreboardAllies" ).str(), sectionStanding[ 0 ], sectionSeats[ 0 ] );
-		drawScoreboardText( scoreboardString( bodyFont, text ), innerLeft + stripPixels( SCOREBOARD_TEXT_INSET ), bandMiddle,
-												SCOREBOARD_ALIGN_LEFT, SCOREBOARD_ALLIES_COLOR );
-	}
-	for( Int column = 0; column < (Int)ARRAY_SIZE( TheScoreboardColumns ); column++ )
-	{
-		drawScoreboardText( scoreboardString( smallFont, TheGameText->fetch( TheScoreboardColumns[ column ].label ) ),
-												innerLeft + stripPixels( TheScoreboardColumns[ column ].x ), bandMiddle,
-												TheScoreboardColumns[ column ].align, SCOREBOARD_HEADING_COLOR );
-	}
-	y += headerHeight;
+		size_t end = first;
+		Int standing = 0;
+		for( ; end < seats.size() && seats[ end ].section == seats[ first ].section; end++ )
+			if( !TheVictoryConditions->hasSinglePlayerBeenDefeated( seats[ end ].player ) )
+				standing++;
 
-	Int row = 0;
-	for( Int seat = 0; seat < seats; seat++ )
-	{
-		if( !allied[ seat ] )
-			continue;
+		HtmlValues band;
+		band[ "kind" ] = "band";
+		band[ "standing" ] = std::to_string( standing );
+		band[ "seats" ] = std::to_string( end - first );
+		if( watching )
+		{
+			// a free for all is one section of players with no team between them
+			UnicodeString label = TheGameText->fetch( "GUI:ScoreboardPlayer" );
+			if( seats[ first ].section >= 0 )
+				label.format( L"%s %s", TheGameText->fetch( "GUI:ScoreboardTeam" ).str(), scoreboardTeamLabel( seats[ first ].slot ).str() );
+			band[ "side" ] = "team";
+			band[ "label" ] = WideCharStringToMultiByte( label.str() );
+		}
+		else
+		{
+			band[ "side" ] = seats[ first ].section == 0 ? "allies" : "enemies";
+			band[ "label" ] = WideCharStringToMultiByte( TheGameText->fetch( seats[ first ].section == 0 ? "GUI:ScoreboardAllies"
+																																																	: "GUI:ScoreboardEnemies" ).str() );
+		}
+		rows.push_back( band );
 
-		if( players[ seat ] == local )
-			TheDisplay->drawFillRect( innerLeft, y, innerWidth, rowHeight, SCOREBOARD_OWN_ROW_COLOR );
-		else if( row % 2 == 1 )
-			TheDisplay->drawFillRect( innerLeft, y, innerWidth, rowHeight, SCOREBOARD_ZEBRA_COLOR );
-		row++;
-		drawScoreboardRow( players[ seat ], slots[ seat ], watching, bodyFont, smallFont, innerLeft, y, rowHeight );
-		y += rowHeight;
+		for( ; first < end; first++ )
+			rows.push_back( scoreboardSeat( seats[ first ].player, seats[ first ].slot, watching || seats[ first ].section == 0,
+																			seats[ first ].player == local ) );
 	}
 
-	if( sectionSeats[ 1 ] == 0 )
-		return;
-
-	// the enemy: its band, then its seats as chips, four to a line.  A chip is a colour, a name and
-	// a team and nothing else: the enemy's general, money and promotions are for its own side to
-	// know, and a full row of empty columns would only be a row of things you are not told.
-	y += sectionGap;
-	TheDisplay->drawFillRect( innerLeft, y, innerWidth, headerHeight, SCOREBOARD_ENEMIES_BAND_COLOR );
-	text.format( L"%s  %d/%d", TheGameText->fetch( "GUI:ScoreboardEnemies" ).str(), sectionStanding[ 1 ], sectionSeats[ 1 ] );
-	drawScoreboardText( scoreboardString( bodyFont, text ), innerLeft + stripPixels( SCOREBOARD_TEXT_INSET ), y + headerHeight / 2,
-											SCOREBOARD_ALIGN_LEFT, SCOREBOARD_ENEMIES_COLOR );
-	y += headerHeight;
-
-	Int chip = 0;
-	for( Int seat = 0; seat < seats; seat++ )
-	{
-		if( allied[ seat ] )
-			continue;
-
-		const Int chipLeft = innerLeft + ( chip % SCOREBOARD_CHIPS_PER_LINE ) * chipWidth;
-		const Int chipTop = y + ( chip / SCOREBOARD_CHIPS_PER_LINE ) * chipHeight;
-		const Int chipMiddle = chipTop + chipHeight / 2;
-		if( ( chip / SCOREBOARD_CHIPS_PER_LINE + chip ) % 2 == 1 )
-			TheDisplay->drawFillRect( chipLeft, chipTop, chipWidth, chipHeight, SCOREBOARD_ZEBRA_COLOR );
-		chip++;
-
-		const Bool defeated = TheVictoryConditions->hasSinglePlayerBeenDefeated( players[ seat ] );
-		TheDisplay->drawFillRect( chipLeft, chipTop, stripPixels( SCOREBOARD_STRIPE_WIDTH ), chipHeight,
-															defeated ? SCOREBOARD_DEFEATED_COLOR : clientPlayerColor( players[ seat ] ) );
-		drawScoreboardText( scoreboardString( smallFont, scoreboardTeamLabel( slots[ seat ] ) ), chipLeft + chipWidth - inset,
-												chipMiddle, SCOREBOARD_ALIGN_RIGHT, SCOREBOARD_GENERAL_COLOR );
-		DisplayString *name = scoreboardString( bodyFont, slots[ seat ]->getName() );
-		drawScoreboardText( name, chipLeft + inset, chipMiddle, SCOREBOARD_ALIGN_LEFT,
-												defeated ? SCOREBOARD_DEFEATED_COLOR : SCOREBOARD_NAME_COLOR );
-		if( defeated )
-			strikeScoreboardName( name, chipLeft + inset, chipMiddle );
-	}
+	HtmlValues values;
+	values[ "side" ] = spectatorSide();
+	values[ "clock" ] = spectatorClock( TheGameLogic->getFrame() );
+	m_scoreboardOverlay->setPage( HtmlTemplate_expand( m_scoreboardPage, values, lists, lookupGameText ) );
+	m_scoreboardOverlay->draw();
 }
 
 //-------------------------------------------------------------------------------------------------

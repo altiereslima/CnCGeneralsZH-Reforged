@@ -1192,17 +1192,13 @@ protected:
 	void drawSkillStrip( void );					///< the watched player's bought promotions, under those
 
 	//
-	// The scoreboard on Tab: every seat in the match, your side in full rows and the other side as
-	// name chips.  Drawn over everything, like the clock plate, from a pool of strings that are
-	// handed out in the same order every frame so each keeps its font and its text texture.
+	// The scoreboard on Tab, Window/Html/Scoreboard.html: every seat in the match, your side in full
+	// and the other side as name and team only; watching, every seat in full.  Drawn over everything.
 	//
-	enum { SCOREBOARD_STRING_COUNT = 160 };
-	DisplayString *scoreboardString( GameFont *font, const UnicodeString &text, Int wrapWidth = 0 );
-	void drawScoreboardRow( Player *player, const GameSlot *slot, Bool withTeam, GameFont *bodyFont, GameFont *smallFont,
-													Int left, Int top, Int rowHeight );
 	Bool												m_scoreboardOpen;
-	Int													m_scoreboardStringsUsed;	///< handed out so far this frame
-	DisplayString *							m_scoreboardStrings[ SCOREBOARD_STRING_COUNT ];
+	HtmlOverlay *								m_scoreboardOverlay;
+	Bool												m_scoreboardPageLoaded;		///< read once a match, like the spectator's page
+	std::string									m_scoreboardPage;
 
 	//
 	// The spectator's page over the battlefield, Window/Html/Spectator.html: the drop-down that

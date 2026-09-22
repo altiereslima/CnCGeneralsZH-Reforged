@@ -697,10 +697,10 @@ found and fixed â€” EA's own, not port damage.**
 
 ## A scoreboard on Tab
 
-- Tab opens a scoreboard over the top of the screen and closes it again. Each side sits under a band in its own colour, green for yours and red for the enemy, and the band says how many of that side are still in the game, 4/4 down to 0/4. With a group selected, Tab still steps through the units in it as before, so the scoreboard wants one unit or none selected.
-- Every row on your side opens on a stripe of that player's colour, then the general's face, the player's name and the general under it. Then rank, money in the bank, income per minute, kills and losses, the unit that player has built the most of, and every promotion bought, once, at the level it has reached. Money has room for seven digits, and the unit column takes a name of twenty letters on one line. Numbers line up on their last digit, and your own row is lit.
-- Names are written in white and the player's colour goes on the stripe. Dark red on a black panel measured about 2 to 1 and could barely be read. A player who is out goes grey with a line through the name.
-- The enemy is one line of name cards, four to a line, each a colour, a name and a team and nothing more. What they are playing and what they have in the bank is theirs to know, and four rows of empty columns only said so at length.
+- Tab opens a scoreboard docked to the left edge of the screen, the way Dota docks its own, and closes it again. It is built from your command bar's steel, grey, red or sand for your side, with the match clock in its corner. Each side sits under a band edged green for yours and red for the enemy, and the band says how many of that side are still in the game, 4/4 down to 0/4. Watching, there is a band for every team. With a group selected, Tab still steps through the units in it as before, so the scoreboard wants one unit or none selected.
+- Every row on your side opens on a stripe of that player's colour, then the general in his metal tray, the player's name and the general under it. Then rank, money in the bank, income per minute, kills and losses, every promotion bought, once, at the level it has reached, and the unit that player has built the most of. Numbers line up on their last digit, and your own row is lit.
+- Names are written in white and the player's colour goes on the stripe. Dark red on a black panel measured about 2 to 1 and could barely be read. A player who is out goes grey.
+- An enemy row is a colour, a name and a team and nothing more. What they are playing and what they have in the bank is theirs to know.
 - Watching a match, everybody gets the full row, with a team column to say who is with whom.
 - The diplomacy screen, where you mute a player, is still on the command bar's button.
 
