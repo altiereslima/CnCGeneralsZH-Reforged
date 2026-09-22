@@ -6666,6 +6666,18 @@ TEST(the_shroud_never_hides_your_own_plan_from_your_own_builder)
 	CHECK( ActionManager_shroudHidesTarget( TRUE, FALSE, FALSE, FALSE ) == FALSE );	// in plain sight
 }
 
+/** A player clicking a building in the fog is judged on what they last saw there, so the cursor and
+	 the walk over give nothing away.  The AI and scripts keep seeing the real building: were they
+	 judged on memory too, every computer game would play differently and every replay recorded
+	 before would stop matching. */
+TEST(only_a_players_own_click_is_judged_on_what_they_last_saw)
+{
+	CHECK( ActionManager_orderReadsMemory( CMD_FROM_PLAYER, TRUE ) == TRUE );
+	CHECK( ActionManager_orderReadsMemory( CMD_FROM_PLAYER, FALSE ) == FALSE );	// a computer player's group order
+	CHECK( ActionManager_orderReadsMemory( CMD_FROM_AI, TRUE ) == FALSE );			// a human's unit acting on its own
+	CHECK( ActionManager_orderReadsMemory( CMD_FROM_SCRIPT, TRUE ) == FALSE );
+}
+
 //-------------------------------------------------------------------------------------------------
 /** A plan is a silhouette, not a building: cancelling it - or an enemy shooting it - must not set
 	off the explosion, collapse and rubble of a structure that never stood.  Object::onDie skips

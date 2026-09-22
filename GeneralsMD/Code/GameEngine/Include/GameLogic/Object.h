@@ -188,6 +188,21 @@ extern Bool Object_keepsOwnerAlive( Bool underConstruction, Real constructionPer
 ///< is this a plan a viewer on that footing with its owner must not see, live or remembered in the fog?
 extern Bool Object_isPlanHiddenFrom( Bool underConstruction, Real constructionPercent, Relationship viewerToOwner );
 
+//-------------------------------------------------------------------------------------------------
+/** What one player saw of a structure the moment the last of it went out of their sight.  An order
+	* that player gives against it in the fog is judged on this, not on what has happened there since. */
+//-------------------------------------------------------------------------------------------------
+struct ObjectSeenState
+{
+	UnsignedInt	teamID;								///< the TeamID it belonged to, TEAM_ID_INVALID while nothing is remembered
+	Int					apparentPlayerIndex;	///< the owner its contain showed, or NO_APPARENT_PLAYER when it showed none
+	Int					nonStealthOccupants;	///< occupants anyone could see
+	Bool				suppliesExhausted;		///< a supply warehouse with no boxes left
+	Bool				atFullHealth;
+
+	enum { NO_APPARENT_PLAYER = -1 };
+};
+
 class Object : public Thing, public Snapshot
 {
 
@@ -619,6 +634,11 @@ public:
 
 	ObjectShroudStatus getShroudedStatus(Int playerIndex) const;
 
+	const ObjectSeenState *getSeenStateFor( Int playerIndex ) const;	///< NULL while that player can see it
+	void rememberAsSeenBy( Int playerIndex );		///< it just went out of that player's sight
+	void forgetAsSeenBy( Int playerIndex );			///< it is back in that player's sight
+	Bool isUnknownTo( Int playerIndex ) const;	///< neither in that player's sight nor remembered; the logic's own answer, unlike getShroudedStatus
+
 	DisabledMaskType getDisabledFlags() const { return m_disabledMask; }
 	Bool isDisabled() const { return m_disabledMask.any(); }
 	Bool clearDisabled( DisabledType type );
@@ -752,6 +772,7 @@ private:
 	SightingInfo		*m_partitionRevealAllLastLook;			///< And a seperate look to reveal at a different range if so marked
 	Int							m_visionSpiedBy[MAX_PLAYER_COUNT];  ///< Reference count of having units spied on by players.
 	PlayerMaskType	m_visionSpiedMask;									///< For quick lookup and edge triggered maintenance
+	ObjectSeenState	m_seenState[MAX_PLAYER_COUNT];			///< each player's memory of this structure while it is out of their sight
 
 	SightingInfo	*m_partitionLastShroud;	///< Where and for whom I last shrouded, so I can undo its effects when I stop
 	SightingInfo	*m_partitionLastThreat;	///< Where and for whom I last delt with threat, so I can undo its effects when I stop

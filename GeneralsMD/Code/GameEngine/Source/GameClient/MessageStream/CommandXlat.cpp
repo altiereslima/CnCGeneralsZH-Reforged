@@ -47,6 +47,7 @@
 #include "Common/Recorder.h"
 #include "Common/SpecialPower.h"
 #include "Common/StatsCollector.h"
+#include "Common/Team.h"
 #include "Common/ThingTemplate.h"
 #include "Common/GameLOD.h"
 
@@ -1707,7 +1708,12 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 			//This case prevents rebels from using tranq darts on allies.
 			if( obj && BitTest( command->getOptions(), COMMAND_OPTION_NEED_OBJECT_TARGET ) )
 			{
-				Relationship relationship = ThePlayerList->getLocalPlayer()->getRelationship( obj->getTeam() );
+				// a building out of sight is judged on who held it when it was last seen, the way
+				// the ActionManager judges the order itself
+				const Player *localPlayer = ThePlayerList->getLocalPlayer();
+				const ObjectSeenState *seen = obj->getSeenStateFor( localPlayer->getPlayerIndex() );
+				const Team *seenTeam = seen ? TheTeamFactory->findTeamByID( seen->teamID ) : NULL;
+				Relationship relationship = localPlayer->getRelationship( seenTeam ? seenTeam : obj->getTeam() );
 				switch( relationship )
 				{
 					case ALLIES:
