@@ -188,14 +188,16 @@ def unexpected_test_failures(output):
         rest=output[m.end():]
         end=re.search(r"(?m)^\s*Start\s+\d+: |^\d+% tests passed", rest)
         block=rest[:end.start()] if end else rest
-        # Sem o resumo do harness o binário não chegou ao fim (crash no meio).
+        tail=" / ".join([x.strip() for x in block.splitlines() if x.strip()][-4:])
+        # Sem o resumo do harness o binário não chegou ao fim (crash no meio), ou é
+        # um smoke test fora do harness.
         if not re.search(r"(?m)^\d+ tests, \d+ checks, \d+ failed\s*$", block):
-            problems.append(f"{name}: terminou sem o resumo do harness")
+            problems.append(f"{name}: terminou sem o resumo do harness | {tail}")
             continue
         cases=re.findall(r"(?m)^FAIL (\S+) \(\d+\)\s*$", block)
         extra=[c for c in cases if c not in KNOWN_UPSTREAM_TEST_FAILURES]
         if not cases or extra:
-            problems.append(f"{name}: "+(", ".join(extra) or "falhou sem caso identificado"))
+            problems.append(f"{name}: "+(", ".join(extra) or "falhou sem caso identificado")+f" | {tail}")
             continue
         known.extend(cases)
     if not failed:
@@ -320,7 +322,7 @@ def main():
                 else:
                     known, problems = unexpected_test_failures(cp.stdout or "")
                     if problems:
-                        raise RuntimeError("ctest falhou: " + "; ".join(problems))
+                        raise RuntimeError("ctest falhou:\n" + "\n".join(problems))
                     result["steps"]["ctest"] = "PASS_WITH_KNOWN_UPSTREAM_FAILURES"
                     result["known_upstream_test_failures"] = known
                     print("::warning::falhas conhecidas do upstream toleradas: " + ", ".join(known))
@@ -336,6 +338,11 @@ def main():
         result["status"] = "FAIL"
         result["error"] = str(exc)
         result["traceback"] = traceback.format_exc()
+        # No Actions, cada linha vira anotação no resumo do run: o log completo só
+        # abre para quem está logado, as anotações aparecem para qualquer um.
+        if os.environ.get("GITHUB_ACTIONS"):
+            for line in str(exc).splitlines()[:10]:
+                print(f"::error::{line}")
         raise
     finally:
         result["finished"] = now()
