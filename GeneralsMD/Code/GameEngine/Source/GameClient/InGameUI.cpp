@@ -1200,6 +1200,8 @@ InGameUI::InGameUI()
 	m_scoreboardOpen = FALSE;
 	m_scoreboardOverlay = NULL;
 	m_scoreboardPageLoaded = FALSE;
+	m_controlBarOverlay = NULL;
+	m_controlBarPageLoaded = FALSE;
 	for( Int stripSeconds = 0; stripSeconds < STRIP_SECONDS_STRINGS; stripSeconds++ )
 		m_stripSecondsString[ stripSeconds ] = NULL;
 	for( Int stripQuantity = 0; stripQuantity < STRIP_QUANTITY_STRINGS; stripQuantity++ )
@@ -1319,6 +1321,8 @@ InGameUI::~InGameUI()
 	m_spectatorOverlay = NULL;
 	delete m_scoreboardOverlay;
 	m_scoreboardOverlay = NULL;
+	delete m_controlBarOverlay;
+	m_controlBarOverlay = NULL;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3865,6 +3869,7 @@ void InGameUI::reset( void )
 	m_isQuitMenuVisible = FALSE;
 	m_scoreboardOpen = FALSE;
 	m_scoreboardPageLoaded = FALSE;
+	m_controlBarPageLoaded = FALSE;
 	m_spectatorPageLoaded = FALSE;
 	m_spectatorFlipped.clear();
 	m_spectatorPicked.clear();
@@ -10075,6 +10080,76 @@ void InGameUI::drawScoreboard( void )
 	values[ "clock" ] = spectatorClock( TheGameLogic->getFrame() );
 	m_scoreboardOverlay->setPage( HtmlTemplate_expand( m_scoreboardPage, values, lists, lookupGameText ) );
 	m_scoreboardOverlay->draw();
+}
+
+static const char *const CONTROL_BAR_PAGE = "Window\\Html\\ControlBar.html";
+
+/** The command bar's windows the page is told the place of, by their name in ControlBar.wnd. */
+static const char *const CONTROL_BAR_WINDOWS[] =
+{
+	"LeftHUD", "RightHUD", "CameoWindow", "CommandWindow", "MoneyDisplay", "PowerWindow", "GeneralsExp",
+	"ButtonGeneral", "ButtonLarge", "ButtonOptions", "ButtonIdleWorker", "ButtonPlaceBeacon", "PopupCommunicator",
+	"WinUAttack"
+};
+
+/** `name`.x, .y, .w and .h in the page's pixels, and `name`.shown "shown" or "hidden". */
+static void putPageRect( HtmlValues &values, const std::string &name, const IRegion2D &rect, Bool shown )
+{
+	const Real scale = ControlBarUniformScale();
+	values[ name + ".x" ] = std::to_string( REAL_TO_INT( rect.lo.x / scale ) );
+	values[ name + ".y" ] = std::to_string( REAL_TO_INT( rect.lo.y / scale ) );
+	values[ name + ".w" ] = std::to_string( shown ? REAL_TO_INT( ( rect.hi.x - rect.lo.x ) / scale ) : 0 );
+	values[ name + ".h" ] = std::to_string( shown ? REAL_TO_INT( ( rect.hi.y - rect.lo.y ) / scale ) : 0 );
+	values[ name + ".shown" ] = shown ? "shown" : "hidden";
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The command bar's frame, drawn from Window/Html/ControlBar.html in the place of its three plates.
+	* The buttons, the radar and the portrait are still the bar's own windows and paint over it; the
+	* page only draws what sits round and under them, so it is told where they are: panel0 to panel2
+	* are the plates' rectangles, sliding and minimising with the bar, and every name in
+	* CONTROL_BAR_WINDOWS is its window's rectangle.  All of them in the page's 800x600 pixels. */
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, Int panelCount )
+{
+	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+		return FALSE;
+
+	if( !m_controlBarPageLoaded )
+	{
+		m_controlBarPageLoaded = TRUE;
+		readHtmlPage( CONTROL_BAR_PAGE, m_controlBarPage );
+	}
+	if( m_controlBarPage.empty() )
+		return FALSE;
+	if( m_controlBarOverlay == NULL )
+		m_controlBarOverlay = new HtmlOverlay( m_superweaponNormalFont );
+
+	HtmlValues values;
+	values[ "side" ] = spectatorSide();
+	for( Int panel = 0; panel < panelCount; panel++ )
+		putPageRect( values, "panel" + std::to_string( panel ), panels[ panel ], shown[ panel ] );
+
+	for( Int each = 0; each < (Int)ARRAY_SIZE( CONTROL_BAR_WINDOWS ); each++ )
+	{
+		const std::string name = CONTROL_BAR_WINDOWS[ each ];
+		GameWindow *window = TheWindowManager->winGetWindowFromId( NULL, NAMEKEY( ( "ControlBar.wnd:" + name ).c_str() ) );
+		IRegion2D rect;
+		rect.lo.x = rect.lo.y = rect.hi.x = rect.hi.y = 0;
+		if( window )
+		{
+			Int width = 0, height = 0;
+			window->winGetScreenPosition( &rect.lo.x, &rect.lo.y );
+			window->winGetSize( &width, &height );
+			rect.hi.x = rect.lo.x + width;
+			rect.hi.y = rect.lo.y + height;
+		}
+		putPageRect( values, name, rect, window != NULL && !window->winIsHidden() );
+	}
+
+	m_controlBarOverlay->setPage( HtmlTemplate_expand( m_controlBarPage, values, HtmlLists(), lookupGameText ) );
+	m_controlBarOverlay->draw();
+	return TRUE;
 }
 
 //-------------------------------------------------------------------------------------------------

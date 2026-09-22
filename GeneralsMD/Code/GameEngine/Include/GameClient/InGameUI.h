@@ -401,6 +401,9 @@ public:  // ********************************************************************
 	virtual void toggleMessages( void ) { m_messagesOn = 1 - m_messagesOn; }	///< toggle messages on/off
 	void toggleScoreboard( void ) { m_scoreboardOpen = !m_scoreboardOpen; }	///< the Tab scoreboard, on or off
 	Bool pickSpectatorStat( Int commandSlot );	///< a command bar key while watching: TRUE when it picked a stat
+	/** The command bar's page, Window/Html/ControlBar.html, under the bar's windows: its panels are
+		* where the plates would have gone, in screen pixels.  FALSE when there is no page to draw. */
+	Bool drawControlBarPage( const IRegion2D *panels, const Bool *shown, Int panelCount );
 	void drawScoreboard( void );																						///< that scoreboard, over everything
 	virtual Bool isMessagesOn( void ) { return m_messagesOn; }	///< are the display messages on
 	void freeMessageResources( void );				///< free resources for the ui messages
@@ -1199,6 +1202,9 @@ protected:
 	HtmlOverlay *								m_scoreboardOverlay;
 	Bool												m_scoreboardPageLoaded;		///< read once a match, like the spectator's page
 	std::string									m_scoreboardPage;
+	HtmlOverlay *								m_controlBarOverlay;
+	Bool												m_controlBarPageLoaded;
+	std::string									m_controlBarPage;
 
 	//
 	// The spectator's page over the battlefield, Window/Html/Spectator.html: the drop-down that

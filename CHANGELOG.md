@@ -486,6 +486,7 @@ found and fixed â€” EA's own, not port damage.**
 - When a superweapon comes ready, the left side says so for eight seconds: whose it is, its picture and its name, "ready to fire". The newest is at the bottom, four at most.
 - Both are an ordinary web page with a stylesheet, in the game's Window folder. Change the colours, the sizes or the order there and the next match you watch draws it that way, and the page opens in a browser too.
 - A minimised command bar stays minimised. Changing seats, or clicking another player's unit while watching, put the whole bar back up over the battlefield you had just cleared. A new match still opens with the bar up.
+- The command bar's frame is drawn new, in the same steel as the boards: three dark panels under a steel rail, the radar and the portrait each set in a bezel with a rivet at every corner, the command buttons in a shallow well, the money on a plaque and the power bar in a groove. Grey for America, red for China, sand for GLA. It slides and minimises with the bar, and like the boards it is a page in the Window folder; take the page away and the old painted bar comes back.
 
 ## Placing buildings
 

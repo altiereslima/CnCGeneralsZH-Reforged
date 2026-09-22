@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<!--
+  The command bar's frame, drawn where its three plates used to be.  The buttons, the radar, the
+  money, the power bar and the portrait are still the bar's own windows and paint over this page;
+  the page draws the steel round and under them.  Same materials as Window/Html/Spectator.html,
+  whose header says what the renderer draws and what it does not.
+
+  The game fills in, every frame (GameClient/HtmlTemplate.h):
+    {{side}}               "america", "china" or "gla": the side whose bar is on screen
+    {{panelN.x}} .y .w .h  N 0 to 2, left, centre and right: where the plates would have gone,
+                           moving with the bar when it slides or minimises; .w and .h are 0 and
+                           {{panelN.shown}} is "hidden" when a minimised bar has stood it down
+    {{Name.x}} .y .w .h    the rectangle of the bar's window Name, and {{Name.shown}} "shown" or
+                           "hidden", for LeftHUD (the radar), RightHUD (the portrait's box),
+                           CameoWindow (the portrait), CommandWindow, MoneyDisplay, PowerWindow,
+                           GeneralsExp, ButtonGeneral, ButtonLarge, ButtonOptions, ButtonIdleWorker,
+                           ButtonPlaceBeacon, PopupCommunicator and WinUAttack
+  All in the page's pixels, a pixel of an 800x600 screen.  Without this page the plates draw.
+
+  Edit the copy under Run/Window/Html and the next match reads it.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Command bar</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { background-color: #3b4a36; }
+  .hidden { display: none; }
+  .piece { position: absolute; }
+
+  /* a panel: a dark body under a steel rail, lit along the top and left like the other pages */
+  .panel { background-color: rgba(10, 16, 20, 0.94); border-top: 1px solid #aab4bf; border-left: 1px solid #8a949f;
+           border-right: 1px solid #1a2026; }
+  .rail { position: absolute; left: 0; right: 0; top: 0; height: 7px;
+          background: linear-gradient(to bottom, #7d8691, #3f4650); border-bottom: 1px solid #0c1114; }
+  .china .panel { background-color: rgba(24, 9, 7, 0.94); border-top-color: #d98a72; border-left-color: #b8604b; }
+  .china .rail { background: linear-gradient(to bottom, #9a4331, #4c1b13); }
+  .gla .panel { background-color: rgba(21, 18, 8, 0.94); border-top-color: #cbbf82; border-left-color: #a99d62; }
+  .gla .rail { background: linear-gradient(to bottom, #8f8249, #48401e); }
+
+  /* a bezel: a window set into the panel, four pixels of steel round a black lip */
+  .bezel { margin: -5px 0 0 -5px; border: 4px solid #4b535e; border-top-color: #2a3036; border-left-color: #2a3036;
+           border-bottom-color: #8a949f; border-right-color: #6f7782; }
+  .bezel .lip { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border: 1px solid #000000; }
+  .china .bezel { border-color: #6a2a1e; border-top-color: #34120c; border-left-color: #34120c; border-bottom-color: #b8604b; border-right-color: #8e3b2b; }
+  .gla .bezel { border-color: #625a31; border-top-color: #302b15; border-left-color: #302b15; border-bottom-color: #a99d62; border-right-color: #867a45; }
+  .rivet { position: absolute; width: 3px; height: 3px; background-color: #aab4bf; border-bottom: 1px solid #0c1114; }
+
+  /* the command grid sits in a shallow well */
+  .well { margin: -3px 0 0 -3px; border: 2px solid #0c1114; border-bottom-color: #4b535e; border-right-color: #4b535e;
+          background-color: rgba(0, 0, 0, 0.35); }
+
+  /* the money's plaque and the power bar's groove */
+  .plaque { margin: -2px 0 0 -8px; padding: 0 6px; border: 1px solid #0c1114; border-top-color: #000000; border-bottom-color: #6f7782;
+            background-color: #05080a; }
+  .groove { margin: -2px 0 0 -2px; border: 1px solid #000000; border-bottom-color: #6f7782; background-color: #020405; }
+</style>
+</head>
+<body>
+<div class="{{side}}">
+
+  <!-- the three plates -->
+  <div class="piece panel {{panel0.shown}}" style="left: {{panel0.x}}px; top: {{panel0.y}}px; width: {{panel0.w}}px; height: {{panel0.h}}px"><div class="rail"></div></div>
+  <div class="piece panel {{panel1.shown}}" style="left: {{panel1.x}}px; top: {{panel1.y}}px; width: {{panel1.w}}px; height: {{panel1.h}}px"><div class="rail"></div></div>
+  <div class="piece panel {{panel2.shown}}" style="left: {{panel2.x}}px; top: {{panel2.y}}px; width: {{panel2.w}}px; height: {{panel2.h}}px"><div class="rail"></div></div>
+
+  <!-- the radar, set in a bezel with a rivet at each corner -->
+  <div class="piece bezel {{LeftHUD.shown}}" style="left: {{LeftHUD.x}}px; top: {{LeftHUD.y}}px; width: {{LeftHUD.w}}px; height: {{LeftHUD.h}}px">
+    <div class="lip"></div>
+    <div class="rivet" style="left: -4px; top: -4px"></div>
+    <div class="rivet" style="right: -4px; top: -4px"></div>
+    <div class="rivet" style="left: -4px; bottom: -4px"></div>
+    <div class="rivet" style="right: -4px; bottom: -4px"></div>
+  </div>
+
+  <!-- the portrait's box, the same bezel -->
+  <div class="piece bezel {{RightHUD.shown}}" style="left: {{RightHUD.x}}px; top: {{RightHUD.y}}px; width: {{RightHUD.w}}px; height: {{RightHUD.h}}px">
+    <div class="lip"></div>
+    <div class="rivet" style="left: -4px; top: -4px"></div>
+    <div class="rivet" style="right: -4px; top: -4px"></div>
+    <div class="rivet" style="left: -4px; bottom: -4px"></div>
+    <div class="rivet" style="right: -4px; bottom: -4px"></div>
+  </div>
+
+  <div class="piece well {{CommandWindow.shown}}" style="left: {{CommandWindow.x}}px; top: {{CommandWindow.y}}px; width: {{CommandWindow.w}}px; height: {{CommandWindow.h}}px"></div>
+  <div class="piece plaque {{MoneyDisplay.shown}}" style="left: {{MoneyDisplay.x}}px; top: {{MoneyDisplay.y}}px; width: {{MoneyDisplay.w}}px; height: {{MoneyDisplay.h}}px"></div>
+  <div class="piece groove {{PowerWindow.shown}}" style="left: {{PowerWindow.x}}px; top: {{PowerWindow.y}}px; width: {{PowerWindow.w}}px; height: {{PowerWindow.h}}px"></div>
+  <div class="piece groove {{GeneralsExp.shown}}" style="left: {{GeneralsExp.x}}px; top: {{GeneralsExp.y}}px; width: {{GeneralsExp.w}}px; height: {{GeneralsExp.h}}px"></div>
+
+</div>
+</body>
+</html>
