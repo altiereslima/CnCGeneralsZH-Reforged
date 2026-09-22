@@ -35,6 +35,22 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install the D3DX9 runtime the tests bind
+        shell: pwsh
+        run: |
+          # The renderer binds d3dx9_43.dll at run time and expects the DirectX End-User Runtime
+          # to have put it in System32, as it has on a player's machine. The hosted runner has
+          # none, and dx9_smoke and test_ww3d2's FVF sizes fail without it. Microsoft ships the
+          # same 9.29.952.3111 DLL in this NuGet package; it is for the tests only, not the artifact.
+          $version = "9.29.952.8"
+          $sha256 = "EAD0906AE8A26C18A7525DA7490127A2110F7C58F18293738283E30E97C6EA4B"
+          $package = "$env:RUNNER_TEMP\d3dx.zip"
+          Invoke-WebRequest -Uri "https://api.nuget.org/v3-flatcontainer/microsoft.dxsdk.d3dx/$version/microsoft.dxsdk.d3dx.$version.nupkg" -OutFile $package
+          $hash = (Get-FileHash $package -Algorithm SHA256).Hash
+          if ($hash -ne $sha256) { throw "Microsoft.DXSDK.D3DX $version downloaded with hash $hash" }
+          Expand-Archive -Path $package -DestinationPath "$env:RUNNER_TEMP\d3dx" -Force
+          Copy-Item "$env:RUNNER_TEMP\d3dx\build\native\release\bin\x64\D3DX9_43.dll" "$env:SystemRoot\System32\d3dx9_43.dll" -Force
+
       - name: Install public build dependencies
         shell: pwsh
         run: |
