@@ -5326,6 +5326,10 @@ GUI:ChooseLadder
 "Escolha uma Competição"
 END
 
+GUI:ClassicGraphics
+"Gráficos Clássicos"
+END
+
 GUI:ClassicMouse
 "Clássico"
 END
@@ -6906,6 +6910,10 @@ GUI:MoneySymbol
 "$"
 END
 
+GUI:Monitor
+"Monitor"
+END
+
 GUI:Month
 "Mês (MM)"
 END
@@ -7716,6 +7724,50 @@ END
 
 GUI:Score
 "Pontuação"
+END
+
+GUI:ScoreboardAllies
+"SEU LADO"
+END
+
+GUI:ScoreboardDeaths
+"M"
+END
+
+GUI:ScoreboardEnemies
+"INIMIGOS"
+END
+
+GUI:ScoreboardFavourite
+"FAVORITO"
+END
+
+GUI:ScoreboardKills
+"A"
+END
+
+GUI:ScoreboardLevel
+"NÍVEL"
+END
+
+GUI:ScoreboardMoney
+"DINHEIRO"
+END
+
+GUI:ScoreboardPerMinute
+"POR MIN"
+END
+
+GUI:ScoreboardPlayer
+"JOGADOR"
+END
+
+GUI:ScoreboardPowers
+"PODERES"
+END
+
+GUI:ScoreboardTeam
+"EQUIPE"
 END
 
 GUI:ScoreScreen
@@ -15118,6 +15170,10 @@ TOOLTIP:CheckAudioHardware
 "Clique nesta caixa para habilitar a aceleração de Áudio por hardware."
 END
 
+TOOLTIP:ClassicGraphics
+"O jogo como era em 2003: texturas e terreno originais, as antigas sombras duras, sem detalhe de relevo e sem brilho ou nitidez. Desativado, usa o visual Reforged. Entra em vigor na próxima inicialização do jogo."
+END
+
 TOOLTIP:ClearButton
 "Limpar a janela de chat."
 END
@@ -15472,6 +15528,10 @@ END
 
 TOOLTIP:Mission9_16
 "Campanha Dois"
+END
+
+TOOLTIP:Monitor
+"Define o monitor em que o jogo é exibido. A lista de resoluções abaixo mostra os tamanhos que este monitor suporta. Aplicado ao aceitar as alterações."
 END
 
 TOOLTIP:MSAA
