@@ -118,6 +118,15 @@ def validate(repo):
         raise RuntimeError("OptionsCatalog.cpp: TextLanguage não acompanha TEXT_LANGUAGE_COUNT")
     result["checks"]["options_language_range"] = "PASS"
 
+    # Stage 13: corner readout hidden by default.
+    need(cpp, "\tm_showHudOverlay = TRUE;\n", "GlobalData.cpp HUD overlay default")
+    need(catalog, "OPTION_BOOL_ACCESSORS( m_showSuperweaponStrip )\n", "OptionsCatalog.cpp accessors")
+    need(catalog, "\t{ NULL, NULL, NULL, OPTION_BOOL, APPLY_LIVE, 0, 0, NULL, NULL }\n", "OptionsCatalog.cpp terminator")
+    test = (code/"Tests/test_gameengine.cpp").read_text(encoding="utf-8-sig")
+    need(test, "\t\t\"ShowHudOverlay\", \"ArchiveReplays\", NULL\n", "test_gameengine forced list")
+    need(test, "\tCHECK( scratch->m_showHudOverlay );\n", "test_gameengine HUD overlay check")
+    result["checks"]["hud_overlay_anchors"] = "PASS"
+
     result["status"] = "PASS"
     return result
 

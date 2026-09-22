@@ -69,6 +69,12 @@ def main():
     need(cm,"Data/PortugueseBrazil","PTBR CMake copy")
     checks["cmake_locale_copy"]="PASS"
 
+    need(cpp,"m_showHudOverlay = FALSE;","HUD overlay off by default")
+    catalog=(code/"GameEngine/Source/Common/OptionsCatalog.cpp").read_text(encoding="utf-8")
+    need(catalog,'{ "ShowHudOverlay",',"ShowHudOverlay Options.ini key")
+    need(catalog,"OPTION_BOOL_ACCESSORS( m_showHudOverlay )","ShowHudOverlay accessors")
+    checks["hud_overlay_hidden"]="PASS"
+
     loc=code/"Data/PortugueseBrazil"
     miss_core=[x for x in CORE_LOCALE_FILES if not (loc/x).is_file()]
     if miss_core:
