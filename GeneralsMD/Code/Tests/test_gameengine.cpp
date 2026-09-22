@@ -3128,6 +3128,25 @@ TEST(connection_retry_backs_off_when_a_command_keeps_going_unacked)
 	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 0 ), 200 );
 }
 
+extern Bool Connection_isRedundantCopyDue( time_t curTime, time_t timeLastOnWire, Int copiesSent );
+
+TEST(connection_redundant_copies_follow_a_send_spaced_and_counted)
+{
+	/* Nothing to copy before the first real send; that one goes out through the ordinary path. */
+	CHECK( !Connection_isRedundantCopyDue( 1000, -1, 0 ) );
+
+	/* Not in the packet the command just went out in, nor one right behind it: two copies inside
+	   the same few milliseconds die in the same burst. */
+	CHECK( !Connection_isRedundantCopyDue( 1000, 1000, 0 ) );
+	CHECK( !Connection_isRedundantCopyDue( 1000 + CONNECTION_REDUNDANT_SPACING_MS - 1, 1000, 0 ) );
+	CHECK( Connection_isRedundantCopyDue( 1000 + CONNECTION_REDUNDANT_SPACING_MS, 1000, 0 ) );
+
+	/* The count is the bandwidth bound: every copy past it is refused however long the ack takes,
+	   and the retry timer takes over from there. */
+	CHECK( Connection_isRedundantCopyDue( 5000, 1000, CONNECTION_REDUNDANT_COPIES - 1 ) );
+	CHECK( !Connection_isRedundantCopyDue( 5000, 1000, CONNECTION_REDUNDANT_COPIES ) );
+}
+
 // ------------------------------------------------------------------------------------------------
 // CRCSnapshotRing - the evidence a mismatch report is missing.  A mismatch is detected several
 // frames after the frame it happened on, so the ring has to still hold that frame when asked, and

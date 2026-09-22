@@ -68,6 +68,10 @@ public:
 	Int getNumTimesSent() const;
 	void markSent(time_t when);
 
+	time_t getTimeLastOnWire() const;
+	Int getNumCopiesSent() const;
+	void markCopied(time_t when);
+
 protected:
 	NetCommandMsg *m_msg;
 	NetCommandRef *m_next;
@@ -75,6 +79,8 @@ protected:
 	UnsignedByte m_relay; ///< Need this in the command reference since the relay value will be different depending on where this particular reference is being sent.
 	time_t m_timeLastSent;
 	Int m_numTimesSent;		///< How many times this reference has gone out.  An ack for a command sent more than once cannot be timed (which send is it acking?), so it is not used as a latency sample - Karn's rule.
+	time_t m_timeLastOnWire;	///< The last send or redundant copy.  Spaces the copies; the retry timer keeps m_timeLastSent.
+	Int m_numCopiesSent;			///< Redundant copies since the last real send.  See CONNECTION_REDUNDANT_COPIES.
 
 #ifdef DEBUG_NETCOMMANDREF
 	UnsignedInt m_id;
@@ -149,10 +155,38 @@ inline Int NetCommandRef::getNumTimesSent() const
 /**
  * Record a send: stamp the time and count it.
  */
-inline void NetCommandRef::markSent(time_t when) 
+inline void NetCommandRef::markSent(time_t when)
 {
 	m_timeLastSent = when;
+	m_timeLastOnWire = when;
+	m_numCopiesSent = 0;
 	++m_numTimesSent;
+}
+
+/**
+ * The last time this reference went out at all, real send or redundant copy.  -1 before the first.
+ */
+inline time_t NetCommandRef::getTimeLastOnWire() const
+{
+	return m_timeLastOnWire;
+}
+
+/**
+ * How many redundant copies have followed the last real send.
+ */
+inline Int NetCommandRef::getNumCopiesSent() const
+{
+	return m_numCopiesSent;
+}
+
+/**
+ * Record a redundant copy.  Neither the retry timer nor Karn's count moves: the copy exists so the
+ * retry is never needed, and the first ack still times the original send.
+ */
+inline void NetCommandRef::markCopied(time_t when)
+{
+	m_timeLastOnWire = when;
+	++m_numCopiesSent;
 }
 
 /**

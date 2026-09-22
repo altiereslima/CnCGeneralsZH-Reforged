@@ -82,6 +82,28 @@ void Connection_updateRetryTimeout( Real sampleMS, Real &srtt, Real &rttvar, tim
  */
 time_t Connection_retryDelayFor( time_t baseRetryMS, Int numTimesSent );
 
+/**
+ * Redundant sends.  A synchronized command (orders, frame info, run-ahead) that is still unacked
+ * goes out again in the next packets this many times, each copy at least the spacing after the
+ * last time it was on the wire, before any retry timer runs out.  On a lossy link the retry is
+ * what the room waits for: the timeout is a full round trip through the packet router and more,
+ * 600 to 800ms at 120ms and 5% loss, and the run-ahead covers only the one-way trip, so every lost
+ * packet was a stall.  A copy 30ms behind the original costs a few bytes and gets there before the
+ * run-ahead runs out.  Only synchronized commands are copied because their receiving end drops a
+ * duplicate by itself (FrameData::addCommand, and the old-frame test in processNetCommand); chat,
+ * disconnect and file traffic keep the plain retry.  A copy does not count as a send for Karn's
+ * rule, so the first ack still times the link.
+ */
+#define CONNECTION_REDUNDANT_COPIES 2
+#define CONNECTION_REDUNDANT_SPACING_MS 30
+
+/**
+ * Whether a command last put on the wire at timeLastOnWire, already copied copiesSent times, is
+ * due another redundant copy at curTime.  -1 is a command that has never gone out.
+ * Free function (not a member, not static) so test_gameengine can link straight to it.
+ */
+Bool Connection_isRedundantCopyDue( time_t curTime, time_t timeLastOnWire, Int copiesSent );
+
 class Connection : public MemoryPoolObject
 {
 	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(Connection, "Connection")		
@@ -126,6 +148,7 @@ public:
 
 protected:
 	void doRetryMetrics();
+	void addRedundantCopies(NetPacket *packet, time_t curTime);
 
 	Bool m_isQuitting;
 	UnsignedInt m_quitTime;
