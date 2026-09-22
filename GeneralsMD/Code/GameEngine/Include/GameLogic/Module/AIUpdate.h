@@ -741,6 +741,7 @@ public:
 	// this is intended for use ONLY by AIGroup's move order, which sends a unit through its tunnel network.
 	void friend_setTunnelTrip( const Coord3D *goal );
 	Bool hasTunnelTrip() const { return m_hasTunnelTrip; }	///< on its way through the tunnel network to a move order's goal
+	const Coord3D *getTunnelTripGoal() const { return &m_tunnelTripGoal; }	///< where the trip ends, once out of the far mouth
 #if defined(_DEBUG) || defined(_INTERNAL)	
 	inline const Coord3D *friend_getRequestedDestination() const { return &m_requestedDestination; }
 	inline const Coord3D *friend_getRequestedDestination2() const { return &m_requestedDestination2; }

@@ -1,0 +1,21 @@
+# Tunnel shortcut, the owner's case: fifteen selected, six already inside to stay, and a trip short
+# enough that the old member-by-member choice sent the front of the group underground and walked
+# the back of it.  The group decides once now, and every member goes through.
+#
+# Measured 2026-09-22 with seed 3: the member-by-member choice charged each rebel a body length for
+# every one sent in before it, and on this trip (about 900 long, 430 through the tunnels) it sent ten
+# through and walked five.  The group choice sends all fifteen; the last is in after 820 frames.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 3 2 small -autoskirmish 2 -takeover -side 0 FactionGLA -side 1 FactionAmerica
+#     -seed 3 -maxframes 4800 -scenario tunnelsplit -logPrefix tunnelsplit_
+
+30    spawn       0  GLATunnelNetwork       1  start0:0:300
+30    spawn       0  GLATunnelNetwork       1  800 1000
+# two here and the two each tunnel comes with make six
+30    spawn       0  GLAInfantryTunnelDefender 2  start0:0:420  25
+60    enter       0  GLAInfantryTunnelDefender 0  GLATunnelNetwork
+
+2940  spawn       0  GLAInfantryRebel      15  start0:250:300  25
+3000  playermove  0  GLAInfantryRebel          650 900
+3000  arrive      0  GLAInfantryRebel          650 900  150

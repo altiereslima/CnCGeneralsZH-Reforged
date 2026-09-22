@@ -47,6 +47,7 @@
 #include "Common/Team.h"
 #include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
+#include "Common/TunnelTracker.h"
 #include "Common/BuildAssistant.h"
 #include "Common/Recorder.h"
 #include "Common/BuildAssistant.h"
@@ -4123,6 +4124,28 @@ void InGameUI::collectOrderHints( void )
 				break;
 
 			case AI_ENTER:
+			{
+				// A move order that is going through the tunnels is still a move: one green thread to
+				// the mouth it goes down and one from the mouth it comes up at to where it was sent.
+				// The far mouth is worked out the way the unit will work it out when it gets there.
+				const Object *entrance = ai->getGoalObject();
+				if( ai->hasTunnelTrip() && entrance != NULL )
+				{
+					hint.kind = ORDER_HINT_MOVE;
+					hint.from = *obj->getPosition();
+					hint.to = *entrance->getPosition();
+					addOrderHint( hint, previous );
+
+					const Object *exit = local->getTunnelSystem()->findQuietTunnelNear( ai->getTunnelTripGoal() );
+					hint.from = ( exit != NULL ) ? *exit->getPosition() : hint.to;
+					hint.to = *ai->getTunnelTripGoal();
+					addOrderHint( hint, previous );
+					continue;
+				}
+				hint.kind = ORDER_HINT_ENTER;
+				break;
+			}
+
 			case AI_RAPPEL_INTO:
 			case AI_COMBATDROP:
 				hint.kind = ORDER_HINT_ENTER;
