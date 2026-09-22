@@ -1960,7 +1960,16 @@ Bool Object::isUnknownTo( Int playerIndex ) const
 	if( m_partitionData == NULL )
 		return FALSE;
 
-	return !m_partitionData->isInSightOf( playerIndex ) && getSeenStateFor( playerIndex ) == NULL;
+	if( m_partitionData->isInSightOf( playerIndex ) || getSeenStateFor( playerIndex ) != NULL )
+		return FALSE;
+
+	// A neutral building under fog rather than shroud is drawn for the player without ever having
+	// been in sight: a skirmish map opens fogged for everyone, so every supply dock on it is there
+	// to see from the first frame. getShroudedStatus draws the same one. Without this line the
+	// computer never knew the dock beside its own base, and built no supply centre all match.
+	const Player *player = ThePlayerList->getNthPlayer( playerIndex );
+	return !( isKindOf( KINDOF_IMMOBILE ) && player->getRelationship( getTeam() ) == NEUTRAL &&
+						!m_partitionData->isFullyShroudedFor( playerIndex ) );
 }
 
 //-------------------------------------------------------------------------------------------------

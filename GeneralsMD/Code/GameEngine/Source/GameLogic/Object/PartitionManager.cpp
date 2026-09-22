@@ -1287,9 +1287,12 @@ void PartitionCell::invalidateShroudedStatusForAllCois(Int playerIndex)
 
 //-----------------------------------------------------------------------------
 /** Called only from the logic's own look and shroud edges, never from the local player's display
-	* refresh, so every machine keeps the same memories on the same frame. */
+	* refresh, so every machine keeps the same memories on the same frame.  Only a cell leaving sight
+	* can take the last of a structure out of view, so that is the one edge that remembers; shroud
+	* laid over a cell nobody was looking at never makes a player remember a building they did not
+	* see.  Shroud laid over all of it wipes the memory, as it wipes the ghost. */
 //-----------------------------------------------------------------------------
-void PartitionCell::updateSeenStructures(Int playerIndex)
+void PartitionCell::updateSeenStructures(Int playerIndex, CellShroudStatus oldShroud, CellShroudStatus newShroud)
 {
 	for (CellAndObjectIntersection* coi = m_firstCoiInCell; coi; coi = coi->getNextCoi())
 	{
@@ -1300,9 +1303,9 @@ void PartitionCell::updateSeenStructures(Int playerIndex)
 		if (object == NULL || !object->isKindOf(KINDOF_STRUCTURE) || object->isKindOf(KINDOF_ALWAYS_VISIBLE))
 			continue;
 
-		if (module->isInSightOf(playerIndex))
+		if (newShroud == CELLSHROUD_CLEAR || module->isFullyShroudedFor(playerIndex))
 			object->forgetAsSeenBy(playerIndex);
-		else
+		else if (oldShroud == CELLSHROUD_CLEAR && !module->isInSightOf(playerIndex))
 			object->rememberAsSeenBy(playerIndex);
 	}
 }
@@ -1328,7 +1331,7 @@ void PartitionCell::addLooker(Int playerIndex)
 	{
 		// On an edge trigger, tell all objects to think about their shroudedness
 		invalidateShroudedStatusForAllCois( playerIndex );
-		updateSeenStructures( playerIndex );
+		updateSeenStructures( playerIndex, oldShroud, newShroud );
 
 		if( playerIndex == ThePlayerList->getLocalPlayer()->getPlayerIndex() )
 		{
@@ -1365,7 +1368,7 @@ void PartitionCell::removeLooker(Int playerIndex)
 	{
 		// On an edge trigger, tell all objects to think about their shroudedness
 		invalidateShroudedStatusForAllCois( playerIndex );
-		updateSeenStructures( playerIndex );
+		updateSeenStructures( playerIndex, oldShroud, newShroud );
 
 		if( playerIndex == ThePlayerList->getLocalPlayer()->getPlayerIndex() )
 		{
@@ -1393,7 +1396,7 @@ void PartitionCell::addShrouder( Int playerIndex )
 	{
 		// On an edge trigger, tell all objects to think about their shroudedness
 		invalidateShroudedStatusForAllCois( playerIndex );
-		updateSeenStructures( playerIndex );
+		updateSeenStructures( playerIndex, oldShroud, newShroud );
 
 		// and update the client if we are on the local player
 		if( playerIndex == ThePlayerList->getLocalPlayer()->getPlayerIndex() )
@@ -1646,6 +1649,18 @@ Bool PartitionData::isInSightOf(Int playerIndex)
 			return TRUE;
 	}
 	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
+Bool PartitionData::isFullyShroudedFor(Int playerIndex)
+{
+	CellAndObjectIntersection* coi = m_coiArray;
+	for (Int i = m_coiInUseCount; i; --i, ++coi)
+	{
+		if (coi->getCell()->getShroudStatusForPlayer(playerIndex) != CELLSHROUD_SHROUDED)
+			return FALSE;
+	}
+	return TRUE;
 }
 
 //-----------------------------------------------------------------------------

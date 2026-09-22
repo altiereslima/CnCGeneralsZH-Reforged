@@ -86,12 +86,12 @@
 
 /** Does 'observerNdx' know this thing is there?
 	*
-	* The partition manager already draws exactly the line wanted here.  A player's shroud status for
-	* an object is SHROUDED until that player has seen it; once seen, an *immobile* object stays
-	* FOGGED when the vision leaves it (PartitionData::friend_calcActualShroudedStatus) while anything
-	* that can move goes back to SHROUDED.  So "not SHROUDED" already means "I can see it now, or it
-	* is a building I have seen and buildings do not walk away" - which is the whole information model
-	* the AI needs, with no memory of its own to keep, save or desync.
+	* "I can see it now, or it is a building I have seen and buildings do not walk away" - which is
+	* the whole information model the AI needs.  Object::isUnknownTo draws that line from the cells
+	* and each structure's memory of who last saw it, both kept on the logic's own frames.  It used to
+	* be getShroudedStatus != SHROUDED, which draws the same line but decides "has seen it" from
+	* whichever code happens to ask while the building is in view: the drawing loop, run for every
+	* player only on an observer's machine, so two machines could think different things.
 	*
 	* observerNdx < 0 is the old omniscient answer, for callers that are not one player's thinking. */
 static Bool observerKnowsAbout( const Object *obj, Int observerNdx )
@@ -100,7 +100,7 @@ static Bool observerKnowsAbout( const Object *obj, Int observerNdx )
 		return FALSE;
 	if( observerNdx < 0 )
 		return TRUE;
-	return obj->getShroudedStatus( observerNdx ) != OBJECTSHROUD_SHROUDED;
+	return !obj->isUnknownTo( observerNdx );
 }
 
 /** What a unit is worth in a fight, for every decision here that has to weigh one force against

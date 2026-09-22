@@ -356,7 +356,7 @@ public:
 	void removeCashValue( Int playerIndex, UnsignedInt cashValue );
 
 	void invalidateShroudedStatusForAllCois(Int playerIndex);
-	void updateSeenStructures(Int playerIndex);	///< this cell just changed for that player: who kept or lost sight of which structure
+	void updateSeenStructures(Int playerIndex, CellShroudStatus oldShroud, CellShroudStatus newShroud);	///< this cell just changed for that player: who kept or lost sight of which structure
 
 #ifdef PM_CACHE_TERRAIN_HEIGHT
 	inline Real getLoTerrain() const { return m_loTerrainZ; }
@@ -533,6 +533,7 @@ public:
 	void invalidateShroudedStatusForAllPlayers();
 
 	Bool isInSightOf(Int playerIndex);	///< is any cell it touches clear for that player, read straight from the cells
+	Bool isFullyShroudedFor(Int playerIndex);	///< is every cell it touches shrouded for that player
 
 	ObjectShroudStatus getShroudedStatus(Int playerIndex);
 
