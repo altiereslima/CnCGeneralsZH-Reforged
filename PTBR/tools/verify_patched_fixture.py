@@ -75,6 +75,13 @@ def main():
     need(catalog,"OPTION_BOOL_ACCESSORS( m_showHudOverlay )","ShowHudOverlay accessors")
     checks["hud_overlay_hidden"]="PASS"
 
+    info=(code/"GameEngine/Source/GameNetwork/GameInfo.cpp").read_text(encoding="utf-8")
+    ptbr=(code/"Data/PortugueseBrazil/Generals.str").read_text(encoding="utf-8-sig")
+    for label in ("GUI:SlotEasyAI","GUI:SlotMediumAI","GUI:SlotHardAI"):
+        need(info,f'AIRungName( "{label}"',f"{label} lookup")
+        need(ptbr,f"\n{label}\n",f"{label} translation")
+    checks["ai_rung_names"]="PASS"
+
     loc=code/"Data/PortugueseBrazil"
     miss_core=[x for x in CORE_LOCALE_FILES if not (loc/x).is_file()]
     if miss_core:

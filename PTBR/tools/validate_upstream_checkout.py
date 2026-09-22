@@ -127,6 +127,14 @@ def validate(repo):
     need(test, "\tCHECK( scratch->m_showHudOverlay );\n", "test_gameengine HUD overlay check")
     result["checks"]["hud_overlay_anchors"] = "PASS"
 
+    # Stage 14: lobby AI difficulty names.
+    info = (code/"GameEngine/Source/GameNetwork/GameInfo.cpp").read_text(encoding="utf-8-sig")
+    need(info, "/** What a seat is called wherever one is listed: the lobby's drop-down, the seat itself, the game\n", "GameInfo.cpp SlotStateName comment")
+    need(info, "\t\tcase SLOT_EASY_AI:\t\t\treturn UnicodeString( L\"Easy AI\" );\n", "GameInfo.cpp Easy AI")
+    need(info, "\t\tcase SLOT_MED_AI:\t\t\t\treturn UnicodeString( L\"Medium AI\" );\n", "GameInfo.cpp Medium AI")
+    need(info, "\t\tcase SLOT_BRUTAL_AI:\t\treturn UnicodeString( L\"Hard AI\" );\n", "GameInfo.cpp Hard AI")
+    result["checks"]["ai_rung_name_anchors"] = "PASS"
+
     result["status"] = "PASS"
     return result
 

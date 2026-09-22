@@ -8174,6 +8174,18 @@ GUI:SkirmishLower
 "Combate"
 END
 
+GUI:SlotEasyAI
+"IA Fácil"
+END
+
+GUI:SlotHardAI
+"IA Difícil"
+END
+
+GUI:SlotMediumAI
+"IA Média"
+END
+
 GUI:Slower
 "Lento"
 END
