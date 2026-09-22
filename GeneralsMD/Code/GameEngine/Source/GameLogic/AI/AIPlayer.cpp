@@ -283,8 +283,8 @@ m_supplySourceAttackCheckFrame(0),
 m_attackedSupplyCenter(INVALID_ID),
 m_teamSeconds(10),
 m_curWarehouseID(INVALID_ID),
-m_buildProbeOffset(0.0f),
-m_buildProbeSkip(0),
+m_buildSearchNext(0),
+m_buildSearchPlan(NULL),
 m_scoutTimer(1),
 m_retreatTimer(1),
 m_expandTimer(1),
@@ -834,6 +834,42 @@ Object *AIPlayer::buildStructureNow(const ThingTemplate *bldgPlan, BuildListInfo
 	return bldg;
 }
 
+/** How far buildStructureWithDozer's flood fill may reach from the build list spot, in pathfind
+	* cells either way: half the width of the square rings it replaced. */
+static const Int BUILD_SEARCH_CELLS = 5;
+static const Int SKIRMISH_BUILD_SEARCH_CELLS = 60;
+static const Int BUILD_PROBES_PER_FRAME = 32;			///< isLocationLegalToBuild calls one frame may spend
+static const Int BUILD_EXPANSIONS_PER_FRAME = 512;	///< cells one frame may take off the flood's queue
+
+// ------------------------------------------------------------------------------------------------
+/** Whether the building search may flood through a cell: ground a vehicle could cross, the AI's own
+	* or anyone's structure standing on it, or the deck of a bridge that is still up over water or a
+	* cliff. worldPos is the cell's position in the world, for the bridge test. */
+// ------------------------------------------------------------------------------------------------
+static Bool isBuildSearchWalkable( Int cellX, Int cellY, const Coord3D *worldPos )
+{
+	const PathfindCell *cell = TheAI->pathfinder()->getCell( LAYER_GROUND, cellX, cellY );
+	if( cell == NULL )
+		return FALSE;		// off the map
+
+	switch( cell->getType() )
+	{
+		case PathfindCell::CELL_CLEAR:
+		case PathfindCell::CELL_RUBBLE:
+		case PathfindCell::CELL_OBSTACLE:
+			return TRUE;
+		default:
+			break;
+	}
+
+	for( Bridge *bridge = TheTerrainLogic->getFirstBridge(); bridge; bridge = bridge->getNext() )
+	{
+		if( bridge->peekBridgeInfo()->curDamageState != BODY_RUBBLE && bridge->isPointOnBridge( worldPos ) )
+			return TRUE;
+	}
+	return FALSE;
+}
+
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
 Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildListInfo *info)
@@ -902,152 +938,94 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 			bldgName.concat(" - Dozer unable to place.  Attempting to adjust position.");
 			TheScriptEngine->AppendDebugMessage(bldgName, false);
 
-			// try to fix.
-			Real posOffset;
+			/* The spot in the build list is taken, so this floods outwards from it one pathfind cell
+				 at a time, nearest first, and takes the first cell where the building fits. The square
+				 rings it replaced took the first legal position on a ring, and that could be the far
+				 side of a cliff or a river from the base: close in a straight line, a long drive round.
+				 The flood only walks ground joined to the spot - clear ground, rubble, structures
+				 standing on it, and bridges that are still up - so nearest means nearest by the ground.
+
+				 Every position tried is a call to isLocationLegalToBuild, a partition query and a
+				 terrain sample, and a whole search in one frame was measured at 46ms in a four-player
+				 match. So each frame gets a budget of positions and cells, and the queue is kept
+				 between frames: the cells come off it in the same order whichever frame runs them, so
+				 the spot it settles on is the spot it would have found in one go. The budget counts
+				 positions and not milliseconds, because a stopwatch would try a different number of
+				 them on a slower machine and the two would desync.
+
+				 When nothing fits, EA settled for the original spot, checked with
+				 NO_ENEMY_OBJECT_OVERLAP alone. That option skips every structure that is not an
+				 enemy's, the AI's own buildings included, and it is how a base grew buildings inside
+				 buildings. No spot now means no building this pass; the next pass floods again with
+				 whatever has been sold or destroyed since. */
+			static const Int NEIGHBOURS[8][2] = { {1,0}, {-1,0}, {0,1}, {0,-1}, {1,1}, {-1,1}, {1,-1}, {-1,-1} };
+			const Int searchRadius = isSkirmishAI() ? SKIRMISH_BUILD_SEARCH_CELLS : BUILD_SEARCH_CELLS;
+			const Int searchWidth = 2*searchRadius + 1;
+			const Int probeStride = isSkirmishAI() ? 2 : 1;		// the rings tried every other cell for a skirmish AI too
+			ICoord2D origin;
+			TheAI->pathfinder()->worldToCell(&pos, &origin);
+			if (m_buildSearchCells.empty() || m_buildSearchPlan != bldgPlan ||
+					m_buildProbePos.x != pos.x || m_buildProbePos.y != pos.y) {
+				m_buildSearchPlan = bldgPlan;
+				m_buildProbePos = pos;
+				m_buildSearchCells.clear();
+				m_buildSearchCells.push_back(origin);
+				m_buildSearchNext = 0;
+				m_buildSearchSeen.assign(searchWidth*searchWidth, 0);
+				m_buildSearchSeen[searchRadius*searchWidth + searchRadius] = 1;
+			}
+
 			Bool valid = false;
-			// Wiggle it a little :)
-			Real limit = 10*PATHFIND_CELL_SIZE_F;
-			if (isSkirmishAI()) {
-				limit = 120*PATHFIND_CELL_SIZE_F;
-			}
 			Coord3D newPos = pos;
-
-			/* One ring of that wiggle per logic frame.
-
-				 The spot in the build list is taken, so this walks a square ring outwards looking for
-				 one that is not, and for a skirmish AI it walks it 120 pathfind cells out - most of a
-				 generated map. Every position costs a call to isLocationLegalToBuild, which is a
-				 partition query for overlapping objects and a zone check for a route to it, and the
-				 rings get longer the further out they go: 3,720 of them by the outermost, 46ms in one
-				 logic frame, measured, and the worst frame of a four-player Twilight Flame match.
-				 It is rare - four such frames in 55,876 - and that is exactly what a stutter is.
-
-				 So the scan gets a budget and remembers where it was. It stops at the end of whichever
-				 ring takes it past BUILD_PROBES_PER_FRAME positions, asks to be called again next
-				 frame, and carries on from that ring; the positions are tried in the same order they
-				 always were, so the spot it settles on is the spot it would have found in one go. The
-				 budget counts positions rather than milliseconds on purpose: a stopwatch would test a
-				 different number of them on a slower machine, and the two would desync.
-
-				 A ring is finished once started rather than resumed part way through, which keeps the
-				 whole of the state in one number.
-
-				 The budget is small because the positions are not equally expensive. The rings near
-				 the base are the dear ones - the partition query there comes back full of the
-				 player's own buildings, and a position that gets past it pays for the terrain
-				 sampling as well - while the outer rings are mostly off the map and are rejected on
-				 the first line. A budget of 100 left a 19.7ms frame made of about 120 inner
-				 positions; at 32 the first frame walks three rings and the worst frame this can cost
-				 is either those, or one whole outer ring of 240 cheap ones.
-
-				 That last claim was wrong. A four-player match on 2026-09-15 spent 20 to 37ms of eight
-				 logic frames in a row here, and a timer put inside the loop showed why: the budget was
-				 only checked between rings, and a ring 72 to 104 cells out holds 152 to 216 positions,
-				 every one of them finished once started. So the budget is checked before every pair
-				 of positions now, and the pair it stopped at is kept beside the ring, which is still
-				 the same order and still the same spot. */
-			const Int BUILD_PROBES_PER_FRAME = 32;
 			Int probes = 0;
-			Bool outOfBudget = false;
-			Real firstOffset = 0;
-			Int skipPairs = 0;
-			if ((m_buildProbeOffset > 0 || m_buildProbeSkip > 0) &&
-					m_buildProbePos.x == pos.x && m_buildProbePos.y == pos.y) {
-				firstOffset = m_buildProbeOffset;		// same spot as last frame: carry on from there
-				skipPairs = m_buildProbeSkip;				// ... from the pair it stopped at inside that ring
-			}
-			m_buildProbePos = pos;
-			m_buildProbeOffset = 0;
-			m_buildProbeSkip = 0;
-
-			for (posOffset = firstOffset; posOffset<limit; posOffset += 2*PATHFIND_CELL_SIZE_F) {
-				const Real ringOffset = posOffset;
-				Int pair = 0;
-				if (probes >= BUILD_PROBES_PER_FRAME) {
-					// out of budget with rings left to walk: pick this one up again next frame
-					m_buildProbeOffset = posOffset;
-					outOfBudget = true;
-					break;
-				}
-				if (isSkirmishAI()) {
-					posOffset += 2*PATHFIND_CELL_SIZE_F;
-				}
-				Real offset = posOffset/2;
-				Real xPos, yPos;
-				yPos = pos.y-offset;
-				for (xPos = pos.x-offset; xPos <= pos.x+offset; xPos+=PATHFIND_CELL_SIZE_F) {
-					if (isSkirmishAI()) xPos += PATHFIND_CELL_SIZE_F;
-					if (skipPairs > 0) { --skipPairs; ++pair; continue; }		// tried last frame
-					if (probes >= BUILD_PROBES_PER_FRAME) {
-						m_buildProbeOffset = ringOffset;
-						m_buildProbeSkip = pair;
-						outOfBudget = true;
-						break;
+			Int expansions = 0;
+			while (m_buildSearchNext < (Int)m_buildSearchCells.size() &&
+					probes < BUILD_PROBES_PER_FRAME && expansions < BUILD_EXPANSIONS_PER_FRAME) {
+				const ICoord2D cell = m_buildSearchCells[m_buildSearchNext++];
+				++expansions;
+				const Int dx = cell.x - origin.x;
+				const Int dy = cell.y - origin.y;
+				for (Int n = 0; n < 8; ++n) {
+					const Int nx = dx + NEIGHBOURS[n][0];
+					const Int ny = dy + NEIGHBOURS[n][1];
+					if (abs(nx) > searchRadius || abs(ny) > searchRadius) continue;
+					UnsignedByte &seen = m_buildSearchSeen[(ny + searchRadius)*searchWidth + nx + searchRadius];
+					if (seen) continue;
+					seen = 1;
+					Coord3D neighbourPos = pos;
+					neighbourPos.x += nx*PATHFIND_CELL_SIZE_F;
+					neighbourPos.y += ny*PATHFIND_CELL_SIZE_F;
+					if (isBuildSearchWalkable(origin.x + nx, origin.y + ny, &neighbourPos)) {
+						ICoord2D next;
+						next.x = origin.x + nx;
+						next.y = origin.y + ny;
+						m_buildSearchCells.push_back(next);
 					}
-					++pair;
-					probes += 2;
-					newPos.x = xPos;
-					newPos.y = yPos;
-					valid = TheBuildAssistant->isLocationLegalToBuild( &newPos, bldgPlan, angle,
-																							 BuildAssistant::CLEAR_PATH |
-																							 BuildAssistant::TERRAIN_RESTRICTIONS |
-																							 BuildAssistant::NO_OBJECT_OVERLAP,
-																							 dozer, m_player ) == LBC_OK;
-					if (valid) break;
-					newPos.y = yPos+posOffset;
-					valid = TheBuildAssistant->isLocationLegalToBuild( &newPos, bldgPlan, angle,
-																							 BuildAssistant::CLEAR_PATH |
-																							 BuildAssistant::TERRAIN_RESTRICTIONS |
-																							 BuildAssistant::NO_OBJECT_OVERLAP,
-																							 dozer, m_player ) == LBC_OK;
 				}
-				if (valid || outOfBudget) break;
-				xPos = pos.x-offset;
-				for (yPos = pos.y-offset; yPos <= pos.y+offset; yPos+=PATHFIND_CELL_SIZE_F) {
-					if (isSkirmishAI()) yPos += PATHFIND_CELL_SIZE_F;
-					if (skipPairs > 0) { --skipPairs; ++pair; continue; }		// tried last frame
-					if (probes >= BUILD_PROBES_PER_FRAME) {
-						m_buildProbeOffset = ringOffset;
-						m_buildProbeSkip = pair;
-						outOfBudget = true;
-						break;
-					}
-					++pair;
-					probes += 2;
-					newPos.x = xPos;
-					newPos.y = yPos;
-					valid = TheBuildAssistant->isLocationLegalToBuild( &newPos, bldgPlan, angle,
-																							 BuildAssistant::CLEAR_PATH |
-																							 BuildAssistant::TERRAIN_RESTRICTIONS |
-																							 BuildAssistant::NO_OBJECT_OVERLAP,
-																							 dozer, m_player ) == LBC_OK;
-					if (valid) break;
-					newPos.x = xPos+posOffset;
-					valid = TheBuildAssistant->isLocationLegalToBuild( &newPos, bldgPlan, angle,
-																							 BuildAssistant::CLEAR_PATH |
-																							 BuildAssistant::TERRAIN_RESTRICTIONS |
-																							 BuildAssistant::NO_OBJECT_OVERLAP,
-																							 dozer, m_player ) == LBC_OK;
-				}
-				if (valid || outOfBudget) break;
+				if ((dx == 0 && dy == 0) || dx % probeStride != 0 || dy % probeStride != 0) continue;
+				if (TheAI->pathfinder()->getCell(LAYER_GROUND, cell.x, cell.y)->getType() != PathfindCell::CELL_CLEAR) continue;
+				newPos.x = pos.x + dx*PATHFIND_CELL_SIZE_F;
+				newPos.y = pos.y + dy*PATHFIND_CELL_SIZE_F;
+				++probes;
+				valid = TheBuildAssistant->isLocationLegalToBuild( &newPos, bldgPlan, angle,
+																						 BuildAssistant::CLEAR_PATH |
+																						 BuildAssistant::TERRAIN_RESTRICTIONS |
+																						 BuildAssistant::NO_OBJECT_OVERLAP,
+																						 dozer, m_player ) == LBC_OK;
+				if (valid) break;
 			}
-			if (valid) pos = newPos;
-			if (!valid && outOfBudget) {
-				/* Out of budget with the search unfinished. The fallback below settles for the
-					 original spot, and taking it here would be answering a question this frame has not
-					 finished asking. */
-				TheTerrainVisual->removeAllBibs();	// isLocationLegalToBuild adds bib feedback
-				m_buildDelay = 1;		// try again next frame; doBaseBuilding leaves any value >= 1 alone
-				return NULL;
+			const Bool searchUnfinished = !valid && m_buildSearchNext < (Int)m_buildSearchCells.size();
+			if (!searchUnfinished) {
+				m_buildSearchCells.clear();		// found, or every reachable cell tried: the next search starts over
 			}
 			if (!valid) {
-				valid = TheBuildAssistant->isLocationLegalToBuild( &pos, bldgPlan, angle,
-																						 BuildAssistant::NO_ENEMY_OBJECT_OVERLAP,
-																						 dozer, m_player ) == LBC_OK;
-				if (!valid) {
-					return NULL;
+				TheTerrainVisual->removeAllBibs();	// isLocationLegalToBuild adds bib feedback
+				if (searchUnfinished) {
+					m_buildDelay = 1;		// try again next frame; doBaseBuilding leaves any value >= 1 alone
 				}
+				return NULL;
 			}
+			pos = newPos;
 
 	}
 

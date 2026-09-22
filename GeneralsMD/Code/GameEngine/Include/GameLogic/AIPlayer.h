@@ -448,12 +448,16 @@ protected:
 
 	Int			m_frameLastBuildingBuilt;	///< When we built the last building.
 
-	/* Where buildStructureWithDozer's search for somewhere to put a building had got to when it ran
-		 out of its per-frame budget, and the spot it was searching around.  Deliberately not xferred:
-		 both machines in a network game compute them the same way from the same frames, and a
-		 savegame that restarts a half-finished scan loses nothing but a few frames of searching. */
-	Real		m_buildProbeOffset;
-	Int			m_buildProbeSkip;		///< position pairs of the ring at m_buildProbeOffset already tried
+	/* Where buildStructureWithDozer's flood fill for somewhere to put a building had got to when it
+		 ran out of its per-frame budget, and which building and spot it was searching for.  Not
+		 xferred: both machines in a network game compute them the same way from the same frames.  A
+		 savegame loaded half way through a search floods again from the start, so the building can
+		 go up a few frames later, or on another cell, than it would have in the game that never
+		 saved.  Network games are not saved, so nothing has to match that. */
+	std::vector<ICoord2D> m_buildSearchCells;	///< every pathfind cell reached so far, in the order reached
+	Int			m_buildSearchNext;								///< first entry of m_buildSearchCells not yet expanded
+	std::vector<UnsignedByte> m_buildSearchSeen;	///< one flag per cell of the square the search may cover
+	const ThingTemplate *m_buildSearchPlan;		///< the building whose footprint the search is trying
 	Coord3D m_buildProbePos;
 
 	GameDifficulty m_difficulty;
