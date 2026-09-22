@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
 import urllib.request
 import zipfile
 
@@ -73,10 +74,25 @@ def safe_extract_zip(zf: zipfile.ZipFile, dst: Path):
             raise RuntimeError(f"entrada absoluta no zip: {info.filename}")
     zf.extractall(dst)
 
+def retrying(what: str, fn, attempts: int = 4):
+    # zlib.net e o GitHub às vezes falham por alguns segundos no runner; um build
+    # inteiro não deve cair por isso. Cada tentativa recomeça do zero.
+    for attempt in range(1, attempts+1):
+        try:
+            return fn()
+        except Exception as exc:
+            if attempt==attempts:
+                raise
+            wait=5*attempt*attempt
+            print(f"{what}: tentativa {attempt} falhou ({str(exc).strip()[:200]}); de novo em {wait}s")
+            time.sleep(wait)
+
 def download(url: str, dst: Path):
-    req=urllib.request.Request(url, headers={"User-Agent":"ZH-Reforged-PTBR-CI/1.0"})
-    with urllib.request.urlopen(req, timeout=60) as r, dst.open("wb") as f:
-        shutil.copyfileobj(r, f)
+    def once():
+        req=urllib.request.Request(url, headers={"User-Agent":"ZH-Reforged-PTBR-CI/1.0"})
+        with urllib.request.urlopen(req, timeout=60) as r, dst.open("wb") as f:
+            shutil.copyfileobj(r, f)
+    retrying(f"download {url}", once)
 
 def refill_vendored_dir(dst: Path, fill):
     # Cada pasta vendorizada tem um .gitignore versionado que mantém o código de
@@ -132,6 +148,17 @@ def run(cmd, cwd=None):
         raise RuntimeError(cp.stdout)
     return cp.stdout
 
+def clone_pinned(git: str, url: str, commit: str, clone: Path, name: str):
+    def once():
+        if clone.exists():
+            shutil.rmtree(clone, ignore_errors=True)
+        run([git,"clone","--no-checkout","--filter=blob:none",url,str(clone)])
+        run([git,"checkout",commit],cwd=clone)
+    retrying(f"clone {name}", once)
+    head=run([git,"rev-parse","HEAD"],cwd=clone).strip()
+    if head.lower()!=commit.lower():
+        raise RuntimeError(f"commit {name} inesperado: {head}")
+
 def validate_gamespy(path: Path):
     required=["CMakeLists.txt"]
     missing=[x for x in required if not (path/x).is_file()]
@@ -163,11 +190,7 @@ def install_gamespy(repo: Path, source_override: Path|None):
     clone=temp_root/"GamespySDK"
     archive=temp_root/"gamespy.zip"
 
-    run([git,"clone","--no-checkout","--filter=blob:none",GAMESPY_REPO,str(clone)])
-    run([git,"checkout",GAMESPY_COMMIT],cwd=clone)
-    head=run([git,"rev-parse","HEAD"],cwd=clone).strip()
-    if head.lower()!=GAMESPY_COMMIT.lower():
-        raise RuntimeError(f"commit GameSpy inesperado: {head}")
+    clone_pinned(git,GAMESPY_REPO,GAMESPY_COMMIT,clone,"GameSpy")
     validate_gamespy(clone)
 
     run([git,"archive","--format=zip","--output",archive,GAMESPY_COMMIT],cwd=clone)
@@ -240,11 +263,7 @@ def install_lzh(repo: Path, source_override: Path|None):
     temp_root=Path(tempfile.mkdtemp(prefix="zh-lzh-"))
     clone=temp_root/"lzhl-1.0"
 
-    run([git,"clone","--no-checkout","--filter=blob:none",LZH_REPO,str(clone)])
-    run([git,"checkout",LZH_COMMIT],cwd=clone)
-    head=run([git,"rev-parse","HEAD"],cwd=clone).strip()
-    if head.lower()!=LZH_COMMIT.lower():
-        raise RuntimeError(f"commit LZH-Light inesperado: {head}")
+    clone_pinned(git,LZH_REPO,LZH_COMMIT,clone,"LZH-Light")
 
     validate_lzh_flat(clone)
 
@@ -309,11 +328,7 @@ def install_directx(repo: Path, source_override: Path|None):
     temp_root=Path(tempfile.mkdtemp(prefix="zh-dx8-"))
     clone=temp_root/"min-dx8-sdk"
 
-    run([git,"clone","--no-checkout","--filter=blob:none",DX8_REPO,str(clone)])
-    run([git,"checkout",DX8_COMMIT],cwd=clone)
-    head=run([git,"rev-parse","HEAD"],cwd=clone).strip()
-    if head.lower()!=DX8_COMMIT.lower():
-        raise RuntimeError(f"commit min-dx8-sdk inesperado: {head}")
+    clone_pinned(git,DX8_REPO,DX8_COMMIT,clone,"min-dx8-sdk")
 
     copy_directx(clone,root)
     validate_directx(repo)
@@ -342,10 +357,17 @@ def main():
     if not (repo/"GeneralsMD/Code").is_dir():
         raise SystemExit("checkout Reforged inválido")
 
-    z=install_zlib(repo, Path(args.zlib_archive).resolve() if args.zlib_archive else None)
-    g=install_gamespy(repo, Path(args.gamespy_source).resolve() if args.gamespy_source else None)
-    l=install_lzh(repo, Path(args.lzh_source).resolve() if args.lzh_source else None)
-    d=install_directx(repo, Path(args.dx8_source).resolve() if args.dx8_source else None)
+    try:
+        z=install_zlib(repo, Path(args.zlib_archive).resolve() if args.zlib_archive else None)
+        g=install_gamespy(repo, Path(args.gamespy_source).resolve() if args.gamespy_source else None)
+        l=install_lzh(repo, Path(args.lzh_source).resolve() if args.lzh_source else None)
+        d=install_directx(repo, Path(args.dx8_source).resolve() if args.dx8_source else None)
+    except Exception as exc:
+        # No Actions vira anotação no resumo do run, que abre sem login.
+        if os.environ.get("GITHUB_ACTIONS"):
+            for line in str(exc).strip().splitlines()[:10]:
+                print(f"::error::{line}")
+        raise
 
     print("PUBLIC DEPENDENCIES INSTALL PASS")
     print("zlib:",z)
