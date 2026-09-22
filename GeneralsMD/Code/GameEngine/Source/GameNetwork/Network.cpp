@@ -666,6 +666,16 @@ void Network::processRunAheadCommand(NetRunAheadCommandMsg *msg) {
 	m_frameRate = msg->getFrameRate();
 	time_t frameGrouping = (1000 * m_runAhead) / m_frameRate; // number of miliseconds between packet sends
 	frameGrouping = frameGrouping / 2; // since we only want the latency for one way to be a factor.
+	/* No longer than one logic frame.  Every send waits out the grouping, acks included, so every
+		 round trip the game measures carries up to two of them - and the measured round trip is what
+		 sizes the run-ahead, which sizes the grouping.  On a 50 ms link losing 2% of its packets
+		 three seats measured 0.95 s, the retry timeout grew to 832 ms and the room fell from 30 frames
+		 a second to 12.  EA's half a run-ahead was for a 2003 modem; a frame's orders fit one
+		 datagram now, and one per frame per peer is nothing. */
+	const time_t oneLogicFrameMS = 1000 / m_frameRate;
+	if (frameGrouping > oneLogicFrameMS) {
+		frameGrouping = oneLogicFrameMS;
+	}
 //	DEBUG_LOG(("Network::processRunAheadCommand - trying to set frame grouping to %d.  run ahead = %d, m_frameRate = %d\n", frameGrouping, m_runAhead, m_frameRate));
 	if (frameGrouping < 1) {
 		frameGrouping = 1; // Having a value less than 1 doesn't make sense.
