@@ -6027,7 +6027,7 @@ GUI:GameSaved
 END
 
 GUI:GameSpeed
-"Velocidade do Jogo"
+"Velocidade"
 END
 
 GUI:GameSpeedDown
@@ -6759,7 +6759,7 @@ GUI:LobbyTabInfo
 END
 
 GUI:LobbyTabSettings
-"Configurações da Sala"
+"Opções da Sala"
 END
 
 GUI:LocaleSelect
@@ -7439,7 +7439,7 @@ GUI:PropShadows
 END
 
 GUI:ProRules
-"Regras Competitivas"
+"Regras Pro"
 END
 
 GUI:PSCannotConnect
