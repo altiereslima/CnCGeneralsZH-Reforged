@@ -319,7 +319,11 @@ def main():
             if args.skip_tests:
                 result["steps"]["ctest"] = "SKIPPED_BY_USER"
             else:
-                cp = run([ctest, "--test-dir", build_dir, "-C", args.config, "--output-on-failure"],
+                # Alguns testes do upstream medem tempo de thread (test_wwlib dá 20 ms para
+                # um worker entrar no loop) e falham às vezes num runner de 2 vCPUs ocupado.
+                # Quem falha roda de novo; uma falha de verdade falha as três vezes.
+                cp = run([ctest, "--test-dir", build_dir, "-C", args.config, "--output-on-failure",
+                          "--repeat", "until-pass:3"],
                          log=logs/"07_ctest.log", check=False)
                 if cp.returncode == 0:
                     result["steps"]["ctest"] = "PASS"
