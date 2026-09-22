@@ -43,6 +43,7 @@
 #include "GameLogic/Object.h"
 #include "GameLogic/PartitionManager.h"
 
+#include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/TunnelContain.h"
 
@@ -250,6 +251,48 @@ void TunnelTracker::onTunnelDestroyed( const Object *deadTunnel )
 				obj->onContainedBy( validTunnel );
 		}
 	}
+}
+
+// ------------------------------------------------------------------------
+// A mouth that took a hit this recently is not one to send anybody through: they would come out
+// into whatever is shooting at it.
+static const UnsignedInt TUNNEL_UNDER_FIRE_FRAMES = 2 * LOGICFRAMES_PER_SECOND;
+
+Object *TunnelTracker::findQuietTunnelNear( const Coord3D *pos ) const
+{
+	const UnsignedInt now = TheGameLogic->getFrame();
+	Object *nearest = NULL;
+	Real nearestSqr = 0.0f;
+	for( std::list<ObjectID>::const_iterator it = m_tunnelIDs.begin(); it != m_tunnelIDs.end(); ++it )
+	{
+		Object *tunnel = TheGameLogic->findObjectByID( *it );
+		if( tunnel == NULL || tunnel->isEffectivelyDead() )
+			continue;
+
+		// the stamp starts at 0xffffffff, which the sum wraps to just under the window
+		if( tunnel->getBodyModule()->getLastDamageTimestamp() + TUNNEL_UNDER_FIRE_FRAMES > now )
+			continue;
+
+		const Real distSqr = ThePartitionManager->getDistanceSquared( tunnel, pos, FROM_CENTER_2D );
+		if( nearest == NULL || distSqr < nearestSqr )
+		{
+			nearest = tunnel;
+			nearestSqr = distSqr;
+		}
+	}
+	return nearest;
+}
+
+// ------------------------------------------------------------------------
+Bool TunnelTracker::hasTunnelTraveller() const
+{
+	for( ContainedItemsList::const_iterator it = m_containList.begin(); it != m_containList.end(); ++it )
+	{
+		const AIUpdateInterface *ai = (*it)->getAI();
+		if( ai != NULL && ai->hasTunnelTrip() )
+			return TRUE;
+	}
+	return FALSE;
 }
 
 // ------------------------------------------------------------------------

@@ -737,6 +737,10 @@ public:
 
 	// this is intended for use ONLY by the salvage collection pass in GameLogic.
 	void friend_setSalvageReturnPosition( const Coord3D *pos );
+
+	// this is intended for use ONLY by AIGroup's move order, which sends a unit through its tunnel network.
+	void friend_setTunnelTrip( const Coord3D *goal );
+	Bool hasTunnelTrip() const { return m_hasTunnelTrip; }	///< on its way through the tunnel network to a move order's goal
 #if defined(_DEBUG) || defined(_INTERNAL)	
 	inline const Coord3D *friend_getRequestedDestination() const { return &m_requestedDestination; }
 	inline const Coord3D *friend_getRequestedDestination2() const { return &m_requestedDestination2; }
@@ -918,6 +922,8 @@ private:
 	Bool				m_hasExitProductionRallyPoint;	///< True while m_exitProductionRallyPoint is still waiting to be ordered.
 	Coord3D			m_salvageReturnPosition;		///< Where we stood when we were sent to fetch a salvage crate.
 	Bool				m_hasSalvageReturnPosition;	///< True while the walk back to m_salvageReturnPosition is still owed.
+	Coord3D			m_tunnelTripGoal;						///< Where a move order sent us before a tunnel shortened the way there.
+	Bool				m_hasTunnelTrip;						///< True from the order to enter a tunnel until the walk from the exit to m_tunnelTripGoal is ordered.
 
 	// Locomotors -------------------------------------------------------------------------------------------------
 	enum LocoGoalType	 // Note - written out in save/load xfer, don't change these numbers.  jba.

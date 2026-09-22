@@ -35,6 +35,7 @@
 #include "Common/Player.h"
 #include "Common/SpecialPower.h"
 #include "Common/ThingTemplate.h"
+#include "Common/TunnelTracker.h"
 #include "Common/Upgrade.h"
 #include "Common/Xfer.h"
 #include "Common/XferCRC.h"
@@ -57,6 +58,7 @@
 #include "GameLogic/Module/StealthUpdate.h"
 #include "GameLogic/Module/SpecialPowerUpdateModule.h"
 #include "GameLogic/ObjectIter.h"
+#include "GameLogic/PartitionManager.h"
 #include "GameLogic/TerrainLogic.h"
 
 #ifdef _INTERNAL
@@ -1974,6 +1976,46 @@ static void crowdSeedLanesAlongWaypoint( AIGroup *group, std::list<Object *>& me
 	crowdSeedLanes( members, center, crowdWaypointAim( center, way ) );
 }
 
+static const Real TUNNEL_SHORTCUT_SHARE = 0.7f;	///< the longest a way through the tunnels may be, as a share of the walk
+
+/** The tunnel mouth a player's move order sends `unit` into on its way to `dest`, or NULL when it
+		walks.  A network with no free place is not looked at at all: whatever fills it was put there to
+		stay.  With one free place the network still carries everybody, one after the other, since a unit
+		passing through leaves by the far mouth on the frame after it arrives; what that costs is the
+		queue at the near mouth, a body length for every member this order already sent there.
+
+		All three legs are straight lines, like the walk they are measured against.
+		ponytail: straight lines, not path lengths; a tunnel across a river the walk has to go round
+		looks no better than one across open ground.  A path search per member when that matters. */
+static Object *pickTunnelEntrance( Object *unit, const Coord3D *dest, std::vector<ObjectID> &sentThrough )
+{
+	if (!unit->getAIUpdateInterface()->isDoingGroundMovement())
+		return NULL;
+
+	const TunnelTracker *network = unit->getControllingPlayer()->getTunnelSystem();
+	if ((Int)network->getContainCount() >= network->getContainMax())
+		return NULL;
+
+	Object *entrance = network->findQuietTunnelNear( unit->getPosition() );
+	Object *exit = network->findQuietTunnelNear( dest );
+	if (entrance == NULL || exit == entrance)
+		return NULL;
+
+	if (!TheActionManager->canEnterObject( unit, entrance, CMD_FROM_PLAYER, DONT_CHECK_CAPACITY ))
+		return NULL;
+
+	const Int queued = (Int)std::count( sentThrough.begin(), sentThrough.end(), entrance->getID() );
+	const Real queue = queued * 2.0f * unit->getGeometryInfo().getBoundingCircleRadius();
+	const Real toEntrance = (Real)sqrt( ThePartitionManager->getDistanceSquared( unit, entrance, FROM_CENTER_2D ) );
+	const Real fromExit = (Real)sqrt( ThePartitionManager->getDistanceSquared( exit, dest, FROM_CENTER_2D ) );
+	const Real walk = (Real)sqrt( ThePartitionManager->getDistanceSquared( unit, dest, FROM_CENTER_2D ) );
+	if (toEntrance + queue + fromExit > walk * TUNNEL_SHORTCUT_SHARE)
+		return NULL;
+
+	sentThrough.push_back( entrance->getID() );
+	return entrance;
+}
+
 /**
  * Move to given position(s)
  */
@@ -2361,6 +2403,7 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 	}
 	Int floodCursor = 0;
 	Int airCursor = 0;
+	std::vector<ObjectID> sentThroughTunnels;
 
 	// Works better if you let the near units get the first paths... jba.
 	// Move the ones nearest the goal first.  Reduces collision problems later.
@@ -2389,6 +2432,16 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 				dest = floodGoals[floodCursor++];
 			else if (airCursor < (Int)airMembers.size() && airMembers[airCursor] == theUnit)
 				dest = airGoals[airCursor++];
+
+			// through the tunnel network when that is shorter; see pickTunnelEntrance
+			Object *entrance = pickTunnelEntrance( theUnit, &dest, sentThroughTunnels );
+			if (entrance != NULL)
+			{
+				ai->clearCrowdLane();
+				ai->aiEnter( entrance, cmdSource );
+				ai->friend_setTunnelTrip( &dest );
+				continue;
+			}
 
 			// a vehicle drives its lane of the group's route; a foot soldier walks through the crowd
 			if (!trunkRoute.empty() && !theUnit->isKindOf( KINDOF_INFANTRY ) && ai->isDoingGroundMovement())

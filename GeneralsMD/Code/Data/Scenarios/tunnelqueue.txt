@@ -1,0 +1,24 @@
+# Tunnel shortcut through one free place: nine of the network's ten are taken by units put there to
+# stay, and the same order as tunnelshortcut.txt has to pass through the one that is left.
+#
+# Every member queues at the near mouth and goes through one after the other, since a unit passing
+# through leaves by the far mouth the frame after it arrives.  Compare with tunnelshortcut.txt
+# (ten free places) and tunnelwalk.txt (no tunnels).
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 3 2 small -autoskirmish 2 -takeover -side 0 FactionGLA -side 1 FactionAmerica
+#     -seed 3 -maxframes 4800 -scenario tunnelqueue -logPrefix tunnelqueue_
+
+30    spawn       0  GLATunnelNetwork       1  start0:0:300
+30    spawn       0  GLATunnelNetwork       1  start1:0:300
+# five here and the two each tunnel comes with make nine
+30    spawn       0  GLAInfantryTunnelDefender 5  start0:0:420  25
+60    enter       0  GLAInfantryTunnelDefender 0  GLATunnelNetwork
+
+# the enter picks whichever tunnel it likes, and the last of them is in around frame 2000
+2940  spawn       0  GLAInfantryRebel      12  start0:250:300  25
+2940  spawn       0  GLATankScorpion        4  start0:-250:300 50
+3000  playermove  0  GLAInfantryRebel          start1:150:300
+3000  playermove  0  GLATankScorpion           start1:150:300
+3000  arrive      0  GLAInfantryRebel          start1:150:300  250
+3000  arrive      0  GLATankScorpion           start1:150:300  250

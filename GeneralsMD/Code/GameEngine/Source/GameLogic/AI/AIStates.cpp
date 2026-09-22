@@ -41,6 +41,7 @@
 #include "Common/Team.h"
 #include "Common/ThingTemplate.h"
 #include "Common/ThingFactory.h"
+#include "Common/TunnelTracker.h"
 #include "Common/Xfer.h"
 #include "Common/XFerCRC.h"
 
@@ -6878,6 +6879,14 @@ void AIEnterState::loadPostProcess( void )
 }  // end loadPostProcess
 
 //----------------------------------------------------------------------------------------------------------
+/** A unit passing through a tunnel on its way somewhere queues at a full mouth instead of giving up
+		on it; see AIEnterState::update. */
+static CanEnterType enterCapacityCheck( const Object *obj )
+{
+	return obj->getAI()->hasTunnelTrip() ? DONT_CHECK_CAPACITY : CHECK_CAPACITY;
+}
+
+//----------------------------------------------------------------------------------------------------------
 StateReturnType AIEnterState::onEnter()
 {
 	m_entryToClear = INVALID_ID;
@@ -6886,8 +6895,8 @@ StateReturnType AIEnterState::onEnter()
 	Object* goal = getMachineGoalObject();
 	if (goal)
 	{
-		if( !TheActionManager->canEnterObject( obj, goal, obj->getAI()->getLastCommandSource(), CHECK_CAPACITY ) )
-			return STATE_FAILURE;	
+		if( !TheActionManager->canEnterObject( obj, goal, obj->getAI()->getLastCommandSource(), enterCapacityCheck( obj ) ) )
+			return STATE_FAILURE;
 
 		m_goalPosition = *goal->getPosition();
 
@@ -6980,7 +6989,7 @@ StateReturnType AIEnterState::update()
 
 		m_goalPosition = *goal->getPosition();
 		obj->getAI()->friend_setGoalObject(goal);
-		if (!TheActionManager->canEnterObject(obj, goal, obj->getAI()->getLastCommandSource(), CHECK_CAPACITY))
+		if (!TheActionManager->canEnterObject(obj, goal, obj->getAI()->getLastCommandSource(), enterCapacityCheck( obj )))
 		{
 			/*
 				special-case: if it's an enemy, try attacking it instead. this is to address this bug: (srj)
@@ -7029,7 +7038,15 @@ StateReturnType AIEnterState::update()
 		code = STATE_CONTINUE;
 	}
 
-	if (code == STATE_SUCCESS) 
+	// Passing through a full tunnel network means waiting at the mouth for a place, as long as
+	// somebody inside is passing through too and will free one.  Everybody inside having been put
+	// there to stay means no place is coming, and the trip walks instead.
+	if (code == STATE_SUCCESS && obj->getAI()->hasTunnelTrip() && !goal->getContain()->isValidContainerFor( obj, TRUE ))
+	{
+		return goal->getControllingPlayer()->getTunnelSystem()->hasTunnelTraveller() ? STATE_CONTINUE : STATE_FAILURE;
+	}
+
+	if (code == STATE_SUCCESS)
 	{
 		// Make sure we entered the container.
 		// srj sez: I don't think we want to restrict this to HELD items. See the intro of GLA02.map

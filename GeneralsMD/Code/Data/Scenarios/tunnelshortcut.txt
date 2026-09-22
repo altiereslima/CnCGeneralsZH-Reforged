@@ -1,0 +1,19 @@
+# Tunnel shortcut: a GLA move order across the map with a tunnel at each end.
+#
+# A player's move order sends every member whose trip through the network is shorter than the walk
+# into the nearest tunnel, and it comes out of the one nearest the goal (AIGroup.cpp,
+# pickTunnelEntrance).  Compare the HEADLESS ARRIVE line with tunnelwalk.txt, the same order with
+# no tunnels, and tunnelfull.txt, where the network is full of units put there to stay.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 3 2 small -autoskirmish 2 -takeover -side 0 FactionGLA -side 1 FactionAmerica
+#     -seed 3 -maxframes 3000 -scenario tunnelshortcut -logPrefix tunnel_
+
+30    spawn       0  GLATunnelNetwork       1  start0:0:300
+30    spawn       0  GLATunnelNetwork       1  start1:0:300
+30    spawn       0  GLAInfantryRebel      12  start0:250:300  25
+30    spawn       0  GLATankScorpion        4  start0:-250:300 50
+90    playermove  0  GLAInfantryRebel          start1:150:300
+90    playermove  0  GLATankScorpion           start1:150:300
+90    arrive      0  GLAInfantryRebel          start1:150:300  250
+90    arrive      0  GLATankScorpion           start1:150:300  250

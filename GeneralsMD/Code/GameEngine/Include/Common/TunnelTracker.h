@@ -68,6 +68,9 @@ public:
 
 	const std::list< ObjectID > *getContainerList() const {return &m_tunnelIDs;}
 
+	Object *findQuietTunnelNear( const Coord3D *pos ) const;	///< the tunnel nearest pos that has not been shot at lately, or NULL
+	Bool hasTunnelTraveller() const;	///< is anybody inside only passing through, and so about to free their place?
+
 	Object *getCurNemesis(void);
 	void updateNemesis(const Object *target);
 
