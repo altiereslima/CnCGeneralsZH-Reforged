@@ -43,7 +43,11 @@
 #include "Common/SubsystemInterface.h"
 #include "Common/UnicodeString.h"
 #include "GameClient/DisplayString.h"
-#include "GameClient/HtmlPanel.h"
+#include "GameClient/HtmlTemplate.h"
+
+#include <set>
+
+class HtmlOverlay;
 #include "GameClient/Mouse.h"
 #include "GameClient/RadiusDecal.h"
 #include "GameClient/View.h"
@@ -1193,18 +1197,19 @@ protected:
 	DisplayString *							m_scoreboardStrings[ SCOREBOARD_STRING_COUNT ];
 
 	//
-	// The drop-down in the top left corner that switches the strips on and off, read from
-	// Window/Html/HudToggles.html: one row per summary, check box or line of words in it.
+	// The spectator's page over the battlefield, Window/Html/Spectator.html: the drop-down that
+	// switches the strips on and off, and every player's net worth.  Only while watching.
 	//
-	void loadHudToggles( void );
-	void freeHudToggleStrings( void );
-	void drawHudToggles( void );
-	Bool handleHudTogglesClick( const ICoord2D *mouse, Bool act );	///< TRUE when the click landed on it
-	Bool												m_hudTogglesLoaded;			///< read once a match, so an edited page shows in the next one
-	Int													m_hudTogglesBottom;			///< its bottom edge, so the message list starts under it
-	std::vector< HtmlRow >			m_hudToggleRows;
-	std::vector< IRegion2D >		m_hudToggleRects;				///< each row's place this frame, empty while it is hidden
-	std::vector< DisplayString * >	m_hudToggleStrings;
+	void drawSpectatorPage( void );
+	Bool handleSpectatorPageClick( const ICoord2D *mouse, Bool act );	///< TRUE when the click landed on it
+	HtmlOverlay *								m_spectatorOverlay;
+	Bool												m_spectatorPageLoaded;		///< read once a match, so an edited page shows in the next one
+	Bool												m_spectatorPageShown;			///< drawn this frame, so clicks are its to take
+	std::string									m_spectatorPage;					///< the page as written, before its {{values}} are filled
+	std::set< std::string >			m_spectatorFlipped;				///< names a data-click="flip:name" has flipped
+	HtmlLists										m_spectatorLists;
+	UnsignedInt									m_spectatorListsFrame;		///< the logic frame the lists were last gathered on
+	Int													m_hudTogglesBottom;				///< the bottom of the page's #hud-top, so the message list starts under it
 
 	Bool												m_placementRangeRingUp;	///< the structure on the cursor is armed, so its reach is drawn
 	Real												m_placementRingRadius;	///< how far from its centre it hits

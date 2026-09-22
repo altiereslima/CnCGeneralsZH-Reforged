@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<!--
+  What a spectator sees over the battlefield: the drop-down that switches the strips, and every
+  player's net worth.  Laid out by litehtml and drawn by the game (GameClient/HtmlOverlay.h).
+
+  A CSS pixel is a pixel of an 800x600 screen and font-size is the game font's point size there;
+  the page is scaled with the rest of the interface.  A background on html or body is for a
+  browser only.  Not drawn: rounded corners, overflow clipping, list bullets, gradients other
+  than linear ones.
+
+  The game fills in, before layout (GameClient/HtmlTemplate.h):
+    {{option:Key}}    "on" while that Options.ini on/off option is on
+    {{flip:name}}     "flipped" while a data-click of flip:name has been clicked an odd number of times
+    {{text:Label}}    a string table label, in the player's language
+    data-each="players", one copy per player still in the match, richest first, with
+      {{name}} {{networth}} {{share}} (percent of the richest) {{color}} {{team}} {{teams}}
+      {{portrait}} (a mapped image name, for <img src>)
+
+  A data-click of option:Key flips that option and saves it; one of flip:name flips the name for
+  the rest of the match.  #hud-top's bottom edge is where the message list starts.
+
+  Edit the copy under Run/Window/Html and the next match reads it.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Spectator</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { background-color: #3b4a36; color: #e8e8e8; font-size: 9px; }
+
+  #hud-top { position: absolute; left: 6px; top: 6px; width: 150px; }
+
+  .menu { background-color: rgba(0, 0, 0, 0.6); margin-bottom: 4px; }
+  .row { padding: 2px 3px; }
+  .row:hover { background-color: rgba(255, 255, 255, 0.12); }
+  .items { display: none; }
+  .menu.flipped .items { display: block; }
+  .box { display: inline-block; width: 8px; height: 8px; margin-right: 5px; border: 1px solid #c8c8c8;
+         text-align: center; line-height: 8px; vertical-align: middle; }
+  .on .box { background-color: #5ac85a; }
+  .menu .sign::before { content: "+"; }
+  .menu.flipped .sign::before { content: "-"; }
+
+  .networth { background-color: rgba(8, 12, 16, 0.78); border-top: 1px solid #45525c; padding-bottom: 2px; }
+  .title { padding: 2px 4px; color: #aab6bf; }
+  .title:hover { color: #ffffff; }
+  .networth .sign::before { content: "- "; }
+  .networth.flipped .sign::before { content: "+ "; }
+  .networth.flipped .list { display: none; }
+
+  .player { height: 14px; margin: 1px 2px; }
+  .portrait { float: left; width: 22px; height: 14px; border-left: 2px solid #888888; }
+  .track { position: relative; height: 14px; margin-left: 27px; }
+  .bar { position: absolute; left: 0; top: 0; height: 14px; }
+  .teams2.team0 .bar { background: linear-gradient(to right, #2f6b21, #72cf4b); }
+  .teams2.team1 .bar { background: linear-gradient(to right, #7a1d17, #e2553f); }
+  .worth { position: relative; padding-left: 3px; line-height: 14px; font-weight: bold; color: #ffffff; }
+</style>
+</head>
+<body>
+<div id="hud-top">
+
+  <div class="menu {{flip:strips}}">
+    <div class="row" data-click="flip:strips"><span class="box sign"></span>{{text:GUI:HudToggles}}</div>
+    <div class="items">
+      <div class="row {{option:ShowProductionStrip}}" data-click="option:ShowProductionStrip"><span class="box"></span>{{text:GUI:HudProductionStrip}}</div>
+      <div class="row {{option:ShowSkillStrip}}" data-click="option:ShowSkillStrip"><span class="box"></span>{{text:GUI:HudSkillStrip}}</div>
+      <div class="row {{option:ShowSuperweaponStrip}}" data-click="option:ShowSuperweaponStrip"><span class="box"></span>{{text:GUI:HudSuperweaponStrip}}</div>
+    </div>
+  </div>
+
+  <div class="networth {{flip:networth}}">
+    <div class="title" data-click="flip:networth"><span class="sign"></span>{{text:GUI:HudNetWorth}}</div>
+    <div class="list">
+      <div class="player teams{{teams}} team{{team}}" data-each="players">
+        <img class="portrait" src="{{portrait}}" style="border-color: {{color}}">
+        <div class="track">
+          <div class="bar" style="width: {{share}}%; background-color: {{color}}"></div>
+          <span class="worth">{{networth}}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

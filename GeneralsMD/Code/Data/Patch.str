@@ -1054,6 +1054,11 @@ GUI:HudSuperweaponStrip
 "Superweapon timers"
 END
 
+// the spectator's list of every player's cash plus what everything he has standing cost
+GUI:HudNetWorth
+"Net worth"
+END
+
 // the scoreboard on Tab
 GUI:ScoreboardAllies
 "YOUR SIDE"

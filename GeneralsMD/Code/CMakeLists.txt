@@ -30,7 +30,8 @@ foreach(vendored
     ${COMP}/ZLib/deflate.c
     ${COMP}/LZHCompress/CompLibSource/Lzhl.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Include/d3d8.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/GameSpy/CMakeLists.txt)
+    ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/GameSpy/CMakeLists.txt
+    ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/litehtml/CMakeLists.txt)
   if(NOT EXISTS ${vendored})
     message(FATAL_ERROR
       "${vendored} is missing. Run Tools\\vendor.ps1 (build.bat does it for you).")
@@ -476,6 +477,14 @@ set(GS_BUILD_TESTS      OFF CACHE BOOL "" FORCE)
 set(GS_INCLUDE_VOICE    OFF CACHE BOOL "" FORCE)
 add_subdirectory(${LIBSRC}/GameSpy ${CMAKE_CURRENT_BINARY_DIR}/gamespy)
 
+# ---- litehtml -------------------------------------------------------------
+# The HTML and CSS layout engine behind the pages drawn over the battlefield (GameClient/
+# HtmlOverlay.cpp).  It lays a page out and calls back to draw each box and each run of text, so
+# the drawing stays the game's own.  Its own CMakeLists sets /permissive- and C++17 for itself
+# alone, and brings the gumbo HTML parser with it.
+set(LITEHTML_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+add_subdirectory(${LIBSRC}/litehtml ${CMAKE_CURRENT_BINARY_DIR}/litehtml)
+
 # d3d8to9 is no longer built.  It was a d3d8.dll next to generals.exe that translated
 # every D3D8 call to Direct3D 9, which is how the renderer ran on a modern runtime
 # without touching the ~5600 D3D8 call sites.  The renderer creates its own
@@ -534,7 +543,7 @@ target_compile_definitions(gameengine PUBLIC
 set_target_properties(gameengine PROPERTIES CXX_STANDARD 17)
 target_link_libraries(gameengine PUBLIC
   ww3d2 wwlib wwmath wwsaveload wwdebug wwutil compression debuglib wwdownload
-  benchmark eabrowserdispatch profile gamespy
+  benchmark eabrowserdispatch profile gamespy litehtml
   dinput8 wininet imagehlp imm32)
 
 # ===========================================================================
@@ -770,12 +779,12 @@ set_target_properties(test_gameengine PROPERTIES CXX_STANDARD 17)
 # fxlist_reforged_ini_parses_and_keeps_its_light runs the fork's own FXList file through the real
 # INI parser, so it needs the tracked master rather than whatever sits in Run/.
 # the_options_menu_buttons_all_wear_one_font reads the tracked layout master, not Run/'s copy.
-# the_hud_toggles_page_binds_only_on_off_options reads the tracked page master the same way.
+# the_spectator_page_names_only_on_off_options reads the tracked page master the same way.
 target_compile_definitions(test_gameengine PRIVATE
   GAMEENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/GameEngine"
   FXLIST_REFORGED_INI="${CMAKE_CURRENT_SOURCE_DIR}/Data/INI/FXListReforged.ini"
   OPTIONS_MENU_WND="${CMAKE_CURRENT_SOURCE_DIR}/Data/Window/Menus/OptionsMenu.wnd"
-  HUD_TOGGLES_HTML="${CMAKE_CURRENT_SOURCE_DIR}/Data/Window/Html/HudToggles.html"
+  SPECTATOR_HTML="${CMAKE_CURRENT_SOURCE_DIR}/Data/Window/Html/Spectator.html"
   PLATE_TEXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Data/Art/Textures")
 
 # The three hand-written self-checks predate the harness; run them from ctest

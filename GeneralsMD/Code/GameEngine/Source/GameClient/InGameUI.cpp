@@ -64,6 +64,7 @@
 #include "Common/FileSystem.h"
 #include "Common/file.h"
 #include "GameNetwork/GameSpy/ThreadUtils.h"
+#include "GameClient/HtmlOverlay.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/GadgetPushButton.h"
@@ -1188,7 +1189,10 @@ InGameUI::InGameUI()
 	m_productionStripTraySource = NULL;
 	for( Int stripString = 0; stripString < STRIP_OVERFLOW_STRINGS; stripString++ )
 		m_productionStripOverflow[ stripString ] = NULL;
-	m_hudTogglesLoaded = FALSE;
+	m_spectatorOverlay = NULL;
+	m_spectatorPageLoaded = FALSE;
+	m_spectatorPageShown = FALSE;
+	m_spectatorListsFrame = 0;
 	m_hudTogglesBottom = 0;
 	m_scoreboardOpen = FALSE;
 	m_scoreboardStringsUsed = 0;
@@ -1309,7 +1313,8 @@ InGameUI::~InGameUI()
 		m_productionStripTraySource = NULL;
 	}
 
-	freeHudToggleStrings();
+	delete m_spectatorOverlay;
+	m_spectatorOverlay = NULL;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1732,17 +1737,22 @@ static Real elevatedReach( Real reach, Real range, const Coord3D &center, Real a
 }
 
 //-------------------------------------------------------------------------------------------------
-// The top left drop-down is a page: its rows come from this file, and each check box in it names
-// the Options.ini key it flips.  A loose copy under Run/ beats the archive, so it can be edited
-// between two matches without a build.
+// The spectator's page.  A loose copy under Run/ beats the archive, so it can be edited between two
+// matches without a build.  What a data-click names is also the {{name}} that reads it back:
+// data-click="option:Key" flips that on/off option and {{option:Key}} is "on" while it is on;
+// data-click="flip:name" flips a switch that lasts the match and {{flip:name}} is "flipped" while
+// it is flipped.  {{text:Label}} is a string table label in the player's language.
 //-------------------------------------------------------------------------------------------------
-static const char *const HUD_TOGGLES_PAGE = "Window\\Html\\HudToggles.html";
+static const char *const SPECTATOR_PAGE = "Window\\Html\\Spectator.html";
+static const std::string OPTION_ACTION = "option:";
+static const std::string FLIP_ACTION = "flip:";
+static const std::string TEXT_LOOKUP = "text:";
 
 enum
 {
-	HUD_TOGGLES_INSET	= 6,		///< from the top and left edges of the screen, 800x600
-	HUD_TOGGLES_WIDTH	= 150,	///< the drop-down's narrowest width, 800x600; longer words widen it
-	HUD_TOGGLES_PAD		= 3			///< round the words and the boxes inside a row, 800x600
+	HUD_TOGGLES_INSET					= 6,													///< between the page's #hud-top and the messages under it, 800x600
+	NET_WORTH_REFRESH_FRAMES	= LOGICFRAMES_PER_SECOND / 2,	///< how often every player's worth is counted again
+	PERCENT										= 100
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -1764,190 +1774,198 @@ static Bool stripSwitchedOff( Bool GlobalData::* flag )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Read the drop-down's page and make a string for each of its rows.  A check box whose name is not
-	* an on/off option has nothing to flip, so it is shown as its words alone. */
+/** {{text:Label}}: a string table label, in the player's language. */
 //-------------------------------------------------------------------------------------------------
-void InGameUI::loadHudToggles( void )
+static Bool lookupGameText( const std::string &name, std::string &value )
 {
-	m_hudTogglesLoaded = TRUE;
-	freeHudToggleStrings();
-	m_hudToggleRows.clear();
-	m_hudToggleRects.clear();
+	if( name.compare( 0, TEXT_LOOKUP.size(), TEXT_LOOKUP ) != 0 )
+		return FALSE;
+	value = WideCharStringToMultiByte( TheGameText->fetch( name.substr( TEXT_LOOKUP.size() ).c_str() ).str() );
+	return TRUE;
+}
 
-	File *file = TheFileSystem->openFile( HUD_TOGGLES_PAGE, File::READ | File::BINARY );
-	if( file == NULL )
-	{
-		DEBUG_LOG(( "HUD toggles: %s is missing, so the drop-down is not drawn\n", HUD_TOGGLES_PAGE ));
-		return;
-	}
-	const Int size = file->size();
-	char *page = file->readEntireAndClose();
-	HtmlPanel_buildRows( std::string( page, size ), m_hudToggleRows );
-	delete [] page;
+//-------------------------------------------------------------------------------------------------
+static std::string cssColor( Color color )
+{
+	UnsignedByte red, green, blue, alpha;
+	GameGetColorComponents( color, &red, &green, &blue, &alpha );
+	char text[ sizeof( "#rrggbb" ) ];
+	sprintf( text, "#%02x%02x%02x", red, green, blue );
+	return text;
+}
 
-	GameFont *font = TheFontLibrary->getFont( m_superweaponNormalFont,
-																						TheGlobalLanguageData->adjustFontSize( HUD_OVERLAY_POINT_SIZE ), TRUE );
-	for( size_t row = 0; row < m_hudToggleRows.size(); row++ )
+struct NetWorthGather
+{
+	const Player *player;
+	Int worth;
+};
+
+static void addObjectWorth( Object *obj, void *userData )
+{
+	NetWorthGather *gather = (NetWorthGather *)userData;
+	if( !obj->isEffectivelyDead() )
+		gather->worth += obj->getTemplate()->calcCostToBuild( gather->player );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The page's "players" list: everyone still in the match, richest first, each with what his cash
+	* and everything he has standing would cost to buy again.  Allies both ways share a team number,
+	* counted in the order the teams first appear in the player list, and every entry carries how
+	* many teams there are, so a page can colour two sides the way Dota does and leave a free for all
+	* in the players' own colours. */
+//-------------------------------------------------------------------------------------------------
+static void gatherNetWorth( std::vector< HtmlValues > &rows )
+{
+	struct Worth
 	{
-		HtmlRow &html = m_hudToggleRows[ row ];
-		if( html.kind == HTML_ROW_CHECKBOX )
+		Player *player;
+		Int worth;
+		Int team;
+	};
+	std::vector< Worth > worths;
+	const Player *local = ThePlayerList->getLocalPlayer();
+	Int teams = 0;
+	for( Int index = 0; index < ThePlayerList->getPlayerCount(); index++ )
+	{
+		Player *player = ThePlayerList->getNthPlayer( index );
+		if( player == NULL || player == local || !player->isPlayerActive() || !player->isPlayableSide() )
+			continue;
+
+		NetWorthGather gather;
+		gather.player = player;
+		gather.worth = player->getMoney()->countMoney();
+		player->iterateObjects( addObjectWorth, &gather );
+
+		Worth worth = { player, gather.worth, -1 };
+		for( size_t earlier = 0; earlier < worths.size() && worth.team < 0; earlier++ )
 		{
-			const OptionDef *option = findOptionDef( html.name.c_str() );
-			if( option == NULL || option->kind != OPTION_BOOL )
-			{
-				DEBUG_LOG(( "HUD toggles: check box name=\"%s\" in %s is not an on/off option\n", html.name.c_str(), HUD_TOGGLES_PAGE ));
-				html.kind = HTML_ROW_TEXT;
-			}
+			const Player *other = worths[ earlier ].player;
+			if( player->getRelationship( other->getDefaultTeam() ) == ALLIES && other->getRelationship( player->getDefaultTeam() ) == ALLIES )
+				worth.team = worths[ earlier ].team;
 		}
-
-		DisplayString *words = TheDisplayStringManager->newDisplayString();
-		words->setFont( font );
-		if( html.textKey.empty() )
-			words->setText( UnicodeString( MultiByteToWideCharSingleLine( html.text.c_str() ).c_str() ) );
-		else
-			words->setText( TheGameText->fetch( html.textKey.c_str() ) );
-		m_hudToggleStrings.push_back( words );
+		if( worth.team < 0 )
+			worth.team = teams++;
+		worths.push_back( worth );
 	}
-	m_hudToggleRects.resize( m_hudToggleRows.size() );
+
+	std::stable_sort( worths.begin(), worths.end(), []( const Worth &a, const Worth &b ) { return a.worth > b.worth; } );
+	const Int richest = worths.empty() ? 0 : worths.front().worth;
+
+	rows.clear();
+	for( size_t index = 0; index < worths.size(); index++ )
+	{
+		const Worth &worth = worths[ index ];
+		const PlayerTemplate *side = worth.player->getPlayerTemplate();
+		const Image *portrait = side ? side->getEnabledImage() : NULL;
+
+		HtmlValues row;
+		row[ "name" ] = WideCharStringToMultiByte( worth.player->getPlayerDisplayName().str() );
+		row[ "networth" ] = std::to_string( worth.worth );
+		row[ "share" ] = std::to_string( richest > 0 ? worth.worth * PERCENT / richest : 0 );
+		row[ "color" ] = cssColor( clientPlayerColor( worth.player ) );
+		row[ "team" ] = std::to_string( worth.team );
+		row[ "teams" ] = std::to_string( teams );
+		row[ "portrait" ] = portrait ? portrait->getName().str() : "";
+		rows.push_back( row );
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
-void InGameUI::freeHudToggleStrings( void )
-{
-	for( size_t row = 0; row < m_hudToggleStrings.size(); row++ )
-		TheDisplayStringManager->freeDisplayString( m_hudToggleStrings[ row ] );
-	m_hudToggleStrings.clear();
-}
-
-//-------------------------------------------------------------------------------------------------
-/** The strips over the battlefield, switched on and off from a drop-down in the top left corner.
+/** The spectator's page: the drop-down that switches the strips on and off, and every player's net
+	* worth.
 	*
-	* Watching a match three of them fight over the same picture - the production rows, the
+	* Watching a match three strips fight over the same picture - the production rows, the
 	* promotions, the superweapon countdowns - and which of them a spectator wants depends on what he
-	* is watching for.  Closed it is one line with a plus in it.  Each box flips its option the moment
-	* it is clicked and saves the choice with the rest of the options.  Only while watching: playing,
-	* the top left corner belongs to the messages. */
+	* is watching for.  Each box flips its option the moment it is clicked and saves the choice with
+	* the rest of the options.  Only while watching: playing, the top left corner belongs to the
+	* messages, and the other side's worth is not a player's to know. */
 //-------------------------------------------------------------------------------------------------
-void InGameUI::drawHudToggles( void )
+void InGameUI::drawSpectatorPage( void )
 {
 	m_hudTogglesBottom = 0;
-	for( size_t row = 0; row < m_hudToggleRects.size(); row++ )
-		m_hudToggleRects[ row ].lo = m_hudToggleRects[ row ].hi = ICoord2D();
+	m_spectatorPageShown = FALSE;
 
 	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
 		return;
 	if( !localPlayerWatching() )
 		return;
 
-	if( !m_hudTogglesLoaded )
-		loadHudToggles();
-	if( m_hudToggleRows.empty() )
+	if( !m_spectatorPageLoaded )
+	{
+		m_spectatorPageLoaded = TRUE;
+		m_spectatorPage.clear();
+		File *file = TheFileSystem->openFile( SPECTATOR_PAGE, File::READ | File::BINARY );
+		if( file == NULL )
+		{
+			DEBUG_LOG(( "Spectator page: %s is missing, so nothing is drawn over the battlefield\n", SPECTATOR_PAGE ));
+			return;
+		}
+		const Int size = file->size();
+		char *page = file->readEntireAndClose();
+		m_spectatorPage.assign( page, size );
+		delete [] page;
+	}
+	if( m_spectatorPage.empty() )
 		return;
+	if( m_spectatorOverlay == NULL )
+		m_spectatorOverlay = new HtmlOverlay( m_superweaponNormalFont );
 
-	const Int pad = stripPixels( HUD_TOGGLES_PAD );
-	const Int left = stripPixels( HUD_TOGGLES_INSET );
-	const Int top = stripPixels( HUD_TOGGLES_INSET );
-	const Int box = m_hudToggleStrings[ 0 ]->getFont()->height;
-	const Int rowH = box + 2 * pad;
-	const Color plate = GameMakeColor( 0, 0, 0, 150 );
-	const Color edge = GameMakeColor( 200, 200, 200, 255 );
-	const Color on = GameMakeColor( 90, 200, 90, 255 );
-	const Color words = GameMakeColor( 235, 235, 235, 255 );
-	const Color shade = GameMakeColor( 0, 0, 0, 255 );
-
-	// one width for every row, so the plates stack into one panel
-	Int width = stripPixels( HUD_TOGGLES_WIDTH );
-	for( Int row = 0; row < (Int)m_hudToggleRows.size(); row++ )
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	if( m_spectatorLists.empty() || frame < m_spectatorListsFrame || frame >= m_spectatorListsFrame + NET_WORTH_REFRESH_FRAMES )
 	{
-		if( !HtmlPanel_isRowShown( m_hudToggleRows, row ) )
-			continue;
-		Int textW = 0, textH = 0;
-		m_hudToggleStrings[ row ]->getSize( &textW, &textH );
-		width = max( width, box + textW + 3 * pad );
+		gatherNetWorth( m_spectatorLists[ "players" ] );
+		m_spectatorListsFrame = frame;
 	}
 
-	TheDisplay->beginBatch2D();
+	HtmlValues values;
+	for( Int row = 0; row < TheOptionCatalogCount; row++ )
+		if( TheOptionCatalog[ row ].kind == OPTION_BOOL && TheOptionCatalog[ row ].get() )
+			values[ OPTION_ACTION + TheOptionCatalog[ row ].iniKey ] = "on";
+	for( std::set< std::string >::const_iterator name = m_spectatorFlipped.begin(); name != m_spectatorFlipped.end(); ++name )
+		values[ FLIP_ACTION + *name ] = "flipped";
 
-	Int y = top;
-	for( Int row = 0; row < (Int)m_hudToggleRows.size(); row++ )
-	{
-		if( !HtmlPanel_isRowShown( m_hudToggleRows, row ) )
-			continue;
-
-		const HtmlRow &html = m_hudToggleRows[ row ];
-		IRegion2D *rect = &m_hudToggleRects[ row ];
-		rect->lo.x = left;
-		rect->lo.y = y;
-		rect->hi.x = left + width;
-		rect->hi.y = y + rowH;
-
-		TheDisplay->drawFillRect( left, y, width, rowH, plate );
-
-		const Int boxX = left + pad;
-		const Int boxY = y + pad;
-		Int wordsX = boxX;
-		if( html.kind != HTML_ROW_TEXT )
-		{
-			TheDisplay->drawOpenRect( boxX, boxY, box, box, 1.0f, edge );
-			wordsX = boxX + box + 2 * pad;
-		}
-
-		if( html.kind == HTML_ROW_SUMMARY )
-		{
-			// a minus to close it, a plus to open it
-			const Int middleY = boxY + box / 2;
-			const Int middleX = boxX + box / 2;
-			TheDisplay->drawLine( boxX + pad, middleY, boxX + box - pad, middleY, 2.0f, edge );
-			if( !html.open )
-				TheDisplay->drawLine( middleX, boxY + pad, middleX, boxY + box - pad, 2.0f, edge );
-		}
-		else if( html.kind == HTML_ROW_CHECKBOX && findOptionDef( html.name.c_str() )->get() )
-		{
-			TheDisplay->drawFillRect( boxX + pad, boxY + pad, box - 2 * pad, box - 2 * pad, on );
-		}
-
-		m_hudToggleStrings[ row ]->draw( wordsX, y + pad, words, shade );
-		y += rowH;
-	}
-
-	TheDisplay->endBatch2D();
-
-	m_hudTogglesBottom = y;
+	m_spectatorOverlay->setPage( HtmlTemplate_expand( m_spectatorPage, values, m_spectatorLists, lookupGameText ) );
+	m_spectatorOverlay->hover( TheMouse->getMouseStatus()->pos );
+	m_spectatorOverlay->draw();
+	m_spectatorPageShown = TRUE;
+	m_hudTogglesBottom = m_spectatorOverlay->bottomOf( "#hud-top" );
 }
 
 //-------------------------------------------------------------------------------------------------
-/** A click on the drop-down is the drop-down's, whatever button it was, so it never becomes a move
-	* order into the ground under it.  Only a plain left click does anything. */
+/** A click on something the page drew is the page's, whatever button it was, so it never becomes a
+	* move order into the ground under it.  Only a plain left click does anything. */
 //-------------------------------------------------------------------------------------------------
-Bool InGameUI::handleHudTogglesClick( const ICoord2D *mouse, Bool act )
+Bool InGameUI::handleSpectatorPageClick( const ICoord2D *mouse, Bool act )
 {
-	for( size_t row = 0; row < m_hudToggleRects.size(); row++ )
-	{
-		const IRegion2D &rect = m_hudToggleRects[ row ];
-		if( mouse->x < rect.lo.x || mouse->x >= rect.hi.x || mouse->y < rect.lo.y || mouse->y >= rect.hi.y )
-			continue;
-
-		if( !act )
-			return TRUE;
-
-		HtmlRow &html = m_hudToggleRows[ row ];
-		if( html.kind == HTML_ROW_SUMMARY )
-			html.open = !html.open;
-
-		if( html.kind == HTML_ROW_CHECKBOX )
-		{
-			const OptionDef *option = findOptionDef( html.name.c_str() );
-			const Bool now = !option->get();
-			option->set( now );
-
-			OptionPreferences pref;
-			pref[ AsciiString( option->iniKey ) ] = AsciiString( now ? "yes" : "no" );
-			pref.write();
-		}
+	if( !m_spectatorPageShown || !m_spectatorOverlay->hover( *mouse ) )
+		return FALSE;
+	if( !act )
 		return TRUE;
-	}
 
-	return FALSE;
+	const std::string action = m_spectatorOverlay->click( *mouse );
+	if( action.compare( 0, FLIP_ACTION.size(), FLIP_ACTION ) == 0 )
+	{
+		const std::string name = action.substr( FLIP_ACTION.size() );
+		if( m_spectatorFlipped.erase( name ) == 0 )
+			m_spectatorFlipped.insert( name );
+	}
+	else if( action.compare( 0, OPTION_ACTION.size(), OPTION_ACTION ) == 0 )
+	{
+		const OptionDef *option = findOptionDef( action.substr( OPTION_ACTION.size() ).c_str() );
+		if( option == NULL || option->kind != OPTION_BOOL )
+		{
+			DEBUG_LOG(( "Spectator page: data-click=\"%s\" names no on/off option\n", action.c_str() ));
+			return TRUE;
+		}
+
+		const Bool now = !option->get();
+		option->set( now );
+
+		OptionPreferences pref;
+		pref[ AsciiString( option->iniKey ) ] = AsciiString( now ? "yes" : "no" );
+		pref.write();
+	}
+	return TRUE;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3374,7 +3392,9 @@ void InGameUI::reset( void )
 {
 	m_isQuitMenuVisible = FALSE;
 	m_scoreboardOpen = FALSE;
-	m_hudTogglesLoaded = FALSE;
+	m_spectatorPageLoaded = FALSE;
+	m_spectatorFlipped.clear();
+	m_spectatorLists.clear();
 	m_inputEnabled = true;
 	// reset the command bar
 	TheControlBar->reset();
@@ -6654,7 +6674,7 @@ void InGameUI::postDraw( void )
 	drawSkillStrip();			// the same shelf, the other end of it
 	drawBlindSpots();
 	drawPlacementReach();		// after the shade, so the outline stays bright over it
-	drawHudToggles();
+	drawSpectatorPage();
 
 
 	// render our display strings for the messages if on
@@ -10329,7 +10349,7 @@ Bool InGameUI::handleProductionStripClick( const ICoord2D *mouse, Bool cancel )
 		return FALSE;
 
 	// the strip drop-down lies over the world the same way the strip does, so its clicks come here too
-	if( handleHudTogglesClick( mouse, !cancel ) )
+	if( handleSpectatorPageClick( mouse, !cancel ) )
 		return TRUE;
 
 	for( Int row = 0; row < PRODUCTION_STRIP_ROWS; row++ )

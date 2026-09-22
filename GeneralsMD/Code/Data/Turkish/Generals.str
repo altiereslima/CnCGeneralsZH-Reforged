@@ -15585,6 +15585,10 @@ GUI:HudSuperweaponStrip
 "Süper silah sayaçları"
 END
 
+GUI:HudNetWorth
+"Net değer"
+END
+
 GUI:ScoreboardAllies
 "TAKIMIN"
 END

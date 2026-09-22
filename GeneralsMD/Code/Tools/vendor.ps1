@@ -115,6 +115,23 @@ function Install-GameSpy {
   Step "GamespySDK -> Libraries\Source\GameSpy"
 }
 
+# --- litehtml 0.10, whole repository: the HTML and CSS layout engine behind the pages drawn over
+# the battlefield. Its CMakeLists builds the bundled gumbo parser as well. Same .gitignore dance as
+# GameSpy, for the same reason.
+function Install-Litehtml {
+  $destination = Join-Path $libraries 'Source\litehtml'
+  if ((Test-Path (Join-Path $destination 'CMakeLists.txt')) -and -not $Force) { return }
+  $archive = Get-File 'https://github.com/litehtml/litehtml/archive/9bc84b8b8d15a4e50f18b327aa30955048b441c2.zip' (Join-Path $work 'litehtml-0.10.zip')
+  $source = Expand-Source $archive 'litehtml'
+  $keep = Join-Path $destination '.gitignore'
+  $kept = if (Test-Path $keep) { Get-Content $keep -Raw } else { $null }
+  if (Test-Path $destination) { Remove-Item -Recurse -Force $destination }
+  New-Item -ItemType Directory -Force -Path $destination | Out-Null
+  Copy-Item (Join-Path $source '*') $destination -Recurse -Force
+  if ($null -ne $kept) { Set-Content -Path $keep -Value $kept -NoNewline }
+  Step "litehtml 0.10 -> Libraries\Source\litehtml"
+}
+
 # --- The fork's own upscaled art: every 3D texture at twice its size, the normal maps the models
 # are lit through, and the ground. Not in git - ReforgedTextures.big alone is a gigabyte, ten times
 # what GitHub takes in a file, and LFS in a fork is billed to the parent repository.
@@ -217,5 +234,6 @@ Install-Zlib
 Install-Lzhl
 Install-DirectX
 Install-GameSpy
+Install-Litehtml
 Install-Art
 Step 'everything the build needs is in place'
