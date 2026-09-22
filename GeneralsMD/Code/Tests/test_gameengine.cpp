@@ -488,6 +488,39 @@ TEST(ini_unknown_block_aborts_the_file)
 	remove( TEST_INI );
 }
 
+/* A map.ini from a player's map folder named a ThreatLevel field on an Object, which Zero Hour has
+   never had, and the match crashed while loading.  GameLogic loads map.ini with unknown fields
+   skipped; every other file still throws on one. */
+TEST(ini_unknown_field_is_skipped_only_when_asked)
+{
+	CHECK( bootOnce() );
+
+	writeFile( TEST_INI,
+		"WaterSet EVENING\r\n"
+		"  ThreatLevel = 3\r\n"
+		"  WaterRepeatCount = 6\r\n"
+		"End\r\n" );
+
+	WaterSettings[ TIME_OF_DAY_EVENING ].m_waterRepeatCount = -1;
+	CHECK( loadIni( TEST_INI ) == FALSE );
+
+	Bool threw = FALSE;
+	INI ini;
+	ini.setSkipUnknownFields( TRUE );
+	try
+	{
+		ini.load( AsciiString( TEST_INI ), INI_LOAD_OVERWRITE, NULL );
+	}
+	catch( ... )
+	{
+		threw = TRUE;
+	}
+	CHECK( threw == FALSE );
+	CHECK_EQ( WaterSettings[ TIME_OF_DAY_EVENING ].m_waterRepeatCount, 6 );
+
+	remove( TEST_INI );
+}
+
 /* Data\INI\FXListReforged.ini is the fork's own explosion light: 89 of EA's FXLists, each repeated
 	 whole with one LightPulse added.  Whole, because FXListStore::parseFXListDefinition clears an
 	 entry before re-reading it - a half-copied block does not add a light, it deletes an explosion.

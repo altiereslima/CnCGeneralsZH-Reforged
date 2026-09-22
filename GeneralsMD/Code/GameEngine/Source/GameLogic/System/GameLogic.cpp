@@ -2534,6 +2534,7 @@ void GameLogic::loadMapINI( AsciiString mapName )
 	if (TheFileSystem->doesFileExist(fullFledgeFilename)) {
 		DEBUG_LOG(("Loading map.ini\n"));
 		INI ini;
+		ini.setSkipUnknownFields( TRUE );
 		ini.load( AsciiString(fullFledgeFilename), INI_LOAD_CREATE_OVERRIDES, NULL );
 	}
 
@@ -2541,6 +2542,7 @@ void GameLogic::loadMapINI( AsciiString mapName )
 	if (TheFileSystem->doesFileExist(fullFledgeFilename)) {
 		DEBUG_LOG(("Loading solo.ini\n"));
 		INI ini;
+		ini.setSkipUnknownFields( TRUE );
 		ini.load( AsciiString(fullFledgeFilename), INI_LOAD_CREATE_OVERRIDES, NULL );
 	}
 	
