@@ -18,9 +18,12 @@ GAMESPY_REPO = "https://github.com/TheSuperHackers/GamespySDK.git"
 GAMESPY_COMMIT = "b1b77d8f1f30d289b4b4910d305a377f706a0bf7"
 LZH_REPO = "https://github.com/TheSuperHackers/lzhl-1.0.git"
 LZH_COMMIT = "dfd96e2ca64adaddb35dd4ebadd6add7d5586783"
-THYME_REPO = "https://github.com/TheAssemblyArmada/Thyme.git"
-THYME_MILES_COMMIT = "ccef1e11c1355c6db577a057c06e7d790f1a0333"
-THYME_MILES_FILES = ["miles.c", "miles.def", "miles.h"]
+# Mesmo commit que GeneralsMD/Code/Tools/vendor.ps1 usa (min-dx8-sdk @ 7bddff8).
+DX8_REPO = "https://github.com/TheSuperHackers/min-dx8-sdk.git"
+DX8_COMMIT = "7bddff8c01f5fb931c3cb73d4aa8e66d303d97bc"
+# extra/ não pode ser copiado inteiro: basetsd.h, d3d.h, ddraw.h e dsound.h de lá
+# sombreiam o Windows SDK moderno e quebram winnt.h. Só estes três são usados.
+DX8_EXTRA_FILES = ["d3dxmath.h", "d3dxmath.inl", "d3dxerr.h"]
 
 LZH_SOURCE_FILES = [
     "Huff.cpp", "Lz.cpp", "Lzhl.cpp",
@@ -75,6 +78,20 @@ def download(url: str, dst: Path):
     with urllib.request.urlopen(req, timeout=60) as r, dst.open("wb") as f:
         shutil.copyfileobj(r, f)
 
+def refill_vendored_dir(dst: Path, fill):
+    # Cada pasta vendorizada tem um .gitignore versionado que mantém o código de
+    # terceiros fora do Git. Apagar a pasta leva junto esse arquivo (e o GameSpy
+    # traz o seu próprio), e o SDK inteiro aparece como não rastreado. O original
+    # é guardado e devolvido depois de preencher a pasta.
+    keep=dst/".gitignore"
+    kept=keep.read_bytes() if keep.is_file() else None
+    if dst.exists():
+        shutil.rmtree(dst)
+    dst.mkdir(parents=True,exist_ok=True)
+    fill(dst)
+    if kept is not None:
+        keep.write_bytes(kept)
+
 def install_zlib(repo: Path, archive_override: Path|None):
     dst=repo/"GeneralsMD/Code/Libraries/Source/Compression/ZLib"
     if all((dst/x).is_file() for x in ZLIB_REQUIRED):
@@ -101,9 +118,7 @@ def install_zlib(repo: Path, archive_override: Path|None):
         if src is None:
             raise RuntimeError("arquivo zlib não contém a árvore esperada")
 
-        if dst.exists():
-            shutil.rmtree(dst)
-        shutil.copytree(src,dst)
+        refill_vendored_dir(dst, lambda d: shutil.copytree(src,d,dirs_exist_ok=True))
 
     missing=[x for x in ZLIB_REQUIRED if not (dst/x).is_file()]
     if missing:
@@ -130,8 +145,7 @@ def install_gamespy(repo: Path, source_override: Path|None):
 
     if source_override:
         validate_gamespy(source_override)
-        if dst.exists(): shutil.rmtree(dst)
-        shutil.copytree(source_override,dst)
+        refill_vendored_dir(dst, lambda d: shutil.copytree(source_override,d,dirs_exist_ok=True))
         return {"status":"INSTALLED_FROM_OVERRIDE","path":str(dst)}
 
     git=shutil.which("git")
@@ -158,11 +172,10 @@ def install_gamespy(repo: Path, source_override: Path|None):
 
     run([git,"archive","--format=zip","--output",archive,GAMESPY_COMMIT],cwd=clone)
 
-    if dst.exists():
-        shutil.rmtree(dst)
-    dst.mkdir(parents=True,exist_ok=True)
-    with zipfile.ZipFile(archive) as zf:
-        safe_extract_zip(zf,dst)
+    def extract(d):
+        with zipfile.ZipFile(archive) as zf:
+            safe_extract_zip(zf,d)
+    refill_vendored_dir(dst, extract)
 
     validate_gamespy(dst)
     if (dst/".git").exists():
@@ -253,61 +266,63 @@ def install_lzh(repo: Path, source_override: Path|None):
         "commit":LZH_COMMIT,
     }
 
-def validate_miles_stub(path: Path):
-    missing=[x for x in THYME_MILES_FILES if not (path/x).is_file()]
+def validate_directx(repo: Path):
+    root=repo/"GeneralsMD/Code/Libraries/DirectX"
+    required=["Include/d3d8.h","Include/d3dx8.h"]+["Include/"+x for x in DX8_EXTRA_FILES]+["Lib/d3dx8.lib"]
+    missing=[x for x in required if not (root/x).is_file()]
     if missing:
-        raise RuntimeError("Miles stub incompleto: "+", ".join(missing))
+        raise RuntimeError("min-dx8-sdk incompleto: "+", ".join(missing))
+    return root
 
-def install_miles_stub(repo: Path, source_override: Path|None):
-    dst=repo/"GeneralsMD/Code/Libraries/Source/WWVegas/Miles6/stub"
+def copy_directx(src: Path, root: Path):
+    include=root/"Include"
+    lib=root/"Lib"
+    include.mkdir(parents=True,exist_ok=True)
+    lib.mkdir(parents=True,exist_ok=True)
+    for f in src.iterdir():
+        if f.is_file() and f.suffix.lower() in (".h",".inl"):
+            shutil.copy2(f,include/f.name)
+        elif f.is_file() and f.suffix.lower()==".lib":
+            shutil.copy2(f,lib/f.name)
+    for name in DX8_EXTRA_FILES:
+        shutil.copy2(src/"extra"/name,include/name)
+
+def install_directx(repo: Path, source_override: Path|None):
+    # O CMakeLists recusa configurar sem Libraries/DirectX/Include/d3d8.h.
+    root=repo/"GeneralsMD/Code/Libraries/DirectX"
     try:
-        validate_miles_stub(dst)
-        return {"status":"PRESENT","path":str(dst)}
+        validate_directx(repo)
+        return {"status":"PRESENT","path":str(root)}
     except RuntimeError:
         pass
 
-    dst.mkdir(parents=True,exist_ok=True)
-
     if source_override:
-        validate_miles_stub(source_override)
-        for name in THYME_MILES_FILES:
-            shutil.copy2(source_override/name,dst/name)
-        validate_miles_stub(dst)
-        return {"status":"INSTALLED_FROM_OVERRIDE","path":str(dst)}
+        copy_directx(source_override,root)
+        validate_directx(repo)
+        return {"status":"INSTALLED_FROM_OVERRIDE","path":str(root)}
 
     git=shutil.which("git")
     if not git:
-        raise RuntimeError("git não encontrado para instalar o stub Miles")
+        raise RuntimeError("git não encontrado para instalar o min-dx8-sdk")
 
-    # Use Git itself as the integrity boundary: clone the repository, checkout the
-    # exact pinned commit and copy only deps/miles.  No raw.githubusercontent
-    # download and no hand-copied per-file hashes are involved.
-    temp_root=Path(tempfile.mkdtemp(prefix="zh-thyme-miles-"))
-    clone=temp_root/"Thyme"
+    # Mesmo esquema do LZH: clone fora da árvore, commit fixado, só os arquivos usados.
+    temp_root=Path(tempfile.mkdtemp(prefix="zh-dx8-"))
+    clone=temp_root/"min-dx8-sdk"
 
-    run([git,"clone","--no-checkout","--filter=blob:none",THYME_REPO,str(clone)])
-    run([git,"checkout",THYME_MILES_COMMIT],cwd=clone)
+    run([git,"clone","--no-checkout","--filter=blob:none",DX8_REPO,str(clone)])
+    run([git,"checkout",DX8_COMMIT],cwd=clone)
     head=run([git,"rev-parse","HEAD"],cwd=clone).strip()
-    if head.lower()!=THYME_MILES_COMMIT.lower():
-        raise RuntimeError(f"commit Thyme inesperado: {head}")
+    if head.lower()!=DX8_COMMIT.lower():
+        raise RuntimeError(f"commit min-dx8-sdk inesperado: {head}")
 
-    src=clone/"deps/miles"
-    validate_miles_stub(src)
-    for name in THYME_MILES_FILES:
-        shutil.copy2(src/name,dst/name)
+    copy_directx(clone,root)
+    validate_directx(repo)
 
-    validate_miles_stub(dst)
-    if (dst/".git").exists():
-        raise RuntimeError("stub Miles não deve conter .git na árvore do Reforged")
-
-    # Keep the temporary clone until the hosted runner is destroyed.  This avoids
-    # Windows races/permissions while deleting Git pack files during the job.
     return {
         "status":"INSTALLED",
-        "path":str(dst),
-        "repository":THYME_REPO,
-        "commit":THYME_MILES_COMMIT,
-        "files":THYME_MILES_FILES,
+        "path":str(root),
+        "repository":DX8_REPO,
+        "commit":DX8_COMMIT,
     }
 
 def main():
@@ -319,8 +334,8 @@ def main():
                     help="fixture/offline override for an already extracted GamespySDK tree")
     ap.add_argument("--lzh-source",default=None,
                     help="fixture/offline override for flat LZH-Light 1.0 source tree")
-    ap.add_argument("--miles-source",default=None,
-                    help="fixture/offline override containing miles.c, miles.def and miles.h")
+    ap.add_argument("--dx8-source",default=None,
+                    help="fixture/offline override for an already extracted min-dx8-sdk tree")
     args=ap.parse_args()
 
     repo=Path(args.repo).resolve()
@@ -330,13 +345,13 @@ def main():
     z=install_zlib(repo, Path(args.zlib_archive).resolve() if args.zlib_archive else None)
     g=install_gamespy(repo, Path(args.gamespy_source).resolve() if args.gamespy_source else None)
     l=install_lzh(repo, Path(args.lzh_source).resolve() if args.lzh_source else None)
-    m=install_miles_stub(repo, Path(args.miles_source).resolve() if args.miles_source else None)
+    d=install_directx(repo, Path(args.dx8_source).resolve() if args.dx8_source else None)
 
     print("PUBLIC DEPENDENCIES INSTALL PASS")
     print("zlib:",z)
     print("gamespy:",g)
     print("lzh:",l)
-    print("miles:",m)
+    print("directx:",d)
 
 if __name__=="__main__":
     main()

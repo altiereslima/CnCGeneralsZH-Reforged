@@ -6,12 +6,13 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import traceback
 
-EXPECTED_UPSTREAM_HEAD = "46eb93120cc43d49230de5f8100538a147f7bbd0"
+EXPECTED_UPSTREAM_HEAD = "e378d932218e1d6a9cb10d3b41cab4e0a5061547"
 
 PATCHED_SOURCE_FILES = [
     "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h",
@@ -24,6 +25,14 @@ PATCHED_SOURCE_FILES = [
     "GeneralsMD/Code/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp",
     "GeneralsMD/Code/CMakeLists.txt",
 ]
+
+# Casos de teste que falham no upstream puro, sem o patch PT-BR. Conferido em
+# e378d932 (v2.1.0) com o test_gameengine recompilado sem o patch: desde o build x64,
+# o gerador de mapas aleatórios cobre mais de 1/5 do mapa de teste com rocha.
+# Só estes nomes são tolerados; qualquer outra falha, crash ou timeout derruba o build.
+KNOWN_UPSTREAM_TEST_FAILURES = {
+    "the_ground_is_textured_by_what_the_ground_is_doing",
+}
 
 CORE_LOCALE_FILES=["Generals.str","Language.ini"]
 MEDIA_LOCALE_FILES=[
@@ -160,6 +169,39 @@ def check_run_output(repo,require_media):
         "pass":exe.is_file() and not miss_core and (not require_media or not miss_media),
     }
 
+def unexpected_test_failures(output):
+    """Devolve (casos conhecidos que falharam, problemas) a partir da saída do ctest."""
+    if "The following tests FAILED:" not in output:
+        return [], ["ctest falhou sem listar os testes que falharam"]
+    summary=output.split("The following tests FAILED:")[-1]
+    failed=re.findall(r"(?m)^\s*\d+ - (\S+) \(([^)]*)\)\s*$", summary)
+    known=[]
+    problems=[]
+    for name,status in failed:
+        if status!="Failed":
+            problems.append(f"{name}: {status}")
+            continue
+        m=re.search(rf"(?m)^.*Test\s+#\d+: {re.escape(name)} \..*$", output)
+        if not m:
+            problems.append(f"{name}: saída não encontrada")
+            continue
+        rest=output[m.end():]
+        end=re.search(r"(?m)^\s*Start\s+\d+: |^\d+% tests passed", rest)
+        block=rest[:end.start()] if end else rest
+        # Sem o resumo do harness o binário não chegou ao fim (crash no meio).
+        if not re.search(r"(?m)^\d+ tests, \d+ checks, \d+ failed\s*$", block):
+            problems.append(f"{name}: terminou sem o resumo do harness")
+            continue
+        cases=re.findall(r"(?m)^FAIL (\S+) \(\d+\)\s*$", block)
+        extra=[c for c in cases if c not in KNOWN_UPSTREAM_TEST_FAILURES]
+        if not cases or extra:
+            problems.append(f"{name}: "+(", ".join(extra) or "falhou sem caso identificado"))
+            continue
+        known.extend(cases)
+    if not failed:
+        problems.append("ctest falhou, mas nenhum teste aparece na lista de falhas")
+    return sorted(set(known)), problems
+
 def main():
     ap = argparse.ArgumentParser(description="Zero Hour Reforged PT-BR Stage 15 Windows runner")
     ap.add_argument("repo", help="raiz do checkout CnCGeneralsZH-Reforged")
@@ -242,7 +284,7 @@ def main():
             result["status"] = "PASS_PREFLIGHT_ONLY"
         else:
             if os.name != "nt":
-                raise RuntimeError("build real é Win32/Windows somente. Use --preflight-only fora do Windows.")
+                raise RuntimeError("build real é Windows x64 somente. Use --preflight-only fora do Windows.")
 
             cmake = find_cmake(args.cmake)
             ctest = find_ctest(cmake)
@@ -258,7 +300,7 @@ def main():
 
             if not (build_dir/"CMakeCache.txt").is_file():
                 run([cmake, "-S", repo/"GeneralsMD/Code", "-B", build_dir,
-                     "-G", "Visual Studio 17 2022", "-A", "Win32"],
+                     "-G", "Visual Studio 17 2022", "-A", "x64"],
                     log=logs/"05_cmake_configure.log")
                 result["steps"]["configure"] = "PASS"
             else:
@@ -271,9 +313,17 @@ def main():
             if args.skip_tests:
                 result["steps"]["ctest"] = "SKIPPED_BY_USER"
             else:
-                run([ctest, "--test-dir", build_dir, "-C", args.config, "--output-on-failure"],
-                    log=logs/"07_ctest.log")
-                result["steps"]["ctest"] = "PASS"
+                cp = run([ctest, "--test-dir", build_dir, "-C", args.config, "--output-on-failure"],
+                         log=logs/"07_ctest.log", check=False)
+                if cp.returncode == 0:
+                    result["steps"]["ctest"] = "PASS"
+                else:
+                    known, problems = unexpected_test_failures(cp.stdout or "")
+                    if problems:
+                        raise RuntimeError("ctest falhou: " + "; ".join(problems))
+                    result["steps"]["ctest"] = "PASS_WITH_KNOWN_UPSTREAM_FAILURES"
+                    result["known_upstream_test_failures"] = known
+                    print("::warning::falhas conhecidas do upstream toleradas: " + ", ".join(known))
 
             output = check_run_output(repo,require_media=media_present)
             result["run_output"] = output

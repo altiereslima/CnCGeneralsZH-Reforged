@@ -7,7 +7,11 @@ O workflow instala automaticamente, em versões/commits fixados:
 - zlib 1.1.4;
 - GameSpy SDK;
 - LZH-Light 1.0;
-- stubs públicos do Miles, obtidos por checkout Git de um commit fixado do Thyme, usados apenas para gerar a import library.
+- min-dx8-sdk (cabeçalhos DirectX 8 que o CMake exige para configurar).
+
+O build é x64 (o upstream removeu o Win32 na v2.0.0). Som e vídeo usam XAudio2 e FFmpeg; as DLLs
+do FFmpeg já vêm versionadas no repositório e entram no artifact. Miles e Bink não são mais usados.
+A arte ampliada do Reforged (`art-latest`, mais de 1 GB) não é baixada no CI.
 
 A mídia localizada é opcional. Para incluí-la no artifact, configure:
 

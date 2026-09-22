@@ -14,15 +14,17 @@ REQUIRED = [
     "GeneralsMD/Code/Libraries/Source/Compression/LZHCompress/CompLibHeader/_lzhl.h",
     "GeneralsMD/Code/Libraries/Source/Compression/LZHCompress/CompLibHeader/lzhl.h",
     "GeneralsMD/Code/Libraries/Source/GameSpy/CMakeLists.txt",
-    "GeneralsMD/Code/Libraries/Source/WWVegas/Miles6/stub/miles.c",
-    "GeneralsMD/Code/Libraries/Source/WWVegas/Miles6/stub/miles.def",
-    "GeneralsMD/Code/Libraries/Source/WWVegas/Miles6/stub/miles.h",
+    "GeneralsMD/Code/Libraries/DirectX/Include/d3d8.h",
+    "GeneralsMD/Code/Libraries/DirectX/Include/d3dxmath.h",
 
-    # Tracked stubs used instead of proprietary SDKs.
-    "GeneralsMD/Code/Libraries/Source/WWVegas/Bink/stub/bink.c",
-    "GeneralsMD/Code/Libraries/Source/WWVegas/Bink/stub/bink.def",
+    # Tracked backends used instead of the proprietary Miles/Bink SDKs (x64 build).
+    "GeneralsMD/Code/Libraries/Source/WWVegas/Bink/ffmpeg/bink_ffmpeg.cpp",
     "GeneralsMD/Code/Libraries/Source/WWVegas/Bink/include/bink.h",
+    "GeneralsMD/Code/Libraries/Source/WWVegas/Miles6/xaudio2/miles_xaudio2.cpp",
     "GeneralsMD/Code/Libraries/Source/WWVegas/Miles6/include/MSS/MSS.h",
+    "GeneralsMD/Code/Libraries/Source/FFmpeg/dist/include/libavcodec/avcodec.h",
+    "GeneralsMD/Code/Libraries/Source/FFmpeg/dist/lib/avcodec.lib",
+    "GeneralsMD/Code/Libraries/Source/FFmpeg/dist/bin/avcodec-62.dll",
 
     # Core build entry points.
     "GeneralsMD/Code/CMakeLists.txt",

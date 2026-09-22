@@ -1,4 +1,4 @@
-name: PT-BR Win32 Build
+name: PT-BR x64 Build
 
 on:
   push:
@@ -28,10 +28,10 @@ jobs:
 
     steps:
       - name: Checkout fork
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -87,7 +87,7 @@ jobs:
             --archive "$env:RUNNER_TEMP\ptbr-media.zip" `
             --sha256 "$env:MEDIA_SHA256"
 
-      - name: Apply PT-BR, validate and build Win32
+      - name: Apply PT-BR, validate and build x64
         shell: pwsh
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -113,23 +113,40 @@ jobs:
       - name: Assemble downloadable PT-BR build
         shell: pwsh
         run: |
+          # Everything the x64 build lays out in GeneralsMD\Run for the game: the exe with its PDB
+          # (the crash log names functions through it), the five FFmpeg DLLs sound and video
+          # decode with, and the loose data CMake copies there. Data\INI and Data\Scripts are in
+          # the multiplayer checksum, so they ship with the exe they were built with. Scenarios\
+          # and Cinema\ are measuring tools, left out.
+          $run = "GeneralsMD\Run"
           $out = "PTBR_BUILD_ARTIFACT"
-          New-Item -ItemType Directory -Force "$out\Data\PortugueseBrazil" | Out-Null
-          Copy-Item "GeneralsMD\Run\generals.exe" "$out\generals.exe" -Force
-          if (Test-Path "GeneralsMD\Run\generals.pdb") {
-            Copy-Item "GeneralsMD\Run\generals.pdb" "$out\generals.pdb" -Force
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $files = @(
+            "generals.exe", "generals.pdb", "Install_Final.bmp",
+            "avcodec-62.dll", "avformat-62.dll", "avutil-60.dll", "swresample-6.dll", "swscale-9.dll"
+          )
+          foreach ($f in $files) {
+            if (-not (Test-Path "$run\$f")) { throw "missing from Run: $f" }
+            Copy-Item "$run\$f" "$out\$f" -Force
           }
-          Copy-Item "GeneralsMD\Run\Data\Patch.str" "$out\Data\Patch.str" -Force
-          Copy-Item "GeneralsMD\Run\Data\PortugueseBrazil\*" "$out\Data\PortugueseBrazil\" -Recurse -Force
+          foreach ($d in @("Data", "Art", "Window")) {
+            if (-not (Test-Path "$run\$d")) { throw "missing from Run: $d\" }
+            Copy-Item "$run\$d" "$out\$d" -Recurse -Force
+          }
+          if (-not (Test-Path "$out\Data\PortugueseBrazil\Generals.str")) {
+            throw "PT-BR text missing from the artifact"
+          }
           Copy-Item "PTBR_STAGE15_RESULTS\result.json" "$out\STAGE15_BUILD_RESULT.json" -Force
           @"
-          Zero Hour Reforged PT-BR build.
-          Requires a legally owned compatible Zero Hour/Reforged installation.
-          Base game .big files, mss32.dll and binkw32.dll are not included.
+          Zero Hour Reforged PT-BR build (x64).
+          Requires a legally owned Zero Hour installation: copy these files over a Reforged
+          install, or put Zero Hour's *.big next to generals.exe and the base game's *.big
+          in ZH_Generals\. No game data ships here. Sound and video run through the FFmpeg
+          DLLs included; mss32.dll and binkw32.dll are not used by the 64-bit build.
           "@ | Set-Content "$out\README_INSTALL.txt" -Encoding UTF8
 
       - name: Upload PT-BR build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ZH-Reforged-PTBR-${{ github.event_name == 'workflow_dispatch' && inputs.config || 'Release' }}-${{ github.run_number }}
           path: PTBR_BUILD_ARTIFACT/
@@ -138,7 +155,7 @@ jobs:
 
       - name: Upload build logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ZH-Reforged-PTBR-logs-${{ github.run_number }}
           path: |
