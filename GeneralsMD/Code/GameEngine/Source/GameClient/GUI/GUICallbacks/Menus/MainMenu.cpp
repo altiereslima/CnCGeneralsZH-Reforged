@@ -219,7 +219,6 @@ static Bool launchChallengeMenu = FALSE;
 static Bool dontAllowTransitions = FALSE;
 
 //Added by Saad
-const Int /*TIME_OUT = 15,*/ CORNER = 10;
 void AcceptResolution();
 void DeclineResolution();
 GameWindow *resAcceptMenu = NULL;
@@ -829,7 +828,8 @@ void DoResolutionDialog()
 	resTimerString.concat(resolutionNew);
 		
 	
-	resAcceptMenu = TheWindowManager->gogoMessageBox( CORNER, CORNER, -1, -1,MSG_BOX_OK | MSG_BOX_CANCEL , 
+	// -1 keeps the layout's own place, the middle of the screen, where every other message box opens
+	resAcceptMenu = TheWindowManager->gogoMessageBox( -1, -1, -1, -1,MSG_BOX_OK | MSG_BOX_CANCEL , 
 																									 TheGameText->fetch("GUI:Resolution"), 
 																									 resTimerString, NULL, NULL, AcceptResolution, 
 																									 DeclineResolution);
