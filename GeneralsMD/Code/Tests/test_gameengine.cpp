@@ -8983,6 +8983,7 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 		CHECK( upper.m_retreatTeams >= lower.m_retreatTeams );
 		CHECK( upper.m_useInfluenceMapForAttackLane >= lower.m_useInfluenceMapForAttackLane );
 		CHECK( upper.m_economyBuildings >= lower.m_economyBuildings );
+		CHECK( upper.m_tacticalMicro >= lower.m_tacticalMicro );
 		CHECK( upper.m_focusFire >= lower.m_focusFire );
 		CHECK( upper.m_savesSciencePoints >= lower.m_savesSciencePoints );
 		CHECK( upper.m_adaptiveHarvesters >= lower.m_adaptiveHarvesters );
@@ -9002,6 +9003,54 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 		CHECK( data.m_skill[ i ].m_scoutIntervalSeconds > 0.0f );
 		CHECK( data.m_skill[ i ].m_maxScouts >= 1 );
 	}
+}
+
+/** The influence map is what every fighting decision of Hard's reads, so what it says about a patch of
+	 ground has to be what the guns there can actually do: reach it flat, reach further from above, and
+	 add up when two of them cover the same cell. */
+TEST(influence_map_covers_what_a_gun_reaches_and_the_high_ground_reaches_further)
+{
+	AIInfluenceMap map;
+	map.reset( 0.0f, 0.0f, 1000.0f, 1000.0f, 50.0f );
+	CHECK_EQ( 20, map.getCols() );
+
+	map.stampEnemy( 500.0f, 500.0f, 0.0f, 100.0f, 1000.0f );
+	CHECK_EQ( 1000.0f, map.enemyAt( 500.0f, 500.0f ) );
+	CHECK_EQ( 1000.0f, map.enemyAt( 575.0f, 525.0f ) );		// cell centre 575,525: 79 away
+	CHECK_EQ( 0.0f, map.enemyAt( 675.0f, 525.0f ) );			// 175 away, out of a 100 gun's reach
+	CHECK_EQ( 0.0f, map.friendAt( 500.0f, 500.0f ) );
+
+	// the same gun thirty units up reaches 90 further (three a unit), which covers the 175 cell
+	map.clear();
+	map.stampEnemy( 500.0f, 500.0f, 30.0f, 100.0f, 1000.0f );
+	CHECK_EQ( 1000.0f, map.enemyAt( 675.0f, 525.0f ) );
+	CHECK_EQ( 0.0f, map.enemyAt( 775.0f, 525.0f ) );
+
+	// ... and a cell on a hill as high as the gun gets no bonus against it
+	map.clear();
+	for( Int row = 0; row < map.getRows(); ++row )
+		for( Int col = 0; col < map.getCols(); ++col )
+			map.setCellHeight( col, row, 30.0f );
+	map.stampEnemy( 500.0f, 500.0f, 30.0f, 100.0f, 1000.0f );
+	CHECK_EQ( 0.0f, map.enemyAt( 675.0f, 525.0f ) );
+
+	map.stampEnemy( 500.0f, 500.0f, 30.0f, 100.0f, 500.0f );
+	CHECK_EQ( 1500.0f, map.enemyAt( 500.0f, 500.0f ) );
+	CHECK_EQ( 0.0f, map.enemyAt( -10.0f, 500.0f ) );			// off the map reads as nothing
+}
+
+/** Kiting: a unit steps back into the band between the enemy's reach and its own, and only when the
+	 band is wide enough to stand in. */
+TEST(kite_standoff_sits_between_the_two_ranges)
+{
+	Real distance = 0.0f;
+	CHECK( AIKite_standoffDistance( 300.0f, 150.0f, 20.0f, &distance ) );
+	CHECK_EQ( 280.0f, distance );		// the far edge of its own 300, well out of the enemy's 150
+	CHECK( AIKite_standoffDistance( 200.0f, 150.0f, 20.0f, &distance ) );
+	CHECK_EQ( 180.0f, distance );
+	CHECK( distance > 150.0f + 20.0f );
+	CHECK( !AIKite_standoffDistance( 180.0f, 150.0f, 20.0f, &distance ) );		// 30 of band, 40 needed
+	CHECK( !AIKite_standoffDistance( 150.0f, 200.0f, 20.0f, &distance ) );		// outranged: nothing to kite
 }
 
 

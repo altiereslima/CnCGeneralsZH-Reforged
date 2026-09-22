@@ -204,6 +204,9 @@ struct AIDifficultyProfile
 	Bool	m_defendExpansions;
 	Int		m_cashHoardThreshold;						///< above this, spend faster; 0 = never hurry
 	Bool	m_economyBuildings;							///< past the hoard, buy production and income the build list never had
+
+	// Fighting: decisions only, from what it knows can shoot where
+	Bool	m_tacticalMicro;								///< kite what it outranges, take the high ground, pull hurt units out
 };
 
 //-------------------------------------------------------------------------------------------------

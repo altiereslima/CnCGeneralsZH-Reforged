@@ -1175,6 +1175,19 @@ Int parseAIDifficulty2(char *args[], int num)
 	return 2;
 }
 
+/** -notactics even|odd: those slots keep their rung but fight without its unit tactics, so a batch can
+	* play Hard against the same Hard minus one thing, from both sides of the map.  Read only in a
+	* single-player skirmish (AIPlayer::doTactics), so a network game never sees it. */
+Int parseNoTactics(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+	{
+		AsciiString parity = args[1];
+		TheWritableGlobalData->m_noTacticsSlotParity = (parity.compareNoCase("even") == 0) ? 0 : 1;
+	}
+	return 2;
+}
+
 Int parseObserver(char *args[], int num)
 {
 	if (TheWritableGlobalData)
@@ -2382,6 +2395,7 @@ static CommandLineParam params[] =
 	{ "-autoskirmish", parseAutoSkirmish },
 	{ "-aidiff", parseAIDifficulty },
 	{ "-aidiff2", parseAIDifficulty2 },
+	{ "-notactics", parseNoTactics },
 	{ "-observer", parseObserver },
 	{ "-headless", parseHeadless },
 	{ "-maxframes", parseMaxGameFrames },

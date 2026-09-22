@@ -1082,9 +1082,9 @@ Real AI::getAdjustedVisionRangeForObject(const Object *object, Int factorsToCons
 	*                      scoutS maxSc react decis   cntr  mass  ttk   indiv team  infl  focus  save   harv  expand guard hoard  econ */
 static const AIDifficultyProfile s_defaultSkillLadder[ AISKILL_COUNT ] =
 {
-	/* Easy      */ { 90.0f, 1, 15.0f, 10.0f,  0.00f, FALSE, 0.00f, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,     0, FALSE },
-	/* Medium    */ { 60.0f, 1,  6.0f,  5.0f,  0.25f, FALSE, 0.35f, TRUE,  FALSE, FALSE, TRUE,  TRUE,  TRUE,  TRUE,  FALSE, 10000, FALSE },
-	/* Brutal    */ { 25.0f, 2,  0.0f,  1.5f,  1.00f, TRUE,  0.50f, TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,   4000, TRUE }
+	/* Easy      */ { 90.0f, 1, 15.0f, 10.0f,  0.00f, FALSE, 0.00f, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,     0, FALSE, FALSE },
+	/* Medium    */ { 60.0f, 1,  6.0f,  5.0f,  0.25f, FALSE, 0.35f, TRUE,  FALSE, FALSE, TRUE,  TRUE,  TRUE,  TRUE,  FALSE, 10000, FALSE, FALSE },
+	/* Brutal    */ { 25.0f, 2,  0.0f,  1.5f,  1.00f, TRUE,  0.50f, TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,   4000, TRUE,  TRUE }
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -1388,6 +1388,7 @@ void AI::parseSkillLevel(INI *ini, void *instance, void* /*store*/, const void* 
 		{ "DefendExpansions",					INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_defendExpansions ) },
 		{ "CashHoardThreshold",				INI::parseInt,  NULL, offsetof( AIDifficultyProfile, m_cashHoardThreshold ) },
 		{ "EconomyBuildings",					INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_economyBuildings ) },
+		{ "TacticalMicro",						INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_tacticalMicro ) },
 		{ NULL, NULL, NULL, 0 }
 	};
 

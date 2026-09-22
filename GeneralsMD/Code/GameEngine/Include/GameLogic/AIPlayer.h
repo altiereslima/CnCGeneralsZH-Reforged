@@ -35,6 +35,7 @@
 #include "Common/Snapshot.h"
 #include "GameLogic/AI.h"			// AISkillLevel, AIRole and the difficulty profile the ladder reads
 #include "Common/GameCommon.h"		// MAX_PLAYER_COUNT, for the per-enemy scouting stamps
+#include "GameLogic/AIInfluenceMap.h"
 
 enum { INVALID_SKILLSET_SELECTION = -1 };
 
@@ -500,6 +501,36 @@ protected:
 	Coord3D			m_strikeAim[ MAX_REMEMBERED_STRIKES ];
 	UnsignedInt	m_strikeFrame[ MAX_REMEMBERED_STRIKES ];	///< frame each was aimed; 0 == slot never used
 	Int					m_strikeNext;											///< slot the next aim is written to
+
+	/** What this player knows can shoot at each patch of the map, and what it has there itself. */
+	AIInfluenceMap	m_influence;
+	void rebuildInfluence(void);
+
+	/** Hard's fighting units, one at a time: step back from what they outrange, climb onto ground
+		* that lengthens their guns, and take a hurt unit out of ground it cannot win on. */
+	virtual void doTactics(void);
+	void tacticsFor(Object *obj);
+	struct TacticalStep
+	{
+		ObjectID		unit;
+		ObjectID		target;						///< what it goes back to shooting when the step is done
+		Coord3D			origin;						///< where it stepped from, to walk back to when the target is gone
+		UnsignedInt	resumeFrame;			///< 0 while it is not stepping
+		UnsignedInt	nextClimbFrame;		///< no look for higher ground before this
+		UnsignedInt	leaveAloneUntil;	///< sent home by the retreat, not to be turned round
+		Bool				rejoin;						///< stepped out of its team's order, and goes back to the team when the fight is over
+		Int					savedAttitude;		///< its mood before a step calmed it, AI_INVALID when it has its own
+		UnsignedInt	lastKiteFrame;		///< last time it stepped back from something it outranges, 0 for never
+		UnsignedInt	lastSeenFrame;		///< a unit not looked at for a while has died or left, and its row goes
+	};
+	std::vector<TacticalStep>	m_tactics;
+	TacticalStep *findTacticalStep(ObjectID unit);
+	TacticalStep *tacticalStepFor(ObjectID unit);		///< ... making the row if there is none
+	void leaveTacticsAlone(ObjectID unit);
+	void stepCalmly(Object *obj, TacticalStep *step, const Coord3D *spot);	///< a move the unit's mood cannot turn into an attack move
+	void restoreMood(Object *obj, TacticalStep *step);
+	Bool pickTacticalSpot(const Object *obj, const Coord3D *from, const Coord3D *awayFrom, Real distance,
+		const Coord3D *mustReach, Real reach, Coord3D *spot);
 };
 
 #endif // _AI_PLAYER_H_

@@ -703,6 +703,7 @@ GlobalData::GlobalData()
 	m_autoSkirmishPlayers = 0; // no skirmish from the command line
 	m_autoSkirmishAIState = SLOT_BRUTAL_AI;
 	m_autoSkirmishAIStateOdd = 0;		// 0 = not set: every slot plays at -aidiff
+	m_noTacticsSlotParity = -1;
 	m_autoSkirmishTeams = 0;				// 0 = not set: every slot fights every other slot
 	m_peaceTime = 0;								// no truce unless -peacetime asks for one
 	m_unitLimit = FALSE;						// no unit limit unless -unitlimit asks for one
