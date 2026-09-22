@@ -110,7 +110,9 @@ static Bool isObjectShroudedForAction ( const Object *source, const Object *targ
 	
 	// the asking player is human
 	// the asking impetus is not from a script
-	// and the target object is Fogged or worse
+	// and the target object is Shrouded.  Fog alone does not stop the order: what the player last saw
+	// there is what they click on, and whether the enter, capture or hack still works is decided when
+	// the unit arrives and can see it.
 
 	if( source && target && source->getControllingPlayer() ) 
 	{
@@ -126,7 +128,7 @@ static Bool isObjectShroudedForAction ( const Object *source, const Object *targ
 
 		return ActionManager_shroudHidesTarget( source->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN,
 																						commandSource == CMD_FROM_SCRIPT,
-																						target->getShroudedStatus( source->getControllingPlayer()->getPlayerIndex() ) >= OBJECTSHROUD_FOGGED,
+																						target->getShroudedStatus( source->getControllingPlayer()->getPlayerIndex() ) == OBJECTSHROUD_SHROUDED,
 																						ownPlacementSilhouette );
 	}
 
@@ -135,13 +137,13 @@ static Bool isObjectShroudedForAction ( const Object *source, const Object *targ
 
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
-Bool ActionManager_shroudHidesTarget( Bool humanSource, Bool fromScript, Bool targetFoggedOrWorse,
+Bool ActionManager_shroudHidesTarget( Bool humanSource, Bool fromScript, Bool targetShrouded,
 																			Bool ownPlacementSilhouette )
 {
 	if( ownPlacementSilhouette )
 		return FALSE;
 
-	return humanSource && !fromScript && targetFoggedOrWorse;
+	return humanSource && !fromScript && targetShrouded;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////

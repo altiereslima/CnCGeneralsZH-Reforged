@@ -6650,15 +6650,16 @@ TEST(the_stop_key_cancels_a_building_that_is_still_going_up)
 	CHECK( Command_stopMeansCancelConstruction( 0, FALSE, FALSE ) == FALSE );	// nothing selected
 }
 
-/** The plan sits in fog on its owner's screen on purpose, and the fog gate on orders would then
-	 refuse every click on it: no build cursor, no resume, nothing but selection.  A player's own
+/** A player's own plan can sit in shroud on its owner's screen, and the shroud gate on orders would
+	 then refuse every click on it: no build cursor, no resume, nothing but selection.  A player's own
 	 plan is never hidden from that player's own builders.  Everything else the gate does is
-	 untouched - an enemy in fog is still out of reach, the AI and scripts still ignore the gate
-	 entirely. */
-TEST(the_fog_never_hides_your_own_plan_from_your_own_builder)
+	 untouched - anything else in shroud is still out of reach, the AI and scripts still ignore the
+	 gate entirely.  Fog is not shroud and never reaches the gate: a fogged building can be entered,
+	 captured or docked at, and the unit finds out on arrival whether it still can. */
+TEST(the_shroud_never_hides_your_own_plan_from_your_own_builder)
 {
 	CHECK( ActionManager_shroudHidesTarget( TRUE, FALSE, TRUE, TRUE ) == FALSE );		// your own plan
-	CHECK( ActionManager_shroudHidesTarget( TRUE, FALSE, TRUE, FALSE ) == TRUE );		// anything else fogged
+	CHECK( ActionManager_shroudHidesTarget( TRUE, FALSE, TRUE, FALSE ) == TRUE );		// anything else shrouded
 
 	CHECK( ActionManager_shroudHidesTarget( TRUE, TRUE, TRUE, FALSE ) == FALSE );		// from a script
 	CHECK( ActionManager_shroudHidesTarget( FALSE, FALSE, TRUE, FALSE ) == FALSE );	// asked by the AI
