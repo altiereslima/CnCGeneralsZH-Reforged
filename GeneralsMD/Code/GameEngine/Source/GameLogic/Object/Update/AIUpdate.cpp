@@ -1187,10 +1187,22 @@ UpdateSleepTime AIUpdateInterface::update( void )
 	{
 		Coord3D rallyPoint = m_exitProductionRallyPoint;
 		m_hasExitProductionRallyPoint = FALSE;
-		if (getObject()->isAbleToAttack() && hasFightingWeapon(getObject()))
-			privateAttackMoveToPosition( &rallyPoint, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
-		else
-			privateMoveToPosition( &rallyPoint, CMD_FROM_AI );
+		const Bool fights = getObject()->isAbleToAttack() && hasFightingWeapon(getObject());
+
+		// a rally point across the map is reached through the tunnels when they are shorter
+		const Real walkX = rallyPoint.x - getObject()->getPosition()->x;
+		const Real walkY = rallyPoint.y - getObject()->getPosition()->y;
+		Object *entrance = getObject()->getControllingPlayer()->getTunnelSystem()->findTunnelShortcut( getObject()->getPosition(),
+			&rallyPoint, (Real)sqrt( walkX * walkX + walkY * walkY ) );
+		const Bool tunnelled = entrance != NULL
+			&& takeTunnelTrip( entrance, &rallyPoint, fights ? TUNNEL_TRIP_ATTACK_MOVE : TUNNEL_TRIP_MOVE, CMD_FROM_AI );
+		if (!tunnelled)
+		{
+			if (fights)
+				privateAttackMoveToPosition( &rallyPoint, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+			else
+				privateMoveToPosition( &rallyPoint, CMD_FROM_AI );
+		}
 		stRet = STATE_CONTINUE;
 	}
 

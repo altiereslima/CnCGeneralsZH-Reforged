@@ -383,6 +383,12 @@ Real TunnelTracker::getFramesForFullHeal() const
 void TunnelTracker::healObject( Object *obj, void *frames)
 {
 	
+	// a unit only passing through on its way somewhere was not sent in to be mended; the heal is for
+	// the ones the player put inside
+	const AIUpdateInterface *ai = obj->getAI();
+	if( ai != NULL && ai->hasTunnelTrip() )
+		return;
+
 	//get the number of frames to heal
 	Real *framesForFullHeal = (Real*)frames;
 

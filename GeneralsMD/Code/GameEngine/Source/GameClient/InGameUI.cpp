@@ -4125,13 +4125,13 @@ void InGameUI::collectOrderHints( void )
 
 			case AI_ENTER:
 			{
-				// A move order that is going through the tunnels is still a move: one green thread to
-				// the mouth it goes down and one from the mouth it comes up at to where it was sent.
-				// The far mouth is worked out the way the unit will work it out when it gets there.
+				// An order that is going through the tunnels is still the order it was: one thread in its
+				// colour to the mouth it goes down and one from the mouth it comes up at to where it was
+				// sent.  The far mouth is worked out the way the unit will work it out when it gets there.
 				const Object *entrance = ai->getGoalObject();
 				if( ai->hasTunnelTrip() && entrance != NULL )
 				{
-					hint.kind = ORDER_HINT_MOVE;
+					hint.kind = ( ai->getTunnelTripEnd() == TUNNEL_TRIP_ATTACK_MOVE ) ? ORDER_HINT_ATTACK_MOVE : ORDER_HINT_MOVE;
 					hint.from = *obj->getPosition();
 					hint.to = *entrance->getPosition();
 					addOrderHint( hint, previous );

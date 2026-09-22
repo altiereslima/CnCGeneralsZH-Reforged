@@ -159,6 +159,8 @@ static Bool parseActionType( const AsciiString &token, ScenarioActionType *actio
 		*action = SCENARIO_ACTION_MOVE;
 	else if (token == "playermove")
 		*action = SCENARIO_ACTION_PLAYERMOVE;
+	else if (token == "playerattackmove")
+		*action = SCENARIO_ACTION_PLAYERATTACKMOVE;
 	else if (token == "attackmove")
 		*action = SCENARIO_ACTION_ATTACKMOVE;
 	else if (token == "attack")
@@ -249,6 +251,7 @@ static Int tokensNeededFor( ScenarioActionType action )
 		case SCENARIO_ACTION_MOVE:				return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_PLAYERMOVE:	return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_POWER:				return SCENARIO_TOKENS_MOVE;
+		case SCENARIO_ACTION_PLAYERATTACKMOVE:	return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_ATTACKMOVE:	return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_ATTACK:			return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_ENTER:				return SCENARIO_TOKENS_ATTACK;
@@ -315,6 +318,7 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 
 		case SCENARIO_ACTION_MOVE:
 		case SCENARIO_ACTION_PLAYERMOVE:
+		case SCENARIO_ACTION_PLAYERATTACKMOVE:
 		case SCENARIO_ACTION_ATTACKMOVE:
 		case SCENARIO_ACTION_ARRIVE:
 		case SCENARIO_ACTION_POWER:
@@ -928,19 +932,24 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 		case SCENARIO_ACTION_MOVE:
 		case SCENARIO_ACTION_PLAYERMOVE:
 		case SCENARIO_ACTION_ATTACKMOVE:
+		case SCENARIO_ACTION_PLAYERATTACKMOVE:
 		{
 			// A player's move takes a different branch of groupMoveToPosition (every member gathers on
-			// the clicked point), so a script order cannot stand in for a right click.
+			// the clicked point), so a script order cannot stand in for a right click.  The same goes
+			// for an attack move, which only a player's or a computer's takes through the tunnels.
+			const Bool attacks = action.action == SCENARIO_ACTION_ATTACKMOVE || action.action == SCENARIO_ACTION_PLAYERATTACKMOVE;
 			if (action.action == SCENARIO_ACTION_MOVE)
 				group->groupMoveToPosition( &dest, FALSE, CMD_FROM_SCRIPT );
 			else if (action.action == SCENARIO_ACTION_PLAYERMOVE)
 				group->groupMoveToPosition( &dest, FALSE, CMD_FROM_PLAYER );
+			else if (action.action == SCENARIO_ACTION_PLAYERATTACKMOVE)
+				group->groupAttackMoveToPosition( &dest, SCENARIO_ATTACK_SHOTS, CMD_FROM_PLAYER );
 			else
 				group->groupAttackMoveToPosition( &dest, SCENARIO_ATTACK_SHOTS, CMD_FROM_SCRIPT );
 
 			DEBUG_LOG(("SCENARIO: frame %d %s slot %d '%s' x%d to (%.0f,%.0f)\n",
 								 action.frame,
-								 (action.action == SCENARIO_ACTION_ATTACKMOVE) ? "attackmove" : "move",
+								 attacks ? "attackmove" : "move",
 								 action.slot, action.selector.str(), taken, dest.x, dest.y));
 			break;
 		}
