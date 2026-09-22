@@ -1,16 +1,20 @@
 <!DOCTYPE html>
 <!--
-  What a spectator sees over the battlefield: the drop-down that switches the strips, and the
-  observer's board - every player ranked by a stat picked from a drop-down, the net worth lead on a
-  radar screen, and what each army is made of.  It is dressed in the command bar's own materials:
-  steel plates with a light top edge and a dark bottom one, the cameo tray the production strips
-  stand in, and the power bar's fills.  Laid out by litehtml and drawn by the game
-  (GameClient/HtmlOverlay.h).
+  What a spectator sees over the battlefield, dressed in the command bar's own materials: steel
+  plates with a lit top edge and a dark bottom one, the cameo tray the production strips stand in,
+  the power bar's fills.  The steel follows the side whose bar is on screen, so selecting a Chinese
+  unit turns it red.  Four pieces:
 
-  A CSS pixel is a pixel of an 800x600 screen and font-size is the game font's point size there;
-  the page is scaled with the rest of the interface.  Text is always drawn with a black shadow.
-  url(Name) is one of the game's mapped images, stretched over the box.  A background on html or
-  body is for a browser only.  Not drawn: rounded corners, overflow clipping, list bullets,
+    #top     every player across the top of the screen, grouped by team, the match clock between two teams
+    #hud-top the left panel: the strips drop-down, the superweapon countdowns and the promotions bought
+    #feed    a superweapon coming ready, on the left for a few seconds, the way Dota's kill feed runs
+    #board   the right panel: every player ranked by a picked stat, the lead graph, the armies
+
+  Laid out by litehtml and drawn by the game (GameClient/HtmlOverlay.h).  A CSS pixel is a pixel of
+  an 800x600 screen and font-size is the game font's point size there; the page is scaled with the
+  rest of the interface.  Text is always drawn with a black shadow.  url(Name) is one of the game's
+  mapped images, drawn at the size background-size gives it and never clipped.  A background on html
+  or body is for a browser only.  Not drawn: rounded corners, overflow clipping, list bullets,
   gradients other than linear ones, and text-transform on anything but plain ASCII letters.
 
   The game fills in, before layout (GameClient/HtmlTemplate.h):
@@ -19,6 +23,8 @@
     {{pick:group}}        the choice last made with data-click="pick:group:choice"
     {{pick:group:choice}} "on" while that is the choice; pick:stat:networth is on until another is made
     {{text:Label}}        a string table label, in the player's language
+    {{side}}              "america", "china" or "gla": the side whose command bar is on screen
+    {{clock}}             the match time, m:ss
     {{stat}}              the label of the picked stat
     {{teams}}             how many teams are left
     {{lead}} {{leader}}   how much net worth the leading team is ahead by, and "team0" or "team1"
@@ -28,8 +34,17 @@
       {{portrait}} (a mapped image name, for <img src>)
     data-each="lead", the first team's net worth less the second's since the start, up to 48
       columns, with {{up}} or {{down}} as a percent of the biggest lead either way
-    data-each="army", per player a {{kind}} "head" entry with his {{image}} and {{color}}, then up to
-      six "unit" entries, the most money first, with the unit's {{image}} and {{count}}
+    data-each="top", every player grouped by team: {{kind}} "player" with {{image}} {{color}} {{name}}
+      {{team}} {{cash}} and {{power}} "brownout" while his power is short; between two teams one
+      entry of kind "clock", between any others one of kind "gap"
+    Three flat lists open each player's run with a {{kind}} "head" entry carrying {{image}} (his
+    general), {{color}} and {{name}}:
+      data-each="army", then up to six "unit" entries, the most money first, with {{image}} {{count}}
+      data-each="superweapons", then his countdowns, soonest first, "weapon" with {{image}} {{time}}
+        and {{ready}} "ready" once it can fire
+      data-each="skills", then his promotions, "skill" with {{image}}
+    data-each="toasts", the superweapons that came ready in the last eight seconds, oldest first:
+      {{portrait}} {{color}} {{name}} of the owner, {{image}} the weapon's cameo and {{what}} its name
 
   The stats: networth, cash, income, army, kills, rank, power.  A data-click of option:Key flips
   that option and saves it; flip:name flips the name for the rest of the match; pick:group:choice
@@ -43,17 +58,49 @@
 <title>Spectator</title>
 <style>
   html, body { margin: 0; padding: 0; }
+  body { background-color: #3b4a36; color: #dfe5ea; font-size: 9px; }
   /* a mapped image is drawn at the size background-size gives it, and nothing clips it */
   .tray, .cell, .fill, .on .box { background-size: 100% 100%; background-repeat: no-repeat; }
-  body { background-color: #3b4a36; color: #dfe5ea; font-size: 9px; }
 
-  #hud-top { position: absolute; left: 4px; top: 4px; width: 172px; }
-
-  /* the command bar's steel: a lit top edge, a dark bottom one */
+  /* the command bar's steel, one per side: a lit top edge, a dark bottom one */
   .plate { background: linear-gradient(to bottom, #6f7782, #3f4650); border-top: 1px solid #aab4bf;
            border-left: 1px solid #8a949f; border-bottom: 1px solid #0c1114; border-right: 1px solid #1a2026; color: #f1f4f6; }
   .plate:hover { background: linear-gradient(to bottom, #808995, #4b535e); }
+  .china .plate { background: linear-gradient(to bottom, #8e3b2b, #4c1b13); border-top-color: #d98a72; border-left-color: #b8604b; }
+  .china .plate:hover { background: linear-gradient(to bottom, #a44734, #5a2218); }
+  .gla .plate { background: linear-gradient(to bottom, #867a45, #48401e); border-top-color: #cbbf82; border-left-color: #a99d62; }
+  .gla .plate:hover { background: linear-gradient(to bottom, #978a50, #544a24); }
   .well { background-color: rgba(9, 20, 23, 0.86); border: 1px solid #0c1114; border-top-color: #000000; }
+  .china .well { background-color: rgba(26, 10, 8, 0.86); }
+  .gla .well { background-color: rgba(22, 19, 8, 0.86); }
+  .tray, .cell { background-image: url(SATraySmall); }
+  .china .tray, .china .cell { background-image: url(SNTraySmall); }
+  .gla .tray, .gla .cell { background-image: url(SUTraySmall); }
+
+  .gold { color: #e8d27a; }
+  .title { padding: 2px 5px; color: #e8d27a; }
+
+  /* ---- the strip across the top ---- */
+  #top { position: absolute; left: 180px; right: 180px; top: 2px; text-align: center; }
+  /* one entry per seat ("tplayer"), and between two teams the clock ("tclock") or a gap ("tgap") */
+  .tplayer, .tclock, .tgap { display: inline-block; position: relative; vertical-align: top; }
+  .tplayer { width: 56px; height: 36px; margin: 0 1px; background-color: rgba(9, 20, 23, 0.7); }
+  .tclock { width: 52px; height: 20px; margin: 6px 4px 0 4px; }
+  .tgap { width: 8px; height: 36px; }
+  .tclock .tray, .tclock .tint, .tclock .who, .tclock .cash, .tgap .tray, .tgap .tint, .tgap .who, .tgap .cash { display: none; }
+  .clocktext { display: none; }
+  .tclock .clocktext { display: block; line-height: 18px; font-size: 11px; font-weight: bold; color: #e8d27a; }
+  .tplayer .tray { position: absolute; left: 14px; top: 2px; width: 28px; height: 18px; }
+  .tplayer .emblem { position: absolute; left: 4px; top: 3px; width: 20px; height: 12px; }
+  .tplayer .tint { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; }
+  .tplayer .who { position: absolute; left: 0; right: 0; top: 20px; font-size: 8px; line-height: 8px; }
+  .tplayer .cash { position: absolute; left: 0; right: 0; top: 27px; font-size: 7px; line-height: 7px; color: #e8d27a; }
+  .tplayer.brownout .cash { color: #ff7a5c; }
+  .team0 .tint { background-color: #b8f08a; }
+  .team1 .tint { background-color: #ff7a5c; }
+
+  /* ---- the left panel ---- */
+  #hud-top { position: absolute; left: 4px; top: 4px; width: 172px; }
 
   .strips { margin-bottom: 3px; }
   .strips .plate { padding: 2px 5px; }
@@ -64,7 +111,33 @@
   .box { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border: 1px solid #778391; background-color: #091417; vertical-align: middle; }
   .on .box { background-image: url(PowerBarGreen); border-color: #b8f08a; }
 
-  .board { padding: 0 0 3px 0; }
+  .section { display: none; margin-bottom: 3px; padding-bottom: 3px; }
+  .section.on { display: block; }
+  .section .title { margin-bottom: 1px; }
+  .shelf { overflow: hidden; padding: 0 3px; }
+  .shelf .cell { float: left; position: relative; width: 22px; height: 19px; margin: 1px 1px 0 0; }
+  .shelf .cell img { position: absolute; left: 1px; top: 1px; width: 20px; height: 17px; }
+  .shelf .cell.head { clear: left; width: 24px; height: 16px; margin: 2px 3px 0 0; }
+  .shelf .cell.head img { left: 3px; top: 2px; width: 18px; height: 12px; }
+  .time { position: absolute; left: 1px; bottom: 0; font-size: 7px; line-height: 7px; font-weight: bold; color: #ffffff; background-color: rgba(0, 0, 0, 0.6); }
+  .weapon.ready .time { color: #b8f08a; }
+  .weapon.ready { background-image: url(PowerBarGreen); }
+  .skills .cell { width: 19px; height: 17px; }
+  .skills .cell img { width: 17px; height: 15px; }
+
+  /* ---- the feed on the left ---- */
+  #feed { width: 260px; }
+  .toast { position: relative; height: 18px; margin-bottom: 2px;
+           background: linear-gradient(to right, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0)); }
+  .toast .tray { position: absolute; left: 2px; top: 1px; width: 24px; height: 16px; }
+  .toast .emblem { position: absolute; left: 3px; top: 2px; width: 18px; height: 12px; }
+  .toast .who { position: absolute; left: 30px; top: 0; line-height: 18px; font-weight: bold; }
+  .toast .weapon { position: absolute; left: 100px; top: 1px; width: 20px; height: 16px; }
+  .toast .what { position: absolute; left: 124px; top: 0; line-height: 10px; color: #e8d27a; }
+  .toast .ready { position: absolute; left: 124px; top: 10px; line-height: 8px; font-size: 7px; color: #b8f08a; }
+
+  /* ---- the right panel ---- */
+  #board { position: absolute; right: 4px; top: 28px; width: 172px; padding: 0 0 3px 0; }
   .head { height: 16px; padding: 0 3px; position: relative; }
   .combo { position: absolute; left: 3px; right: 3px; top: 2px; height: 11px; line-height: 11px; padding-left: 5px; color: #b8f08a; }
   .combo:hover { color: #ffffff; }
@@ -77,11 +150,10 @@
   .choice { padding: 2px 6px; color: #c9d2d9; }
   .choice:hover { color: #ffffff; background-color: rgba(119, 131, 145, 0.25); }
   .choice.on { color: #b8f08a; }
-  .choice.on .box { background-image: url(PowerBarGreen); border-color: #b8f08a; }
 
   .players { margin: 2px 3px 0 3px; }
   .player { position: relative; height: 18px; border-bottom: 1px solid rgba(119, 131, 145, 0.18); }
-  .tray { position: absolute; left: 1px; top: 1px; width: 24px; height: 16px; background-image: url(SATraySmall); }
+  .player .tray { position: absolute; left: 1px; top: 1px; width: 24px; height: 16px; }
   .emblem { position: absolute; left: 3px; top: 2px; width: 18px; height: 12px; }
   .name { position: absolute; left: 30px; top: 1px; line-height: 10px; }
   .value { position: absolute; right: 3px; top: 1px; line-height: 10px; font-weight: bold; color: #e8d27a; }
@@ -92,19 +164,18 @@
 
   .buttons { height: 13px; margin: 3px 3px 0 3px; }
   .button { float: left; width: 78px; height: 11px; line-height: 11px; text-align: center; margin-right: 2px; font-size: 8px; color: #c9d2d9; }
-  .button.flipped { background: linear-gradient(to bottom, #3f4650, #6f7782); border-top-color: #0c1114; border-bottom-color: #aab4bf; color: #b8f08a; }
+  .button.flipped { color: #b8f08a; }
 
   .panel { display: none; clear: both; margin: 3px 3px 0 3px; }
   .panel.flipped { display: block; }
   .graph.flipped { display: none; }
   .graph.flipped.shown { display: block; }
-  .title { padding: 2px 5px; color: #e8d27a; }
   .lead { float: right; font-weight: bold; }
   .team0 .lead { color: #b8f08a; }
   .team1 .lead { color: #ff7a5c; }
 
   /* the radar's screen */
-  .radar { position: relative; height: 38px; margin: 0 4px 4px 4px; background-color: #06140b; border: 1px solid #000000; border-top-color: #000000; border-bottom-color: #3d4a3f; }
+  .radar { position: relative; height: 38px; margin: 0 4px 4px 4px; background-color: #06140b; border: 1px solid #000000; border-bottom-color: #3d4a3f; }
   .grid { position: absolute; left: 0; right: 0; height: 1px; background-color: #0f2a17; }
   .chart { position: absolute; left: 1px; top: 1px; }
   .col { float: left; width: 3px; height: 36px; }
@@ -114,14 +185,26 @@
   .down { position: absolute; left: 0; right: 1px; top: 0; background-color: #e0503c; }
 
   .army { overflow: hidden; padding: 0 3px 3px 3px; }
-  .cell { float: left; position: relative; width: 19px; height: 17px; margin: 1px 1px 0 0; background-image: url(SATraySmall); }
-  .cell img { position: absolute; left: 1px; top: 1px; width: 17px; height: 15px; }
-  .cell.head { clear: left; width: 24px; margin-right: 3px; }
-  .cell.head img { left: 3px; top: 2px; width: 18px; height: 12px; }
+  .army .cell { float: left; position: relative; width: 19px; height: 17px; margin: 1px 1px 0 0; }
+  .army .cell img { position: absolute; left: 1px; top: 1px; width: 17px; height: 15px; }
+  .army .cell.head { clear: left; width: 24px; margin-right: 3px; }
+  .army .cell.head img { left: 3px; top: 2px; width: 18px; height: 12px; }
   .count { position: absolute; right: 2px; bottom: 0; font-size: 8px; font-weight: bold; color: #ffffff; }
 </style>
 </head>
 <body>
+<div class="{{side}}">
+
+<div id="top">
+  <div class="t{{kind}} team{{team}} {{power}}" data-each="top">
+    <div class="tray"><img class="emblem" src="{{image}}"></div>
+    <div class="tint"></div>
+    <div class="who" style="color: {{color}}">{{name}}</div>
+    <div class="cash">{{cash}}</div>
+    <div class="clocktext well">{{clock}}</div>
+  </div>
+</div>
+
 <div id="hud-top">
 
   <div class="strips {{flip:strips}}">
@@ -133,62 +216,91 @@
     </div>
   </div>
 
-  <div class="board well">
-    <div class="head plate">
-      <div class="combo well" data-click="flip:stat">{{stat}}<span class="tab">&#9660;</span></div>
-    </div>
-
-    <div class="{{flip:stat}}">
-      <div class="choices well">
-        <div class="caption">{{text:GUI:HudGameStats}}</div>
-        <div class="choice {{pick:stat:networth}}" data-click="pick:stat:networth"><span class="box"></span>{{text:GUI:HudNetWorth}}</div>
-        <div class="choice {{pick:stat:cash}}" data-click="pick:stat:cash"><span class="box"></span>{{text:GUI:HudStatCash}}</div>
-        <div class="choice {{pick:stat:income}}" data-click="pick:stat:income"><span class="box"></span>{{text:GUI:HudStatIncome}}</div>
-        <div class="choice {{pick:stat:army}}" data-click="pick:stat:army"><span class="box"></span>{{text:GUI:HudStatArmy}}</div>
-        <div class="choice {{pick:stat:kills}}" data-click="pick:stat:kills"><span class="box"></span>{{text:GUI:HudStatKills}}</div>
-        <div class="choice {{pick:stat:rank}}" data-click="pick:stat:rank"><span class="box"></span>{{text:GUI:HudStatRank}}</div>
-        <div class="choice {{pick:stat:power}}" data-click="pick:stat:power"><span class="box"></span>{{text:GUI:HudStatPower}}</div>
+  <div class="section well {{option:ShowSuperweaponStrip}}">
+    <div class="title">{{text:GUI:HudSuperweaponStrip}}</div>
+    <div class="shelf">
+      <div class="cell {{kind}} {{ready}}" data-each="superweapons">
+        <img src="{{image}}">
+        <span class="time">{{time}}</span>
       </div>
     </div>
+  </div>
 
-    <div class="players">
-      <div class="player teams{{teams}} team{{team}}" data-each="players">
-        <div class="tray"><img class="emblem" src="{{portrait}}"></div>
-        <span class="name" style="color: {{color}}">{{name}}</span>
-        <span class="value">{{value}}</span>
-        <div class="meter"><div class="fill" style="width: {{share}}%; background-color: {{color}}"></div></div>
-      </div>
+  <div class="section well skills {{option:ShowSkillStrip}}">
+    <div class="title">{{text:GUI:HudSkillStrip}}</div>
+    <div class="shelf">
+      <div class="cell {{kind}}" data-each="skills"><img src="{{image}}"></div>
     </div>
+  </div>
 
-    <div class="buttons">
-      <div class="button plate {{flip:graph}}" data-click="flip:graph">{{text:GUI:HudNetWorthLead}}</div>
-      <div class="button plate {{flip:army}}" data-click="flip:army">{{text:GUI:HudArmies}}</div>
+  <div id="feed">
+    <div class="toast" data-each="toasts">
+      <div class="tray"><img class="emblem" src="{{portrait}}"></div>
+      <span class="who" style="color: {{color}}">{{name}}</span>
+      <img class="weapon" src="{{image}}">
+      <span class="what">{{what}}</span>
+      <span class="ready">{{text:GUI:HudSuperweaponReady}}</span>
     </div>
+  </div>
 
-    <div class="panel graph well {{graph}} {{flip:graph}}">
-      <div class="title {{leader}}">{{text:GUI:HudNetWorthLead}}<span class="lead">{{lead}}</span></div>
-      <div class="radar">
-        <div class="grid" style="top: 9px"></div>
-        <div class="grid" style="top: 27px"></div>
-        <div class="chart">
-          <div class="col" data-each="lead">
-            <div class="half over"><div class="up" style="height: {{up}}%"></div></div>
-            <div class="half"><div class="down" style="height: {{down}}%"></div></div>
-          </div>
-        </div>
-      </div>
+</div>
+
+<div id="board" class="well">
+  <div class="head plate">
+    <div class="combo well" data-click="flip:stat">{{stat}}<span class="tab">&#9660;</span></div>
+  </div>
+
+  <div class="{{flip:stat}}">
+    <div class="choices well">
+      <div class="caption">{{text:GUI:HudGameStats}}</div>
+      <div class="choice {{pick:stat:networth}}" data-click="pick:stat:networth"><span class="box"></span>{{text:GUI:HudNetWorth}}</div>
+      <div class="choice {{pick:stat:cash}}" data-click="pick:stat:cash"><span class="box"></span>{{text:GUI:HudStatCash}}</div>
+      <div class="choice {{pick:stat:income}}" data-click="pick:stat:income"><span class="box"></span>{{text:GUI:HudStatIncome}}</div>
+      <div class="choice {{pick:stat:army}}" data-click="pick:stat:army"><span class="box"></span>{{text:GUI:HudStatArmy}}</div>
+      <div class="choice {{pick:stat:kills}}" data-click="pick:stat:kills"><span class="box"></span>{{text:GUI:HudStatKills}}</div>
+      <div class="choice {{pick:stat:rank}}" data-click="pick:stat:rank"><span class="box"></span>{{text:GUI:HudStatRank}}</div>
+      <div class="choice {{pick:stat:power}}" data-click="pick:stat:power"><span class="box"></span>{{text:GUI:HudStatPower}}</div>
     </div>
+  </div>
 
-    <div class="panel well {{flip:army}}">
-      <div class="title">{{text:GUI:HudArmies}}</div>
-      <div class="army">
-        <div class="cell {{kind}}" data-each="army">
-          <img src="{{image}}">
-          <span class="count">{{count}}</span>
+  <div class="players">
+    <div class="player teams{{teams}} team{{team}}" data-each="players">
+      <div class="tray"><img class="emblem" src="{{portrait}}"></div>
+      <span class="name" style="color: {{color}}">{{name}}</span>
+      <span class="value">{{value}}</span>
+      <div class="meter"><div class="fill" style="width: {{share}}%; background-color: {{color}}"></div></div>
+    </div>
+  </div>
+
+  <div class="buttons">
+    <div class="button plate {{flip:graph}}" data-click="flip:graph">{{text:GUI:HudNetWorthLead}}</div>
+    <div class="button plate {{flip:army}}" data-click="flip:army">{{text:GUI:HudArmies}}</div>
+  </div>
+
+  <div class="panel graph well {{graph}} {{flip:graph}}">
+    <div class="title {{leader}}">{{text:GUI:HudNetWorthLead}}<span class="lead">{{lead}}</span></div>
+    <div class="radar">
+      <div class="grid" style="top: 9px"></div>
+      <div class="grid" style="top: 27px"></div>
+      <div class="chart">
+        <div class="col" data-each="lead">
+          <div class="half over"><div class="up" style="height: {{up}}%"></div></div>
+          <div class="half"><div class="down" style="height: {{down}}%"></div></div>
         </div>
       </div>
     </div>
   </div>
+
+  <div class="panel well {{flip:army}}">
+    <div class="title">{{text:GUI:HudArmies}}</div>
+    <div class="army">
+      <div class="cell {{kind}}" data-each="army">
+        <img src="{{image}}">
+        <span class="count">{{count}}</span>
+      </div>
+    </div>
+  </div>
+</div>
 
 </div>
 </body>

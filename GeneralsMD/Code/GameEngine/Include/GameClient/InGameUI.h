@@ -326,7 +326,14 @@ public:
 typedef std::list< WorldAnimationData *> WorldAnimationList;
 typedef WorldAnimationList::iterator WorldAnimationListIterator;
 
-
+/** One superweapon countdown as the spectator page lists it: whose, and how long it still has. */
+struct SpectatorSuperweapon
+{
+	Int playerIndex;
+	const Image *cameo;
+	Int seconds;
+	Bool ready;
+};
 
 // ------------------------------------------------------------------------------------------------
 /** Basic functionality common to all in-game user interfaces */
@@ -1216,6 +1223,16 @@ protected:
 	std::vector< Int >					m_spectatorLead;					///< the first team's net worth less the second's, one per sample
 	UnsignedInt									m_spectatorLeadFrame;			///< the logic frame the last of those was taken on
 	Int													m_hudTogglesBottom;				///< the bottom of the page's #hud-top, so the message list starts under it
+
+	std::vector< SpectatorSuperweapon > m_spectatorSuperweapons;	///< every countdown the superweapon pass found, rebuilt each pass
+	/** A superweapon that came ready, on the page for SPECTATOR_TOAST_FRAMES after that. */
+	struct SpectatorToast
+	{
+		HtmlValues values;
+		UnsignedInt until;					///< the logic frame it leaves on
+	};
+	std::vector< SpectatorToast > m_spectatorToasts;
+	void addSpectatorToast( Int playerIndex, const Object *weapon, const Image *cameo );
 
 	Bool												m_placementRangeRingUp;	///< the structure on the cursor is armed, so its reach is drawn
 	Real												m_placementRingRadius;	///< how far from its centre it hits

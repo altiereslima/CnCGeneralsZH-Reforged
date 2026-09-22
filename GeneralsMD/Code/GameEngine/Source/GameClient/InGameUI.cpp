@@ -55,6 +55,7 @@
 
 #include "GameClient/Anim2D.h"
 #include "GameClient/ControlBar.h"
+#include "GameClient/ControlBarScheme.h"
 #include "GameClient/DisplayStringManager.h"
 #include "GameClient/Diplomacy.h"
 #include "GameClient/Eva.h"
@@ -1763,6 +1764,10 @@ enum
 	LEAD_GRAPH_COLUMNS				= 48,		///< the most columns the graph draws; a longer match is averaged into them
 	ARMY_CHART_UNITS					= 6,		///< kinds of unit shown per player, the most money first
 	PLAYER_NAME_CHARS					= 11,		///< a name longer than this is cut, there is no clipping to hide it
+	SECONDS_IN_MINUTE					= 60,
+	SECONDS_PER_HOUR					= 60 * 60,
+	SPECTATOR_TOAST_FRAMES		= LOGICFRAMES_PER_SECOND * 8,	///< how long a "superweapon ready" message stays up
+	SPECTATOR_TOASTS_KEPT			= 4,		///< the most of those on screen at once; the oldest goes first
 	TWO_TEAMS									= 2,
 	PERCENT										= 100
 };
@@ -2049,6 +2054,184 @@ void InGameUI::sampleSpectatorLead( Int lead, Bool twoTeams )
 	m_spectatorLeadFrame = frame;
 }
 
+static Int gatherPlayerSkills( const Player *player, const Image **icons, Int count, Int max );
+
+//-------------------------------------------------------------------------------------------------
+/** The class the page dresses itself in: the side whose command bar is on screen, "america",
+	* "china" or "gla".  The observer bar is America's art under a name of its own, and a watcher who
+	* selects a unit gets its owner's bar, so this follows whoever is being watched. */
+//-------------------------------------------------------------------------------------------------
+static std::string spectatorSide( void )
+{
+	ControlBarSchemeManager *schemes = TheControlBar ? TheControlBar->getControlBarSchemeManager() : NULL;
+	if( schemes == NULL )
+		return "america";
+
+	AsciiString side = schemes->getCurrentSide();
+	if( side == "Observer" )
+		side = schemes->getCurrentArtTwinSide();
+	if( side.startsWith( "China" ) || side == "Boss" )
+		return "china";
+	if( side.startsWith( "GLA" ) )
+		return "gla";
+	return "america";
+}
+
+/** A player's name as the page writes it, cut where there is no clipping to hide the rest. */
+static std::string spectatorName( Player *player )
+{
+	std::wstring name( player->getPlayerDisplayName().str() );
+	if( name.size() > PLAYER_NAME_CHARS )
+		name.resize( PLAYER_NAME_CHARS );
+	return WideCharStringToMultiByte( name.c_str() );
+}
+
+/** The entry that opens a player's run in a flat list: kind "head", his general and his colour. */
+static HtmlValues spectatorHead( Player *player )
+{
+	const PlayerTemplate *side = player->getPlayerTemplate();
+	const Image *portrait = side ? side->getEnabledImage() : NULL;
+
+	HtmlValues head;
+	head[ "kind" ] = "head";
+	head[ "image" ] = portrait ? portrait->getName().str() : "";
+	head[ "color" ] = cssColor( clientPlayerColor( player ) );
+	head[ "name" ] = spectatorName( player );
+	return head;
+}
+
+/** m:ss of match time, or h:mm:ss once it runs past the hour. */
+static std::string spectatorClock( UnsignedInt frame )
+{
+	const UnsignedInt seconds = frame / LOGICFRAMES_PER_SECOND;
+	char text[ sizeof( "000:00:00" ) ];
+	if( seconds >= SECONDS_PER_HOUR )
+		sprintf( text, "%u:%02u:%02u", seconds / SECONDS_PER_HOUR, seconds / SECONDS_IN_MINUTE % SECONDS_IN_MINUTE, seconds % SECONDS_IN_MINUTE );
+	else
+		sprintf( text, "%u:%02u", seconds / SECONDS_IN_MINUTE, seconds % SECONDS_IN_MINUTE );
+	return text;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The page's "top" list, the strip across the top of the screen: every player grouped by team,
+	* each with kind "player", and between two teams an entry of kind "clock" - or kind "gap" between
+	* any others, so a free for all reads as separate seats. */
+//-------------------------------------------------------------------------------------------------
+static void fillSpectatorTop( std::vector< SpectatorStats > players, std::vector< HtmlValues > &entries )
+{
+	std::stable_sort( players.begin(), players.end(),
+										[]( const SpectatorStats &a, const SpectatorStats &b ) { return a.team < b.team; } );
+
+	entries.clear();
+	for( size_t index = 0; index < players.size(); index++ )
+	{
+		const SpectatorStats &stats = players[ index ];
+		if( index > 0 && players[ index - 1 ].team != stats.team )
+		{
+			HtmlValues between;
+			between[ "kind" ] = stats.team == 1 && players.back().team == 1 ? "clock" : "gap";
+			entries.push_back( between );
+		}
+
+		HtmlValues entry = spectatorHead( stats.player );
+		entry[ "kind" ] = "player";
+		entry[ "team" ] = std::to_string( stats.team );
+		entry[ "cash" ] = std::to_string( stats.cash );
+		entry[ "power" ] = stats.power < 0 ? "brownout" : "";
+		entries.push_back( entry );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The page's "superweapons" list: per player who has one, a head entry and then his countdowns,
+	* soonest first, each of kind "weapon" with its cameo, {{time}} and {{ready}} "ready" once it can
+	* fire.  Players come in the order `players` has them. */
+//-------------------------------------------------------------------------------------------------
+static void fillSpectatorSuperweapons( const std::vector< SpectatorStats > &players,
+																			 std::vector< SpectatorSuperweapon > weapons,
+																			 std::vector< HtmlValues > &cells )
+{
+	std::stable_sort( weapons.begin(), weapons.end(),
+										[]( const SpectatorSuperweapon &a, const SpectatorSuperweapon &b ) { return a.seconds < b.seconds; } );
+
+	cells.clear();
+	for( size_t index = 0; index < players.size(); index++ )
+	{
+		const Int owner = players[ index ].player->getPlayerIndex();
+		Bool headed = FALSE;
+		for( size_t weapon = 0; weapon < weapons.size(); weapon++ )
+		{
+			if( weapons[ weapon ].playerIndex != owner )
+				continue;
+			if( !headed )
+				cells.push_back( spectatorHead( players[ index ].player ) );
+			headed = TRUE;
+
+			UnicodeString time;
+			formatStripSeconds( &time, weapons[ weapon ].seconds );
+			HtmlValues cell;
+			cell[ "kind" ] = "weapon";
+			cell[ "image" ] = weapons[ weapon ].cameo ? weapons[ weapon ].cameo->getName().str() : "";
+			cell[ "time" ] = WideCharStringToMultiByte( time.str() );
+			cell[ "ready" ] = weapons[ weapon ].ready ? "ready" : "";
+			cells.push_back( cell );
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The page's "skills" list: per player who has bought any, a head entry and then each promotion
+	* at the level it has reached, of kind "skill" with its cameo. */
+//-------------------------------------------------------------------------------------------------
+static void fillSpectatorSkills( const std::vector< SpectatorStats > &players, std::vector< HtmlValues > &cells )
+{
+	enum { SKILLS_SHOWN = 12 };
+
+	cells.clear();
+	for( size_t index = 0; index < players.size(); index++ )
+	{
+		const Image *icons[ SKILLS_SHOWN ];
+		const Int count = gatherPlayerSkills( players[ index ].player, icons, 0, SKILLS_SHOWN );
+		if( count == 0 )
+			continue;
+
+		cells.push_back( spectatorHead( players[ index ].player ) );
+		for( Int skill = 0; skill < count; skill++ )
+		{
+			HtmlValues cell;
+			cell[ "kind" ] = "skill";
+			cell[ "image" ] = icons[ skill ]->getName().str();
+			cells.push_back( cell );
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A superweapon of player `playerIndex` came ready: the page says so on its left edge for
+	* SPECTATOR_TOAST_FRAMES, newest at the bottom, the way Dota's kill feed runs.  Only a watcher's
+	* page draws them, so nobody else collects any. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::addSpectatorToast( Int playerIndex, const Object *weapon, const Image *cameo )
+{
+	Player *owner = ThePlayerList->getNthPlayer( playerIndex );
+	if( owner == NULL || weapon == NULL || !localPlayerWatching() )
+		return;
+
+	SpectatorToast toast;
+	toast.values = spectatorHead( owner );
+	toast.values[ "kind" ] = "toast";
+	toast.values[ "portrait" ] = toast.values[ "image" ];
+	toast.values[ "image" ] = cameo ? cameo->getName().str() : "";
+	toast.values[ "what" ] = WideCharStringToMultiByte( weapon->getTemplate()->getDisplayName().str() );
+	toast.until = TheGameLogic->getFrame() + SPECTATOR_TOAST_FRAMES;
+
+	DEBUG_LOG(( "Spectator page: %s is ready for player %d on frame %u\n", weapon->getTemplate()->getName().str(),
+							playerIndex, TheGameLogic->getFrame() ));
+	m_spectatorToasts.push_back( toast );
+	if( m_spectatorToasts.size() > SPECTATOR_TOASTS_KEPT )
+		m_spectatorToasts.erase( m_spectatorToasts.begin() );
+}
+
 //-------------------------------------------------------------------------------------------------
 /** The spectator's page: the drop-down that switches the strips on and off, every player ranked by
 	* the number picked in the stat drop-down, the net worth lead over the match and each army's most
@@ -2098,6 +2281,9 @@ void InGameUI::drawSpectatorPage( void )
 		const std::vector< SpectatorStats > players = gatherSpectatorStats( stat, teams );
 		fillSpectatorPlayers( players, stat, teams, m_spectatorLists[ "players" ] );
 		fillSpectatorArmies( players, m_spectatorLists[ "army" ] );
+		fillSpectatorTop( players, m_spectatorLists[ "top" ] );
+		fillSpectatorSuperweapons( players, m_spectatorSuperweapons, m_spectatorLists[ "superweapons" ] );
+		fillSpectatorSkills( players, m_spectatorLists[ "skills" ] );
 
 		Int lead = 0;
 		for( size_t index = 0; index < players.size(); index++ )
@@ -2112,7 +2298,24 @@ void InGameUI::drawSpectatorPage( void )
 		m_spectatorTotals[ "lead" ] = std::to_string( abs( lead ) );
 		m_spectatorTotals[ "leader" ] = lead == 0 ? "" : ( lead > 0 ? "team0" : "team1" );
 		m_spectatorTotals[ "graph" ] = teams == TWO_TEAMS && m_spectatorLead.size() >= TWO_TEAMS ? "shown" : "";
+		m_spectatorTotals[ "side" ] = spectatorSide();
+		m_spectatorTotals[ "clock" ] = spectatorClock( frame );
 		m_spectatorListsFrame = frame;
+	}
+
+	// the messages come and go on their own clock, not the lists' half second
+	std::vector< HtmlValues > &toasts = m_spectatorLists[ "toasts" ];
+	toasts.clear();
+	for( size_t toast = 0; toast < m_spectatorToasts.size(); )
+	{
+		const SpectatorToast &shown = m_spectatorToasts[ toast ];
+		if( frame >= shown.until || frame + SPECTATOR_TOAST_FRAMES < shown.until )
+		{
+			m_spectatorToasts.erase( m_spectatorToasts.begin() + toast );
+			continue;
+		}
+		toasts.push_back( shown.values );
+		toast++;
 	}
 
 	HtmlValues values = m_spectatorTotals;
@@ -3617,6 +3820,8 @@ void InGameUI::reset( void )
 	m_spectatorTotals.clear();
 	m_spectatorLead.clear();
 	m_spectatorLeadFrame = 0;
+	m_spectatorSuperweapons.clear();
+	m_spectatorToasts.clear();
 	m_inputEnabled = true;
 	// reset the command bar
 	TheControlBar->reset();
@@ -6975,6 +7180,7 @@ void InGameUI::postDraw( void )
 		//
 		m_superweaponIconCount = 0;
 		m_superweaponIconTotal = 0;
+		m_spectatorSuperweapons.clear();
 
 		for (Int i=0; i<MAX_PLAYER_COUNT; ++i)
 		{
@@ -7017,6 +7223,8 @@ void InGameUI::postDraw( void )
                 {
                   if ( TheGameLogic->getFrame() > 0 )
                   {
+                    addSpectatorToast( i, owningObject, superweaponCameo( info->getSpecialPowerTemplate() ) );
+
                     SpecialPowerType type = module->getSpecialPowerTemplate()->getSpecialPowerType();
                   
                     Player *localPlayer = ThePlayerList->getLocalPlayer();
@@ -7102,6 +7310,8 @@ void InGameUI::postDraw( void )
 
                   addSuperweaponIcon( superweaponCameo( info->getSpecialPowerTemplate() ),
                                       readySecs, percent, isReady, info->getColor() );
+                  SpectatorSuperweapon listed = { i, superweaponCameo( info->getSpecialPowerTemplate() ), readySecs, isReady };
+                  m_spectatorSuperweapons.push_back( listed );
                 }
                 if (info->getSpecialPowerTemplate()->isSharedNSync())
                   break; // Wow, it is almost too easy!
@@ -9259,7 +9469,8 @@ void InGameUI::addSuperweaponIcon( const Image *image, Int seconds, Int percent,
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawSuperweaponStrip( void )
 {
-	if( m_superweaponIconCount < 1 || stripSwitchedOff( &GlobalData::m_showSuperweaponStrip ) )
+	// watching, the spectator page's left panel lists the countdowns instead
+	if( m_superweaponIconCount < 1 || stripSwitchedOff( &GlobalData::m_showSuperweaponStrip ) || m_spectatorPageShown )
 		return;
 
 	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
@@ -9537,7 +9748,8 @@ static Int gatherPlayerSkills( const Player *player, const Image **icons, Int co
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawSkillStrip( void )
 {
-	if( stripSwitchedOff( &GlobalData::m_showSkillStrip ) )
+	// the spectator page's left panel lists them instead; the page's flag is the last frame's here
+	if( stripSwitchedOff( &GlobalData::m_showSkillStrip ) || m_spectatorPageShown )
 		return;
 	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
 		return;

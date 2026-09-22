@@ -15625,6 +15625,10 @@ GUI:HudArmies
 "Ordular"
 END
 
+GUI:HudSuperweaponReady
+"ateşe hazır"
+END
+
 GUI:ScoreboardAllies
 "TAKIMIN"
 END

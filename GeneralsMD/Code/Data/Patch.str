@@ -1098,6 +1098,11 @@ GUI:HudArmies
 "Armies"
 END
 
+// under a superweapon's name in the spectator's feed, the moment it can fire
+GUI:HudSuperweaponReady
+"ready to fire"
+END
+
 // the scoreboard on Tab
 GUI:ScoreboardAllies
 "YOUR SIDE"
