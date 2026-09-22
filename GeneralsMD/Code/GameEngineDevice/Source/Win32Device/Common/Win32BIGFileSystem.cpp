@@ -54,11 +54,18 @@ static const char *const BASE_GAME_ARCHIVE = "Textures.big";
 
 // Where to look when the registry does not say.  Steam writes no key and installs the two games as
 // sibling folders under steamapps\common (apps 2229870 and 2732960), so the base game is one folder
-// over; a copied-over install puts the same bigs in ZH_Generals next to the exe.
+// over; a copied-over install puts the same bigs in ZH_Generals next to the exe.  The First Decade
+// does the same with its own folder name, and registers the collection's root folder as the base
+// game's InstallPath, so a player on v2.0.1 got "no base game archives" with Generals one folder
+// over.
 static const char *const BASE_GAME_DIRECTORIES[] = {
 	"ZH_Generals\\",
 	"..\\Command & Conquer Generals\\",
+	"..\\Command & Conquer(tm) Generals\\",
 };
+
+// The folder inside the First Decade's registered root that holds the base game.
+static const char FIRST_DECADE_GENERALS_FOLDER[] = "Command & Conquer(tm) Generals\\";
 
 static Bool holdsBaseGameArchives(const char *directory)
 {
@@ -137,6 +144,15 @@ void Win32BIGFileSystem::init() {
       if (!installPath.isEmpty() && !installPath.endsWith("\\"))
       {
         installPath.concat("\\");
+      }
+      if (!installPath.isEmpty() && !holdsBaseGameArchives(installPath.str()))
+      {
+        AsciiString firstDecade = installPath;
+        firstDecade.concat(FIRST_DECADE_GENERALS_FOLDER);
+        if (holdsBaseGameArchives(firstDecade.str()))
+        {
+          installPath = firstDecade;
+        }
       }
       // An uninstalled retail or First Decade copy leaves its key behind, and trusting it loaded
       // no base archive at all: the water and the ground came up magenta and black on the shell map.
