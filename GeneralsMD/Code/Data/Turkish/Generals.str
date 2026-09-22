@@ -15589,6 +15589,10 @@ GUI:HudNetWorth
 "Net değer"
 END
 
+GUI:HudGameStats
+"Oyun istatistikleri"
+END
+
 GUI:HudStatCash
 "Nakit"
 END

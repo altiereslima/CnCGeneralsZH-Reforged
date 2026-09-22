@@ -1059,7 +1059,11 @@ GUI:HudNetWorth
 "Net worth"
 END
 
-// the other numbers the spectator's drop-down can rank every player by
+// the heading of the spectator's stat drop-down, and the other numbers it can rank every player by
+GUI:HudGameStats
+"Game stats"
+END
+
 GUI:HudStatCash
 "Cash"
 END
