@@ -69,8 +69,13 @@ enum
 		 link, which is not a margin, it is a rounding error.  Two frames - 66 ms at 30 Hz - is the
 		 allowance for the jitter the average hides, and it is what makes a low MIN_RUNAHEAD safe:
 		 the links that need the window get more of it than the old flat floor of ten ever gave them,
-		 and the links that do not stop paying for it. */
-	RUNAHEAD_JITTER_FRAMES = 2,
+		 and the links that do not stop paying for it.
+
+		 Three since the router stopped being counted as a leg of the trip (roomLatencySum).  The
+		 window that came out of that was the honest one, and at 200 to 300 ms of ping with 30 to 60 ms
+		 of jitter two frames of allowance let the tail through: two players at 200 ms fell from 29
+		 logic frames a second to 26 on a 5-frame window.  A LAN still sits on MIN_RUNAHEAD. */
+	RUNAHEAD_JITTER_FRAMES = 3,
 
 	/* The room never runs slower than this, whatever the metrics say. */
 	ROOM_FRAME_RATE_FLOOR = 5,
@@ -88,8 +93,20 @@ enum
 	 packet that is still in flight, too large and every click is answered late.  The packet router
 	 computes this for the whole room and broadcasts it, so it is one number everybody obeys. */
 
-/** The run-ahead, in frames.  latencySumSeconds is the sum of the two worst average round trips
-	  (ConnectionManager::getMaximumLatency), fps the rate the room has settled on. */
+/* Every command travels through the packet router, so the longest trip in the room is from the
+	 worst-connected player to the router and on to the second worst: half of each of their round
+	 trips.  The router's own figure is not a leg of any trip.  EA's getMaximumLatency said as much
+	 ("the latency for the packet router is always 0") and then summed it anyway, and the router
+	 measures a real round trip like everybody else.  Three players never showed it, because the two
+	 worst are usually the other two.  Two players always did: the router's round trip plus the
+	 guest's, which is the same trip twice, so the run-ahead covered a whole round trip where half
+	 of one was the wire - 9 frames against 6 at a 200 ms ping.
+
+	 latencies and connected are indexed by slot; routerSlot is left out. */
+Real roomLatencySum( const Real latencies[], const Bool connected[], Int numSlots, Int routerSlot );
+
+/** The run-ahead, in frames.  latencySumSeconds is roomLatencySum's, fps the rate the room has
+	  settled on. */
 Int computeRunAhead( Real latencySumSeconds, Int fps, UnsignedInt slackPercent,
 										 Int minRunAhead, Int maxRunAhead );
 
@@ -110,8 +127,15 @@ Int computeRunAhead( Real latencySumSeconds, Int fps, UnsignedInt slackPercent,
 	 run-ahead - 0.6 s - against the 64 frames the raw samples bought.  A link genuinely slower
 	 than this loses at most 33 ms of one-way window, which RUNAHEAD_JITTER_FRAMES already covers.
 	 ponytail: one ceiling for every link.  The self-calibrating version is the connection's own
-	 srtt + 4*rttvar (Connection.h has both), if a real link is ever found that this undersizes. */
-const Real MAX_PLAUSIBLE_LATENCY_SECONDS = 0.5f;
+	 srtt + 4*rttvar (Connection.h has both), if a real link is ever found that this undersizes.
+
+	 It was half a second until the owner said the rooms this fork is played in sit at 200 to 300 ms
+	 of ping.  The sample is that ping plus the game's own share of the trip - a frame of send
+	 grouping each way and the time until the next pass reads the socket - and a 300 ms ping with
+	 60 ms of jitter measured 0.38 s on average with single samples past 0.5, so the ceiling was
+	 already cutting into links people play on and would have undersized the window on every one of
+	 them a little slower. */
+const Real MAX_PLAUSIBLE_LATENCY_SECONDS = 0.8f;
 
 /** Fold a raw round-trip measurement into the range a round trip can actually occupy. */
 Real sanitizeLatencySample( Real seconds, Real ceilingSeconds );

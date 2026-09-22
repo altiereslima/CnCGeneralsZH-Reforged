@@ -1437,24 +1437,13 @@ void ConnectionManager::updateRunAhead(Int oldRunAhead, Int frameRate, Bool didS
 }
 
 Real ConnectionManager::getMaximumLatency() {
-	// This works for 2 player games because the latency for the packet router is always 0.
-	Real lat1 = 0.0;
-	Real lat2 = 0.0;
-
+	// EA: "This works for 2 player games because the latency for the packet router is always 0."
+	// It is not, so it is left out by name - see roomLatencySum.
+	Bool connected[MAX_SLOTS];
 	for (Int i = 0; i < MAX_SLOTS; ++i) {
-		if (isPlayerConnected(i)) {
-			if (m_latencyAverages[i] != 0.0) {
-				if (m_latencyAverages[i] > lat1) {
-					lat2 = lat1;
-					lat1 = m_latencyAverages[i];
-				} else if (m_latencyAverages[i] > lat2) {
-					lat2 = m_latencyAverages[i];
-				}
-			}
-		}
+		connected[i] = isPlayerConnected(i);
 	}
-
-	return (lat1 + lat2);
+	return roomLatencySum(m_latencyAverages, connected, MAX_SLOTS, m_packetRouterSlot);
 }
 
 void ConnectionManager::getMinimumFps(Int &minFps, Int &minFpsPlayer) {
