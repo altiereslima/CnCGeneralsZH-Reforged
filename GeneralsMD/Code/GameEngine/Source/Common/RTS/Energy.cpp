@@ -90,6 +90,9 @@ Real Energy::getEnergySupplyRatio() const
 		return 0.0f;
 	}
 
+	if( m_owner->hasCheat( CHEAT_INFINITE_POWER ) && m_energyProduction < m_energyConsumption )
+		return 1.0f;
+
 	if (m_energyConsumption == 0)
 		return (Real)m_energyProduction;
 
@@ -104,6 +107,8 @@ Bool Energy::hasSufficientPower(void) const
 		//Power sabotaged, therefore no power.
 		return FALSE;
 	}
+	if( m_owner->hasCheat( CHEAT_INFINITE_POWER ) )
+		return TRUE;
 	return m_energyProduction >= m_energyConsumption;
 }
 

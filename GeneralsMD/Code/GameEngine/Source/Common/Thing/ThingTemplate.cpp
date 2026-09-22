@@ -1555,12 +1555,10 @@ Int ThingTemplate::calcTimeToBuild( const Player* player) const
 	Real factionModifier = 1 + player->getProductionTimeChangePercent( getName() );
 	buildTime *= factionModifier;
 
-#if defined (_DEBUG) || defined (_INTERNAL) || defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
 	if( player->buildsInstantly() )
 	{
 		buildTime = 1;
 	}
-#endif
 
 	// Adjust build time based on energy supply.
 

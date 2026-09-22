@@ -322,6 +322,9 @@ Bool SpecialPowerModule::isReady() const
 		Player *player = getObject()->getControllingPlayer();
 		if ( player )
 		{
+			if ( player->hasCheat( CHEAT_NO_COOLDOWN ) )
+				return TRUE;
+
 			if ( modData->m_specialPowerTemplate->isSharedNSync())
 				return (TheGameLogic->getFrame() >= player->getOrStartSpecialPowerReadyFrame( modData->m_specialPowerTemplate ) );
 		}

@@ -682,7 +682,8 @@ found and fixed â€” EA's own, not port damage.**
 
 - Press the key above Tab and a black panel drops over the top of the screen with a prompt waiting at the bottom of it. Type into it and the game ignores the keys it would otherwise have read as orders, so a word starting with Q does not queue a tank. Escape or the same key again puts it away.
 - `help` lists what it takes, `clear` empties it, `echo` says a line back. The up and down arrows walk back through the last thirty-two things you typed.
-- It opens in the main menu as well as in a match. Nothing it does yet touches the rules of a game, so it is safe to leave open while one runs.
+- It opens in the main menu as well as in a match.
+- Cheats for campaign and skirmish, listed by `cheats`: `money` and `points` hand over cash and general's points, `rankup` raises the general's rank, `heroic` makes every unit you own heroic and `reveal` lifts the shroud for good. `power`, `nocooldown`, `god`, `instantbuild` and `onehitkill` switch on and off: power that never runs short, general's powers and superweapons always ready, your side taking no damage, anything built or trained in an instant, and every hit you land a kill. `money 50000` takes an amount. They are recorded in the replay like any order, and a LAN or online game refuses them.
 - The general's promotion screen moved off that key onto the backslash beside it.
 - One press is one letter. Holding a key repeats it, and the game timed that wait in frames: a third of a second at the 30 frames a second it was written for, 70 milliseconds on a 144 Hz screen, which is shorter than an ordinary keypress. It waits 0.4 seconds now whatever the frame rate, in the console, the chat box and every text field.
 

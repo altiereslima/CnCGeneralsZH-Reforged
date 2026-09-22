@@ -51,12 +51,13 @@
 #include "Common/Radar.h"
 
 #include "GameLogic/AIPathfind.h"
+#include "GameLogic/ExperienceTracker.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Locomotor.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/ObjectCreationList.h"
 #include "GameLogic/ObjectIter.h"
-//#include "GameLogic/PartitionManager.h"
+#include "GameLogic/PartitionManager.h"
 #include "GameLogic/AI.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/DozerAIUpdate.h"
@@ -446,6 +447,16 @@ static const Real SIGNAL_LABEL_HEIGHT = 20.0f;
 Bool Signal_isThrottled( UnsignedInt now, UnsignedInt lastSignalFrame )
 {
 	return now >= lastSignalFrame && now - lastSignalFrame < SIGNAL_COOLDOWN_FRAMES;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The heroic cheat: buildings and anything else that never ranks up are left alone. */
+//-------------------------------------------------------------------------------------------------
+static void makeObjectHeroic( Object *obj, void *userData )
+{
+	ExperienceTracker *tracker = obj->getExperienceTracker();
+	if( tracker->isTrainable() )
+		tracker->setVeterancyLevel( LEVEL_HEROIC );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2151,6 +2162,53 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			signalSound.setPlayerIndex( thisPlayer->getPlayerIndex() );
 			signalSound.setPosition( &pos );
 			TheAudio->addAudioEvent( &signalSound );
+			break;
+		}
+
+		// --------------------------------------------------------------------------------------------
+		// The console's cheats come through here rather than acting from the console, so a replay of
+		// a game that used them records them and plays back the same.  A network game never takes one.
+		case GameMessage::MSG_CHEAT:
+		{
+			if( isInMultiplayerGame() )
+				break;
+
+			CheatKind kind = (CheatKind)msg->getArgument( 0 )->integer;
+			Int amount = msg->getArgument( 1 )->integer;
+			switch( kind )
+			{
+				case CHEAT_MONEY:
+					thisPlayer->getMoney()->deposit( amount );
+					break;
+
+				case CHEAT_GENERAL_POINTS:
+					thisPlayer->addSciencePurchasePoints( amount );
+					break;
+
+				case CHEAT_RANK_UP:
+					thisPlayer->setRankLevel( thisPlayer->getRankLevel() + amount );
+					break;
+
+				case CHEAT_HEROIC:
+					thisPlayer->iterateObjects( makeObjectHeroic, NULL );
+					break;
+
+				case CHEAT_REVEAL_MAP:
+					ThePartitionManager->revealMapForPlayerPermanently( thisPlayer->getPlayerIndex() );
+					break;
+
+				case CHEAT_INFINITE_POWER:
+					thisPlayer->toggleCheat( kind );
+					thisPlayer->onPowerBrownOutChange( !thisPlayer->getEnergy()->hasSufficientPower() );
+					break;
+
+				case CHEAT_NO_COOLDOWN:
+				case CHEAT_GOD_MODE:
+				case CHEAT_INSTANT_BUILD:
+				case CHEAT_ONE_HIT_KILL:
+					thisPlayer->toggleCheat( kind );
+					break;
+			}
 			break;
 		}
 
