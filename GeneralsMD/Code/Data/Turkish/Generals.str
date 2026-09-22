@@ -15589,6 +15589,38 @@ GUI:HudNetWorth
 "Net değer"
 END
 
+GUI:HudStatCash
+"Nakit"
+END
+
+GUI:HudStatIncome
+"Dakikalık gelir"
+END
+
+GUI:HudStatArmy
+"Ordu değeri"
+END
+
+GUI:HudStatKills
+"Öldürme / kayıp"
+END
+
+GUI:HudStatRank
+"General rütbesi"
+END
+
+GUI:HudStatPower
+"Elektrik"
+END
+
+GUI:HudNetWorthLead
+"Net değer farkı"
+END
+
+GUI:HudArmies
+"Ordular"
+END
+
 GUI:ScoreboardAllies
 "TAKIMIN"
 END

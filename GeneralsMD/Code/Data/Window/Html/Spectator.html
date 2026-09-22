@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
-  What a spectator sees over the battlefield: the drop-down that switches the strips, and every
-  player's net worth.  Laid out by litehtml and drawn by the game (GameClient/HtmlOverlay.h).
+  What a spectator sees over the battlefield, down the left edge the way Dota's spectator has it:
+  the drop-down that switches the strips, every player ranked by a number picked from a second
+  drop-down, the net worth lead over the match, and what each army is made of.  Laid out by
+  litehtml and drawn by the game (GameClient/HtmlOverlay.h).
 
   A CSS pixel is a pixel of an 800x600 screen and font-size is the game font's point size there;
   the page is scaled with the rest of the interface.  A background on html or body is for a
@@ -9,15 +11,26 @@
   than linear ones.
 
   The game fills in, before layout (GameClient/HtmlTemplate.h):
-    {{option:Key}}    "on" while that Options.ini on/off option is on
-    {{flip:name}}     "flipped" while a data-click of flip:name has been clicked an odd number of times
-    {{text:Label}}    a string table label, in the player's language
-    data-each="players", one copy per player still in the match, richest first, with
-      {{name}} {{networth}} {{share}} (percent of the richest) {{color}} {{team}} {{teams}}
+    {{option:Key}}        "on" while that Options.ini on/off option is on
+    {{flip:name}}         "flipped" while a data-click of flip:name has been clicked an odd number of times
+    {{pick:group}}        the choice last made with data-click="pick:group:choice"
+    {{pick:group:choice}} "on" while that is the choice; pick:stat:networth is on until another is made
+    {{text:Label}}        a string table label, in the player's language
+    {{stat}}              the label of the picked stat
+    {{teams}}             how many teams are left
+    {{lead}} {{leader}}   how much net worth the leading team is ahead by, and "team0" or "team1"
+    {{graph}}             "shown" once two teams have a lead worth drawing
+    data-each="players", one copy per player still in the match, ranked by the picked stat, with
+      {{name}} {{value}} {{share}} (percent of the highest) {{networth}} {{color}} {{team}} {{teams}}
       {{portrait}} (a mapped image name, for <img src>)
+    data-each="lead", the first team's net worth less the second's since the start, up to 48
+      columns, with {{up}} or {{down}} as a percent of the biggest lead either way
+    data-each="army", per player a {{kind}} "head" entry with his {{image}} and {{color}}, then up to
+      six "unit" entries, the most money first, with the unit's {{image}} and {{count}}
 
-  A data-click of option:Key flips that option and saves it; one of flip:name flips the name for
-  the rest of the match.  #hud-top's bottom edge is where the message list starts.
+  The stats: networth, cash, income, army, kills, rank, power.  A data-click of option:Key flips
+  that option and saves it; flip:name flips the name for the rest of the match; pick:group:choice
+  picks and folds up flip:group.  #hud-top's bottom edge is where the message list starts.
 
   Edit the copy under Run/Window/Html and the next match reads it.
 -->
@@ -31,6 +44,18 @@
 
   #hud-top { position: absolute; left: 6px; top: 6px; width: 150px; }
 
+  .panel { background-color: rgba(8, 12, 16, 0.78); border-top: 1px solid #45525c; margin-bottom: 4px; padding-bottom: 2px; }
+  .head { padding: 2px 4px; color: #aab6bf; }
+  .head:hover { color: #ffffff; }
+  .fold { display: inline-block; width: 8px; margin-right: 2px; }
+  .fold::before { content: "-"; }
+  .flipped > .head .fold::before { content: "+"; }
+  .flipped > .body { display: none; }
+  .opens > .head .fold::before { content: "+"; }
+  .opens.flipped > .head .fold::before { content: "-"; }
+  .opens > .body { display: none; }
+  .opens.flipped > .body { display: block; }
+
   .menu { background-color: rgba(0, 0, 0, 0.6); margin-bottom: 4px; }
   .row { padding: 2px 3px; }
   .row:hover { background-color: rgba(255, 255, 255, 0.12); }
@@ -42,20 +67,42 @@
   .menu .sign::before { content: "+"; }
   .menu.flipped .sign::before { content: "-"; }
 
-  .networth { background-color: rgba(8, 12, 16, 0.78); border-top: 1px solid #45525c; padding-bottom: 2px; }
-  .title { padding: 2px 4px; color: #aab6bf; }
-  .title:hover { color: #ffffff; }
-  .networth .sign::before { content: "- "; }
-  .networth.flipped .sign::before { content: "+ "; }
-  .networth.flipped .list { display: none; }
+  .picker { color: #e8c865; }
+  .picker:hover { color: #ffffff; }
+  .picker::after { content: " v"; }
+  .choices { display: none; background-color: rgba(0, 0, 0, 0.85); border: 1px solid #45525c; margin: 0 2px 2px 2px; }
+  .body.flipped .choices { display: block; }
+  .choice { padding: 2px 6px; color: #aab6bf; }
+  .choice:hover { background-color: rgba(255, 255, 255, 0.12); color: #ffffff; }
+  .choice.on { color: #e8c865; }
 
   .player { height: 14px; margin: 1px 2px; }
   .portrait { float: left; width: 22px; height: 14px; border-left: 2px solid #888888; }
-  .track { position: relative; height: 14px; margin-left: 27px; }
+  .track { position: relative; height: 14px; margin-left: 27px; background-color: rgba(255, 255, 255, 0.05); }
   .bar { position: absolute; left: 0; top: 0; height: 14px; }
   .teams2.team0 .bar { background: linear-gradient(to right, #2f6b21, #72cf4b); }
   .teams2.team1 .bar { background: linear-gradient(to right, #7a1d17, #e2553f); }
-  .worth { position: relative; padding-left: 3px; line-height: 14px; font-weight: bold; color: #ffffff; }
+  .name { position: absolute; left: 3px; top: 0; line-height: 14px; color: #ffffff; }
+  .value { position: absolute; right: 3px; top: 0; line-height: 14px; font-weight: bold; color: #ffffff; }
+
+  .graph { display: none; }
+  .graph.shown { display: block; }
+  .lead { float: right; font-weight: bold; }
+  .team0 .lead { color: #72cf4b; }
+  .team1 .lead { color: #e2553f; }
+  .chart { height: 36px; margin: 1px 3px 0 3px; background-color: rgba(255, 255, 255, 0.05); }
+  .col { float: left; width: 3px; height: 36px; }
+  .half { position: relative; height: 18px; }
+  .over { border-bottom: 1px solid #45525c; height: 17px; }
+  .up { position: absolute; left: 0; right: 0; bottom: 0; background-color: #72cf4b; }
+  .down { position: absolute; left: 0; right: 0; top: 0; background-color: #e2553f; }
+
+  .army { overflow: hidden; padding: 0 2px; }
+  .cell { float: left; position: relative; width: 18px; height: 15px; margin: 1px 1px 0 0; }
+  .cell img { width: 18px; height: 15px; }
+  .cell.head { clear: left; width: 20px; padding: 0; border-left: 2px solid #888888; }
+  .cell.head img { width: 20px; }
+  .count { position: absolute; right: 1px; bottom: 0; font-size: 8px; font-weight: bold; color: #ffffff; }
 </style>
 </head>
 <body>
@@ -70,15 +117,50 @@
     </div>
   </div>
 
-  <div class="networth {{flip:networth}}">
-    <div class="title" data-click="flip:networth"><span class="sign"></span>{{text:GUI:HudNetWorth}}</div>
-    <div class="list">
+  <div class="panel {{flip:statsfold}}">
+    <div class="head">
+      <span class="fold" data-click="flip:statsfold"></span><span class="picker" data-click="flip:stat">{{stat}}</span>
+    </div>
+    <div class="body {{flip:stat}}">
+      <div class="choices">
+        <div class="choice {{pick:stat:networth}}" data-click="pick:stat:networth">{{text:GUI:HudNetWorth}}</div>
+        <div class="choice {{pick:stat:cash}}" data-click="pick:stat:cash">{{text:GUI:HudStatCash}}</div>
+        <div class="choice {{pick:stat:income}}" data-click="pick:stat:income">{{text:GUI:HudStatIncome}}</div>
+        <div class="choice {{pick:stat:army}}" data-click="pick:stat:army">{{text:GUI:HudStatArmy}}</div>
+        <div class="choice {{pick:stat:kills}}" data-click="pick:stat:kills">{{text:GUI:HudStatKills}}</div>
+        <div class="choice {{pick:stat:rank}}" data-click="pick:stat:rank">{{text:GUI:HudStatRank}}</div>
+        <div class="choice {{pick:stat:power}}" data-click="pick:stat:power">{{text:GUI:HudStatPower}}</div>
+      </div>
       <div class="player teams{{teams}} team{{team}}" data-each="players">
         <img class="portrait" src="{{portrait}}" style="border-color: {{color}}">
         <div class="track">
           <div class="bar" style="width: {{share}}%; background-color: {{color}}"></div>
-          <span class="worth">{{networth}}</span>
+          <span class="name">{{name}}</span>
+          <span class="value">{{value}}</span>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel graph {{graph}} {{flip:graphfold}}">
+    <div class="head {{leader}}">
+      <span class="fold" data-click="flip:graphfold"></span>{{text:GUI:HudNetWorthLead}}
+      <span class="lead">{{lead}}</span>
+    </div>
+    <div class="body chart">
+      <div class="col" data-each="lead">
+        <div class="half over"><div class="up" style="height: {{up}}%"></div></div>
+        <div class="half"><div class="down" style="height: {{down}}%"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel opens {{flip:armyfold}}">
+    <div class="head" data-click="flip:armyfold"><span class="fold"></span>{{text:GUI:HudArmies}}</div>
+    <div class="body army">
+      <div class="cell {{kind}}" data-each="army" style="border-color: {{color}}">
+        <img src="{{image}}">
+        <span class="count">{{count}}</span>
       </div>
     </div>
   </div>

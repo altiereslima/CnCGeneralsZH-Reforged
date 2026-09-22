@@ -1193,6 +1193,7 @@ InGameUI::InGameUI()
 	m_spectatorPageLoaded = FALSE;
 	m_spectatorPageShown = FALSE;
 	m_spectatorListsFrame = 0;
+	m_spectatorLeadFrame = 0;
 	m_hudTogglesBottom = 0;
 	m_scoreboardOpen = FALSE;
 	m_scoreboardStringsUsed = 0;
@@ -1741,17 +1742,28 @@ static Real elevatedReach( Real reach, Real range, const Coord3D &center, Real a
 // matches without a build.  What a data-click names is also the {{name}} that reads it back:
 // data-click="option:Key" flips that on/off option and {{option:Key}} is "on" while it is on;
 // data-click="flip:name" flips a switch that lasts the match and {{flip:name}} is "flipped" while
-// it is flipped.  {{text:Label}} is a string table label in the player's language.
+// it is flipped.  data-click="pick:group:choice" makes choice the group's one pick, so {{pick:group}}
+// is "choice" and {{pick:group:choice}} is "on", and folds up the flip of the same name: a drop-down
+// that flip:group opened closes on the choice made in it.  {{text:Label}} is a string table label
+// in the player's language.
 //-------------------------------------------------------------------------------------------------
 static const char *const SPECTATOR_PAGE = "Window\\Html\\Spectator.html";
 static const std::string OPTION_ACTION = "option:";
 static const std::string FLIP_ACTION = "flip:";
+static const std::string PICK_ACTION = "pick:";
 static const std::string TEXT_LOOKUP = "text:";
+static const std::string STAT_GROUP = "stat";
 
 enum
 {
 	HUD_TOGGLES_INSET					= 6,													///< between the page's #hud-top and the messages under it, 800x600
 	NET_WORTH_REFRESH_FRAMES	= LOGICFRAMES_PER_SECOND / 2,	///< how often every player's worth is counted again
+	FRAMES_PER_MINUTE					= LOGICFRAMES_PER_SECOND * 60,
+	LEAD_SAMPLE_FRAMES				= LOGICFRAMES_PER_SECOND * 10,	///< one point of the lead graph every ten seconds
+	LEAD_GRAPH_COLUMNS				= 48,		///< the most columns the graph draws; a longer match is averaged into them
+	ARMY_CHART_UNITS					= 6,		///< kinds of unit shown per player, the most money first
+	PLAYER_NAME_CHARS					= 11,		///< a name longer than this is cut, there is no clipping to hide it
+	TWO_TEAMS									= 2,
 	PERCENT										= 100
 };
 
@@ -1794,76 +1806,152 @@ static std::string cssColor( Color color )
 	return text;
 }
 
-struct NetWorthGather
+/** Everything the page can rank one player by, counted in one walk over what he owns. */
+struct SpectatorStats
 {
-	const Player *player;
-	Int worth;
+	Player *player;
+	Int team;
+	Int networth;		///< cash plus the build cost of everything standing
+	Int cash;
+	Int income;			///< money earned per minute of match, averaged over the whole of it
+	Int army;				///< the build cost of everything standing that is not a structure
+	Int kills;			///< units and buildings destroyed
+	Int losses;
+	Int rank;
+	Int power;			///< produced less consumed, negative when his base is browned out
+	std::map< const ThingTemplate *, Int > units;	///< how many of each unit with a cameo he has standing
 };
 
-static void addObjectWorth( Object *obj, void *userData )
+/** One entry of the stat drop-down: what pick:stat:key names, the label it goes by, and the number
+	* the list is ranked by when it is picked. */
+struct SpectatorStat
 {
-	NetWorthGather *gather = (NetWorthGather *)userData;
-	if( !obj->isEffectivelyDead() )
-		gather->worth += obj->getTemplate()->calcCostToBuild( gather->player );
+	const char *key;
+	const char *label;
+	Int SpectatorStats::*value;
+};
+
+static const SpectatorStat SPECTATOR_STATS[] =
+{
+	{ "networth",	"GUI:HudNetWorth",		&SpectatorStats::networth },
+	{ "cash",			"GUI:HudStatCash",		&SpectatorStats::cash },
+	{ "income",		"GUI:HudStatIncome",	&SpectatorStats::income },
+	{ "army",			"GUI:HudStatArmy",		&SpectatorStats::army },
+	{ "kills",		"GUI:HudStatKills",		&SpectatorStats::kills },
+	{ "rank",			"GUI:HudStatRank",		&SpectatorStats::rank },
+	{ "power",		"GUI:HudStatPower",		&SpectatorStats::power }
+};
+
+/** The stat pick:stat:key names, the first until one is picked. */
+static const SpectatorStat &spectatorStat( const std::map< std::string, std::string > &picked )
+{
+	std::map< std::string, std::string >::const_iterator pick = picked.find( STAT_GROUP );
+	for( Int stat = 0; pick != picked.end() && stat < (Int)ARRAY_SIZE( SPECTATOR_STATS ); stat++ )
+		if( pick->second == SPECTATOR_STATS[ stat ].key )
+			return SPECTATOR_STATS[ stat ];
+	return SPECTATOR_STATS[ 0 ];
+}
+
+static void addObjectStats( Object *obj, void *userData )
+{
+	SpectatorStats *stats = (SpectatorStats *)userData;
+	if( obj->isEffectivelyDead() )
+		return;
+
+	const ThingTemplate *thing = obj->getTemplate();
+	const Int cost = thing->calcCostToBuild( stats->player );
+	stats->networth += cost;
+	if( obj->isKindOf( KINDOF_STRUCTURE ) )
+		return;
+
+	stats->army += cost;
+	if( cost > 0 && thing->getButtonImage() != NULL )
+		stats->units[ thing ]++;
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The page's "players" list: everyone still in the match, richest first, each with what his cash
-	* and everything he has standing would cost to buy again.  Allies both ways share a team number,
-	* counted in the order the teams first appear in the player list, and every entry carries how
-	* many teams there are, so a page can colour two sides the way Dota does and leave a free for all
-	* in the players' own colours. */
+/** Everyone still in the match with his numbers, ranked by `stat`.  Allies both ways share a team
+	* number, counted in the order the teams first appear in the player list; `teams` is how many. */
 //-------------------------------------------------------------------------------------------------
-static void gatherNetWorth( std::vector< HtmlValues > &rows )
+static std::vector< SpectatorStats > gatherSpectatorStats( const SpectatorStat &stat, Int &teams )
 {
-	struct Worth
-	{
-		Player *player;
-		Int worth;
-		Int team;
-	};
-	std::vector< Worth > worths;
+	std::vector< SpectatorStats > players;
 	const Player *local = ThePlayerList->getLocalPlayer();
-	Int teams = 0;
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	teams = 0;
 	for( Int index = 0; index < ThePlayerList->getPlayerCount(); index++ )
 	{
 		Player *player = ThePlayerList->getNthPlayer( index );
 		if( player == NULL || player == local || !player->isPlayerActive() || !player->isPlayableSide() )
 			continue;
 
-		NetWorthGather gather;
-		gather.player = player;
-		gather.worth = player->getMoney()->countMoney();
-		player->iterateObjects( addObjectWorth, &gather );
+		ScoreKeeper *score = player->getScoreKeeper();
+		SpectatorStats stats;
+		stats.player = player;
+		stats.team = -1;
+		stats.cash = player->getMoney()->countMoney();
+		stats.networth = stats.cash;
+		stats.income = frame > 0 ? (Int)( (Int64)score->getTotalMoneyEarned() * FRAMES_PER_MINUTE / frame ) : 0;
+		stats.army = 0;
+		stats.kills = score->getTotalUnitsDestroyed() + score->getTotalBuildingsDestroyed();
+		stats.losses = score->getTotalUnitsLost() + score->getTotalBuildingsLost();
+		stats.rank = player->getRankLevel();
+		stats.power = player->getEnergy()->getProduction() - player->getEnergy()->getConsumption();
+		player->iterateObjects( addObjectStats, &stats );
 
-		Worth worth = { player, gather.worth, -1 };
-		for( size_t earlier = 0; earlier < worths.size() && worth.team < 0; earlier++ )
+		for( size_t earlier = 0; earlier < players.size() && stats.team < 0; earlier++ )
 		{
-			const Player *other = worths[ earlier ].player;
+			const Player *other = players[ earlier ].player;
 			if( player->getRelationship( other->getDefaultTeam() ) == ALLIES && other->getRelationship( player->getDefaultTeam() ) == ALLIES )
-				worth.team = worths[ earlier ].team;
+				stats.team = players[ earlier ].team;
 		}
-		if( worth.team < 0 )
-			worth.team = teams++;
-		worths.push_back( worth );
+		if( stats.team < 0 )
+			stats.team = teams++;
+		players.push_back( stats );
 	}
 
-	std::stable_sort( worths.begin(), worths.end(), []( const Worth &a, const Worth &b ) { return a.worth > b.worth; } );
-	const Int richest = worths.empty() ? 0 : worths.front().worth;
+	const Int SpectatorStats::*value = stat.value;
+	std::stable_sort( players.begin(), players.end(),
+										[ value ]( const SpectatorStats &a, const SpectatorStats &b ) { return a.*value > b.*value; } );
+	return players;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The page's "players" list: one entry per player in the order `players` is ranked, the picked
+	* number written out and as a percentage of the highest.  Every entry carries how many teams
+	* there are, so a page can colour two sides the way Dota does and leave a free for all in the
+	* players' own colours. */
+//-------------------------------------------------------------------------------------------------
+static void fillSpectatorPlayers( const std::vector< SpectatorStats > &players, const SpectatorStat &stat, Int teams,
+																	std::vector< HtmlValues > &rows )
+{
+	Int highest = 0;
+	for( size_t index = 0; index < players.size(); index++ )
+		highest = max( highest, players[ index ].*stat.value );
 
 	rows.clear();
-	for( size_t index = 0; index < worths.size(); index++ )
+	for( size_t index = 0; index < players.size(); index++ )
 	{
-		const Worth &worth = worths[ index ];
-		const PlayerTemplate *side = worth.player->getPlayerTemplate();
+		const SpectatorStats &stats = players[ index ];
+		const PlayerTemplate *side = stats.player->getPlayerTemplate();
 		const Image *portrait = side ? side->getEnabledImage() : NULL;
+		const Int value = stats.*stat.value;
+
+		std::wstring name( stats.player->getPlayerDisplayName().str() );
+		if( name.size() > PLAYER_NAME_CHARS )
+			name.resize( PLAYER_NAME_CHARS );
+
+		std::string text = std::to_string( value );
+		if( stat.value == &SpectatorStats::kills )
+			text += " / " + std::to_string( stats.losses );
 
 		HtmlValues row;
-		row[ "name" ] = WideCharStringToMultiByte( worth.player->getPlayerDisplayName().str() );
-		row[ "networth" ] = std::to_string( worth.worth );
-		row[ "share" ] = std::to_string( richest > 0 ? worth.worth * PERCENT / richest : 0 );
-		row[ "color" ] = cssColor( clientPlayerColor( worth.player ) );
-		row[ "team" ] = std::to_string( worth.team );
+		row[ "name" ] = WideCharStringToMultiByte( name.c_str() );
+		row[ "value" ] = text;
+		row[ "networth" ] = std::to_string( stats.networth );
+		row[ "share" ] = std::to_string( highest > 0 && value > 0 ? value * PERCENT / highest : 0 );
+		row[ "color" ] = cssColor( clientPlayerColor( stats.player ) );
+		row[ "team" ] = std::to_string( stats.team );
 		row[ "teams" ] = std::to_string( teams );
 		row[ "portrait" ] = portrait ? portrait->getName().str() : "";
 		rows.push_back( row );
@@ -1871,8 +1959,100 @@ static void gatherNetWorth( std::vector< HtmlValues > &rows )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The spectator's page: the drop-down that switches the strips on and off, and every player's net
-	* worth.
+/** The page's "army" list, Dota's item chart for an army: per player an entry of kind "head" with
+	* his portrait and colour, then his most expensive kinds of unit, each of kind "unit" with its
+	* cameo and how many are standing.  Flat, so a page floats the entries and clears at each head. */
+//-------------------------------------------------------------------------------------------------
+static void fillSpectatorArmies( const std::vector< SpectatorStats > &players, std::vector< HtmlValues > &cells )
+{
+	typedef std::pair< const ThingTemplate *, Int > UnitCount;
+
+	cells.clear();
+	for( size_t index = 0; index < players.size(); index++ )
+	{
+		const SpectatorStats &stats = players[ index ];
+		const PlayerTemplate *side = stats.player->getPlayerTemplate();
+		const Image *portrait = side ? side->getEnabledImage() : NULL;
+
+		HtmlValues head;
+		head[ "kind" ] = "head";
+		head[ "image" ] = portrait ? portrait->getName().str() : "";
+		head[ "color" ] = cssColor( clientPlayerColor( stats.player ) );
+		cells.push_back( head );
+
+		const Player *owner = stats.player;
+		std::vector< UnitCount > units( stats.units.begin(), stats.units.end() );
+		std::stable_sort( units.begin(), units.end(), [ owner ]( const UnitCount &a, const UnitCount &b )
+			{ return a.second * a.first->calcCostToBuild( owner ) > b.second * b.first->calcCostToBuild( owner ); } );
+		if( units.size() > ARMY_CHART_UNITS )
+			units.resize( ARMY_CHART_UNITS );
+
+		for( size_t unit = 0; unit < units.size(); unit++ )
+		{
+			HtmlValues cell;
+			cell[ "kind" ] = "unit";
+			cell[ "image" ] = units[ unit ].first->getButtonImage()->getName().str();
+			cell[ "count" ] = std::to_string( units[ unit ].second );
+			cells.push_back( cell );
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The page's "lead" list: the first team's net worth less the second's since the match began, as
+	* at most LEAD_GRAPH_COLUMNS columns, each with {{up}} or {{down}} the percentage of the biggest
+	* lead either way.  A longer match averages neighbouring samples into one column. */
+//-------------------------------------------------------------------------------------------------
+static void fillSpectatorLead( const std::vector< Int > &samples, std::vector< HtmlValues > &columns )
+{
+	const Int count = (Int)samples.size();
+	const Int columnCount = min( count, (Int)LEAD_GRAPH_COLUMNS );
+	std::vector< Int > averages( columnCount );
+	Int biggest = 0;
+	for( Int column = 0; column < columnCount; column++ )
+	{
+		const Int first = column * count / columnCount;
+		const Int last = ( column + 1 ) * count / columnCount;
+		Int64 sum = 0;
+		for( Int sample = first; sample < last; sample++ )
+			sum += samples[ sample ];
+		averages[ column ] = (Int)( sum / ( last - first ) );
+		biggest = max( biggest, abs( averages[ column ] ) );
+	}
+
+	columns.clear();
+	for( Int column = 0; column < columnCount; column++ )
+	{
+		const Int share = biggest > 0 ? abs( averages[ column ] ) * PERCENT / biggest : 0;
+		HtmlValues entry;
+		entry[ "up" ] = std::to_string( averages[ column ] > 0 ? share : 0 );
+		entry[ "down" ] = std::to_string( averages[ column ] < 0 ? share : 0 );
+		columns.push_back( entry );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The lead graph samples every LEAD_SAMPLE_FRAMES while two teams are left.  A logic frame that
+	* went backwards is a new match or a load, and starts the graph again. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::sampleSpectatorLead( Int lead, Bool twoTeams )
+{
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	if( frame < m_spectatorLeadFrame )
+		m_spectatorLead.clear();
+	if( !twoTeams )
+		return;
+	if( !m_spectatorLead.empty() && frame < m_spectatorLeadFrame + LEAD_SAMPLE_FRAMES )
+		return;
+
+	m_spectatorLead.push_back( lead );
+	m_spectatorLeadFrame = frame;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The spectator's page: the drop-down that switches the strips on and off, every player ranked by
+	* the number picked in the stat drop-down, the net worth lead over the match and each army's most
+	* expensive units - the panels Dota's spectator keeps down the left of the screen.
 	*
 	* Watching a match three strips fight over the same picture - the production rows, the
 	* promotions, the superweapon countdowns - and which of them a spectator wants depends on what he
@@ -1913,11 +2093,34 @@ void InGameUI::drawSpectatorPage( void )
 	const UnsignedInt frame = TheGameLogic->getFrame();
 	if( m_spectatorLists.empty() || frame < m_spectatorListsFrame || frame >= m_spectatorListsFrame + NET_WORTH_REFRESH_FRAMES )
 	{
-		gatherNetWorth( m_spectatorLists[ "players" ] );
+		const SpectatorStat &stat = spectatorStat( m_spectatorPicked );
+		Int teams = 0;
+		const std::vector< SpectatorStats > players = gatherSpectatorStats( stat, teams );
+		fillSpectatorPlayers( players, stat, teams, m_spectatorLists[ "players" ] );
+		fillSpectatorArmies( players, m_spectatorLists[ "army" ] );
+
+		Int lead = 0;
+		for( size_t index = 0; index < players.size(); index++ )
+			lead += players[ index ].team == 0 ? players[ index ].networth : -players[ index ].networth;
+		sampleSpectatorLead( lead, teams == TWO_TEAMS );
+		fillSpectatorLead( m_spectatorLead, m_spectatorLists[ "lead" ] );
+
+		m_spectatorTotals.clear();
+		m_spectatorTotals[ "stat" ] = WideCharStringToMultiByte( TheGameText->fetch( stat.label ).str() );
+		m_spectatorTotals[ PICK_ACTION + STAT_GROUP + ":" + stat.key ] = "on";
+		m_spectatorTotals[ "teams" ] = std::to_string( teams );
+		m_spectatorTotals[ "lead" ] = std::to_string( abs( lead ) );
+		m_spectatorTotals[ "leader" ] = lead == 0 ? "" : ( lead > 0 ? "team0" : "team1" );
+		m_spectatorTotals[ "graph" ] = teams == TWO_TEAMS && m_spectatorLead.size() >= TWO_TEAMS ? "shown" : "";
 		m_spectatorListsFrame = frame;
 	}
 
-	HtmlValues values;
+	HtmlValues values = m_spectatorTotals;
+	for( std::map< std::string, std::string >::const_iterator pick = m_spectatorPicked.begin(); pick != m_spectatorPicked.end(); ++pick )
+	{
+		values[ PICK_ACTION + pick->first ] = pick->second;
+		values[ PICK_ACTION + pick->first + ":" + pick->second ] = "on";
+	}
 	for( Int row = 0; row < TheOptionCatalogCount; row++ )
 		if( TheOptionCatalog[ row ].kind == OPTION_BOOL && TheOptionCatalog[ row ].get() )
 			values[ OPTION_ACTION + TheOptionCatalog[ row ].iniKey ] = "on";
@@ -1948,6 +2151,21 @@ Bool InGameUI::handleSpectatorPageClick( const ICoord2D *mouse, Bool act )
 		const std::string name = action.substr( FLIP_ACTION.size() );
 		if( m_spectatorFlipped.erase( name ) == 0 )
 			m_spectatorFlipped.insert( name );
+	}
+	else if( action.compare( 0, PICK_ACTION.size(), PICK_ACTION ) == 0 )
+	{
+		const std::string pick = action.substr( PICK_ACTION.size() );
+		const size_t colon = pick.find( ':' );
+		if( colon == std::string::npos )
+		{
+			DEBUG_LOG(( "Spectator page: data-click=\"%s\" is not pick:group:choice\n", action.c_str() ));
+			return TRUE;
+		}
+
+		const std::string group = pick.substr( 0, colon );
+		m_spectatorPicked[ group ] = pick.substr( colon + 1 );
+		m_spectatorFlipped.erase( group );
+		m_spectatorLists.clear();
 	}
 	else if( action.compare( 0, OPTION_ACTION.size(), OPTION_ACTION ) == 0 )
 	{
@@ -3394,7 +3612,11 @@ void InGameUI::reset( void )
 	m_scoreboardOpen = FALSE;
 	m_spectatorPageLoaded = FALSE;
 	m_spectatorFlipped.clear();
+	m_spectatorPicked.clear();
 	m_spectatorLists.clear();
+	m_spectatorTotals.clear();
+	m_spectatorLead.clear();
+	m_spectatorLeadFrame = 0;
 	m_inputEnabled = true;
 	// reset the command bar
 	TheControlBar->reset();

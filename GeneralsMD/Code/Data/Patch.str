@@ -1059,6 +1059,41 @@ GUI:HudNetWorth
 "Net worth"
 END
 
+// the other numbers the spectator's drop-down can rank every player by
+GUI:HudStatCash
+"Cash"
+END
+
+GUI:HudStatIncome
+"Income per minute"
+END
+
+GUI:HudStatArmy
+"Army value"
+END
+
+GUI:HudStatKills
+"Kills / losses"
+END
+
+GUI:HudStatRank
+"General's rank"
+END
+
+GUI:HudStatPower
+"Power"
+END
+
+// the graph of how far the first team's net worth is ahead of the second's
+GUI:HudNetWorthLead
+"Net worth lead"
+END
+
+// each player's most expensive units, with how many he has
+GUI:HudArmies
+"Armies"
+END
+
 // the scoreboard on Tab
 GUI:ScoreboardAllies
 "YOUR SIDE"

@@ -1198,17 +1198,23 @@ protected:
 
 	//
 	// The spectator's page over the battlefield, Window/Html/Spectator.html: the drop-down that
-	// switches the strips on and off, and every player's net worth.  Only while watching.
+	// switches the strips on and off, every player ranked by a chosen number, the net worth lead
+	// over time and what each army is made of.  Only while watching.
 	//
 	void drawSpectatorPage( void );
 	Bool handleSpectatorPageClick( const ICoord2D *mouse, Bool act );	///< TRUE when the click landed on it
+	void sampleSpectatorLead( Int lead, Bool twoTeams );	///< the lead graph's next point, if one is due
 	HtmlOverlay *								m_spectatorOverlay;
 	Bool												m_spectatorPageLoaded;		///< read once a match, so an edited page shows in the next one
 	Bool												m_spectatorPageShown;			///< drawn this frame, so clicks are its to take
 	std::string									m_spectatorPage;					///< the page as written, before its {{values}} are filled
 	std::set< std::string >			m_spectatorFlipped;				///< names a data-click="flip:name" has flipped
+	std::map< std::string, std::string > m_spectatorPicked;	///< group to choice, from data-click="pick:group:choice"
 	HtmlLists										m_spectatorLists;
+	HtmlValues									m_spectatorTotals;				///< the page's values that are not per player, gathered with the lists
 	UnsignedInt									m_spectatorListsFrame;		///< the logic frame the lists were last gathered on
+	std::vector< Int >					m_spectatorLead;					///< the first team's net worth less the second's, one per sample
+	UnsignedInt									m_spectatorLeadFrame;			///< the logic frame the last of those was taken on
 	Int													m_hudTogglesBottom;				///< the bottom of the page's #hud-top, so the message list starts under it
 
 	Bool												m_placementRangeRingUp;	///< the structure on the cursor is armed, so its reach is drawn
