@@ -87,7 +87,9 @@ static Color BuildClockColor = GameMakeColor(0,0,0,120);
 	*
 	* Real seconds, not "logic frames over thirty". The logic rate is a knob in this fork (the game
 	* speed keys move it between 5 and 200), and a build time is a promise about how long you will
-	* be waiting - so at double speed a 20s barracks has to read 10s. `LOGICFRAMES_PER_SECOND` is
+	* be waiting - so at double speed a 20s barracks has to read 10s, and in a match that has sunk to
+	* a third of its rate it has to read 60s. The rate is the one measured over the last second, not
+	* the one asked for (`GameEngine::getLogicFramesPerSecond`). `LOGICFRAMES_PER_SECOND` is
 	* only the fallback for the frames before the engine has a rate at all. */
 //-------------------------------------------------------------------------------------------------
 Int ControlBar_secondsFromFramesAt( Real frames, Int logicFps )
@@ -105,7 +107,7 @@ Int ControlBar_secondsFromFramesAt( Real frames, Int logicFps )
 Int ControlBar_secondsFromFrames( Real frames )
 {
 	return ControlBar_secondsFromFramesAt( frames,
-										TheGameEngine ? TheGameEngine->getFramesPerSecondLimit() : 0 );
+										TheGameEngine ? TheGameEngine->getLogicFramesPerSecond() : 0 );
 }
 
 //-------------------------------------------------------------------------------------------------

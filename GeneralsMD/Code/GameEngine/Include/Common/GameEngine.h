@@ -111,6 +111,7 @@ public:
 																								 It will not return until the game exits. */
 	virtual void setFramesPerSecondLimit( Int fps );	///< Set the maximum rate engine updates are allowed to occur
 	virtual Int  getFramesPerSecondLimit( void );			///< Get maxFPS.  Not inline since it is called from another lib.
+	virtual Int  getLogicFramesPerSecond( void );			///< logic frames the last second really ran; the rate a countdown on screen divides by
 	virtual void setQuitting( Bool quitting );				///< set quitting status
 	virtual Bool getQuitting(void);						///< is app getting ready to quit.
 
@@ -135,7 +136,12 @@ protected:
 	virtual ParticleSystemManager* createParticleSystemManager( void ) = 0;
 	virtual AudioManager *createAudioManager( void ) = 0;				///< Factory for Audio Manager
 
+	void sampleLogicRate( void );
+
 	Int m_maxFPS;																									///< Maximum frames per second allowed
+	UnsignedInt m_logicRateSampleMs;		///< wall clock the current logic rate sample started at, 0 for none
+	UnsignedInt m_logicRateSampleFrame;	///< logic frame it started on
+	Int m_measuredLogicFps;							///< the last whole sample's rate, 0 before there is one
   Bool m_quitting;  ///< true when we need to quit the game
 	Bool m_isActive;	///< app has OS focus.
 

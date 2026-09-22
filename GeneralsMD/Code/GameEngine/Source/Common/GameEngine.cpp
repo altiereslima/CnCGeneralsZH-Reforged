@@ -197,6 +197,47 @@ Int GameEngine::getFramesPerSecondLimit( void )
 }
 
 //-------------------------------------------------------------------------------------------------
+static const UnsignedInt LOGIC_RATE_SAMPLE_MS = 1000;
+
+/** A build time on screen is a promise about how long you will wait, and the limit is only the
+		rate the logic is asked for.  A match that has sunk to 10 frames a second takes three times as
+		long over a 300 frame barracks as the 30 it was asked for, so the countdown says 30s, not 10s.
+		Client only: the wall clock is in it, and nothing in GameLogic may decide by it. */
+void GameEngine::sampleLogicRate( void )
+{
+	if( TheGameLogic == NULL || TheGameLogic->isGamePaused() )
+	{
+		m_logicRateSampleMs = 0;
+		return;
+	}
+
+	const UnsignedInt nowMs = timeGetTime();
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	if( m_logicRateSampleMs == 0 || frame < m_logicRateSampleFrame )
+	{
+		m_logicRateSampleMs = nowMs;
+		m_logicRateSampleFrame = frame;
+		return;
+	}
+
+	const UnsignedInt elapsedMs = nowMs - m_logicRateSampleMs;
+	if( elapsedMs < LOGIC_RATE_SAMPLE_MS )
+		return;
+
+	m_measuredLogicFps = REAL_TO_INT( (frame - m_logicRateSampleFrame) * 1000.0f / elapsedMs + 0.5f );
+	m_logicRateSampleMs = nowMs;
+	m_logicRateSampleFrame = frame;
+}
+
+Int GameEngine::getLogicFramesPerSecond( void )
+{
+	// a stalled network game has no rate at all, and no countdown can say how long that lasts
+	if( m_measuredLogicFps > 0 )
+		return m_measuredLogicFps;
+	return m_maxFPS > 0 ? m_maxFPS : LOGICFRAMES_PER_SECOND;
+}
+
+//-------------------------------------------------------------------------------------------------
 GameEngine::GameEngine( void )
 {
 	// Set the time slice size to 1 ms.
@@ -204,6 +245,9 @@ GameEngine::GameEngine( void )
 
 	// initialize to non garbage values
 	m_maxFPS = 0;
+	m_logicRateSampleMs = 0;
+	m_logicRateSampleFrame = 0;
+	m_measuredLogicFps = 0;
 	m_quitting = FALSE;
 	m_isActive = FALSE;
 
@@ -2100,6 +2144,7 @@ static void updateHeadlessRun( void )
 void GameEngine::update( void )
 {
 	USE_PERF_TIMER(GameEngine_update)
+	sampleLogicRate();
 	{
 #ifdef DEBUG_LOGGING
 		static Int fpsFrames = 0;
