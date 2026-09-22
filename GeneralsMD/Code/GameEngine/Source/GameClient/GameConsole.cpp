@@ -89,14 +89,21 @@ static const ConsoleCheat CONSOLE_CHEATS[] =
 static const Int CONSOLE_CHEAT_COUNT = sizeof( CONSOLE_CHEATS ) / sizeof( CONSOLE_CHEATS[ 0 ] );
 
 //-------------------------------------------------------------------------------------------------
+/** Cheats exist only in a campaign or skirmish match being played; anywhere else the console does
+	* not mention them at all. */
+//-------------------------------------------------------------------------------------------------
+static Bool areCheatsAvailable( void )
+{
+	return TheGameLogic->isInGame() && !TheGameLogic->isInMultiplayerGame()
+		&& TheRecorder->getMode() != RECORDERMODETYPE_PLAYBACK;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Hands the cheat to the logic as a message and says what it will do.  A toggle reads the local
 	* player's bit before the message lands, which is safe because only this machine sends one. */
 //-------------------------------------------------------------------------------------------------
 static AsciiString runCheat( const ConsoleCheat &cheat, AsciiString arguments )
 {
-	if( !TheGameLogic->isInGame() || TheGameLogic->isInMultiplayerGame() || TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK )
-		return AsciiString( "cheats work only in a campaign or skirmish game" );
-
 	const Bool isToggle = cheat.defaultAmount == 0;
 	const Int amount = arguments.isEmpty() ? cheat.defaultAmount : atoi( arguments.str() );
 
@@ -274,18 +281,20 @@ void GameConsole::runCommand( AsciiString commandLine )
 		printLine( AsciiString( "help          this list" ) );
 		printLine( AsciiString( "clear         empty the scrollback" ) );
 		printLine( AsciiString( "echo <text>   print the text back" ) );
-		printLine( AsciiString( "cheats        single-player cheats" ) );
+		if( areCheatsAvailable() )
+			printLine( AsciiString( "cheats        single-player cheats" ) );
 		return;
 	}
 
-	if( command == "cheats" )
+	const Bool cheatsAvailable = areCheatsAvailable();
+	if( cheatsAvailable && command == "cheats" )
 	{
 		for( Int i = 0; i < CONSOLE_CHEAT_COUNT; ++i )
 			printLine( AsciiString( CONSOLE_CHEATS[ i ].help ) );
 		return;
 	}
 
-	for( Int i = 0; i < CONSOLE_CHEAT_COUNT; ++i )
+	for( Int i = 0; cheatsAvailable && i < CONSOLE_CHEAT_COUNT; ++i )
 	{
 		if( command == CONSOLE_CHEATS[ i ].name )
 		{
