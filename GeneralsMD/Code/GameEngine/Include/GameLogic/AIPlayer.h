@@ -328,6 +328,7 @@ protected:
 
 	Bool enemyDirection(Coord3D *dir);	///< unit vector from this base towards the nearest enemy's best known address
 	Bool isHeldExpansion(const Object *warehouse);	///< our supply center stands at it, and it is nearer our base than any enemy's
+	void doTunnels(Object *dozer);	///< a tunnel at home, at the held expansion and far out on the next wave's road
 	void buildAsap(const ThingTemplate *tmpl);	///< the plan's own unbuilt entry if it has one, otherwise a new spot behind the base
 
 	void buyMoneyUnits(void);

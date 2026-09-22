@@ -4858,6 +4858,17 @@ void AIPlayer::doEconomy( void )
 	if( !m_player->getEnergy()->hasSufficientPower() )
 		return;
 
+	// a tunnel pays back in the time every wave and every retreat saves, so it does not wait for the
+	// hoard: behind it, it was bought once in four matches, since an economy that works spends the
+	// bank down to the threshold on the army
+	if( m_player->getCanBuildBase() && m_baseCenterSet )
+	{
+		Object *dozer = NULL;
+		m_player->iterateObjects( findAnyDozer, &dozer );
+		if( dozer )
+			doTunnels( dozer );
+	}
+
 	// hackers and the buildings that pay out on a timer earn their price back, so they only wait for
 	// the hoard threshold, and each of them is bought on every pass the bank allows one ...
 	if( m_player->getMoney()->countMoney() <= profile->m_cashHoardThreshold )
@@ -4925,6 +4936,136 @@ void AIPlayer::doEconomy( void )
 			return;
 		if( placeNear( tmpl, &m_baseCenter, m_baseRadius ) )
 			return;
+	}
+}
+
+/** How near a point one of this player's tunnels has to stand to count as covering it. */
+static const Real TUNNEL_COVER_RADIUS = 350.0f;
+
+/** How far out along the line to the nearest enemy the forward tunnel goes, as a share of the way.
+	* A wave sets off from the edge of its own base, and a shortcut has to save 30% of the walk
+	* (TunnelTracker::findTunnelShortcut), so an exit short of the enemy's doorstep never beats walking:
+	* at 0.45 not one wave in four matches went underground. */
+static const Real FORWARD_TUNNEL_SHARE = 0.75f;
+
+/** A tunnel network the builder can put up right now, off its own buttons.  The tunnel carries
+	* FS_BASE_DEFENSE like the guns, so the kind cannot tell them apart; the module can. */
+static const ThingTemplate *buildableTunnel( Object *builder )
+{
+	const CommandSet *commandSet = TheControlBar->findCommandSet( builder->getCommandSetString() );
+	if( commandSet == NULL )
+		return NULL;
+
+	for( Int i = 0; i < MAX_COMMANDS_PER_SET; ++i )
+	{
+		const CommandButton *button = commandSet->getCommandButton( i );
+		if( button == NULL || button->getCommandType() != GUI_COMMAND_DOZER_CONSTRUCT )
+			continue;
+		const ThingTemplate *tmpl = button->getThingTemplate();
+		if( tmpl == NULL || TheBuildAssistant->canMakeUnit( builder, tmpl ) != CANMAKE_OK )
+			continue;
+		const ModuleInfo &modules = tmpl->getBehaviorModuleInfo();
+		for( Int m = 0; m < modules.getCount(); ++m )
+		{
+			if( modules.getNthName( m ).compareNoCase( "TunnelContain" ) == 0 )
+				return tmpl;
+		}
+	}
+	return NULL;
+}
+
+static Bool hasTunnelNear( Player *player, const Coord3D *spot )
+{
+	const std::list<ObjectID> *tunnels = player->getTunnelSystem()->getContainerList();
+	for( std::list<ObjectID>::const_iterator it = tunnels->begin(); it != tunnels->end(); ++it )
+	{
+		const Object *tunnel = TheGameLogic->findObjectByID( *it );
+		if( tunnel && sqr( tunnel->getPosition()->x - spot->x ) + sqr( tunnel->getPosition()->y - spot->y ) <= sqr( TUNNEL_COVER_RADIUS ) )
+			return TRUE;
+	}
+	return FALSE;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** A GLA computer makes a habit of tunnels at the places that matter: one at home, one at the
+	* expansion it holds, and one on the road the next wave takes, three quarters of the way along.
+	* The move orders, waves and retreats take a tunnel when it is the shorter way
+	* (TunnelTracker::findTunnelShortcut), and with these three a wave goes underground at home and comes
+	* up outside the enemy's base, and a beaten team near the front comes up at home.  One is asked for
+	* a pass, the nearest to home first; the forward one only where nothing this AI has seen can shoot.
+	* There is no cap: the spots are fixed, one a road, and a spot with a tunnel near it asks for none. */
+//----------------------------------------------------------------------------------------------------------
+void AIPlayer::doTunnels( Object *dozer )
+{
+	const ThingTemplate *tunnel = buildableTunnel( dozer );
+	if( tunnel == NULL || priorityBuildPending( m_player, tunnel ) )
+		return;
+
+	const Int MAX_SPOTS = 3;
+	Coord3D spots[ MAX_SPOTS ];
+	Real innerRadius[ MAX_SPOTS ];
+	Int count = 0;
+
+	// at home, out of the middle, which the production buildings have taken
+	spots[ count ] = m_baseCenter;
+	innerRadius[ count++ ] = 0.5f * m_baseRadius;
+
+	const Object *warehouse = TheGameLogic->findObjectByID( m_curWarehouseID );
+	if( warehouse && isHeldExpansion( warehouse ) )
+	{
+		spots[ count ] = *warehouse->getPosition();
+		innerRadius[ count++ ] = warehouse->getGeometryInfo().getBoundingCircleRadius();
+	}
+
+	// on the road the parked wave is about to take, which the script chose knowing where the enemy is;
+	// this AI's own guess can be an empty start position for most of a match on a four-start map.  A
+	// wave parks for seconds at a time, so with nobody parked the last road taken stands in for it
+	Int road = -1;
+	for( Int held = 0; held < MAX_HELD_TEAMS; ++held )
+	{
+		if( m_heldLabel[ held ].isEmpty() )
+			continue;
+		if( road < 0 || m_heldUsed[ held ] )
+			road = held;
+		if( m_heldUsed[ held ] )
+			break;
+	}
+	Waypoint *start = NULL;
+	if( road >= 0 )
+	{
+		AsciiString pathLabel;
+		pathLabel.format( "%s%d", m_heldLabel[ road ].str(), m_heldSuffix[ road ] );
+		start = TheTerrainLogic->getClosestWaypointOnPath( &m_baseCenter, pathLabel );
+	}
+	Waypoint *end = start;
+	for( Int step = 0; end != NULL && end->getNumLinks() > 0 && step < APPROACH_MAX_WAYPOINTS; ++step )
+		end = end->getLink( 0 );
+	if( end != NULL )
+	{
+		const Real reach = FORWARD_TUNNEL_SHARE * sqrt( sqr( end->getLocation()->x - m_baseCenter.x ) + sqr( end->getLocation()->y - m_baseCenter.y ) );
+		Waypoint *way = start;
+		for( Int step = 0; way != NULL && step < APPROACH_MAX_WAYPOINTS; ++step )
+		{
+			const Coord3D *at = way->getLocation();
+			if( sqr( at->x - m_baseCenter.x ) + sqr( at->y - m_baseCenter.y ) >= sqr( reach ) )
+			{
+				if( reach > m_baseRadius && knownFirepowerNear( at ) <= 0.0f )
+				{
+					spots[ count ] = *at;
+					innerRadius[ count++ ] = 0.0f;
+				}
+				break;
+			}
+			way = (way->getNumLinks() > 0) ? way->getLink( 0 ) : NULL;
+		}
+	}
+
+	for( Int i = 0; i < count; ++i )
+	{
+		if( hasTunnelNear( m_player, &spots[ i ] ) )
+			continue;
+		placeNear( tunnel, &spots[ i ], innerRadius[ i ] );
+		return;
 	}
 }
 
