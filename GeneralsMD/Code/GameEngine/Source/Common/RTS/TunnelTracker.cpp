@@ -296,6 +296,38 @@ Bool TunnelTracker::hasTunnelTraveller() const
 }
 
 // ------------------------------------------------------------------------
+static const Real TUNNEL_SHORTCUT_SHARE = 0.7f;	///< the longest a way through the tunnels may be, as a share of the walk
+
+/** Whoever moves - a player's selection, a computer's wave, a unit falling back - decides once for
+		the whole group, from its middle: deciding member by member split a selection, the back of it
+		walking while the front went underground.  A network with no free place is not looked at at all,
+		whatever fills it was put there to stay.  One free place is enough for any group, since a unit
+		passing through leaves by the far mouth the frame after it arrives: sixteen went through one place
+		as fast as through ten (tunnelqueue.txt against tunnelshortcut.txt).
+
+		The legs to and from the tunnels are straight lines.  `walk` is the caller's to measure: the
+		straight line for a move order, the length of the path for a wave that follows one.
+		ponytail: straight lines, not path lengths; a tunnel across a river the walk has to go round
+		looks no better than one across open ground.  A path search when that matters. */
+Object *TunnelTracker::findTunnelShortcut( const Coord3D *from, const Coord3D *to, Real walk ) const
+{
+	if( (Int)getContainCount() >= getContainMax() )
+		return NULL;
+
+	Object *entrance = findQuietTunnelNear( from );
+	Object *exit = findQuietTunnelNear( to );
+	if( entrance == NULL || exit == entrance )
+		return NULL;
+
+	const Real toEntrance = (Real)sqrt( ThePartitionManager->getDistanceSquared( entrance, from, FROM_CENTER_2D ) );
+	const Real fromExit = (Real)sqrt( ThePartitionManager->getDistanceSquared( exit, to, FROM_CENTER_2D ) );
+	if( toEntrance + fromExit > walk * TUNNEL_SHORTCUT_SHARE )
+		return NULL;
+
+	return entrance;
+}
+
+// ------------------------------------------------------------------------
 void TunnelTracker::destroyObject( Object *obj, void * )
 {
 	// Now that tunnels consider ContainedBy to be "the tunnel you entered", I need to say goodbye

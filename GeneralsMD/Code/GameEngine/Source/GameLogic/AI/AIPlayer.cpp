@@ -40,6 +40,7 @@
 #include "Common/PlayerList.h"
 #include "Common/BuildAssistant.h"
 #include "Common/ThingTemplate.h"
+#include "Common/TunnelTracker.h"
 #include "Common/Upgrade.h"
 #include "Common/WellKnownKeys.h"
 #include "Common/Xfer.h"
@@ -5691,8 +5692,48 @@ void AIPlayer::sendWave( AIGroup *wave, const AsciiString &approach, Int pathSuf
 	Waypoint *way = TheTerrainLogic->getClosestWaypointOnPath( &center, pathLabel );
 	DEBUG_LOG(("AI WAVE frame %d player %d sends %d teams, %d units, %.0f power, after %d s, down %s\n", TheGameLogic->getFrame(),
 		m_player->getPlayerIndex(), teams, wave->getCount(), power, heldFrames / LOGICFRAMES_PER_SECOND, pathLabel.str()));
-	if( way )
-		wave->groupFollowWaypointPathAsTeam( way, CMD_FROM_AI );
+	if( way == NULL )
+		return;
+
+	wave->groupFollowWaypointPathAsTeam( way, CMD_FROM_AI );
+	sendWaveThroughTunnels( wave, &center, way );
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** A GLA wave whose tunnels come up nearer the end of its approach path than the path itself goes
+	* takes them, the way a player's move order does (TunnelTracker::findTunnelShortcut), and comes up
+	* fighting.  The path is ordered first and the tunnel replaces it for whoever can go in, so a
+	* member that cannot - an aircraft, anything the tunnel refuses - still has the path. */
+//----------------------------------------------------------------------------------------------------------
+static const Int WAVE_PATH_MAX_POINTS = 256;	///< a path that links back on itself stops being walked here
+
+void AIPlayer::sendWaveThroughTunnels( AIGroup *wave, const Coord3D *center, Waypoint *way )
+{
+	Real walk = (Real)sqrt( sqr( way->getLocation()->x - center->x ) + sqr( way->getLocation()->y - center->y ) );
+	Waypoint *end = way;
+	for( Int i = 0; i < WAVE_PATH_MAX_POINTS && end->getNumLinks() > 0; ++i )
+	{
+		Waypoint *next = end->getLink( 0 );
+		walk += (Real)sqrt( sqr( next->getLocation()->x - end->getLocation()->x ) + sqr( next->getLocation()->y - end->getLocation()->y ) );
+		end = next;
+	}
+
+	Object *entrance = m_player->getTunnelSystem()->findTunnelShortcut( center, end->getLocation(), walk );
+	if( entrance == NULL )
+		return;
+
+	// a copy: a member that goes into the tunnel leaves the group
+	Int sent = 0;
+	const Int waveSize = wave->getCount();
+	const VecObjectID members = wave->getAllIDs();
+	for( VecObjectID::const_iterator it = members.begin(); it != members.end(); ++it )
+	{
+		Object *obj = TheGameLogic->findObjectByID( *it );
+		if( obj && obj->getAI() && obj->getAI()->takeTunnelTrip( entrance, end->getLocation(), TUNNEL_TRIP_ATTACK_MOVE, CMD_FROM_AI ) )
+			++sent;
+	}
+	DEBUG_LOG(("AI WAVE frame %d player %d sends %d of %d units through tunnel %d, the path is %.0f long\n", TheGameLogic->getFrame(),
+		m_player->getPlayerIndex(), sent, waveSize, entrance->getID(), walk));
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -5864,8 +5905,16 @@ void AIPlayer::doRetreats( void )
 			//
 			// Losing.  The whole team goes home if this rung knows how; otherwise the members that
 			// are personally finished go, which saves the units that would otherwise die inside a
-			// fight the team as a whole is still winning.
+			// fight the team as a whole is still winning.  Through the tunnels, when there is one
+			// near the fight and one near home.
 			//
+			const Real homeX = m_baseCenter.x - centre.x;
+			const Real homeY = m_baseCenter.y - centre.y;
+			Object *homeTunnel = m_player->getTunnelSystem()->findTunnelShortcut( &centre, &m_baseCenter,
+				(Real)sqrt( homeX * homeX + homeY * homeY ) );
+			if( homeTunnel )
+				DEBUG_LOG(("AI RETREAT frame %d player %d falls back through tunnel %d\n", TheGameLogic->getFrame(),
+					m_player->getPlayerIndex(), homeTunnel->getID()));
 			for( DLINK_ITERATOR<Object> objIter = team->iterate_TeamMemberList(); !objIter.done(); objIter.advance() )
 			{
 				Object *obj = objIter.cur();
@@ -5883,7 +5932,12 @@ void AIPlayer::doRetreats( void )
 						continue;
 				}
 
-				obj->getAI()->aiMoveToPosition( &m_baseCenter, CMD_FROM_AI );
+				// one already on its way down a tunnel is on its way home; ordering it again would turn it
+				// round at the mouth
+				if( obj->getAI()->hasTunnelTrip() )
+					continue;
+				if( homeTunnel == NULL || !obj->getAI()->takeTunnelTrip( homeTunnel, &m_baseCenter, TUNNEL_TRIP_MOVE, CMD_FROM_AI ) )
+					obj->getAI()->aiMoveToPosition( &m_baseCenter, CMD_FROM_AI );
 			}
 		}
 	}

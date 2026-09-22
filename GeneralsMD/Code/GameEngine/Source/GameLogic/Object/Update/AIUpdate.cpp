@@ -356,6 +356,7 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_hasSalvageReturnPosition = FALSE;
 	m_tunnelTripGoal.zero();
 	m_hasTunnelTrip = FALSE;
+	m_tunnelTripEnd = TUNNEL_TRIP_MOVE;
 	m_locomotorSet.clear();
 	m_curLocomotor = NULL;
 	m_curLocomotorSet = LOCOMOTORSET_INVALID;
@@ -1221,7 +1222,10 @@ UpdateSleepTime AIUpdateInterface::update( void )
 		{
 			Coord3D goal = m_tunnelTripGoal;
 			m_hasTunnelTrip = FALSE;
-			privateMoveToPosition( &goal, CMD_FROM_AI );
+			if (m_tunnelTripEnd == TUNNEL_TRIP_ATTACK_MOVE && me->isAbleToAttack() && hasFightingWeapon(me))
+				privateAttackMoveToPosition( &goal, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+			else
+				privateMoveToPosition( &goal, CMD_FROM_AI );
 		}
 		stRet = STATE_CONTINUE;
 	}
@@ -5209,13 +5213,20 @@ void AIUpdateInterface::friend_setSalvageReturnPosition( const Coord3D *pos )
 
 //----------------------------------------------------------------------------------------
 /**
- * Remember the goal of the move order that was just turned into an enter into a tunnel.  update()
- * takes it from there: out of the mouth nearest the goal, then the walk to it.
+ * Turn an order to go to `goal` into an enter into `entrance`.  update() takes it from there: out of
+ * the mouth nearest the goal, then the last leg to it.
  */
-void AIUpdateInterface::friend_setTunnelTrip( const Coord3D *goal )
+Bool AIUpdateInterface::takeTunnelTrip( Object *entrance, const Coord3D *goal, TunnelTripEnd end, CommandSourceType cmdSource )
 {
+	if (!isDoingGroundMovement() || !TheActionManager->canEnterObject( getObject(), entrance, cmdSource, DONT_CHECK_CAPACITY ))
+		return FALSE;
+
+	// a player's enter ends any trip (aiDoCommand), so the trip is set after it
+	aiEnter( entrance, cmdSource );
 	m_tunnelTripGoal = *goal;
+	m_tunnelTripEnd = end;
 	m_hasTunnelTrip = TRUE;
+	return TRUE;
 }
 
 //----------------------------------------------------------------------------------------
@@ -7059,12 +7070,13 @@ void AIUpdateInterface::crc( Xfer *x )
 	* 12: m_allowedToChase
 	* 13: m_pathfindFoundNothing
 	* 14: the salvage return position and its flag
-	* 16: the tunnel trip's goal and its flag */
+	* 16: the tunnel trip's goal and its flag
+	* 17: how the tunnel trip's last leg is walked */
 // ------------------------------------------------------------------------------------------------
 void AIUpdateInterface::xfer( Xfer *xfer )
 {
   // version
-  const XferVersion currentVersion = 16;
+  const XferVersion currentVersion = 17;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
  
@@ -7387,6 +7399,14 @@ void AIUpdateInterface::xfer( Xfer *xfer )
 		// a save made between a tunnel's enter and the walk out of the far mouth owes the rest of the trip
 		xfer->xferCoord3D(&m_tunnelTripGoal);
 		xfer->xferBool(&m_hasTunnelTrip);
+	}
+
+	if (version >= 17)
+	{
+		// a computer's wave comes out fighting, a move order does not
+		Int end = (Int)m_tunnelTripEnd;
+		xfer->xferInt(&end);
+		m_tunnelTripEnd = (TunnelTripEnd)end;
 	}
 
 }  // end xfer

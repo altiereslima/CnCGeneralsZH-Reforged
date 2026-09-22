@@ -99,6 +99,15 @@ enum GuardTargetType
 	GUARDTARGET_NONE				// Currently not guarding
 };
 
+//-------------------------------------------------------------------------------------------------
+// How a unit that went through the tunnel network walks from the far mouth to where it was sent.
+// Written out in save/load xfer, don't change these numbers.
+enum TunnelTripEnd
+{
+	TUNNEL_TRIP_MOVE = 0,					// a move order: walk there
+	TUNNEL_TRIP_ATTACK_MOVE = 1		// a computer's attack: fight whatever is on the way
+};
+
 #ifdef DEFINE_LOCOMOTORSET_NAMES
 static const char *TheLocomotorSetNames[] = 
 {
@@ -738,8 +747,9 @@ public:
 	// this is intended for use ONLY by the salvage collection pass in GameLogic.
 	void friend_setSalvageReturnPosition( const Coord3D *pos );
 
-	// this is intended for use ONLY by AIGroup's move order, which sends a unit through its tunnel network.
-	void friend_setTunnelTrip( const Coord3D *goal );
+	/** Down `entrance`, out of the mouth nearest `goal`, and on to `goal` the way `end` says.  FALSE,
+			and nothing ordered, for a unit that cannot go into a tunnel. */
+	Bool takeTunnelTrip( Object *entrance, const Coord3D *goal, TunnelTripEnd end, CommandSourceType cmdSource );
 	Bool hasTunnelTrip() const { return m_hasTunnelTrip; }	///< on its way through the tunnel network to a move order's goal
 	const Coord3D *getTunnelTripGoal() const { return &m_tunnelTripGoal; }	///< where the trip ends, once out of the far mouth
 #if defined(_DEBUG) || defined(_INTERNAL)	
@@ -925,6 +935,7 @@ private:
 	Bool				m_hasSalvageReturnPosition;	///< True while the walk back to m_salvageReturnPosition is still owed.
 	Coord3D			m_tunnelTripGoal;						///< Where a move order sent us before a tunnel shortened the way there.
 	Bool				m_hasTunnelTrip;						///< True from the order to enter a tunnel until the walk from the exit to m_tunnelTripGoal is ordered.
+	TunnelTripEnd	m_tunnelTripEnd;					///< How the last leg from the far mouth to m_tunnelTripGoal is walked.
 
 	// Locomotors -------------------------------------------------------------------------------------------------
 	enum LocoGoalType	 // Note - written out in save/load xfer, don't change these numbers.  jba.

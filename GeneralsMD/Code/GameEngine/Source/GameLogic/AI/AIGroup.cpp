@@ -1976,47 +1976,6 @@ static void crowdSeedLanesAlongWaypoint( AIGroup *group, std::list<Object *>& me
 	crowdSeedLanes( members, center, crowdWaypointAim( center, way ) );
 }
 
-static const Real TUNNEL_SHORTCUT_SHARE = 0.7f;	///< the longest a way through the tunnels may be, as a share of the walk
-
-/** The tunnel mouth a player's move order sends its group into on the way from `center` to `goal`,
-		or NULL when the group walks.  The group decides once, from its middle, and every member that can
-		take a tunnel takes it: deciding member by member split a selection, the back of it walking while
-		the front went underground.  A network with no free place is not looked at at all, whatever fills
-		it was put there to stay.  One free place is enough for the whole group, since a unit passing
-		through leaves by the far mouth the frame after it arrives: sixteen went through one place as
-		fast as through ten (tunnelqueue.txt against tunnelshortcut.txt).
-
-		All three legs are straight lines, like the walk they are measured against.
-		ponytail: straight lines, not path lengths; a tunnel across a river the walk has to go round
-		looks no better than one across open ground.  A path search when that matters. */
-static Object *pickTunnelEntrance( const TunnelTracker *network, const Coord3D *center, const Coord3D *goal )
-{
-	if ((Int)network->getContainCount() >= network->getContainMax())
-		return NULL;
-
-	Object *entrance = network->findQuietTunnelNear( center );
-	Object *exit = network->findQuietTunnelNear( goal );
-	if (entrance == NULL || exit == entrance)
-		return NULL;
-
-	const Real toEntrance = (Real)sqrt( ThePartitionManager->getDistanceSquared( entrance, center, FROM_CENTER_2D ) );
-	const Real fromExit = (Real)sqrt( ThePartitionManager->getDistanceSquared( exit, goal, FROM_CENTER_2D ) );
-	const Real walkX = goal->x - center->x;
-	const Real walkY = goal->y - center->y;
-	const Real walk = (Real)sqrt( walkX * walkX + walkY * walkY );
-	if (toEntrance + fromExit > walk * TUNNEL_SHORTCUT_SHARE)
-		return NULL;
-
-	return entrance;
-}
-
-/** Can this member of a group sent through `entrance` go in with the rest of it? */
-static Bool canTakeTunnel( Object *unit, Object *entrance )
-{
-	return unit->getAIUpdateInterface()->isDoingGroundMovement()
-		&& TheActionManager->canEnterObject( unit, entrance, CMD_FROM_PLAYER, DONT_CHECK_CAPACITY );
-}
-
 /**
  * Move to given position(s)
  */
@@ -2405,10 +2364,15 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 	Int floodCursor = 0;
 	Int airCursor = 0;
 
-	// through the tunnel network when that is shorter; see pickTunnelEntrance
+	// through the tunnel network when that is shorter; see TunnelTracker::findTunnelShortcut
 	Object *tunnelEntrance = NULL;
 	if (gatherOnPoint && iter->first() != NULL)
-		tunnelEntrance = pickTunnelEntrance( iter->first()->getControllingPlayer()->getTunnelSystem(), &groupCenter, &goalPos );
+	{
+		const Real walkX = goalPos.x - groupCenter.x;
+		const Real walkY = goalPos.y - groupCenter.y;
+		tunnelEntrance = iter->first()->getControllingPlayer()->getTunnelSystem()->findTunnelShortcut( &groupCenter, &goalPos,
+			(Real)sqrt( walkX * walkX + walkY * walkY ) );
+	}
 
 	// Works better if you let the near units get the first paths... jba.
 	// Move the ones nearest the goal first.  Reduces collision problems later.
@@ -2438,11 +2402,9 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 			else if (airCursor < (Int)airMembers.size() && airMembers[airCursor] == theUnit)
 				dest = airGoals[airCursor++];
 
-			if (tunnelEntrance != NULL && canTakeTunnel( theUnit, tunnelEntrance ))
+			if (tunnelEntrance != NULL && ai->takeTunnelTrip( tunnelEntrance, &dest, TUNNEL_TRIP_MOVE, cmdSource ))
 			{
 				ai->clearCrowdLane();
-				ai->aiEnter( tunnelEntrance, cmdSource );
-				ai->friend_setTunnelTrip( &dest );
 				continue;
 			}
 

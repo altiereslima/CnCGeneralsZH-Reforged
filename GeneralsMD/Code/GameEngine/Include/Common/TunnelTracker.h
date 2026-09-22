@@ -70,6 +70,7 @@ public:
 
 	Object *findQuietTunnelNear( const Coord3D *pos ) const;	///< the tunnel nearest pos that has not been shot at lately, or NULL
 	Bool hasTunnelTraveller() const;	///< is anybody inside only passing through, and so about to free their place?
+	Object *findTunnelShortcut( const Coord3D *from, const Coord3D *to, Real walk ) const;	///< the mouth to go down to get from `from` to `to` quicker than a walk `walk` long, or NULL
 
 	Object *getCurNemesis(void);
 	void updateNemesis(const Object *target);
