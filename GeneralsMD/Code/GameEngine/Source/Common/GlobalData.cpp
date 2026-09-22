@@ -722,6 +722,7 @@ GlobalData::GlobalData()
 	m_cameraLook.x = m_cameraLook.y = 0.0f;
 	m_traceMoveID = 0; // no movement trace
 	m_slowFrameMS = 20.0f; // a frame worth a line in the log; -slowframe lowers it for a hunt
+	m_drawDelayMS = 0; // client passes run as fast as the machine does unless -drawdelay slows them
 	m_showLanes = FALSE; // the lane overlay is a diagnostic, off unless -showlanes asks for it
 	m_uiDrill = 0; // nobody presses the minimise button; -uidrill is how a script presses it
 	m_resDrillFrame = 0; // the resolution stays where it started unless -resdrill changes it mid-match

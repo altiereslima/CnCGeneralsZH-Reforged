@@ -445,6 +445,7 @@ public:
 	Coord2D m_cameraLook;						///< where -camera pointed it
 	Int m_traceMoveID;							///< -tracemove [id]: log one movement line a frame for this object (0 = off, -1 = the first unit that gets blocked)
 	Real m_slowFrameMS;							///< -slowframe <ms>: a logic frame over this long logs its own breakdown (default 20)
+	Int m_drawDelayMS;							///< -drawdelay <ms>: sleep this long in every client pass, a slow graphics card on demand (0 = off)
 	Bool m_showLanes;							///< -showlanes: draw every moving unit's route, the lane it was handed and the offset it kept
 	Int m_uiDrill;								///< -uidrill <n>: every n frames, minimise the command bar and re-apply its scheme, logging where it landed (0 = off)
 	Int m_resDrillFrame;					///< -resdrill <frame> [w] [h]: change the resolution at that logic frame, from inside a running match (0 = off)

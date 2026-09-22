@@ -2010,6 +2010,22 @@ Int parseSlowFrame(char *args[], int num)
 	return 1;
 }
 
+/* -drawdelay <ms> sleeps that long in every client pass, which is what a weak graphics card looks
+	 like to the engine: the picture takes longer while the logic frame costs what it always did.
+	 A network game paces itself on the slowest machine in the room, so the question "does one slow
+	 renderer slow everybody" needs a slow renderer on this machine, next to a fast one. */
+Int parseDrawDelay(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1 && args[1])
+	{
+		const Int ms = atoi(args[1]);
+		if (ms > 0)
+			TheWritableGlobalData->m_drawDelayMS = ms;
+		return 2;
+	}
+	return 1;
+}
+
 /* -netgame <ip>[,<ip>...] starts a LAN game against those addresses with no lobby in front of it,
 	 and -netslot <n> says which of them this copy is.  Every machine is given the same slot list in
 	 the same order, which is all the lobby ever agreed on: the slot list, the map and the seed.  A
@@ -2373,6 +2389,7 @@ static CommandLineParam params[] =
 	{ "-camera", parseCameraLook },
 	{ "-tracemove", parseTraceMove },
 	{ "-slowframe", parseSlowFrame },
+	{ "-drawdelay", parseDrawDelay },
 	{ "-teams", parseTeams },
 	{ "-peacetime", parsePeaceTime },
 	{ "-unitlimit", parseUnitLimit },

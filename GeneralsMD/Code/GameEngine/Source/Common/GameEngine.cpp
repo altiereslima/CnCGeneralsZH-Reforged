@@ -2136,6 +2136,8 @@ void GameEngine::update( void )
 			QueryPerformanceCounter( (LARGE_INTEGER *)&tAudioEnd );
 #endif
 			TheGameClient->UPDATE();
+			if (TheGlobalData->m_drawDelayMS > 0)
+				::Sleep( TheGlobalData->m_drawDelayMS );
 			TheMessageStream->propagateMessages();
 
 			if (TheNetwork != NULL)
@@ -2201,12 +2203,8 @@ void GameEngine::update( void )
 
 		Bool logicFrameDue;
 		Bool mayCatchUp = FALSE;
-		if (fastMode)
-		{
-			logicAccumMs = 0.0f;
-			logicFrameDue = TRUE;
-		}
-		else if (TheNetwork != NULL && TheNetwork->isPacingLogicFrames())
+		const Bool networkPaced = TheNetwork != NULL && TheNetwork->isPacingLogicFrames();
+		if (networkPaced)
 		{
 			// A network game already has a clock: Network::timeForNewFrame() paces the tick against
 			// the negotiated frame rate and only then publishes the frame's commands.  Gating a
@@ -2214,14 +2212,26 @@ void GameEngine::update( void )
 			// a frame needs both to say yes, so the effective rate settles *below* either one and
 			// drifts, which is a systematic multiplayer-only slowdown.  Let the network own it and
 			// keep the accumulator clean for when the game drops back to single player.
+			//
+			// It owns the debt as well.  Each logic frame this machine manages a second is what it
+			// reports to the room, and the room runs at the slowest report, so a pass that ran one
+			// logic frame per picture made a slow graphics card everybody's frame rate: 60ms of
+			// drawing on one of two machines held both at 15 logic frames a second.  This one runs
+			// ahead in this machine's own simulation by as many frames as the network has ready
+			// and due, and headless is here too, since the network paces it all the same.
+			logicAccumMs = 0.0f;
+			logicFrameDue = TRUE;
+			mayCatchUp = TRUE;
+		}
+		else if (fastMode)
+		{
 			logicAccumMs = 0.0f;
 			logicFrameDue = TRUE;
 		}
 		else
 		{
 			logicFrameDue = GameEngine_isLogicFrameDue(logicAccumMs, elapsedMs, m_maxFPS);
-			// Only the wall-clock-paced path has a debt to pay back.  Fast mode and the network
-			// clock above both mean exactly one logic frame per call, by their own definition.
+			// Fast mode means exactly one logic frame per call, by its own definition.
 			mayCatchUp = (m_maxFPS > 0);
 		}
 
@@ -2245,7 +2255,8 @@ void GameEngine::update( void )
 			// count and the pacer's own accumulator cap stop at LOGIC_CATCHUP_MAX_FRAMES, so a logic
 			// frame that is itself over budget cannot pull the loop into a spiral.
 			Int logicTicksThisPass = 0;
-			const Int maxTicksThisPass = GameEngine_logicCatchupMaxFrames(m_maxFPS);
+			const Int maxTicksThisPass = GameEngine_logicCatchupMaxFrames(
+				networkPaced ? (Int)TheNetwork->getFrameRate() : m_maxFPS );
 			/* Bounded by the clock as well as by the count - see LOGIC_CATCHUP_BUDGET_MS.  Three
 				 25ms ticks back to back with no picture in between is the 113ms freeze; one of them
 				 plus the render is a dropped frame nobody files a bug about. */
@@ -2262,8 +2273,33 @@ void GameEngine::update( void )
 				if (!GameEngine_mayStartAnotherCatchupTick( logicTicksThisPass, maxTicksThisPass,
 																									 engineElapsedMS( tCatchupStart, tCatchupNow ) ))
 					break;
+				if (networkPaced)
+				{
+					/* The frame just run may have ended the match, and clearGameData takes the network
+						 down with it. */
+					if (TheNetwork == NULL)
+						break;
+					/* A scripted camera move holds the logic for as many updates as the camera takes to
+						 finish (freezeTime in GameLogic::update), and the camera only moves on a client
+						 pass.  One update a pass is what every machine used to run against it; running
+						 several here would make the count depend on how fast this machine draws. */
+					if (TheTacticalView->isTimeFrozen())
+						break;
+					/* What the frame just posted (its CRC, every frame while DEBUG_CRC is on, or a group
+						 selection) is sent the way a client pass would send it, before the next frame
+						 runs.  The network stamps it with the current logic frame plus the run-ahead, and
+						 a machine running one frame a pass stamps it with the frame after the one that
+						 posted it; sent a frame later, this machine's CRC would be compared against the
+						 others' on another frame and read as a desync.  Asked last, because it has the
+						 side effects: it sends and receives, spends a frame of the network clock, and
+						 puts the next frame's commands on the list. */
+					TheMessageStream->propagateMessages();
+					TheNetwork->UPDATE();
+					if (!TheNetwork->isFrameDataReady())
+						break;
+				}
 				// Asked last, because it is the one with a side effect: it spends the debt it reports.
-				if (!GameEngine_isLogicFrameDue(logicAccumMs, 0.0f, m_maxFPS))
+				else if (!GameEngine_isLogicFrameDue(logicAccumMs, 0.0f, m_maxFPS))
 					break;
 			}
 #ifdef DEBUG_LOGGING

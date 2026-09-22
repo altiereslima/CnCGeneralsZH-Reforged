@@ -224,6 +224,7 @@ found and fixed â€” EA's own, not port damage.**
 - A network game runs at the speed it says it does.
 - A frame of orders now travels in one datagram instead of four or five: the packet was still the 476 bytes a 2003 modem could carry, and every extra datagram was another chance to arrive late.
 - Input delay is measured from simulation speed now, not your graphics card.
+- One player's slow graphics card no longer slows the whole match. A network game runs at the pace of its slowest machine, and a machine that could only draw 16 pictures a second also only advanced the game 16 times a second, so everybody played in slow motion. It now skips pictures to keep up with the game, the way single player already did. Two machines on one desk: with one of them held to 16 pictures a second the match used to run at half speed, and with it held to 10 the match now runs at 28 of its 30 frames a second, the two machines agreeing on every frame.
 - One lost packet costs a round trip instead of a flat two seconds.
 - A desynced match stops at once instead of playing on as two games.
 - A single lost packet no longer freezes the match for twenty seconds. The game now asks for the
