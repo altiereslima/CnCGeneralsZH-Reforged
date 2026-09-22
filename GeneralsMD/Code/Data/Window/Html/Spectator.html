@@ -1,16 +1,17 @@
 <!DOCTYPE html>
 <!--
-  What a spectator sees over the battlefield, down the left edge the way Dota's spectator has it:
-  the drop-down that switches the strips, and Dota's stats drop-down - a dark bar naming the stat,
-  two square buttons beside it for the lead graph and the armies chart, and under it one row per
-  player with no box behind it: portrait, the number in gold, and a thin line in the team's colour
-  ending in a bright dot.  Laid out by litehtml and drawn by the game (GameClient/HtmlOverlay.h).
+  What a spectator sees over the battlefield: the drop-down that switches the strips, and the
+  observer's board - every player ranked by a stat picked from a drop-down, the net worth lead on a
+  radar screen, and what each army is made of.  It is dressed in the command bar's own materials:
+  steel plates with a light top edge and a dark bottom one, the cameo tray the production strips
+  stand in, and the power bar's fills.  Laid out by litehtml and drawn by the game
+  (GameClient/HtmlOverlay.h).
 
   A CSS pixel is a pixel of an 800x600 screen and font-size is the game font's point size there;
   the page is scaled with the rest of the interface.  Text is always drawn with a black shadow.
-  A background on html or body is for a browser only.  Not drawn: rounded corners, overflow
-  clipping, list bullets, gradients other than linear ones, and text-transform on anything but
-  plain ASCII letters.
+  url(Name) is one of the game's mapped images, stretched over the box.  A background on html or
+  body is for a browser only.  Not drawn: rounded corners, overflow clipping, list bullets,
+  gradients other than linear ones, and text-transform on anything but plain ASCII letters.
 
   The game fills in, before layout (GameClient/HtmlTemplate.h):
     {{option:Key}}        "on" while that Options.ini on/off option is on
@@ -42,134 +43,149 @@
 <title>Spectator</title>
 <style>
   html, body { margin: 0; padding: 0; }
-  body { background-color: #3b4a36; color: #d6dde2; font-size: 9px; }
+  /* a mapped image is drawn at the size background-size gives it, and nothing clips it */
+  .tray, .cell, .fill, .on .box { background-size: 100% 100%; background-repeat: no-repeat; }
+  body { background-color: #3b4a36; color: #dfe5ea; font-size: 9px; }
 
-  #hud-top { position: absolute; left: 4px; top: 4px; width: 160px; }
+  #hud-top { position: absolute; left: 4px; top: 4px; width: 172px; }
 
-  /* Dota's bars: dark, a hair of border, the words in a cool grey */
-  .bar { background-color: rgba(18, 22, 26, 0.88); border: 1px solid #3b444c; color: #c3ccd3; }
-  .bar:hover { border-color: #6b7780; color: #ffffff; }
+  /* the command bar's steel: a lit top edge, a dark bottom one */
+  .plate { background: linear-gradient(to bottom, #6f7782, #3f4650); border-top: 1px solid #aab4bf;
+           border-left: 1px solid #8a949f; border-bottom: 1px solid #0c1114; border-right: 1px solid #1a2026; color: #f1f4f6; }
+  .plate:hover { background: linear-gradient(to bottom, #808995, #4b535e); }
+  .well { background-color: rgba(9, 20, 23, 0.86); border: 1px solid #0c1114; border-top-color: #000000; }
 
   .strips { margin-bottom: 3px; }
-  .strips .bar { padding: 2px 5px; }
-  .strips .items { display: none; background-color: rgba(18, 22, 26, 0.88); border: 1px solid #3b444c; border-top: 0; }
+  .strips .plate { padding: 2px 5px; }
+  .strips .items { display: none; padding: 1px 0; }
   .strips.flipped .items { display: block; }
-  .row { padding: 2px 5px; }
-  .row:hover { background-color: rgba(255, 255, 255, 0.08); color: #ffffff; }
-  .box { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border: 1px solid #8a959d; vertical-align: middle; }
-  .on .box { background-color: #6dbf3b; border-color: #a6f05a; }
+  .row { padding: 2px 6px; color: #c9d2d9; }
+  .row:hover { color: #ffffff; background-color: rgba(119, 131, 145, 0.25); }
+  .box { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border: 1px solid #778391; background-color: #091417; vertical-align: middle; }
+  .on .box { background-image: url(PowerBarGreen); border-color: #b8f08a; }
 
-  .tools { height: 15px; margin-bottom: 2px; }
-  .picker { float: left; width: 112px; height: 13px; line-height: 13px; padding-left: 5px; position: relative; }
-  .arrow { position: absolute; right: 5px; top: 0; font-size: 7px; }
-  .button { float: left; position: relative; width: 15px; height: 13px; margin-left: 2px; }
-  .button.flipped { background-color: rgba(70, 82, 92, 0.95); border-color: #8a959d; }
-  .glyph { position: absolute; background-color: #aeb8bf; }
-  .button:hover .glyph, .button.flipped .glyph { background-color: #ffffff; }
+  .board { padding: 0 0 3px 0; }
+  .head { height: 16px; padding: 0 3px; position: relative; }
+  .combo { position: absolute; left: 3px; right: 3px; top: 2px; height: 11px; line-height: 11px; padding-left: 5px; color: #b8f08a; }
+  .combo:hover { color: #ffffff; }
+  .caption { padding: 2px 6px; color: #8a949f; font-size: 8px; }
+  .tab { position: absolute; right: 0; top: 0; width: 11px; height: 11px; text-align: center; font-size: 6px;
+         background: linear-gradient(to bottom, #6f7782, #3f4650); color: #e8d27a; }
 
-  .choices { display: none; background-color: rgba(12, 15, 18, 0.94); border: 1px solid #3b444c; margin-bottom: 3px; width: 152px; }
+  .choices { display: none; margin: 2px 3px; padding: 1px 0; }
   .flipped > .choices { display: block; }
-  .caption { padding: 3px 6px 2px 6px; color: #7d8a93; font-size: 8px; }
-  .choice { padding: 2px 6px; color: #c3ccd3; }
-  .choice:hover { background-color: rgba(255, 255, 255, 0.08); color: #ffffff; }
-  .choice.on { background-color: rgba(120, 132, 142, 0.35); color: #ffffff; }
+  .choice { padding: 2px 6px; color: #c9d2d9; }
+  .choice:hover { color: #ffffff; background-color: rgba(119, 131, 145, 0.25); }
+  .choice.on { color: #b8f08a; }
+  .choice.on .box { background-image: url(PowerBarGreen); border-color: #b8f08a; }
 
-  .player { position: relative; height: 13px; margin-bottom: 1px; }
-  .portrait { position: absolute; left: 0; top: 0; width: 20px; height: 13px; border-left: 2px solid #888888; }
-  .value { position: absolute; left: 25px; top: 0; line-height: 13px; font-weight: bold; color: #f0b43c; }
-  .track { position: absolute; left: 62px; top: 6px; width: 90px; height: 2px; }
-  .line { position: relative; height: 2px; background-color: #9aa4ab; }
-  .dot { position: absolute; right: -2px; top: -1px; width: 4px; height: 4px; background-color: #ffffff; }
-  .teams2.team0 .line { background: linear-gradient(to right, #3f7a1e, #6dbf3b); }
-  .teams2.team0 .dot { background-color: #a6f05a; }
-  .teams2.team1 .line { background: linear-gradient(to right, #7a1d17, #c8402f); }
-  .teams2.team1 .dot { background-color: #ff6a50; }
+  .players { margin: 2px 3px 0 3px; }
+  .player { position: relative; height: 18px; border-bottom: 1px solid rgba(119, 131, 145, 0.18); }
+  .tray { position: absolute; left: 1px; top: 1px; width: 24px; height: 16px; background-image: url(SATraySmall); }
+  .emblem { position: absolute; left: 3px; top: 2px; width: 18px; height: 12px; }
+  .name { position: absolute; left: 30px; top: 1px; line-height: 10px; }
+  .value { position: absolute; right: 3px; top: 1px; line-height: 10px; font-weight: bold; color: #e8d27a; }
+  .meter { position: absolute; left: 30px; right: 3px; top: 12px; height: 3px; background-color: #030709; }
+  .fill { height: 3px; }
+  .teams2.team0 .fill { background-image: url(PowerBarGreen); }
+  .teams2.team1 .fill { background-image: url(PowerBarRed); }
 
-  .panel { display: none; background-color: rgba(12, 15, 18, 0.88); border: 1px solid #3b444c; margin-top: 4px; width: 152px; }
+  .buttons { height: 13px; margin: 3px 3px 0 3px; }
+  .button { float: left; width: 78px; height: 11px; line-height: 11px; text-align: center; margin-right: 2px; font-size: 8px; color: #c9d2d9; }
+  .button.flipped { background: linear-gradient(to bottom, #3f4650, #6f7782); border-top-color: #0c1114; border-bottom-color: #aab4bf; color: #b8f08a; }
+
+  .panel { display: none; clear: both; margin: 3px 3px 0 3px; }
   .panel.flipped { display: block; }
   .graph.flipped { display: none; }
   .graph.flipped.shown { display: block; }
-  .title { padding: 2px 5px; color: #7d8a93; font-size: 8px; }
-  .lead { float: right; font-size: 9px; font-weight: bold; }
-  .team0 .lead { color: #a6f05a; }
-  .team1 .lead { color: #ff6a50; }
-  .chart { height: 36px; margin: 0 4px 4px 4px; }
+  .title { padding: 2px 5px; color: #e8d27a; }
+  .lead { float: right; font-weight: bold; }
+  .team0 .lead { color: #b8f08a; }
+  .team1 .lead { color: #ff7a5c; }
+
+  /* the radar's screen */
+  .radar { position: relative; height: 38px; margin: 0 4px 4px 4px; background-color: #06140b; border: 1px solid #000000; border-top-color: #000000; border-bottom-color: #3d4a3f; }
+  .grid { position: absolute; left: 0; right: 0; height: 1px; background-color: #0f2a17; }
+  .chart { position: absolute; left: 1px; top: 1px; }
   .col { float: left; width: 3px; height: 36px; }
   .half { position: relative; height: 18px; }
-  .over { border-bottom: 1px solid #4b555d; height: 17px; }
-  .up { position: absolute; left: 0; right: 0; bottom: 0; background-color: #6dbf3b; }
-  .down { position: absolute; left: 0; right: 0; top: 0; background-color: #c8402f; }
+  .over { border-bottom: 1px solid #2f7a44; height: 17px; }
+  .up { position: absolute; left: 0; right: 1px; bottom: 0; background-color: #7fe07a; }
+  .down { position: absolute; left: 0; right: 1px; top: 0; background-color: #e0503c; }
 
   .army { overflow: hidden; padding: 0 3px 3px 3px; }
-  .cell { float: left; position: relative; width: 18px; height: 15px; margin: 1px 1px 0 0; }
-  .cell img { width: 18px; height: 15px; }
-  .cell.head { clear: left; width: 20px; border-left: 2px solid #888888; margin-right: 3px; }
-  .cell.head img { width: 20px; }
-  .count { position: absolute; right: 1px; bottom: 0; font-size: 8px; font-weight: bold; color: #ffffff; }
+  .cell { float: left; position: relative; width: 19px; height: 17px; margin: 1px 1px 0 0; background-image: url(SATraySmall); }
+  .cell img { position: absolute; left: 1px; top: 1px; width: 17px; height: 15px; }
+  .cell.head { clear: left; width: 24px; margin-right: 3px; }
+  .cell.head img { left: 3px; top: 2px; width: 18px; height: 12px; }
+  .count { position: absolute; right: 2px; bottom: 0; font-size: 8px; font-weight: bold; color: #ffffff; }
 </style>
 </head>
 <body>
 <div id="hud-top">
 
   <div class="strips {{flip:strips}}">
-    <div class="bar" data-click="flip:strips"><span class="box"></span>{{text:GUI:HudToggles}}</div>
-    <div class="items">
+    <div class="plate" data-click="flip:strips"><span class="box"></span>{{text:GUI:HudToggles}}</div>
+    <div class="items well">
       <div class="row {{option:ShowProductionStrip}}" data-click="option:ShowProductionStrip"><span class="box"></span>{{text:GUI:HudProductionStrip}}</div>
       <div class="row {{option:ShowSkillStrip}}" data-click="option:ShowSkillStrip"><span class="box"></span>{{text:GUI:HudSkillStrip}}</div>
       <div class="row {{option:ShowSuperweaponStrip}}" data-click="option:ShowSuperweaponStrip"><span class="box"></span>{{text:GUI:HudSuperweaponStrip}}</div>
     </div>
   </div>
 
-  <div class="tools">
-    <div class="bar picker" data-click="flip:stat">{{stat}}<span class="arrow">&#9660;</span></div>
-    <div class="bar button {{flip:graph}}" data-click="flip:graph">
-      <div class="glyph" style="left: 3px; top: 7px; width: 2px; height: 4px"></div>
-      <div class="glyph" style="left: 6px; top: 3px; width: 2px; height: 8px"></div>
-      <div class="glyph" style="left: 9px; top: 5px; width: 2px; height: 6px"></div>
+  <div class="board well">
+    <div class="head plate">
+      <div class="combo well" data-click="flip:stat">{{stat}}<span class="tab">&#9660;</span></div>
     </div>
-    <div class="bar button {{flip:army}}" data-click="flip:army">
-      <div class="glyph" style="left: 3px; top: 2px; width: 4px; height: 4px"></div>
-      <div class="glyph" style="left: 8px; top: 2px; width: 4px; height: 4px"></div>
-      <div class="glyph" style="left: 3px; top: 7px; width: 4px; height: 4px"></div>
-      <div class="glyph" style="left: 8px; top: 7px; width: 4px; height: 4px"></div>
-    </div>
-  </div>
 
-  <div class="{{flip:stat}}">
-    <div class="choices">
-      <div class="caption">{{text:GUI:HudGameStats}}</div>
-      <div class="choice {{pick:stat:networth}}" data-click="pick:stat:networth">{{text:GUI:HudNetWorth}}</div>
-      <div class="choice {{pick:stat:cash}}" data-click="pick:stat:cash">{{text:GUI:HudStatCash}}</div>
-      <div class="choice {{pick:stat:income}}" data-click="pick:stat:income">{{text:GUI:HudStatIncome}}</div>
-      <div class="choice {{pick:stat:army}}" data-click="pick:stat:army">{{text:GUI:HudStatArmy}}</div>
-      <div class="choice {{pick:stat:kills}}" data-click="pick:stat:kills">{{text:GUI:HudStatKills}}</div>
-      <div class="choice {{pick:stat:rank}}" data-click="pick:stat:rank">{{text:GUI:HudStatRank}}</div>
-      <div class="choice {{pick:stat:power}}" data-click="pick:stat:power">{{text:GUI:HudStatPower}}</div>
-    </div>
-  </div>
-
-  <div class="player teams{{teams}} team{{team}}" data-each="players">
-    <img class="portrait" src="{{portrait}}" style="border-color: {{color}}">
-    <span class="value">{{value}}</span>
-    <div class="track"><div class="line" style="width: {{share}}%; background-color: {{color}}"><div class="dot"></div></div></div>
-  </div>
-
-  <div class="panel graph {{graph}} {{flip:graph}}">
-    <div class="title {{leader}}">{{text:GUI:HudNetWorthLead}}<span class="lead">{{lead}}</span></div>
-    <div class="chart">
-      <div class="col" data-each="lead">
-        <div class="half over"><div class="up" style="height: {{up}}%"></div></div>
-        <div class="half"><div class="down" style="height: {{down}}%"></div></div>
+    <div class="{{flip:stat}}">
+      <div class="choices well">
+        <div class="caption">{{text:GUI:HudGameStats}}</div>
+        <div class="choice {{pick:stat:networth}}" data-click="pick:stat:networth"><span class="box"></span>{{text:GUI:HudNetWorth}}</div>
+        <div class="choice {{pick:stat:cash}}" data-click="pick:stat:cash"><span class="box"></span>{{text:GUI:HudStatCash}}</div>
+        <div class="choice {{pick:stat:income}}" data-click="pick:stat:income"><span class="box"></span>{{text:GUI:HudStatIncome}}</div>
+        <div class="choice {{pick:stat:army}}" data-click="pick:stat:army"><span class="box"></span>{{text:GUI:HudStatArmy}}</div>
+        <div class="choice {{pick:stat:kills}}" data-click="pick:stat:kills"><span class="box"></span>{{text:GUI:HudStatKills}}</div>
+        <div class="choice {{pick:stat:rank}}" data-click="pick:stat:rank"><span class="box"></span>{{text:GUI:HudStatRank}}</div>
+        <div class="choice {{pick:stat:power}}" data-click="pick:stat:power"><span class="box"></span>{{text:GUI:HudStatPower}}</div>
       </div>
     </div>
-  </div>
 
-  <div class="panel {{flip:army}}">
-    <div class="title">{{text:GUI:HudArmies}}</div>
-    <div class="army">
-      <div class="cell {{kind}}" data-each="army" style="border-color: {{color}}">
-        <img src="{{image}}">
-        <span class="count">{{count}}</span>
+    <div class="players">
+      <div class="player teams{{teams}} team{{team}}" data-each="players">
+        <div class="tray"><img class="emblem" src="{{portrait}}"></div>
+        <span class="name" style="color: {{color}}">{{name}}</span>
+        <span class="value">{{value}}</span>
+        <div class="meter"><div class="fill" style="width: {{share}}%; background-color: {{color}}"></div></div>
+      </div>
+    </div>
+
+    <div class="buttons">
+      <div class="button plate {{flip:graph}}" data-click="flip:graph">{{text:GUI:HudNetWorthLead}}</div>
+      <div class="button plate {{flip:army}}" data-click="flip:army">{{text:GUI:HudArmies}}</div>
+    </div>
+
+    <div class="panel graph well {{graph}} {{flip:graph}}">
+      <div class="title {{leader}}">{{text:GUI:HudNetWorthLead}}<span class="lead">{{lead}}</span></div>
+      <div class="radar">
+        <div class="grid" style="top: 9px"></div>
+        <div class="grid" style="top: 27px"></div>
+        <div class="chart">
+          <div class="col" data-each="lead">
+            <div class="half over"><div class="up" style="height: {{up}}%"></div></div>
+            <div class="half"><div class="down" style="height: {{down}}%"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel well {{flip:army}}">
+      <div class="title">{{text:GUI:HudArmies}}</div>
+      <div class="army">
+        <div class="cell {{kind}}" data-each="army">
+          <img src="{{image}}">
+          <span class="count">{{count}}</span>
+        </div>
       </div>
     </div>
   </div>
