@@ -1033,6 +1033,11 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	// for every machine; v1.1.4 was a 32-bit build and never had the choice.
 	_set_FMA3_enable( 0 );
 
+	// Without this Windows scales the whole window by the display's scaling setting, so at 125% a
+	// 1920x1080 game on a 1920x1080 screen is drawn 2400x1350 and hangs off the bottom right.  The
+	// game sizes everything in real pixels, which is what DPI awareness hands it.
+	::SetProcessDPIAware();
+
 #ifdef _PROFILE
   Profile::StartRange("init");
 #endif
