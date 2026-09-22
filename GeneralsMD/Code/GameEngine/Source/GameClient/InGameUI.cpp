@@ -56,6 +56,7 @@
 #include "GameClient/Anim2D.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/ControlBarScheme.h"
+#include "GameClient/MetaEvent.h"
 #include "GameClient/DisplayStringManager.h"
 #include "GameClient/Diplomacy.h"
 #include "GameClient/Eva.h"
@@ -1768,6 +1769,7 @@ enum
 	SECONDS_PER_HOUR					= 60 * 60,
 	SPECTATOR_TOAST_FRAMES		= LOGICFRAMES_PER_SECOND * 8,	///< how long a "superweapon ready" message stays up
 	SPECTATOR_TOASTS_KEPT			= 4,		///< the most of those on screen at once; the oldest goes first
+	COMMAND_SLOTS_PER_COLUMN	= 2,		///< the command bar numbers its slots down each column, top then bottom
 	TWO_TEAMS									= 2,
 	PERCENT										= 100
 };
@@ -2233,6 +2235,43 @@ void InGameUI::addSpectatorToast( Int playerIndex, const Object *weapon, const I
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The key a command bar slot is bound to right now, "Q" for KEY_Q, so the page names the key the
+	* player really has: the WASD camera moves the whole top row along by one.  Empty when unbound. */
+//-------------------------------------------------------------------------------------------------
+static std::string commandSlotKey( Int commandSlot )
+{
+	static const std::string KEY_PREFIX = "KEY_";
+	const GameMessage::Type meta = (GameMessage::Type)( GameMessage::MSG_META_COMMAND_SLOT01 + commandSlot );
+	for( const MetaMapRec *map = TheMetaMap ? TheMetaMap->getFirstMetaMapRec() : NULL; map; map = map->m_next )
+	{
+		if( map->m_meta != meta )
+			continue;
+		for( const LookupListRec *key = KeyNames; key->name; key++ )
+			if( key->value == map->m_key )
+				return std::string( key->name ).substr( KEY_PREFIX.size() );
+	}
+	return std::string();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The command bar's top row while the spectator page is up: slots 1, 3, 5... - Q, W, E, R, T, Y,
+	* U by default, Q, E, R, T, Y, U, I with the WASD camera - pick the stats in the order the
+	* drop-down lists them, and {{statkey:stat}} names each one's key.  The bottom row and anything
+	* past the last stat are left to the command bar. */
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::pickSpectatorStat( Int commandSlot )
+{
+	const Int stat = commandSlot / COMMAND_SLOTS_PER_COLUMN;
+	if( !m_spectatorPageShown || commandSlot % COMMAND_SLOTS_PER_COLUMN != 0 || stat >= (Int)ARRAY_SIZE( SPECTATOR_STATS ) )
+		return FALSE;
+
+	m_spectatorPicked[ STAT_GROUP ] = SPECTATOR_STATS[ stat ].key;
+	m_spectatorFlipped.erase( STAT_GROUP );
+	m_spectatorLists.clear();
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** The spectator's page: the drop-down that switches the strips on and off, every player ranked by
 	* the number picked in the stat drop-down, the net worth lead over the match and each army's most
 	* expensive units - the panels Dota's spectator keeps down the left of the screen.
@@ -2300,6 +2339,8 @@ void InGameUI::drawSpectatorPage( void )
 		m_spectatorTotals[ "graph" ] = teams == TWO_TEAMS && m_spectatorLead.size() >= TWO_TEAMS ? "shown" : "";
 		m_spectatorTotals[ "side" ] = spectatorSide();
 		m_spectatorTotals[ "clock" ] = spectatorClock( frame );
+		for( Int each = 0; each < (Int)ARRAY_SIZE( SPECTATOR_STATS ); each++ )
+			m_spectatorTotals[ std::string( "statkey:" ) + SPECTATOR_STATS[ each ].key ] = commandSlotKey( each * COMMAND_SLOTS_PER_COLUMN );
 		m_spectatorListsFrame = frame;
 	}
 

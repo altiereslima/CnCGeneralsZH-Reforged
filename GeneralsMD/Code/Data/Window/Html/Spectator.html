@@ -26,6 +26,7 @@
     {{side}}              "america", "china" or "gla": the side whose command bar is on screen
     {{clock}}             the match time, m:ss
     {{stat}}              the label of the picked stat
+    {{statkey:stat}}      the key that picks that stat: the command bar's top row, "Q" and so on
     {{teams}}             how many teams are left
     {{lead}} {{leader}}   how much net worth the leading team is ahead by, and "team0" or "team1"
     {{graph}}             "shown" once two teams have a lead worth drawing
@@ -150,6 +151,9 @@
   .choice { padding: 2px 6px; color: #c9d2d9; }
   .choice:hover { color: #ffffff; background-color: rgba(119, 131, 145, 0.25); }
   .choice.on { color: #b8f08a; }
+  /* the command bar's top row picks a stat while watching, and {{statkey:stat}} is its key */
+  .choice { position: relative; }
+  .key { position: absolute; right: 6px; top: 2px; color: #8a949f; font-size: 8px; }
 
   .players { margin: 2px 3px 0 3px; }
   .player { position: relative; height: 18px; border-bottom: 1px solid rgba(119, 131, 145, 0.18); }
@@ -253,13 +257,13 @@
   <div class="{{flip:stat}}">
     <div class="choices well">
       <div class="caption">{{text:GUI:HudGameStats}}</div>
-      <div class="choice {{pick:stat:networth}}" data-click="pick:stat:networth"><span class="box"></span>{{text:GUI:HudNetWorth}}</div>
-      <div class="choice {{pick:stat:cash}}" data-click="pick:stat:cash"><span class="box"></span>{{text:GUI:HudStatCash}}</div>
-      <div class="choice {{pick:stat:income}}" data-click="pick:stat:income"><span class="box"></span>{{text:GUI:HudStatIncome}}</div>
-      <div class="choice {{pick:stat:army}}" data-click="pick:stat:army"><span class="box"></span>{{text:GUI:HudStatArmy}}</div>
-      <div class="choice {{pick:stat:kills}}" data-click="pick:stat:kills"><span class="box"></span>{{text:GUI:HudStatKills}}</div>
-      <div class="choice {{pick:stat:rank}}" data-click="pick:stat:rank"><span class="box"></span>{{text:GUI:HudStatRank}}</div>
-      <div class="choice {{pick:stat:power}}" data-click="pick:stat:power"><span class="box"></span>{{text:GUI:HudStatPower}}</div>
+      <div class="choice {{pick:stat:networth}}" data-click="pick:stat:networth"><span class="box"></span>{{text:GUI:HudNetWorth}}<span class="key">{{statkey:networth}}</span></div>
+      <div class="choice {{pick:stat:cash}}" data-click="pick:stat:cash"><span class="box"></span>{{text:GUI:HudStatCash}}<span class="key">{{statkey:cash}}</span></div>
+      <div class="choice {{pick:stat:income}}" data-click="pick:stat:income"><span class="box"></span>{{text:GUI:HudStatIncome}}<span class="key">{{statkey:income}}</span></div>
+      <div class="choice {{pick:stat:army}}" data-click="pick:stat:army"><span class="box"></span>{{text:GUI:HudStatArmy}}<span class="key">{{statkey:army}}</span></div>
+      <div class="choice {{pick:stat:kills}}" data-click="pick:stat:kills"><span class="box"></span>{{text:GUI:HudStatKills}}<span class="key">{{statkey:kills}}</span></div>
+      <div class="choice {{pick:stat:rank}}" data-click="pick:stat:rank"><span class="box"></span>{{text:GUI:HudStatRank}}<span class="key">{{statkey:rank}}</span></div>
+      <div class="choice {{pick:stat:power}}" data-click="pick:stat:power"><span class="box"></span>{{text:GUI:HudStatPower}}<span class="key">{{statkey:power}}</span></div>
     </div>
   </div>
 

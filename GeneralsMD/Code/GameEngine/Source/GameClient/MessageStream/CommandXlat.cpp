@@ -2860,7 +2860,11 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_COMMAND_SLOT13:
 		case GameMessage::MSG_META_COMMAND_SLOT14:
 		{
-			TheControlBar->pressCommandButton( t - GameMessage::MSG_META_COMMAND_SLOT01 );
+			// a watcher has no commands to press, and the top row picks the spectator's stat instead,
+			// the keys Dota's spectator uses for the same list
+			const Int slot = t - GameMessage::MSG_META_COMMAND_SLOT01;
+			if( !TheInGameUI->pickSpectatorStat( slot ) )
+				TheControlBar->pressCommandButton( slot );
 			disp = DESTROY_MESSAGE;
 			break;
 		}		// end command bar grid slots
