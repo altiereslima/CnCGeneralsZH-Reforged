@@ -241,6 +241,7 @@ found and fixed â€” EA's own, not port damage.**
 - A map sent to you over the network has to be a map. The other machine used to name any file it liked and fill it with anything at all, and it was written where the name pointed; now the name cannot leave the map folder, the kind has to be one a map transfer carries, and the contents have to match the kind.
 - The processor's rounding mode is reset from the right register every frame.
 - The disconnect screen no longer interrupts a game that is merely slow.
+- The disconnect screen no longer freezes the game when its message is taller than its box. The list scrolled to fit a line that could never fit and never stopped, so when a player dropped out of a three-player match the other two locked up for good; now they wait out the vote and play on.
 - The keepalive interval setting is read now, and kept in a sane range.
 - The anti-freeze brake is measured properly and comes on twice as early.
 - Online input delay is now less than half what it was.
