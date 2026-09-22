@@ -35,6 +35,7 @@
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "GameLogic/Object.h"
+#include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/OpenContain.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/Drawable.h"
@@ -68,6 +69,12 @@ struct PopulateButtonInfo
 void ControlBar::populateButtonProc( Object *obj, void *userData )
 {	
 	PopulateButtonInfo* info = (PopulateButtonInfo*)userData;
+
+	// a unit passing through a tunnel on its way somewhere is inside for a frame; a button for it
+	// would flash in and out as a group went through
+	const AIUpdateInterface *ai = obj->getAI();
+	if( ai != NULL && ai->hasTunnelTrip() )
+		return;
 
 	// sanity
 	DEBUG_ASSERTCRASH( info->buttonIndex < MAX_STRUCTURE_INVENTORY_BUTTONS, 

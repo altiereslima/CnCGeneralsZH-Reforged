@@ -296,6 +296,19 @@ Bool TunnelTracker::hasTunnelTraveller() const
 }
 
 // ------------------------------------------------------------------------
+Int TunnelTracker::getResidentCount() const
+{
+	Int residents = 0;
+	for( ContainedItemsList::const_iterator it = m_containList.begin(); it != m_containList.end(); ++it )
+	{
+		const AIUpdateInterface *ai = (*it)->getAI();
+		if( ai == NULL || !ai->hasTunnelTrip() )
+			++residents;
+	}
+	return residents;
+}
+
+// ------------------------------------------------------------------------
 static const Real TUNNEL_SHORTCUT_SHARE = 0.7f;	///< the longest a way through the tunnels may be, as a share of the walk
 
 /** Whoever moves - a player's selection, a computer's wave, a unit falling back - decides once for

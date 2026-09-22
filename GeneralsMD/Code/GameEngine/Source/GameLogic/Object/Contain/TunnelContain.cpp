@@ -314,6 +314,15 @@ Int TunnelContain::getContainMax( void ) const
 	return tunnelTracker ? tunnelTracker->getContainMax() : 0;
 }
 
+//-------------------------------------------------------------------------------------------------
+Bool TunnelContain::getContainerPipsToShow( Int& numTotal, Int& numFull )
+{
+	TunnelTracker *tunnelTracker = getTunnelTracker();
+	numTotal = getContainMax();
+	numFull = tunnelTracker ? tunnelTracker->getResidentCount() : 0;
+	return true;
+}
+
 const ContainedItemsList* TunnelContain::getContainedItemsList() const
 {
 	TunnelTracker *tunnelTracker = getTunnelTracker();
