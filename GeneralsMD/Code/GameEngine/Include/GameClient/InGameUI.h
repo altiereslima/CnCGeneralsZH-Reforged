@@ -404,6 +404,9 @@ public:  // ********************************************************************
 	/** The command bar's page, Window/Html/ControlBar.html, under the bar's windows: its panels are
 		* where the plates would have gone, in screen pixels.  FALSE when there is no page to draw. */
 	Bool drawControlBarPage( const IRegion2D *panels, const Bool *shown, Int panelCount );
+	/** A click that reached the world, on one of that page's own buttons: TRUE when it was one, and
+		* when `act` is set the button it names is pressed. */
+	Bool handleControlBarPageClick( const ICoord2D *mouse, Bool act );
 	void drawScoreboard( void );																						///< that scoreboard, over everything
 	virtual Bool isMessagesOn( void ) { return m_messagesOn; }	///< are the display messages on
 	void freeMessageResources( void );				///< free resources for the ui messages
@@ -1204,6 +1207,7 @@ protected:
 	std::string									m_scoreboardPage;
 	HtmlOverlay *								m_controlBarOverlay;
 	Bool												m_controlBarPageLoaded;
+	Bool												m_controlBarPageShown;		///< drawn this frame, so its buttons can be clicked
 	std::string									m_controlBarPage;
 
 	//

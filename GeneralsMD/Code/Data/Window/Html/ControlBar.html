@@ -2,24 +2,27 @@
 <!--
   The command bar's frame, drawn where its three plates used to be, and the bar's own buttons.  The
   command buttons, the radar, the money, the power bar and the portrait are still the bar's windows
-  and paint over this page.  The menu, worker, beacon, chat, minimise and promotion buttons and the
-  under-attack light are the page's to draw: their windows take the clicks and draw nothing.  Same
-  materials as Window/Html/Spectator.html, whose header says what the renderer draws and what not.
+  and paint over this page.  The promotion, minimise and beacon buttons and the under-attack light
+  are the page's to draw: their windows take the clicks and draw nothing.  The menu and idle worker
+  buttons are the page's altogether, pressed through data-click="press:Name"; the chat button is
+  gone and Enter still opens the chat.  Same materials as Window/Html/Spectator.html, whose header
+  says what the renderer draws and what not.
 
-  Everything with class "solid" catches clicks; the rest of the screen is battlefield, whatever the
-  old plates covered.
+  Everything with class "solid" catches clicks for the bar; the rest of the screen is battlefield,
+  whatever the old plates covered.  A data-click="press:Name" button must not be solid: its click
+  reaches the page as a click on the battlefield.
 
   The game fills in, every frame (GameClient/HtmlTemplate.h):
     {{side}}               "america", "china" or "gla": the side whose bar is on screen
     {{promotion}}          "ready" while the general has a promotion to spend
+    {{watching}}           "watching" while the local player is an observer or out of the match
     {{blink}}              "lit" for half of every second, for anything that blinks
     {{panelN.x}} .y .w .h  N 0 to 2, left, centre and right: where the plates would have gone,
                            moving with the bar when it slides or minimises; .w and .h are 0 and
                            {{panelN.shown}} is "hidden" when a minimised bar has stood it down
     {{left.x}} .y .w .h    the box round the radar, so the left panel is only as big as its bezel
-    {{centre.x}} .y .w .h  the box round the command grid, the power bar over it and the four buttons
-                           beside it; {{centre.shown}} as above
-    {{purse.x}} .y .w .h   the box round the money, above the centre
+    {{centre.x}} .y .w .h  the box round the command grid with the money and the power bar over it;
+                           {{centre.shown}} as above
     {{right.x}} .y .w .h   the box round the portrait and the experience bar.  The promotion and
                            minimise buttons are moved to sit over its top right corner
     {{Name.x}} .y .w .h    the rectangle of the bar's window Name, {{Name.shown}} "shown" or "hidden"
@@ -55,13 +58,10 @@
 
   /* every panel hugs what it holds, and what the old plates covered round them is battlefield and
      takes clicks as one: the left the radar's bezel, the right the portrait with the two small
-     buttons over its top right corner, the centre the command grid under the power bar, and the
-     purse above it the money and nothing else */
+     buttons over its top right corner, the centre the command grid under the money and power bar */
   .left { margin: -10px 0 0 -8px; padding: 10px 8px 8px 8px; }
   .right { margin: -22px 0 0 -8px; padding: 22px 8px 8px 8px; }
   .centre { margin: -10px 0 0 -6px; padding: 10px 6px 6px 6px; }
-  .purse { margin: -4px 0 0 -6px; padding: 4px 6px 3px 6px; }
-  .purse .rail { height: 2px; }
 
   /* a bezel: a window set into the panel, four pixels of steel round a black lip */
   .bezel { margin: -5px 0 0 -5px; border: 4px solid #4b535e; border-top-color: #2a3036; border-left-color: #2a3036;
@@ -73,21 +73,29 @@
 
   .well { margin: -3px 0 0 -3px; border: 2px solid #0c1114; border-bottom-color: #4b535e; border-right-color: #4b535e;
           background-color: rgba(0, 0, 0, 0.35); }
-  .plaque { margin: -1px 0 0 -1px; border: 1px solid #0c1114; border-bottom-color: #6f7782; background-color: #05080a; }
   .groove { margin: -2px 0 0 -2px; border: 1px solid #000000; border-bottom-color: #6f7782; background-color: #020405; }
 
-  /* the bar's own buttons: a steel cap with its name on it, pressed in when pushed */
+  /* the bar's own buttons: a steel cap, lit gold under the pointer and pressed in when pushed */
   .button { text-align: center; color: #e8eef2; font-weight: bold;
             background: linear-gradient(to bottom, #7d8691, #3f4650); border: 1px solid #0c1114;
             border-top-color: #c3ccd3; border-left-color: #aab4bf; }
   .china .button { background: linear-gradient(to bottom, #a44734, #4c1b13); border-top-color: #e8a28a; border-left-color: #d98a72; }
   .gla .button { background: linear-gradient(to bottom, #978a50, #48401e); border-top-color: #ddd29a; border-left-color: #cbbf82; }
-  .button.hilite { color: #ffffff; border-color: #e8d27a; }
+  .button.hilite, .button:hover { color: #ffffff; border-color: #e8d27a; }
   .button.pushed { background: linear-gradient(to bottom, #2a3036, #4b535e); border-top-color: #0c1114; border-left-color: #0c1114; }
   .button.disabled { color: #6f7782; }
   .button .cap { position: absolute; left: 0; right: 0; top: 50%; margin-top: -5px; line-height: 10px; }
   .button .stars { font-size: 10px; }
   .button.promotion.ready.lit { background: linear-gradient(to bottom, #f6e08a, #a4832a); color: #1a1406; border-color: #fff4b8; }
+
+  /* the menu: three bars in a square cap in the screen's top left corner */
+  .menu { left: 4px; top: 4px; width: 18px; height: 16px; }
+  .menu .bar { position: absolute; left: 4px; right: 4px; height: 2px; background-color: #e8eef2; }
+  .menu:hover .bar { background-color: #e8d27a; }
+
+  /* the idle worker: a tab over the centre panel's top left corner, outside it */
+  .worker { position: absolute; left: 0; top: -15px; width: 44px; height: 14px; border-bottom: 0; }
+  .watching .worker { display: none; }
 
   /* the under-attack light: a tab on the left panel's top left edge, red while the bar blinks it */
   .alert { position: absolute; left: 4px; top: -15px; height: 13px; line-height: 13px; padding: 0 6px; font-size: 7px; font-weight: bold;
@@ -96,14 +104,16 @@
 </style>
 </head>
 <body>
-<div class="{{side}}">
+<div class="{{side}} {{watching}}">
 
   <div class="piece panel solid left {{left.shown}}" style="left: {{left.x}}px; top: {{left.y}}px; width: {{left.w}}px; height: {{left.h}}px">
     <div class="rail"></div>
     <div class="alert {{WinUAttack.state}}">{{text:GUI:BarUnderAttack}}</div>
   </div>
-  <div class="piece panel solid purse {{purse.shown}}" style="left: {{purse.x}}px; top: {{purse.y}}px; width: {{purse.w}}px; height: {{purse.h}}px"><div class="rail"></div></div>
-  <div class="piece panel solid centre {{centre.shown}}" style="left: {{centre.x}}px; top: {{centre.y}}px; width: {{centre.w}}px; height: {{centre.h}}px"><div class="rail"></div></div>
+  <div class="piece panel solid centre {{centre.shown}}" style="left: {{centre.x}}px; top: {{centre.y}}px; width: {{centre.w}}px; height: {{centre.h}}px">
+    <div class="rail"></div>
+    <div class="worker button {{ButtonIdleWorker.state}}" data-click="press:ButtonIdleWorker"><div class="cap">{{text:GUI:BarIdleWorker}}</div></div>
+  </div>
   <div class="piece panel solid right {{right.shown}}" style="left: {{right.x}}px; top: {{right.y}}px; width: {{right.w}}px; height: {{right.h}}px"><div class="rail"></div></div>
 
   <div class="piece bezel {{LeftHUD.shown}}" style="left: {{LeftHUD.x}}px; top: {{LeftHUD.y}}px; width: {{LeftHUD.w}}px; height: {{LeftHUD.h}}px">
@@ -122,16 +132,18 @@
   </div>
 
   <div class="piece well {{CommandWindow.shown}}" style="left: {{CommandWindow.x}}px; top: {{CommandWindow.y}}px; width: {{CommandWindow.w}}px; height: {{CommandWindow.h}}px"></div>
-  <div class="piece plaque {{MoneyDisplay.shown}}" style="left: {{MoneyDisplay.x}}px; top: {{MoneyDisplay.y}}px; width: {{MoneyDisplay.w}}px; height: {{MoneyDisplay.h}}px"></div>
   <div class="piece groove {{PowerWindow.shown}}" style="left: {{PowerWindow.x}}px; top: {{PowerWindow.y}}px; width: {{PowerWindow.w}}px; height: {{PowerWindow.h}}px"></div>
   <div class="piece groove {{GeneralsExp.shown}}" style="left: {{GeneralsExp.x}}px; top: {{GeneralsExp.y}}px; width: {{GeneralsExp.w}}px; height: {{GeneralsExp.h}}px"></div>
 
-  <div class="piece button {{ButtonOptions.shown}} {{ButtonOptions.state}}" style="left: {{ButtonOptions.x}}px; top: {{ButtonOptions.y}}px; width: {{ButtonOptions.w}}px; height: {{ButtonOptions.h}}px"><div class="cap">{{text:GUI:BarMenu}}</div></div>
-  <div class="piece button {{ButtonIdleWorker.shown}} {{ButtonIdleWorker.state}}" style="left: {{ButtonIdleWorker.x}}px; top: {{ButtonIdleWorker.y}}px; width: {{ButtonIdleWorker.w}}px; height: {{ButtonIdleWorker.h}}px"><div class="cap">{{text:GUI:BarIdleWorker}}</div></div>
   <div class="piece button {{ButtonPlaceBeacon.shown}} {{ButtonPlaceBeacon.state}}" style="left: {{ButtonPlaceBeacon.x}}px; top: {{ButtonPlaceBeacon.y}}px; width: {{ButtonPlaceBeacon.w}}px; height: {{ButtonPlaceBeacon.h}}px"><div class="cap">{{text:GUI:BarBeacon}}</div></div>
-  <div class="piece button {{PopupCommunicator.shown}} {{PopupCommunicator.state}}" style="left: {{PopupCommunicator.x}}px; top: {{PopupCommunicator.y}}px; width: {{PopupCommunicator.w}}px; height: {{PopupCommunicator.h}}px"><div class="cap">{{text:GUI:BarChat}}</div></div>
   <div class="piece button promotion {{promotion}} {{blink}} {{ButtonGeneral.shown}} {{ButtonGeneral.state}}" style="left: {{ButtonGeneral.x}}px; top: {{ButtonGeneral.y}}px; width: {{ButtonGeneral.w}}px; height: {{ButtonGeneral.h}}px"><div class="cap stars">&#9733;&#9733;&#9733;</div></div>
   <div class="piece button {{ButtonLarge.shown}} {{ButtonLarge.state}}" style="left: {{ButtonLarge.x}}px; top: {{ButtonLarge.y}}px; width: {{ButtonLarge.w}}px; height: {{ButtonLarge.h}}px"><div class="cap">&#9660;</div></div>
+
+  <div class="piece button menu {{ButtonOptions.state}}" data-click="press:ButtonOptions">
+    <div class="bar" style="top: 4px"></div>
+    <div class="bar" style="top: 7px"></div>
+    <div class="bar" style="top: 10px"></div>
+  </div>
 
 </div>
 </body>

@@ -1202,6 +1202,7 @@ InGameUI::InGameUI()
 	m_scoreboardPageLoaded = FALSE;
 	m_controlBarOverlay = NULL;
 	m_controlBarPageLoaded = FALSE;
+	m_controlBarPageShown = FALSE;
 	for( Int stripSeconds = 0; stripSeconds < STRIP_SECONDS_STRINGS; stripSeconds++ )
 		m_stripSecondsString[ stripSeconds ] = NULL;
 	for( Int stripQuantity = 0; stripQuantity < STRIP_QUANTITY_STRINGS; stripQuantity++ )
@@ -10092,25 +10093,29 @@ static const char *const CONTROL_BAR_WINDOWS[] =
 	"WinUAttack"
 };
 
-/** The bar's windows the page draws instead of letting them paint themselves: its own buttons and
-	* the radar's under-attack light.  They still take their clicks; only their pictures are the page's. */
+/** The bar's windows the page draws instead of letting them paint themselves: the promotion and
+	* minimise buttons, the beacon button and the radar's under-attack light.  They still take their
+	* clicks; only their pictures are the page's. */
 static const char *const CONTROL_BAR_CUSTOM[] =
 {
-	"ButtonGeneral", "ButtonLarge", "ButtonOptions", "ButtonIdleWorker", "ButtonPlaceBeacon", "PopupCommunicator",
-	"WinUAttack"
+	"ButtonGeneral", "ButtonLarge", "ButtonPlaceBeacon", "WinUAttack"
 };
+
+/** The bar's windows the page stands down altogether.  The menu and idle worker buttons are the
+	* page's own, pressed through data-click="press:Name" because they sit where the bar's frame takes
+	* no clicks; the chat button is gone, and Enter still opens the chat. */
+static const char *const CONTROL_BAR_STOOD_DOWN[] = { "ButtonOptions", "ButtonIdleWorker", "PopupCommunicator" };
+static const std::string PRESS_ACTION = "press:";
 
 /** The windows each panel is drawn round, so a panel is only as big as what it holds: the left one
 	* the radar, the right one the portrait and the experience bar, the centre the command grid with
-	* the power bar over it, and the purse above that the money alone.  NULL ends each list. */
+	* the money and the power bar over it.  NULL ends each list. */
 static const char *const CONTROL_BAR_LEFT[] = { "LeftHUD", NULL };
 static const char *const CONTROL_BAR_RIGHT[] = { "RightHUD", "GeneralsExp", "ExpBarForeground", NULL };
 static const char *const CONTROL_BAR_CENTRE[] =
 {
-	"CommandWindow", "ObserverPlayerListWindow", "PowerWindow", "ButtonOptions", "ButtonIdleWorker",
-	"ButtonPlaceBeacon", "PopupCommunicator", NULL
+	"CommandWindow", "ObserverPlayerListWindow", "MoneyDisplay", "PowerWindow", "ButtonPlaceBeacon", NULL
 };
-static const char *const CONTROL_BAR_PURSE[] = { "MoneyDisplay", NULL };
 
 /** The promotion and minimise buttons, small, side by side in the right panel's top right corner,
 	* the minimise button outermost.  800x600 pixels. */
@@ -10204,6 +10209,7 @@ static void putPageRect( HtmlValues &values, const std::string &name, const IReg
 //-------------------------------------------------------------------------------------------------
 Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, Int panelCount )
 {
+	m_controlBarPageShown = FALSE;
 	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
 	{
 		TheControlBar->setPageSolids( NULL );
@@ -10226,6 +10232,7 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	HtmlValues values;
 	values[ "side" ] = spectatorSide();
 	values[ "promotion" ] = TheControlBar->isGeneralStarFlashing() ? "ready" : "";
+	values[ "watching" ] = localPlayerWatching() ? "watching" : "";
 	values[ "blink" ] = TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND > LOGICFRAMES_PER_SECOND / 2 ? "lit" : "";
 	for( Int panel = 0; panel < panelCount; panel++ )
 		putPageRect( values, "panel" + std::to_string( panel ), panels[ panel ], shown[ panel ] );
@@ -10234,11 +10241,8 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	IRegion2D box;
 	const Bool leftFound = controlBarUnion( CONTROL_BAR_LEFT, box );
 	putPageRect( values, "left", box, leftFound && panelCount > 0 && shown[ 0 ] );
-	const Bool centreShown = panelCount > 1 && shown[ 1 ];
 	const Bool centreFound = controlBarUnion( CONTROL_BAR_CENTRE, box );
-	putPageRect( values, "centre", box, centreFound && centreShown );
-	const Bool purseFound = controlBarUnion( CONTROL_BAR_PURSE, box );
-	putPageRect( values, "purse", box, purseFound && centreShown );
+	putPageRect( values, "centre", box, centreFound && panelCount > 1 && shown[ 1 ] );
 	const Bool rightFound = controlBarUnion( CONTROL_BAR_RIGHT, box );
 	putPageRect( values, "right", box, rightFound && panelCount > 2 && shown[ 2 ] );
 
@@ -10281,13 +10285,48 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 		if( window )
 			window->winSetDrawFunc( drawNothing );
 	}
+	for( Int each = 0; each < (Int)ARRAY_SIZE( CONTROL_BAR_STOOD_DOWN ); each++ )
+	{
+		GameWindow *window = controlBarWindow( CONTROL_BAR_STOOD_DOWN[ each ] );
+		if( window && !window->winIsHidden() )
+			window->winHide( TRUE );
+	}
 
 	m_controlBarOverlay->setPage( HtmlTemplate_expand( m_controlBarPage, values, HtmlLists(), lookupGameText ) );
+	m_controlBarOverlay->hover( TheMouse->getMouseStatus()->pos );
 	m_controlBarOverlay->draw();
 
 	std::vector< IRegion2D > solids;
 	m_controlBarOverlay->rectsOf( ".solid", solids );
 	TheControlBar->setPageSolids( &solids );
+	m_controlBarPageShown = TRUE;
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The page's own buttons sit where the bar's frame takes no clicks, so their clicks arrive as clicks
+	* on the world and are taken here.  data-click="press:Name" presses the bar's window Name, the
+	* message a click on it would have sent, even though the window itself is stood down. */
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::handleControlBarPageClick( const ICoord2D *mouse, Bool act )
+{
+	if( !m_controlBarPageShown || m_controlBarOverlay == NULL || !m_controlBarOverlay->hover( *mouse ) )
+		return FALSE;
+
+	const std::string action = m_controlBarOverlay->click( *mouse );
+	if( action.compare( 0, PRESS_ACTION.size(), PRESS_ACTION ) != 0 )
+		return FALSE;
+	if( !act )
+		return TRUE;
+
+	GameWindow *button = controlBarWindow( action.substr( PRESS_ACTION.size() ) );
+	if( button == NULL || !BitTest( button->winGetStatus(), WIN_STATUS_ENABLED ) )
+		return TRUE;
+
+	TheWindowManager->winSendSystemMsg( button->winGetOwner(), GBM_SELECTED, (WindowMsgData)button, button->winGetWindowId() );
+	AudioEventRTS buttonClick( "GUIClick" );
+	if( TheAudio )
+		TheAudio->addAudioEvent( &buttonClick );
 	return TRUE;
 }
 
@@ -10827,7 +10866,10 @@ Bool InGameUI::handleProductionStripClick( const ICoord2D *mouse, Bool cancel )
 	if( mouse == NULL )
 		return FALSE;
 
-	// the strip drop-down lies over the world the same way the strip does, so its clicks come here too
+	// the command bar's own buttons and the strip drop-down lie over the world the same way the strip
+	// does, so their clicks come here too
+	if( handleControlBarPageClick( mouse, !cancel ) )
+		return TRUE;
 	if( handleSpectatorPageClick( mouse, !cancel ) )
 		return TRUE;
 

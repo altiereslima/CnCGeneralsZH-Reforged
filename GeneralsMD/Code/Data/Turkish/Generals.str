@@ -15629,20 +15629,12 @@ GUI:HudSuperweaponReady
 "ateşe hazır"
 END
 
-GUI:BarMenu
-"Menü"
-END
-
 GUI:BarIdleWorker
 "İşçi"
 END
 
 GUI:BarBeacon
 "İşaret"
-END
-
-GUI:BarChat
-"Sohbet"
 END
 
 GUI:BarUnderAttack

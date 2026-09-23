@@ -1104,20 +1104,12 @@ GUI:HudSuperweaponReady
 END
 
 // the command bar's own buttons, written on them now that the bar is drawn from a page
-GUI:BarMenu
-"Menu"
-END
-
 GUI:BarIdleWorker
 "Worker"
 END
 
 GUI:BarBeacon
 "Beacon"
-END
-
-GUI:BarChat
-"Chat"
 END
 
 // the box in the corner of the radar that lights while your forces are under attack
