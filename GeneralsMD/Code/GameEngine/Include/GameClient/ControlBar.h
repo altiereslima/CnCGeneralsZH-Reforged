@@ -1036,10 +1036,18 @@ public:
 	/** The HUD page's place for the general's powers: the first in `corner`, the bottom right of the
 		* grid, each `cell` big with `gap` between them, a row of SPECIAL_POWER_SHORTCUT_COLS running
 		* left from it and the next row over it, the order the row keys count in.  The slots' own tray
-		* art is not drawn; the page draws their cells.  NULL hides the bar.  Screen pixels.  Asked every
-		* frame the page draws, so it holds against the bar's own layout.  Returns how many powers are
-		* shown, each in its place. */
-	Int placeSpecialPowerShortcutGrid( const ICoord2D *corner, const ICoord2D &cell, Int gap );
+		* art is not drawn; the page draws their cells, and each power stands `inset` inside its cell
+		* for the page's frame over the edge.  NULL hides the bar.  Screen pixels.  Asked every frame the
+		* page draws, so it holds against the bar's own layout.  Returns how many powers are shown, each
+		* in its place. */
+	Int placeSpecialPowerShortcutGrid( const ICoord2D *corner, const ICoord2D &cell, Int gap, Int inset );
+
+	/** Puts one of the bar's windows `inset` pixels inside the rectangle layoutPanels gave it, on every
+		* side, for a frame the page draws over the edge; nought gives it the whole rectangle back.  A
+		* rebuild of the layout reads the window as the whole rectangle. */
+	void insetPlacedWindow( GameWindow *window, Int inset );
+	Int getPlacedInset( GameWindow *window ) const;	///< what insetPlacedWindow last put it in by
+	GameWindow *getSpecialPowerShortcutParent( void ) { return m_specialPowerShortcutParent; }
 
 	/// the general's stars are asking to be spent, so the button blinks; see getStarImage
 	Bool isGeneralStarFlashing( void ) const { return m_genStarFlash; }

@@ -410,6 +410,10 @@ public:  // ********************************************************************
 	/** The general's promotion screen, Window/Html/Promotion.html, drawn as `parent`'s picture: the
 		* screen's windows keep their clicks and the promotions' own cameos paint over it. */
 	void drawPromotionPage( GameWindow *parent, Bool front );
+	/** The command bar's grids of buttons whose cells the page frames in front of the buttons. */
+	enum CellGrid { CELL_GRID_COMMAND, CELL_GRID_QUEUE, CELL_GRID_POWERS, CELL_GRID_COUNT };
+	/** The steel frames over one grid's buttons, from Window/Html/ControlBar.html, drawn after them. */
+	void drawCellGridFront( Int grid );
 	void drawScoreboard( void );																						///< that scoreboard, over everything
 	/** Window/Html/Tooltip.html is there to draw with, in a match. */
 	Bool isTooltipPageReady( void );
@@ -1227,6 +1231,8 @@ protected:
 	ICoord2D										m_tooltipSize;						///< the box as last laid out, in screen pixels, to place the next one by
 	HtmlOverlay *								m_promotionOverlay;
 	HtmlOverlay *								m_promotionFrontOverlay;		///< the grid's frames, drawn over the promotions
+	HtmlOverlay *								m_cellFrontOverlay[ CELL_GRID_COUNT ];
+	std::vector< HtmlValues >		m_cellFrontCells[ CELL_GRID_COUNT ];	///< each grid's cells as the bar's page last placed them
 	Bool												m_promotionPageLoaded;
 	std::string									m_promotionPage;
 	Bool												m_signalsWereShown;				///< the smoke signal column was up last frame

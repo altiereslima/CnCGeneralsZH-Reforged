@@ -1207,6 +1207,8 @@ InGameUI::InGameUI()
 	m_controlBarPageLoaded = FALSE;
 	m_promotionOverlay = NULL;
 	m_promotionFrontOverlay = NULL;
+	for( Int grid = 0; grid < CELL_GRID_COUNT; grid++ )
+		m_cellFrontOverlay[ grid ] = NULL;
 	m_promotionPageLoaded = FALSE;
 	m_controlBarPageShown = FALSE;
 	m_tooltipOverlay = NULL;
@@ -1340,6 +1342,11 @@ InGameUI::~InGameUI()
 	m_promotionOverlay = NULL;
 	delete m_promotionFrontOverlay;
 	m_promotionFrontOverlay = NULL;
+	for( Int grid = 0; grid < CELL_GRID_COUNT; grid++ )
+	{
+		delete m_cellFrontOverlay[ grid ];
+		m_cellFrontOverlay[ grid ] = NULL;
+	}
 	delete m_tooltipOverlay;
 	m_tooltipOverlay = NULL;
 }
@@ -10411,6 +10418,7 @@ enum
 	SKILL_TRAY_BORDER			= 6,		///< the tray's steel round its cells
 	SKILL_CELL_GAP				= 2,		///< the steel between two cells
 	SKILL_CELL_PERCENT		= 75,		///< a cell's size against a command button's; the whole size stood too big over the portrait
+	CELL_FRAME						= 3,		///< a grid's steel and bevel, drawn in front over a cell's edge; its button fills the hole inside
 	SIGNAL_BUTTON_SIZE		= 24,		///< each smoke signal button's height, a row of the column
 	SIGNAL_BUTTON_WIDTH		= 40,		///< and its width, room for its picture
 	SIGNAL_BUTTONS				= 3,		///< attack, defend, look
@@ -10580,19 +10588,51 @@ static IRegion2D tabOn( const IRegion2D &box, Int width, Int height, Bool fromRi
 	* line of text and set down on the block under it, so its block is no taller than the figure.
 	* Written as centre, powerframe and moneyblock. */
 //-------------------------------------------------------------------------------------------------
-/** The screen rectangle of the bar's window `prefix` followed by `number` in two digits, shown or not. */
-static IRegion2D numberedWindowRect( const char *prefix, Int number )
+static GameWindow *numberedWindow( const char *prefix, Int number )
 {
 	char name[ 32 ];
 	snprintf( name, sizeof( name ), "%s%02d", prefix, number );
-	GameWindow *window = controlBarWindow( name );
+	return controlBarWindow( name );
+}
+
+/** The screen rectangle of the bar's window `prefix` followed by `number` in two digits, shown or
+	* not: its whole place, the frame the page draws over its edge included. */
+static IRegion2D numberedWindowRect( const char *prefix, Int number )
+{
+	GameWindow *window = numberedWindow( prefix, number );
+	const Int inset = TheControlBar->getPlacedInset( window );
 	IRegion2D place;
 	Int width = 0, height = 0;
 	window->winGetScreenPosition( &place.lo.x, &place.lo.y );
 	window->winGetSize( &width, &height );
-	place.hi.x = place.lo.x + width;
-	place.hi.y = place.lo.y + height;
+	place.lo.x -= inset;
+	place.lo.y -= inset;
+	place.hi.x = place.lo.x + width + 2 * inset;
+	place.hi.y = place.lo.y + height + 2 * inset;
 	return place;
+}
+
+/** How far a grid's cells reach out past their buttons into the gaps between them: half the narrower
+	* of the gaps beside and below button `first`, so a cell's frame stops short of its neighbour's
+	* bevel, and never more than the frame.  The frame's depth past that is taken off the buttons, and
+	* the steel between two pictures stays near the gap the layout left. */
+static Int cellReach( const char *prefix, Int first, Int beside, Int below, Int frame )
+{
+	const IRegion2D place = numberedWindowRect( prefix, first );
+	const Int across = numberedWindowRect( prefix, beside ).lo.x - place.hi.x;
+	const Int down = numberedWindowRect( prefix, below ).lo.y - place.hi.y;
+	return min( frame, min( across, down ) / 2 );
+}
+
+/** `place` grown by `reach` screen pixels on every side. */
+static IRegion2D reachedBy( const IRegion2D &place, Int reach )
+{
+	IRegion2D cell = place;
+	cell.lo.x -= reach;
+	cell.lo.y -= reach;
+	cell.hi.x += reach;
+	cell.hi.y += reach;
+	return cell;
 }
 
 /** ButtonCommandNN's screen rectangle, `button` 1 to COMMAND_BUTTONS, shown or not. */
@@ -10627,7 +10667,7 @@ static void lowerControlBarWindow( const char *name, Int shift )
 	window->winSetPosition( x, y + shift );
 }
 
-static void stackCentre( HtmlValues &values, Bool shown, IRegion2D &centre )
+static void stackCentre( HtmlValues &values, Bool shown, Int reach, IRegion2D &centre )
 {
 	// the command buttons stand as low as the idle worker's key beside them, GRID_BOTTOM_GAP over the
 	// screen's bottom edge, wherever the side's layout put them; the beacon button goes down with them
@@ -10646,7 +10686,8 @@ static void stackCentre( HtmlValues &values, Bool shown, IRegion2D &centre )
 	// money and the power bar stood over bare battlefield.  The grid's place holds whether it is up,
 	// and it is the fourteen buttons' place rather than CommandWindow's: the window reaches 34 pixels
 	// further left, over where the beacon button stands, and left an empty strip in the panel
-	IRegion2D buttons = commandButtonsBox();
+	// It is the cells', which reach `reach` past the buttons
+	IRegion2D buttons = reachedBy( commandButtonsBox(), reach );
 	if( othersFound )
 	{
 		buttons.lo.x = min( buttons.lo.x, grid.lo.x );
@@ -10735,6 +10776,52 @@ static void putPageRect( HtmlValues &values, const std::string &name, const IReg
 	values[ name + ".shown" ] = shown ? "shown" : "hidden";
 }
 
+static void drawCommandGridFront( GameWindow *window, WinInstanceData *instData )
+{
+	TheInGameUI->drawCellGridFront( InGameUI::CELL_GRID_COMMAND );
+}
+
+static void drawQueueGridFront( GameWindow *window, WinInstanceData *instData )
+{
+	TheInGameUI->drawCellGridFront( InGameUI::CELL_GRID_QUEUE );
+}
+
+static void drawPowersGridFront( GameWindow *window, WinInstanceData *instData )
+{
+	TheInGameUI->drawCellGridFront( InGameUI::CELL_GRID_POWERS );
+}
+
+/** A window of no size and no input at the head of `parent`'s children, which draw from the tail,
+	* so `draw` runs after every one of them; made the first time and kept at the head. */
+static void putFrontWindow( GameWindow *parent, GameWinDrawFunc draw )
+{
+	GameWindow *front = parent->winGetChild();
+	while( front && front->winGetDrawFunc() != draw )
+		front = front->winGetNext();
+	if( front == NULL )
+	{
+		front = TheWindowManager->winCreate( parent, WIN_STATUS_NO_INPUT, 0, 0, 0, 0, NULL );
+		front->winSetDrawFunc( draw );
+	}
+	if( parent->winGetChild() != front )
+		front->winBringToTop();
+}
+
+void InGameUI::drawCellGridFront( Int grid )
+{
+	HtmlOverlay *&overlay = m_cellFrontOverlay[ grid ];
+	if( overlay == NULL )
+		overlay = new HtmlOverlay( m_superweaponNormalFont );
+
+	HtmlValues values;
+	HtmlLists lists;
+	values[ "layer" ] = "front";
+	values[ "side" ] = spectatorSide();
+	lists[ "frontcells" ] = m_cellFrontCells[ grid ];
+	overlay->setPage( HtmlTemplate_expand( m_controlBarPage, values, lists, lookupGameText ) );
+	overlay->draw();
+}
+
 //-------------------------------------------------------------------------------------------------
 /** The command bar's frame, drawn from Window/Html/ControlBar.html in the place of its three plates.
 	* The buttons, the radar and the portrait are still the bar's own windows and paint over it; the
@@ -10765,6 +10852,7 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 		m_controlBarOverlay = new HtmlOverlay( m_superweaponNormalFont );
 
 	HtmlValues values;
+	values[ "layer" ] = "back";
 	values[ "side" ] = spectatorSide();
 	// a watcher has no promotions of his own to spend, whatever the bar's flash says
 	const Bool watching = localPlayerWatching();
@@ -10783,6 +10871,18 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	// else - the tabs, the buttons, the signals - stands outside the border.
 	const Real scale = ControlBarUniformScale();
 	const Int border = REAL_TO_INT( PANEL_BORDER * scale );
+
+	// the command and queue buttons stand inside the frame the page draws over their cells' edges, so
+	// the frame covers no part of the picture; the cells reach into the gaps for as much of it as fits.
+	// The gaps are measured from the whole places, whatever the buttons were last put in by
+	const Int cellFrame = REAL_TO_INT( CELL_FRAME * scale );
+	const Int commandReach = cellReach( "ButtonCommand", 1, 3, 2, cellFrame );
+	const Int queueReach = cellReach( "ButtonQueue", 1, 2, 4, cellFrame );
+	for( Int button = 1; button <= COMMAND_BUTTONS; button++ )
+		TheControlBar->insetPlacedWindow( numberedWindow( "ButtonCommand", button ), cellFrame - commandReach );
+	for( Int button = 1; button <= QUEUE_BUTTONS; button++ )
+		TheControlBar->insetPlacedWindow( numberedWindow( "ButtonQueue", button ), cellFrame - queueReach );
+
 	const Bool leftShown = panelCount > 0 && shown[ 0 ];
 	const Bool rightShown = panelCount > 2 && shown[ 2 ];
 
@@ -10809,7 +10909,7 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	putSignalRise( values, nowMs - m_signalsRiseStartMs );
 
 	IRegion2D centreBox;
-	stackCentre( values, panelCount > 1 && shown[ 1 ], centreBox );
+	stackCentre( values, panelCount > 1 && shown[ 1 ], commandReach, centreBox );
 	// the idle worker's key, a smoke signal's size, in a step against the centre panel's border at its
 	// bottom left, standing on the screen's bottom edge; on the top edge it stood under the power bar
 	IRegion2D workerStep;
@@ -10827,7 +10927,7 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	for( Int button = 1; button <= COMMAND_BUTTONS && panelCount > 1 && shown[ 1 ]; button++ )
 	{
 		HtmlValues entry;
-		putPageRect( entry, "cell", commandButtonRect( button ), TRUE );
+		putPageRect( entry, "cell", reachedBy( commandButtonRect( button ), commandReach ), TRUE );
 		commandCells.push_back( entry );
 	}
 
@@ -10851,7 +10951,7 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	for( Int button = 1; button <= QUEUE_BUTTONS && rightFound && rightShown; button++ )
 	{
 		HtmlValues entry;
-		putPageRect( entry, "cell", numberedWindowRect( "ButtonQueue", button ), TRUE );
+		putPageRect( entry, "cell", reachedBy( numberedWindowRect( "ButtonQueue", button ), queueReach ), TRUE );
 		portraitCells.push_back( entry );
 	}
 
@@ -10868,7 +10968,9 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	cell.x = ( button.hi.x - button.lo.x ) * SKILL_CELL_PERCENT / 100;
 	cell.y = ( button.hi.y - button.lo.y ) * SKILL_CELL_PERCENT / 100;
 	const Int cellGap = REAL_TO_INT( SKILL_CELL_GAP * scale );
-	const Int powersShown = TheControlBar->placeSpecialPowerShortcutGrid( rightFound && rightShown ? &corner : NULL, cell, cellGap );
+	const Int powersReach = min( cellFrame, cellGap / 2 );
+	const Int powersShown = TheControlBar->placeSpecialPowerShortcutGrid( rightFound && rightShown ? &corner : NULL, cell, cellGap,
+																																				cellFrame - powersReach );
 
 	std::vector< HtmlValues > &places = lists[ "skillcells" ];
 	IRegion2D powers;
@@ -10886,7 +10988,7 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 		powers.lo.x = min( powers.lo.x, place.lo.x );
 		powers.lo.y = min( powers.lo.y, place.lo.y );
 		HtmlValues entry;
-		putPageRect( entry, "cell", place, TRUE );
+		putPageRect( entry, "cell", reachedBy( place, powersReach ), TRUE );
 		places.push_back( entry );
 	}
 	IRegion2D tray = powers;
@@ -10895,6 +10997,16 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	tray.hi.x = TheDisplay->getWidth();
 	tray.hi.y += trayBorder;
 	putFrame( values, "skilltray", powers, tray, powersShown > 0 );
+
+	// each grid's frames again in front of its buttons, drawn by a window after them
+	m_cellFrontCells[ CELL_GRID_COMMAND ] = commandCells;
+	m_cellFrontCells[ CELL_GRID_QUEUE ] = portraitCells;
+	m_cellFrontCells[ CELL_GRID_POWERS ] = places;
+	putFrontWindow( controlBarWindow( "CommandWindow" ), drawCommandGridFront );
+	putFrontWindow( controlBarWindow( "ProductionQueueWindow" ), drawQueueGridFront );
+	GameWindow *powersParent = TheControlBar->getSpecialPowerShortcutParent();
+	if( powersParent )
+		putFrontWindow( powersParent, drawPowersGridFront );
 
 	// the promotion button is the stars' tab: its window moves under the tab and takes the click that
 	// opens the promotion screen
@@ -11009,7 +11121,6 @@ enum
 	PROMOTION_MARGIN		= 6,	///< the plate round the wells, and between one well and the next
 	PROMOTION_INSET			= 4,	///< a well round its heading and cells
 	PROMOTION_CELL_GAP	= 2,
-	PROMOTION_FRAME			= 3,	///< the front's frame and bevel over a cell's edge; the promotion fills the hole inside
 	PROMOTION_TITLE			= 14,	///< the rank's name's line, the points beside it
 	PROMOTION_BAR				= 7,	///< the experience bar under it
 	PROMOTION_BAR_GAP		= 3,
@@ -11065,7 +11176,7 @@ static void layoutPromotionScreen( GameWindow *parent, PromotionLayout &layout )
 	const Int margin = Page::px( PROMOTION_MARGIN, scale );
 	const Int inset = Page::px( PROMOTION_INSET, scale );
 	const Int heading = Page::px( PROMOTION_HEADING, scale );
-	const Int frame = Page::px( PROMOTION_FRAME, scale );
+	const Int frame = Page::px( CELL_FRAME, scale );
 
 	const Int gridWidth = PROMOTION_COLUMNS * cellWidth + ( PROMOTION_COLUMNS - 1 ) * gap;
 	const Int width = gridWidth + 2 * ( margin + inset );
