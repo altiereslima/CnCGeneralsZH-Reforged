@@ -17,7 +17,8 @@
     {{promotion}}          "ready" while the general has a promotion to spend
     {{watching}}           "watching" while the local player is an observer or out of the match
     {{power.fill}}         the power bar: production as a percent of the bar, on the bar's own
-    {{power.needle}}       logarithmic scale, consumption as the same, and {{power.state}} "green",
+    {{power.needle}}       logarithmic scale, consumption as the same ({{power.consumes}} "hidden"
+                           while it is nought), and {{power.state}} "green",
                            "yellow" or "red"; the watched player's while watching
     data-each="powercells" the same production as 40 cells, each {{lit}} "lit" up to it, standing at
                            {{x}} pixels inside the frame's lip and {{w}} wide
@@ -308,7 +309,7 @@
   </div>
   <div class="piece groove solid stack {{powerframe.shown}}" style="left: {{powerframe.x}}px; top: {{powerframe.y}}px; width: {{powerframe.w}}px; height: {{powerframe.h}}px">
     <div class="cells {{power.state}}" style="height: {{powerframe.inner}}px"><div class="cell {{lit}}" data-each="powercells" style="left: {{x}}px; width: {{w}}px; height: {{powerframe.inner}}px"><div class="seg" style="height: {{powerframe.inner}}px"></div></div></div>
-    <div class="needle" style="left: {{power.needle}}%"></div>
+    <div class="needle {{power.consumes}}" style="left: {{power.needle}}%"></div>
     <div class="lip"></div>
   </div>
   <div class="piece bezel solid stack moneyblock {{moneyblock.shown}}" style="left: {{moneyblock.x}}px; top: {{moneyblock.y}}px; width: {{moneyblock.w}}px; height: {{moneyblock.h}}px">

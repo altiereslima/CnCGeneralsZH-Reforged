@@ -10216,6 +10216,8 @@ static void putPowerBar( HtmlValues &values, std::vector< HtmlValues > &cells )
 	const Real needle = consumption == 1 ? ONE_UNIT_NEEDLE_TENTHS / 10.0f : (Real)consumption;
 	values[ "power.fill" ] = std::to_string( REAL_TO_INT( fill * PERCENT ) );
 	values[ "power.needle" ] = std::to_string( REAL_TO_INT( powerBarShare( needle ) * PERCENT ) );
+	// with nothing drawing power the needle stood at nought, a white bar across the bar's head
+	values[ "power.consumes" ] = consumption > 0 ? "" : "hidden";
 
 	// each cell gets its place and width in the page's pixels, cut from the frame's inside so they
 	// add up to it exactly: floated at a percentage each the page rounded them up and the fortieth
