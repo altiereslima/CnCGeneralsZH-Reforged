@@ -553,6 +553,42 @@ void UpdateProRulesCheckBox(GameWindow *checkBox, GameInfo *myGame, Bool hostMay
 }
 
 // -----------------------------------------------------------------------------
+// Income sharing.  The entries are the IncomeSharing values in order, so an entry's position is
+// its value.
+static const char * theIncomeSharingCaptions[ INCOME_SHARING_COUNT ] =
+{
+  "GUI:IncomeSharingOff", "GUI:IncomeSharingTech", "GUI:IncomeSharingAll"
+};
+
+void PopulateIncomeSharingComboBox(GameWindow *comboBox, GameInfo *myGame, Bool hostMayEdit)
+{
+  GadgetComboBoxReset(comboBox);
+
+  Color color = comboBox->winGetEnabled() ? comboBox->winGetEnabledTextColor() : comboBox->winGetDisabledTextColor();
+  for ( Int i = 0; i < INCOME_SHARING_COUNT; i++ )
+    GadgetComboBoxAddEntry(comboBox, TheGameText->fetch( theIncomeSharingCaptions[i] ), color);
+
+  UpdateIncomeSharingComboBox(comboBox, myGame, hostMayEdit);
+}
+
+void UpdateIncomeSharingComboBox(GameWindow *comboBox, GameInfo *myGame, Bool hostMayEdit)
+{
+  comboBox->winEnable( hostMayEdit );
+
+  Int selected = -1;
+  GadgetComboBoxGetSelectedPos( comboBox, &selected );
+  if ( selected != myGame->getIncomeSharing() )
+    GadgetComboBoxSetSelectedPos( comboBox, myGame->getIncomeSharing(), TRUE );
+}
+
+Int IncomeSharingFromComboBox(GameWindow *comboBox)
+{
+  Int selIndex = -1;
+  GadgetComboBoxGetSelectedPos(comboBox, &selIndex);
+  return selIndex < 0 ? INCOME_SHARING_OFF : selIndex;
+}
+
+// -----------------------------------------------------------------------------
 // The lobby tab strip.
 static GameWindow *theLobbySettingsPage = NULL;
 static GameWindow *theLobbyOtherWindow = NULL;

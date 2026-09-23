@@ -87,6 +87,11 @@ void UpdateUnitLimitCheckBox(GameWindow *checkBox, GameInfo *myGame, Bool hostMa
 // The Pro Rules check box, the same thing for PR.
 void UpdateProRulesCheckBox(GameWindow *checkBox, GameInfo *myGame, Bool hostMayEdit);
 
+// The income sharing dropdown, one entry per IncomeSharing in GameInfo.h, travelling as IS.
+void PopulateIncomeSharingComboBox(GameWindow *comboBox, GameInfo *myGame, Bool hostMayEdit);
+void UpdateIncomeSharingComboBox(GameWindow *comboBox, GameInfo *myGame, Bool hostMayEdit);
+Int IncomeSharingFromComboBox(GameWindow *comboBox);
+
 // The lobby's own tab strip: one page of host settings, and the window that page covers - the chat
 // log in the two network lobbies, the map info list in the skirmish one.  All three screens share
 // these because only one lobby is ever up, and because a tab strip written three times drifts.

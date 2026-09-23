@@ -147,6 +147,12 @@ Int UnitLimitPerPlayer( Int nonObserverPlayers );
 // Whether a build that adds unitsItAdds (a transport and its payload) goes past the share.  0 is no cap.
 Bool UnitCapRefuses( Int unitsTowardCap, Int unitsItAdds, UnsignedInt unitCap );
 
+// The lobby's income sharing, an IncomeSharing from GameInfo.h: whether a payment is split in this
+// match, and each ally's cut when it is split evenly between sharers players.  The earner keeps what
+// the cuts leave, so rounding never loses a dollar.
+Bool IncomeSharingSplits( Int incomeSharing, Bool fromTechBuilding );
+UnsignedInt IncomeAllyShare( UnsignedInt amount, Int sharers );
+
 // Pro Rules, PRO-RULES.md: what every skirmish and network match refuses whoever plays it.
 // GameLogic::isProRules() says whether a match is under them; these say what they cover, by name
 // or by type, so a test can ask them without a match.
@@ -354,6 +360,8 @@ public:
 	/// return the Player's Money sub-object
 	inline Money *getMoney() { return &m_money; }
 	inline const Money *getMoney() const { return &m_money; }
+	/// steady income - a supply run, a hacker's payout, a derrick's - banked and scored, and split with the allies when the lobby's income sharing covers it
+	void earnIncome( UnsignedInt amount, Bool fromTechBuilding );
 
 	UnsignedInt getSupplyBoxValue();///< Many things can affect the alue of a crate, but at heart it is a GlobalData ratio.
 

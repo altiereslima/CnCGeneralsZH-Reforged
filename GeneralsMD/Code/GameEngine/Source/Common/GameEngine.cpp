@@ -519,6 +519,8 @@ static void startAutoSkirmish( Int numPlayersWanted )
 	}
 	TheSkirmishGameInfo->setLocalIP( TheSkirmishGameInfo->getSlot(0)->getIP() );
 	TheSkirmishGameInfo->setMap( mapName );
+	// set on the game rather than on GameLogic, so the replay's header carries it like a lobby's would
+	TheSkirmishGameInfo->setIncomeSharing( TheGlobalData->m_incomeSharing );
 
 	/* -seed makes the whole run repeatable: the seed drives the factions, the colours, the start
 		 positions and every logic random draw after them, so the same command line replays the same

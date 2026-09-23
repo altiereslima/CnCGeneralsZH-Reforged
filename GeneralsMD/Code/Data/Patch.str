@@ -1019,6 +1019,26 @@ TOOLTIP:UnitLimit
 "840 units shared out evenly between the players: two players get 420 each, eight get 105. Units standing and units waiting in a queue both count, buildings do not. Your own count and your share are in the top right corner during the match."
 END
 
+GUI:IncomeSharing
+"Share Income"
+END
+
+TOOLTIP:IncomeSharing
+"What allies split between them. Every payment is divided evenly between the player who earned it and each ally still in the match: an oil derrick paying 200 to one of two allies pays 100 to each. Oil Derricks shares captured derricks only. All Income adds supply runs, hackers and black markets."
+END
+
+GUI:IncomeSharingOff
+"No Sharing"
+END
+
+GUI:IncomeSharingTech
+"Oil Derricks"
+END
+
+GUI:IncomeSharingAll
+"All Income"
+END
+
 GUI:ProRules
 "Pro Rules"
 END

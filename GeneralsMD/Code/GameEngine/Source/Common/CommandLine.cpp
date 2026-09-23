@@ -2004,6 +2004,19 @@ Int parseUnitLimit(char *args[], int num)
 	return 1;
 }
 
+/* -incomesharing <n>: the lobby's income sharing for an -autoskirmish run, 1 for the oil derricks
+	 and 2 for every steady income.  It goes into the slot list the command line builds, so the replay
+	 carries it; a network game has no such slot list and reads the host's options string. */
+Int parseIncomeSharing(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1 && args[1])
+	{
+		TheWritableGlobalData->m_incomeSharing = atoi(args[1]);
+		return 2;
+	}
+	return 1;
+}
+
 /* -slowframe <ms> lowers the bar a logic frame has to clear before it logs its own breakdown.
 
 	 The default of 20ms is a stutter hunt: it catches the frames a player would notice. Chasing a
@@ -2416,6 +2429,7 @@ static CommandLineParam params[] =
 	{ "-teams", parseTeams },
 	{ "-peacetime", parsePeaceTime },
 	{ "-unitlimit", parseUnitLimit },
+	{ "-incomesharing", parseIncomeSharing },
 	{ "-showlanes", parseShowLanes },
 	{ "-uidrill", parseUIDrill },
 	{ "-resdrill", parseResDrill },

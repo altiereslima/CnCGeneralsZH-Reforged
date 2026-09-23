@@ -238,6 +238,7 @@ GameLogic::GameLogic( void )
 	m_peaceTimeEndFrame = 0;
 	m_unitCap = 0;
 	m_proRules = FALSE;
+	m_incomeSharing = INCOME_SHARING_OFF;
 	m_gamePaused = FALSE;
 	m_inputEnabledMemory = TRUE;
 	m_mouseVisibleMemory = TRUE;
@@ -1234,6 +1235,7 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
       m_peaceTimeEndFrame = TheGameInfo->getPeaceTime() * 60 * LOGICFRAMES_PER_SECOND;
       m_unitCap = TheGameInfo->getUnitLimit()
                   ? (UnsignedInt)UnitLimitPerPlayer( TheGameInfo->getNumNonObserverPlayers() ) : 0;
+      m_incomeSharing = TheGameInfo->getIncomeSharing();
     }
     else
     {
@@ -1241,6 +1243,7 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
       m_superweaponRestriction = 0;
       m_peaceTimeEndFrame = 0;
       m_unitCap = 0;
+      m_incomeSharing = INCOME_SHARING_OFF;
     }
 
     /* Pro Rules hold in the modes people play each other in, when the lobby's check box is ticked,
@@ -5550,13 +5553,14 @@ void GameLogic::prepareLogicForObjectLoad( void )
 	* 12: xfer m_peaceTimeEndFrame
 	* 13: xfer m_unitCap
 	* 14: xfer m_proRules
+	* 15: xfer m_incomeSharing
 	*/
 // ------------------------------------------------------------------------------------------------
 void GameLogic::xfer( Xfer *xfer )
 {
 
 	// version
-	const XferVersion currentVersion = 14;
+	const XferVersion currentVersion = 15;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -5929,6 +5933,15 @@ void GameLogic::xfer( Xfer *xfer )
   else if ( xfer->getXferMode() == XFER_LOAD )
   {
     m_proRules = FALSE;
+  }
+
+  if ( version >= 15 )
+  {
+    xfer->xferInt( &m_incomeSharing );
+  }
+  else if ( xfer->getXferMode() == XFER_LOAD )
+  {
+    m_incomeSharing = INCOME_SHARING_OFF;
   }
 }  // end xfer
 

@@ -267,6 +267,10 @@ public:
 			carried by a save, so a loaded game agrees with the one that was saved. */
 	Bool isProRules( void ) const { return m_proRules; }
 
+	/** The lobby's income sharing, an IncomeSharing from GameInfo.h.  Fixed when the match starts and
+			carried by a save; INCOME_SHARING_OFF in every campaign mission. */
+	Int getIncomeSharing( void ) const { return m_incomeSharing; }
+
 #ifdef DUMP_PERF_STATS
 	void getAIMetricsStatistics( UnsignedInt *numAI, UnsignedInt *numMoving, UnsignedInt *numAttacking, UnsignedInt *numWaitingForPath, UnsignedInt *overallFailedPathfinds );
 	void resetOverallFailedPathfinds() { m_overallFailedPathfinds = 0; }
@@ -385,6 +389,7 @@ private:
 	UnsignedInt m_peaceTimeEndFrame;	///< logic frame the lobby's peace time runs out on, 0 = no peace time
 	UnsignedInt m_unitCap;						///< units each player may have standing and queued, 0 = no limit
 	Bool m_proRules;									///< this match refuses what PRO-RULES.md bans
+	Int m_incomeSharing;							///< which earnings allies split, an IncomeSharing
 	LoadScreen *getLoadScreen( Bool loadSaveGame );
 	LoadScreen *m_loadScreen;
 	Bool m_gamePaused;

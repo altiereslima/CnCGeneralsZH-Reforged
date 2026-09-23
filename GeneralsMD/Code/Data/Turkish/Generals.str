@@ -15545,6 +15545,26 @@ TOOLTIP:UnitLimit
 "840 birlik oyuncular arasında eşit paylaştırılır: iki oyuncuya 420'şer, sekiz oyuncuya 105'er düşer. Sahadaki birlikler de kuyrukta bekleyenler de sayılır, binalar sayılmaz. Maç sırasında kendi sayınız ve payınız sağ üst köşede görünür."
 END
 
+GUI:IncomeSharing
+"Gelir Paylaşımı"
+END
+
+TOOLTIP:IncomeSharing
+"Müttefiklerin aralarında böldüğü gelir. Her ödeme, onu kazanan oyuncu ile maçta kalan her müttefiki arasında eşit bölünür: iki müttefikten birinin petrol kuyusu 200 ödüyorsa ikisine 100'er düşer. Petrol Kuyuları yalnızca ele geçirilen kuyuları paylaştırır. Tüm Gelir bunlara ikmal seferlerini, hacker'ları ve karaborsaları ekler."
+END
+
+GUI:IncomeSharingOff
+"Paylaşım Yok"
+END
+
+GUI:IncomeSharingTech
+"Petrol Kuyuları"
+END
+
+GUI:IncomeSharingAll
+"Tüm Gelir"
+END
+
 GUI:ProRules
 "Pro Kuralları"
 END

@@ -552,8 +552,7 @@ StateReturnType HackInternetState::update()
 						amount = 1;
 						break;
 				}
-				money->deposit( amount );
-				owner->getControllingPlayer()->getScoreKeeper()->addMoneyEarned( amount );
+				owner->getControllingPlayer()->earnIncome( amount, FALSE );
 
 				//Grant the unit some experience for a successful hack.
 				xp->addExperiencePoints( ai->getXpPerCashUpdate() );

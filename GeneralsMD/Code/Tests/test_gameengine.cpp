@@ -35,6 +35,7 @@
 #include "GameNetwork/Connection.h"
 #include "GameLogic/CRCSnapshotRing.h"
 #include "GameNetwork/GameDataMatch.h"
+#include "GameNetwork/GameInfo.h"
 #include "GameNetwork/FrameResendPolicy.h"
 #include "GameLogic/FPUControl.h"
 #include "GameNetwork/StallJudgement.h"
@@ -1037,6 +1038,22 @@ TEST(unit_limit_charges_a_transport_for_its_payload)
 
 	/* no limit in the lobby refuses nothing */
 	CHECK( !UnitCapRefuses( 5000, 9, 0 ) );
+}
+
+/* Player.cpp: which payments the lobby's income sharing splits, and what each ally's cut is. */
+TEST(income_sharing_splits_evenly_and_keeps_the_remainder)
+{
+	CHECK( !IncomeSharingSplits( INCOME_SHARING_OFF, TRUE ) );
+	CHECK(  IncomeSharingSplits( INCOME_SHARING_TECH, TRUE ) );
+	CHECK( !IncomeSharingSplits( INCOME_SHARING_TECH, FALSE ) );
+	CHECK(  IncomeSharingSplits( INCOME_SHARING_ALL, FALSE ) );
+
+	/* a derrick's 200 between two allies is 100 each */
+	CHECK_EQ( IncomeAllyShare( 200, 2 ), 100u );
+	/* 100 between three is 33 to each ally and 34 to the earner, who keeps the odd dollar */
+	CHECK_EQ( IncomeAllyShare( 100, 3 ), 33u );
+	/* nobody to share with keeps it all */
+	CHECK_EQ( IncomeAllyShare( 200, 1 ), 0u );
 }
 
 /* CommandXlat.cpp: a right drag spreads the selection along the line drawn, but only when there is
