@@ -38,15 +38,18 @@
     {{panelN.x}} .y .w .h  N 0 to 2, left, centre and right: where the plates would have gone,
                            moving with the bar when it slides or minimises; .w and .h are 0 and
                            {{panelN.shown}} is "hidden" when a minimised bar has stood it down
-    {{left.x}} .y .w .h    the left panel, grown round the radar and out to the screen's left and
-                           bottom edges
-    {{centre.x}} .y .w .h  the centre as three blocks stacked flush, with their steel round them
-    {{powerframe.x}} ...   already: the command grid's panel, the power bar's frame standing on it,
-    {{moneyblock.x}} ...   and the money's block on the frame; each .shown as above, and
-                           {{powerframe.inner}} the height inside the frame and its lip
-    {{right.x}} .y .w .h   the right panel, grown round the portrait and the experience bar and out
-                           to the screen's right and bottom edges.  The promotion and minimise
-                           buttons are moved to sit in its top right corner
+    {{left.x}} .y .w .h    the three panels, each a container and a border outside it: .x and .y
+    {{centre.x}} ...       the border's outer corner, .w and .h the container, exactly what it holds
+    {{right.x}} ...        (the radar; the command grid; the portrait and the experience bar), and
+                           .bt .br .bb .bl the border's four widths, out to the screen's edge on the
+                           sides against it
+    {{alerttab.x}} ...     tabs standing on a border's top edge, outside it: the under-attack light
+    {{workertab.x}} ...    on the radar panel's, the idle worker on the centre's, the skills button
+    {{skillsbutton.x}} ... on the right panel's at its right hand end, with the promotion button
+                           moved beside it
+    {{powerframe.x}} ...   the power bar's frame standing on the centre's border, and the money's
+    {{moneyblock.x}} ...   block on the frame, stacked flush; {{powerframe.inner}} the height inside
+                           the frame and its lip
     {{Name.x}} .y .w .h    the rectangle of the bar's window Name, {{Name.shown}} "shown" or "hidden"
                            and {{Name.state}} any of "disabled", "hilite", "pushed", for LeftHUD (the
                            radar), RightHUD (the portrait's box), CameoWindow (the portrait),
@@ -78,26 +81,21 @@
   .gla .panel { background-color: rgba(21, 18, 8, 0.94); border-top-color: #cbbf82; border-left-color: #a99d62; }
   .gla .rail { background: linear-gradient(to bottom, #8f8249, #48401e); }
 
-  /* every panel hugs what it holds, and what the old plates covered round them is battlefield and
-     takes clicks as one: the left the radar's bezel, the right the portrait with the two small
-     buttons over its top right corner, the centre the command grid under the money and power bar */
-  /* the side panels arrive from the game already grown round their windows and run out to the
-     screen's side and bottom edges, like the centre's blocks run down to its bottom */
+  /* a panel is a container exactly as big as what it holds - the radar, the command grid, the
+     portrait - and a border of steel outside it, out to the screen's edge on the sides against it.
+     The game hands each one its corner, its container's size and the four border widths.  The
+     container is dark behind what it holds; everything else stands outside the border */
+  .frame { border-style: solid; border-color: #6f7782; border-top-color: #aab4bf; border-left-color: #8a949f;
+           border-bottom-color: #3f4650; border-right-color: #4b535e; background-color: rgba(4, 8, 10, 0.94); }
+  .china .frame { border-color: #8e3b2b; border-top-color: #d98a72; border-left-color: #b8604b; border-bottom-color: #4c1b13; border-right-color: #6a2a1e;
+                  background-color: rgba(12, 4, 3, 0.94); }
+  .gla .frame { border-color: #867a45; border-top-color: #cbbf82; border-left-color: #a99d62; border-bottom-color: #48401e; border-right-color: #625a31;
+                background-color: rgba(10, 9, 4, 0.94); }
 
-  /* the centre is three blocks stacked flush like bricks, each narrower than the one under it: the
-     command grid's panel, the power bar's frame on it and the money's block on that.  The game works
-     out where each one ends so they touch, and the page draws them exactly there */
+  /* over the centre's border the power bar's frame and on it the money's block, stacked flush */
   .stack { box-sizing: border-box; margin: 0; }
   /* the money's block is only as tall as its figure, so it wears its lit top edge and no rail */
   .moneyblock .rail { display: none; }
-
-  /* a bezel: a window set into the panel, four pixels of steel round a black lip */
-  .bezel { margin: -5px 0 0 -5px; border: 4px solid #4b535e; border-top-color: #2a3036; border-left-color: #2a3036;
-           border-bottom-color: #8a949f; border-right-color: #6f7782; }
-  .bezel .lip { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border: 1px solid #000000; }
-  .china .bezel { border-color: #6a2a1e; border-top-color: #34120c; border-left-color: #34120c; border-bottom-color: #b8604b; border-right-color: #8e3b2b; }
-  .gla .bezel { border-color: #625a31; border-top-color: #302b15; border-left-color: #302b15; border-bottom-color: #a99d62; border-right-color: #867a45; }
-  .rivet { position: absolute; width: 3px; height: 3px; background-color: #aab4bf; border-bottom: 1px solid #0c1114; }
 
   .well { margin: -3px 0 0 -3px; border: 2px solid #0c1114; border-bottom-color: #4b535e; border-right-color: #4b535e;
           background-color: rgba(0, 0, 0, 0.35); }
@@ -146,13 +144,14 @@
   .menu .bar { position: absolute; left: 4px; right: 4px; height: 2px; background-color: #e8eef2; }
   .menu:hover .bar { background-color: #e8d27a; }
 
-  /* the idle worker: a tab over the centre panel's top left corner, outside it */
-  .worker { position: absolute; left: 0; top: -15px; width: 44px; height: 14px; border-bottom: 0; }
+  /* the idle worker: a tab standing on the centre's border at its left end */
+  .worker { border-bottom: 0; }
   .watching .worker { display: none; }
 
-  /* the under-attack light: a tab on the left panel's top left edge, red while the bar blinks it */
-  .alert { position: absolute; left: 4px; top: -15px; height: 13px; line-height: 13px; padding: 0 6px; font-size: 7px; font-weight: bold;
-           color: #5a2a24; background-color: rgba(20, 8, 6, 0.9); border: 1px solid #4a1a14; border-bottom: 0; }
+  /* the under-attack light: a tab standing on the radar panel's border at its left end, red while
+     the bar blinks it */
+  .alert { line-height: 14px; text-align: center; font-size: 7px; font-weight: bold;
+           color: #5a2a24; background-color: rgba(20, 8, 6, 0.9); }
   .alert.disabled { color: #ffffff; background: linear-gradient(to bottom, #ff6a50, #b0200f); border-color: #ffb0a0; }
 
   /* the skills button is lit while the powers are out, and dark once folded away; the grid's empty
@@ -184,39 +183,17 @@
 <body>
 <div class="{{side}} {{watching}}">
 
-  <div class="piece panel solid left {{left.shown}}" style="left: {{left.x}}px; top: {{left.y}}px; width: {{left.w}}px; height: {{left.h}}px">
-    <div class="rail"></div>
-    <div class="alert {{WinUAttack.state}}">{{text:GUI:BarUnderAttack}}</div>
-  </div>
+  <div class="piece frame solid {{left.shown}}" style="left: {{left.x}}px; top: {{left.y}}px; width: {{left.w}}px; height: {{left.h}}px; border-width: {{left.bt}}px {{left.br}}px {{left.bb}}px {{left.bl}}px"></div>
+  <div class="piece alert {{alerttab.shown}} {{WinUAttack.state}}" style="left: {{alerttab.x}}px; top: {{alerttab.y}}px; width: {{alerttab.w}}px; height: {{alerttab.h}}px">{{text:GUI:BarUnderAttack}}</div>
   <div class="piece panel solid stack moneyblock {{moneyblock.shown}}" style="left: {{moneyblock.x}}px; top: {{moneyblock.y}}px; width: {{moneyblock.w}}px; height: {{moneyblock.h}}px"><div class="rail"></div></div>
   <div class="piece groove solid stack {{powerframe.shown}}" style="left: {{powerframe.x}}px; top: {{powerframe.y}}px; width: {{powerframe.w}}px; height: {{powerframe.h}}px">
     <div class="cells {{power.state}}" style="height: {{powerframe.inner}}px"><div class="cell {{lit}}" data-each="powercells" style="left: {{x}}px; width: {{w}}px; height: {{powerframe.inner}}px"><div class="seg" style="height: {{powerframe.inner}}px"></div></div></div>
     <div class="needle" style="left: {{power.needle}}%"></div>
     <div class="lip"></div>
   </div>
-  <div class="piece panel solid stack centre {{centre.shown}}" style="left: {{centre.x}}px; top: {{centre.y}}px; width: {{centre.w}}px; height: {{centre.h}}px">
-    <div class="rail"></div>
-    <div class="worker button {{ButtonIdleWorker.state}}" data-click="press:ButtonIdleWorker"><div class="cap">{{text:GUI:BarIdleWorker}}</div></div>
-  </div>
-  <div class="piece panel solid right {{right.shown}}" style="left: {{right.x}}px; top: {{right.y}}px; width: {{right.w}}px; height: {{right.h}}px"><div class="rail"></div></div>
-
-  <div class="piece bezel {{LeftHUD.shown}}" style="left: {{LeftHUD.x}}px; top: {{LeftHUD.y}}px; width: {{LeftHUD.w}}px; height: {{LeftHUD.h}}px">
-    <div class="lip"></div>
-    <div class="rivet" style="left: -4px; top: -4px"></div>
-    <div class="rivet" style="right: -4px; top: -4px"></div>
-    <div class="rivet" style="left: -4px; bottom: -4px"></div>
-    <div class="rivet" style="right: -4px; bottom: -4px"></div>
-  </div>
-  <div class="piece bezel {{RightHUD.shown}}" style="left: {{RightHUD.x}}px; top: {{RightHUD.y}}px; width: {{RightHUD.w}}px; height: {{RightHUD.h}}px">
-    <div class="lip"></div>
-    <div class="rivet" style="left: -4px; top: -4px"></div>
-    <div class="rivet" style="right: -4px; top: -4px"></div>
-    <div class="rivet" style="left: -4px; bottom: -4px"></div>
-    <div class="rivet" style="right: -4px; bottom: -4px"></div>
-  </div>
-
-  <div class="piece well {{CommandWindow.shown}}" style="left: {{CommandWindow.x}}px; top: {{CommandWindow.y}}px; width: {{CommandWindow.w}}px; height: {{CommandWindow.h}}px"></div>
-  <div class="piece groove {{GeneralsExp.shown}}" style="left: {{GeneralsExp.x}}px; top: {{GeneralsExp.y}}px; width: {{GeneralsExp.w}}px; height: {{GeneralsExp.h}}px"><div class="lip"></div></div>
+  <div class="piece frame solid {{centre.shown}}" style="left: {{centre.x}}px; top: {{centre.y}}px; width: {{centre.w}}px; height: {{centre.h}}px; border-width: {{centre.bt}}px {{centre.br}}px {{centre.bb}}px {{centre.bl}}px"></div>
+  <div class="piece button worker {{workertab.shown}} {{ButtonIdleWorker.state}}" data-click="press:ButtonIdleWorker" style="left: {{workertab.x}}px; top: {{workertab.y}}px; width: {{workertab.w}}px; height: {{workertab.h}}px"><div class="cap">{{text:GUI:BarIdleWorker}}</div></div>
+  <div class="piece frame solid {{right.shown}}" style="left: {{right.x}}px; top: {{right.y}}px; width: {{right.w}}px; height: {{right.h}}px; border-width: {{right.bt}}px {{right.br}}px {{right.bb}}px {{right.bl}}px"></div>
 
   <div class="piece button {{ButtonPlaceBeacon.shown}} {{ButtonPlaceBeacon.state}}" style="left: {{ButtonPlaceBeacon.x}}px; top: {{ButtonPlaceBeacon.y}}px; width: {{ButtonPlaceBeacon.w}}px; height: {{ButtonPlaceBeacon.h}}px"><div class="cap">{{text:GUI:BarBeacon}}</div></div>
   <div class="piece button promotion {{promotion}} {{blink}} {{ButtonGeneral.shown}} {{ButtonGeneral.state}}" style="left: {{ButtonGeneral.x}}px; top: {{ButtonGeneral.y}}px; width: {{ButtonGeneral.w}}px; height: {{ButtonGeneral.h}}px"><div class="cap stars">&#9733;&#9733;&#9733;</div></div>

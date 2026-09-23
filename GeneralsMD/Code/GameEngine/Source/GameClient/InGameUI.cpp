@@ -10253,22 +10253,22 @@ static const char *const CONTROL_BAR_LEFT[] = { "LeftHUD", NULL };
 static const char *const CONTROL_BAR_RIGHT[] = { "RightHUD", "GeneralsExp", "ExpBarForeground", NULL };
 static const char *const CONTROL_BAR_CENTRE[] = { "CommandWindow", "ObserverPlayerListWindow", "ButtonPlaceBeacon", NULL };
 
-/** The promotion button, small, in the right panel's top right corner beside the page's own skills
-	* button, which takes the outermost place.  800x600 pixels. */
+/** The promotion button, small, on the right panel's border beside the page's own skills button,
+	* which takes the outermost place.  800x600 pixels. */
 enum
 {
 	CORNER_BUTTON_WIDTH		= 32,
-	CORNER_BUTTON_HEIGHT	= 14,
 	CORNER_BUTTON_GAP			= 2,
-	CORNER_BUTTON_RISE		= 16,		///< how far above the portrait's box the buttons' top edge sits
 	SKILL_GRID_WIDTH			= 150,	///< the general's powers, three to a row, against the screen's right edge
-	SKILL_GRID_GAP				= 30,		///< between them and the right panel's top
+	SKILL_GRID_GAP				= 30,		///< between them and the skills button
 	SIGNAL_BUTTON_SIZE		= 24,		///< each smoke signal button's height, a row of the column
 	SIGNAL_BUTTON_WIDTH		= 40,		///< and its width, room for its word in either language
 	SIGNAL_BUTTONS				= 3,		///< attack, defend, look
 	SKILL_GRID_ROWS				= 3,		///< the empty places drawn behind the powers
 	SKILL_GRID_COLUMNS		= 3,
-	SKILLS_BUTTON_WIDTH		= 58		///< wide enough for its name in either language
+	SKILLS_BUTTON_WIDTH		= 58,		///< wide enough for its name in either language
+	ALERT_TAB_WIDTH				= 84,		///< the under-attack light, on the radar panel's border
+	WORKER_TAB_WIDTH			= 44		///< the idle worker button, on the command grid panel's border
 };
 static const char *const SKILLS_FOLDED = "skills";	///< the flip the skills button toggles; flipped is folded away
 static const char *const CORNER_BUTTONS[] = { "ButtonGeneral" };
@@ -10351,14 +10351,59 @@ static void putPageRect( HtmlValues &values, const std::string &name, const IReg
 /** How much steel each block of the centre stack shows round its window, 800x600 pixels. */
 enum
 {
-	STACK_GRID_SIDE			= 6,	///< either side of the command grid, and under it
-	STACK_GRID_TOP			= 10,	///< over the grid when no power bar sits on it
+	PANEL_BORDER				= 8,	///< a panel's border outside its container, on the sides facing the battlefield
 	STACK_FRAME					= 3,	///< the power bar's frame and lip
 	STACK_MONEY_SIDE		= 8,
 	STACK_MONEY_TOP			= 1,	///< over the money's line of text
-	SIDE_PANEL_SIDE			= 8,	///< steel between a side panel's window and its inner edge
-	SIDE_PANEL_TOP			= 10	///< and over it; the outer edges are the screen's
+	PANEL_TAB_HEIGHT		= 14	///< a tab or button standing on a border's top edge
 };
+
+/** The border round a container: `border` screen pixels on the sides facing the battlefield, out to
+	* the screen's edge on the sides against it - the bottom always, the left or the right as asked. */
+static IRegion2D framed( const IRegion2D &content, Int border, Bool againstLeft, Bool againstRight )
+{
+	IRegion2D box;
+	box.lo.x = againstLeft ? 0 : content.lo.x - border;
+	box.lo.y = content.lo.y - border;
+	box.hi.x = againstRight ? TheDisplay->getWidth() : content.hi.x + border;
+	box.hi.y = TheDisplay->getHeight();
+	return box;
+}
+
+/** A panel for the page: `name`.x and .y the border's outer corner, .w and .h the container, and
+	* .bt .br .bb .bl the border's four widths, all in the page's pixels, every edge rounded once so
+	* the container fits what it holds exactly; `name`.shown as putPageRect writes it. */
+static void putFrame( HtmlValues &values, const std::string &name, const IRegion2D &content, const IRegion2D &box, Bool shown )
+{
+	const Real scale = ControlBarUniformScale();
+	struct Edge { static Int page( Int screen, Real scale ) { return REAL_TO_INT_FLOOR( screen / scale + 0.5f ); } };
+	const Int left = Edge::page( box.lo.x, scale ), top = Edge::page( box.lo.y, scale );
+	const Int innerLeft = Edge::page( content.lo.x, scale ), innerTop = Edge::page( content.lo.y, scale );
+	const Int innerRight = Edge::page( content.hi.x, scale ), innerBottom = Edge::page( content.hi.y, scale );
+	const Int right = Edge::page( box.hi.x, scale ), bottom = Edge::page( box.hi.y, scale );
+
+	values[ name + ".x" ] = std::to_string( left );
+	values[ name + ".y" ] = std::to_string( top );
+	values[ name + ".w" ] = std::to_string( shown ? max( 0, innerRight - innerLeft ) : 0 );
+	values[ name + ".h" ] = std::to_string( shown ? max( 0, innerBottom - innerTop ) : 0 );
+	values[ name + ".bl" ] = std::to_string( max( 0, innerLeft - left ) );
+	values[ name + ".bt" ] = std::to_string( max( 0, innerTop - top ) );
+	values[ name + ".br" ] = std::to_string( max( 0, right - innerRight ) );
+	values[ name + ".bb" ] = std::to_string( max( 0, bottom - innerBottom ) );
+	values[ name + ".shown" ] = shown ? "shown" : "hidden";
+}
+
+/** A tab of `width` 800x600 pixels standing on `box`'s top edge, from its left or its right. */
+static IRegion2D tabOn( const IRegion2D &box, Int width, Bool fromRight )
+{
+	const Real scale = ControlBarUniformScale();
+	IRegion2D tab;
+	tab.hi.y = box.lo.y;
+	tab.lo.y = tab.hi.y - REAL_TO_INT( PANEL_TAB_HEIGHT * scale );
+	tab.lo.x = fromRight ? box.hi.x - REAL_TO_INT( width * scale ) : box.lo.x;
+	tab.hi.x = fromRight ? box.hi.x : box.lo.x + REAL_TO_INT( width * scale );
+	return tab;
+}
 
 //-------------------------------------------------------------------------------------------------
 /** The centre of the bar as three blocks stacked flush, each narrower than the one under it: the
@@ -10369,7 +10414,7 @@ enum
 	* line of text and set down on the block under it, so its block is no taller than the figure.
 	* Written as centre, powerframe and moneyblock. */
 //-------------------------------------------------------------------------------------------------
-static void stackCentre( HtmlValues &values, Bool shown )
+static void stackCentre( HtmlValues &values, Bool shown, IRegion2D &centre )
 {
 	IRegion2D grid, power, money;
 	Bool gridFound = controlBarUnion( CONTROL_BAR_CENTRE, grid );
@@ -10395,18 +10440,19 @@ static void stackCentre( HtmlValues &values, Bool shown )
 	}
 	const Bool powerFound = controlBarWindowRect( controlBarWindow( "PowerWindow" ), power );
 
-	// the grid's panel stands on the screen's bottom edge like the side panels
-	IRegion2D centre = grownBy( grid, STACK_GRID_SIDE, STACK_GRID_TOP, STACK_GRID_SIDE, 0 );
-	centre.hi.y = TheDisplay->getHeight();
+	// the grid's container is the grid, its border outside it running down to the screen's bottom.
+	// The power bar is the page's own now, so its frame is free to stand on that border wherever the
+	// power window sits, and the money is set down on the frame
+	centre = framed( grid, REAL_TO_INT( PANEL_BORDER * ControlBarUniformScale() ), FALSE, FALSE );
 	IRegion2D frame = grownBy( power, STACK_FRAME, STACK_FRAME, STACK_FRAME, STACK_FRAME );
+	const Int frameHeight = frame.hi.y - frame.lo.y;
+	frame.hi.y = centre.lo.y;
+	frame.lo.y = frame.hi.y - frameHeight;
 
-	// each block reaches down to the top of the one it stands on
+	// each block stands on the top of the one under it
 	Int floor = centre.lo.y;
 	if( powerFound )
-	{
-		centre.lo.y = frame.hi.y;
 		floor = frame.lo.y;
-	}
 
 	GameWindow *moneyWindow = controlBarWindow( "MoneyDisplay" );
 	Bool moneyFound = controlBarWindowRect( moneyWindow, money );
@@ -10426,7 +10472,7 @@ static void stackCentre( HtmlValues &values, Bool shown )
 	IRegion2D block = grownBy( money, STACK_MONEY_SIDE, STACK_MONEY_TOP, STACK_MONEY_SIDE, 0 );
 	block.hi.y = floor;
 
-	putPageRect( values, "centre", centre, gridFound && shown );
+	putFrame( values, "centre", grid, centre, gridFound && shown );
 	putPageRect( values, "powerframe", frame, powerFound && shown );
 
 	// the page lays boxes out content-box whatever box-sizing says, so the frame's border goes on top
@@ -10502,52 +10548,53 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	for( Int panel = 0; panel < panelCount; panel++ )
 		putPageRect( values, "panel" + std::to_string( panel ), panels[ panel ], shown[ panel ] );
 
-	// every panel hugs what it holds, so the rest of the old plates is battlefield again
-	IRegion2D box;
-	// the side panels stand on the screen's bottom edge and against its side edge, the steel round
-	// what they hold running out to the edge of the screen
-	const Bool leftFound = controlBarUnion( CONTROL_BAR_LEFT, box );
-	IRegion2D side = grownBy( box, 0, SIDE_PANEL_TOP, SIDE_PANEL_SIDE, 0 );
-	side.lo.x = 0;
-	side.hi.y = TheDisplay->getHeight();
-	putPageRect( values, "left", side, leftFound && panelCount > 0 && shown[ 0 ] );
+	// Every panel is a container exactly as big as what it holds, and a border outside it: steel on
+	// the sides facing the battlefield, out to the screen's edge on the sides against it.  Everything
+	// else - the tabs, the buttons, the signals - stands outside the border.
+	const Real scale = ControlBarUniformScale();
+	const Int border = REAL_TO_INT( PANEL_BORDER * scale );
+	const Bool leftShown = panelCount > 0 && shown[ 0 ];
+	const Bool rightShown = panelCount > 2 && shown[ 2 ];
 
-	// the three smoke signal buttons, a column standing on the screen's bottom edge against the
-	// left panel's right side
+	IRegion2D content;
+	const Bool leftFound = controlBarUnion( CONTROL_BAR_LEFT, content );
+	const IRegion2D leftBox = framed( content, border, TRUE, FALSE );
+	putFrame( values, "left", content, leftBox, leftFound && leftShown );
+	putPageRect( values, "alerttab", tabOn( leftBox, ALERT_TAB_WIDTH, FALSE ), leftFound && leftShown );
+
+	// the three smoke signal buttons, a column standing on the screen's bottom edge against the left
+	// panel's border
 	IRegion2D signalColumn;
-	signalColumn.lo.x = side.hi.x;
-	signalColumn.hi.x = side.hi.x + REAL_TO_INT( SIGNAL_BUTTON_WIDTH * ControlBarUniformScale() );
+	signalColumn.lo.x = leftBox.hi.x;
+	signalColumn.hi.x = leftBox.hi.x + REAL_TO_INT( SIGNAL_BUTTON_WIDTH * scale );
 	signalColumn.hi.y = TheDisplay->getHeight();
-	signalColumn.lo.y = signalColumn.hi.y - REAL_TO_INT( SIGNAL_BUTTON_SIZE * SIGNAL_BUTTONS * ControlBarUniformScale() );
-	putPageRect( values, "signals", signalColumn, leftFound && panelCount > 0 && shown[ 0 ] );
-	stackCentre( values, panelCount > 1 && shown[ 1 ] );
+	signalColumn.lo.y = signalColumn.hi.y - REAL_TO_INT( SIGNAL_BUTTON_SIZE * SIGNAL_BUTTONS * scale );
+	putPageRect( values, "signals", signalColumn, leftFound && leftShown );
+
+	IRegion2D centreBox;
+	stackCentre( values, panelCount > 1 && shown[ 1 ], centreBox );
+	putPageRect( values, "workertab", tabOn( centreBox, WORKER_TAB_WIDTH, FALSE ), panelCount > 1 && shown[ 1 ] );
 	HtmlLists lists;
 	putPowerBar( values, lists[ "powercells" ] );	// after the stack, whose frame it divides into cells
-	const Bool rightFound = controlBarUnion( CONTROL_BAR_RIGHT, box );
-	side = grownBy( box, SIDE_PANEL_SIDE, SIDE_PANEL_TOP + CORNER_BUTTON_RISE, 0, 0 );
-	side.hi.x = TheDisplay->getWidth();
-	side.hi.y = TheDisplay->getHeight();
-	putPageRect( values, "right", side, rightFound && panelCount > 2 && shown[ 2 ] );
 
-	// the page's skills button takes the right panel's top right corner and the promotion button
-	// stands beside it; a bar with no portrait showing leaves the promotion button where it was
-	const Real scale = ControlBarUniformScale();
+	const Bool rightFound = controlBarUnion( CONTROL_BAR_RIGHT, content );
+	const IRegion2D rightBox = framed( content, border, FALSE, TRUE );
+	putFrame( values, "right", content, rightBox, rightFound && rightShown );
+
+	// the page's skills button stands on the right panel's border at its right hand end, and the
+	// promotion button beside it; a bar with no portrait showing leaves the promotion button where it was
 	const Int cornerWidth = REAL_TO_INT( CORNER_BUTTON_WIDTH * scale );
-	const Int cornerHeight = REAL_TO_INT( CORNER_BUTTON_HEIGHT * scale );
 	const Int cornerGap = REAL_TO_INT( CORNER_BUTTON_GAP * scale );
-	IRegion2D skills;
-	skills.hi.x = box.hi.x;
-	skills.lo.x = skills.hi.x - REAL_TO_INT( SKILLS_BUTTON_WIDTH * scale );
-	skills.lo.y = box.lo.y - REAL_TO_INT( CORNER_BUTTON_RISE * scale );
-	skills.hi.y = skills.lo.y + cornerHeight;
-	putPageRect( values, "skillsbutton", skills, rightFound && panelCount > 2 && shown[ 2 ] );
+	const IRegion2D skills = tabOn( rightBox, SKILLS_BUTTON_WIDTH, TRUE );
+	const Int cornerHeight = skills.hi.y - skills.lo.y;
+	putPageRect( values, "skillsbutton", skills, rightFound && rightShown );
 
 	// the general's powers ready to fire, three to a row over the right panel, while the skills
 	// button has not folded them away
 	IRegion2D powers;
 	powers.hi.x = TheDisplay->getWidth();
 	powers.lo.x = powers.hi.x - REAL_TO_INT( SKILL_GRID_WIDTH * scale );
-	powers.hi.y = side.lo.y - REAL_TO_INT( SKILL_GRID_GAP * scale );
+	powers.hi.y = skills.lo.y - REAL_TO_INT( SKILL_GRID_GAP * scale );
 	powers.lo.y = powers.hi.y;
 	const Bool powersOpen = m_controlBarFlipped.find( SKILLS_FOLDED ) == m_controlBarFlipped.end();
 	ICoord2D cell;
