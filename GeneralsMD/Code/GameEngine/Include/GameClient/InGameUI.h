@@ -400,7 +400,8 @@ public:  // ********************************************************************
 	virtual void message( UnicodeString format, ... );				  ///< display a message to the user
 	virtual void message( AsciiString stringManagerLabel, ... );///< display a message to the user
 	virtual void toggleMessages( void ) { m_messagesOn = 1 - m_messagesOn; }	///< toggle messages on/off
-	void toggleScoreboard( void ) { m_scoreboardOpen = !m_scoreboardOpen; }	///< the Tab scoreboard, on or off
+	void openScoreboard( void ) { m_scoreboardOpen = TRUE; }		///< the Tab scoreboard, up while Tab is held
+	void closeScoreboard( void ) { m_scoreboardOpen = FALSE; }
 	Bool pickSpectatorStat( Int commandSlot );	///< a command bar key while watching: TRUE when it picked a stat
 	/** The command bar's page, Window/Html/ControlBar.html, under the bar's windows: its panels are
 		* where the plates would have gone, in screen pixels.  FALSE when there is no page to draw. */

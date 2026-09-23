@@ -60,6 +60,7 @@
 #include "GameClient/GameText.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/GUICallbacks.h"
+#include "GameClient/KeyDefs.h"
 #include "GameClient/Shell.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/SelectionInfo.h"
@@ -2565,6 +2566,12 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 {
 	GameMessage::Type t = msg->getType();
 	GameMessageDisposition disp = KEEP_MESSAGE;
+
+	// letting go of Tab puts the scoreboard away, input or no input; the press is the command map's
+	// DIPLOMACY
+	if (t == GameMessage::MSG_RAW_KEY_UP && msg->getArgument( 0 )->integer == KEY_TAB)
+		TheInGameUI->closeScoreboard();
+
 	// We want to always be able to get to the options menu even during no input times and a clear game data message should always go through
 	if (t != GameMessage::MSG_META_OPTIONS && t != GameMessage::MSG_CLEAR_GAME_DATA &&
 			!TheInGameUI->getInputEnabled() && !isSystemMessage(msg)) 
@@ -3343,11 +3350,11 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_DIPLOMACY:
-			// Tab is the scoreboard in any game that has seats; the diplomacy screen, with its mute
-			// buttons, stays on the command bar's own button
+			// Tab is the scoreboard in any game that has seats, up while the key is held; the diplomacy
+			// screen, with its mute buttons, stays on the command bar's own button
 			if (TheGameLogic->isInGame() && !TheGameLogic->isInShellGame() && TheGameInfo)
 			{
-				TheInGameUI->toggleScoreboard();
+				TheInGameUI->openScoreboard();
 			}
 			else if (TheGameLogic->isInGame() && !TheGameLogic->isInShellGame())
 			{

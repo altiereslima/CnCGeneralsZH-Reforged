@@ -2242,40 +2242,90 @@ static std::vector< SpectatorStats > gatherSeats( Int &teams )
 	return seats;
 }
 
+static UnicodeString scoreboardTeamLabel( const GameSlot *slot );
+
+/** The lobby slot `player` sits in, NULL outside a game that has slots. */
+static const GameSlot *playerSlot( const Player *player )
+{
+	for( Int slotNum = 0; TheGameInfo && slotNum < MAX_SLOTS; slotNum++ )
+	{
+		AsciiString playerName;
+		playerName.format( "player%d", slotNum );
+		if( ThePlayerList->findPlayerWithNameKey( NAMEKEY( playerName ) ) == player )
+			return TheGameInfo->getConstSlot( slotNum );
+	}
+	return NULL;
+}
+
 //-------------------------------------------------------------------------------------------------
-/** The command bar page's "seats" list, the strip across the top of the screen while playing: every
-	* player grouped by team, each of kind "seat" with their general and colour, the match clock
-	* between exactly two teams and a gap between any others.  Under each, {{weapon}} says where their
-	* superweapons stand: "ready" once one can fire, "charging" while none can yet, and "none" when
-	* they have none. */
+/** The command bar page's "seats" list, the strip across the top of the screen while playing, one
+	* entry a team: kind "team" with its {{label}}, the lobby's team name, and its players in places
+	* s0 to s7, each {{sN.image}} their general, {{sN.color}}, and {{sN.weapon}} where their
+	* superweapons stand, "ready" once one can fire, "charging" while none can yet and "none" when they
+	* have none; an unused place has {{sN.state}} "none".  A player with no ally is an entry of kind
+	* "solo", with no frame or name, and a free for all past two players is one entry of kind "ffa",
+	* everybody side by side.  The match clock, kind "clock", stands between exactly two teams and after
+	* the rest otherwise, a "gap" between any other two. */
 //-------------------------------------------------------------------------------------------------
 static void fillPlayerSeats( const std::vector< SpectatorStats > &seats, Int teams,
 														 const std::vector< SpectatorSuperweapon > &weapons, std::vector< HtmlValues > &entries )
 {
 	entries.clear();
-	for( size_t index = 0; index < seats.size(); index++ )
+	const Bool freeForAll = teams == (Int)seats.size() && teams > TWO_TEAMS;
+
+	for( size_t first = 0; first < seats.size(); )
 	{
-		if( index > 0 && seats[ index - 1 ].team != seats[ index ].team )
+		HtmlValues group;
+		// the lobby's team name, or the team's place along the strip when the lobby set none
+		const GameSlot *slot = playerSlot( seats[ first ].player );
+		UnicodeString label;
+		if( slot && slot->getTeamNumber() >= 0 )
+			label.format( L"%s %s", TheGameText->fetch( "GUI:ScoreboardTeam" ).str(), scoreboardTeamLabel( slot ).str() );
+		else
+			label.format( L"%s %d", TheGameText->fetch( "GUI:ScoreboardTeam" ).str(), seats[ first ].team + 1 );
+		group[ "label" ] = WideCharStringToMultiByte( label.str() );
+
+		size_t end = first;
+		for( ; end < seats.size() && ( freeForAll || seats[ end ].team == seats[ first ].team ); end++ )
+		{
+			Bool owned = FALSE;
+			Bool ready = FALSE;
+			for( size_t weapon = 0; weapon < weapons.size(); weapon++ )
+			{
+				if( weapons[ weapon ].playerIndex != seats[ end ].player->getPlayerIndex() )
+					continue;
+				owned = TRUE;
+				ready = ready || weapons[ weapon ].ready;
+			}
+
+			const HtmlValues head = spectatorHead( seats[ end ].player );
+			const std::string place = "s" + std::to_string( end - first );
+			group[ place + ".image" ] = head.at( "image" );
+			group[ place + ".color" ] = head.at( "color" );
+			group[ place + ".weapon" ] = ready ? "ready" : owned ? "charging" : "none";
+		}
+		group[ "kind" ] = freeForAll ? "ffa" : end - first > 1 ? "team" : "solo";
+		for( size_t place = end - first; place < MAX_SLOTS; place++ )
+			group[ "s" + std::to_string( place ) + ".state" ] = "none";
+
+		if( !entries.empty() )
 		{
 			HtmlValues between;
 			between[ "kind" ] = teams == TWO_TEAMS ? "clock" : "gap";
 			entries.push_back( between );
 		}
-
-		Bool owned = FALSE;
-		Bool ready = FALSE;
-		for( size_t weapon = 0; weapon < weapons.size(); weapon++ )
-		{
-			if( weapons[ weapon ].playerIndex != seats[ index ].player->getPlayerIndex() )
-				continue;
-			owned = TRUE;
-			ready = ready || weapons[ weapon ].ready;
-		}
-
-		HtmlValues entry = spectatorHead( seats[ index ].player );
-		entry[ "kind" ] = "seat";
-		entry[ "weapon" ] = ready ? "ready" : owned ? "charging" : "none";
-		entries.push_back( entry );
+		entries.push_back( group );
+		first = end;
+	}
+	if( teams != TWO_TEAMS )
+	{
+		HtmlValues gap;
+		gap[ "kind" ] = "gap";
+		if( !entries.empty() )
+			entries.push_back( gap );
+		HtmlValues clock;
+		clock[ "kind" ] = "clock";
+		entries.push_back( clock );
 	}
 }
 
@@ -10180,6 +10230,40 @@ static HtmlValues scoreboardSeat( Player *player, const GameSlot *slot, Bool ful
 }
 
 //-------------------------------------------------------------------------------------------------
+/** One scoreboard seat's superweapons, soonest first, as {{wN.image}} {{wN.time}} and {{wN.state}}
+	* for N 0 to SEAT_SUPERWEAPONS - 1: "ready" once it can fire, "none" for an unused place.  {{armed}}
+	* is "armed" when the player has any. */
+//-------------------------------------------------------------------------------------------------
+static void putSeatSuperweapons( HtmlValues &row, Int playerIndex, const std::vector< SpectatorSuperweapon > &weapons )
+{
+	enum { SEAT_SUPERWEAPONS = 6 };
+
+	std::vector< SpectatorSuperweapon > owned;
+	for( size_t weapon = 0; weapon < weapons.size(); weapon++ )
+		if( weapons[ weapon ].playerIndex == playerIndex )
+			owned.push_back( weapons[ weapon ] );
+	std::stable_sort( owned.begin(), owned.end(),
+										[]( const SpectatorSuperweapon &a, const SpectatorSuperweapon &b ) { return a.seconds < b.seconds; } );
+
+	row[ "armed" ] = owned.empty() ? "" : "armed";
+	for( Int place = 0; place < SEAT_SUPERWEAPONS; place++ )
+	{
+		const std::string name = "w" + std::to_string( place );
+		if( place >= (Int)owned.size() )
+		{
+			row[ name + ".state" ] = "none";
+			continue;
+		}
+
+		UnicodeString time;
+		formatStripSeconds( &time, owned[ place ].seconds );
+		row[ name + ".image" ] = owned[ place ].cameo ? owned[ place ].cameo->getName().str() : "";
+		row[ name + ".time" ] = WideCharStringToMultiByte( time.str() );
+		row[ name + ".state" ] = owned[ place ].ready ? "ready" : "";
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
 /** The scoreboard on Tab, Window/Html/Scoreboard.html, docked to the left the way Dota docks its
 	* own.  A player sees two sections, his side in full and the enemy as names and teams, because
 	* the enemy's general, money and promotions are for its own side to know.  A watcher sees one
@@ -10264,19 +10348,17 @@ void InGameUI::drawScoreboard( void )
 		rows.push_back( band );
 
 		for( ; first < end; first++ )
-			rows.push_back( scoreboardSeat( seats[ first ].player, seats[ first ].slot, watching || seats[ first ].section == 0,
-																			seats[ first ].player == local ) );
+		{
+			HtmlValues row = scoreboardSeat( seats[ first ].player, seats[ first ].slot, watching || seats[ first ].section == 0,
+																			 seats[ first ].player == local );
+			putSeatSuperweapons( row, seats[ first ].player->getPlayerIndex(), m_spectatorSuperweapons );
+			rows.push_back( row );
+		}
 	}
-
-	// every superweapon counting down in the match, per player in the order of the seats across the
-	// top, the one place a player reads the times now the strip is gone
-	Int teams = 0;
-	fillSpectatorSuperweapons( gatherSeats( teams ), m_spectatorSuperweapons, lists[ "superweapons" ] );
 
 	HtmlValues values;
 	values[ "side" ] = spectatorSide();
 	values[ "clock" ] = spectatorClock( TheGameLogic->getFrame() );
-	values[ "weapons" ] = lists[ "superweapons" ].empty() ? "hidden" : "";
 	m_scoreboardOverlay->setPage( HtmlTemplate_expand( m_scoreboardPage, values, lists, lookupGameText ) );
 	m_scoreboardOverlay->draw();
 }

@@ -610,11 +610,12 @@ static void handleCommand( const AsciiString &command )
 		return;
 	}
 
-	/* key <KEY_name> [ALT] [CTRL] [SHIFT]
+	/* key <KEY_name> [ALT] [CTRL] [SHIFT] [HOLD | RELEASE]
 		 One press and release, carried the way Keyboard.cpp carries a real one, so the command map, the
 		 translators and whatever network message sits behind them all see a key.  The keyboard itself
 		 is DirectInput and reads only the foreground window, which a script cannot count on holding.
-		 The mouse stays where it is: post the window a WM_MOUSEMOVE first when the key reads it. */
+		 The mouse stays where it is: post the window a WM_MOUSEMOVE first when the key reads it.
+		 HOLD sends only the press and RELEASE only the release, for what stays up while a key is held. */
 	if (strncmp( command.str(), "key ", 4 ) == 0)
 	{
 		char words[ 256 ];
@@ -635,6 +636,8 @@ static void handleCommand( const AsciiString &command )
 		}
 
 		Int modifiers = KEY_STATE_NONE;
+		Bool down = TRUE;
+		Bool up = TRUE;
 		for( const char *word = strtok( NULL, " " ); word; word = strtok( NULL, " " ) )
 		{
 			if (strcmp( word, "ALT" ) == 0)
@@ -643,19 +646,29 @@ static void handleCommand( const AsciiString &command )
 				modifiers |= KEY_STATE_LCONTROL;
 			else if (strcmp( word, "SHIFT" ) == 0)
 				modifiers |= KEY_STATE_LSHIFT;
+			else if (strcmp( word, "HOLD" ) == 0)
+				up = FALSE;
+			else if (strcmp( word, "RELEASE" ) == 0)
+				down = FALSE;
 			else
 			{
-				replyError( "a modifier is ALT, CTRL or SHIFT" );
+				replyError( "a modifier is ALT, CTRL or SHIFT, and HOLD or RELEASE sends half the press" );
 				return;
 			}
 		}
 
-		GameMessage *press = TheMessageStream->appendMessage( GameMessage::MSG_RAW_KEY_DOWN );
-		press->appendIntegerArgument( key );
-		press->appendIntegerArgument( KEY_STATE_DOWN | modifiers );
-		GameMessage *release = TheMessageStream->appendMessage( GameMessage::MSG_RAW_KEY_UP );
-		release->appendIntegerArgument( key );
-		release->appendIntegerArgument( KEY_STATE_UP | modifiers );
+		if (down)
+		{
+			GameMessage *press = TheMessageStream->appendMessage( GameMessage::MSG_RAW_KEY_DOWN );
+			press->appendIntegerArgument( key );
+			press->appendIntegerArgument( KEY_STATE_DOWN | modifiers );
+		}
+		if (up)
+		{
+			GameMessage *release = TheMessageStream->appendMessage( GameMessage::MSG_RAW_KEY_UP );
+			release->appendIntegerArgument( key );
+			release->appendIntegerArgument( KEY_STATE_UP | modifiers );
+		}
 		replyOk( "\"pressed\":true" );
 		return;
 	}

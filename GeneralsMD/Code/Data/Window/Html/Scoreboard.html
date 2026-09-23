@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  The scoreboard on Tab, docked to the left edge the way Dota docks its own, in the same steel as
+  The scoreboard, up while Tab is held, in the top left corner beside the menu key, in the same steel as
   the spectator's page (Window/Html/Spectator.html, whose header says what the renderer draws and
   what it does not).  Everyone gets it, playing or watching.
 
@@ -15,10 +15,9 @@
       has {{portrait}} {{general}} {{rank}} {{cash}} {{income}} {{kills}} {{losses}}, its promotions
       as {{skill0}} to {{skill6}}, and {{favourite}} with {{favouritename}}, the unit built most.
       A hidden seat is an enemy: a name, a colour and a team, nothing else.
-    data-each="superweapons", every superweapon in the match: per player who has one an entry of
-      {{kind}} "head" with {{image}} their general, {{color}} and {{name}}, then their countdowns, soonest
-      first, {{kind}} "weapon" with {{image}} its cameo, {{time}} and {{ready}} "ready" once it can
-      fire; {{weapons}} is "hidden" while there is none.
+      Every seat has its superweapons, soonest first, as {{w0.image}} {{w0.time}} {{w0.state}} to
+      {{w5...}}, the state "ready" once it can fire and "none" for an unused place, and {{armed}}
+      "armed" when it has any.
 
   An image whose name is empty is not drawn, so an unused {{skillN}} leaves no box.
   Edit the copy under Run/Window/Html and the next match reads it.
@@ -42,7 +41,7 @@
   .china .well { background-color: rgba(26, 10, 8, 0.9); }
   .gla .well { background-color: rgba(22, 19, 8, 0.9); }
 
-  #board { position: absolute; left: 4px; top: 44px; width: 494px; padding-bottom: 3px; }
+  #board { position: absolute; left: 26px; top: 4px; width: 494px; padding-bottom: 3px; }
 
   /* every column's left edge, shared by the captions and the seats; the Turkish captions are the
      long ones, so a number column is as wide as its caption rather than its digits */
@@ -86,19 +85,19 @@
   .defeated .who { color: #8a949f; }
   .defeated .num, .defeated .cash { color: #8a949f; }
 
-  /* the superweapons: a line per player who has one, their general and name, and after it each of
-     their countdowns as a cameo with its time, gold once it can fire */
-  .weapons.hidden { display: none; }
-  .whead { position: relative; height: 20px; margin: 2px 3px 0 3px; }
-  .whead .tray { position: absolute; left: 4px; top: 1px; width: 24px; height: 18px; }
-  .whead .emblem { position: absolute; left: 3px; top: 3px; width: 18px; height: 12px; }
-  .whead .who { position: absolute; left: 32px; top: 0; line-height: 20px; font-weight: bold; }
-  .whead .cameo, .whead .time, .wweapon .tray, .wweapon .who { display: none; }
-  .wweapon { display: inline-block; position: relative; width: 58px; height: 20px; margin: 0 0 2px 7px; }
-  .wweapon .cameo { position: absolute; left: 0; top: 0; width: 24px; height: 20px; border: 1px solid #0c1114; }
-  .wweapon .time { position: absolute; left: 28px; top: 0; line-height: 20px; font-weight: bold; color: #c9d2d9; }
-  .wweapon.ready .cameo { border-color: #e8c24a; }
-  .wweapon.ready .time { color: #f2cf4a; }
+  /* a player's superweapons, each a cameo and its seconds, gold once it can fire: on a line of their
+     own under a full row, and beside the name on an enemy's row, which has nothing else there */
+  .arms { display: none; position: absolute; left: 30px; top: 22px; height: 20px; }
+  .armed .arms { display: block; }
+  .seatrow.full.armed { height: 44px; }
+  .hidden .arms { left: 170px; top: 1px; }
+  .arm { position: absolute; top: 0; width: 52px; height: 20px; }
+  .arm.none { display: none; }
+  .w0 { left: 0; } .w1 { left: 54px; } .w2 { left: 108px; } .w3 { left: 162px; } .w4 { left: 216px; } .w5 { left: 270px; }
+  .arm .cameo { position: absolute; left: 0; top: 0; width: 22px; height: 18px; border: 1px solid #0c1114; }
+  .arm .time { position: absolute; left: 27px; top: 0; line-height: 20px; font-weight: bold; color: #c9d2d9; }
+  .arm.ready .cameo { border-color: #e8c24a; }
+  .arm.ready .time { color: #f2cf4a; }
 </style>
 </head>
 <body>
@@ -118,7 +117,7 @@
 
   <div class="k{{kind}}" data-each="seats">
     <div class="band plate {{side}}">{{label}}<span class="count">{{standing}}/{{seats}}</span></div>
-    <div class="seatrow {{state}}">
+    <div class="seatrow {{state}} {{armed}}">
       <div class="stripe" style="background-color: {{color}}"></div>
       <div class="tray"><img class="emblem" src="{{portrait}}"></div>
       <span class="who c-name">{{name}}</span>
@@ -137,16 +136,14 @@
       <img class="skill" src="{{skill5}}" style="left: 440px">
       <img class="skill" src="{{skill6}}" style="left: 454px">
       <img class="favourite c-favourite" src="{{favourite}}">
-    </div>
-  </div>
-
-  <div class="weapons {{weapons}}">
-    <div class="band plate">{{text:GUI:Superweapons}}</div>
-    <div class="w{{kind}} {{ready}}" data-each="superweapons">
-      <div class="tray"><img class="emblem" src="{{image}}"></div>
-      <span class="who" style="color: {{color}}">{{name}}</span>
-      <img class="cameo" src="{{image}}">
-      <span class="time">{{time}}</span>
+      <div class="arms">
+        <div class="arm w0 {{w0.state}}"><img class="cameo" src="{{w0.image}}"><span class="time">{{w0.time}}</span></div>
+        <div class="arm w1 {{w1.state}}"><img class="cameo" src="{{w1.image}}"><span class="time">{{w1.time}}</span></div>
+        <div class="arm w2 {{w2.state}}"><img class="cameo" src="{{w2.image}}"><span class="time">{{w2.time}}</span></div>
+        <div class="arm w3 {{w3.state}}"><img class="cameo" src="{{w3.image}}"><span class="time">{{w3.time}}</span></div>
+        <div class="arm w4 {{w4.state}}"><img class="cameo" src="{{w4.image}}"><span class="time">{{w4.time}}</span></div>
+        <div class="arm w5 {{w5.state}}"><img class="cameo" src="{{w5.image}}"><span class="time">{{w5.time}}</span></div>
+      </div>
     </div>
   </div>
 </div>
