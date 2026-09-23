@@ -180,7 +180,14 @@
   .cells .lit .seg { background-image: url(PowerBarGreen); }
   .cells.yellow .lit .seg { background-image: url(PowerBarYellow); }
   .cells.red .lit .seg { background-image: url(PowerBarRed); }
-  .needle { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background-color: #ffffff; }
+  /* the needle is a gauge pointer through the whole groove: a white stem outlined in black so it
+     reads on a lit cell as well as a dark one, capped top and bottom where it crosses the groove's
+     edges.  It stands after the lip so the lip does not cut it */
+  .needle { position: absolute; top: -2px; bottom: -2px; width: 4px; margin-left: -2px; background-color: #000000; }
+  .needle .stem { position: absolute; left: 1px; right: 1px; top: 1px; bottom: 1px; background-color: #f4f6f8; }
+  .needle .cap { position: absolute; left: -1px; width: 4px; height: 1px; border: 1px solid #000000; background-color: #f4f6f8; }
+  .needle .head { top: -1px; }
+  .needle .foot { bottom: -1px; }
   .china .groove { border-bottom-color: #d98a72; border-right-color: #d98a72; }
   .gla .groove { border-bottom-color: #cbbf82; border-right-color: #cbbf82; }
 
@@ -309,8 +316,8 @@
   </div>
   <div class="piece groove solid stack {{powerframe.shown}}" style="left: {{powerframe.x}}px; top: {{powerframe.y}}px; width: {{powerframe.w}}px; height: {{powerframe.h}}px">
     <div class="cells {{power.state}}" style="height: {{powerframe.inner}}px"><div class="cell {{lit}}" data-each="powercells" style="left: {{x}}px; width: {{w}}px; height: {{powerframe.inner}}px"><div class="seg" style="height: {{powerframe.inner}}px"></div></div></div>
-    <div class="needle {{power.consumes}}" style="left: {{power.needle}}%"></div>
     <div class="lip"></div>
+    <div class="needle {{power.consumes}}" style="left: {{power.needle}}%"><div class="stem"></div><div class="cap head"></div><div class="cap foot"></div></div>
   </div>
   <div class="piece bezel solid stack moneyblock {{moneyblock.shown}}" style="left: {{moneyblock.x}}px; top: {{moneyblock.y}}px; width: {{moneyblock.w}}px; height: {{moneyblock.h}}px">
     <div class="steel" style="left: 0; right: 0; top: 0; bottom: 0"></div>
