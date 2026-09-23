@@ -394,6 +394,8 @@ found and fixed â€” EA's own, not port damage.**
 - A toppling building crushes the strip across its fall at any angle. The line was only square to the fall when the building fell along an axis; at forty-five degrees it ran down the length of the building and missed the units beside it.
 - A transport killed by the blast of a Terrorist riding in it puts the other passengers out. They were handed back to a vehicle that had already died and were deleted with it, unseen.
 - Something that knocks a unit off its feet lets it stand again. The flailing pose could outlast the stun and stay for good.
+- A tank thrown by a carpet bomb or a MOAB is out of your hands until it comes down. A tank hit where it stood got its controls back on the very next frame, before it had left the ground, and anything already in the air got them back at the top of its arc, so it could drive in mid-air. Now the stun lasts until it lands and a few frames after, and a tank that comes down on its roof, in water it cannot drive through, on a cliff or off the edge of the map is lost, the way the game was written to do and never did. Over one carpet bomb, 16 of 20 units that lived through it came down still stunned where none did before, and one Paladin landed on its back. Replays recorded before this change play out differently.
+- Wreckage and bodies that should not bounce, don't. The data tells debris and a soldier flung by a blast to lie where they land, and fifteen entries say so, but the game never read the number and bounced all of it the same. Replays recorded before this change play out differently.
 
 ## One crate, one collector
 

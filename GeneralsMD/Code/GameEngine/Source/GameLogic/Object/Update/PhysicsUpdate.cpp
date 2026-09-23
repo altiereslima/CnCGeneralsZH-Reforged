@@ -36,6 +36,7 @@
 #include "Common/ThingTemplate.h"
 #include "Common/Xfer.h"
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/Locomotor.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/ContainModule.h"
@@ -513,7 +514,9 @@ Bool PhysicsBehavior::handleBounce(Real oldZ, Real newZ, Real groundZ, Coord3D* 
 	{
 		const Real MIN_STIFF = 0.01f;
 		const Real MAX_STIFF = 0.99f;
-		Real stiffness = TheGlobalData->m_groundStiffness;
+		// ExtraBounciness (OCL debris, a flung SlowDeath body) was stored and saved but never read
+		// here, so the -1.0 that fifteen INI entries use to mean "do not bounce" bounced at 0.8
+		Real stiffness = TheGlobalData->m_groundStiffness + m_extraBounciness;
 		if (stiffness < MIN_STIFF) stiffness = MIN_STIFF;
 		if (stiffness > MAX_STIFF) stiffness = MAX_STIFF;
 
@@ -697,18 +700,24 @@ UpdateSleepTime PhysicsBehavior::update()
 			TheGameLogic->destroyObject(obj);
 		}
 
-		// Check when to clear the stunned status
+		// Check when to clear the stunned status: at rest, and on the ground unless the locomotor holds
+		// the unit off it (a boat, a helicopter), where at rest is all there is.  This was "at rest OR
+		// on the ground", tested on last frame's position, so a vehicle shocked where it stood lost the
+		// stun on the next frame before it ever left the ground, and anything in the air lost it at the
+		// top of its arc where every velocity component passes near zero.  Nothing landed stunned, so
+		// the landing checks in testStunnedUnitForDestruction never ran.
 		if (getIsStunned())
 		{
-			if ( (fabs(m_vel.x) < STUN_RELIEF_EPSILON && 
-				    fabs(m_vel.y) < STUN_RELIEF_EPSILON && 
-				    fabs(m_vel.z) < STUN_RELIEF_EPSILON)
-          ||
-           obj->isSignificantlyAboveTerrain() == FALSE )
+			const AIUpdateInterface* stunnedAI = obj->getAI();
+			Bool heldAloft = stunnedAI != NULL && stunnedAI->getCurLocomotor() != NULL &&
+				stunnedAI->getCurLocomotor()->getBehaviorZ() != Z_NO_Z_MOTIVE_FORCE;
+			if ( fabs(m_vel.x) < STUN_RELIEF_EPSILON &&
+				   fabs(m_vel.y) < STUN_RELIEF_EPSILON &&
+				   fabs(m_vel.z) < STUN_RELIEF_EPSILON &&
+				   ( heldAloft || obj->isSignificantlyAboveTerrain() == FALSE ) )
 			{
 				setStunned(false);
-				// tested on last frame's position, so this can run before the landing below ever
-				// swaps flailing for stunned; clear both or the unit flails for good
+				// clear both: a weak shock can come to rest before the landing below swaps flailing for stunned
 				getObject()->clearModelConditionFlags( MAKE_MODELCONDITION_MASK2( MODELCONDITION_STUNNED, MODELCONDITION_STUNNED_FLAILING ) );
 			}
 
@@ -1850,7 +1859,7 @@ void PhysicsBehavior::testStunnedUnitForDestruction(void)
 	const Coord3D *pos = obj->getPosition();
 
 	// If a stunned object is upside down when it hits the ground, kill it
-	if(obj->getTransformMatrix()->Get_Z_Vector().Z < 0.0f) 
+	if(obj->getTransformMatrix()->Get_Z_Vector().Z < 0.0f)
 	{
 		obj->kill();
 		return;
