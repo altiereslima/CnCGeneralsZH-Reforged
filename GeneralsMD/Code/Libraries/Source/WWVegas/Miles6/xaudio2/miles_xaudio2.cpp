@@ -371,10 +371,11 @@ void computeSpatialGain(const Sample &sample, float *volumeOut, float *panOut)
 
 	float pan = DEFAULT_PAN;
 	if (distance > 0.0001f) {
-		// right = face x up, which is the axis a stereo pan actually moves along
-		const float rightX = listener.faceY * listener.upZ - listener.faceZ * listener.upY;
-		const float rightY = listener.faceZ * listener.upX - listener.faceX * listener.upZ;
-		const float rightZ = listener.faceX * listener.upY - listener.faceY * listener.upX;
+		// right = up x face, the axis a stereo pan moves along. face x up is left in either
+		// handedness, and taking it sent every sound on the right of the screen to the left ear.
+		const float rightX = listener.upY * listener.faceZ - listener.upZ * listener.faceY;
+		const float rightY = listener.upZ * listener.faceX - listener.upX * listener.faceZ;
+		const float rightZ = listener.upX * listener.faceY - listener.upY * listener.faceX;
 		const float rightLength = (float)sqrt(rightX * rightX + rightY * rightY + rightZ * rightZ);
 		if (rightLength > 0.0001f) {
 			const float projection = (dx * rightX + dy * rightY + dz * rightZ) / (rightLength * distance);
