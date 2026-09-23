@@ -95,6 +95,8 @@ static Bool builderIsFree( AIUpdateInterface *ai, DozerAIInterface *dozer );	// 
 
 #include "GameNetwork/GameInfo.h"
 
+#include <algorithm>
+
 #ifdef _INTERNAL
 // for occasional debugging...
 //#pragma optimize("", off)
@@ -6342,6 +6344,7 @@ void ControlBar::populateSpecialPowerShortcut( Player *player)
 		return;
 	// populate the button with commands defined
 	Int currentButton = 0;
+	std::vector<SpecialPowerType> shownPowerTypes;
 	const CommandButton *commandButton;
 	for( i = 0; i < m_currentlyUsedSpecialPowersButtons; i++ )
 	{
@@ -6522,6 +6525,9 @@ void ControlBar::populateSpecialPowerShortcut( Player *player)
 				}
 			}
 
+			if( commandButton->getSpecialPowerTemplate() )
+				shownPowerTypes.push_back( commandButton->getSpecialPowerTemplate()->getSpecialPowerType() );
+
 			// make sure the window is not hidden
 			m_specialPowerShortcutButtons[ currentButton ]->winHide( FALSE );
 			m_specialPowerShortcutButtonParents[ currentButton ]->winHide( FALSE );
@@ -6533,10 +6539,52 @@ void ControlBar::populateSpecialPowerShortcut( Player *player)
 			setControlCommand( m_specialPowerShortcutButtons[ currentButton ], commandButton );
 			GadgetButtonSetAltSound(m_specialPowerShortcutButtons[ currentButton ], "GUIGenShortcutClick");
 			currentButton++;
-					
+
 		}  // end else
 
 	}  // end for i
+
+	//
+	// A superweapon the player took rather than built: a GLA player who captures a nuclear silo
+	// owns a power his own faction's shortcut set has no button for, so the silo could be fired
+	// only by finding it on the map and selecting it.  Every other faction's shortcut set is asked
+	// for a button that fires a power this player now holds and nothing above has shown.  Powers
+	// behind a science are left out: a general's power is bought, never captured.
+	//
+	for( Int t = 0; t < ThePlayerTemplateStore->getPlayerTemplateCount(); ++t )
+	{
+		const PlayerTemplate *otherFaction = ThePlayerTemplateStore->getNthPlayerTemplate( t );
+		if( otherFaction == player->getPlayerTemplate() || otherFaction->getSpecialPowerShortcutCommandSet().isEmpty() )
+			continue;
+		const CommandSet *otherSet = findCommandSet( otherFaction->getSpecialPowerShortcutCommandSet() );
+		if( otherSet == NULL )
+			continue;
+
+		for( Int b = 0; b < MAX_COMMANDS_PER_SET && currentButton < MAX_SPECIAL_POWER_SHORTCUTS; ++b )
+		{
+			const CommandButton *captured = otherSet->getCommandButton( b );
+			if( captured == NULL || !BitTest( captured->getOptions(), NEED_SPECIAL_POWER_SCIENCE ) )
+				continue;
+			const SpecialPowerTemplate *power = captured->getSpecialPowerTemplate();
+			if( power == NULL || power->getRequiredScience() != SCIENCE_INVALID )
+				continue;
+			const SpecialPowerType type = power->getSpecialPowerType();
+			if( std::find( shownPowerTypes.begin(), shownPowerTypes.end(), type ) != shownPowerTypes.end() )
+				continue;
+			if( player->findMostReadyShortcutSpecialPowerOfType( type ) == NULL )
+				continue;
+
+			shownPowerTypes.push_back( type );
+			m_specialPowerShortcutButtons[ currentButton ]->winHide( FALSE );
+			m_specialPowerShortcutButtonParents[ currentButton ]->winHide( FALSE );
+			m_specialPowerShortcutButtons[ currentButton ]->winEnable( TRUE );
+			m_specialPowerShortcutButtonParents[ currentButton ]->winEnable( TRUE );
+			setControlCommand( m_specialPowerShortcutButtons[ currentButton ], captured );
+			GadgetButtonSetAltSound( m_specialPowerShortcutButtons[ currentButton ], "GUIGenShortcutClick" );
+			currentButton++;
+		}
+	}
+
 	if(m_contextParent[ CP_MASTER ] && !m_contextParent[ CP_MASTER ]->winIsHidden() && m_specialPowerShortcutParent->winIsHidden())
 	{
 		showSpecialPowerShortcut();

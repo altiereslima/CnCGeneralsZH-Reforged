@@ -641,6 +641,7 @@ found and fixed â€” EA's own, not port damage.**
 - Pointing a worker at an ally's half-finished building no longer offers to finish it. The cursor promised to resume construction and the order it gave did nothing, because the check behind the cursor asked whether you were allied with whoever owned the site, and you are allied with yourself.
 - Double-tapping 0 jumps the camera to that group.
 - The mouse wheel no longer cancels a camera move already in progress.
+- A nuclear silo, a Scud Storm or a Particle Cannon you capture gets its button on the superweapon bar in the bottom right, next to your own. The bar only ever listed your own faction's powers, so a GLA player holding a Chinese silo had to find it on the map and select it to fire it.
 - The end of a match no longer crashes on the score screen when paratroopers were still in the air over water. Clearing the battlefield dropped them one last time, they drowned, and the debris they left behind went looking for a player who had already been cleared away.
 - Switching between fullscreen and windowed on Direct3D 9 no longer crashes. The graphics card can refuse a buffer for a moment while the screen changes, and the game wrote into the one it never got. It writes somewhere harmless now and asks again the next time it draws.
 - Closing the window while the game is still loading closes the game. The close was turned into a message stamped with your player, and no player exists that early.
