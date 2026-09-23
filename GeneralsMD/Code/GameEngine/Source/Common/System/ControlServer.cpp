@@ -27,6 +27,7 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
 #include "Common/ControlServer.h"
+#include "Common/Energy.h"
 #include "Common/GameEngine.h"
 #include "Common/GlobalData.h"
 #include "Common/MessageStream.h"
@@ -37,8 +38,12 @@
 #include "GameClient/KeyDefs.h"
 #include "GameClient/MetaEvent.h"
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/Module/BodyModule.h"
+#include "GameLogic/Module/SpecialPowerModule.h"
 #include "GameLogic/Object.h"
+#include "GameLogic/PartitionManager.h"
 #include "GameLogic/ScenarioDrill.h"
+#include "GameLogic/TerrainLogic.h"
 #include "GameNetwork/GameInfo.h"		// MAX_SLOTS, for the skirmish command's player count
 
 #include <vector>
@@ -68,6 +73,9 @@ static const unsigned char WS_OPCODE_TEXT = 0x1;
 static const unsigned char WS_OPCODE_CLOSE = 0x8;
 static const unsigned char WS_OPCODE_PING = 0x9;
 static const unsigned char WS_OPCODE_PONG = 0xA;
+
+/// status samples the shroud on this many points a side, spread over the map, for "revealed"
+static const Int STATUS_SHROUD_SAMPLES_PER_SIDE = 8;
 
 // ------------------------------------------------------------------------------------------------
 // SHA-1, because the handshake needs one and nothing in GameEngine has one
@@ -507,13 +515,38 @@ static void replyError( const char *why )
 	sendText( reply );
 }
 
-/** frame number, whether a match is running, and what each player owns. */
+/** Share of the map, in percent, the player can see right now, from a grid of samples.  Fogged
+	ground, seen once and not watched any more, does not count; a skirmish starts with the whole map
+	fogged rather than black. */
+static Int revealedPercent( const Player *player )
+{
+	Region3D extent;
+	TheTerrainLogic->getExtent( &extent );
+
+	Int seen = 0;
+	for( Int row = 0; row < STATUS_SHROUD_SAMPLES_PER_SIDE; ++row )
+	{
+		for( Int column = 0; column < STATUS_SHROUD_SAMPLES_PER_SIDE; ++column )
+		{
+			Coord3D sample;
+			sample.x = extent.lo.x + extent.width() * (column + 0.5f) / STATUS_SHROUD_SAMPLES_PER_SIDE;
+			sample.y = extent.lo.y + extent.height() * (row + 0.5f) / STATUS_SHROUD_SAMPLES_PER_SIDE;
+			sample.z = 0.0f;
+			if (ThePartitionManager->getShroudStatusForPlayer( player->getPlayerIndex(), &sample ) == CELLSHROUD_CLEAR)
+				++seen;
+		}
+	}
+	return seen * 100 / (STATUS_SHROUD_SAMPLES_PER_SIDE * STATUS_SHROUD_SAMPLES_PER_SIDE);
+}
+
+/** frame number, whether a match is running, and what each player owns, with enough of each
+	player's state that every console cheat can be seen to have landed: tools/cheat_check.py. */
 static void replyStatus( void )
 {
 	const Bool inGame = TheGameLogic && TheGameLogic->isInGame() && !TheGameLogic->isInShellGame();
 
 	std::vector<char> reply;
-	char piece[ 256 ];
+	char piece[ 512 ];
 
 	sprintf( piece, "{\"ok\":true,\"frame\":%d,\"inGame\":%s,\"players\":[",
 					 TheGameLogic ? (Int)TheGameLogic->getFrame() : 0,
@@ -531,15 +564,42 @@ static void replyStatus( void )
 				continue;
 
 			Int units = 0;
+			Int heroic = 0;
+			Int hurt = 0;
+			Int powersReady = 0;
 			for( Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
 			{
-				if (obj->getControllingPlayer() == player && !obj->isEffectivelyDead())
-					++units;
+				if (obj->getControllingPlayer() != player || obj->isEffectivelyDead())
+					continue;
+
+				++units;
+				if (obj->getVeterancyLevel() == LEVEL_HEROIC)
+					++heroic;
+				const BodyModuleInterface *body = obj->getBodyModule();
+				if (body && body->getHealth() < body->getMaxHealth())
+					++hurt;
+				for( BehaviorModule **module = obj->getBehaviorModules(); *module; ++module )
+				{
+					SpecialPowerModuleInterface *power = (*module)->getSpecialPower();
+					if (power && power->isReady())
+						++powersReady;
+				}
 			}
 
-			sprintf( piece, "%s{\"index\":%d,\"slot\":%d,\"money\":%u,\"units\":%d}",
+			UnsignedInt cheats = 0;
+			for( Int kind = 0; kind < CHEAT_KIND_COUNT; ++kind )
+			{
+				if (player->hasCheat( (CheatKind)kind ))
+					cheats |= 1 << kind;
+			}
+
+			sprintf( piece, "%s{\"index\":%d,\"slot\":%d,\"money\":%u,\"units\":%d,\"points\":%d,\"rank\":%d,"
+							 "\"cheats\":%u,\"powered\":%s,\"heroic\":%d,\"hurt\":%d,\"powersReady\":%d,\"revealed\":%d}",
 							 first ? "" : ",", i, ThePlayerList->getSlotIndex( i ),
-							 player->getMoney()->countMoney(), units );
+							 player->getMoney()->countMoney(), units, player->getSciencePurchasePoints(),
+							 player->getRankLevel(), cheats,
+							 player->getEnergy()->hasSufficientPower() ? "true" : "false",
+							 heroic, hurt, powersReady, revealedPercent( player ) );
 			for( const char *at = piece; *at; ++at )
 				reply.push_back( *at );
 			first = FALSE;
