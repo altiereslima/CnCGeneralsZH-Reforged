@@ -1146,7 +1146,6 @@ GlobalData::GlobalData()
 	m_buildPlacementShadows = TRUE;
 	m_showHudOverlay = TRUE;
 	m_showPlacementRangeRing = TRUE;
-	m_showProductionStrip = TRUE;
 	m_showSkillStrip = TRUE;
 	m_showSuperweaponStrip = TRUE;
 	m_workersReturnToSupply = TRUE;

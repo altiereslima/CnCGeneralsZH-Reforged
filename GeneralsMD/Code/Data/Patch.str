@@ -1110,10 +1110,6 @@ GUI:HudToggles
 "Strips"
 END
 
-GUI:HudProductionStrip
-"Production queue"
-END
-
 GUI:HudSkillStrip
 "Generals' promotions"
 END

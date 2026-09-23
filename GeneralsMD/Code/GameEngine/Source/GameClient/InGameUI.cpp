@@ -1177,13 +1177,8 @@ InGameUI::InGameUI()
 	m_hudRealClockBaseMs = 0;
 	m_hudLastDrawMs = 0;
 	m_hudOverlayBottom = 0;
-	for( Int stripRow = 0; stripRow < PRODUCTION_STRIP_ROWS; stripRow++ )
-	{
-		m_productionStripCount[ stripRow ] = 0;
-		m_productionStripTotal[ stripRow ] = 0;
-		m_productionStripRowColor[ stripRow ] = 0;
-	}
-	m_productionStripWatching = FALSE;
+	m_productionStripCount = 0;
+	m_productionStripTotal = 0;
 	m_productionStripCameoW = PRODUCTION_STRIP_CAMEO;
 	m_productionStripCameoH = PRODUCTION_STRIP_CAMEO;
 	m_productionStripThemed = FALSE;
@@ -1199,6 +1194,7 @@ InGameUI::InGameUI()
 	m_spectatorPageLoaded = FALSE;
 	m_spectatorPageShown = FALSE;
 	m_spectatorListsFrame = 0;
+	m_spectatorListsWatched = NULL;
 	m_spectatorLeadFrame = 0;
 	m_hudTogglesBottom = 0;
 	m_scoreboardOpen = FALSE;
@@ -1794,6 +1790,7 @@ static const char *const SPECTATOR_PAGE = "Window\\Html\\Spectator.html";
 static const std::string OPTION_ACTION = "option:";
 static const std::string FLIP_ACTION = "flip:";
 static const std::string PICK_ACTION = "pick:";
+static const std::string WATCH_ACTION = "watch:";
 static const std::string TEXT_LOOKUP = "text:";
 static const std::string STAT_GROUP = "stat";
 
@@ -2201,6 +2198,8 @@ static void fillSpectatorTop( std::vector< SpectatorStats > players, std::vector
 		entry[ "team" ] = std::to_string( stats.team );
 		entry[ "cash" ] = std::to_string( stats.cash );
 		entry[ "power" ] = stats.power < 0 ? "brownout" : "";
+		entry[ "click" ] = WATCH_ACTION + std::to_string( stats.player->getPlayerIndex() );
+		entry[ "watched" ] = stats.player == TheControlBar->getObserverLookAtPlayer() ? "watched" : "";
 		entries.push_back( entry );
 	}
 }
@@ -2452,11 +2451,11 @@ Bool InGameUI::pickSpectatorStat( Int commandSlot )
 	* the number picked in the stat drop-down, the net worth lead over the match and each army's most
 	* expensive units - the panels Dota's spectator keeps down the left of the screen.
 	*
-	* Watching a match three strips fight over the same picture - the production rows, the
-	* promotions, the superweapon countdowns - and which of them a spectator wants depends on what he
-	* is watching for.  Each box flips its option the moment it is clicked and saves the choice with
-	* the rest of the options.  Only while watching: playing, the top left corner belongs to the
-	* messages, and the other side's worth is not a player's to know. */
+	* Watching a match two strips fight over the same picture - the promotions and the superweapon
+	* countdowns - and which of them a spectator wants depends on what he is watching for; the
+	* production is on the Tab scoreboard.  Each box flips its option the moment it is clicked and
+	* saves the choice with the rest of the options.  Only while watching: playing, the top left
+	* corner belongs to the messages, and the other side's worth is not a player's to know. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawSpectatorPage( void )
 {
@@ -2478,8 +2477,11 @@ void InGameUI::drawSpectatorPage( void )
 	if( m_spectatorOverlay == NULL )
 		m_spectatorOverlay = new HtmlOverlay( m_superweaponNormalFont );
 
+	// a seat clicked or a unit selected moves the gold mark the same frame, not half a second on
 	const UnsignedInt frame = TheGameLogic->getFrame();
-	if( m_spectatorLists.empty() || frame < m_spectatorListsFrame || frame >= m_spectatorListsFrame + NET_WORTH_REFRESH_FRAMES )
+	const Player *watched = TheControlBar->getObserverLookAtPlayer();
+	if( m_spectatorLists.empty() || watched != m_spectatorListsWatched
+			|| frame < m_spectatorListsFrame || frame >= m_spectatorListsFrame + NET_WORTH_REFRESH_FRAMES )
 	{
 		const SpectatorStat &stat = spectatorStat( m_spectatorPicked );
 		Int teams = 0;
@@ -2508,6 +2510,7 @@ void InGameUI::drawSpectatorPage( void )
 		for( Int each = 0; each < (Int)ARRAY_SIZE( SPECTATOR_STATS ); each++ )
 			m_spectatorTotals[ std::string( "statkey:" ) + SPECTATOR_STATS[ each ].key ] = commandSlotKey( each * COMMAND_SLOTS_PER_COLUMN );
 		m_spectatorListsFrame = frame;
+		m_spectatorListsWatched = watched;
 	}
 
 	// the messages come and go on their own clock, not the lists' half second
@@ -2576,6 +2579,16 @@ Bool InGameUI::handleSpectatorPageClick( const ICoord2D *mouse, Bool act )
 		m_spectatorPicked[ group ] = pick.substr( colon + 1 );
 		m_spectatorFlipped.erase( group );
 		m_spectatorLists.clear();
+	}
+	else if( action.compare( 0, WATCH_ACTION.size(), WATCH_ACTION ) == 0 )
+	{
+		// a seat across the top is that player's button in the old player list, and the seat already
+		// being watched is the list's cancel.  A selection would keep the promotions and the skills on
+		// its own owner whatever the seat says, so the seat takes the whole screen and clears it
+		Player *player = ThePlayerList->getNthPlayer( atoi( action.c_str() + WATCH_ACTION.size() ) );
+		Player *watched = player == TheControlBar->getObserverLookAtPlayer() ? NULL : player;
+		deselectAllDrawables();
+		TheControlBar->watchPlayer( watched );
 	}
 	else if( action.compare( 0, OPTION_ACTION.size(), OPTION_ACTION ) == 0 )
 	{
@@ -9574,6 +9587,23 @@ static const ProductionEntry *findStripEntry( ProductionUpdateInterface *pu,
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The picture a slot is drawn with, given its producer and the queue entry found for it: the
+	* building going up, or what the entry makes.  NULL once the producer or the entry is gone, or
+	* for a template that carries no picture. */
+//-------------------------------------------------------------------------------------------------
+static const Image *stripSlotCameo( const Object *producer, const ProductionEntry *entry,
+																		const InGameUI::ProductionStripSlot *slot )
+{
+	if( slot->isStructure )
+		return producer ? producer->getTemplate()->getButtonImage() : NULL;
+	if( entry == NULL )
+		return NULL;
+	if( slot->isUpgrade )
+		return entry->getProductionUpgrade() ? entry->getProductionUpgrade()->getButtonImage() : NULL;
+	return entry->getProductionObject() ? entry->getProductionObject()->getButtonImage() : NULL;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** The tray a queue cameo stands in: the general's power bar's own, this side's copy of it, turned
 	* back to front.  That bar grows leftward out of the corner and its tray's heavy rail is on the
 	* right hand edge; mirrored, the rail leads a row running the other way.
@@ -9903,7 +9933,7 @@ void InGameUI::drawSuperweaponStrip( void )
 			const Int x = right - trayW + trayHole.x - secondsSlot * trayStep;
 
 			if( !slot->ready )
-				drawStripSeconds( PRODUCTION_STRIP_ROWS * PRODUCTION_STRIP_ROW_MAX + first + secondsSlot,
+				drawStripSeconds( PRODUCTION_STRIP_ROW_MAX + first + secondsSlot,
 													x, y, cameoW, cameoH, slot->seconds );
 		}
 
@@ -9925,7 +9955,7 @@ void InGameUI::drawSuperweaponStrip( void )
 		if( hidden > 0 && lastRow )
 		{
 			// this strip's own "+N", kept apart from the production rows' - see m_stripSecondsString
-			DisplayString *&overflow = m_productionStripOverflow[ PRODUCTION_STRIP_ROWS ];
+			DisplayString *&overflow = m_productionStripOverflow[ STRIP_OVERFLOW_SUPERWEAPON ];
 
 			if( overflow == NULL )
 			{
@@ -10316,12 +10346,64 @@ static void putSeatSuperweapons( HtmlValues &row, Int playerIndex, const std::ve
 }
 
 //-------------------------------------------------------------------------------------------------
+/** One scoreboard seat's production while watching, what the left edge of the screen used to carry:
+	* the SEAT_JOBS soonest things coming, queued in a factory or going up on the ground, as
+	* {{jN.image}} {{jN.time}} {{jN.count}} ("x5" for a run of the same thing) and {{jN.state}}, "none"
+	* for an unused place.  {{jobsmore}} counts the rest, with {{jobsmoremark}} "off" when there are
+	* none.  {{watching}} is "watching" on every seat, so the line keeps its place with nothing coming
+	* and the superweapons after it stay put as a queue empties and fills. */
+//-------------------------------------------------------------------------------------------------
+static void putSeatQueue( HtmlValues &row, Player *player )
+{
+	enum { SEAT_JOBS = 3 };	///< the line's head; its superweapons follow on the same line
+
+	InGameUI::ProductionStripSlot slots[ SEAT_JOBS ];
+	Int count = 0;
+	Int total = 0;
+	ProductionStripGather gather;
+	gather.slot = slots;
+	gather.count = &count;
+	gather.total = &total;
+	gather.max = SEAT_JOBS;
+	gather.skip = INVALID_ID;
+	player->iterateObjects( gatherStripEverything, &gather );
+
+	Int shown = 0;
+	for( Int place = 0; place < SEAT_JOBS; place++ )
+	{
+		const std::string name = "j" + std::to_string( place );
+		if( place >= count )
+		{
+			row[ name + ".state" ] = "none";
+			continue;
+		}
+
+		const InGameUI::ProductionStripSlot *slot = &slots[ place ];
+		Object *producer = TheGameLogic->findObjectByID( slot->producer );
+		const ProductionEntry *entry = producer && !slot->isStructure
+																	 ? findStripEntry( producer->getProductionUpdateInterface(), slot ) : NULL;
+		const Image *cameo = stripSlotCameo( producer, entry, slot );
+		UnicodeString time;
+		formatStripSeconds( &time, ControlBar_secondsFromFrames( (Real)slot->remaining ) );
+		row[ name + ".image" ] = cameo ? cameo->getName().str() : "";
+		row[ name + ".time" ] = WideCharStringToMultiByte( time.str() );
+		row[ name + ".count" ] = slot->quantity > 1 ? "x" + std::to_string( slot->quantity ) : "";
+		row[ name + ".state" ] = "";
+		shown += slot->quantity;
+	}
+	row[ "jobsmore" ] = std::to_string( total - shown );
+	row[ "jobsmoremark" ] = total > shown ? "" : "off";
+	row[ "watching" ] = "watching";
+}
+
+//-------------------------------------------------------------------------------------------------
 /** The scoreboard on Tab, Window/Html/Scoreboard.html, docked to the left the way Dota docks its
 	* own.  A player sees two sections, his side in full and the enemy as names and teams, because
-	* the enemy's general, money and promotions are for its own side to know.  A watcher sees one
-	* section a team, every seat in full.  Every section opens with a band of kind "band" carrying
-	* its {{label}}, how many seats are {{standing}} of {{seats}}, and {{side}} "allies", "enemies"
-	* or "team". */
+	* the enemy's general, money and promotions are for its own side to know.  A watcher, an observer
+	* or a player knocked out who stayed, sees one section a team, every seat in full and with its
+	* production, which is the left edge's queue column he no longer has.  Every section opens with a
+	* band of kind "band" carrying its {{label}}, how many seats are {{standing}} of {{seats}}, and
+	* {{side}} "allies", "enemies" or "team". */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawScoreboard( void )
 {
@@ -10341,7 +10423,7 @@ void InGameUI::drawScoreboard( void )
 		m_scoreboardOverlay = new HtmlOverlay( m_superweaponNormalFont );
 
 	Player *local = ThePlayerList->getLocalPlayer();
-	const Bool watching = local->isPlayerObserver();
+	const Bool watching = localPlayerWatching();
 
 	struct Seat
 	{
@@ -10404,6 +10486,8 @@ void InGameUI::drawScoreboard( void )
 			HtmlValues row = scoreboardSeat( seats[ first ].player, seats[ first ].slot, watching || seats[ first ].section == 0,
 																			 seats[ first ].player == local, earnedPerSecond( seats[ first ].player->getPlayerIndex() ) );
 			putSeatSuperweapons( row, seats[ first ].player->getPlayerIndex(), m_spectatorSuperweapons );
+			if( watching )
+				putSeatQueue( row, seats[ first ].player );
 			rows.push_back( row );
 		}
 	}
@@ -11829,15 +11913,11 @@ void InGameUI::drawQuitMenuPage( GameWindow *parent )
 	* the screen.  The soonest thing to arrive is the bottom cell - the one nearest the command bar
 	* and nearest the eye - and everything behind it is stacked above.  Five cells, and whatever is
 	* left over closes the column as a sixth wearing a "+N", so the strip's whole footprint is one
-	* tray wide however much the base has queued.
-	*
-	* Watching, the run is a row instead, because there the vertical belongs to the players: one row
-	* each, stacked, and a row that grew upward too would have nowhere to put the next player.  The
-	* soonest is then the left hand cell and the run reads left to right. */
+	* tray wide however much the base has queued. */
 //-------------------------------------------------------------------------------------------------
-void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
+void InGameUI::drawProductionStripColumn( Int left, Int bottomY )
 {
-	const Int count = m_productionStripCount[ row ];
+	const Int count = m_productionStripCount;
 	if( count < 1 )
 		return;
 
@@ -11872,8 +11952,8 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 	// Which way the cells run.  Either way they step a whole tray, so no cameo has a neighbouring
 	// tray lying over its edge.
 	//
-	const Int cellStepX = m_productionStripThemed ? m_productionStripStep : m_productionStripWatching ? trayStep : 0;
-	const Int cellStepY = m_productionStripThemed || m_productionStripWatching ? 0 : trayH;
+	const Int cellStepX = m_productionStripThemed ? m_productionStripStep : 0;
+	const Int cellStepY = m_productionStripThemed ? 0 : trayH;
 
 	const Image *tray = productionStripTray();
 
@@ -11883,9 +11963,9 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 	//
 	Int shown = 0;
 	for( Int shownSlot = 0; shownSlot < count; shownSlot++ )
-		shown += m_productionStrip[ row ][ shownSlot ].quantity;
+		shown += m_productionStrip[ shownSlot ].quantity;
 
-	const Int hidden = m_productionStripTotal[ row ] - shown;
+	const Int hidden = m_productionStripTotal - shown;
 	const Int cells = count + ( hidden > 0 ? 1 : 0 );
 
 	//
@@ -11927,7 +12007,7 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 
 	for( Int i = 0; i < count; i++ )
 	{
-		ProductionStripSlot *slot = &m_productionStrip[ row ][ i ];
+		ProductionStripSlot *slot = &m_productionStrip[ i ];
 		StripSlotDraw *draw = &slots[ i ];
 
 		// the soonest is the near cell: the bottom of a column, the left hand end of a row
@@ -11938,7 +12018,6 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 
 		draw->x = slotX;
 		draw->y = y;
-		draw->cameo = NULL;
 		draw->percent = -1;
 		draw->seconds = -1;
 		draw->quantity = slot->quantity;
@@ -11947,6 +12026,7 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 		Object *producer = TheGameLogic->findObjectByID( slot->producer );
 		ProductionUpdateInterface *pu = producer ? producer->getProductionUpdateInterface() : NULL;
 		const ProductionEntry *entry = slot->isStructure ? NULL : findStripEntry( pu, slot );
+		draw->cameo = stripSlotCameo( producer, entry, slot );
 
 		if( slot->isStructure && producer )
 		{
@@ -11954,8 +12034,6 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 			// A building going up carries its own progress rather than a queue entry's: the same
 			// sweep and the same countdown, read off the construction percentage on the object.
 			//
-			draw->cameo = producer->getTemplate()->getButtonImage();
-
 			const Real done = producer->getConstructionPercent();
 			draw->percent = REAL_TO_INT( done );
 
@@ -11969,14 +12047,6 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 		}
 		else if( entry )
 		{
-			if( slot->isUpgrade )
-			{
-				if( entry->getProductionUpgrade() )
-					draw->cameo = entry->getProductionUpgrade()->getButtonImage();
-			}
-			else if( entry->getProductionObject() )
-				draw->cameo = entry->getProductionObject()->getButtonImage();
-
 			//
 			// The scrim starts covering the cameo and is swept off as the item is built, the same
 			// way round as the command bar's own clock. Going the other way - filling up with black
@@ -12019,26 +12089,17 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 		// the cursor is really on, and an accidental cancel costs the whole item.
 		//
 		// a building already standing on the map is not cancelled from here - it is sold or blown up
-		if( !m_productionStripWatching && !slot->isStructure
-				&& TheKeyboard && TheKeyboard->isCtrl() && TheMouse )
+		if( !slot->isStructure && TheKeyboard && TheKeyboard->isCtrl() && TheMouse )
 		{
 			const MouseIO *io = TheMouse->getMouseStatus();
 			draw->cancelHover = io && io->pos.x >= draw->x && io->pos.x < draw->x + cameoW &&
 													io->pos.y >= draw->y && io->pos.y < draw->y + cameoH;
 		}
 
-		// same border colours the command bar puts on its build and upgrade buttons - except while
-		// watching, where the border is whose row it is, since that is what the row is there to say
+		// same border colours the command bar puts on its build and upgrade buttons
 		draw->border = GameMakeColor( 160, 160, 160, 160 );
 		if( draw->cancelHover )
 			draw->border = GameMakeColor( 255, 80, 80, 255 );
-		else if( m_productionStripRowColor[ row ] != 0 )
-		{
-			// the stored player colour's alpha is not ours to trust, the health bars found that out
-			UnsignedByte r, g, b, a;
-			GameGetColorComponents( m_productionStripRowColor[ row ], &r, &g, &b, &a );
-			draw->border = GameMakeColor( r, g, b, 255 );
-		}
 		else if( TheControlBar )
 			draw->border = slot->isUpgrade ? TheControlBar->getUpgradeBorderColor()
 																		 : TheControlBar->getBuildBorderColor();
@@ -12067,7 +12128,7 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 	{
 		const StripSlotDraw *draw = &slots[ secondsSlot ];
 		if( draw->seconds >= 0 )
-			drawStripSeconds( row * PRODUCTION_STRIP_ROW_MAX + secondsSlot,
+			drawStripSeconds( secondsSlot,
 												draw->x, draw->y, cameoW, cameoH, draw->seconds );
 	}
 
@@ -12076,18 +12137,15 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 	{
 		const StripSlotDraw *draw = &slots[ quantitySlot ];
 		if( draw->quantity > 1 )
-			drawStripQuantity( row * PRODUCTION_STRIP_ROW_MAX + quantitySlot,
+			drawStripQuantity( quantitySlot,
 												 draw->x, draw->y, cameoW, draw->quantity );
 	}
 
-	// and the borders round them, a team border heavy enough to read as the row's whole label; the
-	// themed row's frames are Queue.html's
+	// and the borders round them; the themed row's frames are Queue.html's
 	for( Int borderSlot = 0; borderSlot < count && !m_productionStripThemed; borderSlot++ )
 	{
 		const StripSlotDraw *draw = &slots[ borderSlot ];
-		TheDisplay->drawOpenRect( draw->x, draw->y, cameoW, cameoH,
-															m_productionStripRowColor[ row ] != 0 ? 2.0f : 1.0f,
-															draw->border );
+		TheDisplay->drawOpenRect( draw->x, draw->y, cameoW, cameoH, 1.0f, draw->border );
 	}
 
 	for( Int hoverSlot = 0; hoverSlot < count; hoverSlot++ )
@@ -12114,8 +12172,8 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 	//
 	if( hidden > 0 )
 	{
-		// this row's own "+N" - see m_stripSecondsString
-		DisplayString *&overflow = m_productionStripOverflow[ row ];
+		// the column's own "+N" - see m_stripSecondsString
+		DisplayString *&overflow = m_productionStripOverflow[ STRIP_OVERFLOW_PRODUCTION ];
 
 		if( overflow == NULL )
 		{
@@ -12149,7 +12207,7 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 	* right.  Each cell is a power's size, the soonest first, the "+N" in a cell of its own at the end,
 	* and the page's frames are drawn again over the cameos' edges the way the command grid's are. */
 //-------------------------------------------------------------------------------------------------
-void InGameUI::drawQueueTray( Int row )
+void InGameUI::drawQueueTray( void )
 {
 	const Real scale = ControlBarUniformScale();
 	const IRegion2D button = commandButtonRect( 1 );
@@ -12166,9 +12224,9 @@ void InGameUI::drawQueueTray( Int row )
 
 	// a cameo wearing an "x5" stands for five, and the "+N" is what none of them shows
 	Int shown = 0;
-	for( Int slot = 0; slot < m_productionStripCount[ row ]; slot++ )
-		shown += m_productionStrip[ row ][ slot ].quantity;
-	const Int cells = m_productionStripCount[ row ] + ( m_productionStripTotal[ row ] > shown ? 1 : 0 );
+	for( Int slot = 0; slot < m_productionStripCount; slot++ )
+		shown += m_productionStrip[ slot ].quantity;
+	const Int cells = m_productionStripCount + ( m_productionStripTotal > shown ? 1 : 0 );
 
 	IRegion2D cellsBox;
 	cellsBox.lo.x = trayBorder;
@@ -12212,7 +12270,7 @@ void InGameUI::drawQueueTray( Int row )
 	m_queueOverlay->draw();
 
 	TheDisplay->beginBatch2D();
-	drawProductionStripColumn( row, cellsBox.lo.x, cellsBox.lo.y );
+	drawProductionStripColumn( cellsBox.lo.x, cellsBox.lo.y );
 	TheDisplay->endBatch2D();
 
 	values[ "layer" ] = "front";
@@ -12246,16 +12304,9 @@ void InGameUI::drawProductionStrip( void )
 	TheStripDrawMS = 0.0f;
 #endif
 
-	for( Int row = 0; row < PRODUCTION_STRIP_ROWS; row++ )
-	{
-		m_productionStripCount[ row ] = 0;
-		m_productionStripTotal[ row ] = 0;
-		m_productionStripRowColor[ row ] = 0;
-	}
+	m_productionStripCount = 0;
+	m_productionStripTotal = 0;
 
-	// switched off from the drop-down: nothing drawn, and with the counts at nought nothing to click
-	if( stripSwitchedOff( &GlobalData::m_showProductionStrip ) )
-		return;
 	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
 		return;
 
@@ -12263,103 +12314,48 @@ void InGameUI::drawProductionStrip( void )
 	if( player == NULL )
 		return;
 
+	// watching, everybody's queue is on his row of the Tab scoreboard, not down the left edge
+	if( !player->isPlayerActive() )
+		return;
+
 	//
-	// Watching rather than playing (an observer, or a player who has been knocked out and stayed
-	// to watch): the strip becomes every player's queue at once, one row each, wearing that
-	// player's colour. "Who is building what" is the question a spectator is actually asking, and
-	// it was the one thing the game never showed - the observer's own queue is empty, so the strip
-	// used to be blank for the whole match.
+	// A single selected producer leads the column rather than getting one of its own: what the
+	// building you are looking at is making is the front of the strip, and the rest of the base
+	// follows it. It goes in before the sweep over everything else, and the sweep skips it, so
+	// nothing is drawn or counted twice.
 	//
-	m_productionStripWatching = !player->isPlayerActive();
-	if( m_productionStripWatching )
+	ObjectID selected = INVALID_ID;
+	if( getSelectCount() == 1 && !m_selectedDrawables.empty() )
 	{
-		//
-		// Selecting somebody's unit narrows the whole screen to him - his rows here, his skills on
-		// the right, his side on the bar - and clicking empty ground puts the whole match back.
-		//
-		Player *only = TheControlBar ? TheControlBar->getSelectedPlayer() : NULL;
-
-		Int row = 0;
-		for( Int i = 0; i < ThePlayerList->getPlayerCount() && row < PRODUCTION_STRIP_ROWS; i++ )
+		Object *sel = m_selectedDrawables.front()->getObject();
+		if( sel && sel->getControllingPlayer() == player )
 		{
-			Player *p = ThePlayerList->getNthPlayer( i );
-			if( p == NULL || p == player || !p->isPlayerActive() || !p->isPlayableSide() )
-				continue;
-			if( only && p != only )
-				continue;
-
-			ProductionStripGather watch;
-			watch.slot = m_productionStrip[ row ];
-			watch.count = &m_productionStripCount[ row ];
-			watch.total = &m_productionStripTotal[ row ];
-			// eight rows are on screen at once here, so each one is the few soonest and a "+N" -
-			// unless one player has the screen to himself, and then his row is as long as the
-			// playing strip's own column
-			watch.max = only ? PRODUCTION_STRIP_ROW_MAX : PRODUCTION_STRIP_WATCH_MAX;
-			watch.skip = INVALID_ID;			// nothing is selected in somebody else's base
-			p->iterateObjects( gatherStripEverything, &watch );
-
-			if( m_productionStripCount[ row ] > 0 )
-			{
-				m_productionStripRowColor[ row ] = clientPlayerColor( p );
-				row++;						// a player with nothing queued gets no row rather than an empty one
-			}
+			selected = sel->getID();
+			appendProducerQueue( sel, m_productionStrip, &m_productionStripCount, PRODUCTION_STRIP_ROW_MAX,
+													 &m_productionStripTotal, TRUE );
 		}
 	}
-	else
-	{
-		//
-		// A single selected producer leads the column rather than getting one of its own: what the
-		// building you are looking at is making is the front of the strip, and the rest of the base
-		// follows it. It goes in before the sweep over everything else, and the sweep skips it, so
-		// nothing is drawn or counted twice.
-		//
-		ObjectID selected = INVALID_ID;
-		if( getSelectCount() == 1 && !m_selectedDrawables.empty() )
-		{
-			Object *sel = m_selectedDrawables.front()->getObject();
-			if( sel && sel->getControllingPlayer() == player )
-			{
-				selected = sel->getID();
-				appendProducerQueue( sel, m_productionStrip[ PRODUCTION_ROW_QUEUE ],
-														 &m_productionStripCount[ PRODUCTION_ROW_QUEUE ],
-														 PRODUCTION_STRIP_ROW_MAX,
-														 &m_productionStripTotal[ PRODUCTION_ROW_QUEUE ],
-														 TRUE );
-			}
-		}
 
-		//
-		// One sweep, one column: the queues and the buildings going up are gathered into the same
-		// cells and sorted against each other, so the strip is a single run of what the base has
-		// coming.  A dozer raising a war factory now sits in the queue where its finishing time puts
-		// it instead of standing in a column of its own beside it.
-		//
-		ProductionStripGather gather;
-		gather.slot = m_productionStrip[ PRODUCTION_ROW_QUEUE ];
-		gather.count = &m_productionStripCount[ PRODUCTION_ROW_QUEUE ];
-		gather.total = &m_productionStripTotal[ PRODUCTION_ROW_QUEUE ];
-		gather.max = PRODUCTION_STRIP_ROW_MAX;
-		gather.skip = selected;
-		player->iterateObjects( gatherStripEverything, &gather );
-	}
+	//
+	// One sweep, one column: the queues and the buildings going up are gathered into the same
+	// cells and sorted against each other, so the strip is a single run of what the base has
+	// coming.  A dozer raising a war factory now sits in the queue where its finishing time puts
+	// it instead of standing in a column of its own beside it.
+	//
+	ProductionStripGather gather;
+	gather.slot = m_productionStrip;
+	gather.count = &m_productionStripCount;
+	gather.total = &m_productionStripTotal;
+	gather.max = PRODUCTION_STRIP_ROW_MAX;
+	gather.skip = selected;
+	player->iterateObjects( gatherStripEverything, &gather );
 
 #ifdef DEBUG_LOGGING
 	QueryPerformanceCounter( (LARGE_INTEGER *)&tGatherEnd );
 	TheStripGatherMS = stripElapsedMS( tGatherStart, tGatherEnd );
 #endif
 
-	//
-	// The rows in use are closed up before they are placed: playing there is one of them, and
-	// watching, a player with nothing coming would otherwise leave a gap where his column stood.
-	//
-	Int used[ PRODUCTION_STRIP_ROWS ];
-	Int rowsUsed = 0;
-	for( Int row = 0; row < PRODUCTION_STRIP_ROWS; row++ )
-		if( m_productionStripCount[ row ] > 0 )
-			used[ rowsUsed++ ] = row;
-
-	if( rowsUsed == 0 )
+	if( m_productionStripCount == 0 )
 		return;
 
 	//
@@ -12395,11 +12391,6 @@ void InGameUI::drawProductionStrip( void )
 	// however deep the base's queue goes - across the bottom of the screen it used to run over the
 	// battlefield instead.  Cells step a whole tray, so none of them is clipped by the one above.
 	//
-	// Watching, the vertical belongs to the players: one row per player, piled up from the bar, each
-	// row a few cameos running rightward from the left edge.  Those close up by the six that bar
-	// closes its own slots by - its 35 pixel step between 41 pixel slots - so a row reads as one run
-	// of metal, and the rows themselves are a whole tray apart.
-	//
 	const Int trayBelow = traySize.y - trayHole.y;
 	const Int lowerY = barTop - trayBelow - stripPixels( PRODUCTION_STRIP_LIFT );
 
@@ -12409,32 +12400,18 @@ void InGameUI::drawProductionStrip( void )
 		m_queuePageLoaded = TRUE;
 		readHtmlPage( QUEUE_PAGE, m_queuePage );
 	}
-	m_productionStripThemed = !m_productionStripWatching && m_controlBarPageShown && !m_queuePage.empty();
+	m_productionStripThemed = m_controlBarPageShown && !m_queuePage.empty();
 	if( m_productionStripThemed )
-		drawQueueTray( used[ 0 ] );
+		drawQueueTray();
 	else
 	{
 		//
 		// The strip is the busiest thing on the screen that is drawn a quad at a time, so it is drawn
-		// as a batch: the columns hand the display their pieces in an order that lets it gather the
+		// as a batch: the column hands the display its pieces in an order that lets it gather the
 		// ones asking for the same state into single draw calls.  See Display::beginBatch2D.
 		//
 		TheDisplay->beginBatch2D();
-
-		//
-		// Playing there is the one run and it stands on the edge.  Watching, each player is a row of
-		// his own and the rows are piled up from the bar, the first of them lowest, so the vertical
-		// says who and the horizontal says what - a queue that grew upward as well would have nowhere
-		// to put the next player.
-		//
-		for( Int at = 0; at < rowsUsed; at++ )
-		{
-			const Int y = lowerY - at * traySize.y;
-			if( y - traySize.y < 0 )
-				continue;
-			drawProductionStripColumn( used[ at ], 0, y );
-		}
-
+		drawProductionStripColumn( 0, lowerY );
 		TheDisplay->endBatch2D();
 	}
 
@@ -12457,42 +12434,36 @@ Bool InGameUI::handleProductionStripClick( const ICoord2D *mouse, Bool cancel )
 	if( handleSpectatorPageClick( mouse, !cancel ) )
 		return TRUE;
 
-	for( Int row = 0; row < PRODUCTION_STRIP_ROWS; row++ )
+	for( Int i = 0; i < m_productionStripCount; i++ )
 	{
-		for( Int i = 0; i < m_productionStripCount[ row ]; i++ )
+		const ProductionStripSlot *slot = &m_productionStrip[ i ];
+
+		if( mouse->x < slot->pos.x || mouse->x >= slot->pos.x + m_productionStripCameoW ||
+				mouse->y < slot->pos.y || mouse->y >= slot->pos.y + m_productionStripCameoH )
+			continue;
+
+		Object *producer = TheGameLogic->findObjectByID( slot->producer );
+		if( producer == NULL )
+			return TRUE;				// the building died under the cursor - the click is still ours
+
+		if( cancel && !slot->isStructure && producer->isLocallyControlled() )
 		{
-			const ProductionStripSlot *slot = &m_productionStrip[ row ][ i ];
-
-			if( mouse->x < slot->pos.x || mouse->x >= slot->pos.x + m_productionStripCameoW ||
-					mouse->y < slot->pos.y || mouse->y >= slot->pos.y + m_productionStripCameoH )
-				continue;
-
-			Object *producer = TheGameLogic->findObjectByID( slot->producer );
-			if( producer == NULL )
-				return TRUE;				// the building died under the cursor - the click is still ours
-
-			if( cancel && !slot->isStructure && producer->isLocallyControlled() )
-			{
-				//
-				// the producer travels with the message: the strip cancels on buildings that are not
-				// selected, so the logic cannot work out whose queue this is otherwise
-				//
-				// Only ever our own: while watching, the rows are other people's queues, and a
-				// spectator's ctrl-click is a camera jump, not a cancel.
-				//
-				GameMessage *msg = TheMessageStream->appendMessage( slot->isUpgrade
-																													 ? GameMessage::MSG_CANCEL_UPGRADE
-																													 : GameMessage::MSG_CANCEL_UNIT_CREATE );
-				msg->appendIntegerArgument( slot->id );
-				msg->appendObjectIDArgument( slot->producer );
-			}
-			else
-			{
-				TheTacticalView->lookAt( producer->getPosition() );
-			}
-
-			return TRUE;
+			//
+			// the producer travels with the message: the strip cancels on buildings that are not
+			// selected, so the logic cannot work out whose queue this is otherwise
+			//
+			GameMessage *msg = TheMessageStream->appendMessage( slot->isUpgrade
+																												 ? GameMessage::MSG_CANCEL_UPGRADE
+																												 : GameMessage::MSG_CANCEL_UNIT_CREATE );
+			msg->appendIntegerArgument( slot->id );
+			msg->appendObjectIDArgument( slot->producer );
 		}
+		else
+		{
+			TheTacticalView->lookAt( producer->getPosition() );
+		}
+
+		return TRUE;
 	}
 
 	return FALSE;

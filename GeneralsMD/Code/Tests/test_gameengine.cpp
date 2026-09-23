@@ -9914,10 +9914,6 @@ TEST(the_production_strip_folds_a_long_queue_into_its_overflow)
 {
 	CHECK_EQ( 5, (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX );
 
-	// while watching, eight columns share the screen at once, so a column there is never the taller
-	// one - and neither cap may outrun the slots the strip has room to remember
-	CHECK( (Int)InGameUI::PRODUCTION_STRIP_WATCH_MAX <= (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX );
-
 	//
 	// The column, its overflow cell included, has to stand inside the 600 the layout is written in
 	// with room to spare for the control bar it stands on: it grows upward out of the corner, and a
@@ -10033,19 +10029,6 @@ TEST(a_stacked_tray_does_not_lie_over_the_one_below_it)
 	const Int pileHeight = rows * (Int)InGameUI::PRODUCTION_STRIP_TRAY_H;
 	CHECK( pileHeight < 600 / 2 );
 
-	//
-	// Watching, the vertical is the players: a row each, a whole tray apart, piled up off the bottom
-	// of the screen.  Eight of them have to leave the top of a 600 tall screen alone, and a row -
-	// the few soonest plus the tray the "+N" closes it with - has to stay well inside 800 across,
-	// since it is drawn over the battlefield rather than over a bar.
-	//
-	const Int watchPile = (Int)InGameUI::PRODUCTION_STRIP_ROWS * (Int)InGameUI::PRODUCTION_STRIP_TRAY_H;
-	CHECK( watchPile < 2 * 600 / 3 );
-
-	const Int watchWidth = ( (Int)InGameUI::PRODUCTION_STRIP_WATCH_MAX + 1 )
-													* (Int)InGameUI::PRODUCTION_STRIP_TRAY_W;
-	CHECK( watchWidth < 800 / 2 );
-
 	const Int rowWidth = (Int)InGameUI::SUPERWEAPON_STRIP_COLS * (Int)InGameUI::PRODUCTION_STRIP_TRAY_W;
 	CHECK( rowWidth < 800 );
 }
@@ -10053,13 +10036,9 @@ TEST(a_stacked_tray_does_not_lie_over_the_one_below_it)
 /* Buildings going up on the map are not in anybody's queue - they are objects standing on the
 	 ground with a percentage on them - but they land in the same column as the queued items, sorted
 	 against them on the one thing the two kinds share: how long each still has.  The comparison the
-	 column is built with is therefore blind to which kind a slot is, and there is one row while
-	 playing, at the front of the array. */
+	 column is built with is therefore blind to which kind a slot is. */
 TEST(the_buildings_going_up_stand_in_the_queue_column)
 {
-	CHECK_EQ( 0, (Int)InGameUI::PRODUCTION_ROW_QUEUE );
-	CHECK( (Int)InGameUI::PRODUCTION_ROW_QUEUE < (Int)InGameUI::PRODUCTION_STRIP_ROWS );
-
 	// a site three seconds out goes in front of a tank ten seconds out, and not the other way round
 	CHECK( InGameUI::stripSlotGoesBefore( FALSE, 90, FALSE, 300 ) );
 	CHECK( !InGameUI::stripSlotGoesBefore( FALSE, 300, FALSE, 90 ) );
@@ -13746,7 +13725,8 @@ TEST(the_spectator_page_names_only_on_off_options)
 		CHECK( option != NULL && option->kind == OPTION_BOOL );
 		options++;
 	}
-	CHECK_EQ( options, 3 );
+	// the promotions and the superweapon countdowns; the production queues are on the Tab scoreboard
+	CHECK_EQ( options, 2 );
 	CHECK( page.find( "id=\"hud-top\"" ) != std::string::npos );
 	CHECK( page.find( "data-each=\"players\"" ) != std::string::npos );
 }

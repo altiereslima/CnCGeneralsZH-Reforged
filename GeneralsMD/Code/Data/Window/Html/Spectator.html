@@ -36,8 +36,11 @@
     data-each="lead", the first team's net worth less the second's since the start, up to 48
       columns, with {{up}} or {{down}} as a percent of the biggest lead either way
     data-each="top", every player grouped by team: {{kind}} "player" with {{image}} {{color}} {{name}}
-      {{team}} {{cash}} and {{power}} "brownout" while his power is short; between two teams one
-      entry of kind "clock", between any others one of kind "gap"
+      {{team}} {{cash}}, {{power}} "brownout" while his power is short, {{click}} "watch:N" and
+      {{watched}} "watched" while he is the one looked at; between two teams one entry of kind
+      "clock", between any others one of kind "gap".  A data-click of watch:N looks at player N, what
+      his button in the old player list did, and watch:N on the one already looked at goes back to
+      everybody
     Three flat lists open each player's run with a {{kind}} "head" entry carrying {{image}} (his
     general), {{color}} and {{name}}:
       data-each="army", then up to six "unit" entries, the most money first, with {{image}} {{count}}
@@ -97,6 +100,9 @@
   .tplayer .who { position: absolute; left: 0; right: 0; top: 20px; font-size: 8px; line-height: 8px; }
   .tplayer .cash { position: absolute; left: 0; right: 0; top: 27px; font-size: 7px; line-height: 7px; color: #e8d27a; }
   .tplayer.brownout .cash { color: #ff7a5c; }
+  /* the seat is the player list's button: the pointer lights it, and the one being watched is lit gold */
+  .tplayer:hover { background-color: rgba(60, 72, 80, 0.85); }
+  .tplayer.watched { background-color: rgba(232, 210, 122, 0.3); border-bottom: 2px solid #e8d27a; }
   .team0 .tint { background-color: #b8f08a; }
   .team1 .tint { background-color: #ff7a5c; }
 
@@ -201,7 +207,7 @@
 <div class="{{side}}">
 
 <div id="top">
-  <div class="t{{kind}} team{{team}} {{power}}" data-each="top">
+  <div class="t{{kind}} team{{team}} {{power}} {{watched}}" data-each="top" data-click="{{click}}">
     <div class="tray"><img class="emblem" src="{{image}}"></div>
     <div class="tint"></div>
     <div class="who" style="color: {{color}}">{{name}}</div>
@@ -215,7 +221,6 @@
   <div class="strips {{flip:strips}}">
     <div class="plate" data-click="flip:strips"><span class="box"></span>{{text:GUI:HudToggles}}</div>
     <div class="items well">
-      <div class="row {{option:ShowProductionStrip}}" data-click="option:ShowProductionStrip"><span class="box"></span>{{text:GUI:HudProductionStrip}}</div>
       <div class="row {{option:ShowSkillStrip}}" data-click="option:ShowSkillStrip"><span class="box"></span>{{text:GUI:HudSkillStrip}}</div>
       <div class="row {{option:ShowSuperweaponStrip}}" data-click="option:ShowSuperweaponStrip"><span class="box"></span>{{text:GUI:HudSuperweaponStrip}}</div>
     </div>

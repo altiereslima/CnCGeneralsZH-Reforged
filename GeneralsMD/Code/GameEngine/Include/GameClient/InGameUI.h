@@ -760,22 +760,6 @@ public:  // ********************************************************************
 	//
 	enum { PRODUCTION_STRIP_ROW_MAX = 5 };	///< cameos one column will draw, stacked upward; whatever
 																					///  is left over closes it as a sixth cell wearing a "+N"
-	enum { PRODUCTION_STRIP_WATCH_MAX = 3 };	///< and while watching, where eight columns share the
-																					///  screen and a column is a whole player: three cameos and
-																					///  a "+N", since a run of the same unit is one of them now
-	enum { PRODUCTION_STRIP_ROWS = 8 };			///< playing: one column, the whole base's.
-																					///  watching: one column per player, so eight of them
-
-	//
-	// Playing, everything the base has coming is one column: what a factory is turning out and what
-	// a dozer is raising stand in the same run of cells, soonest first, because the question is when
-	// the next thing lands and not which of the two kinds it is.  The building you have selected does
-	// not get a column of its own either - its items lead this one.
-	//
-	enum
-	{
-		PRODUCTION_ROW_QUEUE		= 0		///< queues and building sites together
-	};
 
 	//
 	// A queue slot is one slot of the general's power bar down in the corner, measurement for
@@ -1210,10 +1194,9 @@ protected:
 	void drawPeaceCountdown( UnsignedInt framesLeft );	///< the last seconds of it, one big digit in the middle of the screen
 	void drawHudOverlay( void );					///< the small elapsed-time / fps plate (ShowHudOverlay)
 	void drawProductionStrip( void );			///< the production queue rows above the control bar
-	///< one run of cells - a column while playing, a player's row while watching - with its left
-	///< edge at 'left' and its first cell's top edge at 'bottomY'
-	void drawProductionStripColumn( Int row, Int left, Int bottomY );
-	void drawQueueTray( Int row );		///< the playing strip as a row in Window/Html/Queue.html's tray
+	///< the run of cells, a column, with its left edge at 'left' and its first cell's top edge at 'bottomY'
+	void drawProductionStripColumn( Int left, Int bottomY );
+	void drawQueueTray( void );		///< the playing strip as a row in Window/Html/Queue.html's tray
 	const Image *productionStripTray( void );	///< the bar's tray, mirrored, kept until the bar changes side
 	void stripTrayMetrics( ICoord2D *tray, ICoord2D *cameo, ICoord2D *hole, Int *step );	///< that tray's size, its cameo hole, and the column step
 	void drawStripSeconds( Int which, Int x, Int y, Int w, Int h, Int seconds );	///< countdown written inside a cameo
@@ -1282,6 +1265,7 @@ protected:
 	HtmlLists										m_spectatorLists;
 	HtmlValues									m_spectatorTotals;				///< the page's values that are not per player, gathered with the lists
 	UnsignedInt									m_spectatorListsFrame;		///< the logic frame the lists were last gathered on
+	const Player								*m_spectatorListsWatched;	///< the player being watched when they were, whose seat they mark
 	std::vector< Int >					m_spectatorLead;					///< the first team's net worth less the second's, one per sample
 	UnsignedInt									m_spectatorLeadFrame;			///< the logic frame the last of those was taken on
 	Int													m_hudTogglesBottom;				///< the bottom of the page's #hud-top, so the message list starts under it
@@ -1327,13 +1311,14 @@ protected:
 	// The global production strip: everything the local player has coming - queued in any factory,
 	// or going up on the ground - one cameo each, soonest to finish first, in a column standing on
 	// the corner above the control bar. drawProductionStrip() lays it out and records where each
-	// cameo landed; handleProductionStripClick() reads those back.
+	// cameo landed; handleProductionStripClick() reads those back.  What a factory is turning out
+	// and what a dozer is raising stand in the same run, because the question is when the next thing
+	// lands and not which of the two kinds it is, and the building you have selected leads it.
+	// Watching, the queues are on the Tab scoreboard instead.
 	//
-	ProductionStripSlot					m_productionStrip[ PRODUCTION_STRIP_ROWS ][ PRODUCTION_STRIP_ROW_MAX ];
-	Int													m_productionStripCount[ PRODUCTION_STRIP_ROWS ];	///< cameos drawn per row
-	Int													m_productionStripTotal[ PRODUCTION_STRIP_ROWS ];	///< items queued per row, drawn or not
-	Color												m_productionStripRowColor[ PRODUCTION_STRIP_ROWS ];	///< whose row it is, 0 for the local player's own
-	Bool												m_productionStripWatching;	///< the rows are every player's, not ours
+	ProductionStripSlot					m_productionStrip[ PRODUCTION_STRIP_ROW_MAX ];
+	Int													m_productionStripCount;		///< cameos drawn
+	Int													m_productionStripTotal;		///< items queued, drawn or not
 	Int													m_productionStripCameoW;		///< cameo size this frame, in the control bar's aspect
 	Int													m_productionStripCameoH;
 	Bool												m_productionStripThemed;		///< playing under the bar's page: a row in Queue.html's steel tray
@@ -1358,11 +1343,15 @@ protected:
 	// cameo per frame, and watching a match the strips cost more to draw than the terrain under
 	// them.  Kept per cameo, a countdown rebuilds when its own second changes: once a second.
 	//
-	enum { STRIP_SECONDS_STRINGS = PRODUCTION_STRIP_ROWS * PRODUCTION_STRIP_ROW_MAX
-																 + SUPERWEAPON_STRIP_MAX };
-	enum { STRIP_OVERFLOW_STRINGS = PRODUCTION_STRIP_ROWS + 1 };	///< one per production row, plus the superweapon strip's
+	enum { STRIP_SECONDS_STRINGS = PRODUCTION_STRIP_ROW_MAX + SUPERWEAPON_STRIP_MAX };
+	enum
+	{
+		STRIP_OVERFLOW_PRODUCTION = 0,		///< the "+N" closing the production column
+		STRIP_OVERFLOW_SUPERWEAPON,				///< and the superweapon strip's
+		STRIP_OVERFLOW_STRINGS
+	};
 
-	enum { STRIP_QUANTITY_STRINGS = PRODUCTION_STRIP_ROWS * PRODUCTION_STRIP_ROW_MAX };
+	enum { STRIP_QUANTITY_STRINGS = PRODUCTION_STRIP_ROW_MAX };
 
 	DisplayString *							m_productionStripOverflow[ STRIP_OVERFLOW_STRINGS ];	///< the "+N" that stands for the rest of a row
 	DisplayString *							m_stripSecondsString[ STRIP_SECONDS_STRINGS ];			///< the countdown written inside a cameo, either strip's

@@ -412,7 +412,6 @@ public:
 	Int m_anisotropyLevel;				///< samples anisotropic filtering may take; 0 = whatever the card offers
 	Bool m_showHudOverlay;				///< draw the fps / elapsed time / income line in the corner
 	Bool m_showPlacementRangeRing;		///< while placing a structure, ring its weapon range
-	Bool m_showProductionStrip;			///< the production queue rows above the command bar, bottom left
 	Bool m_showSkillStrip;					///< watching, every general's bought promotions, bottom right
 	Bool m_showSuperweaponStrip;		///< the superweapon countdown cameos, top right
 	Bool m_workersReturnToSupply;		///< a worker that finishes a build job goes back to the dock it left

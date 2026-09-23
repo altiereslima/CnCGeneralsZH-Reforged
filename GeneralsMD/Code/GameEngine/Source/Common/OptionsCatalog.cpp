@@ -80,7 +80,6 @@ OPTION_BOOL_ACCESSORS( m_shadowsForProjectiles )
 OPTION_BOOL_ACCESSORS( m_shadowsForProps )
 OPTION_BOOL_ACCESSORS( m_shadowsForParticles )
 OPTION_BOOL_ACCESSORS( m_particleGroundBounce )
-OPTION_BOOL_ACCESSORS( m_showProductionStrip )
 OPTION_BOOL_ACCESSORS( m_showSkillStrip )
 OPTION_BOOL_ACCESSORS( m_showSuperweaponStrip )
 
@@ -397,11 +396,8 @@ const OptionDef TheOptionCatalog[] =
 
 	// The strips over the battlefield while watching a match.  They have no control in the options
 	// menu: a spectator switches them from the drop-down in the top left corner, which writes them
-	// back itself.  Playing, every strip is drawn whatever these say.
-	{ "ShowProductionStrip",			NULL, "GUI:HudProductionStrip",
-		OPTION_BOOL, APPLY_LIVE, 0, 1,
-		get_m_showProductionStrip, set_m_showProductionStrip },
-
+	// back itself.  Playing, every strip is drawn whatever these say.  The production queues have no
+	// switch: watching, they are on the Tab scoreboard, and playing, they are always drawn.
 	{ "ShowSkillStrip",						NULL, "GUI:HudSkillStrip",
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_showSkillStrip, set_m_showSkillStrip },

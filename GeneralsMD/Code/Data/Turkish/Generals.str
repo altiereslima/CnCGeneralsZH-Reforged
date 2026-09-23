@@ -15637,10 +15637,6 @@ GUI:HudToggles
 "Şeritler"
 END
 
-GUI:HudProductionStrip
-"Üretim sırası"
-END
-
 GUI:HudSkillStrip
 "General yetenekleri"
 END

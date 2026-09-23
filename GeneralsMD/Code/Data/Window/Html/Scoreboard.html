@@ -20,6 +20,10 @@
       {{w4...}}, the state "ready" once it can fire and "none" for an unused place; {{more}} counts
       the rest and {{moreready}} those of them ready, each with a mark "off" at zero; {{armed}} is
       "armed" when it has any.
+      Watching, every seat also has its three soonest things coming, queued or going up, as
+      {{j0.image}} {{j0.time}} {{j0.count}} ("x5" for a run of one thing) {{j0.state}} to {{j2...}},
+      "none" for an unused place; {{jobsmore}} counts the rest, {{jobsmoremark}} "off" at zero, and
+      {{watching}} is "watching" on every seat, coming or not.
 
   An image whose name is empty is not drawn, so an unused {{skillN}} leaves no box.
   Edit the copy under Run/Window/Html and the next match reads it.
@@ -43,7 +47,7 @@
   .china .well { background-color: rgba(26, 10, 8, 0.9); }
   .gla .well { background-color: rgba(22, 19, 8, 0.9); }
 
-  #board { position: absolute; left: 26px; top: 4px; width: 530px; padding-bottom: 3px; }
+  #board { position: absolute; left: 26px; top: 4px; width: 620px; padding-bottom: 3px; }
 
   /* every column's left edge, shared by the captions and the seats; the Turkish captions are the
      long ones, so a number column is as wide as its caption rather than its digits */
@@ -110,6 +114,17 @@
   .arm .time { position: absolute; left: 26px; top: 0; line-height: 20px; font-weight: bold; color: #c9d2d9; }
   .arm.ready .cameo { border-color: #e8c24a; }
   .arm.ready .time { color: #f2cf4a; }
+
+  /* watching, what a player has coming leads the line under the row, the same cameos and seconds as
+     his superweapons, which follow it on the same line: eight rows of two lines each still fit the
+     screen's height, where a third line did not.  The line is there on every seat, empty or not, so
+     the superweapons hold their column while queues come and go */
+  .jobs { display: none; position: absolute; left: 30px; top: 22px; height: 20px; }
+  .watching .jobs { display: block; }
+  .seatrow.full.watching { height: 44px; }
+  .watching .arms { left: 244px; }
+  .jobs .more { left: 180px; }
+  .arm .count { position: absolute; left: 1px; top: 10px; line-height: 8px; font-size: 7px; font-weight: bold; color: #f1f4f6; }
 </style>
 </head>
 <body>
@@ -129,7 +144,7 @@
 
   <div class="k{{kind}}" data-each="seats">
     <div class="band plate {{side}}">{{label}}<span class="count">{{standing}}/{{seats}}</span></div>
-    <div class="seatrow {{state}} {{armed}}">
+    <div class="seatrow {{state}} {{armed}} {{watching}}">
       <div class="stripe" style="background-color: {{color}}"></div>
       <div class="tray"><img class="emblem" src="{{portrait}}"></div>
       <span class="who c-name">{{name}}</span>
@@ -149,6 +164,12 @@
       <img class="skill" src="{{skill5}}" style="left: 440px">
       <img class="skill" src="{{skill6}}" style="left: 454px">
       <img class="favourite c-favourite" src="{{favourite}}">
+      <div class="jobs">
+        <div class="arm w0 {{j0.state}}"><img class="cameo" src="{{j0.image}}"><span class="count">{{j0.count}}</span><span class="time">{{j0.time}}</span></div>
+        <div class="arm w1 {{j1.state}}"><img class="cameo" src="{{j1.image}}"><span class="count">{{j1.count}}</span><span class="time">{{j1.time}}</span></div>
+        <div class="arm w2 {{j2.state}}"><img class="cameo" src="{{j2.image}}"><span class="count">{{j2.count}}</span><span class="time">{{j2.time}}</span></div>
+        <div class="more {{jobsmoremark}}">(+{{jobsmore}})</div>
+      </div>
       <div class="arms">
         <div class="arm w0 {{w0.state}}"><img class="cameo" src="{{w0.image}}"><span class="time">{{w0.time}}</span></div>
         <div class="arm w1 {{w1.state}}"><img class="cameo" src="{{w1.image}}"><span class="time">{{w1.time}}</span></div>

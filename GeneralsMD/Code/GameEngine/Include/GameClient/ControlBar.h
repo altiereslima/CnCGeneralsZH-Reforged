@@ -862,6 +862,9 @@ public:
 
 	/// watching, follow the selection: the player's readouts, his money and his side's metal
 	void updateWatchedPlayer( void );
+	/// watching, look at this player - what pressing his button in the player list did - or at
+	/// everybody for NULL, the list's cancel; the portrait's panel follows whatever is selected
+	void watchPlayer( Player *player );
 	void showObserverPlayerInfo( void );		///< his readouts up, the player list down
 	void showObserverPlayerList( void );		///< and back again
 

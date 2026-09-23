@@ -444,13 +444,13 @@ void ControlBar::markUIDirty( void )
 	* Watching - an observer, or a player knocked out who stayed to watch - the screen used to be
 	* populated with the watcher's own player, who owns no command sets at all, so the whole screen
 	* came up blank.  It follows the field instead: whatever is selected names its owner, and with
-	* nothing selected it is the player the observer list is pointed at, or the first side still in
+	* nothing selected it is the player the seats at the top are pointed at, or the first side still in
 	* the match. */
 //-------------------------------------------------------------------------------------------------
 /** The player a watcher has picked out by clicking one of his things, NULL when nothing is
 	* selected or the selection belongs to nobody who is still playing.  It is what narrows the
-	* whole screen to one player: the production rows on the left, the skills on the right, the
-	* side the bar wears and whose promotion screen the key opens. */
+	* whole screen to one player: his seat lit at the top, the skills on the right, the side the bar
+	* wears and whose promotion screen the key opens. */
 Player *ControlBar::getSelectedPlayer( void )
 {
 	if( ThePlayerList->getLocalPlayer()->isPlayerActive() )
@@ -469,9 +469,9 @@ Player *ControlBar::getSelectedPlayer( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Watching, the selection drives the whole bar: clicking a unit is clicking its owner in the
-	* player list.  His readouts come up, the money plate becomes his, and the bar wears his side's
-	* metal - and clicking empty ground puts the list and the watcher's own plain bar back.
+/** Watching, the selection drives the whole bar: clicking a unit is clicking its owner's seat at
+	* the top.  His seat lights, the portrait's panel comes up, and the bar wears his side's metal -
+	* and clicking empty ground puts everybody and the watcher's own plain bar back.
 	*
 	* Before this, picking up somebody's tank told you nothing about him: the bar stayed on whatever
 	* side had last been chosen off the list, and the money plate with it. */
@@ -482,16 +482,27 @@ void ControlBar::updateWatchedPlayer( void )
 	if( selected == m_watchedSelection )
 		return;
 
-	m_watchedSelection = selected;
-	setObserverLookAtPlayer( selected );
+	watchPlayer( selected );
 
-	if( selected )
+	// the general's stars open the promotion screen of the player who is selected, and there is
+	// nobody's to open with nothing selected
+	static NameKeyType buttonGeneralID = NAMEKEY( "ControlBar.wnd:ButtonGeneral" );
+	GameWindow *buttonGeneral = TheWindowManager->winGetWindowFromId( NULL, buttonGeneralID );
+	if( buttonGeneral )
+		buttonGeneral->winEnable( selected != NULL );
+}
+
+void ControlBar::watchPlayer( Player *player )
+{
+	setObserverLookAtPlayer( player );
+
+	if( player )
 		showObserverPlayerInfo();
 	else
 		showObserverPlayerList();
 
-	const PlayerTemplate *wear = selected ? selected->getPlayerTemplate()
-																				: ThePlayerList->getLocalPlayer()->getPlayerTemplate();
+	const PlayerTemplate *wear = player ? player->getPlayerTemplate()
+																			: ThePlayerList->getLocalPlayer()->getPlayerTemplate();
 	if( m_controlBarSchemeManager && wear && wear->getSide().compare( m_watchedSide ) != 0 )
 	{
 		// a scheme lays the whole bar out again, so it is set when the side really changes and not
@@ -501,12 +512,11 @@ void ControlBar::updateWatchedPlayer( void )
 		restoreStageAfterScheme();
 	}
 
-	// the general's stars open the promotion screen of the player who is selected, and there is
-	// nobody's to open with nothing selected
-	static NameKeyType buttonGeneralID = NAMEKEY( "ControlBar.wnd:ButtonGeneral" );
-	GameWindow *buttonGeneral = TheWindowManager->winGetWindowFromId( NULL, buttonGeneralID );
-	if( buttonGeneral )
-		buttonGeneral->winEnable( selected != NULL );
+	// a seat clicked at the top clears the selection before it gets here, so what is selected is
+	// read again rather than taken from the caller; the portrait's panel is the selection's
+	m_watchedSelection = getSelectedPlayer();
+	if( m_currentControlBarStage == CONTROL_BAR_STAGE_DEFAULT )
+		showPanel( CB_PANEL_RIGHT, m_watchedSelection != NULL );
 }
 
 Player *ControlBar::getWatchedPlayer( void )
@@ -3172,7 +3182,7 @@ void ControlBar::update( void )
 	// if we're an observer, don't do the complete update
 	if( m_isObserverCommandBar)
 	{
-		// clicking a unit is clicking its owner in the player list: his readouts, his money, his side
+		// clicking a unit is clicking its owner's seat at the top: his seat, his side, the portrait
 		updateWatchedPlayer();
 
 		// twice a second is plenty for the observer readouts, and only on a real logic tick -
@@ -5860,10 +5870,11 @@ void ControlBar::setDefaultControlBarConfig( void )
 	m_contextParent[ CP_MASTER ]->winSetPosition(m_defaultControlBarPosition.x, m_defaultControlBarPosition.y);
 	m_contextParent[ CP_MASTER ]->winHide(FALSE);
 
-	// the three panels the minimised bar stands down
+	// the three panels the minimised bar stands down.  Watching, the middle is the player list, which
+	// the seats across the top of the screen have taken over, and the right is the selection's portrait
 	showPanel( CB_PANEL_LEFT, TRUE );
-	showPanel( CB_PANEL_CENTER, TRUE );
-	showPanel( CB_PANEL_RIGHT, TRUE );
+	showPanel( CB_PANEL_CENTER, !m_isObserverCommandBar );
+	showPanel( CB_PANEL_RIGHT, !m_isObserverCommandBar || getSelectedPlayer() != NULL );
 
 	repopulateBuildTooltipLayout();
 	setUpDownImages();
