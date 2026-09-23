@@ -10100,14 +10100,28 @@ static const char *const CONTROL_BAR_CUSTOM[] =
 	"WinUAttack"
 };
 
-/** The windows the centre panel is drawn round, so it is only as big as its buttons, and the ones
-	* the purse above it is drawn round.  NULL ends each list. */
+/** The windows each panel is drawn round, so a panel is only as big as what it holds: the left one
+	* the radar, the right one the portrait and the experience bar, the centre the command grid with
+	* the power bar over it, and the purse above that the money alone.  NULL ends each list. */
+static const char *const CONTROL_BAR_LEFT[] = { "LeftHUD", NULL };
+static const char *const CONTROL_BAR_RIGHT[] = { "RightHUD", "GeneralsExp", "ExpBarForeground", NULL };
 static const char *const CONTROL_BAR_CENTRE[] =
 {
-	"CommandWindow", "ObserverPlayerListWindow", "ButtonOptions", "ButtonIdleWorker", "ButtonPlaceBeacon",
-	"PopupCommunicator", NULL
+	"CommandWindow", "ObserverPlayerListWindow", "PowerWindow", "ButtonOptions", "ButtonIdleWorker",
+	"ButtonPlaceBeacon", "PopupCommunicator", NULL
 };
-static const char *const CONTROL_BAR_PURSE[] = { "MoneyDisplay", "PowerWindow", NULL };
+static const char *const CONTROL_BAR_PURSE[] = { "MoneyDisplay", NULL };
+
+/** The promotion and minimise buttons, small, side by side in the right panel's top right corner,
+	* the minimise button outermost.  800x600 pixels. */
+enum
+{
+	CORNER_BUTTON_WIDTH		= 32,
+	CORNER_BUTTON_HEIGHT	= 14,
+	CORNER_BUTTON_GAP			= 2,
+	CORNER_BUTTON_RISE		= 16		///< how far above the portrait's box the buttons' top edge sits
+};
+static const char *const CORNER_BUTTONS[] = { "ButtonLarge", "ButtonGeneral" };
 
 static void drawNothing( GameWindow *window, WinInstanceData *instData )
 {
@@ -10216,6 +10230,42 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	for( Int panel = 0; panel < panelCount; panel++ )
 		putPageRect( values, "panel" + std::to_string( panel ), panels[ panel ], shown[ panel ] );
 
+	// every panel hugs what it holds, so the rest of the old plates is battlefield again
+	IRegion2D box;
+	const Bool leftFound = controlBarUnion( CONTROL_BAR_LEFT, box );
+	putPageRect( values, "left", box, leftFound && panelCount > 0 && shown[ 0 ] );
+	const Bool centreShown = panelCount > 1 && shown[ 1 ];
+	const Bool centreFound = controlBarUnion( CONTROL_BAR_CENTRE, box );
+	putPageRect( values, "centre", box, centreFound && centreShown );
+	const Bool purseFound = controlBarUnion( CONTROL_BAR_PURSE, box );
+	putPageRect( values, "purse", box, purseFound && centreShown );
+	const Bool rightFound = controlBarUnion( CONTROL_BAR_RIGHT, box );
+	putPageRect( values, "right", box, rightFound && panelCount > 2 && shown[ 2 ] );
+
+	// the promotion and minimise buttons go to the right panel's top right corner; a bar with no
+	// portrait showing leaves them where the bar put them, so minimise stays in reach
+	if( rightFound )
+	{
+		const Real scale = ControlBarUniformScale();
+		const Int width = REAL_TO_INT( CORNER_BUTTON_WIDTH * scale );
+		const Int height = REAL_TO_INT( CORNER_BUTTON_HEIGHT * scale );
+		Int x = box.hi.x;
+		for( Int each = 0; each < (Int)ARRAY_SIZE( CORNER_BUTTONS ); each++ )
+		{
+			GameWindow *button = controlBarWindow( CORNER_BUTTONS[ each ] );
+			if( button == NULL )
+				continue;
+
+			x -= width;
+			Int parentX = 0, parentY = 0;
+			if( button->winGetParent() )
+				button->winGetParent()->winGetScreenPosition( &parentX, &parentY );
+			button->winSetPosition( x - parentX, box.lo.y - REAL_TO_INT( CORNER_BUTTON_RISE * scale ) - parentY );
+			button->winSetSize( width, height );
+			x -= REAL_TO_INT( CORNER_BUTTON_GAP * scale );
+		}
+	}
+
 	for( Int each = 0; each < (Int)ARRAY_SIZE( CONTROL_BAR_WINDOWS ); each++ )
 	{
 		const std::string name = CONTROL_BAR_WINDOWS[ each ];
@@ -10224,15 +10274,6 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 		putPageRect( values, name, rect, controlBarWindowRect( window, rect ) );
 		values[ name + ".state" ] = controlBarWindowState( window );
 	}
-
-	// the centre panel hugs its buttons and the purse its money, so the rest of the old plate is
-	// battlefield again
-	const Bool centreShown = panelCount > 1 && shown[ 1 ];
-	IRegion2D box;
-	const Bool centreFound = controlBarUnion( CONTROL_BAR_CENTRE, box );
-	putPageRect( values, "centre", box, centreFound && centreShown );
-	const Bool purseFound = controlBarUnion( CONTROL_BAR_PURSE, box );
-	putPageRect( values, "purse", box, purseFound && centreShown );
 
 	for( Int each = 0; each < (Int)ARRAY_SIZE( CONTROL_BAR_CUSTOM ); each++ )
 	{
