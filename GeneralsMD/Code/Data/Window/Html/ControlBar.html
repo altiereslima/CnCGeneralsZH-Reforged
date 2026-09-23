@@ -21,9 +21,9 @@
                            moving with the bar when it slides or minimises; .w and .h are 0 and
                            {{panelN.shown}} is "hidden" when a minimised bar has stood it down
     {{left.x}} .y .w .h    the box round the radar, so the left panel is only as big as its bezel
-    {{centre.x}} .y .w .h  the box round the command grid; {{centre.shown}} as above.  The money's step
-                           over it is drawn from MoneyDisplay, and the power bar crosses the gap
-                           between them in its groove alone
+    {{centre.x}} .y .w .h  the centre as three blocks stacked flush, with their steel round them
+    {{powerframe.x}} ...   already: the command grid's panel, the power bar's frame standing on it,
+    {{moneyblock.x}} ...   and the money's block on the frame; each .shown as above
     {{right.x}} .y .w .h   the box round the portrait and the experience bar.  The promotion and
                            minimise buttons are moved to sit over its top right corner
     {{Name.x}} .y .w .h    the rectangle of the bar's window Name, {{Name.shown}} "shown" or "hidden"
@@ -62,14 +62,12 @@
      buttons over its top right corner, the centre the command grid under the money and power bar */
   .left { margin: -10px 0 0 -8px; padding: 10px 8px 8px 8px; }
   .right { margin: -22px 0 0 -8px; padding: 22px 8px 8px 8px; }
-  .centre { margin: -10px 0 0 -6px; padding: 10px 6px 6px 6px; }
 
-  /* over the centre, a narrower step for the money.  It hangs down behind the centre, which is drawn
-     after it and covers the join, so it needs no idea where the centre starts.  The power bar
-     crosses in front of it on the way down, in its groove and nothing else */
-  .step { padding-bottom: 30px; }
-  .step .rail { height: 3px; }
-  .moneystep { margin: -5px 0 0 -8px; padding-top: 5px; padding-left: 8px; padding-right: 8px; }
+  /* the centre is three blocks stacked flush like bricks, each narrower than the one under it: the
+     command grid's panel, the power bar's frame on it and the money's block on that.  The game works
+     out where each one ends so they touch, and the page draws them exactly there */
+  .stack { box-sizing: border-box; margin: 0; }
+  .moneyblock .rail { height: 3px; }
 
   /* a bezel: a window set into the panel, four pixels of steel round a black lip */
   .bezel { margin: -5px 0 0 -5px; border: 4px solid #4b535e; border-top-color: #2a3036; border-left-color: #2a3036;
@@ -124,8 +122,9 @@
     <div class="rail"></div>
     <div class="alert {{WinUAttack.state}}">{{text:GUI:BarUnderAttack}}</div>
   </div>
-  <div class="piece panel solid step moneystep {{centre.shown}} {{MoneyDisplay.shown}}" style="left: {{MoneyDisplay.x}}px; top: {{MoneyDisplay.y}}px; width: {{MoneyDisplay.w}}px; height: {{MoneyDisplay.h}}px"><div class="rail"></div></div>
-  <div class="piece panel solid centre {{centre.shown}}" style="left: {{centre.x}}px; top: {{centre.y}}px; width: {{centre.w}}px; height: {{centre.h}}px">
+  <div class="piece panel solid stack moneyblock {{moneyblock.shown}}" style="left: {{moneyblock.x}}px; top: {{moneyblock.y}}px; width: {{moneyblock.w}}px; height: {{moneyblock.h}}px"><div class="rail"></div></div>
+  <div class="piece groove solid stack {{powerframe.shown}}" style="left: {{powerframe.x}}px; top: {{powerframe.y}}px; width: {{powerframe.w}}px; height: {{powerframe.h}}px"><div class="lip"></div></div>
+  <div class="piece panel solid stack centre {{centre.shown}}" style="left: {{centre.x}}px; top: {{centre.y}}px; width: {{centre.w}}px; height: {{centre.h}}px">
     <div class="rail"></div>
     <div class="worker button {{ButtonIdleWorker.state}}" data-click="press:ButtonIdleWorker"><div class="cap">{{text:GUI:BarIdleWorker}}</div></div>
   </div>
@@ -147,7 +146,6 @@
   </div>
 
   <div class="piece well {{CommandWindow.shown}}" style="left: {{CommandWindow.x}}px; top: {{CommandWindow.y}}px; width: {{CommandWindow.w}}px; height: {{CommandWindow.h}}px"></div>
-  <div class="piece groove {{PowerWindow.shown}}" style="left: {{PowerWindow.x}}px; top: {{PowerWindow.y}}px; width: {{PowerWindow.w}}px; height: {{PowerWindow.h}}px"><div class="lip"></div></div>
   <div class="piece groove {{GeneralsExp.shown}}" style="left: {{GeneralsExp.x}}px; top: {{GeneralsExp.y}}px; width: {{GeneralsExp.w}}px; height: {{GeneralsExp.h}}px"><div class="lip"></div></div>
 
   <div class="piece button {{ButtonPlaceBeacon.shown}} {{ButtonPlaceBeacon.state}}" style="left: {{ButtonPlaceBeacon.x}}px; top: {{ButtonPlaceBeacon.y}}px; width: {{ButtonPlaceBeacon.w}}px; height: {{ButtonPlaceBeacon.h}}px"><div class="cap">{{text:GUI:BarBeacon}}</div></div>

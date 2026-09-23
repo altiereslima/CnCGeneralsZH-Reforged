@@ -10188,6 +10188,62 @@ static Bool controlBarUnion( const char *const *names, IRegion2D &box )
 	return found;
 }
 
+/** `box` grown by so many 800x600 pixels on each side, in screen pixels. */
+static IRegion2D grownBy( const IRegion2D &box, Int left, Int top, Int right, Int bottom )
+{
+	const Real scale = ControlBarUniformScale();
+	IRegion2D grown;
+	grown.lo.x = box.lo.x - REAL_TO_INT( left * scale );
+	grown.lo.y = box.lo.y - REAL_TO_INT( top * scale );
+	grown.hi.x = box.hi.x + REAL_TO_INT( right * scale );
+	grown.hi.y = box.hi.y + REAL_TO_INT( bottom * scale );
+	return grown;
+}
+
+static void putPageRect( HtmlValues &values, const std::string &name, const IRegion2D &rect, Bool shown );
+
+/** How much steel each block of the centre stack shows round its window, 800x600 pixels. */
+enum
+{
+	STACK_GRID_SIDE			= 6,	///< either side of the command grid, and under it
+	STACK_GRID_TOP			= 10,	///< over the grid when no power bar sits on it
+	STACK_FRAME					= 3,	///< the power bar's frame and lip
+	STACK_MONEY_SIDE		= 8,
+	STACK_MONEY_TOP			= 5
+};
+
+//-------------------------------------------------------------------------------------------------
+/** The centre of the bar as three blocks stacked flush, each narrower than the one under it: the
+	* command grid's panel, the power bar in its frame on top of that, and the money's block on top of
+	* the frame.  The windows stay where the bar put them; each block reaches down to the next, so
+	* there is no gap between them, and a block whose window is hidden is left out and the one above
+	* it sits on the one below.  Written as centre, powerframe and moneyblock. */
+//-------------------------------------------------------------------------------------------------
+static void stackCentre( HtmlValues &values, Bool shown )
+{
+	IRegion2D grid, power, money;
+	const Bool gridFound = controlBarUnion( CONTROL_BAR_CENTRE, grid );
+	const Bool powerFound = controlBarWindowRect( controlBarWindow( "PowerWindow" ), power );
+	const Bool moneyFound = controlBarWindowRect( controlBarWindow( "MoneyDisplay" ), money );
+
+	IRegion2D centre = grownBy( grid, STACK_GRID_SIDE, STACK_GRID_TOP, STACK_GRID_SIDE, STACK_GRID_SIDE );
+	IRegion2D frame = grownBy( power, STACK_FRAME, STACK_FRAME, STACK_FRAME, STACK_FRAME );
+	IRegion2D block = grownBy( money, STACK_MONEY_SIDE, STACK_MONEY_TOP, STACK_MONEY_SIDE, 0 );
+
+	// each block reaches down to the top of the one it stands on
+	Int floor = centre.lo.y;
+	if( powerFound )
+	{
+		centre.lo.y = frame.hi.y;
+		floor = frame.lo.y;
+	}
+	block.hi.y = floor;
+
+	putPageRect( values, "centre", centre, gridFound && shown );
+	putPageRect( values, "powerframe", frame, powerFound && shown );
+	putPageRect( values, "moneyblock", block, moneyFound && shown );
+}
+
 /** `name`.x, .y, .w and .h in the page's pixels, and `name`.shown "shown" or "hidden". */
 static void putPageRect( HtmlValues &values, const std::string &name, const IRegion2D &rect, Bool shown )
 {
@@ -10242,8 +10298,7 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	IRegion2D box;
 	const Bool leftFound = controlBarUnion( CONTROL_BAR_LEFT, box );
 	putPageRect( values, "left", box, leftFound && panelCount > 0 && shown[ 0 ] );
-	const Bool centreFound = controlBarUnion( CONTROL_BAR_CENTRE, box );
-	putPageRect( values, "centre", box, centreFound && panelCount > 1 && shown[ 1 ] );
+	stackCentre( values, panelCount > 1 && shown[ 1 ] );
 	const Bool rightFound = controlBarUnion( CONTROL_BAR_RIGHT, box );
 	putPageRect( values, "right", box, rightFound && panelCount > 2 && shown[ 2 ] );
 
