@@ -16,6 +16,9 @@
     {{side}}               "america", "china" or "gla": the side whose bar is on screen
     {{promotion}}          "ready" while the general has a promotion to spend
     {{watching}}           "watching" while the local player is an observer or out of the match
+    {{power.fill}}         the power bar: production as a percent of the bar, on the bar's own
+    {{power.needle}}       logarithmic scale, consumption as the same, and {{power.state}} "green",
+                           "yellow" or "red"; the watched player's while watching
     {{blink}}              "lit" for half of every second, for anything that blinks
     {{panelN.x}} .y .w .h  N 0 to 2, left, centre and right: where the plates would have gone,
                            moving with the bar when it slides or minimises; .w and .h are 0 and
@@ -84,6 +87,15 @@
   .groove { margin: -3px 0 0 -3px; border: 2px solid #7d8691; border-bottom-color: #c3ccd3; border-right-color: #aab4bf;
             background-color: #020405; }
   .groove .lip { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border: 1px solid #000000; }
+
+  /* the power bar is the page's: the production fills the frame from the left, in the power bar's
+     own green, yellow or red, and the consumption is a white needle across it.  Full is the whole
+     frame, lip to lip */
+  .powerfill { position: absolute; left: 0; top: 0; bottom: 0; background-image: url(PowerBarGreen);
+               background-size: 100% 100%; background-repeat: no-repeat; }
+  .powerfill.yellow { background-image: url(PowerBarYellow); }
+  .powerfill.red { background-image: url(PowerBarRed); }
+  .needle { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background-color: #ffffff; }
   .china .groove { border-color: #a44734; border-bottom-color: #e8a28a; border-right-color: #d98a72; }
   .gla .groove { border-color: #978a50; border-bottom-color: #ddd29a; border-right-color: #cbbf82; }
 
@@ -123,7 +135,11 @@
     <div class="alert {{WinUAttack.state}}">{{text:GUI:BarUnderAttack}}</div>
   </div>
   <div class="piece panel solid stack moneyblock {{moneyblock.shown}}" style="left: {{moneyblock.x}}px; top: {{moneyblock.y}}px; width: {{moneyblock.w}}px; height: {{moneyblock.h}}px"><div class="rail"></div></div>
-  <div class="piece groove solid stack {{powerframe.shown}}" style="left: {{powerframe.x}}px; top: {{powerframe.y}}px; width: {{powerframe.w}}px; height: {{powerframe.h}}px"><div class="lip"></div></div>
+  <div class="piece groove solid stack {{powerframe.shown}}" style="left: {{powerframe.x}}px; top: {{powerframe.y}}px; width: {{powerframe.w}}px; height: {{powerframe.h}}px">
+    <div class="powerfill {{power.state}}" style="width: {{power.fill}}%"></div>
+    <div class="needle" style="left: {{power.needle}}%"></div>
+    <div class="lip"></div>
+  </div>
   <div class="piece panel solid stack centre {{centre.shown}}" style="left: {{centre.x}}px; top: {{centre.y}}px; width: {{centre.w}}px; height: {{centre.h}}px">
     <div class="rail"></div>
     <div class="worker button {{ButtonIdleWorker.state}}" data-click="press:ButtonIdleWorker"><div class="cap">{{text:GUI:BarIdleWorker}}</div></div>

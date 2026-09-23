@@ -10102,8 +10102,51 @@ static const char *const CONTROL_BAR_WINDOWS[] =
 	* clicks; only their pictures are the page's. */
 static const char *const CONTROL_BAR_CUSTOM[] =
 {
-	"ButtonGeneral", "ButtonLarge", "ButtonPlaceBeacon", "WinUAttack"
+	"ButtonGeneral", "ButtonLarge", "ButtonPlaceBeacon", "WinUAttack", "PowerWindow"
 };
+
+/** How far along its scale a power figure reaches, 0 to 1: the power bar's own logarithmic scale,
+	* TheGlobalData's base and intervals, the one W3DPowerDraw measured with. */
+static Real powerBarShare( Real power )
+{
+	if( power <= 1.0f || TheGlobalData->m_powerBarBase <= 1 || TheGlobalData->m_powerBarIntervals <= 0.0f )
+		return 0.0f;
+	const Real share = logf( power ) / logf( (Real)TheGlobalData->m_powerBarBase ) / TheGlobalData->m_powerBarIntervals;
+	return share > 1.0f ? 1.0f : share;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The power bar as the page draws it, filling its frame: {{power.fill}} the production and
+	* {{power.needle}} the consumption, both percent of the frame, and {{power.state}} "green",
+	* "yellow" or "red" by the bar's own rule - red once consumption passes production, yellow within
+	* m_powerBarYellowRange of it.  Watching, it is the watched player's power. */
+//-------------------------------------------------------------------------------------------------
+static void putPowerBar( HtmlValues &values )
+{
+	enum { ONE_UNIT_NEEDLE_TENTHS = 15 };	///< a consumption of 1 is drawn as 1.5: log(1) is 0, and 1 is not nothing
+
+	Player *player = TheControlBar->isObserverControlBarOn() ? TheControlBar->getObserverLookAtPlayer()
+																												 : ThePlayerList->getLocalPlayer();
+	const Energy *energy = player ? player->getEnergy() : NULL;
+	if( energy == NULL )
+	{
+		values[ "power.fill" ] = "0";
+		values[ "power.needle" ] = "0";
+		return;
+	}
+
+	const Int production = energy->getProduction();
+	const Int consumption = energy->getConsumption();
+	const Real needle = consumption == 1 ? ONE_UNIT_NEEDLE_TENTHS / 10.0f : (Real)consumption;
+	values[ "power.fill" ] = std::to_string( REAL_TO_INT( powerBarShare( (Real)production ) * PERCENT ) );
+	values[ "power.needle" ] = std::to_string( REAL_TO_INT( powerBarShare( needle ) * PERCENT ) );
+	if( consumption > production )
+		values[ "power.state" ] = "red";
+	else if( consumption > production - TheGlobalData->m_powerBarYellowRange )
+		values[ "power.state" ] = "yellow";
+	else
+		values[ "power.state" ] = "green";
+}
 
 /** The bar's windows the page stands down altogether.  The menu and idle worker buttons are the
 	* page's own, pressed through data-click="press:Name" because they sit where the bar's frame takes
@@ -10294,6 +10337,7 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	const Bool watching = localPlayerWatching();
 	values[ "promotion" ] = !watching && TheControlBar->isGeneralStarFlashing() ? "ready" : "";
 	values[ "watching" ] = watching ? "watching" : "";
+	putPowerBar( values );
 	values[ "blink" ] = TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND > LOGICFRAMES_PER_SECOND / 2 ? "lit" : "";
 	for( Int panel = 0; panel < panelCount; panel++ )
 		putPageRect( values, "panel" + std::to_string( panel ), panels[ panel ], shown[ panel ] );
