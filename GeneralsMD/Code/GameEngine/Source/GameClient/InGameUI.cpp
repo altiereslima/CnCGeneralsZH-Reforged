@@ -6982,6 +6982,9 @@ void InGameUI::deselectAllDrawables( void )
 	// keep our list all tidy
 	m_selectedDrawables.clear();
 
+	// a fresh selection is the player's choice, and a unit still underground is not in it
+	m_tunnelTripRiders.clear();
+
 
 	// our selection can no longer consist of exactly one angry mob
 	m_soloNexusSelectedDrawableID = INVALID_DRAWABLE_ID;
@@ -7005,6 +7008,42 @@ void InGameUI::deselectAllDrawables( void )
 const DrawableList *InGameUI::getAllSelectedDrawables( void ) const
 {
 	return &m_selectedDrawables;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A tunnel hides its passengers, and hiding a drawable deselects it. A player who never asked for
+	* the tunnel, because a move order took it on its own, lost the unit from the selection on the way
+	* through; remember it here so it comes back out selected. A trip ordered by clicking the tunnel
+	* still deselects, as it always did. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::holdSelectionThroughTunnel( Drawable *draw )
+{
+	const Object *obj = draw->getObject();
+	if( obj == NULL || obj->getAI() == NULL || !obj->getAI()->hasTunnelTrip() )
+		return;
+	if( obj->getControllingPlayer() != ThePlayerList->getLocalPlayer() )
+		return;
+
+	m_tunnelTripRiders.push_back( obj->getID() );
+}
+
+//-------------------------------------------------------------------------------------------------
+void InGameUI::restoreSelectionAfterTunnel( Drawable *draw )
+{
+	const Object *obj = draw->getObject();
+	if( obj == NULL )
+		return;
+
+	std::vector<ObjectID>::iterator rider = std::find( m_tunnelTripRiders.begin(), m_tunnelTripRiders.end(), obj->getID() );
+	if( rider == m_tunnelTripRiders.end() )
+		return;
+	m_tunnelTripRiders.erase( rider );
+
+	// the tunnel took it out of the logic side's group too, so it goes back in the way a click adds it
+	GameMessage *groupMsg = TheMessageStream->appendMessage( GameMessage::MSG_CREATE_SELECTED_GROUP );
+	groupMsg->appendBooleanArgument( FALSE );
+	groupMsg->appendObjectIDArgument( obj->getID() );
+	selectDrawable( draw );
 }
 
 //-------------------------------------------------------------------------------------------------

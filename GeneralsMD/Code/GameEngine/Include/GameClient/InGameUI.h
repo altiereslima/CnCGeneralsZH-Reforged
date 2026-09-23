@@ -707,6 +707,8 @@ public:  // ********************************************************************
 	virtual void selectDrawable( Drawable *draw );					///< Mark given Drawable as "selected"
 	virtual void deselectDrawable( Drawable *draw );				///< Clear "selected" status from Drawable
 	virtual void deselectAllDrawables( void );							///< Clear the "select" flag from all drawables
+	void holdSelectionThroughTunnel( Drawable *draw );			///< a selected unit going down a tunnel on its own is selected again when it comes up
+	void restoreSelectionAfterTunnel( Drawable *draw );			///< reselect a unit held by holdSelectionThroughTunnel
 	virtual Int getSelectCount( void ) { return m_selectCount; }		///< Get count of currently selected drawables
 	virtual Int getMaxSelectCount( void ) { return m_maxSelectCount; }	///< Get the max number of selected drawables
 	virtual UnsignedInt getFrameSelectionChanged( void ) { return m_frameSelectionChanged; }	///< Get the max number of selected drawables
@@ -1082,6 +1084,7 @@ protected:
 	AsciiString									m_currentlyPlayingMovie;											///< Used to push updates to TheScriptEngine
 	DrawableList								m_selectedDrawables;													///< A list of all selected drawables.
 	DrawableList								m_selectedLocalDrawables;											///< A list of all selected drawables owned by the local player
+	std::vector<ObjectID>				m_tunnelTripRiders;														///< selected units inside the tunnel network on a move order, selected again when they come out
 	Bool												m_isDragSelecting;														///< If TRUE, an area selection is in progress
 	IRegion2D										m_dragSelectRegion;														///< if isDragSelecting is TRUE, this contains select region
 	Bool												m_isFormationDragging;												///< TRUE while a formation line is being drawn (fork)

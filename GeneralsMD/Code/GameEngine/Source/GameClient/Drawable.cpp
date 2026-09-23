@@ -5332,7 +5332,13 @@ void Drawable::updateHiddenStatus()
 {
 	Bool hidden = m_hidden || m_hiddenByStealth;
 	if( hidden )
+	{
+		if( isSelected() )
+			TheInGameUI->holdSelectionThroughTunnel( this );
 		TheInGameUI->deselectDrawable( this );
+	}
+	else
+		TheInGameUI->restoreSelectionAfterTunnel( this );
 
 	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
 	{
