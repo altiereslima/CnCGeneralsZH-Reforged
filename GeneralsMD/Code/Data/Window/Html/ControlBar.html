@@ -121,15 +121,18 @@
   .gla .bezel .steel { background: linear-gradient(to bottom, #b8ab6e, #766a3a 30%, #3c3519); }
   .gla .bezel .shine { background-color: #ebe2b4; }
   .gla .bezel .sunk { border-bottom-color: #cbbf82; border-right-color: #cbbf82; }
-  /* the command grid: its well is steel, and each of the fourteen places a dark cell a pixel round
-     its button, so steel lines run between the buttons and an empty place shows as a hole */
+  /* the command grid: its well is steel, and each of the fourteen places a dark cell exactly its
+     button's size, the bevel drawn inside it, so a button covers its cell whole and steel lines run
+     between the buttons; an empty place shows as a hole.  A pixel round the button showed as a light
+     line down one side of every button, the other side rounding under it */
   .bezel .sunk.grid { background-color: #3a414a; }
   .china .bezel .sunk.grid { background-color: #45190f; }
   .gla .bezel .sunk.grid { background-color: #423a1c; }
-  .commandcell { margin: -1px 0 0 -1px; border: 1px solid #06090b; border-bottom-color: #9aa4ae; border-right-color: #9aa4ae;
-                 background-color: #020405; }
-  .china .commandcell { border-bottom-color: #d98a72; border-right-color: #d98a72; }
-  .gla .commandcell { border-bottom-color: #cbbf82; border-right-color: #cbbf82; }
+  .commandcell { background-color: #020405; }
+  .commandcell .bevel { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border: 1px solid #06090b;
+                        border-bottom-color: #9aa4ae; border-right-color: #9aa4ae; }
+  .china .commandcell .bevel { border-bottom-color: #d98a72; border-right-color: #d98a72; }
+  .gla .commandcell .bevel { border-bottom-color: #cbbf82; border-right-color: #cbbf82; }
 
   /* over the centre's border the power bar's frame and on it the money's block, stacked flush */
   .stack { box-sizing: border-box; margin: 0; }
@@ -285,7 +288,7 @@
     <div class="shade" style="right: -{{centre.br}}px; top: -{{centre.bt}}px; bottom: -{{centre.bb}}px"></div>
     <div class="sunk grid" style="width: {{centre.w}}px; height: {{centre.h}}px"></div>
   </div>
-  <div class="piece commandcell" data-each="commandcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"></div>
+  <div class="piece commandcell" data-each="commandcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="bevel"></div></div>
   <div class="piece step worker solid {{workertab.shown}} {{ButtonIdleWorker.state}}" style="left: {{workertab.x}}px; top: {{workertab.y}}px; width: {{workertab.w}}px; height: {{workertab.h}}px">
     <div class="key" data-click="press:ButtonIdleWorker"><div class="icon"></div><div class="veil"></div></div>
   </div>
