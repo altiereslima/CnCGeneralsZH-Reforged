@@ -55,8 +55,7 @@
                            {{label}}, "solo" for a player with no ally, or "ffa" for everybody in a
                            free for all; its players in places s0 to s7, {{sN.image}} {{sN.color}}
                            and {{sN.weapon}} "ready", "charging" or "none", {{sN.state}} "none" on an
-                           unused place.  Kind "clock" shows {{clock}}, between two teams or after
-                           the rest; kind "gap" stands between any others
+                           unused place.  An entry of kind "gap" stands between two others
     {{panelN.x}} .y .w .h  N 0 to 2, left, centre and right: where the plates would have gone,
                            moving with the bar when it slides or minimises; .w and .h are 0 and
                            {{panelN.shown}} is "hidden" when a minimised bar has stood it down
@@ -345,17 +344,18 @@
 
   /* the players hanging from the top edge: each their general's flag filling a hairline frame with
      their colour along its top, and under it a band for their superweapons, green once one can
-     fire, blue while none can yet, grey when they have none.  A team stands in a steel frame of its
-     own with its name under the flags; a free for all is everybody side by side.  The clock stands
-     between two teams, or after everybody else */
+     fire, blue while none can yet, grey when they have none.  A team hangs in a plate of the bar's
+     steel, your side's colour, with its name under the flags; a free for all is everybody side by
+     side.  The match clock is on the Tab scoreboard */
   #seats { left: 180px; right: 180px; top: 0; text-align: center; }
-  .steam, .sffa, .ssolo, .sclock, .sgap { display: inline-block; position: relative; vertical-align: top; }
-  .steam { padding: 0 2px 1px 2px; background-color: rgba(4, 8, 10, 0.85); border: 1px solid #8a949f; border-top: 0; }
-  .china .steam { border-color: #b8604b; }
-  .gla .steam { border-color: #a99d62; }
+  .steam, .sffa, .ssolo, .sgap { display: inline-block; position: relative; vertical-align: top; }
+  .steam { padding: 0 2px 1px 2px; border: 1px solid #0c1114; border-top: 0; border-left-color: #b3bbc4;
+           background: linear-gradient(to bottom, #9aa3ad, #5a626c 30%, #353c45); }
+  .china .steam { border-left-color: #d58a70; background: linear-gradient(to bottom, #c06a52, #7a3120 30%, #3f160f); }
+  .gla .steam { border-left-color: #cabe86; background: linear-gradient(to bottom, #b8ab6e, #766a3a 30%, #3c3519); }
   .teamname { display: none; }
-  .steam .teamname { display: block; line-height: 9px; font-size: 7px; font-weight: bold; color: #e8d27a; }
-  .sclock .flags, .sgap .flags, .sclock .teamname, .sgap .teamname, .steam .clocktext, .sffa .clocktext, .ssolo .clocktext, .sgap .clocktext { display: none; }
+  .steam .teamname { display: block; line-height: 9px; font-size: 7px; font-weight: bold; color: #f2cf4a; }
+  .sgap .flags { display: none; }
   .flag { display: inline-block; position: relative; vertical-align: top; width: 32px; height: 26px; margin: 0 1px; }
   .flag.none { display: none; }
   .flag .plate { position: absolute; left: 0; top: 0; width: 30px; height: 21px; border: 1px solid #0c1114; border-top: 0; background-color: #0c1114; }
@@ -365,8 +365,6 @@
   .flag .lamp.ready { background-color: #4fd83a; }
   .flag .lamp.charging { background-color: #3a8ee8; }
   .flag .lamp.none { background-color: #6a737c; }
-  .sclock { width: 46px; height: 18px; margin: 0 4px; line-height: 18px; font-size: 10px; font-weight: bold; color: #e8d27a;
-            background-color: rgba(4, 8, 10, 0.9); border: 1px solid #06090b; border-top: 0; border-bottom-color: #b4bec8; border-right-color: #b4bec8; }
   .sgap { width: 8px; height: 26px; }
 </style>
 </head>
@@ -468,7 +466,6 @@
         <div class="flag {{s7.state}}"><div class="plate"><div class="stripe" style="background-color: {{s7.color}}"></div><img class="emblem" src="{{s7.image}}"></div><div class="lamp {{s7.weapon}}"></div></div>
       </div>
       <div class="teamname">{{label}}</div>
-      <div class="clocktext">{{clock}}</div>
     </div>
   </div>
 

@@ -2264,8 +2264,8 @@ static const GameSlot *playerSlot( const Player *player )
 	* superweapons stand, "ready" once one can fire, "charging" while none can yet and "none" when they
 	* have none; an unused place has {{sN.state}} "none".  A player with no ally is an entry of kind
 	* "solo", with no frame or name, and a free for all past two players is one entry of kind "ffa",
-	* everybody side by side.  The match clock, kind "clock", stands between exactly two teams and after
-	* the rest otherwise, a "gap" between any other two. */
+	* everybody side by side.  Between two entries stands one of kind "gap"; the match clock is on
+	* the Tab scoreboard. */
 //-------------------------------------------------------------------------------------------------
 static void fillPlayerSeats( const std::vector< SpectatorStats > &seats, Int teams,
 														 const std::vector< SpectatorSuperweapon > &weapons, std::vector< HtmlValues > &entries )
@@ -2311,21 +2311,11 @@ static void fillPlayerSeats( const std::vector< SpectatorStats > &seats, Int tea
 		if( !entries.empty() )
 		{
 			HtmlValues between;
-			between[ "kind" ] = teams == TWO_TEAMS ? "clock" : "gap";
+			between[ "kind" ] = "gap";
 			entries.push_back( between );
 		}
 		entries.push_back( group );
 		first = end;
-	}
-	if( teams != TWO_TEAMS )
-	{
-		HtmlValues gap;
-		gap[ "kind" ] = "gap";
-		if( !entries.empty() )
-			entries.push_back( gap );
-		HtmlValues clock;
-		clock[ "kind" ] = "clock";
-		entries.push_back( clock );
 	}
 }
 
@@ -11157,7 +11147,6 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 		const std::vector< SpectatorStats > seats = gatherSeats( teams );
 		fillPlayerSeats( seats, teams, m_spectatorSuperweapons, lists[ "seats" ] );
 	}
-	values[ "clock" ] = spectatorClock( TheGameLogic->getFrame() );
 
 	// a well behind each of the fourteen command buttons, shown or not, so the grid reads as a grid
 	// with the steel between its places, and an empty place is a hole in it rather than bare dark
