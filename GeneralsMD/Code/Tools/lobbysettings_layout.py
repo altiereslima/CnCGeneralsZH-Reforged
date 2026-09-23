@@ -126,6 +126,13 @@ SUPERWEAPON_CHECKBOX = ("CheckboxLimitSuperweapons", "CheckBoxLimitSuperweapons"
 # menu code names them and a missing control is as silent as the rest.
 HAND_PLACED_CHECKBOXES = ("CheckBoxUnitLimit", "CheckBoxProRules")
 
+# Income sharing went on all three pages by hand the same way.
+HAND_PLACED_COMBOS = ("LabelIncomeSharing", "ComboBoxIncomeSharing")
+
+# What build() moves out of EA's skirmish layout and a later hand edit replaced: the game speed
+# slider and its number became one dropdown in the slider's place.  None is gone without a successor.
+REPLACED_BY_HAND = {"SliderGameSpeed": "ComboBoxGameSpeed", "StaticTextGameSpeed": None}
+
 # Pro Rules are for people playing each other, so the skirmish page lost its box again for v1.0.0 and
 # the selfcheck wants it gone there rather than present.
 NO_PRO_RULES_MENU = "SkirmishGameOptionsMenu"
@@ -154,6 +161,11 @@ STRINGS = [
     "TOOLTIP:UnitLimit",
     "GUI:ProRules",
     "TOOLTIP:ProRules",
+    "GUI:IncomeSharing",
+    "TOOLTIP:IncomeSharing",
+    "GUI:IncomeSharingOff",
+    "GUI:IncomeSharingTech",
+    "GUI:IncomeSharingAll",
 ]
 
 
@@ -285,7 +297,10 @@ def selfcheck():
             if layout.find(name) is None:
                 problems.append("%s.wnd has no %s" % (menu, name))
 
-        for name, _l, _t, _w, _h in spec["move"]:
+        for moved, _l, _t, _w, _h in spec["move"]:
+            name = REPLACED_BY_HAND.get(moved, moved)
+            if name is None:
+                continue
             control = layout.find(name)
             if control is None:
                 problems.append("%s.wnd has no %s" % (menu, name))
@@ -300,6 +315,13 @@ def selfcheck():
             elif checkbox is None:
                 problems.append("%s.wnd has no %s" % (menu, name))
             elif page is not None and checkbox not in list(page.walk()):
+                problems.append("%s.wnd: %s is not on the settings page" % (menu, name))
+
+        for name in HAND_PLACED_COMBOS:
+            control = layout.find(name)
+            if control is None:
+                problems.append("%s.wnd has no %s" % (menu, name))
+            elif page is not None and control not in list(page.walk()):
                 problems.append("%s.wnd: %s is not on the settings page" % (menu, name))
 
         for name in SUPERWEAPON_CHECKBOX:

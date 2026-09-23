@@ -90,14 +90,15 @@ LAN_COLUMNS = [
 # (label width, control width, rows); a row is (label, combo), (label, slider, readout) or (check,).
 # "Allow Superweapons" needs 152 at 800x600.
 SKIRMISH_SETTINGS = [
-    (96, 152, [("StartingCashLabel", "ComboBoxStartingCash"), ("LabelSuperweapons", "ComboBoxSuperweapons")]),
-    (88, 112, [("LabelGameSpeed", "SliderGameSpeed", "StaticTextGameSpeed"), ("CheckBoxUnitLimit",)]),
+    (96, 152, [("StartingCashLabel", "ComboBoxStartingCash"), ("LabelSuperweapons", "ComboBoxSuperweapons"),
+               ("LabelIncomeSharing", "ComboBoxIncomeSharing")]),
+    (88, 112, [("LabelGameSpeed", "ComboBoxGameSpeed"), ("CheckBoxUnitLimit",)]),
 ]
-# The LAN page is 84 high over the chat entry, two rows, so Pro Rules takes a third column instead.
+# The LAN page is 84 high over the chat entry, two rows, so the check boxes take a third column.
 LAN_SETTINGS = [
     (96, 152, [("StartingCashLabel", "ComboBoxStartingCash"), ("LabelSuperweapons", "ComboBoxSuperweapons")]),
-    (96, 152, [("LabelPeaceTime", "ComboBoxPeaceTime"), ("CheckBoxUnitLimit",)]),
-    (0, 128, [("CheckBoxProRules",)]),
+    (96, 152, [("LabelPeaceTime", "ComboBoxPeaceTime"), ("LabelIncomeSharing", "ComboBoxIncomeSharing")]),
+    (0, 128, [("CheckBoxProRules",), ("CheckBoxUnitLimit",)]),
 ]
 
 STAT_ROWS = [
