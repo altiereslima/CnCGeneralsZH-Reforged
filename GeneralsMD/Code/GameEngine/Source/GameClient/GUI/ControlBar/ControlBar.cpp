@@ -1385,6 +1385,7 @@ ControlBar::ControlBar( void )
 	m_remainingRadarAttackGlowFrames = 0;
 	m_radarAttackGlowWindow = NULL;
 	m_pageSolidsActive = FALSE;
+	m_shippedShortcutSlot.x = m_shippedShortcutSlot.y = 0;
 
 #if defined( _INTERNAL ) || defined( _DEBUG )
 	m_lastFrameMarkedDirty = 0;
@@ -1912,13 +1913,17 @@ static const std::vector<UnsignedByte> &plateMask( const ControlBarPlate *plate 
 }
 
 //-------------------------------------------------------------------------------------------------
-void ControlBar::setPageSolids( const std::vector< IRegion2D > *solids )
+void ControlBar::setPageSolids( const std::vector< IRegion2D > *solids, const std::vector< IRegion2D > *holes )
 {
 	m_pageSolidsActive = solids != NULL;
 	if( solids )
 		m_pageSolids = *solids;
 	else
 		m_pageSolids.clear();
+	if( holes )
+		m_pageHoles = *holes;
+	else
+		m_pageHoles.clear();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1939,6 +1944,14 @@ Bool ControlBar::letsClickThrough( GameWindow *window, Int x, Int y )
 	// spans the whole centre - would otherwise keep a click on bare battlefield
 	if( m_pageSolidsActive )
 	{
+		// the page's own buttons hand their clicks on to the page, which takes them as clicks on
+		// the world, even where they stand on a solid panel
+		for( size_t hole = 0; hole < m_pageHoles.size(); hole++ )
+		{
+			const IRegion2D &rect = m_pageHoles[ hole ];
+			if( x >= rect.lo.x && y >= rect.lo.y && x < rect.hi.x && y < rect.hi.y )
+				return TRUE;
+		}
 		for( size_t solid = 0; solid < m_pageSolids.size(); solid++ )
 		{
 			const IRegion2D &rect = m_pageSolids[ solid ];
@@ -6029,6 +6042,7 @@ void ControlBar::initSpecialPowershortcutBar( Player *player)
 		m_specialPowerShortcutButtonParents[i] = NULL;
 		m_specialPowerShortcutButtons[i] = NULL;
 	}
+	m_shippedShortcutSlot.x = m_shippedShortcutSlot.y = 0;	// a new layout, measured afresh
 
 	if(m_specialPowerLayout)
 	{
@@ -6182,6 +6196,72 @@ void ControlBar::arrangeSpecialPowerShortcutGrid( void )
 	for( Int j = MAX_SPECIAL_POWER_SHORTCUTS - 1; j >= 0; j-- )
 		if( m_specialPowerShortcutButtonParents[ j ] )
 			m_specialPowerShortcutButtonParents[ j ]->winBringToTop();
+}
+
+//-------------------------------------------------------------------------------------------------
+void ControlBar::placeSpecialPowerShortcutGrid( const IRegion2D *area, ICoord2D *cell )
+{
+	if( cell )
+		cell->x = cell->y = 0;
+	if( m_specialPowerShortcutParent == NULL || m_specialPowerShortcutButtonParents[ 0 ] == NULL )
+		return;
+
+	// the cell keeps the tray's own proportions, read off the first slot the layout shipped - once,
+	// since the grid below resizes that slot every frame
+	if( m_shippedShortcutSlot.x <= 0 )
+		m_specialPowerShortcutButtonParents[ 0 ]->winGetSize( &m_shippedShortcutSlot.x, &m_shippedShortcutSlot.y );
+	const Int cellWidth = area ? ( area->hi.x - area->lo.x ) / SPECIAL_POWER_SHORTCUT_COLS : 0;
+	if( m_shippedShortcutSlot.x <= 0 || cellWidth <= 0 )
+	{
+		if( !m_specialPowerShortcutParent->winIsHidden() )
+			m_specialPowerShortcutParent->winHide( TRUE );
+		return;
+	}
+	const Int cellHeight = cellWidth * m_shippedShortcutSlot.y / m_shippedShortcutSlot.x;
+	if( cell )
+	{
+		cell->x = cellWidth;
+		cell->y = cellHeight;
+	}
+	if( m_currentlyUsedSpecialPowersButtons < 1 )
+	{
+		if( !m_specialPowerShortcutParent->winIsHidden() )
+			m_specialPowerShortcutParent->winHide( TRUE );
+		return;
+	}
+
+	ICoord2D cameoSize, cameoOffset;
+	if( trayLayoutFromSlot( cellWidth, cellHeight, NULL, &cameoSize, &cameoOffset, NULL ) == FALSE )
+		return;
+
+	// the bar covers every cell, or a cell off its edge draws and never takes a click.  It is as tall
+	// as SPECIAL_POWER_SHORTCUT_COLS rows at least, so the first power takes the grid's top left place
+	// with the page's empty ones under it; a longer list grows upward.  Its position is its own
+	// parent's, and the layout's root is not the screen
+	// the powers showing, not the slots the side has: m_currentlyUsedSpecialPowersButtons is eleven
+	// for a general with one power ready, and four rows of it stood the grid a row too high
+	const Int filled = ( countVisibleSpecialPowerShortcuts() + SPECIAL_POWER_SHORTCUT_COLS - 1 ) / SPECIAL_POWER_SHORTCUT_COLS;
+	const Int rows = MAX( filled, (Int)SPECIAL_POWER_SHORTCUT_COLS );
+	Int parentX = 0, parentY = 0;
+	if( m_specialPowerShortcutParent->winGetParent() )
+		m_specialPowerShortcutParent->winGetParent()->winGetScreenPosition( &parentX, &parentY );
+	m_specialPowerShortcutParent->winSetPosition( area->lo.x - parentX, area->hi.y - cellHeight * rows - parentY );
+	m_specialPowerShortcutParent->winSetSize( cellWidth * SPECIAL_POWER_SHORTCUT_COLS, cellHeight * rows );
+	if( m_specialPowerShortcutParent->winIsHidden() )
+		m_specialPowerShortcutParent->winHide( FALSE );
+
+	for( Int i = 0; i < MAX_SPECIAL_POWER_SHORTCUTS; i++ )
+	{
+		GameWindow *slot = m_specialPowerShortcutButtonParents[ i ];
+		GameWindow *button = m_specialPowerShortcutButtons[ i ];
+		if( slot == NULL || button == NULL )
+			continue;
+
+		slot->winSetPosition( ( i % SPECIAL_POWER_SHORTCUT_COLS ) * cellWidth, ( i / SPECIAL_POWER_SHORTCUT_COLS ) * cellHeight );
+		slot->winSetSize( cellWidth, cellHeight );
+		button->winSetSize( cameoSize.x, cameoSize.y );
+		button->winSetPosition( cameoOffset.x, cameoOffset.y );
+	}
 }
 
 //-------------------------------------------------------------------------------------------------

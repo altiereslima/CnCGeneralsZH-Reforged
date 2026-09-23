@@ -1208,6 +1208,7 @@ protected:
 	HtmlOverlay *								m_controlBarOverlay;
 	Bool												m_controlBarPageLoaded;
 	Bool												m_controlBarPageShown;		///< drawn this frame, so its buttons can be clicked
+	std::set< std::string >			m_controlBarFlipped;			///< names a data-click="flip:name" on that page has flipped
 	std::string									m_controlBarPage;
 
 	//
@@ -1247,6 +1248,7 @@ protected:
 	void drawBlindSpots( void );					///< shade the ground a placed or selected defence cannot shoot into
 
 	DisplayString *							m_hudDisplayString;			///< the ShowHudOverlay line (fps / clock)
+	HtmlValues									m_hudValues;						///< that line's readings one by one, for the command bar page's network box
 	DisplayString *							m_peaceTimeDisplayString;	///< the peace time clock at the top of the screen
 	DisplayString *							m_peaceTimeLabelDisplayString;	///< the word written over that clock
 	DisplayString *							m_peaceCountdownDisplayString;	///< the big digit of its last ten seconds

@@ -15637,6 +15637,22 @@ GUI:BarBeacon
 "İşaret"
 END
 
+GUI:BarSkills
+"Yetenekler"
+END
+
+GUI:BarNetReady
+"hazır"
+END
+
+GUI:BarNetRoom
+"oda"
+END
+
+GUI:BarNetUnits
+"birim"
+END
+
 GUI:BarUnderAttack
 "SALDIRI ALTINDA"
 END

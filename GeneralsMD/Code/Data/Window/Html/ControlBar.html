@@ -21,6 +21,19 @@
                            "yellow" or "red"; the watched player's while watching
     data-each="powercells" the same production as 40 cells, each {{lit}} "lit" up to it, standing at
                            {{x}} pixels inside the frame's lip and {{w}} wide
+    {{skillsbutton.x}} ... the skills button's place in the right panel's corner; data-click
+                           "flip:skills" folds the general's powers away and back, and
+                           {{flip:skills}} is "flipped" while they are folded
+    data-each="skillcells" the grid's nine empty places behind the powers, each {{cell.x}} .y .w .h;
+                           none while the skills button has them folded away
+    {{signals.x}} ...      the column of smoke signal buttons against the left panel;
+                           data-click="signal:attack", "signal:defend" or "signal:look" sends one
+                           to the middle of the view, and {{signals}} is "disabled" where the keys
+                           would do nothing either
+    {{net.clock}} ...      the network box: net.clock, net.game, net.real, net.hz, net.fps,
+                           net.renderer and net.frame always; net.ready, net.runahead, net.room,
+                           net.in and net.out with {{net.online}} "online" in a network game;
+                           net.units and net.cap with {{net.capped}} "capped" under a unit limit
     {{blink}}              "lit" for half of every second, for anything that blinks
     {{panelN.x}} .y .w .h  N 0 to 2, left, centre and right: where the plates would have gone,
                            moving with the bar when it slides or minimises; .w and .h are 0 and
@@ -38,7 +51,7 @@
                            and {{Name.state}} any of "disabled", "hilite", "pushed", for LeftHUD (the
                            radar), RightHUD (the portrait's box), CameoWindow (the portrait),
                            CommandWindow, MoneyDisplay, PowerWindow, GeneralsExp, ButtonGeneral,
-                           ButtonLarge (minimise), ButtonOptions, ButtonIdleWorker, ButtonPlaceBeacon,
+                           ButtonLarge (the minimise button, stood down), ButtonOptions, ButtonIdleWorker, ButtonPlaceBeacon,
                            PopupCommunicator and WinUAttack (the under-attack light: "disabled" while
                            it is lit, which is how the bar blinks it)
   All in the page's pixels, a pixel of an 800x600 screen.  Without this page the plates draw.
@@ -141,6 +154,31 @@
   .alert { position: absolute; left: 4px; top: -15px; height: 13px; line-height: 13px; padding: 0 6px; font-size: 7px; font-weight: bold;
            color: #5a2a24; background-color: rgba(20, 8, 6, 0.9); border: 1px solid #4a1a14; border-bottom: 0; }
   .alert.disabled { color: #ffffff; background: linear-gradient(to bottom, #ff6a50, #b0200f); border-color: #ffb0a0; }
+
+  /* the skills button is lit while the powers are out, and dark once folded away; the grid's empty
+     places stand behind the powers, and go with them */
+  .skills.flipped { color: #6f7782; }
+  .skillcell { margin: 1px 0 0 1px; }
+
+  /* the smoke signals, a column of square caps against the radar panel; greyed where the keys would
+     do nothing either, outside a multiplayer game */
+  /* each button stands at its own top: a relatively placed box inside an absolutely placed one is
+     laid out from the screen's corner here, and the column came out in the top left */
+  .signals .signal { position: absolute; left: 0; width: 37px; height: 21px; font-size: 7px; }
+  .signals.disabled .signal { color: #6f7782; }
+  .signal.attack { border-left: 3px solid #e0503c; }
+  .signal.defend { border-left: 3px solid #5a9ee0; }
+  .signal.look { border-left: 3px solid #e8d27a; }
+
+  /* the network box: everything the corner readout had, flush in the screen's top right corner */
+  #net { right: 0; top: 0; padding: 3px 6px 3px 8px; border-right: 0; font-size: 7px; color: #c9d2d9; text-align: right; }
+  #net .line { line-height: 10px; white-space: nowrap; }
+  #net .big { font-size: 9px; font-weight: bold; color: #e8d27a; }
+  #net .dim { color: #7d8a93; }
+  #net .onlineonly { display: none; }
+  #net.online .onlineonly { display: block; }
+  #net .cappedonly { display: none; }
+  #net .cappedonly.capped { display: block; }
 </style>
 </head>
 <body>
@@ -182,12 +220,27 @@
 
   <div class="piece button {{ButtonPlaceBeacon.shown}} {{ButtonPlaceBeacon.state}}" style="left: {{ButtonPlaceBeacon.x}}px; top: {{ButtonPlaceBeacon.y}}px; width: {{ButtonPlaceBeacon.w}}px; height: {{ButtonPlaceBeacon.h}}px"><div class="cap">{{text:GUI:BarBeacon}}</div></div>
   <div class="piece button promotion {{promotion}} {{blink}} {{ButtonGeneral.shown}} {{ButtonGeneral.state}}" style="left: {{ButtonGeneral.x}}px; top: {{ButtonGeneral.y}}px; width: {{ButtonGeneral.w}}px; height: {{ButtonGeneral.h}}px"><div class="cap stars">&#9733;&#9733;&#9733;</div></div>
-  <div class="piece button {{ButtonLarge.shown}} {{ButtonLarge.state}}" style="left: {{ButtonLarge.x}}px; top: {{ButtonLarge.y}}px; width: {{ButtonLarge.w}}px; height: {{ButtonLarge.h}}px"><div class="cap">&#9660;</div></div>
+  <div class="piece button skills {{skillsbutton.shown}} {{flip:skills}}" data-click="flip:skills" style="left: {{skillsbutton.x}}px; top: {{skillsbutton.y}}px; width: {{skillsbutton.w}}px; height: {{skillsbutton.h}}px"><div class="cap">{{text:GUI:BarSkills}}</div></div>
+
+  <div class="piece signals {{signals.shown}} {{signals}}" style="left: {{signals.x}}px; top: {{signals.y}}px; width: {{signals.w}}px; height: {{signals.h}}px">
+    <div class="button signal attack" data-click="signal:attack" style="top: 0"><div class="cap">{{text:GUI:SignalAttackLabel}}</div></div>
+    <div class="button signal defend" data-click="signal:defend" style="top: 24px"><div class="cap">{{text:GUI:SignalDefendLabel}}</div></div>
+    <div class="button signal look" data-click="signal:look" style="top: 48px"><div class="cap">{{text:GUI:SignalAttentionLabel}}</div></div>
+  </div>
+
+  <div class="piece skillcell well" data-each="skillcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"></div>
 
   <div class="piece button menu {{ButtonOptions.state}}" data-click="press:ButtonOptions">
     <div class="bar" style="top: 4px"></div>
     <div class="bar" style="top: 7px"></div>
     <div class="bar" style="top: 10px"></div>
+  </div>
+
+  <div id="net" class="piece panel {{net.online}}">
+    <div class="line"><span class="big">{{net.clock}}</span>  {{net.game}} <span class="dim">({{net.real}})</span></div>
+    <div class="line">{{net.hz}}hz  {{net.fps}}fps  <span class="dim">{{net.renderer}}  frame {{net.frame}}</span></div>
+    <div class="line onlineonly">{{text:GUI:BarNetReady}} {{net.ready}}/{{net.runahead}}  {{text:GUI:BarNetRoom}} {{net.room}}fps  <span class="dim">&#8595;{{net.in}} &#8593;{{net.out}} KB/s</span></div>
+    <div class="line cappedonly {{net.capped}}">{{net.units}}/{{net.cap}} {{text:GUI:BarNetUnits}}</div>
   </div>
 
 </div>

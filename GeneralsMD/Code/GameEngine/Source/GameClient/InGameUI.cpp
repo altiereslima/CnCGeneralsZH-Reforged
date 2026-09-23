@@ -3872,6 +3872,7 @@ void InGameUI::reset( void )
 	m_scoreboardOpen = FALSE;
 	m_scoreboardPageLoaded = FALSE;
 	m_controlBarPageLoaded = FALSE;
+	m_controlBarFlipped.clear();
 	m_spectatorPageLoaded = FALSE;
 	m_spectatorFlipped.clear();
 	m_spectatorPicked.clear();
@@ -8957,8 +8958,9 @@ void InGameUI::drawHudOverlay( void )
 	// the corner is measured fresh every frame, and this plate is the first thing in it
 	m_hudOverlayBottom = 0;
 
-	if( !TheGlobalData->m_showHudOverlay )
-		return;
+	// the command bar page's network box reads these whether the plate is switched on or not; the
+	// plate itself stands down while the page is up, the box is where they are written then
+	const Bool plate = TheGlobalData->m_showHudOverlay && !m_controlBarPageShown;
 
 	// only once a real game is under way - not in the shell, and not on the menu's background map
 	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
@@ -9052,6 +9054,39 @@ void InGameUI::drawHudOverlay( void )
 		units.format( L"   %d/%d units", localPlayer->countUnitsTowardCap(), unitCap );
 		text.concat( units );
 	}
+
+	// the same readings, one value each, for the page
+	char reading[ sizeof( "00:00:00" ) ];
+	m_hudValues.clear();
+	sprintf( reading, "%02d:%02d", wallClock.wHour, wallClock.wMinute );
+	m_hudValues[ "net.clock" ] = reading;
+	sprintf( reading, "%02u:%02u:%02u", gameSecs / 3600, ( gameSecs / 60 ) % 60, gameSecs % 60 );
+	m_hudValues[ "net.game" ] = reading;
+	sprintf( reading, "%02u:%02u:%02u", realSecs / 3600, ( realSecs / 60 ) % 60, realSecs % 60 );
+	m_hudValues[ "net.real" ] = reading;
+	m_hudValues[ "net.hz" ] = std::to_string( REAL_TO_INT( m_hudLogicHz + 0.5f ) );
+	m_hudValues[ "net.fps" ] = std::to_string( REAL_TO_INT( m_hudFps + 0.5f ) );
+	m_hudValues[ "net.renderer" ] = WideCharStringToMultiByte( TheDisplay->getRendererName() );
+	m_hudValues[ "net.frame" ] = std::to_string( logicFrame );
+	if( TheNetwork != NULL )
+	{
+		enum { BYTES_PER_KILOBYTE = 1024 };
+		m_hudValues[ "net.online" ] = "online";
+		m_hudValues[ "net.ready" ] = std::to_string( TheNetwork->getFramesReady() );
+		m_hudValues[ "net.runahead" ] = std::to_string( TheNetwork->getRunAhead() );
+		m_hudValues[ "net.room" ] = std::to_string( TheNetwork->getFrameRate() );
+		m_hudValues[ "net.in" ] = std::to_string( REAL_TO_INT( TheNetwork->getIncomingBytesPerSecond() / BYTES_PER_KILOBYTE ) );
+		m_hudValues[ "net.out" ] = std::to_string( REAL_TO_INT( TheNetwork->getOutgoingBytesPerSecond() / BYTES_PER_KILOBYTE ) );
+	}
+	if( unitCap > 0 && localPlayer && !localPlayer->isPlayerObserver() )
+	{
+		m_hudValues[ "net.units" ] = std::to_string( localPlayer->countUnitsTowardCap() );
+		m_hudValues[ "net.cap" ] = std::to_string( unitCap );
+		m_hudValues[ "net.capped" ] = "capped";
+	}
+
+	if( !plate )
+		return;
 
 	if( m_hudDisplayString == NULL )
 	{
@@ -10166,9 +10201,48 @@ static void putPowerBar( HtmlValues &values, std::vector< HtmlValues > &cells )
 
 /** The bar's windows the page stands down altogether.  The menu and idle worker buttons are the
 	* page's own, pressed through data-click="press:Name" because they sit where the bar's frame takes
-	* no clicks; the chat button is gone, and Enter still opens the chat. */
-static const char *const CONTROL_BAR_STOOD_DOWN[] = { "ButtonOptions", "ButtonIdleWorker", "PopupCommunicator" };
+	* no clicks; the chat button is gone, and Enter still opens the chat; the minimise button is gone,
+	* the bar is only as big as what it holds now. */
+static const char *const CONTROL_BAR_STOOD_DOWN[] = { "ButtonOptions", "ButtonIdleWorker", "PopupCommunicator", "ButtonLarge" };
 static const std::string PRESS_ACTION = "press:";
+static const std::string SIGNAL_ACTION = "signal:";
+
+/** A smoke signal may be sent: the rule the Alt+Z/X/C keys go by, a multiplayer game that is not a
+	* replay, and a player still in it. */
+static Bool signalsAllowed( void )
+{
+	const Player *local = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
+	return TheGameLogic->isInMultiplayerGame() && !TheGameLogic->isInReplayGame() && local && local->isPlayerActive();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** data-click="signal:attack", "signal:defend" or "signal:look": the smoke the Alt+Z/X/C keys send,
+	* in the middle of the view, since a button has no cursor over the ground to put it under.  The
+	* same logic message as the keys, so the same throttle and the same allies see it. */
+//-------------------------------------------------------------------------------------------------
+static void placeSignalAtView( const std::string &kind )
+{
+	static const struct { const char *name; SignalKind kind; } KINDS[] =
+	{
+		{ "attack", SIGNAL_ATTACK }, { "defend", SIGNAL_DEFEND }, { "look", SIGNAL_ATTENTION }
+	};
+
+	if( !signalsAllowed() || TheTacticalView == NULL )
+		return;
+	for( Int each = 0; each < (Int)ARRAY_SIZE( KINDS ); each++ )
+	{
+		if( kind != KINDS[ each ].name )
+			continue;
+
+		Coord3D world;
+		TheTacticalView->getPosition( &world );
+		GameMessage *message = TheMessageStream->appendMessage( GameMessage::MSG_PLACE_SIGNAL );
+		message->appendLocationArgument( world );
+		message->appendIntegerArgument( KINDS[ each ].kind );
+		return;
+	}
+	DEBUG_LOG(( "Command bar page: data-click=\"signal:%s\" names no signal\n", kind.c_str() ));
+}
 
 /** The windows each panel is drawn round, so a panel is only as big as what it holds: the left one
 	* the radar, the right one the portrait and the experience bar, the centre the command grid.  The
@@ -10179,16 +10253,25 @@ static const char *const CONTROL_BAR_LEFT[] = { "LeftHUD", NULL };
 static const char *const CONTROL_BAR_RIGHT[] = { "RightHUD", "GeneralsExp", "ExpBarForeground", NULL };
 static const char *const CONTROL_BAR_CENTRE[] = { "CommandWindow", "ObserverPlayerListWindow", "ButtonPlaceBeacon", NULL };
 
-/** The promotion and minimise buttons, small, side by side in the right panel's top right corner,
-	* the minimise button outermost.  800x600 pixels. */
+/** The promotion button, small, in the right panel's top right corner beside the page's own skills
+	* button, which takes the outermost place.  800x600 pixels. */
 enum
 {
 	CORNER_BUTTON_WIDTH		= 32,
 	CORNER_BUTTON_HEIGHT	= 14,
 	CORNER_BUTTON_GAP			= 2,
-	CORNER_BUTTON_RISE		= 16		///< how far above the portrait's box the buttons' top edge sits
+	CORNER_BUTTON_RISE		= 16,		///< how far above the portrait's box the buttons' top edge sits
+	SKILL_GRID_WIDTH			= 150,	///< the general's powers, three to a row, against the screen's right edge
+	SKILL_GRID_GAP				= 30,		///< between them and the right panel's top
+	SIGNAL_BUTTON_SIZE		= 24,		///< each smoke signal button's height, a row of the column
+	SIGNAL_BUTTON_WIDTH		= 40,		///< and its width, room for its word in either language
+	SIGNAL_BUTTONS				= 3,		///< attack, defend, look
+	SKILL_GRID_ROWS				= 3,		///< the empty places drawn behind the powers
+	SKILL_GRID_COLUMNS		= 3,
+	SKILLS_BUTTON_WIDTH		= 58		///< wide enough for its name in either language
 };
-static const char *const CORNER_BUTTONS[] = { "ButtonLarge", "ButtonGeneral" };
+static const char *const SKILLS_FOLDED = "skills";	///< the flip the skills button toggles; flipped is folded away
+static const char *const CORNER_BUTTONS[] = { "ButtonGeneral" };
 
 static void drawNothing( GameWindow *window, WinInstanceData *instData )
 {
@@ -10411,6 +10494,10 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	const Bool watching = localPlayerWatching();
 	values[ "promotion" ] = !watching && TheControlBar->isGeneralStarFlashing() ? "ready" : "";
 	values[ "watching" ] = watching ? "watching" : "";
+	values.insert( m_hudValues.begin(), m_hudValues.end() );
+	values[ "signals" ] = signalsAllowed() ? "" : "disabled";
+	for( std::set< std::string >::const_iterator name = m_controlBarFlipped.begin(); name != m_controlBarFlipped.end(); ++name )
+		values[ FLIP_ACTION + *name ] = "flipped";
 	values[ "blink" ] = TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND > LOGICFRAMES_PER_SECOND / 2 ? "lit" : "";
 	for( Int panel = 0; panel < panelCount; panel++ )
 		putPageRect( values, "panel" + std::to_string( panel ), panels[ panel ], shown[ panel ] );
@@ -10424,6 +10511,15 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	side.lo.x = 0;
 	side.hi.y = TheDisplay->getHeight();
 	putPageRect( values, "left", side, leftFound && panelCount > 0 && shown[ 0 ] );
+
+	// the three smoke signal buttons, a column standing on the screen's bottom edge against the
+	// left panel's right side
+	IRegion2D signalColumn;
+	signalColumn.lo.x = side.hi.x;
+	signalColumn.hi.x = side.hi.x + REAL_TO_INT( SIGNAL_BUTTON_WIDTH * ControlBarUniformScale() );
+	signalColumn.hi.y = TheDisplay->getHeight();
+	signalColumn.lo.y = signalColumn.hi.y - REAL_TO_INT( SIGNAL_BUTTON_SIZE * SIGNAL_BUTTONS * ControlBarUniformScale() );
+	putPageRect( values, "signals", signalColumn, leftFound && panelCount > 0 && shown[ 0 ] );
 	stackCentre( values, panelCount > 1 && shown[ 1 ] );
 	HtmlLists lists;
 	putPowerBar( values, lists[ "powercells" ] );	// after the stack, whose frame it divides into cells
@@ -10433,14 +10529,53 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	side.hi.y = TheDisplay->getHeight();
 	putPageRect( values, "right", side, rightFound && panelCount > 2 && shown[ 2 ] );
 
-	// the promotion and minimise buttons go to the right panel's top right corner; a bar with no
-	// portrait showing leaves them where the bar put them, so minimise stays in reach
+	// the page's skills button takes the right panel's top right corner and the promotion button
+	// stands beside it; a bar with no portrait showing leaves the promotion button where it was
+	const Real scale = ControlBarUniformScale();
+	const Int cornerWidth = REAL_TO_INT( CORNER_BUTTON_WIDTH * scale );
+	const Int cornerHeight = REAL_TO_INT( CORNER_BUTTON_HEIGHT * scale );
+	const Int cornerGap = REAL_TO_INT( CORNER_BUTTON_GAP * scale );
+	IRegion2D skills;
+	skills.hi.x = box.hi.x;
+	skills.lo.x = skills.hi.x - REAL_TO_INT( SKILLS_BUTTON_WIDTH * scale );
+	skills.lo.y = box.lo.y - REAL_TO_INT( CORNER_BUTTON_RISE * scale );
+	skills.hi.y = skills.lo.y + cornerHeight;
+	putPageRect( values, "skillsbutton", skills, rightFound && panelCount > 2 && shown[ 2 ] );
+
+	// the general's powers ready to fire, three to a row over the right panel, while the skills
+	// button has not folded them away
+	IRegion2D powers;
+	powers.hi.x = TheDisplay->getWidth();
+	powers.lo.x = powers.hi.x - REAL_TO_INT( SKILL_GRID_WIDTH * scale );
+	powers.hi.y = side.lo.y - REAL_TO_INT( SKILL_GRID_GAP * scale );
+	powers.lo.y = powers.hi.y;
+	const Bool powersOpen = m_controlBarFlipped.find( SKILLS_FOLDED ) == m_controlBarFlipped.end();
+	ICoord2D cell;
+	TheControlBar->placeSpecialPowerShortcutGrid( powersOpen && rightFound ? &powers : NULL, &cell );
+
+	// the grid's empty places, three by three, drawn behind the powers the way the command grid's
+	// well stands behind its buttons
+	std::vector< HtmlValues > &places = lists[ "skillcells" ];
+	for( Int row = 0; row < SKILL_GRID_ROWS && cell.x > 0; row++ )
+	{
+		for( Int column = 0; column < SKILL_GRID_COLUMNS; column++ )
+		{
+			IRegion2D place;
+			place.lo.x = powers.lo.x + column * cell.x;
+			place.lo.y = powers.hi.y - ( SKILL_GRID_ROWS - row ) * cell.y;
+			place.hi.x = place.lo.x + cell.x;
+			place.hi.y = place.lo.y + cell.y;
+			HtmlValues entry;
+			putPageRect( entry, "cell", place, TRUE );
+			places.push_back( entry );
+		}
+	}
+
 	if( rightFound )
 	{
-		const Real scale = ControlBarUniformScale();
-		const Int width = REAL_TO_INT( CORNER_BUTTON_WIDTH * scale );
-		const Int height = REAL_TO_INT( CORNER_BUTTON_HEIGHT * scale );
-		Int x = box.hi.x;
+		const Int width = cornerWidth;
+		const Int height = cornerHeight;
+		Int x = skills.lo.x - cornerGap;
 		for( Int each = 0; each < (Int)ARRAY_SIZE( CORNER_BUTTONS ); each++ )
 		{
 			GameWindow *button = controlBarWindow( CORNER_BUTTONS[ each ] );
@@ -10451,9 +10586,9 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 			Int parentX = 0, parentY = 0;
 			if( button->winGetParent() )
 				button->winGetParent()->winGetScreenPosition( &parentX, &parentY );
-			button->winSetPosition( x - parentX, box.lo.y - REAL_TO_INT( CORNER_BUTTON_RISE * scale ) - parentY );
+			button->winSetPosition( x - parentX, skills.lo.y - parentY );
 			button->winSetSize( width, height );
-			x -= REAL_TO_INT( CORNER_BUTTON_GAP * scale );
+			x -= cornerGap;
 		}
 	}
 
@@ -10485,7 +10620,9 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 
 	std::vector< IRegion2D > solids;
 	m_controlBarOverlay->rectsOf( ".solid", solids );
-	TheControlBar->setPageSolids( &solids );
+	std::vector< IRegion2D > buttons;
+	m_controlBarOverlay->rectsOf( "[data-click]", buttons );
+	TheControlBar->setPageSolids( &solids, &buttons );
 	m_controlBarPageShown = TRUE;
 	return TRUE;
 }
@@ -10501,6 +10638,19 @@ Bool InGameUI::handleControlBarPageClick( const ICoord2D *mouse, Bool act )
 		return FALSE;
 
 	const std::string action = m_controlBarOverlay->click( *mouse );
+	if( action.compare( 0, FLIP_ACTION.size(), FLIP_ACTION ) == 0 )
+	{
+		const std::string name = action.substr( FLIP_ACTION.size() );
+		if( act && m_controlBarFlipped.erase( name ) == 0 )
+			m_controlBarFlipped.insert( name );
+		return TRUE;
+	}
+	if( action.compare( 0, SIGNAL_ACTION.size(), SIGNAL_ACTION ) == 0 )
+	{
+		if( act )
+			placeSignalAtView( action.substr( SIGNAL_ACTION.size() ) );
+		return TRUE;
+	}
 	if( action.compare( 0, PRESS_ACTION.size(), PRESS_ACTION ) != 0 )
 		return FALSE;
 	if( !act )

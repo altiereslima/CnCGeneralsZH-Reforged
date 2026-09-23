@@ -1112,6 +1112,25 @@ GUI:BarBeacon
 "Beacon"
 END
 
+// opens and folds away the general's powers ready to fire, over the portrait
+GUI:BarSkills
+"Skills"
+END
+
+// the network box in the top right corner: frames ready out of the input delay, the room's frame
+// rate, and the traffic in and out in kilobytes a second
+GUI:BarNetReady
+"ready"
+END
+
+GUI:BarNetRoom
+"room"
+END
+
+GUI:BarNetUnits
+"units"
+END
+
 // the box in the corner of the radar that lights while your forces are under attack
 GUI:BarUnderAttack
 "UNDER ATTACK"
