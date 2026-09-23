@@ -10728,6 +10728,9 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	const Bool watching = localPlayerWatching();
 	values[ "promotion" ] = !watching && TheControlBar->isGeneralStarFlashing() ? "ready" : "";
 	values[ "watching" ] = watching ? "watching" : "";
+	// the page's clicks are whole, down and up at once, so a key pressed in under the pointer goes by
+	// the mouse's own left button
+	values[ "held" ] = TheMouse->getMouseStatus()->leftState != MBS_Up ? "held" : "";
 	values.insert( m_hudValues.begin(), m_hudValues.end() );
 	values[ "blink" ] = TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND > LOGICFRAMES_PER_SECOND / 2 ? "lit" : "";
 	for( Int panel = 0; panel < panelCount; panel++ )

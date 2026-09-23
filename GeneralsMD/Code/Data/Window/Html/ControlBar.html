@@ -226,6 +226,12 @@
   .gla .key:hover { background: linear-gradient(to bottom, #cabe86, #766a3a); }
   .key .icon { position: absolute; left: 9px; top: 2px; width: 14px; height: 14px;
                background-size: 100% 100%; background-repeat: no-repeat; }
+  /* pressed, the key under the pointer while the left button is {{held}}: sunk deeper than at rest,
+     dark on top and lit below, the gold rim kept and the picture a pixel down */
+  .held .key:hover { background: linear-gradient(to bottom, #151a1f, #3a414a); border-color: #e8d27a; }
+  .china .held .key:hover { background: linear-gradient(to bottom, #1c0906, #5a2217); }
+  .gla .held .key:hover { background: linear-gradient(to bottom, #19160a, #4f4623); }
+  .held .key:hover .icon { top: 3px; }
   .key .veil { display: none; }
   .disabled .key .veil { display: block; position: absolute; left: 0; top: 0; width: 32px; height: 18px;
                          background-color: rgba(4, 8, 10, 0.65); }
@@ -258,12 +264,21 @@
   /* the rank: the promotion button, a key like the idle worker's in a tab on the right panel's
      bezel, a star on it for every rank there is, gold up to the one reached and dark past it.  The
      tab is 66 by 22 and the key 60 by 17 with its rim, three pixels in.  Under the pointer it comes
-     up as lit steel with a gold rim, and while a promotion waits to be spent it blinks gold */
+     up as lit steel with a gold rim, and while a promotion waits to be spent it blinks in the side's own
+     steel at its brightest, a white rim round it.  The stars carry a dark outline so the gold reads
+     on the lit key as well, and an unreached one is a dark star rimmed in light steel */
   .rank .key { left: 3px; top: 3px; width: 58px; height: 15px; }
   .rank.hilite .key { background: linear-gradient(to bottom, #b3bbc4, #5a626c); border-color: #e8d27a; }
   .china .rank.hilite .key { background: linear-gradient(to bottom, #d58a70, #7a3120); }
   .gla .rank.hilite .key { background: linear-gradient(to bottom, #cabe86, #766a3a); }
-  .rank.ready.lit .key { background: linear-gradient(to bottom, #f6e08a, #a4832a); border-color: #fff4b8; }
+  .rank.ready.lit .key { background: linear-gradient(to bottom, #eef3f7, #6f7883); border-color: #ffffff; }
+  .china .rank.ready.lit .key { background: linear-gradient(to bottom, #ffc4ae, #a4432e); border-color: #ffe4d8; }
+  .gla .rank.ready.lit .key { background: linear-gradient(to bottom, #f4ecc0, #8f8249); border-color: #fff8dc; }
+  /* pressed through its own window, which the bar marks pushed, or held under the pointer */
+  .rank.pushed .key, .held .rank .key:hover { background: linear-gradient(to bottom, #151a1f, #3a414a); border-color: #e8d27a; }
+  .china .rank.pushed .key, .china .held .rank .key:hover { background: linear-gradient(to bottom, #1c0906, #5a2217); }
+  .gla .rank.pushed .key, .gla .held .rank .key:hover { background: linear-gradient(to bottom, #19160a, #4f4623); }
+  .rank.pushed .star, .held .rank .key:hover .star { margin-top: 1px; }
   .rank .star { position: absolute; top: 2px; width: 10px; height: 10px; background-size: 100% 100%;
                 background-repeat: no-repeat; background-image: url(Icons/RankStarDark.svg); }
   .rank .star.lit { background-image: url(Icons/RankStar.svg); }
@@ -307,7 +322,7 @@
 </style>
 </head>
 <body>
-<div class="{{side}} {{watching}}">
+<div class="{{side}} {{watching}} {{held}}">
 
   <div class="piece frame bezel solid {{left.shown}}" style="left: {{left.x}}px; top: {{left.y}}px; width: {{left.w}}px; height: {{left.h}}px; border-width: {{left.bt}}px {{left.br}}px {{left.bb}}px {{left.bl}}px">
     <div class="steel" style="left: -{{left.bl}}px; right: -{{left.br}}px; top: -{{left.bt}}px; bottom: -{{left.bb}}px"></div>
