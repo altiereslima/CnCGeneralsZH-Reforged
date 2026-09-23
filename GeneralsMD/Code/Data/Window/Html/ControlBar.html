@@ -51,6 +51,7 @@
     {{skillsbutton.x}} ... on the radar panel's, the skills button on the right panel's at its right
                            hand end, with the promotion button moved beside it
     {{workertab.x}} ...    the idle worker's step, against the centre's border at its bottom left
+    {{powerblock.x}} ...   the power bar's block, the centre's bezel carried on upward as wide as it
     {{powerframe.x}} ...   the power bar's frame standing on the centre's border, and the money's
     {{moneyblock.x}} ...   block on the frame, stacked flush; {{powerframe.inner}} the height inside
                            the frame and its lip
@@ -134,14 +135,30 @@
   .china .commandcell .bevel { border-bottom-color: #d98a72; border-right-color: #d98a72; }
   .gla .commandcell .bevel { border-bottom-color: #cbbf82; border-right-color: #cbbf82; }
 
-  /* over the centre's border the power bar's frame and on it the money's block, stacked flush */
+  /* over the centre's bezel the power bar's block, the same plate carried on upward as wide as the
+     bezel, and on it the money's block, stacked flush.  Each block's steel runs from a shade lighter
+     at its top down to the top of the one under it, and a joint over the lower block's lit top edge
+     makes the three one plate */
   .stack { box-sizing: border-box; margin: 0; }
+  .bezel .joint { position: absolute; left: 1px; right: 1px; bottom: -1px; height: 1px; }
+  .powerblock .steel { background: linear-gradient(to bottom, #b0b8c1, #9aa3ad); }
+  .powerblock .joint { background-color: #9aa3ad; }
+  .moneyblock .steel { background: linear-gradient(to bottom, #c3cad2, #b0b8c1); }
+  .moneyblock .joint { background-color: #b0b8c1; }
+  .china .powerblock .steel { background: linear-gradient(to bottom, #cf8068, #c06a52); }
+  .china .powerblock .joint { background-color: #c06a52; }
+  .china .moneyblock .steel { background: linear-gradient(to bottom, #db957f, #cf8068); }
+  .china .moneyblock .joint { background-color: #cf8068; }
+  .gla .powerblock .steel { background: linear-gradient(to bottom, #c8bc84, #b8ab6e); }
+  .gla .powerblock .joint { background-color: #b8ab6e; }
+  .gla .moneyblock .steel { background: linear-gradient(to bottom, #d6cb98, #c8bc84); }
+  .gla .moneyblock .joint { background-color: #c8bc84; }
 
   .well { margin: -3px 0 0 -3px; border: 2px solid #0c1114; border-bottom-color: #4b535e; border-right-color: #4b535e;
           background-color: rgba(0, 0, 0, 0.35); }
-  /* a groove: a bar framed in two pixels of steel all the way round a black lip, lit a shade more
-     along the bottom and right, so the whole frame reads even where it crosses bare battlefield */
-  .groove { margin: -3px 0 0 -3px; border: 2px solid #7d8691; border-bottom-color: #c3ccd3; border-right-color: #aab4bf;
+  /* a groove: the power bar sunk in its block the way the radar and the grid are, two pixels dark
+     along the top and left and lit along the bottom and right, round a black lip */
+  .groove { margin: -3px 0 0 -3px; border: 2px solid #06090b; border-bottom-color: #b4bec8; border-right-color: #b4bec8;
             background-color: #020405; }
   .groove .lip { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border: 1px solid #000000; }
   /* the power bar's frame in the stack arrives placed exactly, and the groove's own pull up and left
@@ -163,8 +180,8 @@
   .cells.yellow .lit .seg { background-image: url(PowerBarYellow); }
   .cells.red .lit .seg { background-image: url(PowerBarRed); }
   .needle { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background-color: #ffffff; }
-  .china .groove { border-color: #a44734; border-bottom-color: #e8a28a; border-right-color: #d98a72; }
-  .gla .groove { border-color: #978a50; border-bottom-color: #ddd29a; border-right-color: #cbbf82; }
+  .china .groove { border-bottom-color: #d98a72; border-right-color: #d98a72; }
+  .gla .groove { border-bottom-color: #cbbf82; border-right-color: #cbbf82; }
 
   /* the bar's own buttons: a steel cap, lit gold under the pointer and pressed in when pushed */
   .button { text-align: center; color: #e8eef2; font-weight: bold;
@@ -269,18 +286,6 @@
     <div class="sunk" style="width: {{left.w}}px; height: {{left.h}}px"></div>
   </div>
   <div class="piece tab alert {{alerttab.shown}} {{WinUAttack.state}}" style="left: {{alerttab.x}}px; top: {{alerttab.y}}px; width: {{alerttab.w}}px; height: {{alerttab.h}}px"><div class="led"><div class="glint"></div></div></div>
-  <div class="piece bezel solid stack moneyblock {{moneyblock.shown}}" style="left: {{moneyblock.x}}px; top: {{moneyblock.y}}px; width: {{moneyblock.w}}px; height: {{moneyblock.h}}px">
-    <div class="steel" style="left: 0; right: 0; top: 0; bottom: 0"></div>
-    <div class="shine" style="left: 0; right: 0; top: 0"></div>
-    <div class="lit" style="left: 0; top: 0; bottom: 0"></div>
-    <div class="shade" style="right: 0; top: 0; bottom: 0"></div>
-    <div class="inset"></div>
-  </div>
-  <div class="piece groove solid stack {{powerframe.shown}}" style="left: {{powerframe.x}}px; top: {{powerframe.y}}px; width: {{powerframe.w}}px; height: {{powerframe.h}}px">
-    <div class="cells {{power.state}}" style="height: {{powerframe.inner}}px"><div class="cell {{lit}}" data-each="powercells" style="left: {{x}}px; width: {{w}}px; height: {{powerframe.inner}}px"><div class="seg" style="height: {{powerframe.inner}}px"></div></div></div>
-    <div class="needle" style="left: {{power.needle}}%"></div>
-    <div class="lip"></div>
-  </div>
   <div class="piece frame bezel solid {{centre.shown}}" style="left: {{centre.x}}px; top: {{centre.y}}px; width: {{centre.w}}px; height: {{centre.h}}px; border-width: {{centre.bt}}px {{centre.br}}px {{centre.bb}}px {{centre.bl}}px">
     <div class="steel" style="left: -{{centre.bl}}px; right: -{{centre.br}}px; top: -{{centre.bt}}px; bottom: -{{centre.bb}}px"></div>
     <div class="shine" style="left: -{{centre.bl}}px; right: -{{centre.br}}px; top: -{{centre.bt}}px"></div>
@@ -291,6 +296,28 @@
   <div class="piece commandcell" data-each="commandcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="bevel"></div></div>
   <div class="piece step worker solid {{workertab.shown}} {{ButtonIdleWorker.state}}" style="left: {{workertab.x}}px; top: {{workertab.y}}px; width: {{workertab.w}}px; height: {{workertab.h}}px">
     <div class="key" data-click="press:ButtonIdleWorker"><div class="icon"></div><div class="veil"></div></div>
+  </div>
+  <!-- drawn after the centre, and the money after the power bar, so each block's joint covers the lit
+       top edge of the block under it -->
+  <div class="piece bezel solid powerblock {{powerblock.shown}}" style="left: {{powerblock.x}}px; top: {{powerblock.y}}px; width: {{powerblock.w}}px; height: {{powerblock.h}}px">
+    <div class="steel" style="left: 0; right: 0; top: 0; bottom: 0"></div>
+    <div class="shine" style="left: 0; right: 0; top: 0"></div>
+    <div class="lit" style="left: 0; top: 0; bottom: 0"></div>
+    <div class="shade" style="right: 0; top: 0; bottom: 0"></div>
+    <div class="joint"></div>
+  </div>
+  <div class="piece groove solid stack {{powerframe.shown}}" style="left: {{powerframe.x}}px; top: {{powerframe.y}}px; width: {{powerframe.w}}px; height: {{powerframe.h}}px">
+    <div class="cells {{power.state}}" style="height: {{powerframe.inner}}px"><div class="cell {{lit}}" data-each="powercells" style="left: {{x}}px; width: {{w}}px; height: {{powerframe.inner}}px"><div class="seg" style="height: {{powerframe.inner}}px"></div></div></div>
+    <div class="needle" style="left: {{power.needle}}%"></div>
+    <div class="lip"></div>
+  </div>
+  <div class="piece bezel solid stack moneyblock {{moneyblock.shown}}" style="left: {{moneyblock.x}}px; top: {{moneyblock.y}}px; width: {{moneyblock.w}}px; height: {{moneyblock.h}}px">
+    <div class="steel" style="left: 0; right: 0; top: 0; bottom: 0"></div>
+    <div class="shine" style="left: 0; right: 0; top: 0"></div>
+    <div class="lit" style="left: 0; top: 0; bottom: 0"></div>
+    <div class="shade" style="right: 0; top: 0; bottom: 0"></div>
+    <div class="inset"></div>
+    <div class="joint"></div>
   </div>
   <div class="piece frame solid {{right.shown}}" style="left: {{right.x}}px; top: {{right.y}}px; width: {{right.w}}px; height: {{right.h}}px; border-width: {{right.bt}}px {{right.br}}px {{right.bb}}px {{right.bl}}px"></div>
 

@@ -10416,6 +10416,7 @@ enum
 {
 	PANEL_BORDER				= 8,	///< a panel's border outside its container, on the sides facing the battlefield
 	STACK_FRAME					= 3,	///< the power bar's frame and lip
+	STACK_POWER_TOP			= 5,	///< the power bar's block over its frame
 	STACK_MONEY_SIDE		= 8,
 	STACK_MONEY_TOP			= 1,	///< over the money's line of text
 	PANEL_TAB_HEIGHT		= 14	///< a tab or button standing on a border's top edge
@@ -10560,10 +10561,18 @@ static void stackCentre( HtmlValues &values, Bool shown, IRegion2D &centre )
 	frame.hi.y = centre.lo.y;
 	frame.lo.y = frame.hi.y - frameHeight;
 
+	// the power bar's block is the centre's bezel carried on upward, as wide as it, so the bar and
+	// the grid read as two wells in one plate: the centre's top border runs between them
+	IRegion2D powerBlock;
+	powerBlock.lo.x = centre.lo.x;
+	powerBlock.hi.x = centre.hi.x;
+	powerBlock.hi.y = centre.lo.y;
+	powerBlock.lo.y = frame.lo.y - REAL_TO_INT( STACK_POWER_TOP * scale );
+
 	// each block stands on the top of the one under it
 	Int floor = centre.lo.y;
 	if( powerFound )
-		floor = frame.lo.y;
+		floor = powerBlock.lo.y;
 
 	GameWindow *moneyWindow = controlBarWindow( "MoneyDisplay" );
 	Bool moneyFound = controlBarWindowRect( moneyWindow, money );
@@ -10586,6 +10595,7 @@ static void stackCentre( HtmlValues &values, Bool shown, IRegion2D &centre )
 
 	putFrame( values, "centre", grid, centre, shown );
 	putPageRect( values, "powerframe", frame, powerFound && shown );
+	putPageRect( values, "powerblock", powerBlock, powerFound && shown );
 
 	// the page lays boxes out content-box whatever box-sizing says, so the frame's border goes on top
 	// of its width and height: hand it the content, and the height inside its lip for the cells, since
