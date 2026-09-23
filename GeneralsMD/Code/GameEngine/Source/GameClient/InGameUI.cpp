@@ -10311,7 +10311,8 @@ enum
 	SKILL_GRID_COLUMNS		= 3,
 	SKILLS_BUTTON_WIDTH		= 58,		///< wide enough for its name in either language
 	ALERT_TAB_WIDTH				= 54,		///< the under-attack light, a lamp on the radar panel's border
-	WORKER_TAB_WIDTH			= 39		///< the idle worker's step, against the command grid panel's border, as wide as the signals' column
+	WORKER_TAB_WIDTH			= 39,		///< the idle worker's step, against the command grid panel's border, as wide as the signals' column
+	WORKER_STEP_HEIGHT		= 30		///< and its height, its key held clear of the screen's bottom edge
 };
 static const char *const SKILLS_FOLDED = "skills";	///< the flip the skills button toggles; flipped is folded away
 static const UnsignedInt SIGNAL_RISE_MS = 360;					///< each smoke signal button's climb out of the screen's bottom edge
@@ -10652,7 +10653,7 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	workerStep.hi.x = centreBox.lo.x;
 	workerStep.lo.x = workerStep.hi.x - REAL_TO_INT( WORKER_TAB_WIDTH * scale );
 	workerStep.hi.y = TheDisplay->getHeight();
-	workerStep.lo.y = workerStep.hi.y - REAL_TO_INT( SIGNAL_BUTTON_SIZE * scale );
+	workerStep.lo.y = workerStep.hi.y - REAL_TO_INT( WORKER_STEP_HEIGHT * scale );
 	putPageRect( values, "workertab", workerStep, panelCount > 1 && shown[ 1 ] );
 	HtmlLists lists;
 	putPowerBar( values, lists[ "powercells" ] );	// after the stack, whose frame it divides into cells

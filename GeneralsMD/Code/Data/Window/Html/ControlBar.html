@@ -201,9 +201,8 @@
   .worker { border-left: 1px solid #b3bbc4; }
   .china .worker { border-left-color: #d58a70; }
   .gla .worker { border-left-color: #cabe86; }
-  /* the step's lit top edge pushes what it holds down a pixel, and at 3 the key's bottom edge fell
-     off the screen */
-  .worker .key { left: 3px; top: 1px; }
+  /* the step is 30 tall and the key 20 with its rim, so it stands clear of the screen's bottom edge */
+  .worker .key { left: 3px; top: 3px; }
   .worker .icon { background-image: url(Icons/IdleWorker.svg); }
   .watching .worker { display: none; }
 
