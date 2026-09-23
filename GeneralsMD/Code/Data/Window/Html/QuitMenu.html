@@ -1,12 +1,14 @@
 <!DOCTYPE html>
 <!--
-  The Esc menu in the command bar's steel, drawn as the menu's own plate.  Its keys are the menu's
-  buttons, drawing nothing now and still taking their clicks; the logo over them is the menu's own
-  picture and draws over this page.  Same materials as Window/Html/Promotion.html.
+  The Esc menu in the command bar's steel, drawn as the menu's own plate in the middle of the
+  screen.  Its keys are the menu's buttons, drawing nothing now and still taking their clicks, laid
+  out again every frame in a stack; the logo is stood down.  Same materials as
+  Window/Html/Promotion.html.
 
   The game fills in, every frame the menu is up (InGameUI::drawQuitMenuPage):
     {{side}}               "america", "china" or "gla"
     {{panel.x}} .y .w .h   the menu's plate
+    {{well.x}} .y .w .h    the well the keys stand in
     data-each="keys"       every key the menu shows, top to bottom, {{key.x}} .y .w .h, {{label}} the
                            button's own text and {{state}} any of "disabled", "hilite", "pushed"
   All in the page's pixels, a pixel of an 800x600 screen.  Without this page the menu draws as EA
@@ -28,6 +30,13 @@
   .china .plate { background: linear-gradient(to bottom, #c06a52, #7a3120 12%, #3f160f); border-top-color: #f0b8a4; border-left-color: #d58a70; }
   .gla .plate { background: linear-gradient(to bottom, #b8ab6e, #766a3a 12%, #3c3519); border-top-color: #ebe2b4; border-left-color: #cabe86; }
 
+  /* the keys stand in a well sunk two pixels, dark along the top and left and lit along the bottom
+     and right */
+  .well { margin: -2px 0 0 -2px; border: 2px solid #06090b; border-bottom-color: #b4bec8; border-right-color: #b4bec8;
+          background-color: #3a414a; }
+  .china .well { border-bottom-color: #d98a72; border-right-color: #d98a72; background-color: #45190f; }
+  .gla .well { border-bottom-color: #cbbf82; border-right-color: #cbbf82; background-color: #423a1c; }
+
   /* a key sunk in the steel, lit steel with a gold rim under the pointer, pressed in while held, and
      dim when it does nothing */
   .key { border: 1px solid #06090b; border-bottom-color: #9aa4ae; border-right-color: #9aa4ae; background-color: rgba(4, 8, 10, 0.9);
@@ -45,6 +54,7 @@
 <body>
 <div class="{{side}}">
   <div class="piece plate" style="left: {{panel.x}}px; top: {{panel.y}}px; width: {{panel.w}}px; height: {{panel.h}}px"></div>
+  <div class="piece well" style="left: {{well.x}}px; top: {{well.y}}px; width: {{well.w}}px; height: {{well.h}}px"></div>
   <div class="piece key {{state}}" data-each="keys" style="left: {{key.x}}px; top: {{key.y}}px; width: {{key.w}}px; height: {{key.h}}px"><div class="label">{{label}}</div></div>
 </div>
 </body>

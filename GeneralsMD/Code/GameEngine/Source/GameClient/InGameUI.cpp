@@ -11365,7 +11365,8 @@ enum
 	PROMOTION_TITLE			= 14,	///< the rank's name's line, the points beside it
 	PROMOTION_BAR				= 7,	///< the experience bar under it
 	PROMOTION_BAR_GAP		= 3,
-	PROMOTION_HEADING		= 12	///< a row's heading over its first button
+	PROMOTION_HEADING		= 12,	///< a row's heading over its first button
+	PROMOTION_TOP				= 44	///< clear of the players' strip, a team's name under its flags included
 };
 
 /** One place in the screen's grids, screen pixels, and the promotion's button standing in it: NULL
@@ -11402,8 +11403,8 @@ static void placePromotionWindow( const std::string &name, Int x, Int y, Int wid
 	* row a grid five places wide in command button cells with a hair of steel between them, the way
 	* the command bar's grid is, in a well of its own with its heading, a plate's margin between one
 	* well and the next; the rank's name and the points on one line with the bar under them, and the
-	* close button in the last row's fifth place, which no side fills.  Centred at the top of the screen
-	* where the layout hung it.  `layout` gets every place, filled or not, the headings and the wells,
+	* close button in the last row's fifth place, which no side fills.  Centred across the screen, its
+	* top under the players' strip.  `layout` gets every place, filled or not, the headings and the wells,
 	* in screen pixels. */
 //-------------------------------------------------------------------------------------------------
 static void layoutPromotionScreen( GameWindow *parent, PromotionLayout &layout )
@@ -11428,10 +11429,10 @@ static void layoutPromotionScreen( GameWindow *parent, PromotionLayout &layout )
 	placePromotionWindow( "ProgressBarExperience", margin, margin + titleHeight + Page::px( PROMOTION_BAR_GAP, scale ),
 												width - 3 * margin - pointsWidth, Page::px( PROMOTION_BAR, scale ) );
 
-	// the parent goes first, so the places can be handed out in screen pixels
-	Int parentX = 0, parentY = 0;
-	parent->winGetPosition( &parentX, &parentY );
-	parentX = ( TheDisplay->getWidth() - width ) / 2;
+	// the parent goes first, across the middle of the screen just under the players hanging from its
+	// top edge, so the places can be handed out in screen pixels
+	const Int parentX = ( TheDisplay->getWidth() - width ) / 2;
+	const Int parentY = Page::px( PROMOTION_TOP, scale );
 	parent->winSetPosition( parentX, parentY );
 
 	// each row's well stands a margin under the one before, the first a margin under the bar and the
@@ -11643,6 +11644,18 @@ static const char *const QUIT_MENU_PAGE = "Window\\Html\\QuitMenu.html";
 	* and replays, all but the first. */
 static const char *const QUIT_MENU_KEYS[] = { "ButtonSaveLoad", "ButtonOptions", "ButtonRestart", "ButtonExit", "ButtonReturn" };
 
+/** The game's logo over the keys, one name in each layout; the page stands it down. */
+static const char *const QUIT_MENU_LOGOS[] = { "WinLoad", "WinLogo" };
+
+/** The menu's measures, 800x600 pixels. */
+enum
+{
+	QUIT_MENU_KEY_WIDTH		= 176,
+	QUIT_MENU_KEY_HEIGHT	= 24,
+	QUIT_MENU_KEY_GAP			= 6,
+	QUIT_MENU_MARGIN			= 12	///< the plate round the keys' well
+};
+
 /** A window of the same layout as `parent`, by its name there. */
 static GameWindow *quitMenuWindow( GameWindow *parent, const char *name )
 {
@@ -11676,6 +11689,53 @@ void InGameUI::themeQuitMenu( GameWindow *parent )
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The Esc menu laid out compact every frame it draws, before its keys draw: the logo stood down,
+	* the keys the layout shows stacked in a well a plate's margin in from the edge, the plate only as
+	* big as that and in the middle of the screen.  `well` gets the well, in screen pixels. */
+//-------------------------------------------------------------------------------------------------
+static void layoutQuitMenu( GameWindow *parent, IRegion2D &well )
+{
+	const Real scale = ControlBarUniformScale();
+	const Int keyWidth = REAL_TO_INT( QUIT_MENU_KEY_WIDTH * scale );
+	const Int keyHeight = REAL_TO_INT( QUIT_MENU_KEY_HEIGHT * scale );
+	const Int gap = REAL_TO_INT( QUIT_MENU_KEY_GAP * scale );
+	const Int margin = REAL_TO_INT( QUIT_MENU_MARGIN * scale );
+
+	for( Int logo = 0; logo < (Int)ARRAY_SIZE( QUIT_MENU_LOGOS ); logo++ )
+	{
+		GameWindow *window = quitMenuWindow( parent, QUIT_MENU_LOGOS[ logo ] );
+		if( window && !window->winIsHidden() )
+			window->winHide( TRUE );
+	}
+
+	std::vector< GameWindow * > shown;
+	for( Int key = 0; key < (Int)ARRAY_SIZE( QUIT_MENU_KEYS ); key++ )
+	{
+		GameWindow *button = quitMenuWindow( parent, QUIT_MENU_KEYS[ key ] );
+		if( button && !button->winIsHidden() )
+			shown.push_back( button );
+	}
+
+	const Int keysHeight = (Int)shown.size() * ( keyHeight + gap ) - gap;
+	const Int width = keyWidth + 4 * margin;
+	const Int height = keysHeight + 4 * margin;
+	const Int parentX = ( TheDisplay->getWidth() - width ) / 2;
+	const Int parentY = ( TheDisplay->getHeight() - height ) / 2;
+	parent->winSetPosition( parentX, parentY );
+	parent->winSetSize( width, height );
+	for( size_t key = 0; key < shown.size(); key++ )
+	{
+		shown[ key ]->winSetPosition( 2 * margin, 2 * margin + (Int)key * ( keyHeight + gap ) );
+		shown[ key ]->winSetSize( keyWidth, keyHeight );
+	}
+
+	well.lo.x = parentX + margin;
+	well.lo.y = parentY + margin;
+	well.hi.x = parentX + width - margin;
+	well.hi.y = parentY + height - margin;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** The Esc menu from Window/Html/QuitMenu.html, drawn as the menu's plate: every key where its
 	* button stands, with the button's own label, so the restart key reads Surrender or Restart Mission
 	* as the menu relabelled it, and its state. */
@@ -11685,11 +11745,15 @@ void InGameUI::drawQuitMenuPage( GameWindow *parent )
 	if( m_quitMenuOverlay == NULL )
 		m_quitMenuOverlay = new HtmlOverlay( m_superweaponNormalFont );
 
+	IRegion2D well;
+	layoutQuitMenu( parent, well );
+
 	HtmlValues values;
 	HtmlLists lists;
 	values[ "side" ] = spectatorSide();
 	IRegion2D panel;
 	putPageRect( values, "panel", panel, controlBarWindowRect( parent, panel ) );
+	putPageRect( values, "well", well, TRUE );
 
 	std::vector< HtmlValues > &keys = lists[ "keys" ];
 	for( Int key = 0; key < (Int)ARRAY_SIZE( QUIT_MENU_KEYS ); key++ )
