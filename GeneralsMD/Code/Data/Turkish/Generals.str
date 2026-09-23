@@ -15657,10 +15657,6 @@ GUI:BarBeacon
 "İşaret"
 END
 
-GUI:BarSkills
-"Yetenekler"
-END
-
 GUI:BarNetReady
 "hazır"
 END

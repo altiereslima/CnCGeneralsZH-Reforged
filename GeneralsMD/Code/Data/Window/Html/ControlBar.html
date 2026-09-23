@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <!--
   The command bar's frame, drawn where its three plates used to be, and the bar's own buttons.  The
-  command buttons, the radar, the money, the power bar and the portrait are still the bar's windows
-  and paint over this page.  The promotion, minimise and beacon buttons and the under-attack light
-  are the page's to draw: their windows take the clicks and draw nothing.  The menu and idle worker
+  command buttons, the radar, the money and the portrait are still the bar's windows and paint over
+  this page.  The promotion and beacon buttons, the under-attack light, the power bar and the
+  experience bar are the page's to draw: their windows take the clicks and draw nothing.  The menu and idle worker
   buttons are the page's altogether, pressed through data-click="press:Name"; the chat button is
   gone and Enter still opens the chat.  Same materials as Window/Html/Spectator.html, whose header
   says what the renderer draws and what not.
@@ -22,12 +22,14 @@
                            "yellow" or "red"; the watched player's while watching
     data-each="powercells" the same production as 40 cells, each {{lit}} "lit" up to it, standing at
                            {{x}} pixels inside the frame's lip and {{w}} wide
-    {{skillsbutton.x}} ... the skills button's place in the right panel's corner; data-click
-                           "flip:skills" folds the general's powers away and back, and
-                           {{flip:skills}} is "flipped" while they are folded
+    {{expframe.x}} ...     the experience bar's groove down the right panel, .w and .h its inside,
+                           {{expframe.innerw}} the width inside its lip; data-each="expcells" its
+                           ten rungs from the bottom up, each {{lit}} "lit" up to the way from this
+                           rank to the next, at {{y}} inside the lip, {{h}} tall, {{segh}} without
+                           its black line
+    data-each="rankstars"  a star for every rank there is, {{lit}} "lit" up to the one reached
     data-each="commandcells" the fourteen command buttons' places, shown or not, each {{cell.x}} .y .w .h
-    data-each="skillcells" the grid's nine empty places behind the powers, each {{cell.x}} .y .w .h;
-                           none while the skills button has them folded away
+    data-each="skillcells" the grid's nine empty places behind the general's powers, each {{cell.x}} .y .w .h
     {{signals.x}} ...      the column of smoke signal buttons against the left panel;
                            data-click="signal:attack", "signal:defend" or "signal:look" sends one
                            to the middle of the view; {{signals.shown}} is "hidden" where the keys
@@ -49,8 +51,8 @@
                            .bt .br .bb .bl the border's four widths, out to the screen's edge on the
                            sides against it
     {{alerttab.x}} ...     tabs standing on a border's top edge, outside it: the under-attack light
-    {{skillsbutton.x}} ... on the radar panel's, the skills button on the right panel's at its right
-                           hand end, with the promotion button moved beside it
+    {{starstab.x}} ...     on the radar panel's at its left hand end, the rank's stars on the right
+                           panel's at its right hand end, with the promotion button's window under it
     {{workertab.x}} ...    the idle worker's step, against the centre's border at its bottom left
     {{powerblock.x}} ...   the power bar's block, the centre's bezel carried on upward as wide as it
     {{powerframe.x}} ...   the power bar's frame standing on the centre's border, and the money's
@@ -201,8 +203,6 @@
   .button.pushed { background: linear-gradient(to bottom, #2a3036, #4b535e); border-top-color: #0c1114; border-left-color: #0c1114; }
   .button.disabled { color: #6f7782; }
   .button .cap { position: absolute; left: 0; right: 0; top: 50%; margin-top: -5px; line-height: 10px; }
-  .button .stars { font-size: 10px; }
-  .button.promotion.ready.lit { background: linear-gradient(to bottom, #f6e08a, #a4832a); color: #1a1406; border-color: #fff4b8; }
 
   /* the menu: three bars in a square cap in the screen's top left corner */
   .menu { left: 4px; top: 4px; width: 18px; height: 16px; }
@@ -253,9 +253,26 @@
   .alert.disabled .led { border-color: #ff9a80; background: linear-gradient(to bottom, #ff6a50, #d01a08); }
   .alert.disabled .glint { background-color: #ffe4dc; }
 
-  /* the skills button is lit while the powers are out, and dark once folded away; the grid's empty
-     places stand behind the powers, and go with them */
-  .skills.flipped { color: #6f7782; }
+  /* the rank: a star for every rank there is in a tab on the right panel's bezel, gold up to the one
+     reached and sunk dark past it.  The tab is the promotion button: under the pointer its stars
+     brighten, and while a promotion waits to be spent the tab blinks gold */
+  .rank .stars { position: absolute; left: 0; right: 0; top: 1px; line-height: 12px; font-size: 11px; text-align: center; }
+  .rank .star { color: #2a2f35; }
+  .rank .star.lit { color: #f2cf4a; }
+  .rank.hilite .star.lit { color: #fff0a0; }
+  .rank.hilite .star { color: #4b535e; }
+  .rank.ready.lit { background: linear-gradient(to bottom, #f6e08a, #a4832a); border-top-color: #fff4b8; }
+  .rank.ready.lit .star { color: #5a4410; }
+  .rank.ready.lit .star.lit { color: #ffffff; }
+
+  /* the experience bar: rungs up the right panel's groove, lit gold from the bottom up to the way
+     from this rank to the next, a black line over each */
+  .rungs { position: absolute; left: 1px; top: 1px; bottom: 1px; }
+  .rungs .rung { position: absolute; left: 0; }
+  .rungs .seg { margin-top: 1px; background-color: #15130c; }
+  .rungs .lit .seg { background: linear-gradient(to right, #8a6a14, #f6d860, #b08a24); }
+
+  /* the grid's empty places stand behind the powers */
   .skillcell { margin: 1px 0 0 1px; }
 
   /* the smoke signals: a step on the radar's bezel's right, dark down its own right, and a joint
@@ -327,11 +344,21 @@
     <div class="inset"></div>
     <div class="joint"></div>
   </div>
-  <div class="piece frame solid {{right.shown}}" style="left: {{right.x}}px; top: {{right.y}}px; width: {{right.w}}px; height: {{right.h}}px; border-width: {{right.bt}}px {{right.br}}px {{right.bb}}px {{right.bl}}px"></div>
+  <div class="piece frame bezel solid {{right.shown}}" style="left: {{right.x}}px; top: {{right.y}}px; width: {{right.w}}px; height: {{right.h}}px; border-width: {{right.bt}}px {{right.br}}px {{right.bb}}px {{right.bl}}px">
+    <div class="steel" style="left: -{{right.bl}}px; right: -{{right.br}}px; top: -{{right.bt}}px; bottom: -{{right.bb}}px"></div>
+    <div class="shine" style="left: -{{right.bl}}px; right: -{{right.br}}px; top: -{{right.bt}}px"></div>
+    <div class="lit" style="left: -{{right.bl}}px; top: -{{right.bt}}px; bottom: -{{right.bb}}px"></div>
+    <div class="sunk" style="width: {{right.w}}px; height: {{right.h}}px"></div>
+  </div>
+  <div class="piece groove solid stack {{expframe.shown}}" style="left: {{expframe.x}}px; top: {{expframe.y}}px; width: {{expframe.w}}px; height: {{expframe.h}}px">
+    <div class="rungs" style="width: {{expframe.innerw}}px"><div class="rung {{lit}}" data-each="expcells" style="top: {{y}}px; height: {{h}}px; width: {{expframe.innerw}}px"><div class="seg" style="width: {{expframe.innerw}}px; height: {{segh}}px"></div></div></div>
+    <div class="lip"></div>
+  </div>
+  <div class="piece tab rank {{starstab.shown}} {{promotion}} {{blink}} {{ButtonGeneral.state}}" style="left: {{starstab.x}}px; top: {{starstab.y}}px; width: {{starstab.w}}px; height: {{starstab.h}}px">
+    <div class="stars"><span class="star {{lit}}" data-each="rankstars">&#9733;</span></div>
+  </div>
 
   <div class="piece button {{ButtonPlaceBeacon.shown}} {{ButtonPlaceBeacon.state}}" style="left: {{ButtonPlaceBeacon.x}}px; top: {{ButtonPlaceBeacon.y}}px; width: {{ButtonPlaceBeacon.w}}px; height: {{ButtonPlaceBeacon.h}}px"><div class="cap">{{text:GUI:BarBeacon}}</div></div>
-  <div class="piece button promotion {{promotion}} {{blink}} {{ButtonGeneral.shown}} {{ButtonGeneral.state}}" style="left: {{ButtonGeneral.x}}px; top: {{ButtonGeneral.y}}px; width: {{ButtonGeneral.w}}px; height: {{ButtonGeneral.h}}px"><div class="cap stars">&#9733;&#9733;&#9733;</div></div>
-  <div class="piece button skills {{skillsbutton.shown}} {{flip:skills}}" data-click="flip:skills" style="left: {{skillsbutton.x}}px; top: {{skillsbutton.y}}px; width: {{skillsbutton.w}}px; height: {{skillsbutton.h}}px"><div class="cap">{{text:GUI:BarSkills}}</div></div>
 
   <div class="piece step signals solid {{signals.shown}}" style="left: {{signals.x}}px; top: {{signals.y}}px; width: {{signals.w}}px; height: {{signals.h}}px">
     <div class="joint"></div>

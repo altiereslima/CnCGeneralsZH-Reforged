@@ -104,6 +104,7 @@
 #include "GameLogic/IncomingDamage.h"
 #include "GameLogic/Weapon.h"
 #include "GameLogic/Object.h"
+#include "GameLogic/RankInfo.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/PolygonTrigger.h"
@@ -3874,7 +3875,6 @@ void InGameUI::reset( void )
 	m_scoreboardOpen = FALSE;
 	m_scoreboardPageLoaded = FALSE;
 	m_controlBarPageLoaded = FALSE;
-	m_controlBarFlipped.clear();
 	m_signalsWereShown = FALSE;
 	m_spectatorPageLoaded = FALSE;
 	m_spectatorFlipped.clear();
@@ -10179,7 +10179,7 @@ static const char *const CONTROL_BAR_WINDOWS[] =
 	* clicks; only their pictures are the page's. */
 static const char *const CONTROL_BAR_CUSTOM[] =
 {
-	"ButtonGeneral", "ButtonLarge", "ButtonPlaceBeacon", "WinUAttack", "PowerWindow"
+	"ButtonGeneral", "ButtonLarge", "ButtonPlaceBeacon", "WinUAttack", "PowerWindow", "GeneralsExp", "ExpBarForeground"
 };
 
 /** How far along its scale a power figure reaches, 0 to 1: the power bar's own logarithmic scale,
@@ -10243,6 +10243,59 @@ static void putPowerBar( HtmlValues &values, std::vector< HtmlValues > &cells )
 		values[ "power.state" ] = "green";
 }
 
+//-------------------------------------------------------------------------------------------------
+/** The general's experience as the page draws it, in the groove {{expframe.x}} ... puts down the
+	* right panel: `cells` from the bottom up, each {{lit}} "lit" up to the way from this rank to the
+	* next, at {{y}} and {{h}} pixels inside the lip, and `stars` one per rank, {{lit}} up to the rank
+	* reached.  The groove's border goes on top of its size in the page, so expframe.w and .h are cut
+	* to its inside here.  Watching, it is the watched player's. */
+//-------------------------------------------------------------------------------------------------
+static void putExperienceBar( HtmlValues &values, std::vector< HtmlValues > &cells, std::vector< HtmlValues > &stars )
+{
+	enum { FRAME_BORDER = 2, FRAME_LIP = 1, EXPERIENCE_CELLS = 10, FULL = 100 };
+
+	const Int width = atoi( values[ "expframe.w" ].c_str() ) - 2 * FRAME_BORDER;
+	const Int height = atoi( values[ "expframe.h" ].c_str() ) - 2 * FRAME_BORDER;
+	values[ "expframe.w" ] = std::to_string( max( 0, width ) );
+	values[ "expframe.h" ] = std::to_string( max( 0, height ) );
+	values[ "expframe.innerw" ] = std::to_string( max( 0, width - 2 * FRAME_LIP ) );
+
+	const Player *player = TheControlBar->isObserverControlBarOn() ? TheControlBar->getObserverLookAtPlayer()
+																																 : ThePlayerList->getLocalPlayer();
+	cells.clear();
+	stars.clear();
+	if( player == NULL )
+		return;
+
+	// a script can disable a level, which leaves its points required at -1: a rank with no way on
+	// counts as full, where the bar's own drawing divided by it
+	const Int span = player->getSkillPointsLevelUp() - player->getSkillPointsLevelDown();
+	const Int progress = span > 0 ? ( player->getSkillPoints() - player->getSkillPointsLevelDown() ) * FULL / span : FULL;
+	const Int lit = min( (Int)EXPERIENCE_CELLS, max( 0, progress ) * EXPERIENCE_CELLS / FULL );
+	const Int column = height - 2 * FRAME_LIP;
+	for( Int cell = 0; cell < EXPERIENCE_CELLS && column > 0; cell++ )
+	{
+		// cell 0 is the bottom one; each is cut from the column so they add up to it exactly, and its
+		// segment is a pixel shorter, the black line over it
+		enum { CELL_GAP = 1 };
+		const Int top = column - ( cell + 1 ) * column / EXPERIENCE_CELLS;
+		const Int cellHeight = column - cell * column / EXPERIENCE_CELLS - top;
+		HtmlValues entry;
+		entry[ "lit" ] = cell < lit ? "lit" : "";
+		entry[ "y" ] = std::to_string( top );
+		entry[ "h" ] = std::to_string( cellHeight );
+		entry[ "segh" ] = std::to_string( max( 0, cellHeight - CELL_GAP ) );
+		cells.push_back( entry );
+	}
+
+	for( Int rank = 1; rank <= TheRankInfoStore->getRankLevelCount(); rank++ )
+	{
+		HtmlValues entry;
+		entry[ "lit" ] = rank <= player->getRankLevel() ? "lit" : "";
+		stars.push_back( entry );
+	}
+}
+
 /** The bar's windows the page stands down altogether.  The menu and idle worker buttons are the
 	* page's own, pressed through data-click="press:Name" because they sit where the bar's frame takes
 	* no clicks; the chat button is gone, and Enter still opens the chat; the minimise button is gone,
@@ -10296,22 +10349,20 @@ static void placeSignalAtView( const std::string &kind )
 static const char *const CONTROL_BAR_LEFT[] = { "LeftHUD", NULL };
 static const char *const CONTROL_BAR_RIGHT[] = { "RightHUD", "GeneralsExp", "ExpBarForeground", NULL };
 static const char *const CONTROL_BAR_CENTRE[] = { "ObserverPlayerListWindow", "ButtonPlaceBeacon", NULL };
+static const char *const CONTROL_BAR_EXPERIENCE[] = { "GeneralsExp", "ExpBarForeground", NULL };
 static const Int COMMAND_BUTTONS = 14;	///< ButtonCommand01 to 14, the grid a player sees
 
-/** The promotion button, small, on the right panel's border beside the page's own skills button,
-	* which takes the outermost place.  800x600 pixels. */
+/** The pieces standing round the panels, 800x600 pixels. */
 enum
 {
-	CORNER_BUTTON_WIDTH		= 32,
-	CORNER_BUTTON_GAP			= 2,
+	STARS_TAB_WIDTH				= 62,		///< the rank's stars, a tab on the right panel's border, which is the promotion button
 	SKILL_GRID_WIDTH			= 150,	///< the general's powers, three to a row, against the screen's right edge
-	SKILL_GRID_GAP				= 30,		///< between them and the skills button
+	SKILL_GRID_GAP				= 30,		///< between them and the stars' tab
 	SIGNAL_BUTTON_SIZE		= 24,		///< each smoke signal button's height, a row of the column
 	SIGNAL_BUTTON_WIDTH		= 40,		///< and its width, room for its picture
 	SIGNAL_BUTTONS				= 3,		///< attack, defend, look
 	SKILL_GRID_ROWS				= 3,		///< the empty places drawn behind the powers
 	SKILL_GRID_COLUMNS		= 3,
-	SKILLS_BUTTON_WIDTH		= 58,		///< wide enough for its name in either language
 	ALERT_TAB_WIDTH				= 54,		///< the under-attack light, a lamp on the radar panel's border
 	WORKER_TAB_WIDTH			= 39,		///< the idle worker's step, against the command grid panel's border, as wide as the signals' column
 	WORKER_STEP_HEIGHT		= 30,		///< and its height, its key's bottom GRID_BOTTOM_GAP over the screen's bottom edge
@@ -10319,7 +10370,6 @@ enum
 																		///< the grid's two pixel well and four of steel under it; at 4 the well's lit
 																		///< bottom edge sat on the screen's last row and the grid looked cut off
 };
-static const char *const SKILLS_FOLDED = "skills";	///< the flip the skills button toggles; flipped is folded away
 static const UnsignedInt SIGNAL_RISE_MS = 360;					///< each smoke signal button's climb out of the screen's bottom edge
 static const UnsignedInt SIGNAL_RISE_STAGGER_MS = 90;	///< between one button starting and the next
 
@@ -10336,7 +10386,6 @@ static void putSignalRise( HtmlValues &values, UnsignedInt elapsedMs )
 		values[ "signal" + std::to_string( button ) + ".drop" ] = std::to_string( REAL_TO_INT( remaining * SIGNAL_BUTTON_SIZE * SIGNAL_BUTTONS ) );
 	}
 }
-static const char *const CORNER_BUTTONS[] = { "ButtonGeneral" };
 
 static void drawNothing( GameWindow *window, WinInstanceData *instData )
 {
@@ -10665,8 +10714,6 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	values[ "promotion" ] = !watching && TheControlBar->isGeneralStarFlashing() ? "ready" : "";
 	values[ "watching" ] = watching ? "watching" : "";
 	values.insert( m_hudValues.begin(), m_hudValues.end() );
-	for( std::set< std::string >::const_iterator name = m_controlBarFlipped.begin(); name != m_controlBarFlipped.end(); ++name )
-		values[ FLIP_ACTION + *name ] = "flipped";
 	values[ "blink" ] = TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND > LOGICFRAMES_PER_SECOND / 2 ? "lit" : "";
 	for( Int panel = 0; panel < panelCount; panel++ )
 		putPageRect( values, "panel" + std::to_string( panel ), panels[ panel ], shown[ panel ] );
@@ -10728,24 +10775,24 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	const IRegion2D rightBox = framed( content, border, FALSE, TRUE );
 	putFrame( values, "right", content, rightBox, rightFound && rightShown );
 
-	// the page's skills button stands on the right panel's border at its right hand end, and the
-	// promotion button beside it; a bar with no portrait showing leaves the promotion button where it was
-	const Int cornerWidth = REAL_TO_INT( CORNER_BUTTON_WIDTH * scale );
-	const Int cornerGap = REAL_TO_INT( CORNER_BUTTON_GAP * scale );
-	const IRegion2D skills = tabOn( rightBox, SKILLS_BUTTON_WIDTH, TRUE );
-	const Int cornerHeight = skills.hi.y - skills.lo.y;
-	putPageRect( values, "skillsbutton", skills, rightFound && rightShown );
+	// the experience bar's groove down the column the bar's own window and its foreground picture
+	// shared, the medal on top included, and the rank's stars in a tab on the panel's border at its
+	// right hand end, the way the under-attack light stands on the radar's at its left
+	IRegion2D experience;
+	const Bool experienceFound = controlBarUnion( CONTROL_BAR_EXPERIENCE, experience );
+	putPageRect( values, "expframe", experience, experienceFound && rightFound && rightShown );
+	putExperienceBar( values, lists[ "expcells" ], lists[ "rankstars" ] );
+	const IRegion2D starsTab = tabOn( rightBox, STARS_TAB_WIDTH, TRUE );
+	putPageRect( values, "starstab", starsTab, rightFound && rightShown );
 
-	// the general's powers ready to fire, three to a row over the right panel, while the skills
-	// button has not folded them away
+	// the general's powers ready to fire, three to a row over the right panel
 	IRegion2D powers;
 	powers.hi.x = TheDisplay->getWidth();
 	powers.lo.x = powers.hi.x - REAL_TO_INT( SKILL_GRID_WIDTH * scale );
-	powers.hi.y = skills.lo.y - REAL_TO_INT( SKILL_GRID_GAP * scale );
+	powers.hi.y = starsTab.lo.y - REAL_TO_INT( SKILL_GRID_GAP * scale );
 	powers.lo.y = powers.hi.y;
-	const Bool powersOpen = m_controlBarFlipped.find( SKILLS_FOLDED ) == m_controlBarFlipped.end();
 	ICoord2D cell;
-	TheControlBar->placeSpecialPowerShortcutGrid( powersOpen && rightFound ? &powers : NULL, &cell );
+	TheControlBar->placeSpecialPowerShortcutGrid( rightFound ? &powers : NULL, &cell );
 
 	// the grid's empty places, three by three, drawn behind the powers the way the command grid's
 	// well stands behind its buttons
@@ -10765,25 +10812,16 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 		}
 	}
 
-	if( rightFound )
+	// the promotion button is the stars' tab: its window moves under the tab and takes the click that
+	// opens the promotion screen
+	GameWindow *promotion = controlBarWindow( "ButtonGeneral" );
+	if( rightFound && promotion )
 	{
-		const Int width = cornerWidth;
-		const Int height = cornerHeight;
-		Int x = skills.lo.x - cornerGap;
-		for( Int each = 0; each < (Int)ARRAY_SIZE( CORNER_BUTTONS ); each++ )
-		{
-			GameWindow *button = controlBarWindow( CORNER_BUTTONS[ each ] );
-			if( button == NULL )
-				continue;
-
-			x -= width;
-			Int parentX = 0, parentY = 0;
-			if( button->winGetParent() )
-				button->winGetParent()->winGetScreenPosition( &parentX, &parentY );
-			button->winSetPosition( x - parentX, skills.lo.y - parentY );
-			button->winSetSize( width, height );
-			x -= cornerGap;
-		}
+		Int parentX = 0, parentY = 0;
+		if( promotion->winGetParent() )
+			promotion->winGetParent()->winGetScreenPosition( &parentX, &parentY );
+		promotion->winSetPosition( starsTab.lo.x - parentX, starsTab.lo.y - parentY );
+		promotion->winSetSize( starsTab.hi.x - starsTab.lo.x, starsTab.hi.y - starsTab.lo.y );
 	}
 
 	for( Int each = 0; each < (Int)ARRAY_SIZE( CONTROL_BAR_WINDOWS ); each++ )
@@ -10832,13 +10870,6 @@ Bool InGameUI::handleControlBarPageClick( const ICoord2D *mouse, Bool act )
 		return FALSE;
 
 	const std::string action = m_controlBarOverlay->click( *mouse );
-	if( action.compare( 0, FLIP_ACTION.size(), FLIP_ACTION ) == 0 )
-	{
-		const std::string name = action.substr( FLIP_ACTION.size() );
-		if( act && m_controlBarFlipped.erase( name ) == 0 )
-			m_controlBarFlipped.insert( name );
-		return TRUE;
-	}
 	if( action.compare( 0, SIGNAL_ACTION.size(), SIGNAL_ACTION ) == 0 )
 	{
 		if( act )
