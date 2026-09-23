@@ -58,6 +58,7 @@
 #include "Common/SafeDisc/CdaPfn.h"
 #include "Common/StackDump.h"
 #include "Common/MessageStream.h"
+#include "Common/PlayerList.h"
 #include "Common/Registry.h"
 #include "Common/Team.h"
 #include "GameClient/InGameUI.h"
@@ -132,6 +133,15 @@ static Bool isCursorOverWindow( void )
 		return false;
 
 	return PtInRect( &windowRect, cursor ) != 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A GameMessage stamps itself with the local player, so none can be made until the player list
+	* exists.  A window closed while the game was still loading used to fault in that constructor. */
+//-------------------------------------------------------------------------------------------------
+static Bool canPostQuitMessage( void )
+{
+	return TheMessageStream != NULL && ThePlayerList != NULL && ThePlayerList->getLocalPlayer() != NULL;
 }
 
 static HBITMAP gLoadScreenBitmap = NULL;
@@ -427,16 +437,24 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message,
 				// guarded like the focus handlers below: these messages can arrive before the
 				// engine is up and, more often, while it is tearing down - a close or end-session
 				// that lands after TheMessageStream is gone used to fault right here.
-				if (TheMessageStream)
+				if (canPostQuitMessage())
 					TheMessageStream->appendMessage(GameMessage::MSG_META_DEMO_INSTANT_QUIT);
 				return 0;	//don't allow Windows to shutdown while game is running.
 			}
 
 			// ------------------------------------------------------------------------
 			case WM_CLOSE:
-			if (TheGameEngine && !TheGameEngine->getQuitting() && TheMessageStream)
+			if (TheGameEngine && !TheGameEngine->getQuitting())
 			{
 				//user is exiting without using the menus
+
+				// Closed while still loading: nothing can carry a message yet, so the engine is
+				// told to stop and execute() never starts its loop.
+				if (!canPostQuitMessage())
+				{
+					TheGameEngine->setQuitting(TRUE);
+					return 0;
+				}
 
 				//This method didn't work in cinematics because we don't process messages.
 				//But it's the cleanest way to exit that's similar to using menus.

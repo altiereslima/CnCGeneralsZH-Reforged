@@ -4,7 +4,7 @@
 //
 // Patch.str is the 1.04 string overlay from PatchData.big.  The two original
 // strings are kept; everything after them is this fork's, and every command
-// added to Data/INI/CommandMap.ini needs a pair here or Options > Keyboard
+// added to Data/INI/CommandMapReforged.ini needs a pair here or Options > Keyboard
 // shows a blank row.
 //
 // Comments are '//' - GameText.cpp parseStringFile skips exactly that.

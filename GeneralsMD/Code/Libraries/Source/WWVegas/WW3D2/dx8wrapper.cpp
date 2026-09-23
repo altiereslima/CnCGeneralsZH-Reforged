@@ -2445,6 +2445,9 @@ void DX8Wrapper::Draw_Sorting_IB_VB(
 		}
 	}
 
+	// refused by the card, as in Draw: nothing to draw from on either device
+	if (static_cast<DX8VertexBufferClass*>(dyn_vb_access.VertexBuffer)->Get_DX8_Vertex_Buffer()==NULL) return;
+
 	DX8CALL(SetStreamSource(
 		0,
 		static_cast<DX8VertexBufferClass*>(dyn_vb_access.VertexBuffer)->Get_DX8_Vertex_Buffer(),
@@ -2486,6 +2489,8 @@ void DX8Wrapper::Draw_Sorting_IB_VB(
 			IndexBufferExceptionFunc();
 		}
 	}
+
+	if (static_cast<DX8IndexBufferClass*>(dyn_ib_access.IndexBuffer)->Get_DX8_Index_Buffer()==NULL) return;
 
 	// D3D8 handed SetIndices the base vertex index; D3D9 takes it on the draw call
 	// instead, so it travels with the DrawIndexedPrimitive below.
@@ -2607,6 +2612,16 @@ void DX8Wrapper::Draw(
 
 	// Debug feature to disable triangle drawing...
 	if (!_Is_Triangle_Draw_Enabled()) return;
+
+	// A buffer the card refused is a scratch block with no Direct3D buffer and no twin behind it
+	// (Create_Vertex_Buffer), so neither device has anything to draw from; skip it on both.
+	const bool vertices_refused = render_state.vertex_buffers[0]
+		&& (render_state.vertex_buffer_types[0]==BUFFER_TYPE_DX8 || render_state.vertex_buffer_types[0]==BUFFER_TYPE_DYNAMIC_DX8)
+		&& static_cast<DX8VertexBufferClass*>(render_state.vertex_buffers[0])->Get_DX8_Vertex_Buffer()==NULL;
+	const bool indices_refused = render_state.index_buffer
+		&& (render_state.index_buffer_type==BUFFER_TYPE_DX8 || render_state.index_buffer_type==BUFFER_TYPE_DYNAMIC_DX8)
+		&& static_cast<DX8IndexBufferClass*>(render_state.index_buffer)->Get_DX8_Index_Buffer()==NULL;
+	if (vertices_refused || indices_refused) return;
 
 #ifdef MESH_RENDER_SNAPSHOT_ENABLED
 	if (WW3D::Is_Snapshot_Activated()) {

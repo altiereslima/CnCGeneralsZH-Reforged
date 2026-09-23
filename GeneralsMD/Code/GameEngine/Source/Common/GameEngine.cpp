@@ -904,7 +904,7 @@ void GameEngine::init( int argc, char *argv[] )
 
 		AsciiString fname;
 		fname.format("Data\\%s\\CommandMap.ini", GetRegistryLanguage().str());
-		initSubsystem(TheMetaMap,"TheMetaMap", MSGNEW("GameEngineSubsystem") MetaMap(), NULL, fname.str(), "Data\\INI\\CommandMap.ini");
+		initSubsystem(TheMetaMap,"TheMetaMap", MSGNEW("GameEngineSubsystem") MetaMap(), NULL, fname.str(), "Data\\INI\\CommandMapReforged.ini");
 		// Legacy mouse and keyboard answers to the game's own map and to nothing this fork binds
 		TheMetaMap->loadLegacyBindings(fname);
 
