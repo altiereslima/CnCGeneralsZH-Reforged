@@ -1765,6 +1765,7 @@ static const std::string STAT_GROUP = "stat";
 enum
 {
 	HUD_TOGGLES_INSET					= 6,													///< between the page's #hud-top and the messages under it, 800x600
+	MENU_BUTTON_CLEARANCE			= 26,		///< where the messages start, right of the command bar page's menu button, 800x600
 	NET_WORTH_REFRESH_FRAMES	= LOGICFRAMES_PER_SECOND / 2,	///< how often every player's worth is counted again
 	FRAMES_PER_MINUTE					= LOGICFRAMES_PER_SECOND * 60,
 	LEAD_SAMPLE_FRAMES				= LOGICFRAMES_PER_SECOND * 10,	///< one point of the lead graph every ten seconds
@@ -7171,9 +7172,12 @@ void InGameUI::postDraw( void )
 
 		x = m_messagePosition.x;
 		y = m_messagePosition.y;
-		// the messages start under the strip drop-down rather than being written across it
+		// the messages start under the strip drop-down rather than being written across it, and
+		// right of the command bar page's menu button in the corner, which sat on their first letters
 		if( m_hudTogglesBottom + stripPixels( HUD_TOGGLES_INSET ) > y )
 			y = m_hudTogglesBottom + stripPixels( HUD_TOGGLES_INSET );
+		if( m_controlBarPageShown && x < stripPixels( MENU_BUTTON_CLEARANCE ) )
+			x = stripPixels( MENU_BUTTON_CLEARANCE );
 		for( i = MAX_UI_MESSAGES - 1; i >= 0; i-- )
 		{
 
