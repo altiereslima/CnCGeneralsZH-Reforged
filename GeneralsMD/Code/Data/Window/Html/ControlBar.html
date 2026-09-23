@@ -81,7 +81,13 @@
 
   .well { margin: -3px 0 0 -3px; border: 2px solid #0c1114; border-bottom-color: #4b535e; border-right-color: #4b535e;
           background-color: rgba(0, 0, 0, 0.35); }
-  .groove { margin: -2px 0 0 -2px; border: 1px solid #000000; border-bottom-color: #6f7782; background-color: #020405; }
+  /* a groove: a bar framed in two pixels of steel all the way round a black lip, lit a shade more
+     along the bottom and right, so the whole frame reads even where it crosses bare battlefield */
+  .groove { margin: -3px 0 0 -3px; border: 2px solid #7d8691; border-bottom-color: #c3ccd3; border-right-color: #aab4bf;
+            background-color: #020405; }
+  .groove .lip { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border: 1px solid #000000; }
+  .china .groove { border-color: #a44734; border-bottom-color: #e8a28a; border-right-color: #d98a72; }
+  .gla .groove { border-color: #978a50; border-bottom-color: #ddd29a; border-right-color: #cbbf82; }
 
   /* the bar's own buttons: a steel cap, lit gold under the pointer and pressed in when pushed */
   .button { text-align: center; color: #e8eef2; font-weight: bold;
@@ -141,8 +147,8 @@
   </div>
 
   <div class="piece well {{CommandWindow.shown}}" style="left: {{CommandWindow.x}}px; top: {{CommandWindow.y}}px; width: {{CommandWindow.w}}px; height: {{CommandWindow.h}}px"></div>
-  <div class="piece groove {{PowerWindow.shown}}" style="left: {{PowerWindow.x}}px; top: {{PowerWindow.y}}px; width: {{PowerWindow.w}}px; height: {{PowerWindow.h}}px"></div>
-  <div class="piece groove {{GeneralsExp.shown}}" style="left: {{GeneralsExp.x}}px; top: {{GeneralsExp.y}}px; width: {{GeneralsExp.w}}px; height: {{GeneralsExp.h}}px"></div>
+  <div class="piece groove {{PowerWindow.shown}}" style="left: {{PowerWindow.x}}px; top: {{PowerWindow.y}}px; width: {{PowerWindow.w}}px; height: {{PowerWindow.h}}px"><div class="lip"></div></div>
+  <div class="piece groove {{GeneralsExp.shown}}" style="left: {{GeneralsExp.x}}px; top: {{GeneralsExp.y}}px; width: {{GeneralsExp.w}}px; height: {{GeneralsExp.h}}px"><div class="lip"></div></div>
 
   <div class="piece button {{ButtonPlaceBeacon.shown}} {{ButtonPlaceBeacon.state}}" style="left: {{ButtonPlaceBeacon.x}}px; top: {{ButtonPlaceBeacon.y}}px; width: {{ButtonPlaceBeacon.w}}px; height: {{ButtonPlaceBeacon.h}}px"><div class="cap">{{text:GUI:BarBeacon}}</div></div>
   <div class="piece button promotion {{promotion}} {{blink}} {{ButtonGeneral.shown}} {{ButtonGeneral.state}}" style="left: {{ButtonGeneral.x}}px; top: {{ButtonGeneral.y}}px; width: {{ButtonGeneral.w}}px; height: {{ButtonGeneral.h}}px"><div class="cap stars">&#9733;&#9733;&#9733;</div></div>
