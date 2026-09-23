@@ -3590,7 +3590,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 				Int fps = TheGameEngine->getFramesPerSecondLimit();
 
 				if( t == GameMessage::MSG_META_GAME_SPEED_RESET )
-					fps = DEFAULT_MAX_FPS;
+					fps = LOGICFRAMES_PER_SECOND;	// DEFAULT_MAX_FPS is 45, which put "normal" at one and a half times
 				else if( t == GameMessage::MSG_META_GAME_SPEED_UP )
 					fps += 5;
 				else
@@ -3600,7 +3600,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 				if( fps > MAX_LOGIC_FPS ) fps = MAX_LOGIC_FPS;
 
 				TheGameEngine->setFramesPerSecondLimit( fps );
-				TheInGameUI->message( UnicodeString( L"Game speed: %d" ), fps );
+				TheInGameUI->message( UnicodeString( L"Game speed: %d%%" ), fps * 100 / LOGICFRAMES_PER_SECOND );
 			}
 			disp = DESTROY_MESSAGE;
 			break;
