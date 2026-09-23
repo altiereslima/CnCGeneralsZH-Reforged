@@ -1205,6 +1205,7 @@ protected:
 	///< one run of cells - a column while playing, a player's row while watching - with its left
 	///< edge at 'left' and its first cell's top edge at 'bottomY'
 	void drawProductionStripColumn( Int row, Int left, Int bottomY );
+	void drawQueueTray( Int row );		///< the playing strip as a row in Window/Html/Queue.html's tray
 	const Image *productionStripTray( void );	///< the bar's tray, mirrored, kept until the bar changes side
 	void stripTrayMetrics( ICoord2D *tray, ICoord2D *cameo, ICoord2D *hole, Int *step );	///< that tray's size, its cameo hole, and the column step
 	void drawStripSeconds( Int which, Int x, Int y, Int w, Int h, Int seconds );	///< countdown written inside a cameo
@@ -1311,6 +1312,12 @@ protected:
 	Bool												m_productionStripWatching;	///< the rows are every player's, not ours
 	Int													m_productionStripCameoW;		///< cameo size this frame, in the control bar's aspect
 	Int													m_productionStripCameoH;
+	Bool												m_productionStripThemed;		///< playing under the bar's page: a row in Queue.html's steel tray
+	Int													m_productionStripStep;			///< from one themed cameo to the next, across
+	HtmlOverlay *								m_queueOverlay;							///< Window/Html/Queue.html under the cameos
+	HtmlOverlay *								m_queueFrontOverlay;				///< and its frames over them
+	Bool												m_queuePageLoaded;
+	std::string									m_queuePage;
 
 	//
 	// The strip's cameos face the other way from the power bar's, so the tray behind them is a

@@ -1190,6 +1190,11 @@ InGameUI::InGameUI()
 	m_productionStripWatching = FALSE;
 	m_productionStripCameoW = PRODUCTION_STRIP_CAMEO;
 	m_productionStripCameoH = PRODUCTION_STRIP_CAMEO;
+	m_productionStripThemed = FALSE;
+	m_productionStripStep = 0;
+	m_queueOverlay = NULL;
+	m_queueFrontOverlay = NULL;
+	m_queuePageLoaded = FALSE;
 	m_productionStripTray = NULL;
 	m_productionStripTraySource = NULL;
 	for( Int stripString = 0; stripString < STRIP_OVERFLOW_STRINGS; stripString++ )
@@ -1347,6 +1352,10 @@ InGameUI::~InGameUI()
 		delete m_cellFrontOverlay[ grid ];
 		m_cellFrontOverlay[ grid ] = NULL;
 	}
+	delete m_queueOverlay;
+	m_queueOverlay = NULL;
+	delete m_queueFrontOverlay;
+	m_queueFrontOverlay = NULL;
 	delete m_tooltipOverlay;
 	m_tooltipOverlay = NULL;
 }
@@ -10190,6 +10199,7 @@ void InGameUI::drawScoreboard( void )
 
 static const char *const CONTROL_BAR_PAGE = "Window\\Html\\ControlBar.html";
 static const char *const PROMOTION_PAGE = "Window\\Html\\Promotion.html";
+static const char *const QUEUE_PAGE = "Window\\Html\\Queue.html";
 static void standDownPromotionScreen( void );
 
 /** The command bar's windows the page is told the place of, by their name in ControlBar.wnd. */
@@ -11417,21 +11427,23 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 
 	const Int trayW = traySize.x;
 	const Int trayH = traySize.y;
-	const Int cameoW = cameoSize.x;
-	const Int cameoH = cameoSize.y;
+	// under the bar's page the cameos stand in Queue.html's cells instead, in a row: `left` and
+	// `bottomY` are then the first cameo's own corner
+	const Int cameoW = m_productionStripThemed ? m_productionStripCameoW : cameoSize.x;
+	const Int cameoH = m_productionStripThemed ? m_productionStripCameoH : cameoSize.y;
 	// the tray is drawn mirrored, so its hole is mirrored with it: what that bar measures in from
 	// the left is the same distance in from the right here
 	const Int trayInsetX = trayW - trayHole.x - cameoW;
 	const Int trayInsetY = trayHole.y;
 	const Int trayX = left;
-	const Int x = left + trayInsetX;		///< where the first cameo starts
+	const Int x = m_productionStripThemed ? left : left + trayInsetX;		///< where the first cameo starts
 
 	//
 	// Which way the cells run.  Either way they step a whole tray, so no cameo has a neighbouring
 	// tray lying over its edge.
 	//
-	const Int cellStepX = m_productionStripWatching ? trayStep : 0;
-	const Int cellStepY = m_productionStripWatching ? 0 : trayH;
+	const Int cellStepX = m_productionStripThemed ? m_productionStripStep : m_productionStripWatching ? trayStep : 0;
+	const Int cellStepY = m_productionStripThemed || m_productionStripWatching ? 0 : trayH;
 
 	const Image *tray = productionStripTray();
 
@@ -11453,7 +11465,7 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 	// Without the art - a mod that ships no shortcut bar - a slot keeps the flat plate it used to
 	// have rather than losing its backing.
 	//
-	for( Int back = cells - 1; back >= 0; back-- )
+	for( Int back = cells - 1; back >= 0 && !m_productionStripThemed; back-- )
 	{
 		const Int backX = trayX + back * cellStepX;
 		const Int backY = bottomY - back * cellStepY - trayInsetY;
@@ -11638,8 +11650,9 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 												 draw->x, draw->y, cameoW, draw->quantity );
 	}
 
-	// and the borders round them, a team border heavy enough to read as the row's whole label
-	for( Int borderSlot = 0; borderSlot < count; borderSlot++ )
+	// and the borders round them, a team border heavy enough to read as the row's whole label; the
+	// themed row's frames are Queue.html's
+	for( Int borderSlot = 0; borderSlot < count && !m_productionStripThemed; borderSlot++ )
 	{
 		const StripSlotDraw *draw = &slots[ borderSlot ];
 		TheDisplay->drawOpenRect( draw->x, draw->y, cameoW, cameoH,
@@ -11697,6 +11710,87 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 										GameMakeColor( 235, 235, 235, 255 ),
 										GameMakeColor( 0, 0, 0, 255 ) );
 	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Playing under the bar's page, the strip is a row in the page's steel, Window/Html/Queue.html: a
+	* tray on the radar's side as the general's powers' is on the portrait's, standing over the
+	* under-attack light's tab with its first cell against the screen's left edge and the row growing
+	* right.  Each cell is a power's size, the soonest first, the "+N" in a cell of its own at the end,
+	* and the page's frames are drawn again over the cameos' edges the way the command grid's are. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::drawQueueTray( Int row )
+{
+	const Real scale = ControlBarUniformScale();
+	const IRegion2D button = commandButtonRect( 1 );
+	ICoord2D cell;
+	cell.x = ( button.hi.x - button.lo.x ) * SKILL_CELL_PERCENT / 100;
+	cell.y = ( button.hi.y - button.lo.y ) * SKILL_CELL_PERCENT / 100;
+	const Int gap = REAL_TO_INT( SKILL_CELL_GAP * scale );
+	const Int frame = REAL_TO_INT( CELL_FRAME * scale );
+	const Int reach = min( frame, gap / 2 );
+	const Int inset = frame - reach;
+	const Int trayBorder = REAL_TO_INT( SKILL_TRAY_BORDER * scale );
+
+	IRegion2D content;
+	controlBarUnion( CONTROL_BAR_LEFT, content );
+	const IRegion2D alertTab = tabOn( framed( content, REAL_TO_INT( PANEL_BORDER * scale ), TRUE, FALSE ),
+																		ALERT_TAB_WIDTH, PANEL_TAB_HEIGHT, FALSE );
+
+	// a cameo wearing an "x5" stands for five, and the "+N" is what none of them shows
+	Int shown = 0;
+	for( Int slot = 0; slot < m_productionStripCount[ row ]; slot++ )
+		shown += m_productionStrip[ row ][ slot ].quantity;
+	const Int cells = m_productionStripCount[ row ] + ( m_productionStripTotal[ row ] > shown ? 1 : 0 );
+
+	IRegion2D cellsBox;
+	cellsBox.lo.x = trayBorder;
+	cellsBox.hi.y = alertTab.lo.y - REAL_TO_INT( SKILL_GRID_GAP * scale ) - trayBorder;
+	cellsBox.lo.y = cellsBox.hi.y - cell.y;
+	cellsBox.hi.x = cellsBox.lo.x + cells * cell.x + ( cells - 1 ) * gap;
+	IRegion2D tray = cellsBox;
+	tray.lo.x = 0;
+	tray.lo.y -= trayBorder;
+	tray.hi.x += trayBorder;
+	tray.hi.y += trayBorder;
+
+	m_productionStripCameoW = cell.x - 2 * inset;
+	m_productionStripCameoH = cell.y - 2 * inset;
+	m_productionStripStep = cell.x + gap;
+
+	HtmlValues values;
+	HtmlLists lists;
+	values[ "side" ] = spectatorSide();
+	putFrame( values, "tray", cellsBox, tray, TRUE );
+	std::vector< HtmlValues > &cellList = lists[ "cells" ];
+	for( Int each = 0; each < cells; each++ )
+	{
+		IRegion2D place;
+		place.lo.x = cellsBox.lo.x + each * m_productionStripStep;
+		place.lo.y = cellsBox.lo.y;
+		place.hi.x = place.lo.x + cell.x;
+		place.hi.y = cellsBox.hi.y;
+		HtmlValues entry;
+		putPageRect( entry, "cell", reachedBy( place, reach ), TRUE );
+		cellList.push_back( entry );
+	}
+
+	if( m_queueOverlay == NULL )
+	{
+		m_queueOverlay = new HtmlOverlay( m_superweaponNormalFont );
+		m_queueFrontOverlay = new HtmlOverlay( m_superweaponNormalFont );
+	}
+	values[ "layer" ] = "back";
+	m_queueOverlay->setPage( HtmlTemplate_expand( m_queuePage, values, lists, lookupGameText ) );
+	m_queueOverlay->draw();
+
+	TheDisplay->beginBatch2D();
+	drawProductionStripColumn( row, cellsBox.lo.x + inset, cellsBox.lo.y + inset );
+	TheDisplay->endBatch2D();
+
+	values[ "layer" ] = "front";
+	m_queueFrontOverlay->setPage( HtmlTemplate_expand( m_queuePage, values, lists, lookupGameText ) );
+	m_queueFrontOverlay->draw();
 }
 
 #ifdef DEBUG_LOGGING
@@ -11882,28 +11976,40 @@ void InGameUI::drawProductionStrip( void )
 	const Int trayBelow = traySize.y - trayHole.y;
 	const Int lowerY = barTop - trayBelow - stripPixels( PRODUCTION_STRIP_LIFT );
 
-	//
-	// The strip is the busiest thing on the screen that is drawn a quad at a time, so it is drawn
-	// as a batch: the columns hand the display their pieces in an order that lets it gather the ones
-	// asking for the same state into single draw calls.  See Display::beginBatch2D.
-	//
-	TheDisplay->beginBatch2D();
-
-	//
-	// Playing there is the one run and it stands on the edge.  Watching, each player is a row of his
-	// own and the rows are piled up from the bar, the first of them lowest, so the vertical says who
-	// and the horizontal says what - a queue that grew upward as well would have nowhere to put the
-	// next player.
-	//
-	for( Int at = 0; at < rowsUsed; at++ )
+	// playing under the bar's page, the one run is a row in the page's steel instead
+	if( !m_queuePageLoaded )
 	{
-		const Int y = lowerY - at * traySize.y;
-		if( y - traySize.y < 0 )
-			continue;
-		drawProductionStripColumn( used[ at ], 0, y );
+		m_queuePageLoaded = TRUE;
+		readHtmlPage( QUEUE_PAGE, m_queuePage );
 	}
+	m_productionStripThemed = !m_productionStripWatching && m_controlBarPageShown && !m_queuePage.empty();
+	if( m_productionStripThemed )
+		drawQueueTray( used[ 0 ] );
+	else
+	{
+		//
+		// The strip is the busiest thing on the screen that is drawn a quad at a time, so it is drawn
+		// as a batch: the columns hand the display their pieces in an order that lets it gather the
+		// ones asking for the same state into single draw calls.  See Display::beginBatch2D.
+		//
+		TheDisplay->beginBatch2D();
 
-	TheDisplay->endBatch2D();
+		//
+		// Playing there is the one run and it stands on the edge.  Watching, each player is a row of
+		// his own and the rows are piled up from the bar, the first of them lowest, so the vertical
+		// says who and the horizontal says what - a queue that grew upward as well would have nowhere
+		// to put the next player.
+		//
+		for( Int at = 0; at < rowsUsed; at++ )
+		{
+			const Int y = lowerY - at * traySize.y;
+			if( y - traySize.y < 0 )
+				continue;
+			drawProductionStripColumn( used[ at ], 0, y );
+		}
+
+		TheDisplay->endBatch2D();
+	}
 
 #ifdef DEBUG_LOGGING
 	QueryPerformanceCounter( (LARGE_INTEGER *)&tDrawEnd );
