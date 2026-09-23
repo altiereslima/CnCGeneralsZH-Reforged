@@ -1204,6 +1204,7 @@ InGameUI::InGameUI()
 	m_controlBarOverlay = NULL;
 	m_controlBarPageLoaded = FALSE;
 	m_promotionOverlay = NULL;
+	m_promotionFrontOverlay = NULL;
 	m_promotionPageLoaded = FALSE;
 	m_controlBarPageShown = FALSE;
 	m_tooltipOverlay = NULL;
@@ -1335,6 +1336,8 @@ InGameUI::~InGameUI()
 	m_controlBarOverlay = NULL;
 	delete m_promotionOverlay;
 	m_promotionOverlay = NULL;
+	delete m_promotionFrontOverlay;
+	m_promotionFrontOverlay = NULL;
 	delete m_tooltipOverlay;
 	m_tooltipOverlay = NULL;
 }
@@ -10985,14 +10988,14 @@ static const struct PromotionRow
 enum
 {
 	PROMOTION_COLUMNS		= 5,	///< the widest row, the middle one
-	PROMOTION_MARGIN		= 6,	///< the plate round the well, and the well's gap under the bar
-	PROMOTION_INSET			= 4,	///< the well round the cells
+	PROMOTION_MARGIN		= 6,	///< the plate round the wells, and between one well and the next
+	PROMOTION_INSET			= 4,	///< a well round its heading and cells
 	PROMOTION_CELL_GAP	= 2,
+	PROMOTION_FRAME			= 3,	///< the front's frame and bevel over a cell's edge; the promotion fills the hole inside
 	PROMOTION_TITLE			= 14,	///< the rank's name's line, the points beside it
 	PROMOTION_BAR				= 7,	///< the experience bar under it
 	PROMOTION_BAR_GAP		= 3,
-	PROMOTION_HEADING		= 14,	///< a row's heading over its first button
-	PROMOTION_SECTION		= 8		///< between one row's last cells and the next row's heading
+	PROMOTION_HEADING		= 14	///< a row's heading over its first button
 };
 
 /** One place in the screen's grids, screen pixels, and the promotion's button standing in it: NULL
@@ -11008,7 +11011,7 @@ struct PromotionLayout
 {
 	std::vector< PromotionPlace > places;
 	std::vector< IRegion2D > headings;	///< one over each row, in PROMOTION_ROWS' order
-	IRegion2D well;
+	std::vector< IRegion2D > wells;			///< one round each row and its heading, the same order
 };
 
 static GameWindow *promotionWindow( const std::string &name )
@@ -11027,10 +11030,11 @@ static void placePromotionWindow( const std::string &name, Int x, Int y, Int wid
 //-------------------------------------------------------------------------------------------------
 /** The promotion screen laid out compact, every frame it draws, over the layout's own places: each
 	* row a grid five places wide in command button cells with a hair of steel between them, the way
-	* the command bar's grid is, a heading over it and a gap before the next; the rank's name and the
-	* points on one line with the bar under them, and the close button in the last row's fifth place,
-	* which no side fills.  Centred at the top of the screen where the layout hung it.  `layout` gets
-	* every place, filled or not, the headings and the well, in screen pixels. */
+	* the command bar's grid is, in a well of its own with its heading, a plate's margin between one
+	* well and the next; the rank's name and the points on one line with the bar under them, and the
+	* close button in the last row's fifth place, which no side fills.  Centred at the top of the screen
+	* where the layout hung it.  `layout` gets every place, filled or not, the headings and the wells,
+	* in screen pixels. */
 //-------------------------------------------------------------------------------------------------
 static void layoutPromotionScreen( GameWindow *parent, PromotionLayout &layout )
 {
@@ -11043,6 +11047,7 @@ static void layoutPromotionScreen( GameWindow *parent, PromotionLayout &layout )
 	const Int margin = Page::px( PROMOTION_MARGIN, scale );
 	const Int inset = Page::px( PROMOTION_INSET, scale );
 	const Int heading = Page::px( PROMOTION_HEADING, scale );
+	const Int frame = Page::px( PROMOTION_FRAME, scale );
 
 	const Int gridWidth = PROMOTION_COLUMNS * cellWidth + ( PROMOTION_COLUMNS - 1 ) * gap;
 	const Int width = gridWidth + 2 * ( margin + inset );
@@ -11060,16 +11065,21 @@ static void layoutPromotionScreen( GameWindow *parent, PromotionLayout &layout )
 	parentX = ( TheDisplay->getWidth() - width ) / 2;
 	parent->winSetPosition( parentX, parentY );
 
-	// the well stands a margin under the bar and the points, and the cells an inset inside it
-	const Int wellTop = margin + titleHeight + Page::px( PROMOTION_BAR_GAP + PROMOTION_BAR, scale ) + margin;
-	Int y = wellTop + inset;
+	// each row's well stands a margin under the one before, the first a margin under the bar and the
+	// points, and the heading and the cells an inset inside it
+	Int y = margin + titleHeight + Page::px( PROMOTION_BAR_GAP + PROMOTION_BAR, scale );
 	const Int left = margin + inset;
 	layout.places.clear();
 	layout.headings.clear();
+	layout.wells.clear();
 	for( Int row = 0; row < (Int)ARRAY_SIZE( PROMOTION_ROWS ); row++ )
 	{
-		if( row > 0 )
-			y += Page::px( PROMOTION_SECTION, scale );
+		y += margin;
+		IRegion2D well;
+		well.lo.x = parentX + margin;
+		well.hi.x = parentX + width - margin;
+		well.lo.y = parentY + y;
+		y += inset;
 		IRegion2D title;
 		title.lo.x = parentX + left;
 		title.hi.x = title.lo.x + gridWidth;
@@ -11101,32 +11111,37 @@ static void layoutPromotionScreen( GameWindow *parent, PromotionLayout &layout )
 				else if( number < PROMOTION_ROWS[ row ].count )
 				{
 					const std::string name = PROMOTION_ROWS[ row ].buttons + std::to_string( number );
-					placePromotionWindow( name, x, top, cellWidth, cellHeight );
+					placePromotionWindow( name, x + frame, top + frame, cellWidth - 2 * frame, cellHeight - 2 * frame );
 					place.button = promotionWindow( name );
 				}
 				layout.places.push_back( place );
 			}
 		}
-		y += depth * ( cellHeight + gap ) - gap;
+		y += depth * ( cellHeight + gap ) - gap + inset;
+		well.hi.y = parentY + y;
+		layout.wells.push_back( well );
 	}
 
-	const Int height = y + inset + margin;
-	parent->winSetSize( width, height );
-	layout.well.lo.x = parentX + margin;
-	layout.well.hi.x = parentX + width - margin;
-	layout.well.lo.y = parentY + wellTop;
-	layout.well.hi.y = parentY + height - margin;
+	parent->winSetSize( width, y + margin );
 }
 
 /** The screen's picture, drawn by the page while it is there. */
 static void drawPromotionScreen( GameWindow *window, WinInstanceData *instData )
 {
-	TheInGameUI->drawPromotionPage( window );
+	TheInGameUI->drawPromotionPage( window, FALSE );
+}
+
+/** The grid's frames over the promotions, drawn by the child that draws last. */
+static void drawPromotionScreenFront( GameWindow *window, WinInstanceData *instData )
+{
+	TheInGameUI->drawPromotionPage( window->winGetParent(), TRUE );
 }
 
 /** The promotion screen hands its look to the page: the parent draws the page, and every child but
 	* the promotions' own buttons draws nothing - the side's painting, the titles, the bar and its frame
-	* and the close button are the page's.  They all keep their clicks. */
+	* and the close button are the page's.  They all keep their clicks.  The title is moved to the head
+	* of the children, which draw from the tail, so it draws after the promotions and puts the grid's
+	* frames over their edges; it stands clear of every button, so it takes no click from one. */
 static void standDownPromotionScreen( void )
 {
 	GameWindow *parent = promotionWindow( "GenExpParent" );
@@ -11140,6 +11155,11 @@ static void standDownPromotionScreen( void )
 		if( !child->winGetInstanceData()->m_decoratedNameString.startsWith( buttonName.c_str() ) )
 			child->winSetDrawFunc( drawNothing );
 	}
+
+	GameWindow *front = promotionWindow( "StaticTextTitle" );
+	if( parent->winGetChild() != front )
+		front->winBringToTop();
+	front->winSetDrawFunc( drawPromotionScreenFront );
 }
 
 /** "owned", "ready" or "locked" for one promotion's button, by the state the bar left it in: enabled
@@ -11154,9 +11174,10 @@ static const char *promotionState( GameWindow *button )
 //-------------------------------------------------------------------------------------------------
 /** The general's promotion screen from Window/Html/Promotion.html, in the place of the side's
 	* painting.  Everything is placed from the screen's own windows, so it goes where the layout and
-	* the scheme put them; the promotions are the bar's buttons and paint over it. */
+	* the scheme put them; the promotions are the bar's buttons and paint over the back of the page,
+	* and the `front` of it, the grid's frames, paints over them. */
 //-------------------------------------------------------------------------------------------------
-void InGameUI::drawPromotionPage( GameWindow *parent )
+void InGameUI::drawPromotionPage( GameWindow *parent, Bool front )
 {
 	enum
 	{
@@ -11164,15 +11185,17 @@ void InGameUI::drawPromotionPage( GameWindow *parent )
 		FULL							= 100
 	};
 
-	if( m_promotionOverlay == NULL )
-		m_promotionOverlay = new HtmlOverlay( m_superweaponNormalFont );
+	HtmlOverlay *&overlay = front ? m_promotionFrontOverlay : m_promotionOverlay;
+	if( overlay == NULL )
+		overlay = new HtmlOverlay( m_superweaponNormalFont );
 
-	// laid out here, the parent's own draw, so every child is in its place before it draws
+	// laid out in the parent's own draw, the back, so every child is in its place before it draws
 	PromotionLayout layout;
 	layoutPromotionScreen( parent, layout );
 
 	HtmlValues values;
 	HtmlLists lists;
+	values[ "layer" ] = front ? "front" : "back";
 	values[ "side" ] = spectatorSide();
 	values[ "held" ] = TheMouse->getMouseStatus()->leftState != MBS_Up ? "held" : "";
 
@@ -11209,9 +11232,15 @@ void InGameUI::drawPromotionPage( GameWindow *parent )
 		rungs.push_back( entry );
 	}
 
-	// the promotions stand in a well of steel, a dark cell for every place of every row, filled or
-	// not, as the command grid's are, and each row's heading over it
-	putPageRect( values, "well", layout.well, TRUE );
+	// each row of promotions stands in a well of steel, a dark cell for every place, filled or not,
+	// as the command grid's are, its heading over it
+	std::vector< HtmlValues > &wells = lists[ "wells" ];
+	for( size_t row = 0; row < layout.wells.size(); row++ )
+	{
+		HtmlValues entry;
+		putPageRect( entry, "well", layout.wells[ row ], TRUE );
+		wells.push_back( entry );
+	}
 	GameWindow *exit = promotionWindow( "ButtonExit" );
 	std::vector< HtmlValues > &cells = lists[ "cells" ];
 	for( size_t each = 0; each < layout.places.size(); each++ )
@@ -11234,9 +11263,9 @@ void InGameUI::drawPromotionPage( GameWindow *parent )
 		headings.push_back( entry );
 	}
 
-	m_promotionOverlay->setPage( HtmlTemplate_expand( m_promotionPage, values, lists, lookupGameText ) );
-	m_promotionOverlay->hover( TheMouse->getMouseStatus()->pos );
-	m_promotionOverlay->draw();
+	overlay->setPage( HtmlTemplate_expand( m_promotionPage, values, lists, lookupGameText ) );
+	overlay->hover( TheMouse->getMouseStatus()->pos );
+	overlay->draw();
 }
 
 //-------------------------------------------------------------------------------------------------

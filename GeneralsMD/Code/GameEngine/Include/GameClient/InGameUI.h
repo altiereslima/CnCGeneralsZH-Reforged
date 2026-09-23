@@ -409,7 +409,7 @@ public:  // ********************************************************************
 	Bool handleControlBarPageClick( const ICoord2D *mouse, Bool act );
 	/** The general's promotion screen, Window/Html/Promotion.html, drawn as `parent`'s picture: the
 		* screen's windows keep their clicks and the promotions' own cameos paint over it. */
-	void drawPromotionPage( GameWindow *parent );
+	void drawPromotionPage( GameWindow *parent, Bool front );
 	void drawScoreboard( void );																						///< that scoreboard, over everything
 	/** Window/Html/Tooltip.html is there to draw with, in a match. */
 	Bool isTooltipPageReady( void );
@@ -1226,6 +1226,7 @@ protected:
 	std::string									m_tooltipPage;
 	ICoord2D										m_tooltipSize;						///< the box as last laid out, in screen pixels, to place the next one by
 	HtmlOverlay *								m_promotionOverlay;
+	HtmlOverlay *								m_promotionFrontOverlay;		///< the grid's frames, drawn over the promotions
 	Bool												m_promotionPageLoaded;
 	std::string									m_promotionPage;
 	Bool												m_signalsWereShown;				///< the smoke signal column was up last frame

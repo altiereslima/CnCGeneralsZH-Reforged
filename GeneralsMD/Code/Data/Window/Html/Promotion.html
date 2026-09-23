@@ -6,11 +6,12 @@
   nothing now and still taking their clicks, and the page draws them.  Same materials as
   Window/Html/ControlBar.html.
 
-  The game fills in, every frame the screen is up (InGameUI::drawPromotionPage):
+  The game fills in, twice every frame the screen is up (InGameUI::drawPromotionPage):
+    {{layer}}              "back" under the promotions' buttons, "front" over them
     {{side}}               "america", "china" or "gla"
     {{held}}               "held" while the left mouse button is down
     {{panel.x}} .y .w .h   the screen's plate
-    {{well.x}} ...         the well the promotions stand in, under the bar and the points
+    data-each="wells"      a well round each row and its heading, {{well.x}} .y .w .h
     {{Name.x}} .y .w .h    StaticTextTitle, ProgressBarExperience, StaticTextRankPointsAvailable and
                            ButtonExit, each with {{Name.shown}} and {{Name.state}} ("disabled",
                            "hilite", "pushed")
@@ -70,17 +71,24 @@
   .china .heading .rule { background-color: #7a3120; }
   .gla .heading .rule { background-color: #766a3a; }
 
-  /* the grid, as the command bar's: every place a dark cell exactly a button's size, steel between
-     them, an empty place a hole with its bevel.  A promotion's cell carries a rim a pixel outside
-     the button that says where it stands - gold once bought, light steel while it can be bought */
+  /* the page is drawn twice a frame: the back under the promotions, the front over them */
+  .front .under, .back .over { display: none; }
+
+  /* the grid, as the command bar's: every place a dark cell, the well's steel between them.  The front
+     lays the same steel over the gap and two pixels into each cell, with a bevel inside it, and the
+     promotion fills the hole exactly, so the grid reads as laid over the promotions; a promotion's
+     bevel is a rim that says where it stands - gold once bought, light steel while it can be bought */
   .cell { background-color: #020405; }
-  .cell .bevel { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border: 1px solid #06090b;
+  .cell.over { background: none; }
+  .cell .frame { position: absolute; left: -1px; top: -1px; right: -1px; bottom: -1px; border: 3px solid #3a414a; }
+  .china .cell .frame { border-color: #45190f; }
+  .gla .cell .frame { border-color: #423a1c; }
+  .cell .bevel { position: absolute; left: 2px; top: 2px; right: 2px; bottom: 2px; border: 1px solid #06090b;
                  border-bottom-color: #9aa4ae; border-right-color: #9aa4ae; }
   .china .cell .bevel { border-bottom-color: #d98a72; border-right-color: #d98a72; }
   .gla .cell .bevel { border-bottom-color: #cbbf82; border-right-color: #cbbf82; }
-  .cell .rim { display: none; position: absolute; left: -1px; top: -1px; right: -1px; bottom: -1px; border: 1px solid #e8c24a; }
-  .cell.owned .rim { display: block; }
-  .cell.ready .rim { display: block; border-color: #eef3f7; }
+  .cell.owned .bevel { border-color: #e8c24a; }
+  .cell.ready .bevel { border-color: #eef3f7; }
 
   /* the close button: a key sunk in the steel, lit steel with a gold rim under the pointer, pressed in
      while held */
@@ -94,21 +102,22 @@
 </style>
 </head>
 <body>
-<div class="{{side}} {{held}}">
-  <div class="piece plate" style="left: {{panel.x}}px; top: {{panel.y}}px; width: {{panel.w}}px; height: {{panel.h}}px"></div>
-  <div class="piece well" style="left: {{well.x}}px; top: {{well.y}}px; width: {{well.w}}px; height: {{well.h}}px"></div>
+<div class="{{layer}} {{side}} {{held}}">
+  <div class="piece plate under" style="left: {{panel.x}}px; top: {{panel.y}}px; width: {{panel.w}}px; height: {{panel.h}}px"></div>
+  <div class="piece well under" data-each="wells" style="left: {{well.x}}px; top: {{well.y}}px; width: {{well.w}}px; height: {{well.h}}px"></div>
 
-  <div class="piece title {{StaticTextTitle.shown}}" style="left: {{StaticTextTitle.x}}px; top: {{StaticTextTitle.y}}px; width: {{StaticTextTitle.w}}px; height: {{StaticTextTitle.h}}px; line-height: {{StaticTextTitle.h}}px">{{title}}</div>
-  <div class="piece groove {{ProgressBarExperience.shown}}" style="left: {{ProgressBarExperience.x}}px; top: {{ProgressBarExperience.y}}px; width: {{ProgressBarExperience.w}}px; height: {{ProgressBarExperience.h}}px">
+  <div class="piece title under {{StaticTextTitle.shown}}" style="left: {{StaticTextTitle.x}}px; top: {{StaticTextTitle.y}}px; width: {{StaticTextTitle.w}}px; height: {{StaticTextTitle.h}}px; line-height: {{StaticTextTitle.h}}px">{{title}}</div>
+  <div class="piece groove under {{ProgressBarExperience.shown}}" style="left: {{ProgressBarExperience.x}}px; top: {{ProgressBarExperience.y}}px; width: {{ProgressBarExperience.w}}px; height: {{ProgressBarExperience.h}}px">
     <div class="rung {{lit}}" data-each="exprungs" style="left: {{x}}px; width: {{w}}px"><div class="seg"></div></div>
     <div class="lip"></div>
   </div>
-  <div class="piece points {{StaticTextRankPointsAvailable.shown}}" style="left: {{StaticTextRankPointsAvailable.x}}px; top: {{StaticTextRankPointsAvailable.y}}px; width: {{StaticTextRankPointsAvailable.w}}px; height: {{StaticTextRankPointsAvailable.h}}px; line-height: {{StaticTextRankPointsAvailable.h}}px">{{points}}</div>
+  <div class="piece points under {{StaticTextRankPointsAvailable.shown}}" style="left: {{StaticTextRankPointsAvailable.x}}px; top: {{StaticTextRankPointsAvailable.y}}px; width: {{StaticTextRankPointsAvailable.w}}px; height: {{StaticTextRankPointsAvailable.h}}px; line-height: {{StaticTextRankPointsAvailable.h}}px">{{points}}</div>
 
-  <div class="piece heading" data-each="headings" style="left: {{heading.x}}px; top: {{heading.y}}px; width: {{heading.w}}px; height: {{heading.h}}px">{{label}}<div class="rule"></div></div>
-  <div class="piece cell {{state}}" data-each="cells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="bevel"></div><div class="rim"></div></div>
+  <div class="piece heading under" data-each="headings" style="left: {{heading.x}}px; top: {{heading.y}}px; width: {{heading.w}}px; height: {{heading.h}}px">{{label}}<div class="rule"></div></div>
+  <div class="piece cell under" data-each="cells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"></div>
+  <div class="piece cell over {{state}}" data-each="cells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="frame"></div><div class="bevel"></div></div>
 
-  <div class="piece close {{ButtonExit.shown}} {{ButtonExit.state}}" style="left: {{ButtonExit.x}}px; top: {{ButtonExit.y}}px; width: {{ButtonExit.w}}px; height: {{ButtonExit.h}}px"><div class="label">{{text:GUI:CloseExpScreen}}</div></div>
+  <div class="piece close under {{ButtonExit.shown}} {{ButtonExit.state}}" style="left: {{ButtonExit.x}}px; top: {{ButtonExit.y}}px; width: {{ButtonExit.w}}px; height: {{ButtonExit.h}}px"><div class="label">{{text:GUI:CloseExpScreen}}</div></div>
 </div>
 </body>
 </html>
