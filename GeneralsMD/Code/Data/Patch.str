@@ -916,6 +916,24 @@ TOOLTIP:WeaponStats
 "Dmg %d  Range %d"
 END
 
+// The same figures as rows of Window/Html/Tooltip.html, a label and its value each.
+
+TOOLTIP:StatTime
+"Build time"
+END
+
+TOOLTIP:StatSeconds
+"%ds"
+END
+
+TOOLTIP:StatDamage
+"Damage"
+END
+
+TOOLTIP:StatRange
+"Range"
+END
+
 // Peace time - the lobby combo box, its tooltip, the corner countdown and the three things the game
 // says while the clock runs.  Tools/peacetime_layout.py selfcheck fails if any of these goes missing.
 

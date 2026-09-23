@@ -674,6 +674,25 @@ enum ControlBarStages
 };
 
 //-------------------------------------------------------------------------------------------------
+/** What the build tooltip says, piece by piece, so Window/Html/Tooltip.html can lay each piece out
+	* on its own: ControlBarPopupDescription.wnd gets the same pieces run together into one text. */
+//-------------------------------------------------------------------------------------------------
+struct BuildTooltipCard
+{
+	UnicodeString name;
+	UnicodeString description;		///< the button's own text, its lines split by \n
+	UnicodeString warning;				///< why it cannot be bought right now, empty when it can
+	UnicodeString requires;				///< "Requires: ..." naming what is still missing
+	UnsignedInt cost;							///< 0 for nothing to pay
+	Bool costsScience;						///< the cost is promotion points rather than money
+	Bool hasStats;								///< DetailedBuildTooltips: the three figures below are there
+	Int buildSeconds;
+	Int damage;										///< the best weapon's, before any bonus; 0 for no weapon
+	Int range;
+	IRegion2D anchor;							///< the hovered window, in screen pixels
+};
+
+//-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 class ControlBar : public SubsystemInterface
 {
@@ -1335,7 +1354,10 @@ protected:
 
 	WindowLayout *m_buildToolTipLayout;										///< The window that will slide on/display tooltips
 	Bool m_showBuildToolTipLayout;											///< every frame we test to see if we aregoing to continue showing this or not.
+	BuildTooltipCard m_buildTooltipCard;								///< what the layout says, piece by piece
 public:
+	/** What the build tooltip up on screen says, NULL while none is. */
+	const BuildTooltipCard *getBuildTooltipCard( void );
 	void showBuildTooltipLayout( GameWindow *cmdButton );
 	void hideBuildTooltipLayout( void );
 	void deleteBuildTooltipLayout( void );

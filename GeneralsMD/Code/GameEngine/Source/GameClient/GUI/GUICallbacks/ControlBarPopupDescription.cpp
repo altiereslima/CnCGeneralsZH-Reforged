@@ -105,6 +105,28 @@ static GameWindow *theWindow = NULL;
 static AnimateWindowManager *theAnimateWindowManager = NULL;
 static GameWindow *prevWindow = NULL;
 static Bool useAnimation = FALSE;
+
+static void drawNothing( GameWindow *window, WinInstanceData *instData )
+{
+}
+
+/** `window` and every child of it, down, draw nothing from now on. */
+static void silenceWindowTree( GameWindow *window )
+{
+	window->winSetDrawFunc( drawNothing );
+	for( GameWindow *child = window->winGetChild(); child; child = child->winGetNext() )
+		silenceWindowTree( child );
+}
+
+/** Every window of `layout` draws nothing from now on.  The layout's own list, not the windows'
+	* sibling chain: a top level window's next is the next window on screen, and walking that silenced
+	* the command bar and everything else the moment a build tooltip came up. */
+static void silenceLayout( WindowLayout *layout )
+{
+	for( GameWindow *window = layout->getFirstWindow(); window; window = window->winGetNextInLayout() )
+		silenceWindowTree( window );
+}
+
 void ControlBarPopupDescriptionUpdateFunc( WindowLayout *layout, void *param )
 {
 	if(TheScriptEngine->isGameEnding())
@@ -237,6 +259,19 @@ void ControlBar::showBuildTooltipLayout( GameWindow *cmdButton )
 }
 
 
+const BuildTooltipCard *ControlBar::getBuildTooltipCard( void )
+{
+	if( m_buildToolTipLayout == NULL || m_buildToolTipLayout->isHidden() || prevWindow == NULL )
+		return NULL;
+
+	Int width, height;
+	prevWindow->winGetScreenPosition( &m_buildTooltipCard.anchor.lo.x, &m_buildTooltipCard.anchor.lo.y );
+	prevWindow->winGetSize( &width, &height );
+	m_buildTooltipCard.anchor.hi.x = m_buildTooltipCard.anchor.lo.x + width;
+	m_buildTooltipCard.anchor.hi.y = m_buildTooltipCard.anchor.lo.y + height;
+	return &m_buildTooltipCard;
+}
+
 void ControlBar::repopulateBuildTooltipLayout( void )
 {
 	if(!prevWindow || !m_buildToolTipLayout)
@@ -259,6 +294,8 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 	const ProductionPrerequisite *prereq;
 	Bool fireScienceButton = false;
 	UnsignedInt costToBuild = 0;
+	BuildTooltipCard &card = m_buildTooltipCard;
+	card = BuildTooltipCard();
 
 	if(commandButton)
 	{
@@ -347,26 +384,22 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 					switch( makeType )
 					{
 						case CANMAKE_NO_MONEY:
-							descrip.concat( L"\n\n" );
-							descrip.concat( TheGameText->fetch( "TOOLTIP:TooltipNotEnoughMoneyToBuild" ) );
+							card.warning = TheGameText->fetch( "TOOLTIP:TooltipNotEnoughMoneyToBuild" );
 							break;
 						case CANMAKE_QUEUE_FULL:
-							descrip.concat( L"\n\n" );
-							descrip.concat( TheGameText->fetch( "TOOLTIP:TooltipCannotPurchaseBecauseQueueFull" ) );
+							card.warning = TheGameText->fetch( "TOOLTIP:TooltipCannotPurchaseBecauseQueueFull" );
 							break;
 						case CANMAKE_PARKING_PLACES_FULL:
-							descrip.concat( L"\n\n" );
-							descrip.concat( TheGameText->fetch( "TOOLTIP:TooltipCannotBuildUnitBecauseParkingFull" ) );
+							card.warning = TheGameText->fetch( "TOOLTIP:TooltipCannotBuildUnitBecauseParkingFull" );
 							break;
 						case CANMAKE_MAXED_OUT_FOR_PLAYER:
-							descrip.concat( L"\n\n" );
               if ( thingTemplate->isKindOf( KINDOF_STRUCTURE ) )
               {
-                descrip.concat( TheGameText->fetch( "TOOLTIP:TooltipCannotBuildBuildingBecauseMaximumNumber" ) );
+                card.warning = TheGameText->fetch( "TOOLTIP:TooltipCannotBuildBuildingBecauseMaximumNumber" );
               }
               else
               {
-  							descrip.concat( TheGameText->fetch( "TOOLTIP:TooltipCannotBuildUnitBecauseMaximumNumber" ) );
+  							card.warning = TheGameText->fetch( "TOOLTIP:TooltipCannotBuildUnitBecauseMaximumNumber" );
               }
 							break;
 						//case CANMAKE_NO_PREREQ:
@@ -385,13 +418,11 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 						ProductionUpdateInterface *pui = selectedObject->getProductionUpdateInterface();
 						if( pui && pui->getProductionCount() >= pui->getMaxQueueEntries() )
 						{
-							descrip.concat( L"\n\n" );
-							descrip.concat( TheGameText->fetch( "TOOLTIP:TooltipCannotPurchaseBecauseQueueFull" ) );
+							card.warning = TheGameText->fetch( "TOOLTIP:TooltipCannotPurchaseBecauseQueueFull" );
 						}
 						else if( !TheUpgradeCenter->canAffordUpgrade( ThePlayerList->getLocalPlayer(), upgradeTemplate, FALSE ) )
 						{
-							descrip.concat( L"\n\n" );
-							descrip.concat( TheGameText->fetch( "TOOLTIP:TooltipNotEnoughMoneyToBuild" ) );
+							card.warning = TheGameText->fetch( "TOOLTIP:TooltipNotEnoughMoneyToBuild" );
 						}
 					}
 				}
@@ -421,9 +452,8 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 			//
 			if( TheGlobalData->m_detailedBuildTooltips )
 			{
-				UnicodeString stats;
-				Int buildSecs = ControlBar_secondsFromFrames( (Real)thingTemplate->calcTimeToBuild( player ) );
-				stats.format( TheGameText->fetch( "TOOLTIP:BuildTimeSeconds" ), buildSecs );
+				card.hasStats = TRUE;
+				card.buildSeconds = ControlBar_secondsFromFrames( (Real)thingTemplate->calcTimeToBuild( player ) );
 
 				// no bonuses: these are the template's own numbers, before veterancy or upgrades
 				WeaponBonus noBonus;
@@ -444,16 +474,8 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 					}
 				}
 
-				if( bestDamage > 0.0f )
-				{
-					UnicodeString weap;
-					// the gap is here rather than in the string: the string table collapses runs of spaces
-					weap.format( TheGameText->fetch( "TOOLTIP:WeaponStats" ), REAL_TO_INT( bestDamage ), REAL_TO_INT( bestRange ) );
-					stats.concat( L"   " );
-					stats.concat( weap );
-				}
-
-				descrip.concat( stats );
+				card.damage = REAL_TO_INT( bestDamage );
+				card.range = REAL_TO_INT( bestRange );
 			}
 
 			// ask each prerequisite to give us a list of the non satisfied prerequisites
@@ -473,14 +495,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 				requires.concat(requiresList);
 			}
 			if( !requires.isEmpty() )
-			{
-				UnicodeString requireFormat = TheGameText->fetch("CONTROLBAR:Requirements");
-				requires.format(requireFormat.str(), requires.str());
-				if(!descrip.isEmpty())
-					descrip.concat(L"\n");
-				descrip.concat(requires);
-
-			}
+				card.requires.format( TheGameText->fetch( "CONTROLBAR:Requirements" ).str(), requires.str() );
 		}
 		else if( upgradeTemplate )
 		{
@@ -554,12 +569,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 				}
 
 				if( missingScience )
-				{
-					if( !descrip.isEmpty() )
-						descrip.concat(L"\n");
-					requires.format( TheGameText->fetch( "CONTROLBAR:Requirements" ).str(), TheGameText->fetch( "CONTROLBAR:GeneralsPromotion" ).str() );
-					descrip.concat( requires );
-				}
+					card.requires.format( TheGameText->fetch( "CONTROLBAR:Requirements" ).str(), TheGameText->fetch( "CONTROLBAR:GeneralsPromotion" ).str() );
 			}
 		}	
 		else if( st != SCIENCE_INVALID && !fireScienceButton )
@@ -567,6 +577,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 			TheScienceStore->getNameAndDescription(st, name, descrip);
 			
 			costToBuild = TheScienceStore->getSciencePurchaseCost( st );
+			card.costsScience = TRUE;
 			if( costToBuild > 0 )
 			{
 				cost.format( TheGameText->fetch("TOOLTIP:ScienceCost"), costToBuild );
@@ -591,13 +602,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 					requires.concat(requiresList);
 				}
 				if( !requires.isEmpty() )
-				{
-					UnicodeString requireFormat = TheGameText->fetch("CONTROLBAR:Requirements");
-					requires.format(requireFormat.str(), requires.str());
-					if(!descrip.isEmpty())
-						descrip.concat(L"\n");
-					descrip.concat(requires);
-				}
+					card.requires.format( TheGameText->fetch( "CONTROLBAR:Requirements" ).str(), requires.str() );
 			}
 
 		}
@@ -641,8 +646,46 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 			DEBUG_ASSERTCRASH(FALSE, ("ControlBar::populateBuildTooltipLayout We attempted to call the popup tooltip on a game window that has yet to be hand coded in as this fuction was/is designed for only buttons but has been hacked to work with GameWindows."));
 			return;
 		}
-		
+
 	}
+
+	card.name = name;
+	card.description = descrip;
+	card.cost = costToBuild;
+
+	// the layout's one text: the description, then why it cannot be bought, the figures and what it
+	// still needs
+	if( !card.warning.isEmpty() )
+	{
+		descrip.concat( L"\n\n" );
+		descrip.concat( card.warning );
+	}
+	if( card.hasStats )
+	{
+		UnicodeString stats;
+		stats.format( TheGameText->fetch( "TOOLTIP:BuildTimeSeconds" ), card.buildSeconds );
+		if( card.damage > 0 )
+		{
+			UnicodeString weapon;
+			// the gap is here rather than in the string: the string table collapses runs of spaces
+			weapon.format( TheGameText->fetch( "TOOLTIP:WeaponStats" ), card.damage, card.range );
+			stats.concat( L"   " );
+			stats.concat( weapon );
+		}
+		descrip.concat( stats );
+	}
+	if( !card.requires.isEmpty() )
+	{
+		if( !descrip.isEmpty() )
+			descrip.concat( L"\n" );
+		descrip.concat( card.requires );
+	}
+
+	// with the tooltip page in a match the layout stays up for the show and hide logic above, and the
+	// page draws what it says
+	if( TheInGameUI->isTooltipPageReady() )
+		silenceLayout( m_buildToolTipLayout );
+
 	GameWindow *win = TheWindowManager->winGetWindowFromId(m_buildToolTipLayout->getFirstWindow(), TheNameKeyGenerator->nameToKey("ControlBarPopupDescription.wnd:StaticTextName"));
 	if(win)
 	{

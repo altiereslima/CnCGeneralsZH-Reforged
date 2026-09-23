@@ -15565,6 +15565,22 @@ TOOLTIP:WeaponStats
 "Hasar %d  Menzil %d"
 END
 
+TOOLTIP:StatTime
+"Üretim süresi"
+END
+
+TOOLTIP:StatSeconds
+"%d sn"
+END
+
+TOOLTIP:StatDamage
+"Hasar"
+END
+
+TOOLTIP:StatRange
+"Menzil"
+END
+
 GUI:HudToggles
 "Şeritler"
 END

@@ -1204,6 +1204,10 @@ InGameUI::InGameUI()
 	m_controlBarOverlay = NULL;
 	m_controlBarPageLoaded = FALSE;
 	m_controlBarPageShown = FALSE;
+	m_tooltipOverlay = NULL;
+	m_tooltipPageLoaded = FALSE;
+	m_tooltipSize.x = 0;
+	m_tooltipSize.y = 0;
 	m_signalsWereShown = FALSE;
 	m_signalsRiseStartMs = 0;
 	for( Int stripSeconds = 0; stripSeconds < STRIP_SECONDS_STRINGS; stripSeconds++ )
@@ -1327,6 +1331,8 @@ InGameUI::~InGameUI()
 	m_scoreboardOverlay = NULL;
 	delete m_controlBarOverlay;
 	m_controlBarOverlay = NULL;
+	delete m_tooltipOverlay;
+	m_tooltipOverlay = NULL;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3875,6 +3881,7 @@ void InGameUI::reset( void )
 	m_scoreboardOpen = FALSE;
 	m_scoreboardPageLoaded = FALSE;
 	m_controlBarPageLoaded = FALSE;
+	m_tooltipPageLoaded = FALSE;
 	m_signalsWereShown = FALSE;
 	m_spectatorPageLoaded = FALSE;
 	m_spectatorFlipped.clear();
@@ -12181,6 +12188,201 @@ void InGameUI::notifyResolutionChange( void )
 	}
 
 	RecreateQuitMenu();
+}
+
+static const char *const TOOLTIP_PAGE = "Window\\Html\\Tooltip.html";
+
+enum
+{
+	TOOLTIP_ANCHOR_GAP		= 6,		///< page pixels between the build tooltip and the button it describes
+	TOOLTIP_LABEL_LIMIT		= 28,		///< a description line "Label: value" is a row when its label is no longer
+	TOOLTIP_LAYOUT_PASSES	= 2,		///< laid out again once when the box came out another size than it was placed by
+};
+
+//-------------------------------------------------------------------------------------------------
+/** A tooltip text as data-each="lines": {{kind}} "row" with {{label}} and {{value}} for a line that
+	* reads "Label: value" - the string table's "Strong: infantry", "Energy Provided: 5" - and "text"
+	* with {{text}} for any other.  A run of blank lines is one entry of kind "gap", and none opens or
+	* closes the list. */
+//-------------------------------------------------------------------------------------------------
+static void putTooltipLines( const UnicodeString &text, std::vector< HtmlValues > &lines )
+{
+	const std::wstring whitespace = L" \t\r";
+	const std::wstring whole = text.str();
+	Bool gapOwed = FALSE;
+	for( size_t start = 0; start <= whole.size(); )
+	{
+		size_t end = whole.find( L'\n', start );
+		if( end == std::wstring::npos )
+			end = whole.size();
+		std::wstring line = whole.substr( start, end - start );
+		start = end + 1;
+
+		const size_t first = line.find_first_not_of( whitespace );
+		if( first == std::wstring::npos )
+		{
+			gapOwed = !lines.empty();
+			continue;
+		}
+		line = line.substr( first, line.find_last_not_of( whitespace ) - first + 1 );
+
+		if( gapOwed )
+		{
+			HtmlValues gap;
+			gap[ "kind" ] = "gap";
+			lines.push_back( gap );
+			gapOwed = FALSE;
+		}
+
+		HtmlValues entry;
+		const size_t colon = line.find( L':' );
+		const size_t valueStart = colon == std::wstring::npos ? colon : line.find_first_not_of( whitespace, colon + 1 );
+		if( colon != std::wstring::npos && colon <= TOOLTIP_LABEL_LIMIT && valueStart != std::wstring::npos )
+		{
+			entry[ "kind" ] = "row";
+			entry[ "label" ] = WideCharStringToMultiByte( line.substr( 0, colon ).c_str() );
+			entry[ "value" ] = WideCharStringToMultiByte( line.substr( valueStart ).c_str() );
+		}
+		else
+		{
+			entry[ "kind" ] = "text";
+			entry[ "text" ] = WideCharStringToMultiByte( line.c_str() );
+		}
+		lines.push_back( entry );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A button label as a name: the '&' that marks its hotkey letter taken out. */
+//-------------------------------------------------------------------------------------------------
+static std::string tooltipName( const UnicodeString &label )
+{
+	std::wstring name = label.str();
+	const size_t marker = name.find( L'&' );
+	if( marker != std::wstring::npos )
+		name.erase( marker, 1 );
+	return WideCharStringToMultiByte( name.c_str() );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The build tooltip's values: {{name}}, {{cost}} with {{costkind}} "money" or "science" and
+	* {{cost.shown}}, data-each="lines" out of the description, {{warning}} and {{requires}} each with
+	* its .shown, and the three figures {{time}} {{damage}} {{range}} with {{stats.shown}} and
+	* {{weapon.shown}}. */
+//-------------------------------------------------------------------------------------------------
+static void putBuildTooltipCard( const BuildTooltipCard &card, HtmlValues &values, HtmlLists &lists )
+{
+	values[ "kind" ] = "card";
+	values[ "name" ] = tooltipName( card.name );
+	values[ "cost" ] = std::to_string( card.cost );
+	values[ "costkind" ] = card.costsScience ? "science" : "money";
+	values[ "cost.shown" ] = card.cost > 0 ? "shown" : "hidden";
+	putTooltipLines( card.description, lists[ "lines" ] );
+	values[ "warning" ] = WideCharStringToMultiByte( card.warning.str() );
+	values[ "warning.shown" ] = card.warning.isEmpty() ? "hidden" : "shown";
+	values[ "requires" ] = WideCharStringToMultiByte( card.requires.str() );
+	values[ "requires.shown" ] = card.requires.isEmpty() ? "hidden" : "shown";
+
+	UnicodeString seconds;
+	seconds.format( TheGameText->fetch( "TOOLTIP:StatSeconds" ), card.buildSeconds );
+	values[ "time" ] = WideCharStringToMultiByte( seconds.str() );
+	values[ "damage" ] = std::to_string( card.damage );
+	values[ "range" ] = std::to_string( card.range );
+	values[ "stats.shown" ] = card.hasStats ? "shown" : "hidden";
+	values[ "weapon.shown" ] = card.hasStats && card.damage > 0 ? "shown" : "hidden";
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::isTooltipPageReady( void )
+{
+	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+		return FALSE;
+
+	if( !m_tooltipPageLoaded )
+	{
+		m_tooltipPageLoaded = TRUE;
+		readHtmlPage( TOOLTIP_PAGE, m_tooltipPage );
+	}
+	return !m_tooltipPage.empty();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Both tooltips out of Window/Html/Tooltip.html, in the side's steel.  The box is placed by the
+	* size it came out last time; when this one comes out another size it is placed and laid out once
+	* more, so a new tooltip is never drawn a frame in the wrong place. */
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::drawTooltipPage( const UnicodeString &cursorText, const RGBColor *accent )
+{
+	if( !isTooltipPageReady() )
+		return FALSE;
+
+	const BuildTooltipCard *card = TheControlBar->getBuildTooltipCard();
+	if( card == NULL && cursorText.isEmpty() )
+		return TRUE;
+
+	if( m_tooltipOverlay == NULL )
+		m_tooltipOverlay = new HtmlOverlay( m_superweaponNormalFont );
+
+	HtmlValues values;
+	HtmlLists lists;
+	values[ "side" ] = spectatorSide();
+	if( card )
+	{
+		putBuildTooltipCard( *card, values, lists );
+	}
+	else
+	{
+		// the first line names what is under the pointer, the rest are its owner and the like
+		std::vector< HtmlValues > &lines = lists[ "lines" ];
+		putTooltipLines( cursorText, lines );
+		values[ "kind" ] = "tip";
+		if( !lines.empty() )
+		{
+			values[ "title" ] = lines.front()[ "kind" ] == "text" ? lines.front()[ "text" ]
+																														: lines.front()[ "label" ] + ": " + lines.front()[ "value" ];
+			lines.erase( lines.begin() );
+		}
+		values[ "accent" ] = accent ? cssColor( GameMakeColor( REAL_TO_INT( accent->red * 255.0f ), REAL_TO_INT( accent->green * 255.0f ),
+																													 REAL_TO_INT( accent->blue * 255.0f ), 255 ) )
+																: "transparent";
+	}
+
+	const Int screenWidth = TheDisplay->getWidth();
+	const Int screenHeight = TheDisplay->getHeight();
+	const ICoord2D &mouse = TheMouse->getMouseStatus()->pos;
+	const Int gap = REAL_TO_INT( TOOLTIP_ANCHOR_GAP * ControlBarUniformScale() );
+	for( Int pass = 0; pass < TOOLTIP_LAYOUT_PASSES; pass++ )
+	{
+		IRegion2D box;
+		if( card )
+		{
+			// over the button, centred on it, and under it when there is no room above
+			box.lo.x = ( card->anchor.lo.x + card->anchor.hi.x - m_tooltipSize.x ) / 2;
+			box.lo.y = card->anchor.lo.y - gap - m_tooltipSize.y;
+			if( box.lo.y < 0 )
+				box.lo.y = card->anchor.hi.y + gap;
+			box.lo.x = max( 0, min( box.lo.x, screenWidth - m_tooltipSize.x ) );
+		}
+		else
+		{
+			Mouse::placeTooltip( mouse.x, mouse.y, m_tooltipSize.x, m_tooltipSize.y, 0, 0, screenWidth, screenHeight,
+													 &box.lo.x, &box.lo.y );
+		}
+		box.hi.x = box.lo.x + m_tooltipSize.x;
+		box.hi.y = box.lo.y + m_tooltipSize.y;
+		putPageRect( values, "box", box, TRUE );
+		m_tooltipOverlay->setPage( HtmlTemplate_expand( m_tooltipPage, values, lists, lookupGameText ) );
+
+		std::vector< IRegion2D > laidOut;
+		m_tooltipOverlay->rectsOf( "#box", laidOut );
+		DEBUG_ASSERTCRASH( laidOut.size() == 1, ( "%s has %d #box elements, wants one\n", TOOLTIP_PAGE, (Int)laidOut.size() ) );
+		const ICoord2D size = { laidOut.front().hi.x - laidOut.front().lo.x, laidOut.front().hi.y - laidOut.front().lo.y };
+		if( size.x == m_tooltipSize.x && size.y == m_tooltipSize.y )
+			break;
+		m_tooltipSize = size;
+	}
+	m_tooltipOverlay->draw();
+	return TRUE;
 }
 
 void InGameUI::disableTooltipsUntil(UnsignedInt frameNum)

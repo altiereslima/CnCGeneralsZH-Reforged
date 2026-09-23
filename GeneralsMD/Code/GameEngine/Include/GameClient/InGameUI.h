@@ -408,6 +408,12 @@ public:  // ********************************************************************
 		* when `act` is set the button it names is pressed. */
 	Bool handleControlBarPageClick( const ICoord2D *mouse, Bool act );
 	void drawScoreboard( void );																						///< that scoreboard, over everything
+	/** Window/Html/Tooltip.html is there to draw with, in a match. */
+	Bool isTooltipPageReady( void );
+	/** The tooltip page: the command bar's build tooltip over the hovered button while one is up,
+		* otherwise `cursorText` beside the pointer, edged in `accent` when it has one.  FALSE when the
+		* page is not ready, and the caller draws the old way. */
+	Bool drawTooltipPage( const UnicodeString &cursorText, const RGBColor *accent );
 	virtual Bool isMessagesOn( void ) { return m_messagesOn; }	///< are the display messages on
 	void freeMessageResources( void );				///< free resources for the ui messages
 	Color getMessageColor(Bool altColor) { return (altColor)?m_messageColor2:m_messageColor1; }
@@ -1212,6 +1218,10 @@ protected:
 	Bool												m_controlBarPageLoaded;
 	Bool												m_controlBarPageShown;		///< drawn this frame, so its buttons can be clicked
 	std::string									m_controlBarPage;
+	HtmlOverlay *								m_tooltipOverlay;
+	Bool												m_tooltipPageLoaded;
+	std::string									m_tooltipPage;
+	ICoord2D										m_tooltipSize;						///< the box as last laid out, in screen pixels, to place the next one by
 	Bool												m_signalsWereShown;				///< the smoke signal column was up last frame
 	UnsignedInt									m_signalsRiseStartMs;			///< when it last came up, the start of its buttons' rise
 
