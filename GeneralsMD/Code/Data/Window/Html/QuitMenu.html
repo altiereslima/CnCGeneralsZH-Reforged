@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<!--
+  The Esc menu in the command bar's steel, drawn as the menu's own plate.  Its keys are the menu's
+  buttons, drawing nothing now and still taking their clicks; the logo over them is the menu's own
+  picture and draws over this page.  Same materials as Window/Html/Promotion.html.
+
+  The game fills in, every frame the menu is up (InGameUI::drawQuitMenuPage):
+    {{side}}               "america", "china" or "gla"
+    {{panel.x}} .y .w .h   the menu's plate
+    data-each="keys"       every key the menu shows, top to bottom, {{key.x}} .y .w .h, {{label}} the
+                           button's own text and {{state}} any of "disabled", "hilite", "pushed"
+  All in the page's pixels, a pixel of an 800x600 screen.  Without this page the menu draws as EA
+  drew it.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Quit menu</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { background-color: #3b4a36; font-size: 10px; color: #e8eef2; }
+  .piece { position: absolute; }
+
+  /* the plate: steel lit from above, a light line along its top and down its left, dark along its
+     right and bottom */
+  .plate { background: linear-gradient(to bottom, #9aa3ad, #5a626c 12%, #353c45); border: 1px solid #0c1114;
+           border-top-color: #dde4ea; border-left-color: #b3bbc4; }
+  .china .plate { background: linear-gradient(to bottom, #c06a52, #7a3120 12%, #3f160f); border-top-color: #f0b8a4; border-left-color: #d58a70; }
+  .gla .plate { background: linear-gradient(to bottom, #b8ab6e, #766a3a 12%, #3c3519); border-top-color: #ebe2b4; border-left-color: #cabe86; }
+
+  /* a key sunk in the steel, lit steel with a gold rim under the pointer, pressed in while held, and
+     dim when it does nothing */
+  .key { border: 1px solid #06090b; border-bottom-color: #9aa4ae; border-right-color: #9aa4ae; background-color: rgba(4, 8, 10, 0.9);
+         text-align: center; font-weight: bold; }
+  .china .key { border-bottom-color: #d98a72; border-right-color: #d98a72; }
+  .gla .key { border-bottom-color: #cbbf82; border-right-color: #cbbf82; }
+  .key.hilite { background: linear-gradient(to bottom, #b3bbc4, #5a626c); border-color: #e8d27a; color: #ffffff; }
+  .china .key.hilite { background: linear-gradient(to bottom, #d58a70, #7a3120); }
+  .gla .key.hilite { background: linear-gradient(to bottom, #cabe86, #766a3a); }
+  .key.pushed { background: linear-gradient(to bottom, #151a1f, #3a414a); border-color: #e8d27a; color: #f2cf4a; }
+  .key.disabled { color: #5d666f; }
+  .key .label { position: absolute; left: 0; right: 0; top: 50%; margin-top: -7px; line-height: 14px; }
+</style>
+</head>
+<body>
+<div class="{{side}}">
+  <div class="piece plate" style="left: {{panel.x}}px; top: {{panel.y}}px; width: {{panel.w}}px; height: {{panel.h}}px"></div>
+  <div class="piece key {{state}}" data-each="keys" style="left: {{key.x}}px; top: {{key.y}}px; width: {{key.w}}px; height: {{key.h}}px"><div class="label">{{label}}</div></div>
+</div>
+</body>
+</html>

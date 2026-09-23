@@ -411,6 +411,10 @@ public:  // ********************************************************************
 	/** The general's promotion screen, Window/Html/Promotion.html, drawn as `parent`'s picture: the
 		* screen's windows keep their clicks and the promotions' own cameos paint over it. */
 	void drawPromotionPage( GameWindow *parent, Bool front );
+	/** The Esc menu hands its look to Window/Html/QuitMenu.html: `parent` draws the page and its keys
+		* draw nothing and keep their clicks.  Left as it is when there is no page. */
+	void themeQuitMenu( GameWindow *parent );
+	void drawQuitMenuPage( GameWindow *parent );
 	/** The command bar's grids of buttons whose cells the page frames in front of the buttons. */
 	enum CellGrid { CELL_GRID_COMMAND, CELL_GRID_QUEUE, CELL_GRID_POWERS, CELL_GRID_COUNT };
 	/** The steel frames over one grid's buttons, from Window/Html/ControlBar.html, drawn after them. */
@@ -1237,6 +1241,9 @@ protected:
 	std::vector< HtmlValues >		m_cellFrontCells[ CELL_GRID_COUNT ];	///< each grid's cells as the bar's page last placed them
 	Bool												m_promotionPageLoaded;
 	std::string									m_promotionPage;
+	HtmlOverlay *								m_quitMenuOverlay;
+	Bool												m_quitMenuPageLoaded;
+	std::string									m_quitMenuPage;
 	Bool												m_signalsWereShown;				///< the smoke signal column was up last frame
 	UnsignedInt									m_signalsRiseStartMs;			///< when it last came up, the start of its buttons' rise
 

@@ -15,7 +15,9 @@
   The game fills in, every frame (GameClient/HtmlTemplate.h):
     {{layer}}              "back" under the bar's windows; "front" drawn again after one grid's
                            buttons with nothing but {{side}} and data-each="frontcells", that grid's
-                           cells, each {{cell.x}} .y .w .h, whose frames then lie over the buttons
+                           cells, each {{cell.x}} .y .w .h, whose frames then lie over the buttons.
+                           Every cell of every grid is its picture's rectangle, with {{ring}} the
+                           steel round it in page pixels
     {{side}}               "america", "china" or "gla": the side whose bar is on screen
     {{promotion}}          "ready" while the general has a promotion to spend
     {{watching}}           "watching" while the local player is an observer or out of the match
@@ -49,6 +51,10 @@
                            net.in and net.out with {{net.online}} "online" in a network game;
                            net.units and net.cap with {{net.capped}} "capped" under a unit limit
     {{blink}}              "lit" for half of every second, for anything that blinks
+    data-each="seats"      while playing, every player grouped by team, your own first: {{kind}}
+                           "seat" with {{image}} {{color}} and {{weapon}} "ready", "charging" or
+                           "none"; between exactly two teams
+                           an entry of kind "clock" showing {{clock}}, between any others one of "gap"
     {{panelN.x}} .y .w .h  N 0 to 2, left, centre and right: where the plates would have gone,
                            moving with the bar when it slides or minimises; .w and .h are 0 and
                            {{panelN.shown}} is "hidden" when a minimised bar has stood it down
@@ -132,10 +138,11 @@
   .gla .bezel .steel { background: linear-gradient(to bottom, #b8ab6e, #766a3a 30%, #3c3519); }
   .gla .bezel .shine { background-color: #ebe2b4; }
   .gla .bezel .sunk { border-bottom-color: #cbbf82; border-right-color: #cbbf82; }
-  /* the command grid: its well is steel, and each of the fourteen places a dark cell with the well's
-     steel laid two pixels over its edge and a bevel inside that; an empty place shows as a hole.  The
-     page is drawn a second time as the front, after each grid's buttons, with only the frames and
-     the bevels, so the grid lies over the buttons, which stand in the hole exactly */
+  /* the command grid: its well is steel, and each of the fourteen places a dark hole exactly its
+     picture's size, a ring of the well's steel {{ring}} wide round it, half the gap to the next, and
+     a bevel on the hole's edge; an empty place shows as a hole.  The page is drawn a second time as
+     the front, after each grid's buttons, with only the rings and the bevels, so the grid lies over
+     the buttons and takes no more than the bevel's pixel off a picture */
   .front .piece { display: none; }
   .front .piece.over { display: block; }
   .bezel .sunk.grid { background-color: #3a414a; }
@@ -143,10 +150,11 @@
   .gla .bezel .sunk.grid { background-color: #423a1c; }
   .commandcell { background-color: #020405; }
   .commandcell.over { background: none; }
-  .commandcell .edge { position: absolute; left: -1px; top: -1px; right: -1px; bottom: -1px; border: 3px solid #3a414a; }
+  .commandcell .edge { position: absolute; border-style: solid; border-color: #3a414a; }
   .china .commandcell .edge { border-color: #45190f; }
   .gla .commandcell .edge { border-color: #423a1c; }
-  .commandcell .bevel { position: absolute; left: 2px; top: 2px; right: 2px; bottom: 2px; border: 1px solid #06090b;
+  /* the bevel lies on the picture's outermost pixel, where a button draws its own border line */
+  .commandcell .bevel { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border: 1px solid #06090b;
                         border-bottom-color: #9aa4ae; border-right-color: #9aa4ae; }
   .china .commandcell .bevel { border-bottom-color: #d98a72; border-right-color: #d98a72; }
   .gla .commandcell .bevel { border-bottom-color: #cbbf82; border-right-color: #cbbf82; }
@@ -332,6 +340,28 @@
   #net.online .onlineonly { display: block; }
   #net .cappedonly { display: none; }
   #net .cappedonly.capped { display: block; }
+
+  /* the players hanging from the top edge, grouped by team with the clock between two teams: each
+     their general's flag on a steel plate with their colour along its top, and on its bottom edge,
+     half in and half out, a lamp for their superweapons: green once one can fire, an empty ring
+     while none can yet, red when they have none */
+  #seats { left: 180px; right: 180px; top: 0; text-align: center; }
+  .sseat, .sclock, .sgap { display: inline-block; position: relative; vertical-align: top; }
+  .sseat { width: 32px; height: 34px; margin: 0 1px; }
+  .sseat .plate { position: absolute; left: 0; top: 0; width: 30px; height: 26px; border: 1px solid #0c1114; border-top: 0;
+                  background: linear-gradient(to bottom, #6f7782, #3f4650 50%, #1f252c); }
+  .china .sseat .plate { background: linear-gradient(to bottom, #8e3b2b, #4c1b13 50%, #26100b); }
+  .gla .sseat .plate { background: linear-gradient(to bottom, #867a45, #48401e 50%, #241f0f); }
+  .sseat .stripe { position: absolute; left: 0; right: 0; top: 0; height: 3px; }
+  .sseat .emblem { position: absolute; left: 3px; top: 5px; width: 24px; height: 14px; }
+  .sseat .lamp { position: absolute; left: 9px; top: 20px; width: 14px; height: 14px; background-size: 100% 100%; }
+  .sseat .lamp.ready { background-image: url(Icons/LampReady.svg); }
+  .sseat .lamp.charging { background-image: url(Icons/LampCharging.svg); }
+  .sseat .lamp.none { background-image: url(Icons/LampNone.svg); }
+  .sclock { width: 46px; height: 18px; margin: 0 4px; line-height: 18px; font-size: 10px; font-weight: bold; color: #e8d27a;
+            background-color: rgba(4, 8, 10, 0.9); border: 1px solid #06090b; border-top: 0; border-bottom-color: #b4bec8; border-right-color: #b4bec8; }
+  .sgap { width: 8px; height: 30px; }
+  .sclock .plate, .sclock .lamp, .sgap .plate, .sgap .lamp, .sgap .clocktext, .sseat .clocktext { display: none; }
 </style>
 </head>
 <body>
@@ -351,7 +381,7 @@
     <div class="shade" style="right: -{{centre.br}}px; top: -{{centre.bt}}px; bottom: -{{centre.bb}}px"></div>
     <div class="sunk grid" style="width: {{centre.w}}px; height: {{centre.h}}px"></div>
   </div>
-  <div class="piece commandcell" data-each="commandcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="edge"></div><div class="bevel"></div></div>
+  <div class="piece commandcell" data-each="commandcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="edge" style="left: -{{ring}}px; top: -{{ring}}px; right: -{{ring}}px; bottom: -{{ring}}px; border-width: {{ring}}px"></div><div class="bevel"></div></div>
   <div class="piece step worker solid {{workertab.shown}} {{ButtonIdleWorker.state}}" style="left: {{workertab.x}}px; top: {{workertab.y}}px; width: {{workertab.w}}px; height: {{workertab.h}}px">
     <div class="key" data-click="press:ButtonIdleWorker"><div class="icon"></div><div class="veil"></div></div>
   </div>
@@ -383,7 +413,7 @@
     <div class="lit" style="left: -{{right.bl}}px; top: -{{right.bt}}px; bottom: -{{right.bb}}px"></div>
     <div class="sunk grid" style="width: {{right.w}}px; height: {{right.h}}px"></div>
   </div>
-  <div class="piece commandcell" data-each="portraitcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="edge"></div><div class="bevel"></div></div>
+  <div class="piece commandcell" data-each="portraitcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="edge" style="left: -{{ring}}px; top: -{{ring}}px; right: -{{ring}}px; bottom: -{{ring}}px; border-width: {{ring}}px"></div><div class="bevel"></div></div>
   <div class="piece groove solid stack {{expframe.shown}}" style="left: {{expframe.x}}px; top: {{expframe.y}}px; width: {{expframe.w}}px; height: {{expframe.h}}px">
     <div class="rungs" style="width: {{expframe.innerw}}px"><div class="rung {{lit}}" data-each="expcells" style="top: {{y}}px; height: {{h}}px; width: {{expframe.innerw}}px"><div class="seg" style="width: {{expframe.innerw}}px; height: {{segh}}px"></div></div></div>
     <div class="lip"></div>
@@ -408,15 +438,23 @@
     <div class="base" style="left: -{{skilltray.bl}}px; right: -{{skilltray.br}}px; bottom: -{{skilltray.bb}}px"></div>
     <div class="sunk grid" style="width: {{skilltray.w}}px; height: {{skilltray.h}}px"></div>
   </div>
-  <div class="piece commandcell" data-each="skillcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="edge"></div><div class="bevel"></div></div>
+  <div class="piece commandcell" data-each="skillcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="edge" style="left: -{{ring}}px; top: -{{ring}}px; right: -{{ring}}px; bottom: -{{ring}}px; border-width: {{ring}}px"></div><div class="bevel"></div></div>
 
   <!-- the front: one grid's frames again, drawn after its buttons -->
-  <div class="piece commandcell over" data-each="frontcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="edge"></div><div class="bevel"></div></div>
+  <div class="piece commandcell over" data-each="frontcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="edge" style="left: -{{ring}}px; top: -{{ring}}px; right: -{{ring}}px; bottom: -{{ring}}px; border-width: {{ring}}px"></div><div class="bevel"></div></div>
 
   <div class="piece button menu {{ButtonOptions.state}}" data-click="press:ButtonOptions">
     <div class="bar" style="top: 4px"></div>
     <div class="bar" style="top: 7px"></div>
     <div class="bar" style="top: 10px"></div>
+  </div>
+
+  <div id="seats" class="piece">
+    <div class="s{{kind}}" data-each="seats">
+      <div class="plate"><div class="stripe" style="background-color: {{color}}"></div><img class="emblem" src="{{image}}"></div>
+      <div class="lamp {{weapon}}"></div>
+      <div class="clocktext">{{clock}}</div>
+    </div>
   </div>
 
   <div id="net" class="piece panel {{net.online}}">

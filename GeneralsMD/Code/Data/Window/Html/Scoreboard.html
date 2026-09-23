@@ -15,6 +15,10 @@
       has {{portrait}} {{general}} {{rank}} {{cash}} {{income}} {{kills}} {{losses}}, its promotions
       as {{skill0}} to {{skill6}}, and {{favourite}} with {{favouritename}}, the unit built most.
       A hidden seat is an enemy: a name, a colour and a team, nothing else.
+    data-each="superweapons", every superweapon in the match: per player who has one an entry of
+      {{kind}} "head" with {{image}} their general, {{color}} and {{name}}, then their countdowns, soonest
+      first, {{kind}} "weapon" with {{image}} its cameo, {{time}} and {{ready}} "ready" once it can
+      fire; {{weapons}} is "hidden" while there is none.
 
   An image whose name is empty is not drawn, so an unused {{skillN}} leaves no box.
   Edit the copy under Run/Window/Html and the next match reads it.
@@ -81,6 +85,20 @@
   .hidden .tray, .hidden .num, .hidden .skill, .hidden .favourite, .hidden .general { display: none; }
   .defeated .who { color: #8a949f; }
   .defeated .num, .defeated .cash { color: #8a949f; }
+
+  /* the superweapons: a line per player who has one, their general and name, and after it each of
+     their countdowns as a cameo with its time, gold once it can fire */
+  .weapons.hidden { display: none; }
+  .whead { position: relative; height: 20px; margin: 2px 3px 0 3px; }
+  .whead .tray { position: absolute; left: 4px; top: 1px; width: 24px; height: 18px; }
+  .whead .emblem { position: absolute; left: 3px; top: 3px; width: 18px; height: 12px; }
+  .whead .who { position: absolute; left: 32px; top: 0; line-height: 20px; font-weight: bold; }
+  .whead .cameo, .whead .time, .wweapon .tray, .wweapon .who { display: none; }
+  .wweapon { display: inline-block; position: relative; width: 58px; height: 20px; margin: 0 0 2px 7px; }
+  .wweapon .cameo { position: absolute; left: 0; top: 0; width: 24px; height: 20px; border: 1px solid #0c1114; }
+  .wweapon .time { position: absolute; left: 28px; top: 0; line-height: 20px; font-weight: bold; color: #c9d2d9; }
+  .wweapon.ready .cameo { border-color: #e8c24a; }
+  .wweapon.ready .time { color: #f2cf4a; }
 </style>
 </head>
 <body>
@@ -119,6 +137,16 @@
       <img class="skill" src="{{skill5}}" style="left: 440px">
       <img class="skill" src="{{skill6}}" style="left: 454px">
       <img class="favourite c-favourite" src="{{favourite}}">
+    </div>
+  </div>
+
+  <div class="weapons {{weapons}}">
+    <div class="band plate">{{text:GUI:Superweapons}}</div>
+    <div class="w{{kind}} {{ready}}" data-each="superweapons">
+      <div class="tray"><img class="emblem" src="{{image}}"></div>
+      <span class="who" style="color: {{color}}">{{name}}</span>
+      <img class="cameo" src="{{image}}">
+      <span class="time">{{time}}</span>
     </div>
   </div>
 </div>

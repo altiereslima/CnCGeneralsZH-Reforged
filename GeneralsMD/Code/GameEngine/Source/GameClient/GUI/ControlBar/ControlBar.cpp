@@ -1637,7 +1637,7 @@ struct ControlBarPanelPlacement
 	Real designX, designY, designW, designH;
 	Int placedX, placedY, placedW, placedH;
 	Int slideApplied;			///< how far down applyPanelSlide has actually moved this one, in pixels
-	Int inset;						///< how far insetPlacedWindow has put it inside the placed rectangle, in pixels
+	ICoord2D inset;				///< how far insetPlacedWindow has put it inside the placed rectangle, each way, in pixels
 };
 typedef std::map< GameWindow *, ControlBarPanelPlacement > ControlBarPanelPlacementMap;
 static ControlBarPanelPlacementMap theControlBarPlacement;
@@ -2025,10 +2025,10 @@ void ControlBar::placeInPanel( GameWindow *win, Int panel,
 	// a window insetPlacedWindow put inside its place is read as the whole place, or every rebuild
 	// would take the inset for what it was authored at and shrink it again
 	ControlBarPanelPlacement &place = theControlBarPlacement[ win ];
-	size.x += 2 * place.inset;
-	size.y += 2 * place.inset;
-	const Int oldX = oldParentX + rel.x - place.inset;
-	const Int oldY = oldParentY + rel.y - place.inset;
+	size.x += 2 * place.inset.x;
+	size.y += 2 * place.inset.y;
+	const Int oldX = oldParentX + rel.x - place.inset.x;
+	const Int oldY = oldParentY + rel.y - place.inset.y;
 
 	if( place.known == FALSE || oldX != place.placedX || oldY != place.placedY ||
 			size.x != place.placedW || size.y != place.placedH )
@@ -2097,7 +2097,7 @@ void ControlBar::placeInPanel( GameWindow *win, Int panel,
 	place.panel = panel;
 	place.weHid = FALSE;
 	place.slideApplied = 0;
-	place.inset = 0;
+	place.inset.x = place.inset.y = 0;
 	place.placedX = newX;
 	place.placedY = newY;
 	place.placedW = newW;
@@ -2147,20 +2147,20 @@ Int ControlBar::getPanelSlideOffset( Int panel ) const
 }
 
 //-------------------------------------------------------------------------------------------------
-void ControlBar::insetPlacedWindow( GameWindow *window, Int inset )
+void ControlBar::insetPlacedWindow( GameWindow *window, const ICoord2D &inset )
 {
 	ControlBarPanelPlacement &place = theControlBarPlacement.find( window )->second;
-	if( place.inset == inset )
+	if( place.inset.x == inset.x && place.inset.y == inset.y )
 		return;
 
 	// where placeInPanel put it in its parent, which the parent carries with it wherever it goes
 	const ControlBarPanelPlacement &parent = theControlBarPlacement.find( window->winGetParent() )->second;
-	window->winSetPosition( place.placedX - parent.placedX + inset, place.placedY - parent.placedY + inset );
-	window->winSetSize( place.placedW - 2 * inset, place.placedH - 2 * inset );
+	window->winSetPosition( place.placedX - parent.placedX + inset.x, place.placedY - parent.placedY + inset.y );
+	window->winSetSize( place.placedW - 2 * inset.x, place.placedH - 2 * inset.y );
 	place.inset = inset;
 }
 
-Int ControlBar::getPlacedInset( GameWindow *window ) const
+ICoord2D ControlBar::getPlacedInset( GameWindow *window ) const
 {
 	return theControlBarPlacement.find( window )->second.inset;
 }
@@ -6228,7 +6228,7 @@ static void drawNoTray( GameWindow *window, WinInstanceData *instData )
 {
 }
 
-Int ControlBar::placeSpecialPowerShortcutGrid( const ICoord2D *corner, const ICoord2D &cell, Int gap, Int inset )
+Int ControlBar::placeSpecialPowerShortcutGrid( const ICoord2D *corner, const ICoord2D &cell, Int gap )
 {
 	if( m_specialPowerShortcutParent == NULL || m_specialPowerShortcutButtonParents[ 0 ] == NULL )
 		return 0;
@@ -6263,7 +6263,7 @@ Int ControlBar::placeSpecialPowerShortcutGrid( const ICoord2D *corner, const ICo
 		m_specialPowerShortcutParent->winHide( FALSE );
 
 	// the first power in the corner, the row running left from it and the next row over it: the
-	// order the row keys count in.  Each cameo fills its cell but for the inset round it
+	// order the row keys count in.  Each cameo fills its cell
 	for( Int i = 0; i < MAX_SPECIAL_POWER_SHORTCUTS; i++ )
 	{
 		GameWindow *slot = m_specialPowerShortcutButtonParents[ i ];
@@ -6276,8 +6276,8 @@ Int ControlBar::placeSpecialPowerShortcutGrid( const ICoord2D *corner, const ICo
 		slot->winSetPosition( width - ( column + 1 ) * cell.x - column * gap, height - ( row + 1 ) * cell.y - row * gap );
 		slot->winSetSize( cell.x, cell.y );
 		slot->winSetDrawFunc( drawNoTray );
-		button->winSetSize( cell.x - 2 * inset, cell.y - 2 * inset );
-		button->winSetPosition( inset, inset );
+		button->winSetSize( cell.x, cell.y );
+		button->winSetPosition( 0, 0 );
 	}
 	return shown;
 }

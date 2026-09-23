@@ -13,7 +13,8 @@
     {{tray.x}} .y .w .h    the tray, a panel as ControlBar.html's {{right.x}} is: .x and .y the
                            border's outer corner, .w and .h the cells it holds, .bt .br .bb .bl its
                            border's four widths
-    data-each="cells"      a cell behind each cameo and the "+N", each {{cell.x}} .y .w .h
+    data-each="cells"      a cell behind each cameo and the "+N", each {{cell.x}} .y .w .h, the
+                           cameo's own rectangle, and {{ring}} the steel round it
   All in the page's pixels, a pixel of an 800x600 screen.  Without this page the strip draws its
   column of the power bar's trays.
 -->
@@ -45,13 +46,14 @@
   .gla .tray .shine { background-color: #ebe2b4; }
   .gla .tray .sunk { border-bottom-color: #cbbf82; border-right-color: #cbbf82; background-color: #423a1c; }
 
-  /* a cell as the command grid's: dark, the well's steel laid over its edge and a bevel inside */
+  /* a cell as the command grid's: a dark hole the cameo's size, a ring of the well's steel {{ring}}
+     wide round it and a bevel on its edge */
   .cell { background-color: #020405; }
   .cell.over { background: none; }
-  .cell .edge { position: absolute; left: -1px; top: -1px; right: -1px; bottom: -1px; border: 3px solid #3a414a; }
+  .cell .edge { position: absolute; border-style: solid; border-color: #3a414a; }
   .china .cell .edge { border-color: #45190f; }
   .gla .cell .edge { border-color: #423a1c; }
-  .cell .bevel { position: absolute; left: 2px; top: 2px; right: 2px; bottom: 2px; border: 1px solid #06090b;
+  .cell .bevel { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border: 1px solid #06090b;
                  border-bottom-color: #9aa4ae; border-right-color: #9aa4ae; }
   .china .cell .bevel { border-bottom-color: #d98a72; border-right-color: #d98a72; }
   .gla .cell .bevel { border-bottom-color: #cbbf82; border-right-color: #cbbf82; }
@@ -66,8 +68,8 @@
     <div class="base" style="left: -{{tray.bl}}px; right: -{{tray.br}}px; bottom: -{{tray.bb}}px"></div>
     <div class="sunk" style="width: {{tray.w}}px; height: {{tray.h}}px"></div>
   </div>
-  <div class="piece cell under" data-each="cells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="edge"></div><div class="bevel"></div></div>
-  <div class="piece cell over" data-each="cells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="edge"></div><div class="bevel"></div></div>
+  <div class="piece cell under" data-each="cells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="edge" style="left: -{{ring}}px; top: -{{ring}}px; right: -{{ring}}px; bottom: -{{ring}}px; border-width: {{ring}}px"></div><div class="bevel"></div></div>
+  <div class="piece cell over" data-each="cells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="edge" style="left: -{{ring}}px; top: -{{ring}}px; right: -{{ring}}px; bottom: -{{ring}}px; border-width: {{ring}}px"></div><div class="bevel"></div></div>
 </div>
 </body>
 </html>

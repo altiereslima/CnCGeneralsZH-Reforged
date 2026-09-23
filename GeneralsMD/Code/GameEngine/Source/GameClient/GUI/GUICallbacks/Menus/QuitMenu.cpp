@@ -467,7 +467,8 @@ void ToggleQuitMenu()
 			TheInGameUI->setQuitMenuVisible(FALSE);
 			return;
 		}
-		
+		TheInGameUI->themeQuitMenu( quitMenuLayout->getFirstWindow() );
+
 		//quitMenuLayout->hide(FALSE);
 
 		// if we are watching a cinematic, we need to disable the save/load button
