@@ -10312,7 +10312,8 @@ enum
 	SKILLS_BUTTON_WIDTH		= 58,		///< wide enough for its name in either language
 	ALERT_TAB_WIDTH				= 54,		///< the under-attack light, a lamp on the radar panel's border
 	WORKER_TAB_WIDTH			= 39,		///< the idle worker's step, against the command grid panel's border, as wide as the signals' column
-	WORKER_STEP_HEIGHT		= 30		///< and its height, its key held clear of the screen's bottom edge
+	WORKER_STEP_HEIGHT		= 28,		///< and its height, its key's bottom GRID_BOTTOM_GAP over the screen's bottom edge
+	GRID_BOTTOM_GAP				= 4			///< the command buttons' bottom over the screen's bottom edge, level with that key's
 };
 static const char *const SKILLS_FOLDED = "skills";	///< the flip the skills button toggles; flipped is folded away
 static const UnsignedInt SIGNAL_RISE_MS = 360;					///< each smoke signal button's climb out of the screen's bottom edge
@@ -10474,15 +10475,10 @@ static IRegion2D tabOn( const IRegion2D &box, Int width, Bool fromRight )
 	* line of text and set down on the block under it, so its block is no taller than the figure.
 	* Written as centre, powerframe and moneyblock. */
 //-------------------------------------------------------------------------------------------------
-static void stackCentre( HtmlValues &values, Bool shown, IRegion2D &centre )
+/** The box round the fourteen command buttons, shown or not. */
+static IRegion2D commandButtonsBox( void )
 {
-	IRegion2D grid, power, money;
-	Bool gridFound = controlBarUnion( CONTROL_BAR_CENTRE, grid );
-
-	// with nothing selected the bar hides the command grid, and the panel must not go with it: the
-	// money and the power bar stood over bare battlefield.  The grid's place holds whether it is up,
-	// and it is the fourteen buttons' place rather than CommandWindow's: the window reaches 34 pixels
-	// further left, over where the beacon button stands, and left an empty strip in the panel
+	IRegion2D box;
 	for( Int button = 1; button <= COMMAND_BUTTONS; button++ )
 	{
 		char name[ 32 ];
@@ -10494,21 +10490,60 @@ static void stackCentre( HtmlValues &values, Bool shown, IRegion2D &centre )
 		command->winGetSize( &width, &height );
 		place.hi.x = place.lo.x + width;
 		place.hi.y = place.lo.y + height;
-		if( !gridFound )
-			grid = place;
-		grid.lo.x = min( grid.lo.x, place.lo.x );
-		grid.lo.y = min( grid.lo.y, place.lo.y );
-		grid.hi.x = max( grid.hi.x, place.hi.x );
-		grid.hi.y = max( grid.hi.y, place.hi.y );
-		gridFound = TRUE;
+		if( button == 1 )
+			box = place;
+		box.lo.x = min( box.lo.x, place.lo.x );
+		box.lo.y = min( box.lo.y, place.lo.y );
+		box.hi.x = max( box.hi.x, place.hi.x );
+		box.hi.y = max( box.hi.y, place.hi.y );
 	}
+	return box;
+}
+
+/** Moves the bar's window Name down by `shift` screen pixels. */
+static void lowerControlBarWindow( const char *name, Int shift )
+{
+	GameWindow *window = controlBarWindow( name );
+	Int x = 0, y = 0;
+	window->winGetPosition( &x, &y );
+	window->winSetPosition( x, y + shift );
+}
+
+static void stackCentre( HtmlValues &values, Bool shown, IRegion2D &centre )
+{
+	// the command buttons stand as low as the idle worker's key beside them, GRID_BOTTOM_GAP over the
+	// screen's bottom edge, wherever the side's layout put them; the beacon button goes down with them
+	const Real scale = ControlBarUniformScale();
+	const Int shift = TheDisplay->getHeight() - REAL_TO_INT( GRID_BOTTOM_GAP * scale ) - commandButtonsBox().hi.y;
+	if( shift != 0 )
+	{
+		lowerControlBarWindow( "CommandWindow", shift );
+		lowerControlBarWindow( "ButtonPlaceBeacon", shift );
+	}
+
+	IRegion2D grid, power, money;
+	const Bool othersFound = controlBarUnion( CONTROL_BAR_CENTRE, grid );
+
+	// with nothing selected the bar hides the command grid, and the panel must not go with it: the
+	// money and the power bar stood over bare battlefield.  The grid's place holds whether it is up,
+	// and it is the fourteen buttons' place rather than CommandWindow's: the window reaches 34 pixels
+	// further left, over where the beacon button stands, and left an empty strip in the panel
+	IRegion2D buttons = commandButtonsBox();
+	if( othersFound )
+	{
+		buttons.lo.x = min( buttons.lo.x, grid.lo.x );
+		buttons.lo.y = min( buttons.lo.y, grid.lo.y );
+		buttons.hi.x = max( buttons.hi.x, grid.hi.x );
+		buttons.hi.y = max( buttons.hi.y, grid.hi.y );
+	}
+	grid = buttons;
 	const Bool powerFound = controlBarWindowRect( controlBarWindow( "PowerWindow" ), power );
 
 	// the grid's container is the grid, its border outside it running down to the screen's bottom.
 	// The power bar is the page's own now, so its frame is free to stand on that border, as wide as
 	// the grid: each side's layout puts the power window at a width of its own, and the bar changed
 	// length with the side.  The money is set down on the frame, over the grid's middle
-	centre = framed( grid, REAL_TO_INT( PANEL_BORDER * ControlBarUniformScale() ), FALSE, FALSE );
+	centre = framed( grid, REAL_TO_INT( PANEL_BORDER * scale ), FALSE, FALSE );
 	IRegion2D frame = grownBy( power, STACK_FRAME, STACK_FRAME, STACK_FRAME, STACK_FRAME );
 	const Int frameHeight = frame.hi.y - frame.lo.y;
 	frame.lo.x = grid.lo.x;
@@ -10540,7 +10575,7 @@ static void stackCentre( HtmlValues &values, Bool shown, IRegion2D &centre )
 	IRegion2D block = grownBy( money, STACK_MONEY_SIDE, STACK_MONEY_TOP, STACK_MONEY_SIDE, 0 );
 	block.hi.y = floor;
 
-	putFrame( values, "centre", grid, centre, gridFound && shown );
+	putFrame( values, "centre", grid, centre, shown );
 	putPageRect( values, "powerframe", frame, powerFound && shown );
 
 	// the page lays boxes out content-box whatever box-sizing says, so the frame's border goes on top
