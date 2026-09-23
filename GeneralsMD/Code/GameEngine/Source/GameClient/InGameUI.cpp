@@ -10108,14 +10108,12 @@ static const char *const CONTROL_BAR_STOOD_DOWN[] = { "ButtonOptions", "ButtonId
 static const std::string PRESS_ACTION = "press:";
 
 /** The windows each panel is drawn round, so a panel is only as big as what it holds: the left one
-	* the radar, the right one the portrait and the experience bar, the centre the command grid with
-	* the money and the power bar over it.  NULL ends each list. */
+	* the radar, the right one the portrait and the experience bar, the centre the command grid.  The
+	* money and the power bar stand on steps of their own over the centre, drawn from their windows'
+	* rectangles.  NULL ends each list. */
 static const char *const CONTROL_BAR_LEFT[] = { "LeftHUD", NULL };
 static const char *const CONTROL_BAR_RIGHT[] = { "RightHUD", "GeneralsExp", "ExpBarForeground", NULL };
-static const char *const CONTROL_BAR_CENTRE[] =
-{
-	"CommandWindow", "ObserverPlayerListWindow", "MoneyDisplay", "PowerWindow", "ButtonPlaceBeacon", NULL
-};
+static const char *const CONTROL_BAR_CENTRE[] = { "CommandWindow", "ObserverPlayerListWindow", "ButtonPlaceBeacon", NULL };
 
 /** The promotion and minimise buttons, small, side by side in the right panel's top right corner,
 	* the minimise button outermost.  800x600 pixels. */
@@ -10231,8 +10229,10 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 
 	HtmlValues values;
 	values[ "side" ] = spectatorSide();
-	values[ "promotion" ] = TheControlBar->isGeneralStarFlashing() ? "ready" : "";
-	values[ "watching" ] = localPlayerWatching() ? "watching" : "";
+	// a watcher has no promotions of his own to spend, whatever the bar's flash says
+	const Bool watching = localPlayerWatching();
+	values[ "promotion" ] = !watching && TheControlBar->isGeneralStarFlashing() ? "ready" : "";
+	values[ "watching" ] = watching ? "watching" : "";
 	values[ "blink" ] = TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND > LOGICFRAMES_PER_SECOND / 2 ? "lit" : "";
 	for( Int panel = 0; panel < panelCount; panel++ )
 		putPageRect( values, "panel" + std::to_string( panel ), panels[ panel ], shown[ panel ] );
