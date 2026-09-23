@@ -201,7 +201,9 @@
   .worker { border-left: 1px solid #b3bbc4; }
   .china .worker { border-left-color: #d58a70; }
   .gla .worker { border-left-color: #cabe86; }
-  .worker .key { left: 3px; top: 3px; }
+  /* the step's lit top edge pushes what it holds down a pixel, and at 3 the key's bottom edge fell
+     off the screen */
+  .worker .key { left: 3px; top: 1px; }
   .worker .icon { background-image: url(Icons/IdleWorker.svg); }
   .watching .worker { display: none; }
 
@@ -284,9 +286,9 @@
 
   <div class="piece step signals solid {{signals.shown}}" style="left: {{signals.x}}px; top: {{signals.y}}px; width: {{signals.w}}px; height: {{signals.h}}px">
     <div class="joint"></div>
-    <div class="key signal attack" data-click="signal:attack" style="top: 3px; margin-top: {{signal0.drop}}px"><div class="icon"></div></div>
-    <div class="key signal defend" data-click="signal:defend" style="top: 27px; margin-top: {{signal1.drop}}px"><div class="icon"></div></div>
-    <div class="key signal look" data-click="signal:look" style="top: 51px; margin-top: {{signal2.drop}}px"><div class="icon"></div></div>
+    <div class="key signal attack" data-click="signal:attack" style="top: 2px; margin-top: {{signal0.drop}}px"><div class="icon"></div></div>
+    <div class="key signal defend" data-click="signal:defend" style="top: 25px; margin-top: {{signal1.drop}}px"><div class="icon"></div></div>
+    <div class="key signal look" data-click="signal:look" style="top: 48px; margin-top: {{signal2.drop}}px"><div class="icon"></div></div>
   </div>
 
   <div class="piece skillcell well" data-each="skillcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"></div>
