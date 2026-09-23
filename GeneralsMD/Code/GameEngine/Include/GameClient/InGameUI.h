@@ -421,6 +421,8 @@ public:  // ********************************************************************
 	/** The steel frames over one grid's buttons, from Window/Html/ControlBar.html, drawn after them. */
 	void drawCellGridFront( Int grid );
 	void drawScoreboard( void );																						///< that scoreboard, over everything
+	void sampleEarnings( void );																						///< every player's money earned, once a game second
+	Int earnedPerSecond( Int playerIndex ) const;														///< what that player earned a second over the readings held
 	/** Window/Html/Tooltip.html is there to draw with, in a match. */
 	Bool isTooltipPageReady( void );
 	/** The tooltip page: the command bar's build tooltip over the hovered button while one is up,
@@ -1228,6 +1230,21 @@ protected:
 	HtmlOverlay *								m_scoreboardOverlay;
 	Bool												m_scoreboardPageLoaded;		///< read once a match, like the spectator's page
 	std::string									m_scoreboardPage;
+	// The last half minute of every player's money earned, one reading a game second, oldest first, so
+	// a seat can say what it earns now beside its average over the match.  The reading's own second
+	// goes with it: a pass that runs several logic frames at once skips seconds.
+	struct EarnedReading
+	{
+		UnsignedInt second;
+		Int earned[ MAX_PLAYER_COUNT ];
+	};
+	enum
+	{
+		EARNINGS_WINDOW_SECONDS = 30,											///< what the per second figure is measured over
+		EARNINGS_READINGS = EARNINGS_WINDOW_SECONDS + 1		///< a reading at each end of that window and every second between
+	};
+	EarnedReading								m_earnedReadings[ EARNINGS_READINGS ];
+	Int													m_earnedReadingCount;		///< how many of those hold a reading
 	HtmlOverlay *								m_controlBarOverlay;
 	Bool												m_controlBarPageLoaded;
 	Bool												m_controlBarPageShown;		///< drawn this frame, so its buttons can be clicked

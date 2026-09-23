@@ -1223,6 +1223,10 @@ GUI:ScoreboardPerMinute
 "PER MIN"
 END
 
+GUI:ScoreboardPerSecond
+"PER SEC"
+END
+
 GUI:ScoreboardKills
 "K"
 END

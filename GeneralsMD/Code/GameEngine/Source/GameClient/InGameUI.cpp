@@ -1204,6 +1204,7 @@ InGameUI::InGameUI()
 	m_scoreboardOpen = FALSE;
 	m_scoreboardOverlay = NULL;
 	m_scoreboardPageLoaded = FALSE;
+	m_earnedReadingCount = 0;
 	m_controlBarOverlay = NULL;
 	m_controlBarPageLoaded = FALSE;
 	m_promotionOverlay = NULL;
@@ -3990,6 +3991,8 @@ void InGameUI::update( void )
 	sendLocalAllyCursor();
 	updateAllyCursors();
 
+	sampleEarnings();
+
 }  // end update
 
 //-------------------------------------------------------------------------------------------------
@@ -4020,6 +4023,7 @@ void InGameUI::reset( void )
 	m_isQuitMenuVisible = FALSE;
 	m_scoreboardOpen = FALSE;
 	m_scoreboardPageLoaded = FALSE;
+	m_earnedReadingCount = 0;		// a new match and a loaded save both come through here
 	m_controlBarPageLoaded = FALSE;
 	m_tooltipPageLoaded = FALSE;
 	m_promotionPageLoaded = FALSE;
@@ -10177,9 +10181,51 @@ static UnicodeString scoreboardTeamLabel( const GameSlot *slot )
 static const char *const SCOREBOARD_PAGE = "Window\\Html\\Scoreboard.html";
 enum { SCOREBOARD_SKILLS_SHOWN = 7 };	///< promotions on one row, each once at the level it has reached
 
+//-------------------------------------------------------------------------------------------------
+/** Every player's money earned so far, read on the first pass of each game second.  Reading the
+	* score keeper is all it does, so nothing here reaches the logic. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::sampleEarnings( void )
+{
+	if( !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+		return;
+
+	const UnsignedInt second = TheGameLogic->getFrame() / LOGICFRAMES_PER_SECOND;
+	if( m_earnedReadingCount > 0 && second == m_earnedReadings[ m_earnedReadingCount - 1 ].second )
+		return;
+
+	// full, the oldest reading drops off the front
+	if( m_earnedReadingCount == EARNINGS_READINGS )
+		std::copy( m_earnedReadings + 1, m_earnedReadings + EARNINGS_READINGS, m_earnedReadings );
+	else
+		m_earnedReadingCount++;
+
+	EarnedReading &newest = m_earnedReadings[ m_earnedReadingCount - 1 ];
+	newest.second = second;
+	for( Int index = 0; index < ThePlayerList->getPlayerCount(); index++ )
+		newest.earned[ index ] = ThePlayerList->getNthPlayer( index )->getScoreKeeper()->getTotalMoneyEarned();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Money a player earned a second between the oldest reading held and the newest, rounded; 0
+	* until there are two.  It is shared over the whole half minute even before the readings reach
+	* back that far, so the first truck of a match reads as a trickle rather than a fortune. */
+//-------------------------------------------------------------------------------------------------
+Int InGameUI::earnedPerSecond( Int playerIndex ) const
+{
+	if( m_earnedReadingCount < 2 )
+		return 0;
+
+	const EarnedReading &oldest = m_earnedReadings[ 0 ];
+	const EarnedReading &newest = m_earnedReadings[ m_earnedReadingCount - 1 ];
+	const Int seconds = max( (Int)( newest.second - oldest.second ), (Int)EARNINGS_WINDOW_SECONDS );
+	return ( newest.earned[ playerIndex ] - oldest.earned[ playerIndex ] + seconds / 2 ) / seconds;
+}
+
 /** One seat on the scoreboard page.  `full` is whether the local player may see the numbers: his
-	* own side, or everybody when watching.  An enemy is a name, a colour and a team. */
-static HtmlValues scoreboardSeat( Player *player, const GameSlot *slot, Bool full, Bool own )
+	* own side, or everybody when watching.  An enemy is a name, a colour and a team.  `perSecond` is
+	* what the seat has earned a second lately, beside {{income}}, its average over the match. */
+static HtmlValues scoreboardSeat( Player *player, const GameSlot *slot, Bool full, Bool own, Int perSecond )
 {
 	const PlayerTemplate *side = player->getPlayerTemplate();
 	const Image *portrait = side ? side->getEnabledImage() : NULL;
@@ -10202,6 +10248,7 @@ static HtmlValues scoreboardSeat( Player *player, const GameSlot *slot, Bool ful
 	seat[ "rank" ] = std::to_string( player->getRankLevel() );
 	seat[ "cash" ] = std::to_string( player->getMoney()->countMoney() );
 	seat[ "income" ] = std::to_string( frame > 0 ? (Int)( (Int64)score->getTotalMoneyEarned() * FRAMES_PER_MINUTE / frame ) : 0 );
+	seat[ "persecond" ] = std::to_string( perSecond );
 	seat[ "kills" ] = std::to_string( score->getTotalUnitsDestroyed() + score->getTotalBuildingsDestroyed() );
 	seat[ "losses" ] = std::to_string( score->getTotalUnitsLost() + score->getTotalBuildingsLost() );
 
@@ -10355,7 +10402,7 @@ void InGameUI::drawScoreboard( void )
 		for( ; first < end; first++ )
 		{
 			HtmlValues row = scoreboardSeat( seats[ first ].player, seats[ first ].slot, watching || seats[ first ].section == 0,
-																			 seats[ first ].player == local );
+																			 seats[ first ].player == local, earnedPerSecond( seats[ first ].player->getPlayerIndex() ) );
 			putSeatSuperweapons( row, seats[ first ].player->getPlayerIndex(), m_spectatorSuperweapons );
 			rows.push_back( row );
 		}
