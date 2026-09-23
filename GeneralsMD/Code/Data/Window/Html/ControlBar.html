@@ -73,7 +73,8 @@
      command grid's panel, the power bar's frame on it and the money's block on that.  The game works
      out where each one ends so they touch, and the page draws them exactly there */
   .stack { box-sizing: border-box; margin: 0; }
-  .moneyblock .rail { height: 3px; }
+  /* the money's block is only as tall as its figure, so it wears its lit top edge and no rail */
+  .moneyblock .rail { display: none; }
 
   /* a bezel: a window set into the panel, four pixels of steel round a black lip */
   .bezel { margin: -5px 0 0 -5px; border: 4px solid #4b535e; border-top-color: #2a3036; border-left-color: #2a3036;

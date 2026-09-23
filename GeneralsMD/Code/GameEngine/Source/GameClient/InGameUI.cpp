@@ -10272,7 +10272,8 @@ enum
 	STACK_GRID_TOP			= 10,	///< over the grid when no power bar sits on it
 	STACK_FRAME					= 3,	///< the power bar's frame and lip
 	STACK_MONEY_SIDE		= 8,
-	STACK_MONEY_TOP			= 5
+	STACK_MONEY_TOP			= 1,	///< over the money's line of text
+	STACK_MONEY_LEADING	= 4		///< screen pixels the money's window gets over its font's height
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -10280,18 +10281,18 @@ enum
 	* command grid's panel, the power bar in its frame on top of that, and the money's block on top of
 	* the frame.  The windows stay where the bar put them; each block reaches down to the next, so
 	* there is no gap between them, and a block whose window is hidden is left out and the one above
-	* it sits on the one below.  Written as centre, powerframe and moneyblock. */
+	* it sits on the one below.  The money's window alone is moved: it is cut to the height of its
+	* line of text and set down on the block under it, so its block is no taller than the figure.
+	* Written as centre, powerframe and moneyblock. */
 //-------------------------------------------------------------------------------------------------
 static void stackCentre( HtmlValues &values, Bool shown )
 {
 	IRegion2D grid, power, money;
 	const Bool gridFound = controlBarUnion( CONTROL_BAR_CENTRE, grid );
 	const Bool powerFound = controlBarWindowRect( controlBarWindow( "PowerWindow" ), power );
-	const Bool moneyFound = controlBarWindowRect( controlBarWindow( "MoneyDisplay" ), money );
 
 	IRegion2D centre = grownBy( grid, STACK_GRID_SIDE, STACK_GRID_TOP, STACK_GRID_SIDE, STACK_GRID_SIDE );
 	IRegion2D frame = grownBy( power, STACK_FRAME, STACK_FRAME, STACK_FRAME, STACK_FRAME );
-	IRegion2D block = grownBy( money, STACK_MONEY_SIDE, STACK_MONEY_TOP, STACK_MONEY_SIDE, 0 );
 
 	// each block reaches down to the top of the one it stands on
 	Int floor = centre.lo.y;
@@ -10300,6 +10301,20 @@ static void stackCentre( HtmlValues &values, Bool shown )
 		centre.lo.y = frame.hi.y;
 		floor = frame.lo.y;
 	}
+
+	GameWindow *moneyWindow = controlBarWindow( "MoneyDisplay" );
+	Bool moneyFound = controlBarWindowRect( moneyWindow, money );
+	if( moneyFound && moneyWindow->winGetFont() )
+	{
+		const Int height = moneyWindow->winGetFont()->height + STACK_MONEY_LEADING;
+		Int parentX = 0, parentY = 0;
+		if( moneyWindow->winGetParent() )
+			moneyWindow->winGetParent()->winGetScreenPosition( &parentX, &parentY );
+		moneyWindow->winSetPosition( money.lo.x - parentX, floor - height - parentY );
+		moneyWindow->winSetSize( money.hi.x - money.lo.x, height );
+		moneyFound = controlBarWindowRect( moneyWindow, money );
+	}
+	IRegion2D block = grownBy( money, STACK_MONEY_SIDE, STACK_MONEY_TOP, STACK_MONEY_SIDE, 0 );
 	block.hi.y = floor;
 
 	putPageRect( values, "centre", centre, gridFound && shown );
