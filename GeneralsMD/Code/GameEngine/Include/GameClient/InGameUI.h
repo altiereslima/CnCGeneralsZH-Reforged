@@ -34,6 +34,7 @@
 #define _IN_GAME_UI_H_
 
 #include "Common/GameCommon.h"
+#include "Common/GameEngine.h"		// for RateReading
 #include "Common/GameType.h"
 #include "Common/MessageStream.h"		// for GameMessageTranslator
 #include "Common/KindOf.h"
@@ -1284,11 +1285,9 @@ protected:
 	UnsignedInt									m_hudDrawCount;					///< rendered frames counted by drawHudOverlay itself
 	UnsignedInt									m_hudLastSampleFrame;		///< m_hudDrawCount the fps sample was last refreshed on
 	UnsignedInt									m_hudLastSampleMs;			///< wall clock of that sample
-	Real												m_hudFps;								///< smoothed render rate
+	RateReading									m_hudFps;								///< render rate
 	UnsignedInt									m_hudLastSampleLogicFrame;	///< logic frame at that same sample
-	Real												m_hudLogicHz;						///< logic frames actually simulated per real second, smoothed
-	Int													m_hudFpsShown;					///< m_hudFps as written on screen, moved only a full step at a time
-	Int													m_hudLogicHzShown;			///< m_hudLogicHz the same way
+	RateReading									m_hudLogicHz;						///< logic frames actually simulated per real second
 	UnsignedInt									m_hudRealClockBaseMs;		///< wall clock the two elapsed-time readouts were aligned at
 	UnsignedInt									m_hudLastDrawMs;				///< wall clock of the previous overlay draw, so a pause can be taken back out of it
 	Int													m_hudOverlayBottom;			///< bottom of everything drawn in the top right corner, so the superweapon timers start under it

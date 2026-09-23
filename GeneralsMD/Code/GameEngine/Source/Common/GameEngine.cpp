@@ -203,16 +203,22 @@ static const UnsignedInt LOGIC_RATE_SAMPLE_MS = 500;
 		the next, and every countdown dividing by it read 20s, 21s, 19s. The average over the last few
 		seconds takes that out, and the shown number only moves once the average has left it by a full
 		step, so a rate sitting on x.5 does not flip between two values while a real drop still gets
-		through in a second or two. */
-void smoothRateReading( Real sample, Real &average, Int &shown )
+		through in a second or two.
+
+		Until the window has filled, the average is the plain mean of what it has: the first samples
+		after a load run far over the real rate, and letting the first one stand for the whole window
+		kept that number on screen for the opening seconds of every match. */
+void RateReading::add( Real sample )
 {
-	const Real SMOOTHING = 0.125f;			// weight of one sample: about four seconds of them count
+	const Int WINDOW = 8;								// samples that count once there are enough: about four seconds
 	const Real MIN_STEP = 0.75f;				// over half, or an average settling on 20 from above sticks at 21
 	const Real STEP_FRACTION = 0.02f;		// the step at high rates, where one frame is less than 1%
 
-	average = ( average == 0.0f ) ? sample : average + ( sample - average ) * SMOOTHING;
+	if( samples < WINDOW )
+		++samples;
+	average += ( sample - average ) / samples;
 	const Real step = max( MIN_STEP, shown * STEP_FRACTION );
-	if( fabs( average - shown ) >= step )
+	if( samples == 1 || fabs( average - shown ) >= step )
 		shown = REAL_TO_INT( average + 0.5f );
 }
 
@@ -241,7 +247,7 @@ void GameEngine::sampleLogicRate( void )
 	if( elapsedMs < LOGIC_RATE_SAMPLE_MS )
 		return;
 
-	smoothRateReading( (frame - m_logicRateSampleFrame) * 1000.0f / elapsedMs, m_logicFpsAverage, m_measuredLogicFps );
+	m_measuredLogicFps.add( (frame - m_logicRateSampleFrame) * 1000.0f / elapsedMs );
 	m_logicRateSampleMs = nowMs;
 	m_logicRateSampleFrame = frame;
 }
@@ -249,8 +255,8 @@ void GameEngine::sampleLogicRate( void )
 Int GameEngine::getLogicFramesPerSecond( void )
 {
 	// a stalled network game has no rate at all, and no countdown can say how long that lasts
-	if( m_measuredLogicFps > 0 )
-		return m_measuredLogicFps;
+	if( m_measuredLogicFps.shown > 0 )
+		return m_measuredLogicFps.shown;
 	return m_maxFPS > 0 ? m_maxFPS : LOGICFRAMES_PER_SECOND;
 }
 
@@ -264,8 +270,6 @@ GameEngine::GameEngine( void )
 	m_maxFPS = 0;
 	m_logicRateSampleMs = 0;
 	m_logicRateSampleFrame = 0;
-	m_logicFpsAverage = 0.0f;
-	m_measuredLogicFps = 0;
 	m_quitting = FALSE;
 	m_isActive = FALSE;
 
@@ -351,7 +355,7 @@ void GameEngine::setFramesPerSecondLimit( Int fps )
 
 	// the speed keys change the rate on purpose; the countdowns start again from the next sample
 	// rather than taking the average's seconds to walk over
-	m_logicFpsAverage = 0.0f;
+	m_measuredLogicFps.restart();
 }
 
 /* -replay <file>: the name the command line asked for, opened after init()'s resetAll().  See

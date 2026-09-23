@@ -1173,11 +1173,7 @@ InGameUI::InGameUI()
 	m_cameraSnapRepeatMs = 0;
 	m_subtitleFreezeStartMs = 0;
 	m_subtitleFreezeSteps = 0;
-	m_hudFps = 0.0f;
 	m_hudLastSampleLogicFrame = 0;
-	m_hudLogicHz = 0.0f;
-	m_hudFpsShown = 0;
-	m_hudLogicHzShown = 0;
 	m_hudRealClockBaseMs = 0;
 	m_hudLastDrawMs = 0;
 	m_hudOverlayBottom = 0;
@@ -9067,8 +9063,8 @@ void InGameUI::drawHudOverlay( void )
 	else if( nowMs - m_hudLastSampleMs >= 500 )
 	{
 		const Real elapsed = (Real)(nowMs - m_hudLastSampleMs);
-		smoothRateReading( (clientFrame - m_hudLastSampleFrame) * 1000.0f / elapsed, m_hudFps, m_hudFpsShown );
-		smoothRateReading( (logicFrame - m_hudLastSampleLogicFrame) * 1000.0f / elapsed, m_hudLogicHz, m_hudLogicHzShown );
+		m_hudFps.add( (clientFrame - m_hudLastSampleFrame) * 1000.0f / elapsed );
+		m_hudLogicHz.add( (logicFrame - m_hudLastSampleLogicFrame) * 1000.0f / elapsed );
 		m_hudLastSampleMs = nowMs;
 		m_hudLastSampleFrame = clientFrame;
 		m_hudLastSampleLogicFrame = logicFrame;
@@ -9101,7 +9097,7 @@ void InGameUI::drawHudOverlay( void )
 							 wallClock.wHour, wallClock.wMinute,
 							 gameSecs / 3600, (gameSecs / 60) % 60, gameSecs % 60,
 							 realSecs / 3600, (realSecs / 60) % 60, realSecs % 60,
-							 m_hudLogicHzShown, m_hudFpsShown,
+							 m_hudLogicHz.shown, m_hudFps.shown,
 							 TheDisplay->getRendererName() );
 
 	UnicodeString frameText;
@@ -9139,8 +9135,8 @@ void InGameUI::drawHudOverlay( void )
 	m_hudValues[ "net.game" ] = reading;
 	sprintf( reading, "%02u:%02u:%02u", realSecs / 3600, ( realSecs / 60 ) % 60, realSecs % 60 );
 	m_hudValues[ "net.real" ] = reading;
-	m_hudValues[ "net.hz" ] = std::to_string( m_hudLogicHzShown );
-	m_hudValues[ "net.fps" ] = std::to_string( m_hudFpsShown );
+	m_hudValues[ "net.hz" ] = std::to_string( m_hudLogicHz.shown );
+	m_hudValues[ "net.fps" ] = std::to_string( m_hudFps.shown );
 	m_hudValues[ "net.renderer" ] = WideCharStringToMultiByte( TheDisplay->getRendererName() );
 	m_hudValues[ "net.frame" ] = std::to_string( logicFrame );
 	if( TheNetwork != NULL )
