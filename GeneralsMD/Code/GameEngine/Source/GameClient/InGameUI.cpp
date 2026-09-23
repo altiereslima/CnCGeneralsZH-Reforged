@@ -10475,21 +10475,28 @@ static IRegion2D tabOn( const IRegion2D &box, Int width, Bool fromRight )
 	* line of text and set down on the block under it, so its block is no taller than the figure.
 	* Written as centre, powerframe and moneyblock. */
 //-------------------------------------------------------------------------------------------------
+/** ButtonCommandNN's screen rectangle, `button` 1 to COMMAND_BUTTONS, shown or not. */
+static IRegion2D commandButtonRect( Int button )
+{
+	char name[ 32 ];
+	snprintf( name, sizeof( name ), "ButtonCommand%02d", button );
+	GameWindow *command = controlBarWindow( name );
+	IRegion2D place;
+	Int width = 0, height = 0;
+	command->winGetScreenPosition( &place.lo.x, &place.lo.y );
+	command->winGetSize( &width, &height );
+	place.hi.x = place.lo.x + width;
+	place.hi.y = place.lo.y + height;
+	return place;
+}
+
 /** The box round the fourteen command buttons, shown or not. */
 static IRegion2D commandButtonsBox( void )
 {
 	IRegion2D box;
 	for( Int button = 1; button <= COMMAND_BUTTONS; button++ )
 	{
-		char name[ 32 ];
-		snprintf( name, sizeof( name ), "ButtonCommand%02d", button );
-		GameWindow *command = controlBarWindow( name );
-		IRegion2D place;
-		Int width = 0, height = 0;
-		command->winGetScreenPosition( &place.lo.x, &place.lo.y );
-		command->winGetSize( &width, &height );
-		place.hi.x = place.lo.x + width;
-		place.hi.y = place.lo.y + height;
+		const IRegion2D place = commandButtonRect( button );
 		if( button == 1 )
 			box = place;
 		box.lo.x = min( box.lo.x, place.lo.x );
@@ -10692,6 +10699,16 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	putPageRect( values, "workertab", workerStep, panelCount > 1 && shown[ 1 ] );
 	HtmlLists lists;
 	putPowerBar( values, lists[ "powercells" ] );	// after the stack, whose frame it divides into cells
+
+	// a well behind each of the fourteen command buttons, shown or not, so the grid reads as a grid
+	// with the steel between its places, and an empty place is a hole in it rather than bare dark
+	std::vector< HtmlValues > &commandCells = lists[ "commandcells" ];
+	for( Int button = 1; button <= COMMAND_BUTTONS && panelCount > 1 && shown[ 1 ]; button++ )
+	{
+		HtmlValues entry;
+		putPageRect( entry, "cell", commandButtonRect( button ), TRUE );
+		commandCells.push_back( entry );
+	}
 
 	const Bool rightFound = controlBarUnion( CONTROL_BAR_RIGHT, content );
 	const IRegion2D rightBox = framed( content, border, FALSE, TRUE );
