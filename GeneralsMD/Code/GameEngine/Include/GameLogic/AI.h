@@ -185,8 +185,8 @@ struct AIDifficultyProfile
 	// Perception. Never fog: only how diligently it looks and how fast it acts on what it saw.
 	Real	m_scoutIntervalSeconds;					///< how often the scout is re-tasked; every rung scouts
 	Int		m_maxScouts;
-	Real	m_reactionDelaySeconds;					///< lag between "something happened" and answering it
-	Real	m_decisionIntervalSeconds;			///< how often it re-evaluates - the AI's APM
+	Real	m_decisionIntervalSeconds;			///< how often it re-evaluates - the AI's APM, and so how late it answers
+																				///< what it saw: a separate reaction delay stood here, read by nothing
 
 	// Decision quality
 	Real	m_counterCompositionWeight;			///< 0 = ignore what the enemy fields (EA's behaviour)

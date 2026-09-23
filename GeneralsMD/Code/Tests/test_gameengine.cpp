@@ -6879,15 +6879,18 @@ static Bool RMGParseLighting( DataChunkInput &file, DataChunkInfo *info, void * 
 
 static Bool RMGParseWaterAreas( DataChunkInput &file, DataChunkInfo *info, void * )
 {
-	theRMGParse.m_numWaterAreas = file.readInt();
+	const Int numAreas = file.readInt();
+	theRMGParse.m_numWaterAreas = 0;
 
-	for( Int area = 0; area < theRMGParse.m_numWaterAreas; area++ )
+	for( Int area = 0; area < numAreas; area++ )
 	{
-		file.readAsciiString();							// trigger name
+		const AsciiString name = file.readAsciiString();	// trigger name
 		file.readAsciiString();							// layer
 		file.readInt();									// trigger id
 
-		CHECK( file.readByte() == 1 );					// every one of ours is water
+		// the lakes are water; the skirmish base areas round every start are not
+		const Bool water = file.readByte() == 1;
+		CHECK( water || name.startsWith( "InnerPerimeter" ) || name.startsWith( "OuterPerimeter" ) );
 		file.readByte();								// not a river
 		file.readInt();									// river start
 
@@ -6903,11 +6906,15 @@ static Bool RMGParseWaterAreas( DataChunkInput &file, DataChunkInfo *info, void 
 			loc.z = (Real)file.readInt();
 			polygon.push_back( loc );
 
-			if( point == 0 )
+			if( water && point == 0 )
 				theRMGParse.m_waterPoints.push_back( loc );
 		}
 
-		theRMGParse.m_waterPolygons.push_back( polygon );
+		if( water )
+		{
+			theRMGParse.m_numWaterAreas++;
+			theRMGParse.m_waterPolygons.push_back( polygon );
+		}
 	}
 	return TRUE;
 }
@@ -6955,7 +6962,8 @@ static Bool RMGParseObject( DataChunkInput &file, DataChunkInfo *info, void * )
 	theRMGParse.m_objectAngles.push_back( angle );
 	theRMGParse.m_objectFlags.push_back( flags );
 
-	if( d.getType( NAMEKEY( "waypointID" ) ) == Dict::DICT_INT )
+	// the start waypoints; the approach paths' waypoints carry a path label and are not starts
+	if( d.getType( NAMEKEY( "waypointID" ) ) == Dict::DICT_INT && d.getType( NAMEKEY( "waypointPathLabel1" ) ) != Dict::DICT_ASCIISTRING )
 	{
 		theRMGParse.m_waypointNames.push_back( d.getAsciiString( NAMEKEY( "waypointName" ) ) );
 		theRMGParse.m_waypointPositions.push_back( loc );
@@ -8359,6 +8367,48 @@ TEST(every_start_reaches_its_money_and_has_two_ways_out)
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Easy and Medium attack only down the map's Center, Flank and Backdoor paths, named for the start
+	they lead to, and only while the wave stands inside its own OuterPerimeter area.  A generated map had
+	neither, and their waves stayed at home: 128 Medium-against-Medium matches lost 159 units between
+	them.  Every start needs all three paths, the links that make them paths rather than loose points,
+	and both base areas. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_generated_map_carries_an_attack_path_to_every_start)
+{
+	CHECK( bootOnce() );
+
+	RandomMapSettings settings;
+	settings.m_seed = 12345;
+	settings.m_numPlayers = 4;
+	settings.m_playableCells = 96;
+	std::vector<char> bytes;
+	RandomMapGenerator::generate( settings, bytes );
+	const std::string map( bytes.begin(), bytes.end() );
+
+	CHECK( map.find( "WaypointsList" ) != std::string::npos );
+	CHECK( map.find( "waypointPathLabel1" ) != std::string::npos );
+	// ... and the base areas their launch condition asks about
+	for( Int start = 1; start <= settings.m_numPlayers; ++start )
+	{
+		char area[32];
+		sprintf( area, "InnerPerimeter%d", start );
+		CHECK( map.find( area ) != std::string::npos );
+		sprintf( area, "OuterPerimeter%d", start );
+		CHECK( map.find( area ) != std::string::npos );
+	}
+	static const char *LANES[3] = { "Center", "Flank", "Backdoor" };
+	for( Int lane = 0; lane < 3; ++lane )
+	{
+		for( Int start = 1; start <= settings.m_numPlayers; ++start )
+		{
+			char label[32];
+			sprintf( label, "%s%d", LANES[lane], start );
+			CHECK( map.find( label ) != std::string::npos );
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
 /** The seed is worthless across two builds unless both builds turn it into the same bytes, and
 	nothing warns anybody when they stop doing so.  These numbers are that warning: change the
 	generator and this test fails until RANDOM_MAP_GENERATOR_VERSION and the recorded fingerprints
@@ -8368,14 +8418,14 @@ TEST(the_generator_still_turns_a_seed_into_the_bytes_it_used_to)
 {
 	CHECK( bootOnce() );
 
-	CHECK_EQ( RANDOM_MAP_GENERATOR_VERSION, 10 );
+	CHECK_EQ( RANDOM_MAP_GENERATOR_VERSION, 11 );
 
 	struct RMGFingerprint { Int m_seed, m_players, m_cells; UnsignedInt m_crc; };
 	static const RMGFingerprint theFingerprints[] =
 	{
-		{ 0, 2, 64, 0x6FE5FB90 },
-		{ 12345, 4, 96, 0x71D5E795 },
-		{ 7, 8, 128, 0x9C0240F4 },
+		{ 0, 2, 64, 0x2D2AF5EF },
+		{ 12345, 4, 96, 0xD1B4AB2D },
+		{ 7, 8, 128, 0x5A40EFA4 },
 	};
 	const Int numFingerprints = sizeof(theFingerprints) / sizeof(theFingerprints[0]);
 
@@ -8969,7 +9019,6 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 
 		// perception: looks more often, acts sooner, thinks more often - never sees more
 		CHECK( upper.m_scoutIntervalSeconds <= lower.m_scoutIntervalSeconds );
-		CHECK( upper.m_reactionDelaySeconds <= lower.m_reactionDelaySeconds );
 		CHECK( upper.m_decisionIntervalSeconds <= lower.m_decisionIntervalSeconds );
 		CHECK( upper.m_maxScouts >= lower.m_maxScouts );
 
@@ -8992,10 +9041,9 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 	}
 
 	// the ends of the ladder are what they say they are: Easy ignores what it is facing and Brutal
-	// is the baseline, which means it counters fully and answers the moment it sees something
+	// is the baseline, which means it counters fully
 	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_EASY ].m_counterCompositionWeight );
 	CHECK_EQ( 1.0f, data.m_skill[ AISKILL_BRUTAL ].m_counterCompositionWeight );
-	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_BRUTAL ].m_reactionDelaySeconds );
 
 	// every rung scouts. An AI that never looks reads as broken, not as easy.
 	for( Int i = 0; i < AISKILL_COUNT; ++i )

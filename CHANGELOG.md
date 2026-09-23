@@ -105,7 +105,7 @@ found and fixed â€” EA's own, not port damage.**
 - It weighs a fight by what is in it, not by who is nearby: only things that can shoot count, and buildings do not. Its own base is not a reason to feel safe and yours is not a reason to run.
 - Its aircraft are left out of it. A retreat order was what took a parked jet off the runway, so while a fight raged near the airfield the whole wing took off, flew at the base, landed, and did it again every few seconds instead of ever reaching you. Aircraft already fly home on their own when the load is spent.
 - Matches finish. Two of these opponents used to fail to settle 65% of their games inside sixteen minutes; it is half that now, and they end in under seven minutes on average instead of ten.
-- On Hard the retreat actually happens now. The order home was handed to units that were already fighting, and the game laid it over their attack instead of replacing it, so a team told to break off carried on driving at what it was shooting, and its aggressive mood turned any walk that did start into a fight on the way. Medium still retreats the old way.
+- The retreat actually happens now, on Normal as well as Hard. The order home was handed to units that were already fighting, and the game laid it over their attack instead of replacing it, so a team told to break off carried on driving at what it was shooting, and its aggressive mood turned any walk that did start into a fight on the way. A unit that makes it home gets its mood back when it stops walking.
 
 ## Hard fights each unit from where it is strongest
 
@@ -1419,6 +1419,13 @@ The whole HUD is on the hardware. Four colours carry it, and they mean the same 
   install and nothing to download, and the map shows up in the list with a picture like any other.
   The bigger the game, the bigger the map: every player who joins brings ground with them, so an
   eight-way fight is not eight bases crammed onto a duel map.
+- Easy and Normal computer opponents attack on them. They only ever set off from inside the base
+  area a map marks round each start, and only down the roads it marks out between the bases. A
+  random map marked neither, so they built their armies and kept them at home all match: 128 games
+  of Normal against Normal lost 159 units between them. Every base now has its areas, and three
+  marked roads to every other base, a middle road along the ground a tank would drive and two that
+  swing out wide to either side. Random maps made by an older version are different maps from the
+  same number.
 - No two of them are the same shape. Nothing is mirrored, rotated or laid out on a ring. The whole
   map is one field of noise, and the bases are found in it: the flattest ground first, then
   whichever good ground is furthest from everything already taken. Some seeds give you four corners

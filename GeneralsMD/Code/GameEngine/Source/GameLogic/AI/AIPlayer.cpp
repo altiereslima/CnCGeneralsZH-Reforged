@@ -6144,14 +6144,16 @@ void AIPlayer::doRetreats( void )
 					continue;
 				if( homeTunnel != NULL && obj->getAI()->takeTunnelTrip( homeTunnel, &m_baseCenter, TUNNEL_TRIP_MOVE, CMD_FROM_AI ) )
 					leaveTacticsAlone( obj->getID() );
-				else if( m_influence.isBuilt() )
+				else if( measuringWithoutTactics() )
+					obj->getAI()->aiMoveToPosition( &m_baseCenter, CMD_FROM_AI );
+				else
 				{
-					// the walk home taken calm, or its mood turns it into an attack move back into the fight
+					// the walk home taken calm and as an order, on every rung: a CMD_FROM_AI move to a unit
+					// that is fighting is laid under its attack, and an aggressive mood turns the walk back
+					// into a fight, so the retreat never happened
 					leaveTacticsAlone( obj->getID() );
 					stepCalmly( obj, tacticalStepFor( obj->getID() ), &m_baseCenter );
 				}
-				else
-					obj->getAI()->aiMoveToPosition( &m_baseCenter, CMD_FROM_AI );
 			}
 		}
 	}
@@ -6194,6 +6196,8 @@ static const Real HURT_HEALTH_SHARE = 0.35f;
 static const UnsignedInt TACTICAL_ROW_EXPIRY_FRAMES = 10 * LOGICFRAMES_PER_SECOND;
 /** A unit the retreat sent home is not turned round by a kite. */
 static const UnsignedInt LEAVE_ALONE_FRAMES = 10 * LOGICFRAMES_PER_SECOND;
+/** ... and gets its mood back when it stops walking, or this long after that at the latest. */
+static const UnsignedInt WALK_HOME_MAX_FRAMES = 30 * LOGICFRAMES_PER_SECOND;
 
 static void collectObject( Object *obj, void *userData )
 {
@@ -6308,8 +6312,6 @@ AIPlayer::TacticalStep *AIPlayer::tacticalStepFor( ObjectID unit )
 
 void AIPlayer::leaveTacticsAlone( ObjectID unit )
 {
-	if( !m_influence.isBuilt() )
-		return;		// no tactics running for this player
 	TacticalStep *step = tacticalStepFor( unit );
 	step->resumeFrame = 0;
 	step->leaveAloneUntil = TheGameLogic->getFrame() + LEAVE_ALONE_FRAMES;
@@ -6415,37 +6417,50 @@ Bool AIPlayer::pickTacticalSpot( const Object *obj, const Coord3D *from, const C
 	* unit's own AI still aims, picks targets and drives; this only decides where it stands, on the
 	* rung's own clock. */
 //----------------------------------------------------------------------------------------------------------
+/** -notactics, the measuring half of a batch: this player fights the way it did before the tactics,
+	* the retreat and the approaches included. */
+Bool AIPlayer::measuringWithoutTactics( void ) const
+{
+	return TheGlobalData->m_noTacticsSlotParity >= 0 && TheGameLogic->isInSkirmishGame() &&
+		(ThePlayerList->getSlotIndex( m_player->getPlayerIndex() ) & 1) == TheGlobalData->m_noTacticsSlotParity;
+}
+
 void AIPlayer::doTactics( void )
 {
-	if( !getSkillProfile()->m_tacticalMicro )
+	if( measuringWithoutTactics() )
 		return;
 	const UnsignedInt now = TheGameLogic->getFrame();
 	const Int me = m_player->getPlayerIndex();
-	if( TheGlobalData->m_noTacticsSlotParity >= 0 && TheGameLogic->isInSkirmishGame() &&
-			(ThePlayerList->getSlotIndex( me ) & 1) == TheGlobalData->m_noTacticsSlotParity )
-		return;		// -notactics, the measuring half of a batch; the approaches then count the old way too
+	const Bool tactics = getSkillProfile()->m_tacticalMicro;
 
-	if( !m_influence.isBuilt() || (now + computeUpdatePhase( me, INFLUENCE_REBUILD_RATE )) % INFLUENCE_REBUILD_RATE == 0 )
+	if( tactics && (!m_influence.isBuilt() || (now + computeUpdatePhase( me, INFLUENCE_REBUILD_RATE )) % INFLUENCE_REBUILD_RATE == 0) )
 		rebuildInfluence();
 
-	if( !m_baseCenterSet )
-		return;
 	if( (now + computeUpdatePhase( me, TACTICS_RATE )) % TACTICS_RATE != 0 )
 		return;
 
-	std::vector<Object *> units;
-	m_player->iterateObjects( collectObject, &units );
-	for( size_t i = 0; i < units.size(); ++i )
-		tacticsFor( units[ i ] );
+	if( tactics && m_baseCenterSet )
+	{
+		std::vector<Object *> units;
+		m_player->iterateObjects( collectObject, &units );
+		for( size_t i = 0; i < units.size(); ++i )
+			tacticsFor( units[ i ] );
+	}
 
 	// ponytail: a linear list searched per unit, a few hundred rows at most; a map keyed on the ID if
 	// armies ever grow past that
 	for( size_t i = 0; i < m_tactics.size(); )
 	{
-		if( now - m_tactics[ i ].lastSeenFrame > TACTICAL_ROW_EXPIRY_FRAMES )
+		Object *unit = TheGameLogic->findObjectByID( m_tactics[ i ].unit );
+		const TacticalStep &row = m_tactics[ i ];
+		// with the tactics running a row goes when the unit has not been looked at for a while; without
+		// them the only rows are walks home from a retreat, which end when the walk does
+		const Bool done = (unit == NULL || unit->isEffectivelyDead()) ? TRUE :
+			tactics ? now - row.lastSeenFrame > TACTICAL_ROW_EXPIRY_FRAMES :
+			now >= row.leaveAloneUntil && (unit->getAI() == NULL || !unit->getAI()->isMoving() || now >= row.leaveAloneUntil + WALK_HOME_MAX_FRAMES);
+		if( done )
 		{
-			// one that is still alive (in a tunnel, garrisoned) keeps the mood its team gave it
-			Object *unit = TheGameLogic->findObjectByID( m_tactics[ i ].unit );
+			// one that is still alive (home, in a tunnel, garrisoned) gets the mood its team gave it back
 			if( unit && unit->getAI() )
 				restoreMood( unit, &m_tactics[ i ] );
 			m_tactics[ i ] = m_tactics.back();
@@ -6497,8 +6512,10 @@ void AIPlayer::tacticsFor( Object *obj )
 	step->lastSeenFrame = now;
 	if( now < step->leaveAloneUntil )
 		return;
-	if( step->resumeFrame == 0 )
-		restoreMood( obj, step );		// home from a lost fight: its own mood again
+	// home from a lost fight: its own mood again once the walk is over, and not before, or the mood turns
+	// what is left of the walk into an attack move
+	if( step->resumeFrame == 0 && (!ai->isMoving() || now >= step->leaveAloneUntil + WALK_HOME_MAX_FRAMES) )
+		restoreMood( obj, step );
 
 	// a step under way ends when it gets there or runs out of time, and the unit goes back to work:
 	// the thing it was shooting if that still stands, otherwise back up the road it stepped off

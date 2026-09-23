@@ -509,6 +509,7 @@ protected:
 	/** Hard's fighting units, one at a time: step back from what they outrange, climb onto ground
 		* that lengthens their guns, and take a hurt unit out of ground it cannot win on. */
 	virtual void doTactics(void);
+	Bool measuringWithoutTactics(void) const;	///< -notactics has this slot fight the old way
 	void tacticsFor(Object *obj);
 	struct TacticalStep
 	{
