@@ -7480,7 +7480,7 @@ void InGameUI::postDraw( void )
 				UnsignedInt readyFrame = TheGameLogic->getFrame();
 				if (framesLeft > 0)
 					readyFrame += framesLeft;
-				Int readySecs = (Int)(SECONDS_PER_LOGICFRAME_REAL * (readyFrame - TheGameLogic->getFrame()));
+				Int readySecs = ControlBar_secondsFromFrames( (Real)(readyFrame - TheGameLogic->getFrame()) );
 				if ( (info->isCountdown && readySecs != info->timestamp) || (!info->isCountdown && framesLeft != info->timestamp) )
 				{
 					if (!readySecs && info->isCountdown)
@@ -8894,7 +8894,7 @@ void InGameUI::drawPeaceTimer( void )
 		return;
 	}
 
-	const UnsignedInt secs = (left + LOGICFRAMES_PER_SECOND - 1) / LOGICFRAMES_PER_SECOND;
+	const UnsignedInt secs = ControlBar_secondsFromFrames( (Real)left );
 
 	UnicodeString text;
 	text.format( TheGameText->fetch( "GUI:PeaceTimeHud" ), secs / 60, secs % 60 );
