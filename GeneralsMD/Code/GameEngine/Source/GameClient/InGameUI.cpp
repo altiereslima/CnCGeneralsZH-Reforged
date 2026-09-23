@@ -9019,22 +9019,6 @@ void InGameUI::drawPeaceCountdown( UnsignedInt framesLeft )
 }
 
 //-------------------------------------------------------------------------------------------------
-// A half-second sample is a count of whole frames, so a steady 30Hz reads 28 one sample and 32
-// the next. The average over the last few seconds takes that out, and the number on screen only
-// moves once the average has left it by a full step, so a rate sitting on x.5 does not flip
-// between two values while a real drop still gets through in a second or two.
-static void smoothHudRate( Real sample, Real &average, Int &shown )
-{
-	const Real SMOOTHING = 0.125f;			// weight of one sample: about four seconds of them count
-	const Real STEP_FRACTION = 0.02f;		// the step at high rates, where one frame is less than 1%
-
-	average = ( average == 0.0f ) ? sample : average + ( sample - average ) * SMOOTHING;
-	const Real step = max( 1.0f, shown * STEP_FRACTION );
-	if( fabs( average - shown ) >= step )
-		shown = REAL_TO_INT( average + 0.5f );
-}
-
-//-------------------------------------------------------------------------------------------------
 void InGameUI::drawHudOverlay( void )
 {
 	// the corner is measured fresh every frame, and this plate is the first thing in it
@@ -9074,8 +9058,8 @@ void InGameUI::drawHudOverlay( void )
 	else if( nowMs - m_hudLastSampleMs >= 500 )
 	{
 		const Real elapsed = (Real)(nowMs - m_hudLastSampleMs);
-		smoothHudRate( (clientFrame - m_hudLastSampleFrame) * 1000.0f / elapsed, m_hudFps, m_hudFpsShown );
-		smoothHudRate( (logicFrame - m_hudLastSampleLogicFrame) * 1000.0f / elapsed, m_hudLogicHz, m_hudLogicHzShown );
+		smoothRateReading( (clientFrame - m_hudLastSampleFrame) * 1000.0f / elapsed, m_hudFps, m_hudFpsShown );
+		smoothRateReading( (logicFrame - m_hudLastSampleLogicFrame) * 1000.0f / elapsed, m_hudLogicHz, m_hudLogicHzShown );
 		m_hudLastSampleMs = nowMs;
 		m_hudLastSampleFrame = clientFrame;
 		m_hudLastSampleLogicFrame = logicFrame;

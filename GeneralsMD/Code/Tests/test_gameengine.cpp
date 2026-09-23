@@ -3015,6 +3015,30 @@ TEST(controlbar_seconds_are_real_seconds_at_the_current_game_speed)
 	CHECK_EQ( ControlBar_secondsFromFramesAt( 0.0f, 200 ), 0 );
 }
 
+extern void smoothRateReading( Real sample, Real &average, Int &shown );
+
+TEST(rate_reading_holds_through_jitter_and_follows_a_real_drop)
+{
+	/* A steady 30Hz sampled every half second counts 14, 15 or 16 frames, 28 to 32 a second. The
+	   first sample is taken as it is; after that the number shown must not move. */
+	Real average = 0.0f;
+	Int shown = 0;
+	smoothRateReading( 30.0f, average, shown );
+	CHECK_EQ( shown, 30 );
+	const Real jitter[] = { 28.0f, 32.0f, 30.0f, 32.0f, 28.0f, 30.0f, 28.0f, 32.0f };
+	for( Int sample = 0; sample < 4; sample++ )
+		for( const Real &reading : jitter )
+		{
+			smoothRateReading( reading, average, shown );
+			CHECK_EQ( shown, 30 );
+		}
+
+	/* a match that sinks to 20 and stays there reads 20 within a few seconds */
+	for( Int sample = 0; sample < 40; sample++ )
+		smoothRateReading( 20.0f, average, shown );
+	CHECK_EQ( shown, 20 );
+}
+
 TEST(controlbar_experience_percent_fills_the_rank_and_clamps)
 {
 	/* a fresh unit at the bottom of its rank */

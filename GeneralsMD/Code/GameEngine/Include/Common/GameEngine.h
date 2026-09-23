@@ -141,11 +141,15 @@ protected:
 	Int m_maxFPS;																									///< Maximum frames per second allowed
 	UnsignedInt m_logicRateSampleMs;		///< wall clock the current logic rate sample started at, 0 for none
 	UnsignedInt m_logicRateSampleFrame;	///< logic frame it started on
-	Int m_measuredLogicFps;							///< the last whole sample's rate, 0 before there is one
+	Real m_logicFpsAverage;							///< the samples averaged, 0 before there is one
+	Int m_measuredLogicFps;							///< that average as countdowns divide by it, moved only a full step at a time
   Bool m_quitting;  ///< true when we need to quit the game
 	Bool m_isActive;	///< app has OS focus.
 
 };
+/// fold one half-second rate sample into a running average and the whole number shown for it
+extern void smoothRateReading( Real sample, Real &average, Int &shown );
+
 inline void GameEngine::setQuitting( Bool quitting ) { m_quitting = quitting; }
 inline Bool GameEngine::getQuitting(void) { return m_quitting; }
 

@@ -197,7 +197,24 @@ Int GameEngine::getFramesPerSecondLimit( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-static const UnsignedInt LOGIC_RATE_SAMPLE_MS = 1000;
+static const UnsignedInt LOGIC_RATE_SAMPLE_MS = 500;
+
+/** A half-second sample is a count of whole frames, so a steady 30Hz reads 28 one sample and 32
+		the next, and every countdown dividing by it read 20s, 21s, 19s. The average over the last few
+		seconds takes that out, and the shown number only moves once the average has left it by a full
+		step, so a rate sitting on x.5 does not flip between two values while a real drop still gets
+		through in a second or two. */
+void smoothRateReading( Real sample, Real &average, Int &shown )
+{
+	const Real SMOOTHING = 0.125f;			// weight of one sample: about four seconds of them count
+	const Real MIN_STEP = 0.75f;				// over half, or an average settling on 20 from above sticks at 21
+	const Real STEP_FRACTION = 0.02f;		// the step at high rates, where one frame is less than 1%
+
+	average = ( average == 0.0f ) ? sample : average + ( sample - average ) * SMOOTHING;
+	const Real step = max( MIN_STEP, shown * STEP_FRACTION );
+	if( fabs( average - shown ) >= step )
+		shown = REAL_TO_INT( average + 0.5f );
+}
 
 /** A build time on screen is a promise about how long you will wait, and the limit is only the
 		rate the logic is asked for.  A match that has sunk to 10 frames a second takes three times as
@@ -224,7 +241,7 @@ void GameEngine::sampleLogicRate( void )
 	if( elapsedMs < LOGIC_RATE_SAMPLE_MS )
 		return;
 
-	m_measuredLogicFps = REAL_TO_INT( (frame - m_logicRateSampleFrame) * 1000.0f / elapsedMs + 0.5f );
+	smoothRateReading( (frame - m_logicRateSampleFrame) * 1000.0f / elapsedMs, m_logicFpsAverage, m_measuredLogicFps );
 	m_logicRateSampleMs = nowMs;
 	m_logicRateSampleFrame = frame;
 }
@@ -247,6 +264,7 @@ GameEngine::GameEngine( void )
 	m_maxFPS = 0;
 	m_logicRateSampleMs = 0;
 	m_logicRateSampleFrame = 0;
+	m_logicFpsAverage = 0.0f;
 	m_measuredLogicFps = 0;
 	m_quitting = FALSE;
 	m_isActive = FALSE;
@@ -330,6 +348,10 @@ void GameEngine::setFramesPerSecondLimit( Int fps )
 {
 	DEBUG_LOG(("GameEngine::setFramesPerSecondLimit() - setting max fps to %d (TheGlobalData->m_useFpsLimit == %d)\n", fps, TheGlobalData->m_useFpsLimit));
 	m_maxFPS = fps;
+
+	// the speed keys change the rate on purpose; the countdowns start again from the next sample
+	// rather than taking the average's seconds to walk over
+	m_logicFpsAverage = 0.0f;
 }
 
 /* -replay <file>: the name the command line asked for, opened after init()'s resetAll().  See
