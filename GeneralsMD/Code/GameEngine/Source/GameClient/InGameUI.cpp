@@ -1203,6 +1203,8 @@ InGameUI::InGameUI()
 	m_controlBarOverlay = NULL;
 	m_controlBarPageLoaded = FALSE;
 	m_controlBarPageShown = FALSE;
+	m_signalsWereShown = FALSE;
+	m_signalsRiseStartMs = 0;
 	for( Int stripSeconds = 0; stripSeconds < STRIP_SECONDS_STRINGS; stripSeconds++ )
 		m_stripSecondsString[ stripSeconds ] = NULL;
 	for( Int stripQuantity = 0; stripQuantity < STRIP_QUANTITY_STRINGS; stripQuantity++ )
@@ -3873,6 +3875,7 @@ void InGameUI::reset( void )
 	m_scoreboardPageLoaded = FALSE;
 	m_controlBarPageLoaded = FALSE;
 	m_controlBarFlipped.clear();
+	m_signalsWereShown = FALSE;
 	m_spectatorPageLoaded = FALSE;
 	m_spectatorFlipped.clear();
 	m_spectatorPicked.clear();
@@ -10262,7 +10265,7 @@ enum
 	SKILL_GRID_WIDTH			= 150,	///< the general's powers, three to a row, against the screen's right edge
 	SKILL_GRID_GAP				= 30,		///< between them and the skills button
 	SIGNAL_BUTTON_SIZE		= 24,		///< each smoke signal button's height, a row of the column
-	SIGNAL_BUTTON_WIDTH		= 40,		///< and its width, room for its word in either language
+	SIGNAL_BUTTON_WIDTH		= 40,		///< and its width, room for its picture
 	SIGNAL_BUTTONS				= 3,		///< attack, defend, look
 	SKILL_GRID_ROWS				= 3,		///< the empty places drawn behind the powers
 	SKILL_GRID_COLUMNS		= 3,
@@ -10271,6 +10274,22 @@ enum
 	WORKER_TAB_WIDTH			= 44		///< the idle worker button, on the command grid panel's border
 };
 static const char *const SKILLS_FOLDED = "skills";	///< the flip the skills button toggles; flipped is folded away
+static const UnsignedInt SIGNAL_RISE_MS = 360;					///< each smoke signal button's climb out of the screen's bottom edge
+static const UnsignedInt SIGNAL_RISE_STAGGER_MS = 90;	///< between one button starting and the next
+
+/** `signalN.drop`, N 0 to 2, how far below its place each smoke signal button still is, in page
+	* pixels, `elapsedMs` after the column came up: each starts a stagger after the one above it and
+	* slows as it arrives, the whole column's height to nothing. */
+static void putSignalRise( HtmlValues &values, UnsignedInt elapsedMs )
+{
+	for( Int button = 0; button < SIGNAL_BUTTONS; button++ )
+	{
+		const Real started = (Real)elapsedMs - (Real)( button * SIGNAL_RISE_STAGGER_MS );
+		const Real progress = min( 1.0f, max( 0.0f, started / SIGNAL_RISE_MS ) );
+		const Real remaining = ( 1.0f - progress ) * ( 1.0f - progress ) * ( 1.0f - progress );
+		values[ "signal" + std::to_string( button ) + ".drop" ] = std::to_string( REAL_TO_INT( remaining * SIGNAL_BUTTON_SIZE * SIGNAL_BUTTONS ) );
+	}
+}
 static const char *const CORNER_BUTTONS[] = { "ButtonGeneral" };
 
 static void drawNothing( GameWindow *window, WinInstanceData *instData )
@@ -10570,6 +10589,11 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	signalColumn.hi.y = TheDisplay->getHeight();
 	signalColumn.lo.y = signalColumn.hi.y - REAL_TO_INT( SIGNAL_BUTTON_SIZE * SIGNAL_BUTTONS * scale );
 	putPageRect( values, "signals", signalColumn, leftFound && leftShown );
+	const UnsignedInt nowMs = timeGetTime();
+	if( leftFound && leftShown && !m_signalsWereShown )
+		m_signalsRiseStartMs = nowMs;
+	m_signalsWereShown = leftFound && leftShown;
+	putSignalRise( values, nowMs - m_signalsRiseStartMs );
 
 	IRegion2D centreBox;
 	stackCentre( values, panelCount > 1 && shown[ 1 ], centreBox );

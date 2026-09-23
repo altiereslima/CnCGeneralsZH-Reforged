@@ -31,7 +31,8 @@ foreach(vendored
     ${COMP}/LZHCompress/CompLibSource/Lzhl.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Include/d3d8.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/GameSpy/CMakeLists.txt
-    ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/litehtml/CMakeLists.txt)
+    ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/litehtml/CMakeLists.txt
+    ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/nanosvg/nanosvgrast.h)
   if(NOT EXISTS ${vendored})
     message(FATAL_ERROR
       "${vendored} is missing. Run Tools\\vendor.ps1 (build.bat does it for you).")
@@ -532,7 +533,9 @@ target_include_directories(gameengine PUBLIC
   # WW3D2 is here for d3dx9math.h alone: BezierSegment carries D3DXMATRIX, and
   # DumbProjectileBehavior steers a shell with it.  dinput.h now comes out of the
   # Windows SDK like d3d9.h does.
-  ${WW}/WW3D2)
+  ${WW}/WW3D2
+  # nanosvg's two headers, compiled into HtmlOverlay.cpp alone: the SVG pictures a page names.
+  ${LIBSRC}/nanosvg)
 # _RELEASE/_DEBUG pick the game's own build flavour; IG_DEBUG_STACKTRACE and
 # Z_PREFIX are what GameEngine.dsp sets.
 target_compile_definitions(gameengine PUBLIC

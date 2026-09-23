@@ -39,9 +39,15 @@
 
 #include <litehtml.h>
 
+#define NANOSVG_IMPLEMENTATION
+#define NANOSVGRAST_IMPLEMENTATION
+#include <nanosvg.h>
+#include <nanosvgrast.h>
+
 #include <algorithm>
 #include <map>
 #include <math.h>
+#include <vector>
 
 namespace
 {
@@ -54,6 +60,9 @@ const Int BOLD_WEIGHT = 600;										///< CSS font-weight from which the game's
 const Real ASCENT_SHARE = 0.8f;								///< of the font's height; GameFont only knows the height
 const Real X_HEIGHT_SHARE = 0.5f;
 const char *const PAGE_FOLDER = "Window\\Html\\";
+const char *const SVG_EXTENSION = ".svg";
+const char *const SVG_UNITS = "px";
+const Int RGBA_BYTES = 4;
 const char *const GENERIC_FAMILIES[] = { "serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui" };
 
 Color gameColor( const litehtml::web_color &color )
@@ -76,6 +85,12 @@ Bool isGenericFamily( const std::string &family )
 		if( _stricmp( family.c_str(), GENERIC_FAMILIES[ index ] ) == 0 )
 			return TRUE;
 	return FALSE;
+}
+
+Bool isSvg( const std::string &source )
+{
+	const size_t extension = strlen( SVG_EXTENSION );
+	return source.size() > extension && _stricmp( source.c_str() + source.size() - extension, SVG_EXTENSION ) == 0;
 }
 
 }	// namespace
@@ -143,6 +158,16 @@ private:
 	};
 	typedef std::map< std::pair< GameFont *, std::string >, CachedString > StringCache;
 
+	/** A row of pixels of one colour in a rasterised SVG, from the box's corner, in screen pixels. */
+	struct SvgRun
+	{
+		Int x;
+		Int y;
+		Int length;
+		Color color;
+	};
+	typedef std::vector< SvgRun > SvgRuns;
+
 	Int screen( litehtml::pixel_t pagePixels ) const { return (Int)floorf( pagePixels * m_scale + 0.5f ); }
 	litehtml::pixel_t page( Int screenPixels ) const { return screenPixels / m_scale; }
 	litehtml::pixel_t viewportWidth( void ) const { return page( m_screenWidth ); }
@@ -150,8 +175,13 @@ private:
 	DisplayString *displayString( GameFont *font, const char *text );
 	void freeStrings( Bool all );
 	void fillBox( const litehtml::position &box, const litehtml::web_color &color );
+	NSVGimage *svgImage( const std::string &source );
+	const SvgRuns &svgRuns( const std::string &source, Int width, Int height );
 
 	std::string							m_defaultFont;
+	NSVGrasterizer *				m_rasterizer;
+	std::map< std::string, NSVGimage * >	m_svgImages;	///< by page path; NULL for a file missing or unreadable
+	std::map< std::string, SvgRuns >			m_svgRuns;		///< by page path and screen size
 	std::string							m_page;
 	litehtml::document::ptr	m_document;
 	Real										m_scale;
@@ -165,6 +195,7 @@ private:
 //-------------------------------------------------------------------------------------------------
 HtmlOverlayContainer::HtmlOverlayContainer( const AsciiString &defaultFont ) :
 	m_defaultFont( defaultFont.str() ),
+	m_rasterizer( nsvgCreateRasterizer() ),
 	m_scale( 1.0f ),
 	m_screenWidth( 0 ),
 	m_screenHeight( 0 ),
@@ -177,6 +208,10 @@ HtmlOverlayContainer::~HtmlOverlayContainer( void )
 {
 	m_document = nullptr;
 	freeStrings( TRUE );
+	for( std::map< std::string, NSVGimage * >::iterator image = m_svgImages.begin(); image != m_svgImages.end(); ++image )
+		if( image->second )
+			nsvgDelete( image->second );
+	nsvgDeleteRasterizer( m_rasterizer );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -377,22 +412,116 @@ void HtmlOverlayContainer::draw_text( litehtml::uint_ptr hdc, const char *text, 
 //-------------------------------------------------------------------------------------------------
 void HtmlOverlayContainer::get_image_size( const char *source, const char *baseUrl, litehtml::size &size )
 {
+	if( isSvg( source ) )
+	{
+		const NSVGimage *picture = svgImage( source );
+		size.width = picture ? picture->width : 0;
+		size.height = picture ? picture->height : 0;
+		return;
+	}
+
 	const Image *image = TheMappedImageCollection->findImageByName( AsciiString( source ) );
 	size.width = image ? (litehtml::pixel_t)image->getImageWidth() : 0;
 	size.height = image ? (litehtml::pixel_t)image->getImageHeight() : 0;
 }
 
 //-------------------------------------------------------------------------------------------------
-/** An image source is the name of one of the game's mapped images, and it is stretched over the box. */
+/** An image source is the name of one of the game's mapped images, stretched over the box, or a .svg
+	* file beside the pages, fitted into the box whole and centred. */
 void HtmlOverlayContainer::draw_image( litehtml::uint_ptr hdc, const litehtml::background_layer &layer,
 																			const std::string &url, const std::string &baseUrl )
 {
-	const Image *image = TheMappedImageCollection->findImageByName( AsciiString( url.c_str() ) );
-	if( image == NULL || layer.is_root )
+	if( layer.is_root )
 		return;
 
 	const litehtml::position &box = layer.origin_box;
-	TheDisplay->drawImage( image, screen( box.x ), screen( box.y ), screen( box.x + box.width ), screen( box.y + box.height ) );
+	const Int left = screen( box.x );
+	const Int top = screen( box.y );
+	const Int right = screen( box.x + box.width );
+	const Int bottom = screen( box.y + box.height );
+	if( isSvg( url ) )
+	{
+		const SvgRuns &runs = svgRuns( url, right - left, bottom - top );
+		for( SvgRuns::const_iterator run = runs.begin(); run != runs.end(); ++run )
+			TheDisplay->drawFillRect( left + run->x, top + run->y, run->length, 1, run->color );
+		return;
+	}
+
+	const Image *image = TheMappedImageCollection->findImageByName( AsciiString( url.c_str() ) );
+	if( image )
+		TheDisplay->drawImage( image, left, top, right, bottom );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A .svg beside the pages, parsed once. */
+NSVGimage *HtmlOverlayContainer::svgImage( const std::string &source )
+{
+	std::map< std::string, NSVGimage * >::iterator found = m_svgImages.find( source );
+	if( found != m_svgImages.end() )
+		return found->second;
+
+	NSVGimage *picture = NULL;
+	const std::string path = std::string( PAGE_FOLDER ) + source;
+	File *file = TheFileSystem->openFile( path.c_str(), File::READ | File::BINARY );
+	if( file == NULL )
+		DEBUG_LOG(( "HtmlOverlay: the picture %s is missing\n", path.c_str() ));
+	else
+	{
+		const Int size = file->size();
+		char *contents = file->readEntireAndClose();
+		std::vector< char > text( contents, contents + size );
+		delete [] contents;
+		text.push_back( '\0' );
+		picture = nsvgParse( &text[ 0 ], SVG_UNITS, (float)BROWSER_DPI );
+	}
+	m_svgImages[ source ] = picture;
+	return picture;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A .svg rasterised at `width` by `height` screen pixels, kept as rows of one colour so the game's
+	* rectangle fill can draw it; once per size, since the picture itself never changes. */
+const HtmlOverlayContainer::SvgRuns &HtmlOverlayContainer::svgRuns( const std::string &source, Int width, Int height )
+{
+	const std::string key = source + "@" + std::to_string( width ) + "x" + std::to_string( height );
+	std::map< std::string, SvgRuns >::iterator found = m_svgRuns.find( key );
+	if( found != m_svgRuns.end() )
+		return found->second;
+
+	SvgRuns &runs = m_svgRuns[ key ];
+	NSVGimage *picture = svgImage( source );
+	if( picture == NULL || width <= 0 || height <= 0 || picture->width <= 0 || picture->height <= 0 )
+		return runs;
+
+	const float scale = std::min( width / picture->width, height / picture->height );
+	const float offsetX = ( width - picture->width * scale ) / 2;
+	const float offsetY = ( height - picture->height * scale ) / 2;
+	std::vector< unsigned char > pixels( width * height * RGBA_BYTES );
+	nsvgRasterize( m_rasterizer, picture, offsetX, offsetY, scale, &pixels[ 0 ], width, height, width * RGBA_BYTES );
+
+	for( Int y = 0; y < height; y++ )
+	{
+		const unsigned char *row = &pixels[ y * width * RGBA_BYTES ];
+		Int x = 0;
+		while( x < width )
+		{
+			const unsigned char *pixel = row + x * RGBA_BYTES;
+			Int length = 1;
+			while( x + length < width && memcmp( pixel, row + ( x + length ) * RGBA_BYTES, RGBA_BYTES ) == 0 )
+				length++;
+			if( pixel[ 3 ] > 0 )
+			{
+				SvgRun run;
+				run.x = x;
+				run.y = y;
+				run.length = length;
+				run.color = GameMakeColor( pixel[ 0 ], pixel[ 1 ], pixel[ 2 ], pixel[ 3 ] );
+				runs.push_back( run );
+			}
+			x += length;
+		}
+	}
+	return runs;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -416,8 +545,10 @@ void HtmlOverlayContainer::draw_solid_fill( litehtml::uint_ptr hdc, const liteht
 }
 
 //-------------------------------------------------------------------------------------------------
-/** A line as thick as the box, run along whichever axis the gradient runs further on, one line per
-	* pair of stops: the game's two-colour line blends between its ends. */
+/** One row or column of pixels at a time across the box, along whichever axis the gradient runs
+	* further on, each filled with the colour its stops blend to there.  A line as thick as the box,
+	* blended between its ends, was the first way: the line takes whole-pixel centres, so a box an odd
+	* number of pixels wide came out a pixel short on one side and let what was under it show. */
 void HtmlOverlayContainer::draw_linear_gradient( litehtml::uint_ptr hdc, const litehtml::background_layer &layer,
 																								const litehtml::background_layer::linear_gradient &gradient )
 {
@@ -434,27 +565,35 @@ void HtmlOverlayContainer::draw_linear_gradient( litehtml::uint_ptr hdc, const l
 	const Real runX = gradient.end.x - gradient.start.x;
 	const Real runY = gradient.end.y - gradient.start.y;
 	const Bool across = fabsf( runX ) >= fabsf( runY );
-	const Int middle = across ? ( screen( box.y ) + screen( box.y + box.height ) ) / 2
-														: ( screen( box.x ) + screen( box.x + box.width ) ) / 2;
-	const Real thickness = across ? (Real)( screen( box.y + box.height ) - screen( box.y ) )
-																: (Real)( screen( box.x + box.width ) - screen( box.x ) );
+	const Int left = screen( box.x );
+	const Int top = screen( box.y );
+	const Int right = screen( box.x + box.width );
+	const Int bottom = screen( box.y + box.height );
+	const Int first = across ? left : top;
+	const Int last = across ? right : bottom;
+	const Real start = across ? gradient.start.x : gradient.start.y;
+	const Real run = across ? runX : runY;
+	if( right <= left || bottom <= top || run == 0 )
+		return;
 
-	for( size_t stop = 0; stop + 1 < stops.size(); stop++ )
+	size_t stop = 0;
+	for( Int pixel = first; pixel < last; pixel++ )
 	{
-		const Color from = gameColor( stops[ stop ].color );
-		const Color to = gameColor( stops[ stop + 1 ].color );
+		const Real offset = ( page( pixel ) + page( 1 ) / 2 - start ) / run;
+		while( stop + 2 < stops.size() && offset > stops[ stop + 1 ].offset )
+			stop++;
+		const litehtml::web_color &from = stops[ stop ].color;
+		const litehtml::web_color &to = stops[ stop + 1 ].color;
+		const Real span = stops[ stop + 1 ].offset - stops[ stop ].offset;
+		const Real share = span > 0 ? std::min( 1.0f, std::max( 0.0f, ( offset - stops[ stop ].offset ) / span ) ) : 0.0f;
+		const Color color = GameMakeColor( REAL_TO_INT( from.red + ( to.red - from.red ) * share ),
+																			 REAL_TO_INT( from.green + ( to.green - from.green ) * share ),
+																			 REAL_TO_INT( from.blue + ( to.blue - from.blue ) * share ),
+																			 REAL_TO_INT( from.alpha + ( to.alpha - from.alpha ) * share ) );
 		if( across )
-		{
-			const Int startX = screen( gradient.start.x + runX * stops[ stop ].offset );
-			const Int endX = screen( gradient.start.x + runX * stops[ stop + 1 ].offset );
-			TheDisplay->drawLine( startX, middle, endX, middle, thickness, from, to );
-		}
+			TheDisplay->drawFillRect( pixel, top, 1, bottom - top, color );
 		else
-		{
-			const Int startY = screen( gradient.start.y + runY * stops[ stop ].offset );
-			const Int endY = screen( gradient.start.y + runY * stops[ stop + 1 ].offset );
-			TheDisplay->drawLine( middle, startY, middle, endY, thickness, from, to );
-		}
+			TheDisplay->drawFillRect( left, pixel, right - left, 1, color );
 	}
 }
 

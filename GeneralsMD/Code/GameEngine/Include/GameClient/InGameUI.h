@@ -1210,6 +1210,8 @@ protected:
 	Bool												m_controlBarPageShown;		///< drawn this frame, so its buttons can be clicked
 	std::set< std::string >			m_controlBarFlipped;			///< names a data-click="flip:name" on that page has flipped
 	std::string									m_controlBarPage;
+	Bool												m_signalsWereShown;				///< the smoke signal column was up last frame
+	UnsignedInt									m_signalsRiseStartMs;			///< when it last came up, the start of its buttons' rise
 
 	//
 	// The spectator's page over the battlefield, Window/Html/Spectator.html: the drop-down that

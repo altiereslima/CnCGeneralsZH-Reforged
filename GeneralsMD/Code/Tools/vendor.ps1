@@ -132,6 +132,18 @@ function Install-Litehtml {
   Step "litehtml 0.10 -> Libraries\Source\litehtml"
 }
 
+# --- nanosvg, the two headers: parses and rasterises the SVG pictures a page names in url(), which
+# the game then draws pixel by pixel. Same .gitignore dance as litehtml.
+function Install-Nanosvg {
+  $destination = Join-Path $libraries 'Source\nanosvg'
+  if ((Test-Path (Join-Path $destination 'nanosvgrast.h')) -and -not $Force) { return }
+  $archive = Get-File 'https://github.com/memononen/nanosvg/archive/239e102ec2c691f2902e20ace2ed36ee4a35cfe6.zip' (Join-Path $work 'nanosvg.zip')
+  $source = Expand-Source $archive 'nanosvg'
+  Copy-Files (Get-TopLevel (Join-Path $source 'src') @('.h')) $destination
+  Copy-Item (Join-Path $source 'LICENSE.txt') $destination -Force
+  Step "nanosvg -> Libraries\Source\nanosvg"
+}
+
 # --- The fork's own upscaled art: every 3D texture at twice its size, the normal maps the models
 # are lit through, and the ground. Not in git - ReforgedTextures.big alone is a gigabyte, ten times
 # what GitHub takes in a file, and LFS in a fork is billed to the parent repository.
@@ -235,5 +247,6 @@ Install-Lzhl
 Install-DirectX
 Install-GameSpy
 Install-Litehtml
+Install-Nanosvg
 Install-Art
 Step 'everything the build needs is in place'
