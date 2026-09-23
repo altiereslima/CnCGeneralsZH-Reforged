@@ -10311,7 +10311,7 @@ enum
 	SKILL_GRID_COLUMNS		= 3,
 	SKILLS_BUTTON_WIDTH		= 58,		///< wide enough for its name in either language
 	ALERT_TAB_WIDTH				= 54,		///< the under-attack light, a lamp on the radar panel's border
-	WORKER_TAB_WIDTH			= 39		///< the idle worker's key, on the command grid panel's border, as wide as the signals' column
+	WORKER_TAB_WIDTH			= 39		///< the idle worker's step, against the command grid panel's border, as wide as the signals' column
 };
 static const char *const SKILLS_FOLDED = "skills";	///< the flip the skills button toggles; flipped is folded away
 static const UnsignedInt SIGNAL_RISE_MS = 360;					///< each smoke signal button's climb out of the screen's bottom edge
@@ -10504,11 +10504,14 @@ static void stackCentre( HtmlValues &values, Bool shown, IRegion2D &centre )
 	const Bool powerFound = controlBarWindowRect( controlBarWindow( "PowerWindow" ), power );
 
 	// the grid's container is the grid, its border outside it running down to the screen's bottom.
-	// The power bar is the page's own now, so its frame is free to stand on that border wherever the
-	// power window sits, and the money is set down on the frame
+	// The power bar is the page's own now, so its frame is free to stand on that border, as wide as
+	// the grid: each side's layout puts the power window at a width of its own, and the bar changed
+	// length with the side.  The money is set down on the frame, over the grid's middle
 	centre = framed( grid, REAL_TO_INT( PANEL_BORDER * ControlBarUniformScale() ), FALSE, FALSE );
 	IRegion2D frame = grownBy( power, STACK_FRAME, STACK_FRAME, STACK_FRAME, STACK_FRAME );
 	const Int frameHeight = frame.hi.y - frame.lo.y;
+	frame.lo.x = grid.lo.x;
+	frame.hi.x = grid.hi.x;
 	frame.hi.y = centre.lo.y;
 	frame.lo.y = frame.hi.y - frameHeight;
 
@@ -10528,7 +10531,8 @@ static void stackCentre( HtmlValues &values, Bool shown, IRegion2D &centre )
 		Int parentX = 0, parentY = 0;
 		if( moneyWindow->winGetParent() )
 			moneyWindow->winGetParent()->winGetScreenPosition( &parentX, &parentY );
-		moneyWindow->winSetPosition( money.lo.x - parentX, floor - height - parentY );
+		const Int left = ( grid.lo.x + grid.hi.x - ( money.hi.x - money.lo.x ) ) / 2;
+		moneyWindow->winSetPosition( left - parentX, floor - height - parentY );
 		moneyWindow->winSetSize( money.hi.x - money.lo.x, height );
 		moneyFound = controlBarWindowRect( moneyWindow, money );
 	}
@@ -10642,10 +10646,14 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 
 	IRegion2D centreBox;
 	stackCentre( values, panelCount > 1 && shown[ 1 ], centreBox );
-	// the idle worker's tab holds a key the size of a smoke signal's, so it is a signal row tall
-	IRegion2D workerTab = tabOn( centreBox, WORKER_TAB_WIDTH, FALSE );
-	workerTab.lo.y = workerTab.hi.y - REAL_TO_INT( SIGNAL_BUTTON_SIZE * scale );
-	putPageRect( values, "workertab", workerTab, panelCount > 1 && shown[ 1 ] );
+	// the idle worker's key, a smoke signal's size, in a step against the centre panel's border at its
+	// bottom left, standing on the screen's bottom edge; on the top edge it stood under the power bar
+	IRegion2D workerStep;
+	workerStep.hi.x = centreBox.lo.x;
+	workerStep.lo.x = workerStep.hi.x - REAL_TO_INT( WORKER_TAB_WIDTH * scale );
+	workerStep.hi.y = TheDisplay->getHeight();
+	workerStep.lo.y = workerStep.hi.y - REAL_TO_INT( SIGNAL_BUTTON_SIZE * scale );
+	putPageRect( values, "workertab", workerStep, panelCount > 1 && shown[ 1 ] );
 	HtmlLists lists;
 	putPowerBar( values, lists[ "powercells" ] );	// after the stack, whose frame it divides into cells
 

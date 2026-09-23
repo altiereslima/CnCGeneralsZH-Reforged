@@ -47,9 +47,9 @@
                            .bt .br .bb .bl the border's four widths, out to the screen's edge on the
                            sides against it
     {{alerttab.x}} ...     tabs standing on a border's top edge, outside it: the under-attack light
-    {{workertab.x}} ...    on the radar panel's, the idle worker on the centre's, the skills button
-    {{skillsbutton.x}} ... on the right panel's at its right hand end, with the promotion button
-                           moved beside it
+    {{skillsbutton.x}} ... on the radar panel's, the skills button on the right panel's at its right
+                           hand end, with the promotion button moved beside it
+    {{workertab.x}} ...    the idle worker's step, against the centre's border at its bottom left
     {{powerframe.x}} ...   the power bar's frame standing on the centre's border, and the money's
     {{moneyblock.x}} ...   block on the frame, stacked flush; {{powerframe.inner}} the height inside
                            the frame and its lip
@@ -190,7 +190,17 @@
   .disabled .key .veil { display: block; position: absolute; left: 0; top: 0; width: 32px; height: 18px;
                          background-color: rgba(4, 8, 10, 0.65); }
 
-  /* the idle worker: a key in a tab standing on the centre's border at its left end */
+  /* a step: a bezel's steel carried on beside it at the shade the bezel has that low down, with its
+     own lit top edge, standing on the screen's bottom edge */
+  .step { background: linear-gradient(to bottom, #4f575f, #353c45); border-top: 1px solid #dde4ea; }
+  .china .step { background: linear-gradient(to bottom, #6a2a1c, #3f160f); border-top-color: #f0b8a4; }
+  .gla .step { background: linear-gradient(to bottom, #665b31, #3c3519); border-top-color: #ebe2b4; }
+
+  /* the idle worker: a key in a step against the centre's border at its bottom left, lit down its
+     left side, and one pixel wider than it is told so it runs over the centre's own lit line */
+  .worker { border-left: 1px solid #b3bbc4; }
+  .china .worker { border-left-color: #d58a70; }
+  .gla .worker { border-left-color: #cabe86; }
   .worker .key { left: 3px; top: 3px; }
   .worker .icon { background-image: url(Icons/IdleWorker.svg); }
   .watching .worker { display: none; }
@@ -208,16 +218,13 @@
   .skills.flipped { color: #6f7782; }
   .skillcell { margin: 1px 0 0 1px; }
 
-  /* the smoke signals: a step of the radar's bezel on its right, the same steel carried on at the
-     shade the bezel has at that height, with its own lit top edge, and a joint over the bezel's dark
-     right line so the two read as one piece.  Three keys in it: a crosshair to attack, a shield to
-     defend, an eye to look */
-  .signals { background: linear-gradient(to bottom, #4f575f, #353c45); border-top: 1px solid #dde4ea; border-right: 1px solid #0c1114; }
+  /* the smoke signals: a step on the radar's bezel's right, dark down its own right, and a joint
+     over the bezel's dark right line so the two read as one piece.  Three keys in it: a crosshair to
+     attack, a shield to defend, an eye to look */
+  .signals { border-right: 1px solid #0c1114; }
   .signals .joint { position: absolute; left: -1px; top: 0; bottom: 0; width: 1px; background: linear-gradient(to bottom, #4f575f, #353c45); }
-  .china .signals, .china .signals .joint { background: linear-gradient(to bottom, #6a2a1c, #3f160f); }
-  .china .signals { border-top-color: #f0b8a4; }
-  .gla .signals, .gla .signals .joint { background: linear-gradient(to bottom, #665b31, #3c3519); }
-  .gla .signals { border-top-color: #ebe2b4; }
+  .china .signals .joint { background: linear-gradient(to bottom, #6a2a1c, #3f160f); }
+  .gla .signals .joint { background: linear-gradient(to bottom, #665b31, #3c3519); }
   /* each key stands at its own top, pushed down by {{signalN.drop}} while it rises: a relatively
      placed box inside an absolutely placed one is laid out from the screen's corner here, and the
      column came out in the top left */
@@ -266,7 +273,7 @@
     <div class="shade" style="right: -{{centre.br}}px; top: -{{centre.bt}}px; bottom: -{{centre.bb}}px"></div>
     <div class="sunk" style="width: {{centre.w}}px; height: {{centre.h}}px"></div>
   </div>
-  <div class="piece tab worker {{workertab.shown}} {{ButtonIdleWorker.state}}" style="left: {{workertab.x}}px; top: {{workertab.y}}px; width: {{workertab.w}}px; height: {{workertab.h}}px">
+  <div class="piece step worker solid {{workertab.shown}} {{ButtonIdleWorker.state}}" style="left: {{workertab.x}}px; top: {{workertab.y}}px; width: {{workertab.w}}px; height: {{workertab.h}}px">
     <div class="key" data-click="press:ButtonIdleWorker"><div class="icon"></div><div class="veil"></div></div>
   </div>
   <div class="piece frame solid {{right.shown}}" style="left: {{right.x}}px; top: {{right.y}}px; width: {{right.w}}px; height: {{right.h}}px; border-width: {{right.bt}}px {{right.br}}px {{right.bb}}px {{right.bl}}px"></div>
@@ -275,7 +282,7 @@
   <div class="piece button promotion {{promotion}} {{blink}} {{ButtonGeneral.shown}} {{ButtonGeneral.state}}" style="left: {{ButtonGeneral.x}}px; top: {{ButtonGeneral.y}}px; width: {{ButtonGeneral.w}}px; height: {{ButtonGeneral.h}}px"><div class="cap stars">&#9733;&#9733;&#9733;</div></div>
   <div class="piece button skills {{skillsbutton.shown}} {{flip:skills}}" data-click="flip:skills" style="left: {{skillsbutton.x}}px; top: {{skillsbutton.y}}px; width: {{skillsbutton.w}}px; height: {{skillsbutton.h}}px"><div class="cap">{{text:GUI:BarSkills}}</div></div>
 
-  <div class="piece signals solid {{signals.shown}}" style="left: {{signals.x}}px; top: {{signals.y}}px; width: {{signals.w}}px; height: {{signals.h}}px">
+  <div class="piece step signals solid {{signals.shown}}" style="left: {{signals.x}}px; top: {{signals.y}}px; width: {{signals.w}}px; height: {{signals.h}}px">
     <div class="joint"></div>
     <div class="key signal attack" data-click="signal:attack" style="top: 3px; margin-top: {{signal0.drop}}px"><div class="icon"></div></div>
     <div class="key signal defend" data-click="signal:defend" style="top: 27px; margin-top: {{signal1.drop}}px"><div class="icon"></div></div>
