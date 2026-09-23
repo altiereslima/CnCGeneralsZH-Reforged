@@ -677,6 +677,23 @@ enum ControlBarStages
 /** What the build tooltip says, piece by piece, so Window/Html/Tooltip.html can lay each piece out
 	* on its own: ControlBarPopupDescription.wnd gets the same pieces run together into one text. */
 //-------------------------------------------------------------------------------------------------
+/** One line of what an upgrade does: the figure under `label`, a string table label, goes from `from` to `to`. */
+struct BuildTooltipChange
+{
+	const char *label;
+	std::string from;
+	std::string to;
+};
+
+/** An upgrade and what it does to one unit.  On a unit's card `name` is the upgrade's; on an
+	* upgrade's card it is the unit's. */
+struct BuildTooltipUpgrade
+{
+	UnicodeString name;
+	Bool owned;										///< the player has it already
+	std::vector< BuildTooltipChange > changes;
+};
+
 struct BuildTooltipCard
 {
 	UnicodeString name;
@@ -685,10 +702,14 @@ struct BuildTooltipCard
 	UnicodeString requires;				///< "Requires: ..." naming what is still missing
 	UnsignedInt cost;							///< 0 for nothing to pay
 	Bool costsScience;						///< the cost is promotion points rather than money
-	Bool hasStats;								///< DetailedBuildTooltips: the three figures below are there
+	Bool hasStats;								///< DetailedBuildTooltips: the figures below are there
 	Int buildSeconds;
-	Int damage;										///< the best weapon's, before any bonus; 0 for no weapon
+	Int health;										///< 0 for a body that cannot be hurt
+	Int damage;										///< the main weapon's, with the upgrades the player owns; 0 for no weapon
 	Int range;
+	Real attacksPerSecond;				///< shots a second over a whole clip and its reload
+	Int damagePerSecond;
+	std::vector< BuildTooltipUpgrade > upgrades;	///< a unit's upgrades, or the units an upgrade changes
 	IRegion2D anchor;							///< the hovered window, in screen pixels
 };
 

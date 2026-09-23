@@ -2240,33 +2240,12 @@ Bool AIPlayer::selectTeamToReinforce( Int minPriority )
 // ------------------------------------------------------------------------------------------------
 /** Determine the next team to build.  Return true if one was selected. */
 // ------------------------------------------------------------------------------------------------
-//-------------------------------------------------------------------------------------------------
-/** The health a unit template is built with.  Every body module that can be hurt keeps it in
-	* ActiveBodyModuleData; the one that cannot, InactiveBody, is not on the list and answers zero. */
-//-------------------------------------------------------------------------------------------------
-static Real computeTemplateMaxHealth( const ThingTemplate *tmpl )
-{
-	static const char *BODIES_WITH_HEALTH[] =
-		{ "ActiveBody", "StructureBody", "HiveStructureBody", "UndeadBody", "HighlanderBody", "ImmortalBody", NULL };
-
-	const ModuleInfo &modules = tmpl->getBehaviorModuleInfo();
-	for( Int m = 0; m < modules.getCount(); ++m )
-	{
-		for( const char **body = BODIES_WITH_HEALTH; *body != NULL; ++body )
-		{
-			if( modules.getNthName( m ).compareNoCase( *body ) == 0 )
-				return static_cast<const ActiveBodyModuleData *>( modules.getNthData( m ) )->m_maxHealth;
-		}
-	}
-	return 0.0f;
-}
-
 static Real templateMaxHealth( const ThingTemplate *tmpl )
 {
 	std::map<const ThingTemplate *, Real>::const_iterator known = theMaxHealthCache.find( tmpl );
 	if( known != theMaxHealthCache.end() )
 		return known->second;
-	const Real health = computeTemplateMaxHealth( tmpl );
+	const Real health = tmpl->calcMaxHealth();
 	theMaxHealthCache[ tmpl ] = health;
 	return health;
 }

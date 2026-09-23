@@ -24,8 +24,16 @@
       {{name}}              the button's name
       {{cost}}              what it costs, {{costkind}} "money" or "science" (promotion points),
                             {{cost.shown}} "hidden" when it costs nothing
-      {{time}} {{damage}} {{range}}  build time with its unit, the best weapon's damage and range;
-                            {{stats.shown}} and {{weapon.shown}}
+      {{health}} {{damage}} {{speed}} {{dps}} {{range}} {{time}}  the unit's figures with the
+                            upgrades its player owns: health, then its main weapon (the one with
+                            the most damage a second) as damage, attacks a second with their unit,
+                            damage a second and range, and the build time with its unit;
+                            {{stats.shown}}, {{health.shown}} and {{weapon.shown}}
+      data-each="upgrades"  a unit's upgrades, or on an upgrade's card the units it changes
+                            ({{upgradeskind}} "unit" or "upgrade", {{upgrades.shown}}): {{kind}}
+                            "upgrade" with {{name}} and {{owned}} "owned", then its lines, "change"
+                            with {{label}} {{from}} {{to}}, or "remark" with {{label}} {{to}} for
+                            what has no figure (armour)
       {{warning}}           why it cannot be bought right now, {{warning.shown}}
       {{requires}}          "Requires: ...", {{requires.shown}}
     tip only:
@@ -44,10 +52,11 @@
   .hidden { display: none; }
 
   /* the box: the panels' dark body under a steel rim, lit along the top and left */
-  #box { position: absolute; background-color: rgba(8, 12, 16, 0.96); border: 1px solid #1a2026;
+  /* opaque: at 0.96 the money figure under a card showed through it */
+  #box { position: absolute; background-color: #080c10; border: 1px solid #1a2026;
          border-top-color: #aab4bf; border-left-color: #8a949f; }
-  .china #box { background-color: rgba(20, 8, 6, 0.96); border-top-color: #d98a72; border-left-color: #b8604b; }
-  .gla #box { background-color: rgba(18, 16, 7, 0.96); border-top-color: #cbbf82; border-left-color: #a99d62; }
+  .china #box { background-color: #140806; border-top-color: #d98a72; border-left-color: #b8604b; }
+  .gla #box { background-color: #121007; border-top-color: #cbbf82; border-left-color: #a99d62; }
   #box.card { width: 210px; }
 
   /* the card's header: the rail's steel, the name on it and the cost at its right hand end */
@@ -57,8 +66,12 @@
   .gla .head { background: linear-gradient(to bottom, #8f8249, #48401e); }
   .name { font-size: 9px; font-weight: bold; color: #ffffff; }
   .cost { float: right; margin-left: 6px; font-size: 9px; font-weight: bold; color: #e8d27a; }
-  .cost .star { display: inline-block; width: 8px; height: 8px; margin-right: 2px; background-image: url(Icons/RankStar.svg); }
-  .cost.money .star { display: none; }
+  /* a promotion's star is its own float left of the figure: inline in the figure's float it fell to
+     a second line */
+  .star { float: right; width: 8px; height: 8px; margin: 2px 0 0 6px; background-image: url(Icons/RankStar.svg);
+          background-size: 100% 100%; background-repeat: no-repeat; }
+  .cost.science { margin-left: 2px; }
+  .star.money { display: none; }
   .cost.science .dollar { display: none; }
 
   /* the body: rows as label and value, prose in a softer grey, a gap where the text left a blank line */
@@ -77,6 +90,27 @@
   .china .stats { border-top-color: #3e1f19; }
   .gla .stats { border-top-color: #37321c; }
   .stats .value { color: #e8d27a; }
+
+  /* the upgrades under another rule: each name in green, Dota's colour for what an upgrade adds, gold
+     once it is owned, and under it every figure it moves, from the plain one to the upgraded one.
+     An upgrade's card lists the units it changes in the same shape */
+  .upgrades { margin: 0 6px 5px 6px; padding-top: 3px; border-top: 1px solid #2c343c; line-height: 11px; }
+  .china .upgrades { border-top-color: #3e1f19; }
+  .gla .upgrades { border-top-color: #37321c; }
+  .caption { color: #8a949f; font-size: 7px; font-weight: bold; }
+  .upgrades.unit .forupgrade, .upgrades.upgrade .forunit { display: none; }
+  .entry .name { font-size: 8px; font-weight: bold; color: #8fd46a; }
+  .entry.owned .name { color: #e8d27a; }
+  .entry .mark { color: #a89f6a; }
+  .entry.change, .entry.remark { padding-left: 6px; }
+  .entry .from { color: #f1f4f6; }
+  .entry .arrow { color: #8a949f; }
+  .entry .to { font-weight: bold; color: #8fd46a; }
+  .entry.owned .to { color: #e8d27a; }
+  .entry.upgrade .label, .entry.upgrade .from, .entry.upgrade .arrow, .entry.upgrade .to { display: none; }
+  .entry.change .name, .entry.change .mark, .entry.remark .name, .entry.remark .mark { display: none; }
+  .entry.remark .from, .entry.remark .arrow, .entry .mark { display: none; }
+  .entry.upgrade.owned .mark { display: inline; }
 
   /* a note sunk into the card: dark on top, lit below, the warning in the under-attack lamp's red */
   .note { margin: 0 6px 6px 6px; padding: 3px 5px 3px 5px; line-height: 10px; background-color: #1b232b;
@@ -97,7 +131,8 @@
   <div id="box" class="{{kind}}" style="left: {{box.x}}px; top: {{box.y}}px; border-left-color: {{accent}}">
     <div class="cardonly">
       <div class="head">
-        <span class="cost {{costkind}} {{cost.shown}}"><span class="star"></span><span class="dollar">$</span>{{cost}}</span>
+        <span class="cost {{costkind}} {{cost.shown}}"><span class="dollar">$</span>{{cost}}</span>
+        <span class="star {{costkind}} {{cost.shown}}"></span>
         <span class="name">{{name}}</span>
       </div>
     </div>
@@ -107,9 +142,16 @@
     </div>
     <div class="cardonly">
       <div class="stats {{stats.shown}}">
-        <div class="line"><span class="label">{{text:TOOLTIP:StatTime}}: </span><span class="value">{{time}}</span></div>
+        <div class="line {{health.shown}}"><span class="label">{{text:TOOLTIP:StatHealth}}: </span><span class="value">{{health}}</span></div>
         <div class="line {{weapon.shown}}"><span class="label">{{text:TOOLTIP:StatDamage}}: </span><span class="value">{{damage}}</span></div>
+        <div class="line {{weapon.shown}}"><span class="label">{{text:TOOLTIP:StatAttackSpeed}}: </span><span class="value">{{speed}}</span></div>
+        <div class="line {{weapon.shown}}"><span class="label">{{text:TOOLTIP:StatDamagePerSecond}}: </span><span class="value">{{dps}}</span></div>
         <div class="line {{weapon.shown}}"><span class="label">{{text:TOOLTIP:StatRange}}: </span><span class="value">{{range}}</span></div>
+        <div class="line"><span class="label">{{text:TOOLTIP:StatTime}}: </span><span class="value">{{time}}</span></div>
+      </div>
+      <div class="upgrades {{upgradeskind}} {{upgrades.shown}}">
+        <div class="caption"><span class="forunit">{{text:TOOLTIP:Upgrades}}</span><span class="forupgrade">{{text:TOOLTIP:UpgradeChanges}}</span></div>
+        <div class="entry {{kind}} {{owned}}" data-each="upgrades"><span class="name">{{name}}</span><span class="mark"> ({{text:TOOLTIP:UpgradeOwned}})</span><span class="label">{{label}}: </span><span class="from">{{from}}</span><span class="arrow"> → </span><span class="to">{{to}}</span></div>
       </div>
       <div class="note warning {{warning.shown}}">{{warning}}</div>
       <div class="note requires {{requires.shown}}">{{requires}}</div>

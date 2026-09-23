@@ -88,11 +88,14 @@
 #include "GameClient/Controlbar.h"
 #include "GameClient/DisplayStringManager.h"
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/Damage.h"
+#include "GameLogic/Module/MaxHealthUpgrade.h"
 #include "GameLogic/Module/OverchargeBehavior.h"
 #include "GameLogic/Module/ProductionUpdate.h"
 #include "GameLogic/ScriptEngine.h"
 
 #include "GameNetwork/NetworkInterface.h"
+#include "GameNetwork/GameSpy/ThreadUtils.h"		// WideCharStringToMultiByte
 #include "GameLogic/Weapon.h"		// WeaponTemplate/WeaponBonus for the detailed build tooltip
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -125,6 +128,291 @@ static void silenceLayout( WindowLayout *layout )
 {
 	for( GameWindow *window = layout->getFirstWindow(); window; window = window->winGetNextInLayout() )
 		silenceWindowTree( window );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** What an upgrade does to a unit, as far as the build tooltip counts it: the modules it triggers
+	* on that unit, added together. */
+//-------------------------------------------------------------------------------------------------
+struct UpgradeEffect
+{
+	Bool weaponSet;				///< WeaponSetUpgrade: the PLAYER_UPGRADE weapon set
+	Bool weaponBonus;			///< WeaponBonusUpgrade: the PLAYER_UPGRADE weapon bonus
+	Bool armor;						///< ArmorUpgrade, which the tooltip names without a figure
+	Real addHealth;				///< MaxHealthUpgrade
+};
+
+static void addEffect( UpgradeEffect &into, const UpgradeEffect &effect )
+{
+	into.weaponSet = into.weaponSet || effect.weaponSet;
+	into.weaponBonus = into.weaponBonus || effect.weaponBonus;
+	into.armor = into.armor || effect.armor;
+	into.addHealth += effect.addHealth;
+}
+
+typedef std::map< std::string, UpgradeEffect > UpgradeEffects;
+
+//-------------------------------------------------------------------------------------------------
+/** Every upgrade that triggers one of `thing`'s weapon, armour or health upgrade modules, by the
+	* upgrade's name, and what it does.  A module that wants all its triggers at once is counted under
+	* each of them alone. */
+// ponytail: RequiresAllTriggers is read as any trigger; no stock unit hangs a figure on two upgrades at once
+//-------------------------------------------------------------------------------------------------
+static void findUpgradeEffects( const ThingTemplate *thing, UpgradeEffects &effects )
+{
+	const ModuleInfo &modules = thing->getBehaviorModuleInfo();
+	for( Int m = 0; m < modules.getCount(); ++m )
+	{
+		const AsciiString &module = modules.getNthName( m );
+		UpgradeEffect effect = {};
+		if( module.compareNoCase( "WeaponSetUpgrade" ) == 0 )
+			effect.weaponSet = TRUE;
+		else if( module.compareNoCase( "WeaponBonusUpgrade" ) == 0 )
+			effect.weaponBonus = TRUE;
+		else if( module.compareNoCase( "ArmorUpgrade" ) == 0 )
+			effect.armor = TRUE;
+		else if( module.compareNoCase( "MaxHealthUpgrade" ) == 0 )
+			effect.addHealth = static_cast< const MaxHealthUpgradeModuleData * >( modules.getNthData( m ) )->m_addMaxHealth;
+		else
+			continue;
+
+		const UpgradeMuxData &mux = static_cast< const UpgradeModuleData * >( modules.getNthData( m ) )->m_upgradeMuxData;
+		for( size_t trigger = 0; trigger < mux.m_activationUpgradeNames.size(); ++trigger )
+			addEffect( effects[ mux.m_activationUpgradeNames[ trigger ].str() ], effect );
+	}
+}
+
+/** One weapon slot's figures; `weapon` NULL for a slot with nothing in it that hurts. */
+struct WeaponFigures
+{
+	const WeaponTemplate *weapon;
+	Real damage;
+	Real range;
+	Real attacksPerSecond;
+};
+
+/** A unit's health and its weapons, slot by slot. */
+struct UnitFigures
+{
+	Real health;
+	WeaponFigures slots[ WEAPONSLOT_COUNT ];
+
+	/** The slot with the most damage a second, WEAPONSLOT_COUNT for an unarmed unit. */
+	Int mainSlot( void ) const
+	{
+		Int best = WEAPONSLOT_COUNT;
+		for( Int slot = PRIMARY_WEAPON; slot < WEAPONSLOT_COUNT; ++slot )
+			if( slots[ slot ].weapon && ( best == WEAPONSLOT_COUNT || slots[ slot ].damage * slots[ slot ].attacksPerSecond
+																																> slots[ best ].damage * slots[ best ].attacksPerSecond ) )
+				best = slot;
+		return best;
+	}
+};
+
+//-------------------------------------------------------------------------------------------------
+/** `thing`'s figures with `effect` applied, read off the template the way Weapon::computeBonus
+	* reads an object: the game's own weapon bonuses and the weapon's extra ones for the conditions
+	* set.  A clip fires its shots a delay apart and then reloads in place of the last delay.  A
+	* weapon that does no damage, the dummies that hold a slot until an upgrade fills it, is none. */
+//-------------------------------------------------------------------------------------------------
+static UnitFigures figuresOf( const ThingTemplate *thing, const UpgradeEffect &effect )
+{
+	UnitFigures figures = {};
+	figures.health = thing->calcMaxHealth() + effect.addHealth;
+
+	WeaponSetFlags setFlags;
+	if( effect.weaponSet )
+		setFlags.set( WEAPONSET_PLAYER_UPGRADE );
+	const WeaponBonusConditionFlags bonusFlags = effect.weaponBonus ? ( 1 << WEAPONBONUSCONDITION_PLAYER_UPGRADE ) : 0;
+	const WeaponTemplateSet *set = thing->findWeaponTemplateSet( setFlags );
+	if( set == NULL )
+		return figures;
+
+	for( Int slot = PRIMARY_WEAPON; slot < WEAPONSLOT_COUNT; ++slot )
+	{
+		const WeaponTemplate *weapon = set->getNth( (WeaponSlotType)slot );
+		if( weapon == NULL || weapon->getDamageType() == DAMAGE_HEALING || !IsHealthDamagingDamage( weapon->getDamageType() ) )
+			continue;
+
+		WeaponBonus bonus;
+		TheGlobalData->m_weaponBonusSet->appendBonuses( bonusFlags, bonus );
+		if( weapon->getExtraBonus() )
+			weapon->getExtraBonus()->appendBonuses( bonusFlags, bonus );
+
+		const Real damage = weapon->getPrimaryDamage( bonus );
+		if( damage <= 0.0f )
+			continue;
+		const Real delay = max( 1.0f, INT_TO_REAL( weapon->getMinDelayBetweenShots() + weapon->getMaxDelayBetweenShots() ) * 0.5f
+																		/ bonus.getField( WeaponBonus::RATE_OF_FIRE ) );
+		const Int clip = weapon->getClipSize();
+		const Real cycle = clip > 0 ? ( clip - 1 ) * delay + max( 1, weapon->getClipReloadTime( bonus ) ) : delay;
+
+		WeaponFigures &figure = figures.slots[ slot ];
+		figure.weapon = weapon;
+		figure.damage = damage;
+		figure.range = weapon->getAttackRange( bonus );
+		figure.attacksPerSecond = ( clip > 0 ? clip : 1 ) * LOGICFRAMES_PER_SECOND / cycle;
+	}
+	return figures;
+}
+
+static std::string wholeFigure( Real value )
+{
+	return std::to_string( REAL_TO_INT( value ) );
+}
+
+/** Attacks a second, two decimals and the string table's unit: "1.25/s". */
+static std::string rateFigure( Real value )
+{
+	char text[ 32 ];
+	snprintf( text, sizeof( text ), "%.2f", value );
+	return text + WideCharStringToMultiByte( TheGameText->fetch( "TOOLTIP:StatPerSecond" ).str() );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The lines that tell `from` and `to` apart.  The main weapon is compared figure by figure when
+	* the upgrade leaves it in its slot; any other weapon the upgrade puts in, a Ranger's grenade or a
+	* Humvee's missile, is a line of its own with its damage and range.  Then the armour, when
+	* `effect` changes it. */
+//-------------------------------------------------------------------------------------------------
+static void putChanges( const UnitFigures &from, const UnitFigures &to, const UpgradeEffect &effect,
+												std::vector< BuildTooltipChange > &changes )
+{
+	if( wholeFigure( from.health ) != wholeFigure( to.health ) )
+	{
+		const BuildTooltipChange health = { "TOOLTIP:StatHealth", wholeFigure( from.health ), wholeFigure( to.health ) };
+		changes.push_back( health );
+	}
+
+	const Int main = from.mainSlot();
+	if( main != WEAPONSLOT_COUNT && to.slots[ main ].weapon )
+	{
+		const WeaponFigures &before = from.slots[ main ];
+		const WeaponFigures &after = to.slots[ main ];
+		const BuildTooltipChange damage = { "TOOLTIP:StatDamage", wholeFigure( before.damage ), wholeFigure( after.damage ) };
+		const BuildTooltipChange speed = { "TOOLTIP:StatAttackSpeed", rateFigure( before.attacksPerSecond ), rateFigure( after.attacksPerSecond ) };
+		const BuildTooltipChange perSecond = { "TOOLTIP:StatDamagePerSecond", wholeFigure( before.damage * before.attacksPerSecond ),
+																					 wholeFigure( after.damage * after.attacksPerSecond ) };
+		const BuildTooltipChange range = { "TOOLTIP:StatRange", wholeFigure( before.range ), wholeFigure( after.range ) };
+
+		const BuildTooltipChange *candidates[] = { &damage, &speed, &perSecond, &range };
+		for( Int each = 0; each < (Int)ARRAY_SIZE( candidates ); ++each )
+			if( candidates[ each ]->from != candidates[ each ]->to )
+				changes.push_back( *candidates[ each ] );
+	}
+
+	for( Int slot = PRIMARY_WEAPON; slot < WEAPONSLOT_COUNT; ++slot )
+	{
+		const WeaponFigures &after = to.slots[ slot ];
+		if( ( slot == main && main != WEAPONSLOT_COUNT && after.weapon ) || after.weapon == NULL || after.weapon == from.slots[ slot ].weapon )
+			continue;
+
+		UnicodeString figures;
+		figures.format( TheGameText->fetch( "TOOLTIP:StatNewWeaponFigures" ), REAL_TO_INT( after.damage ), REAL_TO_INT( after.range ) );
+		const BuildTooltipChange weapon = { "TOOLTIP:StatNewWeapon", "", WideCharStringToMultiByte( figures.str() ) };
+		changes.push_back( weapon );
+	}
+
+	if( effect.armor )
+	{
+		const BuildTooltipChange armor = { "TOOLTIP:StatArmor", "", WideCharStringToMultiByte( TheGameText->fetch( "TOOLTIP:StatArmorStronger" ).str() ) };
+		changes.push_back( armor );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The effect of every upgrade in `effects` the player has, leaving out `leftOut`. */
+//-------------------------------------------------------------------------------------------------
+static UpgradeEffect ownedEffect( const UpgradeEffects &effects, const Player *player, const std::string &leftOut )
+{
+	UpgradeEffect owned = {};
+	for( UpgradeEffects::const_iterator upgrade = effects.begin(); upgrade != effects.end(); ++upgrade )
+	{
+		const UpgradeTemplate *known = TheUpgradeCenter->findUpgrade( upgrade->first.c_str() );
+		if( upgrade->first != leftOut && known && player->hasUpgradeComplete( known ) )
+			addEffect( owned, upgrade->second );
+	}
+	return owned;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A unit's card: its figures with the upgrades the player owns, and each upgrade that changes one
+	* of them with what it changes, from the figure without it to the figure with it. */
+//-------------------------------------------------------------------------------------------------
+static void putUnitFigures( BuildTooltipCard &card, const ThingTemplate *thing, const Player *player )
+{
+	UpgradeEffects effects;
+	findUpgradeEffects( thing, effects );
+
+	const UpgradeEffect owned = ownedEffect( effects, player, "" );
+	const UnitFigures now = figuresOf( thing, owned );
+	card.health = REAL_TO_INT( now.health );
+	const Int main = now.mainSlot();
+	if( main != WEAPONSLOT_COUNT )
+	{
+		const WeaponFigures &weapon = now.slots[ main ];
+		card.damage = REAL_TO_INT( weapon.damage );
+		card.range = REAL_TO_INT( weapon.range );
+		card.attacksPerSecond = weapon.attacksPerSecond;
+		card.damagePerSecond = REAL_TO_INT( weapon.damage * weapon.attacksPerSecond );
+	}
+
+	for( UpgradeEffects::const_iterator effect = effects.begin(); effect != effects.end(); ++effect )
+	{
+		const UpgradeTemplate *upgrade = TheUpgradeCenter->findUpgrade( effect->first.c_str() );
+		if( upgrade == NULL )
+			continue;
+
+		BuildTooltipUpgrade entry;
+		entry.name = TheGameText->fetch( upgrade->getDisplayNameLabel() );
+		entry.owned = player->hasUpgradeComplete( upgrade );
+		UpgradeEffect without = ownedEffect( effects, player, effect->first );
+		UpgradeEffect with = without;
+		addEffect( with, effect->second );
+		putChanges( figuresOf( thing, without ), figuresOf( thing, with ), effect->second, entry.changes );
+		if( !entry.changes.empty() )
+			card.upgrades.push_back( entry );
+	}
+}
+
+enum
+{
+	UPGRADE_TARGETS_SHOWN = 6,		///< the most units an upgrade's card lists
+};
+
+//-------------------------------------------------------------------------------------------------
+/** An upgrade's card: the units of the player's side it changes a figure of, each with the change
+	* from the plain unit.  The units are what the side's build buttons make, each name once: walking
+	* every template found the campaign's copies of a Ranger or a Crusader as well, one of them with a
+	* range of 999996.  Done only when the card is filled in, on hovering and when the bar changes. */
+//-------------------------------------------------------------------------------------------------
+static void putUpgradeTargets( BuildTooltipCard &card, const UpgradeTemplate *upgrade, const Player *player )
+{
+	const UpgradeEffect plain = {};
+	std::set< std::wstring > named;
+	for( const CommandButton *button = TheControlBar->getCommandButtons(); button; button = button->getNext() )
+	{
+		if( card.upgrades.size() >= UPGRADE_TARGETS_SHOWN )
+			break;
+		const ThingTemplate *thing = button->getThingTemplate();
+		if( thing == NULL || thing->getDefaultOwningSide() != player->getSide() || named.count( thing->getDisplayName().str() ) )
+			continue;
+
+		UpgradeEffects effects;
+		findUpgradeEffects( thing, effects );
+		UpgradeEffects::const_iterator effect = effects.find( upgrade->getUpgradeName().str() );
+		if( effect == effects.end() )
+			continue;
+
+		BuildTooltipUpgrade entry;
+		entry.name = thing->getDisplayName();
+		entry.owned = FALSE;
+		putChanges( figuresOf( thing, plain ), figuresOf( thing, effect->second ), effect->second, entry.changes );
+		if( entry.changes.empty() )
+			continue;
+		named.insert( thing->getDisplayName().str() );
+		card.upgrades.push_back( entry );
+	}
 }
 
 void ControlBarPopupDescriptionUpdateFunc( WindowLayout *layout, void *param )
@@ -454,28 +742,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 			{
 				card.hasStats = TRUE;
 				card.buildSeconds = ControlBar_secondsFromFrames( (Real)thingTemplate->calcTimeToBuild( player ) );
-
-				// no bonuses: these are the template's own numbers, before veterancy or upgrades
-				WeaponBonus noBonus;
-				Real bestRange = 0.0f;
-				Real bestDamage = 0.0f;
-				const WeaponTemplateSet *wts = thingTemplate->findWeaponTemplateSet( WeaponSetFlags() );
-				if( wts )
-				{
-					for( Int ws = PRIMARY_WEAPON; ws < WEAPONSLOT_COUNT; ++ws )
-					{
-						const WeaponTemplate *wt = wts->getNth( (WeaponSlotType)ws );
-						if( wt == NULL )
-							continue;
-						if( wt->getUnmodifiedAttackRange() > bestRange )
-							bestRange = wt->getUnmodifiedAttackRange();
-						if( wt->getPrimaryDamage( noBonus ) > bestDamage )
-							bestDamage = wt->getPrimaryDamage( noBonus );
-					}
-				}
-
-				card.damage = REAL_TO_INT( bestDamage );
-				card.range = REAL_TO_INT( bestRange );
+				putUnitFigures( card, thingTemplate, player );
 			}
 
 			// ask each prerequisite to give us a list of the non satisfied prerequisites
@@ -499,6 +766,9 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 		}
 		else if( upgradeTemplate )
 		{
+			if( TheGlobalData->m_detailedBuildTooltips )
+				putUpgradeTargets( card, upgradeTemplate, player );
+
 			//We are looking at an upgrade purchase icon. Maybe we already purchased it?
 
 			Bool hasUpgradeAlready = player->hasUpgradeComplete( upgradeTemplate );

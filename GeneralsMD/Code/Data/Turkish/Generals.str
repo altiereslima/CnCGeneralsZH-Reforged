@@ -15581,6 +15581,50 @@ TOOLTIP:StatRange
 "Menzil"
 END
 
+TOOLTIP:StatHealth
+"Can"
+END
+
+TOOLTIP:StatAttackSpeed
+"Atış hızı"
+END
+
+TOOLTIP:StatPerSecond
+"/sn"
+END
+
+TOOLTIP:StatDamagePerSecond
+"Saniyelik hasar"
+END
+
+TOOLTIP:StatArmor
+"Zırh"
+END
+
+TOOLTIP:StatArmorStronger
+"güçlenir"
+END
+
+TOOLTIP:StatNewWeapon
+"Yeni silah"
+END
+
+TOOLTIP:StatNewWeaponFigures
+"%d hasar, %d menzil"
+END
+
+TOOLTIP:Upgrades
+"GELİŞTİRMELER"
+END
+
+TOOLTIP:UpgradeChanges
+"ETKİLEDİKLERİ"
+END
+
+TOOLTIP:UpgradeOwned
+"alındı"
+END
+
 GUI:HudToggles
 "Şeritler"
 END

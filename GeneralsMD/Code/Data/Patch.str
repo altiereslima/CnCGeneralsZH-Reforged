@@ -934,6 +934,52 @@ TOOLTIP:StatRange
 "Range"
 END
 
+TOOLTIP:StatHealth
+"Health"
+END
+
+TOOLTIP:StatAttackSpeed
+"Attack speed"
+END
+
+TOOLTIP:StatPerSecond
+"/s"
+END
+
+TOOLTIP:StatDamagePerSecond
+"Damage per second"
+END
+
+TOOLTIP:StatArmor
+"Armor"
+END
+
+TOOLTIP:StatArmorStronger
+"stronger"
+END
+
+TOOLTIP:StatNewWeapon
+"New weapon"
+END
+
+TOOLTIP:StatNewWeaponFigures
+"%d damage, %d range"
+END
+
+// Under the figures: a unit's upgrades, or on an upgrade's card the units it changes.
+
+TOOLTIP:Upgrades
+"UPGRADES"
+END
+
+TOOLTIP:UpgradeChanges
+"CHANGES"
+END
+
+TOOLTIP:UpgradeOwned
+"owned"
+END
+
 // Peace time - the lobby combo box, its tooltip, the corner countdown and the three things the game
 // says while the clock runs.  Tools/peacetime_layout.py selfcheck fails if any of these goes missing.
 

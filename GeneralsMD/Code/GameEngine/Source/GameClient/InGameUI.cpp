@@ -12612,8 +12612,8 @@ static std::string tooltipName( const UnicodeString &label )
 //-------------------------------------------------------------------------------------------------
 /** The build tooltip's values: {{name}}, {{cost}} with {{costkind}} "money" or "science" and
 	* {{cost.shown}}, data-each="lines" out of the description, {{warning}} and {{requires}} each with
-	* its .shown, and the three figures {{time}} {{damage}} {{range}} with {{stats.shown}} and
-	* {{weapon.shown}}. */
+	* its .shown, the figures {{time}} {{health}} {{damage}} {{speed}} {{dps}} {{range}} with
+	* {{stats.shown}}, {{health.shown}} and {{weapon.shown}}, and data-each="upgrades". */
 //-------------------------------------------------------------------------------------------------
 static void putBuildTooltipCard( const BuildTooltipCard &card, HtmlValues &values, HtmlLists &lists )
 {
@@ -12631,10 +12631,40 @@ static void putBuildTooltipCard( const BuildTooltipCard &card, HtmlValues &value
 	UnicodeString seconds;
 	seconds.format( TheGameText->fetch( "TOOLTIP:StatSeconds" ), card.buildSeconds );
 	values[ "time" ] = WideCharStringToMultiByte( seconds.str() );
+	values[ "health" ] = std::to_string( card.health );
 	values[ "damage" ] = std::to_string( card.damage );
 	values[ "range" ] = std::to_string( card.range );
+	char speed[ 32 ];
+	snprintf( speed, sizeof( speed ), "%.2f", card.attacksPerSecond );
+	values[ "speed" ] = speed + WideCharStringToMultiByte( TheGameText->fetch( "TOOLTIP:StatPerSecond" ).str() );
+	values[ "dps" ] = std::to_string( card.damagePerSecond );
 	values[ "stats.shown" ] = card.hasStats ? "shown" : "hidden";
+	values[ "health.shown" ] = card.hasStats && card.health > 0 ? "shown" : "hidden";
 	values[ "weapon.shown" ] = card.hasStats && card.damage > 0 ? "shown" : "hidden";
+
+	// a unit's card lists its upgrades; an upgrade's card lists the units it changes
+	values[ "upgrades.shown" ] = card.upgrades.empty() ? "hidden" : "shown";
+	values[ "upgradeskind" ] = card.hasStats ? "unit" : "upgrade";
+	std::vector< HtmlValues > &upgrades = lists[ "upgrades" ];
+	for( size_t each = 0; each < card.upgrades.size(); ++each )
+	{
+		const BuildTooltipUpgrade &upgrade = card.upgrades[ each ];
+		HtmlValues head;
+		head[ "kind" ] = "upgrade";
+		head[ "name" ] = WideCharStringToMultiByte( upgrade.name.str() );
+		head[ "owned" ] = upgrade.owned ? "owned" : "";
+		upgrades.push_back( head );
+		for( size_t change = 0; change < upgrade.changes.size(); ++change )
+		{
+			HtmlValues line;
+			line[ "kind" ] = upgrade.changes[ change ].from.empty() ? "remark" : "change";
+			line[ "owned" ] = head[ "owned" ];
+			line[ "label" ] = WideCharStringToMultiByte( TheGameText->fetch( upgrade.changes[ change ].label ).str() );
+			line[ "from" ] = upgrade.changes[ change ].from;
+			line[ "to" ] = upgrade.changes[ change ].to;
+			upgrades.push_back( line );
+		}
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
