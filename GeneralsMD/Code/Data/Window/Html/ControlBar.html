@@ -95,13 +95,23 @@
   .gla .frame { border-color: #867a45; border-top-color: #cbbf82; border-left-color: #a99d62; border-bottom-color: #48401e; border-right-color: #625a31;
                 background-color: rgba(10, 9, 4, 0.94); }
 
-  /* the radar's bezel: a steel plate lit from above over the whole border, a light line along its
-     top and a dark one down its right, and the radar sunk in a two pixel well.  Every piece is
-     placed from the container's corner with the border's widths written in, since the page cannot
-     add a width to a width */
+  /* a bezel, round the radar, the command grid and the money: a steel plate lit from above over the
+     whole border, a light line along its top and down a left side that faces the battlefield, a dark
+     one down its right, and what it holds sunk in a two pixel well.  Every piece is placed from the
+     container's corner with the border's widths written in, since the page cannot add a width to a
+     width */
   .bezel .steel { position: absolute; background: linear-gradient(to bottom, #9aa3ad, #5a626c 30%, #353c45); }
   .bezel .shine { position: absolute; height: 1px; background-color: #dde4ea; }
+  .bezel .lit { position: absolute; width: 1px; background-color: #b3bbc4; }
   .bezel .shade { position: absolute; width: 1px; background-color: #0c1114; }
+  /* the money's figure is the bar's own window over the block; the well under it is inset from the
+     block's sides rather than fitted to the figure, whose width the page is not told */
+  .bezel .inset { position: absolute; left: 5px; right: 5px; top: 1px; bottom: 0; background-color: #020405;
+                  border-top: 1px solid #06090b; border-left: 1px solid #06090b; border-right: 1px solid #b4bec8; }
+  .china .bezel .lit { background-color: #d58a70; }
+  .china .bezel .inset { border-right-color: #d98a72; }
+  .gla .bezel .lit { background-color: #cabe86; }
+  .gla .bezel .inset { border-right-color: #cbbf82; }
   .bezel .sunk { position: absolute; left: -2px; top: -2px; border: 2px solid #06090b;
                  border-bottom-color: #b4bec8; border-right-color: #b4bec8; background-color: #020405; }
   .china .bezel .steel { background: linear-gradient(to bottom, #c06a52, #7a3120 30%, #3f160f); }
@@ -113,8 +123,6 @@
 
   /* over the centre's border the power bar's frame and on it the money's block, stacked flush */
   .stack { box-sizing: border-box; margin: 0; }
-  /* the money's block is only as tall as its figure, so it wears its lit top edge and no rail */
-  .moneyblock .rail { display: none; }
 
   .well { margin: -3px 0 0 -3px; border: 2px solid #0c1114; border-bottom-color: #4b535e; border-right-color: #4b535e;
           background-color: rgba(0, 0, 0, 0.35); }
@@ -231,13 +239,25 @@
     <div class="sunk" style="width: {{left.w}}px; height: {{left.h}}px"></div>
   </div>
   <div class="piece alert {{alerttab.shown}} {{WinUAttack.state}}" style="left: {{alerttab.x}}px; top: {{alerttab.y}}px; width: {{alerttab.w}}px; height: {{alerttab.h}}px"><div class="led"><div class="glint"></div></div></div>
-  <div class="piece panel solid stack moneyblock {{moneyblock.shown}}" style="left: {{moneyblock.x}}px; top: {{moneyblock.y}}px; width: {{moneyblock.w}}px; height: {{moneyblock.h}}px"><div class="rail"></div></div>
+  <div class="piece bezel solid stack moneyblock {{moneyblock.shown}}" style="left: {{moneyblock.x}}px; top: {{moneyblock.y}}px; width: {{moneyblock.w}}px; height: {{moneyblock.h}}px">
+    <div class="steel" style="left: 0; right: 0; top: 0; bottom: 0"></div>
+    <div class="shine" style="left: 0; right: 0; top: 0"></div>
+    <div class="lit" style="left: 0; top: 0; bottom: 0"></div>
+    <div class="shade" style="right: 0; top: 0; bottom: 0"></div>
+    <div class="inset"></div>
+  </div>
   <div class="piece groove solid stack {{powerframe.shown}}" style="left: {{powerframe.x}}px; top: {{powerframe.y}}px; width: {{powerframe.w}}px; height: {{powerframe.h}}px">
     <div class="cells {{power.state}}" style="height: {{powerframe.inner}}px"><div class="cell {{lit}}" data-each="powercells" style="left: {{x}}px; width: {{w}}px; height: {{powerframe.inner}}px"><div class="seg" style="height: {{powerframe.inner}}px"></div></div></div>
     <div class="needle" style="left: {{power.needle}}%"></div>
     <div class="lip"></div>
   </div>
-  <div class="piece frame solid {{centre.shown}}" style="left: {{centre.x}}px; top: {{centre.y}}px; width: {{centre.w}}px; height: {{centre.h}}px; border-width: {{centre.bt}}px {{centre.br}}px {{centre.bb}}px {{centre.bl}}px"></div>
+  <div class="piece frame bezel solid {{centre.shown}}" style="left: {{centre.x}}px; top: {{centre.y}}px; width: {{centre.w}}px; height: {{centre.h}}px; border-width: {{centre.bt}}px {{centre.br}}px {{centre.bb}}px {{centre.bl}}px">
+    <div class="steel" style="left: -{{centre.bl}}px; right: -{{centre.br}}px; top: -{{centre.bt}}px; bottom: -{{centre.bb}}px"></div>
+    <div class="shine" style="left: -{{centre.bl}}px; right: -{{centre.br}}px; top: -{{centre.bt}}px"></div>
+    <div class="lit" style="left: -{{centre.bl}}px; top: -{{centre.bt}}px; bottom: -{{centre.bb}}px"></div>
+    <div class="shade" style="right: -{{centre.br}}px; top: -{{centre.bt}}px; bottom: -{{centre.bb}}px"></div>
+    <div class="sunk" style="width: {{centre.w}}px; height: {{centre.h}}px"></div>
+  </div>
   <div class="piece button worker {{workertab.shown}} {{ButtonIdleWorker.state}}" data-click="press:ButtonIdleWorker" style="left: {{workertab.x}}px; top: {{workertab.y}}px; width: {{workertab.w}}px; height: {{workertab.h}}px"><div class="cap">{{text:GUI:BarIdleWorker}}</div></div>
   <div class="piece frame solid {{right.shown}}" style="left: {{right.x}}px; top: {{right.y}}px; width: {{right.w}}px; height: {{right.h}}px; border-width: {{right.bt}}px {{right.br}}px {{right.bb}}px {{right.bl}}px"></div>
 
