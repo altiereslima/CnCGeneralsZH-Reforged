@@ -614,17 +614,29 @@ void HtmlOverlayContainer::draw_conic_gradient( litehtml::uint_ptr hdc, const li
 }
 
 //-------------------------------------------------------------------------------------------------
+/** A border's width as drawn: none for a side styled away. */
+static litehtml::pixel_t drawnWidth( const litehtml::border &border )
+{
+	const Bool styledAway = border.style == litehtml::border_style_none || border.style == litehtml::border_style_hidden;
+	return styledAway || border.width <= 0 ? 0 : border.width;
+}
+
+//-------------------------------------------------------------------------------------------------
 void HtmlOverlayContainer::draw_borders( litehtml::uint_ptr hdc, const litehtml::borders &borders,
 																				const litehtml::position &place, bool root )
 {
 	if( root )
 		return;
 
+	// the top and bottom own the corners and the sides stand between them: drawn full height, a
+	// groove's dark left edge ran on down past its lit bottom and stuck out of the bevel in black
+	const litehtml::pixel_t topWidth = drawnWidth( borders.top );
+	const litehtml::pixel_t bottomWidth = drawnWidth( borders.bottom );
 	const litehtml::border *sides[] = { &borders.top, &borders.bottom, &borders.left, &borders.right };
 	for( size_t side = 0; side < ARRAY_SIZE( sides ); side++ )
 	{
 		const litehtml::border &border = *sides[ side ];
-		if( border.width <= 0 || border.style == litehtml::border_style_none || border.style == litehtml::border_style_hidden )
+		if( drawnWidth( border ) <= 0 )
 			continue;
 
 		litehtml::position edge = place;
@@ -635,12 +647,13 @@ void HtmlOverlayContainer::draw_borders( litehtml::uint_ptr hdc, const litehtml:
 			edge.y = place.y + place.height - border.width;
 			edge.height = border.width;
 		}
-		else if( sides[ side ] == &borders.left )
-			edge.width = border.width;
 		else
 		{
-			edge.x = place.x + place.width - border.width;
+			edge.y = place.y + topWidth;
+			edge.height = place.height - topWidth - bottomWidth;
 			edge.width = border.width;
+			if( sides[ side ] == &borders.right )
+				edge.x = place.x + place.width - border.width;
 		}
 		fillBox( edge, border.color );
 	}
