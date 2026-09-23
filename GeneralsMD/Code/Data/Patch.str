@@ -1120,10 +1120,6 @@ GUI:BarChat
 "Chat"
 END
 
-GUI:BarGeneral
-"Promotions"
-END
-
 // the box in the corner of the radar that lights while your forces are under attack
 GUI:BarUnderAttack
 "UNDER ATTACK"

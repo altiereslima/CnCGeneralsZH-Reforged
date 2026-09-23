@@ -15645,10 +15645,6 @@ GUI:BarChat
 "Sohbet"
 END
 
-GUI:BarGeneral
-"Terfiler"
-END
-
 GUI:BarUnderAttack
 "SALDIRI ALTINDA"
 END
