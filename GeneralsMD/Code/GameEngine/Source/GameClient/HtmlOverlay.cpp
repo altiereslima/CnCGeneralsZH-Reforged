@@ -92,6 +92,7 @@ public:
 	Bool hover( const ICoord2D &mouse );
 	std::string click( const ICoord2D &mouse );
 	Int bottomOf( const char *selector );
+	void rectsOf( const char *selector, std::vector< IRegion2D > &rects );
 
 	litehtml::uint_ptr create_font( const litehtml::font_description &description, const litehtml::document *document,
 																	litehtml::font_metrics *metrics ) override;
@@ -252,6 +253,29 @@ Int HtmlOverlayContainer::bottomOf( const char *selector )
 		return 0;
 	const litehtml::position placement = element->get_placement();
 	return screen( placement.y + placement.height );
+}
+
+//-------------------------------------------------------------------------------------------------
+void HtmlOverlayContainer::rectsOf( const char *selector, std::vector< IRegion2D > &rects )
+{
+	rects.clear();
+	if( !m_document )
+		return;
+
+	const litehtml::elements_list elements = m_document->root()->select_all( selector );
+	for( litehtml::elements_list::const_iterator element = elements.begin(); element != elements.end(); ++element )
+	{
+		const litehtml::position placement = ( *element )->get_placement();
+		if( placement.width <= 0 || placement.height <= 0 )
+			continue;
+
+		IRegion2D rect;
+		rect.lo.x = screen( placement.x );
+		rect.lo.y = screen( placement.y );
+		rect.hi.x = screen( placement.x + placement.width );
+		rect.hi.y = screen( placement.y + placement.height );
+		rects.push_back( rect );
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -557,3 +581,4 @@ void HtmlOverlay::draw( void )													{ m_container->draw(); }
 Bool HtmlOverlay::hover( const ICoord2D &mouse )				{ return m_container->hover( mouse ); }
 std::string HtmlOverlay::click( const ICoord2D &mouse )	{ return m_container->click( mouse ); }
 Int HtmlOverlay::bottomOf( const char *selector )				{ return m_container->bottomOf( selector ); }
+void HtmlOverlay::rectsOf( const char *selector, std::vector< IRegion2D > &rects )	{ m_container->rectsOf( selector, rects ); }

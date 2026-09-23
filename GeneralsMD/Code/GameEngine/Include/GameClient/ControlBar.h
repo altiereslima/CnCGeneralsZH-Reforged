@@ -987,6 +987,13 @@ public:
 		* went nowhere.  GameWindow::winPointInChild asks, so clicking and unit picking agree. */
 	Bool letsClickThrough( GameWindow *window, Int x, Int y );
 
+	/** The screen rectangles the bar's CSS page drew solid, which take the place of the plates in
+		* letsClickThrough while the page is drawing; NULL when it is not, and the plates decide again. */
+	void setPageSolids( const std::vector< IRegion2D > *solids );
+
+	/// the general's stars are asking to be spent, so the button blinks; see getStarImage
+	Bool isGeneralStarFlashing( void ) const { return m_genStarFlash; }
+
 	/// the same journey as a fraction, 0 home and 1 gone.  Needs no display, which is why the test
 	/// for the rebuild ordering asks this one; see clearPanelSlide
 	Real getPanelSlideFraction( Int panel ) const
@@ -1311,6 +1318,8 @@ protected:
 	Bool m_isObserverCommandBar;												///< If this is true, the command bar behaves greatly differnt
 	Player *m_observerLookAtPlayer;											///< The current player we're looking at, Null if we're not looking at anyone.
 	AsciiString m_watchedSide;													///< the side the bar is wearing while watching, so a selection change only lays it out again when it really changes side
+	std::vector< IRegion2D > m_pageSolids;							///< what the CSS page drew solid, in screen pixels; see setPageSolids
+	Bool m_pageSolidsActive;														///< the page is drawing, so m_pageSolids decides clicks and not the plates
 	Player *m_watchedSelection;													///< the player the selection last named while watching, NULL for nobody
 
 	WindowLayout *m_buildToolTipLayout;										///< The window that will slide on/display tooltips

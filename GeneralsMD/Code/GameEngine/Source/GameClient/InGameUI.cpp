@@ -10092,6 +10092,84 @@ static const char *const CONTROL_BAR_WINDOWS[] =
 	"WinUAttack"
 };
 
+/** The bar's windows the page draws instead of letting them paint themselves: its own buttons and
+	* the radar's under-attack light.  They still take their clicks; only their pictures are the page's. */
+static const char *const CONTROL_BAR_CUSTOM[] =
+{
+	"ButtonGeneral", "ButtonLarge", "ButtonOptions", "ButtonIdleWorker", "ButtonPlaceBeacon", "PopupCommunicator",
+	"WinUAttack"
+};
+
+/** The windows the centre panel is drawn round, so it is only as big as its buttons, and the ones
+	* the purse above it is drawn round.  NULL ends each list. */
+static const char *const CONTROL_BAR_CENTRE[] =
+{
+	"CommandWindow", "ObserverPlayerListWindow", "ButtonOptions", "ButtonIdleWorker", "ButtonPlaceBeacon",
+	"PopupCommunicator", NULL
+};
+static const char *const CONTROL_BAR_PURSE[] = { "MoneyDisplay", "PowerWindow", NULL };
+
+static void drawNothing( GameWindow *window, WinInstanceData *instData )
+{
+}
+
+static GameWindow *controlBarWindow( const std::string &name )
+{
+	return TheWindowManager->winGetWindowFromId( NULL, NAMEKEY( ( "ControlBar.wnd:" + name ).c_str() ) );
+}
+
+/** A window's screen rectangle, and FALSE when it is missing or hidden. */
+static Bool controlBarWindowRect( GameWindow *window, IRegion2D &rect )
+{
+	rect.lo.x = rect.lo.y = rect.hi.x = rect.hi.y = 0;
+	if( window == NULL || window->winIsHidden() )
+		return FALSE;
+
+	Int width = 0, height = 0;
+	window->winGetScreenPosition( &rect.lo.x, &rect.lo.y );
+	window->winGetSize( &width, &height );
+	rect.hi.x = rect.lo.x + width;
+	rect.hi.y = rect.lo.y + height;
+	return TRUE;
+}
+
+/** "disabled", "hilite" and "pushed" as they apply, for a page to draw a button's state by. */
+static std::string controlBarWindowState( GameWindow *window )
+{
+	std::string state;
+	if( window == NULL )
+		return state;
+	if( !BitTest( window->winGetStatus(), WIN_STATUS_ENABLED ) )
+		state += " disabled";
+	const UnsignedInt flags = window->winGetInstanceData()->getState();
+	if( BitTest( flags, WIN_STATE_HILITED ) )
+		state += " hilite";
+	if( BitTest( flags, WIN_STATE_SELECTED ) )
+		state += " pushed";
+	return state;
+}
+
+/** The box round every shown window of a NULL-ended list, and FALSE when none of them is shown. */
+static Bool controlBarUnion( const char *const *names, IRegion2D &box )
+{
+	Bool found = FALSE;
+	box.lo.x = box.lo.y = box.hi.x = box.hi.y = 0;
+	for( ; *names; names++ )
+	{
+		IRegion2D rect;
+		if( !controlBarWindowRect( controlBarWindow( *names ), rect ) )
+			continue;
+		if( !found )
+			box = rect;
+		box.lo.x = min( box.lo.x, rect.lo.x );
+		box.lo.y = min( box.lo.y, rect.lo.y );
+		box.hi.x = max( box.hi.x, rect.hi.x );
+		box.hi.y = max( box.hi.y, rect.hi.y );
+		found = TRUE;
+	}
+	return found;
+}
+
 /** `name`.x, .y, .w and .h in the page's pixels, and `name`.shown "shown" or "hidden". */
 static void putPageRect( HtmlValues &values, const std::string &name, const IRegion2D &rect, Bool shown )
 {
@@ -10113,7 +10191,10 @@ static void putPageRect( HtmlValues &values, const std::string &name, const IReg
 Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, Int panelCount )
 {
 	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+	{
+		TheControlBar->setPageSolids( NULL );
 		return FALSE;
+	}
 
 	if( !m_controlBarPageLoaded )
 	{
@@ -10121,34 +10202,51 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 		readHtmlPage( CONTROL_BAR_PAGE, m_controlBarPage );
 	}
 	if( m_controlBarPage.empty() )
+	{
+		TheControlBar->setPageSolids( NULL );
 		return FALSE;
+	}
 	if( m_controlBarOverlay == NULL )
 		m_controlBarOverlay = new HtmlOverlay( m_superweaponNormalFont );
 
 	HtmlValues values;
 	values[ "side" ] = spectatorSide();
+	values[ "promotion" ] = TheControlBar->isGeneralStarFlashing() ? "ready" : "";
+	values[ "blink" ] = TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND > LOGICFRAMES_PER_SECOND / 2 ? "lit" : "";
 	for( Int panel = 0; panel < panelCount; panel++ )
 		putPageRect( values, "panel" + std::to_string( panel ), panels[ panel ], shown[ panel ] );
 
 	for( Int each = 0; each < (Int)ARRAY_SIZE( CONTROL_BAR_WINDOWS ); each++ )
 	{
 		const std::string name = CONTROL_BAR_WINDOWS[ each ];
-		GameWindow *window = TheWindowManager->winGetWindowFromId( NULL, NAMEKEY( ( "ControlBar.wnd:" + name ).c_str() ) );
+		GameWindow *window = controlBarWindow( name );
 		IRegion2D rect;
-		rect.lo.x = rect.lo.y = rect.hi.x = rect.hi.y = 0;
+		putPageRect( values, name, rect, controlBarWindowRect( window, rect ) );
+		values[ name + ".state" ] = controlBarWindowState( window );
+	}
+
+	// the centre panel hugs its buttons and the purse its money, so the rest of the old plate is
+	// battlefield again
+	const Bool centreShown = panelCount > 1 && shown[ 1 ];
+	IRegion2D box;
+	const Bool centreFound = controlBarUnion( CONTROL_BAR_CENTRE, box );
+	putPageRect( values, "centre", box, centreFound && centreShown );
+	const Bool purseFound = controlBarUnion( CONTROL_BAR_PURSE, box );
+	putPageRect( values, "purse", box, purseFound && centreShown );
+
+	for( Int each = 0; each < (Int)ARRAY_SIZE( CONTROL_BAR_CUSTOM ); each++ )
+	{
+		GameWindow *window = controlBarWindow( CONTROL_BAR_CUSTOM[ each ] );
 		if( window )
-		{
-			Int width = 0, height = 0;
-			window->winGetScreenPosition( &rect.lo.x, &rect.lo.y );
-			window->winGetSize( &width, &height );
-			rect.hi.x = rect.lo.x + width;
-			rect.hi.y = rect.lo.y + height;
-		}
-		putPageRect( values, name, rect, window != NULL && !window->winIsHidden() );
+			window->winSetDrawFunc( drawNothing );
 	}
 
 	m_controlBarOverlay->setPage( HtmlTemplate_expand( m_controlBarPage, values, HtmlLists(), lookupGameText ) );
 	m_controlBarOverlay->draw();
+
+	std::vector< IRegion2D > solids;
+	m_controlBarOverlay->rectsOf( ".solid", solids );
+	TheControlBar->setPageSolids( &solids );
 	return TRUE;
 }
 

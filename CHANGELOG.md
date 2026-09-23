@@ -497,6 +497,8 @@ found and fixed â€” EA's own, not port damage.**
 - Both are an ordinary web page with a stylesheet, in the game's Window folder. Change the colours, the sizes or the order there and the next match you watch draws it that way, and the page opens in a browser too.
 - A minimised command bar stays minimised. Changing seats, or clicking another player's unit while watching, put the whole bar back up over the battlefield you had just cleared. A new match still opens with the bar up.
 - The command bar's frame is drawn new, in the same steel as the boards: three dark panels under a steel rail, the radar and the portrait each set in a bezel with a rivet at every corner, the command buttons in a shallow well, the money on a plaque and the power bar in a groove. Grey for America, red for China, sand for GLA. It slides and minimises with the bar, and like the boards it is a page in the Window folder; take the page away and the old painted bar comes back.
+- The middle of the bar is only as big as its buttons now: one panel round the command grid and its side buttons, and a narrower one above it round the money and the power bar. The corners the old painting filled either side of the money are battlefield again, and a click there lands on the battlefield.
+- The bar's own buttons are drawn to match, steel caps with their names on them, Menu, Worker, Beacon, Chat and Promotions, lit gold under the pointer and pressed in when pushed. Promotions glows gold on the half second while you have one to spend. The under-attack light is a tab on the top left corner of the radar's panel that blinks red, written UNDER ATTACK.
 
 ## Placing buildings
 

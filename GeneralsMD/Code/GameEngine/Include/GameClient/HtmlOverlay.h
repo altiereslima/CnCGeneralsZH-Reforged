@@ -41,6 +41,7 @@
 #include "Common/AsciiString.h"
 
 #include <string>
+#include <vector>
 
 class HtmlOverlayContainer;
 
@@ -65,6 +66,9 @@ public:
 
 	/** The bottom edge in screen pixels of the first element the CSS selector finds, 0 for none. */
 	Int bottomOf( const char *selector );
+
+	/** The screen rectangle of every element the CSS selector finds, empty ones left out. */
+	void rectsOf( const char *selector, std::vector< IRegion2D > &rects );
 
 private:
 	HtmlOverlayContainer *m_container;

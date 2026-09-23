@@ -1,20 +1,31 @@
 <!DOCTYPE html>
 <!--
-  The command bar's frame, drawn where its three plates used to be.  The buttons, the radar, the
-  money, the power bar and the portrait are still the bar's own windows and paint over this page;
-  the page draws the steel round and under them.  Same materials as Window/Html/Spectator.html,
-  whose header says what the renderer draws and what it does not.
+  The command bar's frame, drawn where its three plates used to be, and the bar's own buttons.  The
+  command buttons, the radar, the money, the power bar and the portrait are still the bar's windows
+  and paint over this page.  The menu, worker, beacon, chat, minimise and promotion buttons and the
+  under-attack light are the page's to draw: their windows take the clicks and draw nothing.  Same
+  materials as Window/Html/Spectator.html, whose header says what the renderer draws and what not.
+
+  Everything with class "solid" catches clicks; the rest of the screen is battlefield, whatever the
+  old plates covered.
 
   The game fills in, every frame (GameClient/HtmlTemplate.h):
     {{side}}               "america", "china" or "gla": the side whose bar is on screen
+    {{promotion}}          "ready" while the general has a promotion to spend
+    {{blink}}              "lit" for half of every second, for anything that blinks
     {{panelN.x}} .y .w .h  N 0 to 2, left, centre and right: where the plates would have gone,
                            moving with the bar when it slides or minimises; .w and .h are 0 and
                            {{panelN.shown}} is "hidden" when a minimised bar has stood it down
-    {{Name.x}} .y .w .h    the rectangle of the bar's window Name, and {{Name.shown}} "shown" or
-                           "hidden", for LeftHUD (the radar), RightHUD (the portrait's box),
-                           CameoWindow (the portrait), CommandWindow, MoneyDisplay, PowerWindow,
-                           GeneralsExp, ButtonGeneral, ButtonLarge, ButtonOptions, ButtonIdleWorker,
-                           ButtonPlaceBeacon, PopupCommunicator and WinUAttack
+    {{centre.x}} .y .w .h  the box round the command grid and the four buttons beside it, so the
+                           centre panel is only as big as its buttons; {{centre.shown}} as above
+    {{purse.x}} .y .w .h   the box round the money and the power bar, above it
+    {{Name.x}} .y .w .h    the rectangle of the bar's window Name, {{Name.shown}} "shown" or "hidden"
+                           and {{Name.state}} any of "disabled", "hilite", "pushed", for LeftHUD (the
+                           radar), RightHUD (the portrait's box), CameoWindow (the portrait),
+                           CommandWindow, MoneyDisplay, PowerWindow, GeneralsExp, ButtonGeneral,
+                           ButtonLarge (minimise), ButtonOptions, ButtonIdleWorker, ButtonPlaceBeacon,
+                           PopupCommunicator and WinUAttack (the under-attack light: "disabled" while
+                           it is lit, which is how the bar blinks it)
   All in the page's pixels, a pixel of an 800x600 screen.  Without this page the plates draw.
 
   Edit the copy under Run/Window/Html and the next match reads it.
@@ -25,7 +36,7 @@
 <title>Command bar</title>
 <style>
   html, body { margin: 0; padding: 0; }
-  body { background-color: #3b4a36; }
+  body { background-color: #3b4a36; font-size: 8px; color: #dfe5ea; }
   .hidden { display: none; }
   .piece { position: absolute; }
 
@@ -39,6 +50,11 @@
   .gla .panel { background-color: rgba(21, 18, 8, 0.94); border-top-color: #cbbf82; border-left-color: #a99d62; }
   .gla .rail { background: linear-gradient(to bottom, #8f8249, #48401e); }
 
+  /* the centre hugs the command grid and its side buttons, and the purse above it the money and the
+     power bar: what the old plate covered round them is battlefield, and takes clicks as one */
+  .centre { margin: -10px 0 0 -6px; padding: 10px 6px 0 6px; }
+  .purse { margin: -10px 0 0 -8px; padding: 10px 8px 6px 8px; }
+
   /* a bezel: a window set into the panel, four pixels of steel round a black lip */
   .bezel { margin: -5px 0 0 -5px; border: 4px solid #4b535e; border-top-color: #2a3036; border-left-color: #2a3036;
            border-bottom-color: #8a949f; border-right-color: #6f7782; }
@@ -47,25 +63,40 @@
   .gla .bezel { border-color: #625a31; border-top-color: #302b15; border-left-color: #302b15; border-bottom-color: #a99d62; border-right-color: #867a45; }
   .rivet { position: absolute; width: 3px; height: 3px; background-color: #aab4bf; border-bottom: 1px solid #0c1114; }
 
-  /* the command grid sits in a shallow well */
   .well { margin: -3px 0 0 -3px; border: 2px solid #0c1114; border-bottom-color: #4b535e; border-right-color: #4b535e;
           background-color: rgba(0, 0, 0, 0.35); }
-
-  /* the money's plaque and the power bar's groove */
-  .plaque { margin: -2px 0 0 -8px; padding: 0 6px; border: 1px solid #0c1114; border-top-color: #000000; border-bottom-color: #6f7782;
-            background-color: #05080a; }
+  .plaque { margin: -2px 0 0 -8px; padding: 0 6px; border: 1px solid #0c1114; border-bottom-color: #6f7782; background-color: #05080a; }
   .groove { margin: -2px 0 0 -2px; border: 1px solid #000000; border-bottom-color: #6f7782; background-color: #020405; }
+
+  /* the bar's own buttons: a steel cap with its name on it, pressed in when pushed */
+  .button { text-align: center; color: #e8eef2; font-weight: bold;
+            background: linear-gradient(to bottom, #7d8691, #3f4650); border: 1px solid #0c1114;
+            border-top-color: #c3ccd3; border-left-color: #aab4bf; }
+  .china .button { background: linear-gradient(to bottom, #a44734, #4c1b13); border-top-color: #e8a28a; border-left-color: #d98a72; }
+  .gla .button { background: linear-gradient(to bottom, #978a50, #48401e); border-top-color: #ddd29a; border-left-color: #cbbf82; }
+  .button.hilite { color: #ffffff; border-color: #e8d27a; }
+  .button.pushed { background: linear-gradient(to bottom, #2a3036, #4b535e); border-top-color: #0c1114; border-left-color: #0c1114; }
+  .button.disabled { color: #6f7782; }
+  .button .cap { position: absolute; left: 0; right: 0; top: 50%; margin-top: -5px; line-height: 10px; }
+  .button.promotion.ready.lit { background: linear-gradient(to bottom, #f6e08a, #a4832a); color: #1a1406; border-color: #fff4b8; }
+
+  /* the under-attack light: a tab on the left panel's top left edge, red while the bar blinks it */
+  .alert { position: absolute; left: 4px; top: -15px; height: 13px; line-height: 13px; padding: 0 6px; font-size: 7px; font-weight: bold;
+           color: #5a2a24; background-color: rgba(20, 8, 6, 0.9); border: 1px solid #4a1a14; border-bottom: 0; }
+  .alert.disabled { color: #ffffff; background: linear-gradient(to bottom, #ff6a50, #b0200f); border-color: #ffb0a0; }
 </style>
 </head>
 <body>
 <div class="{{side}}">
 
-  <!-- the three plates -->
-  <div class="piece panel {{panel0.shown}}" style="left: {{panel0.x}}px; top: {{panel0.y}}px; width: {{panel0.w}}px; height: {{panel0.h}}px"><div class="rail"></div></div>
-  <div class="piece panel {{panel1.shown}}" style="left: {{panel1.x}}px; top: {{panel1.y}}px; width: {{panel1.w}}px; height: {{panel1.h}}px"><div class="rail"></div></div>
-  <div class="piece panel {{panel2.shown}}" style="left: {{panel2.x}}px; top: {{panel2.y}}px; width: {{panel2.w}}px; height: {{panel2.h}}px"><div class="rail"></div></div>
+  <div class="piece panel solid {{panel0.shown}}" style="left: {{panel0.x}}px; top: {{panel0.y}}px; width: {{panel0.w}}px; height: {{panel0.h}}px">
+    <div class="rail"></div>
+    <div class="alert {{WinUAttack.state}}">{{text:GUI:BarUnderAttack}}</div>
+  </div>
+  <div class="piece panel solid purse {{purse.shown}}" style="left: {{purse.x}}px; top: {{purse.y}}px; width: {{purse.w}}px; height: {{purse.h}}px"><div class="rail"></div></div>
+  <div class="piece panel solid centre {{centre.shown}}" style="left: {{centre.x}}px; top: {{centre.y}}px; width: {{centre.w}}px; height: {{centre.h}}px"><div class="rail"></div></div>
+  <div class="piece panel solid {{panel2.shown}}" style="left: {{panel2.x}}px; top: {{panel2.y}}px; width: {{panel2.w}}px; height: {{panel2.h}}px"><div class="rail"></div></div>
 
-  <!-- the radar, set in a bezel with a rivet at each corner -->
   <div class="piece bezel {{LeftHUD.shown}}" style="left: {{LeftHUD.x}}px; top: {{LeftHUD.y}}px; width: {{LeftHUD.w}}px; height: {{LeftHUD.h}}px">
     <div class="lip"></div>
     <div class="rivet" style="left: -4px; top: -4px"></div>
@@ -73,8 +104,6 @@
     <div class="rivet" style="left: -4px; bottom: -4px"></div>
     <div class="rivet" style="right: -4px; bottom: -4px"></div>
   </div>
-
-  <!-- the portrait's box, the same bezel -->
   <div class="piece bezel {{RightHUD.shown}}" style="left: {{RightHUD.x}}px; top: {{RightHUD.y}}px; width: {{RightHUD.w}}px; height: {{RightHUD.h}}px">
     <div class="lip"></div>
     <div class="rivet" style="left: -4px; top: -4px"></div>
@@ -87,6 +116,13 @@
   <div class="piece plaque {{MoneyDisplay.shown}}" style="left: {{MoneyDisplay.x}}px; top: {{MoneyDisplay.y}}px; width: {{MoneyDisplay.w}}px; height: {{MoneyDisplay.h}}px"></div>
   <div class="piece groove {{PowerWindow.shown}}" style="left: {{PowerWindow.x}}px; top: {{PowerWindow.y}}px; width: {{PowerWindow.w}}px; height: {{PowerWindow.h}}px"></div>
   <div class="piece groove {{GeneralsExp.shown}}" style="left: {{GeneralsExp.x}}px; top: {{GeneralsExp.y}}px; width: {{GeneralsExp.w}}px; height: {{GeneralsExp.h}}px"></div>
+
+  <div class="piece button {{ButtonOptions.shown}} {{ButtonOptions.state}}" style="left: {{ButtonOptions.x}}px; top: {{ButtonOptions.y}}px; width: {{ButtonOptions.w}}px; height: {{ButtonOptions.h}}px"><div class="cap">{{text:GUI:BarMenu}}</div></div>
+  <div class="piece button {{ButtonIdleWorker.shown}} {{ButtonIdleWorker.state}}" style="left: {{ButtonIdleWorker.x}}px; top: {{ButtonIdleWorker.y}}px; width: {{ButtonIdleWorker.w}}px; height: {{ButtonIdleWorker.h}}px"><div class="cap">{{text:GUI:BarIdleWorker}}</div></div>
+  <div class="piece button {{ButtonPlaceBeacon.shown}} {{ButtonPlaceBeacon.state}}" style="left: {{ButtonPlaceBeacon.x}}px; top: {{ButtonPlaceBeacon.y}}px; width: {{ButtonPlaceBeacon.w}}px; height: {{ButtonPlaceBeacon.h}}px"><div class="cap">{{text:GUI:BarBeacon}}</div></div>
+  <div class="piece button {{PopupCommunicator.shown}} {{PopupCommunicator.state}}" style="left: {{PopupCommunicator.x}}px; top: {{PopupCommunicator.y}}px; width: {{PopupCommunicator.w}}px; height: {{PopupCommunicator.h}}px"><div class="cap">{{text:GUI:BarChat}}</div></div>
+  <div class="piece button promotion {{promotion}} {{blink}} {{ButtonGeneral.shown}} {{ButtonGeneral.state}}" style="left: {{ButtonGeneral.x}}px; top: {{ButtonGeneral.y}}px; width: {{ButtonGeneral.w}}px; height: {{ButtonGeneral.h}}px"><div class="cap">{{text:GUI:BarGeneral}}</div></div>
+  <div class="piece button {{ButtonLarge.shown}} {{ButtonLarge.state}}" style="left: {{ButtonLarge.x}}px; top: {{ButtonLarge.y}}px; width: {{ButtonLarge.w}}px; height: {{ButtonLarge.h}}px"><div class="cap">&#9660;</div></div>
 
 </div>
 </body>

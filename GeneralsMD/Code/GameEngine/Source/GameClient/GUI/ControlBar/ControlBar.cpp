@@ -1384,6 +1384,7 @@ ControlBar::ControlBar( void )
 	m_radarAttackGlowOn = FALSE;
 	m_remainingRadarAttackGlowFrames = 0;
 	m_radarAttackGlowWindow = NULL;
+	m_pageSolidsActive = FALSE;
 
 #if defined( _INTERNAL ) || defined( _DEBUG )
 	m_lastFrameMarkedDirty = 0;
@@ -1911,6 +1912,16 @@ static const std::vector<UnsignedByte> &plateMask( const ControlBarPlate *plate 
 }
 
 //-------------------------------------------------------------------------------------------------
+void ControlBar::setPageSolids( const std::vector< IRegion2D > *solids )
+{
+	m_pageSolidsActive = solids != NULL;
+	if( solids )
+		m_pageSolids = *solids;
+	else
+		m_pageSolids.clear();
+}
+
+//-------------------------------------------------------------------------------------------------
 Bool ControlBar::letsClickThrough( GameWindow *window, Int x, Int y )
 {
 	GameWindow *frame = window->winGetParent();
@@ -1922,6 +1933,20 @@ Bool ControlBar::letsClickThrough( GameWindow *window, Int x, Int y )
 	const char *shortName = shortWindowName( window );
 	if( shortName[ 0 ] != 0 && strcmp( shortName, "CenterBackground" ) != 0 )
 		return FALSE;
+
+	// the CSS page is what is drawn, so what it drew solid is what is solid.  Asked before the
+	// children, because a see-through child the page does not draw - the observer's info window
+	// spans the whole centre - would otherwise keep a click on bare battlefield
+	if( m_pageSolidsActive )
+	{
+		for( size_t solid = 0; solid < m_pageSolids.size(); solid++ )
+		{
+			const IRegion2D &rect = m_pageSolids[ solid ];
+			if( x >= rect.lo.x && y >= rect.lo.y && x < rect.hi.x && y < rect.hi.y )
+				return FALSE;
+		}
+		return TRUE;
+	}
 
 	// a command button or anything else inside the pane is its own window and keeps its click
 	if( window->winPointInChild( x, y, TRUE ) != window )
