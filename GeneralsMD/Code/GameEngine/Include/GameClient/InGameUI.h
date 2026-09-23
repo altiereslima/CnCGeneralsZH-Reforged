@@ -1279,7 +1279,9 @@ protected:
 	UnsignedInt									m_hudLastSampleMs;			///< wall clock of that sample
 	Real												m_hudFps;								///< smoothed render rate
 	UnsignedInt									m_hudLastSampleLogicFrame;	///< logic frame at that same sample
-	Real												m_hudLogicHz;						///< logic frames actually simulated per real second
+	Real												m_hudLogicHz;						///< logic frames actually simulated per real second, smoothed
+	Int													m_hudFpsShown;					///< m_hudFps as written on screen, moved only a full step at a time
+	Int													m_hudLogicHzShown;			///< m_hudLogicHz the same way
 	UnsignedInt									m_hudRealClockBaseMs;		///< wall clock the two elapsed-time readouts were aligned at
 	UnsignedInt									m_hudLastDrawMs;				///< wall clock of the previous overlay draw, so a pause can be taken back out of it
 	Int													m_hudOverlayBottom;			///< bottom of everything drawn in the top right corner, so the superweapon timers start under it
