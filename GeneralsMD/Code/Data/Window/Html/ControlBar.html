@@ -21,8 +21,8 @@
                            moving with the bar when it slides or minimises; .w and .h are 0 and
                            {{panelN.shown}} is "hidden" when a minimised bar has stood it down
     {{left.x}} .y .w .h    the box round the radar, so the left panel is only as big as its bezel
-    {{centre.x}} .y .w .h  the box round the command grid; {{centre.shown}} as above.  The money's and
-                           the power bar's steps over it are drawn from MoneyDisplay and PowerWindow
+    {{centre.x}} .y .w .h  the box round the command grid and the power bar over it; {{centre.shown}}
+                           as above.  The money's step over it is drawn from MoneyDisplay
     {{right.x}} .y .w .h   the box round the portrait and the experience bar.  The promotion and
                            minimise buttons are moved to sit over its top right corner
     {{Name.x}} .y .w .h    the rectangle of the bar's window Name, {{Name.shown}} "shown" or "hidden"
@@ -63,12 +63,10 @@
   .right { margin: -22px 0 0 -8px; padding: 22px 8px 8px 8px; }
   .centre { margin: -10px 0 0 -6px; padding: 10px 6px 6px 6px; }
 
-  /* over the centre, two steps, each narrower than the one under it: the power bar's, then on top
-     the money's.  Each hangs down behind the step under it, which is drawn after it and covers the
-     join, so none needs to know where the next one starts */
+  /* over the centre, a narrower step for the money.  It hangs down behind the centre, which is drawn
+     after it and covers the join, so it needs no idea where the centre starts */
   .step { padding-bottom: 30px; }
   .step .rail { height: 3px; }
-  .powerstep { margin: -8px 0 0 -14px; padding-top: 8px; padding-left: 14px; padding-right: 14px; }
   .moneystep { margin: -5px 0 0 -8px; padding-top: 5px; padding-left: 8px; padding-right: 8px; }
 
   /* a bezel: a window set into the panel, four pixels of steel round a black lip */
@@ -119,7 +117,6 @@
     <div class="alert {{WinUAttack.state}}">{{text:GUI:BarUnderAttack}}</div>
   </div>
   <div class="piece panel solid step moneystep {{centre.shown}} {{MoneyDisplay.shown}}" style="left: {{MoneyDisplay.x}}px; top: {{MoneyDisplay.y}}px; width: {{MoneyDisplay.w}}px; height: {{MoneyDisplay.h}}px"><div class="rail"></div></div>
-  <div class="piece panel solid step powerstep {{centre.shown}} {{PowerWindow.shown}}" style="left: {{PowerWindow.x}}px; top: {{PowerWindow.y}}px; width: {{PowerWindow.w}}px; height: {{PowerWindow.h}}px"><div class="rail"></div></div>
   <div class="piece panel solid centre {{centre.shown}}" style="left: {{centre.x}}px; top: {{centre.y}}px; width: {{centre.w}}px; height: {{centre.h}}px">
     <div class="rail"></div>
     <div class="worker button {{ButtonIdleWorker.state}}" data-click="press:ButtonIdleWorker"><div class="cap">{{text:GUI:BarIdleWorker}}</div></div>
