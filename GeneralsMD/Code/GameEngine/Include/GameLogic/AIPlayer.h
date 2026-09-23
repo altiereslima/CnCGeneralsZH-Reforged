@@ -433,6 +433,8 @@ protected:
 	Int				m_playerStartNdx[ MAX_PLAYER_COUNT ];	///< the start position each player is known to be at; -1 == not found yet
 	UnsignedInt m_startIntelFrame;			///< frame the above was last brought up to date
 	ObjectID	m_capturerID;						///< the unit currently out taking tech buildings for us
+	ObjectID	m_ferryID;							///< the helicopter flying the capturer to its target, INVALID_ID for none
+	std::vector<ObjectID>	m_droppedRiders;	///< infantry a helicopter is putting down at a fight, sent on once out
 	Int				m_captureTimer;					///< frames until the next look for something to capture
 	ObjectID	m_hijackerID;						///< the thief currently out after an enemy vehicle
 	Int				m_hijackTimer;					///< frames until the next look for a vehicle to take
@@ -509,6 +511,7 @@ protected:
 	/** Hard's fighting units, one at a time: step back from what they outrange, climb onto ground
 		* that lengthens their guns, and take a hurt unit out of ground it cannot win on. */
 	virtual void doTactics(void);
+	void doTransports(void);	///< helicopters put riders who cannot shoot out down at the fight
 	Bool measuringWithoutTactics(void) const;	///< -notactics has this slot fight the old way
 	void tacticsFor(Object *obj);
 	struct TacticalStep

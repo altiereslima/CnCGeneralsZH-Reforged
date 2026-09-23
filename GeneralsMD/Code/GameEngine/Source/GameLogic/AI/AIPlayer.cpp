@@ -187,6 +187,11 @@ static const Int SCOUT_CHECK_RATE = 2 * LOGICFRAMES_PER_SECOND;
 	* this is a check, not a re-path. */
 static const Int CAPTURE_CHECK_RATE = 5 * LOGICFRAMES_PER_SECOND;
 
+/** A capture further than this from the capturer goes by helicopter when one is waiting, and the
+	* helicopter puts it down this far short of the building. */
+static const Real FERRY_MIN_WALK = 900.0f;
+static const Real FERRY_DROP_STANDOFF = 60.0f;
+
 /** How often the AI looks for a vehicle to take.  Same rhythm as the capture check, and the target
 	* has to be in sight, so a faster clock would only re-order what is already walking. */
 static const Int HIJACK_CHECK_RATE = 5 * LOGICFRAMES_PER_SECOND;
@@ -303,6 +308,7 @@ m_role(AIROLE_AGGRESSIVE)
 	}
 	m_startIntelFrame = 0;
 	m_capturerID = INVALID_ID;
+	m_ferryID = INVALID_ID;
 	m_captureTimer = 1;
 	m_hijackerID = INVALID_ID;
 	m_hijackTimer = 1;
@@ -4243,6 +4249,7 @@ void AIPlayer::update( void )
 	AI_PHASE( AIP_ECONOMY, doSuperweapons() );			// The big guns, as soon as they can be bought.
 	AI_PHASE( AIP_WAVE,    doWaves() );							// Send the parked attack teams out together.
 	AI_PHASE( AIP_TACTICS, doTactics() );						// Fight each unit from where it is strongest.
+	AI_PHASE( AIP_TACTICS, doTransports() );				// Put the helicopters' riders down at the fight.
 
 #ifdef DEBUG_LOGGING
 	Int64 playerEnd;
@@ -5547,6 +5554,7 @@ struct HomeAirSearch
 	Coord3D home;
 	Real reachSqr;
 	AIGroup *wave;
+	ObjectID ferry;		///< the helicopter carrying the capturer, which stays on that job
 };
 
 /** Somebody of this player's is on the way to climb into this helicopter. */
@@ -5567,7 +5575,7 @@ static void findBoarder( Object *obj, void *userData )
 static void addHomeHelicopter( Object *obj, void *userData )
 {
 	HomeAirSearch *search = (HomeAirSearch *)userData;
-	if( !isHelicopter( obj ) || obj->isContained() || obj->getGroup() == search->wave )
+	if( !isHelicopter( obj ) || obj->isContained() || obj->getGroup() == search->wave || obj->getID() == search->ferry )
 		return;
 	// on guard or doing nothing, wherever the guard team put it; one already out on an attack keeps going
 	const StateID state = obj->getAI()->getCurrentStateID();
@@ -5755,6 +5763,7 @@ void AIPlayer::doWaves( void )
 	air.home = m_baseCenter;
 	air.reachSqr = sqr( 2.0f * m_baseRadius );
 	air.wave = wave;
+	air.ferry = m_ferryID;
 	m_player->iterateObjects( addHomeHelicopter, &air );
 	if( wave->isEmpty() )
 	{
@@ -5798,22 +5807,24 @@ void AIPlayer::doWaves( void )
 }
 
 //----------------------------------------------------------------------------------------------------------
-/** Fill the waiting helicopters with the parked wave's infantry, while the wave gathers.  A bunkered
-	* Helix and the Combat Chinook let their riders shoot out, and the scripts flew them empty for the
-	* whole match.  An infantryman boards the nearest one with a seat he can shoot from, so it leaves with
-	* the wave carrying a squad; one already on its way to a seat is no longer idle and is left alone. */
+/** Fill the waiting helicopters with the parked wave's infantry, while the wave gathers.  The scripts
+	* flew them empty for the whole match.  An infantryman boards the nearest one with a free seat, so it
+	* leaves with the wave carrying a squad: one that can shoot out of a bunkered Helix or a Combat
+	* Chinook fights from it, and one that cannot is put down where the fighting starts (doTransports).
+	* One already on its way to a seat is no longer idle and is left alone. */
 //----------------------------------------------------------------------------------------------------------
 struct GunshipList
 {
 	Coord3D home;
 	Real reachSqr;
+	ObjectID ferry;		///< the capturer's helicopter, not a seat for the wave
 	std::vector<Object *> gunships;
 };
 
 static void findGunshipAtHome( Object *obj, void *userData )
 {
 	GunshipList *list = (GunshipList *)userData;
-	if( !isTransportWithRoom( obj ) || obj->isContained() )
+	if( !isTransportWithRoom( obj ) || obj->isContained() || obj->getID() == list->ferry )
 		return;
 	const StateID state = obj->getAI()->getCurrentStateID();
 	const Bool waiting = state == AI_IDLE || state == AI_GUARD || state == AI_GUARD_RETALIATE;
@@ -5826,6 +5837,7 @@ void AIPlayer::loadGunships( void )
 	GunshipList list;
 	list.home = m_baseCenter;
 	list.reachSqr = sqr( 2.0f * m_baseRadius );
+	list.ferry = m_ferryID;
 	m_player->iterateObjects( findGunshipAtHome, &list );
 	if( list.gunships.empty() )
 		return;
@@ -5863,9 +5875,13 @@ void AIPlayer::loadGunships( void )
 		for( size_t g = 0; g < list.gunships.size(); ++g )
 		{
 			const Object *gunship = list.gunships[ g ];
-			if( seats[ g ] <= 0 || !gunship->getContain()->isValidContainerFor( rider, TRUE ) ||
-					!gunship->getContain()->isPassengerAllowedToFire( rider->getID() ) )
+			// a rider who cannot shoot out rides as cargo: doTransports puts him down where the fight
+			// starts.  Seating only those who could shoot out left every unbunkered Helix empty - 43
+			// Helixes left with waves over two Hard China matches, all of them with no one aboard
+			if( seats[ g ] <= 0 || !gunship->getContain()->isValidContainerFor( rider, TRUE ) )
 				continue;
+			if( !m_influence.isBuilt() && !gunship->getContain()->isPassengerAllowedToFire( rider->getID() ) )
+				continue;		// nothing would put cargo down without the tactics: gunship seats only
 			const Real distSqr = sqr( gunship->getPosition()->x - rider->getPosition()->x ) + sqr( gunship->getPosition()->y - rider->getPosition()->y );
 			if( nearest < 0 || distSqr < nearestSqr )
 			{
@@ -5880,6 +5896,12 @@ void AIPlayer::loadGunships( void )
 			m_player->getPlayerIndex(), rider->getTemplate()->getName().str(), list.gunships[ nearest ]->getTemplate()->getName().str(),
 			list.gunships[ nearest ]->getID(), list.gunships[ nearest ]->getContain()->getContainCount(), list.gunships[ nearest ]->getContain()->getContainMax()));
 		rider->getAI()->aiEnter( list.gunships[ nearest ], CMD_FROM_AI );
+		// a helicopter on guard stays in the air and nobody gets in: the same Black Lotus was sent to one
+		// Helix three times over two minutes and never boarded, while the capturer boarded an idle one
+		// first time.  Stood down, it lands for its riders, and the wave takes idle helicopters anyway
+		AIUpdateInterface *shipAI = list.gunships[ nearest ]->getAI();
+		if( shipAI->getCurrentStateID() != AI_IDLE )
+			shipAI->aiIdle( CMD_FROM_AI );
 	}
 }
 
@@ -6472,6 +6494,100 @@ void AIPlayer::doTactics( void )
 }
 
 //----------------------------------------------------------------------------------------------------------
+/** How often the loaded helicopters are looked at, and how far back from the fight they may land. */
+static const Int TRANSPORT_CHECK_RATE = LOGICFRAMES_PER_SECOND / 2;
+static const Int DROP_BACKOFF_CELLS = 8;
+
+struct LoadedTransports
+{
+	ObjectID ferry;
+	std::vector<Object *> ships;
+};
+
+static void findLoadedTransport( Object *obj, void *userData )
+{
+	LoadedTransports *found = (LoadedTransports *)userData;
+	const ContainModuleInterface *contain = obj->getContain();
+	if( !isHelicopter( obj ) || obj->isContained() || obj->getID() == found->ferry || contain == NULL || contain->getContainCount() == 0 )
+		return;
+	found->ships.push_back( obj );
+}
+
+/** A helicopter that went with a wave carrying riders who cannot shoot out of it puts them down at the
+	* edge of the fight: the first cell on its way home that nothing known covers, from the moment the
+	* influence map says it is over ground the enemy's guns reach.  Once they are out and standing they
+	* go on towards the enemy the wave was sent at. */
+void AIPlayer::doTransports( void )
+{
+	if( !m_influence.isBuilt() )
+		return;		// Hard with its tactics running: nothing else loads the wave's infantry
+	if( (TheGameLogic->getFrame() + computeUpdatePhase( m_player->getPlayerIndex(), TRANSPORT_CHECK_RATE )) % TRANSPORT_CHECK_RATE != 0 )
+		return;
+
+	Coord3D enemyPos;
+	Player *enemy = getAiEnemy();
+	const Bool haveEnemy = enemy && enemyStartGuess( enemy->getPlayerIndex(), &enemyPos );
+	for( size_t i = 0; i < m_droppedRiders.size(); )
+	{
+		Object *rider = TheGameLogic->findObjectByID( m_droppedRiders[ i ] );
+		if( rider && !rider->isEffectivelyDead() && (rider->isContained() || rider->getAI() == NULL || !rider->getAI()->isIdle()) )
+		{
+			++i;
+			continue;
+		}
+		if( rider && !rider->isEffectivelyDead() && haveEnemy )
+			rider->getAI()->aiAttackMoveToPosition( &enemyPos, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+		m_droppedRiders[ i ] = m_droppedRiders.back();
+		m_droppedRiders.pop_back();
+	}
+
+	LoadedTransports found;
+	found.ferry = m_ferryID;
+	m_player->iterateObjects( findLoadedTransport, &found );
+	for( size_t s = 0; s < found.ships.size(); ++s )
+	{
+		Object *ship = found.ships[ s ];
+		const Coord3D *pos = ship->getPosition();
+		if( m_influence.enemyAt( pos->x, pos->y ) <= 0.0f )
+			continue;		// not at the fight yet
+
+		ContainModuleInterface *contain = ship->getContain();
+		std::vector<ObjectID> cargo;
+		Bool dropping = FALSE;
+		const ContainedItemsList *items = contain->getContainedItemsList();
+		for( ContainedItemsList::const_iterator it = items->begin(); it != items->end(); ++it )
+		{
+			const Object *rider = *it;
+			if( !rider->isKindOf( KINDOF_INFANTRY ) || contain->isPassengerAllowedToFire( rider->getID() ) )
+				continue;		// a gunship's riders fight from it; the Helix's own gun mount is not cargo
+			if( std::find( m_droppedRiders.begin(), m_droppedRiders.end(), rider->getID() ) != m_droppedRiders.end() )
+				dropping = TRUE;
+			cargo.push_back( rider->getID() );
+		}
+		if( cargo.empty() || dropping )
+			continue;
+
+		Coord3D drop = *pos;
+		const Real homeX = m_baseCenter.x - pos->x;
+		const Real homeY = m_baseCenter.y - pos->y;
+		const Real homeDist = sqrt( homeX * homeX + homeY * homeY );
+		for( Int back = 1; back <= DROP_BACKOFF_CELLS && homeDist > 1.0f; ++back )
+		{
+			drop.x = pos->x + homeX / homeDist * back * INFLUENCE_CELL_SIZE;
+			drop.y = pos->y + homeY / homeDist * back * INFLUENCE_CELL_SIZE;
+			if( m_influence.enemyAt( drop.x, drop.y ) <= 0.0f )
+				break;
+		}
+		drop.z = TheTerrainLogic->getGroundHeight( drop.x, drop.y );
+		DEBUG_LOG(("AI TRANSPORT frame %d player %d drops %d riders from '%s' at (%.0f,%.0f)\n", TheGameLogic->getFrame(),
+			m_player->getPlayerIndex(), (Int)cargo.size(), ship->getTemplate()->getName().str(), drop.x, drop.y));
+		// an order rather than an AI's aside, or it is laid under the wave's path and never happens
+		ship->getAI()->aiMoveToAndEvacuate( &drop, CMD_FROM_SCRIPT );
+		m_droppedRiders.insert( m_droppedRiders.end(), cargo.begin(), cargo.end() );
+	}
+}
+
+//----------------------------------------------------------------------------------------------------------
 void AIPlayer::tacticsFor( Object *obj )
 {
 	// armed, not "able to attack" this frame: that reads false while a clip reloads, which is exactly
@@ -6482,8 +6598,8 @@ void AIPlayer::tacticsFor( Object *obj )
 			obj->isKindOf( KINDOF_DOZER ) || obj->isKindOf( KINDOF_HARVESTER ) || obj->isKindOf( KINDOF_PROJECTILE ) )
 		return;
 	AIUpdateInterface *ai = obj->getAI();
-	if( ai == NULL || ai->hasTunnelTrip() )
-		return;
+	if( ai == NULL || ai->hasTunnelTrip() || ai->getCurLocomotor() == NULL )
+		return;		// a gun that cannot move (a Helix's gattling mount) has no step to take
 	// base defence stays where it was put, and the scouts, the capturer and the hijacker have their jobs
 	Team *team = obj->getTeam();
 	if( team == NULL || obj->isKindOf( KINDOF_MONEY_HACKER ) )
@@ -6621,7 +6737,10 @@ void AIPlayer::tacticsFor( Object *obj )
 				continue;
 			const Real reach = enemyRange + Weapon_elevationRangeBonus( enemyRange, firingHeight( enemy ) - pos->z );
 			const Real distSqr = sqr( enemy->getPosition()->x - pos->x ) + sqr( enemy->getPosition()->y - pos->y );
-			if( nearestArmed == NULL || distSqr < nearestArmedDistSqr )
+			// and only one it can shoot: without this a Battlemaster "turned on" every Helix overhead,
+			// 410 times in two matches, and drove after aircraft its gun cannot reach
+			if( (nearestArmed == NULL || distSqr < nearestArmedDistSqr) &&
+					obj->getAbleToAttackSpecificObject( ATTACK_NEW_TARGET, enemy, CMD_FROM_AI ) == ATTACKRESULT_POSSIBLE )
 			{
 				nearestArmed = enemy;
 				nearestArmedDistSqr = distSqr;
@@ -6633,7 +6752,7 @@ void AIPlayer::tacticsFor( Object *obj )
 			// running from something faster only means not shooting at it; a gun that cannot move is
 			// always worth standing off from
 			AIUpdateInterface *enemyAI = enemy->getAI();
-			const Bool enemyMoves = enemyAI && !enemy->isKindOf( KINDOF_IMMOBILE ) && !enemy->isKindOf( KINDOF_STRUCTURE );
+			const Bool enemyMoves = enemyAI && enemyAI->getCurLocomotor() && !enemy->isKindOf( KINDOF_IMMOBILE ) && !enemy->isKindOf( KINDOF_STRUCTURE );
 			const Real enemySpeed = enemyMoves ? enemyAI->getCurLocomotorSpeed() : 0.0f;
 			if( enemySpeed > ai->getCurLocomotorSpeed() )
 				continue;
@@ -7429,9 +7548,32 @@ void AIPlayer::doCapture( void )
 		return;
 	}
 
+	// the ride out: a capturer sitting in its helicopter is flown to the building and put down beside it
+	if( capturer->isContained() )
+	{
+		Object *ship = capturer->getContainedBy();
+		if( ship && ship->getID() == m_ferryID && ship->getAI() && ship->getAI()->isIdle() && target )
+		{
+			Coord3D drop = *target->getPosition();
+			const Real dx = ship->getPosition()->x - drop.x;
+			const Real dy = ship->getPosition()->y - drop.y;
+			const Real length = sqrt( dx * dx + dy * dy );
+			if( length > FERRY_DROP_STANDOFF )
+			{
+				drop.x += dx / length * FERRY_DROP_STANDOFF;
+				drop.y += dy / length * FERRY_DROP_STANDOFF;
+			}
+			drop.z = TheTerrainLogic->getGroundHeight( drop.x, drop.y );
+			DEBUG_LOG(("AI player %d flies its capturer to a '%s'\n", m_player->getPlayerIndex(), target->getTemplate()->getName().str()));
+			ship->getAI()->aiMoveToAndEvacuate( &drop, CMD_FROM_AI );
+		}
+		return;
+	}
+
 	AIUpdateInterface *ai = capturer->getAI();
 	if( ai == NULL || !ai->isIdle() )
-		return;			// still on its way
+		return;			// still on its way, to the building or to its seat
+	m_ferryID = INVALID_ID;		// standing and out, so the helicopter is free for the waves again
 
 	//
 	// A capture in progress reads as idle - the ability parks the unit's AI while it works - so
@@ -7466,7 +7608,41 @@ void AIPlayer::doCapture( void )
 	}
 	else
 	{
-		ai->aiMoveToObject( target, CMD_FROM_AI );
+		// a long walk goes by air when a helicopter with a seat is waiting at home: the rifleman who
+		// walked across the map to a derrick was the capture a player saw take minutes
+		Object *ship = NULL;
+		const Real walkSqr = sqr( target->getPosition()->x - from.x ) + sqr( target->getPosition()->y - from.y );
+		if( walkSqr > sqr( FERRY_MIN_WALK ) && !measuringWithoutTactics() )
+		{
+			GunshipList list;
+			list.home = m_baseCenter;
+			list.reachSqr = sqr( 2.0f * m_baseRadius );
+			list.ferry = INVALID_ID;
+			m_player->iterateObjects( findGunshipAtHome, &list );
+			Real nearestSqr = 0.0f;
+			for( size_t g = 0; g < list.gunships.size(); ++g )
+			{
+				Object *candidate = list.gunships[ g ];
+				if( candidate->getAI() == NULL || !candidate->getAI()->isIdle() ||
+						!candidate->getContain()->isValidContainerFor( capturer, TRUE ) )
+					continue;
+				const Real distSqr = sqr( candidate->getPosition()->x - from.x ) + sqr( candidate->getPosition()->y - from.y );
+				if( ship == NULL || distSqr < nearestSqr )
+				{
+					ship = candidate;
+					nearestSqr = distSqr;
+				}
+			}
+		}
+		if( ship )
+		{
+			DEBUG_LOG(("AI player %d boards its capturer onto '%s' %d for a '%s'\n", m_player->getPlayerIndex(),
+				ship->getTemplate()->getName().str(), ship->getID(), target->getTemplate()->getName().str()));
+			m_ferryID = ship->getID();
+			ai->aiEnter( ship, CMD_FROM_AI );
+		}
+		else
+			ai->aiMoveToObject( target, CMD_FROM_AI );
 	}
 }
 
@@ -8064,7 +8240,7 @@ void AIPlayer::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 9;		// 2: scout  3: rung and role  4: scouting stamps  5: the capturer  6: parked waves  7: superweapon aims  8: the hijacker  9: tactical steps
+	XferVersion currentVersion = 10;		// 2: scout  3: rung and role  4: scouting stamps  5: the capturer  6: parked waves  7: superweapon aims  8: the hijacker  9: tactical steps  10: the ferry and dropped riders
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -8304,6 +8480,17 @@ void AIPlayer::xfer( Xfer *xfer )
 			xfer->xferInt( &step.savedAttitude );
 			xfer->xferUnsignedInt( &step.lastKiteFrame );
 		}
+	}
+	// the capturer's helicopter, and the riders a helicopter is putting down at a fight
+	if( version >= 10 )
+	{
+		xfer->xferObjectID( &m_ferryID );
+		UnsignedShort dropped = (UnsignedShort)m_droppedRiders.size();
+		xfer->xferUnsignedShort( &dropped );
+		if( xfer->getXferMode() == XFER_LOAD )
+			m_droppedRiders.resize( dropped );
+		for( UnsignedShort i = 0; i < dropped; ++i )
+			xfer->xferObjectID( &m_droppedRiders[ i ] );
 	}
 
 	// the ladder rung and the role, which are rolled once and must come back the same way
