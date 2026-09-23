@@ -4313,6 +4313,12 @@ void GameLogic::update( void )
 	#endif
 	}
 
+	/* A start held back by a movie has set the game mode and started the recorder, but the match
+		 does not exist yet: TheGameInfo is still NULL and the CRC below reads it.  A skirmish asked for
+		 over -control while the EA logo was still playing faulted there on its first frame. */
+	if (isIntroMoviePlaying())
+		return;
+
 	// send the current time to the GameClient
 	DEBUG_ASSERTCRASH(TheGameLogic == this, ("hmm, TheGameLogic is not right"));
 	UnsignedInt now = TheGameLogic->getFrame();

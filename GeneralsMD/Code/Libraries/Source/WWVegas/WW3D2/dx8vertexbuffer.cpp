@@ -510,36 +510,51 @@ void DX8VertexBufferClass::Create_Vertex_Buffer(UsageType usage)
 		return;
 	}
 
-	WWDEBUG_SAY(("Vertex buffer creation failed, trying to release assets...\n"));
+	//	Not for a dynamic buffer.  Those are asked for in the middle of a frame, from inside
+	//	DX8MeshRendererClass::Flush, and _Invalidate_Mesh_Cache deletes the very container that is
+	//	rendering and the list Flush is walking.  Evicting managed memory does nothing for a
+	//	D3DPOOL_DEFAULT buffer on a device that is refusing anyway.
+	if (!(usage&USAGE_DYNAMIC)) {
+		WWDEBUG_SAY(("Vertex buffer creation failed, trying to release assets...\n"));
 
-	// Vertex buffer creation failed, so try releasing least used textures and flushing the mesh cache.
+		// Vertex buffer creation failed, so try releasing least used textures and flushing the mesh cache.
 
-	// Free all textures that haven't been used in the last 5 seconds
-	TextureClass::Invalidate_Old_Unused_Textures(5000);
+		// Free all textures that haven't been used in the last 5 seconds
+		TextureClass::Invalidate_Old_Unused_Textures(5000);
 
-	// Invalidate the mesh cache
-	WW3D::_Invalidate_Mesh_Cache();
+		// Invalidate the mesh cache
+		WW3D::_Invalidate_Mesh_Cache();
 
-	//@todo: Find some way to invalidate the textures too
-	// D3D9 replaced ResourceManagerDiscardBytes with EvictManagedResources, which takes
-	// no byte count and returns nothing useful to act on.
-	DX8Wrapper::_Get_D3D_Device()->EvictManagedResources();
+		//@todo: Find some way to invalidate the textures too
+		// D3D9 replaced ResourceManagerDiscardBytes with EvictManagedResources, which takes
+		// no byte count and returns nothing useful to act on.
+		DX8Wrapper::_Get_D3D_Device()->EvictManagedResources();
 
-	// Try again...
-	ret=DX8Wrapper::_Get_D3D_Device()->CreateVertexBuffer(
-		FVF_Info().Get_FVF_Size()*VertexCount,
-		usage_flags,
-		FVF_Info().Get_FVF(),
-		(usage&USAGE_DYNAMIC) ? D3DPOOL_DEFAULT : D3DPOOL_MANAGED,
-		&VertexBuffer,
-		NULL);	// pSharedHandle, D3D9's extra parameter, reserved and always null
+		// Try again...
+		ret=DX8Wrapper::_Get_D3D_Device()->CreateVertexBuffer(
+			FVF_Info().Get_FVF_Size()*VertexCount,
+			usage_flags,
+			FVF_Info().Get_FVF(),
+			D3DPOOL_MANAGED,
+			&VertexBuffer,
+			NULL);	// pSharedHandle, D3D9's extra parameter, reserved and always null
 
-	if (SUCCEEDED(ret)) {
-		WWDEBUG_SAY(("...Vertex buffer creation succesful\n"));
+		if (SUCCEEDED(ret)) {
+			WWDEBUG_SAY(("...Vertex buffer creation succesful\n"));
+			return;
+		}
 	}
 
-	// If it still fails it is fatal
+	//	It was never fatal: DX8_ErrorCode only logs.  A device that is lost for a moment, which a
+	//	window mode change on Direct3D 9 can leave it, refuses a D3DPOOL_DEFAULT buffer, and the next
+	//	lock of the null buffer faulted.  Writes go to a scratch block instead, the way they do with
+	//	no device at all, and DX8Wrapper::Draw skips a draw from it on both devices.  The twin goes
+	//	too: nothing would ever fill it, and Direct3D 11 would draw it anyway.
 	DX8_ErrorCode(ret);
+	VertexBuffer=NULL;
+	ScratchVertices=W3DNEWARRAY unsigned char[FVF_Info().Get_FVF_Size()*VertexCount];
+	delete DX11Twin;
+	DX11Twin=NULL;
 
 	/* Old Code
 	DX8CALL(CreateVertexBuffer(
@@ -840,6 +855,14 @@ void DynamicVBAccessClass::Allocate_DX8_Dynamic_Buffer()
 		if (_DynamicDX8VertexBufferSize<DEFAULT_VB_SIZE) _DynamicDX8VertexBufferSize=DEFAULT_VB_SIZE;
 	}
 
+	// One made while the device refused buffers is a scratch block; try for a real one again, but
+	// only once the device says it is back, not on every draw while it still refuses
+	if (_DynamicDX8VertexBuffer && _DynamicDX8VertexBuffer->Get_DX8_Vertex_Buffer()==NULL
+			&& DX8Wrapper::_Get_D3D_Device()!=NULL
+			&& DX8Wrapper::_Get_D3D_Device()->TestCooperativeLevel()==D3D_OK) {
+		REF_PTR_RELEASE(_DynamicDX8VertexBuffer);
+	}
+
 	// Create a new vb if one doesn't exist currently
 	if (!_DynamicDX8VertexBuffer) {
 		unsigned usage=DX8VertexBufferClass::USAGE_DYNAMIC;
@@ -930,6 +953,12 @@ DynamicVBAccessClass::WriteLockClass::WriteLockClass(DynamicVBAccessClass* dynam
 		WWASSERT(_DynamicDX8VertexBuffer);
 //		WWASSERT(!_DynamicDX8VertexBuffer->Engine_Refs());
 
+		if (static_cast<DX8VertexBufferClass*>(DynamicVBAccess->VertexBuffer)->Get_DX8_Vertex_Buffer()==NULL) {
+			Vertices=(VertexFormatXYZNDUV2*)static_cast<DX8VertexBufferClass*>(DynamicVBAccess->VertexBuffer)->Get_Scratch_Vertices();
+			Vertices+=DynamicVBAccess->VertexBufferOffset;
+			break;
+		}
+
 		DX8_Assert();
 		// Lock with discard contents if the buffer offset is zero
 		DX8_ErrorCode(static_cast<DX8VertexBufferClass*>(DynamicVBAccess->VertexBuffer)->Get_DX8_Vertex_Buffer()->Lock(
@@ -972,6 +1001,7 @@ DynamicVBAccessClass::WriteLockClass::~WriteLockClass()
 		WWDEBUG_SAY(("DynamicVertexBuffer->Unlock()\n"));
 */
 #endif
+		if (static_cast<DX8VertexBufferClass*>(DynamicVBAccess->VertexBuffer)->Get_DX8_Vertex_Buffer()==NULL) break;
 		DX8_Assert();
 		DX11Lock.End();
 		DX8_ErrorCode(static_cast<DX8VertexBufferClass*>(DynamicVBAccess->VertexBuffer)->Get_DX8_Vertex_Buffer()->Unlock());

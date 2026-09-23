@@ -641,6 +641,10 @@ found and fixed â€” EA's own, not port damage.**
 - Pointing a worker at an ally's half-finished building no longer offers to finish it. The cursor promised to resume construction and the order it gave did nothing, because the check behind the cursor asked whether you were allied with whoever owned the site, and you are allied with yourself.
 - Double-tapping 0 jumps the camera to that group.
 - The mouse wheel no longer cancels a camera move already in progress.
+- The end of a match no longer crashes on the score screen when paratroopers were still in the air over water. Clearing the battlefield dropped them one last time, they drowned, and the debris they left behind went looking for a player who had already been cleared away.
+- Switching between fullscreen and windowed on Direct3D 9 no longer crashes. The graphics card can refuse a buffer for a moment while the screen changes, and the game wrote into the one it never got. It writes somewhere harmless now and asks again the next time it draws.
+- Closing the window while the game is still loading closes the game. The close was turned into a message stamped with your player, and no player exists that early.
+- Steam checking or repairing the game files no longer leaves you with a game that crashes the moment it starts. Steam puts its own original exe back and leaves this build's key bindings file in place, and the original read that file, found commands it had never heard of and gave up. The file has a name only this build looks for now, so the original starts as plain Zero Hour.
 
 ## The buildings nobody repairs, repair themselves
 
