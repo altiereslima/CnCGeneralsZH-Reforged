@@ -10293,7 +10293,8 @@ static void placeSignalAtView( const std::string &kind )
 	* each list. */
 static const char *const CONTROL_BAR_LEFT[] = { "LeftHUD", NULL };
 static const char *const CONTROL_BAR_RIGHT[] = { "RightHUD", "GeneralsExp", "ExpBarForeground", NULL };
-static const char *const CONTROL_BAR_CENTRE[] = { "CommandWindow", "ObserverPlayerListWindow", "ButtonPlaceBeacon", NULL };
+static const char *const CONTROL_BAR_CENTRE[] = { "ObserverPlayerListWindow", "ButtonPlaceBeacon", NULL };
+static const Int COMMAND_BUTTONS = 14;	///< ButtonCommand01 to 14, the grid a player sees
 
 /** The promotion button, small, on the right panel's border beside the page's own skills button,
 	* which takes the outermost place.  800x600 pixels. */
@@ -10310,7 +10311,7 @@ enum
 	SKILL_GRID_COLUMNS		= 3,
 	SKILLS_BUTTON_WIDTH		= 58,		///< wide enough for its name in either language
 	ALERT_TAB_WIDTH				= 54,		///< the under-attack light, a lamp on the radar panel's border
-	WORKER_TAB_WIDTH			= 44		///< the idle worker button, on the command grid panel's border
+	WORKER_TAB_WIDTH			= 39		///< the idle worker's key, on the command grid panel's border, as wide as the signals' column
 };
 static const char *const SKILLS_FOLDED = "skills";	///< the flip the skills button toggles; flipped is folded away
 static const UnsignedInt SIGNAL_RISE_MS = 360;					///< each smoke signal button's climb out of the screen's bottom edge
@@ -10478,14 +10479,18 @@ static void stackCentre( HtmlValues &values, Bool shown, IRegion2D &centre )
 	Bool gridFound = controlBarUnion( CONTROL_BAR_CENTRE, grid );
 
 	// with nothing selected the bar hides the command grid, and the panel must not go with it: the
-	// money and the power bar stood over bare battlefield.  The grid's place holds whether it is up
-	GameWindow *commands = controlBarWindow( "CommandWindow" );
-	if( commands )
+	// money and the power bar stood over bare battlefield.  The grid's place holds whether it is up,
+	// and it is the fourteen buttons' place rather than CommandWindow's: the window reaches 34 pixels
+	// further left, over where the beacon button stands, and left an empty strip in the panel
+	for( Int button = 1; button <= COMMAND_BUTTONS; button++ )
 	{
+		char name[ 32 ];
+		snprintf( name, sizeof( name ), "ButtonCommand%02d", button );
+		GameWindow *command = controlBarWindow( name );
 		IRegion2D place;
 		Int width = 0, height = 0;
-		commands->winGetScreenPosition( &place.lo.x, &place.lo.y );
-		commands->winGetSize( &width, &height );
+		command->winGetScreenPosition( &place.lo.x, &place.lo.y );
+		command->winGetSize( &width, &height );
 		place.hi.x = place.lo.x + width;
 		place.hi.y = place.lo.y + height;
 		if( !gridFound )
@@ -10637,7 +10642,10 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 
 	IRegion2D centreBox;
 	stackCentre( values, panelCount > 1 && shown[ 1 ], centreBox );
-	putPageRect( values, "workertab", tabOn( centreBox, WORKER_TAB_WIDTH, FALSE ), panelCount > 1 && shown[ 1 ] );
+	// the idle worker's tab holds a key the size of a smoke signal's, so it is a signal row tall
+	IRegion2D workerTab = tabOn( centreBox, WORKER_TAB_WIDTH, FALSE );
+	workerTab.lo.y = workerTab.hi.y - REAL_TO_INT( SIGNAL_BUTTON_SIZE * scale );
+	putPageRect( values, "workertab", workerTab, panelCount > 1 && shown[ 1 ] );
 	HtmlLists lists;
 	putPowerBar( values, lists[ "powercells" ] );	// after the stack, whose frame it divides into cells
 
