@@ -993,12 +993,13 @@ public:
 		* solid panel. */
 	void setPageSolids( const std::vector< IRegion2D > *solids, const std::vector< IRegion2D > *holes = NULL );
 
-	/** The HUD page's place for the general's powers: the bar laid out as rows of
-		* SPECIAL_POWER_SHORTCUT_COLS filling `area`'s width, the first row at the top, standing on
-		* `area`'s bottom edge so more rows grow upward; its top is not read.  NULL hides it.  Screen
-		* pixels.  Asked every frame the page draws, so it holds against the bar's own layout.  `cell`,
-		* when given, is set to one cell's size, 0 by 0 while there is no bar to lay out. */
-	void placeSpecialPowerShortcutGrid( const IRegion2D *area, ICoord2D *cell = NULL );
+	/** The HUD page's place for the general's powers: the first in `corner`, the bottom right of the
+		* grid, each `cell` big with `gap` between them, a row of SPECIAL_POWER_SHORTCUT_COLS running
+		* left from it and the next row over it, the order the row keys count in.  The slots' own tray
+		* art is not drawn; the page draws their cells.  NULL hides the bar.  Screen pixels.  Asked every
+		* frame the page draws, so it holds against the bar's own layout.  Returns how many powers are
+		* shown, each in its place. */
+	Int placeSpecialPowerShortcutGrid( const ICoord2D *corner, const ICoord2D &cell, Int gap );
 
 	/// the general's stars are asking to be spent, so the button blinks; see getStarImage
 	Bool isGeneralStarFlashing( void ) const { return m_genStarFlash; }
@@ -1329,7 +1330,6 @@ protected:
 	AsciiString m_watchedSide;													///< the side the bar is wearing while watching, so a selection change only lays it out again when it really changes side
 	std::vector< IRegion2D > m_pageSolids;							///< what the CSS page drew solid, in screen pixels; see setPageSolids
 	std::vector< IRegion2D > m_pageHoles;								///< the page's own buttons, which let their clicks through
-	ICoord2D m_shippedShortcutSlot;											///< the powers bar's slot as its layout shipped it, before the page's grid resized it
 	Bool m_pageSolidsActive;														///< the page is drawing, so m_pageSolids decides clicks and not the plates
 	Player *m_watchedSelection;													///< the player the selection last named while watching, NULL for nobody
 

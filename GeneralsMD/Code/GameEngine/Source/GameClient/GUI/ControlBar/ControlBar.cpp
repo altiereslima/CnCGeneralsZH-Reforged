@@ -1385,7 +1385,6 @@ ControlBar::ControlBar( void )
 	m_remainingRadarAttackGlowFrames = 0;
 	m_radarAttackGlowWindow = NULL;
 	m_pageSolidsActive = FALSE;
-	m_shippedShortcutSlot.x = m_shippedShortcutSlot.y = 0;
 
 #if defined( _INTERNAL ) || defined( _DEBUG )
 	m_lastFrameMarkedDirty = 0;
@@ -6042,7 +6041,6 @@ void ControlBar::initSpecialPowershortcutBar( Player *player)
 		m_specialPowerShortcutButtonParents[i] = NULL;
 		m_specialPowerShortcutButtons[i] = NULL;
 	}
-	m_shippedShortcutSlot.x = m_shippedShortcutSlot.y = 0;	// a new layout, measured afresh
 
 	if(m_specialPowerLayout)
 	{
@@ -6199,57 +6197,48 @@ void ControlBar::arrangeSpecialPowerShortcutGrid( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-void ControlBar::placeSpecialPowerShortcutGrid( const IRegion2D *area, ICoord2D *cell )
+/** The page draws the cell behind each power, so the slot's own tray picture, in the side's art,
+	* is not drawn under it. */
+static void drawNoTray( GameWindow *window, WinInstanceData *instData )
 {
-	if( cell )
-		cell->x = cell->y = 0;
+}
+
+Int ControlBar::placeSpecialPowerShortcutGrid( const ICoord2D *corner, const ICoord2D &cell, Int gap )
+{
 	if( m_specialPowerShortcutParent == NULL || m_specialPowerShortcutButtonParents[ 0 ] == NULL )
-		return;
+		return 0;
 
-	// the cell keeps the tray's own proportions, read off the first slot the layout shipped - once,
-	// since the grid below resizes that slot every frame
-	if( m_shippedShortcutSlot.x <= 0 )
-		m_specialPowerShortcutButtonParents[ 0 ]->winGetSize( &m_shippedShortcutSlot.x, &m_shippedShortcutSlot.y );
-	const Int cellWidth = area ? ( area->hi.x - area->lo.x ) / SPECIAL_POWER_SHORTCUT_COLS : 0;
-	if( m_shippedShortcutSlot.x <= 0 || cellWidth <= 0 )
+	if( corner == NULL || m_currentlyUsedSpecialPowersButtons < 1 )
 	{
 		if( !m_specialPowerShortcutParent->winIsHidden() )
 			m_specialPowerShortcutParent->winHide( TRUE );
-		return;
-	}
-	const Int cellHeight = cellWidth * m_shippedShortcutSlot.y / m_shippedShortcutSlot.x;
-	if( cell )
-	{
-		cell->x = cellWidth;
-		cell->y = cellHeight;
-	}
-	if( m_currentlyUsedSpecialPowersButtons < 1 )
-	{
-		if( !m_specialPowerShortcutParent->winIsHidden() )
-			m_specialPowerShortcutParent->winHide( TRUE );
-		return;
+		return 0;
 	}
 
-	ICoord2D cameoSize, cameoOffset;
-	if( trayLayoutFromSlot( cellWidth, cellHeight, NULL, &cameoSize, &cameoOffset, NULL ) == FALSE )
-		return;
-
-	// the bar covers every cell, or a cell off its edge draws and never takes a click.  It is as tall
-	// as SPECIAL_POWER_SHORTCUT_COLS rows at least, so the first power takes the grid's top left place
-	// with the page's empty ones under it; a longer list grows upward.  Its position is its own
-	// parent's, and the layout's root is not the screen
 	// the powers showing, not the slots the side has: m_currentlyUsedSpecialPowersButtons is eleven
-	// for a general with one power ready, and four rows of it stood the grid a row too high
-	const Int filled = ( countVisibleSpecialPowerShortcuts() + SPECIAL_POWER_SHORTCUT_COLS - 1 ) / SPECIAL_POWER_SHORTCUT_COLS;
-	const Int rows = MAX( filled, (Int)SPECIAL_POWER_SHORTCUT_COLS );
+	// for a general with one power ready
+	const Int shown = countVisibleSpecialPowerShortcuts();
+	if( shown < 1 )
+		return 0;
+
+	// the bar covers every cell, or a cell off its edge draws and never takes a click, and it is only
+	// as big as the powers shown, so the battlefield round them takes its own clicks.  Its position is
+	// its own parent's, and the layout's root is not the screen
+	const Int columns = MIN( shown, (Int)SPECIAL_POWER_SHORTCUT_COLS );
+	const Int rows = ( shown + SPECIAL_POWER_SHORTCUT_COLS - 1 ) / SPECIAL_POWER_SHORTCUT_COLS;
+	const Int width = columns * cell.x + ( columns - 1 ) * gap;
+	const Int height = rows * cell.y + ( rows - 1 ) * gap;
 	Int parentX = 0, parentY = 0;
 	if( m_specialPowerShortcutParent->winGetParent() )
 		m_specialPowerShortcutParent->winGetParent()->winGetScreenPosition( &parentX, &parentY );
-	m_specialPowerShortcutParent->winSetPosition( area->lo.x - parentX, area->hi.y - cellHeight * rows - parentY );
-	m_specialPowerShortcutParent->winSetSize( cellWidth * SPECIAL_POWER_SHORTCUT_COLS, cellHeight * rows );
+	m_specialPowerShortcutParent->winSetPosition( corner->x - width - parentX, corner->y - height - parentY );
+	m_specialPowerShortcutParent->winSetSize( width, height );
+	m_specialPowerShortcutParent->winSetDrawFunc( drawNoTray );
 	if( m_specialPowerShortcutParent->winIsHidden() )
 		m_specialPowerShortcutParent->winHide( FALSE );
 
+	// the first power in the corner, the row running left from it and the next row over it: the
+	// order the row keys count in.  Each cameo fills its cell
 	for( Int i = 0; i < MAX_SPECIAL_POWER_SHORTCUTS; i++ )
 	{
 		GameWindow *slot = m_specialPowerShortcutButtonParents[ i ];
@@ -6257,11 +6246,15 @@ void ControlBar::placeSpecialPowerShortcutGrid( const IRegion2D *area, ICoord2D 
 		if( slot == NULL || button == NULL )
 			continue;
 
-		slot->winSetPosition( ( i % SPECIAL_POWER_SHORTCUT_COLS ) * cellWidth, ( i / SPECIAL_POWER_SHORTCUT_COLS ) * cellHeight );
-		slot->winSetSize( cellWidth, cellHeight );
-		button->winSetSize( cameoSize.x, cameoSize.y );
-		button->winSetPosition( cameoOffset.x, cameoOffset.y );
+		const Int column = i % SPECIAL_POWER_SHORTCUT_COLS;
+		const Int row = i / SPECIAL_POWER_SHORTCUT_COLS;
+		slot->winSetPosition( width - ( column + 1 ) * cell.x - column * gap, height - ( row + 1 ) * cell.y - row * gap );
+		slot->winSetSize( cell.x, cell.y );
+		slot->winSetDrawFunc( drawNoTray );
+		button->winSetSize( cell.x, cell.y );
+		button->winSetPosition( 0, 0 );
 	}
+	return shown;
 }
 
 //-------------------------------------------------------------------------------------------------

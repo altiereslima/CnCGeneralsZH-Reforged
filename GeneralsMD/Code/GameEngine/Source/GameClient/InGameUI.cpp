@@ -10365,13 +10365,12 @@ enum
 {
 	STARS_TAB_WIDTH				= 66,		///< the rank's stars, a key in a tab on the right panel's border, which is the promotion button
 	STARS_TAB_HEIGHT			= 22,		///< the key 17 tall with its rim, three pixels down
-	SKILL_GRID_WIDTH			= 150,	///< the general's powers, three to a row, against the screen's right edge
-	SKILL_GRID_GAP				= 30,		///< between them and the stars' tab
+	SKILL_GRID_GAP				= 12,		///< between the general's powers' tray and the stars' tab under it
+	SKILL_TRAY_BORDER			= 6,		///< the tray's steel round its cells
+	SKILL_CELL_GAP				= 2,		///< the steel between two cells
 	SIGNAL_BUTTON_SIZE		= 24,		///< each smoke signal button's height, a row of the column
 	SIGNAL_BUTTON_WIDTH		= 40,		///< and its width, room for its picture
 	SIGNAL_BUTTONS				= 3,		///< attack, defend, look
-	SKILL_GRID_ROWS				= 3,		///< the empty places drawn behind the powers
-	SKILL_GRID_COLUMNS		= 3,
 	ALERT_TAB_WIDTH				= 54,		///< the under-attack light, a lamp on the radar panel's border
 	WORKER_TAB_WIDTH			= 39,		///< the idle worker's step, against the command grid panel's border, as wide as the signals' column
 	WORKER_STEP_HEIGHT		= 30,		///< and its height, its key's bottom GRID_BOTTOM_GAP over the screen's bottom edge
@@ -10813,31 +10812,39 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 		portraitCells.push_back( entry );
 	}
 
-	// the general's powers ready to fire, three to a row over the right panel
-	IRegion2D powers;
-	powers.hi.x = TheDisplay->getWidth();
-	powers.lo.x = powers.hi.x - REAL_TO_INT( SKILL_GRID_WIDTH * scale );
-	powers.hi.y = starsTab.lo.y - REAL_TO_INT( SKILL_GRID_GAP * scale );
-	powers.lo.y = powers.hi.y;
+	// the general's powers ready to fire over the right panel, the first in the corner against the
+	// screen's right edge, the row growing left as they come and wrapping upward past three, each a
+	// command button's size.  They sit in a tray of the panels' steel only as big as they are, and each
+	// has a dark cell behind it the way the command grid's buttons do
+	const Int trayBorder = REAL_TO_INT( SKILL_TRAY_BORDER * scale );
+	ICoord2D corner;
+	corner.x = TheDisplay->getWidth() - trayBorder;
+	corner.y = starsTab.lo.y - REAL_TO_INT( SKILL_GRID_GAP * scale ) - trayBorder;
+	const IRegion2D button = commandButtonRect( 1 );
 	ICoord2D cell;
-	TheControlBar->placeSpecialPowerShortcutGrid( rightFound ? &powers : NULL, &cell );
+	cell.x = button.hi.x - button.lo.x;
+	cell.y = button.hi.y - button.lo.y;
+	const Int cellGap = REAL_TO_INT( SKILL_CELL_GAP * scale );
+	const Int powersShown = TheControlBar->placeSpecialPowerShortcutGrid( rightFound && rightShown ? &corner : NULL, cell, cellGap );
 
-	// the grid's empty places, three by three, drawn behind the powers the way the command grid's
-	// well stands behind its buttons
 	std::vector< HtmlValues > &places = lists[ "skillcells" ];
-	for( Int row = 0; row < SKILL_GRID_ROWS && cell.x > 0; row++ )
+	IRegion2D powers;
+	powers.lo = corner;
+	powers.hi = corner;
+	for( Int slot = 0; slot < powersShown; slot++ )
 	{
-		for( Int column = 0; column < SKILL_GRID_COLUMNS; column++ )
-		{
-			IRegion2D place;
-			place.lo.x = powers.lo.x + column * cell.x;
-			place.lo.y = powers.hi.y - ( SKILL_GRID_ROWS - row ) * cell.y;
-			place.hi.x = place.lo.x + cell.x;
-			place.hi.y = place.lo.y + cell.y;
-			HtmlValues entry;
-			putPageRect( entry, "cell", place, TRUE );
-			places.push_back( entry );
-		}
+		const Int column = slot % SPECIAL_POWER_SHORTCUT_COLS;
+		const Int row = slot / SPECIAL_POWER_SHORTCUT_COLS;
+		IRegion2D place;
+		place.hi.x = corner.x - column * ( cell.x + cellGap );
+		place.hi.y = corner.y - row * ( cell.y + cellGap );
+		place.lo.x = place.hi.x - cell.x;
+		place.lo.y = place.hi.y - cell.y;
+		powers.lo.x = min( powers.lo.x, place.lo.x );
+		powers.lo.y = min( powers.lo.y, place.lo.y );
+		HtmlValues entry;
+		putPageRect( entry, "cell", place, TRUE );
+		places.push_back( entry );
 	}
 
 	// the promotion button is the stars' tab: its window moves under the tab and takes the click that
@@ -10846,6 +10853,12 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	if( rightFound && promotion )
 	{
 		Int parentX = 0, parentY = 0;
+	IRegion2D tray = powers;
+	tray.lo.x -= trayBorder;
+	tray.lo.y -= trayBorder;
+	tray.hi.x = TheDisplay->getWidth();
+	tray.hi.y += trayBorder;
+	putFrame( values, "skilltray", powers, tray, powersShown > 0 );
 		if( promotion->winGetParent() )
 			promotion->winGetParent()->winGetScreenPosition( &parentX, &parentY );
 		promotion->winSetPosition( starsTab.lo.x - parentX, starsTab.lo.y - parentY );

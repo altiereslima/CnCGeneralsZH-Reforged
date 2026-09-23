@@ -31,7 +31,9 @@
                            {{x}} inside the 58 wide key so the row is centred on it
     data-each="portraitcells" the production queue's nine places over the portrait's, each {{cell.x}} .y .w .h
     data-each="commandcells" the fourteen command buttons' places, shown or not, each {{cell.x}} .y .w .h
-    data-each="skillcells" the grid's nine empty places behind the general's powers, each {{cell.x}} .y .w .h
+    {{skilltray.x}} ...    the general's powers' tray, a panel as {{right.x}} is, only as big as the
+                           powers shown; data-each="skillcells" a cell behind each power, each
+                           {{cell.x}} .y .w .h
     {{signals.x}} ...      the column of smoke signal buttons against the left panel;
                            data-click="signal:attack", "signal:defend" or "signal:look" sends one
                            to the middle of the view; {{signals.shown}} is "hidden" where the keys
@@ -292,8 +294,10 @@
   .rungs .seg { margin-top: 1px; background-color: #15130c; }
   .rungs .lit .seg { background: linear-gradient(to right, #8a6a14, #f6d860, #b08a24); }
 
-  /* the grid's empty places stand behind the powers */
-  .skillcell { margin: 1px 0 0 1px; }
+  /* the general's powers stand in a tray of the panels' steel against the screen's right edge, only
+     as big as the powers shown, a dark cell behind each; its bottom edge is shaded, since it stands
+     over the battlefield rather than on the screen's edge */
+  .bezel .base { position: absolute; height: 1px; background-color: #0c1114; }
 
   /* the smoke signals: a step on the radar's bezel's right, dark down its own right, and a joint
      over the bezel's dark right line so the two read as one piece.  Three keys in it: a crosshair to
@@ -388,7 +392,14 @@
     <div class="key signal look" data-click="signal:look" style="top: 48px; margin-top: {{signal2.drop}}px"><div class="icon"></div></div>
   </div>
 
-  <div class="piece skillcell well" data-each="skillcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"></div>
+  <div class="piece frame bezel solid {{skilltray.shown}}" style="left: {{skilltray.x}}px; top: {{skilltray.y}}px; width: {{skilltray.w}}px; height: {{skilltray.h}}px; border-width: {{skilltray.bt}}px {{skilltray.br}}px {{skilltray.bb}}px {{skilltray.bl}}px">
+    <div class="steel" style="left: -{{skilltray.bl}}px; right: -{{skilltray.br}}px; top: -{{skilltray.bt}}px; bottom: -{{skilltray.bb}}px"></div>
+    <div class="shine" style="left: -{{skilltray.bl}}px; right: -{{skilltray.br}}px; top: -{{skilltray.bt}}px"></div>
+    <div class="lit" style="left: -{{skilltray.bl}}px; top: -{{skilltray.bt}}px; bottom: -{{skilltray.bb}}px"></div>
+    <div class="base" style="left: -{{skilltray.bl}}px; right: -{{skilltray.br}}px; bottom: -{{skilltray.bb}}px"></div>
+    <div class="sunk grid" style="width: {{skilltray.w}}px; height: {{skilltray.h}}px"></div>
+  </div>
+  <div class="piece commandcell" data-each="skillcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="bevel"></div></div>
 
   <div class="piece button menu {{ButtonOptions.state}}" data-click="press:ButtonOptions">
     <div class="bar" style="top: 4px"></div>
