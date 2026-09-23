@@ -10119,27 +10119,43 @@ static Real powerBarShare( Real power )
 /** The power bar as the page draws it, filling its frame: {{power.fill}} the production and
 	* {{power.needle}} the consumption, both percent of the frame, and {{power.state}} "green",
 	* "yellow" or "red" by the bar's own rule - red once consumption passes production, yellow within
-	* m_powerBarYellowRange of it.  Watching, it is the watched player's power. */
+	* m_powerBarYellowRange of it.  Watching, it is the watched player's power.  `cells` is the same
+	* production as a row of POWER_CELLS cells, each {{lit}} "lit" up to it, for a segmented bar. */
 //-------------------------------------------------------------------------------------------------
-static void putPowerBar( HtmlValues &values )
+static void putPowerBar( HtmlValues &values, std::vector< HtmlValues > &cells )
 {
-	enum { ONE_UNIT_NEEDLE_TENTHS = 15 };	///< a consumption of 1 is drawn as 1.5: log(1) is 0, and 1 is not nothing
+	enum
+	{
+		ONE_UNIT_NEEDLE_TENTHS	= 15,	///< a consumption of 1 is drawn as 1.5: log(1) is 0, and 1 is not nothing
+		POWER_CELLS							= 40	///< the bar is drawn as this many cells, lit up to the production
+	};
 
 	Player *player = TheControlBar->isObserverControlBarOn() ? TheControlBar->getObserverLookAtPlayer()
 																												 : ThePlayerList->getLocalPlayer();
 	const Energy *energy = player ? player->getEnergy() : NULL;
-	if( energy == NULL )
-	{
-		values[ "power.fill" ] = "0";
-		values[ "power.needle" ] = "0";
-		return;
-	}
-
-	const Int production = energy->getProduction();
-	const Int consumption = energy->getConsumption();
+	const Int production = energy ? energy->getProduction() : 0;
+	const Int consumption = energy ? energy->getConsumption() : 0;
+	const Real fill = powerBarShare( (Real)production );
 	const Real needle = consumption == 1 ? ONE_UNIT_NEEDLE_TENTHS / 10.0f : (Real)consumption;
-	values[ "power.fill" ] = std::to_string( REAL_TO_INT( powerBarShare( (Real)production ) * PERCENT ) );
+	values[ "power.fill" ] = std::to_string( REAL_TO_INT( fill * PERCENT ) );
 	values[ "power.needle" ] = std::to_string( REAL_TO_INT( powerBarShare( needle ) * PERCENT ) );
+
+	// each cell gets its place and width in the page's pixels, cut from the frame's inside so they
+	// add up to it exactly: floated at a percentage each the page rounded them up and the fortieth
+	// fell onto a second row, and a percentage of an absolutely placed box does not resolve at all
+	enum { FRAME_LIP = 1 };
+	const Int row = atoi( values[ "powerframe.w" ].c_str() ) - 2 * FRAME_LIP;
+	cells.clear();
+	const Int lit = REAL_TO_INT( fill * POWER_CELLS );
+	for( Int cell = 0; cell < POWER_CELLS && row > 0; cell++ )
+	{
+		const Int left = cell * row / POWER_CELLS;
+		HtmlValues entry;
+		entry[ "lit" ] = cell < lit ? "lit" : "";
+		entry[ "x" ] = std::to_string( left );
+		entry[ "w" ] = std::to_string( ( cell + 1 ) * row / POWER_CELLS - left );
+		cells.push_back( entry );
+	}
 	if( consumption > production )
 		values[ "power.state" ] = "red";
 	else if( consumption > production - TheGlobalData->m_powerBarYellowRange )
@@ -10288,6 +10304,16 @@ static void stackCentre( HtmlValues &values, Bool shown )
 
 	putPageRect( values, "centre", centre, gridFound && shown );
 	putPageRect( values, "powerframe", frame, powerFound && shown );
+
+	// the page lays boxes out content-box whatever box-sizing says, so the frame's border goes on top
+	// of its width and height: hand it the content, and the height inside its lip for the cells, since
+	// a percentage of a height set by top and bottom does not resolve in the page either
+	enum { FRAME_BORDER = 2, FRAME_LIP = 1 };
+	const Int width = atoi( values[ "powerframe.w" ].c_str() ) - 2 * FRAME_BORDER;
+	const Int height = atoi( values[ "powerframe.h" ].c_str() ) - 2 * FRAME_BORDER;
+	values[ "powerframe.w" ] = std::to_string( width > 0 ? width : 0 );
+	values[ "powerframe.h" ] = std::to_string( height > 0 ? height : 0 );
+	values[ "powerframe.inner" ] = std::to_string( height > 2 * FRAME_LIP ? height - 2 * FRAME_LIP : 0 );
 	putPageRect( values, "moneyblock", block, moneyFound && shown );
 }
 
@@ -10337,7 +10363,6 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	const Bool watching = localPlayerWatching();
 	values[ "promotion" ] = !watching && TheControlBar->isGeneralStarFlashing() ? "ready" : "";
 	values[ "watching" ] = watching ? "watching" : "";
-	putPowerBar( values );
 	values[ "blink" ] = TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND > LOGICFRAMES_PER_SECOND / 2 ? "lit" : "";
 	for( Int panel = 0; panel < panelCount; panel++ )
 		putPageRect( values, "panel" + std::to_string( panel ), panels[ panel ], shown[ panel ] );
@@ -10347,6 +10372,8 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	const Bool leftFound = controlBarUnion( CONTROL_BAR_LEFT, box );
 	putPageRect( values, "left", box, leftFound && panelCount > 0 && shown[ 0 ] );
 	stackCentre( values, panelCount > 1 && shown[ 1 ] );
+	HtmlLists lists;
+	putPowerBar( values, lists[ "powercells" ] );	// after the stack, whose frame it divides into cells
 	const Bool rightFound = controlBarUnion( CONTROL_BAR_RIGHT, box );
 	putPageRect( values, "right", box, rightFound && panelCount > 2 && shown[ 2 ] );
 
@@ -10396,7 +10423,7 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 			window->winHide( TRUE );
 	}
 
-	m_controlBarOverlay->setPage( HtmlTemplate_expand( m_controlBarPage, values, HtmlLists(), lookupGameText ) );
+	m_controlBarOverlay->setPage( HtmlTemplate_expand( m_controlBarPage, values, lists, lookupGameText ) );
 	m_controlBarOverlay->hover( TheMouse->getMouseStatus()->pos );
 	m_controlBarOverlay->draw();
 

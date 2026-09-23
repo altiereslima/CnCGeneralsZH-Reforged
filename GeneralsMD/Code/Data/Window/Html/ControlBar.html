@@ -19,6 +19,8 @@
     {{power.fill}}         the power bar: production as a percent of the bar, on the bar's own
     {{power.needle}}       logarithmic scale, consumption as the same, and {{power.state}} "green",
                            "yellow" or "red"; the watched player's while watching
+    data-each="powercells" the same production as 40 cells, each {{lit}} "lit" up to it, standing at
+                           {{x}} pixels inside the frame's lip and {{w}} wide
     {{blink}}              "lit" for half of every second, for anything that blinks
     {{panelN.x}} .y .w .h  N 0 to 2, left, centre and right: where the plates would have gone,
                            moving with the bar when it slides or minimises; .w and .h are 0 and
@@ -26,7 +28,8 @@
     {{left.x}} .y .w .h    the box round the radar, so the left panel is only as big as its bezel
     {{centre.x}} .y .w .h  the centre as three blocks stacked flush, with their steel round them
     {{powerframe.x}} ...   already: the command grid's panel, the power bar's frame standing on it,
-    {{moneyblock.x}} ...   and the money's block on the frame; each .shown as above
+    {{moneyblock.x}} ...   and the money's block on the frame; each .shown as above, and
+                           {{powerframe.inner}} the height inside the frame and its lip
     {{right.x}} .y .w .h   the box round the portrait and the experience bar.  The promotion and
                            minimise buttons are moved to sit over its top right corner
     {{Name.x}} .y .w .h    the rectangle of the bar's window Name, {{Name.shown}} "shown" or "hidden"
@@ -88,13 +91,20 @@
             background-color: #020405; }
   .groove .lip { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border: 1px solid #000000; }
 
-  /* the power bar is the page's: the production fills the frame from the left, in the power bar's
-     own green, yellow or red, and the consumption is a white needle across it.  Full is the whole
-     frame, lip to lip */
-  .powerfill { position: absolute; left: 0; top: 0; bottom: 0; background-image: url(PowerBarGreen);
-               background-size: 100% 100%; background-repeat: no-repeat; }
-  .powerfill.yellow { background-image: url(PowerBarYellow); }
-  .powerfill.red { background-image: url(PowerBarRed); }
+  /* the power bar is the page's: a row of cells across the frame, lit from the left up to the
+     production in the power bar's own green, yellow or red, a black line between every two, and the
+     consumption a white needle across them.  Full is every cell, lip to lip */
+  /* the row's height is the frame's inside, {{powerframe.inner}}, written in: a percentage of a
+     height set by top and bottom does not resolve here, and the cells came out with none */
+  .cells { position: absolute; left: 1px; top: 1px; right: 1px; }
+  /* each cell stands at its own {{x}} and {{w}} in pixels, and the gap is the inner block's margin:
+     floated at a percentage the fortieth cell fell onto a second row, and a percentage of an
+     absolutely placed box does not resolve here at all */
+  .cells .cell { position: absolute; top: 0; }
+  .cells .seg { margin-right: 1px; background-color: #0d1512; background-size: 100% 100%; background-repeat: no-repeat; }
+  .cells .lit .seg { background-image: url(PowerBarGreen); }
+  .cells.yellow .lit .seg { background-image: url(PowerBarYellow); }
+  .cells.red .lit .seg { background-image: url(PowerBarRed); }
   .needle { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background-color: #ffffff; }
   .china .groove { border-color: #a44734; border-bottom-color: #e8a28a; border-right-color: #d98a72; }
   .gla .groove { border-color: #978a50; border-bottom-color: #ddd29a; border-right-color: #cbbf82; }
@@ -136,7 +146,7 @@
   </div>
   <div class="piece panel solid stack moneyblock {{moneyblock.shown}}" style="left: {{moneyblock.x}}px; top: {{moneyblock.y}}px; width: {{moneyblock.w}}px; height: {{moneyblock.h}}px"><div class="rail"></div></div>
   <div class="piece groove solid stack {{powerframe.shown}}" style="left: {{powerframe.x}}px; top: {{powerframe.y}}px; width: {{powerframe.w}}px; height: {{powerframe.h}}px">
-    <div class="powerfill {{power.state}}" style="width: {{power.fill}}%"></div>
+    <div class="cells {{power.state}}" style="height: {{powerframe.inner}}px"><div class="cell {{lit}}" data-each="powercells" style="left: {{x}}px; width: {{w}}px; height: {{powerframe.inner}}px"><div class="seg" style="height: {{powerframe.inner}}px"></div></div></div>
     <div class="needle" style="left: {{power.needle}}%"></div>
     <div class="lip"></div>
   </div>
