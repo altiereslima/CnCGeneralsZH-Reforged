@@ -407,6 +407,9 @@ public:  // ********************************************************************
 	/** A click that reached the world, on one of that page's own buttons: TRUE when it was one, and
 		* when `act` is set the button it names is pressed. */
 	Bool handleControlBarPageClick( const ICoord2D *mouse, Bool act );
+	/** The general's promotion screen, Window/Html/Promotion.html, drawn as `parent`'s picture: the
+		* screen's windows keep their clicks and the promotions' own cameos paint over it. */
+	void drawPromotionPage( GameWindow *parent );
 	void drawScoreboard( void );																						///< that scoreboard, over everything
 	/** Window/Html/Tooltip.html is there to draw with, in a match. */
 	Bool isTooltipPageReady( void );
@@ -1222,6 +1225,9 @@ protected:
 	Bool												m_tooltipPageLoaded;
 	std::string									m_tooltipPage;
 	ICoord2D										m_tooltipSize;						///< the box as last laid out, in screen pixels, to place the next one by
+	HtmlOverlay *								m_promotionOverlay;
+	Bool												m_promotionPageLoaded;
+	std::string									m_promotionPage;
 	Bool												m_signalsWereShown;				///< the smoke signal column was up last frame
 	UnsignedInt									m_signalsRiseStartMs;			///< when it last came up, the start of its buttons' rise
 

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<!--
+  The general's promotion screen, drawn in the place of the side's painting, in the command bar's
+  steel.  The promotions are the screen's own buttons and paint over this page, each on its cell; the
+  close button, the title, the points and the experience bar are the screen's windows too, drawing
+  nothing now and still taking their clicks, and the page draws them.  Same materials as
+  Window/Html/ControlBar.html.
+
+  The game fills in, every frame the screen is up (InGameUI::drawPromotionPage):
+    {{side}}               "america", "china" or "gla"
+    {{held}}               "held" while the left mouse button is down
+    {{panel.x}} .y .w .h   the screen's plate
+    {{well.x}} ...         the well the promotions stand in, under the bar and the points
+    {{Name.x}} .y .w .h    StaticTextTitle, ProgressBarExperience, StaticTextRankPointsAvailable and
+                           ButtonExit, each with {{Name.shown}} and {{Name.state}} ("disabled",
+                           "hilite", "pushed")
+    {{title}}              the rank's name, {{points}} the promotions left to spend
+    data-each="exprungs"   the experience bar's twenty rungs, each {{lit}} "lit" up to the way from
+                           this rank to the next, at {{x}} and {{w}} inside the bar
+    data-each="headings"   a heading over each row of promotions, {{heading.x}} .y .w .h and {{label}}
+    data-each="cells"      every place of every row's grid, {{cell.x}} .y .w .h, and {{state}}
+                           "owned" once bought, "ready" while it can be, "locked" while it cannot,
+                           "empty" where no promotion stands
+  All in the page's pixels, a pixel of an 800x600 screen.  Without this page the painting draws.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Promotion</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { background-color: #3b4a36; font-size: 8px; color: #dfe5ea; }
+  .hidden { display: none; }
+  .piece { position: absolute; }
+
+  /* the plate: steel lit from above, a light line along its top and down its left, dark along its
+     right and bottom */
+  .plate { background: linear-gradient(to bottom, #9aa3ad, #5a626c 18%, #353c45); border: 1px solid #0c1114;
+           border-top-color: #dde4ea; border-left-color: #b3bbc4; }
+  .china .plate { background: linear-gradient(to bottom, #c06a52, #7a3120 18%, #3f160f); border-top-color: #f0b8a4; border-left-color: #d58a70; }
+  .gla .plate { background: linear-gradient(to bottom, #b8ab6e, #766a3a 18%, #3c3519); border-top-color: #ebe2b4; border-left-color: #cabe86; }
+
+  /* a well sunk two pixels, dark along the top and left and lit along the bottom and right */
+  .well { margin: -2px 0 0 -2px; border: 2px solid #06090b; border-bottom-color: #b4bec8; border-right-color: #b4bec8;
+          background-color: #3a414a; }
+  .china .well { border-bottom-color: #d98a72; border-right-color: #d98a72; background-color: #45190f; }
+  .gla .well { border-bottom-color: #cbbf82; border-right-color: #cbbf82; background-color: #423a1c; }
+
+  .title { text-align: left; font-size: 10px; font-weight: bold; color: #f2cf4a; }
+
+  /* the experience bar: twenty rungs in a groove, gold from the left up to the way to the next rank */
+  .groove { margin: -3px 0 0 -3px; border: 2px solid #06090b; border-bottom-color: #b4bec8; border-right-color: #b4bec8;
+            background-color: #020405; }
+  .china .groove { border-bottom-color: #d98a72; border-right-color: #d98a72; }
+  .gla .groove { border-bottom-color: #cbbf82; border-right-color: #cbbf82; }
+  .groove .lip { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border: 1px solid #000000; }
+  .rung { position: absolute; top: 1px; bottom: 1px; }
+  .rung .seg { position: absolute; left: 0; right: 1px; top: 0; bottom: 0; background-color: #15130c; }
+  .rung.lit .seg { background: linear-gradient(to bottom, #f6d860, #8a6a14); }
+
+  /* the promotions left to spend: a gold figure in a small dark window */
+  .points { margin: -2px 0 0 -2px; border: 2px solid #06090b; border-bottom-color: #b4bec8; border-right-color: #b4bec8;
+            background-color: #020405; text-align: center; font-size: 11px; font-weight: bold; color: #f2cf4a; }
+  .china .points { border-bottom-color: #d98a72; border-right-color: #d98a72; }
+  .gla .points { border-bottom-color: #cbbf82; border-right-color: #cbbf82; }
+
+  /* a row's heading, over a lit rule the width of the well */
+  .heading { padding-left: 4px; font-size: 8px; font-weight: bold; color: #c9d2d9; text-align: left; line-height: 11px; }
+  .heading .rule { position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background-color: #5a626c; }
+  .china .heading .rule { background-color: #7a3120; }
+  .gla .heading .rule { background-color: #766a3a; }
+
+  /* the grid, as the command bar's: every place a dark cell exactly a button's size, steel between
+     them, an empty place a hole with its bevel.  A promotion's cell carries a rim a pixel outside
+     the button that says where it stands - gold once bought, light steel while it can be bought */
+  .cell { background-color: #020405; }
+  .cell .bevel { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border: 1px solid #06090b;
+                 border-bottom-color: #9aa4ae; border-right-color: #9aa4ae; }
+  .china .cell .bevel { border-bottom-color: #d98a72; border-right-color: #d98a72; }
+  .gla .cell .bevel { border-bottom-color: #cbbf82; border-right-color: #cbbf82; }
+  .cell .rim { display: none; position: absolute; left: -1px; top: -1px; right: -1px; bottom: -1px; border: 1px solid #e8c24a; }
+  .cell.owned .rim { display: block; }
+  .cell.ready .rim { display: block; border-color: #eef3f7; }
+
+  /* the close button: a key sunk in the steel, lit steel with a gold rim under the pointer, pressed in
+     while held */
+  .close { border: 1px solid #06090b; border-bottom-color: #9aa4ae; border-right-color: #9aa4ae; background-color: rgba(4, 8, 10, 0.9);
+           text-align: center; font-size: 8px; font-weight: bold; color: #e8eef2; }
+  .close.hilite { background: linear-gradient(to bottom, #b3bbc4, #5a626c); border-color: #e8d27a; color: #ffffff; }
+  .china .close.hilite { background: linear-gradient(to bottom, #d58a70, #7a3120); }
+  .gla .close.hilite { background: linear-gradient(to bottom, #cabe86, #766a3a); }
+  .held .close.hilite, .close.pushed { background: linear-gradient(to bottom, #151a1f, #3a414a); border-color: #e8d27a; }
+  .close .label { position: absolute; left: 0; right: 0; top: 50%; margin-top: -6px; line-height: 12px; }
+</style>
+</head>
+<body>
+<div class="{{side}} {{held}}">
+  <div class="piece plate" style="left: {{panel.x}}px; top: {{panel.y}}px; width: {{panel.w}}px; height: {{panel.h}}px"></div>
+  <div class="piece well" style="left: {{well.x}}px; top: {{well.y}}px; width: {{well.w}}px; height: {{well.h}}px"></div>
+
+  <div class="piece title {{StaticTextTitle.shown}}" style="left: {{StaticTextTitle.x}}px; top: {{StaticTextTitle.y}}px; width: {{StaticTextTitle.w}}px; height: {{StaticTextTitle.h}}px; line-height: {{StaticTextTitle.h}}px">{{title}}</div>
+  <div class="piece groove {{ProgressBarExperience.shown}}" style="left: {{ProgressBarExperience.x}}px; top: {{ProgressBarExperience.y}}px; width: {{ProgressBarExperience.w}}px; height: {{ProgressBarExperience.h}}px">
+    <div class="rung {{lit}}" data-each="exprungs" style="left: {{x}}px; width: {{w}}px"><div class="seg"></div></div>
+    <div class="lip"></div>
+  </div>
+  <div class="piece points {{StaticTextRankPointsAvailable.shown}}" style="left: {{StaticTextRankPointsAvailable.x}}px; top: {{StaticTextRankPointsAvailable.y}}px; width: {{StaticTextRankPointsAvailable.w}}px; height: {{StaticTextRankPointsAvailable.h}}px; line-height: {{StaticTextRankPointsAvailable.h}}px">{{points}}</div>
+
+  <div class="piece heading" data-each="headings" style="left: {{heading.x}}px; top: {{heading.y}}px; width: {{heading.w}}px; height: {{heading.h}}px">{{label}}<div class="rule"></div></div>
+  <div class="piece cell {{state}}" data-each="cells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="bevel"></div><div class="rim"></div></div>
+
+  <div class="piece close {{ButtonExit.shown}} {{ButtonExit.state}}" style="left: {{ButtonExit.x}}px; top: {{ButtonExit.y}}px; width: {{ButtonExit.w}}px; height: {{ButtonExit.h}}px"><div class="label">{{text:GUI:CloseExpScreen}}</div></div>
+</div>
+</body>
+</html>

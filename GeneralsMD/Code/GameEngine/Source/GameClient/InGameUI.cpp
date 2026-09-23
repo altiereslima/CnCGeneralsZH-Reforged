@@ -1203,6 +1203,8 @@ InGameUI::InGameUI()
 	m_scoreboardPageLoaded = FALSE;
 	m_controlBarOverlay = NULL;
 	m_controlBarPageLoaded = FALSE;
+	m_promotionOverlay = NULL;
+	m_promotionPageLoaded = FALSE;
 	m_controlBarPageShown = FALSE;
 	m_tooltipOverlay = NULL;
 	m_tooltipPageLoaded = FALSE;
@@ -1331,6 +1333,8 @@ InGameUI::~InGameUI()
 	m_scoreboardOverlay = NULL;
 	delete m_controlBarOverlay;
 	m_controlBarOverlay = NULL;
+	delete m_promotionOverlay;
+	m_promotionOverlay = NULL;
 	delete m_tooltipOverlay;
 	m_tooltipOverlay = NULL;
 }
@@ -3882,6 +3886,7 @@ void InGameUI::reset( void )
 	m_scoreboardPageLoaded = FALSE;
 	m_controlBarPageLoaded = FALSE;
 	m_tooltipPageLoaded = FALSE;
+	m_promotionPageLoaded = FALSE;
 	m_signalsWereShown = FALSE;
 	m_spectatorPageLoaded = FALSE;
 	m_spectatorFlipped.clear();
@@ -10172,6 +10177,8 @@ void InGameUI::drawScoreboard( void )
 }
 
 static const char *const CONTROL_BAR_PAGE = "Window\\Html\\ControlBar.html";
+static const char *const PROMOTION_PAGE = "Window\\Html\\Promotion.html";
+static void standDownPromotionScreen( void );
 
 /** The command bar's windows the page is told the place of, by their name in ControlBar.wnd. */
 static const char *const CONTROL_BAR_WINDOWS[] =
@@ -10251,6 +10258,17 @@ static void putPowerBar( HtmlValues &values, std::vector< HtmlValues > &cells )
 		values[ "power.state" ] = "green";
 }
 
+/** How far `player` is from this rank to the next, 0 to 100.  A script can disable a level, which
+	* leaves its points required at -1: a rank with no way on counts as full, where the bar's own
+	* drawing divided by it. */
+static Int experiencePercent( const Player *player )
+{
+	enum { FULL = 100 };
+	const Int span = player->getSkillPointsLevelUp() - player->getSkillPointsLevelDown();
+	const Int progress = span > 0 ? ( player->getSkillPoints() - player->getSkillPointsLevelDown() ) * FULL / span : FULL;
+	return min( (Int)FULL, max( 0, progress ) );
+}
+
 //-------------------------------------------------------------------------------------------------
 /** The general's experience as the page draws it, in the groove {{expframe.x}} ... puts down the
 	* right panel: `cells` from the bottom up, each {{lit}} "lit" up to the way from this rank to the
@@ -10275,11 +10293,7 @@ static void putExperienceBar( HtmlValues &values, std::vector< HtmlValues > &cel
 	if( player == NULL )
 		return;
 
-	// a script can disable a level, which leaves its points required at -1: a rank with no way on
-	// counts as full, where the bar's own drawing divided by it
-	const Int span = player->getSkillPointsLevelUp() - player->getSkillPointsLevelDown();
-	const Int progress = span > 0 ? ( player->getSkillPoints() - player->getSkillPointsLevelDown() ) * FULL / span : FULL;
-	const Int lit = min( (Int)EXPERIENCE_CELLS, max( 0, progress ) * EXPERIENCE_CELLS / FULL );
+	const Int lit = experiencePercent( player ) * EXPERIENCE_CELLS / FULL;
 	const Int column = height - 2 * FRAME_LIP;
 	for( Int cell = 0; cell < EXPERIENCE_CELLS && column > 0; cell++ )
 	{
@@ -10895,6 +10909,15 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 			window->winHide( TRUE );
 	}
 
+	// the promotion screen is its own layout, drawn over the bar; its page goes with this one
+	if( !m_promotionPageLoaded )
+	{
+		m_promotionPageLoaded = TRUE;
+		readHtmlPage( PROMOTION_PAGE, m_promotionPage );
+	}
+	if( !m_promotionPage.empty() )
+		standDownPromotionScreen();
+
 	m_controlBarOverlay->setPage( HtmlTemplate_expand( m_controlBarPage, values, lists, lookupGameText ) );
 	m_controlBarOverlay->hover( TheMouse->getMouseStatus()->pos );
 	m_controlBarOverlay->draw();
@@ -10939,6 +10962,281 @@ Bool InGameUI::handleControlBarPageClick( const ICoord2D *mouse, Bool act )
 	if( TheAudio )
 		TheAudio->addAudioEvent( &buttonClick );
 	return TRUE;
+}
+
+static const char *const PROMOTION_PREFIX = "GeneralsExpPoints.wnd:";
+static const char *const PROMOTION_BUTTON_PREFIX = "ButtonRank";
+
+/** The promotion screen's three rows, each a run of ButtonRankNNumberM buttons under a heading. */
+static const struct PromotionRow
+{
+	const char *buttons;	///< the buttons' name, before their number
+	Int count;
+	Int depth;						///< buttons to a column: the layout numbers the middle row's down each column
+	const char *heading;	///< the string table label over the row
+} PROMOTION_ROWS[] =
+{
+	{ "ButtonRank1Number", 4, 1, "GUI:Rank1Required" },
+	{ "ButtonRank3Number", 15, 3, "GUI:Rank3Required" },
+	{ "ButtonRank8Number", 4, 1, "GUI:Rank8Required" }
+};
+
+/** The compact screen's measures, 800x600 pixels; a cell is a command button's size. */
+enum
+{
+	PROMOTION_COLUMNS		= 5,	///< the widest row, the middle one
+	PROMOTION_MARGIN		= 6,	///< the plate round the well, and the well's gap under the bar
+	PROMOTION_INSET			= 4,	///< the well round the cells
+	PROMOTION_CELL_GAP	= 2,
+	PROMOTION_TITLE			= 14,	///< the rank's name's line, the points beside it
+	PROMOTION_BAR				= 7,	///< the experience bar under it
+	PROMOTION_BAR_GAP		= 3,
+	PROMOTION_HEADING		= 14,	///< a row's heading over its first button
+	PROMOTION_SECTION		= 8		///< between one row's last cells and the next row's heading
+};
+
+/** One place in the screen's grids, screen pixels, and the promotion's button standing in it: NULL
+	* for a place no promotion fills, which shows as a hole, and the close button in its own place. */
+struct PromotionPlace
+{
+	IRegion2D rect;
+	GameWindow *button;
+};
+
+/** Where layoutPromotionScreen put everything the page draws round the windows. */
+struct PromotionLayout
+{
+	std::vector< PromotionPlace > places;
+	std::vector< IRegion2D > headings;	///< one over each row, in PROMOTION_ROWS' order
+	IRegion2D well;
+};
+
+static GameWindow *promotionWindow( const std::string &name )
+{
+	return TheWindowManager->winGetWindowFromId( NULL, NAMEKEY( ( PROMOTION_PREFIX + name ).c_str() ) );
+}
+
+/** Puts one of the screen's windows at `x`, `y` in its parent, `width` by `height`, screen pixels. */
+static void placePromotionWindow( const std::string &name, Int x, Int y, Int width, Int height )
+{
+	GameWindow *window = promotionWindow( name );
+	window->winSetPosition( x, y );
+	window->winSetSize( width, height );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The promotion screen laid out compact, every frame it draws, over the layout's own places: each
+	* row a grid five places wide in command button cells with a hair of steel between them, the way
+	* the command bar's grid is, a heading over it and a gap before the next; the rank's name and the
+	* points on one line with the bar under them, and the close button in the last row's fifth place,
+	* which no side fills.  Centred at the top of the screen where the layout hung it.  `layout` gets
+	* every place, filled or not, the headings and the well, in screen pixels. */
+//-------------------------------------------------------------------------------------------------
+static void layoutPromotionScreen( GameWindow *parent, PromotionLayout &layout )
+{
+	const Real scale = ControlBarUniformScale();
+	struct Page { static Int px( Int pagePixels, Real scale ) { return REAL_TO_INT( pagePixels * scale ); } };
+	const IRegion2D button = commandButtonRect( 1 );
+	const Int cellWidth = button.hi.x - button.lo.x;
+	const Int cellHeight = button.hi.y - button.lo.y;
+	const Int gap = Page::px( PROMOTION_CELL_GAP, scale );
+	const Int margin = Page::px( PROMOTION_MARGIN, scale );
+	const Int inset = Page::px( PROMOTION_INSET, scale );
+	const Int heading = Page::px( PROMOTION_HEADING, scale );
+
+	const Int gridWidth = PROMOTION_COLUMNS * cellWidth + ( PROMOTION_COLUMNS - 1 ) * gap;
+	const Int width = gridWidth + 2 * ( margin + inset );
+	const Int titleHeight = Page::px( PROMOTION_TITLE, scale );
+	const Int pointsWidth = Page::px( PROMOTION_TITLE + PROMOTION_BAR, scale );
+	placePromotionWindow( "StaticTextTitle", margin, margin, width - 2 * margin - pointsWidth, titleHeight );
+	placePromotionWindow( "StaticTextRankPointsAvailable", width - margin - pointsWidth, margin, pointsWidth,
+												titleHeight + Page::px( PROMOTION_BAR + PROMOTION_BAR_GAP, scale ) );
+	placePromotionWindow( "ProgressBarExperience", margin, margin + titleHeight + Page::px( PROMOTION_BAR_GAP, scale ),
+												width - 3 * margin - pointsWidth, Page::px( PROMOTION_BAR, scale ) );
+
+	// the parent goes first, so the places can be handed out in screen pixels
+	Int parentX = 0, parentY = 0;
+	parent->winGetPosition( &parentX, &parentY );
+	parentX = ( TheDisplay->getWidth() - width ) / 2;
+	parent->winSetPosition( parentX, parentY );
+
+	// the well stands a margin under the bar and the points, and the cells an inset inside it
+	const Int wellTop = margin + titleHeight + Page::px( PROMOTION_BAR_GAP + PROMOTION_BAR, scale ) + margin;
+	Int y = wellTop + inset;
+	const Int left = margin + inset;
+	layout.places.clear();
+	layout.headings.clear();
+	for( Int row = 0; row < (Int)ARRAY_SIZE( PROMOTION_ROWS ); row++ )
+	{
+		if( row > 0 )
+			y += Page::px( PROMOTION_SECTION, scale );
+		IRegion2D title;
+		title.lo.x = parentX + left;
+		title.hi.x = title.lo.x + gridWidth;
+		title.lo.y = parentY + y;
+		title.hi.y = title.lo.y + heading - gap;
+		layout.headings.push_back( title );
+		y += heading;
+
+		const Int depth = PROMOTION_ROWS[ row ].depth;
+		const Bool lastRow = row == (Int)ARRAY_SIZE( PROMOTION_ROWS ) - 1;
+		for( Int column = 0; column < PROMOTION_COLUMNS; column++ )
+		{
+			for( Int line = 0; line < depth; line++ )
+			{
+				const Int x = left + column * ( cellWidth + gap );
+				const Int top = y + line * ( cellHeight + gap );
+				const Int number = column * depth + line;
+				PromotionPlace place;
+				place.rect.lo.x = parentX + x;
+				place.rect.lo.y = parentY + top;
+				place.rect.hi.x = place.rect.lo.x + cellWidth;
+				place.rect.hi.y = place.rect.lo.y + cellHeight;
+				place.button = NULL;
+				if( lastRow && column == PROMOTION_COLUMNS - 1 )
+				{
+					placePromotionWindow( "ButtonExit", x, top, cellWidth, cellHeight );
+					place.button = promotionWindow( "ButtonExit" );
+				}
+				else if( number < PROMOTION_ROWS[ row ].count )
+				{
+					const std::string name = PROMOTION_ROWS[ row ].buttons + std::to_string( number );
+					placePromotionWindow( name, x, top, cellWidth, cellHeight );
+					place.button = promotionWindow( name );
+				}
+				layout.places.push_back( place );
+			}
+		}
+		y += depth * ( cellHeight + gap ) - gap;
+	}
+
+	const Int height = y + inset + margin;
+	parent->winSetSize( width, height );
+	layout.well.lo.x = parentX + margin;
+	layout.well.hi.x = parentX + width - margin;
+	layout.well.lo.y = parentY + wellTop;
+	layout.well.hi.y = parentY + height - margin;
+}
+
+/** The screen's picture, drawn by the page while it is there. */
+static void drawPromotionScreen( GameWindow *window, WinInstanceData *instData )
+{
+	TheInGameUI->drawPromotionPage( window );
+}
+
+/** The promotion screen hands its look to the page: the parent draws the page, and every child but
+	* the promotions' own buttons draws nothing - the side's painting, the titles, the bar and its frame
+	* and the close button are the page's.  They all keep their clicks. */
+static void standDownPromotionScreen( void )
+{
+	GameWindow *parent = promotionWindow( "GenExpParent" );
+	if( parent == NULL )
+		return;
+
+	parent->winSetDrawFunc( drawPromotionScreen );
+	const std::string buttonName = std::string( PROMOTION_PREFIX ) + PROMOTION_BUTTON_PREFIX;
+	for( GameWindow *child = parent->winGetChild(); child; child = child->winGetNext() )
+	{
+		if( !child->winGetInstanceData()->m_decoratedNameString.startsWith( buttonName.c_str() ) )
+			child->winSetDrawFunc( drawNothing );
+	}
+}
+
+/** "owned", "ready" or "locked" for one promotion's button, by the state the bar left it in: enabled
+	* when it can be bought, disabled in colour when it was, disabled in grey otherwise. */
+static const char *promotionState( GameWindow *button )
+{
+	if( BitTest( button->winGetStatus(), WIN_STATUS_ENABLED ) )
+		return "ready";
+	return BitTest( button->winGetStatus(), WIN_STATUS_ALWAYS_COLOR ) ? "owned" : "locked";
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The general's promotion screen from Window/Html/Promotion.html, in the place of the side's
+	* painting.  Everything is placed from the screen's own windows, so it goes where the layout and
+	* the scheme put them; the promotions are the bar's buttons and paint over it. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::drawPromotionPage( GameWindow *parent )
+{
+	enum
+	{
+		EXPERIENCE_RUNGS	= 20,
+		FULL							= 100
+	};
+
+	if( m_promotionOverlay == NULL )
+		m_promotionOverlay = new HtmlOverlay( m_superweaponNormalFont );
+
+	// laid out here, the parent's own draw, so every child is in its place before it draws
+	PromotionLayout layout;
+	layoutPromotionScreen( parent, layout );
+
+	HtmlValues values;
+	HtmlLists lists;
+	values[ "side" ] = spectatorSide();
+	values[ "held" ] = TheMouse->getMouseStatus()->leftState != MBS_Up ? "held" : "";
+
+	IRegion2D panel;
+	controlBarWindowRect( parent, panel );
+	putPageRect( values, "panel", panel, TRUE );
+
+	static const char *const PLACED[] = { "StaticTextTitle", "ProgressBarExperience", "StaticTextRankPointsAvailable", "ButtonExit" };
+	for( Int each = 0; each < (Int)ARRAY_SIZE( PLACED ); each++ )
+	{
+		GameWindow *window = promotionWindow( PLACED[ each ] );
+		IRegion2D rect;
+		putPageRect( values, PLACED[ each ], rect, controlBarWindowRect( window, rect ) );
+		values[ std::string( PLACED[ each ] ) + ".state" ] = controlBarWindowState( window );
+	}
+	values[ "title" ] = WideCharStringToMultiByte( GadgetStaticTextGetText( promotionWindow( "StaticTextTitle" ) ).str() );
+	values[ "points" ] = WideCharStringToMultiByte( GadgetStaticTextGetText( promotionWindow( "StaticTextRankPointsAvailable" ) ).str() );
+
+	// the bar goes by the player the screen was opened for, the watched one while watching
+	const Player *player = TheControlBar->isObserverControlBarOn() ? TheControlBar->getObserverLookAtPlayer()
+																																 : ThePlayerList->getLocalPlayer();
+	// its rungs cut from the bar's width in page pixels so they add up to it exactly, as the power
+	// bar's cells are
+	const Int lit = player ? experiencePercent( player ) * EXPERIENCE_RUNGS / FULL : 0;
+	const Int barWidth = atoi( values[ "ProgressBarExperience.w" ].c_str() );
+	std::vector< HtmlValues > &rungs = lists[ "exprungs" ];
+	for( Int rung = 0; rung < EXPERIENCE_RUNGS && barWidth > 0; rung++ )
+	{
+		const Int left = rung * barWidth / EXPERIENCE_RUNGS;
+		HtmlValues entry;
+		entry[ "lit" ] = rung < lit ? "lit" : "";
+		entry[ "x" ] = std::to_string( left );
+		entry[ "w" ] = std::to_string( ( rung + 1 ) * barWidth / EXPERIENCE_RUNGS - left );
+		rungs.push_back( entry );
+	}
+
+	// the promotions stand in a well of steel, a dark cell for every place of every row, filled or
+	// not, as the command grid's are, and each row's heading over it
+	putPageRect( values, "well", layout.well, TRUE );
+	GameWindow *exit = promotionWindow( "ButtonExit" );
+	std::vector< HtmlValues > &cells = lists[ "cells" ];
+	for( size_t each = 0; each < layout.places.size(); each++ )
+	{
+		const PromotionPlace &place = layout.places[ each ];
+		if( place.button == exit )
+			continue;
+
+		HtmlValues entry;
+		putPageRect( entry, "cell", place.rect, TRUE );
+		entry[ "state" ] = place.button && !place.button->winIsHidden() ? promotionState( place.button ) : "empty";
+		cells.push_back( entry );
+	}
+	std::vector< HtmlValues > &headings = lists[ "headings" ];
+	for( size_t row = 0; row < layout.headings.size(); row++ )
+	{
+		HtmlValues entry;
+		putPageRect( entry, "heading", layout.headings[ row ], TRUE );
+		entry[ "label" ] = WideCharStringToMultiByte( TheGameText->fetch( PROMOTION_ROWS[ row ].heading ).str() );
+		headings.push_back( entry );
+	}
+
+	m_promotionOverlay->setPage( HtmlTemplate_expand( m_promotionPage, values, lists, lookupGameText ) );
+	m_promotionOverlay->hover( TheMouse->getMouseStatus()->pos );
+	m_promotionOverlay->draw();
 }
 
 //-------------------------------------------------------------------------------------------------
