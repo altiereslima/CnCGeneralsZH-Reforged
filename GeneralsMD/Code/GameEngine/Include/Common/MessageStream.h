@@ -297,9 +297,6 @@ public:
 		MSG_META_HOLD_POSITION,											///< hold position: guard in place, no pursuit (fork)
 		MSG_META_TOGGLE_GUARD,											///< arm guard for the next order click or drag (fork)
 		MSG_META_TOGGLE_PAUSE,											///< pause/unpause, single player and replay only (fork)
-		MSG_META_GAME_SPEED_UP,											///< raise the logic rate (fork)
-		MSG_META_GAME_SPEED_DOWN,										///< lower the logic rate (fork)
-		MSG_META_GAME_SPEED_RESET,									///< back to the default logic rate (fork)
 		MSG_META_TOGGLE_PURCHASE_SCIENCE,						///< open/close the general's promotion screen (fork)
 		
 		MSG_META_BEGIN_CAMERA_ROTATE_LEFT,

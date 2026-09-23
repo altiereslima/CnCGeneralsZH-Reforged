@@ -251,30 +251,6 @@ GUI:GameResumed
 "Game resumed."
 END
 
-GUI:GameSpeedUp
-"Game Speed Up"
-END
-
-GUI:GameSpeedUpDescription
-"Speeds the game up by five logic frames a second. Single player and replays only."
-END
-
-GUI:GameSpeedDown
-"Game Speed Down"
-END
-
-GUI:GameSpeedDownDescription
-"Slows the game down by five logic frames a second. Single player and replays only."
-END
-
-GUI:GameSpeedReset
-"Normal Game Speed"
-END
-
-GUI:GameSpeedResetDescription
-"Puts the game back to its normal speed. Single player and replays only."
-END
-
 GUI:SelectAllMilitary
 "Select Military Units"
 END

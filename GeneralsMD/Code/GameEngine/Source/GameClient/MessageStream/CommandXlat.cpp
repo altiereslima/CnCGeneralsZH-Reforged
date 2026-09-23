@@ -3579,33 +3579,6 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			break;
 		}
 
-		case GameMessage::MSG_META_GAME_SPEED_UP:
-		case GameMessage::MSG_META_GAME_SPEED_DOWN:
-		case GameMessage::MSG_META_GAME_SPEED_RESET:
-		{
-			if( TheGameEngine && TheGameLogic && !TheGameLogic->isInMultiplayerGame() )
-			{
-				const Int MIN_LOGIC_FPS = 5;
-				const Int MAX_LOGIC_FPS = 200;
-				Int fps = TheGameEngine->getFramesPerSecondLimit();
-
-				if( t == GameMessage::MSG_META_GAME_SPEED_RESET )
-					fps = LOGICFRAMES_PER_SECOND;	// DEFAULT_MAX_FPS is 45, which put "normal" at one and a half times
-				else if( t == GameMessage::MSG_META_GAME_SPEED_UP )
-					fps += 5;
-				else
-					fps -= 5;
-
-				if( fps < MIN_LOGIC_FPS ) fps = MIN_LOGIC_FPS;
-				if( fps > MAX_LOGIC_FPS ) fps = MAX_LOGIC_FPS;
-
-				TheGameEngine->setFramesPerSecondLimit( fps );
-				TheInGameUI->message( UnicodeString( L"Game speed: %d%%" ), fps * 100 / LOGICFRAMES_PER_SECOND );
-			}
-			disp = DESTROY_MESSAGE;
-			break;
-		}
-
 		//
 		// Hold position: every selected unit guards the spot it is standing on and does not
 		// pursue. The location has to be resolved per unit on the logic side, so this carries

@@ -14849,30 +14849,6 @@ GUI:GameResumed
 "Oyun devam ediyor."
 END
 
-GUI:GameSpeedUp
-"Oyunu Hızlandır"
-END
-
-GUI:GameSpeedUpDescription
-"Oyunu saniyede beş mantık karesi hızlandırır. Yalnızca tek oyunculu oyunlarda ve tekrarlarda."
-END
-
-GUI:GameSpeedDown
-"Oyunu Yavaşlat"
-END
-
-GUI:GameSpeedDownDescription
-"Oyunu saniyede beş mantık karesi yavaşlatır. Yalnızca tek oyunculu oyunlarda ve tekrarlarda."
-END
-
-GUI:GameSpeedReset
-"Normal Oyun Hızı"
-END
-
-GUI:GameSpeedResetDescription
-"Oyunu normal hızına döndürür. Yalnızca tek oyunculu oyunlarda ve tekrarlarda."
-END
-
 GUI:SelectAllMilitary
 "Askeri Birlikleri Seç"
 END
