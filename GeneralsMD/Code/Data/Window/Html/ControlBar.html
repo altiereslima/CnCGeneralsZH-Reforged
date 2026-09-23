@@ -92,6 +92,22 @@
   .gla .frame { border-color: #867a45; border-top-color: #cbbf82; border-left-color: #a99d62; border-bottom-color: #48401e; border-right-color: #625a31;
                 background-color: rgba(10, 9, 4, 0.94); }
 
+  /* the radar's bezel: a steel plate lit from above over the whole border, a light line along its
+     top and a dark one down its right, and the radar sunk in a two pixel well.  Every piece is
+     placed from the container's corner with the border's widths written in, since the page cannot
+     add a width to a width */
+  .bezel .steel { position: absolute; background: linear-gradient(to bottom, #9aa3ad, #5a626c 30%, #353c45); }
+  .bezel .shine { position: absolute; height: 1px; background-color: #dde4ea; }
+  .bezel .shade { position: absolute; width: 1px; background-color: #0c1114; }
+  .bezel .sunk { position: absolute; left: -2px; top: -2px; border: 2px solid #06090b;
+                 border-bottom-color: #b4bec8; border-right-color: #b4bec8; background-color: #020405; }
+  .china .bezel .steel { background: linear-gradient(to bottom, #c06a52, #7a3120 30%, #3f160f); }
+  .china .bezel .shine { background-color: #f0b8a4; }
+  .china .bezel .sunk { border-bottom-color: #d98a72; border-right-color: #d98a72; }
+  .gla .bezel .steel { background: linear-gradient(to bottom, #b8ab6e, #766a3a 30%, #3c3519); }
+  .gla .bezel .shine { background-color: #ebe2b4; }
+  .gla .bezel .sunk { border-bottom-color: #cbbf82; border-right-color: #cbbf82; }
+
   /* over the centre's border the power bar's frame and on it the money's block, stacked flush */
   .stack { box-sizing: border-box; margin: 0; }
   /* the money's block is only as tall as its figure, so it wears its lit top edge and no rail */
@@ -150,9 +166,16 @@
 
   /* the under-attack light: a tab standing on the radar panel's border at its left end, red while
      the bar blinks it */
-  .alert { line-height: 14px; text-align: center; font-size: 7px; font-weight: bold;
-           color: #5a2a24; background-color: rgba(20, 8, 6, 0.9); }
-  .alert.disabled { color: #ffffff; background: linear-gradient(to bottom, #ff6a50, #b0200f); border-color: #ffb0a0; }
+  /* a red lamp in a tab cut from the bezel's own steel, running down into its top edge; dark until
+     the bar blinks it.  The tab is 54 by 14 and the lamp a bar 42 by 10 with its rim */
+  .alert { background: linear-gradient(to bottom, #b3bbc4, #8b949e); border-top: 1px solid #dde4ea; border-right: 1px solid #0c1114; }
+  .china .alert { background: linear-gradient(to bottom, #d58a70, #c06a52); border-top-color: #f0b8a4; }
+  .gla .alert { background: linear-gradient(to bottom, #cabe86, #b8ab6e); border-top-color: #ebe2b4; }
+  .alert .led { position: absolute; left: 6px; top: 2px; width: 40px; height: 8px; border: 1px solid #120302;
+                background: linear-gradient(to bottom, #4a0d08, #2a0604); }
+  .alert .glint { position: absolute; left: 2px; top: 1px; width: 36px; height: 2px; background-color: #6a2a24; }
+  .alert.disabled .led { border-color: #ff9a80; background: linear-gradient(to bottom, #ff6a50, #d01a08); }
+  .alert.disabled .glint { background-color: #ffe4dc; }
 
   /* the skills button is lit while the powers are out, and dark once folded away; the grid's empty
      places stand behind the powers, and go with them */
@@ -183,8 +206,13 @@
 <body>
 <div class="{{side}} {{watching}}">
 
-  <div class="piece frame solid {{left.shown}}" style="left: {{left.x}}px; top: {{left.y}}px; width: {{left.w}}px; height: {{left.h}}px; border-width: {{left.bt}}px {{left.br}}px {{left.bb}}px {{left.bl}}px"></div>
-  <div class="piece alert {{alerttab.shown}} {{WinUAttack.state}}" style="left: {{alerttab.x}}px; top: {{alerttab.y}}px; width: {{alerttab.w}}px; height: {{alerttab.h}}px">{{text:GUI:BarUnderAttack}}</div>
+  <div class="piece frame bezel solid {{left.shown}}" style="left: {{left.x}}px; top: {{left.y}}px; width: {{left.w}}px; height: {{left.h}}px; border-width: {{left.bt}}px {{left.br}}px {{left.bb}}px {{left.bl}}px">
+    <div class="steel" style="left: -{{left.bl}}px; right: -{{left.br}}px; top: -{{left.bt}}px; bottom: -{{left.bb}}px"></div>
+    <div class="shine" style="left: -{{left.bl}}px; right: -{{left.br}}px; top: -{{left.bt}}px"></div>
+    <div class="shade" style="right: -{{left.br}}px; top: -{{left.bt}}px; bottom: -{{left.bb}}px"></div>
+    <div class="sunk" style="width: {{left.w}}px; height: {{left.h}}px"></div>
+  </div>
+  <div class="piece alert {{alerttab.shown}} {{WinUAttack.state}}" style="left: {{alerttab.x}}px; top: {{alerttab.y}}px; width: {{alerttab.w}}px; height: {{alerttab.h}}px"><div class="led"><div class="glint"></div></div></div>
   <div class="piece panel solid stack moneyblock {{moneyblock.shown}}" style="left: {{moneyblock.x}}px; top: {{moneyblock.y}}px; width: {{moneyblock.w}}px; height: {{moneyblock.h}}px"><div class="rail"></div></div>
   <div class="piece groove solid stack {{powerframe.shown}}" style="left: {{powerframe.x}}px; top: {{powerframe.y}}px; width: {{powerframe.w}}px; height: {{powerframe.h}}px">
     <div class="cells {{power.state}}" style="height: {{powerframe.inner}}px"><div class="cell {{lit}}" data-each="powercells" style="left: {{x}}px; width: {{w}}px; height: {{powerframe.inner}}px"><div class="seg" style="height: {{powerframe.inner}}px"></div></div></div>

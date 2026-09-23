@@ -1131,11 +1131,6 @@ GUI:BarNetUnits
 "units"
 END
 
-// the box in the corner of the radar that lights while your forces are under attack
-GUI:BarUnderAttack
-"UNDER ATTACK"
-END
-
 // the scoreboard on Tab
 GUI:ScoreboardAllies
 "YOUR SIDE"

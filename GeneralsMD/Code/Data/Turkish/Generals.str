@@ -15653,10 +15653,6 @@ GUI:BarNetUnits
 "birim"
 END
 
-GUI:BarUnderAttack
-"SALDIRI ALTINDA"
-END
-
 GUI:ScoreboardAllies
 "TAKIMIN"
 END

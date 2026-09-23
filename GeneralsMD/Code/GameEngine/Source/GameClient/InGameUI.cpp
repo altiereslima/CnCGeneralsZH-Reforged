@@ -10267,7 +10267,7 @@ enum
 	SKILL_GRID_ROWS				= 3,		///< the empty places drawn behind the powers
 	SKILL_GRID_COLUMNS		= 3,
 	SKILLS_BUTTON_WIDTH		= 58,		///< wide enough for its name in either language
-	ALERT_TAB_WIDTH				= 84,		///< the under-attack light, on the radar panel's border
+	ALERT_TAB_WIDTH				= 54,		///< the under-attack light, a lamp on the radar panel's border
 	WORKER_TAB_WIDTH			= 44		///< the idle worker button, on the command grid panel's border
 };
 static const char *const SKILLS_FOLDED = "skills";	///< the flip the skills button toggles; flipped is folded away
