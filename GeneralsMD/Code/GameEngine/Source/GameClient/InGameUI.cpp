@@ -12746,7 +12746,7 @@ static void putBuildTooltipCard( const BuildTooltipCard &card, HtmlValues &value
 		const BuildTooltipUpgrade &upgrade = card.upgrades[ each ];
 		HtmlValues head;
 		head[ "kind" ] = "upgrade";
-		head[ "name" ] = WideCharStringToMultiByte( upgrade.name.str() );
+		head[ "name" ] = tooltipName( upgrade.name );
 		head[ "owned" ] = upgrade.owned ? "owned" : "";
 		upgrades.push_back( head );
 		for( size_t change = 0; change < upgrade.changes.size(); ++change )

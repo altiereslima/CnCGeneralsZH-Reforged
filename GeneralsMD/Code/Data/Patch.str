@@ -962,6 +962,14 @@ TOOLTIP:StatNewWeapon
 "New weapon"
 END
 
+TOOLTIP:StatNewWeaponGround
+"Ground weapon"
+END
+
+TOOLTIP:StatNewWeaponAir
+"Anti-air weapon"
+END
+
 TOOLTIP:StatNewWeaponFigures
 "%d damage, %d range"
 END

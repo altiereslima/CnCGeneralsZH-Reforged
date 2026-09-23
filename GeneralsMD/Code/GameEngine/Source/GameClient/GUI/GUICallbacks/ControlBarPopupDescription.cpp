@@ -307,9 +307,15 @@ static void putChanges( const UnitFigures &from, const UnitFigures &to, const Up
 		if( ( slot == main && main != WEAPONSLOT_COUNT && after.weapon ) || after.weapon == NULL || after.weapon == from.slots[ slot ].weapon )
 			continue;
 
+		// named by what it aims at, since TOW puts in one missile for the ground and one for the air
+		const Int aims = after.weapon->getAntiMask();
+		const Bool atGround = ( aims & WEAPON_ANTI_GROUND ) != 0;
+		const Bool atAir = ( aims & WEAPON_ANTI_AIRBORNE_VEHICLE ) != 0;
+		const char *label = atGround == atAir ? "TOOLTIP:StatNewWeapon" : ( atAir ? "TOOLTIP:StatNewWeaponAir" : "TOOLTIP:StatNewWeaponGround" );
+
 		UnicodeString figures;
 		figures.format( TheGameText->fetch( "TOOLTIP:StatNewWeaponFigures" ), REAL_TO_INT( after.damage ), REAL_TO_INT( after.range ) );
-		const BuildTooltipChange weapon = { "TOOLTIP:StatNewWeapon", "", WideCharStringToMultiByte( figures.str() ) };
+		const BuildTooltipChange weapon = { label, "", WideCharStringToMultiByte( figures.str() ) };
 		changes.push_back( weapon );
 	}
 
@@ -333,6 +339,31 @@ static UpgradeEffect ownedEffect( const UpgradeEffects &effects, const Player *p
 			addEffect( owned, upgrade->second );
 	}
 	return owned;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** What the build button that sells `upgrade` calls it, so a unit's card and the upgrade's own card
+	* say the same name: the upgrade's own label reads "Ranger Flash-Bang Grenades" where its button
+	* reads "Flash-Bang Grenades".  The selection's own buttons first, since several buttons sell one
+	* upgrade under labels that differ ("Flash-Bang Grenade" on one, "Grenades" on the Barracks'); then
+	* any button; the upgrade's label when no button sells it. */
+//-------------------------------------------------------------------------------------------------
+static UnicodeString upgradeButtonName( const UpgradeTemplate *upgrade )
+{
+	const Drawable *selected = TheInGameUI->getFirstSelectedDrawable();
+	const Object *seller = selected ? selected->getObject() : NULL;
+	const CommandSet *set = seller ? TheControlBar->findCommandSet( seller->getCommandSetString() ) : NULL;
+	for( Int slot = 0; set && slot < MAX_COMMANDS_PER_SET; ++slot )
+	{
+		const CommandButton *button = set->getCommandButton( slot );
+		if( button && button->getUpgradeTemplate() == upgrade && button->getTextLabel().isNotEmpty() )
+			return TheGameText->fetch( button->getTextLabel() );
+	}
+
+	for( const CommandButton *button = TheControlBar->getCommandButtons(); button; button = button->getNext() )
+		if( button->getUpgradeTemplate() == upgrade && button->getTextLabel().isNotEmpty() )
+			return TheGameText->fetch( button->getTextLabel() );
+	return TheGameText->fetch( upgrade->getDisplayNameLabel() );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -364,7 +395,7 @@ static void putUnitFigures( BuildTooltipCard &card, const ThingTemplate *thing, 
 			continue;
 
 		BuildTooltipUpgrade entry;
-		entry.name = TheGameText->fetch( upgrade->getDisplayNameLabel() );
+		entry.name = upgradeButtonName( upgrade );
 		entry.owned = player->hasUpgradeComplete( upgrade );
 		UpgradeEffect without = ownedEffect( effects, player, effect->first );
 		UpgradeEffect with = without;
@@ -557,6 +588,21 @@ const BuildTooltipCard *ControlBar::getBuildTooltipCard( void )
 	prevWindow->winGetSize( &width, &height );
 	m_buildTooltipCard.anchor.hi.x = m_buildTooltipCard.anchor.lo.x + width;
 	m_buildTooltipCard.anchor.hi.y = m_buildTooltipCard.anchor.lo.y + height;
+
+	// a command button's card stands over the whole grid, the top row's top, so a bottom row
+	// button's card does not come down over the buttons above it
+	static const NameKeyType commandWindowKey = TheNameKeyGenerator->nameToKey( "ControlBar.wnd:CommandWindow" );
+	GameWindow *grid = prevWindow->winGetParent();
+	if( grid && grid->winGetWindowId() == commandWindowKey )
+	{
+		for( GameWindow *button = grid->winGetChild(); button; button = button->winGetNext() )
+		{
+			Int buttonX, buttonY;
+			button->winGetScreenPosition( &buttonX, &buttonY );
+			if( !button->winIsHidden() )
+				m_buildTooltipCard.anchor.lo.y = min( m_buildTooltipCard.anchor.lo.y, buttonY );
+		}
+	}
 	return &m_buildTooltipCard;
 }
 

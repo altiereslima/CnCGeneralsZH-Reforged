@@ -710,7 +710,7 @@ struct BuildTooltipCard
 	Real attacksPerSecond;				///< shots a second over a whole clip and its reload
 	Int damagePerSecond;
 	std::vector< BuildTooltipUpgrade > upgrades;	///< a unit's upgrades, or the units an upgrade changes
-	IRegion2D anchor;							///< the hovered window, in screen pixels
+	IRegion2D anchor;							///< the hovered window in screen pixels, its top the grid's top for a command button
 };
 
 //-------------------------------------------------------------------------------------------------

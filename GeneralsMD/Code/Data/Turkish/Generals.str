@@ -15609,6 +15609,14 @@ TOOLTIP:StatNewWeapon
 "Yeni silah"
 END
 
+TOOLTIP:StatNewWeaponGround
+"Kara silahı"
+END
+
+TOOLTIP:StatNewWeaponAir
+"Uçaksavar silahı"
+END
+
 TOOLTIP:StatNewWeaponFigures
 "%d hasar, %d menzil"
 END
