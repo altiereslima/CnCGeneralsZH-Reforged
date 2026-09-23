@@ -25,13 +25,15 @@
     {{panelN.x}} .y .w .h  N 0 to 2, left, centre and right: where the plates would have gone,
                            moving with the bar when it slides or minimises; .w and .h are 0 and
                            {{panelN.shown}} is "hidden" when a minimised bar has stood it down
-    {{left.x}} .y .w .h    the box round the radar, so the left panel is only as big as its bezel
+    {{left.x}} .y .w .h    the left panel, grown round the radar and out to the screen's left and
+                           bottom edges
     {{centre.x}} .y .w .h  the centre as three blocks stacked flush, with their steel round them
     {{powerframe.x}} ...   already: the command grid's panel, the power bar's frame standing on it,
     {{moneyblock.x}} ...   and the money's block on the frame; each .shown as above, and
                            {{powerframe.inner}} the height inside the frame and its lip
-    {{right.x}} .y .w .h   the box round the portrait and the experience bar.  The promotion and
-                           minimise buttons are moved to sit over its top right corner
+    {{right.x}} .y .w .h   the right panel, grown round the portrait and the experience bar and out
+                           to the screen's right and bottom edges.  The promotion and minimise
+                           buttons are moved to sit in its top right corner
     {{Name.x}} .y .w .h    the rectangle of the bar's window Name, {{Name.shown}} "shown" or "hidden"
                            and {{Name.state}} any of "disabled", "hilite", "pushed", for LeftHUD (the
                            radar), RightHUD (the portrait's box), CameoWindow (the portrait),
@@ -66,8 +68,8 @@
   /* every panel hugs what it holds, and what the old plates covered round them is battlefield and
      takes clicks as one: the left the radar's bezel, the right the portrait with the two small
      buttons over its top right corner, the centre the command grid under the money and power bar */
-  .left { margin: -10px 0 0 -8px; padding: 10px 8px 8px 8px; }
-  .right { margin: -22px 0 0 -8px; padding: 22px 8px 8px 8px; }
+  /* the side panels arrive from the game already grown round their windows and run out to the
+     screen's side and bottom edges, like the centre's blocks run down to its bottom */
 
   /* the centre is three blocks stacked flush like bricks, each narrower than the one under it: the
      command grid's panel, the power bar's frame on it and the money's block on that.  The game works
@@ -91,6 +93,9 @@
   .groove { margin: -3px 0 0 -3px; border: 2px solid #7d8691; border-bottom-color: #c3ccd3; border-right-color: #aab4bf;
             background-color: #020405; }
   .groove .lip { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border: 1px solid #000000; }
+  /* the power bar's frame in the stack arrives placed exactly, and the groove's own pull up and left
+     left a gap under it */
+  .groove.stack { margin: 0; }
 
   /* the power bar is the page's: a row of cells across the frame, lit from the left up to the
      production in the power bar's own green, yellow or red, a black line between every two, and the

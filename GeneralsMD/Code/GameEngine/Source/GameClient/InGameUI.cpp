@@ -10273,7 +10273,8 @@ enum
 	STACK_FRAME					= 3,	///< the power bar's frame and lip
 	STACK_MONEY_SIDE		= 8,
 	STACK_MONEY_TOP			= 1,	///< over the money's line of text
-	STACK_MONEY_LEADING	= 4		///< screen pixels the money's window gets over its font's height
+	SIDE_PANEL_SIDE			= 8,	///< steel between a side panel's window and its inner edge
+	SIDE_PANEL_TOP			= 10	///< and over it; the outer edges are the screen's
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -10288,10 +10289,32 @@ enum
 static void stackCentre( HtmlValues &values, Bool shown )
 {
 	IRegion2D grid, power, money;
-	const Bool gridFound = controlBarUnion( CONTROL_BAR_CENTRE, grid );
+	Bool gridFound = controlBarUnion( CONTROL_BAR_CENTRE, grid );
+
+	// with nothing selected the bar hides the command grid, and the panel must not go with it: the
+	// money and the power bar stood over bare battlefield.  The grid's place holds whether it is up
+	GameWindow *commands = controlBarWindow( "CommandWindow" );
+	if( commands )
+	{
+		IRegion2D place;
+		Int width = 0, height = 0;
+		commands->winGetScreenPosition( &place.lo.x, &place.lo.y );
+		commands->winGetSize( &width, &height );
+		place.hi.x = place.lo.x + width;
+		place.hi.y = place.lo.y + height;
+		if( !gridFound )
+			grid = place;
+		grid.lo.x = min( grid.lo.x, place.lo.x );
+		grid.lo.y = min( grid.lo.y, place.lo.y );
+		grid.hi.x = max( grid.hi.x, place.hi.x );
+		grid.hi.y = max( grid.hi.y, place.hi.y );
+		gridFound = TRUE;
+	}
 	const Bool powerFound = controlBarWindowRect( controlBarWindow( "PowerWindow" ), power );
 
-	IRegion2D centre = grownBy( grid, STACK_GRID_SIDE, STACK_GRID_TOP, STACK_GRID_SIDE, STACK_GRID_SIDE );
+	// the grid's panel stands on the screen's bottom edge like the side panels
+	IRegion2D centre = grownBy( grid, STACK_GRID_SIDE, STACK_GRID_TOP, STACK_GRID_SIDE, 0 );
+	centre.hi.y = TheDisplay->getHeight();
 	IRegion2D frame = grownBy( power, STACK_FRAME, STACK_FRAME, STACK_FRAME, STACK_FRAME );
 
 	// each block reaches down to the top of the one it stands on
@@ -10306,7 +10329,10 @@ static void stackCentre( HtmlValues &values, Bool shown )
 	Bool moneyFound = controlBarWindowRect( moneyWindow, money );
 	if( moneyFound && moneyWindow->winGetFont() )
 	{
-		const Int height = moneyWindow->winGetFont()->height + STACK_MONEY_LEADING;
+		// the font's height is the line without the drop shadow and the accents over the capitals, and
+		// a window that tall had the figure standing out over the block; half as much again holds it
+		enum { MONEY_LINE_HALVES = 3 };
+		const Int height = moneyWindow->winGetFont()->height * MONEY_LINE_HALVES / 2;
 		Int parentX = 0, parentY = 0;
 		if( moneyWindow->winGetParent() )
 			moneyWindow->winGetParent()->winGetScreenPosition( &parentX, &parentY );
@@ -10335,11 +10361,18 @@ static void stackCentre( HtmlValues &values, Bool shown )
 /** `name`.x, .y, .w and .h in the page's pixels, and `name`.shown "shown" or "hidden". */
 static void putPageRect( HtmlValues &values, const std::string &name, const IRegion2D &rect, Bool shown )
 {
+	// every edge is rounded once, on its own, so two boxes that share an edge on screen share it on
+	// the page too: rounding a width and a height separately left the stacked blocks a pixel or two
+	// apart
 	const Real scale = ControlBarUniformScale();
-	values[ name + ".x" ] = std::to_string( REAL_TO_INT( rect.lo.x / scale ) );
-	values[ name + ".y" ] = std::to_string( REAL_TO_INT( rect.lo.y / scale ) );
-	values[ name + ".w" ] = std::to_string( shown ? REAL_TO_INT( ( rect.hi.x - rect.lo.x ) / scale ) : 0 );
-	values[ name + ".h" ] = std::to_string( shown ? REAL_TO_INT( ( rect.hi.y - rect.lo.y ) / scale ) : 0 );
+	const Int left = REAL_TO_INT_FLOOR( rect.lo.x / scale + 0.5f );
+	const Int top = REAL_TO_INT_FLOOR( rect.lo.y / scale + 0.5f );
+	const Int right = REAL_TO_INT_FLOOR( rect.hi.x / scale + 0.5f );
+	const Int bottom = REAL_TO_INT_FLOOR( rect.hi.y / scale + 0.5f );
+	values[ name + ".x" ] = std::to_string( left );
+	values[ name + ".y" ] = std::to_string( top );
+	values[ name + ".w" ] = std::to_string( shown ? right - left : 0 );
+	values[ name + ".h" ] = std::to_string( shown ? bottom - top : 0 );
 	values[ name + ".shown" ] = shown ? "shown" : "hidden";
 }
 
@@ -10384,13 +10417,21 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 
 	// every panel hugs what it holds, so the rest of the old plates is battlefield again
 	IRegion2D box;
+	// the side panels stand on the screen's bottom edge and against its side edge, the steel round
+	// what they hold running out to the edge of the screen
 	const Bool leftFound = controlBarUnion( CONTROL_BAR_LEFT, box );
-	putPageRect( values, "left", box, leftFound && panelCount > 0 && shown[ 0 ] );
+	IRegion2D side = grownBy( box, 0, SIDE_PANEL_TOP, SIDE_PANEL_SIDE, 0 );
+	side.lo.x = 0;
+	side.hi.y = TheDisplay->getHeight();
+	putPageRect( values, "left", side, leftFound && panelCount > 0 && shown[ 0 ] );
 	stackCentre( values, panelCount > 1 && shown[ 1 ] );
 	HtmlLists lists;
 	putPowerBar( values, lists[ "powercells" ] );	// after the stack, whose frame it divides into cells
 	const Bool rightFound = controlBarUnion( CONTROL_BAR_RIGHT, box );
-	putPageRect( values, "right", box, rightFound && panelCount > 2 && shown[ 2 ] );
+	side = grownBy( box, SIDE_PANEL_SIDE, SIDE_PANEL_TOP + CORNER_BUTTON_RISE, 0, 0 );
+	side.hi.x = TheDisplay->getWidth();
+	side.hi.y = TheDisplay->getHeight();
+	putPageRect( values, "right", side, rightFound && panelCount > 2 && shown[ 2 ] );
 
 	// the promotion and minimise buttons go to the right panel's top right corner; a bar with no
 	// portrait showing leaves them where the bar put them, so minimise stays in reach
