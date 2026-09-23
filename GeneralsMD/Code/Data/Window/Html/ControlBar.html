@@ -28,9 +28,10 @@
                            none while the skills button has them folded away
     {{signals.x}} ...      the column of smoke signal buttons against the left panel;
                            data-click="signal:attack", "signal:defend" or "signal:look" sends one
-                           to the middle of the view, and {{signals}} is "disabled" where the keys
-                           would do nothing either; {{signal0.drop}} to {{signal2.drop}} how far
-                           below its place each button still is while they rise into the column
+                           to the middle of the view; {{signals.shown}} is "hidden" where the keys
+                           would do nothing either, a game with no allies to see the smoke, and
+                           {{signal0.drop}} to {{signal2.drop}} how far below its place each button
+                           still is while they rise into the column
     url(Name.svg)          an SVG file under Window/Html, fitted whole into the box and centred
     {{net.clock}} ...      the network box: net.clock, net.game, net.real, net.hz, net.fps,
                            net.renderer and net.frame always; net.ready, net.runahead, net.room,
@@ -188,8 +189,7 @@
      shade the bezel has at that height, with its own lit top edge, and a joint over the bezel's dark
      right line so the two read as one piece.  Three keys sunk in it like the radar is, each an SVG in one
      colour, a crosshair to attack, a shield to defend, an eye to look.  Under the pointer a key
-     comes up out of its well as lit steel with a gold rim.  Veiled where the keys would do nothing
-     either, outside a multiplayer game */
+     comes up out of its well as lit steel with a gold rim */
   .signals { background: linear-gradient(to bottom, #4f575f, #353c45); border-top: 1px solid #dde4ea; border-right: 1px solid #0c1114; }
   .signals .joint { position: absolute; left: -1px; top: 0; bottom: 0; width: 1px; background: linear-gradient(to bottom, #4f575f, #353c45); }
   .china .signals, .china .signals .joint { background: linear-gradient(to bottom, #6a2a1c, #3f160f); }
@@ -209,9 +209,6 @@
   .signal.attack .icon { background-image: url(Icons/SignalAttack.svg); }
   .signal.defend .icon { background-image: url(Icons/SignalDefend.svg); }
   .signal.look .icon { background-image: url(Icons/SignalLook.svg); }
-  .signal .veil { display: none; }
-  .signals.disabled .signal .veil { display: block; position: absolute; left: 0; top: 0; width: 32px; height: 18px;
-                                    background-color: rgba(4, 8, 10, 0.65); }
 
   /* the network box: everything the corner readout had, flush in the screen's top right corner */
   #net { right: 0; top: 0; padding: 3px 6px 3px 8px; border-right: 0; font-size: 7px; color: #c9d2d9; text-align: right; }
@@ -248,11 +245,11 @@
   <div class="piece button promotion {{promotion}} {{blink}} {{ButtonGeneral.shown}} {{ButtonGeneral.state}}" style="left: {{ButtonGeneral.x}}px; top: {{ButtonGeneral.y}}px; width: {{ButtonGeneral.w}}px; height: {{ButtonGeneral.h}}px"><div class="cap stars">&#9733;&#9733;&#9733;</div></div>
   <div class="piece button skills {{skillsbutton.shown}} {{flip:skills}}" data-click="flip:skills" style="left: {{skillsbutton.x}}px; top: {{skillsbutton.y}}px; width: {{skillsbutton.w}}px; height: {{skillsbutton.h}}px"><div class="cap">{{text:GUI:BarSkills}}</div></div>
 
-  <div class="piece signals solid {{signals.shown}} {{signals}}" style="left: {{signals.x}}px; top: {{signals.y}}px; width: {{signals.w}}px; height: {{signals.h}}px">
+  <div class="piece signals solid {{signals.shown}}" style="left: {{signals.x}}px; top: {{signals.y}}px; width: {{signals.w}}px; height: {{signals.h}}px">
     <div class="joint"></div>
-    <div class="signal attack" data-click="signal:attack" style="top: 3px; margin-top: {{signal0.drop}}px"><div class="icon"></div><div class="veil"></div></div>
-    <div class="signal defend" data-click="signal:defend" style="top: 27px; margin-top: {{signal1.drop}}px"><div class="icon"></div><div class="veil"></div></div>
-    <div class="signal look" data-click="signal:look" style="top: 51px; margin-top: {{signal2.drop}}px"><div class="icon"></div><div class="veil"></div></div>
+    <div class="signal attack" data-click="signal:attack" style="top: 3px; margin-top: {{signal0.drop}}px"><div class="icon"></div></div>
+    <div class="signal defend" data-click="signal:defend" style="top: 27px; margin-top: {{signal1.drop}}px"><div class="icon"></div></div>
+    <div class="signal look" data-click="signal:look" style="top: 51px; margin-top: {{signal2.drop}}px"><div class="icon"></div></div>
   </div>
 
   <div class="piece skillcell well" data-each="skillcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"></div>

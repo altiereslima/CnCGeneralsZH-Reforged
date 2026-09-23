@@ -10560,7 +10560,6 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	values[ "promotion" ] = !watching && TheControlBar->isGeneralStarFlashing() ? "ready" : "";
 	values[ "watching" ] = watching ? "watching" : "";
 	values.insert( m_hudValues.begin(), m_hudValues.end() );
-	values[ "signals" ] = signalsAllowed() ? "" : "disabled";
 	for( std::set< std::string >::const_iterator name = m_controlBarFlipped.begin(); name != m_controlBarFlipped.end(); ++name )
 		values[ FLIP_ACTION + *name ] = "flipped";
 	values[ "blink" ] = TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND > LOGICFRAMES_PER_SECOND / 2 ? "lit" : "";
@@ -10582,17 +10581,19 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	putPageRect( values, "alerttab", tabOn( leftBox, ALERT_TAB_WIDTH, FALSE ), leftFound && leftShown );
 
 	// the three smoke signal buttons, a column standing on the screen's bottom edge against the left
-	// panel's border
+	// panel's border; not there at all where the keys would do nothing either, a game with no allies
+	// to see the smoke
 	IRegion2D signalColumn;
 	signalColumn.lo.x = leftBox.hi.x;
 	signalColumn.hi.x = leftBox.hi.x + REAL_TO_INT( SIGNAL_BUTTON_WIDTH * scale );
 	signalColumn.hi.y = TheDisplay->getHeight();
 	signalColumn.lo.y = signalColumn.hi.y - REAL_TO_INT( SIGNAL_BUTTON_SIZE * SIGNAL_BUTTONS * scale );
-	putPageRect( values, "signals", signalColumn, leftFound && leftShown );
+	const Bool signalsShown = leftFound && leftShown && signalsAllowed();
+	putPageRect( values, "signals", signalColumn, signalsShown );
 	const UnsignedInt nowMs = timeGetTime();
-	if( leftFound && leftShown && !m_signalsWereShown )
+	if( signalsShown && !m_signalsWereShown )
 		m_signalsRiseStartMs = nowMs;
-	m_signalsWereShown = leftFound && leftShown;
+	m_signalsWereShown = signalsShown;
 	putSignalRise( values, nowMs - m_signalsRiseStartMs );
 
 	IRegion2D centreBox;
