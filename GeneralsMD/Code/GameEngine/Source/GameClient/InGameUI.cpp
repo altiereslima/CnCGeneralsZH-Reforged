@@ -10179,7 +10179,8 @@ static const char *const CONTROL_BAR_WINDOWS[] =
 	* clicks; only their pictures are the page's. */
 static const char *const CONTROL_BAR_CUSTOM[] =
 {
-	"ButtonGeneral", "ButtonLarge", "ButtonPlaceBeacon", "WinUAttack", "PowerWindow", "GeneralsExp", "ExpBarForeground"
+	"ButtonGeneral", "ButtonLarge", "ButtonPlaceBeacon", "WinUAttack", "PowerWindow", "GeneralsExp", "ExpBarForeground", "RightHUD",
+	"WinUnitSelected"
 };
 
 /** How far along its scale a power figure reaches, 0 to 1: the power bar's own logarithmic scale,
@@ -10288,10 +10289,16 @@ static void putExperienceBar( HtmlValues &values, std::vector< HtmlValues > &cel
 		cells.push_back( entry );
 	}
 
-	for( Int rank = 1; rank <= TheRankInfoStore->getRankLevelCount(); rank++ )
+	// the stars stand at pixel places centred on the key: centred as a line of text, the page measured
+	// the star glyph wider than it drew it and the row sat to the left
+	enum { RANK_KEY_WIDTH = 58, STAR_PITCH = 11, STAR_SIZE = 10 };
+	const Int rankCount = TheRankInfoStore->getRankLevelCount();
+	const Int firstStar = ( RANK_KEY_WIDTH - ( rankCount * STAR_PITCH - ( STAR_PITCH - STAR_SIZE ) ) ) / 2;
+	for( Int rank = 1; rank <= rankCount; rank++ )
 	{
 		HtmlValues entry;
 		entry[ "lit" ] = rank <= player->getRankLevel() ? "lit" : "";
+		entry[ "x" ] = std::to_string( firstStar + ( rank - 1 ) * STAR_PITCH );
 		stars.push_back( entry );
 	}
 }
@@ -10351,11 +10358,13 @@ static const char *const CONTROL_BAR_RIGHT[] = { "RightHUD", "GeneralsExp", "Exp
 static const char *const CONTROL_BAR_CENTRE[] = { "ObserverPlayerListWindow", "ButtonPlaceBeacon", NULL };
 static const char *const CONTROL_BAR_EXPERIENCE[] = { "GeneralsExp", "ExpBarForeground", NULL };
 static const Int COMMAND_BUTTONS = 14;	///< ButtonCommand01 to 14, the grid a player sees
+static const Int QUEUE_BUTTONS = 9;			///< ButtonQueue01 to 09, the production queue's three by three over the portrait's place
 
 /** The pieces standing round the panels, 800x600 pixels. */
 enum
 {
-	STARS_TAB_WIDTH				= 62,		///< the rank's stars, a tab on the right panel's border, which is the promotion button
+	STARS_TAB_WIDTH				= 66,		///< the rank's stars, a key in a tab on the right panel's border, which is the promotion button
+	STARS_TAB_HEIGHT			= 22,		///< the key 17 tall with its rim, three pixels down
 	SKILL_GRID_WIDTH			= 150,	///< the general's powers, three to a row, against the screen's right edge
 	SKILL_GRID_GAP				= 30,		///< between them and the stars' tab
 	SIGNAL_BUTTON_SIZE		= 24,		///< each smoke signal button's height, a row of the column
@@ -10508,13 +10517,13 @@ static void putFrame( HtmlValues &values, const std::string &name, const IRegion
 	values[ name + ".shown" ] = shown ? "shown" : "hidden";
 }
 
-/** A tab of `width` 800x600 pixels standing on `box`'s top edge, from its left or its right. */
-static IRegion2D tabOn( const IRegion2D &box, Int width, Bool fromRight )
+/** A tab of `width` by `height` 800x600 pixels standing on `box`'s top edge, from its left or its right. */
+static IRegion2D tabOn( const IRegion2D &box, Int width, Int height, Bool fromRight )
 {
 	const Real scale = ControlBarUniformScale();
 	IRegion2D tab;
 	tab.hi.y = box.lo.y;
-	tab.lo.y = tab.hi.y - REAL_TO_INT( PANEL_TAB_HEIGHT * scale );
+	tab.lo.y = tab.hi.y - REAL_TO_INT( height * scale );
 	tab.lo.x = fromRight ? box.hi.x - REAL_TO_INT( width * scale ) : box.lo.x;
 	tab.hi.x = fromRight ? box.hi.x : box.lo.x + REAL_TO_INT( width * scale );
 	return tab;
@@ -10529,19 +10538,25 @@ static IRegion2D tabOn( const IRegion2D &box, Int width, Bool fromRight )
 	* line of text and set down on the block under it, so its block is no taller than the figure.
 	* Written as centre, powerframe and moneyblock. */
 //-------------------------------------------------------------------------------------------------
-/** ButtonCommandNN's screen rectangle, `button` 1 to COMMAND_BUTTONS, shown or not. */
-static IRegion2D commandButtonRect( Int button )
+/** The screen rectangle of the bar's window `prefix` followed by `number` in two digits, shown or not. */
+static IRegion2D numberedWindowRect( const char *prefix, Int number )
 {
 	char name[ 32 ];
-	snprintf( name, sizeof( name ), "ButtonCommand%02d", button );
-	GameWindow *command = controlBarWindow( name );
+	snprintf( name, sizeof( name ), "%s%02d", prefix, number );
+	GameWindow *window = controlBarWindow( name );
 	IRegion2D place;
 	Int width = 0, height = 0;
-	command->winGetScreenPosition( &place.lo.x, &place.lo.y );
-	command->winGetSize( &width, &height );
+	window->winGetScreenPosition( &place.lo.x, &place.lo.y );
+	window->winGetSize( &width, &height );
 	place.hi.x = place.lo.x + width;
 	place.hi.y = place.lo.y + height;
 	return place;
+}
+
+/** ButtonCommandNN's screen rectangle, `button` 1 to COMMAND_BUTTONS, shown or not. */
+static IRegion2D commandButtonRect( Int button )
+{
+	return numberedWindowRect( "ButtonCommand", button );
 }
 
 /** The box round the fourteen command buttons, shown or not. */
@@ -10730,7 +10745,7 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	const Bool leftFound = controlBarUnion( CONTROL_BAR_LEFT, content );
 	const IRegion2D leftBox = framed( content, border, TRUE, FALSE );
 	putFrame( values, "left", content, leftBox, leftFound && leftShown );
-	putPageRect( values, "alerttab", tabOn( leftBox, ALERT_TAB_WIDTH, FALSE ), leftFound && leftShown );
+	putPageRect( values, "alerttab", tabOn( leftBox, ALERT_TAB_WIDTH, PANEL_TAB_HEIGHT, FALSE ), leftFound && leftShown );
 
 	// the three smoke signal buttons, a column standing on the screen's bottom edge against the left
 	// panel's border; not there at all where the keys would do nothing either, a game with no allies
@@ -10782,8 +10797,18 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	const Bool experienceFound = controlBarUnion( CONTROL_BAR_EXPERIENCE, experience );
 	putPageRect( values, "expframe", experience, experienceFound && rightFound && rightShown );
 	putExperienceBar( values, lists[ "expcells" ], lists[ "rankstars" ] );
-	const IRegion2D starsTab = tabOn( rightBox, STARS_TAB_WIDTH, TRUE );
+	const IRegion2D starsTab = tabOn( rightBox, STARS_TAB_WIDTH, STARS_TAB_HEIGHT, TRUE );
 	putPageRect( values, "starstab", starsTab, rightFound && rightShown );
+
+	// the portrait's well is steel with a dark cell for each of the production queue's nine places,
+	// the grid the side's RightHUD picture used to draw in the side's own colour, blue for America
+	std::vector< HtmlValues > &portraitCells = lists[ "portraitcells" ];
+	for( Int button = 1; button <= QUEUE_BUTTONS && rightFound && rightShown; button++ )
+	{
+		HtmlValues entry;
+		putPageRect( entry, "cell", numberedWindowRect( "ButtonQueue", button ), TRUE );
+		portraitCells.push_back( entry );
+	}
 
 	// the general's powers ready to fire, three to a row over the right panel
 	IRegion2D powers;
