@@ -10230,13 +10230,15 @@ static HtmlValues scoreboardSeat( Player *player, const GameSlot *slot, Bool ful
 }
 
 //-------------------------------------------------------------------------------------------------
-/** One scoreboard seat's superweapons, soonest first, as {{wN.image}} {{wN.time}} and {{wN.state}}
-	* for N 0 to SEAT_SUPERWEAPONS - 1: "ready" once it can fire, "none" for an unused place.  {{armed}}
-	* is "armed" when the player has any. */
+/** One scoreboard seat's superweapons, the SEAT_SUPERWEAPONS soonest side by side as {{wN.image}}
+	* {{wN.time}} and {{wN.state}}: "ready" once it can fire, "none" for an unused place.  The rest
+	* are counted, {{more}} of them with {{moremark}} "off" when there are none, and {{moreready}}
+	* of those ready with {{morereadymark}} "off" when none is.  {{armed}} is "armed" when the
+	* player has any. */
 //-------------------------------------------------------------------------------------------------
 static void putSeatSuperweapons( HtmlValues &row, Int playerIndex, const std::vector< SpectatorSuperweapon > &weapons )
 {
-	enum { SEAT_SUPERWEAPONS = 6 };
+	enum { SEAT_SUPERWEAPONS = 5 };
 
 	std::vector< SpectatorSuperweapon > owned;
 	for( size_t weapon = 0; weapon < weapons.size(); weapon++ )
@@ -10261,6 +10263,19 @@ static void putSeatSuperweapons( HtmlValues &row, Int playerIndex, const std::ve
 		row[ name + ".time" ] = WideCharStringToMultiByte( time.str() );
 		row[ name + ".state" ] = owned[ place ].ready ? "ready" : "";
 	}
+
+	Int more = 0;
+	Int moreReady = 0;
+	for( size_t weapon = SEAT_SUPERWEAPONS; weapon < owned.size(); weapon++ )
+	{
+		more++;
+		if( owned[ weapon ].ready )
+			moreReady++;
+	}
+	row[ "more" ] = std::to_string( more );
+	row[ "moremark" ] = more > 0 ? "" : "off";
+	row[ "moreready" ] = std::to_string( moreReady );
+	row[ "morereadymark" ] = moreReady > 0 ? "" : "off";
 }
 
 //-------------------------------------------------------------------------------------------------
