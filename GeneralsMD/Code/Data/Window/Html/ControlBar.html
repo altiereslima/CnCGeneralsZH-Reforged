@@ -182,15 +182,27 @@
   .skills.flipped { color: #6f7782; }
   .skillcell { margin: 1px 0 0 1px; }
 
-  /* the smoke signals, a column of square caps against the radar panel; greyed where the keys would
+  /* the smoke signals: a step of the radar's bezel on its right, the same steel carried on at the
+     shade the bezel has at that height, with its own lit top edge and a joint over the bezel's dark
+     right line so the two read as one piece.  Three caps sit in it, each with a picture drawn in
+     pixels: a crosshair to attack, a shield to defend, an eye to look.  Greyed where the keys would
      do nothing either, outside a multiplayer game */
-  /* each button stands at its own top: a relatively placed box inside an absolutely placed one is
+  .signals { background: linear-gradient(to bottom, #4f575f, #353c45); border-top: 1px solid #dde4ea; border-right: 1px solid #0c1114; }
+  .signals .joint { position: absolute; left: -1px; top: 0; bottom: 0; width: 1px; background: linear-gradient(to bottom, #4f575f, #353c45); }
+  .china .signals, .china .signals .joint { background: linear-gradient(to bottom, #6a2a1c, #3f160f); }
+  .china .signals { border-top-color: #f0b8a4; }
+  .gla .signals, .gla .signals .joint { background: linear-gradient(to bottom, #665b31, #3c3519); }
+  .gla .signals { border-top-color: #ebe2b4; }
+  /* each cap stands at its own top: a relatively placed box inside an absolutely placed one is
      laid out from the screen's corner here, and the column came out in the top left */
-  .signals .signal { position: absolute; left: 0; width: 37px; height: 21px; font-size: 7px; }
-  .signals.disabled .signal { color: #6f7782; }
-  .signal.attack { border-left: 3px solid #e0503c; }
-  .signal.defend { border-left: 3px solid #5a9ee0; }
-  .signal.look { border-left: 3px solid #e8d27a; }
+  .signals .signal { position: absolute; left: 3px; width: 32px; height: 18px; }
+  .signal .icon { position: absolute; }
+  .signal .px { position: absolute; }
+  .signal.attack .px { background-color: #ff6a50; }
+  .signal.defend .px { background-color: #7ab8f5; }
+  .signal.defend .px.inner { background-color: #2a5a90; }
+  .signal.look .px { background-color: #f4dc78; }
+  .signals.disabled .signal .px { background-color: #6f7782; }
 
   /* the network box: everything the corner readout had, flush in the screen's top right corner */
   #net { right: 0; top: 0; padding: 3px 6px 3px 8px; border-right: 0; font-size: 7px; color: #c9d2d9; text-align: right; }
@@ -227,10 +239,47 @@
   <div class="piece button promotion {{promotion}} {{blink}} {{ButtonGeneral.shown}} {{ButtonGeneral.state}}" style="left: {{ButtonGeneral.x}}px; top: {{ButtonGeneral.y}}px; width: {{ButtonGeneral.w}}px; height: {{ButtonGeneral.h}}px"><div class="cap stars">&#9733;&#9733;&#9733;</div></div>
   <div class="piece button skills {{skillsbutton.shown}} {{flip:skills}}" data-click="flip:skills" style="left: {{skillsbutton.x}}px; top: {{skillsbutton.y}}px; width: {{skillsbutton.w}}px; height: {{skillsbutton.h}}px"><div class="cap">{{text:GUI:BarSkills}}</div></div>
 
-  <div class="piece signals {{signals.shown}} {{signals}}" style="left: {{signals.x}}px; top: {{signals.y}}px; width: {{signals.w}}px; height: {{signals.h}}px">
-    <div class="button signal attack" data-click="signal:attack" style="top: 0"><div class="cap">{{text:GUI:SignalAttackLabel}}</div></div>
-    <div class="button signal defend" data-click="signal:defend" style="top: 24px"><div class="cap">{{text:GUI:SignalDefendLabel}}</div></div>
-    <div class="button signal look" data-click="signal:look" style="top: 48px"><div class="cap">{{text:GUI:SignalAttentionLabel}}</div></div>
+  <div class="piece signals solid {{signals.shown}} {{signals}}" style="left: {{signals.x}}px; top: {{signals.y}}px; width: {{signals.w}}px; height: {{signals.h}}px">
+    <div class="joint"></div>
+    <div class="button signal attack" data-click="signal:attack" style="top: 3px"><div class="icon" style="left: 10px; top: 3px">
+      <div class="px" style="left: 5px; top: 0; width: 1px; height: 4px"></div>
+      <div class="px" style="left: 5px; top: 7px; width: 1px; height: 4px"></div>
+      <div class="px" style="left: 0; top: 5px; width: 4px; height: 1px"></div>
+      <div class="px" style="left: 7px; top: 5px; width: 4px; height: 1px"></div>
+      <div class="px" style="left: 5px; top: 5px; width: 1px; height: 1px"></div>
+      <div class="px" style="left: 1px; top: 1px; width: 3px; height: 1px"></div>
+      <div class="px" style="left: 1px; top: 1px; width: 1px; height: 3px"></div>
+      <div class="px" style="left: 7px; top: 1px; width: 3px; height: 1px"></div>
+      <div class="px" style="left: 9px; top: 1px; width: 1px; height: 3px"></div>
+      <div class="px" style="left: 1px; top: 9px; width: 3px; height: 1px"></div>
+      <div class="px" style="left: 1px; top: 7px; width: 1px; height: 3px"></div>
+      <div class="px" style="left: 7px; top: 9px; width: 3px; height: 1px"></div>
+      <div class="px" style="left: 9px; top: 7px; width: 1px; height: 3px"></div>
+    </div></div>
+    <div class="button signal defend" data-click="signal:defend" style="top: 27px"><div class="icon" style="left: 10px; top: 3px">
+      <div class="px" style="left: 0; top: 0; width: 11px; height: 6px"></div>
+      <div class="px" style="left: 1px; top: 6px; width: 9px; height: 1px"></div>
+      <div class="px" style="left: 2px; top: 7px; width: 7px; height: 1px"></div>
+      <div class="px" style="left: 3px; top: 8px; width: 5px; height: 1px"></div>
+      <div class="px" style="left: 4px; top: 9px; width: 3px; height: 1px"></div>
+      <div class="px" style="left: 5px; top: 10px; width: 1px; height: 1px"></div>
+      <div class="px inner" style="left: 5px; top: 1px; width: 1px; height: 8px"></div>
+    </div></div>
+    <div class="button signal look" data-click="signal:look" style="top: 51px"><div class="icon" style="left: 9px; top: 5px">
+      <div class="px" style="left: 4px; top: 0; width: 5px; height: 1px"></div>
+      <div class="px" style="left: 2px; top: 1px; width: 2px; height: 1px"></div>
+      <div class="px" style="left: 9px; top: 1px; width: 2px; height: 1px"></div>
+      <div class="px" style="left: 1px; top: 2px; width: 1px; height: 1px"></div>
+      <div class="px" style="left: 11px; top: 2px; width: 1px; height: 1px"></div>
+      <div class="px" style="left: 0; top: 3px; width: 1px; height: 1px"></div>
+      <div class="px" style="left: 12px; top: 3px; width: 1px; height: 1px"></div>
+      <div class="px" style="left: 1px; top: 4px; width: 1px; height: 1px"></div>
+      <div class="px" style="left: 11px; top: 4px; width: 1px; height: 1px"></div>
+      <div class="px" style="left: 2px; top: 5px; width: 2px; height: 1px"></div>
+      <div class="px" style="left: 9px; top: 5px; width: 2px; height: 1px"></div>
+      <div class="px" style="left: 4px; top: 6px; width: 5px; height: 1px"></div>
+      <div class="px" style="left: 5px; top: 2px; width: 3px; height: 3px"></div>
+    </div></div>
   </div>
 
   <div class="piece skillcell well" data-each="skillcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"></div>
