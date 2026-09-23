@@ -10312,8 +10312,10 @@ enum
 	SKILLS_BUTTON_WIDTH		= 58,		///< wide enough for its name in either language
 	ALERT_TAB_WIDTH				= 54,		///< the under-attack light, a lamp on the radar panel's border
 	WORKER_TAB_WIDTH			= 39,		///< the idle worker's step, against the command grid panel's border, as wide as the signals' column
-	WORKER_STEP_HEIGHT		= 28,		///< and its height, its key's bottom GRID_BOTTOM_GAP over the screen's bottom edge
-	GRID_BOTTOM_GAP				= 4			///< the command buttons' bottom over the screen's bottom edge, level with that key's
+	WORKER_STEP_HEIGHT		= 30,		///< and its height, its key's bottom GRID_BOTTOM_GAP over the screen's bottom edge
+	GRID_BOTTOM_GAP				= 6			///< the command buttons' bottom over the screen's bottom edge, level with that key's:
+																		///< the grid's two pixel well and four of steel under it; at 4 the well's lit
+																		///< bottom edge sat on the screen's last row and the grid looked cut off
 };
 static const char *const SKILLS_FOLDED = "skills";	///< the flip the skills button toggles; flipped is folded away
 static const UnsignedInt SIGNAL_RISE_MS = 360;					///< each smoke signal button's climb out of the screen's bottom edge
