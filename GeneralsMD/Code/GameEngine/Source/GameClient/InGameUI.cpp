@@ -1228,6 +1228,7 @@ InGameUI::InGameUI()
 	m_promotionPageLoaded = FALSE;
 	m_quitMenuOverlay = NULL;
 	m_quitMenuPageLoaded = FALSE;
+	m_quitMenuOpenedMs = 0;
 	m_controlBarPageShown = FALSE;
 	m_tooltipOverlay = NULL;
 	m_tooltipPageLoaded = FALSE;
@@ -11761,6 +11762,16 @@ enum
 	QUIT_MENU_MARGIN			= 12	///< the plate round the keys' well
 };
 
+/** The menu coming up, in milliseconds of the wall clock: the dimmed screen and the plate fade in,
+	* then the keys come in top to bottom, each lit bright for a moment the way EA's keys flashed. */
+enum
+{
+	QUIT_MENU_FADE_MS				= 120,
+	QUIT_MENU_KEY_FIRST_MS	= 80,		///< the first key, after the plate is mostly there
+	QUIT_MENU_KEY_STEP_MS		= 45,		///< each key after the one over it
+	QUIT_MENU_KEY_FLASH_MS	= 120		///< how long a key stays lit when it comes in
+};
+
 /** A window of the same layout as `parent`, by its name there. */
 static GameWindow *quitMenuWindow( GameWindow *parent, const char *name )
 {
@@ -11784,6 +11795,7 @@ void InGameUI::themeQuitMenu( GameWindow *parent )
 	if( m_quitMenuPage.empty() )
 		return;
 
+	m_quitMenuOpenedMs = timeGetTime();
 	parent->winSetDrawFunc( drawQuitMenu );
 	for( Int key = 0; key < (Int)ARRAY_SIZE( QUIT_MENU_KEYS ); key++ )
 	{
@@ -11856,10 +11868,16 @@ void InGameUI::drawQuitMenuPage( GameWindow *parent )
 	HtmlValues values;
 	HtmlLists lists;
 	values[ "side" ] = spectatorSide();
+	IRegion2D screen;
+	screen.lo.x = screen.lo.y = 0;
+	screen.hi.x = TheDisplay->getWidth();
+	screen.hi.y = TheDisplay->getHeight();
+	putPageRect( values, "screen", screen, TRUE );
 	IRegion2D panel;
 	putPageRect( values, "panel", panel, controlBarWindowRect( parent, panel ) );
 	putPageRect( values, "well", well, TRUE );
 
+	const Int openMs = (Int)( timeGetTime() - m_quitMenuOpenedMs );
 	std::vector< HtmlValues > &keys = lists[ "keys" ];
 	for( Int key = 0; key < (Int)ARRAY_SIZE( QUIT_MENU_KEYS ); key++ )
 	{
@@ -11870,12 +11888,19 @@ void InGameUI::drawQuitMenuPage( GameWindow *parent )
 
 		HtmlValues entry;
 		putPageRect( entry, "key", rect, TRUE );
-		entry[ "state" ] = controlBarWindowState( button );
+		const Int keyMs = openMs - QUIT_MENU_KEY_FIRST_MS - (Int)keys.size() * QUIT_MENU_KEY_STEP_MS;
+		if( keyMs < 0 )
+			entry[ "state" ] = "waiting";
+		else if( keyMs < QUIT_MENU_KEY_FLASH_MS )
+			entry[ "state" ] = "flash";
+		else
+			entry[ "state" ] = controlBarWindowState( button );
 		entry[ "label" ] = WideCharStringToMultiByte( button->winGetInstanceData()->getText().str() );
 		keys.push_back( entry );
 	}
 
 	m_quitMenuOverlay->setPage( HtmlTemplate_expand( m_quitMenuPage, values, lists, lookupGameText ) );
+	m_quitMenuOverlay->setAlpha( min( 255, openMs * 255 / QUIT_MENU_FADE_MS ) );
 	m_quitMenuOverlay->draw();
 }
 

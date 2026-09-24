@@ -1258,6 +1258,7 @@ protected:
 	HtmlOverlay *								m_quitMenuOverlay;
 	Bool												m_quitMenuPageLoaded;
 	std::string									m_quitMenuPage;
+	UnsignedInt									m_quitMenuOpenedMs;			///< when themeQuitMenu last put the menu up, wall clock: the game is paused under it
 	Bool												m_signalsWereShown;				///< the smoke signal column was up last frame
 	UnsignedInt									m_signalsRiseStartMs;			///< when it last came up, the start of its buttons' rise
 
