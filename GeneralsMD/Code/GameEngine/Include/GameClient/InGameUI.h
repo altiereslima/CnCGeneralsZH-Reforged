@@ -822,6 +822,7 @@ public:  // ********************************************************************
 
 	/// a click landed on the strip: jump to that producer, or cancel the item when 'cancel' is set
 	Bool handleProductionStripClick( const ICoord2D *mouse, Bool cancel );
+	void foldSpectatorDropDowns( const ICoord2D &mouse );		///< a press off the spectator's page closes its drop-downs
 
 	//
 	// One superweapon countdown of the top right strip. The list is rebuilt every frame out of
@@ -1259,7 +1260,8 @@ protected:
 	std::vector< HtmlOverlay * >	m_quitMenuKeyOverlays;	///< one for each of the menu's keys, each fading in on its own
 	Bool												m_quitMenuPageLoaded;
 	std::string									m_quitMenuPage;
-	UnsignedInt									m_quitMenuOpenedMs;			///< when themeQuitMenu last put the menu up, wall clock: the game is paused under it
+	Int													m_quitMenuShownMs;			///< how far the menu's coming up has run, -1 until its first picture
+	UnsignedInt									m_quitMenuDrawnAt;			///< the wall clock at its last picture: the game is paused under it
 	Bool												m_signalsWereShown;				///< the smoke signal column was up last frame
 	UnsignedInt									m_signalsRiseStartMs;			///< when it last came up, the start of its buttons' rise
 

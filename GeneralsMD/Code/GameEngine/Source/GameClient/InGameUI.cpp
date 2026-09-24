@@ -1228,7 +1228,8 @@ InGameUI::InGameUI()
 	m_promotionPageLoaded = FALSE;
 	m_quitMenuOverlay = NULL;
 	m_quitMenuPageLoaded = FALSE;
-	m_quitMenuOpenedMs = 0;
+	m_quitMenuShownMs = 0;
+	m_quitMenuDrawnAt = 0;
 	m_controlBarPageShown = FALSE;
 	m_tooltipOverlay = NULL;
 	m_tooltipPageLoaded = FALSE;
@@ -2313,9 +2314,29 @@ Bool InGameUI::handleSpectatorPageClick( const ICoord2D *mouse, Bool act )
 	return TRUE;
 }
 
+/** The page's three drop-downs, each opened by a flip of its name. */
+static const std::string *const SPECTATOR_DROP_DOWNS[] = { &CAMERA_GROUP, &FOLLOW_GROUP, &STAT_GROUP };
+
+//-------------------------------------------------------------------------------------------------
+/** Any button pressed anywhere but on the page, over a window or over the world, folds up whichever
+	* drop-down is open.  A press on the page is the page's, and runSpectatorAction folds the rest. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::foldSpectatorDropDowns( const ICoord2D &mouse )
+{
+	if( !m_spectatorPageShown || m_spectatorOverlay->hover( mouse ) )
+		return;
+	for( Int each = 0; each < (Int)ARRAY_SIZE( SPECTATOR_DROP_DOWNS ); each++ )
+		m_spectatorFlipped.erase( *SPECTATOR_DROP_DOWNS[ each ] );
+}
+
 //-------------------------------------------------------------------------------------------------
 void InGameUI::runSpectatorAction( const std::string &action )
 {
+	// whatever the page was clicked for, every drop-down but the one it opens folds up
+	for( Int each = 0; each < (Int)ARRAY_SIZE( SPECTATOR_DROP_DOWNS ); each++ )
+		if( action != FLIP_ACTION + *SPECTATOR_DROP_DOWNS[ each ] )
+			m_spectatorFlipped.erase( *SPECTATOR_DROP_DOWNS[ each ] );
+
 	if( action.compare( 0, FLIP_ACTION.size(), FLIP_ACTION ) == 0 )
 	{
 		const std::string name = action.substr( FLIP_ACTION.size() );
@@ -11777,6 +11798,12 @@ enum
 	QUIT_MENU_KEY_FLASH_MS	= 220		///< how long a key stays lit when it comes in, its fade included
 };
 
+/** The most one picture moves the menu's coming up on.  A single-player game pausing under the menu
+	* draws at ten frames a second for the first half second or so, and on the wall clock alone the
+	* keys had all come in within four pictures: they seemed to pop up with no fade at all. */
+static const Int QUIT_MENU_MOST_MS_A_PICTURE = 25;
+static const Int QUIT_MENU_NOT_DRAWN = -1;	///< m_quitMenuShownMs until the menu's first picture
+
 /** A window of the same layout as `parent`, by its name there. */
 static GameWindow *quitMenuWindow( GameWindow *parent, const char *name )
 {
@@ -11800,7 +11827,7 @@ void InGameUI::themeQuitMenu( GameWindow *parent )
 	if( m_quitMenuPage.empty() )
 		return;
 
-	m_quitMenuOpenedMs = timeGetTime();
+	m_quitMenuShownMs = QUIT_MENU_NOT_DRAWN;
 	parent->winSetDrawFunc( drawQuitMenu );
 	for( Int key = 0; key < (Int)ARRAY_SIZE( QUIT_MENU_KEYS ); key++ )
 	{
@@ -11882,7 +11909,15 @@ void InGameUI::drawQuitMenuPage( GameWindow *parent )
 	putPageRect( values, "panel", panel, controlBarWindowRect( parent, panel ) );
 	putPageRect( values, "well", well, TRUE );
 
-	const Int openMs = (Int)( timeGetTime() - m_quitMenuOpenedMs );
+	// the coming up starts on the menu's first picture and moves on with the wall clock, but never
+	// by more than QUIT_MENU_MOST_MS_A_PICTURE a picture
+	const UnsignedInt now = timeGetTime();
+	if( m_quitMenuShownMs == QUIT_MENU_NOT_DRAWN )
+		m_quitMenuShownMs = 0;
+	else
+		m_quitMenuShownMs += min( (Int)( now - m_quitMenuDrawnAt ), QUIT_MENU_MOST_MS_A_PICTURE );
+	m_quitMenuDrawnAt = now;
+	const Int openMs = m_quitMenuShownMs;
 	const Int pageAlpha = min( 255, openMs * 255 / QUIT_MENU_FADE_MS );
 
 	// a key still fading in is drawn alone on the same page with the rest of it bare, the page having
