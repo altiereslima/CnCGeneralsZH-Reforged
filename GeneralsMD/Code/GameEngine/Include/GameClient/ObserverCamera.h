@@ -29,7 +29,7 @@
 // The followed player is picked from the camera's list, not the seats: clicking a unit makes its
 // owner the watched player, and the camera jumping to an enemy's screen on a click would be no use.
 // Fog on draws the followed player's fog, what he has seen and what he has not, and hides what he
-// cannot see; following nobody it changes nothing.  Nothing here is logic: the camera and the fog
+// cannot see, stealthed units he has not detected included; following nobody it changes nothing.  Nothing here is logic: the camera and the fog
 // are this machine's picture only.
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
