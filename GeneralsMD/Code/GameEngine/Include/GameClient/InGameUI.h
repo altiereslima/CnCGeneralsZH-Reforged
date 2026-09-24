@@ -1256,6 +1256,7 @@ protected:
 	Bool												m_promotionPageLoaded;
 	std::string									m_promotionPage;
 	HtmlOverlay *								m_quitMenuOverlay;
+	std::vector< HtmlOverlay * >	m_quitMenuKeyOverlays;	///< one for each of the menu's keys, each fading in on its own
 	Bool												m_quitMenuPageLoaded;
 	std::string									m_quitMenuPage;
 	UnsignedInt									m_quitMenuOpenedMs;			///< when themeQuitMenu last put the menu up, wall clock: the game is paused under it

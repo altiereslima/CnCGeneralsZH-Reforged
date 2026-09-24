@@ -1367,6 +1367,9 @@ InGameUI::~InGameUI()
 	m_promotionFrontOverlay = NULL;
 	delete m_quitMenuOverlay;
 	m_quitMenuOverlay = NULL;
+	for( size_t key = 0; key < m_quitMenuKeyOverlays.size(); key++ )
+		delete m_quitMenuKeyOverlays[ key ];
+	m_quitMenuKeyOverlays.clear();
 	for( Int grid = 0; grid < CELL_GRID_COUNT; grid++ )
 	{
 		delete m_cellFrontOverlay[ grid ];
@@ -11763,13 +11766,15 @@ enum
 };
 
 /** The menu coming up, in milliseconds of the wall clock: the dimmed screen and the plate fade in,
-	* then the keys come in top to bottom, each lit bright for a moment the way EA's keys flashed. */
+	* then the keys come in top to bottom, each fading in from nothing lit bright in the side's steel,
+	* the way EA's keys flashed. */
 enum
 {
 	QUIT_MENU_FADE_MS				= 120,
 	QUIT_MENU_KEY_FIRST_MS	= 80,		///< the first key, after the plate is mostly there
 	QUIT_MENU_KEY_STEP_MS		= 45,		///< each key after the one over it
-	QUIT_MENU_KEY_FLASH_MS	= 120		///< how long a key stays lit when it comes in
+	QUIT_MENU_KEY_FADE_MS		= 150,	///< a key from nothing to whole
+	QUIT_MENU_KEY_FLASH_MS	= 220		///< how long a key stays lit when it comes in, its fade included
 };
 
 /** A window of the same layout as `parent`, by its name there. */
@@ -11878,7 +11883,14 @@ void InGameUI::drawQuitMenuPage( GameWindow *parent )
 	putPageRect( values, "well", well, TRUE );
 
 	const Int openMs = (Int)( timeGetTime() - m_quitMenuOpenedMs );
+	const Int pageAlpha = min( 255, openMs * 255 / QUIT_MENU_FADE_MS );
+
+	// a key still fading in is drawn alone on the same page with the rest of it bare, the page having
+	// no opacity of its own for one element; the keys already whole are on the menu's page
+	struct FadingKey { HtmlValues entry; Int alpha; };
+	std::vector< FadingKey > fading;
 	std::vector< HtmlValues > &keys = lists[ "keys" ];
+	Int shown = 0;
 	for( Int key = 0; key < (Int)ARRAY_SIZE( QUIT_MENU_KEYS ); key++ )
 	{
 		GameWindow *button = quitMenuWindow( parent, QUIT_MENU_KEYS[ key ] );
@@ -11886,22 +11898,40 @@ void InGameUI::drawQuitMenuPage( GameWindow *parent )
 		if( !controlBarWindowRect( button, rect ) )
 			continue;
 
+		const Int keyMs = openMs - QUIT_MENU_KEY_FIRST_MS - shown * QUIT_MENU_KEY_STEP_MS;
+		shown++;
+		if( keyMs < 0 )
+			continue;
+
 		HtmlValues entry;
 		putPageRect( entry, "key", rect, TRUE );
-		const Int keyMs = openMs - QUIT_MENU_KEY_FIRST_MS - (Int)keys.size() * QUIT_MENU_KEY_STEP_MS;
-		if( keyMs < 0 )
-			entry[ "state" ] = "waiting";
-		else if( keyMs < QUIT_MENU_KEY_FLASH_MS )
-			entry[ "state" ] = "flash";
-		else
-			entry[ "state" ] = controlBarWindowState( button );
+		entry[ "state" ] = keyMs < QUIT_MENU_KEY_FLASH_MS ? "flash" : controlBarWindowState( button );
 		entry[ "label" ] = WideCharStringToMultiByte( button->winGetInstanceData()->getText().str() );
-		keys.push_back( entry );
+		if( keyMs < QUIT_MENU_KEY_FADE_MS )
+		{
+			FadingKey fade;
+			fade.entry = entry;
+			fade.alpha = keyMs * pageAlpha / QUIT_MENU_KEY_FADE_MS;
+			fading.push_back( fade );
+		}
+		else
+			keys.push_back( entry );
 	}
 
 	m_quitMenuOverlay->setPage( HtmlTemplate_expand( m_quitMenuPage, values, lists, lookupGameText ) );
-	m_quitMenuOverlay->setAlpha( min( 255, openMs * 255 / QUIT_MENU_FADE_MS ) );
+	m_quitMenuOverlay->setAlpha( pageAlpha );
 	m_quitMenuOverlay->draw();
+
+	values[ "frame" ] = "bare";
+	for( size_t each = 0; each < fading.size(); each++ )
+	{
+		if( m_quitMenuKeyOverlays.size() <= each )
+			m_quitMenuKeyOverlays.push_back( new HtmlOverlay( m_superweaponNormalFont ) );
+		keys.assign( 1, fading[ each ].entry );
+		m_quitMenuKeyOverlays[ each ]->setPage( HtmlTemplate_expand( m_quitMenuPage, values, lists, lookupGameText ) );
+		m_quitMenuKeyOverlays[ each ]->setAlpha( fading[ each ].alpha );
+		m_quitMenuKeyOverlays[ each ]->draw();
+	}
 }
 
 //-------------------------------------------------------------------------------------------------

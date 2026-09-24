@@ -12,10 +12,11 @@
     {{well.x}} .y .w .h    the well the keys stand in
     data-each="keys"       every key the menu shows, top to bottom, {{key.x}} .y .w .h, {{label}} the
                            button's own text and {{state}} any of "disabled", "hilite", "pushed",
-                           or while the menu comes up "waiting" before the key comes in and
-                           "flash" for a moment as it does
+                           or "flash" for a moment as the key comes in
+    {{frame}}              "bare" when the page is drawn for one key alone, fading in over the
+                           menu: everything but the keys stands down
   All in the page's pixels, a pixel of an 800x600 screen.  The game fades the whole page in as the
-  menu comes up.  Without this page the menu draws as EA
+  menu comes up, and each key after it.  Without this page the menu draws as EA
   drew it.
 -->
 <html>
@@ -52,8 +53,11 @@
   .gla .key.hilite { background: linear-gradient(to bottom, #cabe86, #766a3a); }
   .key.pushed { background: linear-gradient(to bottom, #151a1f, #3a414a); border-color: #e8d27a; color: #f2cf4a; }
   .key.disabled { color: #5d666f; }
-  .key.waiting { display: none; }
-  .key.flash { background: linear-gradient(to bottom, #fff6d0, #e8d27a); border-color: #fff6d0; color: #ffffff; }
+  /* a key coming in is lit bright in its side's own steel */
+  .key.flash { background: linear-gradient(to bottom, #f4f8fb, #9aa3ad); border-color: #ffffff; color: #ffffff; }
+  .china .key.flash { background: linear-gradient(to bottom, #ffd6c8, #c06a52); border-color: #ffe6dc; }
+  .gla .key.flash { background: linear-gradient(to bottom, #fff4c8, #b8ab6e); border-color: #fff8dc; }
+  .bare .dim, .bare .plate, .bare .well { display: none; }
 
   /* the battlefield behind the menu, dimmed while the game waits on it */
   .dim { background-color: rgba(0, 0, 0, 0.65); }
@@ -61,7 +65,7 @@
 </style>
 </head>
 <body>
-<div class="{{side}}">
+<div class="{{side}} {{frame}}">
   <div class="piece dim" style="left: {{screen.x}}px; top: {{screen.y}}px; width: {{screen.w}}px; height: {{screen.h}}px"></div>
   <div class="piece plate" style="left: {{panel.x}}px; top: {{panel.y}}px; width: {{panel.w}}px; height: {{panel.h}}px"></div>
   <div class="piece well" style="left: {{well.x}}px; top: {{well.y}}px; width: {{well.w}}px; height: {{well.h}}px"></div>
