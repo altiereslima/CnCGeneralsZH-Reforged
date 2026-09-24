@@ -427,6 +427,9 @@ static const Real SIGNAL_SECONDS = 3.0f;
 /// the smoke is fed for the first half of the signal and its last puff fades out over the second
 static const UnsignedInt SIGNAL_HALF_FRAMES = (UnsignedInt)( SIGNAL_SECONDS * LOGICFRAMES_PER_SECOND / 2 );
 
+/// the mark on the ground and the radar ping outlast the smoke, as long as the feed's line about it
+static const Real SIGNAL_MARK_SECONDS = 10.0f;
+
 static const UnsignedInt SIGNAL_COOLDOWN_FRAMES = LOGICFRAMES_PER_SECOND;
 
 // The beacon template draws a column nine units wide that needs five seconds to climb, which at the
@@ -2147,7 +2150,9 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 				smoke->setVelocityMultiplier( &rise );
 			}
 
-			TheRadar->createEvent( &pos, look.radarEvent, SIGNAL_SECONDS );
+			TheRadar->createEvent( &pos, look.radarEvent, SIGNAL_MARK_SECONDS );
+			TheInGameUI->addSignalMark( (SignalKind)kind, pos, clientPlayerColor( thisPlayer ),
+				(UnsignedInt)( SIGNAL_MARK_SECONDS * LOGICFRAMES_PER_SECOND ) );
 
 			// floating text runs the colour through the viewer's scheme itself, so it takes the logic one
 			Coord3D labelPos = pos;

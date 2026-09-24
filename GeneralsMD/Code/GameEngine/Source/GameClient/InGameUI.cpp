@@ -83,6 +83,7 @@
 #include "GameClient/GadgetStaticText.h"
 #include "GameClient/View.h"
 #include "GameClient/TerrainVisual.h"	
+#include "GameClient/CinemaDirector.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/Display.h"
 #include "GameClient/WindowLayout.h"
@@ -1166,6 +1167,7 @@ InGameUI::InGameUI()
 	m_feedPageLoaded = FALSE;
 	m_feedFloor = 0;
 	m_queueTrayTop = 0;
+	m_armedSignal = SIGNAL_KIND_COUNT;
 	m_dozerCheckFrame = 0;
 	for( Int index = 0; index < MAX_PLAYER_COUNT; index++ )
 		m_hadDozer[ index ] = FALSE;
@@ -3411,6 +3413,7 @@ void InGameUI::update( void )
 	UnsignedInt currLogicFrame = TheGameLogic->getFrame();
 	if( TheGameLogic->isInGame() && !TheGameLogic->isInShellGame() )
 		watchDozers();
+	updateSignalMarks();
 	UnsignedByte r, g, b, a;
 	Int amount;
 
@@ -3749,6 +3752,8 @@ void InGameUI::reset( void )
 	m_feedPageLoaded = FALSE;
 	m_chatPageLoaded = FALSE;
 	m_chatLines.clear();
+	clearSignalMarks();
+	m_armedSignal = SIGNAL_KIND_COUNT;
 	m_dozerCheckFrame = 0;
 	for( Int index = 0; index < MAX_PLAYER_COUNT; index++ )
 		m_hadDozer[ index ] = FALSE;
@@ -5703,6 +5708,13 @@ void InGameUI::createMouseoverHint( const GameMessage *msg )
 	if (m_isScrolling || m_isSelecting)
 		return; // no mouseover for you
 
+	// a signal armed off the bar is where the next click goes, over a unit, the ground or the radar
+	if( isSignalArmed() )
+	{
+		setMouseCursor( Mouse::CROSS );
+		return;
+	}
+
 	GameWindow *window = NULL;
 	const MouseIO *io = TheMouse->getMouseStatus();
 	Bool underWindow = false;
@@ -5985,6 +5997,12 @@ void InGameUI::createCommandHint( const GameMessage *msg )
 {
 	if (m_isScrolling || m_isSelecting || TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK)
 		return;
+
+	if( isSignalArmed() )
+	{
+		setMouseCursor( Mouse::CROSS );
+		return;
+	}
 
 	const Drawable *draw = TheGameClient->findDrawableByID(m_mousedOverDrawableID);
 	GameMessage::Type t = msg->getType();
@@ -8797,6 +8815,97 @@ void InGameUI::addSignalWord( const UnicodeString& text, const Coord3D *pos, Col
 		TheGlobalLanguageData->adjustFontSize( SIGNAL_WORD_POINT_SIZE ), TRUE ) );
 }
 
+/** Each signal's mark on the ground, by SignalKind: Art/Textures/<name>.tga, drawn by
+	* Tools/signal_marks.py, white where the sender's colour goes. */
+static const char *const SIGNAL_MARK_TEXTURES[ SIGNAL_KIND_COUNT ] =
+{
+	"ReforgedSignalAttack", "ReforgedSignalDefend", "ReforgedSignalLook"
+};
+
+enum
+{
+	SIGNAL_MARK_SIZE						= 160,	///< across, in world units: 90 read as a coin from the default camera
+	SIGNAL_MARK_OPACITY					= 230,	///< out of 255, so the ground under it still shows a little
+	SIGNAL_MARK_FADE_IN_FRAMES	= LOGICFRAMES_PER_SECOND / 4,
+	SIGNAL_MARK_FADE_OUT_FRAMES	= LOGICFRAMES_PER_SECOND * 2
+};
+
+//-------------------------------------------------------------------------------------------------
+/** The mark a signal lays on the ground: crossed swords, a shield or an eye in a ring, in `color`,
+	* turned to this viewer's camera as it stands now so it reads upright. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::addSignalMark( SignalKind kind, const Coord3D &pos, Color color, UnsignedInt holdFrames )
+{
+	Shadow::ShadowTypeInfo decalInfo;
+	decalInfo.allowUpdates = FALSE;
+	decalInfo.allowWorldAlign = TRUE;		// wrapped over the terrain it lands on
+	// SHADOW_ALPHA_DECAL is the kind setColor and setOpacity reach, and removeShadow takes off
+	decalInfo.m_type = SHADOW_ALPHA_DECAL;
+	strcpy( decalInfo.m_ShadowName, SIGNAL_MARK_TEXTURES[ kind ] );
+	decalInfo.m_sizeX = SIGNAL_MARK_SIZE;
+	decalInfo.m_sizeY = SIGNAL_MARK_SIZE;
+	decalInfo.m_offsetX = 0.0f;
+	decalInfo.m_offsetY = 0.0f;
+
+	SignalMark mark;
+	mark.decal = TheProjectedShadowManager->addDecal( &decalInfo );
+	mark.decal->setAngle( TheTacticalView->getAngle() );
+	mark.decal->setColor( color );
+	mark.decal->setOpacity( 0 );
+	mark.decal->setPosition( pos.x, pos.y, pos.z );
+	mark.born = TheGameLogic->getFrame();
+	mark.until = mark.born + holdFrames;
+	m_signalMarks.push_back( mark );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Fades each mark in and out by the logic frame, so a paused game holds them, and takes off the
+	* ones whose time is up.  Hidden while scripts or -cinema hide the icons, like a radius decal. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::updateSignalMarks( void )
+{
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	const Bool shown = TheGameLogic->getDrawIconUI() && !CinemaDirector_hidesHud();
+	for( size_t index = 0; index < m_signalMarks.size(); )
+	{
+		// a frame going backwards is a loaded save, and the mark is not from this game any more
+		SignalMark &mark = m_signalMarks[ index ];
+		if( frame >= mark.until || frame < mark.born )
+		{
+			mark.decal->release();
+			m_signalMarks.erase( m_signalMarks.begin() + index );
+			continue;
+		}
+
+		const UnsignedInt rising = ( frame - mark.born ) * SIGNAL_MARK_OPACITY / SIGNAL_MARK_FADE_IN_FRAMES;
+		const UnsignedInt falling = ( mark.until - frame ) * SIGNAL_MARK_OPACITY / SIGNAL_MARK_FADE_OUT_FRAMES;
+		mark.decal->setOpacity( shown ? (Int)min( (UnsignedInt)SIGNAL_MARK_OPACITY, min( rising, falling ) ) : 0 );
+		index++;
+	}
+}
+
+void InGameUI::clearSignalMarks( void )
+{
+	for( size_t index = 0; index < m_signalMarks.size(); index++ )
+		m_signalMarks[ index ].decal->release();
+	m_signalMarks.clear();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The same logic message as the Alt+Z/X/C keys, so the same throttle and the same allies see it. */
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::placeArmedSignal( const Coord3D &world )
+{
+	if( !isSignalArmed() )
+		return FALSE;
+
+	GameMessage *message = TheMessageStream->appendMessage( GameMessage::MSG_PLACE_SIGNAL );
+	message->appendLocationArgument( world );
+	message->appendIntegerArgument( m_armedSignal );
+	disarmSignal();
+	return TRUE;
+}
+
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 #if defined(_DEBUG) || defined(_INTERNAL)
@@ -10568,29 +10677,25 @@ static Bool signalsAllowed( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** data-click="signal:attack", "signal:defend" or "signal:look": the smoke the Alt+Z/X/C keys send,
-	* in the middle of the view, since a button has no cursor over the ground to put it under.  The
-	* same logic message as the keys, so the same throttle and the same allies see it. */
+/** data-click="signal:attack", "signal:defend" or "signal:look": arms the smoke the Alt+Z/X/C keys
+	* send, and the next left click on the ground or the radar drops it there; the right button or
+	* Escape takes it back. */
 //-------------------------------------------------------------------------------------------------
-static void placeSignalAtView( const std::string &kind )
+static void armSignalFromPage( const std::string &kind )
 {
 	static const struct { const char *name; SignalKind kind; } KINDS[] =
 	{
 		{ "attack", SIGNAL_ATTACK }, { "defend", SIGNAL_DEFEND }, { "look", SIGNAL_ATTENTION }
 	};
 
-	if( !signalsAllowed() || TheTacticalView == NULL )
+	if( !signalsAllowed() )
 		return;
 	for( Int each = 0; each < (Int)ARRAY_SIZE( KINDS ); each++ )
 	{
 		if( kind != KINDS[ each ].name )
 			continue;
 
-		Coord3D world;
-		TheTacticalView->getPosition( &world );
-		GameMessage *message = TheMessageStream->appendMessage( GameMessage::MSG_PLACE_SIGNAL );
-		message->appendLocationArgument( world );
-		message->appendIntegerArgument( KINDS[ each ].kind );
+		TheInGameUI->armSignal( KINDS[ each ].kind );
 		return;
 	}
 	DEBUG_LOG(( "Command bar page: data-click=\"signal:%s\" names no signal\n", kind.c_str() ));
@@ -11343,7 +11448,7 @@ Bool InGameUI::handleControlBarPageClick( const ICoord2D *mouse, Bool act )
 	if( action.compare( 0, SIGNAL_ACTION.size(), SIGNAL_ACTION ) == 0 )
 	{
 		if( act )
-			placeSignalAtView( action.substr( SIGNAL_ACTION.size() ) );
+			armSignalFromPage( action.substr( SIGNAL_ACTION.size() ) );
 		return TRUE;
 	}
 	if( action.compare( 0, PRESS_ACTION.size(), PRESS_ACTION ) != 0 )

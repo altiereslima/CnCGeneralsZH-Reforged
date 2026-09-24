@@ -3449,6 +3449,12 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 				cancelledSomething = TRUE;
 			}
 
+			if( TheInGameUI->isSignalArmed() )
+			{
+				TheInGameUI->disarmSignal();
+				cancelledSomething = TRUE;
+			}
+
 			if( cancelledSomething == FALSE )
 				ToggleQuitMenu();
 

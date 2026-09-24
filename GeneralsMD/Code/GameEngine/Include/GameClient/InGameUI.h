@@ -76,6 +76,17 @@ enum ShadowType;
 enum CanAttackResult;
 enum ScienceType;
 
+/** The smoke signals a player drops for their allies, carried as the integer argument of
+  * MSG_PLACE_SIGNAL.  The value arrives from another machine, so the receiving side range-checks
+  * it against SIGNAL_KIND_COUNT. */
+enum SignalKind
+{
+	SIGNAL_ATTACK,
+	SIGNAL_DEFEND,
+	SIGNAL_ATTENTION,
+	SIGNAL_KIND_COUNT
+};
+
 // ------------------------------------------------------------------------------------------------
 enum RadiusCursorType
 {
@@ -887,6 +898,14 @@ public:  // ********************************************************************
 	virtual FloatingTextData *addFloatingText(const UnicodeString& text,const Coord3D * pos, Color color);
 	/// a smoke signal's word, written on the smoke for holdFrames and then faded like any floating text
 	void addSignalWord( const UnicodeString& text, const Coord3D *pos, Color color, UnsignedInt holdFrames );
+	/// a smoke signal's mark laid on the ground in the sender's colour, faded in and out over holdFrames
+	void addSignalMark( SignalKind kind, const Coord3D &pos, Color color, UnsignedInt holdFrames );
+	/// a signal button pressed: the next left click on the ground or the radar drops that signal there
+	void armSignal( SignalKind kind ) { m_armedSignal = kind; }
+	void disarmSignal( void ) { m_armedSignal = SIGNAL_KIND_COUNT; }
+	Bool isSignalArmed( void ) const { return m_armedSignal != SIGNAL_KIND_COUNT; }
+	/// sends the armed signal to `world` and disarms; FALSE, doing nothing, when none is armed
+	Bool placeArmedSignal( const Coord3D &world );
 
 	// Drawable caption stuff
 	AsciiString	getDrawableCaptionFontName( void )	{ return m_drawableCaptionFont; }
@@ -1275,6 +1294,16 @@ protected:
 		UnsignedInt until;					///< the logic frame it leaves on
 	};
 	std::vector< FeedLine >			m_feedLines;
+	SignalKind									m_armedSignal;						///< the signal the next click drops; SIGNAL_KIND_COUNT for none
+	struct SignalMark
+	{
+		Shadow *decal;
+		UnsignedInt born;						///< the logic frame it went down on
+		UnsignedInt until;					///< and the one it is gone by
+	};
+	std::vector< SignalMark >		m_signalMarks;
+	void updateSignalMarks( void );
+	void clearSignalMarks( void );
 	void addFeedLine( HtmlValues line );
 	void feedAct( Player *player, const Image *cameo, const std::string &what, const char *tag, const char *label );
 	void watchDozers( void );
