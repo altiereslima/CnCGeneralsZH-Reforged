@@ -743,6 +743,7 @@ GlobalData::GlobalData()
 	m_netGameHosts.clear(); // no network game from the command line
 	m_netGameStarted = FALSE;
 	m_netGameLocalSlot = 0;
+	m_netGameAISlots = 0;
 	m_lanPlayerName.clear(); // the lobby name comes out of the preferences unless -lanname says otherwise
 	m_lanLobbyOnStart = FALSE;
 	m_skirmishLobbyOnStart = FALSE;

@@ -634,9 +634,10 @@ static void startAutoNetGame( void )
 		return;
 	}
 
-	if (numSlots > md->m_numPlayers)
+	const Int numSeats = numSlots + TheGlobalData->m_netGameAISlots;
+	if (numSeats > md->m_numPlayers || numSeats > MAX_SLOTS)
 	{
-		DEBUG_LOG(("-netgame: '%s' holds %d players, not %d\n", mapName.str(), md->m_numPlayers, numSlots));
+		DEBUG_LOG(("-netgame: '%s' holds %d players, not %d\n", mapName.str(), md->m_numPlayers, numSeats));
 		return;
 	}
 

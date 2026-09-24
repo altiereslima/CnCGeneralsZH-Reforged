@@ -2191,6 +2191,19 @@ Int parseNetSlot(char *args[], int num)
 	return 2;
 }
 
+/* -netai <n> puts n AI seats after the -netgame addresses.  Two idle copies play nothing, and a
+	 desync that players meet ten minutes into a match needs a match that is being played: AIs
+	 building, fighting and dying.  An AI runs inside GameLogic on every machine alike, so every copy
+	 has to be given the same number, the way every copy is given the same address list. */
+Int parseNetAI(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+	{
+		TheWritableGlobalData->m_netGameAISlots = max( 0, atoi(args[1]) );
+	}
+	return 2;
+}
+
 /* -replay <file> plays a replay back without the menus, the way -autoskirmish starts a match
 	 without them.  The only route into playback was ReplayMenu's list box and the _DEBUG/_INTERNAL
 	 -file switch, so a Release build could record a game and then had no way to play it back
@@ -2457,6 +2470,7 @@ static CommandLineParam params[] =
 	{ "-loadsave", parseLoadSave },
 	{ "-netgame", parseNetGame },
 	{ "-netslot", parseNetSlot },
+	{ "-netai", parseNetAI },
 	{ "-lanip", parseLanIP },
 	{ "-lanname", parseLanName },
 	{ "-lanlobby", parseLanLobby },
