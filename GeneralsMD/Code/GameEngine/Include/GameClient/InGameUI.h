@@ -1211,6 +1211,8 @@ protected:
 	///< the run of cells, a column, with its left edge at 'left' and its first cell's top edge at 'bottomY'
 	void drawProductionStripColumn( Int left, Int bottomY );
 	void drawQueueTray( void );		///< the playing strip as a row in Window/Html/Queue.html's tray
+	void drawNetPage( void );			///< the network box, Window/Html/Net.html, with the command bar's page
+	std::string scoreboardHtml( void );	///< Window/Html/Scoreboard.html filled in for this frame
 	const Image *productionStripTray( void );	///< the bar's tray, mirrored, kept until the bar changes side
 	void stripTrayMetrics( ICoord2D *tray, ICoord2D *cameo, ICoord2D *hole, Int *step );	///< that tray's size, its cameo hole, and the column step
 	void drawStripSeconds( Int which, Int x, Int y, Int w, Int h, Int seconds );	///< countdown written inside a cameo
@@ -1227,6 +1229,8 @@ protected:
 	HtmlOverlay *								m_scoreboardOverlay;
 	Bool												m_scoreboardPageLoaded;		///< read once a match, like the spectator's page
 	std::string									m_scoreboardPage;
+	std::string									m_scoreboardHtml;					///< the page filled in, kept for NET_WORTH_REFRESH_FRAMES
+	UnsignedInt									m_scoreboardHtmlFrame;		///< the logic frame it was filled in on
 	// The last half minute of every player's money earned, one reading a game second, oldest first, so
 	// a seat can say what it earns now beside its average over the match.  The reading's own second
 	// goes with it: a pass that runs several logic frames at once skips seconds.
@@ -1246,6 +1250,10 @@ protected:
 	Bool												m_controlBarPageLoaded;
 	Bool												m_controlBarPageShown;		///< drawn this frame, so its buttons can be clicked
 	std::string									m_controlBarPage;
+	Bool												m_controlBarPageHovered;	///< the pointer was on something the page drew, last frame
+	HtmlOverlay *								m_netOverlay;
+	Bool												m_netPageLoaded;
+	std::string									m_netPage;
 	HtmlOverlay *								m_tooltipOverlay;
 	Bool												m_tooltipPageLoaded;
 	std::string									m_tooltipPage;
@@ -1329,7 +1337,7 @@ protected:
 	void drawBlindSpots( void );					///< shade the ground a placed or selected defence cannot shoot into
 
 	DisplayString *							m_hudDisplayString;			///< the ShowHudOverlay line (fps / clock)
-	HtmlValues									m_hudValues;						///< that line's readings one by one, for the command bar page's network box
+	HtmlValues									m_hudValues;						///< that line's readings one by one, for Window/Html/Net.html
 	DisplayString *							m_peaceTimeDisplayString;	///< the peace time clock at the top of the screen
 	DisplayString *							m_peaceTimeLabelDisplayString;	///< the word written over that clock
 	DisplayString *							m_peaceCountdownDisplayString;	///< the big digit of its last ten seconds

@@ -1218,9 +1218,13 @@ InGameUI::InGameUI()
 	m_scoreboardOpen = FALSE;
 	m_scoreboardOverlay = NULL;
 	m_scoreboardPageLoaded = FALSE;
+	m_scoreboardHtmlFrame = 0;
 	m_earnedReadingCount = 0;
 	m_controlBarOverlay = NULL;
 	m_controlBarPageLoaded = FALSE;
+	m_controlBarPageHovered = FALSE;
+	m_netOverlay = NULL;
+	m_netPageLoaded = FALSE;
 	m_promotionOverlay = NULL;
 	m_promotionFrontOverlay = NULL;
 	for( Int grid = 0; grid < CELL_GRID_COUNT; grid++ )
@@ -1362,6 +1366,8 @@ InGameUI::~InGameUI()
 	m_scoreboardOverlay = NULL;
 	delete m_controlBarOverlay;
 	m_controlBarOverlay = NULL;
+	delete m_netOverlay;
+	m_netOverlay = NULL;
 	delete m_promotionOverlay;
 	m_promotionOverlay = NULL;
 	delete m_promotionFrontOverlay;
@@ -3762,8 +3768,10 @@ void InGameUI::reset( void )
 	m_isQuitMenuVisible = FALSE;
 	m_scoreboardOpen = FALSE;
 	m_scoreboardPageLoaded = FALSE;
+	m_scoreboardHtml.clear();
 	m_earnedReadingCount = 0;		// a new match and a loaded save both come through here
 	m_controlBarPageLoaded = FALSE;
+	m_netPageLoaded = FALSE;
 	m_tooltipPageLoaded = FALSE;
 	m_promotionPageLoaded = FALSE;
 	m_quitMenuPageLoaded = FALSE;
@@ -9304,7 +9312,8 @@ void InGameUI::drawHudOverlay( void )
 	m_hudValues[ "net.hz" ] = std::to_string( m_hudLogicHz.shown );
 	m_hudValues[ "net.fps" ] = std::to_string( m_hudFps.shown );
 	m_hudValues[ "net.renderer" ] = WideCharStringToMultiByte( TheDisplay->getRendererName() );
-	m_hudValues[ "net.frame" ] = std::to_string( logicFrame );
+	// as of the last rate reading, twice a second: every frame laid the box out thirty times a second
+	m_hudValues[ "net.frame" ] = std::to_string( m_hudLastSampleLogicFrame );
 	if( TheNetwork != NULL )
 	{
 		enum { BYTES_PER_KILOBYTE = 1024 };
@@ -10443,6 +10452,23 @@ void InGameUI::drawScoreboard( void )
 	if( m_scoreboardOverlay == NULL )
 		m_scoreboardOverlay = new HtmlOverlay( m_superweaponNormalFont );
 
+	// counted again twice a second, as the spectator page is: the money moves every frame, and every
+	// change lays the whole page out again
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	if( m_scoreboardHtml.empty() || frame < m_scoreboardHtmlFrame || frame >= m_scoreboardHtmlFrame + NET_WORTH_REFRESH_FRAMES )
+	{
+		m_scoreboardHtml = scoreboardHtml();
+		m_scoreboardHtmlFrame = frame;
+	}
+	m_scoreboardOverlay->setPage( m_scoreboardHtml );
+	m_scoreboardOverlay->draw();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Window/Html/Scoreboard.html filled in with every seat as it stands this frame. */
+//-------------------------------------------------------------------------------------------------
+std::string InGameUI::scoreboardHtml( void )
+{
 	Player *local = ThePlayerList->getLocalPlayer();
 	const Bool watching = localPlayerWatching();
 
@@ -10516,8 +10542,7 @@ void InGameUI::drawScoreboard( void )
 	HtmlValues values;
 	values[ "side" ] = spectatorSide();
 	values[ "clock" ] = spectatorClock( TheGameLogic->getFrame() );
-	m_scoreboardOverlay->setPage( HtmlTemplate_expand( m_scoreboardPage, values, lists, lookupGameText ) );
-	m_scoreboardOverlay->draw();
+	return HtmlTemplate_expand( m_scoreboardPage, values, lists, lookupGameText );
 }
 
 static const char *const CONTROL_BAR_PAGE = "Window\\Html\\ControlBar.html";
@@ -11151,6 +11176,28 @@ static void putFrontWindow( GameWindow *parent, GameWinDrawFunc draw )
 		front->winBringToTop();
 }
 
+static const char *const NET_PAGE = "Window\\Html\\Net.html";
+
+/** The network box in the screen's top right corner, drawHudOverlay's readings on a page of their
+	* own: they change several times a second, and each change lays its page out again. */
+void InGameUI::drawNetPage( void )
+{
+	if( !m_netPageLoaded )
+	{
+		m_netPageLoaded = TRUE;
+		readHtmlPage( NET_PAGE, m_netPage );
+	}
+	if( m_netPage.empty() )
+		return;
+	if( m_netOverlay == NULL )
+		m_netOverlay = new HtmlOverlay( m_superweaponNormalFont );
+
+	HtmlValues values = m_hudValues;
+	values[ "side" ] = spectatorSide();
+	m_netOverlay->setPage( HtmlTemplate_expand( m_netPage, values, HtmlLists(), lookupGameText ) );
+	m_netOverlay->draw();
+}
+
 void InGameUI::drawCellGridFront( Int grid )
 {
 	HtmlOverlay *&overlay = m_cellFrontOverlay[ grid ];
@@ -11203,10 +11250,10 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	values[ "promotion" ] = !watching && TheControlBar->isGeneralStarFlashing() ? "ready" : "";
 	values[ "watching" ] = watching ? "watching" : "";
 	// the page's clicks are whole, down and up at once, so a key pressed in under the pointer goes by
-	// the mouse's own left button
-	values[ "held" ] = TheMouse->getMouseStatus()->leftState != MBS_Up ? "held" : "";
-	values.insert( m_hudValues.begin(), m_hudValues.end() );
-	values[ "blink" ] = TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND > LOGICFRAMES_PER_SECOND / 2 ? "lit" : "";
+	// the mouse's own left button.  Only over the page: a changed value lays the whole page out again,
+	// fifteen milliseconds, and every click on the battlefield did that twice
+	values[ "held" ] = m_controlBarPageHovered && TheMouse->getMouseStatus()->leftState != MBS_Up ? "held" : "";
+	values[ "blink" ] = !values[ "promotion" ].empty() && TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND > LOGICFRAMES_PER_SECOND / 2 ? "lit" : "";
 	for( Int panel = 0; panel < panelCount; panel++ )
 		putPageRect( values, "panel" + std::to_string( panel ), panels[ panel ], shown[ panel ] );
 
@@ -11423,8 +11470,9 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 		standDownPromotionScreen();
 
 	m_controlBarOverlay->setPage( HtmlTemplate_expand( m_controlBarPage, values, lists, lookupGameText ) );
-	m_controlBarOverlay->hover( TheMouse->getMouseStatus()->pos );
+	m_controlBarPageHovered = m_controlBarOverlay->hover( TheMouse->getMouseStatus()->pos );
 	m_controlBarOverlay->draw();
+	drawNetPage();
 
 	std::vector< IRegion2D > solids;
 	m_controlBarOverlay->rectsOf( ".solid", solids );
