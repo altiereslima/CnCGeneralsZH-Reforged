@@ -412,6 +412,7 @@ public:
 	Int m_anisotropyLevel;				///< samples anisotropic filtering may take; 0 = whatever the card offers
 	Bool m_showHudOverlay;				///< draw the fps / elapsed time / income line in the corner
 	Bool m_showPlacementRangeRing;		///< while placing a structure, ring its weapon range
+	Bool m_showProductionStrip;			///< the production queue rows above the command bar, bottom left
 	Bool m_showSkillStrip;					///< watching, every general's bought promotions, bottom right
 	Bool m_showSuperweaponStrip;		///< the superweapon countdown cameos, top right
 	Bool m_workersReturnToSupply;		///< a worker that finishes a build job goes back to the dock it left
@@ -428,12 +429,9 @@ public:
 	Bool m_headless;							///< -headless: never draw a frame, never pace the logic tick, quit when the match ends
 	Bool m_turbo;									///< -turbo: draw, but run one logic frame a pass instead of pacing it to the wall clock
 	Int m_autoSkirmishAIStateOdd;		///< -aidiff2 <name>: rung for the odd-numbered slots (0 = same as -aidiff)
-	Int m_noTacticsSlotParity;			///< -notactics even|odd: those slots of a skirmish fight without Hard's unit tactics; -1 none
 	Int m_autoSkirmishTeams;				///< -teams <n>: split the auto-skirmish slots into n allied teams (0 or 1 = free-for-all)
 	Int m_peaceTime;								///< -peacetime <n>: the lobby's peace time, in minutes, for an -autoskirmish run
 	Bool m_unitLimit;								///< -unitlimit: the lobby's unit limit for an -autoskirmish run
-	Int m_incomeSharing;						///< -incomesharing <n>: the lobby's income sharing, an IncomeSharing, for an -autoskirmish run
-	Int m_techRespawn;							///< -techrespawn <n>: the lobby's tech building respawn, in minutes, for an -autoskirmish run
 	Int m_maxGameFrames;						///< -maxframes <n>: quit after n logic frames however the match is going (0 = no limit)
 	Int m_screenShotFrame;					///< -screenshot <n>: save one picture when the run reaches logic frame n (0 = never)
 	Int m_videoStartFrame;					///< -video <from> <to> [name]: the first logic frame recorded
@@ -464,7 +462,6 @@ public:
 	AsciiString m_netGameHosts;				///< -netgame <ip>[,<ip>...]: the slot list of a LAN game started from the command line (empty = off)
 	Bool m_netGameStarted;						///< that -netgame passed its checks and StartAutomatedGame ran, so every seat has this command line
 	Int m_netGameLocalSlot;						///< -netslot <n>: which of those addresses this copy of the game is
-	Int m_netGameAISlots;							///< -netai <n>: that many AI seats after the addresses, at the -aidiff rung
 	AsciiString m_lanPlayerName;			///< -lanname <name>: the name this copy takes in the LAN lobby (empty = the one in the preferences)
 	Bool m_lanLobbyOnStart;						///< -lanlobby: open the LAN lobby instead of stopping at the main menu
 	Bool m_skirmishLobbyOnStart;			///< -skirmishlobby: open the skirmish staging room instead of stopping at the main menu

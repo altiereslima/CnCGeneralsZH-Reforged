@@ -87,9 +87,10 @@ class ProductionStripTestUI : public CameraTestUI
 public:
 	void staleCameo()
 	{
+		for(Int row = 0; row < PRODUCTION_STRIP_ROWS; ++row) m_productionStripCount[row] = 0;
 		m_productionStripCameoW = m_productionStripCameoH = 40;
-		m_productionStripCount = 1;
-		ProductionStripSlot &slot = m_productionStrip[0];
+		m_productionStripCount[0] = 1;
+		ProductionStripSlot &slot = m_productionStrip[0][0];
 		slot.producer = INVALID_ID; // producer died after the last draw; the strip still owns the click
 		slot.pos.x = slot.pos.y = 20;
 	}

@@ -42,8 +42,6 @@ public:
 	/// where the middle-button scroll was started from, or NULL if no such scroll is running
 	const ICoord2D* getScrollAnchor( void );
 	Bool hasMouseMovedRecently( void );
-	/// scrolling, turning or tilting the camera by hand, with the mouse or the keys, right now
-	Bool isMovingCamera( void ) const { return m_isScrolling || m_isRotating || m_isPitching; }
 	void setCurrentPos( const ICoord2D& pos );
 
 	void resetModes(); //Used when disabling input, so when we reenable it we aren't stuck in a mode.
@@ -78,10 +76,7 @@ private:
 	Bool m_scrollMovesCursor;	// the scroll in progress swapped the cursor for the scroll arrows and puts it back when it stops
 	void setScrolling( Int );
 	void stopScrolling( void );
-	Bool networkCameraDue( const ViewLocation &view );
 	UnsignedInt m_lastMouseMoveFrame;
-	UnsignedInt m_cameraSentFrame;		///< the logic frame this player's camera last went to the other machines
-	ViewLocation m_cameraSent;				///< and where it was then
 };	
 
 extern LookAtTranslator *TheLookAtTranslator;

@@ -25,7 +25,6 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
-#include "Common/BuildAssistant.h"
 #include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "Common/GlobalData.h"
@@ -40,7 +39,6 @@
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/BehaviorModule.h"
 #include "GameLogic/Module/CreateModule.h"
-#include "GameLogic/Module/ProductionUpdate.h"
 #include "GameLogic/Module/SpecialPowerModule.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/ScenarioDrill.h"
@@ -177,8 +175,6 @@ static Bool parseActionType( const AsciiString &token, ScenarioActionType *actio
 		*action = SCENARIO_ACTION_PARTICLES;
 	else if (token == "power")
 		*action = SCENARIO_ACTION_POWER;
-	else if (token == "produce")
-		*action = SCENARIO_ACTION_PRODUCE;
 	else
 		return FALSE;
 
@@ -259,7 +255,6 @@ static Int tokensNeededFor( ScenarioActionType action )
 		case SCENARIO_ACTION_ATTACKMOVE:	return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_ATTACK:			return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_ENTER:				return SCENARIO_TOKENS_ATTACK;
-		case SCENARIO_ACTION_PRODUCE:			return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_STOP:				return SCENARIO_TOKENS_STOP;
 		case SCENARIO_ACTION_ARRIVE:			return SCENARIO_TOKENS_ARRIVE;
 	}
@@ -345,14 +340,6 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 			if (!parseWholeNumber( tokens[ 4 ], &action->targetSlot ))
 				return SCENARIO_PARSE_BAD_SLOT;
 			action->targetSelector = tokens[ 5 ];
-			break;
-		}
-
-		case SCENARIO_ACTION_PRODUCE:
-		{
-			action->targetSelector = tokens[ 4 ];	// what to make
-			if (!parseWholeNumber( tokens[ 5 ], &action->count ) || action->count < 1)
-				return SCENARIO_PARSE_BAD_COUNT;
 			break;
 		}
 
@@ -625,9 +612,6 @@ static Bool spawnOne( const ThingTemplate *tmpl, Team *team, const Coord3D *pos 
 			continue;
 		create->onBuildComplete();
 	}
-
-	// a capture refreshes the bar the same way; without it a spawned superweapon waits for a click
-	TheControlBar->markUIDirty();
 
 	team->setActive();
 	TheAI->pathfinder()->addObjectToPathfindMap( obj );
@@ -930,33 +914,6 @@ static Bool executePower( const ScenarioAction &action, Player *player, const Co
 	return fired > 0;
 }
 
-/** Queue `count` of the template in the first matching building of this seat, the way a click on
-	  its build button would, money and prerequisites checked by the building's own queue.  What a
-	  queue refuses is counted and reported, not forced. */
-static Bool executeProduce( const ScenarioAction &action, Player *player )
-{
-	Object *building = findFirstMatching( player, action.selector );
-	ProductionUpdateInterface *queue = building ? building->getProductionUpdateInterface() : NULL;
-	const ThingTemplate *made = TheThingFactory->findTemplate( action.targetSelector );
-	if (queue == NULL || made == NULL)
-	{
-		DEBUG_LOG(("SCENARIO: frame %d produce: slot %d has no producing '%s', or '%s' is no template\n",
-							 action.frame, action.slot, action.selector.str(), action.targetSelector.str()));
-		return FALSE;
-	}
-
-	Int queued = 0;
-	for (Int each = 0; each < action.count; ++each)
-	{
-		if (queue->canQueueCreateUnit( made ) == CANMAKE_OK && queue->queueCreateUnit( made, queue->requestUniqueUnitID() ))
-			++queued;
-	}
-
-	DEBUG_LOG(("SCENARIO: frame %d produce slot %d '%s' queued %d of %d '%s'\n",
-						 action.frame, action.slot, action.selector.str(), queued, action.count, action.targetSelector.str()));
-	return queued > 0;
-}
-
 static Bool executeOrder( const ScenarioAction &action, Player *player, const Coord3D &dest )
 {
 	AIGroup *group = TheAI->createGroup();
@@ -1036,7 +993,6 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 		case SCENARIO_ACTION_ARRIVE:
 		case SCENARIO_ACTION_PARTICLES:
 		case SCENARIO_ACTION_POWER:
-		case SCENARIO_ACTION_PRODUCE:
 			ordered = FALSE;		// handled before the group is built
 			break;
 	}
@@ -1069,9 +1025,6 @@ Bool ScenarioDrill_execute( const ScenarioAction &action )
 
 	if (action.action == SCENARIO_ACTION_POWER)
 		return executePower( action, player, position );
-
-	if (action.action == SCENARIO_ACTION_PRODUCE)
-		return executeProduce( action, player );
 
 	return executeOrder( action, player, position );
 }

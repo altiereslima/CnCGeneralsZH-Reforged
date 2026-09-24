@@ -357,7 +357,6 @@ public:
 	virtual void releaseShadows(void);	///< frees all shadow resources used by this module - used by Options screen.
 	virtual void allocateShadows(void); ///< create shadow resources if not already present. Used by Options screen.
 	void allocateContactShadow(void);		///< the soft patch under a structure, which is what stands it on the ground
-	Bool isShadowHiddenByShroud(void) const;	///< obscured, and not something that keeps its shadow in fog
 	Bool registerModelShadow(void);			///< hand this model's shape to the tree buffer to cast; TRUE if it took it
 	void unregisterModelShadow(void);		///< take it back when the model changes or the drawable goes
 

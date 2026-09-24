@@ -60,7 +60,6 @@
 #include "GameClient/GameText.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/GUICallbacks.h"
-#include "GameClient/KeyDefs.h"
 #include "GameClient/Shell.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/SelectionInfo.h"
@@ -2566,12 +2565,6 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 {
 	GameMessage::Type t = msg->getType();
 	GameMessageDisposition disp = KEEP_MESSAGE;
-
-	// letting go of Tab puts the scoreboard away, input or no input; the press is the command map's
-	// DIPLOMACY
-	if (t == GameMessage::MSG_RAW_KEY_UP && msg->getArgument( 0 )->integer == KEY_TAB)
-		TheInGameUI->closeScoreboard();
-
 	// We want to always be able to get to the options menu even during no input times and a clear game data message should always go through
 	if (t != GameMessage::MSG_META_OPTIONS && t != GameMessage::MSG_CLEAR_GAME_DATA &&
 			!TheInGameUI->getInputEnabled() && !isSystemMessage(msg)) 
@@ -2867,11 +2860,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_COMMAND_SLOT13:
 		case GameMessage::MSG_META_COMMAND_SLOT14:
 		{
-			// a watcher has no commands to press, and the top row picks the spectator's stat instead,
-			// the keys Dota's spectator uses for the same list
-			const Int slot = t - GameMessage::MSG_META_COMMAND_SLOT01;
-			if( !TheInGameUI->pickSpectatorStat( slot ) )
-				TheControlBar->pressCommandButton( slot );
+			TheControlBar->pressCommandButton( t - GameMessage::MSG_META_COMMAND_SLOT01 );
 			disp = DESTROY_MESSAGE;
 			break;
 		}		// end command bar grid slots
@@ -3324,10 +3313,12 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_CHAT_ALLIES:
 			if (TheGameLogic->isInMultiplayerGame() && !TheGameLogic->isInReplayGame())
 			{
-				// a watcher, or a player beaten, has no team: his line goes to everyone, and
-				// ConnectionManager::processChat shows it to the watchers alone
-				ToggleInGameChat();
-				SetInGameChatType( ThePlayerList->getLocalPlayer()->isPlayerActive() ? INGAME_CHAT_ALLIES : INGAME_CHAT_EVERYONE );
+				Player *localPlayer = ThePlayerList->getLocalPlayer();
+				if (localPlayer && localPlayer->isPlayerActive() || !TheGlobalData->m_netMinPlayers)
+				{
+					ToggleInGameChat();
+					SetInGameChatType( INGAME_CHAT_ALLIES );
+				}
 			}
 			disp = DESTROY_MESSAGE;
 			break;
@@ -3336,19 +3327,23 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_CHAT_EVERYONE:
 			if (TheGameLogic->isInMultiplayerGame() && !TheGameLogic->isInReplayGame())
 			{
-				ToggleInGameChat();
-				SetInGameChatType( INGAME_CHAT_EVERYONE );
+				Player *localPlayer = ThePlayerList->getLocalPlayer();
+				if (localPlayer && localPlayer->isPlayerActive() || !TheGlobalData->m_netMinPlayers)
+				{
+					ToggleInGameChat();
+					SetInGameChatType( INGAME_CHAT_EVERYONE );
+				}
 			}
 			disp = DESTROY_MESSAGE;
 			break;
 
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_DIPLOMACY:
-			// Tab is the scoreboard in any game that has seats, up while the key is held; the diplomacy
-			// screen, with its mute buttons, stays on the command bar's own button
+			// Tab is the scoreboard in any game that has seats; the diplomacy screen, with its mute
+			// buttons, stays on the command bar's own button
 			if (TheGameLogic->isInGame() && !TheGameLogic->isInShellGame() && TheGameInfo)
 			{
-				TheInGameUI->openScoreboard();
+				TheInGameUI->toggleScoreboard();
 			}
 			else if (TheGameLogic->isInGame() && !TheGameLogic->isInShellGame())
 			{
@@ -3446,12 +3441,6 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			if( TheInGameUI->getGUICommand() != NULL )
 			{
 				TheInGameUI->setGUICommand( NULL );
-				cancelledSomething = TRUE;
-			}
-
-			if( TheInGameUI->isSignalArmed() )
-			{
-				TheInGameUI->disarmSignal();
 				cancelledSomething = TRUE;
 			}
 
@@ -3581,6 +3570,33 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 				Bool paused = !TheGameLogic->isGamePaused();
 				TheGameLogic->setGamePaused( paused );
 				TheInGameUI->message( paused ? "GUI:GamePaused" : "GUI:GameResumed" );
+			}
+			disp = DESTROY_MESSAGE;
+			break;
+		}
+
+		case GameMessage::MSG_META_GAME_SPEED_UP:
+		case GameMessage::MSG_META_GAME_SPEED_DOWN:
+		case GameMessage::MSG_META_GAME_SPEED_RESET:
+		{
+			if( TheGameEngine && TheGameLogic && !TheGameLogic->isInMultiplayerGame() )
+			{
+				const Int MIN_LOGIC_FPS = 5;
+				const Int MAX_LOGIC_FPS = 200;
+				Int fps = TheGameEngine->getFramesPerSecondLimit();
+
+				if( t == GameMessage::MSG_META_GAME_SPEED_RESET )
+					fps = DEFAULT_MAX_FPS;
+				else if( t == GameMessage::MSG_META_GAME_SPEED_UP )
+					fps += 5;
+				else
+					fps -= 5;
+
+				if( fps < MIN_LOGIC_FPS ) fps = MIN_LOGIC_FPS;
+				if( fps > MAX_LOGIC_FPS ) fps = MAX_LOGIC_FPS;
+
+				TheGameEngine->setFramesPerSecondLimit( fps );
+				TheInGameUI->message( UnicodeString( L"Game speed: %d" ), fps );
 			}
 			disp = DESTROY_MESSAGE;
 			break;

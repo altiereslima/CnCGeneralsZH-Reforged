@@ -37,8 +37,6 @@
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
 
-#include <typeinfo>	// the machine's class name in the missing-state line, which is all Release logs
-
 #ifdef _INTERNAL
 // for occasional debugging...
 
@@ -539,13 +537,8 @@ State *StateMachine::internalGetState( StateID id )
 	if (i == m_stateMap.end())
 	{
 		DEBUG_CRASH( ("StateMachine::internalGetState(): Invalid state for object %s using state %d", m_owner->getTemplate()->getName().str(), id) );
-		// DEBUG_CRASH is silent in Release, so this line is all a player's crash report carries: a
-		// v2.1.0 report came back naming neither the object nor the state, with "#d" for the number.
-		DEBUG_LOG(("%s on %s (id %d) has no state %d, in state %d, %d states defined, frame %d\n",
-			typeid(*this).name(), m_owner->getTemplate()->getName().str(), (Int)m_owner->getID(), (Int)id,
-			m_currentState ? (Int)m_currentState->getID() : -1, (Int)m_stateMap.size(),
-			(Int)TheGameLogic->getFrame()));
-		DEBUG_LOG(("Attempting to recover - locating default state %d...\n", (Int)m_defaultStateID));
+		DEBUG_LOG(("Transisioning to state #d\n", (Int)id));
+		DEBUG_LOG(("Attempting to recover - locating default state...\n"));
 		i = m_stateMap.find(m_defaultStateID);
 		if (i == m_stateMap.end()) {
 			DEBUG_LOG(("Failed to located default state.  Aborting...\n"));

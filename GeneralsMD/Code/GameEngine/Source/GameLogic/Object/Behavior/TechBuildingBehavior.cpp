@@ -35,7 +35,6 @@
 #include "Common/Xfer.h"
 #include "GameClient/FXList.h"
 #include "GameClient/InGameUI.h"
-#include "GameLogic/GameLogic.h"
 #include "GameLogic/Module/TechBuildingBehavior.h"
 #include "GameLogic/Object.h"
 
@@ -129,9 +128,6 @@ void TechBuildingBehavior::onDie( const DamageInfo *damageInfo )
 	Object *us = getObject();
 	us->clearModelConditionState( MODELCONDITION_CAPTURED );
 	us->setTeam( ThePlayerList->getNeutralPlayer()->getDefaultTeam() );
-
-	// and, if the lobby asked for it, a new one on this spot later
-	TheGameLogic->scheduleTechRespawn( us );
 
 }  // end onDie
 

@@ -238,8 +238,6 @@ GameLogic::GameLogic( void )
 	m_peaceTimeEndFrame = 0;
 	m_unitCap = 0;
 	m_proRules = FALSE;
-	m_incomeSharing = INCOME_SHARING_OFF;
-	m_techRespawnDelay = 0;
 	m_gamePaused = FALSE;
 	m_inputEnabledMemory = TRUE;
 	m_mouseVisibleMemory = TRUE;
@@ -446,7 +444,6 @@ void GameLogic::reset( void )
 	destroyAllObjectsImmediate();
 
 	m_nextObjID = (ObjectID)1;
-	m_pendingTechBuildings.clear();
 
 	m_frameObjectsChangedTriggerAreas = 0;
 
@@ -1237,8 +1234,6 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
       m_peaceTimeEndFrame = TheGameInfo->getPeaceTime() * 60 * LOGICFRAMES_PER_SECOND;
       m_unitCap = TheGameInfo->getUnitLimit()
                   ? (UnsignedInt)UnitLimitPerPlayer( TheGameInfo->getNumNonObserverPlayers() ) : 0;
-      m_incomeSharing = TheGameInfo->getIncomeSharing();
-      m_techRespawnDelay = TheGameInfo->getTechRespawn() * 60 * LOGICFRAMES_PER_SECOND;
     }
     else
     {
@@ -1246,8 +1241,6 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
       m_superweaponRestriction = 0;
       m_peaceTimeEndFrame = 0;
       m_unitCap = 0;
-      m_incomeSharing = INCOME_SHARING_OFF;
-      m_techRespawnDelay = 0;
     }
 
     /* Pro Rules hold in the modes people play each other in, when the lobby's check box is ticked,
@@ -2783,10 +2776,8 @@ void GameLogic::writeMismatchDump( Int numPlayers )
 	}
 
 	fprintf( fp, "Mismatch detected on frame %d\n", m_frame );
-	fprintf( fp, "Local player is slot %d of %d connected players; %d CRCs were compared\n",
+	fprintf( fp, "Local player is slot %d of %d connected players; %d CRCs were compared\n\n",
 		TheNetwork ? TheNetwork->getLocalPlayerID() : 0, numPlayers, m_cachedCRCs.size() );
-	// every player's dump carries the same two, which is how the reports from one match are paired up
-	fprintf( fp, "Map %s, seed %d\n\n", TheGameInfo->getMap().str(), TheGameInfo->getSeed() );
 
 	/* Two machines that never agreed about arithmetic produce a mismatch that looks exactly like a
 		 logic bug.  This number depends on the machine's math and nothing else, so the first thing to
@@ -2817,8 +2808,6 @@ void GameLogic::writeMismatchDump( Int numPlayers )
 	{
 		fprintf( fp, "\nNo CRC snapshot was retained for this frame.\n" );
 		fclose( fp );
-		// the launcher finds the log of this match by this line, so it is written either way
-		DEBUG_LOG(( "Mismatch on frame %d (no snapshot) - wrote %s\n", m_frame, fname.str() ));
 		return;
 	}
 
@@ -4275,114 +4264,6 @@ static void salvageCrateTick( void )
 	}
 }
 
-/* Tech building respawn, asked for in GitHub #23.  In the retail game an oil derrick blown up in
-	 the first fight is gone for the rest of the match, and so is everything the map had put there
-	 to fight over.  With the lobby's option on, TechBuildingBehavior::onDie writes the building
-	 down, and once the delay has run out a neutral one of the same kind stands on the same spot,
-	 full health and waiting for an engineer.
-
-	 A derrick, a refinery, a hospital and an artillery platform die into a ruin that KeepObjectDie
-	 keeps; the ruin goes when the new building comes.  The two pads die with DestroyDie and leave
-	 nothing.  Either way the spot has to be empty first.  Anything a player built there, a tank
-	 parked on the ruin or a squad standing in the yard holds the respawn back, and it tries again
-	 every second until they are gone, so a building never comes up around somebody's units. */
-void GameLogic::scheduleTechRespawn( const Object *ruin )
-{
-	if( m_techRespawnDelay == 0 )
-		return;
-
-	PendingTechBuilding pending;
-	pending.m_template = ruin->getTemplate();
-	pending.m_position = *ruin->getPosition();
-	pending.m_angle = ruin->getOrientation();
-	pending.m_ruinID = ruin->getID();
-	pending.m_dueFrame = m_frame + m_techRespawnDelay;
-	m_pendingTechBuildings.push_back( pending );
-	DEBUG_LOG(("TECH RESPAWN frame %d %s down at (%.0f, %.0f), due frame %d\n", m_frame,
-		pending.m_template->getName().str(), pending.m_position.x, pending.m_position.y, pending.m_dueFrame));
-}
-
-/** Would a building of this kind here stand on something?  Shrubbery, rubble, mines and whatever is
-	 in the air are what a dozer would build over as well (BuildAssistant::isRemovableForConstruction).
-	 What holds it back is anything that can move away and any building a player owns. */
-static Bool techBuildingSpotIsTaken( const ThingTemplate *building, const Coord3D *position, Real angle, ObjectID ruinID )
-{
-	const GeometryInfo &footprint = building->getTemplateGeometryInfo();
-	SimpleObjectIterator *iter = ThePartitionManager->iterateObjectsInRange( position, footprint.getBoundingCircleRadius(),
-																																					FROM_BOUNDINGSPHERE_2D );
-	MemoryPoolObjectHolder hold( iter );
-	for( Object *them = iter->first(); them != NULL; them = iter->next() )
-	{
-		if( them->getID() == ruinID || them->isEffectivelyDead() || them->isAirborneTarget() )
-			continue;
-		if( them->isKindOf( KINDOF_INERT ) || them->isKindOf( KINDOF_MINE )
-				|| them->isKindOf( KINDOF_SHRUBBERY ) || them->isKindOf( KINDOF_CLEARED_BY_BUILD ) )
-			continue;
-		// the map's own civilian buildings and walls stood there with the first one, sometimes touching it
-		if( them->isKindOf( KINDOF_IMMOBILE ) && !them->getControllingPlayer()->isPlayableSide() )
-			continue;
-
-		if( ThePartitionManager->geomCollidesWithGeom( them->getPosition(), them->getGeometryInfo(), them->getOrientation(),
-																									 position, footprint, angle ) )
-			return TRUE;
-	}
-
-	return FALSE;
-}
-
-void GameLogic::techRespawnTick( void )
-{
-	if( m_pendingTechBuildings.empty() || m_frame % LOGICFRAMES_PER_SECOND != 0 )
-		return;
-
-	for( size_t i = 0; i < m_pendingTechBuildings.size(); )
-	{
-		const PendingTechBuilding pending = m_pendingTechBuildings[ i ];
-		if( pending.m_dueFrame > m_frame )
-		{
-			++i;
-			continue;
-		}
-
-		// a load hands out IDs again from the highest one alive, so the ID of a ruin that is gone can
-		// name a newer unit; only a dead one of the same kind is the ruin
-		Object *ruin = findObjectByID( pending.m_ruinID );
-		if( ruin != NULL && ( ruin->getTemplate() != pending.m_template || !ruin->isEffectivelyDead() ) )
-			ruin = NULL;
-
-		if( techBuildingSpotIsTaken( pending.m_template, &pending.m_position, pending.m_angle,
-																 ruin != NULL ? ruin->getID() : INVALID_ID ) )
-		{
-			++i;
-			continue;
-		}
-
-		m_pendingTechBuildings.erase( m_pendingTechBuildings.begin() + i );
-
-		if( ruin != NULL )
-		{
-			// pathfind cells are a flag, not a count: the ruin gives its back before the building marks
-			// its own, or the ruin's destructor would clear the building's (ReplaceObjectUpgrade does the same)
-			TheAI->pathfinder()->removeObjectFromPathfindMap( ruin );
-			destroyObject( ruin );
-		}
-
-		Object *building = TheThingFactory->newObject( pending.m_template, ThePlayerList->getNeutralPlayer()->getDefaultTeam() );
-		building->setOrientation( pending.m_angle );
-		building->setPosition( &pending.m_position );
-		building->setLayer( TheTerrainLogic->getLayerForDestination( &pending.m_position ) );
-		for( BehaviorModule **m = building->getBehaviorModules(); *m; ++m )
-		{
-			CreateModuleInterface *create = (*m)->getCreate();
-			if( create )
-				create->onBuildComplete();
-		}
-		TheAI->pathfinder()->addObjectToPathfindMap( building );
-		DEBUG_LOG(("TECH RESPAWN frame %d %s back at (%.0f, %.0f), %d frames late\n", m_frame,
-			pending.m_template->getName().str(), pending.m_position.x, pending.m_position.y, m_frame - pending.m_dueFrame));
-	}
-}
-
 void GameLogic::update( void )
 {
 	USE_PERF_TIMER(GameLogic_update)
@@ -4429,12 +4310,6 @@ void GameLogic::update( void )
 	#endif
 	}
 
-	/* A start held back by a movie has set the game mode and started the recorder, but the match
-		 does not exist yet: TheGameInfo is still NULL and the CRC below reads it.  A skirmish asked for
-		 over -control while the EA logo was still playing faulted there on its first frame. */
-	if (isIntroMoviePlaying())
-		return;
-
 	// send the current time to the GameClient
 	DEBUG_ASSERTCRASH(TheGameLogic == this, ("hmm, TheGameLogic is not right"));
 	UnsignedInt now = TheGameLogic->getFrame();
@@ -4470,9 +4345,6 @@ void GameLogic::update( void )
 
 	// ... and the salvage nobody collects
 	salvageCrateTick();
-
-	// ... and the tech buildings the lobby wants back
-	techRespawnTick();
 
 	/* The scripted measurement harness.  Keyed to the logic frame rather than to the render pass, so the same
 		 scenario file plays out on the same frames however fast the machine draws - which is the whole
@@ -5678,15 +5550,13 @@ void GameLogic::prepareLogicForObjectLoad( void )
 	* 12: xfer m_peaceTimeEndFrame
 	* 13: xfer m_unitCap
 	* 14: xfer m_proRules
-	* 15: xfer m_incomeSharing
-	* 16: xfer m_techRespawnDelay and m_pendingTechBuildings
 	*/
 // ------------------------------------------------------------------------------------------------
 void GameLogic::xfer( Xfer *xfer )
 {
 
 	// version
-	const XferVersion currentVersion = 16;
+	const XferVersion currentVersion = 14;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -6059,47 +5929,6 @@ void GameLogic::xfer( Xfer *xfer )
   else if ( xfer->getXferMode() == XFER_LOAD )
   {
     m_proRules = FALSE;
-  }
-
-  if ( version >= 15 )
-  {
-    xfer->xferInt( &m_incomeSharing );
-  }
-  else if ( xfer->getXferMode() == XFER_LOAD )
-  {
-    m_incomeSharing = INCOME_SHARING_OFF;
-  }
-
-  if ( version >= 16 )
-  {
-    xfer->xferUnsignedInt( &m_techRespawnDelay );
-
-    UnsignedInt pendingCount = (UnsignedInt)m_pendingTechBuildings.size();
-    xfer->xferUnsignedInt( &pendingCount );
-    if ( xfer->getXferMode() == XFER_LOAD )
-      m_pendingTechBuildings.resize( pendingCount );
-
-    for ( UnsignedInt i = 0; i < pendingCount; ++i )
-    {
-      PendingTechBuilding &pending = m_pendingTechBuildings[ i ];
-      AsciiString templateName = xfer->getXferMode() == XFER_LOAD ? AsciiString::TheEmptyString : pending.m_template->getName();
-      xfer->xferAsciiString( &templateName );
-      if ( xfer->getXferMode() == XFER_LOAD )
-      {
-        pending.m_template = TheThingFactory->findTemplate( templateName );
-        if ( pending.m_template == NULL )
-          throw SC_INVALID_DATA;
-      }
-      xfer->xferCoord3D( &pending.m_position );
-      xfer->xferReal( &pending.m_angle );
-      xfer->xferObjectID( &pending.m_ruinID );
-      xfer->xferUnsignedInt( &pending.m_dueFrame );
-    }
-  }
-  else if ( xfer->getXferMode() == XFER_LOAD )
-  {
-    m_techRespawnDelay = 0;
-    m_pendingTechBuildings.clear();
   }
 }  // end xfer
 

@@ -80,6 +80,7 @@ OPTION_BOOL_ACCESSORS( m_shadowsForProjectiles )
 OPTION_BOOL_ACCESSORS( m_shadowsForProps )
 OPTION_BOOL_ACCESSORS( m_shadowsForParticles )
 OPTION_BOOL_ACCESSORS( m_particleGroundBounce )
+OPTION_BOOL_ACCESSORS( m_showProductionStrip )
 OPTION_BOOL_ACCESSORS( m_showSkillStrip )
 OPTION_BOOL_ACCESSORS( m_showSuperweaponStrip )
 
@@ -243,9 +244,9 @@ const OptionDef TheOptionCatalog[] =
 		get_m_showAllyCursors, set_m_showAllyCursors },
 
 	// The match on Razer hardware: the command bar on the letter keys, power on the digits,
-	// superweapons on the numpad, money on the mousepad.  Only during a match; off, and in every
-	// menu, the keyboard goes back to whatever Synapse wants to do with it.  On Options > Controls.
-	{ "ChromaLighting",						OPT_WND( "CheckChromaLighting" ), "GUI:ChromaLighting",
+	// superweapons on the numpad, money on the mousepad.  Off gives the keyboard back to whatever
+	// Synapse wants to do with it, and takes the worker thread with it.
+	{ "ChromaLighting",						"", "",
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_chromaLighting, set_m_chromaLighting },
 
@@ -396,8 +397,11 @@ const OptionDef TheOptionCatalog[] =
 
 	// The strips over the battlefield while watching a match.  They have no control in the options
 	// menu: a spectator switches them from the drop-down in the top left corner, which writes them
-	// back itself.  Playing, every strip is drawn whatever these say.  The production queues have no
-	// switch: watching, they are on the Tab scoreboard, and playing, they are always drawn.
+	// back itself.  Playing, every strip is drawn whatever these say.
+	{ "ShowProductionStrip",			NULL, "GUI:HudProductionStrip",
+		OPTION_BOOL, APPLY_LIVE, 0, 1,
+		get_m_showProductionStrip, set_m_showProductionStrip },
+
 	{ "ShowSkillStrip",						NULL, "GUI:HudSkillStrip",
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_showSkillStrip, set_m_showSkillStrip },

@@ -25,7 +25,6 @@
 
 #include "GameClient/GameConsole.h"
 
-#include "Common/GameEngine.h"
 #include "Common/MessageStream.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
@@ -117,36 +116,6 @@ static AsciiString runCheat( const ConsoleCheat &cheat, AsciiString arguments )
 		result.format( "%s %s", cheat.name, ThePlayerList->getLocalPlayer()->hasCheat( cheat.kind ) ? "off" : "on" );
 	else
 		result.format( "%s done", cheat.name );
-	return result;
-}
-
-//-------------------------------------------------------------------------------------------------
-/** The game speed as a share of normal, the same thing numpad plus and minus move.  It changes how
-	* often a logic frame runs and nothing inside one, so a network game, which runs at the pace the
-	* whole room agrees on, is the one place it is refused. */
-//-------------------------------------------------------------------------------------------------
-static const Int SPEED_MIN_PERCENT = 17;		///< 5 logic frames a second
-static const Int SPEED_MAX_PERCENT = 666;		///< 200 logic frames a second
-static const Int SPEED_NORMAL_PERCENT = 100;
-
-static AsciiString runSpeed( AsciiString arguments )
-{
-	AsciiString result;
-	if( !TheGameLogic->isInGame() || TheGameLogic->isInMultiplayerGame() )
-	{
-		result = "speed: single-player matches only";
-		return result;
-	}
-
-	if( !arguments.isEmpty() )
-	{
-		Int percent = arguments.compareNoCase( "reset" ) == 0 ? SPEED_NORMAL_PERCENT : atoi( arguments.str() );
-		if( percent < SPEED_MIN_PERCENT ) percent = SPEED_MIN_PERCENT;
-		if( percent > SPEED_MAX_PERCENT ) percent = SPEED_MAX_PERCENT;
-		TheGameEngine->setFramesPerSecondLimit( percent * LOGICFRAMES_PER_SECOND / SPEED_NORMAL_PERCENT );
-	}
-
-	result.format( "speed %d%%", TheGameEngine->getFramesPerSecondLimit() * SPEED_NORMAL_PERCENT / LOGICFRAMES_PER_SECOND );
 	return result;
 }
 
@@ -312,7 +281,6 @@ void GameConsole::runCommand( AsciiString commandLine )
 		printLine( AsciiString( "help          this list" ) );
 		printLine( AsciiString( "clear         empty the scrollback" ) );
 		printLine( AsciiString( "echo <text>   print the text back" ) );
-		printLine( AsciiString( "speed [n]     game speed in percent, 100 is normal, 'reset' goes back" ) );
 		if( areCheatsAvailable() )
 			printLine( AsciiString( "cheats        single-player cheats" ) );
 		return;
@@ -344,12 +312,6 @@ void GameConsole::runCommand( AsciiString commandLine )
 	if( command == "echo" )
 	{
 		printLine( arguments );
-		return;
-	}
-
-	if( command == "speed" )
-	{
-		printLine( runSpeed( arguments ) );
 		return;
 	}
 

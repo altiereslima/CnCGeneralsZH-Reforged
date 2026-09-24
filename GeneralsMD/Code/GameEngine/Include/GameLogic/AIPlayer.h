@@ -35,7 +35,6 @@
 #include "Common/Snapshot.h"
 #include "GameLogic/AI.h"			// AISkillLevel, AIRole and the difficulty profile the ladder reads
 #include "Common/GameCommon.h"		// MAX_PLAYER_COUNT, for the per-enemy scouting stamps
-#include "GameLogic/AIInfluenceMap.h"
 
 enum { INVALID_SKILLSET_SELECTION = -1 };
 
@@ -333,8 +332,8 @@ protected:
 	void buildAsap(const ThingTemplate *tmpl);	///< the plan's own unbuilt entry if it has one, otherwise a new spot behind the base
 
 	void buyMoneyUnits(void);
-	Int moneyUnitRoom(void) const;	///< how many more money units this player's army and internet centers carry
-	Bool hasEnoughMoneyUnitsFor(TeamPrototype *proto) const;	///< this team is all hackers and there is no room for more
+	Int countMoneyUnits(void) const;	///< money units of this player's that are still standing
+	Bool hasEnoughMoneyUnitsFor(TeamPrototype *proto) const;	///< this team is all hackers and the cap is reached
 	Bool placeNear(const ThingTemplate *tmpl, const Coord3D *center, Real innerRadius);	///< a legal, safe spot on a ring round center, queued for a dozer
 	Real knownFirepowerAlongPath(Waypoint *way);	///< what this AI has seen that can shoot, along an approach
 	AsciiString secondApproachLabel(const Coord3D *from, const AsciiString &taken, Int pathSuffix);	///< the quietest other road, or empty
@@ -433,8 +432,6 @@ protected:
 	Int				m_playerStartNdx[ MAX_PLAYER_COUNT ];	///< the start position each player is known to be at; -1 == not found yet
 	UnsignedInt m_startIntelFrame;			///< frame the above was last brought up to date
 	ObjectID	m_capturerID;						///< the unit currently out taking tech buildings for us
-	ObjectID	m_ferryID;							///< the helicopter flying the capturer to its target, INVALID_ID for none
-	std::vector<ObjectID>	m_droppedRiders;	///< infantry a helicopter is putting down at a fight, sent on once out
 	Int				m_captureTimer;					///< frames until the next look for something to capture
 	ObjectID	m_hijackerID;						///< the thief currently out after an enemy vehicle
 	Int				m_hijackTimer;					///< frames until the next look for a vehicle to take
@@ -503,38 +500,6 @@ protected:
 	Coord3D			m_strikeAim[ MAX_REMEMBERED_STRIKES ];
 	UnsignedInt	m_strikeFrame[ MAX_REMEMBERED_STRIKES ];	///< frame each was aimed; 0 == slot never used
 	Int					m_strikeNext;											///< slot the next aim is written to
-
-	/** What this player knows can shoot at each patch of the map, and what it has there itself. */
-	AIInfluenceMap	m_influence;
-	void rebuildInfluence(void);
-
-	/** Hard's fighting units, one at a time: step back from what they outrange, climb onto ground
-		* that lengthens their guns, and take a hurt unit out of ground it cannot win on. */
-	virtual void doTactics(void);
-	void doTransports(void);	///< helicopters put riders who cannot shoot out down at the fight
-	Bool measuringWithoutTactics(void) const;	///< -notactics has this slot fight the old way
-	void tacticsFor(Object *obj);
-	struct TacticalStep
-	{
-		ObjectID		unit;
-		ObjectID		target;						///< what it goes back to shooting when the step is done
-		Coord3D			origin;						///< where it stepped from, to walk back to when the target is gone
-		UnsignedInt	resumeFrame;			///< 0 while it is not stepping
-		UnsignedInt	nextClimbFrame;		///< no look for higher ground before this
-		UnsignedInt	leaveAloneUntil;	///< sent home by the retreat, not to be turned round
-		Bool				rejoin;						///< stepped out of its team's order, and goes back to the team when the fight is over
-		Int					savedAttitude;		///< its mood before a step calmed it, AI_INVALID when it has its own
-		UnsignedInt	lastKiteFrame;		///< last time it stepped back from something it outranges, 0 for never
-		UnsignedInt	lastSeenFrame;		///< a unit not looked at for a while has died or left, and its row goes
-	};
-	std::vector<TacticalStep>	m_tactics;
-	TacticalStep *findTacticalStep(ObjectID unit);
-	TacticalStep *tacticalStepFor(ObjectID unit);		///< ... making the row if there is none
-	void leaveTacticsAlone(ObjectID unit);
-	void stepCalmly(Object *obj, TacticalStep *step, const Coord3D *spot);	///< a move the unit's mood cannot turn into an attack move
-	void restoreMood(Object *obj, TacticalStep *step);
-	Bool pickTacticalSpot(const Object *obj, const Coord3D *from, const Coord3D *awayFrom, Real distance,
-		const Coord3D *mustReach, Real reach, Coord3D *spot);
 };
 
 #endif // _AI_PLAYER_H_

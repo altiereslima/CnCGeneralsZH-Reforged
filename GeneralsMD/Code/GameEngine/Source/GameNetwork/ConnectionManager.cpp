@@ -700,7 +700,7 @@ void ConnectionManager::processChat(NetChatCommandMsg *msg)
 	
 	AsciiString playerName;
 	playerName.format("player%d", msg->getPlayerID());
-	Player *player = ThePlayerList->findPlayerWithNameKey( TheNameKeyGenerator->nameToKey( playerName ) );
+	const Player *player = ThePlayerList->findPlayerWithNameKey( TheNameKeyGenerator->nameToKey( playerName ) );
 	if (!player)
 	{
 		TheInGameUI->message(UnicodeString(L"%ls"), unitext.str());
@@ -713,7 +713,9 @@ void ConnectionManager::processChat(NetChatCommandMsg *msg)
 	
 	if ( ((1<<m_localSlot) & msg->getPlayerMask() ) && canSeeChat  )
 	{
-		TheInGameUI->chatMessage(player, msg->getText());
+		RGBColor rgb;
+		rgb.setFromInt(clientPlayerColor(player));
+		TheInGameUI->messageColor(&rgb, UnicodeString(L"%ls"), unitext.str());
 
 		// feedback for received chat messages in-game
 		AudioEventRTS audioEvent("GUICommunicatorIncoming");
@@ -1852,15 +1854,7 @@ PlayerLeaveCode ConnectionManager::disconnectPlayer(Int slot) {
 	UnicodeString unicodeName;
 	unicodeName = getPlayerName(slot);
 	if (unicodeName.getLength() > 0 && m_connections[slot]) {
-		UnicodeString left;
-		left.format( TheGameText->fetch( "Network:PlayerLeftGame" ), unicodeName.str() );
-		AsciiString slotName;
-		slotName.format( "player%d", slot );
-		Player *player = ThePlayerList->findPlayerWithNameKey( TheNameKeyGenerator->nameToKey( slotName ) );
-		if( player )
-			TheInGameUI->playerMessage( player, left );
-		else
-			TheInGameUI->message( UnicodeString( L"%ls" ), left.str() );
+		TheInGameUI->message("Network:PlayerLeftGame", unicodeName.str());
 
 		// People are boneheads. Also play a sound
 		static AudioEventRTS leftGameSound("GUIMessageReceived");

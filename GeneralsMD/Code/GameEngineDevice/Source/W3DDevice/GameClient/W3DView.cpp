@@ -51,7 +51,6 @@
 #include "GameClient/Color.h"
 #include "GameClient/CameraBoundary.h"
 #include "GameClient/CinemaDirector.h"
-#include "GameClient/ObserverCamera.h"
 #include "GameClient/CommandXlat.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/GameClient.h"
@@ -649,6 +648,9 @@ void W3DView::stopDoingScriptedCamera( void )
 //-------------------------------------------------------------------------------------------------
 void W3DView::setCameraTransform( void )
 {
+	if (m_viewLockedUntilFrame > TheGameClient->getFrame())
+		return;
+
 	m_cameraHasMovedSinceRequest = true;
 	Matrix3D cameraTransform( 1 );
 	
@@ -1091,7 +1093,7 @@ static void drawablePostDraw( Drawable *draw, void *userData )
 		return;
 
 	Object* obj = draw->getObject();
-	Int localPlayerIndex = ThePlayerList ? TheObserverCamera.getShroudPlayerIndex() : 0;
+	Int localPlayerIndex = ThePlayerList ? ThePlayerList->getLocalPlayer()->getPlayerIndex() : 0;
 #if defined(_DEBUG) || defined(_INTERNAL)
 	ObjectShroudStatus ss = (!obj || !TheGlobalData->m_shroudOn) ? OBJECTSHROUD_CLEAR : obj->getShroudedStatus(localPlayerIndex);
 #else
@@ -2753,6 +2755,10 @@ void W3DView::holdZoomAnchor( Bool zoomMoved )
 		m_zoomAnchorValid = false;
 		return;
 	}
+
+	// a locked view builds no camera this frame, so a measurement would read the last frame's again
+	if (m_viewLockedUntilFrame > TheGameClient->getFrame())
+		return;
 
 	setCameraTransform();
 	Coord3D world;

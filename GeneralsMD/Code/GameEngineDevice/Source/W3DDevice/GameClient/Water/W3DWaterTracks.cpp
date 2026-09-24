@@ -330,10 +330,6 @@ Int WaterTracksObj::render(DX8VertexBufferClass	*vertexBuffer, Int batchStart)
 	unsigned byteOffset;
 	unsigned lockFlags;
 
-	// the buffer is made right after a device reset, which is when the card can refuse it
-	if (vertexBuffer->Get_DX8_Vertex_Buffer() == NULL)
-		return batchStart;
-
 	if (batchStart < (WATER_VB_PAGES*WATER_STRIP_X*WATER_STRIP_Y-m_x*m_y))
 	{	//we have room in current VB, append new verts
 		byteOffset = batchStart*vertexSize;

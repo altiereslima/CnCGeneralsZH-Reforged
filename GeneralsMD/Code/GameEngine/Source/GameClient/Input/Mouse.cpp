@@ -539,7 +539,6 @@ Mouse::Mouse( void )
 	m_tooltipBackColor.green = 0;
 	m_tooltipBackColor.blue = 0;
 	m_tooltipBackColor.alpha = 255;
-	m_tooltipHasAccent = FALSE;
 
 }  // end Mouse
 
@@ -870,10 +869,8 @@ void Mouse::setCursorTooltip( UnicodeString tooltip, Int delay, const RGBColor *
 		m_tooltipDisplayString->setText(tooltip);
 		//DEBUG_LOG(("Tooltip: %ls\n", tooltip.str()));
 	}
-	m_tooltipHasAccent = color != NULL;
 	if (color)
 	{
-		m_tooltipAccent = *color;
 		if (m_useTooltipAltTextColor)
 		{
 			if (m_adjustTooltipAltColor)
@@ -1037,15 +1034,7 @@ void Mouse::drawTooltip( void )
 		return;
 	}
 
-	const Bool cursorTip = m_displayTooltip && TheDisplay && m_tooltipDisplayString && (m_tooltipDisplayString->getTextLength() > 0) && !m_isTooltipEmpty;
-
-	// in a match the tooltip page draws both kinds, this one and the command bar's build tooltip;
-	// TheInGameUI is not made yet while the first screens load
-	const UnicodeString pageText = cursorTip ? m_tooltipDisplayString->getText() : UnicodeString::TheEmptyString;
-	if( TheInGameUI && TheInGameUI->drawTooltipPage( pageText, m_tooltipHasAccent ? &m_tooltipAccent : NULL ) )
-		return;
-
-	if( cursorTip )
+	if( m_displayTooltip && TheDisplay && m_tooltipDisplayString && (m_tooltipDisplayString->getTextLength() > 0) && !m_isTooltipEmpty)
 	{
 		Int width, xPos;
 		Int height, yPos;

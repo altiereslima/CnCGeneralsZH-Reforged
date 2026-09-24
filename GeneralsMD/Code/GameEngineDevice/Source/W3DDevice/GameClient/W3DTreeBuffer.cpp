@@ -73,7 +73,6 @@ enum
 #include "GameClient/ClientRandomValue.h"
 #include "GameClient/GameClient.h"		// logic-frame gate for the sway phase
 #include "GameClient/FXList.h"
-#include "GameClient/ObserverCamera.h"
 #include "W3DDevice/GameClient/TerrainTex.h"
 #include "W3DDevice/GameClient/HeightMap.h"
 #include "W3DDevice/GameClient/W3DDynamicLight.h"
@@ -2504,7 +2503,7 @@ void W3DTreeBuffer::updateTopplingTree(TTree *tree)
 		return;
 
 	const W3DTreeDrawModuleData* d = m_treeTypes[tree->treeType].m_data;
-	Int localPlayerIndex = ThePlayerList ? TheObserverCamera.getShroudPlayerIndex() : 0;
+	Int localPlayerIndex = ThePlayerList ? ThePlayerList->getLocalPlayer()->getPlayerIndex() : 0;
 	Coord3D pos;
 	pos.set(tree->location.X, tree->location.Y, tree->location.Z);
 	ObjectShroudStatus ss = ThePartitionManager->getPropShroudStatusForPlayer(localPlayerIndex, &pos);

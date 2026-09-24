@@ -251,7 +251,6 @@ public:
 	inline LocomotorAppearance getAppearance() const { return m_template->m_appearance; }
 	inline LocomotorPriority getMovePriority() const { return m_template->m_movePriority; }
 	inline LocomotorSurfaceTypeMask getLegalSurfaces() const { return m_template->m_surfaces; }
-	inline LocomotorBehaviorZ getBehaviorZ() const { return m_template->m_behaviorZ; }
 
 	inline AsciiString getTemplateName() const { return m_template->m_name;}
 	inline Real getMinSpeed() const { return m_template->m_minSpeed;}

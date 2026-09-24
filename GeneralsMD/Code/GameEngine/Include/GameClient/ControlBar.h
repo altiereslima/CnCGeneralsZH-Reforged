@@ -674,46 +674,6 @@ enum ControlBarStages
 };
 
 //-------------------------------------------------------------------------------------------------
-/** What the build tooltip says, piece by piece, so Window/Html/Tooltip.html can lay each piece out
-	* on its own: ControlBarPopupDescription.wnd gets the same pieces run together into one text. */
-//-------------------------------------------------------------------------------------------------
-/** One line of what an upgrade does: the figure under `label`, a string table label, goes from `from` to `to`. */
-struct BuildTooltipChange
-{
-	const char *label;
-	std::string from;
-	std::string to;
-};
-
-/** An upgrade and what it does to one unit.  On a unit's card `name` is the upgrade's; on an
-	* upgrade's card it is the unit's. */
-struct BuildTooltipUpgrade
-{
-	UnicodeString name;
-	Bool owned;										///< the player has it already
-	std::vector< BuildTooltipChange > changes;
-};
-
-struct BuildTooltipCard
-{
-	UnicodeString name;
-	UnicodeString description;		///< the button's own text, its lines split by \n
-	UnicodeString warning;				///< why it cannot be bought right now, empty when it can
-	UnicodeString requires;				///< "Requires: ..." naming what is still missing
-	UnsignedInt cost;							///< 0 for nothing to pay
-	Bool costsScience;						///< the cost is promotion points rather than money
-	Bool hasStats;								///< DetailedBuildTooltips: the figures below are there
-	Int buildSeconds;
-	Int health;										///< 0 for a body that cannot be hurt
-	Int damage;										///< the main weapon's, with the upgrades the player owns; 0 for no weapon
-	Int range;
-	Real attacksPerSecond;				///< shots a second over a whole clip and its reload
-	Int damagePerSecond;
-	std::vector< BuildTooltipUpgrade > upgrades;	///< a unit's upgrades, or the units an upgrade changes
-	IRegion2D anchor;							///< the hovered window in screen pixels, its top the grid's top for a command button
-};
-
-//-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 class ControlBar : public SubsystemInterface
 {
@@ -862,9 +822,6 @@ public:
 
 	/// watching, follow the selection: the player's readouts, his money and his side's metal
 	void updateWatchedPlayer( void );
-	/// watching, look at this player - what pressing his button in the player list did - or at
-	/// everybody for NULL, the list's cancel; the portrait's panel follows whatever is selected
-	void watchPlayer( Player *player );
 	void showObserverPlayerInfo( void );		///< his readouts up, the player list down
 	void showObserverPlayerList( void );		///< and back again
 
@@ -1029,33 +986,6 @@ public:
 		* rectangles and the plates are not, so without this a click on the sky above a sloped edge
 		* went nowhere.  GameWindow::winPointInChild asks, so clicking and unit picking agree. */
 	Bool letsClickThrough( GameWindow *window, Int x, Int y );
-
-	/** The screen rectangles the bar's CSS page drew solid, which take the place of the plates in
-		* letsClickThrough while the page is drawing; NULL when it is not, and the plates decide again.
-		* `holes` are the page's own buttons: a click on one goes through to the page even inside a
-		* solid panel. */
-	void setPageSolids( const std::vector< IRegion2D > *solids, const std::vector< IRegion2D > *holes = NULL );
-
-	/** The HUD page's place for the general's powers: the first in `corner`, the bottom right of the
-		* grid, each `cell` big with `gap` between them, a row of SPECIAL_POWER_SHORTCUT_COLS running
-		* left from it and the next row over it, the order the row keys count in.  The slots' own tray
-		* art is not drawn; the page draws their cells.  NULL hides the bar.  Screen pixels.  Asked every
-		* frame the page draws, so it holds against the bar's own layout.  Returns how many powers are
-		* shown, each in its place. */
-	Int placeSpecialPowerShortcutGrid( const ICoord2D *corner, const ICoord2D &cell, Int gap );
-
-	/** Puts one of the bar's windows `inset` pixels inside the rectangle layoutPanels gave it, across
-		* on both sides and down on both, or outside it where the inset is less than nought; nought gives
-		* it the rectangle back.  A rebuild of the layout reads the window as that rectangle. */
-	void insetPlacedWindow( GameWindow *window, const ICoord2D &inset );
-	ICoord2D getPlacedInset( GameWindow *window ) const;	///< what insetPlacedWindow last put it in by
-	/** Moves one of the bar's windows `shift` pixels down, and the places layoutPanels recorded for it
-		* and everything inside it with it, so a rebuild of the layout reads it as placed there. */
-	void lowerPlacedWindow( GameWindow *window, Int shift );
-	GameWindow *getSpecialPowerShortcutParent( void ) { return m_specialPowerShortcutParent; }
-
-	/// the general's stars are asking to be spent, so the button blinks; see getStarImage
-	Bool isGeneralStarFlashing( void ) const { return m_genStarFlash; }
 
 	/// the same journey as a fraction, 0 home and 1 gone.  Needs no display, which is why the test
 	/// for the rebuild ordering asks this one; see clearPanelSlide
@@ -1381,17 +1311,11 @@ protected:
 	Bool m_isObserverCommandBar;												///< If this is true, the command bar behaves greatly differnt
 	Player *m_observerLookAtPlayer;											///< The current player we're looking at, Null if we're not looking at anyone.
 	AsciiString m_watchedSide;													///< the side the bar is wearing while watching, so a selection change only lays it out again when it really changes side
-	std::vector< IRegion2D > m_pageSolids;							///< what the CSS page drew solid, in screen pixels; see setPageSolids
-	std::vector< IRegion2D > m_pageHoles;								///< the page's own buttons, which let their clicks through
-	Bool m_pageSolidsActive;														///< the page is drawing, so m_pageSolids decides clicks and not the plates
 	Player *m_watchedSelection;													///< the player the selection last named while watching, NULL for nobody
 
 	WindowLayout *m_buildToolTipLayout;										///< The window that will slide on/display tooltips
 	Bool m_showBuildToolTipLayout;											///< every frame we test to see if we aregoing to continue showing this or not.
-	BuildTooltipCard m_buildTooltipCard;								///< what the layout says, piece by piece
 public:
-	/** What the build tooltip up on screen says, NULL while none is. */
-	const BuildTooltipCard *getBuildTooltipCard( void );
 	void showBuildTooltipLayout( GameWindow *cmdButton );
 	void hideBuildTooltipLayout( void );
 	void deleteBuildTooltipLayout( void );

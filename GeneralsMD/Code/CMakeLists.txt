@@ -30,9 +30,7 @@ foreach(vendored
     ${COMP}/ZLib/deflate.c
     ${COMP}/LZHCompress/CompLibSource/Lzhl.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Include/d3d8.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/GameSpy/CMakeLists.txt
-    ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/litehtml/CMakeLists.txt
-    ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/nanosvg/nanosvgrast.h)
+    ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/GameSpy/CMakeLists.txt)
   if(NOT EXISTS ${vendored})
     message(FATAL_ERROR
       "${vendored} is missing. Run Tools\\vendor.ps1 (build.bat does it for you).")
@@ -478,14 +476,6 @@ set(GS_BUILD_TESTS      OFF CACHE BOOL "" FORCE)
 set(GS_INCLUDE_VOICE    OFF CACHE BOOL "" FORCE)
 add_subdirectory(${LIBSRC}/GameSpy ${CMAKE_CURRENT_BINARY_DIR}/gamespy)
 
-# ---- litehtml -------------------------------------------------------------
-# The HTML and CSS layout engine behind the pages drawn over the battlefield (GameClient/
-# HtmlOverlay.cpp).  It lays a page out and calls back to draw each box and each run of text, so
-# the drawing stays the game's own.  Its own CMakeLists sets /permissive- and C++17 for itself
-# alone, and brings the gumbo HTML parser with it.
-set(LITEHTML_BUILD_TESTING OFF CACHE BOOL "" FORCE)
-add_subdirectory(${LIBSRC}/litehtml ${CMAKE_CURRENT_BINARY_DIR}/litehtml)
-
 # d3d8to9 is no longer built.  It was a d3d8.dll next to generals.exe that translated
 # every D3D8 call to Direct3D 9, which is how the renderer ran on a modern runtime
 # without touching the ~5600 D3D8 call sites.  The renderer creates its own
@@ -533,9 +523,7 @@ target_include_directories(gameengine PUBLIC
   # WW3D2 is here for d3dx9math.h alone: BezierSegment carries D3DXMATRIX, and
   # DumbProjectileBehavior steers a shell with it.  dinput.h now comes out of the
   # Windows SDK like d3d9.h does.
-  ${WW}/WW3D2
-  # nanosvg's two headers, compiled into HtmlOverlay.cpp alone: the SVG pictures a page names.
-  ${LIBSRC}/nanosvg)
+  ${WW}/WW3D2)
 # _RELEASE/_DEBUG pick the game's own build flavour; IG_DEBUG_STACKTRACE and
 # Z_PREFIX are what GameEngine.dsp sets.
 target_compile_definitions(gameengine PUBLIC
@@ -546,7 +534,7 @@ target_compile_definitions(gameengine PUBLIC
 set_target_properties(gameengine PROPERTIES CXX_STANDARD 17)
 target_link_libraries(gameengine PUBLIC
   ww3d2 wwlib wwmath wwsaveload wwdebug wwutil compression debuglib wwdownload
-  benchmark eabrowserdispatch profile gamespy litehtml
+  benchmark eabrowserdispatch profile gamespy
   dinput8 wininet imagehlp imm32)
 
 # ===========================================================================
@@ -665,9 +653,8 @@ add_custom_command(TARGET generals POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           ${CMAKE_CURRENT_SOURCE_DIR}/Data/Install_Final.bmp
           ${CMAKE_CURRENT_SOURCE_DIR}/../Run/
-  # The three command bar plates per side and the smoke signals' ground marks.  A loose
-  # texture beats every .big, so these land in Run/Art/Textures where the W3D file
-  # system looks first.
+  # The three command bar plates per side.  A loose texture beats every .big, so
+  # these land in Run/Art/Textures where the W3D file system looks first.
   COMMAND ${CMAKE_COMMAND} -E copy_directory
           ${CMAKE_CURRENT_SOURCE_DIR}/Data/Art/Textures
           ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Art/Textures
@@ -783,12 +770,10 @@ set_target_properties(test_gameengine PROPERTIES CXX_STANDARD 17)
 # fxlist_reforged_ini_parses_and_keeps_its_light runs the fork's own FXList file through the real
 # INI parser, so it needs the tracked master rather than whatever sits in Run/.
 # the_options_menu_buttons_all_wear_one_font reads the tracked layout master, not Run/'s copy.
-# the_spectator_page_names_only_on_off_options reads the tracked page master the same way.
 target_compile_definitions(test_gameengine PRIVATE
   GAMEENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/GameEngine"
   FXLIST_REFORGED_INI="${CMAKE_CURRENT_SOURCE_DIR}/Data/INI/FXListReforged.ini"
   OPTIONS_MENU_WND="${CMAKE_CURRENT_SOURCE_DIR}/Data/Window/Menus/OptionsMenu.wnd"
-  SPECTATOR_HTML="${CMAKE_CURRENT_SOURCE_DIR}/Data/Window/Html/Spectator.html"
   PLATE_TEXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Data/Art/Textures")
 
 # The three hand-written self-checks predate the harness; run them from ctest

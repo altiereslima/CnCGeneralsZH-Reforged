@@ -228,11 +228,9 @@ Bool LANAPI::StartAutomatedGame( AsciiString mapName, Int seed, const UnsignedIn
 		 split.  Without it every slot is -1, "no team", and everybody fights everybody - which is
 		 what a scripted throughput test wants and what a test of anything allied cannot use. */
 	const Int teams = TheGlobalData->m_autoSkirmishTeams;
-	// -netai seats come after the addresses and take part in the team split like any other seat
-	const Int numSeats = numSlots + TheGlobalData->m_netGameAISlots;
-	const Int slotsPerTeam = (teams > 1 && numSeats >= teams) ? ((numSeats + teams - 1) / teams) : 0;
+	const Int slotsPerTeam = (teams > 1 && numSlots >= teams) ? ((numSlots + teams - 1) / teams) : 0;
 
-	for (Int i = 0; i < numSeats; ++i)
+	for (Int i = 0; i < numSlots; ++i)
 	{
 		/* The names have to differ: GameInfo looks players up by name, and the player list ends up
 			 with one side per slot named after it. */
@@ -248,19 +246,12 @@ Bool LANAPI::StartAutomatedGame( AsciiString mapName, Int seed, const UnsignedIn
 		}
 
 		LANGameSlot slot;
-		if (i < numSlots)
-		{
-			slot.setState( SLOT_PLAYER, playerName );
-			slot.setIP( slotIPs[i] );
-			slot.setPort( NETWORK_BASE_PORT_NUMBER );	// one address per player, so one port does for all
-			slot.setLastHeard( timeGetTime() );
-			slot.setLogin( m_userName );
-			slot.setHost( m_hostName );
-		}
-		else
-		{
-			slot.setState( (SlotState)TheGlobalData->m_autoSkirmishAIState );
-		}
+		slot.setState( SLOT_PLAYER, playerName );
+		slot.setIP( slotIPs[i] );
+		slot.setPort( NETWORK_BASE_PORT_NUMBER );	// one address per player, so one port does for all
+		slot.setLastHeard( timeGetTime() );
+		slot.setLogin( m_userName );
+		slot.setHost( m_hostName );
 		slot.setPlayerTemplate( PLAYERTEMPLATE_RANDOM );
 		slot.setColor( -1 );			// -1 is "random" to populateRandomSideAndColor
 		slot.setStartPos( -1 );		// and to populateRandomStartPosition
@@ -351,8 +342,6 @@ void LANAPI::OnGameStart( void )
       pref.setSuperweaponRestriction( m_currentGame->getSuperweaponRestriction() );
       pref.setInt( "UnitLimit", m_currentGame->getUnitLimit() ? 1 : 0 );
       pref.setInt( "ProRules", m_currentGame->getProRules() ? 1 : 0 );
-      pref.setInt( "IncomeSharing", m_currentGame->getIncomeSharing() );
-      pref.setInt( "TechRespawn", m_currentGame->getTechRespawn() );
       pref.setStartingCash( m_currentGame->getStartingCash() );
     }
 		pref.write();

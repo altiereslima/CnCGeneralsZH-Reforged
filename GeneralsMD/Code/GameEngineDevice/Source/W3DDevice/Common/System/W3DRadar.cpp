@@ -42,7 +42,6 @@
 #include "GameClient/Color.h"
 #include "GameClient/Display.h"
 #include "GameClient/GameClient.h"
-#include "GameClient/ObserverCamera.h"
 #include "GameClient/GameWindow.h"
 #include "GameClient/Image.h"
 #include "GameClient/Line2D.h"
@@ -356,7 +355,8 @@ void W3DRadar::drawLandmarkIcon( Int pixelX, Int pixelY, Int width, Int height,
 //-------------------------------------------------------------------------------------------------
 void W3DRadar::collectLandmarks( const RadarObject *listHead )
 {
-	const Int localPlayerIndex = TheObserverCamera.getShroudPlayerIndex();
+	const Player *localPlayer = ThePlayerList->getLocalPlayer();
+	const Int localPlayerIndex = localPlayer ? localPlayer->getPlayerIndex() : 0;
 
 	for( const RadarObject *rObj = listHead; rObj; rObj = rObj->friend_getNext() )
 	{
@@ -781,7 +781,10 @@ void W3DRadar::renderObjectList( const RadarObject *listHead, TextureClass *text
 	// loop through all objects and draw
 	ICoord2D radarPoint;
 
-	const Int playerIndex = TheObserverCamera.getShroudPlayerIndex();
+	Player *player = ThePlayerList->getLocalPlayer();
+	Int playerIndex=0;
+	if (player)
+		playerIndex=player->getPlayerIndex();
 
 	if( calcHero )
 	{
@@ -843,8 +846,7 @@ void W3DRadar::renderObjectList( const RadarObject *listHead, TextureClass *text
 		// Now it twinkles for any stealthed object, whether locally controlled or neutral-observier-viewed
 		if( obj->testStatus( OBJECT_STATUS_STEALTHED ) )
 		{
-      // an enemy of whoever the screen is drawn for: the local player, or the followed one with fog on
-      if ( ThePlayerList->getNthPlayer( playerIndex )->getRelationship(obj->getTeam()) == ENEMIES )
+      if ( ThePlayerList->getLocalPlayer()->getRelationship(obj->getTeam()) == ENEMIES )
         if( !obj->testStatus( OBJECT_STATUS_DETECTED ) && !obj->testStatus( OBJECT_STATUS_DISGUISED ) )
 				  skip = TRUE;
 

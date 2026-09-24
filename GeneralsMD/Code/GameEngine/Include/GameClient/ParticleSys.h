@@ -187,7 +187,6 @@ public:
 	inline Real getSize( void ) { return m_size; }
 	inline Real getAngle( void ) { return m_angleZ; }
 	inline Real getAlpha( void ) { return m_alpha; }
-	inline UnsignedInt getLifetimeLeft( void ) const { return m_lifetimeLeft; }
 	inline const RGBColor *getColor( void ) { return &m_color; }
 	inline void setColor( RGBColor *color ) { m_color = *color; }
 
@@ -752,8 +751,6 @@ public:
 
 	// @todo Const this jkmcd
 	Particle *getFirstParticle( void ) { return m_systemParticlesHead; }
-	const Particle *getLastParticle( void ) const { return m_systemParticlesTail; }	///< the youngest, the last one emitted
-	UnsignedInt getSystemLifetimeLeft( void ) const { return m_systemLifetimeLeft; }
 
 	void addParticle( Particle *particleToAdd );
 	/// when a particle dies, it calls this method - ONLY FOR USE BY PARTICLE

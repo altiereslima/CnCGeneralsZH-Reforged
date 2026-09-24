@@ -76,7 +76,6 @@
 #include "GameClient/Eva.h"
 #include "GameClient/GameClient.h"
 #include "GameClient/GameText.h"
-#include "GameClient/InGameUI.h"
 
 #include "GameLogic/AI.h"
 #include "GameLogic/AIPathfind.h"
@@ -1735,7 +1734,7 @@ void Player::preTeamDestroy( const Team *team )
 //-------------------------------------------------------------------------------------------------
 void Player::onStructureCreated( Object *builder, Object *structure )
 {
-	TheInGameUI->feedStructure( structure, FALSE );
+
 }  // end onStructureCreated
 
 //-------------------------------------------------------------------------------------------------
@@ -1767,8 +1766,7 @@ void Player::onStructureConstructionComplete( Object *builder, Object *structure
 	// the GUI needs to re-evaluate the information being displayed to the user now
 	if( TheControlBar )
 		TheControlBar->markUIDirty();
-	TheInGameUI->feedStructure( structure, TRUE );
-
+	
 	// This object may require us to play some EVA sounds.
 	Player *localPlayer = ThePlayerList->getLocalPlayer();
 
@@ -2734,8 +2732,7 @@ Bool Player::attemptToPurchaseScience(ScienceType science)
 	addScience(science);
 
 	getAcademyStats()->recordGeneralsPointsSpent( cost );
-	TheInGameUI->feedScience( this, science );
-
+	
 	if( ThePlayerList->getLocalPlayer() == this )
 	{
 		TheControlBar->markUIDirty();
@@ -3233,47 +3230,6 @@ static Int unitsTowardCapPerBuild( const ThingTemplate *unit )
 Bool UnitCapRefuses( Int unitsTowardCap, Int unitsItAdds, UnsignedInt unitCap )
 {
   return unitCap > 0 && (UnsignedInt)( unitsTowardCap + unitsItAdds ) > unitCap;
-}
-
-//=============================================================================
-Bool IncomeSharingSplits( Int incomeSharing, Bool fromTechBuilding )
-{
-  return incomeSharing == INCOME_SHARING_ALL || ( incomeSharing == INCOME_SHARING_TECH && fromTechBuilding );
-}
-
-UnsignedInt IncomeAllyShare( UnsignedInt amount, Int sharers )
-{
-  return sharers > 1 ? amount / sharers : 0;
-}
-
-/* An ally is a playable side still in the match that both ends call allied.  The walk is in player
-   list order, which every machine holds alike, so the split is the same in a network game. */
-void Player::earnIncome( UnsignedInt amount, Bool fromTechBuilding )
-{
-  Player *allies[ MAX_PLAYER_COUNT ];
-  Int allyCount = 0;
-  if ( IncomeSharingSplits( TheGameLogic->getIncomeSharing(), fromTechBuilding ) )
-  {
-    for ( Int i = 0; i < ThePlayerList->getPlayerCount(); ++i )
-    {
-      Player *other = ThePlayerList->getNthPlayer( i );
-      if ( other != this && other->isPlayableSide() && other->isPlayerActive()
-           && getRelationship( other->getDefaultTeam() ) == ALLIES
-           && other->getRelationship( getDefaultTeam() ) == ALLIES )
-        allies[ allyCount++ ] = other;
-    }
-  }
-
-  const UnsignedInt allyShare = IncomeAllyShare( amount, allyCount + 1 );
-  for ( Int i = 0; i < allyCount; ++i )
-  {
-    allies[ i ]->getMoney()->deposit( allyShare );
-    allies[ i ]->getScoreKeeper()->addMoneyEarned( allyShare );
-  }
-
-  const UnsignedInt ownShare = amount - allyShare * allyCount;
-  m_money.deposit( ownShare );
-  m_scoreKeeper.addMoneyEarned( ownShare );
 }
 
 // one object: itself if it is a unit, and whatever units it has queued, however many each entry makes

@@ -283,8 +283,7 @@ public:
 
 	/** Where a tooltip box of this size goes for a pointer here: beside it, flipped to the other
 		* side at the right or bottom edge, and then held inside the screen.  Static and free of every
-		* member so the placement can be checked without a display; drawTooltip and the tooltip page
-		* are its callers. */
+		* member so the placement can be checked without a display; drawTooltip is its only caller. */
 	static void placeTooltip( Int mouseX, Int mouseY, Int width, Int height,
 														Int minX, Int minY, Int maxX, Int maxY,
 														Int *xOut, Int *yOut );
@@ -385,8 +384,6 @@ protected:
 	UnsignedInt m_stillTime;
 	RGBAColorInt m_tooltipTextColor;
 	RGBAColorInt m_tooltipBackColor;
-	Bool m_tooltipHasAccent;												///< the tooltip came with a colour, its owner's
-	RGBColor m_tooltipAccent;												///< that colour as it came, before the INI's alt colour rules
 
 	Int m_eventsThisFrame;
 

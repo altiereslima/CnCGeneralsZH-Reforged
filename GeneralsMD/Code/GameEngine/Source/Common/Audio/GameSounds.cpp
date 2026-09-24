@@ -54,7 +54,6 @@
 #include "Common/PlayerList.h"
 
 #include "GameLogic/PartitionManager.h"
-#include "GameClient/ObserverCamera.h"
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 #ifdef _INTERNAL
@@ -233,7 +232,7 @@ Bool SoundManager::canPlayNow( AudioEventRTS *event )
 				return false;
 			}
 			
-			Int localPlayerNdx = TheObserverCamera.getShroudPlayerIndex();
+			Int localPlayerNdx = ThePlayerList->getLocalPlayer()->getPlayerIndex();
 			if( (event->getAudioEventInfo()->m_type & ST_SHROUDED) && 
 					 ThePartitionManager->getShroudStatusForPlayer(localPlayerNdx, pos) != CELLSHROUD_CLEAR ) 
 			{

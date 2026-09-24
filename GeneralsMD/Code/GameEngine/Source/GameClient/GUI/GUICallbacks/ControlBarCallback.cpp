@@ -305,17 +305,6 @@ WindowMsgHandledType LeftHUDInput( GameWindow *window, UnsignedInt msg,
 			if( radarPixelToWorld( &mouse, &world ) )
 			{
 
-				// a signal armed off the command bar goes down on the map spot a left press is over,
-				// and a right press takes it back
-				if( TheInGameUI->isSignalArmed() )
-				{
-					if( msg == GWM_LEFT_DOWN )
-						TheInGameUI->placeArmedSignal( world );
-					else
-						TheInGameUI->disarmSignal();
-					break;
-				}
-
 				// No drawables, or a right click automatically means its a look at.
 				// Having drawables and being in attack move mode means that we should attack move.
 				// Having drawables and not being in attack move mode means that we should move.

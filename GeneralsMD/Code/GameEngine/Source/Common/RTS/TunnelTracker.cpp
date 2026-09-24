@@ -269,11 +269,6 @@ Object *TunnelTracker::findQuietTunnelNear( const Coord3D *pos ) const
 		if( tunnel == NULL || tunnel->isEffectivelyDead() )
 			continue;
 
-		// a tunnel joins the network the frame its foundation is laid, so a ghost nobody has built
-		// yet, or one being sold, is on the list too; a unit sent there walked into the scaffolding
-		if( tunnel->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) || tunnel->testStatus( OBJECT_STATUS_SOLD ) )
-			continue;
-
 		// the stamp starts at 0xffffffff, which the sum wraps to just under the window
 		if( tunnel->getBodyModule()->getLastDamageTimestamp() + TUNNEL_UNDER_FIRE_FRAMES > now )
 			continue;
@@ -314,6 +309,8 @@ Int TunnelTracker::getResidentCount() const
 }
 
 // ------------------------------------------------------------------------
+static const Real TUNNEL_SHORTCUT_SHARE = 0.7f;	///< the longest a way through the tunnels may be, as a share of the walk
+
 /** Whoever moves - a player's selection, a computer's wave, a unit falling back - decides once for
 		the whole group, from its middle: deciding member by member split a selection, the back of it
 		walking while the front went underground.  A network with no free place is not looked at at all,
@@ -321,8 +318,6 @@ Int TunnelTracker::getResidentCount() const
 		passing through leaves by the far mouth the frame after it arrives: sixteen went through one place
 		as fast as through ten (tunnelqueue.txt against tunnelshortcut.txt).
 
-		Any way through that is shorter than the walk is taken.  It used to have to come in under 70% of
-		it, and a rally point with a tunnel beside the factory and another beside the point still walked.
 		The legs to and from the tunnels are straight lines.  `walk` is the caller's to measure: the
 		straight line for a move order, the length of the path for a wave that follows one.
 		ponytail: straight lines, not path lengths; a tunnel across a river the walk has to go round
@@ -339,7 +334,7 @@ Object *TunnelTracker::findTunnelShortcut( const Coord3D *from, const Coord3D *t
 
 	const Real toEntrance = (Real)sqrt( ThePartitionManager->getDistanceSquared( entrance, from, FROM_CENTER_2D ) );
 	const Real fromExit = (Real)sqrt( ThePartitionManager->getDistanceSquared( exit, to, FROM_CENTER_2D ) );
-	if( toEntrance + fromExit >= walk )
+	if( toEntrance + fromExit > walk * TUNNEL_SHORTCUT_SHARE )
 		return NULL;
 
 	return entrance;

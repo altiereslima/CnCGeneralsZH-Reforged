@@ -131,7 +131,6 @@ static void considerBuilderProc( Object *obj, void *userData )
 #include "GameClient/InGameUI.h"
 #include "GameClient/KeyDefs.h"
 #include "GameClient/Mouse.h"
-#include "GameClient/ObserverCamera.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/PlayerColorScheme.h"
 #include "GameClient/Shell.h"
@@ -403,26 +402,26 @@ void GameLogic::prepareNewGame( Int gameMode, GameDifficulty diff, Int rankPoint
 
 //-------------------------------------------------------------------------------------------------
 /** What each smoke signal says on an ally's screen, indexed by SignalKind.  The smoke is the sender's
-	* colour, so the kind is told apart by the mark it lays on the ground.  No signal uses
+	* colour, so the kind is told apart by the word floated over it.  No signal uses
 	* RADAR_EVENT_UNDER_ATTACK, because Radar::tryEvent refuses a real attack warning within ten
 	* seconds of one of those. */
 //-------------------------------------------------------------------------------------------------
 struct SignalLook
 {
 	RadarEventType radarEvent;
+	const char *wordLabel;
 	const char *announcementLabel;
 };
 
 static const SignalLook SIGNAL_LOOKS[ SIGNAL_KIND_COUNT ] =
 {
-	{ RADAR_EVENT_BATTLE_PLAN,	"GUI:SignalAttackPlaced" },
-	{ RADAR_EVENT_CONSTRUCTION,	"GUI:SignalDefendPlaced" },
-	{ RADAR_EVENT_INFORMATION,	"GUI:SignalAttentionPlaced" },
+	{ RADAR_EVENT_BATTLE_PLAN,	"GUI:SignalAttackLabel",		"GUI:SignalAttackPlaced" },
+	{ RADAR_EVENT_CONSTRUCTION,	"GUI:SignalDefendLabel",		"GUI:SignalDefendPlaced" },
+	{ RADAR_EVENT_INFORMATION,	"GUI:SignalAttentionLabel",	"GUI:SignalAttentionPlaced" },
 };
 
 static const char *SIGNAL_SMOKE_TEMPLATE = "BeaconSmokeFFFFFF";
-/// the smoke, the mark on the ground and the radar ping all go together, as long as the feed's line
-static const Real SIGNAL_SECONDS = 10.0f;
+static const Real SIGNAL_SECONDS = 3.0f;
 
 /// the smoke is fed for the first half of the signal and its last puff fades out over the second
 static const UnsignedInt SIGNAL_HALF_FRAMES = (UnsignedInt)( SIGNAL_SECONDS * LOGICFRAMES_PER_SECOND / 2 );
@@ -430,13 +429,16 @@ static const UnsignedInt SIGNAL_HALF_FRAMES = (UnsignedInt)( SIGNAL_SECONDS * LO
 static const UnsignedInt SIGNAL_COOLDOWN_FRAMES = LOGICFRAMES_PER_SECOND;
 
 // The beacon template draws a column nine units wide that needs five seconds to climb, which at the
-// signal's first three seconds and the default camera height is a dark speck.  Measured on screen,
-// not derived: these make it a plume a tank's width across that a player finds at a glance.
+// signal's three seconds and the default camera height is a dark speck.  Measured on screen, not
+// derived: these make it a plume a tank's width across that a player finds at a glance.
 static const Real SIGNAL_SMOKE_SIZE_SCALE = 5.0f;
 static const Real SIGNAL_SMOKE_DENSITY_SCALE = 3.0f;
 static const Real SIGNAL_SMOKE_RISE_SCALE = 3.0f;
 static const Real SIGNAL_SMOKE_ALPHA_MIN = 0.6f;
 static const Real SIGNAL_SMOKE_ALPHA_MAX = 0.8f;
+
+/// the word is written this far above the ground, which is about the middle of the plume
+static const Real SIGNAL_LABEL_HEIGHT = 20.0f;
 
 //-------------------------------------------------------------------------------------------------
 /** Is a signal on this frame too soon after the player's last one?  A last frame ahead of now is
@@ -2045,7 +2047,7 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 					// tell the user
 					UnicodeString s;
 					s.format(TheGameText->fetch("GUI:BeaconPlaced"), thisPlayer->getPlayerDisplayName().str());
-					TheInGameUI->playerMessage( thisPlayer, s );
+					TheInGameUI->message( s );
 
 					// play a sound
 					static AudioEventRTS aSound("BeaconPlaced");
@@ -2142,14 +2144,19 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 				smoke->setBurstCountMultiplier( SIGNAL_SMOKE_DENSITY_SCALE );
 				Coord3D rise = { 1.0f, 1.0f, SIGNAL_SMOKE_RISE_SCALE };
 				smoke->setVelocityMultiplier( &rise );
-				TheInGameUI->addSignalMark( (SignalKind)kind, pos, clientPlayerColor( thisPlayer ), smoke->getSystemID() );
 			}
 
 			TheRadar->createEvent( &pos, look.radarEvent, SIGNAL_SECONDS );
 
+			// floating text runs the colour through the viewer's scheme itself, so it takes the logic one
+			Coord3D labelPos = pos;
+			labelPos.z += SIGNAL_LABEL_HEIGHT;
+			TheInGameUI->addSignalWord( TheGameText->fetch( look.wordLabel ), &labelPos,
+				thisPlayer->getPlayerColor(), SIGNAL_HALF_FRAMES );
+
 			UnicodeString announcement;
 			announcement.format( TheGameText->fetch( look.announcementLabel ), thisPlayer->getPlayerDisplayName().str() );
-			TheInGameUI->playerMessage( thisPlayer, announcement );
+			TheInGameUI->message( announcement );
 
 			static AudioEventRTS signalSound( "BeaconPlaced" );
 			signalSound.setPlayerIndex( thisPlayer->getPlayerIndex() );
@@ -2336,25 +2343,35 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 		// --------------------------------------------------------------------------------------------
 		case GameMessage::MSG_SET_REPLAY_CAMERA:
 		{
-			// Where this player's camera is, out of a replay or over the network from a match going on.
-			// Only a watcher's camera is ever moved by it, and that is the observer camera's to do on
-			// its own frame when it is following this player; the logic only passes it on.
-			ViewLocation loc;
-			const Coord3D &pos = msg->getArgument( 0 )->location;
-			loc.init( pos.x, pos.y, pos.z, msg->getArgument( 1 )->real, msg->getArgument( 2 )->real, msg->getArgument( 3 )->real );
-			TheObserverCamera.notePlayerView( thisPlayer->getPlayerIndex(), loc );
-
-			// a replay shows the recorded player's pointer too, while the watcher is not using his own
-			if (TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK && TheObserverCamera.getMode() == OBSERVER_CAMERA_PLAYER
-					&& TheObserverCamera.getFollowedPlayerIndex() == thisPlayer->getPlayerIndex() && !TheLookAtTranslator->hasMouseMovedRecently())
+			if (TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK && TheGlobalData->m_useCameraInReplay && TheControlBar->getObserverLookAtPlayer() == thisPlayer)
 			{
-				TheMouse->setCursor( (Mouse::MouseCursor)(msg->getArgument( 4 )->integer) );
-				ICoord2D mousePos = msg->getArgument( 5 )->pixel;
-				TheMouse->setPosition( mousePos.x, mousePos.y );
-				TheLookAtTranslator->setCurrentPos( mousePos );
+				if (TheTacticalView->isCameraMovementFinished())
+				{
+					ViewLocation loc;
+					Coord3D pos;
+					Real pitch, angle, zoom;
+					pos = msg->getArgument( 0 )->location;
+					angle = msg->getArgument( 1 )->real;
+					pitch = msg->getArgument( 2 )->real;
+					zoom = msg->getArgument( 3 )->real;
+					loc.init(pos.x, pos.y, pos.z, angle, pitch, zoom);
+					TheTacticalView->setLocation( &loc );
+
+					// TheSuperHackers @fix Hold the restored location for this frame, or the user's
+					// own scroll and zoom input lands on top of it and the camera never arrives.
+					TheTacticalView->lockViewForOneFrame();
+
+					if (!TheLookAtTranslator->hasMouseMovedRecently())
+					{
+						TheMouse->setCursor( (Mouse::MouseCursor)(msg->getArgument( 4 )->integer) );
+						ICoord2D mousePos = msg->getArgument( 5 )->pixel;
+						TheMouse->setPosition( mousePos.x, mousePos.y );
+						TheLookAtTranslator->setCurrentPos( mousePos );
+					}
+				}
 			}
 			break;
-		}
+		} // end beacon text
 
 		//---------------------------------------------------------------------------------------------
 		case GameMessage::MSG_CREATE_TEAM0:

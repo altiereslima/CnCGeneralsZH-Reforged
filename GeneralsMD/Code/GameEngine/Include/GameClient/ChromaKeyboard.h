@@ -23,9 +23,8 @@
 // the navigation cluster, superweapons on the numpad, production along the
 // bottom, and money on the mousepad.  Talks to the Chroma REST server on
 // localhost, so it needs no SDK header, no import library and no DLL beside the
-// exe: with Synapse absent the request fails and is tried again every few
-// seconds.  The session is held only during a match with the option on; in the
-// menus the board is left to Synapse.
+// exe: with Synapse absent the first request fails and the whole thing goes
+// quiet for the run.
 //
 ///////////////////////////////////////////////////////////////////////////////
 

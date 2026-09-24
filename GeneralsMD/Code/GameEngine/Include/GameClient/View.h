@@ -126,6 +126,7 @@ public:
 	virtual void setOrigin( Int x, Int y) { m_originX=x; m_originY=y;}				///< Sets location of top-left view corner on display 
 	virtual void getOrigin( Int *x, Int *y) { *x=m_originX; *y=m_originY;}			///< Return location of top-left view corner on display
 
+	virtual void lockViewForOneFrame(); ///< Refuse camera transforms for the rest of this client frame.
 	virtual void forceRedraw() = 0;
 
 	virtual void lookAt( const Coord3D *o );														///< Center the view on the given coordinate
@@ -258,6 +259,8 @@ protected:
 
 	UnsignedInt m_id;																						///< Rhe ID of this view
 	static UnsignedInt m_idNext;																///< Used for allocating view ID's for all views
+
+	UnsignedInt m_viewLockedUntilFrame;													///< Client frame the camera is free to move again
 
 	Coord3D m_pos;																							///< Position of this view, in world coordinates
 	Int m_width, m_height;																			///< Dimensions of the view
