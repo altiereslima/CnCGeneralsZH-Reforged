@@ -74,6 +74,7 @@ enum LegalBuildCode;
 enum KindOfType;
 enum ShadowType;
 enum CanAttackResult;
+enum ScienceType;
 
 // ------------------------------------------------------------------------------------------------
 enum RadiusCursorType
@@ -399,8 +400,12 @@ public:  // ********************************************************************
 	virtual void message( UnicodeString format, ... );				  ///< display a message to the user
 	virtual void message( AsciiString stringManagerLabel, ... );///< display a message to the user
 	void playerMessage( Player *player, const UnicodeString &text );	///< a message about that player, his flag at its head
-	/** The feed's line for a superweapon that came ready, or was fired when `launched`. */
-	void feedSuperweapon( const Object *weapon, const AsciiString &powerName, const SpecialPowerTemplate *power, Bool launched );
+	void chatMessage( Player *player, const UnicodeString &text );		///< a line of chat, under the middle of the screen
+	/** The feed's lines for what a player did: a special power fired, a superweapon or advanced tech
+		* building started or `finished`, a promotion bought.  Each decides who is told. */
+	void feedSpecialPower( const Object *source, const AsciiString &powerName, const SpecialPowerTemplate *power );
+	void feedStructure( Object *structure, Bool finished );
+	void feedScience( Player *player, ScienceType science );
 	virtual void toggleMessages( void ) { m_messagesOn = 1 - m_messagesOn; }	///< toggle messages on/off
 	void openScoreboard( void ) { m_scoreboardOpen = TRUE; }		///< the Tab scoreboard, up while Tab is held
 	void closeScoreboard( void ) { m_scoreboardOpen = FALSE; }
@@ -1271,7 +1276,17 @@ protected:
 	};
 	std::vector< FeedLine >			m_feedLines;
 	void addFeedLine( HtmlValues line );
+	void feedAct( Player *player, const Image *cameo, const std::string &what, const char *tag, const char *label );
+	void watchDozers( void );
 	void drawFeed( void );
+	UnsignedInt									m_dozerCheckFrame;				///< the logic frame watchDozers last looked on
+	Bool												m_hadDozer[ MAX_PLAYER_COUNT ];	///< that player had a dozer or worker then
+	// the chat under the middle of the screen, Window/Html/Chat.html, the same lines kept a while
+	std::vector< FeedLine >			m_chatLines;
+	void drawChat( void );
+	HtmlOverlay *								m_chatOverlay;
+	Bool												m_chatPageLoaded;
+	std::string									m_chatPage;
 	HtmlOverlay *								m_feedOverlay;
 	Bool												m_feedPageLoaded;
 	std::string									m_feedPage;

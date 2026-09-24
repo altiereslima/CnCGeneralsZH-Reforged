@@ -204,7 +204,7 @@ static void formatStripSeconds( UnicodeString *text, Int seconds )
 	* be asked.  A power with no button anywhere (a scripted one, a mod's) draws as an empty box
 	* with its countdown in it, which is still the timer it was asked for. */
 //-------------------------------------------------------------------------------------------------
-static const Image *superweaponCameo( const SpecialPowerTemplate *powerTemplate )
+static const CommandButton *powerButton( const SpecialPowerTemplate *powerTemplate )
 {
 	if( powerTemplate == NULL || TheControlBar == NULL )
 		return NULL;
@@ -213,9 +213,27 @@ static const Image *superweaponCameo( const SpecialPowerTemplate *powerTemplate 
 			 button = button->getNext() )
 	{
 		if( button->getSpecialPowerTemplate() == powerTemplate && button->getButtonImage() )
-			return button->getButtonImage();
+			return button;
 	}
 
+	return NULL;
+}
+
+static const Image *superweaponCameo( const SpecialPowerTemplate *powerTemplate )
+{
+	const CommandButton *button = powerButton( powerTemplate );
+	return button ? button->getButtonImage() : NULL;
+}
+
+/** The promotion screen's button that buys a science, the picture a bought promotion goes by. */
+static const CommandButton *scienceButton( ScienceType science )
+{
+	for( const CommandButton *button = TheControlBar->getCommandButtons(); button; button = button->getNext() )
+	{
+		const ScienceVec &sciences = button->getScienceVec();
+		if( button->getButtonImage() && std::find( sciences.begin(), sciences.end(), science ) != sciences.end() )
+			return button;
+	}
 	return NULL;
 }
 
@@ -1148,6 +1166,11 @@ InGameUI::InGameUI()
 	m_feedPageLoaded = FALSE;
 	m_feedFloor = 0;
 	m_queueTrayTop = 0;
+	m_dozerCheckFrame = 0;
+	for( Int index = 0; index < MAX_PLAYER_COUNT; index++ )
+		m_hadDozer[ index ] = FALSE;
+	m_chatOverlay = NULL;
+	m_chatPageLoaded = FALSE;
 
 	m_replayWindow = NULL;
 	m_messagesOn = TRUE;
@@ -1328,6 +1351,8 @@ InGameUI::~InGameUI()
 	m_spectatorOverlay = NULL;
 	delete m_feedOverlay;
 	m_feedOverlay = NULL;
+	delete m_chatOverlay;
+	m_chatOverlay = NULL;
 	delete m_scoreboardOverlay;
 	m_scoreboardOverlay = NULL;
 	delete m_controlBarOverlay;
@@ -1806,7 +1831,7 @@ enum
 	PLAYER_NAME_CHARS					= 11,		///< a name longer than this is cut, there is no clipping to hide it
 	SECONDS_IN_MINUTE					= 60,
 	SECONDS_PER_HOUR					= 60 * 60,
-	FEED_LINE_FRAMES					= LOGICFRAMES_PER_SECOND * 8,	///< how long a line of the event feed stays up
+	FEED_LINE_FRAMES					= LOGICFRAMES_PER_SECOND * 10,	///< how long a line of the event feed stays up
 	FEED_LINES_KEPT						= 6,		///< the most of those on screen at once; the oldest goes first
 	COMMAND_SLOTS_PER_COLUMN	= 2,		///< the command bar numbers its slots down each column, top then bottom
 	PERCENT										= 100
@@ -3383,6 +3408,8 @@ void InGameUI::update( void )
 
 	// the messages are lines of the event feed now, which drops them at drawing by their frame
 	UnsignedInt currLogicFrame = TheGameLogic->getFrame();
+	if( TheGameLogic->isInGame() && !TheGameLogic->isInShellGame() )
+		watchDozers();
 	UnsignedByte r, g, b, a;
 	Int amount;
 
@@ -3719,6 +3746,11 @@ void InGameUI::reset( void )
 	m_spectatorTotals.clear();
 	m_spectatorSuperweapons.clear();
 	m_feedPageLoaded = FALSE;
+	m_chatPageLoaded = FALSE;
+	m_chatLines.clear();
+	m_dozerCheckFrame = 0;
+	for( Int index = 0; index < MAX_PLAYER_COUNT; index++ )
+		m_hadDozer[ index ] = FALSE;
 	m_inputEnabled = true;
 	// reset the command bar
 	TheControlBar->reset();
@@ -3914,26 +3946,129 @@ void InGameUI::playerMessage( Player *player, const UnicodeString &text )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** A superweapon that came ready or was fired: whose, its picture, its name.  Only the ones with a
-	* countdown on everybody's screen, so a general's power fired from a command button is not one. */
+/** Is the local screen told what `player` did where nobody else is?  A watcher is told everything,
+	* a player what he or a mutual ally did: an enemy's promotion or his power going up is not his to
+	* know. */
 //-------------------------------------------------------------------------------------------------
-void InGameUI::feedSuperweapon( const Object *weapon, const AsciiString &powerName, const SpecialPowerTemplate *power,
-																Bool launched )
+static Bool feedShows( const Player *player )
 {
-	Player *owner = weapon->getControllingPlayer();
-	const SuperweaponInfo *info = findSWInfo( owner->getPlayerIndex(), powerName, weapon->getID(), power );
-	if( info == NULL || info->m_hiddenByScript || info->m_hiddenByScience )
+	const Player *local = ThePlayerList->getLocalPlayer();
+	if( !local->isPlayerActive() || player == local )
+		return TRUE;
+	return player->getRelationship( local->getDefaultTeam() ) == ALLIES &&
+				 local->getRelationship( player->getDefaultTeam() ) == ALLIES;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A command button's name, its hotkey marker taken out: "&A-10 Strike" is "A-10 Strike". */
+//-------------------------------------------------------------------------------------------------
+static std::string buttonName( const CommandButton *button )
+{
+	std::string name = WideCharStringToMultiByte( TheGameText->fetch( button->getTextLabel() ).str() );
+	name.erase( std::remove( name.begin(), name.end(), '&' ), name.end() );
+	return name;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A line about something one player did: his flag and his name, the `cameo` it is pictured by,
+	* `what` it is called and the string table's `label` for what happened, coloured by `tag`. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::feedAct( Player *player, const Image *cameo, const std::string &what, const char *tag, const char *label )
+{
+	HtmlValues line = spectatorHead( player );
+	line[ "kind" ] = "act";
+	line[ "portrait" ] = line[ "image" ];
+	line[ "image" ] = cameo ? cameo->getName().str() : "";
+	line[ "what" ] = what;
+	line[ "tag" ] = tag;
+	line[ "tagtext" ] = WideCharStringToMultiByte( TheGameText->fetch( label ).str() );
+	addFeedLine( line );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A special power fired.  A superweapon with a countdown on everybody's screen is told to everybody,
+	* the way EVA tells them; a general's power, one a promotion bought, only where feedShows says.  A
+	* unit's own ability is neither and writes nothing. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::feedSpecialPower( const Object *source, const AsciiString &powerName, const SpecialPowerTemplate *power )
+{
+	Player *owner = source->getControllingPlayer();
+	const CommandButton *button = powerButton( power );
+	const Image *cameo = button ? button->getButtonImage() : NULL;
+	const SuperweaponInfo *info = findSWInfo( owner->getPlayerIndex(), powerName, source->getID(), power );
+	if( info != NULL )
+	{
+		if( !info->m_hiddenByScript && !info->m_hiddenByScience )
+			feedAct( owner, cameo, WideCharStringToMultiByte( source->getTemplate()->getDisplayName().str() ),
+							 "launched", "GUI:HudSuperweaponLaunched" );
+		return;
+	}
+	if( power->getRequiredScience() == SCIENCE_INVALID || button == NULL || !feedShows( owner ) )
+		return;
+	feedAct( owner, cameo, buttonName( button ), "used", "GUI:HudPowerUsed" );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A superweapon or an advanced tech building going up, or finished.  A finished superweapon is told
+	* to everybody, the way EVA tells them; the rest only where feedShows says. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::feedStructure( Object *structure, Bool finished )
+{
+	const Bool superweapon = structure->isKindOf( KINDOF_FS_SUPERWEAPON );
+	if( !superweapon && !structure->isKindOf( KINDOF_FS_ADVANCED_TECH ) )
 		return;
 
-	HtmlValues line = spectatorHead( owner );
-	line[ "kind" ] = "weapon";
-	line[ "portrait" ] = line[ "image" ];
-	const Image *cameo = superweaponCameo( power );
-	line[ "image" ] = cameo ? cameo->getName().str() : "";
-	line[ "what" ] = WideCharStringToMultiByte( weapon->getTemplate()->getDisplayName().str() );
-	line[ "tag" ] = launched ? "launched" : "ready";
-	line[ "tagtext" ] = WideCharStringToMultiByte( TheGameText->fetch( launched ? "GUI:HudSuperweaponLaunched" : "GUI:HudSuperweaponReady" ).str() );
-	addFeedLine( line );
+	Player *owner = structure->getControllingPlayer();
+	if( !( finished && superweapon ) && !feedShows( owner ) )
+		return;
+	feedAct( owner, structure->getTemplate()->getButtonImage(),
+					 WideCharStringToMultiByte( structure->getTemplate()->getDisplayName().str() ),
+					 finished ? "built" : "started", finished ? "GUI:HudStructureBuilt" : "GUI:HudStructureStarted" );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A promotion bought: the power or the unit it opens, by the promotion screen's own button. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::feedScience( Player *player, ScienceType science )
+{
+	if( !feedShows( player ) )
+		return;
+
+	UnicodeString name, description;
+	TheScienceStore->getNameAndDescription( science, name, description );
+	const CommandButton *button = scienceButton( science );
+	feedAct( player, button ? button->getButtonImage() : NULL, WideCharStringToMultiByte( name.str() ),
+					 "unlocked", "GUI:HudPromotionBought" );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Once a second: a player whose last dozer, or last worker for the GLA, has just gone gets a line,
+	* since without one he can build nothing more.  Only where feedShows says, and not for a player
+	* already beaten, whose last dozer went with everything else. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::watchDozers( void )
+{
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	if( frame < m_dozerCheckFrame + LOGICFRAMES_PER_SECOND && frame >= m_dozerCheckFrame )
+		return;
+	m_dozerCheckFrame = frame;
+
+	KindOfMaskType dozers;
+	dozers.set( KINDOF_DOZER );
+	for( Int index = 0; index < ThePlayerList->getPlayerCount() && index < MAX_PLAYER_COUNT; index++ )
+	{
+		Player *player = ThePlayerList->getNthPlayer( index );
+		const Bool has = player->isPlayableSide() && player->countObjects( dozers, KINDOFMASK_NONE ) > 0;
+		const Bool lost = m_hadDozer[ index ] && !has;
+		m_hadDozer[ index ] = has;
+		if( !lost || TheVictoryConditions->hasSinglePlayerBeenDefeated( player ) || !feedShows( player ) )
+			continue;
+
+		const Bool workers = player->getPlayerTemplate()->getSide().startsWith( "GLA" );
+		UnicodeString text;
+		text.format( TheGameText->fetch( workers ? "GUI:HudNoWorkerLeft" : "GUI:HudNoDozerLeft" ), player->getPlayerDisplayName().str() );
+		playerMessage( player, text );
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3942,11 +4077,21 @@ void InGameUI::feedSuperweapon( const Object *weapon, const AsciiString &powerNa
 //-------------------------------------------------------------------------------------------------
 void InGameUI::addFeedLine( HtmlValues line )
 {
-	DEBUG_LOG(( "FEED frame %u %s: %s%s%s %s %s\n", TheGameLogic->getFrame(), line[ "kind" ].c_str(), line[ "before" ].c_str(),
-							line[ "name" ].c_str(), line[ "after" ].c_str(), line[ "what" ].c_str(), line[ "tagtext" ].c_str() ));
+	// written out first: reading the names fills in the ones a kind leaves out, so every line held
+	// has all of them and two of the same compare equal
+	const std::string logged = line[ "kind" ] + ": " + line[ "before" ] + line[ "name" ] + line[ "after" ] + " " +
+														 line[ "what" ] + " " + line[ "tagtext" ];
+
+	// one power fired from several of its owner's buildings on the same frame is one line, not three
+	const UnsignedInt until = TheGameLogic->getFrame() + FEED_LINE_FRAMES;
+	for( size_t each = 0; each < m_feedLines.size(); each++ )
+		if( m_feedLines[ each ].until == until && m_feedLines[ each ].values == line )
+			return;
+
+	DEBUG_LOG(( "FEED frame %u %s\n", TheGameLogic->getFrame(), logged.c_str() ));
 	FeedLine added;
 	added.values = line;
-	added.until = TheGameLogic->getFrame() + FEED_LINE_FRAMES;
+	added.until = until;
 	m_feedLines.push_back( added );
 	if( m_feedLines.size() > FEED_LINES_KEPT )
 		m_feedLines.erase( m_feedLines.begin() );
@@ -4015,6 +4160,82 @@ void InGameUI::drawFeed( void )
 	values[ "floor" ] = std::to_string( REAL_TO_INT_FLOOR( floor / ControlBarUniformScale() ) );
 	m_feedOverlay->setPage( HtmlTemplate_expand( m_feedPage, values, lists, lookupGameText ) );
 	m_feedOverlay->draw();
+}
+
+static const char *const CHAT_PAGE = "Window\\Html\\Chat.html";
+
+enum
+{
+	CHAT_LINE_FRAMES		= LOGICFRAMES_PER_SECOND * 10,	///< how long a chat line stays up with the chat shut
+	CHAT_LINES_KEPT			= 8,		///< the most lines held, all of them shown while the chat is open
+	CHAT_WIDTH					= 360,	///< the chat's width, 800x600
+	CHAT_BAR_HEIGHT			= 14,		///< the typing bar's height, 800x600
+	CHAT_BAR_PERCENT		= 58,		///< how far down the screen the typing bar's top stands
+	CHAT_CARET_FRAMES		= LOGICFRAMES_PER_SECOND / 2	///< the caret's blink, on and off
+};
+
+//-------------------------------------------------------------------------------------------------
+/** A line of chat from `player`: his flag, his name in his colour, what he said.  It goes into the
+	* chat under the middle of the screen, Dota's way, not into the feed. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::chatMessage( Player *player, const UnicodeString &text )
+{
+	FeedLine line;
+	line.values = spectatorHead( player );
+	line.values[ "text" ] = WideCharStringToMultiByte( text.str() );
+	line.until = TheGameLogic->getFrame() + CHAT_LINE_FRAMES;
+	DEBUG_LOG(( "CHAT frame %u %s: %s\n", TheGameLogic->getFrame(), line.values[ "name" ].c_str(), line.values[ "text" ].c_str() ));
+	m_chatLines.push_back( line );
+	if( m_chatLines.size() > CHAT_LINES_KEPT )
+		m_chatLines.erase( m_chatLines.begin() );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The chat, Window/Html/Chat.html, a little under the middle of the screen: the lines of the last
+	* ten seconds, and with Enter pressed the typing bar under every line held, the chat's own windows
+	* moved under it so they take the keys and the clicks there and draw nothing. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::drawChat( void )
+{
+	if( !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+		return;
+
+	const Real scale = ControlBarUniformScale();
+	const Int pageWidth = REAL_TO_INT_FLOOR( TheDisplay->getWidth() / scale );
+	const Int left = ( pageWidth - CHAT_WIDTH ) / 2;
+	const Int bar = REAL_TO_INT_FLOOR( TheDisplay->getHeight() / scale ) * CHAT_BAR_PERCENT / 100;
+
+	UnicodeString typed, audience;
+	const Bool open = GetInGameChatEntry( typed, audience, REAL_TO_INT_FLOOR( left * scale ), REAL_TO_INT_FLOOR( bar * scale ),
+																				REAL_TO_INT_CEIL( CHAT_WIDTH * scale ), REAL_TO_INT_CEIL( CHAT_BAR_HEIGHT * scale ) );
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	HtmlLists lists;
+	std::vector< HtmlValues > &lines = lists[ "chat" ];
+	for( size_t line = 0; line < m_chatLines.size(); line++ )
+		if( open || ( frame < m_chatLines[ line ].until && frame + CHAT_LINE_FRAMES >= m_chatLines[ line ].until ) )
+			lines.push_back( m_chatLines[ line ].values );
+	if( !open && lines.empty() )
+		return;
+
+	if( !m_chatPageLoaded )
+	{
+		m_chatPageLoaded = TRUE;
+		readHtmlPage( CHAT_PAGE, m_chatPage );
+	}
+	if( m_chatPage.empty() )
+		return;
+	if( m_chatOverlay == NULL )
+		m_chatOverlay = new HtmlOverlay( m_superweaponNormalFont );
+
+	HtmlValues values;
+	values[ "left" ] = std::to_string( left );
+	values[ "bar" ] = std::to_string( bar );
+	values[ "open" ] = open ? "open" : "";
+	values[ "typed" ] = WideCharStringToMultiByte( typed.str() );
+	values[ "caret" ] = frame / CHAT_CARET_FRAMES % 2 == 0 ? "lit" : "";
+	values[ "audience" ] = WideCharStringToMultiByte( audience.str() );
+	m_chatOverlay->setPage( HtmlTemplate_expand( m_chatPage, values, lists, lookupGameText ) );
+	m_chatOverlay->draw();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -7076,6 +7297,7 @@ void InGameUI::postDraw( void )
 	drawPlacementReach();		// after the shade, so the outline stays bright over it
 	drawSpectatorPage();
 	drawFeed();
+	drawChat();
 
 	if( m_militarySubtitle )
 	{
@@ -7161,7 +7383,9 @@ void InGameUI::postDraw( void )
                 {
                   if ( TheGameLogic->getFrame() > 0 )
                   {
-                    feedSuperweapon( owningObject, mapIt->first, info->getSpecialPowerTemplate(), FALSE );
+                    feedAct( owningObject->getControllingPlayer(), superweaponCameo( info->getSpecialPowerTemplate() ),
+                             WideCharStringToMultiByte( owningObject->getTemplate()->getDisplayName().str() ),
+                             "ready", "GUI:HudSuperweaponReady" );
 
                     SpecialPowerType type = module->getSpecialPowerTemplate()->getSpecialPowerType();
                   

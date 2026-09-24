@@ -53,6 +53,14 @@ static UnicodeString s_savedChat;
 static InGameChatType inGameChatType;
 
 // ------------------------------------------------------------------------------------------------
+/** Window/Html/Chat.html draws the chat: the typed line with the lines over it.  The layout's
+	* windows keep the keys and draw nothing. */
+// ------------------------------------------------------------------------------------------------
+static void drawChatNothing( GameWindow *window, WinInstanceData *instData )
+{
+}
+
+// ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
 void ShowInGameChat( Bool immediate )
 {
@@ -84,6 +92,10 @@ void ShowInGameChat( Bool immediate )
 
 		static NameKeyType chatTypeStaticTextID = TheNameKeyGenerator->nameToKey( "InGameChat.wnd:StaticTextChatType" );
 		chatTypeStaticText = TheWindowManager->winGetWindowFromId( NULL, chatTypeStaticTextID );
+
+		chatWindow->winSetDrawFunc( drawChatNothing );
+		for( GameWindow *child = chatWindow->winGetChild(); child; child = child->winGetNext() )
+			child->winSetDrawFunc( drawChatNothing );
 	}
 	TheWindowManager->winSetFocus( chatTextEntry );
 	SetInGameChatType( INGAME_CHAT_EVERYONE );
@@ -140,6 +152,28 @@ void SetInGameChatType( InGameChatType chatType )
 			break;
 		}
 	}
+}
+
+// ------------------------------------------------------------------------------------------------
+/** While the chat is open: the line being typed and whom it goes to, and the chat's windows moved
+	* over the page's typing bar, `x` `y` `width` `height` on screen, so the invisible layout takes no
+	* clicks anywhere else.  FALSE while it is shut. */
+// ------------------------------------------------------------------------------------------------
+Bool GetInGameChatEntry( UnicodeString &typed, UnicodeString &audience, Int x, Int y, Int width, Int height )
+{
+	if( !IsInGameChatActive() )
+		return FALSE;
+
+	typed = GadgetTextEntryGetText( chatTextEntry );
+	audience = GadgetStaticTextGetText( chatTypeStaticText );
+	chatWindow->winSetPosition( x, y );
+	chatWindow->winSetSize( width, height );
+	for( GameWindow *child = chatWindow->winGetChild(); child; child = child->winGetNext() )
+	{
+		child->winSetPosition( 0, 0 );
+		child->winSetSize( child == chatTextEntry ? width : 0, child == chatTextEntry ? height : 0 );
+	}
+	return TRUE;
 }
 
 // ------------------------------------------------------------------------------------------------

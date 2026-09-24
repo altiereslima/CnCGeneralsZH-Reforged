@@ -1213,6 +1213,34 @@ GUI:HudSuperweaponLaunched
 "launched"
 END
 
+// after a general's power's name in the event feed, the moment it is used
+GUI:HudPowerUsed
+"used"
+END
+
+// after a promotion's name in the event feed, the moment it is bought
+GUI:HudPromotionBought
+"unlocked"
+END
+
+// after a superweapon's or an advanced tech building's name in the event feed
+GUI:HudStructureStarted
+"construction started"
+END
+
+GUI:HudStructureBuilt
+"built"
+END
+
+// a line of the event feed when a player's last dozer or worker is gone; %s is his name
+GUI:HudNoDozerLeft
+"%s has no dozer left"
+END
+
+GUI:HudNoWorkerLeft
+"%s has no worker left"
+END
+
 // the command bar's own buttons, written on them now that the bar is drawn from a page
 GUI:BarIdleWorker
 "Worker"

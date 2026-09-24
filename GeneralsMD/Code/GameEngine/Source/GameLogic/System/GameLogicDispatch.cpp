@@ -2048,7 +2048,7 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 					// tell the user
 					UnicodeString s;
 					s.format(TheGameText->fetch("GUI:BeaconPlaced"), thisPlayer->getPlayerDisplayName().str());
-					TheInGameUI->message( s );
+					TheInGameUI->playerMessage( thisPlayer, s );
 
 					// play a sound
 					static AudioEventRTS aSound("BeaconPlaced");
@@ -2157,7 +2157,7 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 
 			UnicodeString announcement;
 			announcement.format( TheGameText->fetch( look.announcementLabel ), thisPlayer->getPlayerDisplayName().str() );
-			TheInGameUI->message( announcement );
+			TheInGameUI->playerMessage( thisPlayer, announcement );
 
 			static AudioEventRTS signalSound( "BeaconPlaced" );
 			signalSound.setPlayerIndex( thisPlayer->getPlayerIndex() );

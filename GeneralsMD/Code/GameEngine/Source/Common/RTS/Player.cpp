@@ -76,6 +76,7 @@
 #include "GameClient/Eva.h"
 #include "GameClient/GameClient.h"
 #include "GameClient/GameText.h"
+#include "GameClient/InGameUI.h"
 
 #include "GameLogic/AI.h"
 #include "GameLogic/AIPathfind.h"
@@ -1734,7 +1735,7 @@ void Player::preTeamDestroy( const Team *team )
 //-------------------------------------------------------------------------------------------------
 void Player::onStructureCreated( Object *builder, Object *structure )
 {
-
+	TheInGameUI->feedStructure( structure, FALSE );
 }  // end onStructureCreated
 
 //-------------------------------------------------------------------------------------------------
@@ -1766,7 +1767,8 @@ void Player::onStructureConstructionComplete( Object *builder, Object *structure
 	// the GUI needs to re-evaluate the information being displayed to the user now
 	if( TheControlBar )
 		TheControlBar->markUIDirty();
-	
+	TheInGameUI->feedStructure( structure, TRUE );
+
 	// This object may require us to play some EVA sounds.
 	Player *localPlayer = ThePlayerList->getLocalPlayer();
 
@@ -2732,7 +2734,8 @@ Bool Player::attemptToPurchaseScience(ScienceType science)
 	addScience(science);
 
 	getAcademyStats()->recordGeneralsPointsSpent( cost );
-	
+	TheInGameUI->feedScience( this, science );
+
 	if( ThePlayerList->getLocalPlayer() == this )
 	{
 		TheControlBar->markUIDirty();

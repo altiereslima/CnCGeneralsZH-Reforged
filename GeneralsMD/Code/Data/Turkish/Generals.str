@@ -15729,6 +15729,30 @@ GUI:HudSuperweaponLaunched
 "ateşlendi"
 END
 
+GUI:HudPowerUsed
+"kullanıldı"
+END
+
+GUI:HudPromotionBought
+"açıldı"
+END
+
+GUI:HudStructureStarted
+"inşaatı başladı"
+END
+
+GUI:HudStructureBuilt
+"tamamlandı"
+END
+
+GUI:HudNoDozerLeft
+"%s için hiç dozer kalmadı"
+END
+
+GUI:HudNoWorkerLeft
+"%s için hiç işçi kalmadı"
+END
+
 GUI:BarIdleWorker
 "İşçi"
 END

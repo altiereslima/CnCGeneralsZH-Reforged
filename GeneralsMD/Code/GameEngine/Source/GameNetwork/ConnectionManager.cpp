@@ -713,7 +713,7 @@ void ConnectionManager::processChat(NetChatCommandMsg *msg)
 	
 	if ( ((1<<m_localSlot) & msg->getPlayerMask() ) && canSeeChat  )
 	{
-		TheInGameUI->playerMessage(player, unitext);
+		TheInGameUI->chatMessage(player, msg->getText());
 
 		// feedback for received chat messages in-game
 		AudioEventRTS audioEvent("GUICommunicatorIncoming");
