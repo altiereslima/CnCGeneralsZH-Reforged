@@ -62,6 +62,8 @@ public:
 	W3DLaserDrawModuleData();
 	~W3DLaserDrawModuleData();
 	static void buildFieldParse(MultiIniFieldParse& p);
+
+	virtual Bool getLaserTemplateWidth( Real &width ) const { width = m_outerBeamWidth * 0.5f; return TRUE; }
 };
 
 //-------------------------------------------------------------------------------------------------

@@ -212,10 +212,9 @@ void LaserUpdate::clientUpdate( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The width on a given logic frame, worked out from the frames alone.  The Particle Cannon damages
-	* with this width, so it cannot come from m_currentWidthScalar: that one moves only when the client
-	* updates, and a network game that catches up runs several logic ticks with no client pass between
-	* them, which left the catching-up machine damaging with a width a few frames old. */
+/** The width on a given logic frame, worked out from the frames alone.  The Particle Cannon's damage
+	* radius runs the same arithmetic on its own frames (ParticleUplinkCannonUpdate::
+	* computeOrbitBeamWidthScalar), so the picture and the damage agree without logic reading this. */
 //-------------------------------------------------------------------------------------------------
 Real LaserUpdate::computeWidthScalar( UnsignedInt frame ) const
 {
@@ -391,26 +390,6 @@ void LaserUpdate::initLaser( const Object *parent, const Object *target, const C
 	}
 
 	m_dirty = true;
-}
-
-//-------------------------------------------------------------------------------------------------
-Real LaserUpdate::getCurrentLaserRadius() const
-{
-	const Drawable *draw = getDrawable();
-	const LaserDrawInterface* ldi = NULL;
-	for( const DrawModule** d = draw->getDrawModules(); *d; ++d )
-	{
-		ldi = (*d)->getLaserDrawInterface();
-		if( ldi )
-		{
-			//***NOTE***
-			//While it appears the logic is accessing client data, it is actually accessing template module
-			//data from the client. This value is INI constant thus can't change. It's grouped with other 
-			//laser defining attributes and having it there makes it easier for artists.
-			return ldi->getLaserTemplateWidth() * computeWidthScalar( TheGameLogic->getFrame() );
-		}
-	}
-	return 0.0f;
 }
 
 // ------------------------------------------------------------------------------------------------

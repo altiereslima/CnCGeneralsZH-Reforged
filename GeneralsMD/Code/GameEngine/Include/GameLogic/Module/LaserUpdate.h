@@ -81,8 +81,6 @@ public:
 	const Coord3D* getStartPos() { return &m_startPos; }
 	const Coord3D* getEndPos() { return &m_endPos; }
 
-	Real getCurrentLaserRadius() const;
-
 	void setDirty( Bool dirty ) { m_dirty = dirty; }
 	Bool isDirty() { return m_dirty; }
 

@@ -122,7 +122,11 @@ public:
 		* ask through ExitInterface.  Both points are relative to the model origin. */
 	virtual Bool getProductionExitPointsInModelSpace( Coord3D& unitCreatePoint, Coord3D& naturalRallyPoint ) const { return FALSE; }
 
-	static void buildFieldParse(MultiIniFieldParse& p) 
+	/** A laser draw module's half width, read off the template rather than a drawable, so a
+		* Particle Cannon's damage radius does not depend on its beam being drawn. */
+	virtual Bool getLaserTemplateWidth( Real &width ) const { return FALSE; }
+
+	static void buildFieldParse(MultiIniFieldParse& p)
 	{
 		// nothing
 	}
