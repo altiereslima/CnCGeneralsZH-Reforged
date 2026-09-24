@@ -11282,8 +11282,9 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	const Bool experienceFound = controlBarUnion( CONTROL_BAR_EXPERIENCE, experience );
 	putPageRect( values, "expframe", experience, experienceFound && rightFound && rightShown );
 	putExperienceBar( values, lists[ "expcells" ], lists[ "rankstars" ] );
+	// a watcher, or a player beaten, has no promotions to buy, and the bar disables the button for him
 	const IRegion2D starsTab = tabOn( rightBox, STARS_TAB_WIDTH, STARS_TAB_HEIGHT, TRUE );
-	putPageRect( values, "starstab", starsTab, rightFound && rightShown );
+	putPageRect( values, "starstab", starsTab, rightFound && rightShown && ThePlayerList->getLocalPlayer()->isPlayerActive() );
 
 	// the portrait's well is steel with a dark cell for each of the production queue's nine places,
 	// the grid the side's RightHUD picture used to draw in the side's own colour, blue for America
