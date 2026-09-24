@@ -421,19 +421,17 @@ static const SignalLook SIGNAL_LOOKS[ SIGNAL_KIND_COUNT ] =
 };
 
 static const char *SIGNAL_SMOKE_TEMPLATE = "BeaconSmokeFFFFFF";
-static const Real SIGNAL_SECONDS = 3.0f;
+/// the smoke, the mark on the ground and the radar ping all go together, as long as the feed's line
+static const Real SIGNAL_SECONDS = 10.0f;
 
 /// the smoke is fed for the first half of the signal and its last puff fades out over the second
 static const UnsignedInt SIGNAL_HALF_FRAMES = (UnsignedInt)( SIGNAL_SECONDS * LOGICFRAMES_PER_SECOND / 2 );
 
-/// the mark on the ground and the radar ping outlast the smoke, as long as the feed's line about it
-static const Real SIGNAL_MARK_SECONDS = 10.0f;
-
 static const UnsignedInt SIGNAL_COOLDOWN_FRAMES = LOGICFRAMES_PER_SECOND;
 
 // The beacon template draws a column nine units wide that needs five seconds to climb, which at the
-// signal's three seconds and the default camera height is a dark speck.  Measured on screen, not
-// derived: these make it a plume a tank's width across that a player finds at a glance.
+// signal's first three seconds and the default camera height is a dark speck.  Measured on screen,
+// not derived: these make it a plume a tank's width across that a player finds at a glance.
 static const Real SIGNAL_SMOKE_SIZE_SCALE = 5.0f;
 static const Real SIGNAL_SMOKE_DENSITY_SCALE = 3.0f;
 static const Real SIGNAL_SMOKE_RISE_SCALE = 3.0f;
@@ -2144,11 +2142,10 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 				smoke->setBurstCountMultiplier( SIGNAL_SMOKE_DENSITY_SCALE );
 				Coord3D rise = { 1.0f, 1.0f, SIGNAL_SMOKE_RISE_SCALE };
 				smoke->setVelocityMultiplier( &rise );
+				TheInGameUI->addSignalMark( (SignalKind)kind, pos, clientPlayerColor( thisPlayer ), smoke->getSystemID() );
 			}
 
-			TheRadar->createEvent( &pos, look.radarEvent, SIGNAL_MARK_SECONDS );
-			TheInGameUI->addSignalMark( (SignalKind)kind, pos, clientPlayerColor( thisPlayer ),
-				(UnsignedInt)( SIGNAL_MARK_SECONDS * LOGICFRAMES_PER_SECOND ) );
+			TheRadar->createEvent( &pos, look.radarEvent, SIGNAL_SECONDS );
 
 			UnicodeString announcement;
 			announcement.format( TheGameText->fetch( look.announcementLabel ), thisPlayer->getPlayerDisplayName().str() );

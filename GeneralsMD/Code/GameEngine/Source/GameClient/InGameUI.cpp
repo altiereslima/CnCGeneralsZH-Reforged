@@ -88,6 +88,7 @@
 #include "GameClient/Display.h"
 #include "GameClient/WindowLayout.h"
 #include "GameClient/LookAtXlat.h"
+#include "GameClient/ParticleSys.h"
 #include "GameClient/SelectionXlat.h"
 #include "GameClient/Shadow.h"
 #include "GameClient/GlobalLanguage.h"
@@ -8807,15 +8808,14 @@ enum
 {
 	SIGNAL_MARK_SIZE						= 160,	///< across, in world units: 90 read as a coin from the default camera
 	SIGNAL_MARK_OPACITY					= 230,	///< out of 255, so the ground under it still shows a little
-	SIGNAL_MARK_FADE_IN_FRAMES	= LOGICFRAMES_PER_SECOND / 4,
-	SIGNAL_MARK_FADE_OUT_FRAMES	= LOGICFRAMES_PER_SECOND * 2
+	SIGNAL_MARK_FADE_OUT_FRAMES	= LOGICFRAMES_PER_SECOND * 2	///< the smoke's last steps, over which the mark fades
 };
 
 //-------------------------------------------------------------------------------------------------
 /** The mark a signal lays on the ground: crossed swords, a shield or an eye in a ring, in `color`,
 	* turned to this viewer's camera as it stands now so it reads upright. */
 //-------------------------------------------------------------------------------------------------
-void InGameUI::addSignalMark( SignalKind kind, const Coord3D &pos, Color color, UnsignedInt holdFrames )
+void InGameUI::addSignalMark( SignalKind kind, const Coord3D &pos, Color color, ParticleSystemID smoke )
 {
 	Shadow::ShadowTypeInfo decalInfo;
 	decalInfo.allowUpdates = FALSE;
@@ -8834,33 +8834,36 @@ void InGameUI::addSignalMark( SignalKind kind, const Coord3D &pos, Color color, 
 	mark.decal->setColor( color );
 	mark.decal->setOpacity( 0 );
 	mark.decal->setPosition( pos.x, pos.y, pos.z );
-	mark.born = TheGameLogic->getFrame();
-	mark.until = mark.born + holdFrames;
+	mark.smoke = smoke;
 	m_signalMarks.push_back( mark );
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Fades each mark in and out by the logic frame, so a paused game holds them, and takes off the
-	* ones whose time is up.  Hidden while scripts or -cinema hide the icons, like a radius decal. */
+/** Each mark lasts as long as its smoke and fades out over the smoke's last steps.  Both can't
+	* simply count logic frames: ParticleSystemManager::update steps once per pass that sees a new
+	* logic frame, so a network game catching up several frames in one pass keeps its smoke longer
+	* than the frame count says, and a mark on its own clock went a second early or late.  The smoke
+	* has left in it what it still has to emit plus the life of its youngest puff.  Hidden while
+	* scripts or -cinema hide the icons, like a radius decal. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::updateSignalMarks( void )
 {
-	const UnsignedInt frame = TheGameLogic->getFrame();
 	const Bool shown = TheGameLogic->getDrawIconUI() && !CinemaDirector_hidesHud();
 	for( size_t index = 0; index < m_signalMarks.size(); )
 	{
-		// a frame going backwards is a loaded save, and the mark is not from this game any more
 		SignalMark &mark = m_signalMarks[ index ];
-		if( frame >= mark.until || frame < mark.born )
+		const ParticleSystem *smoke = TheParticleSystemManager->findParticleSystem( mark.smoke );
+		if( smoke == NULL )
 		{
 			mark.decal->release();
 			m_signalMarks.erase( m_signalMarks.begin() + index );
 			continue;
 		}
 
-		const UnsignedInt rising = ( frame - mark.born ) * SIGNAL_MARK_OPACITY / SIGNAL_MARK_FADE_IN_FRAMES;
-		const UnsignedInt falling = ( mark.until - frame ) * SIGNAL_MARK_OPACITY / SIGNAL_MARK_FADE_OUT_FRAMES;
-		mark.decal->setOpacity( shown ? (Int)min( (UnsignedInt)SIGNAL_MARK_OPACITY, min( rising, falling ) ) : 0 );
+		const Particle *youngest = smoke->getLastParticle();
+		const UnsignedInt left = smoke->getSystemLifetimeLeft() + ( youngest ? youngest->getLifetimeLeft() : 0 );
+		const UnsignedInt opacity = min( (UnsignedInt)SIGNAL_MARK_OPACITY, left * SIGNAL_MARK_OPACITY / SIGNAL_MARK_FADE_OUT_FRAMES );
+		mark.decal->setOpacity( shown ? (Int)opacity : 0 );
 		index++;
 	}
 }

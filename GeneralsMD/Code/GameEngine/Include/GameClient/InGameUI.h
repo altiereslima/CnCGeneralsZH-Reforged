@@ -895,8 +895,8 @@ public:  // ********************************************************************
 	// Floating Test Methods
 	/// the text it added, for a caller that wants to hold it longer; NULL while icons are not drawn
 	virtual FloatingTextData *addFloatingText(const UnicodeString& text,const Coord3D * pos, Color color);
-	/// a smoke signal's mark laid on the ground in the sender's colour, faded in and out over holdFrames
-	void addSignalMark( SignalKind kind, const Coord3D &pos, Color color, UnsignedInt holdFrames );
+	/// a smoke signal's mark laid on the ground in the sender's colour, there until its smoke is gone
+	void addSignalMark( SignalKind kind, const Coord3D &pos, Color color, ParticleSystemID smoke );
 	/// a signal button pressed: the next left click on the ground or the radar drops that signal there
 	void armSignal( SignalKind kind ) { m_armedSignal = kind; }
 	void disarmSignal( void ) { m_armedSignal = SIGNAL_KIND_COUNT; }
@@ -1295,8 +1295,7 @@ protected:
 	struct SignalMark
 	{
 		Shadow *decal;
-		UnsignedInt born;						///< the logic frame it went down on
-		UnsignedInt until;					///< and the one it is gone by
+		ParticleSystemID smoke;			///< the signal's smoke, which the mark lasts exactly as long as
 	};
 	std::vector< SignalMark >		m_signalMarks;
 	void updateSignalMarks( void );

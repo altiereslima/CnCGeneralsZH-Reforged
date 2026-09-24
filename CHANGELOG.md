@@ -720,7 +720,7 @@ found and fixed â€” EA's own, not port damage.**
 - An ally who alt-tabs away fades out over a couple of seconds instead of freezing on the map, so a marker that is still there is a marker somebody is still behind.
 - Off in one place. `ShowAllyCursors = no` in `Options.ini` stops both halves: nothing is sent from your machine and nothing is drawn on it.
 - Alt+Z, Alt+X and Alt+C put up a puff of smoke in your own colour where your mouse is, and lay a mark on the ground under it: crossed swords, a shield or an eye. The colour says who, the mark says what, with no word to read in anyone's language. Point at the radar instead and the smoke goes up on that spot of the map.
-- Your allies see the smoke and their radar blinks at the spot, and the feed says who sent it. The smoke clears in three seconds and the mark in ten, so the call you made a minute ago is never still standing next to the one you are making now. Enemies see none of it.
+- Your allies see the smoke and their radar blinks at the spot, and the feed says who sent it. The smoke and the mark stay ten seconds and go together, so the call you made a minute ago is never still standing next to the one you are making now. Enemies see none of it.
 - One signal a second per player. Hammering the key gets you the first puff and nothing else, and a teammate who tries it cannot bury your screen in smoke either, because every machine in the game holds everyone to the same limit.
 
 ## A console, on the key above Tab

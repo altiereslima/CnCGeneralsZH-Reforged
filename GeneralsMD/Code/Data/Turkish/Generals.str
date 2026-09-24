@@ -14790,7 +14790,7 @@ GUI:SignalAttack
 END
 
 GUI:SignalAttackDescription
-"İmlecin olduğu yere ya da altındaki radar noktasına sizin renginizde bir duman ve on saniyeliğine yere çapraz kılıçlar bırakır. Yalnızca müttefikleriniz görür."
+"İmlecin olduğu yere ya da altındaki radar noktasına on saniyeliğine sizin renginizde bir duman ve yere çapraz kılıçlar bırakır. Yalnızca müttefikleriniz görür."
 END
 
 GUI:SignalDefend
@@ -14798,7 +14798,7 @@ GUI:SignalDefend
 END
 
 GUI:SignalDefendDescription
-"İmlecin olduğu yere ya da altındaki radar noktasına sizin renginizde bir duman ve on saniyeliğine yere bir kalkan bırakır. Yalnızca müttefikleriniz görür."
+"İmlecin olduğu yere ya da altındaki radar noktasına on saniyeliğine sizin renginizde bir duman ve yere bir kalkan bırakır. Yalnızca müttefikleriniz görür."
 END
 
 GUI:SignalAttention
@@ -14806,7 +14806,7 @@ GUI:SignalAttention
 END
 
 GUI:SignalAttentionDescription
-"İmlecin olduğu yere ya da altındaki radar noktasına sizin renginizde bir duman ve on saniyeliğine yere bir göz bırakır. Yalnızca müttefikleriniz görür."
+"İmlecin olduğu yere ya da altındaki radar noktasına on saniyeliğine sizin renginizde bir duman ve yere bir göz bırakır. Yalnızca müttefikleriniz görür."
 END
 
 GUI:SignalAttackPlaced
