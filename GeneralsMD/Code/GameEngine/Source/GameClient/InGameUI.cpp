@@ -1833,6 +1833,7 @@ enum
 	SECONDS_PER_HOUR					= 60 * 60,
 	FEED_LINE_FRAMES					= LOGICFRAMES_PER_SECOND * 10,	///< how long a line of the event feed stays up
 	FEED_LINES_KEPT						= 6,		///< the most of those on screen at once; the oldest goes first
+	FEED_HISTORY_KEPT					= 12,		///< the lines held for the open chat to show, however old
 	COMMAND_SLOTS_PER_COLUMN	= 2,		///< the command bar numbers its slots down each column, top then bottom
 	PERCENT										= 100
 };
@@ -4072,7 +4073,7 @@ void InGameUI::watchDozers( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** One more line at the bottom of the feed, up for FEED_LINE_FRAMES; past FEED_LINES_KEPT the oldest
+/** One more line at the bottom of the feed, up for FEED_LINE_FRAMES; past FEED_HISTORY_KEPT the oldest
 	* goes.  Every line is logged too, so a run can be read for what the feed said. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::addFeedLine( HtmlValues line )
@@ -4093,7 +4094,7 @@ void InGameUI::addFeedLine( HtmlValues line )
 	added.values = line;
 	added.until = until;
 	m_feedLines.push_back( added );
-	if( m_feedLines.size() > FEED_LINES_KEPT )
+	if( m_feedLines.size() > FEED_HISTORY_KEPT )
 		m_feedLines.erase( m_feedLines.begin() );
 }
 
@@ -4130,29 +4131,27 @@ Int InGameUI::feedFloor( void ) const
 //-------------------------------------------------------------------------------------------------
 /** The event feed, Window/Html/Feed.html, for a player and a watcher alike: the newest line at the
 	* bottom, standing on the radar's under-attack tab, or on the production queue's row while that is
-	* up over the tab.  A line is up for FEED_LINE_FRAMES, and while the chat is open every line held
-	* is, so Enter shows what was missed.  The messages switch (toggleMessages) takes the whole feed
-	* away. */
+	* up over the tab.  The last FEED_LINES_KEPT lines are up for FEED_LINE_FRAMES each, and while the
+	* chat is open every line held is, so Enter shows what was missed.  The messages switch
+	* (toggleMessages) takes the whole feed away. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawFeed( void )
 {
+	// a frame going backwards is a loaded save, and a line from its future is not from this game
 	const UnsignedInt frame = TheGameLogic->getFrame();
+	for( size_t line = 0; line < m_feedLines.size(); )
+		if( frame + FEED_LINE_FRAMES < m_feedLines[ line ].until )
+			m_feedLines.erase( m_feedLines.begin() + line );
+		else
+			line++;
+
 	const Bool history = IsInGameChatActive();
+	const size_t shownFrom = history ? 0 : m_feedLines.size() - min( m_feedLines.size(), (size_t)FEED_LINES_KEPT );
 	HtmlLists lists;
 	std::vector< HtmlValues > &lines = lists[ "feed" ];
-	for( size_t line = 0; line < m_feedLines.size(); )
-	{
-		// a frame going backwards is a loaded save, and the line is not from this game any more
-		const FeedLine &shown = m_feedLines[ line ];
-		if( frame + FEED_LINE_FRAMES < shown.until )
-		{
-			m_feedLines.erase( m_feedLines.begin() + line );
-			continue;
-		}
-		if( history || frame < shown.until )
-			lines.push_back( shown.values );
-		line++;
-	}
+	for( size_t line = shownFrom; line < m_feedLines.size(); line++ )
+		if( history || frame < m_feedLines[ line ].until )
+			lines.push_back( m_feedLines[ line ].values );
 	if( lines.empty() || !m_messagesOn || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
 		return;
 
@@ -4182,7 +4181,8 @@ enum
 	CHAT_LINES_KEPT			= 8,		///< the most lines held, all of them shown while the chat is open
 	CHAT_WIDTH					= 360,	///< the chat's width, 800x600
 	CHAT_BAR_HEIGHT			= 22,		///< the typing bar's height with its padding and border, 800x600
-	FEED_FULL_HEIGHT		= 99,		///< Feed.html with all FEED_LINES_KEPT lines up, 16 each and its 3 at the foot, 800x600
+	FEED_LINE_HEIGHT		= 16,		///< a line of Feed.html with the pixel over it, 800x600
+	FEED_FOOT						= 3,		///< Feed.html's gap under its newest line, 800x600
 	CHAT_OVER_FEED			= 12,		///< the gap between the typing bar and the full feed under it, 800x600
 	CHAT_CARET_FRAMES		= LOGICFRAMES_PER_SECOND / 2	///< the caret's blink, on and off
 };
@@ -4204,10 +4204,11 @@ void InGameUI::chatMessage( Player *player, const UnicodeString &text )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The chat, Window/Html/Chat.html, in the left corner over the feed, clear of it even with all its
-	* lines up so the chat does not move as the feed grows: shut, the talk round
-	* its newest line, fading out together; open, the typing bar under every line held, the chat's own
-	* windows moved under it so they take the keys and the clicks there and draw nothing. */
+/** The chat, Window/Html/Chat.html, in the left corner over the feed, clear of it even with all
+	* FEED_LINES_KEPT of its lines up so the chat does not move as the feed grows, and open, clear of
+	* the feed's whole history under it too: shut, the talk round its newest line, fading out
+	* together; open, the typing bar under every line held, the chat's own windows moved under it so
+	* they take the keys and the clicks there and draw nothing. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawChat( void )
 {
@@ -4215,7 +4216,9 @@ void InGameUI::drawChat( void )
 		return;
 
 	const Real scale = ControlBarUniformScale();
-	const Int bar = REAL_TO_INT_FLOOR( feedFloor() / scale ) - FEED_FULL_HEIGHT - CHAT_OVER_FEED - CHAT_BAR_HEIGHT;
+	const size_t feedLines = max( (size_t)FEED_LINES_KEPT, IsInGameChatActive() ? m_feedLines.size() : 0 );
+	const Int bar = REAL_TO_INT_FLOOR( feedFloor() / scale ) - (Int)feedLines * FEED_LINE_HEIGHT - FEED_FOOT - CHAT_OVER_FEED -
+									CHAT_BAR_HEIGHT;
 
 	UnicodeString typed, audience;
 	const Bool open = GetInGameChatEntry( typed, audience, 0, REAL_TO_INT_FLOOR( bar * scale ),

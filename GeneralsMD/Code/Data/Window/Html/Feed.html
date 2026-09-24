@@ -6,7 +6,7 @@
   dozer.  Chat has its own page, Window/Html/Chat.html.  The feed stands on the radar's under-attack
   tab in the screen's bottom left corner, the newest line at the bottom, the way Dota's kill feed
   stands on its minimap.  A line is up for ten seconds, six at most, and the oldest goes first;
-  while the chat is open the last six are up however old they are.  Same
+  while the chat is open the last twelve are up however old they are, and the chat stands over them.  Same
   materials as Window/Html/Spectator.html, whose header says what the renderer draws.
 
   The game fills in, every frame a line is up (InGameUI::drawFeed):
@@ -39,9 +39,9 @@
            background: linear-gradient(to right, rgba(0, 0, 0, 0.86), rgba(0, 0, 0, 0.6) 65%, rgba(0, 0, 0, 0)); }
 
   .flag { width: 20px; height: 12px; margin-right: 4px; vertical-align: middle; }
-  /* a plain message has no player, so a steel chip with a mark stands where the flag would, taking
-     the flag's 24 pixels with its margin so every line's words start in one column */
-  .chip { display: inline-block; width: 11px; height: 11px; line-height: 11px; margin: 0 8px 0 5px; vertical-align: middle;
+  /* a plain message has no player, so a steel plate the flag's size with a mark on it stands where
+     the flag would, and every line's words start in one column */
+  .chip { display: inline-block; width: 20px; height: 10px; line-height: 10px; margin-right: 4px; vertical-align: middle;
           text-align: center; font-size: 8px; font-weight: bold; color: #f2cf4a;
           background: linear-gradient(to bottom, #6f7782, #3f4650); border-top: 1px solid #aab4bf; border-bottom: 1px solid #0c1114; }
   .who { font-weight: bold; }
