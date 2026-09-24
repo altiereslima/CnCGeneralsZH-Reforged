@@ -51,6 +51,7 @@ static GameWindow *chatTextEntry = NULL;
 static GameWindow *chatTypeStaticText = NULL;
 static UnicodeString s_savedChat;
 static InGameChatType inGameChatType;
+static const UnsignedInt SAME_PRESS_MS = 150;	///< ToggleInGameChat: two calls this close are one Enter
 
 // ------------------------------------------------------------------------------------------------
 /** Window/Html/Chat.html draws the chat: the typed line with the lines over it.  The layout's
@@ -223,12 +224,14 @@ Bool handleInGameSlashCommands(UnicodeString uText)
 // ------------------------------------------------------------------------------------------------
 void ToggleInGameChat( Bool immediate )
 {
-	static Bool justHid = false;
-	if (justHid)
-	{
-		justHid = false;
+	// One Enter that sends reaches here twice, once as the text entry's end of edit and once as the
+	// chat key, in either order; the second must not open the chat straight back up.  A flag that
+	// swallowed the next call ate the following Enter instead whenever the text entry took the key,
+	// so opening the chat again after a line took two presses.  The second of one press comes within
+	// the same few frames; a press of its own does not.
+	static UnsignedInt hiddenAtMs = 0;
+	if (timeGetTime() - hiddenAtMs < SAME_PRESS_MS)
 		return;
-	}
 
 	if (TheGameLogic->isInReplayGame())
 		return;
@@ -283,7 +286,7 @@ void ToggleInGameChat( Bool immediate )
 				}
 				GadgetTextEntrySetText( chatTextEntry, UnicodeString::TheEmptyString );
 				HideInGameChat( immediate );
-				justHid = true;
+				hiddenAtMs = timeGetTime();
 			}
 		}
 	}

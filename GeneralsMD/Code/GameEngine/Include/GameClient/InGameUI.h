@@ -1279,9 +1279,10 @@ protected:
 	void feedAct( Player *player, const Image *cameo, const std::string &what, const char *tag, const char *label );
 	void watchDozers( void );
 	void drawFeed( void );
+	Int feedFloor( void ) const;
 	UnsignedInt									m_dozerCheckFrame;				///< the logic frame watchDozers last looked on
 	Bool												m_hadDozer[ MAX_PLAYER_COUNT ];	///< that player had a dozer or worker then
-	// the chat under the middle of the screen, Window/Html/Chat.html, the same lines kept a while
+	// the chat over the feed, Window/Html/Chat.html, the same lines kept a while
 	std::vector< FeedLine >			m_chatLines;
 	void drawChat( void );
 	HtmlOverlay *								m_chatOverlay;

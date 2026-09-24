@@ -57,6 +57,9 @@ public:
 
 	void draw( void );
 
+	/** Fade everything the page draws, text, fills and images, 0 to 255; 255 until it is set. */
+	void setAlpha( Int alpha );
+
 	/** Move the pointer over the page, for :hover.  TRUE when it is on something the page drew
 		* rather than on the empty body round it. */
 	Bool hover( const ICoord2D &mouse );

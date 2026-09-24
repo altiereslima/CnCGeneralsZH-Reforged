@@ -4116,6 +4116,18 @@ static Int controlBarTop( void )
 static const char *const FEED_PAGE = "Window\\Html\\Feed.html";
 
 //-------------------------------------------------------------------------------------------------
+/** Where the feed stands on screen: the radar's under-attack tab, or the production queue's row
+	* while that is up over the tab. */
+//-------------------------------------------------------------------------------------------------
+Int InGameUI::feedFloor( void ) const
+{
+	// ponytail: with no bar page the old queue column climbs the same corner under the feed; the
+	// page always ships, so that column's top is not measured
+	const Int floor = m_controlBarPageShown ? m_feedFloor : controlBarTop();
+	return m_productionStripThemed && m_productionStripCount > 0 ? min( floor, m_queueTrayTop ) : floor;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** The event feed, Window/Html/Feed.html, for a player and a watcher alike: the newest line at the
 	* bottom, standing on the radar's under-attack tab, or on the production queue's row while that is
 	* up over the tab.  The messages switch (toggleMessages) takes the whole feed away. */
@@ -4150,14 +4162,8 @@ void InGameUI::drawFeed( void )
 	if( m_feedOverlay == NULL )
 		m_feedOverlay = new HtmlOverlay( m_superweaponNormalFont );
 
-	// ponytail: with no bar page the old queue column climbs the same corner under the feed; the
-	// page always ships, so that column's top is not measured
-	Int floor = m_controlBarPageShown ? m_feedFloor : controlBarTop();
-	if( m_productionStripThemed && m_productionStripCount > 0 )
-		floor = min( floor, m_queueTrayTop );
-
 	HtmlValues values;
-	values[ "floor" ] = std::to_string( REAL_TO_INT_FLOOR( floor / ControlBarUniformScale() ) );
+	values[ "floor" ] = std::to_string( REAL_TO_INT_FLOOR( feedFloor() / ControlBarUniformScale() ) );
 	m_feedOverlay->setPage( HtmlTemplate_expand( m_feedPage, values, lists, lookupGameText ) );
 	m_feedOverlay->draw();
 }
@@ -4167,10 +4173,13 @@ static const char *const CHAT_PAGE = "Window\\Html\\Chat.html";
 enum
 {
 	CHAT_LINE_FRAMES		= LOGICFRAMES_PER_SECOND * 10,	///< how long a chat line stays up with the chat shut
+	CHAT_FADE_FRAMES		= LOGICFRAMES_PER_SECOND * 3 / 2,	///< the last of that, over which the shut chat fades out
+	OPAQUE_PAGE					= 255,	///< HtmlOverlay::setAlpha's full strength
 	CHAT_LINES_KEPT			= 8,		///< the most lines held, all of them shown while the chat is open
 	CHAT_WIDTH					= 360,	///< the chat's width, 800x600
-	CHAT_BAR_HEIGHT			= 14,		///< the typing bar's height, 800x600
-	CHAT_BAR_PERCENT		= 58,		///< how far down the screen the typing bar's top stands
+	CHAT_BAR_HEIGHT			= 22,		///< the typing bar's height with its padding and border, 800x600
+	FEED_FULL_HEIGHT		= 99,		///< Feed.html with all FEED_LINES_KEPT lines up, 16 each and its 3 at the foot, 800x600
+	CHAT_OVER_FEED			= 12,		///< the gap between the typing bar and the full feed under it, 800x600
 	CHAT_CARET_FRAMES		= LOGICFRAMES_PER_SECOND / 2	///< the caret's blink, on and off
 };
 
@@ -4191,9 +4200,10 @@ void InGameUI::chatMessage( Player *player, const UnicodeString &text )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The chat, Window/Html/Chat.html, a little under the middle of the screen: the lines of the last
-	* ten seconds, and with Enter pressed the typing bar under every line held, the chat's own windows
-	* moved under it so they take the keys and the clicks there and draw nothing. */
+/** The chat, Window/Html/Chat.html, in the left corner over the feed, clear of it even with all its
+	* lines up so the chat does not move as the feed grows: shut, the talk round
+	* its newest line, fading out together; open, the typing bar under every line held, the chat's own
+	* windows moved under it so they take the keys and the clicks there and draw nothing. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawChat( void )
 {
@@ -4201,21 +4211,24 @@ void InGameUI::drawChat( void )
 		return;
 
 	const Real scale = ControlBarUniformScale();
-	const Int pageWidth = REAL_TO_INT_FLOOR( TheDisplay->getWidth() / scale );
-	const Int left = ( pageWidth - CHAT_WIDTH ) / 2;
-	const Int bar = REAL_TO_INT_FLOOR( TheDisplay->getHeight() / scale ) * CHAT_BAR_PERCENT / 100;
+	const Int bar = REAL_TO_INT_FLOOR( feedFloor() / scale ) - FEED_FULL_HEIGHT - CHAT_OVER_FEED - CHAT_BAR_HEIGHT;
 
 	UnicodeString typed, audience;
-	const Bool open = GetInGameChatEntry( typed, audience, REAL_TO_INT_FLOOR( left * scale ), REAL_TO_INT_FLOOR( bar * scale ),
+	const Bool open = GetInGameChatEntry( typed, audience, 0, REAL_TO_INT_FLOOR( bar * scale ),
 																				REAL_TO_INT_CEIL( CHAT_WIDTH * scale ), REAL_TO_INT_CEIL( CHAT_BAR_HEIGHT * scale ) );
+
+	// shut, the chat is the talk around its newest line: every line that came within CHAT_LINE_FRAMES
+	// before it, up until CHAT_LINE_FRAMES after it and fading out together over the last
+	// CHAT_FADE_FRAMES of that
 	const UnsignedInt frame = TheGameLogic->getFrame();
+	const UnsignedInt newestUntil = m_chatLines.empty() ? 0 : m_chatLines.back().until;
+	if( !open && ( frame >= newestUntil || frame + CHAT_LINE_FRAMES < newestUntil ) )
+		return;
 	HtmlLists lists;
 	std::vector< HtmlValues > &lines = lists[ "chat" ];
 	for( size_t line = 0; line < m_chatLines.size(); line++ )
-		if( open || ( frame < m_chatLines[ line ].until && frame + CHAT_LINE_FRAMES >= m_chatLines[ line ].until ) )
+		if( open || m_chatLines[ line ].until + CHAT_LINE_FRAMES >= newestUntil )
 			lines.push_back( m_chatLines[ line ].values );
-	if( !open && lines.empty() )
-		return;
 
 	if( !m_chatPageLoaded )
 	{
@@ -4228,13 +4241,13 @@ void InGameUI::drawChat( void )
 		m_chatOverlay = new HtmlOverlay( m_superweaponNormalFont );
 
 	HtmlValues values;
-	values[ "left" ] = std::to_string( left );
 	values[ "bar" ] = std::to_string( bar );
 	values[ "open" ] = open ? "open" : "";
 	values[ "typed" ] = WideCharStringToMultiByte( typed.str() );
 	values[ "caret" ] = frame / CHAT_CARET_FRAMES % 2 == 0 ? "lit" : "";
 	values[ "audience" ] = WideCharStringToMultiByte( audience.str() );
 	m_chatOverlay->setPage( HtmlTemplate_expand( m_chatPage, values, lists, lookupGameText ) );
+	m_chatOverlay->setAlpha( open ? OPAQUE_PAGE : min( (Int)OPAQUE_PAGE, (Int)( newestUntil - frame ) * OPAQUE_PAGE / CHAT_FADE_FRAMES ) );
 	m_chatOverlay->draw();
 }
 

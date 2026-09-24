@@ -65,10 +65,7 @@ const char *const SVG_UNITS = "px";
 const Int RGBA_BYTES = 4;
 const char *const GENERIC_FAMILIES[] = { "serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui" };
 
-Color gameColor( const litehtml::web_color &color )
-{
-	return GameMakeColor( color.red, color.green, color.blue, color.alpha );
-}
+const Int OPAQUE_ALPHA = 255;
 
 /** The first family in a CSS font-family list, without its quotes. */
 std::string firstFamily( const std::string &families )
@@ -108,6 +105,7 @@ public:
 	std::string click( const ICoord2D &mouse );
 	Int bottomOf( const char *selector );
 	void rectsOf( const char *selector, std::vector< IRegion2D > &rects );
+	void setAlpha( Int alpha ) { m_alpha = alpha; }
 
 	litehtml::uint_ptr create_font( const litehtml::font_description &description, const litehtml::document *document,
 																	litehtml::font_metrics *metrics ) override;
@@ -168,6 +166,10 @@ private:
 	};
 	typedef std::vector< SvgRun > SvgRuns;
 
+	/** A colour with its alpha scaled by the whole page's, setAlpha's. */
+	Color tint( Int red, Int green, Int blue, Int alpha ) const { return GameMakeColor( red, green, blue, alpha * m_alpha / OPAQUE_ALPHA ); }
+	Color tint( const litehtml::web_color &color ) const { return tint( color.red, color.green, color.blue, color.alpha ); }
+
 	Int screen( litehtml::pixel_t pagePixels ) const { return (Int)floorf( pagePixels * m_scale + 0.5f ); }
 	litehtml::pixel_t page( Int screenPixels ) const { return screenPixels / m_scale; }
 	litehtml::pixel_t viewportWidth( void ) const { return page( m_screenWidth ); }
@@ -190,6 +192,7 @@ private:
 	StringCache							m_strings;
 	UnsignedInt							m_stamp;
 	std::string							m_clicked;
+	Int											m_alpha;			///< the whole page's, OPAQUE_ALPHA unless it is fading
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -199,7 +202,8 @@ HtmlOverlayContainer::HtmlOverlayContainer( const AsciiString &defaultFont ) :
 	m_scale( 1.0f ),
 	m_screenWidth( 0 ),
 	m_screenHeight( 0 ),
-	m_stamp( 0 )
+	m_stamp( 0 ),
+	m_alpha( OPAQUE_ALPHA )
 {
 }
 
@@ -405,8 +409,8 @@ void HtmlOverlayContainer::draw_text( litehtml::uint_ptr hdc, const char *text, 
 	if( font == 0 || color.alpha == 0 )
 		return;
 
-	displayString( (GameFont *)font, text )->draw( screen( place.x ), screen( place.y ), gameColor( color ),
-																								 GameMakeColor( 0, 0, 0, color.alpha ) );
+	displayString( (GameFont *)font, text )->draw( screen( place.x ), screen( place.y ), tint( color ),
+																								 tint( 0, 0, 0, color.alpha ) );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -443,13 +447,17 @@ void HtmlOverlayContainer::draw_image( litehtml::uint_ptr hdc, const litehtml::b
 	{
 		const SvgRuns &runs = svgRuns( url, right - left, bottom - top );
 		for( SvgRuns::const_iterator run = runs.begin(); run != runs.end(); ++run )
-			TheDisplay->drawFillRect( left + run->x, top + run->y, run->length, 1, run->color );
+		{
+			UnsignedByte red, green, blue, alpha;
+			GameGetColorComponents( run->color, &red, &green, &blue, &alpha );
+			TheDisplay->drawFillRect( left + run->x, top + run->y, run->length, 1, tint( red, green, blue, alpha ) );
+		}
 		return;
 	}
 
 	const Image *image = TheMappedImageCollection->findImageByName( AsciiString( url.c_str() ) );
 	if( image )
-		TheDisplay->drawImage( image, left, top, right, bottom );
+		TheDisplay->drawImage( image, left, top, right, bottom, tint( OPAQUE_ALPHA, OPAQUE_ALPHA, OPAQUE_ALPHA, OPAQUE_ALPHA ) );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -532,7 +540,7 @@ void HtmlOverlayContainer::fillBox( const litehtml::position &box, const litehtm
 	const Int right = screen( box.x + box.width );
 	const Int bottom = screen( box.y + box.height );
 	if( color.alpha > 0 && right > left && bottom > top )
-		TheDisplay->drawFillRect( left, top, right - left, bottom - top, gameColor( color ) );
+		TheDisplay->drawFillRect( left, top, right - left, bottom - top, tint( color ) );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -586,10 +594,10 @@ void HtmlOverlayContainer::draw_linear_gradient( litehtml::uint_ptr hdc, const l
 		const litehtml::web_color &to = stops[ stop + 1 ].color;
 		const Real span = stops[ stop + 1 ].offset - stops[ stop ].offset;
 		const Real share = span > 0 ? std::min( 1.0f, std::max( 0.0f, ( offset - stops[ stop ].offset ) / span ) ) : 0.0f;
-		const Color color = GameMakeColor( REAL_TO_INT( from.red + ( to.red - from.red ) * share ),
-																			 REAL_TO_INT( from.green + ( to.green - from.green ) * share ),
-																			 REAL_TO_INT( from.blue + ( to.blue - from.blue ) * share ),
-																			 REAL_TO_INT( from.alpha + ( to.alpha - from.alpha ) * share ) );
+		const Color color = tint( REAL_TO_INT( from.red + ( to.red - from.red ) * share ),
+															REAL_TO_INT( from.green + ( to.green - from.green ) * share ),
+															REAL_TO_INT( from.blue + ( to.blue - from.blue ) * share ),
+															REAL_TO_INT( from.alpha + ( to.alpha - from.alpha ) * share ) );
 		if( across )
 			TheDisplay->drawFillRect( pixel, top, 1, bottom - top, color );
 		else
@@ -730,6 +738,7 @@ HtmlOverlay::~HtmlOverlay( void )
 
 void HtmlOverlay::setPage( const std::string &html )	{ m_container->setPage( html ); }
 void HtmlOverlay::draw( void )													{ m_container->draw(); }
+void HtmlOverlay::setAlpha( Int alpha )									{ m_container->setAlpha( alpha ); }
 Bool HtmlOverlay::hover( const ICoord2D &mouse )				{ return m_container->hover( mouse ); }
 std::string HtmlOverlay::click( const ICoord2D &mouse )	{ return m_container->click( mouse ); }
 Int HtmlOverlay::bottomOf( const char *selector )				{ return m_container->bottomOf( selector ); }
