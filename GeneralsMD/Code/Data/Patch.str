@@ -1087,6 +1087,22 @@ GUI:IncomeSharingAll
 "All Income"
 END
 
+GUI:TechRespawn
+"Tech Respawn"
+END
+
+TOOLTIP:TechRespawn
+"How long a destroyed tech building lies in ruins before a neutral one stands on the same spot again, at full health and ready to be captured. Oil derricks, refineries, hospitals, artillery platforms, repair bays and reinforcement pads all come back. A unit or a building standing on the spot holds it back until it moves."
+END
+
+GUI:TechRespawnOff
+"Never"
+END
+
+GUI:TechRespawnFormat
+"After %d min"
+END
+
 GUI:ProRules
 "Pro Rules"
 END

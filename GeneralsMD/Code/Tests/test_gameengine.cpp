@@ -12938,6 +12938,29 @@ TEST(pro_rules_box_starts_ticked_and_clears)
 	TheWritableGlobalData = saved;
 }
 
+/* Tech building respawn arrives as TR= in the host's options string, so the setter is the one place
+	 that keeps a hand-made value from standing a building up every frame or never. */
+TEST(tech_respawn_starts_off_and_clamps_the_wire_value)
+{
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+
+	SkirmishGameInfo game;
+	game.init();
+	CHECK_EQ( game.getTechRespawn(), 0 );
+	game.setTechRespawn( 5 );
+	CHECK_EQ( game.getTechRespawn(), 5 );
+	game.setTechRespawn( -3 );
+	CHECK_EQ( game.getTechRespawn(), 0 );
+	game.setTechRespawn( 1000 );
+	CHECK_EQ( game.getTechRespawn(), 60 );
+	game.reset();
+	CHECK_EQ( game.getTechRespawn(), 0 );
+
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = saved;
+}
+
 #include "Common/SpecialPowerType.h"
 
 /* Pro Rules name what they ban by the ending every general's copy shares, so each check below

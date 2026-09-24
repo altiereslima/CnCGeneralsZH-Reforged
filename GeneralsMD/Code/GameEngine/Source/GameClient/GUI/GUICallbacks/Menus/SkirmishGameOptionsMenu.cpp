@@ -120,6 +120,7 @@ static NameKeyType comboBoxSuperweaponsID = NAMEKEY_INVALID;
 static NameKeyType comboBoxStartingCashID = NAMEKEY_INVALID;
 static NameKeyType checkBoxUnitLimitID = NAMEKEY_INVALID;
 static NameKeyType comboBoxIncomeSharingID = NAMEKEY_INVALID;
+static NameKeyType comboBoxTechRespawnID = NAMEKEY_INVALID;
 
 // Window Pointers ------------------------------------------------------------------------
 static GameWindow *parentSkirmishGameOptions = NULL;
@@ -134,6 +135,7 @@ static GameWindow *comboBoxSuperweapons = NULL;
 static GameWindow *comboBoxStartingCash = NULL;
 static GameWindow *checkBoxUnitLimit = NULL;
 static GameWindow *comboBoxIncomeSharing = NULL;
+static GameWindow *comboBoxTechRespawn = NULL;
 static GameWindow *comboBoxPlayer[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
 																									 NULL,NULL,NULL,NULL };
 
@@ -387,6 +389,7 @@ Bool SkirmishPreferences::write(void)
   setSuperweaponRestriction( TheSkirmishGameInfo->getSuperweaponRestriction() );
   setInt( "UnitLimit", TheSkirmishGameInfo->getUnitLimit() ? 1 : 0 );
   setInt( "IncomeSharing", TheSkirmishGameInfo->getIncomeSharing() );
+  setInt( "TechRespawn", TheSkirmishGameInfo->getTechRespawn() );
 
 	setSlotList();
 
@@ -1073,6 +1076,12 @@ static void handleIncomeSharingSelection()
     TheSkirmishGameInfo->setIncomeSharing( IncomeSharingFromComboBox( comboBoxIncomeSharing ) );
 }
 
+static void handleTechRespawnSelection()
+{
+  if (comboBoxTechRespawn)
+    TheSkirmishGameInfo->setTechRespawn( TechRespawnFromComboBox( comboBoxTechRespawn ) );
+}
+
 
 //-------------------------------------------------------------------------------------------------
 /** Initialize the Gadgets Options Menu */
@@ -1091,6 +1100,7 @@ void InitSkirmishGameGadgets( void )
   comboBoxStartingCashID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:ComboBoxStartingCash" ) );
   checkBoxUnitLimitID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:CheckBoxUnitLimit" ) );
   comboBoxIncomeSharingID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:ComboBoxIncomeSharing" ) );
+  comboBoxTechRespawnID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:ComboBoxTechRespawn" ) );
 
 	// Initialize the pointers to our gadgets
 	parentSkirmishGameOptions = TheWindowManager->winGetWindowFromId( NULL, parentSkirmishGameOptionsID );
@@ -1121,6 +1131,10 @@ void InitSkirmishGameGadgets( void )
   DEBUG_ASSERTCRASH(comboBoxIncomeSharing, ("Could not find the comboBoxIncomeSharing"));
   if ( comboBoxIncomeSharing )
     PopulateIncomeSharingComboBox( comboBoxIncomeSharing, TheSkirmishGameInfo, TRUE );
+  comboBoxTechRespawn = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, comboBoxTechRespawnID );
+  DEBUG_ASSERTCRASH(comboBoxTechRespawn, ("Could not find the comboBoxTechRespawn"));
+  if ( comboBoxTechRespawn )
+    PopulateTechRespawnComboBox( comboBoxTechRespawn, TheSkirmishGameInfo, TRUE );
 
 	textEntryPlayerNameID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:TextEntryPlayerName" ) );
   textEntryPlayerName = TheWindowManager->winGetWindowFromId( NULL, textEntryPlayerNameID );
@@ -1297,6 +1311,8 @@ void updateSkirmishGameOptions( void )
     UpdateUnitLimitCheckBox( checkBoxUnitLimit, TheSkirmishGameInfo, TRUE );
   if ( comboBoxIncomeSharing )
     UpdateIncomeSharingComboBox( comboBoxIncomeSharing, TheSkirmishGameInfo, TRUE );
+  if ( comboBoxTechRespawn )
+    UpdateTechRespawnComboBox( comboBoxTechRespawn, TheSkirmishGameInfo, TRUE );
   Int itemCount = GadgetComboBoxGetLength(comboBoxStartingCash);
   for ( Int index = 0; index < itemCount; index++ )
   {
@@ -1382,6 +1398,7 @@ void SkirmishGameOptionsMenuInit( WindowLayout *layout, void *userData )
   TheSkirmishGameInfo->setSuperweaponRestriction( prefs.getSuperweaponRestriction() );
   TheSkirmishGameInfo->setUnitLimit( prefs.getInt( "UnitLimit", 0 ) != 0 );
   TheSkirmishGameInfo->setIncomeSharing( prefs.getInt( "IncomeSharing", INCOME_SHARING_OFF ) );
+  TheSkirmishGameInfo->setTechRespawn( prefs.getInt( "TechRespawn", 0 ) );
   // Pro Rules are for people playing each other; a skirmish against the computer never has them.
   TheSkirmishGameInfo->setProRules( FALSE );
  
@@ -1623,6 +1640,10 @@ WindowMsgHandledType SkirmishGameOptionsMenuSystem( GameWindow *window, Unsigned
         else if ( controlID == comboBoxIncomeSharingID )
         {
           handleIncomeSharingSelection();
+        }
+        else if ( controlID == comboBoxTechRespawnID )
+        {
+          handleTechRespawnSelection();
         }
         else
         {

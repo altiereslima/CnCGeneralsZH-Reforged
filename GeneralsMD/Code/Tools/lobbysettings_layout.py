@@ -126,8 +126,8 @@ SUPERWEAPON_CHECKBOX = ("CheckboxLimitSuperweapons", "CheckBoxLimitSuperweapons"
 # menu code names them and a missing control is as silent as the rest.
 HAND_PLACED_CHECKBOXES = ("CheckBoxUnitLimit", "CheckBoxProRules")
 
-# Income sharing went on all three pages by hand the same way.
-HAND_PLACED_COMBOS = ("LabelIncomeSharing", "ComboBoxIncomeSharing")
+# Income sharing and tech building respawn went on all three pages by hand the same way.
+HAND_PLACED_COMBOS = ("LabelIncomeSharing", "ComboBoxIncomeSharing", "LabelTechRespawn", "ComboBoxTechRespawn")
 
 # What build() moves out of EA's skirmish layout and a later hand edit replaced: the game speed
 # slider and its number became one dropdown in the slider's place.  None is gone without a successor.
@@ -166,6 +166,10 @@ STRINGS = [
     "GUI:IncomeSharingOff",
     "GUI:IncomeSharingTech",
     "GUI:IncomeSharingAll",
+    "GUI:TechRespawn",
+    "TOOLTIP:TechRespawn",
+    "GUI:TechRespawnOff",
+    "GUI:TechRespawnFormat",
 ]
 
 

@@ -15541,6 +15541,22 @@ GUI:IncomeSharingAll
 "Tüm Gelir"
 END
 
+GUI:TechRespawn
+"Bina Dönüşü"
+END
+
+TOOLTIP:TechRespawn
+"Yıkılan bir teknoloji binasının ne kadar süre enkaz olarak kalacağı. Süre dolunca aynı yerde tarafsız ve tam sağlıklı bir yenisi durur, yeniden ele geçirilebilir. Petrol kuyuları, rafineriler, hastaneler, topçu platformları, tamirhaneler ve takviye pistleri geri gelir. O yerde duran bir birlik ya da bina, oradan çekilene kadar dönüşü bekletir."
+END
+
+GUI:TechRespawnOff
+"Dönmez"
+END
+
+GUI:TechRespawnFormat
+"%d dk sonra"
+END
+
 GUI:ProRules
 "Pro Kuralları"
 END

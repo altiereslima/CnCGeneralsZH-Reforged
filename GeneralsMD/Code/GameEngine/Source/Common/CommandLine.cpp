@@ -2017,6 +2017,18 @@ Int parseIncomeSharing(char *args[], int num)
 	return 1;
 }
 
+/* -techrespawn <minutes>: the lobby's tech building respawn for an -autoskirmish run, carried the
+	 same way as -incomesharing. */
+Int parseTechRespawn(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1 && args[1])
+	{
+		TheWritableGlobalData->m_techRespawn = atoi(args[1]);
+		return 2;
+	}
+	return 1;
+}
+
 /* -slowframe <ms> lowers the bar a logic frame has to clear before it logs its own breakdown.
 
 	 The default of 20ms is a stutter hunt: it catches the frames a player would notice. Chasing a
@@ -2430,6 +2442,7 @@ static CommandLineParam params[] =
 	{ "-peacetime", parsePeaceTime },
 	{ "-unitlimit", parseUnitLimit },
 	{ "-incomesharing", parseIncomeSharing },
+	{ "-techrespawn", parseTechRespawn },
 	{ "-showlanes", parseShowLanes },
 	{ "-uidrill", parseUIDrill },
 	{ "-resdrill", parseResDrill },

@@ -589,6 +589,61 @@ Int IncomeSharingFromComboBox(GameWindow *comboBox)
 }
 
 // -----------------------------------------------------------------------------
+// Tech building respawn: minutes a destroyed tech building lies in ruins before a neutral one
+// comes back, the rungs GitHub #23 asked for.
+static const Int theTechRespawnChoices[] = { 0, 3, 5, 10 };
+
+void PopulateTechRespawnComboBox(GameWindow *comboBox, GameInfo *myGame, Bool hostMayEdit)
+{
+  GadgetComboBoxReset(comboBox);
+
+  Color color = comboBox->winGetEnabled() ? comboBox->winGetEnabledTextColor() : comboBox->winGetDisabledTextColor();
+  for ( Int i = 0; i < (Int)(sizeof(theTechRespawnChoices)/sizeof(theTechRespawnChoices[0])); i++ )
+  {
+    UnicodeString text;
+    if ( theTechRespawnChoices[i] == 0 )
+      text = TheGameText->fetch( "GUI:TechRespawnOff" );
+    else
+      text.format( TheGameText->fetch( "GUI:TechRespawnFormat" ), theTechRespawnChoices[i] );
+
+    Int newIndex = GadgetComboBoxAddEntry(comboBox, text, color);
+    GadgetComboBoxSetItemData(comboBox, newIndex, (void *)(intptr_t)theTechRespawnChoices[i]);
+  }
+
+  UpdateTechRespawnComboBox(comboBox, myGame, hostMayEdit);
+}
+
+void UpdateTechRespawnComboBox(GameWindow *comboBox, GameInfo *myGame, Bool hostMayEdit)
+{
+  comboBox->winEnable( hostMayEdit );
+
+  Int itemCount = GadgetComboBoxGetLength(comboBox);
+  for ( Int index = 0; index < itemCount; index++ )
+  {
+    if ( (Int)(intptr_t)GadgetComboBoxGetItemData(comboBox, index) == myGame->getTechRespawn() )
+    {
+      Int selected = -1;
+      GadgetComboBoxGetSelectedPos( comboBox, &selected );
+      if ( selected != index )
+        GadgetComboBoxSetSelectedPos(comboBox, index, TRUE);
+      return;
+    }
+  }
+
+  // a host on a build with a longer list than ours
+  GadgetComboBoxSetSelectedPos(comboBox, 0, TRUE);
+}
+
+Int TechRespawnFromComboBox(GameWindow *comboBox)
+{
+  Int selIndex = -1;
+  GadgetComboBoxGetSelectedPos(comboBox, &selIndex);
+  if ( selIndex < 0 )
+    return 0;
+  return (Int)(intptr_t)GadgetComboBoxGetItemData(comboBox, selIndex);
+}
+
+// -----------------------------------------------------------------------------
 // The lobby tab strip.
 static GameWindow *theLobbySettingsPage = NULL;
 static GameWindow *theLobbyOtherWindow = NULL;

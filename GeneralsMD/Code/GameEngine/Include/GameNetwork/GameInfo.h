@@ -270,6 +270,11 @@ public:
   inline Int getIncomeSharing( void ) const;
   void setIncomeSharing( Int incomeSharing );
 
+  // Minutes a destroyed tech building lies in ruins before a neutral one stands on its spot again.
+  // 0 is the retail game, where a destroyed tech building stays destroyed.
+  inline Int getTechRespawn( void ) const;
+  void setTechRespawn( Int minutes );
+
   Bool hasAIPlayers( void ) const;									///< is any slot held by a computer player?
 
 protected:
@@ -297,6 +302,7 @@ protected:
   Bool m_unitLimit; // the lobby's unit limit is on
   Bool m_proRules; // the lobby's Pro Rules are on
   Int m_incomeSharing; // an IncomeSharing, INCOME_SHARING_OFF = the retail game
+  Int m_techRespawn; // minutes before a destroyed tech building comes back, 0 = never
 };
 
 extern GameInfo *TheGameInfo;
@@ -328,6 +334,7 @@ Int         GameInfo::getPeaceTime( void ) const            { return hasAIPlayer
 Bool        GameInfo::getUnitLimit( void ) const            { return m_unitLimit; }
 Bool        GameInfo::getProRules( void ) const             { return m_proRules; }
 Int         GameInfo::getIncomeSharing( void ) const        { return m_incomeSharing; }
+Int         GameInfo::getTechRespawn( void ) const          { return m_techRespawn; }
 
 AsciiString GameInfoToAsciiString( const GameInfo *game );
 Bool ParseAsciiStringToGameInfo( GameInfo *game, AsciiString options );

@@ -708,6 +708,7 @@ GlobalData::GlobalData()
 	m_peaceTime = 0;								// no truce unless -peacetime asks for one
 	m_unitLimit = FALSE;						// no unit limit unless -unitlimit asks for one
 	m_incomeSharing = 0;						// INCOME_SHARING_OFF unless -incomesharing asks
+	m_techRespawn = 0;							// a destroyed tech building stays destroyed unless -techrespawn asks
 	m_autoSkirmishObserver = FALSE;
 	m_headless = FALSE;
 	m_turbo = FALSE;
