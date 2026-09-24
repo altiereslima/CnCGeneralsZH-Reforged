@@ -197,6 +197,70 @@ Int GameEngine::getFramesPerSecondLimit( void )
 }
 
 //-------------------------------------------------------------------------------------------------
+static const UnsignedInt LOGIC_RATE_SAMPLE_MS = 500;
+
+/** A half-second sample is a count of whole frames, so a steady 30Hz reads 28 one sample and 32
+		the next, and every countdown dividing by it read 20s, 21s, 19s. The average over the last few
+		seconds takes that out, and the shown number only moves once the average has left it by a full
+		step, so a rate sitting on x.5 does not flip between two values while a real drop still gets
+		through in a second or two.
+
+		Until the window has filled, the average is the plain mean of what it has: the first samples
+		after a load run far over the real rate, and letting the first one stand for the whole window
+		kept that number on screen for the opening seconds of every match. */
+void RateReading::add( Real sample )
+{
+	const Int WINDOW = 8;								// samples that count once there are enough: about four seconds
+	const Real MIN_STEP = 0.75f;				// over half, or an average settling on 20 from above sticks at 21
+	const Real STEP_FRACTION = 0.02f;		// the step at high rates, where one frame is less than 1%
+
+	if( samples < WINDOW )
+		++samples;
+	average += ( sample - average ) / samples;
+	const Real step = max( MIN_STEP, shown * STEP_FRACTION );
+	if( samples == 1 || fabs( average - shown ) >= step )
+		shown = REAL_TO_INT( average + 0.5f );
+}
+
+/** A build time on screen is a promise about how long you will wait, and the limit is only the
+		rate the logic is asked for.  A match that has sunk to 10 frames a second takes three times as
+		long over a 300 frame barracks as the 30 it was asked for, so the countdown says 30s, not 10s.
+		Client only: the wall clock is in it, and nothing in GameLogic may decide by it. */
+void GameEngine::sampleLogicRate( void )
+{
+	if( TheGameLogic == NULL || TheGameLogic->isGamePaused() )
+	{
+		m_logicRateSampleMs = 0;
+		return;
+	}
+
+	const UnsignedInt nowMs = timeGetTime();
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	if( m_logicRateSampleMs == 0 || frame < m_logicRateSampleFrame )
+	{
+		m_logicRateSampleMs = nowMs;
+		m_logicRateSampleFrame = frame;
+		return;
+	}
+
+	const UnsignedInt elapsedMs = nowMs - m_logicRateSampleMs;
+	if( elapsedMs < LOGIC_RATE_SAMPLE_MS )
+		return;
+
+	m_measuredLogicFps.add( (frame - m_logicRateSampleFrame) * 1000.0f / elapsedMs );
+	m_logicRateSampleMs = nowMs;
+	m_logicRateSampleFrame = frame;
+}
+
+Int GameEngine::getLogicFramesPerSecond( void )
+{
+	// a stalled network game has no rate at all, and no countdown can say how long that lasts
+	if( m_measuredLogicFps.shown > 0 )
+		return m_measuredLogicFps.shown;
+	return m_maxFPS > 0 ? m_maxFPS : LOGICFRAMES_PER_SECOND;
+}
+
+//-------------------------------------------------------------------------------------------------
 GameEngine::GameEngine( void )
 {
 	// Set the time slice size to 1 ms.
@@ -204,6 +268,8 @@ GameEngine::GameEngine( void )
 
 	// initialize to non garbage values
 	m_maxFPS = 0;
+	m_logicRateSampleMs = 0;
+	m_logicRateSampleFrame = 0;
 	m_quitting = FALSE;
 	m_isActive = FALSE;
 
@@ -286,6 +352,10 @@ void GameEngine::setFramesPerSecondLimit( Int fps )
 {
 	DEBUG_LOG(("GameEngine::setFramesPerSecondLimit() - setting max fps to %d (TheGlobalData->m_useFpsLimit == %d)\n", fps, TheGlobalData->m_useFpsLimit));
 	m_maxFPS = fps;
+
+	// the speed keys change the rate on purpose; the countdowns start again from the next sample
+	// rather than taking the average's seconds to walk over
+	m_measuredLogicFps.restart();
 }
 
 /* -replay <file>: the name the command line asked for, opened after init()'s resetAll().  See
@@ -475,6 +545,9 @@ static void startAutoSkirmish( Int numPlayersWanted )
 	}
 	TheSkirmishGameInfo->setLocalIP( TheSkirmishGameInfo->getSlot(0)->getIP() );
 	TheSkirmishGameInfo->setMap( mapName );
+	// set on the game rather than on GameLogic, so the replay's header carries it like a lobby's would
+	TheSkirmishGameInfo->setIncomeSharing( TheGlobalData->m_incomeSharing );
+	TheSkirmishGameInfo->setTechRespawn( TheGlobalData->m_techRespawn );
 
 	/* -seed makes the whole run repeatable: the seed drives the factions, the colours, the start
 		 positions and every logic random draw after them, so the same command line replays the same
@@ -561,9 +634,10 @@ static void startAutoNetGame( void )
 		return;
 	}
 
-	if (numSlots > md->m_numPlayers)
+	const Int numSeats = numSlots + TheGlobalData->m_netGameAISlots;
+	if (numSeats > md->m_numPlayers || numSeats > MAX_SLOTS)
 	{
-		DEBUG_LOG(("-netgame: '%s' holds %d players, not %d\n", mapName.str(), md->m_numPlayers, numSlots));
+		DEBUG_LOG(("-netgame: '%s' holds %d players, not %d\n", mapName.str(), md->m_numPlayers, numSeats));
 		return;
 	}
 
@@ -904,7 +978,7 @@ void GameEngine::init( int argc, char *argv[] )
 
 		AsciiString fname;
 		fname.format("Data\\%s\\CommandMap.ini", GetRegistryLanguage().str());
-		initSubsystem(TheMetaMap,"TheMetaMap", MSGNEW("GameEngineSubsystem") MetaMap(), NULL, fname.str(), "Data\\INI\\CommandMap.ini");
+		initSubsystem(TheMetaMap,"TheMetaMap", MSGNEW("GameEngineSubsystem") MetaMap(), NULL, fname.str(), "Data\\INI\\CommandMapReforged.ini");
 		// Legacy mouse and keyboard answers to the game's own map and to nothing this fork binds
 		TheMetaMap->loadLegacyBindings(fname);
 
@@ -2100,6 +2174,7 @@ static void updateHeadlessRun( void )
 void GameEngine::update( void )
 {
 	USE_PERF_TIMER(GameEngine_update)
+	sampleLogicRate();
 	{
 #ifdef DEBUG_LOGGING
 		static Int fpsFrames = 0;

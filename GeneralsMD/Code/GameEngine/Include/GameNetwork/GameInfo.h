@@ -57,6 +57,16 @@ enum
 	PLAYERTEMPLATE_MIN = PLAYERTEMPLATE_OBSERVER
 };
 
+// The lobby's income sharing: which earnings are split evenly between a player and every ally
+// still in the match.  The values travel in the options string and in saves, so only append.
+enum IncomeSharing
+{
+	INCOME_SHARING_OFF,				// the retail game, everybody keeps what he earns
+	INCOME_SHARING_TECH,			// captured tech buildings, the oil derricks
+	INCOME_SHARING_ALL,				// every steady income: supply runs, hackers, derricks, black markets
+	INCOME_SHARING_COUNT
+};
+
 /**
   * GameSlot class - maintains information about the contents of a
 	* game slot.  This persists throughout the game.
@@ -255,6 +265,16 @@ public:
   inline Bool getProRules( void ) const;
   void setProRules( Bool proRules );
 
+  // The lobby's income sharing, an IncomeSharing from Player.h: what an ally's earnings are split
+  // with the rest of his team.  Off is the retail game.
+  inline Int getIncomeSharing( void ) const;
+  void setIncomeSharing( Int incomeSharing );
+
+  // Minutes a destroyed tech building lies in ruins before a neutral one stands on its spot again.
+  // 0 is the retail game, where a destroyed tech building stays destroyed.
+  inline Int getTechRespawn( void ) const;
+  void setTechRespawn( Int minutes );
+
   Bool hasAIPlayers( void ) const;									///< is any slot held by a computer player?
 
 protected:
@@ -281,6 +301,8 @@ protected:
   Int m_peaceTime; // minutes of enforced peace at the start of the match, 0 = off
   Bool m_unitLimit; // the lobby's unit limit is on
   Bool m_proRules; // the lobby's Pro Rules are on
+  Int m_incomeSharing; // an IncomeSharing, INCOME_SHARING_OFF = the retail game
+  Int m_techRespawn; // minutes before a destroyed tech building comes back, 0 = never
 };
 
 extern GameInfo *TheGameInfo;
@@ -311,6 +333,8 @@ void        GameInfo::setOldFactionsOnly( Bool oldFactionsOnly ) { m_oldFactions
 Int         GameInfo::getPeaceTime( void ) const            { return hasAIPlayers() ? 0 : m_peaceTime; }
 Bool        GameInfo::getUnitLimit( void ) const            { return m_unitLimit; }
 Bool        GameInfo::getProRules( void ) const             { return m_proRules; }
+Int         GameInfo::getIncomeSharing( void ) const        { return m_incomeSharing; }
+Int         GameInfo::getTechRespawn( void ) const          { return m_techRespawn; }
 
 AsciiString GameInfoToAsciiString( const GameInfo *game );
 Bool ParseAsciiStringToGameInfo( GameInfo *game, AsciiString options );

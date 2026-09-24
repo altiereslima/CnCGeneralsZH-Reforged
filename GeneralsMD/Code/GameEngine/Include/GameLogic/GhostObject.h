@@ -54,6 +54,8 @@ public:
 	virtual void snapShot(int playerIndex)=0;
 	virtual void updateParentObject(Object *object, PartitionData *mod)=0;
 	virtual void freeSnapShot(int playerIndex)=0;
+	/// whether this player's fog shows the snapshot in place of the object
+	virtual Bool hasSnapShot(int playerIndex) const=0;
 	inline PartitionData *friend_getPartitionData(void) const {return m_partitionData;}
 	inline GeometryType getGeometryType(void) const {return m_parentGeometryType;}
 	inline Bool getGeometrySmall(void) const {return m_parentGeometryIsSmall;}

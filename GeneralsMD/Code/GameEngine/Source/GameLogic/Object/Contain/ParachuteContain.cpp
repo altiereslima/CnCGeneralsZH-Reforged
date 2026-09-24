@@ -472,7 +472,15 @@ void ParachuteContain::onContaining( Object *rider, Bool wasSelected )
 //-------------------------------------------------------------------------------------------------
 void ParachuteContain::onRemoving( Object *rider )
 {
-	OpenContain::onRemoving(rider);	
+	OpenContain::onRemoving(rider);
+
+	// Ending a match deletes every object, and a paratrooper still over water left his chute
+	// through Object::onDestroy, "drowned" here, fired his death weapon and had it build debris for
+	// a player list already emptied: a null controller in Object's constructor, a v2.1.0 crash on
+	// the score screen.  Only the clear-out is skipped.  A rider deleted mid-match, by a script or
+	// with the plane he rode, still lands the way he did in v2.1.0, so its replays play back.
+	if (rider->isDestroyed() && TheGameLogic->isClearingGameData())
+		return;
 
 	const ParachuteContainModuleData* d = getParachuteContainModuleData();
 

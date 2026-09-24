@@ -72,6 +72,18 @@ Int GameEngine_logicCatchupMaxFrames( Int logicFps );
 /** Whether the catch-up loop may start another logic tick this pass. */
 Bool GameEngine_mayStartAnotherCatchupTick( Int ticksSoFar, Int maxTicks, Real elapsedMsInLoop );
 
+/** A rate sampled every half second, averaged, and the whole number written on screen for it. */
+struct RateReading
+{
+	Real average;		///< the samples so far, or the last several once there are that many
+	Int samples;		///< how many the average holds, up to the window
+	Int shown;			///< the average as written, moved only a full step at a time
+
+	RateReading() : average( 0.0f ), samples( 0 ), shown( 0 ) {}
+	void add( Real sample );
+	void restart() { samples = 0; }		///< the next sample starts the average again; shown stays
+};
+
 // forward declarations
 class AudioManager;
 class GameLogic;
@@ -111,6 +123,7 @@ public:
 																								 It will not return until the game exits. */
 	virtual void setFramesPerSecondLimit( Int fps );	///< Set the maximum rate engine updates are allowed to occur
 	virtual Int  getFramesPerSecondLimit( void );			///< Get maxFPS.  Not inline since it is called from another lib.
+	virtual Int  getLogicFramesPerSecond( void );			///< logic frames the last second really ran; the rate a countdown on screen divides by
 	virtual void setQuitting( Bool quitting );				///< set quitting status
 	virtual Bool getQuitting(void);						///< is app getting ready to quit.
 
@@ -135,7 +148,12 @@ protected:
 	virtual ParticleSystemManager* createParticleSystemManager( void ) = 0;
 	virtual AudioManager *createAudioManager( void ) = 0;				///< Factory for Audio Manager
 
+	void sampleLogicRate( void );
+
 	Int m_maxFPS;																									///< Maximum frames per second allowed
+	UnsignedInt m_logicRateSampleMs;		///< wall clock the current logic rate sample started at, 0 for none
+	UnsignedInt m_logicRateSampleFrame;	///< logic frame it started on
+	RateReading m_measuredLogicFps;			///< the rate countdowns divide by, 0 shown before there is one
   Bool m_quitting;  ///< true when we need to quit the game
 	Bool m_isActive;	///< app has OS focus.
 

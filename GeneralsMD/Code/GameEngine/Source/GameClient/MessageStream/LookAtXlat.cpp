@@ -48,6 +48,7 @@
 #include "GameClient/View.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/LookAtXlat.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameLogic/Module/UpdateModule.h"
 #include "GameLogic/GameLogic.h"
 
@@ -134,6 +135,7 @@ LookAtTranslator::LookAtTranslator() :
 	m_timestamp(0),
 	m_lastPlaneID(INVALID_DRAWABLE_ID),
 	m_lastMouseMoveFrame(0),
+	m_cameraSentFrame(0),
 	m_scrollType(SCROLL_NONE),
 	m_scrollMovesCursor(true)
 {
@@ -178,6 +180,30 @@ Bool LookAtTranslator::hasMouseMovedRecently( void )
 void LookAtTranslator::setCurrentPos( const ICoord2D& pos )
 {
 	m_currentPos = pos;
+}
+
+/// how often at most a player's camera goes out to the other machines: five times a second, about
+/// fifty bytes each, and the observer smooths the steps between
+static const UnsignedInt CAMERA_NETWORK_FRAMES = LOGICFRAMES_PER_SECOND / 5;
+
+//-----------------------------------------------------------------------------
+/** Is this playing player's camera due to go out over the network?  Only in a match between
+	* machines, only from somebody still playing, and only when it moved since the last one went. */
+Bool LookAtTranslator::networkCameraDue( const ViewLocation &view )
+{
+	if( !TheGameLogic->isInMultiplayerGame() || !ThePlayerList->getLocalPlayer()->isPlayerActive() )
+		return FALSE;
+
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	if( frame >= m_cameraSentFrame && frame < m_cameraSentFrame + CAMERA_NETWORK_FRAMES )
+		return FALSE;
+	if( view.m_pos.x == m_cameraSent.m_pos.x && view.m_pos.y == m_cameraSent.m_pos.y
+			&& view.m_angle == m_cameraSent.m_angle && view.m_pitch == m_cameraSent.m_pitch && view.m_zoom == m_cameraSent.m_zoom )
+		return FALSE;
+
+	m_cameraSentFrame = frame;
+	m_cameraSent = view;
+	return TRUE;
 }
 
 //-----------------------------------------------------------------------------
@@ -380,8 +406,10 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			// the pointer has to be over the window: the position below is the last one the mouse
 			// device was told about, and a pointer that has left a windowed game left through an
 			// edge, so believing it would scroll the map for as long as the mouse sat on the desktop.
+			// Nor while a watcher's director or player camera drives: the spectator page stands on the
+			// top and right edges, and the pointer on its way to it took the camera away (ObserverCamera.h).
 			const Bool edgeScrollAllowed = (!TheGlobalData->m_windowed || TheGlobalData->m_edgeScrollInWindowedMode)
-																			&& TheMouse->isCursorInWindow();
+																			&& TheMouse->isCursorInWindow() && !TheObserverCamera.isDriving();
 
 			if (m_isScrolling)
 			{
@@ -597,12 +625,14 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			// Advance the pan clock even while stationary, so restarting does not include idle time.
 			TheTacticalView->scrollBy( &offset );
 
-			//if (TheGlobalData->m_saveCameraInReplay /*&& TheRecorder->getMode() != RECORDERMODETYPE_PLAYBACK *//**/&& (TheGameLogic->isInSinglePlayerGame() || TheGameLogic->isInSkirmishGame())/**/)
-			//if (TheGlobalData->m_saveCameraInReplay && (TheGameLogic->isInMultiplayerGame() || TheGameLogic->isInSinglePlayerGame() || TheGameLogic->isInSkirmishGame()))
-			if (TheGlobalData->m_saveCameraInReplay && (TheGameLogic->isInSinglePlayerGame() || TheGameLogic->isInSkirmishGame()))
+			// A playing player's camera goes to the other machines too, so an observer can watch his
+			// screen: every CAMERA_NETWORK_FRAMES logic frames at most and only when it moved, where
+			// a game on one machine records it every frame as EA did.
+			ViewLocation currentView;
+			TheTacticalView->getLocation(&currentView);
+			const Bool recordCamera = TheGlobalData->m_saveCameraInReplay && (TheGameLogic->isInSinglePlayerGame() || TheGameLogic->isInSkirmishGame());
+			if (recordCamera || networkCameraDue(currentView))
 			{
-				ViewLocation currentView;
-				TheTacticalView->getLocation(&currentView);
 				GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_SET_REPLAY_CAMERA );
 				msg->appendLocationArgument( currentView.m_pos );
 				msg->appendRealArgument( currentView.m_angle );

@@ -187,6 +187,11 @@ static const Int SCOUT_CHECK_RATE = 2 * LOGICFRAMES_PER_SECOND;
 	* this is a check, not a re-path. */
 static const Int CAPTURE_CHECK_RATE = 5 * LOGICFRAMES_PER_SECOND;
 
+/** A capture further than this from the capturer goes by helicopter when one is waiting, and the
+	* helicopter puts it down this far short of the building. */
+static const Real FERRY_MIN_WALK = 900.0f;
+static const Real FERRY_DROP_STANDOFF = 60.0f;
+
 /** How often the AI looks for a vehicle to take.  Same rhythm as the capture check, and the target
 	* has to be in sight, so a faster clock would only re-order what is already walking. */
 static const Int HIJACK_CHECK_RATE = 5 * LOGICFRAMES_PER_SECOND;
@@ -303,6 +308,7 @@ m_role(AIROLE_AGGRESSIVE)
 	}
 	m_startIntelFrame = 0;
 	m_capturerID = INVALID_ID;
+	m_ferryID = INVALID_ID;
 	m_captureTimer = 1;
 	m_hijackerID = INVALID_ID;
 	m_hijackTimer = 1;
@@ -2045,26 +2051,6 @@ Bool AIPlayer::isPossibleToBuildTeam( TeamPrototype *proto, Bool requireIdleFact
 /** Check if this team is buildable, doesn't exceed maximum limits, meets conditions, 
 	* and isn't under construction. */
 // ------------------------------------------------------------------------------------------------
-/** How many money units are worth owning.  An internet center holds four, and one working outside
-	it earns the same, so a couple over that covers a center being rebuilt.  Everything past this is
-	a barracks slot the army wanted and 625 that did not buy a tank. */
-static const Int MAX_MONEY_UNITS = 6;
-
-static void countMoneyUnit( Object *obj, void *userData )
-{
-	if( obj->isKindOf( KINDOF_MONEY_HACKER ) && !obj->isEffectivelyDead() )
-		(*(Int *)userData)++;
-}
-
-/** How many money units this player has standing, dead ones excluded.  Counted rather than tracked:
-	a hacker dies, is captured, or walks into a transport, and a running tally would drift. */
-Int AIPlayer::countMoneyUnits( void ) const
-{
-	Int count = 0;
-	m_player->iterateObjects( countMoneyUnit, &count );
-	return count;
-}
-
 /** Is every unit this team asks for a money unit?  The shipped skirmish scripts give China's hacker
 	team a production priority of 1000, which no other team can be scored above, so once it is
 	buildable it wins every selection it is offered - fifteen of thirty-five on seed 11. */
@@ -2084,11 +2070,11 @@ static Bool isMoneyUnitTeam( const TeamPrototype *proto )
 	return named > 0;
 }
 
-/** A team of nothing but hackers spends against the same cap the direct purchase does, or the two
+/** A team of nothing but hackers spends against the same room the direct purchase does, or the two
 	of them together bury a barracks under money units all match. */
 Bool AIPlayer::hasEnoughMoneyUnitsFor( TeamPrototype *proto ) const
 {
-	return isMoneyUnitTeam( proto ) && countMoneyUnits() >= MAX_MONEY_UNITS;
+	return isMoneyUnitTeam( proto ) && moneyUnitRoom() <= 0;
 }
 
 Bool AIPlayer::isAGoodIdeaToBuildTeam( TeamPrototype *proto )
@@ -2254,33 +2240,12 @@ Bool AIPlayer::selectTeamToReinforce( Int minPriority )
 // ------------------------------------------------------------------------------------------------
 /** Determine the next team to build.  Return true if one was selected. */
 // ------------------------------------------------------------------------------------------------
-//-------------------------------------------------------------------------------------------------
-/** The health a unit template is built with.  Every body module that can be hurt keeps it in
-	* ActiveBodyModuleData; the one that cannot, InactiveBody, is not on the list and answers zero. */
-//-------------------------------------------------------------------------------------------------
-static Real computeTemplateMaxHealth( const ThingTemplate *tmpl )
-{
-	static const char *BODIES_WITH_HEALTH[] =
-		{ "ActiveBody", "StructureBody", "HiveStructureBody", "UndeadBody", "HighlanderBody", "ImmortalBody", NULL };
-
-	const ModuleInfo &modules = tmpl->getBehaviorModuleInfo();
-	for( Int m = 0; m < modules.getCount(); ++m )
-	{
-		for( const char **body = BODIES_WITH_HEALTH; *body != NULL; ++body )
-		{
-			if( modules.getNthName( m ).compareNoCase( *body ) == 0 )
-				return static_cast<const ActiveBodyModuleData *>( modules.getNthData( m ) )->m_maxHealth;
-		}
-	}
-	return 0.0f;
-}
-
 static Real templateMaxHealth( const ThingTemplate *tmpl )
 {
 	std::map<const ThingTemplate *, Real>::const_iterator known = theMaxHealthCache.find( tmpl );
 	if( known != theMaxHealthCache.end() )
 		return known->second;
-	const Real health = computeTemplateMaxHealth( tmpl );
+	const Real health = tmpl->calcMaxHealth();
 	theMaxHealthCache[ tmpl ] = health;
 	return health;
 }
@@ -4162,9 +4127,9 @@ void AIPlayer::doUpgradesAndSkills( void )
 	 Pathfinder already break theirs down: per job, plus whichever single player cost the most.
 	 Reset once per logic frame by AI::update. */
 enum { AIP_BASE, AIP_READY, AIP_QUEUED, AIP_TEAM, AIP_UPGRADE,
-			 AIP_BRIDGE, AIP_SCOUT, AIP_RETREAT, AIP_EXPAND, AIP_CAPTURE, AIP_ECONOMY, AIP_POWER, AIP_WAVE, AIP_PHASE_COUNT };
+			 AIP_BRIDGE, AIP_SCOUT, AIP_RETREAT, AIP_EXPAND, AIP_CAPTURE, AIP_ECONOMY, AIP_POWER, AIP_WAVE, AIP_TACTICS, AIP_PHASE_COUNT };
 static const char *theAIPhaseName[ AIP_PHASE_COUNT ] =
-	{ "base", "ready", "queued", "team", "upg", "bridge", "scout", "retreat", "expand", "capture", "economy", "power", "wave" };
+	{ "base", "ready", "queued", "team", "upg", "bridge", "scout", "retreat", "expand", "capture", "economy", "power", "wave", "tactics" };
 static Real theAIPhaseMS[ AIP_PHASE_COUNT ];
 static Real theAIWorstPlayerMS = 0.0f;
 static Int theAIWorstPlayer = -1;
@@ -4242,6 +4207,8 @@ void AIPlayer::update( void )
 	AI_PHASE( AIP_POWER,   doPower() );							// Keep the lights on, and out of reach.
 	AI_PHASE( AIP_ECONOMY, doSuperweapons() );			// The big guns, as soon as they can be bought.
 	AI_PHASE( AIP_WAVE,    doWaves() );							// Send the parked attack teams out together.
+	AI_PHASE( AIP_TACTICS, doTactics() );						// Fight each unit from where it is strongest.
+	AI_PHASE( AIP_TACTICS, doTransports() );				// Put the helicopters' riders down at the fight.
 
 #ifdef DEBUG_LOGGING
 	Int64 playerEnd;
@@ -4492,6 +4459,9 @@ static const Real DEFENSE_STANDOFF = 1.0f;
 static const Int ARMY_PER_DEFENSE = 4;
 static const Int DEFENSES_PER_SUPERWEAPON = 4;
 
+/** Dozers a Hard AI trains on its own when every one it has is on a building. */
+static const Int MAX_ECONOMY_DOZERS = 4;
+
 /** Tries on each ring when looking for somewhere to put a purchase down.  Every try is a legality
 	* check that costs about a millisecond, so this bounds the spike rather than the search. */
 static const Int PLACEMENT_ANGLES = 12;
@@ -4502,6 +4472,36 @@ static const Real APPROACH_WATCH_RADIUS = 250.0f;
 
 /** Longest approach walked, in waypoints; a path that loops would otherwise never end. */
 static const Int APPROACH_MAX_WAYPOINTS = 64;
+
+/** The influence map's cell: a fifth of a tank's range, so the edge of a gun's reach is placed to
+	* within a tank's length. */
+static const Real INFLUENCE_CELL_SIZE = 60.0f;
+
+/** A unit that kited this recently is left in its fight by the retreat. */
+static const UnsignedInt KITE_KEEPS_FIGHT_FRAMES = 5 * LOGICFRAMES_PER_SECOND;
+
+/** Clear ground all the way on the straight line between two points: no cliff, water or wall cell in
+	* between.  A spot on top of a ledge is a short step on the map and a long drive round by the ramp,
+	* and a tactical step is only worth it when it is the short one. */
+static Bool groundLineClear( const Coord3D *from, const Coord3D *to )
+{
+	const Real dx = to->x - from->x;
+	const Real dy = to->y - from->y;
+	const Int samples = 1 + REAL_TO_INT_FLOOR( sqrt( dx * dx + dy * dy ) / (PATHFIND_CELL_SIZE_F * 0.5f) );
+	for( Int i = 1; i <= samples; ++i )
+	{
+		Coord3D at;
+		at.x = from->x + dx * i / samples;
+		at.y = from->y + dy * i / samples;
+		at.z = 0.0f;
+		ICoord2D cell;
+		TheAI->pathfinder()->worldToCell( &at, &cell );
+		const PathfindCell *pathCell = TheAI->pathfinder()->getCell( LAYER_GROUND, cell.x, cell.y );
+		if( pathCell == NULL || pathCell->getType() != PathfindCell::CELL_CLEAR )
+			return FALSE;
+	}
+	return TRUE;
+}
 
 /** Something of this kind the builder can make right now, off the builder's own buttons, so the
 	* answer is right for every faction and general without a table of names. */
@@ -4640,6 +4640,23 @@ static void findAnyDozer( Object *obj, void *userData )
 		*dozer = obj;
 }
 
+struct DozerTally
+{
+	Int dozers;
+	Int building;
+};
+
+static void tallyDozer( Object *obj, void *userData )
+{
+	DozerTally *tally = (DozerTally *)userData;
+	if( !obj->isKindOf( KINDOF_DOZER ) || obj->isEffectivelyDead() || obj->getAI() == NULL )
+		return;
+	++tally->dozers;
+	DozerAIInterface *dozerAI = obj->getAI()->getDozerAIInterface();
+	if( dozerAI && dozerAI->isTaskPending( DOZER_TASK_BUILD ) )
+		++tally->building;
+}
+
 /** A purchase of this kind is already on the build list and waiting for a dozer.  Asked per template
 	* rather than for the whole list: the script's own plan keeps seven to twenty priority entries
 	* waiting through most of a match, and a global "wait for the last one" never let anything through. */
@@ -4691,6 +4708,45 @@ static BaseTally tallyBase( Player *player )
 	BaseTally tally = { 0, 0, 0 };
 	player->iterateObjects( tallyObject, &tally );
 	return tally;
+}
+
+/** Money units that earn in the open: what a player owns before an internet center stands, and what
+	it keeps beside the centers it has. */
+static const Int MONEY_UNITS_IN_THE_OPEN = 4;
+
+/** Fighting units for every money unit past that.  The hackers share the barracks queue with the
+	infantry, and a Hard Tank General with no ratio spent two thirds of 20,000 frames on them. */
+static const Int ARMY_PER_MONEY_UNIT = 4;
+
+/** The money units a player has standing, and the seats its finished internet centers hold for them.
+	Counted rather than tracked: a hacker dies, is captured, or walks into a transport, and a running
+	tally would drift. */
+struct MoneyUnitTally
+{
+	Int owned;
+	Int seats;
+};
+
+static void tallyMoneyUnit( Object *obj, void *userData )
+{
+	MoneyUnitTally *tally = (MoneyUnitTally *)userData;
+	if( obj->isEffectivelyDead() )
+		return;
+	if( obj->isKindOf( KINDOF_MONEY_HACKER ) )
+		++tally->owned;
+	else if( obj->isKindOf( KINDOF_FS_INTERNET_CENTER ) && !obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
+		tally->seats += obj->getContain()->getContainMax();
+}
+
+/** Room grows with the army, so an AI that cannot field one does not buy an economy instead, and a
+	late-game bank with forty tanks behind it buys ten.  The seats bound it: past the centers' seats
+	plus the few in the open, a hacker is one more target sitting in the base. */
+Int AIPlayer::moneyUnitRoom( void ) const
+{
+	MoneyUnitTally money = { 0, 0 };
+	m_player->iterateObjects( tallyMoneyUnit, &money );
+	const Int byArmy = max( MONEY_UNITS_IN_THE_OPEN, tallyBase( m_player ).army / ARMY_PER_MONEY_UNIT );
+	return min( byArmy, money.seats + MONEY_UNITS_IN_THE_OPEN ) - money.owned;
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -4878,6 +4934,16 @@ void AIPlayer::doEconomy( void )
 	if( !m_player->getCanBuildBase() || !m_baseCenterSet )
 		return;
 
+	/* Base building only ever asked for a dozer when it had none, so a Hard AI played the whole match
+		 on two, and everything bought below waited in one line for them: nine base-building passes in
+		 ten found both on a job. Four China Tank AIs on Twilight Flame, seeds 7 to 9, free-for-all and
+		 2v2, 18,000 frames: 8 of the 24 never put up a war factory and never attacked. With this, none,
+		 39 attack waves became 82, and each spent 67,000 instead of 45,000. */
+	DozerTally dozers = { 0, 0 };
+	m_player->iterateObjects( tallyDozer, &dozers );
+	if( dozers.dozers > 0 && dozers.building == dozers.dozers && dozers.dozers < MAX_ECONOMY_DOZERS )
+		queueDozer();
+
 	// any dozer will do to read the buttons from: an idle one is what builds it, and that is later
 	Object *dozer = NULL;
 	m_player->iterateObjects( findAnyDozer, &dozer );
@@ -4943,9 +5009,9 @@ void AIPlayer::doEconomy( void )
 static const Real TUNNEL_COVER_RADIUS = 350.0f;
 
 /** How far out along the line to the nearest enemy the forward tunnel goes, as a share of the way.
-	* A wave sets off from the edge of its own base, and a shortcut has to save 30% of the walk
-	* (TunnelTracker::findTunnelShortcut), so an exit short of the enemy's doorstep never beats walking:
-	* at 0.45 not one wave in four matches went underground. */
+	* A wave sets off from the edge of its own base, and an exit short of the enemy's doorstep saves
+	* little or nothing over walking (TunnelTracker::findTunnelShortcut): at 0.45, when a shortcut still
+	* had to save 30% of the walk, not one wave in four matches went underground. */
 static const Real FORWARD_TUNNEL_SHARE = 0.75f;
 
 /** A tunnel network the builder can put up right now, off its own buttons.  The tunnel carries
@@ -5218,17 +5284,15 @@ void AIPlayer::doSuperweapons( void )
 	* never idle; one slot behind the army's unit is a delay the army does not notice.  It used to be
 	* one factory a pass; the owner's call is that a Hard China never falls behind on hackers.
 	*
-	* With a cap, because nothing counted them.  A Hard Tank General trained 67 of them over 20,000
-	* frames on seed 11, about two thirds of everything it spent, and a player watching it from the
-	* other side of the map reported that China's tank general builds nothing but infantry.  A hacker
-	* earns only while it is sitting still and working, an internet center holds four, and past a
-	* handful the next one is a rifleman with no rifle standing in a barracks queue the army wants. */
+	* Within moneyUnitRoom, because nothing counted them.  A Hard Tank General trained 67 of them over
+	* 20,000 frames on seed 11, about two thirds of everything it spent, and a player watching it from
+	* the other side of the map reported that China's tank general builds nothing but infantry. */
 //----------------------------------------------------------------------------------------------------------
 void AIPlayer::buyMoneyUnits( void )
 {
 	const Int MAX_QUEUED_AHEAD = 1;
-	Int owned = countMoneyUnits();
-	if( owned >= MAX_MONEY_UNITS )
+	Int room = moneyUnitRoom();
+	if( room <= 0 )
 		return;
 
 	for( BuildListInfo *info = m_player->getBuildList(); info; info = info->getNext() )
@@ -5242,10 +5306,10 @@ void AIPlayer::buyMoneyUnits( void )
 		const ThingTemplate *moneyUnit = buildableOfKind( factory, GUI_COMMAND_UNIT_BUILD, KINDOF_MONEY_HACKER );
 		if( moneyUnit && pu->queueCreateUnit( moneyUnit, pu->requestUniqueUnitID() ) )
 		{
-			DEBUG_LOG(("AI ECONOMY frame %d player %d trains '%s', %d in the bank, %d money units\n",
+			DEBUG_LOG(("AI ECONOMY frame %d player %d trains '%s', %d in the bank, room for %d more\n",
 				TheGameLogic->getFrame(), m_player->getPlayerIndex(), moneyUnit->getName().str(),
-				m_player->getMoney()->countMoney(), owned + 1));
-			if( ++owned >= MAX_MONEY_UNITS )
+				m_player->getMoney()->countMoney(), room - 1));
+			if( --room <= 0 )
 				return;
 		}
 	}
@@ -5364,7 +5428,22 @@ Real AIPlayer::knownFirepowerAlongPath( Waypoint *way )
 	for( Int step = 0; way != NULL && step < APPROACH_MAX_WAYPOINTS; ++step )
 	{
 		firepower += knownFirepowerNear( way->getLocation() );
-		way = (way->getNumLinks() > 0) ? way->getLink( 0 ) : NULL;
+		Waypoint *next = (way->getNumLinks() > 0) ? way->getLink( 0 ) : NULL;
+		if( next && m_influence.isBuilt() )
+		{
+			// the whole leg, not only its ends: a gun that covers the middle of a long leg between two
+			// waypoints out of its reach is still on the road
+			const Coord3D *a = way->getLocation();
+			const Coord3D *b = next->getLocation();
+			const Real length = sqrt( sqr( b->x - a->x ) + sqr( b->y - a->y ) );
+			const Int samples = REAL_TO_INT_FLOOR( length / INFLUENCE_CELL_SIZE );
+			for( Int i = 1; i < samples; ++i )
+			{
+				const Real t = INT_TO_REAL( i ) / INT_TO_REAL( samples );
+				firepower += m_influence.enemyAt( a->x + (b->x - a->x) * t, a->y + (b->y - a->y) * t );
+			}
+		}
+		way = next;
 	}
 	return firepower;
 }
@@ -5374,6 +5453,12 @@ Real AIPlayer::knownFirepowerAlongPath( Waypoint *way )
 //----------------------------------------------------------------------------------------------------------
 Real AIPlayer::knownFirepowerNear( const Coord3D *pos )
 {
+	// the influence map answers the question the radius only approximated: not what stands near the
+	// road, but what can shoot onto it, the high ground's reach included.  The radius count below also
+	// took in this player's own units, which the affiliation filter lets through whatever it is asked.
+	if( m_influence.isBuilt() )
+		return m_influence.enemyAt( pos->x, pos->y );
+
 	PartitionFilterPlayerAffiliation enemies( m_player, ALLOW_ENEMIES, true );
 	PartitionFilterAlive alive;
 	PartitionFilter *filters[] = { &enemies, &alive, NULL };
@@ -5465,6 +5550,7 @@ struct HomeAirSearch
 	Coord3D home;
 	Real reachSqr;
 	AIGroup *wave;
+	ObjectID ferry;		///< the helicopter carrying the capturer, which stays on that job
 };
 
 /** Somebody of this player's is on the way to climb into this helicopter. */
@@ -5485,7 +5571,7 @@ static void findBoarder( Object *obj, void *userData )
 static void addHomeHelicopter( Object *obj, void *userData )
 {
 	HomeAirSearch *search = (HomeAirSearch *)userData;
-	if( !isHelicopter( obj ) || obj->isContained() || obj->getGroup() == search->wave )
+	if( !isHelicopter( obj ) || obj->isContained() || obj->getGroup() == search->wave || obj->getID() == search->ferry )
 		return;
 	// on guard or doing nothing, wherever the guard team put it; one already out on an attack keeps going
 	const StateID state = obj->getAI()->getCurrentStateID();
@@ -5673,6 +5759,7 @@ void AIPlayer::doWaves( void )
 	air.home = m_baseCenter;
 	air.reachSqr = sqr( 2.0f * m_baseRadius );
 	air.wave = wave;
+	air.ferry = m_ferryID;
 	m_player->iterateObjects( addHomeHelicopter, &air );
 	if( wave->isEmpty() )
 	{
@@ -5716,22 +5803,24 @@ void AIPlayer::doWaves( void )
 }
 
 //----------------------------------------------------------------------------------------------------------
-/** Fill the waiting helicopters with the parked wave's infantry, while the wave gathers.  A bunkered
-	* Helix and the Combat Chinook let their riders shoot out, and the scripts flew them empty for the
-	* whole match.  An infantryman boards the nearest one with a seat he can shoot from, so it leaves with
-	* the wave carrying a squad; one already on its way to a seat is no longer idle and is left alone. */
+/** Fill the waiting helicopters with the parked wave's infantry, while the wave gathers.  The scripts
+	* flew them empty for the whole match.  An infantryman boards the nearest one with a free seat, so it
+	* leaves with the wave carrying a squad: one that can shoot out of a bunkered Helix or a Combat
+	* Chinook fights from it, and one that cannot is put down where the fighting starts (doTransports).
+	* One already on its way to a seat is no longer idle and is left alone. */
 //----------------------------------------------------------------------------------------------------------
 struct GunshipList
 {
 	Coord3D home;
 	Real reachSqr;
+	ObjectID ferry;		///< the capturer's helicopter, not a seat for the wave
 	std::vector<Object *> gunships;
 };
 
 static void findGunshipAtHome( Object *obj, void *userData )
 {
 	GunshipList *list = (GunshipList *)userData;
-	if( !isTransportWithRoom( obj ) || obj->isContained() )
+	if( !isTransportWithRoom( obj ) || obj->isContained() || obj->getID() == list->ferry )
 		return;
 	const StateID state = obj->getAI()->getCurrentStateID();
 	const Bool waiting = state == AI_IDLE || state == AI_GUARD || state == AI_GUARD_RETALIATE;
@@ -5744,6 +5833,7 @@ void AIPlayer::loadGunships( void )
 	GunshipList list;
 	list.home = m_baseCenter;
 	list.reachSqr = sqr( 2.0f * m_baseRadius );
+	list.ferry = m_ferryID;
 	m_player->iterateObjects( findGunshipAtHome, &list );
 	if( list.gunships.empty() )
 		return;
@@ -5781,9 +5871,13 @@ void AIPlayer::loadGunships( void )
 		for( size_t g = 0; g < list.gunships.size(); ++g )
 		{
 			const Object *gunship = list.gunships[ g ];
-			if( seats[ g ] <= 0 || !gunship->getContain()->isValidContainerFor( rider, TRUE ) ||
-					!gunship->getContain()->isPassengerAllowedToFire( rider->getID() ) )
+			// a rider who cannot shoot out rides as cargo: doTransports puts him down where the fight
+			// starts.  Seating only those who could shoot out left every unbunkered Helix empty - 43
+			// Helixes left with waves over two Hard China matches, all of them with no one aboard
+			if( seats[ g ] <= 0 || !gunship->getContain()->isValidContainerFor( rider, TRUE ) )
 				continue;
+			if( !m_influence.isBuilt() && !gunship->getContain()->isPassengerAllowedToFire( rider->getID() ) )
+				continue;		// nothing would put cargo down without the tactics: gunship seats only
 			const Real distSqr = sqr( gunship->getPosition()->x - rider->getPosition()->x ) + sqr( gunship->getPosition()->y - rider->getPosition()->y );
 			if( nearest < 0 || distSqr < nearestSqr )
 			{
@@ -5798,6 +5892,12 @@ void AIPlayer::loadGunships( void )
 			m_player->getPlayerIndex(), rider->getTemplate()->getName().str(), list.gunships[ nearest ]->getTemplate()->getName().str(),
 			list.gunships[ nearest ]->getID(), list.gunships[ nearest ]->getContain()->getContainCount(), list.gunships[ nearest ]->getContain()->getContainMax()));
 		rider->getAI()->aiEnter( list.gunships[ nearest ], CMD_FROM_AI );
+		// a helicopter on guard stays in the air and nobody gets in: the same Black Lotus was sent to one
+		// Helix three times over two minutes and never boarded, while the capturer boarded an idle one
+		// first time.  Stood down, it lands for its riders, and the wave takes idle helicopters anyway
+		AIUpdateInterface *shipAI = list.gunships[ nearest ]->getAI();
+		if( shipAI->getCurrentStateID() != AI_IDLE )
+			shipAI->aiIdle( CMD_FROM_AI );
 	}
 }
 
@@ -6055,9 +6155,732 @@ void AIPlayer::doRetreats( void )
 				// round at the mouth
 				if( obj->getAI()->hasTunnelTrip() )
 					continue;
-				if( homeTunnel == NULL || !obj->getAI()->takeTunnelTrip( homeTunnel, &m_baseCenter, TUNNEL_TRIP_MOVE, CMD_FROM_AI ) )
+				// one that is kiting the fight is winning its own share of it however the totals read: a
+				// Rocket Buggy turned for home in front of four tanks it outran and outranged died turning
+				const TacticalStep *kiting = findTacticalStep( obj->getID() );
+				if( kiting && kiting->lastKiteFrame != 0 && TheGameLogic->getFrame() - kiting->lastKiteFrame < KITE_KEEPS_FIGHT_FRAMES )
+					continue;
+				if( homeTunnel != NULL && obj->getAI()->takeTunnelTrip( homeTunnel, &m_baseCenter, TUNNEL_TRIP_MOVE, CMD_FROM_AI ) )
+					leaveTacticsAlone( obj->getID() );
+				else if( measuringWithoutTactics() )
 					obj->getAI()->aiMoveToPosition( &m_baseCenter, CMD_FROM_AI );
+				else
+				{
+					// the walk home taken calm and as an order, on every rung: a CMD_FROM_AI move to a unit
+					// that is fighting is laid under its attack, and an aggressive mood turns the walk back
+					// into a fight, so the retreat never happened
+					leaveTacticsAlone( obj->getID() );
+					stepCalmly( obj, tacticalStepFor( obj->getID() ), &m_baseCenter );
+				}
 			}
+		}
+	}
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** How often the influence map is redrawn, and how often each fighting unit is looked at.  Both are on
+	* the frame and the player's slot, so there is no timer to save and every machine does it on the
+	* same frame. */
+static const Int INFLUENCE_REBUILD_RATE = LOGICFRAMES_PER_SECOND;
+static const Int TACTICS_RATE = LOGICFRAMES_PER_SECOND / 3;
+
+/** Kiting.  A unit steps back from something it outranges once that thing is inside its own reach
+	* plus this much, and stops where the enemy's gun is this far short of it. */
+static const Real KITE_MARGIN = 25.0f;
+/** ... and starts watching it this far outside the enemy's reach, so the turn is done before it arrives. */
+static const Real KITE_WATCH_MARGIN = 2.0f * KITE_MARGIN;
+/** ... and only from something at least this share of what it is worth itself. */
+static const Real KITE_WORTHY_SHARE = 0.5f;
+/** ... and, when that something can move, only with at least this much more range than it. */
+static const Real KITE_MOBILE_RANGE_RATIO = 1.5f;
+/** The longest a step lasts before it goes back to shooting, whether it got there or not. */
+static const UnsignedInt TACTICAL_STEP_MAX_FRAMES = 2 * LOGICFRAMES_PER_SECOND;
+/** A kite is a hop, not a walk: every frame on the move is a frame not shooting.  It gets the turn and
+	* the drive to its spot, and never more than this. */
+static const UnsignedInt KITE_STEP_MAX_FRAMES = 3 * LOGICFRAMES_PER_SECOND;
+static const UnsignedInt KITE_TURN_FRAMES = LOGICFRAMES_PER_SECOND;
+
+/** The high ground.  Worth a climb when it is this much higher than where the unit stands, which is
+	* thirty more units of range; looked for this far round the unit, and not again for a while. */
+static const Real CLIMB_MIN_GAIN = 10.0f;
+static const Real CLIMB_SEARCH_RADIUS = 110.0f;
+static const UnsignedInt CLIMB_INTERVAL_FRAMES = 6 * LOGICFRAMES_PER_SECOND;
+
+/** A unit this hurt, standing where what can shoot it outweighs what is on its side, is spent for
+	* nothing if it stays. */
+static const Real HURT_HEALTH_SHARE = 0.35f;
+
+/** Rows for units not looked at for this long are dropped: dead, garrisoned, or gone home. */
+static const UnsignedInt TACTICAL_ROW_EXPIRY_FRAMES = 10 * LOGICFRAMES_PER_SECOND;
+/** A unit the retreat sent home is not turned round by a kite. */
+static const UnsignedInt LEAVE_ALONE_FRAMES = 10 * LOGICFRAMES_PER_SECOND;
+/** ... and gets its mood back when it stops walking, or this long after that at the latest. */
+static const UnsignedInt WALK_HOME_MAX_FRAMES = 30 * LOGICFRAMES_PER_SECOND;
+
+static void collectObject( Object *obj, void *userData )
+{
+	((std::vector<Object *> *)userData)->push_back( obj );
+}
+
+/** The longest gun this has that can hit something standing on the ground. */
+static Real groundAttackRange( const Object *obj )
+{
+	Real best = 0.0f;
+	for( Int slot = PRIMARY_WEAPON; slot < WEAPONSLOT_COUNT; ++slot )
+	{
+		const Weapon *weapon = obj->getWeaponInWeaponSlot( (WeaponSlotType)slot );
+		if( weapon == NULL || (weapon->getTemplate()->getAntiMask() & WEAPON_ANTI_GROUND) == 0 )
+			continue;
+		const Real range = weapon->getAttackRange( obj );
+		if( range > best )
+			best = range;
+	}
+	return best;
+}
+
+/** Where a gun fires from, for the high ground's reach: an aircraft's range is flat
+	* (Weapon_elevatedRange), so it counts as standing on the ground under it. */
+static Real firingHeight( const Object *obj )
+{
+	const Coord3D *pos = obj->getPosition();
+	if( obj->isKindOf( KINDOF_AIRCRAFT ) )
+		return TheTerrainLogic->getGroundHeight( pos->x, pos->y );
+	return pos->z;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** B4, the map itself.  Every armed thing this player knows about is stamped onto the cells its guns
+	* reach: the enemy's into one layer, this player's and its allies' into the other.  Known means
+	* observerKnowsAbout, the same line every other decision here draws, so a gun it has never seen
+	* does not steer it and a bunker it saw once keeps doing so. */
+//----------------------------------------------------------------------------------------------------------
+void AIPlayer::rebuildInfluence( void )
+{
+	if( !m_influence.isSized() )
+	{
+		Region3D extent;
+		TheTerrainLogic->getExtent( &extent );
+		m_influence.reset( extent.lo.x, extent.lo.y, extent.hi.x - extent.lo.x, extent.hi.y - extent.lo.y, INFLUENCE_CELL_SIZE );
+		for( Int row = 0; row < m_influence.getRows(); ++row )
+		{
+			for( Int col = 0; col < m_influence.getCols(); ++col )
+			{
+				Real x, y;
+				m_influence.cellCenter( col, row, &x, &y );
+				m_influence.setCellHeight( col, row, TheTerrainLogic->getGroundHeight( x, y ) );
+			}
+		}
+	}
+
+	m_influence.clear();
+	const Int me = m_player->getPlayerIndex();
+	for( Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
+	{
+		if( obj->isEffectivelyDead() || obj->isKindOf( KINDOF_PROJECTILE ) )
+			continue;
+		const Bool mine = obj->getControllingPlayer() == m_player;
+		const Relationship relation = m_player->getRelationship( obj->getTeam() );
+		if( !mine && relation != ENEMIES && relation != ALLIES )
+			continue;
+		const Real power = aiCombatPower( obj );
+		if( power <= 0.0f )
+			continue;
+		const Real range = groundAttackRange( obj );
+		if( range <= 0.0f )
+			continue;
+		const Coord3D *pos = obj->getPosition();
+		if( mine || relation == ALLIES )
+			m_influence.stampFriend( pos->x, pos->y, firingHeight( obj ), range, power );
+		else if( observerKnowsAbout( obj, me ) )
+			m_influence.stampEnemy( pos->x, pos->y, firingHeight( obj ), range, power );
+	}
+	m_influence.markBuilt( TheGameLogic->getFrame() );
+}
+
+//----------------------------------------------------------------------------------------------------------
+AIPlayer::TacticalStep *AIPlayer::findTacticalStep( ObjectID unit )
+{
+	for( size_t i = 0; i < m_tactics.size(); ++i )
+	{
+		if( m_tactics[ i ].unit == unit )
+			return &m_tactics[ i ];
+	}
+	return NULL;
+}
+
+AIPlayer::TacticalStep *AIPlayer::tacticalStepFor( ObjectID unit )
+{
+	TacticalStep *existing = findTacticalStep( unit );
+	if( existing )
+		return existing;
+	TacticalStep step;
+	step.unit = unit;
+	step.target = INVALID_ID;
+	step.resumeFrame = 0;
+	step.nextClimbFrame = 0;
+	step.leaveAloneUntil = 0;
+	step.lastSeenFrame = TheGameLogic->getFrame();
+	step.origin.zero();
+	step.rejoin = FALSE;
+	step.savedAttitude = AI_INVALID;
+	step.lastKiteFrame = 0;
+	m_tactics.push_back( step );
+	return &m_tactics.back();
+}
+
+void AIPlayer::leaveTacticsAlone( ObjectID unit )
+{
+	TacticalStep *step = tacticalStepFor( unit );
+	step->resumeFrame = 0;
+	step->leaveAloneUntil = TheGameLogic->getFrame() + LEAVE_ALONE_FRAMES;
+}
+
+/** A computer player's teams are set aggressive, and an aggressive mood turns every plain move into
+	* an attack move (AIMoveToState::update): the kite, the climb and the walk out of a lost fight would
+	* turn round at the first enemy in reach and go back to shooting.  So the step is taken calm, and the
+	* mood comes back when the step is over. */
+void AIPlayer::stepCalmly( Object *obj, TacticalStep *step, const Coord3D *spot )
+{
+	AIUpdateInterface *ai = obj->getAI();
+	if( step->savedAttitude == AI_INVALID )
+	{
+		// getAttitude is protected; the mood matrix carries the same answer
+		switch( ai->getMoodMatrixValue() & MM_Mood_Bitmask )
+		{
+			case MM_Mood_Sleep:				step->savedAttitude = AI_SLEEP; break;
+			case MM_Mood_Passive:			step->savedAttitude = AI_PASSIVE; break;
+			case MM_Mood_Alert:				step->savedAttitude = AI_ALERT; break;
+			case MM_Mood_Aggressive:	step->savedAttitude = AI_AGGRESSIVE; break;
+			default:									step->savedAttitude = AI_NORMAL; break;
+		}
+	}
+	ai->setAttitude( AI_NORMAL );
+	// and given as an order rather than an AI's aside: a CMD_FROM_AI move to a unit that is busy is laid
+	// over its attack as a temporary state (privateMoveToPosition), and the attack carries on under it
+	// - the buggy that was told to back away drove on towards the tank it was shooting
+	ai->aiMoveToPosition( spot, CMD_FROM_SCRIPT );
+}
+
+void AIPlayer::restoreMood( Object *obj, TacticalStep *step )
+{
+	if( step->savedAttitude == AI_INVALID )
+		return;
+	obj->getAI()->setAttitude( (AttitudeType)step->savedAttitude );
+	step->savedAttitude = AI_INVALID;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** A spot distance out from awayFrom, on the side the unit is on, that the ground lets it stand on and
+	* from which mustReach is still inside reach (stretched by any height it gains).  Of the candidates,
+	* the one the fewest known guns cover; among the ones about as quiet as that, the highest. */
+//----------------------------------------------------------------------------------------------------------
+Bool AIPlayer::pickTacticalSpot( const Object *obj, const Coord3D *from, const Coord3D *awayFrom, Real distance,
+																 const Coord3D *mustReach, Real reach, Coord3D *spot )
+{
+	Real dx = from->x - awayFrom->x;
+	Real dy = from->y - awayFrom->y;
+	Real length = sqrt( dx * dx + dy * dy );
+	if( length < 1.0f )
+	{
+		// standing on top of it: step towards home
+		dx = m_baseCenter.x - from->x;
+		dy = m_baseCenter.y - from->y;
+		length = sqrt( dx * dx + dy * dy );
+		if( length < 1.0f )
+			return FALSE;
+	}
+	dx /= length;
+	dy /= length;
+
+	const Int CANDIDATES = 7;
+	static const Real TURN[ CANDIDATES ] = { 0.0f, 0.45f, -0.45f, 0.9f, -0.9f, 1.35f, -1.35f };		// radians either side of straight back
+
+	Bool found = FALSE;
+	Real bestThreat = 0.0f;
+	Real bestZ = 0.0f;
+	for( Int i = 0; i < CANDIDATES; ++i )
+	{
+		const Real c = Cos( TURN[ i ] );
+		const Real s = Sin( TURN[ i ] );
+		Coord3D at;
+		at.x = awayFrom->x + (dx * c - dy * s) * distance;
+		at.y = awayFrom->y + (dx * s + dy * c) * distance;
+		at.z = TheTerrainLogic->getGroundHeight( at.x, at.y );
+
+		if( !groundLineClear( from, &at ) )
+			continue;
+		if( mustReach )
+		{
+			const Real reachFromThere = reach + Weapon_elevationRangeBonus( reach, at.z - mustReach->z );
+			if( sqr( at.x - mustReach->x ) + sqr( at.y - mustReach->y ) > sqr( reachFromThere ) )
+				continue;
+		}
+		const Real threat = m_influence.enemyAt( at.x, at.y );
+		// about as quiet: within a tenth, or both nothing
+		const Bool quieter = !found || threat < bestThreat * 0.9f;
+		const Bool asQuietAndHigher = found && threat <= bestThreat * 1.1f && at.z > bestZ;
+		if( quieter || asQuietAndHigher )
+		{
+			found = TRUE;
+			bestThreat = threat;
+			bestZ = at.z;
+			*spot = at;
+		}
+	}
+	return found;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** Hard's units, fought one at a time from the influence map.  Deliberately at the player level: the
+	* unit's own AI still aims, picks targets and drives; this only decides where it stands, on the
+	* rung's own clock. */
+//----------------------------------------------------------------------------------------------------------
+/** -notactics, the measuring half of a batch: this player fights the way it did before the tactics,
+	* the retreat and the approaches included. */
+Bool AIPlayer::measuringWithoutTactics( void ) const
+{
+	return TheGlobalData->m_noTacticsSlotParity >= 0 && TheGameLogic->isInSkirmishGame() &&
+		(ThePlayerList->getSlotIndex( m_player->getPlayerIndex() ) & 1) == TheGlobalData->m_noTacticsSlotParity;
+}
+
+void AIPlayer::doTactics( void )
+{
+	if( measuringWithoutTactics() )
+		return;
+	const UnsignedInt now = TheGameLogic->getFrame();
+	const Int me = m_player->getPlayerIndex();
+	const Bool tactics = getSkillProfile()->m_tacticalMicro;
+
+	if( tactics && (!m_influence.isBuilt() || (now + computeUpdatePhase( me, INFLUENCE_REBUILD_RATE )) % INFLUENCE_REBUILD_RATE == 0) )
+		rebuildInfluence();
+
+	if( (now + computeUpdatePhase( me, TACTICS_RATE )) % TACTICS_RATE != 0 )
+		return;
+
+	if( tactics && m_baseCenterSet )
+	{
+		std::vector<Object *> units;
+		m_player->iterateObjects( collectObject, &units );
+		for( size_t i = 0; i < units.size(); ++i )
+			tacticsFor( units[ i ] );
+	}
+
+	// ponytail: a linear list searched per unit, a few hundred rows at most; a map keyed on the ID if
+	// armies ever grow past that
+	for( size_t i = 0; i < m_tactics.size(); )
+	{
+		Object *unit = TheGameLogic->findObjectByID( m_tactics[ i ].unit );
+		const TacticalStep &row = m_tactics[ i ];
+		// with the tactics running a row goes when the unit has not been looked at for a while; without
+		// them the only rows are walks home from a retreat, which end when the walk does
+		const Bool done = (unit == NULL || unit->isEffectivelyDead()) ? TRUE :
+			tactics ? now - row.lastSeenFrame > TACTICAL_ROW_EXPIRY_FRAMES :
+			now >= row.leaveAloneUntil && (unit->getAI() == NULL || !unit->getAI()->isMoving() || now >= row.leaveAloneUntil + WALK_HOME_MAX_FRAMES);
+		if( done )
+		{
+			// one that is still alive (home, in a tunnel, garrisoned) gets the mood its team gave it back
+			if( unit && unit->getAI() )
+				restoreMood( unit, &m_tactics[ i ] );
+			m_tactics[ i ] = m_tactics.back();
+			m_tactics.pop_back();
+		}
+		else
+			++i;
+	}
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** How often the loaded helicopters are looked at, and how far back from the fight they may land. */
+static const Int TRANSPORT_CHECK_RATE = LOGICFRAMES_PER_SECOND / 2;
+static const Int DROP_BACKOFF_CELLS = 8;
+
+struct LoadedTransports
+{
+	ObjectID ferry;
+	std::vector<Object *> ships;
+};
+
+static void findLoadedTransport( Object *obj, void *userData )
+{
+	LoadedTransports *found = (LoadedTransports *)userData;
+	const ContainModuleInterface *contain = obj->getContain();
+	if( !isHelicopter( obj ) || obj->isContained() || obj->getID() == found->ferry || contain == NULL || contain->getContainCount() == 0 )
+		return;
+	found->ships.push_back( obj );
+}
+
+/** A helicopter that went with a wave carrying riders who cannot shoot out of it puts them down at the
+	* edge of the fight: the first cell on its way home that nothing known covers, from the moment the
+	* influence map says it is over ground the enemy's guns reach.  Once they are out and standing they
+	* go on towards the enemy the wave was sent at. */
+void AIPlayer::doTransports( void )
+{
+	if( !m_influence.isBuilt() )
+		return;		// Hard with its tactics running: nothing else loads the wave's infantry
+	if( (TheGameLogic->getFrame() + computeUpdatePhase( m_player->getPlayerIndex(), TRANSPORT_CHECK_RATE )) % TRANSPORT_CHECK_RATE != 0 )
+		return;
+
+	Coord3D enemyPos;
+	Player *enemy = getAiEnemy();
+	const Bool haveEnemy = enemy && enemyStartGuess( enemy->getPlayerIndex(), &enemyPos );
+	for( size_t i = 0; i < m_droppedRiders.size(); )
+	{
+		Object *rider = TheGameLogic->findObjectByID( m_droppedRiders[ i ] );
+		if( rider && !rider->isEffectivelyDead() && (rider->isContained() || rider->getAI() == NULL || !rider->getAI()->isIdle()) )
+		{
+			++i;
+			continue;
+		}
+		if( rider && !rider->isEffectivelyDead() && haveEnemy )
+			rider->getAI()->aiAttackMoveToPosition( &enemyPos, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+		m_droppedRiders[ i ] = m_droppedRiders.back();
+		m_droppedRiders.pop_back();
+	}
+
+	LoadedTransports found;
+	found.ferry = m_ferryID;
+	m_player->iterateObjects( findLoadedTransport, &found );
+	for( size_t s = 0; s < found.ships.size(); ++s )
+	{
+		Object *ship = found.ships[ s ];
+		const Coord3D *pos = ship->getPosition();
+		if( m_influence.enemyAt( pos->x, pos->y ) <= 0.0f )
+			continue;		// not at the fight yet
+
+		ContainModuleInterface *contain = ship->getContain();
+		std::vector<ObjectID> cargo;
+		Bool dropping = FALSE;
+		const ContainedItemsList *items = contain->getContainedItemsList();
+		for( ContainedItemsList::const_iterator it = items->begin(); it != items->end(); ++it )
+		{
+			const Object *rider = *it;
+			if( !rider->isKindOf( KINDOF_INFANTRY ) || contain->isPassengerAllowedToFire( rider->getID() ) )
+				continue;		// a gunship's riders fight from it; the Helix's own gun mount is not cargo
+			if( std::find( m_droppedRiders.begin(), m_droppedRiders.end(), rider->getID() ) != m_droppedRiders.end() )
+				dropping = TRUE;
+			cargo.push_back( rider->getID() );
+		}
+		if( cargo.empty() || dropping )
+			continue;
+
+		Coord3D drop = *pos;
+		const Real homeX = m_baseCenter.x - pos->x;
+		const Real homeY = m_baseCenter.y - pos->y;
+		const Real homeDist = sqrt( homeX * homeX + homeY * homeY );
+		for( Int back = 1; back <= DROP_BACKOFF_CELLS && homeDist > 1.0f; ++back )
+		{
+			drop.x = pos->x + homeX / homeDist * back * INFLUENCE_CELL_SIZE;
+			drop.y = pos->y + homeY / homeDist * back * INFLUENCE_CELL_SIZE;
+			if( m_influence.enemyAt( drop.x, drop.y ) <= 0.0f )
+				break;
+		}
+		drop.z = TheTerrainLogic->getGroundHeight( drop.x, drop.y );
+		DEBUG_LOG(("AI TRANSPORT frame %d player %d drops %d riders from '%s' at (%.0f,%.0f)\n", TheGameLogic->getFrame(),
+			m_player->getPlayerIndex(), (Int)cargo.size(), ship->getTemplate()->getName().str(), drop.x, drop.y));
+		// an order rather than an AI's aside, or it is laid under the wave's path and never happens
+		ship->getAI()->aiMoveToAndEvacuate( &drop, CMD_FROM_SCRIPT );
+		m_droppedRiders.insert( m_droppedRiders.end(), cargo.begin(), cargo.end() );
+	}
+}
+
+//----------------------------------------------------------------------------------------------------------
+void AIPlayer::tacticsFor( Object *obj )
+{
+	// armed, not "able to attack" this frame: that reads false while a clip reloads, which is exactly
+	// when a Rocket Buggy has to step away, and it took every buggy out of here the moment it had fired
+	if( obj->isEffectivelyDead() || obj->isContained() || groundAttackRange( obj ) <= 0.0f )
+		return;
+	if( obj->isKindOf( KINDOF_STRUCTURE ) || obj->isKindOf( KINDOF_IMMOBILE ) || obj->isKindOf( KINDOF_AIRCRAFT ) ||
+			obj->isKindOf( KINDOF_DOZER ) || obj->isKindOf( KINDOF_HARVESTER ) || obj->isKindOf( KINDOF_PROJECTILE ) )
+		return;
+	AIUpdateInterface *ai = obj->getAI();
+	if( ai == NULL || ai->hasTunnelTrip() || ai->getCurLocomotor() == NULL )
+		return;		// a gun that cannot move (a Helix's gattling mount) has no step to take
+	// base defence stays where it was put, and the scouts, the capturer and the hijacker have their jobs
+	Team *team = obj->getTeam();
+	if( team == NULL || obj->isKindOf( KINDOF_MONEY_HACKER ) )
+		return;
+	const TeamTemplateInfo *info = team->getPrototype()->getTemplateInfo();
+	if( info && (info->m_isBaseDefense || info->m_isPerimeterDefense) )
+		return;
+	if( obj->getID() == m_capturerID || obj->getID() == m_hijackerID )
+		return;
+	for( Int i = 0; i < MAX_AI_SCOUTS; ++i )
+	{
+		if( obj->getID() == m_scoutID[ i ] )
+			return;
+	}
+
+	const Coord3D *pos = obj->getPosition();
+	const UnsignedInt now = TheGameLogic->getFrame();
+	const Real threatHere = m_influence.enemyAt( pos->x, pos->y );
+	Object *victim = ai->getCurrentVictim();
+	const TacticalStep *existing = findTacticalStep( obj->getID() );
+	if( threatHere <= 0.0f && victim == NULL &&
+			(existing == NULL || (existing->resumeFrame == 0 && !existing->rejoin && existing->savedAttitude == AI_INVALID)) )
+		return;		// nothing can shoot it and it is shooting nothing: nothing to decide
+
+	TacticalStep *step = tacticalStepFor( obj->getID() );
+	step->lastSeenFrame = now;
+	if( now < step->leaveAloneUntil )
+		return;
+	// home from a lost fight: its own mood again once the walk is over, and not before, or the mood turns
+	// what is left of the walk into an attack move
+	if( step->resumeFrame == 0 && (!ai->isMoving() || now >= step->leaveAloneUntil + WALK_HOME_MAX_FRAMES) )
+		restoreMood( obj, step );
+
+	// a step under way ends when it gets there or runs out of time, and the unit goes back to work:
+	// the thing it was shooting if that still stands, otherwise back up the road it stepped off
+	if( step->resumeFrame != 0 )
+	{
+		if( now < step->resumeFrame && ai->isMoving() )
+			return;
+		step->resumeFrame = 0;
+		restoreMood( obj, step );
+		Object *target = TheGameLogic->findObjectByID( step->target );
+		if( target && !target->isEffectivelyDead() && observerKnowsAbout( target, m_player->getPlayerIndex() ) )
+			ai->aiAttackObject( target, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+		else
+			ai->aiAttackMoveToPosition( &step->origin, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+		return;
+	}
+
+	// a step replaced the order the team gave it, so once the fight it stepped for is over it is standing
+	// on its own in the middle of the map; it goes back to the rest of its team rather than wait there
+	// to be picked off
+	if( step->rejoin && victim == NULL && threatHere <= 0.0f && !ai->isMoving() )
+	{
+		step->rejoin = FALSE;
+		Coord3D centre;
+		centre.zero();
+		Real count = 0.0f;
+		for( DLINK_ITERATOR<Object> iter = team->iterate_TeamMemberList(); !iter.done(); iter.advance() )
+		{
+			const Object *mate = iter.cur();
+			if( mate == NULL || mate == obj || mate->isEffectivelyDead() || mate->isContained() )
+				continue;
+			centre.x += mate->getPosition()->x;
+			centre.y += mate->getPosition()->y;
+			count += 1.0f;
+		}
+		if( count > 0.0f )
+		{
+			centre.x /= count;
+			centre.y /= count;
+			centre.z = TheTerrainLogic->getGroundHeight( centre.x, centre.y );
+			ai->aiAttackMoveToPosition( &centre, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+		}
+		return;
+	}
+
+	const Real myRange = groundAttackRange( obj );
+	if( myRange <= 0.0f )
+		return;
+
+	// a hurt unit on ground it cannot win goes home, where the next wave will pick it up
+	const BodyModuleInterface *body = obj->getBodyModule();
+	const Real friendsHere = m_influence.friendAt( pos->x, pos->y );
+	if( body && body->getHealth() < body->getMaxHealth() * HURT_HEALTH_SHARE && threatHere > friendsHere )
+	{
+		DEBUG_LOG(("AI TACTICS frame %d player %d pulls a hurt '%s' out, %.0f against %.0f\n", now, m_player->getPlayerIndex(),
+			obj->getTemplate()->getName().str(), threatHere, friendsHere));
+		// out to the first ground on the way home that nothing known covers, not all the way home: on a
+		// big map the walk home crossed the ground it was pulled out of, and it stays near enough to
+		// guard the road behind the fight
+		Coord3D safe = m_baseCenter;
+		const Real homeX = m_baseCenter.x - pos->x;
+		const Real homeY = m_baseCenter.y - pos->y;
+		const Real homeDist = sqrt( homeX * homeX + homeY * homeY );
+		for( Real along = INFLUENCE_CELL_SIZE; along < homeDist; along += INFLUENCE_CELL_SIZE )
+		{
+			const Real x = pos->x + homeX * along / homeDist;
+			const Real y = pos->y + homeY * along / homeDist;
+			if( m_influence.enemyAt( x, y ) <= 0.0f )
+			{
+				safe.x = x + homeX * INFLUENCE_CELL_SIZE / homeDist;		// a cell past the edge of the reach
+				safe.y = y + homeY * INFLUENCE_CELL_SIZE / homeDist;
+				safe.z = TheTerrainLogic->getGroundHeight( safe.x, safe.y );
+				break;
+			}
+		}
+		stepCalmly( obj, step, &safe );
+		step->rejoin = TRUE;
+		step->leaveAloneUntil = now + LEAVE_ALONE_FRAMES;
+		return;
+	}
+
+	// kite: the nearest thing that is about to reach it and that it outranges
+	Object *closing = NULL;
+	Real closingRange = 0.0f;
+	Real closingDistSqr = 0.0f;
+	Object *nearestArmed = NULL;			// the closest armed thing in this unit's reach, whatever else it is
+	Real nearestArmedDistSqr = 0.0f;
+	{
+		PartitionFilterPlayerAffiliation enemies( m_player, ALLOW_ENEMIES, true );
+		PartitionFilterAlive alive;
+		PartitionFilter *filters[] = { &enemies, &alive, NULL };
+		ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange( pos, myRange, FROM_CENTER_2D, filters );
+		MemoryPoolObjectHolder hold( iter );
+		for( Object *enemy = iter->first(); enemy; enemy = iter->next() )
+		{
+			// the affiliation filter lets the player's own objects through whatever it is asked for
+			if( enemy->getControllingPlayer() == m_player || m_player->getRelationship( enemy->getTeam() ) != ENEMIES )
+				continue;
+			if( enemy->isKindOf( KINDOF_PROJECTILE ) || !observerKnowsAbout( enemy, m_player->getPlayerIndex() ) )
+				continue;
+			const Real enemyRange = groundAttackRange( enemy );
+			if( enemyRange <= 0.0f )
+				continue;
+			const Real reach = enemyRange + Weapon_elevationRangeBonus( enemyRange, firingHeight( enemy ) - pos->z );
+			const Real distSqr = sqr( enemy->getPosition()->x - pos->x ) + sqr( enemy->getPosition()->y - pos->y );
+			// and only one it can shoot: without this a Battlemaster "turned on" every Helix overhead,
+			// 410 times in two matches, and drove after aircraft its gun cannot reach
+			if( (nearestArmed == NULL || distSqr < nearestArmedDistSqr) &&
+					obj->getAbleToAttackSpecificObject( ATTACK_NEW_TARGET, enemy, CMD_FROM_AI ) == ATTACKRESULT_POSSIBLE )
+			{
+				nearestArmed = enemy;
+				nearestArmedDistSqr = distSqr;
+			}
+			// watched from as far out as the unit drives while it turns round, since a vehicle cannot
+			// reverse: a buggy that started its turn at the enemy's reach finished it inside
+			if( distSqr > sqr( reach + KITE_WATCH_MARGIN + ai->getCurLocomotorSpeed() * KITE_TURN_FRAMES ) )
+				continue;		// not close enough to hurt yet, nor soon
+			// running from something faster only means not shooting at it; a gun that cannot move is
+			// always worth standing off from
+			AIUpdateInterface *enemyAI = enemy->getAI();
+			const Bool enemyMoves = enemyAI && enemyAI->getCurLocomotor() && !enemy->isKindOf( KINDOF_IMMOBILE ) && !enemy->isKindOf( KINDOF_STRUCTURE );
+			const Real enemySpeed = enemyMoves ? enemyAI->getCurLocomotorSpeed() : 0.0f;
+			if( enemySpeed > ai->getCurLocomotorSpeed() )
+				continue;
+			// a gun that moves is worth stepping away from while it is fighting this player or already
+			// reaches this unit; one still out of reach and busy with somebody else is shot, not run from.
+			// Four tanks sent at one buggy of four drove through the other three.
+			const Object *enemyVictim = enemyAI ? enemyAI->getCurrentVictim() : NULL;
+			const Bool comingForUs = enemyVictim && enemyVictim->getControllingPlayer() == m_player;
+			if( enemyMoves && !comingForUs && distSqr > sqr( reach ) )
+				continue;
+			// a gun that walks is run from only by something that outranges it by a long way, a rocket
+			// launcher against a tank; a tank that hopped back from another tank's slightly shorter gun
+			// spent the hop turning round, and on Twilight Flame kiting like that lost more than it saved
+			if( enemyMoves && myRange < reach * KITE_MOBILE_RANGE_RATIO )
+				continue;
+			// and only from something worth running from: a tank that backs away from a rifleman it
+			// could have driven over was the commonest step the first version took
+			if( obj->getCrusherLevel() > enemy->getCrushableLevel() || aiCombatPower( enemy ) < KITE_WORTHY_SHARE * aiCombatPower( obj ) )
+				continue;
+			if( closing == NULL || distSqr < closingDistSqr )
+			{
+				closing = enemy;
+				closingRange = reach;
+				closingDistSqr = distSqr;
+			}
+		}
+	}
+	// fire, then step: a gun that is ready or aiming shoots first, and the hop happens while it reloads.
+	// Hopping on the clock alone had a Tomahawk step back every second and never finish a launch.
+	// Once the enemy's gun already reaches it, it steps whatever its own gun is doing: a Tomahawk that
+	// waited to finish aiming while four tanks drove up to it died aiming.
+	const Weapon *gun = obj->getCurrentWeapon();
+	// ... and only when what it is shooting at is in reach; a gun that is ready while it drives towards a
+	// target further off is not about to fire, and waiting on it let a buggy drive into the tanks
+	const Bool gunBusy = gun && (gun->getStatus() == READY_TO_FIRE || gun->getStatus() == PRE_ATTACK) && victim != NULL &&
+		sqr( victim->getPosition()->x - pos->x ) + sqr( victim->getPosition()->y - pos->y ) <= sqr( myRange );
+	const Bool alreadyHit = closing && closingDistSqr <= sqr( closingRange );
+	// Only what can aim without driving: infantry, or a gun on a turret.  A Rocket Buggy's rack is fixed
+	// to the chassis and a car cannot turn on the spot, so every hop cost it a three-second circle to
+	// face the tank again, and it fired less kiting than standing.
+	const Bool aimsWithoutDriving = obj->isKindOf( KINDOF_INFANTRY ) || ai->getWhichTurretForCurWeapon() != TURRET_INVALID;
+	Real standoff = 0.0f;
+	if( aimsWithoutDriving && closing && (alreadyHit || !gunBusy) && AIKite_standoffDistance( myRange, closingRange, KITE_MARGIN, &standoff ) &&
+			closingDistSqr < sqr( standoff - KITE_MARGIN ) )		// already standing off: a step would only slide it sideways
+	{
+		Coord3D spot;
+		if( pickTacticalSpot( obj, pos, closing->getPosition(), standoff, closing->getPosition(), myRange, &spot ) )
+		{
+			// back to shooting the gun it stepped away from, which the spot keeps in reach; going back to a
+			// target further off drove the buggies through the tanks in front of it to get there
+			step->target = closing->getID();
+			DEBUG_LOG(("AI TACTICS frame %d player %d kites '%s' back from '%s', %.0f outranging %.0f, (%.0f,%.0f) to (%.0f,%.0f) away from (%.0f,%.0f)\n",
+				now, m_player->getPlayerIndex(), obj->getTemplate()->getName().str(), closing->getTemplate()->getName().str(), myRange, closingRange,
+				pos->x, pos->y, spot.x, spot.y, closing->getPosition()->x, closing->getPosition()->y));
+			step->origin = *pos;
+			// long enough to turn round and drive there; a vehicle given one second did not finish the turn
+			step->lastKiteFrame = now;
+			const Real speed = max( ai->getCurLocomotorSpeed(), 0.1f );
+			const Real walk = sqrt( sqr( spot.x - pos->x ) + sqr( spot.y - pos->y ) );
+			step->resumeFrame = now + min<UnsignedInt>( KITE_STEP_MAX_FRAMES, KITE_TURN_FRAMES + REAL_TO_INT_CEIL( walk / speed ) );
+			step->rejoin = TRUE;
+			stepCalmly( obj, step, &spot );
+			return;
+		}
+	}
+
+	// A target out of reach is walked to, through whatever is in reach on the way.  Four buggies sent at
+	// the last of four tanks drove past the other three with their rockets loaded and died without one
+	// shot fired.  With an armed enemy already in reach, that is the one it shoots.
+	if( victim && nearestArmed && nearestArmed != victim &&
+			sqr( victim->getPosition()->x - pos->x ) + sqr( victim->getPosition()->y - pos->y ) > sqr( myRange ) )
+	{
+		DEBUG_LOG(("AI TACTICS frame %d player %d turns '%s' on the '%s' in reach instead of walking to its target\n", now,
+			m_player->getPlayerIndex(), obj->getTemplate()->getName().str(), nearestArmed->getTemplate()->getName().str()));
+		ai->aiAttackObject( nearestArmed, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+		return;
+	}
+
+	/* The high ground.  A climb is worth its walk only when it changes the exchange: the target can hit
+		 this unit where it stands, and from a rise nearby this unit reaches the target while the target no
+		 longer reaches it.  Climbing whenever a rise was near measured worse on Twilight Flame than not
+		 climbing at all - every walk mid-fight is time not shooting, and its ramps made the walk long. */
+	const Real victimRange = victim ? groundAttackRange( victim ) : 0.0f;
+	const Real victimReachHere = victimRange + (victim ? Weapon_elevationRangeBonus( victimRange, firingHeight( victim ) - pos->z ) : 0.0f);
+	const Bool victimHitsMe = victim && victimRange > 0.0f &&
+		sqr( victim->getPosition()->x - pos->x ) + sqr( victim->getPosition()->y - pos->y ) <= sqr( victimReachHere );
+	if( victimHitsMe && !ai->isMoving() && now >= step->nextClimbFrame )
+	{
+		step->nextClimbFrame = now + CLIMB_INTERVAL_FRAMES;
+		const Int DIRECTIONS = 8;
+		Coord3D best;
+		Bool found = FALSE;
+		Real bestZ = pos->z + CLIMB_MIN_GAIN;
+		for( Int ring = 1; ring <= 2; ++ring )
+		{
+			const Real radius = CLIMB_SEARCH_RADIUS * ring / 2.0f;
+			for( Int d = 0; d < DIRECTIONS; ++d )
+			{
+				const Real angle = 2.0f * PI * d / DIRECTIONS;
+				Coord3D at;
+				at.x = pos->x + radius * Cos( angle );
+				at.y = pos->y + radius * Sin( angle );
+				at.z = TheTerrainLogic->getGroundHeight( at.x, at.y );
+				if( at.z < bestZ )
+					continue;
+				ICoord2D cell;
+				TheAI->pathfinder()->worldToCell( &at, &cell );
+				const PathfindCell *pathCell = TheAI->pathfinder()->getCell( LAYER_GROUND, cell.x, cell.y );
+				if( pathCell == NULL || pathCell->getType() != PathfindCell::CELL_CLEAR )
+					continue;
+				const Coord3D *vpos = victim->getPosition();
+				const Real reachFromThere = myRange + Weapon_elevationRangeBonus( myRange, at.z - vpos->z );
+				const Real victimReachThere = victimRange + Weapon_elevationRangeBonus( victimRange, firingHeight( victim ) - at.z );
+				const Real distSqr = sqr( at.x - vpos->x ) + sqr( at.y - vpos->y );
+				if( distSqr > sqr( reachFromThere ) || distSqr <= sqr( victimReachThere + KITE_MARGIN ) )
+					continue;		// out of its own reach, or still inside the target's
+				if( m_influence.enemyAt( at.x, at.y ) > threatHere || !groundLineClear( pos, &at ) )
+					continue;
+				best = at;
+				bestZ = at.z;
+				found = TRUE;
+			}
+		}
+		if( found )
+		{
+			DEBUG_LOG(("AI TACTICS frame %d player %d takes '%s' %.0f up onto (%.0f,%.0f)\n", now, m_player->getPlayerIndex(),
+				obj->getTemplate()->getName().str(), best.z - pos->z, best.x, best.y));
+			step->target = victim->getID();
+			step->origin = *pos;
+			step->resumeFrame = now + TACTICAL_STEP_MAX_FRAMES;
+			step->rejoin = TRUE;
+			stepCalmly( obj, step, &best );
 		}
 	}
 }
@@ -6721,9 +7544,32 @@ void AIPlayer::doCapture( void )
 		return;
 	}
 
+	// the ride out: a capturer sitting in its helicopter is flown to the building and put down beside it
+	if( capturer->isContained() )
+	{
+		Object *ship = capturer->getContainedBy();
+		if( ship && ship->getID() == m_ferryID && ship->getAI() && ship->getAI()->isIdle() && target )
+		{
+			Coord3D drop = *target->getPosition();
+			const Real dx = ship->getPosition()->x - drop.x;
+			const Real dy = ship->getPosition()->y - drop.y;
+			const Real length = sqrt( dx * dx + dy * dy );
+			if( length > FERRY_DROP_STANDOFF )
+			{
+				drop.x += dx / length * FERRY_DROP_STANDOFF;
+				drop.y += dy / length * FERRY_DROP_STANDOFF;
+			}
+			drop.z = TheTerrainLogic->getGroundHeight( drop.x, drop.y );
+			DEBUG_LOG(("AI player %d flies its capturer to a '%s'\n", m_player->getPlayerIndex(), target->getTemplate()->getName().str()));
+			ship->getAI()->aiMoveToAndEvacuate( &drop, CMD_FROM_AI );
+		}
+		return;
+	}
+
 	AIUpdateInterface *ai = capturer->getAI();
 	if( ai == NULL || !ai->isIdle() )
-		return;			// still on its way
+		return;			// still on its way, to the building or to its seat
+	m_ferryID = INVALID_ID;		// standing and out, so the helicopter is free for the waves again
 
 	//
 	// A capture in progress reads as idle - the ability parks the unit's AI while it works - so
@@ -6758,7 +7604,41 @@ void AIPlayer::doCapture( void )
 	}
 	else
 	{
-		ai->aiMoveToObject( target, CMD_FROM_AI );
+		// a long walk goes by air when a helicopter with a seat is waiting at home: the rifleman who
+		// walked across the map to a derrick was the capture a player saw take minutes
+		Object *ship = NULL;
+		const Real walkSqr = sqr( target->getPosition()->x - from.x ) + sqr( target->getPosition()->y - from.y );
+		if( walkSqr > sqr( FERRY_MIN_WALK ) && !measuringWithoutTactics() )
+		{
+			GunshipList list;
+			list.home = m_baseCenter;
+			list.reachSqr = sqr( 2.0f * m_baseRadius );
+			list.ferry = INVALID_ID;
+			m_player->iterateObjects( findGunshipAtHome, &list );
+			Real nearestSqr = 0.0f;
+			for( size_t g = 0; g < list.gunships.size(); ++g )
+			{
+				Object *candidate = list.gunships[ g ];
+				if( candidate->getAI() == NULL || !candidate->getAI()->isIdle() ||
+						!candidate->getContain()->isValidContainerFor( capturer, TRUE ) )
+					continue;
+				const Real distSqr = sqr( candidate->getPosition()->x - from.x ) + sqr( candidate->getPosition()->y - from.y );
+				if( ship == NULL || distSqr < nearestSqr )
+				{
+					ship = candidate;
+					nearestSqr = distSqr;
+				}
+			}
+		}
+		if( ship )
+		{
+			DEBUG_LOG(("AI player %d boards its capturer onto '%s' %d for a '%s'\n", m_player->getPlayerIndex(),
+				ship->getTemplate()->getName().str(), ship->getID(), target->getTemplate()->getName().str()));
+			m_ferryID = ship->getID();
+			ai->aiEnter( ship, CMD_FROM_AI );
+		}
+		else
+			ai->aiMoveToObject( target, CMD_FROM_AI );
 	}
 }
 
@@ -7356,7 +8236,7 @@ void AIPlayer::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 8;		// 2: scout  3: rung and role  4: scouting stamps  5: the capturer  6: parked waves  7: superweapon aims  8: the hijacker
+	XferVersion currentVersion = 10;		// 2: scout  3: rung and role  4: scouting stamps  5: the capturer  6: parked waves  7: superweapon aims  8: the hijacker  9: tactical steps  10: the ferry and dropped riders
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -7570,6 +8450,43 @@ void AIPlayer::xfer( Xfer *xfer )
 			xfer->xferUnsignedInt( &m_strikeFrame[ strike ] );
 		}
 		xfer->xferInt( &m_strikeNext );
+	}
+	// the units part way through a tactical step, above all the mood each was calmed from: a game saved
+	// in the middle of a kite would otherwise load a unit that stays calm for the rest of the match.  And
+	// the influence map as it stands, since the next rebuild can be most of a second off and the lanes,
+	// the retreat and the steps all read it before then.
+	if( version >= 9 )
+	{
+		m_influence.xfer( xfer );
+		UnsignedShort rows = (UnsignedShort)m_tactics.size();
+		xfer->xferUnsignedShort( &rows );
+		if( xfer->getXferMode() == XFER_LOAD )
+			m_tactics.resize( rows );
+		for( UnsignedShort i = 0; i < rows; ++i )
+		{
+			TacticalStep &step = m_tactics[ i ];
+			xfer->xferObjectID( &step.unit );
+			xfer->xferObjectID( &step.target );
+			xfer->xferCoord3D( &step.origin );
+			xfer->xferUnsignedInt( &step.resumeFrame );
+			xfer->xferUnsignedInt( &step.nextClimbFrame );
+			xfer->xferUnsignedInt( &step.leaveAloneUntil );
+			xfer->xferUnsignedInt( &step.lastSeenFrame );
+			xfer->xferBool( &step.rejoin );
+			xfer->xferInt( &step.savedAttitude );
+			xfer->xferUnsignedInt( &step.lastKiteFrame );
+		}
+	}
+	// the capturer's helicopter, and the riders a helicopter is putting down at a fight
+	if( version >= 10 )
+	{
+		xfer->xferObjectID( &m_ferryID );
+		UnsignedShort dropped = (UnsignedShort)m_droppedRiders.size();
+		xfer->xferUnsignedShort( &dropped );
+		if( xfer->getXferMode() == XFER_LOAD )
+			m_droppedRiders.resize( dropped );
+		for( UnsignedShort i = 0; i < dropped; ++i )
+			xfer->xferObjectID( &m_droppedRiders[ i ] );
 	}
 
 	// the ladder rung and the role, which are rolled once and must come back the same way

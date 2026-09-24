@@ -317,14 +317,10 @@ W3DGhostObject::W3DGhostObject()
 // ------------------------------------------------------------------------------------------------
 W3DGhostObject::~W3DGhostObject()
 {
-#ifdef DEBUG_FOG_MEMORY
 	for (Int i=0; i<MAX_PLAYER_COUNT; i++)
 	{
 		DEBUG_ASSERTCRASH(m_parentSnapshots[i] == NULL, ("Delete of non-empty GhostObject"));
 	}
-#else
-	DEBUG_ASSERTCRASH(m_parentSnapshots[TheGhostObjectManager->getLocalPlayerIndex()] == NULL, ("Delete of non-empty GhostObject"));
-#endif
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -334,10 +330,10 @@ Should only be called when object enters the fogged state.*/
 // ------------------------------------------------------------------------------------------------
 void W3DGhostObject::snapShot(int playerIndex)
 {
-#ifndef DEBUG_FOG_MEMORY
-	if (playerIndex != TheGhostObjectManager->getLocalPlayerIndex())
-		return;	//we only snapshot things for the initial local player because local player can't change in non-debug game.
-#endif
+	//every player's memory is kept only where the fog can be handed to somebody else, an observer's
+	//machine; without it a building the new viewer saw lost its snapshot and left its shadow behind
+	if (playerIndex != TheGhostObjectManager->getLocalPlayerIndex() && !TheGhostObjectManager->trackAllPlayers())
+		return;
 
 	Drawable *draw=m_parentObject->getDrawable();
 	if (draw->isDrawableEffectivelyHidden())
@@ -448,6 +444,11 @@ void W3DGhostObject::restoreParentObject(void)
 	//Notify drawable that it's okay to render its render objects again.
 	draw->setFullyObscuredByShroud(false);
 
+	// a headless run keeps every player's snapshots for an observer too, and has no scene to put
+	// the object back into - see W3DRenderObjectSnapshot::addToScene
+	if (W3DDisplay::m_3DScene == NULL)
+		return;
+
 	//walk through all W3D render objects used by this object
 	for (DrawModule ** dm = draw->getDrawModules(); *dm; ++dm)
 	{
@@ -476,31 +477,8 @@ void W3DGhostObject::restoreParentObject(void)
 // ------------------------------------------------------------------------------------------------
 void W3DGhostObject::freeAllSnapShots(void)
 {
-	Int playerIndex;
-
-#ifdef DEBUG_FOG_MEMORY
-	for (playerIndex=0; playerIndex<MAX_PLAYER_COUNT; playerIndex++)
-#else
-	playerIndex = TheGhostObjectManager->getLocalPlayerIndex();
-#endif
-		if (m_parentSnapshots[playerIndex])
-		{	//if we have a snapshot for this object, remove it from
-			//scene.
-			removeFromScene(playerIndex);
-
-			//Restore actual objects assuming they are still alive.
-			if (m_parentObject)
-				restoreParentObject();
-
-			W3DRenderObjectSnapshot *snap=m_parentSnapshots[playerIndex];
-			W3DRenderObjectSnapshot *nextSnap;
-			while (snap)
-			{	nextSnap = snap->m_next;
-				delete snap;
-				snap = nextSnap;
-			}
-			m_parentSnapshots[playerIndex]=NULL;
-		}
+	for (Int playerIndex=0; playerIndex<MAX_PLAYER_COUNT; playerIndex++)
+		freeSnapShot(playerIndex);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -508,11 +486,6 @@ void W3DGhostObject::freeAllSnapShots(void)
 // ------------------------------------------------------------------------------------------------
 void W3DGhostObject::freeSnapShot(int playerIndex)
 {
-#ifndef DEBUG_FOG_MEMORY
-	if (playerIndex != TheGhostObjectManager->getLocalPlayerIndex())
-		return;	//we only snapshot things for the local player
-#endif
-
 	if (m_parentSnapshots[playerIndex])
 	{	//if we have a snapshot for this object, remove it from
 		//scene and put back the original object if it still exists.
@@ -1059,15 +1032,13 @@ void W3DGhostObjectManager::updateOrphanedObjects(int *playerIndexList, int numN
 		if (!mod->m_parentObject)
 		{	
 			numStoredSnapshots=0;
-#ifdef DEBUG_FOG_MEMORY
-			for (int i=0; i<numNonLocalPlayers; i++, playerIndexList++)
+			for (int i=0; i<numNonLocalPlayers; i++)
 			{
-				if (mod->m_parentSnapshots[*playerIndexList])
-					mod->getShroudStatus(*playerIndexList);
-				if (mod->m_parentSnapshots[*playerIndexList])
+				if (mod->m_parentSnapshots[playerIndexList[i]])
+					mod->getShroudStatus(playerIndexList[i]);
+				if (mod->m_parentSnapshots[playerIndexList[i]])
 					numStoredSnapshots++;
 			}
-#endif
 			mod->getShroudStatus(m_localPlayer);
 			if (mod->m_parentSnapshots[m_localPlayer])
 					numStoredSnapshots++;

@@ -3302,11 +3302,8 @@ Int Object::getConstructionSecondsRemaining() const
 		rate = 100.0f / INT_TO_REAL( max( 1, framesToBuild ) );
 	}
 	Real left = max( 0.0f, 100.0f - m_constructionPercent );
-	// real seconds: the logic runs at the game-speed rate, not at a fixed 30 frames a second
-	Int logicFps = TheGameEngine ? TheGameEngine->getFramesPerSecondLimit() : 0;
-	if( logicFps <= 0 )
-		logicFps = LOGICFRAMES_PER_SECOND;
-	return REAL_TO_INT_CEIL( left / rate / logicFps );
+	// for the screen only: the rate it divides by is measured on the wall clock
+	return ControlBar_secondsFromFrames( left / rate );
 }
 
 //-------------------------------------------------------------------------------------------------

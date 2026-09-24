@@ -51,6 +51,7 @@ public:
 	virtual void snapShot(int playerIndex);
 	virtual void updateParentObject(Object *object, PartitionData *mod);
 	virtual void freeSnapShot(int playerIndex);
+	virtual Bool hasSnapShot(int playerIndex) const { return m_parentSnapshots[playerIndex] != NULL; }
 protected:
 	virtual void crc( Xfer *xfer);
 	virtual void xfer( Xfer *xfer );

@@ -34,6 +34,7 @@
 #define _IN_GAME_UI_H_
 
 #include "Common/GameCommon.h"
+#include "Common/GameEngine.h"		// for RateReading
 #include "Common/GameType.h"
 #include "Common/MessageStream.h"		// for GameMessageTranslator
 #include "Common/KindOf.h"
@@ -43,6 +44,11 @@
 #include "Common/SubsystemInterface.h"
 #include "Common/UnicodeString.h"
 #include "GameClient/DisplayString.h"
+#include "GameClient/HtmlTemplate.h"
+
+#include <set>
+
+class HtmlOverlay;
 #include "GameClient/Mouse.h"
 #include "GameClient/RadiusDecal.h"
 #include "GameClient/View.h"
@@ -68,6 +74,18 @@ enum LegalBuildCode;
 enum KindOfType;
 enum ShadowType;
 enum CanAttackResult;
+enum ScienceType;
+
+/** The smoke signals a player drops for their allies, carried as the integer argument of
+  * MSG_PLACE_SIGNAL.  The value arrives from another machine, so the receiving side range-checks
+  * it against SIGNAL_KIND_COUNT. */
+enum SignalKind
+{
+	SIGNAL_ATTACK,
+	SIGNAL_DEFEND,
+	SIGNAL_ATTENTION,
+	SIGNAL_KIND_COUNT
+};
 
 // ------------------------------------------------------------------------------------------------
 enum RadiusCursorType
@@ -279,7 +297,6 @@ public:
 	Coord3D					m_pos3D;													///< the 3d position in game coords
 	Int							m_frameTimeOut;												///< when we want this thing to disappear
 	Int							m_frameCount;													///< how many frames have we been displaying text?
-	Bool						m_isSignalWord;													///< a smoke signal's word: stays on its spot, outlined, drawn over fogged ground too (fork)
 };
 
 typedef std::list<FloatingTextData *> FloatingTextList;
@@ -321,7 +338,14 @@ public:
 typedef std::list< WorldAnimationData *> WorldAnimationList;
 typedef WorldAnimationList::iterator WorldAnimationListIterator;
 
-
+/** One superweapon countdown as the spectator page lists it: whose, and how long it still has. */
+struct SpectatorSuperweapon
+{
+	Int playerIndex;
+	const Image *cameo;
+	Int seconds;
+	Bool ready;
+};
 
 // ------------------------------------------------------------------------------------------------
 /** Basic functionality common to all in-game user interfaces */
@@ -383,14 +407,47 @@ public:  // ********************************************************************
 
 	// interface for messages to the user
 	// srj sez: passing as const-ref screws up varargs for some reason. dunno why. just pass by value.
-	virtual void messageColor( const RGBColor *rgbColor, UnicodeString format, ... );	///< display a colored message to the user
 	virtual void message( UnicodeString format, ... );				  ///< display a message to the user
 	virtual void message( AsciiString stringManagerLabel, ... );///< display a message to the user
+	void playerMessage( Player *player, const UnicodeString &text );	///< a message about that player, his flag at its head
+	void chatMessage( Player *player, const UnicodeString &text );		///< a line of chat, under the middle of the screen
+	/** The feed's lines for what a player did: a special power fired, a superweapon or advanced tech
+		* building started or `finished`, a promotion bought.  Each decides who is told. */
+	void feedSpecialPower( const Object *source, const AsciiString &powerName, const SpecialPowerTemplate *power );
+	void feedStructure( Object *structure, Bool finished );
+	void feedScience( Player *player, ScienceType science );
 	virtual void toggleMessages( void ) { m_messagesOn = 1 - m_messagesOn; }	///< toggle messages on/off
-	void toggleScoreboard( void ) { m_scoreboardOpen = !m_scoreboardOpen; }	///< the Tab scoreboard, on or off
+	void openScoreboard( void ) { m_scoreboardOpen = TRUE; }		///< the Tab scoreboard, up while Tab is held
+	void closeScoreboard( void ) { m_scoreboardOpen = FALSE; }
+	Bool pickSpectatorStat( Int commandSlot );	///< a command bar key while watching: TRUE when it picked a stat
+	/** The command bar's page, Window/Html/ControlBar.html, under the bar's windows: its panels are
+		* where the plates would have gone, in screen pixels.  FALSE when there is no page to draw. */
+	Bool drawControlBarPage( const IRegion2D *panels, const Bool *shown, Int panelCount );
+	/** A click that reached the world, on one of that page's own buttons: TRUE when it was one, and
+		* when `act` is set the button it names is pressed. */
+	Bool handleControlBarPageClick( const ICoord2D *mouse, Bool act );
+	/** The general's promotion screen, Window/Html/Promotion.html, drawn as `parent`'s picture: the
+		* screen's windows keep their clicks and the promotions' own cameos paint over it. */
+	void drawPromotionPage( GameWindow *parent, Bool front );
+	/** The Esc menu hands its look to Window/Html/QuitMenu.html: `parent` draws the page and its keys
+		* draw nothing and keep their clicks.  Left as it is when there is no page. */
+	void themeQuitMenu( GameWindow *parent );
+	void drawQuitMenuPage( GameWindow *parent );
+	/** The command bar's grids of buttons whose cells the page frames in front of the buttons. */
+	enum CellGrid { CELL_GRID_COMMAND, CELL_GRID_QUEUE, CELL_GRID_POWERS, CELL_GRID_COUNT };
+	/** The steel frames over one grid's buttons, from Window/Html/ControlBar.html, drawn after them. */
+	void drawCellGridFront( Int grid );
 	void drawScoreboard( void );																						///< that scoreboard, over everything
+	void sampleEarnings( void );																						///< every player's money earned, once a game second
+	Int earnedPerSecond( Int playerIndex ) const;														///< what that player earned a second over the readings held
+	/** Window/Html/Tooltip.html is there to draw with, in a match. */
+	Bool isTooltipPageReady( void );
+	/** The tooltip page: the command bar's build tooltip over the hovered button while one is up,
+		* otherwise `cursorText` beside the pointer, edged in `accent` when it has one.  FALSE when the
+		* page is not ready, and the caller draws the old way. */
+	Bool drawTooltipPage( const UnicodeString &cursorText, const RGBColor *accent );
 	virtual Bool isMessagesOn( void ) { return m_messagesOn; }	///< are the display messages on
-	void freeMessageResources( void );				///< free resources for the ui messages
+	void freeMessageResources( void );				///< empty the event feed
 	Color getMessageColor(Bool altColor) { return (altColor)?m_messageColor2:m_messageColor1; }
 	
 	// interface for military style messages
@@ -688,6 +745,8 @@ public:  // ********************************************************************
 	virtual void selectDrawable( Drawable *draw );					///< Mark given Drawable as "selected"
 	virtual void deselectDrawable( Drawable *draw );				///< Clear "selected" status from Drawable
 	virtual void deselectAllDrawables( void );							///< Clear the "select" flag from all drawables
+	void holdSelectionThroughTunnel( Drawable *draw );			///< a selected unit going down a tunnel on its own is selected again when it comes up
+	void restoreSelectionAfterTunnel( Drawable *draw );			///< reselect a unit held by holdSelectionThroughTunnel
 	virtual Int getSelectCount( void ) { return m_selectCount; }		///< Get count of currently selected drawables
 	virtual Int getMaxSelectCount( void ) { return m_maxSelectCount; }	///< Get the max number of selected drawables
 	virtual UnsignedInt getFrameSelectionChanged( void ) { return m_frameSelectionChanged; }	///< Get the max number of selected drawables
@@ -718,22 +777,6 @@ public:  // ********************************************************************
 	//
 	enum { PRODUCTION_STRIP_ROW_MAX = 5 };	///< cameos one column will draw, stacked upward; whatever
 																					///  is left over closes it as a sixth cell wearing a "+N"
-	enum { PRODUCTION_STRIP_WATCH_MAX = 3 };	///< and while watching, where eight columns share the
-																					///  screen and a column is a whole player: three cameos and
-																					///  a "+N", since a run of the same unit is one of them now
-	enum { PRODUCTION_STRIP_ROWS = 8 };			///< playing: one column, the whole base's.
-																					///  watching: one column per player, so eight of them
-
-	//
-	// Playing, everything the base has coming is one column: what a factory is turning out and what
-	// a dozer is raising stand in the same run of cells, soonest first, because the question is when
-	// the next thing lands and not which of the two kinds it is.  The building you have selected does
-	// not get a column of its own either - its items lead this one.
-	//
-	enum
-	{
-		PRODUCTION_ROW_QUEUE		= 0		///< queues and building sites together
-	};
 
 	//
 	// A queue slot is one slot of the general's power bar down in the corner, measurement for
@@ -779,6 +822,7 @@ public:  // ********************************************************************
 
 	/// a click landed on the strip: jump to that producer, or cancel the item when 'cancel' is set
 	Bool handleProductionStripClick( const ICoord2D *mouse, Bool cancel );
+	void foldSpectatorDropDowns( const ICoord2D &mouse );		///< a press off the spectator's page closes its drop-downs
 
 	//
 	// One superweapon countdown of the top right strip. The list is rebuilt every frame out of
@@ -852,8 +896,14 @@ public:  // ********************************************************************
 	// Floating Test Methods
 	/// the text it added, for a caller that wants to hold it longer; NULL while icons are not drawn
 	virtual FloatingTextData *addFloatingText(const UnicodeString& text,const Coord3D * pos, Color color);
-	/// a smoke signal's word, written on the smoke for holdFrames and then faded like any floating text
-	void addSignalWord( const UnicodeString& text, const Coord3D *pos, Color color, UnsignedInt holdFrames );
+	/// a smoke signal's mark laid on the ground in the sender's colour, there until its smoke is gone
+	void addSignalMark( SignalKind kind, const Coord3D &pos, Color color, ParticleSystemID smoke );
+	/// a signal button pressed: the next left click on the ground or the radar drops that signal there
+	void armSignal( SignalKind kind ) { m_armedSignal = kind; }
+	void disarmSignal( void ) { m_armedSignal = SIGNAL_KIND_COUNT; }
+	Bool isSignalArmed( void ) const { return m_armedSignal != SIGNAL_KIND_COUNT; }
+	/// sends the armed signal to `world` and disarms; FALSE, doing nothing, when none is armed
+	Bool placeArmedSignal( const Coord3D &world );
 
 	// Drawable caption stuff
 	AsciiString	getDrawableCaptionFontName( void )	{ return m_drawableCaptionFont; }
@@ -975,15 +1025,6 @@ protected:
 		MOUSEMODE_MAX
 	};
 
-	struct UIMessage
-	{
-		UnicodeString fullText;									///< the whole text message
-		DisplayString *displayString;						///< display string used to render the message
-		UnsignedInt timestamp;									///< logic frame message was created on
-		Color color;														///< color to render this in
-	};
-	enum { MAX_UI_MESSAGES = 6 };
-
 	struct MilitarySubtitleData
 	{
 		UnicodeString subtitle;										///< The complete subtitle to be drawn, each line is separated by L"\n"
@@ -1021,8 +1062,7 @@ protected:
 	void setMouseCursor(Mouse::MouseCursor c);
 
 	
-	void addMessageText( const UnicodeString& formattedMessage, const RGBColor *rgbColor = NULL );  ///< internal workhorse for adding plain text for messages
-	void removeMessageAtIndex( Int i );				///< remove the message at index i
+	void addMessageText( const UnicodeString& formattedMessage );  ///< a plain message, a line of the event feed
 
 	void updateFloatingText( void );						///< Update function to move our floating text
 	void drawFloatingText( void );							///< Draw all our floating text
@@ -1041,6 +1081,10 @@ public:
 	/** The patch of an ally's own colour lying under their cursor.  On the ground so that it reads
 		* as light falling on the map rather than as a disc floating over it. */
 	virtual void drawAllyCursorLights( void ) { }
+
+	/// what a data-click on the spectator's page does, by its text: a click on the page, or the
+	/// control socket's "spectator" verb, which a script uses instead of finding the pixel
+	void runSpectatorAction( const std::string &action );
 protected:
 
 	void clearWorldAnimations( void );					///< delete all world animations
@@ -1063,6 +1107,7 @@ protected:
 	AsciiString									m_currentlyPlayingMovie;											///< Used to push updates to TheScriptEngine
 	DrawableList								m_selectedDrawables;													///< A list of all selected drawables.
 	DrawableList								m_selectedLocalDrawables;											///< A list of all selected drawables owned by the local player
+	std::vector<ObjectID>				m_tunnelTripRiders;														///< selected units inside the tunnel network on a move order, selected again when they come out
 	Bool												m_isDragSelecting;														///< If TRUE, an area selection is in progress
 	IRegion2D										m_dragSelectRegion;														///< if isDragSelecting is TRUE, this contains select region
 	Bool												m_isFormationDragging;												///< TRUE while a formation line is being drawn (fork)
@@ -1147,10 +1192,6 @@ protected:
 	VideoBuffer*								m_cameoVideoBuffer;///< video playback buffer
 	VideoStreamInterface*				m_cameoVideoStream;///< Video stream;
 
-	// message data
-	UIMessage										m_uiMessages[ MAX_UI_MESSAGES ];/**< messages to display to the user, the
-																						array is organized with newer messages at
-																						index 0, and increasing to older ones */
 	// superweapon timer data
 	SuperweaponMap							m_superweapons[MAX_PLAYER_COUNT];
 	enum { HUD_OVERLAY_POINT_SIZE = 9 };	///< small: this sits over the battlefield, not in a panel
@@ -1167,9 +1208,9 @@ protected:
 	void drawPeaceCountdown( UnsignedInt framesLeft );	///< the last seconds of it, one big digit in the middle of the screen
 	void drawHudOverlay( void );					///< the small elapsed-time / fps plate (ShowHudOverlay)
 	void drawProductionStrip( void );			///< the production queue rows above the control bar
-	///< one run of cells - a column while playing, a player's row while watching - with its left
-	///< edge at 'left' and its first cell's top edge at 'bottomY'
-	void drawProductionStripColumn( Int row, Int left, Int bottomY );
+	///< the run of cells, a column, with its left edge at 'left' and its first cell's top edge at 'bottomY'
+	void drawProductionStripColumn( Int left, Int bottomY );
+	void drawQueueTray( void );		///< the playing strip as a row in Window/Html/Queue.html's tray
 	const Image *productionStripTray( void );	///< the bar's tray, mirrored, kept until the bar changes side
 	void stripTrayMetrics( ICoord2D *tray, ICoord2D *cameo, ICoord2D *hole, Int *step );	///< that tray's size, its cameo hole, and the column step
 	void drawStripSeconds( Int which, Int x, Int y, Int w, Int h, Int seconds );	///< countdown written inside a cameo
@@ -1179,30 +1220,108 @@ protected:
 	void drawSkillStrip( void );					///< the watched player's bought promotions, under those
 
 	//
-	// The scoreboard on Tab: every seat in the match, your side in full rows and the other side as
-	// name chips.  Drawn over everything, like the clock plate, from a pool of strings that are
-	// handed out in the same order every frame so each keeps its font and its text texture.
+	// The scoreboard on Tab, Window/Html/Scoreboard.html: every seat in the match, your side in full
+	// and the other side as name and team only; watching, every seat in full.  Drawn over everything.
 	//
-	enum { SCOREBOARD_STRING_COUNT = 160 };
-	DisplayString *scoreboardString( GameFont *font, const UnicodeString &text, Int wrapWidth = 0 );
-	void drawScoreboardRow( Player *player, const GameSlot *slot, Bool withTeam, GameFont *bodyFont, GameFont *smallFont,
-													Int left, Int top, Int rowHeight );
 	Bool												m_scoreboardOpen;
-	Int													m_scoreboardStringsUsed;	///< handed out so far this frame
-	DisplayString *							m_scoreboardStrings[ SCOREBOARD_STRING_COUNT ];
+	HtmlOverlay *								m_scoreboardOverlay;
+	Bool												m_scoreboardPageLoaded;		///< read once a match, like the spectator's page
+	std::string									m_scoreboardPage;
+	// The last half minute of every player's money earned, one reading a game second, oldest first, so
+	// a seat can say what it earns now beside its average over the match.  The reading's own second
+	// goes with it: a pass that runs several logic frames at once skips seconds.
+	struct EarnedReading
+	{
+		UnsignedInt second;
+		Int earned[ MAX_PLAYER_COUNT ];
+	};
+	enum
+	{
+		EARNINGS_WINDOW_SECONDS = 30,											///< what the per second figure is measured over
+		EARNINGS_READINGS = EARNINGS_WINDOW_SECONDS + 1		///< a reading at each end of that window and every second between
+	};
+	EarnedReading								m_earnedReadings[ EARNINGS_READINGS ];
+	Int													m_earnedReadingCount;		///< how many of those hold a reading
+	HtmlOverlay *								m_controlBarOverlay;
+	Bool												m_controlBarPageLoaded;
+	Bool												m_controlBarPageShown;		///< drawn this frame, so its buttons can be clicked
+	std::string									m_controlBarPage;
+	HtmlOverlay *								m_tooltipOverlay;
+	Bool												m_tooltipPageLoaded;
+	std::string									m_tooltipPage;
+	ICoord2D										m_tooltipSize;						///< the box as last laid out, in screen pixels, to place the next one by
+	HtmlOverlay *								m_promotionOverlay;
+	HtmlOverlay *								m_promotionFrontOverlay;		///< the grid's frames, drawn over the promotions
+	HtmlOverlay *								m_cellFrontOverlay[ CELL_GRID_COUNT ];
+	std::vector< HtmlValues >		m_cellFrontCells[ CELL_GRID_COUNT ];	///< each grid's cells as the bar's page last placed them
+	Bool												m_promotionPageLoaded;
+	std::string									m_promotionPage;
+	HtmlOverlay *								m_quitMenuOverlay;
+	std::vector< HtmlOverlay * >	m_quitMenuKeyOverlays;	///< one for each of the menu's keys, each fading in on its own
+	Bool												m_quitMenuPageLoaded;
+	std::string									m_quitMenuPage;
+	Int													m_quitMenuShownMs;			///< how far the menu's coming up has run, -1 until its first picture
+	UnsignedInt									m_quitMenuDrawnAt;			///< the wall clock at its last picture: the game is paused under it
+	Bool												m_signalsWereShown;				///< the smoke signal column was up last frame
+	UnsignedInt									m_signalsRiseStartMs;			///< when it last came up, the start of its buttons' rise
 
 	//
-	// The drop-down in the top left corner that switches the strips on and off.  Row 0 is its header,
-	// the rest are one check box each.
+	// The spectator's page over the battlefield, Window/Html/Spectator.html: the drop-down that
+	// switches the strips on and off, every player ranked by a chosen number, the net worth lead
+	// over time and what each army is made of.  Only while watching.
 	//
-	enum { HUD_TOGGLE_ROWS = 4 };
-	void drawHudToggles( void );
-	Bool handleHudTogglesClick( const ICoord2D *mouse, Bool act );	///< TRUE when the click landed on it
-	Bool												m_hudTogglesOpen;
-	Int													m_hudToggleRowsShown;		///< rows drawn this frame, header included
-	Int													m_hudTogglesBottom;			///< its bottom edge, so the message list starts under it
-	IRegion2D										m_hudToggleRects[ HUD_TOGGLE_ROWS ];
-	DisplayString *							m_hudToggleStrings[ HUD_TOGGLE_ROWS ];
+	void drawSpectatorPage( void );
+	Bool handleSpectatorPageClick( const ICoord2D *mouse, Bool act );	///< TRUE when the click landed on it
+	HtmlOverlay *								m_spectatorOverlay;
+	Bool												m_spectatorPageLoaded;		///< read once a match, so an edited page shows in the next one
+	Bool												m_spectatorPageShown;			///< drawn this frame, so clicks are its to take
+	std::string									m_spectatorPage;					///< the page as written, before its {{values}} are filled
+	std::set< std::string >			m_spectatorFlipped;				///< names a data-click="flip:name" has flipped
+	std::map< std::string, std::string > m_spectatorPicked;	///< group to choice, from data-click="pick:group:choice"
+	HtmlLists										m_spectatorLists;
+	HtmlValues									m_spectatorTotals;				///< the page's values that are not per player, gathered with the lists
+	UnsignedInt									m_spectatorListsFrame;		///< the logic frame the lists were last gathered on
+	const Player								*m_spectatorListsWatched;	///< the player being watched when they were, whose seat they mark
+
+	std::vector< SpectatorSuperweapon > m_spectatorSuperweapons;	///< every countdown the superweapon pass found, rebuilt each pass
+
+	//
+	// The event feed over the radar, Window/Html/Feed.html: every message, a superweapon ready or
+	// fired, a player beaten or gone, the newest at the bottom.  A player's and a watcher's alike.
+	//
+	struct FeedLine
+	{
+		HtmlValues values;
+		UnsignedInt until;					///< the logic frame it leaves on
+	};
+	std::vector< FeedLine >			m_feedLines;
+	SignalKind									m_armedSignal;						///< the signal the next click drops; SIGNAL_KIND_COUNT for none
+	struct SignalMark
+	{
+		Shadow *decal;
+		ParticleSystemID smoke;			///< the signal's smoke, which the mark lasts exactly as long as
+	};
+	std::vector< SignalMark >		m_signalMarks;
+	void updateSignalMarks( void );
+	void clearSignalMarks( void );
+	void addFeedLine( HtmlValues line );
+	void feedAct( Player *player, const Image *cameo, const std::string &what, const char *tag, const char *label );
+	void watchDozers( void );
+	void drawFeed( void );
+	Int feedFloor( void ) const;
+	UnsignedInt									m_dozerCheckFrame;				///< the logic frame watchDozers last looked on
+	Bool												m_hadDozer[ MAX_PLAYER_COUNT ];	///< that player had a dozer or worker then
+	// the chat over the feed, Window/Html/Chat.html, the same lines kept a while
+	std::vector< FeedLine >			m_chatLines;
+	void drawChat( void );
+	HtmlOverlay *								m_chatOverlay;
+	Bool												m_chatPageLoaded;
+	std::string									m_chatPage;
+	HtmlOverlay *								m_feedOverlay;
+	Bool												m_feedPageLoaded;
+	std::string									m_feedPage;
+	Int													m_feedFloor;							///< the radar's tab top on screen, from the bar's page
+	Int													m_queueTrayTop;						///< the queue row's top on screen, while it is drawn
 
 	Bool												m_placementRangeRingUp;	///< the structure on the cursor is armed, so its reach is drawn
 	Real												m_placementRingRadius;	///< how far from its centre it hits
@@ -1210,6 +1329,7 @@ protected:
 	void drawBlindSpots( void );					///< shade the ground a placed or selected defence cannot shoot into
 
 	DisplayString *							m_hudDisplayString;			///< the ShowHudOverlay line (fps / clock)
+	HtmlValues									m_hudValues;						///< that line's readings one by one, for the command bar page's network box
 	DisplayString *							m_peaceTimeDisplayString;	///< the peace time clock at the top of the screen
 	DisplayString *							m_peaceTimeLabelDisplayString;	///< the word written over that clock
 	DisplayString *							m_peaceCountdownDisplayString;	///< the big digit of its last ten seconds
@@ -1217,9 +1337,9 @@ protected:
 	UnsignedInt									m_hudDrawCount;					///< rendered frames counted by drawHudOverlay itself
 	UnsignedInt									m_hudLastSampleFrame;		///< m_hudDrawCount the fps sample was last refreshed on
 	UnsignedInt									m_hudLastSampleMs;			///< wall clock of that sample
-	Real												m_hudFps;								///< smoothed render rate
+	RateReading									m_hudFps;								///< render rate
 	UnsignedInt									m_hudLastSampleLogicFrame;	///< logic frame at that same sample
-	Real												m_hudLogicHz;						///< logic frames actually simulated per real second
+	RateReading									m_hudLogicHz;						///< logic frames actually simulated per real second
 	UnsignedInt									m_hudRealClockBaseMs;		///< wall clock the two elapsed-time readouts were aligned at
 	UnsignedInt									m_hudLastDrawMs;				///< wall clock of the previous overlay draw, so a pause can be taken back out of it
 	Int													m_hudOverlayBottom;			///< bottom of everything drawn in the top right corner, so the superweapon timers start under it
@@ -1234,15 +1354,22 @@ protected:
 	// The global production strip: everything the local player has coming - queued in any factory,
 	// or going up on the ground - one cameo each, soonest to finish first, in a column standing on
 	// the corner above the control bar. drawProductionStrip() lays it out and records where each
-	// cameo landed; handleProductionStripClick() reads those back.
+	// cameo landed; handleProductionStripClick() reads those back.  What a factory is turning out
+	// and what a dozer is raising stand in the same run, because the question is when the next thing
+	// lands and not which of the two kinds it is, and the building you have selected leads it.
+	// Watching, the queues are on the Tab scoreboard instead.
 	//
-	ProductionStripSlot					m_productionStrip[ PRODUCTION_STRIP_ROWS ][ PRODUCTION_STRIP_ROW_MAX ];
-	Int													m_productionStripCount[ PRODUCTION_STRIP_ROWS ];	///< cameos drawn per row
-	Int													m_productionStripTotal[ PRODUCTION_STRIP_ROWS ];	///< items queued per row, drawn or not
-	Color												m_productionStripRowColor[ PRODUCTION_STRIP_ROWS ];	///< whose row it is, 0 for the local player's own
-	Bool												m_productionStripWatching;	///< the rows are every player's, not ours
+	ProductionStripSlot					m_productionStrip[ PRODUCTION_STRIP_ROW_MAX ];
+	Int													m_productionStripCount;		///< cameos drawn
+	Int													m_productionStripTotal;		///< items queued, drawn or not
 	Int													m_productionStripCameoW;		///< cameo size this frame, in the control bar's aspect
 	Int													m_productionStripCameoH;
+	Bool												m_productionStripThemed;		///< playing under the bar's page: a row in Queue.html's steel tray
+	Int													m_productionStripStep;			///< from one themed cameo to the next, across
+	HtmlOverlay *								m_queueOverlay;							///< Window/Html/Queue.html under the cameos
+	HtmlOverlay *								m_queueFrontOverlay;				///< and its frames over them
+	Bool												m_queuePageLoaded;
+	std::string									m_queuePage;
 
 	//
 	// The strip's cameos face the other way from the power bar's, so the tray behind them is a
@@ -1259,11 +1386,15 @@ protected:
 	// cameo per frame, and watching a match the strips cost more to draw than the terrain under
 	// them.  Kept per cameo, a countdown rebuilds when its own second changes: once a second.
 	//
-	enum { STRIP_SECONDS_STRINGS = PRODUCTION_STRIP_ROWS * PRODUCTION_STRIP_ROW_MAX
-																 + SUPERWEAPON_STRIP_MAX };
-	enum { STRIP_OVERFLOW_STRINGS = PRODUCTION_STRIP_ROWS + 1 };	///< one per production row, plus the superweapon strip's
+	enum { STRIP_SECONDS_STRINGS = PRODUCTION_STRIP_ROW_MAX + SUPERWEAPON_STRIP_MAX };
+	enum
+	{
+		STRIP_OVERFLOW_PRODUCTION = 0,		///< the "+N" closing the production column
+		STRIP_OVERFLOW_SUPERWEAPON,				///< and the superweapon strip's
+		STRIP_OVERFLOW_STRINGS
+	};
 
-	enum { STRIP_QUANTITY_STRINGS = PRODUCTION_STRIP_ROWS * PRODUCTION_STRIP_ROW_MAX };
+	enum { STRIP_QUANTITY_STRINGS = PRODUCTION_STRIP_ROW_MAX };
 
 	DisplayString *							m_productionStripOverflow[ STRIP_OVERFLOW_STRINGS ];	///< the "+N" that stands for the rest of a row
 	DisplayString *							m_stripSecondsString[ STRIP_SECONDS_STRINGS ];			///< the countdown written inside a cameo, either strip's
