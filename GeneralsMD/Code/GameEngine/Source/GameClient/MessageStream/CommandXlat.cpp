@@ -3324,12 +3324,10 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_CHAT_ALLIES:
 			if (TheGameLogic->isInMultiplayerGame() && !TheGameLogic->isInReplayGame())
 			{
-				Player *localPlayer = ThePlayerList->getLocalPlayer();
-				if (localPlayer && localPlayer->isPlayerActive() || !TheGlobalData->m_netMinPlayers)
-				{
-					ToggleInGameChat();
-					SetInGameChatType( INGAME_CHAT_ALLIES );
-				}
+				// a watcher, or a player beaten, has no team: his line goes to everyone, and
+				// ConnectionManager::processChat shows it to the watchers alone
+				ToggleInGameChat();
+				SetInGameChatType( ThePlayerList->getLocalPlayer()->isPlayerActive() ? INGAME_CHAT_ALLIES : INGAME_CHAT_EVERYONE );
 			}
 			disp = DESTROY_MESSAGE;
 			break;
@@ -3338,12 +3336,8 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_CHAT_EVERYONE:
 			if (TheGameLogic->isInMultiplayerGame() && !TheGameLogic->isInReplayGame())
 			{
-				Player *localPlayer = ThePlayerList->getLocalPlayer();
-				if (localPlayer && localPlayer->isPlayerActive() || !TheGlobalData->m_netMinPlayers)
-				{
-					ToggleInGameChat();
-					SetInGameChatType( INGAME_CHAT_EVERYONE );
-				}
+				ToggleInGameChat();
+				SetInGameChatType( INGAME_CHAT_EVERYONE );
 			}
 			disp = DESTROY_MESSAGE;
 			break;
