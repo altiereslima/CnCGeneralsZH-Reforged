@@ -16,6 +16,9 @@ REQUIRED = [
     "GeneralsMD/Code/Libraries/Source/GameSpy/CMakeLists.txt",
     "GeneralsMD/Code/Libraries/DirectX/Include/d3d8.h",
     "GeneralsMD/Code/Libraries/DirectX/Include/d3dxmath.h",
+    "GeneralsMD/Code/Libraries/Source/litehtml/CMakeLists.txt",
+    "GeneralsMD/Code/Libraries/Source/nanosvg/nanosvg.h",
+    "GeneralsMD/Code/Libraries/Source/nanosvg/nanosvgrast.h",
 
     # Tracked backends used instead of the proprietary Miles/Bink SDKs (x64 build).
     "GeneralsMD/Code/Libraries/Source/WWVegas/Bink/ffmpeg/bink_ffmpeg.cpp",
