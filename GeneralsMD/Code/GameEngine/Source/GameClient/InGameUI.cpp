@@ -10989,15 +10989,6 @@ static IRegion2D commandButtonsBox( void )
 	return box;
 }
 
-/** Moves the bar's window Name down by `shift` screen pixels. */
-static void lowerControlBarWindow( const char *name, Int shift )
-{
-	GameWindow *window = controlBarWindow( name );
-	Int x = 0, y = 0;
-	window->winGetPosition( &x, &y );
-	window->winSetPosition( x, y + shift );
-}
-
 static void stackCentre( HtmlValues &values, Bool shown, const ICoord2D &grow, IRegion2D &centre )
 {
 	// the command buttons stand as low as the idle worker's key beside them, GRID_BOTTOM_GAP over the
@@ -11005,7 +10996,7 @@ static void stackCentre( HtmlValues &values, Bool shown, const ICoord2D &grow, I
 	const Real scale = ControlBarUniformScale();
 	const Int shift = barBottom() - REAL_TO_INT( GRID_BOTTOM_GAP * scale ) - commandButtonsBox().hi.y - grow.y;
 	if( shift != 0 )
-		lowerControlBarWindow( "CommandWindow", shift );
+		TheControlBar->lowerPlacedWindow( controlBarWindow( "CommandWindow" ), shift );
 
 	IRegion2D grid, power, money;
 	const Bool othersFound = controlBarUnion( CONTROL_BAR_CENTRE, grid );

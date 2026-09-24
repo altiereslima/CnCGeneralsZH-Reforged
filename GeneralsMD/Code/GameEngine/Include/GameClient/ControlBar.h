@@ -1049,6 +1049,9 @@ public:
 		* it the rectangle back.  A rebuild of the layout reads the window as that rectangle. */
 	void insetPlacedWindow( GameWindow *window, const ICoord2D &inset );
 	ICoord2D getPlacedInset( GameWindow *window ) const;	///< what insetPlacedWindow last put it in by
+	/** Moves one of the bar's windows `shift` pixels down, and the places layoutPanels recorded for it
+		* and everything inside it with it, so a rebuild of the layout reads it as placed there. */
+	void lowerPlacedWindow( GameWindow *window, Int shift );
 	GameWindow *getSpecialPowerShortcutParent( void ) { return m_specialPowerShortcutParent; }
 
 	/// the general's stars are asking to be spent, so the button blinks; see getStarImage

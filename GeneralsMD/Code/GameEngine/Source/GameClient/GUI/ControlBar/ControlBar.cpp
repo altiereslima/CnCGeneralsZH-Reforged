@@ -2176,6 +2176,27 @@ ICoord2D ControlBar::getPlacedInset( GameWindow *window ) const
 }
 
 //-------------------------------------------------------------------------------------------------
+/** A window moved without its place moving was read by the next layoutPanels as moved by somebody
+	* else, in the loader's stretched space, and its size taken back through the loader's scale: the
+	* command grid, lowered to the bottom edge, came out three quarters as wide after a watcher's
+	* selection rebuilt the bar, and the promotion screen measures its cells off it. */
+//-------------------------------------------------------------------------------------------------
+static void lowerPlaces( GameWindow *window, Int shift )
+{
+	theControlBarPlacement.find( window )->second.placedY += shift;
+	for( GameWindow *child = window->winGetChild(); child; child = child->winGetNext() )
+		lowerPlaces( child, shift );
+}
+
+void ControlBar::lowerPlacedWindow( GameWindow *window, Int shift )
+{
+	Int x = 0, y = 0;
+	window->winGetPosition( &x, &y );
+	window->winSetPosition( x, y + shift );
+	lowerPlaces( window, shift );
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Put every window where its panel's slide says it should be.
 	*
 	* layoutPanels has already recorded which panel each direct child of the frame went into and the
