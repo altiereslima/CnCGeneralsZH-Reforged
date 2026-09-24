@@ -403,22 +403,21 @@ void GameLogic::prepareNewGame( Int gameMode, GameDifficulty diff, Int rankPoint
 
 //-------------------------------------------------------------------------------------------------
 /** What each smoke signal says on an ally's screen, indexed by SignalKind.  The smoke is the sender's
-	* colour, so the kind is told apart by the word floated over it.  No signal uses
+	* colour, so the kind is told apart by the mark it lays on the ground.  No signal uses
 	* RADAR_EVENT_UNDER_ATTACK, because Radar::tryEvent refuses a real attack warning within ten
 	* seconds of one of those. */
 //-------------------------------------------------------------------------------------------------
 struct SignalLook
 {
 	RadarEventType radarEvent;
-	const char *wordLabel;
 	const char *announcementLabel;
 };
 
 static const SignalLook SIGNAL_LOOKS[ SIGNAL_KIND_COUNT ] =
 {
-	{ RADAR_EVENT_BATTLE_PLAN,	"GUI:SignalAttackLabel",		"GUI:SignalAttackPlaced" },
-	{ RADAR_EVENT_CONSTRUCTION,	"GUI:SignalDefendLabel",		"GUI:SignalDefendPlaced" },
-	{ RADAR_EVENT_INFORMATION,	"GUI:SignalAttentionLabel",	"GUI:SignalAttentionPlaced" },
+	{ RADAR_EVENT_BATTLE_PLAN,	"GUI:SignalAttackPlaced" },
+	{ RADAR_EVENT_CONSTRUCTION,	"GUI:SignalDefendPlaced" },
+	{ RADAR_EVENT_INFORMATION,	"GUI:SignalAttentionPlaced" },
 };
 
 static const char *SIGNAL_SMOKE_TEMPLATE = "BeaconSmokeFFFFFF";
@@ -440,9 +439,6 @@ static const Real SIGNAL_SMOKE_DENSITY_SCALE = 3.0f;
 static const Real SIGNAL_SMOKE_RISE_SCALE = 3.0f;
 static const Real SIGNAL_SMOKE_ALPHA_MIN = 0.6f;
 static const Real SIGNAL_SMOKE_ALPHA_MAX = 0.8f;
-
-/// the word is written this far above the ground, which is about the middle of the plume
-static const Real SIGNAL_LABEL_HEIGHT = 20.0f;
 
 //-------------------------------------------------------------------------------------------------
 /** Is a signal on this frame too soon after the player's last one?  A last frame ahead of now is
@@ -2153,12 +2149,6 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			TheRadar->createEvent( &pos, look.radarEvent, SIGNAL_MARK_SECONDS );
 			TheInGameUI->addSignalMark( (SignalKind)kind, pos, clientPlayerColor( thisPlayer ),
 				(UnsignedInt)( SIGNAL_MARK_SECONDS * LOGICFRAMES_PER_SECOND ) );
-
-			// floating text runs the colour through the viewer's scheme itself, so it takes the logic one
-			Coord3D labelPos = pos;
-			labelPos.z += SIGNAL_LABEL_HEIGHT;
-			TheInGameUI->addSignalWord( TheGameText->fetch( look.wordLabel ), &labelPos,
-				thisPlayer->getPlayerColor(), SIGNAL_HALF_FRAMES );
 
 			UnicodeString announcement;
 			announcement.format( TheGameText->fetch( look.announcementLabel ), thisPlayer->getPlayerDisplayName().str() );

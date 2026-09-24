@@ -8796,25 +8796,6 @@ FloatingTextData *InGameUI::addFloatingText(const UnicodeString& text,const Coor
 	}
 }
 
-//-------------------------------------------------------------------------------------------------
-/** The floating text machinery, lettered for a word that has to be read over smoke at a glance.
-	* The default floating text font is the money pop-up's, which is too thin for that. */
-//-------------------------------------------------------------------------------------------------
-void InGameUI::addSignalWord( const UnicodeString& text, const Coord3D *pos, Color color, UnsignedInt holdFrames )
-{
-	const char *SIGNAL_WORD_FONT = "Arial";
-	const Int SIGNAL_WORD_POINT_SIZE = 14;
-
-	FloatingTextData *word = addFloatingText( text, pos, color );
-	if( word == NULL )
-		return;
-
-	word->m_isSignalWord = TRUE;
-	word->m_frameTimeOut = TheGameLogic->getFrame() + holdFrames;
-	word->m_dString->setFont( TheWindowManager->winFindFont( AsciiString( SIGNAL_WORD_FONT ),
-		TheGlobalLanguageData->adjustFontSize( SIGNAL_WORD_POINT_SIZE ), TRUE ) );
-}
-
 /** Each signal's mark on the ground, by SignalKind: Art/Textures/<name>.tga, drawn by
 	* Tools/signal_marks.py, white where the sender's colour goes. */
 static const char *const SIGNAL_MARK_TEXTURES[ SIGNAL_KIND_COUNT ] =
@@ -12460,27 +12441,6 @@ Bool InGameUI::handleProductionStripClick( const ICoord2D *mouse, Bool cancel )
 	return FALSE;
 }
 
-//-------------------------------------------------------------------------------------------------
-/** Text with a stroke round it: the string in the outline colour one pixel out in each of the eight
-	* directions, then the string itself on top.  The position has to move between the passes, not
-	* the drop offset - W3DDisplayString rebuilds its quads only when the position or a colour
-	* changes, so eight drop offsets on one position would draw the first shadow eight times. */
-//-------------------------------------------------------------------------------------------------
-static void drawOutlinedText( DisplayString *string, Int x, Int y, Color color, Color outline )
-{
-	const Int STROKE_PIXELS = 1;
-
-	for( Int dy = -STROKE_PIXELS; dy <= STROKE_PIXELS; dy += STROKE_PIXELS )
-	{
-		for( Int dx = -STROKE_PIXELS; dx <= STROKE_PIXELS; dx += STROKE_PIXELS )
-		{
-			if( dx != 0 || dy != 0 )
-				string->draw( x + dx, y + dy, outline, outline );
-		}
-	}
-	string->draw( x, y, color, outline );
-}
-
 void InGameUI::drawFloatingText( void )
 {
 	FloatingTextData *ftd;
@@ -12499,7 +12459,7 @@ void InGameUI::drawFloatingText( void )
 		// translate it's 3d pos into a 2d screen pos
 		if( TheTacticalView->worldToScreen(&ftd->m_pos3D, &pos)
 			&& ftd->m_dString
-			&& ( ftd->m_isSignalWord || ThePartitionManager->getShroudStatusForPlayer(playerNdx, pCX, pCY) == CELLSHROUD_CLEAR ) )
+			&& ThePartitionManager->getShroudStatusForPlayer(playerNdx, pCX, pCY) == CELLSHROUD_CLEAR )
 		{
 			Color dropColor;
 			UnsignedByte r, g, b, a;
@@ -12509,13 +12469,6 @@ void InGameUI::drawFloatingText( void )
 			GameGetColorComponents( ftd->m_color, &r, &g, &b, &a );
 			dropColor = GameMakeColor( 0, 0, 0, a );
 			ftd->m_dString->getSize(&width, &height);
-
-			// a signal's word is written on the smoke it names, centred on it, and does not drift off
-			if( ftd->m_isSignalWord )
-			{
-				drawOutlinedText( ftd->m_dString, pos.x - width / 2, pos.y - height / 2, ftd->m_color, dropColor );
-				continue;
-			}
 
 			pos.y -= ftd->m_frameCount * m_floatingTextMoveUpSpeed;
 			// draw it!
@@ -12626,7 +12579,6 @@ FloatingTextData::FloatingTextData(void)
 	m_color = 0;
 	m_frameCount = 0;
 	m_frameTimeOut = 0;
-	m_isSignalWord = FALSE;
 	m_pos3D.zero();
 	m_text.clear();
 	//

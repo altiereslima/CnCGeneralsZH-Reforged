@@ -192,7 +192,7 @@ GUI:SignalAttack
 END
 
 GUI:SignalAttackDescription
-"Smoke in your colour marked ATTACK for three seconds, where the cursor is or on the radar spot under it. Only your allies see it."
+"Smoke in your colour and crossed swords on the ground for ten seconds, where the cursor is or on the radar spot under it. Only your allies see it."
 END
 
 GUI:SignalDefend
@@ -200,7 +200,7 @@ GUI:SignalDefend
 END
 
 GUI:SignalDefendDescription
-"Smoke in your colour marked DEFEND for three seconds, where the cursor is or on the radar spot under it. Only your allies see it."
+"Smoke in your colour and a shield on the ground for ten seconds, where the cursor is or on the radar spot under it. Only your allies see it."
 END
 
 GUI:SignalAttention
@@ -208,19 +208,7 @@ GUI:SignalAttention
 END
 
 GUI:SignalAttentionDescription
-"Smoke in your colour marked LOOK for three seconds, where the cursor is or on the radar spot under it. Only your allies see it."
-END
-
-GUI:SignalAttackLabel
-"ATTACK"
-END
-
-GUI:SignalDefendLabel
-"DEFEND"
-END
-
-GUI:SignalAttentionLabel
-"LOOK"
+"Smoke in your colour and an eye on the ground for ten seconds, where the cursor is or on the radar spot under it. Only your allies see it."
 END
 
 GUI:SignalAttackPlaced
