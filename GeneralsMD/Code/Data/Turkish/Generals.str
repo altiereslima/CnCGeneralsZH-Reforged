@@ -15757,10 +15757,6 @@ GUI:BarIdleWorker
 "İşçi"
 END
 
-GUI:BarBeacon
-"İşaret"
-END
-
 GUI:BarNetReady
 "hazır"
 END

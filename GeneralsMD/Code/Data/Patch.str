@@ -1246,10 +1246,6 @@ GUI:BarIdleWorker
 "Worker"
 END
 
-GUI:BarBeacon
-"Beacon"
-END
-
 // the network box in the top right corner: frames ready out of the input delay, the room's frame
 // rate, and the traffic in and out in kilobytes a second
 GUI:BarNetReady

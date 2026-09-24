@@ -2871,12 +2871,9 @@ void ControlBar::initWindows( void )
 			setControlCommand(win, findCommandButton("NonCommand_IdleWorker") );
 			win->winSetTooltipFunc(commandButtonTooltip);
 		}
+		// the bar carries no beacon button; nothing below shows it again
 		win = TheWindowManager->winGetWindowFromId(NULL,TheNameKeyGenerator->nameToKey("ControlBar.wnd:ButtonPlaceBeacon"));
-		if(win)
-		{
-			setControlCommand(win, findCommandButton("NonCommand_Beacon") );
-			win->winSetTooltipFunc(commandButtonTooltip);
-		}
+		win->winHide(TRUE);
 		win = TheWindowManager->winGetWindowFromId(NULL,TheNameKeyGenerator->nameToKey("ControlBar.wnd:ButtonGeneral"));
 		if(win)
 		{
@@ -5340,10 +5337,8 @@ void ControlBar::setControlBarSchemeByPlayer(Player *p)
 	if(m_controlBarSchemeManager)
 		m_controlBarSchemeManager->setControlBarSchemeByPlayer(p);
 
-	static NameKeyType buttonPlaceBeaconID = NAMEKEY( "ControlBar.wnd:ButtonPlaceBeacon" );
 	static NameKeyType buttonIdleWorkerID = NAMEKEY("ControlBar.wnd:ButtonIdleWorker");
 	static NameKeyType buttonGeneralID = NAMEKEY("ControlBar.wnd:ButtonGeneral");
-	GameWindow *buttonPlaceBeacon = TheWindowManager->winGetWindowFromId( NULL, buttonPlaceBeaconID );
 	GameWindow *buttonIdleWorker = TheWindowManager->winGetWindowFromId( NULL, buttonIdleWorkerID );
 	GameWindow *buttonGeneral = TheWindowManager->winGetWindowFromId( NULL, buttonGeneralID );
 
@@ -5353,8 +5348,6 @@ void ControlBar::setControlBarSchemeByPlayer(Player *p)
 		switchToContext( CB_CONTEXT_OBSERVER_LIST, NULL );
 		DEBUG_LOG(("We're loading the Observer Command Bar\n"));
 
-		if (buttonPlaceBeacon)
-			buttonPlaceBeacon->winHide(TRUE);
 		if (buttonIdleWorker)
 			buttonIdleWorker->winHide(TRUE);
 		if (buttonGeneral)
@@ -5365,10 +5358,6 @@ void ControlBar::setControlBarSchemeByPlayer(Player *p)
 		switchToContext( CB_CONTEXT_NONE, NULL );
 		m_isObserverCommandBar = FALSE;
 
-		if (buttonPlaceBeacon)
-			buttonPlaceBeacon->winHide(
-			(TheGameLogic->getGameMode() != GAME_LAN && TheGameLogic->getGameMode() != GAME_INTERNET) ||
-			!TheGameInfo->isMultiPlayer());
 		if (buttonIdleWorker)
 			buttonIdleWorker->winHide(FALSE);
 		if (buttonGeneral)
@@ -5397,10 +5386,8 @@ void ControlBar::setControlBarSchemeByPlayerTemplate( const PlayerTemplate *pt)
 	if(m_controlBarSchemeManager)
 		m_controlBarSchemeManager->setControlBarSchemeByPlayerTemplate(pt);
 
-	static NameKeyType buttonPlaceBeaconID = NAMEKEY( "ControlBar.wnd:ButtonPlaceBeacon" );
 	static NameKeyType buttonIdleWorkerID = NAMEKEY("ControlBar.wnd:ButtonIdleWorker");
 	static NameKeyType buttonGeneralID = NAMEKEY("ControlBar.wnd:ButtonGeneral");
-	GameWindow *buttonPlaceBeacon = TheWindowManager->winGetWindowFromId( NULL, buttonPlaceBeaconID );
 	GameWindow *buttonIdleWorker = TheWindowManager->winGetWindowFromId( NULL, buttonIdleWorkerID );
 	GameWindow *buttonGeneral = TheWindowManager->winGetWindowFromId( NULL, buttonGeneralID );
 
@@ -5410,8 +5397,6 @@ void ControlBar::setControlBarSchemeByPlayerTemplate( const PlayerTemplate *pt)
 		switchToContext( CB_CONTEXT_OBSERVER_LIST, NULL );
 		DEBUG_LOG(("We're loading the Observer Command Bar\n"));
 
-		if (buttonPlaceBeacon)
-			buttonPlaceBeacon->winHide(TRUE);
 		if (buttonIdleWorker)
 			buttonIdleWorker->winHide(TRUE);
 		if (buttonGeneral)
@@ -5422,10 +5407,6 @@ void ControlBar::setControlBarSchemeByPlayerTemplate( const PlayerTemplate *pt)
 		switchToContext( CB_CONTEXT_NONE, NULL );
 		m_isObserverCommandBar = FALSE;
 
-		if (buttonPlaceBeacon)
-			buttonPlaceBeacon->winHide(
-			(TheGameLogic->getGameMode() != GAME_LAN && TheGameLogic->getGameMode() != GAME_INTERNET) ||
-			!TheGameInfo->isMultiPlayer());
 		if (buttonIdleWorker)
 			buttonIdleWorker->winHide(FALSE);
 		if (buttonGeneral)

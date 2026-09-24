@@ -2,7 +2,7 @@
 <!--
   The command bar's frame, drawn where its three plates used to be, and the bar's own buttons.  The
   command buttons, the radar, the money and the portrait are still the bar's windows and paint over
-  this page.  The promotion and beacon buttons, the under-attack light, the power bar and the
+  this page.  The promotion button, the under-attack light, the power bar and the
   experience bar are the page's to draw: their windows take the clicks and draw nothing.  The menu and idle worker
   buttons are the page's altogether, pressed through data-click="press:Name"; the chat button is
   gone and Enter still opens the chat.  Same materials as Window/Html/Spectator.html, whose header
@@ -71,7 +71,7 @@
                            and {{Name.state}} any of "disabled", "hilite", "pushed", for LeftHUD (the
                            radar), RightHUD (the portrait's box), CameoWindow (the portrait),
                            CommandWindow, MoneyDisplay, PowerWindow, GeneralsExp, ButtonGeneral,
-                           ButtonLarge (the minimise button, stood down), ButtonOptions, ButtonIdleWorker, ButtonPlaceBeacon,
+                           ButtonLarge (the minimise button, stood down), ButtonOptions, ButtonIdleWorker,
                            PopupCommunicator and WinUAttack (the under-attack light: "disabled" while
                            it is lit, which is how the bar blinks it)
   All in the page's pixels, a pixel of an 800x600 screen.  Without this page the plates draw.
@@ -395,8 +395,6 @@
   <div class="piece tab rank {{starstab.shown}} {{promotion}} {{blink}} {{ButtonGeneral.state}}" style="left: {{starstab.x}}px; top: {{starstab.y}}px; width: {{starstab.w}}px; height: {{starstab.h}}px">
     <div class="key"><div class="star {{lit}}" data-each="rankstars" style="left: {{x}}px"></div><div class="veil"></div></div>
   </div>
-
-  <div class="piece button {{ButtonPlaceBeacon.shown}} {{ButtonPlaceBeacon.state}}" style="left: {{ButtonPlaceBeacon.x}}px; top: {{ButtonPlaceBeacon.y}}px; width: {{ButtonPlaceBeacon.w}}px; height: {{ButtonPlaceBeacon.h}}px"><div class="cap">{{text:GUI:BarBeacon}}</div></div>
 
   <div class="piece step signals solid {{signals.shown}}" style="left: {{signals.x}}px; top: {{signals.y}}px; width: {{signals.w}}px; height: {{signals.h}}px">
     <div class="joint"></div>

@@ -10404,16 +10404,16 @@ static void standDownPromotionScreen( void );
 static const char *const CONTROL_BAR_WINDOWS[] =
 {
 	"LeftHUD", "RightHUD", "CameoWindow", "CommandWindow", "MoneyDisplay", "PowerWindow", "GeneralsExp",
-	"ButtonGeneral", "ButtonLarge", "ButtonOptions", "ButtonIdleWorker", "ButtonPlaceBeacon", "PopupCommunicator",
+	"ButtonGeneral", "ButtonLarge", "ButtonOptions", "ButtonIdleWorker", "PopupCommunicator",
 	"WinUAttack"
 };
 
 /** The bar's windows the page draws instead of letting them paint themselves: the promotion and
-	* minimise buttons, the beacon button and the radar's under-attack light.  They still take their
-	* clicks; only their pictures are the page's. */
+	* minimise buttons and the radar's under-attack light.  They still take their clicks; only their
+	* pictures are the page's. */
 static const char *const CONTROL_BAR_CUSTOM[] =
 {
-	"ButtonGeneral", "ButtonLarge", "ButtonPlaceBeacon", "WinUAttack", "PowerWindow", "GeneralsExp", "ExpBarForeground", "RightHUD",
+	"ButtonGeneral", "ButtonLarge", "WinUAttack", "PowerWindow", "GeneralsExp", "ExpBarForeground", "RightHUD",
 	"WinUnitSelected"
 };
 
@@ -10596,7 +10596,7 @@ static void placeSignalAtView( const std::string &kind )
 	* each list. */
 static const char *const CONTROL_BAR_LEFT[] = { "LeftHUD", NULL };
 static const char *const CONTROL_BAR_RIGHT[] = { "RightHUD", "GeneralsExp", "ExpBarForeground", NULL };
-static const char *const CONTROL_BAR_CENTRE[] = { "ObserverPlayerListWindow", "ButtonPlaceBeacon", NULL };
+static const char *const CONTROL_BAR_CENTRE[] = { "ObserverPlayerListWindow", NULL };
 static const char *const CONTROL_BAR_EXPERIENCE[] = { "GeneralsExp", "ExpBarForeground", NULL };
 static const Int COMMAND_BUTTONS = 14;	///< ButtonCommand01 to 14, the grid a player sees
 static const Int QUEUE_BUTTONS = 9;			///< ButtonQueue01 to 09, the production queue's three by three over the portrait's place
@@ -10905,14 +10905,11 @@ static void lowerControlBarWindow( const char *name, Int shift )
 static void stackCentre( HtmlValues &values, Bool shown, const ICoord2D &grow, IRegion2D &centre )
 {
 	// the command buttons stand as low as the idle worker's key beside them, GRID_BOTTOM_GAP over the
-	// screen's bottom edge, wherever the side's layout put them; the beacon button goes down with them
+	// screen's bottom edge, wherever the side's layout put them
 	const Real scale = ControlBarUniformScale();
 	const Int shift = barBottom() - REAL_TO_INT( GRID_BOTTOM_GAP * scale ) - commandButtonsBox().hi.y - grow.y;
 	if( shift != 0 )
-	{
 		lowerControlBarWindow( "CommandWindow", shift );
-		lowerControlBarWindow( "ButtonPlaceBeacon", shift );
-	}
 
 	IRegion2D grid, power, money;
 	const Bool othersFound = controlBarUnion( CONTROL_BAR_CENTRE, grid );
@@ -10920,7 +10917,7 @@ static void stackCentre( HtmlValues &values, Bool shown, const ICoord2D &grow, I
 	// with nothing selected the bar hides the command grid, and the panel must not go with it: the
 	// money and the power bar stood over bare battlefield.  The grid's place holds whether it is up,
 	// and it is the fourteen buttons' place rather than CommandWindow's: the window reaches 34 pixels
-	// further left, over where the beacon button stands, and left an empty strip in the panel
+	// further left, over where retail's beacon button stood, and left an empty strip in the panel
 	// It is the cells', which reach `grow` past the buttons' places
 	IRegion2D buttons = reachedBy( commandButtonsBox(), grow.x, grow.y );
 	if( othersFound )
