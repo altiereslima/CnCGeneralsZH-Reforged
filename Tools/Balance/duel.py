@@ -32,7 +32,7 @@ UNITS = {
     "ChinaTankBattleMaster": 800, "ChinaTankOverlord": 2000, "ChinaTankGattling": 800, "ChinaTankDragon": 800,
     "ChinaInfantryRedguard": 300, "ChinaInfantryTankHunter": 300,
     "GLATankScorpion": 600, "GLATankMarauder": 800, "GLAVehicleTechnical": 500, "GLAInfantryRebel": 150,
-    "GLAInfantryTunnelDefender": 300, "GLAVehicleQuadCannon": 700,
+    "GLAInfantryTunnelDefender": 300, "GLAVehicleQuadCannon": 800, "GLAVehicleRocketBuggy": 900,
 }
 
 
