@@ -337,7 +337,8 @@ void EMPUpdate::doDisableAttack( void )
 							sys->attachToObject(curVictim);
 							sys->setPosition( &offs );
 							sys->setSystemLifetime(MAX(0, data->m_disabledDuration - 30));
-							sys->setInitialDelay(GameLogicRandomValue(1,100));
+							// Client stream too: this line runs only where the drawable and the particle system exist.
+							sys->setInitialDelay(GameClientRandomValue(1,100));
 						}
 					}
 				} 

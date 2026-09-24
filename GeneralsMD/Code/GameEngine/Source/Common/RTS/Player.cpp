@@ -1189,11 +1189,12 @@ void Player::becomingLocalPlayer(Bool yes)
 			for( Object* object = iter->first(); object; object = iter->next() )
 			{
 				// Added support for updating the perceptions of garrisoned buildings containing enemy stealth units.
-				// When changing teams, it is necessary to update this information.
+				// When changing teams, it is necessary to update this information.  The look only: a change of
+				// local player happens on one machine, and the full recalc also reset teams in logic.
 				ContainModuleInterface *contain = object->getContain();
 				if( contain )
 				{
-					contain->recalcApparentControllingPlayer();
+					contain->refreshApparentLook();
 					TheRadar->removeObject( object );
 					TheRadar->addObject( object );
 				}

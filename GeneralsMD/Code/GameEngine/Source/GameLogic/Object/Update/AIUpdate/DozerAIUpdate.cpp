@@ -1107,13 +1107,16 @@ void DozerPrimaryIdleState::crc( Xfer *xfer )
 void DozerPrimaryIdleState::xfer( Xfer *xfer )
 {
   // version
-  XferVersion currentVersion = 1;
+  // 2: the unfinished-structure scan's timer, or a loaded game scanned on a different frame
+  XferVersion currentVersion = 2;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
 
 	xfer->xferUnsignedInt(&m_idleTooLongTimestamp);
 	xfer->xferInt(&m_idlePlayerNumber);
 	xfer->xferBool(&m_isMarkedAsIdle);
+	if (version >= 2)
+		xfer->xferUnsignedInt(&m_nextUnfinishedScanFrame);
 }  // end xfer
 
 // ------------------------------------------------------------------------------------------------

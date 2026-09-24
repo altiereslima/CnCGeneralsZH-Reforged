@@ -129,7 +129,10 @@ public:
 	virtual const Player* getApparentControllingPlayer(const Player* observingPlayer) const = 0;
 
 	virtual void recalcApparentControllingPlayer() = 0;
- 
+
+	/// Redraws what the local player is shown - colour, the garrisoned look - and touches no logic.  For a change of local player.
+	virtual void refreshApparentLook() = 0;
+
 	//
 	// you will want to override onContaining() and onRemoving() if you need to
 	// do special actions at those event times for your module

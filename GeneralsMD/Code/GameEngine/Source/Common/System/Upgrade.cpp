@@ -227,6 +227,7 @@ UpgradeCenter::UpgradeCenter( void )
 	m_upgradeList = NULL;
 	m_nextTemplateMaskBit = 0;
 	buttonImagesCached = FALSE;
+	m_maskBitBeforeMapOverrides = -1;
 
 }  // end UpgradeCenter
 
@@ -234,7 +235,9 @@ UpgradeCenter::UpgradeCenter( void )
 //-------------------------------------------------------------------------------------------------
 UpgradeCenter::~UpgradeCenter( void )
 {
-	
+	for( size_t i = 0; i < m_beforeMapOverrides.size(); ++i )
+		m_beforeMapOverrides[ i ].second->deleteInstance();
+
 	// delete all the upgrades loaded from the INI database
 	UpgradeTemplate *next;
 	while( m_upgradeList )
@@ -282,6 +285,35 @@ void UpgradeCenter::init( void )
 //-------------------------------------------------------------------------------------------------
 void UpgradeCenter::reset( void )
 {
+	/* What a map.ini changed goes back, or the next match in this process researches at that price
+		 and speed while a machine that never loaded the map does not.  Links stay as they are now: an
+		 upgrade the map.ini added may have been linked in beside one it changed. */
+	for( Int i = (Int)m_beforeMapOverrides.size() - 1; i >= 0; --i )
+	{
+		UpgradeTemplate *live = m_beforeMapOverrides[ i ].first;
+		UpgradeTemplate *before = m_beforeMapOverrides[ i ].second;
+		UpgradeTemplate *next = live->friend_getNext();
+		UpgradeTemplate *prev = live->friend_getPrev();
+		*live = *before;
+		live->friend_setNext( next );
+		live->friend_setPrev( prev );
+		before->deleteInstance();
+	}
+	m_beforeMapOverrides.clear();
+
+	/* And what it added goes, with its mask bits.  Left in, the next match that loads a map.ini adding
+		 upgrades hands them other bits than a machine that never played the first map; the command
+		 buttons and objects that named them were overrides, and those are gone by now. */
+	for( size_t i = 0; i < m_addedByMap.size(); ++i )
+	{
+		unlinkUpgrade( m_addedByMap[ i ] );
+		m_addedByMap[ i ]->deleteInstance();
+	}
+	m_addedByMap.clear();
+	if( m_maskBitBeforeMapOverrides >= 0 )
+		m_nextTemplateMaskBit = m_maskBitBeforeMapOverrides;
+	m_maskBitBeforeMapOverrides = -1;
+
 	if( TheMappedImageCollection && !buttonImagesCached )
 	{
 		UpgradeTemplate *upgrade;
@@ -488,9 +520,19 @@ void UpgradeCenter::parseUpgradeDefinition( INI *ini )
 	{
 
 		// allocate a new item
+		if( ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES && TheUpgradeCenter->m_maskBitBeforeMapOverrides < 0 )
+			TheUpgradeCenter->m_maskBitBeforeMapOverrides = TheUpgradeCenter->m_nextTemplateMaskBit;
 		upgrade = TheUpgradeCenter->newUpgrade( name );
+		if( ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES )
+			TheUpgradeCenter->m_addedByMap.push_back( upgrade );
 
 	}  // end if
+	else if( ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES )
+	{
+		UpgradeTemplate *before = newInstance(UpgradeTemplate);
+		*before = *upgrade;
+		TheUpgradeCenter->m_beforeMapOverrides.push_back( std::make_pair( upgrade, before ) );
+	}
 
 	// sanity
 	DEBUG_ASSERTCRASH( upgrade, ("parseUpgradeDefinition: Unable to allocate upgrade '%s'\n", name.str()) );

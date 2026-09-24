@@ -38,6 +38,7 @@
 #include "Common/Team.h" 
 #include "Common/ThingFactory.h"
 #include "Common/PlayerList.h"
+#include "Common/Recorder.h"
 #include "Common/BuildAssistant.h"
 #include "Common/ThingTemplate.h"
 #include "Common/TunnelTracker.h"
@@ -910,13 +911,10 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 		 The loser waits exactly one frame - a thirtieth of a second on a building that takes half a
 		 minute to put up. The order is the player list order, so every machine defers the same
 		 player on the same frame and a replay still matches. */
-	static UnsignedInt s_lastPlacementFrame = 0;
-	const UnsignedInt nowFrame = TheGameLogic->getFrame();
-	if (s_lastPlacementFrame == nowFrame && nowFrame != 0) {
+	if (!TheAI->claimBuildingPlacement(TheGameLogic->getFrame())) {
 		m_buildDelay = 1;		// try again next frame; doBaseBuilding leaves any value >= 1 alone
 		return NULL;
 	}
-	s_lastPlacementFrame = nowFrame;
 	// construct the building
 	Coord3D pos = *info->getLocation();
 	pos.z += TheTerrainLogic->getGroundHeight(pos.x, pos.y);
@@ -6439,7 +6437,11 @@ Bool AIPlayer::pickTacticalSpot( const Object *obj, const Coord3D *from, const C
 	* the retreat and the approaches included. */
 Bool AIPlayer::measuringWithoutTactics( void ) const
 {
-	return TheGlobalData->m_noTacticsSlotParity >= 0 && TheGameLogic->isInSkirmishGame() &&
+	// A skirmish or the playback of one, so a recording made with the switch plays back with it too
+	// (given the switch again: it is a measuring aid and does not travel in the replay).
+	const Int originalMode = (TheRecorder && TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK)
+													 ? TheRecorder->getGameMode() : TheGameLogic->getGameMode();
+	return TheGlobalData->m_noTacticsSlotParity >= 0 && originalMode == GAME_SKIRMISH &&
 		(ThePlayerList->getSlotIndex( m_player->getPlayerIndex() ) & 1) == TheGlobalData->m_noTacticsSlotParity;
 }
 

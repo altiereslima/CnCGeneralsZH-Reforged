@@ -316,6 +316,7 @@ AI::AI( void )
 	m_aiData = NEW TAiData;
 	m_pathfinder = NEW Pathfinder;
 	m_nextFormationID = NO_FORMATION_ID;
+	m_lastBuildingPlacementFrame = 0;
 }
 
 /**
@@ -352,6 +353,15 @@ void AI::reset( void )
 	m_nextGroupID = 0;
 	m_nextFormationID = NO_FORMATION_ID;
 	getNextFormationID(); // increment once past NO_FORMATION_ID.  jba.
+	m_lastBuildingPlacementFrame = 0;
+}
+
+Bool AI::claimBuildingPlacement( UnsignedInt frame )
+{
+	if (m_lastBuildingPlacementFrame == frame && frame != 0)
+		return FALSE;
+	m_lastBuildingPlacementFrame = frame;
+	return TRUE;
 }
 
 /**

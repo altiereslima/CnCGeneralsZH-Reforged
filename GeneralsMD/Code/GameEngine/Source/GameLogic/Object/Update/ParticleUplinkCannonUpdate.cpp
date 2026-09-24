@@ -776,8 +776,12 @@ UpdateSleepTime ParticleUplinkCannonUpdate::update()
 		{
 			//We can see it -- we only want to do anything if we just started seeing it, which means
 			//we want to add client effects again.
+			/* Not before the logic has cached the bones itself, on its first status change.  Caching them
+				 here happened on the frame this machine's player first saw the cannon, under whatever
+				 model state it had then, and a bone count short by one sets m_invalidSettings - which
+				 stops the cannon for good on this machine only.  An idle cannon has nothing to show. */
 			Bool revealThisFrame = m_clientShroudedLastFrame != shrouded;
-			if( revealThisFrame )
+			if( revealThisFrame && m_defaultInfoCached )
 			{
 				//Only if we reveal this frame, will we add client effects. The logic can take it from
 				//here on... unless of course we lose sight again.

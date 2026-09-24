@@ -967,7 +967,8 @@ protected:
 					di->setModelName(modelName, m_okToChangeModelColor ? obj->getIndicatorColor() : 0, m_shadowType);
 					if (m_animSets.size() > 0)
 					{
-						Int which = GameLogicRandomValue(0, m_animSets.size()-1);
+						// the animation names only reach the draw module, so the client stream
+						Int which = GameClientRandomValue(0, m_animSets.size()-1);
 						di->setAnimNames(m_animSets[which].m_animInitial, m_animSets[which].m_animFlying, m_animSets[which].m_animFinal, m_fxFinal);
 					}
 				}
@@ -1624,11 +1625,26 @@ void ObjectCreationListStore::addObjectCreationNugget(ObjectCreationNugget* nugg
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Puts back what a map.ini changed, the way ArmorStore::reset does and for the same reason: the next
+	* match in this process would otherwise create objects from lists no other machine has.  The nuggets
+	* a map.ini added stay in m_nuggets, which owns them, and are simply no longer listed. */
+//-------------------------------------------------------------------------------------------------
+void ObjectCreationListStore::reset()
+{
+	for (Int i = (Int)m_beforeMapOverrides.size() - 1; i >= 0; --i)
+		m_ocls[m_beforeMapOverrides[i].first] = m_beforeMapOverrides[i].second;
+	m_beforeMapOverrides.clear();
+}
+
+//-------------------------------------------------------------------------------------------------
 /*static */ void ObjectCreationListStore::parseObjectCreationListDefinition(INI *ini)
 {
 	// read the ObjectCreationList name
 	const char *c = ini->getNextToken();
 	NameKeyType key = TheNameKeyGenerator->nameToKey(c);
+	ObjectCreationListMap::const_iterator existing = TheObjectCreationListStore->m_ocls.find(key);
+	if (ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES && existing != TheObjectCreationListStore->m_ocls.end())
+		TheObjectCreationListStore->m_beforeMapOverrides.push_back(std::make_pair(key, existing->second));
 	ObjectCreationList& ocl = TheObjectCreationListStore->m_ocls[key];
 	ocl.clear();
 	ini->initFromINI(&ocl, TheObjectCreationListFieldParse);

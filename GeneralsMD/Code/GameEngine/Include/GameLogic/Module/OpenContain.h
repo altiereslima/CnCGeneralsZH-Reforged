@@ -142,6 +142,7 @@ public:
  
 	virtual const Player* getApparentControllingPlayer(const Player* observingPlayer) const { return NULL; }
 	virtual void recalcApparentControllingPlayer() { }
+	virtual void refreshApparentLook() { }
 		
 	virtual void onContaining( Object *obj, Bool wasSelected );		///< object now contains 'obj'
 	virtual void onRemoving( Object *obj );			///< object no longer contains 'obj'

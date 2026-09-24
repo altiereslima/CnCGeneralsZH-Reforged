@@ -80,6 +80,7 @@ enum CheatKind
 	CHEAT_GOD_MODE,
 	CHEAT_INSTANT_BUILD,
 	CHEAT_ONE_HIT_KILL,
+	CHEAT_TAKE_CONTROL,			///< Shift-Ctrl-T: the amount is the index of the player to take over
 
 	CHEAT_KIND_COUNT
 };

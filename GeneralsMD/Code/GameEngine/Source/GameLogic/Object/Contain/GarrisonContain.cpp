@@ -1241,6 +1241,32 @@ void GarrisonContain::recalcApparentControllingPlayer( void )
 		m_hideGarrisonedStateFromNonallies = false;
 	}
 
+	refreshApparentLook();
+
+	// now that we have an object inside us, we need to get all the garrison point positions
+	// if we don't already have them.
+	if( getObject()->getDrawable() && getContainCount() > 0 )
+	{
+		if ( isEnclosingContainerFor( 0 ) )
+		{
+			if ( m_garrisonPointsInitialized == FALSE )
+				loadGarrisonPoints();
+		}
+		else // must need station points instead
+		{
+			if ( m_stationGarrisonPointsInitialized == FALSE )
+				loadStationGarrisonPoints();
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The half of recalcApparentControllingPlayer that is only what this machine's player is shown.
+	* A change of local player calls this alone: the whole recalc from there reset an empty building's
+	* team and the hidden-garrison flag on the machine whose player changed, and no other. */
+//-------------------------------------------------------------------------------------------------
+void GarrisonContain::refreshApparentLook( void )
+{
 	//Only allow the garrison state to be set if the client team knows that it is garrisoned.
 	Drawable *draw = getObject()->getDrawable();
 	if( draw )
@@ -1277,26 +1303,6 @@ void GarrisonContain::recalcApparentControllingPlayer( void )
 			else
 				draw->setIndicatorColor( controller->getPlayerColor() );
 		}
-
-		// now that we have an object inside us, we need to get all the garrison point positions
-		// if we don't already have them.
-		if( getContainCount() > 0 )
-    {
-      if ( isEnclosingContainerFor( 0 ) )
-      {
-        if ( m_garrisonPointsInitialized == FALSE )
-		    {
-			    loadGarrisonPoints();
-		    }
-      }
-      else // must need station points instead
-      {
-        if ( m_stationGarrisonPointsInitialized == FALSE )
-        {
-          loadStationGarrisonPoints();
-        }
-      }
-    }
 	}
 }
 

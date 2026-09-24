@@ -573,6 +573,9 @@ public:
 
 	inline UnsignedInt getNextGroupID( void ) { return ++m_nextGroupID; }
 
+	/// One building placement per logic frame across every computer player: FALSE when one already went down on this frame.
+	Bool claimBuildingPlacement( UnsignedInt frame );
+
 protected:
 	Pathfinder *m_pathfinder;							///< the pathfinding system
 	std::list<AIGroup *> m_groupList;			///< the list of AIGroups
@@ -582,6 +585,7 @@ protected:
 	
 	UnsignedInt m_nextGroupID;
 	FormationID m_nextFormationID;
+	UnsignedInt m_lastBuildingPlacementFrame;	///< cleared by reset: a static here outlived the match and deferred the next match's first placement on one machine only
 };
 
 extern AI *TheAI;												///< the Artificial Intelligence singleton

@@ -1027,9 +1027,33 @@ Real AudioManager::getAudioLengthMS( const AudioEventRTS *event )
 
 	tmpEvent.generateFilename();
 	tmpEvent.generatePlayInfo();
-	return getFileLengthMS(tmpEvent.getAttackFilename()) + 
-				 getFileLengthMS(tmpEvent.getFilename()) + 
-				 getFileLengthMS(tmpEvent.getDecayFilename());
+	AsciiString attack = tmpEvent.getAttackFilename();
+	AsciiString sound = tmpEvent.getFilename();
+	AsciiString decay = tmpEvent.getDecayFilename();
+
+	/* A file in this install's language folder wins over the generic one, and a line of speech runs
+		 a different length in German than in English, so two players with different languages waited
+		 on the same script for a different number of frames.  In a multiplayer or skirmish session the
+		 length comes from the generic folder on every machine, and a line that has no generic file
+		 counts as finished at once. */
+	if (TheGameEngine->isMultiplayerSession())
+	{
+		const AudioType type = tmpEvent.getAudioEventInfo()->m_soundType;
+		const AsciiString localizedPrefix = tmpEvent.generateFilenamePrefix(type, TRUE);
+		const AsciiString genericPrefix = tmpEvent.generateFilenamePrefix(type, FALSE);
+		AsciiString *names[] = { &attack, &sound, &decay };
+		for (Int i = 0; i < (Int)(sizeof(names) / sizeof(names[0])); ++i)
+		{
+			if (names[i]->startsWith(localizedPrefix))
+			{
+				AsciiString generic = genericPrefix;
+				generic.concat(names[i]->str() + localizedPrefix.getLength());
+				*names[i] = generic;
+			}
+		}
+	}
+
+	return getFileLengthMS(attack) + getFileLengthMS(sound) + getFileLengthMS(decay);
 }
 
 //-------------------------------------------------------------------------------------------------
