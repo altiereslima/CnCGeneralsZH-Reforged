@@ -47,19 +47,21 @@
   .china .well { background-color: rgba(26, 10, 8, 0.9); }
   .gla .well { background-color: rgba(22, 19, 8, 0.9); }
 
-  #board { position: absolute; left: 26px; top: 4px; width: 620px; padding-bottom: 3px; }
+  #board { position: absolute; left: 26px; top: 4px; width: 660px; padding-bottom: 3px; }
 
   /* every column's left edge, shared by the captions and the seats; the Turkish captions are the
-     long ones, so a number column is as wide as its caption rather than its digits */
+     long ones, so a number column is as wide as its caption rather than its digits.  The columns
+     are packed against the right edge, the favourite unit last, and the name takes what is left:
+     at 98 pixels "USA Air Force General" ran into the team */
   .c-name { left: 30px; }
-  .c-team { left: 128px; width: 34px; }
-  .c-rank { left: 164px; width: 34px; text-align: right; }
-  .c-cash { left: 200px; width: 50px; text-align: right; }
-  .c-income { left: 252px; width: 54px; text-align: right; }
-  .c-kills { left: 308px; width: 26px; text-align: right; }
-  .c-losses { left: 336px; width: 26px; text-align: right; }
-  .c-skills { left: 370px; }
-  .c-favourite { left: 470px; }
+  .c-team { left: 282px; width: 34px; }
+  .c-rank { left: 318px; width: 34px; text-align: right; }
+  .c-cash { left: 354px; width: 50px; text-align: right; }
+  .c-income { left: 406px; width: 54px; text-align: right; }
+  .c-kills { left: 462px; width: 26px; text-align: right; }
+  .c-losses { left: 490px; width: 26px; text-align: right; }
+  .c-skills { left: 526px; }
+  .c-favourite { left: 630px; }
 
   .captions { position: relative; height: 16px; line-height: 16px; }
   .captions span { position: absolute; top: 0; font-size: 7px; color: #e8d27a; }
@@ -103,7 +105,7 @@
   .arms { display: none; position: absolute; left: 30px; top: 22px; height: 20px; }
   .armed .arms { display: block; }
   .seatrow.full.armed { height: 44px; }
-  .hidden .arms { left: 168px; top: 1px; }
+  .hidden .arms { left: 322px; top: 1px; }
   .arm { position: absolute; top: 0; width: 56px; height: 20px; }
   .arm.none { display: none; }
   .w0 { left: 0; } .w1 { left: 60px; } .w2 { left: 120px; } .w3 { left: 180px; } .w4 { left: 240px; }
@@ -156,13 +158,13 @@
       <span class="num persecond c-income">{{persecond}}</span>
       <span class="cell num c-kills">{{kills}}</span>
       <span class="cell num c-losses">{{losses}}</span>
-      <img class="skill" src="{{skill0}}" style="left: 370px">
-      <img class="skill" src="{{skill1}}" style="left: 384px">
-      <img class="skill" src="{{skill2}}" style="left: 398px">
-      <img class="skill" src="{{skill3}}" style="left: 412px">
-      <img class="skill" src="{{skill4}}" style="left: 426px">
-      <img class="skill" src="{{skill5}}" style="left: 440px">
-      <img class="skill" src="{{skill6}}" style="left: 454px">
+      <img class="skill" src="{{skill0}}" style="left: 526px">
+      <img class="skill" src="{{skill1}}" style="left: 540px">
+      <img class="skill" src="{{skill2}}" style="left: 554px">
+      <img class="skill" src="{{skill3}}" style="left: 568px">
+      <img class="skill" src="{{skill4}}" style="left: 582px">
+      <img class="skill" src="{{skill5}}" style="left: 596px">
+      <img class="skill" src="{{skill6}}" style="left: 610px">
       <img class="favourite c-favourite" src="{{favourite}}">
       <div class="jobs">
         <div class="arm w0 {{j0.state}}"><img class="cameo" src="{{j0.image}}"><span class="count">{{j0.count}}</span><span class="time">{{j0.time}}</span></div>
