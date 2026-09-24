@@ -1,19 +1,12 @@
-# Brazilian Portuguese localization
+# Zero Hour Reforged — Português (Brasil)
 
-PT-BR integration for CnCGeneralsZH-Reforged.
+Integração PT-BR para `CnCGeneralsZH-Reforged`.
 
-This directory contains only the localization data and the small build scripts required to apply
-and validate it. The original English data remains untouched.
+O Git contém o overlay textual (`Generals.str`, `Language.ini`), patchers, validadores e workflow.
+zlib, GameSpy, LZH-Light e o min-dx8-sdk são instalados automaticamente em versões fixadas antes
+da compilação x64.
 
-## Layout
+Os BIKs e texturas PT-BR não ficam no Git. Eles são opcionais no CI: se um bundle privado for
+configurado, entram no artifact; caso contrário, a compilação continua e o jogo usa fallback de mídia.
 
-- `Data/PortugueseBrazil/` — translated text and language configuration.
-- `scripts/apply.py` — applies the source integration.
-- `scripts/dependencies.py` — installs public build dependencies at pinned revisions.
-- `scripts/validate.py` — validates source integration and build prerequisites.
-- `scripts/build.py` — Win32/CMake build runner.
-- `scripts/media.py` — optional installer for localized videos/textures.
-
-Localized BIK/DDS/TGA assets are intentionally not stored in Git.
-
-The validator also checks localized skirmish/multiplayer map titles before compilation.
+Veja `SETUP.md`.

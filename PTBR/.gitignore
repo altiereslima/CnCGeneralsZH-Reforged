@@ -1,4 +1,5 @@
-Data/PortugueseBrazil/Movies/
-Data/PortugueseBrazil/Art/Textures/
+payload/GeneralsMD/Code/Data/PortugueseBrazil/Movies/
+payload/GeneralsMD/Code/Data/PortugueseBrazil/Art/Textures/
+PTBR_STAGE15_RESULTS/
 __pycache__/
 *.pyc
