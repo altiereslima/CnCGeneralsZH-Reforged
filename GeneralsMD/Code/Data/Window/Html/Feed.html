@@ -40,10 +40,12 @@
 
   .flag { width: 20px; height: 12px; margin-right: 4px; vertical-align: middle; }
   /* a plain message has no player, so a steel plate the flag's size with a mark on it stands where
-     the flag would, and every line's words start in one column */
-  .chip { display: inline-block; width: 20px; height: 10px; line-height: 10px; margin-right: 4px; vertical-align: middle;
-          text-align: center; font-size: 8px; font-weight: bold; color: #f2cf4a;
+     the flag would, and every line's words start in one column.  The mark is an exclamation mark
+     lying down, a bar and its dot, since the renderer turns no text */
+  .chip { display: inline-block; position: relative; width: 20px; height: 10px; margin-right: 4px; vertical-align: middle;
           background: linear-gradient(to bottom, #6f7782, #3f4650); border-top: 1px solid #aab4bf; border-bottom: 1px solid #0c1114; }
+  .chip .bang { position: absolute; left: 4px; top: 4px; width: 8px; height: 2px; background-color: #f2cf4a; }
+  .chip .dot { position: absolute; left: 14px; top: 4px; width: 2px; height: 2px; background-color: #f2cf4a; }
   .who { font-weight: bold; }
   .cameo { width: 18px; height: 13px; margin: 0 4px; vertical-align: middle; }
   .what { color: #e8d27a; }
@@ -63,7 +65,7 @@
 <div id="feed" style="height: {{floor}}px">
   <div id="lines">
     <div class="line" data-each="feed">
-      <div class="strip k{{kind}}"><span class="chip">!</span><img class="flag" src="{{portrait}}">{{before}}<span class="who" style="color: {{color}}">{{name}}</span>{{after}}<img class="cameo" src="{{image}}"><span class="what">{{what}}</span><span class="tag {{tag}}">{{tagtext}}</span></div>
+      <div class="strip k{{kind}}"><span class="chip"><span class="bang"></span><span class="dot"></span></span><img class="flag" src="{{portrait}}">{{before}}<span class="who" style="color: {{color}}">{{name}}</span>{{after}}<img class="cameo" src="{{image}}"><span class="what">{{what}}</span><span class="tag {{tag}}">{{tagtext}}</span></div>
     </div>
   </div>
 </div>
