@@ -27,10 +27,10 @@
 // AI, which has no camera, gets the narrowed director, and with nobody picked it does nothing.
 // Scrolling with the keys or a drag, turning the camera or clicking the radar hands it back to the
 // watcher, who keeps the player he picked.  The screen's edge does not scroll while this drives:
-// the page's flags stand on the top edge and its panel on the right one, and reaching for either
-// used to scroll the map and take the camera from the director with nobody asking.
+// the page's panel stands on the right one, and reaching for it used to scroll the map and take the
+// camera from the director with nobody asking.
 //
-// The followed player is picked from his own list, not the seats: clicking a unit makes its owner
+// The followed player is picked from his own list, not the selection: clicking a unit makes its owner
 // the watched player, and the camera jumping to an enemy's screen on a click would be no use.  Fog
 // on draws the followed player's fog, what he has seen and what he has not, and hides what he
 // cannot see, stealthed units he has not detected included; following nobody it changes nothing.

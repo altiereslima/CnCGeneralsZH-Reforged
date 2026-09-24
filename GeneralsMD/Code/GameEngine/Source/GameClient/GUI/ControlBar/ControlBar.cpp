@@ -446,13 +446,11 @@ void ControlBar::markUIDirty( void )
 	* Watching - an observer, or a player knocked out who stayed to watch - the screen used to be
 	* populated with the watcher's own player, who owns no command sets at all, so the whole screen
 	* came up blank.  It follows the field instead: whatever is selected names its owner, and with
-	* nothing selected it is the player the seats at the top are pointed at, or the first side still in
-	* the match. */
+	* nothing selected it is the player being watched, or the first side still in the match. */
 //-------------------------------------------------------------------------------------------------
 /** The player a watcher has picked out by clicking one of his things, NULL when nothing is
 	* selected or the selection belongs to nobody who is still playing.  It is what narrows the
-	* whole screen to one player: his seat lit at the top, the skills on the right, the side the bar
-	* wears and whose promotion screen the key opens. */
+	* whole screen to one player: the side the bar wears and whose promotion screen the key opens. */
 Player *ControlBar::getSelectedPlayer( void )
 {
 	if( ThePlayerList->getLocalPlayer()->isPlayerActive() )
@@ -471,9 +469,9 @@ Player *ControlBar::getSelectedPlayer( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Watching, the selection drives the whole bar: clicking a unit is clicking its owner's seat at
-	* the top.  His seat lights, the portrait's panel comes up, and the bar wears his side's metal -
-	* and clicking empty ground puts everybody and the watcher's own plain bar back.
+/** Watching, the selection drives the whole bar: clicking a unit watches its owner.  The
+	* portrait's panel comes up and the bar wears his side's metal, and clicking empty ground puts
+	* everybody and the watcher's own plain bar back.
 	*
 	* Before this, picking up somebody's tank told you nothing about him: the bar stayed on whatever
 	* side had last been chosen off the list, and the money plate with it. */
@@ -5873,7 +5871,7 @@ void ControlBar::setDefaultControlBarConfig( void )
 	m_contextParent[ CP_MASTER ]->winHide(FALSE);
 
 	// the three panels the minimised bar stands down.  Watching, the middle is the player list, which
-	// the seats across the top of the screen have taken over, and the right is the selection's portrait
+	// the spectator page and the Tab scoreboard have taken over, and the right is the selection's portrait
 	showPanel( CB_PANEL_LEFT, TRUE );
 	showPanel( CB_PANEL_CENTER, !m_isObserverCommandBar );
 	showPanel( CB_PANEL_RIGHT, !m_isObserverCommandBar || getSelectedPlayer() != NULL );

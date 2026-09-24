@@ -1816,7 +1816,6 @@ enum
 	SPECTATOR_TOAST_FRAMES		= LOGICFRAMES_PER_SECOND * 8,	///< how long a "superweapon ready" message stays up
 	SPECTATOR_TOASTS_KEPT			= 4,		///< the most of those on screen at once; the oldest goes first
 	COMMAND_SLOTS_PER_COLUMN	= 2,		///< the command bar numbers its slots down each column, top then bottom
-	TWO_TEAMS									= 2,
 	PERCENT										= 100
 };
 
@@ -2125,7 +2124,7 @@ static std::string spectatorClock( UnsignedInt frame )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The players the camera can follow, grouped by team the way the seats are.  Which one it is
+/** The players the camera can follow, grouped by team the way the scoreboard is.  Which one it is
 	* following is marked every frame, not at the lists' rebuilds. */
 //-------------------------------------------------------------------------------------------------
 static void fillSpectatorFollows( std::vector< SpectatorStats > players, std::vector< HtmlValues > &entries )
@@ -2171,121 +2170,6 @@ static void fillSpectatorCameraValues( std::vector< HtmlValues > &follows, HtmlV
 	const HtmlValues head = spectatorHead( ThePlayerList->getNthPlayer( followed ) );
 	values[ "follow" ] = head.at( "name" );
 	values[ "followcolor" ] = head.at( "color" );
-}
-
-//-------------------------------------------------------------------------------------------------
-/** Every player still in the match for the pages a player sees: grouped by team, allies both ways
-	* sharing one, the local player's own team first.  Only the player and the team are filled in;
-	* `teams` is how many there are. */
-//-------------------------------------------------------------------------------------------------
-static std::vector< SpectatorStats > gatherSeats( Int &teams )
-{
-	std::vector< SpectatorStats > seats;
-	const Player *local = ThePlayerList->getLocalPlayer();
-	Int localTeam = -1;
-	teams = 0;
-	for( Int index = 0; index < ThePlayerList->getPlayerCount(); index++ )
-	{
-		Player *player = ThePlayerList->getNthPlayer( index );
-		if( player == NULL || !player->isPlayerActive() || !player->isPlayableSide() )
-			continue;
-
-		SpectatorStats seat = SpectatorStats();
-		seat.player = player;
-		seat.team = -1;
-		for( size_t earlier = 0; earlier < seats.size() && seat.team < 0; earlier++ )
-		{
-			const Player *other = seats[ earlier ].player;
-			if( player->getRelationship( other->getDefaultTeam() ) == ALLIES && other->getRelationship( player->getDefaultTeam() ) == ALLIES )
-				seat.team = seats[ earlier ].team;
-		}
-		if( seat.team < 0 )
-			seat.team = teams++;
-		if( player == local )
-			localTeam = seat.team;
-		seats.push_back( seat );
-	}
-
-	std::stable_sort( seats.begin(), seats.end(), [ localTeam ]( const SpectatorStats &a, const SpectatorStats &b )
-		{ return ( a.team == localTeam ? -1 : a.team ) < ( b.team == localTeam ? -1 : b.team ); } );
-	return seats;
-}
-
-static UnicodeString scoreboardTeamLabel( const GameSlot *slot );
-
-/** The lobby slot `player` sits in, NULL outside a game that has slots. */
-static const GameSlot *playerSlot( const Player *player )
-{
-	for( Int slotNum = 0; TheGameInfo && slotNum < MAX_SLOTS; slotNum++ )
-	{
-		AsciiString playerName;
-		playerName.format( "player%d", slotNum );
-		if( ThePlayerList->findPlayerWithNameKey( NAMEKEY( playerName ) ) == player )
-			return TheGameInfo->getConstSlot( slotNum );
-	}
-	return NULL;
-}
-
-//-------------------------------------------------------------------------------------------------
-/** The command bar page's "seats" list, the strip across the top of the screen while playing, one
-	* entry a team: kind "team" with its {{label}}, the lobby's team name, and its players in places
-	* s0 to s7, each {{sN.image}} their general, {{sN.color}}, and {{sN.weapon}} where their
-	* superweapons stand, "ready" once one can fire, "charging" while none can yet and "none" when they
-	* have none; an unused place has {{sN.state}} "none".  A player with no ally is an entry of kind
-	* "solo", with no frame or name, and a free for all past two players is one entry of kind "ffa",
-	* everybody side by side.  Between two entries stands one of kind "gap"; the match clock is on
-	* the Tab scoreboard. */
-//-------------------------------------------------------------------------------------------------
-static void fillPlayerSeats( const std::vector< SpectatorStats > &seats, Int teams,
-														 const std::vector< SpectatorSuperweapon > &weapons, std::vector< HtmlValues > &entries )
-{
-	entries.clear();
-	const Bool freeForAll = teams == (Int)seats.size() && teams > TWO_TEAMS;
-
-	for( size_t first = 0; first < seats.size(); )
-	{
-		HtmlValues group;
-		// the lobby's team name, or the team's place along the strip when the lobby set none
-		const GameSlot *slot = playerSlot( seats[ first ].player );
-		UnicodeString label;
-		if( slot && slot->getTeamNumber() >= 0 )
-			label.format( L"%s %s", TheGameText->fetch( "GUI:ScoreboardTeam" ).str(), scoreboardTeamLabel( slot ).str() );
-		else
-			label.format( L"%s %d", TheGameText->fetch( "GUI:ScoreboardTeam" ).str(), seats[ first ].team + 1 );
-		group[ "label" ] = WideCharStringToMultiByte( label.str() );
-
-		size_t end = first;
-		for( ; end < seats.size() && ( freeForAll || seats[ end ].team == seats[ first ].team ); end++ )
-		{
-			Bool owned = FALSE;
-			Bool ready = FALSE;
-			for( size_t weapon = 0; weapon < weapons.size(); weapon++ )
-			{
-				if( weapons[ weapon ].playerIndex != seats[ end ].player->getPlayerIndex() )
-					continue;
-				owned = TRUE;
-				ready = ready || weapons[ weapon ].ready;
-			}
-
-			const HtmlValues head = spectatorHead( seats[ end ].player );
-			const std::string place = "s" + std::to_string( end - first );
-			group[ place + ".image" ] = head.at( "image" );
-			group[ place + ".color" ] = head.at( "color" );
-			group[ place + ".weapon" ] = ready ? "ready" : owned ? "charging" : "none";
-		}
-		group[ "kind" ] = freeForAll ? "ffa" : end - first > 1 ? "team" : "solo";
-		for( size_t place = end - first; place < MAX_SLOTS; place++ )
-			group[ "s" + std::to_string( place ) + ".state" ] = "none";
-
-		if( !entries.empty() )
-		{
-			HtmlValues between;
-			between[ "kind" ] = "gap";
-			entries.push_back( between );
-		}
-		entries.push_back( group );
-		first = end;
-	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2352,10 +2236,9 @@ Bool InGameUI::pickSpectatorStat( Int commandSlot )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The spectator's page: the players across the top the way a player sees them, the camera, every
-	* player ranked by the number picked in the stat drop-down and each army's most expensive units,
-	* and a superweapon coming ready on the left.  The promotions and the production are on the Tab
-	* scoreboard.  Only while watching: the other side's worth is not a player's to know. */
+/** The spectator's page: the camera, every player ranked by the number picked in the stat drop-down
+	* and each army's most expensive units, and a superweapon coming ready on the left.  The players
+	* themselves, the promotions and the production are on the Tab scoreboard.  Only while watching: the other side's worth is not a player's to know. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawSpectatorPage( void )
 {
@@ -2388,11 +2271,6 @@ void InGameUI::drawSpectatorPage( void )
 		fillSpectatorPlayers( players, stat, m_spectatorLists[ "players" ] );
 		fillSpectatorArmies( players, m_spectatorLists[ "army" ] );
 		fillSpectatorFollows( players, m_spectatorLists[ "follows" ] );
-
-		// the strip across the top is the one a player has, grouped by the lobby's teams
-		Int seatTeams = 0;
-		const std::vector< SpectatorStats > seats = gatherSeats( seatTeams );
-		fillPlayerSeats( seats, seatTeams, m_spectatorSuperweapons, m_spectatorLists[ "seats" ] );
 
 		m_spectatorTotals.clear();
 		m_spectatorTotals[ "stat" ] = WideCharStringToMultiByte( TheGameText->fetch( stat.label ).str() );
@@ -2490,7 +2368,7 @@ void InGameUI::runSpectatorAction( const std::string &action )
 	}
 	else if( action.compare( 0, FOLLOW_ACTION.size(), FOLLOW_ACTION ) == 0 )
 	{
-		// following a player is watching him too: his seat lit, his side on the bar
+		// following a player is watching him too: his side on the bar and the page's steel
 		const std::string choice = action.substr( FOLLOW_ACTION.size() );
 		Player *player = choice == FOLLOW_NOBODY ? NULL : ThePlayerList->getNthPlayer( atoi( choice.c_str() ) );
 		m_spectatorFlipped.erase( FOLLOW_GROUP );
@@ -9689,7 +9567,7 @@ void InGameUI::addSuperweaponIcon( const Image *image, Int seconds, Int percent,
 void InGameUI::drawSuperweaponStrip( void )
 {
 	// watching, the spectator page's left panel lists the countdowns instead
-	// playing under the bar's page, the countdowns are on the Tab scoreboard and the strip of seats
+	// playing under the bar's page, the countdowns are on the Tab scoreboard
 	if( m_superweaponIconCount < 1 || stripSwitchedOff( &GlobalData::m_showSuperweaponStrip ) || m_spectatorPageShown ||
 			( m_controlBarPageShown && !localPlayerWatching() ) )
 		return;
@@ -11165,16 +11043,6 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	putPageRect( values, "workertab", workerStep, panelCount > 1 && shown[ 1 ] );
 	HtmlLists lists;
 	putPowerBar( values, lists[ "powercells" ] );	// after the stack, whose frame it divides into cells
-
-	// every player across the top of the screen, and whether each has a superweapon ready; a watcher's
-	// own page has its strip there
-	// gathered first: an argument list may read `teams` before gatherSeats has counted them
-	if( !watching )
-	{
-		Int teams = 0;
-		const std::vector< SpectatorStats > seats = gatherSeats( teams );
-		fillPlayerSeats( seats, teams, m_spectatorSuperweapons, lists[ "seats" ] );
-	}
 
 	// a well behind each of the fourteen command buttons, shown or not, so the grid reads as a grid
 	// with the steel between its places, and an empty place is a hole in it rather than bare dark
