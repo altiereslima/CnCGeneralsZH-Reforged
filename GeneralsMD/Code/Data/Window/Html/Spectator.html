@@ -156,7 +156,9 @@
 
   .players { margin: 2px 3px 0 3px; }
   .player { position: relative; height: 18px; border-bottom: 1px solid rgba(119, 131, 145, 0.18); }
-  .player .tray { position: absolute; left: 1px; top: 0; }
+  /* the emblem as tall as its row, at the flag's 5:3 the top strip draws it at */
+  .player .tray { position: absolute; left: 1px; top: 0; width: 30px; }
+  .player .emblem { left: 0; top: 0; width: 30px; height: 18px; }
   .name { position: absolute; left: 34px; top: 1px; line-height: 10px; }
   .value { position: absolute; right: 3px; top: 1px; line-height: 10px; font-weight: bold; color: #e8d27a; }
   .meter { position: absolute; left: 34px; right: 3px; top: 12px; height: 3px; background-color: #030709; }
@@ -175,8 +177,8 @@
   .army { overflow: hidden; padding: 0 1px 3px 1px; }
   .army .cell { float: left; position: relative; width: 19px; height: 17px; margin: 1px 1px 0 0; }
   .army .cell img { position: absolute; left: 1px; top: 1px; width: 17px; height: 15px; }
-  .army .cell.head { clear: left; width: 28px; height: 18px; margin-right: 2px; }
-  .army .cell.head img { left: 4px; top: 3px; width: 20px; height: 12px; }
+  .army .cell.head { clear: left; width: 30px; height: 18px; margin-right: 1px; }
+  .army .cell.head img { left: 0; top: 0; width: 30px; height: 18px; }
   .count { position: absolute; right: 2px; bottom: 0; font-size: 8px; font-weight: bold; color: #ffffff; }
 </style>
 </head>
