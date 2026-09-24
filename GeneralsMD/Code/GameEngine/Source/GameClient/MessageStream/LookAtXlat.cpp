@@ -48,6 +48,7 @@
 #include "GameClient/View.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/LookAtXlat.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameLogic/Module/UpdateModule.h"
 #include "GameLogic/GameLogic.h"
 
@@ -405,8 +406,10 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			// the pointer has to be over the window: the position below is the last one the mouse
 			// device was told about, and a pointer that has left a windowed game left through an
 			// edge, so believing it would scroll the map for as long as the mouse sat on the desktop.
+			// Nor while a watcher's director or player camera drives: the spectator page stands on the
+			// top and right edges, and the pointer on its way to it took the camera away (ObserverCamera.h).
 			const Bool edgeScrollAllowed = (!TheGlobalData->m_windowed || TheGlobalData->m_edgeScrollInWindowedMode)
-																			&& TheMouse->isCursorInWindow();
+																			&& TheMouse->isCursorInWindow() && !TheObserverCamera.isDriving();
 
 			if (m_isScrolling)
 			{

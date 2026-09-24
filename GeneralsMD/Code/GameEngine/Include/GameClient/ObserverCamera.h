@@ -25,8 +25,10 @@
 // counts only the fights that player is in.  Player shows what the followed player's own screen
 // shows: a player's camera comes over the network a few times a second (MSG_SET_REPLAY_CAMERA), an
 // AI, which has no camera, gets the narrowed director, and with nobody picked it does nothing.
-// Scrolling, turning the camera or clicking the radar hands it back to the watcher, who keeps the
-// player he picked.
+// Scrolling with the keys or a drag, turning the camera or clicking the radar hands it back to the
+// watcher, who keeps the player he picked.  The screen's edge does not scroll while this drives:
+// the page's flags stand on the top edge and its panel on the right one, and reaching for either
+// used to scroll the map and take the camera from the director with nobody asking.
 //
 // The followed player is picked from his own list, not the seats: clicking a unit makes its owner
 // the watched player, and the camera jumping to an enemy's screen on a click would be no use.  Fog
@@ -92,6 +94,8 @@ public:
 	/// the player being followed, still while the watcher has the camera in his own hands, or
 	/// NO_PLAYER
 	Int getFollowedPlayerIndex( void ) const { return m_followed; }
+	/// the camera is where this put it last frame, the director's or a player's
+	Bool isDriving( void ) const { return m_driving; }
 	Bool isFogOn( void ) const { return m_fog; }
 	void setFog( Bool fog ) { m_fog = fog; }
 

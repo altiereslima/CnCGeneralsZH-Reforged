@@ -26,16 +26,13 @@
     {{side}}              "america", "china" or "gla": the side whose command bar is on screen
     {{stat}}              the label of the picked stat
     {{statkey:stat}}      the key that picks that stat: the command bar's top row, "Q" and so on
-    {{teams}}             how many teams are left
     data-each="players", one copy per player still in the match, ranked by the picked stat, with
-      {{name}} {{value}} {{share}} (percent of the highest) {{networth}} {{color}} {{team}} {{teams}}
+      {{name}} {{value}} {{share}} (percent of the highest) {{networth}} {{color}}
       {{portrait}} (a mapped image name, for <img src>)
     data-each="seats", ControlBar.html's list: one entry a team, {{kind}} "team" with {{label}},
       "solo" or "ffa", its players in places s0 to s7 with {{sN.image}} {{sN.color}} {{sN.weapon}},
-      {{sN.state}} "none" on an unused place, and here {{sN.click}} "watch:N" and {{sN.watched}}
-      "watched" while he is the one looked at; kind "gap" between two entries.  A data-click of
-      watch:N looks at player N, what his button in the old player list did, and watch:N on the one
-      already looked at goes back to everybody
+      {{sN.state}} "none" on an unused place; kind "gap" between two entries.  Nothing on it is
+      clicked: the camera's player drop-down is where a player is picked
     data-each="army", every player's run: a {{kind}} "head" entry carrying {{image}} (his general),
       {{color}} and {{name}}, then up to six "unit" entries, the most money first, with {{image}}
       {{count}}
@@ -91,8 +88,7 @@
   /* each their general's flag filling a hairline frame with their colour along its top, and under
      it a band for their superweapons, green once one can fire, blue while none can yet, grey when
      they have none.  A team hangs in a plate of the steel with its name under the flags; a free for
-     all is everybody side by side.  A flag is the old player list's button: the pointer lights its
-     frame, and the player being watched has his in gold */
+     all is everybody side by side */
   #seats { position: absolute; left: 180px; right: 180px; top: 0; text-align: center; }
   .steam, .sffa, .ssolo, .sgap { display: inline-block; position: relative; vertical-align: top; }
   .steam { padding: 0 2px 1px 2px; border: 1px solid #0c1114; border-top: 0; border-left-color: #b3bbc4;
@@ -111,8 +107,6 @@
   .flag .lamp.ready { background-color: #4fd83a; }
   .flag .lamp.charging { background-color: #3a8ee8; }
   .flag .lamp.none { background-color: #6a737c; }
-  .flag:hover .frame, .flag:hover .lamp { border-color: #dfe5ea; }
-  .flag.watched .frame, .flag.watched .lamp { border-color: #e8d27a; }
   .sgap { width: 8px; height: 26px; }
 
   .row { padding: 2px 6px; color: #c9d2d9; }
@@ -166,9 +160,11 @@
   .name { position: absolute; left: 34px; top: 1px; line-height: 10px; }
   .value { position: absolute; right: 3px; top: 1px; line-height: 10px; font-weight: bold; color: #e8d27a; }
   .meter { position: absolute; left: 34px; right: 3px; top: 12px; height: 3px; background-color: #030709; }
+  /* the bar is the player's own colour, like his name; a two-sided match used to paint one side's
+     bars green and the other's red, so a blue name stood over a red bar */
   .fill { height: 3px; }
-  .teams2.team0 .fill { background-image: url(PowerBarGreen); }
-  .teams2.team1 .fill { background-image: url(PowerBarRed); }
+  /* the board's emblems stand bare, with no tray round them */
+  .player .tray, .army .cell.head { background-image: none; }
 
   .button { height: 11px; line-height: 11px; margin: 3px 3px 0 3px; text-align: center; font-size: 8px; color: #c9d2d9; }
   .button.flipped { color: #b8f08a; }
@@ -190,14 +186,14 @@
 <div id="seats">
   <div class="s{{kind}}" data-each="seats">
     <div class="flags">
-      <div class="flag {{s0.state}} {{s0.watched}}" data-click="{{s0.click}}"><div class="frame"><div class="stripe" style="background-color: {{s0.color}}"></div><img class="emblem" src="{{s0.image}}"></div><div class="lamp {{s0.weapon}}"></div></div>
-      <div class="flag {{s1.state}} {{s1.watched}}" data-click="{{s1.click}}"><div class="frame"><div class="stripe" style="background-color: {{s1.color}}"></div><img class="emblem" src="{{s1.image}}"></div><div class="lamp {{s1.weapon}}"></div></div>
-      <div class="flag {{s2.state}} {{s2.watched}}" data-click="{{s2.click}}"><div class="frame"><div class="stripe" style="background-color: {{s2.color}}"></div><img class="emblem" src="{{s2.image}}"></div><div class="lamp {{s2.weapon}}"></div></div>
-      <div class="flag {{s3.state}} {{s3.watched}}" data-click="{{s3.click}}"><div class="frame"><div class="stripe" style="background-color: {{s3.color}}"></div><img class="emblem" src="{{s3.image}}"></div><div class="lamp {{s3.weapon}}"></div></div>
-      <div class="flag {{s4.state}} {{s4.watched}}" data-click="{{s4.click}}"><div class="frame"><div class="stripe" style="background-color: {{s4.color}}"></div><img class="emblem" src="{{s4.image}}"></div><div class="lamp {{s4.weapon}}"></div></div>
-      <div class="flag {{s5.state}} {{s5.watched}}" data-click="{{s5.click}}"><div class="frame"><div class="stripe" style="background-color: {{s5.color}}"></div><img class="emblem" src="{{s5.image}}"></div><div class="lamp {{s5.weapon}}"></div></div>
-      <div class="flag {{s6.state}} {{s6.watched}}" data-click="{{s6.click}}"><div class="frame"><div class="stripe" style="background-color: {{s6.color}}"></div><img class="emblem" src="{{s6.image}}"></div><div class="lamp {{s6.weapon}}"></div></div>
-      <div class="flag {{s7.state}} {{s7.watched}}" data-click="{{s7.click}}"><div class="frame"><div class="stripe" style="background-color: {{s7.color}}"></div><img class="emblem" src="{{s7.image}}"></div><div class="lamp {{s7.weapon}}"></div></div>
+      <div class="flag {{s0.state}}"><div class="frame"><div class="stripe" style="background-color: {{s0.color}}"></div><img class="emblem" src="{{s0.image}}"></div><div class="lamp {{s0.weapon}}"></div></div>
+      <div class="flag {{s1.state}}"><div class="frame"><div class="stripe" style="background-color: {{s1.color}}"></div><img class="emblem" src="{{s1.image}}"></div><div class="lamp {{s1.weapon}}"></div></div>
+      <div class="flag {{s2.state}}"><div class="frame"><div class="stripe" style="background-color: {{s2.color}}"></div><img class="emblem" src="{{s2.image}}"></div><div class="lamp {{s2.weapon}}"></div></div>
+      <div class="flag {{s3.state}}"><div class="frame"><div class="stripe" style="background-color: {{s3.color}}"></div><img class="emblem" src="{{s3.image}}"></div><div class="lamp {{s3.weapon}}"></div></div>
+      <div class="flag {{s4.state}}"><div class="frame"><div class="stripe" style="background-color: {{s4.color}}"></div><img class="emblem" src="{{s4.image}}"></div><div class="lamp {{s4.weapon}}"></div></div>
+      <div class="flag {{s5.state}}"><div class="frame"><div class="stripe" style="background-color: {{s5.color}}"></div><img class="emblem" src="{{s5.image}}"></div><div class="lamp {{s5.weapon}}"></div></div>
+      <div class="flag {{s6.state}}"><div class="frame"><div class="stripe" style="background-color: {{s6.color}}"></div><img class="emblem" src="{{s6.image}}"></div><div class="lamp {{s6.weapon}}"></div></div>
+      <div class="flag {{s7.state}}"><div class="frame"><div class="stripe" style="background-color: {{s7.color}}"></div><img class="emblem" src="{{s7.image}}"></div><div class="lamp {{s7.weapon}}"></div></div>
     </div>
     <div class="teamname">{{label}}</div>
   </div>
@@ -263,7 +259,7 @@
   </div>
 
   <div class="players">
-    <div class="player teams{{teams}} team{{team}}" data-each="players">
+    <div class="player" data-each="players">
       <div class="tray"><img class="emblem" src="{{portrait}}"></div>
       <span class="name" style="color: {{color}}">{{name}}</span>
       <span class="value">{{value}}</span>

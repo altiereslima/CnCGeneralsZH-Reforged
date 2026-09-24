@@ -1788,7 +1788,6 @@ static Real elevatedReach( Real reach, Real range, const Coord3D &center, Real a
 static const char *const SPECTATOR_PAGE = "Window\\Html\\Spectator.html";
 static const std::string FLIP_ACTION = "flip:";
 static const std::string PICK_ACTION = "pick:";
-static const std::string WATCH_ACTION = "watch:";
 // data-click="camera:free", "camera:director" or "camera:player" picks who drives the camera
 // (ObserverCamera.h) and folds up flip:camera; "follow:N" or "follow:none" picks the player it
 // follows and folds up flip:follow; "fog" turns the followed player's fog on and off
@@ -1944,14 +1943,14 @@ static void addObjectStats( Object *obj, void *userData )
 
 //-------------------------------------------------------------------------------------------------
 /** Everyone still in the match with his numbers, ranked by `stat`.  Allies both ways share a team
-	* number, counted in the order the teams first appear in the player list; `teams` is how many. */
+	* number, counted in the order the teams first appear in the player list. */
 //-------------------------------------------------------------------------------------------------
-static std::vector< SpectatorStats > gatherSpectatorStats( const SpectatorStat &stat, Int &teams )
+static std::vector< SpectatorStats > gatherSpectatorStats( const SpectatorStat &stat )
 {
 	std::vector< SpectatorStats > players;
 	const Player *local = ThePlayerList->getLocalPlayer();
 	const UnsignedInt frame = TheGameLogic->getFrame();
-	teams = 0;
+	Int teams = 0;
 	for( Int index = 0; index < ThePlayerList->getPlayerCount(); index++ )
 	{
 		Player *player = ThePlayerList->getNthPlayer( index );
@@ -1991,11 +1990,9 @@ static std::vector< SpectatorStats > gatherSpectatorStats( const SpectatorStat &
 
 //-------------------------------------------------------------------------------------------------
 /** The page's "players" list: one entry per player in the order `players` is ranked, the picked
-	* number written out and as a percentage of the highest.  Every entry carries how many teams
-	* there are, so a page can colour two sides the way Dota does and leave a free for all in the
-	* players' own colours. */
+	* number written out and as a percentage of the highest. */
 //-------------------------------------------------------------------------------------------------
-static void fillSpectatorPlayers( const std::vector< SpectatorStats > &players, const SpectatorStat &stat, Int teams,
+static void fillSpectatorPlayers( const std::vector< SpectatorStats > &players, const SpectatorStat &stat,
 																	std::vector< HtmlValues > &rows )
 {
 	Int highest = 0;
@@ -2024,8 +2021,6 @@ static void fillSpectatorPlayers( const std::vector< SpectatorStats > &players, 
 		row[ "networth" ] = std::to_string( stats.networth );
 		row[ "share" ] = std::to_string( highest > 0 && value > 0 ? value * PERCENT / highest : 0 );
 		row[ "color" ] = cssColor( clientPlayerColor( stats.player ) );
-		row[ "team" ] = std::to_string( stats.team );
-		row[ "teams" ] = std::to_string( teams );
 		row[ "portrait" ] = portrait ? portrait->getName().str() : "";
 		rows.push_back( row );
 	}
@@ -2277,8 +2272,6 @@ static void fillPlayerSeats( const std::vector< SpectatorStats > &seats, Int tea
 			group[ place + ".image" ] = head.at( "image" );
 			group[ place + ".color" ] = head.at( "color" );
 			group[ place + ".weapon" ] = ready ? "ready" : owned ? "charging" : "none";
-			group[ place + ".click" ] = WATCH_ACTION + std::to_string( seats[ end ].player->getPlayerIndex() );
-			group[ place + ".watched" ] = seats[ end ].player == TheControlBar->getObserverLookAtPlayer() ? "watched" : "";
 		}
 		group[ "kind" ] = freeForAll ? "ffa" : end - first > 1 ? "team" : "solo";
 		for( size_t place = end - first; place < MAX_SLOTS; place++ )
@@ -2384,16 +2377,15 @@ void InGameUI::drawSpectatorPage( void )
 	if( m_spectatorOverlay == NULL )
 		m_spectatorOverlay = new HtmlOverlay( m_superweaponNormalFont );
 
-	// a seat clicked or a unit selected moves the gold mark the same frame, not half a second on
+	// a unit selected turns the page to his side's steel the same frame, not half a second on
 	const UnsignedInt frame = TheGameLogic->getFrame();
 	const Player *watched = TheControlBar->getObserverLookAtPlayer();
 	if( m_spectatorLists.empty() || watched != m_spectatorListsWatched
 			|| frame < m_spectatorListsFrame || frame >= m_spectatorListsFrame + NET_WORTH_REFRESH_FRAMES )
 	{
 		const SpectatorStat &stat = spectatorStat( m_spectatorPicked );
-		Int teams = 0;
-		const std::vector< SpectatorStats > players = gatherSpectatorStats( stat, teams );
-		fillSpectatorPlayers( players, stat, teams, m_spectatorLists[ "players" ] );
+		const std::vector< SpectatorStats > players = gatherSpectatorStats( stat );
+		fillSpectatorPlayers( players, stat, m_spectatorLists[ "players" ] );
 		fillSpectatorArmies( players, m_spectatorLists[ "army" ] );
 		fillSpectatorFollows( players, m_spectatorLists[ "follows" ] );
 
@@ -2405,7 +2397,6 @@ void InGameUI::drawSpectatorPage( void )
 		m_spectatorTotals.clear();
 		m_spectatorTotals[ "stat" ] = WideCharStringToMultiByte( TheGameText->fetch( stat.label ).str() );
 		m_spectatorTotals[ PICK_ACTION + STAT_GROUP + ":" + stat.key ] = "on";
-		m_spectatorTotals[ "teams" ] = std::to_string( teams );
 		m_spectatorTotals[ "side" ] = spectatorSide();
 		for( Int each = 0; each < (Int)ARRAY_SIZE( SPECTATOR_STATS ); each++ )
 			m_spectatorTotals[ std::string( "statkey:" ) + SPECTATOR_STATS[ each ].key ] = commandSlotKey( each * COMMAND_SLOTS_PER_COLUMN );
@@ -2483,24 +2474,6 @@ void InGameUI::runSpectatorAction( const std::string &action )
 		m_spectatorPicked[ group ] = pick.substr( colon + 1 );
 		m_spectatorFlipped.erase( group );
 		m_spectatorLists.clear();
-	}
-	else if( action.compare( 0, WATCH_ACTION.size(), WATCH_ACTION ) == 0 )
-	{
-		// a seat across the top is that player's button in the old player list, and the seat already
-		// being watched is the list's cancel.  A selection would keep the promotions and the skills on
-		// its own owner whatever the seat says, so the seat takes the whole screen and clears it
-		Player *player = ThePlayerList->getNthPlayer( atoi( action.c_str() + WATCH_ACTION.size() ) );
-		Player *watched = player == TheControlBar->getObserverLookAtPlayer() ? NULL : player;
-		deselectAllDrawables();
-		TheControlBar->watchPlayer( watched );
-
-		// a replay with the recorded camera switched on in the options follows whoever is watched,
-		// what picking him in the old player list did
-		if( TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK && TheGlobalData->m_useCameraInReplay )
-		{
-			TheObserverCamera.followPlayer( watched != NULL ? watched->getPlayerIndex() : ObserverCamera::NO_PLAYER );
-			TheObserverCamera.setMode( watched != NULL ? OBSERVER_CAMERA_PLAYER : OBSERVER_CAMERA_FREE );
-		}
 	}
 	else if( action.compare( 0, CAMERA_ACTION.size(), CAMERA_ACTION ) == 0 )
 	{
