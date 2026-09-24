@@ -22,10 +22,6 @@ LZH_COMMIT = "dfd96e2ca64adaddb35dd4ebadd6add7d5586783"
 # Mesmo commit que GeneralsMD/Code/Tools/vendor.ps1 usa (min-dx8-sdk @ 7bddff8).
 DX8_REPO = "https://github.com/TheSuperHackers/min-dx8-sdk.git"
 DX8_COMMIT = "7bddff8c01f5fb931c3cb73d4aa8e66d303d97bc"
-LITEHTML_COMMIT = "9bc84b8b8d15a4e50f18b327aa30955048b441c2"
-NANOSVG_COMMIT = "239e102ec2c691f2902e20ace2ed36ee4a35cfe6"
-LITEHTML_URL = f"https://github.com/litehtml/litehtml/archive/{LITEHTML_COMMIT}.zip"
-NANOSVG_URL = f"https://github.com/memononen/nanosvg/archive/{NANOSVG_COMMIT}.zip"
 # extra/ não pode ser copiado inteiro: basetsd.h, d3d.h, ddraw.h e dsound.h de lá
 # sombreiam o Windows SDK moderno e quebram winnt.h. Só estes três são usados.
 DX8_EXTRA_FILES = ["d3dxmath.h", "d3dxmath.inl", "d3dxerr.h"]
@@ -344,67 +340,6 @@ def install_directx(repo: Path, source_override: Path|None):
         "commit":DX8_COMMIT,
     }
 
-def archive_source(url: str, name: str, temp_root: Path) -> Path:
-    archive=temp_root/(name+".zip")
-    extracted=temp_root/"extracted"
-    extracted.mkdir()
-    download(url,archive)
-    with zipfile.ZipFile(archive) as zf:
-        safe_extract_zip(zf,extracted)
-    roots=[p for p in extracted.iterdir() if p.is_dir()]
-    if len(roots)!=1:
-        raise RuntimeError(f"arquivo {name} não contém uma única árvore de código")
-    return roots[0]
-
-def validate_litehtml(path: Path):
-    if not (path/"CMakeLists.txt").is_file():
-        raise RuntimeError("litehtml inválido: CMakeLists.txt ausente")
-
-def install_litehtml(repo: Path, source_override: Path|None):
-    dst=repo/"GeneralsMD/Code/Libraries/Source/litehtml"
-    if (dst/"CMakeLists.txt").is_file():
-        return {"status":"PRESENT","path":str(dst)}
-
-    if source_override:
-        validate_litehtml(source_override)
-        refill_vendored_dir(dst, lambda d: shutil.copytree(source_override,d,dirs_exist_ok=True))
-        return {"status":"INSTALLED_FROM_OVERRIDE","path":str(dst)}
-
-    with tempfile.TemporaryDirectory(prefix="zh-litehtml-") as td:
-        source=archive_source(LITEHTML_URL,"litehtml",Path(td))
-        validate_litehtml(source)
-        refill_vendored_dir(dst, lambda d: shutil.copytree(source,d,dirs_exist_ok=True))
-    validate_litehtml(dst)
-    return {"status":"INSTALLED","path":str(dst),"commit":LITEHTML_COMMIT}
-
-def validate_nanosvg_source(path: Path):
-    required=["src/nanosvg.h","src/nanosvgrast.h","LICENSE.txt"]
-    missing=[name for name in required if not (path/name).is_file()]
-    if missing:
-        raise RuntimeError("nanosvg inválido: "+", ".join(missing))
-
-def install_nanosvg(repo: Path, source_override: Path|None):
-    dst=repo/"GeneralsMD/Code/Libraries/Source/nanosvg"
-    if all((dst/name).is_file() for name in ("nanosvg.h","nanosvgrast.h")):
-        return {"status":"PRESENT","path":str(dst)}
-
-    def copy_headers(source: Path):
-        validate_nanosvg_source(source)
-        def fill(d: Path):
-            for name in ("nanosvg.h","nanosvgrast.h"):
-                shutil.copy2(source/"src"/name,d/name)
-            shutil.copy2(source/"LICENSE.txt",d/"LICENSE.txt")
-        refill_vendored_dir(dst,fill)
-
-    if source_override:
-        copy_headers(source_override)
-        return {"status":"INSTALLED_FROM_OVERRIDE","path":str(dst)}
-
-    with tempfile.TemporaryDirectory(prefix="zh-nanosvg-") as td:
-        source=archive_source(NANOSVG_URL,"nanosvg",Path(td))
-        copy_headers(source)
-    return {"status":"INSTALLED","path":str(dst),"commit":NANOSVG_COMMIT}
-
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--repo",required=True)
@@ -416,10 +351,6 @@ def main():
                     help="fixture/offline override for flat LZH-Light 1.0 source tree")
     ap.add_argument("--dx8-source",default=None,
                     help="fixture/offline override for an already extracted min-dx8-sdk tree")
-    ap.add_argument("--litehtml-source",default=None,
-                    help="fixture/offline override for an already extracted litehtml tree")
-    ap.add_argument("--nanosvg-source",default=None,
-                    help="fixture/offline override for an already extracted nanosvg tree")
     args=ap.parse_args()
 
     repo=Path(args.repo).resolve()
@@ -431,8 +362,6 @@ def main():
         g=install_gamespy(repo, Path(args.gamespy_source).resolve() if args.gamespy_source else None)
         l=install_lzh(repo, Path(args.lzh_source).resolve() if args.lzh_source else None)
         d=install_directx(repo, Path(args.dx8_source).resolve() if args.dx8_source else None)
-        h=install_litehtml(repo, Path(args.litehtml_source).resolve() if args.litehtml_source else None)
-        n=install_nanosvg(repo, Path(args.nanosvg_source).resolve() if args.nanosvg_source else None)
     except Exception as exc:
         # No Actions vira anotação no resumo do run, que abre sem login.
         if os.environ.get("GITHUB_ACTIONS"):
@@ -445,8 +374,6 @@ def main():
     print("gamespy:",g)
     print("lzh:",l)
     print("directx:",d)
-    print("litehtml:",h)
-    print("nanosvg:",n)
 
 if __name__=="__main__":
     main()
