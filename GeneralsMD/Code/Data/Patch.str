@@ -1178,6 +1178,26 @@ GUI:HudArmies
 "Armies"
 END
 
+// the spectator's camera drop-down, "Camera: Director"
+GUI:HudCamera
+"Camera"
+END
+
+// the camera goes to the biggest fight on the map by itself
+GUI:HudCameraDirector
+"Director"
+END
+
+// the camera is the spectator's own again
+GUI:HudCameraFree
+"Free"
+END
+
+// draw the followed player's fog of war, so the spectator sees only what he sees
+GUI:HudFog
+"Fog of war"
+END
+
 // under a superweapon's name in the spectator's feed, the moment it can fire
 GUI:HudSuperweaponReady
 "ready to fire"

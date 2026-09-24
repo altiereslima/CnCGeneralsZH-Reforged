@@ -79,6 +79,7 @@
 #include "GameClient/PlayerColorScheme.h"
 #include "GameClient/VideoPlayer.h"
 #include "GameClient/Mouse.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameClient/Keyboard.h"
 #include "GameClient/GadgetStaticText.h"
 #include "GameClient/View.h"
@@ -1791,6 +1792,13 @@ static const std::string OPTION_ACTION = "option:";
 static const std::string FLIP_ACTION = "flip:";
 static const std::string PICK_ACTION = "pick:";
 static const std::string WATCH_ACTION = "watch:";
+// data-click="camera:director", "camera:free" or "camera:N" drives the camera (ObserverCamera.h) and
+// folds up flip:camera; data-click="fog" turns the followed player's fog on and off
+static const std::string CAMERA_ACTION = "camera:";
+static const std::string CAMERA_DIRECTOR = "director";
+static const std::string CAMERA_FREE = "free";
+static const std::string CAMERA_GROUP = "camera";
+static const std::string FOG_ACTION = "fog";
 static const std::string TEXT_LOOKUP = "text:";
 static const std::string STAT_GROUP = "stat";
 
@@ -2205,6 +2213,53 @@ static void fillSpectatorTop( std::vector< SpectatorStats > players, std::vector
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The players the camera can follow, grouped by team the way the seats are.  Which one it is
+	* following is marked every frame, since scrolling by hand lets go of him between two of the
+	* lists' rebuilds. */
+//-------------------------------------------------------------------------------------------------
+static void fillSpectatorCameras( std::vector< SpectatorStats > players, std::vector< HtmlValues > &entries )
+{
+	std::stable_sort( players.begin(), players.end(),
+										[]( const SpectatorStats &a, const SpectatorStats &b ) { return a.team < b.team; } );
+
+	entries.clear();
+	for( size_t index = 0; index < players.size(); index++ )
+	{
+		HtmlValues entry = spectatorHead( players[ index ].player );
+		entry[ "click" ] = CAMERA_ACTION + std::to_string( players[ index ].player->getPlayerIndex() );
+		entries.push_back( entry );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** What the camera's drop-down and the fog switch show this frame. */
+//-------------------------------------------------------------------------------------------------
+static void fillSpectatorCameraValues( std::vector< HtmlValues > &cameras, HtmlValues &values )
+{
+	const Int followed = TheObserverCamera.getFollowedPlayerIndex();
+	const ObserverCameraMode mode = TheObserverCamera.getMode();
+	const std::string followedClick = CAMERA_ACTION + std::to_string( followed );
+	for( size_t index = 0; index < cameras.size(); index++ )
+		cameras[ index ][ "on" ] = mode == OBSERVER_CAMERA_PLAYER && cameras[ index ][ "click" ] == followedClick ? "on" : "";
+
+	const char *label = mode == OBSERVER_CAMERA_DIRECTOR ? "GUI:HudCameraDirector" : "GUI:HudCameraFree";
+	values[ "camera" ] = WideCharStringToMultiByte( TheGameText->fetch( label ).str() );
+	values[ "cameradirector" ] = mode == OBSERVER_CAMERA_DIRECTOR ? "on" : "";
+	values[ "camerafree" ] = mode == OBSERVER_CAMERA_FREE && followed == ObserverCamera::NO_PLAYER ? "on" : "";
+	values[ "fog" ] = TheObserverCamera.isFogOn() ? "on" : "";
+	values[ "fogname" ] = "";
+	values[ "fogcolor" ] = "";
+	if( followed == ObserverCamera::NO_PLAYER )
+		return;
+
+	const HtmlValues head = spectatorHead( ThePlayerList->getNthPlayer( followed ) );
+	if( mode == OBSERVER_CAMERA_PLAYER )
+		values[ "camera" ] = head.at( "name" );
+	values[ "fogname" ] = head.at( "name" );
+	values[ "fogcolor" ] = head.at( "color" );
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Every player still in the match for the pages a player sees: grouped by team, allies both ways
 	* sharing one, the local player's own team first.  Only the player and the team are filled in;
 	* `teams` is how many there are. */
@@ -2489,6 +2544,7 @@ void InGameUI::drawSpectatorPage( void )
 		fillSpectatorPlayers( players, stat, teams, m_spectatorLists[ "players" ] );
 		fillSpectatorArmies( players, m_spectatorLists[ "army" ] );
 		fillSpectatorTop( players, m_spectatorLists[ "top" ] );
+		fillSpectatorCameras( players, m_spectatorLists[ "cameras" ] );
 		fillSpectatorSuperweapons( players, m_spectatorSuperweapons, m_spectatorLists[ "superweapons" ] );
 		fillSpectatorSkills( players, m_spectatorLists[ "skills" ] );
 
@@ -2529,6 +2585,7 @@ void InGameUI::drawSpectatorPage( void )
 	}
 
 	HtmlValues values = m_spectatorTotals;
+	fillSpectatorCameraValues( m_spectatorLists[ "cameras" ], values );
 	for( std::map< std::string, std::string >::const_iterator pick = m_spectatorPicked.begin(); pick != m_spectatorPicked.end(); ++pick )
 	{
 		values[ PICK_ACTION + pick->first ] = pick->second;
@@ -2558,7 +2615,13 @@ Bool InGameUI::handleSpectatorPageClick( const ICoord2D *mouse, Bool act )
 	if( !act )
 		return TRUE;
 
-	const std::string action = m_spectatorOverlay->click( *mouse );
+	runSpectatorAction( m_spectatorOverlay->click( *mouse ) );
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
+void InGameUI::runSpectatorAction( const std::string &action )
+{
 	if( action.compare( 0, FLIP_ACTION.size(), FLIP_ACTION ) == 0 )
 	{
 		const std::string name = action.substr( FLIP_ACTION.size() );
@@ -2572,7 +2635,7 @@ Bool InGameUI::handleSpectatorPageClick( const ICoord2D *mouse, Bool act )
 		if( colon == std::string::npos )
 		{
 			DEBUG_LOG(( "Spectator page: data-click=\"%s\" is not pick:group:choice\n", action.c_str() ));
-			return TRUE;
+			return;
 		}
 
 		const std::string group = pick.substr( 0, colon );
@@ -2589,14 +2652,43 @@ Bool InGameUI::handleSpectatorPageClick( const ICoord2D *mouse, Bool act )
 		Player *watched = player == TheControlBar->getObserverLookAtPlayer() ? NULL : player;
 		deselectAllDrawables();
 		TheControlBar->watchPlayer( watched );
+
+		// a replay with the recorded camera switched on in the options follows whoever is watched,
+		// what picking him in the old player list did
+		if( TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK && TheGlobalData->m_useCameraInReplay )
+		{
+			if( watched != NULL )
+				TheObserverCamera.followPlayer( watched->getPlayerIndex() );
+			else
+				TheObserverCamera.setMode( OBSERVER_CAMERA_FREE );
+		}
 	}
+	else if( action.compare( 0, CAMERA_ACTION.size(), CAMERA_ACTION ) == 0 )
+	{
+		const std::string choice = action.substr( CAMERA_ACTION.size() );
+		m_spectatorFlipped.erase( CAMERA_GROUP );
+		if( choice == CAMERA_DIRECTOR )
+			TheObserverCamera.setMode( OBSERVER_CAMERA_DIRECTOR );
+		else if( choice == CAMERA_FREE )
+			TheObserverCamera.setMode( OBSERVER_CAMERA_FREE );
+		else
+		{
+			// following a player is watching him too: his seat lit, his side on the bar
+			Player *player = ThePlayerList->getNthPlayer( atoi( choice.c_str() ) );
+			deselectAllDrawables();
+			TheControlBar->watchPlayer( player );
+			TheObserverCamera.followPlayer( player->getPlayerIndex() );
+		}
+	}
+	else if( action == FOG_ACTION )
+		TheObserverCamera.setFog( !TheObserverCamera.isFogOn() );
 	else if( action.compare( 0, OPTION_ACTION.size(), OPTION_ACTION ) == 0 )
 	{
 		const OptionDef *option = findOptionDef( action.substr( OPTION_ACTION.size() ).c_str() );
 		if( option == NULL || option->kind != OPTION_BOOL )
 		{
 			DEBUG_LOG(( "Spectator page: data-click=\"%s\" names no on/off option\n", action.c_str() ));
-			return TRUE;
+			return;
 		}
 
 		const Bool now = !option->get();
@@ -2606,7 +2698,6 @@ Bool InGameUI::handleSpectatorPageClick( const ICoord2D *mouse, Bool act )
 		pref[ AsciiString( option->iniKey ) ] = AsciiString( now ? "yes" : "no" );
 		pref.write();
 	}
-	return TRUE;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3945,6 +4036,11 @@ void InGameUI::update( void )
 	// alt-tab does not fling the camera across the map on the first frame.  See FINDINGS.md 7.4.
 	//
 	const UnsignedInt cameraNowMs = timeGetTime();
+
+	// a watcher's camera is driven for him while it is not in his own hands (ObserverCamera.h)
+	if( TheGameLogic->isInGame() && localPlayerWatching() )
+		TheObserverCamera.update( cameraNowMs );
+
 	Real cameraSteps = 1.0f;
 	if( m_cameraKeyLastMs != 0 )
 		cameraSteps = (Real)(cameraNowMs - m_cameraKeyLastMs) * (LOGICFRAMES_PER_SECOND / 1000.0f);
@@ -4043,6 +4139,7 @@ void InGameUI::reset( void )
 	m_quitMenuPageLoaded = FALSE;
 	m_signalsWereShown = FALSE;
 	m_spectatorPageLoaded = FALSE;
+	TheObserverCamera.reset();
 	m_spectatorFlipped.clear();
 	m_spectatorPicked.clear();
 	m_spectatorLists.clear();
@@ -5274,12 +5371,12 @@ Bool InGameUI::issueAttackCircle( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Whether the shroud is over this object as far as the player at this machine is concerned. */
+/** Whether the shroud is over this object as far as the player at this machine is concerned, or the
+	* player a watcher with fog on is looking through. */
 //-------------------------------------------------------------------------------------------------
 Bool InGameUI::isHiddenByShroud( const Object *obj ) const
 {
-	const Int localIndex = ThePlayerList->getLocalPlayer()->getPlayerIndex();
-	return obj->getShroudedStatus( localIndex ) > OBJECTSHROUD_PARTIAL_CLEAR;
+	return obj->getShroudedStatus( TheObserverCamera.getShroudPlayerIndex() ) > OBJECTSHROUD_PARTIAL_CLEAR;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5944,7 +6041,7 @@ void InGameUI::createMouseoverHint( const GameMessage *msg )
 				else
 					tooltip = str;
 
-				Int localPlayerIndex = ThePlayerList ? ThePlayerList->getLocalPlayer()->getPlayerIndex() : 0;
+				Int localPlayerIndex = ThePlayerList ? TheObserverCamera.getShroudPlayerIndex() : 0;
 
 				Int x, y;
 				ThePartitionManager->worldToCell(obj->getPosition()->x, obj->getPosition()->y, &x, &y);
@@ -12498,8 +12595,8 @@ void InGameUI::drawFloatingText( void )
 	{
 		ftd = *it;
 		ICoord2D pos;
-		// get the local player's index
-		Int playerNdx = ThePlayerList->getLocalPlayer()->getPlayerIndex();
+		// whose fog the screen is drawn in
+		Int playerNdx = TheObserverCamera.getShroudPlayerIndex();
 
 		// which PartitionManager cells are we looking at?
 		Int pCX, pCY;
@@ -12783,7 +12880,7 @@ void InGameUI::updateAndDrawWorldAnimations( void )
 		// don't bother going forward with the draw process if this location is shrouded for
 		// the local player
 		//
-		Int playerIndex = ThePlayerList->getLocalPlayer()->getPlayerIndex();
+		Int playerIndex = TheObserverCamera.getShroudPlayerIndex();
 		if( ThePartitionManager->getShroudStatusForPlayer( playerIndex, &wad->m_worldPos ) != CELLSHROUD_CLEAR )
 		{
 

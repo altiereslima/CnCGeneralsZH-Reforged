@@ -1067,6 +1067,10 @@ public:
 	/** The patch of an ally's own colour lying under their cursor.  On the ground so that it reads
 		* as light falling on the map rather than as a disc floating over it. */
 	virtual void drawAllyCursorLights( void ) { }
+
+	/// what a data-click on the spectator's page does, by its text: a click on the page, or the
+	/// control socket's "spectator" verb, which a script uses instead of finding the pixel
+	void runSpectatorAction( const std::string &action );
 protected:
 
 	void clearWorldAnimations( void );					///< delete all world animations

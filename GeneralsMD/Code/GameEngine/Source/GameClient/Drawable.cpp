@@ -83,6 +83,7 @@
 #include "GameClient/GlobalLanguage.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/Image.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/PlayerColorScheme.h"
 #include "GameClient/LanguageFilter.h"
@@ -4004,7 +4005,7 @@ void Drawable::drawSupplyCash( const IRegion2D *healthBarRegion )
 	}
 
 	// shrouded ground keeps its secrets: what was there when you last looked is not news
-	if( obj->getShroudedStatus( ThePlayerList->getLocalPlayer()->getPlayerIndex() ) != OBJECTSHROUD_CLEAR )
+	if( obj->getShroudedStatus( TheObserverCamera.getShroudPlayerIndex() ) != OBJECTSHROUD_CLEAR )
 		return;
 
 	if( m_supplyCashDisplayString == NULL )

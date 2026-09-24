@@ -47,6 +47,7 @@
 #include "Common/QuickTrig.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/FXList.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameClient/PlayerColorScheme.h"
 #include "GameClient/Shadow.h"
 #include "GameLogic/GameLogic.h"		// for real-time frame
@@ -2175,7 +2176,7 @@ static Bool keepsShadowInFog(const Drawable *draw)
 		return FALSE;
 
 	//fogged keeps it, shrouded does not
-	const Int localPlayerIndex = ThePlayerList ? ThePlayerList->getLocalPlayer()->getPlayerIndex() : 0;
+	const Int localPlayerIndex = ThePlayerList ? TheObserverCamera.getShroudPlayerIndex() : 0;
 	return obj->getShroudedStatus(localPlayerIndex) < OBJECTSHROUD_SHROUDED;
 }
 

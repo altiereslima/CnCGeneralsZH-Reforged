@@ -8,7 +8,8 @@
     #top     every player across the top of the screen, grouped by team, the match clock between two teams
     #hud-top the left panel: the strips drop-down, the superweapon countdowns and the promotions bought
     #feed    a superweapon coming ready, on the left for a few seconds, the way Dota's kill feed runs
-    #board   the right panel: every player ranked by a picked stat, the lead graph, the armies
+    #board   the right panel: the camera and the fog, every player ranked by a picked stat, the lead
+             graph, the armies
 
   Laid out by litehtml and drawn by the game (GameClient/HtmlOverlay.h).  A CSS pixel is a pixel of
   an 800x600 screen and font-size is the game font's point size there; the page is scaled with the
@@ -49,6 +50,14 @@
       data-each="skills", then his promotions, "skill" with {{image}}
     data-each="toasts", the superweapons that came ready in the last eight seconds, oldest first:
       {{portrait}} {{color}} {{name}} of the owner, {{image}} the weapon's cameo and {{what}} its name
+    data-each="cameras", every player the camera can follow, grouped by team: {{image}} {{color}}
+      {{name}}, {{click}} "camera:N" and {{on}} "on" while the camera is following him.  A
+      data-click of camera:director or camera:free hands the camera to the director or back to the
+      watcher, camera:N follows player N's own screen (GameClient/ObserverCamera.h), and each folds
+      up flip:camera.  {{camera}} is what drives it now, the director, free or the player's name;
+      {{cameradirector}} and {{camerafree}} are "on" while it is that one
+    {{fog}} "on" while the fog is drawn for the followed player, flipped with data-click="fog";
+      {{fogname}} {{fogcolor}} are that player's, empty while nobody is followed
 
   The stats: networth, cash, income, army, kills, rank, power.  A data-click of option:Key flips
   that option and saves it; flip:name flips the name for the rest of the match; pick:group:choice
@@ -256,6 +265,20 @@
 </div>
 
 <div id="board" class="well">
+  <div class="head plate">
+    <div class="combo well" data-click="flip:camera">{{text:GUI:HudCamera}}: {{camera}}<span class="tab">&#9660;</span></div>
+  </div>
+
+  <div class="{{flip:camera}}">
+    <div class="choices well">
+      <div class="choice {{cameradirector}}" data-click="camera:director"><span class="box"></span>{{text:GUI:HudCameraDirector}}</div>
+      <div class="choice {{on}}" data-each="cameras" data-click="{{click}}"><span class="box"></span><span style="color: {{color}}">{{name}}</span></div>
+      <div class="choice {{camerafree}}" data-click="camera:free"><span class="box"></span>{{text:GUI:HudCameraFree}}</div>
+    </div>
+  </div>
+
+  <div class="row {{fog}}" data-click="fog"><span class="box"></span>{{text:GUI:HudFog}} <span style="color: {{fogcolor}}">{{fogname}}</span></div>
+
   <div class="head plate">
     <div class="combo well" data-click="flip:stat">{{stat}}<span class="tab">&#9660;</span></div>
   </div>

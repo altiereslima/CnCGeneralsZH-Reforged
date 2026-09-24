@@ -47,6 +47,7 @@
 #include "GameClient/Display.h"
 #include "GameClient/GameClient.h"
 #include "GameClient/Drawable.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameClient/ParticleSys.h"
 #include "GameLogic/PartitionManager.h"
 
@@ -806,7 +807,7 @@ void FXList::clear()
 //-------------------------------------------------------------------------------------------------
 void FXList::doFXPos(const Coord3D *primary, const Matrix3D* primaryMtx, const Real primarySpeed, const Coord3D *secondary, const Real overrideRadius ) const
 {
-	if (ThePartitionManager->getShroudStatusForPlayer(ThePlayerList->getLocalPlayer()->getPlayerIndex(), primary) != CELLSHROUD_CLEAR)
+	if (ThePartitionManager->getShroudStatusForPlayer(TheObserverCamera.getShroudPlayerIndex(), primary) != CELLSHROUD_CLEAR)
 		return;
 
 	for (FXNuggetList::const_iterator it = m_nuggets.begin(); it != m_nuggets.end(); ++it)
@@ -818,7 +819,7 @@ void FXList::doFXPos(const Coord3D *primary, const Matrix3D* primaryMtx, const R
 //-------------------------------------------------------------------------------------------------
 void FXList::doFXObj(const Object* primary, const Object* secondary) const
 {
-	if (primary && primary->getShroudedStatus(ThePlayerList->getLocalPlayer()->getPlayerIndex()) > OBJECTSHROUD_PARTIAL_CLEAR)
+	if (primary && primary->getShroudedStatus(TheObserverCamera.getShroudPlayerIndex()) > OBJECTSHROUD_PARTIAL_CLEAR)
 		return;	//the primary object is fogged or shrouded so don't bother with the effect.
 
 	for (FXNuggetList::const_iterator it = m_nuggets.begin(); it != m_nuggets.end(); ++it)

@@ -131,6 +131,7 @@ static void considerBuilderProc( Object *obj, void *userData )
 #include "GameClient/InGameUI.h"
 #include "GameClient/KeyDefs.h"
 #include "GameClient/Mouse.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/PlayerColorScheme.h"
 #include "GameClient/Shell.h"
@@ -2343,35 +2344,25 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 		// --------------------------------------------------------------------------------------------
 		case GameMessage::MSG_SET_REPLAY_CAMERA:
 		{
-			if (TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK && TheGlobalData->m_useCameraInReplay && TheControlBar->getObserverLookAtPlayer() == thisPlayer)
+			// Where this player's camera is, out of a replay or over the network from a match going on.
+			// Only a watcher's camera is ever moved by it, and that is the observer camera's to do on
+			// its own frame when it is following this player; the logic only passes it on.
+			ViewLocation loc;
+			const Coord3D &pos = msg->getArgument( 0 )->location;
+			loc.init( pos.x, pos.y, pos.z, msg->getArgument( 1 )->real, msg->getArgument( 2 )->real, msg->getArgument( 3 )->real );
+			TheObserverCamera.notePlayerView( thisPlayer->getPlayerIndex(), loc );
+
+			// a replay shows the recorded player's pointer too, while the watcher is not using his own
+			if (TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK && TheObserverCamera.getMode() == OBSERVER_CAMERA_PLAYER
+					&& TheObserverCamera.getFollowedPlayerIndex() == thisPlayer->getPlayerIndex() && !TheLookAtTranslator->hasMouseMovedRecently())
 			{
-				if (TheTacticalView->isCameraMovementFinished())
-				{
-					ViewLocation loc;
-					Coord3D pos;
-					Real pitch, angle, zoom;
-					pos = msg->getArgument( 0 )->location;
-					angle = msg->getArgument( 1 )->real;
-					pitch = msg->getArgument( 2 )->real;
-					zoom = msg->getArgument( 3 )->real;
-					loc.init(pos.x, pos.y, pos.z, angle, pitch, zoom);
-					TheTacticalView->setLocation( &loc );
-
-					// TheSuperHackers @fix Hold the restored location for this frame, or the user's
-					// own scroll and zoom input lands on top of it and the camera never arrives.
-					TheTacticalView->lockViewForOneFrame();
-
-					if (!TheLookAtTranslator->hasMouseMovedRecently())
-					{
-						TheMouse->setCursor( (Mouse::MouseCursor)(msg->getArgument( 4 )->integer) );
-						ICoord2D mousePos = msg->getArgument( 5 )->pixel;
-						TheMouse->setPosition( mousePos.x, mousePos.y );
-						TheLookAtTranslator->setCurrentPos( mousePos );
-					}
-				}
+				TheMouse->setCursor( (Mouse::MouseCursor)(msg->getArgument( 4 )->integer) );
+				ICoord2D mousePos = msg->getArgument( 5 )->pixel;
+				TheMouse->setPosition( mousePos.x, mousePos.y );
+				TheLookAtTranslator->setCurrentPos( mousePos );
 			}
 			break;
-		} // end beacon text
+		}
 
 		//---------------------------------------------------------------------------------------------
 		case GameMessage::MSG_CREATE_TEAM0:

@@ -13755,6 +13755,7 @@ TEST(the_spectator_page_names_only_on_off_options)
 }
 
 #include "test_camera_behavior.inc"
+#include "test_observer_camera.inc"
 #include "test_production_input.inc"
 #include "test_minimap_input.inc"
 #include "test_selection_priority.inc"

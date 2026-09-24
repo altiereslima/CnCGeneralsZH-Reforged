@@ -42,6 +42,7 @@
 #include "GameClient/Color.h"
 #include "GameClient/Display.h"
 #include "GameClient/GameClient.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameClient/GameWindow.h"
 #include "GameClient/Image.h"
 #include "GameClient/Line2D.h"
@@ -355,8 +356,7 @@ void W3DRadar::drawLandmarkIcon( Int pixelX, Int pixelY, Int width, Int height,
 //-------------------------------------------------------------------------------------------------
 void W3DRadar::collectLandmarks( const RadarObject *listHead )
 {
-	const Player *localPlayer = ThePlayerList->getLocalPlayer();
-	const Int localPlayerIndex = localPlayer ? localPlayer->getPlayerIndex() : 0;
+	const Int localPlayerIndex = TheObserverCamera.getShroudPlayerIndex();
 
 	for( const RadarObject *rObj = listHead; rObj; rObj = rObj->friend_getNext() )
 	{
@@ -781,10 +781,7 @@ void W3DRadar::renderObjectList( const RadarObject *listHead, TextureClass *text
 	// loop through all objects and draw
 	ICoord2D radarPoint;
 
-	Player *player = ThePlayerList->getLocalPlayer();
-	Int playerIndex=0;
-	if (player)
-		playerIndex=player->getPlayerIndex();
+	const Int playerIndex = TheObserverCamera.getShroudPlayerIndex();
 
 	if( calcHero )
 	{

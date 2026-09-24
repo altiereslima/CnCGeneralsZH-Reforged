@@ -15701,6 +15701,22 @@ GUI:HudArmies
 "Ordular"
 END
 
+GUI:HudCamera
+"Kamera"
+END
+
+GUI:HudCameraDirector
+"Yönetmen"
+END
+
+GUI:HudCameraFree
+"Serbest"
+END
+
+GUI:HudFog
+"Savaş sisi"
+END
+
 GUI:HudSuperweaponReady
 "ateşe hazır"
 END

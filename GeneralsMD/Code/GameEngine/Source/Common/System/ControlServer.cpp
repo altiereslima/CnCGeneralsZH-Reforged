@@ -35,6 +35,7 @@
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "GameClient/Display.h"
+#include "GameClient/InGameUI.h"
 #include "GameClient/KeyDefs.h"
 #include "GameClient/MetaEvent.h"
 #include "GameLogic/GameLogic.h"
@@ -730,6 +731,16 @@ static void handleCommand( const AsciiString &command )
 			release->appendIntegerArgument( KEY_STATE_UP | modifiers );
 		}
 		replyOk( "\"pressed\":true" );
+		return;
+	}
+
+	/* spectator <action>
+		 What a data-click on the spectator's page does, without finding its pixel: camera:director,
+		 camera:3, fog, flip:camera and the rest of the actions Window/Html/Spectator.html names. */
+	if (strncmp( command.str(), "spectator ", 10 ) == 0)
+	{
+		TheInGameUI->runSpectatorAction( command.str() + 10 );
+		replyOk( "\"done\":true" );
 		return;
 	}
 

@@ -81,6 +81,7 @@
 
 #include "GameClient/Line2D.h"
 #include "GameClient/ControlBar.h"
+#include "GameClient/ObserverCamera.h"
 
 #include <float.h>
 
@@ -1333,7 +1334,7 @@ void PartitionCell::addLooker(Int playerIndex)
 		invalidateShroudedStatusForAllCois( playerIndex );
 		updateSeenStructures( playerIndex, oldShroud, newShroud );
 
-		if( playerIndex == ThePlayerList->getLocalPlayer()->getPlayerIndex() )
+		if( playerIndex == TheObserverCamera.getShroudPlayerIndex() )
 		{
 			// and if this is the local player, do the Client update.
 			TheDisplay->setShroudLevel(m_cellX, m_cellY, newShroud);
@@ -1370,7 +1371,7 @@ void PartitionCell::removeLooker(Int playerIndex)
 		invalidateShroudedStatusForAllCois( playerIndex );
 		updateSeenStructures( playerIndex, oldShroud, newShroud );
 
-		if( playerIndex == ThePlayerList->getLocalPlayer()->getPlayerIndex() )
+		if( playerIndex == TheObserverCamera.getShroudPlayerIndex() )
 		{
 			// and if this is the local player, do the Client update.
 			TheDisplay->setShroudLevel(m_cellX, m_cellY, newShroud);
@@ -1399,7 +1400,7 @@ void PartitionCell::addShrouder( Int playerIndex )
 		updateSeenStructures( playerIndex, oldShroud, newShroud );
 
 		// and update the client if we are on the local player
-		if( playerIndex == ThePlayerList->getLocalPlayer()->getPlayerIndex() )
+		if( playerIndex == TheObserverCamera.getShroudPlayerIndex() )
 		{
 			TheDisplay->setShroudLevel(m_cellX, m_cellY, newShroud);
 			TheRadar->setShroudLevel(m_cellX, m_cellY, newShroud);
@@ -3145,11 +3146,12 @@ void PartitionManager::shroudMapForPlayer( Int playerIndex )
 //-----------------------------------------------------------------------------
 void PartitionManager::refreshShroudForLocalPlayer()
 {
-	// This is a drawing refresh only, and so is allowed to use the Local Player.
+	// This is a drawing refresh only, and so is allowed to use the Local Player, or the player a
+	// watcher is looking through.
 	TheDisplay->clearShroud();
 	TheRadar->clearShroud();
 
-	Int playerIndex = ThePlayerList->getLocalPlayer()->getPlayerIndex();
+	Int playerIndex = TheObserverCamera.getShroudPlayerIndex();
 	for (int i = 0; i < m_totalCellCount; ++i)
 	{
 		Int x = m_cells[i].getCellX();
