@@ -1821,7 +1821,8 @@ Bool TerrainLogic::objectInteractsWithBridgeLayer(Object *obj, Int layer, Bool c
 	while (pBridge ) {
 		if (pBridge->getLayer() == layer) {
 			Bool match = false;
-			if (pBridge->isPointOnBridge(obj->getPosition()) ) {
+			const Bool overDeck = pBridge->isPointOnBridge(obj->getPosition());
+			if (overDeck) {
 				match = true;
 			}
 
@@ -1840,9 +1841,17 @@ Bool TerrainLogic::objectInteractsWithBridgeLayer(Object *obj, Int layer, Bool c
 			}
 
 			if (match) {
+				/* The height test keeps a unit driving under the deck from being lifted onto it.  At the
+					 ramp mouth, before the unit is over the deck, its height is the bank's, and at the corners
+					 of the long bridge on Golden Oasis the bank sits nine to ten below the deck: the unit was
+					 taken onto the bridge, dropped back to the ground a few frames later as the bank fell
+					 away, and drove on under the deck to rock against the bank there for good.  An Overlord,
+					 routed wide of the ramp by its size, came in at that corner, and one of eight never
+					 crossed.  So the mouth allows twice the gap the deck does. */
+				const Real allowed = overDeck ? LAYER_Z_CLOSE_ENOUGH_F : LAYER_Z_CLOSE_ENOUGH_F * 2.0f;
 				Real bridgeHeight = pBridge->getBridgeHeight(obj->getPosition(), NULL);
 				Real delta = fabs(obj->getPosition()->z-bridgeHeight);
-				if (delta>LAYER_Z_CLOSE_ENOUGH_F) {
+				if (delta>allowed) {
 					return false;
 				}
 

@@ -1,0 +1,17 @@
+# Overlords over the long bridge.
+#
+# overlordbridge.txt on the long bridge in the east of Golden Oasis, the route of bridgelong.txt:
+# the deck runs from 2637,1165 to 2948,1550 and is about twelve cells wide.
+#
+# Before the ramp mouth took a tank from a low bank, 7 of 8 arrived on every seed 1-6 and the last
+# after about 2750 frames: one Overlord came up at the ramp's east corner, was put back on the
+# ground and sat under the deck. After, 8 of 8 on every seed, the last after about 2100.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Golden Oasis\Golden Oasis.map" -autoskirmish 2 -takeover
+#     -side 0 FactionChina -side 1 FactionGLA -seed 1 -maxframes 6000
+#     -scenario overlordlong -logPrefix overlordlong_
+
+30    spawn       0  ChinaTankOverlord  8  2417 893  70
+60    playermove  0  ChinaTankOverlord  3168 1822
+60    arrive      0  ChinaTankOverlord  3168 1822  200
