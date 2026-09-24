@@ -15725,6 +15725,10 @@ GUI:HudSuperweaponReady
 "ateşe hazır"
 END
 
+GUI:HudSuperweaponLaunched
+"ateşlendi"
+END
+
 GUI:BarIdleWorker
 "İşçi"
 END

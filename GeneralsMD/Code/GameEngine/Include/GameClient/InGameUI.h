@@ -396,9 +396,11 @@ public:  // ********************************************************************
 
 	// interface for messages to the user
 	// srj sez: passing as const-ref screws up varargs for some reason. dunno why. just pass by value.
-	virtual void messageColor( const RGBColor *rgbColor, UnicodeString format, ... );	///< display a colored message to the user
 	virtual void message( UnicodeString format, ... );				  ///< display a message to the user
 	virtual void message( AsciiString stringManagerLabel, ... );///< display a message to the user
+	void playerMessage( Player *player, const UnicodeString &text );	///< a message about that player, his flag at its head
+	/** The feed's line for a superweapon that came ready, or was fired when `launched`. */
+	void feedSuperweapon( const Object *weapon, const AsciiString &powerName, const SpecialPowerTemplate *power, Bool launched );
 	virtual void toggleMessages( void ) { m_messagesOn = 1 - m_messagesOn; }	///< toggle messages on/off
 	void openScoreboard( void ) { m_scoreboardOpen = TRUE; }		///< the Tab scoreboard, up while Tab is held
 	void closeScoreboard( void ) { m_scoreboardOpen = FALSE; }
@@ -430,7 +432,7 @@ public:  // ********************************************************************
 		* page is not ready, and the caller draws the old way. */
 	Bool drawTooltipPage( const UnicodeString &cursorText, const RGBColor *accent );
 	virtual Bool isMessagesOn( void ) { return m_messagesOn; }	///< are the display messages on
-	void freeMessageResources( void );				///< free resources for the ui messages
+	void freeMessageResources( void );				///< empty the event feed
 	Color getMessageColor(Bool altColor) { return (altColor)?m_messageColor2:m_messageColor1; }
 	
 	// interface for military style messages
@@ -1001,15 +1003,6 @@ protected:
 		MOUSEMODE_MAX
 	};
 
-	struct UIMessage
-	{
-		UnicodeString fullText;									///< the whole text message
-		DisplayString *displayString;						///< display string used to render the message
-		UnsignedInt timestamp;									///< logic frame message was created on
-		Color color;														///< color to render this in
-	};
-	enum { MAX_UI_MESSAGES = 6 };
-
 	struct MilitarySubtitleData
 	{
 		UnicodeString subtitle;										///< The complete subtitle to be drawn, each line is separated by L"\n"
@@ -1047,8 +1040,7 @@ protected:
 	void setMouseCursor(Mouse::MouseCursor c);
 
 	
-	void addMessageText( const UnicodeString& formattedMessage, const RGBColor *rgbColor = NULL );  ///< internal workhorse for adding plain text for messages
-	void removeMessageAtIndex( Int i );				///< remove the message at index i
+	void addMessageText( const UnicodeString& formattedMessage );  ///< a plain message, a line of the event feed
 
 	void updateFloatingText( void );						///< Update function to move our floating text
 	void drawFloatingText( void );							///< Draw all our floating text
@@ -1178,10 +1170,6 @@ protected:
 	VideoBuffer*								m_cameoVideoBuffer;///< video playback buffer
 	VideoStreamInterface*				m_cameoVideoStream;///< Video stream;
 
-	// message data
-	UIMessage										m_uiMessages[ MAX_UI_MESSAGES ];/**< messages to display to the user, the
-																						array is organized with newer messages at
-																						index 0, and increasing to older ones */
 	// superweapon timer data
 	SuperweaponMap							m_superweapons[MAX_PLAYER_COUNT];
 	enum { HUD_OVERLAY_POINT_SIZE = 9 };	///< small: this sits over the battlefield, not in a panel
@@ -1269,17 +1257,26 @@ protected:
 	HtmlValues									m_spectatorTotals;				///< the page's values that are not per player, gathered with the lists
 	UnsignedInt									m_spectatorListsFrame;		///< the logic frame the lists were last gathered on
 	const Player								*m_spectatorListsWatched;	///< the player being watched when they were, whose seat they mark
-	Int													m_hudTogglesBottom;				///< the bottom of the page's #hud-top, so the message list starts under it
 
 	std::vector< SpectatorSuperweapon > m_spectatorSuperweapons;	///< every countdown the superweapon pass found, rebuilt each pass
-	/** A superweapon that came ready, on the page for SPECTATOR_TOAST_FRAMES after that. */
-	struct SpectatorToast
+
+	//
+	// The event feed over the radar, Window/Html/Feed.html: every message, a superweapon ready or
+	// fired, a player beaten or gone, the newest at the bottom.  A player's and a watcher's alike.
+	//
+	struct FeedLine
 	{
 		HtmlValues values;
 		UnsignedInt until;					///< the logic frame it leaves on
 	};
-	std::vector< SpectatorToast > m_spectatorToasts;
-	void addSpectatorToast( Int playerIndex, const Object *weapon, const Image *cameo );
+	std::vector< FeedLine >			m_feedLines;
+	void addFeedLine( HtmlValues line );
+	void drawFeed( void );
+	HtmlOverlay *								m_feedOverlay;
+	Bool												m_feedPageLoaded;
+	std::string									m_feedPage;
+	Int													m_feedFloor;							///< the radar's tab top on screen, from the bar's page
+	Int													m_queueTrayTop;						///< the queue row's top on screen, while it is drawn
 
 	Bool												m_placementRangeRingUp;	///< the structure on the cursor is armed, so its reach is drawn
 	Real												m_placementRingRadius;	///< how far from its centre it hits

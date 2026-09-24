@@ -3,12 +3,9 @@
   What a spectator sees over the battlefield, dressed in the command bar's own materials: steel
   plates with a lit top edge and a dark bottom one, the cameo tray the production strips stand in,
   the power bar's fills.  The steel follows the side whose bar is on screen, so selecting a Chinese
-  unit turns it red.  Two pieces, and the players themselves are on the Tab scoreboard:
-
-    #hud-top #feed, a superweapon coming ready, on the left for a few seconds, the way Dota's kill
-             feed runs
-    #right   down the right: #watch, the camera, the followed player and the fog, and under it
-             #board, every player ranked by a picked stat and the armies
+  unit turns it red.  One piece: #right down the right, #watch with the camera, the followed player
+  and the fog, and under it #board, every player ranked by a picked stat and the armies.  The players
+  themselves are on the Tab scoreboard and what happens is in Window/Html/Feed.html over the radar.
 
   Laid out by litehtml and drawn by the game (GameClient/HtmlOverlay.h).  A CSS pixel is a pixel of
   an 800x600 screen and font-size is the game font's point size there; the page is scaled with the
@@ -31,8 +28,6 @@
     data-each="army", every player's run: a {{kind}} "head" entry carrying {{image}} (his general),
       {{color}} and {{name}}, then up to six "unit" entries, the most money first, with {{image}}
       {{count}}
-    data-each="toasts", the superweapons that came ready in the last eight seconds, oldest first:
-      {{portrait}} {{color}} {{name}} of the owner, {{image}} the weapon's cameo and {{what}} its name
     {{camera}} names who drives the camera (GameClient/ObserverCamera.h), and {{camerafree}}
       {{cameradirector}} {{cameraplayer}} are "on" while it is that one.  A data-click of
       camera:free, camera:director or camera:player hands it over and folds up flip:camera
@@ -43,7 +38,7 @@
     {{fog}} "on" while the fog is drawn for the followed player, flipped with data-click="fog"
 
   The stats: networth, cash, income, army, kills, rank, power.  A data-click of flip:name flips the
-  name for the rest of the match; pick:group:choice picks and folds up flip:group.  #hud-top's bottom edge is where the message list starts.
+  name for the rest of the match; pick:group:choice picks and folds up flip:group.
 
   Edit the copy under Run/Window/Html and the next match reads it.
 -->
@@ -83,17 +78,6 @@
   .row:hover { color: #ffffff; background-color: rgba(119, 131, 145, 0.25); }
   .box { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border: 1px solid #778391; background-color: #091417; vertical-align: middle; }
   .on .box { background-image: url(PowerBarGreen); border-color: #b8f08a; }
-
-  /* ---- the feed on the left ---- */
-  /* it stands clear of the command bar's menu button in the screen's top left corner */
-  #hud-top { position: absolute; left: 26px; top: 4px; width: 260px; }
-  .toast { position: relative; height: 18px; margin-bottom: 2px;
-           background: linear-gradient(to right, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0)); }
-  .toast .tray { position: absolute; left: 2px; top: 0; }
-  .toast .who { position: absolute; left: 34px; top: 0; line-height: 18px; font-weight: bold; }
-  .toast .weapon { position: absolute; left: 104px; top: 1px; width: 20px; height: 16px; }
-  .toast .what { position: absolute; left: 128px; top: 0; line-height: 10px; color: #e8d27a; }
-  .toast .ready { position: absolute; left: 128px; top: 10px; line-height: 8px; font-size: 7px; color: #b8f08a; }
 
   /* ---- the right column: the camera, and under it the board ---- */
   /* under ControlBar.html's #net, 37px tall with the network line a player knocked out of an
@@ -154,19 +138,6 @@
 </head>
 <body>
 <div class="{{side}}">
-
-<div id="hud-top">
-  <div id="feed">
-    <div class="toast" data-each="toasts">
-      <div class="tray"><img class="emblem" src="{{portrait}}"></div>
-      <span class="who" style="color: {{color}}">{{name}}</span>
-      <img class="weapon" src="{{image}}">
-      <span class="what">{{what}}</span>
-      <span class="ready">{{text:GUI:HudSuperweaponReady}}</span>
-    </div>
-  </div>
-
-</div>
 
 <div id="right">
 <div id="watch" class="well">

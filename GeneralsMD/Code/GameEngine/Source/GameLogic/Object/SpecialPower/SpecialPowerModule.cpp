@@ -678,6 +678,8 @@ void SpecialPowerModule::aboutToDoSpecialPower( const Coord3D *location )
 		// the same place so the two can never end up describing different events.
 		// It stamps a frame on the client side and returns; nothing here changes.
 		chromaSuperweaponLaunched( type );
+		// and the event feed, which writes a line only for a superweapon with a public countdown
+		TheInGameUI->feedSuperweapon( getObject(), getPowerName(), getSpecialPowerModuleData()->m_specialPowerTemplate, TRUE );
 	}
 
 	// get module data

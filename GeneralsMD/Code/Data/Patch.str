@@ -1203,9 +1203,14 @@ GUI:HudFog
 "Fog of war"
 END
 
-// under a superweapon's name in the spectator's feed, the moment it can fire
+// after a superweapon's name in the event feed over the radar, the moment it can fire
 GUI:HudSuperweaponReady
 "ready to fire"
+END
+
+// after a superweapon's name in the event feed, the moment it is fired
+GUI:HudSuperweaponLaunched
+"launched"
 END
 
 // the command bar's own buttons, written on them now that the bar is drawn from a page

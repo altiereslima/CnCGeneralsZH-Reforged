@@ -195,7 +195,9 @@ void VictoryConditions::update( void )
 				ThePartitionManager->revealMapForPlayerPermanently( p->getPlayerIndex() );
 				TheGameClient->updateFakeDrawables();
 				
-				TheInGameUI->message("GUI:PlayerHasBeenDefeated", p->getPlayerDisplayName().str() );
+				UnicodeString defeated;
+				defeated.format( TheGameText->fetch( "GUI:PlayerHasBeenDefeated" ), p->getPlayerDisplayName().str() );
+				TheInGameUI->playerMessage( p, defeated );
 				// People are boneheads. Also play a sound
 				static AudioEventRTS leftGameSound("GUIMessageReceived");
 				TheAudio->addAudioEvent(&leftGameSound);

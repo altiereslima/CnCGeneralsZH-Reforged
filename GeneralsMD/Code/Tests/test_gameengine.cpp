@@ -13740,8 +13740,8 @@ TEST(the_spectator_page_has_its_pieces_and_no_option_clicks)
 	fclose( fp );
 
 	CHECK( page.find( "data-click=\"option:" ) == std::string::npos );
-	// the message list starts under #hud-top
-	CHECK( page.find( "id=\"hud-top\"" ) != std::string::npos );
+	// the superweapons coming ready are lines of the feed over the radar, Feed.html, for everybody
+	CHECK( page.find( "data-each=\"toasts\"" ) == std::string::npos );
 	CHECK( page.find( "data-each=\"players\"" ) != std::string::npos );
 	// the players are on the Tab scoreboard, not in a strip across the top
 	CHECK( page.find( "data-each=\"seats\"" ) == std::string::npos );

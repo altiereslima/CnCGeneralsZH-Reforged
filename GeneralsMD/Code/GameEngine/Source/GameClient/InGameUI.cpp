@@ -1144,16 +1144,10 @@ InGameUI::InGameUI()
 	m_cameoVideoStream = NULL;
 	m_cameoVideoBuffer = NULL;
 
-	// message info
-	for( i = 0; i < MAX_UI_MESSAGES; i++ )
-	{
-
-		m_uiMessages[ i ].fullText.clear();
-		m_uiMessages[ i ].displayString = NULL;
-		m_uiMessages[ i ].timestamp = 0;
-		m_uiMessages[ i ].color = 0;
-
-	}  // end for i
+	m_feedOverlay = NULL;
+	m_feedPageLoaded = FALSE;
+	m_feedFloor = 0;
+	m_queueTrayTop = 0;
 
 	m_replayWindow = NULL;
 	m_messagesOn = TRUE;
@@ -1195,7 +1189,6 @@ InGameUI::InGameUI()
 	m_spectatorPageShown = FALSE;
 	m_spectatorListsFrame = 0;
 	m_spectatorListsWatched = NULL;
-	m_hudTogglesBottom = 0;
 	m_scoreboardOpen = FALSE;
 	m_scoreboardOverlay = NULL;
 	m_scoreboardPageLoaded = FALSE;
@@ -1333,6 +1326,8 @@ InGameUI::~InGameUI()
 
 	delete m_spectatorOverlay;
 	m_spectatorOverlay = NULL;
+	delete m_feedOverlay;
+	m_feedOverlay = NULL;
 	delete m_scoreboardOverlay;
 	m_scoreboardOverlay = NULL;
 	delete m_controlBarOverlay;
@@ -1805,16 +1800,14 @@ static const std::string STAT_GROUP = "stat";
 
 enum
 {
-	HUD_TOGGLES_INSET					= 6,													///< between the page's #hud-top and the messages under it, 800x600
-	MENU_BUTTON_CLEARANCE			= 26,		///< where the messages start, right of the command bar page's menu button, 800x600
 	NET_WORTH_REFRESH_FRAMES	= LOGICFRAMES_PER_SECOND / 2,	///< how often every player's worth is counted again
 	FRAMES_PER_MINUTE					= LOGICFRAMES_PER_SECOND * 60,
 	ARMY_CHART_UNITS					= 6,		///< kinds of unit shown per player, the most money first
 	PLAYER_NAME_CHARS					= 11,		///< a name longer than this is cut, there is no clipping to hide it
 	SECONDS_IN_MINUTE					= 60,
 	SECONDS_PER_HOUR					= 60 * 60,
-	SPECTATOR_TOAST_FRAMES		= LOGICFRAMES_PER_SECOND * 8,	///< how long a "superweapon ready" message stays up
-	SPECTATOR_TOASTS_KEPT			= 4,		///< the most of those on screen at once; the oldest goes first
+	FEED_LINE_FRAMES					= LOGICFRAMES_PER_SECOND * 8,	///< how long a line of the event feed stays up
+	FEED_LINES_KEPT						= 6,		///< the most of those on screen at once; the oldest goes first
 	COMMAND_SLOTS_PER_COLUMN	= 2,		///< the command bar numbers its slots down each column, top then bottom
 	PERCENT										= 100
 };
@@ -2173,32 +2166,6 @@ static void fillSpectatorCameraValues( std::vector< HtmlValues > &follows, HtmlV
 }
 
 //-------------------------------------------------------------------------------------------------
-/** A superweapon of player `playerIndex` came ready: the page says so on its left edge for
-	* SPECTATOR_TOAST_FRAMES, newest at the bottom, the way Dota's kill feed runs.  Only a watcher's
-	* page draws them, so nobody else collects any. */
-//-------------------------------------------------------------------------------------------------
-void InGameUI::addSpectatorToast( Int playerIndex, const Object *weapon, const Image *cameo )
-{
-	Player *owner = ThePlayerList->getNthPlayer( playerIndex );
-	if( owner == NULL || weapon == NULL || !localPlayerWatching() )
-		return;
-
-	SpectatorToast toast;
-	toast.values = spectatorHead( owner );
-	toast.values[ "kind" ] = "toast";
-	toast.values[ "portrait" ] = toast.values[ "image" ];
-	toast.values[ "image" ] = cameo ? cameo->getName().str() : "";
-	toast.values[ "what" ] = WideCharStringToMultiByte( weapon->getTemplate()->getDisplayName().str() );
-	toast.until = TheGameLogic->getFrame() + SPECTATOR_TOAST_FRAMES;
-
-	DEBUG_LOG(( "Spectator page: %s is ready for player %d on frame %u\n", weapon->getTemplate()->getName().str(),
-							playerIndex, TheGameLogic->getFrame() ));
-	m_spectatorToasts.push_back( toast );
-	if( m_spectatorToasts.size() > SPECTATOR_TOASTS_KEPT )
-		m_spectatorToasts.erase( m_spectatorToasts.begin() );
-}
-
-//-------------------------------------------------------------------------------------------------
 /** The key a command bar slot is bound to right now, "Q" for KEY_Q, so the page names the key the
 	* player really has: the WASD camera moves the whole top row along by one.  Empty when unbound. */
 //-------------------------------------------------------------------------------------------------
@@ -2237,12 +2204,12 @@ Bool InGameUI::pickSpectatorStat( Int commandSlot )
 
 //-------------------------------------------------------------------------------------------------
 /** The spectator's page: the camera, every player ranked by the number picked in the stat drop-down
-	* and each army's most expensive units, and a superweapon coming ready on the left.  The players
-	* themselves, the promotions and the production are on the Tab scoreboard.  Only while watching: the other side's worth is not a player's to know. */
+	* and each army's most expensive units.  The players themselves, the promotions and the production
+	* are on the Tab scoreboard, and what happens is in the feed over the radar.  Only while watching:
+	* the other side's worth is not a player's to know. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawSpectatorPage( void )
 {
-	m_hudTogglesBottom = 0;
 	m_spectatorPageShown = FALSE;
 
 	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
@@ -2282,21 +2249,6 @@ void InGameUI::drawSpectatorPage( void )
 		m_spectatorListsWatched = watched;
 	}
 
-	// the messages come and go on their own clock, not the lists' half second
-	std::vector< HtmlValues > &toasts = m_spectatorLists[ "toasts" ];
-	toasts.clear();
-	for( size_t toast = 0; toast < m_spectatorToasts.size(); )
-	{
-		const SpectatorToast &shown = m_spectatorToasts[ toast ];
-		if( frame >= shown.until || frame + SPECTATOR_TOAST_FRAMES < shown.until )
-		{
-			m_spectatorToasts.erase( m_spectatorToasts.begin() + toast );
-			continue;
-		}
-		toasts.push_back( shown.values );
-		toast++;
-	}
-
 	HtmlValues values = m_spectatorTotals;
 	fillSpectatorCameraValues( m_spectatorLists[ "follows" ], values );
 	for( std::map< std::string, std::string >::const_iterator pick = m_spectatorPicked.begin(); pick != m_spectatorPicked.end(); ++pick )
@@ -2311,7 +2263,6 @@ void InGameUI::drawSpectatorPage( void )
 	m_spectatorOverlay->hover( TheMouse->getMouseStatus()->pos );
 	m_spectatorOverlay->draw();
 	m_spectatorPageShown = TRUE;
-	m_hudTogglesBottom = m_spectatorOverlay->bottomOf( "#hud-top" );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3400,7 +3351,6 @@ DECLARE_PERF_TIMER(InGameUI_update)
 void InGameUI::update( void )
 {
 	USE_PERF_TIMER(InGameUI_update)
-	Int i;
 
 	/// @todo make sure this code gets called even when the UI is not being drawn
 	if ( m_videoStream && m_videoBuffer )
@@ -3431,67 +3381,10 @@ void InGameUI::update( void )
 		}
 	}
 
-	//
-	// remove any message strings that have expired, note that the oldest strings are
-	// always at the end of the array (higher index numbers) so we can just remove things
-	// from the rear and never have to worry about shifting entries cause we check every
-	// frame
-	//
+	// the messages are lines of the event feed now, which drops them at drawing by their frame
 	UnsignedInt currLogicFrame = TheGameLogic->getFrame();
-	// ms -> logic frames. This used to divide by LOGICFRAMES_PER_SECOND instead of multiplying and
-	// then divide by 1000 again, so with the shipped MessageDelayMS (~5000) it was 5000/30 = 166,
-	// 166/1000 = 0 - every UI message started fading on the frame it was posted.
-	//
-	// ...and the shipped value holds a message for five whole seconds before the fade even
-	// starts, on top of a fade that took three more: the corner was still showing what you did
-	// eight seconds ago, stacked under what you have done since. Cap the hold at MESSAGE_HOLD_MS
-	// and take the fade down at a fixed rate, which is about a second.
-	//
-	// That rate is per LOGIC frame, not per call: this runs once per render frame, so a fixed
-	// step per call would empty the alpha (fps/30) times too fast - the same trap the military
-	// subtitle countdown below fell into.
-	//
-	const int MESSAGE_HOLD_MS = 2500;
-	const int MESSAGE_FADE_PER_FRAME = 8;
-	static UnsignedInt s_lastMessageFadeFrame = 0xffffffff;
-	const Bool fadeThisPass = ( currLogicFrame != s_lastMessageFadeFrame );
-	s_lastMessageFadeFrame = currLogicFrame;
-	int messageDelayMS = m_messageDelayMS;
-	if( messageDelayMS > MESSAGE_HOLD_MS )
-		messageDelayMS = MESSAGE_HOLD_MS;
-	const int messageTimeout = messageDelayMS * LOGICFRAMES_PER_SECOND / 1000;
 	UnsignedByte r, g, b, a;
 	Int amount;
-	for( i = MAX_UI_MESSAGES - 1; i >= 0; i-- )
-	{
-		// removeMessageAtIndex NULLs displayString; without this empty slots counted as expired
-		// every frame and were re-cleared forever.
-		if( m_uiMessages[ i ].displayString == NULL )
-			continue;
-
-		if( fadeThisPass && currLogicFrame - m_uiMessages[ i ].timestamp > messageTimeout )
-		{
-
-			// get the current color of this text
-			GameGetColorComponents( m_uiMessages[ i ].color, &r, &g, &b, &a );
-
-			// start fading the alpha on this color down
-			amount = MESSAGE_FADE_PER_FRAME;
-			if( a - amount < 0 )
-				a = 0;
-			else
-				a -= amount;
-			
-			// set the new color
-			m_uiMessages[ i ].color = GameMakeColor( r, g, b, a );
-
-			// when alpha is completely zero we remove this string
-			if( a == 0 )
-				removeMessageAtIndex( i );
-
-		}  // end if
-
-	}  // end for i
 
 	//
 	// Update the Military Subtitle display
@@ -3825,7 +3718,7 @@ void InGameUI::reset( void )
 	m_spectatorLists.clear();
 	m_spectatorTotals.clear();
 	m_spectatorSuperweapons.clear();
-	m_spectatorToasts.clear();
+	m_feedPageLoaded = FALSE;
 	m_inputEnabled = true;
 	// reset the command bar
 	TheControlBar->reset();
@@ -3920,29 +3813,11 @@ void InGameUI::reset( void )
 }  // end reset
 
 //-------------------------------------------------------------------------------------------------
-/** Free any resources we used for our messages */
+/** Empty the event feed: a new match, and the score screen, start without the last one's lines */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::freeMessageResources( void )
 {
-	Int i;
-
-	// release display strings and set text to empty
-	for( i = 0; i < MAX_UI_MESSAGES; i++ )
-	{
-
-		// emtpy text
-		m_uiMessages[ i ].fullText.clear();
-
-		// free display string
-		if( m_uiMessages[ i ].displayString )
-			TheDisplayStringManager->freeDisplayString( m_uiMessages[ i ].displayString );
-		m_uiMessages[ i ].displayString = NULL;
-
-		// set timestamp to zero
-		m_uiMessages[ i ].timestamp = 0;
-
-	}  // end for i
-
+	m_feedLines.clear();
 }  // end freeMessageResources
 
 //-------------------------------------------------------------------------------------------------
@@ -4001,91 +3876,146 @@ void InGameUI::message( UnicodeString format, ... )
 }  // end message
 
 //-------------------------------------------------------------------------------------------------
-/** Interface for display text messages to the user */
+/** A message is a line of the event feed over the radar, Window/Html/Feed.html, the way the kill
+	* feed runs in Dota.  It used to be a column of text written over the battlefield's top left. */
 //-------------------------------------------------------------------------------------------------
-// srj sez: passing as const-ref screws up varargs for some reason. dunno why. just pass by value.
-void InGameUI::messageColor( const RGBColor *rgbColor, UnicodeString format, ... )
+void InGameUI::addMessageText( const UnicodeString& formattedMessage )
 {
-	UnicodeString formattedMessage;
-
-	// construct the final text after formatting
-	va_list args;
-  va_start( args, format );
-	WideChar buf[ UnicodeString::MAX_FORMAT_BUF_LEN ];
-  // truncate rather than throw: an uncaught engine exception aborts with 0xC0000409 and no log
-  // at all, so an over-long chat or script message used to be a silent hard crash.
-  if( _vsnwprintf(buf, sizeof( buf )/sizeof( WideChar ) - 1, format.str(), args ) < 0 )
-			DEBUG_LOG(("InGameUI::message - text truncated to %d characters\n", (Int)(sizeof( buf )/sizeof( WideChar ) - 1)));
-	buf[ sizeof( buf )/sizeof( WideChar ) - 1 ] = 0;
-	formattedMessage.set( buf );
-  va_end(args);
-
-	// add the text to the ui
-	addMessageText( formattedMessage, rgbColor );
-
-}  // end message
+	HtmlValues line;
+	line[ "kind" ] = "note";
+	line[ "before" ] = WideCharStringToMultiByte( formattedMessage.str() );
+	addFeedLine( line );
+}
 
 //-------------------------------------------------------------------------------------------------
+/** A message about one player: his general's flag at its head and his name in his colour where the
+	* text says it.  A chat line, a player beaten, a player gone. */
 //-------------------------------------------------------------------------------------------------
-void InGameUI::addMessageText( const UnicodeString& formattedMessage, const RGBColor *rgbColor )
+void InGameUI::playerMessage( Player *player, const UnicodeString &text )
 {
-	Int i;
-	Color color1 = m_messageColor1;
-	Color color2 = m_messageColor2;
-
-	if (rgbColor)
+	HtmlValues line = spectatorHead( player );
+	line[ "kind" ] = "player";
+	line[ "portrait" ] = line[ "image" ];
+	const std::string whole = WideCharStringToMultiByte( text.str() );
+	const std::string name = WideCharStringToMultiByte( player->getPlayerDisplayName().str() );
+	const size_t at = name.empty() ? std::string::npos : whole.find( name );
+	if( at == std::string::npos )
 	{
-		color1 = rgbColor->getAsInt() | GameMakeColor( 0, 0, 0, 255 );
-		color2 = rgbColor->getAsInt() | GameMakeColor( 0, 0, 0, 255 );
+		line[ "before" ] = whole;
+		line[ "name" ] = "";
 	}
-
-	// delete the message stuff at the last index
-	m_uiMessages[ MAX_UI_MESSAGES - 1 ].fullText.clear();
-	if( m_uiMessages[ MAX_UI_MESSAGES - 1 ].displayString )
-		TheDisplayStringManager->freeDisplayString( m_uiMessages[ MAX_UI_MESSAGES - 1 ].displayString );
-	m_uiMessages[ MAX_UI_MESSAGES - 1 ].displayString = NULL;
-	m_uiMessages[ MAX_UI_MESSAGES - 1 ].timestamp = 0;
-
-	// shift all the messages down one index and remove the last one
-	for( i = MAX_UI_MESSAGES - 1; i >= 1; i-- )
-		m_uiMessages[ i ] = m_uiMessages[ i - 1 ];
-
-	//
-	// set the new message in index 0, note that we need to allocate a display string, but
-	// we do not need to free the one that is already there because it has been moved
-	// "up" an index
-	//
-	m_uiMessages[ 0 ].fullText = formattedMessage;
-	m_uiMessages[ 0 ].timestamp = TheGameLogic->getFrame();
-	m_uiMessages[ 0 ].displayString = TheDisplayStringManager->newDisplayString();
-	m_uiMessages[ 0 ].displayString->setFont( TheFontLibrary->getFont( m_messageFont, 
-																						TheGlobalLanguageData->adjustFontSize(m_messagePointSize), m_messageBold ) );
-	m_uiMessages[ 0 ].displayString->setText( m_uiMessages[ 0 ].fullText );
-	
-	//
-	// assign a color for this string instance that will stay with it no matter what
-	// line it is rendered on
-	//
-	if( m_uiMessages[ 1 ].displayString == NULL || m_uiMessages[ 1 ].color == color2 )
-		m_uiMessages[ 0 ].color = color1;
 	else
-		m_uiMessages[ 0 ].color = color2;
-
-}  // end addFormattedMessage
+	{
+		line[ "before" ] = whole.substr( 0, at );
+		line[ "name" ] = name;
+		line[ "after" ] = whole.substr( at + name.size() );
+	}
+	addFeedLine( line );
+}
 
 //-------------------------------------------------------------------------------------------------
-/** Remove the message on screen at index i */
+/** A superweapon that came ready or was fired: whose, its picture, its name.  Only the ones with a
+	* countdown on everybody's screen, so a general's power fired from a command button is not one. */
 //-------------------------------------------------------------------------------------------------
-void InGameUI::removeMessageAtIndex( Int i )
+void InGameUI::feedSuperweapon( const Object *weapon, const AsciiString &powerName, const SpecialPowerTemplate *power,
+																Bool launched )
 {
+	Player *owner = weapon->getControllingPlayer();
+	const SuperweaponInfo *info = findSWInfo( owner->getPlayerIndex(), powerName, weapon->getID(), power );
+	if( info == NULL || info->m_hiddenByScript || info->m_hiddenByScience )
+		return;
 
-	m_uiMessages[ i ].fullText.clear();
-	if( m_uiMessages[ i ].displayString )
-		TheDisplayStringManager->freeDisplayString( m_uiMessages[ i ].displayString );
-	m_uiMessages[ i ].displayString = NULL;
-	m_uiMessages[ i ].timestamp = 0;
+	HtmlValues line = spectatorHead( owner );
+	line[ "kind" ] = "weapon";
+	line[ "portrait" ] = line[ "image" ];
+	const Image *cameo = superweaponCameo( power );
+	line[ "image" ] = cameo ? cameo->getName().str() : "";
+	line[ "what" ] = WideCharStringToMultiByte( weapon->getTemplate()->getDisplayName().str() );
+	line[ "tag" ] = launched ? "launched" : "ready";
+	line[ "tagtext" ] = WideCharStringToMultiByte( TheGameText->fetch( launched ? "GUI:HudSuperweaponLaunched" : "GUI:HudSuperweaponReady" ).str() );
+	addFeedLine( line );
+}
 
-}  // end removeMessageAtIndex
+//-------------------------------------------------------------------------------------------------
+/** One more line at the bottom of the feed, up for FEED_LINE_FRAMES; past FEED_LINES_KEPT the oldest
+	* goes.  Every line is logged too, so a run can be read for what the feed said. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::addFeedLine( HtmlValues line )
+{
+	DEBUG_LOG(( "FEED frame %u %s: %s%s%s %s %s\n", TheGameLogic->getFrame(), line[ "kind" ].c_str(), line[ "before" ].c_str(),
+							line[ "name" ].c_str(), line[ "after" ].c_str(), line[ "what" ].c_str(), line[ "tagtext" ].c_str() ));
+	FeedLine added;
+	added.values = line;
+	added.until = TheGameLogic->getFrame() + FEED_LINE_FRAMES;
+	m_feedLines.push_back( added );
+	if( m_feedLines.size() > FEED_LINES_KEPT )
+		m_feedLines.erase( m_feedLines.begin() );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Where the command bar starts on screen, or the screen's bottom while the bar is hidden: it is
+	* hidden while the game loads and in the observer views. */
+//-------------------------------------------------------------------------------------------------
+static Int controlBarTop( void )
+{
+	static NameKeyType controlBarKey = TheNameKeyGenerator->nameToKey( "ControlBar.wnd:ControlBarParent" );
+	GameWindow *bar = TheWindowManager->winGetWindowFromId( NULL, controlBarKey );
+	if( bar == NULL || bar->winIsHidden() )
+		return TheDisplay->getHeight();
+
+	ICoord2D barPos;
+	bar->winGetScreenPosition( &barPos.x, &barPos.y );
+	return barPos.y;
+}
+
+static const char *const FEED_PAGE = "Window\\Html\\Feed.html";
+
+//-------------------------------------------------------------------------------------------------
+/** The event feed, Window/Html/Feed.html, for a player and a watcher alike: the newest line at the
+	* bottom, standing on the radar's under-attack tab, or on the production queue's row while that is
+	* up over the tab.  The messages switch (toggleMessages) takes the whole feed away. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::drawFeed( void )
+{
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	HtmlLists lists;
+	std::vector< HtmlValues > &lines = lists[ "feed" ];
+	for( size_t line = 0; line < m_feedLines.size(); )
+	{
+		// a frame going backwards is a loaded save, and the line is not from this game any more
+		const FeedLine &shown = m_feedLines[ line ];
+		if( frame >= shown.until || frame + FEED_LINE_FRAMES < shown.until )
+		{
+			m_feedLines.erase( m_feedLines.begin() + line );
+			continue;
+		}
+		lines.push_back( shown.values );
+		line++;
+	}
+	if( lines.empty() || !m_messagesOn || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+		return;
+
+	if( !m_feedPageLoaded )
+	{
+		m_feedPageLoaded = TRUE;
+		readHtmlPage( FEED_PAGE, m_feedPage );
+	}
+	if( m_feedPage.empty() )
+		return;
+	if( m_feedOverlay == NULL )
+		m_feedOverlay = new HtmlOverlay( m_superweaponNormalFont );
+
+	// ponytail: with no bar page the old queue column climbs the same corner under the feed; the
+	// page always ships, so that column's top is not measured
+	Int floor = m_controlBarPageShown ? m_feedFloor : controlBarTop();
+	if( m_productionStripThemed && m_productionStripCount > 0 )
+		floor = min( floor, m_queueTrayTop );
+
+	HtmlValues values;
+	values[ "floor" ] = std::to_string( REAL_TO_INT_FLOOR( floor / ControlBarUniformScale() ) );
+	m_feedOverlay->setPage( HtmlTemplate_expand( m_feedPage, values, lists, lookupGameText ) );
+	m_feedOverlay->draw();
+}
 
 //-------------------------------------------------------------------------------------------------
 /** An area selection is occurring, start graphical "hint". */
@@ -7145,45 +7075,7 @@ void InGameUI::postDraw( void )
 	drawBlindSpots();
 	drawPlacementReach();		// after the shade, so the outline stays bright over it
 	drawSpectatorPage();
-
-
-	// render our display strings for the messages if on
-	if( m_messagesOn )
-	{
-		Int i, x, y;
-		Color dropColor;
-		UnsignedByte r, g, b, a;
-
-		x = m_messagePosition.x;
-		y = m_messagePosition.y;
-		// the messages start under the strip drop-down rather than being written across it, and
-		// right of the command bar page's menu button in the corner, which sat on their first letters
-		if( m_hudTogglesBottom + stripPixels( HUD_TOGGLES_INSET ) > y )
-			y = m_hudTogglesBottom + stripPixels( HUD_TOGGLES_INSET );
-		if( m_controlBarPageShown && x < stripPixels( MENU_BUTTON_CLEARANCE ) )
-			x = stripPixels( MENU_BUTTON_CLEARANCE );
-		for( i = MAX_UI_MESSAGES - 1; i >= 0; i-- )
-		{
-
-			if( m_uiMessages[ i ].displayString )
-			{
-
-				// make drop color black, but use the alpha setting of the fill color specified (for fading)
-				GameGetColorComponents( m_uiMessages[ i ].color, &r, &g, &b, &a );
-				dropColor = GameMakeColor( 0, 0, 0, a );
-
-				// draw the text
-				m_uiMessages[ i ].displayString->draw( x, y, m_uiMessages[ i ].color, dropColor );
-
-				// increment text spot to next location
-				GameFont *font = m_uiMessages[ i ].displayString->getFont();
-				y += font->height;
-
-			}  //end if
-
-		}  // end for i
-
-	}  // end if
+	drawFeed();
 
 	if( m_militarySubtitle )
 	{
@@ -7269,7 +7161,7 @@ void InGameUI::postDraw( void )
                 {
                   if ( TheGameLogic->getFrame() > 0 )
                   {
-                    addSpectatorToast( i, owningObject, superweaponCameo( info->getSpecialPowerTemplate() ) );
+                    feedSuperweapon( owningObject, mapIt->first, info->getSpecialPowerTemplate(), FALSE );
 
                     SpecialPowerType type = module->getSpecialPowerTemplate()->getSpecialPowerType();
                   
@@ -9915,15 +9807,7 @@ void InGameUI::drawSkillStrip( void )
 	// with, which is where the eye is not: watching a match you read the bottom of the screen, and
 	// the two strips now sit at either end of the same shelf.
 	//
-	Int barTop = TheDisplay->getHeight();
-	static NameKeyType controlBarKey = TheNameKeyGenerator->nameToKey( "ControlBar.wnd:ControlBarParent" );
-	GameWindow *bar = TheWindowManager->winGetWindowFromId( NULL, controlBarKey );
-	if( bar && !bar->winIsHidden() )
-	{
-		ICoord2D barPos;
-		bar->winGetScreenPosition( &barPos.x, &barPos.y );
-		barTop = barPos.y;
-	}
+	const Int barTop = controlBarTop();
 
 	const Int lowerY = barTop - ( trayH - trayHole.y ) - stripPixels( PRODUCTION_STRIP_LIFT );
 	const Int right = TheDisplay->getWidth();
@@ -11009,7 +10893,10 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	const Bool leftFound = controlBarUnion( CONTROL_BAR_LEFT, content );
 	const IRegion2D leftBox = framed( content, border, TRUE, FALSE );
 	putFrame( values, "left", content, leftBox, leftFound && leftShown );
-	putPageRect( values, "alerttab", tabOn( leftBox, ALERT_TAB_WIDTH, PANEL_TAB_HEIGHT, FALSE ), leftFound && leftShown );
+	const IRegion2D alertTab = tabOn( leftBox, ALERT_TAB_WIDTH, PANEL_TAB_HEIGHT, FALSE );
+	putPageRect( values, "alerttab", alertTab, leftFound && leftShown );
+	// the event feed stands on that tab, or on the screen's bottom with the radar folded away
+	m_feedFloor = leftFound && leftShown ? alertTab.lo.y : barBottom();
 
 	// the three smoke signal buttons, a column standing on the screen's bottom edge against the left
 	// panel's border; not there at all where the keys would do nothing either, a game with no allies
@@ -12003,6 +11890,7 @@ void InGameUI::drawQueueTray( void )
 	tray.lo.y -= trayBorder;
 	tray.hi.x += trayBorder;
 	tray.hi.y += trayBorder;
+	m_queueTrayTop = tray.lo.y;
 
 	m_productionStripCameoW = cell.x;
 	m_productionStripCameoH = cell.y;
@@ -12127,15 +12015,7 @@ void InGameUI::drawProductionStrip( void )
 	// sit on top of the control bar. If the bar is not up (it is hidden while the game is loading,
 	// and in the observer views) fall back to the bottom of the screen.
 	//
-	Int barTop = TheDisplay->getHeight();
-	static NameKeyType controlBarKey = TheNameKeyGenerator->nameToKey( "ControlBar.wnd:ControlBarParent" );
-	GameWindow *bar = TheWindowManager->winGetWindowFromId( NULL, controlBarKey );
-	if( bar && !bar->winIsHidden() )
-	{
-		ICoord2D barPos;
-		bar->winGetScreenPosition( &barPos.x, &barPos.y );
-		barTop = barPos.y;
-	}
+	const Int barTop = controlBarTop();
 
 	//
 	// A queue cameo is one cameo of the general's power bar, to the pixel: the row is built out of
