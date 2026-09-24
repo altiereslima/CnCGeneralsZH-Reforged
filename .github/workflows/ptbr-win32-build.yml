@@ -1,9 +1,8 @@
-name: PT-BR x64 Build
+name: PT-BR Win32 Build
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
     inputs:
       config:
@@ -27,44 +26,23 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      - name: Checkout fork
-        uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install the D3DX9 runtime the tests bind
+      - name: Install build dependencies
         shell: pwsh
-        run: |
-          # The renderer binds d3dx9_43.dll at run time and expects the DirectX End-User Runtime
-          # to have put it in System32, as it has on a player's machine. The hosted runner has
-          # none, and dx9_smoke and test_ww3d2's FVF sizes fail without it; its shader assembler
-          # also needs D3DCompiler_43.dll beside it. Microsoft ships the same 9.29.952.3111 DLLs
-          # in this NuGet package. They are for the tests only, not the artifact.
-          $version = "9.29.952.8"
-          $sha256 = "EAD0906AE8A26C18A7525DA7490127A2110F7C58F18293738283E30E97C6EA4B"
-          $package = "$env:RUNNER_TEMP\d3dx.zip"
-          Invoke-WebRequest -Uri "https://api.nuget.org/v3-flatcontainer/microsoft.dxsdk.d3dx/$version/microsoft.dxsdk.d3dx.$version.nupkg" -OutFile $package
-          $hash = (Get-FileHash $package -Algorithm SHA256).Hash
-          if ($hash -ne $sha256) { throw "Microsoft.DXSDK.D3DX $version downloaded with hash $hash" }
-          Expand-Archive -Path $package -DestinationPath "$env:RUNNER_TEMP\d3dx" -Force
-          $bin = "$env:RUNNER_TEMP\d3dx\build\native\release\bin\x64"
-          Copy-Item "$bin\D3DX9_43.dll" "$env:SystemRoot\System32\d3dx9_43.dll" -Force
-          Copy-Item "$bin\D3DCompiler_43.dll" "$env:SystemRoot\System32\D3DCompiler_43.dll" -Force
+        run: python PTBR\scripts\dependencies.py --repo .
 
-      - name: Install public build dependencies
+      - name: Validate build prerequisites
         shell: pwsh
-        run: |
-          python PTBR\tools\install_public_dependencies.py --repo .
+        run: python PTBR\scripts\validate.py --repo . --prereqs-only
 
-      - name: Audit complete build prerequisites
-        shell: pwsh
-        run: |
-          python PTBR\tools\audit_build_prereqs.py --repo .
-
-      - name: Detect optional PT-BR media
+      - name: Detect optional localized media
         id: media
         shell: pwsh
         env:
@@ -75,14 +53,13 @@ jobs:
           $hasHash = -not [string]::IsNullOrWhiteSpace($env:MEDIA_SHA256)
           if (-not $hasUrl -and -not $hasHash) {
             "enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-            Write-Host "::notice::PT-BR media not configured; build continues with text and runtime media fallback."
           } elseif ($hasUrl -xor $hasHash) {
             throw "Configure both PTBR_MEDIA_URL and PTBR_MEDIA_SHA256, or leave both empty."
           } else {
             "enabled=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           }
 
-      - name: Download optional PT-BR media
+      - name: Download localized media
         if: steps.media.outputs.enabled == 'true'
         shell: pwsh
         env:
@@ -95,18 +72,18 @@ jobs:
           }
           Invoke-WebRequest -Uri $env:MEDIA_URL -Headers $headers -OutFile "$env:RUNNER_TEMP\ptbr-media.zip"
 
-      - name: Install and verify optional PT-BR media
+      - name: Install localized media
         if: steps.media.outputs.enabled == 'true'
         shell: pwsh
         env:
           MEDIA_SHA256: ${{ secrets.PTBR_MEDIA_SHA256 }}
         run: |
-          python PTBR\tools\install_ptbr_media_bundle.py `
+          python PTBR\scripts\media.py `
             --package PTBR `
             --archive "$env:RUNNER_TEMP\ptbr-media.zip" `
             --sha256 "$env:MEDIA_SHA256"
 
-      - name: Apply PT-BR, validate and build x64
+      - name: Build
         shell: pwsh
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -114,71 +91,44 @@ jobs:
           INPUT_RUN_TESTS: ${{ inputs.run_tests }}
         run: |
           if ($env:EVENT_NAME -eq "workflow_dispatch") {
-            $buildConfig = $env:INPUT_CONFIG
-            $runTests = $env:INPUT_RUN_TESTS
+            $config = $env:INPUT_CONFIG
+            $tests = $env:INPUT_RUN_TESTS
           } else {
-            $buildConfig = "Release"
-            $runTests = "true"
+            $config = "Release"
+            $tests = "true"
           }
+          if ([string]::IsNullOrWhiteSpace($config)) { $config = "Release" }
 
-          if ([string]::IsNullOrWhiteSpace($buildConfig)) {
-            $buildConfig = "Release"
-          }
+          $args = @(".", "--config", "$config", "--clean", "--allow-dirty")
+          if ($tests -ne "true") { $args += "--skip-tests" }
+          python PTBR\scripts\build.py @args
 
-          $runnerArgs = @(".", "--config", "$buildConfig", "--clean", "--allow-dirty")
-          if ($runTests -ne "true") { $runnerArgs += "--skip-tests" }
-          python PTBR\tools\run_windows_stage15.py @runnerArgs
-
-      - name: Assemble downloadable PT-BR build
+      - name: Package build
         shell: pwsh
         run: |
-          # Everything the x64 build lays out in GeneralsMD\Run for the game: the exe with its PDB
-          # (the crash log names functions through it), the five FFmpeg DLLs sound and video
-          # decode with, and the loose data CMake copies there. Data\INI and Data\Scripts are in
-          # the multiplayer checksum, so they ship with the exe they were built with. Scenarios\
-          # and Cinema\ are measuring tools, left out.
-          $run = "GeneralsMD\Run"
           $out = "PTBR_BUILD_ARTIFACT"
-          New-Item -ItemType Directory -Force $out | Out-Null
-          $files = @(
-            "generals.exe", "generals.pdb", "Install_Final.bmp",
-            "avcodec-62.dll", "avformat-62.dll", "avutil-60.dll", "swresample-6.dll", "swscale-9.dll"
-          )
-          foreach ($f in $files) {
-            if (-not (Test-Path "$run\$f")) { throw "missing from Run: $f" }
-            Copy-Item "$run\$f" "$out\$f" -Force
+          New-Item -ItemType Directory -Force "$out\Data\PortugueseBrazil" | Out-Null
+          Copy-Item "GeneralsMD\Run\generals.exe" "$out\generals.exe" -Force
+          if (Test-Path "GeneralsMD\Run\generals.pdb") {
+            Copy-Item "GeneralsMD\Run\generals.pdb" "$out\generals.pdb" -Force
           }
-          foreach ($d in @("Data", "Art", "Window")) {
-            if (-not (Test-Path "$run\$d")) { throw "missing from Run: $d\" }
-            Copy-Item "$run\$d" "$out\$d" -Recurse -Force
-          }
-          if (-not (Test-Path "$out\Data\PortugueseBrazil\Generals.str")) {
-            throw "PT-BR text missing from the artifact"
-          }
-          Copy-Item "PTBR_STAGE15_RESULTS\result.json" "$out\STAGE15_BUILD_RESULT.json" -Force
-          @"
-          Zero Hour Reforged PT-BR build (x64).
-          Requires a legally owned Zero Hour installation: copy these files over a Reforged
-          install, or put Zero Hour's *.big next to generals.exe and the base game's *.big
-          in ZH_Generals\. No game data ships here. Sound and video run through the FFmpeg
-          DLLs included; mss32.dll and binkw32.dll are not used by the 64-bit build.
-          "@ | Set-Content "$out\README_INSTALL.txt" -Encoding UTF8
+          Copy-Item "GeneralsMD\Run\Data\Patch.str" "$out\Data\Patch.str" -Force
+          Copy-Item "GeneralsMD\Run\Data\PortugueseBrazil\*" "$out\Data\PortugueseBrazil\" -Recurse -Force
+          Copy-Item "PTBR_BUILD_RESULTS\result.json" "$out\BUILD_RESULT.json" -Force
 
-      - name: Upload PT-BR build
-        uses: actions/upload-artifact@v6
+      - name: Upload build
+        uses: actions/upload-artifact@v4
         with:
-          name: ZH-Reforged-PTBR-${{ github.event_name == 'workflow_dispatch' && inputs.config || 'Release' }}-${{ github.run_number }}
+          name: ZH-Reforged-PTBR-${{ github.run_number }}
           path: PTBR_BUILD_ARTIFACT/
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload build logs
+      - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: ZH-Reforged-PTBR-logs-${{ github.run_number }}
-          path: |
-            PTBR_STAGE15_RESULTS/
-            build/Testing/Temporary/
+          path: PTBR_BUILD_RESULTS/
           if-no-files-found: warn
           retention-days: 14
