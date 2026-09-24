@@ -62,7 +62,6 @@
 #include "GameClient/Eva.h"
 #include "GameClient/GameText.h"
 #include "Common/UserPreferences.h"
-#include "Common/OptionsCatalog.h"
 #include "Common/FileSystem.h"
 #include "Common/file.h"
 #include "GameNetwork/GameSpy/ThreadUtils.h"
@@ -1196,7 +1195,6 @@ InGameUI::InGameUI()
 	m_spectatorPageShown = FALSE;
 	m_spectatorListsFrame = 0;
 	m_spectatorListsWatched = NULL;
-	m_spectatorLeadFrame = 0;
 	m_hudTogglesBottom = 0;
 	m_scoreboardOpen = FALSE;
 	m_scoreboardOverlay = NULL;
@@ -1788,7 +1786,6 @@ static Real elevatedReach( Real reach, Real range, const Coord3D &center, Real a
 // in the player's language.
 //-------------------------------------------------------------------------------------------------
 static const char *const SPECTATOR_PAGE = "Window\\Html\\Spectator.html";
-static const std::string OPTION_ACTION = "option:";
 static const std::string FLIP_ACTION = "flip:";
 static const std::string PICK_ACTION = "pick:";
 static const std::string WATCH_ACTION = "watch:";
@@ -1813,8 +1810,6 @@ enum
 	MENU_BUTTON_CLEARANCE			= 26,		///< where the messages start, right of the command bar page's menu button, 800x600
 	NET_WORTH_REFRESH_FRAMES	= LOGICFRAMES_PER_SECOND / 2,	///< how often every player's worth is counted again
 	FRAMES_PER_MINUTE					= LOGICFRAMES_PER_SECOND * 60,
-	LEAD_SAMPLE_FRAMES				= LOGICFRAMES_PER_SECOND * 10,	///< one point of the lead graph every ten seconds
-	LEAD_GRAPH_COLUMNS				= 48,		///< the most columns the graph draws; a longer match is averaged into them
 	ARMY_CHART_UNITS					= 6,		///< kinds of unit shown per player, the most money first
 	PLAYER_NAME_CHARS					= 11,		///< a name longer than this is cut, there is no clipping to hide it
 	SECONDS_IN_MINUTE					= 60,
@@ -2076,57 +2071,6 @@ static void fillSpectatorArmies( const std::vector< SpectatorStats > &players, s
 	}
 }
 
-//-------------------------------------------------------------------------------------------------
-/** The page's "lead" list: the first team's net worth less the second's since the match began, as
-	* at most LEAD_GRAPH_COLUMNS columns, each with {{up}} or {{down}} the percentage of the biggest
-	* lead either way.  A longer match averages neighbouring samples into one column. */
-//-------------------------------------------------------------------------------------------------
-static void fillSpectatorLead( const std::vector< Int > &samples, std::vector< HtmlValues > &columns )
-{
-	const Int count = (Int)samples.size();
-	const Int columnCount = min( count, (Int)LEAD_GRAPH_COLUMNS );
-	std::vector< Int > averages( columnCount );
-	Int biggest = 0;
-	for( Int column = 0; column < columnCount; column++ )
-	{
-		const Int first = column * count / columnCount;
-		const Int last = ( column + 1 ) * count / columnCount;
-		Int64 sum = 0;
-		for( Int sample = first; sample < last; sample++ )
-			sum += samples[ sample ];
-		averages[ column ] = (Int)( sum / ( last - first ) );
-		biggest = max( biggest, abs( averages[ column ] ) );
-	}
-
-	columns.clear();
-	for( Int column = 0; column < columnCount; column++ )
-	{
-		const Int share = biggest > 0 ? abs( averages[ column ] ) * PERCENT / biggest : 0;
-		HtmlValues entry;
-		entry[ "up" ] = std::to_string( averages[ column ] > 0 ? share : 0 );
-		entry[ "down" ] = std::to_string( averages[ column ] < 0 ? share : 0 );
-		columns.push_back( entry );
-	}
-}
-
-//-------------------------------------------------------------------------------------------------
-/** The lead graph samples every LEAD_SAMPLE_FRAMES while two teams are left.  A logic frame that
-	* went backwards is a new match or a load, and starts the graph again. */
-//-------------------------------------------------------------------------------------------------
-void InGameUI::sampleSpectatorLead( Int lead, Bool twoTeams )
-{
-	const UnsignedInt frame = TheGameLogic->getFrame();
-	if( frame < m_spectatorLeadFrame )
-		m_spectatorLead.clear();
-	if( !twoTeams )
-		return;
-	if( !m_spectatorLead.empty() && frame < m_spectatorLeadFrame + LEAD_SAMPLE_FRAMES )
-		return;
-
-	m_spectatorLead.push_back( lead );
-	m_spectatorLeadFrame = frame;
-}
-
 static Int gatherPlayerSkills( const Player *player, const Image **icons, Int count, Int max );
 
 //-------------------------------------------------------------------------------------------------
@@ -2183,38 +2127,6 @@ static std::string spectatorClock( UnsignedInt frame )
 	else
 		sprintf( text, "%u:%02u", seconds / SECONDS_IN_MINUTE, seconds % SECONDS_IN_MINUTE );
 	return text;
-}
-
-//-------------------------------------------------------------------------------------------------
-/** The page's "top" list, the strip across the top of the screen: every player grouped by team,
-	* each with kind "player", and between two teams an entry of kind "clock" - or kind "gap" between
-	* any others, so a free for all reads as separate seats. */
-//-------------------------------------------------------------------------------------------------
-static void fillSpectatorTop( std::vector< SpectatorStats > players, std::vector< HtmlValues > &entries )
-{
-	std::stable_sort( players.begin(), players.end(),
-										[]( const SpectatorStats &a, const SpectatorStats &b ) { return a.team < b.team; } );
-
-	entries.clear();
-	for( size_t index = 0; index < players.size(); index++ )
-	{
-		const SpectatorStats &stats = players[ index ];
-		if( index > 0 && players[ index - 1 ].team != stats.team )
-		{
-			HtmlValues between;
-			between[ "kind" ] = stats.team == 1 && players.back().team == 1 ? "clock" : "gap";
-			entries.push_back( between );
-		}
-
-		HtmlValues entry = spectatorHead( stats.player );
-		entry[ "kind" ] = "player";
-		entry[ "team" ] = std::to_string( stats.team );
-		entry[ "cash" ] = std::to_string( stats.cash );
-		entry[ "power" ] = stats.power < 0 ? "brownout" : "";
-		entry[ "click" ] = WATCH_ACTION + std::to_string( stats.player->getPlayerIndex() );
-		entry[ "watched" ] = stats.player == TheControlBar->getObserverLookAtPlayer() ? "watched" : "";
-		entries.push_back( entry );
-	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2365,6 +2277,8 @@ static void fillPlayerSeats( const std::vector< SpectatorStats > &seats, Int tea
 			group[ place + ".image" ] = head.at( "image" );
 			group[ place + ".color" ] = head.at( "color" );
 			group[ place + ".weapon" ] = ready ? "ready" : owned ? "charging" : "none";
+			group[ place + ".click" ] = WATCH_ACTION + std::to_string( seats[ end ].player->getPlayerIndex() );
+			group[ place + ".watched" ] = seats[ end ].player == TheControlBar->getObserverLookAtPlayer() ? "watched" : "";
 		}
 		group[ "kind" ] = freeForAll ? "ffa" : end - first > 1 ? "team" : "solo";
 		for( size_t place = end - first; place < MAX_SLOTS; place++ )
@@ -2378,70 +2292,6 @@ static void fillPlayerSeats( const std::vector< SpectatorStats > &seats, Int tea
 		}
 		entries.push_back( group );
 		first = end;
-	}
-}
-
-//-------------------------------------------------------------------------------------------------
-/** The page's "superweapons" list: per player who has one, a head entry and then his countdowns,
-	* soonest first, each of kind "weapon" with its cameo, {{time}} and {{ready}} "ready" once it can
-	* fire.  Players come in the order `players` has them. */
-//-------------------------------------------------------------------------------------------------
-static void fillSpectatorSuperweapons( const std::vector< SpectatorStats > &players,
-																			 std::vector< SpectatorSuperweapon > weapons,
-																			 std::vector< HtmlValues > &cells )
-{
-	std::stable_sort( weapons.begin(), weapons.end(),
-										[]( const SpectatorSuperweapon &a, const SpectatorSuperweapon &b ) { return a.seconds < b.seconds; } );
-
-	cells.clear();
-	for( size_t index = 0; index < players.size(); index++ )
-	{
-		const Int owner = players[ index ].player->getPlayerIndex();
-		Bool headed = FALSE;
-		for( size_t weapon = 0; weapon < weapons.size(); weapon++ )
-		{
-			if( weapons[ weapon ].playerIndex != owner )
-				continue;
-			if( !headed )
-				cells.push_back( spectatorHead( players[ index ].player ) );
-			headed = TRUE;
-
-			UnicodeString time;
-			formatStripSeconds( &time, weapons[ weapon ].seconds );
-			HtmlValues cell;
-			cell[ "kind" ] = "weapon";
-			cell[ "image" ] = weapons[ weapon ].cameo ? weapons[ weapon ].cameo->getName().str() : "";
-			cell[ "time" ] = WideCharStringToMultiByte( time.str() );
-			cell[ "ready" ] = weapons[ weapon ].ready ? "ready" : "";
-			cells.push_back( cell );
-		}
-	}
-}
-
-//-------------------------------------------------------------------------------------------------
-/** The page's "skills" list: per player who has bought any, a head entry and then each promotion
-	* at the level it has reached, of kind "skill" with its cameo. */
-//-------------------------------------------------------------------------------------------------
-static void fillSpectatorSkills( const std::vector< SpectatorStats > &players, std::vector< HtmlValues > &cells )
-{
-	enum { SKILLS_SHOWN = 12 };
-
-	cells.clear();
-	for( size_t index = 0; index < players.size(); index++ )
-	{
-		const Image *icons[ SKILLS_SHOWN ];
-		const Int count = gatherPlayerSkills( players[ index ].player, icons, 0, SKILLS_SHOWN );
-		if( count == 0 )
-			continue;
-
-		cells.push_back( spectatorHead( players[ index ].player ) );
-		for( Int skill = 0; skill < count; skill++ )
-		{
-			HtmlValues cell;
-			cell[ "kind" ] = "skill";
-			cell[ "image" ] = icons[ skill ]->getName().str();
-			cells.push_back( cell );
-		}
 	}
 }
 
@@ -2509,15 +2359,10 @@ Bool InGameUI::pickSpectatorStat( Int commandSlot )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The spectator's page: the drop-down that switches the strips on and off, every player ranked by
-	* the number picked in the stat drop-down, the net worth lead over the match and each army's most
-	* expensive units - the panels Dota's spectator keeps down the left of the screen.
-	*
-	* Watching a match two strips fight over the same picture - the promotions and the superweapon
-	* countdowns - and which of them a spectator wants depends on what he is watching for; the
-	* production is on the Tab scoreboard.  Each box flips its option the moment it is clicked and
-	* saves the choice with the rest of the options.  Only while watching: playing, the top left
-	* corner belongs to the messages, and the other side's worth is not a player's to know. */
+/** The spectator's page: the players across the top the way a player sees them, the camera, every
+	* player ranked by the number picked in the stat drop-down and each army's most expensive units,
+	* and a superweapon coming ready on the left.  The promotions and the production are on the Tab
+	* scoreboard.  Only while watching: the other side's worth is not a player's to know. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawSpectatorPage( void )
 {
@@ -2550,26 +2395,18 @@ void InGameUI::drawSpectatorPage( void )
 		const std::vector< SpectatorStats > players = gatherSpectatorStats( stat, teams );
 		fillSpectatorPlayers( players, stat, teams, m_spectatorLists[ "players" ] );
 		fillSpectatorArmies( players, m_spectatorLists[ "army" ] );
-		fillSpectatorTop( players, m_spectatorLists[ "top" ] );
 		fillSpectatorFollows( players, m_spectatorLists[ "follows" ] );
-		fillSpectatorSuperweapons( players, m_spectatorSuperweapons, m_spectatorLists[ "superweapons" ] );
-		fillSpectatorSkills( players, m_spectatorLists[ "skills" ] );
 
-		Int lead = 0;
-		for( size_t index = 0; index < players.size(); index++ )
-			lead += players[ index ].team == 0 ? players[ index ].networth : -players[ index ].networth;
-		sampleSpectatorLead( lead, teams == TWO_TEAMS );
-		fillSpectatorLead( m_spectatorLead, m_spectatorLists[ "lead" ] );
+		// the strip across the top is the one a player has, grouped by the lobby's teams
+		Int seatTeams = 0;
+		const std::vector< SpectatorStats > seats = gatherSeats( seatTeams );
+		fillPlayerSeats( seats, seatTeams, m_spectatorSuperweapons, m_spectatorLists[ "seats" ] );
 
 		m_spectatorTotals.clear();
 		m_spectatorTotals[ "stat" ] = WideCharStringToMultiByte( TheGameText->fetch( stat.label ).str() );
 		m_spectatorTotals[ PICK_ACTION + STAT_GROUP + ":" + stat.key ] = "on";
 		m_spectatorTotals[ "teams" ] = std::to_string( teams );
-		m_spectatorTotals[ "lead" ] = std::to_string( abs( lead ) );
-		m_spectatorTotals[ "leader" ] = lead == 0 ? "" : ( lead > 0 ? "team0" : "team1" );
-		m_spectatorTotals[ "graph" ] = teams == TWO_TEAMS && m_spectatorLead.size() >= TWO_TEAMS ? "shown" : "";
 		m_spectatorTotals[ "side" ] = spectatorSide();
-		m_spectatorTotals[ "clock" ] = spectatorClock( frame );
 		for( Int each = 0; each < (Int)ARRAY_SIZE( SPECTATOR_STATS ); each++ )
 			m_spectatorTotals[ std::string( "statkey:" ) + SPECTATOR_STATS[ each ].key ] = commandSlotKey( each * COMMAND_SLOTS_PER_COLUMN );
 		m_spectatorListsFrame = frame;
@@ -2598,9 +2435,6 @@ void InGameUI::drawSpectatorPage( void )
 		values[ PICK_ACTION + pick->first ] = pick->second;
 		values[ PICK_ACTION + pick->first + ":" + pick->second ] = "on";
 	}
-	for( Int row = 0; row < TheOptionCatalogCount; row++ )
-		if( TheOptionCatalog[ row ].kind == OPTION_BOOL && TheOptionCatalog[ row ].get() )
-			values[ OPTION_ACTION + TheOptionCatalog[ row ].iniKey ] = "on";
 	for( std::set< std::string >::const_iterator name = m_spectatorFlipped.begin(); name != m_spectatorFlipped.end(); ++name )
 		values[ FLIP_ACTION + *name ] = "flipped";
 
@@ -2693,22 +2527,6 @@ void InGameUI::runSpectatorAction( const std::string &action )
 	}
 	else if( action == FOG_ACTION )
 		TheObserverCamera.setFog( !TheObserverCamera.isFogOn() );
-	else if( action.compare( 0, OPTION_ACTION.size(), OPTION_ACTION ) == 0 )
-	{
-		const OptionDef *option = findOptionDef( action.substr( OPTION_ACTION.size() ).c_str() );
-		if( option == NULL || option->kind != OPTION_BOOL )
-		{
-			DEBUG_LOG(( "Spectator page: data-click=\"%s\" names no on/off option\n", action.c_str() ));
-			return;
-		}
-
-		const Bool now = !option->get();
-		option->set( now );
-
-		OptionPreferences pref;
-		pref[ AsciiString( option->iniKey ) ] = AsciiString( now ? "yes" : "no" );
-		pref.write();
-	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -4155,8 +3973,6 @@ void InGameUI::reset( void )
 	m_spectatorPicked.clear();
 	m_spectatorLists.clear();
 	m_spectatorTotals.clear();
-	m_spectatorLead.clear();
-	m_spectatorLeadFrame = 0;
 	m_spectatorSuperweapons.clear();
 	m_spectatorToasts.clear();
 	m_inputEnabled = true;

@@ -1259,7 +1259,6 @@ protected:
 	//
 	void drawSpectatorPage( void );
 	Bool handleSpectatorPageClick( const ICoord2D *mouse, Bool act );	///< TRUE when the click landed on it
-	void sampleSpectatorLead( Int lead, Bool twoTeams );	///< the lead graph's next point, if one is due
 	HtmlOverlay *								m_spectatorOverlay;
 	Bool												m_spectatorPageLoaded;		///< read once a match, so an edited page shows in the next one
 	Bool												m_spectatorPageShown;			///< drawn this frame, so clicks are its to take
@@ -1270,8 +1269,6 @@ protected:
 	HtmlValues									m_spectatorTotals;				///< the page's values that are not per player, gathered with the lists
 	UnsignedInt									m_spectatorListsFrame;		///< the logic frame the lists were last gathered on
 	const Player								*m_spectatorListsWatched;	///< the player being watched when they were, whose seat they mark
-	std::vector< Int >					m_spectatorLead;					///< the first team's net worth less the second's, one per sample
-	UnsignedInt									m_spectatorLeadFrame;			///< the logic frame the last of those was taken on
 	Int													m_hudTogglesBottom;				///< the bottom of the page's #hud-top, so the message list starts under it
 
 	std::vector< SpectatorSuperweapon > m_spectatorSuperweapons;	///< every countdown the superweapon pass found, rebuilt each pass

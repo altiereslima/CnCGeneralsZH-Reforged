@@ -15649,10 +15649,6 @@ TOOLTIP:UpgradeOwned
 "alındı"
 END
 
-GUI:HudToggles
-"Şeritler"
-END
-
 GUI:HudSkillStrip
 "General yetenekleri"
 END
@@ -15691,10 +15687,6 @@ END
 
 GUI:HudStatPower
 "Elektrik"
-END
-
-GUI:HudNetWorthLead
-"Net değer farkı"
 END
 
 GUI:HudArmies

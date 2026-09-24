@@ -13722,9 +13722,10 @@ TEST(html_template_fills_values_and_repeats_each)
 	CHECK_STR( HtmlTemplate_escape( "a\"b'c" ).c_str(), "a&quot;b&#39;c" );
 }
 
-// The spectator's page is the shipped one.  A data-click naming something that is not an on/off
-// option draws a box that does nothing, and only a watched match would show it.
-TEST(the_spectator_page_names_only_on_off_options)
+// The spectator's page is the shipped one.  It switches no options any more - the strips drop-down
+// that did went with the shelves it switched - so an option: click is a box that does nothing, and
+// only a watched match would show it.
+TEST(the_spectator_page_has_its_pieces_and_no_option_clicks)
 {
 	FILE *fp = fopen( SPECTATOR_HTML, "rb" );
 	CHECK( fp != NULL );
@@ -13738,20 +13739,11 @@ TEST(the_spectator_page_names_only_on_off_options)
 		page.append( chunk, got );
 	fclose( fp );
 
-	const std::string click = "data-click=\"option:";
-	Int options = 0;
-	for( size_t at = page.find( click ); at != std::string::npos; at = page.find( click, at + 1 ) )
-	{
-		const size_t nameAt = at + click.size();
-		const std::string name = page.substr( nameAt, page.find( '"', nameAt ) - nameAt );
-		const OptionDef *option = findOptionDef( name.c_str() );
-		CHECK( option != NULL && option->kind == OPTION_BOOL );
-		options++;
-	}
-	// the promotions and the superweapon countdowns; the production queues are on the Tab scoreboard
-	CHECK_EQ( options, 2 );
+	CHECK( page.find( "data-click=\"option:" ) == std::string::npos );
+	// the message list starts under #hud-top
 	CHECK( page.find( "id=\"hud-top\"" ) != std::string::npos );
 	CHECK( page.find( "data-each=\"players\"" ) != std::string::npos );
+	CHECK( page.find( "data-each=\"seats\"" ) != std::string::npos );
 }
 
 #include "test_camera_behavior.inc"
