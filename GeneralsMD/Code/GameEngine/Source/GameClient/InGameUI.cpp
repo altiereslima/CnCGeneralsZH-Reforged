@@ -4130,23 +4130,27 @@ Int InGameUI::feedFloor( void ) const
 //-------------------------------------------------------------------------------------------------
 /** The event feed, Window/Html/Feed.html, for a player and a watcher alike: the newest line at the
 	* bottom, standing on the radar's under-attack tab, or on the production queue's row while that is
-	* up over the tab.  The messages switch (toggleMessages) takes the whole feed away. */
+	* up over the tab.  A line is up for FEED_LINE_FRAMES, and while the chat is open every line held
+	* is, so Enter shows what was missed.  The messages switch (toggleMessages) takes the whole feed
+	* away. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawFeed( void )
 {
 	const UnsignedInt frame = TheGameLogic->getFrame();
+	const Bool history = IsInGameChatActive();
 	HtmlLists lists;
 	std::vector< HtmlValues > &lines = lists[ "feed" ];
 	for( size_t line = 0; line < m_feedLines.size(); )
 	{
 		// a frame going backwards is a loaded save, and the line is not from this game any more
 		const FeedLine &shown = m_feedLines[ line ];
-		if( frame >= shown.until || frame + FEED_LINE_FRAMES < shown.until )
+		if( frame + FEED_LINE_FRAMES < shown.until )
 		{
 			m_feedLines.erase( m_feedLines.begin() + line );
 			continue;
 		}
-		lines.push_back( shown.values );
+		if( history || frame < shown.until )
+			lines.push_back( shown.values );
 		line++;
 	}
 	if( lines.empty() || !m_messagesOn || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
