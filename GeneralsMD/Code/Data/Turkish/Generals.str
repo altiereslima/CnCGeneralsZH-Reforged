@@ -15713,6 +15713,18 @@ GUI:HudCameraFree
 "Serbest"
 END
 
+GUI:HudCameraPlayer
+"Oyuncu kamerası"
+END
+
+GUI:HudFollow
+"Oyuncu"
+END
+
+GUI:HudFollowNobody
+"Hiçbiri"
+END
+
 GUI:HudFog
 "Savaş sisi"
 END

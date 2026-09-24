@@ -50,14 +50,14 @@
       data-each="skills", then his promotions, "skill" with {{image}}
     data-each="toasts", the superweapons that came ready in the last eight seconds, oldest first:
       {{portrait}} {{color}} {{name}} of the owner, {{image}} the weapon's cameo and {{what}} its name
-    data-each="cameras", every player the camera can follow, grouped by team: {{image}} {{color}}
-      {{name}}, {{click}} "camera:N" and {{on}} "on" while the camera is following him.  A
-      data-click of camera:director or camera:free hands the camera to the director or back to the
-      watcher, camera:N follows player N's own screen (GameClient/ObserverCamera.h), and each folds
-      up flip:camera.  {{camera}} is what drives it now, the director, free or the player's name;
-      {{cameradirector}} and {{camerafree}} are "on" while it is that one
-    {{fog}} "on" while the fog is drawn for the followed player, flipped with data-click="fog";
-      {{fogname}} {{fogcolor}} are that player's, empty while nobody is followed
+    {{camera}} names who drives the camera (GameClient/ObserverCamera.h), and {{camerafree}}
+      {{cameradirector}} {{cameraplayer}} are "on" while it is that one.  A data-click of
+      camera:free, camera:director or camera:player hands it over and folds up flip:camera
+    data-each="follows", every player the camera can follow, grouped by team: {{image}} {{color}}
+      {{name}}, {{click}} "follow:N" and {{on}} "on" while he is the one followed.  follow:none
+      follows nobody and {{follownobody}} is "on" then; each folds up flip:follow.  {{follow}}
+      {{followcolor}} are the followed player's name and colour, or the nobody label and no colour
+    {{fog}} "on" while the fog is drawn for the followed player, flipped with data-click="fog"
 
   The stats: networth, cash, income, army, kills, rank, power.  A data-click of option:Key flips
   that option and saves it; flip:name flips the name for the rest of the match; pick:group:choice
@@ -271,13 +271,24 @@
 
   <div class="{{flip:camera}}">
     <div class="choices well">
-      <div class="choice {{cameradirector}}" data-click="camera:director"><span class="box"></span>{{text:GUI:HudCameraDirector}}</div>
-      <div class="choice {{on}}" data-each="cameras" data-click="{{click}}"><span class="box"></span><span style="color: {{color}}">{{name}}</span></div>
       <div class="choice {{camerafree}}" data-click="camera:free"><span class="box"></span>{{text:GUI:HudCameraFree}}</div>
+      <div class="choice {{cameradirector}}" data-click="camera:director"><span class="box"></span>{{text:GUI:HudCameraDirector}}</div>
+      <div class="choice {{cameraplayer}}" data-click="camera:player"><span class="box"></span>{{text:GUI:HudCameraPlayer}}</div>
     </div>
   </div>
 
-  <div class="row {{fog}}" data-click="fog"><span class="box"></span>{{text:GUI:HudFog}} <span style="color: {{fogcolor}}">{{fogname}}</span></div>
+  <div class="head plate">
+    <div class="combo well" data-click="flip:follow">{{text:GUI:HudFollow}}: <span style="color: {{followcolor}}">{{follow}}</span><span class="tab">&#9660;</span></div>
+  </div>
+
+  <div class="{{flip:follow}}">
+    <div class="choices well">
+      <div class="choice {{follownobody}}" data-click="follow:none"><span class="box"></span>{{text:GUI:HudFollowNobody}}</div>
+      <div class="choice {{on}}" data-each="follows" data-click="{{click}}"><span class="box"></span><span style="color: {{color}}">{{name}}</span></div>
+    </div>
+  </div>
+
+  <div class="row {{fog}}" data-click="fog"><span class="box"></span>{{text:GUI:HudFog}}</div>
 
   <div class="head plate">
     <div class="combo well" data-click="flip:stat">{{stat}}<span class="tab">&#9660;</span></div>

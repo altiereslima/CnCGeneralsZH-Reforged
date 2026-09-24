@@ -1039,7 +1039,10 @@ void Drawable::allocateShadows(void)
 //-------------------------------------------------------------------------------------------------
 void Drawable::setFullyObscuredByShroud(Bool fullyObscured)
 {
-	if (m_drawableFullyObscuredByShroud != fullyObscured)
+	// passed on every frame while obscured, not only on the change: whether a building's shadow stays
+	// in the fog can change under a flag that does not, when its ground goes from fogged to shrouded
+	// or its snapshot is taken or freed
+	if (m_drawableFullyObscuredByShroud != fullyObscured || fullyObscured)
 	{
 		for (DrawModule** dm = getDrawModules(); *dm; ++dm)
 		{

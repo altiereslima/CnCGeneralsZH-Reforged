@@ -1792,12 +1792,17 @@ static const std::string OPTION_ACTION = "option:";
 static const std::string FLIP_ACTION = "flip:";
 static const std::string PICK_ACTION = "pick:";
 static const std::string WATCH_ACTION = "watch:";
-// data-click="camera:director", "camera:free" or "camera:N" drives the camera (ObserverCamera.h) and
-// folds up flip:camera; data-click="fog" turns the followed player's fog on and off
+// data-click="camera:free", "camera:director" or "camera:player" picks who drives the camera
+// (ObserverCamera.h) and folds up flip:camera; "follow:N" or "follow:none" picks the player it
+// follows and folds up flip:follow; "fog" turns the followed player's fog on and off
 static const std::string CAMERA_ACTION = "camera:";
 static const std::string CAMERA_DIRECTOR = "director";
 static const std::string CAMERA_FREE = "free";
+static const std::string CAMERA_PLAYER = "player";
 static const std::string CAMERA_GROUP = "camera";
+static const std::string FOLLOW_ACTION = "follow:";
+static const std::string FOLLOW_NOBODY = "none";
+static const std::string FOLLOW_GROUP = "follow";
 static const std::string FOG_ACTION = "fog";
 static const std::string TEXT_LOOKUP = "text:";
 static const std::string STAT_GROUP = "stat";
@@ -2214,10 +2219,9 @@ static void fillSpectatorTop( std::vector< SpectatorStats > players, std::vector
 
 //-------------------------------------------------------------------------------------------------
 /** The players the camera can follow, grouped by team the way the seats are.  Which one it is
-	* following is marked every frame, since scrolling by hand lets go of him between two of the
-	* lists' rebuilds. */
+	* following is marked every frame, not at the lists' rebuilds. */
 //-------------------------------------------------------------------------------------------------
-static void fillSpectatorCameras( std::vector< SpectatorStats > players, std::vector< HtmlValues > &entries )
+static void fillSpectatorFollows( std::vector< SpectatorStats > players, std::vector< HtmlValues > &entries )
 {
 	std::stable_sort( players.begin(), players.end(),
 										[]( const SpectatorStats &a, const SpectatorStats &b ) { return a.team < b.team; } );
@@ -2226,37 +2230,40 @@ static void fillSpectatorCameras( std::vector< SpectatorStats > players, std::ve
 	for( size_t index = 0; index < players.size(); index++ )
 	{
 		HtmlValues entry = spectatorHead( players[ index ].player );
-		entry[ "click" ] = CAMERA_ACTION + std::to_string( players[ index ].player->getPlayerIndex() );
+		entry[ "click" ] = FOLLOW_ACTION + std::to_string( players[ index ].player->getPlayerIndex() );
 		entries.push_back( entry );
 	}
 }
 
 //-------------------------------------------------------------------------------------------------
-/** What the camera's drop-down and the fog switch show this frame. */
+/** What the camera's and the followed player's drop-downs and the fog switch show this frame. */
 //-------------------------------------------------------------------------------------------------
-static void fillSpectatorCameraValues( std::vector< HtmlValues > &cameras, HtmlValues &values )
+static void fillSpectatorCameraValues( std::vector< HtmlValues > &follows, HtmlValues &values )
 {
 	const Int followed = TheObserverCamera.getFollowedPlayerIndex();
 	const ObserverCameraMode mode = TheObserverCamera.getMode();
-	const std::string followedClick = CAMERA_ACTION + std::to_string( followed );
-	for( size_t index = 0; index < cameras.size(); index++ )
-		cameras[ index ][ "on" ] = mode == OBSERVER_CAMERA_PLAYER && cameras[ index ][ "click" ] == followedClick ? "on" : "";
+	const std::string followedClick = FOLLOW_ACTION + std::to_string( followed );
+	for( size_t index = 0; index < follows.size(); index++ )
+		follows[ index ][ "on" ] = follows[ index ][ "click" ] == followedClick ? "on" : "";
 
-	const char *label = mode == OBSERVER_CAMERA_DIRECTOR ? "GUI:HudCameraDirector" : "GUI:HudCameraFree";
+	const char *label = mode == OBSERVER_CAMERA_DIRECTOR ? "GUI:HudCameraDirector"
+		: mode == OBSERVER_CAMERA_PLAYER ? "GUI:HudCameraPlayer" : "GUI:HudCameraFree";
 	values[ "camera" ] = WideCharStringToMultiByte( TheGameText->fetch( label ).str() );
 	values[ "cameradirector" ] = mode == OBSERVER_CAMERA_DIRECTOR ? "on" : "";
-	values[ "camerafree" ] = mode == OBSERVER_CAMERA_FREE && followed == ObserverCamera::NO_PLAYER ? "on" : "";
+	values[ "cameraplayer" ] = mode == OBSERVER_CAMERA_PLAYER ? "on" : "";
+	values[ "camerafree" ] = mode == OBSERVER_CAMERA_FREE ? "on" : "";
 	values[ "fog" ] = TheObserverCamera.isFogOn() ? "on" : "";
-	values[ "fogname" ] = "";
-	values[ "fogcolor" ] = "";
+	values[ "follownobody" ] = followed == ObserverCamera::NO_PLAYER ? "on" : "";
 	if( followed == ObserverCamera::NO_PLAYER )
+	{
+		values[ "follow" ] = WideCharStringToMultiByte( TheGameText->fetch( "GUI:HudFollowNobody" ).str() );
+		values[ "followcolor" ] = "";
 		return;
+	}
 
 	const HtmlValues head = spectatorHead( ThePlayerList->getNthPlayer( followed ) );
-	if( mode == OBSERVER_CAMERA_PLAYER )
-		values[ "camera" ] = head.at( "name" );
-	values[ "fogname" ] = head.at( "name" );
-	values[ "fogcolor" ] = head.at( "color" );
+	values[ "follow" ] = head.at( "name" );
+	values[ "followcolor" ] = head.at( "color" );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2544,7 +2551,7 @@ void InGameUI::drawSpectatorPage( void )
 		fillSpectatorPlayers( players, stat, teams, m_spectatorLists[ "players" ] );
 		fillSpectatorArmies( players, m_spectatorLists[ "army" ] );
 		fillSpectatorTop( players, m_spectatorLists[ "top" ] );
-		fillSpectatorCameras( players, m_spectatorLists[ "cameras" ] );
+		fillSpectatorFollows( players, m_spectatorLists[ "follows" ] );
 		fillSpectatorSuperweapons( players, m_spectatorSuperweapons, m_spectatorLists[ "superweapons" ] );
 		fillSpectatorSkills( players, m_spectatorLists[ "skills" ] );
 
@@ -2585,7 +2592,7 @@ void InGameUI::drawSpectatorPage( void )
 	}
 
 	HtmlValues values = m_spectatorTotals;
-	fillSpectatorCameraValues( m_spectatorLists[ "cameras" ], values );
+	fillSpectatorCameraValues( m_spectatorLists[ "follows" ], values );
 	for( std::map< std::string, std::string >::const_iterator pick = m_spectatorPicked.begin(); pick != m_spectatorPicked.end(); ++pick )
 	{
 		values[ PICK_ACTION + pick->first ] = pick->second;
@@ -2657,10 +2664,8 @@ void InGameUI::runSpectatorAction( const std::string &action )
 		// what picking him in the old player list did
 		if( TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK && TheGlobalData->m_useCameraInReplay )
 		{
-			if( watched != NULL )
-				TheObserverCamera.followPlayer( watched->getPlayerIndex() );
-			else
-				TheObserverCamera.setMode( OBSERVER_CAMERA_FREE );
+			TheObserverCamera.followPlayer( watched != NULL ? watched->getPlayerIndex() : ObserverCamera::NO_PLAYER );
+			TheObserverCamera.setMode( watched != NULL ? OBSERVER_CAMERA_PLAYER : OBSERVER_CAMERA_FREE );
 		}
 	}
 	else if( action.compare( 0, CAMERA_ACTION.size(), CAMERA_ACTION ) == 0 )
@@ -2669,16 +2674,22 @@ void InGameUI::runSpectatorAction( const std::string &action )
 		m_spectatorFlipped.erase( CAMERA_GROUP );
 		if( choice == CAMERA_DIRECTOR )
 			TheObserverCamera.setMode( OBSERVER_CAMERA_DIRECTOR );
+		else if( choice == CAMERA_PLAYER )
+			TheObserverCamera.setMode( OBSERVER_CAMERA_PLAYER );
 		else if( choice == CAMERA_FREE )
 			TheObserverCamera.setMode( OBSERVER_CAMERA_FREE );
 		else
-		{
-			// following a player is watching him too: his seat lit, his side on the bar
-			Player *player = ThePlayerList->getNthPlayer( atoi( choice.c_str() ) );
-			deselectAllDrawables();
-			TheControlBar->watchPlayer( player );
-			TheObserverCamera.followPlayer( player->getPlayerIndex() );
-		}
+			DEBUG_LOG(( "Spectator page: data-click=\"%s\" names no camera\n", action.c_str() ));
+	}
+	else if( action.compare( 0, FOLLOW_ACTION.size(), FOLLOW_ACTION ) == 0 )
+	{
+		// following a player is watching him too: his seat lit, his side on the bar
+		const std::string choice = action.substr( FOLLOW_ACTION.size() );
+		Player *player = choice == FOLLOW_NOBODY ? NULL : ThePlayerList->getNthPlayer( atoi( choice.c_str() ) );
+		m_spectatorFlipped.erase( FOLLOW_GROUP );
+		deselectAllDrawables();
+		TheControlBar->watchPlayer( player );
+		TheObserverCamera.followPlayer( player != NULL ? player->getPlayerIndex() : ObserverCamera::NO_PLAYER );
 	}
 	else if( action == FOG_ACTION )
 		TheObserverCamera.setFog( !TheObserverCamera.isFogOn() );

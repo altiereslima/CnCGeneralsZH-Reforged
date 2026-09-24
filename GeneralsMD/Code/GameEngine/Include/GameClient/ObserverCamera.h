@@ -19,18 +19,20 @@
 // ObserverCamera.h ///////////////////////////////////////////////////////////////////////////////
 // Who drives a watcher's camera, and whose fog his screen is drawn in.
 //
-// Free is the camera in the watcher's own hands.  Director goes wherever the most things have
-// been hit in the last few seconds and stays there a while before it looks for a hotter fight.
-// Player shows what the followed player's own screen shows: a player's camera comes over the
-// network a few times a second (MSG_SET_REPLAY_CAMERA), and an AI, which has no camera, gets the
-// director narrowed to the fights his own units are in.  Scrolling, turning the camera or clicking
-// the radar hands it back to the watcher, who keeps following that player's fog.
+// The mode and the followed player are picked apart, from two lists.  Free is the camera in the
+// watcher's own hands.  Director goes wherever the most things have been hit in the last few
+// seconds and stays there a while before it looks for a hotter fight; with a player picked it
+// counts only the fights that player is in.  Player shows what the followed player's own screen
+// shows: a player's camera comes over the network a few times a second (MSG_SET_REPLAY_CAMERA), an
+// AI, which has no camera, gets the narrowed director, and with nobody picked it does nothing.
+// Scrolling, turning the camera or clicking the radar hands it back to the watcher, who keeps the
+// player he picked.
 //
-// The followed player is picked from the camera's list, not the seats: clicking a unit makes its
-// owner the watched player, and the camera jumping to an enemy's screen on a click would be no use.
-// Fog on draws the followed player's fog, what he has seen and what he has not, and hides what he
-// cannot see, stealthed units he has not detected included; following nobody it changes nothing.  Nothing here is logic: the camera and the fog
-// are this machine's picture only.
+// The followed player is picked from his own list, not the seats: clicking a unit makes its owner
+// the watched player, and the camera jumping to an enemy's screen on a click would be no use.  Fog
+// on draws the followed player's fog, what he has seen and what he has not, and hides what he
+// cannot see, stealthed units he has not detected included; following nobody it changes nothing.
+// Nothing here is logic: the camera and the fog are this machine's picture only.
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #pragma once
@@ -83,9 +85,9 @@ public:
 	void notePlayerView( Int playerIndex, const ViewLocation &view );
 
 	ObserverCameraMode getMode( void ) const { return m_mode; }
-	/// the director, or the camera back in the watcher's hands; either stops following anybody
 	void setMode( ObserverCameraMode mode );
-	/// show this player's screen, and his fog while fog is on
+	/// the player whose screen the player mode shows, whose fights the director keeps to and whose
+	/// fog is drawn while fog is on; NO_PLAYER for nobody
 	void followPlayer( Int playerIndex );
 	/// the player being followed, still while the watcher has the camera in his own hands, or
 	/// NO_PLAYER
@@ -103,6 +105,7 @@ private:
 	void updateShroudViewer( void );
 	void holdHeight( Bool hold );
 	Bool takenByHand( const ViewLocation &current ) const;
+	Bool isShowingPlayerView( void ) const;
 	Bool chooseTarget( const ViewLocation &current, ViewLocation *target );
 	Bool directorPlace( const Player *narrowTo, Coord2D *place );
 

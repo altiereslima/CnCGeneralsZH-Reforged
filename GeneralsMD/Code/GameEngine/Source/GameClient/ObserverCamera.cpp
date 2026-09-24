@@ -188,7 +188,6 @@ void ObserverCamera::notePlayerView( Int playerIndex, const ViewLocation &view )
 void ObserverCamera::setMode( ObserverCameraMode mode )
 {
 	m_mode = mode;
-	m_followed = NO_PLAYER;
 	m_driving = FALSE;
 	m_placeValid = FALSE;
 }
@@ -196,7 +195,6 @@ void ObserverCamera::setMode( ObserverCameraMode mode )
 //-------------------------------------------------------------------------------------------------
 void ObserverCamera::followPlayer( Int playerIndex )
 {
-	m_mode = OBSERVER_CAMERA_PLAYER;
 	m_followed = playerIndex;
 	m_driving = FALSE;
 	m_placeValid = FALSE;
@@ -212,12 +210,11 @@ Int ObserverCamera::getShroudPlayerIndex( void ) const
 /** The fog is the followed player's while it is on.  Swapping it is what the debug key that makes
 	* you another player does to the fog: his ghosts of what he last saw in, and the ground redrawn
 	* in his shroud.  A knocked-out player's machine kept only his own fog memory until now, so it
-	* starts keeping everybody's the first time he asks for somebody else's.
+	* starts keeping everybody's the first time he asks for somebody else's; what the new viewer saw
+	* before that has no snapshot and is not drawn in his fog, shadow included.
 	*
-	* Two things each drawable remembers belong to the old viewer and are cleared: whether it is
-	* obscured, which a building's shadow is only decided again on a change of, and the frame it was
-	* last seen clear, which keeps a unit drawn two seconds after it goes into fog.  The drawable
-	* walk in GameClient::update sets the first again for the new viewer before the next frame. */
+	* The frame each drawable was last seen clear belongs to the old viewer and is cleared, or a unit
+	* he saw stays drawn two seconds into the new viewer's fog. */
 //-------------------------------------------------------------------------------------------------
 void ObserverCamera::updateShroudViewer( void )
 {
@@ -230,10 +227,7 @@ void ObserverCamera::updateShroudViewer( void )
 	TheGhostObjectManager->setLocalPlayerIndex( getShroudPlayerIndex() );
 	ThePartitionManager->refreshShroudForLocalPlayer();
 	for( Drawable *draw = TheGameClient->firstDrawable(); draw != NULL; draw = draw->getNextDrawable() )
-	{
-		draw->setFullyObscuredByShroud( FALSE );
 		draw->setShroudClearFrame( 0 );
-	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -336,26 +330,30 @@ Bool ObserverCamera::directorPlace( const Player *narrowTo, Coord2D *place )
 }
 
 //-------------------------------------------------------------------------------------------------
+Bool ObserverCamera::isShowingPlayerView( void ) const
+{
+	return m_mode == OBSERVER_CAMERA_PLAYER && m_followed != NO_PLAYER && m_playerViews[ m_followed ].isValid();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The director with a player picked keeps to his fights; a player's camera with nobody picked has
+	* nothing to show and leaves the camera where it is. */
+//-------------------------------------------------------------------------------------------------
 Bool ObserverCamera::chooseTarget( const ViewLocation &current, ViewLocation *target )
 {
+	if( m_mode == OBSERVER_CAMERA_PLAYER && m_followed == NO_PLAYER )
+		return FALSE;
+
+	if( isShowingPlayerView() )
+	{
+		*target = m_playerViews[ m_followed ];
+		return TRUE;
+	}
+
+	const Player *narrowTo = m_followed == NO_PLAYER ? NULL : ThePlayerList->getNthPlayer( m_followed );
 	const Coord3D &at = current.getPosition();
 	Coord2D place;
-	if( m_mode == OBSERVER_CAMERA_DIRECTOR )
-	{
-		if( !directorPlace( NULL, &place ) )
-			return FALSE;
-		target->init( place.x, place.y, at.z, current.getAngle(), current.getPitch(), current.getZoom() );
-		return TRUE;
-	}
-
-	const ViewLocation &view = m_playerViews[ m_followed ];
-	if( view.isValid() )
-	{
-		*target = view;
-		return TRUE;
-	}
-
-	if( !directorPlace( ThePlayerList->getNthPlayer( m_followed ), &place ) )
+	if( !directorPlace( narrowTo, &place ) )
 		return FALSE;
 	target->init( place.x, place.y, at.z, current.getAngle(), current.getPitch(), current.getZoom() );
 	return TRUE;
@@ -396,7 +394,7 @@ void ObserverCamera::update( UnsignedInt nowMilliseconds )
 		return;
 	}
 
-	holdHeight( m_mode == OBSERVER_CAMERA_PLAYER && m_playerViews[ m_followed ].isValid() );
+	holdHeight( isShowingPlayerView() );
 	const Real timeConstant = m_mode == OBSERVER_CAMERA_PLAYER ? PLAYER_PAN_SECONDS : DIRECTOR_PAN_SECONDS;
 	const ViewLocation step = ObserverCamera_approach( current, target, elapsed / MILLISECONDS_PER_SECOND, timeConstant );
 	TheTacticalView->setLocation( &step );

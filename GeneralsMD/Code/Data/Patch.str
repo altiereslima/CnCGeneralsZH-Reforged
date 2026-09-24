@@ -1193,6 +1193,21 @@ GUI:HudCameraFree
 "Free"
 END
 
+// the camera shows what the followed player's own screen shows
+GUI:HudCameraPlayer
+"Player camera"
+END
+
+// the spectator's second drop-down, "Player: Nova", the player the camera and the fog follow
+GUI:HudFollow
+"Player"
+END
+
+// in that drop-down, following nobody
+GUI:HudFollowNobody
+"None"
+END
+
 // draw the followed player's fog of war, so the spectator sees only what he sees
 GUI:HudFog
 "Fog of war"
