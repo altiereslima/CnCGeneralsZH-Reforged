@@ -1032,7 +1032,7 @@ public:
 
 	Bool isLinePassable( const Object *obj, LocomotorSurfaceTypeMask acceptableSurfaces, 
 		PathfindLayerEnum layer, const Coord3D& startWorld, const Coord3D& endWorld, 
-		Bool blocked, Bool allowPinched );	///< Return true if the straight line between the given points is passable
+		Bool blocked, Bool allowPinched, Bool ignoreUnits = FALSE );	///< Return true if the straight line between the given points is passable
 
 	void moveAlliesAwayFromDestination( Object *obj,const Coord3D& destination);	
 
@@ -1057,6 +1057,9 @@ public:
 
 	// Adjusts the destination to a spot near dest for landing that is not occupied by other units.
 	Bool adjustToLandingDestination(Object *obj, Coord3D *dest);
+	/// Move a newly produced ground unit to clear ground when a fixed obstacle blocks its straight exit path.
+	/// Returns true when the caller must skip AI_FOLLOW_EXITPRODUCTION_PATH.
+	Bool bypassBlockedProductionExit(Object *unit, const Object *producer, const Coord3D *naturalRallyPoint);
 
 	// Adjusts the destination to a spot that can attack target that is not occupied by other units.
 	Bool adjustTargetDestination(const Object *obj, const Object *target, const Coord3D *targetPos, 
