@@ -935,6 +935,11 @@ void GameEngine::init( int argc, char *argv[] )
 
 
 		initSubsystem(TheThingFactory,"TheThingFactory", createThingFactory(), &xferCRC, "Data\\INI\\Default\\Object.ini", NULL, "Data\\INI\\Object");
+		/* The fork's balance, written over EA's numbers after every object, weapon and armor exists.
+			 MULTIFILE edits a template in place and leaves every field the file does not name as EA
+			 wrote it, so the file holds the changes and nothing else; an Armor block still replaces
+			 that armor whole.  It is in the INI CRC like the files it edits. */
+		ini.load( AsciiString( "Data\\INI\\BalanceReforged.ini" ), INI_LOAD_MULTIFILE, &xferCRC );
 
 	#ifdef DUMP_PERF_STATS///////////////////////////////////////////////////////////////////////////
 	GetPrecisionTimer(&endTime64);//////////////////////////////////////////////////////////////////

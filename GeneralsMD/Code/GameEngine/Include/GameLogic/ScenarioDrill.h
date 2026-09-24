@@ -69,7 +69,8 @@ enum ScenarioActionType
 	SCENARIO_ACTION_PLAYERMOVE,		///< playermove <slot> <selector> <position>; a right click, not a script order
 	SCENARIO_ACTION_POWER,					///< power <slot> <building> <position> [powerName]; fire its special powers (or the one named) there now, charged or not
 	SCENARIO_ACTION_PLAYERATTACKMOVE,	///< playerattackmove <slot> <selector> <position>; the player's attack move, not a script's
-	SCENARIO_ACTION_PRODUCE				///< produce <slot> <building> <template> <count>; queue that many in its first matching building
+	SCENARIO_ACTION_PRODUCE,			///< produce <slot> <building> <template> <count>; queue that many in its first matching building
+	SCENARIO_ACTION_TALLY					///< tally <slot> <selector>; log how many are alive, their health and what they cost
 };
 
 /// ScenarioAction::atStart when the position is plain numbers

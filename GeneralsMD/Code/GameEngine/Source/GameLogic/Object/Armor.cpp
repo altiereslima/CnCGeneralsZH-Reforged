@@ -140,6 +140,12 @@ const ArmorTemplate* ArmorStore::findArmorTemplate(AsciiString name) const
 
 	const char *c = ini->getNextToken();
 	NameKeyType key = TheNameKeyGenerator->nameToKey(c);
+	if (ini->getLoadType() == INI_LOAD_MULTIFILE && TheArmorStore->m_armorTemplates.find(key) == TheArmorStore->m_armorTemplates.end())
+	{
+		// BalanceReforged.ini rewrites armors objects already wear; a new name would reach nothing
+		DEBUG_CRASH(("Armor '%s' is patched but was never defined", c));
+		throw INI_INVALID_DATA;
+	}
 	ArmorTemplate& armorTmpl = TheArmorStore->m_armorTemplates[key];
 	armorTmpl.clear();
 	ini->initFromINI(&armorTmpl, myFieldParse);
