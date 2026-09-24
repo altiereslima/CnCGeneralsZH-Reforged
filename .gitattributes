@@ -4,6 +4,9 @@
 # the same.
 *.sh text eol=lf
 
+# litehtml's sources are LF, and a patch for them in CRLF matches none of their lines.
+GeneralsMD/Code/Libraries/Source/litehtml-*.patch text eol=lf
+
 # FFmpeg's own files, committed as they came out of its build: no line ending conversion on the
 # headers, and the DLLs and import libraries are binary.
 GeneralsMD/Code/Libraries/Source/FFmpeg/dist/** -text

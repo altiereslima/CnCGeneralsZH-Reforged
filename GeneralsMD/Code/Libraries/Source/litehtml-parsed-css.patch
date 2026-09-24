@@ -1,0 +1,53 @@
+diff --git a/include/litehtml/document.h b/include/litehtml/document.h
+index e01f5b4..ba7353e 100644
+--- a/include/litehtml/document.h
++++ b/include/litehtml/document.h
+@@ -113,7 +113,9 @@ namespace litehtml
+ 			const estring&       str,
+ 			document_container*  container,
+ 			const string&        master_styles = litehtml::master_css,
+-			const string&        user_styles = "");
++			const string&        user_styles = "",
++			const css*           master_parsed = nullptr,	// ZHR: parsed once by the caller, used in place of master_styles
++			const css*           user_parsed = nullptr);	// ZHR: and of user_styles
+
+ 	private:
+ 		uint_ptr	add_font(const font_description& descr, font_metrics* fm);
+diff --git a/src/document.cpp b/src/document.cpp
+index abf3987..6a41cf4 100644
+--- a/src/document.cpp
++++ b/src/document.cpp
+@@ -52,7 +52,9 @@ document::ptr document::createFromString(
+ 	const estring& str,
+ 	document_container* container,
+ 	const string& master_styles,
+-	const string& user_styles )
++	const string& user_styles,
++	const css* master_parsed,
++	const css* user_parsed )
+ {
+ 	// Create litehtml::document
+ 	document::ptr doc = make_shared<document>(container);
+@@ -79,12 +81,20 @@ document::ptr document::createFromString(
+ 	// Destroy GumboOutput
+ 	gumbo_destroy_output(&kGumboDefaultOptions, output);
+
+-	if (master_styles != "")
++	if (master_parsed)
++	{
++		doc->m_master_css = *master_parsed;
++	}
++	else if (master_styles != "")
+ 	{
+ 		doc->m_master_css.parse_css_stylesheet(master_styles, "", doc);
+ 		doc->m_master_css.sort_selectors();
+ 	}
+-	if (user_styles != "")
++	if (user_parsed)
++	{
++		doc->m_user_css = *user_parsed;
++	}
++	else if (user_styles != "")
+ 	{
+ 		doc->m_user_css.parse_css_stylesheet(user_styles, "", doc);
+ 		doc->m_user_css.sort_selectors();

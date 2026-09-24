@@ -30,6 +30,7 @@
 #include "GameClient/DisplayStringManager.h"
 #include "GameClient/GameFont.h"
 #include "GameClient/HtmlOverlay.h"
+#include "GameClient/HtmlTemplate.h"
 #include "GameClient/Image.h"
 #include "GameNetwork/GameSpy/ThreadUtils.h"
 
@@ -60,6 +61,7 @@ const Int BOLD_WEIGHT = 600;										///< CSS font-weight from which the game's
 const Real ASCENT_SHARE = 0.8f;								///< of the font's height; GameFont only knows the height
 const Real X_HEIGHT_SHARE = 0.5f;
 const char *const PAGE_FOLDER = "Window\\Html\\";
+const char *const EMPTY_PAGE = "<!DOCTYPE html><html></html>";	///< standards mode, as every page is
 const char *const SVG_EXTENSION = ".svg";
 const char *const SVG_UNITS = "px";
 const Int RGBA_BYTES = 4;
@@ -186,6 +188,10 @@ private:
 	std::map< std::string, SvgRuns >			m_svgRuns;		///< by page path and screen size
 	std::string							m_page;
 	litehtml::document::ptr	m_document;
+	litehtml::document::ptr	m_cssDocument;	///< an empty page the stylesheets are parsed against, for its quirks mode
+	litehtml::css						m_masterCss;		///< litehtml's own stylesheet, parsed once
+	litehtml::css						m_pageCss;			///< the page's <style>, parsed while its text stays the same
+	std::string							m_styles;				///< that text
 	Real										m_scale;
 	Int											m_screenWidth;
 	Int											m_screenHeight;
@@ -211,6 +217,7 @@ HtmlOverlayContainer::HtmlOverlayContainer( const AsciiString &defaultFont ) :
 HtmlOverlayContainer::~HtmlOverlayContainer( void )
 {
 	m_document = nullptr;
+	m_cssDocument = nullptr;
 	freeStrings( TRUE );
 	for( std::map< std::string, NSVGimage * >::iterator image = m_svgImages.begin(); image != m_svgImages.end(); ++image )
 		if( image->second )
@@ -231,7 +238,32 @@ void HtmlOverlayContainer::setPage( const std::string &html )
 	m_screenWidth = width;
 	m_screenHeight = height;
 	m_scale = scale;
-	m_document = litehtml::document::createFromString( litehtml::estring( html, litehtml::encoding::utf_8 ), this );
+
+	// litehtml makes an element for every word and one for every white space character, each with a
+	// whole set of CSS properties, so the stylesheet and the indenting came in as thousands of them:
+	// eleven milliseconds to build the command bar and three to throw it away
+	std::string body;
+	std::string styles;
+	HtmlTemplate_compact( html, body, styles );
+
+	// the stylesheets were two thirds of building a page, and they are the same text every time:
+	// litehtml's own is parsed once, and the page's again only when its text changes
+	if( m_cssDocument == nullptr )
+	{
+		m_cssDocument = litehtml::document::createFromString( litehtml::estring( EMPTY_PAGE, litehtml::encoding::utf_8 ), this, "", "" );
+		m_masterCss.parse_css_stylesheet( std::string( litehtml::master_css ), "", m_cssDocument );
+		m_masterCss.sort_selectors();
+	}
+	if( styles != m_styles )
+	{
+		m_styles = styles;
+		m_pageCss = litehtml::css();
+		m_pageCss.parse_css_stylesheet( m_styles, "", m_cssDocument );
+		m_pageCss.sort_selectors();
+	}
+
+	m_document = litehtml::document::createFromString( litehtml::estring( body, litehtml::encoding::utf_8 ), this, "", "",
+																										 &m_masterCss, &m_pageCss );
 	m_document->render( viewportWidth() );
 }
 

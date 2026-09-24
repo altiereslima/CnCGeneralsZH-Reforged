@@ -200,3 +200,64 @@ std::string HtmlTemplate_expand( const std::string &written, const HtmlValues &v
 		at = end;
 	}
 }
+
+//-------------------------------------------------------------------------------------------------
+static Bool isPageSpace( char character )
+{
+	return character == ' ' || character == '\t' || character == '\n' || character == '\r' || character == '\f';
+}
+
+//-------------------------------------------------------------------------------------------------
+void HtmlTemplate_compact( const std::string &page, std::string &body, std::string &styles )
+{
+	static const std::string STYLE_OPEN = "<style";
+	static const std::string STYLE_CLOSE = "</style>";
+
+	body.clear();
+	styles.clear();
+	body.reserve( page.size() );
+	size_t at = 0;
+	while( at < page.size() )
+	{
+		if( page.compare( at, STYLE_OPEN.size(), STYLE_OPEN ) == 0 )
+		{
+			const size_t open = page.find( '>', at );
+			const size_t close = open == std::string::npos ? std::string::npos : page.find( STYLE_CLOSE, open );
+			if( close == std::string::npos )
+			{
+				body.append( page, at, std::string::npos );
+				break;
+			}
+			styles.append( page, open + 1, close - open - 1 );
+			at = close + STYLE_CLOSE.size();
+		}
+		else if( page[ at ] == '<' )
+		{
+			// a tag goes over whole, the white space in its attribute values with it
+			char quote = 0;
+			const size_t start = at;
+			for( ; at < page.size(); at++ )
+			{
+				const char character = page[ at ];
+				if( quote != 0 )
+					quote = character == quote ? 0 : quote;
+				else if( character == '"' || character == '\'' )
+					quote = character;
+				else if( character == '>' )
+				{
+					at++;
+					break;
+				}
+			}
+			body.append( page, start, at - start );
+		}
+		else if( isPageSpace( page[ at ] ) )
+		{
+			while( at < page.size() && isPageSpace( page[ at ] ) )
+				at++;
+			body += ' ';
+		}
+		else
+			body += page[ at++ ];
+	}
+}
