@@ -626,6 +626,9 @@ static Bool spawnOne( const ThingTemplate *tmpl, Team *team, const Coord3D *pos 
 		create->onBuildComplete();
 	}
 
+	// a capture refreshes the bar the same way; without it a spawned superweapon waits for a click
+	TheControlBar->markUIDirty();
+
 	team->setActive();
 	TheAI->pathfinder()->addObjectToPathfindMap( obj );
 	return TRUE;
