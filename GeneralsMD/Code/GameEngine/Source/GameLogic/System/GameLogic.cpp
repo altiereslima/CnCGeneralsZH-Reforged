@@ -2783,8 +2783,10 @@ void GameLogic::writeMismatchDump( Int numPlayers )
 	}
 
 	fprintf( fp, "Mismatch detected on frame %d\n", m_frame );
-	fprintf( fp, "Local player is slot %d of %d connected players; %d CRCs were compared\n\n",
+	fprintf( fp, "Local player is slot %d of %d connected players; %d CRCs were compared\n",
 		TheNetwork ? TheNetwork->getLocalPlayerID() : 0, numPlayers, m_cachedCRCs.size() );
+	// every player's dump carries the same two, which is how the reports from one match are paired up
+	fprintf( fp, "Map %s, seed %d\n\n", TheGameInfo->getMap().str(), TheGameInfo->getSeed() );
 
 	/* Two machines that never agreed about arithmetic produce a mismatch that looks exactly like a
 		 logic bug.  This number depends on the machine's math and nothing else, so the first thing to
@@ -2815,6 +2817,8 @@ void GameLogic::writeMismatchDump( Int numPlayers )
 	{
 		fprintf( fp, "\nNo CRC snapshot was retained for this frame.\n" );
 		fclose( fp );
+		// the launcher finds the log of this match by this line, so it is written either way
+		DEBUG_LOG(( "Mismatch on frame %d (no snapshot) - wrote %s\n", m_frame, fname.str() ));
 		return;
 	}
 
