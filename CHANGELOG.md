@@ -241,6 +241,8 @@ found and fixed â€” EA's own, not port damage.**
 - The first building of a computer player is no longer held back a frame on a machine that already played a match that session.
 - Two allied vehicles blocking each other in a narrow pass no longer read freed memory while they make way, which could crash the game or split it.
 - A cheat every machine refused during a network game is refused in the replay of it too.
+- An install that differs where it matters can no longer join and split the match later. The game's check at the door now also covers the command buttons the computer player builds from and every unit model, whose shape decides where shots leave the barrel. And a map's own rules file counts as part of the map, so two players with the same map and different rules get it sent across instead of fighting with different armour.
+- The computer player's sense of which unit beats which comes out the same on every processor. It used the runtime's logarithm, which takes a different path on processors with newer instructions.
 - The price of all of the above: a replay recorded on an earlier version can go out of step on this one where it has a Particle Cannon, an EMP, a stealthed garrison or two allies making way for each other in it.
 - Pausing no longer leaks a little memory for every sound that was about to start.
 - A sound cancelled before it started really is cancelled. The check compared a pointer against a handle - two different things sharing one slot - so it never matched and the sound played anyway.

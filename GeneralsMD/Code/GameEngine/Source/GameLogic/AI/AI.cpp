@@ -1340,12 +1340,33 @@ Real aiFramesToKill( Real targetHealth, const AIShotPattern &shots )
 }
 
 //-------------------------------------------------------------------------------------------------
+/** log2 out of frexpf and a fixed series, all exact or plain IEEE arithmetic.  The runtime's log
+	* takes an FMA3 path on a processor that has one, and a last bit that differs between two
+	* machines is enough to flip the AI's pick between two scores that tie. */
+//-------------------------------------------------------------------------------------------------
+static Real deterministicLog2( Real value )
+{
+	const Real INVERSE_LN2 = 1.44269504f;
+
+	Int exponent = 0;
+	const Real mantissa = frexpf( value, &exponent );		// value = mantissa * 2^exponent, mantissa in [0.5, 1)
+
+	// ln(m) = 2 atanh(t) with t = (m - 1) / (m + 1), and |t| <= 1/3 keeps five terms under 1e-6
+	const Real t = (mantissa - 1.0f) / (mantissa + 1.0f);
+	const Real t2 = t * t;
+	const Real atanhT = t * (1.0f + t2 * (1.0f / 3.0f + t2 * (1.0f / 5.0f + t2 * (1.0f / 7.0f + t2 * (1.0f / 9.0f)))));
+
+	return INT_TO_REAL( exponent ) + 2.0f * atanhT * INVERSE_LN2;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** One pairing, money for money.  On a log scale, so twice as good and half as good sit the same
 	* distance either side of an even trade, and the two directions of one pairing always sum to 1. */
 //-------------------------------------------------------------------------------------------------
 Real aiMatchupScore( Real myFramesToKill, Real theirFramesToKill, Real myCost, Real theirCost )
 {
 	const Real SATURATING_DOUBLINGS = 4.0f;		// sixteen times better is as good as it gets
+	const Real SATURATING_ADVANTAGE = 16.0f;	// 2 ^ SATURATING_DOUBLINGS
 
 	if( myFramesToKill < 0.0f )
 		return 0.0f;				// nothing I can do about it, whatever it can do to me
@@ -1356,7 +1377,10 @@ Real aiMatchupScore( Real myFramesToKill, Real theirFramesToKill, Real myCost, R
 	if( myCost > 0.0f && theirCost > 0.0f )
 		advantage *= theirCost / myCost;			// twice the price has to kill twice as fast to break even
 
-	const Real doublings = (Real)( log( advantage ) / log( 2.0 ) );
+	// the score saturates past sixteen either way, and the clamp keeps zero and infinity out of the log
+	if( advantage > SATURATING_ADVANTAGE ) advantage = SATURATING_ADVANTAGE;
+	if( advantage < 1.0f / SATURATING_ADVANTAGE ) advantage = 1.0f / SATURATING_ADVANTAGE;
+	const Real doublings = deterministicLog2( advantage );
 	Real score = 0.5f + 0.5f * doublings / SATURATING_DOUBLINGS;
 	if( score < 0.0f ) score = 0.0f;
 	if( score > 1.0f ) score = 1.0f;

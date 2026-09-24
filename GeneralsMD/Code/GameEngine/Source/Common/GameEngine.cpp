@@ -191,6 +191,42 @@ extern CComModule _Module;
 //-------------------------------------------------------------------------------------------------
 static void updateTGAtoDDS();
 
+//-------------------------------------------------------------------------------------------------
+/** A file logic reads that no subsystem loads through the INI checksum, as it resolved on this
+	* machine, byte for byte. */
+//-------------------------------------------------------------------------------------------------
+static void checksumFileContents( XferCRC &xferCRC, const char *path )
+{
+	File *file = TheFileSystem->openFile( path, File::READ );
+	Int fileSize = file->size();
+	char *contents = file->readEntireAndClose();
+	xferCRC.xferUser( contents, fileSize );
+	delete [] contents;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Every model's bones place fire points, turret pivots and dock positions in logic, so a model
+	* that differs between two machines splits their match.  Hashing 190 MB of models on every start
+	* costs seconds; the name and size of each model as it resolved catches a different patch
+	* archive or a loose model, which are the two ways an install ends up with another one. */
+//-------------------------------------------------------------------------------------------------
+static void checksumModelIndex( XferCRC &xferCRC )
+{
+	FilenameList models;
+	TheFileSystem->getFileListInDirectory( AsciiString( "Art\\W3D\\" ), AsciiString( "*.w3d" ), models, TRUE );
+
+	for( FilenameListIter it = models.begin(); it != models.end(); ++it )
+	{
+		AsciiString name = *it;
+		name.toLower();
+		FileInfo info;
+		TheFileSystem->getFileInfo( *it, &info );
+		xferCRC.xferUser( const_cast<char *>( name.str() ), name.getLength() );
+		xferCRC.xferInt( &info.sizeLow );
+	}
+	DEBUG_LOG(( "INI CRC covers %d models\n", (Int)models.size() ));
+}
+
 Int GameEngine::getFramesPerSecondLimit( void )
 {
 	return m_maxFPS;
@@ -1009,6 +1045,12 @@ void GameEngine::init( int argc, char *argv[] )
 	DEBUG_LOG(("%s", Buf));////////////////////////////////////////////////////////////////////////////
 	#endif/////////////////////////////////////////////////////////////////////////////////////////////
 
+
+		// the control bar parses these without the checksum, and the AI builds and hunts from them
+		checksumFileContents( xferCRC, "Data\\INI\\Default\\CommandButton.ini" );
+		checksumFileContents( xferCRC, "Data\\INI\\CommandButton.ini" );
+		checksumFileContents( xferCRC, "Data\\INI\\CommandSet.ini" );
+		checksumModelIndex( xferCRC );
 
 		xferCRC.close();
 		TheWritableGlobalData->m_iniCRC = xferCRC.getCRC();
