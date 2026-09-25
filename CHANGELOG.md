@@ -373,6 +373,18 @@ found and fixed â€” EA's own, not port damage.**
   fires five rockets a reload, one after another. Rifles keep their own turns and never wait behind the
   rockets.
 
+## A defence earns its price
+
+- A tower used to be cheaper to kill than to build. We put every stock defence against 22 kinds of attacker, 528 fights a round, and in Zero Hour as shipped two Battlemasters took a Gattling Cannon and lost nothing, and tanks paid 89 cents in wrecks for every dollar of Patriot they destroyed. Tank shells now do half damage to the Patriot, the Gattling Cannon, the Stinger Site and the Fire Base. Taking one with tanks now costs you more than the tower cost them: a Patriot $1.23 in tanks per dollar, a Stinger Site $1.09, a Fire Base $1.26.
+- The Gattling Cannon costs 1000, the same as a Patriot. It is still the tower for infantry and aircraft, and it makes a rifle rush pay $1.72 for every dollar of it.
+- Bunkers and Tunnel Networks stand half as long again, 1500 instead of 1000. One of them in a game saved before this change comes back at full health when you load it.
+- Heavy artillery is untouched. A Tomahawk, an Inferno Cannon, a Nuke Cannon or a Scud Launcher outranges every tower in the game and still takes one without losing a thing. Bring them when a player digs in.
+- The Rocket Buggy fires from 235 instead of 300. Its rockets used to outreach every tower by 75, so a pack of buggies took a Patriot or a Bunker without a scratch. They still take it most of the time, and now leave wrecks worth a fifth to four fifths of what the tower cost.
+- A Paladin's laser fires every two seconds instead of every second. It used to shoot down every missile a Patriot sent at it, so four Paladins killed a Patriot every time and lost a quarter of its price doing it, while Crusaders for the same money never broke one. The Patriot now stands half the time.
+- The Quad Cannon costs 800, up from 700 (850 for the Toxin and Demolitions generals). For the same money seven of them were an even fight for five Crusaders; now tanks beat them, and they still shred every kind of infantry.
+- The Dragon Tank has 400 health instead of 280. It was the worst unit in the game for its price and lost to every armored target; now it trades evenly with Paladins and Quad Cannons and still loses to main battle tanks.
+- Replays recorded before this change play out differently.
+
 ## Weapons and units that were quietly wrong
 
 - A bunker buster shot down on the way in no longer clears out the building it was aimed at. It emptied the bunker from wherever it happened to be destroyed - a Point Defence Laser did not save you, it just moved the explosion.

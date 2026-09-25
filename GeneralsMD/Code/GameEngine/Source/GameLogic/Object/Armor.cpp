@@ -156,6 +156,12 @@ void ArmorStore::reset()
 	ArmorTemplateMap::const_iterator existing = TheArmorStore->m_armorTemplates.find(key);
 	if (ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES && existing != TheArmorStore->m_armorTemplates.end())
 		TheArmorStore->m_beforeMapOverrides.push_back(std::make_pair(key, existing->second));
+	if (ini->getLoadType() == INI_LOAD_MULTIFILE && existing == TheArmorStore->m_armorTemplates.end())
+	{
+		// BalanceReforged.ini rewrites armors objects already wear; a new name would reach nothing
+		DEBUG_CRASH(("Armor '%s' is patched but was never defined", c));
+		throw INI_INVALID_DATA;
+	}
 	ArmorTemplate& armorTmpl = TheArmorStore->m_armorTemplates[key];
 	armorTmpl.clear();
 	ini->initFromINI(&armorTmpl, myFieldParse);

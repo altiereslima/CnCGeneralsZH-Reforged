@@ -179,6 +179,8 @@ static Bool parseActionType( const AsciiString &token, ScenarioActionType *actio
 		*action = SCENARIO_ACTION_POWER;
 	else if (token == "produce")
 		*action = SCENARIO_ACTION_PRODUCE;
+	else if (token == "tally")
+		*action = SCENARIO_ACTION_TALLY;
 	else
 		return FALSE;
 
@@ -261,6 +263,7 @@ static Int tokensNeededFor( ScenarioActionType action )
 		case SCENARIO_ACTION_ENTER:				return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_PRODUCE:			return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_STOP:				return SCENARIO_TOKENS_STOP;
+		case SCENARIO_ACTION_TALLY:				return SCENARIO_TOKENS_STOP;
 		case SCENARIO_ACTION_ARRIVE:			return SCENARIO_TOKENS_ARRIVE;
 	}
 	return SCENARIO_TOKENS_STOP;
@@ -357,6 +360,7 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 		}
 
 		case SCENARIO_ACTION_STOP:
+		case SCENARIO_ACTION_TALLY:
 			break;
 	}
 
@@ -543,6 +547,11 @@ static Bool selectorMatches( const AsciiString &selector, const Object *obj )
 	const ThingTemplate *tmpl = obj->getTemplate();
 	if (tmpl == NULL)
 		return FALSE;
+
+	// "GLAVehicleTechnical*": a Technical spawns as one of its chassis templates, never under its own name
+	const Int length = selector.getLength();
+	if (length > 1 && selector.getCharAt( length - 1 ) == '*')
+		return strncmp( tmpl->getName().str(), selector.str(), length - 1 ) == 0;
 
 	return tmpl->getName() == selector;
 }
@@ -957,6 +966,34 @@ static Bool executeProduce( const ScenarioAction &action, Player *player )
 	return queued > 0;
 }
 
+/** How much of this seat's matching stock is still standing: the count, the health left against the
+	  health they started with, and what the living ones cost.  Structures count too, so a fight between
+	  an army and a defence reads as money lost on each side. */
+static Bool executeTally( const ScenarioAction &action, Player *player )
+{
+	Int alive = 0;
+	Int inside = 0;
+	Real health = 0.0f;
+	Real maxHealth = 0.0f;
+	Int worth = 0;
+	for( Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
+	{
+		if (obj->getControllingPlayer() != player || obj->isEffectivelyDead() || !selectorMatches( action.selector, obj ))
+			continue;
+
+		++alive;
+		if (obj->getContainedBy() != NULL)
+			++inside;
+		health += obj->getBodyModule()->getHealth();
+		maxHealth += obj->getBodyModule()->getMaxHealth();
+		worth += obj->getTemplate()->friend_getBuildCost();
+	}
+
+	DEBUG_LOG(("HEADLESS TALLY: frame %d slot %d '%s': %d alive, health %.0f of %.0f, worth %d, %d inside\n",
+						 action.frame, action.slot, action.selector.str(), alive, health, maxHealth, worth, inside));
+	return TRUE;
+}
+
 static Bool executeOrder( const ScenarioAction &action, Player *player, const Coord3D &dest )
 {
 	AIGroup *group = TheAI->createGroup();
@@ -1037,6 +1074,7 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 		case SCENARIO_ACTION_PARTICLES:
 		case SCENARIO_ACTION_POWER:
 		case SCENARIO_ACTION_PRODUCE:
+		case SCENARIO_ACTION_TALLY:
 			ordered = FALSE;		// handled before the group is built
 			break;
 	}
@@ -1072,6 +1110,9 @@ Bool ScenarioDrill_execute( const ScenarioAction &action )
 
 	if (action.action == SCENARIO_ACTION_PRODUCE)
 		return executeProduce( action, player );
+
+	if (action.action == SCENARIO_ACTION_TALLY)
+		return executeTally( action, player );
 
 	return executeOrder( action, player, position );
 }

@@ -388,7 +388,14 @@ AsciiString TheThingTemplateBeingParsedName;
 
 	// find existing item if present
 	ThingTemplate *thingTemplate = TheThingFactory->findTemplateInternal( name, FALSE );
-	if( !thingTemplate )
+	if( !thingTemplate && ini->getLoadType() == INI_LOAD_MULTIFILE )
+	{
+		// a patch names an object EA's files built; a name that finds nothing is a typo, and a new
+		// template made from it would change no unit and still land in the INI CRC
+		DEBUG_CRASH(( "[LINE: %d in '%s'] %s patches an object that does not exist", ini->getLineNum(), ini->getFilename().str(), name.str() ));
+		throw INI_INVALID_DATA;
+	}
+	else if( !thingTemplate )
 	{
 		// no item is present, create a new one
 		thingTemplate = TheThingFactory->newTemplate( name );
@@ -398,6 +405,11 @@ AsciiString TheThingTemplateBeingParsedName;
 			// gets deleted on ::reset().
 			thingTemplate->markAsOverride();
 		}
+	}
+	else if( ini->getLoadType() == INI_LOAD_MULTIFILE )
+	{
+		// BalanceReforged.ini: the fields it names are written over the template EA's file built, and
+		// everything it does not name stays as it was
 	}
 	else if( ini->getLoadType() != INI_LOAD_CREATE_OVERRIDES )
 	{

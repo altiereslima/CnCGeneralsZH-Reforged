@@ -1805,18 +1805,27 @@ void WeaponStore::postProcessLoad()
 	{
 		if (ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES)
 			weapon = TheWeaponStore->newOverride(weapon);
-		else 
+		else if (ini->getLoadType() == INI_LOAD_MULTIFILE)
+		{
+			// BalanceReforged.ini: edit the weapon in place, the fields it does not name stay as they were
+		}
+		else
 		{
 			DEBUG_CRASH(("Weapon '%s' already exists, but OVERRIDE not specified", c));
 			return;
 		}
 
 	}
+	else if (ini->getLoadType() == INI_LOAD_MULTIFILE)
+	{
+		DEBUG_CRASH(("Weapon '%s' is patched but was never defined", c));
+		throw INI_INVALID_DATA;
+	}
 	else
 	{
 		// no item is present, create a new one
 		weapon = TheWeaponStore->newWeaponTemplate(name);
-	} 
+	}
 
 	// parse the ini weapon definition
 	ini->initFromINI(weapon, weapon->getFieldParse());

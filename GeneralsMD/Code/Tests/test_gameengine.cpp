@@ -523,6 +523,58 @@ TEST(ini_unknown_field_is_skipped_only_when_asked)
 	remove( TEST_INI );
 }
 
+/* Data\INI\BalanceReforged.ini is loaded INI_LOAD_MULTIFILE after Weapon.ini: a Weapon block in it
+	 edits EA's weapon in place.  Before this load type was honoured, a second definition of a weapon
+	 was refused and returned early, so the whole balance file would have loaded and changed nothing. */
+TEST(balance_patch_edits_a_weapon_in_place)
+{
+	CHECK( bootOnce() );
+
+	if( TheWeaponStore == NULL )
+		TheWeaponStore = NEW WeaponStore;
+
+	writeFile( TEST_INI,
+		"Weapon BalancePatchProbeGun\r\n"
+		"  PrimaryDamage = 60.0\r\n"
+		"  AttackRange = 150.0\r\n"
+		"  DelayBetweenShots = 2000\r\n"
+		"End\r\n" );
+	CHECK( loadIni( TEST_INI ) );
+
+	writeFile( TEST_INI,
+		"Weapon BalancePatchProbeGun\r\n"
+		"  PrimaryDamage = 45.0\r\n"
+		"End\r\n" );
+	INI ini;
+	ini.load( AsciiString( TEST_INI ), INI_LOAD_MULTIFILE, NULL );
+
+	const WeaponTemplate *gun = TheWeaponStore->findWeaponTemplate( "BalancePatchProbeGun" );
+	CHECK( gun != NULL );
+	WeaponBonus noBonus;
+	CHECK_NEAR( gun->getPrimaryDamage( noBonus ), 45.0f, 0.01f );
+	CHECK_NEAR( gun->getUnmodifiedAttackRange(), 150.0f, 0.01f );
+
+	/* a patch that names a weapon nobody defined is a typo, and has to stop the load */
+	writeFile( TEST_INI,
+		"Weapon BalancePatchProbeGunTypo\r\n"
+		"  PrimaryDamage = 45.0\r\n"
+		"End\r\n" );
+	Bool threw = FALSE;
+	try
+	{
+		INI typo;
+		typo.load( AsciiString( TEST_INI ), INI_LOAD_MULTIFILE, NULL );
+	}
+	catch( ... )
+	{
+		threw = TRUE;
+	}
+	CHECK( threw );
+	CHECK( TheWeaponStore->findWeaponTemplate( "BalancePatchProbeGunTypo" ) == NULL );
+
+	remove( TEST_INI );
+}
+
 /* Data\INI\FXListReforged.ini is the fork's own explosion light: 89 of EA's FXLists, each repeated
 	 whole with one LightPulse added.  Whole, because FXListStore::parseFXListDefinition clears an
 	 entry before re-reading it - a half-copied block does not add a light, it deletes an explosion.
@@ -13154,6 +13206,11 @@ TEST(scenario_parses_the_order_lines)
 
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "900 stop 2 *", &action ), (Int)SCENARIO_PARSE_OK );
 	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_STOP );
+
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "1800 tally 1 ChinaGattlingCannon", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_TALLY );
+	CHECK_STR( action.selector.str(), "ChinaGattlingCannon" );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "1800 tally 1", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
 
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "700 power 1 GLAScudStorm start0:0:300", &action ),
 						(Int)SCENARIO_PARSE_OK );
