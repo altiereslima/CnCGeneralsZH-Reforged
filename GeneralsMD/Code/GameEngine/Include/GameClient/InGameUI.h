@@ -907,14 +907,19 @@ public:  // ********************************************************************
 	Bool isInPreferSelectionMode( void ) const { return m_preferSelection; }
 
 	void setClientQuiet( Bool enabled )  { m_clientQuiet = enabled; }
-	void setWaypointMode( Bool enabled )		{ m_waypointMode = enabled; }
+	void setWaypointMode( Bool enabled )		{ m_waypointMode = enabled; if( !enabled && m_orderKeyKeptByShift ) clearAttackMoveToMode(); }
 	void setForceMoveMode( Bool enabled )		{ m_forceMoveToMode = enabled; }
 	void setForceAttackMode( Bool enabled )		{ m_forceAttackMode = enabled; }
 	void setPreferSelectionMode( Bool enabled )		{ m_preferSelection = enabled; }
 	
 	void toggleAttackMoveToMode( void )				{ m_attackMoveToMode = !m_attackMoveToMode; m_forceAttackArmed = FALSE; m_guardArmed = FALSE; }
 	Bool isInAttackMoveToMode( void ) const		{ return m_attackMoveToMode; }
-	void clearAttackMoveToMode( void )				{ m_attackMoveToMode = FALSE; m_forceAttackArmed = FALSE; m_guardArmed = FALSE; }
+	void clearAttackMoveToMode( void )				{ m_attackMoveToMode = FALSE; m_forceAttackArmed = FALSE; m_guardArmed = FALSE; m_orderKeyKeptByShift = FALSE; }
+
+	// an order click with one of the three keys armed spends the key, unless shift is down: then it
+	// stays armed for the next click, so a row of targets is one key and a row of clicks, and it drops
+	// when shift comes up
+	void spendOrderKey( void )								{ if( m_waypointMode ) m_orderKeyKeptByShift = TRUE; else clearAttackMoveToMode(); }
 
 	// the attack key arms force fire the way the attack move key arms an attack move: the next
 	// order click shoots whatever is under it, ground included, and the mode drops again with the
@@ -1485,6 +1490,7 @@ protected:
 	Bool												m_attackMoveToMode;	///< are we in attack move mode?
 	Bool												m_forceAttackArmed;	///< is the attack key holding force fire for the next click?
 	Bool												m_guardArmed;				///< is the guard key holding a guard order for the next click?
+	Bool												m_orderKeyKeptByShift;	///< an armed key was clicked with under shift, and drops when shift comes up
 	Bool												m_preferSelection;		///< the shift key has been depressed.
 
 	// wall clock of the previous update(), so a held camera key can be stepped by elapsed

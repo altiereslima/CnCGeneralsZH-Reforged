@@ -1483,7 +1483,7 @@ void CommandTranslator::finishFormationDrag( const ICoord2D& lift )
 		newMsg->appendLocationArgument( world );
 	}
 
-	TheInGameUI->clearAttackMoveToMode();
+	TheInGameUI->spendOrderKey();
 
 	const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
 	if( selected && !selected->empty() )
@@ -4236,7 +4236,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 				}
 
 				disp = DESTROY_MESSAGE;
-				TheInGameUI->clearAttackMoveToMode();
+				TheInGameUI->spendOrderKey();
 
 				//issueMoveToLocationCommand( &pos, draw, DO_COMMAND );
 			}

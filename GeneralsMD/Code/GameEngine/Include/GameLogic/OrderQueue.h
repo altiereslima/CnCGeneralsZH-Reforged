@@ -139,12 +139,13 @@ public:
 
 	static Bool isOrder( GameMessage::Type type );			///< a hand-given order to the selected units
 	static Bool isQueueable( GameMessage::Type type );	///< an order that can wait its turn in a chain
-	static Bool isTerminal( GameMessage::Type type );		///< an order that never finishes, so it ends its chain
+	static Bool isTerminal( GameMessage::Type type );		///< an order that never finishes: a post, and nothing can be queued behind it
 
 private:
 	void queueOrder( GameMessage *msg, const std::vector<ObjectID>& selected, Player *owner );
 	Bool queueUpgrade( GameMessage *msg, AIGroup *selected, Player *owner );		///< FALSE: bought now, not queued
 	void startChain( GameMessage *msg, const std::vector<ObjectID>& members, Player *owner );
+	void addChain( GameMessage *msg, const std::vector<ObjectID>& members );
 	void appendOrder( OrderChain& chain, GameMessage *msg, Player *owner );
 	void releaseUnits( const std::vector<ObjectID>& ids );
 	Bool isStepOver( OrderChain& chain, Player *owner );

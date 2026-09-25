@@ -478,6 +478,11 @@ Bool OrderQueue::takeMessage( GameMessage *msg, AIGroup *selected, Player *owner
 	if( mode == ORDER_QUEUE_NONE || !isQueueable( msg->getType() ) )
 	{
 		releaseUnits( ids );
+
+		// a guard, a hold or a shot at the ground given without shift is a post all the same, and a
+		// shift click behind it is turned away like one behind a queued guard
+		if( isTerminal( msg->getType() ) )
+			addChain( msg, ids );
 		return FALSE;
 	}
 
@@ -517,12 +522,16 @@ void OrderQueue::queueOrder( GameMessage *msg, const std::vector<ObjectID>& sele
 		if( part.empty() )
 			continue;
 
-		touched.push_back( it );
-		parts.push_back( part );
-
 		std::vector<ObjectID> rest;
 		std::set_difference( loose.begin(), loose.end(), part.begin(), part.end(), std::back_inserter( rest ) );
 		loose.swap( rest );
+
+		// units on a post have no next place to be, so the order is not theirs
+		if( isTerminal( it->m_active.getType() ) )
+			continue;
+
+		touched.push_back( it );
+		parts.push_back( part );
 	}
 
 	for( size_t i = 0; i < touched.size(); i++ )
@@ -603,6 +612,10 @@ Bool OrderQueue::queueUpgrade( GameMessage *msg, AIGroup *selected, Player *owne
 	while( chain != m_chains.end() && !std::binary_search( chain->m_members.begin(), chain->m_members.end(), producerID ) )
 		++chain;
 
+	// a unit on a post has nothing to wait for, so it buys it now
+	if( chain != m_chains.end() && isTerminal( chain->m_active.getType() ) )
+		return FALSE;
+
 	if( chain == m_chains.end() )
 	{
 		const AIUpdateInterface *ai = producer->getAIUpdateInterface();
@@ -626,11 +639,16 @@ Bool OrderQueue::queueUpgrade( GameMessage *msg, AIGroup *selected, Player *owne
 void OrderQueue::startChain( GameMessage *msg, const std::vector<ObjectID>& members, Player *owner )
 {
 	OrderQueue_dispatch( msg, members );
+	addChain( msg, members );
+}
 
-	// a guard is not a list, just an order
-	if( isTerminal( msg->getType() ) )
-		return;
-
+//-------------------------------------------------------------------------------------------------
+/** A chain on the order msg, which the caller has seen carried out.  On a guard, a hold or a shot at
+	* the ground it is a post: it holds nothing, it never moves on, and it is there only so a shift
+	* click behind it can be turned away, until an order without shift takes the units off it. */
+//-------------------------------------------------------------------------------------------------
+void OrderQueue::addChain( GameMessage *msg, const std::vector<ObjectID>& members )
+{
 	OrderChain chain;
 	chain.m_members = members;
 	chain.m_active.copyFrom( msg );
@@ -641,7 +659,8 @@ void OrderQueue::startChain( GameMessage *msg, const std::vector<ObjectID>& memb
 void OrderQueue::appendOrder( OrderChain& chain, GameMessage *msg, Player *owner )
 {
 	// nothing after a guard would ever come round
-	if( !chain.m_pending.empty() && isTerminal( chain.m_pending.back().getType() ) )
+	if( isTerminal( chain.m_active.getType() )
+			|| ( !chain.m_pending.empty() && isTerminal( chain.m_pending.back().getType() ) ) )
 		return;
 
 	if( msg->getType() == GameMessage::MSG_DO_MOVETO && chain.m_pending.empty()
@@ -716,6 +735,10 @@ Bool OrderQueue::isStepOver( OrderChain& chain, Player *owner )
 		if( OrderQueue_isAttack( chain.m_active.getType() ) && IncomingDamageTracker::isAlreadyDoomed( target ) )
 			return TRUE;
 	}
+
+	// a post never ends by itself; the object it guards dying is the one way off it, above
+	if( isTerminal( chain.m_active.getType() ) )
+		return FALSE;
 
 	Bool anyWorking = FALSE;
 	Bool anyRearming = FALSE;
@@ -807,16 +830,11 @@ Bool OrderQueue::advance( OrderChain& chain, Player *owner )
 		}
 
 		OrderQueue_dispatch( next, chain.m_members, owner );
-		if( isTerminal( next.getType() ) )
-		{
-			OrderQueue_log( "last order out, it never ends", chain, owner );
-			return FALSE;
-		}
 
 		chain.m_active = next;
 		chain.m_settledFrames = 0;
 		chain.m_waitingForRearm = FALSE;
-		OrderQueue_log( "next order out", chain, owner );
+		OrderQueue_log( isTerminal( next.getType() ) ? "last order out, a post" : "next order out", chain, owner );
 
 		Coord3D dest;
 		while( next.getType() == GameMessage::MSG_DO_MOVETO && !chain.m_pending.empty()

@@ -1302,6 +1302,7 @@ InGameUI::InGameUI()
 	m_attackMoveToMode	= false;
 	m_forceAttackArmed	= false;
 	m_guardArmed				= false;
+	m_orderKeyKeptByShift	= false;
 	m_preferSelection		= false;
 	m_isAttackCircling	= FALSE;
 	clearAllyCursors();
@@ -3847,6 +3848,7 @@ void InGameUI::reset( void )
 	m_attackMoveToMode	= false;
 	m_forceAttackArmed	= false;
 	m_guardArmed				= false;
+	m_orderKeyKeptByShift	= false;
 	m_preferSelection		= false;
 	m_isAttackCircling	= FALSE;
 	clearAllyCursors();

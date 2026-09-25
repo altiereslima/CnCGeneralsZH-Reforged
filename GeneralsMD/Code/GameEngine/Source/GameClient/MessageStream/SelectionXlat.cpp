@@ -1093,7 +1093,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 				// and the click that follows this release is the order.  Only a real circle eats it
 				if( TheInGameUI->issueAttackCircle() )
 				{
-					TheInGameUI->clearAttackMoveToMode();
+					TheInGameUI->spendOrderKey();
 					m_dragOrderJustIssued = TRUE;
 				}
 
