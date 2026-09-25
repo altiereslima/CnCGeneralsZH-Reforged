@@ -645,6 +645,7 @@ public:
 		MSG_DO_FORMATION_GUARD,											///< (location...) the same curve, each unit guarding its own point (fork)
 		MSG_PLACE_SIGNAL,														///< (location, Int SignalKind) smoke only the sender's allies are shown (fork)
 		MSG_CHEAT,																	///< (Int CheatKind, Int amount) a console cheat, refused in a network game (fork)
+		MSG_QUEUE_NEXT_ORDER,												///< (Int OrderQueueMode) the order right after this one is a shift-queued one (fork)
 
 		MSG_BEGIN_DEBUG_NETWORK_MESSAGES = 1900,		///< network messages that exist only in debug/internal builds. all grouped separately.
 

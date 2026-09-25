@@ -1,0 +1,36 @@
+# Six Scorpions are given a whole shift queue at once and have to work through it on their own:
+# walk two points, attack-move onto a Humvee, kill a named Crusader, walk back and guard there.
+# Two Quad Cannons are sent off with a plain move first and then shift-moved, which is the list
+# starting behind an order that was given without shift.
+#
+# Nothing here is a player's click. The shift verbs hand each order to the seat's order queue the
+# way it arrives over the network, so the log's "order queue:" lines are the list at work and the
+# two arrive lines say whether each group reached the end of it.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover
+#     -side 0 FactionGLA -side 1 FactionAmerica -seed 1 -maxframes 2400
+#     -scenario shiftqueue -logPrefix shiftqueue_
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn            0  GLATankScorpion          6  760 920   30
+30    spawn            0  GLAVehicleQuadCannon     2  760 1100  30
+30    spawn            1  AmericaVehicleHumvee     1  1400 1400
+30    spawn            1  AmericaTankCrusader      1  1250 1550
+
+60    shiftmove        0  GLATankScorpion           1000 900
+61    shiftmove        0  GLATankScorpion           1100 1150
+62    shiftattackmove  0  GLATankScorpion           1400 1400
+63    shiftattack      0  GLATankScorpion           1 AmericaTankCrusader
+64    shiftmove        0  GLATankScorpion           900 1250
+65    shiftguard       0  GLATankScorpion           900 1250
+
+60    playermove       0  GLAVehicleQuadCannon      1000 1300
+61    shiftmove        0  GLAVehicleQuadCannon      700 1500
+
+66    arrive           0  GLATankScorpion           900 1250 150
+66    arrive           0  GLAVehicleQuadCannon      700 1500 150
+
+2390  tally            1  AmericaVehicleHumvee
+2390  tally            1  AmericaTankCrusader

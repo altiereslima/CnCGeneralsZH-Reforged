@@ -181,6 +181,14 @@ static Bool parseActionType( const AsciiString &token, ScenarioActionType *actio
 		*action = SCENARIO_ACTION_PRODUCE;
 	else if (token == "tally")
 		*action = SCENARIO_ACTION_TALLY;
+	else if (token == "shiftmove")
+		*action = SCENARIO_ACTION_SHIFTMOVE;
+	else if (token == "shiftattackmove")
+		*action = SCENARIO_ACTION_SHIFTATTACKMOVE;
+	else if (token == "shiftattack")
+		*action = SCENARIO_ACTION_SHIFTATTACK;
+	else if (token == "shiftguard")
+		*action = SCENARIO_ACTION_SHIFTGUARD;
 	else
 		return FALSE;
 
@@ -259,6 +267,10 @@ static Int tokensNeededFor( ScenarioActionType action )
 		case SCENARIO_ACTION_POWER:				return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_PLAYERATTACKMOVE:	return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_ATTACKMOVE:	return SCENARIO_TOKENS_MOVE;
+		case SCENARIO_ACTION_SHIFTMOVE:		return SCENARIO_TOKENS_MOVE;
+		case SCENARIO_ACTION_SHIFTATTACKMOVE:	return SCENARIO_TOKENS_MOVE;
+		case SCENARIO_ACTION_SHIFTGUARD:	return SCENARIO_TOKENS_MOVE;
+		case SCENARIO_ACTION_SHIFTATTACK:	return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_ATTACK:			return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_ENTER:				return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_PRODUCE:			return SCENARIO_TOKENS_ATTACK;
@@ -330,6 +342,9 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 		case SCENARIO_ACTION_ATTACKMOVE:
 		case SCENARIO_ACTION_ARRIVE:
 		case SCENARIO_ACTION_POWER:
+		case SCENARIO_ACTION_SHIFTMOVE:
+		case SCENARIO_ACTION_SHIFTATTACKMOVE:
+		case SCENARIO_ACTION_SHIFTGUARD:
 		{
 			Int next = SCENARIO_ORDER_POSITION_TOKEN;
 			const ScenarioParseResult position = parseScenarioPosition( tokens, count, &next, action );
@@ -344,6 +359,7 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 
 		case SCENARIO_ACTION_ATTACK:
 		case SCENARIO_ACTION_ENTER:
+		case SCENARIO_ACTION_SHIFTATTACK:
 		{
 			if (!parseWholeNumber( tokens[ 4 ], &action->targetSlot ))
 				return SCENARIO_PARSE_BAD_SLOT;
@@ -994,6 +1010,65 @@ static Bool executeTally( const ScenarioAction &action, Player *player )
 	return TRUE;
 }
 
+/** A shift click: the order goes onto the seat's order queue the way it would arrive over the network
+	  with MSG_QUEUE_NEXT_ORDER in front of it, carrying the arguments the command translator gives it.
+	  The group is destroyed here on every path, by the queue when it takes the order. */
+static Bool executeShiftOrder( const ScenarioAction &action, Player *player, const Coord3D &dest,
+															 AIGroup *group, Int taken )
+{
+	GameMessage::Type type = GameMessage::MSG_DO_GUARD_POSITION;
+	const char *verb = "shiftguard";
+	if (action.action == SCENARIO_ACTION_SHIFTMOVE)
+	{
+		type = GameMessage::MSG_DO_MOVETO;
+		verb = "shiftmove";
+	}
+	else if (action.action == SCENARIO_ACTION_SHIFTATTACKMOVE)
+	{
+		type = GameMessage::MSG_DO_ATTACKMOVETO;
+		verb = "shiftattackmove";
+	}
+	else if (action.action == SCENARIO_ACTION_SHIFTATTACK)
+	{
+		type = GameMessage::MSG_DO_ATTACK_OBJECT;
+		verb = "shiftattack";
+	}
+
+	GameMessage *msg = newInstance( GameMessage )( type );
+	msg->friend_setPlayerIndex( player->getPlayerIndex() );
+
+	if (type == GameMessage::MSG_DO_ATTACK_OBJECT)
+	{
+		Player *targetPlayer = findPlayerForSlot( action.targetSlot );
+		Object *target = (targetPlayer != NULL) ? findFirstMatching( targetPlayer, action.targetSelector ) : NULL;
+		if (target == NULL)
+		{
+			DEBUG_LOG(("SCENARIO: frame %d %s: slot %d owns nothing matching '%s'\n",
+								 action.frame, verb, action.targetSlot, action.targetSelector.str()));
+			msg->deleteInstance();
+			TheAI->destroyGroup( group );
+			return FALSE;
+		}
+		msg->appendObjectIDArgument( target->getID() );
+	}
+	else
+	{
+		msg->appendLocationArgument( dest );
+		if (type == GameMessage::MSG_DO_ATTACKMOVETO)
+			msg->appendBooleanArgument( FALSE );
+		if (type == GameMessage::MSG_DO_GUARD_POSITION)
+			msg->appendIntegerArgument( GUARDMODE_GUARD_WITHOUT_PURSUIT );
+	}
+
+	player->getOrderQueue()->setNextOrderMode( ORDER_QUEUE_APPEND );
+	player->getOrderQueue()->takeMessage( msg, group, player );
+	msg->deleteInstance();
+
+	DEBUG_LOG(("SCENARIO: frame %d %s slot %d '%s' x%d\n",
+						 action.frame, verb, action.slot, action.selector.str(), taken));
+	return TRUE;
+}
+
 static Bool executeOrder( const ScenarioAction &action, Player *player, const Coord3D &dest )
 {
 	AIGroup *group = TheAI->createGroup();
@@ -1060,6 +1135,12 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 								 action.targetSlot, action.targetSelector.str()));
 			break;
 		}
+
+		case SCENARIO_ACTION_SHIFTMOVE:
+		case SCENARIO_ACTION_SHIFTATTACKMOVE:
+		case SCENARIO_ACTION_SHIFTATTACK:
+		case SCENARIO_ACTION_SHIFTGUARD:
+			return executeShiftOrder( action, player, dest, group, taken );		// the group is gone either way
 
 		case SCENARIO_ACTION_STOP:
 		{

@@ -51,6 +51,7 @@
 #include "GameClient/KeyDownInfo.h"
 #include "GameClient/GameWindowTransitions.h"
 #include "GameLogic/ScenarioDrill.h"
+#include "GameLogic/OrderQueue.h"
 #include "Common/ControlServer.h"
 #include "GameLogic/LogicRandomValue.h"
 #include "GameClient/ClientRandomValue.h"
@@ -13194,6 +13195,28 @@ TEST(scenario_parses_a_particles_line)
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "30 particles 0 X 5 760", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
 }
 
+// A queued order that is not an order would never end a list when given without shift, and an order
+// that ends its chain but cannot be queued would never be reached.  The prefix itself is not an order,
+// or it would release the units it is about to queue for.
+TEST(order_queue_kinds_nest)
+{
+	for( Int type = GameMessage::MSG_BEGIN_NETWORK_MESSAGES; type <= GameMessage::MSG_END_NETWORK_MESSAGES; type++ )
+	{
+		const GameMessage::Type messageType = (GameMessage::Type)type;
+		if( OrderQueue::isQueueable( messageType ) )
+			CHECK( OrderQueue::isOrder( messageType ) );
+		if( OrderQueue::isTerminal( messageType ) )
+			CHECK( OrderQueue::isQueueable( messageType ) );
+	}
+
+	CHECK( !OrderQueue::isOrder( GameMessage::MSG_QUEUE_NEXT_ORDER ) );
+	CHECK( OrderQueue::isQueueable( GameMessage::MSG_DO_ATTACKMOVETO ) );
+	CHECK( !OrderQueue::isTerminal( GameMessage::MSG_DO_ATTACKMOVETO ) );
+	CHECK( OrderQueue::isTerminal( GameMessage::MSG_DO_GUARD_POSITION ) );
+	CHECK( OrderQueue::isOrder( GameMessage::MSG_DO_STOP ) );
+	CHECK( !OrderQueue::isQueueable( GameMessage::MSG_DO_STOP ) );
+}
+
 TEST(scenario_parses_the_order_lines)
 {
 	ScenarioAction action;
@@ -13224,6 +13247,18 @@ TEST(scenario_parses_the_order_lines)
 
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "900 stop 2 *", &action ), (Int)SCENARIO_PARSE_OK );
 	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_STOP );
+
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftmove 0 * start1:0:-400", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_SHIFTMOVE );
+	CHECK_EQ( action.atStart, 1 );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftattackmove 0 * 900 700", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_SHIFTATTACKMOVE );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftguard 0 * 900 700", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_SHIFTGUARD );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftattack 0 * 1 AmericaCommandCenter", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_SHIFTATTACK );
+	CHECK_STR( action.targetSelector.str(), "AmericaCommandCenter" );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftattack 0 * 1", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
 
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "1800 tally 1 ChinaGattlingCannon", &action ), (Int)SCENARIO_PARSE_OK );
 	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_TALLY );

@@ -55,6 +55,7 @@
 
 // forward declarations
 class AudioEventRTS;
+class AIGroup;
 class Object;
 class Drawable;
 class Player;
@@ -132,8 +133,9 @@ public:
 
 	void prepareNewGame( Int gameMode, GameDifficulty diff, Int rankPoints );						///< prepare for new game 
 
-	void logicMessageDispatcher( GameMessage *msg, 
-																			 void *userData );	///< Logic command list processing
+	/// Logic command list processing.  A NULL orderedGroup means the order is for the sender's selection;
+	/// otherwise it is for exactly that group (a shift-queued order coming round), which is destroyed here.
+	void logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup );
 
 	void registerObject( Object *obj );							///< Given an object, register it with the GameLogic and give it a unique ID
 

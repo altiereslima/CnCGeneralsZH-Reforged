@@ -2674,6 +2674,10 @@ void GameLogic::processCommandList( CommandList *list )
 		logicMessageDispatcher( msg, NULL );
 	}
 
+	// a shift prefix belongs to the order right behind it in the same frame, never to a later one
+	for( Int i = 0; i < ThePlayerList->getPlayerCount(); i++ )
+		ThePlayerList->getNthPlayer( i )->getOrderQueue()->forgetNextOrderMode();
+
 	if (m_shouldValidateCRCs && !TheNetwork->sawCRCMismatch())
 	{
 		Bool sawCRCMismatch = FALSE;

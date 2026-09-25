@@ -463,7 +463,7 @@ static void makeObjectHeroic( Object *obj, void *userData )
   * appropriate objects.
 	* @todo Rename this to "CommandProcessor", or similiar. */
 //-------------------------------------------------------------------------------------------------
-void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
+void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup )
 {
 #ifdef _DEBUG
 	DEBUG_ASSERTCRASH(msg != NULL && msg != (GameMessage*)0xdeadbeef, ("bad msg"));
@@ -485,9 +485,9 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 		return;
 	}
 
-	AIGroup *currentlySelectedGroup = NULL;
+	AIGroup *currentlySelectedGroup = orderedGroup;
 
-	if (isInGame())
+	if (isInGame() && orderedGroup == NULL)
 	{
 		if (msg->getType() >= GameMessage::MSG_BEGIN_NETWORK_MESSAGES && msg->getType() <= GameMessage::MSG_END_NETWORK_MESSAGES)
 		{
@@ -540,8 +540,26 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 
 	// process the message
 	GameMessage::Type msgType = msg->getType();
+
+	//
+	// The shift queue (fork).  A queued order goes into the sender's order queue and comes back through
+	// here later with its units named in orderedGroup; an order given without shift ends the list for
+	// the units it went to.  An order already coming round from the queue is not looked at again.
+	// See OrderQueue.h.
+	//
+	if( orderedGroup == NULL && msgType != GameMessage::MSG_QUEUE_NEXT_ORDER
+			&& thisPlayer->getOrderQueue()->takeMessage( msg, currentlySelectedGroup, thisPlayer ) )
+		return;		// the queue destroyed the group
+
 	switch( msgType )
 	{
+		//---------------------------------------------------------------------------------------------
+		case GameMessage::MSG_QUEUE_NEXT_ORDER:
+		{
+			thisPlayer->getOrderQueue()->setNextOrderMode( msg->getArgument( 0 )->integer );
+			break;
+		}
+
 		//---------------------------------------------------------------------------------------------
 		case GameMessage::MSG_NEW_GAME:
 		{
@@ -2527,7 +2545,7 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 	}  // end switch
 
 	/**/ /// @todo: multiplayer semantics
-	if (currentlySelectedGroup && TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK && TheGlobalData->m_useCameraInReplay && TheControlBar->getObserverLookAtPlayer() == thisPlayer /*&& !TheRecorder->isMultiplayer()*/)
+	if (currentlySelectedGroup && orderedGroup == NULL && TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK && TheGlobalData->m_useCameraInReplay && TheControlBar->getObserverLookAtPlayer() == thisPlayer /*&& !TheRecorder->isMultiplayer()*/)
 	{
 		const VecObjectID& selectedObjects = currentlySelectedGroup->getAllIDs();
 		TheInGameUI->deselectAllDrawables();

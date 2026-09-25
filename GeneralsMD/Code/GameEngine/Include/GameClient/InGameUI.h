@@ -45,6 +45,7 @@
 #include "Common/UnicodeString.h"
 #include "GameClient/DisplayString.h"
 #include "GameClient/HtmlTemplate.h"
+#include "GameLogic/OrderQueue.h"		// the shift queue, which the logic keeps and the UI draws
 
 #include <set>
 
@@ -537,28 +538,9 @@ public:  // ********************************************************************
 	const ICoord2D& getAttackCircleCursor( void ) const { return m_attackCircleCursor; }
 	Bool getAttackCircleGround( Coord3D& center, Real& radius ) const;	///< the circle in world terms, FALSE while it is still a dot
 
-	// An attack order (force-attack or attack-move) added to the shift queue.  The goal path the
-	// plain move queue rides on carries no order type, so this is a second queue: an ordinary
-	// message the client sends again once the order before it is over, nothing new for the logic
-	// to learn.
-	enum AttackWaypointKind
-	{
-		ATTACK_WAYPOINT_ATTACK,		///< attack-move to a point, or force-attack a victim
-		ATTACK_WAYPOINT_GUARD			///< post the group here.  A guard never ends, so it ends the queue
-	};
-
-	struct AttackWaypoint
-	{
-		Coord3D						pos;					///< where to go, or the last known spot of targetID
-		ObjectID					targetID;			///< INVALID_ID for a point, a specific victim otherwise
-		Bool							forceAttack;	///< what the attack key said when it was queued, not when it goes out
-		AttackWaypointKind	kind;					///< which order this entry sends when it reaches the front
-	};
-	void queueAttackWaypoint( const Coord3D *pos, Object *targetObj );
-	void queueGuardWaypoint( const Coord3D *pos );
-	void clearShiftAttackQueue( void );
-	Bool isShiftAttackQueueActive( void ) const { return !m_shiftAttackQueue.empty() || m_shiftAttackQueueRunning; }
-	const std::vector<AttackWaypoint>& getShiftAttackQueue( void ) const { return m_shiftAttackQueue; }
+	/// The order about to go on the message stream is a shift-queued one: MSG_QUEUE_NEXT_ORDER goes
+	/// in front of it.  The logic keeps the list; see OrderQueue.h.
+	void markNextOrderQueued( OrderQueueMode mode );
 
 	virtual void createAttackHint( const GameMessage *msg );		///< An attack command has occurred, start graphical "hint"
 	virtual void createForceAttackHint( const GameMessage *msg );		///< A force attack command has occurred, start graphical "hint"
@@ -1132,28 +1114,15 @@ protected:
 	ICoord2D										m_attackCircleAnchor;													///< where the circle was started, in pixels
 	ICoord2D										m_attackCircleCursor;													///< where the cursor is now, which is the rim
 
-	std::vector<AttackWaypoint>	m_shiftAttackQueue;														///< attack points still owed, in click order (fork)
-	Bool												m_shiftAttackQueueRunning;										///< TRUE once the first order of the queue has been sent
-	AttackWaypoint							m_shiftAttackQueueActive;											///< the order that was sent, so its completion can be noticed
-	UnsignedInt									m_shiftAttackQueueEngagedFrame;								///< the last logic frame somebody was still working on the order in flight
-	std::vector<ObjectID>				m_shiftAttackQueueUnits;											///< who was told, so a changed selection drops the queue
-	Bool												m_shiftAttackQueueWaitingForRearm;							///< the order stands but its aircraft went home for ammo
-	Bool												m_shiftAttackQueueWaitingForSelection;				///< the order stands but nothing that was told is in hand
-
 	void updateFormationHints( void );													///< recompute who goes where from the curve being drawn
 	void updateOrderHints( void );															///< read the selection's own goals, once a frame
 	void collectOrderHints( void );															///< one hint per selected unit and queued point
 	void bunchOrderHints( void );																///< merge the hints of units going the same way
-	void updateShiftAttackQueue( void );												///< send the next queued attack once the current one is over
 	void addOrderHint( OrderHint& hint, const std::vector<OrderHint>& previous );	///< keep a marker's age across the frame the list is rebuilt on
 	Bool getHeldAircraftOrder( const Object *obj, OrderHintKind& kind, Coord3D& to ) const;	///< the order an aircraft is sitting on until it is airborne
-	void pushShiftAttackOrder( const AttackWaypoint& order );		///< add one order to the queue, or start a queue with it
-	void sendShiftAttackOrder( const AttackWaypoint& waypoint );	///< put one queue entry on the message stream
-	void logShiftAttackQueue( const char *why ) const;						///< one line saying what the queue did and what its group was doing
-	void addShiftAttackQueueTail( OrderHint& hint, const std::vector<OrderHint>& previous );	///< every target still owed, drawn on from where the hint leaves off
+	void addQueuedOrderTail( OrderHint& hint, const OrderChain& chain, const std::vector<OrderHint>& previous );	///< every order still owed, drawn on from where the hint leaves off
+	Bool getQueuedOrderHint( const QueuedOrder& order, OrderHintKind& kind, Coord3D& to ) const;	///< the marker a queued order draws, FALSE for none
 	Bool isHiddenByShroud( const Object *obj ) const;						///< is the shroud over this, for the player at this machine
-	void collectSelectedObjectIDs( std::vector<ObjectID>& ids ) const;	///< the selection by id, sorted
-	Bool selectionOwnsShiftAttackQueue( const std::vector<ObjectID>& selected ) const;	///< is this still the group the queue was given to
 	Bool												m_displayedMaxWarning;                        ///< keeps the warning from being shown over and over
 	const CommandButton *				m_pendingGUICommand;										///< GUI command that needs additional interaction from the user
 	BuildProgress								m_buildProgress[ MAX_BUILD_PROGRESS ];	///< progress for building units

@@ -962,36 +962,13 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 
 	if (m_teamExists)
 	{
-		// under shift, an attack (force-attack on an attackable, or attack-move) joins the shift
-		// queue instead of the plain waypoint path - that path is a bare list of points with no
-		// order type, so it cannot carry an attack.  See InGameUI::queueAttackWaypoint.
 		Bool forceAttackHere = isForceAttackTargeting() && isForceAttackable;
-		Bool queuedGuard = TheInGameUI->isInWaypointMode() && TheInGameUI->isGuardArmed();
-		Bool queuedAttack = TheInGameUI->isInWaypointMode()
-												 && ( TheInGameUI->isInAttackMoveToMode() || forceAttackHere );
 
-		// the guard key posts the selection where it is pointed, and under shift it joins the line
-		// of orders as its last one: clear this, then sit there.  A guard never finishes, so nothing
-		// can be queued behind it
-		if( queuedGuard )
+		// the guard key posts the selection where it is pointed.  Under shift it joins the list as its
+		// last order: clear this, then sit there
+		if( TheInGameUI->isGuardArmed() )
 		{
 			msgType = GameMessage::MSG_DO_GUARD_POSITION;
-			if( commandType == DO_COMMAND )
-				TheInGameUI->queueGuardWaypoint( pos );
-		}
-		else if( TheInGameUI->isGuardArmed() )
-		{
-			msgType = GameMessage::MSG_DO_GUARD_POSITION;
-		}
-		else if( queuedAttack )
-		{
-			msgType = forceAttackHere ? GameMessage::MSG_DO_ATTACK_OBJECT : GameMessage::MSG_DO_ATTACKMOVETO;
-			if( commandType == DO_COMMAND )
-				TheInGameUI->queueAttackWaypoint( pos, forceAttackHere ? obj : NULL );
-		}
-		else if( TheInGameUI->isInWaypointMode() )
-		{
-			msgType = GameMessage::MSG_ADD_WAYPOINT;
 		}
 		else if( TheInGameUI->isInAttackMoveToMode())
 		{
@@ -1009,8 +986,12 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 		{
 			msgType = GameMessage::MSG_DO_MOVETO;
 		}
-		if( commandType == DO_COMMAND && !queuedAttack && !queuedGuard )
+		if( commandType == DO_COMMAND )
 		{
+			// shift puts the order on the end of the units' list rather than carrying it out now
+			if( TheInGameUI->isInWaypointMode() )
+				TheInGameUI->markNextOrderQueued( ORDER_QUEUE_APPEND );
+
 			GameMessage *movemsg = TheMessageStream->appendMessage( msgType );
 			if (msgType == GameMessage::MSG_DO_ATTACK_OBJECT)
 				movemsg->appendObjectIDArgument( obj->getID() );
@@ -1492,6 +1473,10 @@ void CommandTranslator::finishFormationDrag( const ICoord2D& lift )
 															TheInGameUI->isForceAttackArmed(),
 															TheInGameUI->isGuardArmed() );
 
+	// a line drawn with shift is the next order on the units' list
+	if( TheInGameUI->isInWaypointMode() )
+		TheInGameUI->markNextOrderQueued( ORDER_QUEUE_APPEND );
+
 	// the traced curve becomes world points; who stands where along it is decided on
 	// the logic side, where every machine decides it the same way
 	GameMessage *newMsg = TheMessageStream->appendMessage( formationType );
@@ -1503,11 +1488,6 @@ void CommandTranslator::finishFormationDrag( const ICoord2D& lift )
 	}
 
 	TheInGameUI->clearAttackMoveToMode();
-
-	// a hand-given order ends whatever list the group was working through, unless shift
-	// says the player is adding to it
-	if( !TheInGameUI->isInWaypointMode() )
-		TheInGameUI->clearShiftAttackQueue();
 
 	const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
 	if( selected && !selected->empty() )
@@ -1544,13 +1524,15 @@ GameMessage::Type CommandTranslator::evaluateForceAttack( Drawable *draw, const 
 		{
 			retVal = GameMessage::MSG_DO_FORCE_ATTACK_OBJECT;
 
-			if( type == DO_COMMAND ) 
+			if( type == DO_COMMAND )
 			{
 				pickAndPlayUnitVoiceResponse( allSelected, retVal );
+				if( TheInGameUI->isInWaypointMode() )
+					TheInGameUI->markNextOrderQueued( ORDER_QUEUE_APPEND );
 				GameMessage *newMsg = TheMessageStream->appendMessage( retVal );
 				newMsg->appendObjectIDArgument( obj->getID() );
-				
-			} 
+
+			}
 			else if( type == DO_HINT ) 
 			{
 				retVal = GameMessage::MSG_DO_FORCE_ATTACK_OBJECT_HINT;
@@ -1572,12 +1554,14 @@ GameMessage::Type CommandTranslator::evaluateForceAttack( Drawable *draw, const 
 		{
 			retVal = GameMessage::MSG_DO_FORCE_ATTACK_GROUND;
 
-			if( type == DO_COMMAND ) 
+			if( type == DO_COMMAND )
 			{
 				pickAndPlayUnitVoiceResponse( allSelected, retVal );
+				if( TheInGameUI->isInWaypointMode() )
+					TheInGameUI->markNextOrderQueued( ORDER_QUEUE_APPEND );
 				GameMessage *newMsg = TheMessageStream->appendMessage( retVal );
 				newMsg->appendLocationArgument( *pos );
-			} 
+			}
 			else if( type == DO_HINT ) 
 			{
 				retVal = GameMessage::MSG_DO_FORCE_ATTACK_GROUND_HINT;
@@ -4192,12 +4176,6 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 					disp = DESTROY_MESSAGE;
 					TheInGameUI->clearAttackMoveToMode();
-
-					// a hand-given order ends whatever list the group was working through, unless shift
-					// says the player is adding to it - in which case the order just given is itself the
-					// newest entry in that list
-					if( !TheInGameUI->isInWaypointMode() )
-						TheInGameUI->clearShiftAttackQueue();
 				}
 			}
 
@@ -4276,11 +4254,6 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 				disp = DESTROY_MESSAGE;
 				TheInGameUI->clearAttackMoveToMode();
-
-				// the same rule the right button's orders follow: a hand-given attack ends the list the
-				// group was working through, unless shift says it is being added to
-				if( isOrderKey && !TheInGameUI->isInWaypointMode() )
-					TheInGameUI->clearShiftAttackQueue();
 
 				//issueMoveToLocationCommand( &pos, draw, DO_COMMAND );
 			}

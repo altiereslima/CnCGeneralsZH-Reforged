@@ -405,6 +405,7 @@ void Player::init(const PlayerTemplate* pt)
 
 	m_isPreorder = FALSE;
 	m_isPlayerDead = FALSE;
+	m_orderQueue.reset();
 
 	m_radarCount = 0;
 	m_disableProofRadarCount = 0;
@@ -771,6 +772,8 @@ void Player::update()
 	// heal what is inside the tunnel network, once for the whole network
 	if( m_tunnelSystem )
 		m_tunnelSystem->healObjects();
+
+	m_orderQueue.update( this );
 
 	// A trickle of income that does not come from a supply line. `MoneyPerMinute` in GameData.ini,
 	// zero and therefore absent unless somebody asks for it. Paid on the minute rather than spread
@@ -4477,13 +4480,14 @@ void Player::crc( Xfer *xfer )
 	* 6: Store m_unitsShouldHunt, set to true after the script "Tell player to hunt" is called.
 	* 7: added Preorder flag
 	* 8: Save m_disabledSciences & m_hiddenSciences. jba.
+	* 9: The shift queue, m_orderQueue (fork).
 	*/
 // ------------------------------------------------------------------------------------------------
 void Player::xfer( Xfer *xfer )
 {
 
 	// version
-	const XferVersion currentVersion = 8;
+	const XferVersion currentVersion = 9;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -5019,6 +5023,11 @@ void Player::xfer( Xfer *xfer )
 	}
 	else
 		m_unitsShouldHunt = FALSE;
+
+	if (version >= 9)
+		m_orderQueue.xfer( xfer );
+	else
+		m_orderQueue.reset();
 
 }  // end xfer
 

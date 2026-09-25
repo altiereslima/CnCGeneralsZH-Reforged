@@ -1089,11 +1089,6 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			// click that follows this release has to be eaten or it would reselect under the anchor
 			if( TheInGameUI->isAttackCircling() )
 			{
-				// a circle drawn with shift adds its targets to the end of the list the group is
-				// already working through; without shift it replaces that list
-				if( !TheInGameUI->isInWaypointMode() )
-					TheInGameUI->clearShiftAttackQueue();
-
 				// a press with the attack key that never became a drag is an ordinary attack click,
 				// and the click that follows this release is the order.  Only a real circle eats it
 				if( TheInGameUI->issueAttackCircle() )
