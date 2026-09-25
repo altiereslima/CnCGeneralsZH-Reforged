@@ -67,8 +67,9 @@ public:
 	/** Click at the pointer and return the data-click of what was clicked, empty for nothing. */
 	std::string click( const ICoord2D &mouse );
 
-	/** The data-tip of what the last hover() found under the pointer, empty for nothing. */
-	std::string tip( void );
+	/** The data-tip of what the last hover() found under the pointer, empty for nothing, and the
+		* screen rectangle of the element that carries it. */
+	std::string tip( IRegion2D &rect );
 
 	/** The bottom edge in screen pixels of the first element the CSS selector finds, 0 for none. */
 	Int bottomOf( const char *selector );

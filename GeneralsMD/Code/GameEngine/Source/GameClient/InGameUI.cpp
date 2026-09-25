@@ -7243,8 +7243,7 @@ void InGameUI::postDraw( void )
                   const CommandButton *button = powerButton( info->getSpecialPowerTemplate() );
                   const Image *cameo = button ? button->getButtonImage() : NULL;
                   addSuperweaponIcon( cameo, readySecs, percent, isReady, info->getColor() );
-                  SpectatorSuperweapon listed = { i, cameo, readySecs, isReady,
-                                                  button ? TheGameText->fetch( button->getTextLabel() ) : UnicodeString::TheEmptyString };
+                  SpectatorSuperweapon listed = { i, cameo, readySecs, isReady, button };
                   m_spectatorSuperweapons.push_back( listed );
                 }
                 if (info->getSpecialPowerTemplate()->isSharedNSync())
@@ -9341,18 +9340,50 @@ static const Image *stripSlotCameo( const Object *producer, const ProductionEntr
 	return entry->getProductionObject() ? entry->getProductionObject()->getButtonImage() : NULL;
 }
 
-/** The name of what stripSlotCameo draws, empty where it draws nothing. */
-static UnicodeString stripSlotName( const Object *producer, const ProductionEntry *entry,
-																		const InGameUI::ProductionStripSlot *slot )
+/** The command button that builds a unit or a building, the one its build card is filled in from. */
+static const CommandButton *buildButtonForThing( const ThingTemplate *thing )
+{
+	for( const CommandButton *button = TheControlBar->getCommandButtons(); button; button = button->getNext() )
+	{
+		const GUICommandType type = button->getCommandType();
+		if( ( type == GUI_COMMAND_UNIT_BUILD || type == GUI_COMMAND_DOZER_CONSTRUCT ) && button->getThingTemplate()
+				&& button->getThingTemplate()->isEquivalentTo( thing ) )
+			return button;
+	}
+	return NULL;
+}
+
+/** The command button that buys an upgrade. */
+static const CommandButton *buildButtonForUpgrade( const UpgradeTemplate *upgrade )
+{
+	for( const CommandButton *button = TheControlBar->getCommandButtons(); button; button = button->getNext() )
+	{
+		const GUICommandType type = button->getCommandType();
+		if( ( type == GUI_COMMAND_PLAYER_UPGRADE || type == GUI_COMMAND_OBJECT_UPGRADE ) && button->getUpgradeTemplate() == upgrade )
+			return button;
+	}
+	return NULL;
+}
+
+/** A page's data-tip for a button on a player's row: the player's index, a space and the button's
+	* name, which ControlBar::findCommandButton finds it by.  Button names are INI tokens and hold no
+	* space.  Empty for no button. */
+static std::string buttonTip( const CommandButton *button, const Player *owner )
+{
+	return button ? std::to_string( owner->getPlayerIndex() ) + " " + button->getName().str() : "";
+}
+
+/** The button that builds what stripSlotCameo draws, NULL where it draws nothing. */
+static const CommandButton *stripSlotButton( const Object *producer, const ProductionEntry *entry,
+																						 const InGameUI::ProductionStripSlot *slot )
 {
 	if( slot->isStructure )
-		return producer ? producer->getTemplate()->getDisplayName() : UnicodeString::TheEmptyString;
+		return producer ? buildButtonForThing( producer->getTemplate() ) : NULL;
 	if( entry == NULL )
-		return UnicodeString::TheEmptyString;
+		return NULL;
 	if( slot->isUpgrade )
-		return entry->getProductionUpgrade() ? TheGameText->fetch( entry->getProductionUpgrade()->getDisplayNameLabel() )
-																				 : UnicodeString::TheEmptyString;
-	return entry->getProductionObject() ? entry->getProductionObject()->getDisplayName() : UnicodeString::TheEmptyString;
+		return entry->getProductionUpgrade() ? buildButtonForUpgrade( entry->getProductionUpgrade() ) : NULL;
+	return entry->getProductionObject() ? buildButtonForThing( entry->getProductionObject() ) : NULL;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -10032,7 +10063,7 @@ static HtmlValues scoreboardSeat( Player *player, const GameSlot *slot, Bool ful
 	{
 		const std::string name = "skill" + std::to_string( skill );
 		seat[ name ] = skills[ skill ]->getButtonImage()->getName().str();
-		seat[ name + ".tip" ] = WideCharStringToMultiByte( TheGameText->fetch( skills[ skill ]->getTextLabel() ).str() );
+		seat[ name + ".tip" ] = buttonTip( skills[ skill ], player );
 	}
 
 	const ThingTemplate *favourite = score->getMostBuiltUnit();
@@ -10040,6 +10071,7 @@ static HtmlValues scoreboardSeat( Player *player, const GameSlot *slot, Bool ful
 	{
 		seat[ "favourite" ] = favourite->getButtonImage()->getName().str();
 		seat[ "favouritename" ] = WideCharStringToMultiByte( favourite->getDisplayName().str() );
+		seat[ "favourite.tip" ] = buttonTip( buildButtonForThing( favourite ), player );
 	}
 	return seat;
 }
@@ -10077,7 +10109,7 @@ static void putSeatSuperweapons( HtmlValues &row, Int playerIndex, const std::ve
 		row[ name + ".image" ] = owned[ place ].cameo ? owned[ place ].cameo->getName().str() : "";
 		row[ name + ".time" ] = WideCharStringToMultiByte( time.str() );
 		row[ name + ".state" ] = owned[ place ].ready ? "ready" : "";
-		row[ name + ".tip" ] = WideCharStringToMultiByte( owned[ place ].name.str() );
+		row[ name + ".tip" ] = buttonTip( owned[ place ].button, ThePlayerList->getNthPlayer( playerIndex ) );
 	}
 
 	Int more = 0;
@@ -10138,7 +10170,7 @@ static void putSeatQueue( HtmlValues &row, Player *player )
 		row[ name + ".time" ] = WideCharStringToMultiByte( time.str() );
 		row[ name + ".count" ] = slot->quantity > 1 ? "x" + std::to_string( slot->quantity ) : "";
 		row[ name + ".state" ] = "";
-		row[ name + ".tip" ] = WideCharStringToMultiByte( stripSlotName( producer, entry, slot ).str() );
+		row[ name + ".tip" ] = buttonTip( stripSlotButton( producer, entry, slot ), player );
 		shown += slot->quantity;
 	}
 	row[ "jobsmore" ] = std::to_string( total - shown );
@@ -10157,6 +10189,7 @@ static void putSeatQueue( HtmlValues &row, Player *player )
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawScoreboard( void )
 {
+	TheControlBar->hideBoardCard();
 	if( !m_scoreboardOpen || TheGameInfo == NULL )
 		return;
 	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
@@ -10181,10 +10214,21 @@ void InGameUI::drawScoreboard( void )
 		m_scoreboardHtmlFrame = frame;
 	}
 	m_scoreboardOverlay->setPage( m_scoreboardHtml );
-	// the mouse clears its tooltip every frame, so one set here lasts as long as the pointer stays on
-	// a promotion, a cameo or the favourite unit, and the board hides whatever is under it
+	// a promotion, a cameo or the favourite unit under the pointer gets the command bar's build card,
+	// its health, damage and range; the board hides the battlefield's tooltips under it
 	if( m_scoreboardOverlay->hover( TheMouse->getMouseStatus()->pos ) )
-		TheMouse->setCursorTooltip( UnicodeString( MultiByteToWideCharSingleLine( m_scoreboardOverlay->tip().c_str() ).c_str() ) );
+	{
+		TheMouse->setCursorTooltip( UnicodeString::TheEmptyString );
+		IRegion2D anchor;
+		const std::string tip = m_scoreboardOverlay->tip( anchor );
+		if( !tip.empty() )
+		{
+			// counted for the row's player: his prices, and his upgrades in the damage and the health
+			const size_t space = tip.find( ' ' );
+			TheControlBar->showBoardCard( TheControlBar->findCommandButton( AsciiString( tip.c_str() + space + 1 ) ),
+																		ThePlayerList->getNthPlayer( atoi( tip.c_str() ) ), anchor );
+		}
+	}
 	m_scoreboardOverlay->draw();
 }
 

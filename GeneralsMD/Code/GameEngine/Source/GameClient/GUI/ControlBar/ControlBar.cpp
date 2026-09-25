@@ -1270,6 +1270,10 @@ ControlBar::ControlBar( void )
 	m_currentControlBarStage = CONTROL_BAR_STAGE_DEFAULT;
 	m_buildToolTipLayout = NULL;
 	m_showBuildToolTipLayout = FALSE;
+	m_boardCardButton = NULL;
+	m_boardCardOwner = NULL;
+	m_boardCardShown = FALSE;
+	m_boardCardWasShown = FALSE;
 
 	// Added By Sadullah Nader
 	// initializing vars to zero
@@ -5565,7 +5569,9 @@ void ControlBar::showPurchaseScience( void )
 	m_purchaseScienceOpen = TRUE;
 	//switchToContext(CB_CONTEXT_PURCHASE_SCIENCE, NULL);
 	m_contextParent[ CP_PURCHASE_SCIENCE ]->winHide(FALSE);
-	if (TheGlobalData->m_animateWindows)
+	// the fade holds the screen hidden for nine frames and draws the side's old painting of it fading
+	// in, which the page has replaced
+	if (TheGlobalData->m_animateWindows && !TheInGameUI->isPromotionPageShown())
 		TheTransitionHandler->setGroup("GenExpFade");
 		//m_generalsScreenAnimate->registerGameWindow( m_contextParent[ CP_PURCHASE_SCIENCE ], WIN_ANIMATION_SLIDE_TOP, TRUE, 200 );
 

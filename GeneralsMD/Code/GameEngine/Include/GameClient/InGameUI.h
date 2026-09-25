@@ -346,7 +346,7 @@ struct SpectatorSuperweapon
 	const Image *cameo;
 	Int seconds;
 	Bool ready;
-	UnicodeString name;
+	const CommandButton *button;	///< the power's own, for its tooltip card; NULL for a power with none
 };
 
 // ------------------------------------------------------------------------------------------------
@@ -431,6 +431,8 @@ public:  // ********************************************************************
 	/** The general's promotion screen, Window/Html/Promotion.html, drawn as `parent`'s picture: the
 		* screen's windows keep their clicks and the promotions' own cameos paint over it. */
 	void drawPromotionPage( GameWindow *parent, Bool front );
+	/** TRUE once the promotion screen is the page's, so the painted screen's own fade-in stays off. */
+	Bool isPromotionPageShown( void ) const { return m_promotionPageLoaded && !m_promotionPage.empty(); }
 	/** The Esc menu hands its look to Window/Html/QuitMenu.html: `parent` draws the page and its keys
 		* draw nothing and keep their clicks.  Left as it is when there is no page. */
 	void themeQuitMenu( GameWindow *parent );

@@ -578,8 +578,33 @@ void ControlBar::showBuildTooltipLayout( GameWindow *cmdButton )
 }
 
 
+void ControlBar::showBoardCard( const CommandButton *button, Player *owner, const IRegion2D &anchor )
+{
+	if( button != m_boardCardButton || owner != m_boardCardOwner || !m_boardCardWasShown )
+	{
+		populateBuildTooltipLayout( button, NULL, owner );
+		m_boardCard = m_buildTooltipCard;
+		// the money short and the buildings missing are the buyer's, and on the board nobody is buying
+		m_boardCard.warning.clear();
+		m_boardCard.requires.clear();
+		m_boardCardButton = button;
+		m_boardCardOwner = owner;
+	}
+	m_boardCard.anchor = anchor;
+	m_boardCardShown = TRUE;
+}
+
+void ControlBar::hideBoardCard( void )
+{
+	m_boardCardWasShown = m_boardCardShown;
+	m_boardCardShown = FALSE;
+}
+
 const BuildTooltipCard *ControlBar::getBuildTooltipCard( void )
 {
+	// the pointer is on the page, over whatever window was pointed at last
+	if( m_boardCardShown )
+		return &m_boardCard;
 	if( m_buildToolTipLayout == NULL || m_buildToolTipLayout->isHidden() || prevWindow == NULL )
 		return NULL;
 
@@ -618,10 +643,14 @@ void ControlBar::repopulateBuildTooltipLayout( void )
 
 void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton, GameWindow *tooltipWin)
 {
+	populateBuildTooltipLayout( commandButton, tooltipWin, ThePlayerList->getLocalPlayer() );
+}
+
+void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton, GameWindow *tooltipWin, Player *player )
+{
 	if(!m_buildToolTipLayout)
 		return;
 
-	Player *player = ThePlayerList->getLocalPlayer();
 	UnicodeString name, cost, descrip;
 	UnicodeString requires = UnicodeString::TheEmptyString, requiresList;
 	Bool firstRequirement = true;

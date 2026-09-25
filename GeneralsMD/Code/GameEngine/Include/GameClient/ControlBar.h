@@ -1389,14 +1389,26 @@ protected:
 	WindowLayout *m_buildToolTipLayout;										///< The window that will slide on/display tooltips
 	Bool m_showBuildToolTipLayout;											///< every frame we test to see if we aregoing to continue showing this or not.
 	BuildTooltipCard m_buildTooltipCard;								///< what the layout says, piece by piece
+	BuildTooltipCard m_boardCard;												///< the card for what the pointer is on in a page, the Tab scoreboard's
+	const CommandButton *m_boardCardButton;							///< the button m_boardCard was filled in from
+	Player *m_boardCardOwner;														///< and the player its figures were counted for
+	Bool m_boardCardShown;															///< a page asked for m_boardCard this frame
+	Bool m_boardCardWasShown;														///< and the frame before, so a card pointed at again is filled in again
 public:
 	/** What the build tooltip up on screen says, NULL while none is. */
 	const BuildTooltipCard *getBuildTooltipCard( void );
+	/** The build card for a button a page draws rather than a window, its prices and figures counted
+		* for owner, standing against anchor, for this frame: a page calls hideBoardCard every frame and
+		* this while the pointer is on one. */
+	void showBoardCard( const CommandButton *button, Player *owner, const IRegion2D &anchor );
+	void hideBoardCard( void );
 	void showBuildTooltipLayout( GameWindow *cmdButton );
 	void hideBuildTooltipLayout( void );
 	void deleteBuildTooltipLayout( void );
 	Bool getShowBuildTooltipLayout( void ){return m_showBuildToolTipLayout;	}
 	void populateBuildTooltipLayout( const CommandButton *commandButton, GameWindow *tooltipWin = NULL );
+	/// the same with the prices and figures counted for player rather than the local one
+	void populateBuildTooltipLayout( const CommandButton *commandButton, GameWindow *tooltipWin, Player *player );
 	void repopulateBuildTooltipLayout( void );
 	/// where the popup lives, so -uidrill can read the rectangle it landed in.  The tooltip is placed
 	/// against BackgroundMarker's screen position, so it goes wherever the bar's windows went

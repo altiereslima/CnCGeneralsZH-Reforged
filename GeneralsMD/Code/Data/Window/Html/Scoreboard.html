@@ -14,8 +14,8 @@
       "hidden", plus " own" on your own seat and " defeated" once a seat is out.  A full seat also
       has {{portrait}} {{general}} {{rank}} {{cash}} {{income}}, the match's average a minute, with
       {{persecond}} after it in brackets, what it earned a second over the last half minute, {{kills}}
-      {{losses}}, its promotions as {{skill0}} to {{skill6}} named by {{skill0.tip}} to {{skill6.tip}},
-      and {{favourite}} with {{favouritename}}, the unit built most.
+      {{losses}}, its promotions as {{skill0}} to {{skill6}} with {{skill0.tip}} to {{skill6.tip}},
+      and {{favourite}} with {{favouritename}} and {{favourite.tip}}, the unit built most.
       A hidden seat is an enemy: a name, a colour and a team, nothing else.
       Every seat has its five soonest superweapons as {{w0.image}} {{w0.time}} {{w0.state}} {{w0.tip}} to
       {{w4...}}, the state "ready" once it can fire and "none" for an unused place; {{more}} counts
@@ -26,8 +26,10 @@
       {{j2...}}, "none" for an unused place; {{jobsmore}} counts the rest, {{jobsmoremark}} "off" at
       zero, and {{watching}} is "watching" on every seat, coming or not.
 
-  An image whose name is empty is not drawn, so an unused {{skillN}} leaves no box.  A data-tip is
-  the tooltip the pointer gets over that element, and an empty one gets none.
+  An image whose name is empty is not drawn, so an unused {{skillN}} leaves no box.  Every .tip is
+  the row's player and a command button, "3 Command_ConstructChinaTankBattlemaster", and the pointer
+  on an element whose data-tip holds one gets that button's build card, the command bar's tooltip
+  with its health, damage and range counted with that player's upgrades; an empty one gets none.
   Edit the copy under Run/Window/Html and the next match reads it.
 -->
 <html>
@@ -165,7 +167,7 @@
       <img class="skill" src="{{skill4}}" data-tip="{{skill4.tip}}" style="left: 614px">
       <img class="skill" src="{{skill5}}" data-tip="{{skill5.tip}}" style="left: 635px">
       <img class="skill" src="{{skill6}}" data-tip="{{skill6.tip}}" style="left: 656px">
-      <img class="favourite c-favourite" src="{{favourite}}" data-tip="{{favouritename}}">
+      <img class="favourite c-favourite" src="{{favourite}}" data-tip="{{favourite.tip}}">
       <div class="jobs">
         <div class="arm w0 {{j0.state}}" data-tip="{{j0.tip}}"><img class="cameo" src="{{j0.image}}"><span class="count">{{j0.count}}</span><span class="time">{{j0.time}}</span></div>
         <div class="arm w1 {{j1.state}}" data-tip="{{j1.tip}}"><img class="cameo" src="{{j1.image}}"><span class="count">{{j1.count}}</span><span class="time">{{j1.time}}</span></div>
