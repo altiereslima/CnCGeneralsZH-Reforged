@@ -5569,6 +5569,7 @@ void ControlBar::showPurchaseScience( void )
 	m_purchaseScienceOpen = TRUE;
 	//switchToContext(CB_CONTEXT_PURCHASE_SCIENCE, NULL);
 	m_contextParent[ CP_PURCHASE_SCIENCE ]->winHide(FALSE);
+	TheInGameUI->openPromotionPage();
 	// the fade holds the screen hidden for nine frames and draws the side's old painting of it fading
 	// in, which the page has replaced
 	if (TheGlobalData->m_animateWindows && !TheInGameUI->isPromotionPageShown())

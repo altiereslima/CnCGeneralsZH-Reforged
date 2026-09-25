@@ -1229,6 +1229,8 @@ InGameUI::InGameUI()
 	for( Int grid = 0; grid < CELL_GRID_COUNT; grid++ )
 		m_cellFrontOverlay[ grid ] = NULL;
 	m_promotionPageLoaded = FALSE;
+	m_promotionShownMs = 0;
+	m_promotionDrawnAt = 0;
 	m_quitMenuOverlay = NULL;
 	m_quitMenuPageLoaded = FALSE;
 	m_quitMenuShownMs = 0;
@@ -11497,6 +11499,18 @@ static const char *promotionState( GameWindow *button )
 	* the scheme put them; the promotions are the bar's buttons and paint over the back of the page,
 	* and the `front` of it, the grid's frames, paints over them. */
 //-------------------------------------------------------------------------------------------------
+/** The promotion screen coming up the way the Esc menu does: the screen dims and the page fades in
+	* over PROMOTION_FADE_MS of the wall clock from its first picture, never more than
+	* PROMOTION_MOST_MS_A_PICTURE a picture, so a slow first picture does not skip the fade. */
+static const Int PROMOTION_FADE_MS = 120;
+static const Int PROMOTION_MOST_MS_A_PICTURE = 25;
+static const Int PROMOTION_NOT_DRAWN = -1;
+
+void InGameUI::openPromotionPage( void )
+{
+	m_promotionShownMs = PROMOTION_NOT_DRAWN;
+}
+
 void InGameUI::drawPromotionPage( GameWindow *parent, Bool front )
 {
 	enum
@@ -11522,6 +11536,24 @@ void InGameUI::drawPromotionPage( GameWindow *parent, Bool front )
 	IRegion2D panel;
 	controlBarWindowRect( parent, panel );
 	putPageRect( values, "panel", panel, TRUE );
+	IRegion2D screen;
+	screen.lo.x = screen.lo.y = 0;
+	screen.hi.x = TheDisplay->getWidth();
+	screen.hi.y = TheDisplay->getHeight();
+	putPageRect( values, "screen", screen, TRUE );
+
+	// the back draws first each picture and moves the coming up on for both layers
+	if( !front )
+	{
+		const UnsignedInt now = timeGetTime();
+		if( m_promotionShownMs == PROMOTION_NOT_DRAWN )
+			m_promotionShownMs = 0;
+		else
+			m_promotionShownMs = min( m_promotionShownMs + min( (Int)( now - m_promotionDrawnAt ), PROMOTION_MOST_MS_A_PICTURE ),
+																PROMOTION_FADE_MS );
+		m_promotionDrawnAt = now;
+	}
+	overlay->setAlpha( max( 0, m_promotionShownMs ) * OPAQUE_PAGE / PROMOTION_FADE_MS );
 
 	static const char *const PLACED[] = { "StaticTextTitle", "ProgressBarExperience", "StaticTextRankPointsAvailable", "ButtonExit" };
 	for( Int each = 0; each < (Int)ARRAY_SIZE( PLACED ); each++ )

@@ -11,6 +11,7 @@
     {{side}}               "america", "china" or "gla"
     {{held}}               "held" while the left mouse button is down
     {{panel.x}} .y .w .h   the screen's plate
+    {{screen.x}} .y .w .h  the whole screen, dimmed under the back layer as the Esc menu dims it
     data-each="wells"      a well round each row and its heading, {{well.x}} .y .w .h
     {{Name.x}} .y .w .h    StaticTextTitle, ProgressBarExperience, StaticTextRankPointsAvailable and
                            ButtonExit, each with {{Name.shown}} and {{Name.state}} ("disabled",
@@ -23,7 +24,8 @@
                            round it in page pixels, and {{state}}
                            "owned" once bought, "ready" while it can be, "locked" while it cannot,
                            "empty" where no promotion stands
-  All in the page's pixels, a pixel of an 800x600 screen.  Without this page the painting draws.
+  All in the page's pixels, a pixel of an 800x600 screen.  The game fades both layers in as the
+  screen comes up.  Without this page the painting draws.
 -->
 <html>
 <head>
@@ -34,6 +36,8 @@
   body { background-color: #3b4a36; font-size: 8px; color: #dfe5ea; }
   .hidden { display: none; }
   .piece { position: absolute; }
+  /* the battlefield and the bar behind the screen, dimmed as the Esc menu dims them */
+  .dim { background-color: rgba(0, 0, 0, 0.65); }
 
   /* the plate: steel lit from above, a light line along its top and down its left, dark along its
      right and bottom */
@@ -105,6 +109,7 @@
 </head>
 <body>
 <div class="{{layer}} {{side}} {{held}}">
+  <div class="piece dim under" style="left: {{screen.x}}px; top: {{screen.y}}px; width: {{screen.w}}px; height: {{screen.h}}px"></div>
   <div class="piece plate under" style="left: {{panel.x}}px; top: {{panel.y}}px; width: {{panel.w}}px; height: {{panel.h}}px"></div>
   <div class="piece well under" data-each="wells" style="left: {{well.x}}px; top: {{well.y}}px; width: {{well.w}}px; height: {{well.h}}px"></div>
 

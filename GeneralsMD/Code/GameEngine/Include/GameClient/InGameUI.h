@@ -433,6 +433,8 @@ public:  // ********************************************************************
 	void drawPromotionPage( GameWindow *parent, Bool front );
 	/** TRUE once the promotion screen is the page's, so the painted screen's own fade-in stays off. */
 	Bool isPromotionPageShown( void ) const { return m_promotionPageLoaded && !m_promotionPage.empty(); }
+	/** The promotion screen is coming up: its page and the dimmed screen under it fade in from now. */
+	void openPromotionPage( void );
 	/** The Esc menu hands its look to Window/Html/QuitMenu.html: `parent` draws the page and its keys
 		* draw nothing and keep their clicks.  Left as it is when there is no page. */
 	void themeQuitMenu( GameWindow *parent );
@@ -1248,6 +1250,8 @@ protected:
 	std::vector< HtmlValues >		m_cellFrontCells[ CELL_GRID_COUNT ];	///< each grid's cells as the bar's page last placed them
 	Bool												m_promotionPageLoaded;
 	std::string									m_promotionPage;
+	Int													m_promotionShownMs;				///< how far the promotion screen has come up, -1 before its first picture
+	UnsignedInt									m_promotionDrawnAt;				///< the wall clock at its last picture
 	HtmlOverlay *								m_quitMenuOverlay;
 	std::vector< HtmlOverlay * >	m_quitMenuKeyOverlays;	///< one for each of the menu's keys, each fading in on its own
 	Bool												m_quitMenuPageLoaded;
