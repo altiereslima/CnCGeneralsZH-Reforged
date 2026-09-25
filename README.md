@@ -22,8 +22,9 @@ Reforged is that source moved to Visual Studio 2022 and worked on as a game. Abo
 files were ported. Around sixty bugs were found and fixed that EA shipped in 2003 and nobody noticed
 for twenty-two years. And the computer opponent builds a base now, which it never could.
 
-No unit or weapon is rebalanced. You need your own copy of Zero Hour, because no game data ships
-here.
+One balance pass, measured in 528 staged fights a round: defences no longer die cheaper than they
+cost, and the Dragon Tank, Quad Cannon, Paladin and Rocket Buggy were brought into line. The
+changelog has every number. You need your own copy of Zero Hour, because no game data ships here.
 
 ## Play it
 
