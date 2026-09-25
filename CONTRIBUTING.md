@@ -36,10 +36,10 @@ nobody minds a rewritten pull request branch.
 
 ## Before you open it
 
-Build Release and run the tests. The build is Win32 only.
+Build Release and run the tests. The build is x64 only, and `-A Win32` stops at configure.
 
 ```console
-cmake -S GeneralsMD/Code -B build -G "Visual Studio 17 2022" -A Win32
+cmake -S GeneralsMD/Code -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```

@@ -5,7 +5,7 @@
 Command & Conquer: Generals Zero Hour, rebuilt from the source EA opened and played as a game again.
 
 [![release](https://img.shields.io/github/v/release/olcayseygan/CnCGeneralsZH-Reforged?style=for-the-badge&label=release&labelColor=161b22&color=4459b6)](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/releases/latest)
-![platform](https://img.shields.io/badge/platform-Windows%20x86-0d1117?style=for-the-badge&labelColor=161b22)
+![platform](https://img.shields.io/badge/platform-Windows%20x64-0d1117?style=for-the-badge&labelColor=161b22)
 ![renderer](https://img.shields.io/badge/renderer-Direct3D%2011-0d1117?style=for-the-badge&labelColor=161b22)
 ![license](https://img.shields.io/badge/license-GPL--3.0-0d1117?style=for-the-badge&labelColor=161b22)
 
