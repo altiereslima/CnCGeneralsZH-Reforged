@@ -11347,7 +11347,8 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	putExperienceBar( values, lists[ "expcells" ], lists[ "rankstars" ] );
 	// a watcher, or a player beaten, has no promotions to buy, and the bar disables the button for him
 	const IRegion2D starsTab = tabOn( rightBox, STARS_TAB_WIDTH, STARS_TAB_HEIGHT, TRUE );
-	putPageRect( values, "starstab", starsTab, rightFound && rightShown && ThePlayerList->getLocalPlayer()->isPlayerActive() );
+	const Bool starsShown = rightFound && rightShown && ThePlayerList->getLocalPlayer()->isPlayerActive();
+	putPageRect( values, "starstab", starsTab, starsShown );
 
 	// the portrait's well is steel with a dark cell for each of the production queue's nine places,
 	// the grid the side's RightHUD picture used to draw in the side's own colour, blue for America
@@ -11427,8 +11428,11 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 		putFrontWindow( powersParent, drawPowersGridFront );
 
 	// the promotion button is the stars' tab: its window moves under the tab and takes the click that
-	// opens the promotion screen
+	// opens the promotion screen.  With no tab drawn it goes too: a watcher who clicked a unit got the
+	// button enabled again, an empty patch of screen with a tooltip that opened the screen
 	GameWindow *promotion = controlBarWindow( "ButtonGeneral" );
+	if( promotion )
+		promotion->winHide( !starsShown );
 	if( rightFound && promotion )
 	{
 		Int parentX = 0, parentY = 0;
