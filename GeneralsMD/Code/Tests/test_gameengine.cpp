@@ -8729,13 +8729,31 @@ TEST(the_ground_is_textured_by_what_the_ground_is_doing)
 
 	/* Which class covers the most ground is the seed's business - a map whose terraces mostly sit
 		high is a dirt map and one that sits low is a sand map - but no single texture may cover
-		the whole thing, and the two the fighting happens on have to carry most of it. Rock is the
-		cliff faces, so a map that is mostly rock is a map nobody can drive across. */
+		the whole thing, and the two the fighting happens on have to carry most of it. */
 	for( Int i = 0; i < 4; i++ )
 		CHECK( cellsPerClass[i] < (total * 3) / 4 );
 
 	CHECK( cellsPerClass[0] + cellsPerClass[2] > total / 2 );
-	CHECK( cellsPerClass[3] < total / 5 );
+
+	/* Rock starts at under half the cliff slope, so since the rolling maps of generator version 10
+		most of it is hillside a tank drives up. 72 maps over twelve seeds, two sizes and 2/4/6
+		players painted 17.8% of the ground rock on average and 23.6% at most; this seed paints 22%.
+		What must stay small is the ground nobody can cross, and that is under 2.3% on all 72. */
+	CHECK( cellsPerClass[3] < total / 4 );
+
+	const Real cliffLimit = 9.8f;						// PATHFIND_CLIFF_SLOPE_LIMIT_F
+	Int numCells = 0;
+	Int numCliffCells = 0;
+	for( Int y = 0; y + 1 < theRMGParse.m_height; y++ )
+	{
+		for( Int x = 0; x + 1 < theRMGParse.m_width; x++ )
+		{
+			numCells++;
+			if( RMGCellSpan( x, y ) > cliffLimit )
+				numCliffCells++;
+		}
+	}
+	CHECK( numCliffCells < numCells / 20 );
 }
 
 //////////////////////////////////////////////////////////////////////////////
