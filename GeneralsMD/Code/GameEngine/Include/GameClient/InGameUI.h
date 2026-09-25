@@ -345,6 +345,7 @@ struct SpectatorSuperweapon
 	const Image *cameo;
 	Int seconds;
 	Bool ready;
+	UnicodeString name;
 };
 
 // ------------------------------------------------------------------------------------------------

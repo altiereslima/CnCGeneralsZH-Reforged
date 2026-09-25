@@ -105,6 +105,7 @@ public:
 	void draw( void );
 	Bool hover( const ICoord2D &mouse );
 	std::string click( const ICoord2D &mouse );
+	std::string tip( void );
 	Int bottomOf( const char *selector );
 	void rectsOf( const char *selector, std::vector< IRegion2D > &rects );
 	void setAlpha( Int alpha ) { m_alpha = alpha; }
@@ -311,6 +312,21 @@ std::string HtmlOverlayContainer::click( const ICoord2D &mouse )
 	m_document->on_lbutton_down( x, y, x, y, redraw );
 	m_document->on_lbutton_up( x, y, x, y, redraw );
 	return m_clicked;
+}
+
+//-------------------------------------------------------------------------------------------------
+std::string HtmlOverlayContainer::tip( void )
+{
+	if( !m_document )
+		return std::string();
+
+	for( std::shared_ptr< const litehtml::element > element = m_document->get_over_element(); element; element = element->parent() )
+	{
+		const char *text = element->get_attr( "data-tip" );
+		if( text )
+			return text;
+	}
+	return std::string();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -773,5 +789,6 @@ void HtmlOverlay::draw( void )													{ m_container->draw(); }
 void HtmlOverlay::setAlpha( Int alpha )									{ m_container->setAlpha( alpha ); }
 Bool HtmlOverlay::hover( const ICoord2D &mouse )				{ return m_container->hover( mouse ); }
 std::string HtmlOverlay::click( const ICoord2D &mouse )	{ return m_container->click( mouse ); }
+std::string HtmlOverlay::tip( void )										{ return m_container->tip(); }
 Int HtmlOverlay::bottomOf( const char *selector )				{ return m_container->bottomOf( selector ); }
 void HtmlOverlay::rectsOf( const char *selector, std::vector< IRegion2D > &rects )	{ m_container->rectsOf( selector, rects ); }

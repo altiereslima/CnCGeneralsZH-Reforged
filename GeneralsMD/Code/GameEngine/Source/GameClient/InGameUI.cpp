@@ -2098,7 +2098,7 @@ static void fillSpectatorArmies( const std::vector< SpectatorStats > &players, s
 	}
 }
 
-static Int gatherPlayerSkills( const Player *player, const Image **icons, Int count, Int max );
+static Int gatherPlayerSkills( const Player *player, const CommandButton **buttons, Int count, Int max );
 
 //-------------------------------------------------------------------------------------------------
 /** The class the page dresses itself in: the side whose command bar is on screen, "america",
@@ -7542,9 +7542,11 @@ void InGameUI::postDraw( void )
                                                  : REAL_TO_INT( 100.0f * (Real)( reload - left ) / (Real)reload );
                   }
 
-                  addSuperweaponIcon( superweaponCameo( info->getSpecialPowerTemplate() ),
-                                      readySecs, percent, isReady, info->getColor() );
-                  SpectatorSuperweapon listed = { i, superweaponCameo( info->getSpecialPowerTemplate() ), readySecs, isReady };
+                  const CommandButton *button = powerButton( info->getSpecialPowerTemplate() );
+                  const Image *cameo = button ? button->getButtonImage() : NULL;
+                  addSuperweaponIcon( cameo, readySecs, percent, isReady, info->getColor() );
+                  SpectatorSuperweapon listed = { i, cameo, readySecs, isReady,
+                                                  button ? TheGameText->fetch( button->getTextLabel() ) : UnicodeString::TheEmptyString };
                   m_spectatorSuperweapons.push_back( listed );
                 }
                 if (info->getSpecialPowerTemplate()->isSharedNSync())
@@ -9641,6 +9643,20 @@ static const Image *stripSlotCameo( const Object *producer, const ProductionEntr
 	return entry->getProductionObject() ? entry->getProductionObject()->getButtonImage() : NULL;
 }
 
+/** The name of what stripSlotCameo draws, empty where it draws nothing. */
+static UnicodeString stripSlotName( const Object *producer, const ProductionEntry *entry,
+																		const InGameUI::ProductionStripSlot *slot )
+{
+	if( slot->isStructure )
+		return producer ? producer->getTemplate()->getDisplayName() : UnicodeString::TheEmptyString;
+	if( entry == NULL )
+		return UnicodeString::TheEmptyString;
+	if( slot->isUpgrade )
+		return entry->getProductionUpgrade() ? TheGameText->fetch( entry->getProductionUpgrade()->getDisplayNameLabel() )
+																				 : UnicodeString::TheEmptyString;
+	return entry->getProductionObject() ? entry->getProductionObject()->getDisplayName() : UnicodeString::TheEmptyString;
+}
+
 //-------------------------------------------------------------------------------------------------
 /** The tray a queue cameo stands in: the general's power bar's own, this side's copy of it, turned
 	* back to front.  That bar grows leftward out of the corner and its tray's heavy rail is on the
@@ -10025,7 +10041,7 @@ void InGameUI::drawSuperweaponStrip( void )
 struct BoughtSkill
 {
 	ScienceType science;
-	const Image *cameo;
+	const CommandButton *button;
 };
 
 /** Every science in one of a general's three promotion command sets that the player has actually
@@ -10050,7 +10066,7 @@ static Int gatherSkillCameos( const Player *player, const AsciiString &setName,
 			continue;
 
 		skills[ count ].science = science;
-		skills[ count ].cameo = button->getButtonImage();
+		skills[ count ].button = button;
 		count++;
 	}
 
@@ -10058,14 +10074,14 @@ static Int gatherSkillCameos( const Player *player, const AsciiString &setName,
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Everything one player has bought out of his three promotion sets, in rank order, as cameos
-	* appended to icons.  Hands back the new count.
+/** Everything one player has bought out of his three promotion sets, in rank order, as the
+	* promotion screen's buttons appended to buttons, each with a picture.  Hands back the new count.
 	*
 	* A level that a later level of the same power has replaced is left out: Artillery Barrage 3 is
 	* one cameo, not three of the same picture in a row.  "Replaced" is the science's own
 	* prerequisite list, so the second level asking for the first is what hides the first. */
 //-------------------------------------------------------------------------------------------------
-static Int gatherPlayerSkills( const Player *player, const Image **icons, Int count, Int max )
+static Int gatherPlayerSkills( const Player *player, const CommandButton **buttons, Int count, Int max )
 {
 	const PlayerTemplate *playerTemplate = player->getPlayerTemplate();
 	if( playerTemplate == NULL )
@@ -10089,7 +10105,7 @@ static Int gatherPlayerSkills( const Player *player, const Image **icons, Int co
 		if( replaced )
 			continue;
 
-		icons[ count ] = skills[ i ].cameo;
+		buttons[ count ] = skills[ i ].button;
 		count++;
 	}
 
@@ -10120,7 +10136,7 @@ void InGameUI::drawSkillStrip( void )
 	if( local == NULL || local->isPlayerActive() || TheControlBar == NULL )
 		return;
 
-	const Image *icons[ SKILL_STRIP_MAX ];
+	const CommandButton *skills[ SKILL_STRIP_MAX ];
 	Color rowColor[ SKILL_STRIP_ROWS ];
 	Int rowCount[ SKILL_STRIP_ROWS ];
 	Int rows = 0;
@@ -10128,7 +10144,7 @@ void InGameUI::drawSkillStrip( void )
 	Player *selected = TheControlBar->getSelectedPlayer();
 	if( selected )
 	{
-		const Int count = gatherPlayerSkills( selected, icons, 0, SKILL_STRIP_MAX );
+		const Int count = gatherPlayerSkills( selected, skills, 0, SKILL_STRIP_MAX );
 		const Color color = clientPlayerColor( selected );
 
 		while( rows * SKILL_STRIP_COLS < count && rows < SKILL_STRIP_ROWS )
@@ -10149,7 +10165,7 @@ void InGameUI::drawSkillStrip( void )
 
 			// a row is one player's, so his own run stops at the end of it rather than running on
 			const Int start = rows * SKILL_STRIP_COLS;
-			const Int count = gatherPlayerSkills( player, icons, start, start + SKILL_STRIP_COLS );
+			const Int count = gatherPlayerSkills( player, skills, start, start + SKILL_STRIP_COLS );
 			if( count == start )
 				continue;						// nothing bought yet: no row rather than an empty one
 
@@ -10212,7 +10228,7 @@ void InGameUI::drawSkillStrip( void )
 		for( Int cameoSlot = 0; cameoSlot < inRow; cameoSlot++ )
 		{
 			const Int x = right - trayW + trayHole.x - cameoSlot * trayStep;
-			TheDisplay->drawImage( icons[ first + cameoSlot ], x, y, x + cameoW, y + cameoH );
+			TheDisplay->drawImage( skills[ first + cameoSlot ]->getButtonImage(), x, y, x + cameoW, y + cameoH );
 		}
 
 		// whose skills these are, in his own colour, the same border the superweapon cameos wear
@@ -10312,10 +10328,14 @@ static HtmlValues scoreboardSeat( Player *player, const GameSlot *slot, Bool ful
 	seat[ "kills" ] = std::to_string( score->getTotalUnitsDestroyed() + score->getTotalBuildingsDestroyed() );
 	seat[ "losses" ] = std::to_string( score->getTotalUnitsLost() + score->getTotalBuildingsLost() );
 
-	const Image *skills[ SCOREBOARD_SKILLS_SHOWN ];
+	const CommandButton *skills[ SCOREBOARD_SKILLS_SHOWN ];
 	const Int skillCount = gatherPlayerSkills( player, skills, 0, SCOREBOARD_SKILLS_SHOWN );
 	for( Int skill = 0; skill < skillCount; skill++ )
-		seat[ "skill" + std::to_string( skill ) ] = skills[ skill ]->getName().str();
+	{
+		const std::string name = "skill" + std::to_string( skill );
+		seat[ name ] = skills[ skill ]->getButtonImage()->getName().str();
+		seat[ name + ".tip" ] = WideCharStringToMultiByte( TheGameText->fetch( skills[ skill ]->getTextLabel() ).str() );
+	}
 
 	const ThingTemplate *favourite = score->getMostBuiltUnit();
 	if( favourite && favourite->getButtonImage() )
@@ -10359,6 +10379,7 @@ static void putSeatSuperweapons( HtmlValues &row, Int playerIndex, const std::ve
 		row[ name + ".image" ] = owned[ place ].cameo ? owned[ place ].cameo->getName().str() : "";
 		row[ name + ".time" ] = WideCharStringToMultiByte( time.str() );
 		row[ name + ".state" ] = owned[ place ].ready ? "ready" : "";
+		row[ name + ".tip" ] = WideCharStringToMultiByte( owned[ place ].name.str() );
 	}
 
 	Int more = 0;
@@ -10419,6 +10440,7 @@ static void putSeatQueue( HtmlValues &row, Player *player )
 		row[ name + ".time" ] = WideCharStringToMultiByte( time.str() );
 		row[ name + ".count" ] = slot->quantity > 1 ? "x" + std::to_string( slot->quantity ) : "";
 		row[ name + ".state" ] = "";
+		row[ name + ".tip" ] = WideCharStringToMultiByte( stripSlotName( producer, entry, slot ).str() );
 		shown += slot->quantity;
 	}
 	row[ "jobsmore" ] = std::to_string( total - shown );
@@ -10461,6 +10483,10 @@ void InGameUI::drawScoreboard( void )
 		m_scoreboardHtmlFrame = frame;
 	}
 	m_scoreboardOverlay->setPage( m_scoreboardHtml );
+	// the mouse clears its tooltip every frame, so one set here lasts as long as the pointer stays on
+	// a promotion, a cameo or the favourite unit, and the board hides whatever is under it
+	if( m_scoreboardOverlay->hover( TheMouse->getMouseStatus()->pos ) )
+		TheMouse->setCursorTooltip( UnicodeString( MultiByteToWideCharSingleLine( m_scoreboardOverlay->tip().c_str() ).c_str() ) );
 	m_scoreboardOverlay->draw();
 }
 

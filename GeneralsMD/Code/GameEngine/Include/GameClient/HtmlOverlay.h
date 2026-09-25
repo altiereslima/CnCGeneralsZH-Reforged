@@ -26,7 +26,7 @@
 //
 // An element with data-click="..." is a button; click() hands back that text and the caller
 // decides what it means.  Clicks walk up from what is under the pointer to the first element
-// that has one.
+// that has one.  data-tip="..." is the tooltip of what it is on, found the same way by tip().
 //
 // Not drawn: rounded corners, clipping for overflow, list bullets, and gradients other than
 // linear ones, which draw as their first colour.
@@ -66,6 +66,9 @@ public:
 
 	/** Click at the pointer and return the data-click of what was clicked, empty for nothing. */
 	std::string click( const ICoord2D &mouse );
+
+	/** The data-tip of what the last hover() found under the pointer, empty for nothing. */
+	std::string tip( void );
 
 	/** The bottom edge in screen pixels of the first element the CSS selector finds, 0 for none. */
 	Int bottomOf( const char *selector );
