@@ -988,10 +988,6 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 		}
 		if( commandType == DO_COMMAND )
 		{
-			// shift puts the order on the end of the units' list rather than carrying it out now
-			if( TheInGameUI->isInWaypointMode() )
-				TheInGameUI->markNextOrderQueued( ORDER_QUEUE_APPEND );
-
 			GameMessage *movemsg = TheMessageStream->appendMessage( msgType );
 			if (msgType == GameMessage::MSG_DO_ATTACK_OBJECT)
 				movemsg->appendObjectIDArgument( obj->getID() );
@@ -1644,24 +1640,11 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 	{
 		GameMessage *hintMessage;
 
-		if( TheInGameUI->isInWaypointMode() )
-		{
-			//Override any *other* commands with waypoint commands.
-			if( type == DO_COMMAND || type == EVALUATE_ONLY )
-			{
-				if( TheTerrainLogic )
-				{
-					msgType = issueMoveToLocationCommand( pos, draw, type );
-				}
-			}
-			else
-			{
-				msgType = GameMessage::MSG_ADD_WAYPOINT_HINT;
-				hintMessage = TheMessageStream->appendMessage( msgType );
-				hintMessage->appendLocationArgument( *pos );
-			}
-			return msgType;
-		}
+		// shift used to turn every click into a point on the path.  Now whatever the click orders - an
+		// attack, a capture, a ride in a transport - goes on the end of the units' list, and the logic
+		// keeps it there (OrderQueue.h).  A click that orders nothing is dropped by the logic with it
+		if( TheInGameUI->isInWaypointMode() && type == DO_COMMAND )
+			TheInGameUI->markNextOrderQueued( ORDER_QUEUE_APPEND );
 
 		CanAttackResult result;
 
@@ -2457,11 +2440,11 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 			if( type == DO_COMMAND || type == EVALUATE_ONLY )
 			{
 				// issue command
-				// Note: If draw is valid, then its one of ours and we don't have something more specific 
-				// to do. Therefore, lets not issue a move command, and instead we'll return that there 
-				// wasn't a command for us to perform.
-				
-				if ( draw == NULL )
+				// Note: If draw is valid, then its one of ours and we don't have something more specific
+				// to do. Therefore, lets not issue a move command, and instead we'll return that there
+				// wasn't a command for us to perform.  Under shift it is a point on the path all the same.
+
+				if ( draw == NULL || TheInGameUI->isInWaypointMode() )
 					msgType = issueMoveToLocationCommand( pos, drawableInWay, type );
 			}  // end if
 			else

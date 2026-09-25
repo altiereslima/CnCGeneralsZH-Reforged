@@ -13215,6 +13215,14 @@ TEST(order_queue_kinds_nest)
 	CHECK( OrderQueue::isTerminal( GameMessage::MSG_DO_GUARD_POSITION ) );
 	CHECK( OrderQueue::isOrder( GameMessage::MSG_DO_STOP ) );
 	CHECK( !OrderQueue::isQueueable( GameMessage::MSG_DO_STOP ) );
+
+	// a capture, a ride in a transport and a special weapon wait their turn like a move
+	CHECK( OrderQueue::isQueueable( GameMessage::MSG_DO_SPECIAL_POWER_AT_OBJECT ) );
+	CHECK( OrderQueue::isQueueable( GameMessage::MSG_ENTER ) );
+	CHECK( OrderQueue::isQueueable( GameMessage::MSG_DO_WEAPON_AT_LOCATION ) );
+
+	// buying an upgrade without shift must not throw away the list of the unit it is for
+	CHECK( !OrderQueue::isOrder( GameMessage::MSG_QUEUE_UPGRADE ) );
 }
 
 TEST(scenario_parses_the_order_lines)
@@ -13259,6 +13267,22 @@ TEST(scenario_parses_the_order_lines)
 	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_SHIFTATTACK );
 	CHECK_STR( action.targetSelector.str(), "AmericaCommandCenter" );
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftattack 0 * 1", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
+
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftpower 0 * 1 AmericaSupplyCenter SpecialAbilityBlackLotusCaptureBuilding",
+																					 &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_SHIFTPOWER );
+	CHECK_STR( action.targetSelector.str(), "AmericaSupplyCenter" );
+	CHECK_STR( action.name.str(), "SpecialAbilityBlackLotusCaptureBuilding" );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftpower 0 * 1 AmericaSupplyCenter", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
+
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftupgrade 0 ChinaTankOverlord Upgrade_ChinaOverlordGattlingCannon", &action ),
+						(Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_SHIFTUPGRADE );
+	CHECK_STR( action.name.str(), "Upgrade_ChinaOverlordGattlingCannon" );
+
+	// a line read after one that named something must not carry that name
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftmove 0 * 900 700", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK( action.name.isEmpty() );
 
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "1800 tally 1 ChinaGattlingCannon", &action ), (Int)SCENARIO_PARSE_OK );
 	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_TALLY );

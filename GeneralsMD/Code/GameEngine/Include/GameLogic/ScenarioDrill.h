@@ -78,7 +78,9 @@ enum ScenarioActionType
 	SCENARIO_ACTION_SHIFTMOVE,				///< shiftmove <slot> <selector> <position>; a shift right click, onto the units' order queue
 	SCENARIO_ACTION_SHIFTATTACKMOVE,	///< shiftattackmove <slot> <selector> <position>; the same with attack move
 	SCENARIO_ACTION_SHIFTATTACK,			///< shiftattack <slot> <selector> <targetSlot> <targetSelector>; the same with an attack on one unit
-	SCENARIO_ACTION_SHIFTGUARD				///< shiftguard <slot> <selector> <position>; the same with the guard key
+	SCENARIO_ACTION_SHIFTGUARD,				///< shiftguard <slot> <selector> <position>; the same with the guard key
+	SCENARIO_ACTION_SHIFTPOWER,				///< shiftpower <slot> <selector> <targetSlot> <targetSelector> <power>; the same with a special power armed, on one object
+	SCENARIO_ACTION_SHIFTUPGRADE			///< shiftupgrade <slot> <selector> <upgrade>; shift on an object upgrade button, bought by every unit that matches
 };
 
 /// ScenarioAction::atStart when the position is plain numbers
@@ -116,6 +118,7 @@ struct ScenarioAction
 	Real radius;									///< how close to the target counts as arrived
 	Int targetSlot;								///< whose units to attack
 	AsciiString targetSelector;		///< which of them
+	AsciiString name;							///< shiftpower's special power, shiftupgrade's upgrade
 };
 
 /** Turn one line of a scenario file into an action.  Pure: no engine state is read, which is what

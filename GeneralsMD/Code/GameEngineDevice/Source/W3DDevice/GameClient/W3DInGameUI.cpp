@@ -292,6 +292,9 @@ W3DInGameUI::W3DInGameUI()
 	for( Int i = 0; i < MAX_PLAYER_COUNT; ++i )
 		m_allyCursorNames[ i ] = NULL;
 
+	for( Int i = 0; i < MAX_ORDER_STEP_NUMBERS; ++i )
+		m_orderStepNumbers[ i ] = NULL;
+
 }  // end W3DInGameUI
 
 //-------------------------------------------------------------------------------------------------
@@ -306,6 +309,13 @@ W3DInGameUI::~W3DInGameUI()
 		{
 			TheDisplayStringManager->freeDisplayString( m_allyCursorNames[ i ] );
 			m_allyCursorNames[ i ] = NULL;
+		}
+
+	for( Int i = 0; i < MAX_ORDER_STEP_NUMBERS; ++i )
+		if( m_orderStepNumbers[ i ] )
+		{
+			TheDisplayStringManager->freeDisplayString( m_orderStepNumbers[ i ] );
+			m_orderStepNumbers[ i ] = NULL;
 		}
 
 }  // end ~W3DInGameUI
@@ -1094,6 +1104,88 @@ static const Image *orderCursorImage( Mouse::MouseCursor cursor, ICoord2D *hotSp
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The cursor a kind of order is given with, for the kinds whose colour is the plain green and so
+	* says nothing on its own.  Mouse::NONE for the rest. */
+//-------------------------------------------------------------------------------------------------
+static Mouse::MouseCursor orderHintCursor( InGameUI::OrderHintKind kind )
+{
+	switch( kind )
+	{
+		case InGameUI::ORDER_HINT_ENTER:					return Mouse::ENTER_FRIENDLY;
+		case InGameUI::ORDER_HINT_DOCK:						return Mouse::DOCK;
+		case InGameUI::ORDER_HINT_GET_REPAIRED:		return Mouse::GET_REPAIRED;
+		case InGameUI::ORDER_HINT_GET_HEALED:			return Mouse::GET_HEALED;
+		case InGameUI::ORDER_HINT_DO_REPAIR:			return Mouse::DO_REPAIR;
+		case InGameUI::ORDER_HINT_CAPTURE:				return Mouse::CAPTUREBUILDING;
+		case InGameUI::ORDER_HINT_HACK:						return Mouse::HACK;
+		default:																	return Mouse::NONE;
+	}
+}
+
+static const Int ORDER_STEP_POINT_SIZE = 11;
+
+//-------------------------------------------------------------------------------------------------
+/** How much bigger the step numbers are drawn than at 800x600.  Their font grows with the screen,
+	* so everything laid out round them grows by the same factor or the number runs into the pointer
+	* at 1440p and into the marker beside it at 4K. */
+//-------------------------------------------------------------------------------------------------
+static Real orderStepScale( void )
+{
+	return (Real)TheGlobalLanguageData->adjustFontSize( ORDER_STEP_POINT_SIZE ) / (Real)ORDER_STEP_POINT_SIZE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A step of a shift list carries its number, and beside it what the step is: the upgrade's own
+	* button art, or the cursor of an order the colour cannot tell apart from a move.  The row sits
+	* above and to the right of the pointer's tip, clear of the pointer itself, which hangs below it. */
+//-------------------------------------------------------------------------------------------------
+void W3DInGameUI::drawOrderStep( const OrderHint& hint, const ICoord2D& tip, UnsignedInt color )
+{
+	const Real NUMBER_OFFSET_X = 10.0f;
+	const Real ROW_HEIGHT = 22.0f;
+	const Real ICON_GAP = 2.0f;
+
+	const Real scale = orderStepScale();
+	const Int rowHeight = REAL_TO_INT( ROW_HEIGHT * scale );
+	const UnsignedInt alpha = color & 0xFF000000;
+	Int x = tip.x + REAL_TO_INT( NUMBER_OFFSET_X * scale );
+	const Int top = tip.y - rowHeight;
+
+	if( hint.step > 0 && hint.step <= MAX_ORDER_STEP_NUMBERS )
+	{
+		DisplayString *&number = m_orderStepNumbers[ hint.step - 1 ];
+		if( number == NULL )
+		{
+			number = TheDisplayStringManager->newDisplayString();
+			number->setFont( TheWindowManager->winFindFont( AsciiString( "Arial" ),
+																TheGlobalLanguageData->adjustFontSize( ORDER_STEP_POINT_SIZE ), TRUE ) );
+			UnicodeString text;
+			text.format( L"%d", hint.step );
+			number->setText( text );
+		}
+
+		Int width = 0, height = 0;
+		number->getSize( &width, &height );
+		number->draw( x, top + ( rowHeight - height ) / 2, (Color)color, (Color)alpha );
+		x += width + REAL_TO_INT( ICON_GAP * scale );
+	}
+
+	const Image *icon = hint.icon;
+	if( icon == NULL )
+	{
+		ICoord2D hotSpot;
+		icon = orderCursorImage( orderHintCursor( hint.kind ), &hotSpot );
+	}
+	if( icon == NULL )
+		return;
+
+	// the row's height, and the width the art's own proportions give it: a button cameo is wider
+	// than it is tall, and squeezed into a square it reads as a different picture
+	const Int iconWidth = rowHeight * icon->getImageWidth() / max( icon->getImageHeight(), 1 );
+	TheDisplay->drawImage( icon, x, top, x + iconWidth, top + rowHeight, alpha | 0x00FFFFFF );
+}
+
+//-------------------------------------------------------------------------------------------------
 /** One faint line per bunch of selected units going the same way, from where they stand to where
 	* they are going, with the order's own cursor sitting on the destination.  Green for a move, pink
 	* for an attack-move, red for an attack.  The goals are read off the units every frame, so the
@@ -1106,6 +1198,11 @@ void W3DInGameUI::drawOrderHints( void )
 		return;
 
 	const Real width = 1.0f;
+
+	// how far right of the spot an upgrade or an ability stands: past the pointer and the number of
+	// the step that ends there, both of which grow with the screen
+	const Real IN_PLACE_MARKER_OFFSET = 44.0f;
+	const Int inPlaceOffset = REAL_TO_INT( IN_PLACE_MARKER_OFFSET * orderStepScale() );
 
 	// A new marker slides up out of the bottom right and fades in over this long, so an order that
 	// has just been given announces itself instead of appearing fully formed.  Wall clock rather
@@ -1137,9 +1234,15 @@ void W3DInGameUI::drawOrderHints( void )
 		if( TheTacticalView->worldToScreenTriReturn( &it->to, &to ) == View::WTS_INVALID )
 			continue;
 
+		// an upgrade or an ability is used on the spot the step before it ends on, whose marker is
+		// already there, so this one stands beside it rather than on top of it and draws no thread
+		const Bool inPlace = it->kind == ORDER_HINT_UPGRADE || it->kind == ORDER_HINT_ABILITY;
+		if( inPlace )
+			to.x += inPlaceOffset;
+
 		// Order Lines off in the options takes the lines away and leaves the markers: where a unit is
 		// going is still worth a glance when the thread across the map is not
-		if( TheGlobalData->m_showOrderLines )
+		if( TheGlobalData->m_showOrderLines && !inPlace )
 			TheDisplay->drawLine( from.x, from.y, to.x, to.y, width, lineColor );
 
 		// the marker is the plain pointer, tinted: its white body takes the order colour and the
@@ -1160,6 +1263,14 @@ void W3DInGameUI::drawOrderHints( void )
 			const UnsignedInt markerColor = ( orderHintMarkerColor( it->kind ) & 0x00FFFFFF )
 																			| ( (UnsignedInt)REAL_TO_INT( 255.0f * eased ) << 24 );
 			TheDisplay->drawImage( image, x, y, x + w, y + h, markerColor );
+
+			if( it->step > 0 || it->icon )
+			{
+				ICoord2D tip;
+				tip.x = to.x + slide;
+				tip.y = to.y + slide;
+				drawOrderStep( *it, tip, markerColor );
+			}
 		}
 	}
 

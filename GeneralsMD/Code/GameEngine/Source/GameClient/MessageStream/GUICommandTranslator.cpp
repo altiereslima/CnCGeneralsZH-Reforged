@@ -396,7 +396,14 @@ GameMessageDisposition GUICommandTranslator::translateGameMessage(const GameMess
 			// do the command action
 			if( command && !command->isContextCommand() )
 			{
-				switch( command->getCommandType() )
+				// shift: the order this click gives goes on the end of the units' list.  A special power
+				// goes on to the command translator, which marks it there
+				const GUICommandType commandType = command->getCommandType();
+				if( TheInGameUI->isInWaypointMode() && commandType != GUI_COMMAND_SPECIAL_POWER
+						&& commandType != GUI_COMMAND_SPECIAL_POWER_FROM_SHORTCUT )
+					TheInGameUI->markNextOrderQueued( ORDER_QUEUE_APPEND );
+
+				switch( commandType )
 				{
 
 					//---------------------------------------------------------------------------------------

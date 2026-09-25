@@ -84,6 +84,7 @@ protected:
 	virtual void drawAttackCircle( void );				///< the circle a left drag is sweeping targets out of
 	virtual void drawAllyCursorLights( void );		///< the patch of an ally's colour lying under their cursor
 	void drawAllyCursors( void );									///< each ally's pointer and name, over the world
+	void drawOrderStep( const OrderHint& hint, const ICoord2D& tip, UnsignedInt color );	///< a shift list step's number and what it is
 
 	RenderObjClass *m_buildingPlacementAnchor;
 	RenderObjClass *m_buildingPlacementArrow;
@@ -91,6 +92,11 @@ protected:
 	/// One name plate per player, built the first time that ally's cursor is drawn and kept, because
 	/// laying out the same string every frame for every ally is work nobody sees.
 	DisplayString *m_allyCursorNames[ MAX_PLAYER_COUNT ];
+
+	/// The numbers on the steps of a shift list, each laid out once.  A step past the last one has no
+	/// number, which on a list that long is no loss.
+	enum { MAX_ORDER_STEP_NUMBERS = 30 };
+	DisplayString *m_orderStepNumbers[ MAX_ORDER_STEP_NUMBERS ];
 
 };  // end class W3DInGameUI
 

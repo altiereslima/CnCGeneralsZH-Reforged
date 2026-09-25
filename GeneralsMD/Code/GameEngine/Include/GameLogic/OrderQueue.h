@@ -34,7 +34,8 @@
 // The units that were told together form a chain and go through it together: nobody starts the next
 // order until everyone left alive is done with this one, so an army does not string out across the
 // map behind its fastest unit.  Selecting part of a chain and adding to it splits that part off with
-// a copy of the list.  An order given without shift ends the list for the units it went to.
+// a copy of the list.  An order given without shift ends the list for the units it went to.  An
+// upgrade bought with shift is a step as well, paid for when the chain reaches it.
 //
 // Everything here is logic state: it is saved with the player, and a replay rebuilds it from the
 // recorded messages.
@@ -79,6 +80,7 @@ public:
 	Bool isStanding( void ) const { return m_type == GameMessage::MSG_INVALID; }
 	ObjectID getTargetID( void ) const;											///< the object the order names, INVALID_ID for none
 	Bool getDestination( Coord3D *pos ) const;							///< the first location it carries, FALSE for none
+	const GameMessageArgumentType& getArgument( Int index ) const { return m_args[ index ]; }
 
 	void xfer( Xfer *xfer );
 
@@ -141,6 +143,7 @@ public:
 
 private:
 	void queueOrder( GameMessage *msg, const std::vector<ObjectID>& selected, Player *owner );
+	Bool queueUpgrade( GameMessage *msg, AIGroup *selected, Player *owner );		///< FALSE: bought now, not queued
 	void startChain( GameMessage *msg, const std::vector<ObjectID>& members, Player *owner );
 	void appendOrder( OrderChain& chain, GameMessage *msg, Player *owner );
 	void releaseUnits( const std::vector<ObjectID>& ids );

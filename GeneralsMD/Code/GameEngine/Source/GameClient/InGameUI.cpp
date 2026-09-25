@@ -4741,6 +4741,7 @@ void InGameUI::updateOrderHints( void )
 	}
 
 	collectOrderHints();
+	numberOrderHints();
 	bunchOrderHints();
 }
 
@@ -4774,6 +4775,7 @@ void InGameUI::collectOrderHints( void )
 		hint.owner = obj->getID();
 		Coord3D resolvedGoal;
 		Bool goalResolved = FALSE;
+		Bool legsDrawn = FALSE;		// the order drew its own threads, and the shift list follows on from them
 		switch( ai->getCurrentStateID() )
 		{
 			case AI_MOVE_TO:
@@ -4848,7 +4850,8 @@ void InGameUI::collectOrderHints( void )
 					hint.from = ( exit != NULL ) ? *exit->getPosition() : hint.to;
 					hint.to = *ai->getTunnelTripGoal();
 					addOrderHint( hint, previous );
-					continue;
+					legsDrawn = TRUE;
+					break;
 				}
 				hint.kind = ORDER_HINT_ENTER;
 				break;
@@ -4896,46 +4899,48 @@ void InGameUI::collectOrderHints( void )
 				break;
 		}
 
-		hint.from = *obj->getPosition();
+		if( !legsDrawn )
+		{
+			hint.from = *obj->getPosition();
 
-		if( goalResolved )
-		{
-			hint.to = resolvedGoal;
-		}
-		else
-		{
 			// a queued path is shown point by point: one thread from the unit to its next point and one
 			// from each point to the one after it, so the whole shift queue is on the ground at once and
 			// stays there after the key is let go
 			const Int pathSize = ai->friend_getWaypointGoalPathSize();
 			const Int pathIndex = ai->friend_getCurrentGoalPathIndex();
-			if( pathSize > 0 && pathIndex >= 0 && pathIndex < pathSize )
+			if( goalResolved )
 			{
-				for( Int i = pathIndex; i < pathSize; i++ )
+				hint.to = resolvedGoal;
+			}
+			else if( pathSize > 0 && pathIndex >= 0 && pathIndex < pathSize )
+			{
+				for( Int i = pathIndex; i < pathSize - 1; i++ )
 				{
 					hint.to = *ai->friend_getGoalPathPosition( i );
 					addOrderHint( hint, previous );
 					hint.from = hint.to;
 				}
-				continue;
+				hint.to = *ai->friend_getGoalPathPosition( pathSize - 1 );
+			}
+			else
+			{
+				// a goal object outranks the goal position: a unit chasing something is headed wherever that
+				// thing is standing now, not where it stood when the order was given.  Without one the end of
+				// the unit's own path is where it is really going: a group sent to one spot is spread over the
+				// free cells round it, and the order's point is the same for every member.  A unit still
+				// waiting for its path has only the order's point to show
+				Object *goalObj = ai->getGoalObject();
+				Path *path = ai->getPath();
+				if( goalObj )
+					hint.to = *goalObj->getPosition();
+				else if( path )
+					hint.to = *path->getLastNode()->getPosition();
+				else
+					hint.to = *ai->getGoalPosition();
 			}
 
-			// a goal object outranks the goal position: a unit chasing something is headed wherever that
-			// thing is standing now, not where it stood when the order was given.  Without one the end of
-			// the unit's own path is where it is really going: a group sent to one spot is spread over the
-			// free cells round it, and the order's point is the same for every member.  A unit still
-			// waiting for its path has only the order's point to show
-			Object *goalObj = ai->getGoalObject();
-			Path *path = ai->getPath();
-			if( goalObj )
-				hint.to = *goalObj->getPosition();
-			else if( path )
-				hint.to = *path->getLastNode()->getPosition();
-			else
-				hint.to = *ai->getGoalPosition();
+			addOrderHint( hint, previous );
 		}
-
-		addOrderHint( hint, previous );
 
 		// the rest of the unit's shift queue: every order still owed after this one, each drawn on from
 		// where the last leaves off.  The list belongs to the whole chain rather than to one unit, so
@@ -4996,9 +5001,10 @@ void InGameUI::collectOrderHints( void )
 			OrderHint hint;
 			hint.owner = *id;
 			hint.from = *member->getPosition();
+			hint.to = hint.from;
 
 			// the order the chain is on now is no longer in its list, so it is drawn from here
-			if( getQueuedOrderHint( chain->m_active, hint.kind, hint.to ) )
+			if( getQueuedOrderHint( chain->m_active, hint ) )
 			{
 				addOrderHint( hint, previous );
 				hint.from = hint.to;
@@ -5033,7 +5039,7 @@ void InGameUI::bunchOrderHints( void )
 		for( size_t i = 0; i < m_drawnOrderHints.size(); ++i )
 		{
 			OrderHint& bunch = m_drawnOrderHints[ i ];
-			if( bunch.kind != hint->kind )
+			if( bunch.kind != hint->kind || bunch.step != hint->step || bunch.icon != hint->icon )
 				continue;
 			const Real fromX = bunch.from.x - hint->from.x;
 			const Real fromY = bunch.from.y - hint->from.y;
@@ -5076,7 +5082,7 @@ void InGameUI::addQueuedOrderTail( OrderHint& hint, const OrderChain& chain, con
 	for( std::vector<QueuedOrder>::const_iterator order = chain.m_pending.begin();
 			 order != chain.m_pending.end(); ++order )
 	{
-		if( !getQueuedOrderHint( *order, hint.kind, hint.to ) )
+		if( !getQueuedOrderHint( *order, hint ) )
 			continue;
 
 		addOrderHint( hint, previous );
@@ -5089,41 +5095,109 @@ void InGameUI::addQueuedOrderTail( OrderHint& hint, const OrderChain& chain, con
 	* than where it stood when the player picked it, so the thread follows a target that is driving
 	* away.  One that died while it waited its turn is drawn nowhere: the order will be skipped.  Nor
 	* is one that has driven into the shroud since it was picked - the thread would otherwise trace it
-	* through the fog, which is a look at the map you have not earned. */
+	* through the fog, which is a look at the map you have not earned.
+	*
+	* An upgrade, or an ability that needs no target, is used wherever the step before it ends, which
+	* is the hint.to handed in; it is left there, and the marker sits on that spot. */
 //-------------------------------------------------------------------------------------------------
-Bool InGameUI::getQueuedOrderHint( const QueuedOrder& order, OrderHintKind& kind, Coord3D& to ) const
+Bool InGameUI::getQueuedOrderHint( const QueuedOrder& order, OrderHint& hint ) const
 {
+	hint.icon = NULL;
+
 	switch( order.getType() )
 	{
 		case GameMessage::MSG_DO_MOVETO:
 		case GameMessage::MSG_DO_FORCEMOVETO:
 		case GameMessage::MSG_DO_FORMATION_MOVETO:
-			kind = ORDER_HINT_MOVE;
+		case GameMessage::MSG_DO_SALVAGE:
+			hint.kind = ORDER_HINT_MOVE;
 			break;
 
 		case GameMessage::MSG_DO_ATTACKMOVETO:
 		case GameMessage::MSG_DO_FORMATION_ATTACKMOVETO:
-			kind = ORDER_HINT_ATTACK_MOVE;
+			hint.kind = ORDER_HINT_ATTACK_MOVE;
 			break;
 
 		case GameMessage::MSG_DO_ATTACK_OBJECT:
-			kind = ORDER_HINT_ATTACK;
+		case GameMessage::MSG_DO_WEAPON_AT_OBJECT:
+			hint.kind = ORDER_HINT_ATTACK;
 			break;
 
 		case GameMessage::MSG_DO_FORCE_ATTACK_OBJECT:
-			kind = ORDER_HINT_FORCE_ATTACK;
+			hint.kind = ORDER_HINT_FORCE_ATTACK;
 			break;
 
 		case GameMessage::MSG_DO_FORCE_ATTACK_GROUND:
 		case GameMessage::MSG_DO_FORMATION_FORCEATTACK:
-			kind = ORDER_HINT_ATTACK_GROUND;
+		case GameMessage::MSG_DO_WEAPON_AT_LOCATION:
+		case GameMessage::MSG_DO_SPECIAL_POWER_AT_LOCATION:
+			hint.kind = ORDER_HINT_ATTACK_GROUND;
 			break;
 
 		case GameMessage::MSG_DO_GUARD_POSITION:
 		case GameMessage::MSG_DO_GUARD_OBJECT:
 		case GameMessage::MSG_DO_FORMATION_GUARD:
-			kind = ORDER_HINT_GUARD;
+			hint.kind = ORDER_HINT_GUARD;
 			break;
+
+		case GameMessage::MSG_ENTER:
+		case GameMessage::MSG_COMBATDROP_AT_OBJECT:
+		case GameMessage::MSG_COMBATDROP_AT_LOCATION:
+			hint.kind = ORDER_HINT_ENTER;
+			break;
+
+		case GameMessage::MSG_DOCK:
+			hint.kind = ORDER_HINT_DOCK;
+			break;
+
+		case GameMessage::MSG_GET_REPAIRED:
+			hint.kind = ORDER_HINT_GET_REPAIRED;
+			break;
+
+		case GameMessage::MSG_GET_HEALED:
+			hint.kind = ORDER_HINT_GET_HEALED;
+			break;
+
+		case GameMessage::MSG_DO_REPAIR:
+			hint.kind = ORDER_HINT_DO_REPAIR;
+			break;
+
+		case GameMessage::MSG_DO_SPECIAL_POWER_AT_OBJECT:
+		{
+			// a capture and a hack have cursors of their own; the rest of what a unit does to one object
+			// with an ability - a charge, a sniper round, a satchel - is an attack as far as the marker goes
+			const SpecialPowerTemplate *power = TheSpecialPowerStore->findSpecialPowerTemplateByID( order.getArgument( 0 ).integer );
+			switch( power ? power->getSpecialPowerType() : SPECIAL_INVALID )
+			{
+				case SPECIAL_INFANTRY_CAPTURE_BUILDING:
+				case SPECIAL_BLACKLOTUS_CAPTURE_BUILDING:
+					hint.kind = ORDER_HINT_CAPTURE;
+					break;
+
+				case SPECIAL_BLACKLOTUS_DISABLE_VEHICLE_HACK:
+				case SPECIAL_BLACKLOTUS_STEAL_CASH_HACK:
+				case SPECIAL_HACKER_DISABLE_BUILDING:
+					hint.kind = ORDER_HINT_HACK;
+					break;
+
+				default:
+					hint.kind = ORDER_HINT_ATTACK;
+					break;
+			}
+			break;
+		}
+
+		case GameMessage::MSG_DO_SPECIAL_POWER:
+			hint.kind = ORDER_HINT_ABILITY;
+			return TRUE;
+
+		case GameMessage::MSG_QUEUE_UPGRADE:
+		{
+			const UpgradeTemplate *upgrade = TheUpgradeCenter->findUpgradeByKey( (NameKeyType)order.getArgument( 1 ).integer );
+			hint.kind = ORDER_HINT_UPGRADE;
+			hint.icon = upgrade ? upgrade->getButtonImage() : NULL;
+			return TRUE;
+		}
 
 		default:
 			// a hold is wherever each unit happens to be standing, and a list that began behind an
@@ -5133,14 +5207,37 @@ Bool InGameUI::getQueuedOrderHint( const QueuedOrder& order, OrderHintKind& kind
 
 	const ObjectID targetID = order.getTargetID();
 	if( targetID == INVALID_ID )
-		return order.getDestination( &to );
+		return order.getDestination( &hint.to );
 
 	const Object *target = TheGameLogic->findObjectByID( targetID );
 	if( target == NULL || target->isEffectivelyDead() || isHiddenByShroud( target ) )
 		return FALSE;
 
-	to = *target->getPosition();
+	hint.to = *target->getPosition();
 	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The hints of one unit sit together in the list, in the order it will get to them.  A unit with
+	* more than one place to go carries a number on each, so a shift list reads first to last on the
+	* ground; a unit with one does not, since a lone "1" says nothing. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::numberOrderHints( void )
+{
+	size_t first = 0;
+	while( first < m_orderHints.size() )
+	{
+		size_t end = first + 1;
+		while( end < m_orderHints.size() && m_orderHints[ end ].owner == m_orderHints[ first ].owner )
+			++end;
+
+		if( end - first > 1 )
+		{
+			for( size_t i = first; i < end; ++i )
+				m_orderHints[ i ].step = (Int)( i - first ) + 1;
+		}
+		first = end;
+	}
 }
 
 //-------------------------------------------------------------------------------------------------

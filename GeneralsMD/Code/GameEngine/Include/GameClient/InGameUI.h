@@ -500,15 +500,21 @@ public:  // ********************************************************************
 		ORDER_HINT_CAPTURE,					///< go and take it
 		ORDER_HINT_HACK,						///< go and hack it
 		ORDER_HINT_GUARD,						///< hold that spot
-		ORDER_HINT_WAYPOINT					///< walking a path somebody laid down
+		ORDER_HINT_WAYPOINT,				///< walking a path somebody laid down
+		ORDER_HINT_ABILITY,					///< use an ability where it stands, from a shift list
+		ORDER_HINT_UPGRADE					///< buy an upgrade where it stands, from a shift list
 	};
 	struct OrderHint
 	{
+		OrderHint( void ) : kind( ORDER_HINT_MOVE ), owner( INVALID_ID ), bornMs( 0 ), step( 0 ), icon( NULL ) {}
+
 		Coord3D from;						///< where the unit is now
 		Coord3D to;							///< where it is going
 		OrderHintKind kind;
 		ObjectID owner;					///< the selected unit this one belongs to
 		UnsignedInt bornMs;			///< when the marker first appeared, so it can be slid in
+		Int step;								///< its place in the order the unit will get to its points, from 1; 0 when it has only the one
+		const Image *icon;			///< the upgrade's own button art on an upgrade step, NULL otherwise
 	};
 	const std::vector<OrderHint>& getOrderHints( void ) const { return m_drawnOrderHints; }
 
@@ -1121,7 +1127,8 @@ protected:
 	void addOrderHint( OrderHint& hint, const std::vector<OrderHint>& previous );	///< keep a marker's age across the frame the list is rebuilt on
 	Bool getHeldAircraftOrder( const Object *obj, OrderHintKind& kind, Coord3D& to ) const;	///< the order an aircraft is sitting on until it is airborne
 	void addQueuedOrderTail( OrderHint& hint, const OrderChain& chain, const std::vector<OrderHint>& previous );	///< every order still owed, drawn on from where the hint leaves off
-	Bool getQueuedOrderHint( const QueuedOrder& order, OrderHintKind& kind, Coord3D& to ) const;	///< the marker a queued order draws, FALSE for none
+	Bool getQueuedOrderHint( const QueuedOrder& order, OrderHint& hint ) const;	///< the marker a queued order draws, FALSE for none
+	void numberOrderHints( void );															///< a unit with more than one place to go numbers them
 	Bool isHiddenByShroud( const Object *obj ) const;						///< is the shroud over this, for the player at this machine
 	Bool												m_displayedMaxWarning;                        ///< keeps the warning from being shown over and over
 	const CommandButton *				m_pendingGUICommand;										///< GUI command that needs additional interaction from the user

@@ -748,8 +748,11 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 			if( upgradeT == NULL )
 				break;
 
+			// shift: the unit buys it when its list gets there, and the money is looked at then
+			const Bool queued = TheInGameUI->isInWaypointMode();
+
 			//Make sure the player can really make this
-			if( TheUpgradeCenter->canAffordUpgrade( ThePlayerList->getLocalPlayer(), upgradeT, TRUE ) == FALSE )
+			if( !queued && TheUpgradeCenter->canAffordUpgrade( ThePlayerList->getLocalPlayer(), upgradeT, TRUE ) == FALSE )
 			{
 				//Kris: Disabled because we can get a valid reason for not being able to afford the upgrade!
 				//TheInGameUI->message( "upgrade unsupported in commandprocessing." );
@@ -801,10 +804,12 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 						continue;
 
 					// the logic charges each one as it queues it, so stop at what is in the bank
-					if( cost > 0 && purse < cost )
+					if( !queued && cost > 0 && purse < cost )
 						break;
 					purse -= cost;
 
+					if( queued )
+						TheInGameUI->markNextOrderQueued( ORDER_QUEUE_APPEND );
 					GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_QUEUE_UPGRADE );
 					msg->appendObjectIDArgument( target->getID() );
 					msg->appendIntegerArgument( upgradeT->getUpgradeNameKey() );
@@ -827,6 +832,8 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 				break;
 
 			// send the message
+			if( queued )
+				TheInGameUI->markNextOrderQueued( ORDER_QUEUE_APPEND );
 			GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_QUEUE_UPGRADE );
 			msg->appendObjectIDArgument( objID );
 			msg->appendIntegerArgument( upgradeT->getUpgradeNameKey() );
@@ -1108,6 +1115,10 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 
 		case GUI_COMMAND_SPECIAL_POWER:
 		{
+			// shift: the units use it when their list gets there
+			if( TheInGameUI->isInWaypointMode() )
+				TheInGameUI->markNextOrderQueued( ORDER_QUEUE_APPEND );
+
 			// command needs no additional data, send the message
 			GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_DO_SPECIAL_POWER );
 			msg->appendIntegerArgument( commandButton->getSpecialPowerTemplate()->getID() );

@@ -33,6 +33,7 @@
 #include "GameLogic/Object.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/JetAIUpdate.h"
+#include "GameLogic/Module/SpecialPowerUpdateModule.h"
 
 #include <algorithm>
 #include <iterator>
@@ -98,9 +99,14 @@ GameMessage *QueuedOrder::makeMessage( Int playerIndex ) const
 //-------------------------------------------------------------------------------------------------
 ObjectID QueuedOrder::getTargetID( void ) const
 {
+	// the object an order at a place carries is whatever stood on that spot, not what it is for
+	if( m_type == GameMessage::MSG_DO_SPECIAL_POWER_AT_LOCATION || m_type == GameMessage::MSG_DO_WEAPON_AT_LOCATION )
+		return INVALID_ID;
+
+	// MSG_ENTER names the selection first, as INVALID_ID, and what to climb into second
 	for( size_t i = 0; i < m_args.size(); i++ )
 	{
-		if( m_argTypes[ i ] == ARGUMENTDATATYPE_OBJECTID )
+		if( m_argTypes[ i ] == ARGUMENTDATATYPE_OBJECTID && m_args[ i ].objectID != INVALID_ID )
 			return m_args[ i ].objectID;
 	}
 	return INVALID_ID;
@@ -191,12 +197,30 @@ static Bool OrderQueue_holdsChain( const Object *obj, const Player *owner )
 }
 
 //-------------------------------------------------------------------------------------------------
+/** A capture, a charge being planted, a hack: the ability walks the unit up to its target with orders
+	* of its own, so while it runs the unit reads as idle or as told by the AI. */
+//-------------------------------------------------------------------------------------------------
+static Bool OrderQueue_isUsingAbility( const Object *obj )
+{
+	for( BehaviorModule **module = obj->getBehaviorModules(); *module; ++module )
+	{
+		const SpecialPowerUpdateInterface *power = (*module)->getSpecialPowerUpdateInterface();
+		if( power != NULL && power->isSpecialAbility() && power->isActive() )
+			return TRUE;
+	}
+	return FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Is this unit busy with an order the player gave?  A fight it picked for itself while standing
 	* about is not one: the group is done, and the next order takes it off that fight.  Nor is a
 	* guard, which never ends. */
 //-------------------------------------------------------------------------------------------------
-static Bool OrderQueue_isWorking( const AIUpdateInterface *ai )
+static Bool OrderQueue_isWorking( const Object *obj, const AIUpdateInterface *ai )
 {
+	if( OrderQueue_isUsingAbility( obj ) )
+		return TRUE;
+
 	if( ai->isIdle() || ai->getLastCommandSource() != CMD_FROM_PLAYER )
 		return FALSE;
 
@@ -234,6 +258,23 @@ static Bool OrderQueue_isWalking( const AIUpdateInterface *ai )
 static Bool OrderQueue_isAttack( GameMessage::Type type )
 {
 	return type == GameMessage::MSG_DO_ATTACK_OBJECT || type == GameMessage::MSG_DO_FORCE_ATTACK_OBJECT;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A special power that names the object firing it - a superweapon off the shortcut bar - goes to
+	* that object whatever is selected, so it is no order to the selection at all. */
+//-------------------------------------------------------------------------------------------------
+static Bool OrderQueue_namesItsOwnSource( const GameMessage *msg )
+{
+	Int sourceArg;
+	switch( msg->getType() )
+	{
+		case GameMessage::MSG_DO_SPECIAL_POWER:							sourceArg = 2; break;
+		case GameMessage::MSG_DO_SPECIAL_POWER_AT_OBJECT:		sourceArg = 3; break;
+		case GameMessage::MSG_DO_SPECIAL_POWER_AT_LOCATION:	sourceArg = 5; break;
+		default:																						return FALSE;
+	}
+	return msg->getArgument( sourceArg )->objectID != INVALID_ID;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -337,6 +378,13 @@ Bool OrderQueue::isOrder( GameMessage::Type type )
 		case GameMessage::MSG_GET_REPAIRED:
 		case GameMessage::MSG_GET_HEALED:
 		case GameMessage::MSG_DO_REPAIR:
+		case GameMessage::MSG_DO_WEAPON_AT_OBJECT:
+		case GameMessage::MSG_DO_WEAPON_AT_LOCATION:
+		case GameMessage::MSG_COMBATDROP_AT_OBJECT:
+		case GameMessage::MSG_COMBATDROP_AT_LOCATION:
+		case GameMessage::MSG_DO_SPECIAL_POWER:
+		case GameMessage::MSG_DO_SPECIAL_POWER_AT_LOCATION:
+		case GameMessage::MSG_DO_SPECIAL_POWER_AT_OBJECT:
 			return TRUE;
 
 		default:
@@ -352,6 +400,7 @@ Bool OrderQueue::isQueueable( GameMessage::Type type )
 		case GameMessage::MSG_DO_MOVETO:
 		case GameMessage::MSG_DO_ATTACKMOVETO:
 		case GameMessage::MSG_DO_FORCEMOVETO:
+		case GameMessage::MSG_DO_SALVAGE:
 		case GameMessage::MSG_DO_ATTACK_OBJECT:
 		case GameMessage::MSG_DO_FORCE_ATTACK_OBJECT:
 		case GameMessage::MSG_DO_FORCE_ATTACK_GROUND:
@@ -362,6 +411,18 @@ Bool OrderQueue::isQueueable( GameMessage::Type type )
 		case GameMessage::MSG_DO_FORMATION_ATTACKMOVETO:
 		case GameMessage::MSG_DO_FORMATION_FORCEATTACK:
 		case GameMessage::MSG_DO_FORMATION_GUARD:
+		case GameMessage::MSG_ENTER:
+		case GameMessage::MSG_DOCK:
+		case GameMessage::MSG_GET_REPAIRED:
+		case GameMessage::MSG_GET_HEALED:
+		case GameMessage::MSG_DO_REPAIR:
+		case GameMessage::MSG_DO_WEAPON_AT_OBJECT:
+		case GameMessage::MSG_DO_WEAPON_AT_LOCATION:
+		case GameMessage::MSG_COMBATDROP_AT_OBJECT:
+		case GameMessage::MSG_COMBATDROP_AT_LOCATION:
+		case GameMessage::MSG_DO_SPECIAL_POWER:
+		case GameMessage::MSG_DO_SPECIAL_POWER_AT_LOCATION:
+		case GameMessage::MSG_DO_SPECIAL_POWER_AT_OBJECT:
 			return TRUE;
 
 		default:
@@ -404,7 +465,11 @@ Bool OrderQueue::takeMessage( GameMessage *msg, AIGroup *selected, Player *owner
 	const Int mode = m_nextOrderMode;
 	m_nextOrderMode = ORDER_QUEUE_NONE;
 
-	if( selected == NULL || !isOrder( msg->getType() ) )
+	// buying one is no order to the units, so without shift it leaves their list alone
+	if( msg->getType() == GameMessage::MSG_QUEUE_UPGRADE )
+		return mode != ORDER_QUEUE_NONE && queueUpgrade( msg, selected, owner );
+
+	if( selected == NULL || !isOrder( msg->getType() ) || OrderQueue_namesItsOwnSource( msg ) )
 		return FALSE;
 
 	std::vector<ObjectID> ids = selected->getAllIDs();
@@ -490,7 +555,7 @@ void OrderQueue::queueOrder( GameMessage *msg, const std::vector<ObjectID>& sele
 	{
 		const Object *obj = TheGameLogic->findObjectByID( *it );
 		const AIUpdateInterface *ai = obj ? obj->getAIUpdateInterface() : NULL;
-		if( ai == NULL || !OrderQueue_isWorking( ai ) )
+		if( ai == NULL || !OrderQueue_isWorking( obj, ai ) )
 			continue;
 		anyWorking = TRUE;
 		if( !OrderQueue_isWalking( ai ) )
@@ -518,6 +583,41 @@ void OrderQueue::queueOrder( GameMessage *msg, const std::vector<ObjectID>& sele
 
 	added.m_pending.push_back( QueuedOrder() );
 	added.m_pending.back().copyFrom( msg );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Shift on an upgrade button: the unit buys it when its list gets there, and pays then; if the money
+	* is not there by that time the upgrade is passed over.  It becomes a step of the chain the unit is
+	* in, which does not split for it, since the upgrade names its unit and the rest of the chain has
+	* nothing to do but wait a moment.  A unit busy with an order given without shift starts a list
+	* behind it, and one with nothing to do buys it now. */
+//-------------------------------------------------------------------------------------------------
+Bool OrderQueue::queueUpgrade( GameMessage *msg, AIGroup *selected, Player *owner )
+{
+	const ObjectID producerID = msg->getArgument( 0 )->objectID;
+	const Object *producer = TheGameLogic->findObjectByID( producerID );
+	if( producer == NULL || producer->getControllingPlayer() != owner )
+		return FALSE;
+
+	OrderChainList::iterator chain = m_chains.begin();
+	while( chain != m_chains.end() && !std::binary_search( chain->m_members.begin(), chain->m_members.end(), producerID ) )
+		++chain;
+
+	if( chain == m_chains.end() )
+	{
+		const AIUpdateInterface *ai = producer->getAIUpdateInterface();
+		if( ai == NULL || !OrderQueue_isWorking( producer, ai ) )
+			return FALSE;
+
+		m_chains.push_back( OrderChain() );
+		chain = --m_chains.end();
+		chain->m_members.push_back( producerID );
+	}
+
+	if( selected )
+		TheAI->destroyGroup( selected );
+	appendOrder( *chain, msg, owner );
+	return TRUE;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -647,7 +747,7 @@ Bool OrderQueue::isStepOver( OrderChain& chain, Player *owner )
 			}
 		}
 
-		if( OrderQueue_isWorking( ai ) || ai->hasTunnelTrip() )
+		if( OrderQueue_isWorking( obj, ai ) || ai->hasTunnelTrip() )
 			anyWorking = TRUE;
 		else if( jet != NULL )
 			anyReadyToGoAgain = TRUE;
@@ -698,6 +798,11 @@ Bool OrderQueue::advance( OrderChain& chain, Player *owner )
 			const Object *target = TheGameLogic->findObjectByID( targetID );
 			if( target == NULL || target->isEffectivelyDead()
 					|| ( OrderQueue_isAttack( next.getType() ) && IncomingDamageTracker::isAlreadyDoomed( target ) ) )
+				continue;
+
+			// the list was copied when the chain split, and the upgrade belongs to whichever half has the unit
+			if( next.getType() == GameMessage::MSG_QUEUE_UPGRADE
+					&& !std::binary_search( chain.m_members.begin(), chain.m_members.end(), targetID ) )
 				continue;
 		}
 
