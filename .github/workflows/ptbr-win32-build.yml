@@ -136,12 +136,13 @@ jobs:
           # (the crash log names functions through it), the five FFmpeg DLLs sound and video
           # decode with, and the loose data CMake copies there. Data\INI and Data\Scripts are in
           # the multiplayer checksum, so they ship with the exe they were built with. Scenarios\
-          # and Cinema\ are measuring tools, left out.
+          # and Cinema\ are measuring tools, left out. So is upstream's Install_Final.bmp: the PT-BR
+          # edition opens on the game's own splash, the one the Zero Hour install already has.
           $run = "GeneralsMD\Run"
           $out = "PTBR_BUILD_ARTIFACT"
           New-Item -ItemType Directory -Force $out | Out-Null
           $files = @(
-            "generals.exe", "generals.pdb", "Install_Final.bmp",
+            "generals.exe", "generals.pdb",
             "avcodec-62.dll", "avformat-62.dll", "avutil-60.dll", "swresample-6.dll", "swscale-9.dll"
           )
           foreach ($f in $files) {
@@ -162,6 +163,8 @@ jobs:
           install, or put Zero Hour's *.big next to generals.exe and the base game's *.big
           in ZH_Generals\. No game data ships here. Sound and video run through the FFmpeg
           DLLs included; mss32.dll and binkw32.dll are not used by the 64-bit build.
+          The opening splash is the Install_Final.bmp your Zero Hour install came with. If an
+          earlier Reforged build replaced it, copy the original back next to generals.exe.
           "@ | Set-Content "$out\README_INSTALL.txt" -Encoding UTF8
 
       - name: Upload PT-BR build
