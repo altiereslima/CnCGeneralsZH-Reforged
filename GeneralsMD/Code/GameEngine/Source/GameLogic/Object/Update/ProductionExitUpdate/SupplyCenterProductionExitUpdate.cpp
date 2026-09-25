@@ -96,6 +96,11 @@ void SupplyCenterProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDo
 		newObj->setPosition( &createPoint );
 		newObj->setOrientation( exitAngle );
 
+		/** @todo This really should be automatically wrapped up in an actication sequence
+		for objects in general */
+		// tell the AI about it
+		TheAI->pathfinder()->addObjectToPathfindMap( newObj );
+		
 		Vector3 p;
 
 		//
@@ -112,12 +117,6 @@ void SupplyCenterProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDo
 		std::vector<Coord3D> exitPath;
 
 		Coord3D tmp; tmp.x = p.X; tmp.y = p.Y; tmp.z = p.Z;
-		const Bool blockedExit = TheAI->pathfinder()->bypassBlockedProductionExit(newObj, creationObject, &tmp);
-
-		/** @todo This really should be automatically wrapped up in an actication sequence
-		for objects in general */
-		// tell the AI about it
-		TheAI->pathfinder()->addObjectToPathfindMap( newObj );
 		exitPath.push_back(tmp);
 
 		if (m_rallyPointExists)
@@ -128,10 +127,7 @@ void SupplyCenterProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDo
 		AIUpdateInterface  *ai = newObj->getAIUpdateInterface();
 		if( ai )
 		{
-			if (!blockedExit)
-				ai->aiFollowExitProductionPath( &exitPath, creationObject, CMD_FROM_AI );
-			else if (m_rallyPointExists)
-				ai->friend_setExitProductionRallyPoint(&m_rallyPoint);
+			ai->aiFollowExitProductionPath( &exitPath, creationObject, CMD_FROM_AI );
 
 			// Here is the special bit for this exit style, force wanting on SupplyTruck types
 			SupplyTruckAIInterface* supplyTruckAI = ai->getSupplyTruckAIInterface();

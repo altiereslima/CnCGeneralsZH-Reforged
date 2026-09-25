@@ -104,13 +104,9 @@ void QueueProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoorType 
 		createPoint.x = loc.X;
 		createPoint.y = loc.Y;
 		createPoint.z = loc.Z;
+
 		newObj->setPosition( &createPoint );
 		newObj->setOrientation( exitAngle );
-
-		Coord3D naturalRallyPoint;
-		getNaturalRallyPoint(naturalRallyPoint);
-		AIUpdateInterface *ai = newObj->getAIUpdateInterface();
-		Bool blockedExit = TheAI->pathfinder()->bypassBlockedProductionExit(newObj, creationObject, &naturalRallyPoint);
 
 		//
 		// Objects that are created in the air from producers that are in the air get 
@@ -137,12 +133,14 @@ void QueueProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoorType 
 		for objects in general */
 		// tell the AI about it
 		TheAI->pathfinder()->addObjectToPathfindMap( newObj );
-		Coord3D tmp = naturalRallyPoint;
+		Coord3D tmp;
+		getNaturalRallyPoint(tmp);
 		// Grid it.
 		TheAI->pathfinder()->snapPosition(newObj, &tmp);
 		std::vector<Coord3D> exitPath;
 		exitPath.push_back(tmp);
 
+		AIUpdateInterface  *ai = newObj->getAIUpdateInterface();
 		if (m_rallyPointExists)
 		{
 			if (ai && ai->isDoingGroundMovement())
@@ -159,7 +157,7 @@ void QueueProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoorType 
 			// Double the destination to keep redguards from stacking.
 			exitPath.push_back(tmp);
 		}
-		if (ai && !blockedExit) {
+		if (ai) {
 			ai->aiFollowExitProductionPath( &exitPath, creationObject, CMD_FROM_AI );
 		}
 		m_currentDelay = md->m_exitDelayData;

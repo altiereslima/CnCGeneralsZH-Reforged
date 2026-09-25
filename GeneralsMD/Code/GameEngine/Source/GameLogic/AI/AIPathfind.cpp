@@ -6793,31 +6793,7 @@ Bool Pathfinder::adjustToLandingDestination(Object *obj, Coord3D *dest)
 		delta++;
 	}
 	return false;
-}
-
-//-------------------------------------------------------------------------------------------------
-/** Production exits normally use a straight quick path through their producer. If another fixed
- * obstacle blocks the line, that path can never finish and the exit state rejects player orders.
- * Place the unit on clear ground near the natural rally point before it enters the pathfind map.
- */
-Bool Pathfinder::bypassBlockedProductionExit(Object *unit, const Object *producer, const Coord3D *naturalRallyPoint)
-{
-	AIUpdateInterface *ai = unit->getAIUpdateInterface();
-	if (ai == NULL || !ai->isDoingGroundMovement())
-		return FALSE;
-
-	setIgnoreObstacleID(producer->getID());
-	const Bool clearExit = isLinePassable(unit, ai->getLocomotorSet().getValidSurfaces(),
-		producer->getLayer(), *unit->getPosition(), *naturalRallyPoint, FALSE, FALSE, TRUE);
-	setIgnoreObstacleID(INVALID_ID);
-	if (clearExit)
-		return FALSE;
-
-	Coord3D safePoint = *naturalRallyPoint;
-	if (adjustToLandingDestination(unit, &safePoint))
-		unit->setPosition(&safePoint);
-	return TRUE;
-}
+}	
 
 
 
@@ -11546,7 +11522,6 @@ struct LinePassableStruct
 	Bool centerInCell;
 	Bool blocked;
 	Bool allowPinched;
-	Bool ignoreUnits;
 };
 
 /*static*/ Int Pathfinder::linePassableCallback(Pathfinder* pathfinder, PathfindCell* from, PathfindCell* to, Int to_x, Int to_y, void* userData)
@@ -11562,11 +11537,15 @@ struct LinePassableStruct
 	info.radius = d->radius;
 	info.considerTransient = d->blocked;
 	info.acceptableSurfaces = d->acceptableSurfaces;
-	if (!d->ignoreUnits)
+	pfBump( PF_MC_LINEPASS );
+	if (!pathfinder->checkForMovement(d->obj, info))
 	{
-		pfBump( PF_MC_LINEPASS );
-		if (!pathfinder->checkForMovement(d->obj, info) || info.allyFixedCount || info.enemyFixed)
-			return 1;	// bail out
+		return 1;	// bail out
+	}
+
+	if (info.allyFixedCount || info.enemyFixed) 
+	{
+		return 1;	// bail out
 	}
 
 	if (!d->allowPinched && to->getPinched() &&
@@ -11615,10 +11594,10 @@ struct GroundPathPassableStruct
  * Given two world-space points, check the line of sight between them for any impassible cells.
  * Uses Bresenham line algorithm from www.gamedev.net.
  */
-Bool Pathfinder::isLinePassable( const Object *obj, LocomotorSurfaceTypeMask acceptableSurfaces,
-												PathfindLayerEnum layer, const Coord3D& startWorld,
-												const Coord3D& endWorld, Bool blocked,
-												Bool allowPinched, Bool ignoreUnits)
+Bool Pathfinder::isLinePassable( const Object *obj, LocomotorSurfaceTypeMask acceptableSurfaces, 
+																PathfindLayerEnum layer, const Coord3D& startWorld, 
+																const Coord3D& endWorld, Bool blocked, 
+																Bool allowPinched)
 {
 	LinePassableStruct info;
 	//CRCDEBUG_LOG(("Pathfinder::isLinePassable(): %d %d %d \n", m_ignoreObstacleID, m_isMapReady, m_isTunneling));
@@ -11628,7 +11607,6 @@ Bool Pathfinder::isLinePassable( const Object *obj, LocomotorSurfaceTypeMask acc
 	getRadiusAndCenter(obj, info.radius, info.centerInCell);
 	info.blocked = blocked;
 	info.allowPinched = allowPinched;
-	info.ignoreUnits = ignoreUnits;
 
 	Int ret = iterateCellsAlongLine(startWorld, endWorld, layer, linePassableCallback, (void*)&info);
 	return ret == 0;

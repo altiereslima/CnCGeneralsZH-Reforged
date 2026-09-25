@@ -95,14 +95,13 @@ void DefaultProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoorTyp
 		newObj->setPosition( &createPoint );
 		newObj->setOrientation( exitAngle );
 		newObj->setLayer( creationObject->getLayer() );
-		Coord3D tmp;
-		getNaturalRallyPoint(tmp);
-		const Bool blockedExit = TheAI->pathfinder()->bypassBlockedProductionExit(newObj, creationObject, &tmp);
 
 		/** @todo This really should be automatically wrapped up in an actication sequence
 		for objects in general */
 		// tell the AI about it
 		TheAI->pathfinder()->addObjectToPathfindMap( newObj );
+		Coord3D tmp;
+		getNaturalRallyPoint(tmp);
 		std::vector<Coord3D> exitPath;
 		exitPath.push_back(tmp);
 
@@ -117,7 +116,7 @@ void DefaultProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoorTyp
 			if (TheAI->pathfinder()->adjustDestination(newObj, ai->getLocomotorSet(), &tmp))
 				ai->friend_setExitProductionRallyPoint( &tmp );
 		}
-		if (ai && !blockedExit) {
+		if (ai) {
 			ai->aiFollowExitProductionPath( &exitPath, creationObject, CMD_FROM_AI );
 		}
 	}
