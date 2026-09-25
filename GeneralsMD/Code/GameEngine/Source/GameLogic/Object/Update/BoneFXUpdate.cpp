@@ -298,6 +298,13 @@ UpdateSleepTime BoneFXUpdate::update( void )
 		m_active = TRUE;
 	}
 
+	/* Resolved here, on the first logic update in a body state, rather than by whichever timer fires
+		 first: the particle timer runs on the client stream, so the frame it fired on - and the model
+		 state the OCL bones were read under - differed per machine, and OCL objects are logic. */
+	if (m_bonesResolved[m_curBodyState] == FALSE) {
+		resolveBoneLocations();
+	}
+
 	for (Int i = 0; i < BONE_FX_MAX_BONES; ++i) {
 		//Check to see if its time to fire off any cool stuff.
 		if ((m_nextFXFrame[m_curBodyState][i] != -1) && (m_nextFXFrame[m_curBodyState][i] <= now)) {

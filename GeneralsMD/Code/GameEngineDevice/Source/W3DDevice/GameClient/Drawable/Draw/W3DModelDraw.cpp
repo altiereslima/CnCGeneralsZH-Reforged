@@ -59,6 +59,7 @@
 #include "GameLogic/WeaponSet.h"
 #include "GameLogic/FPUControl.h"
 #include "GameLogic/Module/AIUpdate.h"
+#include "GameLogic/Module/ContainModule.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
 #include "W3DDevice/GameClient/Module/W3DModelDraw.h"
 #include "W3DDevice/GameClient/W3DAssetManager.h"
@@ -3526,6 +3527,8 @@ Bool W3DModelDraw::clientOnly_getRenderObjInfo(Coord3D* pos, Real* boundingSpher
 	return true;
 }
 
+static ModelConditionFlags logicConditionFlags(const Drawable* draw, const ModelConditionFlags& c);
+
 //-------------------------------------------------------------------------------------------------
 Bool W3DModelDraw::getProjectileLaunchOffset(
 	const ModelConditionFlags& condition, 
@@ -3543,7 +3546,7 @@ Bool W3DModelDraw::getProjectileLaunchOffset(
 		to get the pristine bone(s) for the state that logic believes to be current,
 		not the one the client might currently be using...
 	*/
-	const ModelConditionInfo* stateToUse = findBestInfo(condition);
+	const ModelConditionInfo* stateToUse = findBestInfo(logicConditionFlags(getDrawable(), condition));
 	if (!stateToUse)
 	{
 		CRCDEBUG_LOG(("can't find best info\n"));
@@ -3692,7 +3695,7 @@ Int W3DModelDraw::getPristineBonePositionsForConditionState(
 		to get the pristine bone(s) for the state that logic believes to be current,
 		not the one the client might currently be using...
 	*/
-	const ModelConditionInfo* stateToUse = findBestInfo(condition);
+	const ModelConditionInfo* stateToUse = findBestInfo(logicConditionFlags(getDrawable(), condition));
 	if (!stateToUse)
 		return 0;
 
@@ -3965,10 +3968,35 @@ const ModelConditionInfo* W3DModelDraw::findBestInfo(const ModelConditionFlags& 
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The flags a question from the logic is answered under.  GARRISONED is set per viewer:
+	* GarrisonContain keeps it off a building full of undetected stealth units on every machine but
+	* its owner's and allies'.  Bones, barrels and launch points picked under it came out different
+	* per machine, so logic asks with the owner's answer, which is whether anyone is inside. */
+//-------------------------------------------------------------------------------------------------
+static ModelConditionFlags logicConditionFlags(const Drawable* draw, const ModelConditionFlags& c)
+{
+	ModelConditionFlags flags = c;
+	const Object* obj = draw->getObject();
+	const ContainModuleInterface* contain = obj ? obj->getContain() : NULL;
+	if (contain && contain->isGarrisonable())
+		flags.set(MODELCONDITION_GARRISONED, contain->getContainCount() > 0 ? 1 : 0);
+	return flags;
+}
+
+//-------------------------------------------------------------------------------------------------
 Int W3DModelDraw::getBarrelCount(WeaponSlotType wslot) const
 {
-	return (m_curState && (m_curState->m_validStuff & ModelConditionInfo::BARRELS_VALID)) ?
-		m_curState->m_weaponBarrelInfoVec[wslot].size() : 0;
+	/*
+		The weapon asks this, so it has to answer for the state logic believes to be current, the way
+		getProjectileLaunchOffset does.  m_curState leaves a transition only when this drawable is drawn,
+		and whether it is drawn is this machine's camera and fog.
+	*/
+	const ModelConditionInfo* stateToUse = findBestInfo(logicConditionFlags(getDrawable(), getDrawable()->getModelConditionFlags()));
+	if (!stateToUse)
+		return 0;
+	stateToUse->validateStuff(NULL, getDrawable()->getScale(), getW3DModelDrawModuleData()->m_extraPublicBones);
+	return (stateToUse->m_validStuff & ModelConditionInfo::BARRELS_VALID) ?
+		stateToUse->m_weaponBarrelInfoVec[wslot].size() : 0;
 }
 
 //-------------------------------------------------------------------------------------------------

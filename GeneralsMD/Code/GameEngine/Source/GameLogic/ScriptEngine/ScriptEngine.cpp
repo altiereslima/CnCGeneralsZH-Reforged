@@ -5957,7 +5957,9 @@ Player *ScriptEngine::getPlayerFromAsciiString(const AsciiString& playerString)
 	if (playerString == LOCAL_PLAYER || (playerString == THE_PLAYER && is_GeneralsChallengeContext))
 		// Designers have built their Generals' Challenge maps, referencing "ThePlayer" meaning the local player.
 		// However, they've also built many of their single player maps with this string, where "ThePlayer" is not intended as an alias.
-		return ThePlayerList->getLocalPlayer();
+		// The keyboard seat, which a playback keeps where the recording had it; the local player there
+		// is the ReplayObserver.  A network game has none and keeps EA's answer.
+		return ThePlayerList->getKeyboardPlayer() ? ThePlayerList->getKeyboardPlayer() : ThePlayerList->getLocalPlayer();
 	if (playerString == THIS_PLAYER)
 		return getCurrentPlayer();
 	else if (playerString == THIS_PLAYER_ENEMY)	{
@@ -6082,7 +6084,7 @@ Team * ScriptEngine::getTeamNamed(const AsciiString& teamName)
 	if (teamName == TEAM_THE_PLAYER && is_GeneralsChallengeContext)
 		// Designers have built their Generals' Challenge maps, referencing "teamThePlayer" meaning the local player's default (parent) team.
 		// However, they've also built many of their single player maps with this string, where "teamThePlayer" is not intended as an alias.
-		return ThePlayerList->getLocalPlayer()->getDefaultTeam();
+		return (ThePlayerList->getKeyboardPlayer() ? ThePlayerList->getKeyboardPlayer() : ThePlayerList->getLocalPlayer())->getDefaultTeam();
 	if (teamName == THIS_TEAM) {
 		if (m_callingTeam) 
 			return m_callingTeam;
@@ -7439,6 +7441,9 @@ Bool ScriptEngine::isSpeechComplete( const AsciiString& testSpeech, Bool removeF
 	if (findIt == m_testingSpeech.end()) {
 		PairAsciiStringUINT newPair;
 		AudioEventRTS event(testSpeech);
+		// Logical, or a sound with several variants picks the one to measure off the audio stream,
+		// which every machine has moved differently by now.
+		event.setIsLogicalAudio(TRUE);
 		Real audioLength = TheAudio->getAudioLengthMS(&event);
 		UnsignedInt frameCount = REAL_TO_UNSIGNEDINT(audioLength / MSEC_PER_LOGICFRAME_REAL);
 
@@ -7474,6 +7479,7 @@ Bool ScriptEngine::isAudioComplete( const AsciiString& testAudio, Bool removeFro
 	if (findIt == m_testingAudio.end()) {
 		PairAsciiStringUINT newPair;
 		AudioEventRTS event(testAudio);
+		event.setIsLogicalAudio(TRUE);	// see isSpeechComplete
 		Real audioLength = TheAudio->getAudioLengthMS(&event);
 		UnsignedInt frameCount = REAL_TO_UNSIGNEDINT(audioLength / MSEC_PER_LOGICFRAME_REAL);
 

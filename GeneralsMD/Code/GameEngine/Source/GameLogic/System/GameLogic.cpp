@@ -1184,6 +1184,14 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 		TheWritableGlobalData->m_peaceTime = 0;						// -peacetime, and the host's options string is read below
 		TheWritableGlobalData->m_unitLimit = FALSE;						// -unitlimit, the same
 	}
+	/* The playback of a network game is not a network game, but it replays one that ran the host's
+		 options, so a switch given to the playback has to be dropped the same way. */
+	else if (TheRecorder && TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK
+					 && (TheRecorder->getGameMode() == GAME_LAN || TheRecorder->getGameMode() == GAME_INTERNET))
+	{
+		TheWritableGlobalData->m_peaceTime = 0;
+		TheWritableGlobalData->m_unitLimit = FALSE;
+	}
 
 	m_showBehindBuildingMarkers = TRUE;
 	m_drawIconUI = TRUE;
@@ -4462,6 +4470,33 @@ void GameLogic::update( void )
 		TheScriptEngine->UPDATE();
 	}
 
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tScripts );
+
+	/* A camera move that freezes time ends on this machine's wall clock, and the scripts above run
+		 once per frozen pass: in a multiplayer or skirmish session a machine whose camera took longer
+		 counted its script timers down further.  There the camera freezes nothing, as the camera
+		 condition in ScriptConditions already reports every move finished. */
+	Bool freezeTime = !TheGameEngine->isMultiplayerSession()
+										&& TheTacticalView->isTimeFrozen() && !TheTacticalView->isCameraMovementFinished();
+	freezeTime = freezeTime || TheScriptEngine->isTimeFrozenDebug() || TheScriptEngine->isTimeFrozenScript();
+
+	if (freezeTime)
+	{
+		if (TheCommandList->containsMessageOfType(GameMessage::MSG_CLEAR_GAME_DATA))
+		{
+			TheScriptEngine->forceUnfreezeTime();
+		}
+		else
+		{
+			/// @todo - make sure this never happens during a network game.  jba.
+			return;
+		}
+	}
+
+	/* The fork's own ticks come after the freeze return.  A frozen pass does not advance the frame, so
+		 ahead of it they ran once per frozen pass, and how many passes a cinematic takes is camera state
+		 that differs per machine: the repair tick healed again on every one of them. */
+
 	// the lobby's peace time, if the host set one
 	peaceTimeTick();
 
@@ -4482,24 +4517,6 @@ void GameLogic::update( void )
 	/* And whatever arrived down the control socket since the last logic frame.  Reading a socket
 		 happens on a render pass and making an object has to happen in here, so the two are split. */
 	ControlServer_runCommands();
-
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tScripts );
-
-	Bool freezeTime = TheTacticalView->isTimeFrozen() && !TheTacticalView->isCameraMovementFinished();
-	freezeTime = freezeTime || TheScriptEngine->isTimeFrozenDebug() || TheScriptEngine->isTimeFrozenScript();
-	
-	if (freezeTime) 
-	{
-		if (TheCommandList->containsMessageOfType(GameMessage::MSG_CLEAR_GAME_DATA)) 
-		{
-			TheScriptEngine->forceUnfreezeTime();
-		} 
-		else 
-		{
-			/// @todo - make sure this never happens during a network game.  jba.
-			return;
-		}
-	}
 
 	// Note - TerrainLogic update needs to happen after ScriptEngine update, but before object updates.  jba.
 	// This way changes in bridges are noted in the script engine before being cleared in TerrainLogic->update

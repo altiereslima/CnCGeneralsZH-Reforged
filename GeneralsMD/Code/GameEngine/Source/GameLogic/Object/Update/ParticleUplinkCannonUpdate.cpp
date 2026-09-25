@@ -200,6 +200,8 @@ ParticleUplinkCannonUpdate::ParticleUplinkCannonUpdate( Thing *thing, const Modu
 	m_nextDamagePulseFrame = 0;
 	m_startAttackFrame = 0;
 	m_startDecayFrame = 0;
+	m_orbitBeamWidenFrame = 0;
+	m_orbitBeamDecayFrame = 0;
 	m_lastDrivingClickFrame = 0;
 	m_2ndLastDrivingClickFrame = 0;
 	m_clientShroudedLastFrame = FALSE;
@@ -456,6 +458,7 @@ UpdateSleepTime ParticleUplinkCannonUpdate::update()
 				if( orbitalBirthFrame <= now )
 				{
 					createOrbitToTargetLaser( data->m_widthGrowFrames );
+					m_orbitBeamWidenFrame = now;
 					m_laserStatus = LASERSTATUS_BORN;
 					m_scorchMarksMade		= 0;
 					m_nextScorchMarkFrame = now; 
@@ -463,13 +466,15 @@ UpdateSleepTime ParticleUplinkCannonUpdate::update()
 					m_nextDamagePulseFrame = now;
 				}
 				break;
+			/* The beam drawable is only the picture: the state below moves on the logic's frames
+				 whether or not it exists, because a machine that culled or never made it would
+				 otherwise keep a cannon firing that every other machine has stopped. */
 			case LASERSTATUS_BORN:
 			{
-				Drawable *beam = TheGameClient->findDrawableByID( m_orbitToTargetBeamID );
-				if( beam )
+				if( orbitalDecayStart <= now )
 				{
-					//m_annihilationSound.setPosition( beam->getPosition() );
-					if( orbitalDecayStart <= now )
+					Drawable *beam = TheGameClient->findDrawableByID( m_orbitToTargetBeamID );
+					if( beam )
 					{
 						static NameKeyType nameKeyClientUpdate = NAMEKEY( "LaserUpdate" );
 						LaserUpdate *update = (LaserUpdate*)beam->findClientUpdateModule( nameKeyClientUpdate );
@@ -477,8 +482,9 @@ UpdateSleepTime ParticleUplinkCannonUpdate::update()
 						{
 							update->setDecayFrames( data->m_widthGrowFrames );
 						}
-						m_laserStatus = LASERSTATUS_DECAYING;
 					}
+					m_orbitBeamDecayFrame = now;
+					m_laserStatus = LASERSTATUS_DECAYING;
 				}
 				break;
 			}
@@ -487,16 +493,18 @@ UpdateSleepTime ParticleUplinkCannonUpdate::update()
 				Drawable *beam = TheGameClient->findDrawableByID( m_orbitToTargetBeamID );
 				if( beam )
 				{
-					//m_annihilationSound.setPosition( beam->getPosition() );
 					TheAudio->removeAudioEvent( m_annihilationSound.getPlayingHandle() );
-					if( orbitalDeathFrame <= now )
+				}
+				if( orbitalDeathFrame <= now )
+				{
+					if( beam )
 					{
 						TheGameClient->destroyDrawable( beam );
-						m_orbitToTargetBeamID = INVALID_DRAWABLE_ID;
-						m_laserStatus = LASERSTATUS_DEAD;
-						m_startAttackFrame = 0;
-						setLogicalStatus( STATUS_IDLE );
 					}
+					m_orbitToTargetBeamID = INVALID_DRAWABLE_ID;
+					m_laserStatus = LASERSTATUS_DEAD;
+					m_startAttackFrame = 0;
+					setLogicalStatus( STATUS_IDLE );
 				}
 				break;
 			}
@@ -506,9 +514,12 @@ UpdateSleepTime ParticleUplinkCannonUpdate::update()
 		}
 
 		Drawable *beam = TheGameClient->findDrawableByID( m_orbitToTargetBeamID );
-		if( beam && orbitalBirthFrame <= now && now <= orbitalDeathFrame )
+		Real beamRadius = 0.0f;
+		const Bool beamLive = (m_laserStatus == LASERSTATUS_BORN || m_laserStatus == LASERSTATUS_DECAYING)
+			&& findOrbitBeamRadius( beamRadius );
+		if( beamLive && orbitalBirthFrame <= now && now <= orbitalDeathFrame )
 		{
-		
+
 			if( !m_manualTargetMode && !m_scriptedWaypointMode )
 			{
 				//Calculate the position of the beam because it swaths -- a nice S curve centering at the target location!
@@ -617,23 +628,25 @@ UpdateSleepTime ParticleUplinkCannonUpdate::update()
 			orbitPosition.set( &m_currentTargetPosition );
 			orbitPosition.z += ORBITAL_BEAM_Z_OFFSET;
 
-			Real scorchRadius = 0.0f;
-			Real damageRadius = 0.0f;
+			const Real laserRadius = beamRadius * computeOrbitBeamWidthScalar( now );
+			const Real scorchRadius = laserRadius * data->m_scorchMarkScalar;
+			const Real damageRadius = laserRadius * data->m_damageRadiusScalar;
 
-			//Reset the laser position
-			static NameKeyType nameKeyClientUpdate = NAMEKEY( "LaserUpdate" );
-			LaserUpdate *update = (LaserUpdate*)beam->findClientUpdateModule( nameKeyClientUpdate );
-			if( update )
+			if( beam )
 			{
-				update->initLaser( NULL, NULL, &orbitPosition, &m_currentTargetPosition, "" );
-				scorchRadius = update->getCurrentLaserRadius() * data->m_scorchMarkScalar;
-				damageRadius = update->getCurrentLaserRadius() * data->m_damageRadiusScalar;
-			}
+				//Reset the laser position
+				static NameKeyType nameKeyClientUpdate = NAMEKEY( "LaserUpdate" );
+				LaserUpdate *update = (LaserUpdate*)beam->findClientUpdateModule( nameKeyClientUpdate );
+				if( update )
+				{
+					update->initLaser( NULL, NULL, &orbitPosition, &m_currentTargetPosition, "" );
+				}
 
-			// Keep the emitter where it used to be, near the ground the beam is hitting.
-			Coord3D audioPos = m_currentTargetPosition;
-			audioPos.z += ORBITAL_BEAM_AUDIO_Z_OFFSET;
-			beam->setPosition( &audioPos );
+				// Keep the emitter where it used to be, near the ground the beam is hitting.
+				Coord3D audioPos = m_currentTargetPosition;
+				audioPos.z += ORBITAL_BEAM_AUDIO_Z_OFFSET;
+				beam->setPosition( &audioPos );
+			}
 
 			//Create scorch marks periodically
 			if( m_nextScorchMarkFrame <= now )
@@ -776,8 +789,12 @@ UpdateSleepTime ParticleUplinkCannonUpdate::update()
 		{
 			//We can see it -- we only want to do anything if we just started seeing it, which means
 			//we want to add client effects again.
+			/* Not before the logic has cached the bones itself, on its first status change.  Caching them
+				 here happened on the frame this machine's player first saw the cannon, under whatever
+				 model state it had then, and a bone count short by one sets m_invalidSettings - which
+				 stops the cannon for good on this machine only.  An idle cannon has nothing to show. */
 			Bool revealThisFrame = m_clientShroudedLastFrame != shrouded;
-			if( revealThisFrame )
+			if( revealThisFrame && m_defaultInfoCached )
 			{
 				//Only if we reveal this frame, will we add client effects. The logic can take it from
 				//here on... unless of course we lose sight again.
@@ -1075,6 +1092,49 @@ void ParticleUplinkCannonUpdate::removeAllEffects()
 	//Remove all sound hooks
 }
 
+//-------------------------------------------------------------------------------------------------
+/** The orbit beam's half width, off its template's laser draw module: what LaserUpdate read off the
+	* beam drawable, without needing the drawable.  FALSE when there is no beam to fire, which is when
+	* createOrbitToTargetLaser makes none either. */
+//-------------------------------------------------------------------------------------------------
+Bool ParticleUplinkCannonUpdate::findOrbitBeamRadius( Real &radius ) const
+{
+	const ParticleUplinkCannonUpdateModuleData *data = getParticleUplinkCannonUpdateModuleData();
+	if( data->m_particleBeamLaserName.isEmpty() )
+		return FALSE;
+
+	const ThingTemplate *beamTemplate = TheThingFactory->findTemplate( data->m_particleBeamLaserName );
+	if( beamTemplate == NULL )
+		return FALSE;
+
+	const ModuleInfo &drawModules = beamTemplate->getDrawModuleInfo();
+	for( Int i = 0; i < drawModules.getCount(); ++i )
+	{
+		if( drawModules.getNthData( i )->getLaserTemplateWidth( radius ) )
+			return TRUE;
+	}
+	radius = 0.0f;
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** LaserUpdate::computeWidthScalar on the cannon's own frames: wider from birth over WidthGrowTime,
+	* narrower from the decay over the same time, the same arithmetic so the radius is the same float. */
+//-------------------------------------------------------------------------------------------------
+Real ParticleUplinkCannonUpdate::computeOrbitBeamWidthScalar( UnsignedInt frame ) const
+{
+	const UnsignedInt growFrames = getParticleUplinkCannonUpdateModuleData()->m_widthGrowFrames;
+	if( growFrames == 0 )
+		return 1.0f;
+
+	if( m_laserStatus == LASERSTATUS_DECAYING )
+	{
+		Real scalar = 1.0f - (Real)(frame - m_orbitBeamDecayFrame) / (Real)growFrames;
+		return scalar <= 0.0f ? 0.0f : scalar;
+	}
+	Real scalar = (Real)(frame - m_orbitBeamWidenFrame) / (Real)growFrames;
+	return scalar >= 1.0f ? 1.0f : scalar;
+}
 
 //-------------------------------------------------------------------------------------------------
 Bool ParticleUplinkCannonUpdate::calculateDefaultInformation()
@@ -1366,14 +1426,15 @@ void ParticleUplinkCannonUpdate::crc( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
-	* 1: Initial version */
+	* 1: Initial version
+	* 4: the orbit beam's widen and decay frames, which the damage radius is worked out from */
 // ------------------------------------------------------------------------------------------------
 void ParticleUplinkCannonUpdate::xfer( Xfer *xfer )
 {
 	const ParticleUplinkCannonUpdateModuleData *data = getParticleUplinkCannonUpdateModuleData();
 
 	// version
-	XferVersion currentVersion = 3;
+	XferVersion currentVersion = 4;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -1479,6 +1540,18 @@ void ParticleUplinkCannonUpdate::xfer( Xfer *xfer )
 		xfer->xferBool( &m_manualTargetMode );
 		xfer->xferBool( &m_scriptedWaypointMode );
 		xfer->xferUnsignedInt( &m_nextDestWaypointID );
+	}
+
+	if( version >= 4 )
+	{
+		xfer->xferUnsignedInt( &m_orbitBeamWidenFrame );
+		xfer->xferUnsignedInt( &m_orbitBeamDecayFrame );
+	}
+	else
+	{
+		// an older save fired on schedule, and the beam changed state on these frames
+		m_orbitBeamWidenFrame = m_startAttackFrame + data->m_beamTravelFrames;
+		m_orbitBeamDecayFrame = m_startDecayFrame + data->m_beamTravelFrames;
 	}
 
 }  // end xfer

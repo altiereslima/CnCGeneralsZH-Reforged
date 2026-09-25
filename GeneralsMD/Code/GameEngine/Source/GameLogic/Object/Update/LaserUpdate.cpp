@@ -202,33 +202,33 @@ void LaserUpdate::clientUpdate( void )
 	updateStartPos();
 	updateEndPos();
 
+	if( m_decaying || m_widening )
+	{
+		m_currentWidthScalar = computeWidthScalar( TheGameLogic->getFrame() );
+		m_dirty = true;
+		if( !m_decaying && m_currentWidthScalar >= 1.0f )
+			m_widening = false;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The width on a given logic frame, worked out from the frames alone.  The Particle Cannon's damage
+	* radius runs the same arithmetic on its own frames (ParticleUplinkCannonUpdate::
+	* computeOrbitBeamWidthScalar), so the picture and the damage agree without logic reading this. */
+//-------------------------------------------------------------------------------------------------
+Real LaserUpdate::computeWidthScalar( UnsignedInt frame ) const
+{
 	if( m_decaying )
 	{
-		UnsignedInt now = TheGameLogic->getFrame();
-		m_currentWidthScalar = 1.0f - (Real)(now - m_decayStartFrame) / (Real)(m_decayFinishFrame - m_decayStartFrame);
-		m_dirty = true;
-		if( m_currentWidthScalar <= 0.0f )
-		{
-			m_currentWidthScalar = 0.0f;
-
-			//When decay is finished... delete the laser.
-			//TheGameLogic->destroyObject( getObject() );
-			return;
-		}
+		Real scalar = 1.0f - (Real)(frame - m_decayStartFrame) / (Real)(m_decayFinishFrame - m_decayStartFrame);
+		return scalar <= 0.0f ? 0.0f : scalar;
 	}
-	else if( m_widening )
+	if( m_widening )
 	{
-		//We need to resize our laser width based on the growth ratio completed.
-		UnsignedInt now = TheGameLogic->getFrame();
-		m_currentWidthScalar = (Real)(now - m_widenStartFrame) / (Real)(m_widenFinishFrame - m_widenStartFrame);
-		m_dirty = true;
-		if( m_currentWidthScalar >= 1.0f )
-		{
-			m_currentWidthScalar = 1.0f;
-			m_widening = false;
-		}
+		Real scalar = (Real)(frame - m_widenStartFrame) / (Real)(m_widenFinishFrame - m_widenStartFrame);
+		return scalar >= 1.0f ? 1.0f : scalar;
 	}
-	return;
+	return 1.0f;
 }
 
 void LaserUpdate::setDecayFrames( UnsignedInt decayFrames )
@@ -390,26 +390,6 @@ void LaserUpdate::initLaser( const Object *parent, const Object *target, const C
 	}
 
 	m_dirty = true;
-}
-
-//-------------------------------------------------------------------------------------------------
-Real LaserUpdate::getCurrentLaserRadius() const
-{
-	const Drawable *draw = getDrawable();
-	const LaserDrawInterface* ldi = NULL;
-	for( const DrawModule** d = draw->getDrawModules(); *d; ++d )
-	{
-		ldi = (*d)->getLaserDrawInterface();
-		if( ldi )
-		{
-			//***NOTE***
-			//While it appears the logic is accessing client data, it is actually accessing template module
-			//data from the client. This value is INI constant thus can't change. It's grouped with other 
-			//laser defining attributes and having it there makes it easier for artists.
-			return ldi->getLaserTemplateWidth() * m_currentWidthScalar;
-		}
-	}
-	return 0.0f;
 }
 
 // ------------------------------------------------------------------------------------------------

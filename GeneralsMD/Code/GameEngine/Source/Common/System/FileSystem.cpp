@@ -211,6 +211,15 @@ File*		FileSystem::openFile( const Char *filename, Int access )
 		file = TheLocalFileSystem->openFile( filename, access );
 	}
 
+	/* A file made here exists from now on, and doesFileExist may already have said it did not: a
+		 map transfer asks before it writes, and the map.ini it then writes was skipped by the loader
+		 on the receiving machine, which played with the stock data while the host played with the
+		 map's (upstream #991). */
+	if ( file != NULL && (access & File::CREATE) )
+	{
+		m_fileExist[ TheNameKeyGenerator->nameToLowercaseKey( filename ) ] = true;
+	}
+
 	if ( (TheArchiveFileSystem != NULL) && (file == NULL) )
 	{
 		file = TheArchiveFileSystem->openFile( filename );

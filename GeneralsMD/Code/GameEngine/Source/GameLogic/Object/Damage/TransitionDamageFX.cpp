@@ -360,7 +360,9 @@ void TransitionDamageFX::onBodyDamageStateChange( const DamageInfo* damageInfo,
 						getDamageTypeFlag( modData->m_damageFXTypes, lastDamageInfo->in.m_damageType ) )
 				{
 
-					pos = getLocalEffectPos( &modData->m_fxList[ newState ][ i ].locInfo, draw );
+					// Client stream, as for the particle systems below: only the effect uses this spot, and
+					// how many draws the bone pick takes depends on the model art this install loaded.
+					pos = getLocalEffectPos( &modData->m_fxList[ newState ][ i ].locInfo, draw, TRUE );
 					getObject()->convertBonePosToWorldPos( &pos, NULL, &pos, NULL );
 					FXList::doFXPos( modData->m_fxList[ newState ][ i ].fx, &pos );
 

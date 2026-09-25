@@ -229,6 +229,10 @@ private:
 	typedef std::vector<PlayerTemplate> PlayerTemplateVector;
 
 	PlayerTemplateVector m_playerTemplates;
+
+	/// What a map.ini overwrote, by index and in the order it did, and how many templates there were before it added any; reset() puts both back.
+	std::vector< std::pair<Int, PlayerTemplate> > m_beforeMapOverrides;
+	Int m_countBeforeMapOverrides;
 };
 
 // ----------------------------------------------------------------------------------------------

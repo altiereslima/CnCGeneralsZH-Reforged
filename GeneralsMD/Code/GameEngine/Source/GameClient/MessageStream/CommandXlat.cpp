@@ -2532,16 +2532,15 @@ Bool takeControlOfPlayer( Player *p )
 	if (!p->isPlayerActive() || !p->isPlayableSide())
 		return FALSE;
 
-	p->setPlayerType(PLAYER_HUMAN, FALSE);	// throws away its AIPlayer, if it had one
+	/* Throwing away the AIPlayer and moving the keyboard seat are the logic's to do, on the frame the
+		 message runs, so a replay does them too.  Called from here they happened on this machine only
+		 and no recording of the match played back.  The message goes out as the player being left. */
+	GameMessage *takeOver = TheMessageStream->appendMessage( GameMessage::MSG_CHEAT );
+	takeOver->appendIntegerArgument( CHEAT_TAKE_CONTROL );
+	takeOver->appendIntegerArgument( p->getPlayerIndex() );
+
 	ThePlayerList->setLocalPlayer(p);
 	TheInGameUI->deselectAllDrawables();
-
-	/* Every driverless base feeds its sight to whoever is at the keyboard (Object::handleShroud), and
-		 that mask was worked out the last time each object looked - which for a building is when it was
-		 built.  Make them all look again, or the base you just left goes dark behind you. */
-	for (Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject())
-		obj->handlePartitionCellMaintenance();
-
 	ThePartitionManager->refreshShroudForLocalPlayer();
 	TheControlBar->initSpecialPowershortcutBar(p);
 	TheControlBar->setControlBarSchemeByPlayer(p);

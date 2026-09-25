@@ -619,14 +619,13 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 
 				}  // end if
 
-				// get a new production id to assign to this
-				ProductionID productionID = pu->requestUniqueUnitID();
-
-				// create a message to build this thing
+				// create a message to build this thing.  The second argument is kept for the message's
+				// shape and is unused: the logic mints the production ID, because minting it here moved
+				// the factory's counter on this machine and no other.
 
 				GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_QUEUE_UNIT_CREATE );
 				msg->appendIntegerArgument( whatToBuild->getTemplateID() );
-				msg->appendIntegerArgument( productionID );
+				msg->appendIntegerArgument( PRODUCTIONID_INVALID );
 				msg->appendObjectIDArgument( factory->getID() );	// which of the selected factories builds it
 
 				//

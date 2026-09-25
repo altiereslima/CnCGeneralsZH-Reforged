@@ -32,6 +32,7 @@
 #include "Common/AudioAffect.h"
 #include "Common/BuildAssistant.h"
 #include "Common/CRCDebug.h"
+#include "Common/crc.h"
 #include "Common/Radar.h"
 #include "Common/PlayerTemplate.h"
 #include "Common/Team.h"
@@ -190,6 +191,153 @@ extern CComModule _Module;
 
 //-------------------------------------------------------------------------------------------------
 static void updateTGAtoDDS();
+
+//-------------------------------------------------------------------------------------------------
+/** A file logic reads that no subsystem loads through the INI checksum, as it resolved on this
+	* machine, byte for byte. */
+//-------------------------------------------------------------------------------------------------
+static void checksumFileContents( XferCRC &xferCRC, const char *path )
+{
+	File *file = TheFileSystem->openFile( path, File::READ );
+	Int fileSize = file->size();
+	char *contents = file->readEntireAndClose();
+	xferCRC.xferUser( contents, fileSize );
+	delete [] contents;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** What a model's bytes hashed to, and the size and write time of the file they were read out of:
+	* the archive the model resolved to, or the loose model itself. */
+//-------------------------------------------------------------------------------------------------
+struct ModelChecksum
+{
+	FileInfo source;
+	UnsignedInt crc;
+};
+typedef std::map<std::string, ModelChecksum> ModelChecksumMap;	///< keyed "source|model"
+
+static const char *MODEL_CHECKSUM_CACHE = "ModelChecksums.txt";
+static const Int MODEL_CHECKSUM_LINE_LENGTH = 1024;
+
+static AsciiString modelChecksumCachePath( void )
+{
+	AsciiString path = TheGlobalData->getPath_UserData();
+	path.concat( MODEL_CHECKSUM_CACHE );
+	return path;
+}
+
+static ModelChecksumMap readModelChecksumCache( void )
+{
+	ModelChecksumMap cache;
+	FILE *cacheFile = fopen( modelChecksumCachePath().str(), "r" );
+	if (cacheFile == NULL)
+		return cache;		// the first start on this machine, or the file was deleted
+
+	char line[MODEL_CHECKSUM_LINE_LENGTH];
+	while (fgets( line, sizeof( line ), cacheFile ))
+	{
+		ModelChecksum entry;
+		Int keyOffset = 0;
+		if (sscanf( line, "%x %d %d %d %d %n", &entry.crc, &entry.source.sizeHigh, &entry.source.sizeLow,
+				&entry.source.timestampHigh, &entry.source.timestampLow, &keyOffset ) != 5)
+			continue;		// a torn line from a copy killed mid-write reads again from the model
+
+		std::string key( line + keyOffset );
+		key.erase( key.find_last_not_of( "\r\n" ) + 1 );
+		cache[key] = entry;
+	}
+	fclose( cacheFile );
+	return cache;
+}
+
+/** Written beside and moved over the old one, so a second copy starting at the same moment reads
+	* one whole file or the other and never half of each. */
+static void writeModelChecksumCache( const ModelChecksumMap &cache )
+{
+	AsciiString finalPath = modelChecksumCachePath();
+	AsciiString scratchPath;
+	scratchPath.format( "%s.%u", finalPath.str(), (UnsignedInt)GetCurrentProcessId() );
+
+	FILE *cacheFile = fopen( scratchPath.str(), "w" );
+	if (cacheFile == NULL)
+		return;		// a read-only user folder costs the next start a full read, nothing else
+
+	for( ModelChecksumMap::const_iterator it = cache.begin(); it != cache.end(); ++it )
+	{
+		const ModelChecksum &entry = it->second;
+		fprintf( cacheFile, "%08X %d %d %d %d %s\n", entry.crc, entry.source.sizeHigh, entry.source.sizeLow,
+			entry.source.timestampHigh, entry.source.timestampLow, it->first.c_str() );
+	}
+	fclose( cacheFile );
+	if (!MoveFileExA( scratchPath.str(), finalPath.str(), MOVEFILE_REPLACE_EXISTING ))
+		DeleteFileA( scratchPath.str() );		// another copy holds it open; its own write will do
+}
+
+static Bool isSameFile( const FileInfo &left, const FileInfo &right )
+{
+	return left.sizeHigh == right.sizeHigh && left.sizeLow == right.sizeLow
+		&& left.timestampHigh == right.timestampHigh && left.timestampLow == right.timestampLow;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Every model's bones place fire points, turret pivots and dock positions in logic, so a model
+	* that differs between two machines splits their match.  Each model's bytes go into the checksum
+	* as it resolved: a loose model beats every archive, and a later patch archive beats an earlier
+	* one.  Reading all of them is about 375 MB, so what a model hashed to is kept in the user folder
+	* against the size and write time of the file it came from, and read again only when that file
+	* changes. */
+//-------------------------------------------------------------------------------------------------
+static void checksumModels( XferCRC &xferCRC )
+{
+	FilenameList models;
+	TheFileSystem->getFileListInDirectory( AsciiString( "Art\\W3D\\" ), AsciiString( "*.w3d" ), models, TRUE );
+
+	const ModelChecksumMap cache = readModelChecksumCache();
+	ModelChecksumMap current;
+	Int modelsRead = 0;
+
+	for( FilenameListIter it = models.begin(); it != models.end(); ++it )
+	{
+		AsciiString model = *it;
+		model.toLower();
+
+		AsciiString source = TheLocalFileSystem->doesFileExist( model.str() )
+			? model : TheArchiveFileSystem->getArchiveFilenameForFile( model );
+
+		ModelChecksum entry;
+		const Bool sourceKnown = TheLocalFileSystem->getFileInfo( source, &entry.source );
+
+		std::string key( source.str() );
+		key.append( "|" );
+		key.append( model.str() );
+
+		ModelChecksumMap::const_iterator cached = cache.find( key );
+		if (sourceKnown && cached != cache.end() && isSameFile( cached->second.source, entry.source ))
+		{
+			entry.crc = cached->second.crc;
+		}
+		else
+		{
+			File *file = TheFileSystem->openFile( model.str(), File::READ );
+			Int fileSize = file->size();
+			char *contents = file->readEntireAndClose();
+			CRC modelCRC;
+			modelCRC.computeCRC( contents, fileSize );
+			delete [] contents;
+			entry.crc = modelCRC.get();
+			++modelsRead;
+		}
+		if (sourceKnown)
+			current[key] = entry;
+
+		xferCRC.xferUser( const_cast<char *>( model.str() ), model.getLength() );
+		xferCRC.xferUnsignedInt( &entry.crc );
+	}
+
+	if (modelsRead > 0)
+		writeModelChecksumCache( current );
+	DEBUG_LOG(( "INI CRC covers %d models, %d of them read this start\n", (Int)models.size(), modelsRead ));
+}
 
 Int GameEngine::getFramesPerSecondLimit( void )
 {
@@ -1010,6 +1158,12 @@ void GameEngine::init( int argc, char *argv[] )
 	DEBUG_LOG(("%s", Buf));////////////////////////////////////////////////////////////////////////////
 	#endif/////////////////////////////////////////////////////////////////////////////////////////////
 
+
+		// the control bar parses these without the checksum, and the AI builds and hunts from them
+		checksumFileContents( xferCRC, "Data\\INI\\Default\\CommandButton.ini" );
+		checksumFileContents( xferCRC, "Data\\INI\\CommandButton.ini" );
+		checksumFileContents( xferCRC, "Data\\INI\\CommandSet.ini" );
+		checksumModels( xferCRC );
 
 		xferCRC.close();
 		TheWritableGlobalData->m_iniCRC = xferCRC.getCRC();

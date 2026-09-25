@@ -9260,6 +9260,10 @@ TEST(matchup_score_is_money_for_money)
 
 	// a free unit has no price to weigh, so only the kill times count
 	CHECK_NEAR( faster, aiMatchupScore( 240.0f, 480.0f, 0.0f, 900.0f ), 0.0001f );
+
+	// the log is the game's own, and still a log: three times better is log2(3) = 1.58496 doublings
+	CHECK_NEAR( 0.5f + 0.5f * 1.5849625f / 4.0f, aiMatchupScore( 160.0f, 480.0f, 900.0f, 900.0f ), 0.00001f );
+	CHECK_NEAR( 0.625f, faster, 0.00001f );
 }
 
 

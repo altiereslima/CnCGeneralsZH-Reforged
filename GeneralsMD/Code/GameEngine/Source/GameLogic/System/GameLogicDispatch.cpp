@@ -42,6 +42,7 @@
 #include "Common/PlayerTemplate.h"
 #include "Common/MessageStream.h"
 #include "Common/MultiplayerSettings.h"
+#include "Common/RandomValue.h"
 #include "Common/Recorder.h"
 #include "Common/BuildAssistant.h"
 #include "Common/SpecialPower.h"
@@ -569,6 +570,12 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 				TheGameEngine->setFramesPerSecondLimit(maxFPS);
 				TheWritableGlobalData->m_useFpsLimit = true;
 			}
+
+			/* Seed again from the number the start was seeded with.  Every start seeds when it appends
+				 this message, and the logic acts on it a pass later, after the shell map's scripts have
+				 run once more on the freshly seeded stream - a draw a copy with -noshellmap, or a replay
+				 started from the command line, never made.  The recorder writes this same number. */
+			InitRandom( GetGameLogicRandomSeed() );
 
 			// prepare for new game
 			prepareNewGame( gameMode, diff, rankPoints );
@@ -1656,11 +1663,12 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 		{
 			Object *producer = NULL;
 			const ThingTemplate *whatToCreate;
-			ProductionID productionID;
 
-			// get data from the message
+			// get data from the message.  Argument 1 was a production ID the build button minted
+			// from the factory's counter, which moved the counter on the sender's machine only, so
+			// the next ID a script or a flight deck minted there differed from everyone else's.  The
+			// ID is minted below, in logic, on every machine alike.
 			whatToCreate = TheThingFactory->findByTemplateID( msg->getArgument( 0 )->integer );
-			productionID = (ProductionID)msg->getArgument( 1 )->integer;
 
 			// an explicit producer (multi-select build) must be one of the selected objects
 			if( msg->getArgumentCount() > 2 && currentlySelectedGroup )
@@ -1689,7 +1697,7 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			}  // end if
 
 			// queue the build
-			pu->queueCreateUnit( whatToCreate, productionID );
+			pu->queueCreateUnit( whatToCreate, pu->requestUniqueUnitID() );
 
 			break;
 
@@ -2163,7 +2171,12 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 		// a game that used them records them and plays back the same.  A network game never takes one.
 		case GameMessage::MSG_CHEAT:
 		{
-			if( isInMultiplayerGame() )
+			// Refused in a network game, and so in its playback too, or a cheat every machine
+			// ignored during the match would be applied when the replay of it plays.  The recorded
+			// mode, not isMultiplayer(): the recorder counts a skirmish as multiplayer.
+			const Int originalMode = (TheRecorder && TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK)
+															 ? TheRecorder->getGameMode() : getGameMode();
+			if( originalMode == GAME_LAN || originalMode == GAME_INTERNET )
 				break;
 
 			CheatKind kind = (CheatKind)msg->getArgument( 0 )->integer;
@@ -2201,6 +2214,23 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 				case CHEAT_ONE_HIT_KILL:
 					thisPlayer->toggleCheat( kind );
 					break;
+
+				/* The logic half of takeControlOfPlayer, a message so the recording has it: the AIPlayer
+					 goes, the keyboard seat moves, and every object looks again, or the base just left goes
+					 dark behind you - a building's looking mask was worked out when it was built. */
+				case CHEAT_TAKE_CONTROL:
+				{
+					Player *target = ThePlayerList->getNthPlayer( amount );
+					if( target == NULL )
+						break;
+					target->setPlayerType( PLAYER_HUMAN, FALSE );
+					ThePlayerList->setKeyboardPlayer( target );
+					for( Object *obj = getFirstObject(); obj; obj = obj->getNextObject() )
+						obj->handlePartitionCellMaintenance();
+					if( target == ThePlayerList->getLocalPlayer() )
+						ThePartitionManager->refreshShroudForLocalPlayer();
+					break;
+				}
 			}
 			break;
 		}

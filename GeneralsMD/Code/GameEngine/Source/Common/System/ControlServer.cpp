@@ -802,6 +802,15 @@ static void handleCommand( const AsciiString &command )
 		return;
 	}
 
+	/* A world command changes this machine's simulation and nobody else's.  A network match the
+		 lobby started would split on it, and a replay would stop matching its recording; a -netgame
+		 match is allowed, on the same terms -scenario is (GameLogic::startNewGame). */
+	if ((TheGameLogic->isInMultiplayerGame() && !TheGlobalData->m_netGameStarted) || TheGameLogic->isInReplayGame())
+	{
+		replyError( "world commands only run in a skirmish or a -netgame match" );
+		return;
+	}
+
 	if ((Int)thePendingCommands.size() >= CONTROL_MAX_COMMANDS_PER_FRAME)
 	{
 		replyError( "too many commands queued for one frame" );
@@ -904,8 +913,8 @@ void ControlServer_poll( void )
 
 void ControlServer_runCommands( void )
 {
-	if (thePendingCommands.empty())
-		return;
+	if (theQuitRequested && TheGameEngine)
+		TheGameEngine->setQuitting( TRUE );
 
 	for( std::vector<AsciiString>::iterator it = thePendingCommands.begin();
 			 it != thePendingCommands.end(); ++it )
@@ -922,9 +931,6 @@ void ControlServer_runCommands( void )
 	}
 
 	thePendingCommands.clear();
-
-	if (theQuitRequested && TheGameEngine)
-		TheGameEngine->setQuitting( TRUE );
 }
 
 void ControlServer_shutdown( void )

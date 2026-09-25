@@ -1227,6 +1227,11 @@ void OpenContain::monitorConditionChanges( void )
 	if( draw )
 	{
 		currCondition = draw->getModelConditionFlags();
+		/* GARRISONED is set per viewer: GarrisonContain hides it from anyone who has not detected a
+			 stealth garrison, so it flips on different frames on the owner's machine and an enemy's, and
+			 the redeploy it caused moved occupants on one machine only.  The fire points are loaded under
+			 flags of their own, so nothing needs a redeploy for this bit. */
+		currCondition.set( MODELCONDITION_GARRISONED, 0 );
 		if(currCondition != m_conditionState )
 			stateChanged = TRUE;
 	}

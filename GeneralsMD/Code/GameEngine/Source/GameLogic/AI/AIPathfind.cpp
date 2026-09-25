@@ -12092,6 +12092,11 @@ if (g_UT_startTiming) return false;
 	if (obj->getAIUpdateInterface()) {
 		ignoreId = obj->getAIUpdateInterface()->getIgnoredObstacleID();
 	}
+	/* Collect first, move afterwards.  aiMoveAwayFromUnit can recurse into moveAllies and on into
+		 a move that destroys this very path, and the walk used to carry on through the freed nodes
+		 (upstream #3323): a crash, or a walk that reads whatever the allocator put there next, which
+		 is not the same on two machines.  The allies are moved in the order the walk met them. */
+	std::vector<ObjectID> alliesToMove;
 	for( node = path->getLastNode(); node && node != path->getFirstNode(); node = node->getPrevious() )	{
 		ICoord2D curCell;
 		worldToCell(node->getPosition(), &curCell);
@@ -12121,25 +12126,31 @@ if (g_UT_startTiming) return false;
 						// If this is a general clear operation, don't let infantry push vehicles.
 						if (!path->getBlockedByAlly()) continue;
 					}
-					if( otherObj && otherObj->getAI() && !otherObj->getAI()->isMoving() ) 
-					{
-						if( otherObj->getAI()->isAttacking() ) 
-						{
-							continue; // Don't move units that are attacking. [8/14/2003]
-						}
-
-						//Kris: Patch 1.01 November 3, 2003
-						//Black Lotus exploit fix -- moving while hacking.
-						if( otherObj->testStatus( OBJECT_STATUS_IS_USING_ABILITY ) || otherObj->getAI()->isBusy() )
-						{
-							continue; // Packing or unpacking objects for example
-						}
-						
-						//DEBUG_LOG(("Moving ally\n"));
-						otherObj->getAI()->aiMoveAwayFromUnit(obj, CMD_FROM_AI);
+					if (std::find(alliesToMove.begin(), alliesToMove.end(), otherObj->getID()) == alliesToMove.end()) {
+						alliesToMove.push_back(otherObj->getID());
 					}
 				}
 			}
+		}
+	}
+	for (std::vector<ObjectID>::const_iterator it = alliesToMove.begin(); it != alliesToMove.end(); ++it) {
+		Object *otherObj = TheGameLogic->findObjectByID(*it);
+		if( otherObj && otherObj->getAI() && !otherObj->getAI()->isMoving() )
+		{
+			if( otherObj->getAI()->isAttacking() )
+			{
+				continue; // Don't move units that are attacking. [8/14/2003]
+			}
+
+			//Kris: Patch 1.01 November 3, 2003
+			//Black Lotus exploit fix -- moving while hacking.
+			if( otherObj->testStatus( OBJECT_STATUS_IS_USING_ABILITY ) || otherObj->getAI()->isBusy() )
+			{
+				continue; // Packing or unpacking objects for example
+			}
+
+			//DEBUG_LOG(("Moving ally\n"));
+			otherObj->getAI()->aiMoveAwayFromUnit(obj, CMD_FROM_AI);
 		}
 	}
 	return true;

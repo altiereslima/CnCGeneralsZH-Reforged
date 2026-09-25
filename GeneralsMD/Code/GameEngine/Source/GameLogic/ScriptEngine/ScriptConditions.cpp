@@ -2687,6 +2687,10 @@ Bool ScriptConditions::evaluateSkirmishPlayerHasDiscoveredPlayer(Parameter *pSki
 //-------------------------------------------------------------------------------------------------
 Bool ScriptConditions::evaluateMusicHasCompleted(Parameter *pMusicParm, Parameter *pIntParm)
 {
+	// The music player is this machine's: switched off, or with no device, it never finishes a track.
+	// A multiplayer or skirmish map gets a constant, the way evaluateNamedSelected does.
+	if (TheGameEngine->isMultiplayerSession())
+		return FALSE;
 	AsciiString str = pMusicParm->getString();
 	return TheAudio->hasMusicTrackCompleted(str, pIntParm->getInt());
 }
@@ -2751,7 +2755,11 @@ Bool ScriptConditions::evaluateCondition( Condition *pCondition )
 			return evaluateNamedUnitExists(pCondition->getParameter(0));
 		case Condition::TEAM_HAS_UNITS: 
 			return evaluateHasUnits(pCondition->getParameter(0));
-		case Condition::CAMERA_MOVEMENT_FINISHED: 
+		case Condition::CAMERA_MOVEMENT_FINISHED:
+			// A scripted camera move runs on this machine's wall clock (W3DView::updateView), so in a
+			// multiplayer or skirmish session it counts as finished at once on every machine.
+			if (TheGameEngine->isMultiplayerSession())
+				return TRUE;
 			return TheTacticalView->isCameraMovementFinished();
 		case Condition::TEAM_STATE_IS: 
 			return evaluateTeamStateIs(pCondition->getParameter(0), pCondition->getParameter(1));

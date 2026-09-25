@@ -230,6 +230,21 @@ found and fixed â€” EA's own, not port damage.**
 - Somebody quitting no longer reports a desync to everyone still playing.
 - A power sabotage no longer follows a player into the next match.
 - Muting sound effects or speech no longer desyncs the game.
+- A replay of a match you played yourself plays back. Every recording with a human seat whose units moved went out of step at the first check, three seconds in: the playback shared those units' sight with the person watching the replay, which the match itself never did. Taking over a computer side with Shift-Ctrl-T is written into the replay as well, so a recording plays back past it.
+- A Particle Cannon beam hurts the same on every machine. How far its damage reached was read off the picture of the beam, and a machine catching up after a stutter damaged with a beam a few frames old. A cannon an enemy happened to spot while it stood idle could also go dead on that enemy's machine alone.
+- A map with its own rules no longer follows you into the next match. A custom map can change armour, upgrades, what a building leaves behind and a side's starting setup; a machine that had played one kept those values until the game was restarted, and fought the next match with them while everyone else used the stock ones. And a map sent to you over the network is played with its rules file, where the receiving machine used to skip it.
+- A building full of stealthed Jarmen Kells or Hijackers no longer shuffles them between windows on one screen only when a detector sweeps over it.
+- A unit whose firing animation has its own set of barrels fires from the same barrel on every machine, whatever each player's camera happens to be looking at.
+- A unit queued in a factory by a map script is numbered the same on every machine, so cancelling it works everywhere and not just for its owner.
+- A map script that waits on a sound, a music track or a camera move now decides on the same frame on every machine.
+- A match starts from the number the lobby agreed on, whatever the battle behind the menu was doing when the host pressed start.
+- Graphics detail no longer decides whether a piece of debris exists or how long a death takes.
+- The first building of a computer player is no longer held back a frame on a machine that already played a match that session.
+- Two allied vehicles blocking each other in a narrow pass no longer read freed memory while they make way, which could crash the game or split it.
+- A cheat every machine refused during a network game is refused in the replay of it too.
+- An install that differs where it matters can no longer join and split the match later. The game's check at the door now also covers the command buttons the computer player builds from and every unit model, whose shape decides where shots leave the barrel. And a map's own rules file counts as part of the map, so two players with the same map and different rules get it sent across instead of fighting with different armour.
+- The computer player's sense of which unit beats which comes out the same on every processor. It used the runtime's logarithm, which takes a different path on processors with newer instructions.
+- The price of all of the above: a replay recorded on an earlier version can go out of step on this one where it has a Particle Cannon, an EMP, a stealthed garrison or two allies making way for each other in it.
 - Pausing no longer leaks a little memory for every sound that was about to start.
 - A sound cancelled before it started really is cancelled. The check compared a pointer against a handle - two different things sharing one slot - so it never matched and the sound played anyway.
 - Angles come from the game's own table, identical on every machine.

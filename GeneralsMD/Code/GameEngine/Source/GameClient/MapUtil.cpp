@@ -87,35 +87,8 @@ static Coord3DList	m_techPositions;
 static Int m_mapDX = 0;
 static Int m_mapDY = 0;
 
-static UnsignedInt calcCRC( AsciiString dirName, AsciiString fname )
+static void addFileToCRC( CRC &theCRC, File *fp )
 {
-	CRC theCRC;
-	theCRC.clear();
-
-	// Try the official map dir
-	AsciiString asciiFile;
-	char	tempBuf[_MAX_PATH];
-	char	filenameBuf[_MAX_PATH];
-	int length = 0;
-	// bounded: fname comes from a directory scan / the map cache and can be longer than _MAX_PATH
-	strncpy(tempBuf, fname.str(), _MAX_PATH - 1);
-	tempBuf[_MAX_PATH - 1] = 0;
-	length = strlen( tempBuf );
-	if( length >= 4 )
-	{
-		memset( filenameBuf, '\0', _MAX_PATH);
-		strncpy( filenameBuf, tempBuf, length - 4);
-	}
-
-	File *fp;
-	asciiFile = fname;
-	fp = TheFileSystem->openFile(asciiFile.str(), File::READ);
-	if( !fp )
-	{
-		DEBUG_CRASH(("Couldn't open '%s'\n", fname.str()));
-		return 0;
-	}
-
 	UnsignedByte buf[4096];
 	Int num;
 	while ( (num=fp->read(buf, 4096)) > 0 )
@@ -124,7 +97,60 @@ static UnsignedInt calcCRC( AsciiString dirName, AsciiString fname )
 	}
 
 	fp->close();
-	fp = NULL;
+}
+
+/** GameLogic::startNewGame loads these from the map's folder with INI_LOAD_CREATE_OVERRIDES, and
+	* they change armour, upgrades, weapons and objects for the match.  The lobby compares only this
+	* CRC, so two players with the same map file and different rules files used to be let in to a
+	* match that split on the first shot. */
+static const char *const MAP_RULES_FILES[] = { "map.ini", "solo.ini" };
+static const Int MAP_RULES_FILE_COUNT = sizeof( MAP_RULES_FILES ) / sizeof( MAP_RULES_FILES[0] );
+
+static AsciiString mapRulesPath( const AsciiString &fname, Int rulesIndex )
+{
+	// the map's folder, cut the way startNewGame cuts it
+	char folder[_MAX_PATH];
+	strncpy( folder, fname.str(), _MAX_PATH - 1 );
+	folder[_MAX_PATH - 1] = 0;
+	char *separator = folder + strlen( folder );
+	while ((separator > folder) && (*separator != '\\') && (*separator != '/'))
+		--separator;
+	*separator = 0;
+
+	AsciiString path;
+	path.format( "%s\\%s", folder, MAP_RULES_FILES[rulesIndex] );
+	return path;
+}
+
+static Bool hasMapRules( const AsciiString &fname )
+{
+	for( Int i = 0; i < MAP_RULES_FILE_COUNT; ++i )
+	{
+		if (TheFileSystem->doesFileExist( mapRulesPath( fname, i ).str() ))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+static UnsignedInt calcCRC( AsciiString dirName, AsciiString fname )
+{
+	CRC theCRC;
+	theCRC.clear();
+
+	File *fp = TheFileSystem->openFile(fname.str(), File::READ);
+	if( !fp )
+	{
+		DEBUG_CRASH(("Couldn't open '%s'\n", fname.str()));
+		return 0;
+	}
+	addFileToCRC( theCRC, fp );
+
+	for( Int i = 0; i < MAP_RULES_FILE_COUNT; ++i )
+	{
+		File *rules = TheFileSystem->openFile( mapRulesPath( fname, i ).str(), File::READ );
+		if (rules)
+			addFileToCRC( theCRC, rules );
+	}
 
 	return theCRC.get();
 }
@@ -706,6 +732,10 @@ Bool MapCache::addMap( AsciiString dirName, AsciiString fname, FileInfo *fileInf
 		if ((md.m_filesize == filesize) &&
 				(md.m_CRC != 0))
 		{
+			// the cache is keyed on the map file's size, which says nothing about its rules files
+			if (hasMapRules( fname ))
+				(*this)[lowerFname].m_CRC = calcCRC( dirName, fname );
+
 			// Force a lookup so that we don't display the English localization in all builds.
 			if (md.m_nameLookupTag.isEmpty())
 			{
