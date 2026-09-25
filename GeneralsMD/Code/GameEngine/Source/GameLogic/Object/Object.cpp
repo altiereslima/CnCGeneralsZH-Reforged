@@ -3302,11 +3302,8 @@ Int Object::getConstructionSecondsRemaining() const
 		rate = 100.0f / INT_TO_REAL( max( 1, framesToBuild ) );
 	}
 	Real left = max( 0.0f, 100.0f - m_constructionPercent );
-	// real seconds: the logic runs at the game-speed rate, not at a fixed 30 frames a second
-	Int logicFps = TheGameEngine ? TheGameEngine->getFramesPerSecondLimit() : 0;
-	if( logicFps <= 0 )
-		logicFps = LOGICFRAMES_PER_SECOND;
-	return REAL_TO_INT_CEIL( left / rate / logicFps );
+	// for the screen only: the rate it divides by is measured on the wall clock
+	return ControlBar_secondsFromFrames( left / rate );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5316,12 +5313,14 @@ void Object::look()
 						 skirmish screen, or a player taken over with Shift-Ctrl-T - shares its eyes with
 						 whoever is at the keyboard, so you can watch it without switching to it.  Both
 						 ways round: switch to that base and your first one keeps feeding you its sight.
-						 Off in a network game, where the logic must not depend on who is looking. */
-					if( getControllingPlayer()->getPlayerType() == PLAYER_HUMAN
-							&& !TheGameLogic->isInMultiplayerGame()
-							&& ThePlayerList->getLocalPlayer() )
+						 "Whoever is at the keyboard" is the logic's keyboard player, not the local player: a
+						 playback's local player is the ReplayObserver, and every human unit's looks came out
+						 different from the recording's.  NULL in a network game, where the logic must not
+						 depend on who is looking. */
+					Player *keyboardPlayer = ThePlayerList->getKeyboardPlayer();
+					if( getControllingPlayer()->getPlayerType() == PLAYER_HUMAN && keyboardPlayer )
 					{
-						lookingMask |= ThePlayerList->getLocalPlayer()->getPlayerMask();
+						lookingMask |= keyboardPlayer->getPlayerMask();
 					}
 
 					// Other players can also be looking through our eyes.

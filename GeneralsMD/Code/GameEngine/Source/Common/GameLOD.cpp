@@ -694,10 +694,10 @@ void GameLODManager::applyDynamicLODLevel(DynamicGameLODLevel level)
 	m_numParticleGenerations=0;
 	m_dynamicParticleSkipMask=m_dynamicGameLODInfo[level].m_dynamicParticleSkipMask;
 
-	m_numDebrisGenerations=0;
-	m_dynamicDebrisSkipMask=m_dynamicGameLODInfo[level].m_dynamicDebrisSkipMask;
-
-	m_slowDeathScale=m_dynamicGameLODInfo[level].m_slowDeathScale;
+	/* DebrisSkipMask and SlowDeathScale are still parsed and no longer applied.  The dynamic level
+		 follows this machine's frame rate, and logic reads both: the one decides whether a debris object
+		 is created, the other how long a death takes.  The stock GameLOD.ini sets them to no effect at
+		 every level, and the file is outside the multiplayer checksum, so a changed one split the match. */
 	m_minDynamicParticlePriority=m_dynamicGameLODInfo[level].m_minDynamicParticlePriority;
 	m_minDynamicParticleSkipPriority=m_dynamicGameLODInfo[level].m_minDynamicParticleSkipPriority;
 }

@@ -47,6 +47,7 @@
 #include "GameClient/FXList.h"
 #include "GameClient/GameClient.h"
 #include "GameClient/Eva.h"
+#include "GameClient/ObserverCamera.h"
 
 #include "GameLogic/Damage.h"
 #include "GameLogic/Object.h"
@@ -834,9 +835,12 @@ UpdateSleepTime StealthUpdate::update( void )
 
 
 
+	// the look is for whoever the screen is drawn for: this machine's player, or the one a watcher
+	// follows with his fog on, so a stealthed enemy he has not found is not on the screen either
 	if (draw)
 	{
-		StealthLookType stealthLook = calcStealthedStatusForPlayer( self, ThePlayerList->getLocalPlayer() );
+		const Player *viewer = ThePlayerList->getNthPlayer( TheObserverCamera.getShroudPlayerIndex() );
+		StealthLookType stealthLook = calcStealthedStatusForPlayer( self, viewer );
 		draw->setStealthLook( stealthLook );
 	}
 

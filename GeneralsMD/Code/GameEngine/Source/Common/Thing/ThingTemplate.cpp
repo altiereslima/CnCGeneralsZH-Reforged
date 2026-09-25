@@ -64,6 +64,7 @@
 #include "GameClient/Shadow.h"
 
 #include "GameLogic/Armor.h"
+#include "GameLogic/Module/ActiveBody.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/SpecialPowerModule.h"
 #include "GameLogic/Object.h"
@@ -1540,6 +1541,27 @@ Int ThingTemplate::calcCostToBuild( const Player* player) const
 	Real factionModifier = 1 + player->getProductionCostChangePercent( getName() );
 	factionModifier *= player->getProductionCostChangeBasedOnKindOf( m_kindof );
 	return getBuildCost() * factionModifier * player->getHandicap()->getHandicap(Handicap::BUILDCOST, this);
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Every body module that can be hurt keeps its health in ActiveBodyModuleData; the one that
+	* cannot, InactiveBody, is not on the list and answers zero. */
+//-------------------------------------------------------------------------------------------------
+Real ThingTemplate::calcMaxHealth( void ) const
+{
+	static const char *BODIES_WITH_HEALTH[] =
+		{ "ActiveBody", "StructureBody", "HiveStructureBody", "UndeadBody", "HighlanderBody", "ImmortalBody", NULL };
+
+	const ModuleInfo &modules = getBehaviorModuleInfo();
+	for( Int m = 0; m < modules.getCount(); ++m )
+	{
+		for( const char **body = BODIES_WITH_HEALTH; *body != NULL; ++body )
+		{
+			if( modules.getNthName( m ).compareNoCase( *body ) == 0 )
+				return static_cast<const ActiveBodyModuleData *>( modules.getNthData( m ) )->m_maxHealth;
+		}
+	}
+	return 0.0f;
 }
 
 //-------------------------------------------------------------------------------------------------

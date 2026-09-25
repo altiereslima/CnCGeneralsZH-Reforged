@@ -193,7 +193,7 @@ public:
 	~ObjectCreationListStore();
 
 	void init() { }
-	void reset() { }
+	void reset();
 	void update() { }
 
 	/**
@@ -210,6 +210,9 @@ private:
 
 	typedef std::map< NameKeyType, ObjectCreationList, std::less<NameKeyType> > ObjectCreationListMap;
 	ObjectCreationListMap m_ocls;
+
+	/// What a map.ini overwrote, in the order it did, put back by reset() so the next match starts from the stock lists.
+	std::vector< std::pair<NameKeyType, ObjectCreationList> > m_beforeMapOverrides;
 
 	// note, this list doesn't own the nuggets; all nuggets are owned by the Store.
 	typedef std::vector<ObjectCreationNugget*> ObjectCreationNuggetVector;

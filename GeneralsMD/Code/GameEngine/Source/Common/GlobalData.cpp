@@ -703,9 +703,12 @@ GlobalData::GlobalData()
 	m_autoSkirmishPlayers = 0; // no skirmish from the command line
 	m_autoSkirmishAIState = SLOT_BRUTAL_AI;
 	m_autoSkirmishAIStateOdd = 0;		// 0 = not set: every slot plays at -aidiff
+	m_noTacticsSlotParity = -1;
 	m_autoSkirmishTeams = 0;				// 0 = not set: every slot fights every other slot
 	m_peaceTime = 0;								// no truce unless -peacetime asks for one
 	m_unitLimit = FALSE;						// no unit limit unless -unitlimit asks for one
+	m_incomeSharing = 0;						// INCOME_SHARING_OFF unless -incomesharing asks
+	m_techRespawn = 0;							// a destroyed tech building stays destroyed unless -techrespawn asks
 	m_autoSkirmishObserver = FALSE;
 	m_headless = FALSE;
 	m_turbo = FALSE;
@@ -740,6 +743,7 @@ GlobalData::GlobalData()
 	m_netGameHosts.clear(); // no network game from the command line
 	m_netGameStarted = FALSE;
 	m_netGameLocalSlot = 0;
+	m_netGameAISlots = 0;
 	m_lanPlayerName.clear(); // the lobby name comes out of the preferences unless -lanname says otherwise
 	m_lanLobbyOnStart = FALSE;
 	m_skirmishLobbyOnStart = FALSE;
@@ -1144,7 +1148,6 @@ GlobalData::GlobalData()
 	m_buildPlacementShadows = TRUE;
 	m_showHudOverlay = TRUE;
 	m_showPlacementRangeRing = TRUE;
-	m_showProductionStrip = TRUE;
 	m_showSkillStrip = TRUE;
 	m_showSuperweaponStrip = TRUE;
 	m_workersReturnToSupply = TRUE;

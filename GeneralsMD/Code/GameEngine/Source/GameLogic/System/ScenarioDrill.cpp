@@ -25,11 +25,13 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
+#include "Common/BuildAssistant.h"
 #include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "Common/GlobalData.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
+#include "Common/SpecialPower.h"
 #include "Common/Team.h"
 #include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
@@ -39,6 +41,7 @@
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/BehaviorModule.h"
 #include "GameLogic/Module/CreateModule.h"
+#include "GameLogic/Module/ProductionUpdate.h"
 #include "GameLogic/Module/SpecialPowerModule.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/ScenarioDrill.h"
@@ -77,6 +80,12 @@ static const Int SCENARIO_TOKENS_MOVE = 5;
 static const Int SCENARIO_TOKENS_ATTACK = 6;
 static const Int SCENARIO_TOKENS_SPAWN = 6;
 static const Int SCENARIO_TOKENS_ARRIVE = 5;
+static const Int SCENARIO_TOKENS_SHIFTPOWER = 7;
+static const Int SCENARIO_TOKENS_SHIFTUPGRADE = 5;
+
+// where the name sits in the lines that carry one
+static const Int SCENARIO_SHIFTPOWER_NAME_TOKEN = 6;
+static const Int SCENARIO_SHIFTUPGRADE_NAME_TOKEN = 4;
 
 // where the position starts in each line that has one
 static const Int SCENARIO_SPAWN_POSITION_TOKEN = 5;
@@ -175,6 +184,22 @@ static Bool parseActionType( const AsciiString &token, ScenarioActionType *actio
 		*action = SCENARIO_ACTION_PARTICLES;
 	else if (token == "power")
 		*action = SCENARIO_ACTION_POWER;
+	else if (token == "produce")
+		*action = SCENARIO_ACTION_PRODUCE;
+	else if (token == "tally")
+		*action = SCENARIO_ACTION_TALLY;
+	else if (token == "shiftmove")
+		*action = SCENARIO_ACTION_SHIFTMOVE;
+	else if (token == "shiftattackmove")
+		*action = SCENARIO_ACTION_SHIFTATTACKMOVE;
+	else if (token == "shiftattack")
+		*action = SCENARIO_ACTION_SHIFTATTACK;
+	else if (token == "shiftguard")
+		*action = SCENARIO_ACTION_SHIFTGUARD;
+	else if (token == "shiftpower")
+		*action = SCENARIO_ACTION_SHIFTPOWER;
+	else if (token == "shiftupgrade")
+		*action = SCENARIO_ACTION_SHIFTUPGRADE;
 	else
 		return FALSE;
 
@@ -253,9 +278,17 @@ static Int tokensNeededFor( ScenarioActionType action )
 		case SCENARIO_ACTION_POWER:				return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_PLAYERATTACKMOVE:	return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_ATTACKMOVE:	return SCENARIO_TOKENS_MOVE;
+		case SCENARIO_ACTION_SHIFTMOVE:		return SCENARIO_TOKENS_MOVE;
+		case SCENARIO_ACTION_SHIFTATTACKMOVE:	return SCENARIO_TOKENS_MOVE;
+		case SCENARIO_ACTION_SHIFTGUARD:	return SCENARIO_TOKENS_MOVE;
+		case SCENARIO_ACTION_SHIFTATTACK:	return SCENARIO_TOKENS_ATTACK;
+		case SCENARIO_ACTION_SHIFTPOWER:	return SCENARIO_TOKENS_SHIFTPOWER;
+		case SCENARIO_ACTION_SHIFTUPGRADE:	return SCENARIO_TOKENS_SHIFTUPGRADE;
 		case SCENARIO_ACTION_ATTACK:			return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_ENTER:				return SCENARIO_TOKENS_ATTACK;
+		case SCENARIO_ACTION_PRODUCE:			return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_STOP:				return SCENARIO_TOKENS_STOP;
+		case SCENARIO_ACTION_TALLY:				return SCENARIO_TOKENS_STOP;
 		case SCENARIO_ACTION_ARRIVE:			return SCENARIO_TOKENS_ARRIVE;
 	}
 	return SCENARIO_TOKENS_STOP;
@@ -299,6 +332,7 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 	action->radius = SCENARIO_DEFAULT_ARRIVE_RADIUS;
 	action->targetSlot = 0;
 	action->targetSelector.clear();
+	action->name.clear();
 
 	switch (actionType)
 	{
@@ -322,6 +356,9 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 		case SCENARIO_ACTION_ATTACKMOVE:
 		case SCENARIO_ACTION_ARRIVE:
 		case SCENARIO_ACTION_POWER:
+		case SCENARIO_ACTION_SHIFTMOVE:
+		case SCENARIO_ACTION_SHIFTATTACKMOVE:
+		case SCENARIO_ACTION_SHIFTGUARD:
 		{
 			Int next = SCENARIO_ORDER_POSITION_TOKEN;
 			const ScenarioParseResult position = parseScenarioPosition( tokens, count, &next, action );
@@ -336,14 +373,31 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 
 		case SCENARIO_ACTION_ATTACK:
 		case SCENARIO_ACTION_ENTER:
+		case SCENARIO_ACTION_SHIFTATTACK:
+		case SCENARIO_ACTION_SHIFTPOWER:
 		{
 			if (!parseWholeNumber( tokens[ 4 ], &action->targetSlot ))
 				return SCENARIO_PARSE_BAD_SLOT;
 			action->targetSelector = tokens[ 5 ];
+			if (actionType == SCENARIO_ACTION_SHIFTPOWER)
+				action->name = tokens[ SCENARIO_SHIFTPOWER_NAME_TOKEN ];
+			break;
+		}
+
+		case SCENARIO_ACTION_SHIFTUPGRADE:
+			action->name = tokens[ SCENARIO_SHIFTUPGRADE_NAME_TOKEN ];
+			break;
+
+		case SCENARIO_ACTION_PRODUCE:
+		{
+			action->targetSelector = tokens[ 4 ];	// what to make
+			if (!parseWholeNumber( tokens[ 5 ], &action->count ) || action->count < 1)
+				return SCENARIO_PARSE_BAD_COUNT;
 			break;
 		}
 
 		case SCENARIO_ACTION_STOP:
+		case SCENARIO_ACTION_TALLY:
 			break;
 	}
 
@@ -531,6 +585,11 @@ static Bool selectorMatches( const AsciiString &selector, const Object *obj )
 	if (tmpl == NULL)
 		return FALSE;
 
+	// "GLAVehicleTechnical*": a Technical spawns as one of its chassis templates, never under its own name
+	const Int length = selector.getLength();
+	if (length > 1 && selector.getCharAt( length - 1 ) == '*')
+		return strncmp( tmpl->getName().str(), selector.str(), length - 1 ) == 0;
+
 	return tmpl->getName() == selector;
 }
 
@@ -612,6 +671,9 @@ static Bool spawnOne( const ThingTemplate *tmpl, Team *team, const Coord3D *pos 
 			continue;
 		create->onBuildComplete();
 	}
+
+	// a capture refreshes the bar the same way; without it a spawned superweapon waits for a click
+	TheControlBar->markUIDirty();
 
 	team->setActive();
 	TheAI->pathfinder()->addObjectToPathfindMap( obj );
@@ -914,6 +976,171 @@ static Bool executePower( const ScenarioAction &action, Player *player, const Co
 	return fired > 0;
 }
 
+/** Queue `count` of the template in the first matching building of this seat, the way a click on
+	  its build button would, money and prerequisites checked by the building's own queue.  What a
+	  queue refuses is counted and reported, not forced. */
+static Bool executeProduce( const ScenarioAction &action, Player *player )
+{
+	Object *building = findFirstMatching( player, action.selector );
+	ProductionUpdateInterface *queue = building ? building->getProductionUpdateInterface() : NULL;
+	const ThingTemplate *made = TheThingFactory->findTemplate( action.targetSelector );
+	if (queue == NULL || made == NULL)
+	{
+		DEBUG_LOG(("SCENARIO: frame %d produce: slot %d has no producing '%s', or '%s' is no template\n",
+							 action.frame, action.slot, action.selector.str(), action.targetSelector.str()));
+		return FALSE;
+	}
+
+	Int queued = 0;
+	for (Int each = 0; each < action.count; ++each)
+	{
+		if (queue->canQueueCreateUnit( made ) == CANMAKE_OK && queue->queueCreateUnit( made, queue->requestUniqueUnitID() ))
+			++queued;
+	}
+
+	DEBUG_LOG(("SCENARIO: frame %d produce slot %d '%s' queued %d of %d '%s'\n",
+						 action.frame, action.slot, action.selector.str(), queued, action.count, action.targetSelector.str()));
+	return queued > 0;
+}
+
+/** How much of this seat's matching stock is still standing: the count, the health left against the
+	  health they started with, and what the living ones cost.  Structures count too, so a fight between
+	  an army and a defence reads as money lost on each side. */
+static Bool executeTally( const ScenarioAction &action, Player *player )
+{
+	Int alive = 0;
+	Int inside = 0;
+	Real health = 0.0f;
+	Real maxHealth = 0.0f;
+	Int worth = 0;
+	for( Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
+	{
+		if (obj->getControllingPlayer() != player || obj->isEffectivelyDead() || !selectorMatches( action.selector, obj ))
+			continue;
+
+		++alive;
+		if (obj->getContainedBy() != NULL)
+			++inside;
+		health += obj->getBodyModule()->getHealth();
+		maxHealth += obj->getBodyModule()->getMaxHealth();
+		worth += obj->getTemplate()->friend_getBuildCost();
+	}
+
+	DEBUG_LOG(("HEADLESS TALLY: frame %d slot %d '%s': %d alive, health %.0f of %.0f, worth %d, %d inside\n",
+						 action.frame, action.slot, action.selector.str(), alive, health, maxHealth, worth, inside));
+	return TRUE;
+}
+
+/** A shift click: the order goes onto the seat's order queue the way it would arrive over the network
+	  with MSG_QUEUE_NEXT_ORDER in front of it, carrying the arguments the command translator gives it.
+	  The group is destroyed here on every path, by the queue when it takes the order. */
+static Bool executeShiftOrder( const ScenarioAction &action, Player *player, const Coord3D &dest,
+															 AIGroup *group, Int taken )
+{
+	GameMessage::Type type = GameMessage::MSG_DO_GUARD_POSITION;
+	const char *verb = "shiftguard";
+	if (action.action == SCENARIO_ACTION_SHIFTMOVE)
+	{
+		type = GameMessage::MSG_DO_MOVETO;
+		verb = "shiftmove";
+	}
+	else if (action.action == SCENARIO_ACTION_SHIFTATTACKMOVE)
+	{
+		type = GameMessage::MSG_DO_ATTACKMOVETO;
+		verb = "shiftattackmove";
+	}
+	else if (action.action == SCENARIO_ACTION_SHIFTATTACK)
+	{
+		type = GameMessage::MSG_DO_ATTACK_OBJECT;
+		verb = "shiftattack";
+	}
+	else if (action.action == SCENARIO_ACTION_SHIFTPOWER)
+	{
+		type = GameMessage::MSG_DO_SPECIAL_POWER_AT_OBJECT;
+		verb = "shiftpower";
+	}
+
+	GameMessage *msg = newInstance( GameMessage )( type );
+	msg->friend_setPlayerIndex( player->getPlayerIndex() );
+
+	if (action.action == SCENARIO_ACTION_SHIFTATTACK || action.action == SCENARIO_ACTION_SHIFTPOWER)
+	{
+		Player *targetPlayer = findPlayerForSlot( action.targetSlot );
+		Object *target = (targetPlayer != NULL) ? findFirstMatching( targetPlayer, action.targetSelector ) : NULL;
+		const SpecialPowerTemplate *power = (action.action == SCENARIO_ACTION_SHIFTPOWER)
+																				? TheSpecialPowerStore->findSpecialPowerTemplate( action.name ) : NULL;
+		if (target == NULL || (action.action == SCENARIO_ACTION_SHIFTPOWER && power == NULL))
+		{
+			DEBUG_LOG(("SCENARIO: frame %d %s: slot %d owns nothing matching '%s', or there is no power '%s'\n",
+								 action.frame, verb, action.targetSlot, action.targetSelector.str(), action.name.str()));
+			msg->deleteInstance();
+			TheAI->destroyGroup( group );
+			return FALSE;
+		}
+
+		if (power != NULL)
+			msg->appendIntegerArgument( power->getID() );
+		msg->appendObjectIDArgument( target->getID() );
+		if (power != NULL)
+		{
+			msg->appendIntegerArgument( 0 );						// the button's options, which a capture never reads
+			msg->appendObjectIDArgument( INVALID_ID );	// fired by the selection, as off the command bar
+		}
+	}
+	else
+	{
+		msg->appendLocationArgument( dest );
+		if (type == GameMessage::MSG_DO_ATTACKMOVETO)
+			msg->appendBooleanArgument( FALSE );
+		if (type == GameMessage::MSG_DO_GUARD_POSITION)
+			msg->appendIntegerArgument( GUARDMODE_GUARD_WITHOUT_PURSUIT );
+	}
+
+	player->getOrderQueue()->setNextOrderMode( ORDER_QUEUE_APPEND );
+	player->getOrderQueue()->takeMessage( msg, group, player );
+	msg->deleteInstance();
+
+	DEBUG_LOG(("SCENARIO: frame %d %s slot %d '%s' x%d\n",
+						 action.frame, verb, action.slot, action.selector.str(), taken));
+	return TRUE;
+}
+
+/** Shift on an object upgrade button, once for every unit that matches: the two messages the command
+	  bar sends, handed to the dispatcher the way they arrive.  An upgrade names the unit that buys it, so
+	  unlike the other shift verbs this one needs nothing selected. */
+static Bool executeShiftUpgrade( const ScenarioAction &action, Player *player, AIGroup *group, Int taken )
+{
+	const std::vector<ObjectID> buyers = group->getAllIDs();
+	TheAI->destroyGroup( group );
+
+	const UpgradeTemplate *upgrade = TheUpgradeCenter->findUpgrade( action.name );
+	if (upgrade == NULL)
+	{
+		DEBUG_LOG(("SCENARIO: frame %d shiftupgrade: there is no upgrade '%s'\n", action.frame, action.name.str()));
+		return FALSE;
+	}
+
+	for (std::vector<ObjectID>::const_iterator it = buyers.begin(); it != buyers.end(); ++it)
+	{
+		GameMessage *prefix = newInstance( GameMessage )( GameMessage::MSG_QUEUE_NEXT_ORDER );
+		prefix->friend_setPlayerIndex( player->getPlayerIndex() );
+		prefix->appendIntegerArgument( ORDER_QUEUE_APPEND );
+		TheGameLogic->logicMessageDispatcher( prefix, NULL );
+		prefix->deleteInstance();
+
+		GameMessage *msg = newInstance( GameMessage )( GameMessage::MSG_QUEUE_UPGRADE );
+		msg->friend_setPlayerIndex( player->getPlayerIndex() );
+		msg->appendObjectIDArgument( *it );
+		msg->appendIntegerArgument( upgrade->getUpgradeNameKey() );
+		TheGameLogic->logicMessageDispatcher( msg, NULL );
+		msg->deleteInstance();
+	}
+
+	DEBUG_LOG(("SCENARIO: frame %d shiftupgrade slot %d '%s' x%d '%s'\n",
+						 action.frame, action.slot, action.selector.str(), taken, action.name.str()));
+	return TRUE;
+}
+
 static Bool executeOrder( const ScenarioAction &action, Player *player, const Coord3D &dest )
 {
 	AIGroup *group = TheAI->createGroup();
@@ -981,6 +1208,16 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 			break;
 		}
 
+		case SCENARIO_ACTION_SHIFTMOVE:
+		case SCENARIO_ACTION_SHIFTATTACKMOVE:
+		case SCENARIO_ACTION_SHIFTATTACK:
+		case SCENARIO_ACTION_SHIFTGUARD:
+		case SCENARIO_ACTION_SHIFTPOWER:
+			return executeShiftOrder( action, player, dest, group, taken );		// the group is gone either way
+
+		case SCENARIO_ACTION_SHIFTUPGRADE:
+			return executeShiftUpgrade( action, player, group, taken );
+
 		case SCENARIO_ACTION_STOP:
 		{
 			group->groupIdle( CMD_FROM_SCRIPT );
@@ -993,6 +1230,8 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 		case SCENARIO_ACTION_ARRIVE:
 		case SCENARIO_ACTION_PARTICLES:
 		case SCENARIO_ACTION_POWER:
+		case SCENARIO_ACTION_PRODUCE:
+		case SCENARIO_ACTION_TALLY:
 			ordered = FALSE;		// handled before the group is built
 			break;
 	}
@@ -1025,6 +1264,12 @@ Bool ScenarioDrill_execute( const ScenarioAction &action )
 
 	if (action.action == SCENARIO_ACTION_POWER)
 		return executePower( action, player, position );
+
+	if (action.action == SCENARIO_ACTION_PRODUCE)
+		return executeProduce( action, player );
+
+	if (action.action == SCENARIO_ACTION_TALLY)
+		return executeTally( action, player );
 
 	return executeOrder( action, player, position );
 }

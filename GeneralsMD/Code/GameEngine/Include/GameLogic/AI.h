@@ -185,8 +185,8 @@ struct AIDifficultyProfile
 	// Perception. Never fog: only how diligently it looks and how fast it acts on what it saw.
 	Real	m_scoutIntervalSeconds;					///< how often the scout is re-tasked; every rung scouts
 	Int		m_maxScouts;
-	Real	m_reactionDelaySeconds;					///< lag between "something happened" and answering it
-	Real	m_decisionIntervalSeconds;			///< how often it re-evaluates - the AI's APM
+	Real	m_decisionIntervalSeconds;			///< how often it re-evaluates - the AI's APM, and so how late it answers
+																				///< what it saw: a separate reaction delay stood here, read by nothing
 
 	// Decision quality
 	Real	m_counterCompositionWeight;			///< 0 = ignore what the enemy fields (EA's behaviour)
@@ -204,6 +204,9 @@ struct AIDifficultyProfile
 	Bool	m_defendExpansions;
 	Int		m_cashHoardThreshold;						///< above this, spend faster; 0 = never hurry
 	Bool	m_economyBuildings;							///< past the hoard, buy production and income the build list never had
+
+	// Fighting: decisions only, from what it knows can shoot where
+	Bool	m_tacticalMicro;								///< kite what it outranges, take the high ground, pull hurt units out
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -570,6 +573,9 @@ public:
 
 	inline UnsignedInt getNextGroupID( void ) { return ++m_nextGroupID; }
 
+	/// One building placement per logic frame across every computer player: FALSE when one already went down on this frame.
+	Bool claimBuildingPlacement( UnsignedInt frame );
+
 protected:
 	Pathfinder *m_pathfinder;							///< the pathfinding system
 	std::list<AIGroup *> m_groupList;			///< the list of AIGroups
@@ -579,6 +585,7 @@ protected:
 	
 	UnsignedInt m_nextGroupID;
 	FormationID m_nextFormationID;
+	UnsignedInt m_lastBuildingPlacementFrame;	///< cleared by reset: a static here outlived the match and deferred the next match's first placement on one machine only
 };
 
 extern AI *TheAI;												///< the Artificial Intelligence singleton

@@ -297,9 +297,6 @@ public:
 		MSG_META_HOLD_POSITION,											///< hold position: guard in place, no pursuit (fork)
 		MSG_META_TOGGLE_GUARD,											///< arm guard for the next order click or drag (fork)
 		MSG_META_TOGGLE_PAUSE,											///< pause/unpause, single player and replay only (fork)
-		MSG_META_GAME_SPEED_UP,											///< raise the logic rate (fork)
-		MSG_META_GAME_SPEED_DOWN,										///< lower the logic rate (fork)
-		MSG_META_GAME_SPEED_RESET,									///< back to the default logic rate (fork)
 		MSG_META_TOGGLE_PURCHASE_SCIENCE,						///< open/close the general's promotion screen (fork)
 		
 		MSG_META_BEGIN_CAMERA_ROTATE_LEFT,
@@ -648,6 +645,7 @@ public:
 		MSG_DO_FORMATION_GUARD,											///< (location...) the same curve, each unit guarding its own point (fork)
 		MSG_PLACE_SIGNAL,														///< (location, Int SignalKind) smoke only the sender's allies are shown (fork)
 		MSG_CHEAT,																	///< (Int CheatKind, Int amount) a console cheat, refused in a network game (fork)
+		MSG_QUEUE_NEXT_ORDER,												///< (Int OrderQueueMode) the order right after this one is a shift-queued one (fork)
 
 		MSG_BEGIN_DEBUG_NETWORK_MESSAGES = 1900,		///< network messages that exist only in debug/internal builds. all grouped separately.
 

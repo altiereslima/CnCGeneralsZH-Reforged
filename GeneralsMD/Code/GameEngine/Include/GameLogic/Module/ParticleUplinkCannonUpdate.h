@@ -179,6 +179,9 @@ public:
 	void createOrbitToTargetLaser( UnsignedInt growthFrames );
 	void createGroundHitParticleSystem( IntensityTypes intensity );
 
+	Bool findOrbitBeamRadius( Real &radius ) const;		///< the beam template's half width, FALSE without a beam
+	Real computeOrbitBeamWidthScalar( UnsignedInt frame ) const;
+
 	Bool calculateDefaultInformation();
 	Bool calculateUpBonePositions();
 
@@ -228,6 +231,8 @@ protected:
 	UnsignedInt			m_nextDamagePulseFrame;
 	UnsignedInt			m_startAttackFrame;
 	UnsignedInt			m_startDecayFrame;
+	UnsignedInt			m_orbitBeamWidenFrame;		///< logic frame the orbit beam was born and began to widen
+	UnsignedInt			m_orbitBeamDecayFrame;		///< logic frame it began to narrow
 	UnsignedInt			m_lastDrivingClickFrame;
 	UnsignedInt			m_2ndLastDrivingClickFrame;
 	UnsignedInt			m_nextDestWaypointID;

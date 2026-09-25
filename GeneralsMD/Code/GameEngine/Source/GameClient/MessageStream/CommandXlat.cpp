@@ -60,6 +60,7 @@
 #include "GameClient/GameText.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/GUICallbacks.h"
+#include "GameClient/KeyDefs.h"
 #include "GameClient/Shell.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/SelectionInfo.h"
@@ -961,36 +962,13 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 
 	if (m_teamExists)
 	{
-		// under shift, an attack (force-attack on an attackable, or attack-move) joins the shift
-		// queue instead of the plain waypoint path - that path is a bare list of points with no
-		// order type, so it cannot carry an attack.  See InGameUI::queueAttackWaypoint.
 		Bool forceAttackHere = isForceAttackTargeting() && isForceAttackable;
-		Bool queuedGuard = TheInGameUI->isInWaypointMode() && TheInGameUI->isGuardArmed();
-		Bool queuedAttack = TheInGameUI->isInWaypointMode()
-												 && ( TheInGameUI->isInAttackMoveToMode() || forceAttackHere );
 
-		// the guard key posts the selection where it is pointed, and under shift it joins the line
-		// of orders as its last one: clear this, then sit there.  A guard never finishes, so nothing
-		// can be queued behind it
-		if( queuedGuard )
+		// the guard key posts the selection where it is pointed.  Under shift it joins the list as its
+		// last order: clear this, then sit there
+		if( TheInGameUI->isGuardArmed() )
 		{
 			msgType = GameMessage::MSG_DO_GUARD_POSITION;
-			if( commandType == DO_COMMAND )
-				TheInGameUI->queueGuardWaypoint( pos );
-		}
-		else if( TheInGameUI->isGuardArmed() )
-		{
-			msgType = GameMessage::MSG_DO_GUARD_POSITION;
-		}
-		else if( queuedAttack )
-		{
-			msgType = forceAttackHere ? GameMessage::MSG_DO_ATTACK_OBJECT : GameMessage::MSG_DO_ATTACKMOVETO;
-			if( commandType == DO_COMMAND )
-				TheInGameUI->queueAttackWaypoint( pos, forceAttackHere ? obj : NULL );
-		}
-		else if( TheInGameUI->isInWaypointMode() )
-		{
-			msgType = GameMessage::MSG_ADD_WAYPOINT;
 		}
 		else if( TheInGameUI->isInAttackMoveToMode())
 		{
@@ -1008,7 +986,7 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 		{
 			msgType = GameMessage::MSG_DO_MOVETO;
 		}
-		if( commandType == DO_COMMAND && !queuedAttack && !queuedGuard )
+		if( commandType == DO_COMMAND )
 		{
 			GameMessage *movemsg = TheMessageStream->appendMessage( msgType );
 			if (msgType == GameMessage::MSG_DO_ATTACK_OBJECT)
@@ -1493,20 +1471,31 @@ void CommandTranslator::finishFormationDrag( const ICoord2D& lift )
 
 	// the traced curve becomes world points; who stands where along it is decided on
 	// the logic side, where every machine decides it the same way
-	GameMessage *newMsg = TheMessageStream->appendMessage( formationType );
+	std::vector<Coord3D> line;
 	for( std::vector<ICoord2D>::const_iterator it = curve.begin(); it != curve.end(); ++it )
 	{
 		Coord3D world;
 		TheTacticalView->screenToTerrain( &(*it), &world );
-		newMsg->appendLocationArgument( world );
+		line.push_back( world );
 	}
 
-	TheInGameUI->clearAttackMoveToMode();
+	// a line drawn with the attack key across enemies is aimed at them: each one it crosses goes on
+	// the target list, in the order the line meets them, and the ground under the line is not shot
+	// at.  Only a line that crosses nobody fires on the ground along it
+	const Bool aimedAtTargets = formationType == GameMessage::MSG_DO_FORMATION_FORCEATTACK
+															&& TheInGameUI->issueAttackLine( line ) > 0;
+	if( !aimedAtTargets )
+	{
+		// a line drawn with shift is the next order on the units' list
+		if( TheInGameUI->isInWaypointMode() )
+			TheInGameUI->markNextOrderQueued( ORDER_QUEUE_APPEND );
 
-	// a hand-given order ends whatever list the group was working through, unless shift
-	// says the player is adding to it
-	if( !TheInGameUI->isInWaypointMode() )
-		TheInGameUI->clearShiftAttackQueue();
+		GameMessage *newMsg = TheMessageStream->appendMessage( formationType );
+		for( std::vector<Coord3D>::const_iterator it = line.begin(); it != line.end(); ++it )
+			newMsg->appendLocationArgument( *it );
+	}
+
+	TheInGameUI->spendOrderKey();
 
 	const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
 	if( selected && !selected->empty() )
@@ -1543,13 +1532,15 @@ GameMessage::Type CommandTranslator::evaluateForceAttack( Drawable *draw, const 
 		{
 			retVal = GameMessage::MSG_DO_FORCE_ATTACK_OBJECT;
 
-			if( type == DO_COMMAND ) 
+			if( type == DO_COMMAND )
 			{
 				pickAndPlayUnitVoiceResponse( allSelected, retVal );
+				if( TheInGameUI->isInWaypointMode() )
+					TheInGameUI->markNextOrderQueued( ORDER_QUEUE_APPEND );
 				GameMessage *newMsg = TheMessageStream->appendMessage( retVal );
 				newMsg->appendObjectIDArgument( obj->getID() );
-				
-			} 
+
+			}
 			else if( type == DO_HINT ) 
 			{
 				retVal = GameMessage::MSG_DO_FORCE_ATTACK_OBJECT_HINT;
@@ -1571,12 +1562,14 @@ GameMessage::Type CommandTranslator::evaluateForceAttack( Drawable *draw, const 
 		{
 			retVal = GameMessage::MSG_DO_FORCE_ATTACK_GROUND;
 
-			if( type == DO_COMMAND ) 
+			if( type == DO_COMMAND )
 			{
 				pickAndPlayUnitVoiceResponse( allSelected, retVal );
+				if( TheInGameUI->isInWaypointMode() )
+					TheInGameUI->markNextOrderQueued( ORDER_QUEUE_APPEND );
 				GameMessage *newMsg = TheMessageStream->appendMessage( retVal );
 				newMsg->appendLocationArgument( *pos );
-			} 
+			}
 			else if( type == DO_HINT ) 
 			{
 				retVal = GameMessage::MSG_DO_FORCE_ATTACK_GROUND_HINT;
@@ -1659,24 +1652,11 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 	{
 		GameMessage *hintMessage;
 
-		if( TheInGameUI->isInWaypointMode() )
-		{
-			//Override any *other* commands with waypoint commands.
-			if( type == DO_COMMAND || type == EVALUATE_ONLY )
-			{
-				if( TheTerrainLogic )
-				{
-					msgType = issueMoveToLocationCommand( pos, draw, type );
-				}
-			}
-			else
-			{
-				msgType = GameMessage::MSG_ADD_WAYPOINT_HINT;
-				hintMessage = TheMessageStream->appendMessage( msgType );
-				hintMessage->appendLocationArgument( *pos );
-			}
-			return msgType;
-		}
+		// shift used to turn every click into a point on the path.  Now whatever the click orders - an
+		// attack, a capture, a ride in a transport - goes on the end of the units' list, and the logic
+		// keeps it there (OrderQueue.h).  A click that orders nothing is dropped by the logic with it
+		if( TheInGameUI->isInWaypointMode() && type == DO_COMMAND )
+			TheInGameUI->markNextOrderQueued( ORDER_QUEUE_APPEND );
 
 		CanAttackResult result;
 
@@ -2472,11 +2452,11 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 			if( type == DO_COMMAND || type == EVALUATE_ONLY )
 			{
 				// issue command
-				// Note: If draw is valid, then its one of ours and we don't have something more specific 
-				// to do. Therefore, lets not issue a move command, and instead we'll return that there 
-				// wasn't a command for us to perform.
-				
-				if ( draw == NULL )
+				// Note: If draw is valid, then its one of ours and we don't have something more specific
+				// to do. Therefore, lets not issue a move command, and instead we'll return that there
+				// wasn't a command for us to perform.  Under shift it is a point on the path all the same.
+
+				if ( draw == NULL || TheInGameUI->isInWaypointMode() )
 					msgType = issueMoveToLocationCommand( pos, drawableInWay, type );
 			}  // end if
 			else
@@ -2531,16 +2511,15 @@ Bool takeControlOfPlayer( Player *p )
 	if (!p->isPlayerActive() || !p->isPlayableSide())
 		return FALSE;
 
-	p->setPlayerType(PLAYER_HUMAN, FALSE);	// throws away its AIPlayer, if it had one
+	/* Throwing away the AIPlayer and moving the keyboard seat are the logic's to do, on the frame the
+		 message runs, so a replay does them too.  Called from here they happened on this machine only
+		 and no recording of the match played back.  The message goes out as the player being left. */
+	GameMessage *takeOver = TheMessageStream->appendMessage( GameMessage::MSG_CHEAT );
+	takeOver->appendIntegerArgument( CHEAT_TAKE_CONTROL );
+	takeOver->appendIntegerArgument( p->getPlayerIndex() );
+
 	ThePlayerList->setLocalPlayer(p);
 	TheInGameUI->deselectAllDrawables();
-
-	/* Every driverless base feeds its sight to whoever is at the keyboard (Object::handleShroud), and
-		 that mask was worked out the last time each object looked - which for a building is when it was
-		 built.  Make them all look again, or the base you just left goes dark behind you. */
-	for (Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject())
-		obj->handlePartitionCellMaintenance();
-
 	ThePartitionManager->refreshShroudForLocalPlayer();
 	TheControlBar->initSpecialPowershortcutBar(p);
 	TheControlBar->setControlBarSchemeByPlayer(p);
@@ -2565,6 +2544,12 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 {
 	GameMessage::Type t = msg->getType();
 	GameMessageDisposition disp = KEEP_MESSAGE;
+
+	// letting go of Tab puts the scoreboard away, input or no input; the press is the command map's
+	// DIPLOMACY
+	if (t == GameMessage::MSG_RAW_KEY_UP && msg->getArgument( 0 )->integer == KEY_TAB)
+		TheInGameUI->closeScoreboard();
+
 	// We want to always be able to get to the options menu even during no input times and a clear game data message should always go through
 	if (t != GameMessage::MSG_META_OPTIONS && t != GameMessage::MSG_CLEAR_GAME_DATA &&
 			!TheInGameUI->getInputEnabled() && !isSystemMessage(msg)) 
@@ -2860,7 +2845,11 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_COMMAND_SLOT13:
 		case GameMessage::MSG_META_COMMAND_SLOT14:
 		{
-			TheControlBar->pressCommandButton( t - GameMessage::MSG_META_COMMAND_SLOT01 );
+			// a watcher has no commands to press, and the top row picks the spectator's stat instead,
+			// the keys Dota's spectator uses for the same list
+			const Int slot = t - GameMessage::MSG_META_COMMAND_SLOT01;
+			if( !TheInGameUI->pickSpectatorStat( slot ) )
+				TheControlBar->pressCommandButton( slot );
 			disp = DESTROY_MESSAGE;
 			break;
 		}		// end command bar grid slots
@@ -3313,12 +3302,10 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_CHAT_ALLIES:
 			if (TheGameLogic->isInMultiplayerGame() && !TheGameLogic->isInReplayGame())
 			{
-				Player *localPlayer = ThePlayerList->getLocalPlayer();
-				if (localPlayer && localPlayer->isPlayerActive() || !TheGlobalData->m_netMinPlayers)
-				{
-					ToggleInGameChat();
-					SetInGameChatType( INGAME_CHAT_ALLIES );
-				}
+				// a watcher, or a player beaten, has no team: his line goes to everyone, and
+				// ConnectionManager::processChat shows it to the watchers alone
+				ToggleInGameChat();
+				SetInGameChatType( ThePlayerList->getLocalPlayer()->isPlayerActive() ? INGAME_CHAT_ALLIES : INGAME_CHAT_EVERYONE );
 			}
 			disp = DESTROY_MESSAGE;
 			break;
@@ -3327,23 +3314,19 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_CHAT_EVERYONE:
 			if (TheGameLogic->isInMultiplayerGame() && !TheGameLogic->isInReplayGame())
 			{
-				Player *localPlayer = ThePlayerList->getLocalPlayer();
-				if (localPlayer && localPlayer->isPlayerActive() || !TheGlobalData->m_netMinPlayers)
-				{
-					ToggleInGameChat();
-					SetInGameChatType( INGAME_CHAT_EVERYONE );
-				}
+				ToggleInGameChat();
+				SetInGameChatType( INGAME_CHAT_EVERYONE );
 			}
 			disp = DESTROY_MESSAGE;
 			break;
 
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_DIPLOMACY:
-			// Tab is the scoreboard in any game that has seats; the diplomacy screen, with its mute
-			// buttons, stays on the command bar's own button
+			// Tab is the scoreboard in any game that has seats, up while the key is held; the diplomacy
+			// screen, with its mute buttons, stays on the command bar's own button
 			if (TheGameLogic->isInGame() && !TheGameLogic->isInShellGame() && TheGameInfo)
 			{
-				TheInGameUI->toggleScoreboard();
+				TheInGameUI->openScoreboard();
 			}
 			else if (TheGameLogic->isInGame() && !TheGameLogic->isInShellGame())
 			{
@@ -3441,6 +3424,12 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			if( TheInGameUI->getGUICommand() != NULL )
 			{
 				TheInGameUI->setGUICommand( NULL );
+				cancelledSomething = TRUE;
+			}
+
+			if( TheInGameUI->isSignalArmed() )
+			{
+				TheInGameUI->disarmSignal();
 				cancelledSomething = TRUE;
 			}
 
@@ -3570,33 +3559,6 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 				Bool paused = !TheGameLogic->isGamePaused();
 				TheGameLogic->setGamePaused( paused );
 				TheInGameUI->message( paused ? "GUI:GamePaused" : "GUI:GameResumed" );
-			}
-			disp = DESTROY_MESSAGE;
-			break;
-		}
-
-		case GameMessage::MSG_META_GAME_SPEED_UP:
-		case GameMessage::MSG_META_GAME_SPEED_DOWN:
-		case GameMessage::MSG_META_GAME_SPEED_RESET:
-		{
-			if( TheGameEngine && TheGameLogic && !TheGameLogic->isInMultiplayerGame() )
-			{
-				const Int MIN_LOGIC_FPS = 5;
-				const Int MAX_LOGIC_FPS = 200;
-				Int fps = TheGameEngine->getFramesPerSecondLimit();
-
-				if( t == GameMessage::MSG_META_GAME_SPEED_RESET )
-					fps = DEFAULT_MAX_FPS;
-				else if( t == GameMessage::MSG_META_GAME_SPEED_UP )
-					fps += 5;
-				else
-					fps -= 5;
-
-				if( fps < MIN_LOGIC_FPS ) fps = MIN_LOGIC_FPS;
-				if( fps > MAX_LOGIC_FPS ) fps = MAX_LOGIC_FPS;
-
-				TheGameEngine->setFramesPerSecondLimit( fps );
-				TheInGameUI->message( UnicodeString( L"Game speed: %d" ), fps );
 			}
 			disp = DESTROY_MESSAGE;
 			break;
@@ -4209,12 +4171,6 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 					disp = DESTROY_MESSAGE;
 					TheInGameUI->clearAttackMoveToMode();
-
-					// a hand-given order ends whatever list the group was working through, unless shift
-					// says the player is adding to it - in which case the order just given is itself the
-					// newest entry in that list
-					if( !TheInGameUI->isInWaypointMode() )
-						TheInGameUI->clearShiftAttackQueue();
 				}
 			}
 
@@ -4292,12 +4248,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 				}
 
 				disp = DESTROY_MESSAGE;
-				TheInGameUI->clearAttackMoveToMode();
-
-				// the same rule the right button's orders follow: a hand-given attack ends the list the
-				// group was working through, unless shift says it is being added to
-				if( isOrderKey && !TheInGameUI->isInWaypointMode() )
-					TheInGameUI->clearShiftAttackQueue();
+				TheInGameUI->spendOrderKey();
 
 				//issueMoveToLocationCommand( &pos, draw, DO_COMMAND );
 			}

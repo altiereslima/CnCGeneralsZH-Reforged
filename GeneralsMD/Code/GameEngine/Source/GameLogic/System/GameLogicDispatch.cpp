@@ -42,6 +42,7 @@
 #include "Common/PlayerTemplate.h"
 #include "Common/MessageStream.h"
 #include "Common/MultiplayerSettings.h"
+#include "Common/RandomValue.h"
 #include "Common/Recorder.h"
 #include "Common/BuildAssistant.h"
 #include "Common/SpecialPower.h"
@@ -131,6 +132,7 @@ static void considerBuilderProc( Object *obj, void *userData )
 #include "GameClient/InGameUI.h"
 #include "GameClient/KeyDefs.h"
 #include "GameClient/Mouse.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/PlayerColorScheme.h"
 #include "GameClient/Shell.h"
@@ -402,26 +404,26 @@ void GameLogic::prepareNewGame( Int gameMode, GameDifficulty diff, Int rankPoint
 
 //-------------------------------------------------------------------------------------------------
 /** What each smoke signal says on an ally's screen, indexed by SignalKind.  The smoke is the sender's
-	* colour, so the kind is told apart by the word floated over it.  No signal uses
+	* colour, so the kind is told apart by the mark it lays on the ground.  No signal uses
 	* RADAR_EVENT_UNDER_ATTACK, because Radar::tryEvent refuses a real attack warning within ten
 	* seconds of one of those. */
 //-------------------------------------------------------------------------------------------------
 struct SignalLook
 {
 	RadarEventType radarEvent;
-	const char *wordLabel;
 	const char *announcementLabel;
 };
 
 static const SignalLook SIGNAL_LOOKS[ SIGNAL_KIND_COUNT ] =
 {
-	{ RADAR_EVENT_BATTLE_PLAN,	"GUI:SignalAttackLabel",		"GUI:SignalAttackPlaced" },
-	{ RADAR_EVENT_CONSTRUCTION,	"GUI:SignalDefendLabel",		"GUI:SignalDefendPlaced" },
-	{ RADAR_EVENT_INFORMATION,	"GUI:SignalAttentionLabel",	"GUI:SignalAttentionPlaced" },
+	{ RADAR_EVENT_BATTLE_PLAN,	"GUI:SignalAttackPlaced" },
+	{ RADAR_EVENT_CONSTRUCTION,	"GUI:SignalDefendPlaced" },
+	{ RADAR_EVENT_INFORMATION,	"GUI:SignalAttentionPlaced" },
 };
 
 static const char *SIGNAL_SMOKE_TEMPLATE = "BeaconSmokeFFFFFF";
-static const Real SIGNAL_SECONDS = 3.0f;
+/// the smoke, the mark on the ground and the radar ping all go together, as long as the feed's line
+static const Real SIGNAL_SECONDS = 10.0f;
 
 /// the smoke is fed for the first half of the signal and its last puff fades out over the second
 static const UnsignedInt SIGNAL_HALF_FRAMES = (UnsignedInt)( SIGNAL_SECONDS * LOGICFRAMES_PER_SECOND / 2 );
@@ -429,16 +431,13 @@ static const UnsignedInt SIGNAL_HALF_FRAMES = (UnsignedInt)( SIGNAL_SECONDS * LO
 static const UnsignedInt SIGNAL_COOLDOWN_FRAMES = LOGICFRAMES_PER_SECOND;
 
 // The beacon template draws a column nine units wide that needs five seconds to climb, which at the
-// signal's three seconds and the default camera height is a dark speck.  Measured on screen, not
-// derived: these make it a plume a tank's width across that a player finds at a glance.
+// signal's first three seconds and the default camera height is a dark speck.  Measured on screen,
+// not derived: these make it a plume a tank's width across that a player finds at a glance.
 static const Real SIGNAL_SMOKE_SIZE_SCALE = 5.0f;
 static const Real SIGNAL_SMOKE_DENSITY_SCALE = 3.0f;
 static const Real SIGNAL_SMOKE_RISE_SCALE = 3.0f;
 static const Real SIGNAL_SMOKE_ALPHA_MIN = 0.6f;
 static const Real SIGNAL_SMOKE_ALPHA_MAX = 0.8f;
-
-/// the word is written this far above the ground, which is about the middle of the plume
-static const Real SIGNAL_LABEL_HEIGHT = 20.0f;
 
 //-------------------------------------------------------------------------------------------------
 /** Is a signal on this frame too soon after the player's last one?  A last frame ahead of now is
@@ -464,7 +463,7 @@ static void makeObjectHeroic( Object *obj, void *userData )
   * appropriate objects.
 	* @todo Rename this to "CommandProcessor", or similiar. */
 //-------------------------------------------------------------------------------------------------
-void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
+void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup )
 {
 #ifdef _DEBUG
 	DEBUG_ASSERTCRASH(msg != NULL && msg != (GameMessage*)0xdeadbeef, ("bad msg"));
@@ -486,9 +485,9 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 		return;
 	}
 
-	AIGroup *currentlySelectedGroup = NULL;
+	AIGroup *currentlySelectedGroup = orderedGroup;
 
-	if (isInGame())
+	if (isInGame() && orderedGroup == NULL)
 	{
 		if (msg->getType() >= GameMessage::MSG_BEGIN_NETWORK_MESSAGES && msg->getType() <= GameMessage::MSG_END_NETWORK_MESSAGES)
 		{
@@ -541,8 +540,26 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 
 	// process the message
 	GameMessage::Type msgType = msg->getType();
+
+	//
+	// The shift queue (fork).  A queued order goes into the sender's order queue and comes back through
+	// here later with its units named in orderedGroup; an order given without shift ends the list for
+	// the units it went to.  An order already coming round from the queue is not looked at again.
+	// See OrderQueue.h.
+	//
+	if( orderedGroup == NULL && msgType != GameMessage::MSG_QUEUE_NEXT_ORDER
+			&& thisPlayer->getOrderQueue()->takeMessage( msg, currentlySelectedGroup, thisPlayer ) )
+		return;		// the queue destroyed the group
+
 	switch( msgType )
 	{
+		//---------------------------------------------------------------------------------------------
+		case GameMessage::MSG_QUEUE_NEXT_ORDER:
+		{
+			thisPlayer->getOrderQueue()->setNextOrderMode( msg->getArgument( 0 )->integer );
+			break;
+		}
+
 		//---------------------------------------------------------------------------------------------
 		case GameMessage::MSG_NEW_GAME:
 		{
@@ -571,6 +588,12 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 				TheGameEngine->setFramesPerSecondLimit(maxFPS);
 				TheWritableGlobalData->m_useFpsLimit = true;
 			}
+
+			/* Seed again from the number the start was seeded with.  Every start seeds when it appends
+				 this message, and the logic acts on it a pass later, after the shell map's scripts have
+				 run once more on the freshly seeded stream - a draw a copy with -noshellmap, or a replay
+				 started from the command line, never made.  The recorder writes this same number. */
+			InitRandom( GetGameLogicRandomSeed() );
 
 			// prepare for new game
 			prepareNewGame( gameMode, diff, rankPoints );
@@ -1658,11 +1681,12 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 		{
 			Object *producer = NULL;
 			const ThingTemplate *whatToCreate;
-			ProductionID productionID;
 
-			// get data from the message
+			// get data from the message.  Argument 1 was a production ID the build button minted
+			// from the factory's counter, which moved the counter on the sender's machine only, so
+			// the next ID a script or a flight deck minted there differed from everyone else's.  The
+			// ID is minted below, in logic, on every machine alike.
 			whatToCreate = TheThingFactory->findByTemplateID( msg->getArgument( 0 )->integer );
-			productionID = (ProductionID)msg->getArgument( 1 )->integer;
 
 			// an explicit producer (multi-select build) must be one of the selected objects
 			if( msg->getArgumentCount() > 2 && currentlySelectedGroup )
@@ -1691,7 +1715,7 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			}  // end if
 
 			// queue the build
-			pu->queueCreateUnit( whatToCreate, productionID );
+			pu->queueCreateUnit( whatToCreate, pu->requestUniqueUnitID() );
 
 			break;
 
@@ -2047,7 +2071,7 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 					// tell the user
 					UnicodeString s;
 					s.format(TheGameText->fetch("GUI:BeaconPlaced"), thisPlayer->getPlayerDisplayName().str());
-					TheInGameUI->message( s );
+					TheInGameUI->playerMessage( thisPlayer, s );
 
 					// play a sound
 					static AudioEventRTS aSound("BeaconPlaced");
@@ -2144,19 +2168,14 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 				smoke->setBurstCountMultiplier( SIGNAL_SMOKE_DENSITY_SCALE );
 				Coord3D rise = { 1.0f, 1.0f, SIGNAL_SMOKE_RISE_SCALE };
 				smoke->setVelocityMultiplier( &rise );
+				TheInGameUI->addSignalMark( (SignalKind)kind, pos, clientPlayerColor( thisPlayer ), smoke->getSystemID() );
 			}
 
 			TheRadar->createEvent( &pos, look.radarEvent, SIGNAL_SECONDS );
 
-			// floating text runs the colour through the viewer's scheme itself, so it takes the logic one
-			Coord3D labelPos = pos;
-			labelPos.z += SIGNAL_LABEL_HEIGHT;
-			TheInGameUI->addSignalWord( TheGameText->fetch( look.wordLabel ), &labelPos,
-				thisPlayer->getPlayerColor(), SIGNAL_HALF_FRAMES );
-
 			UnicodeString announcement;
 			announcement.format( TheGameText->fetch( look.announcementLabel ), thisPlayer->getPlayerDisplayName().str() );
-			TheInGameUI->message( announcement );
+			TheInGameUI->playerMessage( thisPlayer, announcement );
 
 			static AudioEventRTS signalSound( "BeaconPlaced" );
 			signalSound.setPlayerIndex( thisPlayer->getPlayerIndex() );
@@ -2170,7 +2189,12 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 		// a game that used them records them and plays back the same.  A network game never takes one.
 		case GameMessage::MSG_CHEAT:
 		{
-			if( isInMultiplayerGame() )
+			// Refused in a network game, and so in its playback too, or a cheat every machine
+			// ignored during the match would be applied when the replay of it plays.  The recorded
+			// mode, not isMultiplayer(): the recorder counts a skirmish as multiplayer.
+			const Int originalMode = (TheRecorder && TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK)
+															 ? TheRecorder->getGameMode() : getGameMode();
+			if( originalMode == GAME_LAN || originalMode == GAME_INTERNET )
 				break;
 
 			CheatKind kind = (CheatKind)msg->getArgument( 0 )->integer;
@@ -2208,6 +2232,23 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 				case CHEAT_ONE_HIT_KILL:
 					thisPlayer->toggleCheat( kind );
 					break;
+
+				/* The logic half of takeControlOfPlayer, a message so the recording has it: the AIPlayer
+					 goes, the keyboard seat moves, and every object looks again, or the base just left goes
+					 dark behind you - a building's looking mask was worked out when it was built. */
+				case CHEAT_TAKE_CONTROL:
+				{
+					Player *target = ThePlayerList->getNthPlayer( amount );
+					if( target == NULL )
+						break;
+					target->setPlayerType( PLAYER_HUMAN, FALSE );
+					ThePlayerList->setKeyboardPlayer( target );
+					for( Object *obj = getFirstObject(); obj; obj = obj->getNextObject() )
+						obj->handlePartitionCellMaintenance();
+					if( target == ThePlayerList->getLocalPlayer() )
+						ThePartitionManager->refreshShroudForLocalPlayer();
+					break;
+				}
 			}
 			break;
 		}
@@ -2343,35 +2384,25 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 		// --------------------------------------------------------------------------------------------
 		case GameMessage::MSG_SET_REPLAY_CAMERA:
 		{
-			if (TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK && TheGlobalData->m_useCameraInReplay && TheControlBar->getObserverLookAtPlayer() == thisPlayer)
+			// Where this player's camera is, out of a replay or over the network from a match going on.
+			// Only a watcher's camera is ever moved by it, and that is the observer camera's to do on
+			// its own frame when it is following this player; the logic only passes it on.
+			ViewLocation loc;
+			const Coord3D &pos = msg->getArgument( 0 )->location;
+			loc.init( pos.x, pos.y, pos.z, msg->getArgument( 1 )->real, msg->getArgument( 2 )->real, msg->getArgument( 3 )->real );
+			TheObserverCamera.notePlayerView( thisPlayer->getPlayerIndex(), loc );
+
+			// a replay shows the recorded player's pointer too, while the watcher is not using his own
+			if (TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK && TheObserverCamera.getMode() == OBSERVER_CAMERA_PLAYER
+					&& TheObserverCamera.getFollowedPlayerIndex() == thisPlayer->getPlayerIndex() && !TheLookAtTranslator->hasMouseMovedRecently())
 			{
-				if (TheTacticalView->isCameraMovementFinished())
-				{
-					ViewLocation loc;
-					Coord3D pos;
-					Real pitch, angle, zoom;
-					pos = msg->getArgument( 0 )->location;
-					angle = msg->getArgument( 1 )->real;
-					pitch = msg->getArgument( 2 )->real;
-					zoom = msg->getArgument( 3 )->real;
-					loc.init(pos.x, pos.y, pos.z, angle, pitch, zoom);
-					TheTacticalView->setLocation( &loc );
-
-					// TheSuperHackers @fix Hold the restored location for this frame, or the user's
-					// own scroll and zoom input lands on top of it and the camera never arrives.
-					TheTacticalView->lockViewForOneFrame();
-
-					if (!TheLookAtTranslator->hasMouseMovedRecently())
-					{
-						TheMouse->setCursor( (Mouse::MouseCursor)(msg->getArgument( 4 )->integer) );
-						ICoord2D mousePos = msg->getArgument( 5 )->pixel;
-						TheMouse->setPosition( mousePos.x, mousePos.y );
-						TheLookAtTranslator->setCurrentPos( mousePos );
-					}
-				}
+				TheMouse->setCursor( (Mouse::MouseCursor)(msg->getArgument( 4 )->integer) );
+				ICoord2D mousePos = msg->getArgument( 5 )->pixel;
+				TheMouse->setPosition( mousePos.x, mousePos.y );
+				TheLookAtTranslator->setCurrentPos( mousePos );
 			}
 			break;
-		} // end beacon text
+		}
 
 		//---------------------------------------------------------------------------------------------
 		case GameMessage::MSG_CREATE_TEAM0:
@@ -2514,7 +2545,7 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 	}  // end switch
 
 	/**/ /// @todo: multiplayer semantics
-	if (currentlySelectedGroup && TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK && TheGlobalData->m_useCameraInReplay && TheControlBar->getObserverLookAtPlayer() == thisPlayer /*&& !TheRecorder->isMultiplayer()*/)
+	if (currentlySelectedGroup && orderedGroup == NULL && TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK && TheGlobalData->m_useCameraInReplay && TheControlBar->getObserverLookAtPlayer() == thisPlayer /*&& !TheRecorder->isMultiplayer()*/)
 	{
 		const VecObjectID& selectedObjects = currentlySelectedGroup->getAllIDs();
 		TheInGameUI->deselectAllDrawables();

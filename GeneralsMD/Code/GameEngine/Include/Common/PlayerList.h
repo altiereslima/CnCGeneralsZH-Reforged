@@ -130,6 +130,15 @@ public:
 	void setLocalPlayer(Player *player);
 
 	/**
+		The seat at the keyboard as the logic knows it: the local player of a single-player game when the
+		match starts, moved only by a recorded Shift-Ctrl-T, and NULL in a network game and its replay.
+		A playback puts the ReplayObserver in the local seat and this stays where the recording had it, so
+		anything the simulation does for "whoever is playing" reads this and never getLocalPlayer().
+	*/
+	inline Player *getKeyboardPlayer() { return m_keyboardPlayer; }
+	inline void setKeyboardPlayer(Player *player) { m_keyboardPlayer = player; }
+
+	/**
 		Return the player matching the player mask
 	*/
 	Player *getPlayerFromMask( PlayerMaskType mask );
@@ -176,6 +185,7 @@ private:
 	void setSlotIndex( Int playerIndex, Int slotIndex );
 
 	Player				*m_local;
+	Player				*m_keyboardPlayer;
 	Int						m_playerCount;
 	Player				*m_players[MAX_PLAYER_COUNT];
 	Int						m_slotIndices[MAX_PLAYER_COUNT];	///< which network slot each player index came from, -1 for none

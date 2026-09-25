@@ -483,6 +483,7 @@ struct RMGObject
 	Real m_angle;
 	Int m_waypointID;		///< 0 for anything that is not a waypoint
 	Int m_flags;			///< MapObject's own flags; the road ones are the only ones used here
+	AsciiString m_pathLabel;	///< a waypoint on a skirmish approach path: "Center3", "Flank1" ...
 };
 
 /** A road is two objects in a row carrying MapObject's road flags, which W3DRoadBuffer pairs up as
@@ -639,6 +640,7 @@ public:
 	std::vector<char> m_passable;
 	std::vector<RMGLake> m_lakes;
 	std::vector<RMGObject> m_objects;
+	std::vector< std::pair<Int, Int> > m_waypointLinks;	///< waypointID to waypointID, for WaypointsList
 
 	/// The blend table the BlendTileData chunk carries; entry 0 is the "no blend" default.
 	struct RMGBlend
@@ -683,6 +685,9 @@ private:
 	void buildTerrainClasses( const UnsignedByte perm[512] );
 	void buildBlends( void );
 	void buildObjects( const UnsignedByte perm[512] );
+	void addApproachPaths( Int *waypointID );
+	void addApproachWaypoint( const char *lane, Int targetStart, Int fromStart, Int step, Real cellX, Real cellY,
+														Int *waypointID, Int *previous );
 	void placeSupplyAndDerricks( void );
 	void placeTowns( void );
 	void placeBunkers( void );
@@ -4009,6 +4014,136 @@ void RMGLayout::placeScenery( const UnsignedByte perm[512] )
 	}
 }
 
+/** One waypoint every this many cells along an approach path. */
+static const Int RMG_APPROACH_SPACING_CELLS = 12;
+/** How far a flank or back-door path bows out from the straight line, as a share of its length. */
+static const Real RMG_APPROACH_BULGE = 0.3f;
+/** How far a bowed point may be moved to find ground a unit can reach. */
+static const Int RMG_APPROACH_SNAP_CELLS = 10;
+
+void RMGLayout::addApproachWaypoint( const char *lane, Int targetStart, Int fromStart, Int step, Real cellX, Real cellY,
+																		 Int *waypointID, Int *previous )
+{
+	RMGObject waypoint;
+	waypoint.m_templateName = "*Waypoints/Waypoint";
+	waypoint.m_uniqueID.format( "%s%d_from%d_%d", lane, targetStart + 1, fromStart + 1, step );
+	waypoint.m_pathLabel.format( "%s%d", lane, targetStart + 1 );
+	waypoint.m_worldX = cellX * MAP_XY_FACTOR;
+	waypoint.m_worldY = cellY * MAP_XY_FACTOR;
+	waypoint.m_angle = 0.0f;
+	waypoint.m_waypointID = (*waypointID)++;
+	waypoint.m_flags = 0;
+	m_objects.push_back( waypoint );
+	if( *previous > 0 )
+		m_waypointLinks.push_back( std::make_pair( *previous, waypoint.m_waypointID ) );
+	*previous = waypoint.m_waypointID;
+}
+
+/** The skirmish scripts send a wave down "Center", "Flank" or "Backdoor" followed by the target's start
+	number, starting from the waypoint of that path nearest the wave. A generated map carried none of
+	them, nor the base areas the launch waits on (writePolygonTriggers), so Easy and Medium, whose
+	attacks are nothing but those paths, built their waves and never sent one: 128 Medium-against-Medium
+	matches lost 159 units between them. Every start gets all three
+	paths from every other start. The centre one walks the ground route the flood fill finds; the other
+	two bow out to either side of the straight line, each point moved onto the nearest ground a unit
+	can reach from the target. */
+void RMGLayout::addApproachPaths( Int *waypointID )
+{
+	m_waypointLinks.clear();
+	static const char *LANES[3] = { "Center", "Flank", "Backdoor" };
+	static const Real BULGE[3] = { 0.0f, RMG_APPROACH_BULGE, -RMG_APPROACH_BULGE };
+	static const Int STEP_X[4] = { 1, -1, 0, 0 };
+	static const Int STEP_Y[4] = { 0, 0, 1, -1 };
+
+	std::vector<Int> dist;
+	for( UnsignedInt target = 0; target < m_starts.size(); target++ )
+	{
+		const Int targetX = (Int)m_starts[target].m_cellX;
+		const Int targetY = (Int)m_starts[target].m_cellY;
+		floodDistancesFromCell( targetX, targetY, dist );
+
+		for( UnsignedInt from = 0; from < m_starts.size(); from++ )
+		{
+			if( from == target )
+				continue;
+			const Real fromX = m_starts[from].m_cellX;
+			const Real fromY = m_starts[from].m_cellY;
+			const Real dx = m_starts[target].m_cellX - fromX;
+			const Real dy = m_starts[target].m_cellY - fromY;
+			const Real length = sqrtf( dx * dx + dy * dy );
+			if( length < 1.0f )
+				continue;
+
+			for( Int lane = 0; lane < 3; lane++ )
+			{
+				Int previous = 0;
+				Int step = 0;
+				Int x = (Int)fromX;
+				Int y = (Int)fromY;
+				if( lane == 0 && dist[cellIndex( x, y )] > 0 )
+				{
+					// downhill on the flood from the target: the route a unit would drive
+					Int walked = 0;
+					while( dist[cellIndex( x, y )] > 0 )
+					{
+						const Int here = dist[cellIndex( x, y )];
+						Bool stepped = FALSE;
+						for( Int n = 0; n < 4 && !stepped; n++ )
+						{
+							const Int nx = x + STEP_X[n];
+							const Int ny = y + STEP_Y[n];
+							if( nx < 0 || ny < 0 || nx >= m_width - 1 || ny >= m_height - 1 )
+								continue;
+							if( dist[cellIndex( nx, ny )] == here - 1 )
+							{
+								x = nx;
+								y = ny;
+								stepped = TRUE;
+							}
+						}
+						if( !stepped )
+							break;		// a breadth-first flood always leaves one; this only guards the loop
+						if( ++walked % RMG_APPROACH_SPACING_CELLS == 0 )
+							addApproachWaypoint( LANES[lane], (Int)target, (Int)from, step++, (Real)x, (Real)y, waypointID, &previous );
+					}
+				}
+				else
+				{
+					const Int points = max( 2, (Int)(length / RMG_APPROACH_SPACING_CELLS) );
+					for( Int k = 1; k < points; k++ )
+					{
+						const Real t = (Real)k / (Real)points;
+						const Real bow = BULGE[lane] * length * 4.0f * t * (1.0f - t);
+						const Real px = fromX + dx * t - dy / length * bow;
+						const Real py = fromY + dy * t + dx / length * bow;
+						// the nearest cell a unit can reach, ring by ring
+						Bool found = FALSE;
+						for( Int ring = 0; ring <= RMG_APPROACH_SNAP_CELLS && !found; ring++ )
+						{
+							for( Int oy = -ring; oy <= ring && !found; oy++ )
+							{
+								for( Int ox = -ring; ox <= ring && !found; ox++ )
+								{
+									if( abs( ox ) != ring && abs( oy ) != ring )
+										continue;
+									const Int cx = (Int)px + ox;
+									const Int cy = (Int)py + oy;
+									if( cx < 0 || cy < 0 || cx >= m_width - 1 || cy >= m_height - 1 || dist[cellIndex( cx, cy )] < 0 )
+										continue;
+									addApproachWaypoint( LANES[lane], (Int)target, (Int)from, step++, (Real)cx, (Real)cy, waypointID, &previous );
+									found = TRUE;
+								}
+							}
+						}
+					}
+				}
+				addApproachWaypoint( LANES[lane], (Int)target, (Int)from, step++, m_starts[target].m_cellX, m_starts[target].m_cellY,
+														 waypointID, &previous );
+			}
+		}
+	}
+}
+
 void RMGLayout::buildObjects( const UnsignedByte perm[512] )
 {
 	m_objects.clear();
@@ -4029,6 +4164,7 @@ void RMGLayout::buildObjects( const UnsignedByte perm[512] )
 
 		reserveSite( m_starts[i].m_cellX, m_starts[i].m_cellY, RMG_FLAT_RADIUS );
 	}
+	addApproachPaths( &waypointID );
 
 	placeSupplyAndDerricks();
 	placeTowns();
@@ -4104,7 +4240,8 @@ static void writeWaypoint( MapChunkWriter& w, const RMGObject& object )
 		w.writeInt( 0 );
 		w.writeAsciiString( object.m_templateName.str() );
 
-		w.beginDict( 12 );
+		const Bool onPath = !object.m_pathLabel.isEmpty();
+		w.beginDict( onPath ? 13 : 12 );
 		w.dictInt( "objectInitialHealth", 100 );
 		w.dictBool( "objectEnabled", TRUE );
 		w.dictBool( "objectPowered", TRUE );
@@ -4117,6 +4254,8 @@ static void writeWaypoint( MapChunkWriter& w, const RMGObject& object )
 		w.dictBool( "objectSellable", TRUE );
 		w.dictBool( "objectRepairable", TRUE );
 		w.dictAsciiString( "waypointName", object.m_uniqueID.str() );
+		if( onPath )
+			w.dictAsciiString( "waypointPathLabel1", object.m_pathLabel.str() );
 	w.closeChunk();
 }
 
@@ -4245,9 +4384,21 @@ static void writeSides( MapChunkWriter& w )
 	w.closeChunk();
 }
 
-/** One water area per basin. Point zero carries the water height for the whole
-	area, which is what isUnderwater compares the ground against. */
-static void writeWaterAreas( MapChunkWriter& w, const RMGLayout& layout )
+/** The skirmish scripts' base areas, in cells: InnerPerimeterN round start N is "my base", and a
+	wave only leaves while it stands inside OuterPerimeterN. Neither is ever bigger than a share of the
+	way to the nearest other start, so two bases' areas never overlap. */
+static const Real RMG_INNER_PERIMETER_CELLS = 30.0f;
+static const Real RMG_OUTER_PERIMETER_CELLS = 55.0f;
+static const Real RMG_OUTER_PERIMETER_SHARE = 0.45f;
+static const Real RMG_INNER_OF_OUTER = 0.6f;
+static const Int RMG_PERIMETER_SIDES = 16;
+
+/** Every trigger area the map has: one water area per basin, and the two base areas round every
+	start. Point zero of a water area carries the water height for the whole area, which is what
+	isUnderwater compares the ground against. The base areas are what an Easy or Medium attack
+	waits on: "[Skirmish]MyOuterPerimeter" resolves to OuterPerimeterN, a generated map had none,
+	and the scripts' launch condition was never true. */
+static void writePolygonTriggers( MapChunkWriter& w, const RMGLayout& layout )
 {
 	// The polygon is the contour of the basin that was carved, so the engine floods the same
 	// shape the height field holds.
@@ -4257,6 +4408,7 @@ static void writeWaterAreas( MapChunkWriter& w, const RMGLayout& layout )
 		if( (Int)layout.m_lakes[i].m_polygon.size() >= 3 )
 			written++;
 	}
+	written += 2 * (Int)layout.m_starts.size();
 
 	w.openChunk( "PolygonTriggers", K_TRIGGERS_VERSION_4 );
 		w.writeInt( written );
@@ -4290,6 +4442,43 @@ static void writeWaterAreas( MapChunkWriter& w, const RMGLayout& layout )
 			}
 
 			id++;
+		}
+
+		for( UnsignedInt start = 0; start < layout.m_starts.size(); start++ )
+		{
+			const RMGPoint& centre = layout.m_starts[start];
+			Real nearest = FLT_MAX;
+			for( UnsignedInt other = 0; other < layout.m_starts.size(); other++ )
+			{
+				if( other == start )
+					continue;
+				const Real dx = layout.m_starts[other].m_cellX - centre.m_cellX;
+				const Real dy = layout.m_starts[other].m_cellY - centre.m_cellY;
+				nearest = min( nearest, (Real)sqrt( dx * dx + dy * dy ) );
+			}
+			const Real outer = min( RMG_OUTER_PERIMETER_CELLS, nearest * RMG_OUTER_PERIMETER_SHARE );
+			const Real inner = min( RMG_INNER_PERIMETER_CELLS, outer * RMG_INNER_OF_OUTER );
+			for( Int ring = 0; ring < 2; ring++ )
+			{
+				AsciiString name;
+				name.format( "%s%d", ring == 0 ? "InnerPerimeter" : "OuterPerimeter", start + 1 );
+				const Real radius = (ring == 0) ? inner : outer;
+
+				w.writeAsciiString( name.str() );
+				w.writeAsciiString( "" );			// layer
+				w.writeInt( id++ );					// trigger id
+				w.writeByte( 0 );					// not water
+				w.writeByte( 0 );					// not a river
+				w.writeInt( 0 );					// river start
+				w.writeInt( RMG_PERIMETER_SIDES );
+				for( Int point = 0; point < RMG_PERIMETER_SIDES; point++ )
+				{
+					const Real angle = 2.0f * PI * point / RMG_PERIMETER_SIDES;
+					w.writeInt( (Int)((centre.m_cellX + radius * Cos( angle )) * MAP_XY_FACTOR + 0.5f) );
+					w.writeInt( (Int)((centre.m_cellY + radius * Sin( angle )) * MAP_XY_FACTOR + 0.5f) );
+					w.writeInt( 0 );
+				}
+			}
 		}
 	w.closeChunk();
 }
@@ -4496,12 +4685,22 @@ void RandomMapGenerator::generate( const RandomMapSettings& settings, std::vecto
 		}
 	w.closeChunk();
 
-	/***************WATER ***************/
-	if( !layout.m_lakes.empty() )
-		writeWaterAreas( w, layout );
+	/***************WATER AND BASE AREAS ***************/
+	writePolygonTriggers( w, layout );
 
 	/***************GLOBAL LIGHTING DATA ***************/
 	writeGlobalLighting( w );
+
+	/***************WAYPOINT LINKS ***************/
+	// read after every waypoint exists (TerrainLogic::loadMap), so its place in the file is free
+	w.openChunk( "WaypointsList", K_WAYPOINTS_VERSION_1 );
+		w.writeInt( (Int)layout.m_waypointLinks.size() );
+		for( UnsignedInt i = 0; i < layout.m_waypointLinks.size(); i++ )
+		{
+			w.writeInt( layout.m_waypointLinks[i].first );
+			w.writeInt( layout.m_waypointLinks[i].second );
+		}
+	w.closeChunk();
 
 	w.finish( mapBytes );
 }
@@ -4786,8 +4985,14 @@ Bool generatedMapBytes( const AsciiString& path, const char **bytesOut, Int *siz
 	AsciiString lower = path;
 	lower.toLower();
 
-	const std::vector<char>& bytes = lower.endsWith( ".tga" ) ? slot->m_previewBytes
-																														: slot->m_mapBytes;
+	// the map and its preview, nothing else: the terrain loader asks for "<map>.wak" beside every map,
+	// and handing it the map read the map's last four bytes as a count of shore waves. It came out
+	// harmless while the map ended in the lighting chunk and crashed every load once it ended in the
+	// waypoint links.
+	const Bool preview = lower.endsWith( ".tga" );
+	if( !preview && !lower.endsWith( ".map" ) )
+		return FALSE;
+	const std::vector<char>& bytes = preview ? slot->m_previewBytes : slot->m_mapBytes;
 	if( bytes.empty() )
 		return FALSE;
 

@@ -264,6 +264,12 @@ protected:
 	Int m_nextTemplateMaskBit;												///< Each instantiated UpgradeTemplate will be given a Int64 bit as an identifier
 	Bool buttonImagesCached;
 
+	/// Each upgrade a map.ini changed, with a copy of what it was, in the order it changed them; reset() puts them back.
+	std::vector< std::pair<UpgradeTemplate *, UpgradeTemplate *> > m_beforeMapOverrides;
+	/// The upgrades a map.ini added, and the mask bit the first of them took; reset() removes them and hands the bits back.
+	std::vector< UpgradeTemplate * > m_addedByMap;
+	Int m_maskBitBeforeMapOverrides;
+
 };
 
 // EXTERNALS //////////////////////////////////////////////////////////////////////////////////////

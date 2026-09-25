@@ -132,6 +132,13 @@ void HackInternetAIUpdate::aiDoCommand(const AICommandParms* parms)
 	if (!isAllowedToRespondToAiCommands(parms))
 		return;
 
+	// A hacker already at work, or unpacking to start, ignores a repeat hack order. Without this a
+	// hack order given to a selection with one idle hacker in it packed up every busy one and
+	// started it again from nothing. A hacker packing up still takes it, which cancels the pack.
+	if( parms->m_cmd == AICMD_HACK_INTERNET &&
+			( getStateMachine()->getCurrentStateID() == HACK_INTERNET || getStateMachine()->getCurrentStateID() == UNPACKING ) )
+		return;
+
 	//If our hacker is currently packing up his gear, we need to prevent him
 	//from moving until completed. In order to accomplish this, we'll detect,
 	//then 
@@ -545,8 +552,7 @@ StateReturnType HackInternetState::update()
 						amount = 1;
 						break;
 				}
-				money->deposit( amount );
-				owner->getControllingPlayer()->getScoreKeeper()->addMoneyEarned( amount );
+				owner->getControllingPlayer()->earnIncome( amount, FALSE );
 
 				//Grant the unit some experience for a successful hack.
 				xp->addExperiencePoints( ai->getXpPerCashUpdate() );

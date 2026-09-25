@@ -125,13 +125,14 @@ static const Int COLOR_GOLD = 0x00D7FF;
 //-----------------------------------------------------------------------------
 // The keyboard grid, zone by zone.  Column zero is the strip down the left of
 // the board and column one is escape, tab, caps and shift, so the typing rows
-// all start at two.  Row zero is the function keys.
+// start at two, except Z's, which starts at three behind the ISO key.  Row zero
+// is the function keys.
 //-----------------------------------------------------------------------------
 static const char *CHROMA_KEY_ROWS[] = { "1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm" };
 static const Int CHROMA_KEY_ROW_COUNT = 4;
+static const Int CHROMA_KEY_FIRST_COLUMNS[ CHROMA_KEY_ROW_COUNT ] = { 2, 2, 2, 3 };
 static const Int CHROMA_POWER_ROW = 0;
 static const Int CHROMA_FIRST_HOTKEY_ROW = 1;
-static const Int CHROMA_KEY_FIRST_COLUMN = 2;
 static const Int CHROMA_KEY_FIRST_ROW = 1;
 
 static const Int MATCH_STATE_ROW = 0;
@@ -209,7 +210,13 @@ static Int s_pendingCells[ CHROMA_CELLS ];
 static Bool s_workerRunning = FALSE;
 static Bool s_disabled = FALSE;
 static volatile LONG s_workerShouldStop = 0;
+/// Whether the hardware is ours right now: the option is on and a match is being
+/// played.  Anywhere else the session is closed and Synapse lights the board.
+static volatile LONG s_sessionWanted = 0;
 static HANDLE s_workerThread = NULL;
+
+/// How long the worker waits before asking an absent Chroma server again.
+static const DWORD CHROMA_RETRY_MS = 5000;
 
 //-----------------------------------------------------------------------------
 // Pure helpers.
@@ -223,7 +230,7 @@ Int chromaCellForKey( char key )
 		{
 			if( keys[ column ] == key )
 				return (CHROMA_KEY_FIRST_ROW + row) * KEYBOARD_COLUMNS
-						 + CHROMA_KEY_FIRST_COLUMN + column;
+						 + CHROMA_KEY_FIRST_COLUMNS[ row ] + column;
 		}
 	}
 	return -1;
@@ -918,68 +925,119 @@ static void chromaBuildDeviceBody( const ChromaDevice &device, const Int *cells,
 }
 
 //-----------------------------------------------------------------------------
+/** Open a session and connect to the address it names, or NULL when there is no
+	* Chroma server to open one with. */
+static HINTERNET chromaConnect( HINTERNET internet, char *sessionRoot, Int sessionRootBytes )
+{
+	HINTERNET handshake = InternetConnectA( internet, CHROMA_HOST, CHROMA_PORT, NULL, NULL,
+																					INTERNET_SERVICE_HTTP, 0, 0 );
+	if( handshake == NULL )
+		return NULL;
+
+	char sessionHost[ 64 ];
+	INTERNET_PORT sessionPort = 0;
+	const Bool opened = chromaOpenSession( handshake, sessionHost, sizeof( sessionHost ),
+																				 &sessionPort, sessionRoot, sessionRootBytes );
+	InternetCloseHandle( handshake );
+	if( !opened )
+		return NULL;
+
+	HINTERNET connection = InternetConnectA( internet, sessionHost, sessionPort, NULL, NULL,
+																					 INTERNET_SERVICE_HTTP, 0, 0 );
+	if( connection != NULL )
+		DEBUG_LOG(( "Chroma: session open on %s:%d%s\n", sessionHost, (Int)sessionPort, sessionRoot ));
+	return connection;
+}
+
+//-----------------------------------------------------------------------------
+/** Hand the hardware back.  Without the DELETE it holds the last frame sent
+	* until the session times out, ten seconds of a battle on a board in a menu. */
+static void chromaDisconnect( HINTERNET connection, const char *sessionRoot )
+{
+	chromaRequest( connection, "DELETE", sessionRoot, "", NULL, 0 );
+	InternetCloseHandle( connection );
+	DEBUG_LOG(( "Chroma: session closed, the board is Synapse's again\n" ));
+}
+
+//-----------------------------------------------------------------------------
+/** The session is held only while s_sessionWanted says so, which is while a
+	* match is being played with the option on.  Out of a match the board goes
+	* back to whatever Synapse draws for the desktop. */
 static DWORD WINAPI chromaWorkerMain( LPVOID )
 {
 	// Big enough for the largest device's cells as ten-digit numbers, plus the
 	// punctuation and the effect name.
 	char body[ KEYBOARD_CELLS * 12 + 128 ];
-	char sessionHost[ 64 ];
 	char sessionRoot[ 128 ];
 	char devicePath[ CHROMA_DEVICE_COUNT ][ 160 ];
-	INTERNET_PORT sessionPort = 0;
 	Int sent[ CHROMA_CELLS ];
 	Int cells[ CHROMA_CELLS ];
 
 	HINTERNET internet = InternetOpenA( "ZeroHourReforged", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0 );
-	HINTERNET handshake = NULL;
-	if( internet != NULL )
-	{
-		DWORD timeout = CHROMA_TIMEOUT_MS;
-		InternetSetOptionA( internet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof( timeout ) );
-		InternetSetOptionA( internet, INTERNET_OPTION_SEND_TIMEOUT, &timeout, sizeof( timeout ) );
-		InternetSetOptionA( internet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof( timeout ) );
-		handshake = InternetConnectA( internet, CHROMA_HOST, CHROMA_PORT, NULL, NULL,
-																	INTERNET_SERVICE_HTTP, 0, 0 );
-	}
+	if( internet == NULL )
+		return 0;
 
-	// ponytail: one attempt at startup.  Synapse started after the game is not
-	// picked up; retrying on a timer would mean a second piece of state to own.
-	Bool opened = handshake != NULL
-							&& chromaOpenSession( handshake, sessionHost, sizeof( sessionHost ),
-																		&sessionPort, sessionRoot, sizeof( sessionRoot ) );
-	if( handshake != NULL )
-		InternetCloseHandle( handshake );
+	DWORD timeout = CHROMA_TIMEOUT_MS;
+	InternetSetOptionA( internet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof( timeout ) );
+	InternetSetOptionA( internet, INTERNET_OPTION_SEND_TIMEOUT, &timeout, sizeof( timeout ) );
+	InternetSetOptionA( internet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof( timeout ) );
 
 	HINTERNET connection = NULL;
-	if( opened )
-		connection = InternetConnectA( internet, sessionHost, sessionPort, NULL, NULL,
-																	 INTERNET_SERVICE_HTTP, 0, 0 );
-	if( connection == NULL )
-	{
-		DEBUG_LOG(( "Chroma: no Razer server on %s:%d, hardware lighting is off for this run\n",
-								CHROMA_HOST, (Int)CHROMA_PORT ));
-		if( internet != NULL )
-			InternetCloseHandle( internet );
-		return 0;
-	}
-	for( Int device = 0; device < CHROMA_DEVICE_COUNT; ++device )
-	{
-		_snprintf( devicePath[ device ], sizeof( devicePath[ device ] ), "%s/%s",
-							 sessionRoot, CHROMA_DEVICES[ device ].endpoint );
-		devicePath[ device ][ sizeof( devicePath[ device ] ) - 1 ] = 0;
-	}
-	DEBUG_LOG(( "Chroma: session open on %s:%d%s\n", sessionHost, (Int)sessionPort, sessionRoot ));
-
-	memset( sent, 0, sizeof( sent ) );
+	Bool everAttempted = FALSE;
+	Bool absenceLogged = FALSE;
+	DWORD lastAttemptMs = 0;
 	DWORD lastSendMs = 0;
 	Bool answersLogged = FALSE;
 	while( InterlockedCompareExchange( &s_workerShouldStop, 0, 0 ) == 0 )
 	{
+		const DWORD nowMs = timeGetTime();
+		const Bool wanted = InterlockedCompareExchange( &s_sessionWanted, 0, 0 ) != 0;
+		if( !wanted )
+		{
+			if( connection != NULL )
+			{
+				chromaDisconnect( connection, sessionRoot );
+				connection = NULL;
+			}
+			Sleep( CHROMA_SEND_INTERVAL_MS );
+			continue;
+		}
+
+		if( connection == NULL )
+		{
+			// Synapse may be started, or restarted, after the game, so an absent
+			// server is asked again every few seconds rather than given up on.
+			if( everAttempted && nowMs - lastAttemptMs < CHROMA_RETRY_MS )
+			{
+				Sleep( CHROMA_SEND_INTERVAL_MS );
+				continue;
+			}
+			everAttempted = TRUE;
+			lastAttemptMs = nowMs;
+			connection = chromaConnect( internet, sessionRoot, sizeof( sessionRoot ) );
+			if( connection == NULL )
+			{
+				if( !absenceLogged )
+					DEBUG_LOG(( "Chroma: no Razer server on %s:%d, asking again every %d ms\n",
+											CHROMA_HOST, (Int)CHROMA_PORT, (Int)CHROMA_RETRY_MS ));
+				absenceLogged = TRUE;
+				Sleep( CHROMA_SEND_INTERVAL_MS );
+				continue;
+			}
+			for( Int device = 0; device < CHROMA_DEVICE_COUNT; ++device )
+			{
+				_snprintf( devicePath[ device ], sizeof( devicePath[ device ] ), "%s/%s",
+									 sessionRoot, CHROMA_DEVICES[ device ].endpoint );
+				devicePath[ device ][ sizeof( devicePath[ device ] ) - 1 ] = 0;
+			}
+			memset( sent, 0, sizeof( sent ) );
+			lastSendMs = 0;
+		}
+
 		EnterCriticalSection( &s_cellLock );
 		memcpy( cells, s_pendingCells, sizeof( cells ) );
 		LeaveCriticalSection( &s_cellLock );
 
-		const DWORD nowMs = timeGetTime();
 		const Bool keepalive = lastSendMs == 0 || nowMs - lastSendMs >= CHROMA_KEEPALIVE_MS;
 		Bool sentAnything = FALSE;
 		for( Int device = 0; device < CHROMA_DEVICE_COUNT; ++device )
@@ -1011,10 +1069,8 @@ static DWORD WINAPI chromaWorkerMain( LPVOID )
 		Sleep( CHROMA_SEND_INTERVAL_MS );
 	}
 
-	// Without this the hardware holds the last frame sent until the session times
-	// out, so the board stays lit for ten seconds after the game is gone.
-	chromaRequest( connection, "DELETE", sessionRoot, "", NULL, 0 );
-	InternetCloseHandle( connection );
+	if( connection != NULL )
+		chromaDisconnect( connection, sessionRoot );
 	InternetCloseHandle( internet );
 	return 0;
 }
@@ -1316,7 +1372,9 @@ static const ChromaKeyRun CHROMA_KEY_RUNS[] =
 	{ MK_ENTER,				1,	3,	14 },
 	{ MK_KP4,					3,	3,	18 },		// 4, 5, 6
 
-	{ MK_Z,						10,	4,	2 },		// Z to M, comma, period, slash
+	// Z sits one column further right than A: column two of this row is the extra
+	// key an ISO board has between left shift and Z (RZKEY_Z is 0x0403).
+	{ MK_Z,						10,	4,	3 },		// Z to M, comma, period, slash
 	{ MK_UP,					1,	4,	16 },
 	{ MK_KP1,					3,	4,	18 },		// 1, 2, 3
 
@@ -1324,7 +1382,7 @@ static const ChromaKeyRun CHROMA_KEY_RUNS[] =
 	{ MK_LEFT,				1,	5,	15 },
 	{ MK_DOWN,				1,	5,	16 },
 	{ MK_RIGHT,				1,	5,	17 },
-	{ MK_KP0,					1,	5,	18 },
+	{ MK_KP0,					1,	5,	19 },		// RZKEY_NUMPAD0 is 0x0513
 };
 static const Int CHROMA_KEY_RUN_COUNT = sizeof( CHROMA_KEY_RUNS ) / sizeof( CHROMA_KEY_RUNS[ 0 ] );
 
@@ -1737,7 +1795,7 @@ static void chromaFillAlarm( Int *cells, Real alarm )
 }
 
 //-----------------------------------------------------------------------------
-static void chromaFillCells( Int *cells )
+static void chromaFillCells( Int *cells, Bool inMatch )
 {
 	Real red = 0.5f, green = 0.5f, blue = 0.5f;
 	Player *localPlayer = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
@@ -1751,9 +1809,6 @@ static void chromaFillCells( Int *cells )
 	}
 	const Int factionColor = chromaColor( red, green, blue );
 
-	// The shell map is a running game as far as GameLogic is concerned, so the
-	// match test has to exclude it or the main menu lights up like a battle.
-	const Bool inMatch = TheGameLogic && TheGameLogic->isInGame() && !TheGameLogic->isInShellGame();
 	const UnsignedInt frame = TheGameLogic ? TheGameLogic->getFrame() : 0;
 
 	Real alarm = 0.0f;
@@ -1865,13 +1920,16 @@ void updateChromaKeyboard( void )
 		s_workerRunning = TRUE;
 	}
 
+	// The shell map is a running game as far as GameLogic is concerned, so the
+	// match test has to exclude it or the main menu lights up like a battle.
+	const Bool inMatch = TheGameLogic != NULL && TheGameLogic->isInGame() && !TheGameLogic->isInShellGame();
+	// The option applies live: off, or out of a match, and the worker closes the
+	// session and the board goes back to Synapse.
+	const Bool wanted = inMatch && TheGlobalData != NULL && TheGlobalData->m_chromaLighting;
+	InterlockedExchange( &s_sessionWanted, wanted ? 1 : 0 );
+
 	Int cells[ CHROMA_CELLS ];
-	// The option applies live, so turning it off mid-match has to hand the
-	// hardware back dark rather than freeze it on the last frame.
-	if( TheGlobalData != NULL && !TheGlobalData->m_chromaLighting )
-		memset( cells, 0, sizeof( cells ) );
-	else
-		chromaFillCells( cells );
+	chromaFillCells( cells, inMatch );
 
 	EnterCriticalSection( &s_cellLock );
 	memcpy( s_pendingCells, cells, sizeof( s_pendingCells ) );

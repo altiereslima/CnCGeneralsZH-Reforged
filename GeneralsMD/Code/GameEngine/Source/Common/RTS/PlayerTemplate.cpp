@@ -261,9 +261,9 @@ const Image *PlayerTemplate::getEnabledImage( void ) const
 /*extern*/ PlayerTemplateStore *ThePlayerTemplateStore = NULL;
 
 //-----------------------------------------------------------------------------
-PlayerTemplateStore::PlayerTemplateStore() 
+PlayerTemplateStore::PlayerTemplateStore()
 {
-	// nothing
+	m_countBeforeMapOverrides = -1;
 }
 
 //-----------------------------------------------------------------------------
@@ -283,6 +283,16 @@ void PlayerTemplateStore::reset()
 {
 // don't reset this list here; we want to retain this info.
 //	m_playerTemplates.clear();
+
+	/* Except for what a map.ini changed, which the next match in this process would otherwise play
+		 with and a machine that never loaded that map would not: starting money, the side's build
+		 list and the rest, by the slot's template. */
+	for (Int i = (Int)m_beforeMapOverrides.size() - 1; i >= 0; --i)
+		m_playerTemplates[m_beforeMapOverrides[i].first] = m_beforeMapOverrides[i].second;
+	m_beforeMapOverrides.clear();
+	if (m_countBeforeMapOverrides >= 0)
+		m_playerTemplates.resize(m_countBeforeMapOverrides);
+	m_countBeforeMapOverrides = -1;
 }
 
 //-----------------------------------------------------------------------------
@@ -395,6 +405,13 @@ void PlayerTemplateStore::getAllSideStrings(AsciiStringList *outStringList)
 	NameKeyType namekey = NAMEKEY(c);
 
 	PlayerTemplate* pt = const_cast<PlayerTemplate*>(ThePlayerTemplateStore->findPlayerTemplate(namekey));
+	if (ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES)
+	{
+		if (ThePlayerTemplateStore->m_countBeforeMapOverrides < 0)
+			ThePlayerTemplateStore->m_countBeforeMapOverrides = (Int)ThePlayerTemplateStore->m_playerTemplates.size();
+		if (pt)
+			ThePlayerTemplateStore->m_beforeMapOverrides.push_back(std::make_pair((Int)(pt - &ThePlayerTemplateStore->m_playerTemplates[0]), *pt));
+	}
 	if (pt)
 	{
 		ini->initFromINI(pt, pt->getFieldParse() );

@@ -51,12 +51,14 @@
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "Common/PlayerTemplate.h"
+#include "Common/Recorder.h"
 #include "Common/Team.h"
 #include "Common/WellKnownKeys.h"
 #include "Common/Xfer.h"
 #ifdef _DEBUG
 #include "GameLogic/Object.h"
 #endif
+#include "GameLogic/GameLogic.h"
 #include "GameLogic/SidesList.h"
 #include "GameNetwork/GameInfo.h"
 #include "GameNetwork/NetworkDefs.h"
@@ -238,6 +240,12 @@ void PlayerList::newGame()
 		 The two numbers are not the same and never were: player 0 is the neutral player, so a human
 		 in slot 0 is player 1.  Everything in GameNetwork is indexed by the slot. */
 	assignSlotIndices( TheGameInfo );
+
+	/* The local player chosen above is the one the recording had, in playback too: the replay's game
+		 info carries the recorded local slot, and the switch to the ReplayObserver comes later. */
+	const Int originalMode = (TheRecorder && TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK)
+													 ? TheRecorder->getGameMode() : TheGameLogic->getGameMode();
+	m_keyboardPlayer = (originalMode == GAME_LAN || originalMode == GAME_INTERNET) ? NULL : m_local;
 }
 
 //-----------------------------------------------------------------------------
@@ -251,6 +259,8 @@ void PlayerList::init()
 
 	for (int j = 0; j < MAX_PLAYER_COUNT; j++)
 		m_slotIndices[j] = -1;
+
+	m_keyboardPlayer = NULL;
 
 	// call setLocalPlayer so that becomingLocalPlayer() gets called appropriately
 	setLocalPlayer(m_players[0]);
@@ -465,7 +475,9 @@ void PlayerList::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 1;
+	// 2: the keyboard seat, which newGame would otherwise reset to the local player and so undo a
+	//    Shift-Ctrl-T for the shared-look hook
+	XferVersion currentVersion = 2;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -488,6 +500,13 @@ void PlayerList::xfer( Xfer *xfer )
 	// xfer each of the player data
 	for( Int i = 0; i < playerCount; ++i )
 		xfer->xferSnapshot( m_players[ i ] );
+
+	if( version >= 2 )
+	{
+		Int keyboardIndex = m_keyboardPlayer ? m_keyboardPlayer->getPlayerIndex() : -1;
+		xfer->xferInt( &keyboardIndex );
+		m_keyboardPlayer = keyboardIndex >= 0 ? getNthPlayer( keyboardIndex ) : NULL;
+	}
 
 }  // end xfer
 

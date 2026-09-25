@@ -81,8 +81,6 @@ public:
 	const Coord3D* getStartPos() { return &m_startPos; }
 	const Coord3D* getEndPos() { return &m_endPos; }
 
-	Real getCurrentLaserRadius() const;
-
 	void setDirty( Bool dirty ) { m_dirty = dirty; }
 	Bool isDirty() { return m_dirty; }
 
@@ -94,6 +92,7 @@ protected:
 
 	void updateStartPos(); ///< figures out and sets startPos
 	void updateEndPos(); ///< figures out and sets endPos
+	Real computeWidthScalar( UnsignedInt frame ) const; ///< the width on that logic frame, from the frames alone
 
 	//If the master dies, so will this laser (although if it has a fade delay, it'll just skip to the fade)
 	Coord3D m_startPos;

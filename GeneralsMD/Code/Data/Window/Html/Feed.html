@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<!--
+  The event feed, for a player and a watcher alike: every message the game writes, a smoke signal
+  or a beacon, a superweapon coming ready or being fired, a general's power used, a promotion bought,
+  a superweapon or advanced tech building started or finished, a player beaten, gone or left with no
+  dozer.  Chat has its own page, Window/Html/Chat.html.  The feed stands on the radar's under-attack
+  tab in the screen's bottom left corner, the newest line at the bottom, the way Dota's kill feed
+  stands on its minimap.  A line is up for ten seconds, six at most, and the oldest goes first;
+  while the chat is open the last twelve are up however old they are, and the chat stands over them.  Same
+  materials as Window/Html/Spectator.html, whose header says what the renderer draws.
+
+  The game fills in, every frame a line is up (InGameUI::drawFeed):
+    {{floor}}              where the feed stands: the top of the radar's tab, or of the production
+                           queue's row while that is over the tab
+    data-each="feed"       one entry a line, the oldest first, {{kind}} one of
+                             "note"    a plain message, all of it in {{before}}
+                             "player"  a message about one player: {{portrait}} his general's flag,
+                                       {{color}} his colour, and the text as {{before}} {{name}}
+                                       {{after}}, his name cut out of it wherever it says it
+                             "act"     something a player did: {{portrait}} {{color}} {{name}},
+                                       {{image}} its cameo, {{what}} its name and {{tagtext}} what
+                                       happened, {{tag}} one of "ready" "launched" "used" "unlocked"
+                                       "started" "built"
+  All in the page's pixels, a pixel of an 800x600 screen.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Feed</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { background-color: #3b4a36; color: #e6ebef; font-size: 9px; }
+
+  #feed { position: absolute; left: 0; top: 0; width: 400px; }
+  #lines { position: absolute; left: 0; bottom: 3px; width: 400px; }
+  .line { height: 15px; margin-top: 1px; }
+  /* a black band under the words that thins out to nothing on the right, over the battlefield */
+  .strip { display: inline-block; height: 15px; line-height: 15px; padding: 0 40px 0 2px; white-space: nowrap;
+           background: linear-gradient(to right, rgba(0, 0, 0, 0.86), rgba(0, 0, 0, 0.6) 65%, rgba(0, 0, 0, 0)); }
+
+  .flag { width: 20px; height: 12px; margin-right: 4px; vertical-align: middle; }
+  /* a plain message has no player, so a steel plate the flag's size with a mark on it stands where
+     the flag would, and every line's words start in one column.  The mark is an exclamation mark
+     lying down, a bar and its dot, since the renderer turns no text */
+  .chip { display: inline-block; position: relative; width: 20px; height: 10px; margin-right: 4px; vertical-align: middle;
+          background: linear-gradient(to bottom, #6f7782, #3f4650); border-top: 1px solid #aab4bf; border-bottom: 1px solid #0c1114; }
+  .chip .bang { position: absolute; left: 4px; top: 4px; width: 8px; height: 2px; background-color: #f2cf4a; }
+  .chip .dot { position: absolute; left: 14px; top: 4px; width: 2px; height: 2px; background-color: #f2cf4a; }
+  .who { font-weight: bold; }
+  .cameo { width: 18px; height: 13px; margin: 0 4px; vertical-align: middle; }
+  .what { color: #e8d27a; }
+  .tag { margin-left: 4px; font-weight: bold; }
+  .tag.ready, .tag.built { color: #b8f08a; }
+  .tag.launched { color: #ff6a55; }
+  .tag.used { color: #f2cf4a; }
+  .tag.unlocked { color: #7fc8ff; }
+  .tag.started { color: #c9d2d9; }
+
+  .knote .flag, .knote .cameo, .knote .what, .knote .tag { display: none; }
+  .kplayer .chip, .kplayer .cameo, .kplayer .what, .kplayer .tag { display: none; }
+  .kact .chip { display: none; }
+</style>
+</head>
+<body>
+<div id="feed" style="height: {{floor}}px">
+  <div id="lines">
+    <div class="line" data-each="feed">
+      <div class="strip k{{kind}}"><span class="chip"><span class="bang"></span><span class="dot"></span></span><img class="flag" src="{{portrait}}">{{before}}<span class="who" style="color: {{color}}">{{name}}</span>{{after}}<img class="cameo" src="{{image}}"><span class="what">{{what}}</span><span class="tag {{tag}}">{{tagtext}}</span></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

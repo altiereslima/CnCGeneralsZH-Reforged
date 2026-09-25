@@ -54,6 +54,7 @@
 #include "Common/PerfTimer.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
+#include "GameClient/ObserverCamera.h"
 #include "WW3D2/Camera.h"
 #include "WW3D2/RInfo.h"
 #include "WW3D2/Light.h"
@@ -369,7 +370,7 @@ void W3DPropBuffer::drawProps(RenderInfoClass &rinfo)
 			m_props[i].ss = OBJECTSHROUD_CLEAR;
 		}
 		if (m_props[i].ss == OBJECTSHROUD_INVALID) {
-			Int localPlayerIndex = ThePlayerList ? ThePlayerList->getLocalPlayer()->getPlayerIndex() : 0;
+			Int localPlayerIndex = ThePlayerList ? TheObserverCamera.getShroudPlayerIndex() : 0;
 			m_props[i].ss = ThePartitionManager->getPropShroudStatusForPlayer(localPlayerIndex, &m_props[i].location);
 		}
 		if (m_props[i].ss >= OBJECTSHROUD_SHROUDED) {

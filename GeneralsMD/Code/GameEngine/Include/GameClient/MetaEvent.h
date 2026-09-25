@@ -388,7 +388,7 @@ public:
 	static void parseMetaMap(INI* ini);
 
 	/** Fill the Legacy list from the language's CommandMap.ini alone, which is the game's own map out
-		* of its own archives.  Everything this fork binds is in Data\INI\CommandMap.ini, and only the
+		* of its own archives.  Everything this fork binds is in Data\INI\CommandMapReforged.ini, and only the
 		* Modern list reads that. */
 	void loadLegacyBindings( const AsciiString& languageMapFile );
 

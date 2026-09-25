@@ -357,31 +357,40 @@ DX8IndexBufferClass::DX8IndexBufferClass(unsigned short index_count_,UsageType u
 		return;
 	}
 
-	WWDEBUG_SAY(("Index buffer creation failed, trying to release assets...\n"));
+	//	Not for a dynamic buffer, which is asked for mid-frame: see Create_Vertex_Buffer.
+	if (!(usage&USAGE_DYNAMIC)) {
+		WWDEBUG_SAY(("Index buffer creation failed, trying to release assets...\n"));
 
-	// Vertex buffer creation failed, so try releasing least used textures and flushing the mesh cache.
+		// Vertex buffer creation failed, so try releasing least used textures and flushing the mesh cache.
 
-	// Free all textures that haven't been used in the last 5 seconds
-	TextureClass::Invalidate_Old_Unused_Textures(5000);
+		// Free all textures that haven't been used in the last 5 seconds
+		TextureClass::Invalidate_Old_Unused_Textures(5000);
 
-	// Invalidate the mesh cache
-	WW3D::_Invalidate_Mesh_Cache();
+		// Invalidate the mesh cache
+		WW3D::_Invalidate_Mesh_Cache();
 
-	// Try again...
-	ret=DX8Wrapper::_Get_D3D_Device()->CreateIndexBuffer(
-		sizeof(WORD)*index_count,
-		usage_flags,
-		D3DFMT_INDEX16,
-		(usage&USAGE_DYNAMIC) ? D3DPOOL_DEFAULT : D3DPOOL_MANAGED,
-		&index_buffer,
-		NULL);	// pSharedHandle, D3D9's extra parameter, reserved and always null
+		// Try again...
+		ret=DX8Wrapper::_Get_D3D_Device()->CreateIndexBuffer(
+			sizeof(WORD)*index_count,
+			usage_flags,
+			D3DFMT_INDEX16,
+			D3DPOOL_MANAGED,
+			&index_buffer,
+			NULL);	// pSharedHandle, D3D9's extra parameter, reserved and always null
 
-	if (SUCCEEDED(ret)) {
-		WWDEBUG_SAY(("...Index buffer creation succesful\n"));
+		if (SUCCEEDED(ret)) {
+			WWDEBUG_SAY(("...Index buffer creation succesful\n"));
+			return;
+		}
 	}
 
-	// If it still fails it is fatal
+	//	Not fatal and never was; a refused buffer writes to scratch like Create_Vertex_Buffer's,
+	//	and loses its Direct3D 11 twin for the same reason.
 	DX8_ErrorCode(ret);
+	index_buffer=NULL;
+	scratch_indices=W3DNEWARRAY unsigned short[index_count];
+	delete dx11_twin;
+	dx11_twin=NULL;
 }
 
 // ----------------------------------------------------------------------------
@@ -484,6 +493,11 @@ DynamicIBAccessClass::WriteLockClass::WriteLockClass(DynamicIBAccessClass* ib_ac
 	case BUFFER_TYPE_DYNAMIC_DX8:
 		WWASSERT(DynamicIBAccess);
 //		WWASSERT(!dynamic_dx8_index_buffer->Engine_Refs());
+		if (static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer)->Get_DX8_Index_Buffer()==NULL) {
+			Indices=static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer)->Get_Scratch_Indices();
+			Indices+=DynamicIBAccess->IndexBufferOffset;
+			break;
+		}
 		DX8_Assert();
 		DX8_ErrorCode(
 			static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer)->Get_DX8_Index_Buffer()->Lock(
@@ -517,6 +531,7 @@ DynamicIBAccessClass::WriteLockClass::~WriteLockClass()
 	DX8_THREAD_ASSERT();
 	switch (DynamicIBAccess->Get_Type()) {
 	case BUFFER_TYPE_DYNAMIC_DX8:
+		if (static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer)->Get_DX8_Index_Buffer()==NULL) break;
 		DX8_Assert();
 		DX11Lock.End();
 		DX8_ErrorCode(static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer)->Get_DX8_Index_Buffer()->Unlock());
@@ -548,6 +563,14 @@ void DynamicIBAccessClass::Allocate_DX8_Dynamic_Buffer()
 		REF_PTR_RELEASE(_DynamicDX8IndexBuffer);
 		_DynamicDX8IndexBufferSize=IndexCount;
 		if (_DynamicDX8IndexBufferSize<DEFAULT_IB_SIZE) _DynamicDX8IndexBufferSize=DEFAULT_IB_SIZE;
+	}
+
+	// One made while the device refused buffers is a scratch block; try for a real one again, but
+	// only once the device says it is back, not on every draw while it still refuses
+	if (_DynamicDX8IndexBuffer && _DynamicDX8IndexBuffer->Get_DX8_Index_Buffer()==NULL
+			&& DX8Wrapper::_Get_D3D_Device()!=NULL
+			&& DX8Wrapper::_Get_D3D_Device()->TestCooperativeLevel()==D3D_OK) {
+		REF_PTR_RELEASE(_DynamicDX8IndexBuffer);
 	}
 
 	// Create a new vb if one doesn't exist currently

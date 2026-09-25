@@ -105,7 +105,7 @@ public:
 	~ArmorStore();
 
 	void init() { }
-	void reset() { }
+	void reset();
 	void update() { }
 
 	/**
@@ -124,6 +124,9 @@ private:
 
 	typedef std::hash_map< NameKeyType, ArmorTemplate, rts::hash<NameKeyType>, rts::equal_to<NameKeyType> > ArmorTemplateMap;
 	ArmorTemplateMap m_armorTemplates;
+
+	/// What a map.ini overwrote, in the order it did, put back by reset() so the next match starts from the stock armour.
+	std::vector< std::pair<NameKeyType, ArmorTemplate> > m_beforeMapOverrides;
 
 };
 

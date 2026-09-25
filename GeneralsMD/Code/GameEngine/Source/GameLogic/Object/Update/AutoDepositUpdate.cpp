@@ -203,10 +203,9 @@ UpdateSleepTime AutoDepositUpdate::update( void )
 
 		if( modData->m_isActualMoney )
 		{
-			getObject()->getControllingPlayer()->getMoney()->deposit( moneyAmount );
-			// score what we actually deposited: this used to score m_depositAmount only, so the
+			// scores what is actually deposited: this used to score m_depositAmount only, so the
 			// upgraded supply boost never reached the end-game income total.
-			getObject()->getControllingPlayer()->getScoreKeeper()->addMoneyEarned( moneyAmount );
+			getObject()->getControllingPlayer()->earnIncome( moneyAmount, getObject()->isKindOf( KINDOF_TECH_BUILDING ) );
 		}
 		
 		// OY LOOK!  I AM USING LOCAL PLAYER.  Do not put anything other than TheInGameUI->addFloatingText in the block this controls!!!

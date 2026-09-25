@@ -52,7 +52,6 @@
 #include "GameClient/GadgetComboBox.h"
 #include "GameClient/GadgetTextEntry.h"
 #include "GameClient/GadgetPushButton.h"
-#include "GameClient/GadgetSlider.h"
 #include "GameClient/GadgetStaticText.h"
 #include "GameClient/MapUtil.h"
 #include "GameClient/Mouse.h"
@@ -116,14 +115,14 @@ static NameKeyType buttonStartID = NAMEKEY_INVALID;
 static NameKeyType buttonSelectMapID = NAMEKEY_INVALID;
 static NameKeyType buttonResetID = NAMEKEY_INVALID;
 static NameKeyType windowMapID = NAMEKEY_INVALID;
-static NameKeyType sliderGameSpeedID = NAMEKEY_INVALID; 
-static NameKeyType staticTextGameSpeedID = NAMEKEY_INVALID;
+static NameKeyType comboBoxGameSpeedID = NAMEKEY_INVALID;
 static NameKeyType comboBoxSuperweaponsID = NAMEKEY_INVALID;
 static NameKeyType comboBoxStartingCashID = NAMEKEY_INVALID;
 static NameKeyType checkBoxUnitLimitID = NAMEKEY_INVALID;
+static NameKeyType comboBoxIncomeSharingID = NAMEKEY_INVALID;
+static NameKeyType comboBoxTechRespawnID = NAMEKEY_INVALID;
 
 // Window Pointers ------------------------------------------------------------------------
-static GameWindow *staticTextGameSpeed = NULL;
 static GameWindow *parentSkirmishGameOptions = NULL;
 static GameWindow *buttonExit = NULL;
 static GameWindow *buttonStart = NULL;
@@ -135,6 +134,8 @@ static GameWindow *textEntryPlayerName = NULL;
 static GameWindow *comboBoxSuperweapons = NULL;
 static GameWindow *comboBoxStartingCash = NULL;
 static GameWindow *checkBoxUnitLimit = NULL;
+static GameWindow *comboBoxIncomeSharing = NULL;
+static GameWindow *comboBoxTechRespawn = NULL;
 static GameWindow *comboBoxPlayer[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
 																									 NULL,NULL,NULL,NULL };
 
@@ -162,10 +163,31 @@ static Bool buttonPushed = FALSE;
 static Bool stillNeedsToSetOptions = FALSE;
 void skirmishUpdateSlotList( void );
 static void populateSkirmishBattleHonors( void );
-// The slider used to run one notch past 60 to a "--" that started the match at 1000 logic frames a
-// second. It is 15 to 60 now, and a preference saved at the old top notch lands on 60.
-static const Int SKIRMISH_GAME_SPEED_MIN = 15;
-static const Int SKIRMISH_GAME_SPEED_MAX = 60;
+// The game speed dropdown, as logic frames a second against the normal 30.  Half speed to double.
+// x0.75 is 22.5, which a whole frame rate cannot hold, so it runs at 23.  The preference keeps the
+// frame rate, so one saved by the old 15 to 60 slider lands on the nearest entry.
+static const Int SKIRMISH_GAME_SPEEDS[] = { 15, 23, 30, 45, 60 };
+static const WideChar *SKIRMISH_GAME_SPEED_CAPTIONS[] = { L"x0.5", L"x0.75", L"x1", L"x1.5", L"x2" };
+static const Int SKIRMISH_GAME_SPEED_COUNT = sizeof( SKIRMISH_GAME_SPEEDS ) / sizeof( SKIRMISH_GAME_SPEEDS[ 0 ] );
+
+static Int nearestGameSpeedIndex( Int framesPerSecond )
+{
+	Int nearest = 0;
+	for( Int i = 1; i < SKIRMISH_GAME_SPEED_COUNT; ++i )
+	{
+		if( abs( SKIRMISH_GAME_SPEEDS[ i ] - framesPerSecond ) < abs( SKIRMISH_GAME_SPEEDS[ nearest ] - framesPerSecond ) )
+			nearest = i;
+	}
+	return nearest;
+}
+
+static Int selectedGameSpeed( void )
+{
+	GameWindow *comboBoxGameSpeed = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, comboBoxGameSpeedID );
+	Int selected = 0;
+	GadgetComboBoxGetSelectedPos( comboBoxGameSpeed, &selected );
+	return SKIRMISH_GAME_SPEEDS[ selected ];
+}
 Bool doUpdateSlotList = TRUE;
 
 static Int getNextSelectablePlayer(Int start)
@@ -366,13 +388,12 @@ Bool SkirmishPreferences::write(void)
   setStartingCash( TheSkirmishGameInfo->getStartingCash() );
   setSuperweaponRestriction( TheSkirmishGameInfo->getSuperweaponRestriction() );
   setInt( "UnitLimit", TheSkirmishGameInfo->getUnitLimit() ? 1 : 0 );
+  setInt( "IncomeSharing", TheSkirmishGameInfo->getIncomeSharing() );
+  setInt( "TechRespawn", TheSkirmishGameInfo->getTechRespawn() );
 
 	setSlotList();
 
-//	NameKeyType sliderGameSpeedID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:SliderGameSpeed" ) );
-	GameWindow *sliderGameSpeed = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, sliderGameSpeedID );
-	Int maxFPS = GadgetSliderGetPosition( sliderGameSpeed );
-	setInt("FPS", maxFPS);
+	setInt("FPS", selectedGameSpeed());
 
 	return UserPreferences::write();
 }
@@ -401,31 +422,13 @@ static void playerTooltip(GameWindow *window,
 }
 */
 
-void setFPSTextBox( Int sliderPos )
-{
-	if(!staticTextGameSpeed)
-		return;
-	UnicodeString text;
-	staticTextGameSpeed->winEnable(TRUE);
-	if( sliderPos == TheGlobalData->m_framesPerSecondLimit )
-	{
-		// set different color
-		staticTextGameSpeed->winEnable(FALSE);
-	}
-	text.format(L"%2d", sliderPos);
-	GadgetStaticTextSetText(staticTextGameSpeed, text);
-}
-
 void reallyDoStart( void )
 {
 	if (TheGameLogic->isInGame())
 		TheGameLogic->clearGameData(FALSE);
-	
-	//NameKeyType sliderGameSpeedID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:SliderGameSpeed" ) );
-	GameWindow *sliderGameSpeed = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, sliderGameSpeedID );
-	Int maxFPS = GadgetSliderGetPosition( sliderGameSpeed );
-	DEBUG_LOG(("GameSpeedSlider was at %d\n", maxFPS));
-	maxFPS = max( SKIRMISH_GAME_SPEED_MIN, min( SKIRMISH_GAME_SPEED_MAX, maxFPS ) );
+
+	const Int maxFPS = selectedGameSpeed();
+	DEBUG_LOG(("Game speed dropdown is at %d logic frames a second\n", maxFPS));
 
   TheWritableGlobalData->m_mapName = TheSkirmishGameInfo->getMap();
   TheSkirmishGameInfo->startGame(0);
@@ -1067,6 +1070,18 @@ static void handleSuperweaponSelection()
   }
 }
 
+static void handleIncomeSharingSelection()
+{
+  if (comboBoxIncomeSharing)
+    TheSkirmishGameInfo->setIncomeSharing( IncomeSharingFromComboBox( comboBoxIncomeSharing ) );
+}
+
+static void handleTechRespawnSelection()
+{
+  if (comboBoxTechRespawn)
+    TheSkirmishGameInfo->setTechRespawn( TechRespawnFromComboBox( comboBoxTechRespawn ) );
+}
+
 
 //-------------------------------------------------------------------------------------------------
 /** Initialize the Gadgets Options Menu */
@@ -1081,10 +1096,11 @@ void InitSkirmishGameGadgets( void )
 	buttonSelectMapID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:ButtonSelectMap" ) );
 	buttonResetID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:ButtonReset" ) );
 	windowMapID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:MapWindow" ) );
-	staticTextGameSpeedID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:StaticTextGameSpeed" ) );
   comboBoxSuperweaponsID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:ComboBoxSuperweapons" ) );
   comboBoxStartingCashID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:ComboBoxStartingCash" ) );
   checkBoxUnitLimitID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:CheckBoxUnitLimit" ) );
+  comboBoxIncomeSharingID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:ComboBoxIncomeSharing" ) );
+  comboBoxTechRespawnID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:ComboBoxTechRespawn" ) );
 
 	// Initialize the pointers to our gadgets
 	parentSkirmishGameOptions = TheWindowManager->winGetWindowFromId( NULL, parentSkirmishGameOptionsID );
@@ -1099,8 +1115,6 @@ void InitSkirmishGameGadgets( void )
 	DEBUG_ASSERTCRASH(textEntryMapDisplay, ("Could not find the textEntryMapDisplay"));
 	buttonReset = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, buttonResetID );
 	DEBUG_ASSERTCRASH(buttonReset, ("Could not find the buttonReset"));
-	staticTextGameSpeed = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, staticTextGameSpeedID );
-	DEBUG_ASSERTCRASH(staticTextGameSpeed, ("Could not find the staticTextGameSpeed"));
   comboBoxSuperweapons = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, comboBoxSuperweaponsID );
   DEBUG_ASSERTCRASH(comboBoxSuperweapons, ("Could not find the comboBoxSuperweapons"));
   if ( comboBoxSuperweapons )
@@ -1113,6 +1127,14 @@ void InitSkirmishGameGadgets( void )
   DEBUG_ASSERTCRASH(checkBoxUnitLimit, ("Could not find the checkBoxUnitLimit"));
   if ( checkBoxUnitLimit )
     UpdateUnitLimitCheckBox( checkBoxUnitLimit, TheSkirmishGameInfo, TRUE );
+  comboBoxIncomeSharing = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, comboBoxIncomeSharingID );
+  DEBUG_ASSERTCRASH(comboBoxIncomeSharing, ("Could not find the comboBoxIncomeSharing"));
+  if ( comboBoxIncomeSharing )
+    PopulateIncomeSharingComboBox( comboBoxIncomeSharing, TheSkirmishGameInfo, TRUE );
+  comboBoxTechRespawn = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, comboBoxTechRespawnID );
+  DEBUG_ASSERTCRASH(comboBoxTechRespawn, ("Could not find the comboBoxTechRespawn"));
+  if ( comboBoxTechRespawn )
+    PopulateTechRespawnComboBox( comboBoxTechRespawn, TheSkirmishGameInfo, TRUE );
 
 	textEntryPlayerNameID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:TextEntryPlayerName" ) );
   textEntryPlayerName = TheWindowManager->winGetWindowFromId( NULL, textEntryPlayerNameID );
@@ -1287,6 +1309,10 @@ void updateSkirmishGameOptions( void )
     UpdateSuperweaponComboBox( comboBoxSuperweapons, TheSkirmishGameInfo, TRUE );
   if ( checkBoxUnitLimit )
     UpdateUnitLimitCheckBox( checkBoxUnitLimit, TheSkirmishGameInfo, TRUE );
+  if ( comboBoxIncomeSharing )
+    UpdateIncomeSharingComboBox( comboBoxIncomeSharing, TheSkirmishGameInfo, TRUE );
+  if ( comboBoxTechRespawn )
+    UpdateTechRespawnComboBox( comboBoxTechRespawn, TheSkirmishGameInfo, TRUE );
   Int itemCount = GadgetComboBoxGetLength(comboBoxStartingCash);
   for ( Int index = 0; index < itemCount; index++ )
   {
@@ -1311,7 +1337,7 @@ void SkirmishGameOptionsMenuInit( WindowLayout *layout, void *userData )
 
 	stillNeedsToSetOptions = FALSE;
 
-	sliderGameSpeedID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:SliderGameSpeed" ) );
+	comboBoxGameSpeedID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:ComboBoxGameSpeed" ) );
 	
 	sandboxOk = FALSE;
   doUpdateSlotList = FALSE;
@@ -1371,6 +1397,8 @@ void SkirmishGameOptionsMenuInit( WindowLayout *layout, void *userData )
   TheSkirmishGameInfo->setStartingCash( prefs.getStartingCash() );
   TheSkirmishGameInfo->setSuperweaponRestriction( prefs.getSuperweaponRestriction() );
   TheSkirmishGameInfo->setUnitLimit( prefs.getInt( "UnitLimit", 0 ) != 0 );
+  TheSkirmishGameInfo->setIncomeSharing( prefs.getInt( "IncomeSharing", INCOME_SHARING_OFF ) );
+  TheSkirmishGameInfo->setTechRespawn( prefs.getInt( "TechRespawn", 0 ) );
   // Pro Rules are for people playing each other; a skirmish against the computer never has them.
   TheSkirmishGameInfo->setProRules( FALSE );
  
@@ -1399,12 +1427,12 @@ void SkirmishGameOptionsMenuInit( WindowLayout *layout, void *userData )
 	//updateSkirmishGameOptions();
 	//initSkirmishGameOptions();
 
-	// set up the game speed slider
-//	NameKeyType sliderGameSpeedID = TheNameKeyGenerator->nameToKey( AsciiString( "SkirmishGameOptionsMenu.wnd:SliderGameSpeed" ) );
-	GameWindow *sliderGameSpeed = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, sliderGameSpeedID );
-	Int sliderPos = max(SKIRMISH_GAME_SPEED_MIN,min(SKIRMISH_GAME_SPEED_MAX,prefs.getInt("FPS", TheGlobalData->m_framesPerSecondLimit)));
-	GadgetSliderSetPosition( sliderGameSpeed, sliderPos );
-	setFPSTextBox(sliderPos);
+	// set up the game speed dropdown
+	GameWindow *comboBoxGameSpeed = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, comboBoxGameSpeedID );
+	GadgetComboBoxReset( comboBoxGameSpeed );
+	for( Int i = 0; i < SKIRMISH_GAME_SPEED_COUNT; ++i )
+		GadgetComboBoxAddEntry( comboBoxGameSpeed, UnicodeString( SKIRMISH_GAME_SPEED_CAPTIONS[ i ] ), comboBoxGameSpeed->winGetEnabledTextColor() );
+	GadgetComboBoxSetSelectedPos( comboBoxGameSpeed, nearestGameSpeedIndex( prefs.getInt( "FPS", LOGICFRAMES_PER_SECOND ) ) );
 	buttonStart->winSetText(TheGameText->fetch("GUI:Start"));
 	/* hey, for now we're also going to disable the map select button until it doesn't crash */
 	//buttonSelectMap->winEnable( FALSE );
@@ -1609,6 +1637,14 @@ WindowMsgHandledType SkirmishGameOptionsMenuSystem( GameWindow *window, Unsigned
         {
           handleSuperweaponSelection();
         }
+        else if ( controlID == comboBoxIncomeSharingID )
+        {
+          handleIncomeSharingSelection();
+        }
+        else if ( controlID == comboBoxTechRespawnID )
+        {
+          handleTechRespawnSelection();
+        }
         else
         {
 				  for (Int i = 0; i < MAX_SLOTS; i++)
@@ -1635,17 +1671,6 @@ WindowMsgHandledType SkirmishGameOptionsMenuSystem( GameWindow *window, Unsigned
         skirmishUpdateSlotList();
         break;
 			}// case GCM_SELECTED:
-		//-------------------------------------------------------------------------------------------------
-		case GSM_SLIDER_TRACK:
-		{
-			GameWindow *control = (GameWindow *)mData1;
-			Int sliderPos = (Int)mData2;
-			Int controlID = control->winGetWindowId();
-			if(controlID == sliderGameSpeedID)
-			{
-				setFPSTextBox(sliderPos);
-			}
-		}
 		//-------------------------------------------------------------------------------------------------
 		case GBM_SELECTED:
 			{

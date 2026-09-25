@@ -131,6 +131,19 @@ const ArmorTemplate* ArmorStore::findArmorTemplate(AsciiString name) const
 }
 
 //-------------------------------------------------------------------------------------------------
+/** A map.ini changes armour in place and the next match in this process would play with it, where a
+	* machine that never loaded that map plays the stock values.  Backwards, so an armour both map.ini and
+	* solo.ini changed goes back to what it was before either.  In place, because every ArmorSet holds a
+	* pointer to its template. */
+//-------------------------------------------------------------------------------------------------
+void ArmorStore::reset()
+{
+	for (Int i = (Int)m_beforeMapOverrides.size() - 1; i >= 0; --i)
+		m_armorTemplates[m_beforeMapOverrides[i].first] = m_beforeMapOverrides[i].second;
+	m_beforeMapOverrides.clear();
+}
+
+//-------------------------------------------------------------------------------------------------
 /*static */ void ArmorStore::parseArmorDefinition(INI *ini)
 {
 	static const FieldParse myFieldParse[] = 
@@ -140,6 +153,15 @@ const ArmorTemplate* ArmorStore::findArmorTemplate(AsciiString name) const
 
 	const char *c = ini->getNextToken();
 	NameKeyType key = TheNameKeyGenerator->nameToKey(c);
+	ArmorTemplateMap::const_iterator existing = TheArmorStore->m_armorTemplates.find(key);
+	if (ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES && existing != TheArmorStore->m_armorTemplates.end())
+		TheArmorStore->m_beforeMapOverrides.push_back(std::make_pair(key, existing->second));
+	if (ini->getLoadType() == INI_LOAD_MULTIFILE && existing == TheArmorStore->m_armorTemplates.end())
+	{
+		// BalanceReforged.ini rewrites armors objects already wear; a new name would reach nothing
+		DEBUG_CRASH(("Armor '%s' is patched but was never defined", c));
+		throw INI_INVALID_DATA;
+	}
 	ArmorTemplate& armorTmpl = TheArmorStore->m_armorTemplates[key];
 	armorTmpl.clear();
 	ini->initFromINI(&armorTmpl, myFieldParse);

@@ -74,6 +74,7 @@
 
 #include "GameClient/CinemaDirector.h"
 #include "GameClient/Anim2D.h"
+#include "GameClient/ControlBar.h"
 #include "GameClient/Display.h"
 #include "GameClient/DisplayStringManager.h"
 #include "GameClient/Drawable.h"
@@ -82,6 +83,7 @@
 #include "GameClient/GlobalLanguage.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/Image.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/PlayerColorScheme.h"
 #include "GameClient/LanguageFilter.h"
@@ -1037,7 +1039,10 @@ void Drawable::allocateShadows(void)
 //-------------------------------------------------------------------------------------------------
 void Drawable::setFullyObscuredByShroud(Bool fullyObscured)
 {
-	if (m_drawableFullyObscuredByShroud != fullyObscured)
+	// passed on every frame while obscured, not only on the change: whether a building's shadow stays
+	// in the fog can change under a flag that does not, when its ground goes from fogged to shrouded
+	// or its snapshot is taken or freed
+	if (m_drawableFullyObscuredByShroud != fullyObscured || fullyObscured)
 	{
 		for (DrawModule** dm = getDrawModules(); *dm; ++dm)
 		{
@@ -3761,7 +3766,7 @@ void Drawable::drawBombed(const IRegion2D* healthBarRegion)
 					// hey, I've got an idea! why don't we ASK the anim how long it is?
 					//
 					UnsignedInt dieFrame = update->getDetonationFrame();
-					UnsignedInt seconds = REAL_TO_INT_CEIL( (dieFrame - now) * SECONDS_PER_LOGICFRAME_REAL);
+					UnsignedInt seconds = ControlBar_secondsFromFrames( (Real)(dieFrame - now) );
 
 					UnsignedInt numFrames = getIconInfo()->m_icon[ ICON_BOMB_TIMED ]->getAnimTemplate()->getNumFrames();
 					// this anim goes from "N" seconds down to zero, so the max seconds we can use is N-1.
@@ -4003,7 +4008,7 @@ void Drawable::drawSupplyCash( const IRegion2D *healthBarRegion )
 	}
 
 	// shrouded ground keeps its secrets: what was there when you last looked is not news
-	if( obj->getShroudedStatus( ThePlayerList->getLocalPlayer()->getPlayerIndex() ) != OBJECTSHROUD_CLEAR )
+	if( obj->getShroudedStatus( TheObserverCamera.getShroudPlayerIndex() ) != OBJECTSHROUD_CLEAR )
 		return;
 
 	if( m_supplyCashDisplayString == NULL )
@@ -4422,11 +4427,7 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 			Int totalFrames = pe->getProductionType() == PRODUCTION_UNIT
 												? pe->getProductionObject()->calcTimeToBuild( player )
 												: pe->getProductionUpgrade()->calcTimeToBuild( player );
-			// real seconds: the logic runs at the game-speed rate, not at a fixed 30 frames a second
-			Int logicFps = TheGameEngine ? TheGameEngine->getFramesPerSecondLimit() : 0;
-			if( logicFps <= 0 )
-				logicFps = LOGICFRAMES_PER_SECOND;
-			Int secondsLeft = REAL_TO_INT_CEIL( totalFrames * (1.0f - pct * 0.01f) / logicFps );
+			Int secondsLeft = ControlBar_secondsFromFrames( totalFrames * (1.0f - pct * 0.01f) );
 
 			// one shared string: draw() renders immediately, and the manager lives for the whole app
 			static DisplayString *prodTimeString = NULL;
@@ -4588,11 +4589,6 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 				//
 				if( chargeFramesLeft > 0 )
 				{
-					// real seconds: the logic runs at the game-speed rate, not a fixed 30 a second
-					Int logicFps = TheGameEngine ? TheGameEngine->getFramesPerSecondLimit() : 0;
-					if( logicFps <= 0 )
-						logicFps = LOGICFRAMES_PER_SECOND;
-
 					// one shared string: draw() renders immediately and the manager lives for the app
 					static DisplayString *chargeTimeString = NULL;
 					if( chargeTimeString == NULL )
@@ -4604,7 +4600,7 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 					}
 
 					UnicodeString text;
-					text.format( L"%ds", REAL_TO_INT_CEIL( INT_TO_REAL( chargeFramesLeft ) / logicFps ) );
+					text.format( L"%ds", ControlBar_secondsFromFrames( INT_TO_REAL( chargeFramesLeft ) ) );
 					if( chargeTimeString->getText().compare( text ) != 0 )
 						chargeTimeString->setText( text );
 
@@ -5340,7 +5336,13 @@ void Drawable::updateHiddenStatus()
 {
 	Bool hidden = m_hidden || m_hiddenByStealth;
 	if( hidden )
+	{
+		if( isSelected() )
+			TheInGameUI->holdSelectionThroughTunnel( this );
 		TheInGameUI->deselectDrawable( this );
+	}
+	else
+		TheInGameUI->restoreSelectionAfterTunnel( this );
 
 	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
 	{

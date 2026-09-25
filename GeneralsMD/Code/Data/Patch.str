@@ -4,7 +4,7 @@
 //
 // Patch.str is the 1.04 string overlay from PatchData.big.  The two original
 // strings are kept; everything after them is this fork's, and every command
-// added to Data/INI/CommandMap.ini needs a pair here or Options > Keyboard
+// added to Data/INI/CommandMapReforged.ini needs a pair here or Options > Keyboard
 // shows a blank row.
 //
 // Comments are '//' - GameText.cpp parseStringFile skips exactly that.
@@ -192,7 +192,7 @@ GUI:SignalAttack
 END
 
 GUI:SignalAttackDescription
-"Smoke in your colour marked ATTACK for three seconds, where the cursor is or on the radar spot under it. Only your allies see it."
+"Smoke in your colour and crossed swords on the ground for ten seconds, where the cursor is or on the radar spot under it. Only your allies see it."
 END
 
 GUI:SignalDefend
@@ -200,7 +200,7 @@ GUI:SignalDefend
 END
 
 GUI:SignalDefendDescription
-"Smoke in your colour marked DEFEND for three seconds, where the cursor is or on the radar spot under it. Only your allies see it."
+"Smoke in your colour and a shield on the ground for ten seconds, where the cursor is or on the radar spot under it. Only your allies see it."
 END
 
 GUI:SignalAttention
@@ -208,19 +208,7 @@ GUI:SignalAttention
 END
 
 GUI:SignalAttentionDescription
-"Smoke in your colour marked LOOK for three seconds, where the cursor is or on the radar spot under it. Only your allies see it."
-END
-
-GUI:SignalAttackLabel
-"ATTACK"
-END
-
-GUI:SignalDefendLabel
-"DEFEND"
-END
-
-GUI:SignalAttentionLabel
-"LOOK"
+"Smoke in your colour and an eye on the ground for ten seconds, where the cursor is or on the radar spot under it. Only your allies see it."
 END
 
 GUI:SignalAttackPlaced
@@ -249,30 +237,6 @@ END
 
 GUI:GameResumed
 "Game resumed."
-END
-
-GUI:GameSpeedUp
-"Game Speed Up"
-END
-
-GUI:GameSpeedUpDescription
-"Speeds the game up by five logic frames a second. Single player and replays only."
-END
-
-GUI:GameSpeedDown
-"Game Speed Down"
-END
-
-GUI:GameSpeedDownDescription
-"Slows the game down by five logic frames a second. Single player and replays only."
-END
-
-GUI:GameSpeedReset
-"Normal Game Speed"
-END
-
-GUI:GameSpeedResetDescription
-"Puts the game back to its normal speed. Single player and replays only."
 END
 
 GUI:SelectAllMilitary
@@ -870,6 +834,14 @@ TOOLTIP:WasdCamera
 "W A S D move the camera. F attacks, G stops, H attack-moves, J guards and K holds position, and the command bar's top row reads Q E R T Y U I. Modern input only."
 END
 
+GUI:ChromaLighting
+"Razer Chroma Lighting"
+END
+
+TOOLTIP:ChromaLighting
+"During a match, a Razer keyboard, mouse and mousepad show the command bar, power, superweapons and money. In the menus Synapse keeps its own lighting."
+END
+
 GUI:OrderLines
 "Order Lines"
 END
@@ -930,6 +902,78 @@ END
 
 TOOLTIP:WeaponStats
 "Dmg %d  Range %d"
+END
+
+// The same figures as rows of Window/Html/Tooltip.html, a label and its value each.
+
+TOOLTIP:StatTime
+"Build time"
+END
+
+TOOLTIP:StatSeconds
+"%ds"
+END
+
+TOOLTIP:StatDamage
+"Damage"
+END
+
+TOOLTIP:StatRange
+"Range"
+END
+
+TOOLTIP:StatHealth
+"Health"
+END
+
+TOOLTIP:StatAttackSpeed
+"Attack speed"
+END
+
+TOOLTIP:StatPerSecond
+"/s"
+END
+
+TOOLTIP:StatDamagePerSecond
+"Damage per second"
+END
+
+TOOLTIP:StatArmor
+"Armor"
+END
+
+TOOLTIP:StatArmorStronger
+"stronger"
+END
+
+TOOLTIP:StatNewWeapon
+"New weapon"
+END
+
+TOOLTIP:StatNewWeaponGround
+"Ground weapon"
+END
+
+TOOLTIP:StatNewWeaponAir
+"Anti-air weapon"
+END
+
+TOOLTIP:StatNewWeaponFigures
+"%d damage, %d range"
+END
+
+// Under the figures: a unit's upgrades, or on an upgrade's card the units it changes.
+
+TOOLTIP:Upgrades
+"UPGRADES"
+END
+
+TOOLTIP:UpgradeChanges
+"CHANGES"
+END
+
+TOOLTIP:UpgradeOwned
+"owned"
 END
 
 // Peace time - the lobby combo box, its tooltip, the corner countdown and the three things the game
@@ -1011,6 +1055,42 @@ TOOLTIP:UnitLimit
 "840 units shared out evenly between the players: two players get 420 each, eight get 105. Units standing and units waiting in a queue both count, buildings do not. Your own count and your share are in the top right corner during the match."
 END
 
+GUI:IncomeSharing
+"Share Income"
+END
+
+TOOLTIP:IncomeSharing
+"What allies split between them. Every payment is divided evenly between the player who earned it and each ally still in the match: an oil derrick paying 200 to one of two allies pays 100 to each. Oil Derricks shares captured derricks only. All Income adds supply runs, hackers and black markets."
+END
+
+GUI:IncomeSharingOff
+"No Sharing"
+END
+
+GUI:IncomeSharingTech
+"Oil Derricks"
+END
+
+GUI:IncomeSharingAll
+"All Income"
+END
+
+GUI:TechRespawn
+"Tech Respawn"
+END
+
+TOOLTIP:TechRespawn
+"How long a destroyed tech building lies in ruins before a neutral one stands on the same spot again, at full health and ready to be captured. Oil derricks, refineries, hospitals, artillery platforms, repair bays and reinforcement pads all come back. A unit or a building standing on the spot holds it back until it moves."
+END
+
+GUI:TechRespawnOff
+"Never"
+END
+
+GUI:TechRespawnFormat
+"After %d min"
+END
+
 GUI:ProRules
 "Pro Rules"
 END
@@ -1029,21 +1109,143 @@ GUI:CantBuildTooManyDerrickDefenses
 "You already have two defenses round these oil derricks."
 END
 
-// the drop-down in the top left corner of a match that switches the strips on and off
-GUI:HudToggles
-"Strips"
-END
-
-GUI:HudProductionStrip
-"Production queue"
-END
-
 GUI:HudSkillStrip
 "Generals' promotions"
 END
 
 GUI:HudSuperweaponStrip
 "Superweapon timers"
+END
+
+// the spectator's list of every player's cash plus what everything he has standing cost
+GUI:HudNetWorth
+"Net worth"
+END
+
+// the heading of the spectator's stat drop-down, and the other numbers it can rank every player by
+GUI:HudGameStats
+"Game stats"
+END
+
+GUI:HudStatCash
+"Cash"
+END
+
+GUI:HudStatIncome
+"Income per minute"
+END
+
+GUI:HudStatArmy
+"Army value"
+END
+
+GUI:HudStatKills
+"Kills / losses"
+END
+
+GUI:HudStatRank
+"General's rank"
+END
+
+GUI:HudStatPower
+"Power"
+END
+
+// each player's most expensive units, with how many he has
+GUI:HudArmies
+"Armies"
+END
+
+// the spectator's camera drop-down, "Camera: Director"
+GUI:HudCamera
+"Camera"
+END
+
+// the camera goes to the biggest fight on the map by itself
+GUI:HudCameraDirector
+"Director"
+END
+
+// the camera is the spectator's own again
+GUI:HudCameraFree
+"Free"
+END
+
+// the camera shows what the followed player's own screen shows
+GUI:HudCameraPlayer
+"Player camera"
+END
+
+// the spectator's second drop-down, "Player: Nova", the player the camera and the fog follow
+GUI:HudFollow
+"Player"
+END
+
+// in that drop-down, following nobody
+GUI:HudFollowNobody
+"None"
+END
+
+// draw the followed player's fog of war, so the spectator sees only what he sees
+GUI:HudFog
+"Fog of war"
+END
+
+// after a superweapon's name in the event feed over the radar, the moment it can fire
+GUI:HudSuperweaponReady
+"ready to fire"
+END
+
+// after a superweapon's name in the event feed, the moment it is fired
+GUI:HudSuperweaponLaunched
+"launched"
+END
+
+// after a general's power's name in the event feed, the moment it is used
+GUI:HudPowerUsed
+"used"
+END
+
+// after a promotion's name in the event feed, the moment it is bought
+GUI:HudPromotionBought
+"unlocked"
+END
+
+// after a superweapon's or an advanced tech building's name in the event feed
+GUI:HudStructureStarted
+"construction started"
+END
+
+GUI:HudStructureBuilt
+"built"
+END
+
+// a line of the event feed when a player's last dozer or worker is gone; %s is his name
+GUI:HudNoDozerLeft
+"%s has no dozer left"
+END
+
+GUI:HudNoWorkerLeft
+"%s has no worker left"
+END
+
+// the command bar's own buttons, written on them now that the bar is drawn from a page
+GUI:BarIdleWorker
+"Worker"
+END
+
+// the network box in the top right corner: frames ready out of the input delay, the room's frame
+// rate, and the traffic in and out in kilobytes a second
+GUI:BarNetReady
+"ready"
+END
+
+GUI:BarNetRoom
+"room"
+END
+
+GUI:BarNetUnits
+"units"
 END
 
 // the scoreboard on Tab
@@ -1073,6 +1275,10 @@ END
 
 GUI:ScoreboardPerMinute
 "PER MIN"
+END
+
+GUI:ScoreboardPerSecond
+"PER SEC"
 END
 
 GUI:ScoreboardKills

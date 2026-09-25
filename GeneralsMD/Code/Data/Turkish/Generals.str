@@ -14790,7 +14790,7 @@ GUI:SignalAttack
 END
 
 GUI:SignalAttackDescription
-"İmlecin olduğu yere ya da altındaki radar noktasına üç saniyeliğine sizin renginizde, SALDIR yazılı bir duman bırakır. Yalnızca müttefikleriniz görür."
+"İmlecin olduğu yere ya da altındaki radar noktasına on saniyeliğine sizin renginizde bir duman ve yere çapraz kılıçlar bırakır. Yalnızca müttefikleriniz görür."
 END
 
 GUI:SignalDefend
@@ -14798,7 +14798,7 @@ GUI:SignalDefend
 END
 
 GUI:SignalDefendDescription
-"İmlecin olduğu yere ya da altındaki radar noktasına üç saniyeliğine sizin renginizde, SAVUN yazılı bir duman bırakır. Yalnızca müttefikleriniz görür."
+"İmlecin olduğu yere ya da altındaki radar noktasına on saniyeliğine sizin renginizde bir duman ve yere bir kalkan bırakır. Yalnızca müttefikleriniz görür."
 END
 
 GUI:SignalAttention
@@ -14806,19 +14806,7 @@ GUI:SignalAttention
 END
 
 GUI:SignalAttentionDescription
-"İmlecin olduğu yere ya da altındaki radar noktasına üç saniyeliğine sizin renginizde, BAK yazılı bir duman bırakır. Yalnızca müttefikleriniz görür."
-END
-
-GUI:SignalAttackLabel
-"SALDIR"
-END
-
-GUI:SignalDefendLabel
-"SAVUN"
-END
-
-GUI:SignalAttentionLabel
-"BAK"
+"İmlecin olduğu yere ya da altındaki radar noktasına on saniyeliğine sizin renginizde bir duman ve yere bir göz bırakır. Yalnızca müttefikleriniz görür."
 END
 
 GUI:SignalAttackPlaced
@@ -14847,30 +14835,6 @@ END
 
 GUI:GameResumed
 "Oyun devam ediyor."
-END
-
-GUI:GameSpeedUp
-"Oyunu Hızlandır"
-END
-
-GUI:GameSpeedUpDescription
-"Oyunu saniyede beş mantık karesi hızlandırır. Yalnızca tek oyunculu oyunlarda ve tekrarlarda."
-END
-
-GUI:GameSpeedDown
-"Oyunu Yavaşlat"
-END
-
-GUI:GameSpeedDownDescription
-"Oyunu saniyede beş mantık karesi yavaşlatır. Yalnızca tek oyunculu oyunlarda ve tekrarlarda."
-END
-
-GUI:GameSpeedReset
-"Normal Oyun Hızı"
-END
-
-GUI:GameSpeedResetDescription
-"Oyunu normal hızına döndürür. Yalnızca tek oyunculu oyunlarda ve tekrarlarda."
 END
 
 GUI:SelectAllMilitary
@@ -15429,6 +15393,14 @@ TOOLTIP:WasdCamera
 "W A S D kamerayı gezdirir. F saldırır, G durdurur, H saldırarak ilerler, J gözcü koyar, K konumu korur; komut çubuğunun üst sırası Q E R T Y U I olur. Yalnızca Modern girişte."
 END
 
+GUI:ChromaLighting
+"Razer Chroma Işıkları"
+END
+
+TOOLTIP:ChromaLighting
+"Maç sırasında Razer klavye, fare ve mousepad komut çubuğunu, elektriği, süper silahları ve parayı gösterir. Menülerde Synapse kendi ışığını yakar."
+END
+
 GUI:OrderLines
 "Emir Çizgileri"
 END
@@ -15537,6 +15509,42 @@ TOOLTIP:UnitLimit
 "840 birlik oyuncular arasında eşit paylaştırılır: iki oyuncuya 420'şer, sekiz oyuncuya 105'er düşer. Sahadaki birlikler de kuyrukta bekleyenler de sayılır, binalar sayılmaz. Maç sırasında kendi sayınız ve payınız sağ üst köşede görünür."
 END
 
+GUI:IncomeSharing
+"Gelir Paylaşımı"
+END
+
+TOOLTIP:IncomeSharing
+"Müttefiklerin aralarında böldüğü gelir. Her ödeme, onu kazanan oyuncu ile maçta kalan her müttefiki arasında eşit bölünür: iki müttefikten birinin petrol kuyusu 200 ödüyorsa ikisine 100'er düşer. Petrol Kuyuları yalnızca ele geçirilen kuyuları paylaştırır. Tüm Gelir bunlara ikmal seferlerini, hacker'ları ve karaborsaları ekler."
+END
+
+GUI:IncomeSharingOff
+"Paylaşım Yok"
+END
+
+GUI:IncomeSharingTech
+"Petrol Kuyuları"
+END
+
+GUI:IncomeSharingAll
+"Tüm Gelir"
+END
+
+GUI:TechRespawn
+"Bina Dönüşü"
+END
+
+TOOLTIP:TechRespawn
+"Yıkılan bir teknoloji binasının ne kadar süre enkaz olarak kalacağı. Süre dolunca aynı yerde tarafsız ve tam sağlıklı bir yenisi durur, yeniden ele geçirilebilir. Petrol kuyuları, rafineriler, hastaneler, topçu platformları, tamirhaneler ve takviye pistleri geri gelir. O yerde duran bir birlik ya da bina, oradan çekilene kadar dönüşü bekletir."
+END
+
+GUI:TechRespawnOff
+"Dönmez"
+END
+
+GUI:TechRespawnFormat
+"%d dk sonra"
+END
+
 GUI:ProRules
 "Pro Kuralları"
 END
@@ -15561,12 +15569,72 @@ TOOLTIP:WeaponStats
 "Hasar %d  Menzil %d"
 END
 
-GUI:HudToggles
-"Şeritler"
+TOOLTIP:StatTime
+"Üretim süresi"
 END
 
-GUI:HudProductionStrip
-"Üretim sırası"
+TOOLTIP:StatSeconds
+"%d sn"
+END
+
+TOOLTIP:StatDamage
+"Hasar"
+END
+
+TOOLTIP:StatRange
+"Menzil"
+END
+
+TOOLTIP:StatHealth
+"Can"
+END
+
+TOOLTIP:StatAttackSpeed
+"Atış hızı"
+END
+
+TOOLTIP:StatPerSecond
+"/sn"
+END
+
+TOOLTIP:StatDamagePerSecond
+"Saniyelik hasar"
+END
+
+TOOLTIP:StatArmor
+"Zırh"
+END
+
+TOOLTIP:StatArmorStronger
+"güçlenir"
+END
+
+TOOLTIP:StatNewWeapon
+"Yeni silah"
+END
+
+TOOLTIP:StatNewWeaponGround
+"Kara silahı"
+END
+
+TOOLTIP:StatNewWeaponAir
+"Uçaksavar silahı"
+END
+
+TOOLTIP:StatNewWeaponFigures
+"%d hasar, %d menzil"
+END
+
+TOOLTIP:Upgrades
+"GELİŞTİRMELER"
+END
+
+TOOLTIP:UpgradeChanges
+"ETKİLEDİKLERİ"
+END
+
+TOOLTIP:UpgradeOwned
+"alındı"
 END
 
 GUI:HudSkillStrip
@@ -15575,6 +15643,118 @@ END
 
 GUI:HudSuperweaponStrip
 "Süper silah sayaçları"
+END
+
+GUI:HudNetWorth
+"Net değer"
+END
+
+GUI:HudGameStats
+"Oyun istatistikleri"
+END
+
+GUI:HudStatCash
+"Nakit"
+END
+
+GUI:HudStatIncome
+"Dakikalık gelir"
+END
+
+GUI:HudStatArmy
+"Ordu değeri"
+END
+
+GUI:HudStatKills
+"Öldürme / kayıp"
+END
+
+GUI:HudStatRank
+"General rütbesi"
+END
+
+GUI:HudStatPower
+"Elektrik"
+END
+
+GUI:HudArmies
+"Ordular"
+END
+
+GUI:HudCamera
+"Kamera"
+END
+
+GUI:HudCameraDirector
+"Yönetmen"
+END
+
+GUI:HudCameraFree
+"Serbest"
+END
+
+GUI:HudCameraPlayer
+"Oyuncu kamerası"
+END
+
+GUI:HudFollow
+"Oyuncu"
+END
+
+GUI:HudFollowNobody
+"Hiçbiri"
+END
+
+GUI:HudFog
+"Savaş sisi"
+END
+
+GUI:HudSuperweaponReady
+"ateşe hazır"
+END
+
+GUI:HudSuperweaponLaunched
+"ateşlendi"
+END
+
+GUI:HudPowerUsed
+"kullanıldı"
+END
+
+GUI:HudPromotionBought
+"açıldı"
+END
+
+GUI:HudStructureStarted
+"inşaatı başladı"
+END
+
+GUI:HudStructureBuilt
+"tamamlandı"
+END
+
+GUI:HudNoDozerLeft
+"%s için hiç dozer kalmadı"
+END
+
+GUI:HudNoWorkerLeft
+"%s için hiç işçi kalmadı"
+END
+
+GUI:BarIdleWorker
+"İşçi"
+END
+
+GUI:BarNetReady
+"hazır"
+END
+
+GUI:BarNetRoom
+"oda"
+END
+
+GUI:BarNetUnits
+"birim"
 END
 
 GUI:ScoreboardAllies
@@ -15603,6 +15783,10 @@ END
 
 GUI:ScoreboardPerMinute
 "DAKİKADA"
+END
+
+GUI:ScoreboardPerSecond
+"SANİYEDE"
 END
 
 GUI:ScoreboardKills

@@ -70,6 +70,7 @@
 #include "GameClient/LookAtXlat.h"
 #include "GameClient/MetaEvent.h"
 #include "GameClient/Mouse.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/PlaceEventTranslator.h"
 #include "GameClient/RayEffect.h"
@@ -745,7 +746,8 @@ void GameClient::update( void )
 	freezeTime = freezeTime || TheScriptEngine->isTimeFrozenDebug();
 	freezeTime = freezeTime || TheScriptEngine->isTimeFrozenScript();
 	freezeTime = freezeTime || TheGameLogic->isGamePaused();
-	Int localPlayerIndex = ThePlayerList ? ThePlayerList->getLocalPlayer()->getPlayerIndex() : 0;
+	// the player whose fog is drawn: this machine's, or the one a watcher looks through with fog on
+	Int localPlayerIndex = ThePlayerList ? TheObserverCamera.getShroudPlayerIndex() : 0;
 
 	// hack to let client spin fast in network games but still do effects at the same pace. -MDC
 	static UnsignedInt lastFrame = ~0;

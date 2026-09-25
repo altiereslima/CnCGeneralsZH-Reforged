@@ -38,6 +38,10 @@
 // stream, so a run driven by a scenario cannot be replayed.  Repeatability comes from the file
 // plus -seed instead, which is what an A/B needs anyway.
 //
+// The shift verbs are the exception to the script source.  They hand the order to the seat's order
+// queue exactly as a message with MSG_QUEUE_NEXT_ORDER in front of it would arrive, so the queue
+// dispatches them as the player's own, which is the only way to exercise it without a mouse.
+//
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #pragma once
@@ -68,7 +72,15 @@ enum ScenarioActionType
 	SCENARIO_ACTION_ENTER,				///< enter <slot> <selector> <targetSlot> <targetSelector>
 	SCENARIO_ACTION_PLAYERMOVE,		///< playermove <slot> <selector> <position>; a right click, not a script order
 	SCENARIO_ACTION_POWER,					///< power <slot> <building> <position> [powerName]; fire its special powers (or the one named) there now, charged or not
-	SCENARIO_ACTION_PLAYERATTACKMOVE	///< playerattackmove <slot> <selector> <position>; the player's attack move, not a script's
+	SCENARIO_ACTION_PLAYERATTACKMOVE,	///< playerattackmove <slot> <selector> <position>; the player's attack move, not a script's
+	SCENARIO_ACTION_PRODUCE,			///< produce <slot> <building> <template> <count>; queue that many in its first matching building
+	SCENARIO_ACTION_TALLY,				///< tally <slot> <selector>; log how many are alive, their health and what they cost
+	SCENARIO_ACTION_SHIFTMOVE,				///< shiftmove <slot> <selector> <position>; a shift right click, onto the units' order queue
+	SCENARIO_ACTION_SHIFTATTACKMOVE,	///< shiftattackmove <slot> <selector> <position>; the same with attack move
+	SCENARIO_ACTION_SHIFTATTACK,			///< shiftattack <slot> <selector> <targetSlot> <targetSelector>; the same with an attack on one unit
+	SCENARIO_ACTION_SHIFTGUARD,				///< shiftguard <slot> <selector> <position>; the same with the guard key
+	SCENARIO_ACTION_SHIFTPOWER,				///< shiftpower <slot> <selector> <targetSlot> <targetSelector> <power>; the same with a special power armed, on one object
+	SCENARIO_ACTION_SHIFTUPGRADE			///< shiftupgrade <slot> <selector> <upgrade>; shift on an object upgrade button, bought by every unit that matches
 };
 
 /// ScenarioAction::atStart when the position is plain numbers
@@ -106,6 +118,7 @@ struct ScenarioAction
 	Real radius;									///< how close to the target counts as arrived
 	Int targetSlot;								///< whose units to attack
 	AsciiString targetSelector;		///< which of them
+	AsciiString name;							///< shiftpower's special power, shiftupgrade's upgrade
 };
 
 /** Turn one line of a scenario file into an action.  Pure: no engine state is read, which is what

@@ -243,8 +243,9 @@ W3DLaserDraw::~W3DLaserDraw( void )
 //-------------------------------------------------------------------------------------------------
 Real W3DLaserDraw::getLaserTemplateWidth() const
 {
-	const W3DLaserDrawModuleData *data = getW3DLaserDrawModuleData();
-	return data->m_outerBeamWidth * 0.5f;
+	Real width = 0.0f;
+	getW3DLaserDrawModuleData()->getLaserTemplateWidth( width );
+	return width;
 }
 
 //-------------------------------------------------------------------------------------------------

@@ -90,15 +90,21 @@ LAN_COLUMNS = [
 # (label width, control width, rows); a row is (label, combo), (label, slider, readout) or (check,).
 # "Allow Superweapons" needs 152 at 800x600.
 SKIRMISH_SETTINGS = [
-    (96, 152, [("StartingCashLabel", "ComboBoxStartingCash"), ("LabelSuperweapons", "ComboBoxSuperweapons")]),
-    (88, 112, [("LabelGameSpeed", "SliderGameSpeed", "StaticTextGameSpeed"), ("CheckBoxUnitLimit",)]),
+    (96, 152, [("StartingCashLabel", "ComboBoxStartingCash"), ("LabelSuperweapons", "ComboBoxSuperweapons"),
+               ("LabelIncomeSharing", "ComboBoxIncomeSharing")]),
+    (88, 112, [("LabelGameSpeed", "ComboBoxGameSpeed"), ("CheckBoxUnitLimit",),
+               ("LabelTechRespawn", "ComboBoxTechRespawn")]),
 ]
-# The LAN page is 84 high over the chat entry, two rows, so Pro Rules takes a third column instead.
+# The LAN page is 84 high over the chat entry and every column is full, so the check boxes take a
+# third column and the rows close up to 28 from the page top to fit a third one.
 LAN_SETTINGS = [
-    (96, 152, [("StartingCashLabel", "ComboBoxStartingCash"), ("LabelSuperweapons", "ComboBoxSuperweapons")]),
-    (96, 152, [("LabelPeaceTime", "ComboBoxPeaceTime"), ("CheckBoxUnitLimit",)]),
-    (0, 128, [("CheckBoxProRules",)]),
+    (96, 152, [("StartingCashLabel", "ComboBoxStartingCash"), ("LabelSuperweapons", "ComboBoxSuperweapons"),
+               ("LabelTechRespawn", "ComboBoxTechRespawn")]),
+    (96, 152, [("LabelPeaceTime", "ComboBoxPeaceTime"), ("LabelIncomeSharing", "ComboBoxIncomeSharing")]),
+    (0, 128, [("CheckBoxProRules",), ("CheckBoxUnitLimit",)]),
 ]
+LAN_SETTING_ROW_PITCH = 28
+LAN_SETTING_TOP_PADDING = 4
 
 STAT_ROWS = [
     ("StaticTextBestStreak", "StaticTextBestStreakValue"),
@@ -170,11 +176,15 @@ def place_map(layout):
                          % (entry_top - ROW_TOP - MAP_WINDOW_HEIGHT))
 
 
-def place_settings(layout, columns, page_left, page_right, page_top):
+def place_settings(layout, columns, page_left, page_right, page_top, page_bottom,
+                   row_pitch=SETTING_ROW_PITCH, top_padding=SETTING_PADDING):
     left = page_left + SETTING_PADDING
     for label_width, control_width, rows in columns:
         for row, names in enumerate(rows):
-            top = page_top + SETTING_PADDING + row * SETTING_ROW_PITCH
+            top = page_top + top_padding + row * row_pitch
+            if top + ROW_HEIGHT > page_bottom:
+                raise ValueError("%s runs to %d, past the page bottom at %d"
+                                 % (names[0], top + ROW_HEIGHT, page_bottom))
             if len(names) == 1:
                 need(layout, names[0]).place(left, top, label_width + control_width, ROW_HEIGHT)
                 continue
@@ -233,7 +243,7 @@ def build_skirmish(layout):
     page_height = PAGE_BOTTOM - PAGE_TOP
     for window in (info_frame, need(layout, "ListboxInfo"), need(layout, "PageLobbySettings")):
         window.place(INNER_LEFT, PAGE_TOP, SEAT_RIGHT - INNER_LEFT, page_height)
-    place_settings(layout, SKIRMISH_SETTINGS, INNER_LEFT, SEAT_RIGHT, PAGE_TOP)
+    place_settings(layout, SKIRMISH_SETTINGS, INNER_LEFT, SEAT_RIGHT, PAGE_TOP, PAGE_BOTTOM)
 
     stats_panel.place(MAP_LEFT, PAGE_TOP, MAP_WIDTH, page_height)
     value_left = INNER_RIGHT - STAT_INSET - STAT_VALUE_WIDTH
@@ -260,7 +270,8 @@ def build_lan(layout):
     need(layout, "PageLobbySettings").place(INNER_LEFT, PAGE_TOP, chat_width, listbox_height)
     need(layout, "TextEntryChat").place(INNER_LEFT, entry_top, chat_width - EMOTE_WIDTH - COLUMN_GAP, ROW_HEIGHT)
     need(layout, "ButtonEmote").place(INNER_RIGHT - EMOTE_WIDTH, entry_top, EMOTE_WIDTH, ROW_HEIGHT)
-    place_settings(layout, LAN_SETTINGS, INNER_LEFT, INNER_RIGHT, PAGE_TOP)
+    place_settings(layout, LAN_SETTINGS, INNER_LEFT, INNER_RIGHT, PAGE_TOP, PAGE_TOP + listbox_height,
+                   LAN_SETTING_ROW_PITCH, LAN_SETTING_TOP_PADDING)
     return layout
 
 

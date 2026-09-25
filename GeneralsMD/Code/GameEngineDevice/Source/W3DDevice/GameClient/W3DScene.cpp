@@ -43,6 +43,7 @@
 #include "GameLogic/Object.h"
 #include "GameLogic/GameLogic.h"
 #include "GameClient/Drawable.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/Color.h"
 #include "GameClient/PlayerColorScheme.h"
@@ -569,7 +570,7 @@ void RTS3DScene::renderSpecificDrawables(RenderInfoClass &rinfo, Int numDrawable
 #ifdef DIRTY_CONDITION_FLAGS
 	StDrawableDirtyStuffLocker lockDirtyStuff;
 #endif
-	Int localPlayerIndex = ThePlayerList ? ThePlayerList->getLocalPlayer()->getPlayerIndex() : 0;
+	Int localPlayerIndex = ThePlayerList ? TheObserverCamera.getShroudPlayerIndex() : 0;
 	RefRenderObjListIterator it(&UpdateList);	
 	// loop through all render objects in the list:
 	for (it.First(&RenderList); !it.Is_Done();) 
@@ -1163,7 +1164,7 @@ void RTS3DScene::Customized_Render( RenderInfoClass &rinfo )
 		Get_Extra_Pass_Polygon_Mode() == EXTRA_PASS_DISABLE)
 		TheW3DVolumetricShadowManager->renderShadowMap(rinfo.Camera);
 
-	Int localPlayerIndex = ThePlayerList ? ThePlayerList->getLocalPlayer()->getPlayerIndex() : 0;
+	Int localPlayerIndex = ThePlayerList ? TheObserverCamera.getShroudPlayerIndex() : 0;
 
 #define USE_LIGHT_ENV 1
 
@@ -1427,7 +1428,7 @@ void RTS3DScene::flushOccludedObjectsIntoStencil(RenderInfoClass & rinfo)
 	//Assume no player colors are visible and all stencil bits are free for use by shadows.
 	TheW3DShadowManager->setStencilShadowMask(0);
 
-	Int localPlayerIndex = ThePlayerList ? ThePlayerList->getLocalPlayer()->getPlayerIndex() : 0;
+	Int localPlayerIndex = ThePlayerList ? TheObserverCamera.getShroudPlayerIndex() : 0;
 
 	if (m_numPotentialOccludees && m_numPotentialOccluders)
 	{
@@ -1619,7 +1620,7 @@ void RTS3DScene::flushOccludedObjects(RenderInfoClass & rinfo)
 
 	if (m_occludedObjectsCount)
 	{
-		Int localPlayerIndex = ThePlayerList ? ThePlayerList->getLocalPlayer()->getPlayerIndex() : 0;
+		Int localPlayerIndex = ThePlayerList ? TheObserverCamera.getShroudPlayerIndex() : 0;
 
 		if (DX8Wrapper::Has_Stencil())	//just in case we have shadows, disable them over occluded pixels.
 		{
@@ -1689,7 +1690,7 @@ void RTS3DScene::flushTranslucentObjects(RenderInfoClass & rinfo)
 
 	if (m_translucentObjectsCount)
 	{
-		Int localPlayerIndex = ThePlayerList ? ThePlayerList->getLocalPlayer()->getPlayerIndex() : 0;
+		Int localPlayerIndex = ThePlayerList ? TheObserverCamera.getShroudPlayerIndex() : 0;
 
 		for (Int i=0; i<m_translucentObjectsCount; i++)
 		{

@@ -47,15 +47,19 @@
 #include "Common/QuickTrig.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/FXList.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameClient/PlayerColorScheme.h"
 #include "GameClient/Shadow.h"
 #include "GameLogic/GameLogic.h"		// for real-time frame
+#include "GameLogic/GhostObject.h"
+#include "GameLogic/PartitionManager.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/WeaponSet.h"
 #include "GameLogic/FPUControl.h"
 #include "GameLogic/Module/AIUpdate.h"
+#include "GameLogic/Module/ContainModule.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
 #include "W3DDevice/GameClient/Module/W3DModelDraw.h"
 #include "W3DDevice/GameClient/W3DAssetManager.h"
@@ -2031,7 +2035,7 @@ void W3DModelDraw::allocateShadows(void)
 		}
 
 		if (m_shadow)
-		{	m_shadow->enableShadowInvisible(m_fullyObscuredByShroud);
+		{	m_shadow->enableShadowInvisible(isShadowHiddenByShroud());
 			if (m_renderObject->Is_Hidden() || !m_shadowEnabled)
 				m_shadow->enableShadowRender(FALSE);
 		}
@@ -2084,7 +2088,7 @@ void W3DModelDraw::allocateContactShadow(void)
 	if (m_contactShadow)
 	{
 		m_contactShadow->setOpacity( CONTACT_SHADOW_OPACITY );
-		m_contactShadow->enableShadowInvisible( m_fullyObscuredByShroud );
+		m_contactShadow->enableShadowInvisible( isShadowHiddenByShroud() );
 		if (m_renderObject->Is_Hidden() || !m_shadowEnabled)
 			m_contactShadow->enableShadowRender( FALSE );
 	}
@@ -2160,8 +2164,10 @@ void W3DModelDraw::getRenderCostRecursive(RenderCost & rc,RenderObjClass * robj)
 	Anything that moves does not, and this is not a detail: a shadow crawling across fogged ground
 	is the position of a unit you are not allowed to see.
 
-	Never-seen ground is not fog and gets nothing - the check below asks for the real shroud status
-	rather than trusting the obscured flag, which cannot tell the two apart. */
+	What decides it is whether the snapshot is standing there for whoever's fog is drawn, not the
+	shroud status.  Never-seen ground has no snapshot, and neither has a building an observer's
+	newly picked player saw before his fog was being remembered: there the building is not drawn,
+	and a kept shadow was a building-shaped hole in the light on empty ground. */
 static Bool keepsShadowInFog(const Drawable *draw)
 {
 	if (draw == NULL)
@@ -2174,22 +2180,36 @@ static Bool keepsShadowInFog(const Drawable *draw)
 	if (!obj->isKindOf(KINDOF_IMMOBILE) || obj->isKindOf(KINDOF_PROJECTILE))
 		return FALSE;
 
-	//fogged keeps it, shrouded does not
-	const Int localPlayerIndex = ThePlayerList ? ThePlayerList->getLocalPlayer()->getPlayerIndex() : 0;
-	return obj->getShroudedStatus(localPlayerIndex) < OBJECTSHROUD_SHROUDED;
+	const PartitionData *partition = obj->friend_getPartitionData();
+	if (partition == NULL || partition->getGhostObject() == NULL)
+		return FALSE;
+
+	const Int viewerIndex = ThePlayerList ? TheObserverCamera.getShroudPlayerIndex() : 0;
+	return partition->getGhostObject()->hasSnapShot(viewerIndex);
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool W3DModelDraw::isShadowHiddenByShroud(void) const
+{
+	return m_fullyObscuredByShroud && !keepsShadowInFog(getDrawable());
 }
 
 //-------------------------------------------------------------------------------------------------
 void W3DModelDraw::setFullyObscuredByShroud(Bool fullyObscured)
 {
-	if (m_fullyObscuredByShroud != fullyObscured)
+	const Bool changed = m_fullyObscuredByShroud != fullyObscured;
+	m_fullyObscuredByShroud = fullyObscured;
+
+	const Bool hideShadow = isShadowHiddenByShroud();
+	if (m_shadow)
+		m_shadow->enableShadowInvisible(hideShadow);
+	//the patch under a building used to keep the value it was made with, so a building the
+	//fog's owner has never seen still darkened the ground where it stands
+	if (m_contactShadow)
+		m_contactShadow->enableShadowInvisible(hideShadow);
+
+	if (changed)
 	{
-		m_fullyObscuredByShroud = fullyObscured;
-
-		const Bool hideShadow = m_fullyObscuredByShroud && !keepsShadowInFog(getDrawable());
-
-		if (m_shadow)
-			m_shadow->enableShadowInvisible(hideShadow);
 		//the terrain decal is a marker, not a shadow: it goes with the thing it marks
 		if (m_terrainDecal)
 			m_terrainDecal->enableShadowInvisible(m_fullyObscuredByShroud);
@@ -3336,7 +3356,7 @@ void W3DModelDraw::setModelState(const ModelConditionInfo* newState)
 			}
 
 			if (m_shadow)
-			{	m_shadow->enableShadowInvisible(m_fullyObscuredByShroud);
+			{	m_shadow->enableShadowInvisible(isShadowHiddenByShroud());
 				m_shadow->enableShadowRender(m_shadowEnabled);
 			}
 		}
@@ -3507,6 +3527,8 @@ Bool W3DModelDraw::clientOnly_getRenderObjInfo(Coord3D* pos, Real* boundingSpher
 	return true;
 }
 
+static ModelConditionFlags logicConditionFlags(const Drawable* draw, const ModelConditionFlags& c);
+
 //-------------------------------------------------------------------------------------------------
 Bool W3DModelDraw::getProjectileLaunchOffset(
 	const ModelConditionFlags& condition, 
@@ -3524,7 +3546,7 @@ Bool W3DModelDraw::getProjectileLaunchOffset(
 		to get the pristine bone(s) for the state that logic believes to be current,
 		not the one the client might currently be using...
 	*/
-	const ModelConditionInfo* stateToUse = findBestInfo(condition);
+	const ModelConditionInfo* stateToUse = findBestInfo(logicConditionFlags(getDrawable(), condition));
 	if (!stateToUse)
 	{
 		CRCDEBUG_LOG(("can't find best info\n"));
@@ -3673,7 +3695,7 @@ Int W3DModelDraw::getPristineBonePositionsForConditionState(
 		to get the pristine bone(s) for the state that logic believes to be current,
 		not the one the client might currently be using...
 	*/
-	const ModelConditionInfo* stateToUse = findBestInfo(condition);
+	const ModelConditionInfo* stateToUse = findBestInfo(logicConditionFlags(getDrawable(), condition));
 	if (!stateToUse)
 		return 0;
 
@@ -3946,10 +3968,35 @@ const ModelConditionInfo* W3DModelDraw::findBestInfo(const ModelConditionFlags& 
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The flags a question from the logic is answered under.  GARRISONED is set per viewer:
+	* GarrisonContain keeps it off a building full of undetected stealth units on every machine but
+	* its owner's and allies'.  Bones, barrels and launch points picked under it came out different
+	* per machine, so logic asks with the owner's answer, which is whether anyone is inside. */
+//-------------------------------------------------------------------------------------------------
+static ModelConditionFlags logicConditionFlags(const Drawable* draw, const ModelConditionFlags& c)
+{
+	ModelConditionFlags flags = c;
+	const Object* obj = draw->getObject();
+	const ContainModuleInterface* contain = obj ? obj->getContain() : NULL;
+	if (contain && contain->isGarrisonable())
+		flags.set(MODELCONDITION_GARRISONED, contain->getContainCount() > 0 ? 1 : 0);
+	return flags;
+}
+
+//-------------------------------------------------------------------------------------------------
 Int W3DModelDraw::getBarrelCount(WeaponSlotType wslot) const
 {
-	return (m_curState && (m_curState->m_validStuff & ModelConditionInfo::BARRELS_VALID)) ?
-		m_curState->m_weaponBarrelInfoVec[wslot].size() : 0;
+	/*
+		The weapon asks this, so it has to answer for the state logic believes to be current, the way
+		getProjectileLaunchOffset does.  m_curState leaves a transition only when this drawable is drawn,
+		and whether it is drawn is this machine's camera and fog.
+	*/
+	const ModelConditionInfo* stateToUse = findBestInfo(logicConditionFlags(getDrawable(), getDrawable()->getModelConditionFlags()));
+	if (!stateToUse)
+		return 0;
+	stateToUse->validateStuff(NULL, getDrawable()->getScale(), getW3DModelDrawModuleData()->m_extraPublicBones);
+	return (stateToUse->m_validStuff & ModelConditionInfo::BARRELS_VALID) ?
+		stateToUse->m_weaponBarrelInfoVec[wslot].size() : 0;
 }
 
 //-------------------------------------------------------------------------------------------------

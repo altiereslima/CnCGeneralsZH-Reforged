@@ -81,7 +81,6 @@ View::View( void )
 	m_lockDist = 0.0f;
 	m_maxHeightAboveGround = 0.0f;
 	m_minHeightAboveGround = 0.0f;
-	m_viewLockedUntilFrame = 0;
 	m_next = NULL;
 	m_okToAdjustHeight = TRUE;
 	m_originX = 0;
@@ -142,13 +141,6 @@ void View::reset( void )
 {
 	// Only fixing the reported bug.  Who knows what side effects resetting the rest could have.
 	m_zoomLimited = TRUE;
-
-	m_viewLockedUntilFrame = 0;
-}
-
-void View::lockViewForOneFrame()
-{
-	m_viewLockedUntilFrame = TheGameClient->getFrame() + 1;
 }
 
 /**

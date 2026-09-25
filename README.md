@@ -4,12 +4,16 @@
 
 Command & Conquer: Generals Zero Hour, rebuilt from the source EA opened and played as a game again.
 
+<img src=".github/media/hero.jpg" alt="American tanks cross a stone bridge into a German village under an A-10 strike, long morning shadows over the stream" width="100%">
+
 [![release](https://img.shields.io/github/v/release/olcayseygan/CnCGeneralsZH-Reforged?style=for-the-badge&label=release&labelColor=161b22&color=4459b6)](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/releases/latest)
-![platform](https://img.shields.io/badge/platform-Windows%20x86-0d1117?style=for-the-badge&labelColor=161b22)
+![platform](https://img.shields.io/badge/platform-Windows%20x64-0d1117?style=for-the-badge&labelColor=161b22)
 ![renderer](https://img.shields.io/badge/renderer-Direct3D%2011-0d1117?style=for-the-badge&labelColor=161b22)
 ![license](https://img.shields.io/badge/license-GPL--3.0-0d1117?style=for-the-badge&labelColor=161b22)
+[![stars](https://img.shields.io/github/stars/olcayseygan/CnCGeneralsZH-Reforged?style=for-the-badge&labelColor=161b22&color=4459b6)](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/stargazers)
+[![good first issues](https://img.shields.io/github/issues/olcayseygan/CnCGeneralsZH-Reforged/good%20first%20issue?style=for-the-badge&label=good%20first%20issues&labelColor=161b22&color=2f7d4f)](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/labels/good%20first%20issue)
 
-[Download](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/releases/latest) · [Every change](CHANGELOG.md) · [Build it](#build-it)
+[Download](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/releases/latest) · [Every change](CHANGELOG.md) · [Build it](#build-it) · [Help out](#help-out) · [Discussions](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/discussions)
 
 </div>
 
@@ -22,8 +26,9 @@ Reforged is that source moved to Visual Studio 2022 and worked on as a game. Abo
 files were ported. Around sixty bugs were found and fixed that EA shipped in 2003 and nobody noticed
 for twenty-two years. And the computer opponent builds a base now, which it never could.
 
-No unit or weapon is rebalanced. You need your own copy of Zero Hour, because no game data ships
-here.
+One balance pass, measured in 528 staged fights a round: defences no longer die cheaper than they
+cost, and the Dragon Tank, Quad Cannon, Paladin and Rocket Buggy were brought into line. The
+changelog has every number. You need your own copy of Zero Hour, because no game data ships here.
 
 ## Play it
 
@@ -68,6 +73,8 @@ Easy, Medium and Hard differ in what the computer is allowed to decide. No level
 cheaper units, faster building or longer sight. Measured over 32 headless matches with the seats swapped both ways,
 Hard beats Easy 15-0.
 
+![A Hard AI's American base on Twilight Flame at 7:51: airfield, war factory, strategy centre under construction, power plants, Comanches and tanks between the buildings](.github/media/ai-base.jpg)
+
 ### Orders that happen
 
 Attack-move fights what it meets. Aircraft make their pass, fly home, rearm and pick your order back
@@ -93,12 +100,16 @@ a fixed list of units and tricks out of every network match. Your ally's mouse s
 pool of their colour with their name on it. Two copies of the game on one machine can play each other
 over the LAN screen.
 
+![The LAN room's Lobby Settings page: starting cash, superweapons, tech respawn, peace time, shared income, Pro Rules and the unit limit](.github/media/lobby.jpg)
+
 ### A picture that holds up
 
 The game draws through Direct3D 11 by default, with glow and edge smoothing over the battlefield.
 `-d3d9` brings back the old renderer. Soldiers cast shadows from their pose and all 128 tree types
 cast theirs. Eighty-nine kinds of explosion light the ground around them, and every smoke and fire
 sprite is drawn: 101,000 of them at 8.3 ms a frame.
+
+![A night fight on Dark Night: burning ground lights the grass and tree trunks orange under blue moonlight while an A-10 and Comanches cross the valley](.github/media/night-fire.jpg)
 
 Wide screens get a command bar in three pieces instead of one stretched strip, and text that grows
 with the monitor. On an ultrawide the view opens sideways, so a wider screen shows more battlefield.
@@ -109,6 +120,8 @@ Options > Gameplay > Language. Menus, the command bar, briefings, tooltips and t
 3,853 lines of Turkish, written against one glossary of more than 1,400 terms. Voices and videos stay
 as your install has them.
 
+![The Crusader's build card in Turkish over the command bar, with the production strip on the left](.github/media/turkish.jpg)
+
 > [!NOTE]
 > [CHANGELOG.md](CHANGELOG.md) is the whole record: every change with the numbers behind it, and the
 > work that was tried and taken back out.
@@ -117,7 +130,7 @@ as your install has them.
 
 There is no CI and no debugger on the machine this is built on. The game tests itself instead.
 
-- 38 automated test suites run on every build.
+- 39 automated test binaries run on every build.
 - Headless, a 23-minute skirmish plays out in 38 seconds, the same way on every run.
 - An AI change is argued with 20 headless matches on the same seeds, win rate and match length
   before and after.
@@ -190,6 +203,20 @@ without its finishing passes.
   full of Inferno Cannon fire. `-d3d9` is the way back.
 - Random maps generate and play, and they are out of the skirmish list until the generator stops
   dealing seeds that should not be played. `-randommap <seed>` starts one.
+
+## Help out
+
+Two PCs and an evening are the most useful thing anyone can give this right now.
+[#27](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/issues/27) says what to play and what
+to send back, and a clean match counts as much as a broken one.
+
+For code, the
+[good first issues](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/labels/good%20first%20issue)
+are client-side changes that cannot desync a match, each with the files to open and what done looks
+like. The [help wanted](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/labels/help%20wanted)
+ones are bigger. [CONTRIBUTING.md](CONTRIBUTING.md) has the commit format and the checks a pull
+request runs, and [Discussions](https://github.com/olcayseygan/CnCGeneralsZH-Reforged/discussions)
+is open for anything that is not an issue yet.
 
 ---
 

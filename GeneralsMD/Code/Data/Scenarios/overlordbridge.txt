@@ -1,0 +1,16 @@
+# Overlords over a bridge.
+#
+# Players reported Overlords sticking on bridges more than any other tank. Eight of them, one right
+# click, over the Kandahar bridge on Golden Oasis that runs from 1826,1410 to 1688,1585, the same
+# route as bridgecross.txt. An Overlord's box is 52 by 26 against a Crusader's 30 by 20, and it
+# drives at 20 a second and turns at 60 degrees where a Crusader does 30 and 180. This bridge never
+# held one up: 8 of 8 on seeds 1-6 before and after the ramp-mouth fix. overlordlong.txt did.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Golden Oasis\Golden Oasis.map" -autoskirmish 2 -takeover
+#     -side 0 FactionChina -side 1 FactionGLA -seed 1 -maxframes 5000
+#     -scenario overlordbridge -logPrefix overlord_
+
+30    spawn       0  ChinaTankOverlord  8  2043 1136  70
+60    playermove  0  ChinaTankOverlord  1471 1859
+60    arrive      0  ChinaTankOverlord  1471 1859  200

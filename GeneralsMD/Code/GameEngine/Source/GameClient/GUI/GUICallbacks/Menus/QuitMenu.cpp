@@ -333,6 +333,25 @@ static void restartMissionMenu()
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The menu comes and goes at once.  Its transitions flash the rectangles each window had when
+	* they started, and InGameUI::themeQuitMenu lays the menu out compact only as it draws, so the
+	* flashes lit the old layout's places somewhere else on the screen.  Skipping the group leaves
+	* every window where the group's end puts it, as the flashes did when they finished. */
+//-------------------------------------------------------------------------------------------------
+static void showQuitMenuLayout( const char *group )
+{
+	TheTransitionHandler->remove( group );
+	TheTransitionHandler->setGroup( group );
+	TheTransitionHandler->remove( group, TRUE );
+}
+
+static void hideQuitMenuLayout( void )
+{
+	if( quitMenuLayout )
+		quitMenuLayout->hide( TRUE );
+}
+
+//-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 void HideQuitMenu( void )
 {
@@ -340,10 +359,7 @@ void HideQuitMenu( void )
 	// So don't do anything that counts on that menu actually being here.
 	if(!isVisible)
 		return;
-	if(quitMenuLayout && quitMenuLayout == noSaveLoadQuitMenuLayout)
-		TheTransitionHandler->reverse("QuitNoSaveBack");
-	else if( quitMenuLayout && quitMenuLayout == fullQuitMenuLayout)
-		TheTransitionHandler->reverse("QuitFullBack");
+	hideQuitMenuLayout();
 
 	TheInGameUI->setQuitMenuVisible( FALSE );
 	isVisible = FALSE;
@@ -413,23 +429,7 @@ void ToggleQuitMenu()
 		
 		if ( !TheGameLogic->isInMultiplayerGame() )
 			TheGameLogic->setGamePaused(FALSE);
-		if(quitMenuLayout && quitMenuLayout == noSaveLoadQuitMenuLayout)
-			TheTransitionHandler->reverse("QuitNoSaveBack");
-		else if( quitMenuLayout && quitMenuLayout == fullQuitMenuLayout )
-		{
-			TheTransitionHandler->reverse("QuitFullBack");
-			//begin KRISMORNESS
-			//TheTransitionHandler->reverse("QuitFull");
-			//if( TheTransitionHandler->areTransitionsEnabled() )
-			//else
-			//{
-			//	TheTransitionHandler->remove("QuitFull");
-			//	quitMenuLayout = NULL;
-			//	isVisible = TRUE;
-			//	HideQuitMenu();
-			//}
-			//end KRISMORNESS
-		}
+		hideQuitMenuLayout();
 	}
 	else
 	{
@@ -446,8 +446,7 @@ void ToggleQuitMenu()
 				noSaveLoadQuitMenuLayout = TheWindowManager->winCreateLayout( AsciiString( "Menus/QuitNoSave.wnd" ) );
 			quitMenuLayout = noSaveLoadQuitMenuLayout;
 			initGadgetsNoSaveQuit();
-			TheTransitionHandler->remove("QuitNoSave");
-			TheTransitionHandler->setGroup("QuitNoSave");
+			showQuitMenuLayout( "QuitNoSave" );
 		}
 		else
 		{
@@ -455,8 +454,7 @@ void ToggleQuitMenu()
 				fullQuitMenuLayout= TheWindowManager->winCreateLayout( AsciiString( "Menus/QuitMenu.wnd" ) );
 			quitMenuLayout = fullQuitMenuLayout;
 			initGadgetsFullQuit();
-			TheTransitionHandler->remove("QuitFull");
-			TheTransitionHandler->setGroup("QuitFull");
+			showQuitMenuLayout( "QuitFull" );
 		}
 
 		// load the quit menu from the layout file if needed
@@ -467,7 +465,8 @@ void ToggleQuitMenu()
 			TheInGameUI->setQuitMenuVisible(FALSE);
 			return;
 		}
-		
+		TheInGameUI->themeQuitMenu( quitMenuLayout->getFirstWindow() );
+
 		//quitMenuLayout->hide(FALSE);
 
 		// if we are watching a cinematic, we need to disable the save/load button

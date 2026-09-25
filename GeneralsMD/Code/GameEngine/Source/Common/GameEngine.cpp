@@ -32,6 +32,7 @@
 #include "Common/AudioAffect.h"
 #include "Common/BuildAssistant.h"
 #include "Common/CRCDebug.h"
+#include "Common/crc.h"
 #include "Common/Radar.h"
 #include "Common/PlayerTemplate.h"
 #include "Common/Team.h"
@@ -191,9 +192,220 @@ extern CComModule _Module;
 //-------------------------------------------------------------------------------------------------
 static void updateTGAtoDDS();
 
+//-------------------------------------------------------------------------------------------------
+/** A file logic reads that no subsystem loads through the INI checksum, as it resolved on this
+	* machine, byte for byte. */
+//-------------------------------------------------------------------------------------------------
+static void checksumFileContents( XferCRC &xferCRC, const char *path )
+{
+	File *file = TheFileSystem->openFile( path, File::READ );
+	Int fileSize = file->size();
+	char *contents = file->readEntireAndClose();
+	xferCRC.xferUser( contents, fileSize );
+	delete [] contents;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** What a model's bytes hashed to, and the size and write time of the file they were read out of:
+	* the archive the model resolved to, or the loose model itself. */
+//-------------------------------------------------------------------------------------------------
+struct ModelChecksum
+{
+	FileInfo source;
+	UnsignedInt crc;
+};
+typedef std::map<std::string, ModelChecksum> ModelChecksumMap;	///< keyed "source|model"
+
+static const char *MODEL_CHECKSUM_CACHE = "ModelChecksums.txt";
+static const Int MODEL_CHECKSUM_LINE_LENGTH = 1024;
+
+static AsciiString modelChecksumCachePath( void )
+{
+	AsciiString path = TheGlobalData->getPath_UserData();
+	path.concat( MODEL_CHECKSUM_CACHE );
+	return path;
+}
+
+static ModelChecksumMap readModelChecksumCache( void )
+{
+	ModelChecksumMap cache;
+	FILE *cacheFile = fopen( modelChecksumCachePath().str(), "r" );
+	if (cacheFile == NULL)
+		return cache;		// the first start on this machine, or the file was deleted
+
+	char line[MODEL_CHECKSUM_LINE_LENGTH];
+	while (fgets( line, sizeof( line ), cacheFile ))
+	{
+		ModelChecksum entry;
+		Int keyOffset = 0;
+		if (sscanf( line, "%x %d %d %d %d %n", &entry.crc, &entry.source.sizeHigh, &entry.source.sizeLow,
+				&entry.source.timestampHigh, &entry.source.timestampLow, &keyOffset ) != 5)
+			continue;		// a torn line from a copy killed mid-write reads again from the model
+
+		std::string key( line + keyOffset );
+		key.erase( key.find_last_not_of( "\r\n" ) + 1 );
+		cache[key] = entry;
+	}
+	fclose( cacheFile );
+	return cache;
+}
+
+/** Written beside and moved over the old one, so a second copy starting at the same moment reads
+	* one whole file or the other and never half of each. */
+static void writeModelChecksumCache( const ModelChecksumMap &cache )
+{
+	AsciiString finalPath = modelChecksumCachePath();
+	AsciiString scratchPath;
+	scratchPath.format( "%s.%u", finalPath.str(), (UnsignedInt)GetCurrentProcessId() );
+
+	FILE *cacheFile = fopen( scratchPath.str(), "w" );
+	if (cacheFile == NULL)
+		return;		// a read-only user folder costs the next start a full read, nothing else
+
+	for( ModelChecksumMap::const_iterator it = cache.begin(); it != cache.end(); ++it )
+	{
+		const ModelChecksum &entry = it->second;
+		fprintf( cacheFile, "%08X %d %d %d %d %s\n", entry.crc, entry.source.sizeHigh, entry.source.sizeLow,
+			entry.source.timestampHigh, entry.source.timestampLow, it->first.c_str() );
+	}
+	fclose( cacheFile );
+	if (!MoveFileExA( scratchPath.str(), finalPath.str(), MOVEFILE_REPLACE_EXISTING ))
+		DeleteFileA( scratchPath.str() );		// another copy holds it open; its own write will do
+}
+
+static Bool isSameFile( const FileInfo &left, const FileInfo &right )
+{
+	return left.sizeHigh == right.sizeHigh && left.sizeLow == right.sizeLow
+		&& left.timestampHigh == right.timestampHigh && left.timestampLow == right.timestampLow;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Every model's bones place fire points, turret pivots and dock positions in logic, so a model
+	* that differs between two machines splits their match.  Each model's bytes go into the checksum
+	* as it resolved: a loose model beats every archive, and a later patch archive beats an earlier
+	* one.  Reading all of them is about 375 MB, so what a model hashed to is kept in the user folder
+	* against the size and write time of the file it came from, and read again only when that file
+	* changes. */
+//-------------------------------------------------------------------------------------------------
+static void checksumModels( XferCRC &xferCRC )
+{
+	FilenameList models;
+	TheFileSystem->getFileListInDirectory( AsciiString( "Art\\W3D\\" ), AsciiString( "*.w3d" ), models, TRUE );
+
+	const ModelChecksumMap cache = readModelChecksumCache();
+	ModelChecksumMap current;
+	Int modelsRead = 0;
+
+	for( FilenameListIter it = models.begin(); it != models.end(); ++it )
+	{
+		AsciiString model = *it;
+		model.toLower();
+
+		AsciiString source = TheLocalFileSystem->doesFileExist( model.str() )
+			? model : TheArchiveFileSystem->getArchiveFilenameForFile( model );
+
+		ModelChecksum entry;
+		const Bool sourceKnown = TheLocalFileSystem->getFileInfo( source, &entry.source );
+
+		std::string key( source.str() );
+		key.append( "|" );
+		key.append( model.str() );
+
+		ModelChecksumMap::const_iterator cached = cache.find( key );
+		if (sourceKnown && cached != cache.end() && isSameFile( cached->second.source, entry.source ))
+		{
+			entry.crc = cached->second.crc;
+		}
+		else
+		{
+			File *file = TheFileSystem->openFile( model.str(), File::READ );
+			Int fileSize = file->size();
+			char *contents = file->readEntireAndClose();
+			CRC modelCRC;
+			modelCRC.computeCRC( contents, fileSize );
+			delete [] contents;
+			entry.crc = modelCRC.get();
+			++modelsRead;
+		}
+		if (sourceKnown)
+			current[key] = entry;
+
+		xferCRC.xferUser( const_cast<char *>( model.str() ), model.getLength() );
+		xferCRC.xferUnsignedInt( &entry.crc );
+	}
+
+	if (modelsRead > 0)
+		writeModelChecksumCache( current );
+	DEBUG_LOG(( "INI CRC covers %d models, %d of them read this start\n", (Int)models.size(), modelsRead ));
+}
+
 Int GameEngine::getFramesPerSecondLimit( void )
 {
 	return m_maxFPS;
+}
+
+//-------------------------------------------------------------------------------------------------
+static const UnsignedInt LOGIC_RATE_SAMPLE_MS = 500;
+
+/** A half-second sample is a count of whole frames, so a steady 30Hz reads 28 one sample and 32
+		the next, and every countdown dividing by it read 20s, 21s, 19s. The average over the last few
+		seconds takes that out, and the shown number only moves once the average has left it by a full
+		step, so a rate sitting on x.5 does not flip between two values while a real drop still gets
+		through in a second or two.
+
+		Until the window has filled, the average is the plain mean of what it has: the first samples
+		after a load run far over the real rate, and letting the first one stand for the whole window
+		kept that number on screen for the opening seconds of every match. */
+void RateReading::add( Real sample )
+{
+	const Int WINDOW = 8;								// samples that count once there are enough: about four seconds
+	const Real MIN_STEP = 0.75f;				// over half, or an average settling on 20 from above sticks at 21
+	const Real STEP_FRACTION = 0.02f;		// the step at high rates, where one frame is less than 1%
+
+	if( samples < WINDOW )
+		++samples;
+	average += ( sample - average ) / samples;
+	const Real step = max( MIN_STEP, shown * STEP_FRACTION );
+	if( samples == 1 || fabs( average - shown ) >= step )
+		shown = REAL_TO_INT( average + 0.5f );
+}
+
+/** A build time on screen is a promise about how long you will wait, and the limit is only the
+		rate the logic is asked for.  A match that has sunk to 10 frames a second takes three times as
+		long over a 300 frame barracks as the 30 it was asked for, so the countdown says 30s, not 10s.
+		Client only: the wall clock is in it, and nothing in GameLogic may decide by it. */
+void GameEngine::sampleLogicRate( void )
+{
+	if( TheGameLogic == NULL || TheGameLogic->isGamePaused() )
+	{
+		m_logicRateSampleMs = 0;
+		return;
+	}
+
+	const UnsignedInt nowMs = timeGetTime();
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	if( m_logicRateSampleMs == 0 || frame < m_logicRateSampleFrame )
+	{
+		m_logicRateSampleMs = nowMs;
+		m_logicRateSampleFrame = frame;
+		return;
+	}
+
+	const UnsignedInt elapsedMs = nowMs - m_logicRateSampleMs;
+	if( elapsedMs < LOGIC_RATE_SAMPLE_MS )
+		return;
+
+	m_measuredLogicFps.add( (frame - m_logicRateSampleFrame) * 1000.0f / elapsedMs );
+	m_logicRateSampleMs = nowMs;
+	m_logicRateSampleFrame = frame;
+}
+
+Int GameEngine::getLogicFramesPerSecond( void )
+{
+	// a stalled network game has no rate at all, and no countdown can say how long that lasts
+	if( m_measuredLogicFps.shown > 0 )
+		return m_measuredLogicFps.shown;
+	return m_maxFPS > 0 ? m_maxFPS : LOGICFRAMES_PER_SECOND;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -204,6 +416,8 @@ GameEngine::GameEngine( void )
 
 	// initialize to non garbage values
 	m_maxFPS = 0;
+	m_logicRateSampleMs = 0;
+	m_logicRateSampleFrame = 0;
 	m_quitting = FALSE;
 	m_isActive = FALSE;
 
@@ -286,6 +500,10 @@ void GameEngine::setFramesPerSecondLimit( Int fps )
 {
 	DEBUG_LOG(("GameEngine::setFramesPerSecondLimit() - setting max fps to %d (TheGlobalData->m_useFpsLimit == %d)\n", fps, TheGlobalData->m_useFpsLimit));
 	m_maxFPS = fps;
+
+	// the speed keys change the rate on purpose; the countdowns start again from the next sample
+	// rather than taking the average's seconds to walk over
+	m_measuredLogicFps.restart();
 }
 
 /* -replay <file>: the name the command line asked for, opened after init()'s resetAll().  See
@@ -475,6 +693,9 @@ static void startAutoSkirmish( Int numPlayersWanted )
 	}
 	TheSkirmishGameInfo->setLocalIP( TheSkirmishGameInfo->getSlot(0)->getIP() );
 	TheSkirmishGameInfo->setMap( mapName );
+	// set on the game rather than on GameLogic, so the replay's header carries it like a lobby's would
+	TheSkirmishGameInfo->setIncomeSharing( TheGlobalData->m_incomeSharing );
+	TheSkirmishGameInfo->setTechRespawn( TheGlobalData->m_techRespawn );
 
 	/* -seed makes the whole run repeatable: the seed drives the factions, the colours, the start
 		 positions and every logic random draw after them, so the same command line replays the same
@@ -561,9 +782,10 @@ static void startAutoNetGame( void )
 		return;
 	}
 
-	if (numSlots > md->m_numPlayers)
+	const Int numSeats = numSlots + TheGlobalData->m_netGameAISlots;
+	if (numSeats > md->m_numPlayers || numSeats > MAX_SLOTS)
 	{
-		DEBUG_LOG(("-netgame: '%s' holds %d players, not %d\n", mapName.str(), md->m_numPlayers, numSlots));
+		DEBUG_LOG(("-netgame: '%s' holds %d players, not %d\n", mapName.str(), md->m_numPlayers, numSeats));
 		return;
 	}
 
@@ -862,6 +1084,11 @@ void GameEngine::init( int argc, char *argv[] )
 
 
 		initSubsystem(TheThingFactory,"TheThingFactory", createThingFactory(), &xferCRC, "Data\\INI\\Default\\Object.ini", NULL, "Data\\INI\\Object");
+		/* The fork's balance, written over EA's numbers after every object, weapon and armor exists.
+			 MULTIFILE edits a template in place and leaves every field the file does not name as EA
+			 wrote it, so the file holds the changes and nothing else; an Armor block still replaces
+			 that armor whole.  It is in the INI CRC like the files it edits. */
+		ini.load( AsciiString( "Data\\INI\\BalanceReforged.ini" ), INI_LOAD_MULTIFILE, &xferCRC );
 
 	#ifdef DUMP_PERF_STATS///////////////////////////////////////////////////////////////////////////
 	GetPrecisionTimer(&endTime64);//////////////////////////////////////////////////////////////////
@@ -904,7 +1131,7 @@ void GameEngine::init( int argc, char *argv[] )
 
 		AsciiString fname;
 		fname.format("Data\\%s\\CommandMap.ini", GetRegistryLanguage().str());
-		initSubsystem(TheMetaMap,"TheMetaMap", MSGNEW("GameEngineSubsystem") MetaMap(), NULL, fname.str(), "Data\\INI\\CommandMap.ini");
+		initSubsystem(TheMetaMap,"TheMetaMap", MSGNEW("GameEngineSubsystem") MetaMap(), NULL, fname.str(), "Data\\INI\\CommandMapReforged.ini");
 		// Legacy mouse and keyboard answers to the game's own map and to nothing this fork binds
 		TheMetaMap->loadLegacyBindings(fname);
 
@@ -936,6 +1163,12 @@ void GameEngine::init( int argc, char *argv[] )
 	DEBUG_LOG(("%s", Buf));////////////////////////////////////////////////////////////////////////////
 	#endif/////////////////////////////////////////////////////////////////////////////////////////////
 
+
+		// the control bar parses these without the checksum, and the AI builds and hunts from them
+		checksumFileContents( xferCRC, "Data\\INI\\Default\\CommandButton.ini" );
+		checksumFileContents( xferCRC, "Data\\INI\\CommandButton.ini" );
+		checksumFileContents( xferCRC, "Data\\INI\\CommandSet.ini" );
+		checksumModels( xferCRC );
 
 		xferCRC.close();
 		TheWritableGlobalData->m_iniCRC = xferCRC.getCRC();
@@ -2100,6 +2333,7 @@ static void updateHeadlessRun( void )
 void GameEngine::update( void )
 {
 	USE_PERF_TIMER(GameEngine_update)
+	sampleLogicRate();
 	{
 #ifdef DEBUG_LOGGING
 		static Int fpsFrames = 0;

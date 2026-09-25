@@ -140,6 +140,7 @@ public:
 	*/
 	virtual const Player* getApparentControllingPlayer( const Player* observingPlayer ) const;
 	virtual void recalcApparentControllingPlayer( void );
+	virtual void refreshApparentLook( void );
 	virtual Bool isDisplayedOnControlBar() const {return TRUE;}///< Does this container display its contents on the ControlBar?
 
   virtual void onDamage( DamageInfo *info );

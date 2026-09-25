@@ -648,6 +648,18 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 		//-----------------------------------------------------------------------------
 		case GameMessage::MSG_MOUSE_LEFT_CLICK:
 		{
+			// a signal armed off the command bar goes down where this click is, and the click selects nothing
+			if( TheInGameUI->isSignalArmed() )
+			{
+				const IRegion2D &clicked = msg->getArgument(0)->pixelRegion;
+				const ICoord2D centre = { ( clicked.lo.x + clicked.hi.x ) / 2, ( clicked.lo.y + clicked.hi.y ) / 2 };
+				Coord3D world;
+				if( TheTacticalView->screenToTerrain( &centre, &world ) )
+					TheInGameUI->placeArmedSignal( world );
+				disp = DESTROY_MESSAGE;
+				break;
+			}
+
 			// the release that ended an attack circle still arrives here as a click.  Letting it
 			// through would reselect whatever sat under the anchor, and a changed selection is exactly
 			// what drops the queue that was just built
@@ -1077,16 +1089,11 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			// click that follows this release has to be eaten or it would reselect under the anchor
 			if( TheInGameUI->isAttackCircling() )
 			{
-				// a circle drawn with shift adds its targets to the end of the list the group is
-				// already working through; without shift it replaces that list
-				if( !TheInGameUI->isInWaypointMode() )
-					TheInGameUI->clearShiftAttackQueue();
-
 				// a press with the attack key that never became a drag is an ordinary attack click,
 				// and the click that follows this release is the order.  Only a real circle eats it
 				if( TheInGameUI->issueAttackCircle() )
 				{
-					TheInGameUI->clearAttackMoveToMode();
+					TheInGameUI->spendOrderKey();
 					m_dragOrderJustIssued = TRUE;
 				}
 
@@ -1168,6 +1175,13 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 		//-----------------------------------------------------------------------------
 		case GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP:
 		{
+			// a signal armed off the command bar is all the right button takes back
+			if( TheInGameUI->isSignalArmed() )
+			{
+				TheInGameUI->disarmSignal();
+				break;
+			}
+
 			//
 			// Legacy is the game as shipped: a right drag scrolled the camera and did nothing else, and
 			// a right click cancelled whatever was armed or, with nothing armed, deselected everyone.

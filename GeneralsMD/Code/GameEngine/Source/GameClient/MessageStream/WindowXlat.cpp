@@ -274,6 +274,14 @@ GameMessageDisposition WindowTranslator::translateGameMessage(const GameMessage 
 			TheMousePos.y = mousePos.y;
 #endif
 
+			// a press off the spectator's page closes its drop-downs, before a window can take it
+			if( TheInGameUI && ( msg->getType() == GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN
+													 || msg->getType() == GameMessage::MSG_RAW_MOUSE_LEFT_DOUBLE_CLICK
+													 || msg->getType() == GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_DOWN
+													 || msg->getType() == GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN
+													 || msg->getType() == GameMessage::MSG_RAW_MOUSE_RIGHT_DOUBLE_CLICK ) )
+				TheInGameUI->foldSpectatorDropDowns( mousePos );
+
 			// process the mouse event position
 			GameWindowMessage gwm = rawMouseToWindowMessage( msg );
 			if( TheWindowManager )

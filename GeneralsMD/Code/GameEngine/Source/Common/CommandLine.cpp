@@ -1175,6 +1175,19 @@ Int parseAIDifficulty2(char *args[], int num)
 	return 2;
 }
 
+/** -notactics even|odd: those slots keep their rung but fight without its unit tactics, so a batch can
+	* play Hard against the same Hard minus one thing, from both sides of the map.  Read only in a
+	* single-player skirmish (AIPlayer::doTactics), so a network game never sees it. */
+Int parseNoTactics(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+	{
+		AsciiString parity = args[1];
+		TheWritableGlobalData->m_noTacticsSlotParity = (parity.compareNoCase("even") == 0) ? 0 : 1;
+	}
+	return 2;
+}
+
 Int parseObserver(char *args[], int num)
 {
 	if (TheWritableGlobalData)
@@ -1991,6 +2004,31 @@ Int parseUnitLimit(char *args[], int num)
 	return 1;
 }
 
+/* -incomesharing <n>: the lobby's income sharing for an -autoskirmish run, 1 for the oil derricks
+	 and 2 for every steady income.  It goes into the slot list the command line builds, so the replay
+	 carries it; a network game has no such slot list and reads the host's options string. */
+Int parseIncomeSharing(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1 && args[1])
+	{
+		TheWritableGlobalData->m_incomeSharing = atoi(args[1]);
+		return 2;
+	}
+	return 1;
+}
+
+/* -techrespawn <minutes>: the lobby's tech building respawn for an -autoskirmish run, carried the
+	 same way as -incomesharing. */
+Int parseTechRespawn(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1 && args[1])
+	{
+		TheWritableGlobalData->m_techRespawn = atoi(args[1]);
+		return 2;
+	}
+	return 1;
+}
+
 /* -slowframe <ms> lowers the bar a logic frame has to clear before it logs its own breakdown.
 
 	 The default of 20ms is a stutter hunt: it catches the frames a player would notice. Chasing a
@@ -2149,6 +2187,19 @@ Int parseNetSlot(char *args[], int num)
 		if (slot >= MAX_SLOTS)
 			slot = MAX_SLOTS - 1;
 		TheWritableGlobalData->m_netGameLocalSlot = slot;
+	}
+	return 2;
+}
+
+/* -netai <n> puts n AI seats after the -netgame addresses.  Two idle copies play nothing, and a
+	 desync that players meet ten minutes into a match needs a match that is being played: AIs
+	 building, fighting and dying.  An AI runs inside GameLogic on every machine alike, so every copy
+	 has to be given the same number, the way every copy is given the same address list. */
+Int parseNetAI(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+	{
+		TheWritableGlobalData->m_netGameAISlots = max( 0, atoi(args[1]) );
 	}
 	return 2;
 }
@@ -2382,6 +2433,7 @@ static CommandLineParam params[] =
 	{ "-autoskirmish", parseAutoSkirmish },
 	{ "-aidiff", parseAIDifficulty },
 	{ "-aidiff2", parseAIDifficulty2 },
+	{ "-notactics", parseNoTactics },
 	{ "-observer", parseObserver },
 	{ "-headless", parseHeadless },
 	{ "-maxframes", parseMaxGameFrames },
@@ -2402,6 +2454,8 @@ static CommandLineParam params[] =
 	{ "-teams", parseTeams },
 	{ "-peacetime", parsePeaceTime },
 	{ "-unitlimit", parseUnitLimit },
+	{ "-incomesharing", parseIncomeSharing },
+	{ "-techrespawn", parseTechRespawn },
 	{ "-showlanes", parseShowLanes },
 	{ "-uidrill", parseUIDrill },
 	{ "-resdrill", parseResDrill },
@@ -2416,6 +2470,7 @@ static CommandLineParam params[] =
 	{ "-loadsave", parseLoadSave },
 	{ "-netgame", parseNetGame },
 	{ "-netslot", parseNetSlot },
+	{ "-netai", parseNetAI },
 	{ "-lanip", parseLanIP },
 	{ "-lanname", parseLanName },
 	{ "-lanlobby", parseLanLobby },

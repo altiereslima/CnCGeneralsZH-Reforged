@@ -35,6 +35,7 @@
 #include "GameNetwork/Connection.h"
 #include "GameLogic/CRCSnapshotRing.h"
 #include "GameNetwork/GameDataMatch.h"
+#include "GameNetwork/GameInfo.h"
 #include "GameNetwork/FrameResendPolicy.h"
 #include "GameLogic/FPUControl.h"
 #include "GameNetwork/StallJudgement.h"
@@ -46,9 +47,11 @@
 #include "GameClient/ChromaKeyboard.h"
 #include "GameClient/MetaEvent.h"
 #include "GameClient/ClickTolerance.h"
+#include "GameClient/HtmlTemplate.h"
 #include "GameClient/KeyDownInfo.h"
 #include "GameClient/GameWindowTransitions.h"
 #include "GameLogic/ScenarioDrill.h"
+#include "GameLogic/OrderQueue.h"
 #include "Common/ControlServer.h"
 #include "GameLogic/LogicRandomValue.h"
 #include "GameClient/ClientRandomValue.h"
@@ -517,6 +520,58 @@ TEST(ini_unknown_field_is_skipped_only_when_asked)
 	}
 	CHECK( threw == FALSE );
 	CHECK_EQ( WaterSettings[ TIME_OF_DAY_EVENING ].m_waterRepeatCount, 6 );
+
+	remove( TEST_INI );
+}
+
+/* Data\INI\BalanceReforged.ini is loaded INI_LOAD_MULTIFILE after Weapon.ini: a Weapon block in it
+	 edits EA's weapon in place.  Before this load type was honoured, a second definition of a weapon
+	 was refused and returned early, so the whole balance file would have loaded and changed nothing. */
+TEST(balance_patch_edits_a_weapon_in_place)
+{
+	CHECK( bootOnce() );
+
+	if( TheWeaponStore == NULL )
+		TheWeaponStore = NEW WeaponStore;
+
+	writeFile( TEST_INI,
+		"Weapon BalancePatchProbeGun\r\n"
+		"  PrimaryDamage = 60.0\r\n"
+		"  AttackRange = 150.0\r\n"
+		"  DelayBetweenShots = 2000\r\n"
+		"End\r\n" );
+	CHECK( loadIni( TEST_INI ) );
+
+	writeFile( TEST_INI,
+		"Weapon BalancePatchProbeGun\r\n"
+		"  PrimaryDamage = 45.0\r\n"
+		"End\r\n" );
+	INI ini;
+	ini.load( AsciiString( TEST_INI ), INI_LOAD_MULTIFILE, NULL );
+
+	const WeaponTemplate *gun = TheWeaponStore->findWeaponTemplate( "BalancePatchProbeGun" );
+	CHECK( gun != NULL );
+	WeaponBonus noBonus;
+	CHECK_NEAR( gun->getPrimaryDamage( noBonus ), 45.0f, 0.01f );
+	CHECK_NEAR( gun->getUnmodifiedAttackRange(), 150.0f, 0.01f );
+
+	/* a patch that names a weapon nobody defined is a typo, and has to stop the load */
+	writeFile( TEST_INI,
+		"Weapon BalancePatchProbeGunTypo\r\n"
+		"  PrimaryDamage = 45.0\r\n"
+		"End\r\n" );
+	Bool threw = FALSE;
+	try
+	{
+		INI typo;
+		typo.load( AsciiString( TEST_INI ), INI_LOAD_MULTIFILE, NULL );
+	}
+	catch( ... )
+	{
+		threw = TRUE;
+	}
+	CHECK( threw );
+	CHECK( TheWeaponStore->findWeaponTemplate( "BalancePatchProbeGunTypo" ) == NULL );
 
 	remove( TEST_INI );
 }
@@ -1036,6 +1091,22 @@ TEST(unit_limit_charges_a_transport_for_its_payload)
 
 	/* no limit in the lobby refuses nothing */
 	CHECK( !UnitCapRefuses( 5000, 9, 0 ) );
+}
+
+/* Player.cpp: which payments the lobby's income sharing splits, and what each ally's cut is. */
+TEST(income_sharing_splits_evenly_and_keeps_the_remainder)
+{
+	CHECK( !IncomeSharingSplits( INCOME_SHARING_OFF, TRUE ) );
+	CHECK(  IncomeSharingSplits( INCOME_SHARING_TECH, TRUE ) );
+	CHECK( !IncomeSharingSplits( INCOME_SHARING_TECH, FALSE ) );
+	CHECK(  IncomeSharingSplits( INCOME_SHARING_ALL, FALSE ) );
+
+	/* a derrick's 200 between two allies is 100 each */
+	CHECK_EQ( IncomeAllyShare( 200, 2 ), 100u );
+	/* 100 between three is 33 to each ally and 34 to the earner, who keeps the odd dollar */
+	CHECK_EQ( IncomeAllyShare( 100, 3 ), 33u );
+	/* nobody to share with keeps it all */
+	CHECK_EQ( IncomeAllyShare( 200, 1 ), 0u );
 }
 
 /* CommandXlat.cpp: a right drag spreads the selection along the line drawn, but only when there is
@@ -2995,6 +3066,44 @@ TEST(controlbar_seconds_are_real_seconds_at_the_current_game_speed)
 	CHECK_EQ( ControlBar_secondsFromFramesAt( 61.0f, 60 ), 2 );
 	CHECK_EQ( ControlBar_secondsFromFramesAt( 1.0f, 200 ), 1 );
 	CHECK_EQ( ControlBar_secondsFromFramesAt( 0.0f, 200 ), 0 );
+}
+
+TEST(rate_reading_holds_through_jitter_and_follows_a_real_drop)
+{
+	/* The first sample after a load runs far over the real rate. Until the window is full it is one
+	   sample among however many there are, not the whole average: 200 then seven 30s is their mean. */
+	RateReading rate;
+	rate.add( 200.0f );
+	CHECK_EQ( rate.shown, 200 );
+	rate.add( 30.0f );
+	CHECK_EQ( rate.shown, 115 );
+	for( Int sample = 0; sample < 6; sample++ )
+		rate.add( 30.0f );
+	CHECK_EQ( rate.shown, 51 );
+	for( Int sample = 0; sample < 40; sample++ )
+		rate.add( 30.0f );
+	CHECK_EQ( rate.shown, 30 );
+
+	/* A steady 30Hz sampled every half second counts 14, 15 or 16 frames, 28 to 32 a second, and
+	   the number shown must not move for it */
+	const Real jitter[] = { 28.0f, 32.0f, 30.0f, 32.0f, 28.0f, 30.0f, 28.0f, 32.0f };
+	for( Int round = 0; round < 4; round++ )
+		for( const Real &reading : jitter )
+		{
+			rate.add( reading );
+			CHECK_EQ( rate.shown, 30 );
+		}
+
+	/* a match that sinks to 20 and stays there reads 20 within a few seconds */
+	for( Int sample = 0; sample < 40; sample++ )
+		rate.add( 20.0f );
+	CHECK_EQ( rate.shown, 20 );
+
+	/* a restart takes the next sample as it is, and keeps showing the old number until then */
+	rate.restart();
+	CHECK_EQ( rate.shown, 20 );
+	rate.add( 60.0f );
+	CHECK_EQ( rate.shown, 60 );
 }
 
 TEST(controlbar_experience_percent_fills_the_rank_and_clamps)
@@ -6878,15 +6987,18 @@ static Bool RMGParseLighting( DataChunkInput &file, DataChunkInfo *info, void * 
 
 static Bool RMGParseWaterAreas( DataChunkInput &file, DataChunkInfo *info, void * )
 {
-	theRMGParse.m_numWaterAreas = file.readInt();
+	const Int numAreas = file.readInt();
+	theRMGParse.m_numWaterAreas = 0;
 
-	for( Int area = 0; area < theRMGParse.m_numWaterAreas; area++ )
+	for( Int area = 0; area < numAreas; area++ )
 	{
-		file.readAsciiString();							// trigger name
+		const AsciiString name = file.readAsciiString();	// trigger name
 		file.readAsciiString();							// layer
 		file.readInt();									// trigger id
 
-		CHECK( file.readByte() == 1 );					// every one of ours is water
+		// the lakes are water; the skirmish base areas round every start are not
+		const Bool water = file.readByte() == 1;
+		CHECK( water || name.startsWith( "InnerPerimeter" ) || name.startsWith( "OuterPerimeter" ) );
 		file.readByte();								// not a river
 		file.readInt();									// river start
 
@@ -6902,11 +7014,15 @@ static Bool RMGParseWaterAreas( DataChunkInput &file, DataChunkInfo *info, void 
 			loc.z = (Real)file.readInt();
 			polygon.push_back( loc );
 
-			if( point == 0 )
+			if( water && point == 0 )
 				theRMGParse.m_waterPoints.push_back( loc );
 		}
 
-		theRMGParse.m_waterPolygons.push_back( polygon );
+		if( water )
+		{
+			theRMGParse.m_numWaterAreas++;
+			theRMGParse.m_waterPolygons.push_back( polygon );
+		}
 	}
 	return TRUE;
 }
@@ -6954,7 +7070,8 @@ static Bool RMGParseObject( DataChunkInput &file, DataChunkInfo *info, void * )
 	theRMGParse.m_objectAngles.push_back( angle );
 	theRMGParse.m_objectFlags.push_back( flags );
 
-	if( d.getType( NAMEKEY( "waypointID" ) ) == Dict::DICT_INT )
+	// the start waypoints; the approach paths' waypoints carry a path label and are not starts
+	if( d.getType( NAMEKEY( "waypointID" ) ) == Dict::DICT_INT && d.getType( NAMEKEY( "waypointPathLabel1" ) ) != Dict::DICT_ASCIISTRING )
 	{
 		theRMGParse.m_waypointNames.push_back( d.getAsciiString( NAMEKEY( "waypointName" ) ) );
 		theRMGParse.m_waypointPositions.push_back( loc );
@@ -8358,6 +8475,48 @@ TEST(every_start_reaches_its_money_and_has_two_ways_out)
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Easy and Medium attack only down the map's Center, Flank and Backdoor paths, named for the start
+	they lead to, and only while the wave stands inside its own OuterPerimeter area.  A generated map had
+	neither, and their waves stayed at home: 128 Medium-against-Medium matches lost 159 units between
+	them.  Every start needs all three paths, the links that make them paths rather than loose points,
+	and both base areas. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_generated_map_carries_an_attack_path_to_every_start)
+{
+	CHECK( bootOnce() );
+
+	RandomMapSettings settings;
+	settings.m_seed = 12345;
+	settings.m_numPlayers = 4;
+	settings.m_playableCells = 96;
+	std::vector<char> bytes;
+	RandomMapGenerator::generate( settings, bytes );
+	const std::string map( bytes.begin(), bytes.end() );
+
+	CHECK( map.find( "WaypointsList" ) != std::string::npos );
+	CHECK( map.find( "waypointPathLabel1" ) != std::string::npos );
+	// ... and the base areas their launch condition asks about
+	for( Int start = 1; start <= settings.m_numPlayers; ++start )
+	{
+		char area[32];
+		sprintf( area, "InnerPerimeter%d", start );
+		CHECK( map.find( area ) != std::string::npos );
+		sprintf( area, "OuterPerimeter%d", start );
+		CHECK( map.find( area ) != std::string::npos );
+	}
+	static const char *LANES[3] = { "Center", "Flank", "Backdoor" };
+	for( Int lane = 0; lane < 3; ++lane )
+	{
+		for( Int start = 1; start <= settings.m_numPlayers; ++start )
+		{
+			char label[32];
+			sprintf( label, "%s%d", LANES[lane], start );
+			CHECK( map.find( label ) != std::string::npos );
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
 /** The seed is worthless across two builds unless both builds turn it into the same bytes, and
 	nothing warns anybody when they stop doing so.  These numbers are that warning: change the
 	generator and this test fails until RANDOM_MAP_GENERATOR_VERSION and the recorded fingerprints
@@ -8367,14 +8526,14 @@ TEST(the_generator_still_turns_a_seed_into_the_bytes_it_used_to)
 {
 	CHECK( bootOnce() );
 
-	CHECK_EQ( RANDOM_MAP_GENERATOR_VERSION, 10 );
+	CHECK_EQ( RANDOM_MAP_GENERATOR_VERSION, 11 );
 
 	struct RMGFingerprint { Int m_seed, m_players, m_cells; UnsignedInt m_crc; };
 	static const RMGFingerprint theFingerprints[] =
 	{
-		{ 0, 2, 64, 0x6FE5FB90 },
-		{ 12345, 4, 96, 0x71D5E795 },
-		{ 7, 8, 128, 0x9C0240F4 },
+		{ 0, 2, 64, 0x2D2AF5EF },
+		{ 12345, 4, 96, 0xD1B4AB2D },
+		{ 7, 8, 128, 0x5A40EFA4 },
 	};
 	const Int numFingerprints = sizeof(theFingerprints) / sizeof(theFingerprints[0]);
 
@@ -8571,13 +8730,31 @@ TEST(the_ground_is_textured_by_what_the_ground_is_doing)
 
 	/* Which class covers the most ground is the seed's business - a map whose terraces mostly sit
 		high is a dirt map and one that sits low is a sand map - but no single texture may cover
-		the whole thing, and the two the fighting happens on have to carry most of it. Rock is the
-		cliff faces, so a map that is mostly rock is a map nobody can drive across. */
+		the whole thing, and the two the fighting happens on have to carry most of it. */
 	for( Int i = 0; i < 4; i++ )
 		CHECK( cellsPerClass[i] < (total * 3) / 4 );
 
 	CHECK( cellsPerClass[0] + cellsPerClass[2] > total / 2 );
-	CHECK( cellsPerClass[3] < total / 5 );
+
+	/* Rock starts at under half the cliff slope, so since the rolling maps of generator version 10
+		most of it is hillside a tank drives up. 72 maps over twelve seeds, two sizes and 2/4/6
+		players painted 17.8% of the ground rock on average and 23.6% at most; this seed paints 22%.
+		What must stay small is the ground nobody can cross, and that is under 2.3% on all 72. */
+	CHECK( cellsPerClass[3] < total / 4 );
+
+	const Real cliffLimit = 9.8f;						// PATHFIND_CLIFF_SLOPE_LIMIT_F
+	Int numCells = 0;
+	Int numCliffCells = 0;
+	for( Int y = 0; y + 1 < theRMGParse.m_height; y++ )
+	{
+		for( Int x = 0; x + 1 < theRMGParse.m_width; x++ )
+		{
+			numCells++;
+			if( RMGCellSpan( x, y ) > cliffLimit )
+				numCliffCells++;
+		}
+	}
+	CHECK( numCliffCells < numCells / 20 );
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -8968,7 +9145,6 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 
 		// perception: looks more often, acts sooner, thinks more often - never sees more
 		CHECK( upper.m_scoutIntervalSeconds <= lower.m_scoutIntervalSeconds );
-		CHECK( upper.m_reactionDelaySeconds <= lower.m_reactionDelaySeconds );
 		CHECK( upper.m_decisionIntervalSeconds <= lower.m_decisionIntervalSeconds );
 		CHECK( upper.m_maxScouts >= lower.m_maxScouts );
 
@@ -8982,6 +9158,7 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 		CHECK( upper.m_retreatTeams >= lower.m_retreatTeams );
 		CHECK( upper.m_useInfluenceMapForAttackLane >= lower.m_useInfluenceMapForAttackLane );
 		CHECK( upper.m_economyBuildings >= lower.m_economyBuildings );
+		CHECK( upper.m_tacticalMicro >= lower.m_tacticalMicro );
 		CHECK( upper.m_focusFire >= lower.m_focusFire );
 		CHECK( upper.m_savesSciencePoints >= lower.m_savesSciencePoints );
 		CHECK( upper.m_adaptiveHarvesters >= lower.m_adaptiveHarvesters );
@@ -8990,10 +9167,9 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 	}
 
 	// the ends of the ladder are what they say they are: Easy ignores what it is facing and Brutal
-	// is the baseline, which means it counters fully and answers the moment it sees something
+	// is the baseline, which means it counters fully
 	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_EASY ].m_counterCompositionWeight );
 	CHECK_EQ( 1.0f, data.m_skill[ AISKILL_BRUTAL ].m_counterCompositionWeight );
-	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_BRUTAL ].m_reactionDelaySeconds );
 
 	// every rung scouts. An AI that never looks reads as broken, not as easy.
 	for( Int i = 0; i < AISKILL_COUNT; ++i )
@@ -9001,6 +9177,54 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 		CHECK( data.m_skill[ i ].m_scoutIntervalSeconds > 0.0f );
 		CHECK( data.m_skill[ i ].m_maxScouts >= 1 );
 	}
+}
+
+/** The influence map is what every fighting decision of Hard's reads, so what it says about a patch of
+	 ground has to be what the guns there can actually do: reach it flat, reach further from above, and
+	 add up when two of them cover the same cell. */
+TEST(influence_map_covers_what_a_gun_reaches_and_the_high_ground_reaches_further)
+{
+	AIInfluenceMap map;
+	map.reset( 0.0f, 0.0f, 1000.0f, 1000.0f, 50.0f );
+	CHECK_EQ( 20, map.getCols() );
+
+	map.stampEnemy( 500.0f, 500.0f, 0.0f, 100.0f, 1000.0f );
+	CHECK_EQ( 1000.0f, map.enemyAt( 500.0f, 500.0f ) );
+	CHECK_EQ( 1000.0f, map.enemyAt( 575.0f, 525.0f ) );		// cell centre 575,525: 79 away
+	CHECK_EQ( 0.0f, map.enemyAt( 675.0f, 525.0f ) );			// 175 away, out of a 100 gun's reach
+	CHECK_EQ( 0.0f, map.friendAt( 500.0f, 500.0f ) );
+
+	// the same gun thirty units up reaches 90 further (three a unit), which covers the 175 cell
+	map.clear();
+	map.stampEnemy( 500.0f, 500.0f, 30.0f, 100.0f, 1000.0f );
+	CHECK_EQ( 1000.0f, map.enemyAt( 675.0f, 525.0f ) );
+	CHECK_EQ( 0.0f, map.enemyAt( 775.0f, 525.0f ) );
+
+	// ... and a cell on a hill as high as the gun gets no bonus against it
+	map.clear();
+	for( Int row = 0; row < map.getRows(); ++row )
+		for( Int col = 0; col < map.getCols(); ++col )
+			map.setCellHeight( col, row, 30.0f );
+	map.stampEnemy( 500.0f, 500.0f, 30.0f, 100.0f, 1000.0f );
+	CHECK_EQ( 0.0f, map.enemyAt( 675.0f, 525.0f ) );
+
+	map.stampEnemy( 500.0f, 500.0f, 30.0f, 100.0f, 500.0f );
+	CHECK_EQ( 1500.0f, map.enemyAt( 500.0f, 500.0f ) );
+	CHECK_EQ( 0.0f, map.enemyAt( -10.0f, 500.0f ) );			// off the map reads as nothing
+}
+
+/** Kiting: a unit steps back into the band between the enemy's reach and its own, and only when the
+	 band is wide enough to stand in. */
+TEST(kite_standoff_sits_between_the_two_ranges)
+{
+	Real distance = 0.0f;
+	CHECK( AIKite_standoffDistance( 300.0f, 150.0f, 20.0f, &distance ) );
+	CHECK_EQ( 280.0f, distance );		// the far edge of its own 300, well out of the enemy's 150
+	CHECK( AIKite_standoffDistance( 200.0f, 150.0f, 20.0f, &distance ) );
+	CHECK_EQ( 180.0f, distance );
+	CHECK( distance > 150.0f + 20.0f );
+	CHECK( !AIKite_standoffDistance( 180.0f, 150.0f, 20.0f, &distance ) );		// 30 of band, 40 needed
+	CHECK( !AIKite_standoffDistance( 150.0f, 200.0f, 20.0f, &distance ) );		// outranged: nothing to kite
 }
 
 
@@ -9107,6 +9331,10 @@ TEST(matchup_score_is_money_for_money)
 
 	// a free unit has no price to weigh, so only the kill times count
 	CHECK_NEAR( faster, aiMatchupScore( 240.0f, 480.0f, 0.0f, 900.0f ), 0.0001f );
+
+	// the log is the game's own, and still a log: three times better is log2(3) = 1.58496 doublings
+	CHECK_NEAR( 0.5f + 0.5f * 1.5849625f / 4.0f, aiMatchupScore( 160.0f, 480.0f, 900.0f, 900.0f ), 0.00001f );
+	CHECK_NEAR( 0.625f, faster, 0.00001f );
 }
 
 
@@ -9761,10 +9989,6 @@ TEST(the_production_strip_folds_a_long_queue_into_its_overflow)
 {
 	CHECK_EQ( 5, (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX );
 
-	// while watching, eight columns share the screen at once, so a column there is never the taller
-	// one - and neither cap may outrun the slots the strip has room to remember
-	CHECK( (Int)InGameUI::PRODUCTION_STRIP_WATCH_MAX <= (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX );
-
 	//
 	// The column, its overflow cell included, has to stand inside the 600 the layout is written in
 	// with room to spare for the control bar it stands on: it grows upward out of the corner, and a
@@ -9880,19 +10104,6 @@ TEST(a_stacked_tray_does_not_lie_over_the_one_below_it)
 	const Int pileHeight = rows * (Int)InGameUI::PRODUCTION_STRIP_TRAY_H;
 	CHECK( pileHeight < 600 / 2 );
 
-	//
-	// Watching, the vertical is the players: a row each, a whole tray apart, piled up off the bottom
-	// of the screen.  Eight of them have to leave the top of a 600 tall screen alone, and a row -
-	// the few soonest plus the tray the "+N" closes it with - has to stay well inside 800 across,
-	// since it is drawn over the battlefield rather than over a bar.
-	//
-	const Int watchPile = (Int)InGameUI::PRODUCTION_STRIP_ROWS * (Int)InGameUI::PRODUCTION_STRIP_TRAY_H;
-	CHECK( watchPile < 2 * 600 / 3 );
-
-	const Int watchWidth = ( (Int)InGameUI::PRODUCTION_STRIP_WATCH_MAX + 1 )
-													* (Int)InGameUI::PRODUCTION_STRIP_TRAY_W;
-	CHECK( watchWidth < 800 / 2 );
-
 	const Int rowWidth = (Int)InGameUI::SUPERWEAPON_STRIP_COLS * (Int)InGameUI::PRODUCTION_STRIP_TRAY_W;
 	CHECK( rowWidth < 800 );
 }
@@ -9900,13 +10111,9 @@ TEST(a_stacked_tray_does_not_lie_over_the_one_below_it)
 /* Buildings going up on the map are not in anybody's queue - they are objects standing on the
 	 ground with a percentage on them - but they land in the same column as the queued items, sorted
 	 against them on the one thing the two kinds share: how long each still has.  The comparison the
-	 column is built with is therefore blind to which kind a slot is, and there is one row while
-	 playing, at the front of the array. */
+	 column is built with is therefore blind to which kind a slot is. */
 TEST(the_buildings_going_up_stand_in_the_queue_column)
 {
-	CHECK_EQ( 0, (Int)InGameUI::PRODUCTION_ROW_QUEUE );
-	CHECK( (Int)InGameUI::PRODUCTION_ROW_QUEUE < (Int)InGameUI::PRODUCTION_STRIP_ROWS );
-
 	// a site three seconds out goes in front of a tank ten seconds out, and not the other way round
 	CHECK( InGameUI::stripSlotGoesBefore( FALSE, 90, FALSE, 300 ) );
 	CHECK( !InGameUI::stripSlotGoesBefore( FALSE, 300, FALSE, 90 ) );
@@ -12806,6 +13013,29 @@ TEST(pro_rules_box_starts_ticked_and_clears)
 	TheWritableGlobalData = saved;
 }
 
+/* Tech building respawn arrives as TR= in the host's options string, so the setter is the one place
+	 that keeps a hand-made value from standing a building up every frame or never. */
+TEST(tech_respawn_starts_off_and_clamps_the_wire_value)
+{
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+
+	SkirmishGameInfo game;
+	game.init();
+	CHECK_EQ( game.getTechRespawn(), 0 );
+	game.setTechRespawn( 5 );
+	CHECK_EQ( game.getTechRespawn(), 5 );
+	game.setTechRespawn( -3 );
+	CHECK_EQ( game.getTechRespawn(), 0 );
+	game.setTechRespawn( 1000 );
+	CHECK_EQ( game.getTechRespawn(), 60 );
+	game.reset();
+	CHECK_EQ( game.getTechRespawn(), 0 );
+
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = saved;
+}
+
 #include "Common/SpecialPowerType.h"
 
 /* Pro Rules name what they ban by the ending every general's copy shares, so each check below
@@ -12965,6 +13195,36 @@ TEST(scenario_parses_a_particles_line)
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "30 particles 0 X 5 760", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
 }
 
+// A queued order that is not an order would never end a list when given without shift, and an order
+// that ends its chain but cannot be queued would never be reached.  The prefix itself is not an order,
+// or it would release the units it is about to queue for.
+TEST(order_queue_kinds_nest)
+{
+	for( Int type = GameMessage::MSG_BEGIN_NETWORK_MESSAGES; type <= GameMessage::MSG_END_NETWORK_MESSAGES; type++ )
+	{
+		const GameMessage::Type messageType = (GameMessage::Type)type;
+		if( OrderQueue::isQueueable( messageType ) )
+			CHECK( OrderQueue::isOrder( messageType ) );
+		if( OrderQueue::isTerminal( messageType ) )
+			CHECK( OrderQueue::isQueueable( messageType ) );
+	}
+
+	CHECK( !OrderQueue::isOrder( GameMessage::MSG_QUEUE_NEXT_ORDER ) );
+	CHECK( OrderQueue::isQueueable( GameMessage::MSG_DO_ATTACKMOVETO ) );
+	CHECK( !OrderQueue::isTerminal( GameMessage::MSG_DO_ATTACKMOVETO ) );
+	CHECK( OrderQueue::isTerminal( GameMessage::MSG_DO_GUARD_POSITION ) );
+	CHECK( OrderQueue::isOrder( GameMessage::MSG_DO_STOP ) );
+	CHECK( !OrderQueue::isQueueable( GameMessage::MSG_DO_STOP ) );
+
+	// a capture, a ride in a transport and a special weapon wait their turn like a move
+	CHECK( OrderQueue::isQueueable( GameMessage::MSG_DO_SPECIAL_POWER_AT_OBJECT ) );
+	CHECK( OrderQueue::isQueueable( GameMessage::MSG_ENTER ) );
+	CHECK( OrderQueue::isQueueable( GameMessage::MSG_DO_WEAPON_AT_LOCATION ) );
+
+	// buying an upgrade without shift must not throw away the list of the unit it is for
+	CHECK( !OrderQueue::isOrder( GameMessage::MSG_QUEUE_UPGRADE ) );
+}
+
 TEST(scenario_parses_the_order_lines)
 {
 	ScenarioAction action;
@@ -12995,6 +13255,39 @@ TEST(scenario_parses_the_order_lines)
 
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "900 stop 2 *", &action ), (Int)SCENARIO_PARSE_OK );
 	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_STOP );
+
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftmove 0 * start1:0:-400", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_SHIFTMOVE );
+	CHECK_EQ( action.atStart, 1 );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftattackmove 0 * 900 700", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_SHIFTATTACKMOVE );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftguard 0 * 900 700", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_SHIFTGUARD );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftattack 0 * 1 AmericaCommandCenter", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_SHIFTATTACK );
+	CHECK_STR( action.targetSelector.str(), "AmericaCommandCenter" );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftattack 0 * 1", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
+
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftpower 0 * 1 AmericaSupplyCenter SpecialAbilityBlackLotusCaptureBuilding",
+																					 &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_SHIFTPOWER );
+	CHECK_STR( action.targetSelector.str(), "AmericaSupplyCenter" );
+	CHECK_STR( action.name.str(), "SpecialAbilityBlackLotusCaptureBuilding" );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftpower 0 * 1 AmericaSupplyCenter", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
+
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftupgrade 0 ChinaTankOverlord Upgrade_ChinaOverlordGattlingCannon", &action ),
+						(Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_SHIFTUPGRADE );
+	CHECK_STR( action.name.str(), "Upgrade_ChinaOverlordGattlingCannon" );
+
+	// a line read after one that named something must not carry that name
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftmove 0 * 900 700", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK( action.name.isEmpty() );
+
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "1800 tally 1 ChinaGattlingCannon", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_TALLY );
+	CHECK_STR( action.selector.str(), "ChinaGattlingCannon" );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "1800 tally 1", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
 
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "700 power 1 GLAScudStorm start0:0:300", &action ),
 						(Int)SCENARIO_PARSE_OK );
@@ -13317,8 +13610,11 @@ TEST(chroma_keys_land_on_the_razer_grid)
 	CHECK_EQ(chromaCellForKey('p'), 2 * 22 + 11);
 	CHECK_EQ(chromaCellForKey('a'), 3 * 22 + 2);
 	CHECK_EQ(chromaCellForKey('l'), 3 * 22 + 10);
-	CHECK_EQ(chromaCellForKey('z'), 4 * 22 + 2);
-	CHECK_EQ(chromaCellForKey('m'), 4 * 22 + 8);
+	// Z's row starts a column later: column two is the ISO key between left shift and Z, which
+	// RZKEY_Z = 0x0403 says.  At column two every key of the command bar's second row lit the lamp
+	// one to its left, and Z's lit a key most boards do not have.
+	CHECK_EQ(chromaCellForKey('z'), 4 * 22 + 3);
+	CHECK_EQ(chromaCellForKey('m'), 4 * 22 + 9);
 	// Upper case never reaches here: HotKeyManager lowers every key it stores.
 	CHECK_EQ(chromaCellForKey('Q'), -1);
 	CHECK_EQ(chromaCellForKey(' '), -1);
@@ -13399,6 +13695,7 @@ TEST(chroma_key_maps_agree_on_every_letter_and_digit)
 	CHECK_NE(chromaCellForMappableKey(MK_KP1), chromaCellForMappableKey(MK_1));
 	CHECK_EQ(chromaCellForMappableKey(MK_KP7), 2 * 22 + 18);
 	CHECK_EQ(chromaCellForMappableKey(MK_KP1), 4 * 22 + 18);
+	CHECK_EQ(chromaCellForMappableKey(MK_KP0), 5 * 22 + 19);	// RZKEY_NUMPAD0 = 0x0513
 
 	// The function row, which is where the generals powers land
 	CHECK_EQ(chromaCellForMappableKey(MK_F1), 3);
@@ -13410,7 +13707,8 @@ TEST(chroma_key_maps_agree_on_every_letter_and_digit)
 	CHECK_EQ(chromaCellForMappableKey(MK_MINUS), 1 * 22 + 12);
 	CHECK_EQ(chromaCellForMappableKey(MK_LBRACKET), 2 * 22 + 12);
 	CHECK_EQ(chromaCellForMappableKey(MK_SEMICOLON), 3 * 22 + 11);
-	CHECK_EQ(chromaCellForMappableKey(MK_COMMA), 4 * 22 + 9);
+	CHECK_EQ(chromaCellForMappableKey(MK_COMMA), 4 * 22 + 10);
+	CHECK_EQ(chromaCellForMappableKey(MK_SLASH), 4 * 22 + 12);
 
 	CHECK_EQ(chromaCellForMappableKey(MK_NONE), -1);
 
@@ -13521,7 +13819,93 @@ TEST(chroma_money_bar_is_a_thousand_credits_a_lamp)
 	CHECK_EQ(chromaMoneySegments(400000, 15), 15);
 }
 
+// A page's {{names}} take the entry's value first, then the page's, then the lookup's, and nothing
+// at all when none of them knows it; comments go; a data-each element is written once per entry, nested
+// elements of the same name inside it included, and a player's name cannot open a tag.
+TEST(html_template_fills_values_and_repeats_each)
+{
+	const std::string page =
+		"<!-- a comment may describe {{title}} and data-each=\"players\" -->"
+		"<p class=\"{{option:A}}\">{{ title }}</p>"
+		"<ul><li class=\"t{{team}}\" data-each=\"players\"><li>{{name}}</li>{{missing}}</li></ul>"
+		"<div data-each='nobody'>gone</div>{{text:Label}}";
+
+	HtmlValues values;
+	values[ "option:A" ] = "on";
+	values[ "title" ] = "T";
+	values[ "team" ] = "9";
+
+	HtmlLists lists;
+	HtmlValues first;
+	first[ "name" ] = "<b>&";
+	HtmlValues second;
+	second[ "name" ] = "Bo";
+	second[ "team" ] = "1";
+	lists[ "players" ].push_back( first );
+	lists[ "players" ].push_back( second );
+
+	const HtmlLookup lookup = []( const std::string &name, std::string &value ) -> Bool
+	{
+		if( name != "text:Label" )
+			return FALSE;
+		value = "looked";
+		return TRUE;
+	};
+
+	CHECK_STR( HtmlTemplate_expand( page, values, lists, lookup ).c_str(),
+		"<p class=\"on\">T</p>"
+		"<ul><li class=\"t9\" data-each=\"players\"><li>&lt;b&gt;&amp;</li></li>"
+		"<li class=\"t1\" data-each=\"players\"><li>Bo</li></li></ul>"
+		"looked" );
+	CHECK_STR( HtmlTemplate_escape( "a\"b'c" ).c_str(), "a&quot;b&#39;c" );
+}
+
+// litehtml builds an element for every word and every white space character, so the page it is
+// handed has its stylesheet taken out for the CSS parser and each run of white space between tags
+// cut to one; a tag's attribute values keep theirs, a '>' inside quotes included.
+TEST(a_page_goes_to_litehtml_with_its_style_apart_and_its_spaces_folded)
+{
+	std::string body;
+	std::string styles;
+	HtmlTemplate_compact( "<!DOCTYPE html>\r\n<html>\n  <head><style>\n  .a b { top: 1px; }\n</style></head>\n"
+												"  <body>\n\t<div class=\"x  y\" data-click='a > b'>one   two</div>\n  <span>3</span> <span>4</span>\n</body></html>",
+												body, styles );
+	CHECK_STR( styles.c_str(), "\n  .a b { top: 1px; }\n" );
+	CHECK_STR( body.c_str(), "<!DOCTYPE html> <html> <head></head> <body> <div class=\"x  y\" data-click='a > b'>one two</div> "
+													 "<span>3</span> <span>4</span> </body></html>" );
+
+	HtmlTemplate_compact( "<p>no end<style>.a{}", body, styles );
+	CHECK_STR( body.c_str(), "<p>no end<style>.a{}" );
+	CHECK_STR( styles.c_str(), "" );
+}
+
+// The spectator's page is the shipped one.  It switches no options any more - the strips drop-down
+// that did went with the shelves it switched - so an option: click is a box that does nothing, and
+// only a watched match would show it.
+TEST(the_spectator_page_has_its_pieces_and_no_option_clicks)
+{
+	FILE *fp = fopen( SPECTATOR_HTML, "rb" );
+	CHECK( fp != NULL );
+	if( fp == NULL )
+		return;
+
+	std::string page;
+	char chunk[ 1024 ];
+	size_t got = 0;
+	while( ( got = fread( chunk, 1, sizeof( chunk ), fp ) ) > 0 )
+		page.append( chunk, got );
+	fclose( fp );
+
+	CHECK( page.find( "data-click=\"option:" ) == std::string::npos );
+	// the superweapons coming ready are lines of the feed over the radar, Feed.html, for everybody
+	CHECK( page.find( "data-each=\"toasts\"" ) == std::string::npos );
+	CHECK( page.find( "data-each=\"players\"" ) != std::string::npos );
+	// the players are on the Tab scoreboard, not in a strip across the top
+	CHECK( page.find( "data-each=\"seats\"" ) == std::string::npos );
+}
+
 #include "test_camera_behavior.inc"
+#include "test_observer_camera.inc"
 #include "test_production_input.inc"
 #include "test_minimap_input.inc"
 #include "test_selection_priority.inc"

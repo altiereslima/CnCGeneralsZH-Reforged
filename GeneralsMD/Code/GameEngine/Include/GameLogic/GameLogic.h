@@ -55,6 +55,7 @@
 
 // forward declarations
 class AudioEventRTS;
+class AIGroup;
 class Object;
 class Drawable;
 class Player;
@@ -132,8 +133,9 @@ public:
 
 	void prepareNewGame( Int gameMode, GameDifficulty diff, Int rankPoints );						///< prepare for new game 
 
-	void logicMessageDispatcher( GameMessage *msg, 
-																			 void *userData );	///< Logic command list processing
+	/// Logic command list processing.  A NULL orderedGroup means the order is for the sender's selection;
+	/// otherwise it is for exactly that group (a shift-queued order coming round), which is destroyed here.
+	void logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup );
 
 	void registerObject( Object *obj );							///< Given an object, register it with the GameLogic and give it a unique ID
 
@@ -267,6 +269,17 @@ public:
 			carried by a save, so a loaded game agrees with the one that was saved. */
 	Bool isProRules( void ) const { return m_proRules; }
 
+	/** The lobby's income sharing, an IncomeSharing from GameInfo.h.  Fixed when the match starts and
+			carried by a save; INCOME_SHARING_OFF in every campaign mission. */
+	Int getIncomeSharing( void ) const { return m_incomeSharing; }
+
+	/** The lobby's tech building respawn, in frames: how long a destroyed tech building lies in ruins
+			before a neutral one stands on its spot again.  0 when the option is off, which is every
+			campaign mission and every game it was not set for. */
+	UnsignedInt getTechRespawnDelay( void ) const { return m_techRespawnDelay; }
+	/// a tech building has just died; stand a neutral one on its spot once the delay has run out
+	void scheduleTechRespawn( const Object *ruin );
+
 #ifdef DUMP_PERF_STATS
 	void getAIMetricsStatistics( UnsignedInt *numAI, UnsignedInt *numMoving, UnsignedInt *numAttacking, UnsignedInt *numWaitingForPath, UnsignedInt *overallFailedPathfinds );
 	void resetOverallFailedPathfinds() { m_overallFailedPathfinds = 0; }
@@ -385,6 +398,20 @@ private:
 	UnsignedInt m_peaceTimeEndFrame;	///< logic frame the lobby's peace time runs out on, 0 = no peace time
 	UnsignedInt m_unitCap;						///< units each player may have standing and queued, 0 = no limit
 	Bool m_proRules;									///< this match refuses what PRO-RULES.md bans
+	Int m_incomeSharing;							///< which earnings allies split, an IncomeSharing
+	UnsignedInt m_techRespawnDelay;		///< frames a destroyed tech building stays down, 0 = for good
+
+	/// a destroyed tech building waiting to stand again
+	struct PendingTechBuilding
+	{
+		const ThingTemplate *m_template;
+		Coord3D m_position;
+		Real m_angle;
+		ObjectID m_ruinID;							///< what KeepObjectDie left standing; a DestroyDie building leaves nothing
+		UnsignedInt m_dueFrame;
+	};
+	std::vector<PendingTechBuilding> m_pendingTechBuildings;	///< in the order they died, which every machine agrees on
+	void techRespawnTick( void );
 	LoadScreen *getLoadScreen( Bool loadSaveGame );
 	LoadScreen *m_loadScreen;
 	Bool m_gamePaused;
