@@ -5343,7 +5343,7 @@ Bool InGameUI::issueAttackCircle( void )
 	if( !wasDragged )
 		return FALSE;
 
-	Player *local = ThePlayerList->getLocalPlayer();
+	const Player *local = ThePlayerList->getLocalPlayer();
 
 	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange( &center, radius,
 																																		FROM_CENTER_2D, NULL,
@@ -5352,30 +5352,7 @@ Bool InGameUI::issueAttackCircle( void )
 	Int targetCount = 0;
 	for( Object *obj = iter->first(); obj; obj = iter->next() )
 	{
-		if( obj->isEffectivelyDead() )
-			continue;
-		if( local->getRelationship( obj->getTeam() ) != ENEMIES )
-			continue;
-		if( isHiddenByShroud( obj ) )
-			continue;
-
-		//
-		// Shroud is only half of invisible. A stealthed tank sitting in ground the player has
-		// cleared passes the test above, so a circle swept over open country used to pick out every
-		// hidden unit in it and open fire: a detector nobody built, and a way to read the map for
-		// stealth by dragging a circle over it. Undetected means not in the circle.
-		//
-		if( obj->testStatus( OBJECT_STATUS_STEALTHED ) && !obj->testStatus( OBJECT_STATUS_DETECTED ) )
-			continue;
-
-		//
-		// Not everything hostile standing in the circle is something to shoot at.  A shell or a
-		// missile in flight is an object on the enemy's team like any other, and the range query hands
-		// them over the same way it hands over tanks; the rest of the engine drops them by kind
-		// wherever it scans.  Each one that reached the list cost the group a two second stall on a
-		// target that was about to stop existing.
-		//
-		if( obj->isKindOf( KINDOF_PROJECTILE ) || obj->isKindOf( KINDOF_UNATTACKABLE ) )
+		if( !isAttackListTarget( obj, local ) )
 			continue;
 
 		const Bool startsList = targetCount == 0 && !isInWaypointMode();
@@ -5388,6 +5365,130 @@ Bool InGameUI::issueAttackCircle( void )
 	DEBUG_LOG(("attack circle: radius %.0f, %d targets, %d selected\n", radius, targetCount,
 						 getSelectCount()));
 	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Would the circle or the attack line put this on the target list? */
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::isAttackListTarget( const Object *obj, const Player *local ) const
+{
+	if( obj->isEffectivelyDead() )
+		return FALSE;
+	if( local->getRelationship( obj->getTeam() ) != ENEMIES )
+		return FALSE;
+	if( isHiddenByShroud( obj ) )
+		return FALSE;
+
+	//
+	// Shroud is only half of invisible. A stealthed tank sitting in ground the player has
+	// cleared passes the test above, so a circle swept over open country used to pick out every
+	// hidden unit in it and open fire: a detector nobody built, and a way to read the map for
+	// stealth by dragging a circle over it. Undetected means not in the circle.
+	//
+	if( obj->testStatus( OBJECT_STATUS_STEALTHED ) && !obj->testStatus( OBJECT_STATUS_DETECTED ) )
+		return FALSE;
+
+	//
+	// Not everything hostile standing in the circle is something to shoot at.  A shell or a
+	// missile in flight is an object on the enemy's team like any other, and the range query hands
+	// them over the same way it hands over tanks; the rest of the engine drops them by kind
+	// wherever it scans.  Each one that reached the list cost the group a two second stall on a
+	// target that was about to stop existing.
+	//
+	return !obj->isKindOf( KINDOF_PROJECTILE ) && !obj->isKindOf( KINDOF_UNATTACKABLE );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The line drawn with the attack key: every enemy it runs across goes on the target list, in the
+	* order the line reaches it, so the direction it was drawn in is the direction the group fights
+	* along.  "Across" is the line passing over the object's own footprint, give or take a few feet for
+	* a hand that is not steady.  Returns how many targets went out; with none, the caller fires on
+	* the ground along the line instead. */
+//-------------------------------------------------------------------------------------------------
+Int InGameUI::issueAttackLine( const std::vector<Coord3D>& line )
+{
+	// how far off the line a unit's edge may be and still count as under it
+	const Real LINE_TOLERANCE = 10.0f;
+
+	// the range query measures to centres, so it reaches this much further for a building whose
+	// centre is off the line and whose walls are under it
+	const Real LARGEST_FOOTPRINT = 150.0f;
+
+	if( line.size() < 2 )
+		return 0;
+
+	// one query over the circle round the whole line, then each object is measured against it
+	Region2D box;
+	box.lo.x = box.hi.x = line[ 0 ].x;
+	box.lo.y = box.hi.y = line[ 0 ].y;
+	for( std::vector<Coord3D>::const_iterator point = line.begin(); point != line.end(); ++point )
+	{
+		box.lo.x = min( box.lo.x, point->x );
+		box.lo.y = min( box.lo.y, point->y );
+		box.hi.x = max( box.hi.x, point->x );
+		box.hi.y = max( box.hi.y, point->y );
+	}
+	Coord3D center;
+	center.x = ( box.lo.x + box.hi.x ) * 0.5f;
+	center.y = ( box.lo.y + box.hi.y ) * 0.5f;
+	center.z = 0.0f;
+	const Real halfWidth = ( box.hi.x - box.lo.x ) * 0.5f;
+	const Real halfHeight = ( box.hi.y - box.lo.y ) * 0.5f;
+	const Real reach = sqrt( halfWidth * halfWidth + halfHeight * halfHeight ) + LINE_TOLERANCE + LARGEST_FOOTPRINT;
+
+	const Player *local = ThePlayerList->getLocalPlayer();
+	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange( &center, reach, FROM_CENTER_2D, NULL );
+	MemoryPoolObjectHolder holder( iter );
+
+	// how far along the line each target is, so they can go out in the order the line meets them
+	std::vector< std::pair<Real, ObjectID> > targets;
+	for( Object *obj = iter->first(); obj; obj = iter->next() )
+	{
+		if( !isAttackListTarget( obj, local ) )
+			continue;
+
+		const Coord3D *pos = obj->getPosition();
+		const Real allowed = obj->getGeometryInfo().getBoundingCircleRadius() + LINE_TOLERANCE;
+		Real bestDistanceSqr = allowed * allowed;
+		Real along = -1.0f;
+		Real walked = 0.0f;
+		for( size_t i = 1; i < line.size(); ++i )
+		{
+			const Real dx = line[ i ].x - line[ i - 1 ].x;
+			const Real dy = line[ i ].y - line[ i - 1 ].y;
+			const Real lengthSqr = dx * dx + dy * dy;
+			const Real length = sqrt( lengthSqr );
+			Real t = 0.0f;
+			if( lengthSqr > 0.0f )
+				t = clamp( 0.0f, ( ( pos->x - line[ i - 1 ].x ) * dx + ( pos->y - line[ i - 1 ].y ) * dy ) / lengthSqr, 1.0f );
+			const Real offX = line[ i - 1 ].x + dx * t - pos->x;
+			const Real offY = line[ i - 1 ].y + dy * t - pos->y;
+			const Real distanceSqr = offX * offX + offY * offY;
+			if( distanceSqr <= bestDistanceSqr )
+			{
+				bestDistanceSqr = distanceSqr;
+				along = walked + length * t;
+			}
+			walked += length;
+		}
+
+		if( along >= 0.0f )
+			targets.push_back( std::make_pair( along, obj->getID() ) );
+	}
+
+	std::sort( targets.begin(), targets.end() );
+
+	for( size_t i = 0; i < targets.size(); ++i )
+	{
+		const Bool startsList = i == 0 && !isInWaypointMode();
+		markNextOrderQueued( startsList ? ORDER_QUEUE_FRESH : ORDER_QUEUE_APPEND );
+		GameMessage *attack = TheMessageStream->appendMessage( GameMessage::MSG_DO_ATTACK_OBJECT );
+		attack->appendObjectIDArgument( targets[ i ].second );
+	}
+
+	DEBUG_LOG(("attack line: %d points, %d targets, %d selected\n", (Int)line.size(), (Int)targets.size(),
+						 getSelectCount()));
+	return (Int)targets.size();
 }
 
 //-------------------------------------------------------------------------------------------------

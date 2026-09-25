@@ -1469,18 +1469,30 @@ void CommandTranslator::finishFormationDrag( const ICoord2D& lift )
 															TheInGameUI->isForceAttackArmed(),
 															TheInGameUI->isGuardArmed() );
 
-	// a line drawn with shift is the next order on the units' list
-	if( TheInGameUI->isInWaypointMode() )
-		TheInGameUI->markNextOrderQueued( ORDER_QUEUE_APPEND );
-
 	// the traced curve becomes world points; who stands where along it is decided on
 	// the logic side, where every machine decides it the same way
-	GameMessage *newMsg = TheMessageStream->appendMessage( formationType );
+	std::vector<Coord3D> line;
 	for( std::vector<ICoord2D>::const_iterator it = curve.begin(); it != curve.end(); ++it )
 	{
 		Coord3D world;
 		TheTacticalView->screenToTerrain( &(*it), &world );
-		newMsg->appendLocationArgument( world );
+		line.push_back( world );
+	}
+
+	// a line drawn with the attack key across enemies is aimed at them: each one it crosses goes on
+	// the target list, in the order the line meets them, and the ground under the line is not shot
+	// at.  Only a line that crosses nobody fires on the ground along it
+	const Bool aimedAtTargets = formationType == GameMessage::MSG_DO_FORMATION_FORCEATTACK
+															&& TheInGameUI->issueAttackLine( line ) > 0;
+	if( !aimedAtTargets )
+	{
+		// a line drawn with shift is the next order on the units' list
+		if( TheInGameUI->isInWaypointMode() )
+			TheInGameUI->markNextOrderQueued( ORDER_QUEUE_APPEND );
+
+		GameMessage *newMsg = TheMessageStream->appendMessage( formationType );
+		for( std::vector<Coord3D>::const_iterator it = line.begin(); it != line.end(); ++it )
+			newMsg->appendLocationArgument( *it );
 	}
 
 	TheInGameUI->spendOrderKey();
