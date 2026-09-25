@@ -53,4 +53,9 @@ extern std::string HtmlTemplate_expand( const std::string &page, const HtmlValue
 /** The text with & < > " and ' written as entities, so a player's name cannot open a tag. */
 extern std::string HtmlTemplate_escape( const std::string &text );
 
+/** A filled-in page split for litehtml: the <style> block's text into `styles`, for its CSS parser,
+	* and the rest into `body` with every run of white space outside a tag one space, which is all CSS
+	* draws of it while no page uses white-space: pre. */
+extern void HtmlTemplate_compact( const std::string &page, std::string &body, std::string &styles );
+
 #endif // _HTML_TEMPLATE_H_

@@ -132,6 +132,24 @@ function Install-Litehtml {
   Step "litehtml 0.10 -> Libraries\Source\litehtml"
 }
 
+# --- The fork's one change to litehtml, Libraries\Source\litehtml-parsed-css.patch: createFromString
+# takes stylesheets the caller parsed once, which was two thirds of building a page. HtmlOverlay.cpp
+# passes them and does not compile without it. A copy that has the patch says so by the parameter's
+# name in document.h, so a copy fetched before the patch existed gets it on the next build too.
+function Install-LitehtmlPatch {
+  $destination = Join-Path $libraries 'Source\litehtml'
+  $header = Join-Path $destination 'include\litehtml\document.h'
+  if (Select-String -LiteralPath $header -Pattern 'master_parsed' -SimpleMatch -Quiet) { return }
+  $patch = Join-Path $libraries 'Source\litehtml-parsed-css.patch'
+  # without the ceiling git finds this checkout around the folder and skips every file in the patch
+  # as outside it, and says nothing
+  $env:GIT_CEILING_DIRECTORIES = Join-Path $libraries 'Source'
+  try { git -C $destination -c core.autocrlf=false apply $patch }
+  finally { Remove-Item Env:GIT_CEILING_DIRECTORIES }
+  if ($LASTEXITCODE -ne 0) { throw "litehtml-parsed-css.patch did not apply to Libraries\Source\litehtml" }
+  Step "litehtml-parsed-css.patch -> Libraries\Source\litehtml"
+}
+
 # --- nanosvg, the two headers: parses and rasterises the SVG pictures a page names in url(), which
 # the game then draws pixel by pixel. Same .gitignore dance as litehtml.
 function Install-Nanosvg {
@@ -247,6 +265,7 @@ Install-Lzhl
 Install-DirectX
 Install-GameSpy
 Install-Litehtml
+Install-LitehtmlPatch
 Install-Nanosvg
 Install-Art
 Step 'everything the build needs is in place'

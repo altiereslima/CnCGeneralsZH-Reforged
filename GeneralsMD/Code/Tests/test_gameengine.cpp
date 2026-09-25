@@ -13783,6 +13783,25 @@ TEST(html_template_fills_values_and_repeats_each)
 	CHECK_STR( HtmlTemplate_escape( "a\"b'c" ).c_str(), "a&quot;b&#39;c" );
 }
 
+// litehtml builds an element for every word and every white space character, so the page it is
+// handed has its stylesheet taken out for the CSS parser and each run of white space between tags
+// cut to one; a tag's attribute values keep theirs, a '>' inside quotes included.
+TEST(a_page_goes_to_litehtml_with_its_style_apart_and_its_spaces_folded)
+{
+	std::string body;
+	std::string styles;
+	HtmlTemplate_compact( "<!DOCTYPE html>\r\n<html>\n  <head><style>\n  .a b { top: 1px; }\n</style></head>\n"
+												"  <body>\n\t<div class=\"x  y\" data-click='a > b'>one   two</div>\n  <span>3</span> <span>4</span>\n</body></html>",
+												body, styles );
+	CHECK_STR( styles.c_str(), "\n  .a b { top: 1px; }\n" );
+	CHECK_STR( body.c_str(), "<!DOCTYPE html> <html> <head></head> <body> <div class=\"x  y\" data-click='a > b'>one two</div> "
+													 "<span>3</span> <span>4</span> </body></html>" );
+
+	HtmlTemplate_compact( "<p>no end<style>.a{}", body, styles );
+	CHECK_STR( body.c_str(), "<p>no end<style>.a{}" );
+	CHECK_STR( styles.c_str(), "" );
+}
+
 // The spectator's page is the shipped one.  It switches no options any more - the strips drop-down
 // that did went with the shelves it switched - so an option: click is a box that does nothing, and
 // only a watched match would show it.
