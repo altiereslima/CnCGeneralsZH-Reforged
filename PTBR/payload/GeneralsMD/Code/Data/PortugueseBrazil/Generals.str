@@ -4558,6 +4558,22 @@ GUI:Back
 "VOLTAR"
 END
 
+GUI:BarIdleWorker
+"Trabalhador"
+END
+
+GUI:BarNetReady
+"pronto"
+END
+
+GUI:BarNetRoom
+"sala"
+END
+
+GUI:BarNetUnits
+"unidades"
+END
+
 GUI:BattleHonors
 "Condecorações de Batalha"
 END
@@ -5324,6 +5340,10 @@ END
 
 GUI:ChooseLadder
 "Escolha uma Competição"
+END
+
+GUI:ChromaLighting
+"Iluminação Razer Chroma"
 END
 
 GUI:ClassicGraphics
@@ -6470,16 +6490,112 @@ GUI:HTTPProxy
 "Proxy HTTP:"
 END
 
+GUI:HudArmies
+"Exércitos"
+END
+
+GUI:HudCamera
+"Câmera"
+END
+
+GUI:HudCameraDirector
+"Diretor"
+END
+
+GUI:HudCameraFree
+"Livre"
+END
+
+GUI:HudCameraPlayer
+"Câmera do jogador"
+END
+
+GUI:HudFog
+"Névoa de guerra"
+END
+
+GUI:HudFollow
+"Jogador"
+END
+
+GUI:HudFollowNobody
+"Nenhum"
+END
+
+GUI:HudGameStats
+"Estatísticas"
+END
+
+GUI:HudNetWorth
+"Patrimônio"
+END
+
+GUI:HudNoDozerLeft
+"%s ficou sem Construtores"
+END
+
+GUI:HudNoWorkerLeft
+"%s ficou sem Trabalhadores"
+END
+
 GUI:HudOverlay
 "Informações Extras da Interface"
+END
+
+GUI:HudPowerUsed
+"em ação"
 END
 
 GUI:HudProductionStrip
 "Fila de produção"
 END
 
+GUI:HudPromotionBought
+"agora disponível"
+END
+
 GUI:HudSkillStrip
 "Promoções dos Generais"
+END
+
+GUI:HudStatArmy
+"Valor do exército"
+END
+
+GUI:HudStatCash
+"Dinheiro"
+END
+
+GUI:HudStatIncome
+"Renda por minuto"
+END
+
+GUI:HudStatKills
+"Abates / perdas"
+END
+
+GUI:HudStatPower
+"Energia"
+END
+
+GUI:HudStatRank
+"Patente do General"
+END
+
+GUI:HudStructureBuilt
+"construção concluída"
+END
+
+GUI:HudStructureStarted
+"em construção"
+END
+
+GUI:HudSuperweaponLaunched
+"disparou"
+END
+
+GUI:HudSuperweaponReady
+"pode disparar"
 END
 
 GUI:HudSuperweaponStrip
@@ -6500,6 +6616,22 @@ END
 
 GUI:IgnoreSm
 "Ignorar"
+END
+
+GUI:IncomeSharing
+"Dividir Renda"
+END
+
+GUI:IncomeSharingAll
+"Toda a Renda"
+END
+
+GUI:IncomeSharingOff
+"Sem Divisão"
+END
+
+GUI:IncomeSharingTech
+"Poços de Petróleo"
 END
 
 GUI:InfantryShadows
@@ -7758,6 +7890,10 @@ GUI:ScoreboardPerMinute
 "POR MIN"
 END
 
+GUI:ScoreboardPerSecond
+"POR SEG"
+END
+
 GUI:ScoreboardPlayer
 "JOGADOR"
 END
@@ -8119,7 +8255,7 @@ GUI:SignalAttack
 END
 
 GUI:SignalAttackDescription
-"Cria por três segundos uma fumaça da sua cor marcada ATACAR no ponto do cursor ou do radar. Apenas seus aliados a veem."
+"Cria por dez segundos uma fumaça da sua cor e espadas cruzadas no chão, no ponto do cursor ou do radar. Apenas seus aliados os veem."
 END
 
 GUI:SignalAttackLabel
@@ -8135,7 +8271,7 @@ GUI:SignalAttention
 END
 
 GUI:SignalAttentionDescription
-"Cria por três segundos uma fumaça da sua cor marcada OLHE no ponto do cursor ou do radar. Apenas seus aliados a veem."
+"Cria por dez segundos uma fumaça da sua cor e um olho no chão, no ponto do cursor ou do radar. Apenas seus aliados os veem."
 END
 
 GUI:SignalAttentionLabel
@@ -8151,7 +8287,7 @@ GUI:SignalDefend
 END
 
 GUI:SignalDefendDescription
-"Cria por três segundos uma fumaça da sua cor marcada DEFENDER no ponto do cursor ou do radar. Apenas seus aliados a veem."
+"Cria por dez segundos uma fumaça da sua cor e um escudo no chão, no ponto do cursor ou do radar. Apenas seus aliados os veem."
 END
 
 GUI:SignalDefendLabel
@@ -8440,6 +8576,18 @@ END
 
 GUI:Team
 "Equipe"
+END
+
+GUI:TechRespawn
+"Reconstrução"
+END
+
+GUI:TechRespawnFormat
+"Após %d min"
+END
+
+GUI:TechRespawnOff
+"Nunca"
 END
 
 GUI:TestBrowser
@@ -15182,6 +15330,10 @@ TOOLTIP:CheckAudioHardware
 "Clique nesta caixa para habilitar a aceleração de Áudio por hardware."
 END
 
+TOOLTIP:ChromaLighting
+"Durante a partida, teclado, mouse e mousepad Razer mostram a barra de comando, a energia, as superarmas e o dinheiro. Nos menus, o Synapse mantém a própria iluminação."
+END
+
 TOOLTIP:ClassicGraphics
 "O jogo como era em 2003: texturas e terreno originais, as antigas sombras duras, sem detalhe de relevo e sem brilho ou nitidez. Desativado, usa o visual Reforged. Entra em vigor na próxima inicialização do jogo."
 END
@@ -15408,6 +15560,10 @@ END
 
 TOOLTIP:IgnoredModifier
 "(ignorado)"
+END
+
+TOOLTIP:IncomeSharing
+"O que os aliados dividem entre si. Cada pagamento é dividido igualmente entre o jogador que o recebeu e cada aliado ainda na partida: um Poço de Petróleo que paga 200 a um de dois aliados paga 100 a cada um. Poços de Petróleo divide apenas os poços capturados. Toda a Renda inclui também as coletas de suprimentos, os Hackers e os Mercados Negros."
 END
 
 TOOLTIP:InfantryShadows
@@ -15862,6 +16018,62 @@ TOOLTIP:StartWorldBuilder
 "Inicia o World Builder."
 END
 
+TOOLTIP:StatArmor
+"Blindagem"
+END
+
+TOOLTIP:StatArmorStronger
+"reforçada"
+END
+
+TOOLTIP:StatAttackSpeed
+"Velocidade de ataque"
+END
+
+TOOLTIP:StatDamage
+"Dano"
+END
+
+TOOLTIP:StatDamagePerSecond
+"Dano por segundo"
+END
+
+TOOLTIP:StatHealth
+"Vida"
+END
+
+TOOLTIP:StatNewWeapon
+"Nova arma"
+END
+
+TOOLTIP:StatNewWeaponAir
+"Arma antiaérea"
+END
+
+TOOLTIP:StatNewWeaponFigures
+"%d de dano, %d de alcance"
+END
+
+TOOLTIP:StatNewWeaponGround
+"Arma terrestre"
+END
+
+TOOLTIP:StatPerSecond
+"/s"
+END
+
+TOOLTIP:StatRange
+"Alcance"
+END
+
+TOOLTIP:StatSeconds
+"%ds"
+END
+
+TOOLTIP:StatTime
+"Tempo de construção"
+END
+
 TOOLTIP:StopSearch
 "Abortar busca atual"
 END
@@ -15884,6 +16096,10 @@ END
 
 TOOLTIP:TechBuilding
 "Instalação Técnica"
+END
+
+TOOLTIP:TechRespawn
+"Quanto tempo um prédio técnico destruído fica em ruínas até um novo, neutro, surgir no mesmo lugar, com vida total e pronto para ser capturado. Poços de petróleo, refinarias, hospitais, plataformas de artilharia, alas de reparos e plataformas de reforço voltam. Uma unidade ou construção no local impede o retorno até sair dali."
 END
 
 TOOLTIP:textentrybox
@@ -15944,6 +16160,18 @@ END
 
 TOOLTIP:UnlockMaxFPS
 "Permite que o jogo seja executado com animações acima de 30 quadros por segundo. Esta opção afeta a velocidade do jogo. Recomendada apenas para fins de avaliação de desempenho."
+END
+
+TOOLTIP:UpgradeChanges
+"EFEITOS"
+END
+
+TOOLTIP:UpgradeOwned
+"já possui"
+END
+
+TOOLTIP:Upgrades
+"MELHORIAS"
 END
 
 TOOLTIP:UseAccount
