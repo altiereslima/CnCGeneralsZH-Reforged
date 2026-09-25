@@ -4,20 +4,20 @@ import json
 import sys
 
 EXPECTED_SNAPSHOT = {
-    "head_commit": "e378d932218e1d6a9cb10d3b41cab4e0a5061547",
+    "head_commit": "8d578be965ae3ea202b00fb9382f7b4e072453b5",
     "files": {
-        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "4ac5571db55f6fafabf6089f31d2ec0b1e3462d9",
-        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "ced1a9c0ea34d14379535963ec4aed36c9da6a4b",
+        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "2cc766a749651e9927fdf7581ae73a57eb6b1482",
+        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "da60ab27569182d61932e94a27f8e800249be66b",
         "GeneralsMD/Code/GameEngine/Source/GameClient/GameText.cpp": "de5aa27ae27cd311081d7abd9c1ddf18372f7d5a",
         "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "189bf883f5e702abffcde3094b85260adbb92681",
-        "GeneralsMD/Code/Data/Patch.str": "452eba038a6634159e61841af7cc4df719a4d2ea",
+        "GeneralsMD/Code/Data/Patch.str": "6c1cf2c3928c8ebccc275b77fb361a1f2a39202b",
         "GeneralsMD/Code/GameEngine/Source/GameClient/GlobalLanguage.cpp": "115d28f739fdd8f061a2622ecf4f685dd620f174",
         "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DFileSystem.cpp": "b41dc411edf6034177bef575112742f6f92137fb",
         "GeneralsMD/Code/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp": "23f711877eb038a8f3b2dba5b27644cb71048337",
-        "GeneralsMD/Code/CMakeLists.txt": "37c37f2d954ccb87f08b7cb3edd34cd7a7b5dec8",
+        "GeneralsMD/Code/CMakeLists.txt": "7ae597095e9667a97e6ce586b9fff79226a56f13",
         "GeneralsMD/Code/GameEngine/Include/Common/AsciiString.h": "338c83a046b1338a9b60622ead08db762ff7b41a",
         "GeneralsMD/Code/GameEngine/Include/Common/Debug.h": "708817af5576ace9079e3c8f2900b92eb727882a",
-        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "888668e2088188051c87e670294e842bd5b421f0",
+        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "6f64738464e418c04201da48d6b3330834e54403",
     }
 }
 
