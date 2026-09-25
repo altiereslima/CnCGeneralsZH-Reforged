@@ -135,6 +135,14 @@ def validate(repo):
     need(info, "\t\tcase SLOT_BRUTAL_AI:\t\treturn UnicodeString( L\"Hard AI\" );\n", "GameInfo.cpp Hard AI")
     result["checks"]["ai_rung_name_anchors"] = "PASS"
 
+    # Stage 16: textured command bar plates by default.
+    need(h, "\tBool m_showHudOverlay;\t\t\t\t///< draw the fps / elapsed time / income line in the corner\n", "GlobalData.h HUD overlay member")
+    ui = (code/"GameEngine/Source/GameClient/InGameUI.cpp").read_text(encoding="utf-8-sig")
+    need(ui, "\tif( m_controlBarPage.empty() )\n\t{\n\t\tTheControlBar->setPageSolids( NULL );\n\t\treturn FALSE;\n\t}\n", "InGameUI.cpp command bar page fallback")
+    w3dbar = (code/"GameEngineDevice/Source/W3DDevice/GameClient/GUI/GUICallbacks/W3DControlBar.cpp").read_text(encoding="utf-8-sig")
+    need(w3dbar, "TheInGameUI->drawControlBarPage( panels, shown, ControlBar::CB_PANEL_COUNT ) )\n\t\treturn;\n", "W3DControlBar.cpp plates drawn when the page is not")
+    result["checks"]["classic_command_bar_anchors"] = "PASS"
+
     result["status"] = "PASS"
     return result
 

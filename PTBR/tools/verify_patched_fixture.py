@@ -82,6 +82,13 @@ def main():
         need(ptbr,f"\n{label}\n",f"{label} translation")
     checks["ai_rung_names"]="PASS"
 
+    need(h,"Bool m_classicCommandBar;","classic command bar member")
+    need(cpp,"m_classicCommandBar = TRUE;","classic command bar default")
+    need(catalog,'{ "ClassicCommandBar",',"ClassicCommandBar Options.ini key")
+    ui=(code/"GameEngine/Source/GameClient/InGameUI.cpp").read_text(encoding="utf-8")
+    need(ui,"m_controlBarPage.empty() || TheGlobalData->m_classicCommandBar","plates unless the page is asked for")
+    checks["classic_command_bar"]="PASS"
+
     loc=code/"Data/PortugueseBrazil"
     miss_core=[x for x in CORE_LOCALE_FILES if not (loc/x).is_file()]
     if miss_core:

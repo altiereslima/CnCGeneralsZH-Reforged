@@ -27,6 +27,7 @@ PATCHED_SOURCE_FILES = [
     "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp",
     "GeneralsMD/Code/Tests/test_gameengine.cpp",
     "GeneralsMD/Code/GameEngine/Source/GameNetwork/GameInfo.cpp",
+    "GeneralsMD/Code/GameEngine/Source/GameClient/InGameUI.cpp",
 ]
 
 # Casos de teste que falham sem culpa do patch PT-BR. Só estes nomes são tolerados;
@@ -263,8 +264,8 @@ def main():
         if state == "clean":
             backup = backup_sources(repo, result_dir)
             result["backup"] = str(backup)
-            run([sys.executable, str(pkg/"tools/apply_stage14.py"), str(repo)],
-                log=logs/"01_apply_stage14.log")
+            run([sys.executable, str(pkg/"tools/apply_stage16.py"), str(repo)],
+                log=logs/"01_apply_stage16.log")
             result["steps"]["apply_patch"] = "PASS"
         elif state == "patched":
             result["steps"]["apply_patch"] = "SKIPPED_ALREADY_PATCHED"
