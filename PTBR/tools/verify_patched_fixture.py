@@ -82,12 +82,15 @@ def main():
         need(ptbr,f"\n{label}\n",f"{label} translation")
     checks["ai_rung_names"]="PASS"
 
-    need(h,"Bool m_classicCommandBar;","classic command bar member")
-    need(cpp,"m_classicCommandBar = TRUE;","classic command bar default")
-    need(catalog,'{ "ClassicCommandBar",',"ClassicCommandBar Options.ini key")
+    need(h,"Bool m_classicInterface;","classic interface member")
+    need(cpp,"m_classicInterface = TRUE;","classic interface default")
+    need(catalog,'{ "ClassicInterface",',"ClassicInterface Options.ini key")
     ui=(code/"GameEngine/Source/GameClient/InGameUI.cpp").read_text(encoding="utf-8")
-    need(ui,"m_controlBarPage.empty() || TheGlobalData->m_classicCommandBar","plates unless the page is asked for")
-    checks["classic_command_bar"]="PASS"
+    need(ui,"m_controlBarPage.empty() || TheGlobalData->m_classicInterface","plates unless the page is asked for")
+    need(ui,"m_quitMenuPage.empty() || TheGlobalData->m_classicInterface","original Esc menu unless the page is asked for")
+    quit_menu=(code/"GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/QuitMenu.cpp").read_text(encoding="utf-8")
+    need(quit_menu,'TheTransitionHandler->reverse( "QuitFullBack" );',"original Esc menu closing transition")
+    checks["classic_interface"]="PASS"
 
     loc=code/"Data/PortugueseBrazil"
     miss_core=[x for x in CORE_LOCALE_FILES if not (loc/x).is_file()]

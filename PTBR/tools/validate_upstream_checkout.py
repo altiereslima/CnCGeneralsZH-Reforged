@@ -141,7 +141,11 @@ def validate(repo):
     need(ui, "\tif( m_controlBarPage.empty() )\n\t{\n\t\tTheControlBar->setPageSolids( NULL );\n\t\treturn FALSE;\n\t}\n", "InGameUI.cpp command bar page fallback")
     w3dbar = (code/"GameEngineDevice/Source/W3DDevice/GameClient/GUI/GUICallbacks/W3DControlBar.cpp").read_text(encoding="utf-8-sig")
     need(w3dbar, "TheInGameUI->drawControlBarPage( panels, shown, ControlBar::CB_PANEL_COUNT ) )\n\t\treturn;\n", "W3DControlBar.cpp plates drawn when the page is not")
-    result["checks"]["classic_command_bar_anchors"] = "PASS"
+    need(ui, "\t\treadHtmlPage( QUIT_MENU_PAGE, m_quitMenuPage );\n\t}\n\tif( m_quitMenuPage.empty() )\n\t\treturn;\n", "InGameUI.cpp Esc menu page fallback")
+    quit_menu = (code/"GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/QuitMenu.cpp").read_text(encoding="utf-8-sig")
+    need(quit_menu, "\tTheTransitionHandler->setGroup( group );\n\tTheTransitionHandler->remove( group, TRUE );\n}\n", "QuitMenu.cpp showQuitMenuLayout")
+    need(quit_menu, "static void hideQuitMenuLayout( void )\n{\n\tif( quitMenuLayout )\n\t\tquitMenuLayout->hide( TRUE );\n}\n", "QuitMenu.cpp hideQuitMenuLayout")
+    result["checks"]["classic_interface_anchors"] = "PASS"
 
     result["status"] = "PASS"
     return result
