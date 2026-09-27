@@ -238,6 +238,7 @@ public:
 		{
 			// A chinook given transport duty loses his supplies.
 			while( ai->loseOneBox() );
+			ai->setForceWantingState(FALSE);
 		}
 
 		// kill any drift...
@@ -1073,12 +1074,14 @@ UpdateSleepTime ChinookAIUpdate::update()
 				!m_hasPendingCommand &&
 				getObject()->getBodyModule()->getHealth() == getObject()->getBodyModule()->getMaxHealth())
 		{
-			// we're completely healed, so take off again
+			// we're completely healed, so take off again.  Let go of the pad too, or a later order to
+			// repair at it would read as "already repairing there" and be ignored.
 			pp->setHealee(getObject(), false);
+			Object *airfield = TheGameLogic->findObjectByID( m_airfieldForHealing );
+			setAirfieldForHealing(INVALID_ID);
 			setMyState(TAKING_OFF, NULL, NULL, CMD_FROM_AI);
 
 			// and then go where the airfield's rally point says, instead of hovering over the pad
-			Object *airfield = TheGameLogic->findObjectByID( m_airfieldForHealing );
 			if (airfield)
 			{
 				ExitInterface *exitInterface = airfield->getObjectExitInterface();
@@ -1097,11 +1100,16 @@ UpdateSleepTime ChinookAIUpdate::update()
 	}
 	else
 	{
+		// The airfield we were flying to for repairs is gone: stop there, the way a unit driving to a
+		// dead war factory does, instead of flying on and landing on the rubble.
+		const Bool lostRepairAirfield = m_airfieldForHealing != INVALID_ID && m_flightStatus == CHINOOK_FLYING;
 		setAirfieldForHealing(INVALID_ID);
+		if (lostRepairAirfield)
+			aiIdle(CMD_FROM_AI);
 	}
 
 
-  
+
 	// have to call our parent's isIdle, because we override it to never return true
 	// when we have a pending command...
 	ContainModuleInterface* contain = getObject()->getContain();
@@ -1125,6 +1133,16 @@ UpdateSleepTime ChinookAIUpdate::update()
 			{
 				setMyState(TAKING_OFF, NULL, NULL, CMD_FROM_AI);
 			}
+		}
+		else if (m_flightStatus == CHINOOK_FLYING && !m_hasPendingCommand && contain->hasObjectsWantingToEnterOrExit())
+		{
+			// A Helix guarding, or shooting at something, never went idle, so infantry sent to board it
+			// stood underneath until the player pressed Stop, and a passenger told to get out stayed in.
+			// Neither order has anywhere to be, so the newer one wins and it comes down.  A move still
+			// finishes first; the idle branch above lands at the end of it.
+			StateID state = getCurrentStateID();
+			if (state == AI_GUARD || state == AI_GUARD_RETALIATE || state == AI_ATTACK_OBJECT || state == AI_ATTACK_POSITION)
+				setMyState(LANDING, NULL, NULL, CMD_FROM_AI);
 		}
 
 
@@ -1272,8 +1290,15 @@ void ChinookAIUpdate::privateCombatDrop( Object* target, const Coord3D& pos, Com
 //-------------------------------------------------------------------------------------------------
 void ChinookAIUpdate::aiDoCommand(const AICommandParms* parms)
 {
-	// this gets reset every time a command is issued.
-	setAirfieldForHealing(INVALID_ID);
+	// Already on the way to this pad or sitting on it: a second order to repair there used to drop the
+	// healing, take off and fly a circuit back to the same pad.
+	if (parms->m_cmd == AICMD_GET_REPAIRED && parms->m_obj != NULL && parms->m_obj->getID() == m_airfieldForHealing)
+		return;
+
+	// this gets reset every time a command is issued, except an unload: dropping the passengers
+	// on the pad is no reason to stop being repaired there.
+	if (parms->m_cmd != AICMD_EVACUATE && parms->m_cmd != AICMD_EXIT)
+		setAirfieldForHealing(INVALID_ID);
 
 	if (!isAllowedToRespondToAiCommands(parms))
 		return;
@@ -1394,13 +1419,15 @@ void ChinookAIUpdate::crc( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
-	* 1: Initial version */
+	* 1: Initial version
+	* 2: m_originalPos
+	* 3: the pending command keeps its source */
 // ------------------------------------------------------------------------------------------------
 void ChinookAIUpdate::xfer( Xfer *xfer )
 {
 
   // version
-  XferVersion currentVersion = 2;
+  XferVersion currentVersion = 3;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
 	// extend base class
@@ -1409,6 +1436,8 @@ void ChinookAIUpdate::xfer( Xfer *xfer )
 	xfer->xferBool(&m_hasPendingCommand);
 	if (m_hasPendingCommand) {
 		m_pendingCommand.doXfer(xfer);
+		if (version < 3)
+			m_pendingCommand.setCommandSource(CMD_FROM_AI);
 	}
 	xfer->xferUser(&m_flightStatus, sizeof(m_flightStatus));
 	xfer->xferObjectID(&m_airfieldForHealing);

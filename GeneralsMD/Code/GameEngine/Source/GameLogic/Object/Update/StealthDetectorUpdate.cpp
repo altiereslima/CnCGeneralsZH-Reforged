@@ -134,6 +134,10 @@ Bool PartitionFilterStealthedOrStealthGarrisoned::allow( Object *objOther)
 	if( objOther->getStatusBits().test( OBJECT_STATUS_STEALTHED ) )
 		return TRUE;
 
+	// visible for now (firing, moving), but it will stealth again; see the loop in update()
+	if( objOther->getStatusBits().test( OBJECT_STATUS_CAN_STEALTH ) )
+		return TRUE;
+
 	ContainModuleInterface *contain = objOther->getContain();
 	if( contain && contain->isGarrisonable() && contain->getStealthUnitsContained() )
 		return TRUE;
@@ -209,7 +213,16 @@ UpdateSleepTime StealthDetectorUpdate::update( void )
 			continue;
 
 		StealthUpdate* stealth = them->getStealth();
-		if ( stealth ) 
+		if ( stealth && !them->testStatus( OBJECT_STATUS_STEALTHED ) )
+		{
+			// A stealth unit in plain sight (a GPS-scrambled Quad firing) keeps its detection running,
+			// quietly. Skipped until it stealthed again, it came back stealthed and undetected until
+			// this detector's next scan, invisible for those frames, and every attack on it dropped.
+			stealth->keepDetected( data->m_updateRate + 1 );
+			continue;
+		}
+
+		if ( stealth )
 		{
 
 			// we have found someone

@@ -419,6 +419,7 @@ void Player::init(const PlayerTemplate* pt)
 		m_battlePlanBonuses->deleteInstance();
 		m_battlePlanBonuses = NULL;
 	}
+	m_visionSpies.clear();
 
 	deleteUpgradeList();
 
@@ -1124,17 +1125,33 @@ void Player::initFromDict(const Dict* d)
 }
 
 //=============================================================================
-void Player::becomingTeamMember(Object *obj, Bool yes) 
-{ 
+void Player::becomingTeamMember(Object *obj, Bool yes, Bool objectXferLoad)
+{
 	if (!obj)
-		return;	
+		return;
 
 	// energy production/consumption hooks, note we ignore things that are UNDER_CONSTRUCTION
 	if( !obj->getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
 	{
 		obj->friend_adjustPowerForPlayer(yes);
 	}  // end if
-		
+
+	if (obj->isKindOf(KINDOF_DOZER)
+			&& obj->getAIUpdateInterface()
+			&& obj->getAIUpdateInterface()->isIdle())
+	{
+		// Need to remove it from the pick a peasant button
+		if (yes)
+			TheInGameUI->addIdleWorker(obj);
+		else
+			TheInGameUI->removeIdleWorker(obj, getPlayerIndex());
+	}
+
+	// An object being loaded already carries its saved vision range and bonuses; a battle plan
+	// applied again here would stack a Search and Destroy bonus on top and break the shroud.
+	if (objectXferLoad)
+		return;
+
 	// when we capture a building, we need to see if there's an AutoDepositUpdate hooked to it,
 	// if so, award the cash bonus
 	if(this != ThePlayerList->getNeutralPlayer() && yes)
@@ -1156,21 +1173,13 @@ void Player::becomingTeamMember(Object *obj, Bool yes)
 		else
 		{
 			//We are leaving a team with active battle plans so remove them now.
-			removeBattlePlanBonusesForObject( obj ); 
+			removeBattlePlanBonusesForObject( obj );
 		}
 	}
-	
 
-	if (obj->isKindOf(KINDOF_DOZER) 
-			&& obj->getAIUpdateInterface() 
-			&& obj->getAIUpdateInterface()->isIdle())
-	{
-		// Need to remove it from the pick a peasant button
-		if (yes)
-			TheInGameUI->addIdleWorker(obj);
-		else
-			TheInGameUI->removeIdleWorker(obj, getPlayerIndex());
-	}
+	// A new object is not ready here yet; Object::initObject marks it. One being destroyed is gone.
+	if( obj->areModulesReady() && !obj->isDestroyed() )
+		applyVisionSpies( obj, yes );
 }
 
 //=============================================================================
@@ -2574,14 +2583,21 @@ void Player::doBountyForKill(const Object* killer, const Object* victim)
 		getMoney()->deposit( bounty );
 		m_scoreKeeper.addMoneyEarned( bounty );
 
-		//Display cash income floating over the recipient.
-		UnicodeString moneyString;
-		moneyString.format( TheGameText->fetch( "GUI:AddCash" ), bounty );
-		Coord3D pos;
-		pos.zero();
-		pos.add( killer->getPosition() );
-		pos.z += 10.0f; //add a little z to make it show up above the unit.
-		TheInGameUI->addFloatingText( moneyString, &pos, GameMakeColor( 255, 255, 0, 255 ) );
+		// Display cash income floating over the recipient - but not to an enemy of a killer it cannot see,
+		// or the number gives the stealthed unit away. Client display only, the deposit above is logic.
+		const Object *seenKiller = killer->getContainedBy() ? killer->getContainedBy() : killer;
+		const Bool hiddenKiller = seenKiller->testStatus( OBJECT_STATUS_STEALTHED ) && !seenKiller->testStatus( OBJECT_STATUS_DETECTED );
+		const Player *localPlayer = ThePlayerList->getLocalPlayer();
+		if( !hiddenKiller || localPlayer->getRelationship( killer->getTeam() ) != ENEMIES )
+		{
+			UnicodeString moneyString;
+			moneyString.format( TheGameText->fetch( "GUI:AddCash" ), bounty );
+			Coord3D pos;
+			pos.zero();
+			pos.add( killer->getPosition() );
+			pos.z += 10.0f; //add a little z to make it show up above the unit.
+			TheInGameUI->addFloatingText( moneyString, &pos, GameMakeColor( 255, 255, 0, 255 ) );
+		}
 	}
 }
 
@@ -4026,7 +4042,8 @@ static void localApplyBattlePlanBonusesToObject( Object *obj, void *userData )
 				if( bonus->m_sightRangeScalar != 1.0f )
 				{
 					objectToModify->setVisionRange( obj->getVisionRange() * bonus->m_sightRangeScalar );
-					objectToModify->setShroudClearingRange( obj->getShroudClearingRange() * bonus->m_sightRangeScalar );
+					// the own range: a scaffold reports zero, and scaling that left the finished building blind
+					objectToModify->setShroudClearingRange( obj->getOwnShroudClearingRange() * bonus->m_sightRangeScalar );
 				}
 			}
 
@@ -4415,6 +4432,39 @@ void Player::setUnitsVisionSpied( Bool setting, KindOfMaskType whichUnits, Playe
 	data.byWhom = byWhom;
 	// Being spied is now a property of the unit, not us, since we can spy only a portion of the enemy.
 	iterateObjects( iterator_setUnitsVisionSpied, &data );
+
+	// EA only marked the units standing when the power went on, so a Command Center built under a
+	// Satellite Hack stayed dark. The list lets becomingTeamMember mark what joins later.
+	if( setting )
+	{
+		VisionSpy spy;
+		spy.kinds = whichUnits;
+		spy.byWhom = byWhom;
+		m_visionSpies.push_back( spy );
+		return;
+	}
+	for( VisionSpyList::iterator it = m_visionSpies.begin(); it != m_visionSpies.end(); ++it )
+	{
+		if( it->byWhom == byWhom && it->kinds == whichUnits )
+		{
+			m_visionSpies.erase( it );
+			return;
+		}
+	}
+}
+
+// ------------------------------------------------------------------------------------------------
+void Player::applyVisionSpies( Object *obj, Bool setting ) const
+{
+	// A loading object already carries its saved spied count and is only moved back to its team
+	if( TheGameState->isInLoadGame() )
+		return;
+
+	for( VisionSpyList::const_iterator it = m_visionSpies.begin(); it != m_visionSpies.end(); ++it )
+	{
+		if( obj->isAnyKindOf( it->kinds ) )
+			obj->setVisionSpied( setting, it->byWhom );
+	}
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -4487,7 +4537,7 @@ void Player::xfer( Xfer *xfer )
 {
 
 	// version
-	const XferVersion currentVersion = 9;
+	const XferVersion currentVersion = 10;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -5028,6 +5078,21 @@ void Player::xfer( Xfer *xfer )
 		m_orderQueue.xfer( xfer );
 	else
 		m_orderQueue.reset();
+
+	UnsignedShort visionSpyCount = (UnsignedShort)m_visionSpies.size();
+	if( version >= 10 )
+		xfer->xferUnsignedShort( &visionSpyCount );
+	else
+		visionSpyCount = 0;
+	if( xfer->getXferMode() == XFER_LOAD )
+		m_visionSpies.resize( visionSpyCount );
+	for( UnsignedShort i = 0; i < visionSpyCount; ++i )
+	{
+		m_visionSpies[ i ].kinds.xfer( xfer );
+		Int byWhom = m_visionSpies[ i ].byWhom;
+		xfer->xferInt( &byWhom );
+		m_visionSpies[ i ].byWhom = byWhom;
+	}
 
 }  // end xfer
 

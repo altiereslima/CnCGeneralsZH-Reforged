@@ -196,6 +196,7 @@ W3DView::W3DView()
 	m_shakerAngles.Z =0.0f;
 
 	m_recalcCamera = false;
+	m_isometricApplied = false;
 	m_zoomAnchorValid = false;
 	m_zoomAnchorTerrainHeight = 0.0f;
 	m_scrollWheelHeight = 0.0f;
@@ -231,6 +232,31 @@ void W3DView::setHeight(Int height)
 }
 
 //-------------------------------------------------------------------------------------------------
+// The horizontal field of view the perspective camera has at this view width; see setWidth.
+static Real perspectiveHorizontalFov( Int viewWidth )
+{
+	return (Real)viewWidth / (Real)TheDisplay->getWidth()
+		* ViewHorizontalFovForScreen( TheDisplay->getWidth(), TheDisplay->getHeight() );
+}
+
+//-------------------------------------------------------------------------------------------------
+// The world direction through a point of the camera's screen, -1 to 1 on both axes.  Un_Project
+// hands back the camera position plus this, and taking the position off again is what every
+// caller did.  15000 units out, where the isometric camera stands, a float keeps two decimals of
+// that position, and a direction one pixel wide came back rounded to ten pixels.
+static Vector3 viewDirectionThrough( const CameraClass& camera, Real logicalX, Real logicalY )
+{
+	Vector2 planeMin, planeMax;
+	camera.Get_View_Plane( planeMin, planeMax );
+	const Vector3 onViewPlane( planeMin.X + ( planeMax.X - planeMin.X ) * ( logicalX + 1.0f ) * 0.5f,
+		planeMin.Y + ( planeMax.Y - planeMin.Y ) * ( logicalY + 1.0f ) * 0.5f, -1.0f );
+	Vector3 direction;
+	Matrix3D::Rotate_Vector( camera.Get_Transform(), onViewPlane, &direction );
+	direction.Normalize();
+	return direction;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Sets the width of the viewport, while maintaining original camera perspective. */
 //-------------------------------------------------------------------------------------------------
 void W3DView::setWidth(Int width)
@@ -258,8 +284,9 @@ void W3DView::setWidth(Int width)
 	//edges; 16:9 is the shape the game is played at, so nothing below it moves,
 	//and the terrain is drawn whole - what the wider view reaches is the map
 	//boundary, not black.
-	m_3DCamera->Set_View_Plane((Real)width/(Real)TheDisplay->getWidth()
-		* ViewHorizontalFovForScreen(TheDisplay->getWidth(), TheDisplay->getHeight()),-1);
+	m_3DCamera->Set_View_Plane(perspectiveHorizontalFov(width),-1);
+	// the isometric camera narrows the cone again in setCameraTransform
+	m_recalcCamera = true;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -616,9 +643,7 @@ void W3DView::getPickRay(const ICoord2D *screen, Vector3 *rayStart, Vector3 *ray
 	PixelScreenToW3DLogicalScreen(screen->x - m_originX,screen->y - m_originY, &logX, &logY,getWidth(),getHeight());
 
 	*rayStart = m_3DCamera->Get_Position();	//get camera location
-	m_3DCamera->Un_Project(*rayEnd,Vector2(logX,logY));	//get world space point
-	*rayEnd -= *rayStart;	//vector camera to world space point
-	rayEnd->Normalize();	//make unit vector
+	*rayEnd = viewDirectionThrough(*m_3DCamera, logX, logY);
 	*rayEnd *= m_3DCamera->Get_Depth();	//adjust length to reach far clip plane
 	*rayEnd += *rayStart;	//get point on far clip plane along ray from camera.
 }
@@ -645,6 +670,165 @@ void W3DView::stopDoingScriptedCamera( void )
 	m_doingZoomCamera = false;
 	m_doingScriptedCameraLock = false;
 }
+
+//-------------------------------------------------------------------------------------------------
+// The isometric camera's frame, fitted to what the perspective camera sees.  The perspective
+// frame's four corners, the middles of its four edges and its centre are cast onto a flat plane at
+// the view's ground level, and the isometric frame is the one that puts those nine points closest to the same places on
+// its own screen, measured in world units.  An orthographic frame is a rectangle on the view plane
+// and the perspective one lands on the ground as a trapezoid, so the corners cannot all meet: the
+// fit leaves the perspective frame a little more at the far corners and the isometric one the
+// same amount more at the near corners, and neither camera reaches further than the other.  The
+// heading is the player's; the fit picks the look-at point, the width and the elevation.  The
+// plane is flat on purpose: cast onto the terrain, a hill passing under the frame changed the
+// width and the elevation, and the picture jumped in and out while the player panned over it.
+class IsometricFrameFit
+{
+public:
+	enum { POINT_COUNT = 9 };
+
+	IsometricFrameFit( const Matrix3D& perspective, Real groundLevel, Real tanHalfWidth, Real heightOverWidth )
+		: m_heightOverWidth( heightOverWidth )
+	{
+		// a corner ray at the horizon would reach no ground at all
+		const Real shallowestRay = DEG_TO_RADF( 5.0f );
+
+		const Vector3 eye = perspective.Get_Translation();
+		const Vector3 forward = -perspective.Get_Z_Vector();	// a W3D camera looks down its -Z
+		const Vector3 up = perspective.Get_Y_Vector();
+		const Vector3 right = perspective.Get_X_Vector();
+		m_right = Vector3( right.X, right.Y, 0.0f );
+		m_right.Normalize();
+		m_ahead = Vector3( forward.X, forward.Y, 0.0f );
+		m_ahead.Normalize();
+
+		Int point = 0;
+		for( Int row = -1; row <= 1; ++row )
+		{
+			for( Int column = -1; column <= 1; ++column )
+			{
+				Vector3 direction = forward + right * ( column * tanHalfWidth )
+					+ up * ( row * tanHalfWidth * heightOverWidth );
+				direction.Normalize();
+				if( direction.Z > -sin( shallowestRay ) )
+				{
+					Vector3 flat( direction.X, direction.Y, 0.0f );
+					flat.Normalize();
+					direction = flat * cos( shallowestRay ) + Vector3( 0.0f, 0.0f, -sin( shallowestRay ) );
+				}
+				const Vector3 ground = eye + direction * ( ( groundLevel - eye.Z ) / direction.Z );
+				m_screenX[ point ] = (Real)column;
+				m_screenY[ point ] = (Real)row;
+				m_acrossScreen[ point ] = Vector3::Dot_Product( ground, m_right );
+				m_along[ point ] = Vector3::Dot_Product( ground, m_ahead );
+				m_height[ point ] = ground.Z;
+				m_ground[ point ] = ground;
+				++point;
+			}
+		}
+
+		const Real goldenSection = 0.618034f;
+		const Int searchSteps = 40;
+		Real low = DEG_TO_RADF( 15.0f );
+		Real high = DEG_TO_RADF( 75.0f );
+		for( Int step = 0; step < searchSteps; ++step )
+		{
+			const Real lower = high - ( high - low ) * goldenSection;
+			const Real upper = low + ( high - low ) * goldenSection;
+			if( errorAt( lower ) < errorAt( upper ) )
+				high = upper;
+			else
+				low = lower;
+		}
+		m_elevation = ( low + high ) * 0.5f;
+		errorAt( m_elevation );
+	}
+
+	Real getHalfWidth( void ) const { return m_halfWidth; }
+
+	/// the line of sight, pointing into the screen
+	Vector3 getSight( void ) const { return m_ahead * cos( m_elevation ) + Vector3( 0.0f, 0.0f, -sin( m_elevation ) ); }
+
+	/// the middle of the fitted frame, halfway through the fitted points along the line of sight
+	Vector3 getTarget( void ) const
+	{
+		const Vector3 sight = getSight();
+		Real alongSight = 0.0f;
+		for( Int point = 0; point < POINT_COUNT; ++point )
+			alongSight += Vector3::Dot_Product( m_ground[ point ], sight );
+		alongSight /= POINT_COUNT;
+		return m_right * m_acrossCentre + screenUp() * m_upCentre + sight * alongSight;
+	}
+
+	/// how far the fitted points lie in front of and behind the target along the line of sight
+	Real getDepthSpread( void ) const
+	{
+		const Vector3 sight = getSight();
+		const Real centre = Vector3::Dot_Product( getTarget(), sight );
+		Real spread = 0.0f;
+		for( Int point = 0; point < POINT_COUNT; ++point )
+			spread = max( spread, (Real)fabs( Vector3::Dot_Product( m_ground[ point ], sight ) - centre ) );
+		return spread;
+	}
+
+private:
+	Vector3 screenUp( void ) const { return m_ahead * sin( m_elevation ) + Vector3( 0.0f, 0.0f, cos( m_elevation ) ); }
+
+	/** The summed squared distance, in world units on the view plane, between where the nine
+		* points land and where they belong at this elevation, with the look-at point and the width
+		* that are best for it.  Both of those have a closed form once the elevation is fixed,
+		* because the screen positions are symmetric about the middle. */
+	Real errorAt( Real elevation )
+	{
+		const Real sinElevation = sin( elevation );
+		const Real cosElevation = cos( elevation );
+		Real upOnViewPlane[ POINT_COUNT ];
+		m_acrossCentre = 0.0f;
+		m_upCentre = 0.0f;
+		for( Int point = 0; point < POINT_COUNT; ++point )
+		{
+			upOnViewPlane[ point ] = m_along[ point ] * sinElevation + m_height[ point ] * cosElevation;
+			m_acrossCentre += m_acrossScreen[ point ];
+			m_upCentre += upOnViewPlane[ point ];
+		}
+		m_acrossCentre /= POINT_COUNT;
+		m_upCentre /= POINT_COUNT;
+
+		Real numerator = 0.0f;
+		Real denominator = 0.0f;
+		for( Int point = 0; point < POINT_COUNT; ++point )
+		{
+			const Real screenUpInWidths = m_screenY[ point ] * m_heightOverWidth;
+			numerator += m_screenX[ point ] * ( m_acrossScreen[ point ] - m_acrossCentre )
+				+ screenUpInWidths * ( upOnViewPlane[ point ] - m_upCentre );
+			denominator += m_screenX[ point ] * m_screenX[ point ] + screenUpInWidths * screenUpInWidths;
+		}
+		m_halfWidth = numerator / denominator;
+
+		Real error = 0.0f;
+		for( Int point = 0; point < POINT_COUNT; ++point )
+		{
+			const Real acrossMiss = m_acrossScreen[ point ] - m_acrossCentre - m_screenX[ point ] * m_halfWidth;
+			const Real upMiss = upOnViewPlane[ point ] - m_upCentre - m_screenY[ point ] * m_heightOverWidth * m_halfWidth;
+			error += acrossMiss * acrossMiss + upMiss * upMiss;
+		}
+		return error;
+	}
+
+	Real m_heightOverWidth;
+	Vector3 m_right;
+	Vector3 m_ahead;
+	Vector3 m_ground[ POINT_COUNT ];
+	Real m_screenX[ POINT_COUNT ];
+	Real m_screenY[ POINT_COUNT ];
+	Real m_acrossScreen[ POINT_COUNT ];
+	Real m_along[ POINT_COUNT ];
+	Real m_height[ POINT_COUNT ];
+	Real m_elevation;
+	Real m_halfWidth;
+	Real m_acrossCentre;
+	Real m_upCentre;
+};
 
 //-------------------------------------------------------------------------------------------------
 void W3DView::setCameraTransform( void )
@@ -706,6 +890,36 @@ void W3DView::setCameraTransform( void )
 
 	// rebuild it (even if we just did it due to camera constraints)
 	buildCameraTransform( &cameraTransform );
+
+	// The isometric camera: a 4 degree cone from far away is near enough orthographic that a tank
+	// is drawn the same size at the top of the screen as at the bottom.  It is not a real
+	// orthographic projection because CameraClass::Update_Frustum always builds a perspective
+	// culling frustum.  IsometricFrameFit decides where it looks from, so that it sees the ground
+	// the perspective camera would, on any screen shape.  Rotating and zooming work as they always
+	// did, because the perspective camera they move is still built first.
+	const Bool wasIsometric = m_isometricApplied;
+	m_isometricApplied = TheGlobalData->m_isometricCamera;
+	const Real perspectiveFov = perspectiveHorizontalFov(getWidth());
+	if (m_isometricApplied)
+	{
+		const Real isometricFov = DEG_TO_RADF(4.0f);
+		// the tallest thing standing on the frame's ground, above and below the depth it spans
+		const Real depthMargin = 1000.0f;
+
+		const IsometricFrameFit fit(cameraTransform, m_groundLevel, tan(perspectiveFov * 0.5f), (Real)getHeight() / (Real)getWidth());
+		const Vector3 target = fit.getTarget();
+		const Real distance = fit.getHalfWidth() / tan(isometricFov * 0.5f);
+		const Real depthSpread = fit.getDepthSpread();
+		cameraTransform.Make_Identity();
+		cameraTransform.Look_At(target - fit.getSight() * distance, target, 0);
+		m_3DCamera->Set_View_Plane(isometricFov, -1);
+		m_3DCamera->Set_Clip_Planes(distance - depthSpread - depthMargin, distance + depthSpread + depthMargin);
+	}
+	else if (wasIsometric)
+	{
+		m_3DCamera->Set_View_Plane(perspectiveFov, -1);
+	}
+
 	m_3DCamera->Set_Transform( cameraTransform );
 
 	if (TheTerrainRenderObject)
@@ -1498,7 +1712,13 @@ void W3DView::update(void)
 	// highest of the five samples jumped, and the settle went the other way.  Zoomed in on uneven
 	// ground that never stopped, and the camera rocked forward and back.
 	//
-	m_terrainHeightUnderCamera = m_zoomAnchorValid ? m_zoomAnchorTerrainHeight : getHeightAroundPos(m_pos.x, m_pos.y);
+	// The isometric camera holds its height over the view's ground level instead, for the reason
+	// IsometricFrameFit gives: following the hills made the picture grow and shrink under the pan.
+	//
+	if (TheGlobalData->m_isometricCamera)
+		m_terrainHeightUnderCamera = m_groundLevel;
+	else
+		m_terrainHeightUnderCamera = m_zoomAnchorValid ? m_zoomAnchorTerrainHeight : getHeightAroundPos(m_pos.x, m_pos.y);
 	m_currentHeightAboveGround = m_cameraOffset.z * m_zoom - m_terrainHeightUnderCamera;
 	const Real zoomBeforeSettle = m_zoom;
 	//
@@ -1571,7 +1791,7 @@ void W3DView::update(void)
 	}
 	
 	// (gth) C&C3 if m_isCameraSlaved then force the camera to update each frame
-	if ((recalcCamera) || (m_isCameraSlaved)) {
+	if ((recalcCamera) || (m_isCameraSlaved) || TheGlobalData->m_isometricCamera != m_isometricApplied) {
 		setCameraTransform();
 	}
 	m_recalcCamera = false;
@@ -2157,6 +2377,15 @@ void W3DView::scrollBy( Coord2D *delta )
 		world.Y = (worldEnd.Y - worldStart.Y) * scrollDtFactor;
 		world.Z = (worldEnd.Z - worldStart.Z) * scrollDtFactor;
 
+		// the step is measured on the view plane, which a 4 degree cone makes 13 times smaller
+		if (m_isometricApplied)
+		{
+			const Real coneScale = tan(perspectiveHorizontalFov(getWidth()) * 0.5f)
+				/ tan(m_3DCamera->Get_Horizontal_FOV() * 0.5f);
+			world.X *= coneScale;
+			world.Y *= coneScale;
+		}
+
 		// scroll by delta
 		Coord3D pos = *getPosition();
 		pos.x += world.X;
@@ -2697,10 +2926,7 @@ void W3DView::lookAt( const Coord3D *o )
 		CastResultStruct result;
 		Vector3 intersection(0,0,0);
 
-		rayStart = m_3DCamera->Get_Position();	//get camera location
-		m_3DCamera->Un_Project(rayEnd,Vector2(0.0f,0.0f));	//get world space point
-		rayEnd -= rayStart;	//vector camera to world space point
-		rayEnd.Normalize();	//make unit vector
+		rayEnd = viewDirectionThrough(*m_3DCamera, 0.0f, 0.0f);
 		rayEnd *= m_3DCamera->Get_Depth();	//adjust length to reach far clip plane
 		rayStart.Set(pos.x, pos.y, pos.z);
 		rayEnd += rayStart;	//get point on far clip plane along ray from camera.

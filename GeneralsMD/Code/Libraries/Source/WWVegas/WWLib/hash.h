@@ -99,7 +99,7 @@ private:
 class HashTableIteratorClass
 {
 public:
-	HashTableIteratorClass( HashTableClass & table ) : Table( table ) {}
+	HashTableIteratorClass( HashTableClass & table ) : Table( table ) { First(); }
 	virtual ~HashTableIteratorClass( void ) {}
 
 	void					First( void );

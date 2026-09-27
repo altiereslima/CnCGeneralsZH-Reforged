@@ -1201,7 +1201,16 @@ static void parseAsciiStringLC( INI* ini, void * /*instance*/, void *store, cons
 }
 
 //-------------------------------------------------------------------------------------------------
-void W3DModelDrawModuleData::buildFieldParse(MultiIniFieldParse& p) 
+/** ReplaceTexture = <old> <new>: draw every model of this module with <new> wherever it names <old>. */
+void W3DModelDrawModuleData::parseReplaceTexture( INI* ini, void *instance, void * /*store*/, const void* /*userData*/ )
+{
+	W3DModelDrawModuleData* self = (W3DModelDrawModuleData*)instance;
+	self->m_replaceTextureOld = ini->getNextAsciiString();
+	self->m_replaceTextureNew = ini->getNextAsciiString();
+}
+
+//-------------------------------------------------------------------------------------------------
+void W3DModelDrawModuleData::buildFieldParse(MultiIniFieldParse& p)
 {
   ModuleData::buildFieldParse(p);
 
@@ -1225,6 +1234,7 @@ void W3DModelDrawModuleData::buildFieldParse(MultiIniFieldParse& p)
 		{ "AttachToBoneInAnotherModule", parseAsciiStringLC, NULL, offsetof(W3DModelDrawModuleData, m_attachToDrawableBone) },
 		{ "IgnoreConditionStates", ModelConditionFlags::parseFromINI, NULL, offsetof(W3DModelDrawModuleData, m_ignoreConditionStates) },
 		{ "ReceivesDynamicLights", INI::parseBool, NULL, offsetof(W3DModelDrawModuleData, m_receivesDynamicLights) },
+		{ "ReplaceTexture", W3DModelDrawModuleData::parseReplaceTexture, NULL, 0 },
     { 0, 0, 0, 0 }
 	};
   p.add(dataFieldParse);
@@ -2474,7 +2484,10 @@ void W3DModelDraw::adjustAnimation(const ModelConditionInfo* prevState, Real pre
 					isCommonMaintainFrameFlagSet(m_curState->m_flags, prevState->m_flags) &&
 					prevAnimFraction >= 0.0)
 			{
-				startFrame = REAL_TO_INT(prevAnimFraction * animHandle->Get_Num_Frames()-1);
+				// getCurrentAnimFraction is frame / (frames - 1), so this is its inverse. EA wrote
+				// fraction * frames - 1, which put every carried-over animation a frame back (upstream #157)
+				// rounded, since frame 5 of 11 comes back as 4.9999995
+				startFrame = REAL_TO_INT(prevAnimFraction * (animHandle->Get_Num_Frames()-1) + 0.5f);
 			}
 
 			m_renderObject->Set_Animation(animHandle, startFrame, m_curState->m_mode);
@@ -2757,11 +2770,12 @@ void W3DModelDraw::handleClientTurretPositioning()
 */
 void W3DModelDraw::handleClientRecoil()
 {
-	const W3DModelDrawModuleData* d = getW3DModelDrawModuleData();
-	if (!(m_curState->m_validStuff & ModelConditionInfo::BARRELS_VALID))
+	if (!m_curState || !(m_curState->m_validStuff & ModelConditionInfo::BARRELS_VALID))
 	{
 		return;
 	}
+
+	const W3DModelDrawModuleData* d = getW3DModelDrawModuleData();
 
 	// do recoil, if any
 	for (int wslot = 0; wslot < WEAPONSLOT_COUNT; ++wslot)
@@ -3302,7 +3316,10 @@ void W3DModelDraw::setModelState(const ModelConditionInfo* newState)
 		}
 		else
 		{
-			m_renderObject = W3DDisplay::m_assetManager->Create_Render_Obj(newState->m_modelName.str(), draw->getScale(), m_hexColor);
+			const W3DModelDrawModuleData* data = getW3DModelDrawModuleData();
+			Bool swapsTexture = !data->m_replaceTextureOld.isEmpty();
+			m_renderObject = W3DDisplay::m_assetManager->Create_Render_Obj(newState->m_modelName.str(), draw->getScale(), m_hexColor,
+				swapsTexture ? data->m_replaceTextureOld.str() : NULL, swapsTexture ? data->m_replaceTextureNew.str() : NULL);
 			DEBUG_ASSERTCRASH(m_renderObject, ("*** ASSET ERROR: Model %s not found!\n",newState->m_modelName.str()));
 		}
 

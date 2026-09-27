@@ -72,6 +72,28 @@ UndeadBody::~UndeadBody( void )
 }
 
 // ------------------------------------------------------------------------------------------------
+/** A death type that only ordinary slow deaths take is a real death, not a first one.  The Battle
+	* Bus leaves SUICIDED and EXTRA_4 to a plain SlowDeathBehavior on purpose, but the second life
+	* started that module straight from here, without onDie, so a detonated Demo bus vanished a frame
+	* later without its death weapon.  With no slow death at all the second life still happens. */
+// ------------------------------------------------------------------------------------------------
+static Bool isSecondLifeDeath( Object *obj, const DamageInfo *damageInfo )
+{
+	Bool anyApplies = FALSE;
+	for( BehaviorModule** update = obj->getBehaviorModules(); *update; ++update )
+	{
+		SlowDeathBehaviorInterface* sdu = (*update)->getSlowDeathBehaviorInterface();
+		if( sdu != NULL && sdu->isDieApplicable( damageInfo ) )
+		{
+			if( sdu->canBeginSecondLife() )
+				return TRUE;
+			anyApplies = TRUE;
+		}
+	}
+	return !anyApplies;
+}
+
+// ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
 void UndeadBody::attemptDamage( DamageInfo *damageInfo )
 {
@@ -87,6 +109,7 @@ void UndeadBody::attemptDamage( DamageInfo *damageInfo )
 			&& !m_isSecondLife
 			&& estimateDamage( damageInfo->in ) >= getHealth()
 			&& IsHealthDamagingDamage(damageInfo->in.m_damageType)
+			&& isSecondLifeDeath( getObject(), damageInfo )
 			)
 	{
 		// clamp what lands, for the same reason as the test above: armour applied after a raw clamp
@@ -126,7 +149,7 @@ void UndeadBody::startSecondLife(DamageInfo *damageInfo)
 	for( update = getObject()->getBehaviorModules(); *update; ++update )
 	{
 		SlowDeathBehaviorInterface* sdu = (*update)->getSlowDeathBehaviorInterface();
-		if (sdu != NULL  && sdu->isDieApplicable(damageInfo) )
+		if (sdu != NULL  && sdu->isDieApplicable(damageInfo) && sdu->canBeginSecondLife() )
 		{
 			total += sdu->getProbabilityModifier( damageInfo );
 		}
@@ -140,7 +163,7 @@ void UndeadBody::startSecondLife(DamageInfo *damageInfo)
 	for( update = getObject()->getBehaviorModules(); *update; ++update)
 	{
 		SlowDeathBehaviorInterface* sdu = (*update)->getSlowDeathBehaviorInterface();
-		if (sdu != NULL && sdu->isDieApplicable(damageInfo))
+		if (sdu != NULL && sdu->isDieApplicable(damageInfo) && sdu->canBeginSecondLife())
 		{
 			roll -= sdu->getProbabilityModifier( damageInfo );
 			if (roll <= 0)

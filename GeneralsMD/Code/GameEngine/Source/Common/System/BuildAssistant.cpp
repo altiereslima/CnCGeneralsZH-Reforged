@@ -682,8 +682,15 @@ LegalBuildCode BuildAssistant::isLocationClearOfObjects( const Coord3D *worldPos
 																											 UnsignedInt options,
 																											 Player *thePlayer)
 {
-	ObjectIterator *iter = 
-			ThePartitionManager->iteratePotentialCollisions( worldPos,
+	/* A building stands on the ground, and the collision test below is three dimensional, so it is asked
+		 at the ground under worldPos whatever height the caller passed. The computer's placement searches
+		 kept the height of the spot they started from, or passed 0, and a probe that floated above a
+		 building's roof found it clear: a Hard USA put three pairs of supply drop zones exactly on top of
+		 each other in one match. */
+	Coord3D groundPos = *worldPos;
+	groundPos.z = TheTerrainLogic->getGroundHeight( groundPos.x, groundPos.y );
+	ObjectIterator *iter =
+			ThePartitionManager->iteratePotentialCollisions( &groundPos,
 																											 build->getTemplateGeometryInfo(),
 																											 angle );
 	Object *them;
@@ -720,6 +727,8 @@ LegalBuildCode BuildAssistant::isLocationClearOfObjects( const Coord3D *worldPos
 		{
 			if( them->testStatus( OBJECT_STATUS_IS_USING_ABILITY ) || them->getAI() && them->getAI()->isBusy() )
 			{
+				// marked like every other refusal below, or the placement goes red with nothing showing why
+				TheTerrainVisual->addFactionBib( them, TRUE );
 				return LBC_OBJECTS_IN_THE_WAY;
 			}
 		}
@@ -755,6 +764,25 @@ LegalBuildCode BuildAssistant::isLocationClearOfObjects( const Coord3D *worldPos
 		if( them->isDisabled() )
 		{
 			//Kris: If object is disabled, it can't move out of the way, thus you can't build there.
+			if( feedbackWithFailure )
+			{
+				TheTerrainVisual->addFactionBib( them, TRUE );
+				return LBC_OBJECTS_IN_THE_WAY;
+			}
+			return LBC_GENERIC_FAILURE;
+		}
+
+		//
+		// Nor can a thing with no AI to tell it to move, and moveObjectsForConstruction turns a
+		// human's order down for one - after the trees in the footprint are already cleared and the
+		// other units already sent away, with no money taken and nothing placed. Most train cars are
+		// such a thing. Say so here, where the ghost goes red. The AI builds over them regardless
+		// (buildObjectNow lets it), so its placement is left as it was.
+		//
+		if( builderObject && !onlyCheckEnemies &&
+				builderObject->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN &&
+				!them->isKindOf( KINDOF_ALWAYS_SELECTABLE ) && them->getAIUpdateInterface() == NULL )
+		{
 			if( feedbackWithFailure )
 			{
 				TheTerrainVisual->addFactionBib( them, TRUE );
@@ -1701,14 +1729,18 @@ void BuildAssistant::sellObject( Object *obj )
 	// unfortunately, structures don't keep list of mines they own, so we must do
 	// this the hard way :-( [fortunately, this doens't happen very often, so this
 	// is probably an acceptable, if icky, solution.] (srj)
-	for (Object* mine = TheGameLogic->getFirstObject(); mine; mine = mine->getNextObject())
+	// The same walk takes the soldiers of a structure whose spawns are its weapons (the Stinger
+	// Site): the site stopped shooting above, but its soldiers fired on until the sale finished, a
+	// way to keep damaging an attacker while getting the money back.
+	const Bool spawnsAreWeapons = obj->isKindOf(KINDOF_SPAWNS_ARE_THE_WEAPONS);
+	for (Object* owned = TheGameLogic->getFirstObject(); owned; owned = owned->getNextObject())
 	{
-		if (mine->isKindOf(KINDOF_MINE))
+		if (owned->getProducerID() != obj->getID())
+			continue;
+
+		if (owned->isKindOf(KINDOF_MINE) || spawnsAreWeapons)
 		{
-			if (mine->getProducerID() == obj->getID())
-			{
-				TheGameLogic->destroyObject(mine);
-			}
+			TheGameLogic->destroyObject(owned);
 		}
 	}
 

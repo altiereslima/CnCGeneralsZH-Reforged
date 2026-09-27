@@ -73,6 +73,7 @@ void GameSlot::reset()
 	m_NATBehavior = FirewallHelperClass::FIREWALL_TYPE_SIMPLE;
 	m_lastFrameInGame = 0;
 	m_disconnected = FALSE;
+	m_IP = 0;
 	m_port = 0;
 	m_isMuted = FALSE;
 	m_hasSavedOriginalSetup = FALSE;
@@ -1025,11 +1026,131 @@ Bool GameInfo::isSandbox(void)
 
 static const char slotListID		= 'S';
 
+// The longest prefix of a UTF-8 name, at most maxBytes long, that does not cut a character in half:
+// a continuation byte (10xxxxxx) at the cut belongs to the character before it.
+static Int utf8PrefixLength( const AsciiString& name, Int maxBytes )
+{
+	const Int len = name.getLength();
+	if (len <= maxBytes)
+		return len;
+
+	Int cut = maxBytes;
+	while (cut > 0 && (((unsigned char)name.str()[cut]) & 0xC0) == 0x80)
+		--cut;
+	return cut;
+}
+
+static void truncatePlayerName( AsciiString& name, Int maxBytes )
+{
+	const Int cut = utf8PrefixLength(name, maxBytes);
+	while (name.getLength() > cut)
+		name.removeLastChar();
+}
+
+// Bytes of the first whole character of the name, 0 when there is none.
+static Int getMinPlayerNameLength( const AsciiString& name )
+{
+	for (Int maxBytes = 1; maxBytes <= name.getLength(); ++maxBytes)
+	{
+		const Int cut = utf8PrefixLength(name, maxBytes);
+		if (cut > 0)
+			return cut;
+	}
+	return 0;
+}
+
+// Share maxPlayerNamesLength bytes between the human players' names, every one keeping at least its
+// first character, and a name shorter than its share handing what it does not use to the ones after.
+static Bool truncatePlayerNames( const GameInfo *game, AsciiString playerNames[MAX_SLOTS], Int maxPlayerNamesLength )
+{
+	Int minLengths[MAX_SLOTS] = { 0 };
+	Int minTotalLength = 0;
+	Int playerCount = 0;
+	Int i;
+
+	for (i = 0; i < MAX_SLOTS; ++i)
+	{
+		const GameSlot *slot = game->getConstSlot(i);
+		if (slot && slot->isHuman())
+		{
+			minLengths[i] = getMinPlayerNameLength(playerNames[i]);
+			if (minLengths[i] == 0)
+				return FALSE;
+			minTotalLength += minLengths[i];
+			++playerCount;
+		}
+	}
+
+	if (playerCount == 0 || maxPlayerNamesLength < minTotalLength)
+		return FALSE;
+
+	Int remainingLength = maxPlayerNamesLength;
+	for (i = 0; i < MAX_SLOTS; ++i)
+	{
+		const GameSlot *slot = game->getConstSlot(i);
+		if (slot && slot->isHuman())
+		{
+			const Int extraLength = (remainingLength - minTotalLength) / playerCount;
+			truncatePlayerName(playerNames[i], minLengths[i] + extraLength);
+			remainingLength -= playerNames[i].getLength();
+			minTotalLength -= minLengths[i];
+			--playerCount;
+		}
+	}
+
+	return TRUE;
+}
+
+static AsciiString buildGameInfoAsciiString( const GameInfo *game, const AsciiString playerNames[MAX_SLOTS] );
+
+//
+// The LAN packet has room for m_lanMaxOptionsLength bytes of this.  EA shortened each name while it
+// appended the slots, sharing what was left between the slots still to come; once the fixed fields
+// had used it all the share went negative, the name emptied, and removeLastChar on an empty string
+// looped forever - the host of a room with long names hung.  The string is built with whole names
+// first and only rebuilt with shortened ones when it does not fit.
+//
 AsciiString GameInfoToAsciiString( const GameInfo *game )
 {
 	if (!game)
 		return AsciiString::TheEmptyString;
 
+	AsciiString playerNames[MAX_SLOTS];
+	Int playerNamesLength = 0;
+	for (Int i = 0; i < MAX_SLOTS; ++i)
+	{
+		const GameSlot *slot = game->getConstSlot(i);
+		if (slot && slot->isHuman())
+		{
+			playerNames[i] = WideCharStringToMultiByte(slot->getName().str()).c_str();
+			playerNamesLength += playerNames[i].getLength();
+		}
+	}
+
+	AsciiString optionsString = buildGameInfoAsciiString(game, playerNames);
+	Bool optionsFit = TheLAN == NULL || optionsString.getLength() <= m_lanMaxOptionsLength;
+	if (!optionsFit)
+	{
+		const Int fixedLength = optionsString.getLength() - playerNamesLength;
+		if (truncatePlayerNames(game, playerNames, m_lanMaxOptionsLength - fixedLength))
+		{
+			optionsString = buildGameInfoAsciiString(game, playerNames);
+			optionsFit = optionsString.getLength() <= m_lanMaxOptionsLength;
+		}
+	}
+
+	if (!optionsFit)
+	{
+		DEBUG_CRASH(("WARNING: options string cannot fit within the expected length!  Length is %d, but max is %d!\n",
+			optionsString.getLength(), m_lanMaxOptionsLength));
+		return AsciiString::TheEmptyString;
+	}
+
+	return optionsString;
+}
+
+static AsciiString buildGameInfoAsciiString( const GameInfo *game, const AsciiString playerNames[MAX_SLOTS] )
+{
 	AsciiString mapName = game->getMap();
 	mapName = TheGameState->realMapPathToPortableMapPath(mapName);
 	AsciiString newMapName;
@@ -1078,15 +1199,8 @@ AsciiString GameInfoToAsciiString( const GameInfo *game )
 				slot->getColor(), slot->getPlayerTemplate(),
 				slot->getStartPos(), slot->getTeamNumber(),
 				slot->getNATBehavior() );
-			//make sure name doesn't cause overflow of m_lanMaxOptionsLength
-			int lenCur = tmp.getLength() + optionsString.getLength() + 2;  //+2 for H and trailing ;
-			int lenRem = m_lanMaxOptionsLength - lenCur;  //length remaining before overflowing
-			int lenMax = lenRem / (MAX_SLOTS-i);  //share lenRem with all remaining slots
-			AsciiString name = WideCharStringToMultiByte(slot->getName().str()).c_str();
-			while( name.getLength() > lenMax )
-				name.removeLastChar();  //what a horrible way to truncate.  I hate AsciiString.
-			
-			str.format( "H%s%s", name.str(), tmp.str() );
+
+			str.format( "H%s%s", playerNames[i].str(), tmp.str() );
 		}
 		else if (slot && slot->isAI())
 		{
@@ -1111,10 +1225,6 @@ AsciiString GameInfoToAsciiString( const GameInfo *game )
 	}
 	optionsString.concat(';');
 
-	DEBUG_ASSERTCRASH(!TheLAN || (optionsString.getLength() < m_lanMaxOptionsLength),
-		("WARNING: options string is longer than expected!  Length is %d, but max is %d!\n",
-		optionsString.getLength(), m_lanMaxOptionsLength));
-	
 	return optionsString;
 }
 
@@ -1798,5 +1908,29 @@ void SkirmishGameInfo::xfer( Xfer *xfer )
 void SkirmishGameInfo::loadPostProcess( void )
 {
 }  // end loadPostProcess
+
+//
+// Random color, position and faction are drawn off the logical seed.  A restarted game puts the
+// pre-draw values back so the same draws happen again.  The recorder writes the slot list before
+// GameLogic::tryStartNewGame runs, so both call this: done only in tryStartNewGame, the replay of a
+// restarted skirmish recorded the first game's drawn values and every playback of it mismatched.
+//
+void GameInfo::handleOriginalSetups( void )
+{
+	for (Int i = 0; i < MAX_SLOTS; ++i)
+	{
+		GameSlot *slot = getSlot(i);
+		if (slot->hasSavedOriginalSetup())
+		{
+			slot->setColor(slot->getOriginalColor());
+			slot->setStartPos(slot->getOriginalStartPos());
+			slot->setPlayerTemplate(slot->getOriginalPlayerTemplate());
+		}
+		else
+		{
+			slot->saveOriginalSetup();
+		}
+	}
+}
 
 

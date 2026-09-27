@@ -315,7 +315,11 @@ UpdateSleepTime WorkerAIUpdate::update( void )
 			if( currentTask == DOZER_TASK_REPAIR &&
 					TheActionManager->canRepairObject( getObject(), targetObject, getLastCommandSource() ) == FALSE )
 				invalidTask = TRUE;
-			
+
+			// as in DozerAIUpdate::update: no job is done from inside a tunnel, a transport or a garrison
+			if( getObject()->getContainedBy() )
+				invalidTask = TRUE;
+
 			// cancel the task if it's now invalid
 			if( invalidTask == TRUE )
 				cancelTask( currentTask );
@@ -427,7 +431,8 @@ Object *WorkerAIUpdate::construct( const ThingTemplate *what,
 
 	// leave the supply truck state and now behave like a dozer.
 	exitingSupplyTruckState();
-	
+	setForceWantingState(FALSE);
+
 	// take the required money away from the player
 	if( isRebuild == FALSE )
 	{
@@ -721,6 +726,7 @@ void WorkerAIUpdate::newTask( DozerTask task, Object* target )
 			getObject()->getAIUpdateInterface()->aiIdle(CMD_FROM_AI);
 		}
 		m_workerMachine->setState( AS_DOZER );
+		setForceWantingState(FALSE);
 		// To clarify, I leave supply truck mode when I notice I am doing something not supply
 		// truck related.  When given a construct command, I wait to do anything until I notice
 		// I'm not busy.  Both states are being polite, so I must force the switch.
@@ -822,14 +828,16 @@ void WorkerAIUpdate::internalCancelTask( DozerTask task )
 	// call the single method that gets called for completing and canceling tasks
 	internalTaskCompleteOrCancelled( task );
 
+	const ObjectID cancelledTargetID = m_task[ task ].m_targetObjectID;
+
 	// remove the info for this task
 	m_task[ task ].m_targetObjectID = INVALID_ID;
 	m_task[ task ].m_taskOrderFrame = 0;
-	
+
 	// remove dock point info for this task
 	for( Int i = 0; i < DOZER_NUM_DOCK_POINTS; i++ )
 		m_dockPoint[ task ][ i ].valid = FALSE;
-	
+
 	// stop the dozer from moving
 	AIUpdateInterface *ai = getObject()->getAIUpdateInterface();
 	if( !ai )
@@ -838,6 +846,10 @@ void WorkerAIUpdate::internalCancelTask( DozerTask task )
 	}
 	/// @todo we really need a stop command instead of making it move to it's current location
 	ai->aiMoveToPosition( getObject()->getPosition(), CMD_FROM_AI );
+
+	// see DozerAIUpdate::internalCancelTask: the building stays an obstacle once the walk to it is off
+	if( ai->getIgnoredObstacleID() == cancelledTargetID )
+		ai->ignoreObstacle( NULL );
 
 }  
 
@@ -863,6 +875,9 @@ void WorkerAIUpdate::internalTaskCompleteOrCancelled( DozerTask task )
 
 			// the builder is no longer actively building something
 			getObject()->clearModelConditionState( MODELCONDITION_ACTIVELY_CONSTRUCTING );
+
+			// see DozerAIUpdate::internalTaskCompleteOrCancelled
+			finishBuildingSound();
 
 			//
 			// WorkersReturnToSupply: a worker pulled off a supply run to put up a building used to
@@ -1074,7 +1089,10 @@ void WorkerAIUpdate::aiDoCommand(const AICommandParms* parms)
 
 			// when a player issues commands, this will cause the dozer to re-evaluate what it's doing
 			if( parms->m_cmdSource == CMD_FROM_PLAYER )
+			{
 				m_dozerMachine->resetToDefaultState();
+				setForceWantingState(FALSE);
+			}
 			break;
 
 		}  // end default
@@ -1441,6 +1459,8 @@ void WorkerAIUpdate::removeBridgeScaffolding( Object *bridgeTower )
 //------------------------------------------------------------------------------------------------
 void WorkerAIUpdate::startBuildingSound( const AudioEventRTS *sound, ObjectID constructionSiteID )
 {
+	// the handle is the only way to stop the loop, so drop the last one before it is overwritten
+	TheAudio->removeAudioEvent( m_buildingSound.getPlayingHandle() );
 	m_buildingSound = *sound;
 	m_buildingSound.setObjectID( constructionSiteID );
 	m_buildingSound.setPlayingHandle( TheAudio->addAudioEvent( &m_buildingSound ) );

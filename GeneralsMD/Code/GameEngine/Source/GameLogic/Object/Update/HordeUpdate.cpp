@@ -269,10 +269,22 @@ UpdateSleepTime HordeUpdate::update( void )
 		
 		PartitionFilterHordeMember hmFilter(getObject(), md);
 		PartitionFilter *filters[] = { &hmFilter, NULL };
-		SimpleObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(getObject(), md->m_minDist, FROM_BOUNDINGSPHERE_3D, filters);
+		// RubOffRadius reaches further than Radius (150 against 75 on the Battlemaster), but the
+		// honorary-member test below only ever saw the units inside Radius, so a tank that close to a
+		// true member never got the horde. Walk the larger of the two, count only inside Radius.
+		const Real scanRadius = max( md->m_minDist, md->m_rubOffRadius );
+		SimpleObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(getObject(), scanRadius, FROM_BOUNDINGSPHERE_3D, filters);
 		MemoryPoolObjectHolder hold(iter);
 
-		if ((iter->getCount() >= md->m_minCount - 1) )//we really are in the thick part of the horde
+		const Real minDistSq = sqr( md->m_minDist );
+		Int nearby = 0;
+		for (Object* other = iter->first(); other; other = iter->next())
+		{
+			if (ThePartitionManager->getDistanceSquared(getObject(), other, FROM_BOUNDINGSPHERE_3D) <= minDistSq)
+				++nearby;
+		}
+
+		if ((nearby >= md->m_minCount - 1) )//we really are in the thick part of the horde
 		{
 			m_inHorde = TRUE;
 			m_trueHordeMember = TRUE;

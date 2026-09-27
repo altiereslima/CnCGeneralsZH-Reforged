@@ -148,6 +148,9 @@ void Keyboard::updateKeys( void )
 		/** @todo -- if we don't have focus, we could destroy all the keys retrieved
 		here so that we don't process anything */
 
+		// what this key was last pressed with, read before its new state overwrites it
+		const UnsignedShort pressState = m_keyStatus[ m_keys[ index ].key ].state;
+
 		m_keyStatus[ m_keys[ index ].key ].state = m_keys[ index ].state;
 		m_keyStatus[ m_keys[ index ].key ].status = m_keys[ index ].status;
 		m_keyStatus[ m_keys[ index ].key ].sequence = timeGetTime();
@@ -179,28 +182,24 @@ void Keyboard::updateKeys( void )
 
 		}  // end else if
 
+		//
+		// the modifiers held at this point of the batch, not at its end: Ctrl down, F down, Ctrl up
+		// read in one frame used to hand the F its press without the Ctrl.  A press keeps them in
+		// the key's status, and its release says so, because a player who lets go of Ctrl before F
+		// has still pressed Ctrl+F, not F (the command bar's F hotkey fired on that release).
+		//
+		BitSet( m_keys[ index ].state, m_modifiers );
+		if( BitTest( m_keys[ index ].state, KEY_STATE_DOWN ) )
+			m_keyStatus[ m_keys[ index ].key ].state = m_keys[ index ].state;
+		else if( pressState & ( KEY_STATE_CONTROL | KEY_STATE_ALT ) )
+			BitSet( m_keys[ index ].state, KEY_STATE_PRESSED_WITH_CTRL_ALT );
+
 		index++;
 
 	}  // end while
 
 	// check for key repeats
 	checkKeyRepeat();
-
-	if( m_modifiers )
-	{
-		index = 0;
-		while( m_keys[ index ].key != KEY_NONE )
-		{
-
-			// set in the modifier data into the already existing up/down state
-			BitSet( m_keys[ index ].state, m_modifiers );
-
-			// next key
-			index++;
-
-		}  // end while
-
-	}  // end if
 
 }  // end updateKeys
 
@@ -236,7 +235,7 @@ Bool Keyboard::checkKeyRepeat( void )
 			{
 				// Add key to this frame
 				m_keys[ index ].key = (UnsignedByte)key;
-				m_keys[ index ].state = KEY_STATE_DOWN | KEY_STATE_AUTOREPEAT;  // note: not a bitset; this is an assignment
+				m_keys[ index ].state = KEY_STATE_DOWN | KEY_STATE_AUTOREPEAT | m_modifiers;  // note: not a bitset; this is an assignment
 				m_keys[ index ].status = KeyboardIO::STATUS_UNUSED;
 
 				// Set End Flag
@@ -762,6 +761,24 @@ void Keyboard::update( void )
 //-------------------------------------------------------------------------------------------------
 void Keyboard::resetKeys( void )
 {
+
+	//
+	// A modifier held when focus went away comes up in another window, and its release never
+	// reaches the game.  Wiping the state here was not enough: the translators downstream still
+	// had Alt held, so after an Alt+Tab the first key pressed went to ending an Alt that was long
+	// gone, and a fresh Alt could not start waypoints because nothing had changed.  Let them see
+	// the release.  There is no stream yet, or any more, while the window starts and closes.
+	//
+	static const KeyDefType modifierKeys[] = { KEY_LCTRL, KEY_RCTRL, KEY_LSHIFT, KEY_RSHIFT, KEY_LALT, KEY_RALT };
+	for( Int i = 0; TheMessageStream && i < (Int)ARRAY_SIZE( modifierKeys ); ++i )
+	{
+		if( BitTest( m_keyStatus[ modifierKeys[ i ] ].state, KEY_STATE_DOWN ) )
+		{
+			GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_RAW_KEY_UP );
+			msg->appendIntegerArgument( modifierKeys[ i ] );
+			msg->appendIntegerArgument( KEY_STATE_UP );
+		}
+	}
 
 	memset( m_keys, 0, sizeof( m_keys ) );
 	memset( m_keyStatus, 0, sizeof( m_keyStatus ) );

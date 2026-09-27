@@ -185,6 +185,12 @@ Bool CrateCollide::isValidToExecute( const Object *other ) const
 	if( !md->m_allowMultiplePickup && getObject()->isDestroyed() )
 		return FALSE;
 
+	// A unit that works as a crate (hijacker, saboteur, pilot) and was killed earlier in the same frame
+	// still touched its target before it was gone: a Paladin's laser shot the hijacker, and he left a
+	// corpse and took the Paladin as well.
+	if( getObject()->isEffectivelyDead() )
+		return FALSE;
+
 	if( md->m_isForbidOwnerPlayer  &&  (getObject()->getControllingPlayer() == other->getControllingPlayer()) )
 		return FALSE; // Design has decreed this to not be picked up by the dead guy's team.
 

@@ -304,7 +304,10 @@ void AutoHealBehavior::pulseHealObject( Object *obj )
 	const AutoHealBehaviorModuleData *data = getAutoHealBehaviorModuleData();
 
 	
-	if ( data->m_radius == 0.0f )
+	// A single burst is one heal, not a source that could stack pulse on pulse, so it skips the
+	// one-healer-at-a-time rule.  Under it an Emergency Repair landing on vehicles an Ambulance or a
+	// Propaganda Tower was already tending healed nothing, and the burst never comes again.
+	if ( data->m_radius == 0.0f || data->m_singleBurst )
 		obj->attemptHealing(data->m_healingAmount, getObject());
 	else
 		obj->attemptHealingFromSoleBenefactor( data->m_healingAmount, getObject(), data->m_healingDelay );

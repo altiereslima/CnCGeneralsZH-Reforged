@@ -96,7 +96,7 @@ Real ArmorTemplate::adjustDamage(DamageType t, Real damage) const
 		return;
 	}
 
-	DamageType dt = (DamageType)DamageTypeFlags::getSingleBitFromName(damageName);
+	DamageType dt = (DamageType)INI::scanIndexList(damageName, DamageTypeFlags::getBitNames());
 	self->m_damageCoefficient[dt] = pct;
 }
 
@@ -148,7 +148,8 @@ void ArmorStore::reset()
 {
 	static const FieldParse myFieldParse[] = 
 	{
-		{ "Armor", ArmorTemplate::parseArmorCoefficients, NULL, 0 }
+		{ "Armor", ArmorTemplate::parseArmorCoefficients, NULL, 0 },
+		{ NULL, NULL, NULL, 0 }
 	};
 
 	const char *c = ini->getNextToken();

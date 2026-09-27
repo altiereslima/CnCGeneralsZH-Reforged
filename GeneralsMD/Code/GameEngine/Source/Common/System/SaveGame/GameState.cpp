@@ -39,6 +39,7 @@
 #include "Common/PlayerList.h"
 #include "Common/RandomValue.h"
 #include "Common/Radar.h"
+#include "Common/Recorder.h"
 #include "Common/Team.h"
 #include "Common/WellKnownKeys.h"
 #include "Common/XferLoad.h"
@@ -58,6 +59,7 @@
 #include "GameLogic/ScriptEngine.h"
 #include "GameLogic/SidesList.h"
 #include "GameLogic/TerrainLogic.h"
+#include "GameLogic/Weapon.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -93,6 +95,7 @@ SaveGameInfo::SaveGameInfo( void )
 	date.year					= 0;
 	missionNumber			= 0;
 	saveFileType			= SAVE_FILE_TYPE_NORMAL;
+	framesPerSecond		= 0;
 
 }  // end SaveGameInfo
 
@@ -322,7 +325,8 @@ void GameState::init( void )
 	addSnapshotBlock( "CHUNK_TeamFactory",						TheTeamFactory,						SNAPSHOT_SAVELOAD );
 	addSnapshotBlock( "CHUNK_Players",								ThePlayerList,						SNAPSHOT_SAVELOAD );
 	addSnapshotBlock( "CHUNK_GameLogic",							TheGameLogic,							SNAPSHOT_SAVELOAD );
-	addSnapshotBlock( "CHUNK_Radar",									TheRadar,									SNAPSHOT_SAVELOAD );
+	addSnapshotBlock( "CHUNK_WeaponStore",						TheWeaponStore,						SNAPSHOT_SAVELOAD );	// absent from older saves, which load without it
+	addSnapshotBlock( "CHUNK_Radar",								TheRadar,									SNAPSHOT_SAVELOAD );
 	addSnapshotBlock( "CHUNK_ScriptEngine",						TheScriptEngine,					SNAPSHOT_SAVELOAD );
 	addSnapshotBlock( "CHUNK_SidesList",							TheSidesList,							SNAPSHOT_SAVELOAD );
 	addSnapshotBlock( "CHUNK_TacticalView",						TheTacticalView,					SNAPSHOT_SAVELOAD );
@@ -652,6 +656,48 @@ SaveCode GameState::missionSave( void )
 }  // end missionSave
 
 // ------------------------------------------------------------------------------------------------
+/** A replay's rewind checkpoint.  saveGame without the save list: any path, no description, and
+	* nothing told to the player, since one is taken every half minute of the replay. */
+// ------------------------------------------------------------------------------------------------
+void GameState::saveCheckpoint( AsciiString filepath )
+{
+	getSaveGameInfo()->saveFileType = SAVE_FILE_TYPE_NORMAL;
+	getSaveGameInfo()->missionMapName.clear();
+
+	XferSave xferSave;
+	xferSave.open( filepath );
+	xferSaveData( &xferSave, SNAPSHOT_SAVELOAD );
+	xferSave.close();
+}
+
+// ------------------------------------------------------------------------------------------------
+/** loadGame for a checkpoint, with the recorder's turn between the reset and the load: the reset
+	* closes the replay, and the load's new game reads the players out of it. */
+// ------------------------------------------------------------------------------------------------
+void GameState::loadCheckpoint( AsciiString filepath, const std::function< void( void ) > &afterReset )
+{
+	TheGameStateMap->clearScratchPadMaps();
+
+	XferLoad xferLoad;
+	xferLoad.open( filepath );
+
+	TheGameEngine->reset();
+	afterReset();
+
+	TheGhostObjectManager->saveLockGhostObjects( TRUE );
+	TheGameLogic->setLoadingWithoutScreen( TRUE );
+	{
+		LatchRestore<Bool> inLoadGame( m_isInLoadGame, TRUE );
+		xferSaveData( &xferLoad, SNAPSHOT_SAVELOAD );
+	}
+	TheGameLogic->setLoadingWithoutScreen( FALSE );
+	xferLoad.close();
+	TheGhostObjectManager->saveLockGhostObjects( FALSE );
+
+	gameStatePostProcessLoad();
+}
+
+// ------------------------------------------------------------------------------------------------
 /** Load the save game pointed to by filename */
 // ------------------------------------------------------------------------------------------------
 SaveCode GameState::loadGame( AvailableGameInfo gameInfo )
@@ -682,6 +728,11 @@ SaveCode GameState::loadGame( AvailableGameInfo gameInfo )
 	// open the save file
 	XferLoad xferLoad;
 	xferLoad.open( filepath );
+
+	// A match still recording ends here, before the engine reset closes its file with no length
+	// written into the header.
+	if( TheRecorder->getMode() == RECORDERMODETYPE_RECORD )
+		TheRecorder->stopRecording();
 
 	// clear out the game engine
 	TheGameEngine->reset();
@@ -741,6 +792,11 @@ SaveCode GameState::loadGame( AvailableGameInfo gameInfo )
 		return SC_INVALID_DATA;	// you can't use a naked "throw" outside of a catch statement!
 
 	}  // end if
+
+	// A loaded match played at the default 30 whatever speed it was saved at: the reset during the
+	// load puts the default back, and nothing kept the speed. A mission save starts its map afresh.
+	if( getSaveGameInfo()->saveFileType != SAVE_FILE_TYPE_MISSION && getSaveGameInfo()->framesPerSecond > 0 )
+		TheGameEngine->setFramesPerSecondLimit( getSaveGameInfo()->framesPerSecond );
 
 	//
 	// when loading a mission save, we want to do as much normal loading stuff as we
@@ -1456,6 +1512,9 @@ void GameState::xferSaveData( Xfer *xfer, SnapshotType which )
 
 				}  // end if
 
+				// DEBUG_CRASH below is compiled out of a release build, so this is the only word of which
+				// block a load died in
+				DEBUG_LOG(("Loading block '%s'\n", token.str()));
 				try
 				{
 
@@ -1569,12 +1628,21 @@ void GameState::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 2;
+	XferVersion currentVersion = 3;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
 	// get structure for our current game info
 	SaveGameInfo *saveGameInfo = getSaveGameInfo();
+
+	// version 3: the game speed, read back by loadGame. It goes first because the rest of this
+	// block ends in branches.
+	if( xfer->getXferMode() == XFER_SAVE )
+		saveGameInfo->framesPerSecond = TheGameEngine->getFramesPerSecondLimit();
+	else
+		saveGameInfo->framesPerSecond = 0;
+	if( version >= 3 )
+		xfer->xferInt( &saveGameInfo->framesPerSecond );
 
 	// version 2
 	if( version >= 2 )
@@ -1621,19 +1689,17 @@ void GameState::xfer( Xfer *xfer )
 	// if no label was found, we'll use the map name (just filename, no directory info)
 	if( exists == FALSE || saveGameInfo->mapLabel == AsciiString::TheEmptyString )
 	{
-		char string[ _MAX_PATH ];
-
-		strcpy( string, TheGlobalData->m_mapName.str() );
-		char *p = strrchr( string, '\\' );
+		// either separator can end the directory part: a map named on the command line may use '/'
+		const char *mapName = TheGlobalData->m_mapName.str();
+		const char *back = strrchr( mapName, '\\' );
+		const char *forward = strrchr( mapName, '/' );
+		const char *p = back;
+		if( forward != NULL && (p == NULL || forward > p) )
+			p = forward;
 		if( p == NULL )
 			saveGameInfo->mapLabel = TheGlobalData->m_mapName;
 		else
-		{
-
-			p++;  // skip the '\' we're on
-			saveGameInfo->mapLabel.set( p );
-
-		}  // end else
+			saveGameInfo->mapLabel.set( p + 1 );  // skip the separator we're on
 
 	}  // end if
 

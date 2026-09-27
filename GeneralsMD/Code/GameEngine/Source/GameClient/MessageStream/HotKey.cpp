@@ -100,6 +100,9 @@ GameMessageDisposition HotKeyTranslator::translateGameMessage(const GameMessage 
 		// the label hotkey is meant to be that click's equal. Ctrl and alt still block the hotkey.
 		if(newModState & ~SHIFT)
 			return disp;
+		// Ctrl+F let go of Ctrl first ends on a bare F release; it is still Ctrl+F
+		if( keyState & KEY_STATE_PRESSED_WITH_CTRL_ALT )
+			return disp;
 		// NUL-terminate it: UnicodeString::set() runs wcslen over what it is given, and this used
 		// to hand it a single un-terminated WideChar on the stack.
 		WideChar key[2];

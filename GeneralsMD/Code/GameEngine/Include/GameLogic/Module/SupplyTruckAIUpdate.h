@@ -272,8 +272,9 @@ public:
 
 	virtual void noteDockActionWindow( UnsignedInt frames );
 	virtual Real getDockActionProgress() const;
-	
+
 	virtual UpdateSleepTime update();
+	virtual void aiDoCommand(const AICommandParms* parms);
 
 protected:
 

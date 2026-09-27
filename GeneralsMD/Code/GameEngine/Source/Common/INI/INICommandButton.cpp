@@ -62,6 +62,10 @@ void ControlBar::parseCommandButtonDefinition( INI *ini )
 			button->markAsOverride();
 		}
 	}  // end if
+	else if( ini->getLoadType() == INI_LOAD_MULTIFILE )
+	{
+		// a patch file's button edits EA's in place and names only what changes
+	}
 	else if( ini->getLoadType() != INI_LOAD_CREATE_OVERRIDES )
 	{
 		DEBUG_CRASH(( "[LINE: %d in '%s'] Duplicate commandbutton %s found!", ini->getLineNum(), ini->getFilename().str(), name.str() ));
@@ -73,6 +77,11 @@ void ControlBar::parseCommandButtonDefinition( INI *ini )
 
 	// parse the ini definition
 	ini->initFromINI( button, button->getFieldParse() );
+
+	// ControlBar::postProcessCommands looks the images up once, at startup, and a map.ini is read at
+	// map load, long after: a button it adds or re-images drew empty. Look that one up now.
+	if( ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES )
+		button->cacheButtonImage();
 	
 
 	//Make sure buttons with special power templates also have the appropriate option set.

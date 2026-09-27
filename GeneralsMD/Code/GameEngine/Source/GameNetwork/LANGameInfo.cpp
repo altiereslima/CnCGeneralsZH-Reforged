@@ -215,6 +215,10 @@ void LANDisplayGameList( GameWindow *gameListbox, LANGameInfo *gameList )
 			selectedPtr = (LANGameInfo *)GadgetListBoxGetItemData(gameListbox, selectedIndex, 0);
 		}
 
+		// every game announced or closed rebuilds the list, and the reset threw the player's
+		// scroll back to the top while he was reading down it
+		const Int topVisible = GadgetListBoxGetTopVisibleEntry(gameListbox);
+
 		GadgetListBoxReset(gameListbox);
 		
 		while (gameList)
@@ -243,6 +247,8 @@ void LANDisplayGameList( GameWindow *gameListbox, LANGameInfo *gameList )
 			GadgetListBoxSetSelected(gameListbox, indexToSelect);
 		else
 			HideGameInfoWindow(TRUE);
+
+		GadgetListBoxSetTopVisibleEntry(gameListbox, topVisible);
 	}
 }
 

@@ -55,9 +55,12 @@ UpdateSleepTime WanderAIUpdate::update( void )
 	// If I'm standing still, move somewhere
 	if (isIdle())
 	{
+		// 5 to 50 either way on each axis; the retail 5..50 only ever walked north east
 		Coord3D dest = *(getObject()->getPosition());
-		dest.x += GameLogicRandomValue( 5, 50 );
-		dest.y += GameLogicRandomValue( 5, 50 );
+		const Int stepX = GameLogicRandomValue( -45, 45 );
+		const Int stepY = GameLogicRandomValue( -45, 45 );
+		dest.x += stepX < 0 ? stepX - 5 : stepX + 5;
+		dest.y += stepY < 0 ? stepY - 5 : stepY + 5;
  		aiMoveToPosition( &dest, CMD_FROM_AI );
 	}
 

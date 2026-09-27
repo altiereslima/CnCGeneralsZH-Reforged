@@ -209,12 +209,13 @@ void WeaponSet::crc( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
-	* 1: Initial version */
+	* 1: Initial version
+	* 2: m_hasPitchLimit is written where m_hasDamageWeapon used to be written twice */
 // ------------------------------------------------------------------------------------------------
 void WeaponSet::xfer( Xfer *xfer )
 {
 	// version
-	const XferVersion currentVersion = 1;
+	const XferVersion currentVersion = 2;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -285,8 +286,16 @@ void WeaponSet::xfer( Xfer *xfer )
 	xfer->xferUser(&m_curWeaponLockedStatus, sizeof(m_curWeaponLockedStatus));
 	xfer->xferUnsignedInt(&m_filledWeaponSlotMask);
 	xfer->xferInt(&m_totalAntiMask);
+	xfer->xferBool(version >= 2 ? &m_hasPitchLimit : &m_hasDamageWeapon);
 	xfer->xferBool(&m_hasDamageWeapon);
-	xfer->xferBool(&m_hasDamageWeapon);
+	if (version < 2)
+	{
+		// a version 1 save never held the flag, so rebuild it from the loaded weapons
+		m_hasPitchLimit = false;
+		for (Int i = 0; i < WEAPONSLOT_COUNT; ++i)
+			if (m_weapons[i] != NULL && m_weapons[i]->isPitchLimited())
+				m_hasPitchLimit = true;
+	}
 
 	m_totalDamageTypeMask.xfer(xfer);// BitSet has built in xfer
 
@@ -322,7 +331,10 @@ void WeaponSet::updateWeaponSet(const Object* obj)
 		{
 			if (m_weapons[i] != NULL)
 			{
-				m_weapons[i]->deleteInstance();
+				// Not deleted here: this runs inside the weapon's own fire when the shot kills, the kill
+				// promotes the shooter and the promotion swaps the weapon set (an Angry Mob member on
+				// its way to Veteran).  privateFireWeapon then wrote into the freed Weapon.
+				TheWeaponStore->deleteWeaponLater(m_weapons[i]);
 				m_weapons[i] = NULL;
 			}
 

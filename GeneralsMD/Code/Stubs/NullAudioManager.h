@@ -83,8 +83,6 @@ public:
 	virtual void removePlayingAudio( AsciiString ) {}
 	virtual void removeAllDisabledAudio() {}
 
-	virtual Bool has3DSensitiveStreamsPlaying( void ) const { return FALSE; }
-
 	/* Bink is stubbed out too, so nobody asks for this handle. */
 	virtual void *getHandleForBink( void ) { return NULL; }
 	virtual void releaseHandleForBink( void ) {}

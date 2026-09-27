@@ -416,6 +416,34 @@ void LANEnableStartButton(Bool enabled)
 	buttonSelectMap->winEnable(enabled);
 }
 
+// The countdown's last second: shutting the menu down clears every gadget pointer below, and a
+// click that lands after that dereferences one of them.
+void LANDisableButtons()
+{
+	buttonStart->winEnable(false);
+	buttonBack->winEnable(false);
+	buttonSelectMap->winEnable(false);
+	comboBoxStartingCash->winEnable(false);
+
+	GameWindow *optionalGadgets[] = { comboBoxSuperweapons, comboBoxPeaceTime, checkBoxUnitLimit,
+		checkBoxProRules, comboBoxIncomeSharing, comboBoxTechRespawn };
+	for (Int i = 0; i < (Int)ARRAY_SIZE(optionalGadgets); ++i)
+	{
+		if (optionalGadgets[i])
+			optionalGadgets[i]->winEnable(false);
+	}
+
+	for (Int i = 0; i < MAX_SLOTS; ++i)
+	{
+		comboBoxPlayer[i]->winEnable(false);
+		comboBoxColor[i]->winEnable(false);
+		comboBoxPlayerTemplate[i]->winEnable(false);
+		comboBoxTeam[i]->winEnable(false);
+		buttonAccept[i]->winEnable(false);
+		buttonMapStartPosition[i]->winEnable(false);
+	}
+}
+
 static void handleColorSelection(int index)
 {
 	GameWindow *combo = comboBoxColor[index];
@@ -1113,7 +1141,8 @@ void updateGameOptions( void )
 		if (comboBoxSuperweapons)
 			UpdateSuperweaponComboBox( comboBoxSuperweapons, theGame, TheLAN->AmIHost() );
 		Int itemCount = GadgetComboBoxGetLength(comboBoxStartingCash);
-    for ( Int index = 0; index < itemCount; index++ )
+    Int index;
+    for ( index = 0; index < itemCount; index++ )
     {
       Int value  = (Int)GadgetComboBoxGetItemData(comboBoxStartingCash, index);
       if ( value == theGame->getStartingCash().countMoney() )
@@ -1123,7 +1152,10 @@ void updateGameOptions( void )
       }
     }
 
-    DEBUG_ASSERTCRASH( index < itemCount, ("Could not find new starting cash amount %d in list", theGame->getStartingCash().countMoney() ) );
+    // the preferences set the cash after the box was filled, so an amount the list does not carry
+    // (StartingCash in the player's INI) was in force but never shown
+    if ( index == itemCount )
+      PopulateStartingCashComboBox( comboBoxStartingCash, theGame );
 
 		if (comboBoxPeaceTime)
 			UpdatePeaceTimeComboBox( comboBoxPeaceTime, theGame, TheLAN->AmIHost() );

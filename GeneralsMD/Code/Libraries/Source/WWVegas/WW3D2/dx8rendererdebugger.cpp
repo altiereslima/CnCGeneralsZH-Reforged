@@ -27,7 +27,7 @@ bool DX8RendererDebugger::Enabled;
 
 void DX8RendererDebugger::Enable(bool enable)
 {
-	Enabled=true;
+	Enabled=enable;
 }
 
 void DX8RendererDebugger::Get_String(StringClass& s)

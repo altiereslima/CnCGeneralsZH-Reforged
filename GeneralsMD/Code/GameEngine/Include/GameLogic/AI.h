@@ -729,6 +729,7 @@ public:
 	void store(const AICommandParms& parms);
 	void reconstitute(AICommandParms& parms) const;
 	void doXfer(Xfer *xfer);
+	void setCommandSource(CommandSourceType cmdSource) { m_cmdSource = cmdSource; }
 	AICommandType getCommandType() const { return m_cmd; }
 	ObjectID getTargetObjectID() const { return m_obj; }
 	const Coord3D& getTargetPosition() const { return m_pos; }

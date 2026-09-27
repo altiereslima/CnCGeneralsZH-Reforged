@@ -620,10 +620,11 @@ void AIUpdateInterface::requestPath( Coord3D *destination, Bool isFinalGoal )
 	}
 	m_waitingForPath = TRUE;
 	if (m_pathTimestamp > TheGameLogic->getFrame()-3) {
-		/* Requesting path very quickly.  Can cause a spin. */
-		//DEBUG_LOG(("%d Pathfind - repathing in less than 3 frames.  Waiting 1 second\n",
-			//TheGameLogic->getFrame()));
-		setQueueForPathTime(LOGICFRAMES_PER_SECOND);
+		/* Requesting path very quickly.  Can cause a spin. The spin needs a gap between two
+			 paths, not the one or two seconds EA waited here, which left a unit that had just been
+			 given a second order standing still or walking the old path until the timer ran out. So
+			 the request waits out the rest of the three frames and no longer. */
+		setQueueForPathTime(repathDebounceFrames());
 		// See if it has been too soon.
 		// jba intense debug
 		//DEBUG_LOG(("Info - RePathing very quickly %d, %d.\n", m_pathTimestamp, TheGameLogic->getFrame()));
@@ -654,8 +655,7 @@ void AIUpdateInterface::requestAttackPath( ObjectID victimID, const Coord3D* vic
 	m_waitingForPath = TRUE;
 	if (m_pathTimestamp > TheGameLogic->getFrame()-3) {
 		/* Requesting path very quickly.  Can cause a spin. */
-		//DEBUG_LOG(("%d Pathfind - repathing in less than 3 frames.  Waiting 2 second\n",TheGameLogic->getFrame()));
-		setQueueForPathTime(2*LOGICFRAMES_PER_SECOND);
+		setQueueForPathTime(repathDebounceFrames());
 		setLocomotorGoalNone();
 		return;
 	}
@@ -678,8 +678,7 @@ void AIUpdateInterface::requestApproachPath( Coord3D *destination )
 	m_waitingForPath = TRUE;
 	if (m_pathTimestamp > TheGameLogic->getFrame()-3) {
 		/* Requesting path very quickly.  Can cause a spin. */
-		//DEBUG_LOG(("%d Pathfind - repathing in less than 3 frames.  Waiting 2 second\n",TheGameLogic->getFrame()));
-		setQueueForPathTime(2*LOGICFRAMES_PER_SECOND);
+		setQueueForPathTime(repathDebounceFrames());
 		return;
 	}
 	queueForPathOrRetry();
@@ -702,8 +701,7 @@ void AIUpdateInterface::requestSafePath( ObjectID repulsor )
 	m_waitingForPath = TRUE;
 	if (m_pathTimestamp > TheGameLogic->getFrame()-3) {
 		/* Requesting path very quickly.  Can cause a spin. */
-		//DEBUG_LOG(("%d Pathfind - repathing in less than 3 frames.  Waiting 2 second\n",TheGameLogic->getFrame()));
-		setQueueForPathTime(2*LOGICFRAMES_PER_SECOND);
+		setQueueForPathTime(repathDebounceFrames());
 		return;
 	}
 	queueForPathOrRetry();
@@ -968,6 +966,14 @@ Bool AIUpdateInterface::chooseLocomotorSetExplicit(LocomotorSetType wst)
 	const LocomotorTemplateVector* set = getAIUpdateModuleData()->findLocomotorTemplateVector(wst);
 	if (set)
 	{
+		// A dying aircraft keeps the locomotor it has. JetSlowDeathBehavior grounds a wreck by taking the
+		// lift and the turn rate off the current Locomotor instance, and a rebuild from the templates
+		// (the jet's attack or return set timing out, say) hands the wreck full lift back and it flies
+		// on. LOCOMOTORSET_INVALID is a set not built yet, which loadPostProcess still has to build.
+		const Object* obj = getObject();
+		if (m_curLocomotorSet != LOCOMOTORSET_INVALID && obj->isEffectivelyDead() && obj->isKindOf(KINDOF_AIRCRAFT))
+			return FALSE;
+
 		m_locomotorSet.clear();
 		m_curLocomotor = NULL;
 		for (Int i = 0; i < set->size(); ++i)
@@ -5948,6 +5954,10 @@ void AIUpdateInterface::privateGuardPosition( const Coord3D *pos, GuardMode guar
 	m_guardMode = guardMode;
 
 	getStateMachine()->clear();
+	// The guard machine moves on its own goal, so the outer one kept whatever the last order left
+	// in it, (0,0,0) on a fresh unit. An ALT-queued move appends after the goal position and so
+	// started its path from the map's corner.
+	setGoalPositionClipped( &adjPos, cmdSource );
 	setLastCommandSource( cmdSource );
 	getStateMachine()->setState( AI_GUARD );
 }

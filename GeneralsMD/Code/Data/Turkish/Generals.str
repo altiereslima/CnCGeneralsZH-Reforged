@@ -7942,7 +7942,7 @@ CONTROLBAR:Money
 END
 
 CONTROLBAR:MoneyDescription
-"Sahip olduğunuz para miktarı"
+"Sahip olduğunuz para ve son yarım dakikada saniyede kazandığınız"
 END
 
 UPGRADE:AmericaDroneARmor
@@ -12866,7 +12866,7 @@ CONTROLBAR:TooltipMOAB
 END
 
 CONTROLBAR:TooltipLeafletDrop
-"Güçlü: Piyade \n \n Geri Sayım: 6:00"
+"Güçlü: Piyade \n \n Geri Sayım: 5:00"
 END
 
 CONTROLBAR:TooltipTankParaDrop
@@ -14210,7 +14210,7 @@ CONTROLBAR:ToolTipChinaBuildEmperor
 END
 
 CONTROLBAR:AirF_ToolTipUSAScienceSpectreGunship
-"Spectre Savaş Uçakları savaş alanı üzerinde daire çizerek düşman kuvvetlerini obüs ve Gatling toplarıyla döver \n \nSeviye 1: 10 saniye \n Seviye 2: 15 saniye \n Seviye 3: 30 saniye \n \n Çağrıldığı yer: Komuta Merkezi"
+"Spectre Savaş Uçakları savaş alanı üzerinde daire çizerek düşman kuvvetlerini obüs ve Gatling toplarıyla döver \n \nSeviye 1: 10 saniye \n Seviye 2: 15 saniye \n Seviye 3: 20 saniye \n \n Çağrıldığı yer: Komuta Merkezi"
 END
 
 OBJECT:ValveStation
@@ -15261,6 +15261,14 @@ TOOLTIP:ZoomToCursor
 "Tekerlek, ekranın ortası yerine imlecin üzerinde durduğu yere doğru yakınlaştırır. Yalnızca Modern kontrollerde."
 END
 
+GUI:IsometricCamera
+"İzometrik Kamera"
+END
+
+TOOLTIP:IsometricCamera
+"Savaş alanı uzaktan görünür, bir birlik ekranın üstünde de altında da aynı boyda çizilir. Kamerayı yine sen döndürür ve yakınlaştırırsın."
+END
+
 GUI:EdgeScrollWindowed
 "Pencerede Kenardan Kaydır"
 END
@@ -15789,6 +15797,10 @@ GUI:ScoreboardPerSecond
 "SANİYEDE"
 END
 
+GUI:ControlBarMoneyEarning
+"$ %d  +%d/sn"
+END
+
 GUI:ScoreboardKills
 "K"
 END
@@ -15803,4 +15815,20 @@ END
 
 GUI:ScoreboardFavourite
 "FAVORİ"
+END
+
+CONTROLBAR:AirF_TooltipSpectreGunship
+"Güçlü: Araçlar \n \n Geri Sayım: 3:00"
+END
+
+CONTROLBAR:AirF_TooltipCarpetBomb
+"Hedef bölgeye halı bombardımanı yapın \n \n Geri Sayım: 4:00"
+END
+
+CONTROLBAR:Slth_TooltipFireGPSScrambler
+"GPS Karıştırıcı \n Geri Sayım: 3:00"
+END
+
+CONTROLBAR:Demo_ToolTipGLAScienceRebelAmbush
+"Her yerde Asilerle ani bir pusu kurmanızı sağlar \n \n Seviye 1: 4 Asi \n Seviye 2: 6 Asi \n Seviye 3: 10 Asi \n \n Çağrıldığı yer: Komuta Merkezi"
 END

@@ -285,7 +285,7 @@ RenderObjClass * W3DAssetManager::Create_Render_Obj(const char* name)
 // write straight into it, so the number lives in one place rather than six.
 enum { MUNGED_NAME_SIZE = 512 };
 
-static inline void Munge_Render_Obj_Name(char *newname, const char *oldname, float scale, const int color, const char *textureName)
+static inline void Munge_Render_Obj_Name(char *newname, const char *oldname, float scale, const int color, const char *oldTextureName, const char *textureName)
 {
 	char lower_case_name[255];
 	strlcpy(lower_case_name, oldname, ARRAY_SIZE(lower_case_name));
@@ -293,8 +293,10 @@ static inline void Munge_Render_Obj_Name(char *newname, const char *oldname, flo
 
 	if (!textureName)
 		textureName = "";
+	if (!oldTextureName)
+		oldTextureName = "";
 
-	snprintf(newname, MUNGED_NAME_SIZE, "#%d!%g!%s#%s",color,scale,textureName,lower_case_name);
+	snprintf(newname, MUNGED_NAME_SIZE, "#%d!%g!%s>%s#%s",color,scale,oldTextureName,textureName,lower_case_name);
 }
 
 //---------------------------------------------------------------------
@@ -337,33 +339,35 @@ Int W3DAssetManager::replaceHLODTexture(RenderObjClass *robj, TextureClass *oldT
 //---------------------------------------------------------------------
 Int W3DAssetManager::replaceMeshTexture(RenderObjClass *robj, TextureClass *oldTex, TextureClass *newTex)
 {
-	int i;
-	int didReplace=0;
-
-	MeshClass *mesh=(MeshClass*) robj;	
-	MeshModelClass * model = mesh->Get_Model();
+	MeshClass *mesh=(MeshClass*) robj;
 	MaterialInfoClass	*material = mesh->Get_Material_Info();
+	Bool usesOld = FALSE;
+	for (int i=0; i<material->Texture_Count(); i++)
+		usesOld |= (material->Peek_Texture(i) == oldTex);
+	REF_PTR_RELEASE(material);
+	if (!usesOld)
+		return 0;
 
-	for (i=0; i<material->Texture_Count(); i++)
+	// The model is shared with every other copy of this asset; swap on a copy of our own.
+	mesh->Make_Unique();
+	MeshModelClass * model = mesh->Get_Model();
+	material = mesh->Get_Material_Info();
+	for (int i=0; i<material->Texture_Count(); i++)
 	{
 		if (material->Peek_Texture(i) == oldTex)
-		{	
-			model->Replace_Texture(oldTex,newTex);
 			material->Replace_Texture(i,newTex);
-			didReplace=1;
-		}
 	}
+	model->Replace_Texture(oldTex,newTex);
 
-	REF_PTR_RELEASE(material);	
+	REF_PTR_RELEASE(material);
 	REF_PTR_RELEASE(model);
-	return didReplace;
+	return 1;
 }
 
 //---------------------------------------------------------------------
-/** Replaces all references to old texture with new texture.  Operation is performed on
-	asset prototype so it will affect most instances of this object.  Objects which have
-	been customized with house color will not be affected unless they are created after
-	this function is called.
+/** Replaces all references to old texture with new texture on robj alone.  Each mesh that
+	names the old texture gets a model of its own first, so the prototype and every other
+	instance keep drawing the old one.
 */
 int W3DAssetManager::replacePrototypeTexture(RenderObjClass *robj, const char * oldname, const char * newname)
 {
@@ -762,7 +766,7 @@ RenderObjClass * W3DAssetManager::Create_Render_Obj(
 	}
 
 	char newname[MUNGED_NAME_SIZE];
-	Munge_Render_Obj_Name(newname, name, scale, color, newTexture);
+	Munge_Render_Obj_Name(newname, name, scale, color, oldTexture, newTexture);
 
 	// see if we got a cached version
 	RenderObjClass *rendobj = NULL;

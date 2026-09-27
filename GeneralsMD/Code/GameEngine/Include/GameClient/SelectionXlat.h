@@ -31,6 +31,7 @@
 #define _H_SelectionXlat
 
 #include "GameClient/InGameUI.h"
+#include "Common/Player.h"		// NUM_HOTKEY_SQUADS
 
 class ThingTemplate;
 
@@ -61,6 +62,16 @@ private:
 
 	SelectCountMap m_selectCountMap;
 
+	// A team key's new members reach the logic a run-ahead after the press in a network game.  A
+	// select in between drew the squad the logic still held, while the logic, taking the two in
+	// order, selected the new one: the screen and the orders went to different units.  What each
+	// key last sent and the frame it lands on, 0 for nothing on the way.
+	std::vector<ObjectID> m_pendingSquad[ NUM_HOTKEY_SQUADS ];
+	UnsignedInt m_pendingSquadLands[ NUM_HOTKEY_SQUADS ];
+
+	Bool isSquadPending( Int group ) const;
+	void selectHotkeySquad( Player *player, Int group, Bool ownOnly );	///< what the logic will have in the squad by the time a select sent now lands
+
 	Bool selectFriends( Drawable *draw, GameMessage *createTeamMsg, Bool dragSelecting );
 	Bool killThemKillThemAll( Drawable *draw, GameMessage *killThemAllMsg );
 
@@ -76,7 +87,8 @@ public:
 	//changes the mode of drag selecting to it's opposite
 	void setDragSelecting(Bool dragSelect);
 	void setLeftMouseButton(Bool state);
-  
+	void forgetPendingSquads();	///< a match is over: what its team keys sent will never land
+
 #if defined(_DEBUG) || defined(_INTERNAL) || defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
   Bool m_HandOfGodSelectionMode;
   Bool isHandOfGodSelectionMode( void) { return m_HandOfGodSelectionMode; };

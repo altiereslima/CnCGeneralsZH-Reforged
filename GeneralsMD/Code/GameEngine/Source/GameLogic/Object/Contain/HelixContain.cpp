@@ -39,6 +39,7 @@
 #include "Common/ThingFactory.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/Drawable.h"
+#include "GameLogic/ExperienceTracker.h"
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/HelixContain.h"
 #include "GameLogic/Object.h"
@@ -240,10 +241,14 @@ void HelixContain::onDelete( void )
 // ------------------------------------------------------------------------------------------------
 void HelixContain::onCapture( Player *oldOwner, Player *newOwner )
 {
-//  Need to setteam() the portable structure, that's all;
+//  Need to setteam() the portable structure
   Object *portable = getPortableStructure();
   if ( portable )
 	  portable->setTeam( newOwner->getDefaultTeam() );
+
+	// and the passengers go the way every transport's do: a Helix sniped on the ground skipped this,
+	// so its infantry sat on in a neutral hulk while an Overlord's or a Humvee's got out
+	TransportContain::onCapture( oldOwner, newOwner );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -267,7 +272,7 @@ void HelixContain::addToContainList( Object *obj )
 //-------------------------------------------------------------------------------------------------
 void HelixContain::addToContain( Object *obj )
 {
-  if ( obj->isKindOf( KINDOF_PORTABLE_STRUCTURE ) && m_portableStructureID == INVALID_ID)  
+  if ( obj->isKindOf( KINDOF_PORTABLE_STRUCTURE ) && m_portableStructureID == INVALID_ID)
   {
     Object *portable = getPortableStructure();
     if ( portable )
@@ -276,6 +281,10 @@ void HelixContain::addToContain( Object *obj )
     m_portableStructureID = obj->getID();
     obj->friend_setContainedBy( getObject() );//fool portable into thinking my object is his container
 
+    // The portable never goes through onContaining(), so the kills of the gattling or speaker on top
+    // earned the Helix nothing; send them to the Helix the way OverlordContain does for its rider.
+    if ( obj->getExperienceTracker() )
+      obj->getExperienceTracker()->setExperienceSink( getObject()->getID() );
 
   }
   else

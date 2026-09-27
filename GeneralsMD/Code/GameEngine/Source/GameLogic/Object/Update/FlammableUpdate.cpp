@@ -323,4 +323,8 @@ void FlammableUpdate::loadPostProcess( void )
 	// extend base class
 	UpdateModule::loadPostProcess();
 
+	// a save carries the burning state but not the playing handle, so the fire went silent on load
+	if( m_status == FS_AFLAME )
+		startBurningSound();
+
 }  // end loadPostProcess

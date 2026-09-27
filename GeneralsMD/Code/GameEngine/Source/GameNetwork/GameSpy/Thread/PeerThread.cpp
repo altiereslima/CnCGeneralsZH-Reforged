@@ -1211,6 +1211,17 @@ void PeerThreadClass::Thread_Function()
 
 	peer = peerInitialize( &callbacks );
 	DEBUG_ASSERTCRASH( peer != NULL, ("NULL peer!") );
+	if (peer == NULL)
+	{
+		// The assert is gone in Release, where the NULL went on to fault in peerSetRoomWatchKeys().
+		// startThread() reuses this object, so clear the flags for the next attempt.
+		markAsDisconnected();
+		PeerResponse resp;
+		resp.peerResponseType = PeerResponse::PEERRESPONSE_DISCONNECT;
+		resp.discon.reason = DISCONNECT_COULDNOTCONNECT;
+		TheGameSpyPeerMessageQueue->addResponse(resp);
+		return;
+	}
 	m_isConnected = m_isConnecting = false;
 
 	qr2_register_key(EXECRC_KEY, EXECRC_STR);

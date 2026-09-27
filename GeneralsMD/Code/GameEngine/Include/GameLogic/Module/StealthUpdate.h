@@ -131,6 +131,8 @@ public:
 	Int getDisguisedPlayerIndex() const { return m_disguiseAsPlayerIndex; }
 	const ThingTemplate *getDisguisedTemplate() { return m_disguiseAsTemplate; }
 	void markAsDetected( UnsignedInt numFrames = 0 );
+	void keepDetected( UnsignedInt numFrames );	///< extend the detection only: no disguise loss, no wake-ups
+
 	void disguiseAsObject( const Object *target ); //wrapper function for ease.
 	Real getFriendlyOpacity() const;
 	UnsignedInt getStealthDelay() const { return getStealthUpdateModuleData()->m_stealthDelay; }

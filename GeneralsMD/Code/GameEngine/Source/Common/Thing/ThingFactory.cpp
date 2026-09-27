@@ -388,10 +388,11 @@ AsciiString TheThingTemplateBeingParsedName;
 
 	// find existing item if present
 	ThingTemplate *thingTemplate = TheThingFactory->findTemplateInternal( name, FALSE );
-	if( !thingTemplate && ini->getLoadType() == INI_LOAD_MULTIFILE )
+	if( !thingTemplate && ini->getLoadType() == INI_LOAD_MULTIFILE && reskinFrom.isEmpty() )
 	{
 		// a patch names an object EA's files built; a name that finds nothing is a typo, and a new
-		// template made from it would change no unit and still land in the INI CRC
+		// template made from it would change no unit and still land in the INI CRC.  An ObjectReskin
+		// is the exception: it is new by design and names its original, which has to exist.
 		DEBUG_CRASH(( "[LINE: %d in '%s'] %s patches an object that does not exist", ini->getLineNum(), ini->getFilename().str(), name.str() ));
 		throw INI_INVALID_DATA;
 	}

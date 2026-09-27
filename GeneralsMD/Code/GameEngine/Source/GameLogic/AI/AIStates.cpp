@@ -136,7 +136,10 @@ void AICommandParmsStorage::reconstitute(AICommandParms& parms) const
 void AICommandParmsStorage::doXfer(Xfer *xfer) 
 {
 	xfer->xferUser(&m_cmd, sizeof(m_cmd));
-	xfer->xferUser(&m_cmd, sizeof(m_cmdSource));
+	// EA wrote m_cmd a second time here, so a loaded command lost its source.
+	// A save from before the fix holds a copy of m_cmd in this slot; the owners' xfer versions tell
+	// them apart and reset the source with setCommandSource.
+	xfer->xferUser(&m_cmdSource, sizeof(m_cmdSource));
 	xfer->xferCoord3D(&m_pos);
 	xfer->xferObjectID(&m_obj);
 	xfer->xferObjectID(&m_otherObj);
@@ -266,6 +269,19 @@ static Bool inWeaponRangeObject(State *thisState, void* userData);
 
 //----------------------------------------------------------------------------------------------------------
 /**
+ * A ground attack has no victim for cannotPossiblyAttackObject to look at, so nothing ended it when its
+ * shooter's container stopped letting him fire: rocket soldiers in a Humvee kept shelling the ground from
+ * inside the Chinook the Humvee drove into.
+ */
+static Bool passengerMayNotFire( State *thisState, void* userData )
+{
+	const Object *obj = thisState->getMachineOwner();
+	const Object *containedBy = obj->getContainedBy();
+	return containedBy && !containedBy->getContain()->isPassengerAllowedToFire( obj->getID() );
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
  * Create an AI state machine. Define all of the states the machine 
  * can possibly be in, and set the initial (default) state.
  */
@@ -292,8 +308,9 @@ AttackStateMachine::AttackStateMachine( Object *obj, AIAttackState* att, AsciiSt
 
 	const StateConditionInfo* objectConditions = forceAttacking ? objectConditionsForced : objectConditionsNormal;
 
-	static const StateConditionInfo positionConditions[] = 
+	static const StateConditionInfo positionConditions[] =
 	{
+		StateConditionInfo(passengerMayNotFire, EXIT_MACHINE_WITH_FAILURE, NULL),
 		StateConditionInfo(outOfWeaponRangePosition, AttackStateMachine::CHASE_TARGET, NULL),
 		StateConditionInfo(NULL, NULL, NULL)	// keep last
 	};
@@ -2744,8 +2761,11 @@ StateReturnType AIAttackApproachTargetState::updateInternal()
 			// one standing still.
 			const Bool isTargetingMine = weapon && weapon->getDamageType() == DAMAGE_DISARM &&
 				(victim->isKindOf(KINDOF_MINE) || victim->isKindOf(KINDOF_BOOBY_TRAP) || victim->isKindOf(KINDOF_DEMOTRAP));
+			// our own and our allies' stealthed units are visible to us, so a force attack on one approaches
+			const Bool isVisibleToUs = source->getControllingPlayer() == victim->getControllingPlayer() ||
+				source->getRelationship(victim) == ALLIES;
 
-			if (!isTargetingMine)
+			if (!isTargetingMine && !isVisibleToUs)
 				return STATE_FAILURE;
 		}
 		ai->setCurrentVictim(victim);
@@ -5888,6 +5908,16 @@ StateReturnType AIAttackFireWeaponState::update()
 		return STATE_FAILURE;
 	}
 
+	// The victim can leave range between the aim and the shot: a vehicle driving off while Jarmen Kell
+	// turns to snipe it. fireWeaponTemplate then refuses the shot, but the round is already off the
+	// clip, so a one-round ability went on cooldown with nothing hit. Back to aiming instead, which
+	// closes the distance. A contained shooter is left alone, its range comes from a fire point.
+	if (m_att->isAttackingObject() && !weapon->getTemplate()->isLeechRangeWeapon() && !obj->isContained()
+			&& !weapon->isWithinAttackRange(obj, victim))
+	{
+		return STATE_FAILURE;
+	}
+
 	// must adjust the state BEFORE calling fireWeapon, for FX to work correctly...
 	obj->setFiringConditionForCurrentWeapon();
 
@@ -7069,7 +7099,11 @@ StateReturnType AIEnterState::update()
 					// The partition manager doesn't generate collisions in the border area, so we have to
 					// add ourselves.  jba.
 					ContainModuleInterface* contain = goal->getContain();
-					if (contain)
+					if (obj->isKindOf(KINDOF_INFANTRY) && goal->isDisabledByType(DISABLED_UNMANNED))
+					{
+						goal->takeOverUnmanned(obj);	// a driver, not a passenger - see OpenContain::onCollide
+					}
+					else if (contain)
 					{
 						contain->addToContain(obj);
 					}

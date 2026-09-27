@@ -324,6 +324,13 @@ Bool StealthUpdate::allowedToStealth( Object *stealthOwner ) const
 	{
 		return FALSE;
 	}
+
+	// A vehicle whose crew was killed belongs to nobody, and no detector reveals a stealthed object it
+	// is not an enemy of, so it stayed invisible to everyone for good. It stealths again once manned.
+	if( self->isDisabledByType( DISABLED_UNMANNED ) )
+	{
+		return FALSE;
+	}
 	
 	if( flags & STEALTH_NOT_WHILE_TAKING_DAMAGE && self->getBodyModule()->getLastDamageTimestamp() >= now - 1 )
 	{
@@ -945,6 +952,14 @@ void StealthUpdate::markAsDetected(UnsignedInt numFrames)
 			player->iterateObjects(setWakeupIfInRange, self);
 		}
 	}
+}
+
+//-------------------------------------------------------------------------------------------------
+void StealthUpdate::keepDetected( UnsignedInt numFrames )
+{
+	const UnsignedInt expires = TheGameLogic->getFrame() + numFrames;
+	if( m_detectionExpiresFrame < expires )
+		m_detectionExpiresFrame = expires;
 }
 
 //-------------------------------------------------------------------------------------------------

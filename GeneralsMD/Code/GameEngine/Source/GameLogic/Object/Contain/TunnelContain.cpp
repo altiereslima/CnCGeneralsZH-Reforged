@@ -131,27 +131,26 @@ void TunnelContain::harmAndForceExitAllContained( DamageInfo *info )
 	if( tunnelTracker == NULL )
 		return;
 
+	// A tunnel still being built joins the network the moment it is placed, but nobody can be inside
+	// it: a Bunker Buster on the scaffold threw out and hurt everyone in every tunnel on the map.
+	if( getObject()->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
+		return;
+
 	const ContainedItemsList *fullList = tunnelTracker->getContainedItemsList();
 
-	Object *obj;
-	ContainedItemsList::const_iterator it;
-
-	//Kris: Patch 1.01 -- November 6, 2003
-	//No longer advances the iterator and saves it. The iterator is fetched from the beginning after
-	//each loop. This is to prevent a crash where dropping a bunker buster on a tunnel network containing
-	//multiple units (if they have the suicide bomb upgrade - demo general). In this case, multiple bunker
-	//busters would hit the tunnel network in close succession. Missile #1 would iterate the list, killing 
-	//infantry #1. Infantry #1 would explode and destroy Missile #2. Missile #2 would start iterating the
-	//same list, killing the remaining units. When Missile #1 picked up and continued processing the list
-	//it would crash because it's iterator was deleted from under it.
-	it = (*fullList).begin();
-	while( it != (*fullList).end() )
+	// Everyone is out before anyone is harmed, as in OpenContain. A demo rider's blast can kill the last
+	// tunnel, whose death kills everyone still inside instead of putting them out harmed, and a second
+	// bunker buster set off by that blast finds the list already empty instead of walking it under the first.
+	std::vector<Object*> exited;
+	while( !fullList->empty() )
 	{
-		obj = *it;
+		Object *obj = fullList->front();
 		removeFromContain( obj, true );
-    obj->attemptDamage( info );
-		it = (*fullList).begin();
-	}  // end while
+		exited.push_back( obj );
+	}
+
+	for( std::vector<Object*>::iterator it = exited.begin(); it != exited.end(); ++it )
+		(*it)->attemptDamage( info );
 
 }  // end removeAllContained
 
@@ -168,6 +167,10 @@ void TunnelContain::killAllContained( void )
 	//
 	TunnelTracker *tunnelTracker = getTunnelTracker();
 	if( tunnelTracker == NULL )
+		return;
+
+	// the scaffold holds nobody; Neutron Shells on one killed the whole network (see above)
+	if( getObject()->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
 		return;
 
 	ContainedItemsList list;

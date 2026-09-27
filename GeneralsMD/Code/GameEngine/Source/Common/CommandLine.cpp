@@ -1299,8 +1299,9 @@ Int parseStats(char *args[], int num)
 {
 	if (TheWritableGlobalData && num > 1)
 	{
-		TheWritableGlobalData->m_dumpStatsAtInterval = TRUE;
 		TheWritableGlobalData->m_statsInterval  = atoi(args[1]);
+		// W3DDisplay takes the frame modulo this; -stats 0 or a word divided by zero
+		TheWritableGlobalData->m_dumpStatsAtInterval = TheWritableGlobalData->m_statsInterval > 0;
 	}
 	return 2;
 }

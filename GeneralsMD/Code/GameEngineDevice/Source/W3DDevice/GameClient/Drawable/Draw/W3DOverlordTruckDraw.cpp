@@ -85,7 +85,11 @@ void W3DOverlordTruckDraw::doDrawModule(const Matrix3D* transformMtx)
 		)
 	{
 		Drawable *riderDraw = me->getContain()->friend_getRider()->getDrawable();
-		riderDraw->setColorTintEnvelope( *getDrawable()->getColorTintEnvelope() );
+		// the envelope is made on a drawable's first tint, so an untinted Avenger has none; a rider
+		// tinted on its own (a POWERED turret losing power) read through that null and crashed
+		TintEnvelope *env = getDrawable()->getColorTintEnvelope();
+		if( env )
+			riderDraw->setColorTintEnvelope( *env );
 
 		riderDraw->notifyDrawableDependencyCleared();
 		riderDraw->draw( NULL );// What the hell?  This param isn't used for anything

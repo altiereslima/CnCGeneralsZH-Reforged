@@ -6216,6 +6216,19 @@ void TintEnvelope::setDecayFrames( UnsignedInt frames )
 }
 
 //-------------------------------------------------------------------------------------------------
+void TintEnvelope::release(void)
+{
+	/* play() aims the decay at the peak it was given, which is only right when the tint got there.
+		 An EMP running out under a Frenzy starts the frenzy red from the disabled grey, and a frenzy
+		 that ends before that attack finishes decayed the grey along the red: away from zero, into a
+		 cyan that never met the rest test. Decay from the colour we are at, at the same pace. */
+	const Real peakLength = m_peakColor.Length();
+	if (peakLength > FADE_RATE_EPSILON)
+		m_decayRate = m_currentColor * ( -m_decayRate.Length() / peakLength );
+	m_envState = ENVELOPE_STATE_DECAY;
+}
+
+//-------------------------------------------------------------------------------------------------
 void TintEnvelope::update(void)
 {
 	switch ( m_envState )

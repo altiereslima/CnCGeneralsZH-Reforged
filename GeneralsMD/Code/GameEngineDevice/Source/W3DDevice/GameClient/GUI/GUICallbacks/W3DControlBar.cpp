@@ -498,17 +498,10 @@ void W3DCommandBarGenExpDraw( GameWindow *window, WinInstanceData *instData )
 	static const Image *endBar = TheMappedImageCollection->findImageByName("GenExpBarTop1");
 	static const Image *beginBar = TheMappedImageCollection->findImageByName("GenExpBarBottom1");
 	static const Image *centerBar = TheMappedImageCollection->findImageByName("GenExpBar1");
-	Int progress;
-	progress = ((player->getSkillPoints() - player->getSkillPointsLevelDown()) * 100) /(player->getSkillPointsLevelUp() - player->getSkillPointsLevelDown());
-	
+	const Int progress = player->getRankProgressPercent();
+
 	if(progress <= 0)
 		return;
-
-	// GS This should never be necessary, but scripts can change the points required or even disable a level.
-	// A disabled level will be -1 for points required.  Just be totally safe and bind to 100, and we will
-	// fix the scripts to bind the points gained later.
-	if( progress > 100 )
-		progress = 100;
 
 	ICoord2D pos, size;
 	window->winGetScreenPosition( &pos.x, &pos.y );

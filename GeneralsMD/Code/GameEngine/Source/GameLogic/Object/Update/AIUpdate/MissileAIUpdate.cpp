@@ -247,7 +247,15 @@ void MissileAIUpdate::projectileFireAtObjectOrPosition( const Object *victim, co
 
 	Vector3 dir = getObject()->getTransformMatrix()->Get_X_Vector();
 	dir.Normalize();
-	dir.Z += 2*zFactor;
+	// A target above us gets a loft of twice its slope. The launch direction already carries a
+	// pitched turret's aim, though, and the loft went on top of it: a Dragon Tank flaming a bunker
+	// up a slope sent the flames over the roof, and a flame that never touches the building clears
+	// nobody out of it. The loft now makes up only the climb the launch still lacks, which is all
+	// of it for a barrel that does not pitch.
+	const Real launchRun = sqrtf(sqr(dir.X) + sqr(dir.Y));
+	const Real launchSlope = (launchRun > 0.0f) ? dir.Z / launchRun : zFactor;
+	if (zFactor > launchSlope)
+		dir.Z += 2*(zFactor - (launchSlope > 0.0f ? launchSlope : 0.0f));
 	dir.Normalize();
 	PhysicsBehavior* physics = getObject()->getPhysics();
 	if (physics && initialVelToUse > 0)
@@ -388,6 +396,11 @@ Bool MissileAIUpdate::projectileHandleCollision( Object *other )
 void MissileAIUpdate::detonate()
 {
 	Object* obj = getObject();
+
+	// Once only.  The kill state can detonate on arrival and a collision with the target land in the
+	// same frame, before the missile is gone, and the warhead's damage was dealt twice.
+	if( obj->testStatus( OBJECT_STATUS_MISSILE_KILLING_SELF ) )
+		return;
 
 	if (m_detonationWeaponTmpl)
 	{

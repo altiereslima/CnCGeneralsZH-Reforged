@@ -44,6 +44,8 @@
 #include "GameClient/ShellHooks.h"
 
 #include "GameSpy/ghttp/ghttp.h"
+// Must follow ghttp.h: gsavailable.h uses gsi_char without including gsplatform.h.
+#include "GameSpy/gsavailable.h"
 
 #include "GameNetwork/DownloadManager.h"
 #include "GameNetwork/GameSpy/BuddyThread.h"
@@ -64,6 +66,14 @@
 
 static Bool checkingForPatchBeforeGameSpy = FALSE;
 static Int checksLeftBeforeOnline = 0;
+
+// The GameSpy SDK checks this before every backend call: peerInitialize() returns NULL until it is
+// GSIACAvailable, and nothing here ever ran the check, so going online faulted on that NULL peer.
+static GSIACResult availableCheckResult = GSIACWaiting;
+// Kept apart from the result so a cancelled check cannot decrement checksLeftBeforeOnline after
+// CancelPatchCheckCallback() has reset it.
+static Bool availableCheckInProgress = FALSE;
+
 static Int timeThroughOnline = 0; // used to avoid having old callbacks cause problems
 static Bool mustDownloadPatch = FALSE;
 static Bool cantConnectBeforeOnline = FALSE;
@@ -145,6 +155,12 @@ static void noPatchBeforeOnlineCallback( void )
 	}
 }
 
+// the backend is unavailable: back to the menu
+static void backendUnavailableCallback( void )
+{
+	HandleCanceledDownload();
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////
 
 static Bool hasWriteAccess()
@@ -220,6 +236,16 @@ static void startOnline( void )
 	}
 
 	TheScriptEngine->signalUIInteract(TheShellHookNames[SHELL_SCRIPT_HOOK_MAIN_MENU_ONLINE_SELECTED]);
+
+	if (availableCheckResult != GSIACAvailable)
+	{
+		// The backend reported the title disabled; every GameSpy thread would fail to start.
+		// noPatchBeforeOnlineCallback() would call startOnline() again and reopen this box.
+		MessageBoxOk(TheGameText->fetch("GUI:GSErrorTitle"),
+			TheGameText->fetch("GUI:GSDisconReason4"),
+			backendUnavailableCallback);
+		return;
+	}
 
 	DEBUG_ASSERTCRASH( !TheGameSpyBuddyMessageQueue, ("TheGameSpyBuddyMessageQueue exists!") );
 	DEBUG_ASSERTCRASH( !TheGameSpyPeerMessageQueue, ("TheGameSpyPeerMessageQueue exists!") );
@@ -587,6 +613,11 @@ void CancelPatchCheckCallbackAndReopenDropdown( void )
 void CancelPatchCheckCallback( void )
 {
 	s_asyncDNSLookupInProgress = FALSE;
+	if (availableCheckInProgress)
+	{
+		GSICancelAvailableCheck();
+		availableCheckInProgress = FALSE;
+	}
 	HandleCanceledDownload(FALSE); // don't dropdown
 	checkingForPatchBeforeGameSpy = FALSE;
 	checksLeftBeforeOnline = 0;
@@ -748,6 +779,30 @@ void HTTPThinkWrapper( void )
 		}
 	}
 
+	// GSIAvailableCheckThink() is what advances the check; it has to be called until it stops
+	// returning GSIACWaiting.  It counts as one of checksLeftBeforeOnline, so startOnline() waits
+	// for it the same way it waits for the HTTP fetches.
+	if (availableCheckInProgress)
+	{
+		availableCheckResult = GSIAvailableCheckThink();
+		if (availableCheckResult != GSIACWaiting)
+		{
+			availableCheckInProgress = FALSE;
+			--checksLeftBeforeOnline;
+			DEBUG_ASSERTCRASH(checksLeftBeforeOnline>=0, ("Too many callbacks"));
+			if (onlineCancelWindow && checksLeftBeforeOnline == 0)
+			{
+				TheWindowManager->winDestroy(onlineCancelWindow);
+				onlineCancelWindow = NULL;
+			}
+
+			DEBUG_LOG(("Availability check returned %d\n", availableCheckResult));
+
+			if (checksLeftBeforeOnline == 0)
+				startOnline();
+		}
+	}
+
 	if (isHttpOk)
 	{
 		try
@@ -809,7 +864,12 @@ void StartPatchCheck( void )
 
 static void reallyStartPatchCheck( void )
 {
-	checksLeftBeforeOnline = 4;
+	checksLeftBeforeOnline = 5;  // the four ghttp calls below, plus the availability check
+
+	GSICancelAvailableCheck();  // going online can be retried; do not leak the last attempt's socket
+	availableCheckResult = GSIACWaiting;
+	availableCheckInProgress = TRUE;
+	GSIStartAvailableCheck("ccgenzh");
 
 	std::string gameURL, mapURL;
 	std::string configURL, motdURL;

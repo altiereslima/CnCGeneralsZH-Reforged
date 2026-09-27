@@ -126,6 +126,7 @@ CreditsLine::~CreditsLine()
 CreditsManager::CreditsManager(void)
 {
 	m_scrollRate = 1; // in pixels
+	m_scrollCarry = 0.0f;
 	m_scrollRatePerFrames = 1;
 	m_scrollDown = TRUE;	// if TRUE text will come from the top to the bottom if False, it will go from the bottom up
 	m_framesSinceStarted = 0;
@@ -183,6 +184,7 @@ void CreditsManager::reset( void )
 	m_isFinished = FALSE;
 	m_creditLineListIt = m_creditLineList.begin();
 	m_framesSinceStarted = 0;
+	m_scrollCarry = 0.0f;
 
 }
 
@@ -194,7 +196,14 @@ void CreditsManager::update( void )
 	
 	if(m_framesSinceStarted%m_scrollRatePerFrames != 0)
 		return;
-	
+
+	// ScrollRate is in 800x600 pixels. The lines are set in fonts that grow with the screen, so a
+	// step of the same pixel count took minutes longer at 1600x1200; the step grows with the fonts.
+	const Int FONT_SCALE_PROBE = 1000;
+	const Real fontScale = (Real)TheGlobalLanguageData->adjustFontSize( FONT_SCALE_PROBE ) / FONT_SCALE_PROBE;
+	const Real scrollStep = m_scrollRate * fontScale + m_scrollCarry;
+	const Int scrollPixels = (Int)scrollStep;
+	m_scrollCarry = scrollStep - scrollPixels;
 
 	Int y = 0;
 	Int yTest = 0;
@@ -208,7 +217,7 @@ void CreditsManager::update( void )
 	while (drawIt != m_displayedCreditLineList.end())
 	{
 		CreditsLine *cLine = *drawIt;
-		y = cLine->m_pos.y = cLine->m_pos.y + (m_scrollRate * directionMultiplyer);
+		y = cLine->m_pos.y = cLine->m_pos.y + (scrollPixels * directionMultiplyer);
 		lastHeight = cLine->m_height;
 		yTest = y + ((lastHeight + CREDIT_SPACE_OFFSET) * offsetEndMultiplyer);
 		if(((m_scrollDown && (yTest > end)) || (!m_scrollDown && (yTest < end))))

@@ -138,7 +138,8 @@ private:
 
 	CreditsLineList m_displayedCreditLineList;
 
-	Int m_scrollRate; // in pixels
+	Int m_scrollRate; // in pixels of an 800x600 screen
+	Real m_scrollCarry; // the part of a pixel the last step did not move, at the real screen height
 	Int m_scrollRatePerFrames;
 	Bool m_scrollDown;	// if TRUE text will come from the top to the bottom if False, it will go from the bottom up
 

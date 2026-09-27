@@ -3986,6 +3986,13 @@ Bool PartitionManager::tryPosition( const Coord3D *center,
 						them->isKindOf( KINDOF_STRUCTURE ) )
 					continue;
 
+				// A friendly mine is no obstacle: nothing walks around it and it never goes off under us.
+				// Its geometry is the 30-unit trigger circle, though, so a supply center with the mine
+				// upgrade ringed itself with rejected spots and sent its trucks to dock beyond them.
+				if( them->isKindOf( KINDOF_MINE ) &&
+						options->relationshipObject->getRelationship( them ) == ALLIES )
+					continue;
+
 			}  // end if, relationship checks
 
 			//

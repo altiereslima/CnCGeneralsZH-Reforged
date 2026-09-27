@@ -361,9 +361,11 @@ RecorderClass *TheRecorder = NULL;
 /**
  * Constructor
  */
-RecorderClass::RecorderClass() 
+RecorderClass::RecorderClass()
 {
 	m_originalGameMode = GAME_NONE;
+	m_playbackFrameDuration = 0;
+	m_playbackFramesPerSecond = 0;
 	m_mode = RECORDERMODETYPE_RECORD;
 	m_file = NULL;
 	m_fileName.clear();
@@ -400,6 +402,8 @@ RecorderClass::~RecorderClass() {
  */
 void RecorderClass::init() {
 	m_originalGameMode = GAME_NONE;
+	m_playbackFrameDuration = 0;
+	m_playbackFramesPerSecond = 0;
 	m_mode = RECORDERMODETYPE_NONE;
 	m_file = NULL;
 	m_fileName.clear();
@@ -643,6 +647,9 @@ void RecorderClass::startRecording(GameDifficulty diff, Int originalGameMode, In
 	{
     if(TheSkirmishGameInfo)
     {
+			// This runs before GameLogic::tryStartNewGame, so a restarted skirmish has to get its
+			// pre-random slot setup back here too, or the replay records the first game's draws.
+			TheSkirmishGameInfo->handleOriginalSetups();
 			TheSkirmishGameInfo->setCRCInterval(REPLAY_CRC_INTERVAL);
       theSlotList = GameInfoToAsciiString(TheSkirmishGameInfo);
       DEBUG_LOG(("GameInfo String: %s\n",theSlotList.str()));
@@ -958,6 +965,16 @@ AsciiString RecorderClass::getCurrentReplayFilename( void )
 	return AsciiString::TheEmptyString;
 }
 
+UnsignedInt RecorderClass::getPlaybackFrameDuration( void )
+{
+	return m_mode == RECORDERMODETYPE_PLAYBACK ? m_playbackFrameDuration : 0;
+}
+
+Int RecorderClass::getPlaybackFramesPerSecond( void )
+{
+	return m_mode == RECORDERMODETYPE_PLAYBACK ? m_playbackFramesPerSecond : 0;
+}
+
 CRCInfo::CRCInfo()
 {
 	m_localPlayer = ~0;
@@ -1077,7 +1094,7 @@ Bool RecorderClass::testVersionPlayback(AsciiString filename)
  * Start playback of the file. Return true or false depending on if the file is
  * a valid replay file or not.
  */
-Bool RecorderClass::playbackFile(AsciiString filename) 
+Bool RecorderClass::playbackFile(AsciiString filename)
 {
 	if (!m_doingAnalysis)
 	{
@@ -1087,6 +1104,70 @@ Bool RecorderClass::playbackFile(AsciiString filename)
 		}
 	}
 
+	Int difficulty = 0;
+	Int rankPoints = 0;
+	Int maxFPS = 0;
+	if (!openPlayback(filename, difficulty, rankPoints, maxFPS))
+		return FALSE;
+
+	if (replayIsMissingFirstCRC( m_originalGameMode ))
+	{
+		m_crcInfo->skipFirstCRC();
+	}
+
+	m_nextFrame = 0;	// the last playback may have left -1 here, and readNextFrame reads forward from it
+	readNextFrame();
+
+	// send a message to the logic for a new game
+	if (!m_doingAnalysis)
+	{
+		GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_NEW_GAME );
+		msg->appendIntegerArgument(GAME_REPLAY);
+		msg->appendIntegerArgument(difficulty);
+		msg->appendIntegerArgument(rankPoints);
+		if( maxFPS != 0 )
+			msg->appendIntegerArgument(maxFPS);
+		InitRandom( m_gameInfo.getSeed() );
+	}
+
+	return TRUE;
+}
+
+RecorderClass::PlaybackCursor RecorderClass::getPlaybackCursor( void )
+{
+	PlaybackCursor cursor;
+	cursor.filePosition = ftell(m_file);
+	cursor.nextFrame = m_nextFrame;
+	cursor.crcInfo = *m_crcInfo;
+	return cursor;
+}
+
+/**
+ * Pick a replay up again where getPlaybackCursor left it, once an engine reset has closed it.  The
+ * header is read the same way playbackFile reads it, for the players the new game is built from.
+ */
+void RecorderClass::resumePlayback(AsciiString filename, const PlaybackCursor &cursor)
+{
+	Int difficulty = 0;
+	Int rankPoints = 0;
+	Int maxFPS = 0;
+	openPlayback(filename, difficulty, rankPoints, maxFPS);
+	// the checkpoint names its own map, and no new game will come along to use this one up
+	TheWritableGlobalData->m_pendingFile.clear();
+	// the load starts a game, and a replay's random sides and start positions are drawn off this
+	// seed: drawn off any other, the sides come out different and the checkpoint's teams do not fit
+	InitRandom( m_gameInfo.getSeed() );
+	fseek(m_file, cursor.filePosition, SEEK_SET);
+	m_nextFrame = cursor.nextFrame;
+	*m_crcInfo = cursor.crcInfo;
+}
+
+/**
+ * Open a replay and read everything in front of its first command: the header, the difficulty, the
+ * original game mode, the rank points and the frame rate the game was played at.
+ */
+Bool RecorderClass::openPlayback(AsciiString filename, Int &difficulty, Int &rankPoints, Int &maxFPS)
+{
 	m_mode = RECORDERMODETYPE_PLAYBACK;
 
 	ReplayHeader header;
@@ -1097,6 +1178,7 @@ Bool RecorderClass::playbackFile(AsciiString filename)
 	{
 		return FALSE;
 	}
+	m_playbackFrameDuration = header.frameDuration;
 #ifdef DEBUG_LOGGING
 
 	Bool versionStringDiff = header.versionString != TheVersion->getUnicodeVersion();
@@ -1157,37 +1239,16 @@ Bool RecorderClass::playbackFile(AsciiString filename)
 	REPLAY_CRC_INTERVAL = m_gameInfo.getCRCInterval();
 	DEBUG_LOG(("Player index is %d, replay CRC interval is %d\n", m_crcInfo->getLocalPlayer(), REPLAY_CRC_INTERVAL));
 
-	Int difficulty = 0;
 	fread(&difficulty, sizeof(difficulty), 1, m_file);
 
 	fread(&m_originalGameMode, sizeof(m_originalGameMode), 1, m_file);
 
-	Int rankPoints = 0;
 	fread(&rankPoints, sizeof(rankPoints), 1, m_file);
-	
-	Int maxFPS = 0;
+
 	fread(&maxFPS, sizeof(maxFPS), 1, m_file);
+	m_playbackFramesPerSecond = maxFPS;
 
 	DEBUG_LOG(("RecorderClass::playbackFile() - original game was mode %d\n", m_originalGameMode));
-
-	if (replayIsMissingFirstCRC( m_originalGameMode ))
-	{
-		m_crcInfo->skipFirstCRC();
-	}
-
-	readNextFrame();
-
-	// send a message to the logic for a new game
-	if (!m_doingAnalysis)
-	{
-		GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_NEW_GAME );
-		msg->appendIntegerArgument(GAME_REPLAY);
-		msg->appendIntegerArgument(difficulty);
-		msg->appendIntegerArgument(rankPoints);
-		if( maxFPS != 0 )
-			msg->appendIntegerArgument(maxFPS);
-		InitRandom( m_gameInfo.getSeed() );
-	}
 
 	m_currentReplayFilename = filename;
 	return TRUE;
@@ -1260,9 +1321,22 @@ AsciiString RecorderClass::readAsciiString() {
  * is stopped and the next frame is said to be -1.
  */
 void RecorderClass::readNextFrame() {
+	const UnsignedInt lastFrame = m_nextFrame;
 	Int retcode = fread(&m_nextFrame, sizeof(m_nextFrame), 1, m_file);
-	if (retcode != 1) {
-		DEBUG_LOG(("RecorderClass::readNextFrame - fread failed on frame %d\n", TheGameLogic->getFrame()));
+	//
+	// Commands are written in frame order and none after the duration the header is closed with, so a
+	// frame behind the last one, or past that end, is a damaged file.  Playback used to wait for that
+	// frame, which never comes back or comes after the game is over, and a headless run never ended.
+	// A header left at 0 is a game that never closed its file, and has no end to hold the frame to.
+	//
+	const Bool damaged = retcode == 1 && ( m_nextFrame < lastFrame ||
+		( m_playbackFrameDuration != 0 && m_nextFrame > m_playbackFrameDuration ) );
+	if (retcode != 1 || damaged) {
+		if (damaged)
+			DEBUG_LOG(("RecorderClass::readNextFrame - next command on frame %u after one on frame %u, replay ends on frame %u: file is damaged\n",
+				m_nextFrame, lastFrame, m_playbackFrameDuration));
+		else
+			DEBUG_LOG(("RecorderClass::readNextFrame - fread failed on frame %d\n", TheGameLogic->getFrame()));
 		m_nextFrame = -1;
 		stopPlayback();
 	}

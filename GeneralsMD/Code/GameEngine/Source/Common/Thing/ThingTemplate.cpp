@@ -791,6 +791,12 @@ void ThingTemplate::parseReplaceModule(INI *ini, void *instance, void *store, co
 
 	self->m_moduleParsingMode = MODULEPARSE_ADD_REMOVE_REPLACE;
 
+	// The object's Locomotor lines are stored in its AI module's data, so a replaced AI module takes
+	// them along: Lazr_AmericaVehicleChinook's replaced ChinookAIUpdate left it no locomotor, and the
+	// first move order it got off the pad read a null one.
+	const AIUpdateModuleData *aiBefore = self->friend_getAIModuleInfo();
+	const LocomotorTemplateMap locomotorsBefore = aiBefore ? aiBefore->m_locomotorTemplates : LocomotorTemplateMap();
+
 	const char *modToRemove = ini->getNextToken();
 	AsciiString removedModuleName;
 	Bool removed = self->removeModuleInfo(modToRemove, removedModuleName);
@@ -801,9 +807,15 @@ void ThingTemplate::parseReplaceModule(INI *ini, void *instance, void *store, co
 		throw INI_INVALID_DATA;
 	}
 
+	const Bool replacesAIModule = aiBefore != NULL && self->friend_getAIModuleInfo() == NULL;
+
 	self->m_moduleBeingReplacedName = removedModuleName;
 	self->m_moduleBeingReplacedTag = modToRemove;
 	ini->initFromINI(self, self->getFieldParse());
+
+	AIUpdateModuleData *aiAfter = self->friend_getAIModuleInfo();
+	if (replacesAIModule && aiAfter != NULL && aiAfter->m_locomotorTemplates.empty())
+		aiAfter->m_locomotorTemplates = locomotorsBefore;
 	self->m_moduleBeingReplacedName.clear();
 	self->m_moduleBeingReplacedTag.clear();
 
@@ -909,6 +921,19 @@ void ThingTemplate::parseArmorTemplateSet( INI* ini, void *instance, void * /*st
 
 	ArmorTemplateSet ws;
 	ws.parseArmorTemplateSet(ini);
+	self->m_armorTemplateSetFinder.clear();
+	if (ini->getLoadType() == INI_LOAD_MULTIFILE)
+	{
+		// a patch file's set with conditions the template already has takes that set's place
+		for (ArmorTemplateSetVector::iterator it = self->m_armorTemplateSets.begin(); it != self->m_armorTemplateSets.end(); ++it)
+		{
+			if (it->getNthConditionsYes(0) == ws.getNthConditionsYes(0))
+			{
+				*it = ws;
+				return;
+			}
+		}
+	}
 #if defined(_DEBUG) || defined(_INTERNAL)
 	if (ini->getLoadType() != INI_LOAD_CREATE_OVERRIDES)
 	{
@@ -922,7 +947,6 @@ void ThingTemplate::parseArmorTemplateSet( INI* ini, void *instance, void * /*st
 	}
 #endif
 	self->m_armorTemplateSets.push_back(ws);
-	self->m_armorTemplateSetFinder.clear();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -937,6 +961,19 @@ void ThingTemplate::parseWeaponTemplateSet( INI* ini, void *instance, void * /*s
 
 	WeaponTemplateSet ws;
 	ws.parseWeaponTemplateSet(ini, self);
+	self->m_weaponTemplateSetFinder.clear();
+	if (ini->getLoadType() == INI_LOAD_MULTIFILE)
+	{
+		// a patch file's set with conditions the template already has takes that set's place
+		for (WeaponTemplateSetVector::iterator it = self->m_weaponTemplateSets.begin(); it != self->m_weaponTemplateSets.end(); ++it)
+		{
+			if (it->getNthConditionsYes(0) == ws.getNthConditionsYes(0))
+			{
+				*it = ws;
+				return;
+			}
+		}
+	}
 #if defined(_DEBUG) || defined(_INTERNAL)
 	if (ini->getLoadType() != INI_LOAD_CREATE_OVERRIDES)
 	{
@@ -950,7 +987,6 @@ void ThingTemplate::parseWeaponTemplateSet( INI* ini, void *instance, void * /*s
 	}
 #endif
 	self->m_weaponTemplateSets.push_back(ws);
-	self->m_weaponTemplateSetFinder.clear();
 }
 
 //-------------------------------------------------------------------------------------------------

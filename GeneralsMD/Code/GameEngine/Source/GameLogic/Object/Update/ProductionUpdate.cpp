@@ -162,6 +162,7 @@ ProductionEntry::ProductionEntry( void )
 	m_productionID = (ProductionID)1;
 	m_percentComplete = 0.0f;
 	m_framesUnderConstruction = 0;
+	m_totalProductionFrames = 0;
 	m_next = NULL;
 	m_prev = NULL;
 	//Added By Sadullah Nader
@@ -169,6 +170,7 @@ ProductionEntry::ProductionEntry( void )
 	m_productionQuantityProduced = 0;
 	m_productionQuantityTotal = 0;
 	//
+	m_costPaid = 0;
 }  // end ProductionEntry
 
 //-------------------------------------------------------------------------------------------------
@@ -305,12 +307,13 @@ Bool ProductionUpdate::queueUpgrade( const UpgradeTemplate *upgrade )
 
 	// take the cost for the build away from the player
 	Money *money = player->getMoney();
-	money->withdraw( upgrade->calcCostToBuild( player ) );
+	const UnsignedInt costPaid = money->withdraw( upgrade->calcCostToBuild( player ) );
 
 	// allocate a new production entry
 	ProductionEntry *production = newInstance(ProductionEntry);
 
 	// assing production entry data
+	production->m_costPaid = costPaid;
 	production->m_type = PRODUCTION_UPGRADE;
 	production->m_upgradeToResearch = upgrade;
 	production->m_productionID = PRODUCTIONID_INVALID;  // not needed for upgrades, you can only have one of
@@ -373,7 +376,7 @@ void ProductionUpdate::cancelUpgrade( const UpgradeTemplate *upgrade )
 	if( refundIt )
 	{
 		Money *money = player->getMoney();
-		money->deposit( production->m_upgradeToResearch->calcCostToBuild( player ) );
+		money->deposit( production->m_costPaid );
 	}
 
 	// remove this production from the queue
@@ -456,11 +459,12 @@ Bool ProductionUpdate::queueCreateUnit( const ThingTemplate *unitType, Productio
 	// take the cost for the build away from the player
 	Player *player = getObject()->getControllingPlayer();
 	Money *money = player->getMoney();
-	money->withdraw( unitType->calcCostToBuild( player ) );
+	const UnsignedInt costPaid = money->withdraw( unitType->calcCostToBuild( player ) );
 
 	// allocate a new production entry
 	ProductionEntry *production = newInstance(ProductionEntry);
 
+	production->m_costPaid = costPaid;
 	production->m_productionQuantityTotal = getQuantityPerOrder( unitType );
 	production->m_productionQuantityProduced = 0;
 
@@ -504,7 +508,7 @@ Bool ProductionUpdate::cancelUnitCreate( ProductionID productionID )
 			// give the player the cost of the object back
 			Player *player = getObject()->getControllingPlayer();
 			Money *money = player->getMoney();
-			money->deposit( production->m_objectToProduce->calcCostToBuild( player ) );
+			money->deposit( production->m_costPaid );
 
 			// remove from queue list
 			removeFromProductionQueue( production );
@@ -802,15 +806,25 @@ UpdateSleepTime ProductionUpdate::update( void )
 
 	}  // end if
 
-	// increase the frames we've been under production for
-	production->m_framesUnderConstruction++;
-
 	// how many total logic frames does it take to produce this unit
 	Int totalProductionFrames;
 	if( production->m_type == PRODUCTION_UNIT )
 		totalProductionFrames = production->m_objectToProduce->calcTimeToBuild( player );
 	else
 		totalProductionFrames = production->m_upgradeToResearch->calcTimeToBuild( player );
+
+	//
+	// The build time moves with power, the factory count and the rest.  Rescale the frames already
+	// done to the new time so the fraction finished carries over.  Measuring the old count against
+	// the new time applied the new rate to the whole build: a first power plant finished a half-built
+	// dozer on the spot, and losing power sent a progress bar backwards.
+	//
+	if( production->m_totalProductionFrames > 0 && totalProductionFrames != production->m_totalProductionFrames )
+		production->m_framesUnderConstruction = production->m_framesUnderConstruction * totalProductionFrames / production->m_totalProductionFrames;
+	production->m_totalProductionFrames = totalProductionFrames;
+
+	// increase the frames we've been under production for
+	production->m_framesUnderConstruction++;
 
 	// figure out our percent complete
 	production->m_percentComplete = INT_TO_REAL( production->m_framesUnderConstruction ) /
@@ -1346,7 +1360,9 @@ void ProductionUpdate::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 1;
+	// 2: each entry carries what was paid for it
+	// 3: each entry carries the build time its frame count was measured against
+	XferVersion currentVersion = 3;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -1396,6 +1412,12 @@ void ProductionUpdate::xfer( Xfer *xfer )
 
 			// exit door
 			xfer->xferInt( (Int*)&production->m_exitDoor );
+
+			// cost paid
+			xfer->xferUnsignedInt( &production->m_costPaid );
+
+			// build time the frame count was measured against
+			xfer->xferInt( &production->m_totalProductionFrames );
 
 		}  // end for
 
@@ -1485,6 +1507,18 @@ void ProductionUpdate::xfer( Xfer *xfer )
 
 			// exit door
 			xfer->xferInt( (Int*)&production->m_exitDoor );
+
+			// cost paid; an older save refunds at today's price, as it always did
+			if( version >= 2 )
+				xfer->xferUnsignedInt( &production->m_costPaid );
+			else if( production->m_type == PRODUCTION_UNIT )
+				production->m_costPaid = production->m_objectToProduce->calcCostToBuild( getObject()->getControllingPlayer() );
+			else
+				production->m_costPaid = production->m_upgradeToResearch->calcCostToBuild( getObject()->getControllingPlayer() );
+
+			// an older save leaves it 0, and the first update measures against whatever it finds
+			if( version >= 3 )
+				xfer->xferInt( &production->m_totalProductionFrames );
 
 		}  // end for, i
 

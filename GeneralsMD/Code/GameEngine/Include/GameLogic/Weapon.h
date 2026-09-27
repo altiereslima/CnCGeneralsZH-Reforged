@@ -822,7 +822,7 @@ private:
 	OK to swap an Object's Weapon out at any given time.)
 */
 //-------------------------------------------------------------------------------------------------
-class WeaponStore : public SubsystemInterface
+class WeaponStore : public SubsystemInterface, public Snapshot
 {
 	friend class WeaponTemplate;
 
@@ -848,6 +848,9 @@ public:
 		return newInstance(Weapon)(tmpl, wslot);	// my, that was easy
 	}
 
+	// frees a Weapon at the end of this logic frame, for one that may still be firing on the stack
+	void deleteWeaponLater( Weapon *weapon ) { m_weaponsToDelete.push_back( weapon ); }
+
 	void createAndFireTempWeapon(const WeaponTemplate* w, const Object *source, const Coord3D* pos);
 	void createAndFireTempWeapon(const WeaponTemplate* w, const Object *source, Object *target);
 	
@@ -863,8 +866,16 @@ protected:
 	WeaponTemplate *newOverride( WeaponTemplate *weaponTemplate );
 
 	void deleteAllDelayedDamage();
+	void deleteWeaponsNow();
 	void resetWeaponTemplates( void );
 	void setDelayedDamage(const WeaponTemplate *weapon, const Coord3D* pos, UnsignedInt whichFrame, ObjectID sourceID, ObjectID victimID, const WeaponBonus& bonus);
+
+	// Snapshot: the hits each weapon's historic bonus is counting and the delayed damage still in
+	// flight, both keyed by weapon name. A save lost both, so an Inferno bonus half counted and a
+	// tank shell in the air were gone after a load.
+	virtual void crc( Xfer *xfer ) { }
+	virtual void xfer( Xfer *xfer );
+	virtual void loadPostProcess( void ) { }
 
 private:
 
@@ -892,6 +903,7 @@ private:
 	typedef std::hash_map<NameKeyType, WeaponTemplate*, rts::hash<NameKeyType>, rts::equal_to<NameKeyType> > WeaponTemplateMap;
 	WeaponTemplateMap m_weaponTemplateHashMap;
 	std::list<WeaponDelayedDamageInfo> m_weaponDDI;
+	std::vector<Weapon*> m_weaponsToDelete;			///< from deleteWeaponLater, freed by the next update or reset; nothing in it is game state
 };
 
 // EXTERNALS //////////////////////////////////////////////////////////////////////////////////////

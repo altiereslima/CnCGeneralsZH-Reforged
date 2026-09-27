@@ -197,7 +197,7 @@ public:
 						UnsignedInt decayFrames = DEF_DECAY_FRAMES, 
 						UnsignedInt sustainAtPeak = DEF_SUSTAIN_FRAMES ); // ask MLorenzen
 	void sustain(void) { m_envState = ENVELOPE_STATE_SUSTAIN; }
-	void release(void) { m_envState = ENVELOPE_STATE_DECAY; }
+	void release(void);
 	void rest(void)    { m_envState = ENVELOPE_STATE_REST; } // goes away now!
 	Bool isEffective() const { return m_affect; }
 	const Vector3* getColor() const { return &m_currentColor; }

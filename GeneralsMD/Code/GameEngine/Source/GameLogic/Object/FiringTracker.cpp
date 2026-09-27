@@ -167,6 +167,10 @@ void FiringTracker::shotFired(const Weapon* weaponFired, ObjectID victimID)
 		{
 			AudioEventRTS audio = weaponFired->getFireSound();
 			audio.setObjectID(getObject()->getID());
+			// Still firing but no longer playing: the audio manager dropped the loop, usually because the
+			// camera moved out of its range. Picking it up again replayed the Attack part as if the
+			// weapon had just opened fire (an ECM tank's jammer, upstream #166).
+			audio.setSkipAttack(m_frameToStopLoopingSound != 0 && now < m_frameToStopLoopingSound);
 			m_audioHandle = TheAudio->addAudioEvent( &audio );
 		}
 		m_frameToStopLoopingSound = now + fireSoundLoopTime;

@@ -289,6 +289,8 @@ public:
 	std::vector<AsciiString>					m_extraPublicBones;
 	AsciiString												m_trackFile;						///< if present, leaves tracks using this texture
 	AsciiString												m_attachToDrawableBone;
+	AsciiString												m_replaceTextureOld;		///< with m_replaceTextureNew, one texture this module draws in place of another on every model
+	AsciiString												m_replaceTextureNew;
 #ifdef CACHE_ATTACH_BONE
 	mutable Vector3										m_attachToDrawableBoneOffset;
 #endif
@@ -329,6 +331,7 @@ public:
 
 private:
 	static void parseConditionState( INI* ini, void *instance, void * /*store*/, const void* /*userData*/ );
+	static void parseReplaceTexture( INI* ini, void *instance, void * /*store*/, const void* /*userData*/ );
 
 public:
  	virtual void crc( Xfer *xfer );

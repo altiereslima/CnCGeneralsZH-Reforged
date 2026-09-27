@@ -1205,6 +1205,18 @@ StateReturnType DozerPrimaryIdleState::update( void )
 		m_idleTooLongTimestamp = TheGameLogic->getFrame();
 
 	//
+	// Inside a tunnel, a transport or a garrison a builder can reach nothing.  It used to look for work
+	// from in there all the same: a Worker sent into a tunnel on its way to a foundation took that
+	// foundation back up a second later, and one loaded into a truck beside a site went on building it.
+	// The idle clock starts again when it comes out.
+	//
+	if( dozer->getContainedBy() )
+	{
+		m_idleTooLongTimestamp = TheGameLogic->getFrame();
+		return STATE_CONTINUE;
+	}
+
+	//
 	// a builder that has just gone idle next to an unfinished structure nobody is working on
 	// (its own next one, an abandoned one, a dead dozer's) picks that job up.  A second's
 	// grace lets a follow-up order from the player win; the scan itself runs once a second.
@@ -1728,7 +1740,12 @@ UpdateSleepTime DozerAIUpdate::update( void )
 		if( currentTask == DOZER_TASK_REPAIR &&
 				TheActionManager->canRepairObject( getObject(), targetObject, getLastCommandSource() ) == FALSE )
 			invalidTask = TRUE;
-		
+
+		// a job cannot be done from inside a container; the build step took "not moving" for "arrived"
+		// and went on building from wherever the container stood
+		if( getObject()->getContainedBy() )
+			invalidTask = TRUE;
+
 		// cancel the task if it's now invalid
 		if( invalidTask == TRUE )
 			cancelTask( currentTask );
@@ -2258,17 +2275,24 @@ void DozerAIUpdate::internalCancelTask( DozerTask task )
 	// call the single method that gets called for completing and canceling tasks
 	internalTaskCompleteOrCancelled( task );
 
+	const ObjectID cancelledTargetID = m_task[ task ].m_targetObjectID;
+
 	// remove the info for this task
 	m_task[ task ].m_targetObjectID = INVALID_ID;
 	m_task[ task ].m_taskOrderFrame = 0;
-	
+
 	// remove dock point info for this task
 	for( Int i = 0; i < DOZER_NUM_DOCK_POINTS; i++ )
 		m_dockPoint[ task ][ i ].valid = FALSE;
-	
+
 	// stop the dozer from moving
 	AIUpdateInterface *ai = getObject()->getAIUpdateInterface();
 	ai->aiIdle( CMD_FROM_AI );
+
+	// The walk to the building ignored it as an obstacle, and only arriving cleared that. A move
+	// ordered before arriving would path straight through the building.
+	if( ai->getIgnoredObstacleID() == cancelledTargetID )
+		ai->ignoreObstacle( NULL );
 
 }  // end internalCancelTask
 
@@ -2295,6 +2319,10 @@ void DozerAIUpdate::internalTaskCompleteOrCancelled( DozerTask task )
 
 			// the builder is no longer actively building something
 			getObject()->clearModelConditionState( MODELCONDITION_ACTIVELY_CONSTRUCTING );
+
+			// and the site's construction loop goes with it: a builder stopped halfway left it playing,
+			// and resuming the build stacked a second one on top
+			finishBuildingSound();
 
 			// And the thing we were working on is no longer being actively built
 
@@ -2560,6 +2588,8 @@ void DozerAIUpdate::aiDoCommand(const AICommandParms* parms)
 //------------------------------------------------------------------------------------------------
 void DozerAIUpdate::startBuildingSound( const AudioEventRTS *sound, ObjectID constructionSiteID )
 {
+	// the handle is the only way to stop the loop, so drop the last one before it is overwritten
+	TheAudio->removeAudioEvent( m_buildingSound.getPlayingHandle() );
 	m_buildingSound = *sound;
 	m_buildingSound.setObjectID( constructionSiteID );
 	m_buildingSound.setPlayingHandle( TheAudio->addAudioEvent( &m_buildingSound ) );

@@ -151,10 +151,17 @@ void AISkirmishPlayer::processBaseBuilding( void )
 							if (priorID == spawnerID) {
 								DEBUG_LOG(("AI Found hole to rebuild %s\n", curPlan->getName().str()));
 								info->setObjectID(obj->getID());
+								break;
 							}
 						}
  					}
 					AIPlayer::profileBaseSubEnd( AIPlayer::BASE_SUB_HOLE );
+					// The hole rebuilds it by itself.  The bldg this pass tests further down is the outer
+					// one, still the null lookup of the dead building, so the entry went on to be picked
+					// for a dozer as well and a second copy went up beside the hole.
+					if (info->getObjectID() != INVALID_ID) {
+						continue;
+					}
 				}	else {
 					if (bldg->getControllingPlayer() == m_player) {
 						// Check for built or dozer missing.
@@ -608,14 +615,15 @@ void AISkirmishPlayer::acquireEnemy(void)
 			// distance to half the map, which reads as "ignore the one you are about to beat".
 			//
 			Bool alreadyTargeted = FALSE;
-			Bool attackingMe = FALSE;
+			// The candidate itself has to have picked us. EA asked this of every other AI in the loop
+			// below, which skips the candidate, so the bonus went to anyone but the aggressor.
+			Bool attackingMe = curPlayer->isSkirmishAIPlayer() && curPlayer->getCurrentEnemy()==m_player;
 			Int k;
 			for (k=0; k<ThePlayerList->getPlayerCount(); k++) {
 				if (k==i) continue;  // don't count self.
 				Player *somePlayer = ThePlayerList->getNthPlayer(k);
 				if (!somePlayer->isSkirmishAIPlayer()) continue;
 				if (somePlayer->getCurrentEnemy()==curPlayer) alreadyTargeted = TRUE;
-				if (somePlayer->getCurrentEnemy()==m_player) attackingMe = TRUE;
 			}
 
 			const Real share = (estateTotal > 0.0f && i < MAX_PLAYER_COUNT) ? (estate[i] / estateTotal) : 0.0f;
@@ -1317,12 +1325,23 @@ void AISkirmishPlayer::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 1;
+	// 2: the current enemy and the frame to look for one again.  Without them a loaded game picked
+	//    its enemy afresh on the first frame and played on differently from the one that was saved.
+	XferVersion currentVersion = 2;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
 	// xfer base class info
 	AIPlayer::xfer( xfer );
+
+	if( version >= 2 )
+	{
+		xfer->xferUnsignedInt( &m_frameToCheckEnemy );
+		Int enemyIndex = m_currentEnemy ? m_currentEnemy->getPlayerIndex() : -1;
+		xfer->xferInt( &enemyIndex );
+		if( xfer->getXferMode() == XFER_LOAD )
+			m_currentEnemy = enemyIndex >= 0 ? ThePlayerList->getNthPlayer( enemyIndex ) : NULL;
+	}
 
 	// front base defense
 	xfer->xferInt( &m_curFrontBaseDefense );

@@ -356,8 +356,10 @@ void W3DGadgetHorizontalSliderImageDrawA( GameWindow *window,
 
 		leftImageRight = leftImageLeft					= GadgetSliderGetDisabledImageLeft( window );
 		rightImageRight = rightImageLeft				= GadgetSliderGetDisabledImageRight( window );
-//		centerImageRight = centerImageLeft				= GadgetSliderGetDisabledImageCenter( window );
-//		smallCenterImageRight = smallCenterImageLeft	= GadgetSliderGetDisabledImageSmallCenter( window );
+		// these two were commented out, which left the centre images as whatever was on the stack for
+		// every disabled slider: the sanity check below read them and the draw went through them
+		centerImageRight = centerImageLeft				= GadgetSliderGetDisabledImageCenter( window );
+		smallCenterImageRight = smallCenterImageLeft	= GadgetSliderGetDisabledImageSmallCenter( window );
 
 	}  // end if, disabled
 	else //if( BitTest( instData->getState(), WIN_STATE_HILITED ) )

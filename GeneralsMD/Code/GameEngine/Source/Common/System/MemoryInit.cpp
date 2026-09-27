@@ -784,7 +784,7 @@ void userMemoryManagerInitPools()
 		{
 			if (buf[0] == ';')
 				continue;
-			if (sscanf(buf, "%s %d %d", poolName, &initial, &overflow ) == 3)
+			if (sscanf(buf, "%255s %d %d", poolName, &initial, &overflow ) == 3)
 			{
 				for (PoolSizeRec* p = sizes; p->name != NULL; ++p)
 				{

@@ -40,6 +40,7 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
 #include "Common/PerfTimer.h"
+#include "Common/Player.h"
 #include "Common/Team.h"
 #include "Common/Xfer.h"
 #include "Common/ThingTemplate.h"
@@ -242,6 +243,7 @@ Bool AIGuardMachine::lookForInnerTarget(void)
 	PartitionFilterRelationship					f5(owner, PartitionFilterRelationship::ALLOW_NEUTRAL);
 	PartitionFilterPossibleToEnter			f6(owner, CMD_FROM_AI);
 	PartitionFilterPossibleToHijack			f7(owner, CMD_FROM_AI);
+	PartitionFilterFreeOfFog						filterFogged(owner->getControllingPlayer()->getPlayerIndex());
 
 	PartitionFilter *filters[16];
 	Int count = 0;
@@ -270,6 +272,9 @@ Bool AIGuardMachine::lookForInnerTarget(void)
 	}
 
 	filters[count++] = &filterMapStatus;
+	// A guard used to lock onto enemies standing in fog, which every other auto-target refuses
+	// (getNextMoodTarget's UNFOGGED). It picks from what its player can see now.
+	filters[count++] = &filterFogged;
 
 	Real visionRange = AIGuardMachine::getStdGuardRange(owner);
 

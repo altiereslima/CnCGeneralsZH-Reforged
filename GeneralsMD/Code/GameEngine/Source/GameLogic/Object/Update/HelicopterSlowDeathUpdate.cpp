@@ -455,6 +455,15 @@ UpdateSleepTime HelicopterSlowDeathBehavior::update( void )
 			// mark the frame we hit the ground on
 			m_hitGroundFrame = TheGameLogic->getFrame();
 
+			// A copter down before its blades flew off never reached the ejection above, which only
+			// runs in the air: a veteran Comanche shot down low lost its pilot (upstream #175).
+			if( m_bladeFlyOffFrame > 0 )
+			{
+				m_bladeFlyOffFrame = 0;
+				if( modData->m_oclEjectPilot && copter->getVeterancyLevel() > LEVEL_REGULAR )
+					EjectPilotDie::ejectPilot( modData->m_oclEjectPilot, copter, NULL );
+			}
+
 			// make hit ground effect
 			FXList::doFXObj( modData->m_fxHitGround, copter );
 			ObjectCreationList::create( modData->m_oclHitGround, copter, NULL );
@@ -562,5 +571,17 @@ void HelicopterSlowDeathBehavior::loadPostProcess( void )
 
 	// extend base class
 	SlowDeathBehavior::loadPostProcess();
+
+	// the death loop plays from the start of the spiral until the ground; a save carries neither the
+	// event nor its handle, so a copter loaded mid-spiral fell in silence
+	if( isSlowDeathActivated() && m_hitGroundFrame == 0 )
+	{
+		m_deathSound = getHelicopterSlowDeathBehaviorModuleData()->m_deathSound;
+		if( m_deathSound.getEventName().isEmpty() == false )
+		{
+			m_deathSound.setObjectID( getObject()->getID() );
+			m_deathSound.setPlayingHandle( TheAudio->addAudioEvent( &m_deathSound ) );
+		}
+	}
 
 }  // end loadPostProcess

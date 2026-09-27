@@ -220,14 +220,10 @@ ParameterClass::Get_Name (void) const
 inline void
 ParameterClass::Set_Name (const char *new_name)
 {
-	if (m_Name != NULL) {
-		::free ((void *)m_Name);
-		m_Name = NULL;
-	}
-
-	if (new_name != NULL) {
-		m_Name = ::strdup (new_name);
-	}
+	// Copy before freeing the old name: new_name may point into it.
+	char *name = (new_name != NULL) ? ::strdup (new_name) : NULL;
+	::free ((void *)m_Name);
+	m_Name = name;
 
 	return ;
 }

@@ -29,6 +29,7 @@
 #include "Common/ControlServer.h"
 #include "Common/Energy.h"
 #include "Common/GameEngine.h"
+#include "Common/GameState.h"
 #include "Common/GlobalData.h"
 #include "Common/MessageStream.h"
 #include "Common/Money.h"
@@ -647,6 +648,35 @@ static void handleCommand( const AsciiString &command )
 	{
 		theQuitRequested = TRUE;
 		replyOk( "\"quitting\":true" );
+		return;
+	}
+
+	/* save <name>: the save menu's Save, into <name>.sav in the save directory, so a script can make
+		 the file -loadsave opens.  Letters, digits, - and _ only, since it becomes a path. */
+	if (strncmp( command.str(), "save ", 5 ) == 0)
+	{
+		AsciiString name( command.str() + 5 );
+		name.trim();
+		if (name.isEmpty() || strspn( name.str(), "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" ) != (size_t)name.getLength())
+		{
+			replyError( "save wants a name of letters, digits, - and _" );
+			return;
+		}
+		if (TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame())
+		{
+			replyError( "save needs a match in progress" );
+			return;
+		}
+		AsciiString filename;
+		filename.format( "%s.sav", name.str() );
+		UnicodeString description;
+		description.translate( name );
+		if (TheGameState->saveGame( filename, description, SAVE_FILE_TYPE_NORMAL ) != SC_OK)
+		{
+			replyError( "the game could not write the save" );
+			return;
+		}
+		replyOk( "\"saved\":true" );
 		return;
 	}
 

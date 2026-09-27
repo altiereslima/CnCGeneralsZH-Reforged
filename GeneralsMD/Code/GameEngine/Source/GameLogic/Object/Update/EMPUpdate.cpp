@@ -238,9 +238,11 @@ void EMPUpdate::doDisableAttack( void )
 
 
 
-//////////////	    // must match our kindof flags (if any)
-//////////////	    if (data && !curVictim->isKindOfMulti(data->m_victimKindOf, data->m_victimKindOfNot))
-//////////////		    continue;
+			// must match our kindof flags (if any).  VictimRequiredKindOf and VictimForbiddenKindOf were
+			// parsed and then ignored with this commented out; no shipped EMP sets either, so both masks
+			// are empty and this passes everything for them.
+			if (!curVictim->isKindOfMulti(data->m_victimKindOf, data->m_victimKindOfNot))
+				continue;
 
 
 

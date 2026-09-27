@@ -119,6 +119,7 @@ public:
 	virtual void beginSlowDeath( const DamageInfo *damageInfo ) = 0;
 	virtual Int getProbabilityModifier( const DamageInfo *damageInfo ) const = 0;
 	virtual Bool isDieApplicable(const DamageInfo *damageInfo) const = 0;
+	virtual Bool canBeginSecondLife() const = 0;	///< can this module turn an UndeadBody's first death into its second life
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -154,6 +155,7 @@ public:
 	virtual void beginSlowDeath( const DamageInfo *damageInfo );
 	virtual Int getProbabilityModifier( const DamageInfo *damageInfo ) const;
 	virtual Bool isDieApplicable(const DamageInfo *damageInfo) const { return getSlowDeathBehaviorModuleData()->m_dieMuxData.isDieApplicable(getObject(), damageInfo); }
+	virtual Bool canBeginSecondLife() const { return FALSE; }
 
 protected:
 

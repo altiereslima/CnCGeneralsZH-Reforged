@@ -196,6 +196,7 @@ public:
 	void setSlot( Int slotNum, GameSlot slotInfo );		///< Set the slot state (human, open, AI, etc)
 	GameSlot* getSlot( Int slotNum );									///< Get the slot
 	const GameSlot* getConstSlot( Int slotNum ) const;	///< Get the slot
+	void handleOriginalSetups( void );								///< a restart puts back the pre-random slot setup, a first start saves it
 	virtual Bool amIHost( void ) const;															///< Convenience function - is the local player the game host?
 	virtual Int getLocalSlotNum( void ) const;				///< Get the local slot number, or -1 if we're not present
 	Int getSlotNum( AsciiString userName ) const;			///< Get the slot number corresponding to a specific user, or -1 if he's not present

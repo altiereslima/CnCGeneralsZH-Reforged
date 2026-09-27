@@ -536,7 +536,7 @@ public:
 	/**
 		the given object has just become (or just ceased to be) a member of one of our teams (or subteams)
 	*/
-	void becomingTeamMember(Object *obj, Bool yes);
+	void becomingTeamMember(Object *obj, Bool yes, Bool objectXferLoad = false);
 
 	/**
 		this is called when the player becomes the local player (yes==true)
@@ -699,6 +699,8 @@ public:
 	
 	/// All of our units are new spied upon; they sight for the given enemy
 	void setUnitsVisionSpied( Bool setting, KindOfMaskType whichUnits, PlayerIndex byWhom );
+	/// Put a unit joining (or leaving) this player under (or out of) every spy vision now on against it
+	void applyVisionSpies( Object *obj, Bool setting ) const;
 
 	/// Destroy all of the teams for this player, causing him to DIE.
 	void killPlayer(void);
@@ -828,6 +830,17 @@ public:
 	Int getRankLevel() const							{ return m_rankLevel; }
 	Int getSkillPointsLevelUp() const			{ return m_levelUp;	}
 	Int getSkillPointsLevelDown() const			{ return m_levelDown;	}
+	/// How far from this rank to the next, 0 to 100.  A level a script disabled (-1 points) or two
+	/// ranks a Rank.ini gave the same points leave no way on, and count as full; the bars used to
+	/// divide by that difference.
+	Int getRankProgressPercent() const
+	{
+		const Int span = m_levelUp - m_levelDown;
+		if( span <= 0 )
+			return 100;
+		const Int progress = ( m_skillPoints - m_levelDown ) * 100 / span;
+		return progress < 0 ? 0 : ( progress > 100 ? 100 : progress );
+	}
 	UnicodeString getGeneralName() const	{ return m_generalName; }	
 	void setGeneralName( UnicodeString name ){ m_generalName = name;	}
 	/// returns TRUE if rank level really changed.
@@ -944,6 +957,14 @@ private:
 	Bool									m_unitsShouldHunt;
 
 	Bool									m_attackedBy[MAX_PLAYER_COUNT];	///< For each player, have they attacked me?
+
+	struct VisionSpy
+	{
+		KindOfMaskType	kinds;
+		PlayerIndex			byWhom;
+	};
+	typedef std::vector<VisionSpy> VisionSpyList;
+	VisionSpyList					m_visionSpies;	///< Spy visions on against this player, one entry per switch-on, so a unit made later is spied too
 	UnsignedInt						m_attackedFrame;	///< Last frame attacked.
 	
 	Real									m_cashBountyPercent;

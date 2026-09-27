@@ -1504,7 +1504,15 @@ RenderObjClass *	 BaseHeightMapRenderObjClass::Clone(void) const
 /** Loads the roads from the map objects. */
 //=============================================================================
 void BaseHeightMapRenderObjClass::loadRoadsAndBridges(W3DTerrainLogic *pTerrainLogic, Bool saveGame)
-{	
+{
+	// Bridges first and whatever the device says: loading them is what hands each bridge to the
+	// terrain logic, and nothing loads them again.  Behind the device test below, a game alt-tabbed
+	// out of fullscreen while the map loaded started with no bridges to cross at all, and in a
+	// network game with a map the other machines did not have.  Their buffers fill when drawn.
+	if (m_bridgeBuffer) {
+		m_bridgeBuffer->loadBridges(pTerrainLogic, saveGame);
+	}
+
 	if (DX8Wrapper::_Get_D3D_Device() && (DX8Wrapper::_Get_D3D_Device()->TestCooperativeLevel()) != D3D_OK)
 		return;	//device not ready to render anything
 
@@ -1513,9 +1521,6 @@ void BaseHeightMapRenderObjClass::loadRoadsAndBridges(W3DTerrainLogic *pTerrainL
 		m_roadBuffer->loadRoads();
 	}
 #endif
-	if (m_bridgeBuffer) {
-		m_bridgeBuffer->loadBridges(pTerrainLogic, saveGame);
-	}
 }
 
 // ============================================================================

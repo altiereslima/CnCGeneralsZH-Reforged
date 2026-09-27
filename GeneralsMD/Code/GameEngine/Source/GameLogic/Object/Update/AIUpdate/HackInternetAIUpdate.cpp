@@ -215,20 +215,23 @@ void HackInternetAIUpdate::crc( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
-	* 1: Initial version */
+	* 1: Initial version
+	* 2: the pending command keeps its source */
 // ------------------------------------------------------------------------------------------------
 void HackInternetAIUpdate::xfer( Xfer *xfer )
 {
   // version
-  XferVersion currentVersion = 1;
+  XferVersion currentVersion = 2;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
- 
+
  // extend base class
 	AIUpdateInterface::xfer(xfer);
 	xfer->xferBool(&m_hasPendingCommand);
 	if (m_hasPendingCommand) {
 		m_pendingCommand.doXfer(xfer);
+		if (version < 2)
+			m_pendingCommand.setCommandSource(CMD_FROM_AI);
 	}
 }  // end xfer
 

@@ -329,4 +329,8 @@ void MissileLauncherBuildingUpdate::loadPostProcess( void )
 	// extend base class
 	UpdateModule::loadPostProcess();
 
+	// the open-door loop starts on the switch to DOOR_OPEN, which a load does not repeat
+	if( m_doorState == DOOR_OPEN )
+		m_openIdleAudio.setPlayingHandle( TheAudio->addAudioEvent( &m_openIdleAudio ) );
+
 }  // end loadPostProcess

@@ -269,6 +269,20 @@ Real SupplyTruckAIUpdate::getWarehouseScanDistance() const
 	return 2 * getSupplyTruckAIUpdateModuleData()->m_warehouseScanDistance;
 }
 
+//-------------------------------------------------------------------------------------------------
+/** A player's order ends the forced trip back to supply duty that a supply center gives a fresh
+	* truck. */
+//-------------------------------------------------------------------------------------------------
+void SupplyTruckAIUpdate::aiDoCommand(const AICommandParms* parms)
+{
+	if (parms->m_cmdSource == CMD_FROM_PLAYER)
+	{
+		setForceWantingState(FALSE);
+	}
+
+	AIUpdateInterface::aiDoCommand(parms);
+}
+
 // ------------------------------------------------------------------------------------------------
 /** CRC */
 // ------------------------------------------------------------------------------------------------

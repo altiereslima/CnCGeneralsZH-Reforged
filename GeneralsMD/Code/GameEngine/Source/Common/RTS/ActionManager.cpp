@@ -285,6 +285,22 @@ Bool ActionManager::canGetRepairedAt( const Object *obj, const Object *repairDes
 		if( !obj->isAboveTerrain() ||
 					repairDest->isKindOf( KINDOF_FS_AIRFIELD ) == FALSE )
 			return FALSE;
+
+		// A plane lands on a parking space, its own or a free one; helicopters use the helipad. With
+		// every space held by other planes the cursor still offered the landing, and the plane never
+		// came down (upstream #152). canEnterObject asks the same of a plane coming in to rearm.
+		if( !obj->isKindOf( KINDOF_PRODUCED_AT_HELIPAD ) )
+		{
+			Bool parking = FALSE;
+			for( BehaviorModule** i = repairDest->getBehaviorModules(); *i && !parking; ++i )
+			{
+				ParkingPlaceBehaviorInterface* pp = (*i)->getParkingPlaceBehaviorInterface();
+				if( pp != NULL )
+					parking = pp->hasReservedSpace( obj->getID() ) || pp->hasAvailableSpaceFor( obj->getTemplate() );
+			}
+			if( !parking )
+				return FALSE;
+		}
 	}
 	else
 	{

@@ -665,7 +665,8 @@ add_custom_command(TARGET generals POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           ${CMAKE_CURRENT_SOURCE_DIR}/Data/Install_Final.bmp
           ${CMAKE_CURRENT_SOURCE_DIR}/../Run/
-  # The three command bar plates per side and the smoke signals' ground marks.  A loose
+  # The three command bar plates per side, the smoke signals' ground marks and the
+  # SupW uplink's pink laser strip (Tools/pink_laser.py).  A loose
   # texture beats every .big, so these land in Run/Art/Textures where the W3D file
   # system looks first.
   COMMAND ${CMAKE_COMMAND} -E copy_directory

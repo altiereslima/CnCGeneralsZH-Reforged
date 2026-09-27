@@ -582,7 +582,11 @@ TEST(balance_patch_edits_a_weapon_in_place)
 	 GameEngine::init loads the file and folds it into the multiplayer INI CRC, so both ways of
 	 getting it wrong are expensive: a malformed block throws and takes the whole startup down, and
 	 a regeneration that loses the LightPulse ships a file that lights nothing and still refuses
-	 every player who does not have that exact copy. */
+	 every player who does not have that exact copy.  Since then the file also carries fixes that
+	 are not lights: the Artillery Barrage's sound, with EA's own light, and the Superweapon uplink's
+	 pink death, which has none and is the one block the count leaves out. */
+static const char *const s_unlitReforgedFXList = "FXList SupW_FX_ParticleUplinkDeathInitial";
+
 TEST(fxlist_reforged_ini_parses_and_keeps_its_light)
 {
 	CHECK( bootOnce() );
@@ -606,7 +610,11 @@ TEST(fxlist_reforged_ini_parses_and_keeps_its_light)
 	char line[ 512 ];
 	while( fgets( line, sizeof( line ), fp ) != NULL )
 	{
-		if( strncmp( line, "FXList ", 7 ) == 0 )
+		if( strncmp( line, s_unlitReforgedFXList, strlen( s_unlitReforgedFXList ) ) == 0 )
+		{
+			open = 0;
+		}
+		else if( strncmp( line, "FXList ", 7 ) == 0 )
 		{
 			++blocks;
 			open = 1;
@@ -625,7 +633,7 @@ TEST(fxlist_reforged_ini_parses_and_keeps_its_light)
 	}
 	fclose( fp );
 
-	CHECK_EQ( blocks, 89 );
+	CHECK_EQ( blocks, 90 );
 	CHECK_EQ( lit, blocks );
 }
 
@@ -2263,6 +2271,61 @@ TEST(placement_grid_snap_puts_footprint_edges_on_cell_lines)
 
 	/* a template with no footprint worth the name still lands on a whole cell, not on nothing */
 	CHECK_NEAR(InGameUI::snapPlacementAxis(13.0f, 0.0f), 14.5f, 0.0001f);
+}
+
+TEST(placement_row_packs_the_footprint_along_the_nearest_eighth)
+{
+	Coord2D step;
+	const Real half = 0.70710678f;	/* cos and sin of an eighth of a turn */
+
+	/* facing along x, a 40 by 30 footprint: one piece per 40 dragged and the hair the logic's
+	 * clearance test needs between them, the first free */
+	CHECK_EQ(InGameUI::placementRow(119.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 3);
+	CHECK_NEAR(step.x, 40.5f, 0.0001f);
+	CHECK_NEAR(step.y, 0.0f, 0.0001f);
+	CHECK_EQ(InGameUI::placementRow(122.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 4);
+
+	/* a hand-drawn line 20 degrees off still runs straight, and backwards runs backwards */
+	CHECK_EQ(InGameUI::placementRow(-100.0f, 36.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 3);
+	CHECK_NEAR(step.x, -40.5f, 0.0001f);
+	CHECK_NEAR(step.y, 0.0f, 0.0001f);
+
+	/* along y the step is the footprint's other side */
+	InGameUI::placementRow(0.0f, -90.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step);
+	CHECK_NEAR(step.x, 0.0f, 0.0001f);
+	CHECK_NEAR(step.y, -30.5f, 0.0001f);
+
+	/* a diagonal slides each piece along the last one's long side instead of meeting it corner
+	 * to corner: 30 on each axis and the hair, where 40 by 30 left a triangle of ground */
+	CHECK_EQ(InGameUI::placementRow(80.0f, 60.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 3);
+	CHECK_NEAR(step.x, 30.0f + 0.5f * half, 0.001f);
+	CHECK_NEAR(step.y, 30.0f + 0.5f * half, 0.001f);
+
+	/* turned a quarter, the footprint's sides swap axes, Cos's float dust and all */
+	InGameUI::placementRow(100.0f, 0.0f, -0.00000004f, 1.0f, 20.0f, 15.0f, 50, &step);
+	CHECK_NEAR(step.x, 30.5f, 0.0001f);
+
+	/* turned an eighth, a row along the structure's own line stands face to face with the
+	 * next: a step 40 long, and the hair */
+	InGameUI::placementRow(100.0f, 100.0f, half, half, 20.0f, 15.0f, 50, &step);
+	CHECK_NEAR(step.x * step.x + step.y * step.y, 40.5f * 40.5f, 0.01f);
+	InGameUI::placementRow(-100.0f, 100.0f, half, half, 20.0f, 15.0f, 50, &step);
+	CHECK_NEAR(step.x * step.x + step.y * step.y, 30.5f * 30.5f, 0.01f);
+
+	/* and across the structure's line the row can do no better than corner to corner: the
+	 * shorter half-side's diagonal, 30 / cos 45 */
+	InGameUI::placementRow(100.0f, 0.0f, half, half, 20.0f, 15.0f, 50, &step);
+	CHECK_NEAR(step.x, 30.0f / half + 0.5f, 0.001f);
+	CHECK_NEAR(step.y, 0.0f, 0.0001f);
+
+	/* the step is the footprint, not the build grid's next whole cell */
+	InGameUI::placementRow(100.0f, 0.0f, 1.0f, 0.0f, 22.0f, 30.0f, 50, &step);
+	CHECK_NEAR(step.x, 44.5f, 0.0001f);
+
+	/* never more than the cap, never fewer than one, and no drag is one piece */
+	CHECK_EQ(InGameUI::placementRow(1000.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 5, &step), 5);
+	CHECK_EQ(InGameUI::placementRow(1000.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 0, &step), 1);
+	CHECK_EQ(InGameUI::placementRow(0.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 1);
 }
 
 
@@ -5216,6 +5279,17 @@ TEST(a_transferred_file_has_to_be_what_its_name_says_it_is)
 	CHECK( IsValidTransferFileContent( "maps\\foo\\foo.tga", makeTga( 128, TRUE ), 128 ) );
 	CHECK( !IsValidTransferFileContent( "maps\\foo\\foo.tga", makeTga( 128, FALSE ), 128 ) );
 	CHECK( !IsValidTransferFileContent( "maps\\foo\\foo.tga", text, 8 ) );
+
+	// a Targa 1.0 has no footer at all, and a header that holds up does instead: an 8 by 8
+	// truecolor at 32 bits, and one byte short of the pixels it promises
+	static const Int PLAIN_BYTES = 18 + 8 * 8 * 4;
+	UnsignedByte *plain = makeTga( PLAIN_BYTES, FALSE );
+	plain[2] = 2;
+	plain[12] = 8;
+	plain[14] = 8;
+	plain[16] = 32;
+	CHECK( IsValidTransferFileContent( "maps\\foo\\foo.tga", plain, PLAIN_BYTES ) );
+	CHECK( !IsValidTransferFileContent( "maps\\foo\\foo.tga", plain, PLAIN_BYTES - 1 ) );
 }
 
 /* The name a joining player sends goes into the game state string the lobby passes around, and that
@@ -11063,35 +11137,63 @@ TEST(the_health_bar_grows_with_the_unit_under_it_and_not_with_the_screens_width)
 	 spent, so a shift-held run of clicks does not put two structures on the same square.  What it
 	 remembers is the footprint, and two footprints that merely touch are two structures built flush
 	 against each other, which is most of a base wall. */
+static InGameUI::PlacementBox placementBox( Real x, Real y, Real c, Real s, Real halfMajor, Real halfMinor )
+{
+	InGameUI::PlacementBox box = { x, y, c, s, halfMajor, halfMinor };
+	return box;
+}
+
 TEST(two_structures_ordered_onto_the_same_ground_are_one_too_many)
 {
-	Region2D a, b;
-
-	a.lo.x = 0.0f;   a.lo.y = 0.0f;   a.hi.x = 40.0f;  a.hi.y = 40.0f;
+	const Real half = 0.70710678f;	/* cos and sin of an eighth of a turn */
+	InGameUI::PlacementBox a = placementBox( 20.0f, 20.0f, 1.0f, 0.0f, 20.0f, 20.0f );
+	InGameUI::PlacementBox b;
 
 	// itself, obviously
 	CHECK( InGameUI::footprintsOverlap( &a, &a ) );
 
 	// a corner inside it counts, from either side
-	b.lo.x = 39.0f;  b.lo.y = 39.0f;  b.hi.x = 79.0f;  b.hi.y = 79.0f;
+	b = placementBox( 59.0f, 59.0f, 1.0f, 0.0f, 20.0f, 20.0f );
 	CHECK( InGameUI::footprintsOverlap( &a, &b ) );
 	CHECK( InGameUI::footprintsOverlap( &b, &a ) );
 
 	// flush against it does not - a row of buildings on the build grid is not an overlap
-	b.lo.x = 40.0f;  b.lo.y = 0.0f;   b.hi.x = 80.0f;  b.hi.y = 40.0f;
+	b = placementBox( 60.0f, 20.0f, 1.0f, 0.0f, 20.0f, 20.0f );
 	CHECK( !InGameUI::footprintsOverlap( &a, &b ) );
 	CHECK( !InGameUI::footprintsOverlap( &b, &a ) );
 
 	// nor does clear of it, on either axis alone
-	b.lo.x = 10.0f;  b.lo.y = 41.0f;  b.hi.x = 30.0f;  b.hi.y = 60.0f;
+	b = placementBox( 20.0f, 50.5f, 1.0f, 0.0f, 10.0f, 9.5f );
 	CHECK( !InGameUI::footprintsOverlap( &a, &b ) );
-	b.lo.x = 41.0f;  b.lo.y = 10.0f;  b.hi.x = 60.0f;  b.hi.y = 30.0f;
+	b = placementBox( 50.5f, 20.0f, 1.0f, 0.0f, 9.5f, 10.0f );
 	CHECK( !InGameUI::footprintsOverlap( &a, &b ) );
 
 	// one wholly inside another - a small structure ordered into a big one's middle
-	b.lo.x = 10.0f;  b.lo.y = 10.0f;  b.hi.x = 20.0f;  b.hi.y = 20.0f;
+	b = placementBox( 15.0f, 15.0f, 1.0f, 0.0f, 5.0f, 5.0f );
 	CHECK( InGameUI::footprintsOverlap( &a, &b ) );
 	CHECK( InGameUI::footprintsOverlap( &b, &a ) );
+
+	//
+	// Two structures turned an eighth, side by side along their own faces.  The squares around
+	// them overlap by half their width; the structures themselves only touch, and the logic builds
+	// both - so the second click is not refused and the ghost does not slide off to leave a gap.
+	//
+	a = placementBox( 0.0f, 0.0f, half, half, 20.0f, 15.0f );
+	b = placementBox( 40.0f * half, 40.0f * half, half, half, 20.0f, 15.0f );
+	CHECK( !InGameUI::footprintsOverlap( &a, &b ) );
+	CHECK( !InGameUI::footprintsOverlap( &b, &a ) );
+	b = placementBox( -30.0f * half, 30.0f * half, half, half, 20.0f, 15.0f );
+	CHECK( !InGameUI::footprintsOverlap( &a, &b ) );
+
+	// a step shorter and they do share ground
+	b = placementBox( 38.0f * half, 38.0f * half, half, half, 20.0f, 15.0f );
+	CHECK( InGameUI::footprintsOverlap( &a, &b ) );
+
+	// and one turned against the other is judged on the other's sides too
+	b = placementBox( 34.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f );
+	CHECK( InGameUI::footprintsOverlap( &a, &b ) );
+	b = placementBox( 45.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f );
+	CHECK( !InGameUI::footprintsOverlap( &a, &b ) );
 
 	//
 	// and the window it is remembered for has to outlast a bad link: a network game runs the order
@@ -11099,6 +11201,75 @@ TEST(two_structures_ordered_onto_the_same_ground_are_one_too_many)
 	//
 	CHECK( (Int)InGameUI::PENDING_PLACEMENT_FRAMES >= 30 );
 	CHECK( (Int)InGameUI::PENDING_PLACEMENTS >= 2 );
+}
+
+/* A structure clicked out beside another by eye lands flush against it: a player's step is never
+	 the building's width to the unit, and the build grid alone cannot close the difference for a
+	 structure standing diagonal to it. */
+TEST(a_structure_clicked_beside_another_is_pulled_flush)
+{
+	const Real half = 0.70710678f;	/* cos and sin of an eighth of a turn */
+	const InGameUI::PlacementBox standing = placementBox( 0.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f );
+	InGameUI::PlacementBox mine;
+
+	/* short of touching by a little: pulled across to touching and the logic's hair, and put on
+	 * the line it was nearly on */
+	mine = placementBox( 45.0f, 3.0f, 1.0f, 0.0f, 20.0f, 15.0f );
+	CHECK( InGameUI::flushAgainst( &standing, &mine ) );
+	CHECK_NEAR( mine.x, 40.5f, 0.0001f );
+	CHECK_NEAR( mine.y, 0.0f, 0.0001f );
+
+	/* sunk into it by less than half: pushed back out */
+	mine = placementBox( 32.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f );
+	CHECK( InGameUI::flushAgainst( &standing, &mine ) );
+	CHECK_NEAR( mine.x, 40.5f, 0.0001f );
+
+	/* the other side of it works the same way */
+	mine = placementBox( 2.0f, -33.0f, 1.0f, 0.0f, 20.0f, 15.0f );
+	CHECK( InGameUI::flushAgainst( &standing, &mine ) );
+	CHECK_NEAR( mine.x, 0.0f, 0.0001f );
+	CHECK_NEAR( mine.y, -30.5f, 0.0001f );
+
+	/* a step off on the diagonal keeps to the diagonal, sliding along the long side */
+	mine = placementBox( 45.0f, 35.0f, 1.0f, 0.0f, 20.0f, 15.0f );
+	CHECK( InGameUI::flushAgainst( &standing, &mine ) );
+	CHECK_NEAR( mine.x, mine.y, 0.001f );
+	CHECK_NEAR( mine.y, 30.0f + 0.5f * half, 0.001f );
+
+	/* a gap of a cell and a half is a gap somebody meant */
+	mine = placementBox( 56.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f );
+	CHECK( !InGameUI::flushAgainst( &standing, &mine ) );
+	CHECK_NEAR( mine.x, 56.0f, 0.0001f );
+
+	/* sunk in past half is a click on the structure itself, not beside it */
+	mine = placementBox( 15.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f );
+	CHECK( !InGameUI::flushAgainst( &standing, &mine ) );
+
+	/* both turned an eighth: a step along their own faces goes face to face */
+	const InGameUI::PlacementBox diagonal = placementBox( 0.0f, 0.0f, half, half, 20.0f, 15.0f );
+	mine = placementBox( 45.0f * half - 4.0f * half, 45.0f * half + 4.0f * half, half, half, 20.0f, 15.0f );
+	CHECK( InGameUI::flushAgainst( &diagonal, &mine ) );
+	CHECK_NEAR( mine.x, 40.5f * half, 0.001f );
+	CHECK_NEAR( mine.y, 40.5f * half, 0.001f );
+
+	/* and a step sideways on the map, past structures standing diagonal to it, stays on the line
+	 * and nests corner into corner - a Power Plant at its own heading, 44 by 60, a player's step
+	 * 70 along and 3 off */
+	const InGameUI::PlacementBox plant = placementBox( 0.0f, 0.0f, half, -half, 22.0f, 30.0f );
+	mine = placementBox( 70.0f, 3.0f, half, -half, 22.0f, 30.0f );
+	CHECK( InGameUI::flushAgainst( &plant, &mine ) );
+	CHECK_NEAR( mine.x, 44.0f / half + 0.5f, 0.001f );
+	CHECK_NEAR( mine.y, 0.0f, 0.001f );
+	CHECK( !InGameUI::footprintsOverlap( &plant, &mine ) );
+
+	/* a quarter turn off still squares up, with its sides swapped */
+	mine = placementBox( 38.0f, 0.0f, 0.0f, 1.0f, 20.0f, 15.0f );
+	CHECK( InGameUI::flushAgainst( &standing, &mine ) );
+	CHECK_NEAR( mine.x, 35.5f, 0.0001f );
+
+	/* and one at some other angle is left where it was put */
+	mine = placementBox( 45.0f, 0.0f, 0.8660254f, 0.5f, 20.0f, 15.0f );
+	CHECK( !InGameUI::flushAgainst( &standing, &mine ) );
 }
 
 TEST(option_catalog_rows_are_well_formed)
@@ -13902,6 +14073,10 @@ TEST(the_spectator_page_has_its_pieces_and_no_option_clicks)
 	CHECK( page.find( "data-each=\"players\"" ) != std::string::npos );
 	// the players are on the Tab scoreboard, not in a strip across the top
 	CHECK( page.find( "data-each=\"seats\"" ) == std::string::npos );
+	// a replay's timeline: InGameUI reads the pointer's place along the element with id track
+	CHECK( page.find( "id=\"track\" class=\"sunk\" data-click=\"replay:seek\"" ) != std::string::npos );
+	CHECK( page.find( "data-click=\"replay:pause\"" ) != std::string::npos );
+	CHECK( page.find( "data-click=\"replay:speed:100\"" ) != std::string::npos );
 }
 
 #include "test_camera_behavior.inc"

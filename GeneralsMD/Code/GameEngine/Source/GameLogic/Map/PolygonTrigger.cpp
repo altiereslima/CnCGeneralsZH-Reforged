@@ -285,7 +285,7 @@ void PolygonTrigger::updateBounds(void)	const
 	}
 	m_boundsNeedsUpdate = 0;
 	Real halfWidth = (m_bounds.hi.x - m_bounds.lo.x) / 2.0f;
-	Real halfHeight = (m_bounds.hi.y + m_bounds.lo.y) / 2.0f;
+	Real halfHeight = (m_bounds.hi.y - m_bounds.lo.y) / 2.0f;
 
 	m_radius = sqrt(halfHeight*halfHeight + halfWidth*halfWidth);
 }
@@ -553,6 +553,10 @@ void PolygonTrigger::xfer( Xfer *xfer )
 
 	// bounds need update
 	xfer->xferBool( &m_boundsNeedsUpdate );
+
+	// the radius is derived from the points, and a save from before the half-height fix holds a wrong one
+	if( xfer->getXferMode() == XFER_LOAD )
+		m_boundsNeedsUpdate = TRUE;
 
 }  // end xfer
 

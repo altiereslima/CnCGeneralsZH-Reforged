@@ -35,6 +35,8 @@
 #include "Common/DrawnPath.h"
 #include "Common/GameAudio.h"
 #include "Common/GameEngine.h"
+#include "Common/GameState.h"
+#include "Common/RandomValue.h"
 #include "Common/GameType.h"
 #include "Common/MessageStream.h"
 #include "Common/PerfTimer.h"
@@ -610,7 +612,7 @@ void InGameUI::xfer( Xfer *xfer )
 					xfer->xferBool(&swInfo->m_hiddenByScript);
 					xfer->xferBool(&swInfo->m_hiddenByScience);
 					xfer->xferBool(&swInfo->m_ready);
-          if ( currentVersion >= 3 )
+          if ( version >= 3 )
           {
             xfer->xferBool( &swInfo->m_evaReadyPlayed );
           }
@@ -657,7 +659,7 @@ void InGameUI::xfer( Xfer *xfer )
 			xfer->xferBool(&hiddenByScript);
 			xfer->xferBool(&hiddenByScience);
 			xfer->xferBool(&ready);
-      if ( currentVersion >= 3 )
+      if ( version >= 3 )
       {
         xfer->xferBool( &evaReadyPlayed );
       }
@@ -1185,6 +1187,7 @@ InGameUI::InGameUI()
 	m_peaceTimeLabelDisplayString = NULL;
 	m_peaceCountdownDisplayString = NULL;
 	m_lastMoneyDisplayed = -1;
+	m_lastEarningDisplayed = 0;
 	m_hudDrawCount = 0;
 	m_hudLastSampleFrame = 0;
 	m_hudLastSampleMs = 0;
@@ -2204,6 +2207,228 @@ static void fillSpectatorCameraValues( std::vector< HtmlValues > &follows, HtmlV
 }
 
 //-------------------------------------------------------------------------------------------------
+// The replay strip, on the spectator's page where a player's command grid stands: the timeline and
+// the playback speed.  data-click="replay:seek" on #track jumps to the frame under the pointer,
+// "replay:pause" pauses and resumes, and "replay:speed:N" plays at N percent of the logic rate the
+// game was played at.  A seek forward fast-forwards, one picture in thirty drawn, until the frame
+// is reached.  A seek back loads the last checkpoint in front of the frame and runs forward from
+// there: the simulation keeps no history to step back through, so the replay saves the whole world
+// every half minute of it as it plays.  The load puts no loading screen up; the picture holds.
+//-------------------------------------------------------------------------------------------------
+static const std::string REPLAY_ACTION = "replay:";
+static const std::string REPLAY_SEEK = REPLAY_ACTION + "seek";
+static const std::string REPLAY_SEEK_TO = REPLAY_SEEK + ":";
+static const std::string REPLAY_PAUSE = REPLAY_ACTION + "pause";
+static const std::string REPLAY_SPEED = REPLAY_ACTION + "speed:";
+static const char *const REPLAY_TRACK = "#track";
+static const Int REPLAY_SPEEDS[] = { 50, 100, 200, 400, 800 };
+
+/** The frame a seek runs to, 0 for none.  Not a member: a seek back resets the whole interface when
+	* it starts the replay over, and the frame has to outlive that. */
+static UnsignedInt TheReplaySeekFrame = 0;
+
+/** 1x: the rate the game was played at.  A skirmish on its fast setting recorded 60. */
+static Int replayNormalFramesPerSecond( void )
+{
+	const Int recorded = TheRecorder->getPlaybackFramesPerSecond();
+	return recorded > 0 ? recorded : LOGICFRAMES_PER_SECOND;
+}
+
+/** The replay's length, or the frame reached if the header never had it written. */
+static UnsignedInt replayLength( void )
+{
+	return max( TheRecorder->getPlaybackFrameDuration(), TheGameLogic->getFrame() );
+}
+
+static void fillReplayValues( HtmlValues &values )
+{
+	if( !TheGameLogic->isInReplayGame() )
+		return;
+
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	const UnsignedInt length = replayLength();
+	values[ "replay" ] = "on";
+	values[ "replaypaused" ] = TheGameLogic->isGamePaused() ? "paused" : "";
+	values[ "replayseeking" ] = TheReplaySeekFrame > 0 ? "seeking" : "";
+	values[ "replaytime" ] = spectatorClock( frame );
+	values[ "replaylength" ] = spectatorClock( length );
+	values[ "replayshare" ] = std::to_string( length > 0 ? frame * PERCENT / length : 0 );
+
+	const Int speed = TheGameEngine->getFramesPerSecondLimit() * PERCENT / replayNormalFramesPerSecond();
+	for( Int each = 0; each < (Int)ARRAY_SIZE( REPLAY_SPEEDS ); each++ )
+		values[ REPLAY_SPEED + std::to_string( REPLAY_SPEEDS[ each ] ) ] = speed == REPLAY_SPEEDS[ each ] ? "on" : "";
+}
+
+/** A rewind checkpoint: the world saved between two logic frames, where playback stood in the
+	* replay, and the CRCs the last logic frame posted that the next one has yet to compare.  Those
+	* are messages on their way, and the load's reset empties the stream they are in. */
+struct ReplayCheckpoint
+{
+	AsciiString path;
+	RecorderClass::PlaybackCursor cursor;
+	GameLogicRandomState random;			///< a save game does not carry the logic's random stream
+	std::vector< std::pair< Int, Bool > > postedCRCs;
+};
+
+static const UnsignedInt REPLAY_CHECKPOINT_FRAMES = LOGICFRAMES_PER_SECOND * 30;
+static const char *const REPLAY_CHECKPOINT_FOLDER = "ReplayRewind";
+
+/** The checkpoints of the replay TheReplayCheckpointsOf names, by frame.  Not members, for the same
+	* reason as the seek frame: loading one resets the interface. */
+static std::map< UnsignedInt, ReplayCheckpoint > TheReplayCheckpoints;
+static AsciiString TheReplayCheckpointsOf;
+
+/** A seek back is carried out on the next client pass rather than in the click: the load resets the
+	* message stream, and the click is a message the stream is in the middle of handing round. */
+static Bool TheReplayRewindWaiting = FALSE;
+
+static void seekReplay( UnsignedInt target )
+{
+	TheGameLogic->setGamePaused( FALSE );
+	// the first checkpoint is taken on the first frame, so only frame 0 has none behind it
+	TheReplayRewindWaiting = target <= TheGameLogic->getFrame() && !TheReplayCheckpoints.empty();
+	TheReplaySeekFrame = target;
+}
+
+/** A folder of this process's own: two copies of the game watching replays at once each keep their
+	* checkpoints apart, and a copy that died leaves nothing another will take for its own. */
+static AsciiString replayCheckpointFolder( void )
+{
+	AsciiString leaf;
+	leaf.format( "%s\\%u", REPLAY_CHECKPOINT_FOLDER, (UnsignedInt)GetCurrentProcessId() );
+	return TheGameState->getFilePathInSaveDirectory( leaf );
+}
+
+/** Every checkpoint file in the folder, not only the ones in the map, so nothing outlives the replay. */
+static void forgetReplayCheckpoints( void )
+{
+	const AsciiString folder = replayCheckpointFolder();
+	AsciiString pattern;
+	pattern.format( "%s\\*.sav", folder.str() );
+	WIN32_FIND_DATAA found;
+	HANDLE search = FindFirstFileA( pattern.str(), &found );
+	if( search != INVALID_HANDLE_VALUE )
+	{
+		do
+		{
+			AsciiString path;
+			path.format( "%s\\%s", folder.str(), found.cFileName );
+			DeleteFileA( path.str() );
+		} while( FindNextFileA( search, &found ) );
+		FindClose( search );
+	}
+	TheReplayCheckpoints.clear();
+}
+
+static void collectPostedCRCs( GameMessageList *list, std::vector< std::pair< Int, Bool > > &crcs )
+{
+	for( GameMessage *message = list->getFirstMessage(); message; message = message->next() )
+		if( message->getType() == GameMessage::MSG_LOGIC_CRC )
+			crcs.push_back( std::make_pair( message->getArgument( 0 )->integer, message->getArgument( 1 )->boolean ) );
+}
+
+static void takeReplayCheckpoint( UnsignedInt frame )
+{
+	const DWORD startMs = timeGetTime();
+	CreateDirectoryA( TheGameState->getSaveDirectory().str(), NULL );
+	CreateDirectoryA( TheGameState->getFilePathInSaveDirectory( REPLAY_CHECKPOINT_FOLDER ).str(), NULL );
+	const AsciiString folder = replayCheckpointFolder();
+	CreateDirectoryA( folder.str(), NULL );
+
+	ReplayCheckpoint &checkpoint = TheReplayCheckpoints[ frame ];
+	checkpoint.path.format( "%s\\%u.sav", folder.str(), frame );
+	checkpoint.cursor = TheRecorder->getPlaybackCursor();
+	checkpoint.random = GetGameLogicRandomState();
+	// the command list first: what it holds reaches the logic ahead of what the stream still holds
+	collectPostedCRCs( TheCommandList, checkpoint.postedCRCs );
+	collectPostedCRCs( TheMessageStream, checkpoint.postedCRCs );
+	TheGameState->saveCheckpoint( checkpoint.path );
+	DEBUG_LOG(( "REPLAY CHECKPOINT frame %u in %u ms\n", frame, (UnsignedInt)( timeGetTime() - startMs ) ));
+}
+
+/** Load the last checkpoint at or before the frame, or the first one if the frame is before it.  The
+	* camera, the speed and the observer's view stay as they were: the checkpoint carries the camera it
+	* was taken with, which is not where the person watching is looking now. */
+static void rewindReplay( UnsignedInt target )
+{
+	std::map< UnsignedInt, ReplayCheckpoint >::const_iterator at = TheReplayCheckpoints.upper_bound( target );
+	if( at != TheReplayCheckpoints.begin() )
+		--at;
+	const ReplayCheckpoint &checkpoint = at->second;
+
+	const AsciiString replayFile = TheRecorder->getCurrentReplayFilename();
+	Coord3D lookingAt;
+	TheTacticalView->getPosition( &lookingAt );
+	const Real angle = TheTacticalView->getAngle();
+	const Real pitch = TheTacticalView->getPitch();
+	const Real zoom = TheTacticalView->getZoom();
+	const Int framesPerSecond = TheGameEngine->getFramesPerSecondLimit();
+	const DWORD startMs = timeGetTime();
+
+	TheGameState->loadCheckpoint( checkpoint.path,
+		[ & ]() { TheRecorder->resumePlayback( replayFile, checkpoint.cursor ); } );
+	SetGameLogicRandomState( checkpoint.random );
+
+	for( size_t each = 0; each < checkpoint.postedCRCs.size(); each++ )
+	{
+		GameMessage *crc = TheMessageStream->appendMessage( GameMessage::MSG_LOGIC_CRC );
+		crc->appendIntegerArgument( checkpoint.postedCRCs[ each ].first );
+		crc->appendBooleanArgument( checkpoint.postedCRCs[ each ].second );
+	}
+
+	TheTacticalView->lookAt( &lookingAt );
+	TheTacticalView->setAngle( angle );
+	TheTacticalView->setPitch( pitch );
+	TheTacticalView->setZoom( zoom );
+	TheGameEngine->setFramesPerSecondLimit( framesPerSecond );
+	DEBUG_LOG(( "REPLAY REWIND to frame %u from the checkpoint at %u, loaded in %u ms\n",
+		target, at->first, (UnsignedInt)( timeGetTime() - startMs ) ));
+}
+
+/** Every client pass, between two logic frames: the checkpoints are taken here, a seek back is carried
+	* out here, and a seek stops on its frame rather than on the next picture drawn. */
+static void updateReplaySeek( void )
+{
+	if( !TheGameLogic->isInGame() || TheGameLogic->isLoadingMap() )
+		return;
+	if( !TheGameLogic->isInReplayGame() )
+	{
+		TheReplaySeekFrame = 0;
+		TheReplayRewindWaiting = FALSE;
+		if( TheReplayCheckpointsOf.isNotEmpty() )
+		{
+			forgetReplayCheckpoints();
+			TheReplayCheckpointsOf.clear();
+		}
+		return;
+	}
+
+	if( TheReplayCheckpointsOf != TheRecorder->getCurrentReplayFilename() )
+	{
+		forgetReplayCheckpoints();
+		TheReplayCheckpointsOf = TheRecorder->getCurrentReplayFilename();
+	}
+
+	if( TheReplayRewindWaiting )
+	{
+		TheReplayRewindWaiting = FALSE;
+		rewindReplay( TheReplaySeekFrame );
+	}
+
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	if( TheRecorder->hasPlaybackLeft() && frame > 0
+			&& ( TheReplayCheckpoints.empty() || frame >= TheReplayCheckpoints.rbegin()->first + REPLAY_CHECKPOINT_FRAMES ) )
+		takeReplayCheckpoint( frame );
+
+	if( TheReplaySeekFrame == 0 )
+		return;
+	const Bool seeking = frame < TheReplaySeekFrame;
+	TheWritableGlobalData->m_TiVOFastMode = seeking;
+	if( !seeking )
+		TheReplaySeekFrame = 0;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** The key a command bar slot is bound to right now, "Q" for KEY_Q, so the page names the key the
 	* player really has: the WASD camera moves the whole top row along by one.  Empty when unbound. */
 //-------------------------------------------------------------------------------------------------
@@ -2289,6 +2514,7 @@ void InGameUI::drawSpectatorPage( void )
 
 	HtmlValues values = m_spectatorTotals;
 	fillSpectatorCameraValues( m_spectatorLists[ "follows" ], values );
+	fillReplayValues( values );
 	for( std::map< std::string, std::string >::const_iterator pick = m_spectatorPicked.begin(); pick != m_spectatorPicked.end(); ++pick )
 	{
 		values[ PICK_ACTION + pick->first ] = pick->second;
@@ -2314,7 +2540,18 @@ Bool InGameUI::handleSpectatorPageClick( const ICoord2D *mouse, Bool act )
 	if( !act )
 		return TRUE;
 
-	runSpectatorAction( m_spectatorOverlay->click( *mouse ) );
+	const std::string action = m_spectatorOverlay->click( *mouse );
+	if( action == REPLAY_SEEK && TheGameLogic->isInReplayGame() )
+	{
+		std::vector< IRegion2D > tracks;
+		m_spectatorOverlay->rectsOf( REPLAY_TRACK, tracks );
+		const IRegion2D &track = tracks.front();
+		const Real share = clamp( 0.0f, (Real)( mouse->x - track.lo.x ) / (Real)( track.hi.x - track.lo.x ), 1.0f );
+		seekReplay( REAL_TO_UNSIGNEDINT( share * replayLength() ) );
+		return TRUE;
+	}
+
+	runSpectatorAction( action );
 	return TRUE;
 }
 
@@ -2387,6 +2624,14 @@ void InGameUI::runSpectatorAction( const std::string &action )
 	}
 	else if( action == FOG_ACTION )
 		TheObserverCamera.setFog( !TheObserverCamera.isFogOn() );
+	// the pause key's own message, so the key and the button are one path
+	else if( action == REPLAY_PAUSE && TheGameLogic->isInReplayGame() )
+		TheMessageStream->appendMessage( GameMessage::MSG_META_TOGGLE_PAUSE );
+	// replay:seek:N, a frame to jump to, for a script that has no pointer to put on the timeline
+	else if( action.compare( 0, REPLAY_SEEK_TO.size(), REPLAY_SEEK_TO ) == 0 && TheGameLogic->isInReplayGame() )
+		seekReplay( (UnsignedInt)atoi( action.substr( REPLAY_SEEK_TO.size() ).c_str() ) );
+	else if( action.compare( 0, REPLAY_SPEED.size(), REPLAY_SPEED ) == 0 && TheGameLogic->isInReplayGame() )
+		TheGameEngine->setFramesPerSecondLimit( atoi( action.substr( REPLAY_SPEED.size() ).c_str() ) * replayNormalFramesPerSecond() / PERCENT );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3146,18 +3391,22 @@ void InGameUI::handleBuildPlacements( void )
 
 		// update the angle of the icon to match any placement angle and pick the
 		// location the icon will be at (anchored is the start, otherwise it's the mouse)
+		Bool row = FALSE;
 		if( isPlacementAnchored() )
 		{
 			ICoord2D start, end;
-								
-			// get the placement arrow points	
+
+			// get the placement arrow points
 			getPlacementPoints( &start, &end );
 
 			// set icon to anchor point
 			loc = start;
 
-			// only adjust angle if we've actually moved the mouse
-			if( start.x != end.x || start.y != end.y )
+			// only adjust angle if we've actually moved the mouse, and not into a row: that drag
+			// lays structures, the heading stays the one they had
+			const Bool dragged = start.x != end.x || start.y != end.y;
+			row = dragged && placesRow();
+			if( dragged && !row )
 				angle = computePlacementAngle( &start, &end );
 
 		}  // end if
@@ -3178,6 +3427,7 @@ void InGameUI::handleBuildPlacements( void )
 		if( !TheTacticalView->screenToTerrain( &loc, &world ) )
 			world = *m_placeIcon[ 0 ]->getPosition();
 		snapPlacementToGrid( &world, m_pendingPlaceType, angle );
+		snapPlacementToNeighbour( &world, m_pendingPlaceType, angle );
 
 		//
 		// NudgeBuildPlacement: the ghost sits where the last legality check found room, which is
@@ -3186,6 +3436,11 @@ void InGameUI::handleBuildPlacements( void )
 		// walk away from the mouse; the ghost is at most one frame behind it.
 		//
 		const Coord3D cursorWorld = world;
+
+		// a row starts where it was anchored; each piece is judged where it stands, not nudged
+		if( row )
+			m_placementNudge.zero();
+
 		if( m_placementNudge.x != 0.0f || m_placementNudge.y != 0.0f )
 		{
 			world.x += m_placementNudge.x;
@@ -3205,7 +3460,7 @@ void InGameUI::handleBuildPlacements( void )
 		// delay time between checks or we need to come up with a way of recording what is
 		// valid and what isn't or "fudge" the results to feel "ok"
 		//
-		if( TheGameClient->getFrame() & 0x1 )
+		if( ( TheGameClient->getFrame() & 0x1 ) && !row )
 		{
 			TheTerrainVisual->removeAllBibs();
 
@@ -3282,10 +3537,13 @@ void InGameUI::handleBuildPlacements( void )
 
 		//
 		// we have additional place icons when we're placing down a line of walls or other
-		// similarly placed object ... for those we will have them be oriented the same way
-		// as the first one, but we'll set their positions so that they "tile" end to end
+		// similarly placed object, or a shift-dragged row of structures ... for those we will
+		// have them be oriented the same way as the first one, but we'll set their positions so
+		// that they "tile" end to end
 		//
-		if( isPlacementAnchored() && TheBuildAssistant->isLineBuildTemplate( m_pendingPlaceType ) )
+		const Bool lineBuild = isPlacementAnchored() && TheBuildAssistant->isLineBuildTemplate( m_pendingPlaceType );
+		Int iconsUsed = 1;
+		if( lineBuild || row )
 		{
 			Int i;
 
@@ -3302,33 +3560,46 @@ void InGameUI::handleBuildPlacements( void )
 					!TheTacticalView->screenToTerrain( &screenEnd, &worldEnd ) )
 				return;
 
-			// both ends, so a wall lands on the grid and tiles from a grid square
+			// both ends, so a wall lands on the grid and tiles from a grid square; a row starts where
+			// the ghost did, against its neighbour
 			snapPlacementToGrid( &worldStart, m_pendingPlaceType, angle );
 			snapPlacementToGrid( &worldEnd, m_pendingPlaceType, angle );
-
-			// how big are each of our objects
-			Real objectSize = m_pendingPlaceType->getTemplateGeometryInfo().getMajorRadius() * 2.0f;
-			
-			// what is our max tiling length we can make
-			Int maxObjects = TheGlobalData->m_maxLineBuildObjects;
+			snapPlacementToNeighbour( &worldStart, m_pendingPlaceType, angle );
 
 			// get the builder object that will be constructing things
 			Object *builderObject = TheGameLogic->findObjectByID( TheInGameUI->getPendingPlaceSourceObjectID() );
 
-			//
-			// given the start/end points in the world and the the angle of the wall, fill
-			// out an array of positions that "tile" this wall across the landscape
-			//
-			BuildAssistant::TileBuildInfo *tileBuildInfo;
-			tileBuildInfo = TheBuildAssistant->buildTiledLocations( m_pendingPlaceType, angle,
-																															&worldStart, &worldEnd,
-																															objectSize, maxObjects,
-																															builderObject );	
+			const Coord3D *positions;
+			std::vector<Coord3D> rowPositions;
+			if( lineBuild )
+			{
+				// how big are each of our objects
+				Real objectSize = m_pendingPlaceType->getTemplateGeometryInfo().getMajorRadius() * 2.0f;
+
+				//
+				// given the start/end points in the world and the the angle of the wall, fill
+				// out an array of positions that "tile" this wall across the landscape
+				//
+				BuildAssistant::TileBuildInfo *tileBuildInfo;
+				tileBuildInfo = TheBuildAssistant->buildTiledLocations( m_pendingPlaceType, angle,
+																																&worldStart, &worldEnd,
+																																objectSize,
+																																TheGlobalData->m_maxLineBuildObjects,
+																																builderObject );
+				positions = tileBuildInfo->positions;
+				iconsUsed = tileBuildInfo->tilesUsed;
+			}
+			else
+			{
+				computePlacementRow( m_pendingPlaceType, angle, &worldStart, &worldEnd, &rowPositions );
+				positions = &rowPositions[ 0 ];
+				iconsUsed = (Int)rowPositions.size();
+			}
 
 			// create any necessary drawables we need to "fill out" the line
-			for( i = 0; i < tileBuildInfo->tilesUsed; i++ )
+			for( i = 0; i < iconsUsed; i++ )
 			{
-			
+
 				if( m_placeIcon[ i ] == NULL )
 					m_placeIcon[ i ] = TheThingFactory->newDrawable( m_pendingPlaceType,
 																													 DRAWABLE_STATUS_NO_STATE_PARTICLES );
@@ -3336,27 +3607,25 @@ void InGameUI::handleBuildPlacements( void )
 			}  // end for i
 
 			//
-			// destroy any drawables that we're not using anymore because a previous
-			// line length was longer
+			// A row is judged piece by piece, on the frames the single ghost would have been: red
+			// where the click will leave a gap, and the cursor says yes while any piece can go up.
 			//
-			for( i = tileBuildInfo->tilesUsed; i < maxObjects; i++ )
+			const Bool judgeRow = row && ( TheGameClient->getFrame() & 0x1 );
+			if( judgeRow )
 			{
-
-				if( m_placeIcon[ i ] != NULL )
-					TheGameClient->destroyDrawable( m_placeIcon[ i ] );
-				m_placeIcon[ i ] = NULL;
-
-			}  // end for i
+				TheTerrainVisual->removeAllBibs();
+				m_placementLegal = FALSE;
+			}
 
 			//
 			// march down each drawable and set the position based on its position in the
 			// line and set their angles all the same
 			//
-			for( i = 0; i < tileBuildInfo->tilesUsed; i++ )
+			for( i = 0; i < iconsUsed; i++ )
 			{
 
 				// set the drawble position
-				m_placeIcon[ i ]->setPosition( &tileBuildInfo->positions[ i ] );
+				m_placeIcon[ i ]->setPosition( &positions[ i ] );
 
 				// set opacity and shadowing for the drawble
 				dressPlacementPreview( m_placeIcon[ i ] );
@@ -3364,9 +3633,34 @@ void InGameUI::handleBuildPlacements( void )
 				// set the drawable angle
 				m_placeIcon[ i ]->setOrientation( angle );
 
+				if( judgeRow )
+				{
+					const Bool legal =
+						TheBuildAssistant->isLocationLegalToBuild( &positions[ i ], m_pendingPlaceType, angle,
+																											 placementCheckOptions(), builderObject,
+																											 NULL ) == LBC_OK &&
+						!overlapsPendingPlacement( &positions[ i ], m_pendingPlaceType, angle );
+					m_placeIcon[ i ]->colorTint( legal ? NULL : &illegalBuildColor );
+					if( legal )
+						m_placementLegal = TRUE;
+				}
+
 			}  // end for i
 
 		}  // end if
+
+		//
+		// destroy any drawables that we're not using anymore because a previous line length was
+		// longer, or the row was let go of
+		//
+		for( Int i = iconsUsed; i < TheGlobalData->m_maxLineBuildObjects; i++ )
+		{
+
+			if( m_placeIcon[ i ] != NULL )
+				TheGameClient->destroyDrawable( m_placeIcon[ i ] );
+			m_placeIcon[ i ] = NULL;
+
+		}  // end for i
 
 	}  // end if
 
@@ -3405,6 +3699,8 @@ DECLARE_PERF_TIMER(InGameUI_update)
 void InGameUI::update( void )
 {
 	USE_PERF_TIMER(InGameUI_update)
+
+	updateReplaySeek();
 
 	/// @todo make sure this code gets called even when the UI is not being drawn
 	if ( m_videoStream && m_videoBuffer )
@@ -3613,14 +3909,16 @@ void InGameUI::update( void )
 	if( moneyPlayer)
 	{
 		Int currentMoney = moneyPlayer->getMoney()->countMoney();
+		Int currentEarning = earnedPerSecond( moneyPlayer->getPlayerIndex() );
 
-		if( m_lastMoneyDisplayed != currentMoney )
+		if( m_lastMoneyDisplayed != currentMoney || m_lastEarningDisplayed != currentEarning )
 		{
 			UnicodeString buffer;
 
-			buffer.format( TheGameText->fetch( "GUI:ControlBarMoneyDisplay" ), currentMoney );
+			buffer.format( TheGameText->fetch( "GUI:ControlBarMoneyEarning" ), currentMoney, currentEarning );
 			GadgetStaticTextSetText( moneyWin, buffer );
 			m_lastMoneyDisplayed = currentMoney;
+			m_lastEarningDisplayed = currentEarning;
 
 		}  // end if
 
@@ -6601,32 +6899,100 @@ Real InGameUI::computePlacementAngle( const ICoord2D *start, const ICoord2D *end
 	* box is major along its facing and minor across it, and anything round is its bounding circle.
 	* At 45 degrees the axis-aligned extents grow, which is right - that is the ground it covers. */
 //-------------------------------------------------------------------------------------------------
-void InGameUI::snapPlacementToGrid( Coord3D *world, const ThingTemplate *what, Real angle ) const
+static void placementHalfSizes( const ThingTemplate *what, Real *major, Real *minor )
 {
-	if( world == NULL || what == NULL || TheGlobalData->m_gridBuildPlacement == FALSE )
-		return;
-
 	const GeometryInfo &geom = what->getTemplateGeometryInfo();
-	Real major = geom.getMajorRadius();
-	Real minor = geom.getMinorRadius();
+	*major = geom.getMajorRadius();
+	*minor = geom.getMinorRadius();
 	if( geom.getGeomType() != GEOMETRY_BOX )
-		major = minor = geom.getBoundingCircleRadius();
+		*major = *minor = geom.getBoundingCircleRadius();
 
 	// The ground a structure really takes is not its collision box: BuildAssistant's own clearance
 	// check grows both radii by the factory bib (isLocationClearOfObjects' myBounds), and the bib is
 	// the concrete apron you can see under it.  Snapping the bare box left that apron hanging off
 	// the grid by the bib's width, which is what makes a placed building look like it did not
 	// quite sit down on its squares.
-	major += what->getFactoryExtraBibWidth();
-	minor += what->getFactoryExtraBibWidth();
+	*major += what->getFactoryExtraBibWidth();
+	*minor += what->getFactoryExtraBibWidth();
+}
+
+static void placementHalfExtents( const ThingTemplate *what, Real angle, Real *halfX, Real *halfY )
+{
+	Real major, minor;
+	placementHalfSizes( what, &major, &minor );
 
 	const Real c = (Real)fabs( Cos( angle ) );
 	const Real sn = (Real)fabs( Sin( angle ) );
 
-	world->x = snapPlacementAxis( world->x, major * c + minor * sn );
-	world->y = snapPlacementAxis( world->y, major * sn + minor * c );
+	*halfX = major * c + minor * sn;
+	*halfY = major * sn + minor * c;
+}
+
+void InGameUI::snapPlacementToGrid( Coord3D *world, const ThingTemplate *what, Real angle ) const
+{
+	if( world == NULL || what == NULL || TheGlobalData->m_gridBuildPlacement == FALSE )
+		return;
+
+	Real halfX, halfY;
+	placementHalfExtents( what, angle, &halfX, &halfY );
+
+	world->x = snapPlacementAxis( world->x, halfX );
+	world->y = snapPlacementAxis( world->y, halfY );
 
 }  // end snapPlacementToGrid
+
+//-------------------------------------------------------------------------------------------------
+/** Shift held on the drag: a wall already tiles from any drag, so it is left to do that. */
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::placesRow( void )
+{
+	return m_pendingPlaceType != NULL && TheKeyboard && TheKeyboard->isShift() &&
+				 !TheBuildAssistant->isLineBuildTemplate( m_pendingPlaceType );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Every piece faces 'angle', the heading on the ghost before the drag began: the drag is spent on
+	* the row, so it cannot aim as well.  The row stops where the money does, which is what the logic
+	* would do to the orders past it anyway (canMakeUnit per MSG_DOZER_CONSTRUCT); the player sees the
+	* row that will go up.  Legality is not asked here - the ghost and the click each ask it per piece. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::computePlacementRow( const ThingTemplate *what, Real angle, const Coord3D *start,
+																		const Coord3D *end, std::vector<Coord3D> *positions ) const
+{
+	//
+	// A factory's door needs its lane clear of the next structure (isLocationClearOfObjects' exit
+	// check), so a row running out of the door or into it leaves the lane between each pair.
+	// Half the lane on each half-length: the pair's shared box grows by the whole of it.
+	//
+	Real major, minor;
+	placementHalfSizes( what, &major, &minor );
+	const Real halfFacing = major + what->getFactoryExitWidth() * 0.5f;
+
+	Int most = TheGlobalData->m_maxLineBuildObjects;
+	Player *player = ThePlayerList->getLocalPlayer();
+	const Int cost = what->calcCostToBuild( player );
+	if( cost > 0 )
+	{
+		const Int affordable = (Int)( player->getMoney()->countMoney() / cost );
+		if( affordable < most )
+			most = affordable;
+	}
+
+	Coord2D step;
+	const Int count = placementRow( end->x - start->x, end->y - start->y, (Real)Cos( angle ),
+																	(Real)Sin( angle ), halfFacing, minor, most, &step );
+
+	positions->clear();
+	for( Int i = 0; i < count; i++ )
+	{
+		Coord3D pos;
+		pos.x = start->x + step.x * i;
+		pos.y = start->y + step.y * i;
+		pos.z = TheTerrainLogic->getGroundHeight( pos.x, pos.y );
+		positions->push_back( pos );
+	}
+
+}  // end computePlacementRow
 
 //-------------------------------------------------------------------------------------------------
 /** The legality question asked of the spot under the ghost, in one place - the nudge search asks it
@@ -6646,31 +7012,22 @@ UnsignedInt InGameUI::placementCheckOptions( void )
 }  // end placementCheckOptions
 
 //-------------------------------------------------------------------------------------------------
-/** The ground a structure of this template would stand on, put down here at this heading.  The
-	* geometry's own bounds, which for a box at any angle is the rectangle around the turned box:
-	* two of those sharing ground is close enough to "on top of each other" for the client to refuse
-	* a second click, and the logic side asks the real question afterwards anyway. */
+/** The ground a structure of this template would stand on, put down here at this heading: the box
+	* isLocationClearOfObjects compares, bib and all. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::placementFootprint( const ThingTemplate *what, const Coord3D *world, Real angle,
-																	 Region2D *footprint )
+																	 PlacementBox *footprint )
 {
-	what->getTemplateGeometryInfo().get2DBounds( *world, angle, *footprint );
+	placementHalfSizes( what, &footprint->halfMajor, &footprint->halfMinor );
+	footprint->x = world->x;
+	footprint->y = world->y;
+	footprint->c = (Real)Cos( angle );
+	footprint->s = (Real)Sin( angle );
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Do two footprints share any ground?  Touching edge to edge does not count: structures are built
-	* flush against each other on the build grid all game, and a row of them is not an overlap. */
-//-------------------------------------------------------------------------------------------------
-Bool InGameUI::footprintsOverlap( const Region2D *a, const Region2D *b )
-{
-	return a->lo.x < b->hi.x && b->lo.x < a->hi.x &&
-				 a->lo.y < b->hi.y && b->lo.y < a->hi.y;
-
-}  // end footprintsOverlap
-
-//-------------------------------------------------------------------------------------------------
 /** Remember a structure just ordered, so the click after it knows the ground is spoken for.  Round
-	* a ring: the oldest of the eight goes, which is the one most likely to be standing by now. */
+	* a ring: the oldest goes, which is the one most likely to be standing by now. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::recordPendingPlacement( const ThingTemplate *what, const Coord3D *world, Real angle )
 {
@@ -6705,7 +7062,7 @@ Bool InGameUI::overlapsPendingPlacement( const Coord3D *world, const ThingTempla
 	if( what == NULL || world == NULL || TheGameLogic == NULL )
 		return FALSE;
 
-	Region2D mine;
+	PlacementBox mine;
 	placementFootprint( what, world, angle, &mine );
 
 	const UnsignedInt now = TheGameLogic->getFrame();
@@ -6725,6 +7082,77 @@ Bool InGameUI::overlapsPendingPlacement( const Coord3D *world, const ThingTempla
 	return FALSE;
 
 }  // end overlapsPendingPlacement
+
+//-------------------------------------------------------------------------------------------------
+/** Of every structure it could be pulled against, the one that moves it least wins - the one the
+	* click was plainly meant for.  Standing structures come off the partition manager, ordered ones
+	* off the pending ring, and one that has since gone up is in both, the same box twice. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::snapPlacementToNeighbour( Coord3D *world, const ThingTemplate *what, Real angle ) const
+{
+	if( TheBuildAssistant->isLineBuildTemplate( what ) )
+		return;
+
+	const Real largestFootprint = 150.0f;		// half-diagonal of the biggest structure it may lean on
+
+	PlacementBox mine;
+	placementFootprint( what, world, angle, &mine );
+
+	Coord2D best;
+	best.x = world->x;
+	best.y = world->y;
+	Real bestMoveSqr = -1.0f;
+
+	std::vector<PlacementBox> neighbours;
+	const UnsignedInt now = TheGameLogic->getFrame();
+	for( Int i = 0; i < PENDING_PLACEMENTS; i++ )
+	{
+		const PendingPlacement *pending = &m_pendingPlacement[ i ];
+		if( pending->frame != 0 && now >= pending->frame && now - pending->frame <= PENDING_PLACEMENT_FRAMES )
+			neighbours.push_back( pending->footprint );
+	}
+
+	const Real searchRadius = (Real)sqrt( mine.halfMajor * mine.halfMajor + mine.halfMinor * mine.halfMinor ) +
+														(Real)PLACEMENT_FLUSH_REACH + largestFootprint;
+	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange( world, searchRadius, FROM_CENTER_2D, NULL );
+	MemoryPoolObjectHolder holder( iter );
+	for( Object *obj = iter->first(); obj; obj = iter->next() )
+	{
+		if( !obj->isKindOf( KINDOF_STRUCTURE ) || obj->isEffectivelyDead() )
+			continue;
+
+		PlacementBox standing;
+		placementFootprint( obj->getTemplate(), obj->getPosition(), obj->getOrientation(), &standing );
+		neighbours.push_back( standing );
+	}
+
+	for( size_t i = 0; i < neighbours.size(); i++ )
+	{
+		PlacementBox moved = mine;
+		if( !flushAgainst( &neighbours[ i ], &moved ) )
+			continue;
+
+		// flush against this one and into the next is no help: the nudge would throw it off again
+		Bool blocked = FALSE;
+		for( size_t j = 0; j < neighbours.size() && !blocked; j++ )
+			blocked = j != i && footprintsOverlap( &moved, &neighbours[ j ] );
+		if( blocked )
+			continue;
+
+		const Real moveSqr = ( moved.x - mine.x ) * ( moved.x - mine.x ) + ( moved.y - mine.y ) * ( moved.y - mine.y );
+		if( bestMoveSqr < 0.0f || moveSqr < bestMoveSqr )
+		{
+			bestMoveSqr = moveSqr;
+			best.x = moved.x;
+			best.y = moved.y;
+		}
+	}
+
+	world->x = best.x;
+	world->y = best.y;
+	world->z = TheTerrainLogic->getGroundHeight( best.x, best.y );
+
+}  // end snapPlacementToNeighbour
 
 //-------------------------------------------------------------------------------------------------
 void InGameUI::forgetPendingPlacements( void )
@@ -9030,7 +9458,9 @@ void InGameUI::drawHudOverlay( void )
 	const UnsignedInt clientFrame = m_hudDrawCount;
 	const UnsignedInt logicFrame = TheGameLogic->getFrame();
 	UnsignedInt nowMs = timeGetTime();
-	if( m_hudLastSampleFrame == 0 )
+	// a replay wound back runs the frame number backwards, and the unsigned difference read as tens
+	// of millions of logic frames a second; the reading starts over from there instead
+	if( m_hudLastSampleFrame == 0 || logicFrame < m_hudLastSampleLogicFrame )
 	{
 		m_hudLastSampleMs = nowMs;
 		m_hudLastSampleFrame = clientFrame;
@@ -10499,17 +10929,6 @@ static void putPowerBar( HtmlValues &values, std::vector< HtmlValues > &cells )
 		values[ "power.state" ] = "green";
 }
 
-/** How far `player` is from this rank to the next, 0 to 100.  A script can disable a level, which
-	* leaves its points required at -1: a rank with no way on counts as full, where the bar's own
-	* drawing divided by it. */
-static Int experiencePercent( const Player *player )
-{
-	enum { FULL = 100 };
-	const Int span = player->getSkillPointsLevelUp() - player->getSkillPointsLevelDown();
-	const Int progress = span > 0 ? ( player->getSkillPoints() - player->getSkillPointsLevelDown() ) * FULL / span : FULL;
-	return min( (Int)FULL, max( 0, progress ) );
-}
-
 //-------------------------------------------------------------------------------------------------
 /** The general's experience as the page draws it, in the groove {{expframe.x}} ... puts down the
 	* right panel: `cells` from the bottom up, each {{lit}} "lit" up to the way from this rank to the
@@ -10534,7 +10953,7 @@ static void putExperienceBar( HtmlValues &values, std::vector< HtmlValues > &cel
 	if( player == NULL )
 		return;
 
-	const Int lit = experiencePercent( player ) * EXPERIENCE_CELLS / FULL;
+	const Int lit = player->getRankProgressPercent() * EXPERIENCE_CELLS / FULL;
 	const Int column = height - 2 * FRAME_LIP;
 	for( Int cell = 0; cell < EXPERIENCE_CELLS && column > 0; cell++ )
 	{
@@ -11672,7 +12091,7 @@ void InGameUI::drawPromotionPage( GameWindow *parent, Bool front )
 																																 : ThePlayerList->getLocalPlayer();
 	// its rungs cut from the bar's width in page pixels so they add up to it exactly, as the power
 	// bar's cells are
-	const Int lit = player ? experiencePercent( player ) * EXPERIENCE_RUNGS / FULL : 0;
+	const Int lit = player ? player->getRankProgressPercent() * EXPERIENCE_RUNGS / FULL : 0;
 	const Int barWidth = atoi( values[ "ProgressBarExperience.w" ].c_str() );
 	std::vector< HtmlValues > &rungs = lists[ "exprungs" ];
 	for( Int rung = 0; rung < EXPERIENCE_RUNGS && barWidth > 0; rung++ )

@@ -244,11 +244,8 @@ class MilesAudioManager : public AudioManager
 
 		virtual void closeAnySamplesUsingFile( const void *fileToClose );
 
-    
-    virtual Bool has3DSensitiveStreamsPlaying( void ) const; 
 
-
-	protected:	
+	protected:
 		// 3-D functions
 		virtual void setDeviceListenerPosition( void );
 		const Coord3D *getCurrentPositionFromEvent( AudioEventRTS *event );

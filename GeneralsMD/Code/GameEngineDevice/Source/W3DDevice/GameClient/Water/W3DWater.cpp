@@ -1383,6 +1383,10 @@ void WaterRenderObjClass::update( void )
 		if (elapsedSec > 0.1f)
 			elapsedSec = 0.1f;		// a level load must not jump the surface forward
 
+		// a pause or a script's time freeze stops every unit and particle; the water stops with them
+		if (TheGameLogic->isGamePaused() || TheScriptEngine->isTimeFrozenScript() || TheScriptEngine->isTimeFrozenDebug())
+			elapsedSec = 0.0f;
+
 		const Real step = elapsedSec * AUTHORED_FPS * WATER_SCROLL_SPEED;
 
 		m_riverVOrigin += 0.002f * step;

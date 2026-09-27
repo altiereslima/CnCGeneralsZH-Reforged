@@ -1870,7 +1870,15 @@ void Team::updateState(void)
 			PartitionFilterAlive filterAlive;
 			PartitionFilterSameMapStatus filterMapStatus(iter.cur());
 
-			PartitionFilter *filters[] = { &filterTeam, &filterAlive, &filterMapStatus, NULL };
+			// A shell in flight, an undetected stealth unit or the system object a power drops is not an
+			// enemy the team can see; the unit's own Enemy Sighted condition leaves them out the same way.
+			KindOfMaskType notSeen = MAKE_KINDOF_MASK(KINDOF_PROJECTILE);
+			notSeen.set(KINDOF_INERT);
+			PartitionFilterAcceptByKindOf filterSeenKind(KINDOFMASK_NONE, notSeen);
+			PartitionFilterRejectByObjectStatus filterStealth( MAKE_OBJECT_STATUS_MASK( OBJECT_STATUS_STEALTHED ),
+																												 MAKE_OBJECT_STATUS_MASK2( OBJECT_STATUS_DETECTED, OBJECT_STATUS_DISGUISED ) );
+
+			PartitionFilter *filters[] = { &filterTeam, &filterAlive, &filterMapStatus, &filterSeenKind, &filterStealth, NULL };
 			Real visionRange = iter.cur()->getVisionRange();
 			anyAliveInTeam = true;
 			Object *pObj = ThePartitionManager->getClosestObject( iter.cur(), visionRange, 
@@ -2391,7 +2399,9 @@ Object *Team::tryToRecruit(const ThingTemplate *tTemplate, const Coord3D *teamHo
 		if (!teamIsRecruitable) {
 			continue;
 		}
-		if (obj->getAIUpdateInterface() && !obj->getAIUpdateInterface()->isRecruitable()) {
+		// a recruit is sent home or told to stop the moment it joins, so one with no AI to take the
+		// order cannot be recruited: AIPlayer::queueUnits read the missing AI and crashed
+		if (!obj->getAIUpdateInterface() || !obj->getAIUpdateInterface()->isRecruitable()) {
 			continue; // can't recruit this unit.
 		}
 		if( obj->isDisabledByType( DISABLED_HELD ) ) 

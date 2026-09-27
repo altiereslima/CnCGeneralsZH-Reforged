@@ -104,6 +104,8 @@ void ReplaceObjectUpgrade::upgradeImplementation( )
 
 	if( replacementObject->getControllingPlayer() )
 	{
+		// made finished, so joining the team already counted its power; the completion counts it again
+		replacementObject->friend_adjustPowerForPlayer(FALSE);
 		replacementObject->getControllingPlayer()->onStructureConstructionComplete(me, replacementObject, FALSE);
 	}
 }

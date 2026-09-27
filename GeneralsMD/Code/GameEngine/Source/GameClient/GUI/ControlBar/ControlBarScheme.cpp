@@ -426,6 +426,17 @@ ControlBarScheme::ControlBarScheme(void)
 }
 
 
+// The scheme's layout is scaled by the display over this resolution, so a zero here divides by zero.
+void ControlBarScheme::validate(void) const
+{
+	if (m_ScreenCreationRes.x <= 0 || m_ScreenCreationRes.y <= 0)
+	{
+		DEBUG_CRASH(("ControlBarScheme '%s' has an invalid screen creation resolution (%d, %d)",
+			m_name.str(), m_ScreenCreationRes.x, m_ScreenCreationRes.y));
+		throw INI_INVALID_DATA;
+	}
+}
+
 void ControlBarScheme::init(void)
 {
 	if(TheControlBar)

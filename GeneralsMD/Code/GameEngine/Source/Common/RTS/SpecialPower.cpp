@@ -171,7 +171,9 @@ void SpecialPowerStore::parseSpecialPowerDefinition( INI *ini )
 	{
 		if (specialPower)
 		{
-			throw INI_INVALID_DATA;
+			// SpecialPowerReforged.ini edits EA's powers in place
+			if (ini->getLoadType() != INI_LOAD_MULTIFILE)
+				throw INI_INVALID_DATA;
 		}
 		else
 		{

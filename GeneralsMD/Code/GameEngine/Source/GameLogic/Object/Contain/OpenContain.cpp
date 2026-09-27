@@ -463,6 +463,10 @@ void OpenContain::killAllContained( void )
 	list.swap( m_containList );
 	m_containListSize = 0;
 
+	// the riders die in here; onRemoving played the door and the "getting out" voice for each of them
+	const Bool soundsWereEnabled = m_loadSoundsEnabled;
+	m_loadSoundsEnabled = FALSE;
+
 	ContainedItemsList::iterator it = list.begin();
 
  	while ( it != list.end() )
@@ -490,6 +494,7 @@ void OpenContain::killAllContained( void )
 
 	}  // end while
 
+	m_loadSoundsEnabled = soundsWereEnabled;
 
   DEBUG_ASSERTCRASH( m_containListSize == 0, ("killallcontain just made a booboo, list size != zero.") );
 
@@ -500,26 +505,20 @@ void OpenContain::killAllContained( void )
 //--------------------------------------------------------------------------------------------------------
 void OpenContain::harmAndForceExitAllContained( DamageInfo *info )
 {
-	ContainedItemsList::iterator it = m_containList.begin();
-
- 	while ( it != m_containList.end() )
+	// Everyone is out before anyone is harmed. Harming a rider can bring the container down (a demo
+	// rider's suicide blast), and the container's death then put the riders still inside out without the
+	// damage they were owed. Patch 1.03 restarted the walk after every rider to survive that recursion;
+	// emptying the list first makes the recursion find nothing.
+	std::vector<Object*> exited;
+	while ( !m_containList.empty() )
 	{
-		Object *rider = *it;
+		Object *rider = m_containList.front();
+		removeFromContain( rider, true );
+		exited.push_back( rider );
+	}
 
-		if ( rider )
-		{
-		  removeFromContain( rider, true );
-		  rider->attemptDamage( info );
-		}
-
-		//Kris: Patch 1.03 -- Crash fix when neutral bunker on Alpine Assault is occupied with 10 demo general 
-		//infantry units with the suicide upgrade and US stealth fighters with bunker busters kill the guys inside.
-		//Causes recursive damage where a bunker buster destroys an infantry, the infantry explodes and blows up 
-		//another missile which kills everyone inside while the first missile is killing everyone. And the game blows up.
-		//Fix is to reset the list.
-		it = m_containList.begin();
-
-	}  // end while
+	for ( std::vector<Object*>::iterator it = exited.begin(); it != exited.end(); ++it )
+		(*it)->attemptDamage( info );
 
 
   DEBUG_ASSERTCRASH( m_containListSize == 0, ("harmAndForceExitAllContained just made a booboo, list size != zero.") );
@@ -620,7 +619,7 @@ void OpenContain::iterateContained( ContainIterateFunc func, void *userData, Boo
 Object* OpenContain::getClosestRider( const Coord3D *pos )
 {
 	Object *closest = NULL;
-	Real closestDistance;
+	Real closestDistance = 0.0f;
 
 	for(ContainedItemsList::const_iterator it = m_containList.begin(); it != m_containList.end(); ++it)
 	{
@@ -793,8 +792,11 @@ void OpenContain::onContaining( Object *rider, Bool wasSelected )
 }
 
 //-------------------------------------------------------------------------------------------------
-void OpenContain::onRemoving( Object *rider) 
+void OpenContain::onRemoving( Object *rider)
 {
+	if( !m_loadSoundsEnabled )
+		return;	// killAllContained: nobody is getting out
+
 	// Play audio
 	AudioEventRTS exitSound = *getObject()->getTemplate()->getSoundExit();
 	exitSound.setObjectID(getObject()->getID());
@@ -842,6 +844,15 @@ void OpenContain::onCollide( Object *other, const Coord3D *loc, const Coord3D *n
 	// (huh huh, he said "enter")
 	if (ai->getEnterTarget() != getObject())
 		return;
+
+	// An infantryman walking into an unmanned vehicle drives it away; he does not ride in it.  When this
+	// side of the collision came first he was taken in as a passenger instead, and a sniped Battle Bus
+	// or Emperor stayed neutral with somebody shooting out of it.
+	if( other->isKindOf( KINDOF_INFANTRY ) && getObject()->isDisabledByType( DISABLED_UNMANNED ) )
+	{
+		getObject()->takeOverUnmanned( other );
+		return;
+	}
 
 	// last-minute change: don't allow units from multiple (different) players to occupy the same
 	// unit. so eject everyone else if they aren't controlled by the same player. (srj)

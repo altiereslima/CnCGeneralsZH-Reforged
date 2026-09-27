@@ -297,6 +297,7 @@ Bool ParticleUplinkCannonUpdate::initiateIntentToDoSpecialPower(const SpecialPow
 		m_startAttackFrame = TheGameLogic->getFrame();
 		m_laserStatus = LASERSTATUS_NONE;
 		m_manualTargetMode = TRUE;
+		m_scriptedWaypointMode = FALSE;	// a previous scripted run must not steer this one along its path
 		m_initialTargetPosition.set( targetPos );
 		m_overrideTargetDestination.set( targetPos );
 		m_currentTargetPosition.set( targetPos );
@@ -316,6 +317,7 @@ Bool ParticleUplinkCannonUpdate::initiateIntentToDoSpecialPower(const SpecialPow
 			pos.set( targetObj->getPosition() );
 		}
    	m_startAttackFrame = max( now, (UnsignedInt)1 );
+		m_manualTargetMode = FALSE;
 		m_scriptedWaypointMode = TRUE;
    	m_laserStatus = LASERSTATUS_NONE;
 		setLogicalStatus( STATUS_READY_TO_FIRE );
@@ -348,6 +350,14 @@ Bool ParticleUplinkCannonUpdate::initiateIntentToDoSpecialPower(const SpecialPow
 		{
 			pos.set( targetObj->getPosition() );
 		}
+		else
+		{
+			// nothing to aim at; pos would be uninitialised
+			return FALSE;
+		}
+		// the flags a previous manual or scripted-waypoint run left set would take this one over
+		m_manualTargetMode = FALSE;
+		m_scriptedWaypointMode = FALSE;
    	m_initialTargetPosition.set( &pos );
    	m_startAttackFrame = max( now, (UnsignedInt)1 );
    	m_laserStatus = LASERSTATUS_NONE;

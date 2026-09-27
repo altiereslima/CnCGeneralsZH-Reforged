@@ -37,6 +37,9 @@
 
 extern DWORD TheMessageTime;
 
+class GameSpyInfoInterface;
+extern GameSpyInfoInterface *TheGameSpyInfo;	// GameNetwork/GameSpy/PeerDefs.h, not NULL while logged in online
+
 //-------------------------------------------------------------------------------------------------
 /** Constructor for Win32GameEngine */
 //-------------------------------------------------------------------------------------------------
@@ -105,9 +108,14 @@ void Win32GameEngine::update( void )
 			}
 
 			// If we are running a multiplayer game, keep running the logic.
-			// There is code in the client to skip client redraw if we are 
+			// There is code in the client to skip client redraw if we are
 			// iconic.  jba.
-			if (TheGameEngine->getQuitting() || TheGameLogic->isInInternetGame() || TheGameLogic->isInLanGame()) {
+			// The same goes for a lobby or staging room, online or LAN: their menus answer joins, chat
+			// and slot changes from their own update, and only TheLAN above was kept alive.  A host
+			// minimized in an online room left nobody able to join until the window came back, when
+			// everything that had queued up played out at once.
+			if (TheGameEngine->getQuitting() || TheGameLogic->isInInternetGame() || TheGameLogic->isInLanGame() ||
+					TheLAN != NULL || TheGameSpyInfo != NULL) {
 				break; // keep running.
 			}
 		}

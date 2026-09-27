@@ -702,6 +702,14 @@ TOOLTIP:ZoomToCursor
 "The wheel zooms towards whatever the cursor is over instead of the middle of the screen. Modern controls only."
 END
 
+GUI:IsometricCamera
+"Isometric Camera"
+END
+
+TOOLTIP:IsometricCamera
+"The battlefield seen from far off, so a unit is the same size at the top of the screen as at the bottom. You still turn and zoom the camera."
+END
+
 GUI:EdgeScrollWindowed
 "Edge Scroll In A Window"
 END
@@ -1281,6 +1289,14 @@ GUI:ScoreboardPerSecond
 "PER SEC"
 END
 
+GUI:ControlBarMoneyEarning
+"$ %d  +%d/s"
+END
+
+CONTROLBAR:MoneyDescription
+"The money you have, and what you earned a second over the last half minute"
+END
+
 GUI:ScoreboardKills
 "K"
 END
@@ -1295,4 +1311,33 @@ END
 
 GUI:ScoreboardFavourite
 "FAVOURITE"
+END
+
+// Power tooltips that named the wrong countdown or count: the Air Force Spectre
+// Gunship (3:00) and Carpet Bomb (4:00), the Leaflet Drop (5:00), the Stealth GPS
+// Scrambler (3:00), the Spectre's third rank (20 seconds) and the Demolitions
+// ambush (4, 6 and 10 rebels).
+
+CONTROLBAR:AirF_TooltipSpectreGunship
+"Strong vs. Vehicles \n \n Countdown Timer: 3:00"
+END
+
+CONTROLBAR:AirF_TooltipCarpetBomb
+"Carpet Bomb target area \n \n Countdown Timer: 4:00"
+END
+
+CONTROLBAR:TooltipLeafletDrop
+"Strong vs. Infantry \n \n Countdown Timer: 5:00"
+END
+
+CONTROLBAR:Slth_TooltipFireGPSScrambler
+"GPS Scrambler \n Countdown Timer: 3:00"
+END
+
+CONTROLBAR:AirF_ToolTipUSAScienceSpectreGunship
+"Spectre Gunships circle the battlefield and pummel enemy forces with Howitzers and Gatling Cannons \n \nLevel 1: 10 seconds \n Level 2: 15 seconds \n Level 3: 20 seconds \n \n Deploy from: Command Center"
+END
+
+CONTROLBAR:Demo_ToolTipGLAScienceRebelAmbush
+"Allows you to create a surprise ambush of Rebels anywhere \n \n Rank 1: 4 Rebels \n Rank 2: 6 Rebels \n Rank 3: 10 Rebels \n \n Deploy from: Command Center"
 END

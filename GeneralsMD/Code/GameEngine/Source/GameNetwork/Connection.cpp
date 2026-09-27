@@ -29,7 +29,11 @@
 #include "GameNetwork/NetworkUtil.h"
 #include "GameLogic/GameLogic.h"
 
-enum { MaxQuitFlushTime = 30000 }; // wait this many milliseconds at most to retry things before quitting
+// wait this many milliseconds at most to retry things before quitting. EA's 30 seconds held the
+// victory screen that long whenever the last opponent had already left: nobody acks the commands
+// still queued for a player who is gone, so the queue only ever empties on this timeout. Five
+// seconds is still some twenty round trips at 250 ms for our own leave to get through.
+enum { MaxQuitFlushTime = 5000 };
 
 /**
  * Jacobson/Karels.  See the comment on CONNECTION_MIN_RETRY_TIME in Connection.h for why the flat

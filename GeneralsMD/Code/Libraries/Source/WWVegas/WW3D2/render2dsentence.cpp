@@ -892,8 +892,11 @@ void	Render2DSentenceClass::Build_Sentence_Centered (const WCHAR *text, int *hkX
 				ch = *text++;
 			}
 			float char_spacing = Font->Get_Char_Spacing (ch);
-			
-			bool exceeded_texture_width	= ((TextureOffset.I + char_spacing) >= CurrTextureSize);
+
+			//	Blit_Char writes the glyph's whole width, overlap and overhang columns included, so
+			//	that is what has to fit: tested on the spacing alone, the last few columns of a glyph
+			//	near the edge ran on into the next texel row and wiped the first letter of the line.
+			bool exceeded_texture_width	= ((TextureOffset.I + Font->Get_Char_Width (ch)) >= CurrTextureSize);
 			bool encountered_break_char	= (ch == L' ' || ch == L'\n' || ch == 0);
 			
 			//
@@ -1032,7 +1035,8 @@ Vector2	Render2DSentenceClass::Build_Sentence_Not_Centered (const WCHAR *text, i
 		}
 		float char_spacing = Font->Get_Char_Spacing (ch);
 
-		bool exceeded_texture_width	= ((TextureOffset.I + char_spacing) >= CurrTextureSize);
+		// the whole width Blit_Char writes, as in Build_Sentence_Centered
+		bool exceeded_texture_width	= ((TextureOffset.I + Font->Get_Char_Width (ch)) >= CurrTextureSize);
 		bool encountered_break_char	= (ch == L' ' || ch == L'\n' || ch == 0);
 		bool wordBiggerThenLine = ((useHardWordWrap) && ( WrapWidth != 0 ) &&((Cursor.X + TextureOffset.I -TextureStartX + char_spacing) >= WrapWidth));
 		//

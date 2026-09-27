@@ -970,13 +970,15 @@ void Script::crc( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
-	* 1: Initial version */
+	* 1: Initial version
+	* 2: The next evaluation frame of a delayed script.  Without it every delayed script ran its
+	*    conditions on the first frame after a load instead of waiting out its delay. */
 // ------------------------------------------------------------------------------------------------
 void Script::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 1;
+	XferVersion currentVersion = 2;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -984,6 +986,9 @@ void Script::xfer( Xfer *xfer )
 	Bool active = isActive();
 	xfer->xferBool( &active );
 	setActive( active );
+
+	if( version >= 2 )
+		xfer->xferUnsignedInt( &m_frameToEvaluateAt );
 
 }  // end xfer
 

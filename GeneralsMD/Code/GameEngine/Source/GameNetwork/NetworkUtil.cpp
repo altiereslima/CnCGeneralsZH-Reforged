@@ -418,11 +418,30 @@ Bool IsValidTransferFileContent(const AsciiString &filePath, const UnsignedByte 
 				return FALSE;
 			}
 			const UnsignedByte *sig = data + dataSize - (TGA2_SIGNATURE_LEN + 2);
-			if (memcmp(sig, TGA2_SIGNATURE, TGA2_SIGNATURE_LEN) != 0
-				|| sig[TGA2_SIGNATURE_LEN] != '.'
-				|| sig[TGA2_SIGNATURE_LEN + 1] != '\0')
+			if (memcmp(sig, TGA2_SIGNATURE, TGA2_SIGNATURE_LEN) == 0
+				&& sig[TGA2_SIGNATURE_LEN] == '.'
+				&& sig[TGA2_SIGNATURE_LEN + 1] == '\0')
 			{
-				DEBUG_LOG(("TGA file '%s' has no TRUEVISION-XFILE footer\n", filePath.str()));
+				break;
+			}
+
+			// The footer is Targa 2.0 and a 1.0 file has none, which is every preview a paint program
+			// saves that way.  Refusing those sent no progress back, and the host sat out the whole
+			// two minute timeout and called the map transfer failed.  Without a footer the header has
+			// to hold up instead: a real image type, a size, a pixel depth, and for an uncompressed
+			// image the pixels it promises.  Read by offset, the struct is not packed.
+			const UnsignedByte imageType = data[2];
+			const UnsignedInt width = data[12] | (data[13] << 8);
+			const UnsignedInt height = data[14] | (data[15] << 8);
+			const UnsignedByte pixelDepth = data[16];
+			const Bool knownType = imageType == TGA_CMAPPED || imageType == TGA_TRUECOLOR || imageType == TGA_MONO
+				|| imageType == TGA_CMAPPED_ENCODED || imageType == TGA_TRUECOLOR_ENCODED || imageType == TGA_MONO_ENCODED;
+			const Bool knownDepth = pixelDepth == 8 || pixelDepth == 15 || pixelDepth == 16 || pixelDepth == 24 || pixelDepth == 32;
+			const Bool encoded = imageType >= TGA_CMAPPED_ENCODED;
+			if (!knownType || !knownDepth || width == 0 || height == 0
+				|| (!encoded && 18 + data[0] + (Int64)width * height * ((pixelDepth + 7) / 8) > (Int64)dataSize))
+			{
+				DEBUG_LOG(("TGA file '%s' has no TRUEVISION-XFILE footer and no header that holds up\n", filePath.str()));
 				return FALSE;
 			}
 			break;

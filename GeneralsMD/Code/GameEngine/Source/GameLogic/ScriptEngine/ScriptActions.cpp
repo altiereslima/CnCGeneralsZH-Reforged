@@ -3021,12 +3021,13 @@ void ScriptActions::doCameraMotionBlur(Bool zoomIn, Bool saturate)
 
 static PlayerMaskType getHumanPlayerMask( void )
 {
-	PlayerMaskType mask;
+	// was uninitialised and and-ed, so the set came off the stack and differed per machine
+	PlayerMaskType mask = 0;
 	for (Int i=0; i<ThePlayerList->getPlayerCount(); ++i)
 	{
 		const Player *player = ThePlayerList->getNthPlayer(i);
 		if (player->getPlayerType() == PLAYER_HUMAN)
-			mask &= player->getPlayerMask();
+			mask |= player->getPlayerMask();
 	}
 
 	//DEBUG_LOG(("getHumanPlayerMask(): mask was %4.4X\n", mask));
@@ -5591,6 +5592,8 @@ void ScriptActions::doTeamUseCommandButtonOnNearestGarrisonedBuilding( const Asc
 	}
 
 	PartitionFilterPlayerAffiliation f1(team->getControllingPlayer(), ALLOW_ENEMIES, true);
+	// the affiliation filter lets the player's own objects through whatever it is asked for
+	PartitionFilterPlayer notOwn(team->getControllingPlayer(), false);
 	PartitionFilterAcceptByKindOf f2(MAKE_KINDOF_MASK(KINDOF_STRUCTURE), KINDOFMASK_NONE);
 	PartitionFilterGarrisonable f3(true);
 	PartitionFilterValidCommandButtonTarget f4(srcObj, commandButton, true, CMD_FROM_SCRIPT);
@@ -5599,7 +5602,7 @@ void ScriptActions::doTeamUseCommandButtonOnNearestGarrisonedBuilding( const Asc
 	Coord3D pos;
 	theGroup->getCenter(&pos);
 
-	PartitionFilter *filters[] = { &f1, &f2, &f3, &f4, &filterMapStatus, 0 };
+	PartitionFilter *filters[] = { &f1, &notOwn, &f2, &f3, &f4, &filterMapStatus, 0 };
 	Object *obj = ThePartitionManager->getClosestObject(&pos, REALLY_FAR, FROM_CENTER_2D, filters);
 	if (!obj) {
 		return;

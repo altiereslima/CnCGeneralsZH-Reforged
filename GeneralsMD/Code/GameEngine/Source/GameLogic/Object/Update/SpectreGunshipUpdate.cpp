@@ -336,8 +336,10 @@ public:
 		if (objOther->isEffectivelyDead())
 			return false;
 
-		// this is also way fast (bit test) so do it next.
-		if (objOther->isOffMap() != m_obj->isOffMap())
+		// this is also way fast (bit test) so do it next. The targets are on the map whatever the
+		// ship is: it orbits past the edge, and comparing its own off-map bit with the target's
+		// left the gattling with nothing to shoot for as long as the orbit was outside.
+		if (objOther->isOffMap())
 			return false;
 
 		Relationship r = m_obj->getRelationship(objOther);

@@ -660,7 +660,7 @@ Bool Particle::update( const ParticleUpdateContext &context )
 	else if (m_color.red > 1.0f)
 		m_color.red = 1.0f;
 
-	if (m_color.red < 0.0f)
+	if (m_color.green < 0.0f)
 		m_color.green = 0.0f;
 	else if (m_color.green > 1.0f)
 		m_color.green = 1.0f;
@@ -786,8 +786,9 @@ Bool Particle::isInvisible( const ParticleUpdateContext &context )
 		case ParticleSystemInfo::ADDITIVE:
 			// if color is black, this particle is invisible
 			
-			// check that we're not in the process of going to another color
-			if (m_colorKey[ m_colorTargetKey ].frame == 0)
+			// check that we're not in the process of going to another color; past the last key
+			// frame the index is one beyond the array
+			if (m_colorTargetKey >= MAX_KEYFRAMES || m_colorKey[ m_colorTargetKey ].frame == 0)
 			{
 				if ((m_color.red + m_color.green + m_color.blue) <= 0.06f)
 					return true;
@@ -795,9 +796,13 @@ Bool Particle::isInvisible( const ParticleUpdateContext &context )
 			return false;
 
 		case ParticleSystemInfo::ALPHA:
-			// if alpha is zero, this particle is invisible
-			if (m_alpha < 0.02f)
-				return true;
+			// if alpha is zero, this particle is invisible - but not while it is on its way to another
+			// key, or a particle that fades in from zero slower than 0.02 a frame dies on its first update
+			if (m_alphaTargetKey >= MAX_KEYFRAMES || m_alphaKey[ m_alphaTargetKey ].frame == 0)
+			{
+				if (m_alpha < 0.02f)
+					return true;
+			}
 			return false;
 
 		case ParticleSystemInfo::ALPHA_TEST:
@@ -808,7 +813,7 @@ Bool Particle::isInvisible( const ParticleUpdateContext &context )
 			// if color is white, this particle is invisible
 
 			// check that we're not in the process of going to another color
-			if (m_colorKey[ m_colorTargetKey ].frame == 0)
+			if (m_colorTargetKey >= MAX_KEYFRAMES || m_colorKey[ m_colorTargetKey ].frame == 0)
 			{
 				if ((m_color.red * m_color.green * m_color.blue) > 0.95f)
 					return true;
@@ -3367,6 +3372,8 @@ void ParticleSystemManager::init( void )
 	/// Read INI data and build templates
 	INI ini;
 	ini.load( AsciiString( "Data\\INI\\ParticleSystem.ini" ), INI_LOAD_OVERWRITE, NULL );
+	// The fork's own systems, beside EA's 1088 rather than in a loose copy of all of them
+	ini.load( AsciiString( "Data\\INI\\ParticleSystemReforged.ini" ), INI_LOAD_OVERWRITE, NULL );
 
 	// "-particlebounce" on the command line: every system hits the terrain, using the built-in
 	// defaults.  Without it nothing changes unless a system's INI sets GroundCollision itself.

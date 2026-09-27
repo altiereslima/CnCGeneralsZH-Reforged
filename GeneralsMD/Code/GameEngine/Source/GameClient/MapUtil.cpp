@@ -568,6 +568,7 @@ Bool MapCache::loadUserMaps()
 {
 	// Read in map list from disk
 	AsciiString mapDir;
+	Bool userCacheBroken = FALSE;
 	if (TheGlobalData->m_buildMapCache)
 	{
 		mapDir = getMapDir();
@@ -589,7 +590,19 @@ Bool MapCache::loadUserMaps()
 			if (fp)
 			{
 				fp->close();
-				ini.load( fname, INI_LOAD_OVERWRITE, NULL );
+				// the user folder's cache is ours to rebuild, and a hand edit or a torn write used to
+				// stop the game at startup.  Forget what it held; every map below parses fresh, and
+				// returning TRUE has updateCache write a clean file over the broken one.
+				try
+				{
+					ini.load( fname, INI_LOAD_OVERWRITE, NULL );
+				}
+				catch (...)
+				{
+					DEBUG_LOG(("MapCache: %s does not parse, rebuilding it\n", fname.str()));
+					clear();
+					userCacheBroken = TRUE;
+				}
 			}
 
 		}
@@ -706,7 +719,19 @@ Bool MapCache::loadUserMaps()
 	if (clearUnseenMaps(mapDir))
 		return TRUE;
 
-	return parsedAMap;
+	return parsedAMap || userCacheBroken;
+}
+
+// The file name after the last separator of either kind, or the whole name when there is none.
+// reverseFind('\\') + 1 was a pointer one past NULL for a name without a backslash.
+static const char *mapFileNamePart( const AsciiString& fname )
+{
+	const char *back = fname.reverseFind('\\');
+	const char *forward = fname.reverseFind('/');
+	const char *sep = back;
+	if (forward != NULL && (sep == NULL || forward > sep))
+		sep = forward;
+	return sep ? sep + 1 : fname.str();
 }
 
 //Bool MapCache::addMap( AsciiString dirName, AsciiString fname, WinTimeStamp timestamp, UnsignedInt filesize, Bool isOfficial )
@@ -741,7 +766,7 @@ Bool MapCache::addMap( AsciiString dirName, AsciiString fname, FileInfo *fileInf
 			{
 				// unofficial maps or maps without names
 				AsciiString tempdisplayname;
-				tempdisplayname = fname.reverseFind('\\') + 1;
+				tempdisplayname = mapFileNamePart(fname);
 				(*this)[lowerFname].m_displayName.translate(tempdisplayname);
 				if (md.m_numPlayers >= 2)
 				{
@@ -797,7 +822,7 @@ Bool MapCache::addMap( AsciiString dirName, AsciiString fname, FileInfo *fileInf
 	{
 		DEBUG_LOG(("Missing TheKey_mapName!\n"));
 		AsciiString tempdisplayname;
-		tempdisplayname = fname.reverseFind('\\') + 1;
+		tempdisplayname = mapFileNamePart(fname);
 		md.m_displayName.translate(tempdisplayname);
 		if (md.m_numPlayers >= 2)
 		{

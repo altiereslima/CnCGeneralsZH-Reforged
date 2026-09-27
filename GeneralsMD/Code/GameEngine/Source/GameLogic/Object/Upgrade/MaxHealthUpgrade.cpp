@@ -81,13 +81,16 @@ void MaxHealthUpgrade::upgradeImplementation( )
 {
 	const MaxHealthUpgradeModuleData *data = getMaxHealthUpgradeModuleData();
 
-	//Simply add the xp scalar to the xp tracker!
 	Object *obj = getObject();
 
 	BodyModuleInterface *body = obj->getBodyModule();
 	if( body )
 	{
-		body->setMaxHealth( body->getMaxHealth() + data->m_addMaxHealth, data->m_maxHealthChangeType );
+		// Veterancy multiplies max health when it arrives, so an addition made after a promotion has
+		// to carry the promotion's bonus too. Without it an Elite Paladin that researched Composite
+		// Armor ended on 750 where one armored first and promoted later ended on 780.
+		Real add = data->m_addMaxHealth * TheGlobalData->m_healthBonus[ obj->getVeterancyLevel() ];
+		body->setMaxHealth( body->getMaxHealth() + add, data->m_maxHealthChangeType );
 	}
 }
 

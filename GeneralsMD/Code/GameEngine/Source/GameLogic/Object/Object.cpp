@@ -556,6 +556,8 @@ void Object::initObject()
 		{
 			controller->applyBattlePlanBonusesForObject( this );
 		}
+
+		controller->applyVisionSpies( this, TRUE );
 	}
 
 
@@ -929,7 +931,7 @@ void Object::setOrRestoreTeam( Team* team, Bool restoring )
 		{
 			m_team->removeFrom_TeamMemberList(this);
 			if (m_team->getControllingPlayer())
-				m_team->getControllingPlayer()->becomingTeamMember(this, false);
+				m_team->getControllingPlayer()->becomingTeamMember(this, false, restoring);
 		}
 	}
 		
@@ -943,7 +945,7 @@ void Object::setOrRestoreTeam( Team* team, Bool restoring )
 		{
 			m_team->prependTo_TeamMemberList(this);
 			if (m_team->getControllingPlayer())
-				m_team->getControllingPlayer()->becomingTeamMember(this, true);
+				m_team->getControllingPlayer()->becomingTeamMember(this, true, restoring);
 		}
 		
 		// now, adjust the attitude of the unit to its new team.
@@ -2286,7 +2288,13 @@ void Object::setDisabledUntil( DisabledType type, UnsignedInt frame )
 		// A building's AI does not run while it is EMPed, hacked, subdued or out of power, so the attack it
 		// was in never exited and kept its look: a Gattling Cannon spun its barrels through the whole EMP.
 		// Selling a building idles it the same way, and it picks a target again once it is back.
-		if( isAIHaltedByDisable() )
+		// Not while a save is loading. A save adds each building's power back as the building comes back,
+		// oldest first, so a base that once built past its plants runs short partway through the load
+		// and switches off the buildings already restored. Their update modules go back on the sleepy
+		// list only once every object is in, and idling one before that woke a module the list did not
+		// hold: "sleepy update module illegal index", a player's crash on Load. The AI state each was
+		// saved in is what the load leaves it in.
+		if( isAIHaltedByDisable() && !TheGameState->isInLoadGame() )
 		{
 			m_ai->stopTurretsTurning();
 			if( isKindOf( KINDOF_STRUCTURE ) )
@@ -2991,9 +2999,14 @@ void Object::friend_prepareForMapBoundaryAdjust(void)
 //-------------------------------------------------------------------------------------------------
 void Object::friend_notifyOfNewMapBoundary(void)
 {
-	ThePartitionManager->registerObject(this);
+	// A rider of an enclosing container stays out of the world the way OpenContain took it out:
+	// registering it put a garrison's occupants back in reach of every splash weapon.
+	const Bool enclosed = m_containedBy && m_containedBy->getContain()->isEnclosingContainerFor( this );
+	if( !enclosed )
+		ThePartitionManager->registerObject(this);
 	TheRadar->addObject(this);
-	TheAI->pathfinder()->addObjectToPathfindMap( this );
+	if( !enclosed )
+		TheAI->pathfinder()->addObjectToPathfindMap( this );
 
 	// Now that the PartitionManager has finished its reset, we need to relook
 	handlePartitionCellMaintenance();
@@ -5705,7 +5718,10 @@ void Object::setVisionSpied(Bool setting, Int byWhom)
 
 		m_visionSpiedMask = workingMask;
 
-		handlePartitionCellMaintenance();
+		// A unit spied as it is made still sits at the origin; the move that places it looks for it
+		const Coord3D* pos = getPosition();
+		if (pos->x || pos->y || pos->z)
+			handlePartitionCellMaintenance();
 	}
 }
 
@@ -5878,7 +5894,8 @@ void Object::doCommandButton( const CommandButton *commandButton, CommandSourceT
 				{
 					WeaponSlotType weaponSlot = commandButton->getWeaponSlot();
 					// GUI_COMMAND_SWITCH_WEAPON switches until un-switched, or switched to something else.
-					setWeaponLock( weaponSlot, LOCKED_PERMANENTLY );
+					if( canSwitchToWeapon( weaponSlot ) )
+						setWeaponLock( weaponSlot, LOCKED_PERMANENTLY );
 					return;
 				}
 
@@ -6577,6 +6594,48 @@ Bool Object::canProduceUpgrade( const UpgradeTemplate *upgrade )
 	}
 
 	return FALSE;// Cheatin' punk.
+}
+
+//=============================================================================
+/** A switch-weapon order goes to a whole selection or a whole team, and every member used to take
+	* the lock. A Missile Defender in a group with a Ranger took the flashbang switch as a permanent
+	* lock on its laser-guided missiles and fired them at anything, as fast as they reload. */
+Bool Object::canSwitchToWeapon( WeaponSlotType weaponSlot ) const
+{
+	const CommandSet *set = TheControlBar->findCommandSet(getCommandSetString());
+	if( set == NULL )
+		return FALSE;	// an object with no command set has no buttons at all
+
+	for( Int buttonIndex = 0; buttonIndex < MAX_COMMANDS_PER_SET; buttonIndex++ )
+	{
+		const CommandButton *button = set->getCommandButton(buttonIndex);
+		if( button && button->getCommandType() == GUI_COMMAND_SWITCH_WEAPON && button->getWeaponSlot() == weaponSlot )
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** An infantryman reaching an unmanned vehicle becomes its driver: the vehicle is his side's and
+	* he is gone.  The collision that brings him to it can arrive on either object first, so both
+	* PhysicsUpdate (his) and OpenContain (the vehicle's) come here. */
+//-------------------------------------------------------------------------------------------------
+void Object::takeOverUnmanned( Object *pilot )
+{
+	clearDisabled( DISABLED_UNMANNED );
+
+	//We need to be able to test whether an object on a team has been captured, so set here that this object
+	//was captured.
+	setCaptured(true);
+
+	defect( pilot->getTeam(), 0 );
+
+	//In order to make things easier for the designers, we are going to transfer the name
+	//of the infantry to the vehicle... so the designer can control the vehicle with their scripts.
+	TheScriptEngine->transferObjectName( pilot->getName(), this );
+
+	TheGameLogic->destroyObject( pilot );
 }
 
 //=============================================================================

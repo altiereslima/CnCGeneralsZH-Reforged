@@ -457,14 +457,13 @@ void WeaponTemplate::postProcessLoad()
 		DEBUG_ASSERTCRASH(m_projectileTmpl, ("projectile %s not found!",m_projectileName.str()));
 	}
 
+	// The OCL names are cleared once they are resolved, so a name that is empty here was either never
+	// given (the pointer is still NULL from the constructor) or resolved by an earlier pass. A map.ini
+	// runs this pass again after the game's own, and it must not drop the OCLs it did not name.
 	for (Int i = LEVEL_FIRST; i <= LEVEL_LAST; ++i)
 	{
 		// And the OCL if there is one
-		if (m_fireOCLNames[i].isEmpty())
-		{
-			m_fireOCLs[i] = NULL;
-		}
-		else
+		if (m_fireOCLNames[i].isNotEmpty())
 		{
 			m_fireOCLs[i] = TheObjectCreationListStore->findObjectCreationList(m_fireOCLNames[i].str() );
 			DEBUG_ASSERTCRASH(m_fireOCLs[i], ("OCL %s not found in a weapon!",m_fireOCLNames[i].str()));
@@ -472,11 +471,7 @@ void WeaponTemplate::postProcessLoad()
 		m_fireOCLNames[i].clear();
 
 		// And the other OCL if there is one
-		if (m_projectileDetonationOCLNames[i].isEmpty() )
-		{
-			m_projectileDetonationOCLs[i] = NULL;
-		}
-		else
+		if (m_projectileDetonationOCLNames[i].isNotEmpty() )
 		{
 			m_projectileDetonationOCLs[i] = TheObjectCreationListStore->findObjectCreationList(m_projectileDetonationOCLNames[i].str() );
 			DEBUG_ASSERTCRASH(m_projectileDetonationOCLs[i], ("OCL %s not found in a weapon!",m_projectileDetonationOCLNames[i].str()));
@@ -1601,6 +1596,7 @@ WeaponStore::WeaponStore()
 WeaponStore::~WeaponStore()
 {
 	deleteAllDelayedDamage();
+	deleteWeaponsNow();
 
 	for (Int i = 0; i < m_weaponTemplateVector.size(); i++)
 	{
@@ -1686,22 +1682,34 @@ WeaponTemplate *WeaponStore::newWeaponTemplate(AsciiString name)
 } 
 
 //-------------------------------------------------------------------------------------------------
+/* A map.ini block for a weapon that already exists. EA parsed it into a copy that nothing ever
+	 pointed at - not the store, not the object templates, which hold the original by pointer - so a
+	 map could add weapons but every change to an existing one was lost. The block now edits the
+	 original, and the original's first state is kept aside for reset() to put back after the match. */
 WeaponTemplate *WeaponStore::newOverride(WeaponTemplate *weaponTemplate)
 {
-	if (!weaponTemplate)
-		return NULL;
-	
-	// allocate a new weapon
-	WeaponTemplate *wt = newInstance(WeaponTemplate);
-	(*wt) = (*weaponTemplate);
-	(wt)->friend_setNextTemplate(weaponTemplate);
-	
-	return wt;
-} 
+	if (!weaponTemplate->isOverride())
+	{
+		WeaponTemplate *pristine = newInstance(WeaponTemplate);
+		(*pristine) = (*weaponTemplate);
+		weaponTemplate->friend_setNextTemplate(pristine);
+		// the copy shares the extra-bonus set, and a WeaponBonus line edits that set in place
+		if (pristine->m_extraBonus)
+		{
+			weaponTemplate->m_extraBonus = newInstance(WeaponBonusSet);
+			(*weaponTemplate->m_extraBonus) = (*pristine->m_extraBonus);
+		}
+	}
+
+	return weaponTemplate;
+}
 
 //-------------------------------------------------------------------------------------------------
 void WeaponStore::update()
 {
+	// end of the logic frame: nothing is firing any more
+	deleteWeaponsNow();
+
 	for (std::list<WeaponDelayedDamageInfo>::iterator ddi = m_weaponDDI.begin(); ddi != m_weaponDDI.end(); )
 	{
 		UnsignedInt curFrame = TheGameLogic->getFrame();
@@ -1727,6 +1735,14 @@ void WeaponStore::deleteAllDelayedDamage()
 	m_weaponDDI.clear();
 }
 
+//-------------------------------------------------------------------------------------------------
+void WeaponStore::deleteWeaponsNow()
+{
+	for (size_t i = 0; i < m_weaponsToDelete.size(); ++i)
+		m_weaponsToDelete[i]->deleteInstance();
+	m_weaponsToDelete.clear();
+}
+
 // ------------------------------------------------------------------------------------------------
 void WeaponStore::resetWeaponTemplates( void )
 {
@@ -1742,19 +1758,23 @@ void WeaponStore::resetWeaponTemplates( void )
 //-------------------------------------------------------------------------------------------------
 void WeaponStore::reset()
 {
-	// clean up any overriddes.
+	// put back every weapon a map.ini edited (see newOverride)
 	for (Int i = 0; i < m_weaponTemplateVector.size(); ++i)
 	{
 		WeaponTemplate *wt = m_weaponTemplateVector[i];
-		if (wt->isOverride()) 
+		if (wt->isOverride())
 		{
-			WeaponTemplate *override = wt;
-			wt = wt->friend_clearNextTemplate();
-			override->deleteInstance();
+			WeaponTemplate *pristine = wt->friend_clearNextTemplate();
+			if (wt->m_extraBonus)
+				wt->m_extraBonus->deleteInstance();
+			(*wt) = (*pristine);
+			pristine->m_extraBonus = NULL;	// wt owns it again
+			pristine->deleteInstance();
 		}
 	}
 
 	deleteAllDelayedDamage();
+	deleteWeaponsNow();
 	IncomingDamageTracker::reset();
 	resetWeaponTemplates();
 }
@@ -1770,6 +1790,117 @@ void WeaponStore::setDelayedDamage(const WeaponTemplate *weapon, const Coord3D* 
 	wi.m_delayIntendedVictimID = victimID;
 	wi.m_bonus = bonus;
 	m_weaponDDI.push_back(wi);
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Weapons are named the way Weapon::xfer names them, and found again the way it finds them. */
+static WeaponTemplate *xferWeaponTemplateName( Xfer *xfer, const WeaponTemplate *wt )
+{
+	AsciiString name;
+	if( xfer->getXferMode() == XFER_SAVE )
+		name = wt->getName();
+	xfer->xferAsciiString( &name );
+	if( xfer->getXferMode() == XFER_SAVE )
+		return NULL;
+
+	WeaponTemplate *found = (WeaponTemplate *)TheWeaponStore->findWeaponTemplate( name );
+	if( found == NULL )
+	{
+		DEBUG_CRASH(( "WeaponStore::xfer - weapon '%s' in the save is not defined\n", name.str() ));
+		throw INI_INVALID_DATA;
+	}
+	return found;
+}
+
+//-------------------------------------------------------------------------------------------------
+void WeaponStore::xfer( Xfer *xfer )
+{
+	const XferVersion currentVersion = 1;
+	XferVersion version = currentVersion;
+	xfer->xferVersion( &version, currentVersion );
+
+	// the historic hits of every weapon that has any
+	UnsignedShort historyCount = 0;
+	if( xfer->getXferMode() == XFER_SAVE )
+	{
+		for( size_t i = 0; i < m_weaponTemplateVector.size(); ++i )
+			if( !m_weaponTemplateVector[i]->m_historicDamage.empty() )
+				++historyCount;
+	}
+	xfer->xferUnsignedShort( &historyCount );
+
+	size_t next = 0;
+	for( UnsignedShort h = 0; h < historyCount; ++h )
+	{
+		WeaponTemplate *wt = NULL;
+		if( xfer->getXferMode() == XFER_SAVE )
+		{
+			while( m_weaponTemplateVector[next]->m_historicDamage.empty() )
+				++next;
+			wt = m_weaponTemplateVector[next++];
+			xferWeaponTemplateName( xfer, wt );
+		}
+		else
+		{
+			wt = xferWeaponTemplateName( xfer, NULL );
+			wt->m_historicDamage.clear();
+		}
+
+		xfer->xferUnsignedInt( &wt->m_historicDamageTriggerId );
+
+		UnsignedShort hitCount = (UnsignedShort)wt->m_historicDamage.size();
+		xfer->xferUnsignedShort( &hitCount );
+		if( xfer->getXferMode() == XFER_SAVE )
+		{
+			for( HistoricWeaponDamageList::iterator it = wt->m_historicDamage.begin(); it != wt->m_historicDamage.end(); ++it )
+			{
+				xfer->xferUnsignedInt( &it->frame );
+				xfer->xferCoord3D( &it->location );
+				xfer->xferUnsignedInt( &it->triggerId );
+			}
+		}
+		else
+		{
+			for( UnsignedShort n = 0; n < hitCount; ++n )
+			{
+				HistoricWeaponDamageInfo hit( 0, Coord3D() );
+				xfer->xferUnsignedInt( &hit.frame );
+				xfer->xferCoord3D( &hit.location );
+				xfer->xferUnsignedInt( &hit.triggerId );
+				wt->m_historicDamage.push_back( hit );
+			}
+		}
+	}
+
+	// the delayed damage still in flight
+	UnsignedShort delayedCount = (UnsignedShort)m_weaponDDI.size();
+	xfer->xferUnsignedShort( &delayedCount );
+	if( xfer->getXferMode() != XFER_SAVE )
+		m_weaponDDI.clear();
+
+	std::list<WeaponDelayedDamageInfo>::iterator ddi = m_weaponDDI.begin();
+	for( UnsignedShort d = 0; d < delayedCount; ++d )
+	{
+		WeaponDelayedDamageInfo loaded;
+		WeaponDelayedDamageInfo &info = ( xfer->getXferMode() == XFER_SAVE ) ? *ddi++ : loaded;
+
+		WeaponTemplate *wt = xferWeaponTemplateName( xfer, info.m_delayedWeapon );
+		if( xfer->getXferMode() != XFER_SAVE )
+			info.m_delayedWeapon = wt;
+		xfer->xferCoord3D( &info.m_delayDamagePos );
+		xfer->xferUnsignedInt( &info.m_delayDamageFrame );
+		xfer->xferObjectID( &info.m_delaySourceID );
+		xfer->xferObjectID( &info.m_delayIntendedVictimID );
+		for( Int f = 0; f < WeaponBonus::FIELD_COUNT; ++f )
+		{
+			Real value = info.m_bonus.getField( (WeaponBonus::Field)f );
+			xfer->xferReal( &value );
+			info.m_bonus.setField( (WeaponBonus::Field)f, value );
+		}
+
+		if( xfer->getXferMode() != XFER_SAVE )
+			m_weaponDDI.push_back( info );
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2084,8 +2215,17 @@ void Weapon::onWeaponBonusChange(const Object *source)
 
 	if( needUpdate )
 	{
-		m_whenLastReloadStarted = TheGameLogic->getFrame();
-		m_whenWeCanFireAgain = m_whenLastReloadStarted + newDelay;	
+		// Carry the progress over rather than starting the wait again: a propaganda tower's rate of fire
+		// bonus coming or going used to restart the whole reload, so a Nuke Cannon walking in and out of
+		// range of one never got to fire.  Half way through the old wait is half way through the new one.
+		const UnsignedInt now = TheGameLogic->getFrame();
+		const UnsignedInt oldDelay = m_whenWeCanFireAgain > m_whenLastReloadStarted ? m_whenWeCanFireAgain - m_whenLastReloadStarted : 0;
+		const UnsignedInt elapsed = now > m_whenLastReloadStarted ? now - m_whenLastReloadStarted : 0;
+		UnsignedInt newElapsed = 0;
+		if( oldDelay > 0 && newDelay > 0 )
+			newElapsed = (UnsignedInt)( (Real)min( elapsed, oldDelay ) / (Real)oldDelay * (Real)newDelay );
+		m_whenLastReloadStarted = now - min( newElapsed, now );
+		m_whenWeCanFireAgain = m_whenLastReloadStarted + newDelay;
 		
 		if (source->isReloadTimeShared())
 		{	
@@ -3022,6 +3162,11 @@ static void makeAssistanceRequest( Object *requestOf, void *userData )
 
 	// Don't ask ourselves (can't believe I forgot this one)
 	if( requestOf == requestData->m_requestingObject )
+		return;
+
+	// Nor the battery being shot at: it took the lock onto its long-range assist weapon, could not
+	// fire at itself, and went hunting with that range instead.
+	if( requestOf == requestData->m_victimObject )
 		return;
 
 	// Only request of our kind of people

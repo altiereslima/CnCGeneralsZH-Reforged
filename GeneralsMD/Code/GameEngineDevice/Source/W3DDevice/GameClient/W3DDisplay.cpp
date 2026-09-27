@@ -2056,6 +2056,12 @@ void W3DDisplay::draw( void )
 
 	extern HWND ApplicationHWnd;
 	if (ApplicationHWnd && ::IsIconic(ApplicationHWnd)) {
+		// A network game keeps its logic running while minimized (Win32GameEngine::update), and
+		// the particle update below is the only thing that retires a particle system, so skipping
+		// it with the draw stacked up every system the match made in the meantime, all of them to
+		// start emitting at once on return (TheSuperHackers #2709 reproduce it with Propaganda
+		// Towers).  Same bookkeeping as the lost-device branch below.
+		TheParticleSystemManager->update();
 		return;
 	}
 

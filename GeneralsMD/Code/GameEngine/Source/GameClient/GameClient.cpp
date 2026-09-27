@@ -528,6 +528,11 @@ void GameClient::reset( void )
 	// need to reset the in game UI to clear drawables before they are destroyed
 	TheInGameUI->reset();
 
+	// the team keys pressed in the match we are leaving will never land, and the next one counts
+	// its frames from zero again (init attaches no translators without a message stream)
+	if (TheSelectionTranslator)
+		TheSelectionTranslator->forgetPendingSquads();
+
 	// destroy all Drawables
 	for( draw = m_drawableList; draw; draw = nextDraw )
 	{
@@ -683,8 +688,18 @@ void GameClient::update( void )
 
   if (TheInGameUI->isCameraTrackingDrawable())
   {
+    // Stop following a unit the moment it can no longer be seen - stealthed, or gone into fog or
+    // shroud for the player whose fog is drawn - or the camera shows where it went.
     Drawable *draw = TheInGameUI->getFirstSelectedDrawable();
-    if ( draw )
+    const Object *object = draw ? draw->getObject() : NULL;
+    Bool isVisible = object != NULL && !draw->isDrawableEffectivelyHidden();
+    if ( isVisible )
+    {
+      const ObjectShroudStatus shroudStatus = object->getShroudedStatus( TheObserverCamera.getShroudPlayerIndex() );
+      isVisible = shroudStatus == OBJECTSHROUD_CLEAR || shroudStatus == OBJECTSHROUD_PARTIAL_CLEAR;
+    }
+
+    if ( isVisible )
     {
       const Coord3D *pos = draw->getPosition();
       TheTacticalView->lookAt( pos );

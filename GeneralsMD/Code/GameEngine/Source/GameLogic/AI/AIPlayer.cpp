@@ -693,7 +693,9 @@ void AIPlayer::queueSupplyTruck( void )
 							{
 								// This thinks he is a gatherer, but doesn't have a preferred dock id.
 								Object *center = TheGameLogic->findObjectByID(info->getObjectID());
-								if (center) {
+								// a GLA building that died leaves a rebuild hole in its build list slot, and a
+								// hole is no dock: the gatherer drove to it and stood there
+								if (center && !center->isKindOf(KINDOF_REBUILD_HOLE)) {
 									info->setCurrentGatherers(info->getCurrentGatherers()+1);
 									// Note - although this is the ai, we are sending in CMD_FROM_PLAYER.
 									// This causes the dock object to stick in the docking interface.

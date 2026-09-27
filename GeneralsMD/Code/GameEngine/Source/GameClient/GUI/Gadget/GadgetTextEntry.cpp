@@ -105,6 +105,13 @@ WindowMsgHandledType GadgetTextEntryInput( GameWindow *window, UnsignedInt msg,
 			// --------------------------------------------------------------------
 			if ( ch == VK_RETURN )
 			{
+				// WM_CHAR's lParam bit 30 says the key was already down: a held Enter repeating. The meta
+				// map ignores repeats, but this did not, so holding Enter opened the chat with the press and
+				// sent it shut with the first repeat, over and over.
+				const WindowMsgData KEY_WAS_DOWN = 1 << 30;
+				if( BitTest( mData2, KEY_WAS_DOWN ) )
+					return MSG_HANDLED;
+
 				// Done with this edit
 			 		TheWindowManager->winSendSystemMsg( window->winGetOwner(), 
 			 																				GEM_EDIT_DONE,
@@ -195,6 +202,18 @@ WindowMsgHandledType GadgetTextEntryInput( GameWindow *window, UnsignedInt msg,
 				case KEY_F12:
 				case KEY_CAPS:
 				case KEY_DEL:
+					return MSG_IGNORED;
+
+				// the modifiers go on to the meta translator, both ways.  A Ctrl press passed through
+				// (the check above) but its release was swallowed here, so force-attack stayed armed
+				// after typing into the beacon or chat box and a click on a building fired at it
+				// instead of selecting it.
+				case KEY_LCTRL:
+				case KEY_RCTRL:
+				case KEY_LALT:
+				case KEY_RALT:
+				case KEY_LSHIFT:
+				case KEY_RSHIFT:
 					return MSG_IGNORED;
 
 				// --------------------------------------------------------------------

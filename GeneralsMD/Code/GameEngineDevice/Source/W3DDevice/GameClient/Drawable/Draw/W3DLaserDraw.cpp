@@ -275,7 +275,12 @@ void W3DLaserDraw::doDrawModule(const Matrix3D* transformMtx)
 
 		for( int segment = 0; segment < data->m_segments; segment++ )
 		{
-			if( data->m_arcHeight > 0.0f && data->m_segments > 1 )
+			// a laser drawn before LaserUpdate has placed it has both ends at the origin, and the arc
+			// below divides by half its length: NaN points into the segmented line
+			const Coord3D *start = update->getStartPos();
+			const Coord3D *end = update->getEndPos();
+			const Bool hasLength = start->x != end->x || start->y != end->y || start->z != end->z;
+			if( data->m_arcHeight > 0.0f && data->m_segments > 1 && hasLength )
 			{
 				//CALCULATE A CURVED LINE BASED ON TOTAL LENGTH AND DESIRED HEIGHT INCREASE
 				//To do this we will use a portion of the cos wave ranging between -0.25PI

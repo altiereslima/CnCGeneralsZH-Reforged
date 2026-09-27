@@ -149,6 +149,7 @@ const FieldParse AudioEventInfo::m_audioEventInfo[] =
 	{ "MinRange",							INI::parseReal,						NULL,								offsetof( AudioEventInfo, m_minDistance) },
 	{ "MaxRange",							INI::parseReal,						NULL,								offsetof( AudioEventInfo, m_maxDistance) },
 	{ "LowPassCutoff",				INI::parsePercentToReal,	NULL,								offsetof( AudioEventInfo, m_lowPassFreq) },
+	{ NULL, NULL, NULL, 0 }
 };
 
 //-------------------------------------------------------------------------------------------------

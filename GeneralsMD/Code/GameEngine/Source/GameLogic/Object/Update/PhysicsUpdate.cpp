@@ -1232,20 +1232,7 @@ void PhysicsBehavior::onCollide( Object *other, const Coord3D *loc, const Coord3
 		{
 			//This is in fact the case, and we are doing it here because it applies to all infantry in any unmanned vehicle.
 			//This could be done via a special/new module, but doing it here doesn't require a new module update to every infantry.
-			other->clearDisabled( DISABLED_UNMANNED );
-
-			//We need to be able to test whether an object on a team has been captured, so set here that this object
-			//was captured.
-			other->setCaptured(true);
-			
-			other->defect( obj->getTeam(), 0 );
-			//other->setTeam( obj->getTeam() );
-
-			//In order to make things easier for the designers, we are going to transfer the name
-			//of the infantry to the vehicle... so the designer can control the vehicle with their scripts.
-			TheScriptEngine->transferObjectName( obj->getName(), other );
-
-			TheGameLogic->destroyObject( obj );
+			other->takeOverUnmanned( obj );
 		}
 		return;
 	}

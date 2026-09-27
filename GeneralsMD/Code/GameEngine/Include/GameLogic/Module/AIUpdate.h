@@ -775,6 +775,7 @@ public:
 	inline Bool getRetryPath(void) {return m_retryPath;}
 	inline Bool didPathfindFindNothing(void) const {return m_pathfindFoundNothing;}
 	void queueForPathOrRetry(void);	///< join the pathfind queue, or try again shortly when it is full
+	Int repathDebounceFrames(void) const {return (Int)(m_pathTimestamp + 3 - TheGameLogic->getFrame());}	///< what is left of the three frames a new path waits after the last one
 	UnsignedInt getQueueForPathFrame(void) const {return m_queueForPathFrame;}	///< nonzero while a too-quick path request is held back
 	
 	inline void setAllowedToChase( Bool allow ) { m_allowedToChase = allow; }

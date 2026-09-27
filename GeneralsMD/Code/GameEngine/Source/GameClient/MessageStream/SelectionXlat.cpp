@@ -56,6 +56,7 @@
 #include "GameClient/SelectionPriority.h"
 #include "GameClient/SelectionXlat.h"
 #include "GameClient/TerrainVisual.h"
+#include "GameNetwork/NetworkInterface.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -289,6 +290,7 @@ SelectionTranslator::SelectionTranslator()
 	m_rightDownTime = 0;
 	m_rightDownCamera.zero();
 	m_selectCountMap.clear();
+	forgetPendingSquads();
 
 	TheSelectionTranslator = this;
 
@@ -1250,15 +1252,21 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 				DEBUG_LOG(("META: create team %d\n",group));
 				// Assign selected items to a group
 				GameMessage *newmsg = TheMessageStream->appendMessage((GameMessage::Type)(GameMessage::MSG_CREATE_TEAM0 + group));
+				m_pendingSquad[ group ].clear();
 				Drawable *drawable = TheGameClient->getDrawableList();
 				while (drawable != NULL)
 				{
 					if (drawable->isSelected() && drawable->getObject() && drawable->getObject()->isLocallyControlled())
 					{
 						newmsg->appendObjectIDArgument(drawable->getObject()->getID());
+						m_pendingSquad[ group ].push_back(drawable->getObject()->getID());
 					}
 					drawable = drawable->getNextDrawable();
 				}
+				// A game on one machine runs it on the next logic frame, before any select could see the old
+				// squad.  One frame over in a network game, for a message the network sends out a frame late:
+				// the list stands in for the squad it becomes, so reading it once too often costs nothing.
+				m_pendingSquadLands[ group ] = TheNetwork ? (UnsignedInt)TheNetwork->getExecutionFrame() + 1 : 0;
 			}
 			disp = DESTROY_MESSAGE;
 			break;
@@ -1331,19 +1339,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 					Player *player = ThePlayerList->getLocalPlayer();
 					if (player)
 					{
-						Squad *selectedSquad = player->getHotkeySquad(group);
-						if (selectedSquad != NULL)
-						{
-							VecObjectPtr objlist = selectedSquad->getLiveObjects();
-							Int numObjs = objlist.size();
-							for (Int i = 0; i < numObjs; ++i)
-							{
-								if( objlist[i]->getControllingPlayer() == player )
-								{
-									TheInGameUI->selectDrawable(objlist[i]->getDrawable());
-								}
-							}
-						}
+						selectHotkeySquad( player, group, TRUE );
 					}
 				}
 				m_lastGroupSelTime = now;
@@ -1414,16 +1410,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 					Player *player = ThePlayerList->getLocalPlayer();
 					if (player)
 					{
-						Squad *selectedSquad = player->getHotkeySquad(group);
-						if (selectedSquad != NULL)
-						{
-							VecObjectPtr objlist = selectedSquad->getLiveObjects();
-							Int numObjs = objlist.size();
-							for (Int i = 0; i < numObjs; ++i)
-							{
-								TheInGameUI->selectDrawable(objlist[i]->getDrawable());
-							}
-						}
+						selectHotkeySquad( player, group, FALSE );
 					}
 				}
 				m_lastGroupSelTime = now;
@@ -1556,4 +1543,66 @@ void SelectionTranslator::setDragSelecting(Bool dragSelect)
 void SelectionTranslator::setLeftMouseButton(Bool state)
 {
 	m_leftMouseButtonIsDown = state;
+}
+
+//-----------------------------------------------------------------------------
+void SelectionTranslator::forgetPendingSquads()
+{
+	for( Int group = 0; group < NUM_HOTKEY_SQUADS; ++group )
+	{
+		m_pendingSquad[ group ].clear();
+		m_pendingSquadLands[ group ] = 0;
+	}
+}
+
+//-----------------------------------------------------------------------------
+Bool SelectionTranslator::isSquadPending( Int group ) const
+{
+	return m_pendingSquadLands[ group ] != 0 && TheGameLogic->getFrame() <= m_pendingSquadLands[ group ];
+}
+
+//-----------------------------------------------------------------------------
+/** Select on screen what the logic will hold in this squad by the time a select sent now lands:
+	* the members a team key sent for it if they are still on the way, and never a unit that a key
+	* on the way takes into another squad, which the logic removes from every squad but its new one. */
+//-----------------------------------------------------------------------------
+void SelectionTranslator::selectHotkeySquad( Player *player, Int group, Bool ownOnly )
+{
+	VecObjectPtr objlist;
+	const UnsignedInt groupLands = isSquadPending( group ) ? m_pendingSquadLands[ group ] : 0;
+	if( groupLands != 0 )
+	{
+		for( size_t i = 0; i < m_pendingSquad[ group ].size(); ++i )
+		{
+			Object *obj = TheGameLogic->findObjectByID( m_pendingSquad[ group ][ i ] );
+			if( obj && obj->isSelectable() )
+				objlist.push_back( obj );
+		}
+	}
+	else
+	{
+		Squad *selectedSquad = player->getHotkeySquad( group );
+		if( selectedSquad == NULL )
+			return;
+		objlist = selectedSquad->getLiveObjects();
+	}
+
+	for( size_t i = 0; i < objlist.size(); ++i )
+	{
+		Object *obj = objlist[ i ];
+		if( ownOnly && obj->getControllingPlayer() != player )
+			continue;
+
+		Bool movedAway = FALSE;
+		for( Int other = 0; other < NUM_HOTKEY_SQUADS && !movedAway; ++other )
+		{
+			// only a key that lands after this squad's own can still take a member out of it
+			if( other == group || !isSquadPending( other ) || m_pendingSquadLands[ other ] <= groupLands )
+				continue;
+			const std::vector<ObjectID> &sent = m_pendingSquad[ other ];
+			movedAway = std::find( sent.begin(), sent.end(), obj->getID() ) != sent.end();
+		}
+		if( !movedAway )
+			TheInGameUI->selectDrawable( obj->getDrawable() );
+	}
 }

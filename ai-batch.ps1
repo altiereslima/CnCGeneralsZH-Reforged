@@ -64,7 +64,12 @@ param(
 	# (e.g. -ExtraArgs "-unitlimit") without a rebuild between batches
 	[string[]] $ExtraArgs = @(),
 	# minutes before a wedged run is killed rather than waited on forever
-	[int] $TimeoutMinutes = 20
+	[int] $TimeoutMinutes = 20,
+	# matches played at once. A headless match is one logic thread, so one a core runs the batch
+	# that many times faster and the results are the same: the logic does not read the clock. The
+	# frame-time and stutter lines are the exception, every copy slows the others, so a batch that is
+	# asked about frame time passes -Parallel 1
+	[int] $Parallel = [Environment]::ProcessorCount
 )
 
 $ErrorActionPreference = "Stop"
@@ -78,6 +83,9 @@ if (-not (Test-Path $exePath)) {
 
 # One row per match. Slot results are kept as a hashtable per row so the summary can pivot on them.
 $rows = @()
+
+# Every match is started first, $Parallel at a time, and read back afterwards in seed order.
+$started = @()
 
 for ($i = 0; $i -lt $Runs; $i++) {
 
@@ -120,22 +128,41 @@ for ($i = 0; $i -lt $Runs; $i++) {
 	if ($Teams -gt 1) { $args += "-teams"; $args += $Teams }
 	if ($ExtraArgs.Count) { $args += $ExtraArgs }
 
-	$where = if ($Map) { $Map } else { "$cells cells" }
-	Write-Host ("[{0,3}/{1}] seed {2} {3} ... " -f ($i + 1), $Runs, $seed, $where) -NoNewline
-	$sw = [Diagnostics.Stopwatch]::StartNew()
+	while (@($started | Where-Object { -not $_.Proc.HasExited }).Count -ge $Parallel) {
+		Start-Sleep -Milliseconds 200
+	}
 	$proc = Start-Process -FilePath $exePath -ArgumentList $args -WorkingDirectory $RunDir -PassThru
 	$proc.PriorityClass = 'AboveNormal'
-	if (-not $proc.WaitForExit($TimeoutMinutes * 60 * 1000)) {
+	$started += [pscustomobject]@{
+		Index = $i; Seed = $seed; Cells = $cells; Log = $log; Proc = $proc
+		Clock = [Diagnostics.Stopwatch]::StartNew()
+	}
+}
+
+foreach ($run in $started) {
+
+	$seed = $run.Seed
+	$cells = $run.Cells
+	$log = $run.Log
+	$proc = $run.Proc
+	$sw = $run.Clock
+
+	$where = if ($Map) { $Map } else { "$cells cells" }
+	Write-Host ("[{0,3}/{1}] seed {2} {3} ... " -f ($run.Index + 1), $Runs, $seed, $where) -NoNewline
+	$timeLeft = [Math]::Max(0, $TimeoutMinutes * 60 * 1000 - $sw.ElapsedMilliseconds)
+	if (-not $proc.WaitForExit([int]$timeLeft)) {
 		$proc.Kill()
 		Write-Host "KILLED (wedged past $TimeoutMinutes min)"
 		$rows += [pscustomobject]@{ Seed = $seed; Cells = $cells; Why = "wedged"; Frames = 0; Wall = $sw.Elapsed.TotalSeconds; Slots = @{}; Pf = $null }
 		continue
 	}
+	# the wall time is the process's own; this loop may reach a run long after it finished
 	$sw.Stop()
+	$wall = ($proc.ExitTime - $proc.StartTime).TotalSeconds
 
 	if (-not (Test-Path $log)) {
 		Write-Host "NO LOG (exit $($proc.ExitCode))"
-		$rows += [pscustomobject]@{ Seed = $seed; Cells = $cells; Why = "no log"; Frames = 0; Wall = $sw.Elapsed.TotalSeconds; Slots = @{}; Pf = $null }
+		$rows += [pscustomobject]@{ Seed = $seed; Cells = $cells; Why = "no log"; Frames = 0; Wall = $wall; Slots = @{}; Pf = $null }
 		continue
 	}
 
@@ -219,9 +246,9 @@ for ($i = 0; $i -lt $Runs; $i++) {
 
 	$winner = ($slots.Keys | Where-Object { $slots[$_].Status -eq "WON" } | Select-Object -First 1)
 	$winnerText = if ($null -ne $winner) { "player $winner" } else { "no winner" }
-	Write-Host ("{0}, {1}, frame {2}, {3:n0}s" -f $why, $winnerText, $frames, $sw.Elapsed.TotalSeconds)
+	Write-Host ("{0}, {1}, frame {2}, {3:n0}s" -f $why, $winnerText, $frames, $wall)
 
-	$rows += [pscustomobject]@{ Seed = $seed; Cells = $cells; Why = $why; Frames = $frames; Wall = $sw.Elapsed.TotalSeconds; Slots = $slots; Pf = $pf; Perf = $perf; Jobs = $jobs; Ft = $ft; Spikes = $spikes }
+	$rows += [pscustomobject]@{ Seed = $seed; Cells = $cells; Why = $why; Frames = $frames; Wall = $wall; Slots = $slots; Pf = $pf; Perf = $perf; Jobs = $jobs; Ft = $ft; Spikes = $spikes }
 }
 
 # ---------------------------------------------------------------------------------------------

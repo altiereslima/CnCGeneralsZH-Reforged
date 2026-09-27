@@ -847,6 +847,10 @@ Bool SpawnBehavior::shouldTryToSpawn()
 	// Not if we are turned off
 	if( !m_active )
 		return FALSE;
+	// Not once we are dead: a spawner killed earlier in the frame still runs this update before it is
+	// destroyed, and whatever it made then was never in the list onDie walked, so it lived on alone.
+	if( getObject()->isEffectivelyDead() )
+		return FALSE;
 	if( getObject()->getStatusBits().test( OBJECT_STATUS_RECONSTRUCTING ) && modData->m_isOneShotData )
 	{
 		// If we are a Hole rebuild, not only should we not, but we should never ask again.

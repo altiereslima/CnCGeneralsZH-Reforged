@@ -58,10 +58,12 @@
 #include "GameClient/DebugDisplay.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/GameClient.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameClient/VideoPlayer.h"
 #include "GameClient/View.h"
 
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/PartitionManager.h"
 #include "GameLogic/TerrainLogic.h"
 
 #include "Common/File.h"
@@ -1971,7 +1973,7 @@ void MilesAudioManager::selectProvider( UnsignedInt providerNdx )
 	{
 		providerNdx = getProviderIndex( "Miles Fast 2D Positional Audio" );
 	}
-	success = AIL_open_3D_provider( m_provider3D[providerNdx].id ) == 0;
+	success = providerNdx < m_providerCount && AIL_open_3D_provider( m_provider3D[providerNdx].id ) == 0;
 
 	//if (providerNdx < m_providerCount) 
 	//{
@@ -1985,8 +1987,8 @@ void MilesAudioManager::selectProvider( UnsignedInt providerNdx )
 		m_selectedProvider = PROVIDER_ERROR;
 		// try to select a failsafe
 		providerNdx = getProviderIndex( "Miles Fast 2D Positional Audio" );
-		success = AIL_open_3D_provider( m_provider3D[providerNdx].id ) == 0;
-	} 
+		success = providerNdx < m_providerCount && AIL_open_3D_provider( m_provider3D[providerNdx].id ) == 0;
+	}
 
 	if ( success )
 	{
@@ -2550,9 +2552,22 @@ void MilesAudioManager::processPlayingList( void )
 					Real volForConsideration = getEffectiveVolume(playing->m_audioEventRTS);
 					volForConsideration /= (m_sound3DVolume > 0.0f ? m_soundVolume : 1.0f);
 					Bool playAnyways = BitTest( playing->m_audioEventRTS->getAudioEventInfo()->m_type, ST_GLOBAL) || playing->m_audioEventRTS->getAudioEventInfo()->m_priority == AP_CRITICAL;
-					if( volForConsideration < m_audioSettings->m_minVolume && !playAnyways ) 
+					if( volForConsideration < m_audioSettings->m_minVolume && !playAnyways )
 					{
 						// don't want to get an additional callback for this sample
+						AIL_register_3D_EOS_callback(playing->m_3DSample, NULL);
+						stopPlayingAudio( playing );
+						continue;
+					}
+					// canPlayNow keeps a shrouded sound from starting in the fog, but a loop that started
+					// in the open played on after its source flew into the fog: an enemy Helix or Comanche
+					// could be heard, and followed, where it could not be seen.  Stopped like one out of
+					// range, and the drawable starts it again once the spot is clear.
+					else if( !playAnyways
+						&& BitTest( playing->m_audioEventRTS->getAudioEventInfo()->m_type, ST_SHROUDED )
+						&& playing->m_audioEventRTS->getAudioEventInfo()->isPermanentSound()
+						&& ThePartitionManager->getShroudStatusForPlayer( TheObserverCamera.getShroudPlayerIndex(), pos ) != CELLSHROUD_CLEAR )
+					{
 						AIL_register_3D_EOS_callback(playing->m_3DSample, NULL);
 						stopPlayingAudio( playing );
 						continue;
@@ -2628,44 +2643,6 @@ void MilesAudioManager::processPlayingList( void )
 		}
 	}
 }
-
-//Patch for a rare bug (only on about 5% of in-studio machines suffer, and not all the time) .
-//The actual mechanics of this problem are still elusive as of the date of this comment. 8/21/03
-//but the cause is clear. Some cinematics do a radical change in the microphone position, which
-//calls for a radical 3DSoundVolume adjustment. If this happens while a stereo stream is *ENDING*,
-//low-level code gets caught in a tight loop. (Hangs) on some machines.
-//To prevent this condition, we just suppress the updating of 3DSoundVolume while one of these
-//is on the list. Since the music tracks play continuously, they never *END* during these cinematics.
-//so we filter them out as, *NOT SENSITIVE*... we do want to update 3DSoundVolume during music, 
-//which is almost all of the time.
-
-Bool MilesAudioManager::has3DSensitiveStreamsPlaying( void ) const
-{
-  if ( m_playingStreams.empty() )
-    return FALSE;
-
-	for ( std::list< PlayingAudio* >::const_iterator it = m_playingStreams.begin(); it != m_playingStreams.end(); ++it ) 
-  {
-		const PlayingAudio *playing = (*it);
-
-    if ( ! playing )
-      continue;
-
-    if ( !audioIsType(playing->m_audioEventRTS, AT_Music) )
-    {
-      return TRUE;
-    }
-
-    if ( playing->m_audioEventRTS->getEventName().startsWith("Game_") == FALSE ) 
-    {
-      return TRUE;
-    }
-  }	
-  
-  return FALSE; 
-
-}
-
 
 //-------------------------------------------------------------------------------------------------
 void MilesAudioManager::processFadingList( void )
@@ -3396,6 +3373,11 @@ void *AudioFileCache::openFile( AudioEventRTS *eventToOpenFrom )
 
 	if (it != m_openFiles.end()) {
 		++it->second.m_openCount;
+		// A cached file keeps the info of whoever opened it first, and a map's customised sound
+		// shares its file with the stock one.  That info is deleted with the level
+		// (removeLevelSpecificAudioEventInfos), and freeEnoughSpaceForSample went on reading the
+		// priority out of it for the file's next user.  The event opening it now is alive.
+		it->second.m_eventInfo = eventToOpenFrom->getAudioEventInfo();
 		return it->second.m_file;
 	}
 
