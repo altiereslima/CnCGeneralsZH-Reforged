@@ -358,6 +358,14 @@ CONTROLBAR:AirF_ConstructAmericaVehicleChinook
 "Chinook de &Combate"
 END
 
+CONTROLBAR:AirF_TooltipCarpetBomb
+"Executa um Bombardeio de Saturação na área desejada. \n \n Contagem Regressiva: 4:00"
+END
+
+CONTROLBAR:AirF_TooltipSpectreGunship
+"Chama uma Nave de Artilharia Spectre para atacar a área selecionada. \n \n Contagem Regressiva: 3:00"
+END
+
 CONTROLBAR:AirF_ToolTipUSABuildAurora
 "O ataque supersônico torna o Aurora imune aos disparos inimigos. Após o ataque supersônico, o Aurora reduz a velocidade em 50% \n \n Eficiente contra estruturas \n Vulnerável contra bombardeiros e unidades antiaéreas"
 END
@@ -375,7 +383,7 @@ CONTROLBAR:AirF_ToolTipUSAScienceCarpetBomb
 END
 
 CONTROLBAR:AirF_ToolTipUSAScienceSpectreGunship
-"Chama uma Nave de Artilharia Spectre para circular a área e atacar com obuseiros e canhões Gattling. \n \n Patente 1: 10 segundos \n Patente 2: 15 segundos \n Patente 3: 30 segundos \n \n Ordenado por: Centro de Comando"
+"Chama uma Nave de Artilharia Spectre para circular a área e atacar com obuseiros e canhões Gattling. \n \n Patente 1: 10 segundos \n Patente 2: 15 segundos \n Patente 3: 20 segundos \n \n Ordenado por: Centro de Comando"
 END
 
 CONTROLBAR:AirF_TooltipUSAUpgradeLaserMissiles
@@ -1090,6 +1098,10 @@ CONTROLBAR:Demo_ConstructGLADemoTrap
 "Armadilha Avançada de Demolição"
 END
 
+CONTROLBAR:Demo_ToolTipGLAScienceRebelAmbush
+"Permite que você crie uma emboscada de Rebeldes em qualquer lugar do mapa. \n \n Patente 1: 4 Rebeldes. \n Patente 2: 6 Rebeldes. \n Patente 3: 10 Rebeldes. \n \n Ordenado por: Centro de Comando"
+END
+
 CONTROLBAR:Demo_ToolTipGLAUpgradeHEBomb
 "Aumenta em 100% os danos de todas as Armadilhas de Demolição"
 END
@@ -1419,7 +1431,7 @@ CONTROLBAR:Money
 END
 
 CONTROLBAR:MoneyDescription
-"Esta é a quantidade de recursos que você possui."
+"Esta é a quantidade de recursos que você possui e quanto ganhou por segundo no último meio minuto."
 END
 
 CONTROLBAR:NapalmStrike
@@ -1604,6 +1616,10 @@ END
 
 CONTROLBAR:Slth_ConstructGLAInfantryRebel
 "Re&belde Invisível"
+END
+
+CONTROLBAR:Slth_TooltipFireGPSScrambler
+"Camufla unidades aliadas na área selecionada. \n \n Contagem Regressiva: 3:00"
 END
 
 CONTROLBAR:SneakAttack
@@ -2547,7 +2563,7 @@ CONTROLBAR:ToolTipGuardWithoutPursuit
 END
 
 CONTROLBAR:TooltipLeafletDrop
-"Eficiente contra Unidades \n \n Contagem Regressiva: 6:00"
+"Eficiente contra Unidades \n \n Contagem Regressiva: 5:00"
 END
 
 CONTROLBAR:TooltipMissileDefenderLaser
@@ -5550,6 +5566,10 @@ GUI:ControlBarMoneyDisplay
 "$ %d"
 END
 
+GUI:ControlBarMoneyEarning
+"$ %d  +%d/s"
+END
+
 GUI:ControlOptions
 "OPÇÕES DE CONTROLE"
 END
@@ -6696,6 +6716,10 @@ END
 
 GUI:IPAddresses
 "IP Rede:"
+END
+
+GUI:IsometricCamera
+"Câmera Isométrica"
 END
 
 GUI:Join
@@ -15580,6 +15604,10 @@ END
 
 TOOLTIP:InvalidGameVersionSingleLine
 "Esta versão do jogo é diferente."
+END
+
+TOOLTIP:IsometricCamera
+"O campo de batalha visto de longe, com cada unidade do mesmo tamanho no alto e na base da tela. Você continua podendo girar e aproximar a câmera."
 END
 
 TOOLTIP:JoinGame
