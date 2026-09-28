@@ -29,6 +29,7 @@ PATCHED_SOURCE_FILES = [
     "GeneralsMD/Code/GameEngine/Source/GameNetwork/GameInfo.cpp",
     "GeneralsMD/Code/GameEngine/Source/GameClient/InGameUI.cpp",
     "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/QuitMenu.cpp",
+    "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DPushButton.cpp",
 ]
 
 # Casos de teste que falham sem culpa do patch PT-BR. Só estes nomes são tolerados;

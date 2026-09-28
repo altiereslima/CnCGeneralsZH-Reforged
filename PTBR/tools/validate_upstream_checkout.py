@@ -145,6 +145,10 @@ def validate(repo):
     quit_menu = (code/"GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/QuitMenu.cpp").read_text(encoding="utf-8-sig")
     need(quit_menu, "\tTheTransitionHandler->setGroup( group );\n\tTheTransitionHandler->remove( group, TRUE );\n}\n", "QuitMenu.cpp showQuitMenuLayout")
     need(quit_menu, "static void hideQuitMenuLayout( void )\n{\n\tif( quitMenuLayout )\n\t\tquitMenuLayout->hide( TRUE );\n}\n", "QuitMenu.cpp hideQuitMenuLayout")
+    button = (code/"GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DPushButton.cpp").read_text(encoding="utf-8-sig")
+    need(button, "// USER INCLUDES //////////////////////////////////////////////////////////////\n#include \"GameClient/Gadget.h\"\n", "W3DPushButton.cpp includes")
+    need(button, "extern Real ControlBarHudScale( void );\n", "W3DPushButton.cpp HUD scale declaration")
+    need(button, "\tInt pointSize = REAL_TO_INT_FLOOR( designPoints * ControlBarHudScale() );\n", "W3DPushButton.cpp badge point size")
     result["checks"]["classic_interface_anchors"] = "PASS"
 
     result["status"] = "PASS"

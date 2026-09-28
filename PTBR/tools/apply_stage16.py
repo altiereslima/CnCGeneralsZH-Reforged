@@ -17,6 +17,12 @@ import sys
 # A edição PT-BR fica com o original nos dois: as páginas respondem como se faltassem, sem
 # depender de apagar arquivo na pasta do jogo, e o menu Esc volta a abrir e fechar pelas próprias
 # transições. "ClassicInterface = no" no Options.ini traz as páginas do upstream de volta.
+#
+# Desde a v2.2.0 a página também monta a barra de novo (grade 6x3, barra de retratos), numa escala
+# própria, 70% da uniforme. Essa montagem só roda com a página, então a barra clássica continua no
+# layout da EA, na escala uniforme; mas os números nos cantos dos botões (fila, recarga, preço)
+# passaram a usar a escala da página em qualquer caso. Com a interface clássica eles voltam à
+# escala da barra em que estão.
 
 def fail(msg):
     raise SystemExit("STAGE16: " + msg)
@@ -152,6 +158,31 @@ def main():
         "\tif( quitMenuLayout )\n"
         "\t\tquitMenuLayout->hide( TRUE );\n"
         "}\n",
+    )
+
+    # 7) Os números nos cantos dos botões na escala da barra clássica, a uniforme.
+    button = code / "GameEngineDevice" / "Source" / "W3DDevice" / "GameClient" / "GUI" / "Gadget" / "W3DPushButton.cpp"
+    replace_once(
+        button,
+        "// USER INCLUDES //////////////////////////////////////////////////////////////\n"
+        "#include \"GameClient/Gadget.h\"\n",
+        "// USER INCLUDES //////////////////////////////////////////////////////////////\n"
+        "#include \"Common/GlobalData.h\"\n"
+        "#include \"GameClient/Gadget.h\"\n",
+    )
+    replace_once(
+        button,
+        "extern Real ControlBarHudScale( void );\n",
+        "extern Real ControlBarHudScale( void );\n"
+        "extern Real ControlBarUniformScale( void );\t///< PT-BR edition: the scale the classic bar stands at\n",
+    )
+    replace_once(
+        button,
+        "\tInt pointSize = REAL_TO_INT_FLOOR( designPoints * ControlBarHudScale() );\n",
+        "\t// PT-BR edition: the classic bar is laid out at the uniform scale, and its markings with it\n"
+        "\tconst Real barScale = ( TheGlobalData != NULL && TheGlobalData->m_classicInterface )\n"
+        "\t\t? ControlBarUniformScale() : ControlBarHudScale();\n"
+        "\tInt pointSize = REAL_TO_INT_FLOOR( designPoints * barScale );\n",
     )
 
     print("STAGE16 APPLY PASS")

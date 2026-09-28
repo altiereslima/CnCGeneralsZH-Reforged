@@ -39,6 +39,12 @@ def main():
     need(bink,'localizedLanguage.compareNoCase( GetRegistryLanguage().str() )','Bink fallback comparison')
     out['checks']['bink_include_contracts']='PASS'
 
+    # The command buttons' markings read the classic interface switch and the uniform scale.
+    button=(code/'GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DPushButton.cpp').read_text(encoding='utf-8-sig')
+    need(button,'#include "Common/GlobalData.h"','W3DPushButton GlobalData include')
+    need(button,'extern Real ControlBarUniformScale( void );','W3DPushButton uniform scale declaration')
+    out['checks']['push_button_scale_contracts']='PASS'
+
     # Options migration uses public UserPreferences APIs and PreferenceMap operations.
     opt=(code/'GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp').read_text(encoding='utf-8-sig')
     need(opt,'#include "Common/UserPreferences.h"','Options UserPreferences include')

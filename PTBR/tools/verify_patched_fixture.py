@@ -90,6 +90,8 @@ def main():
     need(ui,"m_quitMenuPage.empty() || TheGlobalData->m_classicInterface","original Esc menu unless the page is asked for")
     quit_menu=(code/"GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/QuitMenu.cpp").read_text(encoding="utf-8")
     need(quit_menu,'TheTransitionHandler->reverse( "QuitFullBack" );',"original Esc menu closing transition")
+    button=(code/"GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DPushButton.cpp").read_text(encoding="utf-8")
+    need(button,"TheGlobalData->m_classicInterface )\n\t\t? ControlBarUniformScale() : ControlBarHudScale();","classic bar's markings at the uniform scale")
     checks["classic_interface"]="PASS"
 
     loc=code/"Data/PortugueseBrazil"
