@@ -12,7 +12,7 @@ import subprocess
 import sys
 import traceback
 
-EXPECTED_UPSTREAM_HEAD = "843bf76b35bafab3c47fa9e8ab20cb1f932b17a3"
+EXPECTED_UPSTREAM_HEAD = "1e720010117c1ff43712dfdc8606f3780a9accc9"
 
 PATCHED_SOURCE_FILES = [
     "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h",
