@@ -35,6 +35,14 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install the Python packages ctest's tool checks import
+        shell: pwsh
+        run: |
+          # Since v2.2.0 ctest runs Tools/order_cameos.py selfcheck, which paints the command bar's
+          # attack, hold and move cameos with NumPy and Pillow. The runner's Python has neither, and
+          # the test stops at its first import. Pinned, like every other download in this build.
+          python -m pip install --disable-pip-version-check numpy==2.1.3 pillow==11.0.0
+
       - name: Install the D3DX9 runtime the tests bind
         shell: pwsh
         run: |
