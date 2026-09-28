@@ -147,162 +147,187 @@ static void commandButtonTooltip(GameWindow *window,
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The key command bar slot 'slot' answers to right now, MK_NONE when none does.  Read live out of
-	the meta map, which is where CommandMap.ini puts the grid: a second copy of those letters here
-	is a copy that goes stale, and one did - the chord's second keys stayed Q A W S E D R F long
-	after the bottom row of the grid had moved to Z X C V B N M, so half the cells answered to a
-	letter that was not written on them and the letter that was fell straight through to the button
-	underneath.  Rebinding a slot in Options > Keyboard now moves its chord with it. */
+/** The place a command of `type` always stands at, or -1 for one that takes the next free place. */
 //-------------------------------------------------------------------------------------------------
-static MappableKeyType getGridHotKey( Int slot )
+static Int fixedCommandPlace( Int type )
 {
-	if( TheMetaMap == NULL || slot < 0 || slot >= MAX_COMMANDS_PER_SET )
-		return MK_NONE;
-
-	const GameMessage::Type wanted =
-		(GameMessage::Type)( GameMessage::MSG_META_COMMAND_SLOT01 + slot );
-
-	for( const MetaMapRec *rec = TheMetaMap->getFirstMetaMapRec(); rec; rec = rec->m_next )
-		if( rec->m_meta == wanted && rec->m_modState == 0 )
-			return rec->m_key;
-
-	return MK_NONE;
-
-}  // end getGridHotKey
-
-//-------------------------------------------------------------------------------------------------
-/** Which slot a press on the grid key for 'index' lands on with the structure chord as it
-	stands, or SLOT_ARMS_CHORD for a press that would only start one, or SLOT_NOTHING.  Changes
-	nothing: pressCommandButton acts on the answer and peekCommandButtonPress reports it. */
-//-------------------------------------------------------------------------------------------------
-Int ControlBar::resolveGridPress( Int index, Int chordGroup, Bool hasStructures, Bool indexIsStructure )
-{
-	if( index < 0 || index >= MAX_COMMANDS_PER_SET )
-		return SLOT_NOTHING;
-
-	//
-	// a builder's structures are reached by a two-key chord so the whole set can stay on
-	// screen: Q arms the structures in columns 1-4 (slots 0-7), W the ones in columns 5-7
-	// (slots 8-13), and the next grid key picks the cell inside that group by its own
-	// position - Q-Q, Q-Z, ... W-Q (= T's cell), W-Z (= B's cell) ...  A structure has no other
-	// way in: its own letter on its own is the second half of a chord nobody started.  Q and W
-	// are whatever the grid binds to slots 0 and 2, so with W A S D on the camera they are Q and E.
-	//
-	if( !hasStructures )
-		return index;
-
-	if( chordGroup < 0 )
+	switch( type )
 	{
-		if( index == CHORD_SLOT_Q || index == CHORD_SLOT_W )
-			return SLOT_ARMS_CHORD;
+		case GUI_COMMAND_STOP:									return COMMAND_PLACE_STOP;
+		case GUI_COMMAND_ATTACK_MOVE:						return COMMAND_PLACE_ATTACK_MOVE;
+		case GUI_COMMAND_GUARD:
+		case GUI_COMMAND_GUARD_WITHOUT_PURSUIT:
+		case GUI_COMMAND_GUARD_FLYING_UNITS_ONLY:	return COMMAND_PLACE_GUARD;
+		case GUI_COMMAND_EVACUATE:							return COMMAND_PLACE_EJECT;
+		case GUI_COMMAND_SET_RALLY_POINT:				return COMMAND_PLACE_RALLY;
+		case GUI_COMMAND_SELL:									return COMMAND_PLACE_SELL;
+	}
+	return -1;
+}
 
-		//
-		// Every structure is two keys, and only two.  The key painted on a cell is the *second*
-		// of its pair, so on its own it used to fall through to whatever sits in the slot that
-		// key names - which for a builder is another structure.  So the same building could be
-		// put up either by the chord written on it or by one bare letter nobody wrote anywhere,
-		// and a key pressed after a Q that had already been dropped built something.
-		//
-		return indexIsStructure ? SLOT_NOTHING : index;
+//-------------------------------------------------------------------------------------------------
+/** What the key of `place` did before the grid took it, MSG_INVALID for a key that pressed a cell
+	already.  The grid keeps it for the place's own order and for a place with nothing in it, so S
+	still stops a selection whose bar has no stop button, and still calls off a building going up. */
+//-------------------------------------------------------------------------------------------------
+static GameMessage::Type orderAtPlace( Int place )
+{
+	switch( place )
+	{
+		case COMMAND_PLACE_ATTACK:			return GameMessage::MSG_META_TOGGLE_FORCEATTACK;
+		case COMMAND_PLACE_STOP:				return GameMessage::MSG_META_STOP;
+		case COMMAND_PLACE_ATTACK_MOVE:	return GameMessage::MSG_META_TOGGLE_ATTACKMOVE;
+		case COMMAND_PLACE_GUARD:				return GameMessage::MSG_META_TOGGLE_GUARD;
+		case COMMAND_PLACE_HOLD:				return GameMessage::MSG_META_HOLD_POSITION;
+		case COMMAND_PLACE_MOVE:				return GameMessage::MSG_META_TOGGLE_MOVE;
+	}
+	return GameMessage::MSG_INVALID;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** What a set builds, which takes the free places before the rest of the set. */
+static Bool isProduction( Int type )
+{
+	return type == GUI_COMMAND_UNIT_BUILD || type == GUI_COMMAND_DOZER_CONSTRUCT;
+}
+
+//-------------------------------------------------------------------------------------------------
+Int ControlBar_namedCommandPlace( const char *buttonName )
+{
+	static const struct { const char *name; Int place; } NAMED[] =
+	{
+		{ "Command_DisarmMinesAtPosition",				COMMAND_PLACE_CLEAR_MINES },
+		{ "Command_UpgradeGLAWorkerFakeCommandSet",	COMMAND_PLACE_FAKE_STRUCTURES },
+		{ "Command_UpgradeGLAWorkerRealCommandSet",	COMMAND_PLACE_FAKE_STRUCTURES },
+		{ "Demo_Command_TertiarySuicide",					COMMAND_PLACE_EXPLOSIVE }
+	};
+	for( Int each = 0; each < (Int)ARRAY_SIZE( NAMED ); each++ )
+		if( strcmp( NAMED[ each ].name, buttonName ) == 0 )
+			return NAMED[ each ].place;
+	return -1;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool ControlBar_commandPlaces( const Int *types, const Int *pinned, Int count, Int *places )
+{
+	// the owner's order of 2026-09-28: down the columns two rows at a time, toward the top left
+	static const Int FILL[ COMMAND_PLACE_COUNT ] =
+	{
+		COMMAND_PLACE_Q, COMMAND_PLACE_A, COMMAND_PLACE_W, COMMAND_PLACE_Z, COMMAND_PLACE_S, COMMAND_PLACE_E,
+		COMMAND_PLACE_X, COMMAND_PLACE_D, COMMAND_PLACE_R, COMMAND_PLACE_C, COMMAND_PLACE_F, COMMAND_PLACE_T,
+		COMMAND_PLACE_V, COMMAND_PLACE_G, COMMAND_PLACE_Y, COMMAND_PLACE_B, COMMAND_PLACE_H, COMMAND_PLACE_N
+	};
+
+	Bool taken[ COMMAND_PLACE_COUNT ] = { FALSE };
+	Bool fights = FALSE;
+	for( Int slot = 0; slot < count; slot++ )
+	{
+		places[ slot ] = -1;
+		fights = fights || types[ slot ] == GUI_COMMAND_ATTACK_MOVE;
+	}
+	taken[ COMMAND_PLACE_ATTACK ] = taken[ COMMAND_PLACE_HOLD ] = taken[ COMMAND_PLACE_MOVE ] = fights;
+
+	for( Int slot = 0; slot < count; slot++ )
+	{
+		const Int place = pinned[ slot ] >= 0 ? pinned[ slot ] : fixedCommandPlace( types[ slot ] );
+		if( place >= 0 && !taken[ place ] )
+		{
+			places[ slot ] = place;
+			taken[ place ] = TRUE;
+		}
 	}
 
-	if( index >= CHORD_GROUP_SIZE )
-		return SLOT_NOTHING;		// the second key must be one of the first group's cells (Q W E R A S D F)
-	index += chordGroup * CHORD_GROUP_SIZE;
-	return index < MAX_COMMANDS_PER_SET ? index : SLOT_NOTHING;
-
-}  // end resolveGridPress
+	// production first, then the rest: a factory whose set opens on an upgrade still puts its units
+	// on Q A W before the upgrade
+	for( Int pass = 0; pass < 2; pass++ )
+	{
+		const Bool wantProduction = ( pass == 0 );
+		for( Int slot = 0; slot < count; slot++ )
+		{
+			if( places[ slot ] >= 0 || types[ slot ] == GUI_COMMAND_NONE || isProduction( types[ slot ] ) != wantProduction )
+				continue;
+			for( Int each = 0; each < COMMAND_PLACE_COUNT; each++ )
+			{
+				if( !taken[ FILL[ each ] ] )
+				{
+					places[ slot ] = FILL[ each ];
+					taken[ FILL[ each ] ] = TRUE;
+					break;
+				}
+			}
+		}
+	}
+	return fights;
+}
 
 //-------------------------------------------------------------------------------------------------
-Int ControlBar::resolveCommandSlot( Int index, Bool *hasStructures ) const
+Bool ControlBar::getCommandPlaces( Int *places ) const
 {
-	*hasStructures = FALSE;
-	Bool indexIsStructure = FALSE;
-	for( Int i = 0; i < MAX_COMMANDS_PER_SET; i++ )
+	// a context without the command group (nothing selected, a building going up, a beacon) hides the
+	// group's parent and leaves the buttons as the last selection set them: those are not on the bar
+	const Bool groupShown = !m_contextParent[ CP_COMMAND ]->winIsHidden();
+	Int types[ MAX_COMMANDS_PER_SET ];
+	Int pinned[ MAX_COMMANDS_PER_SET ];
+	for( Int slot = 0; slot < MAX_COMMANDS_PER_SET; slot++ )
 	{
-		GameWindow *w = m_commandWindows[ i ];
-		if( w == NULL || BitTest( w->winGetStatus(), WIN_STATUS_HIDDEN ) )
-			continue;
-		const CommandButton *c = (const CommandButton *)GadgetButtonGetData( w );
-		if( c == NULL || c->getCommandType() != GUI_COMMAND_DOZER_CONSTRUCT )
-			continue;
-		*hasStructures = TRUE;
-		if( i == index )
-			indexIsStructure = TRUE;
+		GameWindow *window = m_commandWindows[ slot ];
+		const CommandButton *command = ( groupShown && window && !BitTest( window->winGetStatus(), WIN_STATUS_HIDDEN ) )
+																	 ? (const CommandButton *)GadgetButtonGetData( window ) : NULL;
+		types[ slot ] = command ? command->getCommandType() : GUI_COMMAND_NONE;
+		pinned[ slot ] = command ? ControlBar_namedCommandPlace( command->getName().str() ) : -1;
 	}
-	return resolveGridPress( index, m_chordGroup, *hasStructures, indexIsStructure );
+	return ControlBar_commandPlaces( types, pinned, MAX_COMMANDS_PER_SET, places );
+}
+
+//-------------------------------------------------------------------------------------------------
+Int ControlBar::resolveCommandSlot( Int place ) const
+{
+	Int places[ MAX_COMMANDS_PER_SET ];
+	getCommandPlaces( places );
+	for( Int slot = 0; slot < MAX_COMMANDS_PER_SET; slot++ )
+		if( places[ slot ] == place )
+			return slot;
+	return SLOT_NOTHING;
 
 }  // end resolveCommandSlot
 
 //-------------------------------------------------------------------------------------------------
-ControlBar::PressOutcome ControlBar::peekCommandButtonPress( Int index, GameWindow **button )
+ControlBar::PressOutcome ControlBar::peekCommandButtonPress( Int place, GameWindow **button )
 {
 	*button = NULL;
 
-	Bool hasStructures = FALSE;
-	const Int slot = resolveCommandSlot( index, &hasStructures );
+	const Int slot = resolveCommandSlot( place );
 	if( slot == SLOT_NOTHING )
 		return PRESS_DOES_NOTHING;
 
-	if( slot == SLOT_ARMS_CHORD )
-	{
-		// the first cell of the group this key would arm that the second key could press
-		const Int first = ( index == CHORD_SLOT_Q ? 0 : 1 ) * CHORD_GROUP_SIZE;
-		for( Int i = first; i < first + CHORD_GROUP_SIZE && i < MAX_COMMANDS_PER_SET; i++ )
-		{
-			GameWindow *w = m_commandWindows[ i ];
-			if( w && !BitTest( w->winGetStatus(), WIN_STATUS_HIDDEN )
-					&& BitTest( w->winGetStatus(), WIN_STATUS_ENABLED ) )
-			{
-				*button = w;
-				break;
-			}
-		}
-		return PRESS_ARMS_CHORD;
-	}
-
 	GameWindow *win = m_commandWindows[ slot ];
-	if( win == NULL || BitTest( win->winGetStatus(), WIN_STATUS_HIDDEN ) )
-		return PRESS_DOES_NOTHING;
-
 	*button = win;
 	return BitTest( win->winGetStatus(), WIN_STATUS_ENABLED ) ? PRESS_FIRES : PRESS_IS_REFUSED;
 
 }  // end peekCommandButtonPress
 
 //-------------------------------------------------------------------------------------------------
-/** Press a command bar button by slot index.  Mirrors HotKeyManager::executeHotKey: a hidden
-	slot does nothing at all, an enabled one gets the same GBM_SELECTED the mouse would send,
-	and a disabled one just makes the rejection noise. */
+/** Press the command at a grid place.  Mirrors HotKeyManager::executeHotKey: an empty place does
+	nothing at all, an enabled button gets the same GBM_SELECTED the mouse would send, and a
+	disabled one just makes the rejection noise.  The places of the shared orders go through the
+	orders' own messages instead, see orderAtPlace. */
 //-------------------------------------------------------------------------------------------------
-void ControlBar::pressCommandButton( Int index )
+void ControlBar::pressCommandButton( Int place )
 {
-	// a press that names no slot at all leaves an armed chord alone
-	if( index < 0 || index >= MAX_COMMANDS_PER_SET )
+	if( place < 0 || place >= COMMAND_PLACE_COUNT )
 		return;
 
-	Bool hasStructures = FALSE;
-	const Int slot = resolveCommandSlot( index, &hasStructures );
-
-	if( slot == SLOT_ARMS_CHORD )
+	const Int slot = resolveCommandSlot( place );
+	GameWindow *win = ( slot == SLOT_NOTHING ) ? NULL : m_commandWindows[ slot ];
+	const CommandButton *command = win ? (const CommandButton *)GadgetButtonGetData( win ) : NULL;
+	const GameMessage::Type order = orderAtPlace( place );
+	if( order != GameMessage::MSG_INVALID && ( command == NULL || fixedCommandPlace( command->getCommandType() ) == place ) )
 	{
-		m_chordGroup = ( index == CHORD_SLOT_Q ) ? 0 : 1;
-		m_chordStartMs = timeGetTime();
-		m_chordDrawableID = m_currentSelectedDrawable ? m_currentSelectedDrawable->getID()
-																								 : INVALID_DRAWABLE_ID;
-		markUIDirty();		// the group that is armed greys the other one out
+		TheMessageStream->appendMessage( order );
 		return;
 	}
 
-	// an armed chord is spent by its second key whether or not that key found a cell
-	if( hasStructures && m_chordGroup >= 0 )
-		dropChord();
-
-	if( slot == SLOT_NOTHING )
-		return;
-
-	GameWindow *win = m_commandWindows[ slot ];
-	if( win == NULL || BitTest( win->winGetStatus(), WIN_STATUS_HIDDEN ) )
+	if( win == NULL )
 		return;
 
 	if( BitTest( win->winGetStatus(), WIN_STATUS_ENABLED ) )
@@ -322,53 +347,6 @@ void ControlBar::pressCommandButton( Int index )
 	}
 
 }  // end pressCommandButton
-
-//-------------------------------------------------------------------------------------------------
-/** The second key of a structure chord is the cell's own position inside the group, so it is
-	whatever the grid has bound to slots 0..7 - Q Z W X E C R V on the shipped map, which is what is
-	painted on the cells.  MetaEventTranslator hands the raw key here while a chord is armed. */
-//-------------------------------------------------------------------------------------------------
-Bool ControlBar::handleChordKey( Int mappableKey )
-{
-	if( m_chordGroup < 0 )
-		return FALSE;
-
-	for( Int i = 0; i < CHORD_GROUP_SIZE; i++ )
-	{
-		const MappableKeyType key = getGridHotKey( i );
-
-		if( key != MK_NONE && (Int)key == mappableKey )
-		{
-			pressCommandButton( i );	// resolves the chord: i + group * CHORD_GROUP_SIZE
-			return TRUE;
-		}
-	}
-
-	//
-	// Any other key means the player is done with the chord, so drop it and let the key through.
-	// It used to be left armed: nothing in the game cleared it except another grid key or a
-	// context change, so a Q pressed and thought better of stayed armed for the rest of the
-	// game and the next A or S - attack move, stop - silently became "place this structure",
-	// which took the selection away and looked like the click had been eaten.
-	//
-	dropChord();
-	return FALSE;
-
-}  // end handleChordKey
-
-//-------------------------------------------------------------------------------------------------
-/** Forget a half-typed structure chord. */
-//-------------------------------------------------------------------------------------------------
-void ControlBar::dropChord( void )
-{
-	if( m_chordGroup < 0 )
-		return;
-
-	m_chordGroup = -1;
-	m_chordDrawableID = INVALID_DRAWABLE_ID;
-	markUIDirty();		// the greyed-out half of the structures comes back
-
-}  // end dropChord
 
 //-------------------------------------------------------------------------------------------------
 /** Build the menu and back buttons a paged builder shows.  They carry no thing template and no
@@ -1349,9 +1327,6 @@ ControlBar::ControlBar( void )
 	for( i = 0; i < BUILD_PAGE_COUNT; i++ )
 		m_buildPageButton[ i ] = NULL;
 	m_buildPageBackButton = NULL;
-	m_chordGroup = -1;
-	m_chordStartMs = 0;
-	m_chordDrawableID = INVALID_DRAWABLE_ID;
 	m_upgradeSpreadFrame = 0;
 	m_upgradeSpreadEntries = 0;
 	for( i = 0; i < UPGRADE_SPREAD_MAX; i++ )
@@ -1515,6 +1490,22 @@ Real ControlBarUniformScale( void )
 }
 
 //-------------------------------------------------------------------------------------------------
+Real ControlBarHudScaleFor( Int displayWidth, Int displayHeight )
+{
+	const Real s = ControlBarUniformScaleFor( displayWidth, displayHeight ) * CONTROL_BAR_HUD_PERCENT / 100.0f;
+	return s < 1.0f ? 1.0f : s;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real ControlBarHudScale( void )
+{
+	if( TheDisplay == NULL )
+		return 1.0f;
+
+	return ControlBarHudScaleFor( TheDisplay->getWidth(), TheDisplay->getHeight() );
+}
+
+//-------------------------------------------------------------------------------------------------
 /** One window of a layout being taken out of the loader's stretched space, and everything under it.
 	* Positions are relative to the parent, so both the parent's old and its new screen origin travel
 	* down the recursion - the same walk placeInPanel does, without the panels and the plate art. */
@@ -1651,7 +1642,6 @@ struct ControlBarPanelPlacement
 	Real designX, designY, designW, designH;
 	Int placedX, placedY, placedW, placedH;
 	Int slideApplied;			///< how far down applyPanelSlide has actually moved this one, in pixels
-	ICoord2D inset;				///< how far insetPlacedWindow has put it inside the placed rectangle, each way, in pixels
 };
 typedef std::map< GameWindow *, ControlBarPanelPlacement > ControlBarPanelPlacementMap;
 static ControlBarPanelPlacementMap theControlBarPlacement;
@@ -2036,13 +2026,9 @@ void ControlBar::placeInPanel( GameWindow *win, Int panel,
 	win->winGetPosition( &rel.x, &rel.y );
 	win->winGetSize( &size.x, &size.y );
 
-	// a window insetPlacedWindow put inside its place is read as the whole place, or every rebuild
-	// would take the inset for what it was authored at and shrink it again
 	ControlBarPanelPlacement &place = theControlBarPlacement[ win ];
-	size.x += 2 * place.inset.x;
-	size.y += 2 * place.inset.y;
-	const Int oldX = oldParentX + rel.x - place.inset.x;
-	const Int oldY = oldParentY + rel.y - place.inset.y;
+	const Int oldX = oldParentX + rel.x;
+	const Int oldY = oldParentY + rel.y;
 
 	if( place.known == FALSE || oldX != place.placedX || oldY != place.placedY ||
 			size.x != place.placedW || size.y != place.placedH )
@@ -2111,7 +2097,6 @@ void ControlBar::placeInPanel( GameWindow *win, Int panel,
 	place.panel = panel;
 	place.weHid = FALSE;
 	place.slideApplied = 0;
-	place.inset.x = place.inset.y = 0;
 	place.placedX = newX;
 	place.placedY = newY;
 	place.placedW = newW;
@@ -2161,43 +2146,41 @@ Int ControlBar::getPanelSlideOffset( Int panel ) const
 }
 
 //-------------------------------------------------------------------------------------------------
-void ControlBar::insetPlacedWindow( GameWindow *window, const ICoord2D &inset )
-{
-	ControlBarPanelPlacement &place = theControlBarPlacement.find( window )->second;
-	if( place.inset.x == inset.x && place.inset.y == inset.y )
-		return;
-
-	// where placeInPanel put it in its parent, which the parent carries with it wherever it goes
-	const ControlBarPanelPlacement &parent = theControlBarPlacement.find( window->winGetParent() )->second;
-	window->winSetPosition( place.placedX - parent.placedX + inset.x, place.placedY - parent.placedY + inset.y );
-	window->winSetSize( place.placedW - 2 * inset.x, place.placedH - 2 * inset.y );
-	place.inset = inset;
-}
-
-ICoord2D ControlBar::getPlacedInset( GameWindow *window ) const
-{
-	return theControlBarPlacement.find( window )->second.inset;
-}
-
-//-------------------------------------------------------------------------------------------------
 /** A window moved without its place moving was read by the next layoutPanels as moved by somebody
 	* else, in the loader's stretched space, and its size taken back through the loader's scale: the
 	* command grid, lowered to the bottom edge, came out three quarters as wide after a watcher's
-	* selection rebuilt the bar, and the promotion screen measures its cells off it. */
+	* selection rebuilt the bar.  The children keep their own places, since they stay where they
+	* stood on screen. */
 //-------------------------------------------------------------------------------------------------
-static void lowerPlaces( GameWindow *window, Int shift )
+void ControlBar::placeWindowAt( GameWindow *window, const IRegion2D &rect )
 {
-	theControlBarPlacement.find( window )->second.placedY += shift;
-	for( GameWindow *child = window->winGetChild(); child; child = child->winGetNext() )
-		lowerPlaces( child, shift );
-}
+	ICoord2D screen, size;
+	window->winGetScreenPosition( &screen.x, &screen.y );
+	window->winGetSize( &size.x, &size.y );
+	const Int dx = rect.lo.x - screen.x;
+	const Int dy = rect.lo.y - screen.y;
+	const Int width = rect.hi.x - rect.lo.x;
+	const Int height = rect.hi.y - rect.lo.y;
+	if( dx == 0 && dy == 0 && size.x == width && size.y == height )
+		return;
 
-void ControlBar::lowerPlacedWindow( GameWindow *window, Int shift )
-{
 	Int x = 0, y = 0;
 	window->winGetPosition( &x, &y );
-	window->winSetPosition( x, y + shift );
-	lowerPlaces( window, shift );
+	window->winSetPosition( x + dx, y + dy );
+	window->winSetSize( width, height );
+	for( GameWindow *child = window->winGetChild(); child; child = child->winGetNext() )
+	{
+		child->winGetPosition( &x, &y );
+		child->winSetPosition( x - dx, y - dy );
+	}
+
+	// a window made in code, a multi-selection's cell, has no place until the next layoutPanels
+	// gives it one, and that one reads it as first seen whatever is written here
+	ControlBarPanelPlacement &place = theControlBarPlacement[ window ];
+	place.placedX += dx;
+	place.placedY += dy;
+	place.placedW = width;
+	place.placedH = height;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2702,7 +2685,10 @@ void ControlBar::shutdownWindows( void )
 	for( i = 0; i < MAX_PURCHASE_SCIENCE_RANK_8; i++ )
 		m_sciencePurchaseWindowsRank8[ i ] = NULL;
 	for( i = 0; i < MAX_RIGHT_HUD_UPGRADE_CAMEOS; i++ )
+	{
 		m_rightHUDUpgradeCameos[ i ] = NULL;
+		m_rightHUDUpgrades[ i ] = NULL;
+	}
 	for( i = 0; i < MAX_SPECIAL_POWER_SHORTCUTS; i++ )
 	{
 		m_specialPowerShortcutButtons[ i ] = NULL;
@@ -2871,6 +2857,7 @@ void ControlBar::initWindows( void )
 			m_rightHUDUpgradeCameos[ i ] =
 				TheWindowManager->winGetWindowFromId( m_rightHUDWindow, id );
 			m_rightHUDUpgradeCameos[ i ]->winSetStatus( WIN_STATUS_USE_OVERLAY_STATES );
+			m_rightHUDUpgradeCameos[ i ]->winSetTooltipFunc( commandButtonTooltip );
 		}
 
 		// the multi-select unit grid cells over the right HUD are created on demand by
@@ -3115,28 +3102,8 @@ void ControlBar::update( void )
 	}
 
 	//
-	// a chord the player armed and then walked away from expires on its own, so it cannot be
-	// waiting to eat a keystroke a minute later
-	//
-	if( m_chordGroup >= 0 && timeGetTime() - m_chordStartMs > CHORD_TIMEOUT_MS )
-	{
-		dropChord();
-	}
-
-	//
-	// ... and neither does a chord whose builder is gone: the command bar is now showing
-	// something else, so the cell the second key would pick is not the one that was armed
-	//
-	if( m_chordGroup >= 0 )
-	{
-		const DrawableID nowShowing = m_currentSelectedDrawable ? m_currentSelectedDrawable->getID()
-																													 : INVALID_DRAWABLE_ID;
-		if( nowShowing != m_chordDrawableID )
-			dropChord();
-	}
-
-	//
-	// a general's power row goes the same way: it expires on its own, and it drops the moment the
+	// a general's power row expires on its own, so it cannot be waiting to eat a keystroke a minute
+	// later, and it drops the moment the
 	// bar it was picked against is off screen - hidden with the command bar, animated out, or
 	// repopulated with fewer powers than the row names.  Otherwise a key pressed in a hurry and
 	// then thought better of sits armed, and the next one fires a power instead of picking a row
@@ -4507,15 +4474,6 @@ void ControlBar::switchToContext( ControlBarContext context, Drawable *draw )
 	// save a pointer for the currently selected drawable
 	m_currentSelectedDrawable = draw;
 
-	//
-	// a half-typed structure chord used to be dropped here.  It cannot be: evaluateContextUI
-	// erases the bar by switching to CB_CONTEXT_NONE before it rebuilds it, and arming the
-	// chord calls markUIDirty() itself to grey the other group out - so the chord killed
-	// itself on the very next frame and the second key never had a chord to resolve.
-	// ControlBar::update drops it instead, when the drawable driving the bar is no longer the
-	// one the chord was armed on.
-	//
-
 	if (IsInGameChatActive() == FALSE && TheGameLogic && !TheGameLogic->isInShellGame()) {
 		TheWindowManager->winSetFocus( NULL );
 	}
@@ -4828,28 +4786,9 @@ static UnicodeString getMetaKeyLabel( GameMessage::Type wanted )
 
 }  // end getMetaKeyLabel
 
-static UnicodeString getGridHotKeyLabel( Int slot )
+static UnicodeString getGridHotKeyLabel( Int place )
 {
-	return getMetaKeyLabel( (GameMessage::Type)(GameMessage::MSG_META_COMMAND_SLOT01 + slot) );
-}
-
-//-------------------------------------------------------------------------------------------------
-/** The letter a button's label marks with '&', in capitals: the key HotKeyManager presses that
-	* button with under Legacy input.  Read from the untranslated label, because a translation marks
-	* letters of its own - the Turkish one marks every label's first letter, which put K on three
-	* GLA structures and S on five. */
-//-------------------------------------------------------------------------------------------------
-static UnicodeString getLabelHotKeyLabel( const AsciiString& textLabel )
-{
-	UnicodeString label;
-	const UnicodeString text = TheGameText->fetchUntranslated( textLabel.str() );
-	const WideChar *marker = wcschr( text.str(), L'&' );
-	if( marker && marker[ 1 ] )
-	{
-		const WideChar letter[ 2 ] = { (WideChar)towupper( marker[ 1 ] ), 0 };
-		label.set( letter );
-	}
-	return label;
+	return getMetaKeyLabel( (GameMessage::Type)(GameMessage::MSG_META_COMMAND_SLOT01 + place) );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -4936,72 +4875,34 @@ void ControlBar::setControlCommand( GameWindow *button, const CommandButton *com
 
 	setCommandBarBorder(button, commandButton->getCommandButtonMappedBorderType());
 	
-	//
-	// The '&' letter buried in each localized button label and the grid keys are two rival input
-	// schemes for the same buttons: the letter fires on KEY_UP out of HotKeyTranslator, the grid
-	// keys on KEY_DOWN out of MetaEventTranslator, so leaving both live makes one keystroke do two
-	// things.  Modern is the grid and registers no letters.  Legacy is the letters, which is what the
-	// game shipped with, and each button wears its own letter the way a Modern one wears its grid key.
-	//
-	const Bool legacyInput = TheGlobalData->isLegacyInput();
-	if( legacyInput && TheHotKeyManager )
-	{
-		AsciiString hotKey = TheHotKeyManager->searchHotKey(
-			TheGameText->fetchUntranslated( commandButton->getTextLabel().str() ) );
-		if( hotKey.isNotEmpty() )
-			TheHotKeyManager->addHotKey( button, hotKey );
-	}
+	// the key in the button's top left corner is its place's, and a place is only known once the
+	// whole set is on the bar: labelCommandPlaces paints it
 
-	// paint the key in the button's top left corner.  Only the real command bar slots get one -
-	// the communicator, options and science buttons are not on the grid.
+	GadgetButtonSetAltSound(button, "GUICommandBarClick");
+
+}  // end setControlCommand
+
+//-------------------------------------------------------------------------------------------------
+void ControlBar::labelCommandPlaces( const Int *places )
+{
 	for( Int slot = 0; slot < MAX_COMMANDS_PER_SET; slot++ )
 	{
-		if( m_commandWindows[ slot ] != button )
+		GameWindow *button = m_commandWindows[ slot ];
+		if( button == NULL )
 			continue;
 
-		UnicodeString label = legacyInput ? getLabelHotKeyLabel( commandButton->getTextLabel() )
-																			: getGridHotKeyLabel( slot );
-
-		// structures are reached by a chord: Q or W picks the group (columns 1-4 or 5-7), then
-		// the key of the cell's own position inside that group - paint both, "QQ", "QZ", "WQ" ...
-		// Legacy has no chords, and a structure is its one letter.
-		if( commandButton->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT && !label.isEmpty() && !legacyInput )
-		{
-			Int base = ( slot < CHORD_GROUP_SIZE ) ? 0 : CHORD_GROUP_SIZE;
-			UnicodeString chord = getGridHotKeyLabel( base == 0 ? CHORD_SLOT_Q : CHORD_SLOT_W );
-			chord.concat( getGridHotKeyLabel( slot - base ) );
-			label = chord;
-		}
-
+		const UnicodeString label = places[ slot ] >= 0 ? getGridHotKeyLabel( places[ slot ] ) : UnicodeString();
 		if( label.isEmpty() )
 			button->winClearStatus( WIN_STATUS_SHORTCUT_BUTTON );
 		else
 			button->winSetStatus( WIN_STATUS_SHORTCUT_BUTTON );
 
-		GadgetButtonSetText( button, label );
-		break;
-	}
-	//
-	// the stop button does not live on the grid: MSG_META_STOP presses it whether or not grid hot
-	// keys are switched on, and on a building of yours that is still going up it is the cancel key,
-	// so the button wears that letter in both modes.
-	//
-	if( commandButton->getCommandType() == GUI_COMMAND_STOP )
-	{
-		UnicodeString stopKey = legacyInput ? getLabelHotKeyLabel( commandButton->getTextLabel() )
-																				: getMetaKeyLabel( GameMessage::MSG_META_STOP );
-
-		if( stopKey.isEmpty() )
-			button->winClearStatus( WIN_STATUS_SHORTCUT_BUTTON );
-		else
-			button->winSetStatus( WIN_STATUS_SHORTCUT_BUTTON );
-
-		GadgetButtonSetText( button, stopKey );
+		// every frame, so only a changed key goes to the button
+		if( button->winGetText().compare( label ) != 0 )
+			GadgetButtonSetText( button, label );
 	}
 
-	GadgetButtonSetAltSound(button, "GUICommandBarClick");
-
-}  // end setControlCommand
+}  // end labelCommandPlaces
 
 //-------------------------------------------------------------------------------------------------
 void CommandButton::cacheButtonImage()
@@ -5163,6 +5064,7 @@ void ControlBar::setPortraitByObject( Object *obj )
 
 			m_rightHUDUpgradeCameos[i]->winHide(FALSE);
 			m_rightHUDUpgradeCameos[i]->winSetEnabledImage( 0, ut->getButtonImage() );
+			m_rightHUDUpgrades[i] = ut;
 			if( obj->hasUpgrade(ut) )
 			{
 				//Object level upgrades
@@ -5631,7 +5533,7 @@ void ControlBar::updatePurchaseScienceHotKeys( void )
 		return;
 	}
 
-	// a column marked and then thought better of expires on its own, like an armed builder chord
+	// a column marked and then thought better of expires on its own, like a powers tray row
 	if( m_purchaseScienceColumn >= 0
 			&& timeGetTime() - m_purchaseScienceColumnMs > CHORD_TIMEOUT_MS )
 		clearPurchaseScienceColumn();
@@ -5643,10 +5545,8 @@ void ControlBar::updatePurchaseScienceHotKeys( void )
 	{
 		GameWindow *candidate = purchaseScienceCandidate( column );
 
-		// Legacy's number keys pick groups, as they did in the game as shipped, so its columns wear no key
 		UnicodeString label;
-		if( !TheGlobalData->isLegacyInput() &&
-				( m_purchaseScienceColumn < 0 || m_purchaseScienceColumn == column ) )
+		if( m_purchaseScienceColumn < 0 || m_purchaseScienceColumn == column )
 			label = getMetaKeyLabel( (GameMessage::Type)( GameMessage::MSG_META_SELECT_TEAM1 + column ) );
 
 		for( Int depth = 0; depth < PURCHASE_SCIENCE_COLUMN_DEPTH; depth++ )
@@ -6698,8 +6598,7 @@ void ControlBar::drawSpecialPowerShortcutMultiplierText()
 		else if( i / SPECIAL_POWER_SHORTCUT_COLS == m_specialPowerShortcutRow )
 			keySlot = i % SPECIAL_POWER_SHORTCUT_COLS;
 
-		// the power keys are this fork's; Legacy's powers are clicked, and wear only their ready count
-		if( keySlot >= 0 && keySlot < MAX_SPECIAL_POWER_SHORTCUTS && !TheGlobalData->isLegacyInput() )
+		if( keySlot >= 0 && keySlot < MAX_SPECIAL_POWER_SHORTCUTS )
 			text = getMetaKeyLabel( (GameMessage::Type)(GameMessage::MSG_META_SHORTCUT_SLOT01 + keySlot) );
 
 		const SpecialPowerTemplate *spTemplate = command->getSpecialPowerTemplate();

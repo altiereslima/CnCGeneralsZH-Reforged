@@ -57,6 +57,9 @@ public:
 
 	void draw( void );
 
+	/** Lay the page out at ControlBarHudScale(), the bottom HUD's, rather than the uniform scale. */
+	void setHud( Bool hud );
+
 	/** Fade everything the page draws, text, fills and images, 0 to 255; 255 until it is set. */
 	void setAlpha( Int alpha );
 

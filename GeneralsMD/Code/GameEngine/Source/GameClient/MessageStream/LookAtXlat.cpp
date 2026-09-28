@@ -66,23 +66,17 @@ static enum
 
 static Bool scrollDir[4] = { false, false, false, false };
 
-// The directions a W A S D key is holding.  A release only ends a scroll its own press started: with
-// the box off W is a grid key, and letting go of it must not stop the up arrow; with the box
-// unticked while W is held, letting go must still stop the camera.
-static Bool letterScrollDir[4] = { false, false, false, false };
-
-static void scrollByLetter( Int dir, Bool isPressed, Bool pressScrolls )
-{
-	if( isPressed ? !pressScrolls : !letterScrollDir[ dir ] )
-		return;
-
-	letterScrollDir[ dir ] = isPressed;
-	scrollDir[ dir ] = isPressed;
-}
-
 Int SCROLL_AMT = 100;
 
 static const Int edgeScrollSize = 3;
+
+static Bool isAtScreenEdge( const ICoord2D& pos )
+{
+	const Int width  = (Int)TheDisplay->getWidth();
+	const Int height = (Int)TheDisplay->getHeight();
+	return pos.x < edgeScrollSize || pos.y < edgeScrollSize
+			|| pos.x >= width - edgeScrollSize || pos.y >= height - edgeScrollSize;
+}
 
 static Mouse::MouseCursor prevCursor = Mouse::ARROW;
 
@@ -92,14 +86,9 @@ void LookAtTranslator::setScrolling(Int x)
 	if (!TheInGameUI->getInputEnabled())
 		return;
 
-	// With the W A S D box ticked a keyboard scroll leaves the cursor alone - arrow keys too, it is the
-	// same scroll - because the mouse is not the thing moving the camera.  A mouse scroll, and every
-	// keyboard scroll with the box off, still turns the cursor into the scroll arrows.
-	m_scrollMovesCursor = !( x == SCROLL_KEY && TheGlobalData->isWasdCamera() );
-	if( m_scrollMovesCursor )
-		prevCursor = TheMouse->getMouseCursor();
+	prevCursor = TheMouse->getMouseCursor();
 	m_isScrolling = true;
-	TheInGameUI->setScrolling( TRUE, m_scrollMovesCursor );
+	TheInGameUI->setScrolling( TRUE );
 	TheTacticalView->setMouseLock( TRUE );
 	m_scrollType = x;
 	// A manual pan restores map constraints widened by scripted camera paths.
@@ -113,10 +102,9 @@ void LookAtTranslator::setScrolling(Int x)
 void LookAtTranslator::stopScrolling( void )
 {
 	m_isScrolling = false;
-	TheInGameUI->setScrolling( FALSE, m_scrollMovesCursor );
+	TheInGameUI->setScrolling( FALSE );
 	TheTacticalView->setMouseLock( FALSE );
-	if( m_scrollMovesCursor )
-		TheMouse->setCursor(prevCursor);
+	TheMouse->setCursor(prevCursor);
 	m_scrollType = SCROLL_NONE;
 		
 	// if we have a stats collectore increment the stats
@@ -127,6 +115,7 @@ void LookAtTranslator::stopScrolling( void )
 
 //-----------------------------------------------------------------------------
 LookAtTranslator::LookAtTranslator() :
+	m_rightPanArmed(false),
 	m_isScrolling(false),
 	m_isRotating(false),
 	m_freeRotateAngle(0.0f),
@@ -136,8 +125,7 @@ LookAtTranslator::LookAtTranslator() :
 	m_lastPlaneID(INVALID_DRAWABLE_ID),
 	m_lastMouseMoveFrame(0),
 	m_cameraSentFrame(0),
-	m_scrollType(SCROLL_NONE),
-	m_scrollMovesCursor(true)
+	m_scrollType(SCROLL_NONE)
 {
 	//Added By Sadullah Nader
 	//Initializations misssing and needed
@@ -159,7 +147,7 @@ LookAtTranslator::~LookAtTranslator()
 
 const ICoord2D* LookAtTranslator::getScrollAnchor(void)
 {
-	if (m_isScrolling && (m_scrollType == SCROLL_MMB || m_scrollType == SCROLL_RMB))
+	if (isRightDragPanning())
 	{
 		return &m_anchor;
 	}
@@ -231,19 +219,6 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			if (TheShell && TheShell->isShellActive())
 				break;
 
-			//
-			// With the W A S D box ticked those four scroll alongside the arrow keys, and
-			// CommandMapWASD.ini moves what they were bound to.  They are read here as raw keys
-			// instead of being bound there for two reasons: the meta map holds one key per command, so
-			// binding them would have taken the arrows away, and a meta record fires its UP only while
-			// the modifier state still matches the one the key went down with - letting go of W with
-			// ctrl held for a control group would have left the camera scrolling with nothing to stop
-			// it.  A press with ctrl or alt down belongs to whatever that combination is bound to.
-			//
-			const Bool letterPressScrolls = TheGlobalData->isWasdCamera() &&
-																		 !BitTest( state, KEY_STATE_CONTROL ) &&
-																		 !BitTest( state, KEY_STATE_ALT );
-
 			switch (key)
 			{
 			case KEY_UP:
@@ -257,18 +232,6 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 				break;
 			case KEY_RIGHT:
 				scrollDir[DIR_RIGHT] = isPressed;
-				break;
-			case KEY_W:
-				scrollByLetter( DIR_UP, isPressed, letterPressScrolls );
-				break;
-			case KEY_S:
-				scrollByLetter( DIR_DOWN, isPressed, letterPressScrolls );
-				break;
-			case KEY_A:
-				scrollByLetter( DIR_LEFT, isPressed, letterPressScrolls );
-				break;
-			case KEY_D:
-				scrollByLetter( DIR_RIGHT, isPressed, letterPressScrolls );
 				break;
 			}
 
@@ -295,31 +258,24 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 		}
 
 		//-----------------------------------------------------------------------------
-		// Modern's right button belongs to the order layer - a click commands, a drag draws a
-		// formation line - so here it only keeps the idle timer honest: a player who is
-		// right-clicking is not away from the keyboard.  Legacy's right drag scrolls the camera, as
-		// the game shipped.
+		// A right click is an order and a right drag pans.  The press only arms the pan: it starts
+		// once the cursor has left the mouse's drag tolerance, so a click that wobbles a pixel or two
+		// still reaches CommandXlat as an order and never nudges the camera.  The anchor stays where
+		// the button went down and the camera runs away from it, faster the further the cursor gets.
 		case GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN:
+		case GameMessage::MSG_RAW_MOUSE_RIGHT_DOUBLE_CLICK:
 		{
 			m_lastMouseMoveFrame = TheGameLogic->getFrame();
-
-			if (TheGlobalData->isLegacyInput())
-			{
-				m_anchor = msg->getArgument( 0 )->pixel;
-				m_currentPos = msg->getArgument( 0 )->pixel;
-
-				if (!TheInGameUI->isSelecting() && !m_isScrolling)
-					setScrolling(SCROLL_RMB);
-			}
+			m_anchor = msg->getArgument( 0 )->pixel;
+			m_rightPanArmed = true;
 			break;
 		}
 
-		//-----------------------------------------------------------------------------
 		case GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP:
 		{
 			m_lastMouseMoveFrame = TheGameLogic->getFrame();
-
-			if (m_scrollType == SCROLL_RMB)
+			m_rightPanArmed = false;
+			if (isRightDragPanning())
 				stopScrolling();
 			break;
 		}
@@ -334,25 +290,13 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			m_currentPos = msg->getArgument( 0 )->pixel;
 			m_timestamp = TheGameClient->getFrame();
 
-			// The middle button is the camera: drag it and the map follows the cursor, hold ctrl and
-			// the drag turns the camera instead.  It used to be the other way round, with a
-			// MiddleMousePans switch in Options.ini deciding; there is no switch now because the
-			// right button no longer scrolls anything and the pan has to live somewhere.  The
-			// click-to-reset below works either way.  Legacy's middle drag only ever turns the camera,
-			// because its right button is the one that scrolls.
-			if( !TheKeyboard->isCtrl() && !TheGlobalData->isLegacyInput() )
-			{
-				m_isRotating = false;
-				if (!TheInGameUI->isSelecting() && !m_isScrolling)
-					setScrolling(SCROLL_MMB);
-			}
-			else
-			{
-				m_isRotating = true;
-				// the drag turns this, and under SnapCameraRotateTo45 the camera stands on whichever
-				// eighth it is nearest - so start it where the camera already is.
-				m_freeRotateAngle = TheTacticalView->getAngle();
-			}
+			// The middle button turns the camera: drag it sideways and the heading follows.  The pan
+			// is on the right button, so no modifier is needed.  A click without a drag puts the
+			// camera back, below.
+			m_isRotating = true;
+			// the drag turns this, and under SnapCameraRotateTo45 the camera stands on whichever
+			// eighth it is nearest - so start it where the camera already is.
+			m_freeRotateAngle = TheTacticalView->getAngle();
 			break;
 		}
 
@@ -365,8 +309,6 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			const UnsignedInt PIXEL_OFFSET = 5;
 
 			m_isRotating = false;
-			if (m_scrollType == SCROLL_MMB)
-				stopScrolling();
 			Int dx = m_currentPos.x-m_originalAnchor.x;
 			if (dx<0) dx = -dx;
 			Int dy = m_currentPos.y-m_originalAnchor.y;
@@ -390,15 +332,23 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 				m_lastMouseMoveFrame = TheGameLogic->getFrame();
 
 			m_currentPos = msg->getArgument( 0 )->pixel;
-			
-			UnsignedInt height = TheDisplay->getHeight();
-			UnsignedInt width  = TheDisplay->getWidth();
 
 			if (TheInGameUI->getInputEnabled() == FALSE) {
 				// We don't care how we're scrolling, just stop.
 				if (m_isScrolling)
 					stopScrolling();
+				m_rightPanArmed = false;
 				break;
+			}
+
+			// a right press that has travelled past the drag tolerance is a pan, not an order
+			if (m_rightPanArmed
+					&& ((UnsignedInt)abs(m_currentPos.x - m_anchor.x) > TheMouse->m_dragTolerance
+							|| (UnsignedInt)abs(m_currentPos.y - m_anchor.y) > TheMouse->m_dragTolerance))
+			{
+				m_rightPanArmed = false;
+				if (!TheInGameUI->isSelecting() && !m_isScrolling)
+					setScrolling(SCROLL_RMB);
 			}
 
 			// retail disables edge scrolling entirely in a window; EdgeScrollInWindowedMode in
@@ -413,19 +363,14 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 
 			if (m_isScrolling)
 			{
-				if ( m_scrollType == SCROLL_SCREENEDGE
-						 && (!edgeScrollAllowed
-								 || (m_currentPos.x >= edgeScrollSize && m_currentPos.y >= edgeScrollSize && m_currentPos.y < height-edgeScrollSize && m_currentPos.x < width-edgeScrollSize)) )
+				if ( m_scrollType == SCROLL_SCREENEDGE && (!edgeScrollAllowed || !isAtScreenEdge(m_currentPos)) )
 				{
 					stopScrolling();
 				}
 			}
-			else if (edgeScrollAllowed)
+			else if (edgeScrollAllowed && isAtScreenEdge(m_currentPos))
 			{
-				if ( m_currentPos.x < edgeScrollSize || m_currentPos.y < edgeScrollSize || m_currentPos.y >= height-edgeScrollSize || m_currentPos.x >= width-edgeScrollSize )
-				{
-					setScrolling(SCROLL_SCREENEDGE);
-				}
+				setScrolling(SCROLL_SCREENEDGE);
 			}
 
 			// rotate the view
@@ -435,7 +380,7 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 
 				Real angle = FACTOR * (m_currentPos.x - m_anchor.x);
 
-				if (TheGlobalData->m_snapCameraRotateTo45 && !TheGlobalData->isLegacyInput())
+				if (TheGlobalData->m_snapCameraRotateTo45)
 				{
 					// discrete heading: the drag turns an angle we keep to ourselves and the camera
 					// jumps to the eighth it is nearest, as the mouse crosses each halfway point.
@@ -491,14 +436,14 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			//
 			// Whole notches only: half a touchpad swipe is not a 45 degree turn.
 			const Int rotateSteps = (Int)spin;
-			if (!TheGlobalData->isLegacyInput() && TheKeyboard->isCtrl() && rotateSteps != 0 &&
+			if (TheKeyboard->isCtrl() && rotateSteps != 0 &&
 					TheInGameUI->rotatePendingPlacement( rotateSteps ))
 				return DESTROY_MESSAGE;
 
 			// ZoomToCursor: the view holds the ground under the cursor while the zoom eases in.  It does
 			// it inside its own update, between the zoom moving and the frame being drawn; held from
 			// here, the correction always landed a frame late.
-			if (TheGlobalData->m_zoomToCursor && !TheGlobalData->isLegacyInput() && TheInGameUI->getInputEnabled())
+			if (TheGlobalData->m_zoomToCursor && TheInGameUI->getInputEnabled())
 				TheTacticalView->anchorZoomAt( &msg->getArgument( 0 )->pixel );
 
 			if (spin > 0.0f)
@@ -540,11 +485,10 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 				switch (m_scrollType)
 				{
 				case SCROLL_RMB:
-				case SCROLL_MMB:
 					{
 						// The anchor stays where the button went down and the camera runs away from it,
-						// faster the further the cursor gets.  This is what the right button used to do,
-						// and it is what the hand expects; a one-to-one drag of the world is not the same
+						// faster the further the cursor gets.  This is the retail right-drag scroll, and it
+						// is what the hand expects; a one-to-one drag of the world is not the same
 						// gesture and reads as sluggish at these scroll factors.
 						if (TheInGameUI->shouldMoveScrollAnchor())
 						{
@@ -844,10 +788,7 @@ void LookAtTranslator::resetModes()
 	// the flags that say a scroll is in progress.
 	//
 	for( Int i = 0; i < 4; ++i )
-	{
 		scrollDir[i] = false;
-		letterScrollDir[i] = false;
-	}
 
 	if( m_isScrolling && TheInGameUI && TheTacticalView && TheMouse )
 		stopScrolling();

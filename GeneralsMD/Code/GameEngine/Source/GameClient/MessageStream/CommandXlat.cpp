@@ -105,8 +105,7 @@
 /**
  * Is the next order click a force fire?
  * Under Modern only the attack key arms it: ctrl is the "one shared pace" modifier on a move (see
- * issueMoveToLocationCommand), so a ctrl click could not ask for both.  Legacy's ctrl is still the
- * game's own force fire (InGameUI::isForceFireOn).
+ * issueMoveToLocationCommand), so a ctrl click could not ask for both.
  */
 Bool CommandXlat_isForceAttackTargeting( Bool forceAttackArmed, Bool attackMoveArmed )
 {
@@ -132,7 +131,8 @@ Bool Command_stopMeansCancelConstruction( Int selectionCount, Bool locallyContro
 
 //-------------------------------------------------------------------------------------------------
 /**
- * Is this right-button press the start of a formation line?
+ * Is this left-button press, made with the move, attack move or guard key armed, the start of a
+ * formation line?
  * A GUI command waiting for a target owns the next click, and with nothing of your own selected
  * there is nobody to spread, so both of those leave the drag meaning nothing.
  */
@@ -173,10 +173,6 @@ SignalKind Command_signalKindForMeta( GameMessage::Type meta )
 
 static Bool isFormationDragArmed( void )
 {
-	// a Legacy right drag is the camera scroll it always was
-	if( TheGlobalData->isLegacyInput() )
-		return FALSE;
-
 	return Command_formationDragArmed( TheGlobalData->m_formationDrag,
 																		 TheInGameUI->getSelectCount() > 0
 																			&& TheInGameUI->areSelectedObjectsControllable(),
@@ -2857,6 +2853,10 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_COMMAND_SLOT12:
 		case GameMessage::MSG_META_COMMAND_SLOT13:
 		case GameMessage::MSG_META_COMMAND_SLOT14:
+		case GameMessage::MSG_META_COMMAND_SLOT15:
+		case GameMessage::MSG_META_COMMAND_SLOT16:
+		case GameMessage::MSG_META_COMMAND_SLOT17:
+		case GameMessage::MSG_META_COMMAND_SLOT18:
 		{
 			// a watcher has no commands to press, and the top row picks the spectator's stat instead,
 			// the keys Dota's spectator uses for the same list
@@ -3405,9 +3405,8 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 			//
 			// Escape is "take that back" before it is "open the menu": a structure waiting to be
-			// placed, a targeting command armed off the command bar, or a half-typed builder chord
-			// are all dropped first, and the pause menu only comes up on a press with nothing
-			// pending.
+			// placed or a targeting command armed off the command bar is dropped first, and the pause
+			// menu only comes up on a press with nothing pending.
 			//
 			Bool cancelledSomething = FALSE;
 
@@ -3415,12 +3414,6 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			if( TheControlBar && TheControlBar->isPurchaseScienceVisible() )
 			{
 				TheControlBar->hidePurchaseScience();
-				cancelledSomething = TRUE;
-			}
-
-			if( TheControlBar && TheControlBar->isChordArmed() )
-			{
-				TheControlBar->dropChord();
 				cancelledSomething = TRUE;
 			}
 
@@ -3548,6 +3541,12 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		// is pointed instead of walking them there and leaving them idle
 		case GameMessage::MSG_META_TOGGLE_GUARD:
 			TheInGameUI->toggleGuardArmed( );
+			break;
+
+		//-----------------------------------------------------------------------------------------
+		// the move key: the next order click, or a left drag, is the move a right click would give
+		case GameMessage::MSG_META_TOGGLE_MOVE:
+			TheInGameUI->toggleMoveArmed( );
 			break;
 
 		//-----------------------------------------------------------------------------------------
@@ -4044,16 +4043,14 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			m_mouseRightDragAnchor = msg->getArgument( 0 )->pixel;
 			m_mouseRightDown = (UnsignedInt) msg->getArgument( 2 )->integer;
 
-			// attack move and guard draw their line with the left button only
-			m_formationDragAnchor = m_mouseRightDragAnchor;
-			m_formationDragArmed = isFormationDragArmed() && !TheInGameUI->isLineOrderArmed();
-
+			// a right drag pans the camera (LookAtXlat) and never draws a formation line
 			break;
 		}
 
 		//-----------------------------------------------------------------------------
-		// Attack move and guard are aimed with the left button, so with either armed a left drag draws
-		// the same line a right drag does.  The attack key keeps its left drag for the attack circle.
+		// A formation line is drawn with the left button, and only once the move, attack move or guard
+		// key is armed: a left drag without one is a selection box.  The attack key keeps its left
+		// drag for the attack circle.
 		case GameMessage::MSG_RAW_MOUSE_LEFT_DOUBLE_CLICK:
 		case GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN:
 		{
@@ -4104,11 +4101,8 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			m_mouseRightDragLift = msg->getArgument( 0 )->pixel;
 			m_mouseRightUp = (UnsignedInt) msg->getArgument( 2 )->integer;
 
-			if( m_formationDragArmed )
-				finishFormationDrag( m_mouseRightDragLift );
-
 			// a structure waiting to be placed is dropped by the same release, over in
-			// SelectionXlat, which sees it whether this was a click or a drag
+			// SelectionXlat, unless the release ended a pan
 
 			break;
 		}
@@ -4116,7 +4110,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		//-----------------------------------------------------------------------------
 		case GameMessage::MSG_MOUSE_RIGHT_DOUBLE_CLICK:
 		{
-			if( TheGlobalData->m_doubleClickAttackMove && !TheGlobalData->isLegacyInput() )
+			if( TheGlobalData->m_doubleClickAttackMove )
 			{
 				// create the message and append arguments for a guard location
 				GameMessage *newMsg = TheMessageStream->appendMessage( GameMessage::MSG_DO_GUARD_POSITION );
@@ -4135,28 +4129,24 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		}
 		case GameMessage::MSG_MOUSE_RIGHT_CLICK:
 		{
-			// The right button is the order button, always.  It used to depend on UseAlternateMouse,
-			// which is gone: a click here commands, a drag draws a formation line, and neither of
-			// them scrolls.
-			//
-			// The one exception is the attack, attack move or guard key.  Those orders are aimed with the
-			// left button, so a right click while one is armed puts the key down and gives no order.
-			//
-			// A Legacy right button never orders at all: it scrolls and deselects, which LookAtXlat and
-			// SelectionXlat do.
-			if( TheGlobalData->isLegacyInput() )
-				break;
+			// A right click is an order.  A right drag pans the camera (LookAtXlat), so a release that
+			// travelled past the drag tolerance, or was held too long, gives no order at all.
+			const Bool isRightClick = TheMouse->isClick(&m_mouseRightDragAnchor, &m_mouseRightDragLift,
+					NULL, NULL,
+					m_mouseRightDown, m_mouseRightUp);
 
+			// The one exception is the move, attack, attack move or guard key.  Those orders are aimed
+			// with the left button, so a right click while one is armed puts the key down and gives no
+			// order.  A pan leaves the key armed.
 			if( TheInGameUI->isOrderKeyArmed() )
 			{
-				TheInGameUI->clearAttackMoveToMode();
+				if( isRightClick )
+					TheInGameUI->clearAttackMoveToMode();
 				disp = DESTROY_MESSAGE;
 				break;
 			}
 
-			if (TheMouse->isClick(&m_mouseRightDragAnchor, &m_mouseRightDragLift,
-					NULL, NULL,
-					m_mouseRightDown, m_mouseRightUp))
+			if (isRightClick)
 			{
 				Bool isPoint = (msg->getArgument(0)->pixelRegion.height() == 0 && msg->getArgument(0)->pixelRegion.width() == 0);
 
@@ -4197,26 +4187,6 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 		//-----------------------------------------------------------------------------
 		case GameMessage::MSG_MOUSE_LEFT_DOUBLE_CLICK:
-		{
-			// Legacy's orders are on the left button, so its double-click guard is here.  Modern's is on
-			// the right button, and this case does nothing of its own.
-			if( TheGlobalData->isLegacyInput() && TheGlobalData->m_doubleClickAttackMove )
-			{
-				// create the message and append arguments for a guard location
-				GameMessage *newMsg = TheMessageStream->appendMessage( GameMessage::MSG_DO_GUARD_POSITION );
-				Coord3D pos;
-				TheTacticalView->screenToTerrain( &msg->getArgument( 0 )->pixel, &pos );
-				newMsg->appendLocationArgument(pos);
-				newMsg->appendIntegerArgument(GUARDMODE_NORMAL);
-
-				ThePlayerList->getLocalPlayer()->getAcademyStats()->recordDoubleClickAttackMoveOrderGiven();
-
-				TheInGameUI->triggerDoubleClickAttackMoveGuardHint();
-
-				break;
-			}
-			//intentional fall through
-		}
 		case GameMessage::MSG_MOUSE_LEFT_CLICK:
 		{
 			Bool isPoint = (msg->getArgument(0)->pixelRegion.height() == 0 && msg->getArgument(0)->pixelRegion.width() == 0);
@@ -4244,10 +4214,9 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 			// The left button selects and nothing else.  The exceptions are a GUI command that is
 			// already armed and waiting for a target, and the attack, attack move and guard keys: all of
-			// them are aimed with the left button, because the right one cancels them.  In Legacy the left
-			// button is the order button as well, as it was in the game as shipped.
+			// them are aimed with the left button, because the right one cancels them.
 			const Bool isOrderKey = TheInGameUI->isOrderKeyArmed();
-			if( !isFiringGUICommand && !isOrderKey && !TheGlobalData->isLegacyInput() )
+			if( !isFiringGUICommand && !isOrderKey )
 				break;
 
 			Bool controllable = TheInGameUI->areSelectedObjectsControllable()

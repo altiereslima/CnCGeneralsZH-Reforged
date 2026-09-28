@@ -53,6 +53,7 @@
 #include "Common/Radar.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/WindowXlat.h"
+#include "GameClient/LookAtXlat.h"
 #include "GameClient/Shell.h"
 #include "GameClient/Display.h"
 
@@ -266,6 +267,14 @@ GameMessageDisposition WindowTranslator::translateGameMessage(const GameMessage 
 					&& ( msg->getType() == GameMessage::MSG_RAW_MOUSE_POSITION
 							 || msg->getType() == GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP
 							 || msg->getType() == GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP ) )
+			{
+				forceKeepMessage = TRUE;
+			}
+			// A middle drag turning the camera owns the mouse the same way, or a release over the
+			// command bar leaves the camera turning with every move until the next middle click.
+			if( TheLookAtTranslator && TheLookAtTranslator->isMovingCamera()
+					&& ( msg->getType() == GameMessage::MSG_RAW_MOUSE_POSITION
+							 || msg->getType() == GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_UP ) )
 			{
 				forceKeepMessage = TRUE;
 			}

@@ -187,8 +187,9 @@ Bool CrateCollide::isValidToExecute( const Object *other ) const
 
 	// A unit that works as a crate (hijacker, saboteur, pilot) and was killed earlier in the same frame
 	// still touched its target before it was gone: a Paladin's laser shot the hijacker, and he left a
-	// corpse and took the Paladin as well.
-	if( getObject()->isEffectivelyDead() )
+	// corpse and took the Paladin as well.  A real crate has no health at all: its InactiveBody marks it
+	// effectively dead from birth, so the test is for units only, or no crate in the game pays out.
+	if( !getObject()->isKindOf( KINDOF_CRATE ) && getObject()->isEffectivelyDead() )
 		return FALSE;
 
 	if( md->m_isForbidOwnerPlayer  &&  (getObject()->getControllingPlayer() == other->getControllingPlayer()) )

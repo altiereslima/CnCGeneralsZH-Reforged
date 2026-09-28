@@ -526,7 +526,16 @@ void ControlBar::showBuildTooltipLayout( GameWindow *cmdButton )
 
 	if(!cmdButton)
 		return;
-	if(BitTest(cmdButton->winGetStyle(), GWS_PUSH_BUTTON))
+	UnicodeString portraitName, portraitDescription;
+	if( describePortraitBarWindow( cmdButton, portraitName, portraitDescription ) )
+	{
+		// an upgrade cameo or a type tile on the portrait bar: no command button behind it
+		if( TheInGameUI->isQuitMenuVisible() )
+			return;
+		m_showBuildToolTipLayout = TRUE;
+		populateBuildTooltipLayout( NULL, cmdButton );
+	}
+	else if(BitTest(cmdButton->winGetStyle(), GWS_PUSH_BUTTON))
 	{
 		const CommandButton *commandButton = (const CommandButton *)GadgetButtonGetData(cmdButton);
 		
@@ -954,8 +963,12 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 	}
 	else if(tooltipWin)
 	{
-		
-		if( tooltipWin == TheWindowManager->winGetWindowFromId(m_buildToolTipLayout->getFirstWindow(), TheNameKeyGenerator->nameToKey("ControlBar.wnd:MoneyDisplay")))
+
+		if( describePortraitBarWindow( tooltipWin, name, descrip ) )
+		{
+			// an upgrade cameo or a type tile: the call has written the name and the description
+		}
+		else if( tooltipWin ==TheWindowManager->winGetWindowFromId(m_buildToolTipLayout->getFirstWindow(), TheNameKeyGenerator->nameToKey("ControlBar.wnd:MoneyDisplay")))
 		{
 			name = TheGameText->fetch("CONTROLBAR:Money");
 			descrip = TheGameText->fetch("CONTROLBAR:MoneyDescription");

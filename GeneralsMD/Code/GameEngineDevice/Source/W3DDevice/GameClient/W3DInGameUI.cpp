@@ -871,7 +871,7 @@ void W3DInGameUI::drawSelectionRegion( void )
 }  // end drawSelectionRegion
 
 //-------------------------------------------------------------------------------------------------
-/** draw the line a right drag is spreading the selection along.  Where each unit will stand is
+/** draw the line an armed left drag is spreading the selection along.  Where each unit will stand is
 	* said by the cursor sitting there, not by a mark on the line */
 //-------------------------------------------------------------------------------------------------
 void W3DInGameUI::drawFormationLine( void )

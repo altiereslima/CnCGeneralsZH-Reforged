@@ -132,7 +132,6 @@ static const char *CHROMA_KEY_ROWS[] = { "1234567890", "qwertyuiop", "asdfghjkl"
 static const Int CHROMA_KEY_ROW_COUNT = 4;
 static const Int CHROMA_KEY_FIRST_COLUMNS[ CHROMA_KEY_ROW_COUNT ] = { 2, 2, 2, 3 };
 static const Int CHROMA_POWER_ROW = 0;
-static const Int CHROMA_FIRST_HOTKEY_ROW = 1;
 static const Int CHROMA_KEY_FIRST_ROW = 1;
 
 static const Int MATCH_STATE_ROW = 0;
@@ -1405,17 +1404,14 @@ Int chromaCellForMappableKey( Int key )
 //-----------------------------------------------------------------------------
 // Which lamp each command bar slot and each tray slot answers to under the
 // bindings in force, looked up twice a second rather than per lamp per frame.
-// The player can rebind a slot in Options and change scheme mid-match, so it
-// cannot be looked up once.  Under Legacy nothing is bound to either and every
-// entry is -1, which is right: there the letters in the labels do the work.
+// The player can rebind a slot in Options mid-match, so it cannot be looked up
+// once.
 //-----------------------------------------------------------------------------
 /// How many slots of each bar a key can actually reach, counted off the messages
-/// themselves rather than off the arrays behind the bars.  The two do not agree:
-/// the command bar holds eighteen slots and only fourteen of them have a key,
-/// the rest being for buttons a map script puts up.  Reading the slot out of a
-/// message and bounding it by eighteen therefore ran four slots past the end of
-/// the command messages and into the shortcut ones, and filed the first four
-/// function keys as command bar slots.
+/// themselves rather than off the arrays behind the bars.  Bounding a slot read
+/// out of a message by the bar's array once ran past the end of the command
+/// messages and into the shortcut ones, and filed function keys as command bar
+/// slots.
 static const Int COMMAND_SLOTS_WITH_KEYS =
 	(Int)GameMessage::MSG_META_SHORTCUT_SLOT01 - (Int)GameMessage::MSG_META_COMMAND_SLOT01;
 static const Int SHORTCUT_SLOTS_WITH_KEYS =
@@ -1490,37 +1486,8 @@ static void chromaRefreshBoundCells( UnsignedInt frame )
 }
 
 //-----------------------------------------------------------------------------
-/** The command bar under Legacy input: the letter marked in each button's label,
-	* which is what HotKeyManager presses it with.
-	*
-	* Only under Legacy.  The manager is not the command bar's alone - every screen
-	* that has ever put a labelled button up has registered its letters there and
-	* they stay registered - so under Modern, where the bar binds none of them,
-	* this used to light whatever a menu had left behind. */
-static void chromaFillLabelHotKeys( Int *cells, Int pressable, Int unavailable )
-{
-	for( Int row = CHROMA_FIRST_HOTKEY_ROW; row < CHROMA_KEY_ROW_COUNT; ++row )
-	{
-		const char *keys = CHROMA_KEY_ROWS[ row ];
-		for( Int column = 0; keys[ column ] != 0; ++column )
-		{
-			Bool isPressable = FALSE;
-			const char keyText[ 2 ] = { keys[ column ], 0 };
-			GameWindow *win = TheHotKeyManager->findHotKey( AsciiString( keyText ), &isPressable );
-			if( win == NULL )
-				continue;
-
-			cells[ chromaCellForKey( keys[ column ] ) ] =
-				isPressable ? chromaPressableWithClock( pressable, win ) : unavailable;
-		}
-	}
-}
-
-//-----------------------------------------------------------------------------
-/** The command bar under Modern input: the grid keys, with the builder's two key
-	* chord followed.  What a key would do comes from the control bar's own
-	* resolution of the press, so when Q has armed a group the lamps move onto that
-	* group's cells the moment the labels on screen do. */
+/** The command bar: the grid keys.  What a key would do comes from the control
+	* bar's own resolution of the press, so the lamps follow the labels on screen. */
 static void chromaFillCommandGrid( Int *cells, Int pressable, Int unavailable )
 {
 	for( Int slot = 0; slot < COMMAND_SLOTS_WITH_KEYS; ++slot )
@@ -1847,14 +1814,7 @@ static void chromaFillCells( Int *cells, Bool inMatch )
 	const Int pressable = factionColor;
 	const Int unavailable = COLOR_OFF;
 
-	// Two input schemes reach the same buttons by different keys, and exactly one
-	// of them is live: Legacy presses the letters in the labels, Modern presses
-	// the grid.  Whichever is not the player's lights nothing.
-	if( TheGlobalData != NULL && TheGlobalData->isLegacyInput() )
-	{
-		chromaFillLabelHotKeys( cells, pressable, unavailable );
-	}
-	else if( TheControlBar != NULL )
+	if( TheControlBar != NULL )
 	{
 		chromaFillCommandGrid( cells, pressable, unavailable );
 		chromaFillPowerTray( cells, bed, factionColor, frame );

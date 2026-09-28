@@ -20,9 +20,11 @@
 // Who drives a watcher's camera, and whose fog his screen is drawn in.
 //
 // The mode and the followed player are picked apart, from two lists.  Free is the camera in the
-// watcher's own hands.  Director goes wherever the most things have been hit in the last few
-// seconds and stays there a while before it looks for a hotter fight; with a player picked it
-// counts only the fights that player is in.  Player shows what the followed player's own screen
+// watcher's own hands.  Director goes to the fight of the last few seconds with the most at stake,
+// each hit counted by what the thing hit cost and more for a kill or a superweapon, and stays there
+// a while before it looks for a bigger fight.  With no fight on it goes round the armies on the
+// move, the bases going up and the superweapons, a few seconds each, so it never sits still; with a
+// player picked it counts only that player's fights and things.  Player shows what the followed player's own screen
 // shows: a player's camera comes over the network a few times a second (MSG_SET_REPLAY_CAMERA), an
 // AI, which has no camera, gets the narrowed director, and with nobody picked it does nothing.
 // Scrolling with the keys or a drag, turning the camera or clicking the radar hands it back to the
@@ -68,6 +70,14 @@ Bool ObserverCamera_hottestPlace( const std::vector< DirectorHeat > &hits, Coord
 Real ObserverCamera_heatAround( const std::vector< DirectorHeat > &hits, const Coord2D &around, Coord2D *middle );
 /// whether a director holding a place with heatHere for framesHere should cut to one with heatThere
 Bool ObserverCamera_shouldMove( Real heatHere, Real heatThere, UnsignedInt framesHere );
+/// what one recent hit counts for: more the dearer the thing hit, more again if it died or is a
+/// superweapon
+Real ObserverCamera_hitWeight( Int cost, Bool killed, Bool superweapon );
+/// what one thing is worth looking at with no fight on: its cost, doubled while it marches or is
+/// being built, halved for a building that is only standing there, tripled for a superweapon
+Real ObserverCamera_sightWeight( Int cost, Bool structure, Bool busy, Bool superweapon );
+/// the best place among the sights away from the ones in seen; FALSE when every sight was seen
+Bool ObserverCamera_nextSight( const std::vector< DirectorHeat > &sights, const std::vector< Coord2D > &seen, Coord2D *place );
 /// a step of the camera towards where it is going, easing with timeConstant, or the jump there when
 /// the two are further apart than a pan should cross
 ViewLocation ObserverCamera_approach( const ViewLocation &from, const ViewLocation &to, Real elapsedSeconds, Real timeConstant );
@@ -129,6 +139,8 @@ private:
 	UnsignedInt m_placeSince;				///< the logic frame it went there
 	UnsignedInt m_placeScanned;			///< the logic frame the hits were last counted
 	const Player *m_placeFor;				///< whose fights the place was picked from, NULL for everybody's
+	Bool m_placeIsFight;						///< the place is a fight, not a sight picked while nothing was hit
+	std::vector< Coord2D > m_seen;	///< the last few sights, oldest first, not gone back to while there is another
 };
 
 extern ObserverCamera TheObserverCamera;

@@ -32,6 +32,8 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
 #include "Common/ThingTemplate.h"
+#include "Common/Upgrade.h"
+#include "GameClient/GameText.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/GameClient.h"
@@ -182,21 +184,15 @@ void ControlBar::updateMultiSelectStrip( void )
 		return;
 
 	//
-	// a selection of one unit type reads like a single selection: its portrait, upgrade
-	// cameos and all, with how many are selected written on the portrait
+	// the portrait bar's rule, the owner's: each selected type once, its own tile with its count, and
+	// no upgrades, which belong to one unit.  The portrait is still set to the focused type for the
+	// bar's own bookkeeping, and the page shrinks its window to nothing.  setPortraitByObject hides the
+	// cells, so it goes first
 	//
-	if( m_multiSelectGroupCount == 1 )
-	{
-		Drawable *draw = TheGameClient->findDrawableByID( m_multiSelectGroupFirst[ 0 ] );
-		Object *obj = draw ? draw->getObject() : NULL;
-		setPortraitByObject( obj );		// also hides the grid cells
-		if( obj )
-			GadgetButtonSetCount( m_rightHUDCameoWindow, m_multiSelectGroupSize[ 0 ] );
-		return;
-	}
-
-	// the grid replaces the portrait while a mixed multi-selection is up
-	setPortraitByObject( NULL );
+	Drawable *focused = TheGameClient->findDrawableByID( m_multiSelectGroupFirst[ m_multiSelectFocus ] );
+	setPortraitByObject( focused ? focused->getObject() : NULL );
+	for( Int upgrade = 0; upgrade < MAX_RIGHT_HUD_UPGRADE_CAMEOS; upgrade++ )
+		m_rightHUDUpgradeCameos[ upgrade ]->winHide( TRUE );
 
 	// one cell per selected type with its count; the focused type is the lit one, the rest
 	// wear the darkened overlay state
@@ -218,6 +214,49 @@ void ControlBar::updateMultiSelectStrip( void )
 	}
 
 }  // end updateMultiSelectStrip
+
+//-------------------------------------------------------------------------------------------------
+/** The tooltip a type tile shows, through the build tooltip the command buttons use. */
+//-------------------------------------------------------------------------------------------------
+static void portraitBarTooltip( GameWindow *window, WinInstanceData *instData, UnsignedInt mouse )
+{
+	TheControlBar->showBuildTooltipLayout( window );
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool ControlBar::describePortraitBarWindow( GameWindow *window, UnicodeString &name, UnicodeString &description ) const
+{
+	for( Int upgrade = 0; upgrade < MAX_RIGHT_HUD_UPGRADE_CAMEOS; upgrade++ )
+	{
+		const UpgradeTemplate *shown = m_rightHUDUpgrades[ upgrade ];
+		if( window != m_rightHUDUpgradeCameos[ upgrade ] || shown == NULL )
+			continue;
+
+		name = TheGameText->fetch( shown->getDisplayNameLabel().str() );
+		// the description is the one on the button that buys it, when there is such a button
+		description.clear();
+		for( const CommandButton *button = m_commandButtons; button; button = button->getNext() )
+		{
+			if( button->getUpgradeTemplate() == shown && button->getDescriptionLabel().isNotEmpty() )
+			{
+				description = TheGameText->fetch( button->getDescriptionLabel() );
+				break;
+			}
+		}
+		return TRUE;
+	}
+
+	for( size_t tile = 0; tile < m_multiSelectTiles.size() && (Int)tile < m_multiSelectGroupCount; tile++ )
+	{
+		if( window != m_multiSelectTiles[ tile ] )
+			continue;
+
+		name.format( L"%ls (%d)", m_multiSelectGroupTemplate[ tile ]->getDisplayName().str(), m_multiSelectGroupSize[ tile ] );
+		description.clear();
+		return TRUE;
+	}
+	return FALSE;
+}
 
 //-------------------------------------------------------------------------------------------------
 /** Make sure 'count' grid cells exist and lay them out n x n over the right HUD, n the
@@ -248,7 +287,10 @@ void ControlBar::layoutMultiSelectTiles( Int count )
 													WIN_STATUS_ENABLED | WIN_STATUS_USE_OVERLAY_STATES | WIN_STATUS_HIDDEN,
 													0, 0, cellW, cellH, GameWinDefaultSystem );
 			if( tile )
+			{
 				tile->winSetDrawFunc( TheWindowManager->getPushButtonImageDrawFunc() );
+				tile->winSetTooltipFunc( portraitBarTooltip );
+			}
 			m_multiSelectTiles.push_back( tile );
 		}
 

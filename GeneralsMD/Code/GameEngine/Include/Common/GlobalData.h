@@ -72,17 +72,6 @@ enum HealthBarModeType
 	HEALTH_BAR_MODE_COUNT	= 4,
 };
 
-/** How the mouse and the keyboard give orders.  Modern is this fork's: left selects, right orders, the
-	* middle button drives the camera and the grid keys run the command bar.  Legacy is the game as it
-	* shipped, keys and all, with none of what this fork added to either. */
-enum InputSchemeType
-{
-	INPUT_SCHEME_MODERN		= 0,
-	INPUT_SCHEME_LEGACY		= 1,
-
-	INPUT_SCHEME_COUNT		= 2,
-};
-
 /** The language the game's words are shown in.  English is the string table EA shipped; every other
 	* entry names a translation GameText lays over it.  Speech and video stay what the install has. */
 enum TextLanguageType
@@ -318,10 +307,6 @@ public:
 	Int m_healthBarMode;					///< HealthBarModeType: which units wear a bar at all
 	Int m_playerColorScheme;			///< PlayerColorSchemeType: whose colour the client draws (client only)
 	Int m_textLanguage;						///< TextLanguageType: the translation GameText lays over the CSF, read once at startup (client only)
-	Int m_inputScheme;						///< InputSchemeType: which mouse and keyboard the client answers to, read on every click and key (client only)
-	Bool isLegacyInput( void ) const { return m_inputScheme == INPUT_SCHEME_LEGACY; }
-	Bool m_wasdCamera;						///< W A S D scroll the camera and the unit keys move to F G H J K; Modern input only (client only)
-	Bool isWasdCamera( void ) const { return m_wasdCamera && !isLegacyInput(); }
 	Bool m_showOrderLines;				///< draw a line from each selected unit to where it is going, and its queue (client only)
 	Bool m_scriptDebug;						///< Should we attempt to load the script debugger window (.DLL)
 	Bool m_particleEdit;					///< Should we attempt to load the particle editor (.DLL)
@@ -405,7 +390,7 @@ public:
 	Bool m_buildPlacementShadows;		///< whether that structure casts a shadow while it rides the cursor
 	Bool m_zoomToCursor;				///< the mouse wheel zooms toward whatever the cursor is over
 	Bool m_isometricCamera;				///< the tactical view from far off down a narrow cone, near enough orthographic
-	Bool m_formationDrag;				///< dragging the right button spreads the selection along the line drawn
+	Bool m_formationDrag;				///< with the move, attack move or guard key armed, a left drag spreads the selection along the line drawn
 	Bool m_showAllyCursors;				///< in a network game, draw where each ally's mouse is pointing
 	Bool m_chromaLighting;				///< put the state of the match on Razer hardware
 	Int m_menuTransitionSpeed;			///< percent of the authored speed the menus slide and fade at; 100 = as drawn

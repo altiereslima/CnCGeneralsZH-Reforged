@@ -407,10 +407,11 @@ Bool AISkirmishPlayer::isAGoodIdeaToBuildTeam( TeamPrototype *proto )
 	if (hasEnoughMoneyUnitsFor(proto)) {
 		return false;
 	}
-	// check build limit, which a hoard raises for attack teams; defence teams keep the data's
+	// check build limit, which a hoard raises for attack teams; defence teams keep the data's, and so do
+	// the guard teams the scripts never send, or a rich AI stood four copies of its tunnel guards at home
 	const TeamTemplateInfo *info = proto->getTemplateInfo();
 	Int allowedInstances = info->m_maxInstances;
-	if (!info->m_isBaseDefense && !info->m_isPerimeterDefense) {
+	if (!info->m_isBaseDefense && !info->m_isPerimeterDefense && aiTeamAttacks(info)) {
 		allowedInstances = aiHoardAllowedTeamInstances( allowedInstances, m_player->getMoney()->countMoney(),
 																										getSkillProfile()->m_cashHoardThreshold );
 	}

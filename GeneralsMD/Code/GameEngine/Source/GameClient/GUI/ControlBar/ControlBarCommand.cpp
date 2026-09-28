@@ -890,16 +890,6 @@ void ControlBar::updateContextCommand( void )
 			}
 		}
 
-		// a structure outside the armed chord group greys out until the chord resolves
-		if( m_chordGroup >= 0 && command->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT &&
-				( i < CHORD_GROUP_SIZE ) != ( m_chordGroup == 0 ) )
-		{
-			setCommandBarBorder( win, command->getCommandButtonMappedBorderType() );
-			win->winEnable( FALSE );
-			continue;
-		}
-
-
 // LORENZEN COMMENTED THIS OUT 8/11
     // Reason: ExitCameos can be greyed out when the container object gets subdued 
 
@@ -951,16 +941,6 @@ void ControlBar::updateContextCommand( void )
 		{
 			win->winEnable( TRUE );
 			win->winSetStatus( WIN_STATUS_ALWAYS_COLOR );
-		}
-
-		// while a chord is armed, the structures of its group that can be built right now wear
-		// a green border - those are what the next key picks; otherwise the command's own border
-		if( command->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT )
-		{
-			if( m_chordGroup >= 0 && BitTest( win->winGetStatus(), WIN_STATUS_ENABLED ) )
-				GadgetButtonSetBorder( win, GameMakeColor( 60, 255, 60, 255 ), TRUE );
-			else
-				setCommandBarBorder( win, command->getCommandButtonMappedBorderType() );
 		}
 
 		//Determine by the production type of this button, whether or not the created object

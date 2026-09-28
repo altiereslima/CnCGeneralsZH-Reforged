@@ -141,7 +141,7 @@ extern void pickAndPlayUnitVoiceResponse( const DrawableList *list, GameMessage:
 ///< does the stop key cancel a building that is going up, rather than stopping a unit?
 extern Bool Command_stopMeansCancelConstruction( Int selectionCount, Bool locallyControlled, Bool underConstruction );
 
-/** Does this right-button press start a formation line?  setting is TheGlobalData->m_formationDrag. */
+/** Does this left-button press, made with a line order armed, start a formation line?  setting is TheGlobalData->m_formationDrag. */
 extern Bool Command_formationDragArmed( Bool setting, Bool haveMovableSelection,
 																				Bool guiCommandPending );
 

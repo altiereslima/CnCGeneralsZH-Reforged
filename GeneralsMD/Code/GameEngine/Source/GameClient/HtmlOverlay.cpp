@@ -200,6 +200,8 @@ private:
 	UnsignedInt							m_stamp;
 	std::string							m_clicked;
 	Int											m_alpha;			///< the whole page's, OPAQUE_ALPHA unless it is fading
+public:
+	Bool										m_hud;				///< laid out at ControlBarHudScale(), the bottom HUD's own
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -210,7 +212,8 @@ HtmlOverlayContainer::HtmlOverlayContainer( const AsciiString &defaultFont ) :
 	m_screenWidth( 0 ),
 	m_screenHeight( 0 ),
 	m_stamp( 0 ),
-	m_alpha( OPAQUE_ALPHA )
+	m_alpha( OPAQUE_ALPHA ),
+	m_hud( FALSE )
 {
 }
 
@@ -231,7 +234,7 @@ void HtmlOverlayContainer::setPage( const std::string &html )
 {
 	const Int width = TheDisplay->getWidth();
 	const Int height = TheDisplay->getHeight();
-	const Real scale = ControlBarUniformScale();
+	const Real scale = m_hud ? ControlBarHudScale() : ControlBarUniformScale();
 	if( m_document && html == m_page && width == m_screenWidth && height == m_screenHeight && scale == m_scale )
 		return;
 
@@ -794,6 +797,7 @@ HtmlOverlay::~HtmlOverlay( void )
 
 void HtmlOverlay::setPage( const std::string &html )	{ m_container->setPage( html ); }
 void HtmlOverlay::draw( void )													{ m_container->draw(); }
+void HtmlOverlay::setHud( Bool hud )										{ m_container->m_hud = hud; }
 void HtmlOverlay::setAlpha( Int alpha )									{ m_container->setAlpha( alpha ); }
 Bool HtmlOverlay::hover( const ICoord2D &mouse )				{ return m_container->hover( mouse ); }
 std::string HtmlOverlay::click( const ICoord2D &mouse )	{ return m_container->click( mouse ); }

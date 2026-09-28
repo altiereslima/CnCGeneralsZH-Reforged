@@ -119,8 +119,7 @@ NAME_THE_UNNAMED = [
 ]
 
 # Controls that are in the shipped file and are not wanted at all.  CheckAlternateMouse chose
-# between the classic mouse and the alternate one; ComboBoxInputScheme is that choice now, and it
-# takes the keyboard along with the mouse.
+# between the classic mouse and the alternate one; there is one mouse now.
 DELETE = ["CheckAlternateMouse"]
 
 # The templates new controls are cloned from, and whose lettering the moved ones take.
@@ -162,9 +161,6 @@ NEW_CONTROLS = [
     (LABEL,  "LabelSmoke",             "GUI:Smoke"),
     (COMBO,  "ComboBoxSmoke",          None),
     (CHECK,  "CheckParticleBounce",    "GUI:ParticleBounce"),
-    (LABEL,  "LabelInputScheme",       "GUI:InputScheme"),
-    (COMBO,  "ComboBoxInputScheme",    None),
-    (CHECK,  "CheckWasdCamera",        "GUI:WasdCamera"),
     (CHECK,  "CheckChromaLighting",    "GUI:ChromaLighting"),
 ]
 
@@ -268,8 +264,6 @@ GROUP_LAYOUT = [
         ("check", "Retaliation"),
         ("check", "CheckDoubleClickAttackMove")]),
     ("PageControls", 2, "GUI:OptionsGroupInput", [
-        setting("LabelInputScheme", "ComboBoxInputScheme"),
-        ("check", "CheckWasdCamera"),
         ("check", "CheckChromaLighting")]),
 
     ("PageGameplay", 0, "GUI:OptionsGroupBattlefield", [

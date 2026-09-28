@@ -73,8 +73,6 @@ OPTION_BOOL_ACCESSORS( m_classicGraphics )
 OPTION_INT_ACCESSORS( m_healthBarMode )
 OPTION_INT_ACCESSORS( m_playerColorScheme )
 OPTION_INT_ACCESSORS( m_textLanguage )
-OPTION_INT_ACCESSORS( m_inputScheme )
-OPTION_BOOL_ACCESSORS( m_wasdCamera )
 OPTION_BOOL_ACCESSORS( m_showOrderLines )
 OPTION_BOOL_ACCESSORS( m_useShadowVolumesForSkins )
 OPTION_BOOL_ACCESSORS( m_shadowsForProjectiles )
@@ -220,11 +218,10 @@ const OptionDef TheOptionCatalog[] =
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_snapCameraRotateTo45, set_m_snapCameraRotateTo45 },
 
-	// MiddleMousePans used to sit here.  The middle button is the only camera drag there is now, so
-	// there is nothing left to choose: it pans, and Ctrl turns the same drag into a rotate.
+	// MiddleMousePans used to sit here.  There is nothing left to choose: a right drag pans and a
+	// middle drag turns the camera.
 
-	// Back on Options > Controls: players split on whether the wheel should chase the cursor, and
-	// Legacy zooms on the middle of the screen whatever this says.
+	// Back on Options > Controls: players split on whether the wheel should chase the cursor.
 	{ "ZoomToCursor",							OPT_WND( "CheckZoomToCursor" ), "GUI:ZoomToCursor",
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_zoomToCursor, set_m_zoomToCursor },
@@ -235,9 +232,9 @@ const OptionDef TheOptionCatalog[] =
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_isometricCamera, set_m_isometricCamera },
 
-	// A right drag over the ground spreads the selection along the line drawn instead of sending
-	// everyone to one point.  On by default - the right button stopped scrolling, so the drag was
-	// free - and here for anyone who would rather a slipped click did nothing at all.
+	// With the move, attack move or guard key armed, a left drag over the ground spreads the
+	// selection along the line drawn instead of sending everyone to one point.  On by default, and
+	// here for anyone who would rather that drag did nothing at all.
 	{ "FormationDrag",						"", "",
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_formationDrag, set_m_formationDrag },
@@ -342,26 +339,12 @@ const OptionDef TheOptionCatalog[] =
 		OPTION_ENUM, APPLY_LIVE, 0, PLAYER_COLOR_SCHEME_COUNT - 1,
 		get_m_playerColorScheme, set_m_playerColorScheme },
 
-	// Modern or Legacy.  Legacy is the mouse and the keys the game shipped with and switches off what
-	// this fork added to both.  Every click and key asks, so it changes the moment Accept is pressed,
-	// and it is local: two players in one match can give orders two different ways.
 	// The line from each selected unit to where it is going, with every point of a shift queue after
 	// it.  The list is rebuilt from the units every frame, so turning it off takes the lines away at
 	// once and turning it back on shows the orders already given.
 	{ "OrderLines",								OPT_WND( "CheckOrderLines" ), "GUI:OrderLines",
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_showOrderLines, set_m_showOrderLines },
-
-	{ "InputScheme",							OPT_WND( "ComboBoxInputScheme" ), "GUI:InputScheme",
-		OPTION_ENUM, APPLY_LIVE, 0, INPUT_SCHEME_COUNT - 1,
-		get_m_inputScheme, set_m_inputScheme },
-
-	// W A S D on the camera, and the keys they held moved to F G H J K.  Modern only: the box greys
-	// while Legacy is picked, and a tick saved under Modern is kept but ignored until Modern is back.
-	// Every key asks, and Accept rebuilds the command bar's letters, so it changes at once.
-	{ "WasdCamera",								OPT_WND( "CheckWasdCamera" ), "GUI:WasdCamera",
-		OPTION_BOOL, APPLY_LIVE, 0, 1,
-		get_m_wasdCamera, set_m_wasdCamera },
 
 	// Which language the words are in.  English is the string table the game shipped with, and every
 	// other entry is a translation laid over it, so a line the translation lacks stays English.  The

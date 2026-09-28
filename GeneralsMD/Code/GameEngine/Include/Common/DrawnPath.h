@@ -18,7 +18,7 @@
 
 // FILE: DrawnPath.h ////////////////////////////////////////////////////////////////////////////
 //
-// The curve the player traces with the right button, and the arithmetic that turns it into
+// The curve the player traces with the left button after arming a move, and the arithmetic that turns it into
 // standing room.  Both sides of the engine need the same answers: the logic to decide who goes
 // where, the client to draw it while the line is still being dragged.  Written once here so the
 // two pictures cannot drift apart.

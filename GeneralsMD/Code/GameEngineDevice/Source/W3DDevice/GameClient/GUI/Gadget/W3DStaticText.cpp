@@ -95,8 +95,8 @@ static void drawStaticTextText( GameWindow *window, WinInstanceData *instData,
 	window->winGetScreenPosition( &origin.x, &origin.y );
 	window->winGetSize( &size.x, &size.y );
 	
-	// Set the text Wrap width
-	wordWrap = size.x - 10;
+	// Set the text Wrap width; a one line window never wraps
+	wordWrap = BitTest( window->winGetStatus(), WIN_STATUS_ONE_LINE ) ? 0 : size.x - 10;
 	//if(wordWrap == 89)
 	//	wordWrap = 95;
 	text->setWordWrap(wordWrap);	

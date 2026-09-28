@@ -154,6 +154,10 @@ static const LookupListRec GameMessageMetaTypeNames[] =
 	{ "COMMAND_SLOT12",											GameMessage::MSG_META_COMMAND_SLOT12 },
 	{ "COMMAND_SLOT13",											GameMessage::MSG_META_COMMAND_SLOT13 },
 	{ "COMMAND_SLOT14",											GameMessage::MSG_META_COMMAND_SLOT14 },
+	{ "COMMAND_SLOT15",											GameMessage::MSG_META_COMMAND_SLOT15 },
+	{ "COMMAND_SLOT16",											GameMessage::MSG_META_COMMAND_SLOT16 },
+	{ "COMMAND_SLOT17",											GameMessage::MSG_META_COMMAND_SLOT17 },
+	{ "COMMAND_SLOT18",											GameMessage::MSG_META_COMMAND_SLOT18 },
 	{ "SHORTCUT_SLOT01",										GameMessage::MSG_META_SHORTCUT_SLOT01 },
 	{ "SHORTCUT_SLOT02",										GameMessage::MSG_META_SHORTCUT_SLOT02 },
 	{ "SHORTCUT_SLOT03",										GameMessage::MSG_META_SHORTCUT_SLOT03 },
@@ -182,6 +186,7 @@ static const LookupListRec GameMessageMetaTypeNames[] =
 	{ "TOGGLE_PURCHASE_SCIENCE",								GameMessage::MSG_META_TOGGLE_PURCHASE_SCIENCE },
 	{ "HOLD_POSITION",													GameMessage::MSG_META_HOLD_POSITION },
 	{ "TOGGLE_GUARD",														GameMessage::MSG_META_TOGGLE_GUARD },
+	{ "TOGGLE_MOVE",														GameMessage::MSG_META_TOGGLE_MOVE },
 	{ "TOGGLE_PAUSE",														GameMessage::MSG_META_TOGGLE_PAUSE },
 	{ "DEPLOY",																		GameMessage::MSG_META_DEPLOY },
 	{ "CREATE_FORMATION",													GameMessage::MSG_META_CREATE_FORMATION },
@@ -448,9 +453,8 @@ static const char * findGameMessageNameByType(GameMessage::Type type)
 //-------------------------------------------------------------------------------------------------
 static Bool metaIgnoresShift(const MetaMapRec *map)
 {
-	return !TheGlobalData->isLegacyInput() &&
-				 map->m_meta >= GameMessage::MSG_META_COMMAND_SLOT01 &&
-				 map->m_meta <= GameMessage::MSG_META_COMMAND_SLOT14 &&
+	return map->m_meta >= GameMessage::MSG_META_COMMAND_SLOT01 &&
+				 map->m_meta <= GameMessage::MSG_META_COMMAND_SLOT18 &&
 				 (map->m_modState & SHIFT) == 0;
 }
 
@@ -459,17 +463,6 @@ GameMessageDisposition MetaEventTranslator::translateGameMessage(const GameMessa
 {
 	GameMessageDisposition disp = KEEP_MESSAGE;
 	GameMessage::Type t = msg->getType();
-
-	//
-	// a click is the player saying what they want with the mouse, so whatever half-typed
-	// structure chord is still armed from the keyboard is stale - drop it before it can eat
-	// the next A or S and turn it into a building to place
-	//
-	if( ( t == GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN ||
-				t == GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN ) && TheControlBar )
-	{
-		TheControlBar->dropChord();
-	}
 
 	if (t == GameMessage::MSG_RAW_KEY_DOWN || t == GameMessage::MSG_RAW_KEY_UP)
 	{
@@ -496,30 +489,11 @@ GameMessageDisposition MetaEventTranslator::translateGameMessage(const GameMessa
 		}
 
 		//
-		// a half-typed structure chord (Q or W pressed on a builder) takes the next plain key:
-		// the group's own eight cell keys pick a cell, anything else drops the chord and goes
-		// on as usual.  Legacy has no chords: its structures are the letters on their labels.
-		//
-		if( !TheGlobalData->isLegacyInput() &&
-				t == GameMessage::MSG_RAW_KEY_DOWN && ( newModState & ( CTRL | ALT ) ) == 0 &&
-				!( keyState & KEY_STATE_AUTOREPEAT ) &&
-				TheControlBar && TheControlBar->isChordArmed() &&
-				!( TheShell && TheShell->isShellActive() ) )
-		{
-			if( TheControlBar->handleChordKey( key ) )
-			{
-				m_lastModState = newModState;
-				return DESTROY_MESSAGE;
-			}
-		}
-
-		//
 		// Tab / Shift-Tab walks the focus through a multi-selection's units on the control bar.
 		// Handled here rather than through the MetaMap because CommandMap.ini lives in the
 		// shipped game data and has no slot for it.  The game as it shipped did nothing with Tab.
 		//
-		if( !TheGlobalData->isLegacyInput() &&
-				t == GameMessage::MSG_RAW_KEY_DOWN && key == MK_TAB &&
+		if( t == GameMessage::MSG_RAW_KEY_DOWN && key == MK_TAB &&
 				( newModState & ( CTRL | ALT ) ) == 0 &&
 				!( keyState & KEY_STATE_AUTOREPEAT ) &&
 				TheGameClient->getFrame() >= 1 &&
@@ -537,14 +511,13 @@ GameMessageDisposition MetaEventTranslator::translateGameMessage(const GameMessa
 		// the key came up while the modifier was still held.  Letting go of Ctrl first meant the
 		// key's own release carried no Ctrl, the record no longer matched, and whatever the DOWN
 		// had switched on stayed on.  Every key remembers the combinations it was pressed with, so
-		// a modifier release can finish them off in whatever order the player let go.  Legacy keeps
-		// the game's own rule, where the order of letting go mattered.
+		// a modifier release can finish them off in whatever order the player let go.
 		//
 		const Bool isModifierKey = ( key == KEY_LCTRL || key == KEY_RCTRL ||
 																 key == KEY_LSHIFT || key == KEY_RSHIFT ||
 																 key == KEY_LALT || key == KEY_RALT );
 
-		if( isModifierKey && ( keyState & KEY_STATE_UP ) && !TheGlobalData->isLegacyInput() )
+		if( isModifierKey && ( keyState & KEY_STATE_UP ) )
 		{
 			for( Int keyIndex = 0; keyIndex < NUM_MAPPABLE_KEYS; ++keyIndex )
 			{
@@ -621,10 +594,7 @@ GameMessageDisposition MetaEventTranslator::translateGameMessage(const GameMessa
 				disp = DESTROY_MESSAGE;
 				// every record on this modifier fires, not the first one found: shift is both "add to
 				// the selection" on the left button and "queue the order" on the right, and the two
-				// are separate records that have to come on and go off together.  Legacy stops at the
-				// first, as the game did.
-				if( TheGlobalData->isLegacyInput() )
-					break;
+				// are separate records that have to come on and go off together.
 				continue;
 			}
 
@@ -815,73 +785,19 @@ GameMessageDisposition MetaEventTranslator::translateGameMessage(const GameMessa
 
 //-------------------------------------------------------------------------------------------------
 MetaMap::MetaMap() :
-	m_parseScheme(INPUT_SCHEME_MODERN)
+	m_metaMaps(NULL)
 {
-	for (Int scheme = 0; scheme < BINDING_LIST_COUNT; ++scheme)
-		m_metaMaps[scheme] = NULL;
 }
 
 //-------------------------------------------------------------------------------------------------
 MetaMap::~MetaMap()
 {
-	for (Int scheme = 0; scheme < BINDING_LIST_COUNT; ++scheme)
+	while (m_metaMaps)
 	{
-		while (m_metaMaps[scheme])
-		{
-			MetaMapRec *next = m_metaMaps[scheme]->m_next;
-			m_metaMaps[scheme]->deleteInstance();
-			m_metaMaps[scheme] = next;
-		}
+		MetaMapRec *next = m_metaMaps->m_next;
+		m_metaMaps->deleteInstance();
+		m_metaMaps = next;
 	}
-}
-
-//-------------------------------------------------------------------------------------------------
-const MetaMapRec *MetaMap::getFirstMetaMapRec() const
-{
-	if( TheGlobalData->isLegacyInput() )
-		return m_metaMaps[ INPUT_SCHEME_LEGACY ];
-
-	return m_metaMaps[ TheGlobalData->isWasdCamera() ? BINDINGS_WASD : INPUT_SCHEME_MODERN ];
-}
-
-//-------------------------------------------------------------------------------------------------
-void MetaMap::loadLegacyBindings( const AsciiString& languageMapFile )
-{
-	m_parseScheme = INPUT_SCHEME_LEGACY;
-	INI ini;
-	ini.load( languageMapFile, INI_LOAD_OVERWRITE, NULL );
-	m_parseScheme = INPUT_SCHEME_MODERN;
-}
-
-//-------------------------------------------------------------------------------------------------
-void MetaMap::loadWasdBindings( const AsciiString& overlayFile )
-{
-	//
-	// Appended at the tail, not through getMetaMapRec, which puts a new record at the head: the
-	// translator stops at the first record that matches a key, so the copy keeps Modern's order and
-	// answers a key the way Modern does wherever the overlay does not reach.
-	//
-	MetaMapRec **tail = &m_metaMaps[ BINDINGS_WASD ];
-	for( const MetaMapRec *modern = m_metaMaps[ INPUT_SCHEME_MODERN ]; modern; modern = modern->m_next )
-	{
-		MetaMapRec *copy = newInstance( MetaMapRec );
-		copy->m_next = NULL;
-		copy->m_meta = modern->m_meta;
-		copy->m_key = modern->m_key;
-		copy->m_transition = modern->m_transition;
-		copy->m_modState = modern->m_modState;
-		copy->m_usableIn = modern->m_usableIn;
-		copy->m_category = modern->m_category;
-		copy->m_description = modern->m_description;
-		copy->m_displayName = modern->m_displayName;
-		*tail = copy;
-		tail = &copy->m_next;
-	}
-
-	m_parseScheme = BINDINGS_WASD;
-	INI ini;
-	ini.load( overlayFile, INI_LOAD_OVERWRITE, NULL );
-	m_parseScheme = INPUT_SCHEME_MODERN;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -898,7 +814,7 @@ GameMessage::Type MetaMap::findGameMessageMetaType(const char* name)
 //-------------------------------------------------------------------------------------------------
 MetaMapRec *MetaMap::getMetaMapRec(GameMessage::Type t)
 {
-	for (MetaMapRec *map = m_metaMaps[m_parseScheme]; map; map = map->m_next)
+	for (MetaMapRec *map = m_metaMaps; map; map = map->m_next)
 	{
 		if (map->m_meta == t)
 			return map;
@@ -914,8 +830,8 @@ MetaMapRec *MetaMap::getMetaMapRec(GameMessage::Type t)
 	m->m_category = CATEGORY_MISC;
 	m->m_description.clear();
 	m->m_displayName.clear();
-	m->m_next = m_metaMaps[m_parseScheme];
-	m_metaMaps[m_parseScheme] = m;
+	m->m_next = m_metaMaps;
+	m_metaMaps = m;
 	
 	return m;
 }

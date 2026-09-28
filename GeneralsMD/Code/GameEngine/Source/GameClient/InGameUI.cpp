@@ -1188,6 +1188,7 @@ InGameUI::InGameUI()
 	m_peaceCountdownDisplayString = NULL;
 	m_lastMoneyDisplayed = -1;
 	m_lastEarningDisplayed = 0;
+	m_moneyPlate = MoneyPlateWidth();
 	m_hudDrawCount = 0;
 	m_hudLastSampleFrame = 0;
 	m_hudLastSampleMs = 0;
@@ -1307,6 +1308,7 @@ InGameUI::InGameUI()
 	m_attackMoveToMode	= false;
 	m_forceAttackArmed	= false;
 	m_guardArmed				= false;
+	m_moveArmed					= false;
 	m_orderKeyKeptByShift	= false;
 	m_preferSelection		= false;
 	m_isAttackCircling	= FALSE;
@@ -1849,7 +1851,6 @@ enum
 	FEED_LINE_FRAMES					= LOGICFRAMES_PER_SECOND * 10,	///< how long a line of the event feed stays up
 	FEED_LINES_KEPT						= 6,		///< the most of those on screen at once; the oldest goes first
 	FEED_HISTORY_KEPT					= 12,		///< the lines held for the open chat to show, however old
-	COMMAND_SLOTS_PER_COLUMN	= 2,		///< the command bar numbers its slots down each column, top then bottom
 	PERCENT										= 100
 };
 
@@ -2430,7 +2431,7 @@ static void updateReplaySeek( void )
 
 //-------------------------------------------------------------------------------------------------
 /** The key a command bar slot is bound to right now, "Q" for KEY_Q, so the page names the key the
-	* player really has: the WASD camera moves the whole top row along by one.  Empty when unbound. */
+	* player really has after a rebinding in Options > Keyboard.  Empty when unbound. */
 //-------------------------------------------------------------------------------------------------
 static std::string commandSlotKey( Int commandSlot )
 {
@@ -2448,15 +2449,14 @@ static std::string commandSlotKey( Int commandSlot )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The command bar's top row while the spectator page is up: slots 1, 3, 5... - Q, W, E, R, T, Y,
-	* U by default, Q, E, R, T, Y, U, I with the WASD camera - pick the stats in the order the
-	* drop-down lists them, and {{statkey:stat}} names each one's key.  The bottom row and anything
-	* past the last stat are left to the command bar. */
+/** The command grid's keys in reading order while the spectator page is up - Q, W, E, R, T, Y, A as
+	* shipped - pick the stats in the order the drop-down lists them, and {{statkey:stat}} names each
+	* one's key.  Anything past the last stat is left to the command bar. */
 //-------------------------------------------------------------------------------------------------
 Bool InGameUI::pickSpectatorStat( Int commandSlot )
 {
-	const Int stat = commandSlot / COMMAND_SLOTS_PER_COLUMN;
-	if( !m_spectatorPageShown || commandSlot % COMMAND_SLOTS_PER_COLUMN != 0 || stat >= (Int)ARRAY_SIZE( SPECTATOR_STATS ) )
+	const Int stat = commandSlot;
+	if( !m_spectatorPageShown || stat >= (Int)ARRAY_SIZE( SPECTATOR_STATS ) )
 		return FALSE;
 
 	m_spectatorPicked[ STAT_GROUP ] = SPECTATOR_STATS[ stat ].key;
@@ -2507,7 +2507,7 @@ void InGameUI::drawSpectatorPage( void )
 		m_spectatorTotals[ PICK_ACTION + STAT_GROUP + ":" + stat.key ] = "on";
 		m_spectatorTotals[ "side" ] = spectatorSide();
 		for( Int each = 0; each < (Int)ARRAY_SIZE( SPECTATOR_STATS ); each++ )
-			m_spectatorTotals[ std::string( "statkey:" ) + SPECTATOR_STATS[ each ].key ] = commandSlotKey( each * COMMAND_SLOTS_PER_COLUMN );
+			m_spectatorTotals[ std::string( "statkey:" ) + SPECTATOR_STATS[ each ].key ] = commandSlotKey( each );
 		m_spectatorListsFrame = frame;
 		m_spectatorListsWatched = watched;
 	}
@@ -3405,8 +3405,7 @@ void InGameUI::handleBuildPlacements( void )
 			// only adjust angle if we've actually moved the mouse, and not into a row: that drag
 			// lays structures, the heading stays the one they had
 			const Bool dragged = start.x != end.x || start.y != end.y;
-			row = dragged && placesRow();
-			if( dragged && !row )
+			row = dragged && placesRow();			if( dragged && !row )
 				angle = computePlacementAngle( &start, &end );
 
 		}  // end if
@@ -3561,9 +3560,11 @@ void InGameUI::handleBuildPlacements( void )
 				return;
 
 			// both ends, so a wall lands on the grid and tiles from a grid square; a row starts where
-			// the ghost did, against its neighbour
+			// the ghost did, against its neighbour, and runs toward the cursor itself, since a snapped
+			// end turned a short drag a few degrees off the line the player drew
 			snapPlacementToGrid( &worldStart, m_pendingPlaceType, angle );
-			snapPlacementToGrid( &worldEnd, m_pendingPlaceType, angle );
+			if( lineBuild )
+				snapPlacementToGrid( &worldEnd, m_pendingPlaceType, angle );
 			snapPlacementToNeighbour( &worldStart, m_pendingPlaceType, angle );
 
 			// get the builder object that will be constructing things
@@ -4148,6 +4149,7 @@ void InGameUI::reset( void )
 	m_attackMoveToMode	= false;
 	m_forceAttackArmed	= false;
 	m_guardArmed				= false;
+	m_moveArmed					= false;
 	m_orderKeyKeptByShift	= false;
 	m_preferSelection		= false;
 	m_isAttackCircling	= FALSE;
@@ -6424,17 +6426,11 @@ void InGameUI::createCommandHint( const GameMessage *msg )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Ctrl held is how the game as shipped force fired, and Legacy is that game.  Modern keeps ctrl for
-	* the shared pace on a move and force fires on the attack key alone. */
+/** Force fire is the attack key alone; ctrl held is the shared pace on a move. */
 //-------------------------------------------------------------------------------------------------
-Bool InGameUI_isForceFireOn( Bool forceAttackArmed, Bool ctrlHeld, Bool legacyInput )
-{
-	return forceAttackArmed || ( legacyInput && ctrlHeld );
-}
-
 Bool InGameUI::isForceFireOn( void ) const
 {
-	return InGameUI_isForceFireOn( m_forceAttackArmed, m_forceAttackMode, TheGlobalData->isLegacyInput() );
+	return m_forceAttackArmed;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -6981,7 +6977,6 @@ void InGameUI::computePlacementRow( const ThingTemplate *what, Real angle, const
 	Coord2D step;
 	const Int count = placementRow( end->x - start->x, end->y - start->y, (Real)Cos( angle ),
 																	(Real)Sin( angle ), halfFacing, minor, most, &step );
-
 	positions->clear();
 	for( Int i = 0; i < count; i++ )
 	{
@@ -7881,7 +7876,7 @@ void InGameUI::postDraw( void )
 		}
 	}
 	
-	// draw the scroll anchor, which sits on the middle button now
+	// draw the anchor of a right-drag pan
 	if (TheLookAtTranslator && m_drawRMBScrollAnchor)
 	{
 		const ICoord2D* anchor = TheLookAtTranslator->getScrollAnchor();
@@ -10890,7 +10885,7 @@ static void putPowerBar( HtmlValues &values, std::vector< HtmlValues > &cells )
 	enum
 	{
 		ONE_UNIT_NEEDLE_TENTHS	= 15,	///< a consumption of 1 is drawn as 1.5: log(1) is 0, and 1 is not nothing
-		POWER_CELLS							= 40	///< the bar is drawn as this many cells, lit up to the production
+		POWER_CELLS							= 20	///< the bar is drawn as this many cells, lit up to the production
 	};
 
 	Player *player = TheControlBar->isObserverControlBarOn() ? TheControlBar->getObserverLookAtPlayer()
@@ -10902,14 +10897,16 @@ static void putPowerBar( HtmlValues &values, std::vector< HtmlValues > &cells )
 	const Real needle = consumption == 1 ? ONE_UNIT_NEEDLE_TENTHS / 10.0f : (Real)consumption;
 	values[ "power.fill" ] = std::to_string( REAL_TO_INT( fill * PERCENT ) );
 	values[ "power.needle" ] = std::to_string( REAL_TO_INT( powerBarShare( needle ) * PERCENT ) );
-	// with nothing drawing power the needle stood at nought, a white bar across the bar's head
+	// with nothing drawing power the needle stood at nought, a white bar across the bar's foot
 	values[ "power.consumes" ] = consumption > 0 ? "" : "hidden";
 
-	// each cell gets its place and width in the page's pixels, cut from the frame's inside so they
-	// add up to it exactly: floated at a percentage each the page rounded them up and the fortieth
-	// fell onto a second row, and a percentage of an absolutely placed box does not resolve at all
+	// the bar lies along the grid: each cell gets its place and width in the page's pixels from the
+	// left, cut from the frame's inside so they add up to it exactly - floated at a percentage each
+	// the page rounded them up, and a percentage of an absolutely placed box does not resolve at all.
+	// The needle is a pixel place for the same reason
 	enum { FRAME_LIP = 1 };
 	const Int row = atoi( values[ "powerframe.w" ].c_str() ) - 2 * FRAME_LIP;
+	values[ "power.needlex" ] = std::to_string( REAL_TO_INT( powerBarShare( needle ) * row ) );
 	cells.clear();
 	const Int lit = REAL_TO_INT( fill * POWER_CELLS );
 	for( Int cell = 0; cell < POWER_CELLS && row > 0; cell++ )
@@ -10918,7 +10915,9 @@ static void putPowerBar( HtmlValues &values, std::vector< HtmlValues > &cells )
 		HtmlValues entry;
 		entry[ "lit" ] = cell < lit ? "lit" : "";
 		entry[ "x" ] = std::to_string( left );
-		entry[ "w" ] = std::to_string( ( cell + 1 ) * row / POWER_CELLS - left );
+		const Int width = ( cell + 1 ) * row / POWER_CELLS - left;
+		entry[ "w" ] = std::to_string( width );
+		entry[ "segw" ] = std::to_string( max( 0, width - 1 ) );	// the black line before it
 		cells.push_back( entry );
 	}
 	if( consumption > production )
@@ -10984,13 +10983,19 @@ static void putExperienceBar( HtmlValues &values, std::vector< HtmlValues > &cel
 	}
 }
 
-/** The bar's windows the page stands down altogether.  The menu and idle worker buttons are the
-	* page's own, pressed through data-click="press:Name" because they sit where the bar's frame takes
-	* no clicks; the chat button is gone, and Enter still opens the chat; the minimise button is gone,
-	* the bar is only as big as what it holds now. */
-static const char *const CONTROL_BAR_STOOD_DOWN[] = { "ButtonOptions", "ButtonIdleWorker", "PopupCommunicator", "ButtonLarge" };
+/** The bar's windows the page stands down altogether.  The menu, idle worker and promotion buttons are
+	* the page's own, pressed through data-click="press:Name": the promotion button is the skills key
+	* over the radar, above the top of the bar's frame, where a window takes no clicks.  The chat button
+	* is gone, and Enter still opens the chat; the minimise button is gone, the bar is only as big as
+	* what it holds now; the experience bar's windows would take clicks where the page no longer draws
+	* them. */
+static const char *const CONTROL_BAR_STOOD_DOWN[] =
+{
+	"ButtonOptions", "ButtonIdleWorker", "PopupCommunicator", "ButtonLarge", "ButtonGeneral", "GeneralsExp", "ExpBarForeground"
+};
 static const std::string PRESS_ACTION = "press:";
 static const std::string SIGNAL_ACTION = "signal:";
+static const std::string ORDER_ACTION = "order:";
 
 /** A smoke signal may be sent: the rule the Alt+Z/X/C keys go by, a multiplayer game that is not a
 	* replay, and a player still in it. */
@@ -11025,45 +11030,90 @@ static void armSignalFromPage( const std::string &kind )
 	DEBUG_LOG(( "Command bar page: data-click=\"signal:%s\" names no signal\n", kind.c_str() ));
 }
 
-/** The windows each panel is drawn round, so a panel is only as big as what it holds: the left one
-	* the radar, the right one the portrait and the experience bar, the centre the command grid.  The
-	* money stands on a step of its own over the centre, drawn from its window's rectangle, and the
-	* power bar crosses the gap between the two in its groove with no steel of its own.  NULL ends
-	* each list. */
-static const char *const CONTROL_BAR_LEFT[] = { "LeftHUD", NULL };
-static const char *const CONTROL_BAR_RIGHT[] = { "RightHUD", "GeneralsExp", "ExpBarForeground", NULL };
-static const char *const CONTROL_BAR_CENTRE[] = { "ObserverPlayerListWindow", NULL };
-static const char *const CONTROL_BAR_EXPERIENCE[] = { "GeneralsExp", "ExpBarForeground", NULL };
-static const Int COMMAND_BUTTONS = 14;	///< ButtonCommand01 to 14, the grid a player sees
-static const Int QUEUE_BUTTONS = 9;			///< ButtonQueue01 to 09, the production queue's three by three over the portrait's place
+//-------------------------------------------------------------------------------------------------
+/** data-click="order:attack", "order:hold" or "order:move", the command panel's orders no command set
+	* has a button for: what the A, C and V keys do, force fire armed for the next click, hold position,
+	* and a move armed for the next click. */
+//-------------------------------------------------------------------------------------------------
+static void orderFromPage( const std::string &order )
+{
+	if( order == "attack" )
+		TheInGameUI->toggleForceAttackArmed();
+	else if( order == "move" )
+		TheInGameUI->toggleMoveArmed();
+	else if( order == "hold" && TheInGameUI->getSelectCount() > 0 )
+	{
+		GameMessage *hold = TheMessageStream->appendMessage( GameMessage::MSG_DO_HOLD_POSITION );
+		hold->appendIntegerArgument( GUARDMODE_GUARD_WITHOUT_PURSUIT );
+	}
+	else
+		DEBUG_LOG(( "Command bar page: data-click=\"order:%s\" names no order\n", order.c_str() ));
+}
 
-/** The pieces standing round the panels, 800x600 pixels. */
+/** The radar's window, the left panel's container with the experience bar's groove beside it.  NULL
+	* ends the list. */
+static const char *const CONTROL_BAR_LEFT[] = { "LeftHUD", NULL };
+static const Int COMMAND_BUTTONS = 14;	///< ButtonCommand01 to 14, the command set a player sees
+static const Int UPGRADE_CAMEOS = 5;		///< UnitUpgrade1 to 5, a single unit's upgrades in the portrait bar
+
+/** The bar as the owner drew it on 2026-09-28, 800x600 pixels at ControlBarHudScale(): from the left,
+	* the radar with the experience bar beside it, then the command grid, six by three, with the power
+	* bar lying along its top and the money on the power bar's left end, then the portrait bar on the
+	* screen's bottom edge.  Over the radar the idle worker's key stands on the skills key, the skills
+	* key on the under-attack light at its left hand end, and the smoke signals at its right. */
 enum
 {
-	STARS_TAB_WIDTH				= 66,		///< the rank's stars, a key in a tab on the right panel's border, which is the promotion button
-	STARS_TAB_HEIGHT			= 22,		///< the key 17 tall with its rim, three pixels down
-	SKILL_GRID_GAP				= 12,		///< between the general's powers' tray and the stars' tab under it
+	COMMAND_BUTTON_WIDTH	= 50,		///< a command button as ControlBar.wnd authors it, the promotion screen's cell
+	COMMAND_BUTTON_HEIGHT	= 44,
+	CELL_WIDTH						= 38,		///< the portrait bar's and the trays' cell, three quarters of a command button:
+	CELL_HEIGHT						= 33,		///< the whole size made the owner's drawing a third again as wide
+	COMMAND_CELL_WIDTH		= 46,		///< the command grid's, a fifth bigger again: the owner asked for the production
+	COMMAND_CELL_HEIGHT		= 40,		///< area to stand out from the rest of the bar
+	CELL_GAP							= 4,		///< between two cells of the command grid and the portrait bar, a ring of half of
+																///< it round each picture
+	COMMAND_COLUMNS				= COMMAND_PLACE_COLUMNS,
+	COMMAND_ROWS					= COMMAND_PLACE_COUNT / COMMAND_PLACE_COLUMNS,
+	PORTRAIT_WIDTH				= 44,		///< the portrait's cell, a cell's height at the portrait's own shape
+	PORTRAIT_PLACES				= 7,		///< the most cells the portrait bar holds in one row after the portrait; it is
+																///< only as long as what it holds
+	RADAR_WIDTH						= 167,	///< the radar's shape, as ControlBar.wnd authors LeftHUD; its height is the
+	RADAR_HEIGHT					= 152,	///< command grid's and the power bar's panels together
+	EXPERIENCE_WIDTH			= 12,		///< the experience bar's groove, the radar's height
+	EXPERIENCE_GAP				= 4,		///< between it and the radar
+	PANEL_FOOT						= 4,		///< a grid's ring over the screen's bottom edge, the steel under it
+	SKILLS_TAB_WIDTH			= 66,		///< the skills key, the rank's stars, in a tab on the under-attack light
+	SKILLS_TAB_HEIGHT			= 22,		///< the key 17 tall with its rim, three pixels down
+	ALERT_TAB_WIDTH				= 66,		///< the under-attack light, a lamp on the radar panel's border, the key's width
+	SIGNAL_BUTTONS				= 3,		///< attack, defend, look
+	SIGNAL_STEP_WIDTH			= 104,	///< the signals' step on the radar panel's border at its right hand end,
+	SIGNAL_STEP_HEIGHT		= 24,		///< three keys side by side
+	IDLE_TAB_WIDTH				= 38,		///< the idle worker's key in a tab on the skills key's, with its rim
+	IDLE_TAB_HEIGHT				= 22,
+	POWER_WIDTH						= 12,		///< the power bar's groove along the command grid's top, frame and lip
+	MONEY_TEXT_MARGIN			= 5,		///< the money's well each side of its figure, which sets the well's width
+	MONEY_HEIGHT					= 18,		///< the money's well in its plate on the power bar's panel
+	MONEY_PLATE_BORDER		= 5,		///< the plate's steel round the well
+	SKILL_GRID_GAP				= 12,		///< between the general's powers' tray and what it stands on
 	SKILL_TRAY_BORDER			= 6,		///< the tray's steel round its cells
 	QUEUE_TRAY_BORDER			= 3,		///< the production queue's tray's, thinner, since the row runs over the battlefield
-	SKILL_CELL_GAP				= 2,		///< the steel between two cells
-	SKILL_CELL_PERCENT		= 75,		///< a cell's size against a command button's; the whole size stood too big over the portrait
-	CELL_GAP_LEAST				= 2,		///< the least steel between two pictures of a grid, a bevel each side
-	SIGNAL_BUTTON_SIZE		= 24,		///< each smoke signal button's height, a row of the column
-	SIGNAL_BUTTON_WIDTH		= 40,		///< and its width, room for its picture
-	SIGNAL_BUTTONS				= 3,		///< attack, defend, look
-	ALERT_TAB_WIDTH				= 54,		///< the under-attack light, a lamp on the radar panel's border
-	WORKER_TAB_WIDTH			= 39,		///< the idle worker's step, against the command grid panel's border, as wide as the signals' column
-	WORKER_STEP_HEIGHT		= 30,		///< and its height, its key's bottom GRID_BOTTOM_GAP over the screen's bottom edge
-	GRID_BOTTOM_GAP				= 6			///< the command buttons' bottom over the screen's bottom edge, level with that key's:
-																		///< the grid's two pixel well and four of steel under it; at 4 the well's lit
-																		///< bottom edge sat on the screen's last row and the grid looked cut off
+	SKILL_CELL_GAP				= 2			///< the steel between two cells of the powers and the production queue
 };
-static const UnsignedInt SIGNAL_RISE_MS = 360;					///< each smoke signal button's climb out of the screen's bottom edge
+
+/** A grid cell's size on screen. */
+static ICoord2D cellSize( void )
+{
+	const Real scale = ControlBarHudScale();
+	ICoord2D cell;
+	cell.x = REAL_TO_INT( CELL_WIDTH * scale );
+	cell.y = REAL_TO_INT( CELL_HEIGHT * scale );
+	return cell;
+}
+static const UnsignedInt SIGNAL_RISE_MS = 360;					///< each smoke signal button's climb out of the radar's bezel
 static const UnsignedInt SIGNAL_RISE_STAGGER_MS = 90;	///< between one button starting and the next
 
 /** `signalN.drop`, N 0 to 2, how far below its place each smoke signal button still is, in page
-	* pixels, `elapsedMs` after the column came up: each starts a stagger after the one above it and
-	* slows as it arrives, the whole column's height to nothing. */
+	* pixels, `elapsedMs` after the step came up: each starts a stagger after the one on its left and
+	* slows as it arrives, the step's height to nothing. */
 static void putSignalRise( HtmlValues &values, UnsignedInt elapsedMs )
 {
 	for( Int button = 0; button < SIGNAL_BUTTONS; button++ )
@@ -11071,7 +11121,7 @@ static void putSignalRise( HtmlValues &values, UnsignedInt elapsedMs )
 		const Real started = (Real)elapsedMs - (Real)( button * SIGNAL_RISE_STAGGER_MS );
 		const Real progress = min( 1.0f, max( 0.0f, started / SIGNAL_RISE_MS ) );
 		const Real remaining = ( 1.0f - progress ) * ( 1.0f - progress ) * ( 1.0f - progress );
-		values[ "signal" + std::to_string( button ) + ".drop" ] = std::to_string( REAL_TO_INT( remaining * SIGNAL_BUTTON_SIZE * SIGNAL_BUTTONS ) );
+		values[ "signal" + std::to_string( button ) + ".drop" ] = std::to_string( REAL_TO_INT( remaining * SIGNAL_STEP_HEIGHT ) );
 	}
 }
 
@@ -11136,28 +11186,13 @@ static Bool controlBarUnion( const char *const *names, IRegion2D &box )
 	return found;
 }
 
-/** `box` grown by so many 800x600 pixels on each side, in screen pixels. */
-static IRegion2D grownBy( const IRegion2D &box, Int left, Int top, Int right, Int bottom )
-{
-	const Real scale = ControlBarUniformScale();
-	IRegion2D grown;
-	grown.lo.x = box.lo.x - REAL_TO_INT( left * scale );
-	grown.lo.y = box.lo.y - REAL_TO_INT( top * scale );
-	grown.hi.x = box.hi.x + REAL_TO_INT( right * scale );
-	grown.hi.y = box.hi.y + REAL_TO_INT( bottom * scale );
-	return grown;
-}
+static void putPageRect( HtmlValues &values, const std::string &name, const IRegion2D &rect, Bool shown,
+												 Real scale = ControlBarUniformScale() );
 
-static void putPageRect( HtmlValues &values, const std::string &name, const IRegion2D &rect, Bool shown );
-
-/** How much steel each block of the centre stack shows round its window, 800x600 pixels. */
+/** A panel's steel, 800x600 pixels. */
 enum
 {
 	PANEL_BORDER				= 8,	///< a panel's border outside its container, on the sides facing the battlefield
-	STACK_FRAME					= 3,	///< the power bar's frame and lip
-	STACK_POWER_TOP			= 5,	///< the power bar's block over its frame
-	STACK_MONEY_SIDE		= 8,
-	STACK_MONEY_TOP			= 1,	///< over the money's line of text
 	PANEL_TAB_HEIGHT		= 14	///< a tab or button standing on a border's top edge
 };
 
@@ -11188,7 +11223,7 @@ static IRegion2D framed( const IRegion2D &content, Int border, Bool againstLeft,
 	* the container fits what it holds exactly; `name`.shown as putPageRect writes it. */
 static void putFrame( HtmlValues &values, const std::string &name, const IRegion2D &content, const IRegion2D &box, Bool shown )
 {
-	const Real scale = ControlBarUniformScale();
+	const Real scale = ControlBarHudScale();
 	struct Edge { static Int page( Int screen, Real scale ) { return REAL_TO_INT_FLOOR( screen / scale + 0.5f ); } };
 	const Int left = Edge::page( box.lo.x, scale ), top = Edge::page( box.lo.y, scale );
 	const Int innerLeft = Edge::page( content.lo.x, scale ), innerTop = Edge::page( content.lo.y, scale );
@@ -11209,7 +11244,7 @@ static void putFrame( HtmlValues &values, const std::string &name, const IRegion
 /** A tab of `width` by `height` 800x600 pixels standing on `box`'s top edge, from its left or its right. */
 static IRegion2D tabOn( const IRegion2D &box, Int width, Int height, Bool fromRight )
 {
-	const Real scale = ControlBarUniformScale();
+	const Real scale = ControlBarHudScale();
 	IRegion2D tab;
 	tab.hi.y = box.lo.y;
 	tab.lo.y = tab.hi.y - REAL_TO_INT( height * scale );
@@ -11218,32 +11253,11 @@ static IRegion2D tabOn( const IRegion2D &box, Int width, Int height, Bool fromRi
 	return tab;
 }
 
-//-------------------------------------------------------------------------------------------------
-/** The centre of the bar as three blocks stacked flush, each narrower than the one under it: the
-	* command grid's panel, the power bar in its frame on top of that, and the money's block on top of
-	* the frame.  The windows stay where the bar put them; each block reaches down to the next, so
-	* there is no gap between them, and a block whose window is hidden is left out and the one above
-	* it sits on the one below.  The money's window alone is moved: it is cut to the height of its
-	* line of text and set down on the block under it, so its block is no taller than the figure.
-	* Written as centre, powerframe and moneyblock. */
-//-------------------------------------------------------------------------------------------------
 static GameWindow *numberedWindow( const char *prefix, Int number )
 {
 	char name[ 32 ];
 	snprintf( name, sizeof( name ), "%s%02d", prefix, number );
 	return controlBarWindow( name );
-}
-
-/** `place` grown by `across` screen pixels on the left and the right and `down` on the top and the
-	* bottom. */
-static IRegion2D reachedBy( const IRegion2D &place, Int across, Int down )
-{
-	IRegion2D cell = place;
-	cell.lo.x -= across;
-	cell.lo.y -= down;
-	cell.hi.x += across;
-	cell.hi.y += down;
-	return cell;
 }
 
 /** The screen rectangle of one of the bar's windows as it stands now. */
@@ -11258,172 +11272,155 @@ static IRegion2D windowScreenRect( GameWindow *window )
 	return rect;
 }
 
-/** The screen rectangle of the bar's window `prefix` followed by `number` in two digits, shown or
-	* not, as layoutPanels placed it, before gridGrowth grew it. */
-static IRegion2D numberedWindowRect( const char *prefix, Int number )
-{
-	GameWindow *window = numberedWindow( prefix, number );
-	const ICoord2D inset = TheControlBar->getPlacedInset( window );
-	return reachedBy( windowScreenRect( window ), inset.x, inset.y );
-}
-
 /** The page's ring of steel round a picture with `gap` screen pixels to its neighbour: half of it in
 	* the page's pixels, so two rings meet in the gap, and one at least, which is the bevel. */
-static Int pageRing( Int gap )
+static Int pageRing( Int gap, Real scale )
 {
-	return max( 1, (Int)REAL_TO_INT_FLOOR( gap / ControlBarUniformScale() / 2 ) );
+	return max( 1, (Int)REAL_TO_INT_FLOOR( gap / scale / 2 ) );
 }
-
-/** How far a grid's buttons grow into the gaps the layout left between them, and the ring the page
-	* lays round each picture. */
-struct GridGrowth
-{
-	ICoord2D grow;		///< screen pixels, across and down, on each side
-	Int ring;					///< page pixels
-};
-
-/** The buttons grow until the gaps beside and below button `first` are both half the narrower of
-	* the two, and never under `least` screen pixels. */
-static GridGrowth gridGrowth( const char *prefix, Int first, Int beside, Int below, Int least )
-{
-	const IRegion2D place = numberedWindowRect( prefix, first );
-	const Int across = numberedWindowRect( prefix, beside ).lo.x - place.hi.x;
-	const Int down = numberedWindowRect( prefix, below ).lo.y - place.hi.y;
-	const Int gap = max( least, min( across, down ) / 2 );
-	GridGrowth growth;
-	growth.grow.x = max( 0, ( across - gap ) / 2 );
-	growth.grow.y = max( 0, ( down - gap ) / 2 );
-	growth.ring = pageRing( min( across - 2 * growth.grow.x, down - 2 * growth.grow.y ) );
-	return growth;
-}
-
-static void putPageRect( HtmlValues &values, const std::string &name, const IRegion2D &rect, Bool shown );
 
 /** One cell of a grid for the page: the picture's hole as `cell` and the ring round it. */
-static void putCell( HtmlValues &entry, const IRegion2D &picture, Int ring )
+static void putCell( HtmlValues &entry, const IRegion2D &picture, Int ring, Real scale )
 {
-	putPageRect( entry, "cell", picture, TRUE );
+	putPageRect( entry, "cell", picture, TRUE, scale );
 	entry[ "ring" ] = std::to_string( ring );
 }
 
-/** ButtonCommandNN's screen rectangle, `button` 1 to COMMAND_BUTTONS, shown or not. */
-static IRegion2D commandButtonRect( Int button )
+/** A grid of `columns` by `rows` cells of `width` by `height` and the ring round them, standing on
+	* `bottom` with its left edge on `left`, screen pixels. */
+static IRegion2D gridBox( Int left, Int bottom, Int columns, Int rows, Int width, Int height )
 {
-	return numberedWindowRect( "ButtonCommand", button );
-}
-
-/** The box round the fourteen command buttons, shown or not. */
-static IRegion2D commandButtonsBox( void )
-{
+	const Real scale = ControlBarHudScale();
 	IRegion2D box;
-	for( Int button = 1; button <= COMMAND_BUTTONS; button++ )
-	{
-		const IRegion2D place = commandButtonRect( button );
-		if( button == 1 )
-			box = place;
-		box.lo.x = min( box.lo.x, place.lo.x );
-		box.lo.y = min( box.lo.y, place.lo.y );
-		box.hi.x = max( box.hi.x, place.hi.x );
-		box.hi.y = max( box.hi.y, place.hi.y );
-	}
+	box.lo.x = left;
+	box.hi.x = left + REAL_TO_INT( columns * ( width + CELL_GAP ) * scale );
+	box.hi.y = bottom;
+	box.lo.y = bottom - REAL_TO_INT( rows * ( height + CELL_GAP ) * scale );
 	return box;
 }
 
-static void stackCentre( HtmlValues &values, Bool shown, const ICoord2D &grow, IRegion2D &centre )
+/** Cell `column`, `row` of the grid of `width` by `height` cells `box` holds, scaled by `share`: a
+	* grid of smaller cells in the same room, the portrait bar's when a selection has more types than it
+	* has places. */
+static IRegion2D gridCell( const IRegion2D &box, Int column, Int row, Int width, Int height, Real share = 1.0f )
 {
-	// the command buttons stand as low as the idle worker's key beside them, GRID_BOTTOM_GAP over the
-	// screen's bottom edge, wherever the side's layout put them
-	const Real scale = ControlBarUniformScale();
-	const Int shift = barBottom() - REAL_TO_INT( GRID_BOTTOM_GAP * scale ) - commandButtonsBox().hi.y - grow.y;
-	if( shift != 0 )
-		TheControlBar->lowerPlacedWindow( controlBarWindow( "CommandWindow" ), shift );
+	const Real scale = ControlBarHudScale() * share;
+	IRegion2D cell;
+	cell.lo.x = box.lo.x + REAL_TO_INT( ( CELL_GAP / 2 + column * ( width + CELL_GAP ) ) * scale );
+	cell.lo.y = box.lo.y + REAL_TO_INT( ( CELL_GAP / 2 + row * ( height + CELL_GAP ) ) * scale );
+	cell.hi.x = cell.lo.x + REAL_TO_INT( width * scale );
+	cell.hi.y = cell.lo.y + REAL_TO_INT( height * scale );
+	return cell;
+}
 
-	IRegion2D grid, power, money;
-	const Bool othersFound = controlBarUnion( CONTROL_BAR_CENTRE, grid );
-
-	// with nothing selected the bar hides the command grid, and the panel must not go with it: the
-	// money and the power bar stood over bare battlefield.  The grid's place holds whether it is up,
-	// and it is the fourteen buttons' place rather than CommandWindow's: the window reaches 34 pixels
-	// further left, over where retail's beacon button stood, and left an empty strip in the panel
-	// It is the cells', which reach `grow` past the buttons' places
-	IRegion2D buttons = reachedBy( commandButtonsBox(), grow.x, grow.y );
-	if( othersFound )
+//-------------------------------------------------------------------------------------------------
+/** Three seconds: the income beside the money changes once a second, so a figure bouncing across a
+	* digit, or an income flickering between +9/s and +10/s, never holds narrower for three updates in
+	* a row and the plate keeps still; a real drop, a building paid for, has settled by then and the
+	* plate follows while the eye is back on the battlefield.  The ease is short enough to read as a
+	* settle, and every page pixel it moves lays the page out again. */
+Int InGameUI_moneyPlateWidth( MoneyPlateWidth &plate, Int needed, UnsignedInt nowMs )
+{
+	if( needed >= plate.target )
 	{
-		buttons.lo.x = min( buttons.lo.x, grid.lo.x );
-		buttons.lo.y = min( buttons.lo.y, grid.lo.y );
-		buttons.hi.x = max( buttons.hi.x, grid.hi.x );
-		buttons.hi.y = max( buttons.hi.y, grid.hi.y );
+		plate.target = needed;
+		plate.pending = FALSE;
 	}
-	grid = buttons;
-	const Bool powerFound = controlBarWindowRect( controlBarWindow( "PowerWindow" ), power );
-
-	// the grid's container is the grid, its border outside it running down to the screen's bottom.
-	// The power bar is the page's own now, so its frame is free to stand on that border, as wide as
-	// the grid: each side's layout puts the power window at a width of its own, and the bar changed
-	// length with the side.  The money is set down on the frame, over the grid's middle
-	centre = framed( grid, REAL_TO_INT( PANEL_BORDER * scale ), FALSE, FALSE );
-	IRegion2D frame = grownBy( power, STACK_FRAME, STACK_FRAME, STACK_FRAME, STACK_FRAME );
-	const Int frameHeight = frame.hi.y - frame.lo.y;
-	frame.lo.x = grid.lo.x;
-	frame.hi.x = grid.hi.x;
-	frame.hi.y = centre.lo.y;
-	frame.lo.y = frame.hi.y - frameHeight;
-
-	// the power bar's block is the centre's bezel carried on upward, as wide as it, so the bar and
-	// the grid read as two wells in one plate: the centre's top border runs between them
-	IRegion2D powerBlock;
-	powerBlock.lo.x = centre.lo.x;
-	powerBlock.hi.x = centre.hi.x;
-	powerBlock.hi.y = centre.lo.y;
-	powerBlock.lo.y = frame.lo.y - REAL_TO_INT( STACK_POWER_TOP * scale );
-
-	// each block stands on the top of the one under it
-	Int floor = centre.lo.y;
-	if( powerFound )
-		floor = powerBlock.lo.y;
-
-	GameWindow *moneyWindow = controlBarWindow( "MoneyDisplay" );
-	Bool moneyFound = controlBarWindowRect( moneyWindow, money );
-	if( moneyFound && moneyWindow->winGetFont() )
+	else if( !plate.pending )
 	{
-		// the font's height is the line without the drop shadow and the accents over the capitals, and
-		// a window that tall had the figure standing out over the block; half as much again holds it
+		plate.pending = TRUE;
+		plate.pendingSinceMs = nowMs;
+		plate.pendingWidth = needed;
+	}
+	else
+	{
+		plate.pendingWidth = max( plate.pendingWidth, needed );
+		if( nowMs - plate.pendingSinceMs >= MONEY_SHRINK_HOLD_MS )
+		{
+			plate.easeFrom = plate.shown;
+			plate.easeStartMs = nowMs;
+			plate.easing = TRUE;
+			plate.target = plate.pendingWidth;
+			plate.pending = FALSE;
+		}
+	}
+
+	plate.shown = plate.target;
+	if( plate.easing )
+	{
+		const UnsignedInt elapsed = nowMs - plate.easeStartMs;
+		if( elapsed >= MONEY_SHRINK_EASE_MS )
+			plate.easing = FALSE;
+		else
+		{
+			// eased out: quick at first, settling onto the new width
+			const Real left = 1.0f - (Real)elapsed / MONEY_SHRINK_EASE_MS;
+			plate.shown = max( plate.target, plate.target + REAL_TO_INT( ( plate.easeFrom - plate.target ) * left * left ) );
+		}
+	}
+	return plate.shown;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The money, a steel plate standing on the power bar's panel `powerBox` at its left end with the
+	* figure in a dark well `wellWidth` screen pixels wide, the owner's place of 2026-09-28.  The
+	* money's window is moved into the well, cut to its line of text.  Written as moneyplate and
+	* moneyblock. */
+//-------------------------------------------------------------------------------------------------
+static void putMoney( HtmlValues &values, const IRegion2D &powerBox, Int wellWidth, Bool shown )
+{
+	const Real scale = ControlBarHudScale();
+	const Int border = REAL_TO_INT( MONEY_PLATE_BORDER * scale );
+	IRegion2D plate = tabOn( powerBox, 0, MONEY_HEIGHT + 2 * MONEY_PLATE_BORDER, FALSE );
+	plate.hi.x = plate.lo.x + wellWidth + 2 * border;
+	IRegion2D money = plate;
+	money.lo.x += border;
+	money.hi.x -= border;
+	money.lo.y += border;
+	money.hi.y -= border;
+	putPageRect( values, "moneyplate", plate, shown, scale );
+	putPageRect( values, "moneyblock", money, shown, scale );
+
+	// the font's height is the line without the drop shadow and the accents over the capitals, and a
+	// window that tall had the figure standing out over its block; half as much again holds it
+	GameWindow *moneyWindow = controlBarWindow( "MoneyDisplay" );
+	if( moneyWindow->winGetFont() )
+	{
 		enum { MONEY_LINE_HALVES = 3 };
 		const Int height = moneyWindow->winGetFont()->height * MONEY_LINE_HALVES / 2;
-		Int parentX = 0, parentY = 0;
-		if( moneyWindow->winGetParent() )
-			moneyWindow->winGetParent()->winGetScreenPosition( &parentX, &parentY );
-		const Int left = ( grid.lo.x + grid.hi.x - ( money.hi.x - money.lo.x ) ) / 2;
-		moneyWindow->winSetPosition( left - parentX, floor - height - parentY );
-		moneyWindow->winSetSize( money.hi.x - money.lo.x, height );
-		moneyFound = controlBarWindowRect( moneyWindow, money );
+		IRegion2D line = money;
+		line.lo.y = ( money.lo.y + money.hi.y - height ) / 2;
+		line.hi.y = line.lo.y + height;
+		TheControlBar->placeWindowAt( moneyWindow, line );
 	}
-	IRegion2D block = grownBy( money, STACK_MONEY_SIDE, STACK_MONEY_TOP, STACK_MONEY_SIDE, 0 );
-	block.hi.y = floor;
+}
 
-	putFrame( values, "centre", grid, centre, shown );
-	putPageRect( values, "powerframe", frame, powerFound && shown );
-	putPageRect( values, "powerblock", powerBlock, powerFound && shown );
+//-------------------------------------------------------------------------------------------------
+/** The power bar lying in its groove at `groove`, screen pixels, with the power window moved under it
+	* so its tooltip stands on the bar.  The page lays boxes out content-box whatever box-sizing says,
+	* so the groove's border goes on top of its width and height: it is handed the content, and the
+	* height inside its lip for the cells.  Written as powerframe. */
+//-------------------------------------------------------------------------------------------------
+static void putPowerGroove( HtmlValues &values, const IRegion2D &groove, Bool shown )
+{
+	putPageRect( values, "powerframe", groove, shown, ControlBarHudScale() );
+	TheControlBar->placeWindowAt( controlBarWindow( "PowerWindow" ), groove );
 
-	// the page lays boxes out content-box whatever box-sizing says, so the frame's border goes on top
-	// of its width and height: hand it the content, and the height inside its lip for the cells, since
-	// a percentage of a height set by top and bottom does not resolve in the page either
 	enum { FRAME_BORDER = 2, FRAME_LIP = 1 };
 	const Int width = atoi( values[ "powerframe.w" ].c_str() ) - 2 * FRAME_BORDER;
 	const Int height = atoi( values[ "powerframe.h" ].c_str() ) - 2 * FRAME_BORDER;
 	values[ "powerframe.w" ] = std::to_string( width > 0 ? width : 0 );
 	values[ "powerframe.h" ] = std::to_string( height > 0 ? height : 0 );
 	values[ "powerframe.inner" ] = std::to_string( height > 2 * FRAME_LIP ? height - 2 * FRAME_LIP : 0 );
-	putPageRect( values, "moneyblock", block, moneyFound && shown );
 }
 
-/** `name`.x, .y, .w and .h in the page's pixels, and `name`.shown "shown" or "hidden". */
-static void putPageRect( HtmlValues &values, const std::string &name, const IRegion2D &rect, Bool shown )
+/** `name`.x, .y, .w and .h in the page's pixels, `scale` screen pixels to one, and `name`.shown
+	* "shown" or "hidden". */
+static void putPageRect( HtmlValues &values, const std::string &name, const IRegion2D &rect, Bool shown, Real scale )
 {
 	// every edge is rounded once, on its own, so two boxes that share an edge on screen share it on
 	// the page too: rounding a width and a height separately left the stacked blocks a pixel or two
 	// apart
-	const Real scale = ControlBarUniformScale();
 	const Int left = REAL_TO_INT_FLOOR( rect.lo.x / scale + 0.5f );
 	const Int top = REAL_TO_INT_FLOOR( rect.lo.y / scale + 0.5f );
 	const Int right = REAL_TO_INT_FLOOR( rect.hi.x / scale + 0.5f );
@@ -11492,7 +11489,10 @@ void InGameUI::drawCellGridFront( Int grid )
 {
 	HtmlOverlay *&overlay = m_cellFrontOverlay[ grid ];
 	if( overlay == NULL )
+	{
 		overlay = new HtmlOverlay( m_superweaponNormalFont );
+		overlay->setHud( TRUE );
+	}
 
 	HtmlValues values;
 	HtmlLists lists;
@@ -11544,141 +11544,242 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	// fifteen milliseconds, and every click on the battlefield did that twice
 	values[ "held" ] = m_controlBarPageHovered && TheMouse->getMouseStatus()->leftState != MBS_Up ? "held" : "";
 	values[ "blink" ] = !values[ "promotion" ].empty() && TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND > LOGICFRAMES_PER_SECOND / 2 ? "lit" : "";
-	for( Int panel = 0; panel < panelCount; panel++ )
-		putPageRect( values, "panel" + std::to_string( panel ), panels[ panel ], shown[ panel ] );
-
 	// Every panel is a container exactly as big as what it holds, and a border outside it: steel on
 	// the sides facing the battlefield, out to the screen's edge on the sides against it.  Everything
-	// else - the tabs, the buttons, the signals - stands outside the border.
-	const Real scale = ControlBarUniformScale();
+	// else - the tabs, the keys, the signals - stands outside the border.  The layout is the owner's
+	// drawing of 2026-09-28 at ControlBarHudScale(), which is what the page is laid out at too: from
+	// the left the radar with the experience bar beside it, then the command grid with the portrait bar
+	// on it and the power bar standing up after it
+	const Real scale = ControlBarHudScale();
+	m_controlBarOverlay->setHud( TRUE );
+	for( Int panel = 0; panel < panelCount; panel++ )
+		putPageRect( values, "panel" + std::to_string( panel ), panels[ panel ], shown[ panel ], scale );
 	const Int border = REAL_TO_INT( PANEL_BORDER * scale );
-
-	// the command and queue buttons grow into the gaps the layout left until the steel between two
-	// pictures is half what it was, and the page's rings round the pictures meet in what is left.
-	// The gaps are measured from the placed rectangles, whatever the buttons were last grown by
-	const Int leastGap = REAL_TO_INT( CELL_GAP_LEAST * scale );
-	const GridGrowth commandGrowth = gridGrowth( "ButtonCommand", 1, 3, 2, leastGap );
-	const GridGrowth queueGrowth = gridGrowth( "ButtonQueue", 1, 2, 4, leastGap );
-	ICoord2D grown;
-	grown.x = -commandGrowth.grow.x;
-	grown.y = -commandGrowth.grow.y;
-	for( Int button = 1; button <= COMMAND_BUTTONS; button++ )
-		TheControlBar->insetPlacedWindow( numberedWindow( "ButtonCommand", button ), grown );
-	grown.x = -queueGrowth.grow.x;
-	grown.y = -queueGrowth.grow.y;
-	for( Int button = 1; button <= QUEUE_BUTTONS; button++ )
-		TheControlBar->insetPlacedWindow( numberedWindow( "ButtonQueue", button ), grown );
-
+	const Int ring = CELL_GAP / 2;
+	const Int foot = barBottom() - REAL_TO_INT( PANEL_FOOT * scale );
 	const Bool leftShown = panelCount > 0 && shown[ 0 ];
-	const Bool rightShown = panelCount > 2 && shown[ 2 ];
+	const Bool centreShown = panelCount > 1 && shown[ 1 ];
+	HtmlLists lists;
 
+	// the radar, and the experience bar's groove beside it as tall as it; its own window stood on the
+	// right panel, which is gone.  The left panel holds the two.  layoutPanels puts the radar at the
+	// uniform scale, so it is put again at the HUD's
+	GameWindow *radarWindow = controlBarWindow( "LeftHUD" );
+	const Bool leftFound = leftShown && !radarWindow->winIsHidden();
+	// the radar stands as tall as the command grid's panel and the power bar's over it together, so its
+	// panel's top is level with the power bar's, the owner's call of 2026-09-28, and keeps its shape
 	IRegion2D content;
-	const Bool leftFound = controlBarUnion( CONTROL_BAR_LEFT, content );
+	content.hi.y = foot;
+	content.lo.y = content.hi.y - REAL_TO_INT( COMMAND_ROWS * ( COMMAND_CELL_HEIGHT + CELL_GAP ) * scale ) - 2 * border
+								 - REAL_TO_INT( POWER_WIDTH * scale );
+	content.lo.x = border;
+	content.hi.x = content.lo.x + ( content.hi.y - content.lo.y ) * RADAR_WIDTH / RADAR_HEIGHT;
+	TheControlBar->placeWindowAt( radarWindow, content );
+	IRegion2D experience = content;
+	experience.lo.x = content.hi.x + REAL_TO_INT( EXPERIENCE_GAP * scale );
+	experience.hi.x = experience.lo.x + REAL_TO_INT( EXPERIENCE_WIDTH * scale );
+	content.hi.x = experience.hi.x;
 	const IRegion2D leftBox = framed( content, border, TRUE, FALSE );
-	putFrame( values, "left", content, leftBox, leftFound && leftShown );
-	const IRegion2D alertTab = tabOn( leftBox, ALERT_TAB_WIDTH, PANEL_TAB_HEIGHT, FALSE );
-	putPageRect( values, "alerttab", alertTab, leftFound && leftShown );
-	// the event feed stands on that tab, or on the screen's bottom with the radar folded away
-	m_feedFloor = leftFound && leftShown ? alertTab.lo.y : barBottom();
+	putFrame( values, "left", content, leftBox, leftFound );
+	putPageRect( values, "expframe", experience, leftFound, scale );
+	putExperienceBar( values, lists[ "expcells" ], lists[ "rankstars" ] );
 
-	// the three smoke signal buttons, a column standing on the screen's bottom edge against the left
-	// panel's border; not there at all where the keys would do nothing either, a game with no allies
-	// to see the smoke
-	IRegion2D signalColumn;
-	signalColumn.lo.x = leftBox.hi.x;
-	signalColumn.hi.x = leftBox.hi.x + REAL_TO_INT( SIGNAL_BUTTON_WIDTH * scale );
-	signalColumn.hi.y = barBottom();
-	signalColumn.lo.y = signalColumn.hi.y - REAL_TO_INT( SIGNAL_BUTTON_SIZE * SIGNAL_BUTTONS * scale );
-	const Bool signalsShown = leftFound && leftShown && signalsAllowed();
-	putPageRect( values, "signals", signalColumn, signalsShown );
+	// on the radar panel's top edge at its left hand end the under-attack light, and on the light the
+	// skills key: the rank's stars, and the button that opens the promotion screen.  A watcher, or a
+	// player beaten, has no promotions to buy, and the bar disables the button for him.  On the skills
+	// key the idle worker's, the owner's place for it
+	const IRegion2D alertTab = tabOn( leftBox, ALERT_TAB_WIDTH, PANEL_TAB_HEIGHT, FALSE );
+	putPageRect( values, "alerttab", alertTab, leftFound, scale );
+	const IRegion2D skillsTab = tabOn( alertTab, SKILLS_TAB_WIDTH, SKILLS_TAB_HEIGHT, FALSE );
+	const Bool skillsShown = leftFound && ThePlayerList->getLocalPlayer()->isPlayerActive();
+	putPageRect( values, "skillstab", skillsTab, skillsShown, scale );
+	const IRegion2D idleTab = tabOn( skillsShown ? skillsTab : alertTab, IDLE_TAB_WIDTH, IDLE_TAB_HEIGHT, FALSE );
+	const Bool idleShown = leftFound && centreShown;
+	putPageRect( values, "idletab", idleTab, idleShown, scale );
+	// the event feed and the production queue's row stand on the top key
+	m_feedFloor = idleShown ? idleTab.lo.y : skillsShown ? skillsTab.lo.y : leftFound ? alertTab.lo.y : barBottom();
+
+	// the three smoke signal buttons side by side on the same edge at its right hand end; not there at
+	// all where the keys would do nothing either, a game with no allies to see the smoke
+	IRegion2D signalStep;
+	signalStep.hi.x = leftBox.hi.x;
+	signalStep.lo.x = signalStep.hi.x - REAL_TO_INT( SIGNAL_STEP_WIDTH * scale );
+	signalStep.hi.y = leftBox.lo.y;
+	signalStep.lo.y = signalStep.hi.y - REAL_TO_INT( SIGNAL_STEP_HEIGHT * scale );
+	const Bool signalsShown = leftFound && signalsAllowed();
+	putPageRect( values, "signals", signalStep, signalsShown, scale );
 	const UnsignedInt nowMs = timeGetTime();
+
+	// the idle worker's key flashes while a worker stands idle, which is when the bar enables its
+	// window: lit and dark in turn, a beat the eye catches at the edge of the screen
+	enum { IDLE_FLASH_PERIOD_MS = 700 };
+	const Bool idleWaiting = idleShown && BitTest( controlBarWindow( "ButtonIdleWorker" )->winGetStatus(), WIN_STATUS_ENABLED );
+	values[ "idleflash" ] = idleWaiting && nowMs % IDLE_FLASH_PERIOD_MS < IDLE_FLASH_PERIOD_MS / 2 ? "flash" : "";
 	if( signalsShown && !m_signalsWereShown )
 		m_signalsRiseStartMs = nowMs;
 	m_signalsWereShown = signalsShown;
 	putSignalRise( values, nowMs - m_signalsRiseStartMs );
 
-	IRegion2D centreBox;
-	// the grid's container holds the pictures and the rings round them
-	ICoord2D gridOutside;
-	gridOutside.x = commandGrowth.grow.x + REAL_TO_INT( commandGrowth.ring * scale );
-	gridOutside.y = commandGrowth.grow.y + REAL_TO_INT( commandGrowth.ring * scale );
-	stackCentre( values, panelCount > 1 && shown[ 1 ], gridOutside, centreBox );
-	// the idle worker's key, a smoke signal's size, in a step against the centre panel's border at its
-	// bottom left, standing on the screen's bottom edge; on the top edge it stood under the power bar
-	IRegion2D workerStep;
-	workerStep.hi.x = centreBox.lo.x;
-	workerStep.lo.x = workerStep.hi.x - REAL_TO_INT( WORKER_TAB_WIDTH * scale );
-	workerStep.hi.y = barBottom();
-	workerStep.lo.y = workerStep.hi.y - REAL_TO_INT( WORKER_STEP_HEIGHT * scale );
-	putPageRect( values, "workertab", workerStep, panelCount > 1 && shown[ 1 ] );
-	HtmlLists lists;
-	putPowerBar( values, lists[ "powercells" ] );	// after the stack, whose frame it divides into cells
+	// the command grid against the radar's panel, six by three, every place its key: the orders in the
+	// owner's places (ControlBar_commandPlaces) and everything else packed toward the top left, what a
+	// set builds before its abilities and upgrades.  Over the grid's frame the power bar lies in a
+	// groove of its own panel, and the money stands on that panel's left end
+	const IRegion2D commandBox = gridBox( leftBox.hi.x + border, foot, COMMAND_COLUMNS, COMMAND_ROWS,
+																				COMMAND_CELL_WIDTH, COMMAND_CELL_HEIGHT );
+	Int where[ MAX_COMMANDS_PER_SET ];
+	const Bool fights = TheControlBar->getCommandPlaces( where );
+	TheControlBar->labelCommandPlaces( where );
+	Bool taken[ COMMAND_PLACE_COUNT ] = { FALSE };
+	for( Int button = 0; button < COMMAND_BUTTONS; button++ )
+		if( where[ button ] >= 0 )
+			taken[ where[ button ] ] = TRUE;
+	// attack, hold position and move have no button in any command set: the page's keys do what A, C
+	// and V do, for anything that attack moves
+	taken[ COMMAND_PLACE_ATTACK ] = taken[ COMMAND_PLACE_HOLD ] = taken[ COMMAND_PLACE_MOVE ] = fights;
 
-	// a well behind each of the fourteen command buttons, shown or not, so the grid reads as a grid
-	// with the steel between its places, and an empty place is a hole in it rather than bare dark
+	// with nothing selected the frame keeps the whole grid's size and the grid is bare steel, the
+	// owner's call: only the cells go
+	const IRegion2D centreBox = framed( commandBox, border, FALSE, FALSE );
+	putFrame( values, "centre", commandBox, centreBox, centreShown );
+
+	// the power bar lying along the grid's top, in the strip the portrait bar had, a panel of its own
+	// as wide as the grid; the money stands on its left end, the owner's places of 2026-09-28
+	IRegion2D power = commandBox;
+	power.hi.y = centreBox.lo.y - border;
+	power.lo.y = power.hi.y - REAL_TO_INT( POWER_WIDTH * scale );
+	IRegion2D powerBox = framed( power, border, FALSE, FALSE );
+	powerBox.hi.y = centreBox.lo.y;
+	putFrame( values, "powerpanel", power, powerBox, centreShown );
+	putPowerGroove( values, power, centreShown );
+	putPowerBar( values, lists[ "powercells" ] );	// after the groove, which it divides into cells
+	// the money's well is as wide as the figure and a margin each side, following it through
+	// InGameUI_moneyPlateWidth on the client's clock.  A static text wraps at its window's width less
+	// ten pixels, which the margin only covered from a scale of 1.0 up: at 1280x720 "$ 48500  +0/s"
+	// broke onto two lines and spilled out of the plate.  The window is one line, which the static
+	// text draws unwrapped, so the figure is never cut and its own string measures it
+	GameWindow *moneyWindow = controlBarWindow( "MoneyDisplay" );
+	DisplayString *moneyText = ( (TextData *)moneyWindow->winGetUserData() )->text;
+	moneyWindow->winSetStatus( WIN_STATUS_ONE_LINE );
+	moneyText->setWordWrap( 0 );
+	const Int moneyNeeded = moneyText->getWidth() + 2 * REAL_TO_INT( MONEY_TEXT_MARGIN * scale );
+	putMoney( values, powerBox, InGameUI_moneyPlateWidth( m_moneyPlate, moneyNeeded, nowMs ),
+						centreShown && !moneyWindow->winIsHidden() );
+
+	// each command button to its place.  A click only reaches a window inside every one of its parents,
+	// so the buttons' two cover the whole frame; the page's solids still decide what is battlefield
+	const IRegion2D frameRect = windowScreenRect( TheControlBar->getMasterParent() );
+	TheControlBar->placeWindowAt( controlBarWindow( "CenterBackground" ), frameRect );
+	TheControlBar->placeWindowAt( controlBarWindow( "CommandWindow" ), frameRect );
+
+	// a cell only for a place a command stands in; an empty one is the panel's steel
+	IRegion2D place[ COMMAND_PLACE_COUNT ];
 	std::vector< HtmlValues > &commandCells = lists[ "commandcells" ];
-	for( Int button = 1; button <= COMMAND_BUTTONS && panelCount > 1 && shown[ 1 ]; button++ )
+	for( Int each = 0; each < COMMAND_PLACE_COUNT; each++ )
 	{
-		HtmlValues entry;
-		putCell( entry, windowScreenRect( numberedWindow( "ButtonCommand", button ) ), commandGrowth.ring );
-		commandCells.push_back( entry );
-	}
-
-	const Bool rightFound = controlBarUnion( CONTROL_BAR_RIGHT, content );
-	const IRegion2D rightBox = framed( content, border, FALSE, TRUE );
-	putFrame( values, "right", content, rightBox, rightFound && rightShown );
-
-	// the experience bar's groove down the column the bar's own window and its foreground picture
-	// shared, the medal on top included, and the rank's stars in a tab on the panel's border at its
-	// right hand end, the way the under-attack light stands on the radar's at its left
-	IRegion2D experience;
-	const Bool experienceFound = controlBarUnion( CONTROL_BAR_EXPERIENCE, experience );
-	putPageRect( values, "expframe", experience, experienceFound && rightFound && rightShown );
-	putExperienceBar( values, lists[ "expcells" ], lists[ "rankstars" ] );
-	// a watcher, or a player beaten, has no promotions to buy, and the bar disables the button for him
-	const IRegion2D starsTab = tabOn( rightBox, STARS_TAB_WIDTH, STARS_TAB_HEIGHT, TRUE );
-	const Bool starsShown = rightFound && rightShown && ThePlayerList->getLocalPlayer()->isPlayerActive();
-	putPageRect( values, "starstab", starsTab, starsShown );
-
-	// the portrait's well is steel with a dark cell for each of the production queue's nine places,
-	// the grid the side's RightHUD picture used to draw in the side's own colour, blue for America
-	// While a unit is selected its portrait stands over four of those places and its upgrades in the
-	// other five: the portrait's four are one cell then, the portrait's own
-	std::vector< HtmlValues > &portraitCells = lists[ "portraitcells" ];
-	GameWindow *portrait = controlBarWindow( "CameoWindow" );
-	const Bool portraitShown = !portrait->winIsHidden() && !portrait->winGetParent()->winIsHidden();
-	const IRegion2D portraitRect = windowScreenRect( portrait );
-	if( portraitShown && rightFound && rightShown )
-	{
-		HtmlValues entry;
-		putCell( entry, portraitRect, queueGrowth.ring );
-		portraitCells.push_back( entry );
-	}
-	for( Int button = 1; button <= QUEUE_BUTTONS && rightFound && rightShown; button++ )
-	{
-		const IRegion2D place = windowScreenRect( numberedWindow( "ButtonQueue", button ) );
-		if( portraitShown && place.lo.x >= portraitRect.lo.x && place.hi.x <= portraitRect.hi.x + 1 &&
-				place.lo.y >= portraitRect.lo.y && place.hi.y <= portraitRect.hi.y + 1 )
+		place[ each ] = gridCell( commandBox, each % COMMAND_COLUMNS, each / COMMAND_COLUMNS,
+															COMMAND_CELL_WIDTH, COMMAND_CELL_HEIGHT );
+		if( !centreShown || !taken[ each ] )
 			continue;
 		HtmlValues entry;
-		putCell( entry, place, queueGrowth.ring );
+		putCell( entry, place[ each ], ring, scale );
+		commandCells.push_back( entry );
+	}
+	for( Int button = 0; button < COMMAND_BUTTONS; button++ )
+		if( where[ button ] >= 0 )
+			TheControlBar->placeWindowAt( numberedWindow( "ButtonCommand", button + 1 ), place[ where[ button ] ] );
+	putPageRect( values, "attackkey", place[ COMMAND_PLACE_ATTACK ], centreShown && fights, scale );
+	putPageRect( values, "holdkey", place[ COMMAND_PLACE_HOLD ], centreShown && fights, scale );
+	putPageRect( values, "movekey", place[ COMMAND_PLACE_MOVE ], centreShown && fights, scale );
+	values[ "attackkey.key" ] = commandSlotKey( COMMAND_PLACE_ATTACK );
+	values[ "holdkey.key" ] = commandSlotKey( COMMAND_PLACE_HOLD );
+	values[ "movekey.key" ] = commandSlotKey( COMMAND_PLACE_MOVE );
+
+	// the portrait bar on the screen's bottom edge right of the command panel: the portrait, then a
+	// single unit's upgrades or a multi-selection's types, the owner's rule, and only as long as what
+	// it holds; with no portrait there is no bar.  More types than PORTRAIT_PLACES take smaller cells,
+	// two rows of them, then three.  A watcher has no command panel and keeps the portrait of what he
+	// clicked, the bar standing where the panel would have been
+	GameWindow *portraitWindow = controlBarWindow( "CameoWindow" );
+	const Bool portraitShown = ( centreShown || ( panelCount > 2 && shown[ 2 ] ) ) &&
+														 !portraitWindow->winIsHidden() && !portraitWindow->winGetParent()->winIsHidden();
+	std::vector< GameWindow * > upgrades;
+	for( Int upgrade = 1; upgrade <= UPGRADE_CAMEOS; upgrade++ )
+	{
+		GameWindow *window = controlBarWindow( "UnitUpgrade" + std::to_string( upgrade ) );
+		if( !window->winIsHidden() )
+			upgrades.push_back( window );
+	}
+	std::vector< GameWindow * > tiles;
+	const std::vector< GameWindow * > &allTiles = TheControlBar->getMultiSelectTiles();
+	for( size_t tile = 0; tile < allTiles.size(); tile++ )
+		if( allTiles[ tile ] && !allTiles[ tile ]->winIsHidden() )
+			tiles.push_back( allTiles[ tile ] );
+	Int rows = 1;
+	while( (Int)tiles.size() > rows * rows * PORTRAIT_PLACES )
+		rows++;
+	// a column of `rows` tiles is one cell wide.  A multi-selection shows each type once, its own tile
+	// with its count, the focused one lit: the portrait of the focused type would be that type again,
+	// so the owner had it taken off and its window is shrunk to nothing
+	const Bool multi = !tiles.empty();
+	const Int columns = multi ? ( (Int)tiles.size() + rows - 1 ) / rows : (Int)upgrades.size();
+	const Int portraitWidth = multi ? 0 : PORTRAIT_WIDTH + CELL_GAP;
+
+	IRegion2D portraitBox;
+	portraitBox.lo.x = centreShown ? centreBox.hi.x + border : commandBox.lo.x;
+	portraitBox.hi.y = foot;
+	portraitBox.lo.y = portraitBox.hi.y - REAL_TO_INT( ( CELL_HEIGHT + CELL_GAP ) * scale );
+	portraitBox.hi.x = portraitBox.lo.x + REAL_TO_INT( ( portraitWidth + columns * ( CELL_WIDTH + CELL_GAP ) ) * scale );
+	const IRegion2D portraitFrame = framed( portraitBox, border, FALSE, FALSE );
+	putFrame( values, "portrait", portraitBox, portraitFrame, portraitShown );
+	TheControlBar->placeWindowAt( controlBarWindow( "RightHUD" ), portraitBox );
+	TheControlBar->placeWindowAt( controlBarWindow( "WinUnitSelected" ), portraitBox );
+	IRegion2D portraitCell = gridCell( portraitBox, 0, 0, CELL_WIDTH, CELL_HEIGHT );
+	portraitCell.hi.x = portraitCell.lo.x + ( multi ? 0 : REAL_TO_INT( PORTRAIT_WIDTH * scale ) );
+	TheControlBar->placeWindowAt( portraitWindow, portraitCell );
+	IRegion2D placesBox = portraitBox;
+	if( !multi )
+		placesBox.lo.x = portraitCell.hi.x + REAL_TO_INT( ring * scale );
+
+	std::vector< HtmlValues > &portraitCells = lists[ "portraitcells" ];
+	if( portraitShown && !multi )
+	{
+		HtmlValues entry;
+		putCell( entry, portraitCell, ring, scale );
 		portraitCells.push_back( entry );
 	}
+	for( size_t upgrade = 0; upgrade < upgrades.size(); upgrade++ )
+	{
+		const IRegion2D cell = gridCell( placesBox, (Int)upgrade, 0, CELL_WIDTH, CELL_HEIGHT );
+		TheControlBar->placeWindowAt( upgrades[ upgrade ], cell );
+		HtmlValues entry;
+		putCell( entry, cell, ring, scale );
+		if( portraitShown && tiles.empty() )
+			portraitCells.push_back( entry );
+	}
+	for( size_t tile = 0; tile < tiles.size(); tile++ )
+	{
+		const IRegion2D cell = gridCell( placesBox, (Int)tile / rows, (Int)tile % rows, CELL_WIDTH, CELL_HEIGHT, 1.0f / rows );
+		TheControlBar->placeWindowAt( tiles[ tile ], cell );
+		HtmlValues entry;
+		putCell( entry, cell, rows > 1 ? 1 : ring, scale );
+		if( portraitShown )
+			portraitCells.push_back( entry );
+	}
 
-	// the general's powers ready to fire over the right panel, the first in the corner against the
-	// screen's right edge, the row growing left as they come and wrapping upward past three, each
-	// three quarters of a command button.  They sit in a tray of the panels' steel only as big as they are, and each
-	// has a dark cell behind it the way the command grid's buttons do
+	// the general's powers ready to fire, the first in the corner against the screen's right edge, the
+	// row growing left as they come and wrapping upward past three, each a cell's size.  They sit in a
+	// tray of the panels' steel only as big as they are, standing on the screen's bottom edge right of
+	// the command grid where three fit there, and over the grid's end where they do not
 	const Int trayBorder = REAL_TO_INT( SKILL_TRAY_BORDER * scale );
+	const ICoord2D cell = cellSize();
+	const Int cellGap = REAL_TO_INT( SKILL_CELL_GAP * scale );
+	const Int trayWidth = SPECIAL_POWER_SHORTCUT_COLS * ( cell.x + cellGap ) + 2 * trayBorder;
 	ICoord2D corner;
 	corner.x = TheDisplay->getWidth() - trayBorder;
-	corner.y = starsTab.lo.y - REAL_TO_INT( SKILL_GRID_GAP * scale ) - trayBorder;
-	const IRegion2D button = commandButtonRect( 1 );
-	ICoord2D cell;
-	cell.x = ( button.hi.x - button.lo.x ) * SKILL_CELL_PERCENT / 100;
-	cell.y = ( button.hi.y - button.lo.y ) * SKILL_CELL_PERCENT / 100;
-	const Int cellGap = REAL_TO_INT( SKILL_CELL_GAP * scale );
-	const Int powersShown = TheControlBar->placeSpecialPowerShortcutGrid( rightFound && rightShown ? &corner : NULL, cell, cellGap );
+	const Int panelRight = portraitShown ? max( centreBox.hi.x, portraitFrame.hi.x ) : centreBox.hi.x;
+	corner.y = ( (Int)TheDisplay->getWidth() - panelRight >= trayWidth ? barBottom() : powerBox.lo.y - REAL_TO_INT( SKILL_GRID_GAP * scale ) )
+						 - trayBorder;
+	const Int powersShown = TheControlBar->placeSpecialPowerShortcutGrid( centreShown ? &corner : NULL, cell, cellGap );
 
 	std::vector< HtmlValues > &places = lists[ "skillcells" ];
 	IRegion2D powers;
@@ -11696,7 +11797,7 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 		powers.lo.x = min( powers.lo.x, place.lo.x );
 		powers.lo.y = min( powers.lo.y, place.lo.y );
 		HtmlValues entry;
-		putCell( entry, place, pageRing( cellGap ) );
+		putCell( entry, place, pageRing( cellGap, scale ), scale );
 		places.push_back( entry );
 	}
 	IRegion2D tray = powers;
@@ -11711,33 +11812,18 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	m_cellFrontCells[ CELL_GRID_QUEUE ] = portraitCells;
 	m_cellFrontCells[ CELL_GRID_POWERS ] = places;
 	putFrontWindow( controlBarWindow( "CommandWindow" ), drawCommandGridFront );
-	// the portrait's grid over the queue, the portrait and its upgrades alike, all RightHUD's
+	// the portrait bar's grid over the portrait, its upgrades and a selection's types, all RightHUD's
 	putFrontWindow( controlBarWindow( "RightHUD" ), drawQueueGridFront );
 	GameWindow *powersParent = TheControlBar->getSpecialPowerShortcutParent();
 	if( powersParent )
 		putFrontWindow( powersParent, drawPowersGridFront );
-
-	// the promotion button is the stars' tab: its window moves under the tab and takes the click that
-	// opens the promotion screen.  With no tab drawn it goes too: a watcher who clicked a unit got the
-	// button enabled again, an empty patch of screen with a tooltip that opened the screen
-	GameWindow *promotion = controlBarWindow( "ButtonGeneral" );
-	if( promotion )
-		promotion->winHide( !starsShown );
-	if( rightFound && promotion )
-	{
-		Int parentX = 0, parentY = 0;
-		if( promotion->winGetParent() )
-			promotion->winGetParent()->winGetScreenPosition( &parentX, &parentY );
-		promotion->winSetPosition( starsTab.lo.x - parentX, starsTab.lo.y - parentY );
-		promotion->winSetSize( starsTab.hi.x - starsTab.lo.x, starsTab.hi.y - starsTab.lo.y );
-	}
 
 	for( Int each = 0; each < (Int)ARRAY_SIZE( CONTROL_BAR_WINDOWS ); each++ )
 	{
 		const std::string name = CONTROL_BAR_WINDOWS[ each ];
 		GameWindow *window = controlBarWindow( name );
 		IRegion2D rect;
-		putPageRect( values, name, rect, controlBarWindowRect( window, rect ) );
+		putPageRect( values, name, rect, controlBarWindowRect( window, rect ), scale );
 		values[ name + ".state" ] = controlBarWindowState( window );
 	}
 
@@ -11792,6 +11878,12 @@ Bool InGameUI::handleControlBarPageClick( const ICoord2D *mouse, Bool act )
 	{
 		if( act )
 			armSignalFromPage( action.substr( SIGNAL_ACTION.size() ) );
+		return TRUE;
+	}
+	if( action.compare( 0, ORDER_ACTION.size(), ORDER_ACTION ) == 0 )
+	{
+		if( act )
+			orderFromPage( action.substr( ORDER_ACTION.size() ) );
 		return TRUE;
 	}
 	if( action.compare( 0, PRESS_ACTION.size(), PRESS_ACTION ) != 0 )
@@ -11883,9 +11975,8 @@ static void layoutPromotionScreen( GameWindow *parent, PromotionLayout &layout )
 {
 	const Real scale = ControlBarUniformScale();
 	struct Page { static Int px( Int pagePixels, Real scale ) { return REAL_TO_INT( pagePixels * scale ); } };
-	const IRegion2D button = commandButtonRect( 1 );
-	const Int cellWidth = button.hi.x - button.lo.x;
-	const Int cellHeight = button.hi.y - button.lo.y;
+	const Int cellWidth = Page::px( COMMAND_BUTTON_WIDTH, scale );
+	const Int cellHeight = Page::px( COMMAND_BUTTON_HEIGHT, scale );
 	const Int gap = Page::px( PROMOTION_CELL_GAP, scale );
 	const Int margin = Page::px( PROMOTION_MARGIN, scale );
 	const Int inset = Page::px( PROMOTION_INSET, scale );
@@ -12122,7 +12213,8 @@ void InGameUI::drawPromotionPage( GameWindow *parent, Bool front )
 			continue;
 
 		HtmlValues entry;
-		putCell( entry, place.rect, pageRing( REAL_TO_INT( PROMOTION_CELL_GAP * ControlBarUniformScale() ) ) );
+		putCell( entry, place.rect, pageRing( REAL_TO_INT( PROMOTION_CELL_GAP * ControlBarUniformScale() ), ControlBarUniformScale() ),
+						 ControlBarUniformScale() );
 		entry[ "state" ] = place.button && !place.button->winIsHidden() ? promotionState( place.button ) : "empty";
 		cells.push_back( entry );
 	}
@@ -12638,25 +12730,17 @@ void InGameUI::drawProductionStripColumn( Int left, Int bottomY )
 
 //-------------------------------------------------------------------------------------------------
 /** Playing under the bar's page, the strip is a row in the page's steel, Window/Html/Queue.html: a
-	* tray on the radar's side as the general's powers' is on the portrait's, standing over the
-	* under-attack light's tab with its first cell against the screen's left edge and the row growing
-	* right.  Each cell is a power's size, the soonest first, the "+N" in a cell of its own at the end,
-	* and the page's frames are drawn again over the cameos' edges the way the command grid's are. */
+	* tray over the radar, standing over the skills key with its first cell against the screen's left
+	* edge and the row growing right.  Each cell is a power's size, the soonest first, the "+N" in a
+	* cell of its own at the end, and the page's frames are drawn again over the cameos' edges the way
+	* the command grid's are. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawQueueTray( void )
 {
-	const Real scale = ControlBarUniformScale();
-	const IRegion2D button = commandButtonRect( 1 );
-	ICoord2D cell;
-	cell.x = ( button.hi.x - button.lo.x ) * SKILL_CELL_PERCENT / 100;
-	cell.y = ( button.hi.y - button.lo.y ) * SKILL_CELL_PERCENT / 100;
+	const Real scale = ControlBarHudScale();
+	const ICoord2D cell = cellSize();
 	const Int gap = REAL_TO_INT( SKILL_CELL_GAP * scale );
 	const Int trayBorder = REAL_TO_INT( QUEUE_TRAY_BORDER * scale );
-
-	IRegion2D content;
-	controlBarUnion( CONTROL_BAR_LEFT, content );
-	const IRegion2D alertTab = tabOn( framed( content, REAL_TO_INT( PANEL_BORDER * scale ), TRUE, FALSE ),
-																		ALERT_TAB_WIDTH, PANEL_TAB_HEIGHT, FALSE );
 
 	// a cameo wearing an "x5" stands for five, and the "+N" is what none of them shows
 	Int shown = 0;
@@ -12666,7 +12750,7 @@ void InGameUI::drawQueueTray( void )
 
 	IRegion2D cellsBox;
 	cellsBox.lo.x = trayBorder;
-	cellsBox.hi.y = alertTab.lo.y - REAL_TO_INT( SKILL_GRID_GAP * scale ) - trayBorder;
+	cellsBox.hi.y = m_feedFloor - REAL_TO_INT( SKILL_GRID_GAP * scale ) - trayBorder;
 	cellsBox.lo.y = cellsBox.hi.y - cell.y;
 	cellsBox.hi.x = cellsBox.lo.x + cells * cell.x + ( cells - 1 ) * gap;
 	IRegion2D tray = cellsBox;
@@ -12693,7 +12777,7 @@ void InGameUI::drawQueueTray( void )
 		place.hi.x = place.lo.x + cell.x;
 		place.hi.y = cellsBox.hi.y;
 		HtmlValues entry;
-		putCell( entry, place, pageRing( gap ) );
+		putCell( entry, place, pageRing( gap, scale ), scale );
 		cellList.push_back( entry );
 	}
 
@@ -12701,6 +12785,8 @@ void InGameUI::drawQueueTray( void )
 	{
 		m_queueOverlay = new HtmlOverlay( m_superweaponNormalFont );
 		m_queueFrontOverlay = new HtmlOverlay( m_superweaponNormalFont );
+		m_queueOverlay->setHud( TRUE );
+		m_queueFrontOverlay->setHud( TRUE );
 	}
 	values[ "layer" ] = "back";
 	m_queueOverlay->setPage( HtmlTemplate_expand( m_queuePage, values, lists, lookupGameText ) );

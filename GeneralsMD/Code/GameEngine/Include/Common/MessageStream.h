@@ -225,8 +225,8 @@ public:
 		MSG_META_SELECT_PREV_WORKER,                ///< select 'prev' worker
 		MSG_META_SELECT_NEXT_IDLE_WORKER,           ///< select 'next' idle worker
 
-		// command-bar grid hot keys: one per visible command button, laid out 7 columns x 2 rows
-		// (slot 01/02 = column 1 top/bottom, 03/04 = column 2, ... 13/14 = column 7)
+		// command-bar grid hot keys: one per place of the 6 x 3 command grid, read along the rows
+		// (01-06 the top row, 07-12 the middle one, 13-18 the bottom); see CommandPlace
 		MSG_META_COMMAND_SLOT01,    ///< press command bar slot 01
 		MSG_META_COMMAND_SLOT02,    ///< press command bar slot 02
 		MSG_META_COMMAND_SLOT03,    ///< press command bar slot 03
@@ -241,6 +241,10 @@ public:
 		MSG_META_COMMAND_SLOT12,    ///< press command bar slot 12
 		MSG_META_COMMAND_SLOT13,    ///< press command bar slot 13
 		MSG_META_COMMAND_SLOT14,    ///< press command bar slot 14
+		MSG_META_COMMAND_SLOT15,    ///< press command bar slot 15
+		MSG_META_COMMAND_SLOT16,    ///< press command bar slot 16
+		MSG_META_COMMAND_SLOT17,    ///< press command bar slot 17
+		MSG_META_COMMAND_SLOT18,    ///< press command bar slot 18
 		MSG_META_SHORTCUT_SLOT01,   ///< press general's power shortcut bar slot 01 (F1)
 		MSG_META_SHORTCUT_SLOT02,   ///< press general's power shortcut bar slot 02
 		MSG_META_SHORTCUT_SLOT03,   ///< press general's power shortcut bar slot 03
@@ -296,6 +300,7 @@ public:
 		MSG_META_TOGGLE_FORCEATTACK,								///< arm force fire for the next order click (fork)
 		MSG_META_HOLD_POSITION,											///< hold position: guard in place, no pursuit (fork)
 		MSG_META_TOGGLE_GUARD,											///< arm guard for the next order click or drag (fork)
+		MSG_META_TOGGLE_MOVE,												///< arm a plain move for the next order click or drag (fork)
 		MSG_META_TOGGLE_PAUSE,											///< pause/unpause, single player and replay only (fork)
 		MSG_META_TOGGLE_PURCHASE_SCIENCE,						///< open/close the general's promotion screen (fork)
 		

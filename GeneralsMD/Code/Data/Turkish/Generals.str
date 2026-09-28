@@ -14634,7 +14634,7 @@ GUI:CommandSlot01
 END
 
 GUI:CommandSlot01Description
-"Komut çubuğu yuvası 01'e basar (sütun 1, üst sıra, varsayılan ızgara düzeninde 'Q')."
+"Komut çubuğunun 1. yuvasına basar (1. sütun, üst sıra; varsayılan ızgara düzeninde 'Q')."
 END
 
 GUI:CommandSlot02
@@ -14642,7 +14642,7 @@ GUI:CommandSlot02
 END
 
 GUI:CommandSlot02Description
-"Komut çubuğu yuvası 02'ye basar (sütun 1, alt sıra, varsayılan ızgara düzeninde 'Z')."
+"Komut çubuğunun 2. yuvasına basar (2. sütun, üst sıra; varsayılan ızgara düzeninde 'W')."
 END
 
 GUI:CommandSlot03
@@ -14650,7 +14650,7 @@ GUI:CommandSlot03
 END
 
 GUI:CommandSlot03Description
-"Komut çubuğu yuvası 03'e basar (sütun 2, üst sıra, varsayılan ızgara düzeninde 'W')."
+"Komut çubuğunun 3. yuvasına basar (3. sütun, üst sıra; varsayılan ızgara düzeninde 'E')."
 END
 
 GUI:CommandSlot04
@@ -14658,7 +14658,7 @@ GUI:CommandSlot04
 END
 
 GUI:CommandSlot04Description
-"Komut çubuğu yuvası 04'e basar (sütun 2, alt sıra, varsayılan ızgara düzeninde 'X')."
+"Komut çubuğunun 4. yuvasına basar (4. sütun, üst sıra; varsayılan ızgara düzeninde 'R')."
 END
 
 GUI:CommandSlot05
@@ -14666,7 +14666,7 @@ GUI:CommandSlot05
 END
 
 GUI:CommandSlot05Description
-"Komut çubuğu yuvası 05'e basar (sütun 3, üst sıra, varsayılan ızgara düzeninde 'E')."
+"Komut çubuğunun 5. yuvasına basar (5. sütun, üst sıra; varsayılan ızgara düzeninde 'T')."
 END
 
 GUI:CommandSlot06
@@ -14674,7 +14674,7 @@ GUI:CommandSlot06
 END
 
 GUI:CommandSlot06Description
-"Komut çubuğu yuvası 06'ya basar (sütun 3, alt sıra, varsayılan ızgara düzeninde 'C')."
+"Komut çubuğunun 6. yuvasına basar (6. sütun, üst sıra; varsayılan ızgara düzeninde 'Y')."
 END
 
 GUI:CommandSlot07
@@ -14682,7 +14682,7 @@ GUI:CommandSlot07
 END
 
 GUI:CommandSlot07Description
-"Komut çubuğu yuvası 07'ye basar (sütun 4, üst sıra, varsayılan ızgara düzeninde 'R')."
+"Komut çubuğunun 7. yuvasına basar (1. sütun, orta sıra; varsayılan ızgara düzeninde 'A'). Birliğin Saldır düğmesi buradadır."
 END
 
 GUI:CommandSlot08
@@ -14690,7 +14690,7 @@ GUI:CommandSlot08
 END
 
 GUI:CommandSlot08Description
-"Komut çubuğu yuvası 08'e basar (sütun 4, alt sıra, varsayılan ızgara düzeninde 'V')."
+"Komut çubuğunun 8. yuvasına basar (2. sütun, orta sıra; varsayılan ızgara düzeninde 'S'). Birliğin Dur düğmesi buradadır."
 END
 
 GUI:CommandSlot09
@@ -14698,7 +14698,7 @@ GUI:CommandSlot09
 END
 
 GUI:CommandSlot09Description
-"Komut çubuğu yuvası 09'a basar (sütun 5, üst sıra, varsayılan ızgara düzeninde 'T')."
+"Komut çubuğunun 9. yuvasına basar (3. sütun, orta sıra; varsayılan ızgara düzeninde 'D'). Saldırarak İlerle düğmesi buradadır."
 END
 
 GUI:CommandSlot10
@@ -14706,7 +14706,7 @@ GUI:CommandSlot10
 END
 
 GUI:CommandSlot10Description
-"Komut çubuğunun 10. yuvasına basar (5. sütun, alt sıra; varsayılan ızgara düzeninde 'B')."
+"Komut çubuğunun 10. yuvasına basar (4. sütun, orta sıra; varsayılan ızgara düzeninde 'F')."
 END
 
 GUI:CommandSlot11
@@ -14714,7 +14714,7 @@ GUI:CommandSlot11
 END
 
 GUI:CommandSlot11Description
-"Komut çubuğunun 11. yuvasına basar (6. sütun, üst sıra; varsayılan ızgara düzeninde 'Y')."
+"Komut çubuğunun 11. yuvasına basar (5. sütun, orta sıra; varsayılan ızgara düzeninde 'G')."
 END
 
 GUI:CommandSlot12
@@ -14722,7 +14722,7 @@ GUI:CommandSlot12
 END
 
 GUI:CommandSlot12Description
-"Komut çubuğunun 12. yuvasına basar (6. sütun, alt sıra; varsayılan ızgara düzeninde 'N')."
+"Komut çubuğunun 12. yuvasına basar (6. sütun, orta sıra; varsayılan ızgara düzeninde 'H')."
 END
 
 GUI:CommandSlot13
@@ -14730,7 +14730,7 @@ GUI:CommandSlot13
 END
 
 GUI:CommandSlot13Description
-"Komut çubuğunun 13. yuvasına basar (7. sütun, üst sıra; varsayılan ızgara düzeninde 'U')."
+"Komut çubuğunun 13. yuvasına basar (1. sütun, alt sıra; varsayılan ızgara düzeninde 'Z'). Tahliye düğmesi buradadır: birliğin yolcularını ya da binadaki garnizonu indirir."
 END
 
 GUI:CommandSlot14
@@ -14738,7 +14738,39 @@ GUI:CommandSlot14
 END
 
 GUI:CommandSlot14Description
-"Komut çubuğunun 14. yuvasına basar (7. sütun, alt sıra; varsayılan ızgara düzeninde 'M')."
+"Komut çubuğunun 14. yuvasına basar (2. sütun, alt sıra; varsayılan ızgara düzeninde 'X'). Koru düğmesi buradadır."
+END
+
+GUI:CommandSlot15
+"Komut Çubuğu Yuvası 15"
+END
+
+GUI:CommandSlot15Description
+"Komut çubuğunun 15. yuvasına basar (3. sütun, alt sıra; varsayılan ızgara düzeninde 'C'). Mevzini Koru düğmesi buradadır."
+END
+
+GUI:CommandSlot16
+"Komut Çubuğu Yuvası 16"
+END
+
+GUI:CommandSlot16Description
+"Komut çubuğunun 16. yuvasına basar (4. sütun, alt sıra; varsayılan ızgara düzeninde 'V')."
+END
+
+GUI:CommandSlot17
+"Komut Çubuğu Yuvası 17"
+END
+
+GUI:CommandSlot17Description
+"Komut çubuğunun 17. yuvasına basar (5. sütun, alt sıra; varsayılan ızgara düzeninde 'B'). Binanın toplanma noktası düğmesi buradadır."
+END
+
+GUI:CommandSlot18
+"Komut Çubuğu Yuvası 18"
+END
+
+GUI:CommandSlot18Description
+"Komut çubuğunun 18. yuvasına basar (6. sütun, alt sıra; varsayılan ızgara düzeninde 'N'). Sat düğmesi buradadır."
 END
 
 GUI:TogglePurchaseScience
@@ -14751,38 +14783,6 @@ END
 
 GUI:StopDescription
 "Seçili birliklerin yaptığı işi durdurur."
-END
-
-GUI:ToggleAttackMove
-"Saldırarak İlerle"
-END
-
-GUI:ToggleAttackMoveDescription
-"Saldırarak ilerleme modunu açar: seçili birliklerin gideceği yere sol tıklayın, yolda karşılaştıkları her şeyle çarpışsınlar. Onları bir hat boyunca yaymak için sol tuşu sürükleyin. Sağ tıklama modu kapatır."
-END
-
-GUI:ToggleForceAttack
-"Saldır"
-END
-
-GUI:ToggleForceAttackDescription
-"Zorla saldırı modunu açar: sonraki sol tıklama, altındaki her şeye saldırı emridir; kendi birlikleriniz ve boş zemin de dahil. Sağ tıklama modu kapatır."
-END
-
-GUI:ToggleGuard
-"Koru"
-END
-
-GUI:ToggleGuardDescription
-"Koruma modunu açar: sol tıklama seçili birlikleri o noktaya yerleştirir, sol tuşla sürüklemek onları çizdiğiniz hat boyunca dizer. Sağ tıklama modu kapatır."
-END
-
-GUI:HoldPosition
-"Mevzini Koru"
-END
-
-GUI:HoldPositionDescription
-"Seçili her birlik durduğu noktayı korur: menzile gireni vurur ama asla peşine düşmez."
 END
 
 GUI:SignalAttack
@@ -15375,30 +15375,6 @@ END
 
 GUI:OptionsGroupInput
 "Kontrol Düzeni"
-END
-
-GUI:InputScheme
-"Fare ve Klavye"
-END
-
-GUI:InputScheme0
-"Modern"
-END
-
-GUI:InputScheme1
-"Legacy"
-END
-
-TOOLTIP:InputScheme
-"Modern: sol tık seçer, sağ tık emir verir, orta tuş kamerayı gezdirir, komut çubuğu ızgara tuşlarıyla kullanılır. Legacy: oyunun çıktığı hâldeki fare ve tuşlar, sonradan eklenenlerin hiçbiri olmadan."
-END
-
-GUI:WasdCamera
-"W A S D Kamera"
-END
-
-TOOLTIP:WasdCamera
-"W A S D kamerayı gezdirir. F saldırır, G durdurur, H saldırarak ilerler, J gözcü koyar, K konumu korur; komut çubuğunun üst sırası Q E R T Y U I olur. Yalnızca Modern girişte."
 END
 
 GUI:ChromaLighting

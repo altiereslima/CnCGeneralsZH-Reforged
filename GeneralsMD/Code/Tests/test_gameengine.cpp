@@ -1057,22 +1057,6 @@ TEST(force_fire_is_the_attack_key_and_nothing_else)
 	CHECK( !CommandXlat_isForceAttackTargeting( false, true ) );
 }
 
-/* InGameUI.cpp: Legacy is the game as shipped, where holding ctrl is force fire.  Modern keeps ctrl for
-   the shared pace and force fires on the attack key alone. */
-extern Bool InGameUI_isForceFireOn( Bool forceAttackArmed, Bool ctrlHeld, Bool legacyInput );
-
-TEST(legacy_ctrl_force_fires_and_modern_ctrl_does_not)
-{
-	CHECK(  InGameUI_isForceFireOn( false, true,  true  ) );
-	CHECK( !InGameUI_isForceFireOn( false, true,  false ) );
-
-	/* the attack key arms it under either scheme */
-	CHECK(  InGameUI_isForceFireOn( true,  false, false ) );
-	CHECK(  InGameUI_isForceFireOn( true,  false, true  ) );
-
-	CHECK( !InGameUI_isForceFireOn( false, false, true  ) );
-}
-
 /* Player.cpp: the lobby's unit limit is 840 units shared out by the players who are not watching. */
 TEST(unit_limit_shares_840_between_the_players)
 {
@@ -1117,14 +1101,15 @@ TEST(income_sharing_splits_evenly_and_keeps_the_remainder)
 	CHECK_EQ( IncomeAllyShare( 200, 1 ), 0u );
 }
 
-/* CommandXlat.cpp: a right drag spreads the selection along the line drawn, but only when there is
-   a selection to spread and no GUI command already waiting for the click. */
+/* CommandXlat.cpp: with the move, attack move or guard key armed, a left drag spreads the selection
+   along the line drawn, but only when there is a selection to spread and no GUI command already
+   waiting for the click.  The right button never draws it; a right drag pans. */
 extern Bool Command_formationDragArmed( Bool setting, Bool haveMovableSelection,
 																				Bool guiCommandPending );
 
-TEST(formation_drag_takes_the_right_button_only_when_it_is_asked_for)
+TEST(formation_drag_takes_the_armed_left_button_only_when_it_is_asked_for)
 {
-	/* on by default: a right drag with your own units selected draws the line. */
+	/* on by default: an armed left drag with your own units selected draws the line. */
 	CHECK(  Command_formationDragArmed( true, true, false ) );
 
 	/* off is off. */
@@ -2273,7 +2258,7 @@ TEST(placement_grid_snap_puts_footprint_edges_on_cell_lines)
 	CHECK_NEAR(InGameUI::snapPlacementAxis(13.0f, 0.0f), 14.5f, 0.0001f);
 }
 
-TEST(placement_row_packs_the_footprint_along_the_nearest_eighth)
+TEST(placement_row_packs_the_footprint_along_the_drag)
 {
 	Coord2D step;
 	const Real half = 0.70710678f;	/* cos and sin of an eighth of a turn */
@@ -2285,10 +2270,17 @@ TEST(placement_row_packs_the_footprint_along_the_nearest_eighth)
 	CHECK_NEAR(step.y, 0.0f, 0.0001f);
 	CHECK_EQ(InGameUI::placementRow(122.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 4);
 
-	/* a hand-drawn line 20 degrees off still runs straight, and backwards runs backwards */
-	CHECK_EQ(InGameUI::placementRow(-100.0f, 36.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 3);
+	/* backwards runs backwards */
+	CHECK_EQ(InGameUI::placementRow(-100.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 3);
 	CHECK_NEAR(step.x, -40.5f, 0.0001f);
 	CHECK_NEAR(step.y, 0.0f, 0.0001f);
+
+	/* a line dragged 20 degrees off the axis runs at 20 degrees, not flat: the pieces meet through
+	 * the facing face, 40 / cos 20 apart, and the hair */
+	const Real twenty = 20.0f * PI / 180.0f;
+	InGameUI::placementRow(100.0f * Cos(twenty), 100.0f * Sin(twenty), 1.0f, 0.0f, 20.0f, 15.0f, 50, &step);
+	CHECK_NEAR(step.y / step.x, Sin(twenty) / Cos(twenty), 0.0001f);
+	CHECK_NEAR(sqrt(step.x * step.x + step.y * step.y), 40.0f / Cos(twenty) + 0.5f, 0.001f);
 
 	/* along y the step is the footprint's other side */
 	InGameUI::placementRow(0.0f, -90.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step);
@@ -2297,7 +2289,7 @@ TEST(placement_row_packs_the_footprint_along_the_nearest_eighth)
 
 	/* a diagonal slides each piece along the last one's long side instead of meeting it corner
 	 * to corner: 30 on each axis and the hair, where 40 by 30 left a triangle of ground */
-	CHECK_EQ(InGameUI::placementRow(80.0f, 60.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 3);
+	CHECK_EQ(InGameUI::placementRow(80.0f, 80.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 3);
 	CHECK_NEAR(step.x, 30.0f + 0.5f * half, 0.001f);
 	CHECK_NEAR(step.y, 30.0f + 0.5f * half, 0.001f);
 
@@ -3088,6 +3080,269 @@ TEST(controlbar_promotion_columns_map_to_the_screens_three_rows)
 	CHECK_EQ( seen1, (1 << MAX_PURCHASE_SCIENCE_RANK_1) - 1 );
 	CHECK_EQ( seen3, (1 << MAX_PURCHASE_SCIENCE_RANK_3) - 1 );
 	CHECK_EQ( seen8, (1 << MAX_PURCHASE_SCIENCE_RANK_8) - 1 );
+}
+
+TEST(controlbar_command_places_follow_the_owners_drawing)
+{
+	enum { SLOTS = 14 };
+	Int places[ SLOTS ];
+	const Int N = GUI_COMMAND_NONE;
+	const Int C = GUI_COMMAND_DOZER_CONSTRUCT;
+	const Int nothingPinned[ SLOTS ] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
+
+	/* nothing on the bar, which is what getCommandPlaces hands over for a hidden command group (the
+	   last unit deselected or dead) whatever its buttons still hold: no place taken, no page keys */
+	const Int empty[ SLOTS ] = { N, N, N, N, N, N, N, N, N, N, N, N, N, N };
+	CHECK( !ControlBar_commandPlaces( empty, nothingPinned, SLOTS, places ) );
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		CHECK_EQ( places[ slot ], -1 );
+
+	/* AmericaDozerCommandSet: structures in slots 1 to 9, 11 and 13, disarm mines in 14.  The disarm
+	   is pinned to N by its button's name; the eleven structures pack toward the top left in the
+	   owner's order, Q A W Z S E X D R C F */
+	const Int dozer[ SLOTS ] = { C, C, C, C, C, C, C, C, C, N, C, N, C, GUI_COMMAND_FIRE_WEAPON };
+	Int dozerPinned[ SLOTS ];
+	memcpy( dozerPinned, nothingPinned, sizeof( dozerPinned ) );
+	dozerPinned[ 13 ] = ControlBar_namedCommandPlace( "Command_DisarmMinesAtPosition" );
+	CHECK( !ControlBar_commandPlaces( dozer, dozerPinned, SLOTS, places ) );
+	const Int dozerPlaces[ SLOTS ] = { COMMAND_PLACE_Q, COMMAND_PLACE_A, COMMAND_PLACE_W, COMMAND_PLACE_Z,
+		COMMAND_PLACE_S, COMMAND_PLACE_E, COMMAND_PLACE_X, COMMAND_PLACE_D, COMMAND_PLACE_R, -1, COMMAND_PLACE_C, -1,
+		COMMAND_PLACE_F, COMMAND_PLACE_N };
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		CHECK_EQ( places[ slot ], dozerPlaces[ slot ] );
+
+	/* AmericaVehicleHumveeCommandSet: three drones, five passengers, evacuate, attack move, guard,
+	   stop.  The orders take the owner's places whatever slot they were in - stop S, attack move D,
+	   eject Z, guard X - and A, C and V are kept for attack, hold position and move; the drones and
+	   passengers take what is left in the owner's order, Q W E R F T G Y */
+	const Int humvee[ SLOTS ] = { GUI_COMMAND_OBJECT_UPGRADE, GUI_COMMAND_OBJECT_UPGRADE, GUI_COMMAND_OBJECT_UPGRADE,
+		GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EXIT_CONTAINER,
+		GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EVACUATE, N, GUI_COMMAND_ATTACK_MOVE, N, GUI_COMMAND_GUARD, GUI_COMMAND_STOP };
+	CHECK( ControlBar_commandPlaces( humvee, nothingPinned, SLOTS, places ) );
+	const Int humveePlaces[ SLOTS ] = { COMMAND_PLACE_Q, COMMAND_PLACE_W, COMMAND_PLACE_E, COMMAND_PLACE_R,
+		COMMAND_PLACE_F, COMMAND_PLACE_T, COMMAND_PLACE_G, COMMAND_PLACE_Y, COMMAND_PLACE_Z, -1, COMMAND_PLACE_D, -1,
+		COMMAND_PLACE_X, COMMAND_PLACE_S };
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		CHECK_EQ( places[ slot ], humveePlaces[ slot ] );
+
+	/* ChinaCommandCenterCommandSet: a dozer to build, seven powers, two upgrades, rally, sell.  Rally
+	   stands on B and sell on N whatever slot they were in; the dozer first on Q, then the rest */
+	const Int centre[ SLOTS ] = { GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_SPECIAL_POWER, GUI_COMMAND_SPECIAL_POWER,
+		GUI_COMMAND_SPECIAL_POWER, GUI_COMMAND_SPECIAL_POWER, GUI_COMMAND_SPECIAL_POWER, GUI_COMMAND_SPECIAL_POWER,
+		GUI_COMMAND_SPECIAL_POWER, GUI_COMMAND_OBJECT_UPGRADE, GUI_COMMAND_OBJECT_UPGRADE, N, N,
+		GUI_COMMAND_SET_RALLY_POINT, GUI_COMMAND_SELL };
+	CHECK( !ControlBar_commandPlaces( centre, nothingPinned, SLOTS, places ) );
+	const Int centrePlaces[ SLOTS ] = { COMMAND_PLACE_Q, COMMAND_PLACE_A, COMMAND_PLACE_W, COMMAND_PLACE_Z,
+		COMMAND_PLACE_S, COMMAND_PLACE_E, COMMAND_PLACE_X, COMMAND_PLACE_D, COMMAND_PLACE_R, COMMAND_PLACE_C, -1, -1,
+		COMMAND_PLACE_B, COMMAND_PLACE_N };
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		CHECK_EQ( places[ slot ], centrePlaces[ slot ] );
+
+	/* a factory whose set opens on an upgrade, nine units after it, a garrison, rally and sell: the
+	   units take Q A W S E X D R C, round the garrison's evacuate on Z, and the upgrade comes after
+	   them on F.  Without production first the upgrade would have taken Q */
+	const Int factory[ SLOTS ] = { GUI_COMMAND_OBJECT_UPGRADE, GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_UNIT_BUILD,
+		GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_UNIT_BUILD,
+		GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_EVACUATE, N,
+		GUI_COMMAND_SET_RALLY_POINT, GUI_COMMAND_SELL };
+	CHECK( !ControlBar_commandPlaces( factory, nothingPinned, SLOTS, places ) );
+	const Int factoryPlaces[ SLOTS ] = { COMMAND_PLACE_F, COMMAND_PLACE_Q, COMMAND_PLACE_A, COMMAND_PLACE_W,
+		COMMAND_PLACE_S, COMMAND_PLACE_E, COMMAND_PLACE_X, COMMAND_PLACE_D, COMMAND_PLACE_R, COMMAND_PLACE_C,
+		COMMAND_PLACE_Z, -1, COMMAND_PLACE_B, COMMAND_PLACE_N };
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		CHECK_EQ( places[ slot ], factoryPlaces[ slot ] );
+
+	/* Demo_GLAWorkerCommandSet, the fullest worker: ten structures, the suicide charge, the switch to
+	   the fakes and disarm mines.  The three are pinned by name to B, H and N, and the structures pack
+	   Q A W Z S E X D R C */
+	const Int worker[ SLOTS ] = { C, C, C, C, C, C, C, C, C, C, GUI_COMMAND_FIRE_WEAPON, N,
+		GUI_COMMAND_OBJECT_UPGRADE, GUI_COMMAND_FIRE_WEAPON };
+	Int workerPinned[ SLOTS ];
+	memcpy( workerPinned, nothingPinned, sizeof( workerPinned ) );
+	workerPinned[ 10 ] = ControlBar_namedCommandPlace( "Demo_Command_TertiarySuicide" );
+	workerPinned[ 12 ] = ControlBar_namedCommandPlace( "Command_UpgradeGLAWorkerFakeCommandSet" );
+	workerPinned[ 13 ] = ControlBar_namedCommandPlace( "Command_DisarmMinesAtPosition" );
+	CHECK( !ControlBar_commandPlaces( worker, workerPinned, SLOTS, places ) );
+	const Int workerPlaces[ SLOTS ] = { COMMAND_PLACE_Q, COMMAND_PLACE_A, COMMAND_PLACE_W, COMMAND_PLACE_Z,
+		COMMAND_PLACE_S, COMMAND_PLACE_E, COMMAND_PLACE_X, COMMAND_PLACE_D, COMMAND_PLACE_R, COMMAND_PLACE_C,
+		COMMAND_PLACE_B, -1, COMMAND_PLACE_H, COMMAND_PLACE_N };
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		CHECK_EQ( places[ slot ], workerPlaces[ slot ] );
+
+	// the fake set's switch back stands where the switch to it stood, and a name the table lacks has no place
+	CHECK_EQ( ControlBar_namedCommandPlace( "Command_UpgradeGLAWorkerRealCommandSet" ), (Int)COMMAND_PLACE_H );
+	CHECK_EQ( ControlBar_namedCommandPlace( "Command_ConstructGLABarracks" ), -1 );
+
+	/* the biggest set there is, the Boss general's dozer, fourteen structures: every one gets a place,
+	   no two share one, and they run the owner's order to G */
+	const Int boss[ SLOTS ] = { C, C, C, C, C, C, C, C, C, C, C, C, C, C };
+	ControlBar_commandPlaces( boss, nothingPinned, SLOTS, places );
+	const Int bossPlaces[ SLOTS ] = { COMMAND_PLACE_Q, COMMAND_PLACE_A, COMMAND_PLACE_W, COMMAND_PLACE_Z,
+		COMMAND_PLACE_S, COMMAND_PLACE_E, COMMAND_PLACE_X, COMMAND_PLACE_D, COMMAND_PLACE_R, COMMAND_PLACE_C,
+		COMMAND_PLACE_F, COMMAND_PLACE_T, COMMAND_PLACE_V, COMMAND_PLACE_G };
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		CHECK_EQ( places[ slot ], bossPlaces[ slot ] );
+}
+
+/* The money plate follows its figure's width: wider at once, narrower only once the narrower figure
+   has held for MONEY_SHRINK_HOLD_MS, and then eased down over MONEY_SHRINK_EASE_MS. */
+TEST(the_money_plate_grows_at_once_and_shrinks_only_after_a_hold)
+{
+	const Int WIDE = 120, NARROW = 100;
+	const UnsignedInt START = 100000;
+
+	MoneyPlateWidth plate = MoneyPlateWidth();
+	CHECK_EQ( InGameUI_moneyPlateWidth( plate, NARROW, START ), NARROW );
+	CHECK_EQ( InGameUI_moneyPlateWidth( plate, WIDE, START + 16 ), WIDE );
+
+	// narrower: held until the hold is up, then eased, never under the figure, and settled at the end
+	UnsignedInt now = START + 1000;
+	CHECK_EQ( InGameUI_moneyPlateWidth( plate, NARROW, now ), WIDE );
+	CHECK_EQ( InGameUI_moneyPlateWidth( plate, NARROW, now + MONEY_SHRINK_HOLD_MS - 1 ), WIDE );
+	CHECK_EQ( InGameUI_moneyPlateWidth( plate, NARROW, now + MONEY_SHRINK_HOLD_MS ), WIDE );
+	Int last = WIDE;
+	for( UnsignedInt step = 16; step < MONEY_SHRINK_EASE_MS; step += 16 )
+	{
+		const Int width = InGameUI_moneyPlateWidth( plate, NARROW, now + MONEY_SHRINK_HOLD_MS + step );
+		CHECK( width <= last && width >= NARROW );
+		last = width;
+	}
+	CHECK_EQ( InGameUI_moneyPlateWidth( plate, NARROW, now + MONEY_SHRINK_HOLD_MS + MONEY_SHRINK_EASE_MS ), NARROW );
+
+	// a wider figure in the wait calls the shrink off, and the next narrower one starts the wait again
+	now += 10000;
+	CHECK_EQ( InGameUI_moneyPlateWidth( plate, WIDE, now ), WIDE );
+	CHECK_EQ( InGameUI_moneyPlateWidth( plate, NARROW, now + 1000 ), WIDE );
+	CHECK_EQ( InGameUI_moneyPlateWidth( plate, WIDE, now + 2500 ), WIDE );
+	CHECK_EQ( InGameUI_moneyPlateWidth( plate, NARROW, now + 3000 ), WIDE );
+	CHECK_EQ( InGameUI_moneyPlateWidth( plate, NARROW, now + 3000 + MONEY_SHRINK_HOLD_MS - 1 ), WIDE );
+
+	// 9990 and 10010 in turn every second while building: the plate never moves
+	now += 20000;
+	for( Int second = 0; second < 30; second++ )
+		for( UnsignedInt frame = 0; frame < 1000; frame += 16 )
+			CHECK_EQ( InGameUI_moneyPlateWidth( plate, second % 2 ? NARROW : WIDE, now + second * 1000 + frame ), WIDE );
+}
+
+/* CommandMapReforged.ini binds COMMAND_SLOTnn to the key of place nn - 1: the grid reads Q W E R T Y,
+   A S D F G H, Z X C V B N, so a place's key is where the owner put it on 2026-09-28 - a unit's attack
+   on A, stop on S, attack move on D, eject on Z, guard on X, hold on C, move on V; a building's sell
+   on N, rally point on B and evacuate on Z; a worker's disarm on N, its fakes on H and the Demolition
+   worker's charge on B.  No other record may hold one of those letters bare, or it comes first in the
+   list and steals the key. */
+TEST(the_command_grid_keys_are_the_places_and_n_sells_and_b_rallies)
+{
+	FILE *fp = fopen( COMMAND_MAP_REFORGED_INI, "rb" );
+	CHECK( fp != NULL );
+	if( fp == NULL )
+		return;
+	std::string text;
+	char chunk[ 1024 ];
+	size_t got = 0;
+	while( ( got = fread( chunk, 1, sizeof( chunk ), fp ) ) > 0 )
+		text.append( chunk, got );
+	fclose( fp );
+
+	static const char GRID_KEYS[] = "QWERTYASDFGHZXCVBN";
+	CHECK_EQ( (Int)strlen( GRID_KEYS ), (Int)COMMAND_PLACE_COUNT );
+	CHECK_EQ( GRID_KEYS[ COMMAND_PLACE_ATTACK ], 'A' );
+	CHECK_EQ( GRID_KEYS[ COMMAND_PLACE_STOP ], 'S' );
+	CHECK_EQ( GRID_KEYS[ COMMAND_PLACE_ATTACK_MOVE ], 'D' );
+	CHECK_EQ( GRID_KEYS[ COMMAND_PLACE_EJECT ], 'Z' );
+	CHECK_EQ( GRID_KEYS[ COMMAND_PLACE_GUARD ], 'X' );
+	CHECK_EQ( GRID_KEYS[ COMMAND_PLACE_HOLD ], 'C' );
+	CHECK_EQ( GRID_KEYS[ COMMAND_PLACE_MOVE ], 'V' );
+	CHECK_EQ( GRID_KEYS[ COMMAND_PLACE_RALLY ], 'B' );
+	CHECK_EQ( GRID_KEYS[ COMMAND_PLACE_SELL ], 'N' );
+	CHECK_EQ( GRID_KEYS[ COMMAND_PLACE_CLEAR_MINES ], 'N' );
+	CHECK_EQ( GRID_KEYS[ COMMAND_PLACE_FAKE_STRUCTURES ], 'H' );
+	CHECK_EQ( GRID_KEYS[ COMMAND_PLACE_EXPLOSIVE ], 'B' );
+	CHECK_EQ( GRID_KEYS[ ControlBar_namedCommandPlace( "Command_DisarmMinesAtPosition" ) ], 'N' );
+	CHECK_EQ( GRID_KEYS[ ControlBar_namedCommandPlace( "Command_UpgradeGLAWorkerFakeCommandSet" ) ], 'H' );
+	CHECK_EQ( GRID_KEYS[ ControlBar_namedCommandPlace( "Demo_Command_TertiarySuicide" ) ], 'B' );
+
+	// a set of nothing but flowing commands fills the grid in the owner's order of 2026-09-28
+	static const char FILL_KEYS[] = "QAWZSEXDRCFTVGYBHN";
+	Int flowing[ COMMAND_PLACE_COUNT ];
+	Int unpinned[ COMMAND_PLACE_COUNT ];
+	Int filled[ COMMAND_PLACE_COUNT ];
+	for( Int slot = 0; slot < COMMAND_PLACE_COUNT; slot++ )
+	{
+		flowing[ slot ] = GUI_COMMAND_SPECIAL_POWER;
+		unpinned[ slot ] = -1;
+	}
+	CHECK( !ControlBar_commandPlaces( flowing, unpinned, COMMAND_PLACE_COUNT, filled ) );
+	for( Int slot = 0; slot < COMMAND_PLACE_COUNT; slot++ )
+		CHECK_EQ( GRID_KEYS[ filled[ slot ] ], FILL_KEYS[ slot ] );
+
+	// and the command types that land there, whatever slot of their set they sit in.  A unit that
+	// attack moves keeps A, C and V for the page's attack, hold and move keys: its first flowing
+	// command is Q and its second W
+	enum { SLOTS = 8 };
+	const Int unit[ SLOTS ] = { GUI_COMMAND_STOP, GUI_COMMAND_GUARD, GUI_COMMAND_EVACUATE, GUI_COMMAND_ATTACK_MOVE,
+		GUI_COMMAND_SPECIAL_POWER, GUI_COMMAND_SPECIAL_POWER, GUI_COMMAND_NONE, GUI_COMMAND_NONE };
+	Int places[ SLOTS ];
+	CHECK( ControlBar_commandPlaces( unit, unpinned, SLOTS, places ) );
+	CHECK_EQ( GRID_KEYS[ places[ 0 ] ], 'S' );
+	CHECK_EQ( GRID_KEYS[ places[ 1 ] ], 'X' );
+	CHECK_EQ( GRID_KEYS[ places[ 2 ] ], 'Z' );
+	CHECK_EQ( GRID_KEYS[ places[ 3 ] ], 'D' );
+	CHECK_EQ( GRID_KEYS[ places[ 4 ] ], 'Q' );
+	CHECK_EQ( GRID_KEYS[ places[ 5 ] ], 'W' );
+	const Int building[ SLOTS ] = { GUI_COMMAND_SELL, GUI_COMMAND_SET_RALLY_POINT, GUI_COMMAND_EVACUATE,
+		GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_NONE, GUI_COMMAND_NONE, GUI_COMMAND_NONE };
+	CHECK( !ControlBar_commandPlaces( building, unpinned, SLOTS, places ) );
+	CHECK_EQ( GRID_KEYS[ places[ 0 ] ], 'N' );
+	CHECK_EQ( GRID_KEYS[ places[ 1 ] ], 'B' );
+	CHECK_EQ( GRID_KEYS[ places[ 2 ] ], 'Z' );
+	CHECK_EQ( GRID_KEYS[ places[ 3 ] ], 'Q' );
+	CHECK_EQ( GRID_KEYS[ places[ 4 ] ], 'A' );
+
+	// every block as name, key and modifiers
+	Int slotsBound = 0;
+	std::string name, key, modifiers;
+	size_t at = 0;
+	while( at < text.size() )
+	{
+		size_t end = text.find( '\n', at );
+		if( end == std::string::npos )
+			end = text.size();
+		std::string line = text.substr( at, end - at );
+		at = end + 1;
+		const size_t comment = line.find( ';' );
+		if( comment != std::string::npos )
+			line.erase( comment );
+		char word[ 64 ] = { 0 };
+		char value[ 64 ] = { 0 };
+		if( sscanf( line.c_str(), " CommandMap %63s", word ) == 1 )
+		{
+			name = word;
+			key.clear();
+			modifiers = "NONE";
+		}
+		else if( sscanf( line.c_str(), " Key = %63s", value ) == 1 )
+			key = value;
+		else if( sscanf( line.c_str(), " Modifiers = %63s", value ) == 1 )
+			modifiers = value;
+		else if( sscanf( line.c_str(), " %63s", word ) == 1 && strcmp( word, "End" ) == 0 && !name.empty() )
+		{
+			Int slot = 0;
+			if( sscanf( name.c_str(), "COMMAND_SLOT%d", &slot ) == 1 )
+			{
+				CHECK( slot >= 1 && slot <= COMMAND_PLACE_COUNT );
+				if( slot >= 1 && slot <= COMMAND_PLACE_COUNT )
+				{
+					CHECK_STR( key.c_str(), ( std::string( "KEY_" ) + GRID_KEYS[ slot - 1 ] ).c_str() );
+					CHECK_STR( modifiers.c_str(), "NONE" );
+					slotsBound++;
+				}
+			}
+			else if( modifiers == "NONE" && key.size() == 5 && key.compare( 0, 4, "KEY_" ) == 0 )
+				CHECK( strchr( GRID_KEYS, key[ 4 ] ) == NULL );
+			name.clear();
+		}
+	}
+	CHECK_EQ( slotsBound, (Int)COMMAND_PLACE_COUNT );
 }
 
 TEST(controlbar_seconds_round_up_and_never_reach_zero_early)
@@ -9160,6 +9415,25 @@ TEST(a_supply_visit_costs_what_the_load_costs)
 	CHECK_EQ( 30u, supplyWarehouseActionDelay( 30, 1, 7, 8 ) );
 }
 
+/** A worker standing in the gap between a supply pile and a stash built beside it docked at both
+	 without a step, a $75 box every 15 frames.  A docking now waits out the rest of the shortest leg a
+	 walking worker takes, counted from the last one; a worker that did walk never waits longer. */
+TEST(a_worker_that_does_not_walk_still_pays_for_the_walk)
+{
+	// docked at frame 1000, arrives at the other building 10 frames later with a 5-frame dock delay
+	CHECK_EQ( (UnsignedInt)SUPPLY_DOCK_MIN_LEG_FRAMES - 10, supplyDockLegDelay( 5, 1010, 1000 ) );
+
+	// walked the leg: only the dock's own delay
+	CHECK_EQ( 5u, supplyDockLegDelay( 5, 1000 + SUPPLY_DOCK_MIN_LEG_FRAMES, 1000 ) );
+	CHECK_EQ( 5u, supplyDockLegDelay( 5, 5000, 1000 ) );
+
+	// a dock delay longer than what is left of the leg is not shortened
+	CHECK_EQ( 90u, supplyDockLegDelay( 90, 1010, 1000 ) );
+
+	// never docked before
+	CHECK_EQ( 5u, supplyDockLegDelay( 5, 3, 0 ) );
+}
+
 
 /** EA's floor and ceil nudged the value by the largest float below one and truncated.  The nudge
 	 does not survive the addition: for anything from 2 upwards, f + 0.99999994 rounds to f + 1, so
@@ -11105,6 +11379,19 @@ TEST(the_hud_is_measured_at_the_command_bars_own_scale)
 	CHECK_NEAR( ControlBarUniformScaleFor( 0, 0 ), 1.0f, 0.001f );
 }
 
+/* The bottom HUD is drawn smaller than the rest, the owner's "too big": seventy percent of the
+	 uniform scale, so 1.26 at 1920x1080 where the boards stand at 1.8, and never under what was
+	 authored, so 1280x720 stays at 1 where seventy percent would have been 0.84. */
+TEST(controlbar_hud_scale_is_seventy_percent_and_never_below_one)
+{
+	CHECK_NEAR( ControlBarHudScaleFor( 1920, 1080 ), 1.26f, 0.001f );
+	CHECK_NEAR( ControlBarHudScaleFor( 3840, 2160 ), 2.52f, 0.001f );
+	CHECK_NEAR( ControlBarHudScaleFor( 2560, 1080 ), 1.26f, 0.001f );
+	CHECK_NEAR( ControlBarHudScaleFor( 1280, 720 ), 1.0f, 0.001f );
+	CHECK_NEAR( ControlBarHudScaleFor( 800, 600 ), 1.0f, 0.001f );
+	CHECK( ControlBarHudScaleFor( 1920, 1080 ) < ControlBarUniformScaleFor( 1920, 1080 ) );
+}
+
 /* A health bar is drawn in raw pixels over a tank whose own size on screen is set by the camera,
 	 and the camera fills the screen's *height*.  So the bar has to follow the height too.  Measured
 	 off the width it was two and a half times too wide on a 32:9 screen: the bar of a barracks
@@ -11405,61 +11692,38 @@ TEST(gameplay_conveniences_are_forced_on_and_left_the_catalog)
 	delete scratch;
 }
 
-TEST(the_input_scheme_is_a_live_menu_choice_that_starts_modern)
+TEST(an_options_ini_naming_the_removed_input_scheme_and_wasd_keys_still_loads)
 {
-	/* Legacy is read on every click and key, so the row has to say APPLY_LIVE - a restart note on a
-		 setting that already took would send the player looking for a change that is not coming.  A
-		 player who never opens the menu keeps the game they already had. */
-	const OptionDef *def = findOptionDef( "InputScheme" );
-	CHECK( def != NULL );
-	if( def == NULL )
-		return;
-	CHECK_EQ( def->kind, OPTION_ENUM );
-	CHECK_EQ( def->apply, APPLY_LIVE );
-	CHECK_EQ( def->lo, 0 );
-	CHECK_EQ( def->hi, (Int)INPUT_SCHEME_COUNT - 1 );
-	CHECK( def->widgetName != NULL && def->widgetName[ 0 ] != '\0' );
+	/* InputScheme and WasdCamera were catalog rows until the Legacy mouse and the W A S D camera came
+		 out.  Every Options.ini saved while they existed still carries both, and UserPreferences::load
+		 puts every key it reads into the map.  The catalog only looks up its own keys, so the two are
+		 left lying there, and the rows around them still load. */
+	CHECK( findOptionDef( "InputScheme" ) == NULL );
+	CHECK( findOptionDef( "WasdCamera" ) == NULL );
 
 	GlobalData *saved = TheWritableGlobalData;
 	GlobalData *scratch = NEW GlobalData;
 	TheWritableGlobalData = scratch;
 
-	CHECK_EQ( scratch->m_inputScheme, (Int)INPUT_SCHEME_MODERN );
-	CHECK( !scratch->isLegacyInput() );
-	def->set( INPUT_SCHEME_LEGACY );
-	CHECK( scratch->isLegacyInput() );
-	CHECK_EQ( def->get(), (Int)INPUT_SCHEME_LEGACY );
+	const OptionDef *orderLines = findOptionDef( "OrderLines" );
+	const OptionDef *zoom = findOptionDef( "ZoomToCursor" );
+	CHECK( orderLines != NULL && zoom != NULL );
+	orderLines->set( 1 );
+	zoom->set( 1 );
 
-	TheWritableGlobalData = saved;
-	delete scratch;
-}
+	UserPreferences pref;
+	pref[ AsciiString( "InputScheme" ) ] = AsciiString( "1" );
+	pref[ AsciiString( "WasdCamera" ) ] = AsciiString( "yes" );
+	pref[ AsciiString( "OrderLines" ) ] = AsciiString( "no" );
+	pref[ AsciiString( "ZoomToCursor" ) ] = AsciiString( "no" );
+	loadOptionsFromPreferences( pref );
 
-TEST(wasd_camera_is_a_live_check_box_that_starts_off_and_needs_modern_input)
-{
-	/* The box moves eleven keys a player already has in their hands, so nobody gets it without asking.
-		 A tick saved under Modern is kept through a switch to Legacy, which plays the game's own map,
-		 and comes back with Modern. */
-	const OptionDef *def = findOptionDef( "WasdCamera" );
-	CHECK( def != NULL );
-	if( def == NULL )
-		return;
-	CHECK_EQ( def->kind, OPTION_BOOL );
-	CHECK_EQ( def->apply, APPLY_LIVE );
-	CHECK( def->widgetName != NULL && def->widgetName[ 0 ] != '\0' );
+	CHECK_EQ( orderLines->get(), 0 );
+	CHECK_EQ( zoom->get(), 0 );
 
-	GlobalData *saved = TheWritableGlobalData;
-	GlobalData *scratch = NEW GlobalData;
-	TheWritableGlobalData = scratch;
-
-	CHECK( !scratch->m_wasdCamera );
-	CHECK( !scratch->isWasdCamera() );
-	def->set( 1 );
-	CHECK( scratch->isWasdCamera() );
-	scratch->m_inputScheme = INPUT_SCHEME_LEGACY;
-	CHECK( !scratch->isWasdCamera() );
-	CHECK_EQ( def->get(), 1 );
-	scratch->m_inputScheme = INPUT_SCHEME_MODERN;
-	CHECK( scratch->isWasdCamera() );
+	// and saving over such a file leaves the old keys alone instead of tripping on them
+	saveOptionsToPreferences( pref );
+	CHECK_STR( pref[ AsciiString( "OrderLines" ) ].str(), "no" );
 
 	TheWritableGlobalData = saved;
 	delete scratch;
@@ -12750,8 +13014,8 @@ TEST(build_placement_preview_defaults_are_the_ones_the_game_always_used)
 	// and the income trickle is off unless somebody asks for it
 	CHECK_EQ( scratch->m_moneyPerMinute, 0 );
 
-	// the right button stopped scrolling when the mouse went onto one scheme, which is what freed
-	// a right drag to draw a formation line; that is on unless somebody turns it off
+	// a left drag with the move, attack move or guard key armed draws a formation line; that is on
+	// unless somebody turns it off
 	CHECK( scratch->m_formationDrag );
 
 	delete scratch;
@@ -13896,44 +14160,6 @@ TEST(chroma_key_maps_agree_on_every_letter_and_digit)
 		CHECK_EQ(seen[cell], 0);
 		seen[cell] = 1;
 	}
-}
-
-// Where a grid key lands.  This is the decision pressCommandButton used to make inline, pulled
-// out so the keyboard lighting could ask the same question without pressing anything; every
-// row below is what the inline version did, read off it before it was moved.
-TEST(grid_press_follows_the_builders_two_key_chord)
-{
-	const Int NOTHING = ControlBar::SLOT_NOTHING;
-	const Int ARMS = ControlBar::SLOT_ARMS_CHORD;
-	const Int Q = ControlBar::CHORD_SLOT_Q;
-	const Int W = ControlBar::CHORD_SLOT_W;
-	const Int GROUP = ControlBar::CHORD_GROUP_SIZE;
-
-	// no structures on the bar: a slot is a slot, chord or no chord
-	CHECK_EQ(ControlBar::resolveGridPress(0, -1, FALSE, FALSE), 0);
-	CHECK_EQ(ControlBar::resolveGridPress(5, -1, FALSE, FALSE), 5);
-	CHECK_EQ(ControlBar::resolveGridPress(5, 0, FALSE, FALSE), 5);
-
-	// out of range names nothing
-	CHECK_EQ(ControlBar::resolveGridPress(-1, -1, FALSE, FALSE), NOTHING);
-	CHECK_EQ(ControlBar::resolveGridPress(MAX_COMMANDS_PER_SET, -1, TRUE, FALSE), NOTHING);
-
-	// a builder, nothing armed: Q and W arm, a structure's own key does nothing on its own,
-	// and a cell that is not a structure is still one press
-	CHECK_EQ(ControlBar::resolveGridPress(Q, -1, TRUE, TRUE), ARMS);
-	CHECK_EQ(ControlBar::resolveGridPress(W, -1, TRUE, FALSE), ARMS);
-	CHECK_EQ(ControlBar::resolveGridPress(4, -1, TRUE, TRUE), NOTHING);
-	CHECK_EQ(ControlBar::resolveGridPress(4, -1, TRUE, FALSE), 4);
-
-	// armed: the second key is a cell of the first group, shifted into the armed one
-	CHECK_EQ(ControlBar::resolveGridPress(0, 0, TRUE, TRUE), 0);
-	CHECK_EQ(ControlBar::resolveGridPress(3, 0, TRUE, FALSE), 3);
-	CHECK_EQ(ControlBar::resolveGridPress(0, 1, TRUE, TRUE), GROUP);
-	CHECK_EQ(ControlBar::resolveGridPress(3, 1, TRUE, FALSE), GROUP + 3);
-	CHECK_EQ(ControlBar::resolveGridPress(GROUP - 1, 1, TRUE, FALSE), GROUP + GROUP - 1);
-	// a second key from outside the first group's cells is not a cell of any group
-	CHECK_EQ(ControlBar::resolveGridPress(GROUP, 0, TRUE, FALSE), NOTHING);
-	CHECK_EQ(ControlBar::resolveGridPress(GROUP + 2, 1, TRUE, FALSE), NOTHING);
 }
 
 // The generals powers tray: the first key names a row, the second a power in it, and what the

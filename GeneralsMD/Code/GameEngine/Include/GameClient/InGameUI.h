@@ -349,6 +349,27 @@ struct SpectatorSuperweapon
 	const CommandButton *button;	///< the power's own, for its tooltip card; NULL for a power with none
 };
 
+/** The money plate's width as it follows the figure's: see InGameUI_moneyPlateWidth.  All zero is a
+	* plate never drawn. */
+struct MoneyPlateWidth
+{
+	Int target;								///< the width the plate settles at
+	Int shown;								///< the width it was last drawn at
+	Int easeFrom;							///< the width a shrink eases down from
+	UnsignedInt easeStartMs;
+	Bool easing;
+	Int pendingWidth;					///< the widest a narrower figure has needed while a shrink waits
+	UnsignedInt pendingSinceMs;
+	Bool pending;
+};
+
+/** The width to draw the money plate at, `needed` the width the figure takes now, `nowMs` the
+	* client's clock.  A wider figure widens it at once; a narrower one has to hold for
+	* MONEY_SHRINK_HOLD_MS before the plate eases down to it over MONEY_SHRINK_EASE_MS, and anything
+	* wider in that wait calls the shrink off.  Never narrower than `needed`. */
+enum { MONEY_SHRINK_HOLD_MS = 3000, MONEY_SHRINK_EASE_MS = 200 };
+Int InGameUI_moneyPlateWidth( MoneyPlateWidth &plate, Int needed, UnsignedInt nowMs );
+
 // ------------------------------------------------------------------------------------------------
 /** Basic functionality common to all in-game user interfaces */
 // ------------------------------------------------------------------------------------------------ 
@@ -666,28 +687,28 @@ public:  // ********************************************************************
 	}
 
 	/** A shift-dragged row: the step from one structure to the next, and how many fit between the
-		* anchor and a cursor 'dx'/'dy' away.  The row runs along the nearest eighth of a turn - a
-		* component counts once it is more than tan 22.5 degrees of the other - and packs as tight as
-		* the footprint allows along it: the footprint is the box 'halfFacing' by 'halfSide' turned to
-		* the heading.  So a structure turned onto the row's own line stands face to face with the
-		* next, and one turned across it corner to corner, which is the closest a straight row of those
-		* can get.  The step is not rounded to the build grid: a Power Plant is 44 across and the grid
-		* is 10, and rounding it up left 6 of dirt at every joint.  Never fewer than one, never more
-		* than 'most'.  Inline and static so a test can reach it without linking the whole in-game UI. */
+		* anchor and a cursor 'dx'/'dy' away.  The row runs the way the drag does, at any angle; it
+		* went along the nearest eighth of a turn until the owner asked for 2026-09-28, and a line
+		* dragged at 20 degrees came out flat.  It packs as tight as the footprint allows along it:
+		* the footprint is the box 'halfFacing' by 'halfSide' turned to the heading.  So a structure
+		* turned onto the row's own line stands face to face with the next, and one turned across it
+		* corner to corner, which is the closest a straight row of those can get.  The step is not
+		* rounded to the build grid: a Power Plant is 44 across and the grid is 10, and rounding it
+		* up left 6 of dirt at every joint.  Never fewer than one, never more than 'most'.  Inline
+		* and static so a test can reach it without linking the whole in-game UI. */
 	static Int placementRow( Real dx, Real dy, Real headingCos, Real headingSin, Real halfFacing,
 													 Real halfSide, Int most, Coord2D *step )
 	{
-		const Real slope = 0.41421356f;		// tan 22.5 degrees
-		const Real diagonal = 0.70710678f;	// each component of a unit step on a diagonal
-
-		const Real signX = fabs( dx ) > fabs( dy ) * slope ? ( dx < 0.0f ? -1.0f : 1.0f ) : 0.0f;
-		const Real signY = fabs( dy ) > fabs( dx ) * slope ? ( dy < 0.0f ? -1.0f : 1.0f ) : 0.0f;
-		const Real along = ( signX != 0.0f && signY != 0.0f ) ? diagonal : 1.0f;
-
-		const Real touch = placementTouchDistance( signX * along, signY * along, headingCos, headingSin,
-																							 2.0f * halfFacing, 2.0f * halfSide );
-		step->x = signX * along * touch;
-		step->y = signY * along * touch;
+		step->x = 0.0f;
+		step->y = 0.0f;
+		const Real length = (Real)sqrt( dx * dx + dy * dy );
+		if( length > 0.0f )
+		{
+			const Real touch = placementTouchDistance( dx / length, dy / length, headingCos, headingSin,
+																								 2.0f * halfFacing, 2.0f * halfSide );
+			step->x = dx / length * touch;
+			step->y = dy / length * touch;
+		}
 
 		Int count = 1;
 		const Real stepSqr = step->x * step->x + step->y * step->y;
@@ -1098,9 +1119,9 @@ public:  // ********************************************************************
 	void setForceAttackMode( Bool enabled )		{ m_forceAttackMode = enabled; }
 	void setPreferSelectionMode( Bool enabled )		{ m_preferSelection = enabled; }
 	
-	void toggleAttackMoveToMode( void )				{ m_attackMoveToMode = !m_attackMoveToMode; m_forceAttackArmed = FALSE; m_guardArmed = FALSE; }
+	void toggleAttackMoveToMode( void )				{ m_attackMoveToMode = !m_attackMoveToMode; m_forceAttackArmed = FALSE; m_guardArmed = FALSE; m_moveArmed = FALSE; }
 	Bool isInAttackMoveToMode( void ) const		{ return m_attackMoveToMode; }
-	void clearAttackMoveToMode( void )				{ m_attackMoveToMode = FALSE; m_forceAttackArmed = FALSE; m_guardArmed = FALSE; m_orderKeyKeptByShift = FALSE; }
+	void clearAttackMoveToMode( void )				{ m_attackMoveToMode = FALSE; m_forceAttackArmed = FALSE; m_guardArmed = FALSE; m_moveArmed = FALSE; m_orderKeyKeptByShift = FALSE; }
 
 	// an order click with one of the three keys armed spends the key, unless shift is down: then it
 	// stays armed for the next click, so a row of targets is one key and a row of clicks, and it drops
@@ -1110,17 +1131,22 @@ public:  // ********************************************************************
 	// the attack key arms force fire the way the attack move key arms an attack move: the next
 	// order click shoots whatever is under it, ground included, and the mode drops again with the
 	// same call that drops attack move
-	void toggleForceAttackArmed( void )				{ m_forceAttackArmed = !m_forceAttackArmed; m_attackMoveToMode = FALSE; m_guardArmed = FALSE; }
+	void toggleForceAttackArmed( void )				{ m_forceAttackArmed = !m_forceAttackArmed; m_attackMoveToMode = FALSE; m_guardArmed = FALSE; m_moveArmed = FALSE; }
 	Bool isForceAttackArmed( void ) const			{ return m_forceAttackArmed; }
-	Bool isOrderKeyArmed( void ) const				{ return m_forceAttackArmed || m_attackMoveToMode || m_guardArmed; }	///< the next left click is an attack, an attack move or a guard
-	Bool isForceFireOn( void ) const;					///< the next order click force fires: the attack key armed it, or Legacy's ctrl is held
+	Bool isOrderKeyArmed( void ) const				{ return m_forceAttackArmed || m_attackMoveToMode || m_guardArmed || m_moveArmed; }	///< the next left click is an attack, an attack move, a guard or a move
+	Bool isForceFireOn( void ) const;					///< the next order click force fires: the attack key armed it
 
 	// and the guard key arms guard the same way: the next order click posts the selection on that
 	// spot, or on that object, and a drag posts them along the line instead of stacking them all
-	// on one point.  All three modes are one mode at a time
-	void toggleGuardArmed( void )							{ m_guardArmed = !m_guardArmed; m_attackMoveToMode = FALSE; m_forceAttackArmed = FALSE; }
+	// on one point.  All the armed keys are one mode at a time
+	void toggleGuardArmed( void )							{ m_guardArmed = !m_guardArmed; m_attackMoveToMode = FALSE; m_forceAttackArmed = FALSE; m_moveArmed = FALSE; }
 	Bool isGuardArmed( void ) const						{ return m_guardArmed; }
-	Bool isLineOrderArmed( void ) const				{ return m_attackMoveToMode || m_guardArmed; }	///< a left drag draws an attack move or guard line; force fire's left drag is the attack circle
+
+	// the move key arms the order a right click gives, for the left button: the next order click is
+	// that move, and a left drag draws the formation line
+	void toggleMoveArmed( void )							{ m_moveArmed = !m_moveArmed; m_attackMoveToMode = FALSE; m_forceAttackArmed = FALSE; m_guardArmed = FALSE; }
+	Bool isMoveArmed( void ) const						{ return m_moveArmed; }
+	Bool isLineOrderArmed( void ) const				{ return m_attackMoveToMode || m_guardArmed || m_moveArmed; }	///< a left drag draws a move, attack move or guard line; force fire's left drag is the attack circle
 	
 	// zeroing the repeat clock makes the first quantized step happen on the very next update, so a
 	// tap of the key is one eighth and a hold is one eighth every CAMERA_SNAP_REPEAT_MS.
@@ -1153,8 +1179,7 @@ public:  // ********************************************************************
 	void setDrawRMBScrollAnchor(Bool b) { m_drawRMBScrollAnchor = b; }
 	void setMoveRMBScrollAnchor(Bool b) { m_moveRMBScrollAnchor = b; }
 
-	// The camera scroll moved from the right button to the middle one; the two INI fields keep their
-	// shipped names because InGameUI.ini sets them and an unknown field is a parse error.
+	// The right-drag camera scroll these two fields were named for is back on the right button.
 	Bool shouldMoveScrollAnchor( void ) const { return m_moveRMBScrollAnchor; }
 
 private:
@@ -1513,6 +1538,7 @@ protected:
 	DisplayString *							m_peaceCountdownDisplayString;	///< the big digit of its last ten seconds
 	Int													m_lastMoneyDisplayed;		///< so the money gadget is only written when the amount changes
 	Int													m_lastEarningDisplayed;	///< or the money earned a second beside it
+	MoneyPlateWidth							m_moneyPlate;						///< the money plate's width, following the figure's
 	UnsignedInt									m_hudDrawCount;					///< rendered frames counted by drawHudOverlay itself
 	UnsignedInt									m_hudLastSampleFrame;		///< m_hudDrawCount the fps sample was last refreshed on
 	UnsignedInt									m_hudLastSampleMs;			///< wall clock of that sample
@@ -1679,6 +1705,7 @@ protected:
 	Bool												m_attackMoveToMode;	///< are we in attack move mode?
 	Bool												m_forceAttackArmed;	///< is the attack key holding force fire for the next click?
 	Bool												m_guardArmed;				///< is the guard key holding a guard order for the next click?
+	Bool												m_moveArmed;				///< is the move key holding a move for the next click?
 	Bool												m_orderKeyKeptByShift;	///< an armed key was clicked with under shift, and drops when shift comes up
 	Bool												m_preferSelection;		///< the shift key has been depressed.
 

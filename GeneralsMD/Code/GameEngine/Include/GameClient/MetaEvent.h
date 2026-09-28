@@ -30,7 +30,6 @@
 #ifndef _H_MetaEvent
 #define _H_MetaEvent
 
-#include "Common/GlobalData.h"
 #include "Common/SubsystemInterface.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/KeyDownInfo.h"
@@ -366,11 +365,7 @@ class MetaMap : public SubsystemInterface
 	friend class MetaEventTranslator;
 
 private:
-	/// one list of bindings per InputSchemeType, and a third for Modern with W A S D on the camera
-	enum { BINDINGS_WASD = INPUT_SCHEME_COUNT, BINDING_LIST_COUNT };
-
-	MetaMapRec *m_metaMaps[ BINDING_LIST_COUNT ];
-	Int m_parseScheme;															///< the list parseMetaMap is filling
+	MetaMapRec *m_metaMaps;
 
 protected:
 	GameMessage::Type findGameMessageMetaType(const char* name);
@@ -387,18 +382,7 @@ public:
 
 	static void parseMetaMap(INI* ini);
 
-	/** Fill the Legacy list from the language's CommandMap.ini alone, which is the game's own map out
-		* of its own archives.  Everything this fork binds is in Data\INI\CommandMapReforged.ini, and only the
-		* Modern list reads that. */
-	void loadLegacyBindings( const AsciiString& languageMapFile );
-
-	/** Fill the W A S D list: a copy of the finished Modern list, in the same order, with overlayFile
-		* laid over it.  Runs after everything else that binds into Modern, so the copy has it all. */
-	void loadWasdBindings( const AsciiString& overlayFile );
-
-	/// the bindings the player's InputScheme, and the W A S D box under Modern, answer to
-	const MetaMapRec *getFirstMetaMapRec() const;
-	const MetaMapRec *getFirstMetaMapRec( Int scheme ) const { return m_metaMaps[ scheme ]; }
+	const MetaMapRec *getFirstMetaMapRec() const { return m_metaMaps; }
 };
 
 extern MetaMap *TheMetaMap;

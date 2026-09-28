@@ -83,10 +83,10 @@ void W3DGadgetPushButtonImageDrawOne(GameWindow *window, WinInstanceData *instDa
 
 // PRIVATE FUNCTIONS //////////////////////////////////////////////////////////
 
-/** The command bar's own scale, from ControlBar.cpp.  Declared rather than included: ControlBar.h
+/** The bottom HUD's own scale, the one its buttons are laid out at, from ControlBar.cpp.  Declared rather than included: ControlBar.h
 	* drags in the whole command-set machinery for one function that takes nothing and returns a
 	* float. */
-extern Real ControlBarUniformScale( void );
+extern Real ControlBarHudScale( void );
 
 /** Point size a corner marking wears on a command button at 800x600, which is the resolution the
 	* command bar and its 50x44 buttons were drawn for.  Everything else is this times the scale the
@@ -118,7 +118,7 @@ static GameFont *getBadgeFont( GameWindow *window, Real designPoints = BADGE_DES
 	if( font == NULL )
 		return NULL;
 
-	Int pointSize = REAL_TO_INT_FLOOR( designPoints * ControlBarUniformScale() );
+	Int pointSize = REAL_TO_INT_FLOOR( designPoints * ControlBarHudScale() );
 	if( pointSize < 6 )
 		pointSize = 6;
 

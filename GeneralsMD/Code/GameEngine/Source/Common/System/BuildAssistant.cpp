@@ -686,7 +686,10 @@ LegalBuildCode BuildAssistant::isLocationClearOfObjects( const Coord3D *worldPos
 		 at the ground under worldPos whatever height the caller passed. The computer's placement searches
 		 kept the height of the spot they started from, or passed 0, and a probe that floated above a
 		 building's roof found it clear: a Hard USA put three pairs of supply drop zones exactly on top of
-		 each other in one match. */
+		 each other in one match. The clearance pass round other buildings further down is asked there
+		 too: it kept the caller's height, so the computer's searches at height 0 passed a spot on high
+		 ground that its dozer then refused, and a Hard GLA asked for the same Scud Storm spot for
+		 17,000 frames. */
 	Coord3D groundPos = *worldPos;
 	groundPos.z = TheTerrainLogic->getGroundHeight( groundPos.x, groundPos.y );
 	ObjectIterator *iter =
@@ -848,7 +851,7 @@ LegalBuildCode BuildAssistant::isLocationClearOfObjects( const Coord3D *worldPos
 	}
 	myGeom.setMajorRadius(myFactoryExitWidth/2.0f);
 	if (myFactoryExitWidth>0) {
-		myExitPos = *worldPos;
+		myExitPos = groundPos;
 		checkMyExit = true;
 		Real c = (Real)Cos(angle);
 		Real s = (Real)Sin(angle);
@@ -904,8 +907,8 @@ LegalBuildCode BuildAssistant::isLocationClearOfObjects( const Coord3D *worldPos
 			hisExitPos.x += c*offset;
 			hisExitPos.y += s*offset;
 		}
-		if (ThePartitionManager->geomCollidesWithGeom(them->getPosition(), hisBounds, them->getOrientation(), 
-			worldPos, myBounds, angle)) {
+		if (ThePartitionManager->geomCollidesWithGeom(them->getPosition(), hisBounds, them->getOrientation(),
+			&groundPos, myBounds, angle)) {
 			TheTerrainVisual->addFactionBib(them, true);
 			return LBC_OBJECTS_IN_THE_WAY;
 		}
@@ -923,8 +926,8 @@ LegalBuildCode BuildAssistant::isLocationClearOfObjects( const Coord3D *worldPos
 				return LBC_OBJECTS_IN_THE_WAY;
 			}
 			// Check for overlap of his exit rectangle with my geom info
-			if (checkHisExit && ThePartitionManager->geomCollidesWithGeom(&hisExitPos, hisGeom, them->getOrientation(), 
-					worldPos, myBounds, angle)) {
+			if (checkHisExit && ThePartitionManager->geomCollidesWithGeom(&hisExitPos, hisGeom, them->getOrientation(),
+					&groundPos, myBounds, angle)) {
 				TheTerrainVisual->addFactionBib(them, true);
 				return LBC_OBJECTS_IN_THE_WAY;
 			}

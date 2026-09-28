@@ -25,6 +25,7 @@
 
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
+#include "Common/ThingTemplate.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/GameClient.h"
 #include "GameClient/LookAtXlat.h"
@@ -32,6 +33,7 @@
 #include "GameLogic/Damage.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/GhostObject.h"
+#include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/PartitionManager.h"
@@ -50,6 +52,22 @@ static const UnsignedInt DIRECTOR_SCAN_FRAMES = LOGICFRAMES_PER_SECOND / 2;
 static const UnsignedInt DIRECTOR_HOLD_FRAMES = 6 * LOGICFRAMES_PER_SECOND;
 /// how much hotter somewhere else has to be to be worth leaving a fight that is still going
 static const Real DIRECTOR_SWITCH_MARGIN = 1.5f;
+/// no cut sooner than this after the last one, however big the other fight
+static const UnsignedInt DIRECTOR_SETTLE_FRAMES = 2 * LOGICFRAMES_PER_SECOND;
+/// this much hotter elsewhere and the director goes before its hold is up
+static const Real DIRECTOR_BIG_MARGIN = 3.0f;
+/// after this long on one fight any hotter one elsewhere will do
+static const UnsignedInt DIRECTOR_TIRED_FRAMES = 20 * LOGICFRAMES_PER_SECOND;
+static const Real DIRECTOR_TIRED_MARGIN = 1.1f;
+/// a hit on a thing that cost this much counts twice what a free one does
+static const Real DIRECTOR_COST_PER_WEIGHT = 500.0f;
+/// a kill counts this many times a hit, and anything on a superweapon this many times again
+static const Real DIRECTOR_KILL_FACTOR = 2.0f;
+static const Real DIRECTOR_SUPERWEAPON_FACTOR = 3.0f;
+/// with no fight on, how long the director looks at one army, base or building site
+static const UnsignedInt DIRECTOR_SIGHT_FRAMES = 8 * LOGICFRAMES_PER_SECOND;
+/// how many of the last sights the director will not go back to while there is another
+static const size_t DIRECTOR_SEEN_COUNT = 3;
 /// further apart than this the camera cuts rather than pans: a pan across the map shows nothing
 static const Real CUT_DISTANCE = 700.0f;
 /// the camera found further than this from where it was put was moved by something else, the radar
@@ -64,6 +82,54 @@ static const UnsignedInt LONGEST_STEP_MILLISECONDS = 100;
 static const Real MILLISECONDS_PER_SECOND = 1000.0f;
 
 //-------------------------------------------------------------------------------------------------
+static Bool sameFight( const Coord2D &a, const Coord2D &b )
+{
+	const Real dx = a.x - b.x;
+	const Real dy = a.y - b.y;
+	return dx * dx + dy * dy <= DIRECTOR_GATHER_RADIUS * DIRECTOR_GATHER_RADIUS;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real ObserverCamera_hitWeight( Int cost, Bool killed, Bool superweapon )
+{
+	Real weight = 1.0f + cost / DIRECTOR_COST_PER_WEIGHT;
+	if( killed )
+		weight *= DIRECTOR_KILL_FACTOR;
+	if( superweapon )
+		weight *= DIRECTOR_SUPERWEAPON_FACTOR;
+	return weight;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real ObserverCamera_sightWeight( Int cost, Bool structure, Bool busy, Bool superweapon )
+{
+	Real weight = cost / DIRECTOR_COST_PER_WEIGHT;
+	if( busy )
+		weight *= 2.0f;
+	else if( structure )
+		weight *= 0.5f;
+	if( superweapon )
+		weight *= DIRECTOR_SUPERWEAPON_FACTOR;
+	return weight;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool ObserverCamera_nextSight( const std::vector< DirectorHeat > &sights, const std::vector< Coord2D > &seen, Coord2D *place )
+{
+	std::vector< DirectorHeat > fresh;
+	for( size_t index = 0; index < sights.size(); index++ )
+	{
+		Bool wasSeen = FALSE;
+		for( size_t look = 0; look < seen.size() && !wasSeen; look++ )
+			wasSeen = sameFight( sights[ index ].position, seen[ look ] );
+		if( !wasSeen )
+			fresh.push_back( sights[ index ] );
+	}
+	Real heat = 0.0f;
+	return ObserverCamera_hottestPlace( fresh, place, &heat );
+}
+
+//-------------------------------------------------------------------------------------------------
 Real ObserverCamera_heatAround( const std::vector< DirectorHeat > &hits, const Coord2D &around, Coord2D *middle )
 {
 	Real heat = 0.0f;
@@ -71,9 +137,7 @@ Real ObserverCamera_heatAround( const std::vector< DirectorHeat > &hits, const C
 	for( size_t index = 0; index < hits.size(); index++ )
 	{
 		const DirectorHeat &hit = hits[ index ];
-		const Real dx = hit.position.x - around.x;
-		const Real dy = hit.position.y - around.y;
-		if( dx * dx + dy * dy > DIRECTOR_GATHER_RADIUS * DIRECTOR_GATHER_RADIUS )
+		if( !sameFight( hit.position, around ) )
 			continue;
 
 		heat += hit.weight;
@@ -114,7 +178,14 @@ Bool ObserverCamera_shouldMove( Real heatHere, Real heatThere, UnsignedInt frame
 {
 	if( heatHere <= 0.0f )
 		return heatThere > 0.0f;
-	return framesHere >= DIRECTOR_HOLD_FRAMES && heatThere > heatHere * DIRECTOR_SWITCH_MARGIN;
+	if( framesHere < DIRECTOR_SETTLE_FRAMES )
+		return FALSE;
+	if( heatThere > heatHere * DIRECTOR_BIG_MARGIN )
+		return TRUE;
+	if( framesHere < DIRECTOR_HOLD_FRAMES )
+		return FALSE;
+	const Real margin = framesHere >= DIRECTOR_TIRED_FRAMES ? DIRECTOR_TIRED_MARGIN : DIRECTOR_SWITCH_MARGIN;
+	return heatThere > heatHere * margin;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -174,6 +245,8 @@ void ObserverCamera::reset( void )
 	m_placeSince = 0;
 	m_placeScanned = 0;
 	m_placeFor = NULL;
+	m_placeIsFight = FALSE;
+	m_seen.clear();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -256,9 +329,11 @@ Bool ObserverCamera::takenByHand( const ViewLocation &current ) const
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Where the director looks: the hottest fight, held for a while, followed as it moves, and left
-	* for a clearly hotter one.  Narrowed to one player it counts only the hits on his things and the
-	* hits his things made, and with none of those it goes home to his command centre. */
+/** Where the director looks: the fight with the most at stake, held for a while, followed as it
+	* moves, and left for a clearly bigger one.  With no fight anywhere it goes round what is worth
+	* seeing instead, an army on the move, a base going up, a superweapon, a few seconds each and not
+	* straight back to one it has just shown.  Narrowed to one player it counts only the hits on his
+	* things, the hits his things made and his own sights.  It only reads the logic. */
 //-------------------------------------------------------------------------------------------------
 Bool ObserverCamera::directorPlace( const Player *narrowTo, Coord2D *place )
 {
@@ -276,57 +351,89 @@ Bool ObserverCamera::directorPlace( const Player *narrowTo, Coord2D *place )
 	m_placeScanned = frame;
 
 	std::vector< DirectorHeat > hits;
-	const Object *home = NULL;
+	std::vector< DirectorHeat > sights;
 	for( Object *obj = TheGameLogic->getFirstObject(); obj != NULL; obj = obj->getNextObject() )
 	{
-		if( narrowTo != NULL && home == NULL && obj->getControllingPlayer() == narrowTo
-				&& obj->isKindOf( KINDOF_COMMANDCENTER ) )
-			home = obj;
+		const Int cost = obj->getTemplate()->friend_getBuildCost();
+		const Bool superweapon = obj->isKindOf( KINDOF_FS_SUPERWEAPON );
+		const Bool mine = narrowTo == NULL || obj->getControllingPlayer() == narrowTo;
+		DirectorHeat heat;
+		heat.position.x = obj->getPosition()->x;
+		heat.position.y = obj->getPosition()->y;
+
+		if( mine && cost > 0 && !obj->isEffectivelyDead() )
+		{
+			const AIUpdateInterface *ai = obj->getAIUpdateInterface();
+			const Bool marching = ai != NULL && ai->isMoving() && obj->isAbleToAttack();
+			const Bool busy = marching || obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION );
+			heat.weight = ObserverCamera_sightWeight( cost, obj->isKindOf( KINDOF_STRUCTURE ), busy, superweapon );
+			sights.push_back( heat );
+		}
 
 		const BodyModuleInterface *body = obj->getBodyModule();
 		const UnsignedInt hitAt = body->getLastDamageTimestamp();
 		if( hitAt == 0 || frame >= hitAt + DIRECTOR_HEAT_FRAMES )
 			continue;
-		if( narrowTo != NULL && obj->getControllingPlayer() != narrowTo
-				&& ( body->getLastDamageInfo()->in.m_sourcePlayerMask & narrowTo->getPlayerMask() ) == 0 )
+		if( !mine && ( body->getLastDamageInfo()->in.m_sourcePlayerMask & narrowTo->getPlayerMask() ) == 0 )
 			continue;
 
-		DirectorHeat hit;
-		hit.position.x = obj->getPosition()->x;
-		hit.position.y = obj->getPosition()->y;
-		hit.weight = 1.0f;
-		hits.push_back( hit );
+		heat.weight = ObserverCamera_hitWeight( cost, obj->isEffectivelyDead(), superweapon );
+		hits.push_back( heat );
 	}
 
 	Coord2D hottest;
 	Real hottestHeat = 0.0f;
 	ObserverCamera_hottestPlace( hits, &hottest, &hottestHeat );
 
+	const UnsignedInt held = frame - m_placeSince;
 	Coord2D followed = m_place;
-	const Real heatHere = m_placeValid ? ObserverCamera_heatAround( hits, m_place, &followed ) : 0.0f;
-	if( !m_placeValid || ObserverCamera_shouldMove( heatHere, hottestHeat, frame - m_placeSince ) )
+	if( m_placeValid && m_placeIsFight )
 	{
-		if( hottestHeat > 0.0f )
+		const Real heatHere = ObserverCamera_heatAround( hits, m_place, &followed );
+		if( heatHere > 0.0f && ( sameFight( hottest, followed ) || !ObserverCamera_shouldMove( heatHere, hottestHeat, held ) ) )
 		{
-			DEBUG_LOG(( "OBSCAM frame %u director to (%.0f,%.0f) heat %.0f, was %.0f here\n",
-									frame, hottest.x, hottest.y, hottestHeat, heatHere ));
-			m_place = hottest;
-			m_placeSince = frame;
-			m_placeValid = TRUE;
-		}
-		else if( home != NULL )
-		{
-			m_place.x = home->getPosition()->x;
-			m_place.y = home->getPosition()->y;
-			m_placeSince = frame;
-			m_placeValid = TRUE;
+			m_place = followed;
+			*place = m_place;
+			return TRUE;
 		}
 	}
-	else
-		m_place = followed;
+	else if( m_placeValid && hottestHeat <= 0.0f && held < DIRECTOR_SIGHT_FRAMES )
+	{
+		if( ObserverCamera_heatAround( sights, m_place, &followed ) > 0.0f )
+			m_place = followed;
+		*place = m_place;
+		return TRUE;
+	}
 
+	if( hottestHeat > 0.0f )
+	{
+		DEBUG_LOG(( "OBSCAM frame %u director to fight (%.0f,%.0f) heat %.1f\n", frame, hottest.x, hottest.y, hottestHeat ));
+		m_place = hottest;
+		m_placeIsFight = TRUE;
+	}
+	else
+	{
+		Coord2D sight;
+		if( !ObserverCamera_nextSight( sights, m_seen, &sight ) )
+		{
+			m_seen.clear();
+			if( !ObserverCamera_nextSight( sights, m_seen, &sight ) )
+			{
+				m_placeValid = FALSE;
+				return FALSE;
+			}
+		}
+		DEBUG_LOG(( "OBSCAM frame %u director to sight (%.0f,%.0f)\n", frame, sight.x, sight.y ));
+		m_place = sight;
+		m_placeIsFight = FALSE;
+		m_seen.push_back( sight );
+		if( m_seen.size() > DIRECTOR_SEEN_COUNT )
+			m_seen.erase( m_seen.begin() );
+	}
+	m_placeSince = frame;
+	m_placeValid = TRUE;
 	*place = m_place;
-	return m_placeValid;
+	return TRUE;
 }
 
 //-------------------------------------------------------------------------------------------------

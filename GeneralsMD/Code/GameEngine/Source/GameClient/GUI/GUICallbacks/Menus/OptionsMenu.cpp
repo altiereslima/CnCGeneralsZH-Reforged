@@ -1194,23 +1194,6 @@ static void updateResolutionEnabled( void )
 	comboBoxResolution->winEnable( value != WINDOW_MODE_BORDERLESS );
 }
 
-//-------------------------------------------------------------------------------------------------
-/** The W A S D camera box only means something under Modern input, so it goes grey while Legacy is
-	* picked.  The tick stays as it was: going back to Modern brings back what the player chose.  Read
-	* off the input scheme combo box, like the resolution list above, so it follows the dropdown. */
-//-------------------------------------------------------------------------------------------------
-static void updateWasdCameraEnabled( void )
-{
-	GameWindow *check = findOptionWidget( *findOptionDef( "WasdCamera" ) );
-	GameWindow *schemeWidget = findOptionWidget( *findOptionDef( "InputScheme" ) );
-
-	Int selected = -1;
-	GadgetComboBoxGetSelectedPos( schemeWidget, &selected );
-
-	const Int scheme = ( selected >= 0 ) ? selected : TheGlobalData->m_inputScheme;
-	check->winEnable( scheme != INPUT_SCHEME_LEGACY );
-}
-
 static void saveOptions( void )
 {
 	Int index;
@@ -2612,7 +2595,6 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 
 	// borderless owns the resolution; the list is grey while it is picked
 	updateResolutionEnabled();
-	updateWasdCameraEnabled();
 
 	TheWindowManager->winSetModal(parent);
 	ignoreSelected = FALSE;
@@ -2781,8 +2763,6 @@ WindowMsgHandledType OptionsMenuSystem( GameWindow *window, UnsignedInt msg,
 
 				// picking borderless greys the resolution list out, the other two hand it back
 				updateResolutionEnabled();
-				// picking Legacy greys the W A S D box out, Modern hands it back
-				updateWasdCameraEnabled();
 			break;
 		}
 
@@ -2839,8 +2819,7 @@ WindowMsgHandledType OptionsMenuSystem( GameWindow *window, UnsignedInt msg,
 			{
 				saveOptions();
 
-				// the command bar's hot keys belong to the input scheme, so it rebuilds them on its next
-				// update: grid letters for Modern, the labels' own letters for Legacy
+				// the command bar rebuilds its grid letters on its next update
 				if( TheControlBar )
 					TheControlBar->markUIDirty();
 

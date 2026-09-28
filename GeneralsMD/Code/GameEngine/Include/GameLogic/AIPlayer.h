@@ -42,6 +42,10 @@ enum { INVALID_SKILLSET_SELECTION = -1 };
 class BuildListInfo;
 // this header used to compile only behind whoever happened to include Team.h first
 class TeamPrototype;
+class TeamTemplateInfo;
+
+/// the skirmish scripts send this team at the enemy at some point, rather than keeping it home on guard
+Bool aiTeamAttacks(const TeamTemplateInfo *info);
 
 /**
  * When a team is selected for training, a list of these
@@ -339,6 +343,7 @@ protected:
 	Real knownFirepowerAlongPath(Waypoint *way);	///< what this AI has seen that can shoot, along an approach
 	AsciiString secondApproachLabel(const Coord3D *from, const AsciiString &taken, Int pathSuffix);	///< the quietest other road, or empty
 	void loadGunships(void);	///< the parked wave's infantry boards the gunships at home
+	void sendIdleAttackTeams(void);	///< attack teams standing at home join the next wave instead of waiting for the script's signal
 	Real knownFirepowerNear(const Coord3D *pos);	///< what this AI has seen that can shoot, near a point
 	Bool forwardHoldPoint(const AsciiString &approach, Int pathSuffix, const Coord3D *enemyPos, Coord3D *hold);	///< where a wave gathers on its road
 	void sendWave(AIGroup *wave, const AsciiString &approach, Int pathSuffix, Int teams, Real power, UnsignedInt heldFrames);

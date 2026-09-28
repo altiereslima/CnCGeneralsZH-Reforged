@@ -38,7 +38,7 @@ GUI:CommandSlot02
 END
 
 GUI:CommandSlot02Description
-"Presses command bar slot 02 (column 1, bottom row, 'Z' in the default grid layout)."
+"Presses command bar slot 02 (column 2, top row, 'W' in the default grid layout)."
 END
 
 GUI:CommandSlot03
@@ -46,7 +46,7 @@ GUI:CommandSlot03
 END
 
 GUI:CommandSlot03Description
-"Presses command bar slot 03 (column 2, top row, 'W' in the default grid layout)."
+"Presses command bar slot 03 (column 3, top row, 'E' in the default grid layout)."
 END
 
 GUI:CommandSlot04
@@ -54,7 +54,7 @@ GUI:CommandSlot04
 END
 
 GUI:CommandSlot04Description
-"Presses command bar slot 04 (column 2, bottom row, 'X' in the default grid layout)."
+"Presses command bar slot 04 (column 4, top row, 'R' in the default grid layout)."
 END
 
 GUI:CommandSlot05
@@ -62,7 +62,7 @@ GUI:CommandSlot05
 END
 
 GUI:CommandSlot05Description
-"Presses command bar slot 05 (column 3, top row, 'E' in the default grid layout)."
+"Presses command bar slot 05 (column 5, top row, 'T' in the default grid layout)."
 END
 
 GUI:CommandSlot06
@@ -70,7 +70,7 @@ GUI:CommandSlot06
 END
 
 GUI:CommandSlot06Description
-"Presses command bar slot 06 (column 3, bottom row, 'C' in the default grid layout)."
+"Presses command bar slot 06 (column 6, top row, 'Y' in the default grid layout)."
 END
 
 GUI:CommandSlot07
@@ -78,7 +78,7 @@ GUI:CommandSlot07
 END
 
 GUI:CommandSlot07Description
-"Presses command bar slot 07 (column 4, top row, 'R' in the default grid layout)."
+"Presses command bar slot 07 (column 1, middle row, 'A' in the default grid layout), where a unit's Attack sits."
 END
 
 GUI:CommandSlot08
@@ -86,7 +86,7 @@ GUI:CommandSlot08
 END
 
 GUI:CommandSlot08Description
-"Presses command bar slot 08 (column 4, bottom row, 'V' in the default grid layout)."
+"Presses command bar slot 08 (column 2, middle row, 'S' in the default grid layout), where a unit's Stop sits."
 END
 
 GUI:CommandSlot09
@@ -94,7 +94,7 @@ GUI:CommandSlot09
 END
 
 GUI:CommandSlot09Description
-"Presses command bar slot 09 (column 5, top row, 'T' in the default grid layout)."
+"Presses command bar slot 09 (column 3, middle row, 'D' in the default grid layout), where Attack Move sits."
 END
 
 GUI:CommandSlot10
@@ -102,7 +102,7 @@ GUI:CommandSlot10
 END
 
 GUI:CommandSlot10Description
-"Presses command bar slot 10 (column 5, bottom row, 'B' in the default grid layout)."
+"Presses command bar slot 10 (column 4, middle row, 'F' in the default grid layout)."
 END
 
 GUI:CommandSlot11
@@ -110,7 +110,7 @@ GUI:CommandSlot11
 END
 
 GUI:CommandSlot11Description
-"Presses command bar slot 11 (column 6, top row, 'Y' in the default grid layout)."
+"Presses command bar slot 11 (column 5, middle row, 'G' in the default grid layout)."
 END
 
 GUI:CommandSlot12
@@ -118,7 +118,7 @@ GUI:CommandSlot12
 END
 
 GUI:CommandSlot12Description
-"Presses command bar slot 12 (column 6, bottom row, 'N' in the default grid layout)."
+"Presses command bar slot 12 (column 6, middle row, 'H' in the default grid layout)."
 END
 
 GUI:CommandSlot13
@@ -126,7 +126,7 @@ GUI:CommandSlot13
 END
 
 GUI:CommandSlot13Description
-"Presses command bar slot 13 (column 7, top row, 'U' in the default grid layout)."
+"Presses command bar slot 13 (column 1, bottom row, 'Z' in the default grid layout), where Eject sits, for a unit's passengers or a building's garrison."
 END
 
 GUI:CommandSlot14
@@ -134,7 +134,39 @@ GUI:CommandSlot14
 END
 
 GUI:CommandSlot14Description
-"Presses command bar slot 14 (column 7, bottom row, 'M' in the default grid layout)."
+"Presses command bar slot 14 (column 2, bottom row, 'X' in the default grid layout), where Guard sits."
+END
+
+GUI:CommandSlot15
+"Command Bar Slot 15"
+END
+
+GUI:CommandSlot15Description
+"Presses command bar slot 15 (column 3, bottom row, 'C' in the default grid layout), where Hold Position sits."
+END
+
+GUI:CommandSlot16
+"Command Bar Slot 16"
+END
+
+GUI:CommandSlot16Description
+"Presses command bar slot 16 (column 4, bottom row, 'V' in the default grid layout)."
+END
+
+GUI:CommandSlot17
+"Command Bar Slot 17"
+END
+
+GUI:CommandSlot17Description
+"Presses command bar slot 17 (column 5, bottom row, 'B' in the default grid layout), where a building's rally point sits."
+END
+
+GUI:CommandSlot18
+"Command Bar Slot 18"
+END
+
+GUI:CommandSlot18Description
+"Presses command bar slot 18 (column 6, bottom row, 'N' in the default grid layout), where Sell sits."
 END
 
 GUI:TogglePurchaseScience
@@ -151,38 +183,6 @@ END
 
 GUI:StopDescription
 "Stops what the selected units are doing."
-END
-
-GUI:ToggleAttackMove
-"Attack Move"
-END
-
-GUI:ToggleAttackMoveDescription
-"Arms attack move: left click where the selected units should go, fighting anything they meet on the way, or drag the left button to spread them along a line. Right click puts it down."
-END
-
-GUI:ToggleForceAttack
-"Attack"
-END
-
-GUI:ToggleForceAttackDescription
-"Arms force fire: the next left click is an attack on whatever is under it, your own units and bare ground included. Right click puts it down."
-END
-
-GUI:ToggleGuard
-"Guard"
-END
-
-GUI:ToggleGuardDescription
-"Arms guard: left click posts the selected units on that spot, and a left drag posts them along the line you draw. Right click puts it down."
-END
-
-GUI:HoldPosition
-"Hold Position"
-END
-
-GUI:HoldPositionDescription
-"Every selected unit guards the spot it is standing on: it shoots what comes into range and never chases it."
 END
 
 // Smoke signals.  The three ...Placed lines are what an ally reads; %s is the sender's name.  The
@@ -816,30 +816,6 @@ END
 
 GUI:OptionsGroupInput
 "Input"
-END
-
-GUI:InputScheme
-"Mouse and Keyboard"
-END
-
-GUI:InputScheme0
-"Modern"
-END
-
-GUI:InputScheme1
-"Legacy"
-END
-
-TOOLTIP:InputScheme
-"Modern: left selects, right orders, the middle button moves the camera and the grid keys run the command bar. Legacy: the mouse and keys the game shipped with, without any of the additions."
-END
-
-GUI:WasdCamera
-"W A S D Camera"
-END
-
-TOOLTIP:WasdCamera
-"W A S D move the camera. F attacks, G stops, H attack-moves, J guards and K holds position, and the command bar's top row reads Q E R T Y U I. Modern input only."
 END
 
 GUI:ChromaLighting

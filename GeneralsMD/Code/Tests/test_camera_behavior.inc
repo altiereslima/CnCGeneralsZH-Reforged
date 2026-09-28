@@ -188,7 +188,7 @@ TEST(camera_margin_preferences_load_and_rebuild_constraints)
 	CHECK_EQ(f.view.constraintRecalcs, 1);
 }
 
-TEST(camera_wheel_anchors_zoom_to_cursor_only_under_modern_with_the_box_ticked)
+TEST(camera_wheel_anchors_zoom_to_cursor_only_with_the_box_ticked)
 {
 	// Pull request 5 asked for zoom to cursor to go; it stayed as a menu box instead.
 	const OptionDef *def = findOptionDef("ZoomToCursor");
@@ -220,14 +220,9 @@ TEST(camera_wheel_anchors_zoom_to_cursor_only_under_modern_with_the_box_ticked)
 	f.global->m_zoomToCursor = FALSE;
 	spinWheel();
 	CHECK_EQ(f.view.zoomAnchors, 1);
-
-	f.global->m_zoomToCursor = TRUE;
-	f.global->m_inputScheme = INPUT_SCHEME_LEGACY;
-	spinWheel();
-	CHECK_EQ(f.view.zoomAnchors, 1);
 }
 
-TEST(wasd_camera_scrolls_without_touching_the_cursor_and_only_with_the_box_ticked)
+TEST(arrow_keys_scroll_the_camera_and_w_a_s_d_stay_grid_keys)
 {
 	CHECK(bootOnce());
 	CameraInputFixture f;
@@ -240,8 +235,7 @@ TEST(wasd_camera_scrolls_without_touching_the_cursor_and_only_with_the_box_ticke
 		message->deleteInstance();
 	};
 
-	// Box off: D is a unit key and scrolls nothing; the arrow keys scroll behind the scroll arrows.
-	CHECK(!f.global->isWasdCamera());
+	// D is a command bar key and scrolls nothing; the arrow keys scroll behind the scroll arrows.
 	press(KEY_D, TRUE);
 	CHECK(!f.ui->scrolling);
 	press(KEY_D, FALSE);
@@ -253,19 +247,55 @@ TEST(wasd_camera_scrolls_without_touching_the_cursor_and_only_with_the_box_ticke
 	CHECK(f.ui->scrolling);
 	press(KEY_RIGHT, FALSE);
 	CHECK(!f.ui->scrolling);
+}
 
-	// Box on: D scrolls, and the cursor is not touched on the way in or out.
-	f.global->m_wasdCamera = TRUE;
-	const Int cursorChanges = f.mouse.cursorChanges;
-	press(KEY_D, TRUE);
+TEST(right_drag_pans_past_the_drag_tolerance_and_middle_drag_turns)
+{
+	CHECK(bootOnce());
+	CameraInputFixture f;
+	GameClient *savedClient = TheGameClient;
+	TheGameClient = getTestGameClient();
+	// no edge scrolling, so the pointer positions below mean only what the buttons make of them
+	f.global->m_windowed = TRUE;
+	f.global->m_edgeScrollInWindowedMode = FALSE;
+	f.global->m_snapCameraRotateTo45 = FALSE;
+	f.mouse.m_dragTolerance = 4;
+	const auto mouse = [&f](GameMessage::Type type, Int x, Int y)
+	{
+		GameMessage *message = newInstance(GameMessage)(type);
+		const ICoord2D pixel = {x, y};
+		message->appendPixelArgument(pixel);
+		f.camera.translateGameMessage(message);
+		message->deleteInstance();
+	};
+
+	// a right click that wobbles inside the tolerance stays an order and moves nothing
+	mouse(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN, 300, 300);
+	mouse(GameMessage::MSG_RAW_MOUSE_POSITION, 303, 302);
+	CHECK(!f.ui->scrolling);
+	CHECK(!f.camera.isRightDragPanning());
+	mouse(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP, 303, 302);
+	CHECK(!f.ui->scrolling);
+
+	// past the tolerance the same button pans, anchored where it went down, until it comes up
+	mouse(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN, 300, 300);
+	mouse(GameMessage::MSG_RAW_MOUSE_POSITION, 340, 300);
 	CHECK(f.ui->scrolling);
-	press(KEY_D, FALSE);
+	CHECK(f.camera.isRightDragPanning());
+	CHECK(f.camera.getScrollAnchor() != NULL && f.camera.getScrollAnchor()->x == 300);
+	mouse(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP, 340, 300);
 	CHECK(!f.ui->scrolling);
-	CHECK_EQ(f.mouse.cursorChanges, cursorChanges);
+	CHECK(!f.camera.isRightDragPanning());
 
-	// Legacy keeps the game's own keys: the box is ignored.
-	f.global->m_inputScheme = INPUT_SCHEME_LEGACY;
-	press(KEY_D, TRUE);
+	// a middle drag turns the camera and pans nothing, with no modifier held
+	const Real before = f.view.getAngle();
+	mouse(GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_DOWN, 300, 300);
+	mouse(GameMessage::MSG_RAW_MOUSE_POSITION, 350, 300);
 	CHECK(!f.ui->scrolling);
-	press(KEY_D, FALSE);
+	CHECK(f.camera.isMovingCamera());
+	CHECK(f.view.getAngle() != before);
+	mouse(GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_UP, 350, 300);
+	CHECK(!f.camera.isMovingCamera());
+
+	TheGameClient = savedClient;
 }

@@ -941,10 +941,6 @@ GlobalData::GlobalData()
 	m_playerColorScheme = PLAYER_COLORS_ORIGINAL;
 	// the words the game shipped with until somebody picks a translation
 	m_textLanguage = TEXT_LANGUAGE_ENGLISH;
-	// the mouse and keys this fork plays with until somebody asks for the ones the game shipped with
-	m_inputScheme = INPUT_SCHEME_MODERN;
-	// W A S D stay on the grid and the unit keys until somebody asks for them on the camera
-	m_wasdCamera = FALSE;
 	// the lines have been on since they were added, so nobody loses them until they say so
 	m_showOrderLines = TRUE;
 
@@ -1134,7 +1130,7 @@ GlobalData::GlobalData()
 	m_snapCameraRotateTo45 = TRUE;
 	m_zoomToCursor = TRUE;
 	m_isometricCamera = FALSE;
-	// the right button no longer scrolls, so a right-drag is free to mean something
+	// a left drag with the move, attack move or guard key armed draws a formation line
 	m_formationDrag = TRUE;
 	m_showAllyCursors = TRUE;
 	m_chromaLighting = TRUE;	//costs nothing on a machine with no Razer server: the handshake fails once

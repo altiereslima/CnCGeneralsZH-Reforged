@@ -379,7 +379,6 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 					//
 					Coord3D worldEnd;
 					TheTacticalView->screenToTerrain( &anchorEnd, &worldEnd );
-					TheInGameUI->snapPlacementToGrid( &worldEnd, build, angle );
 
 					std::vector<Coord3D> pieces;
 					TheInGameUI->computePlacementRow( build, angle, &world, &worldEnd, &pieces );
