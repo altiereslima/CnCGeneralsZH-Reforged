@@ -14,6 +14,10 @@ import urllib.request
 import zipfile
 
 ZLIB_URL = "https://zlib.net/fossils/zlib-1.1.4.tar.gz"
+# O projeto libpng/zlib no SourceForge guarda o mesmo arquivo. O zlib.net já entregou ao runner
+# um arquivo com outro MD5 (run #21, 2026-09-28) e acertou na tentativa seguinte; o espelho só é
+# usado quando o zlib.net não entrega o arquivo certo, e passa pelo mesmo MD5.
+ZLIB_MIRROR_URL = "https://downloads.sourceforge.net/project/libpng/zlib/1.1.4/zlib-1.1.4.tar.gz"
 ZLIB_MD5 = "abc405d0bdd3ee22782d7aa20e440f08"
 GAMESPY_REPO = "https://github.com/TheSuperHackers/GamespySDK.git"
 GAMESPY_COMMIT = "b1b77d8f1f30d289b4b4910d305a377f706a0bf7"
@@ -120,11 +124,25 @@ def install_zlib(repo: Path, archive_override: Path|None):
     with tempfile.TemporaryDirectory(prefix="zh-zlib-") as td:
         td=Path(td)
         arc=archive_override if archive_override else td/"zlib-1.1.4.tar.gz"
-        if not archive_override:
-            download(ZLIB_URL, arc)
-        got=md5(arc)
-        if got.lower()!=ZLIB_MD5:
-            raise RuntimeError(f"zlib 1.1.4 MD5 inválido: {got}")
+        if archive_override:
+            got=md5(arc)
+            if got.lower()!=ZLIB_MD5:
+                raise RuntimeError(f"zlib 1.1.4 MD5 inválido: {got}")
+        else:
+            problems=[]
+            for url in (ZLIB_URL, ZLIB_MIRROR_URL):
+                try:
+                    download(url, arc)
+                except Exception as exc:
+                    problems.append(f"{url}: {str(exc).strip()[:200]}")
+                    continue
+                got=md5(arc)
+                if got.lower()==ZLIB_MD5:
+                    break
+                problems.append(f"{url}: MD5 inválido {got}")
+                print(f"zlib 1.1.4: {url} entregou MD5 {got}")
+            else:
+                raise RuntimeError("zlib 1.1.4 não veio íntegro de nenhuma fonte: "+"; ".join(problems))
         extract=td/"extract"
         extract.mkdir()
         safe_extract_tar(arc, extract)
