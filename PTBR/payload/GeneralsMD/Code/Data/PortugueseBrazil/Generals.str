@@ -2563,7 +2563,7 @@ CONTROLBAR:ToolTipGuardWithoutPursuit
 END
 
 CONTROLBAR:TooltipLeafletDrop
-"Eficiente contra Unidades \n \n Contagem Regressiva: 5:00"
+"Eficiente contra Infantaria \n \n Contagem Regressiva: 5:00"
 END
 
 CONTROLBAR:TooltipMissileDefenderLaser
