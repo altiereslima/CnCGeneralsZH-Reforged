@@ -5431,7 +5431,7 @@ GUI:CommandSlot02
 END
 
 GUI:CommandSlot02Description
-"Aciona a posição 02 da barra de comandos (coluna 1, linha inferior, tecla 'Z' no layout de grade padrão)."
+"Aciona a posição 02 da barra de comandos (coluna 2, linha superior, tecla 'W' no layout de grade padrão)."
 END
 
 GUI:CommandSlot03
@@ -5439,7 +5439,7 @@ GUI:CommandSlot03
 END
 
 GUI:CommandSlot03Description
-"Aciona a posição 03 da barra de comandos (coluna 2, linha superior, tecla 'W' no layout de grade padrão)."
+"Aciona a posição 03 da barra de comandos (coluna 3, linha superior, tecla 'E' no layout de grade padrão)."
 END
 
 GUI:CommandSlot04
@@ -5447,7 +5447,7 @@ GUI:CommandSlot04
 END
 
 GUI:CommandSlot04Description
-"Aciona a posição 04 da barra de comandos (coluna 2, linha inferior, tecla 'X' no layout de grade padrão)."
+"Aciona a posição 04 da barra de comandos (coluna 4, linha superior, tecla 'R' no layout de grade padrão)."
 END
 
 GUI:CommandSlot05
@@ -5455,7 +5455,7 @@ GUI:CommandSlot05
 END
 
 GUI:CommandSlot05Description
-"Aciona a posição 05 da barra de comandos (coluna 3, linha superior, tecla 'E' no layout de grade padrão)."
+"Aciona a posição 05 da barra de comandos (coluna 5, linha superior, tecla 'T' no layout de grade padrão)."
 END
 
 GUI:CommandSlot06
@@ -5463,7 +5463,7 @@ GUI:CommandSlot06
 END
 
 GUI:CommandSlot06Description
-"Aciona a posição 06 da barra de comandos (coluna 3, linha inferior, tecla 'C' no layout de grade padrão)."
+"Aciona a posição 06 da barra de comandos (coluna 6, linha superior, tecla 'Y' no layout de grade padrão)."
 END
 
 GUI:CommandSlot07
@@ -5471,7 +5471,7 @@ GUI:CommandSlot07
 END
 
 GUI:CommandSlot07Description
-"Aciona a posição 07 da barra de comandos (coluna 4, linha superior, tecla 'R' no layout de grade padrão)."
+"Aciona a posição 07 da barra de comandos (coluna 1, linha do meio, tecla 'A' no layout de grade padrão), onde fica o comando Atacar de uma unidade."
 END
 
 GUI:CommandSlot08
@@ -5479,7 +5479,7 @@ GUI:CommandSlot08
 END
 
 GUI:CommandSlot08Description
-"Aciona a posição 08 da barra de comandos (coluna 4, linha inferior, tecla 'V' no layout de grade padrão)."
+"Aciona a posição 08 da barra de comandos (coluna 2, linha do meio, tecla 'S' no layout de grade padrão), onde fica o comando Parar de uma unidade."
 END
 
 GUI:CommandSlot09
@@ -5487,7 +5487,7 @@ GUI:CommandSlot09
 END
 
 GUI:CommandSlot09Description
-"Aciona a posição 09 da barra de comandos (coluna 5, linha superior, tecla 'T' no layout de grade padrão)."
+"Aciona a posição 09 da barra de comandos (coluna 3, linha do meio, tecla 'D' no layout de grade padrão), onde fica o comando Mover e Atacar."
 END
 
 GUI:CommandSlot10
@@ -5495,7 +5495,7 @@ GUI:CommandSlot10
 END
 
 GUI:CommandSlot10Description
-"Aciona a posição 10 da barra de comandos (coluna 5, linha inferior, tecla 'B' no layout de grade padrão)."
+"Aciona a posição 10 da barra de comandos (coluna 4, linha do meio, tecla 'F' no layout de grade padrão)."
 END
 
 GUI:CommandSlot11
@@ -5503,7 +5503,7 @@ GUI:CommandSlot11
 END
 
 GUI:CommandSlot11Description
-"Aciona a posição 11 da barra de comandos (coluna 6, linha superior, tecla 'Y' no layout de grade padrão)."
+"Aciona a posição 11 da barra de comandos (coluna 5, linha do meio, tecla 'G' no layout de grade padrão)."
 END
 
 GUI:CommandSlot12
@@ -5511,7 +5511,7 @@ GUI:CommandSlot12
 END
 
 GUI:CommandSlot12Description
-"Aciona a posição 12 da barra de comandos (coluna 6, linha inferior, tecla 'N' no layout de grade padrão)."
+"Aciona a posição 12 da barra de comandos (coluna 6, linha do meio, tecla 'H' no layout de grade padrão)."
 END
 
 GUI:CommandSlot13
@@ -5519,7 +5519,7 @@ GUI:CommandSlot13
 END
 
 GUI:CommandSlot13Description
-"Aciona a posição 13 da barra de comandos (coluna 7, linha superior, tecla 'U' no layout de grade padrão)."
+"Aciona a posição 13 da barra de comandos (coluna 1, linha inferior, tecla 'Z' no layout de grade padrão), onde fica o comando Evacuar, para os passageiros de uma unidade ou a guarnição de um edifício."
 END
 
 GUI:CommandSlot14
@@ -5527,7 +5527,39 @@ GUI:CommandSlot14
 END
 
 GUI:CommandSlot14Description
-"Aciona a posição 14 da barra de comandos (coluna 7, linha inferior, tecla 'M' no layout de grade padrão)."
+"Aciona a posição 14 da barra de comandos (coluna 2, linha inferior, tecla 'X' no layout de grade padrão), onde fica o comando Proteger."
+END
+
+GUI:CommandSlot15
+"Posição 15 da Barra de Comandos"
+END
+
+GUI:CommandSlot15Description
+"Aciona a posição 15 da barra de comandos (coluna 3, linha inferior, tecla 'C' no layout de grade padrão), onde fica o comando Manter Posição."
+END
+
+GUI:CommandSlot16
+"Posição 16 da Barra de Comandos"
+END
+
+GUI:CommandSlot16Description
+"Aciona a posição 16 da barra de comandos (coluna 4, linha inferior, tecla 'V' no layout de grade padrão)."
+END
+
+GUI:CommandSlot17
+"Posição 17 da Barra de Comandos"
+END
+
+GUI:CommandSlot17Description
+"Aciona a posição 17 da barra de comandos (coluna 5, linha inferior, tecla 'B' no layout de grade padrão), onde fica o Ponto de Encontro de um edifício."
+END
+
+GUI:CommandSlot18
+"Posição 18 da Barra de Comandos"
+END
+
+GUI:CommandSlot18Description
+"Aciona a posição 18 da barra de comandos (coluna 6, linha inferior, tecla 'N' no layout de grade padrão), onde fica o comando Vender."
 END
 
 GUI:Community
