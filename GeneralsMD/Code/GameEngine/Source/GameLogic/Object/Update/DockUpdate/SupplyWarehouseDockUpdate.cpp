@@ -30,8 +30,11 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
 #include "Common/GlobalData.h"
+#include "Common/Player.h"
+#include "Common/PlayerList.h"
 #include "Common/Xfer.h"
 #include "GameClient/Drawable.h"
+#include "GameLogic/GameLogic.h"
 #include "GameLogic/Module/SupplyWarehouseDockUpdate.h"
 #include "GameLogic/Module/SupplyTruckAIUpdate.h"
 #include "GameLogic/Object.h"
@@ -90,10 +93,103 @@ SupplyWarehouseDockUpdate::SupplyWarehouseDockUpdate( Thing *thing, const Module
 {
 	m_boxesStored = getSupplyWarehouseDockUpdateModuleData()->m_startingBoxesData;
 	m_nextRegenFrame = 0;
+	memset( m_lastGatherFrame, 0, sizeof( m_lastGatherFrame ) );
 }
 
 SupplyWarehouseDockUpdate::~SupplyWarehouseDockUpdate()
 {
+}
+
+//-------------------------------------------------------------------------------------------------
+// The lobby's supply pile limit (GitHub #30)
+//-------------------------------------------------------------------------------------------------
+
+/** How long a player's last load keeps the pile his.  A gatherer holds an approach spot only from
+	* setting off to driving in, so a player working a pile with one Chinook has nothing standing at
+	* it for the whole trip home, and without this the pile would change hands between every two
+	* loads.  A minute covers a round trip to a supply centre built anywhere near the pile; a player
+	* who stops coming loses the pile a minute after his last box. */
+static const UnsignedInt SUPPLY_PILE_CLAIM_FRAMES = 60 * LOGICFRAMES_PER_SECOND;
+
+Bool SupplyPileLimitCloses( Int limit, UnsignedInt gatheringPlayers, Int playerIndex )
+{
+	if( limit <= 0 || ( gatheringPlayers & ( 1u << playerIndex ) ) )
+		return FALSE;
+
+	Int count = 0;
+	for( ; gatheringPlayers; gatheringPlayers &= gatheringPlayers - 1 )
+		++count;
+	return count >= limit;
+}
+
+static void notePlayerOf( ObjectID dockerID, UnsignedInt *players )
+{
+	const Object *docker = TheGameLogic->findObjectByID( dockerID );
+	if( docker )	// a free spot, or a docker that died and has not been reaped yet
+		*players |= 1u << docker->getControllingPlayer()->getPlayerIndex();
+}
+
+/** A player holds the pile while one of his gatherers is on the way to it, queued outside it or
+	* loading from it, and for SUPPLY_PILE_CLAIM_FRAMES after his last load.  Each player is one, an
+	* ally like anybody else: the request was a team game in which the second player has to find a
+	* pile of his own. */
+UnsignedInt SupplyWarehouseDockUpdate::gatheringPlayers( void ) const
+{
+	UnsignedInt players = 0;
+
+	notePlayerOf( m_activeDocker, &players );
+	for( size_t i = 0; i < m_approachPositionOwners.size(); ++i )
+		notePlayerOf( m_approachPositionOwners[i], &players );
+
+	const UnsignedInt now = TheGameLogic->getFrame();
+	for( Int playerIndex = 0; playerIndex < MAX_PLAYER_COUNT; ++playerIndex )
+	{
+		// a defeated player's claim dies with him, or his pile would stay shut for the rest of the minute
+		if( m_lastGatherFrame[playerIndex] != 0 && now - m_lastGatherFrame[playerIndex] < SUPPLY_PILE_CLAIM_FRAMES &&
+				ThePlayerList->getNthPlayer( playerIndex )->isPlayerActive() )
+			players |= 1u << playerIndex;
+	}
+
+	return players;
+}
+
+Bool SupplyWarehouseDockUpdate::isClosedToPlayer( const Player *player ) const
+{
+	const Int limit = TheGameLogic->getSupplyPileLimit();
+	if( limit == 0 )
+		return FALSE;
+
+	return SupplyPileLimitCloses( limit, gatheringPlayers(), player->getPlayerIndex() );
+}
+
+Bool SupplyWarehouseDockUpdate::isClearToApproach( Object const* docker ) const
+{
+	return !isClosedToPlayer( docker->getControllingPlayer() ) && DockUpdate::isClearToApproach( docker );
+}
+
+Bool SupplyWarehouseDockUpdate::reserveApproachPosition( Object* docker, Coord3D *position, Int *index )
+{
+	const Int limit = TheGameLogic->getSupplyPileLimit();
+	if( limit == 0 )
+		return DockUpdate::reserveApproachPosition( docker, position, index );
+
+	// A refusal fails the docking state, and the gatherer goes back to wanting a pile: the search
+	// skips this one through isClearToApproach and takes the next, or sends it home to wait.
+	const Int playerIndex = docker->getControllingPlayer()->getPlayerIndex();
+	if( isClosedToPlayer( docker->getControllingPlayer() ) )
+	{
+		DEBUG_LOG(("SUPPLY PILE LIMIT frame %d pile %d refuses gatherer %d of player %d, players 0x%X limit %d\n",
+			TheGameLogic->getFrame(), getObject()->getID(), docker->getID(), playerIndex, gatheringPlayers(), limit));
+		return FALSE;
+	}
+
+	const Bool reserved = DockUpdate::reserveApproachPosition( docker, position, index );
+	if( reserved )
+	{
+		DEBUG_LOG(("SUPPLY PILE LIMIT frame %d pile %d takes gatherer %d of player %d, players 0x%X limit %d\n",
+			TheGameLogic->getFrame(), getObject()->getID(), docker->getID(), playerIndex, gatheringPlayers(), limit));
+	}
+	return reserved;
 }
 
 void SupplyWarehouseDockUpdate::onObjectCreated()
@@ -251,6 +347,9 @@ Bool SupplyWarehouseDockUpdate::action( Object* docker, Object *drone )
 	if( taken == 0 )
 		return FALSE; //nobody to gain the boxes, or nowhere to put them
 
+	// what the supply pile limit holds the pile for this player by while his gatherer is away
+	m_lastGatherFrame[ docker->getControllingPlayer()->getPlayerIndex() ] = TheGameLogic->getFrame();
+
 	if( m_boxesStored == 0 && getSupplyWarehouseDockUpdateModuleData()->m_deleteWhenEmpty )
 	{
 		TheGameLogic->destroyObject( getObject() );
@@ -330,13 +429,15 @@ void SupplyWarehouseDockUpdate::crc( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
-	* 1: Initial version */
+	* 1: Initial version
+	* 2: m_nextRegenFrame
+	* 3: m_lastGatherFrame, the supply pile limit's claim on the pile */
 // ------------------------------------------------------------------------------------------------
 void SupplyWarehouseDockUpdate::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 2;
+	XferVersion currentVersion = 3;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -351,6 +452,13 @@ void SupplyWarehouseDockUpdate::xfer( Xfer *xfer )
 		xfer->xferUnsignedInt( &m_nextRegenFrame );
 	else
 		m_nextRegenFrame = 0;
+
+	// who loaded here last and when (version 3); an older save starts with the pile unclaimed
+	if( version >= 3 )
+	{
+		for( Int playerIndex = 0; playerIndex < MAX_PLAYER_COUNT; ++playerIndex )
+			xfer->xferUnsignedInt( &m_lastGatherFrame[playerIndex] );
+	}
 
 }  // end xfer
 

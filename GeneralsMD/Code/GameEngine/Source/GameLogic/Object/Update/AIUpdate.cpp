@@ -5249,6 +5249,18 @@ Bool AIUpdateInterface::takeTunnelTrip( Object *entrance, const Coord3D *goal, T
 
 //----------------------------------------------------------------------------------------
 /**
+ * An AI order does not end a trip (aiDoCommand), so whoever idles a unit with one because the
+ * reason for the trip is gone says so here, or the unit walks on to the old goal the moment it is
+ * idle.  Underground the trip stays: it is what brings the unit back up.
+ */
+void AIUpdateInterface::endTunnelTrip()
+{
+	if (getObject()->getContainedBy() == NULL)
+		m_hasTunnelTrip = FALSE;
+}
+
+//----------------------------------------------------------------------------------------
+/**
  * Follow the path defined by the given array of points
  */
 void AIUpdateInterface::privateFollowPath( std::vector<Coord3D>* path, Object *ignoreObject, CommandSourceType cmdSource, Bool exitProduction )

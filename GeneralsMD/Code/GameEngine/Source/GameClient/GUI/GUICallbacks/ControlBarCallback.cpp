@@ -148,9 +148,9 @@ WindowMsgHandledType LeftHUDInput( GameWindow *window, UnsignedInt msg,
 				const DrawableList *drawableList = TheInGameUI->getAllSelectedLocalDrawables();
 				Mouse::MouseCursor cur = Mouse::ARROW;
 
-				if (!(drawableList->empty() || msg == GWM_MOUSE_LEAVING)) 
+				if (!(drawableList->empty() || msg == GWM_MOUSE_LEAVING))
 				{
-					if (command && command->getCommandType() == GUI_COMMAND_ATTACK_MOVE)
+					if (TheInGameUI->isInAttackMoveToMode())
 					{
 						cur = Mouse::ATTACKMOVETO;
 					}
@@ -231,9 +231,9 @@ WindowMsgHandledType LeftHUDInput( GameWindow *window, UnsignedInt msg,
 					const DrawableList *drawableList = TheInGameUI->getAllSelectedLocalDrawables();
 					Mouse::MouseCursor cur = Mouse::ARROW;
 
-					if (!(drawableList->empty() || msg == GWM_MOUSE_LEAVING)) 
+					if (!(drawableList->empty() || msg == GWM_MOUSE_LEAVING))
 					{
-						if (command && command->getCommandType() == GUI_COMMAND_ATTACK_MOVE)
+						if (TheInGameUI->isInAttackMoveToMode())
 						{
 							cur = Mouse::ATTACKMOVETO;
 						}
@@ -316,9 +316,8 @@ WindowMsgHandledType LeftHUDInput( GameWindow *window, UnsignedInt msg,
 					break;
 				}
 
-				// No drawables, or a right click automatically means its a look at.
-				// Having drawables and being in attack move mode means that we should attack move.
-				// Having drawables and not being in attack move mode means that we should move.
+				// No drawables, or a left press, is a look at, and leaves an armed key armed the way a
+				// pan of the main view does.  A right press with drawables is an order.
 
 				const DrawableList *drawableList = TheInGameUI->getAllSelectedLocalDrawables(); // locally-owned only
 				
@@ -331,51 +330,13 @@ WindowMsgHandledType LeftHUDInput( GameWindow *window, UnsignedInt msg,
 					break;
 				}
 
-				// evaluate any special powers that can be executed from the radar
-				const CommandButton *command = TheInGameUI->getGUICommand();
-				if( command 
-					&& (command->getCommandType() == GUI_COMMAND_SPECIAL_POWER || command->getCommandType() == GUI_COMMAND_SPECIAL_POWER_FROM_SHORTCUT)
-					&& BitTest( command->getOptions(), NEED_TARGET_POS ) 
-					)
-				{
+				// The order the same press on that spot of the ground gives: a special power, an attack
+				// move or a guard off an armed key, a rally point, a move, each one queued under shift.
+				TheGameClient->evaluateContextCommand( NULL, &world, CommandTranslator::DO_COMMAND );
 
-					// do the command
-					TheGameClient->evaluateContextCommand( NULL, &world, CommandTranslator::DO_COMMAND );
-
-				}  // end if
-				else if( command && command->getCommandType() == GUI_COMMAND_ATTACK_MOVE)
-				{
-					// Attack move has changed from a modifier to a command, so it moves up here.
-
-					GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_DO_ATTACKMOVETO );
-					msg->appendLocationArgument( world );
-					msg->appendBooleanArgument( TheInGameUI->isInForceAttackMode() );	// ctrl: arrive together
-
-					// Play the unit voice response
-					pickAndPlayUnitVoiceResponse(TheInGameUI->getAllSelectedDrawables(), GameMessage::MSG_DO_ATTACKMOVETO);
-				}
-				else
-				{
-					GameMessage *newMsg = NULL;
-
-					// Do the superweapon stuff here, before issuing these other messages
-
-					// GS Leaving commented out to show that isInAttackMoveToMode is NEVER SET.  It's a command now, not a modifier.
-//					if (TheInGameUI->isInAttackMoveToMode()) 
-//					{
-//						newMsg = TheMessageStream->appendMessage(GameMessage::MSG_DO_ATTACKMOVETO);
-//						newMsg->appendLocationArgument(world);
-//						// Play the unit voice response
-//						pickAndPlayUnitVoiceResponse(drawableList, GameMessage::MSG_DO_ATTACKMOVETO);
-//						break;
-//					}
-
-					newMsg = TheMessageStream->appendMessage(GameMessage::MSG_DO_MOVETO);
-					newMsg->appendLocationArgument(world);
-					// Play the unit voice response
-					pickAndPlayUnitVoiceResponse(drawableList, GameMessage::MSG_DO_MOVETO);
-				
-				}  // end else
+				// the order spends an armed key, unless shift is keeping it for the next point
+				if( TheInGameUI->isOrderKeyArmed() )
+					TheInGameUI->spendOrderKey();
 
 			}
 			
@@ -390,7 +351,6 @@ WindowMsgHandledType LeftHUDInput( GameWindow *window, UnsignedInt msg,
 
 	}  // end switch( msg )
 
-	TheInGameUI->clearAttackMoveToMode();
 	return MSG_HANDLED;
 
 }  // end LeftHUDInput

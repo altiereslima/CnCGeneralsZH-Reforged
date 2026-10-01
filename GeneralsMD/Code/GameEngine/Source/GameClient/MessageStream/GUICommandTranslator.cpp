@@ -262,44 +262,6 @@ static CommandStatus doGuardCommand( const CommandButton *command, GuardMode gua
 //-------------------------------------------------------------------------------------------------
 /** Do the set rally point command */
 //-------------------------------------------------------------------------------------------------
-static CommandStatus doAttackMoveCommand( const CommandButton *command, const ICoord2D *mouse )
-{
-
-	// sanity
-	if( command == NULL || mouse == NULL )
-		return COMMAND_COMPLETE;
-
-	//
-	// we can only set rally points for structures ... and we never multiple select structures
-	// so we must be sure there is only one thing selected (that thing we will set the point on)
-	//
-	Drawable *draw = TheInGameUI->getFirstSelectedDrawable();
-	DEBUG_ASSERTCRASH( draw, ("doAttackMoveCommand: No selected object(s)\n") );
-
-	// sanity
-	if( draw == NULL || draw->getObject() == NULL )
-		return COMMAND_COMPLETE;
-
-	// convert mouse point to world coords
-	Coord3D world;
-	TheTacticalView->screenToTerrain( mouse, &world );
-
-	// send the message to set the rally point
-	GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_DO_ATTACKMOVETO );
-	msg->appendLocationArgument( world );
-	msg->appendBooleanArgument( TheInGameUI->isInForceAttackMode() );	// ctrl: arrive together
-
-	// Play the unit voice response
-	pickAndPlayUnitVoiceResponse(TheInGameUI->getAllSelectedDrawables(), GameMessage::MSG_DO_ATTACKMOVETO);
-
-	return COMMAND_COMPLETE;
-
-}
-
-
-//-------------------------------------------------------------------------------------------------
-/** Do the set rally point command */
-//-------------------------------------------------------------------------------------------------
 static CommandStatus doSetRallyPointCommand( const CommandButton *command, const ICoord2D *mouse )
 {
 
@@ -470,12 +432,6 @@ GameMessageDisposition GUICommandTranslator::translateGameMessage(const GameMess
 						break;
 
 					}  // end special power
-
-					case GUI_COMMAND_ATTACK_MOVE:
-					{
-						commandStatus = doAttackMoveCommand( command, &mouse );
-						break;
-					}
 
 					//---------------------------------------------------------------------------------------
 					case GUI_COMMAND_SET_RALLY_POINT:

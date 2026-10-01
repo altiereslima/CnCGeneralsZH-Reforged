@@ -148,11 +148,22 @@ NEW_CONTROLS = [
     (COMBO,  "ComboBoxHealthBars",     None),
     (LABEL,  "LabelPlayerColors",      "GUI:PlayerColors"),
     (COMBO,  "ComboBoxPlayerColors",   None),
+    (LABEL,  "LabelHudScale",          "GUI:HudScale"),
+    (COMBO,  "ComboBoxHudScale",       None),
     (LABEL,  "LabelLanguage",          "GUI:Language"),
     (COMBO,  "ComboBoxLanguage",       None),
     (CHECK,  "CheckOrderLines",        "GUI:OrderLines"),
+    (CHECK,  "CheckNetBox",            "GUI:NetBox"),
+    (LABEL,  "LabelIncomeRate",        "GUI:IncomeRate"),
+    (COMBO,  "ComboBoxIncomeRate",     None),
+    (CHECK,  "CheckEmptyBuildingPips", "GUI:EmptyBuildingPips"),
     (CHECK,  "CheckZoomToCursor",      "GUI:ZoomToCursor"),
     (CHECK,  "CheckIsometricCamera",   "GUI:IsometricCamera"),
+    (CHECK,  "CheckStartAtMaxZoom",    "GUI:StartAtMaxZoom"),
+    (LABEL,  "LabelCloserZoom",        "GUI:CloserZoom"),
+    (SLIDER, "SliderCloserZoom",       None),
+    (LABEL,  "LabelDragTolerance",     "GUI:DragTolerance"),
+    (SLIDER, "SliderDragTolerance",    None),
     (CHECK,  "CheckTreeSway",          "GUI:TreeSway"),
     (CHECK,  "CheckInfantryShadows",   "GUI:InfantryShadows"),
     (CHECK,  "CheckProjectileShadows", "GUI:ProjectileShadows"),
@@ -169,10 +180,13 @@ NEW_CONTROLS = [
 READOUTS = [
     "ValueGamma", "ValueTextureResolution", "ValueParticleCap", "ValueAnisotropy",
     "ValueMusicVolume", "ValueSFXVolume", "ValueVoiceVolume", "ValueScrollSpeed",
+    "ValueCloserZoom", "ValueDragTolerance",
 ]
 
-# a cloned slider keeps its template's range unless it is given one
-SLIDER_RANGES = [("SliderAnisotropy", 0, 16)]
+# a cloned slider keeps its template's range unless it is given one; selfcheck holds these to the
+# catalog row's own bounds
+SLIDER_RANGES = [("SliderAnisotropy", 0, 16), ("SliderCloserZoom", 0, 60),
+                 ("SliderDragTolerance", 2, 50)]
 
 # EA's captions that do not fit the page: two popup headings written in capitals, and a check box
 # caption that ran 20 pixels past the panel's right edge once it stood in a 268 pixel column.
@@ -259,18 +273,26 @@ GROUP_LAYOUT = [
     ("PageControls", 0, "GUI:OptionsGroupScrolling", [
         setting("ScrollSpeedLabel", "SliderScrollSpeed", "ValueScrollSpeed"),
         ("check", "CheckZoomToCursor"),
-        ("check", "CheckIsometricCamera")]),
+        ("check", "CheckIsometricCamera"),
+        ("check", "CheckStartAtMaxZoom"),
+        setting("LabelCloserZoom", "SliderCloserZoom", "ValueCloserZoom")]),
     ("PageControls", 1, "GUI:OptionsGroupOrders", [
         ("check", "Retaliation"),
         ("check", "CheckDoubleClickAttackMove")]),
     ("PageControls", 2, "GUI:OptionsGroupInput", [
+        setting("LabelDragTolerance", "SliderDragTolerance", "ValueDragTolerance"),
         ("check", "CheckChromaLighting")]),
 
     ("PageGameplay", 0, "GUI:OptionsGroupBattlefield", [
         setting("LabelHealthBars", "ComboBoxHealthBars"),
         setting("LabelPlayerColors", "ComboBoxPlayerColors"),
-        ("check", "CheckOrderLines")]),
-    ("PageGameplay", 1, "GUI:OptionsGroupLanguage", [
+        ("check", "CheckOrderLines"),
+        ("check", "CheckEmptyBuildingPips")]),
+    ("PageGameplay", 1, "GUI:OptionsGroupHud", [
+        setting("LabelHudScale", "ComboBoxHudScale"),
+        setting("LabelIncomeRate", "ComboBoxIncomeRate"),
+        ("check", "CheckNetBox")]),
+    ("PageGameplay", 2, "GUI:OptionsGroupLanguage", [
         setting("LabelLanguage", "ComboBoxLanguage")]),
 
     ("PageNetwork",  0, "GUI:OptionsGroupAddresses", [
@@ -636,6 +658,13 @@ def selfcheck():
         tooltip = "TOOLTIP:%s" % setting_of(widget)
         if tooltip not in keys:
             problems.append("%s tooltip %s is not in Patch.str" % (row["ini"], tooltip))
+
+        # a slider narrower than its row never reaches the row's ends, and says nothing about it
+        if row["kind"] == "OPTION_INT":
+            bounds = (int(row["lo"]), int(row["hi"]))
+            if dict((name, (low, high)) for name, low, high in SLIDER_RANGES).get(widget) != bounds:
+                problems.append("%s runs %d to %d and SLIDER_RANGES does not give %s that range"
+                                % ((row["ini"],) + bounds + (widget,)))
 
         if row["kind"] == "OPTION_ENUM":
             constant = row["hi"].split()[0]

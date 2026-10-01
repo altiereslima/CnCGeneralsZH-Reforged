@@ -380,9 +380,11 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 		return;
 
 	// God mode stops every hit but an explicit kill (a script, a sale) and a unit's own suicide
-	// weapon, so a terrorist or a demo trap still goes off.
+	// weapon, so a terrorist or a demo trap still goes off. A fall is the unit's own damage too but
+	// not a suicide: an EMPed helicopter drops out of the sky and has to survive the landing.
 	Player *victimPlayer = obj->getControllingPlayer();
-	if( damageInfo->in.m_damageType != DAMAGE_HEALING && !damageInfo->in.m_kill && damager != obj
+	if( damageInfo->in.m_damageType != DAMAGE_HEALING && !damageInfo->in.m_kill
+			&& ( damager != obj || damageInfo->in.m_damageType == DAMAGE_FALLING )
 			&& victimPlayer && victimPlayer->hasCheat( CHEAT_GOD_MODE ) )
 		return;
 

@@ -381,6 +381,37 @@ unsigned SortingRendererClass::Get_Refused_Polygon_Count()
 	return refused_polygon_count;
 }
 
+static unsigned flush_profile_entries;
+static float flush_profile_sort_ms;
+static float flush_profile_copy_ms;
+static float flush_profile_draw_ms;
+
+static float flushProfileElapsedMS(__int64 from, __int64 to)
+{
+	static __int64 freq = 0;
+	if (freq == 0)
+		QueryPerformanceFrequency((LARGE_INTEGER *)&freq);
+	if (freq < 1)
+		return 0.0f;
+	return (float)((double)(to - from) * 1000.0 / (double)freq);
+}
+
+void SortingRendererClass::Reset_Flush_Profile()
+{
+	flush_profile_entries = 0;
+	flush_profile_sort_ms = 0.0f;
+	flush_profile_copy_ms = 0.0f;
+	flush_profile_draw_ms = 0.0f;
+}
+
+void SortingRendererClass::Get_Flush_Profile(unsigned &entries, float &sort_ms, float &copy_ms, float &draw_ms)
+{
+	entries = flush_profile_entries;
+	sort_ms = flush_profile_sort_ms;
+	copy_ms = flush_profile_copy_ms;
+	draw_ms = flush_profile_draw_ms;
+}
+
 static SortingRendererClass::ParallelForFunc parallel_for_hook=NULL;
 
 void SortingRendererClass::Set_Parallel_For(ParallelForFunc parallel_for)
@@ -613,6 +644,9 @@ static void Flush_Sorting_Batch(const TempIndexStruct* entries,unsigned entry_co
 	job.indices=NULL;
 	const int chunks=(int)((entry_count+ENTRIES_PER_COPY_CHUNK-1)/ENTRIES_PER_COPY_CHUNK);
 
+	__int64 tCopyStart, tCopyEnd, tDrawEnd;
+	QueryPerformanceCounter((LARGE_INTEGER *)&tCopyStart);
+
 	DynamicVBAccessClass dyn_vb_access(BUFFER_TYPE_DYNAMIC_DX8,dynamic_fvf_type,(unsigned short)vertex_count);
 	{
 		DynamicVBAccessClass::WriteLockClass lock(&dyn_vb_access);
@@ -639,6 +673,9 @@ static void Flush_Sorting_Batch(const TempIndexStruct* entries,unsigned entry_co
 
 	DX8Wrapper::Set_Index_Buffer(dyn_ib_access,0); // Override with this buffer (do something to prevent need for this!)
 	DX8Wrapper::Set_Vertex_Buffer(dyn_vb_access); // Override with this buffer (do something to prevent need for this!)
+
+	QueryPerformanceCounter((LARGE_INTEGER *)&tCopyEnd);
+	flush_profile_copy_ms += flushProfileElapsedMS(tCopyStart, tCopyEnd);
 
 	DX8Wrapper::Apply_Render_State_Changes();
 
@@ -669,6 +706,9 @@ static void Flush_Sorting_Batch(const TempIndexStruct* entries,unsigned entry_co
 
 	Apply_Render_State(overlapping_nodes[node_id]->sorting_state);
 	DX8Wrapper::Draw_Triangles(run_first_index,run_triangles,run_first_vertex,vertex_cursor-run_first_vertex);
+
+	QueryPerformanceCounter((LARGE_INTEGER *)&tDrawEnd);
+	flush_profile_draw_ms += flushProfileElapsedMS(tCopyEnd, tDrawEnd);
 }
 
 // ----------------------------------------------------------------------------
@@ -686,6 +726,10 @@ void SortingRendererClass::Flush_Sorting_Pool()
 	if (!overlapping_node_count) return;
 
 	SNAPSHOT_SAY(("SortingSystem - Flush \n"));
+
+	flush_profile_entries += overlapping_entry_count;
+	__int64 tSortStart, tSortEnd;
+	QueryPerformanceCounter((LARGE_INTEGER *)&tSortStart);
 
 	TempIndexStruct* tis=Get_Temp_Index_Array(overlapping_entry_count);
 
@@ -797,6 +841,9 @@ void SortingRendererClass::Flush_Sorting_Pool()
 	Run_Parallel((int)overlapping_node_count,NODES_PER_CLAIM,NodeDepthJob::Run,tis);
 
 	const TempIndexStruct* sorted=Sort_By_Depth(tis,temp_sort_scratch_array,overlapping_entry_count);
+
+	QueryPerformanceCounter((LARGE_INTEGER *)&tSortEnd);
+	flush_profile_sort_ms += flushProfileElapsedMS(tSortStart, tSortEnd);
 
 	unsigned batch_start=0;
 	while (batch_start<overlapping_entry_count) {

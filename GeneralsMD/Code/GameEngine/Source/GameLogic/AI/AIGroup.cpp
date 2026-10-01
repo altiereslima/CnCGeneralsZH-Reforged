@@ -83,7 +83,6 @@ AIGroup::AIGroup( void )
 //	DEBUG_LOG(("***AIGROUP %x is being constructed.\n", this));
 	m_groundPath = NULL;
 	m_speed = 0.0f;
-	m_matchSpeeds = TRUE;
 	m_dirty = false;
 	m_id = TheAI->getNextGroupID();
 	m_memberListSize = 0;
@@ -3035,7 +3034,7 @@ void AIGroup::groupAttackPosition( const Coord3D *pos, Int maxShotsToFire, Comma
 /**
  * Attack move to a location
  */
-void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire, CommandSourceType cmdSource, Bool matchSpeeds )
+void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire, CommandSourceType cmdSource )
 {
 	//
 	// This used to hand every member the same single coordinate, so a group attack move arrived as
@@ -3043,13 +3042,6 @@ void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire,
 	// destination the way groupMoveToPosition does (each member keeps its offset from the group
 	// centroid).
 	//
-	// Holding the ground units to the speed of the slowest one keeps the group together on the way
-	// in, but it also means one damaged truck walks the tanks in at its own pace, and that is not
-	// always what you asked for. So it is the player's call, taken from the ctrl key on the click:
-	// ctrl-click an attack move and they arrive together, click it plainly and they each go at
-	// their own speed. AIAttackMoveToState::onEnter reads it back off the group.
-	//
-	m_matchSpeeds = matchSpeeds;
 
 	if (m_dirty)
 		recompute();

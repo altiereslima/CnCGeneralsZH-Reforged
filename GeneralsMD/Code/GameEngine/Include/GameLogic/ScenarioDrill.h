@@ -81,7 +81,8 @@ enum ScenarioActionType
 	SCENARIO_ACTION_SHIFTGUARD,				///< shiftguard <slot> <selector> <position>; the same with the guard key
 	SCENARIO_ACTION_SHIFTPOWER,				///< shiftpower <slot> <selector> <targetSlot> <targetSelector> <power>; the same with a special power armed, on one object
 	SCENARIO_ACTION_SHIFTUPGRADE,			///< shiftupgrade <slot> <selector> <upgrade>; shift on an object upgrade button, bought by every unit that matches
-	SCENARIO_ACTION_DOCK							///< dock <slot> <selector> <targetSlot> <targetSelector>; a right click on a supply point or a dock
+	SCENARIO_ACTION_DOCK,							///< dock <slot> <selector> <targetSlot> <targetSelector>; a right click on a supply point or a dock
+	SCENARIO_ACTION_CONSTRUCT					///< construct <slot> <template> <position>; the local player's placement click, whatever is selected, as a message that is recorded and crosses the network
 };
 
 /// ScenarioAction::atStart when the position is plain numbers

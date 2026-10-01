@@ -85,6 +85,7 @@ protected:
 	virtual void drawAllyCursorLights( void );		///< the patch of an ally's colour lying under their cursor
 	void drawAllyCursors( void );									///< each ally's pointer and name, over the world
 	void drawOrderStep( const OrderHint& hint, const ICoord2D& tip, UnsignedInt color );	///< a shift list step's number and what it is
+	void drawBuildPlanNumbers( void );						///< each waiting plan's turn in its builder's queue
 
 	RenderObjClass *m_buildingPlacementAnchor;
 	RenderObjClass *m_buildingPlacementArrow;

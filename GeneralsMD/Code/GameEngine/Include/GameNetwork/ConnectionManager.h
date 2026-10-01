@@ -119,6 +119,7 @@ public:
 	UnsignedInt getPacketArrivalCushion( void );
 
 	Int getMinimumCushion();
+	void addNetworkStall(time_t ms) { m_frameMetrics.addNetworkStall(ms); }
 
 	void flushConnections();
 

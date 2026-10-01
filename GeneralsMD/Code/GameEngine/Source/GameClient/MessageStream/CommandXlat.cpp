@@ -104,8 +104,7 @@
 //-------------------------------------------------------------------------------------------------
 /**
  * Is the next order click a force fire?
- * Under Modern only the attack key arms it: ctrl is the "one shared pace" modifier on a move (see
- * issueMoveToLocationCommand), so a ctrl click could not ask for both.
+ * Only the attack key arms it. An attack-move click stays an attack move.
  */
 Bool CommandXlat_isForceAttackTargeting( Bool forceAttackArmed, Bool attackMoveArmed )
 {
@@ -1003,11 +1002,6 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 			else
 				movemsg->appendLocationArgument( *pos );
 
-			// ctrl on an attack move click asks for one shared pace - the force attack modifier is
-			// the ctrl key, and it means nothing else while the attack move cursor is up
-			if (msgType == GameMessage::MSG_DO_ATTACKMOVETO)
-				movemsg->appendBooleanArgument( TheInGameUI->isInForceAttackMode() );
-
 			// a posted unit holds its spot and shoots what walks into range, rather than chasing it
 			// off the post the player put it on
 			if (msgType == GameMessage::MSG_DO_GUARD_POSITION)
@@ -1488,9 +1482,9 @@ void CommandTranslator::finishFormationDrag( const ICoord2D& lift )
 		line.push_back( world );
 	}
 
-	// a line drawn with the attack key across enemies is aimed at them: each one it crosses goes on
-	// the target list, in the order the line meets them, and the ground under the line is not shot
-	// at.  Only a line that crosses nobody fires on the ground along it
+	// a line drawn with the attack key across enemies is aimed at them: the units that can shoot
+	// share those enemies along the stroke, and the ground under the line is not shot at.  Only a
+	// line that crosses nobody fires on the ground along it
 	const Bool aimedAtTargets = formationType == GameMessage::MSG_DO_FORMATION_FORCEATTACK
 															&& TheInGameUI->issueAttackLine( line ) > 0;
 	if( !aimedAtTargets )
@@ -2375,6 +2369,23 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 		}  // end else if
 #endif
 		// ********************************************************************************************
+		// A right click on a selected building takes the rally point away from everything selected.
+		// Only the click is answered: the hover and SelectionXlat's EVALUATE_ONLY fall through as
+		// they always did, so the building keeps its selection cursor.
+		else if( type == DO_COMMAND && draw && draw->isSelected()
+						 && TheInGameUI->canSelectedObjectsDoAction( InGameUI::ACTIONTYPE_SET_RALLY_POINT, NULL, InGameUI::SELECTION_ALL, FALSE ) )
+		{
+			msgType = GameMessage::MSG_CLEAR_RALLY_POINT;
+
+			// SELECTION_ALL above means every selected drawable has an object
+			const DrawableList *allSelectedDrawables = TheInGameUI->getAllSelectedDrawables();
+			for( DrawableList::const_iterator it = allSelectedDrawables->begin(); it != allSelectedDrawables->end(); ++it )
+			{
+				GameMessage *newMsg = TheMessageStream->appendMessage( msgType );
+				newMsg->appendObjectIDArgument( (*it)->getObject()->getID() );
+			}
+		}
+		// ********************************************************************************************
 		else if ( pos && !draw && TheInGameUI->canSelectedObjectsDoAction( InGameUI::ACTIONTYPE_SET_RALLY_POINT, NULL, InGameUI::SELECTION_ALL, FALSE ))
 		{
 			msgType = GameMessage::MSG_SET_RALLY_POINT;
@@ -2838,6 +2849,14 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			disp = DESTROY_MESSAGE;
 			break;
 		}		// end select next idle worker
+
+		case GameMessage::MSG_META_SELECT_NEXT_IDLE_UNIT:
+		{
+			TheInGameUI->selectNextIdleUnit();
+
+			disp = DESTROY_MESSAGE;
+			break;
+		}		// end select next idle unit
 
 		case GameMessage::MSG_META_COMMAND_SLOT01:
 		case GameMessage::MSG_META_COMMAND_SLOT02:

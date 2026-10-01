@@ -2018,6 +2018,18 @@ Int parseIncomeSharing(char *args[], int num)
 	return 1;
 }
 
+/* -superweapons <n>: the lobby's superweapon rule for an -autoskirmish run, 1 Limit and 2 No,
+	 carried the same way as -incomesharing. */
+Int parseSuperweapons(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1 && args[1])
+	{
+		TheWritableGlobalData->m_superweapons = atoi(args[1]);
+		return 2;
+	}
+	return 1;
+}
+
 /* -techrespawn <minutes>: the lobby's tech building respawn for an -autoskirmish run, carried the
 	 same way as -incomesharing. */
 Int parseTechRespawn(char *args[], int num)
@@ -2025,6 +2037,18 @@ Int parseTechRespawn(char *args[], int num)
 	if (TheWritableGlobalData && num > 1 && args[1])
 	{
 		TheWritableGlobalData->m_techRespawn = atoi(args[1]);
+		return 2;
+	}
+	return 1;
+}
+
+/* -supplypilelimit <players>: the lobby's supply pile limit for an -autoskirmish run, carried the
+	 same way as -incomesharing. */
+Int parseSupplyPileLimit(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1 && args[1])
+	{
+		TheWritableGlobalData->m_supplyPileLimit = atoi(args[1]);
 		return 2;
 	}
 	return 1;
@@ -2457,6 +2481,8 @@ static CommandLineParam params[] =
 	{ "-unitlimit", parseUnitLimit },
 	{ "-incomesharing", parseIncomeSharing },
 	{ "-techrespawn", parseTechRespawn },
+	{ "-superweapons", parseSuperweapons },
+	{ "-supplypilelimit", parseSupplyPileLimit },
 	{ "-showlanes", parseShowLanes },
 	{ "-uidrill", parseUIDrill },
 	{ "-resdrill", parseResDrill },

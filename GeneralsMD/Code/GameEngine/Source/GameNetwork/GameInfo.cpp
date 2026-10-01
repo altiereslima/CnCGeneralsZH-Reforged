@@ -399,6 +399,7 @@ void GameInfo::reset( void )
   m_proRules = TRUE;
   m_incomeSharing = INCOME_SHARING_OFF;
   m_techRespawn = 0;
+  m_supplyPileLimit = 0;
 
 	//
 
@@ -837,6 +838,16 @@ void GameInfo::setTechRespawn( Int minutes )
   m_techRespawn = minutes;
 }
 
+// clamped the same way; a lobby has MAX_SLOTS players, so nothing above that says anything more
+void GameInfo::setSupplyPileLimit( Int players )
+{
+  if (players < 0)
+    players = 0;
+  if (players > MAX_SLOTS)
+    players = MAX_SLOTS;
+  m_supplyPileLimit = players;
+}
+
 Bool GameInfo::isColorTaken(Int colorIdx, Int slotToIgnore ) const
 {
 	for (Int i=0; i<MAX_SLOTS; ++i)
@@ -1176,10 +1187,11 @@ static AsciiString buildGameInfoAsciiString( const GameInfo *game, const AsciiSt
 	}
 
 	AsciiString optionsString;
-	optionsString.format("US=%d;M=%2.2x%s;MC=%X;MS=%d;SD=%d;C=%d;SR=%u;SC=%u;O=%c;PT=%d;UL=%d;PR=%d;IS=%d;TR=%d;", game->getUseStats(), game->getMapContentsMask(), newMapName.str(),
+	optionsString.format("US=%d;M=%2.2x%s;MC=%X;MS=%d;SD=%d;C=%d;SR=%u;SC=%u;O=%c;PT=%d;UL=%d;PR=%d;IS=%d;TR=%d;PL=%d;", game->getUseStats(), game->getMapContentsMask(), newMapName.str(),
 		game->getMapCRC(), game->getMapSize(), game->getSeed(), game->getCRCInterval(), game->getSuperweaponRestriction(),
 		game->getStartingCash().countMoney(), game->oldFactionsOnly() ? 'Y' : 'N', game->getPeaceTime(),
-		game->getUnitLimit() ? 1 : 0, game->getProRules() ? 1 : 0, game->getIncomeSharing(), game->getTechRespawn() );
+		game->getUnitLimit() ? 1 : 0, game->getProRules() ? 1 : 0, game->getIncomeSharing(), game->getTechRespawn(),
+		game->getSupplyPileLimit() );
 
 	//add player info for each slot
 	optionsString.concat(slotListID);
@@ -1259,6 +1271,7 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
   Bool proRules = FALSE; // the same
   Int incomeSharing = INCOME_SHARING_OFF; // the same
   Int techRespawn = 0; // the same
+  Int supplyPileLimit = 0; // the same
 
 	Bool sawMap, sawMapCRC, sawMapSize, sawSeed, sawSlotlist, sawUseStats, sawSuperweaponRestriction, sawStartingCash, sawOldFactions;
 	sawMap = sawMapCRC = sawMapSize = sawSeed = sawSlotlist = sawUseStats = sawSuperweaponRestriction = sawStartingCash = sawOldFactions = FALSE;
@@ -1380,6 +1393,10 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
     else if (key.compare("TR") == 0 )
     {
       techRespawn = atoi(val.str());
+    }
+    else if (key.compare("PL") == 0 )
+    {
+      supplyPileLimit = atoi(val.str());
     }
 		else if (key.getLength() == 1 && *key.str() == slotListID)
 		{
@@ -1731,6 +1748,7 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
     game->setProRules( proRules );
     game->setIncomeSharing( incomeSharing );
     game->setTechRespawn( techRespawn );
+    game->setSupplyPileLimit( supplyPileLimit );
 
 		return true;
 	}
@@ -1757,7 +1775,7 @@ void SkirmishGameInfo::crc( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 void SkirmishGameInfo::xfer( Xfer *xfer )
 {
-	const XferVersion currentVersion = 9;	// 5 adds m_peaceTime, 6 m_unitLimit, 7 m_proRules, 8 m_incomeSharing, 9 m_techRespawn
+	const XferVersion currentVersion = 10;	// 5 adds m_peaceTime, 6 m_unitLimit, 7 m_proRules, 8 m_incomeSharing, 9 m_techRespawn, 10 m_supplyPileLimit
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -1898,6 +1916,15 @@ void SkirmishGameInfo::xfer( Xfer *xfer )
   else if ( xfer->getXferMode() == XFER_LOAD )
   {
     m_techRespawn = 0;
+  }
+
+  if ( version >= 10 )
+  {
+    xfer->xferInt( &m_supplyPileLimit );
+  }
+  else if ( xfer->getXferMode() == XFER_LOAD )
+  {
+    m_supplyPileLimit = 0;
   }
 
 }  // end xfer

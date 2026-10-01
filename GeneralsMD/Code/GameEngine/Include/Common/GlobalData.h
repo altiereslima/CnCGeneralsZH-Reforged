@@ -72,6 +72,23 @@ enum HealthBarModeType
 	HEALTH_BAR_MODE_COUNT	= 4,
 };
 
+/** The HudScale option's steps, 100/115/130/150% of the bottom HUD's own size (ControlBarHudScale). */
+enum { HUD_SCALE_COUNT = 4 };
+
+/** The IncomeRate option: what the income beside the money is counted over.  Automatic is per
+	* minute below INCOME_RATE_AUTOMATIC_PER_SECOND_FROM dollars a second and per second from there
+	* up: under that a whole number of dollars a second rounds most of the income away, which is
+	* what "+2/s" for $135 a minute does. */
+enum IncomeRateModeType
+{
+	INCOME_RATE_PER_SECOND	= 0,	///< "+40/s", what the bar has always shown
+	INCOME_RATE_PER_MINUTE	= 1,	///< "+2400/min"
+	INCOME_RATE_AUTOMATIC		= 2,
+
+	INCOME_RATE_MODE_COUNT	= 3,
+};
+enum { INCOME_RATE_AUTOMATIC_PER_SECOND_FROM = 10 };
+
 /** The language the game's words are shown in.  English is the string table EA shipped; every other
 	* entry names a translation GameText lays over it.  Speech and video stay what the install has. */
 enum TextLanguageType
@@ -305,6 +322,7 @@ public:
 	Bool m_debugAIObstacles;			///< Used to display AI obstacle debug information
 	Bool m_showObjectHealth;			///< debug display object health
 	Int m_healthBarMode;					///< HealthBarModeType: which units wear a bar at all
+	Int m_hudScale;								///< HUD size step, 0 = 100%; see ControlBarHudScale (client only)
 	Int m_playerColorScheme;			///< PlayerColorSchemeType: whose colour the client draws (client only)
 	Int m_textLanguage;						///< TextLanguageType: the translation GameText lays over the CSF, read once at startup (client only)
 	Bool m_showOrderLines;				///< draw a line from each selected unit to where it is going, and its queue (client only)
@@ -390,6 +408,8 @@ public:
 	Bool m_buildPlacementShadows;		///< whether that structure casts a shadow while it rides the cursor
 	Bool m_zoomToCursor;				///< the mouse wheel zooms toward whatever the cursor is over
 	Bool m_isometricCamera;				///< the tactical view from far off down a narrow cone, near enough orthographic
+	Int m_closerZoomPercent;			///< percent taken off MinCameraHeight, so the wheel comes nearer the ground; 0 = as GameData.ini has it
+	Int m_dragTolerance;				///< pixels the pointer may travel with a button held before the press is a drag; replaces Mouse.ini's DragTolerance
 	Bool m_formationDrag;				///< with the move, attack move or guard key armed, a left drag spreads the selection along the line drawn
 	Bool m_showAllyCursors;				///< in a network game, draw where each ally's mouse is pointing
 	Bool m_chromaLighting;				///< put the state of the match on Razer hardware
@@ -397,6 +417,9 @@ public:
 	Int m_textureFilterMode;			///< 0 bilinear, 1 trilinear, 2 anisotropic
 	Int m_anisotropyLevel;				///< samples anisotropic filtering may take; 0 = whatever the card offers
 	Bool m_showHudOverlay;				///< draw the fps / elapsed time / income line in the corner
+	Bool m_showNetBox;					///< the player's own switch for that corner: the network box, or the plate where the bar has no page
+	Int m_incomeRateMode;				///< IncomeRateModeType: the income beside the money per second, per minute or whichever reads better
+	Bool m_showEmptyBuildingPips;		///< the row of empty slots over a building nobody is in
 	Bool m_showPlacementRangeRing;		///< while placing a structure, ring its weapon range
 	Bool m_showSkillStrip;					///< watching, every general's bought promotions, bottom right
 	Bool m_showSuperweaponStrip;		///< the superweapon countdown cameos, top right
@@ -420,6 +443,8 @@ public:
 	Bool m_unitLimit;								///< -unitlimit: the lobby's unit limit for an -autoskirmish run
 	Int m_incomeSharing;						///< -incomesharing <n>: the lobby's income sharing, an IncomeSharing, for an -autoskirmish run
 	Int m_techRespawn;							///< -techrespawn <n>: the lobby's tech building respawn, in minutes, for an -autoskirmish run
+	Int m_supplyPileLimit;					///< -supplypilelimit <n>: the lobby's supply pile limit, in players a pile, for an -autoskirmish run
+	Int m_superweapons;							///< -superweapons <n>: the lobby's superweapon rule, a SUPERWEAPONS_ mode, for an -autoskirmish run
 	Int m_maxGameFrames;						///< -maxframes <n>: quit after n logic frames however the match is going (0 = no limit)
 	Int m_screenShotFrame;					///< -screenshot <n>: save one picture when the run reaches logic frame n (0 = never)
 	Int m_videoStartFrame;					///< -video <from> <to> [name]: the first logic frame recorded

@@ -385,7 +385,11 @@ Object *BuildAssistant::buildObjectNow( Object *constructorObject, const ThingTe
 			Bool keepsCurrentJob = owningPlayer->getPlayerType() == PLAYER_HUMAN &&
 														 dozer && dozer->isTaskPending( DOZER_TASK_BUILD );
 			if( !keepsCurrentJob )
+			{
+				// a tunnel trip to the last order's goal with it, or the builder walks there first
+				ai->endTunnelTrip();
 				ai->aiIdle(CMD_FROM_AI); // stop any current behavior.
+			}
 			return ai->construct( what, pos, angle, owningPlayer, FALSE );
 		}
 		return NULL;

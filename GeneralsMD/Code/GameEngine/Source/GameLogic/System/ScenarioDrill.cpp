@@ -30,6 +30,7 @@
 #include "Common/FileSystem.h"
 #include "Common/GlobalData.h"
 #include "Common/Player.h"
+#include "Common/MessageStream.h"
 #include "Common/PlayerList.h"
 #include "Common/SpecialPower.h"
 #include "Common/Team.h"
@@ -202,6 +203,8 @@ static Bool parseActionType( const AsciiString &token, ScenarioActionType *actio
 		*action = SCENARIO_ACTION_SHIFTPOWER;
 	else if (token == "shiftupgrade")
 		*action = SCENARIO_ACTION_SHIFTUPGRADE;
+	else if (token == "construct")
+		*action = SCENARIO_ACTION_CONSTRUCT;
 	else
 		return FALSE;
 
@@ -283,6 +286,7 @@ static Int tokensNeededFor( ScenarioActionType action )
 		case SCENARIO_ACTION_SHIFTMOVE:		return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_SHIFTATTACKMOVE:	return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_SHIFTGUARD:	return SCENARIO_TOKENS_MOVE;
+		case SCENARIO_ACTION_CONSTRUCT:		return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_SHIFTATTACK:	return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_SHIFTPOWER:	return SCENARIO_TOKENS_SHIFTPOWER;
 		case SCENARIO_ACTION_SHIFTUPGRADE:	return SCENARIO_TOKENS_SHIFTUPGRADE;
@@ -362,6 +366,7 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 		case SCENARIO_ACTION_SHIFTMOVE:
 		case SCENARIO_ACTION_SHIFTATTACKMOVE:
 		case SCENARIO_ACTION_SHIFTGUARD:
+		case SCENARIO_ACTION_CONSTRUCT:
 		{
 			Int next = SCENARIO_ORDER_POSITION_TOKEN;
 			const ScenarioParseResult position = parseScenarioPosition( tokens, count, &next, action );
@@ -1249,6 +1254,30 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 	return ordered;
 }
 
+/** A placement click, as PlaceEventTranslator sends it: one MSG_DOZER_CONSTRUCT onto the message
+	  stream, so it is recorded in the replay and reaches every machine of a network game, and the
+	  logic picks the builder from whatever is selected then - with nothing selected, the player's idle
+	  builder nearest the site.  Only the local player can click, so any other slot is refused. */
+static Bool executeConstruct( const ScenarioAction &action, Player *player, const Coord3D &dest )
+{
+	const ThingTemplate *build = TheThingFactory->findTemplate( action.selector );
+	if (player != ThePlayerList->getLocalPlayer() || build == NULL)
+	{
+		DEBUG_LOG(("SCENARIO: frame %d construct: slot %d is not the local player, or '%s' is no template\n",
+							 action.frame, action.slot, action.selector.str()));
+		return FALSE;
+	}
+
+	GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_DOZER_CONSTRUCT );
+	msg->appendIntegerArgument( build->getTemplateID() );
+	msg->appendLocationArgument( dest );
+	msg->appendRealArgument( 0.0f );
+
+	DEBUG_LOG(("SCENARIO: frame %d construct slot %d '%s' at (%.0f,%.0f)\n",
+						 action.frame, action.slot, action.selector.str(), dest.x, dest.y));
+	return TRUE;
+}
+
 Bool ScenarioDrill_execute( const ScenarioAction &action )
 {
 	Player *player = findPlayerForSlot( action.slot );
@@ -1279,6 +1308,9 @@ Bool ScenarioDrill_execute( const ScenarioAction &action )
 
 	if (action.action == SCENARIO_ACTION_TALLY)
 		return executeTally( action, player );
+
+	if (action.action == SCENARIO_ACTION_CONSTRUCT)
+		return executeConstruct( action, player, position );
 
 	return executeOrder( action, player, position );
 }

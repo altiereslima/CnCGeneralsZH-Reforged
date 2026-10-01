@@ -43,6 +43,7 @@ public:
 	void doPerFrameMetrics(UnsignedInt frame);
 	void processLatencyResponse(UnsignedInt frame);
 	void addCushion(Int cushion);
+	void addNetworkStall(time_t ms);	///< wall time spent waiting on another machine's commands, not computing
 
 	Real getAverageLatency();
 	Int getAverageFPS();
@@ -53,6 +54,7 @@ protected:
 	// frames per second history variables.
 	Real *m_fpsList;								///< A record of how many game logic frames per second there were for the last 60 seconds.
 	time_t m_lastFpsTimeThing;																///< The time when the last fps entry started being recorded.
+	time_t m_fpsStallMS;																			///< Network stall inside the current fps window; see doPerFrameMetrics.
 	UnsignedInt m_fpsStartingFrame;														///< The logic frame the window above opened on, so the sample is a logic rate.
 	Int m_fpsListIndex;																				///< Index into the array of the current fps list entry being measured.
 	Real m_averageFps;																				///< The current average logic fps, computed just like m_averageLatency below but with the fps numbers.

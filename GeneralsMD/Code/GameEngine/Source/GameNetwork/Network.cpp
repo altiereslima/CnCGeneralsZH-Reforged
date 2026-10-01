@@ -211,6 +211,7 @@ protected:
 	Int m_lastExecutionFrame;																	///< The highest frame number that a command could have been executed on.
 	Int m_lastFrameCompleted;
 	Bool m_didSelfSlug;
+	time_t m_stallStart;																			///< When the frame we are waiting on stopped being ready; 0 when not waiting.
 	__int64 m_perfCountFreq;														///< The frequency of the performance counter.
 
 	__int64 m_nextFrameTime;														///< When did we execute the last frame?  For slugging the GameLogic...
@@ -277,6 +278,7 @@ Network::Network()
 	//Initializations inserted
 	m_checkCRCsThisFrame = FALSE;
 	m_didSelfSlug = FALSE;
+	m_stallStart = 0;
 	m_frameDataReady = FALSE;
 	m_sawCRCMismatch = FALSE;
 	//
@@ -344,6 +346,7 @@ void Network::init()
 	m_lastFrameCompleted = m_runAhead - 1; // subtract 1 since we're starting on frame 0
 	m_frameDataReady = FALSE;
 	m_didSelfSlug = FALSE;
+	m_stallStart = 0;
 
 	m_localStatus = NETLOCALSTATUS_PREGAME;
 
@@ -745,7 +748,19 @@ void Network::update( void )
 		endOfGameCheck();
 	}
 
-	if (AllCommandsReady(TheGameLogic->getFrame())) { // If all the commands are ready for the next frame...
+	/* Wall time spent here waiting on somebody else's commands.  FrameMetrics takes it out of the
+		 logic rate this machine reports, which is a capacity, not a count of frames that happened. */
+	Bool ready = AllCommandsReady(TheGameLogic->getFrame());
+	if (m_conMgr != NULL && m_localStatus == NETLOCALSTATUS_INGAME) {
+		if (!ready && m_stallStart == 0) {
+			m_stallStart = timeGetTime();
+		} else if (ready && m_stallStart != 0) {
+			m_conMgr->addNetworkStall(timeGetTime() - m_stallStart);
+			m_stallStart = 0;
+		}
+	}
+
+	if (ready) { // If all the commands are ready for the next frame...
 		m_conMgr->handleAllCommandsReady();
 //		DEBUG_LOG(("Network::update - frame %d is ready\n", TheGameLogic->getFrame()));
 		if (timeForNewFrame()) { // This needs to come after any other pre-frame execution checks as this changes the timing variables.

@@ -68,10 +68,15 @@
 //-------------------------------------------------------------------------------------------------
 /** Which builder takes a structure job: the free one nearest the site, or failing that the
 	* nearest one at all.  Free = no build/repair task and not hauling supplies; a builder that
-	* is merely walking somewhere counts.  Fed from the selection. */
+	* is merely walking somewhere counts.  Fed from the selection, or from every builder of the
+	* player when no builder is selected (the control bar's stand-in builder context).  Only a
+	* builder whose command set has the structure counts: a GLA worker switched to its fake
+	* structures builds those and the real ones only from the other page, and a captured dozer
+	* builds its own side's. */
 //-------------------------------------------------------------------------------------------------
 struct BuilderPick
 {
+	const ThingTemplate *place;
 	Coord3D loc;
 	Object *idle;
 	Real idleDistSqr;
@@ -89,6 +94,8 @@ static void considerBuilder( Object *candidate, BuilderPick *pick )
 	DozerAIInterface *dozer = ai ? ai->getDozerAIInterface() : NULL;
 	if( dozer == NULL )
 		return;
+	if( !TheBuildAssistant->isPossibleToMakeUnit( candidate, pick->place ) )
+		return;
 
 	Real dx = candidate->getPosition()->x - pick->loc.x;
 	Real dy = candidate->getPosition()->y - pick->loc.y;
@@ -105,6 +112,11 @@ static void considerBuilder( Object *candidate, BuilderPick *pick )
 		pick->idle = candidate;
 		pick->idleDistSqr = distSqr;
 	}
+}
+
+static void considerBuilderProc( Object *obj, void *userData )
+{
+	considerBuilder( obj, (BuilderPick *)userData );
 }
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/OpenContain.h"
@@ -256,6 +268,26 @@ static void doSetRallyPoint( Object *obj, const Coord3D& pos )
 		exitInterface->setRallyPoint( &pos );
 
 	}
+
+}
+
+// ------------------------------------------------------------------------------------------------
+/** The building goes back to what it was before its first rally point: whatever it makes stops
+	* at the natural rally point by the door. */
+// ------------------------------------------------------------------------------------------------
+static void doClearRallyPoint( Object *obj )
+{
+	// the id came off the message, so it may name something that produces nothing
+	ExitInterface *exitInterface = obj->getObjectExitInterface();
+	if( exitInterface )
+		exitInterface->clearRallyPoint();
+
+	DEBUG_LOG(( "RALLY CLEAR: frame %d object %d\n", TheGameLogic->getFrame(), (Int)obj->getID() ));
+
+	// mark the UI as dirty so that we re-evaluate the selection and take the flag down
+	Drawable *draw = obj->getDrawable();
+	if( obj->isLocallyControlled() && draw && draw->isSelected() )
+		TheControlBar->markUIDirty();
 
 }
 
@@ -675,6 +707,20 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 		}
 
 		//---------------------------------------------------------------------------------------------
+		case GameMessage::MSG_CLEAR_RALLY_POINT:
+		{
+			// the same owner check MSG_SET_RALLY_POINT makes, for the same reason
+			Object *obj = TheGameLogic->findObjectByID( msg->getArgument( 0 )->objectID );
+			if (obj && obj->getControllingPlayer() == thisPlayer)
+			{
+				doClearRallyPoint( obj );
+			}
+
+			break;
+
+		}
+
+		//---------------------------------------------------------------------------------------------
 		case GameMessage::MSG_DO_WEAPON:
 		{
 			WeaponSlotType weaponSlot = (WeaponSlotType)msg->getArgument( 0 )->integer;
@@ -956,13 +1002,11 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 		{
 			Coord3D dest = msg->getArgument( 0 )->location;
 
-			// ctrl held on the click means "arrive together" - see AIGroup::groupAttackMoveToPosition
-			Bool matchSpeeds = ( msg->getArgumentCount() > 1 ) ? msg->getArgument( 1 )->boolean : FALSE;
-
+			// Older recordings append a boolean after the point. It is not read.
 			if (currentlySelectedGroup)
 			{
 				currentlySelectedGroup->releaseWeaponLockForGroup(LOCKED_TEMPORARILY);	// release any temporary locks.
-				currentlySelectedGroup->groupAttackMoveToPosition( &dest, NO_MAX_SHOTS_LIMIT, CMD_FROM_PLAYER, matchSpeeds );
+				currentlySelectedGroup->groupAttackMoveToPosition( &dest, NO_MAX_SHOTS_LIMIT, CMD_FROM_PLAYER );
 			}
 
 			break;
@@ -1516,19 +1560,51 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 			// Check enemy, as it is possible that he died this frame.
 			if (enemy)
 			{
-				if (currentlySelectedGroup)
+				AIGroup *attackers = currentlySelectedGroup;
+				AIGroup *named = NULL;
+
+				// The second id is the one unit this shot is for, written by the attack circle. A
+				// message with only the target still means the whole selection. The queue re-enters
+				// here with a group that is already that one unit; a message that arrives on the full
+				// selection has to be narrowed here or it focus-fires.
+				if( msg->getArgumentCount() >= 2 )
+				{
+					const ObjectID attackerID = msg->getArgument( 1 )->objectID;
+					Object *attacker = TheGameLogic->findObjectByID( attackerID );
+					if( attacker == NULL || !isPlayerCommandingOwnObject( thisPlayer, attacker->getControllingPlayer() ) )
+					{
+						if( attacker != NULL )
+						{
+							DEBUG_CRASH( ("MSG_DO_ATTACK_OBJECT: a command from player %d named object %d, which it does not control",
+								msg->getPlayerIndex(), (Int)attackerID) );
+						}
+						break;
+					}
+
+					if( attackers == NULL || attackers->getCount() != 1 || !attackers->isMember( attacker ) )
+					{
+						named = TheAI->createGroup();
+						named->add( attacker );
+						attackers = named;
+					}
+				}
+
+				if (attackers)
 				{
 
 					// how many units the order actually reached, against how many the player had
 					// selected on their own screen: the two disagreeing is what "only one of them
 					// went" looks like from the outside
-					DEBUG_LOG(("attack order: %d units on %s\n", currentlySelectedGroup->getCount(),
+					DEBUG_LOG(("attack order: %d units on %s\n", attackers->getCount(),
 										 enemy->getTemplate()->getName().str()));
 
-					currentlySelectedGroup->releaseWeaponLockForGroup(LOCKED_TEMPORARILY);	// release any temporary locks.
-					currentlySelectedGroup->groupAttackObject( enemy, NO_MAX_SHOTS_LIMIT, CMD_FROM_PLAYER );
+					attackers->releaseWeaponLockForGroup(LOCKED_TEMPORARILY);	// release any temporary locks.
+					attackers->groupAttackObject( enemy, NO_MAX_SHOTS_LIMIT, CMD_FROM_PLAYER );
 
 				}
+
+				if( named )
+					TheAI->destroyGroup( named );
 
 			}
 
@@ -1769,11 +1845,12 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 			angle = msg->getArgument( 2 )->real;
 
 			//
-			// the job goes to the idle selected builder nearest the site.  A builder already on a
-			// job is only taken when no idle one is selected, and with no builder selected at all
-			// nothing is built.
+			// the job goes to the idle builder nearest the site - among the selected builders,
+			// or, with no builder selected (the stand-in builder command bar), among all the
+			// player's builders.  A builder already on a job is only taken when no idle one exists.
 			//
 			BuilderPick pick;
+			pick.place = place;
 			pick.loc = loc;
 			pick.idle = pick.any = NULL;
 			pick.idleDistSqr = pick.anyDistSqr = 1e30f;
@@ -1783,6 +1860,8 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 				for( VecObjectID::const_iterator it = ids.begin(); it != ids.end(); ++it )
 					considerBuilder( TheGameLogic->findObjectByID( *it ), &pick );
 			}
+			if( pick.any == NULL && thisPlayer )
+				thisPlayer->iterateObjects( considerBuilderProc, &pick );
 			Object *constructorObject = pick.idle ? pick.idle : pick.any;
 
 			if( place == NULL || constructorObject == NULL )

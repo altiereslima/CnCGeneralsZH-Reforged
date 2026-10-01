@@ -43,6 +43,7 @@
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/ContainModule.h"
+#include "GameLogic/Module/JetAIUpdate.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
 #include "GameLogic/Object.h"
 #include "GameClient/Drawable.h"
@@ -268,13 +269,26 @@ void EMPUpdate::doDisableAttack( void )
         if ( curVictim->isKindOf( KINDOF_EMP_HARDENED ) ) // self-explanitory
           continue;
 
-				curVictim->kill();// @todo this should use some sort of DEADSTICK DIE or something...
-				Drawable *drw = curVictim->getDrawable();
-				if ( drw )
+				// God mode: kill() walks past ActiveBody's no-damage check, so the aircraft is disabled
+				// like a tank instead. It drops to the ground and lifts off again when the EMP wears off.
+				// A plane that needs a runway would be stranded out there, so it just flies through.
+				Player *victimPlayer = curVictim->getControllingPlayer();
+				if ( victimPlayer && victimPlayer->hasCheat( CHEAT_GOD_MODE ) )
 				{
-					drw->setTintStatus( TINT_STATUS_DISABLED );// paint it black
+					const JetAIUpdate *jet = curVictim->getAI() ? curVictim->getAI()->getJetAIUpdate() : NULL;
+					if ( jet && jet->friend_needsRunway() )
+						continue;
 				}
-				continue;
+				else
+				{
+					curVictim->kill();// @todo this should use some sort of DEADSTICK DIE or something...
+					Drawable *drw = curVictim->getDrawable();
+					if ( drw )
+					{
+						drw->setTintStatus( TINT_STATUS_DISABLED );// paint it black
+					}
+					continue;
+				}
 			}
 			else if ( curVictim->isKindOf( KINDOF_STRUCTURE ) )
 			{

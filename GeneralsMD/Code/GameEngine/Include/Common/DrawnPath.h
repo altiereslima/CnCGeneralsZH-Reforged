@@ -55,4 +55,42 @@ extern void pointAlongPath( const std::vector<Coord3D>& path, const std::vector<
 extern void orderAlongPath( std::vector<Object *>& movers, const std::vector<Coord3D>& path,
 														const std::vector<Real>& arc );
 
+/**
+ * One man or one target standing somewhere, named, so the attack circle can line both sides up
+ * without the sort having to know what an object is. The id is the last tie, which makes the
+ * order a total one.
+ */
+struct AttackAssignSlot
+{
+	ObjectID id;
+	Real x;
+	Real y;
+};
+
+/// The same order as the unit list above, for a position and an id. Nearest the start of the
+/// curve first, and the id breaks a tie. The attack line stands both the guns and the enemies
+/// this way.
+extern void orderAlongPath( std::vector<AttackAssignSlot>& slots, const std::vector<Coord3D>& path,
+														const std::vector<Real>& arc );
+
+/// Who shoots, and which target in the sorted target list. Both indexes are into lists already
+/// sorted the same way, around a circle or along a stroke.
+struct AttackAssignPair
+{
+	Int attacker;
+	Int target;
+};
+
+/// Stand these in the order they sit around (centerX, centerY), counter-clockwise from the +x
+/// ray. No angle is computed: the half-plane, then the cross product, then the distance from the
+/// centre, then the id. A man on the centre itself is the nearest thing on the +x ray.
+extern void orderAroundPoint( std::vector<AttackAssignSlot>& slots, Real centerX, Real centerY );
+
+/// Pair attackers with targets so the counts differ by one at most. Both counts are the lengths
+/// of lists already sorted in the order the gesture drew. With at least as many attackers as targets,
+/// each attacker takes one target and the extras share, in contiguous blocks. With more targets
+/// than attackers, every target is still shot and each attacker queues a contiguous run of them.
+/// Either side empty writes nothing.
+extern void assignAttacks( Int attackerCount, Int targetCount, std::vector<AttackAssignPair>& pairs );
+
 #endif // _H_DrawnPath

@@ -2254,12 +2254,10 @@ Int BaseHeightMapRenderObjClass::getStaticDiffuse(Int x, Int y)
 
 	RTS3DScene *pMyScene = (RTS3DScene *)Scene;
 	if (pMyScene) {
-		RefRenderObjListIterator *it = pMyScene->createLightsIterator();
-		doTheLight(&vertex, lightRay, &normalAtTexel, it, 1.0f);
-		if (it) {
-		 pMyScene->destroyLightsIterator(it);
-		 it = NULL;
-		}
+		// Stack iterator: this runs per vertex of every extra-blend tile each frame,
+		// and a heap one cost two allocator critical sections per call.
+		RefRenderObjListIterator it(pMyScene->getLightList());
+		doTheLight(&vertex, lightRay, &normalAtTexel, &it, 1.0f);
 	} else {
 		doTheLight(&vertex, lightRay, &normalAtTexel, NULL, 1.0f);
 	}

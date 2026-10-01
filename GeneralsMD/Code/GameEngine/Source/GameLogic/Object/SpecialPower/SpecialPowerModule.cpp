@@ -63,8 +63,8 @@
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
-/** Rules 2 and 15 of Pro Rules: the silo stands and charges and firing it is refused, and so is a
-	* Carpet Bomb below rank 3.  Every route to firing - the button, a hotkey, a script, a computer
+/** Rules 2 and 15 of Pro Rules, and the lobby's No Superweapons: the silo stands and charges and
+	* firing it is refused, and so is a Pro Rules Carpet Bomb below rank 3.  Every route to firing - the button, a hotkey, a script, a computer
 	* player - ends in one of the four do calls. */
 static Bool proRulesRefuse( const Object *object, const SpecialPowerTemplate *specialPowerTemplate )
 {

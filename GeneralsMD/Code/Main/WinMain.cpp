@@ -116,6 +116,17 @@ static Bool gInitializing = false;
 static Bool gDoPaint = true;
 static Bool isWinMainActive = false;
 
+// The fullscreen display follows activation from a posted message rather than from inside
+// WM_ACTIVATEAPP.  Changing the mode and the window there let the change itself activate or
+// deactivate the game again, nested inside the handler, and Alt+Tab back flipped between the game
+// and the desktop until the window stayed minimized (issue #45).  The posted message applies
+// whatever state the last activation left, once.  It starts out not shown: the device only puts
+// the display on when the window is in the foreground, so a game started or left behind another
+// window during the splash gets it from its first activation.  When the game was in front, that
+// first apply finds the mode already set and changes nothing.
+static const UINT WM_APP_APPLY_ACTIVATION = WM_APP + 1;
+static Bool isDisplayShownActive = false;
+
 // Whether the cursor is currently clipped to the window.  Activating the game by clicking the
 // taskbar leaves the pointer wherever it was, and clipping right then snatched it into the window
 // from across the desktop; the clip waits for the pointer to arrive on its own now.
@@ -549,12 +560,22 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message,
 					if (TheGameEngine)
 						TheGameEngine->setIsActive(isWinMainActive);
 
-					Reset_D3D_Device(isWinMainActive);
+					::PostMessage(hWnd, WM_APP_APPLY_ACTIVATION, 0, 0);
 					if (isWinMainActive)
 					{	//restore mouse cursor to our custom version.
 						if (TheWin32Mouse)
 							TheWin32Mouse->setCursor(TheWin32Mouse->getMouseCursor());
 					}
+				}
+				return 0;
+			}
+
+			case WM_APP_APPLY_ACTIVATION:
+			{
+				if (isDisplayShownActive != isWinMainActive)
+				{
+					isDisplayShownActive = isWinMainActive;
+					Reset_D3D_Device(isWinMainActive);
 				}
 				return 0;
 			}

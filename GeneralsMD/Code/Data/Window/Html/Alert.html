@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<!--
+  The superweapon banner: words alone, no plate, hanging a little under the top page's plates in the
+  middle of the screen while a superweapon is built, charged or fired.  Whose it is is the colour,
+  nothing else: the player's own neutral, an ally's blue, an enemy's red.  The line is written five
+  times, four black copies a pixel to each side under the coloured one, so the letters carry their
+  own outline and read over snow as well as over a night sky.  A page of its own, laid out once per
+  banner; it fades through the page's alpha, which the game sets as it draws
+  (InGameUI::drawAlertPage).
+
+  The game fills in, in the page's pixels, laid out at ControlBarHudScale() as the bar's page is:
+    {{left}} {{top}}       the banner's corner: centred on the screen, under the top page's plates
+    {{width}}              its width; the words are centred in it
+    {{whose}}              "own", "ally" or "enemy"
+    {{text}}               "Nuclear Missile launched"
+
+  Edit the copy under Run/Window/Html and the next match reads it.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Superweapon banner</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { background-color: #3b4a36; font-size: 8px; color: #dfe5ea; }
+  .piece { position: absolute; }
+
+  #alert { height: 24px; }
+  .text { position: absolute; left: 0; top: 0; height: 24px; line-height: 24px; font-size: 20px; font-weight: bold;
+          text-align: center; white-space: nowrap; }
+  .edge { color: #000000; }
+  .own .face { color: #f1f4f6; }
+  .ally .face { color: #9fd2ff; }
+  .enemy .face { color: #ff3030; }
+</style>
+</head>
+<body>
+<div id="alert" class="piece {{whose}}" style="left: {{left}}px; top: {{top}}px; width: {{width}}px">
+  <div class="text edge" style="width: {{width}}px; margin-left: -1px">{{text}}</div>
+  <div class="text edge" style="width: {{width}}px; margin-left: 1px">{{text}}</div>
+  <div class="text edge" style="width: {{width}}px; margin-top: -1px">{{text}}</div>
+  <div class="text edge" style="width: {{width}}px; margin-top: 1px">{{text}}</div>
+  <div class="text face" style="width: {{width}}px">{{text}}</div>
+</div>
+</body>
+</html>

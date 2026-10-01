@@ -249,7 +249,7 @@ public:
 
 	/// What a seat that predates the ladder (an old save, a replay, a script) plays at.
 	static AISkillLevel skillLevelForDifficulty(GameDifficulty difficulty);
-	void buildBySupplies(Int minimumCash, const AsciiString &thingName ); ///< Builds a building by supplies.
+	void buildBySupplies(Int minimumCash, const AsciiString &thingName, Bool holdableOnly = FALSE ); ///< Builds a building by supplies. holdableOnly is the AI's own expansion: see findSupplyCenter, and no room beside the dock means no building
 	void buildSpecificBuildingNearestTeam( const AsciiString &thingName, const Team *team );
 	void buildUpgrade(const AsciiString &upgrade ); ///< Builds an upgrade.
 	/// A team is about to be destroyed.
@@ -318,9 +318,9 @@ protected:
 	Object *findHijacker(void);					///< a unit of ours that takes a vehicle by walking into it
 	Object *nearestStealableVehicle(const Coord3D *from, Real reach);	///< the closest enemy vehicle in sight; reach <= 0 is the map
 
-	/** Past the hoard, buy what the build list never had: another production building beside the last
-		* expansion when every one of a kind is busy, another income building when production keeps up,
-		* and money units (China's hackers) from any factory standing idle. */
+	/** Past the hoard, buy what the build list never had.  A tank factory or a barracks when that
+		* queue is backing up, an airfield with no count cap, income buildings the same way, and money
+		* units (China's hackers) from any factory with room in its queue. */
 	virtual void doEconomy(void);
 
 	/** Buy a power plant before the margin runs out rather than after, and put it on the far side of
@@ -328,18 +328,22 @@ protected:
 	virtual void doPower(void);
 
 	/** Hard: the superweapon as soon as it can be bought, and the tech building it waits on before
-		* that, with no clock; as many as the game's rules allow. */
+		* that, with no clock; as many superweapons as the game's rules allow, and a few copies of the
+		* tech building so one of them blowing up leaves the tree standing. */
 	virtual void doSuperweapons(void);
 
 	Bool enemyDirection(Coord3D *dir);	///< unit vector from this base towards the nearest enemy's best known address
 	Bool isHeldExpansion(const Object *warehouse);	///< our supply center stands at it, and it is nearer our base than any enemy's
+	Bool isOurSideOfMap(const Coord3D *pos);	///< no nearer any living enemy's base than ours
+	Bool buildExpansionDefense(void);	///< this side's first base defense at the dock chosen last; true while one is on the build list and buildable
 	void doTunnels(Object *dozer);	///< a tunnel at home, at the held expansion and far out on the next wave's road
 	void buildAsap(const ThingTemplate *tmpl);	///< the plan's own unbuilt entry if it has one, otherwise a new spot behind the base
 
 	void buyMoneyUnits(void);
 	Int moneyUnitRoom(void) const;	///< how many more money units this player's army and internet centers carry
 	Bool hasEnoughMoneyUnitsFor(TeamPrototype *proto) const;	///< this team is all hackers and there is no room for more
-	Bool placeNear(const ThingTemplate *tmpl, const Coord3D *center, Real innerRadius);	///< a legal, safe spot on a ring round center, queued for a dozer
+	Bool placeNear(const ThingTemplate *tmpl, const Coord3D *center, Real innerRadius, Bool walkOutward);	///< a legal, safe spot on a ring round center, queued for a dozer. walkOutward keeps searching further out as the inner rings fill
+	Bool queueExtraFactory(Object *dozer, KindOfType kind, Bool unlimited);	///< one more of this factory, beside a held expansion or around the base
 	Real knownFirepowerAlongPath(Waypoint *way);	///< what this AI has seen that can shoot, along an approach
 	AsciiString secondApproachLabel(const Coord3D *from, const AsciiString &taken, Int pathSuffix);	///< the quietest other road, or empty
 	void loadGunships(void);	///< the parked wave's infantry boards the gunships at home
@@ -414,7 +418,7 @@ protected:
  	void queueSupplyTruck(void);
 	void updateBridgeRepair(void);
 	Bool dozerInQueue(void);
-	Object *findSupplyCenter(Int minSupplies);
+	Object *findSupplyCenter(Int minSupplies, Bool holdableOnly = FALSE);	///< holdableOnly: within reach of home, on our side of the map, no enemy at it
 	void getPlayerStructureBounds(Region2D *bounds, Int playerNdx, Bool conservative = FALSE, Int observerNdx = -1 );
 
 	/// what a superweapon aimed here is worth, with the shots already on their way taken off
@@ -476,6 +480,7 @@ protected:
 	Coord3D m_baseCenter; // Center of the initial build list of structures.
 	Bool		m_baseCenterSet; // True if baseCenter is valid.
 	Real m_baseRadius; // Radius of the initial build list of structures.
+	Int			m_placementRing;	///< first ring placeNear tries when the search is allowed to walk outward
 
 	// Bridge repair info.
 	enum {MAX_STRUCTURES_TO_REPAIR = 2};
@@ -501,6 +506,23 @@ protected:
 	AsciiString	m_heldLabel[ MAX_HELD_TEAMS ];		///< the approach the script asked for
 	Int					m_heldSuffix[ MAX_HELD_TEAMS ];		///< the enemy start index its path name ends in
 	UnsignedInt	m_heldSince;											///< frame the first of the parked teams arrived
+
+	Bool isOutOnOrders(const Object *obj) const;	///< away from home with something to do
+	Bool isAtHome(const Coord3D *pos) const;			///< within two base radii of the base center
+	Bool isBaseUnderAttack(void) const;						///< hit lately, with a known enemy that can shoot standing at home
+	Object *homeIntruder(Int *count, std::vector<AIVisibleEnemy> *army) const;	///< the enemy nearest the base center while the base is under attack
+	void defendHome(void);												///< a base under attack trains fighters from its bank and sends its idle units in
+	Real waitingPower(Team *team, AIGroup *group) const;	///< what a team has for a wave, less the members out on orders; they join the group if one is given
+
+	/** How hard this AI leans on its current enemy: its chance against him, looked at again on the
+		* wave tick, decides how big a wave has to be and whether the guards at home go as well. */
+	void updatePressure(void);
+	void sendIdleUnitsHunting(void);							///< attack units idle at the end of their road, and the guards once the enemy is finished
+	Bool holdsTeamsForWaves(void) const;					///< this rung parks attack teams at the current level
+	Bool leavesToFinish(const Object *obj) const;	///< a fighter the last push takes off guard, as against a worker or a scout
+	AIPressure	m_pressure;
+	Real				m_knownEnemyPower;								///< his army as this AI believes it: what is in sight at least, less for each look at his base that does not find it, more for each look not taken
+	Int					m_pressureEnemy;									///< the player index that figure is about, -1 for nobody yet
 
 	/** Where the last few superweapons were aimed, so the next one does not land in the same crater
 		* while the one before it is still in the air. */

@@ -400,6 +400,18 @@ void ControlBar::populateCommand( Object *obj )
 	const CommandButton *slot[ MAX_COMMANDS_PER_SET ];
 	buildCommandLayout( obj, commandSet, slot );
 
+	// a builder standing in for an empty selection offers its buildings, not its orders: nobody
+	// asked that dozer to go and clear mines, or a Demolition worker to blow itself up, the owner's call
+	if( m_standInBuilderID != INVALID_DRAWABLE_ID && obj->getDrawable()
+			&& obj->getDrawable()->getID() == m_standInBuilderID )
+	{
+		for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
+		{
+			const Int place = slot[ i ] ? ControlBar_namedCommandPlace( slot[ i ]->getName().str() ) : -1;
+			if( place == COMMAND_PLACE_CLEAR_MINES || place == COMMAND_PLACE_EXPLOSIVE )
+				slot[ i ] = NULL;
+		}	}
+
 	// populate the button with commands defined
 	const CommandButton *commandButton;
 	for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
@@ -1600,7 +1612,12 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 				// this chain and report the button as available - a power the object cannot even
 				// perform was drawn ready to fire. There is nothing behind it, so hide it.
 				return COMMAND_HIDDEN;
-			} 
+			}
+
+			// a silo whose missile can never fire has no fire button at all
+			if( SuperweaponMissileSilencedInMatch( command->getSpecialPowerTemplate()->getSpecialPowerType() ) )
+				return COMMAND_HIDDEN;
+
 			//
 			// the cooldown in seconds: what is left of it while the power charges, and the whole
 			// of it while the power is ready, so you can see what firing it will cost you

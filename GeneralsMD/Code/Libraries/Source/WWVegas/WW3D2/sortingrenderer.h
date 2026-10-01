@@ -73,6 +73,11 @@ public:
 	/// Polygons refused since the start because the pool's node list was full; they are not drawn.
 	static unsigned Get_Refused_Polygon_Count();
 
+	/// Phases of every flush since the reset.  Depth and the radix are sort, filling the dynamic
+	/// buffers is copy, and Draw_Triangles is draw.  A frame flushes more than once.
+	static void Reset_Flush_Profile();
+	static void Get_Flush_Profile(unsigned &entries, float &sort_ms, float &copy_ms, float &draw_ms);
+
 	/// Where the flush can hand work to more threads: work(0..count-1, context), returning once all of
 	/// it is done.  WW3D2 cannot see the game's job pool, so the device layer installs one; without it
 	/// the work runs inline.  The work never allocates and never touches the device.

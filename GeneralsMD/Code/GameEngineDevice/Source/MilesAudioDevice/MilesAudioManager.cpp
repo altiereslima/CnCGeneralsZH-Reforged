@@ -2213,7 +2213,9 @@ Real MilesAudioManager::getVoiceMixedVolume( const AudioEventRTS *event, Real sl
 	// looping sound's next pass died at address 0x40 on the XAudio2 service thread.
 	const AudioEventInfo *info = event->getAudioEventInfo();
 	const Real eventVolume = event->getVolume() * event->getVolumeShift();
-	if (info != NULL && (info->m_type & ST_VOICE)) {
+	// A reply is heard in the ear, not out on the field.  A world sound flagged as voice - a soldier's
+	// death cry - kept its place in the battle before this boost and keeps it now.
+	if (info != NULL && (info->m_type & ST_VOICE) && !event->isPositionalAudio()) {
 		return min( 1.0f, eventVolume * max( sliderVolume, m_speechVolume ) * VOICE_BOOST );
 	}
 

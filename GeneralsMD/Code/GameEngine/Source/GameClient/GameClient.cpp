@@ -133,6 +133,26 @@ Real TheTranslucentMS = 0.0f;					///< DoParticles() and SortingRendererClass::F
 UnsignedInt TheTranslucentDraws = 0;	///< draw calls made by the fill and the flush
 UnsignedInt TheSortingPolygonsRefused = 0;	///< polygons the sorting pool had no room for, so never drawn
 UnsignedInt TheParticlesPastGroupLimit = 0;	///< on-screen particles doParticles cut at MAX_POINTS_PER_GROUP a system
+//
+// The scene number above is still four different jobs.  The sun's depth pass draws every caster a
+// second time, the post chain runs before the health bars, and the bars themselves walk every
+// drawable in view.  A slow second that only says "scene" cannot tell those apart.
+//
+Real TheShadowMapMS = 0.0f;					///< W3DVolumetricShadowManager::renderShadowMap()
+Int TheShadowMapCasters = 0;					///< casters that pass submitted
+UnsignedInt TheShadowMapDraws = 0;		///< draw calls that pass made
+Real ThePostChainMS = 0.0f;						///< Direct3D11_Finish_Scene(), inside the scene timer
+Real TheIconDrawMS = 0.0f;						///< health bars and the other drawable icons
+UnsignedInt TheSceneDrawCalls = 0;		///< DX8Wrapper draws from Begin_Render through drawViews
+//
+// The translucent number is still three jobs that fail for different reasons: sorting every
+// see-through polygon, copying the sorted vertices into a dynamic buffer, and handing the runs
+// to the device.  The copy is where a buffer lock waits.
+//
+Real TheSortingSortMS = 0.0f;
+Real TheSortingCopyMS = 0.0f;
+Real TheSortingDrawMS = 0.0f;
+UnsignedInt TheSortingEntries = 0;		///< triangles and quads the flushes sorted
 #endif
 
 //-------------------------------------------------------------------------------------------------

@@ -1033,6 +1033,14 @@ TOOLTIP:SupplyWarehouse
 "\n $%d kaldı"
 END
 
+TOOLTIP:SupplyWarehousePercent
+"\n $%d kaldı (%d%%)"
+END
+
+TOOLTIP:SupplyPileFull
+"\n Dolu: yığın sınırı toplayıcılarınızı almıyor"
+END
+
 TOOLTIP:LobbyPlayers
 "Şu anda Oyun Lobisinde bulunan oyuncular"
 END
@@ -14629,6 +14637,14 @@ GUI:SelectNextIdleWorkerDescription
 "Yapacak işi olmayan sonraki dozeri veya işçiyi seçer ve görüntüyü ona odaklar."
 END
 
+GUI:SelectNextIdleUnit
+"Sonraki Boştaki Birliği Seç"
+END
+
+GUI:SelectNextIdleUnitDescription
+"Emri olmayan sonraki savaş birliğini seçer ve görüntüyü ona odaklar."
+END
+
 GUI:CommandSlot01
 "Komut Çubuğu Yuvası 01"
 END
@@ -15261,6 +15277,30 @@ TOOLTIP:ZoomToCursor
 "Tekerlek, ekranın ortası yerine imlecin üzerinde durduğu yere doğru yakınlaştırır. Yalnızca Modern kontrollerde."
 END
 
+GUI:StartAtMaxZoom
+"Uzak Kamerayla Başla"
+END
+
+TOOLTIP:StartAtMaxZoom
+"Maç, kamera tekerleğin gittiği en uzak noktadayken açılır. Kapalıyken haritanın kendisi için ayarlanan yükseklikte açılır."
+END
+
+GUI:CloserZoom
+"Daha Yakın Kamera"
+END
+
+TOOLTIP:CloserZoom
+"Tekerleğin kamerayı yere ne kadar daha yaklaştırabileceği. Yüzde 0 oyunun kendi sınırıdır."
+END
+
+GUI:DragTolerance
+"Sürükleme Eşiği"
+END
+
+TOOLTIP:DragTolerance
+"Bir tuş basılıyken fare kaç piksel oynarsa tıklamanın sürüklemeye döneceği. Seçim kutuları yanlışlıkla açılıyorsa yükseltin, sürüklemeler tıklama sayılıyorsa düşürün."
+END
+
 GUI:IsometricCamera
 "İzometrik Kamera"
 END
@@ -15341,6 +15381,46 @@ TOOLTIP:HudOverlay
 "Ekranın üst kısmındaki ek göstergeler: enerji, gelir ve üretim şeridi."
 END
 
+GUI:NetBox
+"Saat ve Kare Hızı Kutusu"
+END
+
+TOOLTIP:NetBox
+"Sağ üst köşedeki kutu: maç saati, kare hızları ve bağlantı. Kapalıyken süper silah sayaçları köşeye çıkar."
+END
+
+GUI:OptionsGroupHud
+"Arayüz"
+END
+
+GUI:IncomeRate
+"Gelir Gösterimi"
+END
+
+GUI:IncomeRate0
+"Saniyelik"
+END
+
+GUI:IncomeRate1
+"Dakikalık"
+END
+
+GUI:IncomeRate2
+"Otomatik"
+END
+
+TOOLTIP:IncomeRate
+"Paranızın yanındaki gelirin hangi süreye göre yazılacağı. Otomatik, saniyede 10 dolardan az kazanırken dakikalık yazar, çünkü o düzeyde saniyelik tam sayı değişimin çoğunu göstermez; üstünde saniyelik yazar."
+END
+
+GUI:EmptyBuildingPips
+"Boş Bina Yuvaları"
+END
+
+TOOLTIP:EmptyBuildingPips
+"İçinde kimse olmayan binanın üstündeki boş yuva sırası, örneğin Kışlanın üstündeki on yuva. Kapalıyken bina yuvalarını yalnızca içinde biri varken gösterir."
+END
+
 GUI:ArchiveReplays
 "Tekrarları Arşivle"
 END
@@ -15371,6 +15451,14 @@ END
 
 TOOLTIP:HealthBars
 "Akıllı; hasar almış her şeyin, seçili birliklerin ve imlecin altındakinin üzerinde çubuk gösterir. Yalnızca seçili, orijinal oyunun davranışıdır."
+END
+
+GUI:HudScale
+"Arayüz Boyutu"
+END
+
+TOOLTIP:HudScale
+"Komuta çubuğunu ve alttaki arayüzü çözünürlüğün seçtiğinden daha büyük çizer."
 END
 
 GUI:OptionsGroupInput
@@ -15527,6 +15615,22 @@ END
 
 GUI:TechRespawnFormat
 "%d dk sonra"
+END
+
+GUI:SupplyPileLimit
+"Yığın Sınırı"
+END
+
+TOOLTIP:SupplyPileLimit
+"Bir ikmal noktasından ya da ikmal yığınından aynı anda kaç oyuncunun toplayabileceği. 1 seçilirse yığın ona ilk ulaşanın olur; diğer oyuncuların ikmal kamyonları, İşçileri ve Chinook'ları başka bir yığına gider ya da üste bekler. Müttefikler ayrı oyuncu sayılır. Son yük alındıktan bir dakika sonra yığın yeniden boşa çıkar."
+END
+
+GUI:SupplyPileLimitOff
+"Sınır Yok"
+END
+
+GUI:SupplyPileLimitFormat
+"Yığın başına %d"
 END
 
 GUI:ProRules
@@ -15693,12 +15797,80 @@ GUI:HudFog
 "Savaş sisi"
 END
 
+GUI:CheatPanelTitle
+"Hileler"
+END
+
+GUI:CheatMoney
+"Para"
+END
+
+GUI:CheatPoints
+"General Puanı"
+END
+
+GUI:CheatRankUp
+"Rütbe atla"
+END
+
+GUI:CheatHeroic
+"Kahraman birlikler"
+END
+
+GUI:CheatReveal
+"Haritayı aç"
+END
+
+GUI:CheatPower
+"Sınırsız elektrik"
+END
+
+GUI:CheatNoCooldown
+"Bekleme yok"
+END
+
+GUI:CheatGod
+"Ölümsüzlük"
+END
+
+GUI:CheatInstantBuild
+"Anında inşa"
+END
+
+GUI:CheatOneHitKill
+"Tek vuruşta öldür"
+END
+
+GUI:CheatOn
+"AÇIK"
+END
+
+GUI:CheatOff
+"KAPALI"
+END
+
+GUI:CheatApply
+"YAP"
+END
+
 GUI:HudSuperweaponReady
 "ateşe hazır"
 END
 
 GUI:HudSuperweaponLaunched
 "ateşlendi"
+END
+
+GUI:HudAlertBuilt
+"%s tamamlandı"
+END
+
+GUI:HudAlertReady
+"%s hazır"
+END
+
+GUI:HudAlertLaunched
+"%s ateşlendi"
 END
 
 GUI:HudPowerUsed
@@ -15775,6 +15947,10 @@ END
 
 GUI:ControlBarMoneyEarning
 "$ %d  +%d/sn"
+END
+
+GUI:ControlBarMoneyEarningMinute
+"$ %d  +%d/dk"
 END
 
 GUI:ScoreboardKills

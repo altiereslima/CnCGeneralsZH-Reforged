@@ -1,0 +1,17 @@
+# Scud Storm: one GLA storm fired at a far target, for the trace of where its nine missiles end.
+# The seat's own command center stays at start0. The target is America's start, about 780 away.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionGLA -side 1 FactionAmerica -seed 7 -maxframes 900
+#     -scenario scudstorm -logPrefix scudstorm_
+#
+# Read the SCUDTRACE lines of the log (temporary, MissileAIUpdate.cpp, marked TEMP scud-trace).
+
+10    spawn   0  GLAScudStorm   1   start0:0:250
+10    spawn   1  AmericaBarracks  1   start1:0:0
+30    tally   0  *
+30    tally   1  *
+40    power   0  GLAScudStorm  start1
+700   tally   0  *
+700   tally   1  *

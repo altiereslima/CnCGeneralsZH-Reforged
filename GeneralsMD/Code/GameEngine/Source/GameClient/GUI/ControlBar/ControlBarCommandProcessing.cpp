@@ -342,7 +342,15 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 		TheAudio->addAudioEvent( &sound );
 	}
 
-	if( BitTest( commandButton->getOptions(), COMMAND_OPTION_NEED_TARGET ) )
+	if( commandButton->getCommandType() == GUI_COMMAND_ATTACK_MOVE )
+	{
+		// The attack move button arms the same key its hotkey does, rather than becoming a pending
+		// GUI command that one click uses up: shift then keeps it armed for a row of points.  It
+		// takes the place of whatever command was waiting for a target, as any other button would.
+		TheInGameUI->setGUICommand( NULL );
+		TheMessageStream->appendMessage( GameMessage::MSG_META_TOGGLE_ATTACKMOVE );
+	}
+	else if( BitTest( commandButton->getOptions(), COMMAND_OPTION_NEED_TARGET ) )
 	{
 		if (commandButton->getOptions() & USES_MINE_CLEARING_WEAPONSET)
 		{
@@ -882,11 +890,6 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 			break;
 
 		}  // end cancel upgrade
-
-		//---------------------------------------------------------------------------------------------
-		case GUI_COMMAND_ATTACK_MOVE:
-			TheMessageStream->appendMessage(GameMessage::MSG_META_TOGGLE_ATTACKMOVE);
-			break;
 
 		//---------------------------------------------------------------------------------------------
 		case GUI_COMMAND_STOP:

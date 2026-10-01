@@ -910,6 +910,9 @@ private:
 extern WeaponStore *TheWeaponStore;
 
 ///< how much further a range reaches from heightAboveTarget above what it is aimed at; never less
+extern Real Weapon_highGroundRangeBonus( Real range, Real heightAboveTarget );
+
+///< Weapon_highGroundRangeBonus in a match; nothing in the battle behind the main menu
 extern Real Weapon_elevationRangeBonus( Real range, Real heightAboveTarget );
 
 ///< range as source reaches something standing at targetZ; an aircraft gets no high ground

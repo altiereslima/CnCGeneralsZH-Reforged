@@ -208,6 +208,7 @@ static NameKeyType checkBoxUnitLimitID = NAMEKEY_INVALID;
 static NameKeyType checkBoxProRulesID = NAMEKEY_INVALID;
 static NameKeyType comboBoxIncomeSharingID = NAMEKEY_INVALID;
 static NameKeyType comboBoxTechRespawnID = NAMEKEY_INVALID;
+static NameKeyType comboBoxSupplyPileLimitID = NAMEKEY_INVALID;
 
 // Window Pointers ------------------------------------------------------------------------
 static GameWindow *parentWOLGameSetup = NULL;
@@ -227,6 +228,7 @@ static GameWindow *checkBoxUnitLimit = NULL;
 static GameWindow *checkBoxProRules = NULL;
 static GameWindow *comboBoxIncomeSharing = NULL;
 static GameWindow *comboBoxTechRespawn = NULL;
+static GameWindow *comboBoxSupplyPileLimit = NULL;
 
 static GameWindow *comboBoxPlayer[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
 																									 NULL,NULL,NULL,NULL };
@@ -348,6 +350,7 @@ static void savePlayerInfo( void )
           pref.setInt( "ProRules", TheGameSpyGame->getProRules() ? 1 : 0 );
           pref.setInt( "IncomeSharing", TheGameSpyGame->getIncomeSharing() );
           pref.setInt( "TechRespawn", TheGameSpyGame->getTechRespawn() );
+          pref.setInt( "SupplyPileLimit", TheGameSpyGame->getSupplyPileLimit() );
         }
 				pref.write();
 			}
@@ -854,6 +857,24 @@ static void handleTechRespawnSelection()
   }
 }
 
+static void handleSupplyPileLimitSelection()
+{
+  GameInfo *myGame = TheGameSpyInfo->getCurrentStagingRoom();
+
+  // the same guard as the unit limit box below
+  if (myGame == NULL || comboBoxSupplyPileLimit == NULL || myGame->getSupplyPileLimit() == SupplyPileLimitFromComboBox( comboBoxSupplyPileLimit ))
+    return;
+
+  myGame->setSupplyPileLimit( SupplyPileLimitFromComboBox( comboBoxSupplyPileLimit ) );
+  myGame->resetAccepted();
+
+  if (myGame->amIHost())
+  {
+    TheGameSpyInfo->setGameOptions();
+    WOLDisplaySlotList();// Update the accepted button UI
+  }
+}
+
 static void handleProRulesSelection()
 {
   GameInfo *myGame = TheGameSpyInfo->getCurrentStagingRoom();
@@ -1170,6 +1191,8 @@ void WOLDisplayGameOptions( void )
     UpdateIncomeSharingComboBox( comboBoxIncomeSharing, theGame, superweaponIsTheHostsToPick() );
   if ( comboBoxTechRespawn )
     UpdateTechRespawnComboBox( comboBoxTechRespawn, theGame, superweaponIsTheHostsToPick() );
+  if ( comboBoxSupplyPileLimit )
+    UpdateSupplyPileLimitComboBox( comboBoxSupplyPileLimit, theGame, superweaponIsTheHostsToPick() );
 }
 
 
@@ -1261,6 +1284,7 @@ void InitWOLGameGadgets( void )
   checkBoxProRulesID = TheNameKeyGenerator->nameToKey(AsciiString("GameSpyGameOptionsMenu.wnd:CheckBoxProRules"));
   comboBoxIncomeSharingID = TheNameKeyGenerator->nameToKey(AsciiString("GameSpyGameOptionsMenu.wnd:ComboBoxIncomeSharing"));
   comboBoxTechRespawnID = TheNameKeyGenerator->nameToKey(AsciiString("GameSpyGameOptionsMenu.wnd:ComboBoxTechRespawn"));
+  comboBoxSupplyPileLimitID = TheNameKeyGenerator->nameToKey(AsciiString("GameSpyGameOptionsMenu.wnd:ComboBoxSupplyPileLimit"));
 	windowMapSelectMapID = TheNameKeyGenerator->nameToKey(AsciiString("WOLMapSelectMenu.wnd:WinMapPreview"));
 
 	NameKeyType staticTextTitleID = NAMEKEY("GameSpyGameOptionsMenu.wnd:StaticTextGameName");
@@ -1307,6 +1331,10 @@ void InitWOLGameGadgets( void )
   DEBUG_ASSERTCRASH(comboBoxTechRespawn, ("Could not find the GameSpyGameOptionsMenu.wnd:ComboBoxTechRespawn" ));
   if ( comboBoxTechRespawn )
     PopulateTechRespawnComboBox( comboBoxTechRespawn, TheGameSpyGame, superweaponIsTheHostsToPick() );
+  comboBoxSupplyPileLimit = TheWindowManager->winGetWindowFromId( parentWOLGameSetup, comboBoxSupplyPileLimitID );
+  DEBUG_ASSERTCRASH(comboBoxSupplyPileLimit, ("Could not find the GameSpyGameOptionsMenu.wnd:ComboBoxSupplyPileLimit" ));
+  if ( comboBoxSupplyPileLimit )
+    PopulateSupplyPileLimitComboBox( comboBoxSupplyPileLimit, TheGameSpyGame, superweaponIsTheHostsToPick() );
   checkBoxLimitArmies = TheWindowManager->winGetWindowFromId( parentWOLGameSetup, checkBoxLimitArmiesID );
   DEBUG_ASSERTCRASH(windowMap, ("Could not find the GameSpyGameOptionsMenu.wnd:CheckBoxLimitArmies" ));
 
@@ -1465,6 +1493,7 @@ void DeinitWOLGameGadgets( void )
   checkBoxProRules = NULL;
   comboBoxIncomeSharing = NULL;
   comboBoxTechRespawn = NULL;
+  comboBoxSupplyPileLimit = NULL;
 
 //	GameWindow *staticTextTitle = NULL;
 	for (Int i = 0; i < MAX_SLOTS; i++)
@@ -1566,6 +1595,7 @@ void WOLGameSetupMenuInit( WindowLayout *layout, void *userData )
 		game->setProRules( isUsingStats || customPref.getInt( "ProRules", 1 ) != 0 );
 		game->setIncomeSharing( isUsingStats ? INCOME_SHARING_OFF : customPref.getInt( "IncomeSharing", INCOME_SHARING_OFF ) );
 		game->setTechRespawn( isUsingStats ? 0 : customPref.getInt( "TechRespawn", 0 ) );
+		game->setSupplyPileLimit( isUsingStats ? 0 : customPref.getInt( "SupplyPileLimit", 0 ) );
 		if (isUsingStats)
 			game->setOldFactionsOnly( 0 );
 
@@ -2802,6 +2832,10 @@ WindowMsgHandledType WOLGameSetupMenuSystem( GameWindow *window, UnsignedInt msg
         else if ( controlID == comboBoxTechRespawnID )
         {
           handleTechRespawnSelection();
+        }
+        else if ( controlID == comboBoxSupplyPileLimitID )
+        {
+          handleSupplyPileLimitSelection();
         }
         else
         {

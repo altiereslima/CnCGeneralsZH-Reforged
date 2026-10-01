@@ -1040,8 +1040,8 @@ TEST(physics_forward_speed_is_the_projection_not_a_per_axis_norm)
 	CHECK_NEAR( PhysicsBehavior::calcForwardSpeed( climb, up ), 12.0f, 0.01f );
 }
 
-/* CommandXlat.cpp: only the attack key arms force fire.  Holding ctrl did it too, and ctrl is the
-   "one shared pace" modifier, so a ctrl click on the ground shelled the dirt instead of moving. */
+/* CommandXlat.cpp: only the attack key arms force fire. Holding ctrl used to do it too, so a
+   ctrl click on the ground shelled the dirt instead of moving. */
 extern Bool CommandXlat_isForceAttackTargeting( Bool forceAttackArmed, Bool attackMoveArmed );
 
 TEST(force_fire_is_the_attack_key_and_nothing_else)
@@ -1243,6 +1243,174 @@ TEST(drawn_path_orders_units_by_where_they_already_stand)
 	/* before the start clamps to the start, past the end to the end. */
 	CHECK_NEAR( 0.0f, distanceAlongPath( path, arc, -50.0f, -50.0f ), 0.001f );
 	CHECK_NEAR( 200.0f, distanceAlongPath( path, arc, 100.0f, 400.0f ), 0.001f );
+}
+
+/* DrawnPath.cpp: the attack circle stands both sides around its centre and deals the shots so the
+   counts differ by one at most. 10 guns on 3 targets is 3, 4, 3. 3 guns on 10 targets queue
+   3, 4, 3. */
+#include <algorithm>
+
+static AttackAssignSlot attackSlot( Int id, Real x, Real y )
+{
+	AttackAssignSlot slot;
+	slot.id = (ObjectID)id;
+	slot.x = x;
+	slot.y = y;
+	return slot;
+}
+
+TEST(attack_circle_splits_shots_as_evenly_as_the_counts_allow)
+{
+	std::vector<AttackAssignPair> pairs;
+
+	/* ten guns, three targets: each gun one shot, the shares 3, 4 and 3, middle block the long one. */
+	assignAttacks( 10, 3, pairs );
+	CHECK_EQ( 10, (int)pairs.size() );
+	int onTarget[3] = { 0, 0, 0 };
+	for( int i = 0; i < 10; i++ )
+	{
+		CHECK_EQ( i, pairs[i].attacker );
+		CHECK( pairs[i].target >= 0 && pairs[i].target < 3 );
+		onTarget[ pairs[i].target ]++;
+	}
+	CHECK_EQ( 3, onTarget[0] );
+	CHECK_EQ( 4, onTarget[1] );
+	CHECK_EQ( 3, onTarget[2] );
+
+	/* three guns, ten targets: every target is shot once, and the queues are 3, 4, 3 in order. */
+	assignAttacks( 3, 10, pairs );
+	CHECK_EQ( 10, (int)pairs.size() );
+	int perAttacker[3] = { 0, 0, 0 };
+	for( int i = 0; i < 10; i++ )
+	{
+		CHECK_EQ( i, pairs[i].target );
+		CHECK( pairs[i].attacker >= 0 && pairs[i].attacker < 3 );
+		if( i > 0 )
+			CHECK( pairs[i].attacker >= pairs[i - 1].attacker );
+		perAttacker[ pairs[i].attacker ]++;
+	}
+	CHECK_EQ( 3, perAttacker[0] );
+	CHECK_EQ( 4, perAttacker[1] );
+	CHECK_EQ( 3, perAttacker[2] );
+
+	/* one each, in the order they stand. */
+	assignAttacks( 5, 5, pairs );
+	CHECK_EQ( 5, (int)pairs.size() );
+	for( int i = 0; i < 5; i++ )
+	{
+		CHECK_EQ( i, pairs[i].attacker );
+		CHECK_EQ( i, pairs[i].target );
+	}
+
+	/* one target: everybody shoots it. one attacker: that one queues the lot. */
+	assignAttacks( 6, 1, pairs );
+	CHECK_EQ( 6, (int)pairs.size() );
+	for( int i = 0; i < 6; i++ )
+		CHECK_EQ( 0, pairs[i].target );
+
+	assignAttacks( 1, 4, pairs );
+	CHECK_EQ( 4, (int)pairs.size() );
+	for( int i = 0; i < 4; i++ )
+	{
+		CHECK_EQ( 0, pairs[i].attacker );
+		CHECK_EQ( i, pairs[i].target );
+	}
+
+	/* nothing to shoot, or nobody to shoot it. */
+	assignAttacks( 0, 4, pairs );
+	CHECK_EQ( 0, (int)pairs.size() );
+	assignAttacks( 4, 0, pairs );
+	CHECK_EQ( 0, (int)pairs.size() );
+
+	/* seven and three still differ by one, and every index is used. */
+	assignAttacks( 7, 3, pairs );
+	CHECK_EQ( 7, (int)pairs.size() );
+	int seven[3] = { 0, 0, 0 };
+	for( int i = 0; i < 7; i++ )
+		seven[ pairs[i].target ]++;
+	CHECK_EQ( 2, seven[0] );
+	CHECK_EQ( 3, seven[1] );
+	CHECK_EQ( 2, seven[2] );
+}
+
+TEST(attack_circle_stands_both_sides_around_the_centre)
+{
+	/* shuffled on purpose. counter-clockwise from +x, nearer first on the same ray, id after that,
+	   and a man standing on the centre itself leads. */
+	std::vector<AttackAssignSlot> slots;
+	slots.push_back( attackSlot( 4,   0.0f, -10.0f ) ); /* -y */
+	slots.push_back( attackSlot( 1,  10.0f,   0.0f ) ); /* +x, far */
+	slots.push_back( attackSlot( 8,  10.0f,   0.0f ) ); /* +x, far, higher id */
+	slots.push_back( attackSlot( 2,   0.0f,  10.0f ) ); /* +y */
+	slots.push_back( attackSlot( 5,   0.0f,   0.0f ) ); /* centre */
+	slots.push_back( attackSlot( 6,   5.0f,   0.0f ) ); /* +x, near */
+	slots.push_back( attackSlot( 3, -10.0f,   0.0f ) ); /* -x */
+	slots.push_back( attackSlot( 9,  10.0f,  10.0f ) ); /* diagonal, between +x and +y */
+
+	std::vector<AttackAssignSlot> reversed = slots;
+	std::reverse( reversed.begin(), reversed.end() );
+
+	orderAroundPoint( slots, 0.0f, 0.0f );
+	orderAroundPoint( reversed, 0.0f, 0.0f );
+
+	const int expect[] = { 5, 6, 1, 8, 9, 2, 3, 4 };
+	CHECK_EQ( 8, (int)slots.size() );
+	for( int i = 0; i < 8; i++ )
+	{
+		CHECK_EQ( expect[i], (int)slots[i].id );
+		CHECK_EQ( expect[i], (int)reversed[i].id );
+	}
+}
+
+/* DrawnPath.cpp: the attack line stands both sides along the stroke, nearest the start first,
+   the same total order a move line uses. The deal itself is assignAttacks. */
+TEST(attack_line_stands_both_sides_along_the_stroke)
+{
+	/* an L: 100 along x, then 100 along y. */
+	std::vector<Coord3D> path;
+	path.push_back( drawnPathPoint(   0.0f,   0.0f ) );
+	path.push_back( drawnPathPoint( 100.0f,   0.0f ) );
+	path.push_back( drawnPathPoint( 100.0f, 100.0f ) );
+
+	std::vector<Real> arc;
+	buildPathArcLengths( path, arc );
+
+	/* shuffled. off the stroke but nearest the start, then the same point twice so the id
+	   breaks the tie, then the corner, then halfway up the second leg. */
+	std::vector<AttackAssignSlot> slots;
+	slots.push_back( attackSlot( 4, 100.0f,  50.0f ) );
+	slots.push_back( attackSlot( 8,  50.0f,   0.0f ) );
+	slots.push_back( attackSlot( 2,  50.0f,   0.0f ) );
+	slots.push_back( attackSlot( 1,   0.0f,  10.0f ) );
+	slots.push_back( attackSlot( 3, 100.0f,   0.0f ) );
+
+	std::vector<AttackAssignSlot> reversed = slots;
+	std::reverse( reversed.begin(), reversed.end() );
+
+	orderAlongPath( slots, path, arc );
+	orderAlongPath( reversed, path, arc );
+
+	const int expect[] = { 1, 2, 8, 3, 4 };
+	CHECK_EQ( 5, (int)slots.size() );
+	for( int i = 0; i < 5; i++ )
+	{
+		CHECK_EQ( expect[i], (int)slots[i].id );
+		CHECK_EQ( expect[i], (int)reversed[i].id );
+	}
+
+	/* the enemy nearest the start is the first target, and the gun nearest the start takes it. */
+	std::vector<AttackAssignSlot> enemies;
+	enemies.push_back( attackSlot( 20, 100.0f, 50.0f ) );
+	enemies.push_back( attackSlot( 10,   0.0f,  0.0f ) );
+	orderAlongPath( enemies, path, arc );
+
+	std::vector<AttackAssignPair> pairs;
+	assignAttacks( (Int)slots.size(), (Int)enemies.size(), pairs );
+	CHECK_EQ( 5, (int)pairs.size() );
+	CHECK_EQ( 0, pairs[0].attacker );
+	CHECK_EQ( 0, pairs[0].target );
+	CHECK_EQ( 1, (int)slots[0].id );
+	CHECK_EQ( 10, (int)enemies[0].id );
 }
 
 /* AssaultTransportAIUpdate.cpp: the troop crawler deploys its passengers at a target and used to
@@ -2258,66 +2426,151 @@ TEST(placement_grid_snap_puts_footprint_edges_on_cell_lines)
 	CHECK_NEAR(InGameUI::snapPlacementAxis(13.0f, 0.0f), 14.5f, 0.0001f);
 }
 
-TEST(placement_row_packs_the_footprint_along_the_drag)
+TEST(placement_row_pins_both_ends_and_opens_the_middle)
 {
 	Coord2D step;
 	const Real half = 0.70710678f;	/* cos and sin of an eighth of a turn */
 
-	/* facing along x, a 40 by 30 footprint: one piece per 40 dragged and the hair the logic's
-	 * clearance test needs between them, the first free */
-	CHECK_EQ(InGameUI::placementRow(119.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 3);
+	/* facing along x, a 40 by 30 footprint. three exact gaps of 40.5: four pieces, the last
+	 * on the cursor, the step the footprint and the hair the clearance test needs */
+	CHECK_EQ(InGameUI::placementRow(121.5f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 4);
 	CHECK_NEAR(step.x, 40.5f, 0.0001f);
 	CHECK_NEAR(step.y, 0.0f, 0.0001f);
-	CHECK_EQ(InGameUI::placementRow(122.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 4);
+	CHECK_NEAR(step.x * 3.0f, 121.5f, 0.0001f);
 
-	/* backwards runs backwards */
-	CHECK_EQ(InGameUI::placementRow(-100.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 3);
+	/* a length that is not a multiple still ends on the cursor: the spare is spread, the
+	 * step grows past 40.5, and both ends stay */
+	CHECK_EQ(InGameUI::placementRow(130.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 4);
+	CHECK_NEAR(step.x, 130.0f / 3.0f, 0.0001f);
+	CHECK(step.x > 40.5f);
+
+	/* backwards runs backwards, and the last piece is the far end */
+	CHECK_EQ(InGameUI::placementRow(-81.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 3);
 	CHECK_NEAR(step.x, -40.5f, 0.0001f);
 	CHECK_NEAR(step.y, 0.0f, 0.0001f);
 
-	/* a line dragged 20 degrees off the axis runs at 20 degrees, not flat: the pieces meet through
-	 * the facing face, 40 / cos 20 apart, and the hair */
+	/* a line dragged 20 degrees off the axis runs at 20 degrees, not flat, and the pieces
+	 * meet through the facing face */
 	const Real twenty = 20.0f * PI / 180.0f;
-	InGameUI::placementRow(100.0f * Cos(twenty), 100.0f * Sin(twenty), 1.0f, 0.0f, 20.0f, 15.0f, 50, &step);
+	const Real touch20 = 40.0f / Cos(twenty) + 0.5f;
+	const Real drag20 = touch20 * 2.0f;
+	CHECK_EQ(InGameUI::placementRow(drag20 * Cos(twenty), drag20 * Sin(twenty), 1.0f, 0.0f,
+	                                20.0f, 15.0f, 50, &step), 3);
 	CHECK_NEAR(step.y / step.x, Sin(twenty) / Cos(twenty), 0.0001f);
-	CHECK_NEAR(sqrt(step.x * step.x + step.y * step.y), 40.0f / Cos(twenty) + 0.5f, 0.001f);
+	CHECK_NEAR(sqrt(step.x * step.x + step.y * step.y), touch20, 0.001f);
 
-	/* along y the step is the footprint's other side */
-	InGameUI::placementRow(0.0f, -90.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step);
+	/* along y the step is the footprint's other side, two exact gaps */
+	CHECK_EQ(InGameUI::placementRow(0.0f, -61.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 3);
 	CHECK_NEAR(step.x, 0.0f, 0.0001f);
 	CHECK_NEAR(step.y, -30.5f, 0.0001f);
 
 	/* a diagonal slides each piece along the last one's long side instead of meeting it corner
 	 * to corner: 30 on each axis and the hair, where 40 by 30 left a triangle of ground */
-	CHECK_EQ(InGameUI::placementRow(80.0f, 80.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 3);
-	CHECK_NEAR(step.x, 30.0f + 0.5f * half, 0.001f);
-	CHECK_NEAR(step.y, 30.0f + 0.5f * half, 0.001f);
+	const Real diag = 30.0f + 0.5f * half;
+	CHECK_EQ(InGameUI::placementRow(diag * 2.0f, diag * 2.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 3);
+	CHECK_NEAR(step.x, diag, 0.001f);
+	CHECK_NEAR(step.y, diag, 0.001f);
 
 	/* turned a quarter, the footprint's sides swap axes, Cos's float dust and all */
-	InGameUI::placementRow(100.0f, 0.0f, -0.00000004f, 1.0f, 20.0f, 15.0f, 50, &step);
+	CHECK_EQ(InGameUI::placementRow(61.0f, 0.0f, -0.00000004f, 1.0f, 20.0f, 15.0f, 50, &step), 3);
 	CHECK_NEAR(step.x, 30.5f, 0.0001f);
 
-	/* turned an eighth, a row along the structure's own line stands face to face with the
-	 * next: a step 40 long, and the hair */
-	InGameUI::placementRow(100.0f, 100.0f, half, half, 20.0f, 15.0f, 50, &step);
+	/* turned an eighth, a row along the structure's own line stands face to face: a step 40.5
+	 * long. across that line it meets on the short side */
+	CHECK_EQ(InGameUI::placementRow(81.0f * half, 81.0f * half, half, half, 20.0f, 15.0f, 50, &step), 3);
 	CHECK_NEAR(step.x * step.x + step.y * step.y, 40.5f * 40.5f, 0.01f);
-	InGameUI::placementRow(-100.0f, 100.0f, half, half, 20.0f, 15.0f, 50, &step);
+	CHECK_EQ(InGameUI::placementRow(-61.0f * half, 61.0f * half, half, half, 20.0f, 15.0f, 50, &step), 3);
 	CHECK_NEAR(step.x * step.x + step.y * step.y, 30.5f * 30.5f, 0.01f);
 
 	/* and across the structure's line the row can do no better than corner to corner: the
 	 * shorter half-side's diagonal, 30 / cos 45 */
-	InGameUI::placementRow(100.0f, 0.0f, half, half, 20.0f, 15.0f, 50, &step);
-	CHECK_NEAR(step.x, 30.0f / half + 0.5f, 0.001f);
+	const Real corner = 30.0f / half + 0.5f;
+	CHECK_EQ(InGameUI::placementRow(corner * 2.0f, 0.0f, half, half, 20.0f, 15.0f, 50, &step), 3);
+	CHECK_NEAR(step.x, corner, 0.001f);
 	CHECK_NEAR(step.y, 0.0f, 0.0001f);
 
 	/* the step is the footprint, not the build grid's next whole cell */
-	InGameUI::placementRow(100.0f, 0.0f, 1.0f, 0.0f, 22.0f, 30.0f, 50, &step);
+	CHECK_EQ(InGameUI::placementRow(89.0f, 0.0f, 1.0f, 0.0f, 22.0f, 30.0f, 50, &step), 3);
 	CHECK_NEAR(step.x, 44.5f, 0.0001f);
 
-	/* never more than the cap, never fewer than one, and no drag is one piece */
+	/* never more than the cap, and what is affordable still reaches both ends */
 	CHECK_EQ(InGameUI::placementRow(1000.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 5, &step), 5);
+	CHECK_NEAR(step.x * 4.0f, 1000.0f, 0.001f);
 	CHECK_EQ(InGameUI::placementRow(1000.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 0, &step), 1);
 	CHECK_EQ(InGameUI::placementRow(0.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step), 1);
+
+	/* ten units of extra gap: a line that held four flush now holds three, and the two ends
+	 * are still the anchor and the cursor */
+	CHECK_EQ(InGameUI::placementRow(121.5f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step, 10.0f), 3);
+	CHECK_NEAR(step.x, 60.75f, 0.0001f);
+	CHECK_NEAR(step.y, 0.0f, 0.0001f);
+
+	/* a gap longer than the line leaves the two ends and nothing between them */
+	CHECK_EQ(InGameUI::placementRow(121.5f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step, 500.0f), 2);
+	CHECK_NEAR(step.x, 121.5f, 0.0001f);
+
+	/* a negative gap is ignored: the row never packs tighter than the footprints allow */
+	InGameUI::placementRow(81.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &step, -20.0f);
+	CHECK_NEAR(step.x, 40.5f, 0.0001f);
+}
+
+TEST(placement_grid_fills_the_dragged_rectangle_in_lines)
+{
+	Coord2D along, across;
+	Int perLine = 0;
+	const Real half = 0.70710678f;	/* cos and sin of an eighth of a turn */
+
+	/* facing along x, the same 40 by 30 footprint. two exact steps each way: three lines of
+	 * three, 40.5 apart along the facing and 30.5 across it */
+	CHECK_EQ(InGameUI::placementGrid(81.0f, 61.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &along, &across, &perLine), 9);
+	CHECK_EQ(perLine, 3);
+	CHECK_NEAR(along.x, 40.5f, 0.0001f);
+	CHECK_NEAR(along.y, 0.0f, 0.0001f);
+	CHECK_NEAR(across.x, 0.0f, 0.0001f);
+	CHECK_NEAR(across.y, 30.5f, 0.0001f);
+
+	/* the order is line by line: piece 5 is the last of the second line */
+	CHECK_NEAR(along.x * (5 % perLine) + across.x * (5 / perLine), 81.0f, 0.0001f);
+	CHECK_NEAR(along.y * (5 % perLine) + across.y * (5 / perLine), 30.5f, 0.0001f);
+
+	/* a rectangle that is not a multiple keeps a piece on the far corner: the spare is spread */
+	CHECK_EQ(InGameUI::placementGrid(90.0f, 70.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &along, &across, &perLine), 9);
+	CHECK_NEAR(along.x * 2.0f, 90.0f, 0.0001f);
+	CHECK_NEAR(across.y * 2.0f, 70.0f, 0.0001f);
+
+	/* dragged up and to the left, it fills up and to the left */
+	CHECK_EQ(InGameUI::placementGrid(-81.0f, 61.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &along, &across, &perLine), 9);
+	CHECK_NEAR(along.x, -40.5f, 0.0001f);
+	CHECK_NEAR(across.y, 30.5f, 0.0001f);
+
+	/* a drag that is nearly a line is one line, not two lying on each other, and no drag is one piece */
+	CHECK_EQ(InGameUI::placementGrid(81.0f, 10.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &along, &across, &perLine), 3);
+	CHECK_EQ(perLine, 3);
+	CHECK_NEAR(across.y, 0.0f, 0.0001f);
+	CHECK_EQ(InGameUI::placementGrid(10.0f, 61.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &along, &across, &perLine), 3);
+	CHECK_EQ(perLine, 1);
+	CHECK_NEAR(along.x, 0.0f, 0.0001f);
+	CHECK_EQ(InGameUI::placementGrid(0.0f, 0.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &along, &across, &perLine), 1);
+
+	/* turned an eighth, the rectangle turns with the structure: the same 81 by 61 measured
+	 * along its line and across it is the same three by three */
+	CHECK_EQ(InGameUI::placementGrid((81.0f - 61.0f) * half, (81.0f + 61.0f) * half, half, half,
+	                                 20.0f, 15.0f, 50, &along, &across, &perLine), 9);
+	CHECK_EQ(perLine, 3);
+	CHECK_NEAR(along.x * along.x + along.y * along.y, 40.5f * 40.5f, 0.01f);
+	CHECK_NEAR(across.x * across.x + across.y * across.y, 30.5f * 30.5f, 0.01f);
+	CHECK(across.x < 0.0f);
+
+	/* money for five: three on the first line, two on a second that stands on the far side */
+	CHECK_EQ(InGameUI::placementGrid(81.0f, 61.0f, 1.0f, 0.0f, 20.0f, 15.0f, 5, &along, &across, &perLine), 5);
+	CHECK_EQ(perLine, 3);
+	CHECK_NEAR(across.y, 61.0f, 0.0001f);
+	CHECK_EQ(InGameUI::placementGrid(81.0f, 61.0f, 1.0f, 0.0f, 20.0f, 15.0f, 0, &along, &across, &perLine), 1);
+
+	/* ten units of wheel gap open both directions: two by two, corners kept */
+	CHECK_EQ(InGameUI::placementGrid(81.0f, 61.0f, 1.0f, 0.0f, 20.0f, 15.0f, 50, &along, &across, &perLine, 10.0f), 4);
+	CHECK_NEAR(along.x, 81.0f, 0.0001f);
+	CHECK_NEAR(across.y, 61.0f, 0.0001f);
 }
 
 
@@ -3082,90 +3335,104 @@ TEST(controlbar_promotion_columns_map_to_the_screens_three_rows)
 	CHECK_EQ( seen8, (1 << MAX_PURCHASE_SCIENCE_RANK_8) - 1 );
 }
 
-TEST(controlbar_command_places_follow_the_owners_drawing)
+TEST(controlbar_command_places_go_in_rows_by_what_they_are_for)
 {
 	enum { SLOTS = 14 };
 	Int places[ SLOTS ];
 	const Int N = GUI_COMMAND_NONE;
 	const Int C = GUI_COMMAND_DOZER_CONSTRUCT;
+	const Int pr = COMMAND_GROUP_PRODUCTION, de = COMMAND_GROUP_DEFENSE, ut = COMMAND_GROUP_UTILITY;
+	const Int ab = COMMAND_GROUP_ABILITY, pa = COMMAND_GROUP_PASSENGER;
 	const Int nothingPinned[ SLOTS ] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
+	const Int abilities[ SLOTS ] = { ab, ab, ab, ab, ab, ab, ab, ab, ab, ab, ab, ab, ab, ab };
+	const Int Q = COMMAND_PLACE_Q, W = COMMAND_PLACE_W, E = COMMAND_PLACE_E, R = COMMAND_PLACE_R, T = COMMAND_PLACE_T;
+	const Int Y = COMMAND_PLACE_Y, A = COMMAND_PLACE_A, S = COMMAND_PLACE_S, D = COMMAND_PLACE_D, F = COMMAND_PLACE_F;
+	const Int G = COMMAND_PLACE_G, H = COMMAND_PLACE_H, Z = COMMAND_PLACE_Z, X = COMMAND_PLACE_X, V = COMMAND_PLACE_V;
+	const Int B = COMMAND_PLACE_B, M = COMMAND_PLACE_N, CC = COMMAND_PLACE_C;
 
 	/* nothing on the bar, which is what getCommandPlaces hands over for a hidden command group (the
 	   last unit deselected or dead) whatever its buttons still hold: no place taken, no page keys */
 	const Int empty[ SLOTS ] = { N, N, N, N, N, N, N, N, N, N, N, N, N, N };
-	CHECK( !ControlBar_commandPlaces( empty, nothingPinned, SLOTS, places ) );
+	CHECK( !ControlBar_commandPlaces( empty, abilities, nothingPinned, SLOTS, places ) );
 	for( Int slot = 0; slot < SLOTS; slot++ )
 		CHECK_EQ( places[ slot ], -1 );
 
-	/* AmericaDozerCommandSet: structures in slots 1 to 9, 11 and 13, disarm mines in 14.  The disarm
-	   is pinned to N by its button's name; the eleven structures pack toward the top left in the
-	   owner's order, Q A W Z S E X D R C F */
+	/* AmericaDozerCommandSet: power, strategy center, barracks, drop zone, supply center, particle
+	   cannon, patriot, command center, fire base, war factory, airfield, disarm mines pinned to N.
+	   The four that make units along Q, the two defenses along A, the other five along Z */
 	const Int dozer[ SLOTS ] = { C, C, C, C, C, C, C, C, C, N, C, N, C, GUI_COMMAND_FIRE_WEAPON };
+	const Int dozerGroups[ SLOTS ] = { ut, ut, pr, ut, ut, ut, de, pr, de, ab, pr, ab, pr, ab };
 	Int dozerPinned[ SLOTS ];
 	memcpy( dozerPinned, nothingPinned, sizeof( dozerPinned ) );
 	dozerPinned[ 13 ] = ControlBar_namedCommandPlace( "Command_DisarmMinesAtPosition" );
-	CHECK( !ControlBar_commandPlaces( dozer, dozerPinned, SLOTS, places ) );
-	const Int dozerPlaces[ SLOTS ] = { COMMAND_PLACE_Q, COMMAND_PLACE_A, COMMAND_PLACE_W, COMMAND_PLACE_Z,
-		COMMAND_PLACE_S, COMMAND_PLACE_E, COMMAND_PLACE_X, COMMAND_PLACE_D, COMMAND_PLACE_R, -1, COMMAND_PLACE_C, -1,
-		COMMAND_PLACE_F, COMMAND_PLACE_N };
+	CHECK( !ControlBar_commandPlaces( dozer, dozerGroups, dozerPinned, SLOTS, places ) );
+	const Int dozerPlaces[ SLOTS ] = { Z, X, Q, CC, V, B, A, W, S, -1, E, -1, R, M };
 	for( Int slot = 0; slot < SLOTS; slot++ )
 		CHECK_EQ( places[ slot ], dozerPlaces[ slot ] );
 
 	/* AmericaVehicleHumveeCommandSet: three drones, five passengers, evacuate, attack move, guard,
 	   stop.  The orders take the owner's places whatever slot they were in - stop S, attack move D,
-	   eject Z, guard X - and A, C and V are kept for attack, hold position and move; the drones and
-	   passengers take what is left in the owner's order, Q W E R F T G Y */
+	   eject Z, guard X - and A, C and V are kept for attack, hold position and move.  The drones go
+	   along Q and the passengers into the bottom right corner, F G H over B N */
 	const Int humvee[ SLOTS ] = { GUI_COMMAND_OBJECT_UPGRADE, GUI_COMMAND_OBJECT_UPGRADE, GUI_COMMAND_OBJECT_UPGRADE,
 		GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EXIT_CONTAINER,
 		GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EVACUATE, N, GUI_COMMAND_ATTACK_MOVE, N, GUI_COMMAND_GUARD, GUI_COMMAND_STOP };
-	CHECK( ControlBar_commandPlaces( humvee, nothingPinned, SLOTS, places ) );
-	const Int humveePlaces[ SLOTS ] = { COMMAND_PLACE_Q, COMMAND_PLACE_W, COMMAND_PLACE_E, COMMAND_PLACE_R,
-		COMMAND_PLACE_F, COMMAND_PLACE_T, COMMAND_PLACE_G, COMMAND_PLACE_Y, COMMAND_PLACE_Z, -1, COMMAND_PLACE_D, -1,
-		COMMAND_PLACE_X, COMMAND_PLACE_S };
+	const Int humveeGroups[ SLOTS ] = { ab, ab, ab, pa, pa, pa, pa, pa, ab, ab, ab, ab, ab, ab };
+	CHECK( ControlBar_commandPlaces( humvee, humveeGroups, nothingPinned, SLOTS, places ) );
+	const Int humveePlaces[ SLOTS ] = { Q, W, E, F, G, H, B, M, Z, -1, D, -1, X, S };
 	for( Int slot = 0; slot < SLOTS; slot++ )
 		CHECK_EQ( places[ slot ], humveePlaces[ slot ] );
 
-	/* ChinaCommandCenterCommandSet: a dozer to build, seven powers, two upgrades, rally, sell.  Rally
-	   stands on B and sell on N whatever slot they were in; the dozer first on Q, then the rest */
+	/* AmericaVehicleChinookCommandSet: eight passengers, unload, combat drop, stop.  Nothing to attack
+	   with, so A C V are free and the passengers take the right four columns of A and Z */
+	const Int chinook[ SLOTS ] = { GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EXIT_CONTAINER,
+		GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EXIT_CONTAINER,
+		GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EVACUATE, GUI_COMMAND_COMBATDROP, N, N, N, GUI_COMMAND_STOP };
+	const Int chinookGroups[ SLOTS ] = { pa, pa, pa, pa, pa, pa, pa, pa, ab, ab, ab, ab, ab, ab };
+	CHECK( !ControlBar_commandPlaces( chinook, chinookGroups, nothingPinned, SLOTS, places ) );
+	const Int chinookPlaces[ SLOTS ] = { D, F, G, H, CC, V, B, M, Z, Q, -1, -1, -1, S };
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		CHECK_EQ( places[ slot ], chinookPlaces[ slot ] );
+
+	/* ChinaCommandCenterCommandSet: a dozer to build, seven powers, two upgrades, rally, sell.  The
+	   dozer on Q, the abilities under it along A, and the three A cannot hold go on along Z, so the
+	   nine read in order and none stands beside the dozer */
 	const Int centre[ SLOTS ] = { GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_SPECIAL_POWER, GUI_COMMAND_SPECIAL_POWER,
 		GUI_COMMAND_SPECIAL_POWER, GUI_COMMAND_SPECIAL_POWER, GUI_COMMAND_SPECIAL_POWER, GUI_COMMAND_SPECIAL_POWER,
 		GUI_COMMAND_SPECIAL_POWER, GUI_COMMAND_OBJECT_UPGRADE, GUI_COMMAND_OBJECT_UPGRADE, N, N,
 		GUI_COMMAND_SET_RALLY_POINT, GUI_COMMAND_SELL };
-	CHECK( !ControlBar_commandPlaces( centre, nothingPinned, SLOTS, places ) );
-	const Int centrePlaces[ SLOTS ] = { COMMAND_PLACE_Q, COMMAND_PLACE_A, COMMAND_PLACE_W, COMMAND_PLACE_Z,
-		COMMAND_PLACE_S, COMMAND_PLACE_E, COMMAND_PLACE_X, COMMAND_PLACE_D, COMMAND_PLACE_R, COMMAND_PLACE_C, -1, -1,
-		COMMAND_PLACE_B, COMMAND_PLACE_N };
+	const Int centreGroups[ SLOTS ] = { pr, ab, ab, ab, ab, ab, ab, ab, ab, ab, ab, ab, ab, ab };
+	CHECK( !ControlBar_commandPlaces( centre, centreGroups, nothingPinned, SLOTS, places ) );
+	const Int centrePlaces[ SLOTS ] = { Q, A, S, D, F, G, H, Z, X, CC, -1, -1, B, M };
 	for( Int slot = 0; slot < SLOTS; slot++ )
 		CHECK_EQ( places[ slot ], centrePlaces[ slot ] );
 
-	/* a factory whose set opens on an upgrade, nine units after it, a garrison, rally and sell: the
-	   units take Q A W S E X D R C, round the garrison's evacuate on Z, and the upgrade comes after
-	   them on F.  Without production first the upgrade would have taken Q */
+	/* a factory whose set opens on an upgrade, nine units after it, a garrison, rally and sell: six
+	   units fill Q, the other three go on along A, the next row down, and the upgrade
+	   follows them.  The upgrade never takes a place before the units */
 	const Int factory[ SLOTS ] = { GUI_COMMAND_OBJECT_UPGRADE, GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_UNIT_BUILD,
 		GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_UNIT_BUILD,
 		GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_EVACUATE, N,
 		GUI_COMMAND_SET_RALLY_POINT, GUI_COMMAND_SELL };
-	CHECK( !ControlBar_commandPlaces( factory, nothingPinned, SLOTS, places ) );
-	const Int factoryPlaces[ SLOTS ] = { COMMAND_PLACE_F, COMMAND_PLACE_Q, COMMAND_PLACE_A, COMMAND_PLACE_W,
-		COMMAND_PLACE_S, COMMAND_PLACE_E, COMMAND_PLACE_X, COMMAND_PLACE_D, COMMAND_PLACE_R, COMMAND_PLACE_C,
-		COMMAND_PLACE_Z, -1, COMMAND_PLACE_B, COMMAND_PLACE_N };
+	const Int factoryGroups[ SLOTS ] = { ab, pr, pr, pr, pr, pr, pr, pr, pr, pr, ab, ab, ab, ab };
+	CHECK( !ControlBar_commandPlaces( factory, factoryGroups, nothingPinned, SLOTS, places ) );
+	const Int factoryPlaces[ SLOTS ] = { F, Q, W, E, R, T, Y, A, S, D, Z, -1, B, M };
 	for( Int slot = 0; slot < SLOTS; slot++ )
 		CHECK_EQ( places[ slot ], factoryPlaces[ slot ] );
 
-	/* Demo_GLAWorkerCommandSet, the fullest worker: ten structures, the suicide charge, the switch to
-	   the fakes and disarm mines.  The three are pinned by name to B, H and N, and the structures pack
-	   Q A W Z S E X D R C */
+	/* Demo_GLAWorkerCommandSet, the fullest worker: stash, demo trap, barracks, palace, stinger, black
+	   market, tunnel, scud storm, arms dealer, command center, the suicide charge, the switch to the
+	   fakes and disarm mines.  The three are pinned by name to B, H and N, round which the rows fill */
 	const Int worker[ SLOTS ] = { C, C, C, C, C, C, C, C, C, C, GUI_COMMAND_FIRE_WEAPON, N,
 		GUI_COMMAND_OBJECT_UPGRADE, GUI_COMMAND_FIRE_WEAPON };
+	const Int workerGroups[ SLOTS ] = { ut, de, pr, ut, de, ut, de, ut, pr, pr, ab, ab, ab, ab };
 	Int workerPinned[ SLOTS ];
 	memcpy( workerPinned, nothingPinned, sizeof( workerPinned ) );
 	workerPinned[ 10 ] = ControlBar_namedCommandPlace( "Demo_Command_TertiarySuicide" );
 	workerPinned[ 12 ] = ControlBar_namedCommandPlace( "Command_UpgradeGLAWorkerFakeCommandSet" );
 	workerPinned[ 13 ] = ControlBar_namedCommandPlace( "Command_DisarmMinesAtPosition" );
-	CHECK( !ControlBar_commandPlaces( worker, workerPinned, SLOTS, places ) );
-	const Int workerPlaces[ SLOTS ] = { COMMAND_PLACE_Q, COMMAND_PLACE_A, COMMAND_PLACE_W, COMMAND_PLACE_Z,
-		COMMAND_PLACE_S, COMMAND_PLACE_E, COMMAND_PLACE_X, COMMAND_PLACE_D, COMMAND_PLACE_R, COMMAND_PLACE_C,
-		COMMAND_PLACE_B, -1, COMMAND_PLACE_H, COMMAND_PLACE_N };
+	CHECK( !ControlBar_commandPlaces( worker, workerGroups, workerPinned, SLOTS, places ) );
+	const Int workerPlaces[ SLOTS ] = { Z, A, Q, X, S, CC, D, V, W, E, B, -1, H, M };
 	for( Int slot = 0; slot < SLOTS; slot++ )
 		CHECK_EQ( places[ slot ], workerPlaces[ slot ] );
 
@@ -3173,15 +3440,23 @@ TEST(controlbar_command_places_follow_the_owners_drawing)
 	CHECK_EQ( ControlBar_namedCommandPlace( "Command_UpgradeGLAWorkerRealCommandSet" ), (Int)COMMAND_PLACE_H );
 	CHECK_EQ( ControlBar_namedCommandPlace( "Command_ConstructGLABarracks" ), -1 );
 
-	/* the biggest set there is, the Boss general's dozer, fourteen structures: every one gets a place,
-	   no two share one, and they run the owner's order to G */
+	/* the biggest set there is, the Boss general's dozer, fourteen structures: four that make units,
+	   five defenses and five others, each row its own */
 	const Int boss[ SLOTS ] = { C, C, C, C, C, C, C, C, C, C, C, C, C, C };
-	ControlBar_commandPlaces( boss, nothingPinned, SLOTS, places );
-	const Int bossPlaces[ SLOTS ] = { COMMAND_PLACE_Q, COMMAND_PLACE_A, COMMAND_PLACE_W, COMMAND_PLACE_Z,
-		COMMAND_PLACE_S, COMMAND_PLACE_E, COMMAND_PLACE_X, COMMAND_PLACE_D, COMMAND_PLACE_R, COMMAND_PLACE_C,
-		COMMAND_PLACE_F, COMMAND_PLACE_T, COMMAND_PLACE_V, COMMAND_PLACE_G };
+	const Int bossGroups[ SLOTS ] = { ut, de, ut, de, pr, de, pr, de, pr, de, ut, pr, ut, ut };
+	ControlBar_commandPlaces( boss, bossGroups, nothingPinned, SLOTS, places );
+	const Int bossPlaces[ SLOTS ] = { Z, A, X, S, Q, D, W, F, E, G, CC, R, V, B };
 	for( Int slot = 0; slot < SLOTS; slot++ )
 		CHECK_EQ( places[ slot ], bossPlaces[ slot ] );
+
+	/* seven structures that are neither: six along Z, and with no row under Z the
+	   seventh goes up to A, the nearest row above */
+	const Int many[ SLOTS ] = { C, C, C, C, C, C, C, N, N, N, N, N, N, N };
+	const Int manyGroups[ SLOTS ] = { ut, ut, ut, ut, ut, ut, ut, ab, ab, ab, ab, ab, ab, ab };
+	ControlBar_commandPlaces( many, manyGroups, nothingPinned, SLOTS, places );
+	const Int manyPlaces[ SLOTS ] = { Z, X, CC, V, B, M, A, -1, -1, -1, -1, -1, -1, -1 };
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		CHECK_EQ( places[ slot ], manyPlaces[ slot ] );
 }
 
 /* The money plate follows its figure's width: wider at once, narrower only once the narrower figure
@@ -3261,19 +3536,20 @@ TEST(the_command_grid_keys_are_the_places_and_n_sells_and_b_rallies)
 	CHECK_EQ( GRID_KEYS[ ControlBar_namedCommandPlace( "Command_UpgradeGLAWorkerFakeCommandSet" ) ], 'H' );
 	CHECK_EQ( GRID_KEYS[ ControlBar_namedCommandPlace( "Demo_Command_TertiarySuicide" ) ], 'B' );
 
-	// a set of nothing but flowing commands fills the grid in the owner's order of 2026-09-28
-	static const char FILL_KEYS[] = "QAWZSEXDRCFTVGYBHN";
+	// a set of nothing but abilities fills the grid row by row, Q first
 	Int flowing[ COMMAND_PLACE_COUNT ];
 	Int unpinned[ COMMAND_PLACE_COUNT ];
+	Int abilities[ COMMAND_PLACE_COUNT ];
 	Int filled[ COMMAND_PLACE_COUNT ];
 	for( Int slot = 0; slot < COMMAND_PLACE_COUNT; slot++ )
 	{
 		flowing[ slot ] = GUI_COMMAND_SPECIAL_POWER;
 		unpinned[ slot ] = -1;
+		abilities[ slot ] = COMMAND_GROUP_ABILITY;
 	}
-	CHECK( !ControlBar_commandPlaces( flowing, unpinned, COMMAND_PLACE_COUNT, filled ) );
+	CHECK( !ControlBar_commandPlaces( flowing, abilities, unpinned, COMMAND_PLACE_COUNT, filled ) );
 	for( Int slot = 0; slot < COMMAND_PLACE_COUNT; slot++ )
-		CHECK_EQ( GRID_KEYS[ filled[ slot ] ], FILL_KEYS[ slot ] );
+		CHECK_EQ( GRID_KEYS[ filled[ slot ] ], GRID_KEYS[ slot ] );
 
 	// and the command types that land there, whatever slot of their set they sit in.  A unit that
 	// attack moves keeps A, C and V for the page's attack, hold and move keys: its first flowing
@@ -3282,7 +3558,7 @@ TEST(the_command_grid_keys_are_the_places_and_n_sells_and_b_rallies)
 	const Int unit[ SLOTS ] = { GUI_COMMAND_STOP, GUI_COMMAND_GUARD, GUI_COMMAND_EVACUATE, GUI_COMMAND_ATTACK_MOVE,
 		GUI_COMMAND_SPECIAL_POWER, GUI_COMMAND_SPECIAL_POWER, GUI_COMMAND_NONE, GUI_COMMAND_NONE };
 	Int places[ SLOTS ];
-	CHECK( ControlBar_commandPlaces( unit, unpinned, SLOTS, places ) );
+	CHECK( ControlBar_commandPlaces( unit, abilities, unpinned, SLOTS, places ) );
 	CHECK_EQ( GRID_KEYS[ places[ 0 ] ], 'S' );
 	CHECK_EQ( GRID_KEYS[ places[ 1 ] ], 'X' );
 	CHECK_EQ( GRID_KEYS[ places[ 2 ] ], 'Z' );
@@ -3291,12 +3567,14 @@ TEST(the_command_grid_keys_are_the_places_and_n_sells_and_b_rallies)
 	CHECK_EQ( GRID_KEYS[ places[ 5 ] ], 'W' );
 	const Int building[ SLOTS ] = { GUI_COMMAND_SELL, GUI_COMMAND_SET_RALLY_POINT, GUI_COMMAND_EVACUATE,
 		GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_UNIT_BUILD, GUI_COMMAND_NONE, GUI_COMMAND_NONE, GUI_COMMAND_NONE };
-	CHECK( !ControlBar_commandPlaces( building, unpinned, SLOTS, places ) );
+	const Int buildingGroups[ SLOTS ] = { COMMAND_GROUP_ABILITY, COMMAND_GROUP_ABILITY, COMMAND_GROUP_ABILITY,
+		COMMAND_GROUP_PRODUCTION, COMMAND_GROUP_PRODUCTION, COMMAND_GROUP_ABILITY, COMMAND_GROUP_ABILITY, COMMAND_GROUP_ABILITY };
+	CHECK( !ControlBar_commandPlaces( building, buildingGroups, unpinned, SLOTS, places ) );
 	CHECK_EQ( GRID_KEYS[ places[ 0 ] ], 'N' );
 	CHECK_EQ( GRID_KEYS[ places[ 1 ] ], 'B' );
 	CHECK_EQ( GRID_KEYS[ places[ 2 ] ], 'Z' );
 	CHECK_EQ( GRID_KEYS[ places[ 3 ] ], 'Q' );
-	CHECK_EQ( GRID_KEYS[ places[ 4 ] ], 'A' );
+	CHECK_EQ( GRID_KEYS[ places[ 4 ] ], 'W' );
 
 	// every block as name, key and modifiers
 	Int slotsBound = 0;
@@ -6997,11 +7275,11 @@ TEST(an_armed_unit_sees_little_further_than_it_can_shoot)
 	 range, and nothing taken away for standing lower. */
 TEST(high_ground_reaches_further_and_low_ground_no_shorter)
 {
-	CHECK_NEAR( Weapon_elevationRangeBonus( 200.0f, 20.0f ), 60.0f, 0.0001f );
-	CHECK_NEAR( Weapon_elevationRangeBonus( 200.0f, 400.0f ), 200.0f, 0.0001f );
-	CHECK_NEAR( Weapon_elevationRangeBonus( 200.0f, FLT_MAX ), 200.0f, 0.0001f );
-	CHECK_NEAR( Weapon_elevationRangeBonus( 200.0f, 0.0f ), 0.0f, 0.0001f );
-	CHECK_NEAR( Weapon_elevationRangeBonus( 200.0f, -40.0f ), 0.0f, 0.0001f );
+	CHECK_NEAR( Weapon_highGroundRangeBonus( 200.0f, 20.0f ), 60.0f, 0.0001f );
+	CHECK_NEAR( Weapon_highGroundRangeBonus( 200.0f, 400.0f ), 200.0f, 0.0001f );
+	CHECK_NEAR( Weapon_highGroundRangeBonus( 200.0f, FLT_MAX ), 200.0f, 0.0001f );
+	CHECK_NEAR( Weapon_highGroundRangeBonus( 200.0f, 0.0f ), 0.0f, 0.0001f );
+	CHECK_NEAR( Weapon_highGroundRangeBonus( 200.0f, -40.0f ), 0.0f, 0.0001f );
 }
 
 /** A hill hides the ground behind it. Standing in the middle of flat ground with a wall of high cells
@@ -9937,6 +10215,43 @@ TEST(massing_waits_for_a_force_but_never_waits_for_ever)
 }
 
 
+/** Another factory when the queue is backing up, and another tech building until three are standing.
+	 Easy and Normal never reach the caller: economy buildings stay off below Brutal. */
+TEST(extra_factory_follows_the_queue_and_tech_stops_at_three)
+{
+	// nothing left standing: put one back
+	CHECK( aiWantsAnotherFactory( 0, 0, 0, 0, FALSE ) );
+
+	// one already going up is the building this would ask for
+	CHECK( !aiWantsAnotherFactory( 0, 1, 0, 0, FALSE ) );
+	CHECK( !aiWantsAnotherFactory( 2, 1, 0, 4, FALSE ) );
+
+	// a factory with an empty queue is the spare
+	CHECK( !aiWantsAnotherFactory( 2, 0, 1, 3, FALSE ) );
+
+	// every finished factory is busy, and a unit is waiting behind the one being built
+	CHECK( aiWantsAnotherFactory( 2, 0, 0, 2, FALSE ) );
+
+	// busy, but the queue is only the unit under construction
+	CHECK( !aiWantsAnotherFactory( 1, 0, 0, 1, FALSE ) );
+
+	// airfields and the income buildings: another whenever one is not already going up,
+	// even while a finished one sits idle
+	CHECK( aiWantsAnotherFactory( 3, 0, 2, 0, TRUE ) );
+	CHECK( !aiWantsAnotherFactory( 3, 1, 0, 5, TRUE ) );
+
+	CHECK( aiWantsAnotherTechBuilding( 0, 0 ) );
+	CHECK( aiWantsAnotherTechBuilding( AI_TECH_BUILDING_COPIES - 1, 0 ) );
+	CHECK( !aiWantsAnotherTechBuilding( 2, 1 ) );
+	CHECK( !aiWantsAnotherTechBuilding( AI_TECH_BUILDING_COPIES, 0 ) );
+
+	TAiData ladder;
+	CHECK( !ladder.m_skill[ AISKILL_EASY ].m_economyBuildings );
+	CHECK( !ladder.m_skill[ AISKILL_MEDIUM ].m_economyBuildings );
+	CHECK( ladder.m_skill[ AISKILL_BRUTAL ].m_economyBuildings );
+}
+
+
 /** B2: which enemy to go after.  EA's answer was the nearest one, plus a rule with the sign the
 	 wrong way round - an enemy who had lost his units or his production had his distance set to half
 	 the map, which is "ignore the one you are about to beat" and is what drags matches out. */
@@ -10089,6 +10404,56 @@ TEST(a_parked_wave_goes_when_it_is_worth_sending_or_has_waited_long_enough)
 
 	// nothing parked that can fight: nothing to send, however long
 	CHECK( !aiReleaseWave( 0.0f, WAVE, MAX_HOLD * 10, MAX_HOLD ) );
+}
+
+
+/** The wave is sized by the AI's chance against its enemy: an army at home facing nothing goes, and
+	 one facing three times itself stays until it is worth sending. */
+TEST(pressure_rises_with_the_chance_of_winning_and_falls_back_with_it)
+{
+	const Real WAVE = 6000.0f;
+	const UnsignedInt MAX_HOLD = 2700;
+
+	CHECK_NEAR( 0.5f, aiWinChance( 4000.0f, 4000.0f ), 0.0001f );
+	CHECK( aiWinChance( 8000.0f, 1000.0f ) > aiWinChance( 8000.0f, 4000.0f ) );
+	// one rifleman against an empty field is not a rout
+	CHECK( aiWinChance( 200.0f, 0.0f ) < 0.65f );
+
+	CHECK_EQ( AIPRESSURE_NORMAL, aiPressureLevel( 0.5f, TRUE, AIPRESSURE_NORMAL ) );
+	CHECK_EQ( AIPRESSURE_PRESS, aiPressureLevel( aiWinChance( 9000.0f, 3000.0f ), TRUE, AIPRESSURE_NORMAL ) );
+	CHECK_EQ( AIPRESSURE_DEFEND, aiPressureLevel( aiWinChance( 3000.0f, 9000.0f ), FALSE, AIPRESSURE_NORMAL ) );
+
+	// he has nothing left: everything goes, but only on the word of someone looking at his base
+	const Real routed = aiWinChance( 9000.0f, 0.0f );
+	CHECK_EQ( AIPRESSURE_FINISH, aiPressureLevel( routed, TRUE, AIPRESSURE_NORMAL ) );
+	CHECK_EQ( AIPRESSURE_NORMAL, aiPressureLevel( routed, FALSE, AIPRESSURE_NORMAL ) );
+	CHECK_EQ( AIPRESSURE_PRESS, aiPressureLevel( routed, FALSE, AIPRESSURE_PRESS ) );
+	CHECK_EQ( AIPRESSURE_FINISH, aiPressureLevel( routed, FALSE, AIPRESSURE_FINISH ) );
+
+	// a chance sitting inside a threshold keeps the level it has: 0.58 to 0.66 changed level six
+	// times in a minute before the margin was a tenth
+	CHECK_EQ( AIPRESSURE_PRESS, aiPressureLevel( 0.58f, TRUE, AIPRESSURE_PRESS ) );
+	CHECK_EQ( AIPRESSURE_NORMAL, aiPressureLevel( 0.58f, TRUE, AIPRESSURE_NORMAL ) );
+	CHECK_EQ( AIPRESSURE_NORMAL, aiPressureLevel( 0.54f, TRUE, AIPRESSURE_PRESS ) );
+	CHECK_EQ( AIPRESSURE_FINISH, aiPressureLevel( 0.76f, FALSE, AIPRESSURE_FINISH ) );
+	CHECK_EQ( AIPRESSURE_PRESS, aiPressureLevel( 0.74f, FALSE, AIPRESSURE_FINISH ) );
+	CHECK_EQ( AIPRESSURE_DEFEND, aiPressureLevel( 0.42f, FALSE, AIPRESSURE_DEFEND ) );
+	CHECK_EQ( AIPRESSURE_NORMAL, aiPressureLevel( 0.42f, FALSE, AIPRESSURE_NORMAL ) );
+
+	// ahead, a lone artillery piece goes at once
+	CHECK( aiReleaseWaveAt( AIPRESSURE_PRESS, 900.0f, WAVE, 0, MAX_HOLD ) );
+	CHECK( aiReleaseWaveAt( AIPRESSURE_FINISH, 900.0f, WAVE, 0, MAX_HOLD ) );
+	CHECK( !aiReleaseWaveAt( AIPRESSURE_FINISH, 0.0f, WAVE, MAX_HOLD, MAX_HOLD ) );
+
+	// an even match is the wave as it was
+	CHECK( !aiReleaseWaveAt( AIPRESSURE_NORMAL, 900.0f, WAVE, 100, MAX_HOLD ) );
+	CHECK( aiReleaseWaveAt( AIPRESSURE_NORMAL, 900.0f, WAVE, MAX_HOLD, MAX_HOLD ) );
+
+	// outmatched: twice the wave, twice the wait, and never a trickle however long it has waited
+	CHECK( !aiReleaseWaveAt( AIPRESSURE_DEFEND, 6000.0f, WAVE, MAX_HOLD, MAX_HOLD ) );
+	CHECK( aiReleaseWaveAt( AIPRESSURE_DEFEND, 12000.0f, WAVE, 0, MAX_HOLD ) );
+	CHECK( aiReleaseWaveAt( AIPRESSURE_DEFEND, 6000.0f, WAVE, 2 * MAX_HOLD, MAX_HOLD ) );
+	CHECK( !aiReleaseWaveAt( AIPRESSURE_DEFEND, 900.0f, WAVE, 20 * MAX_HOLD, MAX_HOLD ) );
 }
 
 
@@ -10330,20 +10695,23 @@ TEST(every_ai_rung_is_named_the_same_way_as_every_other)
 		for (Int b = a + 1; b < numRungs; ++b)
 			CHECK( wcscmp( SlotStateName( rungs[a] ).str(), SlotStateName( rungs[b] ).str() ) != 0 );
 }
-/* Five is what a column of the strip shows before the rest of the queue folds into the "+N" that
-	 closes it as a sixth cell.  It used to be sixteen across the bottom of the screen, which at a
-	 busy war factory ran the cameos most of the way over the map. */
+/* Nine is what the strip shows before the rest of the queue folds into the "+N" that closes it as a
+	 tenth cell: two rows of five standing on the console over the selection.  It used to be sixteen
+	 across the bottom of the screen, which at a busy war factory ran the cameos most of the way over
+	 the map. */
 TEST(the_production_strip_folds_a_long_queue_into_its_overflow)
 {
-	CHECK_EQ( 5, (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX );
+	enum { ROW = 5 };
+	CHECK_EQ( 9, (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX );
 
 	//
-	// The column, its overflow cell included, has to stand inside the 600 the layout is written in
-	// with room to spare for the control bar it stands on: it grows upward out of the corner, and a
-	// cell drawn past the top of the screen is a cell nobody can read.
+	// The rows, the overflow cell included, have to fill whole rows of five and stand inside the 600
+	// the layout is written in with room to spare for the console they stand on: they grow upward,
+	// and a cell drawn past the top of the screen is a cell nobody can read.
 	//
 	const Int cells = (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX + 1;
-	const Int height = cells * (Int)InGameUI::PRODUCTION_STRIP_TRAY_H;
+	CHECK_EQ( 0, cells % ROW );
+	const Int height = cells / ROW * (Int)InGameUI::PRODUCTION_STRIP_TRAY_H;
 	CHECK( height < 600 / 2 );
 }
 
@@ -10444,7 +10812,7 @@ TEST(a_stacked_tray_does_not_lie_over_the_one_below_it)
 					<= (Int)InGameUI::PRODUCTION_STRIP_TRAY_H );
 
 	//
-	// the superweapon strip stands in the same trays, three rows of six of them, and that pile has
+	// the superweapon strip stands in rows of six, as many as it is allowed to grow to, and that pile has
 	// to fit under the corner clock plate rather than run off the bottom of the 800x600 it is
 	// written in - at the full tray now, which is the taller pile of the two
 	//
@@ -11379,17 +11747,43 @@ TEST(the_hud_is_measured_at_the_command_bars_own_scale)
 	CHECK_NEAR( ControlBarUniformScaleFor( 0, 0 ), 1.0f, 0.001f );
 }
 
-/* The bottom HUD is drawn smaller than the rest, the owner's "too big": seventy percent of the
-	 uniform scale, so 1.26 at 1920x1080 where the boards stand at 1.8, and never under what was
-	 authored, so 1280x720 stays at 1 where seventy percent would have been 0.84. */
-TEST(controlbar_hud_scale_is_seventy_percent_and_never_below_one)
+/* The bottom HUD follows the screen's height alone, the owner's rule of 2026-10-01: seventy percent
+	 of the height over 600, so 1.26 at 1920x1080 as before, with no floor and no whole steps.  It
+	 covers the same part of the height at 720, 1080 and 1440, and an ultrawide screen of the same
+	 height draws it no bigger. */
+TEST(controlbar_hud_scale_follows_the_screens_height)
 {
 	CHECK_NEAR( ControlBarHudScaleFor( 1920, 1080 ), 1.26f, 0.001f );
 	CHECK_NEAR( ControlBarHudScaleFor( 3840, 2160 ), 2.52f, 0.001f );
-	CHECK_NEAR( ControlBarHudScaleFor( 2560, 1080 ), 1.26f, 0.001f );
-	CHECK_NEAR( ControlBarHudScaleFor( 1280, 720 ), 1.0f, 0.001f );
-	CHECK_NEAR( ControlBarHudScaleFor( 800, 600 ), 1.0f, 0.001f );
-	CHECK( ControlBarHudScaleFor( 1920, 1080 ) < ControlBarUniformScaleFor( 1920, 1080 ) );
+	CHECK_NEAR( ControlBarHudScaleFor( 1280, 720 ), 0.84f, 0.001f );
+
+	struct Screen { Int w, h; };
+	const Screen screens[] = { { 1280, 720 }, { 1920, 1080 }, { 2560, 1440 } };
+	const Real reference = ControlBarHudScaleFit( ControlBarHudScaleFor( 1920, 1080 ), 1920 ) / 1080.0f;
+	for( Int i = 0; i < (Int)ARRAY_SIZE( screens ); i++ )
+	{
+		const Real covered = ControlBarHudScaleFit( ControlBarHudScaleFor( screens[ i ].w, screens[ i ].h ), screens[ i ].w ) / screens[ i ].h;
+		CHECK_NEAR( covered, reference, 0.0001f );
+	}
+	CHECK_NEAR( ControlBarHudScaleFit( ControlBarHudScaleFor( 2560, 1080 ), 2560 ),
+							ControlBarHudScaleFit( ControlBarHudScaleFor( 1920, 1080 ), 1920 ), 0.0001f );
+}
+
+/* HUD Size grows the console until it would no longer fit the screen's width, and there it stops:
+	 at HUD Size 100% only a screen narrower than about 1.05:1, at 150% one narrower than about 1.57:1,
+	 which takes in 4:3 and 5:4. */
+TEST(controlbar_hud_size_stops_where_the_console_fills_the_width)
+{
+	const Int console = InGameUI_consolePageWidth();
+	CHECK( console > 800 && console < 1024 );
+	CHECK_NEAR( ControlBarHudScaleFit( 1.26f, 1920 ), 1.26f, 0.001f );
+	CHECK_NEAR( ControlBarHudScaleFit( 1.5f, 1280 ), 1280.0f / console, 0.001f );
+	CHECK( ControlBarHudScaleFit( 1.5f, 1280 ) * console <= 1280.0f );
+	CHECK_NEAR( ControlBarHudScaleFit( 1.0f, 1024 ), 1.0f, 0.001f );
+	CHECK( ControlBarHudScaleFit( 1.0f, 800 ) < 1.0f );
+	const Real narrow = ControlBarHudScaleFor( 1024, 768 );
+	CHECK_NEAR( ControlBarHudScaleFit( narrow, 1024 ), narrow, 0.0001f );
+	CHECK( ControlBarHudScaleFit( narrow * 1.5f, 1024 ) < narrow * 1.5f );
 }
 
 /* A health bar is drawn in raw pixels over a tank whose own size on screen is set by the camera,
@@ -12001,6 +12395,172 @@ TEST(texture_filter_defaults_to_anisotropic)
 	CHECK_EQ( scratch->m_textureFilterMode, 2 );
 	CHECK_EQ( scratch->m_anisotropyLevel, 0 );
 	CHECK_EQ( scratch->m_vsync, FALSE );
+
+	TheWritableGlobalData = saved;
+	delete scratch;
+}
+
+/* Three rows on the Controls page.  The zoom one may only ever bring the camera nearer: the far
+	 limit is how much of the map a player sees, Options.ini is outside the mismatch check, and a row
+	 whose range let the floor climb past the ceiling would push the ceiling up with it in
+	 W3DView::setDefaultView. */
+TEST(start_zoom_closer_zoom_and_drag_threshold_are_rows_that_change_nothing_until_asked)
+{
+	const OptionDef *start = findOptionDef( "StartAtMaxZoom" );
+	const OptionDef *closer = findOptionDef( "CloserZoom" );
+	const OptionDef *drag = findOptionDef( "DragTolerance" );
+	CHECK( start != NULL && closer != NULL && drag != NULL );
+	if( start == NULL || closer == NULL || drag == NULL )
+		return;
+
+	CHECK_EQ( (Int)start->kind, (Int)OPTION_BOOL );
+	CHECK_EQ( (Int)closer->kind, (Int)OPTION_INT );
+	CHECK_EQ( (Int)drag->kind, (Int)OPTION_INT );
+	CHECK( strstr( start->widgetName, "CheckStartAtMaxZoom" ) != NULL );
+	CHECK( strstr( closer->widgetName, "SliderCloserZoom" ) != NULL );
+	CHECK( strstr( drag->widgetName, "SliderDragTolerance" ) != NULL );
+
+	GlobalData *saved = TheWritableGlobalData;
+	GlobalData *scratch = NEW GlobalData;
+	TheWritableGlobalData = scratch;
+
+	// an Options.ini with none of the three keys plays the way the last version did
+	CHECK_EQ( start->get(), 1 );
+	CHECK_EQ( closer->get(), 0 );
+	CHECK_EQ( drag->get(), 25 );	// DragTolerance in INIZH.big's Mouse.ini
+	CHECK( drag->lo > 0 && drag->lo <= 25 && drag->hi >= 25 );
+
+	start->set( 0 );
+	CHECK_EQ( (Int)scratch->m_startAtMaxZoom, 0 );
+	drag->set( 8 );
+	CHECK_EQ( scratch->m_dragTolerance, 8 );
+	closer->set( 40 );
+	CHECK_EQ( scratch->m_closerZoomPercent, 40 );
+
+	// the slider's left end is GameData.ini's own limit, and no position on it is above that
+	CHECK_EQ( closer->lo, 0 );
+	CHECK( closer->hi < 100 );
+	CHECK_NEAR( View_closestCameraHeight( 120.0f, closer->lo ), 120.0f, 0.001f );
+	CHECK_NEAR( View_closestCameraHeight( 120.0f, 60 ), 48.0f, 0.001f );
+	for( Int percent = closer->lo; percent <= closer->hi; ++percent )
+	{
+		const Real height = View_closestCameraHeight( 120.0f, percent );
+		CHECK( height > 0.0f && height <= 120.0f );
+	}
+
+	TheWritableGlobalData = saved;
+	delete scratch;
+}
+
+/* The corner box is the player's to switch off, under a key of its own.  ShowHudOverlay left the
+	 catalog with a "no" still sitting in old Options.ini files, and a row under that name would
+	 read it back and take the box away from people who never asked. */
+TEST(net_box_is_a_check_box_that_starts_on_under_its_own_key)
+{
+	const OptionDef *def = findOptionDef( "ShowNetBox" );
+	CHECK( def != NULL );
+	if( def == NULL )
+		return;
+	CHECK_EQ( (Int)def->kind, (Int)OPTION_BOOL );
+	CHECK_EQ( (Int)def->apply, (Int)APPLY_LIVE );
+	CHECK( strstr( def->widgetName, "CheckNetBox" ) != NULL );
+	CHECK( findOptionDef( "ShowHudOverlay" ) == NULL );
+
+	GlobalData *saved = TheWritableGlobalData;
+	GlobalData *scratch = NEW GlobalData;
+	TheWritableGlobalData = scratch;
+
+	CHECK( scratch->m_showNetBox );
+	def->set( 0 );
+	CHECK( !scratch->m_showNetBox );
+	// the older plate's own switch is not this one's to move
+	CHECK( scratch->m_showHudOverlay );
+
+	TheWritableGlobalData = saved;
+	delete scratch;
+}
+
+/* The income beside the money, per second as it always was until the player picks otherwise.
+	 Automatic is the one with a rule in it: under ten dollars a second the whole number rounds most
+	 of the income away, $135 a minute reading "+2/s", so that is where it goes per minute. */
+TEST(income_rate_stays_per_second_until_picked_and_automatic_turns_at_ten_a_second)
+{
+	const OptionDef *def = findOptionDef( "IncomeRate" );
+	CHECK( def != NULL );
+	if( def == NULL )
+		return;
+	CHECK_EQ( (Int)def->kind, (Int)OPTION_ENUM );
+	CHECK_EQ( def->hi, (Int)INCOME_RATE_MODE_COUNT - 1 );
+	CHECK( strstr( def->widgetName, "ComboBoxIncomeRate" ) != NULL );
+
+	GlobalData *saved = TheWritableGlobalData;
+	GlobalData *scratch = NEW GlobalData;
+	TheWritableGlobalData = scratch;
+
+	CHECK_EQ( def->get(), (Int)INCOME_RATE_PER_SECOND );
+	def->set( INCOME_RATE_AUTOMATIC );
+	CHECK_EQ( scratch->m_incomeRateMode, (Int)INCOME_RATE_AUTOMATIC );
+
+	TheWritableGlobalData = saved;
+	delete scratch;
+
+	CHECK( !InGameUI_incomePerMinute( INCOME_RATE_PER_SECOND, 0 ) );
+	CHECK( !InGameUI_incomePerMinute( INCOME_RATE_PER_SECOND, 500 ) );
+	CHECK( InGameUI_incomePerMinute( INCOME_RATE_PER_MINUTE, 0 ) );
+	CHECK( InGameUI_incomePerMinute( INCOME_RATE_PER_MINUTE, 500 ) );
+	CHECK( InGameUI_incomePerMinute( INCOME_RATE_AUTOMATIC, 0 ) );
+	CHECK( InGameUI_incomePerMinute( INCOME_RATE_AUTOMATIC, 2 ) );
+	CHECK( InGameUI_incomePerMinute( INCOME_RATE_AUTOMATIC, 9 ) );
+	CHECK( !InGameUI_incomePerMinute( INCOME_RATE_AUTOMATIC, 10 ) );
+	CHECK( !InGameUI_incomePerMinute( INCOME_RATE_AUTOMATIC, 40 ) );
+}
+
+TEST(build_plans_are_numbered_in_the_order_their_builder_takes_them)
+{
+	// dozer 7 holds plans 40, 12 and 25 and is walking to 40; dozer 3 holds 30 alone
+	const Int ids[] = { 40, 12, 30, 25 };
+	const Int builders[] = { 7, 7, 3, 7 };
+	const Bool current[] = { TRUE, FALSE, FALSE, FALSE };
+	std::vector<BuildPlanNumber> plans;
+	for( Int i = 0; i < 4; ++i )
+	{
+		BuildPlanNumber plan;
+		plan.plan = (ObjectID)ids[ i ];
+		plan.builder = (ObjectID)builders[ i ];
+		plan.current = current[ i ];
+		plan.step = -1;
+		plans.push_back( plan );
+	}
+
+	InGameUI_numberBuildPlans( plans );
+
+	CHECK_EQ( (Int)plans[ 0 ].plan, 30 );
+	CHECK_EQ( plans[ 0 ].step, 0 );
+	CHECK_EQ( (Int)plans[ 1 ].plan, 40 );
+	CHECK_EQ( plans[ 1 ].step, 1 );
+	CHECK_EQ( (Int)plans[ 2 ].plan, 12 );
+	CHECK_EQ( plans[ 2 ].step, 2 );
+	CHECK_EQ( (Int)plans[ 3 ].plan, 25 );
+	CHECK_EQ( plans[ 3 ].step, 3 );
+}
+
+TEST(empty_building_slots_are_a_check_box_that_starts_on)
+{
+	const OptionDef *def = findOptionDef( "EmptyBuildingPips" );
+	CHECK( def != NULL );
+	if( def == NULL )
+		return;
+	CHECK_EQ( (Int)def->kind, (Int)OPTION_BOOL );
+	CHECK_EQ( (Int)def->apply, (Int)APPLY_LIVE );
+	CHECK( strstr( def->widgetName, "CheckEmptyBuildingPips" ) != NULL );
+
+	GlobalData *saved = TheWritableGlobalData;
+	GlobalData *scratch = NEW GlobalData;
+	TheWritableGlobalData = scratch;
+
+	CHECK( scratch->m_showEmptyBuildingPips );
+	def->set( 0 );
+	CHECK( !scratch->m_showEmptyBuildingPips );
 
 	TheWritableGlobalData = saved;
 	delete scratch;
@@ -13392,6 +13952,26 @@ TEST(the_superweapon_rule_is_a_mode_with_one_exception)
 	CHECK_EQ( SuperweaponBuildCap( SUPERWEAPONS_NONE, laserGeneral ), (Int)SUPERWEAPON_CAP_BANNED );
 	CHECK_EQ( SuperweaponBuildCap( SUPERWEAPONS_NONE, superweaponGeneral ), 1 );
 
+	// except the silo, one for everybody, built for China's upgrades: its missile is what No refuses
+	CHECK_EQ( SuperweaponBuildCap( SUPERWEAPONS_NONE, gla, AsciiString( "ChinaNuclearMissileLauncher" ) ), 1 );
+	CHECK_EQ( SuperweaponBuildCap( SUPERWEAPONS_NONE, gla, AsciiString( "Nuke_ChinaNuclearMissileLauncher" ) ), 1 );
+	CHECK_EQ( SuperweaponBuildCap( SUPERWEAPONS_NONE, superweaponGeneral, AsciiString( "SupW_AmericaNuclearMissileLauncher" ) ), 1 );
+	CHECK_EQ( SuperweaponBuildCap( SUPERWEAPONS_NONE, gla, AsciiString( "GLAScudStorm" ) ), (Int)SUPERWEAPON_CAP_BANNED );
+	CHECK_EQ( SuperweaponBuildCap( SUPERWEAPONS_NONE, laserGeneral, AsciiString( "Lazr_AmericaParticleCannonUplink" ) ), (Int)SUPERWEAPON_CAP_BANNED );
+	CHECK_EQ( SuperweaponBuildCap( SUPERWEAPONS_LIMIT, superweaponGeneral, AsciiString( "SupW_AmericaNuclearMissileLauncher" ) ), 4 );
+	CHECK_EQ( SuperweaponBuildCap( SUPERWEAPONS_ALLOW, gla, AsciiString( "ChinaNuclearMissileLauncher" ) ), (Int)SUPERWEAPON_CAP_UNLIMITED );
+
+	// and that missile is silenced under No or Pro Rules, every general's copy, and nothing else is
+	CHECK( SuperweaponMissileSilenced( SPECIAL_NEUTRON_MISSILE, FALSE, SUPERWEAPONS_NONE ) );
+	CHECK( SuperweaponMissileSilenced( NUKE_SPECIAL_NEUTRON_MISSILE, FALSE, SUPERWEAPONS_NONE ) );
+	CHECK( SuperweaponMissileSilenced( SUPW_SPECIAL_NEUTRON_MISSILE, FALSE, SUPERWEAPONS_NONE ) );
+	CHECK( SuperweaponMissileSilenced( SPECIAL_NEUTRON_MISSILE, TRUE, SUPERWEAPONS_ALLOW ) );
+	CHECK( !SuperweaponMissileSilenced( SPECIAL_NEUTRON_MISSILE, FALSE, SUPERWEAPONS_LIMIT ) );
+	CHECK( !SuperweaponMissileSilenced( SPECIAL_NEUTRON_MISSILE, FALSE, SUPERWEAPONS_ALLOW ) );
+	CHECK( !SuperweaponMissileSilenced( SPECIAL_PARTICLE_UPLINK_CANNON, TRUE, SUPERWEAPONS_NONE ) );
+	CHECK( !SuperweaponMissileSilenced( SPECIAL_SCUD_STORM, TRUE, SUPERWEAPONS_NONE ) );
+	CHECK( !SuperweaponMissileSilenced( SPECIAL_CLUSTER_MINES, FALSE, SUPERWEAPONS_NONE ) );
+
 	// a player with no template at all - the civilian seat - is nobody's exception
 	CHECK_EQ( SuperweaponBuildCap( SUPERWEAPONS_NONE, AsciiString::TheEmptyString ), (Int)SUPERWEAPON_CAP_BANNED );
 
@@ -13469,6 +14049,45 @@ TEST(tech_respawn_starts_off_and_clamps_the_wire_value)
 
 	delete TheWritableGlobalData;
 	TheWritableGlobalData = saved;
+}
+
+#include "GameLogic/Module/SupplyWarehouseDockUpdate.h"
+
+/* The supply pile limit arrives as PL= in the host's options string and is clamped like the rest.
+	 SupplyWarehouseDockUpdate.cpp then decides whom a pile is closed to from the players already on
+	 it, one bit a player index. */
+TEST(supply_pile_limit_starts_off_clamps_and_closes_a_full_pile)
+{
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+
+	SkirmishGameInfo game;
+	game.init();
+	CHECK_EQ( game.getSupplyPileLimit(), 0 );
+	game.setSupplyPileLimit( 2 );
+	CHECK_EQ( game.getSupplyPileLimit(), 2 );
+	game.setSupplyPileLimit( -3 );
+	CHECK_EQ( game.getSupplyPileLimit(), 0 );
+	game.setSupplyPileLimit( 1000 );
+	CHECK_EQ( game.getSupplyPileLimit(), (Int)MAX_SLOTS );
+	game.reset();
+	CHECK_EQ( game.getSupplyPileLimit(), 0 );
+
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = saved;
+
+	/* no limit closes nothing, however many players are on the pile */
+	CHECK( !SupplyPileLimitCloses( 0, 0xFF, 9 ) );
+
+	/* limit 1: an empty pile is open, player 2's pile is closed to player 3 and open to player 2 */
+	CHECK( !SupplyPileLimitCloses( 1, 0, 3 ) );
+	CHECK(  SupplyPileLimitCloses( 1, 1u << 2, 3 ) );
+	CHECK( !SupplyPileLimitCloses( 1, 1u << 2, 2 ) );
+
+	/* limit 2: a second player still fits, a third does not, and either of the two comes back */
+	CHECK( !SupplyPileLimitCloses( 2, 1u << 2, 3 ) );
+	CHECK(  SupplyPileLimitCloses( 2, ( 1u << 2 ) | ( 1u << 3 ), 4 ) );
+	CHECK( !SupplyPileLimitCloses( 2, ( 1u << 2 ) | ( 1u << 3 ), 3 ) );
 }
 
 #include "Common/SpecialPowerType.h"
@@ -14255,6 +14874,20 @@ TEST(html_template_fills_values_and_repeats_each)
 		"<li class=\"t1\" data-each=\"players\"><li>Bo</li></li></ul>"
 		"looked" );
 	CHECK_STR( HtmlTemplate_escape( "a\"b'c" ).c_str(), "a&quot;b&#39;c" );
+
+	// the page is cut once and kept by its text: new values still come through on the next call,
+	// and a page with other text is cut on its own rather than served the first one's blocks
+	values[ "title" ] = "U";
+	lists[ "players" ].pop_back();
+	CHECK_STR( HtmlTemplate_expand( page, values, lists, lookup ).c_str(),
+		"<p class=\"on\">U</p>"
+		"<ul><li class=\"t9\" data-each=\"players\"><li>&lt;b&gt;&amp;</li></li></ul>"
+		"looked" );
+	CHECK_STR( HtmlTemplate_expand( page + "{{title}}", values, lists, lookup ).c_str(),
+		"<p class=\"on\">U</p>"
+		"<ul><li class=\"t9\" data-each=\"players\"><li>&lt;b&gt;&amp;</li></li></ul>"
+		"lookedU" );
+	CHECK_STR( HtmlTemplate_expand( "a {{ open", values, lists, lookup ).c_str(), "a {{ open" );
 }
 
 // litehtml builds an element for every word and every white space character, so the page it is

@@ -58,6 +58,9 @@ public:
 
 	void Set_Render_State(D3DRENDERSTATETYPE state, DWORD value);
 	DWORD Get_Render_State(D3DRENDERSTATETYPE state) const;
+	// What was set, before the caster pass has its say.
+	DWORD Get_Stored_Render_State(D3DRENDERSTATETYPE state) const
+		{ return (static_cast<unsigned>(state) < RENDER_STATE_COUNT) ? RenderStates[state] : 0; }
 
 	// While the sun's depth pass draws, every caster writes depth whatever its material says, and a
 	// see-through one writes it only where its texture is solid.  The states the engine set are

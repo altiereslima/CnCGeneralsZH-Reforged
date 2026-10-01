@@ -140,6 +140,7 @@ static const LookupListRec GameMessageMetaTypeNames[] =
 	{ "SELECT_NEXT_WORKER",												GameMessage::MSG_META_SELECT_NEXT_WORKER },
 	{ "SELECT_PREV_WORKER",												GameMessage::MSG_META_SELECT_PREV_WORKER },
 	{ "SELECT_NEXT_IDLE_WORKER",							GameMessage::MSG_META_SELECT_NEXT_IDLE_WORKER },
+	{ "SELECT_NEXT_IDLE_UNIT",								GameMessage::MSG_META_SELECT_NEXT_IDLE_UNIT },
 	{ "COMMAND_SLOT01",											GameMessage::MSG_META_COMMAND_SLOT01 },
 	{ "COMMAND_SLOT02",											GameMessage::MSG_META_COMMAND_SLOT02 },
 	{ "COMMAND_SLOT03",											GameMessage::MSG_META_COMMAND_SLOT03 },

@@ -106,12 +106,24 @@ const DistanceCalculationType DAMAGE_RANGE_CALC_TYPE = FROM_BOUNDINGSPHERE_3D;
 static const Real ELEVATION_RANGE_PER_HEIGHT = 3.0f;
 static const Real ELEVATION_RANGE_CAP = 1.0f;
 
-Real Weapon_elevationRangeBonus( Real range, Real heightAboveTarget )
+Real Weapon_highGroundRangeBonus( Real range, Real heightAboveTarget )
 {
 	if( heightAboveTarget <= 0.0f )
 		return 0.0f;
 
 	return min( heightAboveTarget * ELEVATION_RANGE_PER_HEIGHT, range * ELEVATION_RANGE_CAP );
+}
+
+/** The battle behind the main menu is EA's staging, laid out for flat ranges.  Its Jarmen Kell
+	* stands on a cliff 115 units above the GLA infantry he was placed beside, and with the high ground
+	* he reached them from 416 away with a 225 rifle: the first one died eight frames after the menu
+	* came up, screaming over it. */
+Real Weapon_elevationRangeBonus( Real range, Real heightAboveTarget )
+{
+	if( TheGameLogic->isInShellGame() )
+		return 0.0f;
+
+	return Weapon_highGroundRangeBonus( range, heightAboveTarget );
 }
 
 Real Weapon_elevatedRange( const Object *source, Real range, Real targetZ )

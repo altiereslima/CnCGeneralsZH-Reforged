@@ -89,7 +89,12 @@ static Bool getPlacementDrag( ICoord2D *start, ICoord2D *end )
 }  // end getPlacementDrag
 
 //-------------------------------------------------------------------------------------------------
-/** The object that is to do the building: the one the placement was started from, while it lives. */
+/** The object that is to do the building.  Normally the one the placement was started from, but
+	* with nothing selected the command bar is being driven by a stand-in builder that is not part of
+	* any selection - and that one is free to die between two clicks of a shift-held run of
+	* structures.  When it is gone, ask the command bar for the current stand-in rather than dropping
+	* out of placement mode: the logic picks the idle builder nearest the site anyway
+	* (MSG_DOZER_CONSTRUCT), so any builder will do to keep the ghost on the cursor. */
 //-------------------------------------------------------------------------------------------------
 static Object *resolvePlacementBuilder( void )
 {
@@ -97,7 +102,8 @@ static Object *resolvePlacementBuilder( void )
 	if( builder != NULL && !builder->isEffectivelyDead() )
 		return builder;
 
-	return NULL;
+	Drawable *standIn = TheControlBar ? TheControlBar->findStandInBuilder( FALSE ) : NULL;
+	return standIn ? standIn->getObject() : NULL;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -143,6 +149,24 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 
 	switch(msg->getType())
 	{
+		//---------------------------------------------------------------------------------------------
+		//
+		// While a shift-dragged row is on the ground, the wheel opens and closes the gap instead of
+		// zooming.  The same message is what LookAtTranslator zooms with, and this translator runs
+		// first, so eating it here is what keeps the camera still.  A row that has not been started
+		// yet leaves the wheel alone: ctrl still turns the building, and a plain roll still zooms.
+		//
+		case GameMessage::MSG_RAW_MOUSE_WHEEL:
+		{
+			if( TheInGameUI->getPendingPlaceType() && TheInGameUI->isPlacementAnchored() &&
+					TheInGameUI->placesRow() )
+			{
+				TheInGameUI->adjustPlacementRowGap( msg->getArgument( 1 )->real );
+				return DESTROY_MESSAGE;
+			}
+			break;
+		}
+
 		case GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN:
 		case GameMessage::MSG_RAW_MOUSE_RIGHT_DOUBLE_CLICK:
 		{
@@ -372,7 +396,9 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 				if( row )
 				{
 					//
-					// A shift-dragged row is one order per structure, each asked on its own: a piece
+					// A shift-dragged row, or an alt-dragged grid (computePlacementRow hands back
+					// either, in the order the ghosts were drawn), is one order per structure, each
+					// asked on its own: a piece
 					// that lands on a rock is left out and the rest still go up.  The logic hands each
 					// order to the idle selected builder nearest it, and once they are all busy the rest
 					// stand at 0% for whichever comes free first (BuildAssistant::buildObjectNow).
@@ -494,9 +520,14 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 					//
 					// get out of pending placement mode, this will also clear the arrow anchor status -
 					// unless shift is held, which keeps placing the same structure until released.
+					// A shift-dragged row is the exception: shift is what drew the line, and it is still
+					// down when the button comes up, so leaving the ghost up would start another building
+					// on the next click.  The row is the whole order.
 					//
 					Drawable *nextBuilder = builderObj ? builderObj->getDrawable() : NULL;
-					if( TheKeyboard && TheKeyboard->isShift() && nextBuilder )
+					if( row )
+						TheInGameUI->placeBuildAvailable( NULL, NULL );
+					else if( TheKeyboard && TheKeyboard->isShift() && nextBuilder )
 						TheInGameUI->placeBuildAvailable( build, nextBuilder );
 					else
 						TheInGameUI->placeBuildAvailable( NULL, NULL );

@@ -645,6 +645,56 @@ Int TechRespawnFromComboBox(GameWindow *comboBox)
 }
 
 // -----------------------------------------------------------------------------
+// Supply pile limit: how many players may gather from one pile at the same time, GitHub #30.
+static const Int theSupplyPileLimitChoices[] = { 0, 1, 2, 3 };
+
+void PopulateSupplyPileLimitComboBox(GameWindow *comboBox, GameInfo *myGame, Bool hostMayEdit)
+{
+  GadgetComboBoxReset(comboBox);
+
+  Color color = comboBox->winGetEnabled() ? comboBox->winGetEnabledTextColor() : comboBox->winGetDisabledTextColor();
+  for ( Int i = 0; i < (Int)(sizeof(theSupplyPileLimitChoices)/sizeof(theSupplyPileLimitChoices[0])); i++ )
+  {
+    UnicodeString text;
+    if ( theSupplyPileLimitChoices[i] == 0 )
+      text = TheGameText->fetch( "GUI:SupplyPileLimitOff" );
+    else
+      text.format( TheGameText->fetch( "GUI:SupplyPileLimitFormat" ), theSupplyPileLimitChoices[i] );
+
+    Int newIndex = GadgetComboBoxAddEntry(comboBox, text, color);
+    GadgetComboBoxSetItemData(comboBox, newIndex, (void *)(intptr_t)theSupplyPileLimitChoices[i]);
+  }
+
+  UpdateSupplyPileLimitComboBox(comboBox, myGame, hostMayEdit);
+}
+
+void UpdateSupplyPileLimitComboBox(GameWindow *comboBox, GameInfo *myGame, Bool hostMayEdit)
+{
+  comboBox->winEnable( hostMayEdit );
+
+  Int itemCount = GadgetComboBoxGetLength(comboBox);
+  for ( Int index = 0; index < itemCount; index++ )
+  {
+    if ( (Int)(intptr_t)GadgetComboBoxGetItemData(comboBox, index) == myGame->getSupplyPileLimit() )
+    {
+      Int selected = -1;
+      GadgetComboBoxGetSelectedPos( comboBox, &selected );
+      if ( selected != index )
+        GadgetComboBoxSetSelectedPos(comboBox, index, TRUE);
+      return;
+    }
+  }
+
+  // a host on a build with a longer list than ours
+  GadgetComboBoxSetSelectedPos(comboBox, 0, TRUE);
+}
+
+Int SupplyPileLimitFromComboBox(GameWindow *comboBox)
+{
+  return TechRespawnFromComboBox( comboBox ); // the same read: the selected entry's item data
+}
+
+// -----------------------------------------------------------------------------
 // The lobby tab strip.
 static GameWindow *theLobbySettingsPage = NULL;
 static GameWindow *theLobbyOtherWindow = NULL;

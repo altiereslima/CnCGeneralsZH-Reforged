@@ -202,6 +202,8 @@ private:
 	Int											m_alpha;			///< the whole page's, OPAQUE_ALPHA unless it is fading
 public:
 	Bool										m_hud;				///< laid out at ControlBarHudScale(), the bottom HUD's own
+	Bool										m_hudPage;		///< laid out at ControlBarHudPageScale(), the in-match HUD's other pages
+	Bool										m_screenPixels;	///< laid out in the screen's own pixels, over either scale
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -213,7 +215,9 @@ HtmlOverlayContainer::HtmlOverlayContainer( const AsciiString &defaultFont ) :
 	m_screenHeight( 0 ),
 	m_stamp( 0 ),
 	m_alpha( OPAQUE_ALPHA ),
-	m_hud( FALSE )
+	m_hud( FALSE ),
+	m_hudPage( FALSE ),
+	m_screenPixels( FALSE )
 {
 }
 
@@ -234,7 +238,7 @@ void HtmlOverlayContainer::setPage( const std::string &html )
 {
 	const Int width = TheDisplay->getWidth();
 	const Int height = TheDisplay->getHeight();
-	const Real scale = m_hud ? ControlBarHudScale() : ControlBarUniformScale();
+	const Real scale = m_screenPixels ? 1.0f : m_hud ? ControlBarHudScale() : m_hudPage ? ControlBarHudPageScale() : ControlBarUniformScale();
 	if( m_document && html == m_page && width == m_screenWidth && height == m_screenHeight && scale == m_scale )
 		return;
 
@@ -695,34 +699,47 @@ void HtmlOverlayContainer::draw_borders( litehtml::uint_ptr hdc, const litehtml:
 	if( root )
 		return;
 
+	//
+	// A side is as many whole screen pixels thick as its width comes to, one at least, measured in
+	// from the box's own edge, and never short of where its inner edge rounds to by itself.  With
+	// both edges rounded apart and nothing else, at a scale that is not a whole number a one pixel
+	// border was one screen pixel on one side of a cell and two on the other.  Cut to its width and
+	// nothing else, it stopped a pixel short of what stands inside it: a cell's ring left the command
+	// button's own coloured outline showing down one side of a whole column at HUD Size 115%.
+	//
+	const Int left = screen( place.x );
+	const Int top = screen( place.y );
+	const Int right = screen( place.x + place.width );
+	const Int bottom = screen( place.y + place.height );
+	const litehtml::border *sides[] = { &borders.top, &borders.bottom, &borders.left, &borders.right };
+	const Int inner[] =
+	{
+		screen( place.y + borders.top.width ) - top,
+		bottom - screen( place.y + place.height - borders.bottom.width ),
+		screen( place.x + borders.left.width ) - left,
+		right - screen( place.x + place.width - borders.right.width )
+	};
+	Int thick[ ARRAY_SIZE( sides ) ];
+	for( size_t side = 0; side < ARRAY_SIZE( sides ); side++ )
+		thick[ side ] = drawnWidth( *sides[ side ] ) > 0 ? std::max( inner[ side ], std::max( 1, screen( sides[ side ]->width ) ) ) : 0;
+
 	// the top and bottom own the corners and the sides stand between them: drawn full height, a
 	// groove's dark left edge ran on down past its lit bottom and stuck out of the bevel in black
-	const litehtml::pixel_t topWidth = drawnWidth( borders.top );
-	const litehtml::pixel_t bottomWidth = drawnWidth( borders.bottom );
-	const litehtml::border *sides[] = { &borders.top, &borders.bottom, &borders.left, &borders.right };
+	const Int sideTop = top + thick[ 0 ];
+	const Int sideHeight = bottom - top - thick[ 0 ] - thick[ 1 ];
+	const IRegion2D edges[] =
+	{
+		{ { left, top }, { right, top + thick[ 0 ] } },
+		{ { left, bottom - thick[ 1 ] }, { right, bottom } },
+		{ { left, sideTop }, { left + thick[ 2 ], sideTop + sideHeight } },
+		{ { right - thick[ 3 ], sideTop }, { right, sideTop + sideHeight } }
+	};
 	for( size_t side = 0; side < ARRAY_SIZE( sides ); side++ )
 	{
-		const litehtml::border &border = *sides[ side ];
-		if( drawnWidth( border ) <= 0 )
-			continue;
-
-		litehtml::position edge = place;
-		if( sides[ side ] == &borders.top )
-			edge.height = border.width;
-		else if( sides[ side ] == &borders.bottom )
-		{
-			edge.y = place.y + place.height - border.width;
-			edge.height = border.width;
-		}
-		else
-		{
-			edge.y = place.y + topWidth;
-			edge.height = place.height - topWidth - bottomWidth;
-			edge.width = border.width;
-			if( sides[ side ] == &borders.right )
-				edge.x = place.x + place.width - border.width;
-		}
-		fillBox( edge, border.color );
+		const IRegion2D &edge = edges[ side ];
+		if( sides[ side ]->color.alpha > 0 && edge.hi.x > edge.lo.x && edge.hi.y > edge.lo.y )
+			TheDisplay->drawFillRect( edge.lo.x, edge.lo.y, edge.hi.x - edge.lo.x, edge.hi.y - edge.lo.y,
+																tint( sides[ side ]->color ) );
 	}
 }
 
@@ -798,6 +815,8 @@ HtmlOverlay::~HtmlOverlay( void )
 void HtmlOverlay::setPage( const std::string &html )	{ m_container->setPage( html ); }
 void HtmlOverlay::draw( void )													{ m_container->draw(); }
 void HtmlOverlay::setHud( Bool hud )										{ m_container->m_hud = hud; }
+void HtmlOverlay::setHudPage( Bool hudPage )						{ m_container->m_hudPage = hudPage; }
+void HtmlOverlay::setScreenPixels( Bool screenPixels )	{ m_container->m_screenPixels = screenPixels; }
 void HtmlOverlay::setAlpha( Int alpha )									{ m_container->setAlpha( alpha ); }
 Bool HtmlOverlay::hover( const ICoord2D &mouse )				{ return m_container->hover( mouse ); }
 std::string HtmlOverlay::click( const ICoord2D &mouse )	{ return m_container->click( mouse ); }

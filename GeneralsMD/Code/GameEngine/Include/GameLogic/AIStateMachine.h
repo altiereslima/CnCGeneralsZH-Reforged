@@ -606,7 +606,6 @@ protected:
 	Bool canHitFromHere( const Object *victim );	///< can we shoot it without moving an inch?
 	Bool mayEngageYet( void );									///< has the required progress toward the goal been made?
 	void requireProgressTowardGoal( void );			///< refuse to fight again until we are closer to the goal
-	void applyGroupSpeed( void );								///< hold this unit to the ordered group's speed
 
 	CommandSourceType	m_commandSrc;		// Original command source.  We switch to CMD_FROM_AI when auto-acquiring.
 	StateMachine *m_attackMoveMachine;
@@ -618,7 +617,6 @@ protected:
 	UnsignedInt		m_frameToScanOn;			///< next frame we may look for a target
 	UnsignedInt		m_frameToApproachOn;	///< until this frame we only take targets we can already shoot
 	Real					m_reengageGoalDistSqr;	///< no new fight until we are this close to the goal (0 = no gate)
-	Real					m_groupSpeed;					///< speed of the slowest member of the ordered group
 	Bool					m_isEngaging;					///< true while the attack sub-machine owns us
 	Bool					m_chaseWasAllowed;		///< the owner's chase flag, saved while we engage
 protected:

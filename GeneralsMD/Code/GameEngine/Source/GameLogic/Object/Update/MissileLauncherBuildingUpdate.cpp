@@ -247,7 +247,8 @@ UpdateSleepTime MissileLauncherBuildingUpdate::update( void )
 		DEBUG_ASSERTCRASH(m_specialPowerModule, ("Missing special power"));
 	}
 	
-	if (m_specialPowerModule)
+	// a missile that can never fire is never shown ready: the doors stay shut
+	if (m_specialPowerModule && !SuperweaponMissileSilencedInMatch(m_specialPowerModule->getSpecialPowerTemplate()->getSpecialPowerType()))
 	{
 		UnsignedInt readyFrame = m_specialPowerModule->getReadyFrame();
 		UnsignedInt whenToStartOpening = (readyFrame >= d->m_doorOpenTime) ? (readyFrame - d->m_doorOpenTime) : 0;

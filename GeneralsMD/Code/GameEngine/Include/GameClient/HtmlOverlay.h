@@ -60,6 +60,15 @@ public:
 	/** Lay the page out at ControlBarHudScale(), the bottom HUD's, rather than the uniform scale. */
 	void setHud( Bool hud );
 
+	/** Lay the page out at ControlBarHudPageScale(), an in-match HUD page beside the console's. */
+	void setHudPage( Bool hudPage );
+
+	/** Lay the page out with a page pixel one pixel of the screen.  At any other scale a page pixel is
+		* a whole number of screen pixels only by luck, and a row of equal cells comes out with its gaps
+		* two pixels here and three there; a page whose every length the game has already turned into
+		* screen pixels has nothing left to round. */
+	void setScreenPixels( Bool screenPixels );
+
 	/** Fade everything the page draws, text, fills and images, 0 to 255; 255 until it is set. */
 	void setAlpha( Int alpha );
 

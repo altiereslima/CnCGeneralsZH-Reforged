@@ -564,6 +564,10 @@ void Mouse::parseIni(void)
 {
 	INI ini;
 	ini.load( AsciiString( "Data\\INI\\Mouse.ini" ), INI_LOAD_OVERWRITE, NULL );
+
+	// The drag threshold is the player's now.  Options.ini was read into GlobalData long before
+	// this mouse existed, so this is where the DragTolerance line above gives way to it.
+	m_dragTolerance = (UnsignedInt)TheGlobalData->m_dragTolerance;
 }
 
 //-------------------------------------------------------------------------------------------------

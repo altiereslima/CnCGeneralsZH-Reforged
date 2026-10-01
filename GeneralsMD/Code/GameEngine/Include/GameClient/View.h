@@ -187,6 +187,7 @@ public:
 	virtual void anchorZoomAt( const ICoord2D *pixel ) { }											///< ZoomToCursor: hold the ground under this pixel there while the zoom settles
 	virtual void setZoomToDefault( void ) { }														///< Set zoom to default value
 	virtual void setZoomToMax( void ) { }																///< Set zoom as far out as the player may zoom by hand
+	void setMinHeightAboveGround( Real height ) { m_minHeightAboveGround = height; }	///< CloserZoom: how near the ground the wheel may come
 	virtual void setOkToAdjustHeight( Bool val ) { m_okToAdjustHeight = val; }	///< Set this to adjust camera height
 
 	// for debugging
@@ -342,6 +343,13 @@ class ViewLocation
 // middle-drag rotate share exactly one copy of it.
 extern Real View_snapAngleToEighth( Real angle );					///< nearest multiple of 45 degrees
 extern Real View_stepAngleByEighths( Real angle, Int steps );	///< snap, then move that many eighths
+
+// CLOSEST ZOOM ///////////////////////////////////////////////////////////////////////////////////
+// The CloserZoom option takes a percentage off GameData.ini's MinCameraHeight.  It can only bring
+// the camera nearer: the far limit is how much of the map a player sees, and that stays the same
+// for everyone in the match.  A free function for the reason above, and so View::init and the
+// option's setter share one copy.
+extern Real View_closestCameraHeight( Real minCameraHeight, Int closerZoomPercent );
 
 // EXTERNALS //////////////////////////////////////////////////////////////////////////////////////
 extern View *TheTacticalView;		///< the main tactical interface to the game world

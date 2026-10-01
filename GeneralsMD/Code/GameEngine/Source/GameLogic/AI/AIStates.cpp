@@ -3598,7 +3598,6 @@ AIAttackMoveToState::AIAttackMoveToState( StateMachine *machine ) : AIMoveToStat
 	m_frameToScanOn = 0;
 	m_frameToApproachOn = 0;
 	m_reengageGoalDistSqr = 0.0f;
-	m_groupSpeed = FAST_AS_POSSIBLE;
 	m_isEngaging = FALSE;
 	m_chaseWasAllowed = FALSE;
 	m_attackMoveMachine = newInstance(AIAttackMoveStateMachine)(getMachineOwner(), "AIAttackMoveMachine");
@@ -3645,7 +3644,9 @@ void AIAttackMoveToState::xfer( Xfer *xfer )
 	}
 	if (version>=4) {
 		xfer->xferReal(&m_reengageGoalDistSqr);
-		xfer->xferReal(&m_groupSpeed);
+		// Attack-move groups used to save a shared speed here. The stream still has the real.
+		Real savedGroupSpeed = 0.0f;
+		xfer->xferReal(&savedGroupSpeed);
 	}
 	if (version>=5) {
 		// m_isEngaging has been saved since version 3, so a load could resume a fight with this
@@ -3699,38 +3700,7 @@ StateReturnType AIAttackMoveToState::onEnter()
 	// spread the scans of a group that was all ordered on the same frame over the scan interval.
 	m_frameToScanOn = TheGameLogic->getFrame() + ((UnsignedInt)owner->getID() % ATTACK_MOVE_SCAN_RATE);
 
-	// An attack move can arrive as a group or as a queue of single units, and which one you want
-	// is the player's call: ctrl on the click asks for one shared pace, the slowest member's. The
-	// order is still running inside the AIGroup that issued it, so the group - and the flag it
-	// carries - is still reachable here; it is gone by the next update.
-	m_groupSpeed = FAST_AS_POSSIBLE;
-	AIGroup *group = ai->getGroup();
-	if (group != NULL && group->getMatchSpeeds() && ai->isDoingGroundMovement())
-	{
-		Real speed = group->getSpeed();
-		if (speed > 0.0f && speed < FAST_AS_POSSIBLE)
-			m_groupSpeed = speed;
-	}
-
-	StateReturnType ret = AIMoveToState::onEnter();
-	// AIInternalMoveToState::onEnter resets the desired speed, so this has to follow it.
-	applyGroupSpeed();
-	return ret;
-}
-
-//----------------------------------------------------------------------------------------------------------
-/**
- * Hold this unit to the group's speed.  Called after every (re)path, since entering the move state
- * puts the speed back to FAST_AS_POSSIBLE.
- */
-void AIAttackMoveToState::applyGroupSpeed( void )
-{
-	if (m_groupSpeed >= FAST_AS_POSSIBLE)
-		return;
-
-	AIUpdateInterface *ai = getMachineOwner()->getAI();
-	if (ai != NULL)
-		ai->setDesiredSpeed(m_groupSpeed);
+	return AIMoveToState::onEnter();
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -4210,7 +4180,6 @@ StateReturnType AIAttackMoveToState::update()
 	{
 		AIMoveToState::onEnter();
 		forceRepath();
-		applyGroupSpeed();		// re-entering the move state put the speed back to FAST_AS_POSSIBLE
 	}
 
 	StateReturnType ret = AIMoveToState::update();

@@ -1,22 +1,44 @@
 <!DOCTYPE html>
 <!--
   Everything the player has coming, playing: one cameo for each item queued in any factory or going
-  up on the ground, the soonest first, in a row of cells growing right from the screen's left edge
-  over the radar's under-attack light.  The tray is the general's powers' tray on the other side of
-  the bar, mirrored.  The cameos, their clocks, their countdowns and the "+N" are the game's own and
+  up on the ground, the soonest first, in rows of five standing on the console over the selection's
+  well, each row growing right and the next one over it, in a tray of the console's steel only as
+  long as each row.
+  The cameos, their clocks, their countdowns and the "+N" are the game's own and
   draw between the page's two layers.  Same materials as Window/Html/ControlBar.html.
 
   The game fills in, twice every frame the row is up (InGameUI::drawQueueTray):
     {{layer}}              "back" under the cameos, "front" over them: the cells' frames again, so
                            the steel lies over each picture's edge
     {{side}}               "america", "china" or "gla"
-    {{tray.x}} .y .w .h    the tray, a panel as ControlBar.html's {{right.x}} is: .x and .y the
-                           border's outer corner, .w and .h the cells it holds, .bt .br .bb .bl its
-                           border's four widths
+    data-each="trays"      the tray, a frame as ControlBar.html's {{console.x}} is: {{tray.x}} and .y
+                           the border's outer corner, .w and .h the cells it holds, .bt .br .bb .bl
+                           its border's four widths.  The queue has one, and a second over it for a
+                           last row shorter than five
     data-each="cells"      a cell behind each cameo and the "+N", each {{cell.x}} .y .w .h, the
                            cameo's own rectangle, and {{ring}} the steel round it
+    {{line}}               how thick the tray's light and dark lines are, 1
+    {{well}}               how deep the well round its cells is, 2
   All in the page's pixels, a pixel of an 800x600 screen.  Without this page the strip draws its
   column of the power bar's trays.
+
+  The superweapon countdowns in the screen's top right corner stand in the same tray turned round
+  (InGameUI::drawSuperweaponStrip).  That page is laid out in the screen's own pixels, every length
+  above already multiplied out by the game: rows of cells under each other and a tray stepped round
+  them have too many edges that must meet for each to be rounded onto the screen by itself.  It adds:
+    {{mirrored}}           "mirrored": the tray is against the screen's right edge, so the dark line
+                           goes down its left
+    data-each="owned"      a box under each superweapon's cameo, {{cell.x}} .y .w .h, in
+                           {{cell.color}}, the colour of the player whose weapon it is, lifted
+                           toward white and back while the weapon is charged.  The game draws the
+                           cameo inside the box, the same distance in from every side, so what shows
+                           of the box is the cell's frame.  The queue has no owned box, and this
+                           strip no `cells`
+    {{tray.step}}          "step" on a second tray: a last row shorter than the six over it hangs
+                           under them only as wide as its own cells, against the same edge, its
+                           top where the rows over it end, so the two read as one stepped plate.
+                           The production queue's turned up: "standing" on its plate of full rows,
+                           which stands on the console, and "rise" on a shorter last row over it
 -->
 <html>
 <head>
@@ -28,31 +50,49 @@
   .piece { position: absolute; }
   .front .under, .back .over { display: none; }
 
-  /* the tray: a steel plate lit from above, a light line along its top, dark down its right, which
-     faces the battlefield, and along its bottom, which stands over it; the cells in a two pixel
+  /* the tray: ControlBar.html's console steel and wells, a light line along its top, dark down its
+     right, which faces the battlefield, and along its bottom, which stands over it; the cells in a
      well.  The border's widths are written into each piece, since the page cannot add a width to a
      width */
   .tray { border-style: solid; border-color: transparent; }
-  .tray .steel { position: absolute; background: linear-gradient(to bottom, #9aa3ad, #5a626c 30%, #353c45); }
-  .tray .shine { position: absolute; height: 1px; background-color: #dde4ea; }
-  .tray .shade { position: absolute; width: 1px; background-color: #0c1114; }
-  .tray .base { position: absolute; height: 1px; background-color: #0c1114; }
-  .tray .sunk { position: absolute; left: -2px; top: -2px; border: 2px solid #06090b;
-                border-bottom-color: #b4bec8; border-right-color: #b4bec8; background-color: #3a414a; }
-  .china .tray .steel { background: linear-gradient(to bottom, #c06a52, #7a3120 30%, #3f160f); }
+  .tray .steel { position: absolute; background: linear-gradient(to bottom, #5c6268, #363b41 30%, #20242a); }
+  .tray .shine { position: absolute; height: {{line}}px; background-color: #dde4ea; }
+  .tray .shade { position: absolute; width: {{line}}px; background-color: #0c1114; }
+  .tray .base { position: absolute; height: {{line}}px; background-color: #0c1114; }
+  .tray .lefthand, .mirrored .tray .righthand { display: none; }
+  .mirrored .tray .lefthand { display: block; }
+  .tray .sunk { position: absolute; left: -{{well}}px; top: -{{well}}px; border: {{well}}px solid #06090b;
+                border-bottom-color: #b4bec8; border-right-color: #b4bec8; background-color: #23272c; }
+  .china .tray .steel { background: linear-gradient(to bottom, #733f31, #491d13 30%, #260d09); }
   .china .tray .shine { background-color: #f0b8a4; }
-  .china .tray .sunk { border-bottom-color: #d98a72; border-right-color: #d98a72; background-color: #45190f; }
-  .gla .tray .steel { background: linear-gradient(to bottom, #b8ab6e, #766a3a 30%, #3c3519); }
+  .china .tray .sunk { border-bottom-color: #d98a72; border-right-color: #d98a72; background-color: #290f09; }
+  .gla .tray .steel { background: linear-gradient(to bottom, #6e6742, #473f23 30%, #24200f); }
   .gla .tray .shine { background-color: #ebe2b4; }
-  .gla .tray .sunk { border-bottom-color: #cbbf82; border-right-color: #cbbf82; background-color: #423a1c; }
+  .gla .tray .sunk { border-bottom-color: #cbbf82; border-right-color: #cbbf82; background-color: #282311; }
+  /* a step: a shorter row hung under the tray over it as one plate.  It has no top of its own, so
+     no light line, and its well's top edge is the well's steel, the gap between two rows */
+  .tray.step .shine { display: none; }
+  .tray.step .sunk { border-top-color: #23272c; }
+  .china .tray.step .sunk { border-top-color: #290f09; }
+  .gla .tray.step .sunk { border-top-color: #282311; }
+  /* the production queue stands on the console's top line, so its plate has no shaded bottom; a
+     shorter last row rises from the plate under it, its well's bottom edge the well's steel */
+  .tray.standing .base, .tray.rise .base { display: none; }
+  /* its steel runs down into the console's top, the shade that steel has there, not out to a dark foot */
+  .tray.standing .steel, .tray.rise .steel { background: linear-gradient(to bottom, #6a7076, #5c6268); }
+  .china .tray.standing .steel, .china .tray.rise .steel { background: linear-gradient(to bottom, #814a3a, #733f31); }
+  .gla .tray.standing .steel, .gla .tray.rise .steel { background: linear-gradient(to bottom, #7b744c, #6e6742); }
+  .tray.rise .sunk { border-bottom-color: #23272c; }
+  .china .tray.rise .sunk { border-bottom-color: #290f09; }
+  .gla .tray.rise .sunk { border-bottom-color: #282311; }
 
   /* a cell as the command grid's: a dark hole the cameo's size, a ring of the well's steel {{ring}}
      wide round it and a bevel on its edge */
   .cell { background-color: #020405; }
   .cell.over { background: none; }
-  .cell .edge { position: absolute; border-style: solid; border-color: #3a414a; }
-  .china .cell .edge { border-color: #45190f; }
-  .gla .cell .edge { border-color: #423a1c; }
+  .cell .edge { position: absolute; border-style: solid; border-color: #23272c; }
+  .china .cell .edge { border-color: #290f09; }
+  .gla .cell .edge { border-color: #282311; }
   .cell .bevel { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border: 1px solid #06090b;
                  border-bottom-color: #9aa4ae; border-right-color: #9aa4ae; }
   .china .cell .bevel { border-bottom-color: #d98a72; border-right-color: #d98a72; }
@@ -60,14 +100,16 @@
 </style>
 </head>
 <body>
-<div class="{{layer}} {{side}}">
-  <div class="piece tray under" style="left: {{tray.x}}px; top: {{tray.y}}px; width: {{tray.w}}px; height: {{tray.h}}px; border-width: {{tray.bt}}px {{tray.br}}px {{tray.bb}}px {{tray.bl}}px">
+<div class="{{layer}} {{side}} {{mirrored}}">
+  <div class="piece tray under {{tray.step}}" data-each="trays" style="left: {{tray.x}}px; top: {{tray.y}}px; width: {{tray.w}}px; height: {{tray.h}}px; border-width: {{tray.bt}}px {{tray.br}}px {{tray.bb}}px {{tray.bl}}px">
     <div class="steel" style="left: -{{tray.bl}}px; right: -{{tray.br}}px; top: -{{tray.bt}}px; bottom: -{{tray.bb}}px"></div>
     <div class="shine" style="left: -{{tray.bl}}px; right: -{{tray.br}}px; top: -{{tray.bt}}px"></div>
-    <div class="shade" style="right: -{{tray.br}}px; top: -{{tray.bt}}px; bottom: -{{tray.bb}}px"></div>
+    <div class="shade righthand" style="right: -{{tray.br}}px; top: -{{tray.bt}}px; bottom: -{{tray.bb}}px"></div>
+    <div class="shade lefthand" style="left: -{{tray.bl}}px; top: -{{tray.bt}}px; bottom: -{{tray.bb}}px"></div>
     <div class="base" style="left: -{{tray.bl}}px; right: -{{tray.br}}px; bottom: -{{tray.bb}}px"></div>
     <div class="sunk" style="width: {{tray.w}}px; height: {{tray.h}}px"></div>
   </div>
+  <div class="piece under" data-each="owned" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px; background-color: {{cell.color}}"></div>
   <div class="piece cell under" data-each="cells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="edge" style="left: -{{ring}}px; top: -{{ring}}px; right: -{{ring}}px; bottom: -{{ring}}px; border-width: {{ring}}px"></div><div class="bevel"></div></div>
   <div class="piece cell over" data-each="cells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="edge" style="left: -{{ring}}px; top: -{{ring}}px; right: -{{ring}}px; bottom: -{{ring}}px; border-width: {{ring}}px"></div><div class="bevel"></div></div>
 </div>

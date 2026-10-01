@@ -458,7 +458,7 @@ enum CommandPlace
 	COMMAND_PLACE_RALLY = COMMAND_PLACE_B,
 	COMMAND_PLACE_SELL = COMMAND_PLACE_N,
 	COMMAND_PLACE_CLEAR_MINES = COMMAND_PLACE_N,	///< a dozer's or worker's
-	COMMAND_PLACE_FAKE_STRUCTURES = COMMAND_PLACE_H,	///< the GLA worker's switch to and from the fakes
+	COMMAND_PLACE_FAKE_STRUCTURES = COMMAND_PLACE_H,	///< the GLA worker's switch to and from the fakes, the end of the defense row
 	COMMAND_PLACE_EXPLOSIVE = COMMAND_PLACE_B			///< the Demolition worker's suicide charge
 };
 
@@ -466,15 +466,29 @@ enum CommandPlace
 	* share a command type with things that flow.  See ControlBar_commandPlaces. */
 Int ControlBar_namedCommandPlace( const char *buttonName );
 
+/** What a command button is for, which picks its row on the grid.  See ControlBar_commandPlaces. */
+enum CommandGroup
+{
+	COMMAND_GROUP_PRODUCTION = 0,	///< a unit to train, or a structure that makes units (a factory, a command center, a fake)
+	COMMAND_GROUP_DEFENSE,				///< a base defense to build
+	COMMAND_GROUP_UTILITY,				///< any other structure to build: power, supply, tech, superweapons
+	COMMAND_GROUP_ABILITY,				///< upgrades, special powers, weapon switches and the rest
+	COMMAND_GROUP_PASSENGER				///< one passenger's way out of a transport or bunker
+};
+
+/** The group of a command button; GUI_COMMAND_DOZER_CONSTRUCT reads the structure's KindOf. */
+Int ControlBar_commandGroup( const class CommandButton *command );
+
 /** Where each of `count` command slots stands: `types` is what each slot holds, GUI_COMMAND_NONE for
-	* an empty one, `pinned` a place a slot's button always takes by name or -1, and `places` gets a
-	* CommandPlace for each or -1.  Pinned buttons, stop, attack move, guard, evacuate, rally point and
-	* sell go to their own places.  A set with an attack move has attack, hold position and move too,
-	* keys no command set has a button for, so their places are kept for them; the return is TRUE then.
-	* Everything else is packed toward the top left, Q A W Z S E X D R C F T V G Y B H N, skipping the
-	* places taken: what the set builds (structures, units) in slot order, then the rest - abilities,
-	* upgrades, passengers - in slot order, so a building's upgrades come after its production. */
-Bool ControlBar_commandPlaces( const Int *types, const Int *pinned, Int count, Int *places );
+	* an empty one, `groups` its CommandGroup, `pinned` a place a slot's button always takes by name or
+	* -1, and `places` gets a CommandPlace for each or -1.  Pinned buttons, stop, attack move, guard,
+	* evacuate, rally point and sell go to their own places.  A set with an attack move has attack, hold
+	* position and move too, keys no command set has a button for, so their places are kept for them;
+	* the return is TRUE then.  Passengers gather in the bottom right corner.  The rest go by rows, the
+	* owner's of 2026-09-30: production along Q, defenses along A, other structures along Z, and
+	* abilities along Q, or along A under a set's production.  A row fills left to right in slot order;
+	* what does not fit goes on in the next row down with room, then in the rows above. */
+Bool ControlBar_commandPlaces( const Int *types, const Int *groups, const Int *pinned, Int count, Int *places );
 enum { MAX_RIGHT_HUD_UPGRADE_CAMEOS = 5};
 enum { MAX_MULTI_SELECT_GROUPS = 36 };	///< unit types a multi-selection tells apart (6x6 grid, Tab focus)
 enum { 
@@ -818,7 +832,9 @@ public:
 	/** press the command at grid place `place` (a CommandPlace), exactly as a mouse click would.
 		This is what the COMMAND_SLOTnn grid keys are wired to.  Where the place holds one of the
 		orders every unit shares, or nothing, the key sends that order's own message, the one its
-		key sent before the grid took it: A force fire, S stop, D attack move, X guard, C hold. */
+		key sent before the grid took it: A force fire, S stop, D attack move, X guard, C hold.
+		A building going up and a building counting down to a unit answer from their own button
+		when the command group is hidden. */
 	void pressCommandButton( Int place );
 
 	/** The place each command window stands at right now, -1 for a hidden one, and whether the
@@ -828,9 +844,13 @@ public:
 	/** paint each command window's key, its place's, in its top left corner; `places` as above */
 	void labelCommandPlaces( const Int *places );
 
-	/** The general's powers are laid out SPECIAL_POWER_SHORTCUT_COLS to a row, so one key press
-		cannot reach eleven of them.  The first press picks a row (F1 is the row in the corner,
-		F2 the one above it) and the second picks a power inside that row (F1 is the rightmost),
+	/** paint `button`'s key, the one `place` is bound to.  `place` below 0 clears it. */
+	void labelPlaceButton( GameWindow *button, Int place );
+
+	/** The general's powers are laid out SPECIAL_POWER_SHORTCUT_COLS to a group, so one key press
+		cannot reach eleven of them.  The first press picks a group, which stands on the HUD as a
+		column (F1 is the column against the console, F2 the next) and the second picks a power
+		inside it (F1 is the bottom one),
 		which puts every power two keystrokes away: F1-F1, F2-F1, F2-F3.  This is what the
 		SHORTCUT_SLOTnn keys are wired to. */
 	void pressSpecialPowerShortcut( Int index );
@@ -889,6 +909,8 @@ public:
 
 	/// is the drawable the currently selected drawable for the context sensitive UI?
 	Bool isDrivingContextUI( Drawable *draw ) const { return draw == m_currentSelectedDrawable; }
+	/// the drawable whose portrait and commands the bar is showing, NULL for none
+	Drawable *getContextDrawable( void ) const { return m_currentSelectedDrawable; }
 
 	//-----------------------------------------------------------------------------------------------
 	// the remaining methods are used to construct the command buttons and command sets for
@@ -1085,9 +1107,10 @@ public:
 		* solid panel. */
 	void setPageSolids( const std::vector< IRegion2D > *solids, const std::vector< IRegion2D > *holes = NULL );
 
-	/** The HUD page's place for the general's powers: the first in `corner`, the bottom right of the
-		* grid, each `cell` big with `gap` between them, a row of SPECIAL_POWER_SHORTCUT_COLS running
-		* left from it and the next row over it, the order the row keys count in.  The slots' own tray
+	/** The HUD page's place for the general's powers: the first in `corner`, the bottom left of the
+		* grid, each `cell` big with `gap` between them, a group of SPECIAL_POWER_SHORTCUT_COLS going
+		* up from it as a column and the next group the column right of it, the order the group keys
+		* count in.  The slots' own tray
 		* art is not drawn; the page draws their cells.  NULL hides the bar.  Screen pixels.  Asked every
 		* frame the page draws, so it holds against the bar's own layout.  Returns how many powers are
 		* shown, each in its place. */
@@ -1097,6 +1120,12 @@ public:
 		* they were on screen.  The place layoutPanels recorded for it moves with it, so a rebuild of the
 		* layout reads the window as put there and not as moved in the loader's stretched space. */
 	void placeWindowAt( GameWindow *window, const IRegion2D &rect );
+
+	/** A context that hides the command group still has its own button, and it stands where that
+		command stands on a finished building: cancel on S, sell on N, the rally point on B.  The
+		countdown keeps the top row and a reinforcement pad's bar the middle one.  `cells` is one
+		screen rect per CommandPlace, and `taken` gains the button's place so the page draws its cell. */
+	void placeContextOnGrid( const IRegion2D &frame, const IRegion2D *cells, Bool *taken );
 	GameWindow *getSpecialPowerShortcutParent( void ) { return m_specialPowerShortcutParent; }
 	/// a multi-selection's type cells, one a selected type, shown or hidden; see updateMultiSelectStrip
 	const std::vector< GameWindow * > &getMultiSelectTiles( void ) const { return m_multiSelectTiles; }
@@ -1257,6 +1286,8 @@ public:
 	// get method for list of commandbuttons
 	const CommandButton *getCommandButtons( void ) { return m_commandButtons; }
 
+	Drawable *findStandInBuilder( Bool freeOnly );				///< the local player's free builder (or, unless freeOnly, any builder) to stand in for an empty selection
+
 protected:
 
 	ICoord2D m_defaultControlBarPosition;				///< Stored the original position of the control bar on the screen
@@ -1354,6 +1385,7 @@ protected:
 	CommandButton *m_buildPageBackButton;									///< takes a page back to the menu buttons
 	Int m_buildPage;																			///< BUILD_PAGE_ROOT, or the page being shown
 	ObjectID m_buildPageObjectID;													///< builder the page belongs to; a new one starts at the menu
+	DrawableID m_standInBuilderID;												///< with nothing selected, the builder whose command bar is shown (INVALID_DRAWABLE_ID otherwise)
 
 	/** A player upgrade is researched once, so it goes to exactly one of the selected buildings -
 		* and the bar cannot see the queue an earlier click in this same frame just filled, because
@@ -1581,12 +1613,24 @@ extern Bool ControlBarPanelDesignToScreen( Int panel, const IRegion2D *design,
 extern Real ControlBarUniformScale( void );
 extern Real ControlBarUniformScaleFor( Int displayWidth, Int displayHeight );	///< ...for a screen you name
 
-/** The scale the bottom HUD's page and everything laid out on it are drawn at: the uniform scale cut
-	* to CONTROL_BAR_HUD_PERCENT of itself, the owner's "too big" of 2026-09-28, and never below 1.  The
-	* tooltips, the boards and the menus keep the uniform scale. */
+/** The scale the bottom HUD's page and everything laid out on it are drawn at: the screen's height
+	* over 600, cut to CONTROL_BAR_HUD_PERCENT of itself, the owner's "too big" of 2026-09-28, with HUD
+	* Size on top, then fitted to the screen's width by ControlBarHudScaleFit.  It follows the height
+	* alone and is not rounded or floored, the owner's rule of 2026-10-01: the HUD covers the same part
+	* of the screen's height at every resolution, and a wider screen does not make it bigger.  1.26 at
+	* 1920x1080, as it was when it went by the narrower axis; 0.84 at 1280x720.  ControlBarHudScaleFor
+	* is the scale before HUD Size and the fit. */
 enum { CONTROL_BAR_HUD_PERCENT = 70 };
 extern Real ControlBarHudScale( void );
 extern Real ControlBarHudScaleFor( Int displayWidth, Int displayHeight );
+/** `scale` cut down until the console, InGameUI_consolePageWidth page pixels, fits `displayWidth`. */
+extern Real ControlBarHudScaleFit( Real scale, Int displayWidth );
+/** The in-match HUD's other pages - the event feed, the chat, the network box, the scoreboard, the
+	* build card, the observer's and the replay's strips - authored at the uniform scale's size: the HUD
+	* scale over CONTROL_BAR_HUD_PERCENT, so they keep their size beside the console at every
+	* resolution and HUD Size, and are what they were at 1920x1080.  The shell's pages, the quit menu
+	* and the promotion screen keep the uniform scale. */
+extern Real ControlBarHudPageScale( void );
 
 /** Undo the .wnd loader's separate-axis stretch over a whole layout: every window under 'root' is
 	* recovered to its authored 800x600 rectangle and put back at ControlBarUniformScale(), anchored

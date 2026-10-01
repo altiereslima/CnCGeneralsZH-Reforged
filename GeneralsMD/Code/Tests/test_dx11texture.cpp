@@ -320,3 +320,79 @@ TEST(dx11texture_an_alphaless_format_comes_out_opaque)
 
 	texture->Release();
 }
+
+// The shroud's way in: a sixteen bit system memory surface copied over a default pool texture every
+// frame, most rows the same as the frame before.  Only the rows that changed are sent again, so a
+// row wrongly taken for unchanged keeps the previous frame's value in the copy.
+static unsigned short shroud_pixel(unsigned row, unsigned column, unsigned frame)
+{
+	return (unsigned short)(0xf000 | ((row + frame) & 0xf) << 8 | (column & 0xf) << 4 | (frame & 0xf));
+}
+
+TEST(dx11texture_a_repeated_sixteen_bit_copy_carries_only_what_changed)
+{
+	Direct3D9Fixture d3d9;
+	if (!d3d9.Create()) {
+		printf("skip: no Direct3D 9 device on this machine\n");
+		return;
+	}
+
+	DX11DeviceClass d3d11;
+	CHECK(d3d11.Create_Offscreen());
+
+	IDirect3DTexture9 * texture = NULL;
+	IDirect3DSurface9 * source = NULL;
+	if (FAILED(d3d9.Get()->CreateTexture(TEXTURE_SIZE, TEXTURE_SIZE, ONE_LEVEL, 0, D3DFMT_A4R4G4B4,
+			D3DPOOL_DEFAULT, &texture, NULL))
+		|| FAILED(d3d9.Get()->CreateOffscreenPlainSurface(TEXTURE_SIZE, TEXTURE_SIZE,
+			D3DFMT_A4R4G4B4, D3DPOOL_SYSTEMMEM, &source, NULL))) {
+		printf("skip: no A4R4G4B4 default pool texture on this machine\n");
+		if (texture != NULL) {
+			texture->Release();
+		}
+		return;
+	}
+	IDirect3DSurface9 * destination = NULL;
+	CHECK(SUCCEEDED(texture->GetSurfaceLevel(0, &destination)));
+
+	// Frame 0 writes every row, frame 1 changes rows 2 and 5 only, frame 2 changes nothing.
+	const unsigned frame_of_row[3][TEXTURE_SIZE] = {
+		{ 0, 0, 0, 0, 0, 0, 0, 0 },
+		{ 0, 0, 1, 0, 0, 1, 0, 0 },
+		{ 0, 0, 1, 0, 0, 1, 0, 0 } };
+	const RECT whole = { 0, 0, (LONG)TEXTURE_SIZE, (LONG)TEXTURE_SIZE };
+	const POINT origin = { 0, 0 };
+	for (unsigned frame = 0; frame < 3; ++frame) {
+		D3DLOCKED_RECT locked;
+		CHECK(SUCCEEDED(source->LockRect(&locked, NULL, 0)));
+		for (unsigned row = 0; row < TEXTURE_SIZE; ++row) {
+			unsigned short * out = (unsigned short *)((unsigned char *)locked.pBits + row * locked.Pitch);
+			for (unsigned column = 0; column < TEXTURE_SIZE; ++column) {
+				out[column] = shroud_pixel(row, column, frame_of_row[frame][row]);
+			}
+		}
+		source->UnlockRect();
+		CHECK(DX11Texture_Update(d3d11.Get_Device(), d3d11.Get_Context(), destination, source,
+			&whole, &origin));
+
+		ID3D11ShaderResourceView * view =
+			DX11Texture_Mirror(d3d11.Get_Device(), d3d11.Get_Context(), texture);
+		CHECK(view != NULL);
+		unsigned char pixels[TEXTURE_SIZE * TEXTURE_SIZE * 4];
+		CHECK(read_back(d3d11, view, pixels, TEXTURE_SIZE * 4));
+		for (unsigned row = 0; row < TEXTURE_SIZE; ++row) {
+			for (unsigned column = 0; column < TEXTURE_SIZE; ++column) {
+				const unsigned short expected = shroud_pixel(row, column, frame_of_row[frame][row]);
+				const unsigned char * pixel = pixels + row * TEXTURE_SIZE * 4 + column * 4;
+				CHECK_EQ(pixel[0], (unsigned char)((expected & 0xf) * 17));
+				CHECK_EQ(pixel[1], (unsigned char)(((expected >> 4) & 0xf) * 17));
+				CHECK_EQ(pixel[2], (unsigned char)(((expected >> 8) & 0xf) * 17));
+				CHECK_EQ(pixel[3], 0xff);
+			}
+		}
+	}
+
+	destination->Release();
+	source->Release();
+	texture->Release();
+}

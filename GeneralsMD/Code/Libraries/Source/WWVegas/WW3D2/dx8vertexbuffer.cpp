@@ -48,7 +48,13 @@
 #include "wwmemlog.h"
 #include "d3dx9runtime.h"
 
-#define DEFAULT_VB_SIZE 5000
+// The shared dynamic buffer is made at the most a 16 bit vertex count can name, once.  Every time
+// it fills, the next lock is a DISCARD, and on the Direct3D 11 frame each DISCARD is a buffer the
+// driver has to rename.  At EA's 5000 it filled about 50 times a frame in a big fight on Bombardment
+// Beach (skinned units and the sorted particles all come through it) and Map spent 8 to 12 ms of
+// the scene waiting for a free copy while the GPU sat about a third busy.  At 65535 it is about 7
+// DISCARDs a frame and 0.02 ms.  It also never has to grow, so it is never released mid-match.
+#define DEFAULT_VB_SIZE 65535
 
 static bool _DynamicSortingVertexArrayInUse=false;
 //static VertexFormatXYZNDUV2* _DynamicSortingVertexArray=NULL;

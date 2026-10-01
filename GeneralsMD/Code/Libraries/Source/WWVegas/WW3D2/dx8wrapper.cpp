@@ -935,42 +935,70 @@ void DX8Wrapper::Set_Requested_Monitor(const char * device)
 
 void DX8Wrapper::Apply_Fullscreen_Display(bool shown)
 {
+	// Nothing here activates a window.  This runs when the game is activated or deactivated, and a
+	// window activated from inside that bounced focus between the game and the desktop until it
+	// ended minimized for good (issue #45): SW_MINIMIZE hands activation to whatever is next in the
+	// z-order, SW_RESTORE and a SetWindowPos without SWP_NOACTIVATE take it back.
 	const bool owns_display = !IsWindowed && Direct3D11_Present_Is_Enabled();
 	if (!owns_display || !shown) {
 		restore_desktop_display();
 		if (owns_display) {
-			::ShowWindow(_Hwnd, SW_MINIMIZE);
+			::ShowWindow(_Hwnd, SW_SHOWMINNOACTIVE);
 		}
 		return;
 	}
 
 	const char * monitor = RequestedMonitor[0] ? RequestedMonitor : NULL;
-	DEVMODEA mode;
-	ZeroMemory(&mode, sizeof(mode));
-	mode.dmSize = sizeof(mode);
-	mode.dmPelsWidth = ResolutionWidth;
-	mode.dmPelsHeight = ResolutionHeight;
-	mode.dmBitsPerPel = BitDepth;
-	mode.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL;
-	if (ChangeDisplaySettingsExA(monitor, &mode, NULL, CDS_FULLSCREEN, NULL) == DISP_CHANGE_SUCCESSFUL) {
-		DisplayModeChanged = true;
-	}
-
-	// Only the primary starts at the desktop's origin, and a monitor can move when its mode changes,
-	// so where it starts is asked after the change.
 	DEVMODEA current;
 	ZeroMemory(&current, sizeof(current));
 	current.dmSize = sizeof(current);
+	EnumDisplaySettingsExA(monitor, ENUM_CURRENT_SETTINGS, &current, 0);
+
+	// A monitor already in the game's mode is left alone.  Asking for it again with no refresh rate
+	// is a real mode change on a 144 or 165Hz desktop, which drops to 60 and back on every return.
+	// Any other mode is asked for at the desktop's own rate first, and the driver's default after.
+	if (current.dmPelsWidth != (DWORD)ResolutionWidth || current.dmPelsHeight != (DWORD)ResolutionHeight ||
+			current.dmBitsPerPel != (DWORD)BitDepth) {
+		DEVMODEA desktop;
+		ZeroMemory(&desktop, sizeof(desktop));
+		desktop.dmSize = sizeof(desktop);
+		DEVMODEA mode;
+		ZeroMemory(&mode, sizeof(mode));
+		mode.dmSize = sizeof(mode);
+		mode.dmPelsWidth = ResolutionWidth;
+		mode.dmPelsHeight = ResolutionHeight;
+		mode.dmBitsPerPel = BitDepth;
+		mode.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL;
+		// 0 and 1 are the hardware default, not a rate.
+		if (EnumDisplaySettingsExA(monitor, ENUM_REGISTRY_SETTINGS, &desktop, 0) &&
+				desktop.dmDisplayFrequency > 1) {
+			mode.dmDisplayFrequency = desktop.dmDisplayFrequency;
+			mode.dmFields |= DM_DISPLAYFREQUENCY;
+		}
+		LONG result = ChangeDisplaySettingsExA(monitor, &mode, NULL, CDS_FULLSCREEN, NULL);
+		if (result != DISP_CHANGE_SUCCESSFUL && (mode.dmFields & DM_DISPLAYFREQUENCY)) {
+			mode.dmFields &= ~DM_DISPLAYFREQUENCY;
+			result = ChangeDisplaySettingsExA(monitor, &mode, NULL, CDS_FULLSCREEN, NULL);
+		}
+		if (result == DISP_CHANGE_SUCCESSFUL) {
+			DisplayModeChanged = true;
+		}
+		// A monitor can move when its mode changes, so where it starts is asked after the change.
+		EnumDisplaySettingsExA(monitor, ENUM_CURRENT_SETTINGS, &current, 0);
+	}
+
+	// Only the primary starts at the desktop's origin.
 	POINT origin = { 0, 0 };
-	if (monitor && EnumDisplaySettingsExA(monitor, ENUM_CURRENT_SETTINGS, &current, 0)) {
+	if (monitor) {
 		origin.x = current.dmPosition.x;
 		origin.y = current.dmPosition.y;
 	}
 
 	if (::IsIconic(_Hwnd)) {
-		::ShowWindow(_Hwnd, SW_RESTORE);
+		::ShowWindow(_Hwnd, SW_SHOWNOACTIVATE);
 	}
-	::SetWindowPos(_Hwnd, HWND_TOPMOST, origin.x, origin.y, ResolutionWidth, ResolutionHeight, SWP_SHOWWINDOW);
+	::SetWindowPos(_Hwnd, HWND_TOPMOST, origin.x, origin.y, ResolutionWidth, ResolutionHeight,
+		SWP_SHOWWINDOW | SWP_NOACTIVATE);
 
 	if (GameGammaSet) {
 		save_desktop_gamma();	// the monitor may have changed since the game's ramp was last set
@@ -1348,8 +1376,12 @@ bool DX8Wrapper::Set_Render_Device(int dev, int width, int height, int bits, int
 	// Direct3D 9 device that owns the display refuses the Direct3D 11 swap chain its window, which
 	// kept every fullscreen game on the old picture.  The mode goes on before the device is made or
 	// reset, so it is made in the mode it will run in.
+	// A player who alt-tabbed away during the splash is not handed a topmost window over whatever he
+	// went to.  The game's activation applies the display when he comes back.
 	const bool device_windowed = IsWindowed || Direct3D11_Present_Is_Enabled();
-	Apply_Fullscreen_Display(true);
+	if (::GetForegroundWindow() == _Hwnd) {
+		Apply_Fullscreen_Display(true);
+	}
 	
 	/*
 	** Initialize values for D3DPRESENT_PARAMETERS members. 	

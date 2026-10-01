@@ -882,23 +882,25 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 			{
 				if( commandButton->getConflictingLabel().isNotEmpty() )
 				{
-					descrip = TheGameText->fetch( commandButton->getConflictingLabel() );
+					card.warning = TheGameText->fetch( commandButton->getConflictingLabel() );
 				}
 				else
 				{
-					descrip = TheGameText->fetch( "TOOLTIP:HasConflictingUpgradeDefault" );
+					card.warning = TheGameText->fetch( "TOOLTIP:HasConflictingUpgradeDefault" );
 				}
 			}
 			else if( hasUpgradeAlready && ( playerUpgradeButton || objectUpgradeButton ) )
 			{
 				//See if we can fetch the "already upgraded" text for this upgrade. If not.... use the default "fill me in".
+				//It goes under the description as the warning rather than over it: retail replaced the
+				//description, so a bought upgrade no longer said what it does.
 				if( commandButton->getPurchasedLabel().isNotEmpty() )
 				{
-					descrip = TheGameText->fetch( commandButton->getPurchasedLabel() );
+					card.warning = TheGameText->fetch( commandButton->getPurchasedLabel() );
 				}
 				else
 				{
-					descrip = TheGameText->fetch( "TOOLTIP:AlreadyUpgradedDefault" );
+					card.warning = TheGameText->fetch( "TOOLTIP:AlreadyUpgradedDefault" );
 				}
 			}
 			else if( !hasUpgradeAlready )

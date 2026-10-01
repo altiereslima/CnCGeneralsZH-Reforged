@@ -89,6 +89,7 @@ public:
 	void				removeDynamicLight(W3DDynamicLight * obj);
 	RefRenderObjListIterator *		createLightsIterator(void);
 	void					destroyLightsIterator(RefRenderObjListIterator * it);
+	RefRenderObjListClass				*getLightList(void) {return &LightList;};	///< for a stack iterator where a heap one per call costs
 	RefRenderObjListClass				*getDynamicLights(void) {return &m_dynamicLightList;};
 	W3DDynamicLight *getADynamicLight(void);
 	void				setGlobalLight(LightClass *pLight,Int lightIndex=0);

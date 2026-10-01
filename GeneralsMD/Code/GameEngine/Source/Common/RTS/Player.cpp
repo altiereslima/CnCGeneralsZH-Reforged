@@ -1355,14 +1355,16 @@ static void doFindSpecialPowerSourceObject( Object *obj, void *userData )
 			//We just care about find an object that has *any* shortcut capable special power.
 			//Iterate through the special power modules and look for one.
 			SpecialPowerModuleInterface *spmInterface = obj->findAnyShortcutSpecialPowerModuleInterface();
-			if( spmInterface && !spmInterface->isScriptOnly() )
+			if( spmInterface && !spmInterface->isScriptOnly()
+					&& !SuperweaponMissileSilencedInMatch( spmInterface->getSpecialPowerTemplate()->getSpecialPowerType() ) )
 			{
 				info->obj = obj;
 				info->lowestReadyFrame = 0;
 				return;
 			}
 		}
-		else if( obj->hasSpecialPower( info->spType ) )
+		// a missile that can never fire gets no shortcut button and no hotkey
+		else if( obj->hasSpecialPower( info->spType ) && !SuperweaponMissileSilencedInMatch( info->spType ) )
 		{
 			SpecialPowerModuleInterface *spmInterface = obj->findSpecialPowerModuleInterface( info->spType );
 			if( spmInterface && !spmInterface->isScriptOnly() )
@@ -1412,7 +1414,7 @@ static void doCountSpecialPowersReady( Object *obj, void *userData )
 			&& !obj->testStatus( OBJECT_STATUS_SOLD ) 
 			&& !obj->isEffectivelyDead() )
 	{
-		if( obj->hasSpecialPower( info->spType ) )
+		if( obj->hasSpecialPower( info->spType ) && !SuperweaponMissileSilencedInMatch( info->spType ) )
 		{
 			SpecialPowerModuleInterface *spmInterface = obj->findSpecialPowerModuleInterface( info->spType );
 			if( spmInterface && !spmInterface->isScriptOnly() )
@@ -1804,9 +1806,11 @@ void Player::onStructureConstructionComplete( Object *builder, Object *structure
     }
   }
 
-	if( structure->hasSpecialPower( SPECIAL_NEUTRON_MISSILE ) || 
-			structure->hasSpecialPower( NUKE_SPECIAL_NEUTRON_MISSILE ) || 
+	// a silo whose missile can never fire is announced as nothing more than a building
+	if( ( structure->hasSpecialPower( SPECIAL_NEUTRON_MISSILE ) ||
+			structure->hasSpecialPower( NUKE_SPECIAL_NEUTRON_MISSILE ) ||
 			structure->hasSpecialPower( SUPW_SPECIAL_NEUTRON_MISSILE ) )
+			&& !SuperweaponMissileSilencedInMatch( SPECIAL_NEUTRON_MISSILE ) )
   {
     if ( localPlayer == structure->getControllingPlayer() )
     {
@@ -3044,13 +3048,18 @@ static void countExisting( Object *obj, void *userData )
    game unrestricted rather than guessing at a number. */
 static const char theSuperweaponGeneralTemplate[] = "FactionAmericaSuperWeaponGeneral";
 
-Int SuperweaponBuildCap( Int restriction, const AsciiString &playerTemplateName )
+Int SuperweaponBuildCap( Int restriction, const AsciiString &playerTemplateName, const AsciiString &buildingName )
 {
   const Bool isSuperweaponGeneral =
       playerTemplateName.compareNoCase( theSuperweaponGeneralTemplate ) == 0;
 
   if ( restriction == SUPERWEAPONS_LIMIT )
     return isSuperweaponGeneral ? SUPERWEAPONS_LIMIT_GENERAL : SUPERWEAPONS_LIMIT_OTHERS;
+
+  // the silo sells China's Uranium Shells, Nuclear Tanks and Neutron Shells, so under No every
+  // player still stands one and only its missile is refused (SuperweaponMissileSilenced)
+  if ( restriction == SUPERWEAPONS_NONE && ProRulesExemptSuperweapon( buildingName ) )
+    return SUPERWEAPONS_LIMIT_OTHERS;
 
   if ( restriction == SUPERWEAPONS_NONE )
     return isSuperweaponGeneral ? SUPERWEAPONS_NONE_GENERAL : SUPERWEAPON_CAP_BANNED;
@@ -3110,11 +3119,16 @@ Bool ProRulesBanUpgrade( const AsciiString &upgradeName )
 // Rule 2, the silo's missile, which each China general and the Superweapon General fire as a type of
 // their own, and rule 15, the Carpet Bomb below rank 3.  The Air Force General buys his at rank 1 and
 // the early China copies come at rank 3, so in practice rule 15 is his.
+static Bool isNeutronMissile( SpecialPowerType specialPowerType )
+{
+  return specialPowerType == SPECIAL_NEUTRON_MISSILE
+         || specialPowerType == NUKE_SPECIAL_NEUTRON_MISSILE
+         || specialPowerType == SUPW_SPECIAL_NEUTRON_MISSILE;
+}
+
 Bool ProRulesBanSpecialPower( SpecialPowerType specialPowerType, Int rankLevel )
 {
-  if ( specialPowerType == SPECIAL_NEUTRON_MISSILE
-       || specialPowerType == NUKE_SPECIAL_NEUTRON_MISSILE
-       || specialPowerType == SUPW_SPECIAL_NEUTRON_MISSILE )
+  if ( isNeutronMissile( specialPowerType ) )
     return TRUE;
 
   const Bool carpetBomb = specialPowerType == SPECIAL_CARPET_BOMB
@@ -3124,9 +3138,22 @@ Bool ProRulesBanSpecialPower( SpecialPowerType specialPowerType, Int rankLevel )
   return carpetBomb && rankLevel < PRO_RULES_CARPET_BOMB_RANK;
 }
 
+Bool SuperweaponMissileSilenced( SpecialPowerType specialPowerType, Bool proRules, Int superweaponRestriction )
+{
+  return isNeutronMissile( specialPowerType )
+         && ( proRules || superweaponRestriction == SUPERWEAPONS_NONE );
+}
+
+Bool SuperweaponMissileSilencedInMatch( SpecialPowerType specialPowerType )
+{
+  return SuperweaponMissileSilenced( specialPowerType, TheGameLogic->isProRules(),
+                                     TheGameLogic->getSuperweaponRestriction() );
+}
+
 Bool ProRulesRefuseSpecialPower( const Player *player, SpecialPowerType specialPowerType )
 {
-  return TheGameLogic->isProRules() && ProRulesBanSpecialPower( specialPowerType, player->getRankLevel() );
+  return SuperweaponMissileSilencedInMatch( specialPowerType )
+         || ( TheGameLogic->isProRules() && ProRulesBanSpecialPower( specialPowerType, player->getRankLevel() ) );
 }
 
 // rule 16
@@ -3354,7 +3381,7 @@ Bool Player::canBuildMoreOfType( const ThingTemplate *whatToBuild, Int unitsPerO
       restriction = SUPERWEAPONS_NONE;
     const AsciiString templateName =
         getPlayerTemplate() ? getPlayerTemplate()->getName() : AsciiString::TheEmptyString;
-    const Int cap = SuperweaponBuildCap( restriction, templateName );
+    const Int cap = SuperweaponBuildCap( restriction, templateName, whatToBuild->getName() );
     if ( cap == SUPERWEAPON_CAP_BANNED )
       return false;
 
@@ -4531,13 +4558,15 @@ void Player::crc( Xfer *xfer )
 	* 7: added Preorder flag
 	* 8: Save m_disabledSciences & m_hiddenSciences. jba.
 	* 9: The shift queue, m_orderQueue (fork).
+	* 10: The vision spies (fork).
+	* 11: m_attackedFrame, which the skirmish AI's base-under-attack test reads (fork).
 	*/
 // ------------------------------------------------------------------------------------------------
 void Player::xfer( Xfer *xfer )
 {
 
 	// version
-	const XferVersion currentVersion = 10;
+	const XferVersion currentVersion = 11;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -5093,6 +5122,13 @@ void Player::xfer( Xfer *xfer )
 		xfer->xferInt( &byWhom );
 		m_visionSpies[ i ].byWhom = byWhom;
 	}
+
+	// the frame this player was last hit, which the skirmish AI reads to keep a base under attack
+	// garrisoned; an older save has none and reads as never
+	if( version >= 11 )
+		xfer->xferUnsignedInt( &m_attackedFrame );
+	else
+		m_attackedFrame = 0;
 
 }  // end xfer
 

@@ -52,6 +52,7 @@ FrameMetrics::FrameMetrics()
 	m_fpsListIndex = 0;
 	m_lastFpsTimeThing = 0;
 	m_fpsStartingFrame = 0;
+	m_fpsStallMS = 0;
 	m_minimumCushion = 0;
 
 	m_pendingLatencies = NEW time_t[MAX_FRAMES_AHEAD];
@@ -97,6 +98,7 @@ void FrameMetrics::init() {
 	// down for the first NetworkFPSHistoryLength seconds of the game.
 	m_lastFpsTimeThing = timeGetTime();
 	m_fpsStartingFrame = 0;
+	m_fpsStallMS = 0;
 	for (i = 0; i < TheGlobalData->m_networkLatencyHistoryLength; ++i) {
 		m_latencyList[i] = (Real)0.2;
 	}
@@ -126,7 +128,22 @@ void FrameMetrics::doPerFrameMetrics(UnsignedInt frame) {
 	time_t curTime = timeGetTime();
 	time_t windowMS = curTime - m_lastFpsTimeThing;
 	if (windowMS >= 1000) {
-		Real logicFps = FrameMetrics_logicFpsSample(frame, m_fpsStartingFrame, windowMS);
+		/* Time spent waiting for another machine's commands is not this machine being slow, and
+			 counting it latched the room: a stall on a real internet link read as a low logic rate,
+			 the room was commanded down to it, the slower room stalled just as often (the run-ahead is
+			 sized in frames of that same rate, so it covers the same wall time) and reported lower
+			 again.  A two player match on 2026-09-29 played 7835 frames in 371 seconds, 21 a
+			 second, from start to end.  The machine that is really slow never waits on anybody, so its
+			 own rate still reaches minFps untouched.  A quarter of the window is kept so a window
+			 that was almost all stall cannot divide by nearly nothing, and the catch-up frames run
+			 after a stall are capped at the game speed rather than reported as a faster machine. */
+		time_t busyMS = windowMS - m_fpsStallMS;
+		if (busyMS < windowMS / 4)
+			busyMS = windowMS / 4;
+		Real logicFps = FrameMetrics_logicFpsSample(frame, m_fpsStartingFrame, busyMS);
+		if (logicFps > (Real)TheGlobalData->m_framesPerSecondLimit)
+			logicFps = (Real)TheGlobalData->m_framesPerSecondLimit;
+		m_fpsStallMS = 0;
 		m_averageFps -= ((m_fpsList[m_fpsListIndex])) / TheGlobalData->m_networkFPSHistoryLength; // subtract out the old value from the average.
 		m_fpsList[m_fpsListIndex] = logicFps;
 		m_averageFps += ((Real)(m_fpsList[m_fpsListIndex])) / TheGlobalData->m_networkFPSHistoryLength; // add the new value to the average.
@@ -177,6 +194,11 @@ Int FrameMetrics::getAverageFPS() {
 
 Real FrameMetrics::getAverageLatency() {
 	return m_averageLatency;
+}
+
+void FrameMetrics::addNetworkStall(time_t ms) {
+	if (ms > 0)
+		m_fpsStallMS += ms;
 }
 
 Int FrameMetrics::getMinimumCushion() {

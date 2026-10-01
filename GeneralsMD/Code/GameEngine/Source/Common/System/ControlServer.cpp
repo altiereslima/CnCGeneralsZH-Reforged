@@ -764,6 +764,30 @@ static void handleCommand( const AsciiString &command )
 		return;
 	}
 
+	/* click <x> <y>
+		 A left press and release at that screen pixel, carried the way Mouse.cpp carries a real one,
+		 for what lies over the world and reads the click's own position, the cheat panel among them.
+		 The cursor itself does not move. */
+	if (strncmp( command.str(), "click ", 6 ) == 0)
+	{
+		ICoord2D pixel;
+		if (sscanf( command.str() + 6, "%d %d", &pixel.x, &pixel.y ) != 2)
+		{
+			replyError( "click wants two screen pixels, x then y" );
+			return;
+		}
+		const GameMessage::Type halves[] = { GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN, GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP };
+		for (Int half = 0; half < 2; ++half)
+		{
+			GameMessage *msg = TheMessageStream->appendMessage( halves[ half ] );
+			msg->appendPixelArgument( pixel );
+			msg->appendIntegerArgument( KEY_STATE_NONE );
+			msg->appendIntegerArgument( 0 );
+		}
+		replyOk( "\"clicked\":true" );
+		return;
+	}
+
 	/* spectator <action>
 		 What a data-click on the spectator's page does, without finding its pixel: camera:director,
 		 follow:3, fog, flip:camera and the rest of the actions Window/Html/Spectator.html names. */

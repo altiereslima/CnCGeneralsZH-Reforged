@@ -529,6 +529,24 @@ TEST(dx11backend_the_alpha_test_cuts_the_pixels_the_comparison_rejects)
 	CHECK_EQ(kept[2], EXPECTED_RED);
 	device.Get_Context()->Unmap(staging, 0);
 
+	// Only the world moves now, the quad off the target to the right.  Nothing a pipeline is built
+	// from changed, so this is the draw that skips the descriptions and the constants both unless
+	// Set_Transform says otherwise, and skipped wrongly it paints the quad where it was.
+	float moved[16];
+	set_identity(moved);
+	moved[12] = 4.0f;
+	device.Get_Context()->ClearRenderTargetView(target_view, clear_colour);
+	backend.Set_Transform(D3DTS_WORLD, moved);
+	CHECK(backend.Draw_Indexed_Triangles(6, 0, 0));
+
+	device.Get_Context()->CopyResource(staging, target);
+	CHECK(SUCCEEDED(device.Get_Context()->Map(staging, 0, D3D11_MAP_READ, 0, &mapped)));
+	const unsigned char * gone = static_cast<const unsigned char *>(mapped.pData)
+		+ mapped.RowPitch * (TARGET_SIZE / 2) + (TARGET_SIZE / 2) * 4;
+	CHECK_EQ(gone[1], 0xff);
+	CHECK_EQ(gone[0], 0x00);
+	device.Get_Context()->Unmap(staging, 0);
+
 	// The comparison is part of the program and the reference is not, so two comparisons are two
 	// pipelines and the reference could have changed between them for free.
 	unsigned pipelines = 0;
@@ -536,7 +554,7 @@ TEST(dx11backend_the_alpha_test_cuts_the_pixels_the_comparison_rejects)
 	unsigned long long refused = 0;
 	backend.Statistics(pipelines, made, refused);
 	CHECK_EQ(pipelines, 2u);
-	CHECK_EQ(made, 2ull);
+	CHECK_EQ(made, 3ull);
 
 	indices->Release();
 	vertices->Release();

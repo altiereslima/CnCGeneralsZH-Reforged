@@ -76,7 +76,7 @@ void AIInfluenceMap::stamp( std::vector<Real> &layer, Real x, Real y, Real z, Re
 	if( m_cols <= 0 || power <= 0.0f || range <= 0.0f )
 		return;
 
-	const Real farthest = range + Weapon_elevationRangeBonus( range, FLT_MAX );
+	const Real farthest = range + Weapon_highGroundRangeBonus( range, FLT_MAX );
 	const Int colLo = max<Int>( 0, REAL_TO_INT_FLOOR( (x - farthest - m_originX) / m_cellSize ) );
 	const Int colHi = min<Int>( m_cols - 1, REAL_TO_INT_FLOOR( (x + farthest - m_originX) / m_cellSize ) );
 	const Int rowLo = max<Int>( 0, REAL_TO_INT_FLOOR( (y - farthest - m_originY) / m_cellSize ) );
@@ -88,7 +88,7 @@ void AIInfluenceMap::stamp( std::vector<Real> &layer, Real x, Real y, Real z, Re
 		{
 			const Int index = row * m_cols + col;
 			const Real cx = m_originX + (col + 0.5f) * m_cellSize;
-			const Real reach = range + Weapon_elevationRangeBonus( range, z - m_height[ index ] );
+			const Real reach = range + Weapon_highGroundRangeBonus( range, z - m_height[ index ] );
 			if( sqr( cx - x ) + sqr( cy - y ) <= sqr( reach ) )
 				layer[ index ] += power;
 		}

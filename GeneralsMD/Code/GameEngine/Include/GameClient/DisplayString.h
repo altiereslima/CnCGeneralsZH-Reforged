@@ -82,6 +82,7 @@ public:
 
 	virtual void setText( UnicodeString text );		///< set text for this string
 	virtual UnicodeString getText( void );				///< get text for this string
+	const UnicodeString &peekText( void ) const { return m_textString; }	///< the text without a copy, whose refcount takes a lock
 	virtual Int getTextLength( void );				///< return number of chars in string
 	virtual void notifyTextChanged( void );		///< called when text has changed
 	virtual void reset( void );								///< reset all contents of string

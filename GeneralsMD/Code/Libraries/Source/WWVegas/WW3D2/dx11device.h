@@ -105,6 +105,13 @@ public:
 	// present_interval is DXGI's sync interval: 0 for no wait, 1 for the next vertical blank.
 	bool Present(unsigned present_interval);
 
+	// True when the swap chain is the flip model with tearing allowed, which is the only kind the
+	// compositor lets a window present faster than the monitor refreshes.
+	bool Can_Tear() const { return Tearing; }
+
+	// What the last Present returned, for the one log line a refused present is worth.
+	HRESULT Last_Present_Result() const { return LastPresentResult; }
+
 	// D3DERR_DEVICELOST's replacement.  S_OK while the device is usable; anything else is a driver
 	// reset or a removed adapter and the device has to be built again from scratch.
 	HRESULT Device_Removed_Reason() const;
@@ -134,6 +141,8 @@ private:
 	bool Software;
 	bool DebugLayerRequested;
 	bool DebugLayerPresent;
+	bool Tearing;
+	HRESULT LastPresentResult;
 };
 
 #endif // DX11DEVICE_H

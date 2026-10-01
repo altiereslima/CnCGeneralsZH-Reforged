@@ -224,6 +224,7 @@ public:
 		MSG_META_SELECT_NEXT_WORKER,                ///< select 'next' worker
 		MSG_META_SELECT_PREV_WORKER,                ///< select 'prev' worker
 		MSG_META_SELECT_NEXT_IDLE_WORKER,           ///< select 'next' idle worker
+		MSG_META_SELECT_NEXT_IDLE_UNIT,             ///< select 'next' fighting unit standing with no order
 
 		// command-bar grid hot keys: one per place of the 6 x 3 command grid, read along the rows
 		// (01-06 the top row, 07-12 the middle one, 13-18 the bottom); see CommandPlace
@@ -651,6 +652,7 @@ public:
 		MSG_PLACE_SIGNAL,														///< (location, Int SignalKind) smoke only the sender's allies are shown (fork)
 		MSG_CHEAT,																	///< (Int CheatKind, Int amount) a console cheat, refused in a network game (fork)
 		MSG_QUEUE_NEXT_ORDER,												///< (Int OrderQueueMode) the order right after this one is a shift-queued one (fork)
+		MSG_CLEAR_RALLY_POINT,											///< (objectID) the building forgets its rally point (fork)
 
 		MSG_BEGIN_DEBUG_NETWORK_MESSAGES = 1900,		///< network messages that exist only in debug/internal builds. all grouped separately.
 

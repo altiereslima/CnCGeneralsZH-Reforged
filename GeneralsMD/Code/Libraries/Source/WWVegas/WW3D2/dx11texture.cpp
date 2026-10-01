@@ -47,6 +47,27 @@ static const GUID DX11_TEXTURE_TARGET =
 // {2E2E9C24-1B2A-4C7E-9E2F-1D0B7E9A5C01}
 static const GUID DX11_TEXTURE_DIRTY =
 	{ 0x2e2e9c24, 0x1b2a, 0x4c7e, { 0x9e, 0x2f, 0x1d, 0x0b, 0x7e, 0x9a, 0x5c, 0x01 } };
+// Which sixteen bit update last went into the copy, matched against LastUpdate below.
+// {2E2E9C25-1B2A-4C7E-9E2F-1D0B7E9A5C01}
+static const GUID DX11_TEXTURE_UPDATE =
+	{ 0x2e2e9c25, 0x1b2a, 0x4c7e, { 0x9e, 0x2f, 0x1d, 0x0b, 0x7e, 0x9a, 0x5c, 0x01 } };
+
+// The source rows of the last sixteen bit update, so the next one into the same rectangle of the
+// same texture expands and sends only the rows that differ.  The shroud copies its whole visible
+// rectangle every frame and most of its rows have not moved since the frame before; expanding all
+// of them anyway was 0.04ms of a 2.2ms frame.  One entry, because the shroud is the only texture
+// updated every frame; anything else in between just takes the whole copy as before.  The
+// generation is stamped on the D3D9 texture as well, so a texture made later at a freed one's
+// address does not inherit its rows.
+struct LastUpdateRows
+{
+	unsigned long long Generation;
+	D3D11_BOX Box;
+	D3DFORMAT Format;
+	std::vector<unsigned char> Rows;
+};
+static LastUpdateRows LastUpdate = { 0 };
+static unsigned long long NextUpdateGeneration = 1;
 
 // Why the first texture that could not be copied could not be copied.  A count of refusals says
 // how much of the picture is missing its texture; this says what to fix.
@@ -471,13 +492,25 @@ bool DX11Texture_Update(ID3D11Device * device, ID3D11DeviceContext * context,
 	}
 
 	ID3D11ShaderResourceView * view = DX11Texture_Mirror(device, context, texture);
-	texture->Release();
+	unsigned long long generation = 0;
+	DWORD generation_size = sizeof(generation);
+	if (FAILED(texture->GetPrivateData(DX11_TEXTURE_UPDATE, &generation, &generation_size))) {
+		generation = 0;
+	}
+	D3DSURFACE_DESC destination_description;
+	// Only a default pool texture that is never drawn into: a managed one is also refreshed whole
+	// from its D3D9 copy behind this function's back, and a target is painted over by draws.
+	const bool drawn_into = FAILED(destination->GetDesc(&destination_description))
+		|| (destination_description.Usage & D3DUSAGE_RENDERTARGET) != 0
+		|| destination_description.Pool != D3DPOOL_DEFAULT;
 	if (view == NULL) {
+		texture->Release();
 		return false;
 	}
 
 	D3DSURFACE_DESC source_description;
 	if (FAILED(source->GetDesc(&source_description))) {
+		texture->Release();
 		return false;
 	}
 
@@ -490,12 +523,14 @@ bool DX11Texture_Update(ID3D11Device * device, ID3D11DeviceContext * context,
 		? (unsigned)(source_rectangle->bottom - source_rectangle->top)
 		: source_description.Height;
 	if (width == 0 || height == 0) {
+		texture->Release();
 		return false;
 	}
 
 	D3DLOCKED_RECT locked;
 	if (FAILED(source->LockRect(&locked, source_rectangle, D3DLOCK_READONLY))) {
 		note_refusal("the surface being copied from would not lock");
+		texture->Release();
 		return false;
 	}
 
@@ -503,6 +538,7 @@ bool DX11Texture_Update(ID3D11Device * device, ID3D11DeviceContext * context,
 	view->GetResource(&resource);
 	if (resource == NULL) {
 		source->UnlockRect();
+		texture->Release();
 		return false;
 	}
 
@@ -516,19 +552,73 @@ bool DX11Texture_Update(ID3D11Device * device, ID3D11DeviceContext * context,
 
 	// The copy was expanded to eight bits a channel when it was made, so the update has to be
 	// expanded the same way or the rows land at the wrong stride in the wrong format.
-	if (is_sixteen_bit_colour(source_description.Format)) {
+	if (is_sixteen_bit_colour(source_description.Format) && !drawn_into) {
+		const unsigned row_bytes = width * 2;
+		const unsigned char * rows = (const unsigned char *)locked.pBits;
+		const bool same_rectangle = generation != 0 && generation == LastUpdate.Generation
+			&& memcmp(&box, &LastUpdate.Box, sizeof(box)) == 0
+			&& LastUpdate.Format == source_description.Format
+			&& LastUpdate.Rows.size() == (size_t)row_bytes * height;
+		if (!same_rectangle) {
+			LastUpdate.Rows.resize((size_t)row_bytes * height);
+			LastUpdate.Box = box;
+			LastUpdate.Format = source_description.Format;
+		}
+
+		// Each run of rows that differs from what the copy already holds goes up as one box; with
+		// a new rectangle every row differs and that is the whole copy, as it always was.
 		const unsigned pitch = width * 4;
-		std::vector<unsigned char> expanded(pitch * height);
-		expand_sixteen_bit(&expanded[0], pitch, (const unsigned char *)locked.pBits, locked.Pitch,
-			width, height, source_description.Format);
-		context->UpdateSubresource(resource, 0, &box, &expanded[0], pitch, 0);
+		std::vector<unsigned char> expanded;
+		unsigned row = 0;
+		while (row < height) {
+			unsigned char * held = &LastUpdate.Rows[(size_t)row * row_bytes];
+			if (same_rectangle && memcmp(held, rows + row * locked.Pitch, row_bytes) == 0) {
+				++row;
+				continue;
+			}
+			unsigned end = row;
+			while (end < height) {
+				held = &LastUpdate.Rows[(size_t)end * row_bytes];
+				if (same_rectangle && memcmp(held, rows + end * locked.Pitch, row_bytes) == 0) {
+					break;
+				}
+				memcpy(held, rows + end * locked.Pitch, row_bytes);
+				++end;
+			}
+			expanded.resize((size_t)pitch * (end - row));
+			expand_sixteen_bit(&expanded[0], pitch, rows + row * locked.Pitch, locked.Pitch,
+				width, end - row, source_description.Format);
+			D3D11_BOX run = box;
+			run.top = box.top + row;
+			run.bottom = box.top + end;
+			context->UpdateSubresource(resource, 0, &run, &expanded[0], pitch, 0);
+			row = end;
+		}
+
+		if (!same_rectangle) {
+			LastUpdate.Generation = NextUpdateGeneration++;
+			texture->SetPrivateData(DX11_TEXTURE_UPDATE, &LastUpdate.Generation,
+				sizeof(LastUpdate.Generation), 0);
+		}
 	}
 	else {
-		context->UpdateSubresource(resource, 0, &box, locked.pBits, locked.Pitch, 0);
+		// Whatever this wrote over, the rows above no longer stand for it.
+		LastUpdate.Generation = 0;
+		if (is_sixteen_bit_colour(source_description.Format)) {
+			const unsigned pitch = width * 4;
+			std::vector<unsigned char> expanded(pitch * height);
+			expand_sixteen_bit(&expanded[0], pitch, (const unsigned char *)locked.pBits,
+				locked.Pitch, width, height, source_description.Format);
+			context->UpdateSubresource(resource, 0, &box, &expanded[0], pitch, 0);
+		}
+		else {
+			context->UpdateSubresource(resource, 0, &box, locked.pBits, locked.Pitch, 0);
+		}
 	}
 
 	resource->Release();
 	source->UnlockRect();
+	texture->Release();
 	return true;
 }
 

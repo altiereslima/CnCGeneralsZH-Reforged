@@ -149,6 +149,11 @@ void Direct3D11_Dump_Programs_To(const char * directory);
 
 void Direct3D11_Present_Enable(bool enabled);
 bool Direct3D11_Present_Is_Enabled();
+// The swap chain is the flip model with tearing, so vsync off runs past the monitor's refresh.
+bool Direct3D11_Can_Tear();
+// True once, the first time a present was refused, with the HRESULT it was refused with.  WW3D2
+// has no logging in a shipping build, so the display asks and writes the line.
+bool Direct3D11_Take_Present_Failure(long & result);
 
 // Wait for the monitor on the Direct3D 11 present.  DXGI takes the interval per Present, so this
 // does not need a device reset the way Direct3D 9's presentation interval does.

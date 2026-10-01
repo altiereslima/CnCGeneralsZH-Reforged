@@ -91,16 +91,21 @@ LAN_COLUMNS = [
 # "Allow Superweapons" needs 152 at 800x600.
 SKIRMISH_SETTINGS = [
     (96, 152, [("StartingCashLabel", "ComboBoxStartingCash"), ("LabelSuperweapons", "ComboBoxSuperweapons"),
-               ("LabelIncomeSharing", "ComboBoxIncomeSharing")]),
+               ("LabelIncomeSharing", "ComboBoxIncomeSharing"), ("LabelSupplyPileLimit", "ComboBoxSupplyPileLimit")]),
     (88, 112, [("LabelGameSpeed", "ComboBoxGameSpeed"), ("CheckBoxUnitLimit",),
                ("LabelTechRespawn", "ComboBoxTechRespawn")]),
 ]
+# The skirmish page is 108 high and the pile limit is its fourth row: 26 apart from 4 under the page
+# top, the last row ends two pixels above the page bottom.
+SKIRMISH_SETTING_ROW_PITCH = 26
+SKIRMISH_SETTING_TOP_PADDING = 4
 # The LAN page is 84 high over the chat entry and every column is full, so the check boxes take a
 # third column and the rows close up to 28 from the page top to fit a third one.
 LAN_SETTINGS = [
     (96, 152, [("StartingCashLabel", "ComboBoxStartingCash"), ("LabelSuperweapons", "ComboBoxSuperweapons"),
                ("LabelTechRespawn", "ComboBoxTechRespawn")]),
-    (96, 152, [("LabelPeaceTime", "ComboBoxPeaceTime"), ("LabelIncomeSharing", "ComboBoxIncomeSharing")]),
+    (96, 152, [("LabelPeaceTime", "ComboBoxPeaceTime"), ("LabelIncomeSharing", "ComboBoxIncomeSharing"),
+               ("LabelSupplyPileLimit", "ComboBoxSupplyPileLimit")]),
     (0, 128, [("CheckBoxProRules",), ("CheckBoxUnitLimit",)]),
 ]
 LAN_SETTING_ROW_PITCH = 28
@@ -243,7 +248,8 @@ def build_skirmish(layout):
     page_height = PAGE_BOTTOM - PAGE_TOP
     for window in (info_frame, need(layout, "ListboxInfo"), need(layout, "PageLobbySettings")):
         window.place(INNER_LEFT, PAGE_TOP, SEAT_RIGHT - INNER_LEFT, page_height)
-    place_settings(layout, SKIRMISH_SETTINGS, INNER_LEFT, SEAT_RIGHT, PAGE_TOP, PAGE_BOTTOM)
+    place_settings(layout, SKIRMISH_SETTINGS, INNER_LEFT, SEAT_RIGHT, PAGE_TOP, PAGE_BOTTOM,
+                   SKIRMISH_SETTING_ROW_PITCH, SKIRMISH_SETTING_TOP_PADDING)
 
     stats_panel.place(MAP_LEFT, PAGE_TOP, MAP_WIDTH, page_height)
     value_left = INNER_RIGHT - STAT_INSET - STAT_VALUE_WIDTH

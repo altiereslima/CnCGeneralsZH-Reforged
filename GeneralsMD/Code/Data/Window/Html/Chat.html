@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  The chat, in the screen's bottom left corner over the event feed (Window/Html/Feed.html) and
+  The chat, in the screen's top left corner under the event feed (Window/Html/Feed.html) and
   clear of it even with all six of its lines up, the way Dota writes it: each line opens on the
   speaker's general's flag and his name in his colour.  With the chat shut the talk round the
   newest line is up, every line that came in the ten seconds before it, for ten seconds after it,
@@ -11,7 +11,8 @@
   whose header says what the renderer draws.
 
   The game fills in, every frame the chat is up (InGameUI::drawChat):
-    {{bar}}               the typing bar's top edge; the lines stand on it
+    {{bar}}               the typing bar's top edge, under room for all eight lines, so it holds
+                           still as lines come in; the lines stand on it
     {{open}}               "open" while the chat is open
     {{typed}}              what has been typed so far, {{caret}} "lit" for half of every second
     {{audience}}           whom it goes to: everyone, allies or observers, in the player's language

@@ -124,6 +124,7 @@ public:
 	virtual Bool getExitPosition( Coord3D& rallyPoint ) const;		
 	virtual Bool getNaturalRallyPoint( Coord3D& rallyPoint, Bool offset = TRUE ) const;
 	virtual void setRallyPoint( const Coord3D *pos );			///< define a "rally point" for units to move towards
+	virtual void clearRallyPoint( void ) { m_heliRallyPointExists = FALSE; }
 	virtual const Coord3D *getRallyPoint( void ) const;			///< define a "rally point" for units to move towards
 
 	// UpdateModule

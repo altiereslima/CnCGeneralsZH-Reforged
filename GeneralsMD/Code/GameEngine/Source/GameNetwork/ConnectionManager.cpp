@@ -1411,12 +1411,14 @@ void ConnectionManager::updateRunAhead(Int oldRunAhead, Int frameRate, Bool didS
 			}
 			msg->setAverageLatency(m_frameMetrics.getAverageLatency());
 
-			// see above for explanation.
-//			if (didSelfSlug) {
-//				msg->setAverageFps(frameRate);
-//			} else {
+			/* See above.  EA left this half commented out, so only the packet router's own slug was
+				 forgiven: the other seat's voluntary 10 % slowdown came back as its capacity and the
+				 room was commanded down to it, a frame or two under 30 on every lossy link. */
+			if (didSelfSlug) {
+				msg->setAverageFps(frameRate);
+			} else {
 				msg->setAverageFps(m_frameMetrics.getAverageFPS());
-//			}
+			}
 			if (didSelfSlug) {
 				//DEBUG_LOG(("ConnectionManager::updateRunAhead - average latency = %f, average fps = %d, actual fps = %d, didSelfSlug = true\n", m_frameMetrics.getAverageLatency(), m_frameMetrics.getAverageFPS(), m_frameMetrics.getAverageFPS()));
 			} else {

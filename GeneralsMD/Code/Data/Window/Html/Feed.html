@@ -3,15 +3,14 @@
   The event feed, for a player and a watcher alike: every message the game writes, a smoke signal
   or a beacon, a superweapon coming ready or being fired, a general's power used, a promotion bought,
   a superweapon or advanced tech building started or finished, a player beaten, gone or left with no
-  dozer.  Chat has its own page, Window/Html/Chat.html.  The feed stands on the radar's under-attack
-  tab in the screen's bottom left corner, the newest line at the bottom, the way Dota's kill feed
-  stands on its minimap.  A line is up for ten seconds, six at most, and the oldest goes first;
-  while the chat is open the last twelve are up however old they are, and the chat stands over them.  Same
-  materials as Window/Html/Spectator.html, whose header says what the renderer draws.
+  dozer.  Chat has its own page, Window/Html/Chat.html.  The feed hangs under the menu key in the
+  screen's top left corner, the oldest line at the top and the newest under it, growing down.  A line
+  is up for ten seconds, six at most, and the oldest goes first; while the chat is open the last
+  twelve are up however old they are, and the chat hangs under them.  Same materials as
+  Window/Html/Spectator.html, whose header says what the renderer draws.
 
   The game fills in, every frame a line is up (InGameUI::drawFeed):
-    {{floor}}              where the feed stands: the top of the radar's tab, or of the production
-                           queue's row while that is over the tab
+    {{top}}                where the feed starts: under the menu key
     data-each="feed"       one entry a line, the oldest first, {{kind}} one of
                              "note"    a plain message, all of it in {{before}}
                              "player"  a message about one player: {{portrait}} his general's flag,
@@ -31,8 +30,7 @@
   html, body { margin: 0; padding: 0; }
   body { background-color: #3b4a36; color: #e6ebef; font-size: 9px; }
 
-  #feed { position: absolute; left: 0; top: 0; width: 400px; }
-  #lines { position: absolute; left: 0; bottom: 3px; width: 400px; }
+  #lines { position: absolute; left: 0; width: 400px; }
   .line { height: 15px; margin-top: 1px; }
   /* a black band under the words that thins out to nothing on the right, over the battlefield */
   .strip { display: inline-block; height: 15px; line-height: 15px; padding: 0 40px 0 2px; white-space: nowrap;
@@ -62,11 +60,9 @@
 </style>
 </head>
 <body>
-<div id="feed" style="height: {{floor}}px">
-  <div id="lines">
-    <div class="line" data-each="feed">
-      <div class="strip k{{kind}}"><span class="chip"><span class="bang"></span><span class="dot"></span></span><img class="flag" src="{{portrait}}">{{before}}<span class="who" style="color: {{color}}">{{name}}</span>{{after}}<img class="cameo" src="{{image}}"><span class="what">{{what}}</span><span class="tag {{tag}}">{{tagtext}}</span></div>
-    </div>
+<div id="lines" style="top: {{top}}px">
+  <div class="line" data-each="feed">
+    <div class="strip k{{kind}}"><span class="chip"><span class="bang"></span><span class="dot"></span></span><img class="flag" src="{{portrait}}">{{before}}<span class="who" style="color: {{color}}">{{name}}</span>{{after}}<img class="cameo" src="{{image}}"><span class="what">{{what}}</span><span class="tag {{tag}}">{{tagtext}}</span></div>
   </div>
 </div>
 </body>

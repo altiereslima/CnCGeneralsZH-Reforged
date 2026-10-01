@@ -1065,9 +1065,9 @@ Real AI::getAdjustedVisionRangeForObject(const Object *object, Int factorsToCons
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 /** The ladder, from AI-ROADMAP.md D6.  Three rungs, and each one is a sentence: Easy looks around
-	* and answers far too late, Medium reacts in time and expands on its own, Brutal is the AI played
-	* as well as it has been programmed to play.  A rung that plays wrong is read as a column here
-	* rather than hunted through a switch(difficulty) somewhere.
+	* and answers late, Medium reacts in time and expands on its own, Brutal is the AI played as well
+	* as it has been programmed to play.  A rung that plays wrong is read as a column here rather
+	* than hunted through a switch(difficulty) somewhere.
 	*
 	* Brutal is the baseline, not a bonus: every number in its row is what the code does when nothing
 	* is held back, and the two rungs below it are handicaps on the AI's *decisions*.
@@ -1089,11 +1089,19 @@ Real AI::getAdjustedVisionRangeForObject(const Object *object, Int factorsToCons
 	*    again for the roadmap's actual proposal, AIPlayer::chooseApproachLabel: of Center, Flank and
 	*    Backdoor, the approach with the least firepower this AI has seen along it.
 	*
-	*                      scoutS maxSc react decis   cntr  mass  ttk   indiv team  infl  focus  save   harv  expand guard hoard  econ */
+	* Easy and Medium were stepped toward that baseline on 2026-09-29, after Hard's extra buildings
+	* opened a gap the two lower rungs could not cross.  Easy looks every 75 seconds and re-decides
+	* every 7, and its trucks follow the piles; it still never retreats, never counters and never
+	* hurries a spend.  Medium looks every 45 and re-decides every 3, counters at half weight, and
+	* starts spending past 6000 instead of 10000.  Massing, team retreat, the influence map, defended
+	* expansions, extra buildings and tactical fighting stay on Hard, and the two measured columns
+	* above were left where the matches put them.
+	*
+	*                      scoutS maxSc decis  cntr  mass   ttk  indiv team infl focus save harv expand guard hoard econ micro */
 static const AIDifficultyProfile s_defaultSkillLadder[ AISKILL_COUNT ] =
 {
-	/* Easy      */ { 90.0f, 1, 10.0f,  0.00f, FALSE, 0.00f, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,     0, FALSE, FALSE },
-	/* Medium    */ { 60.0f, 1,  5.0f,  0.25f, FALSE, 0.35f, TRUE,  FALSE, FALSE, TRUE,  TRUE,  TRUE,  TRUE,  FALSE, 10000, FALSE, FALSE },
+	/* Easy      */ { 75.0f, 1,  7.0f,  0.00f, FALSE, 0.00f, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  FALSE, FALSE,     0, FALSE, FALSE },
+	/* Medium    */ { 45.0f, 1,  3.0f,  0.50f, FALSE, 0.35f, TRUE,  FALSE, FALSE, TRUE,  TRUE,  TRUE,  TRUE,  FALSE,  6000, FALSE, FALSE },
 	/* Brutal    */ { 25.0f, 2,  1.5f,  1.00f, TRUE,  0.50f, TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,   4000, TRUE,  TRUE }
 };
 
@@ -1162,6 +1170,28 @@ Bool aiShouldMass( Real waitingThreat, Real enemyVisibleThreat, Real massFractio
 		return FALSE;
 
 	return waitingThreat < massFraction * enemyVisibleThreat;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool aiWantsAnotherFactory( Int finished, Int constructing, Int idle, Int deepest, Bool unlimited )
+{
+	if( constructing > 0 )
+		return FALSE;					// one is already going up
+	if( unlimited )
+		return TRUE;
+	if( finished <= 0 )
+		return TRUE;					// the last one is gone, so put one back
+	if( idle > 0 )
+		return FALSE;					// a factory with nothing in it is the spare
+	return deepest >= 2;			// busy, and a unit is waiting behind the one being built
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool aiWantsAnotherTechBuilding( Int standing, Int onTheWay )
+{
+	if( onTheWay > 0 )
+		return FALSE;
+	return standing < AI_TECH_BUILDING_COPIES;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1295,6 +1325,41 @@ Bool aiReleaseWave( Real heldPower, Real wavePower, UnsignedInt heldFrames, Unsi
 	if( heldPower <= 0.0f )
 		return FALSE;			// nothing parked that can fight, nothing to send
 	return heldPower >= wavePower || heldFrames >= maxHoldFrames;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real aiWinChance( Real myPower, Real enemyPower )
+{
+	const Real PRIOR = 1500.0f;		// about two main battle tanks a side
+
+	return (myPower + PRIOR) / (myPower + enemyPower + 2.0f * PRIOR);
+}
+
+//-------------------------------------------------------------------------------------------------
+AIPressure aiPressureLevel( Real chance, Bool enemyBaseInSight, AIPressure current )
+{
+	const Real FINISH_AT = 0.85f;
+	const Real PRESS_AT = 0.65f;
+	const Real DEFEND_AT = 0.35f;
+	const Real KEEP = 0.10f;			// how far past its threshold a level is kept
+
+	if( current == AIPRESSURE_FINISH ? chance >= FINISH_AT - KEEP : (enemyBaseInSight && chance >= FINISH_AT) )
+		return AIPRESSURE_FINISH;
+	if( current >= AIPRESSURE_PRESS ? chance >= PRESS_AT - KEEP : (enemyBaseInSight && chance >= PRESS_AT) )
+		return AIPRESSURE_PRESS;
+	if( chance <= (current == AIPRESSURE_DEFEND ? DEFEND_AT + KEEP : DEFEND_AT) )
+		return AIPRESSURE_DEFEND;
+	return AIPRESSURE_NORMAL;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool aiReleaseWaveAt( AIPressure level, Real heldPower, Real wavePower, UnsignedInt heldFrames, UnsignedInt maxHoldFrames )
+{
+	if( level >= AIPRESSURE_PRESS )
+		return heldPower > 0.0f;
+	if( level == AIPRESSURE_DEFEND )
+		return heldPower >= wavePower && aiReleaseWave( heldPower, 2.0f * wavePower, heldFrames, 2 * maxHoldFrames );
+	return aiReleaseWave( heldPower, wavePower, heldFrames, maxHoldFrames );
 }
 
 //-------------------------------------------------------------------------------------------------

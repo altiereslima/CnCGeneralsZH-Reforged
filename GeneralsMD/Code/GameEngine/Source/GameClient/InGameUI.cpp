@@ -104,6 +104,7 @@
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/AIStateMachine.h"
 #include "GameLogic/Module/AIUpdate.h"
+#include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/JetAIUpdate.h"
 #include "GameLogic/Weapon.h"
 #include "GameLogic/Object.h"
@@ -184,14 +185,15 @@ static const Real BLIND_SPOT_RING_WIDTH = PATHFIND_CELL_SIZE_F * 0.5f;	///< two 
 //-------------------------------------------------------------------------------------------------
 static Int stripPixels( Int nominal )
 {
-	return REAL_TO_INT_CEIL( nominal * ControlBarUniformScale() );
+	return REAL_TO_INT_CEIL( nominal * ControlBarHudPageScale() );
 }
 
 //-------------------------------------------------------------------------------------------------
 /** A countdown written inside a cameo, always in bare seconds with the unit on it: "45s", "200s".
 	* A tank takes seconds and a superweapon charges for minutes, and both are read against every
 	* other countdown on the screen, all of which are in seconds - m:ss was a number you had to
-	* convert first. The trailing s is what stops a lone "45" reading as a count of something. */
+	* convert first. The trailing s is what stops a lone "45" reading as a count of something; a
+	* number too wide for its cameo with the s on goes without it, see drawStripSeconds. */
 //-------------------------------------------------------------------------------------------------
 static void formatStripSeconds( UnicodeString *text, Int seconds )
 {
@@ -751,7 +753,7 @@ void InGameUI::addSuperweapon(Int playerIndex, const AsciiString& powerName, Obj
 	if (powerTemplate == NULL)
 		return;
 
-	// Pro Rules: a silo nobody may fire gets no countdown on everybody's screen and no "missile ready"
+	// Pro Rules or No Superweapons: a silo nobody may fire gets no countdown on everybody's screen and no "missile ready"
 	if (ProRulesRefuseSpecialPower(ThePlayerList->getNthPlayer(playerIndex), powerTemplate->getSpecialPowerType()))
 		return;
 
@@ -1159,6 +1161,8 @@ InGameUI::InGameUI()
 	m_placeAngleType = NULL;
 	m_placementLegal = TRUE;
 	m_placementNudge.zero();
+	m_placementRowGap = 0.0f;
+	m_placementRowGapWheel = 0.0f;
 
 	m_videoStream = NULL;
 	m_videoBuffer = NULL;
@@ -1167,8 +1171,11 @@ InGameUI::InGameUI()
 
 	m_feedOverlay = NULL;
 	m_feedPageLoaded = FALSE;
-	m_feedFloor = 0;
-	m_queueTrayTop = 0;
+	m_feedTop = 0;
+	m_queueCorner.x = m_queueCorner.y = 0;
+	m_consoleTop = 0;
+	m_topBarBottom = 0;
+	m_peacePlateBottom = 0;
 	m_armedSignal = SIGNAL_KIND_COUNT;
 	m_dozerCheckFrame = 0;
 	for( Int index = 0; index < MAX_PLAYER_COUNT; index++ )
@@ -1188,6 +1195,7 @@ InGameUI::InGameUI()
 	m_peaceCountdownDisplayString = NULL;
 	m_lastMoneyDisplayed = -1;
 	m_lastEarningDisplayed = 0;
+	m_lastEarningPerMinute = FALSE;
 	m_moneyPlate = MoneyPlateWidth();
 	m_hudDrawCount = 0;
 	m_hudLastSampleFrame = 0;
@@ -1208,6 +1216,7 @@ InGameUI::InGameUI()
 	m_productionStripStep = 0;
 	m_queueOverlay = NULL;
 	m_queueFrontOverlay = NULL;
+	m_superweaponOverlay = NULL;
 	m_queuePageLoaded = FALSE;
 	m_productionStripTray = NULL;
 	m_productionStripTraySource = NULL;
@@ -1228,10 +1237,20 @@ InGameUI::InGameUI()
 	m_controlBarPageHovered = FALSE;
 	m_netOverlay = NULL;
 	m_netPageLoaded = FALSE;
+	m_readoutOverlay = NULL;
+	m_readoutPageLoaded = FALSE;
+	m_alertStartMs = 0;
+	m_alertOverlay = NULL;
+	m_alertPageLoaded = FALSE;
+	m_alertBottom = 0;
 	m_promotionOverlay = NULL;
 	m_promotionFrontOverlay = NULL;
 	for( Int grid = 0; grid < CELL_GRID_COUNT; grid++ )
 		m_cellFrontOverlay[ grid ] = NULL;
+	m_orderKeysShown = FALSE;
+	m_orderKeyPoints = 0;
+	for( Int orderKey = 0; orderKey < ORDER_KEYS; orderKey++ )
+		m_orderKeyString[ orderKey ] = NULL;
 	m_promotionPageLoaded = FALSE;
 	m_promotionShownMs = 0;
 	m_promotionDrawnAt = 0;
@@ -1251,7 +1270,6 @@ InGameUI::InGameUI()
 	for( Int stripQuantity = 0; stripQuantity < STRIP_QUANTITY_STRINGS; stripQuantity++ )
 		m_stripQuantityString[ stripQuantity ] = NULL;
 	m_superweaponIconCount = 0;
-	m_superweaponIconTotal = 0;
 
 	m_superweaponPosition.x = 0.7f;
 	m_superweaponPosition.y = 0.7f;
@@ -1371,6 +1389,10 @@ InGameUI::~InGameUI()
 	m_controlBarOverlay = NULL;
 	delete m_netOverlay;
 	m_netOverlay = NULL;
+	delete m_readoutOverlay;
+	m_readoutOverlay = NULL;
+	delete m_alertOverlay;
+	m_alertOverlay = NULL;
 	delete m_promotionOverlay;
 	m_promotionOverlay = NULL;
 	delete m_promotionFrontOverlay;
@@ -1389,6 +1411,8 @@ InGameUI::~InGameUI()
 	m_queueOverlay = NULL;
 	delete m_queueFrontOverlay;
 	m_queueFrontOverlay = NULL;
+	delete m_superweaponOverlay;
+	m_superweaponOverlay = NULL;
 	delete m_tooltipOverlay;
 	m_tooltipOverlay = NULL;
 }
@@ -2241,14 +2265,21 @@ static UnsignedInt replayLength( void )
 	return max( TheRecorder->getPlaybackFrameDuration(), TheGameLogic->getFrame() );
 }
 
-static void fillReplayValues( HtmlValues &values )
+/** The replay strip's values, the strip standing on `floor`, the top of what is under it in screen
+	* pixels: the bar's console, or the screen's bottom edge. */
+static void fillReplayValues( HtmlValues &values, Int floor )
 {
 	if( !TheGameLogic->isInReplayGame() )
 		return;
 
+	// Spectator.html's #replay with its padding and its borders, and a gap under it
+	enum { REPLAY_STRIP_WIDTH = 322, REPLAY_STRIP_HEIGHT = 52 };
+	const Real scale = ControlBarHudPageScale();
 	const UnsignedInt frame = TheGameLogic->getFrame();
 	const UnsignedInt length = replayLength();
 	values[ "replay" ] = "on";
+	values[ "replayleft" ] = std::to_string( ( REAL_TO_INT_FLOOR( TheDisplay->getWidth() / scale ) - REPLAY_STRIP_WIDTH ) / 2 );
+	values[ "replaytop" ] = std::to_string( REAL_TO_INT_FLOOR( floor / scale ) - REPLAY_STRIP_HEIGHT );
 	values[ "replaypaused" ] = TheGameLogic->isGamePaused() ? "paused" : "";
 	values[ "replayseeking" ] = TheReplaySeekFrame > 0 ? "seeking" : "";
 	values[ "replaytime" ] = spectatorClock( frame );
@@ -2488,7 +2519,10 @@ void InGameUI::drawSpectatorPage( void )
 	if( m_spectatorPage.empty() )
 		return;
 	if( m_spectatorOverlay == NULL )
+	{
 		m_spectatorOverlay = new HtmlOverlay( m_superweaponNormalFont );
+		m_spectatorOverlay->setHudPage( TRUE );
+	}
 
 	// a unit selected turns the page to his side's steel the same frame, not half a second on
 	const UnsignedInt frame = TheGameLogic->getFrame();
@@ -2514,7 +2548,7 @@ void InGameUI::drawSpectatorPage( void )
 
 	HtmlValues values = m_spectatorTotals;
 	fillSpectatorCameraValues( m_spectatorLists[ "follows" ], values );
-	fillReplayValues( values );
+	fillReplayValues( values, m_controlBarPageShown ? m_consoleTop : (Int)TheDisplay->getHeight() );
 	for( std::map< std::string, std::string >::const_iterator pick = m_spectatorPicked.begin(); pick != m_spectatorPicked.end(); ++pick )
 	{
 		values[ PICK_ACTION + pick->first ] = pick->second;
@@ -3911,15 +3945,22 @@ void InGameUI::update( void )
 	{
 		Int currentMoney = moneyPlayer->getMoney()->countMoney();
 		Int currentEarning = earnedPerSecond( moneyPlayer->getPlayerIndex() );
+		// the IncomeRate option: the same half minute of readings, counted per minute
+		const Bool perMinute = InGameUI_incomePerMinute( TheGlobalData->m_incomeRateMode, currentEarning );
+		if( perMinute )
+			currentEarning = earnedOver( moneyPlayer->getPlayerIndex(), 60 );
 
-		if( m_lastMoneyDisplayed != currentMoney || m_lastEarningDisplayed != currentEarning )
+		if( m_lastMoneyDisplayed != currentMoney || m_lastEarningDisplayed != currentEarning ||
+				m_lastEarningPerMinute != perMinute )
 		{
 			UnicodeString buffer;
 
-			buffer.format( TheGameText->fetch( "GUI:ControlBarMoneyEarning" ), currentMoney, currentEarning );
+			buffer.format( TheGameText->fetch( perMinute ? "GUI:ControlBarMoneyEarningMinute" : "GUI:ControlBarMoneyEarning" ),
+										 currentMoney, currentEarning );
 			GadgetStaticTextSetText( moneyWin, buffer );
 			m_lastMoneyDisplayed = currentMoney;
 			m_lastEarningDisplayed = currentEarning;
+			m_lastEarningPerMinute = perMinute;
 
 		}  // end if
 
@@ -4065,6 +4106,10 @@ void InGameUI::reset( void )
 	m_earnedReadingCount = 0;		// a new match and a loaded save both come through here
 	m_controlBarPageLoaded = FALSE;
 	m_netPageLoaded = FALSE;
+	m_readoutPageLoaded = FALSE;
+	m_alertPageLoaded = FALSE;
+	m_alerts.clear();
+	m_alertBottom = 0;
 	m_tooltipPageLoaded = FALSE;
 	m_promotionPageLoaded = FALSE;
 	m_quitMenuPageLoaded = FALSE;
@@ -4328,8 +4373,11 @@ void InGameUI::feedSpecialPower( const Object *source, const AsciiString &powerN
 	if( info != NULL )
 	{
 		if( !info->m_hiddenByScript && !info->m_hiddenByScience )
+		{
 			feedAct( owner, cameo, WideCharStringToMultiByte( source->getTemplate()->getDisplayName().str() ),
 							 "launched", "GUI:HudSuperweaponLaunched" );
+			alertSuperweapon( owner, source->getTemplate()->getDisplayName(), "GUI:HudAlertLaunched" );
+		}
 		return;
 	}
 	if( power->getRequiredScience() == SCIENCE_INVALID || button == NULL || !feedShows( owner ) )
@@ -4353,6 +4401,92 @@ void InGameUI::feedStructure( Object *structure, Bool finished )
 	feedAct( owner, structure->getTemplate()->getButtonImage(),
 					 WideCharStringToMultiByte( structure->getTemplate()->getDisplayName().str() ),
 					 finished ? "built" : "started", finished ? "GUI:HudStructureBuilt" : "GUI:HudStructureStarted" );
+	if( finished && superweapon )
+		alertSuperweapon( owner, structure->getTemplate()->getDisplayName(), "GUI:HudAlertBuilt" );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A banner for a superweapon built, charged or fired, queued behind any already up: the same three
+	* moments EVA calls out to every player, so it tells nobody anything EVA does not.  Whose it is
+	* is the colour alone, the owner's call: the local player's own neutral, an ally's blue, an enemy's
+	* red.  A watcher has no side and gets the neutral one. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::alertSuperweapon( Player *owner, const UnicodeString &name, const char *label )
+{
+	const Player *local = ThePlayerList->getLocalPlayer();
+	SuperweaponAlert alert;
+	UnicodeString text;
+	text.format( TheGameText->fetch( label ), name.str() );
+	alert.text = WideCharStringToMultiByte( text.str() );
+	if( !local->isPlayerActive() || owner == local )
+		alert.whose = "own";
+	else
+		alert.whose = local->getRelationship( owner->getDefaultTeam() ) == ENEMIES ? "enemy" : "ally";
+	if( m_alerts.empty() )
+		m_alertStartMs = timeGetTime();
+	m_alerts.push_back( alert );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The banner up now, under the top page and centred on the console, fading out at the end of its
+	* time.  How long it holds is the owner's rule and goes by what waits behind it: alone, four
+	* seconds; with one more, two; with two or more, one.  It is asked again every frame, so a banner
+	* arriving while one is up can cut the one up short and never draws it out.  Timed on the client's
+	* wall clock, as the money plate's settle and the superweapon strip's breath are: a picture, not a
+	* thing the match counts.  Its page is laid out once per banner: the fade is the page's alpha,
+	* applied as it draws. */
+//-------------------------------------------------------------------------------------------------
+static const UnsignedInt ALERT_FADE_MS = 600;
+static const char *const ALERT_PAGE = "Window\\Html\\Alert.html";
+
+static UnsignedInt alertHoldMs( size_t waiting )
+{
+	static const UnsignedInt HOLD_ALONE_MS = 4000, HOLD_ONE_WAITING_MS = 2000, HOLD_MORE_WAITING_MS = 1000;
+	return waiting == 0 ? HOLD_ALONE_MS : waiting == 1 ? HOLD_ONE_WAITING_MS : HOLD_MORE_WAITING_MS;
+}
+
+void InGameUI::drawAlertPage( void )
+{
+	enum { ALERT_GAP = 14, ALERT_WIDTH = 360, ALERT_OPAQUE = 255 };	// the gap clear of the plates, the owner's "a bit lower"
+	m_alertBottom = 0;
+	const UnsignedInt nowMs = timeGetTime();
+	while( !m_alerts.empty() && nowMs - m_alertStartMs >= alertHoldMs( m_alerts.size() - 1 ) )
+	{
+		m_alerts.erase( m_alerts.begin() );
+		m_alertStartMs = nowMs;
+	}
+	if( m_alerts.empty() )
+		return;
+
+	if( !m_alertPageLoaded )
+	{
+		m_alertPageLoaded = TRUE;
+		readHtmlPage( ALERT_PAGE, m_alertPage );
+	}
+	if( m_alertPage.empty() )
+		return;
+	if( m_alertOverlay == NULL )
+	{
+		m_alertOverlay = new HtmlOverlay( m_superweaponNormalFont );
+		m_alertOverlay->setHud( TRUE );
+	}
+
+	const Real scale = ControlBarHudScale();
+	const SuperweaponAlert &alert = m_alerts.front();
+	HtmlValues values;
+	// the console stands with the powers' widest kept free on its right, so its axis with them is the
+	// screen's middle, the line the top page's plates hang on too
+	values[ "left" ] = std::to_string( REAL_TO_INT_FLOOR( TheDisplay->getWidth() / 2 / scale + 0.5f ) - ALERT_WIDTH / 2 );
+	values[ "width" ] = std::to_string( ALERT_WIDTH );
+	values[ "top" ] = std::to_string( REAL_TO_INT_FLOOR( m_topBarBottom / scale + 0.5f ) + ALERT_GAP );
+	values[ "whose" ] = alert.whose;
+	values[ "text" ] = alert.text;
+	m_alertOverlay->setPage( HtmlTemplate_expand( m_alertPage, values, HtmlLists(), lookupGameText ) );
+
+	const UnsignedInt left = alertHoldMs( m_alerts.size() - 1 ) - ( nowMs - m_alertStartMs );
+	m_alertOverlay->setAlpha( left < ALERT_FADE_MS ? (Int)( ALERT_OPAQUE * left / ALERT_FADE_MS ) : ALERT_OPAQUE );
+	m_alertOverlay->draw();
+	m_alertBottom = m_alertOverlay->bottomOf( "#alert" );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -4445,21 +4579,18 @@ static Int controlBarTop( void )
 static const char *const FEED_PAGE = "Window\\Html\\Feed.html";
 
 //-------------------------------------------------------------------------------------------------
-/** Where the feed stands on screen: the radar's under-attack tab, or the production queue's row
-	* while that is up over the tab. */
+/** Where the feed starts on screen: under the menu key in the top left corner, or the screen's top
+	* without the bar's page. */
 //-------------------------------------------------------------------------------------------------
-Int InGameUI::feedFloor( void ) const
+Int InGameUI::feedTop( void ) const
 {
-	// ponytail: with no bar page the old queue column climbs the same corner under the feed; the
-	// page always ships, so that column's top is not measured
-	const Int floor = m_controlBarPageShown ? m_feedFloor : controlBarTop();
-	return m_productionStripThemed && m_productionStripCount > 0 ? min( floor, m_queueTrayTop ) : floor;
+	return m_controlBarPageShown ? m_feedTop : 0;
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The event feed, Window/Html/Feed.html, for a player and a watcher alike: the newest line at the
-	* bottom, standing on the radar's under-attack tab, or on the production queue's row while that is
-	* up over the tab.  The last FEED_LINES_KEPT lines are up for FEED_LINE_FRAMES each, and while the
+/** The event feed, Window/Html/Feed.html, for a player and a watcher alike: the oldest line at the
+	* top, under the menu key in the top left corner, and the newest under it, the run growing down
+	* the screen.  The last FEED_LINES_KEPT lines are up for FEED_LINE_FRAMES each, and while the
 	* chat is open every line held is, so Enter shows what was missed.  The messages switch
 	* (toggleMessages) takes the whole feed away. */
 //-------------------------------------------------------------------------------------------------
@@ -4491,10 +4622,13 @@ void InGameUI::drawFeed( void )
 	if( m_feedPage.empty() )
 		return;
 	if( m_feedOverlay == NULL )
+	{
 		m_feedOverlay = new HtmlOverlay( m_superweaponNormalFont );
+		m_feedOverlay->setHudPage( TRUE );
+	}
 
 	HtmlValues values;
-	values[ "floor" ] = std::to_string( REAL_TO_INT_FLOOR( feedFloor() / ControlBarUniformScale() ) );
+	values[ "top" ] = std::to_string( REAL_TO_INT_FLOOR( feedTop() / ControlBarHudPageScale() ) );
 	m_feedOverlay->setPage( HtmlTemplate_expand( m_feedPage, values, lists, lookupGameText ) );
 	m_feedOverlay->draw();
 }
@@ -4532,9 +4666,9 @@ void InGameUI::chatMessage( Player *player, const UnicodeString &text )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The chat, Window/Html/Chat.html, in the left corner over the feed, clear of it even with all
+/** The chat, Window/Html/Chat.html, in the top left corner under the feed, clear of it even with all
 	* FEED_LINES_KEPT of its lines up so the chat does not move as the feed grows, and open, clear of
-	* the feed's whole history under it too: shut, the talk round its newest line, fading out
+	* the feed's whole history over it too: shut, the talk round its newest line, fading out
 	* together; open, the typing bar under every line held, the chat's own windows moved under it so
 	* they take the keys and the clicks there and draw nothing. */
 //-------------------------------------------------------------------------------------------------
@@ -4543,27 +4677,31 @@ void InGameUI::drawChat( void )
 	if( !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
 		return;
 
-	const Real scale = ControlBarUniformScale();
-	const size_t feedLines = max( (size_t)FEED_LINES_KEPT, IsInGameChatActive() ? m_feedLines.size() : 0 );
-	const Int bar = REAL_TO_INT_FLOOR( feedFloor() / scale ) - (Int)feedLines * FEED_LINE_HEIGHT - FEED_FOOT - CHAT_OVER_FEED -
-									CHAT_BAR_HEIGHT;
-
-	UnicodeString typed, audience;
-	const Bool open = GetInGameChatEntry( typed, audience, 0, REAL_TO_INT_FLOOR( bar * scale ),
-																				REAL_TO_INT_CEIL( CHAT_WIDTH * scale ), REAL_TO_INT_CEIL( CHAT_BAR_HEIGHT * scale ) );
-
 	// shut, the chat is the talk around its newest line: every line that came within CHAT_LINE_FRAMES
 	// before it, up until CHAT_LINE_FRAMES after it and fading out together over the last
 	// CHAT_FADE_FRAMES of that
 	const UnsignedInt frame = TheGameLogic->getFrame();
 	const UnsignedInt newestUntil = m_chatLines.empty() ? 0 : m_chatLines.back().until;
-	if( !open && ( frame >= newestUntil || frame + CHAT_LINE_FRAMES < newestUntil ) )
-		return;
+	const Bool active = IsInGameChatActive();
 	HtmlLists lists;
 	std::vector< HtmlValues > &lines = lists[ "chat" ];
 	for( size_t line = 0; line < m_chatLines.size(); line++ )
-		if( open || m_chatLines[ line ].until + CHAT_LINE_FRAMES >= newestUntil )
+		if( active || m_chatLines[ line ].until + CHAT_LINE_FRAMES >= newestUntil )
 			lines.push_back( m_chatLines[ line ].values );
+
+	// under the feed, clear of all FEED_LINES_KEPT of its lines so it does not move as the feed grows,
+	// and open, clear of the feed's whole history over it too; the lines stand on the typing bar, which
+	// stands under room for every line kept, so a line coming in does not move it
+	const Real scale = ControlBarHudPageScale();
+	const size_t feedLines = max( (size_t)FEED_LINES_KEPT, active ? m_feedLines.size() : 0 );
+	const Int bar = REAL_TO_INT_FLOOR( feedTop() / scale ) + (Int)feedLines * FEED_LINE_HEIGHT + FEED_FOOT + CHAT_OVER_FEED +
+									CHAT_LINES_KEPT * FEED_LINE_HEIGHT + FEED_FOOT;
+
+	UnicodeString typed, audience;
+	const Bool open = GetInGameChatEntry( typed, audience, 0, REAL_TO_INT_FLOOR( bar * scale ),
+																				REAL_TO_INT_CEIL( CHAT_WIDTH * scale ), REAL_TO_INT_CEIL( CHAT_BAR_HEIGHT * scale ) );
+	if( !open && ( frame >= newestUntil || frame + CHAT_LINE_FRAMES < newestUntil ) )
+		return;
 
 	if( !m_chatPageLoaded )
 	{
@@ -4573,7 +4711,10 @@ void InGameUI::drawChat( void )
 	if( m_chatPage.empty() )
 		return;
 	if( m_chatOverlay == NULL )
+	{
 		m_chatOverlay = new HtmlOverlay( m_superweaponNormalFont );
+		m_chatOverlay->setHudPage( TRUE );
+	}
 
 	HtmlValues values;
 	values[ "bar" ] = std::to_string( bar );
@@ -5622,13 +5763,14 @@ Bool InGameUI::getAttackCircleGround( Coord3D& center, Real& radius ) const
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Everything hostile standing in the circle becomes a list of attacks, nearest first, and the group
-	* is put on the head of it.  Without shift the list replaces whatever the group was doing; with it,
-	* the list goes on the end of the group's shift queue.  Shroud decides membership: a target the
-	* player cannot see is not in the circle, whatever the partition manager knows about it.  The
-	* targets go through the same queue a shift-clicked attack uses, so the whole list is drawn on the
-	* ground as threads and markers instead of only the one target the group happens to be shooting
-	* at. */
+/** The enemies standing in the circle are shared across the units that can shoot.  Both sides are
+	* stood in the order they sit around the centre the player drew, the same order a move line uses
+	* along its curve, and the shots are then dealt so the counts differ by one at most.  With enough
+	* guns each takes one target.  With more targets than guns, each gun queues its own run of them
+	* instead of the whole selection walking one list.  The pair is two ids on the attack message, the
+	* target first, so every other machine fires what this one decided and nobody recomputes the
+	* circle.  Without shift, a unit's first shot replaces whatever it was doing; with shift, the run
+	* goes on the end of that unit's own queue.  Shroud decides which enemies count. */
 //-------------------------------------------------------------------------------------------------
 Bool InGameUI::issueAttackCircle( void )
 {
@@ -5645,25 +5787,91 @@ Bool InGameUI::issueAttackCircle( void )
 
 	const Player *local = ThePlayerList->getLocalPlayer();
 
-	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange( &center, radius,
-																																		FROM_CENTER_2D, NULL,
-																																		ITER_SORTED_NEAR_TO_FAR );
+	// who can actually shoot. a dozer standing in the selection is not given somebody else's target.
+	// a passenger whose transport is also selected is left out too: the transport's own order already
+	// tells everyone inside it to fire.
+	const DrawableList *selected = getAllSelectedLocalDrawables();
+	std::vector<const Object *> shooters;
+	shooters.reserve( selected->size() );
+	for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
+	{
+		const Object *obj = (*it) ? (*it)->getObject() : NULL;
+		if( obj == NULL || obj->isEffectivelyDead() || !obj->isAbleToAttack() )
+			continue;
+		shooters.push_back( obj );
+	}
+
+	std::vector<AttackAssignSlot> attackers;
+	attackers.reserve( shooters.size() );
+	for( std::vector<const Object *>::const_iterator it = shooters.begin(); it != shooters.end(); ++it )
+	{
+		const Object *obj = *it;
+		const Object *holder = obj->getContainedBy();
+		if( holder != NULL )
+		{
+			Bool holderSelected = FALSE;
+			for( std::vector<const Object *>::const_iterator other = shooters.begin(); other != shooters.end(); ++other )
+			{
+				if( *other == holder )
+				{
+					holderSelected = TRUE;
+					break;
+				}
+			}
+			if( holderSelected )
+				continue;
+		}
+
+		AttackAssignSlot slot;
+		slot.id = obj->getID();
+		slot.x = obj->getPosition()->x;
+		slot.y = obj->getPosition()->y;
+		attackers.push_back( slot );
+	}
+
+	std::vector<AttackAssignSlot> targets;
+	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange( &center, radius, FROM_CENTER_2D, NULL );
 	MemoryPoolObjectHolder holder( iter );
-	Int targetCount = 0;
 	for( Object *obj = iter->first(); obj; obj = iter->next() )
 	{
 		if( !isAttackListTarget( obj, local ) )
 			continue;
 
-		const Bool startsList = targetCount == 0 && !isInWaypointMode();
-		markNextOrderQueued( startsList ? ORDER_QUEUE_FRESH : ORDER_QUEUE_APPEND );
-		GameMessage *attack = TheMessageStream->appendMessage( GameMessage::MSG_DO_ATTACK_OBJECT );
-		attack->appendObjectIDArgument( obj->getID() );
-		targetCount++;
+		AttackAssignSlot slot;
+		slot.id = obj->getID();
+		slot.x = obj->getPosition()->x;
+		slot.y = obj->getPosition()->y;
+		targets.push_back( slot );
 	}
 
-	DEBUG_LOG(("attack circle: radius %.0f, %d targets, %d selected\n", radius, targetCount,
-						 getSelectCount()));
+	orderAroundPoint( attackers, center.x, center.y );
+	orderAroundPoint( targets, center.x, center.y );
+
+	std::vector<AttackAssignPair> pairs;
+	assignAttacks( (Int)attackers.size(), (Int)targets.size(), pairs );
+
+	ObjectID previousAttacker = INVALID_ID;
+	for( std::vector<AttackAssignPair>::const_iterator pair = pairs.begin(); pair != pairs.end(); ++pair )
+	{
+		const AttackAssignSlot& attacker = attackers[ pair->attacker ];
+		const AttackAssignSlot& target = targets[ pair->target ];
+		if( attacker.id == target.id )
+			continue;
+
+		const Bool firstForThisAttacker = attacker.id != previousAttacker;
+		previousAttacker = attacker.id;
+
+		// each unit's first shot starts that unit's list. the rest of its run is queued behind it.
+		// shift appends the whole run onto whatever that one unit was already doing.
+		const Bool startsList = firstForThisAttacker && !isInWaypointMode();
+		markNextOrderQueued( startsList ? ORDER_QUEUE_FRESH : ORDER_QUEUE_APPEND );
+		GameMessage *attack = TheMessageStream->appendMessage( GameMessage::MSG_DO_ATTACK_OBJECT );
+		attack->appendObjectIDArgument( target.id );
+		attack->appendObjectIDArgument( attacker.id );
+	}
+
+	DEBUG_LOG(("attack circle: radius %.0f, %d targets, %d attackers, %d shots\n", radius,
+						 (Int)targets.size(), (Int)attackers.size(), (Int)pairs.size()));
 	return TRUE;
 }
 
@@ -5699,11 +5907,13 @@ Bool InGameUI::isAttackListTarget( const Object *obj, const Player *local ) cons
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The line drawn with the attack key: every enemy it runs across goes on the target list, in the
-	* order the line reaches it, so the direction it was drawn in is the direction the group fights
-	* along.  "Across" is the line passing over the object's own footprint, give or take a few feet for
-	* a hand that is not steady.  Returns how many targets went out; with none, the caller fires on
-	* the ground along the line instead. */
+/** The line drawn with the attack key: every enemy it runs across is shared across the units that
+	* can shoot, in the order both sides stand along the stroke, nearest the start first.  The shots
+	* are dealt the same way as the circle, so the counts differ by one at most, and each unit works
+	* down its own share.  "Across" is the line passing over the object's own footprint, give or take
+	* a few feet for a hand that is not steady.  Returns how many enemies the line crossed.  With
+	* none, the caller fires on the ground along the line instead.  Enemies that nobody selected can
+	* shoot still count, so the ground is not fired in their place. */
 //-------------------------------------------------------------------------------------------------
 Int InGameUI::issueAttackLine( const std::vector<Coord3D>& line )
 {
@@ -5740,8 +5950,9 @@ Int InGameUI::issueAttackLine( const std::vector<Coord3D>& line )
 	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange( &center, reach, FROM_CENTER_2D, NULL );
 	MemoryPoolObjectHolder holder( iter );
 
-	// how far along the line each target is, so they can go out in the order the line meets them
-	std::vector< std::pair<Real, ObjectID> > targets;
+	// enemies the stroke actually crosses. who stands where along it is sorted afterwards, guns and
+	// enemies the same way, so the deal does not depend on the order the range query handed them over
+	std::vector<AttackAssignSlot> targets;
 	for( Object *obj = iter->first(); obj; obj = iter->next() )
 	{
 		if( !isAttackListTarget( obj, local ) )
@@ -5773,21 +5984,89 @@ Int InGameUI::issueAttackLine( const std::vector<Coord3D>& line )
 		}
 
 		if( along >= 0.0f )
-			targets.push_back( std::make_pair( along, obj->getID() ) );
+		{
+			AttackAssignSlot slot;
+			slot.id = obj->getID();
+			slot.x = pos->x;
+			slot.y = pos->y;
+			targets.push_back( slot );
+		}
 	}
 
-	std::sort( targets.begin(), targets.end() );
-
-	for( size_t i = 0; i < targets.size(); ++i )
+	// who can actually shoot. a dozer standing in the selection is not given somebody else's target.
+	// a passenger whose transport is also selected is left out too: the transport's own order already
+	// tells everyone inside it to fire. the circle collects the same list.
+	std::vector<AttackAssignSlot> attackers;
+	std::vector<AttackAssignPair> pairs;
+	if( !targets.empty() )
 	{
-		const Bool startsList = i == 0 && !isInWaypointMode();
-		markNextOrderQueued( startsList ? ORDER_QUEUE_FRESH : ORDER_QUEUE_APPEND );
-		GameMessage *attack = TheMessageStream->appendMessage( GameMessage::MSG_DO_ATTACK_OBJECT );
-		attack->appendObjectIDArgument( targets[ i ].second );
+		const DrawableList *selected = getAllSelectedLocalDrawables();
+		std::vector<const Object *> shooters;
+		shooters.reserve( selected->size() );
+		for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
+		{
+			const Object *obj = (*it) ? (*it)->getObject() : NULL;
+			if( obj == NULL || obj->isEffectivelyDead() || !obj->isAbleToAttack() )
+				continue;
+			shooters.push_back( obj );
+		}
+
+		attackers.reserve( shooters.size() );
+		for( std::vector<const Object *>::const_iterator it = shooters.begin(); it != shooters.end(); ++it )
+		{
+			const Object *obj = *it;
+			const Object *container = obj->getContainedBy();
+			if( container != NULL )
+			{
+				Bool containerSelected = FALSE;
+				for( std::vector<const Object *>::const_iterator other = shooters.begin(); other != shooters.end(); ++other )
+				{
+					if( *other == container )
+					{
+						containerSelected = TRUE;
+						break;
+					}
+				}
+				if( containerSelected )
+					continue;
+			}
+
+			AttackAssignSlot slot;
+			slot.id = obj->getID();
+			slot.x = obj->getPosition()->x;
+			slot.y = obj->getPosition()->y;
+			attackers.push_back( slot );
+		}
+
+		std::vector<Real> arc;
+		buildPathArcLengths( line, arc );
+		orderAlongPath( attackers, line, arc );
+		orderAlongPath( targets, line, arc );
+		assignAttacks( (Int)attackers.size(), (Int)targets.size(), pairs );
+
+		ObjectID previousAttacker = INVALID_ID;
+		for( std::vector<AttackAssignPair>::const_iterator pair = pairs.begin(); pair != pairs.end(); ++pair )
+		{
+			const AttackAssignSlot& attacker = attackers[ pair->attacker ];
+			const AttackAssignSlot& target = targets[ pair->target ];
+			if( attacker.id == target.id )
+				continue;
+
+			const Bool firstForThisAttacker = attacker.id != previousAttacker;
+			previousAttacker = attacker.id;
+
+			// each unit's first shot starts that unit's list. the rest of its run is queued behind it.
+			// shift appends the whole run onto whatever that one unit was already doing.
+			const Bool startsList = firstForThisAttacker && !isInWaypointMode();
+			markNextOrderQueued( startsList ? ORDER_QUEUE_FRESH : ORDER_QUEUE_APPEND );
+			GameMessage *attack = TheMessageStream->appendMessage( GameMessage::MSG_DO_ATTACK_OBJECT );
+			attack->appendObjectIDArgument( target.id );
+			attack->appendObjectIDArgument( attacker.id );
+		}
 	}
 
-	DEBUG_LOG(("attack line: %d points, %d targets, %d selected\n", (Int)line.size(), (Int)targets.size(),
-						 getSelectCount()));
+	DEBUG_LOG(("attack line: %d points, %d targets, %d attackers, %d shots\n", (Int)line.size(),
+						 (Int)targets.size(), (Int)attackers.size(), (Int)pairs.size()));
 	return (Int)targets.size();
 }
 
@@ -5868,6 +6147,9 @@ void InGameUI::createMouseoverHint( const GameMessage *msg )
 	Bool underWindow = false;
 	if (io && TheWindowManager)
 		window = TheWindowManager->getWindowUnderCursor(io->pos.x, io->pos.y);
+	// the bar's page's steel where no window of the bar stands, the top page's, is the HUD's too
+	if (io && window == NULL)
+		underWindow = isOnControlBarSteel( io->pos );
 
 	while (window)
 	{
@@ -6037,8 +6319,22 @@ void InGameUI::createMouseoverHint( const GameMessage *msg )
 			{
 				Int boxes = warehouseModule->getBoxesStored();
 				Int value = boxes * TheGlobalData->m_baseValuePerSupplyBox;
-				warehouseFeedback.format(TheGameText->fetch("TOOLTIP:SupplyWarehouse"), value);
+				Int startingBoxes = warehouseModule->getStartingBoxes();
+				if( startingBoxes > 0 )
+				{
+					// what is left against what the pile began the match with; it can be stocked past that
+					Int percent = min( 100, boxes * 100 / startingBoxes );
+					warehouseFeedback.format(TheGameText->fetch("TOOLTIP:SupplyWarehousePercent"), value, percent);
+				}
+				else
+				{
+					// a map or a mod that starts the pile empty gives no total to take a share of: cash alone
+					warehouseFeedback.format(TheGameText->fetch("TOOLTIP:SupplyWarehouse"), value);
+				}
 				str.concat(warehouseFeedback);
+				// the lobby's supply pile limit: say so when this player's gatherers would be turned away
+				if( warehouseModule->isClosedToPlayer( ThePlayerList->getLocalPlayer() ) )
+					str.concat( TheGameText->fetch( "TOOLTIP:SupplyPileFull" ) );
 			}
 
       if (player)
@@ -6202,6 +6498,9 @@ void InGameUI::createCommandHint( const GameMessage *msg )
 	Bool underWindow = false;
 	if (io && TheWindowManager)
 		window = TheWindowManager->getWindowUnderCursor(io->pos.x, io->pos.y);
+	// the bar's page's steel where no window of the bar stands, the top page's, is the HUD's too
+	if (io && window == NULL)
+		underWindow = isOnControlBarSteel( io->pos );
 
 
 	while (window)
@@ -6426,7 +6725,7 @@ void InGameUI::createCommandHint( const GameMessage *msg )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Force fire is the attack key alone; ctrl held is the shared pace on a move. */
+/** Force fire is the attack key alone. */
 //-------------------------------------------------------------------------------------------------
 Bool InGameUI::isForceFireOn( void ) const
 {
@@ -6620,6 +6919,12 @@ void InGameUI::destroyPlacementIcons( void )
 //-------------------------------------------------------------------------------------------------
 void InGameUI::placeBuildAvailable( const ThingTemplate *build, Drawable *buildDrawable )
 {
+	//
+	// Each placement starts packed. The wheel opens the row while its line is being drawn, and that
+	// gap belongs to the line, not to the next building.
+	//
+	m_placementRowGap = 0.0f;
+	m_placementRowGapWheel = 0.0f;
 
 	// if building something, no radius cursor, thankew
 	if (build != NULL)
@@ -6938,13 +7243,58 @@ void InGameUI::snapPlacementToGrid( Coord3D *world, const ThingTemplate *what, R
 }  // end snapPlacementToGrid
 
 //-------------------------------------------------------------------------------------------------
-/** Shift held on the drag: a wall already tiles from any drag, so it is left to do that. */
+/** Shift or alt held on the drag: a wall already tiles from any drag, so it is left to do that.
+	* Everything that asks this wants to know whether the drag lays pieces instead of aiming one, and
+	* that is the same answer for a row and a grid; computePlacementRow is where the two part. */
 //-------------------------------------------------------------------------------------------------
 Bool InGameUI::placesRow( void )
 {
-	return m_pendingPlaceType != NULL && TheKeyboard && TheKeyboard->isShift() &&
+	return m_pendingPlaceType != NULL && TheKeyboard &&
+				 ( TheKeyboard->isShift() || TheKeyboard->isAlt() ) &&
 				 !TheBuildAssistant->isLineBuildTemplate( m_pendingPlaceType );
 }
+
+//-------------------------------------------------------------------------------------------------
+/** Alt makes it a grid, and wins over shift when both are down: a grid dragged along the
+	* structure's own line is already a row.  Let go of alt with shift still held and the same drag
+	* is the shift row again; let go of both and it aims one structure.  Asked only once placesRow
+	* has said yes. */
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::placesGrid( void ) const
+{
+	return TheKeyboard->isAlt();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** One grid square a notch, added to the packed step.  A notch toward the user closes it back,
+	* and it stops at the buildings touching: tighter than that is two structures on one footprint.
+	* Fractions pile up, so a touchpad swipe that arrives as halves still moves the row. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::adjustPlacementRowGap( Real spin )
+{
+	const Real cell = (Real)PLACEMENT_CELL;
+	const Real cap = 20.0f * cell;
+
+	m_placementRowGapWheel += spin;
+	const Int steps = (Int)m_placementRowGapWheel;
+	if( steps == 0 )
+		return;
+
+	m_placementRowGapWheel -= (Real)steps;
+	m_placementRowGap += (Real)steps * cell;
+
+	if( m_placementRowGap < 0.0f )
+	{
+		m_placementRowGap = 0.0f;
+		m_placementRowGapWheel = 0.0f;
+	}
+	else if( m_placementRowGap > cap )
+	{
+		m_placementRowGap = cap;
+		m_placementRowGapWheel = 0.0f;
+	}
+
+}  // end adjustPlacementRowGap
 
 //-------------------------------------------------------------------------------------------------
 /** Every piece faces 'angle', the heading on the ghost before the drag began: the drag is spent on
@@ -6974,15 +7324,33 @@ void InGameUI::computePlacementRow( const ThingTemplate *what, Real angle, const
 			most = affordable;
 	}
 
+	// a row is one line of a grid: everything on line 0, and no step to a next one
 	Coord2D step;
-	const Int count = placementRow( end->x - start->x, end->y - start->y, (Real)Cos( angle ),
-																	(Real)Sin( angle ), halfFacing, minor, most, &step );
+	Coord2D lineStep;
+	lineStep.x = 0.0f;
+	lineStep.y = 0.0f;
+	Int count;
+	Int perLine;
+	if( placesGrid() )
+	{
+		count = placementGrid( end->x - start->x, end->y - start->y, (Real)Cos( angle ),
+													 (Real)Sin( angle ), halfFacing, minor, most, &step, &lineStep, &perLine,
+													 m_placementRowGap );
+	}
+	else
+	{
+		count = placementRow( end->x - start->x, end->y - start->y, (Real)Cos( angle ),
+													(Real)Sin( angle ), halfFacing, minor, most, &step,
+													m_placementRowGap );
+		perLine = count;
+	}
+
 	positions->clear();
 	for( Int i = 0; i < count; i++ )
 	{
 		Coord3D pos;
-		pos.x = start->x + step.x * i;
-		pos.y = start->y + step.y * i;
+		pos.x = start->x + step.x * ( i % perLine ) + lineStep.x * ( i / perLine );
+		pos.y = start->y + step.y * ( i % perLine ) + lineStep.y * ( i / perLine );
 		pos.z = TheTerrainLogic->getGroundHeight( pos.x, pos.y );
 		positions->push_back( pos );
 	}
@@ -7635,7 +8003,6 @@ void InGameUI::postDraw( void )
 		// laid out at the end of it, soonest first.
 		//
 		m_superweaponIconCount = 0;
-		m_superweaponIconTotal = 0;
 		m_spectatorSuperweapons.clear();
 
 		for (Int i=0; i<MAX_PLAYER_COUNT; ++i)
@@ -7682,6 +8049,8 @@ void InGameUI::postDraw( void )
                     feedAct( owningObject->getControllingPlayer(), superweaponCameo( info->getSpecialPowerTemplate() ),
                              WideCharStringToMultiByte( owningObject->getTemplate()->getDisplayName().str() ),
                              "ready", "GUI:HudSuperweaponReady" );
+                  alertSuperweapon( owningObject->getControllingPlayer(), owningObject->getTemplate()->getDisplayName(),
+                                    "GUI:HudAlertReady" );
 
                     SpecialPowerType type = module->getSpecialPowerTemplate()->getSpecialPowerType();
                   
@@ -9298,6 +9667,11 @@ void InGameUI::drawPeaceTimer( void )
 		return;
 	}
 
+	// the bar's top page carries it in a plate of its own (drawControlBarPage); this loose plate is
+	// for a screen without that page
+	if( m_controlBarPageShown && m_peacePlateBottom > 0 )
+		return;
+
 	const UnsignedInt secs = ControlBar_secondsFromFrames( (Real)left );
 
 	UnicodeString text;
@@ -9329,12 +9703,12 @@ void InGameUI::drawPeaceTimer( void )
 	Int labelWidth = 0, labelHeight = 0;
 	m_peaceTimeLabelDisplayString->getSize( &labelWidth, &labelHeight );
 
-	// clear of the top edge rather than jammed against it, and the gap grows with the screen the
-	// same way the command bar under it does
+	// under the top page, the money, clock and power, rather than jammed against it, and the gap grows
+	// with the screen the same way the command bar does
 	const Int pad = 4;
 	const Int plateWidth = (labelWidth > textWidth ? labelWidth : textWidth) + pad*2;
 	const Int plateLeft = (TheDisplay->getWidth() - plateWidth) / 2;
-	const Int top = stripPixels( PEACE_TIMER_TOP_PAD );
+	const Int top = ( m_controlBarPageShown ? m_topBarBottom : 0 ) + stripPixels( PEACE_TIMER_TOP_PAD );
 
 	TheDisplay->drawFillRect( plateLeft, top - 1, plateWidth, labelHeight + textHeight + 2,
 														GameMakeColor( 0, 0, 0, 160 ) );
@@ -9411,10 +9785,18 @@ void InGameUI::drawPeaceCountdown( UnsignedInt framesLeft )
 	Int labelWidth = 0, labelHeight = 0;
 	m_peaceTimeLabelDisplayString->getSize( &labelWidth, &labelHeight );
 
-	// the same line the plate's word was on, so the word does not move when the plate goes
-	const Int top = stripPixels( PEACE_TIMER_TOP_PAD );
 	const Int alpha = REAL_TO_INT_CEIL( opacity * 255.0f );
 
+	// with the top page up the word stays in its plate and the digit hangs from the plate's foot;
+	// without it, the word and the digit stand on the line the loose plate's word was on
+	if( m_controlBarPageShown && m_peacePlateBottom > 0 )
+	{
+		m_peaceCountdownDisplayString->draw( (TheDisplay->getWidth() - textWidth) / 2, m_peacePlateBottom + stripPixels( 2 ),
+										peaceTimeColor( alpha ), GameMakeColor( 0, 0, 0, alpha ) );
+		return;
+	}
+
+	const Int top = stripPixels( PEACE_TIMER_TOP_PAD );
 	m_peaceTimeLabelDisplayString->draw( (TheDisplay->getWidth() - labelWidth) / 2, top,
 									peaceTimeColor( 255 ), GameMakeColor( 0, 0, 0, 255 ) );
 
@@ -9430,7 +9812,7 @@ void InGameUI::drawHudOverlay( void )
 
 	// the command bar page's network box reads these whether the plate is switched on or not; the
 	// plate itself stands down while the page is up, the box is where they are written then
-	const Bool plate = TheGlobalData->m_showHudOverlay && !m_controlBarPageShown;
+	const Bool plate = TheGlobalData->m_showHudOverlay && TheGlobalData->m_showNetBox && !m_controlBarPageShown;
 
 	// only once a real game is under way - not in the shell, and not on the menu's background map
 	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
@@ -9596,13 +9978,12 @@ void InGameUI::drawHudOverlay( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-// The production strip: one cameo per queued item, drawn over the world in a column standing on
-// the corner just above the control bar and growing upward, soonest to finish at the bottom - the
-// item about to pop is always the cell nearest the bar, wherever in the base it is being built.
-// That column is global - everything the local player has queued anywhere - and the buildings
-// going up on the ground stand in a second column beside it. A column draws at most
-// PRODUCTION_STRIP_ROW_MAX cameos and closes with a sixth cell wearing a "+N" for whatever else is
-// queued. Units and upgrades wear the same two border colours the command bar uses. The item a
+// The production strip: one cameo per queued item, drawn in rows of five standing on the console
+// over the selection's well and growing upward, soonest to finish at the bottom left - the item
+// about to pop is always the cell nearest the bar, wherever in the base it is being built. The run
+// is global - everything the local player has queued anywhere, the buildings going up on the
+// ground among them. It draws at most PRODUCTION_STRIP_ROW_MAX cameos and closes with a tenth cell
+// wearing a "+N" for whatever else is queued. Units and upgrades wear the same two border colours the command bar uses. The item a
 // building is actually working on wears a radial fill. A click takes the camera to the building an
 // item is queued on; right-click (or Ctrl-click) cancels one queued item.
 //-------------------------------------------------------------------------------------------------
@@ -10000,35 +10381,127 @@ Bool InGameUI::stripSlotGoesBefore( Bool leads, Int remaining,
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawStripSeconds( Int which, Int x, Int y, Int w, Int h, Int seconds )
 {
-	// its own string, kept between frames - see m_stripSecondsString
-	DisplayString *&secondsString = m_stripSecondsString[ which ];
+	const IRegion2D cell = { { x, y }, { x + w, y + h } };
 
-	if( secondsString == NULL )
+	UnicodeString text, number;
+	formatStripSeconds( &text, seconds );
+	number.format( L"%d", seconds > 0 ? seconds : 0 );
+
+	//
+	// Its own string, kept between frames - see m_stripSecondsString.  Every countdown in a strip is
+	// lettered at one size: a "103s" too wide for its cameo drops the unit and stays that size, where
+	// set a point smaller it stood thin beside a bold "79s" in the next cell.  A string already
+	// holding the bare number was measured when the number last changed and is not measured again,
+	// which would letter it twice a frame.
+	//
+	DisplayString *&string = m_stripSecondsString[ which ];
+	if( string == NULL )
+		string = TheDisplayStringManager->newDisplayString();
+	const Bool unitDropped = string->getText().compare( number ) == 0;
+	if( !unitDropped && ( string->getFont() == NULL || string->getText().compare( text ) != 0 ) )
 	{
-		secondsString = TheDisplayStringManager->newDisplayString();
-		secondsString->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
-										TheGlobalLanguageData->adjustFontSize( PRODUCTION_STRIP_SECS ),
-										TRUE ) );
+		string->setFont( TheFontLibrary->getFont( m_superweaponNormalFont, TheGlobalLanguageData->adjustFontSize( PRODUCTION_STRIP_SECS ), TRUE ) );
+		string->setText( text );
+	}
+	if( unitDropped || !HudReadout_fits( string, cell ) )
+		fitStripString( string, number, PRODUCTION_STRIP_SECS, cell );
+	HudReadout_draw( string, cell, HUD_READOUT_BOTTOM_LEFT, GameMakeColor( 245, 245, 245, 255 ) );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A frame the page draws over a cell's edge, in screen pixels: one page pixel, as thick as
+	* HtmlOverlay's draw_borders makes it at the HUD's scale. */
+//-------------------------------------------------------------------------------------------------
+static Int hudReadoutFrame( void )
+{
+	const Int frame = REAL_TO_INT_FLOOR( ControlBarHudScale() + 0.5f );
+	return frame > 1 ? frame : 1;
+}
+
+enum
+{
+	HUD_READOUT_PAD						= 2,	///< the plate's margin each side of its text, screen pixels
+	HUD_READOUT_POINTS_LEAST	= 6		///< text that still does not fit at this size stays this size
+};
+
+//-------------------------------------------------------------------------------------------------
+/** How wide a readout's text may be on `cell`: the cell less its frame and the plate's margins. */
+static Int readoutRoom( const IRegion2D &cell )
+{
+	return cell.hi.x - cell.lo.x - 2 * hudReadoutFrame() - 2 * HUD_READOUT_PAD;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Measured the way the plate is: by the string's drawn size.  getWidth() adds up the letters'
+	* advances, which leaves out the last letter's overhang, so a "103s" that fitted by that sum had a
+	* plate one pixel wider than its room and stood on the first column of the frame. */
+Bool HudReadout_fits( DisplayString *text, const IRegion2D &cell )
+{
+	Int textWidth = 0;
+	text->getSize( &textWidth, NULL );
+	return textWidth <= readoutRoom( cell );
+}
+
+//-------------------------------------------------------------------------------------------------
+void HudReadout_draw( DisplayString *text, const IRegion2D &cell, HudReadoutCorner corner, Color textColor )
+{
+	Int textWidth = 0, textHeight = 0;
+	text->getSize( &textWidth, &textHeight );
+	if( textWidth <= 0 || textHeight <= 0 )
+		return;
+
+	// text still too wide at the smallest size loses its end to the plate's edge: the plate is never
+	// wider than the cell inside its frame
+	const Int frame = hudReadoutFrame();
+	const Int plateWidth = min( textWidth, readoutRoom( cell ) ) + 2 * HUD_READOUT_PAD;
+	const Bool atLeft = corner == HUD_READOUT_TOP_LEFT || corner == HUD_READOUT_BOTTOM_LEFT;
+	const Bool atTop = corner == HUD_READOUT_TOP_LEFT || corner == HUD_READOUT_TOP_RIGHT;
+
+	Int left = atLeft ? cell.lo.x + frame : cell.hi.x - frame - plateWidth;
+	Int top = atTop ? cell.lo.y + frame : cell.hi.y - frame - textHeight;
+	if( corner == HUD_READOUT_CENTRE )
+	{
+		left = ( cell.lo.x + cell.hi.x - plateWidth ) / 2;
+		top = ( cell.lo.y + cell.hi.y - textHeight ) / 2;
 	}
 
-	UnicodeString text;
-	formatStripSeconds( &text, seconds );
-	secondsString->setText( text );
+	// solid, the colour of a cell's own hole: the text is read against the plate at every HUD Size,
+	// whatever picture is under it
+	TheDisplay->drawFillRect( left, top, plateWidth, textHeight, GameMakeColor( 2, 4, 5, 255 ) );
+	IRegion2D plate = { { left, top }, { left + plateWidth, top + textHeight } };
+	text->setClipRegion( &plate );
+	text->draw( left + HUD_READOUT_PAD, top, textColor, GameMakeColor( 0, 0, 0, 255 ) );
+}
 
-	Int textWidth = 0, textHeight = 0;
-	secondsString->getSize( &textWidth, &textHeight );
+//-------------------------------------------------------------------------------------------------
+/** A readout's own string holding `text`, made the first time, in `fontName` bold at `points` or as
+	* many points under it as it takes to fit a readout on `cell`.  The font is only set when the text
+	* changes or the text no longer fits, so a string whose value stands still keeps its font surface. */
+//-------------------------------------------------------------------------------------------------
+static DisplayString *fitReadoutString( DisplayString *&string, const UnicodeString &text,
+																				const AsciiString &fontName, Int points, const IRegion2D &cell )
+{
+	if( string == NULL )
+		string = TheDisplayStringManager->newDisplayString();
 
-	const Int textX = x + 1;
-	const Int textY = y + h - textHeight - 1;
+	if( string->getFont() == NULL || string->getText().compare( text ) != 0 )
+	{
+		string->setFont( TheFontLibrary->getFont( fontName, points, TRUE ) );
+		string->setText( text );
+	}
 
-	// a plate under it: down in the corner the number sits on whatever the picture happens to be
-	// there, and a pale cameo swallowed the drop shadow along with the digits
-	if( textWidth > 0 && textHeight > 0 )
-		TheDisplay->drawFillRect( textX - 1, textY, textWidth + 2, textHeight,
-															GameMakeColor( 0, 0, 0, 160 ) );
+	while( !HudReadout_fits( string, cell ) && string->getFont()->pointSize > HUD_READOUT_POINTS_LEAST )
+		string->setFont( TheFontLibrary->getFont( fontName, string->getFont()->pointSize - 1, TRUE ) );
 
-	secondsString->draw( textX, textY, GameMakeColor( 245, 245, 245, 255 ),
-											 GameMakeColor( 0, 0, 0, 255 ) );
+	return string;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** One of the strips' own strings, in the strips' font. */
+//-------------------------------------------------------------------------------------------------
+DisplayString *InGameUI::fitStripString( DisplayString *&string, const UnicodeString &text, Int points, const IRegion2D &cell )
+{
+	return fitReadoutString( string, text, m_superweaponNormalFont, TheGlobalLanguageData->adjustFontSize( points ), cell );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -10037,38 +10510,24 @@ void InGameUI::drawStripSeconds( Int which, Int x, Int y, Int w, Int h, Int seco
 	* Kept per cameo for the reason the countdowns are: a DisplayString rebuilds a font surface every
 	* time its text changes, and this one changes only when the run does. */
 //-------------------------------------------------------------------------------------------------
-void InGameUI::drawStripQuantity( Int which, Int x, Int y, Int w, Int quantity )
+void InGameUI::drawStripQuantity( Int which, Int x, Int y, Int w, Int h, Int quantity )
 {
-	DisplayString *&quantityString = m_stripQuantityString[ which ];
-
-	if( quantityString == NULL )
-	{
-		quantityString = TheDisplayStringManager->newDisplayString();
-		quantityString->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
-										TheGlobalLanguageData->adjustFontSize( PRODUCTION_STRIP_SECS ),
-										TRUE ) );
-	}
+	const IRegion2D cell = { { x, y }, { x + w, y + h } };
 
 	UnicodeString text;
 	text.format( L"x%d", quantity );
-	quantityString->setText( text );
 
-	Int textWidth = 0, textHeight = 0;
-	quantityString->getSize( &textWidth, &textHeight );
-
-	quantityString->draw( x + w - textWidth - 1, y + 1,
-												GameMakeColor( 255, 255, 255, 255 ),
-												GameMakeColor( 0, 0, 0, 255 ) );
+	DisplayString *quantityString = fitStripString( m_stripQuantityString[ which ], text, PRODUCTION_STRIP_SECS, cell );
+	HudReadout_draw( quantityString, cell, HUD_READOUT_TOP_RIGHT, GameMakeColor( 255, 255, 255, 255 ) );
 }
 
 //-------------------------------------------------------------------------------------------------
 /** Keep one superweapon timer for the strip, in a list sorted by how long it still has to wait -
-	* soonest first.  Everything live is counted; only the ones that will be drawn get a slot. */
+	* soonest first.  The strip has a cell for SUPERWEAPON_STRIP_MAX of them; past that the soonest
+	* keep theirs and the latest to land have none. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::addSuperweaponIcon( const Image *image, Int seconds, Int percent, Bool ready, Color color )
 {
-	m_superweaponIconTotal++;
-
 	// walk back over the ones that come ready later than this and drop it in front of them; ties
 	// keep the order they were met in, so a pair of identical silos stays put frame to frame
 	Int at = m_superweaponIconCount;
@@ -10076,7 +10535,7 @@ void InGameUI::addSuperweaponIcon( const Image *image, Int seconds, Int percent,
 		at--;
 
 	if( at >= SUPERWEAPON_STRIP_MAX )
-		return;						// everything already kept is sooner: counted into the "+N", not drawn
+		return;						// every cell is taken by one that lands sooner
 
 	if( m_superweaponIconCount < SUPERWEAPON_STRIP_MAX )
 		m_superweaponIconCount++;
@@ -10090,207 +10549,6 @@ void InGameUI::addSuperweaponIcon( const Image *image, Int seconds, Int percent,
 	slot->percent = percent;
 	slot->ready = ready;
 	slot->color = color;
-}
-
-//-------------------------------------------------------------------------------------------------
-/** The superweapon strip: the cameos gathered this frame, top right, under the clock plate.
-	*
-	* Rows fill from the right, because the right hand end is where the strip is anchored and the
-	* one countdown that matters is the next one to land - it is always in the same place, however
-	* many are behind it.  Three rows of six, and whatever is left over closes the last row as a
-	* "+N", the same way the production strip's rows do. */
-//-------------------------------------------------------------------------------------------------
-void InGameUI::drawSuperweaponStrip( void )
-{
-	// watching, the spectator page's left panel lists the countdowns instead
-	// playing under the bar's page, the countdowns are on the Tab scoreboard
-	if( m_superweaponIconCount < 1 || stripSwitchedOff( &GlobalData::m_showSuperweaponStrip ) || m_spectatorPageShown ||
-			( m_controlBarPageShown && !localPlayerWatching() ) )
-		return;
-
-	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
-		return;
-
-	//
-	// The same tray the production strip stands its cameos in, and the same measurements off the
-	// general's power bar - but this strip is not mirrored. It is anchored to the right hand edge
-	// and grows leftwards, which is the direction that bar itself grows, so the artwork sits the
-	// way it was drawn: the heavy rail leads the row at the right hand end.
-	//
-	ICoord2D traySize, cameoSize, trayHole;
-	Int trayStep = 0;
-	stripTrayMetrics( &traySize, &cameoSize, &trayHole, &trayStep );
-
-	const Int trayW = traySize.x;
-	const Int trayH = traySize.y;
-	const Int cameoW = cameoSize.x;
-	const Int cameoH = cameoSize.y;
-	const Image *tray = TheControlBar ? TheControlBar->getSpecialPowerTrayImage() : NULL;
-
-	const Int gap = stripPixels( PRODUCTION_STRIP_GAP );
-	const Int more = stripPixels( PRODUCTION_STRIP_MORE );
-	const Int plate = stripPixels( 3 );
-
-	//
-	// The corner clock plate owns the top right, so the strip starts under it whenever it is up -
-	// a countdown drawn behind the readout is one nobody can read.
-	//
-	Int top = plate;
-	if( m_hudOverlayBottom + plate > top )
-		top = m_hudOverlayBottom + plate;
-
-	//
-	// one pulse for the whole strip rather than one per icon, so every charged superweapon breathes
-	// together instead of each on its own clock.  SuperweaponCountdownFlashDuration is half a cycle
-	// (dark to bright), so the INI knob still says how fast the strip blinks.
-	//
-	Real pulse = 1.0f;
-	if( m_superweaponFlashDuration >= 1.0f )
-	{
-		const Real period = 2.0f * m_superweaponFlashDuration;
-		const Real phase = (Real)( TheGameLogic->getFrame() % (UnsignedInt)period ) / period;
-		pulse = 0.5f - 0.5f * (Real)cos( 2.0 * PI * phase );
-	}
-
-	// flush against the right hand edge: the tray's heavy rail is the edge of the strip, and an inset
-	// leaves it hanging in the middle of nothing.  The production rows keep their inset because their
-	// rail faces the other way, into the screen
-	const Int right = TheDisplay->getWidth();
-	const Int hidden = m_superweaponIconTotal - m_superweaponIconCount;
-
-	// drawn as a batch, for the reason drawProductionStrip() gives - see Display::beginBatch2D
-	TheDisplay->beginBatch2D();
-
-	for( Int row = 0; row < SUPERWEAPON_STRIP_ROWS; row++ )
-	{
-		const Int first = row * SUPERWEAPON_STRIP_COLS;
-		if( first >= m_superweaponIconCount )
-			break;
-
-		Int inRow = m_superweaponIconCount - first;
-		if( inRow > SUPERWEAPON_STRIP_COLS )
-			inRow = SUPERWEAPON_STRIP_COLS;
-
-		const Bool lastRow = ( first + inRow >= m_superweaponIconCount );
-		Int rowWidth = ( inRow - 1 ) * trayStep + trayW;
-		if( hidden > 0 && lastRow )
-			rowWidth += gap + more;
-
-		const Int trayY = top + row * trayH;
-		const Int y = trayY + trayHole.y;
-
-		//
-		// The trays go down first, all of them, and from the far end back, so the rightmost - the
-		// countdown that lands next - is the one drawn last.
-		//
-		for( Int back = inRow - 1; back >= 0; back-- )
-		{
-			const Int backX = right - trayW - back * trayStep;
-			if( tray )
-				TheDisplay->drawImage( tray, backX, trayY, backX + trayW, trayY + trayH );
-			else
-				TheDisplay->drawFillRect( backX, trayY, trayW, trayH, GameMakeColor( 0, 0, 0, 130 ) );
-		}
-
-		//
-		// The row goes down a piece at a time - every picture, then every sweep, then every border -
-		// rather than an icon at a time, for the reason drawProductionStripRow() gives: pieces that
-		// want the same thing of the renderer are one draw call when they follow each other and one
-		// draw call each when they do not.  The icons do not overlap, so nothing changes on screen.
-		//
-		for( Int cameoSlot = 0; cameoSlot < inRow; cameoSlot++ )
-		{
-			const SuperweaponIconSlot *slot = &m_superweaponIcons[ first + cameoSlot ];
-			const Int x = right - trayW + trayHole.x - cameoSlot * trayStep;
-
-			if( slot->image )
-				TheDisplay->drawImage( slot->image, x, y, x + cameoW, y + cameoH );
-		}
-
-		//
-		// the same sweep the production cameos wear, and the same way round as the command bar's own
-		// clock: the scrim covers what is still to be charged and is swept off as the charge runs
-		//
-		for( Int clockSlot = 0; clockSlot < inRow; clockSlot++ )
-		{
-			const SuperweaponIconSlot *slot = &m_superweaponIcons[ first + clockSlot ];
-			const Int x = right - trayW + trayHole.x - clockSlot * trayStep;
-
-			if( !slot->ready )
-				TheDisplay->drawRemainingRectClock( x, y, cameoW, cameoH, slot->percent,
-																						GameMakeColor( 0, 0, 0, 130 ) );
-			else
-			{
-				//
-				// Charged: no number at all - zero seconds is not information - and the cameo itself
-				// breathes in the owning player's colour instead.  A ready superweapon is the one
-				// thing on this strip that wants to be noticed rather than looked up, and a
-				// translucent wash over the picture says whose it is in the same stroke.
-				//
-				UnsignedByte r, g, b, a;
-				GameGetColorComponents( slot->color, &r, &g, &b, &a );
-				const UnsignedByte washAlpha = (UnsignedByte)( 30.0f + 90.0f * pulse );
-				TheDisplay->drawFillRect( x, y, cameoW, cameoH, GameMakeColor( r, g, b, washAlpha ) );
-			}
-		}
-
-		//
-		// bare seconds, however many there are: this strip is read against the other countdowns on
-		// the screen, and m:ss is a number you have to convert first
-		//
-		for( Int secondsSlot = 0; secondsSlot < inRow; secondsSlot++ )
-		{
-			const SuperweaponIconSlot *slot = &m_superweaponIcons[ first + secondsSlot ];
-			const Int x = right - trayW + trayHole.x - secondsSlot * trayStep;
-
-			if( !slot->ready )
-				drawStripSeconds( PRODUCTION_STRIP_ROW_MAX + first + secondsSlot,
-													x, y, cameoW, cameoH, slot->seconds );
-		}
-
-		// the border is whose weapon it is - the colour the timer was registered with
-		for( Int borderSlot = 0; borderSlot < inRow; borderSlot++ )
-		{
-			const SuperweaponIconSlot *slot = &m_superweaponIcons[ first + borderSlot ];
-			const Int x = right - trayW + trayHole.x - borderSlot * trayStep;
-
-			UnsignedByte r, g, b, a;
-			GameGetColorComponents( slot->color, &r, &g, &b, &a );
-			TheDisplay->drawOpenRect( x, y, cameoW, cameoH, 2.0f, GameMakeColor( r, g, b, 255 ) );
-		}
-
-		//
-		// whatever did not fit closes the last row as a "+N", on the left hand end: the strip is
-		// read from the right, so the overflow sits at the far end of it
-		//
-		if( hidden > 0 && lastRow )
-		{
-			// this strip's own "+N", kept apart from the production rows' - see m_stripSecondsString
-			DisplayString *&overflow = m_productionStripOverflow[ STRIP_OVERFLOW_SUPERWEAPON ];
-
-			if( overflow == NULL )
-			{
-				overflow = TheDisplayStringManager->newDisplayString();
-				overflow->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
-														TheGlobalLanguageData->adjustFontSize( HUD_OVERLAY_POINT_SIZE ),
-														TRUE ) );
-			}
-
-			UnicodeString text;
-			text.format( L"+%d", hidden );
-			overflow->setText( text );
-
-			Int textWidth = 0, textHeight = 0;
-			overflow->getSize( &textWidth, &textHeight );
-
-			overflow->draw( right - rowWidth + ( more - textWidth ) / 2,
-											y + ( cameoH - textHeight ) / 2,
-											GameMakeColor( 235, 235, 235, 255 ),
-											GameMakeColor( 0, 0, 0, 255 ) );
-		}
-	}
-
-	TheDisplay->endBatch2D();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -10540,11 +10798,12 @@ void InGameUI::sampleEarnings( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Money a player earned a second between the oldest reading held and the newest, rounded; 0
-	* until there are two.  It is shared over the whole half minute even before the readings reach
-	* back that far, so the first truck of a match reads as a trickle rather than a fortune. */
+/** Money a player earned in `over` seconds at the rate between the oldest reading held and the
+	* newest, rounded; 0 until there are two.  It is shared over the whole half minute even before the
+	* readings reach back that far, so the first truck of a match reads as a trickle rather than a
+	* fortune. */
 //-------------------------------------------------------------------------------------------------
-Int InGameUI::earnedPerSecond( Int playerIndex ) const
+Int InGameUI::earnedOver( Int playerIndex, Int over ) const
 {
 	if( m_earnedReadingCount < 2 )
 		return 0;
@@ -10552,7 +10811,43 @@ Int InGameUI::earnedPerSecond( Int playerIndex ) const
 	const EarnedReading &oldest = m_earnedReadings[ 0 ];
 	const EarnedReading &newest = m_earnedReadings[ m_earnedReadingCount - 1 ];
 	const Int seconds = max( (Int)( newest.second - oldest.second ), (Int)EARNINGS_WINDOW_SECONDS );
-	return ( newest.earned[ playerIndex ] - oldest.earned[ playerIndex ] + seconds / 2 ) / seconds;
+	return ( ( newest.earned[ playerIndex ] - oldest.earned[ playerIndex ] ) * over + seconds / 2 ) / seconds;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI_incomePerMinute( Int incomeRateMode, Int perSecond )
+{
+	if( incomeRateMode == INCOME_RATE_AUTOMATIC )
+		return perSecond < INCOME_RATE_AUTOMATIC_PER_SECOND_FROM;
+
+	return incomeRateMode == INCOME_RATE_PER_MINUTE;
+}
+
+static bool buildPlanComesFirst( const BuildPlanNumber& a, const BuildPlanNumber& b )
+{
+	if( a.builder != b.builder )
+		return a.builder < b.builder;
+	if( a.current != b.current )
+		return a.current != FALSE;
+	return a.plan < b.plan;
+}
+
+void InGameUI_numberBuildPlans( std::vector<BuildPlanNumber>& plans )
+{
+	std::sort( plans.begin(), plans.end(), buildPlanComesFirst );
+
+	size_t first = 0;
+	while( first < plans.size() )
+	{
+		size_t end = first + 1;
+		while( end < plans.size() && plans[ end ].builder == plans[ first ].builder )
+			++end;
+
+		// a lone "1" says nothing, as on a unit's order markers
+		for( size_t i = first; i < end; ++i )
+			plans[ i ].step = end - first > 1 ? (Int)( i - first ) + 1 : 0;
+		first = end;
+	}
 }
 
 /** One seat on the scoreboard page.  `full` is whether the local player may see the numbers: his
@@ -10707,11 +11002,11 @@ static void putSeatQueue( HtmlValues &row, Player *player )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The scoreboard on Tab, Window/Html/Scoreboard.html, docked to the left the way Dota docks its
-	* own.  A player sees two sections, his side in full and the enemy as names and teams, because
-	* the enemy's general, money and promotions are for its own side to know.  A watcher, an observer
-	* or a player knocked out who stayed, sees one section a team, every seat in full and with its
-	* production, which is the left edge's queue column he no longer has.  Every section opens with a
+/** The scoreboard on Tab, Window/Html/Scoreboard.html, hanging under the top page in the middle of
+	* the screen.  A player sees two sections, his side in full and the enemy as names and teams,
+	* because the enemy's general, money and promotions are for its own side to know.  A watcher, an
+	* observer or a player knocked out who stayed, sees one section a team, every seat in full and
+	* with its production, the queue over the console he no longer has.  Every section opens with a
 	* band of kind "band" carrying its {{label}}, how many seats are {{standing}} of {{seats}}, and
 	* {{side}} "allies", "enemies" or "team". */
 //-------------------------------------------------------------------------------------------------
@@ -10731,7 +11026,10 @@ void InGameUI::drawScoreboard( void )
 	if( m_scoreboardPage.empty() )
 		return;
 	if( m_scoreboardOverlay == NULL )
+	{
 		m_scoreboardOverlay = new HtmlOverlay( m_superweaponNormalFont );
+		m_scoreboardOverlay->setHudPage( TRUE );
+	}
 
 	// counted again twice a second, as the spectator page is: the money moves every frame, and every
 	// change lays the whole page out again
@@ -10835,9 +11133,15 @@ std::string InGameUI::scoreboardHtml( void )
 		}
 	}
 
+	// hanging from the top page's foot in the middle of the screen, the two one plate
+	enum { BOARD_WIDTH = 708 };
+	const Real scale = ControlBarHudPageScale();
 	HtmlValues values;
 	values[ "side" ] = spectatorSide();
 	values[ "clock" ] = spectatorClock( TheGameLogic->getFrame() );
+	values[ "boardx" ] = std::to_string( REAL_TO_INT_FLOOR( TheDisplay->getWidth() / scale - BOARD_WIDTH ) / 2 );
+	// under the top page, and under the superweapon banner while one is up
+	values[ "boardy" ] = std::to_string( REAL_TO_INT_FLOOR( ( m_controlBarPageShown ? max( m_topBarBottom, m_alertBottom ) : 0 ) / scale ) );
 	return HtmlTemplate_expand( m_scoreboardPage, values, lists, lookupGameText );
 }
 
@@ -10871,6 +11175,17 @@ static Real powerBarShare( Real power )
 		return 0.0f;
 	const Real share = logf( power ) / logf( (Real)TheGlobalData->m_powerBarBase ) / TheGlobalData->m_powerBarIntervals;
 	return share > 1.0f ? 1.0f : share;
+}
+
+/** Entry `index` of one of the command bar page's lists, made if the list is that short.  The lists
+	* are kept from frame to frame and every entry of one is written with the same keys each time, so
+	* the map nodes and strings of last frame's entry are written over rather than freed and made
+	* again; the caller cuts the list to what it filled. */
+static HtmlValues &listEntry( std::vector< HtmlValues > &list, size_t index )
+{
+	if( index >= list.size() )
+		list.resize( index + 1 );
+	return list[ index ];
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -10907,19 +11222,19 @@ static void putPowerBar( HtmlValues &values, std::vector< HtmlValues > &cells )
 	enum { FRAME_LIP = 1 };
 	const Int row = atoi( values[ "powerframe.w" ].c_str() ) - 2 * FRAME_LIP;
 	values[ "power.needlex" ] = std::to_string( REAL_TO_INT( powerBarShare( needle ) * row ) );
-	cells.clear();
 	const Int lit = REAL_TO_INT( fill * POWER_CELLS );
+	size_t filled = 0;
 	for( Int cell = 0; cell < POWER_CELLS && row > 0; cell++ )
 	{
 		const Int left = cell * row / POWER_CELLS;
-		HtmlValues entry;
+		HtmlValues &entry = listEntry( cells, filled++ );
 		entry[ "lit" ] = cell < lit ? "lit" : "";
 		entry[ "x" ] = std::to_string( left );
 		const Int width = ( cell + 1 ) * row / POWER_CELLS - left;
 		entry[ "w" ] = std::to_string( width );
 		entry[ "segw" ] = std::to_string( max( 0, width - 1 ) );	// the black line before it
-		cells.push_back( entry );
 	}
+	cells.resize( filled );
 	if( consumption > production )
 		values[ "power.state" ] = "red";
 	else if( consumption > production - TheGlobalData->m_powerBarYellowRange )
@@ -10947,13 +11262,16 @@ static void putExperienceBar( HtmlValues &values, std::vector< HtmlValues > &cel
 
 	const Player *player = TheControlBar->isObserverControlBarOn() ? TheControlBar->getObserverLookAtPlayer()
 																																 : ThePlayerList->getLocalPlayer();
-	cells.clear();
-	stars.clear();
 	if( player == NULL )
+	{
+		cells.clear();
+		stars.clear();
 		return;
+	}
 
 	const Int lit = player->getRankProgressPercent() * EXPERIENCE_CELLS / FULL;
 	const Int column = height - 2 * FRAME_LIP;
+	size_t filled = 0;
 	for( Int cell = 0; cell < EXPERIENCE_CELLS && column > 0; cell++ )
 	{
 		// cell 0 is the bottom one; each is cut from the column so they add up to it exactly, and its
@@ -10961,26 +11279,26 @@ static void putExperienceBar( HtmlValues &values, std::vector< HtmlValues > &cel
 		enum { CELL_GAP = 1 };
 		const Int top = column - ( cell + 1 ) * column / EXPERIENCE_CELLS;
 		const Int cellHeight = column - cell * column / EXPERIENCE_CELLS - top;
-		HtmlValues entry;
+		HtmlValues &entry = listEntry( cells, filled++ );
 		entry[ "lit" ] = cell < lit ? "lit" : "";
 		entry[ "y" ] = std::to_string( top );
 		entry[ "h" ] = std::to_string( cellHeight );
 		entry[ "segh" ] = std::to_string( max( 0, cellHeight - CELL_GAP ) );
-		cells.push_back( entry );
 	}
+	cells.resize( filled );
 
 	// the stars stand at pixel places centred on the key: centred as a line of text, the page measured
 	// the star glyph wider than it drew it and the row sat to the left
-	enum { RANK_KEY_WIDTH = 58, STAR_PITCH = 11, STAR_SIZE = 10 };
+	enum { RANK_KEY_WIDTH = 56, STAR_PITCH = 11, STAR_SIZE = 10 };
 	const Int rankCount = TheRankInfoStore->getRankLevelCount();
 	const Int firstStar = ( RANK_KEY_WIDTH - ( rankCount * STAR_PITCH - ( STAR_PITCH - STAR_SIZE ) ) ) / 2;
 	for( Int rank = 1; rank <= rankCount; rank++ )
 	{
-		HtmlValues entry;
+		HtmlValues &entry = listEntry( stars, rank - 1 );
 		entry[ "lit" ] = rank <= player->getRankLevel() ? "lit" : "";
 		entry[ "x" ] = std::to_string( firstStar + ( rank - 1 ) * STAR_PITCH );
-		stars.push_back( entry );
 	}
+	stars.resize( (size_t)max( 0, rankCount ) );
 }
 
 /** The bar's windows the page stands down altogether.  The menu, idle worker and promotion buttons are
@@ -11059,8 +11377,9 @@ static const Int UPGRADE_CAMEOS = 5;		///< UnitUpgrade1 to 5, a single unit's up
 /** The bar as the owner drew it on 2026-09-28, 800x600 pixels at ControlBarHudScale(): from the left,
 	* the radar with the experience bar beside it, then the command grid, six by three, with the power
 	* bar lying along its top and the money on the power bar's left end, then the portrait bar on the
-	* screen's bottom edge.  Over the radar the idle worker's key stands on the skills key, the skills
-	* key on the under-attack light at its left hand end, and the smoke signals at its right. */
+	* screen's bottom edge.  Since 2026-10-01 the radar's keys stand in the selection's header instead,
+	* the idle worker's key, the skills key and the under-attack light from its left, the smoke signals
+	* after them, and the radar has the height of its header too. */
 enum
 {
 	COMMAND_BUTTON_WIDTH	= 50,		///< a command button as ControlBar.wnd authors it, the promotion screen's cell
@@ -11074,29 +11393,41 @@ enum
 	COMMAND_COLUMNS				= COMMAND_PLACE_COLUMNS,
 	COMMAND_ROWS					= COMMAND_PLACE_COUNT / COMMAND_PLACE_COLUMNS,
 	PORTRAIT_WIDTH				= 44,		///< the portrait's cell, a cell's height at the portrait's own shape
-	PORTRAIT_PLACES				= 7,		///< the most cells the portrait bar holds in one row after the portrait; it is
-																///< only as long as what it holds
+	PORTRAIT_PLACES				= 5,		///< the selection's well, cells across: the portrait and a column of text, a
+																///< unit's five upgrades, or a row of a group's types
 	RADAR_WIDTH						= 167,	///< the radar's shape, as ControlBar.wnd authors LeftHUD; its height is the
-	RADAR_HEIGHT					= 152,	///< command grid's and the power bar's panels together
+	RADAR_HEIGHT					= 152,	///< command grid's height
 	EXPERIENCE_WIDTH			= 12,		///< the experience bar's groove, the radar's height
 	EXPERIENCE_GAP				= 4,		///< between it and the radar
 	PANEL_FOOT						= 4,		///< a grid's ring over the screen's bottom edge, the steel under it
-	SKILLS_TAB_WIDTH			= 66,		///< the skills key, the rank's stars, in a tab on the under-attack light
-	SKILLS_TAB_HEIGHT			= 22,		///< the key 17 tall with its rim, three pixels down
-	ALERT_TAB_WIDTH				= 66,		///< the under-attack light, a lamp on the radar panel's border, the key's width
-	SIGNAL_BUTTONS				= 3,		///< attack, defend, look
-	SIGNAL_STEP_WIDTH			= 104,	///< the signals' step on the radar panel's border at its right hand end,
-	SIGNAL_STEP_HEIGHT		= 24,		///< three keys side by side
-	IDLE_TAB_WIDTH				= 38,		///< the idle worker's key in a tab on the skills key's, with its rim
-	IDLE_TAB_HEIGHT				= 22,
-	POWER_WIDTH						= 12,		///< the power bar's groove along the command grid's top, frame and lip
+	HEADER_SLOTS					= 7,		///< the selection's header, in slots of a seventh of it: the idle worker's key,
+																///< the skills key two, the under-attack light, and a smoke signal's key each
+	IDLE_SLOTS						= 1,
+	SKILLS_SLOTS					= 2,
+	ALERT_SLOTS						= 1,
+	SIGNAL_BUTTONS				= 3,		///< attack, defend, look, a slot each
+	SIGNAL_STEP_HEIGHT		= 24,		///< how far each smoke signal key rises into its place
 	MONEY_TEXT_MARGIN			= 5,		///< the money's well each side of its figure, which sets the well's width
-	MONEY_HEIGHT					= 18,		///< the money's well in its plate on the power bar's panel
-	MONEY_PLATE_BORDER		= 5,		///< the plate's steel round the well
-	SKILL_GRID_GAP				= 12,		///< between the general's powers' tray and what it stands on
-	SKILL_TRAY_BORDER			= 6,		///< the tray's steel round its cells
 	QUEUE_TRAY_BORDER			= 3,		///< the production queue's tray's, thinner, since the row runs over the battlefield
-	SKILL_CELL_GAP				= 2			///< the steel between two cells of the powers and the production queue
+	SKILL_CELL_GAP				= 2,		///< the steel between two cells of the powers and the production queue
+	QUEUE_TRAY_LINE				= 1,		///< the light and dark lines along that tray's edges
+	QUEUE_TRAY_WELL				= SKILL_CELL_GAP,	///< the well round its cells: a row stepped under another starts in it
+	QUEUE_TRAY_COLUMNS		= 5,		///< the production queue's cells to a row, rows growing up over the selection
+	HEADER_HEIGHT					= 22,		///< the strip over the selection's and the grid's wells; the radar's well reaches
+																///< up through it to the console's top line
+	HEADER_GAP						= 2,		///< between a header and its well
+	SELECTION_ROWS				= 3,		///< the selection's well: three rows of PORTRAIT_PLACES cells for a group's types
+	PORTRAIT_SCALE				= 2,		///< a lone unit's portrait, two cells high
+	TOP_WELL_HEIGHT				= 22,		///< the top page's clock's well
+	MONEY_WELL_HEIGHT			= 16,		///< the money's well under it
+	TOP_BORDER						= 4,		///< the top page's steel round each of them
+	TOP_BOX_GAP						= 2,		///< the battlefield between two of the top page's plates
+	PEACE_WELL_WIDTH			= 100,	///< the peace time's well under the money, "PEACE 14:59" and a margin: at 88
+																///< the time broke onto a second line at 1920x1080
+	CLOCK_WIDTH						= 64,		///< the top page's wells at their narrowest, in the middle of the screen
+	POWER_BAR_HEIGHT			= 12,		///< the power bar's groove in the command grid's header
+	POWER_BAR_MARGIN			= 6,		///< the header's steel each end of it
+	MENU_FOOT							= 24		///< the menu key's bottom edge in the top left corner, the feed under it
 };
 
 /** A grid cell's size on screen. */
@@ -11192,12 +11523,34 @@ static void putPageRect( HtmlValues &values, const std::string &name, const IReg
 /** A panel's steel, 800x600 pixels. */
 enum
 {
-	PANEL_BORDER				= 8,	///< a panel's border outside its container, on the sides facing the battlefield
-	PANEL_TAB_HEIGHT		= 14	///< a tab or button standing on a border's top edge
+	PANEL_BORDER				= 8,	///< a panel's border outside its container, and the steel between two wells
+	CONSOLE_MARGIN			= 2,	///< the least battlefield each side of the console at its widest
+	POWER_TRAY_EDGE			= 4		///< the general's powers' steel past their last column and over their top cell
 };
 
-/** The border round a container: `border` screen pixels on the sides facing the battlefield, out to
-	* the screen's edge on the sides against it - the bottom always, the left or the right as asked. */
+/** The general's powers' steel at its widest, a column of cells for every group a key picks and the
+	* steel between and past them, `scale` screen pixels to a page pixel. */
+static Int powersTrayWidth( Real scale )
+{
+	enum { COLUMNS = ( MAX_SPECIAL_POWER_SHORTCUTS + SPECIAL_POWER_SHORTCUT_COLS - 1 ) / SPECIAL_POWER_SHORTCUT_COLS };
+	const Int gap = REAL_TO_INT( SKILL_CELL_GAP * scale );
+	return COLUMNS * ( REAL_TO_INT( CELL_WIDTH * scale ) + gap ) + REAL_TO_INT( POWER_TRAY_EDGE * scale );
+}
+
+/** The three wells drawControlBarPage stands side by side, the radar, the selection and the command
+	* grid, with the steel between and round them, and the general's powers' steel at its widest on the
+	* right: the console stands that much left of the middle, so the powers grow into room kept for
+	* them and nothing moves when one comes. */
+Int InGameUI_consolePageWidth( void )
+{
+	const Int radarHeight = COMMAND_ROWS * ( COMMAND_CELL_HEIGHT + CELL_GAP ) + HEADER_GAP + HEADER_HEIGHT;
+	const Int radar = radarHeight * RADAR_WIDTH / RADAR_HEIGHT + EXPERIENCE_GAP + EXPERIENCE_WIDTH;
+	const Int selection = PORTRAIT_PLACES * ( CELL_WIDTH + CELL_GAP );
+	const Int grid = COMMAND_COLUMNS * ( COMMAND_CELL_WIDTH + CELL_GAP );
+	enum { WELLS = 3 };
+	return radar + selection + grid + ( WELLS + 1 ) * PANEL_BORDER + powersTrayWidth( 1.0f ) + 2 * CONSOLE_MARGIN;
+}
+
 /** The screen's bottom edge as the bar stands on it: while the match's intro slides the bar up from
 	* below, its frame is under where layoutPanels put it, and everything standing on the edge goes
 	* down with it, or the panels waited at the bottom while only the buttons rose. */
@@ -11208,22 +11561,25 @@ static Int barBottom( void )
 	return TheDisplay->getHeight() + frameY - TheControlBar->getPanelOrigin()->y;
 }
 
-static IRegion2D framed( const IRegion2D &content, Int border, Bool againstLeft, Bool againstRight )
+/** The border round a container: `border` screen pixels on the sides facing the battlefield, out to
+	* the screen's bottom edge under it. */
+static IRegion2D framed( const IRegion2D &content, Int border )
 {
 	IRegion2D box;
-	box.lo.x = againstLeft ? 0 : content.lo.x - border;
+	box.lo.x = content.lo.x - border;
 	box.lo.y = content.lo.y - border;
-	box.hi.x = againstRight ? TheDisplay->getWidth() : content.hi.x + border;
+	box.hi.x = content.hi.x + border;
 	box.hi.y = barBottom();
 	return box;
 }
 
 /** A panel for the page: `name`.x and .y the border's outer corner, .w and .h the container, and
-	* .bt .br .bb .bl the border's four widths, all in the page's pixels, every edge rounded once so
-	* the container fits what it holds exactly; `name`.shown as putPageRect writes it. */
-static void putFrame( HtmlValues &values, const std::string &name, const IRegion2D &content, const IRegion2D &box, Bool shown )
+	* .bt .br .bb .bl the border's four widths, all in the page's pixels, `scale` screen pixels to one,
+	* every edge rounded once so the container fits what it holds exactly; `name`.shown as putPageRect
+	* writes it. */
+static void putFrame( HtmlValues &values, const std::string &name, const IRegion2D &content, const IRegion2D &box, Bool shown,
+											Real scale = ControlBarHudScale() )
 {
-	const Real scale = ControlBarHudScale();
 	struct Edge { static Int page( Int screen, Real scale ) { return REAL_TO_INT_FLOOR( screen / scale + 0.5f ); } };
 	const Int left = Edge::page( box.lo.x, scale ), top = Edge::page( box.lo.y, scale );
 	const Int innerLeft = Edge::page( content.lo.x, scale ), innerTop = Edge::page( content.lo.y, scale );
@@ -11241,16 +11597,86 @@ static void putFrame( HtmlValues &values, const std::string &name, const IRegion
 	values[ name + ".shown" ] = shown ? "shown" : "hidden";
 }
 
-/** A tab of `width` by `height` 800x600 pixels standing on `box`'s top edge, from its left or its right. */
-static IRegion2D tabOn( const IRegion2D &box, Int width, Int height, Bool fromRight )
+/** The console's next well, `width` screen pixels wide from `left` between `top` and `bottom`, and
+	* `left` moved on past it and the `gap` of steel after it. */
+static IRegion2D nextWell( Int &left, Int width, Int top, Int bottom, Int gap )
 {
+	IRegion2D well;
+	well.lo.x = left;
+	well.hi.x = left + width;
+	well.lo.y = top;
+	well.hi.y = bottom;
+	left = well.hi.x + gap;
+	return well;
+}
+
+/** The header strip over a well of the console, the same width. */
+static IRegion2D wellHeader( const IRegion2D &well, Real scale )
+{
+	IRegion2D header = well;
+	header.hi.y = well.lo.y - REAL_TO_INT( HEADER_GAP * scale );
+	header.lo.y = header.hi.y - REAL_TO_INT( HEADER_HEIGHT * scale );
+	return header;
+}
+
+/** A well of the console for the page, data-each="wells": {{well.x}} .y .w .h and, when `headed`, the
+	* header strip over it, {{header.x}} .y .w .h.  `filled` is how many of the list's entries this frame
+	* has written, and the caller cuts the list to it. */
+static void putWell( std::vector< HtmlValues > &wells, size_t &filled, const IRegion2D &well, Bool shown, Bool headed, Real scale )
+{
+	if( !shown )
+		return;
+	HtmlValues &entry = listEntry( wells, filled++ );
+	putPageRect( entry, "well", well, TRUE, scale );
+	putPageRect( entry, "header", wellHeader( well, scale ), headed, scale );
+}
+
+/** A lone unit's name, rank and health for the page, beside its portrait `portrait` in the
+	* selection's well `well`: {{selinfo.x}} .y .w .h, {{sel.name}}, data-each="selstars" a star for
+	* each veterancy level it has, {{sel.health}} "820/1000", {{sel.healthw}} the bar's lit width in
+	* page pixels out of selinfo.w, and {{sel.healthstate}} "green", "yellow" or "red". */
+static void putSelectedUnit( HtmlValues &values, std::vector< HtmlValues > &stars, const IRegion2D &portrait,
+														 const IRegion2D &well, Bool shown )
+{
+	enum { INFO_GAP = 6, HEALTH_YELLOW_PERCENT = 50, HEALTH_RED_PERCENT = 25, STAR_PITCH = 11 };
 	const Real scale = ControlBarHudScale();
-	IRegion2D tab;
-	tab.hi.y = box.lo.y;
-	tab.lo.y = tab.hi.y - REAL_TO_INT( height * scale );
-	tab.lo.x = fromRight ? box.hi.x - REAL_TO_INT( width * scale ) : box.lo.x;
-	tab.hi.x = fromRight ? box.hi.x : box.lo.x + REAL_TO_INT( width * scale );
-	return tab;
+	IRegion2D info = portrait;
+	info.lo.x = portrait.hi.x + REAL_TO_INT( INFO_GAP * scale );
+	info.hi.x = well.hi.x - REAL_TO_INT( INFO_GAP * scale );
+	// the drawable the bar's portrait is of, which is the one selected
+	const Drawable *drawable = TheControlBar->getContextDrawable();
+	const Object *object = drawable ? drawable->getObject() : NULL;
+	shown = shown && object != NULL;
+	putPageRect( values, "selinfo", info, shown, scale );
+	stars.clear();
+	if( !shown )
+		return;
+
+	// an enemy in disguise is what he looks like, as his portrait is (ControlBar::setPortraitByObject):
+	// the disguise's name, and no rank or health, which are his own
+	if( drawable->getStealthLook() == STEALTHLOOK_DISGUISED_ENEMY )
+	{
+		values[ "sel.name" ] = WideCharStringToMultiByte( drawable->getTemplate()->getDisplayName().str() );
+		values[ "sel.healthshown" ] = "hidden";
+		return;
+	}
+
+	values[ "sel.name" ] = WideCharStringToMultiByte( object->getTemplate()->getDisplayName().str() );
+	values[ "sel.healthshown" ] = "";
+	for( Int level = LEVEL_VETERAN; level <= object->getVeterancyLevel(); level++ )
+	{
+		HtmlValues star;
+		star[ "x" ] = std::to_string( ( level - LEVEL_VETERAN ) * STAR_PITCH );
+		stars.push_back( star );
+	}
+
+	const BodyModuleInterface *body = object->getBodyModule();
+	const Int health = (Int)REAL_TO_INT_CEIL( body->getHealth() );
+	const Int maxHealth = max( 1, (Int)REAL_TO_INT_CEIL( body->getMaxHealth() ) );
+	const Int percent = health * PERCENT / maxHealth;
+	values[ "sel.health" ] = std::to_string( health ) + "/" + std::to_string( maxHealth );
+	values[ "sel.healthw" ] = std::to_string( atoi( values[ "selinfo.w" ].c_str() ) * health / maxHealth );
+	values[ "sel.healthstate" ] = percent <= HEALTH_RED_PERCENT ? "red" : percent <= HEALTH_YELLOW_PERCENT ? "yellow" : "green";
 }
 
 static GameWindow *numberedWindow( const char *prefix, Int number )
@@ -11362,23 +11788,13 @@ Int InGameUI_moneyPlateWidth( MoneyPlateWidth &plate, Int needed, UnsignedInt no
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The money, a steel plate standing on the power bar's panel `powerBox` at its left end with the
-	* figure in a dark well `wellWidth` screen pixels wide, the owner's place of 2026-09-28.  The
-	* money's window is moved into the well, cut to its line of text.  Written as moneyplate and
+/** The money, the figure in a dark well `money`, screen pixels, left of the match clock on the top
+	* page.  The money's window is moved into the well, cut to its line of text.  Written as
 	* moneyblock. */
 //-------------------------------------------------------------------------------------------------
-static void putMoney( HtmlValues &values, const IRegion2D &powerBox, Int wellWidth, Bool shown )
+static void putMoney( HtmlValues &values, const IRegion2D &money, Bool shown )
 {
 	const Real scale = ControlBarHudScale();
-	const Int border = REAL_TO_INT( MONEY_PLATE_BORDER * scale );
-	IRegion2D plate = tabOn( powerBox, 0, MONEY_HEIGHT + 2 * MONEY_PLATE_BORDER, FALSE );
-	plate.hi.x = plate.lo.x + wellWidth + 2 * border;
-	IRegion2D money = plate;
-	money.lo.x += border;
-	money.hi.x -= border;
-	money.lo.y += border;
-	money.hi.y -= border;
-	putPageRect( values, "moneyplate", plate, shown, scale );
 	putPageRect( values, "moneyblock", money, shown, scale );
 
 	// the font's height is the line without the drop shadow and the accents over the capitals, and a
@@ -11469,6 +11885,10 @@ static const char *const NET_PAGE = "Window\\Html\\Net.html";
 	* own: they change several times a second, and each change lays its page out again. */
 void InGameUI::drawNetPage( void )
 {
+	// ShowNetBox: the player switched the corner box off
+	if( !TheGlobalData->m_showNetBox )
+		return;
+
 	if( !m_netPageLoaded )
 	{
 		m_netPageLoaded = TRUE;
@@ -11477,12 +11897,39 @@ void InGameUI::drawNetPage( void )
 	if( m_netPage.empty() )
 		return;
 	if( m_netOverlay == NULL )
+	{
 		m_netOverlay = new HtmlOverlay( m_superweaponNormalFont );
+		m_netOverlay->setHudPage( TRUE );
+	}
 
-	HtmlValues values = m_hudValues;
-	values[ "side" ] = spectatorSide();
-	m_netOverlay->setPage( HtmlTemplate_expand( m_netPage, values, HtmlLists(), lookupGameText ) );
+	// into the readings themselves rather than a copy of them made every frame; nothing else reads
+	// them, and the next sample clears them
+	m_hudValues[ "side" ] = spectatorSide();
+	m_netOverlay->setPage( HtmlTemplate_expand( m_netPage, m_hudValues, HtmlLists(), lookupGameText ) );
 	m_netOverlay->draw();
+}
+
+static const char *const READOUT_PAGE = "Window\\Html\\Readout.html";
+
+/** The match clock and a lone unit's health over the bar's page, with that page's `values`: the clock
+	* turns every second and the health with every hit, and each change lays its page out again. */
+void InGameUI::drawReadoutPage( const HtmlValues &values )
+{
+	if( !m_readoutPageLoaded )
+	{
+		m_readoutPageLoaded = TRUE;
+		readHtmlPage( READOUT_PAGE, m_readoutPage );
+	}
+	if( m_readoutPage.empty() )
+		return;
+	if( m_readoutOverlay == NULL )
+	{
+		m_readoutOverlay = new HtmlOverlay( m_superweaponNormalFont );
+		m_readoutOverlay->setHud( TRUE );
+	}
+
+	m_readoutOverlay->setPage( HtmlTemplate_expand( m_readoutPage, values, HtmlLists(), lookupGameText ) );
+	m_readoutOverlay->draw();
 }
 
 void InGameUI::drawCellGridFront( Int grid )
@@ -11494,12 +11941,41 @@ void InGameUI::drawCellGridFront( Int grid )
 		overlay->setHud( TRUE );
 	}
 
+	//
+	// The page's attack, hold position and move keys wear their letter the way the command buttons
+	// beside them do: the buttons' font and size, on the readouts' plate.  The page wrote it itself
+	// once, in a box with no width of its own, which this layout engine gives no background: the
+	// letter stood bare on the picture in a lighter face than its neighbours'.
+	//
+	if( grid == CELL_GRID_COMMAND && m_orderKeysShown )
+	{
+		static const Int ORDER_KEY_PLACES[ ORDER_KEYS ] = { COMMAND_PLACE_ATTACK, COMMAND_PLACE_HOLD, COMMAND_PLACE_MOVE };
+		enum { ORDER_KEY_POINTS = 7 };		// W3DPushButton.cpp's BADGE_DESIGN_POINTS, the buttons' corner markings
+		const AsciiString fontName = numberedWindow( "ButtonCommand", 1 )->winGetFont()->nameString;
+		const Int points = max( (Int)HUD_READOUT_POINTS_LEAST, (Int)REAL_TO_INT_FLOOR( ORDER_KEY_POINTS * ControlBarHudScale() ) );
+		for( Int key = 0; key < ORDER_KEYS; key++ )
+		{
+			// a letter never changes by itself, so a new HUD Size is what letters it again
+			if( points != m_orderKeyPoints && m_orderKeyString[ key ] != NULL )
+				m_orderKeyString[ key ]->setText( UnicodeString::TheEmptyString );
+
+			UnicodeString letter;
+			letter.translate( AsciiString( commandSlotKey( ORDER_KEY_PLACES[ key ] ).c_str() ) );
+			HudReadout_draw( fitReadoutString( m_orderKeyString[ key ], letter, fontName, points, m_orderKeyCell[ key ] ),
+											 m_orderKeyCell[ key ], HUD_READOUT_TOP_LEFT, GameMakeColor( 255, 255, 255, 255 ) );
+		}
+		m_orderKeyPoints = points;
+	}
+
 	HtmlValues values;
 	HtmlLists lists;
 	values[ "layer" ] = "front";
 	values[ "side" ] = spectatorSide();
-	lists[ "frontcells" ] = m_cellFrontCells[ grid ];
+	// lent to the page and taken back, rather than copied every frame
+	std::vector< HtmlValues > &frontCells = lists[ "frontcells" ];
+	frontCells.swap( m_cellFrontCells[ grid ] );
 	overlay->setPage( HtmlTemplate_expand( m_controlBarPage, values, lists, lookupGameText ) );
+	frontCells.swap( m_cellFrontCells[ grid ] );
 	overlay->draw();
 }
 
@@ -11513,7 +11989,8 @@ void InGameUI::drawCellGridFront( Int grid )
 Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, Int panelCount )
 {
 	m_controlBarPageShown = FALSE;
-	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+	// nor while the map loads: the load screen is painted by the window repaint this page rides on
+	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() || TheGlobalData->m_loadScreenRender )
 	{
 		TheControlBar->setPageSolids( NULL );
 		return FALSE;
@@ -11532,7 +12009,9 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	if( m_controlBarOverlay == NULL )
 		m_controlBarOverlay = new HtmlOverlay( m_superweaponNormalFont );
 
-	HtmlValues values;
+	// kept from the last frame: every key below is written on every frame, so a value is only ever
+	// written over, and a key written on some frames and not others would keep its old value here
+	HtmlValues &values = m_controlBarValues;
 	values[ "layer" ] = "back";
 	values[ "side" ] = spectatorSide();
 	// a watcher has no promotions of his own to spend, whatever the bar's flash says
@@ -11544,12 +12023,14 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	// fifteen milliseconds, and every click on the battlefield did that twice
 	values[ "held" ] = m_controlBarPageHovered && TheMouse->getMouseStatus()->leftState != MBS_Up ? "held" : "";
 	values[ "blink" ] = !values[ "promotion" ].empty() && TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND > LOGICFRAMES_PER_SECOND / 2 ? "lit" : "";
-	// Every panel is a container exactly as big as what it holds, and a border outside it: steel on
-	// the sides facing the battlefield, out to the screen's edge on the sides against it.  Everything
-	// else - the tabs, the keys, the signals - stands outside the border.  The layout is the owner's
-	// drawing of 2026-09-28 at ControlBarHudScale(), which is what the page is laid out at too: from
-	// the left the radar with the experience bar beside it, then the command grid with the portrait bar
-	// on it and the power bar standing up after it
+	// The console: one plate of steel standing on the middle of the screen's bottom edge, its wells side
+	// by side under one top line - the radar with the experience bar beside it, the selection with the
+	// radar's keys and the smoke signals in its header, and the command grid with the power bar in
+	// its header - and the general's powers growing out of its right hand end,
+	// the owner's centred drawing of 2026-10-01 at ControlBarHudScale(), which is what the page is
+	// laid out at too.  Every well is a fixed size and the powers' widest is kept free beside it, so
+	// the console keeps its place through the match and nothing moves under the pointer; HUD Size
+	// grows it from its bottom centre
 	const Real scale = ControlBarHudScale();
 	m_controlBarOverlay->setHud( TRUE );
 	for( Int panel = 0; panel < panelCount; panel++ )
@@ -11559,55 +12040,93 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	const Int foot = barBottom() - REAL_TO_INT( PANEL_FOOT * scale );
 	const Bool leftShown = panelCount > 0 && shown[ 0 ];
 	const Bool centreShown = panelCount > 1 && shown[ 1 ];
-	HtmlLists lists;
+	HtmlLists &lists = m_controlBarLists;
 
-	// the radar, and the experience bar's groove beside it as tall as it; its own window stood on the
-	// right panel, which is gone.  The left panel holds the two.  layoutPanels puts the radar at the
-	// uniform scale, so it is put again at the HUD's
 	GameWindow *radarWindow = controlBarWindow( "LeftHUD" );
 	const Bool leftFound = leftShown && !radarWindow->winIsHidden();
-	// the radar stands as tall as the command grid's panel and the power bar's over it together, so its
-	// panel's top is level with the power bar's, the owner's call of 2026-09-28, and keeps its shape
-	IRegion2D content;
-	content.hi.y = foot;
-	content.lo.y = content.hi.y - REAL_TO_INT( COMMAND_ROWS * ( COMMAND_CELL_HEIGHT + CELL_GAP ) * scale ) - 2 * border
-								 - REAL_TO_INT( POWER_WIDTH * scale );
-	content.lo.x = border;
-	content.hi.x = content.lo.x + ( content.hi.y - content.lo.y ) * RADAR_WIDTH / RADAR_HEIGHT;
-	TheControlBar->placeWindowAt( radarWindow, content );
-	IRegion2D experience = content;
-	experience.lo.x = content.hi.x + REAL_TO_INT( EXPERIENCE_GAP * scale );
-	experience.hi.x = experience.lo.x + REAL_TO_INT( EXPERIENCE_WIDTH * scale );
-	content.hi.x = experience.hi.x;
-	const IRegion2D leftBox = framed( content, border, TRUE, FALSE );
-	putFrame( values, "left", content, leftBox, leftFound );
+	// not there at all where the keys would do nothing either, a game with no allies to see the smoke
+	const Bool signalsShown = leftFound && signalsAllowed();
+
+	// every well is the command grid's height and a header over it, but the radar's, which reaches up
+	// through the header's height to the console's top line and keeps its shape in that, the
+	// experience bar's groove beside it.  A watcher has no grid and no powers, and his console is the
+	// rest of it
+	const Int wellHeight = REAL_TO_INT( COMMAND_ROWS * ( COMMAND_CELL_HEIGHT + CELL_GAP ) * scale );
+	const Int consoleTopLine = foot - wellHeight - REAL_TO_INT( ( HEADER_GAP + HEADER_HEIGHT ) * scale );
+	const Int radarWidth = ( foot - consoleTopLine ) * RADAR_WIDTH / RADAR_HEIGHT;
+	const Int radarWellWidth = radarWidth + REAL_TO_INT( ( EXPERIENCE_GAP + EXPERIENCE_WIDTH ) * scale );
+	const Int selectionWellWidth = REAL_TO_INT( PORTRAIT_PLACES * ( CELL_WIDTH + CELL_GAP ) * scale );
+	const Int gridWellWidth = REAL_TO_INT( COMMAND_COLUMNS * ( COMMAND_CELL_WIDTH + CELL_GAP ) * scale );
+	const ICoord2D cell = cellSize();
+	const Int cellGap = REAL_TO_INT( SKILL_CELL_GAP * scale );
+	Int consoleWidth = radarWellWidth + border + selectionWellWidth;
+	if( centreShown )
+		consoleWidth += border + gridWellWidth + powersTrayWidth( scale );
+
+	Int wellLeft = ( (Int)TheDisplay->getWidth() - consoleWidth ) / 2;
+	const IRegion2D radarWell = nextWell( wellLeft, radarWellWidth, consoleTopLine, foot, border );
+	const IRegion2D selectionWell = nextWell( wellLeft, selectionWellWidth, foot - wellHeight, foot, border );
+	const IRegion2D gridWell = nextWell( wellLeft, gridWellWidth, foot - wellHeight, foot, border );
+
+	IRegion2D wells;
+	wells.lo.x = radarWell.lo.x;
+	wells.hi.x = centreShown ? gridWell.hi.x : selectionWell.hi.x;
+	wells.lo.y = consoleTopLine;
+	wells.hi.y = foot;
+	const IRegion2D consoleBox = framed( wells, border );
+	const Bool consoleShown = leftFound || centreShown;
+	putFrame( values, "console", wells, consoleBox, consoleShown );
+	m_consoleTop = consoleShown ? consoleBox.lo.y : barBottom();
+	// the production queue stands on the console over the selection's well
+	m_queueCorner.x = selectionWell.lo.x;
+	m_queueCorner.y = m_consoleTop;
+
+	std::vector< HtmlValues > &wellList = lists[ "wells" ];
+	size_t wellsFilled = 0;
+	putWell( wellList, wellsFilled, radarWell, leftFound, FALSE, scale );
+	putWell( wellList, wellsFilled, selectionWell, consoleShown, TRUE, scale );
+	putWell( wellList, wellsFilled, gridWell, centreShown, TRUE, scale );
+	wellList.resize( wellsFilled );
+
+	// the radar at the HUD's scale, layoutPanels having put it at the uniform one
+	IRegion2D radar = radarWell;
+	radar.hi.x = radar.lo.x + radarWidth;
+	TheControlBar->placeWindowAt( radarWindow, radar );
+	IRegion2D experience = radarWell;
+	experience.lo.x = experience.hi.x - REAL_TO_INT( EXPERIENCE_WIDTH * scale );
 	putPageRect( values, "expframe", experience, leftFound, scale );
 	putExperienceBar( values, lists[ "expcells" ], lists[ "rankstars" ] );
 
-	// on the radar panel's top edge at its left hand end the under-attack light, and on the light the
-	// skills key: the rank's stars, and the button that opens the promotion screen.  A watcher, or a
-	// player beaten, has no promotions to buy, and the bar disables the button for him.  On the skills
-	// key the idle worker's, the owner's place for it
-	const IRegion2D alertTab = tabOn( leftBox, ALERT_TAB_WIDTH, PANEL_TAB_HEIGHT, FALSE );
-	putPageRect( values, "alerttab", alertTab, leftFound, scale );
-	const IRegion2D skillsTab = tabOn( alertTab, SKILLS_TAB_WIDTH, SKILLS_TAB_HEIGHT, FALSE );
-	const Bool skillsShown = leftFound && ThePlayerList->getLocalPlayer()->isPlayerActive();
-	putPageRect( values, "skillstab", skillsTab, skillsShown, scale );
-	const IRegion2D idleTab = tabOn( skillsShown ? skillsTab : alertTab, IDLE_TAB_WIDTH, IDLE_TAB_HEIGHT, FALSE );
+	// in the selection's header, on its grid of HEADER_SLOTS from its left: the idle worker's key, the
+	// skills key - the rank's stars, and the button that opens the promotion screen - the under-attack
+	// light, and in a multiplayer game the three smoke signals.  A key that is not there leaves no gap:
+	// a watcher, or a player beaten, has no idle worker's key and no promotions to buy, and only the
+	// light is left at the header's left end.  Every edge is a whole slot from the header's left, each
+	// rounded once, so two tabs share theirs
 	const Bool idleShown = leftFound && centreShown;
+	const Bool skillsShown = leftFound && ThePlayerList->getLocalPlayer()->isPlayerActive();
+	const IRegion2D header = wellHeader( selectionWell, scale );
+	const Real slotWidth = (Real)selectionWellWidth / HEADER_SLOTS;
+	struct Slots
+	{
+		static IRegion2D take( const IRegion2D &header, Real slotWidth, Int &slot, Int count )
+		{
+			IRegion2D tab = header;
+			tab.lo.x = header.lo.x + REAL_TO_INT( slot * slotWidth );
+			slot += count;
+			tab.hi.x = header.lo.x + REAL_TO_INT( slot * slotWidth );
+			return tab;
+		}
+	};
+	Int slot = 0;
+	const IRegion2D idleTab = Slots::take( header, slotWidth, slot, idleShown ? IDLE_SLOTS : 0 );
+	const IRegion2D skillsTab = Slots::take( header, slotWidth, slot, skillsShown ? SKILLS_SLOTS : 0 );
+	const IRegion2D alertTab = Slots::take( header, slotWidth, slot, ALERT_SLOTS );
+	const IRegion2D signalTabs = Slots::take( header, slotWidth, slot, signalsShown ? SIGNAL_BUTTONS : 0 );
 	putPageRect( values, "idletab", idleTab, idleShown, scale );
-	// the event feed and the production queue's row stand on the top key
-	m_feedFloor = idleShown ? idleTab.lo.y : skillsShown ? skillsTab.lo.y : leftFound ? alertTab.lo.y : barBottom();
-
-	// the three smoke signal buttons side by side on the same edge at its right hand end; not there at
-	// all where the keys would do nothing either, a game with no allies to see the smoke
-	IRegion2D signalStep;
-	signalStep.hi.x = leftBox.hi.x;
-	signalStep.lo.x = signalStep.hi.x - REAL_TO_INT( SIGNAL_STEP_WIDTH * scale );
-	signalStep.hi.y = leftBox.lo.y;
-	signalStep.lo.y = signalStep.hi.y - REAL_TO_INT( SIGNAL_STEP_HEIGHT * scale );
-	const Bool signalsShown = leftFound && signalsAllowed();
-	putPageRect( values, "signals", signalStep, signalsShown, scale );
+	putPageRect( values, "skillstab", skillsTab, skillsShown, scale );
+	putPageRect( values, "alerttab", alertTab, leftFound, scale );
+	putPageRect( values, "signals", signalTabs, signalsShown, scale );
 	const UnsignedInt nowMs = timeGetTime();
 
 	// the idle worker's key flashes while a worker stands idle, which is when the bar enables its
@@ -11620,11 +12139,11 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	m_signalsWereShown = signalsShown;
 	putSignalRise( values, nowMs - m_signalsRiseStartMs );
 
-	// the command grid against the radar's panel, six by three, every place its key: the orders in the
-	// owner's places (ControlBar_commandPlaces) and everything else packed toward the top left, what a
-	// set builds before its abilities and upgrades.  Over the grid's frame the power bar lies in a
-	// groove of its own panel, and the money stands on that panel's left end
-	const IRegion2D commandBox = gridBox( leftBox.hi.x + border, foot, COMMAND_COLUMNS, COMMAND_ROWS,
+	// the command grid in its well, six by three, every place its key: the orders in the owner's places
+	// (ControlBar_commandPlaces), passengers in the bottom right corner and everything else in rows by
+	// what it is for.  With nothing selected the well keeps the whole grid's size and is bare steel,
+	// the owner's call: only the cells go
+	const IRegion2D commandBox = gridBox( gridWell.lo.x, foot, COMMAND_COLUMNS, COMMAND_ROWS,
 																				COMMAND_CELL_WIDTH, COMMAND_CELL_HEIGHT );
 	Int where[ MAX_COMMANDS_PER_SET ];
 	const Bool fights = TheControlBar->getCommandPlaces( where );
@@ -11637,33 +12156,107 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	// and V do, for anything that attack moves
 	taken[ COMMAND_PLACE_ATTACK ] = taken[ COMMAND_PLACE_HOLD ] = taken[ COMMAND_PLACE_MOVE ] = fights;
 
-	// with nothing selected the frame keeps the whole grid's size and the grid is bare steel, the
-	// owner's call: only the cells go
-	const IRegion2D centreBox = framed( commandBox, border, FALSE, FALSE );
-	putFrame( values, "centre", commandBox, centreBox, centreShown );
-
-	// the power bar lying along the grid's top, in the strip the portrait bar had, a panel of its own
-	// as wide as the grid; the money stands on its left end, the owner's places of 2026-09-28
-	IRegion2D power = commandBox;
-	power.hi.y = centreBox.lo.y - border;
-	power.lo.y = power.hi.y - REAL_TO_INT( POWER_WIDTH * scale );
-	IRegion2D powerBox = framed( power, border, FALSE, FALSE );
-	powerBox.hi.y = centreBox.lo.y;
-	putFrame( values, "powerpanel", power, powerBox, centreShown );
+	// The power bar lies in the command grid's header strip, as long as the strip less a margin each end
+	const IRegion2D gridHeader = wellHeader( gridWell, scale );
+	const Int powerMargin = REAL_TO_INT( POWER_BAR_MARGIN * scale );
+	IRegion2D power;
+	power.lo.x = gridHeader.lo.x + powerMargin;
+	power.hi.x = gridHeader.hi.x - powerMargin;
+	power.lo.y = ( gridHeader.lo.y + gridHeader.hi.y - REAL_TO_INT( POWER_BAR_HEIGHT * scale ) ) / 2;
+	power.hi.y = power.lo.y + REAL_TO_INT( POWER_BAR_HEIGHT * scale );
 	putPowerGroove( values, power, centreShown );
 	putPowerBar( values, lists[ "powercells" ] );	// after the groove, which it divides into cells
-	// the money's well is as wide as the figure and a margin each side, following it through
+
+	// The top page, hanging from the middle of the screen's top edge: the match clock in a plate of its
+	// own, and the money in another hung a little under it, each as wide as what it holds, so the
+	// money's grows from its middle when the figure does.  A watcher's are on the spectator page.  The
+	// money's well is as wide as the figure and a margin each side, following it through
 	// InGameUI_moneyPlateWidth on the client's clock.  A static text wraps at its window's width less
 	// ten pixels, which the margin only covered from a scale of 1.0 up: at 1280x720 "$ 48500  +0/s"
 	// broke onto two lines and spilled out of the plate.  The window is one line, which the static
-	// text draws unwrapped, so the figure is never cut and its own string measures it
+	// text draws unwrapped, so the figure is never cut and its own string measures it.  It stays up
+	// while the bar is put away: it is the player's, not the bar's
+	const Bool topShown = !watching;
+	const Int topBorder = REAL_TO_INT( TOP_BORDER * scale );
 	GameWindow *moneyWindow = controlBarWindow( "MoneyDisplay" );
 	DisplayString *moneyText = ( (TextData *)moneyWindow->winGetUserData() )->text;
 	moneyWindow->winSetStatus( WIN_STATUS_ONE_LINE );
 	moneyText->setWordWrap( 0 );
 	const Int moneyNeeded = moneyText->getWidth() + 2 * REAL_TO_INT( MONEY_TEXT_MARGIN * scale );
-	putMoney( values, powerBox, InGameUI_moneyPlateWidth( m_moneyPlate, moneyNeeded, nowMs ),
-						centreShown && !moneyWindow->winIsHidden() );
+	const Int clockWidth = REAL_TO_INT( CLOCK_WIDTH * scale );
+	const Int moneyWidth = InGameUI_moneyPlateWidth( m_moneyPlate, moneyNeeded, nowMs );
+	IRegion2D clock;
+	clock.lo.x = ( (Int)TheDisplay->getWidth() - clockWidth ) / 2;
+	clock.hi.x = clock.lo.x + clockWidth;
+	clock.lo.y = topBorder;
+	clock.hi.y = clock.lo.y + REAL_TO_INT( TOP_WELL_HEIGHT * scale );
+	putPageRect( values, "clock", clock, topShown, scale );
+	values[ "clock" ] = spectatorClock( TheGameLogic->getFrame() );
+	IRegion2D clockBox = clock;
+	clockBox.lo.x -= topBorder;
+	clockBox.lo.y = 0;
+	clockBox.hi.x += topBorder;
+	clockBox.hi.y += topBorder;
+	putFrame( values, "clockbar", clock, clockBox, topShown );
+
+	const Bool moneyShown = topShown && !moneyWindow->winIsHidden();
+	IRegion2D money;
+	money.lo.x = ( (Int)TheDisplay->getWidth() - moneyWidth ) / 2;
+	money.hi.x = money.lo.x + moneyWidth;
+	money.lo.y = clockBox.hi.y + REAL_TO_INT( TOP_BOX_GAP * scale ) + topBorder;
+	money.hi.y = money.lo.y + REAL_TO_INT( MONEY_WELL_HEIGHT * scale );
+	putMoney( values, money, moneyShown );
+	IRegion2D moneyBox = money;
+	moneyBox.lo.x -= topBorder;
+	moneyBox.lo.y -= topBorder;
+	moneyBox.hi.x += topBorder;
+	moneyBox.hi.y += topBorder;
+	putFrame( values, "moneybar", money, moneyBox, moneyShown );
+	m_topBarBottom = moneyShown ? moneyBox.hi.y : topShown ? clockBox.hi.y : 0;
+
+	// the lobby's peace time in a third plate under the money, while it runs.  Last, because it is
+	// the one that goes: the clock and the money stay where they are when the truce ends, and what
+	// hangs under the top page moves up by the plate and nothing else.  Its figure is Readout.html's,
+	// which is laid out again every second for the clock anyway; the last ten seconds keep the plate
+	// with the word alone, and drawPeaceCountdown counts them out from under it
+	const Bool peaceShown = topShown && TheGameLogic->isPeaceTime();
+	IRegion2D peace;
+	peace.lo.x = ( (Int)TheDisplay->getWidth() - REAL_TO_INT( PEACE_WELL_WIDTH * scale ) ) / 2;
+	peace.hi.x = peace.lo.x + REAL_TO_INT( PEACE_WELL_WIDTH * scale );
+	peace.lo.y = m_topBarBottom + REAL_TO_INT( TOP_BOX_GAP * scale ) + topBorder;
+	peace.hi.y = peace.lo.y + REAL_TO_INT( MONEY_WELL_HEIGHT * scale );
+	putPageRect( values, "peace", peace, peaceShown, scale );
+	IRegion2D peaceBox = peace;
+	peaceBox.lo.x -= topBorder;
+	peaceBox.lo.y -= topBorder;
+	peaceBox.hi.x += topBorder;
+	peaceBox.hi.y += topBorder;
+	putFrame( values, "peacebar", peace, peaceBox, peaceShown );
+	m_peacePlateBottom = peaceShown ? peaceBox.hi.y : 0;
+	if( peaceShown )
+	{
+		m_topBarBottom = peaceBox.hi.y;
+		const UnsignedInt left = TheGameLogic->getPeaceTimeEndFrame() - TheGameLogic->getFrame();
+		const UnsignedInt secs = ControlBar_secondsFromFrames( (Real)left );
+		UnicodeString time;
+		if( left > PEACE_COUNTDOWN_SECONDS * LOGICFRAMES_PER_SECOND )
+			time.format( TheGameText->fetch( "GUI:PeaceTimeHud" ), secs / 60, secs % 60 );
+		values[ "peace.label" ] = WideCharStringToMultiByte( TheGameText->fetch( "GUI:PeaceTimeHudLabel" ).str() );
+		values[ "peace.time" ] = WideCharStringToMultiByte( time.str() );
+	}
+	// the event feed hangs in the top left corner under the menu key, and under the top page's foot
+	// too, which on a 4:3 screen reaches over the feed's lines
+	m_feedTop = max( (Int)REAL_TO_INT( MENU_FOOT * scale ), m_topBarBottom );
+
+	// the money's window stands outside the bar's frame, where a window is never pointed at, and the
+	// power's has nothing to draw, so the page puts their cards up while the pointer is over their wells
+	const ICoord2D &pointer = TheMouse->getMouseStatus()->pos;
+	struct Over { static Bool is( const ICoord2D &point, const IRegion2D &rect )
+		{ return point.x >= rect.lo.x && point.x < rect.hi.x && point.y >= rect.lo.y && point.y < rect.hi.y; } };
+	if( topShown && Over::is( pointer, money ) )
+		TheControlBar->showBuildTooltipLayout( moneyWindow );
+	else if( centreShown && Over::is( pointer, power ) )
+		TheControlBar->showBuildTooltipLayout( controlBarWindow( "PowerWindow" ) );
 
 	// each command button to its place.  A click only reaches a window inside every one of its parents,
 	// so the buttons' two cover the whole frame; the page's solids still decide what is battlefield
@@ -11671,34 +12264,38 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	TheControlBar->placeWindowAt( controlBarWindow( "CenterBackground" ), frameRect );
 	TheControlBar->placeWindowAt( controlBarWindow( "CommandWindow" ), frameRect );
 
-	// a cell only for a place a command stands in; an empty one is the panel's steel
+	// a cell only for a place a command stands in; an empty one is the panel's steel.  A building
+	// going up and one counting down to a unit hide the command group, and their own button takes
+	// its place before the cells are drawn
 	IRegion2D place[ COMMAND_PLACE_COUNT ];
-	std::vector< HtmlValues > &commandCells = lists[ "commandcells" ];
 	for( Int each = 0; each < COMMAND_PLACE_COUNT; each++ )
-	{
 		place[ each ] = gridCell( commandBox, each % COMMAND_COLUMNS, each / COMMAND_COLUMNS,
 															COMMAND_CELL_WIDTH, COMMAND_CELL_HEIGHT );
+	if( centreShown )
+		TheControlBar->placeContextOnGrid( frameRect, place, taken );
+	std::vector< HtmlValues > &commandCells = lists[ "commandcells" ];
+	size_t commandFilled = 0;
+	for( Int each = 0; each < COMMAND_PLACE_COUNT; each++ )
+	{
 		if( !centreShown || !taken[ each ] )
 			continue;
-		HtmlValues entry;
-		putCell( entry, place[ each ], ring, scale );
-		commandCells.push_back( entry );
+		putCell( listEntry( commandCells, commandFilled++ ), place[ each ], ring, scale );
 	}
+	commandCells.resize( commandFilled );
 	for( Int button = 0; button < COMMAND_BUTTONS; button++ )
 		if( where[ button ] >= 0 )
 			TheControlBar->placeWindowAt( numberedWindow( "ButtonCommand", button + 1 ), place[ where[ button ] ] );
 	putPageRect( values, "attackkey", place[ COMMAND_PLACE_ATTACK ], centreShown && fights, scale );
 	putPageRect( values, "holdkey", place[ COMMAND_PLACE_HOLD ], centreShown && fights, scale );
 	putPageRect( values, "movekey", place[ COMMAND_PLACE_MOVE ], centreShown && fights, scale );
-	values[ "attackkey.key" ] = commandSlotKey( COMMAND_PLACE_ATTACK );
-	values[ "holdkey.key" ] = commandSlotKey( COMMAND_PLACE_HOLD );
-	values[ "movekey.key" ] = commandSlotKey( COMMAND_PLACE_MOVE );
+	// their letters are drawCellGridFront's, on the command buttons' own plate
+	m_orderKeysShown = centreShown && fights;
+	m_orderKeyCell[ 0 ] = place[ COMMAND_PLACE_ATTACK ];
+	m_orderKeyCell[ 1 ] = place[ COMMAND_PLACE_HOLD ];
+	m_orderKeyCell[ 2 ] = place[ COMMAND_PLACE_MOVE ];
 
-	// the portrait bar on the screen's bottom edge right of the command panel: the portrait, then a
-	// single unit's upgrades or a multi-selection's types, the owner's rule, and only as long as what
-	// it holds; with no portrait there is no bar.  More types than PORTRAIT_PLACES take smaller cells,
-	// two rows of them, then three.  A watcher has no command panel and keeps the portrait of what he
-	// clicked, the bar standing where the panel would have been
+	// the selection's well left of the grid: a lone unit's portrait and upgrades, or a group's types,
+	// the owner's rule.  A watcher has no command panel and keeps the portrait of what he clicked
 	GameWindow *portraitWindow = controlBarWindow( "CameoWindow" );
 	const Bool portraitShown = ( centreShown || ( panelCount > 2 && shown[ 2 ] ) ) &&
 														 !portraitWindow->winIsHidden() && !portraitWindow->winGetParent()->winIsHidden();
@@ -11714,103 +12311,101 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	for( size_t tile = 0; tile < allTiles.size(); tile++ )
 		if( allTiles[ tile ] && !allTiles[ tile ]->winIsHidden() )
 			tiles.push_back( allTiles[ tile ] );
-	Int rows = 1;
-	while( (Int)tiles.size() > rows * rows * PORTRAIT_PLACES )
-		rows++;
-	// a column of `rows` tiles is one cell wide.  A multi-selection shows each type once, its own tile
-	// with its count, the focused one lit: the portrait of the focused type would be that type again,
-	// so the owner had it taken off and its window is shrunk to nothing
+	// a group's types fill the well in rows of PORTRAIT_PLACES, three of them; more than that take
+	// cells a half, then a third the size, twice and three times as many rows and columns.  A
+	// multi-selection shows each type once, its own tile with its count, the focused one lit: the
+	// portrait of the focused type would be that type again, so the owner had it taken off and its
+	// window is shrunk to nothing
+	Int fold = 1;
+	while( (Int)tiles.size() > fold * fold * PORTRAIT_PLACES * SELECTION_ROWS )
+		fold++;
 	const Bool multi = !tiles.empty();
-	const Int columns = multi ? ( (Int)tiles.size() + rows - 1 ) / rows : (Int)upgrades.size();
-	const Int portraitWidth = multi ? 0 : PORTRAIT_WIDTH + CELL_GAP;
 
-	IRegion2D portraitBox;
-	portraitBox.lo.x = centreShown ? centreBox.hi.x + border : commandBox.lo.x;
-	portraitBox.hi.y = foot;
-	portraitBox.lo.y = portraitBox.hi.y - REAL_TO_INT( ( CELL_HEIGHT + CELL_GAP ) * scale );
-	portraitBox.hi.x = portraitBox.lo.x + REAL_TO_INT( ( portraitWidth + columns * ( CELL_WIDTH + CELL_GAP ) ) * scale );
-	const IRegion2D portraitFrame = framed( portraitBox, border, FALSE, FALSE );
-	putFrame( values, "portrait", portraitBox, portraitFrame, portraitShown );
-	TheControlBar->placeWindowAt( controlBarWindow( "RightHUD" ), portraitBox );
-	TheControlBar->placeWindowAt( controlBarWindow( "WinUnitSelected" ), portraitBox );
-	IRegion2D portraitCell = gridCell( portraitBox, 0, 0, CELL_WIDTH, CELL_HEIGHT );
-	portraitCell.hi.x = portraitCell.lo.x + ( multi ? 0 : REAL_TO_INT( PORTRAIT_WIDTH * scale ) );
+	// the cells stand in the middle of the well's height
+	TheControlBar->placeWindowAt( controlBarWindow( "RightHUD" ), selectionWell );
+	TheControlBar->placeWindowAt( controlBarWindow( "WinUnitSelected" ), selectionWell );
+	IRegion2D placesBox = selectionWell;
+	placesBox.lo.y += ( wellHeight - REAL_TO_INT( SELECTION_ROWS * ( CELL_HEIGHT + CELL_GAP ) * scale ) ) / 2;
+	// a lone unit's portrait two cells high in the top left corner, its name, rank and health beside
+	// it, and its upgrades on the row under it
+	IRegion2D portraitCell = gridCell( placesBox, 0, 0, PORTRAIT_WIDTH * PORTRAIT_SCALE, CELL_HEIGHT * PORTRAIT_SCALE + CELL_GAP );
+	if( multi )
+		portraitCell.hi.x = portraitCell.lo.x;
 	TheControlBar->placeWindowAt( portraitWindow, portraitCell );
-	IRegion2D placesBox = portraitBox;
-	if( !multi )
-		placesBox.lo.x = portraitCell.hi.x + REAL_TO_INT( ring * scale );
+	putSelectedUnit( values, lists[ "selstars" ], portraitCell, selectionWell, portraitShown && !multi );
 
 	std::vector< HtmlValues > &portraitCells = lists[ "portraitcells" ];
+	size_t portraitFilled = 0;
 	if( portraitShown && !multi )
-	{
-		HtmlValues entry;
-		putCell( entry, portraitCell, ring, scale );
-		portraitCells.push_back( entry );
-	}
+		putCell( listEntry( portraitCells, portraitFilled++ ), portraitCell, ring, scale );
 	for( size_t upgrade = 0; upgrade < upgrades.size(); upgrade++ )
 	{
-		const IRegion2D cell = gridCell( placesBox, (Int)upgrade, 0, CELL_WIDTH, CELL_HEIGHT );
+		const IRegion2D cell = gridCell( placesBox, (Int)upgrade, PORTRAIT_SCALE, CELL_WIDTH, CELL_HEIGHT );
 		TheControlBar->placeWindowAt( upgrades[ upgrade ], cell );
-		HtmlValues entry;
-		putCell( entry, cell, ring, scale );
 		if( portraitShown && tiles.empty() )
-			portraitCells.push_back( entry );
+			putCell( listEntry( portraitCells, portraitFilled++ ), cell, ring, scale );
 	}
 	for( size_t tile = 0; tile < tiles.size(); tile++ )
 	{
-		const IRegion2D cell = gridCell( placesBox, (Int)tile / rows, (Int)tile % rows, CELL_WIDTH, CELL_HEIGHT, 1.0f / rows );
+		const Int across = PORTRAIT_PLACES * fold;
+		const IRegion2D cell = gridCell( placesBox, (Int)tile % across, (Int)tile / across, CELL_WIDTH, CELL_HEIGHT, 1.0f / fold );
 		TheControlBar->placeWindowAt( tiles[ tile ], cell );
-		HtmlValues entry;
-		putCell( entry, cell, rows > 1 ? 1 : ring, scale );
 		if( portraitShown )
-			portraitCells.push_back( entry );
+			putCell( listEntry( portraitCells, portraitFilled++ ), cell, fold > 1 ? 1 : ring, scale );
 	}
+	portraitCells.resize( portraitFilled );
 
-	// the general's powers ready to fire, the first in the corner against the screen's right edge, the
-	// row growing left as they come and wrapping upward past three, each a cell's size.  They sit in a
-	// tray of the panels' steel only as big as they are, standing on the screen's bottom edge right of
-	// the command grid where three fit there, and over the grid's end where they do not
-	const Int trayBorder = REAL_TO_INT( SKILL_TRAY_BORDER * scale );
-	const ICoord2D cell = cellSize();
-	const Int cellGap = REAL_TO_INT( SKILL_CELL_GAP * scale );
-	const Int trayWidth = SPECIAL_POWER_SHORTCUT_COLS * ( cell.x + cellGap ) + 2 * trayBorder;
+	// the general's powers ready to fire, growing out of the console's right hand end, a column for
+	// each group a key picks: F1's against it, its powers going up from the wells' floor, F2's beside
+	// it and so on, four columns for eleven.  Only the powers there are have steel, a column of it
+	// under each column of cells as high as its own, so the plate steps down to the right and there
+	// is never an empty place
 	ICoord2D corner;
-	corner.x = TheDisplay->getWidth() - trayBorder;
-	const Int panelRight = portraitShown ? max( centreBox.hi.x, portraitFrame.hi.x ) : centreBox.hi.x;
-	corner.y = ( (Int)TheDisplay->getWidth() - panelRight >= trayWidth ? barBottom() : powerBox.lo.y - REAL_TO_INT( SKILL_GRID_GAP * scale ) )
-						 - trayBorder;
+	corner.x = consoleBox.hi.x;
+	corner.y = foot;
 	const Int powersShown = TheControlBar->placeSpecialPowerShortcutGrid( centreShown ? &corner : NULL, cell, cellGap );
 
 	std::vector< HtmlValues > &places = lists[ "skillcells" ];
-	IRegion2D powers;
-	powers.lo = corner;
-	powers.hi = corner;
 	for( Int slot = 0; slot < powersShown; slot++ )
 	{
-		const Int column = slot % SPECIAL_POWER_SHORTCUT_COLS;
-		const Int row = slot / SPECIAL_POWER_SHORTCUT_COLS;
+		const Int column = slot / SPECIAL_POWER_SHORTCUT_COLS;
+		const Int row = slot % SPECIAL_POWER_SHORTCUT_COLS;
 		IRegion2D place;
-		place.hi.x = corner.x - column * ( cell.x + cellGap );
+		place.lo.x = corner.x + column * ( cell.x + cellGap );
 		place.hi.y = corner.y - row * ( cell.y + cellGap );
-		place.lo.x = place.hi.x - cell.x;
+		place.hi.x = place.lo.x + cell.x;
 		place.lo.y = place.hi.y - cell.y;
-		powers.lo.x = min( powers.lo.x, place.lo.x );
-		powers.lo.y = min( powers.lo.y, place.lo.y );
-		HtmlValues entry;
-		putCell( entry, place, pageRing( cellGap, scale ), scale );
-		places.push_back( entry );
+		putCell( listEntry( places, slot ), place, pageRing( cellGap, scale ), scale );
 	}
-	IRegion2D tray = powers;
-	tray.lo.x -= trayBorder;
-	tray.lo.y -= trayBorder;
-	tray.hi.x = TheDisplay->getWidth();
-	tray.hi.y += trayBorder;
-	putFrame( values, "skilltray", powers, tray, powersShown > 0 );
+	places.resize( (size_t)max( 0, powersShown ) );
 
-	// each grid's frames again in front of its buttons, drawn by a window after them
-	m_cellFrontCells[ CELL_GRID_COMMAND ] = commandCells;
-	m_cellFrontCells[ CELL_GRID_QUEUE ] = portraitCells;
-	m_cellFrontCells[ CELL_GRID_POWERS ] = places;
+	const Int powerEdge = REAL_TO_INT( POWER_TRAY_EDGE * scale );
+	const Int powerColumns = ( powersShown + SPECIAL_POWER_SHORTCUT_COLS - 1 ) / SPECIAL_POWER_SHORTCUT_COLS;
+	std::vector< HtmlValues > &steel = lists[ "powersteel" ];
+	Int columnTop[ MAX_SPECIAL_POWER_SHORTCUTS ];
+	for( Int column = 0; column < powerColumns; column++ )
+	{
+		const Int cells = min( powersShown - column * SPECIAL_POWER_SHORTCUT_COLS, (Int)SPECIAL_POWER_SHORTCUT_COLS );
+		columnTop[ column ] = corner.y - cells * ( cell.y + cellGap ) + cellGap - powerEdge;
+	}
+	for( Int column = 0; column < powerColumns; column++ )
+	{
+		// a column takes the gap left of its cells, and the last the edge right of them too; its own
+		// shade down its right hand side is the part no column beside it covers
+		IRegion2D plate;
+		plate.lo.x = column == 0 ? consoleBox.hi.x - 1 : corner.x + column * ( cell.x + cellGap ) - cellGap;
+		plate.hi.x = corner.x + column * ( cell.x + cellGap ) + cell.x + ( column + 1 == powerColumns ? powerEdge : 0 );
+		plate.lo.y = columnTop[ column ];
+		plate.hi.y = consoleBox.hi.y;
+		HtmlValues &entry = listEntry( steel, column );
+		putPageRect( entry, "plate", plate, TRUE, scale );
+		const Int shadeFoot = column + 1 == powerColumns ? plate.hi.y : columnTop[ column + 1 ];
+		entry[ "shadeh" ] = std::to_string( REAL_TO_INT_FLOOR( ( shadeFoot - plate.lo.y ) / scale + 0.5f ) );
+	}
+	steel.resize( (size_t)max( 0, powerColumns ) );
+
+	// each grid's frames again in front of its buttons, drawn by a window after them; the cells go
+	// over to them once this page is expanded
 	putFrontWindow( controlBarWindow( "CommandWindow" ), drawCommandGridFront );
 	// the portrait bar's grid over the portrait, its upgrades and a selection's types, all RightHUD's
 	putFrontWindow( controlBarWindow( "RightHUD" ), drawQueueGridFront );
@@ -11850,17 +12445,40 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 		standDownPromotionScreen();
 
 	m_controlBarOverlay->setPage( HtmlTemplate_expand( m_controlBarPage, values, lists, lookupGameText ) );
+	// swapped rather than copied: the front windows get this frame's cells, and the lists get the
+	// front windows' old ones to write the next frame over
+	m_cellFrontCells[ CELL_GRID_COMMAND ].swap( commandCells );
+	m_cellFrontCells[ CELL_GRID_QUEUE ].swap( portraitCells );
+	m_cellFrontCells[ CELL_GRID_POWERS ].swap( places );
 	m_controlBarPageHovered = m_controlBarOverlay->hover( TheMouse->getMouseStatus()->pos );
 	m_controlBarOverlay->draw();
+	drawReadoutPage( values );
+	drawAlertPage();
 	drawNetPage();
 
-	std::vector< IRegion2D > solids;
-	m_controlBarOverlay->rectsOf( ".solid", solids );
-	std::vector< IRegion2D > buttons;
-	m_controlBarOverlay->rectsOf( "[data-click]", buttons );
-	TheControlBar->setPageSolids( &solids, &buttons );
+	m_controlBarSolids.clear();
+	m_controlBarOverlay->rectsOf( ".solid", m_controlBarSolids );
+	m_controlBarKeys.clear();
+	m_controlBarOverlay->rectsOf( "[data-click]", m_controlBarKeys );
+	TheControlBar->setPageSolids( &m_controlBarSolids, &m_controlBarKeys );
 	m_controlBarPageShown = TRUE;
 	return TRUE;
+}
+
+static Bool regionsHold( const std::vector< IRegion2D > &regions, const ICoord2D &point )
+{
+	for( size_t each = 0; each < regions.size(); each++ )
+	{
+		const IRegion2D &rect = regions[ each ];
+		if( point.x >= rect.lo.x && point.y >= rect.lo.y && point.x < rect.hi.x && point.y < rect.hi.y )
+			return TRUE;
+	}
+	return FALSE;
+}
+
+Bool InGameUI::isOnControlBarSteel( const ICoord2D &pointer ) const
+{
+	return m_controlBarPageShown && regionsHold( m_controlBarSolids, pointer ) && !regionsHold( m_controlBarKeys, pointer );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -11870,7 +12488,9 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 //-------------------------------------------------------------------------------------------------
 Bool InGameUI::handleControlBarPageClick( const ICoord2D *mouse, Bool act )
 {
-	if( !m_controlBarPageShown || m_controlBarOverlay == NULL || !m_controlBarOverlay->hover( *mouse ) )
+	if( !m_controlBarPageShown || m_controlBarOverlay == NULL )
+		return FALSE;
+	if( !m_controlBarOverlay->hover( *mouse ) )
 		return FALSE;
 
 	const std::string action = m_controlBarOverlay->click( *mouse );
@@ -11886,8 +12506,11 @@ Bool InGameUI::handleControlBarPageClick( const ICoord2D *mouse, Bool act )
 			orderFromPage( action.substr( ORDER_ACTION.size() ) );
 		return TRUE;
 	}
+	// steel outside the bar's frame, where no window of it stands - the top page, and the console's
+	// top where HUD Size lifts it over the frame - takes the click here, before it becomes an order on
+	// the ground under it
 	if( action.compare( 0, PRESS_ACTION.size(), PRESS_ACTION ) != 0 )
-		return FALSE;
+		return isOnControlBarSteel( *mouse );
 	if( !act )
 		return TRUE;
 
@@ -12437,11 +13060,10 @@ void InGameUI::drawQuitMenuPage( GameWindow *parent )
 /** Lay out and draw one run of cells, its left edge at left and the first cameo's top edge at
 	* bottomY.
 	*
-	* Playing, the run is a column: it grows upward out of the corner instead of across the bottom of
-	* the screen.  The soonest thing to arrive is the bottom cell - the one nearest the command bar
-	* and nearest the eye - and everything behind it is stacked above.  Five cells, and whatever is
-	* left over closes the column as a sixth wearing a "+N", so the strip's whole footprint is one
-	* tray wide however much the base has queued. */
+	* Playing, the run is rows of QUEUE_TRAY_COLUMNS growing upward out of the corner, the next row over
+	* the last.  The soonest thing to arrive is the bottom left cell - the one nearest the command bar
+	* and nearest the eye.  PRODUCTION_STRIP_ROW_MAX cells, and whatever is left over closes the run
+	* as one more wearing a "+N". */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawProductionStripColumn( Int left, Int bottomY )
 {
@@ -12477,11 +13099,13 @@ void InGameUI::drawProductionStripColumn( Int left, Int bottomY )
 	const Int x = m_productionStripThemed ? left : left + trayInsetX;		///< where the first cameo starts
 
 	//
-	// Which way the cells run.  Either way they step a whole tray, so no cameo has a neighbouring
-	// tray lying over its edge.
+	// The cells run in rows of QUEUE_TRAY_COLUMNS, the next row over the last: in the page's cells,
+	// or without the page in trays each stepping a whole tray so no cameo has a neighbouring tray
+	// lying over its edge.  Cell n stands `n % columns` steps right and `n / columns` up.
 	//
-	const Int cellStepX = m_productionStripThemed ? m_productionStripStep : 0;
-	const Int cellStepY = m_productionStripThemed ? 0 : trayH;
+	const Int columns = QUEUE_TRAY_COLUMNS;
+	const Int cellStepX = m_productionStripThemed ? m_productionStripStep : trayW;
+	const Int cellStepY = m_productionStripThemed ? m_productionStripCameoH + m_productionStripStep - m_productionStripCameoW : trayH;
 
 	const Image *tray = productionStripTray();
 
@@ -12505,8 +13129,8 @@ void InGameUI::drawProductionStripColumn( Int left, Int bottomY )
 	//
 	for( Int back = cells - 1; back >= 0 && !m_productionStripThemed; back-- )
 	{
-		const Int backX = trayX + back * cellStepX;
-		const Int backY = bottomY - back * cellStepY - trayInsetY;
+		const Int backX = trayX + back % columns * cellStepX;
+		const Int backY = bottomY - back / columns * cellStepY - trayInsetY;
 		if( tray )
 			TheDisplay->drawImage( tray, backX, backY, backX + trayW, backY + trayH );
 		else
@@ -12539,8 +13163,8 @@ void InGameUI::drawProductionStripColumn( Int left, Int bottomY )
 		StripSlotDraw *draw = &slots[ i ];
 
 		// the soonest is the near cell: the bottom of a column, the left hand end of a row
-		const Int slotX = x + i * cellStepX;
-		const Int y = bottomY - i * cellStepY;
+		const Int slotX = x + i % columns * cellStepX;
+		const Int y = bottomY - i / columns * cellStepY;
 		slot->pos.x = slotX;
 		slot->pos.y = y;
 
@@ -12616,8 +13240,10 @@ void InGameUI::drawProductionStripColumn( Int left, Int bottomY )
 		// so: it goes red and wears a minus. Without it a ctrl-click is a guess about which cameo
 		// the cursor is really on, and an accidental cancel costs the whole item.
 		//
-		// a building already standing on the map is not cancelled from here - it is sold or blown up
-		if( !slot->isStructure && TheKeyboard && TheKeyboard->isCtrl() && TheMouse )
+		// a building already standing on the map is not cancelled from here - it is sold or blown up,
+		// and an ally's item is not yours to cancel, so it does not offer to
+		if( !slot->isStructure && producer && producer->isLocallyControlled() &&
+				TheKeyboard && TheKeyboard->isCtrl() && TheMouse )
 		{
 			const MouseIO *io = TheMouse->getMouseStatus();
 			draw->cancelHover = io && io->pos.x >= draw->x && io->pos.x < draw->x + cameoW &&
@@ -12666,7 +13292,7 @@ void InGameUI::drawProductionStripColumn( Int left, Int bottomY )
 		const StripSlotDraw *draw = &slots[ quantitySlot ];
 		if( draw->quantity > 1 )
 			drawStripQuantity( quantitySlot,
-												 draw->x, draw->y, cameoW, draw->quantity );
+												 draw->x, draw->y, cameoW, cameoH, draw->quantity );
 	}
 
 	// and the borders round them; the themed row's frames are Queue.html's
@@ -12700,40 +13326,26 @@ void InGameUI::drawProductionStripColumn( Int left, Int bottomY )
 	//
 	if( hidden > 0 )
 	{
-		// the column's own "+N" - see m_stripSecondsString
-		DisplayString *&overflow = m_productionStripOverflow[ STRIP_OVERFLOW_PRODUCTION ];
-
-		if( overflow == NULL )
-		{
-			overflow = TheDisplayStringManager->newDisplayString();
-			overflow->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
-													TheGlobalLanguageData->adjustFontSize( HUD_OVERLAY_POINT_SIZE ),
-													TRUE ) );
-		}
+		const Int moreX = x + count % columns * cellStepX;
+		const Int moreY = bottomY - count / columns * cellStepY;
+		const IRegion2D cell = { { moreX, moreY }, { moreX + cameoW, moreY + cameoH } };
 
 		UnicodeString text;
 		text.format( L"+%d", hidden );
-		overflow->setText( text );
 
-		Int textWidth = 0, textHeight = 0;
-		overflow->getSize( &textWidth, &textHeight );
-
-		const Int moreX = x + count * cellStepX;
-		const Int moreY = bottomY - count * cellStepY;
-
-		overflow->draw( moreX + ( cameoW - textWidth ) / 2,
-										moreY + ( cameoH - textHeight ) / 2,
-										GameMakeColor( 235, 235, 235, 255 ),
-										GameMakeColor( 0, 0, 0, 255 ) );
+		// the column's own "+N" - see m_stripSecondsString
+		DisplayString *overflow = fitStripString( m_productionStripOverflow[ STRIP_OVERFLOW_PRODUCTION ], text,
+																							HUD_OVERLAY_POINT_SIZE, cell );
+		HudReadout_draw( overflow, cell, HUD_READOUT_CENTRE, GameMakeColor( 235, 235, 235, 255 ) );
 	}
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Playing under the bar's page, the strip is a row in the page's steel, Window/Html/Queue.html: a
-	* tray over the radar, standing over the skills key with its first cell against the screen's left
-	* edge and the row growing right.  Each cell is a power's size, the soonest first, the "+N" in a
-	* cell of its own at the end, and the page's frames are drawn again over the cameos' edges the way
-	* the command grid's are. */
+/** Playing under the bar's page, the strip is a tray in the page's steel, Window/Html/Queue.html,
+	* standing on the console's top edge over the selection's well, its first cell at the well's left
+	* edge: rows of QUEUE_TRAY_COLUMNS growing right, the next row over the last.  Each cell is a
+	* power's size, the soonest first, the "+N" in a cell of its own at the end, and the page's frames
+	* are drawn again over the cameos' edges the way the command grid's are. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawQueueTray( void )
 {
@@ -12747,35 +13359,61 @@ void InGameUI::drawQueueTray( void )
 	for( Int slot = 0; slot < m_productionStripCount; slot++ )
 		shown += m_productionStrip[ slot ].quantity;
 	const Int cells = m_productionStripCount + ( m_productionStripTotal > shown ? 1 : 0 );
-
-	IRegion2D cellsBox;
-	cellsBox.lo.x = trayBorder;
-	cellsBox.hi.y = m_feedFloor - REAL_TO_INT( SKILL_GRID_GAP * scale ) - trayBorder;
-	cellsBox.lo.y = cellsBox.hi.y - cell.y;
-	cellsBox.hi.x = cellsBox.lo.x + cells * cell.x + ( cells - 1 ) * gap;
-	IRegion2D tray = cellsBox;
-	tray.lo.x = 0;
-	tray.lo.y -= trayBorder;
-	tray.hi.x += trayBorder;
-	tray.hi.y += trayBorder;
-	m_queueTrayTop = tray.lo.y;
+	const Int columns = min( cells, (Int)QUEUE_TRAY_COLUMNS );
+	const Int fullRows = cells / QUEUE_TRAY_COLUMNS;
+	const Int lastRow = cells % QUEUE_TRAY_COLUMNS;
 
 	m_productionStripCameoW = cell.x;
 	m_productionStripCameoH = cell.y;
 	m_productionStripStep = cell.x + gap;
+	const Int rowStep = cell.y + gap;
+
+	// the tray stands on the console's top line with nothing between, its left edge the selection
+	// well's: the full rows in one plate, and a shorter last row on top of it only as wide as its own
+	// cells, the two one stepped plate as the powers' columns are
+	IRegion2D cellsBox;
+	cellsBox.lo.x = m_queueCorner.x + trayBorder;
+	cellsBox.hi.y = m_queueCorner.y - trayBorder;
+	cellsBox.lo.y = cellsBox.hi.y - ( fullRows > 0 ? fullRows : 1 ) * rowStep + gap;
+	cellsBox.hi.x = cellsBox.lo.x + columns * m_productionStripStep - gap;
 
 	HtmlValues values;
 	HtmlLists lists;
 	values[ "side" ] = spectatorSide();
-	putFrame( values, "tray", cellsBox, tray, TRUE );
+	values[ "line" ] = std::to_string( QUEUE_TRAY_LINE );
+	values[ "well" ] = std::to_string( QUEUE_TRAY_WELL );
+	std::vector< HtmlValues > &trays = lists[ "trays" ];
+	IRegion2D tray = cellsBox;
+	tray.lo.x -= trayBorder;
+	tray.lo.y -= trayBorder;
+	tray.hi.x += trayBorder;
+	tray.hi.y += trayBorder + 1;	// over the console's light top line, so the two plates are one
+	trays.resize( 1 );
+	putFrame( trays[ 0 ], "tray", cellsBox, tray, TRUE );
+	trays[ 0 ][ "tray.step" ] = "standing";
+	if( fullRows > 0 && lastRow > 0 )
+	{
+		IRegion2D rise = cellsBox;
+		rise.hi.y = cellsBox.lo.y - gap;
+		rise.lo.y = rise.hi.y - cell.y;
+		rise.hi.x = rise.lo.x + lastRow * m_productionStripStep - gap;
+		IRegion2D riseTray = rise;
+		riseTray.lo.x -= trayBorder;
+		riseTray.lo.y -= trayBorder;
+		riseTray.hi.x += trayBorder;
+		riseTray.hi.y = cellsBox.lo.y;
+		trays.resize( 2 );
+		putFrame( trays[ 1 ], "tray", rise, riseTray, TRUE );
+		trays[ 1 ][ "tray.step" ] = "rise";
+	}
 	std::vector< HtmlValues > &cellList = lists[ "cells" ];
 	for( Int each = 0; each < cells; each++ )
 	{
 		IRegion2D place;
-		place.lo.x = cellsBox.lo.x + each * m_productionStripStep;
-		place.lo.y = cellsBox.lo.y;
+		place.lo.x = cellsBox.lo.x + each % QUEUE_TRAY_COLUMNS * m_productionStripStep;
+		place.hi.y = cellsBox.hi.y - each / QUEUE_TRAY_COLUMNS * rowStep;
 		place.hi.x = place.lo.x + cell.x;
-		place.hi.y = cellsBox.hi.y;
+		place.lo.y = place.hi.y - cell.y;
 		HtmlValues entry;
 		putCell( entry, place, pageRing( gap, scale ), scale );
 		cellList.push_back( entry );
@@ -12793,12 +13431,283 @@ void InGameUI::drawQueueTray( void )
 	m_queueOverlay->draw();
 
 	TheDisplay->beginBatch2D();
-	drawProductionStripColumn( cellsBox.lo.x, cellsBox.lo.y );
+	drawProductionStripColumn( cellsBox.lo.x, cellsBox.hi.y - cell.y );
 	TheDisplay->endBatch2D();
 
 	values[ "layer" ] = "front";
 	m_queueFrontOverlay->setPage( HtmlTemplate_expand( m_queuePage, values, lists, lookupGameText ) );
 	m_queueFrontOverlay->draw();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The superweapon strip: the cameos gathered this frame, top right, under the network box.
+	*
+	* Rows fill from the right, because the right hand end is where the strip is anchored and the
+	* one countdown that matters is the next one to land - it is always in the same place, however
+	* many are behind it.  Six to a row and a row for every six: every superweapon has a cell of its
+	* own, and nothing stands for the rest.
+	*
+	* The frames are the page's, Window/Html/Queue.html with the production queue's tray turned
+	* round: the tray against the screen's right edge and under every cameo a box in the colour the
+	* timer was registered with, whose weapon it is.  The cameo stands in the box the frame's
+	* thickness in from each side, so the frame is what is left of the box: one piece, the same on all
+	* four sides at any HUD Size, with the tray's steel between two of them.  A charged one's frame
+	* breathes toward white while the wash over its picture breathes in the owner's colour. */
+//-------------------------------------------------------------------------------------------------
+static const UnsignedInt SUPERWEAPON_BREATH_MS = 2400;	///< a charged superweapon's breath, out and back in
+static const Int SUPERWEAPON_BREATH_STEPS = 12;					///< shades its frame takes on the way: each is a page laid out again
+static const Real SUPERWEAPON_BREATH_LIFT = 0.6f;				///< how far toward white the frame goes at the top of it
+static const Int SUPERWEAPON_CELL_FRAME = 2;						///< a cell's frame in its owner's colour, page pixels
+
+void InGameUI::drawSuperweaponStrip( void )
+{
+	// a player gets the strip, top right; an observer or a replay does not - the spectator page
+	// and the Tab scoreboard carry the countdowns for them
+	if( m_superweaponIconCount < 1 || m_spectatorPageShown || localPlayerWatching() ||
+			( TheRecorder && TheRecorder->getMode() == RECORDERMODETYPE_PLAYBACK ) )
+		return;
+
+	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+		return;
+
+	//
+	// The strip is laid out in the screen's pixels, and its page with it: every length of the steel
+	// is turned into a whole number of screen pixels here, once, and everything after is sums of
+	// those.  Laid out in the page's pixels, each edge was rounded onto the screen by itself, and at
+	// HUD Size 130% a two pixel gap is 2.6: three screen pixels between the first two rows and two
+	// between the next, the tray's rim a pixel up into the last row, its dark line one pixel wide
+	// under a tray of six cells and two under a tray of one.
+	//
+	const Real scale = ControlBarHudScale();
+	struct Whole
+	{
+		static Int of( Real length, Real scale )
+		{
+			const Int pixels = REAL_TO_INT_FLOOR( length * scale + 0.5f );
+			return pixels > 1 ? pixels : 1;
+		}
+	};
+	// a cameo is the size of a general's power's cell in the console, so a countdown up here reads
+	// the way the powers' own do
+	const ICoord2D cameo = cellSize();
+	const Int cameoW = cameo.x;
+	const Int cameoH = cameo.y;
+
+	// the production queue's steel: the gap between two of its cells, which here is the steel between
+	// two owners' frames, and its tray's border, which is the well and the line along its outer edge
+	const Int gap = Whole::of( SKILL_CELL_GAP, scale );
+	const Int line = Whole::of( QUEUE_TRAY_LINE, scale );
+	const Int well = Whole::of( QUEUE_TRAY_WELL, scale );
+	const Int trayBorder = well + line;
+
+	// a cell is the cameo and its frame round it, and the cameo is drawn that far inside the cell's box
+	const Int frame = Whole::of( SUPERWEAPON_CELL_FRAME, scale );
+	const Int cellW = cameoW + 2 * frame;
+	const Int cellH = cameoH + 2 * frame;
+
+	//
+	// The corner readout owns the top right - the clock plate, or with the bar's page up the network
+	// box, which is a page of its own - so the strip starts under whichever is up.  A countdown
+	// drawn behind the readout is one nobody can read.  With neither up the tray stands in the
+	// corner itself, against the screen's top edge as it is against the right.
+	//
+	Int cornerBottom = m_hudOverlayBottom;
+	if( m_controlBarPageShown && m_netOverlay != NULL && TheGlobalData->m_showNetBox )
+	{
+		const Int netBottom = m_netOverlay->bottomOf( "#net" );
+		if( netBottom > cornerBottom )
+			cornerBottom = netBottom;
+	}
+	const Int top = cornerBottom > 0 ? cornerBottom + stripPixels( 3 ) : 0;
+
+	//
+	// one breath for the whole strip rather than one per icon, so every charged superweapon breathes
+	// together instead of each on its own clock: nothing to full and back along a cosine, which
+	// slows at both ends where a blink would snap.  It runs off the wall clock.  It is a picture,
+	// and the match's frames are not its to read: it breathes the same paused or fast-forwarded.
+	//
+	const Real breath = (Real)( timeGetTime() % SUPERWEAPON_BREATH_MS ) / SUPERWEAPON_BREATH_MS;
+	const Real pulse = 0.5f - 0.5f * (Real)cos( 2.0 * PI * breath );
+
+	//
+	// The cells, from the screen's right edge leftwards and a row under a row, six to a row and as
+	// many rows as there are cells for.  Only the last row can be short, and the tray is only as wide
+	// as each row's own cells: the full rows stand in one tray, and a short last row in a second one
+	// hung under it as a step, whose top is where the full rows' cells end, so the steel between the
+	// two is the gap between any two rows and the first tray's bottom rim runs on only past the step.
+	//
+	const Int shown = m_superweaponIconCount;
+	const Int rows = ( shown + SUPERWEAPON_STRIP_COLS - 1 ) / SUPERWEAPON_STRIP_COLS;
+	const Int lastColumns = shown - ( rows - 1 ) * SUPERWEAPON_STRIP_COLS;
+	const Int fullRows = lastColumns < SUPERWEAPON_STRIP_COLS ? rows - 1 : rows;
+	const Int stepX = cellW + gap;
+	const Int stepY = cellH + gap;
+
+	// the cells' box inside the tray's border
+	const Int cellsRight = TheDisplay->getWidth() - trayBorder;
+	const Int cellsTop = top + trayBorder;
+	static const Real SCREEN_PIXELS = 1.0f;		///< the page's scale: a pixel of it is one of the screen's
+
+	HtmlValues values;
+	HtmlLists lists;
+	values[ "side" ] = spectatorSide();
+	values[ "mirrored" ] = "mirrored";
+	values[ "layer" ] = "back";
+	values[ "line" ] = std::to_string( line );
+	values[ "well" ] = std::to_string( well );
+
+	// a tray is its cells and the border round them; its bottom is its last row's cells' bottom and
+	// the border, the same sum the cells are placed by
+	struct Tray
+	{
+		static void put( std::vector< HtmlValues > &trays, const IRegion2D &cells, Int top, Int border, const char *step )
+		{
+			IRegion2D box;
+			box.lo.x = cells.lo.x - border;
+			box.lo.y = top;
+			box.hi.x = cells.hi.x + border;
+			box.hi.y = cells.hi.y + border;
+			trays.push_back( HtmlValues() );
+			putFrame( trays.back(), "tray", cells, box, TRUE, SCREEN_PIXELS );
+			trays.back()[ "tray.step" ] = step;
+		}
+	};
+	std::vector< HtmlValues > &trayList = lists[ "trays" ];
+	if( fullRows > 0 )
+	{
+		IRegion2D cells;
+		cells.lo.x = cellsRight - ( SUPERWEAPON_STRIP_COLS * stepX - gap );
+		cells.lo.y = cellsTop;
+		cells.hi.x = cellsRight;
+		cells.hi.y = cellsTop + fullRows * stepY - gap;
+		Tray::put( trayList, cells, top, trayBorder, "" );
+	}
+	if( fullRows < rows )
+	{
+		IRegion2D cells;
+		cells.lo.x = cellsRight - ( lastColumns * stepX - gap );
+		cells.lo.y = cellsTop + fullRows * stepY;
+		cells.hi.x = cellsRight;
+		cells.hi.y = cells.lo.y + cellH;
+
+		// a step starts where the rows over it end, so its well's top edge is the gap between two rows
+		if( fullRows > 0 )
+			Tray::put( trayList, cells, cells.lo.y - well, trayBorder, "step" );
+		else
+			Tray::put( trayList, cells, top, trayBorder, "" );
+	}
+
+	//
+	// A charged cell's box is its owner's colour lifted toward white, in whole steps so the page is
+	// laid out a dozen times a breath and not every frame.
+	//
+	const Real lift = SUPERWEAPON_BREATH_LIFT * REAL_TO_INT( pulse * SUPERWEAPON_BREATH_STEPS + 0.5f ) / SUPERWEAPON_BREATH_STEPS;
+
+	IRegion2D place[ SUPERWEAPON_STRIP_MAX ];		///< where each cameo is drawn: its cell's box less the frame
+	std::vector< HtmlValues > &ownedList = lists[ "owned" ];
+	for( Int each = 0; each < shown; each++ )
+	{
+		HtmlValues entry;
+		IRegion2D box;
+		box.lo.x = cellsRight - ( each % SUPERWEAPON_STRIP_COLS ) * stepX - cellW;
+		box.lo.y = cellsTop + ( each / SUPERWEAPON_STRIP_COLS ) * stepY;
+		box.hi.x = box.lo.x + cellW;
+		box.hi.y = box.lo.y + cellH;
+		place[ each ].lo.x = box.lo.x + frame;
+		place[ each ].lo.y = box.lo.y + frame;
+		place[ each ].hi.x = box.hi.x - frame;
+		place[ each ].hi.y = box.hi.y - frame;
+
+		UnsignedByte r, g, b, a;
+		GameGetColorComponents( m_superweaponIcons[ each ].color, &r, &g, &b, &a );
+		const Real lifted = m_superweaponIcons[ each ].ready ? lift : 0.0f;
+		putPageRect( entry, "cell", box, TRUE, SCREEN_PIXELS );
+		entry[ "cell.color" ] = cssColor( GameMakeColor( r + REAL_TO_INT( ( 255 - r ) * lifted ),
+																											g + REAL_TO_INT( ( 255 - g ) * lifted ),
+																											b + REAL_TO_INT( ( 255 - b ) * lifted ), 255 ) );
+		ownedList.push_back( entry );
+	}
+
+	if( !m_queuePageLoaded )
+	{
+		m_queuePageLoaded = TRUE;
+		readHtmlPage( QUEUE_PAGE, m_queuePage );
+	}
+	if( m_superweaponOverlay == NULL )
+	{
+		m_superweaponOverlay = new HtmlOverlay( m_superweaponNormalFont );
+		m_superweaponOverlay->setScreenPixels( TRUE );
+	}
+	m_superweaponOverlay->setPage( HtmlTemplate_expand( m_queuePage, values, lists, lookupGameText ) );
+	m_superweaponOverlay->draw();
+
+	// a cameo has no frame drawn over its edge, so a readout's plate stands in its very corner: the
+	// cell handed to the readout is the cameo's and the inset the readout takes off again
+	const Int readoutInset = hudReadoutFrame();
+
+	// drawn as a batch, for the reason drawProductionStrip() gives - see Display::beginBatch2D
+	TheDisplay->beginBatch2D();
+
+	//
+	// The strip goes down a piece at a time - every picture, then every sweep, then every number -
+	// rather than an icon at a time, for the reason drawProductionStripRow() gives: pieces that
+	// want the same thing of the renderer are one draw call when they follow each other and one
+	// draw call each when they do not.  The icons do not overlap, so nothing changes on screen.
+	//
+	for( Int cameoSlot = 0; cameoSlot < shown; cameoSlot++ )
+	{
+		const SuperweaponIconSlot *slot = &m_superweaponIcons[ cameoSlot ];
+		const IRegion2D &cell = place[ cameoSlot ];
+
+		if( slot->image )
+			TheDisplay->drawImage( slot->image, cell.lo.x, cell.lo.y, cell.hi.x, cell.hi.y );
+	}
+
+	//
+	// the same sweep the production cameos wear, and the same way round as the command bar's own
+	// clock: the scrim covers what is still to be charged and is swept off as the charge runs
+	//
+	for( Int clockSlot = 0; clockSlot < shown; clockSlot++ )
+	{
+		const SuperweaponIconSlot *slot = &m_superweaponIcons[ clockSlot ];
+		const IRegion2D &cell = place[ clockSlot ];
+
+		if( !slot->ready )
+			TheDisplay->drawRemainingRectClock( cell.lo.x, cell.lo.y, cell.hi.x - cell.lo.x, cell.hi.y - cell.lo.y,
+																					slot->percent, GameMakeColor( 0, 0, 0, 130 ) );
+		else
+		{
+			//
+			// Charged: no number at all - zero seconds is not information - and the cameo itself
+			// breathes in the owning player's colour instead.  A ready superweapon is the one
+			// thing on this strip that wants to be noticed rather than looked up, and a
+			// translucent wash over the picture says whose it is in the same stroke.
+			//
+			UnsignedByte r, g, b, a;
+			GameGetColorComponents( slot->color, &r, &g, &b, &a );
+			const UnsignedByte washAlpha = (UnsignedByte)( 30.0f + 90.0f * pulse );
+			TheDisplay->drawFillRect( cell.lo.x, cell.lo.y, cell.hi.x - cell.lo.x, cell.hi.y - cell.lo.y,
+																GameMakeColor( r, g, b, washAlpha ) );
+		}
+	}
+
+	//
+	// bare seconds, however many there are: this strip is read against the other countdowns on
+	// the screen, and m:ss is a number you have to convert first
+	//
+	for( Int secondsSlot = 0; secondsSlot < shown; secondsSlot++ )
+	{
+		const SuperweaponIconSlot *slot = &m_superweaponIcons[ secondsSlot ];
+		const IRegion2D &cell = place[ secondsSlot ];
+
+		if( !slot->ready )
+			drawStripSeconds( PRODUCTION_STRIP_ROW_MAX + secondsSlot,
+												cell.lo.x - readoutInset, cell.lo.y - readoutInset,
+												cell.hi.x - cell.lo.x + 2 * readoutInset, cell.hi.y - cell.lo.y + 2 * readoutInset,
+												slot->seconds );
+	}
+
+	TheDisplay->endBatch2D();
 }
 
 #ifdef DEBUG_LOGGING
@@ -12847,11 +13756,17 @@ void InGameUI::drawProductionStrip( void )
 	// follows it. It goes in before the sweep over everything else, and the sweep skips it, so
 	// nothing is drawn or counted twice.
 	//
+	// A mutual ally's building leads it the same way: click his War Factory and what it is turning
+	// out stands ahead of your own queue, to read and nothing else.  The cancel is refused twice
+	// over for a cameo that is not yours, in handleProductionStripClick and again in the logic.
+	// An enemy's or a neutral's never gets here, and a watcher left above.
+	//
 	ObjectID selected = INVALID_ID;
 	if( getSelectCount() == 1 && !m_selectedDrawables.empty() )
 	{
 		Object *sel = m_selectedDrawables.front()->getObject();
-		if( sel && sel->getControllingPlayer() == player )
+		if( sel && ( sel->getControllingPlayer() == player ||
+								 isAllyOfLocalPlayer( sel->getControllingPlayer()->getPlayerIndex() ) ) )
 		{
 			selected = sel->getID();
 			appendProducerQueue( sel, m_productionStrip, &m_productionStripCount, PRODUCTION_STRIP_ROW_MAX,
@@ -12900,11 +13815,10 @@ void InGameUI::drawProductionStrip( void )
 	m_productionStripCameoH = cameoSize.y;
 
 	//
-	// Playing, the queue is a column standing on the corner just above the control bar and growing
-	// upward: the next thing to arrive is the bottom cell, always in the same place, and the rest
-	// of the queue is stacked over it.  Six cells is the whole of it, so the strip is one tray wide
-	// however deep the base's queue goes - across the bottom of the screen it used to run over the
-	// battlefield instead.  Cells step a whole tray, so none of them is clipped by the one above.
+	// Playing, the queue stands on the corner just above the control bar in rows growing upward: the
+	// next thing to arrive is the bottom left cell, always in the same place, and the rest of the
+	// queue is stacked over it.  Ten cells is the whole of it, two rows however deep the base's
+	// queue goes.  Cells step a whole tray, so none of them is clipped by its neighbour.
 	//
 	const Int trayBelow = traySize.y - trayHole.y;
 	const Int lowerY = barTop - trayBelow - stripPixels( PRODUCTION_STRIP_LIFT );
@@ -13459,6 +14373,69 @@ void InGameUI::selectNextIdleWorker( void )
 	}
 }
 
+// A unit of the local player's that is standing on the field with no order: not a dozer, a worker
+// or a supply truck (those have the idle-worker key), not a structure, not riding in anything.
+static Bool isIdleCombatUnit( const Object *obj )
+{
+	if( !obj->isLocallyControlled() || obj->isEffectivelyDead() || obj->isContained() || !obj->isMobile() )
+		return FALSE;
+
+	if( !obj->isKindOf( KINDOF_SELECTABLE ) || obj->isKindOf( KINDOF_NO_SELECT ) || obj->isKindOf( KINDOF_IGNORED_IN_GUI ) )
+		return FALSE;
+
+	if( obj->isKindOf( KINDOF_STRUCTURE ) || obj->isKindOf( KINDOF_DOZER ) || obj->isKindOf( KINDOF_HARVESTER ) )
+		return FALSE;
+
+	// a player owns things with no AI module at all
+	const AIUpdateInterface *ai = obj->getAI();
+	return ai && ai->isIdle();
+}
+
+void InGameUI::selectNextIdleUnit( void )
+{
+	// Nothing keeps a list of these the way the dozers keep m_idleWorkers, so the key walks the
+	// object list, which is in creation order and stays put between presses.  A lone selected unit
+	// is the place to carry on from; with nothing or a group selected the walk starts over.
+	const Object *current = getSelectCount() == 1 ? getFirstSelectedDrawable()->getObject() : NULL;
+	Object *first = NULL;
+	Object *selectThisObject = NULL;
+	Bool passedCurrent = FALSE;
+
+	for( Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
+	{
+		if( isIdleCombatUnit( obj ) )
+		{
+			if( passedCurrent )
+			{
+				selectThisObject = obj;
+				break;
+			}
+			if( !first )
+				first = obj;
+		}
+		if( obj == current )
+			passedCurrent = TRUE;
+	}
+
+	// past the last one the cycle wraps to the first
+	if( !selectThisObject )
+		selectThisObject = first;
+	if( !selectThisObject )
+		return;
+
+	deselectAllDrawables();
+	GameMessage *teamMsg = TheMessageStream->appendMessage( GameMessage::MSG_CREATE_SELECTED_GROUP );
+
+	//New group or add to group? Passed in value is true if we are creating a new group.
+	teamMsg->appendBooleanArgument( TRUE );
+	teamMsg->appendObjectIDArgument( selectThisObject->getID() );
+
+	selectDrawable( selectThisObject->getDrawable() );
+
+	// center on the unit
+	TheTacticalView->lookAt(selectThisObject->getPosition());
+}
+
 Int InGameUI::getIdleWorkerCount( void )
 {
 	Int index = ThePlayerList->getLocalPlayer()->getPlayerIndex();
@@ -13781,7 +14758,10 @@ Bool InGameUI::drawTooltipPage( const UnicodeString &cursorText, const RGBColor 
 		return TRUE;
 
 	if( m_tooltipOverlay == NULL )
+	{
 		m_tooltipOverlay = new HtmlOverlay( m_superweaponNormalFont );
+		m_tooltipOverlay->setHudPage( TRUE );
+	}
 
 	HtmlValues values;
 	HtmlLists lists;
@@ -13810,15 +14790,18 @@ Bool InGameUI::drawTooltipPage( const UnicodeString &cursorText, const RGBColor 
 	const Int screenWidth = TheDisplay->getWidth();
 	const Int screenHeight = TheDisplay->getHeight();
 	const ICoord2D &mouse = TheMouse->getMouseStatus()->pos;
-	const Int gap = REAL_TO_INT( TOOLTIP_ANCHOR_GAP * ControlBarUniformScale() );
+	const Int gap = REAL_TO_INT( TOOLTIP_ANCHOR_GAP * ControlBarHudPageScale() );
 	for( Int pass = 0; pass < TOOLTIP_LAYOUT_PASSES; pass++ )
 	{
 		IRegion2D box;
 		if( card )
 		{
-			// over the button, centred on it, and under it when there is no room above
+			// over the button, centred on it, and under it when there is no room above; a button on
+			// the console has its card standing on the console's top line, clear of the wells' headers,
+			// as the production queue stands there
 			box.lo.x = ( card->anchor.lo.x + card->anchor.hi.x - m_tooltipSize.x ) / 2;
-			box.lo.y = card->anchor.lo.y - gap - m_tooltipSize.y;
+			const Bool onConsole = m_controlBarPageShown && card->anchor.hi.y > m_consoleTop;
+			box.lo.y = onConsole ? m_consoleTop - m_tooltipSize.y : card->anchor.lo.y - gap - m_tooltipSize.y;
 			if( box.lo.y < 0 )
 				box.lo.y = card->anchor.hi.y + gap;
 			box.lo.x = max( 0, min( box.lo.x, screenWidth - m_tooltipSize.x ) );
@@ -13830,7 +14813,7 @@ Bool InGameUI::drawTooltipPage( const UnicodeString &cursorText, const RGBColor 
 		}
 		box.hi.x = box.lo.x + m_tooltipSize.x;
 		box.hi.y = box.lo.y + m_tooltipSize.y;
-		putPageRect( values, "box", box, TRUE );
+		putPageRect( values, "box", box, TRUE, ControlBarHudPageScale() );
 		m_tooltipOverlay->setPage( HtmlTemplate_expand( m_tooltipPage, values, lists, lookupGameText ) );
 
 		std::vector< IRegion2D > laidOut;

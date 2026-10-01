@@ -25,6 +25,14 @@ GUI:SelectNextIdleWorkerDescription
 "Selects the next dozer or worker that has nothing to do and centers the view on it."
 END
 
+GUI:SelectNextIdleUnit
+"Select Next Idle Unit"
+END
+
+GUI:SelectNextIdleUnitDescription
+"Selects the next combat unit that has no orders and centers the view on it."
+END
+
 GUI:CommandSlot01
 "Command Bar Slot 01"
 END
@@ -702,6 +710,30 @@ TOOLTIP:ZoomToCursor
 "The wheel zooms towards whatever the cursor is over instead of the middle of the screen. Modern controls only."
 END
 
+GUI:StartAtMaxZoom
+"Start Zoomed Out"
+END
+
+TOOLTIP:StartAtMaxZoom
+"A match opens with the camera as far out as the wheel goes. Off, it opens at the height the map was framed for."
+END
+
+GUI:CloserZoom
+"Closer Zoom"
+END
+
+TOOLTIP:CloserZoom
+"How much nearer the ground the wheel may bring the camera. 0% is the game's own limit."
+END
+
+GUI:DragTolerance
+"Drag Threshold"
+END
+
+TOOLTIP:DragTolerance
+"How many pixels the mouse may move with a button held before a click becomes a drag. Raise it if selection boxes start by accident, lower it if drags read as clicks."
+END
+
 GUI:IsometricCamera
 "Isometric Camera"
 END
@@ -782,6 +814,46 @@ TOOLTIP:HudOverlay
 "The extra readouts across the top of the screen: power, income and the production strip."
 END
 
+GUI:NetBox
+"Clock And Frame Rate Box"
+END
+
+TOOLTIP:NetBox
+"The box in the top right corner with the match clock, the frame rates and the connection. Off, the superweapon timers move up into the corner."
+END
+
+GUI:OptionsGroupHud
+"HUD"
+END
+
+GUI:IncomeRate
+"Income Shown"
+END
+
+GUI:IncomeRate0
+"Per Second"
+END
+
+GUI:IncomeRate1
+"Per Minute"
+END
+
+GUI:IncomeRate2
+"Automatic"
+END
+
+TOOLTIP:IncomeRate
+"What the income beside your money is counted over. Automatic shows it per minute while you earn less than $10 a second, where a whole number per second hides most of the change, and per second above that."
+END
+
+GUI:EmptyBuildingPips
+"Empty Building Slots"
+END
+
+TOOLTIP:EmptyBuildingPips
+"The row of empty slots over a building with nobody inside, like the ten over a Barracks. Off, a building shows its slots only while someone is in it."
+END
+
 GUI:ArchiveReplays
 "Archive Replays"
 END
@@ -812,6 +884,30 @@ END
 
 TOOLTIP:HealthBars
 "Smart shows a bar over anything hurt, plus the selection and whatever is under the cursor. Selection only is what retail did."
+END
+
+GUI:HudScale
+"HUD Size"
+END
+
+GUI:HudScale0
+"100%"
+END
+
+GUI:HudScale1
+"115%"
+END
+
+GUI:HudScale2
+"130%"
+END
+
+GUI:HudScale3
+"150%"
+END
+
+TOOLTIP:HudScale
+"Draws the command bar and the rest of the bottom HUD larger than your resolution would."
 END
 
 GUI:OptionsGroupInput
@@ -875,6 +971,19 @@ END
 
 TOOLTIP:Language
 "The language of menus, orders, briefings and subtitles. Voices and videos stay as installed. Takes effect the next time the game starts."
+END
+
+// Hovering a supply pile: EA's TOOLTIP:SupplyWarehouse line with the share of the pile's starting
+// cash that is left.  The cash first, then the percentage.
+
+TOOLTIP:SupplyWarehousePercent
+"\n $%d remain (%d%%)"
+END
+
+// The line under it when the lobby's Pile Limit has the pile closed to the player looking at it.
+
+TOOLTIP:SupplyPileFull
+"\n Taken: the pile limit keeps your gatherers out"
 END
 
 // The numbers the build tooltip adds under a unit's description: its build time, then its best
@@ -1075,6 +1184,22 @@ GUI:TechRespawnFormat
 "After %d min"
 END
 
+GUI:SupplyPileLimit
+"Pile Limit"
+END
+
+TOOLTIP:SupplyPileLimit
+"How many players may gather from one supply dock or supply pile at the same time. With 1, a pile belongs to whoever reaches it first, and every other player's supply trucks, Workers and Chinooks go to another pile or wait at home. Allies count as separate players. A pile is free again a minute after the last load was taken from it."
+END
+
+GUI:SupplyPileLimitOff
+"No Limit"
+END
+
+GUI:SupplyPileLimitFormat
+"%d per pile"
+END
+
 GUI:ProRules
 "Pro Rules"
 END
@@ -1175,6 +1300,63 @@ GUI:HudFog
 "Fog of war"
 END
 
+// The cheat panel the console's "trainer" command opens, Window/Html/Cheats.html.
+GUI:CheatPanelTitle
+"Cheats"
+END
+
+GUI:CheatMoney
+"Cash"
+END
+
+GUI:CheatPoints
+"General's points"
+END
+
+GUI:CheatRankUp
+"Rank up"
+END
+
+GUI:CheatHeroic
+"Heroic units"
+END
+
+GUI:CheatReveal
+"Reveal the map"
+END
+
+GUI:CheatPower
+"Unlimited power"
+END
+
+GUI:CheatNoCooldown
+"No cooldowns"
+END
+
+GUI:CheatGod
+"God mode"
+END
+
+GUI:CheatInstantBuild
+"Instant build"
+END
+
+GUI:CheatOneHitKill
+"One-hit kills"
+END
+
+GUI:CheatOn
+"ON"
+END
+
+GUI:CheatOff
+"OFF"
+END
+
+GUI:CheatApply
+"GO"
+END
+
 // after a superweapon's name in the event feed over the radar, the moment it can fire
 GUI:HudSuperweaponReady
 "ready to fire"
@@ -1183,6 +1365,19 @@ END
 // after a superweapon's name in the event feed, the moment it is fired
 GUI:HudSuperweaponLaunched
 "launched"
+END
+
+// the superweapon banner under the clock: %s is the superweapon's own name, "Nuclear Missile"
+GUI:HudAlertBuilt
+"%s built"
+END
+
+GUI:HudAlertReady
+"%s ready"
+END
+
+GUI:HudAlertLaunched
+"%s launched"
 END
 
 // after a general's power's name in the event feed, the moment it is used
@@ -1267,6 +1462,10 @@ END
 
 GUI:ControlBarMoneyEarning
 "$ %d  +%d/s"
+END
+
+GUI:ControlBarMoneyEarningMinute
+"$ %d  +%d/min"
 END
 
 CONTROLBAR:MoneyDescription

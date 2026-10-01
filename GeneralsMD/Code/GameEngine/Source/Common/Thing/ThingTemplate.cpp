@@ -768,12 +768,12 @@ void ThingTemplate::parseRemoveModule(INI *ini, void *instance, void *store, con
 
 	const char *modToRemove = ini->getNextToken();
 	AsciiString removedModuleName;
-	Bool removed = self->removeModuleInfo(modToRemove, removedModuleName);
-	if (!removed)
-	{
-		DEBUG_ASSERTCRASH(removed, ("RemoveModule %s was not found for %s. The game will crash now!\n",modToRemove, self->getName().str()));
-		throw INI_INVALID_DATA;
-	}
+	// A tag that is not there is already removed. Installs outside Steam carry other copies of EA's
+	// data, and a missing tag in one of them stopped the game at start (FixesReforged.ini,
+	// SupW_AuroraFuelAirBomb ModuleTag_03).
+	if (!self->removeModuleInfo(modToRemove, removedModuleName))
+		DEBUG_LOG(("[LINE: %d - FILE: '%s'] RemoveModule %s was not found for %s; skipped.\n",
+			ini->getLineNum(), ini->getFilename().str(), modToRemove, self->getName().str()));
 
 	self->m_moduleParsingMode = oldMode;
 }
@@ -799,13 +799,10 @@ void ThingTemplate::parseReplaceModule(INI *ini, void *instance, void *store, co
 
 	const char *modToRemove = ini->getNextToken();
 	AsciiString removedModuleName;
-	Bool removed = self->removeModuleInfo(modToRemove, removedModuleName);
-	if (!removed)
-	{
-		DEBUG_CRASH(("[LINE: %d - FILE: '%s'] ReplaceModule %s was not found for %s; cannot continue.\n",
-															ini->getLineNum(), ini->getFilename().str(), modToRemove, self->getName().str()));
-		throw INI_INVALID_DATA;
-	}
+	// A missing tag means the new module is simply added, for the same installs RemoveModule skips for.
+	if (!self->removeModuleInfo(modToRemove, removedModuleName))
+		DEBUG_LOG(("[LINE: %d - FILE: '%s'] ReplaceModule %s was not found for %s; adding the new module.\n",
+			ini->getLineNum(), ini->getFilename().str(), modToRemove, self->getName().str()));
 
 	const Bool replacesAIModule = aiBefore != NULL && self->friend_getAIModuleInfo() == NULL;
 

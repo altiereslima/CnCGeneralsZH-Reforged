@@ -1,0 +1,17 @@
+# A GLA base placed with nothing selected, every worker on its fake-structure page.
+#
+# The logic hands a placement to a builder whose own command set has the structure, so the fake
+# supply stash goes up and the real barracks finds nobody to build it and costs nothing.  The
+# tallies at the end read 1 and 0, and the money 9625.  See standinbuild.txt for what construct is.
+# shiftupgrade goes straight to the logic and not through the replay, so this one does not play back.
+#
+#   generals.exe -headless -quickstart -noshellmap -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionGLA -side 1 FactionAmerica -seed 1 -maxframes 1800
+#     -scenario standinfake -logPrefix standinfake_
+
+60    shiftupgrade  0  GLAInfantryWorker  Upgrade_GLAWorkerFakeCommandSet
+240   construct     0  FakeGLASupplyStash    720 550
+250   construct     0  GLABarracks           620 650
+1790  tally         0  FakeGLASupplyStash
+1790  tally         0  GLABarracks

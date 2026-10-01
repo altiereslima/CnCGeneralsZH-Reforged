@@ -39,6 +39,8 @@
 #include "GameLogic/TerrainLogic.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
+#include "GameLogic/Module/AIUpdate.h"
+#include "GameLogic/Module/DozerAIUpdate.h"
 #include "GameClient/CinemaDirector.h"
 #include "GameClient/DisplayStringManager.h"
 #include "GameClient/Drawable.h"
@@ -426,6 +428,9 @@ void W3DInGameUI::draw( void )
 	// and where everything selected is headed, drag or no drag
 	drawOrderHints();
 
+	// and which of the plans each builder puts up next
+	drawBuildPlanNumbers();
+
 	// where the allies are pointing, which is the one thing on this screen somebody else is doing
 	drawAllyCursors();
 
@@ -477,7 +482,12 @@ void W3DInGameUI::draw( void )
 	QueryPerformanceCounter( (LARGE_INTEGER *)&tPostStart );
 #endif
 
-	postDraw();
+	// While the map loads the display calls this every pass to paint the load screen's windows, and
+	// the match is already "in game" with its peace time set: the truce plate, the corner readout and
+	// the strips drew over the load screen.  Only the windows belong there.
+	const Bool matchOnScreen = !TheGlobalData->m_loadScreenRender;
+	if( matchOnScreen )
+		postDraw();
 
 #ifdef DEBUG_LOGGING
 	QueryPerformanceCounter( (LARGE_INTEGER *)&tPostEnd );
@@ -502,9 +512,12 @@ void W3DInGameUI::draw( void )
 	// the one reading you want visible exactly when something is going wrong.
 	//
 	// the peace time clock across the top middle, and the clock plate in the corner beside it
-	drawPeaceTimer();
-	drawHudOverlay();
-	drawScoreboard();
+	if( matchOnScreen )
+	{
+		drawPeaceTimer();
+		drawHudOverlay();
+		drawScoreboard();
+	}
 
 #ifdef EXTENDED_STATS
 	}
@@ -1277,6 +1290,54 @@ void W3DInGameUI::drawOrderHints( void )
 }  // end drawOrderHints
 
 //-------------------------------------------------------------------------------------------------
+/** The local player's plans still waiting for a builder carry the number of their turn, so a
+	* string of shift-placed buildings reads in the order its dozer will put them up.  Read off the
+	* objects every frame; nothing here goes back to the logic. */
+//-------------------------------------------------------------------------------------------------
+void W3DInGameUI::drawBuildPlanNumbers( void )
+{
+	// ponytail: walks every object each frame; keep a list of plans if a big map shows it in a profile
+	std::vector<BuildPlanNumber> plans;
+	for( Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
+	{
+		if( !obj->isLocallyControlled() || obj->testStatus( OBJECT_STATUS_SOLD ) || obj->isEffectivelyDead() ||
+				!Object_isAwaitingBuilder( obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ), obj->getConstructionPercent() ) )
+			continue;
+
+		// a plan whose builder is gone is nobody's queue
+		Object *builder = TheGameLogic->findObjectByID( obj->getBuilderID() );
+		if( builder == NULL || builder->isEffectivelyDead() || builder->getAIUpdateInterface() == NULL )
+			continue;
+		DozerAIInterface *dozerAI = builder->getAIUpdateInterface()->getDozerAIInterface();
+		if( dozerAI == NULL )
+			continue;
+
+		BuildPlanNumber plan;
+		plan.plan = obj->getID();
+		plan.builder = builder->getID();
+		plan.current = dozerAI->isTaskPending( DOZER_TASK_BUILD ) && dozerAI->getTaskTarget( DOZER_TASK_BUILD ) == obj->getID();
+		plan.spot = *obj->getPosition();
+		plan.spot.z += obj->getGeometryInfo().getMaxHeightAbovePosition();
+		plan.step = 0;
+		plans.push_back( plan );
+	}
+
+	InGameUI_numberBuildPlans( plans );
+
+	for( std::vector<BuildPlanNumber>::const_iterator it = plans.begin(); it != plans.end(); ++it )
+	{
+		ICoord2D tip;
+		if( it->step == 0 || !TheTacticalView->worldToScreen( &it->spot, &tip ) )
+			continue;
+
+		OrderHint hint;
+		hint.step = it->step;
+		drawOrderStep( hint, tip, orderHintMarkerColor( ORDER_HINT_MOVE ) );
+	}
+
+}  // end drawBuildPlanNumbers
+
+//-------------------------------------------------------------------------------------------------
 /** A patch of the ally's own colour on the ground under their cursor.  It is a fan of rings whose
 	* alpha falls to nothing at the rim, drawn in the terrain pass like the attack circle's wash, so
 	* units and buildings stand on top of it and it reads as light on the map rather than as a disc
@@ -1465,8 +1526,9 @@ void W3DInGameUI::drawPlaceAngle( View *view )
 	Bool anchorInScene = m_buildingPlacementAnchor->Peek_Scene() != NULL;
 	Bool arrowInScene	 = m_buildingPlacementArrow->Peek_Scene() != NULL;
 
-	// get out of here if this display isn't up anyway, and with shift held it is not: that drag
-	// lays a row and turns nothing, so an anchor and an arrow would promise a turn it will not make
+	// get out of here if this display isn't up anyway, and with shift or alt held it is not: that
+	// drag lays a row or a grid and turns nothing, so an anchor and an arrow would promise a turn
+	// it will not make
 	if( isPlacementAnchored() == FALSE || placesRow() )
 	{
 		if( anchorInScene )

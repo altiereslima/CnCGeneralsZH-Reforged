@@ -472,8 +472,33 @@ Bool OrderQueue::takeMessage( GameMessage *msg, AIGroup *selected, Player *owner
 	if( selected == NULL || !isOrder( msg->getType() ) || OrderQueue_namesItsOwnSource( msg ) )
 		return FALSE;
 
-	std::vector<ObjectID> ids = selected->getAllIDs();
-	std::sort( ids.begin(), ids.end() );
+	// An attack circle names the one unit a shot is for, as the argument after the target. The chain
+	// is that unit's alone, or the whole selection would still share every target. A one-argument
+	// attack is the click it always was, and it still goes to everyone selected. A named unit that
+	// has already died, or that this player does not own, is not a reason to fire the rest of the
+	// selection at that target either.
+	std::vector<ObjectID> ids;
+	if( msg->getType() == GameMessage::MSG_DO_ATTACK_OBJECT && msg->getArgumentCount() >= 2 )
+	{
+		const ObjectID attackerID = msg->getArgument( 1 )->objectID;
+		const Object *attacker = TheGameLogic->findObjectByID( attackerID );
+		if( attacker != NULL && attacker->getControllingPlayer() != owner )
+		{
+			DEBUG_CRASH(( "MSG_DO_ATTACK_OBJECT: player %d named object %d, which it does not control",
+										owner->getPlayerIndex(), (Int)attackerID ));
+		}
+		if( attacker == NULL || attacker->getControllingPlayer() != owner )
+		{
+			TheAI->destroyGroup( selected );
+			return TRUE;
+		}
+		ids.push_back( attackerID );
+	}
+	else
+	{
+		ids = selected->getAllIDs();
+		std::sort( ids.begin(), ids.end() );
+	}
 
 	if( mode == ORDER_QUEUE_NONE || !isQueueable( msg->getType() ) )
 	{

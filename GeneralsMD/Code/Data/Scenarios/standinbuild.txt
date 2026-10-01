@@ -1,0 +1,22 @@
+# Buildings placed with nothing selected: the command bar's stand-in builder.
+#
+# construct is the placement click itself, a message on the stream that the replay records, so the
+# logic picks the builder the way it does for a player: with nothing selected, the idle builder
+# nearest the site, and once none is idle the nearest busy one, who takes it after the job in hand.
+# Slot 0 is the local seat, so no -observer.  One dozer, three power plants: the tally at the end
+# reads 3 alive and $7600.  Before the stand-in came back it read 0 and $10000.
+#
+# Nothing here is a world command that bypasses the replay (no spawn), so the replay this run
+# leaves plays back to the same HEADLESS CRC with -replay and no -scenario.
+#
+#   generals.exe -headless -quickstart -noshellmap -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 1800
+#     -scenario standinbuild -logPrefix standin_
+#
+# The sites are the open sand in the middle of this map (docs/reference/UI-MAP.md, 700,550).
+
+120   construct  0  AmericaPowerPlant   720 550
+120   construct  0  AmericaPowerPlant   620 650
+120   construct  0  AmericaPowerPlant   520 650
+1790  tally      0  AmericaPowerPlant

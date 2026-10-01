@@ -403,7 +403,7 @@ StateReturnType AIGuardRetaliateInnerState::onEnter( void )
 		Object* nemesis = TheGameLogic->findObjectByID(getGuardMachine()->getNemesisID()) ;
 		if (nemesis == NULL) 
 		{
-			DEBUG_LOG(("Unexpected NULL nemesis in AIGuardRetaliateInnerState.\n"));
+			DEBUG_LOG_DEV(("Unexpected NULL nemesis in AIGuardRetaliateInnerState.\n"));
 			return STATE_SUCCESS;
 		}
 		m_enterState = newInstance(AIEnterState)(getMachine());
@@ -422,7 +422,7 @@ StateReturnType AIGuardRetaliateInnerState::onEnter( void )
 		Object* nemesis = TheGameLogic->findObjectByID(getGuardMachine()->getNemesisID()) ;
 		if (nemesis == NULL) 
 		{
-			DEBUG_LOG(("Unexpected NULL nemesis in AIGuardRetaliateInnerState.\n"));
+			DEBUG_LOG_DEV(("Unexpected NULL nemesis in AIGuardRetaliateInnerState.\n"));
 			return STATE_SUCCESS;
 		}
 		m_exitConditions.m_center = pos;
@@ -506,7 +506,8 @@ void AIGuardRetaliateOuterState::xfer( Xfer *xfer )
 /** Load post process */
 // ------------------------------------------------------------------------------------------------
 void AIGuardRetaliateOuterState::loadPostProcess( void )
-{						 AIGuardRetaliateOuterState
+{
+	// see AIGuardOuterState::loadPostProcess. The stray class name made this a no-op.
 	onEnter();
 }  // end loadPostProcess
 
@@ -524,7 +525,7 @@ StateReturnType AIGuardRetaliateOuterState::onEnter( void )
 	Object* nemesis = TheGameLogic->findObjectByID(getGuardMachine()->getNemesisID()) ;
 	if (nemesis == NULL) 
 	{
-		DEBUG_LOG(("Unexpected NULL nemesis in AIGuardRetaliateOuterState.\n"));
+		DEBUG_LOG_DEV(("Unexpected NULL nemesis in AIGuardRetaliateOuterState.\n"));
 		return STATE_SUCCESS;
 	}
 	Object *obj = getMachineOwner();
@@ -630,7 +631,14 @@ StateReturnType AIGuardRetaliateReturnState::onEnter( void )
 		TheAI->pathfinder()->adjustDestination(getMachineOwner(), ai->getLocomotorSet(), &m_goalPosition);
 	}
 	setAdjustsDestination(true);
-	return AIInternalMoveToState::onEnter();
+	// Failure from the walk means it cannot start: the unit cannot move, or the
+	// pathfinder handed back nothing. That same failure is how a live target found
+	// on the way home enters the attack, so a walk that cannot start used to attack
+	// an id that was already gone, and the machine handed itself straight back here.
+	StateReturnType started = AIInternalMoveToState::onEnter();
+	if (started == STATE_FAILURE)
+		return STATE_SUCCESS;
+	return started;
 }
 
 //--------------------------------------------------------------------------------------
@@ -644,8 +652,12 @@ StateReturnType AIGuardRetaliateReturnState::update( void )
 			return STATE_FAILURE; // early termination because we found a target.
 	}
 
-	// Just let the return movement finish.
-	return AIInternalMoveToState::update();
+	// A walk that cannot be finished is the walk being over. The failure edge above
+	// is the only one that means a target was found.
+	StateReturnType moved = AIInternalMoveToState::update();
+	if (moved == STATE_FAILURE)
+		return STATE_SUCCESS;
+	return moved;
 }
 
 //--------------------------------------------------------------------------------------
@@ -814,7 +826,7 @@ StateReturnType AIGuardRetaliateAttackAggressorState::onEnter( void )
 
 	if( !nemesis )
 	{
-		DEBUG_LOG(("Unexpected NULL nemesis in AIGuardRetaliateAttackAggressorState.\n"));
+		DEBUG_LOG_DEV(("Unexpected NULL nemesis in AIGuardRetaliateAttackAggressorState.\n"));
 		return STATE_SUCCESS;
 	}
 

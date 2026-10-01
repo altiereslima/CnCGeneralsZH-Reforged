@@ -473,7 +473,7 @@ AudioHandle AudioManager::addAudioEvent(const AudioEventRTS *eventToAdd)
 	}
 
 	AudioType type = eventToAdd->getAudioEventInfo()->m_soundType;
-	if (type == AT_Music) 
+	if (type == AT_Music)
 	{
 		m_music->addAudioEvent(audioEvent);
 	} 

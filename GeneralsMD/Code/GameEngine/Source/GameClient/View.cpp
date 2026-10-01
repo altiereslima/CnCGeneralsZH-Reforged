@@ -130,7 +130,7 @@ void View::init( void )
 	
 	m_zoom = 1.0f;
 	m_maxHeightAboveGround = TheGlobalData->m_maxCameraHeight;
-	m_minHeightAboveGround = TheGlobalData->m_minCameraHeight;
+	m_minHeightAboveGround = View_closestCameraHeight( TheGlobalData->m_minCameraHeight, TheGlobalData->m_closerZoomPercent );
 	m_okToAdjustHeight = FALSE;
 
 	m_defaultAngle = 0.0f;
@@ -212,6 +212,15 @@ Real View_stepAngleByEighths( Real angle, Int steps )
 {
 	const Real step = PI / 4.0f;
 	return View_snapAngleToEighth( angle ) + steps * step;
+}
+
+/**
+ * CloserZoom: the lowest the wheel may bring the camera, which is GameData.ini's MinCameraHeight
+ * with that percentage taken off.
+ */
+Real View_closestCameraHeight( Real minCameraHeight, Int closerZoomPercent )
+{
+	return minCameraHeight * (Real)(100 - closerZoomPercent) / 100.0f;
 }
 
 /**

@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <!--
-  The scoreboard, up while Tab is held, in the top left corner beside the menu key, in the same steel as
-  the spectator's page (Window/Html/Spectator.html, whose header says what the renderer draws and
-  what it does not).  Everyone gets it, playing or watching.
+  The scoreboard, up while Tab is held, hanging under the top page's money, clock and power in the
+  middle of the screen, in the same steel as the spectator's page (Window/Html/Spectator.html, whose
+  header says what the renderer draws and what it does not).  Everyone gets it, playing or watching.
 
   The game fills in, before layout (GameClient/HtmlTemplate.h):
+    {{boardx}} {{boardy}} the board's top left corner, centred under the top page
     {{text:Label}}   a string table label, in the player's language
     {{side}}         "america", "china" or "gla": the side whose command bar is on screen
     {{clock}}        the match time, m:ss
@@ -51,7 +52,10 @@
   .china .well { background-color: rgba(26, 10, 8, 0.9); }
   .gla .well { background-color: rgba(22, 19, 8, 0.9); }
 
-  #board { position: absolute; left: 26px; top: 4px; width: 708px; padding-bottom: 3px; }
+  /* it hangs from the top page's foot, so its top edge is that page's steel carried on */
+  #board { position: absolute; width: 708px; padding-bottom: 3px; border-top: 3px solid #363b41; }
+  .china #board { border-top-color: #491d13; }
+  .gla #board { border-top-color: #473f23; }
 
   /* every column's left edge, shared by the captions and the seats; the Turkish captions are the
      long ones, so a number column is as wide as its caption rather than its digits, and
@@ -129,12 +133,13 @@
   .seatrow.full.watching { height: 44px; }
   .watching .arms { left: 244px; }
   .jobs .more { left: 180px; }
-  .arm .count { position: absolute; left: 1px; top: 10px; line-height: 8px; font-size: 7px; font-weight: bold; color: #f1f4f6; }
+  .arm .count { position: absolute; left: 1px; top: 11px; padding: 0 1px; line-height: 8px; font-size: 7px; font-weight: bold;
+                background-color: #020405; color: #f1f4f6; }
 </style>
 </head>
 <body>
 <div class="{{side}}">
-<div id="board" class="well">
+<div id="board" class="well" style="left: {{boardx}}px; top: {{boardy}}px">
   <div class="captions plate">
     <span class="c-name">{{text:GUI:ScoreboardPlayer}}</span>
     <span class="c-team">{{text:GUI:ScoreboardTeam}}</span>

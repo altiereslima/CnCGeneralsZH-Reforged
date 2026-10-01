@@ -710,6 +710,8 @@ GlobalData::GlobalData()
 	m_unitLimit = FALSE;						// no unit limit unless -unitlimit asks for one
 	m_incomeSharing = 0;						// INCOME_SHARING_OFF unless -incomesharing asks
 	m_techRespawn = 0;							// a destroyed tech building stays destroyed unless -techrespawn asks
+	m_supplyPileLimit = 0;					// a supply pile takes any number of players unless -supplypilelimit asks
+	m_superweapons = 0;							// SUPERWEAPONS_ALLOW unless -superweapons asks
 	m_autoSkirmishObserver = FALSE;
 	m_headless = FALSE;
 	m_turbo = FALSE;
@@ -937,6 +939,7 @@ GlobalData::GlobalData()
 	m_showObjectHealth = FALSE;
 	// what this fork has always done, so nobody's game changes until they say so
 	m_healthBarMode = HEALTH_BAR_ALWAYS;
+	m_hudScale = 0;
 	// the lobby's own colours until somebody asks for something else
 	m_playerColorScheme = PLAYER_COLORS_ORIGINAL;
 	// the words the game shipped with until somebody picks a translation
@@ -1130,6 +1133,8 @@ GlobalData::GlobalData()
 	m_snapCameraRotateTo45 = TRUE;
 	m_zoomToCursor = TRUE;
 	m_isometricCamera = FALSE;
+	m_closerZoomPercent = 0;
+	m_dragTolerance = 25;		// what Mouse.ini in INIZH.big says, so nothing moves until the slider does
 	// a left drag with the move, attack move or guard key armed draws a formation line
 	m_formationDrag = TRUE;
 	m_showAllyCursors = TRUE;
@@ -1145,6 +1150,9 @@ GlobalData::GlobalData()
 	m_buildPlacementOpacity = PLACEMENT_SILHOUETTE_OPACITY;
 	m_buildPlacementShadows = TRUE;
 	m_showHudOverlay = TRUE;
+	m_showNetBox = TRUE;
+	m_incomeRateMode = INCOME_RATE_PER_SECOND;
+	m_showEmptyBuildingPips = TRUE;
 	m_showPlacementRangeRing = TRUE;
 	m_showSkillStrip = TRUE;
 	m_showSuperweaponStrip = TRUE;

@@ -29,6 +29,9 @@
 
 static bool Requested = false;
 static bool PresentRequested = false;
+// The first refused present of the session, handed out once so a frozen picture leaves one line.
+static HRESULT PresentFailure = S_OK;
+static bool PresentFailureReported = false;
 static bool VSyncRequested = false;
 static bool Active = false;
 static bool NormalMapsEnabled = true;
@@ -394,6 +397,11 @@ bool Direct3D11_Present_Is_Enabled()
 	return PresentRequested && Active;
 }
 
+bool Direct3D11_Can_Tear()
+{
+	return Active && Device.Can_Tear();
+}
+
 bool Direct3D11_Post_Chain(const char * chain)
 {
 	const bool understood = DX11Post_Parse_Chain(chain, PostChain, PostChainLength);
@@ -520,8 +528,20 @@ void Direct3D11_End_Scene(bool flip_frames)
 {
 	if (Active && flip_frames && PresentRequested) {
 		Direct3D11_Finish_Frame();
-		Device.Present(VSyncRequested ? 1 : 0);
+		if (!Device.Present(VSyncRequested ? 1 : 0) && PresentFailure == S_OK) {
+			PresentFailure = Device.Last_Present_Result();
+		}
 	}
+}
+
+bool Direct3D11_Take_Present_Failure(long & result)
+{
+	if (PresentFailure == S_OK || PresentFailureReported) {
+		return false;
+	}
+	PresentFailureReported = true;
+	result = PresentFailure;
+	return true;
 }
 
 void Direct3D11_Mirror_Stream_Source(DX11BufferTwinClass * twin, unsigned stride, unsigned offset)

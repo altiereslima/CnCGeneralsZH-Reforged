@@ -1105,18 +1105,19 @@ void W3DDisplay::init( void )
 
 	}  // end if
 
-	// Which runtime the device really landed on.  The renderer creates an IDirect3DDevice9 itself
-	// now, so there is one answer here and no translating dll to name; -d3d12 was d3d8to9's opt-in
-	// and does nothing until RENDERER-ROADMAP.md's phase 5 puts a real Direct3D 12 backend behind
-	// the same seam.
+	// Which backend draws what is on screen.  d3d9.dll is loaded either way, because the Direct3D 9
+	// device is always made and the Direct3D 11 one mirrors it, so the loaded dll says nothing.
 	DEBUG_LOG(("W3DDisplay::init - renderer runtime: %s\n",
-						 GetModuleHandleA("d3d9.dll") ? "Direct3D 9 (native)"
-						                              : "no Direct3D 9 runtime loaded"));
+						 Direct3D11_Present_Is_Enabled() ? "Direct3D 11"
+						                                 : "Direct3D 9"));
 	// multisampling is opt-in with "-msaa" / "-msaa N" and silently degrades to whatever the
 	// device supports, so log what was actually granted
 	DEBUG_LOG(("W3DDisplay::init - multisampling: %ux\n", DX8Wrapper::Get_MultiSample_Level()));
 	DEBUG_LOG(("W3DDisplay::init - vsync: %s\n", DX8Wrapper::Get_Requested_VSync() ? "on" : "off"));
 	DEBUG_LOG(("W3DDisplay::init - present: %s\n", DX8Wrapper::Is_Flip_Present() ? "flip" : "discard"));
+	if (Direct3D11_Present_Is_Enabled())
+		DEBUG_LOG(("W3DDisplay::init - dx11 swap chain: %s\n",
+							 Direct3D11_Can_Tear() ? "flip, tearing allowed" : "blt, held to the refresh"));
 	DEBUG_LOG(("W3DDisplay::init - adapter: %s\n",
 						 WW3D::Get_Render_Device_Name(WW3D::Get_Render_Device())));
 	{
@@ -2038,6 +2039,7 @@ static void captureVideoFrame(void);
 extern Real TheSceneDrawMS;
 extern Real TheUIDrawMS;
 extern Real TheParticleUpdateMS;
+extern UnsignedInt TheSceneDrawCalls;
 
 static Real w3dElapsedMS( const Int64 &from, const Int64 &to )
 {
@@ -2379,6 +2381,7 @@ AGAIN:
 				QueryPerformanceCounter( (LARGE_INTEGER *)&tUIEnd );
 				TheSceneDrawMS = w3dElapsedMS( tSceneStart, tSceneEnd );
 				TheUIDrawMS = w3dElapsedMS( tSceneEnd, tUIEnd );
+				TheSceneDrawCalls = DX8Wrapper::Get_Draw_Calls();
 #endif
 
 				// end of video example code
@@ -2489,6 +2492,11 @@ AGAIN:
 					if( pipelineMS + textureMS > DX11_FRAME_COST_REPORT_MS )
 						DEBUG_LOG(("DX11 FRAME COST frame %d: %u pipelines built in %.1f ms, %u textures copied in %.1f ms\n",
 							TheGameLogic->getFrame(), pipelines, pipelineMS, textures, textureMS));
+
+					long presentResult = 0;
+					if( Direct3D11_Take_Present_Failure( presentResult ) )
+						DEBUG_LOG(("DX11 PRESENT refused at frame %d: 0x%08X, logged once\n",
+							TheGameLogic->getFrame(), (UnsignedInt)presentResult));
 				}
 
 				/* End_Render is where a lost device is noticed and reset, and that reset is the most

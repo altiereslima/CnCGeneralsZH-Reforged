@@ -222,6 +222,56 @@ TEST(camera_wheel_anchors_zoom_to_cursor_only_with_the_box_ticked)
 	CHECK_EQ(f.view.zoomAnchors, 1);
 }
 
+TEST(ctrl_wheel_zooms_five_notches_for_one)
+{
+	CHECK(bootOnce());
+	CameraInputFixture f;
+	const auto heightAfterOneNotch = [&f]()
+	{
+		f.view.setHeightAboveGround(1000.0f);
+		GameMessage *message = newInstance(GameMessage)(GameMessage::MSG_RAW_MOUSE_WHEEL);
+		const ICoord2D cursor = {320, 240};
+		message->appendPixelArgument(cursor);
+		message->appendRealArgument(1.0f);
+		f.camera.translateGameMessage(message);
+		message->deleteInstance();
+		return f.view.getHeightAboveGround();
+	};
+
+	const Real plain = 1000.0f - heightAfterOneNotch();
+	CHECK(plain > 0.0f);
+	f.keyboard.modifiers(KEY_STATE_LCONTROL);
+	const Real held = 1000.0f - heightAfterOneNotch();
+	CHECK_NEAR(held, 5.0f * plain, 0.01f);
+	// Shift is the row placement's key and changes nothing here
+	f.keyboard.modifiers(KEY_STATE_LSHIFT);
+	CHECK_NEAR(1000.0f - heightAfterOneNotch(), plain, 0.01f);
+}
+
+TEST(edge_scroll_ramps_from_the_band_to_the_old_three_pixels)
+{
+	// three percent of the height, and a tiny window keeps the three pixels it always had
+	CHECK_EQ(EdgeScroll_bandForHeight(1080), 32);
+	CHECK_EQ(EdgeScroll_bandForHeight(1440), 43);
+	CHECK_EQ(EdgeScroll_bandForHeight(60), 3);
+
+	const Int band = EdgeScroll_bandForHeight(1080);
+	// outside the band nothing; on the last three pixels what the game always gave
+	CHECK_EQ(EdgeScroll_strength(band, band), 0.0f);
+	CHECK_EQ(EdgeScroll_strength(500, band), 0.0f);
+	for (Int distance = 0; distance < 3; ++distance)
+		CHECK_EQ(EdgeScroll_strength(distance, band), 1.0f);
+	// entering the band barely moves the map, and every pixel deeper moves it faster
+	CHECK(EdgeScroll_strength(band - 1, band) > 0.0f);
+	CHECK(EdgeScroll_strength(band - 1, band) < 0.05f);
+	for (Int distance = 1; distance < band; ++distance)
+		CHECK(EdgeScroll_strength(distance, band) <= EdgeScroll_strength(distance - 1, band));
+
+	// over a window the band is the three pixels alone: full speed on them, nothing a pixel in
+	CHECK_EQ(EdgeScroll_strength(2, 3), 1.0f);
+	CHECK_EQ(EdgeScroll_strength(3, 3), 0.0f);
+}
+
 TEST(arrow_keys_scroll_the_camera_and_w_a_s_d_stay_grid_keys)
 {
 	CHECK(bootOnce());

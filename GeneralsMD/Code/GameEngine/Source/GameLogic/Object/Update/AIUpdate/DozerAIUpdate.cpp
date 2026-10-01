@@ -38,6 +38,7 @@
 #include "Common/ThingFactory.h"
 #include "Common/Player.h"
 #include "Common/Money.h"
+#include "Common/TunnelTracker.h"
 #include "Common/Radar.h"
 #include "Common/RandomValue.h"
 #include "Common/GameState.h"
@@ -252,7 +253,38 @@ StateReturnType DozerActionPickActionPosState::update( void )
 	machine->setGoalObject( goalObject );
 	machine->setGoalPosition( &goalPos );
 	ai->ignoreObstacle(goalObject);
-	ai->aiMoveToPosition( &goalPos, CMD_FROM_AI );
+
+	//
+	// through the tunnel network when that is shorter, the way a move order goes; see
+	// TunnelTracker::findTunnelShortcut.  The trip ends in a walk from the far mouth to goalPos
+	// (AIUpdateInterface::update), which is the walk the move state below is waiting on, so the job
+	// carries on from there.  Every job comes through here, a build, a repair and a resumed site alike.
+	//
+	const Real walkX = goalPos.x - dozer->getPosition()->x;
+	const Real walkY = goalPos.y - dozer->getPosition()->y;
+	const TunnelTracker *tunnels = dozer->getControllingPlayer()->getTunnelSystem();
+	Object *entrance = tunnels->findTunnelShortcut( dozer->getPosition(), &goalPos,
+		(Real)sqrt( walkX * walkX + walkY * walkY ) );
+
+	//
+	// The shortcut is measured in straight lines, and the site was only ever known to be reachable
+	// from where the builder stood.  A far mouth on the other side of a cliff or on another island
+	// would leave it walking at a wall with the job still in hand, so the ground between that mouth
+	// and the site is asked about first.  The mouth is a structure, which the zone check reads as the
+	// terrain under it.
+	//
+	if( entrance != NULL &&
+			TheAI->pathfinder()->clientSafeQuickDoesPathExist( ai->getLocomotorSet(),
+				tunnels->findQuietTunnelNear( &goalPos )->getPosition(), &goalPos ) &&
+			ai->takeTunnelTrip( entrance, &goalPos, TUNNEL_TRIP_MOVE, CMD_FROM_AI ) )
+	{
+		DEBUG_LOG(("TUNNELBUILD frame %d: builder %d takes tunnel %d to task %d on %d\n", TheGameLogic->getFrame(),
+			dozer->getID(), entrance->getID(), m_task, goalObject->getID()));
+	}
+	else
+	{
+		ai->aiMoveToPosition( &goalPos, CMD_FROM_AI );
+	}
 
 	return STATE_SUCCESS;
 
@@ -358,6 +390,15 @@ StateReturnType DozerActionMoveToActionPosState::update( void )
 		getMachine()->setGoalObject( NULL );
 		return STATE_FAILURE;
 	}
+
+	//
+	// On a tunnel trip the builder is walking to the mouth, underground, or about to be sent on from
+	// the far mouth.  Standing still inside the network is not a failed move, and a mouth that
+	// happens to stand beside the site is not an arrival: the job would be done from inside the
+	// tunnel.  The trip ends in the walk to the goal position, and that walk is the one judged below.
+	//
+	if( ai->hasTunnelTrip() )
+		return STATE_CONTINUE;
 
 	// if distance between us and our goal position is close enough
 	//
@@ -1736,14 +1777,22 @@ UpdateSleepTime DozerAIUpdate::update( void )
 		Object *targetObject = TheGameLogic->findObjectByID( taskTarget );
 		Bool invalidTask = FALSE;
 
+		//
+		// A tunnel on the way to the job is not a container the job is being done from: the move state
+		// waits the trip out (DozerActionMoveToActionPosState::update).  Both checks below would end
+		// the job underground, the repair one because nothing contained may repair
+		// (ActionManager::canRepairObject), so they wait until the builder is back up.
+		//
+		const Bool underground = getObject()->getContainedBy() != NULL && hasTunnelTrip();
+
 		// validate the task and the target
-		if( currentTask == DOZER_TASK_REPAIR &&
+		if( currentTask == DOZER_TASK_REPAIR && !underground &&
 				TheActionManager->canRepairObject( getObject(), targetObject, getLastCommandSource() ) == FALSE )
 			invalidTask = TRUE;
 
 		// a job cannot be done from inside a container; the build step took "not moving" for "arrived"
 		// and went on building from wherever the container stood
-		if( getObject()->getContainedBy() )
+		if( getObject()->getContainedBy() && !underground )
 			invalidTask = TRUE;
 
 		// cancel the task if it's now invalid
@@ -2287,6 +2336,10 @@ void DozerAIUpdate::internalCancelTask( DozerTask task )
 
 	// stop the dozer from moving
 	AIUpdateInterface *ai = getObject()->getAIUpdateInterface();
+
+	// and from walking on to where the job was, which is where a tunnel trip left pending would
+	// send it the moment it went idle
+	ai->endTunnelTrip();
 	ai->aiIdle( CMD_FROM_AI );
 
 	// The walk to the building ignored it as an obstacle, and only arriving cleared that. A move
@@ -2539,9 +2592,13 @@ void DozerAIUpdate::aiDoCommand(const AICommandParms* parms)
 		case AICMD_REPAIR:
 		{
 
-			// if we have no task right now, go idle so we can immediately respond to this
+			// if we have no task right now, go idle so we can immediately respond to this, and drop a
+			// tunnel trip to the last order's goal or the idle builder walks there first
 			if( getCurrentTask() == DOZER_TASK_INVALID )
+			{
+				endTunnelTrip();
 				aiIdle( CMD_FROM_AI );
+			}
 
 			// do the repair
 			privateRepair(parms->m_obj, parms->m_cmdSource);
@@ -2555,7 +2612,10 @@ void DozerAIUpdate::aiDoCommand(const AICommandParms* parms)
 
 			// if we have no task right now, go idle so we can immediately respond to this
 			if( getCurrentTask() == DOZER_TASK_INVALID )
+			{
+				endTunnelTrip();
 				aiIdle( CMD_FROM_AI );
+			}
 
 			// do the command
 			privateResumeConstruction( parms->m_obj, parms->m_cmdSource );

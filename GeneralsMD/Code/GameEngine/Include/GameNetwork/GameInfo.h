@@ -276,6 +276,11 @@ public:
   inline Int getTechRespawn( void ) const;
   void setTechRespawn( Int minutes );
 
+  // How many players may gather from one supply pile at the same time, allies counted one each.
+  // 0 is the retail game, where a pile takes whoever drives up to it.
+  inline Int getSupplyPileLimit( void ) const;
+  void setSupplyPileLimit( Int players );
+
   Bool hasAIPlayers( void ) const;									///< is any slot held by a computer player?
 
 protected:
@@ -304,6 +309,7 @@ protected:
   Bool m_proRules; // the lobby's Pro Rules are on
   Int m_incomeSharing; // an IncomeSharing, INCOME_SHARING_OFF = the retail game
   Int m_techRespawn; // minutes before a destroyed tech building comes back, 0 = never
+  Int m_supplyPileLimit; // players who may gather from one supply pile at once, 0 = any number
 };
 
 extern GameInfo *TheGameInfo;
@@ -336,6 +342,7 @@ Bool        GameInfo::getUnitLimit( void ) const            { return m_unitLimit
 Bool        GameInfo::getProRules( void ) const             { return m_proRules; }
 Int         GameInfo::getIncomeSharing( void ) const        { return m_incomeSharing; }
 Int         GameInfo::getTechRespawn( void ) const          { return m_techRespawn; }
+Int         GameInfo::getSupplyPileLimit( void ) const      { return m_supplyPileLimit; }
 
 AsciiString GameInfoToAsciiString( const GameInfo *game );
 Bool ParseAsciiStringToGameInfo( GameInfo *game, AsciiString options );

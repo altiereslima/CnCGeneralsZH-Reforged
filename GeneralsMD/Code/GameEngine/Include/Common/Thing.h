@@ -121,6 +121,8 @@ public:
 
 	inline const Coord3D *getPosition() const { return &m_cachedPos; }
 	inline Real getOrientation() const { return m_cachedAngle; }
+	/// for a load: the angle as it stood when saved, which the one setTransformMatrix derives from the matrix is a few bits off
+	void restoreOrientation( Real angle ) { m_cachedAngle = angle; m_cacheFlags &= ~VALID_DIRVECTOR; }
 	const Coord3D *getUnitDirectionVector2D() const;
 	void getUnitDirectionVector2D(Coord3D& dir) const;
 	void getUnitDirectionVector3D(Coord3D& dir) const;

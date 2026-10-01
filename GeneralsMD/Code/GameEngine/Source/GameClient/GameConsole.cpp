@@ -25,20 +25,29 @@
 
 #include "GameClient/GameConsole.h"
 
+#include "Common/file.h"
+#include "Common/FileSystem.h"
 #include "Common/GameEngine.h"
 #include "Common/MessageStream.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "Common/Recorder.h"
 #include "GameLogic/GameLogic.h"
+#include "GameNetwork/GameSpy/ThreadUtils.h"
 
 #include "GameClient/Color.h"
+#include "GameClient/ControlBar.h"
+#include "GameClient/ControlBarScheme.h"
 #include "GameClient/Display.h"
 #include "GameClient/DisplayString.h"
 #include "GameClient/DisplayStringManager.h"
 #include "GameClient/GameFont.h"
+#include "GameClient/GameText.h"
+#include "GameClient/HtmlOverlay.h"
+#include "GameClient/HtmlTemplate.h"
 #include "GameClient/KeyDefs.h"
 #include "GameClient/Keyboard.h"
+#include "GameClient/Mouse.h"
 
 GameConsole *TheGameConsole = NULL;
 
@@ -65,27 +74,35 @@ static const Color CONSOLE_INPUT_COLOR = GameMakeColor( 255, 255, 255, 255 );
 static const Color CONSOLE_TEXT_COLOR = GameMakeColor( 190, 190, 190, 255 );
 static const Color CONSOLE_SHADOW_COLOR = GameMakeColor( 0, 0, 0, 0 );
 
+static const Int CHEAT_PANEL_AMOUNTS = 3;			///< the most ready amounts a row of the panel offers
+
 struct ConsoleCheat
 {
 	const char *name;
 	CheatKind kind;
 	Int defaultAmount;	///< what a bare command gives; zero marks a toggle
 	const char *help;
+	const char *label;	///< its row on the cheat panel
+	Int amounts[ CHEAT_PANEL_AMOUNTS ];	///< the panel's keys for it, zero for none; a toggle has one on/off key
 };
 
 static const ConsoleCheat CONSOLE_CHEATS[] =
 {
-	{ "money",				CHEAT_MONEY,						10000,	"money [n]       add cash, 10000 by default" },
-	{ "points",				CHEAT_GENERAL_POINTS,		1,			"points [n]      add general's points" },
-	{ "rankup",				CHEAT_RANK_UP,					1,			"rankup [n]      raise the general's rank" },
-	{ "heroic",				CHEAT_HEROIC,						1,			"heroic          every unit you have goes heroic" },
-	{ "reveal",				CHEAT_REVEAL_MAP,				1,			"reveal          lift the shroud for good" },
-	{ "power",				CHEAT_INFINITE_POWER,		0,			"power           never run short of power" },
-	{ "nocooldown",		CHEAT_NO_COOLDOWN,			0,			"nocooldown      generals powers and superweapons always ready" },
-	{ "god",					CHEAT_GOD_MODE,					0,			"god             your side takes no damage" },
-	{ "instantbuild",	CHEAT_INSTANT_BUILD,		0,			"instantbuild    build, train and upgrade in one frame" },
-	{ "onehitkill",		CHEAT_ONE_HIT_KILL,			0,			"onehitkill      every hit you land kills" },
+	{ "money",				CHEAT_MONEY,						10000,	"money [n]       add cash, 10000 by default",	"GUI:CheatMoney",	{ 1000, 10000, 100000 } },
+	{ "points",				CHEAT_GENERAL_POINTS,		1,			"points [n]      add general's points",	"GUI:CheatPoints",	{ 1, 5, 10 } },
+	{ "rankup",				CHEAT_RANK_UP,					1,			"rankup [n]      raise the general's rank",	"GUI:CheatRankUp",	{ 1 } },
+	{ "heroic",				CHEAT_HEROIC,						1,			"heroic          every unit you have goes heroic",	"GUI:CheatHeroic",	{ 1 } },
+	{ "reveal",				CHEAT_REVEAL_MAP,				1,			"reveal          lift the shroud for good",	"GUI:CheatReveal",	{ 1 } },
+	{ "power",				CHEAT_INFINITE_POWER,		0,			"power           never run short of power",	"GUI:CheatPower",	{ 0 } },
+	{ "nocooldown",		CHEAT_NO_COOLDOWN,			0,			"nocooldown      generals powers and superweapons always ready",	"GUI:CheatNoCooldown",	{ 0 } },
+	{ "god",					CHEAT_GOD_MODE,					0,			"god             your side takes no damage",	"GUI:CheatGod",	{ 0 } },
+	{ "instantbuild",	CHEAT_INSTANT_BUILD,		0,			"instantbuild    build, train and upgrade in one frame",	"GUI:CheatInstantBuild",	{ 0 } },
+	{ "onehitkill",		CHEAT_ONE_HIT_KILL,			0,			"onehitkill      every hit you land kills",	"GUI:CheatOneHitKill",	{ 0 } },
 };
+
+static const char *const CHEAT_PANEL_PAGE = "Window\\Html\\Cheats.html";
+static const char *const CHEAT_PANEL_FONT = "Arial";	///< what the page's text is where its CSS names no font
+static const std::string CHEAT_PANEL_CLOSE = "close";
 
 static const Int CONSOLE_CHEAT_COUNT = sizeof( CONSOLE_CHEATS ) / sizeof( CONSOLE_CHEATS[ 0 ] );
 
@@ -156,7 +173,11 @@ GameConsole::GameConsole()
 		m_historyCursor( 0 ),
 		m_font( NULL ),
 		m_lineStrings( NULL ),
-		m_lineStringCount( 0 )
+		m_lineStringCount( 0 ),
+		m_cheatPanelOpen( FALSE ),
+		m_cheatPanelShown( FALSE ),
+		m_cheatPanelLogged( FALSE ),
+		m_cheatOverlay( NULL )
 {
 	m_font = TheFontLibrary->getFont( AsciiString( CONSOLE_FONT_NAME ),
 																		CONSOLE_FONT_POINT_SIZE,
@@ -182,6 +203,9 @@ GameConsole::~GameConsole()
 	delete [] m_lineStrings;
 	m_lineStrings = NULL;
 	m_lineStringCount = 0;
+
+	delete m_cheatOverlay;
+	m_cheatOverlay = NULL;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -314,7 +338,10 @@ void GameConsole::runCommand( AsciiString commandLine )
 		printLine( AsciiString( "echo <text>   print the text back" ) );
 		printLine( AsciiString( "speed [n]     game speed in percent, 100 is normal, 'reset' goes back" ) );
 		if( areCheatsAvailable() )
+		{
 			printLine( AsciiString( "cheats        single-player cheats" ) );
+			printLine( AsciiString( "trainer       the cheats on a panel, one click each" ) );
+		}
 		return;
 	}
 
@@ -323,6 +350,17 @@ void GameConsole::runCommand( AsciiString commandLine )
 	{
 		for( Int i = 0; i < CONSOLE_CHEAT_COUNT; ++i )
 			printLine( AsciiString( CONSOLE_CHEATS[ i ].help ) );
+		printLine( AsciiString( "trainer         all of these on a panel; trainer again, X or Esc closes it" ) );
+		return;
+	}
+
+	// the console drops out of the way so the panel is under the pointer at once
+	if( cheatsAvailable && command == "trainer" )
+	{
+		m_cheatPanelOpen = !m_cheatPanelOpen;
+		m_cheatPanelLogged = FALSE;
+		if( m_cheatPanelOpen )
+			close();
 		return;
 	}
 
@@ -363,6 +401,8 @@ void GameConsole::runCommand( AsciiString commandLine )
 //-------------------------------------------------------------------------------------------------
 void GameConsole::render( void )
 {
+	renderCheatPanel();		// under the console, which covers it when it drops
+
 	if( !m_isOpen )
 		return;
 
@@ -399,6 +439,170 @@ void GameConsole::render( void )
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The side whose command bar is on screen, for the panel's steel: the same three the other pages
+	* under Window/Html are drawn in. */
+//-------------------------------------------------------------------------------------------------
+static std::string cheatPanelSide( void )
+{
+	ControlBarSchemeManager *schemes = TheControlBar ? TheControlBar->getControlBarSchemeManager() : NULL;
+	const AsciiString side = schemes ? schemes->getCurrentSide() : AsciiString::TheEmptyString;
+	if( side.startsWith( "China" ) || side == "Boss" )
+		return "china";
+	if( side.startsWith( "GLA" ) )
+		return "gla";
+	return "america";
+}
+
+static std::string gameText( const char *label )
+{
+	return WideCharStringToMultiByte( TheGameText->fetch( label ).str() );
+}
+
+/** {{text:Label}}: a string table label, in the player's language. */
+static Bool lookupCheatPanelText( const std::string &name, std::string &value )
+{
+	static const std::string TEXT_LOOKUP = "text:";
+	if( name.compare( 0, TEXT_LOOKUP.size(), TEXT_LOOKUP ) != 0 )
+		return FALSE;
+	value = gameText( name.substr( TEXT_LOOKUP.size() ).c_str() );
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Every cheat a row: its name, then a toggle's one key, lit while it is on, or an amount cheat's
+	* ready amounts.  `clicks` gets what each key sends, in the order the page lays the keys out. */
+//-------------------------------------------------------------------------------------------------
+static void fillCheatPanelCells( std::vector< HtmlValues > &cells, std::vector< std::string > &clicks )
+{
+	const Player *local = ThePlayerList->getLocalPlayer();
+	clicks.push_back( CHEAT_PANEL_CLOSE );
+
+	for( Int i = 0; i < CONSOLE_CHEAT_COUNT; ++i )
+	{
+		const ConsoleCheat &cheat = CONSOLE_CHEATS[ i ];
+		HtmlValues name;
+		name[ "kind" ] = "name";
+		name[ "label" ] = gameText( cheat.label );
+		cells.push_back( name );
+
+		if( cheat.defaultAmount == 0 )
+		{
+			const Bool on = local->hasCheat( cheat.kind );
+			HtmlValues key;
+			key[ "kind" ] = on ? "key on" : "key";
+			key[ "label" ] = gameText( on ? "GUI:CheatOn" : "GUI:CheatOff" );
+			key[ "click" ] = cheat.name;
+			cells.push_back( key );
+			clicks.push_back( key[ "click" ] );
+			continue;
+		}
+
+		const Bool oneAmount = cheat.amounts[ 1 ] == 0;
+		for( Int each = 0; each < CHEAT_PANEL_AMOUNTS && cheat.amounts[ each ] != 0; ++each )
+		{
+			char text[ 64 ];
+			HtmlValues key;
+			key[ "kind" ] = "key";
+			sprintf( text, "+%d", cheat.amounts[ each ] );
+			key[ "label" ] = oneAmount ? gameText( "GUI:CheatApply" ) : std::string( text );
+			sprintf( text, "%s %d", cheat.name, cheat.amounts[ each ] );
+			key[ "click" ] = text;
+			cells.push_back( key );
+			clicks.push_back( key[ "click" ] );
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Window/Html/Cheats.html over the battlefield while it is open.  It shuts itself wherever the
+	* cheats are refused, so a panel left open does not follow the player into a replay. */
+//-------------------------------------------------------------------------------------------------
+void GameConsole::renderCheatPanel( void )
+{
+	m_cheatPanelShown = FALSE;
+	if( !m_cheatPanelOpen )
+		return;
+	if( !areCheatsAvailable() )
+	{
+		m_cheatPanelOpen = FALSE;
+		return;
+	}
+
+	if( m_cheatPage.empty() )
+	{
+		File *file = TheFileSystem->openFile( CHEAT_PANEL_PAGE, File::READ | File::BINARY );
+		if( file == NULL )
+		{
+			printLine( AsciiString( "trainer: Window/Html/Cheats.html is missing" ) );
+			m_cheatPanelOpen = FALSE;
+			return;
+		}
+		const Int size = file->size();
+		char *text = file->readEntireAndClose();
+		m_cheatPage.assign( text, size );
+		delete [] text;
+	}
+	if( m_cheatOverlay == NULL )
+		m_cheatOverlay = new HtmlOverlay( AsciiString( CHEAT_PANEL_FONT ) );
+
+	HtmlValues values;
+	values[ "side" ] = cheatPanelSide();
+	HtmlLists lists;
+	std::vector< std::string > clicks;
+	fillCheatPanelCells( lists[ "cells" ], clicks );
+
+	m_cheatOverlay->setPage( HtmlTemplate_expand( m_cheatPage, values, lists, lookupCheatPanelText ) );
+	m_cheatOverlay->hover( TheMouse->getMouseStatus()->pos );
+	m_cheatOverlay->draw();
+	m_cheatPanelShown = TRUE;
+
+	// where each key landed, so a script driving the game over -control knows where to click
+	if( !m_cheatPanelLogged )
+	{
+		m_cheatPanelLogged = TRUE;
+		std::vector< IRegion2D > keys;
+		m_cheatOverlay->rectsOf( ".key", keys );
+		for( size_t each = 0; each < keys.size() && each < clicks.size(); ++each )
+			DEBUG_LOG(( "Cheat panel: \"%s\" at %d %d\n", clicks[ each ].c_str(),
+									( keys[ each ].lo.x + keys[ each ].hi.x ) / 2, ( keys[ each ].lo.y + keys[ each ].hi.y ) / 2 ));
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A press anywhere on the panel is the panel's, so it never turns into an order for the ground
+	* under it.  Only a left press does anything: it runs the key's cheat the way typing it would. */
+//-------------------------------------------------------------------------------------------------
+Bool GameConsole::handleCheatPanelMouse( const ICoord2D &mouse, Bool act )
+{
+	if( !m_cheatPanelShown || !m_cheatOverlay->hover( mouse ) )
+		return FALSE;
+	if( !act )
+		return TRUE;
+
+	const std::string action = m_cheatOverlay->click( mouse );
+	if( action == CHEAT_PANEL_CLOSE )
+	{
+		closeCheatPanel();
+		return TRUE;
+	}
+
+	AsciiString arguments( action.c_str() );
+	AsciiString name;
+	arguments.nextToken( &name );
+	arguments.trim();
+	for( Int i = 0; !name.isEmpty() && areCheatsAvailable() && i < CONSOLE_CHEAT_COUNT; ++i )
+	{
+		if( name == CONSOLE_CHEATS[ i ].name )
+		{
+			const AsciiString result = runCheat( CONSOLE_CHEATS[ i ], arguments );
+			printLine( result );
+			DEBUG_LOG(( "Cheat panel: %s\n", result.str() ));
+		}
+	}
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
 GameMessageDisposition GameConsoleTranslator::translateGameMessage( const GameMessage *msg )
 {
 	if( TheGameConsole == NULL )
@@ -420,10 +624,51 @@ GameMessageDisposition GameConsoleTranslator::translateGameMessage( const GameMe
 				return DESTROY_MESSAGE;
 			}
 
-			if( !TheGameConsole->isOpen() )
-				return KEEP_MESSAGE;
+			if( TheGameConsole->isOpen() )
+			{
+				TheGameConsole->handleKey( key, keyState );
+				return DESTROY_MESSAGE;
+			}
 
-			TheGameConsole->handleKey( key, keyState );
+			// Esc shuts the cheat panel rather than opening the quit menu: the press is eaten, and the
+			// release shuts it so that release is not left to open the menu either
+			if( key == KEY_ESC && TheGameConsole->isCheatPanelOpen() )
+			{
+				if( !BitTest( keyState, KEY_STATE_DOWN ) )
+					TheGameConsole->closeCheatPanel();
+				return DESTROY_MESSAGE;
+			}
+			return KEEP_MESSAGE;
+		}
+
+		// the wheel carries no position, and the cursor's moves are everybody's
+		case GameMessage::MSG_RAW_MOUSE_POSITION:
+		case GameMessage::MSG_RAW_MOUSE_WHEEL:
+			return KEEP_MESSAGE;
+	}
+
+	// A press on the cheat panel is the panel's, and so is everything that button does until it is
+	// let go, wherever the pointer has gone by then: nothing after this sees a press it never saw
+	// start.  A press that started off the panel is left alone to its release, so a drag box pulled
+	// over the panel still ends.
+	static Bool pressTaken = FALSE;
+	const GameMessage::Type type = msg->getType();
+	if( type > GameMessage::MSG_RAW_MOUSE_BEGIN && type < GameMessage::MSG_RAW_MOUSE_END )
+	{
+		const Bool left = type == GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN || type == GameMessage::MSG_RAW_MOUSE_LEFT_DOUBLE_CLICK;
+		const Bool press = left
+			|| type == GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN || type == GameMessage::MSG_RAW_MOUSE_RIGHT_DOUBLE_CLICK
+			|| type == GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_DOWN || type == GameMessage::MSG_RAW_MOUSE_MIDDLE_DOUBLE_CLICK;
+		if( press )
+		{
+			pressTaken = TheGameConsole->handleCheatPanelMouse( msg->getArgument( 0 )->pixel, left );
+			return pressTaken ? DESTROY_MESSAGE : KEEP_MESSAGE;
+		}
+		if( pressTaken )
+		{
+			if( type == GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP || type == GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP
+					|| type == GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_UP )
+				pressTaken = FALSE;
 			return DESTROY_MESSAGE;
 		}
 	}

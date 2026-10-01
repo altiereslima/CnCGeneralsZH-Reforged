@@ -281,6 +281,11 @@ public:
 	/// a tech building has just died; stand a neutral one on its spot once the delay has run out
 	void scheduleTechRespawn( const Object *ruin );
 
+	/** The lobby's supply pile limit: how many players may have gatherers on one supply pile at the
+			same time, allies counted one each.  0 when the option is off.  Fixed when the match starts
+			and carried by a save. */
+	Int getSupplyPileLimit( void ) const { return m_supplyPileLimit; }
+
 #ifdef DUMP_PERF_STATS
 	void getAIMetricsStatistics( UnsignedInt *numAI, UnsignedInt *numMoving, UnsignedInt *numAttacking, UnsignedInt *numWaitingForPath, UnsignedInt *overallFailedPathfinds );
 	void resetOverallFailedPathfinds() { m_overallFailedPathfinds = 0; }
@@ -402,6 +407,7 @@ private:
 	Bool m_proRules;									///< this match refuses what PRO-RULES.md bans
 	Int m_incomeSharing;							///< which earnings allies split, an IncomeSharing
 	UnsignedInt m_techRespawnDelay;		///< frames a destroyed tech building stays down, 0 = for good
+	Int m_supplyPileLimit;						///< players who may gather from one supply pile at once, 0 = any number
 
 	/// a destroyed tech building waiting to stand again
 	struct PendingTechBuilding

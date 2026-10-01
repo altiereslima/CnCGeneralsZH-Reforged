@@ -185,10 +185,67 @@ static GameMessage::Type orderAtPlace( Int place )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** What a set builds, which takes the free places before the rest of the set. */
-static Bool isProduction( Int type )
+static GameWindow *barWindow( const char *name )
 {
-	return type == GUI_COMMAND_UNIT_BUILD || type == GUI_COMMAND_DOZER_CONSTRUCT;
+	return TheWindowManager->winGetWindowFromId( NULL, TheNameKeyGenerator->nameToKey( name ) );
+}
+
+/** Shown, and every parent of it shown.  winIsHidden stops at the window itself, and a context
+	parent hides its buttons by hiding itself. */
+static Bool barWindowShown( GameWindow *window )
+{
+	if( window == NULL || window->winIsHidden() )
+		return FALSE;
+	for( GameWindow *parent = window->winGetParent(); parent; parent = parent->winGetParent() )
+		if( parent->winIsHidden() )
+			return FALSE;
+	return TRUE;
+}
+
+/** The button a hidden command group still offers at `place`: cancel while a building goes up,
+	sell or the rally point on a building counting down to a unit. */
+static GameWindow *contextButtonAtPlace( Int place )
+{
+	if( place == COMMAND_PLACE_STOP )
+	{
+		GameWindow *cancel = barWindow( "ControlBar.wnd:ButtonCancelConstruction" );
+		if( barWindowShown( cancel ) )
+			return cancel;
+	}
+
+	GameWindow *sell = barWindow( "ControlBar.wnd:OCLTimerSellButton" );
+	if( !barWindowShown( sell ) )
+		return NULL;
+	const CommandButton *command = (const CommandButton *)GadgetButtonGetData( sell );
+	if( command && fixedCommandPlace( command->getCommandType() ) == place )
+		return sell;
+	return NULL;
+}
+
+//-------------------------------------------------------------------------------------------------
+Int ControlBar_commandGroup( const CommandButton *command )
+{
+	switch( command->getCommandType() )
+	{
+		case GUI_COMMAND_UNIT_BUILD:			return COMMAND_GROUP_PRODUCTION;
+		case GUI_COMMAND_EXIT_CONTAINER:	return COMMAND_GROUP_PASSENGER;
+		case GUI_COMMAND_DOZER_CONSTRUCT:	break;
+		default:													return COMMAND_GROUP_ABILITY;
+	}
+
+	const ThingTemplate *structure = command->getThingTemplate();
+	if( structure == NULL )
+		return COMMAND_GROUP_UTILITY;
+	// a fake carries FS_FAKE and nothing else; three of the five are decoys of factories, so the fake
+	// set stands on the row the real factories stand on
+	if( structure->isKindOf( KINDOF_FS_FACTORY ) || structure->isKindOf( KINDOF_FS_BARRACKS ) ||
+			structure->isKindOf( KINDOF_FS_WARFACTORY ) || structure->isKindOf( KINDOF_FS_AIRFIELD ) ||
+			structure->isKindOf( KINDOF_COMMANDCENTER ) || structure->isKindOf( KINDOF_FS_FAKE ) )
+		return COMMAND_GROUP_PRODUCTION;
+	// the demo trap is no FS_ anything, only DEMOTRAP
+	if( structure->isKindOf( KINDOF_FS_BASE_DEFENSE ) || structure->isKindOf( KINDOF_DEMOTRAP ) )
+		return COMMAND_GROUP_DEFENSE;
+	return COMMAND_GROUP_UTILITY;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -208,14 +265,25 @@ Int ControlBar_namedCommandPlace( const char *buttonName )
 }
 
 //-------------------------------------------------------------------------------------------------
-Bool ControlBar_commandPlaces( const Int *types, const Int *pinned, Int count, Int *places )
+static Int freeInRow( const Bool *taken, Int row )
 {
-	// the owner's order of 2026-09-28: down the columns two rows at a time, toward the top left
-	static const Int FILL[ COMMAND_PLACE_COUNT ] =
+	Int free = 0;
+	for( Int column = 0; column < COMMAND_PLACE_COLUMNS; column++ )
+		free += taken[ row * COMMAND_PLACE_COLUMNS + column ] ? 0 : 1;
+	return free;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool ControlBar_commandPlaces( const Int *types, const Int *groups, const Int *pinned, Int count, Int *places )
+{
+	enum { ROWS = COMMAND_PLACE_COUNT / COMMAND_PLACE_COLUMNS };
+	// passengers from the bottom right corner outward, a column of the A and Z rows at a time, then
+	// along Q from the right.  The places they get are handed out in reading order
+	static const Int CORNER[ COMMAND_PLACE_COUNT ] =
 	{
-		COMMAND_PLACE_Q, COMMAND_PLACE_A, COMMAND_PLACE_W, COMMAND_PLACE_Z, COMMAND_PLACE_S, COMMAND_PLACE_E,
-		COMMAND_PLACE_X, COMMAND_PLACE_D, COMMAND_PLACE_R, COMMAND_PLACE_C, COMMAND_PLACE_F, COMMAND_PLACE_T,
-		COMMAND_PLACE_V, COMMAND_PLACE_G, COMMAND_PLACE_Y, COMMAND_PLACE_B, COMMAND_PLACE_H, COMMAND_PLACE_N
+		COMMAND_PLACE_H, COMMAND_PLACE_N, COMMAND_PLACE_G, COMMAND_PLACE_B, COMMAND_PLACE_F, COMMAND_PLACE_V,
+		COMMAND_PLACE_D, COMMAND_PLACE_C, COMMAND_PLACE_S, COMMAND_PLACE_X, COMMAND_PLACE_A, COMMAND_PLACE_Z,
+		COMMAND_PLACE_Y, COMMAND_PLACE_T, COMMAND_PLACE_R, COMMAND_PLACE_E, COMMAND_PLACE_W, COMMAND_PLACE_Q
 	};
 
 	Bool taken[ COMMAND_PLACE_COUNT ] = { FALSE };
@@ -237,21 +305,68 @@ Bool ControlBar_commandPlaces( const Int *types, const Int *pinned, Int count, I
 		}
 	}
 
-	// production first, then the rest: a factory whose set opens on an upgrade still puts its units
-	// on Q A W before the upgrade
-	for( Int pass = 0; pass < 2; pass++ )
+	Int passengers = 0;
+	Bool builds = FALSE;
+	for( Int slot = 0; slot < count; slot++ )
 	{
-		const Bool wantProduction = ( pass == 0 );
+		if( places[ slot ] >= 0 || types[ slot ] == GUI_COMMAND_NONE )
+			continue;
+		passengers += groups[ slot ] == COMMAND_GROUP_PASSENGER ? 1 : 0;
+		builds = builds || groups[ slot ] == COMMAND_GROUP_PRODUCTION;
+	}
+
+	Bool corner[ COMMAND_PLACE_COUNT ] = { FALSE };
+	for( Int each = 0; each < COMMAND_PLACE_COUNT && passengers > 0; each++ )
+	{
+		if( !taken[ CORNER[ each ] ] )
+		{
+			corner[ CORNER[ each ] ] = taken[ CORNER[ each ] ] = TRUE;
+			passengers--;
+		}
+	}
+	Int next = 0;
+	for( Int slot = 0; slot < count; slot++ )
+	{
+		if( places[ slot ] >= 0 || types[ slot ] == GUI_COMMAND_NONE || groups[ slot ] != COMMAND_GROUP_PASSENGER )
+			continue;
+		while( next < COMMAND_PLACE_COUNT && !corner[ next ] )
+			next++;
+		if( next < COMMAND_PLACE_COUNT )
+			places[ slot ] = next++;
+	}
+
+	// the rows, one group at a time; a group that outgrows its row goes on in the next row down with
+	// room, and only then in the rows above, nearest first, so it still reads in slot order after its
+	// own row: a command center's powers run on from A to Z rather than back up beside its dozer
+	static const Int GROUPS[] = { COMMAND_GROUP_PRODUCTION, COMMAND_GROUP_DEFENSE, COMMAND_GROUP_UTILITY, COMMAND_GROUP_ABILITY };
+	for( Int each = 0; each < (Int)ARRAY_SIZE( GROUPS ); each++ )
+	{
+		const Int group = GROUPS[ each ];
+		const Int own = group == COMMAND_GROUP_ABILITY ? ( builds ? 1 : 0 ) : group;
+		Int row = own;
 		for( Int slot = 0; slot < count; slot++ )
 		{
-			if( places[ slot ] >= 0 || types[ slot ] == GUI_COMMAND_NONE || isProduction( types[ slot ] ) != wantProduction )
+			if( places[ slot ] >= 0 || types[ slot ] == GUI_COMMAND_NONE || groups[ slot ] != group )
 				continue;
-			for( Int each = 0; each < COMMAND_PLACE_COUNT; each++ )
+			if( freeInRow( taken, row ) == 0 )
 			{
-				if( !taken[ FILL[ each ] ] )
+				for( Int step = 1; step < 2 * ROWS; step++ )
 				{
-					places[ slot ] = FILL[ each ];
-					taken[ FILL[ each ] ] = TRUE;
+					const Int other = step < ROWS ? own + step : own - ( step - ROWS + 1 );
+					if( other >= 0 && other < ROWS && freeInRow( taken, other ) > 0 )
+					{
+						row = other;
+						break;
+					}
+				}
+			}
+			for( Int column = 0; column < COMMAND_PLACE_COLUMNS; column++ )
+			{
+				const Int place = row * COMMAND_PLACE_COLUMNS + column;
+				if( !taken[ place ] )
+				{
+					places[ slot ] = place;
+					taken[ place ] = TRUE;
 					break;
 				}
 			}
@@ -263,10 +378,12 @@ Bool ControlBar_commandPlaces( const Int *types, const Int *pinned, Int count, I
 //-------------------------------------------------------------------------------------------------
 Bool ControlBar::getCommandPlaces( Int *places ) const
 {
-	// a context without the command group (nothing selected, a building going up, a beacon) hides the
-	// group's parent and leaves the buttons as the last selection set them: those are not on the bar
+	// a context without the command group hides the group's parent.  Its buttons stay as the last
+	// selection set them and are not on the bar.  A building going up and one counting down to a
+	// unit put their own button on the grid in placeContextOnGrid.
 	const Bool groupShown = !m_contextParent[ CP_COMMAND ]->winIsHidden();
 	Int types[ MAX_COMMANDS_PER_SET ];
+	Int groups[ MAX_COMMANDS_PER_SET ];
 	Int pinned[ MAX_COMMANDS_PER_SET ];
 	for( Int slot = 0; slot < MAX_COMMANDS_PER_SET; slot++ )
 	{
@@ -274,9 +391,10 @@ Bool ControlBar::getCommandPlaces( Int *places ) const
 		const CommandButton *command = ( groupShown && window && !BitTest( window->winGetStatus(), WIN_STATUS_HIDDEN ) )
 																	 ? (const CommandButton *)GadgetButtonGetData( window ) : NULL;
 		types[ slot ] = command ? command->getCommandType() : GUI_COMMAND_NONE;
+		groups[ slot ] = command ? ControlBar_commandGroup( command ) : COMMAND_GROUP_ABILITY;
 		pinned[ slot ] = command ? ControlBar_namedCommandPlace( command->getName().str() ) : -1;
 	}
-	return ControlBar_commandPlaces( types, pinned, MAX_COMMANDS_PER_SET, places );
+	return ControlBar_commandPlaces( types, groups, pinned, MAX_COMMANDS_PER_SET, places );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -319,6 +437,8 @@ void ControlBar::pressCommandButton( Int place )
 
 	const Int slot = resolveCommandSlot( place );
 	GameWindow *win = ( slot == SLOT_NOTHING ) ? NULL : m_commandWindows[ slot ];
+	if( win == NULL )
+		win = contextButtonAtPlace( place );
 	const CommandButton *command = win ? (const CommandButton *)GadgetButtonGetData( win ) : NULL;
 	const GameMessage::Type order = orderAtPlace( place );
 	if( order != GameMessage::MSG_INVALID && ( command == NULL || fixedCommandPlace( command->getCommandType() ) == place ) )
@@ -1344,6 +1464,7 @@ ControlBar::ControlBar( void )
 	m_multiSelectFocus = 0;
 	m_buildPage = BUILD_PAGE_ROOT;
 	m_buildPageObjectID = INVALID_ID;
+	m_standInBuilderID = INVALID_DRAWABLE_ID;
 	m_rallyPointDrawableID = INVALID_DRAWABLE_ID;
 	m_displayedConstructPercent = -1.0f;
 	m_displayedOCLTimerSeconds = 0;
@@ -1492,8 +1613,13 @@ Real ControlBarUniformScale( void )
 //-------------------------------------------------------------------------------------------------
 Real ControlBarHudScaleFor( Int displayWidth, Int displayHeight )
 {
-	const Real s = ControlBarUniformScaleFor( displayWidth, displayHeight ) * CONTROL_BAR_HUD_PERCENT / 100.0f;
-	return s < 1.0f ? 1.0f : s;
+	return (Real)displayHeight / CONTROL_BAR_DESIGN_H * CONTROL_BAR_HUD_PERCENT / 100.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real ControlBarHudPageScale( void )
+{
+	return ControlBarHudScale() * 100.0f / CONTROL_BAR_HUD_PERCENT;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1502,7 +1628,21 @@ Real ControlBarHudScale( void )
 	if( TheDisplay == NULL )
 		return 1.0f;
 
-	return ControlBarHudScaleFor( TheDisplay->getWidth(), TheDisplay->getHeight() );
+	// the player's HudScale option on top, 100/115/130/150%
+	static const Real steps[] = { 1.0f, 1.15f, 1.3f, 1.5f };
+	Int step = TheGlobalData ? TheGlobalData->m_hudScale : 0;
+	if( step < 0 || step > 3 )
+		step = 0;
+
+	return ControlBarHudScaleFit( ControlBarHudScaleFor( TheDisplay->getWidth(), TheDisplay->getHeight() ) * steps[ step ],
+																TheDisplay->getWidth() );
+}
+
+//-------------------------------------------------------------------------------------------------
+Real ControlBarHudScaleFit( Real scale, Int displayWidth )
+{
+	const Real widest = (Real)displayWidth / InGameUI_consolePageWidth();
+	return scale < widest ? scale : widest;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2154,6 +2294,9 @@ Int ControlBar::getPanelSlideOffset( Int panel ) const
 //-------------------------------------------------------------------------------------------------
 void ControlBar::placeWindowAt( GameWindow *window, const IRegion2D &rect )
 {
+	// a layout without the named window (a modded ControlBar.wnd, a panel not built yet) hands in null
+	if( window == nullptr )
+		return;
 	ICoord2D screen, size;
 	window->winGetScreenPosition( &screen.x, &screen.y );
 	window->winGetSize( &size.x, &size.y );
@@ -2981,6 +3124,7 @@ void ControlBar::reset( void )
 
 	m_buildPage = BUILD_PAGE_ROOT;
 	m_buildPageObjectID = INVALID_ID;
+	m_standInBuilderID = INVALID_DRAWABLE_ID;
 
 	m_isObserverCommandBar = FALSE; // reset us to use a normal command bar
 	m_observerLookAtPlayer = NULL;
@@ -3249,6 +3393,31 @@ void ControlBar::update( void )
 		clearPurchaseScienceColumn();
 
 	//
+	// a stand-in builder is not selected, so no deselect event tells us when it dies or when a
+	// real selection arrives; re-evaluate ourselves before anything touches its drawable
+	//
+	if( m_standInBuilderID != INVALID_DRAWABLE_ID )
+	{
+		Drawable *standIn = TheGameClient->findDrawableByID( m_standInBuilderID );
+		Object *standInObj = standIn ? standIn->getObject() : NULL;
+		if( TheInGameUI->getSelectCount() > 0 || standInObj == NULL || standInObj->isEffectivelyDead() )
+		{
+			m_standInBuilderID = INVALID_DRAWABLE_ID;
+			m_currentSelectedDrawable = NULL;
+			markUIDirty();
+		}
+	}
+	//
+	// nothing selected and nothing standing in: a builder that is made or bought later gets the
+	// bar, which no selection event would announce either
+	//
+	else if( logicTick && ( logicNow % LOGICFRAMES_PER_SECOND ) == 0 && TheInGameUI->getSelectCount() == 0
+					 && m_currentSelectedDrawable == NULL && findStandInBuilder( FALSE ) )
+	{
+		markUIDirty();
+	}
+
+	//
 	// first, if the UI is dirty repopulate the UI with what the user should see for all the
 	// selected drawables
 	//
@@ -3511,6 +3680,23 @@ void ControlBar::evaluateContextUI( void )
 
 	// erase any current state of the GUI by switching out to the empty context
 	switchToContext( CB_CONTEXT_NONE, NULL );
+
+	//
+	// nothing selected: one of the player's builders stands in and its command bar shows, so
+	// a structure can be placed without selecting a dozer first - the logic then sends the
+	// idle builder nearest the site (MSG_DOZER_CONSTRUCT).  m_standInBuilderID is not cleared
+	// first: findStandInBuilder reads it to keep the builder it is already showing.
+	//
+	if( TheInGameUI->getSelectCount() == 0 && !m_isObserverCommandBar )
+	{
+		Drawable *builder = findStandInBuilder( FALSE );
+		m_standInBuilderID = builder ? builder->getID() : INVALID_DRAWABLE_ID;
+		if( builder )
+			switchToContext( CB_CONTEXT_COMMAND, builder );
+		return;
+	}
+
+	m_standInBuilderID = INVALID_DRAWABLE_ID;
 
 	// get the list of drawable IDs from the in game UI
 	const DrawableList *selectedDrawables = TheInGameUI->getAllSelectedDrawables();
@@ -4037,6 +4223,74 @@ Bool ControlBar::cancelLastQueuedUnit( const ThingTemplate *thing )
 }  // end cancelLastQueuedUnit
 
 //-------------------------------------------------------------------------------------------------
+/** The local player's builder that stands in for an empty selection: an idle one if there is
+	* one, else any live one.  (Player::iterateObjects callback + driver.) */
+//-------------------------------------------------------------------------------------------------
+struct StandInBuilderSearch
+{
+	Object *idle;
+	Object *any;
+};
+
+static void findStandInBuilderProc( Object *obj, void *userData )
+{
+	StandInBuilderSearch *s = (StandInBuilderSearch *)userData;
+	if( obj == NULL || obj->isEffectivelyDead() || obj->getDrawable() == NULL )
+		return;
+	if( obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) || obj->testStatus( OBJECT_STATUS_SOLD ) )
+		return;
+	AIUpdateInterface *ai = obj->getAI();
+	DozerAIInterface *dozer = ai ? ai->getDozerAIInterface() : NULL;
+	if( dozer == NULL )
+		return;
+	if( s->any == NULL )
+		s->any = obj;
+	// free = no build/repair task and not hauling supplies; walking somewhere does not count
+	const SupplyTruckAIInterface *supply = ai->getSupplyTruckAIInterface();
+	if( s->idle == NULL && !dozer->isAnyTaskPending() && !( supply && supply->isCurrentlyFerryingSupplies() ) )
+		s->idle = obj;
+}
+
+Drawable *ControlBar::findStandInBuilder( Bool freeOnly )
+{
+	Player *player = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
+	if( player == NULL )
+		return NULL;
+
+	//
+	// The builder already standing in keeps the bar for as long as it is still a builder.  The
+	// sweep below answers "the first idle one", and idleness changes on its own: a dozer somewhere
+	// across the base finishing a building goes idle and used to take the bar off the one you were
+	// working with.  That drops the page you were on and takes the structure off your cursor, in
+	// the middle of placing it, because something happened somewhere else.  For a GLA worker it
+	// also keeps the fake-structure page it was switched to.
+	//
+	if( m_standInBuilderID != INVALID_DRAWABLE_ID && TheGameClient )
+	{
+		Drawable *held = TheGameClient->findDrawableByID( m_standInBuilderID );
+		Object *obj = held ? held->getObject() : NULL;
+		if( obj && obj->getControllingPlayer() == player )
+		{
+			StandInBuilderSearch check;
+			check.idle = NULL;
+			check.any = NULL;
+			findStandInBuilderProc( obj, &check );
+			if( check.any && ( !freeOnly || check.idle ) )
+				return held;
+		}
+	}
+
+	StandInBuilderSearch s;
+	s.idle = NULL;
+	s.any = NULL;
+	player->iterateObjects( findStandInBuilderProc, &s );
+
+	Object *pick = s.idle ? s.idle : ( freeOnly ? NULL : s.any );
+	return pick ? pick->getDrawable() : NULL;
+
+}  // end findStandInBuilder
+
+//-------------------------------------------------------------------------------------------------
 /** Press the index'th general's power shortcut button, as a mouse click would */
 //-------------------------------------------------------------------------------------------------
 Bool ControlBar::clearSpecialPowerShortcutRow( void )
@@ -4390,8 +4644,8 @@ ControlBar::PressOutcome ControlBar::peekSpecialPowerShortcutPress( Int index, G
 
 //-------------------------------------------------------------------------------------------------
 /** One key cannot reach eleven powers laid out three to a row, so it takes two: the first press
-	* picks the row - F1 the row in the corner, F2 the one above it - and the second picks the power
-	* in it, F1 being the rightmost.  Until a row is picked only the head of each row is labelled,
+	* picks the row - a group of three, standing as a column: F1 the one against the console, F2 the
+	* one right of it - and the second picks the power in it, F1 being the bottom one.  Until a row is picked only the head of each row is labelled,
 	* with the key that picks that row; once one is, the labels move onto its three powers. */
 //-------------------------------------------------------------------------------------------------
 void ControlBar::pressSpecialPowerShortcut( Int index )
@@ -4883,26 +5137,91 @@ void ControlBar::setControlCommand( GameWindow *button, const CommandButton *com
 }  // end setControlCommand
 
 //-------------------------------------------------------------------------------------------------
+void ControlBar::labelPlaceButton( GameWindow *button, Int place )
+{
+	if( button == NULL )
+		return;
+
+	const UnicodeString label = place >= 0 ? getGridHotKeyLabel( place ) : UnicodeString();
+	if( label.isEmpty() )
+		button->winClearStatus( WIN_STATUS_SHORTCUT_BUTTON );
+	else
+		button->winSetStatus( WIN_STATUS_SHORTCUT_BUTTON );
+
+	// every frame, so only a changed key goes to the button
+	if( button->winGetText().compare( label ) != 0 )
+		GadgetButtonSetText( button, label );
+
+}
+
 void ControlBar::labelCommandPlaces( const Int *places )
 {
 	for( Int slot = 0; slot < MAX_COMMANDS_PER_SET; slot++ )
-	{
-		GameWindow *button = m_commandWindows[ slot ];
-		if( button == NULL )
-			continue;
-
-		const UnicodeString label = places[ slot ] >= 0 ? getGridHotKeyLabel( places[ slot ] ) : UnicodeString();
-		if( label.isEmpty() )
-			button->winClearStatus( WIN_STATUS_SHORTCUT_BUTTON );
-		else
-			button->winSetStatus( WIN_STATUS_SHORTCUT_BUTTON );
-
-		// every frame, so only a changed key goes to the button
-		if( button->winGetText().compare( label ) != 0 )
-			GadgetButtonSetText( button, label );
-	}
+		labelPlaceButton( m_commandWindows[ slot ], places[ slot ] );
 
 }  // end labelCommandPlaces
+
+//-------------------------------------------------------------------------------------------------
+static IRegion2D spanCells( const IRegion2D *cells, Int first, Int last )
+{
+	IRegion2D span = cells[ first ];
+	span.hi.x = cells[ last ].hi.x;
+	if( cells[ last ].lo.y < span.lo.y )
+		span.lo.y = cells[ last ].lo.y;
+	if( cells[ last ].hi.y > span.hi.y )
+		span.hi.y = cells[ last ].hi.y;
+	return span;
+}
+
+void ControlBar::placeContextOnGrid( const IRegion2D &frame, const IRegion2D *cells, Bool *taken )
+{
+	// the command group is up, so its own buttons already fill the grid
+	if( m_contextParent[ CP_COMMAND ] && !m_contextParent[ CP_COMMAND ]->winIsHidden() )
+		return;
+
+	GameWindow *building = m_contextParent[ CP_UNDER_CONSTRUCTION ];
+	if( building && !building->winIsHidden() )
+	{
+		// the parent has to cover the cell or the click never arrives
+		placeWindowAt( building, frame );
+		GameWindow *cancel = barWindow( "ControlBar.wnd:ButtonCancelConstruction" );
+		if( barWindowShown( cancel ) )
+		{
+			taken[ COMMAND_PLACE_STOP ] = TRUE;
+			placeWindowAt( cancel, cells[ COMMAND_PLACE_STOP ] );
+			labelPlaceButton( cancel, COMMAND_PLACE_STOP );
+		}
+		GameWindow *desc = barWindow( "ControlBar.wnd:UnderConstructionDesc" );
+		if( barWindowShown( desc ) )
+			placeWindowAt( desc, spanCells( cells, COMMAND_PLACE_Q, COMMAND_PLACE_Y ) );
+		return;
+	}
+
+	GameWindow *timer = m_contextParent[ CP_OCL_TIMER ];
+	if( timer == NULL || timer->winIsHidden() )
+		return;
+
+	placeWindowAt( timer, frame );
+	GameWindow *sell = barWindow( "ControlBar.wnd:OCLTimerSellButton" );
+	if( barWindowShown( sell ) )
+	{
+		const CommandButton *command = (const CommandButton *)GadgetButtonGetData( sell );
+		const Int where = command ? fixedCommandPlace( command->getCommandType() ) : -1;
+		if( where >= 0 )
+		{
+			taken[ where ] = TRUE;
+			placeWindowAt( sell, cells[ where ] );
+			labelPlaceButton( sell, where );
+		}
+	}
+	GameWindow *text = barWindow( "ControlBar.wnd:OCLTimerStaticText" );
+	if( barWindowShown( text ) )
+		placeWindowAt( text, spanCells( cells, COMMAND_PLACE_Q, COMMAND_PLACE_Y ) );
+	GameWindow *bar = barWindow( "ControlBar.wnd:OCLTimerProgressBar" );
+	if( barWindowShown( bar ) )
+		placeWindowAt( bar, spanCells( cells, COMMAND_PLACE_A, COMMAND_PLACE_H ) );
+
+}  // end placeContextOnGrid
 
 //-------------------------------------------------------------------------------------------------
 void CommandButton::cacheButtonImage()
@@ -6072,21 +6391,22 @@ Int ControlBar::placeSpecialPowerShortcutGrid( const ICoord2D *corner, const ICo
 	// the bar covers every cell, or a cell off its edge draws and never takes a click, and it is only
 	// as big as the powers shown, so the battlefield round them takes its own clicks.  Its position is
 	// its own parent's, and the layout's root is not the screen
-	const Int columns = MIN( shown, (Int)SPECIAL_POWER_SHORTCUT_COLS );
-	const Int rows = ( shown + SPECIAL_POWER_SHORTCUT_COLS - 1 ) / SPECIAL_POWER_SHORTCUT_COLS;
+	const Int columns = ( shown + SPECIAL_POWER_SHORTCUT_COLS - 1 ) / SPECIAL_POWER_SHORTCUT_COLS;
+	const Int rows = MIN( shown, (Int)SPECIAL_POWER_SHORTCUT_COLS );
 	const Int width = columns * cell.x + ( columns - 1 ) * gap;
 	const Int height = rows * cell.y + ( rows - 1 ) * gap;
 	Int parentX = 0, parentY = 0;
 	if( m_specialPowerShortcutParent->winGetParent() )
 		m_specialPowerShortcutParent->winGetParent()->winGetScreenPosition( &parentX, &parentY );
-	m_specialPowerShortcutParent->winSetPosition( corner->x - width - parentX, corner->y - height - parentY );
+	m_specialPowerShortcutParent->winSetPosition( corner->x - parentX, corner->y - height - parentY );
 	m_specialPowerShortcutParent->winSetSize( width, height );
 	m_specialPowerShortcutParent->winSetDrawFunc( drawNoTray );
 	if( m_specialPowerShortcutParent->winIsHidden() )
 		m_specialPowerShortcutParent->winHide( FALSE );
 
-	// the first power in the corner, the row running left from it and the next row over it: the
-	// order the row keys count in.  Each cameo fills its cell
+	// the first power in the corner, its group of SPECIAL_POWER_SHORTCUT_COLS going up from it and the
+	// next group in the column to the right: F1's group is the first column, F2's the second, the
+	// order the group keys count in.  Each cameo fills its cell
 	for( Int i = 0; i < MAX_SPECIAL_POWER_SHORTCUTS; i++ )
 	{
 		GameWindow *slot = m_specialPowerShortcutButtonParents[ i ];
@@ -6094,9 +6414,9 @@ Int ControlBar::placeSpecialPowerShortcutGrid( const ICoord2D *corner, const ICo
 		if( slot == NULL || button == NULL )
 			continue;
 
-		const Int column = i % SPECIAL_POWER_SHORTCUT_COLS;
-		const Int row = i / SPECIAL_POWER_SHORTCUT_COLS;
-		slot->winSetPosition( width - ( column + 1 ) * cell.x - column * gap, height - ( row + 1 ) * cell.y - row * gap );
+		const Int column = i / SPECIAL_POWER_SHORTCUT_COLS;
+		const Int row = i % SPECIAL_POWER_SHORTCUT_COLS;
+		slot->winSetPosition( column * ( cell.x + gap ), height - ( row + 1 ) * cell.y - row * gap );
 		slot->winSetSize( cell.x, cell.y );
 		slot->winSetDrawFunc( drawNoTray );
 		button->winSetSize( cell.x, cell.y );
@@ -6584,8 +6904,8 @@ void ControlBar::drawSpecialPowerShortcutMultiplierText()
 
 		//
 		// a power takes two keys, so only the half of them that the next press can reach is
-		// labelled: with no row pending that is the head of each row, carrying the key that
-		// picks the row; with one pending it is that row's powers, carrying their own keys.
+		// labelled: with no group pending that is the foot of each group's column, carrying the
+		// key that picks the group; with one pending it is that group's powers, carrying their own keys.
 		// Which key a slot number means is up to CommandMap.ini - getMetaKeyLabel returns
 		// nothing for an unbound one.
 		//

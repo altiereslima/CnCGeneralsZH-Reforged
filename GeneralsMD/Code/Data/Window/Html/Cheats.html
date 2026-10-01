@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<!--
+  The cheat panel the console's "trainer" command opens: every console cheat as a row, a toggle
+  lit while it is on, an amount cheat with its ready amounts.  Same steel as
+  Window/Html/QuitMenu.html.  A click runs the cheat through the console, so it is a MSG_CHEAT like
+  a typed one: recorded in the replay, refused in a network game.
+
+  The game fills in (GameClient/GameConsole.cpp):
+    {{side}}              "america", "china" or "gla": the side whose command bar is on screen
+    {{text:Label}}        a string table label, in the player's language
+    data-each="cells"     every cell of the panel in reading order: a {{kind}} "name" entry with the
+                          cheat's {{label}} opens each row, then its keys, {{kind}} "key" and "key on"
+                          for a toggle that is on, each with its {{label}} and the {{click}} it sends
+  All in the page's pixels, a pixel of an 800x600 screen.  data-click="close" shuts the panel.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Cheats</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { background-color: #3b4a36; font-size: 10px; color: #e8eef2; }
+
+  .plate { position: absolute; left: 10px; top: 60px; width: 307px; padding: 4px 6px 7px 6px;
+           background: linear-gradient(to bottom, #9aa3ad, #5a626c 12%, #353c45); border: 1px solid #0c1114;
+           border-top-color: #dde4ea; border-left-color: #b3bbc4; }
+  .china .plate { background: linear-gradient(to bottom, #c06a52, #7a3120 12%, #3f160f); border-top-color: #f0b8a4; border-left-color: #d58a70; }
+  .gla .plate { background: linear-gradient(to bottom, #b8ab6e, #766a3a 12%, #3c3519); border-top-color: #ebe2b4; border-left-color: #cabe86; }
+
+  .title { height: 16px; line-height: 16px; font-weight: bold; color: #f2cf4a; }
+
+  .well { padding: 3px 4px 4px 4px; border: 2px solid #06090b; border-bottom-color: #b4bec8; border-right-color: #b4bec8;
+          background-color: #3a414a; }
+  .china .well { border-bottom-color: #d98a72; border-right-color: #d98a72; background-color: #45190f; }
+  .gla .well { border-bottom-color: #cbbf82; border-right-color: #cbbf82; background-color: #423a1c; }
+  .end { clear: left; height: 0; }
+
+  /* the well is exactly one name and three keys wide, so each row's keys stay on its line */
+  .name { float: left; clear: left; white-space: nowrap; width: 124px; height: 14px; line-height: 14px; margin-top: 3px; }
+  .key { float: left; white-space: nowrap; width: 52px; height: 12px; line-height: 12px; margin: 3px 0 0 3px; text-align: center; font-weight: bold;
+         border: 1px solid #06090b; border-bottom-color: #9aa4ae; border-right-color: #9aa4ae; background-color: rgba(4, 8, 10, 0.9); }
+  .china .key { border-bottom-color: #d98a72; border-right-color: #d98a72; }
+  .gla .key { border-bottom-color: #cbbf82; border-right-color: #cbbf82; }
+  .key:hover { background: linear-gradient(to bottom, #b3bbc4, #5a626c); border-color: #e8d27a; color: #ffffff; }
+  .china .key:hover { background: linear-gradient(to bottom, #d58a70, #7a3120); }
+  .gla .key:hover { background: linear-gradient(to bottom, #cabe86, #766a3a); }
+  /* a toggle that is on stays lit in the power bar's green */
+  .key.on { background: linear-gradient(to bottom, #9be07a, #2f7a1c); border-color: #e8d27a; color: #ffffff; }
+
+  .close { position: absolute; right: 6px; top: 4px; width: 14px; height: 12px; line-height: 12px; }
+</style>
+</head>
+<body>
+<div class="{{side}}">
+  <div class="plate">
+    <div class="title">{{text:GUI:CheatPanelTitle}}</div>
+    <div class="key close" data-click="close">X</div>
+    <div class="well">
+      <div class="{{kind}}" data-each="cells" data-click="{{click}}">{{label}}</div>
+      <div class="end"></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

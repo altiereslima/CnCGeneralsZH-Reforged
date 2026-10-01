@@ -5,7 +5,8 @@
   the power bar's fills.  The steel follows the side whose bar is on screen, so selecting a Chinese
   unit turns it red.  One piece: #right down the right, #watch with the camera, the followed player
   and the fog, and under it #board, every player ranked by a picked stat and the armies.  The players
-  themselves are on the Tab scoreboard and what happens is in Window/Html/Feed.html over the radar.
+  themselves are on the Tab scoreboard and what happens is in Window/Html/Feed.html in the top left
+  corner.
 
   Laid out by litehtml and drawn by the game (GameClient/HtmlOverlay.h).  A CSS pixel is a pixel of
   an 800x600 screen and font-size is the game font's point size there; the page is scaled with the
@@ -36,8 +37,8 @@
       follows nobody and {{follownobody}} is "on" then; each folds up flip:follow.  {{follow}}
       {{followcolor}} are the followed player's name and colour, or the nobody label and no colour
     {{fog}} "on" while the fog is drawn for the followed player, flipped with data-click="fog"
-    In a replay only, the strip standing where a player's command grid is:
-    {{replay}} "on", {{replaytime}} {{replaylength}} the time reached and the whole replay's,
+    In a replay only, the strip standing on the middle of the console, ControlBar.html's:
+    {{replay}} "on", {{replayleft}} {{replaytop}} the strip's corner, {{replaytime}} {{replaylength}} the time reached and the whole replay's,
       {{replayshare}} how far along it is in percent, {{replaypaused}} "paused",
       {{replayseeking}} "seeking" while a jump runs forward to its frame, and
       {{replay:speed:N}} "on" while it plays at N percent.  data-click="replay:seek" on #track jumps
@@ -139,13 +140,14 @@
   .army .cell img { position: absolute; left: 1px; top: 1px; width: 17px; height: 15px; }
   .army .cell.head { clear: left; width: 30px; height: 18px; margin-right: 1px; }
   .army .cell.head img { left: 0; top: 0; width: 30px; height: 18px; }
-  .count { position: absolute; right: 2px; bottom: 0; font-size: 8px; font-weight: bold; color: #ffffff; }
+  .count { position: absolute; right: 2px; bottom: 1px; padding: 0 1px; line-height: 8px; font-size: 8px; font-weight: bold;
+           background-color: #020405; color: #ffffff; }
 
-  /* ---- the replay strip, on the screen's bottom edge where the command grid stands in a match ----
+  /* ---- the replay strip, standing on the middle of the console at {{replayleft}} {{replaytop}} ----
      ControlBar.html's own bezel: a steel plate lit from above, a light line along its top and down
      its left, a dark one down its right, the readout and the timeline sunk in two pixel wells, and
      the keys the bar's steel caps, pressed in while they are the one in force */
-  #replay { display: none; position: absolute; left: 240px; top: 551px; width: 306px; height: 38px; padding: 5px 7px 6px 7px;
+  #replay { display: none; position: absolute; width: 306px; height: 38px; padding: 5px 7px 6px 7px;
             background: linear-gradient(to bottom, #9aa3ad, #5a626c 30%, #353c45);
             border-top: 1px solid #dde4ea; border-left: 1px solid #b3bbc4; border-right: 1px solid #0c1114; }
   .china #replay { background: linear-gradient(to bottom, #c06a52, #7a3120 30%, #3f160f); border-top-color: #f0b8a4; border-left-color: #d58a70; }
@@ -248,7 +250,7 @@
 </div>
 </div>
 
-<div id="replay" class="{{replay}} {{replaypaused}} {{replayseeking}}">
+<div id="replay" class="{{replay}} {{replaypaused}} {{replayseeking}}" style="left: {{replayleft}}px; top: {{replaytop}}px">
   <div class="controls">
     <div class="readout sunk"><span class="clock">{{replaytime}}</span> <span class="length">/ {{replaylength}}</span></div>
     <div class="keys">

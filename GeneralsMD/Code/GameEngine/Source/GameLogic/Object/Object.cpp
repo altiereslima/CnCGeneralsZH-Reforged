@@ -4099,8 +4099,14 @@ void Object::onDisabledEdge(Bool becomingDisabled)
 	for( BehaviorModule **module = m_behaviors; *module; ++module )
 		(*module)->onDisabledEdge( becomingDisabled );
 
+	//
+	// Going into any container holds the object, and held is a disabled type, so this is also what a
+	// builder hears on the step into a tunnel mouth - before it is recorded as inside anything.  One
+	// that took the tunnel as the shorter way to its job (DozerActionPickActionPosState::update) is
+	// not giving the job up: it keeps it and carries on from the far mouth.
+	//
 	DozerAIInterface *dozerAI = getAI() ? getAI()->getDozerAIInterface() : NULL;
-	if( becomingDisabled  &&  dozerAI )
+	if( becomingDisabled  &&  dozerAI  &&  !( isDisabledByType( DISABLED_HELD ) && getAI()->hasTunnelTrip() ) )
 	{
 		// Have to say goodbye to the thing we might be building or repairing so someone else can do it.
 		if( dozerAI->getCurrentTask() != DOZER_TASK_INVALID )
@@ -4315,13 +4321,14 @@ void Object::crc( Xfer *xfer )
 	* 8: Kris: Conversion of object status bits from UnsignedInt to BitFlags<>
 	* 9: Extra sighting for reveal to all with different range units
 	* 10: each player's memory of it while it is out of their sight
+	* 11: the cached angle, which the matrix does not give back bit for bit
 	*/
 //-------------------------------------------------------------------------------------------------
 void Object::xfer( Xfer *xfer )
 {
 
 	// version
-	const XferVersion currentVersion = 10;
+	const XferVersion currentVersion = 11;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -4336,7 +4343,27 @@ void Object::xfer( Xfer *xfer )
 	{
 		Matrix3D mtx = *getTransformMatrix();
 		xfer->xferMatrix3D(&mtx);
-		setTransformMatrix(&mtx);
+
+		//
+		// Only a load has a matrix to take in.  Setting it again on the way out re-derives the cached
+		// angle from the matrix, a few bits off the angle setOrientation stored, and a replay checkpoint
+		// is a save taken mid-playback: the playback then turned its idle units from a different angle
+		// than the recording had.
+		//
+		if( xfer->getXferMode() == XFER_LOAD )
+			setTransformMatrix(&mtx);
+
+		//
+		// And the load derives that same angle, so the angle itself goes into the file: a jump back in
+		// a replay is a load, and the playback carries on from it against the recording's CRCs.
+		//
+		if( version >= 11 )
+		{
+			Real angle = getOrientation();
+			xfer->xferReal( &angle );
+			if( xfer->getXferMode() == XFER_LOAD )
+				restoreOrientation( angle );
+		}
 	}
 	else
 	{

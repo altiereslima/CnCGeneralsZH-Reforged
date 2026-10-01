@@ -751,6 +751,7 @@ public:
 			and nothing ordered, for a unit that cannot go into a tunnel. */
 	Bool takeTunnelTrip( Object *entrance, const Coord3D *goal, TunnelTripEnd end, CommandSourceType cmdSource );
 	Bool hasTunnelTrip() const { return m_hasTunnelTrip; }	///< on its way through the tunnel network to a move order's goal
+	void endTunnelTrip();	///< what the trip was for is gone: forget it, unless the unit is already underground
 	const Coord3D *getTunnelTripGoal() const { return &m_tunnelTripGoal; }	///< where the trip ends, once out of the far mouth
 	TunnelTripEnd getTunnelTripEnd() const { return m_tunnelTripEnd; }	///< how the leg from the far mouth is walked
 #if defined(_DEBUG) || defined(_INTERNAL)	

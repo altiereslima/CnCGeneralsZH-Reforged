@@ -341,7 +341,7 @@ StateReturnType AITNGuardInnerState::onEnter( void )
 	Object* nemesis = TheGameLogic->findObjectByID(getGuardMachine()->getNemesisID()) ;
 	if (nemesis == NULL) 
 	{
-		DEBUG_LOG(("Unexpected NULL nemesis in AITNGuardInnerState.\n"));
+		DEBUG_LOG_DEV(("Unexpected NULL nemesis in AITNGuardInnerState.\n"));
 		return STATE_SUCCESS;
 	}
 	m_exitConditions.m_attackGiveUpFrame = TheGameLogic->getFrame() + TheAI->getAiData()->m_guardChaseUnitFrames;
@@ -488,7 +488,7 @@ StateReturnType AITNGuardOuterState::onEnter( void )
 	Object* nemesis = TheGameLogic->findObjectByID(getGuardMachine()->getNemesisID()) ;
 	if (nemesis == NULL) 
 	{
-		DEBUG_LOG(("Unexpected NULL nemesis in AITNGuardOuterState.\n"));
+		DEBUG_LOG_DEV(("Unexpected NULL nemesis in AITNGuardOuterState.\n"));
 		return STATE_SUCCESS;
 	}
 
@@ -611,12 +611,19 @@ StateReturnType AITNGuardReturnState::onEnter( void )
 	// Find tunnel network to enter.
 	// Scan my tunnels.
 	Object *bestTunnel = findBestTunnel(getMachineOwner()->getControllingPlayer(), getMachineOwner()->getPosition());
-	if (bestTunnel==NULL) return STATE_FAILURE;
+	// No tunnel to enter is not a target. Failure here used to enter the attack
+	// on whatever id was left, which was already gone, and the machine handed
+	// itself straight back.
+	if (bestTunnel==NULL) return STATE_SUCCESS;
 
 	getMachine()->setGoalObject(bestTunnel);
 	getMachineOwner()->getAI()->friend_setGoalObject(bestTunnel);
-	
-	return AIEnterState::onEnter();
+
+	// The walk into the tunnel failing is the same thing: the return is over.
+	StateReturnType entered = AIEnterState::onEnter();
+	if (entered == STATE_FAILURE)
+		return STATE_SUCCESS;
+	return entered;
 }
 
 //--------------------------------------------------------------------------------------
@@ -732,7 +739,7 @@ StateReturnType AITNGuardIdleState::update( void )
 		Object *nemesis = TheGameLogic->findObjectByID(getGuardMachine()->getNemesisID());
 		if (nemesis == NULL) 
 		{
-			DEBUG_LOG(("Unexpected NULL nemesis in AITNGuardAttackAggressorState.\n"));
+			DEBUG_LOG_DEV(("Unexpected NULL nemesis in AITNGuardAttackAggressorState.\n"));
 			return STATE_SLEEP(0);
 		}
 		if (getMachineOwner()->getContainedBy()) {
@@ -821,7 +828,7 @@ StateReturnType AITNGuardAttackAggressorState::onEnter( void )
 	Object *nemesis = TheGameLogic->findObjectByID(getGuardMachine()->getNemesisID());
 	if (nemesis == NULL) 
 	{
-		DEBUG_LOG(("Unexpected NULL nemesis in AITNGuardAttackAggressorState.\n"));
+		DEBUG_LOG_DEV(("Unexpected NULL nemesis in AITNGuardAttackAggressorState.\n"));
 		return STATE_SUCCESS;
 	}
 

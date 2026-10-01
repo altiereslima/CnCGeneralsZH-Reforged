@@ -49,6 +49,7 @@
 
 #include <d3d9.h>
 #include <map>
+#include <string.h>
 #include <string>
 #include <vector>
 
@@ -420,9 +421,9 @@ private:
 	// and the lights are set once for a whole batch - so the block is built into a local, compared
 	// against the copy here, and written through only when it differs.
 	//
-	// Comparing bytes rather than flagging the setters dirty is deliberate: there are a dozen ways
-	// into these blocks, including three render states read straight out of the state block, and a
-	// setter nobody flagged would draw with the previous batch's lighting.
+	// The setters do flag the blocks now (ConstantsChanged below), but only to skip building them.
+	// The byte compare still decides the write: a flag says something was set, often to the value
+	// it already had in another order, and only the bytes say whether the buffer is different.
 	VertexConstantBlock HeldVertexConstants;
 	PixelConstantBlock HeldPixelConstants;
 	float HeldEngineConstants[ENGINE_SHADER_CONSTANTS][4];
@@ -434,6 +435,25 @@ private:
 	bool VertexConstantsHeld;
 	bool PixelConstantsHeld;
 	bool EngineConstantsHeld;
+
+	// Whether anything the draws read has changed since the last draw used it, so a draw that
+	// follows another with nothing set in between skips building what it would build identically:
+	// the two constant blocks with their three matrix products, both pipeline descriptions, and a
+	// sampler description a stage.  The terrain is the case this is for, hundreds of tiles in a row
+	// under one transform and one state.  Every setter that writes something a block, a description
+	// or a sampler reads sets the matching flag, and only when the value actually differs.  A new
+	// input to any of them needs its setter to raise the flag here, or the draw after it reads the
+	// previous batch's lighting.
+	bool ConstantsChanged;
+	bool PipelineChanged;
+	bool SamplerChanged[DX11_BACKEND_TEXTURE_STAGES];
+	// A render state, or the shadow caster pass that answers for some of them, changed since the
+	// three state objects were last looked up.
+	bool StateObjectsChanged;
+	// Whether Memos[LastMemo] is what the last Resolve handed back.  A refusal clears it, so a draw
+	// that was refused is refused again through the whole path and counted the same way.
+	bool LastResolveHeld;
+	void Note_Shadow_State_Changed() { ConstantsChanged = true; PipelineChanged = true; StateObjectsChanged = true; }
 	EngineShaderProgram VertexProgram;
 	EngineShaderProgram PixelProgram;
 
@@ -526,18 +546,35 @@ private:
 	ID3D11ShaderResourceView * TargetCheckedViews[DX11_BACKEND_TEXTURE_STAGES];
 	bool TargetCheckedIsTarget[DX11_BACKEND_TEXTURE_STAGES];
 
-	std::map<std::string, ID3D11BlendState *> BlendStates;
-	std::map<std::string, ID3D11DepthStencilState *> DepthStencilStates;
-	std::map<std::string, ID3D11RasterizerState *> RasterizerStates;
-	std::map<std::string, ID3D11SamplerState *> SamplerStates;
+	// Keyed by the description itself and ordered by its bytes, which is safe for the ResolveMemo's
+	// reason: every Build_*_Description memsets first.  They were keyed by the bytes copied into a
+	// std::string, longer than the string's own small buffer, so every lookup allocated and freed.
+	struct Description_Bytes_Less
+	{
+		template <class Description>
+		bool operator()(const Description & left, const Description & right) const
+		{
+			return memcmp(&left, &right, sizeof(Description)) < 0;
+		}
+	};
+	typedef std::map<D3D11_BLEND_DESC, ID3D11BlendState *, Description_Bytes_Less> BlendStateMap;
+	typedef std::map<D3D11_DEPTH_STENCIL_DESC, ID3D11DepthStencilState *, Description_Bytes_Less>
+		DepthStencilStateMap;
+	typedef std::map<D3D11_RASTERIZER_DESC, ID3D11RasterizerState *, Description_Bytes_Less>
+		RasterizerStateMap;
+	typedef std::map<D3D11_SAMPLER_DESC, ID3D11SamplerState *, Description_Bytes_Less> SamplerStateMap;
+	BlendStateMap BlendStates;
+	DepthStencilStateMap DepthStencilStates;
+	RasterizerStateMap RasterizerStates;
+	SamplerStateMap SamplerStates;
 
 	// The last description each kind of state object was looked up by, and the object it got.
 	//
-	// The maps above are keyed by a description's bytes in a std::string, and every description is
-	// longer than the string's own small buffer, so each lookup allocated and freed.  Bind_State_Objects
-	// makes seven of them a draw, and a particle-heavy frame is several hundred draws whose states
-	// change far less often than that.  memcmp is safe for the ResolveMemo's reason: every
-	// Build_*_Description memsets first.  A null object means no memo; Release_Cached nulls them all.
+	// Bind_State_Objects makes seven lookups a draw, and a particle-heavy frame is several hundred
+	// draws whose states change far less often than that.  A null object means no memo;
+	// Release_Cached nulls them all.  The blend, depth stencil and rasterizer descriptions are built
+	// from the render states alone, so while StateObjectsChanged is down the three memos are what a
+	// build would find and the draw skips building and comparing them.
 	D3D11_BLEND_DESC LastBlendDescription;
 	ID3D11BlendState * LastBlendState;
 	D3D11_DEPTH_STENCIL_DESC LastDepthStencilDescription;

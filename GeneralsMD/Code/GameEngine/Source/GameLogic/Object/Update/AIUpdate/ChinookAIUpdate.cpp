@@ -1024,7 +1024,9 @@ Bool ChinookAIUpdate::isAllowedToAdjustDestination() const
 	if (m_flightStatus == CHINOOK_LANDED)
 		return false;
 
-	if( getCurLocomotor()->isInvalidPositionAllowed() )
+	// A script can order a Chinook along a waypoint path before any locomotor is chosen.
+	const Locomotor* locomotor = getCurLocomotor();
+	if( locomotor && locomotor->isInvalidPositionAllowed() )
 	{
 		return FALSE;
 	}

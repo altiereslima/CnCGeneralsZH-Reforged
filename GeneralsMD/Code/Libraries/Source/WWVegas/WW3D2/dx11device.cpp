@@ -18,6 +18,8 @@
 
 #include "dx11device.h"
 
+#include <dxgi1_5.h>
+
 // The back buffer is the same format the D3D9 device asks for, so a picture taken off one can be
 // compared against the other without a conversion standing between them.
 static const DXGI_FORMAT BACK_BUFFER_FORMAT = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -45,6 +47,28 @@ static void release_interface(IUnknown ** object)
 	}
 }
 
+// DXGI 1.5, Windows 10 with a driver that agrees.  Without it a flip model window still waits for
+// the compositor, so there is nothing to gain over the blt model and the old swap chain stays.
+static bool tearing_supported()
+{
+	IDXGIFactory1 * factory = NULL;
+	if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), reinterpret_cast<void **>(&factory)))) {
+		return false;
+	}
+	BOOL allowed = FALSE;
+	IDXGIFactory5 * factory5 = NULL;
+	if (SUCCEEDED(factory->QueryInterface(__uuidof(IDXGIFactory5),
+			reinterpret_cast<void **>(&factory5)))) {
+		if (FAILED(factory5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowed,
+				sizeof(allowed)))) {
+			allowed = FALSE;
+		}
+		factory5->Release();
+	}
+	factory->Release();
+	return allowed != FALSE;
+}
+
 DX11DeviceClass::DX11DeviceClass()
 	: Device(NULL)
 	, Context(NULL)
@@ -60,6 +84,8 @@ DX11DeviceClass::DX11DeviceClass()
 	, Software(false)
 	, DebugLayerRequested(false)
 	, DebugLayerPresent(false)
+	, Tearing(false)
+	, LastPresentResult(S_OK)
 {
 }
 
@@ -98,6 +124,18 @@ bool DX11DeviceClass::Create_Device(bool with_swap_chain, HWND window, unsigned 
 	swap_chain.Windowed = TRUE;
 	swap_chain.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
 
+	// The blt model above is composed by the desktop once a refresh whatever the sync interval, so
+	// with vsync off the game still ran at exactly the monitor's rate, fullscreen included, since
+	// fullscreen is this window over a mode change.  The flip model with tearing allowed is the one
+	// a window may present past the refresh with.  It is tried first where DXGI allows tearing, and
+	// a create that refuses it falls back to the blt model, which is what this always was.
+	DXGI_SWAP_CHAIN_DESC flip_chain = swap_chain;
+	flip_chain.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	flip_chain.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+	const DXGI_SWAP_CHAIN_DESC * chain_choices[] = { &flip_chain, &swap_chain };
+	const unsigned chain_start = (with_swap_chain && tearing_supported()) ? 0u : 1u;
+	const unsigned chain_choice_count = sizeof(chain_choices)/sizeof(chain_choices[0]);
+
 	// Hardware first, WARP second.  WARP draws the same picture on a machine with no D3D11 driver,
 	// which is what makes the device creatable on a build agent as well as on this one.
 	const D3D_DRIVER_TYPE driver_types[] = { D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP };
@@ -113,25 +151,37 @@ bool DX11DeviceClass::Create_Device(bool with_swap_chain, HWND window, unsigned 
 
 	for (unsigned index = 0; index < driver_type_count; ++index) {
 		for (unsigned flag_index = flag_start; flag_index < flag_choice_count; ++flag_index) {
-			const UINT flags = flag_choices[flag_index];
-			const HRESULT result = Create_Device_Guarded(with_swap_chain, driver_types[index], flags,
-				&swap_chain);
-			if (FAILED(result)) {
-				continue;
-			}
+			for (unsigned chain_index = chain_start; chain_index < chain_choice_count; ++chain_index) {
+				const UINT flags = flag_choices[flag_index];
+				const HRESULT result = Create_Device_Guarded(with_swap_chain, driver_types[index], flags,
+					chain_choices[chain_index]);
+				if (FAILED(result)) {
+					continue;
+				}
 
-			Software = (driver_types[index] == D3D_DRIVER_TYPE_WARP);
-			DebugLayerPresent = (flags & D3D11_CREATE_DEVICE_DEBUG) != 0;
-			Width = width;
-			Height = height;
-			if (!with_swap_chain) {
-				return true;
+				Software = (driver_types[index] == D3D_DRIVER_TYPE_WARP);
+				DebugLayerPresent = (flags & D3D11_CREATE_DEVICE_DEBUG) != 0;
+				Tearing = (chain_choices[chain_index] == &flip_chain);
+				Width = width;
+				Height = height;
+				if (!with_swap_chain) {
+					return true;
+				}
+				// DXGI answers Alt+Enter on its own by taking the chain to exclusive fullscreen,
+				// behind the game's back.  A flip chain presenting with tearing is refused there
+				// and the picture freezes, and the game already has its own fullscreen.
+				IDXGIFactory1 * factory = NULL;
+				if (SUCCEEDED(SwapChain->GetParent(__uuidof(IDXGIFactory1),
+						reinterpret_cast<void **>(&factory)))) {
+					factory->MakeWindowAssociation(window, DXGI_MWA_NO_ALT_ENTER);
+					factory->Release();
+				}
+				if (Create_Views()) {
+					return true;
+				}
+				Release();
+				return false;
 			}
-			if (Create_Views()) {
-				return true;
-			}
-			Release();
-			return false;
 		}
 	}
 
@@ -246,13 +296,16 @@ void DX11DeviceClass::Release()
 	Width = 0;
 	Height = 0;
 	Software = false;
+	Tearing = false;
 }
 
 bool DX11DeviceClass::Resize(unsigned width, unsigned height)
 {
 	Release_Views();
+	// ResizeBuffers has to be handed the flags the chain was made with, or it refuses.
+	const UINT chain_flags = Tearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
 	if (FAILED(SwapChain->ResizeBuffers(SWAP_CHAIN_BUFFER_COUNT, width, height,
-			BACK_BUFFER_FORMAT, 0))) {
+			BACK_BUFFER_FORMAT, chain_flags))) {
 		return false;
 	}
 	Width = width;
@@ -272,7 +325,33 @@ void DX11DeviceClass::Clear(float red, float green, float blue, float alpha, boo
 
 bool DX11DeviceClass::Present(unsigned present_interval)
 {
-	return SUCCEEDED(SwapChain->Present(present_interval, 0));
+	if (!Tearing) {
+		LastPresentResult = SwapChain->Present(present_interval, 0);
+		return SUCCEEDED(LastPresentResult);
+	}
+
+	// A flip model Present unbinds the back buffer from the output merger.  The backend keeps its
+	// own record of what is bound and sends only the difference, so whatever was bound goes back
+	// on, and the next frame's first draw lands where the backend thinks it does.
+	ID3D11RenderTargetView * targets[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = { NULL };
+	ID3D11DepthStencilView * depth = NULL;
+	Context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, targets, &depth);
+
+	// Tearing is only allowed with a sync interval of 0; vsync on is an ordinary flip.
+	const HRESULT result = SwapChain->Present(present_interval,
+		present_interval == 0 ? DXGI_PRESENT_ALLOW_TEARING : 0);
+
+	Context->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, targets, depth);
+	for (unsigned index = 0; index < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT; ++index) {
+		if (targets[index] != NULL) {
+			targets[index]->Release();
+		}
+	}
+	if (depth != NULL) {
+		depth->Release();
+	}
+	LastPresentResult = result;
+	return SUCCEEDED(result);
 }
 
 HRESULT DX11DeviceClass::Device_Removed_Reason() const

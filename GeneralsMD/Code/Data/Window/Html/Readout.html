@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<!--
+  The command bar's two figures that move while the rest of it stands still: the match clock on the
+  top page and a lone unit's health beside his portrait.  Drawn over Window/Html/ControlBar.html
+  right after it.  A page is laid out again from its text every time any value in it changes, and
+  inside the bar's page the clock did that every second and a fight with every hit, fifteen
+  milliseconds a time; this page is a handful of boxes.  Net.html is the same for the corner box.
+
+  The game fills in, every frame the bar's page draws (InGameUI::drawReadoutPage), with the bar's
+  page's own values:
+    {{clock.x}} .y .w .h   the clock's well, {{clock.shown}} "hidden" while the top page is down,
+                           and {{clock}} the match time, m:ss
+    {{peace.x}} .y .w .h   the peace time's well under the money's while the truce runs,
+                           {{peace.shown}} "hidden" otherwise; {{peace.label}} "PEACE" and
+                           {{peace.time}} m:ss, empty for the last ten seconds, which the game
+                           counts out under the plate
+    {{selinfo.x}} .y .w .h the column beside a lone unit's portrait, {{selinfo.shown}} the same;
+                           {{sel.health}} "820/1000", {{sel.healthw}} the bar's lit length out of
+                           selinfo.w, {{sel.healthstate}} "green", "yellow" or "red", and
+                           {{sel.healthshown}} "hidden" for an enemy in disguise
+  In the page's pixels, laid out at ControlBarHudScale() as the bar's page is.
+
+  Edit the copy under Run/Window/Html and the next match reads it.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Command bar readout</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { background-color: #3b4a36; font-size: 8px; color: #dfe5ea; }
+  .hidden { display: none; }
+  .piece { position: absolute; }
+
+  /* the match clock, the largest figure on the top page, in the middle of its well */
+  .clock { text-align: center; font-size: 16px; font-weight: bold; color: #f1f4f6; }
+
+  /* the peace time in the truce's own red, the word and the time on one line in the middle of its
+     well */
+  .peace { text-align: center; font-size: 11px; font-weight: bold; color: #ff3030; white-space: nowrap; }
+
+  /* the health over ControlBar.html's groove, which stands at the same place */
+  .fill { position: absolute; left: 0; top: 40px; height: 8px; background-color: #3fbf3f; }
+  .fill.yellow { background-color: #e8c83a; }
+  .fill.red { background-color: #d8402a; }
+  .figure { position: absolute; left: 0; top: 52px; height: 10px; line-height: 10px; color: #c9d2d9; }
+</style>
+</head>
+<body>
+<div class="piece clock {{clock.shown}}" style="left: {{clock.x}}px; top: {{clock.y}}px; width: {{clock.w}}px; height: {{clock.h}}px; line-height: {{clock.h}}px">{{clock}}</div>
+<div class="piece peace {{peace.shown}}" style="left: {{peace.x}}px; top: {{peace.y}}px; width: {{peace.w}}px; height: {{peace.h}}px; line-height: {{peace.h}}px">{{peace.label}} {{peace.time}}</div>
+<div class="piece {{selinfo.shown}}" style="left: {{selinfo.x}}px; top: {{selinfo.y}}px; width: {{selinfo.w}}px; height: {{selinfo.h}}px">
+  <div class="{{sel.healthshown}}">
+    <div class="fill {{sel.healthstate}}" style="width: {{sel.healthw}}px"></div>
+    <div class="figure" style="width: {{selinfo.w}}px">{{sel.health}}</div>
+  </div>
+</div>
+</body>
+</html>

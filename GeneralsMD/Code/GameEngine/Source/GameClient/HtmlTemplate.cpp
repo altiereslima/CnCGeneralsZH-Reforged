@@ -69,28 +69,41 @@ std::string trimmed( const std::string &text )
 	return text.substr( first, last - first );
 }
 
-std::string valueOf( const std::string &name, const HtmlValues *entry, const HtmlValues &values, const HtmlLookup &lookup )
+void appendEscaped( std::string &out, const std::string &text )
 {
-	if( entry )
+	for( size_t index = 0; index < text.size(); index++ )
 	{
-		HtmlValues::const_iterator found = entry->find( name );
-		if( found != entry->end() )
-			return found->second;
+		switch( text[ index ] )
+		{
+			case '&':		out += "&amp;"; break;
+			case '<':		out += "&lt;"; break;
+			case '>':		out += "&gt;"; break;
+			case '"':		out += "&quot;"; break;
+			case '\'':	out += "&#39;"; break;
+			default:		out += text[ index ]; break;
+		}
 	}
-
-	HtmlValues::const_iterator found = values.find( name );
-	if( found != values.end() )
-		return found->second;
-
-	std::string looked;
-	if( lookup && lookup( name, looked ) )
-		return looked;
-	return std::string();
 }
 
-std::string filled( const std::string &text, const HtmlValues *entry, const HtmlValues &values, const HtmlLookup &lookup )
+/** A stretch of page: literal text, or the trimmed name inside one {{name}}. */
+struct Piece
 {
-	std::string out;
+	std::string text;
+	Bool name;
+};
+typedef std::vector< Piece > Pieces;
+
+/** Page text written once, or a data-each element written once per entry of `list`. */
+struct Block
+{
+	Pieces pieces;
+	std::string list;
+	Bool each;
+};
+typedef std::vector< Block > Blocks;
+
+void split( const std::string &text, Pieces &pieces )
+{
 	size_t at = 0;
 	for( ;; )
 	{
@@ -98,14 +111,49 @@ std::string filled( const std::string &text, const HtmlValues *entry, const Html
 		const size_t close = open == std::string::npos ? std::string::npos : text.find( CLOSE_BRACES, open + OPEN_BRACES.size() );
 		if( close == std::string::npos )
 		{
-			out.append( text, at, std::string::npos );
-			return out;
+			if( at < text.size() )
+				pieces.push_back( Piece{ text.substr( at ), FALSE } );
+			return;
 		}
 
-		out.append( text, at, open - at );
-		const std::string name = trimmed( text.substr( open + OPEN_BRACES.size(), close - open - OPEN_BRACES.size() ) );
-		out += HtmlTemplate_escape( valueOf( name, entry, values, lookup ) );
+		if( open > at )
+			pieces.push_back( Piece{ text.substr( at, open - at ), FALSE } );
+		pieces.push_back( Piece{ trimmed( text.substr( open + OPEN_BRACES.size(), close - open - OPEN_BRACES.size() ) ), TRUE } );
 		at = close + CLOSE_BRACES.size();
+	}
+}
+
+void fill( std::string &out, const Pieces &pieces, const HtmlValues *entry, const HtmlValues &values,
+					 const HtmlLookup &lookup, std::string &looked )
+{
+	for( Pieces::const_iterator piece = pieces.begin(); piece != pieces.end(); ++piece )
+	{
+		if( !piece->name )
+		{
+			out += piece->text;
+			continue;
+		}
+
+		if( entry )
+		{
+			HtmlValues::const_iterator found = entry->find( piece->text );
+			if( found != entry->end() )
+			{
+				appendEscaped( out, found->second );
+				continue;
+			}
+		}
+
+		HtmlValues::const_iterator found = values.find( piece->text );
+		if( found != values.end() )
+		{
+			appendEscaped( out, found->second );
+			continue;
+		}
+
+		looked.clear();
+		if( lookup && lookup( piece->text, looked ) )
+			appendEscaped( out, looked );
 	}
 }
 
@@ -134,34 +182,12 @@ size_t elementEnd( const std::string &lower, size_t open, const std::string &tag
 	return lower.size();
 }
 
-}	// namespace
-
-//-------------------------------------------------------------------------------------------------
-std::string HtmlTemplate_escape( const std::string &text )
-{
-	std::string escaped;
-	for( size_t index = 0; index < text.size(); index++ )
-	{
-		switch( text[ index ] )
-		{
-			case '&':		escaped += "&amp;"; break;
-			case '<':		escaped += "&lt;"; break;
-			case '>':		escaped += "&gt;"; break;
-			case '"':		escaped += "&quot;"; break;
-			case '\'':	escaped += "&#39;"; break;
-			default:		escaped += text[ index ]; break;
-		}
-	}
-	return escaped;
-}
-
-//-------------------------------------------------------------------------------------------------
-std::string HtmlTemplate_expand( const std::string &written, const HtmlValues &values,
-																 const HtmlLists &lists, const HtmlLookup &lookup )
+/** The page cut into blocks once: everything but filling in the values, which is all that changes
+	* from one frame to the next. */
+void compile( const std::string &written, Blocks &blocks )
 {
 	const std::string page = withoutComments( written );
 	const std::string lower = lowered( page );
-	std::string out;
 	size_t at = 0;
 	for( ;; )
 	{
@@ -169,8 +195,9 @@ std::string HtmlTemplate_expand( const std::string &written, const HtmlValues &v
 		const size_t open = attribute == std::string::npos ? std::string::npos : lower.rfind( '<', attribute );
 		if( open == std::string::npos || open < at )
 		{
-			out += filled( page.substr( at ), NULL, values, lookup );
-			return out;
+			blocks.push_back( Block{ Pieces(), std::string(), FALSE } );
+			split( page.substr( at ), blocks.back().pieces );
+			return;
 		}
 
 		size_t nameAt = attribute + EACH_ATTRIBUTE.size();
@@ -181,7 +208,6 @@ std::string HtmlTemplate_expand( const std::string &written, const HtmlValues &v
 		size_t nameEnd = nameAt;
 		while( nameEnd < page.size() && ( quoted ? page[ nameEnd ] != quote : strchr( " \t\r\n>", page[ nameEnd ] ) == NULL ) )
 			nameEnd++;
-		const std::string listName = page.substr( nameAt, nameEnd - nameAt );
 
 		size_t tagEnd = open + 1;
 		while( tagEnd < lower.size() && isalnum( (unsigned char)lower[ tagEnd ] ) )
@@ -189,16 +215,58 @@ std::string HtmlTemplate_expand( const std::string &written, const HtmlValues &v
 		const std::string tag = lower.substr( open + 1, tagEnd - open - 1 );
 		const size_t end = elementEnd( lower, open, tag );
 
-		out += filled( page.substr( at, open - at ), NULL, values, lookup );
+		blocks.push_back( Block{ Pieces(), std::string(), FALSE } );
+		split( page.substr( at, open - at ), blocks.back().pieces );
 
-		const std::string element = page.substr( open, end - open );
-		HtmlLists::const_iterator list = lists.find( listName );
-		if( list != lists.end() )
-			for( size_t entry = 0; entry < list->second.size(); entry++ )
-				out += filled( element, &list->second[ entry ], values, lookup );
+		blocks.push_back( Block{ Pieces(), page.substr( nameAt, nameEnd - nameAt ), TRUE } );
+		split( page.substr( open, end - open ), blocks.back().pieces );
 
 		at = end;
 	}
+}
+
+}	// namespace
+
+//-------------------------------------------------------------------------------------------------
+std::string HtmlTemplate_escape( const std::string &text )
+{
+	std::string escaped;
+	appendEscaped( escaped, text );
+	return escaped;
+}
+
+//-------------------------------------------------------------------------------------------------
+std::string HtmlTemplate_expand( const std::string &written, const HtmlValues &values,
+																 const HtmlLists &lists, const HtmlLookup &lookup )
+{
+	// the command bar's page alone is 38 KB and was lowercased and searched four times a frame;
+	// keyed by its text, so a page that changes is cut again rather than served stale.
+	// ponytail: never evicted; the game has a dozen fixed pages, add a bound if pages become generated
+	static std::map< std::string, Blocks > compiled;
+	std::map< std::string, Blocks >::iterator found = compiled.find( written );
+	if( found == compiled.end() )
+	{
+		found = compiled.insert( std::make_pair( written, Blocks() ) ).first;
+		compile( written, found->second );
+	}
+
+	std::string out;
+	out.reserve( written.size() );
+	std::string looked;
+	for( Blocks::const_iterator block = found->second.begin(); block != found->second.end(); ++block )
+	{
+		if( !block->each )
+		{
+			fill( out, block->pieces, NULL, values, lookup, looked );
+			continue;
+		}
+
+		HtmlLists::const_iterator list = lists.find( block->list );
+		if( list != lists.end() )
+			for( size_t entry = 0; entry < list->second.size(); entry++ )
+				fill( out, block->pieces, &list->second[ entry ], values, lookup, looked );
+	}
+	return out;
 }
 
 //-------------------------------------------------------------------------------------------------

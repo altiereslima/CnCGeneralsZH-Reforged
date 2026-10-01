@@ -40,6 +40,7 @@
 #include "GameLogic/PartitionManager.h"
 #include "GameClient/Display.h"
 #include "GameClient/GameText.h"
+#include "GameClient/GameWindowManager.h"	// for what the pointer is over, at the screen's edges
 #include "GameClient/Mouse.h"
 #include "GameClient/Shell.h"
 #include "GameClient/GameClient.h"
@@ -68,14 +69,68 @@ static Bool scrollDir[4] = { false, false, false, false };
 
 Int SCROLL_AMT = 100;
 
+// The last pixels of the screen, where the edge scroll has always run at full speed.
 static const Int edgeScrollSize = 3;
 
-static Bool isAtScreenEdge( const ICoord2D& pos )
+// One wheel notch with Ctrl held counts as this many.  The band from the closest zoom to the
+// farthest is about fifteen notches, so three of these cross it.
+static const Real CTRL_WHEEL_ZOOM_NOTCHES = 5.0f;
+
+//-----------------------------------------------------------------------------
+Int EdgeScroll_bandForHeight( Int displayHeight )
+{
+	const Int band = displayHeight * 3 / 100;	// 32 pixels at 1080, 43 at 1440
+	return band > edgeScrollSize ? band : edgeScrollSize;
+}
+
+//-----------------------------------------------------------------------------
+Real EdgeScroll_strength( Int distanceFromEdge, Int band )
+{
+	if (distanceFromEdge >= band)
+		return 0.0f;
+	if (distanceFromEdge < edgeScrollSize)
+		return 1.0f;
+	return (Real)(band - distanceFromEdge) / (Real)(band - edgeScrollSize);
+}
+
+//-----------------------------------------------------------------------------
+/** The command bar, the minimap and every other window that draws stand on the screen's edges.
+	* The same walk pickDrawable makes: a window under the pointer counts unless it and everything
+	* it sits in is see-through. */
+static Bool isOverWindow( const ICoord2D& pos )
+{
+	GameWindow *window = NULL;
+	if (TheWindowManager)
+		window = TheWindowManager->getWindowUnderCursor( pos.x, pos.y );
+
+	for( ; window; window = window->winGetParent() )
+		if (!BitTest( window->winGetStatus(), WIN_STATUS_SEE_THRU ))
+			return TRUE;
+
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
+/** How hard the screen's edges pull the view with the pointer here: -1..1 on each axis, and zero
+	* on both when the pointer is not in the band at all.  Over a window only the last three pixels
+	* count, as they always did, so reaching for a button on the command bar neither moves the map
+	* nor turns the pointer into a scroll arrow. */
+static Coord2D edgeScrollPull( const ICoord2D& pos )
 {
 	const Int width  = (Int)TheDisplay->getWidth();
 	const Int height = (Int)TheDisplay->getHeight();
-	return pos.x < edgeScrollSize || pos.y < edgeScrollSize
-			|| pos.x >= width - edgeScrollSize || pos.y >= height - edgeScrollSize;
+	const Int band = isOverWindow( pos ) ? edgeScrollSize : EdgeScroll_bandForHeight( height );
+
+	Coord2D pull;
+	pull.x = EdgeScroll_strength( width - 1 - pos.x, band ) - EdgeScroll_strength( pos.x, band );
+	pull.y = EdgeScroll_strength( height - 1 - pos.y, band ) - EdgeScroll_strength( pos.y, band );
+	return pull;
+}
+
+static Bool isAtScreenEdge( const ICoord2D& pos )
+{
+	const Coord2D pull = edgeScrollPull( pos );
+	return pull.x != 0.0f || pull.y != 0.0f;
 }
 
 static Mouse::MouseCursor prevCursor = Mouse::ARROW;
@@ -446,6 +501,12 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			if (TheGlobalData->m_zoomToCursor && TheInGameUI->getInputEnabled())
 				TheTacticalView->anchorZoomAt( &msg->getArgument( 0 )->pixel );
 
+			// Ctrl+wheel with nothing to place crosses the zoom range in three notches instead of
+			// fifteen.  Ctrl and not Shift: Shift is what lays a row of structures, and the wheel
+			// under it sets that row's gap (PlaceEventTranslator).
+			if (TheKeyboard->isCtrl() && TheInGameUI->getPendingPlaceType() == NULL)
+				spin *= CTRL_WHEEL_ZOOM_NOTCHES;
+
 			if (spin > 0.0f)
 				TheTacticalView->zoomIn( spin );
 			else if (spin < 0.0f)
@@ -539,24 +600,11 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 					break;
 				case SCROLL_SCREENEDGE:
 					{
-						UnsignedInt height = TheDisplay->getHeight();
-						UnsignedInt width  = TheDisplay->getWidth();
-						if (m_currentPos.y < edgeScrollSize)
-						{
-							offset.y -= TheGlobalData->m_verticalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor;
-						}
-						if (m_currentPos.y >= height-edgeScrollSize)
-						{
-							offset.y += TheGlobalData->m_verticalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor;
-						}
-						if (m_currentPos.x < edgeScrollSize)
-						{
-							offset.x -= TheGlobalData->m_horizontalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor;
-						}
-						if (m_currentPos.x >= width-edgeScrollSize)
-						{
-							offset.x += TheGlobalData->m_horizontalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor;
-						}
+						// The speed the last three pixels always gave, scaled by how deep into the band
+						// the pointer is: barely moving where it enters, all of it at the edge itself.
+						const Coord2D pull = edgeScrollPull( m_currentPos );
+						offset.x = TheGlobalData->m_horizontalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor * pull.x;
+						offset.y = TheGlobalData->m_verticalScrollSpeedFactor * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor * pull.y;
 					}
 					break;
 				}

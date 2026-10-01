@@ -46,7 +46,9 @@
 #include "thread.h"
 #include "wwmemlog.h"
 
-#define DEFAULT_IB_SIZE 5000
+// Made full size once, for the reason DEFAULT_VB_SIZE in dx8vertexbuffer.cpp gives: each time the
+// buffer fills, the next lock is a DISCARD the Direct3D 11 driver has to rename.
+#define DEFAULT_IB_SIZE 65535
 
 static bool _DynamicSortingIndexArrayInUse=false;
 static SortingIndexBufferClass* _DynamicSortingIndexArray;

@@ -240,6 +240,7 @@ GameLogic::GameLogic( void )
 	m_proRules = FALSE;
 	m_incomeSharing = INCOME_SHARING_OFF;
 	m_techRespawnDelay = 0;
+	m_supplyPileLimit = 0;
 	m_gamePaused = FALSE;
 	m_inputEnabledMemory = TRUE;
 	m_mouseVisibleMemory = TRUE;
@@ -1255,6 +1256,7 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
                   ? (UnsignedInt)UnitLimitPerPlayer( TheGameInfo->getNumNonObserverPlayers() ) : 0;
       m_incomeSharing = TheGameInfo->getIncomeSharing();
       m_techRespawnDelay = TheGameInfo->getTechRespawn() * 60 * LOGICFRAMES_PER_SECOND;
+      m_supplyPileLimit = TheGameInfo->getSupplyPileLimit();
     }
     else
     {
@@ -1264,6 +1266,7 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
       m_unitCap = 0;
       m_incomeSharing = INCOME_SHARING_OFF;
       m_techRespawnDelay = 0;
+      m_supplyPileLimit = 0;
     }
 
     /* Pro Rules hold in the modes people play each other in, when the lobby's check box is ticked,
@@ -4215,6 +4218,9 @@ static Bool hasEnemyInSight( Object *obj )
 	 off it wins over one that cannot, however far back it is standing, because the upgrade is worth
 	 more than the walk; failing that the nearest unit takes the cash.
 
+	 Only a computer player's units are sent.  A human's units stay where the human put them and
+	 pick salvage up when the human drives them over it.
+
 	 How it is sent depends on what it was doing.  An idle unit is ordered to the crate and then walks
 	 back to the spot it left - idle is not the same as free, which is what the first version of this
 	 got wrong.  A line of infantry dug in across a road is idle, every one of them, and a fight in
@@ -4275,6 +4281,9 @@ static void salvageCrateTick( void )
 
 			const Player *owner = them->getControllingPlayer();
 			if( owner == NULL || crate->getShroudedStatus( owner->getPlayerIndex() ) >= OBJECTSHROUD_FOGGED )
+				continue;
+			// a human's units go where the human sends them; only the computer's are sent for salvage
+			if( owner->getPlayerType() != PLAYER_COMPUTER )
 				continue;
 
 			const Bool upgrades = wantsSalvageUpgrade( them );
@@ -5726,13 +5735,14 @@ void GameLogic::prepareLogicForObjectLoad( void )
 	* 14: xfer m_proRules
 	* 15: xfer m_incomeSharing
 	* 16: xfer m_techRespawnDelay and m_pendingTechBuildings
+	* 17: xfer m_supplyPileLimit
 	*/
 // ------------------------------------------------------------------------------------------------
 void GameLogic::xfer( Xfer *xfer )
 {
 
 	// version
-	const XferVersion currentVersion = 16;
+	const XferVersion currentVersion = 17;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -6146,6 +6156,15 @@ void GameLogic::xfer( Xfer *xfer )
   {
     m_techRespawnDelay = 0;
     m_pendingTechBuildings.clear();
+  }
+
+  if ( version >= 17 )
+  {
+    xfer->xferInt( &m_supplyPileLimit );
+  }
+  else if ( xfer->getXferMode() == XFER_LOAD )
+  {
+    m_supplyPileLimit = 0;
   }
 }  // end xfer
 

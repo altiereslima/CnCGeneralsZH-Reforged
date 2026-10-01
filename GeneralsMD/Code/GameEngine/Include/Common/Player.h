@@ -137,10 +137,12 @@ static const char *ScienceAvailabilityNames[] =
 // SUPERWEAPONS_ constants in GameNetwork/GUIUtil.h - and this says what it leaves one player: no cap
 // at all, no superweapon at all, or a number of each type he may have standing.  It takes the
 // player template's name because the rule has one exception, the USA Superweapon General, and
-// because a name is what a test can hand it.
+// because a name is what a test can hand it.  buildingName is the superweapon's own template: the
+// nuclear silo is the one No leaves standing, one per player, for the upgrades it sells.
 //
 enum { SUPERWEAPON_CAP_BANNED = -1, SUPERWEAPON_CAP_UNLIMITED = 0 };
-Int SuperweaponBuildCap( Int restriction, const AsciiString &playerTemplateName );
+Int SuperweaponBuildCap( Int restriction, const AsciiString &playerTemplateName,
+                         const AsciiString &buildingName = AsciiString::TheEmptyString );
 
 // The lobby's unit limit is this many units for the whole match, shared out evenly between the
 // players who are not watching.  UnitLimitPerPlayer is one player's share.
@@ -171,8 +173,15 @@ enum { PRO_RULES_CARPET_BOMB_RANK = 3 };
 Bool ProRulesBanUpgrade( const AsciiString &upgradeName );
 // rules 2 and 15, for a player of this rank
 Bool ProRulesBanSpecialPower( SpecialPowerType specialPowerType, Int rankLevel );
-// the one above asked about the match being played, and about the player's own rank
+// the one above asked about the match being played, and about the player's own rank; it also
+// refuses a missile SuperweaponMissileSilencedInMatch silences
 Bool ProRulesRefuseSpecialPower( const Player *player, SpecialPowerType specialPowerType );
+
+// The silo's missile under Pro Rules or under the lobby's No Superweapons: the silo stands for its
+// upgrades and the missile never fires, so nothing shows it as a superweapon - no countdown, no EVA,
+// no fire button, no shortcut.  Both read game setup only, the same on every machine.
+Bool SuperweaponMissileSilenced( SpecialPowerType specialPowerType, Bool proRules, Int superweaponRestriction );
+Bool SuperweaponMissileSilencedInMatch( SpecialPowerType specialPowerType );
 
 // Rule 9: no foundation this close to an enemy building, edge to edge.  The same 300 world units
 // the derrick cluster rules measure with, which is also more than a Patriot or a Stinger Site

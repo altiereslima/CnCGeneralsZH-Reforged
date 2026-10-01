@@ -125,6 +125,7 @@ static NameKeyType checkBoxUnitLimitID = NAMEKEY_INVALID;
 static NameKeyType checkBoxProRulesID = NAMEKEY_INVALID;
 static NameKeyType comboBoxIncomeSharingID = NAMEKEY_INVALID;
 static NameKeyType comboBoxTechRespawnID = NAMEKEY_INVALID;
+static NameKeyType comboBoxSupplyPileLimitID = NAMEKEY_INVALID;
 static NameKeyType windowMapID = NAMEKEY_INVALID;
 // Window Pointers ------------------------------------------------------------------------
 static GameWindow *parentLanGameOptions = NULL;
@@ -141,6 +142,7 @@ static GameWindow *checkBoxUnitLimit = NULL;
 static GameWindow *checkBoxProRules = NULL;
 static GameWindow *comboBoxIncomeSharing = NULL;
 static GameWindow *comboBoxTechRespawn = NULL;
+static GameWindow *comboBoxSupplyPileLimit = NULL;
 static GameWindow *windowMap = NULL;
 
 static GameWindow *comboBoxPlayer[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
@@ -426,7 +428,7 @@ void LANDisableButtons()
 	comboBoxStartingCash->winEnable(false);
 
 	GameWindow *optionalGadgets[] = { comboBoxSuperweapons, comboBoxPeaceTime, checkBoxUnitLimit,
-		checkBoxProRules, comboBoxIncomeSharing, comboBoxTechRespawn };
+		checkBoxProRules, comboBoxIncomeSharing, comboBoxTechRespawn, comboBoxSupplyPileLimit };
 	for (Int i = 0; i < (Int)ARRAY_SIZE(optionalGadgets); ++i)
 	{
 		if (optionalGadgets[i])
@@ -733,6 +735,24 @@ static void handleTechRespawnSelection()
   }
 }
 
+static void handleSupplyPileLimitSelection()
+{
+  LANGameInfo *myGame = TheLAN->GetMyGame();
+
+  // the same guard as income sharing above
+  if (myGame == NULL || comboBoxSupplyPileLimit == NULL || myGame->getSupplyPileLimit() == SupplyPileLimitFromComboBox( comboBoxSupplyPileLimit ))
+    return;
+
+  myGame->setSupplyPileLimit( SupplyPileLimitFromComboBox( comboBoxSupplyPileLimit ) );
+  myGame->resetAccepted();
+
+  if (myGame->amIHost() && !s_isIniting)
+  {
+    TheLAN->RequestGameOptions(GenerateGameOptionsString(), true);
+    lanUpdateSlotList(); // Update the accepted button UI
+  }
+}
+
 static void handleProRulesSelection()
 {
   LANGameInfo *myGame = TheLAN->GetMyGame();
@@ -821,6 +841,7 @@ void InitLanGameGadgets( void )
   checkBoxProRulesID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:CheckBoxProRules" ) );
   comboBoxIncomeSharingID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:ComboBoxIncomeSharing" ) );
   comboBoxTechRespawnID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:ComboBoxTechRespawn" ) );
+  comboBoxSupplyPileLimitID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:ComboBoxSupplyPileLimit" ) );
 	windowMapID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:MapWindow" ) );
 
 	// Initialize the pointers to our gadgets
@@ -871,6 +892,10 @@ void InitLanGameGadgets( void )
   DEBUG_ASSERTCRASH(comboBoxTechRespawn, ("Could not find the comboBoxTechRespawn"));
 	if (comboBoxTechRespawn)
 		PopulateTechRespawnComboBox(comboBoxTechRespawn, TheLAN->GetMyGame(), TheLAN->AmIHost());
+  comboBoxSupplyPileLimit = TheWindowManager->winGetWindowFromId( parentLanGameOptions, comboBoxSupplyPileLimitID );
+  DEBUG_ASSERTCRASH(comboBoxSupplyPileLimit, ("Could not find the comboBoxSupplyPileLimit"));
+	if (comboBoxSupplyPileLimit)
+		PopulateSupplyPileLimitComboBox(comboBoxSupplyPileLimit, TheLAN->GetMyGame(), TheLAN->AmIHost());
 
 	windowMap = TheWindowManager->winGetWindowFromId( parentLanGameOptions,windowMapID  );
 	DEBUG_ASSERTCRASH(windowMap, ("Could not find the LanGameOptionsMenu.wnd:MapWindow" ));
@@ -977,6 +1002,7 @@ void DeinitLanGameGadgets( void )
   checkBoxProRules = NULL;
   comboBoxIncomeSharing = NULL;
   comboBoxTechRespawn = NULL;
+  comboBoxSupplyPileLimit = NULL;
 	windowMap = NULL;
 	for (Int i = 0; i < MAX_SLOTS; i++)
 	{
@@ -1036,6 +1062,7 @@ void LanGameOptionsMenuInit( WindowLayout *layout, void *userData )
     game->setProRules( pref.getInt( "ProRules", 1 ) != 0 );
     game->setIncomeSharing( pref.getInt( "IncomeSharing", INCOME_SHARING_OFF ) );
     game->setTechRespawn( pref.getInt( "TechRespawn", 0 ) );
+    game->setSupplyPileLimit( pref.getInt( "SupplyPileLimit", 0 ) );
 		AsciiString lowerMap = pref.getPreferredMap();
 		lowerMap.toLower();
 		std::map<AsciiString, MapMetaData>::iterator it = TheMapCache->find(lowerMap);
@@ -1167,6 +1194,8 @@ void updateGameOptions( void )
 			UpdateIncomeSharingComboBox( comboBoxIncomeSharing, theGame, TheLAN->AmIHost() );
 		if (comboBoxTechRespawn)
 			UpdateTechRespawnComboBox( comboBoxTechRespawn, theGame, TheLAN->AmIHost() );
+		if (comboBoxSupplyPileLimit)
+			UpdateSupplyPileLimitComboBox( comboBoxSupplyPileLimit, theGame, TheLAN->AmIHost() );
 	}
 }
 
@@ -1340,6 +1369,10 @@ WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt m
         else if ( controlID == comboBoxTechRespawnID )
         {
           handleTechRespawnSelection();
+        }
+        else if ( controlID == comboBoxSupplyPileLimitID )
+        {
+          handleSupplyPileLimitSelection();
         }
         else
         {

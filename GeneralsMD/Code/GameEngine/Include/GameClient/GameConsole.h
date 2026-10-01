@@ -31,10 +31,12 @@
 #include "Common/UnicodeString.h"
 
 #include <deque>
+#include <string>
 #include <vector>
 
 class DisplayString;
 class GameFont;
+class HtmlOverlay;
 
 /**
  * The console's own scrollback, input line and command table.  One global, TheGameConsole,
@@ -61,11 +63,18 @@ public:
 	/// Draw the panel.  Called from the display's 2D overlay pass.
 	void render( void );
 
+	/// The cheat panel, Window/Html/Cheats.html, that "trainer" opens: every cheat a click away.
+	Bool isCheatPanelOpen( void ) const { return m_cheatPanelOpen; }
+	void closeCheatPanel( void ) { m_cheatPanelOpen = FALSE; }
+	/// TRUE when the pointer is on the panel; with `act`, a click there runs what it was on.
+	Bool handleCheatPanelMouse( const ICoord2D &mouse, Bool act );
+
 private:
 
 	void submitInputLine( void );
 	void runCommand( AsciiString commandLine );
 	void recallHistory( Int direction );
+	void renderCheatPanel( void );
 
 	typedef std::deque<UnicodeString> ScrollbackLines;
 	typedef std::vector<AsciiString> CommandHistory;
@@ -79,6 +88,12 @@ private:
 	GameFont *m_font;
 	DisplayString **m_lineStrings;	///< one per drawable row, reused every frame
 	Int m_lineStringCount;
+
+	Bool m_cheatPanelOpen;
+	Bool m_cheatPanelShown;				///< drawn this frame, so its clicks are real
+	Bool m_cheatPanelLogged;			///< its keys' places written to the log once for each opening
+	std::string m_cheatPage;			///< Window/Html/Cheats.html as read, empty until the first opening
+	HtmlOverlay *m_cheatOverlay;
 };
 
 extern GameConsole *TheGameConsole;

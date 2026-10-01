@@ -86,4 +86,16 @@ private:
 
 extern LookAtTranslator *TheLookAtTranslator;
 
+// EDGE SCROLL ////////////////////////////////////////////////////////////////////////////////////
+// The map scrolls while the pointer is in a band along the screen's edges, faster the deeper in
+// it goes.  Free functions so the arithmetic can be tested without a display.
+
+/** How many pixels in from each edge the band reaches on a display this tall: three percent of
+	* the height, and never less than the three pixels the game shipped with. */
+extern Int EdgeScroll_bandForHeight( Int displayHeight );
+
+/** The share of the full scroll speed at this many pixels from an edge: nothing outside the band,
+	* all of it on the last three pixels, a straight ramp between. */
+extern Real EdgeScroll_strength( Int distanceFromEdge, Int band );
+
 #endif

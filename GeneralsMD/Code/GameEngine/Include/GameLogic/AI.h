@@ -146,8 +146,8 @@ public:
 //-------------------------------------------------------------------------------------------------
 enum AISkillLevel
 {
-	AISKILL_EASY = 0,			///< slow and brave: looks around, but reacts far too late
-	AISKILL_MEDIUM,				///< + unit retreat, closest-target focus, expands on its own
+	AISKILL_EASY = 0,			///< slow and brave: looks around, answers late, never retreats or counters
+	AISKILL_MEDIUM,				///< half a counter, spends past 6000, unit retreat, expands on its own
 	AISKILL_BRUTAL,				///< the baseline: counters what you field, masses, no reaction delay
 
 	AISKILL_COUNT
@@ -296,6 +296,22 @@ Real aiRetreatRatio( Real myHealth, Real myPower, Real enemyHealth, Real enemyPo
 Bool aiShouldMass( Real waitingThreat, Real enemyVisibleThreat, Real massFraction,
 									 Bool timeExpired, Bool baseUnderAttack );
 
+/** Another factory of this kind.  finished are standing and done, constructing are already on the
+	* way, idle are finished factories with an empty queue, deepest is the longest queue among them.
+	*
+	* A queue-gated kind (tanks, infantry) gets another when every finished factory is busy and one of
+	* them has a unit waiting behind the one under construction, and a replacement when none are left.
+	* An unlimited kind (airfields, and the income buildings that follow the same rule) gets another
+	* whenever one is not already going up.  One already on the way is the building this would ask for. */
+Bool aiWantsAnotherFactory( Int finished, Int constructing, Int idle, Int deepest, Bool unlimited );
+
+/** How many copies of the faction tech building (strategy center, propaganda center, palace) to
+	* keep up so one of them blowing up does not take the tree with it. */
+static const Int AI_TECH_BUILDING_COPIES = 3;
+
+/** Another of those, when fewer than AI_TECH_BUILDING_COPIES are standing and none is already on the way. */
+Bool aiWantsAnotherTechBuilding( Int standing, Int onTheWay );
+
 /** How badly one place wants looking at, per step walked there.  A3's scouting is never a search -
 	* the start positions are public, the lobby shows them - so the question is not "where is he" but
 	* "whose picture is worth the walk", and the answer is the stalest one per unit of distance:
@@ -385,6 +401,34 @@ Int aiLeastDefendedLane( const Real *laneFirepower, Int laneCount, Int requested
 	* or the oldest has waited long enough.  The threshold is this AI's own force, never a fraction of
 	* the enemy's, because two AIs each waiting to outnumber the other never move. */
 Bool aiReleaseWave( Real heldPower, Real wavePower, UnsignedInt heldFrames, UnsignedInt maxHoldFrames );
+
+/** How hard a skirmish AI leans on its current enemy, from how it rates its chance against him.  In
+	* order, so a comparison reads as "at least this much". */
+enum AIPressure
+{
+	AIPRESSURE_DEFEND = 0,	///< outmatched: teams stay home until they are a bigger wave than usual
+	AIPRESSURE_NORMAL,			///< an even match, or an enemy nobody has looked at: the wave as it always was
+	AIPRESSURE_PRESS,				///< ahead: no waiting for a wave, teams go as they form
+	AIPRESSURE_FINISH,			///< he has next to no army left: the guards at home go too
+	AIPRESSURE_COUNT
+};
+
+/** The chance of winning the fight between the two armies, 0..1, from what each is worth in the
+	* build-cost currency the waves are counted in.  Both sides are given a couple of tanks they do not
+	* have, so one rifleman against nothing is not a rout. */
+Real aiWinChance( Real myPower, Real enemyPower );
+
+/** The level that chance asks for.  A level is left later than it is entered, so a chance sitting on
+	* a threshold does not change the orders every two seconds: a Hard AI watching an army walk in and
+	* out of its sight changed level six times in a minute on a chance between 0.58 and 0.66.  PRESS and
+	* FINISH are only entered with the enemy's base in view: an army that is merely out of sight is not
+	* an army that is gone. */
+AIPressure aiPressureLevel( Real chance, Bool enemyBaseInSight, AIPressure current );
+
+/** aiReleaseWave under pressure.  Ahead, whatever is parked goes.  Outmatched, the wave is twice the
+	* size, the wait twice as long, and what has waited that long still goes only if it is a wave: a
+	* trickle sent at an enemy who outnumbers it is a gift. */
+Bool aiReleaseWaveAt( AIPressure level, Real heldPower, Real wavePower, UnsignedInt heldFrames, UnsignedInt maxHoldFrames );
 
 class TAiData : public Snapshot
 {
@@ -1198,8 +1242,7 @@ public:
 	}
 	void groupAttackTeam( const Team *team, Int maxShotsToFire, CommandSourceType cmdSource );							///< attack the given team
 	void groupAttackPosition( const Coord3D *pos, Int maxShotsToFire, CommandSourceType cmdSource );						///< attack given spot
-	void groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire, CommandSourceType cmdSource, Bool matchSpeeds = TRUE );	///< Attack move to the location
-	Bool getMatchSpeeds( void ) const { return m_matchSpeeds; }		///< does the last attack move hold everyone to the slowest member?
+	void groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire, CommandSourceType cmdSource );	///< Attack move to the location
 	void groupHunt( CommandSourceType cmdSource );														///< begin "seek and destroy"
 	void groupRepair( Object *obj, CommandSourceType cmdSource );						///< repair the given object
 	void groupResumeConstruction( Object *obj, CommandSourceType cmdSource );	///< resume construction on the object
@@ -1307,7 +1350,6 @@ private:
 	UnsignedInt	m_memberListSize;	 					///< the size of the list of member Objects
 
 	Real m_speed;														///< maximum speed of group (slowest member)
-	Bool m_matchSpeeds;											///< last attack move asked for one shared speed (see groupAttackMoveToPosition)
 	Bool m_dirty;														///< "dirty bit" - if true then group speed, leader, needs recompute
 
 	UnsignedInt m_id;												///< the unique ID of this group

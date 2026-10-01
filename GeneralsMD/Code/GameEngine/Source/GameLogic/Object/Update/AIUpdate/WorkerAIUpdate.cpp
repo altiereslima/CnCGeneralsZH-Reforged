@@ -313,13 +313,17 @@ UpdateSleepTime WorkerAIUpdate::update( void )
 			Object *targetObject = TheGameLogic->findObjectByID( taskTarget );
 			Bool invalidTask = FALSE;
 
+			// as in DozerAIUpdate::update: a tunnel taken on the way to the job is left to finish, and
+			// neither check below is asked until the worker is back up
+			const Bool underground = getObject()->getContainedBy() != NULL && hasTunnelTrip();
+
 			// validate the task and the target
-			if( currentTask == DOZER_TASK_REPAIR &&
+			if( currentTask == DOZER_TASK_REPAIR && !underground &&
 					TheActionManager->canRepairObject( getObject(), targetObject, getLastCommandSource() ) == FALSE )
 				invalidTask = TRUE;
 
-			// as in DozerAIUpdate::update: no job is done from inside a tunnel, a transport or a garrison
-			if( getObject()->getContainedBy() )
+			// no job is done from inside a tunnel, a transport or a garrison
+			if( getObject()->getContainedBy() && !underground )
 				invalidTask = TRUE;
 
 			// cancel the task if it's now invalid
@@ -846,8 +850,22 @@ void WorkerAIUpdate::internalCancelTask( DozerTask task )
 	{
 		return;
 	}
+	// see DozerAIUpdate::internalCancelTask: a tunnel trip left pending would walk on to where the job was
+	const Bool onTunnelTrip = ai->hasTunnelTrip();
+	ai->endTunnelTrip();
+
+	//
+	// The move below does not stop a busy worker.  From the AI it is only laid over the state the
+	// worker is in (AIUpdateInterface::privateMoveToPosition), it ends at once, and that state picks
+	// up where it left off.  On a tunnel trip that state is the walk into the mouth: the worker went
+	// down with no trip and no job and stayed there.  So a trip is ended with a real idle, which is
+	// also what sends a worker already underground out of the far mouth (AIUpdateInterface::update).
+	//
 	/// @todo we really need a stop command instead of making it move to it's current location
-	ai->aiMoveToPosition( getObject()->getPosition(), CMD_FROM_AI );
+	if( onTunnelTrip || getObject()->getContainedBy() )
+		ai->aiIdle( CMD_FROM_AI );
+	else
+		ai->aiMoveToPosition( getObject()->getPosition(), CMD_FROM_AI );
 
 	// see DozerAIUpdate::internalCancelTask: the building stays an obstacle once the walk to it is off
 	if( ai->getIgnoredObstacleID() == cancelledTargetID )
@@ -1054,9 +1072,13 @@ void WorkerAIUpdate::aiDoCommand(const AICommandParms* parms)
 		case AICMD_REPAIR:
 		{
 
-			// if we have no task right now, go idle so we can immediately respond to this
+			// if we have no task right now, go idle so we can immediately respond to this, and drop a
+			// tunnel trip to the last order's goal or the idle worker walks there first
 			if( getCurrentTask() == DOZER_TASK_INVALID )
+			{
+				endTunnelTrip();
 				aiIdle( CMD_FROM_AI );
+			}
 
 			// do the repair
 			privateRepair(parms->m_obj, parms->m_cmdSource);
@@ -1070,7 +1092,10 @@ void WorkerAIUpdate::aiDoCommand(const AICommandParms* parms)
 
 			// if we have no task right now, go idle so we can immediately respond to this
 			if( getCurrentTask() == DOZER_TASK_INVALID )
+			{
+				endTunnelTrip();
 				aiIdle( CMD_FROM_AI );
+			}
 
 			// do the command
 			privateResumeConstruction( parms->m_obj, parms->m_cmdSource );

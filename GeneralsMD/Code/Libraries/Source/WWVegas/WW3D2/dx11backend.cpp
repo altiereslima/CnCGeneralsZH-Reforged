@@ -249,6 +249,13 @@ DX11BackendClass::DX11BackendClass()
 	VertexConstantsHeld = false;
 	PixelConstantsHeld = false;
 	EngineConstantsHeld = false;
+	ConstantsChanged = true;
+	PipelineChanged = true;
+	StateObjectsChanged = true;
+	for (unsigned sampler = 0; sampler < DX11_BACKEND_TEXTURE_STAGES; ++sampler) {
+		SamplerChanged[sampler] = true;
+	}
+	LastResolveHeld = false;
 	memset(StageStates, 0, sizeof(StageStates));
 	memset(Textures, 0, sizeof(Textures));
 	memset(EngineConstants, 0, sizeof(EngineConstants));
@@ -324,6 +331,7 @@ void DX11BackendClass::Release_Cached()
 	}
 	LastMemo = 0;
 	NextMemo = 0;
+	LastResolveHeld = false;
 	Forget_Last_State_Objects();
 
 	for (std::map<std::string, Pipeline>::iterator entry = Pipelines.begin();
@@ -334,19 +342,19 @@ void DX11BackendClass::Release_Cached()
 	}
 	Pipelines.clear();
 
-	for (std::map<std::string, ID3D11BlendState *>::iterator entry = BlendStates.begin();
+	for (BlendStateMap::iterator entry = BlendStates.begin();
 			entry != BlendStates.end(); ++entry) {
 		entry->second->Release();
 	}
 	BlendStates.clear();
 
-	for (std::map<std::string, ID3D11DepthStencilState *>::iterator entry
+	for (DepthStencilStateMap::iterator entry
 			= DepthStencilStates.begin(); entry != DepthStencilStates.end(); ++entry) {
 		entry->second->Release();
 	}
 	DepthStencilStates.clear();
 
-	for (std::map<std::string, ID3D11RasterizerState *>::iterator entry = RasterizerStates.begin();
+	for (RasterizerStateMap::iterator entry = RasterizerStates.begin();
 			entry != RasterizerStates.end(); ++entry) {
 		entry->second->Release();
 	}
@@ -362,7 +370,7 @@ void DX11BackendClass::Release_Cached()
 	CurrentTarget = NULL;
 	CurrentDepth = NULL;
 
-	for (std::map<std::string, ID3D11SamplerState *>::iterator entry = SamplerStates.begin();
+	for (SamplerStateMap::iterator entry = SamplerStates.begin();
 			entry != SamplerStates.end(); ++entry) {
 		entry->second->Release();
 	}
@@ -419,6 +427,7 @@ void DX11BackendClass::Shutdown()
 	ShadowMapSize = 0;
 	ShadowMapBound = false;
 	RenderStates.Set_Shadow_Caster_Pass(false);
+	Note_Shadow_State_Changed();
 	Device = NULL;
 }
 
@@ -491,6 +500,7 @@ bool DX11BackendClass::Begin_Shadow_Map(unsigned size)
 	ShadowMapSavedTarget = CurrentTarget;
 	ShadowMapBound = true;
 	RenderStates.Set_Shadow_Caster_Pass(true);
+	Note_Shadow_State_Changed();
 	Set_Viewport(0, 0, ShadowMapSize, ShadowMapSize);
 	Forget_Bindings();
 	return true;
@@ -504,6 +514,7 @@ void DX11BackendClass::End_Shadow_Map()
 
 	ShadowMapBound = false;
 	RenderStates.Set_Shadow_Caster_Pass(false);
+	Note_Shadow_State_Changed();
 	// What the sun was looking through, kept for the draws that will read the map.
 	multiply(View, Projection, SunViewProjection);
 	ShadowFromClipValid = false;
@@ -533,12 +544,14 @@ void DX11BackendClass::Set_Shadow_Parameters(float bias, float strength,
 	ShadowUnitsPerDepth = units_per_unit_of_depth;
 	ShadowSkyFill = sky_fill;
 	ShadowReceiving = true;
+	Note_Shadow_State_Changed();
 }
 
 void DX11BackendClass::Clear_Shadow_Parameters()
 {
 	ShadowReceiving = false;
 	ShadowFromClipValid = false;
+	Note_Shadow_State_Changed();
 }
 
 /** The inverse of a four by four, by cofactors.  Nothing else in the backend needed one: every
@@ -650,33 +663,50 @@ std::string DX11BackendClass::Shadow_Map_Report()
 
 void DX11BackendClass::Set_Render_State(D3DRENDERSTATETYPE state, DWORD value)
 {
-	RenderStates.Set_Render_State(state, value);
+	// The raw value, not Get_Render_State: that one answers for the caster pass while it runs.
+	if (RenderStates.Get_Stored_Render_State(state) != value) {
+		RenderStates.Set_Render_State(state, value);
+		ConstantsChanged = true;
+		PipelineChanged = true;
+		StateObjectsChanged = true;
+	}
 }
 
 void DX11BackendClass::Set_Texture_Stage_State(unsigned stage, D3DTEXTURESTAGESTATETYPE state,
 	DWORD value)
 {
-	if (stage < DX11_BACKEND_TEXTURE_STAGES && static_cast<unsigned>(state) < DX11_BACKEND_STAGE_STATES) {
+	if (stage < DX11_BACKEND_TEXTURE_STAGES && static_cast<unsigned>(state) < DX11_BACKEND_STAGE_STATES
+			&& StageStates[stage][state] != value) {
 		StageStates[stage][state] = value;
+		PipelineChanged = true;
 	}
 }
 
 void DX11BackendClass::Set_Sampler_State(unsigned sampler, D3DSAMPLERSTATETYPE state, DWORD value)
 {
-	if (sampler < DX11_BACKEND_TEXTURE_STAGES) {
+	if (sampler < DX11_BACKEND_TEXTURE_STAGES
+			&& Samplers[sampler].Get_Sampler_State(state) != value) {
 		Samplers[sampler].Set_Sampler_State(state, value);
+		SamplerChanged[sampler] = true;
 	}
 }
 
+// Only whether a stage has a texture reaches a description; which one is bound is read at bind time.
 void DX11BackendClass::Set_Texture(unsigned stage, ID3D11ShaderResourceView * texture)
 {
 	if (stage < DX11_BACKEND_TEXTURE_STAGES) {
+		if ((Textures[stage] == NULL) != (texture == NULL)) {
+			PipelineChanged = true;
+		}
 		Textures[stage] = texture;
 	}
 }
 
 void DX11BackendClass::Set_Normal_Map(ID3D11ShaderResourceView * normal_map)
 {
+	if ((NormalMap == NULL) != (normal_map == NULL)) {
+		PipelineChanged = true;
+	}
 	NormalMap = normal_map;
 }
 
@@ -701,17 +731,27 @@ bool DX11BackendClass::Terrain_Bumped() const
 void DX11BackendClass::Set_Terrain_Sun(const float direction[3])
 {
 	memcpy(TerrainSun, direction, sizeof(TerrainSun));
+	ConstantsChanged = true;
 }
 
 void DX11BackendClass::Set_Vertex_Format(DWORD fvf)
 {
-	VertexFormat = fvf;
+	if (VertexFormat != fvf) {
+		VertexFormat = fvf;
+		PipelineChanged = true;
+	}
 }
 
 void DX11BackendClass::Set_Pixel_Program(EngineShaderProgram program, bool bound,
 	const char * file_name)
 {
-	PixelProgram = bound ? program : ENGINE_SHADER_NONE;
+	// The wrapper clears both programs on every vertex buffer it applies, so only a different one
+	// counts.  A foreign shader is refused before Resolve and is no input to it.
+	const EngineShaderProgram resolved = bound ? program : ENGINE_SHADER_NONE;
+	if (PixelProgram != resolved) {
+		PipelineChanged = true;
+	}
+	PixelProgram = resolved;
 	ForeignPixelShader = bound && program == ENGINE_SHADER_NONE;
 	ForeignPixelName = ForeignPixelShader ? file_name : "";
 }
@@ -719,7 +759,11 @@ void DX11BackendClass::Set_Pixel_Program(EngineShaderProgram program, bool bound
 void DX11BackendClass::Set_Vertex_Program(EngineShaderProgram program, bool bound,
 	const char * file_name)
 {
-	VertexProgram = bound ? program : ENGINE_SHADER_NONE;
+	const EngineShaderProgram resolved = bound ? program : ENGINE_SHADER_NONE;
+	if (VertexProgram != resolved) {
+		PipelineChanged = true;
+	}
+	VertexProgram = resolved;
 	ForeignVertexShader = bound && program == ENGINE_SHADER_NONE;
 	ForeignVertexName = ForeignVertexShader ? file_name : "";
 }
@@ -782,16 +826,21 @@ void DX11BackendClass::Set_Indices(ID3D11Buffer * buffer, DXGI_FORMAT format)
 
 void DX11BackendClass::Set_Transform(D3DTRANSFORMSTATETYPE state, const float matrix[16])
 {
+	float * held = NULL;
 	switch (state) {
-	case D3DTS_WORLD:       memcpy(World, matrix, sizeof(World)); break;
-	case D3DTS_VIEW:        memcpy(View, matrix, sizeof(View)); break;
-	case D3DTS_PROJECTION:  memcpy(Projection, matrix, sizeof(Projection)); break;
+	case D3DTS_WORLD:       held = World; break;
+	case D3DTS_VIEW:        held = View; break;
+	case D3DTS_PROJECTION:  held = Projection; break;
 	default:
 		if (state >= D3DTS_TEXTURE0
 			&& state < D3DTS_TEXTURE0 + (int)DX11_BACKEND_TEXTURE_STAGES) {
-			memcpy(TextureTransforms[state - D3DTS_TEXTURE0], matrix, sizeof(float) * 16);
+			held = TextureTransforms[state - D3DTS_TEXTURE0];
 		}
 		break;
+	}
+	if (held != NULL && memcmp(held, matrix, sizeof(float) * 16) != 0) {
+		memcpy(held, matrix, sizeof(float) * 16);
+		ConstantsChanged = true;
 	}
 }
 
@@ -803,6 +852,7 @@ void DX11BackendClass::Set_Material(const float ambient[4], const float diffuse[
 	memcpy(MaterialSpecular, specular, sizeof(MaterialSpecular));
 	memcpy(MaterialEmissive, emissive, sizeof(MaterialEmissive));
 	MaterialPower = power;
+	ConstantsChanged = true;
 }
 
 void DX11BackendClass::Set_Light(unsigned index, DWORD type, const float position[4],
@@ -822,12 +872,16 @@ void DX11BackendClass::Set_Light(unsigned index, DWORD type, const float positio
 	memcpy(light.Specular, specular, sizeof(light.Specular));
 	memcpy(light.Attenuation, attenuation, sizeof(light.Attenuation));
 	memcpy(light.Spot, spot, sizeof(light.Spot));
+	ConstantsChanged = true;
+	PipelineChanged = true;
 }
 
 void DX11BackendClass::Disable_Light(unsigned index)
 {
-	if (index < MAXIMUM_VERTEX_LIGHTS) {
+	if (index < MAXIMUM_VERTEX_LIGHTS && Lights[index].Enabled) {
 		Lights[index].Enabled = false;
+		ConstantsChanged = true;
+		PipelineChanged = true;
 	}
 }
 
@@ -1129,6 +1183,7 @@ void DX11BackendClass::Set_Viewport(unsigned x, unsigned y, unsigned width, unsi
 
 	ViewportWidth = (width == 0) ? 1 : width;
 	ViewportHeight = (height == 0) ? 1 : height;
+	ConstantsChanged = true;
 }
 
 void DX11BackendClass::Clear(bool colour, bool depth, const float colour_value[4])
@@ -1264,6 +1319,16 @@ bool DX11BackendClass::Build_Vertex_Description(VertexPipelineDescription & desc
 
 bool DX11BackendClass::Resolve(Pipeline & pipeline)
 {
+	// Nothing either description is built from has been set since the last draw resolved.
+	if (!PipelineChanged && LastResolveHeld) {
+		ResolveMemo & memo = Memos[LastMemo];
+		pipeline = memo.Resolved;
+		++memo.Use->Draws;
+		return true;
+	}
+	PipelineChanged = false;
+	LastResolveHeld = false;
+
 	VertexPipelineDescription vertex_description;
 	CombinerDescription combiner_description;
 	const bool built_combiners = Build_Combiner_Description(combiner_description);
@@ -1292,6 +1357,7 @@ bool DX11BackendClass::Resolve(Pipeline & pipeline)
 			pipeline = memo.Resolved;
 			++memo.Use->Draws;
 			LastMemo = entry;
+			LastResolveHeld = true;
 			return true;
 		}
 	}
@@ -1414,6 +1480,7 @@ void DX11BackendClass::Remember_Resolution(const std::string & key, const Pipeli
 	memo.PixelProgram = PixelProgram;
 	memo.Resolved = resolved;
 	memo.Use = Record_Use(key);
+	LastResolveHeld = true;
 	LastMemo = NextMemo;
 	NextMemo = (NextMemo + 1) % RESOLVE_MEMO_ENTRIES;
 }
@@ -1474,6 +1541,25 @@ const char * DX11BackendClass::Pipeline_Report(unsigned index)
 void DX11BackendClass::Upload_Constants()
 {
 	ID3D11DeviceContext * context = Device->Get_Context();
+	D3D11_MAPPED_SUBRESOURCE mapped;
+
+	// A transcribed program reads the engine's own register bank instead of the block below, so
+	// that bank goes up only on the draws that take one.
+	if (VertexProgram != ENGINE_SHADER_NONE
+		&& (!EngineConstantsHeld
+			|| memcmp(HeldEngineConstants, EngineConstants, sizeof(EngineConstants)) != 0)
+		&& SUCCEEDED(context->Map(EngineConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+		memcpy(mapped.pData, EngineConstants, sizeof(EngineConstants));
+		context->Unmap(EngineConstantBuffer, 0);
+		memcpy(HeldEngineConstants, EngineConstants, sizeof(EngineConstants));
+		EngineConstantsHeld = true;
+	}
+
+	// Nothing either block is built from has been set since both buffers were last written.
+	if (!ConstantsChanged && VertexConstantsHeld && PixelConstantsHeld) {
+		return;
+	}
+	ConstantsChanged = false;
 
 	VertexConstantBlock vertex_block;
 	memset(&vertex_block, 0, sizeof(vertex_block));
@@ -1527,26 +1613,16 @@ void DX11BackendClass::Upload_Constants()
 
 	// See HeldVertexConstants in the header: the buffer is only written through when the bytes
 	// going into it differ from the bytes already there.
-	D3D11_MAPPED_SUBRESOURCE mapped;
-	if ((!VertexConstantsHeld
-			|| memcmp(&HeldVertexConstants, &vertex_block, sizeof(vertex_block)) != 0)
-		&& SUCCEEDED(context->Map(VertexConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-		memcpy(mapped.pData, &vertex_block, sizeof(vertex_block));
-		context->Unmap(VertexConstantBuffer, 0);
-		HeldVertexConstants = vertex_block;
-		VertexConstantsHeld = true;
-	}
-
-	// A transcribed program reads the engine's own register bank instead of the block above, so
-	// that bank goes up only on the draws that take one.
-	if (VertexProgram != ENGINE_SHADER_NONE
-		&& (!EngineConstantsHeld
-			|| memcmp(HeldEngineConstants, EngineConstants, sizeof(EngineConstants)) != 0)
-		&& SUCCEEDED(context->Map(EngineConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-		memcpy(mapped.pData, EngineConstants, sizeof(EngineConstants));
-		context->Unmap(EngineConstantBuffer, 0);
-		memcpy(HeldEngineConstants, EngineConstants, sizeof(EngineConstants));
-		EngineConstantsHeld = true;
+	// A failed Map leaves the buffer unknown, which also keeps the next draw off the early return.
+	if (!VertexConstantsHeld
+			|| memcmp(&HeldVertexConstants, &vertex_block, sizeof(vertex_block)) != 0) {
+		VertexConstantsHeld = false;
+		if (SUCCEEDED(context->Map(VertexConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+			memcpy(mapped.pData, &vertex_block, sizeof(vertex_block));
+			context->Unmap(VertexConstantBuffer, 0);
+			HeldVertexConstants = vertex_block;
+			VertexConstantsHeld = true;
+		}
 	}
 
 	PixelConstantBlock pixel_block;
@@ -1653,13 +1729,15 @@ void DX11BackendClass::Upload_Constants()
 	}
 	pixel_block.SkyUp[3] = SKY_HORIZON_SHARE;
 
-	if ((!PixelConstantsHeld
-			|| memcmp(&HeldPixelConstants, &pixel_block, sizeof(pixel_block)) != 0)
-		&& SUCCEEDED(context->Map(PixelConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-		memcpy(mapped.pData, &pixel_block, sizeof(pixel_block));
-		context->Unmap(PixelConstantBuffer, 0);
-		HeldPixelConstants = pixel_block;
-		PixelConstantsHeld = true;
+	if (!PixelConstantsHeld
+			|| memcmp(&HeldPixelConstants, &pixel_block, sizeof(pixel_block)) != 0) {
+		PixelConstantsHeld = false;
+		if (SUCCEEDED(context->Map(PixelConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+			memcpy(mapped.pData, &pixel_block, sizeof(pixel_block));
+			context->Unmap(PixelConstantBuffer, 0);
+			HeldPixelConstants = pixel_block;
+			PixelConstantsHeld = true;
+		}
 	}
 }
 
@@ -1686,8 +1764,7 @@ ID3D11BlendState * DX11BackendClass::Blend_State()
 		return LastBlendState;
 	}
 
-	const std::string key(reinterpret_cast<const char *>(&description), sizeof(description));
-	std::map<std::string, ID3D11BlendState *>::const_iterator existing = BlendStates.find(key);
+	BlendStateMap::const_iterator existing = BlendStates.find(description);
 	if (existing != BlendStates.end()) {
 		LastBlendDescription = description;
 		LastBlendState = existing->second;
@@ -1702,7 +1779,7 @@ ID3D11BlendState * DX11BackendClass::Blend_State()
 		Note_Refusal("the device refused a blend state");
 		return NULL;
 	}
-	BlendStates[key] = state;
+	BlendStates[description] = state;
 	LastBlendDescription = description;
 	LastBlendState = state;
 	return state;
@@ -1717,9 +1794,7 @@ ID3D11DepthStencilState * DX11BackendClass::Depth_Stencil_State()
 		return LastDepthStencilState;
 	}
 
-	const std::string key(reinterpret_cast<const char *>(&description), sizeof(description));
-	std::map<std::string, ID3D11DepthStencilState *>::const_iterator existing
-		= DepthStencilStates.find(key);
+	DepthStencilStateMap::const_iterator existing = DepthStencilStates.find(description);
 	if (existing != DepthStencilStates.end()) {
 		LastDepthStencilDescription = description;
 		LastDepthStencilState = existing->second;
@@ -1731,7 +1806,7 @@ ID3D11DepthStencilState * DX11BackendClass::Depth_Stencil_State()
 		Note_Refusal("the device refused a depth stencil state");
 		return NULL;
 	}
-	DepthStencilStates[key] = state;
+	DepthStencilStates[description] = state;
 	LastDepthStencilDescription = description;
 	LastDepthStencilState = state;
 	return state;
@@ -1746,9 +1821,7 @@ ID3D11RasterizerState * DX11BackendClass::Rasterizer_State()
 		return LastRasterizerState;
 	}
 
-	const std::string key(reinterpret_cast<const char *>(&description), sizeof(description));
-	std::map<std::string, ID3D11RasterizerState *>::const_iterator existing
-		= RasterizerStates.find(key);
+	RasterizerStateMap::const_iterator existing = RasterizerStates.find(description);
 	if (existing != RasterizerStates.end()) {
 		LastRasterizerDescription = description;
 		LastRasterizerState = existing->second;
@@ -1760,7 +1833,7 @@ ID3D11RasterizerState * DX11BackendClass::Rasterizer_State()
 		Note_Refusal("the device refused a rasterizer state");
 		return NULL;
 	}
-	RasterizerStates[key] = state;
+	RasterizerStates[description] = state;
 	LastRasterizerDescription = description;
 	LastRasterizerState = state;
 	return state;
@@ -1768,6 +1841,13 @@ ID3D11RasterizerState * DX11BackendClass::Rasterizer_State()
 
 ID3D11SamplerState * DX11BackendClass::Sampler_State(unsigned sampler)
 {
+	// Nothing set on this stage since its object was last looked up.  Forget_Last_State_Objects
+	// nulls the object, which sends the next draw down the whole path.
+	if (!SamplerChanged[sampler] && LastSamplerStates[sampler] != NULL) {
+		return LastSamplerStates[sampler];
+	}
+	SamplerChanged[sampler] = false;
+
 	D3D11_SAMPLER_DESC description;
 	Samplers[sampler].Build_Sampler_Description(description);
 	if (LastSamplerStates[sampler] != NULL
@@ -1775,8 +1855,7 @@ ID3D11SamplerState * DX11BackendClass::Sampler_State(unsigned sampler)
 		return LastSamplerStates[sampler];
 	}
 
-	const std::string key(reinterpret_cast<const char *>(&description), sizeof(description));
-	std::map<std::string, ID3D11SamplerState *>::const_iterator existing = SamplerStates.find(key);
+	SamplerStateMap::const_iterator existing = SamplerStates.find(description);
 	if (existing != SamplerStates.end()) {
 		LastSamplerDescriptions[sampler] = description;
 		LastSamplerStates[sampler] = existing->second;
@@ -1786,9 +1865,10 @@ ID3D11SamplerState * DX11BackendClass::Sampler_State(unsigned sampler)
 	ID3D11SamplerState * state = NULL;
 	if (FAILED(Device->Get_Device()->CreateSamplerState(&description, &state))) {
 		Note_Refusal("the device refused a sampler state");
+		SamplerChanged[sampler] = true;
 		return NULL;
 	}
-	SamplerStates[key] = state;
+	SamplerStates[description] = state;
 	LastSamplerDescriptions[sampler] = description;
 	LastSamplerStates[sampler] = state;
 	return state;
@@ -1811,19 +1891,28 @@ void DX11BackendClass::Bind_State_Objects()
 	ID3D11DeviceContext * context = Device->Get_Context();
 	const bool known = Bound.Known;
 
-	ID3D11BlendState * blend = Blend_State();
+	// The memos stand for what the render states would build while none of them has changed; a
+	// lookup that came back null keeps the flag up, so the next draw asks again as it always did.
+	ID3D11BlendState * blend = LastBlendState;
+	ID3D11DepthStencilState * depth_stencil = LastDepthStencilState;
+	ID3D11RasterizerState * rasterizer = LastRasterizerState;
+	if (StateObjectsChanged || blend == NULL || depth_stencil == NULL || rasterizer == NULL) {
+		blend = Blend_State();
+		depth_stencil = Depth_Stencil_State();
+		rasterizer = Rasterizer_State();
+		StateObjectsChanged = blend == NULL || depth_stencil == NULL || rasterizer == NULL;
+	}
+
 	if (!known || blend != Bound.Blend) {
 		context->OMSetBlendState(blend, NULL, 0xffffffff);
 		Bound.Blend = blend;
 	}
-	ID3D11DepthStencilState * depth_stencil = Depth_Stencil_State();
 	const UINT stencil_reference = RenderStates.Get_Stencil_Reference();
 	if (!known || depth_stencil != Bound.DepthStencil || stencil_reference != Bound.StencilReference) {
 		context->OMSetDepthStencilState(depth_stencil, stencil_reference);
 		Bound.DepthStencil = depth_stencil;
 		Bound.StencilReference = stencil_reference;
 	}
-	ID3D11RasterizerState * rasterizer = Rasterizer_State();
 	if (!known || rasterizer != Bound.Rasterizer) {
 		context->RSSetState(rasterizer);
 		Bound.Rasterizer = rasterizer;

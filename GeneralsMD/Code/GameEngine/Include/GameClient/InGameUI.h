@@ -370,6 +370,29 @@ struct MoneyPlateWidth
 enum { MONEY_SHRINK_HOLD_MS = 3000, MONEY_SHRINK_EASE_MS = 200 };
 Int InGameUI_moneyPlateWidth( MoneyPlateWidth &plate, Int needed, UnsignedInt nowMs );
 
+/** The command bar's console at its widest, every well up and a margin each side, in page pixels at
+	* a HUD scale of 1: what ControlBarHudScale fits HUD Size to. */
+Int InGameUI_consolePageWidth( void );
+
+/** The IncomeRate option: TRUE when the income beside the money is written per minute, for a
+	* player earning `perSecond` dollars a second.  See IncomeRateModeType for what automatic picks. */
+Bool InGameUI_incomePerMinute( Int incomeRateMode, Int perSecond );
+
+/** A plan waiting for its builder, as the number over its silhouette is worked out. */
+struct BuildPlanNumber
+{
+	ObjectID plan;
+	ObjectID builder;					///< the dozer or worker the plan was given to
+	Bool current;							///< the builder is already on its way to this one
+	Coord3D spot;							///< where the number goes, in the world
+	Int step;									///< 1 for the next one built, 0 when its builder has only the one
+};
+
+/** Number each builder's plans in the order it will take them: the one it is walking to first, then
+	* lowest id first, which is the order findUnfinishedStructureToContinue picks them in.  The list
+	* comes back sorted by builder and step. */
+void InGameUI_numberBuildPlans( std::vector<BuildPlanNumber>& plans );
+
 // ------------------------------------------------------------------------------------------------
 /** Basic functionality common to all in-game user interfaces */
 // ------------------------------------------------------------------------------------------------ 
@@ -449,6 +472,9 @@ public:  // ********************************************************************
 	/** A click that reached the world, on one of that page's own buttons: TRUE when it was one, and
 		* when `act` is set the button it names is pressed. */
 	Bool handleControlBarPageClick( const ICoord2D *mouse, Bool act );
+	/** TRUE when `pointer` is on the page's steel, a .solid it drew and none of its keys: the HUD's,
+		* never the battlefield's, even where no window of the bar stands. */
+	Bool isOnControlBarSteel( const ICoord2D &pointer ) const;
 	/** The general's promotion screen, Window/Html/Promotion.html, drawn as `parent`'s picture: the
 		* screen's windows keep their clicks and the promotions' own cameos paint over it. */
 	void drawPromotionPage( GameWindow *parent, Bool front );
@@ -466,7 +492,8 @@ public:  // ********************************************************************
 	void drawCellGridFront( Int grid );
 	void drawScoreboard( void );																						///< that scoreboard, over everything
 	void sampleEarnings( void );																						///< every player's money earned, once a game second
-	Int earnedPerSecond( Int playerIndex ) const;														///< what that player earned a second over the readings held
+	Int earnedOver( Int playerIndex, Int seconds ) const;										///< what that player earned in that many seconds, at the rate of the readings held
+	Int earnedPerSecond( Int playerIndex ) const { return earnedOver( playerIndex, 1 ); }
 	/** Window/Html/Tooltip.html is there to draw with, in a match. */
 	Bool isTooltipPageReady( void );
 	/** The tooltip page: the command bar's build tooltip over the hovered button while one is up,
@@ -557,13 +584,13 @@ public:  // ********************************************************************
 	const AllyCursor& getAllyCursor( Int playerIndex ) const { return m_allyCursors[ playerIndex ]; }
 	Real getAllyCursorFade( Int playerIndex ) const;					///< 0 when there is nothing to draw, 1 for a live cursor
 
-	// A circle dragged out with the left button while the attack key is armed.  Everything hostile
-	// and visible inside it joins the shift queue below, and the selection works down that list one
-	// target at a time: the next one is ordered the moment the current one stops existing.
+	// A circle dragged out with the left button while the attack key is armed.  The enemies inside
+	// it are shared across the units that can shoot, in the order both sides stand around the
+	// circle, and each unit works down its own share.
 	void beginAttackCircle( const ICoord2D& pt );
 	void updateAttackCircle( const ICoord2D& pt );
 	Bool issueAttackCircle( void );		///< FALSE when the press never became a drag, so it was an ordinary attack click
-	Int issueAttackLine( const std::vector<Coord3D>& line );	///< every enemy a line drawn with the attack key runs across, as a target list in line order
+	Int issueAttackLine( const std::vector<Coord3D>& line );	///< enemies the stroke crosses, shared along it across the units that can shoot
 	Bool isAttackListTarget( const Object *obj, const Player *local ) const;	///< would the circle or the attack line take this
 	void cancelAttackCircle( void ) { m_isAttackCircling = FALSE; }
 	Bool isAttackCircling( void ) const { return m_isAttackCircling; }
@@ -694,37 +721,120 @@ public:  // ********************************************************************
 		* turned onto the row's own line stands face to face with the next, and one turned across it
 		* corner to corner, which is the closest a straight row of those can get.  The step is not
 		* rounded to the build grid: a Power Plant is 44 across and the grid is 10, and rounding it
-		* up left 6 of dirt at every joint.  Never fewer than one, never more than 'most'.  Inline
-		* and static so a test can reach it without linking the whole in-game UI. */
+		* up left 6 of dirt at every joint.  'extraGap' is world units the wheel adds on top of that
+		* touch while the line is being drawn.  Zero packs them flush, and a negative value is
+		* ignored, so the row never overlaps.  The first piece stands on the anchor and the last on
+		* the cursor.  As many as that spacing allows go between them, and any slack is spread along
+		* the line so the last one still lands on the cursor.  Opening the gap takes pieces out of
+		* the middle.  A drag keeps both ends even when the asked gap is longer than the line, unless
+		* 'most' allows only one.  Never fewer than one, never more than 'most'.  Inline and static
+		* so a test can reach it without linking the whole in-game UI. */
 	static Int placementRow( Real dx, Real dy, Real headingCos, Real headingSin, Real halfFacing,
-													 Real halfSide, Int most, Coord2D *step )
+													 Real halfSide, Int most, Coord2D *step, Real extraGap = 0.0f )
 	{
 		step->x = 0.0f;
 		step->y = 0.0f;
 		const Real length = (Real)sqrt( dx * dx + dy * dy );
-		if( length > 0.0f )
-		{
-			const Real touch = placementTouchDistance( dx / length, dy / length, headingCos, headingSin,
-																								 2.0f * halfFacing, 2.0f * halfSide );
-			step->x = dx / length * touch;
-			step->y = dy / length * touch;
-		}
 
 		Int count = 1;
-		const Real stepSqr = step->x * step->x + step->y * step->y;
-		if( stepSqr > 0.0f )
-			count += REAL_TO_INT_FLOOR( ( dx * step->x + dy * step->y ) / stepSqr );
+		if( length > 0.0f )
+		{
+			Real span = placementTouchDistance( dx / length, dy / length, headingCos, headingSin,
+																					2.0f * halfFacing, 2.0f * halfSide );
+			if( extraGap > 0.0f )
+				span += extraGap;
+			if( span < 0.01f )
+				span = 0.01f;
+
+			// one gap per step, and a drag always has the piece under the cursor as well as the anchor.
+			// the 0.001 covers a quotient that lands a hair under a whole number: the drag and the
+			// touch are the same geometry, and a table sine leaves it at 1.999
+			Int gaps = REAL_TO_INT_FLOOR( length / span + 0.001f );
+			if( gaps < 1 )
+				gaps = 1;
+			count = gaps + 1;
+		}
 
 		if( count > most )
 			count = most;
 		if( count < 1 )
 			count = 1;
+
+		if( count >= 2 )
+		{
+			step->x = dx / (Real)( count - 1 );
+			step->y = dy / (Real)( count - 1 );
+		}
 		return count;
 	}
 
-	/// would dragging the anchor lay a row of the pending structure, rather than aim one?
+	/** An alt-dragged grid, the row's twin in two directions.  The anchor and a cursor 'dx'/'dy'
+		* away are opposite corners of a rectangle squared up with the structure's heading, and the
+		* pieces fill it line by line: 'perLine' of them stand along the heading 'alongStep' apart, and
+		* the lines stand 'acrossStep' apart.  Piece i is alongStep * ( i % perLine ) + acrossStep *
+		* ( i / perLine ) from the anchor, which is the order they are drawn and ordered in.  Each
+		* side packs the way the row does, flush through the face it meets plus 'extraGap', with the
+		* slack spread so the far corner keeps a piece.  The one difference: a side shorter than a
+		* step holds one piece, not two, or a drag that is nearly a line would come out as two lines
+		* lying on each other.  'most' caps the total, so the last line can come up short, and the
+		* lines are counted from what it leaves: five pieces three to a line are two lines, the
+		* second on the far side.  Never fewer than one.  Inline and static for the same test. */
+	static Int placementGrid( Real dx, Real dy, Real headingCos, Real headingSin, Real halfFacing,
+														Real halfSide, Int most, Coord2D *alongStep, Coord2D *acrossStep,
+														Int *perLine, Real extraGap = 0.0f )
+	{
+		alongStep->x = 0.0f;
+		alongStep->y = 0.0f;
+		acrossStep->x = 0.0f;
+		acrossStep->y = 0.0f;
+
+		// the drag, measured along the heading and across it
+		const Real along = dx * headingCos + dy * headingSin;
+		const Real across = dy * headingCos - dx * headingSin;
+
+		const Real gap = extraGap > 0.0f ? extraGap : 0.0f;
+		const Real alongSpan = placementTouchDistance( headingCos, headingSin, headingCos, headingSin,
+																									 2.0f * halfFacing, 2.0f * halfSide ) + gap;
+		const Real acrossSpan = placementTouchDistance( -headingSin, headingCos, headingCos, headingSin,
+																										2.0f * halfFacing, 2.0f * halfSide ) + gap;
+
+		if( most < 1 )
+			most = 1;
+
+		// the same hair under a whole number as the row's
+		Int count = REAL_TO_INT_FLOOR( (Real)fabs( along ) / alongSpan + 0.001f ) + 1;
+		if( count > most )
+			count = most;
+
+		Int lines = REAL_TO_INT_FLOOR( (Real)fabs( across ) / acrossSpan + 0.001f ) + 1;
+		const Int linesPaidFor = ( most + count - 1 ) / count;
+		if( lines > linesPaidFor )
+			lines = linesPaidFor;
+
+		if( count >= 2 )
+		{
+			alongStep->x = along * headingCos / (Real)( count - 1 );
+			alongStep->y = along * headingSin / (Real)( count - 1 );
+		}
+		if( lines >= 2 )
+		{
+			acrossStep->x = -across * headingSin / (Real)( lines - 1 );
+			acrossStep->y = across * headingCos / (Real)( lines - 1 );
+		}
+
+		*perLine = count;
+		const Int total = count * lines;
+		return total > most ? most : total;
+	}
+
+	/// would dragging the anchor lay pieces of the pending structure, a row or a grid, rather than aim one?
 	Bool placesRow( void );
-	/// the centres of that row from 'start' toward 'end', as many as MaxLineBuildObjects and the money allow
+	/// of those two, the grid: alt is held.  Alt with shift is the grid as well
+	Bool placesGrid( void ) const;
+	/// wheel notches while that row is being drawn: one grid square of gap a notch, never below flush
+	void adjustPlacementRowGap( Real spin );
+	/// the centres of that row from 'start' toward 'end', or of the grid between those two corners,
+	/// as many as MaxLineBuildObjects and the money allow
 	void computePlacementRow( const ThingTemplate *what, Real angle, const Coord3D *start,
 														const Coord3D *end, std::vector<Coord3D> *positions ) const;
 
@@ -971,8 +1081,8 @@ public:  // ********************************************************************
 	// One cameo of the global production strip: which producer it belongs to, which entry of that
 	// producer's queue it is, and where it was drawn this frame.
 	//
-	enum { PRODUCTION_STRIP_ROW_MAX = 5 };	///< cameos one column will draw, stacked upward; whatever
-																					///  is left over closes it as a sixth cell wearing a "+N"
+	enum { PRODUCTION_STRIP_ROW_MAX = 9 };	///< cameos the strip will draw; whatever is left over closes
+																					///  it as a tenth cell wearing a "+N", two rows of five over the selection
 
 	//
 	// A queue slot is one slot of the general's power bar down in the corner, measurement for
@@ -1025,7 +1135,7 @@ public:  // ********************************************************************
 	// whatever timers are live, so nothing here outlives the draw that filled it in.
 	//
 	enum { SUPERWEAPON_STRIP_COLS = 6 };		///< cameos in one row, the soonest at the right hand end
-	enum { SUPERWEAPON_STRIP_ROWS = 3 };		///< rows of them, and the rest become a "+N"
+	enum { SUPERWEAPON_STRIP_ROWS = 7 };		///< rows the strip can grow to, past the top half of the screen from the fourth at 1280x720 and HUD Size 150%; past 42 the latest to land have no cell
 	enum { SUPERWEAPON_STRIP_MAX = SUPERWEAPON_STRIP_COLS * SUPERWEAPON_STRIP_ROWS };
 
 	enum { SKILL_STRIP_COLS = 6 };			///< bought promotions in one row, under the countdowns
@@ -1165,6 +1275,7 @@ public:  // ********************************************************************
 	virtual void addIdleWorker( Object *obj );
 	virtual void removeIdleWorker( Object *obj, Int playerNumber );
 	virtual void selectNextIdleWorker( void );
+	void selectNextIdleUnit( void );	///< the same cycle for fighting units standing with no order
 
 	virtual void recreateControlBar( void );
 	virtual void notifyResolutionChange( void );
@@ -1360,6 +1471,8 @@ protected:
 	const ThingTemplate *				m_placeAngleType;												///< the structure that heading was chosen for; another type starts square again
 	Bool												m_placementLegal;												///< last legality verdict for the spot under the structure being placed
 	Coord3D											m_placementNudge;												///< how far the last legality check had to slide the structure to make it fit
+	Real												m_placementRowGap;											///< extra world units between a shift-dragged row, on top of the buildings touching
+	Real												m_placementRowGapWheel;									///< fractional notches not yet worth a whole grid square
 
 	/// a structure ordered here, and the logic frame it was ordered on - see recordPendingPlacement
 	struct PendingPlacement
@@ -1405,11 +1518,16 @@ protected:
 	void drawProductionStripColumn( Int left, Int bottomY );
 	void drawQueueTray( void );		///< the playing strip as a row in Window/Html/Queue.html's tray
 	void drawNetPage( void );			///< the network box, Window/Html/Net.html, with the command bar's page
+	void drawReadoutPage( const HtmlValues &values );	///< the clock and the health, Window/Html/Readout.html, over the bar's page
+	void alertSuperweapon( Player *owner, const UnicodeString &name, const char *label );	///< queue a banner: `name` and what happened to it
+	void drawAlertPage( void );		///< the superweapon banner, Window/Html/Alert.html, under the top page
 	std::string scoreboardHtml( void );	///< Window/Html/Scoreboard.html filled in for this frame
 	const Image *productionStripTray( void );	///< the bar's tray, mirrored, kept until the bar changes side
 	void stripTrayMetrics( ICoord2D *tray, ICoord2D *cameo, ICoord2D *hole, Int *step );	///< that tray's size, its cameo hole, and the column step
 	void drawStripSeconds( Int which, Int x, Int y, Int w, Int h, Int seconds );	///< countdown written inside a cameo
-	void drawStripQuantity( Int which, Int x, Int y, Int w, Int quantity );	///< the "xN" in a cameo's top right corner
+	void drawStripQuantity( Int which, Int x, Int y, Int w, Int h, Int quantity );	///< the "xN" in a cameo's top right corner
+	///< one of the strips' own strings set to 'text', a point smaller at a time until a readout on 'cell' holds it
+	DisplayString *fitStripString( DisplayString *&string, const UnicodeString &text, Int points, const IRegion2D &cell );
 	void addSuperweaponIcon( const Image *image, Int seconds, Int percent, Bool ready, Color color );
 	void drawSuperweaponStrip( void );		///< those icons, top right, soonest at the right hand end
 	void drawSkillStrip( void );					///< the watched player's bought promotions, under those
@@ -1443,10 +1561,25 @@ protected:
 	Bool												m_controlBarPageLoaded;
 	Bool												m_controlBarPageShown;		///< drawn this frame, so its buttons can be clicked
 	std::string									m_controlBarPage;
+	HtmlValues									m_controlBarValues;				///< the page's values, every key written every frame, kept so the nodes are reused
+	HtmlLists										m_controlBarLists;				///< its lists the same way, each entry's keys the same every frame
 	Bool												m_controlBarPageHovered;	///< the pointer was on something the page drew, last frame
+	std::vector< IRegion2D >		m_controlBarSolids;				///< the page's .solid rectangles on screen, as last drawn
+	std::vector< IRegion2D >		m_controlBarKeys;					///< its data-click keys on screen, which stand in the solids
 	HtmlOverlay *								m_netOverlay;
 	Bool												m_netPageLoaded;
 	std::string									m_netPage;
+	HtmlOverlay *								m_readoutOverlay;					///< Window/Html/Readout.html, the clock and the health over the bar's page
+	Bool												m_readoutPageLoaded;
+	std::string									m_readoutPage;
+	/// one superweapon banner waiting or up: what happened, already lettered, and whose it is
+	struct SuperweaponAlert { std::string text; std::string whose; };
+	std::vector< SuperweaponAlert >	m_alerts;								///< the banner up first, then the ones queued behind it
+	UnsignedInt									m_alertStartMs;						///< when the first one went up, on the client's clock
+	HtmlOverlay *								m_alertOverlay;						///< Window/Html/Alert.html, the banner under the top page
+	Bool												m_alertPageLoaded;
+	std::string									m_alertPage;
+	Int													m_alertBottom;						///< the banner's bottom on screen while it is up, else 0: the scoreboard hangs under it
 	HtmlOverlay *								m_tooltipOverlay;
 	Bool												m_tooltipPageLoaded;
 	std::string									m_tooltipPage;
@@ -1455,6 +1588,11 @@ protected:
 	HtmlOverlay *								m_promotionFrontOverlay;		///< the grid's frames, drawn over the promotions
 	HtmlOverlay *								m_cellFrontOverlay[ CELL_GRID_COUNT ];
 	std::vector< HtmlValues >		m_cellFrontCells[ CELL_GRID_COUNT ];	///< each grid's cells as the bar's page last placed them
+	enum { ORDER_KEYS = 3 };																					///< the page's attack, hold position and move keys
+	IRegion2D										m_orderKeyCell[ ORDER_KEYS ];					///< where the page last put each, screen pixels
+	Bool												m_orderKeysShown;
+	DisplayString *							m_orderKeyString[ ORDER_KEYS ];				///< each one's letter, on the command buttons' plate
+	Int													m_orderKeyPoints;											///< the size those were last lettered at: HUD Size changes in a match
 	Bool												m_promotionPageLoaded;
 	std::string									m_promotionPage;
 	Int													m_promotionShownMs;				///< how far the promotion screen has come up, -1 before its first picture
@@ -1511,7 +1649,7 @@ protected:
 	void feedAct( Player *player, const Image *cameo, const std::string &what, const char *tag, const char *label );
 	void watchDozers( void );
 	void drawFeed( void );
-	Int feedFloor( void ) const;
+	Int feedTop( void ) const;
 	UnsignedInt									m_dozerCheckFrame;				///< the logic frame watchDozers last looked on
 	Bool												m_hadDozer[ MAX_PLAYER_COUNT ];	///< that player had a dozer or worker then
 	// the chat over the feed, Window/Html/Chat.html, the same lines kept a while
@@ -1523,8 +1661,11 @@ protected:
 	HtmlOverlay *								m_feedOverlay;
 	Bool												m_feedPageLoaded;
 	std::string									m_feedPage;
-	Int													m_feedFloor;							///< the radar's tab top on screen, from the bar's page
-	Int													m_queueTrayTop;						///< the queue row's top on screen, while it is drawn
+	Int													m_feedTop;								///< where the feed starts on screen, under the menu key, from the bar's page
+	ICoord2D										m_queueCorner;						///< the selection's well's left edge and the console's top on screen: the queue stands there
+	Int													m_consoleTop;							///< the console's top on screen, the build card stands over it
+	Int													m_topBarBottom;						///< the top page's bottom on screen, the scoreboard and the feed hang under it
+	Int													m_peacePlateBottom;				///< the top page's peace time plate's bottom on screen, 0 while it is not up; the last ten seconds hang under it
 
 	Bool												m_placementRangeRingUp;	///< the structure on the cursor is armed, so its reach is drawn
 	Real												m_placementRingRadius;	///< how far from its centre it hits
@@ -1538,6 +1679,7 @@ protected:
 	DisplayString *							m_peaceCountdownDisplayString;	///< the big digit of its last ten seconds
 	Int													m_lastMoneyDisplayed;		///< so the money gadget is only written when the amount changes
 	Int													m_lastEarningDisplayed;	///< or the money earned a second beside it
+	Bool												m_lastEarningPerMinute;	///< or whether that was written per minute
 	MoneyPlateWidth							m_moneyPlate;						///< the money plate's width, following the figure's
 	UnsignedInt									m_hudDrawCount;					///< rendered frames counted by drawHudOverlay itself
 	UnsignedInt									m_hudLastSampleFrame;		///< m_hudDrawCount the fps sample was last refreshed on
@@ -1573,6 +1715,7 @@ protected:
 	Int													m_productionStripStep;			///< from one themed cameo to the next, across
 	HtmlOverlay *								m_queueOverlay;							///< Window/Html/Queue.html under the cameos
 	HtmlOverlay *								m_queueFrontOverlay;				///< and its frames over them
+	HtmlOverlay *								m_superweaponOverlay;				///< the same page under the superweapon strip's cameos, top right
 	Bool												m_queuePageLoaded;
 	std::string									m_queuePage;
 
@@ -1595,7 +1738,6 @@ protected:
 	enum
 	{
 		STRIP_OVERFLOW_PRODUCTION = 0,		///< the "+N" closing the production column
-		STRIP_OVERFLOW_SUPERWEAPON,				///< and the superweapon strip's
 		STRIP_OVERFLOW_STRINGS
 	};
 
@@ -1611,7 +1753,6 @@ protected:
 	//
 	SuperweaponIconSlot					m_superweaponIcons[ SUPERWEAPON_STRIP_MAX ];
 	Int													m_superweaponIconCount;		///< icons drawn
-	Int													m_superweaponIconTotal;		///< timers live, drawn or not; the difference is the "+N"
 
 	Coord2D											m_superweaponPosition;
 	Real												m_superweaponFlashDuration;
@@ -1747,5 +1888,28 @@ protected:
 
 // the singleton
 extern InGameUI *TheInGameUI;
+
+//
+// A readout on a cell of the HUD: a countdown, a key, a price, a power figure, a count.  Every one
+// of them stands on a solid plate in a corner of the cell's inner rectangle, which is the cell less
+// the frame the page draws over its edge, so no plate lies under a border and no digit is cut by
+// one.  The strips in InGameUI.cpp and the command buttons' badges in W3DPushButton.cpp both draw
+// through these.
+//
+enum HudReadoutCorner
+{
+	HUD_READOUT_TOP_LEFT,
+	HUD_READOUT_TOP_RIGHT,
+	HUD_READOUT_BOTTOM_LEFT,
+	HUD_READOUT_BOTTOM_RIGHT,
+	HUD_READOUT_CENTRE
+};
+
+/** Whether `text` as drawn is no wider than a readout on `cell` may be: the inner rectangle less the
+	* plate's own margins.  Text that does not fit is set a point smaller until it does. */
+extern Bool HudReadout_fits( DisplayString *text, const IRegion2D &cell );
+
+/** The plate in `corner` of `cell`'s inner rectangle and `text` on it. */
+extern void HudReadout_draw( DisplayString *text, const IRegion2D &cell, HudReadoutCorner corner, Color textColor );
 
 #endif // _IN_GAME_UI_H_
