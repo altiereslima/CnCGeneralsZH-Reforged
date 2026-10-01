@@ -3,7 +3,7 @@
 // UTF-8. Missing labels fall back to English.
 
 ACADEMY:AlternateMouseInterface
-"A opção "Interface Alternativa do Mouse" fica no menu Opções. Se você prefere usar o botão direito para dar ordens, ative essa opção para comandar suas forças dessa forma."
+"A opção \"Interface Alternativa do Mouse\" fica no menu Opções. Se você prefere usar o botão direito para dar ordens, ative essa opção para comandar suas forças dessa forma."
 END
 
 ACADEMY:BuildAHero
