@@ -4,20 +4,20 @@ import json
 import sys
 
 EXPECTED_SNAPSHOT = {
-    "head_commit": "1e720010117c1ff43712dfdc8606f3780a9accc9",
+    "head_commit": "fde4810f1797cb3746248b0297059e96dab08a46",
     "files": {
-        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "66c5c5090c90f44f55fb6e2cb8df20e969a6e4ef",
-        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "32bcd40d8ea38d807e987799974d0848b7d7df65",
+        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "7d9766c2f2db9ed7215561e58861e47f6180809a",
+        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "250ad45519840b088a7084b41fd1b188106fc401",
         "GeneralsMD/Code/GameEngine/Source/GameClient/GameText.cpp": "d6508926872f5e74c9f9493435edb32f91c5dfd8",
-        "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "7dd2afb2437e0a07877a9431142c87cafa853fe0",
-        "GeneralsMD/Code/Data/Patch.str": "f57dcdef2e69cd11ccf3f9fbe166f1562e6f8e27",
+        "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "6f8cdc02170b10df550ccb5efef5e30d3047dfbb",
+        "GeneralsMD/Code/Data/Patch.str": "f48c14e7132e54ceb8d9c5100a92f737af976750",
         "GeneralsMD/Code/GameEngine/Source/GameClient/GlobalLanguage.cpp": "115d28f739fdd8f061a2622ecf4f685dd620f174",
         "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DFileSystem.cpp": "b41dc411edf6034177bef575112742f6f92137fb",
         "GeneralsMD/Code/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp": "23f711877eb038a8f3b2dba5b27644cb71048337",
-        "GeneralsMD/Code/CMakeLists.txt": "96cc2f505d8b8b48fb15091316df85773bf41db7",
+        "GeneralsMD/Code/CMakeLists.txt": "4380ab0d3fff88017cbde35f064bea6f11c06ed5",
         "GeneralsMD/Code/GameEngine/Include/Common/AsciiString.h": "338c83a046b1338a9b60622ead08db762ff7b41a",
         "GeneralsMD/Code/GameEngine/Include/Common/Debug.h": "708817af5576ace9079e3c8f2900b92eb727882a",
-        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "28958328fa30244f8565e08d776fab64a6532fbb",
+        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "c678ccbdf73c1332630e847cf63e92f36128411c",
     }
 }
 
