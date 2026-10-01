@@ -16079,7 +16079,7 @@ TOOLTIP:PropShadows
 END
 
 TOOLTIP:ProRules
-"Aplica a lista de regras de torneio: restringe determinadas superarmas, Auroras, MiGs com ogivas nucleares táticas, motos explosivas, ataques suicidas, Projéteis de Nêutrons, Comanches Furtivos e outras vantagens. Também limita posicionamentos e algumas defesas próximas a poços de petróleo."
+"A lista de torneio. Sem Canhão de Partículas nem Tempestade SCUD, exceto o único canhão do General de Superarmas. O Silo de Mísseis Nucleares pode ser construído, mas nunca dispara. Sem Aurora, sem MiGs Nucleares Táticos, sem motos explosivas, sem bombas suicidas, Projéteis de Nêutrons ou Comanche Furtivo, e sem Bombardeio de Saturação antes da patente 3. Um Tanque de Microondas não pode desativar uma estrutura ainda em construção, ninguém constrói a menos de 300 de uma estrutura inimiga, e ninguém põe mais de dois Sistemas Patriot, Canhões Gattling ou Baterias Stinger ao redor de um mesmo grupo de poços de petróleo."
 END
 
 TOOLTIP:ProviderSelect
@@ -16471,7 +16471,7 @@ TOOLTIP:WidenSearch
 END
 
 TOOLTIP:WindowMode
-"Tela Cheia assume o modo de vídeo; Sem Bordas cobre a tela com uma janela e permite alternar rapidamente entre aplicativos. Sem Bordas escolhe a resolução automaticamente; nos outros dois modos, use a lista de resoluções."
+"Tela Cheia assume o modo de vídeo; Sem Bordas cobre a tela com uma janela e permite alternar rapidamente entre aplicativos. Sem Bordas usa a resolução do próprio monitor; nos outros dois modos, vale a lista de resoluções acima."
 END
 
 TOOLTIP:WorkersReturn
