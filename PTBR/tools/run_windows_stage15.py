@@ -232,7 +232,9 @@ def main():
     if not (repo/"GeneralsMD/Code").is_dir():
         raise SystemExit("STAGE15: aponte para a raiz do checkout CnCGeneralsZH-Reforged")
 
-    result_dir = repo / "PTBR_STAGE15_RESULTS"
+    # Dentro de PTBR/, onde o PTBR/.gitignore alcança: na raiz do checkout a pasta aparecia como
+    # arquivo novo e a execução seguinte recusava o checkout "com alterações locais".
+    result_dir = pkg / "PTBR_STAGE15_RESULTS"
     result_path = Path(args.result).resolve() if args.result else result_dir/"result.json"
 
     result = {
