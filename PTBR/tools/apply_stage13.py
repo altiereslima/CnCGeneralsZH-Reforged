@@ -2,10 +2,17 @@
 from pathlib import Path
 import sys
 
-# A linha de números no canto superior direito (relógio, tempo de jogo, hz/fps, renderizador,
-# frame) vem ligada para todos no upstream e não tem controle no menu. A edição PT-BR começa
-# com ela escondida; "ShowHudOverlay = yes" no Options.ini traz de volta, do mesmo jeito que
-# as faixas do observador (ShowProductionStrip etc.) são lidas sem controle no menu.
+# A caixa do canto superior direito (relógio da partida, taxas de quadros e, em rede, a conexão)
+# vem ligada para todos no upstream. A edição PT-BR começa com ela escondida.
+#
+# Desde a v2.3.0 o upstream deu à caixa uma chave própria, com controle no menu de opções:
+# ShowNetBox ("Clock And Frame Rate Box"). Sem a página da barra de comando, que é o caso da
+# interface clássica, é ela que liga a plaquinha do canto. A edição PT-BR só muda o padrão para
+# desligado; marcar a opção no menu, ou "ShowNetBox = yes" no Options.ini, traz a caixa de volta.
+#
+# Até a v2.2.1 a edição fazia isso com ShowHudOverlay = FALSE e uma linha ShowHudOverlay própria
+# no catálogo. O upstream agora exige que essa linha não exista (ela voltaria a ler um "no" antigo
+# do Options.ini), e com ela o menu mostraria a opção nova marcada sem caixa nenhuma na tela.
 
 def fail(msg):
     raise SystemExit("STAGE13: " + msg)
@@ -35,51 +42,24 @@ def main():
     # 1) Padrão desligado.
     replace_once(
         code / "GameEngine" / "Source" / "Common" / "GlobalData.cpp",
-        "\tm_showHudOverlay = TRUE;\n",
-        "\t// PT-BR edition: the corner readout starts hidden; ShowHudOverlay = yes in Options.ini\n"
-        "\t// brings it back.\n"
-        "\tm_showHudOverlay = FALSE;\n",
+        "\tm_showNetBox = TRUE;\n",
+        "\t// PT-BR edition: the corner box starts hidden; the Clock And Frame Rate Box option\n"
+        "\t// (ShowNetBox in Options.ini) brings it back.\n"
+        "\tm_showNetBox = FALSE;\n",
     )
 
-    # 2) Options.ini volta a ler a chave, sem controle no menu.
-    catalog = code / "GameEngine" / "Source" / "Common" / "OptionsCatalog.cpp"
-    replace_once(
-        catalog,
-        "OPTION_BOOL_ACCESSORS( m_showSuperweaponStrip )\n",
-        "OPTION_BOOL_ACCESSORS( m_showSuperweaponStrip )\n"
-        "OPTION_BOOL_ACCESSORS( m_showHudOverlay )\n",
-    )
-    replace_once(
-        catalog,
-        "\t\tget_m_showSuperweaponStrip, set_m_showSuperweaponStrip },\n"
-        "\n"
-        "\t{ NULL, NULL, NULL, OPTION_BOOL, APPLY_LIVE, 0, 0, NULL, NULL }\n",
-        "\t\tget_m_showSuperweaponStrip, set_m_showSuperweaponStrip },\n"
-        "\n"
-        "\t// PT-BR edition: the corner readout is off by default, so it needs a key to come back by.\n"
-        "\t{ \"ShowHudOverlay\",\t\t\t\t\tNULL, \"GUI:HudOverlay\",\n"
-        "\t\tOPTION_BOOL, APPLY_LIVE, 0, 1,\n"
-        "\t\tget_m_showHudOverlay, set_m_showHudOverlay },\n"
-        "\n"
-        "\t{ NULL, NULL, NULL, OPTION_BOOL, APPLY_LIVE, 0, 0, NULL, NULL }\n",
-    )
-
-    # 3) O teste do upstream que exige o overlay ligado e fora do catálogo passa a exigir o contrário.
+    # 2) O teste do upstream que exige a caixa ligada de início passa a exigir o contrário.
     test = code / "Tests" / "test_gameengine.cpp"
     replace_once(
         test,
-        "\t\t\"ShowHudOverlay\", \"ArchiveReplays\", NULL\n",
-        "\t\t\"ArchiveReplays\", NULL\n",
-    )
-    replace_once(
-        test,
-        "\tCHECK( scratch->m_showHudOverlay );\n",
-        "\tCHECK( !scratch->m_showHudOverlay );\t// PT-BR edition: hidden until Options.ini asks for it\n"
-        "\tCHECK( findOptionDef( \"ShowHudOverlay\" ) != NULL );\n",
+        "\tCHECK( scratch->m_showNetBox );\n"
+        "\tdef->set( 0 );\n",
+        "\tCHECK( !scratch->m_showNetBox );\t// PT-BR edition: off until the player ticks it\n"
+        "\tdef->set( 0 );\n",
     )
 
     print("STAGE13 APPLY PASS")
-    print("HUD corner readout hidden by default; ShowHudOverlay = yes in Options.ini shows it.")
+    print("Corner box hidden by default; the Clock And Frame Rate Box option (ShowNetBox) shows it.")
 
 if __name__ == "__main__":
     main()

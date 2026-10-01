@@ -69,11 +69,12 @@ def main():
     need(cm,"Data/PortugueseBrazil","PTBR CMake copy")
     checks["cmake_locale_copy"]="PASS"
 
-    need(cpp,"m_showHudOverlay = FALSE;","HUD overlay off by default")
+    need(cpp,"m_showNetBox = FALSE;","corner box off by default")
     catalog=(code/"GameEngine/Source/Common/OptionsCatalog.cpp").read_text(encoding="utf-8")
-    need(catalog,'{ "ShowHudOverlay",',"ShowHudOverlay Options.ini key")
-    need(catalog,"OPTION_BOOL_ACCESSORS( m_showHudOverlay )","ShowHudOverlay accessors")
-    checks["hud_overlay_hidden"]="PASS"
+    need(catalog,'{ "ShowNetBox",',"ShowNetBox option the player turns it back on with")
+    if '{ "ShowHudOverlay",' in catalog:
+        raise RuntimeError("ShowHudOverlay row back in the catalog: upstream reads an old 'no' through it")
+    checks["net_box_hidden"]="PASS"
 
     info=(code/"GameEngine/Source/GameNetwork/GameInfo.cpp").read_text(encoding="utf-8")
     ptbr=(code/"Data/PortugueseBrazil/Generals.str").read_text(encoding="utf-8-sig")
@@ -91,7 +92,9 @@ def main():
     quit_menu=(code/"GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/QuitMenu.cpp").read_text(encoding="utf-8")
     need(quit_menu,'TheTransitionHandler->reverse( "QuitFullBack" );',"original Esc menu closing transition")
     button=(code/"GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DPushButton.cpp").read_text(encoding="utf-8")
-    need(button,"TheGlobalData->m_classicInterface )\n\t\t? ControlBarUniformScale() : ControlBarHudScale();","classic bar's markings at the uniform scale")
+    need(button,"TheGlobalData->m_classicInterface )\n\t\treturn ControlBarUniformScale();","classic bar's markings at the uniform scale")
+    if "designPoints * ControlBarHudScale()" in button or "designPoints * badgeBarScale()" not in button:
+        raise RuntimeError("missing postcondition: every marking measured by badgeBarScale")
     checks["classic_interface"]="PASS"
 
     loc=code/"Data/PortugueseBrazil"

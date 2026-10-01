@@ -18,14 +18,19 @@ import sys
 # depender de apagar arquivo na pasta do jogo, e o menu Esc volta a abrir e fechar pelas próprias
 # transições. "ClassicInterface = no" no Options.ini traz as páginas do upstream de volta.
 #
-# Desde a v2.2.0 a página também monta a barra de novo (grade 6x3, barra de retratos), numa escala
-# própria, 70% da uniforme. Essa montagem só roda com a página, então a barra clássica continua no
+# Desde a v2.2.0 a página também monta a barra de novo (grade 6x3, console centralizado), numa
+# escala própria, a do HUD. Essa montagem só roda com a página, então a barra clássica continua no
 # layout da EA, na escala uniforme; mas os números nos cantos dos botões (fila, recarga, preço)
-# passaram a usar a escala da página em qualquer caso. Com a interface clássica eles voltam à
-# escala da barra em que estão.
+# passaram a usar a escala do HUD em qualquer caso, inclusive para decidir quando tirar o "$" ou o
+# "s" por falta de espaço. Com a interface clássica as duas medidas voltam à escala da barra em que
+# os botões estão.
 
 def fail(msg):
     raise SystemExit("STAGE16: " + msg)
+
+# Quantas vezes o W3DPushButton.cpp do upstream mede uma marcação pela escala da barra; o validador
+# confere o mesmo número, para que um uso novo não fique de fora sem ninguém notar.
+BADGE_SCALE_USES = 2
 
 def replace_once(path, old, new):
     text = path.read_text(encoding="utf-8-sig")
@@ -33,6 +38,13 @@ def replace_once(path, old, new):
     if n != 1:
         fail(f"{path}: esperado 1 bloco, encontrado {n}")
     path.write_text(text.replace(old, new, 1), encoding="utf-8", newline="")
+
+def replace_all(path, old, new, count):
+    text = path.read_text(encoding="utf-8-sig")
+    n = text.count(old)
+    if n != count:
+        fail(f"{path}: esperado {count} ocorrências de {old!r}, encontrado {n}")
+    path.write_text(text.replace(old, new), encoding="utf-8", newline="")
 
 def main():
     repo = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
@@ -57,33 +69,37 @@ def main():
         "\tBool m_classicInterface;\t\t\t///< PT-BR edition: the original command bar plates and Esc menu\n",
     )
 
-    # 2) Padrão: interface original. A âncora é a linha que o estágio 13 escreveu.
+    # 2) Padrão: interface original.
     replace_once(
         code / "GameEngine" / "Source" / "Common" / "GlobalData.cpp",
-        "\tm_showHudOverlay = FALSE;\n",
-        "\tm_showHudOverlay = FALSE;\n"
+        "\tm_showHudOverlay = TRUE;\n",
+        "\tm_showHudOverlay = TRUE;\n"
         "\t// PT-BR edition: the command bar keeps its textured plates and the Esc menu its original\n"
         "\t// layout; ClassicInterface = no in Options.ini draws upstream's HTML pages instead.\n"
         "\tm_classicInterface = TRUE;\n",
     )
 
-    # 3) Options.ini lê a chave, sem controle no menu, como ShowHudOverlay.
+    # 3) Options.ini lê a chave, sem controle no menu, como as faixas do observador.
     catalog = code / "GameEngine" / "Source" / "Common" / "OptionsCatalog.cpp"
     replace_once(
         catalog,
-        "OPTION_BOOL_ACCESSORS( m_showHudOverlay )\n",
-        "OPTION_BOOL_ACCESSORS( m_showHudOverlay )\n"
+        "OPTION_BOOL_ACCESSORS( m_showSuperweaponStrip )\n",
+        "OPTION_BOOL_ACCESSORS( m_showSuperweaponStrip )\n"
         "OPTION_BOOL_ACCESSORS( m_classicInterface )\n",
     )
     replace_once(
         catalog,
-        "\t\tget_m_showHudOverlay, set_m_showHudOverlay },\n",
-        "\t\tget_m_showHudOverlay, set_m_showHudOverlay },\n"
+        "\t\tget_m_showSuperweaponStrip, set_m_showSuperweaponStrip },\n"
+        "\n"
+        "\t{ NULL, NULL, NULL, OPTION_BOOL, APPLY_LIVE, 0, 0, NULL, NULL }\n",
+        "\t\tget_m_showSuperweaponStrip, set_m_showSuperweaponStrip },\n"
         "\n"
         "\t// PT-BR edition: the original command bar plates and Esc menu by default.\n"
         "\t{ \"ClassicInterface\",\t\t\t\t\tNULL, \"GUI:HudOverlay\",\n"
         "\t\tOPTION_BOOL, APPLY_RESTART, 0, 1,\n"
-        "\t\tget_m_classicInterface, set_m_classicInterface },\n",
+        "\t\tget_m_classicInterface, set_m_classicInterface },\n"
+        "\n"
+        "\t{ NULL, NULL, NULL, OPTION_BOOL, APPLY_LIVE, 0, 0, NULL, NULL }\n",
     )
 
     ui = code / "GameEngine" / "Source" / "GameClient" / "InGameUI.cpp"
@@ -174,16 +190,20 @@ def main():
         button,
         "extern Real ControlBarHudScale( void );\n",
         "extern Real ControlBarHudScale( void );\n"
-        "extern Real ControlBarUniformScale( void );\t///< PT-BR edition: the scale the classic bar stands at\n",
+        "extern Real ControlBarUniformScale( void );\n"
+        "\n"
+        "/** PT-BR edition: the scale of the bar a button stands on.  The classic bar is laid out at the\n"
+        "\t* uniform scale, so its markings are sized and judged cramped by it; the page's bar by the HUD's. */\n"
+        "static Real badgeBarScale( void )\n"
+        "{\n"
+        "\tif( TheGlobalData != NULL && TheGlobalData->m_classicInterface )\n"
+        "\t\treturn ControlBarUniformScale();\n"
+        "\treturn ControlBarHudScale();\n"
+        "}\n",
     )
-    replace_once(
-        button,
-        "\tInt pointSize = REAL_TO_INT_FLOOR( designPoints * ControlBarHudScale() );\n",
-        "\t// PT-BR edition: the classic bar is laid out at the uniform scale, and its markings with it\n"
-        "\tconst Real barScale = ( TheGlobalData != NULL && TheGlobalData->m_classicInterface )\n"
-        "\t\t? ControlBarUniformScale() : ControlBarHudScale();\n"
-        "\tInt pointSize = REAL_TO_INT_FLOOR( designPoints * barScale );\n",
-    )
+    # Todo lugar que mede uma marcação pela escala da barra: o tamanho da fonte (getBadgeFont) e,
+    # desde a v2.3.0, o teste que tira o "$" ou o "s" quando a marcação não cabe (drawBadge).
+    replace_all(button, "designPoints * ControlBarHudScale()", "designPoints * badgeBarScale()", BADGE_SCALE_USES)
 
     print("STAGE16 APPLY PASS")
     print("Original command bar plates and Esc menu; ClassicInterface = no in Options.ini shows the HTML pages.")

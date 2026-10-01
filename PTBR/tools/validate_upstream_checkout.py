@@ -118,14 +118,13 @@ def validate(repo):
         raise RuntimeError("OptionsCatalog.cpp: TextLanguage não acompanha TEXT_LANGUAGE_COUNT")
     result["checks"]["options_language_range"] = "PASS"
 
-    # Stage 13: corner readout hidden by default.
-    need(cpp, "\tm_showHudOverlay = TRUE;\n", "GlobalData.cpp HUD overlay default")
-    need(catalog, "OPTION_BOOL_ACCESSORS( m_showSuperweaponStrip )\n", "OptionsCatalog.cpp accessors")
-    need(catalog, "\t{ NULL, NULL, NULL, OPTION_BOOL, APPLY_LIVE, 0, 0, NULL, NULL }\n", "OptionsCatalog.cpp terminator")
+    # Stage 13: the corner box hidden by default, through upstream's own ShowNetBox switch.
+    need(cpp, "\tm_showNetBox = TRUE;\n", "GlobalData.cpp net box default")
+    if '{ "ShowNetBox",' not in catalog or "OPT_WND( \"CheckNetBox\" )" not in catalog:
+        raise RuntimeError("OptionsCatalog.cpp: ShowNetBox sem a caixa de seleção CheckNetBox no menu")
     test = (code/"Tests/test_gameengine.cpp").read_text(encoding="utf-8-sig")
-    need(test, "\t\t\"ShowHudOverlay\", \"ArchiveReplays\", NULL\n", "test_gameengine forced list")
-    need(test, "\tCHECK( scratch->m_showHudOverlay );\n", "test_gameengine HUD overlay check")
-    result["checks"]["hud_overlay_anchors"] = "PASS"
+    need(test, "\tCHECK( scratch->m_showNetBox );\n\tdef->set( 0 );\n", "test_gameengine net box default check")
+    result["checks"]["net_box_anchors"] = "PASS"
 
     # Stage 14: lobby AI difficulty names.
     info = (code/"GameEngine/Source/GameNetwork/GameInfo.cpp").read_text(encoding="utf-8-sig")
@@ -137,6 +136,9 @@ def validate(repo):
 
     # Stage 16: textured command bar plates by default.
     need(h, "\tBool m_showHudOverlay;\t\t\t\t///< draw the fps / elapsed time / income line in the corner\n", "GlobalData.h HUD overlay member")
+    need(cpp, "\tm_showHudOverlay = TRUE;\n", "GlobalData.cpp HUD overlay default")
+    need(catalog, "OPTION_BOOL_ACCESSORS( m_showSuperweaponStrip )\n", "OptionsCatalog.cpp accessors")
+    need(catalog, "\t\tget_m_showSuperweaponStrip, set_m_showSuperweaponStrip },\n\n\t{ NULL, NULL, NULL, OPTION_BOOL, APPLY_LIVE, 0, 0, NULL, NULL }\n", "OptionsCatalog.cpp terminator")
     ui = (code/"GameEngine/Source/GameClient/InGameUI.cpp").read_text(encoding="utf-8-sig")
     need(ui, "\tif( m_controlBarPage.empty() )\n\t{\n\t\tTheControlBar->setPageSolids( NULL );\n\t\treturn FALSE;\n\t}\n", "InGameUI.cpp command bar page fallback")
     w3dbar = (code/"GameEngineDevice/Source/W3DDevice/GameClient/GUI/GUICallbacks/W3DControlBar.cpp").read_text(encoding="utf-8-sig")
@@ -148,7 +150,8 @@ def validate(repo):
     button = (code/"GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DPushButton.cpp").read_text(encoding="utf-8-sig")
     need(button, "// USER INCLUDES //////////////////////////////////////////////////////////////\n#include \"GameClient/Gadget.h\"\n", "W3DPushButton.cpp includes")
     need(button, "extern Real ControlBarHudScale( void );\n", "W3DPushButton.cpp HUD scale declaration")
-    need(button, "\tInt pointSize = REAL_TO_INT_FLOOR( designPoints * ControlBarHudScale() );\n", "W3DPushButton.cpp badge point size")
+    from apply_stage16 import BADGE_SCALE_USES
+    need(button, "designPoints * ControlBarHudScale()", "W3DPushButton.cpp markings measured by the bar's scale", BADGE_SCALE_USES)
     result["checks"]["classic_interface_anchors"] = "PASS"
 
     result["status"] = "PASS"
