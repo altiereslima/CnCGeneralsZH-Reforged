@@ -5326,6 +5326,62 @@ GUI:ChallengeWinText
 "Parabéns, você derrotou %s"
 END
 
+GUI:CheatApply
+"OK"
+END
+
+GUI:CheatGod
+"Modo Deus"
+END
+
+GUI:CheatHeroic
+"Unidades heroicas"
+END
+
+GUI:CheatInstantBuild
+"Construção imediata"
+END
+
+GUI:CheatMoney
+"Recursos"
+END
+
+GUI:CheatNoCooldown
+"Sem recarga"
+END
+
+GUI:CheatOff
+"INATIVO"
+END
+
+GUI:CheatOn
+"ATIVO"
+END
+
+GUI:CheatOneHitKill
+"Abate com um golpe"
+END
+
+GUI:CheatPanelTitle
+"Trapaças"
+END
+
+GUI:CheatPoints
+"Pontos de general"
+END
+
+GUI:CheatPower
+"Energia ilimitada"
+END
+
+GUI:CheatRankUp
+"Subir de patente"
+END
+
+GUI:CheatReveal
+"Revelar o mapa"
+END
+
 GUI:CheckingForPatches
 "Procurando atualizações..."
 END
@@ -5388,6 +5444,10 @@ END
 
 GUI:CloseExpScreen
 "OK"
+END
+
+GUI:CloserZoom
+"Zoom Mais Próximo"
 END
 
 GUI:CloudShadows
@@ -5600,6 +5660,10 @@ END
 
 GUI:ControlBarMoneyEarning
 "$ %d  +%d/s"
+END
+
+GUI:ControlBarMoneyEarningMinute
+"$ %d  +%d/min"
 END
 
 GUI:ControlOptions
@@ -5902,6 +5966,10 @@ GUI:DownloadUnknownTime
 "???"
 END
 
+GUI:DragTolerance
+"Limite de Arrasto"
+END
+
 GUI:DrawScrollAnchor
 "Draw scroll anchor"
 END
@@ -5932,6 +6000,10 @@ END
 
 GUI:Email
 "E-mail"
+END
+
+GUI:EmptyBuildingPips
+"Vagas Vazias nos Edifícios"
 END
 
 GUI:EndCampaign
@@ -6542,6 +6614,18 @@ GUI:HTTPProxy
 "Proxy HTTP:"
 END
 
+GUI:HudAlertBuilt
+"%s: construção concluída"
+END
+
+GUI:HudAlertLaunched
+"%s disparou"
+END
+
+GUI:HudAlertReady
+"%s pode disparar"
+END
+
 GUI:HudArmies
 "Exércitos"
 END
@@ -6606,6 +6690,26 @@ GUI:HudPromotionBought
 "agora disponível"
 END
 
+GUI:HudScale
+"Tamanho da Interface"
+END
+
+GUI:HudScale0
+"100%"
+END
+
+GUI:HudScale1
+"115%"
+END
+
+GUI:HudScale2
+"130%"
+END
+
+GUI:HudScale3
+"150%"
+END
+
 GUI:HudSkillStrip
 "Promoções dos Generais"
 END
@@ -6668,6 +6772,22 @@ END
 
 GUI:IgnoreSm
 "Ignorar"
+END
+
+GUI:IncomeRate
+"Renda Exibida"
+END
+
+GUI:IncomeRate0
+"Por Segundo"
+END
+
+GUI:IncomeRate1
+"Por Minuto"
+END
+
+GUI:IncomeRate2
+"Automático"
 END
 
 GUI:IncomeSharing
@@ -7182,6 +7302,10 @@ GUI:NeedMorePlayers
 "Você precisa de mais jogadores para iniciar a partida."
 END
 
+GUI:NetBox
+"Caixa de Relógio e FPS"
+END
+
 GUI:NetgearDelay
 "Enviar Delay"
 END
@@ -7336,6 +7460,10 @@ END
 
 GUI:OptionsGroupFirewall
 "Firewall"
+END
+
+GUI:OptionsGroupHud
+"Interface"
 END
 
 GUI:OptionsGroupImage
@@ -8070,6 +8198,14 @@ GUI:SelectMap
 "MAPAS"
 END
 
+GUI:SelectNextIdleUnit
+"Selecionar Próxima Unidade Ociosa"
+END
+
+GUI:SelectNextIdleUnitDescription
+"Seleciona a próxima unidade de combate sem ordens e centraliza a câmera nela."
+END
+
 GUI:SelectNextIdleWorker
 "Selecionar Próxima Unidade de Construção Ociosa"
 END
@@ -8442,6 +8578,10 @@ GUI:Start
 "JOGAR"
 END
 
+GUI:StartAtMaxZoom
+"Começar com Zoom Afastado"
+END
+
 GUI:StartCustomMission
 "INICIAR JOGO"
 END
@@ -8588,6 +8728,18 @@ END
 
 GUI:SuperweaponTerrorCell
 "Célula Terrorista"
+END
+
+GUI:SupplyPileLimit
+"Limite por Pilha"
+END
+
+GUI:SupplyPileLimitFormat
+"%d por pilha"
+END
+
+GUI:SupplyPileLimitOff
+"Sem Limite"
 END
 
 GUI:SupW_SuperweaponNeutronMissile
@@ -15406,6 +15558,10 @@ TOOLTIP:CloseExpScreen
 "Volta para o Jogo"
 END
 
+TOOLTIP:CloserZoom
+"Quanto a roda do mouse pode aproximar a câmera do chão além do normal. 0% é o limite do próprio jogo."
+END
+
 TOOLTIP:CloudShadows
 "Ativa/Desativa a exibição das sombras das nuvens sobre o terreno. Desative esta opção para melhorar o desempenho do jogo."
 END
@@ -15486,6 +15642,10 @@ TOOLTIP:DownloadProgress
 "Download em andamento."
 END
 
+TOOLTIP:DragTolerance
+"Quantos pixels o mouse pode se mover com um botão pressionado antes de um clique virar um arrasto. Aumente se caixas de seleção começarem sem querer; diminua se arrastos forem lidos como cliques."
+END
+
 TOOLTIP:EdgeScrollWindowed
 "O jogo original desativa a rolagem pela borda da tela no modo Janela. Ative para usá-la novamente em um segundo monitor ou no modo Sem Bordas."
 END
@@ -15500,6 +15660,10 @@ END
 
 TOOLTIP:EmoteText
 "Clique com o botão esquerdo para enviar uma mensagem."
+END
+
+TOOLTIP:EmptyBuildingPips
+"A fileira de vagas vazias sobre um edifício sem ninguém dentro, como as dez sobre um Quartel. Desligado, um edifício mostra suas vagas apenas enquanto há alguém dentro."
 END
 
 TOOLTIP:EnterPassword
@@ -15610,12 +15774,20 @@ TOOLTIP:HudOverlay
 "Mostra informações adicionais no topo da tela, como energia, renda e a fila de produção."
 END
 
+TOOLTIP:HudScale
+"Desenha a barra de comando e o resto da interface inferior maiores do que a sua resolução faria. Na interface clássica, a barra de comando mantém o tamanho original."
+END
+
 TOOLTIP:IgnoreButton
 "Ignorar jogador"
 END
 
 TOOLTIP:IgnoredModifier
 "(ignorado)"
+END
+
+TOOLTIP:IncomeRate
+"Em que período é contada a renda ao lado dos seus recursos. Automático mostra por minuto enquanto você ganha menos de $10 por segundo, quando um número inteiro por segundo esconde a maior parte da variação, e por segundo acima disso."
 END
 
 TOOLTIP:IncomeSharing
@@ -15772,6 +15944,10 @@ END
 
 TOOLTIP:NameButton
 "Classificar por Nome do Jogo."
+END
+
+TOOLTIP:NetBox
+"A caixa no canto superior direito com o relógio da partida, as taxas de quadros e a conexão. Desligada, os cronômetros das superarmas sobem para o canto."
 END
 
 TOOLTIP:Network
@@ -16050,6 +16226,10 @@ TOOLTIP:StagingPlayerInfo
 "\n Região: %ls \n Ping: %d ms \n %d vitórias/%d derrotas \n %d desconexões \n Exército favorito: %ls"
 END
 
+TOOLTIP:StartAtMaxZoom
+"A partida começa com a câmera no ponto mais distante que a roda do mouse alcança. Desligado, ela começa na altura para a qual o mapa foi enquadrado."
+END
+
 TOOLTIP:StartGame
 "Iniciar partida multijogador"
 END
@@ -16146,8 +16326,20 @@ TOOLTIP:SupplyDock
 "Suprimentos"
 END
 
+TOOLTIP:SupplyPileFull
+"\n Ocupada: o limite por pilha barra seus coletores"
+END
+
+TOOLTIP:SupplyPileLimit
+"Quantos jogadores podem coletar de uma mesma doca ou pilha de suprimentos ao mesmo tempo. Com 1, a pilha pertence a quem chegar primeiro, e os Caminhões de Suprimentos, Trabalhadores e Chinooks dos outros jogadores vão para outra pilha ou esperam na base. Aliados contam como jogadores separados. Uma pilha fica livre de novo um minuto depois que a última carga foi retirada dela."
+END
+
 TOOLTIP:SupplyWarehouse
 "\n Restam $%d."
+END
+
+TOOLTIP:SupplyWarehousePercent
+"\n $%d restantes (%d%%)"
 END
 
 TOOLTIP:TankTreads
