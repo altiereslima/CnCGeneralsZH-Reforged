@@ -23,6 +23,12 @@ O que a edição PT-BR muda no jogo, e a chave do `Options.ini` que volta ao com
 
 Os resultados do runner ficam em `PTBR/PTBR_STAGE15_RESULTS/`.
 
+O inglês original não está no repositório: o jogo o lê de `Data\English\Generals.csf`, dentro do
+`EnglishZH.big` da instalação do Zero Hour. Para conferir a tradução contra ele, rode
+`PTBR/tools/conferir_ingles.py` na pasta do jogo (ou passe o caminho dela). O script gera
+`conferencia_ingles.txt` com números, formatos, títulos e quebras de linha que não batem e os
+rótulos sem tradução, e não precisa de nada além do Python.
+
 O build é x64 (o upstream removeu o Win32 na v2.0.0). Som e vídeo usam XAudio2 e FFmpeg; as DLLs
 do FFmpeg já vêm versionadas no repositório e entram no artifact. Miles e Bink não são mais usados.
 A arte ampliada do Reforged (`art-latest`, mais de 1 GB) não é baixada no CI.
