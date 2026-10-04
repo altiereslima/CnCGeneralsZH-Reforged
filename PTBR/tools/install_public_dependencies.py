@@ -307,6 +307,36 @@ def install_lzh(repo: Path, source_override: Path|None):
         "commit":LZH_COMMIT,
     }
 
+LZH_PATCH_MARKER = b"Zero Hour Reforged: altered"
+
+def apply_lzh_patch(repo: Path):
+    # A única mudança do fork no LZH-Light, versionada ao lado dele: o histórico do LZBuffer começa
+    # zerado (o vendor.sh do upstream explica). Desde a v2.4.0 o CMake se recusa a configurar sem ela,
+    # em toda plataforma, e confere a marca no _lz.h, como o vendor.ps1 e esta função.
+    source=repo/"GeneralsMD/Code/Libraries/Source"
+    dst=source/"Compression/LZHCompress/CompLibHeader"
+    header=dst/"_lz.h"
+    current=header.read_bytes()
+    if LZH_PATCH_MARKER in current:
+        return {"status":"PRESENT"}
+    git=shutil.which("git")
+    if not git:
+        raise RuntimeError("git não encontrado para aplicar lzhl-clear-history.patch")
+    # O patch nas quebras de linha do próprio _lz.h, como o vendor.ps1 faz: o clone pode ter vindo em
+    # CRLF (core.autocrlf do runner) e o patch está fixado em LF.
+    patch=(source/"lzhl-clear-history.patch").read_bytes().replace(b"\r\n",b"\n")
+    if b"\r\n" in current:
+        patch=patch.replace(b"\n",b"\r\n")
+    work=Path(tempfile.mkdtemp(prefix="zh-lzh-patch-"))/"lzhl-clear-history.patch"
+    work.write_bytes(patch)
+    # Sem o teto o git acha o checkout em volta da pasta e não aplica nada, sem avisar.
+    env=dict(os.environ, GIT_CEILING_DIRECTORIES=str(source))
+    cp=subprocess.run([git,"-c","core.autocrlf=false","apply",str(work)],
+                      cwd=dst,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+    if cp.returncode or LZH_PATCH_MARKER not in header.read_bytes():
+        raise RuntimeError("lzhl-clear-history.patch não aplicou no LZH-Light: "+cp.stdout)
+    return {"status":"APPLIED"}
+
 def validate_directx(repo: Path):
     root=repo/"GeneralsMD/Code/Libraries/DirectX"
     required=["Include/d3d8.h","Include/d3dx8.h"]+["Include/"+x for x in DX8_EXTRA_FILES]+["Lib/d3dx8.lib"]
@@ -469,6 +499,7 @@ def main():
         z=install_zlib(repo, Path(args.zlib_archive).resolve() if args.zlib_archive else None)
         g=install_gamespy(repo, Path(args.gamespy_source).resolve() if args.gamespy_source else None)
         l=install_lzh(repo, Path(args.lzh_source).resolve() if args.lzh_source else None)
+        lp=apply_lzh_patch(repo)
         d=install_directx(repo, Path(args.dx8_source).resolve() if args.dx8_source else None)
         h=install_litehtml(repo, Path(args.litehtml_source).resolve() if args.litehtml_source else None)
         hp=apply_litehtml_patch(repo)
@@ -484,6 +515,7 @@ def main():
     print("zlib:",z)
     print("gamespy:",g)
     print("lzh:",l)
+    print("lzh patch:",lp)
     print("directx:",d)
     print("litehtml:",h)
     print("litehtml patch:",hp)
