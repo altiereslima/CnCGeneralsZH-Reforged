@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -275,7 +276,7 @@ Bool UpgradeMuxData::isTriggeredBy(const std::string &upgrade) const
 	for( it = m_triggerUpgradeNames.begin(); it != m_triggerUpgradeNames.end();	++it)
 	{
 		AsciiString trigger = *it;
-		if (stricmp(trigger.str(), upgrade.c_str()) == 0)
+		if (strcasecmp(trigger.str(), upgrade.c_str()) == 0)
 		{
 			return TRUE;
 		}

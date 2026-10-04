@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -93,8 +95,8 @@ void AsciiString::freeBytes(void)
 void AsciiString::validate() const
 {
 	if (!m_data) return;
-	DEBUG_ASSERTCRASH(m_data->m_refCount > 0, ("m_refCount is zero"));
-	DEBUG_ASSERTCRASH(m_data->m_refCount < 32000, ("m_refCount is suspiciously large"));
+	DEBUG_ASSERTCRASH(m_data->m_refCount.load(std::memory_order_relaxed) > 0, ("m_refCount is zero"));
+	DEBUG_ASSERTCRASH(m_data->m_refCount.load(std::memory_order_relaxed) < 32000, ("m_refCount is suspiciously large"));
 	DEBUG_ASSERTCRASH(m_data->m_numCharsAllocated > 0, ("m_numCharsAllocated is zero"));
 //	DEBUG_ASSERTCRASH(m_data->m_numCharsAllocated < 1024, ("m_numCharsAllocated suspiciously large"));
 	DEBUG_ASSERTCRASH(strlen(m_data->peek())+1 <= m_data->m_numCharsAllocated,("str is too long (%d) for storage",strlen(m_data->peek())+1));
@@ -122,14 +124,21 @@ void AsciiString::ensureUniqueBufferOfSize(int numCharsNeeded, Bool preserveData
 	validate();
 
 	if (m_data &&
-			m_data->m_refCount == 1 &&
+			m_data->m_refCount.load(std::memory_order_relaxed) == 1 &&
 			m_data->m_numCharsAllocated >= numCharsNeeded)
 	{
 		// no buffer manhandling is needed (it's already large enough, and unique to us)
+		// memmove, not strcpy or strcat: the source can be this string's own text - nextToken sets the
+		// string to the rest of itself, and a string can be concatenated onto itself - and an
+		// overlapping strcpy or strcat is undefined.  MSVC's copies forward and got away with it;
+		// macOS's x86_64 strcpy did not, and the archive directory lost a random subset of its paths.
 		if (strToCopy)
-			strcpy(m_data->peek(), strToCopy);
+			memmove(m_data->peek(), strToCopy, strlen(strToCopy) + 1);
 		if (strToCat)
-			strcat(m_data->peek(), strToCat);
+		{
+			char *end = m_data->peek() + strlen(m_data->peek());
+			memmove(end, strToCat, strlen(strToCat) + 1);
+		}
 		return;
 	}
 
@@ -137,9 +146,16 @@ void AsciiString::ensureUniqueBufferOfSize(int numCharsNeeded, Bool preserveData
 	if (minBytes > MAX_LEN)
 		throw ERROR_OUT_OF_MEMORY;
 
+	if (TheDynamicMemoryAllocator == NULL)
+		preMainInitMemoryManager();	// a string built by a static constructor, before main (GameMemory.h)
 	int actualBytes = TheDynamicMemoryAllocator->getActualAllocationSize(minBytes);
 	AsciiStringData* newData = (AsciiStringData*)TheDynamicMemoryAllocator->allocateBytesDoNotZero(actualBytes, "STR_AsciiString::ensureUniqueBufferOfSize");
-	newData->m_refCount = 1;
+	/* Placement-new rather than assignment.  allocateBytesDoNotZero hands back raw bytes that are
+		 then cast to AsciiStringData - no constructor has ever run for this struct, which is what the
+		 "Plain Old Data Structure... don't add a ctor/dtor" note on it means - so m_refCount's
+		 lifetime has to be started explicitly now that it is a std::atomic.  It compiles to the same
+		 16-bit store either way; this is about the object model, not the instructions. */
+	new (&newData->m_refCount) std::atomic<unsigned short>(1);
 	newData->m_numCharsAllocated = (actualBytes - sizeof(AsciiStringData))/sizeof(char);
 #if defined(_DEBUG) || defined(_INTERNAL)
 	newData->m_debugptr = newData->peek();	// just makes it easier to read in the debugger
@@ -293,7 +309,13 @@ void AsciiString::format_va(const AsciiString& format, va_list args)
 {
 	validate();
 	char buf[MAX_FORMAT_BUF_LEN];
-  if (_vsnprintf(buf, sizeof(buf)/sizeof(char)-1, format.str(), args) < 0)
+  // vsnprintf, not vsnprintf, and the test is not the same test.  Microsoft's returns -1 when it
+	// truncates; C99's always returns the length it wanted, so "< 0" would stop noticing.  Passing
+	// the full sizeof is also deliberate: C99 counts the terminator inside the bound, so the usable
+	// length is unchanged at sizeof(buf)-1 - and a string that exactly filled the old bound used to
+	// leave buf unterminated for set() to read past, which this no longer permits.
+	const int wanted = vsnprintf(buf, sizeof(buf), format.str(), args);
+	if (wanted < 0 || (size_t)wanted >= sizeof(buf))
 			throw ERROR_OUT_OF_MEMORY;
 	set(buf);
 	validate();
@@ -304,7 +326,8 @@ void AsciiString::format_va(const char* format, va_list args)
 {
 	validate();
 	char buf[MAX_FORMAT_BUF_LEN];
-  if (_vsnprintf(buf, sizeof(buf)/sizeof(char)-1, format, args) < 0)
+  const int wanted = vsnprintf(buf, sizeof(buf), format, args);
+	if (wanted < 0 || (size_t)wanted >= sizeof(buf))
 			throw ERROR_OUT_OF_MEMORY;
 	set(buf);
 	validate();
@@ -335,7 +358,7 @@ Bool AsciiString::startsWithNoCase(const char* p) const
 	if (lenThis < lenThat)
 		return false;	// that must be smaller than this
 
-	return strnicmp(peek(), p, lenThat) == 0;
+	return strncasecmp(peek(), p, lenThat) == 0;
 }
 
 // -----------------------------------------------------
@@ -363,13 +386,13 @@ Bool AsciiString::endsWithNoCase(const char* p) const
 	if (lenThis < lenThat)
 		return false;	// that must be smaller than this
 
-	return strnicmp(peek() + lenThis - lenThat, p, lenThat) == 0;
+	return strncasecmp(peek() + lenThis - lenThat, p, lenThat) == 0;
 }
 
 //-----------------------------------------------------------------------------
 Bool AsciiString::isNone() const
 {
-	return m_data && stricmp(peek(), "None") == 0;
+	return m_data && strcasecmp(peek(), "None") == 0;
 }
 
 //-----------------------------------------------------------------------------

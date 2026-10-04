@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -220,6 +221,7 @@ public:
 	Real						m_turnRate;
 	Real						m_pitchRate;
 	Real						m_naturalTurretAngle;
+	Real						m_yawLimit;							///< how far either side of the natural angle the turret can swing; PI is all the way round
 	Real						m_naturalTurretPitch;
 	Real						m_turretFireAngleSweep[WEAPONSLOT_COUNT];	///< if nonzero, sweep within +/- this angle range while firing
 	Real						m_turretSweepSpeedModifier[WEAPONSLOT_COUNT];	///< While sweeping, change your speed by this
@@ -273,6 +275,8 @@ public:
 	Bool isAllowsPitch() const { return m_data->m_isAllowsPitch; }
 	Real getTurnRate() const { return m_data->m_turnRate; }
 	Real getNaturalTurretAngle() const { return m_data->m_naturalTurretAngle; }
+	Real getYawLimit() const { return m_data->m_yawLimit; }
+	Real getArcShortfall(Real relAngle) const;
 	Real getPitchRate() const { return m_data->m_pitchRate; }
 	Real getFirePitch() const { return m_data->m_firePitch; }
 	Real getGroundUnitPitch() const { return m_data->m_groundUnitPitch; }
@@ -329,6 +333,7 @@ public:
 	Bool friend_isAnyWeaponInRangeOf(const Object* o) const;
 	TurretTargetType friend_getTurretTarget( Object*& obj, Coord3D& pos, Bool clearDeadTargets = TRUE ) const;
 	Bool friend_getTargetWasSetByIdleMood() const { return m_targetWasSetByIdleMood; }
+	Bool friend_getFiresWhileTurning() const { return m_firesWhileTurning; }
 	const Team* friend_getVictimInitialTeam() const { return m_victimInitialTeam; }
 	void friend_checkForIdleMoodTarget();
 	UnsignedInt friend_getNextIdleMoodTargetFrame() const;

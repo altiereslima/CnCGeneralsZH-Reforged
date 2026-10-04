@@ -639,7 +639,7 @@ TEST(stream_format)
 
 TEST(stream_format_truncates_and_stays_terminated)
 {
-	/* _vsnprintf writes no NUL when it fills the buffer, and m_buffer has no
+	/* vsnprintf writes no NUL when it fills the buffer, and m_buffer has no
 	   initialiser - this used to run off the end of the object. */
 	std::string out = run("test.fmtlong");
 	std::string payload = out.substr(strlen("> test.fmtlong\n"));
@@ -690,28 +690,34 @@ static bool translator_high(Debug &dbg, long hresult, void *user)
 	return true;
 }
 
+/* The user pointers are named, so adding and removing pass the same address.  Two "2" literals are one object
+   only under string pooling, which MSVC's Release optimisation turns on and its Debug build does not (W3). */
+static const char translator_user_1[] = "1";
+static const char translator_user_2[] = "2";
+static const char translator_user_nope[] = "nope";
+
 TEST(hresult_translators_run_in_priority_order)
 {
 	translator_log.clear();
 
-	Debug::AddHResultTranslator(1, translator_low, (void *)"1");
-	Debug::AddHResultTranslator(10, translator_high, (void *)"2");
+	Debug::AddHResultTranslator(1, translator_low, (void *)translator_user_1);
+	Debug::AddHResultTranslator(10, translator_high, (void *)translator_user_2);
 
 	CHECK_STR(run("test.hresult").c_str(), "> test.hresult\nHIGH2\n");
 	CHECK_STR(translator_log.c_str(), "high");
 
-	Debug::RemoveHResultTranslator(translator_high, (void *)"2");
+	Debug::RemoveHResultTranslator(translator_high, (void *)translator_user_2);
 	translator_log.clear();
 	CHECK_STR(run("test.hresult").c_str(), "> test.hresult\nLOW1\n");
 	CHECK_STR(translator_log.c_str(), "low");
 
-	Debug::RemoveHResultTranslator(translator_low, (void *)"1");
+	Debug::RemoveHResultTranslator(translator_low, (void *)translator_user_1);
 	CHECK_STR(run("test.hresult").c_str(), "> test.hresult\nHResult:0x80004005\n");
 }
 
 TEST(hresult_removing_an_unregistered_translator_is_harmless)
 {
-	Debug::RemoveHResultTranslator(translator_low, (void *)"nope");
+	Debug::RemoveHResultTranslator(translator_low, (void *)translator_user_nope);
 	CHECK_STR(run("test.hresult").c_str(), "> test.hresult\nHResult:0x80004005\n");
 }
 

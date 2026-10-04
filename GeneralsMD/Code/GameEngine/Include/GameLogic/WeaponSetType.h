@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -38,7 +39,7 @@
 // IMPORTANT NOTE #2: if you add or modify this list, be sure to update TheWeaponSetNames, 
 // *and* TheWeaponSetTypeToModelConditionTypeMap!
 //
-enum WeaponSetType
+enum WeaponSetType : int
 {
 	// The access and use of this enum has the bit shifting built in, so this is a 0,1,2,3,4,5 enum
 	WEAPONSET_VETERAN		= 0,

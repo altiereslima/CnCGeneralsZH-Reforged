@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,6 +31,8 @@
  
 // INCLUDES /////////////////////////////////////////////////////////////////////////////////////// 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+
+#include "Lib/WideCharFns.h"
 #define DEFINE_WEAPONCONDITIONMAP
 #include "Common/BitFlagsIO.h"
 #include "Common/BuildAssistant.h"
@@ -163,17 +167,17 @@ AsciiString DescribeObject(const Object *obj)
 
 	if (obj->getName().isNotEmpty())
 	{
-		ret.format("Object %d (%s) [%s, owned by player %d (%ls)]",
+		ret.format("Object %d (%s) [%s, owned by player %d (%s)]",
 			obj->getID(), obj->getName().str(), obj->getTemplate()->getName().str(),
 			obj->getControllingPlayer()->getPlayerIndex(),
-			obj->getControllingPlayer()->getPlayerDisplayName().str());
+			WideCharAsUtf8( obj->getControllingPlayer()->getPlayerDisplayName().str() ).str());
 	}
 	else
 	{
-		ret.format("Object %d [%s, owned by player %d (%ls)]",
+		ret.format("Object %d [%s, owned by player %d (%s)]",
 			obj->getID(), obj->getTemplate()->getName().str(),
 			obj->getControllingPlayer()->getPlayerIndex(),
-			obj->getControllingPlayer()->getPlayerDisplayName().str());
+			WideCharAsUtf8( obj->getControllingPlayer()->getPlayerDisplayName().str() ).str());
 	}
 
 	return ret;
@@ -3093,6 +3097,83 @@ Bool Object::isMobile() const
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Whoever takes experience points for source: source itself, or the first of its producers that
+		can (see scoreTheKill).  NULL when nobody up the chain can. */
+static Object *findExperienceEarner( Object *source )
+{
+	const Int MAX_PRODUCER_HOPS = 4;
+	Object *earner = source;
+	for( Int hop = 0; hop < MAX_PRODUCER_HOPS; ++hop )
+	{
+		ExperienceTracker *tracker = earner->getExperienceTracker();
+		if (tracker && tracker->isAcceptingExperiencePoints())
+			break;
+
+		Object *producer = TheGameLogic->findObjectByID( earner->getProducerID() );
+		if (producer == NULL || producer == earner)
+			break;
+		earner = producer;
+	}
+
+	ExperienceTracker *earnerTracker = earner->getExperienceTracker();
+	return (earnerTracker && earnerTracker->isAcceptingExperiencePoints()) ? earner : NULL;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Give kill experience to whoever takes points for source.  Returns the one who took it, or NULL
+		when nobody could or it is the victim's ally. */
+static Object *giveKillExperience( Object *source, const Object *victim, Int experience )
+{
+	Object *earner = findExperienceEarner( source );
+	if (earner == NULL || victim->getExperienceTracker()->getExperienceValue( earner ) == 0)
+		return NULL;
+
+	earner->getExperienceTracker()->addExperiencePoints( experience );
+	return earner;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** ActiveBody::attemptHealing put restored health back on patient, with me as the source.
+
+		A trainable unit that heals or repairs an ally earns HEAL_XP_PERCENT of the patient's kill value
+		for a full heal, pro rata.  The points go where kill points from me would go: up the producers,
+		so an Overlord's or a Helix's Propaganda Tower pays the vehicle carrying it (the tower is a
+		rider whose experience sink is the vehicle).  A building earns nothing, and neither does the
+		walk from one, or every repair bay would pay the dozer that built it.  Healing yourself earns
+		nothing, which is also where a Battle Drone repairing its own vehicle ends up. */
+void Object::scoreTheHeal( const Object *patient, Real restored, Real maxHealth )
+{
+	if (isKindOf( KINDOF_STRUCTURE ) || patient->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ))
+		return;
+
+	Object *earner = findExperienceEarner( this );
+	if (earner == NULL)
+		return;
+
+	Object *sink = TheGameLogic->findObjectByID( earner->getExperienceTracker()->getExperienceSink() );
+	if (sink)
+		earner = sink;
+
+	ExperienceTracker *tracker = earner->getExperienceTracker();
+	if (earner == patient || earner->isEffectivelyDead() || !tracker->isTrainable()
+			|| earner->getRelationship( patient ) != ALLIES)
+		return;
+
+	// thousandths of a hit point, so a frame's sliver of health still counts
+	Int value = patient->getTemplate()->getExperienceValue( patient->getVeterancyLevel() );
+	Int points = tracker->accrueHealExperience( value, REAL_TO_INT_FLOOR( restored * 1000.0f ),
+		REAL_TO_INT_CEIL( maxHealth * 1000.0f ) );
+	if (points == 0)
+		return;
+
+	tracker->addExperiencePoints( points );
+
+	DEBUG_LOG(("HEALXP frame=%d healer=%s earner=%s patient=%s xp=%d\n", TheGameLogic->getFrame(),
+		getTemplate()->getName().str(), earner->getTemplate()->getName().str(),
+		patient->getTemplate()->getName().str(), points));
+}
+
+//-------------------------------------------------------------------------------------------------
 void Object::scoreTheKill( const Object *victim )
 {
 	// Do stuff that has nothing to do with experience points here, like tell our Player we killed something
@@ -3144,31 +3225,48 @@ void Object::scoreTheKill( const Object *victim )
 
 		 The walk is a chain and not a single step: a transport makes a payload which makes the thing
 		 that does the killing.  It stops at a fixed depth rather than trusting the data not to contain
-		 a loop, and it stops at the first owner who can accept points, which is the one that fired. */
-	const Int MAX_PRODUCER_HOPS = 4;
-	Object *earner = this;
-	for( Int hop = 0; hop < MAX_PRODUCER_HOPS; ++hop )
-	{
-		ExperienceTracker *tracker = earner->getExperienceTracker();
-		if (tracker && tracker->isAcceptingExperiencePoints())
-			break;
+		 a loop, and it stops at the first owner who can accept points, which is the one that fired.
 
-		Object *producer = TheGameLogic->findObjectByID( earner->getProducerID() );
-		if (producer == NULL || producer == earner)
-			break;
-		earner = producer;
-	}
+		 The kill is split by damage.  The killing blow takes KILL_XP_KILLING_BLOW_PERCENT, the rest goes
+		 to everyone the victim remembers hitting it lately (the killer too) by the health each took off,
+		 and every share goes through the same walk.  A share nobody can take, because its attacker is
+		 dead or cannot earn, goes to the killer.  With nothing remembered the killer takes it all. */
 
-	ExperienceTracker *earnerTracker = earner->getExperienceTracker();
-	if (earnerTracker && earnerTracker->isAcceptingExperiencePoints())
+	// srj sez: per dustin, no experience (et al) for killing things under construction.
+	if (victim->testStatus(OBJECT_STATUS_UNDER_CONSTRUCTION))
+		return;
+
+	const ExperienceTracker *victimTracker = victim->getExperienceTracker();
+	const KillXPDamager *damagers = victimTracker->getDamagers();
+	Int shares[KILL_XP_DAMAGER_SLOTS];
+	Int total = victimTracker->getExperienceValue( this );
+	Int killerXP = KillXPSplit( total, damagers, TheGameLogic->getFrame(), shares );
+	AsciiString others;
+
+	for( Int i = 0; i < KILL_XP_DAMAGER_SLOTS; ++i )
 	{
-		// srj sez: per dustin, no experience (et al) for killing things under construction.
-		if (!victim->testStatus(OBJECT_STATUS_UNDER_CONSTRUCTION))
+		if (shares[i] == 0)
+			continue;
+
+		Object *damager = damagers[i].m_id == getID() ? NULL : TheGameLogic->findObjectByID( damagers[i].m_id );
+		Object *earner = (damager && !damager->isEffectivelyDead()) ? giveKillExperience( damager, victim, shares[i] ) : NULL;
+		if (earner == NULL)
 		{
-			Int experienceValue = victim->getExperienceTracker()->getExperienceValue( earner );
-			earnerTracker->addExperiencePoints( experienceValue );
+			killerXP += shares[i];
+			continue;
 		}
+#ifdef DEBUG_LOGGING
+		AsciiString one;
+		one.format(" other=%s:%d", earner->getTemplate()->getName().str(), shares[i]);
+		others.concat(one);
+#endif
 	}
+
+	Object *earner = giveKillExperience( this, victim, killerXP );
+
+	DEBUG_LOG(("KILLXP frame=%d victim=%s total=%d killer=%s:%d%s\n", TheGameLogic->getFrame(),
+		victim->getTemplate()->getName().str(), total, (earner ? earner : this)->getTemplate()->getName().str(),
+		earner ? killerXP : 0, others.str()));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3367,6 +3465,10 @@ void Object::onVeterancyLevelChanged( VeterancyLevel oldLevel, VeterancyLevel ne
 	// bonuses, the level-up animation and the sound.
 	if( isEffectivelyDead() )
 		return;
+
+	DEBUG_LOG(("PROMOTE frame=%d player=%d template=%s from=%s to=%s xp=%d\n", TheGameLogic->getFrame(),
+		getControllingPlayer()->getPlayerIndex(), getTemplate()->getName().str(),
+		TheVeterancyNames[oldLevel], TheVeterancyNames[newLevel], getExperienceTracker()->getCurrentExperience()));
 
 	updateUpgradeModules();
 
@@ -6426,6 +6528,19 @@ Bool Object::getCaptureProgress( ObjectID *targetID, Real *progress ) const
 	{
 		SpecialPowerUpdateInterface *spInterface = (*u)->getSpecialPowerUpdateInterface();
 		if( spInterface && spInterface->getCaptureProgress( targetID, progress ) )
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+// ------------------------------------------------------------------------------------------------
+Bool Object::getCaptureTarget( ObjectID *targetID ) const
+{
+	for( BehaviorModule** u = m_behaviors; *u; ++u )
+	{
+		SpecialPowerUpdateInterface *spInterface = (*u)->getSpecialPowerUpdateInterface();
+		if( spInterface && spInterface->getCaptureTarget( targetID ) )
 			return TRUE;
 	}
 

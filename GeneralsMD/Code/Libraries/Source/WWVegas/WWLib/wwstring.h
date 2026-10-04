@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -46,7 +47,11 @@
 #include "win.h"
 #include <string.h>
 #include <stdarg.h>
+#if defined(_MSC_VER)
 #include <tchar.h>
+#else
+#include "Platform/MSVCCompat.h"   // TCHAR and the _tcs* spellings, narrow
+#endif
 #include "trim.h"
 #include "wwdebug.h"
 #ifdef _UNIX
@@ -80,7 +85,17 @@ public:
 	StringClass (const StringClass &string, bool hint_temporary = false);
 	StringClass (const TCHAR *string, bool hint_temporary = false);
 	StringClass (TCHAR ch, bool hint_temporary = false);
+/*
+**	The wide half of this class is Win32-only, and deliberately not shimmed.  Copy_Wide below is two
+**	calls to WideCharToMultiByte, so WCHAR here is not a character type this code is generic over -
+**	it is the argument type of a Windows API.  A `typedef wchar_t WCHAR` would make fourteen
+**	translation units compile and leave these three declarations with no possible body off Windows,
+**	or invite a second UTF-16-to-narrow conversion beside the engine's own.  B1 owns what the
+**	engine's text narrows through; see PORTING.md ("Wide characters").
+*/
+#if defined(_WIN32)
 	StringClass (const WCHAR *string, bool hint_temporary = false);
+#endif
 	~StringClass (void);
 
 	////////////////////////////////////////////////////////////
@@ -92,7 +107,9 @@ public:
 	inline const StringClass &operator= (const StringClass &string);
 	inline const StringClass &operator= (const TCHAR *string);
 	inline const StringClass &operator= (TCHAR ch);
+#if defined(_WIN32)
 	inline const StringClass &operator= (const WCHAR *string);
+#endif
 
 	const StringClass &operator+= (const StringClass &string);
 	const StringClass &operator+= (const TCHAR *string);
@@ -131,7 +148,9 @@ public:
 	TCHAR *		Peek_Buffer (void);
 	const TCHAR * Peek_Buffer (void) const;
 
+#if defined(_WIN32)
 	bool Copy_Wide (const WCHAR *source);
+#endif
 
 	////////////////////////////////////////////////////////////
 	//	Static methods
@@ -231,6 +250,7 @@ StringClass::operator= (const TCHAR *string)
 ///////////////////////////////////////////////////////////////////
 //	operator=
 ///////////////////////////////////////////////////////////////////
+#if defined(_WIN32)
 inline const StringClass &
 StringClass::operator= (const WCHAR *string)
 {
@@ -240,6 +260,7 @@ StringClass::operator= (const WCHAR *string)
 
 	return (*this);
 }
+#endif
 
 
 ///////////////////////////////////////////////////////////////////
@@ -329,6 +350,7 @@ StringClass::StringClass (const TCHAR *string, bool hint_temporary)
 ///////////////////////////////////////////////////////////////////
 //	StringClass
 ///////////////////////////////////////////////////////////////////
+#if defined(_WIN32)
 inline
 StringClass::StringClass (const WCHAR *string, bool hint_temporary)
 	:	m_Buffer (m_EmptyString)
@@ -341,6 +363,7 @@ StringClass::StringClass (const WCHAR *string, bool hint_temporary)
 	(*this) = string;
 	return ;
 }
+#endif
 
 ///////////////////////////////////////////////////////////////////
 //	~StringClass

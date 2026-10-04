@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -28,18 +30,19 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include "Lib/BaseType.h"
+#include "Lib/Clock.h"
 #include "camera.h"
 #include "simplevec.h"
 #include "dx8wrapper.h"
-#include "common/MapObject.h"
-#include "common/PerfTimer.h"
+#include "Common/MapObject.h"
+#include "Common/PerfTimer.h"
 #include "W3DDevice/GameClient/HeightMap.h"
 #include "W3DDevice/GameClient/W3DPoly.h"
 #include "W3DDevice/GameClient/W3DShaderManager.h"
 #include "assetmgr.h"
 #include "W3DDevice/GameClient/W3DShroud.h"
 #include "WW3D2/textureloader.h"
-#include "common/GlobalData.h"
+#include "Common/GlobalData.h"
 #include "GameLogic/PartitionManager.h"
 
 #ifdef _INTERNAL
@@ -190,7 +193,7 @@ void W3DShroud::init(WorldHeightMap *pMap, Real worldCellSizeX, Real worldCellSi
 	D3DLOCKED_RECT rect;
 
 	//Get a pointer to source surface pixels.
-	HRESULT res = m_pSrcTexture->LockRect(&rect,NULL,D3DLOCK_NO_DIRTY_UPDATE);
+	RenderResult res = m_pSrcTexture->LockRect(&rect,NULL,D3DLOCK_NO_DIRTY_UPDATE);
 	m_pSrcTexture->UnlockRect();
 
 	DEBUG_ASSERTCRASH( res == D3D_OK, ("Failed to lock shroud src surface"));
@@ -487,7 +490,7 @@ void W3DShroud::fillBorderShroudData(W3DShroudLevel level, SurfaceClass* pDestSu
 
 	//Fill destination texture with border color
 
-	RECT	srcRect;
+	RenderRect	srcRect;
 
 	//create a rectangle enclosing bottom row of unused pixels long enough
 	//to cover destination width.
@@ -496,7 +499,7 @@ void W3DShroud::fillBorderShroudData(W3DShroudLevel level, SurfaceClass* pDestSu
 	srcRect.right= m_numCellsX;
 	srcRect.bottom= m_numCellsY+1;
 
-	POINT	dstPoint={0,0};
+	RenderPoint	dstPoint={0,0};
 
 	Int numFullCopies = m_dstTextureWidth/srcRect.right;
 	Int numExtraPixels = m_dstTextureWidth%srcRect.right;
@@ -721,8 +724,8 @@ void W3DShroud::render(CameraClass *cam)
 		pDestSurface=m_pDstTexture->Get_Surface_Level(0);
 	}
 
-	RECT	srcRect;
-	POINT	dstPoint={1,1};	//first row/column is reserved for border.
+	RenderRect	srcRect;
+	RenderPoint	dstPoint={1,1};	//first row/column is reserved for border.
 	
 	srcRect.left=visStartX;
 	srcRect.top=visStartY;
@@ -757,11 +760,11 @@ void W3DShroud::render(CameraClass *cam)
 
 #define FOG_INTERPOLATION_RATE	(255.0f/1000.0f)	//take one second to go from black to fully lit.
 //-----------------------------------------------------------------------------
-void W3DShroud::interpolateFogLevels(RECT *rect)
+void W3DShroud::interpolateFogLevels(RenderRect *rect)
 {
-	static UnsignedInt prevTime = timeGetTime();
+	static UnsignedInt prevTime = Clock_Milliseconds();
 
-	UnsignedInt timeDiff=timeGetTime()-prevTime;
+	UnsignedInt timeDiff=Clock_Milliseconds()-prevTime;
 
 	if (!timeDiff)
 		return;	//no time has elapsed

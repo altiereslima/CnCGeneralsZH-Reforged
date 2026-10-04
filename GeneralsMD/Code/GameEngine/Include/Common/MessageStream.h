@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -31,6 +33,7 @@
 #ifndef _MESSAGE_STREAM_H_
 #define _MESSAGE_STREAM_H_
 
+#include <type_traits>
 #include <vector>
 
 #include "Common/GameCommon.h"	// ensure we get DUMP_PERF_STATS, or not
@@ -48,8 +51,8 @@ typedef UnsignedInt TranslatorID;								///< Unique identifiers for message str
 
 class Drawable;
 class GameMessageList;
-enum ObjectID;
-enum DrawableID;
+enum ObjectID : Int;
+enum DrawableID : Int;
 
 union GameMessageArgumentType														///< Union of possible data for given message type
 {
@@ -113,7 +116,9 @@ public:
 	/**	@todo Create two classes of message: raw input messages, and command messages. Raw input messages
 						will be destroyed when they reach the end of the stream, whereas command messages will be
 						transferred to TheCommandList */
-	enum Type
+	// Fixed at Int: NetPacket sends a message's type as sizeof(GameMessage::Type) bytes, so its width is
+	// the wire format's.  MSVC's unfixed enums were int already; this makes every compiler agree.
+	enum Type : Int
 	{
 		MSG_INVALID,																///< (none) this msg should never actually occur
 
@@ -653,6 +658,7 @@ public:
 		MSG_CHEAT,																	///< (Int CheatKind, Int amount) a console cheat, refused in a network game (fork)
 		MSG_QUEUE_NEXT_ORDER,												///< (Int OrderQueueMode) the order right after this one is a shift-queued one (fork)
 		MSG_CLEAR_RALLY_POINT,											///< (objectID) the building forgets its rally point (fork)
+		MSG_SET_STANCE,															///< (Int 0 defensive, 1 aggressive) how far the selected units go after what they see (fork)
 
 		MSG_BEGIN_DEBUG_NETWORK_MESSAGES = 1900,		///< network messages that exist only in debug/internal builds. all grouped separately.
 
@@ -741,6 +747,10 @@ private:
 	GameMessageArgument *allocArg( void );
 
 };
+
+// What the ": Int" above guarantees.  Unfixed, clang picks unsigned int for this enum and MSVC int.
+static_assert( std::is_same<std::underlying_type<GameMessage::Type>::type, Int>::value,
+	"GameMessage::Type goes on the wire as sizeof(GameMessage::Type) bytes (NetPacket.cpp)" );
 
 
 /**

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -37,12 +38,12 @@
 #include "Common/PlayerTemplate.h"
 #include "Common/RandomValue.h"
 #include "Common/Recorder.h"
-#include "Common/Version.h"
+#include "Common/version.h"
 #include "GameClient/CampaignManager.h"
 #include "GameClient/ChallengeGenerals.h"
 #include "GameClient/Gadget.h"
 #include "GameClient/GadgetCheckBox.h"
-#include "GameClient/GadgetListbox.h"
+#include "GameClient/GadgetListBox.h"
 #include "GameClient/GadgetStaticText.h"
 #include "GameClient/GameText.h"
 #include "GameClient/GameWindowManager.h"

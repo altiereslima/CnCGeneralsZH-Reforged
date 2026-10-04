@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -30,7 +32,7 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
-#include "GameSpy/ghttp/ghttp.h"
+#include "gamespy/ghttp/ghttp.h"
 
 #include "Common/AudioAffect.h"
 #include "Common/AudioSettings.h"
@@ -41,7 +43,7 @@
 #include "Common/Monitors.h"
 #include "Common/OptionsCatalog.h"
 #include "Common/Registry.h"
-#include "Common/Version.h"
+#include "Common/version.h"
 
 #include "GameClient/ControlBar.h"
 #include "GameClient/GameClient.h"
@@ -76,7 +78,7 @@
 #include "GameClient/MessageBox.h"
 
 // This is for non-RC builds only!!!
-#define VERBOSE_VERSION L"Release"
+#define VERBOSE_VERSION u"Release"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -397,7 +399,7 @@ Bool OptionPreferences::getRetaliationModeEnabled(void)
 	if (it == end())
 		return TheGlobalData->m_clientRetaliationModeEnabled;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -409,7 +411,7 @@ Bool OptionPreferences::getDoubleClickAttackMoveEnabled(void)
 	if( it == end() )
 		return TheGlobalData->m_doubleClickAttackMove;
 
-	if( stricmp( it->second.str(), "yes" ) == 0 )
+	if( strcasecmp( it->second.str(), "yes" ) == 0 )
 		return TRUE;
 
 	return FALSE;
@@ -436,7 +438,7 @@ Bool OptionPreferences::usesSystemMapDir(void)
 	if (it == end())
 		return TRUE;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -448,7 +450,7 @@ Bool OptionPreferences::saveCameraInReplays(void)
 	if (it == end())
 		return TRUE;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -460,7 +462,7 @@ Bool OptionPreferences::useCameraInReplays(void)
 	if (it == end())
 		return TRUE;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -490,7 +492,7 @@ Bool OptionPreferences::getSendDelay(void)
 	if (it == end())
 		return TheGlobalData->m_firewallSendDelay;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -629,7 +631,7 @@ Bool OptionPreferences::getCloudShadowsEnabled(void)
 	if (it == end())
 		return TheGlobalData->m_useCloudMap;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -641,7 +643,7 @@ Bool OptionPreferences::getLightmapEnabled(void)
 	if (it == end())
 		return TheGlobalData->m_useLightMap;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -653,7 +655,7 @@ Bool OptionPreferences::getSmoothWaterEnabled(void)
 	if (it == end())
 		return TheGlobalData->m_showSoftWaterEdge;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -665,7 +667,7 @@ Bool OptionPreferences::getTreesEnabled(void)
 	if (it == end())
 		return TheGlobalData->m_useTrees;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -677,7 +679,7 @@ Bool OptionPreferences::getExtraAnimationsDisabled(void)
 	if (it == end())
 		return TheGlobalData->m_useDrawModuleLOD;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return FALSE;	//we are enabling extra animations, so disabled LOD
 	}
 	return TRUE;
@@ -691,7 +693,7 @@ Bool OptionPreferences::getTreeSwayEnabled(void)
 	if (it == end())
 		return !getExtraAnimationsDisabled();
 
-	return stricmp(it->second.str(), "yes") == 0;
+	return strcasecmp(it->second.str(), "yes") == 0;
 }
 
 Bool OptionPreferences::getUseHeatEffects(void)
@@ -700,7 +702,7 @@ Bool OptionPreferences::getUseHeatEffects(void)
 	if (it == end())
 		return TheGlobalData->m_useHeatEffects;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -712,7 +714,7 @@ Bool OptionPreferences::getDynamicLODEnabled(void)
 	if (it == end())
 		return TheGlobalData->m_enableDynamicLOD;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -724,7 +726,7 @@ Bool OptionPreferences::getFPSLimitEnabled(void)
 	if (it == end())
 		return TheGlobalData->m_useFpsLimit;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -736,7 +738,7 @@ Bool OptionPreferences::get3DShadowsEnabled(void)
 	if (it == end())
 		return TheGlobalData->m_useShadowVolumes;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -748,7 +750,7 @@ Bool OptionPreferences::get2DShadowsEnabled(void)
 	if (it == end())
 		return TheGlobalData->m_useShadowDecals;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -760,7 +762,7 @@ Bool OptionPreferences::getBuildingOcclusionEnabled(void)
 	if (it == end())
 		return TheGlobalData->m_enableBehindBuildingMarkers;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -1089,7 +1091,13 @@ static void readCatalogWidgets( void )
 				GadgetComboBoxGetSelectedPos( widget, &selected );
 				// -1 is a combo box with nothing picked, which is not a value to write anywhere
 				if( selected >= 0 )
-					def.set( clampOptionValue( def, def.lo + selected ) );
+				{
+					const Int value = clampOptionValue( def, def.lo + selected );
+					// a layout read as the menus were built shows only once they are built again
+					if( def.apply == APPLY_SHELL_REBUILD && value != def.get() )
+						pendingShellRebuild = TRUE;
+					def.set( value );
+				}
 				break;
 			}
 
@@ -1133,7 +1141,7 @@ static void fillResolutionList( const MonitorEntry &monitor, Int wantedWidth, In
 	{
 		const DisplayModeEntry &mode = menuModes[ index ];
 		UnicodeString text;
-		text.format( L"%d x %d", mode.width, mode.height );
+		text.format( u"%d x %d", mode.width, mode.height );
 		GadgetComboBoxAddEntry( comboBoxResolution, text, MENU_ENTRY_COLOR );
 
 		if( mode.width == wantedWidth && mode.height == wantedHeight )
@@ -1161,12 +1169,12 @@ static void fillMonitorList( void )
 		const MonitorEntry &monitor = menuMonitors[ index ];
 		UnicodeString text;
 		if( monitor.name[ 0 ] )
-			text.format( L"%d: %hs", monitor.number, monitor.name );
+			text.format( u"%d: %hs", monitor.number, monitor.name );
 		else
-			text.format( L"%d", monitor.number );
+			text.format( u"%d", monitor.number );
 		GadgetComboBoxAddEntry( comboBoxMonitor, text, MENU_ENTRY_COLOR );
 
-		if( ::_stricmp( monitor.device, current.device ) == 0 )
+		if( ::strcasecmp( monitor.device, current.device ) == 0 )
 			selected = index;
 	}
 	GadgetComboBoxSetSelectedPos( comboBoxMonitor, selected );
@@ -1395,7 +1403,7 @@ static void saveOptions( void )
 	const Bool sizeChanged = ( oldDispSettings.xRes != xres || oldDispSettings.yRes != yres );
 	const Bool modeChanged = ( oldWindowMode != TheGlobalData->m_windowMode );
 	const Bool vsyncChanged = ( oldVSync != TheGlobalData->m_vsync );
-	const Bool monitorChanged = ( ::_stricmp( oldMonitor.device, monitor.device ) != 0 );
+	const Bool monitorChanged = ( ::strcasecmp( oldMonitor.device, monitor.device ) != 0 );
 
 	if( sizeChanged || modeChanged || vsyncChanged || monitorChanged )
 	{
@@ -1455,14 +1463,14 @@ static void saveOptions( void )
 	GadgetComboBoxGetSelectedPos(comboBoxLANIP, &index);
 	if (index>=0 && TheGlobalData)
 	{
-		ip = (UnsignedInt)GadgetComboBoxGetItemData(comboBoxLANIP, index);
+		ip = (UnsignedInt)(uintptr_t)GadgetComboBoxGetItemData(comboBoxLANIP, index);
 		TheWritableGlobalData->m_defaultIP = ip;
 		pref->setLANIPAddress(ip);
 	}
 	GadgetComboBoxGetSelectedPos(comboBoxOnlineIP, &index);
 	if (index>=0)
 	{
-		ip = (UnsignedInt)GadgetComboBoxGetItemData(comboBoxOnlineIP, index);
+		ip = (UnsignedInt)(uintptr_t)GadgetComboBoxGetItemData(comboBoxOnlineIP, index);
 		pref->setOnlineIPAddress(ip);
 	}
 
@@ -2046,7 +2054,7 @@ static void updateSliderReadouts( void )
 		switch( readout.kind )
 		{
 			case READOUT_PERCENT:
-				text.format( L"%d%%", position );
+				text.format( u"%d%%", position );
 				break;
 
 			case READOUT_TEXTURE:
@@ -2057,11 +2065,11 @@ static void updateSliderReadouts( void )
 				if( position == 0 )
 					text = TheGameText->fetch( "GUI:AnisotropyCardMaximum" );
 				else
-					text.format( L"%dx", position );
+					text.format( u"%dx", position );
 				break;
 
 			default:
-				text.format( L"%d", position );
+				text.format( u"%d", position );
 				break;
 		}
 		GadgetStaticTextSetText( value, text );
@@ -2108,6 +2116,25 @@ static void showDetailPreset( Int index )
 	updateSliderReadouts();
 }
 
+/** The grey line under the detail box: what the picked preset turns on, and that picking one only
+	* fills in the boxes until Accept.  GUI:DetailNote0..4 follow the box's own order, Ultra to Custom. */
+static void updateDetailNote( void )
+{
+	GameWindow *note = TheWindowManager->winGetWindowFromId( NULL, NAMEKEY( "OptionsMenu.wnd:DetailNote" ) );
+	// a stale Run/Window layout without the line still opens; it just says nothing
+	if( note == NULL )
+		return;
+
+	Int index = CUSTOMDETAIL;
+	GadgetComboBoxGetSelectedPos( comboBoxDetail, &index );
+	if( index < ULTRADETAIL || index > CUSTOMDETAIL )
+		index = CUSTOMDETAIL;
+
+	AsciiString key;
+	key.format( "GUI:DetailNote%d", index );
+	GadgetStaticTextSetText( note, TheGameText->fetch( key ) );
+}
+
 /** A detail control was touched, so what the page shows is nobody's preset any more. */
 static void markDetailCustom( void )
 {
@@ -2119,6 +2146,7 @@ static void markDetailCustom( void )
 	ignoreSelected = TRUE;
 	GadgetComboBoxSetSelectedPos( comboBoxDetail, CUSTOMDETAIL );
 	ignoreSelected = FALSE;
+	updateDetailNote();
 }
 //-------------------------------------------------------------------------------------------------
 /** Initialize the options menu */
@@ -2253,7 +2281,7 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 		if (TheVersion)
 		{
 			UnicodeString version;
-			version.format(L"(%s) %s -- %s", versionString.str(), TheVersion->getFullUnicodeVersion().str(), TheVersion->getUnicodeBuildTime().str());
+			version.format(u"(%s) %s -- %s", versionString.str(), TheVersion->getFullUnicodeVersion().str(), TheVersion->getUnicodeBuildTime().str());
 			GadgetStaticTextSetText( labelVersion, version );
 		}
 		else
@@ -2282,7 +2310,7 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 		count++;
 		str.translate(IPlist->getIPstring());
 		index = GadgetComboBoxAddEntry(comboBoxLANIP, str, color);
-		GadgetComboBoxSetItemData(comboBoxLANIP, index, (void *)(IPlist->getIP()));
+		GadgetComboBoxSetItemData(comboBoxLANIP, index, (void *)(uintptr_t)(IPlist->getIP()));
 		if (selectedIP == IPlist->getIP())
 		{
 			selectedIndex = index;
@@ -2318,7 +2346,7 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 			count++;
 			str.translate(IPlist->getIPstring());
 			index = GadgetComboBoxAddEntry(comboBoxOnlineIP, str, color);
-			GadgetComboBoxSetItemData(comboBoxOnlineIP, index, (void *)(IPlist->getIP()));
+			GadgetComboBoxSetItemData(comboBoxOnlineIP, index, (void *)(uintptr_t)(IPlist->getIP()));
 			if (selectedIP == IPlist->getIP())
 			{
 				selectedIndex = index;
@@ -2552,6 +2580,7 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 
 	fillCatalogWidgets();
 	updateSliderReadouts();
+	updateDetailNote();
 	showOptionsPage( 0 );
 
 	// show menu
@@ -2747,6 +2776,7 @@ WindowMsgHandledType OptionsMenuSystem( GameWindow *window, UnsignedInt msg,
 					Int index = CUSTOMDETAIL;
 					GadgetComboBoxGetSelectedPos( comboBoxDetail, &index );
 					showDetailPreset( index );
+					updateDetailNote();
 				}
 				else if( controlID == comboBoxMonitorID )
 				{
@@ -2923,7 +2953,7 @@ WindowMsgHandledType OptionsMenuSystem( GameWindow *window, UnsignedInt msg,
 				char num[16];
 				num[0] = 0;
 				TheWritableGlobalData->m_firewallBehavior = FirewallHelperClass::FIREWALL_TYPE_UNKNOWN;
-				itoa(TheGlobalData->m_firewallBehavior, num, 10);
+				snprintf(num, sizeof(num), "%d", (Int)TheGlobalData->m_firewallBehavior);
 				AsciiString numstr;
 				numstr = num;
 				(*pref)["FirewallBehavior"] = numstr;

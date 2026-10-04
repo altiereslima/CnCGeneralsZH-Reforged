@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -49,15 +50,24 @@
 #include "W3DDevice/GameClient/W3DGameFont.h"
 #include "W3DDevice/GameClient/W3DDisplayStringManager.h"
 #include "VideoDevice/Bink/BinkVideoPlayer.h"
+#if defined(_WIN32)
+// The keyboard and mouse are Win32Device's here.  Off Windows the keyboard is SDL3's and W3DMouse sits on
+// SDL3's mouse (C3b): the same two factories, below, and the same W3DMouse on both.
 #include "Win32Device/GameClient/Win32DIKeyboard.h"
 #include "Win32Device/GameClient/Win32DIMouse.h"
 #include "Win32Device/GameClient/Win32Mouse.h"
 #include "W3DDevice/GameClient/W3DMouse.h"
+#else
+#include "SdlDevice/GameClient/SdlKeyboard.h"
+#include "W3DDevice/GameClient/W3DMouse.h"
+#endif
 #include "W3DDevice/GameClient/W3DSnow.h"
 
 class ThingTemplate;
 
+#if defined(_WIN32)
 extern Win32Mouse *TheWin32Mouse;
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 // PROTOTYPES /////////////////////////////////////////////////////////////////
@@ -112,7 +122,7 @@ protected:
   /// Manager for display strings
 	virtual DisplayStringManager *createDisplayStringManager( void ) { return NEW W3DDisplayStringManager; }
 
-	virtual VideoPlayerInterface *createVideoPlayer( void ) { return NEW BinkVideoPlayer; }
+	virtual VideoPlayerInterface *createVideoPlayer( void ) { return NEW BinkVideoPlayer; }	///< Bink on FFmpeg, on every platform (V1)
 	/// factory for creating the TerrainVisual
 	virtual TerrainVisual *createTerrainVisual( void ) { return NEW W3DTerrainVisual; }
 
@@ -123,6 +133,7 @@ protected:
 
 };  // end class W3DGameClient
 
+#if defined(_WIN32)
 inline Keyboard *W3DGameClient::createKeyboard( void ) { return NEW DirectInputKeyboard; }
 inline Mouse *W3DGameClient::createMouse( void )
 {
@@ -131,5 +142,11 @@ inline Mouse *W3DGameClient::createMouse( void )
 	TheWin32Mouse = mouse;   ///< global cheat for the WndProc()
 	return mouse;
 }
+#else
+// Off Windows (C3b): SDL3's keyboard, and the same W3DMouse over SDL3's mouse.  There is no WndProc to
+// hand the mouse to: SdlInput_dispatch finds it as SdlMouse::active().
+inline Keyboard *W3DGameClient::createKeyboard( void ) { return NEW SdlKeyboard; }
+inline Mouse *W3DGameClient::createMouse( void ) { return NEW W3DMouse; }
+#endif
 
 #endif  // end __W3DGAMEINTERFACE_H_

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*************************************************************************** 
  ***    C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S     *** 
@@ -44,7 +45,13 @@
 #ifndef __STRTOK_R_H__
 #define __STRTOK_R_H__
 
-#ifndef _UNIX
+/*
+**	POSIX declares strtok_r in <string.h> with C linkage; declaring it again here with C++ linkage
+**	is a hard error, not a redundancy.  The tree's own _UNIX guard was the right idea and the wrong
+**	predicate - _UNIX is never defined anywhere in this build, and defining it would arm sixty other
+**	arms that were never finished.  Ask about the compiler that actually lacks the function.
+*/
+#if defined(_MSC_VER)
 char *strtok_r(char *strptr, const char *delimiters, char **lasts);
 #endif
 

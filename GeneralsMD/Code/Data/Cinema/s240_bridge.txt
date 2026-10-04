@@ -1,0 +1,9 @@
+# Scenarios/s240_bridge.txt on Golden Oasis: looking north-east along the long bridge from its
+# south-west end, the deck receding up the frame with its shadow on the water to the left, the
+# camera pushing along it more slowly than the column drives.
+
+7.7   cut     2690 1240 0.48 40 6
+7.8   move    2830 1400 15
+10.0  shot
+18.0  shot
+23.9  end

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -38,7 +40,7 @@
 #include "GameClient/GameWindow.h"
 #include "GameClient/Mouse.h"
 #include "GameClient/DisplayStringManager.h"
-#include "Gameclient/WindowLayout.h"
+#include "GameClient/WindowLayout.h"
 #include "GameClient/Gadget.h"
 #include "GameClient/GameWindowGlobal.h"
 #include "GameClient/GadgetListBox.h"
@@ -4022,17 +4024,17 @@ Bool GameWindowManager::initTestGUI( void )
 																								100, 100,
 																								&instData,
 																								&listData, NULL, TRUE );
-	GadgetListBoxAddEntryText( window, UnicodeString(L"Listbox text"), 
+	GadgetListBoxAddEntryText( window, UnicodeString(u"Listbox text"), 
 												 TheWindowManager->winMakeColor( 255, 255, 255, 255 ), -1, 0 );
-	GadgetListBoxAddEntryText( window, UnicodeString(L"More text"), 
+	GadgetListBoxAddEntryText( window, UnicodeString(u"More text"), 
 												 TheWindowManager->winMakeColor( 105, 105, 255, 255 ), -1, 0 );
-	GadgetListBoxAddEntryText( window, UnicodeString(L"Nothing"), 
+	GadgetListBoxAddEntryText( window, UnicodeString(u"Nothing"), 
 												 TheWindowManager->winMakeColor( 105, 105, 255, 255 ), -1, 0 );
-	GadgetListBoxAddEntryText( window, UnicodeString(L"Seasons"), 
+	GadgetListBoxAddEntryText( window, UnicodeString(u"Seasons"), 
 												 TheWindowManager->winMakeColor( 105, 205, 255, 255 ), -1, 0 );
-	GadgetListBoxAddEntryText( window, UnicodeString(L"Misery"), 
+	GadgetListBoxAddEntryText( window, UnicodeString(u"Misery"), 
 												 TheWindowManager->winMakeColor( 235, 105, 255, 255 ), -1, 0 );
-	GadgetListBoxAddEntryText( window, UnicodeString(L"Natural"), 
+	GadgetListBoxAddEntryText( window, UnicodeString(u"Natural"), 
 												 TheWindowManager->winMakeColor( 105, 205, 45, 255 ), -1, 0 );
 	window->winSetFont( TheFontLibrary->getFont( AsciiString("Times New Roman"), 12, FALSE ) );
 
@@ -4055,17 +4057,17 @@ Bool GameWindowManager::initTestGUI( void )
 																								100, 100,
 																								&instData,
 																								&listData, NULL, TRUE );
-	GadgetListBoxAddEntryText( window, UnicodeString(L"Listbox text"), 
+	GadgetListBoxAddEntryText( window, UnicodeString(u"Listbox text"), 
 												 TheWindowManager->winMakeColor( 255, 255, 255, 255 ), -1, -1 );
-	GadgetListBoxAddEntryText( window, UnicodeString(L"More text"), 
+	GadgetListBoxAddEntryText( window, UnicodeString(u"More text"), 
 												 TheWindowManager->winMakeColor( 105, 105, 255, 255 ), -1, -1 );
-	GadgetListBoxAddEntryText( window, UnicodeString(L"Nothing"), 
+	GadgetListBoxAddEntryText( window, UnicodeString(u"Nothing"), 
 												 TheWindowManager->winMakeColor( 105, 105, 255, 255 ), -1, -1 );
-	GadgetListBoxAddEntryText( window, UnicodeString(L"Seasons"), 
+	GadgetListBoxAddEntryText( window, UnicodeString(u"Seasons"), 
 												 TheWindowManager->winMakeColor( 105, 205, 255, 255 ), -1, -1 );
-	GadgetListBoxAddEntryText( window, UnicodeString(L"Misery"), 
+	GadgetListBoxAddEntryText( window, UnicodeString(u"Misery"), 
 												 TheWindowManager->winMakeColor( 235, 105, 255, 255 ), -1, -1 );
-	GadgetListBoxAddEntryText( window, UnicodeString(L"Natural"), 
+	GadgetListBoxAddEntryText( window, UnicodeString(u"Natural"), 
 												 TheWindowManager->winMakeColor( 105, 205, 45, 255 ), -1, -1 );
 
 	// make a vert slider

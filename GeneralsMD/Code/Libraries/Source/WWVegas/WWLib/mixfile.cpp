@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*********************************************************************************************** 
  ***                            Confidential - Westwood Studios                              *** 
@@ -35,6 +37,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "mixfile.h"
+#include "zhio.h"
 #include "wwdebug.h"
 #include "ffactory.h"
 #include "wwfile.h"
@@ -42,21 +45,32 @@
 #include "rawfile.h"
 #include "win.h"
 #include "bittype.h"
+#if !defined(_WIN32)
+#include <stdio.h>
+#include <sys/stat.h>
+#endif
 
 /*
 **
 */
+/*
+**	These structs are the file: the constructor reads MIXFILE_HEADER, and the table after it, straight
+**	off disk.  The format's fields are 4 bytes, which is what `long` was on the only platform that ever
+**	wrote one.  On LP64 `long` is 8, and every mix file - including one this build had just written,
+**	since MixFileCreator writes its table 4 bytes a field - was read back as garbage.  Pinned to the
+**	widths the format has; on Windows sint32 and uint32 are the same 32 bits as before.  C1/B5.
+*/
 typedef struct
 {
 	char	signature[4];
-	long	header_offset;
-	long	names_offset;
+	sint32	header_offset;
+	sint32	names_offset;
 
 } MIXFILE_HEADER;
 
 typedef struct
 {
-	long	file_count;
+	sint32	file_count;
 
 } MIXFILE_DATA_HEADER;
 
@@ -318,11 +332,22 @@ MixFileFactoryClass::Flush_Changes (void)
 	//
 	//	Get the path of the mix file
 	//
+#if defined(_WIN32)
 	char drive[_MAX_DRIVE] = { 0 };
 	char dir[_MAX_DIR] = { 0 };
 	::_splitpath (MixFilename, drive, dir, NULL, NULL);
 	StringClass path	= drive;
 	path					+= dir;
+#else
+	//	_splitpath's drive and directory, which on POSIX is everything up to and including the last '/'.
+	//	There are no drive letters, and a backslash is an ordinary filename character: MixFilename is a
+	//	real path by the time it gets here, and making it one is the local file system's job (C1), not
+	//	this function's.
+	const char *last_slash	= strrchr (MixFilename, '/');
+	int dir_length				= (last_slash != NULL) ? (int)(last_slash - (const char *)MixFilename) + 1 : 0;
+	StringClass path			= MixFilename;
+	path.Erase (dir_length, path.Get_Length () - dir_length);
+#endif
 
 	//
 	//	Try to find a temp filename
@@ -369,8 +394,13 @@ MixFileFactoryClass::Flush_Changes (void)
 	//
 	//	Delete the old mix file and rename the new one
 	//
+#if defined(_WIN32)
 	::DeleteFile (MixFilename);
 	::MoveFile (full_path, MixFilename);
+#else
+	zh_remove (MixFilename);
+	zh_rename (full_path, MixFilename);
+#endif
 
 	//
 	//	Reset the lists
@@ -397,7 +427,12 @@ MixFileFactoryClass::Get_Temp_Filename (const char *path, StringClass &full_path
 	//
 	for (int index = 0; index < 20; index ++) {
 		full_path.Format ("%s%.2d.dat", (const char *)temp_path, index + 1);
+#if defined(_WIN32)
 		if (GetFileAttributes (full_path) == 0xFFFFFFFF) {
+#else
+		struct stat st;
+		if (zh_stat (full_path, &st) != 0) {	// INVALID_FILE_ATTRIBUTES: nothing by that name
+#endif
 			retval = true;
 			break;
 		}
@@ -474,11 +509,11 @@ MixFileCreator::MixFileCreator( const char * filename )
 	if ( MixFile != NULL ) {
 		MixFile->Open( FileClass::WRITE );
 		MixFile->Write( "MIX1", 4 );
-		long	header_offset = 0;
+		sint32	header_offset = 0;	// the format's widths, not long's - see MIXFILE_HEADER
 		MixFile->Write( &header_offset, sizeof( header_offset ) );
-		long	names_offset = 0;
+		sint32	names_offset = 0;
 		MixFile->Write( &names_offset, sizeof( names_offset ) );
-		long	unused = 0;
+		sint32	unused = 0;
 		MixFile->Write( &unused, sizeof( unused ) );
 	}
 }
@@ -651,8 +686,11 @@ void	MixFileCreator::Add_File( const char * filename, FileClass *file )
 
 
 /*
-**
+**	The makemix developer tool: builds MAKEMIX.MIX from data\makemix\ with FindFirstFile.  Nothing in
+**	the tree calls Add_Files or Setup_Mix_File, so it stays the Win32 tool it is.  Its WWDEBUG_SAY
+**	passes a StringClass through varargs, which is undefined on x64 - harmless only because it is dead.
 */
+#if defined(_WIN32)
 void	Add_Files( const char * dir, MixFileCreator & mix )
 {
 	BOOL bcontinue = TRUE;
@@ -695,3 +733,4 @@ void	Setup_Mix_File( void )
 	}
 
 }
+#endif	// _WIN32: the makemix tool

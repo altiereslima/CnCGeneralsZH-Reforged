@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -95,7 +96,11 @@
 #include	"xpipe.h"
 #include	"xstraw.h"
 #include	<stdio.h>
-#include <malloc.h>
+#if defined(_MSC_VER)
+#include <malloc.h>   // Microsoft puts malloc, _msize and _alloca here
+#else
+#include "Platform/MSVCCompat.h"   // <stdlib.h> and <alloca.h>, and _alloca's spelling
+#endif
 #ifdef _UNIX
 #include <ctype.h>
 #endif
@@ -107,10 +112,14 @@
 #include	"trect.h"
 #include	"wwfile.h"
 #include	"pk.h"
+#include "Common/EarlyCommandLine.h"	// -headless, which DuplicateCRCError must not wait on
 #include	"pipe.h"
 #include	"wwstring.h"
-#include "widestring.h"
+#if defined(_WIN32)
+#include "widestring.h"   // Get_Wide_String only; see INI.H
+#endif
 #include "nstrdup.h"
+#include "Platform/StrdupAsWindows.h"
 
 #if defined(__WATCOMC__)
 // Disable the "temporary object used to initialize a non-constant reference" warning.
@@ -494,7 +503,7 @@ int INIClass::Load(Straw & ffile)
 			char * ptr = strchr(buffer, ']');
 			if (ptr != NULL) *ptr = '\0';
 			strtrim(buffer);
-			INISection * secptr = W3DNEW INISection(strdup(buffer));
+			INISection * secptr = W3DNEW INISection(strdupAsWindows(buffer));
 			if (secptr == NULL) {
 				Clear();
 				return(false);
@@ -545,7 +554,7 @@ int INIClass::Load(Straw & ffile)
 				}
 
 
-				INIEntry * entryptr = W3DNEW INIEntry(strdup(buffer), strdup(divider));
+				INIEntry * entryptr = W3DNEW INIEntry(strdupAsWindows(buffer), strdupAsWindows(divider));
 				if (entryptr == NULL) {
 					delete secptr;
 					Clear();
@@ -976,6 +985,7 @@ int INIClass::Get_UUBlock(char const * section, void * block, int len) const
 
 
 
+#if defined(_WIN32)
 /***********************************************************************************************
  * INIClass::Get_Wide_String -- Get a wide string from an .INI                                 *
  *                                                                                             *
@@ -1063,6 +1073,8 @@ bool INIClass::Put_Wide_String(char const * section, char const * entry, wchar_t
 	}
 	return(true);
 }
+#endif // _WIN32
+
 
 
 
@@ -1627,7 +1639,7 @@ bool INIClass::Put_String(char const * section, char const * entry, char const *
 	INISection * secptr = Find_Section(section);
 
 	if (secptr == NULL) {
-		secptr = W3DNEW INISection(strdup(section));
+		secptr = W3DNEW INISection(strdupAsWindows(section));
 		if (secptr == NULL) return(false);
 		SectionList->Add_Tail(secptr);
 		SectionIndex->Add_Index(secptr->Index_ID(), secptr);
@@ -1655,7 +1667,7 @@ bool INIClass::Put_String(char const * section, char const * entry, char const *
 	**	Create and add the new entry.
 	*/
 	if (string != NULL && strlen(string) > 0) {
-		entryptr = W3DNEW INIEntry(strdup(entry), strdup(string));
+		entryptr = W3DNEW INIEntry(strdupAsWindows(entry), strdupAsWindows(string));
 
 		// If this assert fires, then the string will be truncated on load, because
 		// there will not be enough room in the loading buffer!
@@ -1800,7 +1812,7 @@ char *INIClass::Get_Alloc_String(char const * section, char const * entry, char 
 	}
 
 	if (defvalue == NULL) return NULL;
-	return(strdup(defvalue));
+	return(strdupAsWindows(defvalue));
 }
 
 int INIClass::Get_List_Index(char const * section, char const * entry, int const defvalue, char *list[])
@@ -1813,7 +1825,7 @@ int INIClass::Get_List_Index(char const * section, char const * entry, int const
 	}
 
 	for (int lp = 0; list[lp]; lp++) {
-		if (stricmp(entryptr->Value, list[lp]) == 0) {
+		if (strcasecmp(entryptr->Value, list[lp]) == 0) {
 			return lp;
 		}
 		assert(lp < 1000);
@@ -1832,14 +1844,14 @@ int INIClass::Get_Int_Bitfield(char const * section, char const * entry, int def
 	// get the bitfield value for each piece.
 	// int count	= 0; (gth) initailized but not referenced...
 	int retval	= 0;
-	char *str	= strdup(entryptr->Value);
+	char *str	= strdupAsWindows(entryptr->Value);
 
    int lp;
 	for (char *token = strtok(str, "|+"); token; token = strtok(NULL, "|+")) {
 		for (lp = 0; list[lp]; lp++) {
 			// if this list entry matches our string token then we need
 			// to set this bit.
-			if (stricmp(token, list[lp]) == 0) {
+			if (strcasecmp(token, list[lp]) == 0) {
 				retval |= (1 << lp);
 				break;
 			}
@@ -1867,7 +1879,7 @@ int *	INIClass::Get_Alloc_Int_Array(char const * section, char const * entry, in
 	// count all the tokens in the string.  Each token should represent an
 	// integer number.
 	int count = 0;
-	char *str = strdup(entryptr->Value);
+	char *str	= strdupAsWindows(entryptr->Value);
 	char *token;
 	for (token = strtok(str, " "); token; token = strtok(NULL, " ")) {
 		count++;
@@ -1878,7 +1890,7 @@ int *	INIClass::Get_Alloc_Int_Array(char const * section, char const * entry, in
 	// array to hold the tokens and parse out the actual values.
 	retval	= W3DNEWARRAY int[count+1];
 	count		= 0;
-	str		= strdup(entryptr->Value);
+	str		= strdupAsWindows(entryptr->Value);
 	for (token = strtok(str, " "); token; token = strtok(NULL, " ")) {
 		retval[count] = atoi(token);
 		count++;
@@ -2354,14 +2366,26 @@ int INIClass::CRC(const char *string)
 void INIClass::DuplicateCRCError(const char *message, const char *section, const char *entry)
 {
 	char buffer[512];
-	_snprintf(buffer, sizeof(buffer), "%s - Duplicate Entry \"%s\" in section \"%s\" (%s)\n", message,
+	snprintf(buffer, sizeof(buffer), "%s - Duplicate Entry \"%s\" in section \"%s\" (%s)\n", message,
 		entry, section, Filename);
 
+#if defined(_WIN32)
 	OutputDebugString(buffer);
+#else
+	// The debugger's output channel on Windows; stderr is the one a Mac debugger shows.  B5.
+	fputs(buffer, stderr);
+#endif
 	assert(0);
 
 #ifdef NDEBUG
 #ifdef _WINDOWS
+	// Never in an unattended run (-headless or ZH_UNATTENDED), which has nobody to press OK: the line
+	// above has said it, and a run with a broken INI stops with it rather than wait on a box.
+	if (isUnattendedProcess()) {
+		fputs(buffer, stderr);
+		fflush(stderr);
+		_exit(2);
+	}
 	MessageBox(0, buffer, "Duplicate CRC in INI file.", MB_ICONSTOP | MB_OK);
 #endif
 #endif

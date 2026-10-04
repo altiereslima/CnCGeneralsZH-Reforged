@@ -1,0 +1,20 @@
+# The 2.4.0 Shorts' missile defence takes over Scenarios/v240_md.txt on Fortress Avalanche. Each
+# fight is laid along the frame's height so it fits an 864 pixel column: the shooters at the top,
+# the tank low in the frame with the missiles coming down at it, and the King Raptors flying up and
+# down the frame over the Stinger Site rather than across it.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 2500 -map "Maps\Fortress Avalanche\Fortress Avalanche.map" -autoskirmish 2
+#     -takeover -side 0 FactionAmerica -side 1 FactionGLA -seed 7 -scenario v240_md
+#     -cinema s240_md -video 100 720 s240_md -maxframes 730
+
+# Avenger under five Tank Hunters, frames 128 to 200
+3.3   cut     1000 2010 0.32 0 10
+5.5   shot
+# Paladin under four Rocket Buggies, frames 322 to 375
+9.5   cut     3300 1960 0.32 0 10
+11.5  shot
+# King Raptors over the Stinger Site, looking west, frames 520 to 700
+17.0  cut     2960 1800 0.44 -90 12
+20.5  shot
+23.9  end

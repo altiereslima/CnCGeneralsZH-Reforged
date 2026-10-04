@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -40,6 +41,7 @@
 #include "GameLogic/Module/PhysicsUpdate.h"
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/ScriptEngine.h"
+#include "GameLogic/Locomotor.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/ParticleSys.h"
@@ -99,10 +101,6 @@ W3DTankDraw::W3DTankDraw( Thing *thing, const ModuleData* moduleData )
 		m_treads[i].m_robj = NULL;
 
 	m_treadCount=0;
-	//Assume all things face along x axis when created.
-	m_lastDirection.x=1.0f;
-	m_lastDirection.y=0.0f;
-	m_lastDirection.z=0.0f;
 
 	createEmitters();
 }
@@ -218,27 +216,6 @@ void W3DTankDraw::setFullyObscuredByShroud(Bool fullyObscured)
 	W3DModelDraw::setFullyObscuredByShroud(fullyObscured);
 }
 
-/**Update uv coordinates on each tread object to simulate movement*/
-void W3DTankDraw::updateTreadPositions(Real uvDelta)
-{
-	Real offset_u;
-	TreadObjectInfo *pTread=m_treads;
-
-	for (Int i=0; i<m_treadCount; i++)
-	{
-		if (pTread->m_type == TREAD_LEFT)	//this tread needs to scroll forwards
-			offset_u = pTread->m_materialSettings.customUVOffset.X + uvDelta;
-		else
-		if (pTread->m_type == TREAD_RIGHT)	//this tread needs to scroll backwards
-			offset_u = pTread->m_materialSettings.customUVOffset.X - uvDelta;
-				
-		// ensure coordinates of offset are in [0, 1] range:
-		offset_u = offset_u - WWMath::Floor(offset_u);
-		pTread->m_materialSettings.customUVOffset.Set(offset_u,0);
-		pTread++;
-	}
-}
-
 /**Grab pointers to the sub-meshes for each tread*/ 
 void W3DTankDraw::updateTreadObjects(void)
 {
@@ -259,7 +236,7 @@ void W3DTankDraw::updateTreadObjects(void)
 			//Check if subobject name starts with "TREADS".
 			if (subObj && subObj->Class_ID() == RenderObjClass::CLASSID_MESH && subObj->Get_Name()
 				&& ( (meshName=strchr(subObj->Get_Name(),'.') ) != 0 && *(meshName++))
-				&&_strnicmp(meshName,"TREADS", 6) == 0)
+				&&strncasecmp(meshName,"TREADS", 6) == 0)
 			{	//check if sub-object has the correct material to do texture scrolling.
 				MaterialInfoClass *mat=subObj->Get_Material_Info();
 				if (mat)
@@ -358,47 +335,32 @@ void W3DTankDraw::doDrawModule(const Matrix3D* transformMtx)
 	m_treadDebrisLeft->setBurstCountMultiplier( velMult.z );
 	m_treadDebrisRight->setBurstCountMultiplier( velMult.z );
 
-	//Update movement of treads
-	if (m_treadCount)
+	/* EA scrolled the treads by TreadAnimationRate every drawn frame once the tank passed a share of
+		 its top speed, which at 120 pictures a second ran them four times too fast, never backwards, and
+		 both at once in a turn. Each tread now runs over exactly the ground it covered: the distance
+		 driven, less or plus the turn times half the track width, at TreadAnimationRate per top speed's
+		 worth of distance. A pivot runs them against each other, a reverse runs them backwards. */
+	Real forward, turn;
+	stepGroundMotion(forward, turn);
+	// undamaged top speed: a damaged tank is slower, and its treads still have to match the ground
+	const Locomotor *loco = obj->getAIUpdateInterface()->getCurLocomotor();
+	Real maxSpeed = loco ? loco->getMaxSpeedForCondition(BODY_PRISTINE) : 0.0f;
+	if (m_treadCount && maxSpeed > 0.0f)
 	{
-		PhysicsTurningType turn=physics->getTurning();
-		Real offset_u;
-		Real treadScrollSpeed=getW3DTankDrawModuleData()->m_treadAnimationRate;
+		Real uvPerDistance = getW3DTankDrawModuleData()->m_treadAnimationRate / maxSpeed;
+		Real sideways = turn * obj->getGeometryInfo().getMinorRadius();
 		TreadObjectInfo *pTread=m_treads;
-		Real maxSpeed=obj->getAIUpdateInterface()->getCurLocomotorSpeed();
-
-		//For optimization sake, we only do complex tread scrolling when tank
-		//is mostly stationary and turning
-		if (turn != TURN_NONE && physics->getVelocityMagnitude()/maxSpeed < getW3DTankDrawModuleData()->m_treadPivotSpeedFraction)
+		for (Int i=0; i<m_treadCount; i++, pTread++)
 		{
-				//Check if we have turned enough since last draw to require animation
-				Coord3D dir;
-				obj->getUnitDirectionVector2D(dir);
-				Real angleToGoal = dir.x * m_lastDirection.x + dir.y * m_lastDirection.y;
-				
-				if (fabs(1.0f-angleToGoal) > 0.00001f)	//check if difference in angle cosines is greater than some cutoff.
-				{
-					if (turn == TURN_NEGATIVE)	//turning right
-						updateTreadPositions(-treadScrollSpeed);
-					else	//turning left
-						updateTreadPositions(treadScrollSpeed);
-				}
-				m_lastDirection=dir;	//update for next frame
-		}
-		else
-		if (physics->isMotive() && physics->getVelocityMagnitude()/maxSpeed >= getW3DTankDrawModuleData()->m_treadDriveSpeedFraction)
-		{	//do simple scrolling based only on speed when tank is moving straight at high speed.
-			//we stop scrolling when tank slows down to reduce the appearance of sliding
-			//tread scrolling speed was not directly tied into tank velocity because it looked odd
-			//under certain situations when tank moved sideways.
-			for (Int i=0; i<m_treadCount; i++)
-			{
-				offset_u = pTread->m_materialSettings.customUVOffset.X - treadScrollSpeed;
-				// ensure coordinates of offset are in [0, 1] range:
-				offset_u = offset_u - WWMath::Floor(offset_u);
-				pTread->m_materialSettings.customUVOffset.Set(offset_u,0);
-				pTread++;
-			}
+			Real distance = forward;
+			if (pTread->m_type == TREAD_LEFT)
+				distance -= sideways;
+			else if (pTread->m_type == TREAD_RIGHT)
+				distance += sideways;
+			Real offset_u = pTread->m_materialSettings.customUVOffset.X - uvPerDistance * distance;
+			// ensure coordinates of offset are in [0, 1] range:
+			offset_u = offset_u - WWMath::Floor(offset_u);
+			pTread->m_materialSettings.customUVOffset.Set(offset_u,0);
 		}
 	}
 

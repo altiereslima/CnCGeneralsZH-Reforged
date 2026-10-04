@@ -34,19 +34,29 @@ REQUIRED = [
     "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h",
 ]
 
+# Dependências que precisam do patch do fork: o CMake confere a mesma marca e para sem ela, com uma
+# mensagem que fala do vendor.ps1 do upstream, não do instalador daqui.
+PATCHED = [
+    ("GeneralsMD/Code/Libraries/Source/Compression/LZHCompress/CompLibHeader/_lz.h", "Zero Hour Reforged: altered"),
+    ("GeneralsMD/Code/Libraries/Source/litehtml/include/litehtml/document.h", "master_parsed"),
+]
+
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--repo",required=True)
     args=ap.parse_args()
     repo=Path(args.repo).resolve()
     missing=[x for x in REQUIRED if not (repo/x).is_file()]
+    unpatched=[path for path,marker in PATCHED
+               if (repo/path).is_file() and marker not in (repo/path).read_text(encoding="utf-8",errors="replace")]
     out={
-        "status":"PASS" if not missing else "FAIL",
+        "status":"PASS" if not missing and not unpatched else "FAIL",
         "checked":len(REQUIRED),
         "missing":missing,
+        "unpatched":unpatched,
     }
     print(json.dumps(out,indent=2))
-    if missing:
+    if missing or unpatched:
         raise SystemExit(1)
 
 if __name__=="__main__":

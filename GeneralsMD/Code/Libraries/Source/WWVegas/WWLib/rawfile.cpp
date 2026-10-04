@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*********************************************************************************************** 
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               *** 
@@ -54,18 +55,93 @@
 
 #include	"always.h"
 #include	"rawfile.h"
-#include	<direct.h>
+#if defined(_MSC_VER)
+#include	<direct.h>   // _mkdir, _chdir; the POSIX spellings come from the shim via always.h
+#endif
 //#include	<share.h>
 #include	<stddef.h>
 #include	<stdio.h>
 #include	<stdlib.h>
 #include	<string.h>
 #include "win.h"
+#include "zhio.h"
 #include	<limits.h>
 #include	<errno.h>
-#ifdef _UNIX
+#if !defined(_WIN32)
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
+#endif
+
+/*
+**	The platform arms below are Win32 and POSIX.  Until B5 the second of each pair was an _UNIX arm
+**	from Westwood's unfinished UNIX port, built on stdio, and every one of them was read before it
+**	was replaced.  They were not a port.  READ|WRITE opened with fopen("w"), which truncates the file
+**	that the Windows arm opens with OPEN_ALWAYS precisely "so that files does not get destroyed";
+**	Raw_Seek returned fseek's 0 rather than the new position; Read took ferror's answer as success;
+**	Get_Date_Time returned a Unix time where every caller keeps a DOS date and time; Set_Date_Time
+**	asserted.  Each POSIX arm is written against the Windows arm beside it, call for call.
+**
+**	Set_Name's _UNIX arm, which rewrote backslashes and lowercased every name, was left for C1 and
+**	removed there: C1 keeps names as the engine spells them and resolves them where they reach the
+**	operating system (zh_open, zh_unlink), since lowercasing breaks every file with capitals on a
+**	case-sensitive volume.  It was inert, since nothing defines _UNIX.
+*/
+#if defined(_WIN32)
+#define RAWFILE_LAST_ERROR()	GetLastError()
+#else
+#define RAWFILE_LAST_ERROR()	errno
+#endif
+
+#if !defined(_WIN32)
+/*
+**	FileTimeToDosDateTime and DosDateTimeToFileTime, over a descriptor.  The FILETIME the Windows arm
+**	reads from GetFileInformationByHandle is UTC and neither call converts it, so these fields are
+**	UTC too, and a Mac and a Windows machine stamp one file the same way.  Date: years since 1980 in
+**	bits 9-15, month in 5-8, day in 0-4.  Time: hours in 11-15, minutes in 5-10, seconds/2 in 0-4.
+*/
+static unsigned long Dos_Date_Time_Of(int fd)
+{
+	struct stat st;
+	struct tm t;
+	if (fstat(fd, &st) != 0 || gmtime_r(&st.st_mtime, &t) == NULL) return 0;
+
+	// Outside 1980-2107 there is no DOS date.  The Windows arm ignores FileTimeToDosDateTime's
+	// failure there and packs whatever it was left with; 0 is what its caller starts from.
+	int year = t.tm_year + 1900 - 1980;
+	if (year < 0 || year > 127) return 0;
+
+	unsigned dosdate = (unsigned)((year << 9) | ((t.tm_mon + 1) << 5) | t.tm_mday);
+	unsigned dostime = (unsigned)((t.tm_hour << 11) | (t.tm_min << 5) | (t.tm_sec / 2));
+	return ((unsigned long)dosdate << 16) | dostime;
+}
+
+static bool Set_Dos_Date_Time_Of(int fd, unsigned long datetime)
+{
+	unsigned dosdate = (unsigned)(datetime >> 16) & 0xFFFF;
+	unsigned dostime = (unsigned)datetime & 0xFFFF;
+
+	struct tm t = {};
+	t.tm_year = (int)(dosdate >> 9) + 1980 - 1900;
+	t.tm_mon  = (int)((dosdate >> 5) & 0x0F) - 1;
+	t.tm_mday = (int)(dosdate & 0x1F);
+	t.tm_hour = (int)(dostime >> 11);
+	t.tm_min  = (int)((dostime >> 5) & 0x3F);
+	t.tm_sec  = (int)(dostime & 0x1F) * 2;
+
+	// Refused rather than normalised, which is what timegm would otherwise do to a month of 13.
+	if (t.tm_mon < 0 || t.tm_mon > 11 || t.tm_mday < 1 || t.tm_hour > 23 || t.tm_min > 59 || t.tm_sec > 59) {
+		return false;
+	}
+
+	// SetFileTime above writes last access and last write and leaves creation alone; so does this.
+	struct timespec times[2];
+	times[0].tv_sec  = times[1].tv_sec  = timegm(&t);
+	times[0].tv_nsec = times[1].tv_nsec = 0;
+	return futimens(fd, times) == 0;
+}
 #endif
 
 
@@ -316,17 +392,8 @@ char const * RawFileClass::Set_Name(char const * filename)
 
 	Filename=filename;
 
-	/*
-	** If this is a UNIX build, fix the filename from the DOS-like name passed in
-	*/
-	#ifdef _UNIX
-		for (int i=0; i<Filename.Get_Length(); i++)
-		{
-			if (Filename[i]=='\\')
-				Filename[i]='/';
-			Filename[i]=tolower(Filename[i]);  // don't preserve case
-		}
-	#endif
+	// The name keeps the engine's spelling on every platform; the POSIX arms open it through zh_open,
+	// which resolves it against the disk (C1, decision D1).
 
 	return(Filename);
 }
@@ -415,31 +482,34 @@ int RawFileClass::Open(int rights)
 				break;
 
 			case READ:
-				#ifdef _UNIX
-					Handle = fopen(Filename, "r");
-				#else
+				#if defined(_WIN32)
 					Handle = CreateFileA(Filename, GENERIC_READ, FILE_SHARE_READ,
 												NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+				#else
+					Handle = zh_open(Filename, O_RDONLY, 0);
 				#endif
 				break;
 
 			case WRITE:
-				#ifdef _UNIX
-					Handle = fopen(Filename, "w");
-				#else
+				#if defined(_WIN32)
 					Handle = CreateFileA(Filename, GENERIC_WRITE, 0,
 												NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+				#else
+					// CREATE_ALWAYS.  POSIX has no share mode, so the 0 above - nobody else may open
+					// the file while it is written - has no equivalent here and is not enforced.
+					Handle = zh_open(Filename, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 				#endif
 				break;
 
 			case READ|WRITE:
-				#ifdef _UNIX
-					Handle = fopen(Filename, "w");
-				#else
+				#if defined(_WIN32)
 					// SKB 5/13/99 use OPEN_ALWAYS instead of CREATE_ALWAYS so that files
 					//					does not get destroyed.
 					Handle = CreateFileA(Filename, GENERIC_READ | GENERIC_WRITE, 0,
 												NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+				#else
+					// OPEN_ALWAYS: create it if it is missing, and no O_TRUNC, for SKB's reason above.
+					Handle = zh_open(Filename, O_RDWR | O_CREAT, 0666);
 				#endif
 				break;
 		}
@@ -513,11 +583,11 @@ bool RawFileClass::Is_Available(int forced)
 	*/
 	for (;;) {
 
-		#ifdef _UNIX
-			Handle=fopen(Filename,"r");
-		#else
+		#if defined(_WIN32)
 			Handle = CreateFileA(Filename, GENERIC_READ, FILE_SHARE_READ,
 											NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		#else
+			Handle = zh_open(Filename, O_RDONLY, 0);
 		#endif
 
 		if (Handle == NULL_HANDLE) {
@@ -530,13 +600,13 @@ bool RawFileClass::Is_Available(int forced)
 	**	Since the file could be opened, then close it and return that the file exists.
 	*/
 	int closeok;
-	#ifdef _UNIX
-		closeok=((fclose(Handle)==0)?TRUE:FALSE);
-	#else
+	#if defined(_WIN32)
 		closeok=CloseHandle(Handle);
+	#else
+		closeok=(close(Handle)==0);
 	#endif
 	if (! closeok) {
-		Error(GetLastError(), false, Filename);
+		Error(RAWFILE_LAST_ERROR(), false, Filename);
 	}
 	Handle = NULL_HANDLE;
 
@@ -571,14 +641,13 @@ void RawFileClass::Close(void)
 		**	call the error routine.
 		*/
 		int closeok;
-		#ifdef _UNIX
-			closeok=(fclose(Handle)==0)?TRUE:FALSE;	
-		#else
+		#if defined(_WIN32)
 			closeok=CloseHandle(Handle);
+		#else
+			closeok=(close(Handle)==0);
 		#endif
-
 		if (!closeok) {
-			Error(GetLastError(), false, Filename);
+			Error(RAWFILE_LAST_ERROR(), false, Filename);
 		}
 
 		/*
@@ -644,22 +713,21 @@ int RawFileClass::Read(void * buffer, int size)
 	while (size > 0) {
 		bytesread = 0;
 
-		int readok=TRUE;
-
-		#ifdef _UNIX
-			readok=TRUE;
-			bytesread=fread(buffer,1,size,Handle);
-			if ((bytesread == 0)&&( ! feof(Handle)))
-				readok=ferror(Handle);
-		#else
+		int readok;
+		#if defined(_WIN32)
 			readok=ReadFile(Handle, buffer, size, &(unsigned long&)bytesread, NULL);
+		#else
+			// ReadFile's contract: a count, zero at end of file, and failure reported apart from it
+			// with the count left at zero.
+			ssize_t got = read(Handle, buffer, size);
+			readok = (got >= 0);
+			bytesread = readok ? (long)got : 0;
 		#endif
-			
 
 		if (! readok) {
 			size -= bytesread;
 			total += bytesread;
-			Error(GetLastError(), true, Filename);
+			Error(RAWFILE_LAST_ERROR(), true, Filename);
 			continue;
 		}
 		size -= bytesread;
@@ -712,17 +780,17 @@ int RawFileClass::Write(void const * buffer, int size)
 		opened = true;
 	}
 
-   int writeok=TRUE;
-   #ifdef _UNIX
-		byteswritten = fwrite(buffer, 1, size, Handle);
-		if (byteswritten != size)
-			writeok = FALSE;
-	#else
+   int writeok;
+   #if defined(_WIN32)
 		writeok=WriteFile(Handle, buffer, size, &(unsigned long&)byteswritten, NULL);
+	#else
+		ssize_t put = write(Handle, buffer, size);
+		writeok = (put >= 0);
+		byteswritten = writeok ? (long)put : 0;
 	#endif
 
 	if (! writeok) {
-		Error(GetLastError(), false, Filename);
+		Error(RAWFILE_LAST_ERROR(), false, Filename);
 	}
 
 	/*
@@ -855,27 +923,19 @@ int RawFileClass::Size(void)
 	*/
 	if (Is_Open()) {
 
-      #ifdef _UNIX
-			fpos_t curpos,startpos,endpos;
-			fgetpos(Handle,&curpos);	
-
-			fseek(Handle,0,SEEK_SET);
-			fgetpos(Handle,&startpos);	
-
-			fseek(Handle,0,SEEK_END);
-			fgetpos(Handle,&endpos);	
-
-			size=endpos-startpos;
-			fsetpos(Handle,&curpos);
-		#else
+		#if defined(_WIN32)
 			size = GetFileSize(Handle, NULL);
+		#else
+			// GetFileSize with no high half: the low 32 bits of the length, all ones on failure.
+			struct stat st;
+			size = (fstat(Handle, &st) == 0) ? (int)(unsigned int)st.st_size : (int)0xFFFFFFFF;
 		#endif
 
 		/*
 		**	If there was in internal error, then call the error function.
 		*/
 		if (size == 0xFFFFFFFF) {
-			Error(GetLastError(), false, Filename);
+			Error(RAWFILE_LAST_ERROR(), false, Filename);
 		}
 
 	} else {
@@ -986,14 +1046,14 @@ int RawFileClass::Delete(void)
 		}
 
 		int deleteok;
-		#ifdef _UNIX
-			deleteok=(unlink(Filename)==0)?TRUE:FALSE;
-		#else
+		#if defined(_WIN32)
 			deleteok=DeleteFile(Filename);
+		#else
+			deleteok=(zh_unlink(Filename)==0);
 		#endif
 
 		if (! deleteok) {
-			Error(GetLastError(), false, Filename);
+			Error(RAWFILE_LAST_ERROR(), false, Filename);
 			return(false);
 		}
 		break;
@@ -1029,11 +1089,7 @@ unsigned long RawFileClass::Get_Date_Time(void)
 	// Ensure we will work properly if the file is not open
 	if (Is_Open()) {
 		// If file is open proceed normally
-#ifdef _UNIX
-		struct stat statbuf;
-		lstat(Filename, &statbuf);
-		retval = statbuf.st_mtime;
-#else
+#if defined(_WIN32)
 		BY_HANDLE_FILE_INFORMATION info;
 
 		if (GetFileInformationByHandle(Handle, &info)) {
@@ -1042,16 +1098,14 @@ unsigned long RawFileClass::Get_Date_Time(void)
 			FileTimeToDosDateTime(&info.ftLastWriteTime, &dosdate, &dostime);
 			retval = (dosdate << 16) | dostime;
 		}
+#else
+		retval = Dos_Date_Time_Of(Handle);
 #endif
 	} else {
 		// If file not open open it, if open succeeded proceed normally and then close to put
 		// everything back the way we found it.
 		if (Open()) {
-#ifdef _UNIX
-			struct stat statbuf;
-			lstat(Filename, &statbuf);
-			retval = statbuf.st_mtime;
-#else
+#if defined(_WIN32)
 			BY_HANDLE_FILE_INFORMATION info;
 
 			if (GetFileInformationByHandle(Handle, &info)) {
@@ -1060,6 +1114,8 @@ unsigned long RawFileClass::Get_Date_Time(void)
 				FileTimeToDosDateTime(&info.ftLastWriteTime, &dosdate, &dostime);
 				retval = (dosdate << 16) | dostime;
 			}
+#else
+			retval = Dos_Date_Time_Of(Handle);
 #endif
 			Close();
 
@@ -1087,10 +1143,7 @@ unsigned long RawFileClass::Get_Date_Time(void)
  *=============================================================================================*/
 bool RawFileClass::Set_Date_Time(unsigned long datetime)
 {
-#ifdef _UNIX
-	assert(0);
-	return(false);
-#else
+#if defined(_WIN32)
 	if (RawFileClass::Is_Open()) {
 		BY_HANDLE_FILE_INFORMATION info;
 
@@ -1102,6 +1155,8 @@ bool RawFileClass::Set_Date_Time(unsigned long datetime)
 		}
 	}
 	return(false);
+#else
+	return RawFileClass::Is_Open() && Set_Dos_Date_Time_Of(Handle, datetime);
 #endif
 }
 
@@ -1179,8 +1234,11 @@ int RawFileClass::Raw_Seek(int pos, int dir)
 		Error(EBADF, false, Filename);
 	}
 
-   #ifdef _UNIX
-      pos=fseek(Handle, pos, dir);
+   #if !defined(_WIN32)
+		// SetFilePointer's contract: the new position, or all ones on failure.  SEEK_SET, SEEK_CUR
+		// and SEEK_END are lseek's own already.
+		off_t newpos = lseek(Handle, pos, dir);
+		pos = (newpos < 0) ? (int)0xFFFFFFFF : (int)newpos;
    #else
 		switch (dir) {
 			case SEEK_SET:
@@ -1202,7 +1260,7 @@ int RawFileClass::Raw_Seek(int pos, int dir)
 	**	If there was an error in the seek, then bail with an error condition.
 	*/
 	if (pos == 0xFFFFFFFF) {
-		Error(GetLastError(), false, Filename);
+		Error(RAWFILE_LAST_ERROR(), false, Filename);
 	}
 
 	/*
@@ -1234,10 +1292,10 @@ void RawFileClass::Attach (void *handle, int rights)
 	Date = 0;
 	Time = 0;
 
-	#ifdef _UNIX
-	  Handle = (FILE *)handle;
-	#else
+	#if defined(_WIN32)
 	  Handle = handle;
+	#else
+	  Handle = (int)reinterpret_cast<intptr_t>(handle);
 	#endif
 }
 

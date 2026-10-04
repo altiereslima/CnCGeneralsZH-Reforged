@@ -1,0 +1,58 @@
+# Two Helixes with the gattling cannon, which is on the Helix's back by frame 640. The first is put
+# on two Paladins with three Rangers beside them, then sent north past them, then west away from
+# them, then attack-moved east through them. The second is put on a Crusader, which cannot shoot at
+# aircraft, and the tank drives two laps of a circle 100 round it, inside the Helix's own gun's
+# range so the Helix never has to chase.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 1800
+#     -scenario helixturret -logPrefix helixturret_
+#
+# Measured 2026-10-03 with a temporary per-frame log of the Helix's heading, the cannon's turret angle
+# and both guns' last shot. Before, the first Helix swung itself 18 degrees onto the Paladin while it
+# hovered and fired its own gun 15 times; the second turned 336 degrees following the circling
+# Crusader, its own gun firing 145 times and the cannon 251. After, neither Helix turns at all to
+# aim: the cannon's turret alone covers 652 degrees round the circle and fires 458 times, and each
+# Helix's own gun, which points only along the nose, fires only when a target crosses it (0 and 7
+# times). Sent past and away the first Helix behaves as it did, because a move order already took
+# its own gun off the target; the 149 degrees it turns going away is its nose coming round into the
+# flight.
+
+30    spawn         1  Tank_ChinaVehicleHelix        1   1200 2700
+40    shiftupgrade  1  Tank_ChinaVehicleHelix            Upgrade_ChinaHelixGattlingCannon
+700   spawn         0  AmericaTankPaladin            2   1420 2760
+700   spawn         0  AmericaInfantryRanger         3   1420 2640
+720   attack        1  Tank_ChinaVehicleHelix        0  AmericaTankPaladin
+900   move          1  Tank_ChinaVehicleHelix            1250 3000
+1050  move          1  Tank_ChinaVehicleHelix            900 2700
+1200  attackmove    1  Tank_ChinaVehicleHelix            1700 2700
+720   tally         0  AmericaTankPaladin
+900   tally         0  AmericaTankPaladin
+1050  tally         0  AmericaTankPaladin
+1200  tally         0  AmericaTankPaladin
+1700  tally         0  AmericaTankPaladin
+1700  tally         0  AmericaInfantryRanger
+
+30    spawn         1  ChinaVehicleHelix             1   1200 3700
+40    shiftupgrade  1  ChinaVehicleHelix                 Upgrade_ChinaHelixGattlingCannon
+700   spawn         0  AmericaTankCrusader           1   1300 3700
+720   attack        1  ChinaVehicleHelix             0  AmericaTankCrusader
+740   move          0  AmericaTankCrusader               1271 3771
+800   move          0  AmericaTankCrusader               1200 3800
+860   move          0  AmericaTankCrusader               1129 3771
+920   move          0  AmericaTankCrusader               1100 3700
+980   move          0  AmericaTankCrusader               1129 3629
+1040  move          0  AmericaTankCrusader               1200 3600
+1100  move          0  AmericaTankCrusader               1271 3629
+1160  move          0  AmericaTankCrusader               1300 3700
+1220  move          0  AmericaTankCrusader               1271 3771
+1280  move          0  AmericaTankCrusader               1200 3800
+1340  move          0  AmericaTankCrusader               1129 3771
+1400  move          0  AmericaTankCrusader               1100 3700
+1460  move          0  AmericaTankCrusader               1129 3629
+1520  move          0  AmericaTankCrusader               1200 3600
+1580  move          0  AmericaTankCrusader               1271 3629
+1640  move          0  AmericaTankCrusader               1300 3700
+1000  tally         0  AmericaTankCrusader
+1700  tally         0  AmericaTankCrusader

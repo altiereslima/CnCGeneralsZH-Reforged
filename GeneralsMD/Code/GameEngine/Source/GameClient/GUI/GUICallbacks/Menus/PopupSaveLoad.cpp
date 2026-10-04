@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -46,6 +47,7 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
 
 #include "Common/GameEngine.h"
 #include "Common/GameState.h"
@@ -454,7 +456,7 @@ static void setEditDescription( GameWindow *editControl )
 	// the map name (which is really only used in debug)
 	//
 	if( campaign )
-		defaultDesc.format( L"%s %d", 
+		defaultDesc.format( u"%s %d", 
 												TheGameText->fetch( campaign->m_campaignNameLabel ).str(),
 												TheCampaignManager->getCurrentMissionNumber() + 1 );
 	else
@@ -462,9 +464,9 @@ static void setEditDescription( GameWindow *editControl )
 		const char *mapName = TheGlobalData->m_mapName.reverseFind( '\\' );
 
 		if( mapName )
-			defaultDesc.format( L"%S", mapName + 1 );
+			defaultDesc.format( u"%S", mapName + 1 );
 		else
-			defaultDesc.format( L"%S", TheGlobalData->m_mapName.str() );
+			defaultDesc.format( u"%S", TheGlobalData->m_mapName.str() );
 		
 		//Keep the extension out of the descriptive name.
 		if( (defaultDesc.getLength() >= 4)  &&  (defaultDesc.getCharAt(defaultDesc.getLength()-4) == '.') )
@@ -718,7 +720,7 @@ WindowMsgHandledType SaveLoadMenuSystem( GameWindow *window, UnsignedInt msg,
 					AsciiString filepath = TheGameState->getFilePathInSaveDirectory(selectedGameInfo->filename);
 
 					// delete the file
-					DeleteFile( filepath.str() );
+					zh_remove( filepath.str() );
 					
 					// repopulate the listbox
 					TheGameState->populateSaveGameListbox( listboxGames, currentLayoutType );

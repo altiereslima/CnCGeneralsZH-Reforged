@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -26,15 +28,15 @@
 // July 2002 Bryan Cleveland
 
 #include "W3DDevice/GameClient/W3DWebBrowser.h"
-#include "WW3D2/Texture.h"
-#include "WW3D2/TextureLoader.h"
-#include "WW3D2/SurfaceClass.h"
+#include "WW3D2/texture.h"
+#include "WW3D2/textureloader.h"
+#include "WW3D2/surfaceclass.h"
 #include "GameClient/Image.h"
 #include "GameClient/GameWindow.h"
 #include "vector2i.h"
 #include "d3dx9runtime.h"
 #include "WW3D2/dx8wrapper.h"
-#include "WW3D2/dx8WebBrowser.h"
+#include "WW3D2/dx8webbrowser.h"
 
 W3DWebBrowser::W3DWebBrowser() : WebBrowser() {
 }

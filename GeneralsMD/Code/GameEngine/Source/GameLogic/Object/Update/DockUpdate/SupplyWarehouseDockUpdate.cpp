@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -40,6 +42,7 @@
 #include "GameLogic/Object.h"
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/AIPathfind.h"
+#include "Platform/MsvcFloatCasts.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -407,7 +410,7 @@ Int SupplyWarehouseDockUpdate::getSupplyCashValue( void ) const
 void SupplyWarehouseDockUpdate::setCashValue( Int cashValue )
 {
 	// A script can tell us our set value, and we need to figure out the boxes needed to provide that.
-	m_boxesStored = ceil(cashValue / (float)TheGlobalData->m_baseValuePerSupplyBox);
+	m_boxesStored = floatToIntAsMsvc((float)ceil(cashValue / (float)TheGlobalData->m_baseValuePerSupplyBox));
 	Drawable *draw = getObject()->getDrawable();
 	if( draw )
 	{

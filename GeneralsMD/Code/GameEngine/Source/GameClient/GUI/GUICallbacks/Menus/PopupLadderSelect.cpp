@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -53,7 +55,7 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
 #include "Common/GlobalData.h"
-#include "Common/Encrypt.h"
+#include "Common/encrypt.h"
 #include "Common/NameKeyGenerator.h"
 #include "GameClient/WindowLayout.h"
 #include "GameClient/Gadget.h"
@@ -135,7 +137,7 @@ static void populateLadderListBox( void )
 	GadgetListBoxGetSelected(listboxLadderSelect, &selIndex);
 	if (selIndex < 0)
 		return;
-	selID = (Int)GadgetListBoxGetItemData(listboxLadderSelect, selIndex);
+	selID = (Int)(intptr_t)GadgetListBoxGetItemData(listboxLadderSelect, selIndex);
 	if (!selID)
 		return;
 	updateLadderDetails(selID, staticTextLadderName, listboxLadderDetails);
@@ -378,7 +380,7 @@ WindowMsgHandledType PopupLadderSelectSystem( GameWindow *window, UnsignedInt ms
 				if (selectPos < 0)
 					break;
 
-				ladderIndex = (Int)GadgetListBoxGetItemData( listboxLadderSelect, selectPos, 0 );
+				ladderIndex = (Int)(intptr_t)GadgetListBoxGetItemData( listboxLadderSelect, selectPos, 0 );
 				const LadderInfo *li = TheLadderList->findLadderByIndex( ladderIndex );
 				if (li && li->cryptedPassword.isNotEmpty())
 				{
@@ -444,7 +446,7 @@ WindowMsgHandledType PopupLadderSelectSystem( GameWindow *window, UnsignedInt ms
 			if (selIndex < 0)
 				break;
 
-			selID = (Int)GadgetListBoxGetItemData(listboxLadderSelect, selIndex);
+			selID = (Int)(intptr_t)GadgetListBoxGetItemData(listboxLadderSelect, selIndex);
 			if (!selID)
 				break;
 
@@ -637,7 +639,7 @@ WindowMsgHandledType RCGameDetailsMenuSystem( GameWindow *window, UnsignedInt ms
 			{
 				GameWindow *control = (GameWindow *)mData1;
 				Int controlID = control->winGetWindowId();
-				Int selectedID = (Int)window->winGetUserData();
+				Int selectedID = (Int)(intptr_t)window->winGetUserData();
 				if(!selectedID)
 					break;
 				closeRightClickMenu(window);
@@ -663,7 +665,7 @@ WindowMsgHandledType RCGameDetailsMenuSystem( GameWindow *window, UnsignedInt ms
 							rcMenu->winBringToTop();
 							rcMenu->winHide(FALSE);
 							
-							rcMenu->winSetUserData((void *)selectedID);
+							rcMenu->winSetUserData((void *)(intptr_t)selectedID);
 							TheWindowManager->winSetLoneWindow(rcMenu);
 
 							GameWindow *st = TheWindowManager->winGetWindowFromId(NULL,

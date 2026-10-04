@@ -1,0 +1,27 @@
+# A wide battle on the palm beach of Flash Effect for the 2.4.0 Shorts: America from the grass in
+# the west, China from the grass in the east, both attack-moving onto the sand at 1700,1500 with
+# the sea behind it, an A-10 strike and a carpet bomb called into the middle.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 5000 -map "Maps\Flash Effect\Flash Effect.map" -autoskirmish 2
+#     -takeover -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario s240_beach
+#     -cinema s240_beach -video 390 780 s240_beach -maxframes 790
+
+10    spawn      0  AmericaCommandCenter            1   start0:240:60
+10    spawn      1  ChinaCommandCenter              1   start1:-260:60
+
+30    spawn      0  AmericaTankCrusader             10  1180 1460  36
+30    spawn      0  AmericaTankPaladin              4   1100 1520  40
+30    spawn      0  AmericaInfantryRanger           12  1250 1420  18
+30    spawn      0  AmericaVehicleComanche          3   1080 1400  60
+30    spawn      0  AmericaVehicleTomahawk          2   1060 1560  40
+30    spawn      1  ChinaTankBattleMaster           10  2220 1460  40
+30    spawn      1  ChinaTankOverlord               3   2300 1520  50
+30    spawn      1  ChinaTankGattling               3   2180 1400  36
+30    spawn      1  ChinaInfantryRedguard           12  2150 1500  18
+30    spawn      1  ChinaVehicleHelix               2   2320 1400  60
+60    attackmove 0  *  1700 1500
+60    attackmove 1  *  1700 1500
+
+450   power      0  AmericaCommandCenter  1760 1480  SuperweaponA10ThunderboltMissileStrike
+520   power      1  ChinaCommandCenter    1640 1520  Early_SuperweaponChinaCarpetBomb

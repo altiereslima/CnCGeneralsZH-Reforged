@@ -1,0 +1,36 @@
+# X2's scene: thirty Inferno Cannons shelling twenty Crusaders, the screen full of fire that the Direct3D 11
+# against Direct3D 9 comparison is about (upstream's README, "Not there yet").  The same frames every run:
+# -takeover leaves both seats without an AI, so nothing moves but what this file orders, and the orders are
+# keyed to the logic frame.  The Crusaders stand under the camera; the cannons fire from 380 units north.
+# A fresh wave of twenty Crusaders arrives every 150 frames and the cannons are set on them again, so
+# the fire does not burn out: the frames to measure run from 300 to 1200.
+#
+#   generals -win -xres 1280 -yres 720 -quickstart -noshellmap -multiInstance -noFPSLimit -msaa 0
+#     -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover -seed 1
+#     -particlecap 20000 -scenario inferno30 -camera 760 850 -maxframes 1300 -logPrefix inferno30_
+#
+# add -d3d9 for the old renderer on Windows; ZH_GPU_TIMING or the D3D11 counters measure the frames.
+#
+#   <frame> spawn <slot> <template> <count> <position> [spacing]; attack <slot> <selector> <targetSlot> <targetSelector>
+
+30    spawn      1  ChinaVehicleInfernoCannon   30  760 470   34
+30    spawn      0  AmericaTankCrusader         20  760 850   36
+40    attack     1  ChinaVehicleInfernoCannon   0   AmericaTankCrusader
+180   spawn      0  AmericaTankCrusader         20  760 850   36
+190   attack     1  ChinaVehicleInfernoCannon   0   AmericaTankCrusader
+330   spawn      0  AmericaTankCrusader         20  760 850   36
+340   attack     1  ChinaVehicleInfernoCannon   0   AmericaTankCrusader
+480   spawn      0  AmericaTankCrusader         20  760 850   36
+490   attack     1  ChinaVehicleInfernoCannon   0   AmericaTankCrusader
+630   spawn      0  AmericaTankCrusader         20  760 850   36
+640   attack     1  ChinaVehicleInfernoCannon   0   AmericaTankCrusader
+780   spawn      0  AmericaTankCrusader         20  760 850   36
+790   attack     1  ChinaVehicleInfernoCannon   0   AmericaTankCrusader
+930   spawn      0  AmericaTankCrusader         20  760 850   36
+940   attack     1  ChinaVehicleInfernoCannon   0   AmericaTankCrusader
+1080  spawn      0  AmericaTankCrusader         20  760 850   36
+1090  attack     1  ChinaVehicleInfernoCannon   0   AmericaTankCrusader
+1230  spawn      0  AmericaTankCrusader         20  760 850   36
+1240  attack     1  ChinaVehicleInfernoCannon   0   AmericaTankCrusader
+1380  spawn      0  AmericaTankCrusader         20  760 850   36
+1390  attack     1  ChinaVehicleInfernoCannon   0   AmericaTankCrusader

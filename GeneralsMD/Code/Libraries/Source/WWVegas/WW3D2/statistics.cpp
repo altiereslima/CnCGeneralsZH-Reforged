@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 #include "statistics.h"
 #include "wwstring.h"
@@ -94,7 +95,7 @@ static void Record_Texture_End()
 	texture_statistics_string="";
 	if (record_texture_mode==Debug_Statistics::RECORD_TEXTURE_DETAILS) {
 		char tmp_text[1024];
-		_snprintf(tmp_text,sizeof(tmp_text),
+		snprintf(tmp_text,sizeof(tmp_text),
 			"Set_DX8_Texture count: %d\nactual changes: %d\n\n"
 			"id      refs changes  size      name\n"
 			"--------------------------------------\n",

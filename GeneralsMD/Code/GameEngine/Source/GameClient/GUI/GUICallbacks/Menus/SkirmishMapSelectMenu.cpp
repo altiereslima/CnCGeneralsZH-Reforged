@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,6 +31,7 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
 #include "Common/GameEngine.h"
 #include "Common/MessageStream.h"
@@ -102,9 +105,9 @@ static void addRandomMapRows( GameWindow *listbox )
 	// archives, and a missing label would read "MISSING: GUI:RandomMap" on screen.
 	static const WideChar *theRandomMapRowLabels[RANDOM_MAP_SIZE_COUNT] =
 	{
-		L"Random map, small - new seed every time (8)",
-		L"Random map - new seed every time (8)",
-		L"Random map, large - new seed every time (8)"
+		u"Random map, small - new seed every time (8)",
+		u"Random map - new seed every time (8)",
+		u"Random map, large - new seed every time (8)"
 	};
 
 	Color color = GameMakeColor( 255, 255, 255, 255 );
@@ -124,7 +127,7 @@ static void addRandomMapRows( GameWindow *listbox )
 static Bool generateRandomMapForSkirmish( RandomMapSize size, AsciiString& mapPathOut )
 {
 	RandomMapSettings settings;
-	settings.m_seed = (Int)GetTickCount();
+	settings.m_seed = (Int)Clock_Milliseconds_Coarse();
 	settings.m_numPlayers = RandomMapGenerator::MAX_PLAYERS;
 	settings.m_playableCells = RandomMapGenerator::cellsFor( size, settings.m_numPlayers );
 
@@ -180,7 +183,7 @@ static void mapListTooltipFunc(GameWindow *window,
 		return;
 	}
 
-	Int imageItemData = (Int)GadgetListBoxGetItemData(window, row, 1);
+	Int imageItemData = (Int)(intptr_t)GadgetListBoxGetItemData(window, row, 1);
 	UnicodeString tooltip;
 	switch (imageItemData)
 	{

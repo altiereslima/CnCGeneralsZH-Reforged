@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -1026,7 +1028,7 @@ void OpenContain::exitObjectViaDoor( Object *exitObj, ExitDoorType exitDoor )
 		if( numberExits > 1 )
 		{
 			char suffix[8];
-			itoa(m_whichExitPath, suffix, 10);
+			snprintf( suffix, sizeof( suffix ), "%d", (Int)(m_whichExitPath) );
 			if( m_whichExitPath < 10 )
 			{
 				startBone.concat('0');
@@ -1145,7 +1147,7 @@ void OpenContain::exitObjectInAHurry( Object *exitObj )
 		if( numberExits > 1 )
 		{
 			char suffix[8];
-			itoa(m_whichExitPath, suffix, 10);
+			snprintf( suffix, sizeof( suffix ), "%d", (Int)(m_whichExitPath) );
 			if( m_whichExitPath < 10 )
 			{
 				startBone.concat('0');
@@ -1331,7 +1333,7 @@ void OpenContain::putObjAtNextFirePoint( Object *obj )
 		// If our passengers are in our turret, we need to recompute the Matrix.
 		AsciiString firepoint("FIREPOINT");
 		char suffix[8];
-		itoa( m_firePointNext + 1, suffix, 10 );//+1 from bone names starting at 1, not zero like my array
+		snprintf( suffix, sizeof( suffix ), "%d", (Int)(m_firePointNext + 1) );//+1 from bone names starting at 1, not zero like my array
 		if( m_firePointNext + 1 < 10 )	// pad on the number the name uses, not the index
 		{
 			firepoint.concat('0');

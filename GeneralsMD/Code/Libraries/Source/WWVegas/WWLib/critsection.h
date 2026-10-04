@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -45,8 +46,30 @@
 
 #include "always.h"
 #include "wwdebug.h"
-#include <windows.h>
 
+#include <mutex>
+#include <thread>
+
+/*
+	THIS FILE IS DEAD, and B14 is recording that rather than acting on it.
+
+	Nothing includes critsection.h except critsection.cpp, critsection.cpp is in no target's source
+	list, and the class below has the same name - CriticalSectionClass - as a live class in
+	WWLib/mutex.h with a different interface and different callers.  Two definitions of one name in
+	one library is an ODR violation waiting for the first translation unit that includes both; it
+	has never happened only because nothing includes this one.
+
+	It is ported anyway, because leaving the last raw CRITICAL_SECTION in WWVegas in a file marked
+	"dead" is how the next sweep finds a fourth copy.  Deleting it instead is probably right and is
+	a separate decision: B14 deliberately did not unify the three
+	implementations, and deleting one is close enough to that to ask first.
+
+	Unlike mutex.h's, this class is deliberately NOT recursive - Enter() asserted inside==false.
+	That assert was itself wrong: it read a plain bool BEFORE acquiring, so a second thread
+	arriving while the first held the lock failed it, which is ordinary contention and the whole
+	point of the class.  It is taken after the acquire now, where it means what it was written to
+	mean.
+*/
 class CriticalSectionClass
 {
 public:
@@ -67,8 +90,9 @@ public:
 	friend LockClass;
 
 private:
-	CRITICAL_SECTION Bar;
-	bool inside;
+	std::mutex Bar;
+	std::thread::id Owner;		// written and read only under Bar
+	bool inside;				// likewise
 	void Enter();
 	void Exit();
 };

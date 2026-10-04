@@ -194,11 +194,19 @@ const size_t CALLER_DEPTH = 6;
 const size_t CALLER_ROWS_SHOWN = 25;
 using CallerChain = std::array<DWORD64, CALLER_DEPTH>;
 
-// The sampler is built for the game's architecture: an x64 sampler reads an x64 game.
+// The sampler is built for the game's architecture: an x64 sampler reads an x64 game, an ARM64 one
+// an ARM64 game.
+#if defined(_M_ARM64)
+#define CONTEXT_PC Pc
+#define CONTEXT_FRAME Fp
+#define CONTEXT_STACK Sp
+const DWORD SAMPLED_MACHINE = IMAGE_FILE_MACHINE_ARM64;
+#else
 #define CONTEXT_PC Rip
 #define CONTEXT_FRAME Rbp
 #define CONTEXT_STACK Rsp
 const DWORD SAMPLED_MACHINE = IMAGE_FILE_MACHINE_AMD64;
+#endif
 
 std::string symbol_name(HANDLE proc, DWORD64 addr, std::map<DWORD64, std::string> &cache)
 {

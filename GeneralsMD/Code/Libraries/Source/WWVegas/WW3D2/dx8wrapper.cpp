@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -43,10 +45,16 @@
 
 //#define CREATE_DX8_MULTI_THREADED
 //#define CREATE_DX8_FPU_PRESERVE
+#if defined(_WIN32)
+#define WW3D_DEVTYPE Requested_Device_Type()	// HAL unless ZH_D3D9_DEVTYPE says otherwise: see below
+#else
 #define WW3D_DEVTYPE D3DDEVTYPE_HAL
+#endif
 
 #include "dx8wrapper.h"
-#include "dx8webbrowser.h"
+#if defined(_WIN32)
+#include "dx8webbrowser.h"	// the embedded browser: Windows only
+#endif
 #include "dx8fvf.h"
 #include "dx8vertexbuffer.h"
 #include "dx8indexbuffer.h"
@@ -59,7 +67,9 @@
 #include "rddesc.h"
 #include "lightenvironment.h"
 #include "statistics.h"
+#if defined(_WIN32)
 #include "registry.h"
+#endif
 #include "boxrobj.h"
 #include "pointgr.h"
 #include "render2d.h"
@@ -82,9 +92,28 @@
 #include "formconv.h"
 #include "dx8texman.h"
 #include "bound.h"
-#include "dx8webbrowser.h"
+#if defined(_WIN32)
+#include "dx8webbrowser.h"	// the embedded browser: Windows only
+#endif
 
 #include "shdlib.h"
+#include <string.h>	// memset, strcpy, strlen
+
+#if defined(_WIN32)
+#include <stdlib.h>	// getenv
+
+/* ZH_D3D9_DEVTYPE=nullref is for measuring, not playing: the reference rasterizer's NULL device
+	 takes every call and draws nothing, so a run times the game's own work in the Direct3D 9
+	 runtime with no driver or rasterizer under it.  It exists only where d3dref9.dll does (the
+	 DirectX SDK's debug runtime); without it CreateDevice fails as it would on a machine with no
+	 device.  Unset, or anything else, the device is the hardware one it has always been.  The
+	 Direct3D 11 side's counterpart is ZH_DX11_DRIVER (dx11device.cpp). */
+static D3DDEVTYPE Requested_Device_Type()
+{
+	const char * requested = getenv("ZH_D3D9_DEVTYPE");
+	return (requested != NULL && _stricmp(requested, "nullref") == 0) ? D3DDEVTYPE_NULLREF : D3DDEVTYPE_HAL;
+}
+#endif
 
 const int DEFAULT_RESOLUTION_WIDTH = 640;
 const int DEFAULT_RESOLUTION_HEIGHT = 480;
@@ -102,7 +131,7 @@ int DX8Wrapper_PreserveFPU = 0;
 **
 ***********************************************************************************/
 
-static HWND						_Hwnd															= NULL;
+static RenderWindow						_Hwnd															= NULL;
 bool								DX8Wrapper::IsInitted									= false;
 bool								DX8Wrapper::_EnableTriangleDraw						= true;
 
@@ -119,7 +148,7 @@ D3DMATRIX						DX8Wrapper::old_view;
 D3DMATRIX						DX8Wrapper::old_prj;
 
 // shader system additions KJM v
-DWORD								DX8Wrapper::Vertex_Format								= 0;
+uint32								DX8Wrapper::Vertex_Format								= 0;
 IDirect3DVertexShader9 *	DX8Wrapper::Vertex_Shader								= NULL;
 IDirect3DPixelShader9 *		DX8Wrapper::Pixel_Shader								= NULL;
 
@@ -129,7 +158,7 @@ Vector4							DX8Wrapper::Pixel_Shader_Constants[MAX_PIXEL_SHADER_CONSTANTS];
 LightEnvironmentClass*		DX8Wrapper::Light_Environment							= NULL;
 RenderInfoClass*				DX8Wrapper::Render_Info									= NULL;
 
-DWORD								DX8Wrapper::Vertex_Processing_Behavior				= 0;
+uint32								DX8Wrapper::Vertex_Processing_Behavior				= 0;
 ZTextureClass*					DX8Wrapper::Shadow_Map[MAX_SHADOW_MAPS];
 
 Vector3							DX8Wrapper::Ambient_Color;
@@ -191,10 +220,10 @@ void DX8Wrapper::_Draw_DX8_Primitive_UP(D3DPRIMITIVETYPE type, unsigned primitiv
 // the routing the game's own copies have been taking.
 void DX8Wrapper::_Copy_DX8_Rects(
 	IDirect3DSurface9* pSourceSurface,
-	CONST RECT* pSourceRectsArray,
+	const RenderRect* pSourceRectsArray,
 	UINT cRects,
 	IDirect3DSurface9* pDestinationSurface,
-	CONST POINT* pDestPointsArray)
+	const RenderPoint* pDestPointsArray)
 {
 	if (pSourceSurface==NULL || pDestinationSurface==NULL || pSourceSurface==pDestinationSurface) {
 		WWASSERT(0);
@@ -203,15 +232,15 @@ void DX8Wrapper::_Copy_DX8_Rects(
 
 	D3DSURFACE_DESC source_desc;
 	D3DSURFACE_DESC destination_desc;
-	if (FAILED(pSourceSurface->GetDesc(&source_desc))
-		|| FAILED(pDestinationSurface->GetDesc(&destination_desc))) {
+	if (Render_Failed(pSourceSurface->GetDesc(&source_desc))
+		|| Render_Failed(pDestinationSurface->GetDesc(&destination_desc))) {
 		WWASSERT(0);
 		return;
 	}
 
 	const UINT rect_count=cRects==0 ? 1 : cRects;
 	for (UINT rect_index=0; rect_index<rect_count; ++rect_index) {
-		RECT source_rect;
+		RenderRect source_rect;
 		if (pSourceRectsArray!=NULL) {
 			source_rect=pSourceRectsArray[rect_index];
 		}
@@ -222,7 +251,7 @@ void DX8Wrapper::_Copy_DX8_Rects(
 			source_rect.bottom=source_desc.Height;
 		}
 
-		RECT destination_rect;
+		RenderRect destination_rect;
 		if (pDestPointsArray!=NULL) {
 			destination_rect.left=pDestPointsArray[rect_index].x;
 			destination_rect.top=pDestPointsArray[rect_index].y;
@@ -233,15 +262,15 @@ void DX8Wrapper::_Copy_DX8_Rects(
 			destination_rect=source_rect;
 		}
 
-		HRESULT hr;
+		RenderResult hr;
 		if (source_desc.Pool==D3DPOOL_MANAGED || destination_desc.Pool!=D3DPOOL_DEFAULT) {
 			hr=D3DXLoadSurfaceFromSurface(pDestinationSurface,NULL,&destination_rect,
 				pSourceSurface,NULL,&source_rect,D3DX_FILTER_NONE,0);
-			if (SUCCEEDED(hr)) {
+			if (Render_Succeeded(hr)) {
 				// A surface written this way does not tell the texture that owns it, and
 				// a managed texture that is never marked dirty is never uploaded again.
 				IDirect3DTexture9* container=NULL;
-				if (SUCCEEDED(pDestinationSurface->GetContainer(IID_IDirect3DTexture9,(void**)&container))
+				if (Render_Succeeded(pDestinationSurface->GetContainer(IID_IDirect3DTexture9,(void**)&container))
 					&& container!=NULL) {
 					container->AddDirtyRect(&destination_rect);
 					container->Release();
@@ -249,7 +278,7 @@ void DX8Wrapper::_Copy_DX8_Rects(
 			}
 		}
 		else if (source_desc.Pool==D3DPOOL_SYSTEMMEM) {
-			const POINT destination_point={destination_rect.left,destination_rect.top};
+			const RenderPoint destination_point={destination_rect.left,destination_rect.top};
 			hr=D3DDevice->UpdateSurface(pSourceSurface,&source_rect,pDestinationSurface,&destination_point);
 		}
 		else {
@@ -257,7 +286,7 @@ void DX8Wrapper::_Copy_DX8_Rects(
 				pDestinationSurface,&destination_rect,D3DTEXF_NONE);
 		}
 
-		if (FAILED(hr)) {
+		if (Render_Failed(hr)) {
 			Non_Fatal_Log_DX8_ErrorCode(hr,__FILE__,__LINE__);
 			return;
 		}
@@ -265,7 +294,7 @@ void DX8Wrapper::_Copy_DX8_Rects(
 		// The same copy into the D3D11 twin of whatever texture the destination belongs to.  It
 		// reads the source surface rather than the destination, because a default-pool destination
 		// is exactly the one D3D9 will not let anything read back.
-		const POINT destination_point={destination_rect.left,destination_rect.top};
+		const RenderPoint destination_point={destination_rect.left,destination_rect.top};
 		Direct3D11_Mirror_Surface_Copy(pDestinationSurface,pSourceSurface,&source_rect,
 			&destination_point);
 	}
@@ -364,7 +393,7 @@ bool DX8Wrapper::Get_Requested_VSync(void)
 // multisampled auto depth/stencil, and Direct3D requires the depth buffer to match the render
 // target - so the plain render target textures the screen filters and the water reflection draw
 // into need a non-multisampled one of their own.  (The retail runtime does not reject the
-// mismatch at bind time; the debug runtime and the docs do.  dx8_smoke_msaa records both.)
+// mismatch at bind time; the debug runtime and the docs do.)
 // NULL means "not multisampling, keep the depth buffer you already have".
 static IDirect3DSurface9 * _RTTDepthBuffer = NULL;
 
@@ -373,11 +402,13 @@ static DynamicVectorClass<StringClass>					_RenderDeviceShortNameTable;
 static DynamicVectorClass<RenderDeviceDescClass>	_RenderDeviceDescriptionTable;
 
 
+#if defined(_WIN32)
 // d3d9.dll is loaded by hand rather than imported, the way d3d8.dll was, so a machine
 // without it gets the engine's own "no Direct3D" path instead of a loader error box.
 typedef IDirect3D9* (WINAPI *Direct3DCreate9Type) (UINT SDKVersion);
 Direct3DCreate9Type	Direct3DCreate9Ptr = NULL;
 HINSTANCE D3D9Lib = NULL;
+#endif
 
 static int Score_Render_Adapter(const RenderDeviceDescClass &desc)
 {
@@ -449,9 +480,8 @@ bool DX8Wrapper::Init(void * hwnd, bool lite)
 	memset(Shadow_Map,0,sizeof(ZTextureClass*)*MAX_SHADOW_MAPS);
 
 	// D3DX9 has no import library and is bound by hand, so this has to happen before
-	// anything reaches a D3DX entry point.  A machine without d3dx9_43.dll gets a
-	// renderer with no texture loading and no shaders rather than a null call, which is
-	// why the failure is logged here and not left for the first caller to trip over.
+	// anything reaches a D3DX entry point.  A machine without d3dx9_43.dll binds the
+	// port's own D3DX, the one ARM64 runs; W3DDisplay::init logs which one it got.
 	if (!Bind_D3DX9_Runtime()) {
 		WWDEBUG_SAY(("DX8Wrapper: d3dx9_43.dll did not bind; textures and shaders will not load\n"));
 	}
@@ -459,7 +489,7 @@ bool DX8Wrapper::Init(void * hwnd, bool lite)
 	/*
 	** Initialize all variables!
 	*/
-	_Hwnd = (HWND)hwnd;
+	_Hwnd = (RenderWindow)hwnd;
 	_MainThreadID=ThreadClass::_Get_Current_Thread_ID();
 	WWDEBUG_SAY(("DX8Wrapper main thread: 0x%x\n",_MainThreadID));
 	CurRenderDevice = -1;
@@ -473,9 +503,9 @@ bool DX8Wrapper::Init(void * hwnd, bool lite)
 
 	for (int light=0;light<4;++light) CurrentDX8LightEnables[light]=false;
 
-	::ZeroMemory(&old_world, sizeof(D3DMATRIX));
-	::ZeroMemory(&old_view, sizeof(D3DMATRIX));
-	::ZeroMemory(&old_prj, sizeof(D3DMATRIX));
+	memset(&old_world,0, sizeof(D3DMATRIX));
+	memset(&old_view,0, sizeof(D3DMATRIX));
+	memset(&old_prj,0, sizeof(D3DMATRIX));
 
 	//old_vertex_shader; TODO
 	//old_sr_shader;
@@ -493,18 +523,24 @@ bool DX8Wrapper::Init(void * hwnd, bool lite)
 	Invalidate_Cached_Render_States();
 
 	if (!lite) {
+#if defined(_WIN32)
 		D3D9Lib = LoadLibrary("D3D9.DLL");
 
 		if (D3D9Lib == NULL) return false;	// Return false at this point if init failed
 
 		Direct3DCreate9Ptr = (Direct3DCreate9Type) GetProcAddress(D3D9Lib, "Direct3DCreate9");
 		if (Direct3DCreate9Ptr == NULL) return false;
+#endif
 
 		/*
 		** Create the D3D interface object
 		*/
 		WWDEBUG_SAY(("Create Direct3D9\n"));
+#if defined(_WIN32)
 		D3DInterface = Direct3DCreate9Ptr(D3D_SDK_VERSION);
+#else
+		D3DInterface = Direct3DCreate9(D3D_SDK_VERSION);	// the device is linked in (posixd3d9): nothing to load
+#endif
 		if (D3DInterface == NULL) {
 			return(false);
 		}
@@ -563,10 +599,15 @@ void DX8Wrapper::Shutdown(void)
 		D3DInterface=NULL;
 	}
 
-	if (D3D9Lib) {
-		FreeLibrary(D3D9Lib);
-		D3D9Lib = NULL;
-	}
+	// D3D9.DLL stays loaded until the process ends: it is not freed here.  Textures outlive this call -
+	// the particle system manager is shut down after the game client that owns the display, and frees
+	// its point groups' textures then - and each Release is a call into this DLL.  This handle is the
+	// only reference to it (the exe and d3dx9_43.dll do not import it), so FreeLibrary unmapped the code
+	// those calls go to.  Required under Proton/Wine: an exit with particle textures still alive faulted
+	// in ~TextureBaseClass with the unload and exits cleanly without it (measured both ways).  Harmless on
+	// native Windows: two real scenes exited cleanly there before and after this change.  A synthetic
+	// probe in this order (texture alive, FreeLibrary, then its Release) shows the mechanism can fault on
+	// Windows too.  Nothing is gained by unloading it moments before the process exits.
 
 	_RenderDeviceNameTable.Clear();		 // note - Delete_All() resizes the vector, causing a reallocation.  Clear is better. jba.
 	_RenderDeviceShortNameTable.Clear();
@@ -619,17 +660,17 @@ void DX8Wrapper::Do_Onetime_Device_Independent_Inits(void)
 	TextureLoader::Init();
 }
 
-inline DWORD F2DW(float f) { return *((unsigned*)&f); }
+inline uint32 F2DW(float f) { return *((unsigned*)&f); }
 void DX8Wrapper::Set_Default_Global_Render_States(void)
 {
 	DX8_THREAD_ASSERT();
 	const D3DCAPS9 &caps = Get_Current_Caps()->Get_DX8_Caps();
 
-	Set_DX8_Render_State(D3DRS_RANGEFOGENABLE, (caps.RasterCaps & D3DPRASTERCAPS_FOGRANGE) ? TRUE : FALSE);
+	Set_DX8_Render_State(D3DRS_RANGEFOGENABLE, (caps.RasterCaps & D3DPRASTERCAPS_FOGRANGE) ? true : false);
 	Set_DX8_Render_State(D3DRS_FOGTABLEMODE, D3DFOG_NONE);
 	Set_DX8_Render_State(D3DRS_FOGVERTEXMODE, D3DFOG_LINEAR);
 	Set_DX8_Render_State(D3DRS_SPECULARMATERIALSOURCE, D3DMCS_MATERIAL);
-	Set_DX8_Render_State(D3DRS_COLORVERTEX, TRUE);
+	Set_DX8_Render_State(D3DRS_COLORVERTEX, true);
 	Set_DX8_ZBias(0);
 	Set_DX8_Texture_Stage_State(1, D3DTSS_BUMPENVLSCALE, F2DW(1.0f));
 	Set_DX8_Texture_Stage_State(1, D3DTSS_BUMPENVLOFFSET, F2DW(0.0f));
@@ -644,8 +685,8 @@ void DX8Wrapper::Set_Default_Global_Render_States(void)
 
 //MW: I added this for 'Generals'.
 bool DX8Wrapper::Validate_Device(void)
-{	DWORD numPasses=0;
-	HRESULT hRes;
+{	RenderUInt32 numPasses=0;
+	RenderResult hRes;
 
 	hRes=_Get_D3D_Device()->ValidateDevice(&numPasses);
 
@@ -681,6 +722,10 @@ void DX8Wrapper::Invalidate_Cached_Render_States(void)
 			Textures[a]->Release();
 		}
 		Textures[a]=NULL;
+		// The Direct3D 11 backend borrows the view the D3D9 texture owns, and the release above can
+		// be that texture's last reference: a reset drops the render targets first.  Left bound, the
+		// view dangles, and the next draw into a target (the water's reflection) reads it and dies.
+		Direct3D11_Mirror_Texture(a, NULL);
 	}
 
 	ShaderClass::Invalidate();
@@ -741,7 +786,7 @@ bool DX8Wrapper::Create_Device(void)
 	D3DCAPS9 caps;
 	if 
 	(
-		FAILED
+		Render_Failed
 		(
 			D3DInterface->GetDeviceCaps
 			(
@@ -755,11 +800,11 @@ bool DX8Wrapper::Create_Device(void)
 		return false;
 	}
 
-	::ZeroMemory(&CurrentAdapterIdentifier, sizeof(D3DADAPTER_IDENTIFIER9));
+	memset(&CurrentAdapterIdentifier,0, sizeof(D3DADAPTER_IDENTIFIER9));
 	
 	if
 	(
-		FAILED
+		Render_Failed
 		( 
 			D3DInterface->GetAdapterIdentifier
 			(
@@ -802,7 +847,7 @@ bool DX8Wrapper::Create_Device(void)
 	Vertex_Processing_Behavior|=D3DCREATE_FPU_PRESERVE;
 #endif
 
-	HRESULT hr=D3DInterface->CreateDevice
+	RenderResult hr=D3DInterface->CreateDevice
 	(
 		CurRenderDevice,
 		WW3D_DEVTYPE,
@@ -812,7 +857,7 @@ bool DX8Wrapper::Create_Device(void)
 		&D3DDevice
 	);
 
-	if (FAILED(hr) && CurRenderDevice != 0)
+	if (Render_Failed(hr) && CurRenderDevice != 0)
 	{
 		CurRenderDevice = 0;
 		hr=D3DInterface->CreateDevice
@@ -826,7 +871,7 @@ bool DX8Wrapper::Create_Device(void)
 		);
 	}
 
-	if (FAILED(hr)) 
+	if (Render_Failed(hr)) 
 	{
 		// The device selection may fail because the device lied that it supports 32 bit zbuffer with 16 bit
 		// display. This happens at least on Voodoo2.
@@ -849,7 +894,7 @@ bool DX8Wrapper::Create_Device(void)
 				&D3DDevice 
 			);
 
-			if (FAILED(hr)) 
+			if (Render_Failed(hr)) 
 			{
 				return false;
 			}
@@ -869,6 +914,7 @@ bool DX8Wrapper::Create_Device(void)
 	return true;
 }
 
+#if defined(_WIN32)
 // What the fullscreen display under the Direct3D 11 picture has changed on the desktop, so leaving
 // the game can put it back.  The gamma is the desktop's own ramp, read before the game's first one.
 static bool DisplayModeChanged = false;
@@ -904,7 +950,7 @@ static void save_desktop_gamma()
 	}
 	HDC hdc = create_monitor_dc();
 	if (hdc) {
-		DesktopGammaSaved = GetDeviceGammaRamp(hdc, &DesktopGammaRamp) != FALSE;
+		DesktopGammaSaved = GetDeviceGammaRamp(hdc, &DesktopGammaRamp) != false;
 		DeleteDC(hdc);
 	}
 }
@@ -950,7 +996,7 @@ void DX8Wrapper::Apply_Fullscreen_Display(bool shown)
 
 	const char * monitor = RequestedMonitor[0] ? RequestedMonitor : NULL;
 	DEVMODEA current;
-	ZeroMemory(&current, sizeof(current));
+	memset(&current,0, sizeof(current));
 	current.dmSize = sizeof(current);
 	EnumDisplaySettingsExA(monitor, ENUM_CURRENT_SETTINGS, &current, 0);
 
@@ -1006,6 +1052,18 @@ void DX8Wrapper::Apply_Fullscreen_Display(bool shown)
 	}
 }
 
+#else
+// Off Windows the display mode, the monitor and the desktop's gamma ramp are the window's (C2) and the
+// swap chain's (A3); the device changes none of them, so there is nothing here to set or put back.
+static bool GameGammaSet = false;
+static D3DGAMMARAMP GameGammaRamp;
+static void set_desktop_gamma(D3DGAMMARAMP *) {}
+static void save_desktop_gamma() {}
+static void restore_desktop_display() {}
+void DX8Wrapper::Set_Requested_Monitor(const char *) {}
+void DX8Wrapper::Apply_Fullscreen_Display(bool) {}
+#endif
+
 bool DX8Wrapper::Reset_Device(bool reload_assets)
 {
 	WWDEBUG_SAY(("Resetting device.\n"));
@@ -1036,7 +1094,7 @@ bool DX8Wrapper::Reset_Device(bool reload_assets)
 		memset(Vertex_Shader_Constants,0,sizeof(Vector4)*MAX_VERTEX_SHADER_CONSTANTS);
 		memset(Pixel_Shader_Constants,0,sizeof(Vector4)*MAX_PIXEL_SHADER_CONSTANTS);
 
-		HRESULT hr=_Get_D3D_Device()->TestCooperativeLevel();
+		RenderResult hr=_Get_D3D_Device()->TestCooperativeLevel();
 		if (hr != D3DERR_DEVICELOST )
 		{	DX8CALL_HRES(Reset(&_PresentParameters),hr)
 			if (hr != D3D_OK)
@@ -1114,8 +1172,8 @@ void DX8Wrapper::Enumerate_Devices()
 	for (int adapter_index=0; adapter_index<adapter_count; adapter_index++) {
 
 		D3DADAPTER_IDENTIFIER9 id;
-		::ZeroMemory(&id, sizeof(D3DADAPTER_IDENTIFIER9));
-		HRESULT res = D3DInterface->GetAdapterIdentifier(adapter_index,NO_ADAPTER_IDENTIFIER_FLAGS,&id);
+		memset(&id,0, sizeof(D3DADAPTER_IDENTIFIER9));
+		RenderResult res = D3DInterface->GetAdapterIdentifier(adapter_index,NO_ADAPTER_IDENTIFIER_FLAGS,&id);
 
 		if (res == D3D_OK) {
 
@@ -1128,11 +1186,21 @@ void DX8Wrapper::Enumerate_Devices()
 			desc.set_driver_name(id.Driver);
 
 			char buf[64];
+#if defined(_WIN32)
 			sprintf(buf,"%d.%d.%d.%d", //"%04x.%04x.%04x.%04x",
 				HIWORD(id.DriverVersion.HighPart),
 				LOWORD(id.DriverVersion.HighPart),
 				HIWORD(id.DriverVersion.LowPart),
 				LOWORD(id.DriverVersion.LowPart));
+#else
+			// DriverVersion is an int64_t off Windows: LARGE_INTEGER's halves, then their 16-bit words.
+			const unsigned long long driver_version = (unsigned long long)id.DriverVersion;
+			sprintf(buf,"%d.%d.%d.%d",
+				(int)((driver_version >> 48) & 0xFFFF),
+				(int)((driver_version >> 32) & 0xFFFF),
+				(int)((driver_version >> 16) & 0xFFFF),
+				(int)(driver_version & 0xFFFF));
+#endif
 
 			desc.set_driver_version(buf);
 
@@ -1164,8 +1232,8 @@ void DX8Wrapper::Enumerate_Devices()
 				int mode_count = D3DInterface->GetAdapterModeCount(adapter_index,display_format);
 				for (int mode_index=0; mode_index<mode_count; mode_index++) {
 					D3DDISPLAYMODE d3dmode;
-					::ZeroMemory(&d3dmode, sizeof(D3DDISPLAYMODE));
-					HRESULT res = D3DInterface->EnumAdapterModes(adapter_index,display_format,mode_index,&d3dmode);
+					memset(&d3dmode,0, sizeof(D3DDISPLAYMODE));
+					RenderResult res = D3DInterface->EnumAdapterModes(adapter_index,display_format,mode_index,&d3dmode);
 					if (res != D3D_OK) continue;
 
 					// Some cards fail in certain modes, DX8Caps keeps list of those.
@@ -1329,7 +1397,7 @@ bool DX8Wrapper::Set_Render_Device(int dev, int width, int height, int bits, int
 	if (resize_window) {
 
 		// Get the current dimensions of the 'render area' of the window
-		RECT rect = { 0 };
+		RenderRect rect = { 0 };
 		::GetClientRect (_Hwnd, &rect);
 
 		// Is the window the correct size for this resolution?
@@ -1342,8 +1410,8 @@ bool DX8Wrapper::Set_Render_Device(int dev, int width, int height, int bits, int
 			rect.top = 0;
 			rect.right = ResolutionWidth;
 			rect.bottom = ResolutionHeight;
-			DWORD dwstyle = ::GetWindowLong (_Hwnd, GWL_STYLE);
-			AdjustWindowRect (&rect, dwstyle, FALSE);
+			uint32 dwstyle = ::GetWindowLong (_Hwnd, GWL_STYLE);
+			AdjustWindowRect (&rect, dwstyle, false);
 
 			// Resize the window to fit this resolution
 			if (!windowed)
@@ -1362,13 +1430,15 @@ bool DX8Wrapper::Set_Render_Device(int dev, int width, int height, int bits, int
 	//must be either resetting existing device or creating a new one.
 	WWASSERT(reset_device || D3DDevice == NULL);
 
-	// The Direct3D 11 device is built beside the Direct3D 9 one rather than instead of it: 236
-	// places still call the D3D9 device directly, so taking it away would be a black screen.  It
-	// is on unless -d3d9 or -headless turned it off.  It comes first, so everything the Direct3D 9
-	// device makes has a Direct3D 11 copy, and only with a new device: a device refused at startup
-	// and created on a reset (an Alt-Tab) drew every building already standing as its shadow alone.
+	// The Direct3D 11 device is built beside the Direct3D 9 one rather than instead of it: the
+	// engine still calls the D3D9 device directly from 148 places outside this wrapper (measured
+	// 2026-09-22 by a call-site survey), so taking it away would be a black
+	// screen.  It is on unless -d3d9 or -headless turned it off.  It comes first, so everything the
+	// Direct3D 9 device makes has a Direct3D 11 copy, and only with a new device: a device refused
+	// at startup and created on a reset (an Alt-Tab) drew every building already standing as its
+	// shadow alone.
 	if (!reset_device && Direct3D11_Is_Enabled() && !Direct3D11_Is_Active()) {
-		const bool created = Direct3D11_Create((HWND)_Hwnd, ResolutionWidth, ResolutionHeight);
+		const bool created = Direct3D11_Create(_Hwnd, ResolutionWidth, ResolutionHeight);	// RenderWindow: the HWND on Windows
 		WWDEBUG_SAY(("-dx11: Direct3D 11 device %s\n", created ? "created" : "refused"));
 	}
 
@@ -1379,14 +1449,18 @@ bool DX8Wrapper::Set_Render_Device(int dev, int width, int height, int bits, int
 	// A player who alt-tabbed away during the splash is not handed a topmost window over whatever he
 	// went to.  The game's activation applies the display when he comes back.
 	const bool device_windowed = IsWindowed || Direct3D11_Present_Is_Enabled();
+#if defined(_WIN32)
 	if (::GetForegroundWindow() == _Hwnd) {
 		Apply_Fullscreen_Display(true);
 	}
+#else
+	Apply_Fullscreen_Display(true);	// empty off Windows: the window's owner sizes it (W3DDisplay's sizeWindowToClient)
+#endif
 	
 	/*
 	** Initialize values for D3DPRESENT_PARAMETERS members. 	
 	*/
-	::ZeroMemory(&_PresentParameters, sizeof(D3DPRESENT_PARAMETERS));
+	memset(&_PresentParameters,0, sizeof(D3DPRESENT_PARAMETERS));
 
 	_PresentParameters.BackBufferWidth = ResolutionWidth;
 	_PresentParameters.BackBufferHeight = ResolutionHeight;
@@ -1398,7 +1472,7 @@ bool DX8Wrapper::Set_Render_Device(int dev, int width, int height, int bits, int
 	_PresentParameters.hDeviceWindow = _Hwnd;
 	_PresentParameters.Windowed = device_windowed;
 
-	_PresentParameters.EnableAutoDepthStencil = TRUE;				// Driver will attempt to match Z-buffer depth
+	_PresentParameters.EnableAutoDepthStencil = true;				// Driver will attempt to match Z-buffer depth
 	_PresentParameters.Flags=0;											// We're not going to lock the backbuffer
 	
 	//
@@ -1419,7 +1493,7 @@ bool DX8Wrapper::Set_Render_Device(int dev, int width, int height, int bits, int
 	if (device_windowed) {
 
 		D3DDISPLAYMODE desktop_mode;
-		::ZeroMemory(&desktop_mode, sizeof(D3DDISPLAYMODE));
+		memset(&desktop_mode,0, sizeof(D3DDISPLAYMODE));
 		D3DInterface->GetAdapterDisplayMode( CurRenderDevice, &desktop_mode );
 
 		DisplayFormat=_PresentParameters.BackBufferFormat = desktop_mode.Format;
@@ -1440,7 +1514,7 @@ bool DX8Wrapper::Set_Render_Device(int dev, int width, int height, int bits, int
 			return false;
 		}
 
-		if (BitDepth==32 && D3DInterface->CheckDeviceType(CurRenderDevice,D3DDEVTYPE_HAL,desktop_mode.Format,D3DFMT_A8R8G8B8, TRUE) == D3D_OK)
+		if (BitDepth==32 && D3DInterface->CheckDeviceType(CurRenderDevice,D3DDEVTYPE_HAL,desktop_mode.Format,D3DFMT_A8R8G8B8, true) == D3D_OK)
 		{	//promote 32-bit modes to include destination alpha
 			_PresentParameters.BackBufferFormat = D3DFMT_A8R8G8B8;
 		}
@@ -1493,9 +1567,9 @@ bool DX8Wrapper::Set_Render_Device(int dev, int width, int height, int bits, int
 		unsigned wanted = _RequestedMultiSampleLevel;
 		for (unsigned samples = wanted; samples >= 2; --samples) {
 			D3DMULTISAMPLE_TYPE type = (D3DMULTISAMPLE_TYPE)samples;
-			if (FAILED(D3DInterface->CheckDeviceMultiSampleType(CurRenderDevice,D3DDEVTYPE_HAL,
+			if (Render_Failed(D3DInterface->CheckDeviceMultiSampleType(CurRenderDevice,D3DDEVTYPE_HAL,
 					_PresentParameters.BackBufferFormat,_PresentParameters.Windowed,type,NULL))) continue;
-			if (FAILED(D3DInterface->CheckDeviceMultiSampleType(CurRenderDevice,D3DDEVTYPE_HAL,
+			if (Render_Failed(D3DInterface->CheckDeviceMultiSampleType(CurRenderDevice,D3DDEVTYPE_HAL,
 					_PresentParameters.AutoDepthStencilFormat,_PresentParameters.Windowed,type,NULL))) continue;
 			_PresentParameters.MultiSampleType = type;
 			break;
@@ -1654,11 +1728,12 @@ bool DX8Wrapper::Set_Device_Resolution(int width,int height,int bits,int windowe
 		if (height != -1) {
 			_PresentParameters.BackBufferHeight = ResolutionHeight = height;
 		}
+#if defined(_WIN32)	// off Windows the window is C2's to size
 		if (resize_window)
 		{
 
 			// Get the current dimensions of the 'render area' of the window
-			RECT rect = { 0 };
+			RenderRect rect = { 0 };
 			::GetClientRect (_Hwnd, &rect);
 
 			// Is the window the correct size for this resolution?
@@ -1672,8 +1747,8 @@ bool DX8Wrapper::Set_Device_Resolution(int width,int height,int bits,int windowe
 				rect.top = 0;
 				rect.right = ResolutionWidth;
 				rect.bottom = ResolutionHeight;
-				DWORD dwstyle = ::GetWindowLong (_Hwnd, GWL_STYLE);
-				AdjustWindowRect (&rect, dwstyle, FALSE);
+				uint32 dwstyle = ::GetWindowLong (_Hwnd, GWL_STYLE);
+				AdjustWindowRect (&rect, dwstyle, false);
 
 				// Resize the window to fit this resolution
 				if (!windowed)
@@ -1688,6 +1763,7 @@ bool DX8Wrapper::Set_Device_Resolution(int width,int height,int bits,int windowe
 									 SWP_NOZORDER | SWP_NOMOVE);
 			}
 		}
+#endif
 #pragma message("TODO: support changing windowed status and changing the bit depth")
 		Apply_Fullscreen_Display(true);
 		const bool reset = Reset_Device();
@@ -1730,6 +1806,7 @@ void DX8Wrapper::Get_Render_Target_Resolution(int & set_w,int & set_h,int & set_
 	return ;
 }
 
+#if defined(_WIN32)	// the render device's settings in the Windows registry, which only Windows has
 bool DX8Wrapper::Registry_Save_Render_Device( const char * sub_key )
 {
 	int	width, height, depth;
@@ -1875,6 +1952,7 @@ bool DX8Wrapper::Registry_Load_Render_Device( const char * sub_key, char *device
 	texture_depth=-1;
 	return false;
 }
+#endif // _WIN32
 
 
 bool DX8Wrapper::Find_Color_And_Z_Mode(int resx,int resy,int bitdepth,D3DFORMAT * set_colorbuffer,D3DFORMAT * set_backbuffer,D3DFORMAT * set_zmode)
@@ -1925,7 +2003,7 @@ bool DX8Wrapper::Find_Color_And_Z_Mode(int resx,int resy,int bitdepth,D3DFORMAT 
 		*set_backbuffer=*set_colorbuffer = format_table[format_index];
 	}
 
-	if (bitdepth==32 && *set_colorbuffer == D3DFMT_X8R8G8B8 && D3DInterface->CheckDeviceType(0,D3DDEVTYPE_HAL,*set_colorbuffer,D3DFMT_A8R8G8B8, TRUE) == D3D_OK)
+	if (bitdepth==32 && *set_colorbuffer == D3DFMT_X8R8G8B8 && D3DInterface->CheckDeviceType(0,D3DDEVTYPE_HAL,*set_colorbuffer,D3DFMT_A8R8G8B8, true) == D3D_OK)
 	{	//promote 32-bit modes to include destination alpha when supported
 		*set_backbuffer = D3DFMT_A8R8G8B8;
 	}
@@ -1944,7 +2022,7 @@ bool DX8Wrapper::Find_Color_Mode(D3DFORMAT colorbuffer, int resx, int resy, UINT
 	UINT i,j,modemax;
 	UINT rx,ry;
 	D3DDISPLAYMODE dmode;
-	::ZeroMemory(&dmode, sizeof(D3DDISPLAYMODE));
+	memset(&dmode,0, sizeof(D3DDISPLAYMODE));
 
 	rx=(unsigned int) resx;
 	ry=(unsigned int) resy;
@@ -2046,7 +2124,7 @@ bool DX8Wrapper::Find_Z_Mode(D3DFORMAT colorbuffer,D3DFORMAT backbuffer, D3DFORM
 bool DX8Wrapper::Test_Z_Mode(D3DFORMAT colorbuffer,D3DFORMAT backbuffer, D3DFORMAT zmode)
 {
 	// See if we have this mode first
-	if (FAILED(D3DInterface->CheckDeviceFormat(D3DADAPTER_DEFAULT,WW3D_DEVTYPE,
+	if (Render_Failed(D3DInterface->CheckDeviceFormat(D3DADAPTER_DEFAULT,WW3D_DEVTYPE,
 		colorbuffer,D3DUSAGE_DEPTHSTENCIL,D3DRTYPE_SURFACE,zmode)))
 	{
 		WWDEBUG_SAY(("CheckDeviceFormat failed.  Colorbuffer format = %d  Zbufferformat = %d\n",colorbuffer,zmode));
@@ -2054,7 +2132,7 @@ bool DX8Wrapper::Test_Z_Mode(D3DFORMAT colorbuffer,D3DFORMAT backbuffer, D3DFORM
 	}
 
 	// Then see if it matches the color buffer
-	if(FAILED(D3DInterface->CheckDepthStencilMatch(D3DADAPTER_DEFAULT, WW3D_DEVTYPE,
+	if(Render_Failed(D3DInterface->CheckDepthStencilMatch(D3DADAPTER_DEFAULT, WW3D_DEVTYPE,
 		colorbuffer,backbuffer,zmode)))
 	{
 		WWDEBUG_SAY(("CheckDepthStencilMatch failed.  Colorbuffer format = %d  Backbuffer format = %d Zbufferformat = %d\n",colorbuffer,backbuffer,zmode));
@@ -2146,7 +2224,9 @@ void DX8Wrapper::Begin_Scene(void)
 	DX8CALL(BeginScene());
 	Direct3D11_Begin_Scene();
 
+#if defined(_WIN32)
 	DX8WebBrowser::Update();
+#endif
 }
 
 void DX8Wrapper::End_Scene(bool flip_frames)
@@ -2155,11 +2235,13 @@ void DX8Wrapper::End_Scene(bool flip_frames)
 	DX8CALL(EndScene());
 	Direct3D11_End_Scene(flip_frames);
 
+#if defined(_WIN32)
 	DX8WebBrowser::Render(0);
+#endif
 
 	if (flip_frames) {
 		DX8_Assert();
-		HRESULT hr;
+		RenderResult hr;
 		{
 			WWPROFILE("DX8Device::Present()");
 			//
@@ -2183,7 +2265,7 @@ void DX8Wrapper::End_Scene(bool flip_frames)
 
 		number_of_DX8_calls++;
 
-		if (SUCCEEDED(hr)) {
+		if (Render_Succeeded(hr)) {
 #ifdef EXTENDED_STATS
 			if (stats.m_sleepTime) {
 				::Sleep(stats.m_sleepTime);
@@ -2234,9 +2316,9 @@ void DX8Wrapper::Flip_To_Primary(void)
 		int resetAttempts = 0;
 
 		while ((flipCount > 0) && (resetAttempts < 3)) {
-			HRESULT hr = _Get_D3D_Device()->TestCooperativeLevel();
+			RenderResult hr = _Get_D3D_Device()->TestCooperativeLevel();
 
-			if (FAILED(hr)) {
+			if (Render_Failed(hr)) {
 				WWDEBUG_SAY(("TestCooperativeLevel Failed!\n"));
 
 				if (D3DERR_DEVICELOST == hr) {
@@ -2255,7 +2337,7 @@ void DX8Wrapper::Flip_To_Primary(void)
 				WWDEBUG_SAY(("Flipping: %ld\n", FrameCount));
 				hr = _Get_D3D_Device()->Present(NULL, NULL, NULL, NULL);
 
-				if (SUCCEEDED(hr)) {
+				if (Render_Succeeded(hr)) {
 					IsDeviceLost=false;
 					FrameCount++;
 					WWDEBUG_SAY(("Flip to primary succeeded %ld\n", FrameCount));
@@ -2308,7 +2390,7 @@ void DX8Wrapper::Clear(bool clear_color, bool clear_z_stencil, const Vector3 &co
 		depthbuffer->Release();
 	}
 
-	DWORD flags = 0;
+	uint32 flags = 0;
 	if (clear_color) flags |= D3DCLEAR_TARGET;
 	if (clear_z_stencil) flags |= D3DCLEAR_ZBUFFER;
 	if (clear_z_stencil && has_stencil) flags |= D3DCLEAR_STENCIL;
@@ -2319,7 +2401,7 @@ void DX8Wrapper::Clear(bool clear_color, bool clear_z_stencil, const Vector3 &co
 	Direct3D11_Mirror_Clear(clear_color, clear_z_stencil, color.X, color.Y, color.Z, dest_alpha);
 }
 
-void DX8Wrapper::Set_Viewport(CONST D3DVIEWPORT9* pViewport)
+void DX8Wrapper::Set_Viewport(const D3DVIEWPORT9* pViewport)
 {
 	DX8_THREAD_ASSERT();
 	DX8CALL(SetViewport(pViewport));
@@ -2589,7 +2671,7 @@ public:
 			return;
 		}
 
-		DWORD texture_factor = 0;
+		RenderUInt32 texture_factor = 0;
 		Device->GetRenderState(D3DRS_TEXTUREFACTOR, &texture_factor);
 		const float factor[4] = {
 			((texture_factor >> 16) & 0xff) / 255.0f,
@@ -2657,9 +2739,9 @@ void DX8Wrapper::Draw(
 
 #ifdef MESH_RENDER_SNAPSHOT_ENABLED
 	if (WW3D::Is_Snapshot_Activated()) {
-		unsigned long passes=0;
+		RenderUInt32 passes=0;	// DWORD on Windows, which ValidateDevice writes
 		SNAPSHOT_SAY(("ValidateDevice: "));
-		HRESULT res=D3DDevice->ValidateDevice(&passes);
+		RenderResult res=D3DDevice->ValidateDevice(&passes);
 		switch (res) {
 		case D3D_OK:
 			SNAPSHOT_SAY(("OK\n"));
@@ -3076,7 +3158,7 @@ IDirect3DTexture9 * DX8Wrapper::_Create_DX8_Texture
 				pool,
 				&texture);
 
-			if (SUCCEEDED(ret)) {
+			if (Render_Succeeded(ret)) {
 				WWDEBUG_SAY(("...Render target creation succesful.\n"));
 			}
 			else {
@@ -3125,7 +3207,7 @@ IDirect3DTexture9 * DX8Wrapper::_Create_DX8_Texture
 			WW3DFormat_To_D3DFormat(format),
 			pool,
 			&texture);
-		if (SUCCEEDED(ret)) {
+		if (Render_Succeeded(ret)) {
 			WWDEBUG_SAY(("...Texture creation succesful.\n"));
 		}
 		else {
@@ -3196,7 +3278,7 @@ IDirect3DTexture9 * DX8Wrapper::_Create_DX8_Texture
 	IDirect3DTexture9 *texture = NULL;
 
 	D3DSURFACE_DESC surface_desc;
-	::ZeroMemory(&surface_desc, sizeof(D3DSURFACE_DESC));
+	memset(&surface_desc,0, sizeof(D3DSURFACE_DESC));
 	surface->GetDesc(&surface_desc);
 
 	// This function will create a texture with a different (but similar) format if the surface is
@@ -3278,7 +3360,7 @@ IDirect3DTexture9 * DX8Wrapper::_Create_DX8_ZTexture
 			NULL	// pSharedHandle, D3D9's extra parameter, reserved and always null
 		);
 
-		if (SUCCEEDED(ret)) 
+		if (Render_Succeeded(ret)) 
 		{
 			WWDEBUG_SAY(("...Render target creation succesful.\n"));
 		}
@@ -3369,7 +3451,7 @@ IDirect3DCubeTexture9* DX8Wrapper::_Create_DX8_Cube_Texture
 				&texture
 			);
 
-			if (SUCCEEDED(ret))
+			if (Render_Succeeded(ret))
 			{
 				WWDEBUG_SAY(("...Render target creation succesful.\n"));
 			}
@@ -3424,7 +3506,7 @@ IDirect3DCubeTexture9* DX8Wrapper::_Create_DX8_Cube_Texture
 			pool,
 			&texture
 		);
-		if (SUCCEEDED(ret)) 
+		if (Render_Succeeded(ret)) 
 		{
 			WWDEBUG_SAY(("...Texture creation succesful.\n"));
 		}
@@ -3503,7 +3585,7 @@ IDirect3DVolumeTexture9* DX8Wrapper::_Create_DX8_Volume_Texture
 			pool,
 			&texture
 		);
-		if (SUCCEEDED(ret)) 
+		if (Render_Succeeded(ret)) 
 		{
 			WWDEBUG_SAY(("...Texture creation succesful.\n"));
 		}
@@ -3742,7 +3824,7 @@ void DX8Wrapper::Set_Light_Environment(LightEnvironmentClass* light_env)
 		int l;
 		for (l =0;l<light_count;++l) {
 			
-			::ZeroMemory(&light, sizeof(D3DLIGHT9));
+			memset(&light,0, sizeof(D3DLIGHT9));
 			
 			light.Type=D3DLIGHT_DIRECTIONAL;
 			(Vector3&)light.Diffuse=light_env->Get_Light_Diffuse(l);
@@ -4026,11 +4108,11 @@ IDirect3DSurface9 * DX8Wrapper::_Get_Non_MultiSampled_Depth_Buffer(void)
 {
 	if (_PresentParameters.MultiSampleType == D3DMULTISAMPLE_NONE) return NULL;
 	if (_RTTDepthBuffer == NULL && D3DDevice != NULL) {
-		if (FAILED(D3DDevice->CreateDepthStencilSurface(
+		if (Render_Failed(D3DDevice->CreateDepthStencilSurface(
 				_PresentParameters.BackBufferWidth,_PresentParameters.BackBufferHeight,
 				_PresentParameters.AutoDepthStencilFormat,D3DMULTISAMPLE_NONE,
 				0,		// MultisampleQuality, meaningless without multisampling
-				TRUE,	// Discard, which is what a depth buffer nobody reads back wants
+				true,	// Discard, which is what a depth buffer nobody reads back wants
 				&_RTTDepthBuffer,
 				NULL))) {
 			_RTTDepthBuffer = NULL;
@@ -4309,7 +4391,7 @@ void DX8Wrapper::Set_Render_Target
 
 
 IDirect3DSwapChain9 *
-DX8Wrapper::Create_Additional_Swap_Chain (HWND render_window)
+DX8Wrapper::Create_Additional_Swap_Chain (RenderWindow render_window)
 {
 	DX8_Assert();
 
@@ -4324,8 +4406,8 @@ DX8Wrapper::Create_Additional_Swap_Chain (HWND render_window)
 	// interval now, and the swap effect is only the copy.
 	params.SwapEffect								= D3DSWAPEFFECT_COPY;
 	params.hDeviceWindow							= render_window;
-	params.Windowed								= TRUE;
-	params.EnableAutoDepthStencil				= TRUE;
+	params.Windowed								= true;
+	params.EnableAutoDepthStencil				= true;
 	params.AutoDepthStencilFormat				= _PresentParameters.AutoDepthStencilFormat;
 	params.Flags									= 0;
 	params.FullScreen_RefreshRateInHz		= D3DPRESENT_RATE_DEFAULT;
@@ -4369,7 +4451,7 @@ void DX8Wrapper::Set_Gamma(float gamma,float bright,float contrast,bool calibrat
 	DX8_Assert();
 	number_of_DX8_calls++;
 
-	DWORD flag=(calibrate?D3DSGR_CALIBRATE:D3DSGR_NO_CALIBRATION);
+	uint32 flag=(calibrate?D3DSGR_CALIBRATE:D3DSGR_NO_CALIBRATION);
 
 	D3DGAMMARAMP ramp;
 	float			 limit;	
@@ -4406,6 +4488,7 @@ void DX8Wrapper::Set_Gamma(float gamma,float bright,float contrast,bool calibrat
 		GameGammaSet = true;
 		set_desktop_gamma(&GameGammaRamp);
 	} else {
+#if defined(_WIN32)	// the desktop's ramp; off Windows the gamma is the swap chain's (A3)
 		HWND hwnd = GetDesktopWindow();
 		HDC hdc = GetDC(hwnd);
 		if (hdc)
@@ -4413,6 +4496,7 @@ void DX8Wrapper::Set_Gamma(float gamma,float bright,float contrast,bool calibrat
 			SetDeviceGammaRamp (hdc, &ramp);
 			ReleaseDC (hwnd, hdc);
 		}
+#endif
 	}
 }
 
@@ -4425,12 +4509,12 @@ void DX8Wrapper::Apply_Default_State()
 	SNAPSHOT_SAY(("DX8Wrapper::Apply_Default_State()\n"));
 	
 	// only set states used in game
-	Set_DX8_Render_State(D3DRS_ZENABLE, TRUE);
+	Set_DX8_Render_State(D3DRS_ZENABLE, true);
 //	Set_DX8_Render_State(D3DRS_FILLMODE, D3DFILL_SOLID);
 	Set_DX8_Render_State(D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
 	//Set_DX8_Render_State(D3DRS_LINEPATTERN, 0);
-	Set_DX8_Render_State(D3DRS_ZWRITEENABLE, TRUE);
-	Set_DX8_Render_State(D3DRS_ALPHATESTENABLE, FALSE);
+	Set_DX8_Render_State(D3DRS_ZWRITEENABLE, true);
+	Set_DX8_Render_State(D3DRS_ALPHATESTENABLE, false);
 	//Set_DX8_Render_State(D3DRS_LASTPIXEL, FALSE);
 	Set_DX8_Render_State(D3DRS_SRCBLEND, D3DBLEND_ONE);
 	Set_DX8_Render_State(D3DRS_DESTBLEND, D3DBLEND_ZERO);
@@ -4438,10 +4522,10 @@ void DX8Wrapper::Apply_Default_State()
 	Set_DX8_Render_State(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
 	Set_DX8_Render_State(D3DRS_ALPHAREF, 0);
 	Set_DX8_Render_State(D3DRS_ALPHAFUNC, D3DCMP_LESSEQUAL);
-	Set_DX8_Render_State(D3DRS_DITHERENABLE, FALSE);
-	Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE, FALSE);
-	Set_DX8_Render_State(D3DRS_FOGENABLE, FALSE);
-	Set_DX8_Render_State(D3DRS_SPECULARENABLE, FALSE);
+	Set_DX8_Render_State(D3DRS_DITHERENABLE, false);
+	Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE, false);
+	Set_DX8_Render_State(D3DRS_FOGENABLE, false);
+	Set_DX8_Render_State(D3DRS_SPECULARENABLE, false);
 //	Set_DX8_Render_State(D3DRS_ZVISIBLE, FALSE);
 //	Set_DX8_Render_State(D3DRS_FOGCOLOR, 0);
 //	Set_DX8_Render_State(D3DRS_FOGTABLEMODE, D3DFOG_NONE);
@@ -4453,7 +4537,7 @@ void DX8Wrapper::Apply_Default_State()
 	//Set_DX8_Render_State(D3DRS_EDGEANTIALIAS, FALSE);
 	Set_DX8_ZBias(0);
 //	Set_DX8_Render_State(D3DRS_RANGEFOGENABLE, FALSE);
-	Set_DX8_Render_State(D3DRS_STENCILENABLE, FALSE);
+	Set_DX8_Render_State(D3DRS_STENCILENABLE, false);
 	Set_DX8_Render_State(D3DRS_STENCILFAIL, D3DSTENCILOP_KEEP);
 	Set_DX8_Render_State(D3DRS_STENCILZFAIL, D3DSTENCILOP_KEEP);
 	Set_DX8_Render_State(D3DRS_STENCILPASS, D3DSTENCILOP_KEEP);
@@ -4470,11 +4554,11 @@ void DX8Wrapper::Apply_Default_State()
 	Set_DX8_Render_State(D3DRS_WRAP5, D3DWRAP_U| D3DWRAP_V);
 	Set_DX8_Render_State(D3DRS_WRAP6, D3DWRAP_U| D3DWRAP_V);
 	Set_DX8_Render_State(D3DRS_WRAP7, D3DWRAP_U| D3DWRAP_V);*/
-	Set_DX8_Render_State(D3DRS_CLIPPING, TRUE);
-	Set_DX8_Render_State(D3DRS_LIGHTING, FALSE);
+	Set_DX8_Render_State(D3DRS_CLIPPING, true);
+	Set_DX8_Render_State(D3DRS_LIGHTING, false);
 	//Set_DX8_Render_State(D3DRS_AMBIENT, 0);
 //	Set_DX8_Render_State(D3DRS_FOGVERTEXMODE, D3DFOG_NONE);
-	Set_DX8_Render_State(D3DRS_COLORVERTEX, TRUE);
+	Set_DX8_Render_State(D3DRS_COLORVERTEX, true);
 /*	Set_DX8_Render_State(D3DRS_LOCALVIEWER, TRUE);
 	Set_DX8_Render_State(D3DRS_NORMALIZENORMALS, FALSE);
 	Set_DX8_Render_State(D3DRS_DIFFUSEMATERIALSOURCE, D3DMCS_COLOR1);
@@ -4484,7 +4568,7 @@ void DX8Wrapper::Apply_Default_State()
 	Set_DX8_Render_State(D3DRS_VERTEXBLEND, D3DVBF_DISABLE);*/
 	//Set_DX8_Render_State(D3DRS_CLIPPLANEENABLE, 0);
 	// D3D9 took this off the render state list; it has its own call now.
-	DX8CALL(SetSoftwareVertexProcessing(FALSE));
+	DX8CALL(SetSoftwareVertexProcessing(false));
 	//Set_DX8_Render_State(D3DRS_POINTSIZE, 0x3f800000);
 	//Set_DX8_Render_State(D3DRS_POINTSIZE_MIN, 0);
 	//Set_DX8_Render_State(D3DRS_POINTSPRITEENABLE, FALSE);
@@ -5164,4 +5248,427 @@ const char* DX8Wrapper::Get_DX8_Blend_Op_Name(unsigned value)
 WW3DFormat	DX8Wrapper::getBackBufferFormat( void )
 {
 	return D3DFormat_To_WW3DFormat( _PresentParameters.BackBufferFormat );
+}
+
+
+/*******************************************************************************************
+** Geometry a caller builds and draws itself, and the rest of what D1 needs to stop the engine
+** reaching past this wrapper.  See dx8wrapper.h for why each of these is shaped the way it is.
+**
+** Nothing in the engine calls any of it yet.  The call sites move in their own pull requests,
+** because the acceptance test for moving one is a pixel comparison and that needs a device.
+*******************************************************************************************/
+
+OwnedGeometryClass::OwnedGeometryClass()
+	:
+	Vertices(NULL),
+	Indices(NULL),
+	VertexTwin(NULL),
+	IndexTwin(NULL),
+	VertexByteCount(0),
+	IndexCount(0),
+	VerticesAreDynamic(false),
+	IndicesAreDynamic(false)
+{
+}
+
+OwnedGeometryClass::~OwnedGeometryClass()
+{
+	Release();
+}
+
+bool OwnedGeometryClass::Create_Vertices(unsigned byte_count, bool refilled_every_frame)
+{
+	WWASSERT(Vertices==NULL);
+	if (byte_count==0) return false;
+
+	IDirect3DDevice9 * device=DX8Wrapper::_Get_D3D_Device();
+	if (device==NULL) return false;
+
+	// Write-only because nothing reads these back, and that is also what lets the Direct3D 11
+	// copy below be the only readable record of what was written.
+	uint32 usage=D3DUSAGE_WRITEONLY;
+	D3DPOOL pool=D3DPOOL_MANAGED;
+	if (refilled_every_frame) {
+		usage|=D3DUSAGE_DYNAMIC;
+		pool=D3DPOOL_DEFAULT;		// a dynamic buffer cannot live in the managed pool
+	}
+
+	// The FVF argument is zero: these vertices are described by the format or the layout the
+	// caller binds before it draws, not by the buffer.
+	if (Render_Failed(device->CreateVertexBuffer(byte_count, usage, 0, pool, &Vertices, NULL))) {
+		Vertices=NULL;
+		return false;
+	}
+
+	VertexByteCount=byte_count;
+	VerticesAreDynamic=refilled_every_frame;
+	VertexTwin=Direct3D11_Twin_Vertex_Buffer(byte_count, refilled_every_frame);
+	return true;
+}
+
+bool OwnedGeometryClass::Create_Indices(unsigned index_count, bool refilled_every_frame)
+{
+	WWASSERT(Indices==NULL);
+	if (index_count==0) return false;
+
+	IDirect3DDevice9 * device=DX8Wrapper::_Get_D3D_Device();
+	if (device==NULL) return false;
+
+	const unsigned byte_count=(unsigned)(index_count*sizeof(unsigned short));
+
+	uint32 usage=D3DUSAGE_WRITEONLY;
+	D3DPOOL pool=D3DPOOL_MANAGED;
+	if (refilled_every_frame) {
+		usage|=D3DUSAGE_DYNAMIC;
+		pool=D3DPOOL_DEFAULT;
+	}
+
+	if (Render_Failed(device->CreateIndexBuffer(byte_count, usage, D3DFMT_INDEX16, pool, &Indices, NULL))) {
+		Indices=NULL;
+		return false;
+	}
+
+	IndexCount=index_count;
+	IndicesAreDynamic=refilled_every_frame;
+	IndexTwin=Direct3D11_Twin_Index_Buffer(byte_count, refilled_every_frame);
+	return true;
+}
+
+void OwnedGeometryClass::Release()
+{
+	if (Vertices!=NULL) {
+		Vertices->Release();
+		Vertices=NULL;
+	}
+	if (Indices!=NULL) {
+		Indices->Release();
+		Indices=NULL;
+	}
+	delete VertexTwin;
+	VertexTwin=NULL;
+	delete IndexTwin;
+	IndexTwin=NULL;
+	VertexByteCount=0;
+	IndexCount=0;
+	VerticesAreDynamic=false;
+	IndicesAreDynamic=false;
+}
+
+// ----------------------------------------------------------------------------
+
+OwnedGeometryClass::VertexLockClass::VertexLockClass(OwnedGeometryClass & geometry,
+	unsigned byte_offset, unsigned byte_count, bool discard)
+	:
+	Geometry(&geometry),
+	Vertices(NULL)
+{
+	DX8_THREAD_ASSERT();
+	if (geometry.Vertices==NULL) return;
+
+	// D3DLOCK_DISCARD is only legal on a dynamic buffer; asking for it on a static one fails the
+	// lock outright, which would lose the caller's vertices silently.
+	const unsigned flags=(discard && geometry.VerticesAreDynamic) ? D3DLOCK_DISCARD : 0;
+
+	void * memory=NULL;
+	if (Render_Failed(geometry.Vertices->Lock(byte_offset, byte_count, &memory, flags)) || memory==NULL) {
+		return;
+	}
+
+	// With a Direct3D 11 copy the write is redirected into the copy's block and written out to
+	// both buffers on unlock; without one this answers null and the Direct3D 9 pointer stands.
+	void * redirected=DX11Lock.Begin(geometry.VertexTwin, memory, byte_offset, byte_count, flags);
+	Vertices=(redirected!=NULL) ? redirected : memory;
+}
+
+OwnedGeometryClass::VertexLockClass::~VertexLockClass()
+{
+	if (Vertices==NULL) return;
+
+	// The copy has to be written while the Direct3D 9 memory is still mapped.
+	DX11Lock.End();
+	Geometry->Vertices->Unlock();
+	Vertices=NULL;
+}
+
+OwnedGeometryClass::IndexLockClass::IndexLockClass(OwnedGeometryClass & geometry,
+	unsigned first_index, unsigned index_count, bool discard)
+	:
+	Geometry(&geometry),
+	Indices(NULL)
+{
+	DX8_THREAD_ASSERT();
+	if (geometry.Indices==NULL) return;
+
+	const unsigned flags=(discard && geometry.IndicesAreDynamic) ? D3DLOCK_DISCARD : 0;
+	const unsigned byte_offset=(unsigned)(first_index*sizeof(unsigned short));
+	const unsigned byte_count=(unsigned)(index_count*sizeof(unsigned short));
+
+	void * memory=NULL;
+	if (Render_Failed(geometry.Indices->Lock(byte_offset, byte_count, &memory, flags)) || memory==NULL) {
+		return;
+	}
+
+	void * redirected=DX11Lock.Begin(geometry.IndexTwin, memory, byte_offset, byte_count, flags);
+	Indices=(unsigned short *)((redirected!=NULL) ? redirected : memory);
+}
+
+OwnedGeometryClass::IndexLockClass::~IndexLockClass()
+{
+	if (Indices==NULL) return;
+
+	DX11Lock.End();
+	Geometry->Indices->Unlock();
+	Indices=NULL;
+}
+
+// ----------------------------------------------------------------------------
+
+AssembledPixelShaderClass::~AssembledPixelShaderClass()
+{
+	Release();
+}
+
+bool AssembledPixelShaderClass::Assemble(const char * source, const char * name)
+{
+	Release();
+
+	if (source==NULL) return false;
+
+	IDirect3DDevice9 * device=DX8Wrapper::_Get_D3D_Device();
+	if (device==NULL || D3DXAssembleShader==NULL) return false;
+
+	LPD3DXBUFFER compiled=NULL;
+	if (Render_Failed(D3DXAssembleShader(source, (UINT)strlen(source), NULL, NULL, 0, &compiled, NULL))
+		|| compiled==NULL) {
+		return false;
+	}
+
+	const RenderResult made=device->CreatePixelShader((RenderUInt32 *)compiled->GetBufferPointer(), &Shader);
+	compiled->Release();
+	if (Render_Failed(made)) {
+		Shader=NULL;
+		return false;
+	}
+
+	// In the same call as the creation on purpose.  Registering is what lets the backend's reports
+	// name the file a refused draw had bound, and a registration that is left out is not an error
+	// anywhere - it turns into a draw refused under a cause that names nothing.
+	Direct3D11_Register_Engine_Shader(Shader, (name!=NULL) ? name : "assembled pixel shader");
+	return true;
+}
+
+void AssembledPixelShaderClass::Release()
+{
+	if (Shader!=NULL) {
+		Shader->Release();
+		Shader=NULL;
+	}
+}
+
+// ----------------------------------------------------------------------------
+
+void DX8Wrapper::Set_Owned_Geometry(const OwnedGeometryClass & geometry, unsigned vertex_stride,
+	unsigned first_vertex_byte)
+{
+	DX8_THREAD_ASSERT();
+	WWASSERT(geometry.Vertices!=NULL);
+
+	DX8CALL(SetStreamSource(0, geometry.Vertices, first_vertex_byte, vertex_stride));
+	Direct3D11_Mirror_Stream_Source(geometry.VertexTwin, vertex_stride, first_vertex_byte);
+
+	if (geometry.Indices!=NULL) {
+		DX8CALL(SetIndices(geometry.Indices));
+		Direct3D11_Mirror_Indices(geometry.IndexTwin);
+	}
+
+	// What the device holds is no longer what this wrapper's cache says it holds.  Without this
+	// the next mesh draw would find its own buffer "already bound" and read the caller's vertices
+	// instead - which is the same shape of bug as a texture stage set behind the wrapper's back.
+	render_state_changed|=VERTEX_BUFFER_CHANGED;
+	render_state_changed|=INDEX_BUFFER_CHANGED;
+}
+
+void DX8Wrapper::Draw_Owned_Triangles(unsigned first_index, unsigned triangle_count,
+	unsigned first_vertex, unsigned vertex_count, bool as_strip)
+{
+	DX8_THREAD_ASSERT();
+	if (triangle_count==0) return;
+
+	// A strip of n triangles is n+2 indices; a list is three each.  Direct3D 9 counts primitives
+	// and the backend counts indices, so both forms are spelled out here rather than at the call
+	// sites, which had them written out by hand and not always the same way.
+	const unsigned index_count=as_strip ? (triangle_count+2) : (triangle_count*3);
+
+	DX8CALL(DrawIndexedPrimitive(
+		as_strip ? D3DPT_TRIANGLESTRIP : D3DPT_TRIANGLELIST,
+		0,						// BaseVertexIndex: the stream offset already moved the vertices
+		first_vertex,
+		vertex_count,
+		first_index,
+		triangle_count));
+
+	if (as_strip) {
+		Direct3D11_Draw_Indexed_Strip(index_count, first_index, 0);
+	}
+	else {
+		Direct3D11_Draw_Indexed_Triangles(index_count, first_index, 0);
+	}
+
+	DX8_RECORD_DRAW_CALLS();
+}
+
+void DX8Wrapper::Draw_Owned_Points(unsigned first_vertex, unsigned point_count)
+{
+	DX8_THREAD_ASSERT();
+	if (point_count==0) return;
+
+	DX8CALL(DrawPrimitive(D3DPT_POINTLIST, first_vertex, point_count));
+
+	// No mirror: the Direct3D 11 backend resolves triangles out of the fixed-function state and
+	// has no point path at all, and a point sized by D3DRS_POINTSCALE_* is not a triangle anybody
+	// can generate from what it is told.  This draw is Direct3D 9 only until something gives the
+	// backend points, and saying so here is better than mirroring it into a draw it refuses.
+	DX8_RECORD_DRAW_CALLS();
+}
+
+void DX8Wrapper::Set_Engine_Vertex_Shader(const EngineVertexShaderClass & shader)
+{
+	DX8_THREAD_ASSERT();
+
+	// The layout first, then the program: a program bound against the previous layout reads its
+	// dcl_ inputs out of a stream described the wrong way, which is zeros rather than an error.
+	if (shader.Layout!=NULL) {
+		DX8CALL(SetVertexDeclaration(shader.Layout));
+	}
+
+	Set_Vertex_Shader(shader.Shader);
+}
+
+void DX8Wrapper::Set_Assembled_Pixel_Shader(const AssembledPixelShaderClass & shader)
+{
+	Set_Pixel_Shader(shader.Shader);
+}
+
+// ----------------------------------------------------------------------------
+
+bool DX8Wrapper::Get_Render_Target_Description(unsigned & width, unsigned & height,
+	WW3DFormat & format)
+{
+	width=0;
+	height=0;
+	format=WW3D_FORMAT_UNKNOWN;
+
+	IDirect3DDevice9 * device=_Get_D3D_Device();
+	if (device==NULL) return false;
+
+	IDirect3DSurface9 * target=NULL;
+	if (Render_Failed(device->GetRenderTarget(PRIMARY_RENDER_TARGET, &target)) || target==NULL) {
+		return false;
+	}
+
+	D3DSURFACE_DESC description;
+	const bool described=Render_Succeeded(target->GetDesc(&description));
+	target->Release();
+	if (!described) return false;
+
+	width=description.Width;
+	height=description.Height;
+	format=D3DFormat_To_WW3DFormat(description.Format);
+	return true;
+}
+
+SurfaceClass * DX8Wrapper::Read_Back_Render_Target()
+{
+	DX8_THREAD_ASSERT();
+
+	IDirect3DDevice9 * device=_Get_D3D_Device();
+	if (device==NULL) return NULL;
+
+	IDirect3DSurface9 * target=NULL;
+	if (Render_Failed(device->GetRenderTarget(PRIMARY_RENDER_TARGET, &target)) || target==NULL) {
+		return NULL;
+	}
+
+	SurfaceClass * read_back=Copy_Surface_To_System_Memory(target);
+	target->Release();
+	return read_back;
+}
+
+SurfaceClass * DX8Wrapper::Read_Back_Frame()
+{
+	DX8_THREAD_ASSERT();
+
+	IDirect3DDevice9 * device=_Get_D3D_Device();
+	if (device==NULL) return NULL;
+
+	IDirect3DSurface9 * back_buffer=NULL;
+	if (Render_Failed(device->GetBackBuffer(PRIMARY_SWAP_CHAIN, 0, D3DBACKBUFFER_TYPE_MONO, &back_buffer))
+		|| back_buffer==NULL) {
+		return NULL;
+	}
+
+	D3DSURFACE_DESC description;
+	if (Render_Failed(back_buffer->GetDesc(&description))) {
+		back_buffer->Release();
+		return NULL;
+	}
+
+	// GetRenderTargetData refuses a multisampled source, and with anti-aliasing on the back buffer
+	// is exactly that.  StretchRect between two render targets of the same size is Direct3D 9's
+	// resolve, so the samples are averaged into a plain target and the read comes off that.  Miss
+	// this and a screenshot falls through to photographing the desktop.
+	IDirect3DSurface9 * source=back_buffer;
+	IDirect3DSurface9 * resolved=NULL;
+	if (description.MultiSampleType!=D3DMULTISAMPLE_NONE
+		&& Render_Succeeded(device->CreateRenderTarget(description.Width, description.Height,
+				description.Format, D3DMULTISAMPLE_NONE, 0, false, &resolved, NULL))
+		&& resolved!=NULL
+		&& Render_Succeeded(device->StretchRect(back_buffer, NULL, resolved, NULL, D3DTEXF_NONE))) {
+		source=resolved;
+	}
+
+	SurfaceClass * read_back=Copy_Surface_To_System_Memory(source);
+
+	if (resolved!=NULL) resolved->Release();
+	back_buffer->Release();
+	return read_back;
+}
+
+SurfaceClass * DX8Wrapper::Copy_Surface_To_System_Memory(IDirect3DSurface9 * source)
+{
+	if (source==NULL) return NULL;
+
+	IDirect3DDevice9 * device=_Get_D3D_Device();
+	if (device==NULL) return NULL;
+
+	D3DSURFACE_DESC description;
+	if (Render_Failed(source->GetDesc(&description))) return NULL;
+	if (description.MultiSampleType!=D3DMULTISAMPLE_NONE) return NULL;
+
+	IDirect3DSurface9 * copy=NULL;
+	if (Render_Failed(device->CreateOffscreenPlainSurface(description.Width, description.Height,
+			description.Format, D3DPOOL_SYSTEMMEM, &copy, NULL)) || copy==NULL) {
+		return NULL;
+	}
+
+	if (Render_Failed(device->GetRenderTargetData(source, copy))) {
+		copy->Release();
+		return NULL;
+	}
+
+	SurfaceClass * surface=NEW_REF(SurfaceClass,(copy));
+	copy->Release();
+	return surface;
+}
+
+bool DX8Wrapper::Device_Is_Ready()
+{
+	IDirect3DDevice9 * device=_Get_D3D_Device();
+	if (device==NULL) return false;
+
+	// Asked of the device, not of Is_Device_Lost: that flag is what the last present reported, and
+	// the four callers ask this before building geometry, which can be a long way from a present.
+	// Deliberately not a DX8CALL - a lost device is the answer here, not an error to log.
+	return device->TestCooperativeLevel()==D3D_OK;
 }

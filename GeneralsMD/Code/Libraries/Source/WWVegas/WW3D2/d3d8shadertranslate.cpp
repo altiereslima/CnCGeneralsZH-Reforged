@@ -19,9 +19,13 @@
 **	(https://github.com/crosire/d3d8to9, BSD 3-clause), vendored in this tree at
 **	Libraries/Source/d3d8to9, with its proxy-object plumbing removed.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 #include "d3d8shadertranslate.h"
 #include "d3dx9runtime.h"
+#if !defined(_WIN32)
+#include "Platform/EngineShaderName.h"
+#endif
 
 #include <regex>
 #include <string>
@@ -40,8 +44,8 @@ static const size_t MAX_DECLARATION_ELEMENTS = 32;
 // stream offset by.
 struct DeclarationType
 {
-	BYTE Type;
-	BYTE Size;
+	unsigned char Type;
+	unsigned char Size;
 };
 
 static const DeclarationType DECLARATION_TYPES[] =
@@ -60,8 +64,8 @@ static const DeclarationType DECLARATION_TYPES[] =
 // the API; D3D9 names a usage and an index instead.  This is that table.
 struct DeclarationUsage
 {
-	BYTE Usage;
-	BYTE UsageIndex;
+	unsigned char Usage;
+	unsigned char UsageIndex;
 };
 
 static const DeclarationUsage DECLARATION_USAGES[] =
@@ -108,7 +112,7 @@ static std::string readable_disassembly(ID3DXBuffer * disassembly)
 	return text;
 }
 
-static const char * usage_declaration_keyword(BYTE usage)
+static const char * usage_declaration_keyword(unsigned char usage)
 {
 	switch (usage) {
 	case D3DDECLUSAGE_POSITION:     return "dcl_position";
@@ -134,7 +138,7 @@ static size_t instruction_count_of(const std::string & source, const char * coun
 	return strtoul(source.substr(position - digit_count - 1, digit_count).c_str(), NULL, 10);
 }
 
-HRESULT Create_Translated_Pixel_Shader(IDirect3DDevice9 * device, const DWORD * function,
+RenderResult Create_Translated_Pixel_Shader(IDirect3DDevice9 * device, const RenderUInt32 * function,
 	IDirect3DPixelShader9 ** shader, std::string * translated_source)
 {
 	if (device == NULL || function == NULL || shader == NULL) {
@@ -142,16 +146,28 @@ HRESULT Create_Translated_Pixel_Shader(IDirect3DDevice9 * device, const DWORD * 
 	}
 	*shader = NULL;
 
+#if defined(_WIN32)
 	if (D3DXDisassembleShader == NULL || D3DXAssembleShader == NULL) {
 		return D3DERR_INVALIDCALL;
 	}
+#endif
 	if (*function < D3DPS_VERSION(1, 0) || *function > D3DPS_VERSION(1, 4)) {
 		return D3DERR_INVALIDCALL;
 	}
+#if !defined(_WIN32)
+	// Off Windows (A3e) the device never runs D3D bytecode: it draws the engine's programs from D3's
+	// transcriptions (engineshader.cpp), recognised by the name each is registered under, as the
+	// Direct3D 11 backend does.  There is no D3DX to translate with either, so the shipped D3D8 tokens go
+	// to the device as they are.
+	if (translated_source != NULL) {
+		translated_source->clear();
+	}
+	return device->CreatePixelShader(function, shader);
+#endif
 
 	ID3DXBuffer * disassembly = NULL;
-	HRESULT result = D3DXDisassembleShader(function, FALSE, NULL, &disassembly);
-	if (FAILED(result)) {
+	RenderResult result = D3DXDisassembleShader(function, false, NULL, &disassembly);
+	if (Render_Failed(result)) {
 		return result;
 	}
 
@@ -183,22 +199,22 @@ HRESULT Create_Translated_Pixel_Shader(IDirect3DDevice9 * device, const DWORD * 
 
 	ID3DXBuffer * assembly = NULL;
 	ID3DXBuffer * errors = NULL;
-	result = D3DXAssembleShader(source.data(), static_cast<UINT>(source.size()), NULL, NULL, 0,
+	result = D3DXAssembleShader(source.data(), static_cast<unsigned int>(source.size()), NULL, NULL, 0,
 		&assembly, &errors);
 	if (errors != NULL) {
 		errors->Release();
 	}
-	if (FAILED(result)) {
+	if (Render_Failed(result)) {
 		return result;
 	}
 
-	result = device->CreatePixelShader(static_cast<const DWORD *>(assembly->GetBufferPointer()), shader);
+	result = device->CreatePixelShader(static_cast<const RenderUInt32 *>(assembly->GetBufferPointer()), shader);
 	assembly->Release();
 	return result;
 }
 
-HRESULT Create_Translated_Vertex_Shader(IDirect3DDevice9 * device, const DWORD * d3d8_declaration,
-	const DWORD * function, IDirect3DVertexShader9 ** shader,
+RenderResult Create_Translated_Vertex_Shader(IDirect3DDevice9 * device, const RenderUInt32 * d3d8_declaration,
+	const RenderUInt32 * function, IDirect3DVertexShader9 ** shader,
 	IDirect3DVertexDeclaration9 ** vertex_declaration, std::string * translated_source)
 {
 	if (device == NULL || d3d8_declaration == NULL || function == NULL
@@ -208,9 +224,11 @@ HRESULT Create_Translated_Vertex_Shader(IDirect3DDevice9 * device, const DWORD *
 	*shader = NULL;
 	*vertex_declaration = NULL;
 
+#if defined(_WIN32)
 	if (D3DXDisassembleShader == NULL || D3DXAssembleShader == NULL) {
 		return D3DERR_INVALIDCALL;
 	}
+#endif
 	if (*function < D3DVS_VERSION(1, 0) || *function > D3DVS_VERSION(1, 1)) {
 		return D3DERR_INVALIDCALL;
 	}
@@ -218,28 +236,28 @@ HRESULT Create_Translated_Vertex_Shader(IDirect3DDevice9 * device, const DWORD *
 	// Decode the D3D8 declaration into D3D9 elements, remembering which vN register each
 	// element feeds so the dcl_ lines can name it.
 	D3DVERTEXELEMENT9 elements[MAX_DECLARATION_ELEMENTS];
-	DWORD input_registers[MAX_DECLARATION_ELEMENTS];
+	unsigned int input_registers[MAX_DECLARATION_ELEMENTS];
 	size_t element_count = 0;
-	WORD stream = 0;
-	WORD offset = 0;
+	unsigned short stream = 0;
+	unsigned short offset = 0;
 
-	for (const DWORD * token = d3d8_declaration; *token != D3DVSD_END(); ++token) {
+	for (const RenderUInt32 * token = d3d8_declaration; *token != D3DVSD_END(); ++token) {
 		if (element_count + 1 >= MAX_DECLARATION_ELEMENTS) {
 			return D3DERR_INVALIDCALL;
 		}
 
-		const DWORD token_type = (*token & D3DVSD_TOKENTYPEMASK) >> D3DVSD_TOKENTYPESHIFT;
+		const unsigned int token_type = (*token & D3DVSD_TOKENTYPEMASK) >> D3DVSD_TOKENTYPESHIFT;
 		if (token_type == D3DVSD_TOKEN_STREAM) {
-			stream = static_cast<WORD>((*token & D3DVSD_STREAMNUMBERMASK) >> D3DVSD_STREAMNUMBERSHIFT);
+			stream = static_cast<unsigned short>((*token & D3DVSD_STREAMNUMBERMASK) >> D3DVSD_STREAMNUMBERSHIFT);
 			offset = 0;
 		}
 		else if (token_type == D3DVSD_TOKEN_STREAMDATA && (*token & 0x10000000) != 0) {
-			offset = static_cast<WORD>(offset
-				+ ((*token & D3DVSD_SKIPCOUNTMASK) >> D3DVSD_SKIPCOUNTSHIFT) * sizeof(DWORD));
+			offset = static_cast<unsigned short>(offset
+				+ ((*token & D3DVSD_SKIPCOUNTMASK) >> D3DVSD_SKIPCOUNTSHIFT) * sizeof(RenderUInt32));
 		}
 		else if (token_type == D3DVSD_TOKEN_STREAMDATA) {
-			const DWORD type = (*token & D3DVSD_DATATYPEMASK) >> D3DVSD_DATATYPESHIFT;
-			const DWORD address = (*token & D3DVSD_VERTEXREGMASK) >> D3DVSD_VERTEXREGSHIFT;
+			const unsigned int type = (*token & D3DVSD_DATATYPEMASK) >> D3DVSD_DATATYPESHIFT;
+			const unsigned int address = (*token & D3DVSD_VERTEXREGMASK) >> D3DVSD_VERTEXREGSHIFT;
 			if (type >= DECLARATION_TYPE_COUNT || address >= DECLARATION_USAGE_COUNT) {
 				return D3DERR_INVALIDCALL;
 			}
@@ -250,7 +268,7 @@ HRESULT Create_Translated_Vertex_Shader(IDirect3DDevice9 * device, const DWORD *
 			elements[element_count].Method = D3DDECLMETHOD_DEFAULT;
 			elements[element_count].Usage = DECLARATION_USAGES[address].Usage;
 			elements[element_count].UsageIndex = DECLARATION_USAGES[address].UsageIndex;
-			offset = static_cast<WORD>(offset + DECLARATION_TYPES[type].Size);
+			offset = static_cast<unsigned short>(offset + DECLARATION_TYPES[type].Size);
 
 			input_registers[element_count] = address;
 			++element_count;
@@ -264,9 +282,29 @@ HRESULT Create_Translated_Vertex_Shader(IDirect3DDevice9 * device, const DWORD *
 	const D3DVERTEXELEMENT9 terminator = D3DDECL_END();
 	elements[element_count] = terminator;
 
+#if !defined(_WIN32)
+	// Off Windows (A3e): the shipped tokens as they are, for the reason Create_Translated_Pixel_Shader
+	// gives, and the declaration decoded above, which the device does read.
+	if (translated_source != NULL) {
+		translated_source->clear();
+	}
+	RenderResult created = device->CreateVertexShader(function, shader);
+	if (Render_Failed(created)) {
+		return created;
+	}
+	created = device->CreateVertexDeclaration(elements, vertex_declaration);
+	if (Render_Failed(created)) {
+		(*shader)->Release();
+		*shader = NULL;
+		return created;
+	}
+	PosixDevice_Keep_D3D8_Declaration(*vertex_declaration, d3d8_declaration);	// for capture version 3
+	return created;
+#endif
+
 	ID3DXBuffer * disassembly = NULL;
-	HRESULT result = D3DXDisassembleShader(function, FALSE, NULL, &disassembly);
-	if (FAILED(result)) {
+	RenderResult result = D3DXDisassembleShader(function, false, NULL, &disassembly);
+	if (Render_Failed(result)) {
 		return result;
 	}
 
@@ -389,23 +427,23 @@ HRESULT Create_Translated_Vertex_Shader(IDirect3DDevice9 * device, const DWORD *
 
 	ID3DXBuffer * assembly = NULL;
 	ID3DXBuffer * errors = NULL;
-	result = D3DXAssembleShader(source.data(), static_cast<UINT>(source.size()), NULL, NULL, 0,
+	result = D3DXAssembleShader(source.data(), static_cast<unsigned int>(source.size()), NULL, NULL, 0,
 		&assembly, &errors);
 	if (errors != NULL) {
 		errors->Release();
 	}
-	if (FAILED(result)) {
+	if (Render_Failed(result)) {
 		return result;
 	}
 
-	result = device->CreateVertexShader(static_cast<const DWORD *>(assembly->GetBufferPointer()), shader);
+	result = device->CreateVertexShader(static_cast<const RenderUInt32 *>(assembly->GetBufferPointer()), shader);
 	assembly->Release();
-	if (FAILED(result)) {
+	if (Render_Failed(result)) {
 		return result;
 	}
 
 	result = device->CreateVertexDeclaration(elements, vertex_declaration);
-	if (FAILED(result)) {
+	if (Render_Failed(result)) {
 		(*shader)->Release();
 		*shader = NULL;
 	}

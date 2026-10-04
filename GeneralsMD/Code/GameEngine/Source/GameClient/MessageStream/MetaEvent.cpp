@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -58,7 +60,7 @@
 
 
 #ifdef DUMP_ALL_KEYS_TO_LOG
-#include "GameClient\Keyboard.h"
+#include "GameClient/Keyboard.h"
 #endif
 
 MetaMap *TheMetaMap = NULL;
@@ -805,7 +807,7 @@ MetaMap::~MetaMap()
 GameMessage::Type MetaMap::findGameMessageMetaType(const char* name)
 {
 	for (const LookupListRec* metaNames = GameMessageMetaTypeNames; metaNames->name; metaNames++)
-		if (stricmp(metaNames->name, name) == 0)
+		if (strcasecmp(metaNames->name, name) == 0)
 			return (GameMessage::Type)metaNames->value;
 
 	DEBUG_CRASH(("MetaTypeName %s not found -- did you remember to add it to GameMessageMetaTypeNames[] ?", name));

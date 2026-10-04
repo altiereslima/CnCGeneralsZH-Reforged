@@ -970,7 +970,7 @@ GUI:Resolution
 END
 
 GUI:Detail
-"Ayrıntı"
+"Hazır Ayar"
 END
 
 GUI:Faction
@@ -9426,19 +9426,19 @@ TOOLTIP:Shadows
 END
 
 GUI:BehindBuilding
-"Bina Arkası"
+"Bina Arkasındaki Birlikler"
 END
 
 TOOLTIP:BehindBuilding
-"Binaların arkasındaki birliklerin gösterilmesini açıp kapatır. Daha iyi performans için kapatın"
+"Bir binanın arkasında kalan birlik, binanın içinden oyuncusunun renginde bir siluet olarak görünür. Kabul Et'e basınca uygulanır."
 END
 
 GUI:ShowProps
-"Dekorları Göster"
+"Ağaçlar ve Çalılar"
 END
 
 TOOLTIP:ShowProps
-"Oyundaki dekor nesnelerini açıp kapatır. Daha iyi performans için kapatın"
+"Haritadaki ağaçlar ve çalılar. Kapatmak yavaş bilgisayara yardım eder. Ağ oyunlarında hep görünürler. Bir sonraki haritada uygulanır."
 END
 
 GUI:LowResSlider
@@ -9454,7 +9454,7 @@ GUI:LowResFaster
 END
 
 TOOLTIP:LowResSlider
-"Yüksek çözünürlüklü dokular oyunu yavaşlatabilir"
+"Kaplamaların ne kadar net olduğu. Düşürmek eski ekran kartında bellek kazandırır. Kabul Et'e basınca uygulanır."
 END
 
 GUI:ParticleCap
@@ -9470,7 +9470,7 @@ GUI:LessParticlesFaster
 END
 
 TOOLTIP:ParticleCapSlider
-"Parçacık sayısı arttıkça oyun yavaşlayabilir"
+"Aynı anda en çok kaç duman, ateş ve kıvılcım parçacığı olabileceği. Sınıra önce büyük çatışmalar dayanır; patlamalar oyunu yavaşlatıyorsa düşürün. Kabul Et'e basınca uygulanır."
 END
 
 GUI:CurrentLossStreak
@@ -9502,19 +9502,19 @@ GUI:OlderReplayVersion
 END
 
 GUI:Shadows2D
-"2B Gölgeler"
+"Yassı Gölgeler"
 END
 
 TOOLTIP:Shadows2D
-"Oyun içi 2B gölgeleri açıp kapatır. Daha iyi performans için kapatın"
+"Düşen gölgesi olmayan bir birliğin ya da füzenin altına çizilen yassı, koyu leke. Pek yük getirmez. Kabul Et'e basınca uygulanır."
 END
 
 GUI:Shadows3D
-"3B Gölgeler"
+"Düşen Gölgeler"
 END
 
 TOOLTIP:Shadows3D
-"Oyun içi 3B gölgeleri açıp kapatır. Daha iyi performans için kapatın"
+"Birliklerin, binaların ve ağaçların yere ve birbirine düşürdüğü gölgeler. Kapalıyken güneşin gölgeleri dahil hepsi kapanır; Piyade Gölgeleri de bunun açık olmasını ister. Kabul Et'e basınca uygulanır, birkaç gölge ancak bir sonraki haritada değişir."
 END
 
 GUI:CloudShadows
@@ -9522,31 +9522,31 @@ GUI:CloudShadows
 END
 
 TOOLTIP:CloudShadows
-"Arazi üzerindeki bulut gölgelerini açıp kapatır. Daha iyi performans için kapatın"
+"Bulutların gölgesi zeminin üstünden kayıp geçer. Pek yük getirmez. Kabul Et'e basınca uygulanır."
 END
 
 GUI:GroundLighting
-"Ek Zemin Aydınlatması"
+"Zemin Deseni"
 END
 
 TOOLTIP:GroundLighting
-"Arazideki ayrıntılı aydınlatmayı açıp kapatır. Daha iyi performans için kapatın"
+"Zeminin üstüne serilen hafif bir açık-koyu desen; tekrar eden zemin parçaları daha az belli olur. Pek yük getirmez. Kabul Et'e basınca uygulanır."
 END
 
 GUI:SmoothWater
-"Yumuşak Su Kenarları"
+"Yumuşak Kıyılar"
 END
 
 TOOLTIP:SmoothWater
-"Su kenarlarının yumuşatılmasını açıp kapatır. Daha iyi performans için kapatın"
+"Su, kıyıda keskin bir çizgiyle bitmek yerine yavaşça kaybolur. Bir sonraki haritada uygulanır."
 END
 
 GUI:ExtraAnimations
-"Ek Animasyonlar"
+"İnşaat İskelesi"
 END
 
 TOOLTIP:ExtraAnimations
-"Binalar yapılırken iskelenin içinde yükselir. Sallanan ağaçların kendi kutusu var."
+"Binalar yapılırken iskelenin içinde yükselir. Bir sonraki haritada uygulanır."
 END
 
 GUI:NoDynamicLOD
@@ -9554,7 +9554,7 @@ GUI:NoDynamicLOD
 END
 
 TOOLTIP:NoDynamicLOD
-"Otomatik ayrıntı ayarını devre dışı bırakır. Daha iyi performans için kapatın"
+"Büyük bir çatışmada kare hızı düşünce oyun yetişebilmek için efektleri azaltır. Açıkken bunu hiç yapmaz: görüntü tam kalır, kare hızı düşer."
 END
 
 GUI:UnlockMaxFPS
@@ -9570,7 +9570,7 @@ GUI:TreeSway
 END
 
 TOOLTIP:TreeSway
-"Ağaçlar ve çalılar rüzgârda eğilir. Bir sonraki haritada etkinleşir."
+"Ağaçlar ve çalılar rüzgârda eğilir. Bir sonraki haritada uygulanır."
 END
 
 GUI:TankTreads
@@ -13778,11 +13778,11 @@ ACADEMY:Firestorm
 END
 
 GUI:HeatEffects
-"Isı Efektleri"
+"Sıcak Hava Titremesi"
 END
 
 TOOLTIP:HeatEffects
-"Isı bozulması efektlerini açar veya kapatır. Daha iyi performans için kapatın"
+"Sıcak hava titrer, Mikrodalga Tankı'nın ışınının üstünde olduğu gibi. Kabul Et'e basınca uygulanır."
 END
 
 GUI:WeatherEffects
@@ -14801,6 +14801,54 @@ GUI:StopDescription
 "Seçili birliklerin yaptığı işi durdurur."
 END
 
+GUI:OrderForceAttack
+"Zorla Saldır"
+END
+
+GUI:OrderForceAttackDescription
+"Bir sonraki tıklama imlecin altındaki her şeye saldırır, zemin ve kendi tarafınız da buna dahil. Vazgeçmek için tuşa yeniden tıklayın."
+END
+
+GUI:OrderHoldPosition
+"Mevzini Koru"
+END
+
+GUI:OrderHoldPositionDescription
+"Seçili birlikler durdukları yeri korur ve yaklaşan her şeyle savaşır, ama onu bölgenin dışına kadar kovalamaz."
+END
+
+GUI:OrderMove
+"Hareket Et"
+END
+
+GUI:OrderMoveDescription
+"Zemine bir sonraki tıklama seçili birlikleri oraya gönderir. Bunun yerine sürüklerseniz birlikler çizdiğiniz çizgi boyunca dizilir."
+END
+
+GUI:OrderSearchAndDestroy
+"Ara ve Yok Et"
+END
+
+GUI:OrderSearchAndDestroyDescription
+"Bir noktaya tıklayın; seçili birlikler çevresinde saldırarak ilerler, karşılarına çıkanla savaşır, sonra kalıp bütün daireyi korur. Daireyi boyutlandırmak için tıklamadan önce fare tekerleğini çevirin."
+END
+
+GUI:OrderStanceDefensive
+"Tutum: Savunmacı"
+END
+
+GUI:OrderStanceDefensiveDescription
+"Seçili birlikler menzile gireni vurur ve koyduğunuz yeri tutar. Saldırgan yapmak için tıklayın: gördükleri her düşmanın peşine düşerler."
+END
+
+GUI:OrderStanceAggressive
+"Tutum: Saldırgan"
+END
+
+GUI:OrderStanceAggressiveDescription
+"Seçili birlikler gördükleri her düşmanın peşine düşer ve onu kovalar. Yeniden savunmacı yapmak için tıklayın: yalnızca menzile gireni vururlar ve yerlerinde kalırlar."
+END
+
 GUI:SignalAttack
 "Sinyal: Saldır"
 END
@@ -14993,8 +15041,28 @@ GUI:Ultra
 "Ultra"
 END
 
+GUI:DetailNote0
+"Bütün kutular açık, en çok parçacık, kalın duman; büyük çatışmada bile ayrıntı düşmez. Seçince sadece kutular dolar, Kabul Et'e basınca uygulanır."
+END
+
+GUI:DetailNote1
+"Bütün gölgeler ve tam boy kaplamalar, duman oyunun kendi ayarında. Seçince sadece kutular dolar, Kabul Et'e basınca uygulanır."
+END
+
+GUI:DetailNote2
+"Düşen gölgeler yerine yassı gölgeler, daha az parçacık; orta halli ekran kartı için. Seçince sadece kutular dolar, Kabul Et'e basınca uygulanır."
+END
+
+GUI:DetailNote3
+"Gölge yok, yarım boy kaplamalar ve en az parçacık; eski bilgisayar için. Seçince sadece kutular dolar, Kabul Et'e basınca uygulanır."
+END
+
+GUI:DetailNote4
+"Bu sayfadaki ve Efektler sayfasındaki kutuları kendiniz seçtiniz. Kabul Et'e basınca olduğu gibi kaydedilir."
+END
+
 GUI:TextureFilter
-"Doku Filtreleme"
+"Kaplama Filtreleme"
 END
 
 GUI:TextureFilter0
@@ -15010,7 +15078,7 @@ GUI:TextureFilter2
 END
 
 TOOLTIP:TextureFilter
-"Kameradan uzaklaşan dokuların nasıl örneklendiği. Bilineer, oyunun çıkış ayarıdır ve uzaktaki zemini titretir; anizotropik onu keskin tutar. Görüntü aygıtı bir sonraki sıfırlandığında etkinleşir."
+"Kameradan uzaklaşan kaplamaların nasıl örneklendiği. Bilineer, oyunun çıkış ayarıdır ve uzaktaki zemini titretir; anizotropik onu keskin tutar. Oyun bir sonraki açılışında uygulanır."
 END
 
 GUI:Anisotropy
@@ -15018,7 +15086,7 @@ GUI:Anisotropy
 END
 
 TOOLTIP:Anisotropy
-"Anizotropik filtrelemenin alabileceği örnek sayısı. Otomatik, en çok 16 olmak üzere kararı ekran kartına bırakır. Yalnızca doku filtreleme anizotropik olduğunda kullanılır."
+"Anizotropik filtrelemenin alabileceği örnek sayısı. Otomatik, en çok 16 olmak üzere kararı ekran kartına bırakır. Yalnızca kaplama filtreleme anizotropik olduğunda kullanılır. Oyun bir sonraki açılışında uygulanır."
 END
 
 GUI:AnisotropyCardMaximum
@@ -15026,7 +15094,7 @@ GUI:AnisotropyCardMaximum
 END
 
 GUI:TextureResolution
-"Doku Çözünürlüğü"
+"Kaplama Kalitesi"
 END
 
 GUI:ParticleLimit
@@ -15138,7 +15206,7 @@ GUI:MSAA0
 END
 
 TOOLTIP:MSAA
-"Model kenarlarındaki merdiven basamaklarını yumuşatır. Ekran kartınızın sunmadığı bir seviye, sunduğu en yüksek seviyeye düşer. Görüntü aygıtı bir sonraki sıfırlandığında uygulanır."
+"Model kenarlarındaki merdiven basamaklarını yumuşatır. Bunu yalnızca Direct3D 9 çizicisi kullanır: varsayılan çizici kenarları kendisi yumuşatır ve bu ayara bakmaz. Ekran kartınızın sunmadığı bir seviye, sunduğu en yüksek seviyeye düşer. Oyun bir sonraki açılışında uygulanır."
 END
 
 GUI:Bloom
@@ -15206,7 +15274,7 @@ GUI:InfantryShadows
 END
 
 TOOLTIP:InfantryShadows
-"Askerler ve öteki hareketli modeller de 3B gölge düşürür. 3B gölgelerin açık olması gerekir. Bir sonraki haritada etkinleşir."
+"Askerler ve öteki hareketli modeller de gerçek gölge düşürür. Düşen Gölgelerin açık olması gerekir. Bir sonraki haritada uygulanır."
 END
 
 GUI:ProjectileShadows
@@ -15214,7 +15282,7 @@ GUI:ProjectileShadows
 END
 
 TOOLTIP:ProjectileShadows
-"Çizerlerin gölge vermediği füzeler ve bombalar yere bir gölge düşürür. Bir sonraki haritada etkinleşir."
+"Çizerlerin gölge vermediği füzeler ve bombalar yere bir gölge düşürür. Bir sonraki haritada uygulanır."
 END
 
 GUI:PropShadows
@@ -15222,7 +15290,7 @@ GUI:PropShadows
 END
 
 TOOLTIP:PropShadows
-"Orijinal oyunun hiç gölgesiz çizdiği çitler, çöpler ve çalılar da gölge düşürür. Bir sonraki haritada etkinleşir."
+"Orijinal oyunun hiç gölgesiz çizdiği çitler, çöpler ve çalılar da gölge düşürür. Bir sonraki haritada uygulanır."
 END
 
 GUI:ParticleShadows
@@ -15230,7 +15298,7 @@ GUI:ParticleShadows
 END
 
 TOOLTIP:ParticleShadows
-"Büyük duman ve toz bulutları altlarındaki zemine yumuşak bir gölge düşürür."
+"Büyük duman ve toz bulutları altlarındaki zemine yumuşak bir gölge düşürür. Kabul Et'e basınca uygulanır."
 END
 
 GUI:Smoke
@@ -15307,6 +15375,14 @@ END
 
 TOOLTIP:IsometricCamera
 "Savaş alanı uzaktan görünür, bir birlik ekranın üstünde de altında da aynı boyda çizilir. Kamerayı yine sen döndürür ve yakınlaştırırsın."
+END
+
+GUI:SmoothMotion
+"Akıcı Hareket"
+END
+
+TOOLTIP:SmoothMotion
+"Birlikler oyunun saniyedeki 30 adımının arasında da çizilir, böylece hızlı bir ekranda akıcı hareket eder. Görüntü bir adım (33 ms) geriden gelir; oyunun kendisi değişmez."
 END
 
 GUI:EdgeScrollWindowed
@@ -15459,6 +15535,22 @@ END
 
 TOOLTIP:HudScale
 "Komuta çubuğunu ve alttaki arayüzü çözünürlüğün seçtiğinden daha büyük çizer."
+END
+
+GUI:MenuLayout
+"Menü Düzeni"
+END
+
+GUI:MenuLayout0
+"Esnet"
+END
+
+GUI:MenuLayout1
+"Sığdır"
+END
+
+TOOLTIP:MenuLayout
+"Sığdır, menüleri çizildikleri biçimde tutar ve geniş ekranda ortalar. Esnet, oyunun her zaman yaptığı gibi onları ekranın kenarlarına kadar genişletir."
 END
 
 GUI:OptionsGroupInput

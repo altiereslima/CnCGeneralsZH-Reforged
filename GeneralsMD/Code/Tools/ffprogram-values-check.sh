@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+#	Copyright 2026 İlyas Akın
+#	Additional terms under GNU GPL section 7 apply: see LICENSE.md.
+#
+#	This program is free software: you can redistribute it and/or modify
+#	it under the terms of the GNU General Public License as published by
+#	the Free Software Foundation, either version 3 of the License, or
+#	(at your option) any later version.
+#
+#	This program is distributed in the hope that it will be useful,
+#	but WITHOUT ANY WARRANTY; without even the implied warranty of
+#	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#	GNU General Public License for more details.
+#
+#	You should have received a copy of the GNU General Public License
+#	along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# FFReference's shader token values (Tests/ffreference/ffprogram.h) against MinGW-w64's d3d8types.h and
+# d3d9types.h: a second source for the numbers the reference pages leave out.  ffprogram.h writes them as
+# its own constants, from Microsoft's d3d8types.h; this compiles translation units that include MinGW's
+# header and ffprogram.h side by side and static_assert every value, with x86_64-w64-mingw32-g++.
+#
+#   1. against d3d8types.h: every opcode, register type, source modifier, rasterizer output, the
+#      version tokens, the end and comment tokens, co-issue, and the parameter-token fields; the vertex
+#      declaration's token types, fields, D3DVSDT_ types and D3DVSDE_ registers, and every literal
+#      declaration token test_ffprogram writes, against the D3DVSD_ macros that make it;
+#   2. against d3d9types.h: the same fields as D3D9 names them (its register number is the 11 bits
+#      the driver pages give; D3D8's mask is wider, and shader model 1 never reaches the difference);
+#   3. the armed control: unit 1 with one assertion made false must NOT compile, so a pass means the
+#      assertions ran.
+# MinGW-w64's headers are compiled against, never copied.
+#
+# Exit status: 0 on a pass; 1 on a failure; 2 without a work folder; 77 without x86_64-w64-mingw32-g++.
+
+set -u
+COMPILER=x86_64-w64-mingw32-g++
+if ! command -v "$COMPILER" >/dev/null 2>&1; then
+	echo "skip: no $COMPILER"
+	exit 77
+fi
+TESTS="$(cd "$(dirname "$0")/../Tests" && pwd)"
+# A work folder that could not be made is the end of the run: going on with WORK empty would put
+# "$WORK/..." at the file system's root.
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ffprogram-values-check.XXXXXX")" || WORK=""
+if [ -z "$WORK" ] || [ ! -d "$WORK" ]; then
+	echo "ffprogram-values-check: cannot make a work folder under ${TMPDIR:-/tmp}" >&2
+	exit 2
+fi
+trap 'rm -rf -- "${WORK:?}"' EXIT
+
+cat > "$WORK/d3d8.cpp" <<'EOF'
+#include <windows.h>
+#include <d3d8types.h>
+#include "ffreference/ffprogram.h"
+using namespace FFRef::Token;
+#define SAME(a, b) static_assert((uint32_t)(a) == (uint32_t)(b), #a " != " #b)
+SAME(OP_NOP, D3DSIO_NOP); SAME(OP_MOV, D3DSIO_MOV); SAME(OP_ADD, D3DSIO_ADD); SAME(OP_SUB, D3DSIO_SUB);
+SAME(OP_MAD, D3DSIO_MAD); SAME(OP_MUL, D3DSIO_MUL); SAME(OP_RCP, D3DSIO_RCP); SAME(OP_RSQ, D3DSIO_RSQ);
+SAME(OP_DP3, D3DSIO_DP3); SAME(OP_DP4, D3DSIO_DP4); SAME(OP_MIN, D3DSIO_MIN); SAME(OP_MAX, D3DSIO_MAX);
+SAME(OP_SLT, D3DSIO_SLT); SAME(OP_SGE, D3DSIO_SGE); SAME(OP_EXP, D3DSIO_EXP); SAME(OP_LOG, D3DSIO_LOG);
+SAME(OP_LIT, D3DSIO_LIT); SAME(OP_DST, D3DSIO_DST); SAME(OP_LRP, D3DSIO_LRP); SAME(OP_FRC, D3DSIO_FRC);
+SAME(OP_M4x4, D3DSIO_M4x4); SAME(OP_M4x3, D3DSIO_M4x3); SAME(OP_M3x4, D3DSIO_M3x4); SAME(OP_M3x3, D3DSIO_M3x3);
+SAME(OP_M3x2, D3DSIO_M3x2); SAME(OP_TEXCOORD, D3DSIO_TEXCOORD); SAME(OP_TEXKILL, D3DSIO_TEXKILL);
+SAME(OP_TEX, D3DSIO_TEX); SAME(OP_TEXBEM, D3DSIO_TEXBEM); SAME(OP_TEXBEML, D3DSIO_TEXBEML);
+SAME(OP_TEXREG2AR, D3DSIO_TEXREG2AR); SAME(OP_TEXREG2GB, D3DSIO_TEXREG2GB); SAME(OP_TEXM3x2PAD, D3DSIO_TEXM3x2PAD);
+SAME(OP_TEXM3x2TEX, D3DSIO_TEXM3x2TEX); SAME(OP_TEXM3x3PAD, D3DSIO_TEXM3x3PAD); SAME(OP_TEXM3x3TEX, D3DSIO_TEXM3x3TEX);
+SAME(OP_TEXM3x3SPEC, D3DSIO_TEXM3x3SPEC); SAME(OP_TEXM3x3VSPEC, D3DSIO_TEXM3x3VSPEC);
+SAME(OP_EXPP, D3DSIO_EXPP); SAME(OP_LOGP, D3DSIO_LOGP); SAME(OP_CND, D3DSIO_CND); SAME(OP_DEF, D3DSIO_DEF);
+SAME(OP_TEXREG2RGB, D3DSIO_TEXREG2RGB); SAME(OP_TEXDP3TEX, D3DSIO_TEXDP3TEX); SAME(OP_TEXM3x2DEPTH, D3DSIO_TEXM3x2DEPTH);
+SAME(OP_TEXDP3, D3DSIO_TEXDP3); SAME(OP_TEXM3x3, D3DSIO_TEXM3x3); SAME(OP_TEXDEPTH, D3DSIO_TEXDEPTH);
+SAME(OP_CMP, D3DSIO_CMP); SAME(OP_BEM, D3DSIO_BEM); SAME(OP_PHASE, D3DSIO_PHASE);
+SAME(COMMENT, D3DSIO_COMMENT); SAME(END, D3DSIO_END);
+SAME(REG_TEMP, D3DSPR_TEMP >> D3DSP_REGTYPE_SHIFT); SAME(REG_INPUT, D3DSPR_INPUT >> D3DSP_REGTYPE_SHIFT);
+SAME(REG_CONST, D3DSPR_CONST >> D3DSP_REGTYPE_SHIFT); SAME(REG_ADDR, D3DSPR_ADDR >> D3DSP_REGTYPE_SHIFT);
+SAME(REG_TEXTURE, D3DSPR_TEXTURE >> D3DSP_REGTYPE_SHIFT); SAME(REG_RASTOUT, D3DSPR_RASTOUT >> D3DSP_REGTYPE_SHIFT);
+SAME(REG_ATTROUT, D3DSPR_ATTROUT >> D3DSP_REGTYPE_SHIFT); SAME(REG_TEXCRDOUT, D3DSPR_TEXCRDOUT >> D3DSP_REGTYPE_SHIFT);
+SAME(RASTOUT_POSITION, D3DSRO_POSITION); SAME(RASTOUT_FOG, D3DSRO_FOG); SAME(RASTOUT_POINTSIZE, D3DSRO_POINT_SIZE);
+SAME(SRC_NONE, D3DSPSM_NONE >> D3DSP_SRCMOD_SHIFT); SAME(SRC_NEGATE, D3DSPSM_NEG >> D3DSP_SRCMOD_SHIFT);
+SAME(SRC_BIAS, D3DSPSM_BIAS >> D3DSP_SRCMOD_SHIFT); SAME(SRC_BIASNEGATE, D3DSPSM_BIASNEG >> D3DSP_SRCMOD_SHIFT);
+SAME(SRC_SIGN, D3DSPSM_SIGN >> D3DSP_SRCMOD_SHIFT); SAME(SRC_SIGNNEGATE, D3DSPSM_SIGNNEG >> D3DSP_SRCMOD_SHIFT);
+SAME(SRC_COMPLEMENT, D3DSPSM_COMP >> D3DSP_SRCMOD_SHIFT); SAME(SRC_X2, D3DSPSM_X2 >> D3DSP_SRCMOD_SHIFT);
+SAME(SRC_X2NEGATE, D3DSPSM_X2NEG >> D3DSP_SRCMOD_SHIFT); SAME(SRC_DZ, D3DSPSM_DZ >> D3DSP_SRCMOD_SHIFT);
+SAME(SRC_DW, D3DSPSM_DW >> D3DSP_SRCMOD_SHIFT);
+SAME(VERSION_PIXEL | 0x0101, D3DPS_VERSION(1, 1)); SAME(VERSION_VERTEX | 0x0101, D3DVS_VERSION(1, 1));
+SAME(COISSUE, D3DSI_COISSUE); SAME(COMMENTSIZE_SHIFT, D3DSI_COMMENTSIZE_SHIFT); SAME(COMMENTSIZE_MASK, D3DSI_COMMENTSIZE_MASK);
+SAME(REGTYPE_SHIFT, D3DSP_REGTYPE_SHIFT); SAME(REGTYPE_MASK, D3DSP_REGTYPE_MASK);
+SAME(WRITEMASK_MASK, D3DSP_WRITEMASK_ALL); SAME(1u << WRITEMASK_SHIFT, D3DSP_WRITEMASK_0);
+SAME(RESULTMOD_SHIFT, D3DSP_DSTMOD_SHIFT); SAME(RESULTMOD_MASK, D3DSP_DSTMOD_MASK);
+SAME(RESULTMOD_SATURATE << RESULTMOD_SHIFT, D3DSPDM_SATURATE);
+SAME(RESULTSHIFT_SHIFT, D3DSP_DSTSHIFT_SHIFT); SAME(RESULTSHIFT_MASK, D3DSP_DSTSHIFT_MASK);
+SAME(SWIZZLE_SHIFT, D3DSP_SWIZZLE_SHIFT); SAME(SWIZZLE_MASK, D3DSP_SWIZZLE_MASK);
+SAME(SRCMOD_SHIFT, D3DSP_SRCMOD_SHIFT); SAME(SRCMOD_MASK, D3DSP_SRCMOD_MASK);
+SAME(ADDRESS_RELATIVE, 1u << D3DVS_ADDRESSMODE_SHIFT);
+// The vertex declaration's tokens (decodeD3D8Declaration), and the tokens its test writes as literals
+namespace D8 = FFRef::D3D8;
+namespace DT = FFRef::Declaration;
+SAME(D8::TOKEN_TYPE_SHIFT, D3DVSD_TOKENTYPESHIFT); SAME(7u << D8::TOKEN_TYPE_SHIFT, D3DVSD_TOKENTYPEMASK);
+SAME(D8::TOKEN_NOP, D3DVSD_TOKEN_NOP); SAME(D8::TOKEN_STREAM, D3DVSD_TOKEN_STREAM);
+SAME(D8::TOKEN_STREAMDATA, D3DVSD_TOKEN_STREAMDATA); SAME(D8::TOKEN_TESSELLATOR, D3DVSD_TOKEN_TESSELLATOR);
+SAME(D8::TOKEN_CONSTMEM, D3DVSD_TOKEN_CONSTMEM); SAME(D8::TOKEN_EXT, D3DVSD_TOKEN_EXT); SAME(D8::TOKEN_END, D3DVSD_TOKEN_END);
+SAME(D8::DECLARATION_END, D3DVSD_END()); SAME(D8::STREAM_NUMBER_MASK, D3DVSD_STREAMNUMBERMASK);
+SAME(D8::STREAM_TESS_BIT, D3DVSD_STREAMTESSMASK); SAME(D8::DATA_LOAD_SKIP_BIT, D3DVSD_DATALOADTYPEMASK);
+SAME(D8::DATA_TYPE_SHIFT, D3DVSD_DATATYPESHIFT); SAME(D8::DATA_TYPE_MASK, D3DVSD_DATATYPEMASK);
+SAME(D8::SKIP_COUNT_SHIFT, D3DVSD_SKIPCOUNTSHIFT); SAME(D8::SKIP_COUNT_MASK, D3DVSD_SKIPCOUNTMASK);
+SAME(D8::VERTEX_REG_MASK, D3DVSD_VERTEXREGMASK);
+SAME(D8::POSITION, D3DVSDE_POSITION); SAME(D8::BLENDWEIGHT, D3DVSDE_BLENDWEIGHT); SAME(D8::BLENDINDICES, D3DVSDE_BLENDINDICES);
+SAME(D8::NORMAL, D3DVSDE_NORMAL); SAME(D8::PSIZE, D3DVSDE_PSIZE); SAME(D8::DIFFUSE, D3DVSDE_DIFFUSE);
+SAME(D8::SPECULAR, D3DVSDE_SPECULAR); SAME(D8::TEXCOORD0, D3DVSDE_TEXCOORD0); SAME(D8::TEXCOORD7, D3DVSDE_TEXCOORD7);
+SAME(D8::POSITION2, D3DVSDE_POSITION2); SAME(D8::NORMAL2, D3DVSDE_NORMAL2);
+SAME(DT::FLOAT1, D3DVSDT_FLOAT1); SAME(DT::FLOAT2, D3DVSDT_FLOAT2); SAME(DT::FLOAT3, D3DVSDT_FLOAT3);
+SAME(DT::FLOAT4, D3DVSDT_FLOAT4); SAME(DT::D3DCOLOR, D3DVSDT_D3DCOLOR); SAME(DT::UBYTE4, D3DVSDT_UBYTE4);
+SAME(DT::SHORT2, D3DVSDT_SHORT2); SAME(DT::SHORT4, D3DVSDT_SHORT4);
+SAME(0x20000000u, D3DVSD_STREAM(0)); SAME(0x20000001u, D3DVSD_STREAM(1)); SAME(0x30000000u, D3DVSD_STREAM_TESS());
+SAME(0x40020000u, D3DVSD_REG(D3DVSDE_POSITION, D3DVSDT_FLOAT3)); SAME(0x40020001u, D3DVSD_REG(1, D3DVSDT_FLOAT3));
+SAME(0x40040002u, D3DVSD_REG(2, D3DVSDT_D3DCOLOR)); SAME(0x40010007u, D3DVSD_REG(D3DVSDE_TEXCOORD0, D3DVSDT_FLOAT2));
+SAME(0x40070003u, D3DVSD_REG(3, D3DVSDT_SHORT4)); SAME(0x40040005u, D3DVSD_REG(5, D3DVSDT_D3DCOLOR));
+SAME(0x40020010u, D3DVSD_REG(D3DVSDE_NORMAL2, D3DVSDT_FLOAT3)); SAME(0x50020000u, D3DVSD_SKIP(2));
+SAME(0x82000000u, D3DVSD_CONST(0, 1)); SAME(0x60020001u, D3DVSD_TESSNORMAL(0, 1)); SAME(0x00000000u, D3DVSD_NOP());
+ARMED_CONTROL
+EOF
+
+cat > "$WORK/d3d9.cpp" <<'EOF'
+#include <windows.h>
+#include <d3d9types.h>
+#include <stddef.h>
+#include "ffreference/ffprogram.h"
+using namespace FFRef::Token;
+#define SAME(a, b) static_assert((uint32_t)(a) == (uint32_t)(b), #a " != " #b)
+SAME(REGNUM_MASK, D3DSP_REGNUM_MASK);
+SAME(OP_TEX, D3DSIO_TEX); SAME(OP_TEXBEM, D3DSIO_TEXBEM); SAME(OP_DEF, D3DSIO_DEF); SAME(OP_LRP, D3DSIO_LRP);
+SAME(OP_M4x4, D3DSIO_M4x4); SAME(OP_RCP, D3DSIO_RCP); SAME(COMMENT, D3DSIO_COMMENT); SAME(END, D3DSIO_END);
+SAME(REG_TEMP, D3DSPR_TEMP); SAME(REG_INPUT, D3DSPR_INPUT); SAME(REG_CONST, D3DSPR_CONST); SAME(REG_ADDR, D3DSPR_ADDR);
+SAME(REG_TEXTURE, D3DSPR_TEXTURE); SAME(REG_RASTOUT, D3DSPR_RASTOUT); SAME(REG_ATTROUT, D3DSPR_ATTROUT);
+SAME(REG_TEXCRDOUT, D3DSPR_TEXCRDOUT);
+SAME(REGTYPE_SHIFT, D3DSP_REGTYPE_SHIFT); SAME(REGTYPE_MASK, D3DSP_REGTYPE_MASK);
+SAME(SRC_COMPLEMENT << SRCMOD_SHIFT, D3DSPSM_COMP); SAME(SRC_NEGATE << SRCMOD_SHIFT, D3DSPSM_NEG);
+SAME(RESULTSHIFT_SHIFT, D3DSP_DSTSHIFT_SHIFT); SAME(SWIZZLE_SHIFT, D3DVS_SWIZZLE_SHIFT);
+SAME(ADDRESS_RELATIVE, D3DVS_ADDRMODE_RELATIVE);
+SAME(COISSUE, D3DSI_COISSUE);
+SAME(VERSION_PIXEL | 0x0101, D3DPS_VERSION(1, 1)); SAME(VERSION_VERTEX | 0x0101, D3DVS_VERSION(1, 1));
+namespace Decl = FFRef::Declaration;
+SAME(Decl::FLOAT1, D3DDECLTYPE_FLOAT1); SAME(Decl::FLOAT2, D3DDECLTYPE_FLOAT2); SAME(Decl::FLOAT3, D3DDECLTYPE_FLOAT3);
+SAME(Decl::FLOAT4, D3DDECLTYPE_FLOAT4); SAME(Decl::D3DCOLOR, D3DDECLTYPE_D3DCOLOR); SAME(Decl::UBYTE4, D3DDECLTYPE_UBYTE4);
+SAME(Decl::SHORT2, D3DDECLTYPE_SHORT2); SAME(Decl::SHORT4, D3DDECLTYPE_SHORT4);
+SAME(Decl::POSITION, D3DDECLUSAGE_POSITION); SAME(Decl::BLENDWEIGHT, D3DDECLUSAGE_BLENDWEIGHT);
+SAME(Decl::BLENDINDICES, D3DDECLUSAGE_BLENDINDICES); SAME(Decl::NORMAL, D3DDECLUSAGE_NORMAL); SAME(Decl::PSIZE, D3DDECLUSAGE_PSIZE);
+SAME(Decl::TEXCOORD, D3DDECLUSAGE_TEXCOORD); SAME(Decl::COLOR, D3DDECLUSAGE_COLOR);
+static_assert(sizeof(FFRef::DeclarationElement) == sizeof(D3DVERTEXELEMENT9), "one element, eight bytes");
+static_assert(offsetof(FFRef::DeclarationElement, offset) == offsetof(D3DVERTEXELEMENT9, Offset), "Offset");
+static_assert(offsetof(FFRef::DeclarationElement, usageIndex) == offsetof(D3DVERTEXELEMENT9, UsageIndex), "UsageIndex");
+EOF
+
+compile() {	# compile <unit> [<control text>]
+	sed "s|ARMED_CONTROL|${2:-}|" "$WORK/$1" > "$WORK/unit.cpp"
+	"$COMPILER" -std=c++17 -fsyntax-only -I "$TESTS" "$WORK/unit.cpp" 2> "$WORK/err.txt"
+}
+
+status=0
+if compile d3d8.cpp; then
+	echo "ok: ffprogram.h's values equal MinGW-w64's d3d8types.h (opcodes, registers, modifiers, fields, versions, and the vertex declaration's tokens, types and registers)"
+else
+	echo "FAIL: against d3d8types.h:"; grep -m5 "error" "$WORK/err.txt"; status=1
+fi
+if compile d3d9.cpp; then
+	echo "ok: and d3d9types.h's (the 11-bit register number, the fields, relative addressing, the declaration types, usages and element layout)"
+else
+	echo "FAIL: against d3d9types.h:"; grep -m5 "error" "$WORK/err.txt"; status=1
+fi
+if compile d3d8.cpp "SAME(OP_TEX, D3DSIO_TEXCOORD);"; then
+	echo "FAIL: the control (a false assertion) compiled, so these assertions prove nothing"; status=1
+else
+	echo "ok: the control, one false assertion, does not compile"
+fi
+exit $status

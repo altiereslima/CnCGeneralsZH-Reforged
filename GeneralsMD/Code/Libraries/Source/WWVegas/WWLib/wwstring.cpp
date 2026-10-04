@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -245,9 +247,11 @@ StringClass::Format_Args (const TCHAR *format, const va_list & arg_list )
 	//
 	// Make a guess at the maximum length of the resulting string
 	//
-	//	_vsnprintf writes no terminator when the result fills the buffer
-	//	exactly, so the array is one TCHAR longer than the count handed to it
-	//	and the extra slot is left as the zero from the initialiser.
+	//	The array is one TCHAR longer than the formatted length this allows.  It used to be that way
+	//	because vsnprintf writes no terminator when the result fills the buffer exactly and the extra
+	//	slot held the zero from the initialiser; with vsnprintf the bound includes the terminator, so
+	//	the count handed over is the whole array and the extra slot is where the terminator goes.
+	//	Either way 512 formatted characters fit, which is what callers were written against.
 	TCHAR temp_buffer[512 + 1] = { 0 };
 	int retval = 0;
 
@@ -257,7 +261,13 @@ StringClass::Format_Args (const TCHAR *format, const va_list & arg_list )
 	#ifdef _UNICODE
 		retval = _vsnwprintf (temp_buffer, 512, format, arg_list);
 	#else
-		retval = _vsnprintf (temp_buffer, 512, format, arg_list);
+		// const_cast: arg_list arrives as `const va_list &` and vsnprintf takes a va_list it may
+		// consume.  Where va_list is a pointer (MSVC, arm64) the const binds to the reference and the
+		// call compiled as it stood.  Where it is an array (x86-64 System V: __va_list_tag[1]) the
+		// const binds to the elements, the array decays to a const pointer, and GCC and Clang both
+		// reject the call.  Found by the Linux amd64 build.  The cast changes no value anywhere.
+		retval = vsnprintf (temp_buffer, sizeof(temp_buffer)/sizeof(TCHAR), format,
+			const_cast<va_list &>(arg_list));
 	#endif
 	
 	//
@@ -283,9 +293,11 @@ StringClass::Format (const TCHAR *format, ...)
 	//
 	// Make a guess at the maximum length of the resulting string
 	//
-	//	_vsnprintf writes no terminator when the result fills the buffer
-	//	exactly, so the array is one TCHAR longer than the count handed to it
-	//	and the extra slot is left as the zero from the initialiser.
+	//	The array is one TCHAR longer than the formatted length this allows.  It used to be that way
+	//	because vsnprintf writes no terminator when the result fills the buffer exactly and the extra
+	//	slot held the zero from the initialiser; with vsnprintf the bound includes the terminator, so
+	//	the count handed over is the whole array and the extra slot is where the terminator goes.
+	//	Either way 512 formatted characters fit, which is what callers were written against.
 	TCHAR temp_buffer[512 + 1] = { 0 };
 	int retval = 0;
 
@@ -295,7 +307,7 @@ StringClass::Format (const TCHAR *format, ...)
 	#ifdef _UNICODE
 		retval = _vsnwprintf (temp_buffer, 512, format, arg_list);
 	#else
-		retval = _vsnprintf (temp_buffer, 512, format, arg_list);
+		retval = vsnprintf (temp_buffer, sizeof(temp_buffer)/sizeof(TCHAR), format, arg_list);
 	#endif
 	
 	//
@@ -324,6 +336,7 @@ StringClass::Release_Resources (void)
 // Copy_Wide
 //
 ///////////////////////////////////////////////////////////////////
+#if defined(_WIN32)   // WideCharToMultiByte; see wwstring.h
 bool StringClass::Copy_Wide (const WCHAR *source)
 {
 	if (source != NULL) {
@@ -348,3 +361,4 @@ bool StringClass::Copy_Wide (const WCHAR *source)
 	// Failure.
 	return (false);
 }
+#endif

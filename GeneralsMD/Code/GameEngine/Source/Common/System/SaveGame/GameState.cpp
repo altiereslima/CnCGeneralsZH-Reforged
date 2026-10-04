@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,11 +31,13 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"
-#include "Common/File.h"
+#include "zhio.h"
+#include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "Common/GameEngine.h"
 #include "Common/GameState.h"
 #include "Common/GameStateMap.h"
+#include "Common/LocalFileSystem.h"
 #include "Common/LatchRestore.h"
 #include "Common/MapObject.h"
 #include "Common/PlayerList.h"
@@ -213,13 +217,49 @@ GameState::SnapshotBlock *GameState::findBlockInfoByToken( AsciiString token, Sn
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+#if !defined(_WIN32)
+#include "Lib/WideCharFns.h"
+
+/* Off Windows the same two strings come from strftime, in whatever LC_TIME the process has - the
+	 user's, once the platform layer calls setlocale(LC_TIME, "") at startup, and "C" until then.
+	 strftime writes LC_TIME's codeset, which is UTF-8 in practice, while LC_CTYPE stays "C" on
+	 purpose (the port's rules say why), so the bytes are decoded as UTF-8 explicitly: mbstowcs would
+	 decode them by LC_CTYPE and mangle every non-ASCII month name.  Display only; nothing here
+	 reaches the simulation. */
+static UnicodeString formatWallClock( const WallClockTime &timeVal, const char *format )
+{
+	struct tm when;
+	memset( &when, 0, sizeof( when ) );
+	when.tm_year = timeVal.wYear - 1900;
+	when.tm_mon = timeVal.wMonth - 1;
+	when.tm_mday = timeVal.wDay;
+	when.tm_wday = timeVal.wDayOfWeek;
+	when.tm_hour = timeVal.wHour;
+	when.tm_min = timeVal.wMinute;
+	when.tm_sec = timeVal.wSecond;
+	when.tm_isdst = -1;
+
+	char bytes[ 256 ];
+	if (strftime( bytes, sizeof( bytes ), format, &when ) == 0)
+		bytes[ 0 ] = 0;
+	WideChar text[ 256 ];
+	WideCharFromUtf8( bytes, text, sizeof( text ) / sizeof( text[ 0 ] ) );
+	UnicodeString result;
+	result.set( text );
+	return result;
+}
+#endif
+
 /* LOCALE_USER_DEFAULT, not LOCALE_SYSTEM_DEFAULT, in both of these: the system locale is the one
 	 the machine was installed with and is what non-Unicode programs get, while the user locale is the
 	 one the person sitting there picked in Region settings. On a machine set up in one country and
 	 used in another - which is most machines that run this game now - the dates in the replay and
 	 save lists came out in a format the owner never chose. */
-UnicodeString getUnicodeDateBuffer(SYSTEMTIME timeVal)
+UnicodeString getUnicodeDateBuffer(WallClockTime timeVal)
 {
+#if !defined(_WIN32)
+	return formatWallClock( timeVal, "%x" );	// the locale's short date, as DATE_SHORTDATE
+#else
 	// setup date buffer for local region date format
 	#define DATE_BUFFER_SIZE 256
 	OSVERSIONINFO	osvi;
@@ -239,19 +279,27 @@ UnicodeString getUnicodeDateBuffer(SYSTEMTIME timeVal)
 			return displayDateBuffer;
 		}	
 	}
-	wchar_t dateBuffer[ DATE_BUFFER_SIZE ];
+	// WideChar, cast at the W call: the same two bytes as WCHAR on Windows.  The size is in characters,
+	// as GetDateFormatW takes it; it used to be sizeof(dateBuffer), twice the buffer.
+	WideChar dateBuffer[ DATE_BUFFER_SIZE ];
 	GetDateFormatW( LOCALE_USER_DEFAULT,
 								 DATE_SHORTDATE,
 								 &timeVal,
 								 NULL,
-								 dateBuffer, sizeof(dateBuffer) );
+								 reinterpret_cast<LPWSTR>( dateBuffer ), DATE_BUFFER_SIZE );
 	displayDateBuffer.set(dateBuffer);
 	return displayDateBuffer;
 	//displayDateBuffer.format( L"%ls", dateBuffer );
+#endif
 }															
 
-UnicodeString getUnicodeTimeBuffer(SYSTEMTIME timeVal) 
+UnicodeString getUnicodeTimeBuffer(WallClockTime timeVal) 
 {
+#if !defined(_WIN32)
+	// The locale's own time format.  Unlike TIME_NOSECONDS below it shows seconds: strftime has no
+	// "this locale's format without the seconds".
+	return formatWallClock( timeVal, "%X" );
+#else
 	// setup time buffer for local region time format
 	UnicodeString displayTimeBuffer;
 	OSVERSIONINFO	osvi;
@@ -272,15 +320,17 @@ UnicodeString getUnicodeTimeBuffer(SYSTEMTIME timeVal)
 	}
 	// setup time buffer for local region time format
 	#define TIME_BUFFER_SIZE 256
-	wchar_t timeBuffer[ TIME_BUFFER_SIZE ];
+	// As dateBuffer above: WideChar, cast at the W call, sized in characters.
+	WideChar timeBuffer[ TIME_BUFFER_SIZE ];
 	GetTimeFormatW( LOCALE_USER_DEFAULT,
 								 TIME_NOSECONDS,
 								 &timeVal,
 								 NULL,
-								 timeBuffer,
-								 sizeof(timeBuffer) );
+								 reinterpret_cast<LPWSTR>( timeBuffer ),
+								 TIME_BUFFER_SIZE );
 	displayTimeBuffer.set(timeBuffer);
 	return displayTimeBuffer;
+#endif
 }
 
 
@@ -470,7 +520,7 @@ AsciiString GameState::findNextSaveFilename( UnicodeString desc )
 		leaf.format("%s_%04d%s", adesc.str(), i, SAVE_GAME_EXTENSION);
 
 		AsciiString path = getFilePathInSaveDirectory(leaf);
-		if( _access( path.str(), 0 ) == -1 )
+		if( zh_access( path.str(), 0 ) == -1 )
 			return leaf;	// note that this returns the leaf, not the full path
 	}
 #else
@@ -517,7 +567,7 @@ AsciiString GameState::findNextSaveFilename( UnicodeString desc )
 			fullPath = getFilePathInSaveDirectory(filename);
 
 			// if file does not exist we're all good
-			if( _access( fullPath.str(), 0 ) == -1 )
+			if( zh_access( fullPath.str(), 0 ) == -1 )
 				return filename;
 
 			// test the text filename
@@ -564,7 +614,7 @@ SaveCode GameState::saveGame( AsciiString filename, UnicodeString desc,
 	}  // end if
 
 	// make absolutely sure the save directory exists
-	CreateDirectory( getSaveDirectory().str(), NULL );
+	TheLocalFileSystem->createDirectory( getSaveDirectory() );
 
 	// construct path to file
 	AsciiString filepath = getFilePathInSaveDirectory(filename);
@@ -1084,7 +1134,7 @@ void GameState::getSaveGameInfoFromFile( AsciiString filename, SaveGameInfo *sav
 			blockSize = xferLoad.beginBlock();
 
 			// is this the block of game info data
-			if( stricmp( token.str(), GAME_STATE_BLOCK_STRING ) == 0 )
+			if( strcasecmp( token.str(), GAME_STATE_BLOCK_STRING ) == 0 )
 			{
 				GameState tempGameState;
 
@@ -1144,9 +1194,10 @@ static void addGameToAvailableList( AsciiString filename, void *userData )
 	DEBUG_ASSERTCRASH( filename.isEmpty() == FALSE, ("addGameToAvailableList - Illegal filename\n") );
  
 	try {
-	// get header info from this listbox
+	// get header info from this listbox.  The path, not the leaf: iterateSaveFiles used to change
+	// into the save directory around this, and no longer does (C1).
 	SaveGameInfo saveGameInfo;
-	TheGameState->getSaveGameInfoFromFile( filename, &saveGameInfo );
+	TheGameState->getSaveGameInfoFromFile( TheGameState->getFilePathInSaveDirectory( filename ), &saveGameInfo );
 
 	// allocate new info 
 	AvailableGameInfo *newInfo = new AvailableGameInfo;
@@ -1240,7 +1291,7 @@ void GameState::populateSaveGameListbox( GameWindow *listbox, SaveLoadLayoutType
 	// add all games found to the list box
 	AvailableGameInfo *info;
 	SaveGameInfo *saveGameInfo;
-	SYSTEMTIME systemTime;
+	WallClockTime systemTime;
 	UnsignedInt count = 0;
 	for( info = m_availableGames; info; info = info->next, count++ )
 	{
@@ -1272,7 +1323,7 @@ void GameState::populateSaveGameListbox( GameWindow *listbox, SaveLoadLayoutType
 			
 			displayLabel = TheGameText->fetch( saveGameInfo->mapLabel, &exists );
 			if( exists == FALSE )
-				displayLabel.format( L"%S", saveGameInfo->mapLabel.str() );
+				displayLabel.format( u"%S", saveGameInfo->mapLabel.str() );
 
 		}  // end if
 
@@ -1314,66 +1365,20 @@ void GameState::iterateSaveFiles( IterateSaveFileCallback callback, void *userDa
 	if( callback == NULL )
 		return;
 
-	// save the current directory
-	char currentDirectory[ _MAX_PATH ];
-	GetCurrentDirectory( _MAX_PATH, currentDirectory );
+	// every file in the save directory, listed there rather than by changing into it (C1); the
+	// callbacks get the leaf, as before, and build the path with getFilePathInSaveDirectory
+	std::vector< AsciiString > files;
+	TheLocalFileSystem->getFilesInDirectory( getSaveDirectory(), AsciiString( "*" ), files );
 
-	// switch into the save directory
-	SetCurrentDirectory( getSaveDirectory().str() );
-
-	// iterate all items in the directory
-	WIN32_FIND_DATA item;  // search item
-	HANDLE hFile = INVALID_HANDLE_VALUE;  // handle for search resources
-	Bool done = FALSE;
-	Bool first = TRUE;
-	while( done == FALSE )
+	for( size_t i = 0; i < files.size(); ++i )
 	{
 
-		// if our first time through we need to start the search
-		if( first )
-		{
+		// see if there is a ".sav" at end of this filename
+		const Char *c = strrchr( files[ i ].str(), '.' );
+		if( c && strcasecmp( c, ".sav" ) == 0 )
+			callback( files[ i ], userData );
 
-			// start search
-			hFile = FindFirstFile( "*", &item );
-			if( hFile == INVALID_HANDLE_VALUE )
-				return;
-
-			// we are no longer on our first item
-			first = FALSE;
-
-		}  // end if, first
-
-		// see if this is a file, and therefore a possible save file
-		if( !(item.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) )
-		{
-
-			// see if there is a ".sav" at end of this filename
-			Char *c = strrchr( item.cFileName, '.' );
-			if( c && stricmp( c, ".sav" ) == 0 )
-			{
-
-				// construction asciistring filename
-				AsciiString filename;
-				filename.set( item.cFileName );
-
-				// call the callback
-				callback( filename, userData );
-
-			}  // end if, a save file
-
-		}  // end if
-
-		// on to the next file
-		if( FindNextFile( hFile, &item ) == 0 )
-			done = TRUE;
-
-	}  // end while
-
-	// close search resources
-	FindClose( hFile );
-
-	// restore the current directory
-	SetCurrentDirectory( currentDirectory );
+	}  // end for
 
 }  // end iterateSaveFiles
 
@@ -1498,7 +1503,7 @@ void GameState::xferSaveData( Xfer *xfer, SnapshotType which )
 				{
 
 					// log the block not found
-					DEBUG_LOG(( "GameState::xferSaveData - Skipping unknown block '%s'\n", token ));
+					DEBUG_LOG(( "GameState::xferSaveData - Skipping unknown block '%s'\n", token.str() ));
 
 					//
 					// block was not found, this could have been a block from an older file
@@ -1657,8 +1662,8 @@ void GameState::xfer( Xfer *xfer )
 	}  // end if
 
 	// current system time
-	SYSTEMTIME systemTime;
-	GetLocalTime( &systemTime );
+	WallClockTime systemTime;
+	getLocalWallClock( &systemTime );
 
 	// date and time
 	saveGameInfo->date.year = systemTime.wYear;

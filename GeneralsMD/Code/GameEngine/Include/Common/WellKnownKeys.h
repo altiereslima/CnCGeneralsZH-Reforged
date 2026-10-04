@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -50,8 +52,19 @@
 
 #include "Common/NameKeyGenerator.h"
 
+// Under clang every key's definition must be a constant initialization, or it does not compile: the
+// keys are read from other translation units' code, and a key constructed at run time could be read
+// before it was.  StaticNameKey's constexpr constructor is what makes this hold on every compiler;
+// the attribute is clang's check of it, key by key.  Other compilers get the constexpr probe in
+// WellKnownKeys.cpp.
+#if defined(__clang__)
+	#define WELL_KNOWN_KEY_CONSTANT_INIT __attribute__((require_constant_initialization))
+#else
+	#define WELL_KNOWN_KEY_CONSTANT_INIT
+#endif
+
 #ifdef INSTANTIATE_WELL_KNOWN_KEYS
-	#define DEFINE_KEY(NAME) 	extern const StaticNameKey TheKey_##NAME; const StaticNameKey TheKey_##NAME(#NAME);
+	#define DEFINE_KEY(NAME) 	extern const StaticNameKey TheKey_##NAME; WELL_KNOWN_KEY_CONSTANT_INIT const StaticNameKey TheKey_##NAME(#NAME);
 #else
 	#define DEFINE_KEY(NAME) 	extern const StaticNameKey TheKey_##NAME;
 #endif

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -39,8 +41,13 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "textureloader.h"
+#if !defined(_WIN32)
+#include "Platform/LoadTiming.h"
+#endif
+#include "Lib/Clock.h"
 #include "mutex.h"
 #include "thread.h"
+#include "threadwake.h"
 #include "wwdebug.h"
 #include "texture.h"
 #include "ffactory.h"
@@ -52,7 +59,7 @@
 #include "dx8wrapper.h"
 #include "dx8caps.h"
 #include "missingtexture.h"
-#include "targa.h"
+#include "TARGA.H"
 #include "d3dx9runtime.h"
 #include <cstdio>
 #include "wwmemlog.h"
@@ -239,6 +246,13 @@ static TextureLoadTaskListClass					_CubeTexLoadFreeList;
 static TextureLoadTaskListClass					_VolTexLoadFreeList;
 
 
+// What the loader thread sleeps on until Begin_Load_And_Queue gives it a task, or Deinit ends it.  It looked at
+// _BackgroundQueue every millisecond (Switch_Thread) for the whole session instead: about 950 wakeups a
+// second, measured, for a queue the shipped game never fills - W3DDisplay turns thumbnails off, so every
+// texture finishes in the foreground (a skirmish under gdb: 1,425 foreground loads, no background request).
+// Defined before _TextureLoadThread, so it outlives the thread object at exit.
+static ThreadWakeClass								_LoaderWake;
+
 // The background texture loading thread.
 static class LoaderThreadClass : public ThreadClass
 {
@@ -248,6 +262,9 @@ public:
 #else
 	LoaderThreadClass(const char *thread_name = "Texture loader thread") : ThreadClass(thread_name) {}
 #endif
+	// A process that ends without Deinit destroys this with the thread asleep in _LoaderWake, where it never
+	// looks at `running`: wake it for good before ~ThreadClass stops and joins it.
+	~LoaderThreadClass() { _LoaderWake.Stop(); }
 
 	void Thread_Function();
 } _TextureLoadThread;
@@ -337,6 +354,7 @@ void TextureLoader::Init()
 
 	ThumbnailManagerClass::Init();
 
+	_LoaderWake.Restart();
 	_TextureLoadThread.Execute();
 	_TextureLoadThread.Set_Priority(-4);
 	TextureInactiveOverrideTime = 0;
@@ -356,6 +374,9 @@ void TextureLoader::Deinit()
 	// unlocked instead: the loader either finishes its current task and exits on its own, or was
 	// never near the lock and exits immediately either way.
 	//
+	// The thread sleeps in _LoaderWake between tasks now, where `running` is never read, so wake it for good
+	// first; Stop() then finds it gone or finishing its task.
+	_LoaderWake.Stop();
 	_TextureLoadThread.Stop();
 
 	FastCriticalSectionClass::LockClass lock(_BackgroundCriticalSection);
@@ -889,10 +910,12 @@ void TextureLoader::Flush_Pending_Load_Tasks(void)
 
 // Nework update macro for texture loader.
 #pragma warning(disable:4201) // warning C4201: nonstandard extension used : nameless struct/union
+#if defined(_WIN32)
 #include <mmsystem.h>
+#endif
 #define UPDATE_NETWORK 											\
 	if (network_callback) {                            \
-		unsigned long time2 = timeGetTime();            \
+		unsigned long time2 = Clock_Milliseconds();            \
 		if (time2 - time > 20) {                        \
 			network_callback();                          \
 			time = time2;                                \
@@ -912,7 +935,7 @@ void TextureLoader::Update(void (*network_callback)(void))
 	// modifying texture tasks.
 	FastCriticalSectionClass::LockClass lock(_ForegroundCriticalSection);
 
-	unsigned long time = timeGetTime();
+	unsigned long time = Clock_Milliseconds();
 
 	// while we have tasks on the foreground queue
 	while (TextureLoadTaskClass *task = _ForegroundQueue.Pop_Front()) {
@@ -998,6 +1021,7 @@ void TextureLoader::Begin_Load_And_Queue(TextureLoadTaskClass *task)
 		// it has something to do with visually important textures,
 		// like those in the foreground, starting their load last.
 		_BackgroundQueue.Push_Front(task);
+		_LoaderWake.Wake();
 	} else {
 		// unable to load.
 		task->Apply_Missing_Texture();
@@ -1029,6 +1053,10 @@ void TextureLoader::Load_Thumbnail(TextureBaseClass *tc)
 void LoaderThreadClass::Thread_Function(void)
 {
 	while (running) {
+		// asleep until there is a task, and out when Deinit (or the exit) says so
+		if (!_LoaderWake.Wait([] { return !_BackgroundQueue.Is_Empty(); })) {
+			break;
+		}
 		// if there are no tasks on the background queue, no need to grab background lock.
 		if (!_BackgroundQueue.Is_Empty()) {
 			// Grab background load so other threads know we could be 
@@ -1049,8 +1077,6 @@ void LoaderThreadClass::Thread_Function(void)
 				_ForegroundQueue.Push_Back(task);
 			}
 		}
-
-		Switch_Thread();
 	}
 }
 
@@ -1297,6 +1323,24 @@ bool TextureLoadTaskClass::Begin_Load(void)
 bool TextureLoadTaskClass::Load(void)
 {
 	WWMEMLOG(MEM_TEXTURE);
+#if !defined(_WIN32)
+	// PERF1's hitch hunt (Platform/LoadTiming.h): a texture load's time, and how much of it was reading.
+	struct LoadTimer
+	{
+		TextureBaseClass *Texture;
+		double Start, ReadStart;
+		explicit LoadTimer(TextureBaseClass *texture) : Texture(texture), Start(zhLoadTimingAsked() ? zhLoadNowMs() : 0.0),
+			ReadStart(zhLoadReadMs()) {}
+		~LoadTimer()
+		{
+			if (!zhLoadTimingAsked()) return;
+			const double took = zhLoadNowMs() - Start, read = zhLoadReadMs() - ReadStart;
+			if (took > ZH_LOAD_TIMING_REPORT_MS)
+				fprintf(stderr, "LOAD tex   t %10.1f ms  %7.1f ms  %s thread  read %.1f ms, parse and build %.1f ms  %s\n",
+					Start, took, zhLoadThread(), read, took - read, Texture ? (const char *)Texture->Get_Full_Path().Peek_Buffer() : "?");
+		}
+	} timer(Texture);
+#endif
 	WWASSERT(Peek_D3D_Texture());
 
 	bool loaded = false;

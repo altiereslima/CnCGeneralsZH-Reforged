@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -32,22 +33,22 @@
 
 #define DEFINE_WEAPONSLOTTYPE_NAMES
 
-#include "Common\RandomValue.h"
-#include "Common\ThingTemplate.h"
-#include "Common\Player.h"
-#include "Common\Xfer.h"
+#include "Common/RandomValue.h"
+#include "Common/ThingTemplate.h"
+#include "Common/Player.h"
+#include "Common/Xfer.h"
 
-#include "GameClient\Drawable.h"
+#include "GameClient/Drawable.h"
 
-#include "GameLogic\GameLogic.h"
-#include "GameLogic\PartitionManager.h"
-#include "GameLogic\Object.h"
-#include "GameLogic\ObjectIter.h"
-#include "GameLogic\Module\AutoFindHealingUpdate.h"
-#include "GameLogic\Module\PhysicsUpdate.h"
-#include "GameLogic\Weapon.h"
-#include "GameLogic\WeaponSet.h"
-#include "GameLogic\Module\AIUpdate.h"
+#include "GameLogic/GameLogic.h"
+#include "GameLogic/PartitionManager.h"
+#include "GameLogic/Object.h"
+#include "GameLogic/ObjectIter.h"
+#include "GameLogic/Module/AutoFindHealingUpdate.h"
+#include "GameLogic/Module/PhysicsUpdate.h"
+#include "GameLogic/Weapon.h"
+#include "GameLogic/WeaponSet.h"
+#include "GameLogic/Module/AIUpdate.h"
 
 
 //-------------------------------------------------------------------------------------------------

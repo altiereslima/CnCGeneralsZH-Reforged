@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -48,10 +50,11 @@
 #include <string.h>
 #include <stdlib.h>
 #include "parametertypes.h"
-#include "vector.h"
+#include "Vector.H"
 #include "wwstring.h"
 #include "bittype.h"
 #include "obbox.h"
+#include "Platform/StrdupAsWindows.h"
 
 
 //////////////////////////////////////////////////////////////////////////////////
@@ -220,8 +223,8 @@ ParameterClass::Get_Name (void) const
 inline void
 ParameterClass::Set_Name (const char *new_name)
 {
-	// Copy before freeing the old name: new_name may point into it.
-	char *name = (new_name != NULL) ? ::strdup (new_name) : NULL;
+	// Copy before freeing the old name: new_name may point into it (upstream).
+	char *name = (new_name != NULL) ? strdupAsWindows (new_name) : NULL;
 	::free ((void *)m_Name);
 	m_Name = name;
 

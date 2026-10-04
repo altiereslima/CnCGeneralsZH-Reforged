@@ -1,0 +1,9 @@
+# The 2.4.0 video's tank takes over Scenarios/v240_tank.txt on Fortress Avalanche: the Marauder
+# passing the Troop Crawlers (frames 190 to 390) and the Crusader pulling away, braking and backing
+# up (400 to 700).
+
+6.3   cut     1000 2000 0.2 0 6
+6.4   follow  GLATankMarauder
+13.3  cut     850 2400 0.15 0 8
+13.4  follow  AmericaTankCrusader
+23.6  end

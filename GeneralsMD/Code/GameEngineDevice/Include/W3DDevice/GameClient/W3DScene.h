@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -39,9 +41,9 @@
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
-#include "WW3D2/Scene.h"
-#include "WW3D2/RInfo.h"
-#include "WW3D2/Coltest.h"
+#include "WW3D2/scene.h"
+#include "WW3D2/rinfo.h"
+#include "WW3D2/coltest.h"
 #include "WW3D2/lightenvironment.h"
 ///////////////////////////////////////////////////////////////////////////////
 // PROTOTYPES /////////////////////////////////////////////////////////////////
@@ -49,7 +51,7 @@
 class W3DDynamicLight;
 class LightClass;
 class Drawable;
-enum CustomScenePassModes;
+#include "W3DDevice/GameClient/W3DCustomScene.h"	// CustomScenePassModes, which ISO C++ cannot forward-declare
 class MaterialPassClass;
 class W3DShroudMaterialPassClass;
 class W3DMaskMaterialPassClass;

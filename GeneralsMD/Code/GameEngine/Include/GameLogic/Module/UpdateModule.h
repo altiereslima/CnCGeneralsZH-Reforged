@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -62,7 +64,7 @@ class DamageInfo;
 class ParticleSystemTemplate;
 class CommandButton;
 class Waypoint;
-enum CommandOption;
+enum CommandOption : Int;
 
 //-------------------------------------------------------------------------------------------------
 enum UpdateSleepTime 
@@ -264,6 +266,7 @@ class ProjectileUpdateInterface
 public:
 	virtual void projectileLaunchAtObjectOrPosition(const Object *victim, const Coord3D* victimPos, const Object *launcher, WeaponSlotType wslot, Int specificBarrelToUse, const WeaponTemplate* detWeap, const ParticleSystemTemplate* exhaustSysOverride) = 0;						///< launch the projectile at the given victim
 	virtual void projectileFireAtObjectOrPosition( const Object *victim, const Coord3D *victimPos, const WeaponTemplate *detWeap, const ParticleSystemTemplate* exhaustSysOverride ) = 0;
+	virtual void projectileLeadVictim( const Object *victim ) {}				///< a shot just launched at a point near this victim aims where it will be instead
 	virtual Bool projectileIsArmed() const = 0;													///< return true if the projectile is armed and ready to explode
 	virtual ObjectID projectileGetLauncherID() const = 0;								///< All projectiles need to keep track of their firer
 	virtual Bool projectileHandleCollision(Object *other) = 0;

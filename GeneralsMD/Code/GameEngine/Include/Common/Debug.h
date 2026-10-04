@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -222,19 +224,34 @@ class AsciiString;
 DEBUG_EXTERN_C void ReleaseCrash(const char* reason);
 DEBUG_EXTERN_C void ReleaseCrashLocalized(const AsciiString& p, const AsciiString& m);
 
+/** The game's data has gone away under it: the drive the install is on was disconnected, ejected or put
+	* to sleep while the game had its archives open.  The archive layer calls this when a read of an open
+	* archive fails that way (File::deviceGone).  Not a crash, and nothing is saved: on the main thread it logs,
+	* says so in a box (none under -headless) and ends the process at once with GAME_DATA_GONE_EXIT_STATUS.
+	* On any other thread (the audio's streaming reads) it only records the loss, and GameDataGoneCheck, which
+	* the main loop calls every frame, ends it there.  The first loss is the one reported. */
+DEBUG_EXTERN_C void GameDataGone(const char* what);
+DEBUG_EXTERN_C void GameDataGoneCheck(void);
+enum { GAME_DATA_GONE_EXIT_STATUS = 3 };		///< the process's exit status when the game's data went away
+
 #define RELEASE_CRASH(m)				do { ReleaseCrash(m); } while (0)
 #define RELEASE_CRASHLOCALIZED(p, m)		do { ReleaseCrashLocalized(p, m); } while (0)
 
 
 #ifdef DEBUG_PROFILE
 
+// int64_t, not Int64: wwdebug's files include this header without Lib/BaseType.h, and only they compile
+// DEBUG_PROFILE (the engine's targets define RELEASE_DEBUG_LOGGING, which turns it off).  EA wrote __int64;
+// on MSVC int64_t, __int64 and Int64 are one type.
+#include <stdint.h>
+
 class SimpleProfiler
 {
 private:
-	__int64 m_freq;
-	__int64 m_startThisSession;
-	__int64 m_totalThisSession;
-	__int64 m_totalAllSessions;
+	int64_t m_freq;
+	int64_t m_startThisSession;
+	int64_t m_totalThisSession;
+	int64_t m_totalAllSessions;
 	int			m_numSessions;
 
 public:

@@ -1,0 +1,19 @@
+# The 2.4.0 Shorts' hook from a player's seat: Scenarios/v240_hook.txt on Fortress Avalanche run
+# without -observer, so seat 0 (America) is the local player, with the interface back on. A
+# player's view of the fight, heading 0 and pitch 0, wide enough for the superweapon banners under
+# the clock, the countdowns in the top right and the centred command bar. The shoot script selects
+# the army with Ctrl+Q over -control before the range starts.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Fortress Avalanche\Fortress Avalanche.map" -autoskirmish 3
+#     -takeover -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA -seed 7
+#     -scenario v240_hook -cinema s240_hook_hud -control 8811 -video 760 1110 s240_hook_hud -maxframes 1120
+
+3.0   hud     on
+3.0   cut     1000 2060 0.76 0 0
+# repeated so a pointer resting on the window edge cannot scroll the view away for long
+24.0  cut     1000 2060 0.76 0 0
+27.0  cut     1000 2060 0.76 0 0
+30.0  cut     1000 2060 0.76 0 0
+33.0  cut     1000 2060 0.76 0 0
+36.9  end

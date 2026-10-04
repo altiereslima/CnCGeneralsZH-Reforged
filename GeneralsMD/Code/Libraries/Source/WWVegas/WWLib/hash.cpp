@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /* $Header: /VSS_Sync/wwlib/hash.cpp 3     10/17/00 4:48p Vss_sync $ */
 /*********************************************************************************************** 
@@ -119,7 +121,7 @@ HashableClass * HashTableClass::Find( const char * key )
 	// Find in the hash table.
 	int index = Hash( key );
 	for ( HashableClass * node = HashTable[ index ]; node != NULL; node = node->NextHash ) {
-		if ( ::stricmp( node->Get_Key(), key ) == 0 ) {
+		if ( ::strcasecmp( node->Get_Key(), key ) == 0 ) {
 			return node;
 		}
 	}

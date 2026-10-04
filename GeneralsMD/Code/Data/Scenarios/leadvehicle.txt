@@ -1,0 +1,20 @@
+# Missile Defenders shooting at Technicals driving across in front of them, for issue #46.
+#
+# Against a vehicle the rocket follows its target, flying at where the Technical is until it is close
+# enough to lock on. The Technicals drive 700 units across the open grass of the small generated map,
+# passing 120 to the side of the four Missile Defenders, and the two tallies say how much of the
+# column was left. Nothing is ordered to shoot: the Defenders pick their own targets.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 900
+#     -scenario leadvehicle -logPrefix leadvehicle_
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn      0  AmericaInfantryMissileDefender  4   700 800  18
+30    spawn      1  GLAVehicleTechnical             6   820 450  30
+
+60    move       1  GLAVehicleTechnical*                820 1150
+60    tally      1  GLAVehicleTechnical*
+880   tally      1  GLAVehicleTechnical*

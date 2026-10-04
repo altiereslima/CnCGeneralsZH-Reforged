@@ -53,9 +53,9 @@ def main():
     replace_once(
         test,
         "\tCHECK( scratch->m_showNetBox );\n"
-        "\tdef->set( 0 );\n",
+        "\t// the older plate's own switch",
         "\tCHECK( !scratch->m_showNetBox );\t// PT-BR edition: off until the player ticks it\n"
-        "\tdef->set( 0 );\n",
+        "\t// the older plate's own switch",
     )
 
     print("STAGE13 APPLY PASS")

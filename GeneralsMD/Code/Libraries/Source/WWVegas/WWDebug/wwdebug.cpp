@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -43,7 +45,15 @@
 
 
 #include "wwdebug.h"
+// Off Windows there is no message box, no DBWIN32 listener and no GetLastError: system errors are
+// errno and strerror_r, and a failed assert goes to stderr and aborts. The Windows branches below
+// are unchanged.
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <errno.h>
+#include <unistd.h>
+#endif
 //#include "win.h" can use this if allowed to see wwlib
 #include <stdlib.h>
 #include <stdarg.h>
@@ -51,7 +61,9 @@
 #include <assert.h>
 #include <string.h>
 #include <signal.h>
-#include "except.h"
+// The real spelling on disk; a case-sensitive volume takes only this one.
+#include "Except.h"
+#include "Common/EarlyCommandLine.h"	// -headless, which the assert box must not wait on
 
 
 static PrintFunc			_CurMessageHandler = NULL;
@@ -65,7 +77,11 @@ static ProfileFunc		_CurProfileStopHandler = NULL;
 
 void Convert_System_Error_To_String(int id, char* buffer, int buf_len)
 {
-#ifndef _UNIX
+#ifndef _WIN32
+	if (buffer != NULL && buf_len > 0) {
+		strerror_r(id, buffer, buf_len);
+	}
+#elif !defined(_UNIX)
 	FormatMessage(
 		FORMAT_MESSAGE_FROM_SYSTEM,
 		NULL,
@@ -79,7 +95,11 @@ void Convert_System_Error_To_String(int id, char* buffer, int buf_len)
 
 int Get_Last_System_Error()
 {
+#ifdef _WIN32
 	return GetLastError();
+#else
+	return errno;
+#endif
 }
 
 /***********************************************************************************************
@@ -295,11 +315,28 @@ void WWDebug_Assert_Fail(const char * expr,const char * file, int line)
 
 	} else {
 
+#ifndef _WIN32
+		// No dialog to answer, so no Retry or Ignore: say what failed and take the Abort path.
+		// There is no exception handler here to be trying to exit, which is what the Windows
+		// branch checks first.
+		fprintf(stderr, "WWDebug_Assert_Fail: %s (%d) Assert: %s\n", file, line, expr);
+		fflush(stderr);
+		raise(SIGABRT);
+		_exit(3);
+#else
 		/*
 		// If the exception handler is try to quit the game then don't show an assert.
 		*/
 		if (Is_Trying_To_Exit()) {
 			ExitProcess(0);
+		}
+
+		// In an unattended run (-headless or ZH_UNATTENDED) there is nobody to answer: say it on stderr and
+		// take Ignore, which is what MessageBoxWrapper answers an unattended run's abort/retry/ignore box with.
+		if (isUnattendedProcess()) {
+			fprintf(stderr, "WWDebug_Assert_Fail (ignored, unattended run): %s (%d) Assert: %s\n", file, line, expr);
+			fflush(stderr);
+			return;
 		}
 
       char assertbuf[4096];
@@ -316,6 +353,7 @@ void WWDebug_Assert_Fail(const char * expr,const char * file, int line)
 			__debugbreak();
       	return;
 		}
+#endif
    }
 }
 #endif
@@ -445,9 +483,10 @@ void WWDebug_Profile_Stop( const char * title)
 
 
 
-#ifdef WWDEBUG
+// DBWIN32 is a Windows debug-output channel to an external listener; nothing else has one.
+#if defined(WWDEBUG) && defined(_WIN32)
 /***********************************************************************************************
- * WWDebug_DBWin32_Message_Handler --                                                          *
+ * WWDebug_DBWin32_Message_Handler --                                                        *
  *                                                                                             *
  * INPUT:                                                                                      *
  *                                                                                             *
@@ -518,4 +557,4 @@ void WWDebug_DBWin32_Message_Handler( const char * str )
 
     return;
 }
-#endif // WWDEBUG
+#endif // WWDEBUG && _WIN32

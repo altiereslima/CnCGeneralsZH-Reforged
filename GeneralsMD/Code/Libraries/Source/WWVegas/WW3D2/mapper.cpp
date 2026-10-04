@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*************************************************************************** 
  ***    C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S     *** 
@@ -51,7 +52,7 @@
 
 Random4Class rand4;
 
-inline DWORD F2DW( FLOAT f ) { return *((DWORD*)&f); }
+inline uint32 F2DW( float f ) { return *((uint32*)&f); }
 
 
 // HY 1/26/01
@@ -264,6 +265,18 @@ void GridTextureMapperClass::Calculate_Texture_Matrix(Matrix4x4 &tex_matrix)
 	tex_matrix[1].Z = v_offset;
 }
 
+// A grid animation's frame time in whole milliseconds, for a nonzero rate.  It is divided by, so never
+// 0, and it is an unsigned int, so never past its range: a rate above 1000 frames a second truncated to
+// 0 on every platform, and one below about 2.3e-7 (asset data) left the range, where C's conversion is
+// undefined and MSVC's own answer could be 0 as well.
+static unsigned int Milliseconds_Per_Frame(float fps)
+{
+	const float ms = 1000.0f / (float)fabs(fps);
+	if (!(ms < 4294967295.0f))
+		return 0xFFFFFFFFu;
+	return ms < 1.0f ? 1u : (unsigned int)ms;
+}
+
 void GridTextureMapperClass::Set_Frame_Per_Second(float fps)
 {
 	initialize(fps, GridWidthLog2);
@@ -286,11 +299,11 @@ void GridTextureMapperClass::initialize(float fps, unsigned int gridwidth_log2)
 		CurrentFrame = Offset;
 	} else if (fps < 0.0f) {
 		Sign = -1;
-		MSPerFrame = (unsigned int)(1000.0f / fabs(fps));
+		MSPerFrame = Milliseconds_Per_Frame(fps);
 		CurrentFrame = (LastFrame - 1) - Offset;
 	} else {
 		Sign = 1;
-		MSPerFrame = (unsigned int)(1000.0f / fabs(fps));
+		MSPerFrame = Milliseconds_Per_Frame(fps);
 		CurrentFrame = Offset;
 	}
 	Remainder = 0;

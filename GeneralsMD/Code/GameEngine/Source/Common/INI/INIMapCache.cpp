@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -157,7 +158,7 @@ void INI::parseMapCacheDefinition( INI* ini )
 		if (md.m_numPlayers >= 2)
 		{
 			UnicodeString extension;
-			extension.format(L" (%d)", md.m_numPlayers);
+			extension.format(u" (%d)", md.m_numPlayers);
 			md.m_displayName.concat(extension);
 		}
 	}
@@ -168,7 +169,7 @@ void INI::parseMapCacheDefinition( INI* ini )
 		if (md.m_numPlayers >= 2)
 		{
 			UnicodeString extension;
-			extension.format(L" (%d)", md.m_numPlayers);
+			extension.format(u" (%d)", md.m_numPlayers);
 			md.m_displayName.concat(extension);
 		}
 	}

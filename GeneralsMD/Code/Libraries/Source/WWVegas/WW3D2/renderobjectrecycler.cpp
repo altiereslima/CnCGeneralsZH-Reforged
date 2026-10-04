@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -85,7 +86,7 @@ RenderObjClass * RenderObjectRecyclerClass::Get_Render_Object(const char * name,
 	
 	RenderObjClass * found = NULL;
 	while (!it.Is_Done()) {
-		if (stricmp(it.Peek_Obj()->Get_Name(),name) == 0) {
+		if (strcasecmp(it.Peek_Obj()->Get_Name(),name) == 0) {
 			found = it.Peek_Obj();
 			break;
 		}

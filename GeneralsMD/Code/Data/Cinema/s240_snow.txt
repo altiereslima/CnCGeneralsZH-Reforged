@@ -1,0 +1,7 @@
+# Scenarios/s240_snow.txt on Fortress Avalanche, wide: the fight on the snow plateau seen across
+# the line between the two armies, a slow turn.
+
+5.0   cut     2110 2070 0.62 -45 10
+5.1   orbit   10 13
+12.0  shot
+18.5  end

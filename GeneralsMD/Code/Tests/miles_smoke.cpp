@@ -14,7 +14,29 @@
  * the same way bink_smoke does without game data.
  */
 
+#if defined(_WIN32)
 #include <windows.h>
+#else
+/* The same test against Miles6/miniaudio (C4).  These are the five Windows calls it makes, local to
+   this file and only off Windows, so the Windows build compiles exactly what it always did. */
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+typedef long LONG;
+#define MAX_PATH 1024
+static LONG InterlockedExchange(volatile LONG *target, LONG value) { return __atomic_exchange_n(target, value, __ATOMIC_SEQ_CST); }
+static LONG InterlockedCompareExchange(volatile LONG *target, LONG exchange, LONG comparand)
+{
+	__atomic_compare_exchange_n(target, &comparand, exchange, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+	return comparand;
+}
+static void Sleep(unsigned milliseconds) { usleep(milliseconds * 1000); }
+static unsigned GetTempPathA(unsigned size, char *buffer)
+{
+	const char *temp = getenv("TMPDIR");
+	return (unsigned)snprintf(buffer, size, "%s/", temp != NULL ? temp : "/tmp");
+}
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -133,6 +155,13 @@ int main(void)
 		printf("FAIL out of memory building the test tone\n");
 		return 1;
 	}
+
+	/* The distance curve every 3D sample plays at, which needs no device: full inside the minimum,
+	   minimum / distance past it, a straight line with RangeVolumeFade, silent from the maximum. */
+	CHECK(AIL_ex_3D_distance_gain(5.0f, 10.0f, 110.0f, 0) == 1.0f, "inside the minimum is not full volume");
+	CHECK(fabs(AIL_ex_3D_distance_gain(60.0f, 10.0f, 110.0f, 0) - 10.0f / 60.0f) < 1e-6, "past the minimum is not minimum / distance");
+	CHECK(fabs(AIL_ex_3D_distance_gain(60.0f, 10.0f, 110.0f, 1) - 0.5f) < 1e-6, "the linear falloff is not halfway at halfway");
+	CHECK(AIL_ex_3D_distance_gain(110.0f, 10.0f, 110.0f, 0) == 0.0f, "the maximum is not silent");
 
 	AIL_startup();
 	if (!AIL_quick_startup(1, 0, 44100, 16, 2)) {

@@ -1,5 +1,5 @@
 /*
- * Bink 1.x surface, implemented on FFmpeg and XAudio2.
+ * Bink 1.x surface, implemented on FFmpeg and XAudio2 (and off Windows on FFmpeg and C4's mix, V1).
  *
  * BINKW32.DLL is a 32-bit binary, so the x64 build cannot bind to the movie player the game ships
  * with.  FFmpeg decodes both of Bink's codecs natively (binkvideo, binkaudio), so the .bik files
@@ -9,8 +9,18 @@
  * reads of Width/Height/Frames/FrameNum keep working.
  */
 
+#if defined(_WIN32)
 #include <windows.h>
+#include "Lib/Clock.h"
 #include <xaudio2.h>
+#else
+// Off Windows the movie's sound is a voice in C4's mix (mss_ex_pcm.h), not an audio engine of its own,
+// and its path is the engine's spelling ("Data\\Movies\\x.bik"), resolved as every file open is.
+#include "Lib/Clock.h"
+#include "MSS/mss_ex_pcm.h"
+#include "posixpath.h"
+#include <string>
+#endif
 #include <deque>
 #include <stdlib.h>
 #include <string.h>
@@ -48,16 +58,21 @@ struct Movie
 	int scaledWidth;
 	int scaledHeight;
 
+#if defined(_WIN32)
 	IXAudio2 *xaudio;
 	IXAudio2MasteringVoice *master;
 	IXAudio2SourceVoice *voice;
 	WAVEFORMATEX audioFormat;
 	std::deque<std::vector<unsigned char> > audioQueued;
+#else
+	HEXPCM pcm;
+	int audioChannels;
+#endif
 	bool audioEnabled;
 	float volume;
 
-	LARGE_INTEGER startTicks;
-	LARGE_INTEGER ticksPerSecond;
+	long long startTicks;			// Clock_Ticks() when the movie started playing
+	long long ticksPerSecond;		// Clock_Ticks_Per_Second() as it was then
 	bool started;
 	bool frameDecoded;
 	bool endOfFile;
@@ -67,16 +82,16 @@ bool soundEnabled = true;
 
 void startClock(Movie *movie)
 {
-	QueryPerformanceFrequency(&movie->ticksPerSecond);
-	QueryPerformanceCounter(&movie->startTicks);
+	movie->ticksPerSecond = Clock_Ticks_Per_Second();
+	movie->startTicks = Clock_Ticks();
 	movie->started = true;
 }
 
 double elapsedSeconds(Movie *movie)
 {
-	LARGE_INTEGER now;
-	QueryPerformanceCounter(&now);
-	return (double)(now.QuadPart - movie->startTicks.QuadPart) / (double)movie->ticksPerSecond.QuadPart;
+	if (movie->ticksPerSecond == 0) return 0.0;
+	const long long now = Clock_Ticks();
+	return (double)(now - movie->startTicks) / (double)movie->ticksPerSecond;
 }
 
 double frameDueSeconds(Movie *movie, unsigned int frameNumber)
@@ -93,6 +108,7 @@ void openAudio(Movie *movie)
 	if (!soundEnabled || movie->audioStream < 0 || movie->audioDecoder == NULL) {
 		return;
 	}
+#if defined(_WIN32)
 	if (FAILED(XAudio2Create(&movie->xaudio, 0, XAUDIO2_DEFAULT_PROCESSOR))) {
 		return;
 	}
@@ -101,6 +117,7 @@ void openAudio(Movie *movie)
 		movie->xaudio = NULL;
 		return;
 	}
+#endif
 
 	const int channels = movie->audioDecoder->ch_layout.nb_channels >= 2 ? 2 : 1;
 	AVChannelLayout outLayout;
@@ -113,6 +130,14 @@ void openAudio(Movie *movie)
 		return;
 	}
 
+#if !defined(_WIN32)
+	movie->audioChannels = channels;
+	movie->pcm = AIL_ex_open_pcm(movie->audioDecoder->sample_rate, channels);
+	if (movie->pcm != NULL) {
+		AIL_ex_set_pcm_volume(movie->pcm, movie->volume);
+		movie->audioEnabled = true;
+	}
+#else
 	memset(&movie->audioFormat, 0, sizeof(movie->audioFormat));
 	movie->audioFormat.wFormatTag = WAVE_FORMAT_PCM;
 	movie->audioFormat.nChannels = (WORD)channels;
@@ -126,8 +151,31 @@ void openAudio(Movie *movie)
 		movie->voice->Start(0);
 		movie->audioEnabled = true;
 	}
+#endif
 }
 
+#if !defined(_WIN32)
+// The same conversion as below, handed to the movie's voice in C4's mix.
+void queueAudioFrame(Movie *movie, AVFrame *frame)
+{
+	if (!movie->audioEnabled || movie->pcm == NULL) {
+		return;
+	}
+	const int blockAlign = movie->audioChannels * 2;
+	const int maxOutSamples = (int)swr_get_out_samples(movie->resampler, frame->nb_samples);
+	std::vector<unsigned char> chunk((size_t)maxOutSamples * blockAlign);
+	if (chunk.empty()) {
+		return;
+	}
+	uint8_t *destination = &chunk[0];
+	const int converted = swr_convert(movie->resampler, &destination, maxOutSamples,
+		(const uint8_t **)frame->extended_data, frame->nb_samples);
+	if (converted <= 0) {
+		return;
+	}
+	AIL_ex_queue_pcm(movie->pcm, (const S16 *)&chunk[0], converted);
+}
+#else
 void queueAudioFrame(Movie *movie, AVFrame *frame)
 {
 	if (!movie->audioEnabled || movie->voice == NULL) {
@@ -162,6 +210,7 @@ void queueAudioFrame(Movie *movie, AVFrame *frame)
 	buffer.pAudioData = &stored[0];
 	movie->voice->SubmitSourceBuffer(&buffer);
 }
+#endif
 
 // Reads packets until the next video frame is decoded, queueing any audio met along the way.
 bool decodeNextVideoFrame(Movie *movie)
@@ -253,16 +302,29 @@ HBINK __stdcall BinkOpen(const char *name, unsigned int)
 	movie->scaledFormat = -1;
 	movie->scaledWidth = 0;
 	movie->scaledHeight = 0;
+#if defined(_WIN32)
 	movie->xaudio = NULL;
 	movie->master = NULL;
 	movie->voice = NULL;
+#else
+	movie->pcm = NULL;
+	movie->audioChannels = 0;
+#endif
 	movie->audioEnabled = false;
 	movie->volume = 1.0f;
 	movie->started = false;
 	movie->frameDecoded = false;
 	movie->endOfFile = false;
 
+#if defined(_WIN32)
 	if (movie->frame == NULL || avformat_open_input(&movie->format, name, NULL, NULL) < 0) {
+#else
+	std::string path;
+	if (!PosixPath_Resolve(name, POSIX_PATH_EXISTING, path)) {
+		path = name;	// FFmpeg reports the failure, as for a missing file on Windows
+	}
+	if (movie->frame == NULL || avformat_open_input(&movie->format, path.c_str(), NULL, NULL) < 0) {
+#endif
 		BinkClose((HBINK)movie);
 		return NULL;
 	}
@@ -336,6 +398,7 @@ void __stdcall BinkClose(HBINK handle)
 		return;
 	}
 
+#if defined(_WIN32)
 	if (movie->voice != NULL) {
 		movie->voice->Stop(0);
 		movie->voice->DestroyVoice();
@@ -346,6 +409,9 @@ void __stdcall BinkClose(HBINK handle)
 	if (movie->xaudio != NULL) {
 		movie->xaudio->Release();
 	}
+#else
+	AIL_ex_close_pcm(movie->pcm);
+#endif
 	if (movie->resampler != NULL) {
 		swr_free(&movie->resampler);
 	}
@@ -429,16 +495,20 @@ int __stdcall BinkGoto(HBINK handle, unsigned int frame, int)
 	if (movie->audioDecoder != NULL) {
 		avcodec_flush_buffers(movie->audioDecoder);
 	}
+#if defined(_WIN32)
 	if (movie->voice != NULL) {
 		movie->voice->FlushSourceBuffers();
 		movie->audioQueued.clear();
 	}
+#else
+	AIL_ex_flush_pcm(movie->pcm);
+#endif
 
 	movie->pub.FrameNum = frame;
 	movie->frameDecoded = false;
 	movie->endOfFile = false;
-	QueryPerformanceCounter(&movie->startTicks);
-	movie->startTicks.QuadPart -= (LONGLONG)(seconds * (double)movie->ticksPerSecond.QuadPart);
+	movie->startTicks = Clock_Ticks();
+	movie->startTicks -= (long long)(seconds * (double)movie->ticksPerSecond);
 	return 1;
 }
 
@@ -491,9 +561,13 @@ int __stdcall BinkSetVolume(HBINK handle, unsigned int, int volume)
 	if (level < 0.0f) level = 0.0f;
 	if (level > 1.0f) level = 1.0f;
 	movie->volume = level;
+#if defined(_WIN32)
 	if (movie->voice != NULL) {
 		movie->voice->SetVolume(level);
 	}
+#else
+	AIL_ex_set_pcm_volume(movie->pcm, level);
+#endif
 	return 1;
 }
 

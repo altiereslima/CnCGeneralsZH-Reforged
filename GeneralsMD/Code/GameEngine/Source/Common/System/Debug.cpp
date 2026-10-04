@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -44,6 +46,10 @@
 
 // SYSTEM INCLUDES 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
+#include "Lib/Clock.h"
+
+#include "Lib/WideCharFns.h"
 
 
 // USER INCLUDES 
@@ -51,9 +57,16 @@
 #ifdef DEBUG_THREADSAFE
 #include "Common/CriticalSection.h"
 #endif
+#include "Common/CrashHandler.h"
 #include "Common/Debug.h"
 #include "Common/EarlyCommandLine.h"
+#include "Common/MessageBoxFlags.h"
+#include "Common/ExecutableDirectory.h"
+#include "Platform/BreakIntoDebugger.h"
 #include "stringex.h"
+#if defined(_WIN32) && defined(_DEBUG)
+#include <crtdbg.h>		// the Debug CRT's report hook (W3)
+#endif
 #include "Common/SystemInfo.h"
 #include "Common/UnicodeString.h"
 #include "GameClient/GameText.h"
@@ -65,7 +78,11 @@
 
 // Horrible reference, but we really, really need to know if we are windowed.
 extern bool DX8Wrapper_IsWindowed;
+#if defined(_WIN32)
 extern HWND ApplicationHWnd;
+#endif
+#include <thread>		// the main thread's id off Windows (Windows uses GetCurrentThreadId); GameDataGone's yield
+#include <atomic>		// GameDataGone's state, set from whichever thread's read failed
 
 extern char *gAppPrefix; /// So WB can have a different log file name.
 
@@ -106,7 +123,11 @@ static FILE *theLogFile = NULL;
 #define LARGE_BUFFER	8192
 static char theBuffer[ LARGE_BUFFER ];	// make it big to avoid weird overflow bugs in debug mode
 static int theDebugFlags = 0;
+#if defined(_WIN32)
 static DWORD theMainThreadID = 0;
+#else
+static std::thread::id theMainThreadID;
+#endif
 // ----------------------------------------------------------------------------
 // PUBLIC DATA 
 // ----------------------------------------------------------------------------
@@ -133,19 +154,45 @@ static void doStackDump();
 // ----------------------------------------------------------------------------
 
 // ----------------------------------------------------------------------------
+#if defined(_DEBUG) || defined(_INTERNAL)
+/* W3: a run nobody watches never waits on an assertion box - a -headless game, or any process started with
+	 ZH_UNATTENDED set (windows-ci.ps1 sets it for ctest).  It logs the assertion and goes on, as EA's full-screen
+	 game did, and says so on stderr too. */
+static Bool unattendedRun()
+{
+	static const Bool fromStart = getenv("ZH_UNATTENDED") != NULL || findEarlyCommandLineOption(L"-headless") != NULL;
+	return fromStart || (TheGlobalData && TheGlobalData->m_headless);
+}
+#endif
+
 inline Bool ignoringAsserts()
 {
 #if defined(_DEBUG) || defined(_INTERNAL)
-	return !DX8Wrapper_IsWindowed || (TheGlobalData&&TheGlobalData->m_debugIgnoreAsserts);
+	return !DX8Wrapper_IsWindowed || (TheGlobalData&&TheGlobalData->m_debugIgnoreAsserts) || unattendedRun();
 #else
 	return !DX8Wrapper_IsWindowed;
 #endif
 }
 
 // ----------------------------------------------------------------------------
+#if defined(_WIN32)
 inline HWND getThreadHWND()
 {
 	return (theMainThreadID == GetCurrentThreadId())?ApplicationHWnd:NULL;
+}
+#endif
+
+/* Before a message box in full screen the game's window is hidden, so that the box can be seen.  The
+	 window is Windows' ApplicationHWnd; off Windows there is none until C2 creates one. */
+static void hideFullScreenWindowForMessage( void )
+{
+#if defined(_WIN32)
+	if (!DX8Wrapper_IsWindowed) {
+		if (ApplicationHWnd) {
+			ShowWindow(ApplicationHWnd, SW_HIDE);
+		}
+	}
+#endif
 }
 
 // ----------------------------------------------------------------------------
@@ -165,17 +212,36 @@ static Bool isUnattendedRun( void )
 {
 	static Int cached = -1;
 	if (cached < 0)
-		cached = findEarlyCommandLineOption( L"-headless" ) ? 1 : 0;
+		cached = isUnattendedProcess() ? 1 : 0;	// -headless or ZH_UNATTENDED (EarlyCommandLine.h)
 	return cached != 0;
 }
 
-int MessageBoxWrapper( LPCSTR lpText, LPCSTR lpCaption, UINT uType )
+int MessageBoxWrapper( const char *lpText, const char *lpCaption, unsigned int uType )
 {
+#if defined(_WIN32)
 	HWND threadHWND = getThreadHWND();
 	if (!threadHWND || isUnattendedRun())
-		return (uType & MB_ABORTRETRYIGNORE)?IDIGNORE:IDYES;
+		return (uType & MSGBOX_ABORTRETRYIGNORE)?MSGBOX_ID_IGNORE:MSGBOX_ID_YES;
 
 	return ::MessageBox(threadHWND, lpText, lpCaption, uType);
+#else
+	/* The platform layer's box when it has a window and is on its thread (TheMessageBoxHook, C2's SDL
+		 one); never in an unattended run, as above. */
+	if (TheMessageBoxHook != NULL && !isUnattendedRun())
+	{
+		const int answer = TheMessageBoxHook(lpText, lpCaption, uType);
+		if (answer >= 0)
+			return answer;
+	}
+	/* Otherwise Windows' own no-window path above: the same answer, and the text where someone can
+		 read it - stderr, and the log if it is open (written directly: DebugLog can be the caller). */
+	fprintf(stderr, "%s%s%s\n", lpCaption, (lpCaption && lpCaption[0]) ? ": " : "", lpText);
+#ifdef DEBUG_LOGGING
+	if (theLogFile)
+		fprintf(theLogFile, "[message box] %s%s%s\n", lpCaption, (lpCaption && lpCaption[0]) ? ": " : "", lpText);
+#endif
+	return (uType & MSGBOX_ABORTRETRYIGNORE)?MSGBOX_ID_IGNORE:MSGBOX_ID_YES;
+#endif
 }
 
 // ----------------------------------------------------------------------------
@@ -201,7 +267,7 @@ static const char *getCurrentTimeString(void)
 static const char *getCurrentTickString(void)
 {
 	static char TheTickString[32];
-	snprintf(TheTickString, ARRAY_SIZE(TheTickString), "(T=%08lx)",::GetTickCount());
+	snprintf(TheTickString, ARRAY_SIZE(TheTickString), "(T=%08x)",Clock_Milliseconds_Coarse());
 	return TheTickString;
 }
 
@@ -238,12 +304,12 @@ static const char *prepBuffer(const char* format, char *buffer, size_t bufferSiz
 	 nothing in the pathfinder, always beside a log line, and did not repeat on a rerun of the same
 	 seed. The file is flushed at most once a second now, and in full on every crash path before the
 	 process exits, so the last lines before a crash still reach it. */
-static const DWORD LOG_FLUSH_INTERVAL_MS = 1000;
-static DWORD theLastLogFlushMS = 0;
+static const UnsignedInt LOG_FLUSH_INTERVAL_MS = 1000;
+static UnsignedInt theLastLogFlushMS = 0;
 
 static void flushLogFileAtMostOnceASecond(void)
 {
-	const DWORD nowMS = ::GetTickCount();
+	const UnsignedInt nowMS = Clock_Milliseconds_Coarse();
 	if (nowMS - theLastLogFlushMS < LOG_FLUSH_INTERVAL_MS)
 		return;
 	theLastLogFlushMS = nowMS;
@@ -265,7 +331,12 @@ static void doLogOutput(const char *buffer)
 	// log message to dev studio output window
 	if (theDebugFlags & DEBUG_FLAG_LOG_TO_CONSOLE)
 	{
+#if defined(_WIN32)
 		::OutputDebugString(buffer);
+#else
+		// The debugger's output channel on Windows; stderr is the one a debugger shows elsewhere.
+		fputs(buffer, stderr);
+#endif
 	}
 }
 #endif
@@ -282,15 +353,15 @@ static int doCrashBox(const char *buffer, Bool logResult)
 	int result;
 
 	if (!ignoringAsserts()) {
-		result = MessageBoxWrapper(buffer, "Assertion Failure", MB_ABORTRETRYIGNORE|MB_TASKMODAL|MB_ICONWARNING|MB_DEFBUTTON3);
+		result = MessageBoxWrapper(buffer, "Assertion Failure", MSGBOX_ABORTRETRYIGNORE|MSGBOX_TASKMODAL|MSGBOX_ICONWARNING|MSGBOX_DEFBUTTON3);
 		//result = MessageBoxWrapper(buffer, "Assertion Failure", MB_ABORTRETRYIGNORE|MB_TASKMODAL|MB_ICONWARNING);
 	}	else {
-		result = IDIGNORE;
+		result = MSGBOX_ID_IGNORE;
 	}
 
 	switch(result)
 	{
-		case IDABORT:
+		case MSGBOX_ID_ABORT:
 #ifdef DEBUG_LOGGING
 			if (logResult)
 				DebugLog("[Abort]\n");
@@ -299,14 +370,14 @@ static int doCrashBox(const char *buffer, Bool logResult)
 #endif
 			_exit(1);
 			break;
-		case IDRETRY:
+		case MSGBOX_ID_RETRY:
 #ifdef DEBUG_LOGGING
 			if (logResult)
 				DebugLog("[Retry]\n");
 #endif
-			::DebugBreak();
+			breakIntoDebugger();
 			break;
-		case IDIGNORE:
+		case MSGBOX_ID_IGNORE:
 #ifdef DEBUG_LOGGING
 			// do nothing, just keep going
 			if (logResult)
@@ -364,6 +435,29 @@ static void whackFunnyCharacters(char *buf)
 	start of the app as possible, before anything else (since other code will
 	probably want to make use of it).
 */
+#if defined(_WIN32) && defined(_DEBUG)
+/* W3: the Debug CRT's own checks - a checked iterator's "vector subscript out of range", a heap check - put
+	 up their box too, which in a run nobody watches waits for ever.  There they are logged with the stack and
+	 the run goes on; anywhere else the CRT asks as it always did. */
+static int __cdecl unattendedCrtReport( int, char *message, int *returnValue )
+{
+	if (!unattendedRun())
+		return FALSE;
+	fprintf(stderr, "DEBUG CRT REPORT (auto-ignored): %s\n", message ? message : "");
+#ifdef DEBUG_LOGGING
+	DebugLog("DEBUG CRT REPORT (auto-ignored): %s\n", message ? message : "");
+#ifdef DEBUG_STACKTRACE
+	doStackDump();
+#endif
+	if (theLogFile != NULL)
+		fflush(theLogFile);
+#endif
+	if (returnValue != NULL)
+		*returnValue = 0;		// no debugger
+	return TRUE;					// handled: no box
+}
+#endif
+
 void DebugInit(int flags)
 {
 //	if (theDebugFlags != 0)
@@ -374,22 +468,20 @@ void DebugInit(int flags)
 	{
 		theDebugFlags = flags;
 
+#if defined(_WIN32)
 		theMainThreadID = GetCurrentThreadId();
+#else
+		theMainThreadID = std::this_thread::get_id();
+#endif
 
 	#ifdef DEBUG_LOGGING
 
 		char dirbuf[ _MAX_PATH ];
-		::GetModuleFileName( NULL, dirbuf, sizeof( dirbuf ) );
-		char *pEnd = dirbuf + strlen( dirbuf );
-		while( pEnd != dirbuf ) 
-		{
-			if( *pEnd == '\\' ) 
-			{
-				*(pEnd + 1) = 0;
-				break;
-			}
-			pEnd--;
-		}
+#if defined(_WIN32)
+		getExecutableDirectory( dirbuf, sizeof( dirbuf ), TRUE );
+#else
+		getLogDirectory( dirbuf, sizeof( dirbuf ), TRUE );	// outside an app bundle (P1)
+#endif
 
 		char prevbuf[ _MAX_PATH ];
 		char curbuf[ _MAX_PATH ];
@@ -412,20 +504,24 @@ void DebugInit(int flags)
 		strlcat(curbuf, logPrefix, ARRAY_SIZE(curbuf));
 		strlcat(curbuf, DEBUG_FILE_NAME, ARRAY_SIZE(curbuf));
 
- 		remove(prevbuf);
+ 		zh_remove(prevbuf);
 		// A failed rotate is not fatal - the log still opens - but it means the ".prev" file holds
 		// some older run than the one before this, and a bug report read on that assumption is read
 		// wrong. It fails when the previous log is still open somewhere, which is what a second copy
 		// of the game without -logPrefix does.
 		// A first run under a new -logPrefix has nothing to rotate, and rename fails for that too -
 		// so ask whether the file was there before deciding anything went wrong.
-		FILE *existing = fopen(curbuf, "r");
+		FILE *existing = zh_fopen(curbuf, "r");
 		const bool hadPreviousLog = (existing != NULL);
 		if (existing != NULL)
 			fclose(existing);
 
-		const int rotated = rename(curbuf, prevbuf);
-		theLogFile = fopen(curbuf, "w");
+		const int rotated = zh_rename(curbuf, prevbuf);
+		theLogFile = zh_fopen(curbuf, "w");
+#if !defined(_WIN32)
+		// The crash handler writes its report into the log too, and may only use the descriptor.
+		setCrashLogDescriptor(theLogFile != NULL ? fileno(theLogFile) : -1);
+#endif
 		if (theLogFile != NULL)
 		{
 			DebugLog("Log %s opened: %s\n", curbuf, getCurrentTimeString());
@@ -433,6 +529,9 @@ void DebugInit(int flags)
 				DebugLog("Could not rotate the previous log to %s: it holds an older run than this one.\n", prevbuf);
 		}
 	#endif
+#if defined(_WIN32) && defined(_DEBUG)
+		_CrtSetReportHook2(_CRT_RPTHOOK_INSTALL, unattendedCrtReport);
+#endif
 	}
 
 }  
@@ -452,7 +551,7 @@ void DebugLog(const char *format, ...)
 #endif
 
 	if (theDebugFlags == 0)
-		MessageBoxWrapper("DebugLog - Debug not inited properly", "", MB_OK|MB_TASKMODAL);
+		MessageBoxWrapper("DebugLog - Debug not inited properly", "", MSGBOX_OK|MSGBOX_TASKMODAL);
 
 	format = prepBuffer(format, theBuffer, ARRAY_SIZE(theBuffer));
 
@@ -462,7 +561,7 @@ void DebugLog(const char *format, ...)
   va_end(arg);
 
 	if (strlen(theBuffer) >= sizeof(theBuffer))
-		MessageBoxWrapper("String too long for debug buffer", "", MB_OK|MB_TASKMODAL);
+		MessageBoxWrapper("String too long for debug buffer", "", MSGBOX_OK|MSGBOX_TASKMODAL);
 
 	whackFunnyCharacters(theBuffer);
 	doLogOutput(theBuffer);
@@ -488,12 +587,8 @@ void DebugCrash(const char *format, ...)
 	char theCrashBuffer[ LARGE_BUFFER ];	
 	if (theDebugFlags == 0)
 	{
-		if (!DX8Wrapper_IsWindowed) {
-			if (ApplicationHWnd) {
-				ShowWindow(ApplicationHWnd, SW_HIDE);
-			}
-		}
-		MessageBoxWrapper("DebugCrash - Debug not inited properly", "", MB_OK|MB_TASKMODAL);
+		hideFullScreenWindowForMessage();
+		MessageBoxWrapper("DebugCrash - Debug not inited properly", "", MSGBOX_OK|MSGBOX_TASKMODAL);
 	}
 
 	format = prepBuffer(format, theCrashBuffer, ARRAY_SIZE(theCrashBuffer));
@@ -504,18 +599,14 @@ void DebugCrash(const char *format, ...)
 	const size_t used = strlen(theCrashBuffer);
 	va_list arg;
   va_start(arg, format);
-  const int wanted = _vsnprintf(theCrashBuffer + used, ARRAY_SIZE(theCrashBuffer) - used, format, arg);
+  const int wanted = vsnprintf(theCrashBuffer + used, ARRAY_SIZE(theCrashBuffer) - used, format, arg);
   va_end(arg);
 	theCrashBuffer[ ARRAY_SIZE(theCrashBuffer) - 1 ] = 0;
 
 	if (wanted < 0 || (size_t)wanted >= ARRAY_SIZE(theCrashBuffer) - used)
 	{
-		if (!DX8Wrapper_IsWindowed) {
-			if (ApplicationHWnd) {
-				ShowWindow(ApplicationHWnd, SW_HIDE);
-			}
-		}
-		MessageBoxWrapper("String too long for debug buffers", "", MB_OK|MB_TASKMODAL);
+		hideFullScreenWindowForMessage();
+		MessageBoxWrapper("String too long for debug buffers", "", MSGBOX_OK|MSGBOX_TASKMODAL);
 	}
 
 #ifdef DEBUG_LOGGING
@@ -525,6 +616,10 @@ void DebugCrash(const char *format, ...)
 	}
 	whackFunnyCharacters(theCrashBuffer);
 	doLogOutput(theCrashBuffer);
+#endif
+#if defined(_DEBUG) || defined(_INTERNAL)
+	if (unattendedRun())
+		fprintf(stderr, "DEBUG CRASH (auto-ignored): %s\n", theCrashBuffer);
 #endif
 #ifdef DEBUG_STACKTRACE
 	if (!(TheGlobalData && TheGlobalData->m_debugIgnoreStackTrace))
@@ -537,18 +632,18 @@ void DebugCrash(const char *format, ...)
 
 	int result = doCrashBox(theCrashBuffer, true);
 
-	if (result == IDIGNORE && TheCurrentIgnoreCrashPtr != NULL) 
+	if (result == MSGBOX_ID_IGNORE && TheCurrentIgnoreCrashPtr != NULL) 
 	{
 		int yn;
 		if (!ignoringAsserts()) 
 		{
-			yn = MessageBoxWrapper("Ignore this crash from now on?", "", MB_YESNO|MB_TASKMODAL);
+			yn = MessageBoxWrapper("Ignore this crash from now on?", "", MSGBOX_YESNO|MSGBOX_TASKMODAL);
 		}	
 		else 
 		{
-			yn = IDYES;
+			yn = MSGBOX_ID_YES;
 		}
-		if (yn == IDYES)
+		if (yn == MSGBOX_ID_YES)
 			*TheCurrentIgnoreCrashPtr = 1;
 		if( TheKeyboard )
 			TheKeyboard->resetKeys();
@@ -574,6 +669,9 @@ void DebugShutdown()
 	if (theLogFile)
 	{
 		DebugLog("Log closed: %s\n", getCurrentTimeString());
+#if !defined(_WIN32)
+		setCrashLogDescriptor(-1);
+#endif
 		fclose(theLogFile);
 	}
 	theLogFile = NULL;
@@ -613,7 +711,7 @@ void DebugSetFlags(int flags)
 // ----------------------------------------------------------------------------
 SimpleProfiler::SimpleProfiler()
 {
-	QueryPerformanceFrequency((LARGE_INTEGER*)&m_freq);
+	m_freq = Clock_Ticks_Per_Second();
 	m_startThisSession = 0;
 	m_totalThisSession = 0;
 	m_totalAllSessions = 0;
@@ -624,7 +722,7 @@ SimpleProfiler::SimpleProfiler()
 void SimpleProfiler::start()
 {
 	DEBUG_ASSERTCRASH(m_startThisSession == 0, ("already started"));
-	QueryPerformanceCounter((LARGE_INTEGER*)&m_startThisSession);
+	m_startThisSession = Clock_Ticks();
 }
 
 // ----------------------------------------------------------------------------
@@ -633,7 +731,7 @@ void SimpleProfiler::stop()
 	if (m_startThisSession != 0) 
 	{
 		__int64 stop;
-		QueryPerformanceCounter((LARGE_INTEGER*)&stop);
+		stop = Clock_Ticks();
 		m_totalThisSession = stop - m_startThisSession;
 		m_totalAllSessions += stop - m_startThisSession;
 		m_startThisSession = 0;
@@ -762,14 +860,10 @@ void ReleaseCrash(const char *reason)
 
 	/// do additional reporting on the crash, if possible
 
-	if (!DX8Wrapper_IsWindowed) {
-		if (ApplicationHWnd) {
-			ShowWindow(ApplicationHWnd, SW_HIDE);
-		}
-	}
+	hideFullScreenWindowForMessage();
 //#if defined(_DEBUG) || defined(_INTERNAL)
 //	/* static */ char buff[8192]; // not so static so we can be threadsafe
-//	_snprintf(buff, 8192, "Sorry, a serious error occurred. (%s)", reason);/
+//	snprintf(buff, 8192, "Sorry, a serious error occurred. (%s)", reason);/
 //	buff[8191] = 0;
 //	::MessageBox(NULL, buff, "Technical Difficulties...", MB_OK|MB_SYSTEMMODAL|MB_ICONERROR);
 //#else
@@ -788,14 +882,14 @@ void ReleaseCrash(const char *reason)
 	strlcpy(curbuf, TheGlobalData->getPath_UserData().str(), ARRAY_SIZE(curbuf));
 	strlcat(curbuf, RELEASECRASH_FILE_NAME, ARRAY_SIZE(curbuf));
 
- 	remove(prevbuf);
-	FILE *existingCrashLog = fopen(curbuf, "r");
+ 	zh_remove(prevbuf);
+	FILE *existingCrashLog = zh_fopen(curbuf, "r");
 	const bool hadPreviousCrashLog = (existingCrashLog != NULL);
 	if (existingCrashLog != NULL)
 		fclose(existingCrashLog);
-	const int rotated = rename(curbuf, prevbuf);
+	const int rotated = zh_rename(curbuf, prevbuf);
 
-	theReleaseCrashLogFile = fopen(curbuf, "w");
+	theReleaseCrashLogFile = zh_fopen(curbuf, "w");
 	if (theReleaseCrashLogFile)
 	{
 		fprintf(theReleaseCrashLogFile, "Release Crash at %s; Reason %s\n", getCurrentTimeString(), reason);
@@ -819,20 +913,17 @@ void ReleaseCrash(const char *reason)
 		theReleaseCrashLogFile = NULL;
 	}
 
-	if (!DX8Wrapper_IsWindowed) {
-		if (ApplicationHWnd) {
-			ShowWindow(ApplicationHWnd, SW_HIDE);
-		}
-	}
+	hideFullScreenWindowForMessage();
 	// the log is written by now; a run nobody is watching should die rather than wait for a click
 	if (isUnattendedRun())
 	{
 		_exit(1);
 	}
 
+#if defined(_WIN32)
 #if defined(_DEBUG) || defined(_INTERNAL)
 	/* static */ char buff[8192]; // not so static so we can be threadsafe
-	_snprintf(buff, 8192, "Sorry, a serious error occurred. (%s)", reason);
+	snprintf(buff, 8192, "Sorry, a serious error occurred. (%s)", reason);
 	buff[8191] = 0;
 	::MessageBox(NULL, buff, "Technical Difficulties...", MB_OK|MB_SYSTEMMODAL|MB_ICONERROR);
 #else
@@ -850,9 +941,87 @@ void ReleaseCrash(const char *reason)
 
 
 #endif
+#else
+	// The same box, through MessageBoxWrapper: SDL's when there is a window and this is its thread (C2),
+	// otherwise a line on stderr.  (A crash signal never gets here; C5's handler writes the file itself.)
+	{
+		char text[ 1024 ];
+#if defined(_DEBUG) || defined(_INTERNAL)
+		snprintf(text, sizeof(text), "Sorry, a serious error occurred. (%s)", reason);
+#else
+		snprintf(text, sizeof(text), "You have encountered a serious error.  Serious errors can be caused by many things including viruses, overheated hardware and hardware that does not meet the minimum specifications for the game. Please visit the forums at www.generals.ea.com for suggested courses of action or consult your manual for Technical Support contact information. (%s)", reason);
+#endif
+		MessageBoxWrapper(text, "Technical Difficulties...", MSGBOX_OK | MSGBOX_ICONERROR | MSGBOX_TASKMODAL);
+	}
+#endif
 
 	_exit(1);
 }  
+
+// ----------------------------------------------------------------------------
+// GameDataGone
+// ----------------------------------------------------------------------------
+
+/* 0: the data is there.  1: a thread is writing theGameDataGoneWhat.  2: it is gone, and
+	 theGameDataGoneWhat says what failed. */
+static std::atomic<int> theGameDataGone( 0 );
+static char theGameDataGoneWhat[ 256 ];
+
+static Bool isMainThread( void )
+{
+#if defined(_WIN32)
+	return theMainThreadID == GetCurrentThreadId();
+#else
+	return theMainThreadID == std::this_thread::get_id();
+#endif
+}
+
+/* On the main thread only.  Written for a run that is past saving: the log is flushed by hand and the
+	 process ends with _exit, so no destructor, no quit path and nothing that writes Options.ini or a save
+	 runs on data it can no longer read. */
+static void gameDataGoneExit( void )
+{
+	while (theGameDataGone.load() == 1)
+		std::this_thread::yield();		// another thread is still naming what failed
+
+	char text[ 1024 ];
+	snprintf( text, sizeof( text ), "The game's data is no longer available (%s could not be read). "
+		"If Zero Hour is installed on an external or network drive, it may have been disconnected, ejected or "
+		"put to sleep. Reconnect it and start the game again.", theGameDataGoneWhat );
+
+	DEBUG_LOG(( "GAME DATA GONE: %s\n", text ));
+#ifdef DEBUG_LOGGING
+	if (theLogFile)
+		fflush( theLogFile );		// flushed on a timer otherwise, and _exit below skips the CRT's flush
+#endif
+	fprintf( stderr, "GAME DATA GONE: %s\n", text );
+	fflush( stderr );
+
+	if (!isUnattendedRun())
+	{
+		hideFullScreenWindowForMessage();
+		MessageBoxWrapper( text, "Command & Conquer Generals Zero Hour", MSGBOX_OK | MSGBOX_ICONERROR | MSGBOX_TASKMODAL );
+	}
+	_exit( GAME_DATA_GONE_EXIT_STATUS );
+}
+
+void GameDataGone( const char *what )
+{
+	int none = 0;
+	if (theGameDataGone.compare_exchange_strong( none, 1 ))
+	{
+		strlcpy( theGameDataGoneWhat, (what != NULL && what[0] != '\0') ? what : "an archive", sizeof( theGameDataGoneWhat ) );
+		theGameDataGone.store( 2 );
+	}
+	if (isMainThread())
+		gameDataGoneExit();
+}
+
+void GameDataGoneCheck( void )
+{
+	if (theGameDataGone.load() != 0)
+		gameDataGoneExit();
+}
 
 void ReleaseCrashLocalized(const AsciiString& p, const AsciiString& m)
 {
@@ -874,19 +1043,17 @@ void ReleaseCrashLocalized(const AsciiString& p, const AsciiString& m)
 
 	/// do additional reporting on the crash, if possible
 
-	if (!DX8Wrapper_IsWindowed) {
-		if (ApplicationHWnd) {
-			ShowWindow(ApplicationHWnd, SW_HIDE);
-		}
-	}
+	hideFullScreenWindowForMessage();
 
 	if (isUnattendedRun())
 	{
 		// nobody to read it; the log below is the report - see ReleaseCrash above
 	}
+#if defined(_WIN32)
 	else if (TheSystemIsUnicode)
 	{
-		::MessageBoxW(NULL, mesg.str(), prompt.str(), MB_OK|MB_SYSTEMMODAL|MB_ICONERROR);
+		// Win32's W API: WideChar and WCHAR are the same two bytes on Windows, which makes the cast honest.
+		::MessageBoxW(NULL, reinterpret_cast<LPCWSTR>(mesg.str()), reinterpret_cast<LPCWSTR>(prompt.str()), MB_OK|MB_SYSTEMMODAL|MB_ICONERROR);
 	}
 	else
 	{
@@ -899,6 +1066,13 @@ void ReleaseCrashLocalized(const AsciiString& p, const AsciiString& m)
 		::SetWindowPos(ApplicationHWnd, HWND_NOTOPMOST, 0, 0, 0, 0,SWP_NOSIZE |SWP_NOMOVE);
 		::MessageBoxA(NULL, mesgA.str(), promptA.str(), MB_OK|MB_TASKMODAL|MB_ICONERROR);
 	}
+#else
+	else
+	{
+		// No window to own a box until C2: the localised text, as UTF-8, where someone can read it.
+		fprintf(stderr, "%s: %s\n", WideCharAsUtf8(prompt.str()).str(), WideCharAsUtf8(mesg.str()).str());
+	}
+#endif
 
 	char prevbuf[ _MAX_PATH ];
 	char curbuf[ _MAX_PATH ];
@@ -908,17 +1082,17 @@ void ReleaseCrashLocalized(const AsciiString& p, const AsciiString& m)
 	strlcpy(curbuf, TheGlobalData->getPath_UserData().str(), ARRAY_SIZE(curbuf));
 	strlcat(curbuf, RELEASECRASH_FILE_NAME, ARRAY_SIZE(curbuf));
 
- 	remove(prevbuf);
-	FILE *existingCrashLog = fopen(curbuf, "r");
+ 	zh_remove(prevbuf);
+	FILE *existingCrashLog = zh_fopen(curbuf, "r");
 	const bool hadPreviousCrashLog = (existingCrashLog != NULL);
 	if (existingCrashLog != NULL)
 		fclose(existingCrashLog);
-	const int rotated = rename(curbuf, prevbuf);
+	const int rotated = zh_rename(curbuf, prevbuf);
 
-	theReleaseCrashLogFile = fopen(curbuf, "w");
+	theReleaseCrashLogFile = zh_fopen(curbuf, "w");
 	if (theReleaseCrashLogFile)
 	{
-		fprintf(theReleaseCrashLogFile, "Release Crash at %s; Reason %ls\n", getCurrentTimeString(), mesg.str());
+		fprintf(theReleaseCrashLogFile, "Release Crash at %s; Reason %s\n", getCurrentTimeString(), WideCharAsUtf8( mesg.str() ).str());
 		if (hadPreviousCrashLog && rotated != 0)
 			fprintf(theReleaseCrashLogFile, "(the previous crash report could not be rotated aside; %s is older than it looks)\n", prevbuf);
 	}

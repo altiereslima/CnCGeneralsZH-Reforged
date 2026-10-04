@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -37,9 +39,9 @@
 #include "GameLogic/Module/UpdateModule.h"
 #include "GameLogic/Module/CollideModule.h"
 
-enum ObjectID;
+enum ObjectID : Int;
 
-enum PhysicsTurningType
+enum PhysicsTurningType : Int
 {
 	TURN_NEGATIVE = -1,
 	TURN_NONE = 0,
@@ -190,6 +192,8 @@ public:
 	void setAllowBouncing(Bool allow) { setFlag(ALLOW_BOUNCE, allow); }
 	void setAllowCollideForce(Bool allow) { setFlag(ALLOW_COLLIDE_FORCE, allow); }
 	void setAllowAirborneFriction(Bool allow) { setFlag(APPLY_FRICTION2D_WHEN_AIRBORNE, allow); }
+	/// the locomotor steers the whole 2D velocity (a helicopter), so no sideways friction while it drives
+	void setMotiveSteersSideways(Bool steers) { setFlag(MOTIVE_STEERS_SIDEWAYS, steers); }
 	void setImmuneToFallingDamage(Bool allow) { setFlag(IMMUNE_TO_FALLING_DAMAGE, allow); }
 	void setStunned(Bool allow) { setFlag(IS_STUNNED, allow); }
 
@@ -266,6 +270,7 @@ private:
 		IS_IN_FREEFALL									= 0x0200,
 		IS_IN_UPDATE										= 0x0400,
 		IS_STUNNED											= 0x0800,
+		MOTIVE_STEERS_SIDEWAYS					= 0x1000,
 	};
 
 	/*

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -27,12 +28,13 @@
 // Author: Michael S. Booth, October 2000
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
 
 #include "stdlib.h"
 #include "string.h"
 #include "Compression.h"
 #include "Common/DataChunk.h"
-#include "Common/File.h"
+#include "Common/file.h"
 #include "Common/FileSystem.h"
 
 // If verbose, lots of debug logging.
@@ -240,7 +242,7 @@ m_pOut(pOut)
 {
 	AsciiString tmpFileName = TheGlobalData->getPath_UserData();
 	tmpFileName.concat(TEMP_FILENAME);
-	m_tmp_file = ::fopen( tmpFileName.str(), "wb" );	
+	m_tmp_file = zh_fopen( tmpFileName.str(), "wb" );	
 	// Added Sadullah Nader
 	// Initializations missing and needed
 	m_chunkStack = NULL;
@@ -259,7 +261,7 @@ DataChunkOutput::~DataChunkOutput()
 	AsciiString tmpFileName = TheGlobalData->getPath_UserData();
 	tmpFileName.concat(TEMP_FILENAME);
 
- 	m_tmp_file = ::fopen( tmpFileName.str(), "rb" );	
+ 	m_tmp_file = zh_fopen( tmpFileName.str(), "rb" );	
 	::fseek(m_tmp_file, 0, SEEK_SET);
 
 	// append the temp m_tmp_file m_contents
@@ -893,7 +895,7 @@ void DataChunkInput::readArrayOfBytes(char *ptr, Int len)
 NameKeyType DataChunkInput::readNameKey(void)
 {
 		Int keyAndType = readInt();
-#if (defined(_DEBUG) || defined(_INTERNAL))
+#if (defined(_DEBUG) || defined(_INTERNAL)) && defined(DEBUG_CRASHING)	// only the assert reads t
 		Dict::DataType t = (Dict::DataType)(keyAndType & 0xff);
 		DEBUG_ASSERTCRASH(t==Dict::DICT_ASCIISTRING,("Invalid key data."));
 #endif

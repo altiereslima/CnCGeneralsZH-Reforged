@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -33,9 +35,9 @@
 
 //#define DO_8STAGE_TERRAIN_PASS		//optimized terrain rendering for Nvidia based cards
 
-#include "WW3D2/Texture.h"
-#include "WWMATH/Matrix3d.h"
-#include "common/AsciiString.h"
+#include "WW3D2/texture.h"
+#include "WWMath/matrix3d.h"
+#include "Common/AsciiString.h"
 
 class WorldHeightMap;
 #define TILE_OFFSET 8

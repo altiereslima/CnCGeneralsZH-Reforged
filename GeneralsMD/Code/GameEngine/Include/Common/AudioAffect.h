@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -32,7 +33,7 @@
 
 // if it is set by the options panel, use the system setting parameter. Otherwise, this will be 
 // appended to whatever the current system volume is.
-enum AudioAffect
+enum AudioAffect : int
 {
 	AudioAffect_Music		= 0x01,
 	AudioAffect_Sound		= 0x02,

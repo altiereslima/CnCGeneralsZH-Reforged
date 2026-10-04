@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -52,8 +54,8 @@
 #include "stringex.h"
 #include "W3DDevice/GameClient/W3DAssetManager.h"
 #include <texture.h>
-#include "common/GlobalData.h"
-#include "common/RandomValue.h"
+#include "Common/GlobalData.h"
+#include "Common/RandomValue.h"
 #include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
 #include "GameClient/TerrainRoads.h"
@@ -66,12 +68,12 @@
 #include "W3DDevice/GameClient/Module/W3DModelDraw.h"
 #include "W3DDevice/GameClient/W3DShaderManager.h"
 #include "W3DDevice/GameClient/W3DShroud.h"
-#include "WW3D2/Camera.h"
-#include "WW3D2/DX8Wrapper.h"
-#include "WW3D2/DX8Renderer.h"
-#include "WW3D2/Mesh.h"
-#include "WW3D2/MeshMdl.h"
-#include "WW3D2/Scene.h"
+#include "WW3D2/camera.h"
+#include "WW3D2/dx8wrapper.h"
+#include "WW3D2/dx8renderer.h"
+#include "WW3D2/mesh.h"
+#include "WW3D2/meshmdl.h"
+#include "WW3D2/scene.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -261,15 +263,15 @@ Bool W3DBridge::load(enum BodyDamageType curDamageState)
 	for (i=0; i<pObj->Get_Num_Sub_Objects(); i++) {
 		RenderObjClass *pSub = pObj->Get_Sub_Object(i);
 		Matrix3D mtx = pSub->Get_Transform();
-		if (0==strnicmp(left, pSub->Get_Name(), strlen(left))) {
+		if (0==strncasecmp(left, pSub->Get_Name(), strlen(left))) {
 			m_leftMtx = mtx;
 			strcpy(left, pSub->Get_Name());
 		}
-		if (0==strnicmp(section, pSub->Get_Name(), strlen(section))) {
+		if (0==strncasecmp(section, pSub->Get_Name(), strlen(section))) {
 			m_sectionMtx = mtx;
 			strcpy(section, pSub->Get_Name());
 		}
-		if (0==strnicmp(right, pSub->Get_Name(), strlen(right))) {
+		if (0==strncasecmp(right, pSub->Get_Name(), strlen(right))) {
 			m_rightMtx = mtx;
 			strcpy(right, pSub->Get_Name());
 		}
@@ -1211,6 +1213,36 @@ void W3DBridgeBuffer::drawBridges(CameraClass * camera, Bool wireframe, TextureC
 			}
 		}
 		W3DShaderManager::resetShader(W3DShaderManager::ST_SHROUD_TEXTURE);
+	}
+}
+
+//=============================================================================
+// W3DBridgeBuffer::drawBridgeShadowCasters
+//=============================================================================
+/** The decks again, into the sun's depth map.  A deck that is not in the map lets the sun through
+		it, so a tank crossing a bridge shadowed the deck and the ground under the bridge as well.
+		The same shader as the frame's own draw, because its alpha test is what cuts the holes in a
+		truss, and the same textures for that alpha.  The enabled flags are the ones drawBridges set
+		on the frame before, which is what keeps a destroyed span out of the map. */
+//=============================================================================
+void W3DBridgeBuffer::drawBridgeShadowCasters(void)
+{
+	if (m_curNumBridgeIndices == 0) {
+		return;
+	}
+
+	// The vertices are in world space; the frame's terrain draw sets this before drawBridges.
+	DX8Wrapper::Set_Transform(D3DTS_WORLD, Matrix3D(1));
+	DX8Wrapper::Set_Material(m_vertexMaterial);
+	DX8Wrapper::Set_Index_Buffer(m_indexBridge,0);
+	DX8Wrapper::Set_Vertex_Buffer(m_vertexBridge);
+	DX8Wrapper::Set_Shader(detailAlphaShader);
+	DX8Wrapper::Set_Texture(1,NULL);
+
+	for (Int curBridge=0; curBridge<m_numBridges; curBridge++) {
+		if (m_bridges[curBridge].isEnabled() && m_bridges[curBridge].isVisible()) {
+			m_bridges[curBridge].renderBridge(FALSE);
+		}
 	}
 }
 

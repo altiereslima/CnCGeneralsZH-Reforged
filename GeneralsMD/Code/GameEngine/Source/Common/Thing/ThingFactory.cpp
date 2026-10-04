@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,6 +31,7 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
 
 #include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
@@ -43,6 +46,7 @@
 #include "Common/PlayerList.h"
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/Module/CreateModule.h"
+#include "GameLogic/Module/AIUpdate.h"
 #include "Common/ProductionPrerequisite.h"
 #include "GameClient/GameClient.h"
 #include "GameClient/Drawable.h"
@@ -469,14 +473,14 @@ const char *outFilenameStringFile	= "thingString.txt";
 
 void resetReportFile( void )
 {
-	FILE *fp = fopen(outFilenameINI, "w");
+	FILE *fp = zh_fopen(outFilenameINI, "w");
 	if (fp)
 	{
 		fprintf(fp, "-- ThingTemplate INI Report --\n\n");
 		fclose(fp);
 	}
 
-	fp = fopen(outFilenameStringFile, "w");
+	fp = zh_fopen(outFilenameStringFile, "w");
 	if (fp)
 	{
 		fprintf(fp, "-- ThingTemplate String File Report --\n\n");
@@ -498,7 +502,7 @@ void reportMissingNameInStringFile( AsciiString templateName )
 void dumpMissingStringNames( void )
 {
 	missingStrings.sort();
-	FILE *fp = fopen(outFilenameStringFile, "w");
+	FILE *fp = zh_fopen(outFilenameStringFile, "w");
 	if (fp)
 	{
 		fprintf(fp, "-- ThingTemplate String File Report --\n\n");
@@ -520,7 +524,7 @@ void reportMissingNameInTemplate( AsciiString templateName )
 
 	missingNames.push_back(templateName);
 
-	FILE *fp = fopen(outFilenameINI, "a+");
+	FILE *fp = zh_fopen(outFilenameINI, "a+");
 	if (fp)
 	{
 		fprintf(fp, "  DisplayName      = OBJECT:%s\n", templateName.str());
@@ -531,6 +535,81 @@ void reportMissingNameInTemplate( AsciiString templateName )
 }
 
 #endif
+
+//-------------------------------------------------------------------------------------------------
+/* Port defect 33: an override that replaced a thing's AI module and left it with no SET_NORMAL locomotor.  An
+	 object's "Locomotor = SET_..." lines are stored in its AI module's data (ThingTemplate's "Locomotor"
+	 field parses into AIUpdateModuleData), so a ReplaceModule of that module discards them unless the
+	 block re-states them: upstream's fbe8dc6f and 179e1f65 did it to three Chinooks, three Humvees, three
+	 ECM tanks and three Nuke Cannons, and the first Chinook a Supply Center made crashed every platform.
+	 parseReplaceModule counts what the replacement discarded; this reports each thing that got none back,
+	 "LocomotorCheck: <name> lost ...", whichever build, for Tests/run_locomotor_check.sh to read, and is a
+	 DEBUG_CRASH in a debug build.  A thing EA made with no locomotor (a structure, a rider, a bomb) is
+	 not one: 118 have an AI module and no SET_NORMAL in the shipped data, measured. */
+//-------------------------------------------------------------------------------------------------
+static void checkLocomotors( ThingTemplate *first )
+{
+	Int replaced = 0, lost = 0;
+	for( ThingTemplate *t = first; t; t = t->friend_getNextTemplate() )
+	{
+		const Int setsLost = t->friend_getLocomotorSetsLostToReplace();
+		if( setsLost == 0 )
+			continue;
+		++replaced;
+		AIUpdateModuleData *ai = t->friend_getAIModuleInfo();
+		const LocomotorTemplateVector *normal = ai ? ai->findLocomotorTemplateVector( LOCOMOTORSET_NORMAL ) : NULL;
+		if( normal != NULL && !normal->empty() )
+			continue;
+		++lost;
+		DEBUG_LOG(( "LocomotorCheck: %s lost its %d locomotor set(s) to a ReplaceModule of its AI module, and has no SET_NORMAL\n",
+			t->getName().str(), setsLost ));
+		DEBUG_CRASH(( "%s lost its locomotors to a ReplaceModule of its AI module (port defect 33): re-state its Locomotor lines", t->getName().str() ));
+	}
+	DEBUG_LOG(( "LocomotorCheck: %d things had an AI module with locomotors replaced, %d of them left without a SET_NORMAL\n", replaced, lost ));
+}
+
+//-------------------------------------------------------------------------------------------------
+/* Port defect 34: an ObjectReskin that ended up without a behaviour module its source has.  A reskin copies its
+	 source's modules, and EA's reskins restate only their Draw, so in EA's data a reskin's behaviour modules
+	 are its source's, name for name.  Upstream's fbe8dc6f added a module to two reskins in a normal load,
+	 and the parse then erased every copied module sharing an interface with it: the Demolition General's
+	 Technical reskins lost their AI, physics, contain and die modules, and the first AI that recruited one
+	 crashed.  Each reskin missing one of its source's behaviour modules (by module name) is logged,
+	 "ReskinCheck: <name> lacks ...", whichever build, for Tests/run_locomotor_check.sh to read, and is a
+	 DEBUG_CRASH in a debug build. */
+//-------------------------------------------------------------------------------------------------
+static void checkReskins( ThingTemplate *first )
+{
+	Int reskins = 0, lacking = 0;
+	for( ThingTemplate *t = first; t; t = t->friend_getNextTemplate() )
+	{
+		const ThingTemplate *source = t->friend_getReskinnedFrom();
+		if( source == NULL )
+			continue;
+		++reskins;
+		const ModuleInfo &have = t->getBehaviorModuleInfo(), &want = source->getBehaviorModuleInfo();
+		AsciiString missing;
+		for( Int i = 0; i < want.getCount(); ++i )
+		{
+			const AsciiString name = want.getNthName( i );
+			Bool found = FALSE;
+			for( Int j = 0; j < have.getCount() && !found; ++j )
+				found = have.getNthName( j ) == name;
+			if( !found )
+			{
+				missing.concat( " " );
+				missing.concat( name );
+			}
+		}
+		if( missing.isEmpty() )
+			continue;
+		++lacking;
+		DEBUG_LOG(( "ReskinCheck: %s lacks behaviour modules its source %s has:%s\n", t->getName().str(),
+			source->getName().str(), missing.str() ));
+		DEBUG_CRASH(( "%s lacks modules its source %s has (port defect 34):%s", t->getName().str(), source->getName().str(), missing.str() ));
+	}
+	DEBUG_LOG(( "ReskinCheck: %d reskins, %d of them lacking a behaviour module their source has\n", reskins, lacking ));
+}
 
 //-------------------------------------------------------------------------------------------------
 /** Post process phase after loading the database files */
@@ -555,7 +634,7 @@ void ThingFactory::postProcessLoad()
 		{
 			reportMissingNameInTemplate( thingTemplate->getName() );
 		}
-		else if (wcsstr(thingTemplate->getDisplayName().str(), L"MISSING:"))
+		else if (WideCharStr(thingTemplate->getDisplayName().str(), u"MISSING:"))
 		{
 			AsciiString asciiName;
 			asciiName.translate(thingTemplate->getDisplayName());
@@ -566,6 +645,9 @@ void ThingFactory::postProcessLoad()
 #endif
 
 	}  // end for 
+
+	checkLocomotors( m_firstTemplate );
+	checkReskins( m_firstTemplate );
 
 #ifdef CHECK_THING_NAMES
 	dumpMissingStringNames();

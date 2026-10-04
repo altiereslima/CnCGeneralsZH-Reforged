@@ -131,8 +131,8 @@ struct MinimapEngineFixture
 		ThePlayerList = savedPlayers;
 		TheRankInfoStore = savedRanks;
 		TheGameLogic = savedLogic;
+		delete global;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 		TheWritableGlobalData = savedGlobal;
-		delete global;
 	}
 };
 

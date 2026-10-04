@@ -1,0 +1,33 @@
+# Does the radius on a guard order change what the guard takes on?
+#
+# Two posts of two Rangers and two Missile Defenders each, 700 apart on the open middle of the
+# small generated map mobopen.txt uses, each with an unarmed worker standing 300 from its post.
+# A guard's own range is its vision times GuardInnerModifierHuman (1.8): 180 for a Ranger, 270 for
+# a Missile Defender, so neither reaches the worker.  The north post gets the guard key with no
+# radius, as a double-click guard or an old replay sends it; the south post gets 350, a few notches
+# of the wheel.  The north worker should still be standing at the end and the south one dead.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 900
+#     -scenario guardradius -logPrefix guardradius_
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn       0  AmericaInfantryRanger                2  700 500   20
+30    spawn       0  AmericaInfantryMissileDefender       2  700 530   20
+30    spawn       1  GLAInfantryWorker                    1  1000 500
+
+30    spawn       0  AirF_AmericaInfantryRanger           2  700 1200  20
+30    spawn       0  AirF_AmericaInfantryMissileDefender  2  700 1230  20
+30    spawn       1  Chem_GLAInfantryWorker               1  1000 1200
+
+60    shiftguard  0  AmericaInfantryRanger                700 515
+60    shiftguard  0  AmericaInfantryMissileDefender       700 515
+60    shiftguard  0  AirF_AmericaInfantryRanger           700 1215  350
+60    shiftguard  0  AirF_AmericaInfantryMissileDefender  700 1215  350
+
+61    tally       1  GLAInfantryWorker
+61    tally       1  Chem_GLAInfantryWorker
+880   tally       1  GLAInfantryWorker
+880   tally       1  Chem_GLAInfantryWorker

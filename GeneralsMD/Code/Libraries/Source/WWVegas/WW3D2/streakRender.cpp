@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              EA PACIFIC CONFIDENTIAL              ***
@@ -25,13 +27,13 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 
-#include "streakrender.h"
+#include "streakRender.h"
 #include "ww3d.h"
 #include "rinfo.h"
 #include "dx8wrapper.h"
 #include "sortingrenderer.h"
 #include "vp.h"
-#include "vector3i.h"
+#include "Vector3i.h"
 #include "random.h"
 #include "v3_rnd.h"
 

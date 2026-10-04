@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -27,6 +29,7 @@
 // Author: Michael S. Booth, March 2001
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
 #include "GameClient/Display.h"
 #include "GameClient/Mouse.h"
@@ -216,7 +219,7 @@ void Display::playLogoMovie( AsciiString movieName, Int minMovieLength, Int minC
 	m_currentlyPlayingMovie = movieName;
 	m_movieHoldTime = minMovieLength;
 	m_copyrightHoldTime = minCopyrightLength;
-	m_elapsedMovieTime = timeGetTime();  // we're using time get time becuase legal want's actual "Seconds"
+	m_elapsedMovieTime = Clock_Milliseconds();  // we're using time get time becuase legal want's actual "Seconds"
 	
 	m_videoBuffer = createVideoBuffer();
 	if (	m_videoBuffer == NULL || 
@@ -322,10 +325,10 @@ void Display::update( void )
 					else
 						m_copyrightDisplayString->setFont(TheFontLibrary->getFont("Courier", 
 						TheGlobalLanguageData->adjustFontSize(12), TRUE));	
-					m_elapsedCopywriteTime = timeGetTime();
+					m_elapsedCopywriteTime = Clock_Milliseconds();
 				}
-				if(m_movieHoldTime + m_elapsedMovieTime < timeGetTime() && 
-						m_copyrightHoldTime + m_elapsedCopywriteTime < timeGetTime())
+				if(m_movieHoldTime + m_elapsedMovieTime < Clock_Milliseconds() && 
+						m_copyrightHoldTime + m_elapsedCopywriteTime < Clock_Milliseconds())
 				{
 					m_movieHoldTime = -1;
 					m_elapsedMovieTime = 0;

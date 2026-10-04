@@ -1,0 +1,221 @@
+diff --git a/include/gamespy/gsplatform.h b/include/gamespy/gsplatform.h
+--- a/include/gamespy/gsplatform.h
++++ b/include/gamespy/gsplatform.h
+@@ -8,8 +8,8 @@
+ // Windows:          _WIN32
+ // Xbox:             _WIN32 + _XBOX
+ // Xbox360:          _WIN32 + _XBOX + _X360
+-// MacOSX:           _MACOSX + _UNIX
+-// Linux:            _LINUX + _UNIX
++// MacOSX:           _MACOSX + GSI_UNIX
++// Linux:            _LINUX + GSI_UNIX
+ // Nintendo DS:      _NITRO
+ // PSP:              _PSP
+ // PS3:              _PS3
+@@ -35,7 +35,10 @@
+ #endif
+ 
+ #if defined(__linux__) || (defined(__APPLE__) && defined(__MACH__))
+-#define _UNIX
++// Zero Hour Reforged: GSI_UNIX, not _UNIX.  _UNIX is also Westwood's abandoned port switch in
++// WWVegas, and defining it here turned it on in every engine file that included this header.
++// Applied by Tools/vendor.sh; see Libraries/Source/gamespy-gsi-unix.patch.
++#define GSI_UNIX
+ #endif
+ 
+ #if defined(_XBOX) || defined(_X360)
+@@ -135,7 +138,7 @@
+ #endif // INSOCK
+ 
+ // LINUX and MACOSX
+-#elif defined(_UNIX)
++#elif defined(GSI_UNIX)
+ #include <unistd.h>
+ #include <sys/types.h>
+ #include <sys/socket.h>
+@@ -321,7 +324,7 @@ typedef uint64_t gsi_u64;
+ #elif defined(_REVOLUTION)
+ typedef signed long long gsi_i64;
+ typedef unsigned long long gsi_u64;
+-#else  /* _UNIX */
++#else  /* GSI_UNIX */
+ typedef long long gsi_i64;
+ typedef unsigned long long gsi_u64;
+ #endif // 64 bit types
+diff --git a/include/gamespy/gsplatformsocket.h b/include/gamespy/gsplatformsocket.h
+--- a/include/gamespy/gsplatformsocket.h
++++ b/include/gamespy/gsplatformsocket.h
+@@ -412,7 +412,7 @@ int gsiShutdown(SOCKET s, int how);
+ #define shutdown(s, h) gsiShutdown(s, h)
+ #endif
+ 
+-#ifdef _UNIX
++#ifdef GSI_UNIX
+ #define GOAGetLastError(s) errno
+ #define closesocket        close //on unix
+ #endif
+diff --git a/include/gamespy/gsplatformthread.h b/include/gamespy/gsplatformthread.h
+--- a/include/gamespy/gsplatformthread.h
++++ b/include/gamespy/gsplatformthread.h
+@@ -86,7 +86,7 @@ typedef struct
+ } GSICriticalSection;
+ typedef void (*GSThreadFunc)(void* arg);
+ 
+-#elif defined(_UNIX) //_LINUX || _MACOSX
++#elif defined(GSI_UNIX) //_LINUX || _MACOSX
+ typedef pthread_mutex_t GSICriticalSection;
+ typedef struct
+ {
+@@ -127,7 +127,7 @@ gsi_u32 gsiInterlockedDecrement(gsi_u32* num);
+ #elif defined(_REVOLUTION)
+ gsi_u32 gsiInterlockedIncrement(gsi_u32* num);
+ gsi_u32 gsiInterlockedDecrement(gsi_u32* num);
+-#elif defined(_UNIX)
++#elif defined(GSI_UNIX)
+ gsi_u32 gsiInterlockedIncrement(gsi_u32* num);
+ gsi_u32 gsiInterlockedDecrement(gsi_u32* num);
+ #endif
+diff --git a/src/common/gsplatformsocket.c b/src/common/gsplatformsocket.c
+--- a/src/common/gsplatformsocket.c
++++ b/src/common/gsplatformsocket.c
+@@ -149,7 +149,7 @@ int SetSockBroadcast(SOCKET sock)
+ 
+ int DisableNagle(SOCKET sock)
+ {
+-#if defined(_WIN32) || defined(_UNIX)
++#if defined(_WIN32) || defined(GSI_UNIX)
+     int rcode;
+     int noDelay = 1;
+ 
+diff --git a/src/common/gsplatformutil.c b/src/common/gsplatformutil.c
+--- a/src/common/gsplatformutil.c
++++ b/src/common/gsplatformutil.c
+@@ -42,7 +42,7 @@ typedef struct GSIResolveHostnameInfo
+     char* hostname;
+     unsigned int ip;
+ 
+-#if defined(_WIN32) /*|| defined(_PS2)*/ || defined(_UNIX) || defined(_REVOLUTION)
++#if defined(_WIN32) /*|| defined(_PS2)*/ || defined(GSI_UNIX) || defined(_REVOLUTION)
+     int finishedResolving;
+     GSIThreadID threadID;
+ #endif
+@@ -59,7 +59,7 @@ typedef struct GSIResolveHostnameInfo
+ // * threading enabled
+ // * and async lookup enabled
+ ////////////////////////////////////////////////////////////////////////////////
+-#if (defined(_WIN32) || /*defined(_PS2) ||*/ defined(_UNIX) || defined(_REVOLUTION)) && !defined(GSI_NO_THREADS)       \
++#if (defined(_WIN32) || /*defined(_PS2) ||*/ defined(GSI_UNIX) || defined(_REVOLUTION)) && !defined(GSI_NO_THREADS)       \
+     && !defined(GSI_NO_ASYNC_DNS)
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+@@ -160,7 +160,7 @@ static void* gsiResolveHostnameThread(void* arg)
+ // has static declarations and is thus un-safe for pthreads
+ //
+ // NOTE: The compiler option "-lpthread" must used for this
+-#if defined(_UNIX)
++#if defined(GSI_UNIX)
+ ////////////////////////////////////////////////////////////////////////////////
+ static void gsiResolveHostnameThread(void* arg)
+ {
+@@ -207,7 +207,7 @@ static void gsiResolveHostnameThread(void* arg)
+     // explicitly exit the thread to free resources
+     gsiExitThread(handle->threadID);
+ }
+-#endif //_UNIX
++#endif //GSI_UNIX
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+ int gsiStartResolvingHostname(const char* hostname, GSIResolveHostnameHandle* handle)
+@@ -548,7 +548,7 @@ gsi_time current_time() //returns current time in milliseconds
+ 
+     return msec;
+ 
+-#elif defined(_UNIX)
++#elif defined(GSI_UNIX)
+     struct timeval time;
+ 
+     gettimeofday(&time, NULL);
+@@ -653,7 +653,7 @@ gsi_time current_time_hires() // returns current time in microseconds
+     return (gsi_time)(ticks.tick);
+ #endif
+ 
+-#ifdef _UNIX
++#ifdef GSI_UNIX
+     struct timeval time;
+ 
+     gettimeofday(&time, NULL);
+@@ -694,7 +694,7 @@ void msleep(gsi_time msec)
+ #elif defined(_PSP)
+     sceKernelDelayThread(msec * 1000);
+ 
+-#elif defined(_UNIX)
++#elif defined(GSI_UNIX)
+     usleep(msec * 1000);
+ 
+ #elif defined(_NITRO)
+@@ -1696,7 +1696,7 @@ static const char* GOAGetUniqueID_Internal(void)
+ #endif // UNIQUEID
+ #endif // _PS2
+ 
+-#if ((defined(_WIN32) && !defined(_XBOX)) || defined(_UNIX))
++#if ((defined(_WIN32) && !defined(_XBOX)) || defined(GSI_UNIX))
+ 
+ static void GenerateID(char* keyval)
+ {
+diff --git a/src/gt2/gt2encode.c b/src/gt2/gt2encode.c
+--- a/src/gt2/gt2encode.c
++++ b/src/gt2/gt2encode.c
+@@ -63,7 +63,7 @@ void gt2MemCopy(char* out, char const* in, int size)
+         memcpy(out, in, (size_t)size);
+     }
+ }
+-#if defined(_PS2) || defined(_UNIX) || defined(_PS3) || defined(_WIN64) || defined(_X360) || defined(__GNUC__) || defined(__clang__)
++#if defined(_PS2) || defined(GSI_UNIX) || defined(_PS3) || defined(_WIN64) || defined(_X360) || defined(__GNUC__) || defined(__clang__)
+ 
+ #define GT_ENCODE_ELEM(TYPE, b, l, args)                                                                               \
+     {                                                                                                                  \
+@@ -137,7 +137,7 @@ void gt2MemCopy(char* out, char const* in, int size)
+         return sizeof(TYPE);                                                                                           \
+     }
+ 
+-#endif /* _PS || _UNIX */
++#endif /* _PS || GSI_UNIX */
+ 
+ static int dbstrlen(GT_DBSTR_TYPE dbstr)
+ {
+diff --git a/src/sc/sctest/sctest.c b/src/sc/sctest/sctest.c
+--- a/src/sc/sctest/sctest.c
++++ b/src/sc/sctest/sctest.c
+@@ -1026,7 +1026,7 @@ int test_main(int argc, char* argv[])
+ 	printf("=== Testing wsLoginRemoteAuth === \n");
+ 	result = RunTests(SCTEST_LOGIN_REMOTEAUTH, gsi_true);*/
+ 
+-#if defined(_WIN32) && !defined(_XBOX) && defined(_UNIX)
++#if defined(_WIN32) && !defined(_XBOX) && defined(GSI_UNIX)
+     fflush(stderr);
+     printf("Done - Press Enter\r\n");
+     fflush(stdout);
+diff --git a/src/sc/sctestmatchless/sctestmatchless.c b/src/sc/sctestmatchless/sctestmatchless.c
+--- a/src/sc/sctestmatchless/sctestmatchless.c
++++ b/src/sc/sctestmatchless/sctestmatchless.c
+@@ -1158,7 +1158,7 @@ int test_main(int argc, char* argv[])
+ 	printf("=== Testing wsLoginRemoteAuth === \n");
+ 	result = RunTests(SCTEST_LOGIN_REMOTEAUTH, gsi_true);*/
+ 
+-#if defined(_WIN32) && !defined(_XBOX) && defined(_UNIX)
++#if defined(_WIN32) && !defined(_XBOX) && defined(GSI_UNIX)
+     fflush(stderr);
+     printf("Done - Press Enter\r\n");
+     fflush(stdout);
+diff --git a/src/voice2/voice2test/voice2test.c b/src/voice2/voice2test/voice2test.c
+--- a/src/voice2/voice2test/voice2test.c
++++ b/src/voice2/voice2test/voice2test.c
+@@ -623,7 +623,7 @@ static void Think(void)
+     }
+ }
+ 
+-#if defined(_UNIX)
++#if defined(GSI_UNIX)
+ #include <sys/select.h>
+ #include <termios.h>
+ #include <curses.h>

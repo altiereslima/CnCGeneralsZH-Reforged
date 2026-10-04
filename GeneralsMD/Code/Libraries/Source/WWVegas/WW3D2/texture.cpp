@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -45,7 +47,7 @@
 #include <stdio.h>
 #include "d3dx9runtime.h"
 #include "dx8wrapper.h"
-#include "targa.h"
+#include "TARGA.H"
 #include <nstrdup.h>
 #include "w3d_file.h"
 #include "assetmgr.h"
@@ -58,6 +60,7 @@
 #include "meshmatdesc.h"
 #include "texturethumbnail.h"
 #include "wwprofile.h"
+#include <string.h>	// memset, strcpy, strlen
 
 //#pragma optimize("", off)
 //#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
@@ -87,7 +90,7 @@ const unsigned MAX_TEXTURES_APPLIED_PER_FRAME=2;
  */
 static bool Describe_Texture_Level_0(IDirect3DTexture9 *texture, D3DSURFACE_DESC &desc)
 {
-	::ZeroMemory(&desc, sizeof(D3DSURFACE_DESC));
+	memset(&desc,0, sizeof(D3DSURFACE_DESC));
 
 	if (texture == NULL)
 		return false;
@@ -1101,8 +1104,8 @@ SurfaceClass *TextureClass::Get_Surface_Level(unsigned int level)
 	}
 
 	IDirect3DSurface9 *d3d_surface = NULL;
-	HRESULT hr = Peek_D3D_Texture()->GetSurfaceLevel(level, &d3d_surface);
-	if (FAILED(hr) || d3d_surface == NULL)
+	RenderResult hr = Peek_D3D_Texture()->GetSurfaceLevel(level, &d3d_surface);
+	if (Render_Failed(hr) || d3d_surface == NULL)
 		return 0;
 
 	SurfaceClass *surface = new SurfaceClass(d3d_surface);
@@ -1724,7 +1727,7 @@ void CubeTextureClass::Apply_New_Surface
 
 	WWASSERT(d3d_texture);
 	D3DSURFACE_DESC d3d_desc;
-	::ZeroMemory(&d3d_desc, sizeof(D3DSURFACE_DESC));
+	memset(&d3d_desc,0, sizeof(D3DSURFACE_DESC));
 	DX8_ErrorCode(Peek_D3D_CubeTexture()->GetLevelDesc(0,&d3d_desc));
 
 	if (initialized) 
@@ -2011,7 +2014,7 @@ void VolumeTextureClass::Apply_New_Surface
 
 	WWASSERT(d3d_texture);
 	D3DVOLUME_DESC d3d_desc;
-	::ZeroMemory(&d3d_desc, sizeof(D3DVOLUME_DESC));
+	memset(&d3d_desc,0, sizeof(D3DVOLUME_DESC));
 
 	DX8_ErrorCode(Peek_D3D_VolumeTexture()->GetLevelDesc(0,&d3d_desc));
 

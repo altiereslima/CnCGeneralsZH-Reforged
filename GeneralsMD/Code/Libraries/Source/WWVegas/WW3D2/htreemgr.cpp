@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /* $Header: /Commando/Code/ww3d2/htreemgr.cpp 2     9/19/01 6:17p Jani_p $ */
 /*********************************************************************************************** 
@@ -250,7 +252,7 @@ Error:
 int HTreeManagerClass::Get_Tree_ID(const char * name)
 {
 	for (int i=0; i<NumTrees; i++) {
-		if (TreePtr[i] && (stricmp(name,TreePtr[i]->Get_Name()) == 0)) {
+		if (TreePtr[i] && (strcasecmp(name,TreePtr[i]->Get_Name()) == 0)) {
 			return i;
 		}
 	}
@@ -301,7 +303,7 @@ HTreeClass * HTreeManagerClass::Get_Tree(const char * name)
 	return TreeHash.Get(lower_case_name);
 
 //	for (int i=0; i<NumTrees; i++) {
-//		if (TreePtr[i] && (stricmp(name,TreePtr[i]->Get_Name()) == 0)) {
+//		if (TreePtr[i] && (strcasecmp(name,TreePtr[i]->Get_Name()) == 0)) {
 //
 //			return TreePtr[i];
 //		}

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -27,9 +29,12 @@
 // Author: Matthew D. Campbell, December 2001
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
+
+#include "Lib/WideCharFns.h"
 
 #include "Common/CRCDebug.h"
-#include "Common/File.h"
+#include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "Common/GameState.h"
 #include "GameClient/GameText.h"
@@ -44,6 +49,7 @@
 #include "GameNetwork/LANAPI.h"						// for testing packet size
 #include "GameNetwork/LANAPICallbacks.h"	// for testing packet size
 #include "strtok_r.h"
+#include "Platform/StrdupAsWindows.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -278,9 +284,9 @@ UnicodeString SlotStateName( SlotState state )
 	{
 		case SLOT_OPEN:					return TheGameText->fetch("GUI:Open");
 		case SLOT_TAKEOVER:			return TheGameText->fetch("GUI:HumanSlot");
-		case SLOT_EASY_AI:			return UnicodeString( L"Easy AI" );
-		case SLOT_MED_AI:				return UnicodeString( L"Medium AI" );
-		case SLOT_BRUTAL_AI:		return UnicodeString( L"Hard AI" );
+		case SLOT_EASY_AI:			return UnicodeString( u"Easy AI" );
+		case SLOT_MED_AI:				return UnicodeString( u"Medium AI" );
+		case SLOT_BRUTAL_AI:		return UnicodeString( u"Hard AI" );
 		case SLOT_CLOSED:
 		default:								return TheGameText->fetch("GUI:Closed");
 	}
@@ -382,7 +388,7 @@ void GameInfo::reset( void )
 	m_gameID = 0;
 	m_mapName = AsciiString("NOMAP");
 	m_mapMask = 0;
-	m_seed = GetTickCount(); //GameClientRandomValue(0, INT_MAX - 1);
+	m_seed = Clock_Milliseconds_Coarse(); //GameClientRandomValue(0, INT_MAX - 1);
 	m_useStats = TRUE;
 	m_surrendered = FALSE;
   m_oldFactionsOnly = FALSE;
@@ -524,7 +530,7 @@ void GameInfo::setSlot( Int slotNum, GameSlot slotInfo )
 	UnsignedInt ip = slotInfo.getIP();
 #endif
 
-	DEBUG_LOG(("GameInfo::setSlot - setting slot %d to be player %ls with IP %d.%d.%d.%d\n", slotNum, slotInfo.getName().str(),
+	DEBUG_LOG(("GameInfo::setSlot - setting slot %d to be player %s with IP %d.%d.%d.%d\n", slotNum, WideCharAsUtf8( slotInfo.getName().str() ).str(),
 							ip >> 24, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff));
 }
 
@@ -1251,7 +1257,7 @@ static Int grabHexInt(const char *s)
 Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
 {
 	// Parse game options
-	char *buf = strdup(options.str());
+	char *buf = strdupAsWindows(options.str());
 	char *bufPtr = buf;
 	char *strPos, *keyValPair;
 	GameSlot newSlot[MAX_SLOTS];
@@ -1364,7 +1370,7 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
     }
     else if (key.compare("SC") == 0 )
     {
-      UnsignedInt startingCashAmount = strtoul( val.str(), NULL, 10 );
+      UnsignedInt startingCashAmount = strtoulAsWindows( val.str() );
       startingCash.init();
       startingCash.deposit( startingCashAmount, FALSE );
       sawStartingCash = TRUE;
@@ -1402,7 +1408,7 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
 		{
 			sawSlotlist = true;
 			/// @TODO: Need to read in all the slot info... big mess right now.
-			char *rawSlotBuf = strdup(val.str());
+			char *rawSlotBuf = strdupAsWindows(val.str());
 			char *freeMe = NULL;
 			AsciiString rawSlot;
 //			Bool slotsOk = true;	//flag that lets us know whether or not the slot list is good.

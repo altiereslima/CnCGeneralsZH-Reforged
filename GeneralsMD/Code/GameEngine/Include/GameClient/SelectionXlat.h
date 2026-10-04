@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -64,6 +65,7 @@ private:
 	UnsignedInt m_pendingSquadLands[ NUM_HOTKEY_SQUADS ];
 
 	Bool isSquadPending( Int group ) const;
+	Bool isTakenByLaterSquad( ObjectID id, Int group ) const;
 	void selectHotkeySquad( Player *player, Int group, Bool ownOnly );	///< what the logic will have in the squad by the time a select sent now lands
 
 	Bool selectFriends( Drawable *draw, GameMessage *createTeamMsg, Bool dragSelecting );

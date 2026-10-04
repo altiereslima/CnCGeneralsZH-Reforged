@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -50,7 +51,7 @@ class WeaponTemplate;
 	* enumeration being in sequential order
 	*/
 //-------------------------------------------------------------------------------------------------
-enum BodyDamageType
+enum BodyDamageType : Int
 {
 	BODY_PRISTINE,				///< unit should appear in pristine condition
 	BODY_DAMAGED,					///< unit has been damaged
@@ -72,7 +73,7 @@ static const char* TheBodyDamageTypeNames[] =
 };
 #endif
 
-enum MaxHealthChangeType
+enum MaxHealthChangeType : Int
 {
 	SAME_CURRENTHEALTH,
 	PRESERVE_RATIO,

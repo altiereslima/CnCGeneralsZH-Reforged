@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -27,6 +29,7 @@
 // Author: Matthew D. Campbell, December 2001
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
 #include "GameClient/GameInfoWindow.h"
 #include "GameClient/GameText.h"
@@ -224,15 +227,15 @@ void LANDisplayGameList( GameWindow *gameListbox, LANGameInfo *gameList )
 		while (gameList)
 		{
 			UnicodeString txtGName;
-			txtGName = L"";
+			txtGName = u"";
 			if( gameList->isGameInProgress() )
 			{
-				txtGName.concat(L"[");
+				txtGName.concat(u"[");
 			}
 			txtGName.concat(gameList->getPlayerName(0));
 			if( gameList->isGameInProgress() )
 			{
-				txtGName.concat(L"]");
+				txtGName.concat(u"]");
 			}
 			Int addedIndex = GadgetListBoxAddEntryText(gameListbox, txtGName, (gameList->isGameInProgress())?gameInProgressColor:gameColor, -1, -1);
 			GadgetListBoxSetItemData(gameListbox, (void *)gameList, addedIndex, 0 );
@@ -304,7 +307,7 @@ Bool ParseGameOptionsString(LANGameInfo *game, AsciiString options)
 			}
 		}
 		// clean up LAN users, etc.
-		UnsignedInt now = timeGetTime();
+		UnsignedInt now = Clock_Milliseconds();
 		for (i=0; i<MAX_SLOTS; ++i)
 		{
 			LANGameSlot *slot = game->getLANSlot(i);

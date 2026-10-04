@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -34,7 +36,7 @@
 
 #define NO_DEBUG_CRC
 
-#include "Common/CRC.h"
+#include "Common/crc.h"
 #include "Common/CRCDebug.h"
 #include "Common/GameState.h"
 #include "Common/GlobalData.h"
@@ -69,11 +71,11 @@
 #include "W3DDevice/GameClient/BaseHeightMap.h"
 #include "W3DDevice/GameClient/W3DTerrainTracks.h"
 #include "W3DDevice/GameClient/WorldHeightMap.h"
-#include "WW3D2/HAnim.h"
-#include "WW3D2/HLod.h"
-#include "WW3D2/RendObj.h"
-#include "WW3D2/Mesh.h"
-#include "WW3D2/MeshMdl.h"
+#include "WW3D2/hanim.h"
+#include "WW3D2/hlod.h"
+#include "WW3D2/rendobj.h"
+#include "WW3D2/mesh.h"
+#include "WW3D2/meshmdl.h"
 #include "Common/BitFlagsIO.h"
 
 #ifdef _INTERNAL
@@ -151,7 +153,7 @@ void LogClass::log(const char *fmt, ...)
 
 	va_list va;
 	va_start( va, fmt );
-	_vsnprintf(buf, 1024, fmt, va );
+	vsnprintf(buf, 1024, fmt, va );
 	buf[1023] = 0;
 	va_end( va );
 
@@ -1251,7 +1253,7 @@ enum AnimParseType
 //-------------------------------------------------------------------------------------------------
 static void parseAnimation(INI* ini, void *instance, void * /*store*/, const void* userData)
 {
-	AnimParseType animType = (AnimParseType)(UnsignedInt)userData;
+	AnimParseType animType = (AnimParseType)(UnsignedInt)(uintptr_t)userData;	// an enum kept in a pointer
 
 	AsciiString animName = ini->getNextAsciiString();
 	animName.toLower();
@@ -1304,7 +1306,7 @@ static void parseShowHideSubObject(INI* ini, void *instance, void *store, const 
 		Bool found = false;
 		for (std::vector<ModelConditionInfo::HideShowSubObjInfo>::iterator it = vec->begin(); it != vec->end(); ++it)
 		{
-			if (stricmp(it->subObjName.str(), subObjName.str()) == 0)
+			if (strcasecmp(it->subObjName.str(), subObjName.str()) == 0)
 			{
 				it->hide = (userData != NULL);
 				found = true;
@@ -1331,7 +1333,7 @@ void W3DModelDraw::showSubObject( const AsciiString& name, Bool show )
 		Bool found = false;
 		for( std::vector<ModelConditionInfo::HideShowSubObjInfo>::iterator it = m_subObjectVec.begin(); it != m_subObjectVec.end(); ++it )
 		{
-			if( stricmp( it->subObjName.str(), name.str() ) == 0 )
+			if( strcasecmp( it->subObjName.str(), name.str() ) == 0 )
 			{
 				it->hide = !show;
 				found = true;
@@ -1465,7 +1467,7 @@ void W3DModelDrawModuleData::parseConditionState(INI* ini, void *instance, void 
 
 	ModelConditionInfo info;
 	W3DModelDrawModuleData* self = (W3DModelDrawModuleData*)instance;
-	ParseCondStateType cst = (ParseCondStateType)(UnsignedInt)userData;
+	ParseCondStateType cst = (ParseCondStateType)(UnsignedInt)(uintptr_t)userData;	// an enum kept in a pointer
 	switch (cst)
 	{
 		case PARSE_DEFAULT:
@@ -1760,6 +1762,9 @@ W3DModelDraw::W3DModelDraw(Thing *thing, const ModuleData* moduleData) : DrawMod
 	}
 	m_needRecalcBoneParticleSystems = false;
 	m_fullyObscuredByShroud = false;
+	m_groundMotionPos.zero();
+	m_groundMotionAngle = 0.0f;
+	m_groundMotionFrame = 0;
 
 	// only validate the current time-of-day and weather conditions by default.
 	getW3DModelDrawModuleData()->validateStuffForTimeAndWeather(getDrawable(), 
@@ -1960,7 +1965,7 @@ static Bool fillShadowInfoFromTemplate(const ThingTemplate *tmplate, Shadow::Sha
 	}
 
 	strcpy(shadowInfo->m_ShadowName, tmplate->getShadowTextureName().str());
-	DEBUG_ASSERTCRASH(shadowInfo->m_ShadowName[0] != ' ', ("this should be validated in ThingTemplate now"));
+	DEBUG_ASSERTCRASH(shadowInfo->m_ShadowName[0] != '\0', ("this should be validated in ThingTemplate now"));
 	shadowInfo->allowUpdates		= FALSE;		//shadow image will never update
 	shadowInfo->allowWorldAlign	= TRUE;	//shadow image will wrap around world objects
 	shadowInfo->m_type					= (ShadowType)tmplate->getShadowType();
@@ -2530,6 +2535,34 @@ Bool W3DModelDraw::setCurAnimDurationInMsec(Real desiredDurationInMsec)
 	}
 
 	return false;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** How far the unit has driven along its own heading, and how far it has turned, since the last
+	* call, read off the position and heading the logic left. A wheel or a tread turned by these
+	* amounts keeps pace with the ground however many pictures a logic frame gets, and runs backwards
+	* when the unit backs up. Returns how many logic frames went by, 0 between two of them. */
+//-------------------------------------------------------------------------------------------------
+UnsignedInt W3DModelDraw::stepGroundMotion(Real& forward, Real& turn)
+{
+	const Coord3D *pos = getDrawable()->getPosition();
+	Real angle = getDrawable()->getOrientation();
+	UnsignedInt now = TheGameLogic->getFrame();
+	if (m_groundMotionFrame == 0)
+	{
+		m_groundMotionPos = *pos;
+		m_groundMotionAngle = angle;
+		m_groundMotionFrame = now;
+	}
+
+	forward = (pos->x - m_groundMotionPos.x) * Cos(angle) + (pos->y - m_groundMotionPos.y) * Sin(angle);
+	turn = stdAngleDiff(angle, m_groundMotionAngle);
+	UnsignedInt frames = now - m_groundMotionFrame;
+
+	m_groundMotionPos = *pos;
+	m_groundMotionAngle = angle;
+	m_groundMotionFrame = now;
+	return frames;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3977,6 +4010,44 @@ void W3DModelDraw::reactToTransformChange( const Matrix3D* oldMtx,
 		}
 	}
 } 
+
+//-------------------------------------------------------------------------------------------------
+/** R1, smooth motion (W3DSmoothMotion.h): on the first render pass after a logic tick, the transform the
+	render object holds now (doDrawModule's, or reactToTransformChange's for a model out of view) becomes
+	the current one, and the tick's verdict - blend, or show it as it is - is decided and counted. */
+void W3DModelDraw::smoothMotionCapture(UnsignedInt clientFrame, Bool marked)
+{
+	if (m_renderObject == NULL)
+		return;
+	m_smoothMotion.capture(m_renderObject->Get_Transform(), m_renderObject, m_renderObject->Is_Hidden() != 0, clientFrame,
+		marked != FALSE);
+}
+
+//-------------------------------------------------------------------------------------------------
+/** R1: just before the scene renders, show the render object `alpha` of the way from its previous logic
+	transform to its current one, when this tick's verdict allows it. */
+void W3DModelDraw::smoothMotionApply(Real alpha)
+{
+	if (m_renderObject == NULL || m_smoothMotion.Model != m_renderObject || m_smoothMotion.Snap != SMOOTH_BLENDED)
+		return;
+	Matrix3D shown;
+	if (SmoothMotion_Blend(m_smoothMotion.Prev, m_smoothMotion.Cur, alpha, shown) != SMOOTH_BLENDED)
+		return;
+	m_renderObject->Set_Transform(shown);
+	m_smoothMotion.Applied = true;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** R1: straight after the render, the logic transform goes back, so picking and anything the logic reads
+	from the render object (ParticleUplinkCannonUpdate's bones) see exactly what they did before. */
+void W3DModelDraw::smoothMotionRestore()
+{
+	if (!m_smoothMotion.Applied)
+		return;
+	m_smoothMotion.Applied = false;
+	if (m_renderObject != NULL && m_smoothMotion.Model == m_renderObject)
+		m_renderObject->Set_Transform(m_smoothMotion.Cur);
+}
 
 //-------------------------------------------------------------------------------------------------
 const ModelConditionInfo* W3DModelDraw::findBestInfo(const ModelConditionFlags& c) const

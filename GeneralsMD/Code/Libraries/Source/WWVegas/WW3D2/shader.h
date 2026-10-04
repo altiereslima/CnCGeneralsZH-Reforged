@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -44,7 +45,9 @@
 
 #include "always.h"
 
-#if defined (SR_OS_SOLARIS)
+// Solaris's and macOS's <limits.h> define PASS_MAX (the longest password getpass() takes), which would
+// turn ShaderClass's enumerator into a number.  Nothing in the engine means that one.
+#if defined (SR_OS_SOLARIS) || (!defined(_WIN32) && defined(PASS_MAX))
 #undef PASS_MAX
 #endif
 

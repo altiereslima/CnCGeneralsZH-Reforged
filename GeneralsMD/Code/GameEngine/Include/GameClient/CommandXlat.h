@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -32,7 +34,7 @@
 
 #include "GameClient/InGameUI.h"
 
-enum GUICommandType;
+enum GUICommandType : Int;
 
 //-----------------------------------------------------------------------------
 class CommandTranslator : public GameMessageTranslator
@@ -84,7 +86,7 @@ private:
 };
 
 
-enum FilterTypes
+enum FilterTypes : Int
 {
 	FT_NULL_FILTER=0,
 	// The following are screen filter shaders, that modify the rendered viewport after it is drawn.
@@ -95,7 +97,7 @@ enum FilterTypes
 	FT_MAX
 };
 
-enum FilterModes
+enum FilterModes : Int
 {
 	FM_NULL_MODE = 0,
 
@@ -128,7 +130,7 @@ enum FilterModes
 class PickAndPlayInfo
 {
 public:
-	PickAndPlayInfo::PickAndPlayInfo(); //INITIALIZE THE CONSTRUCTOR IN CPP
+	PickAndPlayInfo(); //INITIALIZE THE CONSTRUCTOR IN CPP
 
 	Bool						m_air;					//Are we attacking an airborned target?
 	Drawable				*m_drawTarget;	//Do we have an override draw target?

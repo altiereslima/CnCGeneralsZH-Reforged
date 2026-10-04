@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -36,13 +38,13 @@
 #ifndef _GAME_LOD_H_
 #define _GAME_LOD_H_
 
-enum ParticlePriorityType;
+enum ParticlePriorityType : Int;
 
 #define MAX_LOD_PRESETS_PER_LEVEL	32	//number of hardware configs preset for each low,medium,high
 #define MAX_BENCH_PROFILES	16
 
 //Make sure this enum stays in sync with GameLODNames[]
-enum StaticGameLODLevel
+enum StaticGameLODLevel : Int
 {
 	STATIC_GAME_LOD_UNKNOWN=-1,
 	STATIC_GAME_LOD_LOW,
@@ -64,7 +66,7 @@ enum DynamicGameLODLevel
 };
 
 //Make sure this stays in sync with CPUNames[] in gamelod.cpp
-enum CpuType
+enum CpuType : Int
 {
 	XX,	//unknown type
 	P3,
@@ -73,7 +75,7 @@ enum CpuType
 };
 
 //Keep this in sync with VideoNames in Gamelod.cpp
-enum ChipsetType
+enum ChipsetType : Int
 {	DC_UNKNOWN,
 	DC_VOODOO2,
 	DC_VOODOO3,

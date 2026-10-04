@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -30,6 +32,7 @@
 
 #include "WW3D2/matpass.h"
 #include "WW3D2/dx8wrapper.h"
+#include "Platform/RenderTypes.h"
 
 class AABoxClass;
 class WorldHeightMap;
@@ -124,7 +127,7 @@ protected:
 	W3DShroudLevel m_boderShroudLevel;			///<color used to clear the shroud border
 	W3DShroudLevel *m_finalFogData;			///<copy of logical shroud in an easier to access array.
 	W3DShroudLevel *m_currentFogData;		///<copy of intermediate logical shroud while it's interpolated.
-	void interpolateFogLevels(RECT *rect);		///<fade current fog levels to actual logic side levels.
+	void interpolateFogLevels(RenderRect *rect);		///<fade current fog levels to actual logic side levels.
 	void fillBorderShroudData(W3DShroudLevel level, SurfaceClass* pDestSurface);	///<fill the destination texture with a known value
 };
 

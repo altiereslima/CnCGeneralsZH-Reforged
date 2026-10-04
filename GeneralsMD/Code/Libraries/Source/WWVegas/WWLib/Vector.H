@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -59,9 +61,10 @@
 
 #include "always.h"
 #include	<assert.h>
+#include	<stdint.h>	// uintptr_t, in VectorClass::ID; Apple's headers happened to supply it, glibc's do not
 #include	<stdlib.h>
 #include <string.h>
-#include <new.h>
+#include <new>   // was <new.h>, which only MSVC has
 
 #ifdef _MSC_VER
 #pragma warning (disable : 4702) // unreachable code, happens with some uses of these templates
@@ -611,11 +614,16 @@ DynamicVectorClass<T>::DynamicVectorClass(unsigned size, T const * array)
  * HISTORY:                                                                                    *
  *   03/10/1995 JLB : Created.                                                                 *
  *=============================================================================================*/
+// this-> on Length, VectorMax and IsAllocated throughout the out-of-line definitions below: they are
+// members of VectorClass<T>, which is a dependent base, so an unqualified use of one is not looked
+// up until instantiation.  MSVC under /permissive binds them at definition time and accepts it;
+// clang follows the standard and does not.  Resize and ActiveCount need no qualification - they are
+// members of this class.  Identical semantics on both compilers.
 template<class T>
 bool DynamicVectorClass<T>::Resize(int newsize, T const * array)
 {
 	if (VectorClass<T>::Resize(newsize, array)) {
-		if (Length() < ActiveCount) ActiveCount = Length();
+		if (this->Length() < ActiveCount) ActiveCount = this->Length();
 		return(true);
 	}
 	return(false);
@@ -670,9 +678,9 @@ int DynamicVectorClass<T>::ID(T const & object)
 template<class T>
 bool DynamicVectorClass<T>::Add(T const & object)
 {
-	if (ActiveCount >= Length()) {
-		if ((IsAllocated || !VectorMax) && GrowthStep > 0) {
-			if (!Resize(Length() + GrowthStep)) {
+	if (ActiveCount >= this->Length()) {
+		if ((this->IsAllocated || !this->VectorMax) && GrowthStep > 0) {
+			if (!Resize(this->Length() + GrowthStep)) {
 
 				/*
 				**	Failure to increase the size of the vector is an error condition.
@@ -716,9 +724,9 @@ bool DynamicVectorClass<T>::Add(T const & object)
 template<class T>
 bool DynamicVectorClass<T>::Add_Head(T const & object)
 {
-	if (ActiveCount >= Length()) {
-		if ((IsAllocated || !VectorMax) && GrowthStep > 0) {
-			if (!Resize(Length() + GrowthStep)) {
+	if (ActiveCount >= this->Length()) {
+		if ((this->IsAllocated || !this->VectorMax) && GrowthStep > 0) {
+			if (!Resize(this->Length() + GrowthStep)) {
 
 				/*
 				**	Failure to increase the size of the vector is an error condition.
@@ -768,9 +776,9 @@ bool DynamicVectorClass<T>::Insert(int index,T const & object)
 	if (index < 0) return false;
 	if (index > ActiveCount) return false;
 
-	if (ActiveCount >= Length()) {
-		if ((IsAllocated || !VectorMax) && GrowthStep > 0) {
-			if (!Resize(Length() + GrowthStep)) {
+	if (ActiveCount >= this->Length()) {
+		if ((this->IsAllocated || !this->VectorMax) && GrowthStep > 0) {
+			if (!Resize(this->Length() + GrowthStep)) {
 
 				/*
 				**	Failure to increase the size of the vector is an error condition.
@@ -891,7 +899,7 @@ bool DynamicVectorClass<T>::Delete_Index(int index)
 template<class T>
 void DynamicVectorClass<T>::Delete_All(void) 
 {
-	int len = VectorMax;
+	int len = this->VectorMax;
 	Clear();		// Forces destructor call on each object.
 	Resize(len);
 }
@@ -919,10 +927,10 @@ void DynamicVectorClass<T>::Delete_All(void)
 template<class T>
 T * DynamicVectorClass<T>::Uninitialized_Add(void)
 {
-	if (ActiveCount >= Length()) {
+	if (ActiveCount >= this->Length()) {
 //		if ((IsAllocated || !VectorMax) && GrowthStep > 0) {
 		if (GrowthStep > 0) {
-			if (!Resize(Length() + GrowthStep)) {
+			if (!Resize(this->Length() + GrowthStep)) {
 
 				/*
 				**	Failure to increase the size of the vector is an error condition.

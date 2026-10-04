@@ -25,6 +25,11 @@
 extern "C" {
 #endif
 
+/* Off Windows there is one calling convention; the declarations keep MSVC's spelling (V1). */
+#if !defined(_WIN32) && !defined(__stdcall)
+#define __stdcall
+#endif
+
 /*
  * RAD's radbase.h shorthand.  BinkVideoPlayer.cpp declares its surface flag as
  * a "u32", so the missing SDK header supplied these - without them that file

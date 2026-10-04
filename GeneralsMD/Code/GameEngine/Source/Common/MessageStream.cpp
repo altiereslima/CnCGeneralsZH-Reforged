@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -663,6 +664,7 @@ AsciiString GameMessage::getCommandTypeAsAsciiString(GameMessage::Type t)
 	CHECK_IF(MSG_CHEAT)
 	CHECK_IF(MSG_QUEUE_NEXT_ORDER)
 	CHECK_IF(MSG_CLEAR_RALLY_POINT)
+	CHECK_IF(MSG_SET_STANCE)
 	CHECK_IF(MSG_DO_GUARD_OBJECT)
 	CHECK_IF(MSG_DO_STOP)
 	CHECK_IF(MSG_DO_SCATTER)

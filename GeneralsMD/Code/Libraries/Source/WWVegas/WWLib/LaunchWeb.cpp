@@ -92,12 +92,12 @@ bool LaunchWebBrowser(const char* url)
 	// Find the executable that can launch this file
 	char exeName[MAX_PATH];
 	HINSTANCE hInst = FindExecutable(filename, NULL, exeName);
-	assert(((int)hInst > 32) && "Unable to find executable that will display HTML files.");
+	assert(((INT_PTR)hInst > 32) && "Unable to find executable that will display HTML files.");
 
 	// Delete temporary file
 	DeleteFile(filename);
 
-	if ((int)hInst <= 32)
+	if ((INT_PTR)hInst <= 32)
 		{
 		return false;
 		}

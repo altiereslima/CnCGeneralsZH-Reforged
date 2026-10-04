@@ -2,6 +2,9 @@
 # shipping one so both exes can sit in Run/ at once (THREADING-ROADMAP.md section 0).
 build/
 build-perf/
+# build-mac/ and build-linux/ are build-macos.sh's and build-linux.sh's trees (see PORTING.md).
+build-mac/
+build-linux/
 
 # Build/test logs from the CMake port loop
 *.log
@@ -10,8 +13,9 @@ build-perf/
 __pycache__/
 *.pyc
 
-# Per-machine overrides for build.bat, read after its defaults
+# Per-machine overrides for build.bat and build-posix.sh, read after their defaults
 build.local.bat
+build.local.sh
 
 CLAUDE.md
 AGENTS.md

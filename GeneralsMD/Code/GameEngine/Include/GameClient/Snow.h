@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 // FILE: Snow.h /////////////////////////////////////////////////////////
 
@@ -26,8 +27,8 @@
 #include "Common/SubsystemInterface.h"
 #include "Common/Overridable.h"
 #include "Common/Override.h"
-#include "WWMATH/Vector3.h"
-#include "WWMATH/Vector4.h"
+#include "WWMath/vector3.h"
+#include "WWMath/vector4.h"
 
 //-------------------------------------------------------------------------------------------------
 /** This structure keeps the transparency and vertex settings, which are the same regardless of the

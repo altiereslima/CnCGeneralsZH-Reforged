@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -39,7 +41,9 @@
 	* the CRT fails fast on any _controlfp call whose mask names _MCW_PC, so the rounding mode is
 	* the whole of it.  SSE arithmetic rounds at the declared width, which is what the 24-bit
 	* precision setting bought the x87. */
+#if defined(_WIN32)
 #define FP_MODE_FIELDS ( _MCW_RC )
+#endif
 
 /**
   * setFPMode sets the FPU internal precision and rounding mode.  As DirectX is not guaranteed to
@@ -53,5 +57,8 @@ UnsignedInt getFPMode( void );
 
 /** What getFPMode() must read back after setFPMode(): 24-bit precision, round to nearest. */
 UnsignedInt expectedFPMode( void );
+
+/** Put back a mode getFPMode() returned.  Only the rounding field, as on Windows it always was. */
+void restoreFPMode( UnsignedInt mode );
 
 #endif // __FPUCONTROL_H__

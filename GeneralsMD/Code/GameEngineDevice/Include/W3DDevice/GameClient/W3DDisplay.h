@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -126,7 +128,7 @@ public:
 
 	virtual void takeScreenShot(void);						//save screenshot to file
 	virtual void toggleMovieCapture(void);			//enable AVI or frame capture mode.
-	virtual const wchar_t *getRendererName(void) const;
+	virtual const WideChar *getRendererName(void) const;
 
 	virtual void toggleLetterBox(void);	///<enabled letter-boxed display
 	virtual void enableLetterBox(Bool enable);	///<forces letter-boxed display on/off

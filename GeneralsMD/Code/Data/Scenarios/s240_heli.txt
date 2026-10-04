@@ -1,0 +1,36 @@
+# The 2.4.0 Shorts' helicopter takes on the open grass of Fortress Avalanche: a Comanche shooting
+# three Battlemasters 250 to its north is sent 380 straight back and backs away with its nose and
+# its guns still on them, then a gattling Helix holds its heading while its turret follows a
+# Crusader driving circles round it (v240_heli.txt's Helix, started earlier).
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 2500 -map "Maps\Fortress Avalanche\Fortress Avalanche.map" -autoskirmish 2
+#     -takeover -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario s240_heli
+#     -cinema s240_heli -video 230 940 s240_heli -maxframes 950
+#
+# Flash Effect's beach was tried first (2026-10-04) and dropped: the oil derrick cluster at
+# 1700,1700 filled the frame and both helicopters drew at the top edge of a pitch 12 view, about
+# 490 pixels above their ground point at absolute zoom 1.42.
+#
+# Moments: Comanche attacking 150 to 330, backing away firing 330 to 480; Helix 540 to 940.
+
+30    spawn         1  ChinaTankBattleMaster           3   1000 2350 30
+30    spawn         0  AmericaVehicleComanche          1   1000 2100
+120   attack        0  AmericaVehicleComanche          1  ChinaTankBattleMaster
+330   move          0  AmericaVehicleComanche              1000 1720
+
+30    spawn         1  ChinaVehicleHelix               1   3300 2000
+40    shiftupgrade  1  ChinaVehicleHelix                   Upgrade_ChinaHelixGattlingCannon
+520   spawn         0  AmericaTankCrusader             1   3400 2000
+540   attack        1  ChinaVehicleHelix               0  AmericaTankCrusader
+560   move          0  AmericaTankCrusader                 3371 2071
+620   move          0  AmericaTankCrusader                 3300 2100
+680   move          0  AmericaTankCrusader                 3229 2071
+740   move          0  AmericaTankCrusader                 3200 2000
+800   move          0  AmericaTankCrusader                 3229 1929
+860   move          0  AmericaTankCrusader                 3300 1900
+920   move          0  AmericaTankCrusader                 3371 1929
+
+330   tally         1  ChinaTankBattleMaster
+500   tally         1  ChinaTankBattleMaster
+940   tally         0  AmericaTankCrusader

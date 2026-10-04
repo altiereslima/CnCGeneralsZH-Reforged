@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -36,6 +37,7 @@
 
 
 #include "soundscene.h"
+#include "Lib/Clock.h"
 #include "soundcullobj.h"
 #include "logicalsound.h"
 #include "logicallistener.h"
@@ -140,7 +142,7 @@ SoundSceneClass::Collect_Logical_Sounds (int listener_count)
 {
 	WWPROFILE ("Collect_Logical_Sounds");
 
-	uint32 timestamp = ::GetTickCount ();
+	uint32 timestamp = Clock_Milliseconds_Coarse();
 
 	//
 	//	Determine how many listeners to process
@@ -202,7 +204,7 @@ SoundSceneClass::Collect_Logical_Sounds (int listener_count)
 				//	Is the sound ready to notify?
 				//
 				if (sound_obj->Allow_Notify (timestamp)) {
-					listener->On_Event (AudioCallbackClass::EVENT_LOGICAL_HEARD, (uint32)listener, (uint32)sound_obj);
+					listener->On_Event (AudioCallbackClass::EVENT_LOGICAL_HEARD, (uintptr_t)listener, (uintptr_t)sound_obj);
 				}
 			}
 		}

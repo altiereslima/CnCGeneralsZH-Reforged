@@ -1,0 +1,19 @@
+# A Marauder is sent 500 east past four Troop Crawlers parked 100 north of the midpoint of its
+# route. It has no attack order: whatever it shoots, its turret picked for itself on the move.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 1 -maxframes 640
+#     -scenario driveby -logPrefix driveby_
+#
+# Measured 2026-10-03 with a tally of the crawlers' health every frame (the shots below are the
+# frames it dropped). Before, the Marauder had no turret in its logic and drove past without firing
+# once. After, its turret turns to them and it hits on frames 239, 299 and 364, one shell per
+# reload. The same route with a Technical (GLAVehicleTechnical in both places) used to hit twice,
+# once per two-second target check, 58 frames apart; it now hits every 6 frames, 11 times.
+
+5     spawn         0  GLATankMarauder             1   950 3700
+20    spawn         1  ChinaVehicleTroopCrawler    4   1200 3800 14
+30    playermove    0  GLATankMarauder                 1450 3700
+20    tally         1  ChinaVehicleTroopCrawler
+630   tally         1  ChinaVehicleTroopCrawler

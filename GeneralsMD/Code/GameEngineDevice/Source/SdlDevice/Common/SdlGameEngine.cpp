@@ -1,0 +1,386 @@
+/*
+**	Copyright 2026 İlyas Akın
+**	Additional terms under GNU GPL section 7 apply: see LICENSE.md.
+**
+**	This program is free software: you can redistribute it and/or modify
+**	it under the terms of the GNU General Public License as published by
+**	the Free Software Foundation, either version 3 of the License, or
+**	(at your option) any later version.
+**
+**	This program is distributed in the hope that it will be useful,
+**	but WITHOUT ANY WARRANTY; without even the implied warranty of
+**	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+**	GNU General Public License for more details.
+**
+**	You should have received a copy of the GNU General Public License
+**	along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+// SdlGameEngine.cpp: see SdlGameEngine.h.
+
+#include "PreRTS.h"
+
+#include "Common/MessageStream.h"
+#include "Common/PlayerList.h"
+#include "Common/Player.h"
+#include "GameClient/ApplicationWindowTitle.h"
+#include "GameLogic/GameLogic.h"
+#include "SdlDevice/Common/SdlDisplays.h"
+#include "SdlDevice/Common/SdlGameEngine.h"
+#include "SdlDevice/Common/SdlMessageBox.h"
+#include "SdlDevice/GameClient/SdlInput.h"
+#include "SdlDevice/GameClient/SdlMouse.h"
+#include "W3DDevice/GameClient/W3DGameClient.h"
+#include "PosixDevice/Common/PosixFileResolutionDump.h"
+#include "MilesAudioDevice/MilesAudioManager.h"
+#include "Common/GlobalData.h"		// -nodevice picks the radar, as on Windows
+#include "Common/WindowMode.h"
+#include "Win32Device/Common/HeadlessRadar.h"
+#include "W3DDevice/Common/W3DFunctionLexicon.h"
+#include "W3DDevice/Common/W3DModuleFactory.h"
+#include "W3DDevice/Common/W3DRadar.h"
+#include "W3DDevice/Common/W3DThingFactory.h"
+#include "W3DDevice/GameClient/W3DParticleSys.h"
+#include "W3DDevice/GameClient/W3DWindowHooks.h"
+#include "W3DDevice/GameLogic/W3DGameLogic.h"
+
+#include <SDL3/SDL.h>
+
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// WinMain's DEFAULT_XRESOLUTION and DEFAULT_YRESOLUTION: the window's size until W3DDisplay sizes it to
+// the game's resolution when the device is made, as dx8wrapper does on Windows (W3DWindowHooks.h).
+static const int INITIAL_WINDOW_WIDTH = 800;
+static const int INITIAL_WINDOW_HEIGHT = 600;
+
+// The window GameText's title hook names.  One window per process, as on Windows (ApplicationHWnd).
+static SDL_Window *s_titledWindow = NULL;
+
+static void setTitleOfWindow( const char *utf8Title )
+{
+	if (s_titledWindow != NULL)
+		SDL_SetWindowTitle( s_titledWindow, utf8Title );
+}
+
+/** WinMain.cpp's canPostQuitMessage: a GameMessage stamps itself with the local player, so none can be
+	* made until the player list exists. */
+static Bool canPostQuitMessage( void )
+{
+	return TheMessageStream != NULL && ThePlayerList != NULL && ThePlayerList->getLocalPlayer() != NULL;
+}
+
+// WinMain.cpp's, defined in PosixMain.cpp: the window W3DDevice draws into, and whether it is borderless.
+extern RenderWindow ApplicationHWnd;
+extern Bool ApplicationIsBorderless;
+
+/** W3DDisplay's applyWindowFrame, for SDL's window: WinMain's rules, a frame and a caption for a plain
+	* window and none for the two that own the screen. */
+static void dressWindow( Int mode )
+{
+	SDL_Window *window = s_titledWindow;
+	if (window == NULL)
+		return;
+	if (mode == WINDOW_MODE_FULLSCREEN)
+	{
+		SDL_SetWindowFullscreen( window, true );
+		return;
+	}
+	SDL_SetWindowFullscreen( window, false );
+	SDL_SetWindowBordered( window, mode == WINDOW_MODE_WINDOWED );
+}
+
+/** W3DDisplay's sizeWindowToClient, for SDL's window: a client area of the resolution, a plain window
+	* in the middle of the chosen monitor and a borderless one at its corner.  The resolution and the monitor
+	* are in pixels (SdlDisplays.h) and SDL places and sizes a window in points, so both are divided by the
+	* monitor's pixel density: on a display scaled by 2 (a Retina Mac, Wayland at 200 %) a 1280x720 window
+	* is 640x360 points and so 1280x720 pixels, drawn one to one, as on Windows, where the game is DPI-aware.
+	* Taken as points, it was 2560x1440 pixels, and the back buffer was stretched twice over (Wayland at
+	* scale 2, 2026-09-30).  Where points are pixels (X11, a display at 100 %) the density is 1 and nothing
+	* changes. */
+static void sizeWindow( Int mode, Int width, Int height, const MonitorRect &screen )
+{
+	SDL_Window *window = s_titledWindow;
+	if (window == NULL)
+		return;
+	const float density = SdlDisplays_densityOf( screen, window );
+	const int pointsWidth = (int)lround( width / density ), pointsHeight = (int)lround( height / density );
+	SDL_SetWindowSize( window, pointsWidth, pointsHeight );
+	int x = (int)lround( screen.left / density ), y = (int)lround( screen.top / density );
+	if (mode == WINDOW_MODE_WINDOWED)
+	{
+		x += ((int)lround( (screen.right - screen.left) / density ) - pointsWidth) / 2;
+		y += ((int)lround( (screen.bottom - screen.top) / density ) - pointsHeight) / 2;
+	}
+	SDL_SetWindowPosition( window, x, y );
+
+	int pixelWidth = 0, pixelHeight = 0;
+	SDL_GetWindowSizeInPixels( window, &pixelWidth, &pixelHeight );
+	DEBUG_LOG(( "SdlGameEngine: mode %d at %dx%d, %dx%d points at a density of %.2f; the window is %dx%d pixels\n",
+		mode, width, height, pointsWidth, pointsHeight, density, pixelWidth, pixelHeight ));
+}
+
+SdlGameEngine::SdlGameEngine( const WindowRequest &request )
+{
+	m_request = request;
+	m_window = NULL;
+	m_sdlVideoStarted = FALSE;
+}
+
+/* The window and SDL's video outlive the engine, as WinMain's window outlives GameMain: the engine's own
+	 teardown (the base class's, which runs after this) still releases the device, and the GPU device made
+	 on SDL's video must go before the video does.  Under Vulkan, quitting the video unloads the Vulkan
+	 library, and the device's destroy then called into it (Linux x86_64, -offscreen, 2026-09-27).  So the
+	 window is handed on here, and SdlGameEngine_releaseWindow, which PosixMain calls after GameMain,
+	 releases it. */
+static SDL_Window *s_pendingWindow = NULL;
+static Bool s_pendingVideo = FALSE;
+
+SdlGameEngine::~SdlGameEngine()
+{
+	s_pendingWindow = m_window;
+	s_pendingVideo = m_sdlVideoStarted;
+	m_window = NULL;
+	m_sdlVideoStarted = FALSE;
+}
+
+// The window exists before the engine starts, as WinMain creates it before GameMain: GameText names it
+// during GameEngine::init.
+// GameMain calls init( argc, argv ); the argument-less init is empty in GameEngine and nothing calls it.
+void SdlGameEngine::init( int argc, char *argv[] )
+{
+	createWindow();
+	GameEngine::init( argc, argv );
+
+	// P1 step 3: "-dumpFileResolution <file>" writes where every path resolves, then ends the run
+	// (test_packaging_resolution compares two layouts' dumps).  A test switch, never a player's.
+	for (int i = 1; i + 1 < argc; ++i)
+		if (strcasecmp( argv[i], "-dumpFileResolution" ) == 0)
+		{
+			const Bool written = PosixDumpFileResolution( argv[i + 1] );
+			fprintf( stderr, "generals: file resolution %s %s\n", written ? "written to" : "NOT written to", argv[i + 1] );
+			fflush( NULL );
+			_exit( written ? 0 : 1 );
+		}
+}
+
+void SdlGameEngine::createWindow( void )
+{
+	if (m_request.headless)
+		return;		// no SDL video at all: a headless run must work with no display
+
+	if (m_request.offscreen)
+	{
+		startOffscreen();
+		return;
+	}
+
+	// Fullscreen as the game has it on Windows: the display is the game's.  macOS would otherwise put the
+	// window in a fullscreen Space, whose menu bar and Dock slide in when the pointer reaches the top or
+	// bottom edge - where the game scrolls the view.  SDL reads this once, when its video starts.
+	if (!m_request.windowed)
+		SDL_SetHint( SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "0" );
+
+	if (!SDL_Init( SDL_INIT_VIDEO ))
+	{
+		char why[ 512 ];
+		snprintf( why, sizeof( why ), "SDL could not start its video subsystem: %s", SDL_GetError() );
+		RELEASE_CRASH( why );
+		return;
+	}
+	m_sdlVideoStarted = TRUE;
+	ThePlatformDisplays = &TheSdlDisplays;		// Monitors.h answers from SDL's displays from here on
+
+	/* The window's drawable in pixels, not points.  The game's sizes are pixels (SdlDisplays.h), and without
+		 this SDL's Metal view is sized in points: a first run on a scaled Mac drew 3420x2224 into a 1710x1112
+		 swapchain, which macOS then scaled up again (an M2 MacBook Air, 2026-09-28).  The mouse is unaffected: it is
+		 mapped from the window's points (SdlInput_toGamePixels).  Where points are pixels (X11, gamescope) this
+		 changes nothing. */
+	SDL_WindowFlags flags = SDL_WINDOW_HIGH_PIXEL_DENSITY;
+	if (!m_request.windowed)
+		flags |= SDL_WINDOW_FULLSCREEN;
+	if (m_request.hidden)
+		flags |= SDL_WINDOW_HIDDEN;		// -hiddenwindow: drawn, never shown (PosixMain.cpp)
+	int width = INITIAL_WINDOW_WIDTH;
+	int height = INITIAL_WINDOW_HEIGHT;
+	SDL_Rect bounds;
+	if (m_request.borderless && SDL_GetDisplayBounds( SDL_GetPrimaryDisplay(), &bounds ))
+	{
+		// Borderless is a frameless window covering the display, as WinMain makes it.
+		flags |= SDL_WINDOW_BORDERLESS;
+		width = bounds.w;
+		height = bounds.h;
+	}
+
+	m_window = SDL_CreateWindow( "Command and Conquer Generals Zero Hour", width, height, flags );
+	if (m_window == NULL)
+	{
+		char why[ 512 ];
+		snprintf( why, sizeof( why ), "SDL could not create the game's window: %s", SDL_GetError() );
+		RELEASE_CRASH( why );
+		return;
+	}
+	DEBUG_LOG(( "SdlGameEngine: window %dx%d, %s%s%s\n", width, height,
+		m_request.windowed ? "windowed" : "fullscreen", m_request.borderless ? ", borderless" : "",
+		m_request.hidden ? ", hidden" : "" ));
+
+	s_titledWindow = m_window;
+	TheApplicationWindowTitleHook = setTitleOfWindow;
+	setSdlMessageBoxOwner( m_window );
+
+	// WinMain's ApplicationHWnd, for W3DDevice: the device's window, and the calls that dress and size it
+	ApplicationHWnd = (RenderWindow)m_window;
+	ApplicationIsBorderless = m_request.borderless;
+	TheW3DWindowFrameHook = dressWindow;
+	TheW3DWindowSizeHook = sizeWindow;
+}
+
+/* -offscreen (PosixMain.cpp): SDL's video runs, because SDL3 makes no GPU device without it, but no window
+	 is made, and the device draws every frame into its own target.  The display's own video driver first;
+	 where it has no display to add (no window server: a worker over ssh, CI), a driver with no display:
+	   - on Apple, SDL's dummy driver, with ZH_SDL_GPU_METAL_WINDOWLESS for the Metal backend, which otherwise
+	     wants a view the dummy driver cannot make (Libraries/Source/sdl3-metal-windowless.patch);
+	   - elsewhere, SDL's offscreen driver, which gives Vulkan a headless surface (VK_EXT_headless_surface)
+	     with no patch.  The dummy driver has no Vulkan surface, and SDL's Vulkan backend refuses it (measured in
+	     the L2 Vulkan work).
+	 The hint ZH_OFFSCREEN_FRAMES tells the device (a
+	 hint, not ZH_OFFSCREEN itself: the device must not act on the variable when -headless starts no video).
+	 Monitors.h keeps its no-display answers, as
+	 -headless has them, so a run sizes itself from -xres/-yres and Options.ini alone, whatever the host. */
+void SdlGameEngine::startOffscreen( void )
+{
+	SDL_SetHint( "ZH_OFFSCREEN_FRAMES", "1" );
+	SDL_SetHint( "ZH_SDL_GPU_METAL_WINDOWLESS", "1" );
+	// With a window server, the cocoa driver would make the process a Dock application with no window.
+	SDL_SetHint( SDL_HINT_MAC_BACKGROUND_APP, "1" );
+#if defined(__APPLE__)
+	static const char *const NO_DISPLAY_DRIVER = "dummy";
+#else
+	static const char *const NO_DISPLAY_DRIVER = "offscreen";
+#endif
+	const char *driver = "the display's";
+	if (!SDL_Init( SDL_INIT_VIDEO ))
+	{
+		const AsciiString first = SDL_GetError();
+		SDL_SetHint( SDL_HINT_VIDEO_DRIVER, NO_DISPLAY_DRIVER );
+		driver = NO_DISPLAY_DRIVER;
+		if (!SDL_Init( SDL_INIT_VIDEO ))
+		{
+			char why[ 512 ];
+			snprintf( why, sizeof( why ), "SDL could not start its video subsystem for -offscreen: %s (then, with the "
+				"%s driver: %s)", first.str(), NO_DISPLAY_DRIVER, SDL_GetError() );
+			RELEASE_CRASH( why );
+			return;
+		}
+	}
+	m_sdlVideoStarted = TRUE;
+	DEBUG_LOG(( "SdlGameEngine: offscreen, no window; SDL video driver %s (%s)\n", SDL_GetCurrentVideoDriver(), driver ));
+}
+
+void SdlGameEngine_releaseWindow( void )
+{
+	if (s_pendingWindow != NULL)
+	{
+		if (s_titledWindow == s_pendingWindow)
+		{
+			TheApplicationWindowTitleHook = NULL;
+			TheW3DWindowFrameHook = NULL;
+			TheW3DWindowSizeHook = NULL;
+			s_titledWindow = NULL;
+		}
+		if (ApplicationHWnd == (RenderWindow)s_pendingWindow)
+			ApplicationHWnd = NULL;
+		setSdlMessageBoxOwner( NULL );
+		SDL_DestroyWindow( s_pendingWindow );
+		s_pendingWindow = NULL;
+	}
+	if (s_pendingVideo)
+	{
+		ThePlatformDisplays = NULL;
+		SdlMouse_releaseCursors();		// before SDL_QuitMouse walks its list: SdlMouse.h says why
+		SDL_QuitSubSystem( SDL_INIT_VIDEO );
+		s_pendingVideo = FALSE;
+	}
+}
+
+/* WinMain's window procedure, for the messages that are not input (input is C3's):
+	 - closing the window (WM_CLOSE) asks the game to quit the way its menus do, with
+		 MSG_META_DEMO_INSTANT_QUIT, or, while it is still loading and nothing can carry a message, tells
+		 the engine to stop;
+	 - the application's focus (WM_ACTIVATEAPP) is the engine's isActive.
+	 Everything else goes to SdlInput_dispatch, which is WndProc's input half.
+	 Headless there is no SDL and nothing to pump. */
+void SdlGameEngine::serviceWindowsOS( void )
+{
+	if (!m_sdlVideoStarted)
+		return;
+
+	SDL_Event event;
+	while (SDL_PollEvent( &event ))
+	{
+		switch (event.type)
+		{
+			case SDL_EVENT_QUIT:
+			case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+				if (!getQuitting())
+				{
+					if (canPostQuitMessage())
+						TheMessageStream->appendMessage( GameMessage::MSG_META_DEMO_INSTANT_QUIT );
+					else
+						setQuitting( TRUE );
+				}
+				break;
+
+			case SDL_EVENT_WINDOW_FOCUS_GAINED:
+				setIsActive( TRUE );
+				break;
+
+			case SDL_EVENT_WINDOW_FOCUS_LOST:
+				setIsActive( FALSE );
+				break;
+
+			default:
+				SdlInput_dispatch( event );		// keys, text and the mouse (C3): SdlInput.h
+				break;
+		}
+	}
+}
+
+// Win32GameEngine's factories, the same W3D classes (decision 8); the radar too: W3DRadar, and
+// HeadlessRadar only under -nodevice, where there is no device to hold W3DRadar's textures.  -headless
+// makes the device with no window (decision 8, refined), so it keeps W3DRadar, as on Windows.
+GameLogic *SdlGameEngine::createGameLogic( void ) { return NEW W3DGameLogic; }
+GameClient *SdlGameEngine::createGameClient( void ) { return NEW W3DGameClient; }
+ModuleFactory *SdlGameEngine::createModuleFactory( void ) { return NEW W3DModuleFactory; }
+ThingFactory *SdlGameEngine::createThingFactory( void ) { return NEW W3DThingFactory; }
+FunctionLexicon *SdlGameEngine::createFunctionLexicon( void ) { return NEW W3DFunctionLexicon; }
+ParticleSystemManager *SdlGameEngine::createParticleSystemManager( void ) { return NEW W3DParticleSystemManager; }
+
+Radar *SdlGameEngine::createRadar( void )
+{
+	if( TheGlobalData && TheGlobalData->m_noRenderDevice )
+		return NEW HeadlessRadar;
+	return NEW W3DRadar;
+}
+
+/* An automated run makes no sound and shows no window.  A hidden window (-hiddenwindow, or
+	 ZH_HIDDEN_WINDOW) or no window (-offscreen, ZH_OFFSCREEN) is a harness's or a script's run, so it is
+	 silent exactly as -noaudio makes it, and
+	 the audio device is never opened.  ZH_ALLOW_AUDIO=1 keeps the sound for a deliberate audio check.
+	 This is the place: after the command line is parsed, before TheAudio opens its device. */
+AudioManager *SdlGameEngine::createAudioManager( void )
+{
+	const char *allow = getenv( "ZH_ALLOW_AUDIO" );
+	const Bool allowed = allow != NULL && allow[0] != '\0' && strcmp( allow, "0" ) != 0;
+	if ((m_request.hidden || m_request.offscreen) && !allowed && TheWritableGlobalData != NULL)
+	{
+		TheWritableGlobalData->m_audioOn = FALSE;
+		TheWritableGlobalData->m_speechOn = FALSE;
+		TheWritableGlobalData->m_soundsOn = FALSE;
+		TheWritableGlobalData->m_musicOn = FALSE;
+		DEBUG_LOG(( "Audio off: a hidden window or -offscreen is a harness's or a script's run (ZH_ALLOW_AUDIO=1 keeps it)\n" ));
+	}
+	return NEW MilesAudioManager;
+}

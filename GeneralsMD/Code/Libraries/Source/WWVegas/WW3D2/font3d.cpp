@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*********************************************************************************************** 
  ***                            Confidential - Westwood Studios                              *** 
@@ -45,6 +46,7 @@
 #include "surfaceclass.h"
 #include "texture.h"
 #include "vector2i.h"
+#include "Platform/StrdupAsWindows.h"
 
 static	SurfaceClass	*_surface;
 
@@ -59,7 +61,7 @@ Font3DDataClass::Font3DDataClass( const char *filename )
 {
 	Texture = NULL;
 	Load_Font_Image( filename);
-	Name = strdup( filename);
+	Name = strdupAsWindows( filename);
 	Name = strupr( Name);
 }
 
@@ -407,7 +409,7 @@ void	Font3DInstanceClass::Build_Cached_Tables()
  * Finds the normalized screenspace width of a character string - useful for checking before   *
  * printing to avoid overflowing the screen.																	  *                                                                                             * 
  ***********************************************************************************************/
-float	Font3DInstanceClass::String_Width( const WCHAR *test_str )
+float	Font3DInstanceClass::String_Width( const WideChar *test_str )
 {
 	float width = 0.0;
 	for (; *test_str; test_str++) {

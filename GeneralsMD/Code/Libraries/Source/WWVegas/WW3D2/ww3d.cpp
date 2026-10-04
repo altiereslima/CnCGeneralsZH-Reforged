@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -82,6 +84,7 @@
 
 
 #include "ww3d.h"
+#include "Lib/Clock.h"
 #include "rinfo.h"
 #include "assetmgr.h"
 #include "boxrobj.h"
@@ -89,7 +92,9 @@
 #include "camera.h"
 #include "scene.h"
 #include "texfcach.h"
+#if defined(_WIN32)
 #include "registry.h"
+#endif
 #include "segline.h"
 #include "shader.h"
 #include "vertmaterial.h"
@@ -108,10 +113,10 @@
 #include "render2d.h"
 #include "bound.h"
 #include "rddesc.h"
-#include "vector3i.h"
+#include "Vector3i.h"
 #include <cstdio>
 #include "dx8wrapper.h"
-#include "targa.h"
+#include "TARGA.H"
 #include "sortingrenderer.h"
 #include "thread.h"
 #include "cpudetect.h"
@@ -123,7 +128,9 @@
 #include "shdlib.h"
 
 #ifndef _UNIX
-#include "framgrab.h"
+#if defined(_WIN32)
+#include "framgrab.h"	// AVI capture through vfw32; its uses are all under _WINDOWS
+#endif
 #endif
 
 
@@ -219,7 +226,7 @@ unsigned													WW3D::NPatchesLevel=1;
 bool														WW3D::IsTexturingEnabled=true;
 bool										WW3D::IsColoringEnabled=false;
 
-static HWND												_Hwnd = NULL;		// Not a member to hide windows from WW3D users
+static RenderWindow												_Hwnd = NULL;		// Not a member to hide windows from WW3D users
 static int												_TextureReduction = 0;
 static int												_TextureMinDim = 1;
 static bool												_LargeTextureExtraReductionEnabled = false;
@@ -273,7 +280,7 @@ WW3DErrorType WW3D::Init(void *hwnd, char *defaultpal, bool lite)
 {
 	assert(IsInitted == false);
 	WWDEBUG_SAY(("WW3D::Init hwnd = %p\n",hwnd));
-	_Hwnd = (HWND)hwnd;
+	_Hwnd = (RenderWindow)hwnd;
 	Lite = lite;
 
 	/*
@@ -287,8 +294,8 @@ WW3DErrorType WW3D::Init(void *hwnd, char *defaultpal, bool lite)
 	WWDEBUG_SAY(("Allocate Debug Resources\n"));
 	Allocate_Debug_Resources();
 
- 	MMRESULT r=timeBeginPeriod(1);
-	WWASSERT(r==TIMERR_NOERROR);
+ 	const bool fine_resolution=Clock_Begin_Fine_Resolution();
+	WWASSERT(fine_resolution);
 
 	/*
 	** Initialize the dazzle system
@@ -345,8 +352,8 @@ WW3DErrorType WW3D::Shutdown(void)
 #endif //WW3D_DX8
 
 	//restore the previous timer resolution
-	MMRESULT r=timeEndPeriod(1);
-	WWASSERT(r==TIMERR_NOERROR);
+	const bool resolution_given_back=Clock_End_Fine_Resolution();
+	WWASSERT(resolution_given_back);
 	/*
 	** Free memory in predictive LOD optimizer
 	*/
@@ -677,6 +684,7 @@ void WW3D::Get_Device_Resolution(int & set_w,int & set_h,int & set_bits,bool & s
 }
 
 
+#if defined(_WIN32)	// the registry: Windows only
 /***********************************************************************************************
  * WW3D::Registry_Save_Render_Device -- Saves settings to Registry
  *                                                                                             *
@@ -749,6 +757,7 @@ bool WW3D::Registry_Load_Render_Device( const char * sub_key, char *device, int 
 {
 	return DX8Wrapper::Registry_Load_Render_Device(sub_key,device,device_len,width,height,depth,windowed,texture_depth);
 }
+#endif // _WIN32
 
 void WW3D::_Invalidate_Mesh_Cache()
 {
@@ -805,7 +814,7 @@ WW3DErrorType WW3D::Begin_Render(bool clear,bool clearz,const Vector3 & color, f
 
 	WWPROFILE("WW3D::Begin_Render");
 	WWASSERT(IsInitted);
-	HRESULT hr;
+	RenderResult hr;
 
 	SNAPSHOT_SAY(("==========================================\r\n"));
 	SNAPSHOT_SAY(("========== WW3D::Begin_Render ============\r\n"));
@@ -1308,6 +1317,7 @@ void WW3D::Normalize_Coordinates(int x, int y, float &fx, float &fy)
  *=============================================================================================*/
 void WW3D::Make_Screen_Shot( const char * filename_base , const float gamma, const ScreenShotFormatEnum format)
 {
+#if defined(_WIN32)	// the front buffer through the window's rectangle, written with wingdi's structures
 
 	WWASSERT(!IsRendering);
 
@@ -1365,7 +1375,7 @@ void WW3D::Make_Screen_Shot( const char * filename_base , const float gamma, con
 	D3DSURFACE_DESC desc;
 	fb->GetDesc(&desc);
 
-	RECT bounds;
+	RenderRect bounds;
 	GetWindowRect(_Hwnd,&bounds);
 
 	D3DLOCKED_RECT lrect;
@@ -1469,6 +1479,11 @@ void WW3D::Make_Screen_Shot( const char * filename_base , const float gamma, con
 	}
 
 	delete [] image;
+#else
+	// Off Windows a screenshot is W3DDisplay's, from the back buffer, once the device can read it back (A3).
+	(void)filename_base; (void)gamma; (void)format;
+	WWDEBUG_SAY(("WW3D::Make_Screen_Shot: not off Windows yet\n"));
+#endif
 }
 
 
@@ -1494,7 +1509,7 @@ void WW3D::Start_Movie_Capture( const char * filename_base, float frame_rate )
 	WWASSERT( !IsCapturing);
 	IsCapturing = true;
 
-	RECT bounds;
+	RenderRect bounds;
 	GetWindowRect(_Hwnd,&bounds);
 	int height=bounds.bottom-bounds.top;
 	int width=bounds.right-bounds.left;
@@ -1703,7 +1718,7 @@ void WW3D::Update_Movie_Capture( void )
 	D3DSURFACE_DESC desc;
 	fb->GetDesc(&desc);
 
-	RECT bounds;
+	RenderRect bounds;
 	GetWindowRect(_Hwnd,&bounds);
 
 	D3DLOCKED_RECT lrect;

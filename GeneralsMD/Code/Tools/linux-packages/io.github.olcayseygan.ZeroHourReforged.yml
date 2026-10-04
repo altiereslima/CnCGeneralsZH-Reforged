@@ -1,0 +1,45 @@
+# The Flatpak of Zero Hour Reforged (Tools/linux-packages.sh builds it with flatpak-builder and packs it as one
+# .flatpak file with flatpak build-bundle).  It packages the portable folder Tools/linux-portable.sh --no-art
+# made and checked, which linux-packages.sh puts beside this file, in /app/lib/zero-hour-reforged: the game
+# finds its overlay from its own executable's place, as it does from /usr/lib in the other packages.
+#
+# No filesystem permission: the sandbox sees none of the player's folders, so the first start asks for the Zero
+# Hour folder through the desktop portal's folder chooser (SDL's dialog uses it inside a Flatpak), and only
+# the folder chosen is shared with it; a Zero Hour without its base game beside it is followed by a second
+# question, for the Generals folder.  Network: LAN games.  device=all: the GPU.
+app-id: io.github.olcayseygan.ZeroHourReforged
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+command: zero-hour-reforged
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --socket=pulseaudio
+  - --device=all
+  - --share=network
+modules:
+  - name: zero-hour-reforged
+    buildsystem: simple
+    sources:
+      - type: dir
+        path: ZeroHourReforged-linux-x86_64
+        dest: folder
+      - type: file
+        path: io.github.olcayseygan.ZeroHourReforged.metainfo.xml
+    build-commands:
+      - install -d /app/lib/zero-hour-reforged /app/bin /app/share/applications /app/share/metainfo
+          /app/share/icons/hicolor/48x48/apps /app/share/icons/hicolor/128x128/apps
+      - cp -a folder/. /app/lib/zero-hour-reforged/
+      - rm -rf /app/lib/zero-hour-reforged/bin/generals.debug /app/lib/zero-hour-reforged/share/applications
+          /app/lib/zero-hour-reforged/share/icons
+      - ln -s ../lib/zero-hour-reforged/zero-hour-reforged.sh /app/bin/zero-hour-reforged
+      - sed -e 's/^Exec=.*/Exec=zero-hour-reforged/' -e 's/^Icon=.*/Icon=io.github.olcayseygan.ZeroHourReforged/'
+          -e '/^# a template/d' folder/share/applications/zero-hour-reforged.desktop
+          > /app/share/applications/io.github.olcayseygan.ZeroHourReforged.desktop
+      - install -m 644 folder/share/icons/hicolor/48x48/apps/zero-hour-reforged.png
+          /app/share/icons/hicolor/48x48/apps/io.github.olcayseygan.ZeroHourReforged.png
+      - install -m 644 folder/share/icons/hicolor/128x128/apps/zero-hour-reforged.png
+          /app/share/icons/hicolor/128x128/apps/io.github.olcayseygan.ZeroHourReforged.png
+      - install -m 644 io.github.olcayseygan.ZeroHourReforged.metainfo.xml /app/share/metainfo/

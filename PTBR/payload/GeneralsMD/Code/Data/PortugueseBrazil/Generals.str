@@ -4611,7 +4611,7 @@ GUI:BeaconPlacementFailed
 END
 
 GUI:BehindBuilding
-"Assinatura de Calor"
+"Unidades Atrás de Estruturas"
 END
 
 GUI:BestWinStreak
@@ -5899,7 +5899,27 @@ GUI:DesyncTitle
 END
 
 GUI:Detail
-"Nível de Detalhes"
+"Predefinição de Detalhes"
+END
+
+GUI:DetailNote0
+"Todas as caixas marcadas, o máximo de partículas e fumaça densa, e o detalhe nunca cai numa grande batalha. Escolher só preenche as caixas; Aceitar aplica."
+END
+
+GUI:DetailNote1
+"Todas as sombras e texturas em tamanho cheio, com a fumaça original. Escolher só preenche as caixas; Aceitar aplica."
+END
+
+GUI:DetailNote2
+"Sombras planas no lugar das projetadas e menos partículas, para uma placa de vídeo modesta. Escolher só preenche as caixas; Aceitar aplica."
+END
+
+GUI:DetailNote3
+"Sem sombras, texturas pela metade e o mínimo de partículas, para uma máquina antiga. Escolher só preenche as caixas; Aceitar aplica."
+END
+
+GUI:DetailNote4
+"A sua própria combinação das caixas desta página e da aba Efeitos. Aceitar a mantém como está."
 END
 
 GUI:DetailsSetToLowest
@@ -6067,7 +6087,7 @@ GUI:Experience
 END
 
 GUI:ExtraAnimations
-"Animações Extras"
+"Andaimes de Construção"
 END
 
 GUI:Faction
@@ -6279,7 +6299,7 @@ GUI:GridBuild
 END
 
 GUI:GroundLighting
-"Iluminação de Terreno"
+"Padrão do Terreno"
 END
 
 GUI:GroupRoom1
@@ -6551,7 +6571,7 @@ GUI:HealthBars3
 END
 
 GUI:HeatEffects
-"Efeitos de Calor"
+"Distorção do Calor"
 END
 
 GUI:Help
@@ -7182,6 +7202,18 @@ GUI:MediumGameSpeed
 "Médio"
 END
 
+GUI:MenuLayout
+"Layout dos Menus"
+END
+
+GUI:MenuLayout0
+"Esticar"
+END
+
+GUI:MenuLayout1
+"Ajustar"
+END
+
 GUI:MessagesOn
 "Mensagens ativadas."
 END
@@ -7542,8 +7574,56 @@ GUI:OptionsTabNetwork
 "Rede"
 END
 
+GUI:OrderForceAttack
+"Ataque Forçado"
+END
+
+GUI:OrderForceAttackDescription
+"O próximo clique ataca o que estiver sob o cursor, inclusive o chão e o seu próprio lado. Clique no botão de novo para cancelar."
+END
+
+GUI:OrderHoldPosition
+"Manter Posição"
+END
+
+GUI:OrderHoldPositionDescription
+"As unidades selecionadas guardam o lugar onde estão e combatem o que se aproximar, sem persegui-lo para fora da área."
+END
+
 GUI:OrderLines
 "Linhas de Ordens"
+END
+
+GUI:OrderMove
+"Mover"
+END
+
+GUI:OrderMoveDescription
+"O próximo clique no chão manda as unidades selecionadas para lá. Se arrastar, elas se espalham ao longo da linha que você desenhar."
+END
+
+GUI:OrderSearchAndDestroy
+"Procurar e Destruir"
+END
+
+GUI:OrderSearchAndDestroyDescription
+"Clique num ponto e as unidades selecionadas fazem Mover e Atacar ao redor dele, combatendo o que encontrarem, e depois ficam guardando todo o círculo. Gire a roda do mouse antes de clicar para ajustar o tamanho do círculo."
+END
+
+GUI:OrderStanceAggressive
+"Postura: Agressiva"
+END
+
+GUI:OrderStanceAggressiveDescription
+"As unidades selecionadas vão atrás de qualquer inimigo que virem e o perseguem. Clique para deixá-las defensivas de novo: só atiram no que entrar no alcance e ficam onde estão."
+END
+
+GUI:OrderStanceDefensive
+"Postura: Defensiva"
+END
+
+GUI:OrderStanceDefensiveDescription
+"As unidades selecionadas atiram no que entrar no alcance e mantêm o terreno onde você as colocou. Clique para deixá-las agressivas: elas vão atrás de qualquer inimigo que virem."
 END
 
 GUI:OverchargeExhausted
@@ -7747,7 +7827,7 @@ GUI:Progress
 END
 
 GUI:ProjectileShadows
-"Sombras de Projéteis"
+"Sombras de Mísseis"
 END
 
 GUI:PropShadows
@@ -8355,11 +8435,11 @@ GUI:Shadows
 END
 
 GUI:Shadows2D
-"Sombras 2D"
+"Sombras Planas"
 END
 
 GUI:Shadows3D
-"Sombras 3D"
+"Sombras Projetadas"
 END
 
 GUI:ShortcutSlot01
@@ -8435,7 +8515,7 @@ GUI:ShowBehindBuildings
 END
 
 GUI:ShowProps
-"Exibir Objetos Adicionais"
+"Árvores e Arbustos"
 END
 
 GUI:Side
@@ -8538,8 +8618,12 @@ GUI:Smoke2
 "Muito Densa"
 END
 
+GUI:SmoothMotion
+"Movimento Suave"
+END
+
 GUI:SmoothWater
-"Suavizar Água"
+"Margens Suaves"
 END
 
 GUI:SnapBuild45
@@ -15123,7 +15207,7 @@ TOOLTIP:AlternateMouse
 END
 
 TOOLTIP:Anisotropy
-"Define quantas amostras a filtragem anisotrópica pode usar. Automático deixa a placa de vídeo decidir, até 16. Só é usado quando a filtragem de texturas está em Anisotrópica."
+"Define quantas amostras a filtragem anisotrópica pode usar. Automático deixa a placa de vídeo decidir, até 16. Só é usado quando a filtragem de texturas está em Anisotrópica. Entra em vigor na próxima vez que o jogo iniciar."
 END
 
 TOOLTIP:ArchiveReplays
@@ -15403,7 +15487,7 @@ TOOLTIP:BattleHonorUltimateDisabled
 END
 
 TOOLTIP:BehindBuilding
-"Ativa/Desativa a assinatura de calor para mostrar unidades atrás de estruturas. Pode causar lentidão quando ativada."
+"Uma unidade escondida atrás de uma estrutura aparece através dela como uma silhueta na cor do seu jogador. Entra em vigor ao clicar em Aceitar."
 END
 
 TOOLTIP:BioStrategyLong_China
@@ -15563,7 +15647,7 @@ TOOLTIP:CloserZoom
 END
 
 TOOLTIP:CloudShadows
-"Ativa/Desativa a exibição das sombras das nuvens sobre o terreno. Desative esta opção para melhorar o desempenho do jogo."
+"As sombras das nuvens passam sobre o terreno. Custa pouco. Entra em vigor ao clicar em Aceitar."
 END
 
 TOOLTIP:CommandCategory
@@ -15683,7 +15767,7 @@ TOOLTIP:ExperienceToLevel
 END
 
 TOOLTIP:ExtraAnimations
-"Os edifícios sobem dentro dos andaimes durante a construção. O movimento das árvores possui uma opção própria."
+"Os edifícios sobem dentro dos andaimes durante a construção. Entra em vigor no próximo mapa."
 END
 
 TOOLTIP:FireWallPort
@@ -15747,7 +15831,7 @@ TOOLTIP:GridBuild
 END
 
 TOOLTIP:GroundLighting
-"Ativa/Desativa a iluminação detalhada do terreno. Desative esta opção para melhorar o desempenho do jogo."
+"Um leve padrão de luz e sombra sobre o terreno, para que a repetição dos ladrilhos do chão apareça menos. Custa pouco. Entra em vigor ao clicar em Aceitar."
 END
 
 TOOLTIP:HasConflictingUpgradeDefault
@@ -15759,7 +15843,7 @@ TOOLTIP:HealthBars
 END
 
 TOOLTIP:HeatEffects
-"Ligue/Desligue para mostrar os efeitos de distorção provocados pelo calor. Desligue para melhorar o desempenho do jogo."
+"O ar quente tremula, como sobre o raio do Tanque de Microondas. Entra em vigor ao clicar em Aceitar."
 END
 
 TOOLTIP:Help
@@ -15795,7 +15879,7 @@ TOOLTIP:IncomeSharing
 END
 
 TOOLTIP:InfantryShadows
-"Soldados e outros modelos animados também projetam sombras 3D. Requer Sombras 3D. Entra em vigor no próximo mapa."
+"Soldados e outros modelos animados também projetam sombras reais. Requer Sombras Projetadas. Entra em vigor no próximo mapa."
 END
 
 TOOLTIP:InputScheme
@@ -15871,7 +15955,7 @@ TOOLTIP:Login
 END
 
 TOOLTIP:LowResSlider
-"Utilizar texturas de alta qualidade pode causar lentidão durante o jogo."
+"A nitidez das texturas. Menor poupa memória de vídeo numa placa antiga. Entra em vigor ao clicar em Aceitar."
 END
 
 TOOLTIP:LowTextureDetail
@@ -15910,6 +15994,10 @@ TOOLTIP:matchingprogress
 "Mostra o progresso enquanto o QuickMatch procura um oponente."
 END
 
+TOOLTIP:MenuLayout
+"Ajustar mantém os menus no formato em que foram desenhados e os centraliza numa tela larga. Esticar os alarga até as bordas da tela, como o jogo sempre fez."
+END
+
 TOOLTIP:MiddleMousePans
 "Mantenha o botão do meio pressionado para arrastar o mapa sob o cursor."
 END
@@ -15935,7 +16023,7 @@ TOOLTIP:Monitor
 END
 
 TOOLTIP:MSAA
-"Suaviza o serrilhado nas bordas dos modelos. Se a placa não oferecer o nível escolhido, será usado o maior nível compatível. Aplicado na próxima reinicialização do dispositivo gráfico."
+"Suaviza o serrilhado nas bordas dos modelos. Só o renderizador Direct3D 9 usa esta opção: o renderizador padrão suaviza as bordas por conta própria e a ignora. Se a placa não oferecer o nível escolhido, será usado o maior nível compatível. Entra em vigor na próxima vez que o jogo iniciar."
 END
 
 TOOLTIP:MyInfo
@@ -15955,7 +16043,7 @@ TOOLTIP:Network
 END
 
 TOOLTIP:NoDynamicLOD
-"Desabilita o ajuste automático do nível de detalhes. Desative esta opção para melhorar o desempenho do jogo."
+"Quando a taxa de quadros cai numa grande batalha, o jogo reduz os efeitos para acompanhar. Ligado, isso nunca acontece: a imagem fica completa e a taxa de quadros sofre."
 END
 
 TOOLTIP:NoLadder
@@ -16015,11 +16103,11 @@ TOOLTIP:ParticleBounce
 END
 
 TOOLTIP:ParticleCapSlider
-"Utilizar muitos efeitos de partículas pode causar lentidão durante o jogo."
+"Quantas partículas de fumaça, fogo e faíscas podem existir ao mesmo tempo. Grandes batalhas chegam ao limite primeiro; diminua se as explosões deixarem o jogo lento. Entra em vigor ao clicar em Aceitar."
 END
 
 TOOLTIP:ParticleShadows
-"Grandes nuvens de fumaça e poeira projetam uma sombra suave sobre o solo."
+"Grandes nuvens de fumaça e poeira projetam uma sombra suave sobre o solo. Entra em vigor ao clicar em Aceitar."
 END
 
 TOOLTIP:PeaceTime
@@ -16179,15 +16267,15 @@ TOOLTIP:Shadows
 END
 
 TOOLTIP:Shadows2D
-"Ativa/Desativa a exibição de sombras 2D. Desative esta opção para melhorar o desempenho do jogo."
+"A mancha escura e plana desenhada sob uma unidade ou um míssil que não projeta sombra. Custa pouco. Entra em vigor ao clicar em Aceitar."
 END
 
 TOOLTIP:Shadows3D
-"Ativa/Desativa a exibição de sombras 3D. Desative esta opção para melhorar o desempenho do jogo."
+"Sombras que unidades, estruturas e árvores projetam no chão e umas nas outras. Desligada, apaga todas, inclusive as do sol, e Sombras da Infantaria precisa dela ligada. Entra em vigor ao clicar em Aceitar; algumas sombras só mudam no próximo mapa."
 END
 
 TOOLTIP:ShowProps
-"Ativa/Desativa a exibição de objetos adicionais no jogo. Pode causar lentidão quando ativada."
+"Árvores e arbustos no mapa. Desligar ajuda uma máquina lenta. Partidas em rede sempre os mostram. Entra em vigor no próximo mapa."
 END
 
 TOOLTIP:Skirmish
@@ -16198,8 +16286,12 @@ TOOLTIP:Smoke
 "Define por quanto tempo a fumaça permanece no ar e sua densidade. Entre os 1.088 efeitos do jogo, 175 são de fumaça. Muito Densa custou cerca de 0,7 ms por quadro em uma coluna em chamas durante os testes. Entra em vigor na próxima inicialização do jogo."
 END
 
+TOOLTIP:SmoothMotion
+"As unidades são desenhadas entre os 30 passos por segundo do jogo, para se moverem com suavidade numa tela rápida. A imagem fica um passo (33 ms) atrás; o jogo em si não muda."
+END
+
 TOOLTIP:SmoothWater
-"Ativa/Desativa a suavização de bordas para as áreas com água. Desative esta opção para melhorar o desempenho do jogo."
+"A água vai sumindo na margem em vez de terminar numa linha dura. Entra em vigor no próximo mapa."
 END
 
 TOOLTIP:SnapBuild45
@@ -16359,7 +16451,7 @@ TOOLTIP:textentrybox
 END
 
 TOOLTIP:TextureFilter
-"Define como as texturas são filtradas à medida que se afastam da câmera. Bilinear é o padrão do jogo original e pode fazer o terreno distante cintilar; anisotrópica mantém mais nitidez. Entra em vigor na próxima reinicialização do dispositivo gráfico."
+"Define como as texturas são filtradas à medida que se afastam da câmera. Bilinear é o padrão do jogo original e faz o terreno distante cintilar; anisotrópica mantém a nitidez. Entra em vigor na próxima vez que o jogo iniciar."
 END
 
 TOOLTIP:TooltipCannotBuildBuildingBecauseMaximumNumber

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -46,7 +48,11 @@
 #include "dettrig.h"
 #include <math.h>
 #include <float.h>
-#include <emmintrin.h>
+#include <stdint.h>
+#include <string.h>
+// Was <emmintrin.h>, for the two cvtss2si conversions below.  Lib/DetRound.h is where the choice
+// of rounding now lives, for both architectures and with a test behind it.
+#include "Lib/DetRound.h"
 #include <assert.h>
 #include <float.h>
 
@@ -281,8 +287,11 @@ WWINLINE double WWMath::Lerp(double a, double b, float lerp )
 
 WWINLINE bool WWMath::Is_Valid_Float(float x)
 {
-	unsigned long * plong = (unsigned long *)(&x);
-	unsigned long exponent = ((*plong) & 0x7F800000) >> (32-9);
+	// The float's own 32 bits.  This read them through an unsigned long, which is 8 bytes on LP64 (macOS,
+	// Linux): 4 bytes past x on every call (ASan under ZH_SANITIZE), though the mask kept the answer right.
+	uint32_t bits;
+	memcpy(&bits, &x, sizeof(bits));
+	uint32_t exponent = (bits & 0x7F800000) >> (32-9);
 
 	// if exponent is 0xFF, this is a NAN 
 	if (exponent == 0xFF) {
@@ -293,8 +302,11 @@ WWINLINE bool WWMath::Is_Valid_Float(float x)
 
 WWINLINE bool WWMath::Is_Valid_Double(double x)
 {
-	unsigned long * plong = (unsigned long *)(&x) + 1;
-	unsigned long exponent = ((*plong) & 0x7FF00000) >> (32-12);
+	// The high word of the double's 64 bits.  This took it as the second unsigned long, which on LP64 is
+	// the 8 bytes after x: the answer did not depend on x at all there.
+	uint64_t bits;
+	memcpy(&bits, &x, sizeof(bits));
+	uint32_t exponent = ((uint32_t)(bits >> 32) & 0x7FF00000) >> (32-12);
 
 	// if exponent is 0x7FF, this is a NAN 
 	if (exponent == 0x7FF) {
@@ -309,14 +321,15 @@ WWINLINE bool WWMath::Is_Valid_Double(double x)
 
 WWINLINE long WWMath::Float_To_Long(float f)
 {
-	// cvtss2si, not a cast: EA's fistp rounds to nearest even and a C cast truncates, and callers
-	// in GameLogic depend on the rounding.
-	return (long)_mm_cvtss_si32(_mm_set_ss(f));
+	// Not a cast: EA's fistp rounds to nearest even and a C cast truncates, and callers in
+	// GameLogic depend on the rounding.  Lib/DetRound.h picks the instruction per architecture -
+	// cvtss2si on x64, FCVTNS on arm64 - and Tests/test_detround.cpp holds them to the same table.
+	return DetRound::To_Long(f);
 }
 
 WWINLINE long WWMath::Float_To_Long(double f)
 {
-	return (long)_mm_cvtsd_si32(_mm_set_sd(f));
+	return DetRound::To_Long(f);
 }
 
 // ----------------------------------------------------------------------------

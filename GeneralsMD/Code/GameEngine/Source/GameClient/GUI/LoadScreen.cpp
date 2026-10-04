@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -48,6 +50,10 @@
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Platform/SleepMilliseconds.h"
+#include "Lib/Clock.h"
+
+#include "Lib/WideCharFns.h"
 
 //-----------------------------------------------------------------------------
 // USER INCLUDES //////////////////////////////////////////////////////////////
@@ -406,7 +412,7 @@ void SinglePlayerLoadScreen::init( GameInfo *game )
 
 	m_percent = TheWindowManager->winGetWindowFromId( m_loadScreen,TheNameKeyGenerator->nameToKey( AsciiString( "SinglePlayerLoadScreen.wnd:Percent" ) ));
 	DEBUG_ASSERTCRASH(m_percent, ("Can't initialize the m_percent for the single player loadscreen"));
-	GadgetStaticTextSetText(m_percent,UnicodeString(L"0%"));
+	GadgetStaticTextSetText(m_percent,UnicodeString(u"0%"));
 	m_percent->winHide(TRUE);
 
 	m_objectiveWin = TheWindowManager->winGetWindowFromId( m_loadScreen,TheNameKeyGenerator->nameToKey( AsciiString( "SinglePlayerLoadScreen.wnd:ObjectivesWin" ) ));
@@ -539,7 +545,7 @@ void SinglePlayerLoadScreen::init( GameInfo *game )
 
 			if(!m_videoStream->isFrameReady())
 			{
-				Sleep(1);	
+				sleepMilliseconds( 1 );	
 				continue;
 			}
 
@@ -569,7 +575,7 @@ void SinglePlayerLoadScreen::init( GameInfo *game )
 					shiftedPercent = 0;
 				Int percent = (shiftedPercent + FRAME_FUDGE_ADD)/1.3;
 				UnicodeString per;
-				per.format(L"%d%%",percent);
+				per.format(u"%d%%",percent);
 				TheMouse->setCursorTooltip(UnicodeString::TheEmptyString);
 				GadgetProgressBarSetProgress(m_progressBar, percent);
 				GadgetStaticTextSetText(m_percent, per);
@@ -592,7 +598,7 @@ void SinglePlayerLoadScreen::init( GameInfo *game )
 		// if we're min spec'ed don't play a movie
 		
 		Int delay = mission->m_voiceLength * 1000;
-		Int begin = timeGetTime();
+		Int begin = Clock_Milliseconds();
 		Int currTime = begin;
 		Int fudgeFactor = 0;
 		while(begin + delay > currTime )
@@ -602,8 +608,8 @@ void SinglePlayerLoadScreen::init( GameInfo *game )
 
 			TheWindowManager->update();
 			TheDisplay->draw();
-			Sleep(100);
-			currTime = timeGetTime();
+			sleepMilliseconds( 100 );
+			currTime = Clock_Milliseconds();
 		}
 		
 
@@ -627,7 +633,7 @@ void SinglePlayerLoadScreen::update( Int percent )
 {
 	percent = (percent + FRAME_FUDGE_ADD)/1.3;
 	UnicodeString per;
-	per.format(L"%d%%",percent);
+	per.format(u"%d%%",percent);
 	TheMouse->setCursorTooltip(UnicodeString::TheEmptyString);
 	GadgetProgressBarSetProgress(m_progressBar, percent);
 	GadgetStaticTextSetText(m_percent, per);
@@ -953,6 +959,10 @@ void ChallengeLoadScreen::init( GameInfo *game )
 
 	// create the new background video stream
 	m_videoStream = TheVideoPlayer->open( TheCampaignManager->getCurrentMission()->m_movieLabel );
+	// as SinglePlayerLoadScreen::init does: a movie that does not open (none headless, or a missing file) has
+	// no stream, and the buffer below read its size through NULL
+	if ( m_videoStream == NULL )
+		return;
 
 	// Create the new buffer
 	m_videoBuffer = TheDisplay->createVideoBuffer();
@@ -1055,7 +1065,7 @@ void ChallengeLoadScreen::init( GameInfo *game )
 
 			if(!m_videoStream->isFrameReady())
 			{
-				Sleep(1);	
+				sleepMilliseconds( 1 );	
 				continue;
 			}
 
@@ -1081,7 +1091,7 @@ void ChallengeLoadScreen::init( GameInfo *game )
 					shiftedPercent = 0;
 				Int percent = (shiftedPercent + FRAME_FUDGE_ADD)/1.3;
 				UnicodeString per;
-				per.format(L"%d%%",percent);
+				per.format(u"%d%%",percent);
 				TheMouse->setCursorTooltip(UnicodeString::TheEmptyString);
 				GadgetProgressBarSetProgress(m_progressBar, percent);
 			}
@@ -1101,7 +1111,7 @@ void ChallengeLoadScreen::init( GameInfo *game )
 		// if we're min speced
 		m_videoStream->frameGoto(m_videoStream->frameCount()); // zero based
 		while(!m_videoStream->isFrameReady())
-			Sleep(1);
+			sleepMilliseconds( 1 );
 		m_videoStream->frameDecompress();
 		m_videoStream->frameRender(m_videoBuffer);
 		if(m_videoBuffer)
@@ -1110,7 +1120,7 @@ void ChallengeLoadScreen::init( GameInfo *game )
 		activatePiecesMinSpec(generalPlayer, generalOpponent);
 
 		Int delay = mission->m_voiceLength * 1000;
-		Int begin = timeGetTime();
+		Int begin = Clock_Milliseconds();
 		Int currTime = begin;
 		Int fudgeFactor = 0;
 		while(begin + delay > currTime )
@@ -1120,8 +1130,8 @@ void ChallengeLoadScreen::init( GameInfo *game )
 
 			TheWindowManager->update();
 			TheDisplay->draw();
-			Sleep(100);
-			currTime = timeGetTime();
+			sleepMilliseconds( 100 );
+			currTime = Clock_Milliseconds();
 		}
 		
 		m_wndVideoManager->update();
@@ -1148,7 +1158,7 @@ void ChallengeLoadScreen::update( Int percent )
 {
 	percent = (percent + FRAME_FUDGE_ADD)/1.3;
 	UnicodeString per;
-	per.format(L"%d%%",percent);
+	per.format(u"%d%%",percent);
 	TheMouse->setCursorTooltip(UnicodeString::TheEmptyString);
 	GadgetProgressBarSetProgress(m_progressBar, percent);
 
@@ -1176,7 +1186,7 @@ ShellGameLoadScreen::~ShellGameLoadScreen( void )
 
 void ShellGameLoadScreen::init( GameInfo *game )
 {
-	static BOOL firstLoad = TRUE;
+	static Bool firstLoad = TRUE;
 
 	
 	// create the layout of the load screen
@@ -1257,11 +1267,11 @@ void ShellGameLoadScreen::init( GameInfo *game )
 			win->winHide(FALSE);
 		firstLoad = FALSE;
 
-		UnsignedInt showTime = timeGetTime();
-		while(showTime + 3000 > timeGetTime())
+		UnsignedInt showTime = Clock_Milliseconds();
+		while(showTime + 3000 > Clock_Milliseconds())
 		{	
 			LoadScreen::update(0);
-			Sleep(100);
+			sleepMilliseconds( 100 );
 		}
 
 	}
@@ -1755,8 +1765,8 @@ void GameSpyLoadScreen::init( GameInfo *game )
 
 		// Get the stats for the player
 		PSPlayerStats stats = TheGameSpyPSMessageQueue->findPlayerStatsByID(slot->getProfileID());
-		DEBUG_LOG(("LoadScreen - populating info for %ls(%d) - stats returned id %d\n",
-			slot->getName().str(), slot->getProfileID(), stats.id));
+		DEBUG_LOG(("LoadScreen - populating info for %s(%d) - stats returned id %d\n",
+			WideCharAsUtf8( slot->getName().str() ).str(), slot->getProfileID(), stats.id));
 
 		Bool isPreorder = TheGameSpyInfo->didPlayerPreorder(stats.id);
 		Int rankPoints = CalculateRank(stats);
@@ -1782,7 +1792,7 @@ void GameSpyLoadScreen::init( GameInfo *game )
 		{
 			numWins += it->second;
 		}
-		formatString.format(L"%d/%d", numWins, numLosses);
+		formatString.format(u"%d/%d", numWins, numLosses);
 		GadgetStaticTextSetText(m_playerWinLosses[netSlot], formatString);
 		m_playerWinLosses[netSlot]->winSetEnabledTextColors(houseColor, m_playerWinLosses[netSlot]->winGetEnabledTextBorderColor());
 		// favoriteFaction
@@ -1824,7 +1834,7 @@ void GameSpyLoadScreen::init( GameInfo *game )
 		}
 		numGames += GetAdditionalDisconnectsFromUserFile(stats.id);
 
-		formatString.format(L"%d", numGames);
+		formatString.format(u"%d", numGames);
 		GadgetStaticTextSetText(m_playerTotalDisconnects[netSlot], formatString);
 		m_playerTotalDisconnects[netSlot]->winSetEnabledTextColors(houseColor, m_playerTotalDisconnects[netSlot]->winGetEnabledTextBorderColor());
 		GadgetStaticTextSetText(m_playerSide[netSlot], slot->getApparentPlayerTemplateDisplayName() );

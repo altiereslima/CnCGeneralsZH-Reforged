@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -28,6 +30,7 @@
 #include <list>
 #include "Common/MessageStream.h"
 #include "GameNetwork/GameInfo.h"
+#include "Common/WallClock.h"
 
 /**
   * The ReplayGameInfo class holds information about the replay game and
@@ -70,27 +73,47 @@ public:
 	void setSawCRCMismatch(void) { m_sawCRCMismatch = TRUE; }
 	Bool sawCRCMismatch(void) { return m_sawCRCMismatch; }
 
-	/// throw the next CRC away instead of queueing it - see replayIsMissingFirstCRC()
-	void skipFirstCRC(void) { m_skipOneCRC = TRUE; }
+	/// the first recorded CRC may be frame 0's or frame 1's - see replayMayLackFirstCRC()
+	void allowMissingFirstCRC(void) { m_alignment = ALIGN_PENDING; }
+
+	/**
+	 * The computed CRC to compare `recorded` with, taken off the queue.  Once only, when armed by
+	 * allowMissingFirstCRC: if the queue's head is `recorded` the recording has its frame 0 CRC and
+	 * nothing moves; if the next one is, the recording lacks it and the head is dropped; if neither is,
+	 * the head is compared, and reported, as it is.
+	 */
+	UnsignedInt readCRCFor(UnsignedInt recorded);
+
+	enum Alignment
+	{
+		ALIGN_NONE,							///< not a network replay: compared one for one from frame 0
+		ALIGN_PENDING,					///< a network replay whose first comparison has not happened yet
+		ALIGN_FROM_FRAME_0,			///< its CRCs are recorded from frame 0
+		ALIGN_FRAME_0_MISSING,	///< legacy: its frame 0 CRC was never recorded, and one was dropped
+		ALIGN_UNDECIDED					///< neither fitted: the first comparison was a real mismatch
+	};
+	Alignment getAlignment(void) const { return m_alignment; }
 
 protected:
 
 	Bool m_sawCRCMismatch;
-	Bool m_skipOneCRC;
+	Alignment m_alignment;
 	std::list<UnsignedInt> m_data;
 	UnsignedInt m_localPlayer;
 };
 
 /**
-  * TRUE if a replay recorded in this game mode has no CRC for frame 0.  A network game's CRCs
-	* travel as commands, and the one the logic makes on frame 0 is generated after that frame's
-	* commands have already gone out, so it is never sent, never executed and never recorded - the
-	* replay's CRC stream starts at frame 1.  Playback has no network to lose it to and produces a
-	* frame 0 CRC of its own, so without dropping one the whole comparison sits one frame out and a
-	* replay that is perfectly in sync reports a desync on its first interval frame.  Games recorded
-	* off the network - solo and skirmish - keep their frame 0 CRC and must not be shifted.
+  * TRUE if a replay recorded in this game mode may lack its frame 0 CRC.  A network game's CRCs travel
+	* as commands, and a command is only sent once the network has left its pregame state, which it
+	* does when the logic reaches frame 1.  Until d9eccdda (2026-09-22) that happened after frame 0's
+	* CRC had been taken off the command list and deleted, so the CRC was never sent, executed or
+	* recorded: every retail replay and every one recorded before then starts at frame 1.  Since then
+	* Network::update notes the new frame first, so frame 0's CRC goes out and is recorded.  Playback
+	* makes a frame 0 CRC either way, so for these modes CRCInfo decides at the first comparison which
+	* kind of recording it has (allowMissingFirstCRC).  Games recorded off the network - solo and
+	* skirmish - always have their frame 0 CRC and are compared one for one.
 	*/
-Bool replayIsMissingFirstCRC( Int originalGameMode );
+Bool replayMayLackFirstCRC( Int originalGameMode );
 
 class RecorderClass : public SubsystemInterface {
 public:
@@ -141,7 +164,7 @@ public:
 		AsciiString filename;
 		Bool forPlayback;
 		UnicodeString replayName;
-		SYSTEMTIME timeVal;
+		WallClockTime timeVal;
 		UnicodeString versionString;
 		UnicodeString versionTimeString;
 		UnsignedInt versionNumber;

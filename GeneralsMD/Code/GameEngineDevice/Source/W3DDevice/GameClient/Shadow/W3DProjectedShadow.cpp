@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ;////////////////////////////////////////////////////////////////////////////////
 ;//																																						 //
@@ -34,10 +36,10 @@
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "always.h"
 #include "GameClient/View.h"
-#include "WW3D2/Camera.h"
-#include "WW3D2/Light.h"
-#include "WW3D2/DX8Wrapper.h"
-#include "WW3D2/HLod.h"
+#include "WW3D2/camera.h"
+#include "WW3D2/light.h"
+#include "WW3D2/dx8wrapper.h"
+#include "WW3D2/hlod.h"
 #include "WW3D2/mesh.h"
 #include "WW3D2/meshmdl.h"
 #include "WW3D2/assetmgr.h"
@@ -45,19 +47,20 @@
 #include "WW3D2/dx8renderer.h"
 #include "Lib/BaseType.h"
 #include "W3DDevice/GameClient/W3DGranny.h"
-#include "W3DDevice/GameClient/Heightmap.h"
+#include "W3DDevice/GameClient/HeightMap.h"
 #include "d3dx9math.h"
-#include "common/GlobalData.h"
+#include "Common/GlobalData.h"
 #include "W3DDevice/GameClient/W3DProjectedShadow.h"
 #include "WW3D2/statistics.h"
 #include "Common/Debug.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/TerrainLogic.h"
-#include "GameClient/drawable.h"
+#include "GameClient/Drawable.h"
 #include "W3DDevice/GameClient/Module/W3DModelDraw.h"
 #include "W3DDevice/GameClient/W3DShadow.h"
-#include "W3DDevice/GameClient/Heightmap.h"
+#include "W3DDevice/GameClient/HeightMap.h"
+#include "Platform/RenderTypes.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -104,7 +107,7 @@ static Int drawStartY=0;
 struct SHADOW_DECAL_VERTEX	//vertex structure passed to D3D
 {
 		float x,y,z;
-		DWORD diffuse;
+		UnsignedInt diffuse;
 		float u,v;
 }; 
 
@@ -296,7 +299,7 @@ Bool W3DProjectedShadowManager::ReAcquireResources(void)
 	DEBUG_ASSERTCRASH(m_pDev, ("Trying to ReAquireResources on W3DProjectedShadowManager without device"));
 	DEBUG_ASSERTCRASH(shadowDecalIndexBufferD3D == NULL && shadowDecalIndexBufferD3D == NULL, ("ReAquireResources not released in W3DProjectedShadowManager"));
 
-	if (FAILED(m_pDev->CreateIndexBuffer
+	if (Render_Failed(m_pDev->CreateIndexBuffer
 	(
 		SHADOW_DECAL_INDEX_SIZE*sizeof(WORD), 
 		D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC, 
@@ -312,7 +315,7 @@ Bool W3DProjectedShadowManager::ReAcquireResources(void)
 	if (shadowDecalVertexBufferD3D == NULL)
 	{	// Create vertex buffer
 
-		if (FAILED(m_pDev->CreateVertexBuffer
+		if (Render_Failed(m_pDev->CreateVertexBuffer
 		(
 			SHADOW_DECAL_VERTEX_SIZE*sizeof(SHADOW_DECAL_VERTEX),
 			D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC, 
@@ -546,7 +549,7 @@ Int W3DProjectedShadowManager::renderProjectedTerrainShadow(W3DProjectedShadow *
 		m_pDev->SetIndices(shadowIndexBufferD3D);
 		Direct3D11_Mirror_Indices(shadowIndexTwin);
 
-		m_pDev->SetTransform(D3DTS_WORLD,(_D3DMATRIX *)&mWorld);
+		m_pDev->SetTransform(D3DTS_WORLD,(D3DMATRIX *)&mWorld);
 		Direct3D11_Mirror_Transform(D3DTS_WORLD,(const float *)&mWorld);
 
 		m_pDev->SetStreamSource(0,shadowVertexBufferD3D,0,vertexStride);
@@ -617,7 +620,7 @@ enum BlendDirection
 
 //Vertex alpha values for each blend direction assuming tile vertices
 //start at top left corner and continue counter-clockwise
-DWORD BDToVA[9][4]=
+UnsignedInt BDToVA[9][4]=
 {
 	{0xff000000,0xff000000,0xff000000,0xff000000},
 	{0,0,0xff000000,0xff000000},
@@ -799,7 +802,7 @@ void W3DProjectedShadowManager::flushDecals(W3DShadowTexture *texture, ShadowTyp
 	m_pDev->SetIndices(shadowDecalIndexBufferD3D);
 	Direct3D11_Mirror_Indices(shadowDecalIndexTwin);
 
-	m_pDev->SetTransform(D3DTS_WORLD,(_D3DMATRIX *)&mWorld);
+	m_pDev->SetTransform(D3DTS_WORLD,(D3DMATRIX *)&mWorld);
 	Direct3D11_Mirror_Transform(D3DTS_WORLD,(const float *)&mWorld);
 
 	m_pDev->SetStreamSource(0,shadowDecalVertexBufferD3D,0,sizeof(SHADOW_DECAL_VERTEX));

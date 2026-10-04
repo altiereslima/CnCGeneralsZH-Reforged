@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Flatpak's AppStream data (Tools/linux-packages/io.github.olcayseygan.ZeroHourReforged.yml). -->
+<component type="desktop-application">
+  <id>io.github.olcayseygan.ZeroHourReforged</id>
+  <name>Zero Hour Reforged</name>
+  <summary>Command &amp; Conquer Generals Zero Hour engine (needs your own copy of the game)</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later AND LGPL-2.1-or-later AND GPL-2.0-or-later AND Zlib AND BSD-3-Clause AND BSD-2-Clause AND MIT AND Apache-2.0 AND (Unlicense OR MIT-0) AND CC0-1.0 AND LicenseRef-LZH-Light</project_license>
+  <description>
+    <p>
+      Zero Hour Reforged runs Command &amp; Conquer Generals Zero Hour natively, from your own copy of the game
+      (Steam, EA App, CD or The First Decade). No game files are included: on the first start it asks for your
+      Zero Hour folder, and for the original Generals folder when that is not inside it.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.olcayseygan.ZeroHourReforged.desktop</launchable>
+  <url type="homepage">https://github.com/olcayseygan/CnCGeneralsZH-Reforged</url>
+  <content_rating type="oars-1.1">
+    <content_attribute id="violence-realistic">moderate</content_attribute>
+    <content_attribute id="social-chat">intense</content_attribute>
+  </content_rating>
+  <categories>
+    <category>Game</category>
+    <category>StrategyGame</category>
+  </categories>
+</component>

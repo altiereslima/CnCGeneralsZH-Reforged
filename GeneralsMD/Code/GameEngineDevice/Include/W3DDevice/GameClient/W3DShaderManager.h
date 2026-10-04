@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -36,15 +38,17 @@
 #ifndef __W3DSHADERMANAGER_H_
 #define __W3DSHADERMANAGER_H_
 
-#include "WW3D2/Texture.h"
-enum FilterTypes;
-enum CustomScenePassModes;
-enum StaticGameLODLevel;
-enum ChipsetType;
-enum CpuType;
-enum GraphicsVenderID;
+#include "WW3D2/texture.h"
+enum FilterTypes : Int;
+enum FilterModes : Int;
+#include "W3DDevice/GameClient/W3DCustomScene.h"	// CustomScenePassModes, which ISO C++ cannot forward-declare
+enum StaticGameLODLevel : Int;
+enum ChipsetType : Int;
+enum CpuType : Int;
+enum GraphicsVenderID : int;	// defined in W3DShaderManager.cpp with the same int, as MSVC's is
 
 #include <d3d9.h>
+#include "Platform/RenderTypes.h"
 
 class TextureClass;	///forward reference
 /** System for managing complex rendering settings which are either not handled by
@@ -84,7 +88,7 @@ public:
 	static void shutdown(void);	///<release resources used by shaders
 	static ChipsetType getChipset(void);	///<return current device chipset.
 	static GraphicsVenderID getCurrentVendor(void) {return m_currentVendor;}	///<return current card vendor.
-	static __int64 getCurrentDriverVersion(void) {return m_driverVersion; }	///<return current driver version.
+	static Int64 getCurrentDriverVersion(void) {return m_driverVersion; }	///<return current driver version.
 	static Int getShaderPasses(ShaderTypes shader);	///<rendering passes required for shader
 	static Int setShader(ShaderTypes shader, Int pass);	///<enable specific shader pass.
 	static Int setShroudTex(Int stage);	///<Set shroud in a texture stage.
@@ -96,10 +100,10 @@ public:
 	///Return last activated shader.
 	static inline ShaderTypes getCurrentShader(void) {return m_currentShader;}
 	/// Loads a .pso file, translates its D3D8 bytecode and creates the pixel shader.
-	static HRESULT LoadAndCreateD3DPixelShader(const char* strFilePath, IDirect3DPixelShader9** shader);
+	static RenderResult LoadAndCreateD3DPixelShader(const char* strFilePath, IDirect3DPixelShader9** shader);
 	/// Loads a .vso file with the D3D8 declaration array that belongs to it, and creates
 	/// both the vertex shader and the D3D9 declaration that has to be bound beside it.
-	static HRESULT LoadAndCreateD3DVertexShader(const char* strFilePath, const DWORD* pDeclaration,
+	static RenderResult LoadAndCreateD3DVertexShader(const char* strFilePath, const RenderUInt32* pDeclaration,
 		IDirect3DVertexShader9** shader, IDirect3DVertexDeclaration9** declaration);
 
 	static Bool testMinimumRequirements(ChipsetType *videoChipType, CpuType *cpuType, Int *cpuFreq, Int *numRAM, Real *intBenchIndex, Real *floatBenchIndex, Real *memBenchIndex);
@@ -124,7 +128,7 @@ protected:
 	static TextureClass *m_Textures[8];	///textures assigned to each of the possible stages
 	static ChipsetType m_currentChipset;	///<last video card chipset that was detected.
 	static GraphicsVenderID m_currentVendor;	///<last video card vendor
-	static __int64 m_driverVersion;			///<driver version of last chipset.
+	static Int64 m_driverVersion;			///<driver version of last chipset.
 	static ShaderTypes m_currentShader;	///<last shader that was set.
 	static Int m_currentShaderPass;		///<pass of last shader that was set.
 

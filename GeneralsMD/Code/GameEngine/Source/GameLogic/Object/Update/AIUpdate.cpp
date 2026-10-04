@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -147,7 +149,7 @@ void AIUpdate_resetMoveTrace( void )
 	theTracedObjectID = INVALID_ID;
 }
 
-static void AIUpdate_traceMove( const Object *obj, Bool blocked, Int blockedFrames,
+static void AIUpdate_traceMove( const Object *obj, const Coord3D& framePos, Bool blocked, Int blockedFrames,
 																Real desiredSpeed, Real maxSpeed, Real maxBlockedSpeed,
 																Real bumpSpeedLimit, Bool waitingForPath, Bool hasPath,
 																Bool stuck )
@@ -176,14 +178,19 @@ static void AIUpdate_traceMove( const Object *obj, Bool blocked, Int blockedFram
 		}
 	}
 
-	const Coord3D *pos = obj->getPosition();
+	/* The position is where the previous frame ended, physics included. Read after the locomotor, a
+		 frame that began a slide onto the goal showed that slide on top of the physics step before it. */
+	const Coord3D *pos = &framePos;
 	const PhysicsBehavior *physics = obj->getPhysics();
 	const Real actualSpeed = physics ? physics->getVelocityMagnitude() : 0.0f;
-	DEBUG_LOG(("MOVETRACE %d,%d,%.2f,%.2f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d,%d\n",
+	// the last two columns, heading in degrees and the signed speed along the nose, say whether it
+	// is pivoting, turning on the move or backing up
+	DEBUG_LOG(("MOVETRACE %d,%d,%.2f,%.2f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d,%d,%.1f,%.3f\n",
 		TheGameLogic->getFrame(), (Int)obj->getID(), pos->x, pos->y,
 		actualSpeed, desiredSpeed, maxSpeed, maxBlockedSpeed, bumpSpeedLimit,
 		blocked ? 1 : 0, blockedFrames, waitingForPath ? 1 : 0,
-		hasPath ? 1 : 0));
+		hasPath ? 1 : 0, obj->getOrientation() * 180.0f / PI,
+		physics ? physics->getForwardSpeed2D() : 0.0f));
 	if (stuck)
 	{
 		DEBUG_LOG(("MOVETRACE %d,%d,stuck\n", TheGameLogic->getFrame(), (Int)obj->getID()));
@@ -249,7 +256,7 @@ static void AIUpdate_traceMove( const Object *obj, Bool blocked, Int blockedFram
 	self->m_locomotorTemplates[set].clear();
 	for (const char* locoName = ini->getNextToken(); locoName; locoName = ini->getNextTokenOrNull())
 	{
-		if (!*locoName || !stricmp(locoName, "None"))
+		if (!*locoName || !strcasecmp(locoName, "None"))
 			continue;
 
 		NameKeyType locoKey = NAMEKEY(locoName);
@@ -283,9 +290,13 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_stateMachine = NULL;
 	m_nextEnemyScanTime = 0;
 	m_currentVictimID = INVALID_ID;
+	m_withdrawTargetID = INVALID_ID;
+	m_withdrawFrame = 0;
 	m_desiredSpeed = FAST_AS_POSSIBLE;
 	m_lastCommandSource = CMD_FROM_AI;
 	m_guardMode = GUARDMODE_NORMAL;
+	m_guardRadius = 0.0f;
+	m_aggressiveStance = FALSE;
 	m_guardTargetType[0] = m_guardTargetType[1] = GUARDTARGET_NONE;
 	m_locationToGuard.zero();
 	m_objectToGuard = INVALID_ID;
@@ -331,6 +342,8 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_noProgress = 0;
 	m_headOnFrames = 0;
 	m_headOnSeen = FALSE;
+	m_sideStep.x = m_sideStep.y = 0.0f;
+	m_sideStepSeen = FALSE;
 	m_lastProgressPos.zero();
 	m_lastProgressAngle = 0.0f;
 	m_ditherFrom.zero();
@@ -890,6 +903,51 @@ Real AIUpdateInterface::getTurretTurnRate(WhichTurretType tur) const
 {
 	return (tur != TURRET_INVALID && m_turretAI[tur] != NULL) ?
 					m_turretAI[tur]->getTurnRate() :
+					0.0f;
+}
+
+//=============================================================================
+/**
+	Which turret the current attack aims with, and whether that leaves the nose to do it. A gun with no
+	turret, or on one that cannot turn, aims with the nose; but while its clip reloads it cannot fire,
+	so a turret that turns does the aiming instead and the nose is free. That is the Comanche between
+	missile volleys, its pod reloading for fifteen seconds while the chin gun keeps firing.
+*/
+WhichTurretType AIUpdateInterface::getAimingTurret(Bool *noseAims) const
+{
+	WhichTurretType tur = getWhichTurretForCurWeapon();
+	if (getTurretTurnRate(tur) != 0.0f)
+	{
+		*noseAims = FALSE;
+		return tur;
+	}
+
+	// the turret is found first: Weapon::getStatus refreshes the weapon's saved status, so it is asked
+	// only of a unit that has somewhere else to aim from
+	for (Int i = 0; i < MAX_TURRETS; ++i)
+	{
+		if (getTurretTurnRate((WhichTurretType)i) != 0.0f)
+		{
+			const Weapon *weapon = getObject()->getCurrentWeapon();
+			if (weapon && weapon->getStatus() == RELOADING_CLIP)
+			{
+				*noseAims = FALSE;
+				return (WhichTurretType)i;
+			}
+			break;
+		}
+	}
+
+	*noseAims = TRUE;
+	return tur;
+}
+
+//=============================================================================
+/// how far the body has to turn to bring a target at relAngle into turret tur's arc (TurretAI::getArcShortfall)
+Real AIUpdateInterface::getTurretArcShortfall(WhichTurretType tur, Real relAngle) const
+{
+	return (tur != TURRET_INVALID && m_turretAI[tur] != NULL) ?
+					m_turretAI[tur]->getArcShortfall(relAngle) :
 					0.0f;
 }
 
@@ -1751,6 +1809,27 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 	if (!aiOther->isDoingGroundMovement()) return FALSE;
 	if (selfMoving) 
 	{
+		/* A soldier walks round a vehicle rather than waiting at its side. The blocked-speed rule stops
+			 him dead in front of any tank facing his way or standing still, and a tank queueing in a
+			 street is both: on Alpine Assault a Ranger stood 135 frames against the flank of a Crusader
+			 that was itself queued behind another. Here he only notes which way is out, and doLocomotor
+			 takes the part of his step that points into the hull away and adds a half step out from it.
+			 Asking blockedBy first made it flicker: turned along the hull, the hull is off his nose and no
+			 longer blocks him, so he turned back, and stood turning on the spot. */
+		if (getObject()->isKindOf(KINDOF_INFANTRY) && other->isKindOf(KINDOF_VEHICLE)
+			&& getStateMachine()->getCurrentStateID() != AI_PANIC)
+		{
+			Real ax = getObject()->getPosition()->x - other->getPosition()->x;
+			Real ay = getObject()->getPosition()->y - other->getPosition()->y;
+			const Real len = sqrtf(ax*ax + ay*ay);
+			if (len > 0.01f)
+			{
+				m_sideStep.x += ax / len;
+				m_sideStep.y += ay / len;
+				m_sideStepSeen = TRUE;
+				return FALSE;
+			}
+		}
 		Bool blocked = blockedBy(other);
 		if (blocked) 
 		{
@@ -1769,6 +1848,19 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 			}
 
 			Real maxSpeed = calculateMaxBlockedSpeed(other);
+			/* A vehicle held up by a soldier on the march creeps at a third of its speed rather than stopping
+				 or telling him to step aside. He is already walking round the hull (the top of this function),
+				 and a soldier told to step aside lost his route and stood a second before the repath guard let
+				 him ask for another: 13 of the 28 Ranger stops in infconvoy.txt. One who has stopped getting
+				 anywhere is wedged, and is still told. */
+			const Bool marchingSoldier = getObject()->isKindOf(KINDOF_VEHICLE) && other->isKindOf(KINDOF_INFANTRY)
+				&& otherMoving && aiOther->m_noProgress < STUCK_PRESS_FRAMES;
+			if (marchingSoldier && getCurLocomotor())
+			{
+				const Real crawl = getCurLocomotor()->getMaxSpeedForCondition(getObject()->getBodyModule()->getDamageState()) * 0.33f;
+				if (maxSpeed < crawl)
+					maxSpeed = crawl;
+			}
 			// -tracemove <id>: who is in the way, which way he faces against us, and where he sits off our nose,
 			// so a jam can be walked back to the pair at its front one unit at a time
 			if (TheGlobalData->m_traceMoveID > 0 && getObject()->getID() == (ObjectID)TheGlobalData->m_traceMoveID)
@@ -1798,6 +1890,8 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 					{
 						return FALSE;
 					}
+					if (marchingSoldier)
+						return FALSE;	// he is walking round us
 					aiOther->aiMoveAwayFromUnit(getObject(), CMD_FROM_AI);
 					return FALSE;
 				}
@@ -3889,7 +3983,12 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 	stuckRescue();
 
 	const Bool traceWasBlocked = m_isBlocked;	// -tracemove: the flag is cleared on the next line
+	const Coord3D tracePos = *getObject()->getPosition();	// -tracemove: where the last whole frame left it
 	m_isBlocked = FALSE;
+	const Bool sideStep = m_sideStepSeen;
+	const Coord2D sideAway = m_sideStep;
+	m_sideStepSeen = FALSE;
+	m_sideStep.x = m_sideStep.y = 0.0f;
 
 	Bool blocked = m_blockedFrames > 0;
 	Bool requiresConstantCalling = TRUE;	// assume the worst.
@@ -3905,6 +4004,56 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 		}
 		else
 		{
+			/* A helicopter flies with its nose on what it is shooting at.  That matters for a gun with
+				 no turret of its own, or the Comanche's, which has a turn rate of 0 and only fires along
+				 the nose: without this a Comanche passing a target never shot at it.  A weapon on a
+				 turret that turns needs no help, and neither does a fixed gun whose target a carried
+				 turret is already on: a Helix flies where it likes while its gattling cannon tracks. */
+			Coord3D faceTargetPos;
+			const Coord3D *faceTarget = NULL;
+			updateWithdrawTarget();
+			if (m_curLocomotor->isHelicopter(getObject()))
+			{
+				Object *target = NULL;
+				Bool noseAims;
+				WhichTurretType tur = getAimingTurret(&noseAims);
+				if (noseAims && tur == TURRET_INVALID)
+				{
+					target = getCurrentVictim();
+				}
+				else if (noseAims)
+				{
+					target = getTurretTargetObject(tur, FALSE);
+					if (target == NULL)
+						target = getCurrentVictim();
+				}
+				if (target && !target->isEffectivelyDead() && !isCarriedGunOn(target))
+				{
+					faceTargetPos = *target->getPosition();
+					faceTarget = &faceTargetPos;
+				}
+				else if (!noseAims)
+				{
+					// a turret with a limited arc: turn the body only as far as brings its target into the arc
+					const Real HEADING_POINT_DIST = 100.0f;	// any distance does; the nose is turned to its bearing
+					Object *turretTarget = getTurretTargetObject(tur, FALSE);
+					if (turretTarget == NULL)
+						turretTarget = getCurrentVictim();
+					if (turretTarget && !turretTarget->isEffectivelyDead())
+					{
+						Real shortfall = getTurretArcShortfall(tur, ThePartitionManager->getRelativeAngle2D(getObject(), turretTarget->getPosition()));
+						if (shortfall != 0.0f)
+						{
+							Real heading = getObject()->getOrientation() + shortfall;
+							faceTargetPos = *getObject()->getPosition();
+							faceTargetPos.x += Cos(heading) * HEADING_POINT_DIST;
+							faceTargetPos.y += Sin(heading) * HEADING_POINT_DIST;
+							faceTarget = &faceTargetPos;
+						}
+					}
+				}
+			}
+
 			switch (m_locomotorGoalType)
 			{
 				case POSITION_EXPLICIT:
@@ -3913,8 +4062,8 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 						Real myMaxSpeed = m_curLocomotor->getMaxSpeedForCondition(getObject()->getBodyModule()->getDamageState());
 						if( speed == FAST_AS_POSSIBLE || speed > myMaxSpeed )
 							speed = myMaxSpeed;
-						m_curLocomotor->locoUpdate_moveTowardsPosition(getObject(), 
-							m_locomotorGoalData, 0.0f, speed, &blocked);
+						m_curLocomotor->locoUpdate_moveTowardsPosition(getObject(),
+							m_locomotorGoalData, 0.0f, speed, &blocked, faceTarget);
 						m_doFinalPosition = FALSE;
 					}
 					break;
@@ -3937,6 +4086,8 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 						}
 						Coord3D goalPos;
 						Real onPathDistToGoal;
+						Real bendDist = 0.0f;
+						Real bendCos = 1.0f;
 						if (!isDoingGroundMovement())
 						{
 							// airborne locomotor.  Get the goal and distance direct to the goal, don't consider obstacles.
@@ -3952,6 +4103,8 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 							getPath()->computePointOnPath(getObject(), m_locomotorSet, *getObject()->getPosition(), info);
 							onPathDistToGoal = info.distAlongPath;
 							goalPos = info.posOnPath;
+							bendDist = info.bendDist;
+							bendCos = info.bendCos;
 							// layer is a possible bridge in the path.  Check & set the layer if applicable.
 							TheAI->pathfinder()->updateLayer(getObject(), info.layer);
 						}
@@ -4016,8 +4169,45 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 								crowdSteer(goalPos, speed);
 						}
 
+						// a soldier touching a vehicle (processCollision): walk along its side, never into it
+						if (sideStep)
+						{
+							const Real len = sqrtf(sideAway.x*sideAway.x + sideAway.y*sideAway.y);
+							const Coord3D *here = getObject()->getPosition();
+							Real gx = goalPos.x - here->x;
+							Real gy = goalPos.y - here->y;
+							const Real dist = sqrtf(gx*gx + gy*gy);
+							if (len > 0.01f && dist > 0.01f)
+							{
+								const Real nx = sideAway.x / len;
+								const Real ny = sideAway.y / len;
+								const Real into = gx*nx + gy*ny;
+								if (into < 0.0f)
+								{
+									gx -= into*nx;
+									gy -= into*ny;
+									Real t = sqrtf(gx*gx + gy*gy);
+									if (t < 0.1f*dist)
+									{
+										// dead against the hull: pick a side by ID, the same one every frame
+										const Real side = (getObject()->getID() & 1) ? 1.0f : -1.0f;
+										gx = -ny*side;
+										gy = nx*side;
+										t = 1.0f;
+									}
+									goalPos.x = here->x + gx*dist/t;
+									goalPos.y = here->y + gy*dist/t;
+								}
+								/* and half a step out from it, so a tank coming past moves him over rather than
+									 driving through him: with the slide alone a soldier and a tank going the same way
+									 overlapped 31% more often than before in squad30.txt, with this 22% less */
+								goalPos.x += nx*dist*0.5f;
+								goalPos.y += ny*dist*0.5f;
+							}
+						}
+
 						m_curLocomotor->locoUpdate_moveTowardsPosition(getObject(), goalPos,
-							onPathDistToGoal+getPathExtraDistance(), speed, &blocked);
+							onPathDistToGoal+getPathExtraDistance(), speed, &blocked, faceTarget, bendDist, bendCos);
 
 						m_doFinalPosition = FALSE;
 					}
@@ -4081,7 +4271,7 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 			getObject()->clearStatus( MAKE_OBJECT_STATUS_MASK( OBJECT_STATUS_AIRBORNE_TARGET ) );
 
 		// before the ceiling is thrown away for the frame - it is the value the trace is about
-		AIUpdate_traceMove( getObject(), traceWasBlocked, m_blockedFrames,
+		AIUpdate_traceMove( getObject(), tracePos, traceWasBlocked, m_blockedFrames,
 			m_desiredSpeed,
 			m_curLocomotor->getMaxSpeedForCondition(getObject()->getBodyModule()->getDamageState()),
 			m_curMaxBlockedSpeed, m_bumpSpeedLimit, isWaitingForPath(), getPath() != NULL,
@@ -5964,6 +6154,9 @@ void AIUpdateInterface::privateGuardPosition( const Coord3D *pos, GuardMode guar
 	}
 	m_locationToGuard = adjPos;
 	m_guardMode = guardMode;
+	// only a player's guard order carries a radius, set just before it arrives here
+	if (cmdSource != CMD_FROM_PLAYER)
+		m_guardRadius = 0.0f;
 
 	getStateMachine()->clear();
 	// The guard machine moves on its own goal, so the outer one kept whatever the last order left
@@ -6014,6 +6207,8 @@ void AIUpdateInterface::privateGuardObject( Object *objectToGuard, GuardMode gua
 	}
 	m_guardMode = guardMode;
 	m_objectToGuard = objectToGuard->getID();
+	if (cmdSource != CMD_FROM_PLAYER)
+		m_guardRadius = 0.0f;
 
 	getStateMachine()->clear();
 	setLastCommandSource( cmdSource );
@@ -6040,6 +6235,7 @@ void AIUpdateInterface::privateGuardArea( const PolygonTrigger *areaToGuard, Gua
 	}
 	m_areaToGuard = areaToGuard;
 	m_guardMode = guardMode;
+	m_guardRadius = 0.0f;		// the area is the radius
 
 	Coord3D pos;
 	m_areaToGuard->getCenterPoint(&pos);
@@ -6139,6 +6335,112 @@ Object *AIUpdateInterface::getCurrentVictim( void ) const
 		return TheGameLogic->findObjectByID( m_currentVictimID );
 
 	return NULL;
+}
+
+//-------------------------------------------------------------------------------------------------
+/**
+	Whether something in contain is already shooting at victim and can do it without its carrier
+	turning: a rider whose gun is on a turret that turns (a Helix's gattling cannon), a passenger
+	allowed to fire out (the infantry in a Helix's bunker), or the same inside the rider (the Infantry
+	General's Helix bunker holds its infantry itself). No turret in this tree limits its arc, so such a
+	gun reaches the victim from any heading.
+*/
+static Bool AIUpdate_containsGunOn( ContainModuleInterface *contain, const Object *victim )
+{
+	const Object *rider = contain->friend_getRider();
+	if (rider)
+	{
+		const AIUpdateInterface *riderAI = rider->getAI();
+		if (riderAI && riderAI->getCurrentVictim() == victim)
+		{
+			WhichTurretType tur = riderAI->getWhichTurretForCurWeapon();
+			if (tur != TURRET_INVALID && riderAI->getTurretTurnRate(tur) != 0.0f)
+				return TRUE;
+		}
+		if (rider->getContain() && AIUpdate_containsGunOn(rider->getContain(), victim))
+			return TRUE;
+	}
+
+	const ContainedItemsList *passengers = contain->getContainedItemsList();
+	for (ContainedItemsList::const_iterator it = passengers->begin(); it != passengers->end(); ++it)
+	{
+		const Object *passenger = *it;
+		const AIUpdateInterface *passengerAI = passenger->getAI();
+		if (passengerAI && passenger->isKindOf(KINDOF_INFANTRY) && contain->isPassengerAllowedToFire(passenger->getID())
+				&& passengerAI->getCurrentVictim() == victim)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/// whether something this unit carries is already shooting at victim from any heading (AIUpdate_containsGunOn)
+Bool AIUpdateInterface::isCarriedGunOn( const Object *victim ) const
+{
+	ContainModuleInterface *contain = getObject()->getContain();
+	return contain && AIUpdate_containsGunOn(contain, victim);
+}
+
+//-------------------------------------------------------------------------------------------------
+/**
+	A helicopter, or a vehicle whose gun is on a turret, told to move in the middle of a fight keeps
+	shooting what it was attacking while it moves. The attack is ending (AIAttackState::onExit), so
+	remember its victim; updateWithdrawTarget then holds the turret on it for as long as the unit is
+	on a plain move. Only a unit that already had a victim: a move order never picks a new target.
+*/
+void AIUpdateInterface::noteWithdrawTarget( const Object *victim )
+{
+	if (victim && m_curLocomotor
+			&& (m_curLocomotor->isHelicopter(getObject()) || getWhichTurretForCurWeapon() != TURRET_INVALID))
+	{
+		m_withdrawTargetID = victim->getID();
+		m_withdrawFrame = TheGameLogic->getFrame();
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/**
+	Hold the turret the current weapon is on (the Comanche's does not turn, so its nose stays on the
+	target and it backs or slides away) on the remembered target, every frame of a plain move, while
+	the target is alive, attackable and in range. The first frame any of that fails, or a frame is
+	missed, the turret lets go and the helicopter flies the move as it would have. The move itself is
+	never touched.
+*/
+void AIUpdateInterface::updateWithdrawTarget()
+{
+	if (m_withdrawTargetID == INVALID_ID)
+		return;
+
+	Object *obj = getObject();
+	UnsignedInt now = TheGameLogic->getFrame();
+	Object *target = TheGameLogic->findObjectByID(m_withdrawTargetID);
+	StateID state = getStateMachine()->getCurrentStateID();
+	Bool hold = (state == AI_MOVE_TO || state == AI_FOLLOW_PATH) && now <= m_withdrawFrame + 1
+		&& target && !target->isEffectivelyDead();
+	// the attack state picked the weapon; with it gone, a pod reloading would hold the gun silent
+	if (hold)
+		obj->chooseBestWeaponForTarget(target, PREFER_MOST_DAMAGE, getLastCommandSource());
+	WhichTurretType tur = getWhichTurretForCurWeapon();
+	Weapon *weapon = obj->getCurrentWeapon();
+
+	hold = hold && tur != TURRET_INVALID && weapon && weapon->isWithinAttackRange(obj, target);
+	if (hold)
+	{
+		// the same test the turret applies to a target it already has: stealth, a changed side
+		CanAttackResult result = obj->getAbleToAttackSpecificObject(ATTACK_CONTINUED_TARGET, target, getLastCommandSource());
+		hold = result == ATTACKRESULT_POSSIBLE || result == ATTACKRESULT_POSSIBLE_AFTER_MOVING;
+	}
+	if (hold)
+	{
+		m_withdrawFrame = now;
+		setTurretTargetObject(tur, target, FALSE);
+		return;
+	}
+
+	// a new attack on the same target owns the turret now; letting go would drop its aim for a frame
+	if (target && tur != TURRET_INVALID && getTurretTargetObject(tur, FALSE) == target && getCurrentVictim() != target)
+		setTurretTargetObject(tur, NULL, FALSE);
+	m_withdrawTargetID = INVALID_ID;
 }
 
 // if we are attacking a position (and NOT an object), return it. otherwise return null.
@@ -6648,8 +6950,10 @@ Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuring
 	// allow us to pursue the target. therefore, we should ensure that we only
 	// look for targets that are already within attack range (as opposed to vision range).
 	// The caller can lift that restriction (attack move does) when it will actually close
-	// with what it finds instead of driving past it.
-	if (calledByAI && !allowOutOfWeaponRangeTargets && obj->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN)
+	// with what it finds instead of driving past it, and so does a unit the player has put on the
+	// aggressive stance, which goes after what it sees (AIAttackApproachTargetState lets it).
+	if (calledByAI && !allowOutOfWeaponRangeTargets && !m_aggressiveStance
+			&& obj->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN)
 	{
 		flags |= AI::WITHIN_ATTACK_RANGE;
 	}
@@ -7105,12 +7409,15 @@ void AIUpdateInterface::crc( Xfer *x )
 	* 13: m_pathfindFoundNothing
 	* 14: the salvage return position and its flag
 	* 16: the tunnel trip's goal and its flag
-	* 17: how the tunnel trip's last leg is walked */
+	* 17: how the tunnel trip's last leg is walked
+	* 18: the target a helicopter keeps shooting while it moves away
+	* 19: the radius a player's guard order set
+	* 20: the aggressive stance */
 // ------------------------------------------------------------------------------------------------
 void AIUpdateInterface::xfer( Xfer *xfer )
 {
   // version
-  const XferVersion currentVersion = 17;
+  const XferVersion currentVersion = 20;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
  
@@ -7442,6 +7749,18 @@ void AIUpdateInterface::xfer( Xfer *xfer )
 		xfer->xferInt(&end);
 		m_tunnelTripEnd = (TunnelTripEnd)end;
 	}
+
+	if (version >= 18)
+	{
+		xfer->xferObjectID(&m_withdrawTargetID);
+		xfer->xferUnsignedInt(&m_withdrawFrame);
+	}
+
+	if (version >= 19)
+		xfer->xferReal(&m_guardRadius);
+
+	if (version >= 20)
+		xfer->xferBool(&m_aggressiveStance);
 
 }  // end xfer
 

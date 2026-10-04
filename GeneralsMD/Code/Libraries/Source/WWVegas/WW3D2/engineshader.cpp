@@ -15,9 +15,11 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 #include "engineshader.h"
 #include "ffvertex.h"
+#include "sdl3target.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -111,7 +113,9 @@ static void write_preamble(std::string & hlsl)
 	hlsl += line;
 }
 
-// ffvertex's output structure, member for member.  See the file comment for why it cannot differ.
+// ffvertex's output structure, member for member (append_output_structure).  See the file comment for why
+// it cannot differ: it had two coordinate sets where ffvertex writes MAXIMUM_VERTEX_STAGES, which put Fog
+// on another location than every pixel program reads it from, and Direct3D 12 refuses such a pair (X1).
 static void write_output_structure(std::string & hlsl)
 {
 	hlsl +=
@@ -119,12 +123,26 @@ static void write_output_structure(std::string & hlsl)
 		"{\n"
 		"    float4 Position : SV_Position;\n"
 		"    float4 Diffuse  : COLOR0;\n"
-		"    float4 Specular : COLOR1;\n"
-		"    float2 TexCoord0 : TEXCOORD0;\n"
-		"    float2 TexCoord1 : TEXCOORD1;\n"
+		"    float4 Specular : COLOR1;\n";
+	for (unsigned stage = 0; stage < MAXIMUM_VERTEX_STAGES; ++stage) {
+		char line[64];
+		snprintf(line, sizeof(line), "    float2 TexCoord%u : TEXCOORD%u;\n", stage, stage);
+		hlsl += line;
+	}
+	hlsl +=
 		"    float Fog : FOG;\n"
 		"};\n"
 		"\n";
+}
+
+// The coordinate sets a transcription does not write: zero, as ffvertex writes a set it has no source for.
+static void write_unused_coordinates(std::string & hlsl, unsigned first)
+{
+	for (unsigned stage = first; stage < MAXIMUM_VERTEX_STAGES; ++stage) {
+		char line[64];
+		snprintf(line, sizeof(line), "    output.TexCoord%u = float2(0.0, 0.0);\n", stage);
+		hlsl += line;
+	}
 }
 
 /*
@@ -175,7 +193,9 @@ static void write_trees(std::string & hlsl)
 		"    output.Diffuse = input.Diffuse * float4(input.Sway.yyy, 1.0);\n"
 		"    output.Specular = float4(0.0, 0.0, 0.0, 0.0);\n"
 		"    output.TexCoord0 = input.TexCoord0;\n"
-		"    output.TexCoord1 = ((float4(input.Position, 1.0) + c[32]) * c[33]).xy;\n"
+		"    output.TexCoord1 = ((float4(input.Position, 1.0) + c[32]) * c[33]).xy;\n";
+	write_unused_coordinates(hlsl, 2);
+	hlsl +=
 		"    output.Fog = 1.0;\n"
 		"    return output;\n"
 		"}\n";
@@ -209,7 +229,7 @@ static const char * const TERRAIN_BUMP_FUNCTION =
 	"}\n"
 	"\n";
 
-static void write_pixel_preamble(std::string & hlsl, bool bumped = false)
+static void write_pixel_preamble(std::string & hlsl, bool bumped = false, bool volumetric = false)
 {
 	for (unsigned stage = 0; stage < MAXIMUM_COMBINER_STAGES; ++stage) {
 		char line[128];
@@ -247,11 +267,18 @@ static void write_pixel_preamble(std::string & hlsl, bool bumped = false)
 		"    float4 ShadowSoftness;\n"
 		"    float4 Sky;\n"
 		"    float4 SkyUp;\n";
+	// The smoke's field follows them, on the Direct3D 11 text alone (VOLUMETRIC_SAMPLING).
+	if (volumetric) {
+		hlsl += VOLUMETRIC_CONSTANTS;
+	}
 	hlsl += "};\n";
 	if (bumped) {
 		hlsl += "Texture2D NormalMap : register(t4);\n";
 	}
 	hlsl += SHADOW_SAMPLING;
+	if (volumetric) {
+		hlsl += VOLUMETRIC_SAMPLING;
+	}
 	hlsl +=
 		"\n"
 		"struct Input\n"
@@ -300,7 +327,10 @@ static void write_pixel_preamble(std::string & hlsl, bool bumped = false)
 **     mad r0.rgb, t1, t2, r0
 **     mul r0.rgb, r0, t3
 **
-** Every ps_1_1 instruction clamps its result to zero and one, which is the saturate on each line.
+** ps_1_1's registers hold [-1, 1] (PixelShader1xMaxValue 1, the documented minimum for ps 1.0 to 1.3),
+** and only a _sat modifier or the final write clamps to [0, 1].  Every value here is a product or sum
+** of texels and vertex colours in [0, 1], so none goes below zero, and the saturate on each line is the
+** clamp at one: the same result.  Measured against the tests' ps_1_1 interpreter on captured draws (A3e-3).
 ** The alpha is the vertex alpha times the water texture's and the shroud never touches it: a
 ** shrouded stretch of water is dark, not transparent.
 */
@@ -390,13 +420,14 @@ static void write_monochrome(std::string & hlsl)
 		"    float4 current = lerp(texel0, tinted, float4(TextureFactor.aaa, 1.0));\n";
 }
 
-// Every ps_1_1 instruction clamps its result to zero and one, so each step saturates and not only
-// the last: a chain that overflows in the middle and comes back down is a different colour with the
-// clamps than without them.
+// ps_1_1's registers hold [-1, 1] and only _sat or the final write clamps to [0, 1] (see the trapezoid
+// water above).  A chain of products of values in [0, 1] never goes below zero, so the clamp that
+// matters is the one at the top, and it applies at every step, not only the last: a chain that
+// overflows in the middle and comes back down is a different colour with the clamps than without them.
 static void write_multiply_chain(std::string & hlsl, const EngineShaderEntry & entry,
-	bool bumped)
+	bool bumped, bool volumetric)
 {
-	write_pixel_preamble(hlsl, bumped);
+	write_pixel_preamble(hlsl, bumped, volumetric);
 
 	hlsl += "    float4 current = saturate(";
 	hlsl += entry.Opening;
@@ -409,7 +440,7 @@ static void write_multiply_chain(std::string & hlsl, const EngineShaderEntry & e
 	}
 
 	// The ground is where a shadow is read, so every transcribed program that paints it takes one.
-	hlsl += SHADOW_APPLY;
+	hlsl += volumetric ? VOLUMETRIC_SHADOW_APPLY : SHADOW_APPLY;
 
 	if (!bumped) {
 		return;
@@ -484,8 +515,20 @@ EngineShaderProgram EngineShader_From_File(const char * file_path)
 	return ENGINE_SHADER_NONE;
 }
 
-bool EngineShader_Vertex_Program(EngineShaderProgram program, std::string & hlsl)
+bool EngineShader_Vertex_Program(EngineShaderProgram program, std::string & hlsl,
+	VertexShaderTarget target)
 {
+	// Transcribed for the D3D11 profile only: on D3D9 the shipped .vso ran on the device itself.
+	// SDL3 GPU is the D3D11 text with its bindings rewritten.
+	if (target == VERTEX_SHADER_TARGET_D3D9) {
+		hlsl.clear();
+		return false;
+	}
+	if (target == VERTEX_SHADER_TARGET_SDL3_GPU) {
+		return EngineShader_Vertex_Program(program, hlsl, VERTEX_SHADER_TARGET_D3D11)
+			&& SDL3_Shader_Retarget(hlsl, true);
+	}
+
 	hlsl.clear();
 	switch (program) {
 	case ENGINE_SHADER_TREES:
@@ -496,8 +539,28 @@ bool EngineShader_Vertex_Program(EngineShaderProgram program, std::string & hlsl
 	}
 }
 
+static bool write_engine_pixel_program(EngineShaderProgram program,
+	const PixelPipelineDescription & pipeline, std::string & hlsl, bool bumped, bool volumetric);
+
 bool EngineShader_Pixel_Program(EngineShaderProgram program,
-	const PixelPipelineDescription & pipeline, std::string & hlsl, bool bumped)
+	const PixelPipelineDescription & pipeline, std::string & hlsl, bool bumped,
+	CombinerShaderTarget target)
+{
+	// As the vertex half: D3D11 only, and SDL3 GPU as the D3D11 text rebound, without the smoke the
+	// SDL3 backend has no map for.
+	if (target == COMBINER_SHADER_TARGET_D3D9) {
+		hlsl.clear();
+		return false;
+	}
+	if (target == COMBINER_SHADER_TARGET_SDL3_GPU) {
+		return write_engine_pixel_program(program, pipeline, hlsl, bumped, false)
+			&& SDL3_Shader_Retarget(hlsl, false);
+	}
+	return write_engine_pixel_program(program, pipeline, hlsl, bumped, true);
+}
+
+static bool write_engine_pixel_program(EngineShaderProgram program,
+	const PixelPipelineDescription & pipeline, std::string & hlsl, bool bumped, bool volumetric)
 {
 	hlsl.clear();
 	if (bumped && !EngineShader_Can_Bump(program)) {
@@ -506,7 +569,7 @@ bool EngineShader_Pixel_Program(EngineShaderProgram program,
 
 	const EngineShaderEntry * entry = entry_for(program);
 	if (entry != NULL && entry->Opening != NULL) {
-		write_multiply_chain(hlsl, *entry, bumped);
+		write_multiply_chain(hlsl, *entry, bumped, volumetric);
 	}
 	else if (program == ENGINE_SHADER_WATER_TRAPEZOID) {
 		write_trapezoid_water(hlsl);

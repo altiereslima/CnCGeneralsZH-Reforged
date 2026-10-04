@@ -78,11 +78,13 @@ enum ScenarioActionType
 	SCENARIO_ACTION_SHIFTMOVE,				///< shiftmove <slot> <selector> <position>; a shift right click, onto the units' order queue
 	SCENARIO_ACTION_SHIFTATTACKMOVE,	///< shiftattackmove <slot> <selector> <position>; the same with attack move
 	SCENARIO_ACTION_SHIFTATTACK,			///< shiftattack <slot> <selector> <targetSlot> <targetSelector>; the same with an attack on one unit
-	SCENARIO_ACTION_SHIFTGUARD,				///< shiftguard <slot> <selector> <position>; the same with the guard key
+	SCENARIO_ACTION_SHIFTGUARD,				///< shiftguard <slot> <selector> <position> [radius]; the same with the guard key, and the circle the wheel set
 	SCENARIO_ACTION_SHIFTPOWER,				///< shiftpower <slot> <selector> <targetSlot> <targetSelector> <power>; the same with a special power armed, on one object
 	SCENARIO_ACTION_SHIFTUPGRADE,			///< shiftupgrade <slot> <selector> <upgrade>; shift on an object upgrade button, bought by every unit that matches
 	SCENARIO_ACTION_DOCK,							///< dock <slot> <selector> <targetSlot> <targetSelector>; a right click on a supply point or a dock
-	SCENARIO_ACTION_CONSTRUCT					///< construct <slot> <template> <position>; the local player's placement click, whatever is selected, as a message that is recorded and crosses the network
+	SCENARIO_ACTION_CONSTRUCT,				///< construct <slot> <template> <position>; the local player's placement click, whatever is selected, as a message that is recorded and crosses the network
+	SCENARIO_ACTION_STANCE,						///< stance <slot> <selector> aggressive|defensive; the stance key, as MSG_SET_STANCE
+	SCENARIO_ACTION_HUNT							///< hunt <slot> <selector> <position> [radius]; the search and destroy key's sweep, through the order queue as its messages arrive
 };
 
 /// ScenarioAction::atStart when the position is plain numbers

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -34,7 +36,10 @@
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////////////////////////
 #include <stdlib.h>
+#include "Lib/Clock.h"
+#if defined(_WIN32)
 #include <windows.h>
+#endif
 
 // USER INCLUDES //////////////////////////////////////////////////////////////////////////////////
 #include "Common/BuildAssistant.h"
@@ -83,24 +88,27 @@
 #include "W3DDevice/GameClient/W3DDisplay.h"
 #include "W3DDevice/GameClient/W3DScene.h"
 #include "W3DDevice/GameClient/W3DView.h"
+#include "W3DDevice/GameClient/W3DSmoothMotion.h"
 #include "d3dx9math.h"
 #include "W3DDevice/GameClient/W3DShaderManager.h"
 #include "W3DDevice/GameClient/Module/W3DModelDraw.h"
 #include "W3DDevice/GameClient/W3DCustomScene.h"
 
-#include "WW3D2/DX8Renderer.h"
-#include "WW3D2/Light.h"
-#include "WW3D2/Camera.h"
-#include "WW3D2/Coltype.h"
-#include "WW3D2/PredLod.h"
-#include "WW3D2/WW3D.h"
+#include "WW3D2/dx8renderer.h"
+#include "WW3D2/light.h"
+#include "WW3D2/camera.h"
+#include "WW3D2/coltype.h"
+#include "WW3D2/predlod.h"
+#include "WW3D2/ww3d.h"
 #include "WW3D2/dx11runtime.h"
 
 #include "W3DDevice/GameClient/camerashakesystem.h"
 
+#if defined(_WIN32)
 #include "WinMain.h"  /** @todo Remove this, it's only here because we
 													are using timeGetTime, but we can remove that
 													when we have our own timer */
+#endif
 #ifdef _INTERNAL
 // for occasional debugging...
 //#pragma optimize("", off)
@@ -489,8 +497,8 @@ void W3DView::buildCameraTransform( Matrix3D *transform )
 	//WST 11/12/2002 New camera shaker system
 	// This runs once per render frame (and again on every scrollBy), not once per 30Hz
 	// tick, so step the shaker by real elapsed time to keep shakes framerate-independent.
-	static DWORD prevShakeTime = timeGetTime();
-	DWORD nowShakeTime = timeGetTime();
+	static UnsignedInt prevShakeTime = Clock_Milliseconds();
+	UnsignedInt nowShakeTime = Clock_Milliseconds();
 	Real shakeDt = (nowShakeTime - prevShakeTime) * 0.001f;
 	prevShakeTime = nowShakeTime;
 	if (shakeDt > 1.0f/30.0f)
@@ -1415,10 +1423,10 @@ void W3DView::update(void)
 	Bool recalcCamera = m_recalcCamera;
 	Bool didScriptedMovement = false;
 #ifdef LOG_FRAME_TIMES
-	__int64 curTime64,freq64;
-	static __int64 prevTime64=0;
-	QueryPerformanceFrequency((LARGE_INTEGER *)&freq64);
-	QueryPerformanceCounter((LARGE_INTEGER *)&curTime64);
+	Int64 curTime64,freq64;
+	static Int64 prevTime64=0;
+	freq64 = Clock_Ticks_Per_Second();
+	curTime64 = Clock_Ticks();
 	freq64 /= 1000;
 
 	Int elapsedTimeMs = (curTime64 - prevTime64)/freq64;
@@ -1432,9 +1440,9 @@ void W3DView::update(void)
 	// call per 30Hz engine tick; update() now runs once per render frame. Step them on
 	// the original wall-clock cadence so camera motion speed is framerate-independent,
 	// while the camera transform itself still updates every render frame.
-	static DWORD prevCameraStepTime = 0;
-	DWORD nowCameraStepTime = timeGetTime();
-	Bool stepTime = (nowCameraStepTime - prevCameraStepTime) >= (DWORD)TheW3DFrameLengthInMsec;
+	static UnsignedInt prevCameraStepTime = 0;
+	UnsignedInt nowCameraStepTime = Clock_Milliseconds();
+	Bool stepTime = (nowCameraStepTime - prevCameraStepTime) >= (UnsignedInt)TheW3DFrameLengthInMsec;
 	// During a scripted frozen-time pan, W3DDisplay::draw's inner loop calls us and
 	// paces itself to ~30fps already; gating on top of that ran the pan at half speed.
 	if (isTimeFrozen() && !isCameraMovementFinished())
@@ -1444,15 +1452,15 @@ void W3DView::update(void)
 		// carry the remainder instead of discarding it: with a render cadence that is not
 		// a multiple of 33ms (the shell caps at 45fps), discarding ran the steppers at a
 		// fraction of real speed and beat against the render rate as visible judder
-		prevCameraStepTime += (DWORD)TheW3DFrameLengthInMsec;
-		if (nowCameraStepTime - prevCameraStepTime >= (DWORD)TheW3DFrameLengthInMsec)
+		prevCameraStepTime += (UnsignedInt)TheW3DFrameLengthInMsec;
+		if (nowCameraStepTime - prevCameraStepTime >= (UnsignedInt)TheW3DFrameLengthInMsec)
 			prevCameraStepTime = nowCameraStepTime;	// fell far behind (hitch, pause) - resync
 	}
 
 	// the scripted waypoint pan interpolates by milliseconds, so it does not need the
 	// 33ms gate at all: advance it below by the real time this render frame took, which
 	// is what makes shell-map camera moves smooth at any framerate
-	static DWORD prevWaypointTime = 0;
+	static UnsignedInt prevWaypointTime = 0;
 	Int waypointElapsedMs = (Int)(nowCameraStepTime - prevWaypointTime);
 	prevWaypointTime = nowCameraStepTime;
 	if (waypointElapsedMs < 0)
@@ -1490,7 +1498,13 @@ void W3DView::update(void)
 	{
 		followFactor = -1;
 	}
-	if (stepTime && cameraLock != INVALID_ID)
+	// R1, smooth motion: with it on, the lock follows on every render frame, towards the drawable's
+	// blended position, each per-step factor scaled to this frame's length (1-(1-f)^steps); with it off,
+	// 30 Hz steps and the factors as they were.
+	const Bool smoothLock = TheSmoothMotionActive;
+	const Real lockSteps = smoothLock ? (Real)waypointElapsedMs / (Real)TheW3DFrameLengthInMsec : 1.0f;
+	auto perStep = [smoothLock, lockSteps](Real f) -> Real { return smoothLock ? 1.0f - powf(1.0f - f, lockSteps) : f; };
+	if ((smoothLock ? lockSteps > 0.0f : (stepTime != 0)) && cameraLock != INVALID_ID)
 	{
 		m_doingMoveCameraOnWaypointPath = false;
 		m_CameraArrivedAtWaypointOnPathFlag = false;
@@ -1524,7 +1538,7 @@ void W3DView::update(void)
 			if (followFactor<0) {
 				followFactor = 0.05f;
 			} else {
-				followFactor += 0.05f;
+				followFactor += 0.05f * lockSteps;
 				if (followFactor>1.0f) followFactor = 1.0f;
 			}
 			if (getCameraLockDrawable() != NULL)
@@ -1543,6 +1557,14 @@ void W3DView::update(void)
 					// this method must ONLY be called from the client, NEVER From the logic, not even indirectly.
 					if (cameraLockDrawable->clientOnly_getFirstRenderObjInfo(&pos, &boundingSphereRadius, &transform))
 					{
+						Coord3D shown;
+						if (smoothLock && cameraLockDrawable->getSmoothMotionPosition(TheSmoothMotionAlpha, &shown))
+						{
+							const Coord3D *logicPos = cameraLockDrawable->getPosition();
+							pos.x += shown.x - logicPos->x;
+							pos.y += shown.y - logicPos->y;
+							pos.z += shown.z - logicPos->z;
+						}
 						Vector3 zaxis(0,0,1);
 
 						Vector3 objPos;
@@ -1560,7 +1582,7 @@ void W3DView::update(void)
 
 						Vector3 tranDiff = (camtran - prevCamTran);	//vector old position to new position.
 
-						camtran = prevCamTran + tranDiff * 0.1f;	//slowly move camera to new position.
+						camtran = prevCamTran + tranDiff * perStep(0.1f);	//slowly move camera to new position.
 
 						Matrix3D camXForm;
 						camXForm.Look_At(camtran,objPos,0);
@@ -1572,6 +1594,8 @@ void W3DView::update(void)
 			}
 			else
 			{	Coord3D objpos = *cameraLockObj->getPosition();
+				if (smoothLock && cameraLockObj->getDrawable() != NULL)
+					cameraLockObj->getDrawable()->getSmoothMotionPosition(TheSmoothMotionAlpha, &objpos);
 				Coord3D curpos = *getPosition();
 				// don't "snap" directly to the pos, but move there smoothly.
 				Real snapThreshSqr = sqr(TheGlobalData->m_partitionCellSize);
@@ -1595,13 +1619,13 @@ void W3DView::update(void)
 							Real ratio = 1.0f - snapThreshSqr/curDistSqr;
 							
 							// move halfway there.
-							curpos.x += dx*ratio*0.5f;
-							curpos.y += dy*ratio*0.5f;
+							curpos.x += dx*ratio*perStep(0.5f);
+							curpos.y += dy*ratio*perStep(0.5f);
 						}
 						else
 						{
 							// we're inside our 'play' tolerance.  Move slowly to the obj
-							Real ratio = 0.01f * m_lockDist;
+							Real ratio = perStep(0.01f * m_lockDist);
 							Real dx = objpos.x-curpos.x;
 							Real dy = objpos.y-curpos.y;
 							curpos.x += dx*ratio;
@@ -1610,8 +1634,8 @@ void W3DView::update(void)
 					}
 					else
 					{
-						curpos.x += dx*followFactor;
-						curpos.y += dy*followFactor;
+						curpos.x += dx*perStep(followFactor);
+						curpos.y += dy*perStep(followFactor);
 					}
 				}
 				if (!(TheScriptEngine->isTimeFrozenDebug() || TheScriptEngine->isTimeFrozenScript()) && !TheGameLogic->isGamePaused()) {
@@ -1638,7 +1662,7 @@ void W3DView::update(void)
 						}
 						else
 						{
-							m_angle += diff * 0.1f;
+							m_angle += diff * perStep(0.1f);
 						}
 						normAngle(m_angle);
 					}
@@ -1740,7 +1764,7 @@ void W3DView::update(void)
 	// render frame instead and convert m_cameraAdjustSpeed into the equivalent rate for the
 	// time this frame actually took, so the zoom is smooth and its speed stays the same.
 	//
-	static DWORD prevZoomStepTime = 0;
+	static UnsignedInt prevZoomStepTime = 0;
 	Real zoomSteps = (Real)(nowCameraStepTime - prevZoomStepTime) / (Real)TheW3DFrameLengthInMsec;
 	prevZoomStepTime = nowCameraStepTime;
 	if (zoomSteps <= 0.0f || zoomSteps > 10.0f)
@@ -1986,7 +2010,7 @@ extern Real TheIconDrawMS;
 static Real viewElapsedMS( const Int64 &from, const Int64 &to )
 {
 	Int64 freq;
-	QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	freq = Clock_Ticks_Per_Second();
 	if( freq < 1 )
 		return 0.0f;
 	return (Real)((double)(to - from) * 1000.0 / (double)freq);
@@ -2048,7 +2072,7 @@ void W3DView::draw( void )
 		if (preRenderResult && !continueTheEffect && !skipRender)
 		{
 			static UnsignedInt lastFilterComplaintMs = 0;
-			const UnsignedInt nowMs = timeGetTime();
+			const UnsignedInt nowMs = Clock_Milliseconds();
 			if (lastFilterComplaintMs == 0 || nowMs - lastFilterComplaintMs >= 1000)
 			{
 				lastFilterComplaintMs = nowMs;
@@ -2338,11 +2362,11 @@ void W3DView::draw( void )
 	// Nothing happens here unless a chain was asked for, and only the first view of a frame runs it.
 #ifdef DEBUG_LOGGING
 	Int64 tPostChainStart, tPostChainEnd, tIconStart, tIconEnd;
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tPostChainStart );
+	tPostChainStart = Clock_Ticks();
 #endif
 	Direct3D11_Finish_Scene();
 #ifdef DEBUG_LOGGING
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tPostChainEnd );
+	tPostChainEnd = Clock_Ticks();
 	ThePostChainMS = viewElapsedMS( tPostChainStart, tPostChainEnd );
 #endif
 
@@ -2350,11 +2374,11 @@ void W3DView::draw( void )
 	// the post draw is where health bars are drawn, and each one records where it landed
 	TheGameClient->clearHealthBarPickRegions();
 #ifdef DEBUG_LOGGING
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tIconStart );
+	tIconStart = Clock_Ticks();
 #endif
 	TheGameClient->iterateDrawablesInRegion( &axisAlignedRegion, drawablePostDraw, this );
 #ifdef DEBUG_LOGGING
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tIconEnd );
+	tIconEnd = Clock_Ticks();
 	TheIconDrawMS = viewElapsedMS( tIconStart, tIconEnd );
 #endif
 
@@ -2392,7 +2416,7 @@ void W3DView::scrollBy( Coord2D *delta )
 {
 	// Sample every render tick, including zero movement. Measuring only nonzero scrolls
 	// includes all the idle time in the first move and produces a jump on every restart.
-	const Real scrollDtFactor = m_scrollClock.sample(timeGetTime(), TheW3DFrameLengthInMsec);
+	const Real scrollDtFactor = m_scrollClock.sample(Clock_Milliseconds(), TheW3DFrameLengthInMsec);
 	if (delta)
 		m_scrollAmount = *delta;
 

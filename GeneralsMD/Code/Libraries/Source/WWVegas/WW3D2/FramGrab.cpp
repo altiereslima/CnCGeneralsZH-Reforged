@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 // FramGrab.cpp: implementation of the FrameGrabClass class.
 //
@@ -51,7 +52,7 @@ FrameGrabClass::FrameGrabClass(const char *filename, MODE mode, int width, int h
 	char file[256];
 	do {
 		sprintf(file, "%s%d.AVI", filename, counter++);
-		result = _access(file, 0);
+		result = access(file, 0);
 	} while(result != -1);
 
 	// Create new AVI file using AVIFileOpen. 

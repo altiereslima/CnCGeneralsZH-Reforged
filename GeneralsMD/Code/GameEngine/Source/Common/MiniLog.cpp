@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
@@ -28,27 +29,23 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
 #include "Common/MiniLog.h"
+#include "Common/ExecutableDirectory.h"
 
 #ifdef DEBUG_LOGGING
 
 LogClass::LogClass(const char *fname)
 {
 	char buffer[ _MAX_PATH ];
-	GetModuleFileName( NULL, buffer, sizeof( buffer ) );
-	char *pEnd = buffer + strlen( buffer );
-	while( pEnd != buffer )
-	{
-		if( *pEnd == '\\' )
-		{
-			*pEnd = 0;
-			break;
-		}
-		pEnd--;
-	}
+#if defined(_WIN32)
+	getExecutableDirectory( buffer, sizeof( buffer ), FALSE );
+#else
+	getLogDirectory( buffer, sizeof( buffer ), FALSE );	// outside an app bundle (P1)
+#endif
 	AsciiString fullPath;
 	fullPath.format("%s\\%s", buffer, fname);
-	m_fp = fopen(fullPath.str(), "wt");
+	m_fp = zh_fopen(fullPath.str(), "wt");
 }
 
 LogClass::~LogClass()
@@ -74,7 +71,7 @@ void LogClass::log(const char *fmt, ...)
 
 	va_list va;
 	va_start( va, fmt );
-	_vsnprintf(buf, 1024, fmt, va );
+	vsnprintf(buf, 1024, fmt, va );
 	buf[1023] = 0;
 	va_end( va );
 

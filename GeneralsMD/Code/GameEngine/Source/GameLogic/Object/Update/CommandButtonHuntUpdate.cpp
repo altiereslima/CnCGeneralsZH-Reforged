@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -45,12 +47,13 @@
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/ObjectIter.h"
-#include "GameLogic/Module\CommandButtonHuntUpdate.h"
-#include "GameLogic/Module\AIUpdate.h"
-#include "GameLogic/Module\CollideModule.h"
-#include "GameLogic/Module\SpecialAbilityUpdate.h"
-#include "GameLogic/Module\SpecialPowerModule.h"
+#include "GameLogic/Module/CommandButtonHuntUpdate.h"
+#include "GameLogic/Module/AIUpdate.h"
+#include "GameLogic/Module/CollideModule.h"
+#include "GameLogic/Module/SpecialAbilityUpdate.h"
+#include "GameLogic/Module/SpecialPowerModule.h"
 #include "GameLogic/ScriptEngine.h"
+#include "Platform/MsvcFloatCasts.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -349,7 +352,7 @@ Object* CommandButtonHuntUpdate::scanClosestTarget(void)
 				if (info) curPriority = info->getPriority(other->getTemplate());
 				if (curPriority == 0) 
 					continue; // don't attack 0 priority targets.
-				Int modifier = dist/TheAI->getAiData()->m_attackPriorityDistanceModifier;
+				Int modifier = floatToIntAsMsvc(dist/TheAI->getAiData()->m_attackPriorityDistanceModifier);
 				Int modPriority = curPriority-modifier;
 				if (modPriority < 1) 
 					modPriority = 1;

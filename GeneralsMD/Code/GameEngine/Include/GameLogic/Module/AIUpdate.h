@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -61,9 +63,9 @@ class HackInternetAIInterface;
 class AssaultTransportAIInterface;
 class JetAIUpdate;
 
-enum AIStateType;
-enum HordeActionType;
-enum ObjectID;
+enum AIStateType : Int;
+enum HordeActionType : Int;
+enum ObjectID : Int;
 
 
 //-------------------------------------------------------------------------------------------------
@@ -74,7 +76,7 @@ const Real FAST_AS_POSSIBLE = 999999.0f;
 // Note: these values are saved in save files, so you MUST NOT REMOVE OR CHANGE
 // existing values!
 //
-enum LocomotorSetType
+enum LocomotorSetType : Int
 {
 	LOCOMOTORSET_INVALID = -1,
 
@@ -374,6 +376,13 @@ public:
 	virtual GuardTargetType getGuardTargetType() const { return m_guardTargetType[1]; }
 	virtual void clearGuardTargetType() { m_guardTargetType[1] = m_guardTargetType[0]; m_guardTargetType[0] = GUARDTARGET_NONE; }
 	virtual GuardMode getGuardMode() const { return m_guardMode; }
+	// the radius a player's guard order gave this unit; 0 leaves it on its own vision-based range
+	Real getGuardRadius() const { return m_guardRadius; }
+	void setGuardRadius( Real radius ) { m_guardRadius = radius; }
+	// A player's unit on the aggressive stance takes what it sees, not only what it can already
+	// shoot, and goes after it the way a computer player's unit does.  Defensive is EA's rule
+	Bool hasAggressiveStance() const { return m_aggressiveStance; }
+	void setAggressiveStance( Bool aggressive ) { m_aggressiveStance = aggressive; }
 
 	virtual Object* construct( const ThingTemplate *what, 
 														 const Coord3D *pos, Real angle, 
@@ -450,6 +459,8 @@ public:
 	Bool isWeaponSlotOnTurretAndAimingAtTarget(WeaponSlotType wslot, const Object* victim) const;
 	Bool getTurretRotAndPitch(WhichTurretType tur, Real* turretAngle, Real* turretPitch) const;
 	Real getTurretTurnRate(WhichTurretType tur) const;
+	Real getTurretArcShortfall(WhichTurretType tur, Real relAngle) const;
+	WhichTurretType getAimingTurret(Bool *noseAims) const;	///< the turret the current attack aims with, and whether the nose has to
 	void setTurretTargetObject(WhichTurretType tur, Object* o, Bool isForceAttacking = FALSE);
 	Object *getTurretTargetObject( WhichTurretType tur, Bool clearDeadTargets = TRUE );
 	void setTurretTargetPosition(WhichTurretType tur, const Coord3D* pos);
@@ -608,8 +619,11 @@ public:
 	void transferAttack(ObjectID fromID, ObjectID toID);
 
 	void setCurrentVictim( const Object *nemesis );			///<  Current victim.
-	Object *getCurrentVictim( void ) const;	
+	Object *getCurrentVictim( void ) const;
 	virtual void notifyVictimIsDead() { }
+	Bool isCarriedGunOn( const Object *victim ) const;	///< a rider's turret or a passenger is already shooting at victim
+	void noteWithdrawTarget( const Object *victim );		///< an attack is ending; a helicopter or a turret may keep shooting victim while it moves
+	void updateWithdrawTarget();												///< keep the turret on that target while it can, let go once it cannot
 
 	// if we are attacking a position (and NOT an object), return it. otherwise return null.
 	const Coord3D *getCurrentVictimPos( void ) const;	
@@ -834,7 +848,9 @@ private:
 	AIStateMachine*			m_stateMachine;							///< the state machine
 	UnsignedInt					m_nextEnemyScanTime;				///< how long until the next enemy scan
 	ObjectID						m_currentVictimID;					///< if not INVALID_ID, this agent's current victim.
-	Real								m_desiredSpeed;							///< the desired speed of the tank
+	ObjectID						m_withdrawTargetID;					///< what a unit told to move mid-fight keeps shooting while it moves
+	UnsignedInt					m_withdrawFrame;						///< the last frame that target was still held
+	Real								m_desiredSpeed;						///< the desired speed of the tank
 	CommandSourceType		m_lastCommandSource;			/**< Keep track of the source of the last command we got.
 																									This is set immediately before the SetState that goes
 																									to the state machine, so onEnter in there can know where
@@ -842,6 +858,8 @@ private:
 																								*/
 
 	GuardMode							m_guardMode;
+	Real									m_guardRadius;				///< set by a player's guard order; 0 for the vision-based range
+	Bool									m_aggressiveStance;		///< set by MSG_SET_STANCE; FALSE is the defensive stance, EA's
 	GuardTargetType				m_guardTargetType[2];
 	Coord3D								m_locationToGuard;
 	ObjectID							m_objectToGuard;
@@ -903,6 +921,8 @@ private:
 	Int					m_noProgress;								///< consecutive frames wanting to move, not moving, not turning either.
 	Int					m_headOnFrames;							///< consecutive frames held up by somebody driving straight at us.
 	Bool				m_headOnSeen;								///< a collision this frame was with somebody driving straight at us.
+	Coord2D			m_sideStep;									///< a soldier's way out of the vehicles he touched since the last move, summed.
+	Bool				m_sideStepSeen;							///< and whether he touched any.
 	Coord3D			m_lastProgressPos;					///< where we were last frame, which is how the above is counted.
 	Real				m_lastProgressAngle;				///< and which way we were pointing, because coming about is progress too.
 	/* Dithering: driving a long way and getting nowhere, which the frame by frame test above cannot

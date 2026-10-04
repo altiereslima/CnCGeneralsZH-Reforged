@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -82,16 +84,17 @@ enum
 #include "W3DDevice/GameClient/W3DShadow.h"
 #include "W3DDevice/GameClient/W3DShroud.h"
 #include "W3DDevice/GameClient/W3DProjectedShadow.h"
-#include "WW3D2/Camera.h"
-#include "WW3D2/DX8Wrapper.h"
-#include "WW3D2/DX8Renderer.h"
-#include "WW3D2/HLod.h"
-#include "WW3D2/Matinfo.h"
-#include "WW3D2/Mesh.h"
-#include "WW3D2/MeshMdl.h"
+#include "WW3D2/camera.h"
+#include "WW3D2/dx8wrapper.h"
+#include "WW3D2/dx8renderer.h"
+#include "WW3D2/hlod.h"
+#include "WW3D2/matinfo.h"
+#include "WW3D2/mesh.h"
+#include "WW3D2/meshmdl.h"
 #include "WW3D2/vertmaterial.h"
 #include "d3dx9runtime.h"
 #include "d3d8shadertranslate.h"
+#include "Platform/RenderTypes.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -200,7 +203,7 @@ int W3DTreeBuffer::W3DTreeTextureClass::update(W3DTreeBuffer *buffer)
 	surface_level->Release();
 	DX8_ErrorCode(D3DXFilterTexture(Peek_D3D_Texture(), NULL, (UINT)0, D3DX_FILTER_BOX));	
 	if (TheWritableGlobalData->m_textureReductionFactor) {
-		DX8_ErrorCode(Peek_D3D_Texture()->SetLOD((DWORD)TheWritableGlobalData->m_textureReductionFactor));
+		DX8_ErrorCode(Peek_D3D_Texture()->SetLOD((UnsignedInt)TheWritableGlobalData->m_textureReductionFactor));
 	}
 	return(surface_desc.Height);
 }
@@ -214,7 +217,7 @@ int W3DTreeBuffer::W3DTreeTextureClass::update(W3DTreeBuffer *buffer)
 void W3DTreeBuffer::W3DTreeTextureClass::setLOD(Int LOD) const
 {
 	if (Peek_D3D_Texture()) {
-		DX8_ErrorCode(Peek_D3D_Texture()->SetLOD((DWORD)LOD));
+		DX8_ErrorCode(Peek_D3D_Texture()->SetLOD((UnsignedInt)LOD));
 	}
 }
 //=============================================================================
@@ -654,7 +657,7 @@ void W3DTreeBuffer::updateTexture(void)
 		}
 	}
 	DEBUG_ASSERTCRASH(maxHeight<=m_textureWidth, ("Bad max height."));
-	W3DTreeTextureClass *tex = new W3DTreeTextureClass((DWORD)m_textureWidth, (DWORD)m_textureWidth);
+	W3DTreeTextureClass *tex = new W3DTreeTextureClass((UnsignedInt)m_textureWidth, (UnsignedInt)m_textureWidth);
 	m_textureHeight = tex->update(this);
 
 	m_treeTexture = tex;
@@ -1322,7 +1325,7 @@ void W3DTreeBuffer::allocateTreeBuffers(void)
 
 		//shader decleration
 	// DX8_FVF_XYZNDUV1
-	DWORD Declaration[] =
+	RenderUInt32 Declaration[] =
 	{
 		D3DVSD_STREAM( 0 ),
 		D3DVSD_REG( 0, D3DVSDT_FLOAT3 ),  // Position
@@ -1332,13 +1335,13 @@ void W3DTreeBuffer::allocateTreeBuffers(void)
 		D3DVSD_END()
 	};
 
-	HRESULT hr;
+	RenderResult hr;
 	hr = W3DShaderManager::LoadAndCreateD3DVertexShader("shaders\\Trees.vso", &Declaration[0], &m_dwTreeVertexShader, &m_treeVertexDeclaration);
-	if (FAILED(hr))
+	if (Render_Failed(hr))
 		return;
 
 	hr = W3DShaderManager::LoadAndCreateD3DPixelShader("shaders\\Trees.pso", &m_dwTreePixelShader);
-	if (FAILED(hr))
+	if (Render_Failed(hr))
 		return;
 }
 

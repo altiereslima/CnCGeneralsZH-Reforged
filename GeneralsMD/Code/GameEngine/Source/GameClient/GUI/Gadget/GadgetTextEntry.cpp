@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -103,7 +105,7 @@ WindowMsgHandledType GadgetTextEntryInput( GameWindow *window, UnsignedInt msg,
 			WideChar ch = (WideChar) mData1;
 
 			// --------------------------------------------------------------------
-			if ( ch == VK_RETURN )
+			if ( ch == u'\r' )		// VK_RETURN: the same 13, as the character it arrives as
 			{
 				// WM_CHAR's lParam bit 30 says the key was already down: a held Enter repeating. The meta
 				// map ignores repeats, but this did not, so holding Enter opened the chat with the press and
@@ -144,7 +146,7 @@ WindowMsgHandledType GadgetTextEntryInput( GameWindow *window, UnsignedInt msg,
 				if( e->charPos < e->maxTextLen-1 )
 				{
 						e->text->appendChar( ch );
-						e->sText->appendChar( L'*' );
+						e->sText->appendChar( u'*' );
 						e->charPos++;
 						TheWindowManager->winSendSystemMsg( window->winGetOwner(), 
 																						GEM_UPDATE_TEXT,
@@ -364,7 +366,7 @@ WindowMsgHandledType GadgetTextEntrySystem( GameWindow *window, UnsignedInt msg,
 			e->sText->setText( UnicodeString::TheEmptyString );
 			Int len = ustr->getLength();
 			for( Int i = 0; i < len; i++ )
-				e->sText->appendChar( L'*' );
+				e->sText->appendChar( u'*' );
 
 			break;
 

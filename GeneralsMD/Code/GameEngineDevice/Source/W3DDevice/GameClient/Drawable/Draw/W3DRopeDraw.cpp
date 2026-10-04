@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,7 +30,9 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include <stdlib.h>
+#if defined(_WIN32)
 #include <windows.h>
+#endif
 #include "Common/Thing.h"
 #include "Common/ThingTemplate.h"
 #include "Common/Xfer.h"
@@ -40,7 +43,7 @@
 #include "GameLogic/GameLogic.h"
 #include "W3DDevice/GameClient/W3DDisplay.h"
 #include "W3DDevice/GameClient/Module/W3DRopeDraw.h"
-#include "WW3D2/Line3D.h"
+#include "WW3D2/line3d.h"
 #include "W3DDevice/GameClient/W3DScene.h"
 #include "Common/GameState.h"
 
@@ -81,7 +84,10 @@ void W3DRopeDraw::buildSegments()
 	DEBUG_ASSERTCRASH(m_segments.empty(), ("Hmmn, not empty"));
 	m_segments.clear();
 
-	Int numSegs = ceil(m_maxLen / m_wobbleLen);
+	// A mod's ChinookAIUpdate with RopeWobbleLen = 0 (shipped data has 10) makes this 1/0.  Windows converts
+	// the infinity to INT_MIN and draws no rope; ARM64 saturated to INT_MAX and allocated 2^31 segments.
+	// Platform/MsvcFloatCasts.h gives Windows' answer everywhere.
+	Int numSegs = floatToIntAsMsvc((float)ceil(m_maxLen / m_wobbleLen));
 	Real eachLen = m_maxLen / (Real)numSegs;
 	Coord3D pos = *getDrawable()->getPosition();
 	for (int i = 0; i < numSegs; ++i, pos.z += eachLen)

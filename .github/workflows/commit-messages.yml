@@ -32,4 +32,8 @@ jobs:
               status=1
             fi
           done < <(git log --no-merges --format='%h %s' "$BASE..$HEAD")
+          while IFS= read -r line; do
+            echo "::error::${line%% *} is a merge commit. Rebase the branch onto main instead of merging main into it. See CONTRIBUTING.md."
+            status=1
+          done < <(git log --merges --format='%h %s' "$BASE..$HEAD")
           exit $status

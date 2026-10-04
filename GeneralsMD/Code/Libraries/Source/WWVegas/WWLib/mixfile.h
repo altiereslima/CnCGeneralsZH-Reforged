@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***                            Confidential - Westwood Studios                              ***
@@ -49,7 +50,8 @@
 	#include "wwstring.h"
 #endif
 
-#include "vector.h"
+#include "Vector.H"
+#include "bittype.h"	// uint32, for the on-disk table below
 
 class FileClass;
 
@@ -101,9 +103,11 @@ private:
 		bool operator== (const FileInfoStruct &src)	{ return false; }
 		bool operator!= (const FileInfoStruct &src)	{ return true; }
 
-		unsigned long CRC;				// CRC code for embedded file.
-		unsigned long Offset;			// Offset from start of data section.
-		unsigned long Size;				// Size of data subfile.
+		// Read straight off disk as a table, so these are the format's 4-byte fields rather than
+		// long's width; the same 32 bits on Windows.  See MIXFILE_HEADER in mixfile.cpp.
+		uint32 CRC;				// CRC code for embedded file.
+		uint32 Offset;			// Offset from start of data section.
+		uint32 Size;				// Size of data subfile.
 	};
 
 	struct AddInfoStruct {
@@ -148,9 +152,9 @@ private:
 		bool operator== (const FileInfoStruct &src)	{ return false; }
 		bool operator!= (const FileInfoStruct &src)	{ return true; }
 
-		unsigned long	CRC;				// CRC code for embedded file.
-		unsigned long	Offset;			// Offset from start of data section.
-		unsigned long	Size;				// Size of data subfile.
+		uint32			CRC;				// CRC code for embedded file.
+		uint32			Offset;			// Offset from start of data section.
+		uint32			Size;				// Size of data subfile.
 		StringClass		Filename;
 	};
 
@@ -161,6 +165,8 @@ private:
 /*
 **
 */
-void	Setup_Mix_File( void );
+#if defined(_WIN32)
+void	Setup_Mix_File( void );	// the makemix developer tool; Win32 only, and nothing calls it
+#endif
 
 #endif

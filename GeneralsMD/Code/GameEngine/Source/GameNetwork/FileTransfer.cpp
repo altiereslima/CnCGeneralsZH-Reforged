@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,6 +30,8 @@
 ///////////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Platform/SleepMilliseconds.h"
+#include "Lib/Clock.h"
 
 #include "GameClient/LoadScreen.h"
 #include "GameClient/Shell.h"
@@ -47,7 +50,7 @@ static Bool doFileTransfer( AsciiString filename, MapTransferLoadScreen *ls, Int
 	if (mask)
 	{
 		ls->setCurrentFilename(filename);
-		UnsignedInt startTime = timeGetTime();
+		UnsignedInt startTime = Clock_Milliseconds();
 		const Int timeoutPeriod = 2*60*1000;
 		ls->processTimeout(timeoutPeriod/1000);
 
@@ -59,7 +62,7 @@ static Bool doFileTransfer( AsciiString filename, MapTransferLoadScreen *ls, Int
 		Bool sentFile = FALSE;
 		if (TheGameInfo->amIHost())
 		{
-			Sleep(500);
+			sleepMilliseconds( 500 );
 			fileCommandID = TheNetwork->sendFileAnnounce(filename, mask);
 		}
 		else
@@ -109,7 +112,7 @@ static Bool doFileTransfer( AsciiString filename, MapTransferLoadScreen *ls, Int
 				ls->processProgress(0, fileTransferPercent, "MapTransfer:Done");
 			}
 
-			Int now = timeGetTime();
+			Int now = Clock_Milliseconds();
 			if (now > startTime + timeoutPeriod) // bail if we don't finish in a reasonable amount of time
 			{
 				DEBUG_LOG(("Timing out file transfer\n"));

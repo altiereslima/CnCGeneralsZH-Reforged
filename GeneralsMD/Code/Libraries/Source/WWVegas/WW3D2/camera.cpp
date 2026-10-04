@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -730,10 +732,10 @@ void CameraClass::Apply(void)
 	WW3D::Get_Render_Target_Resolution(width,height,bits,windowed);
 	
 	D3DVIEWPORT9 vp;
-	vp.X = (DWORD)(Viewport.Min.X * (float)width);
-	vp.Y = (DWORD)(Viewport.Min.Y * (float)height);
-	vp.Width = (DWORD)((Viewport.Max.X - Viewport.Min.X) * (float)width);
-	vp.Height = (DWORD)((Viewport.Max.Y - Viewport.Min.Y) * (float)height);
+	vp.X = (uint32)(Viewport.Min.X * (float)width);
+	vp.Y = (uint32)(Viewport.Min.Y * (float)height);
+	vp.Width = (uint32)((Viewport.Max.X - Viewport.Min.X) * (float)width);
+	vp.Height = (uint32)((Viewport.Max.Y - Viewport.Min.Y) * (float)height);
 	vp.MinZ = ZBufferMin;
 	vp.MaxZ = ZBufferMax;
 	DX8Wrapper::Set_Viewport(&vp);

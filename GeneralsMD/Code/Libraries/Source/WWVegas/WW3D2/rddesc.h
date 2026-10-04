@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -42,7 +44,7 @@
 #ifndef RDDESC_H
 #define RDDESC_H
 
-#include "vector.h"
+#include "Vector.H"
 #include "wwstring.h"
 #include <d3d9types.h>
 #include <d3d9caps.h>
@@ -67,9 +69,11 @@ class RenderDeviceDescClass
 
 public:
 
-	RenderDeviceDescClass(void) : DeviceName(NULL), DeviceVendor(NULL), DevicePlatform(NULL), 
-											DriverName(NULL), DriverVendor(NULL), DriverVersion(NULL),
-											HardwareName(NULL), HardwareVendor(NULL), HardwareChipset(NULL)
+	// Each StringClass empty.  MSVC read NULL as the int 0 and chose StringClass(int initial_len = 0),
+	// which is what the default constructor is; clang finds NULL ambiguous.
+	RenderDeviceDescClass(void) : DeviceName(), DeviceVendor(), DevicePlatform(), 
+											DriverName(), DriverVendor(), DriverVersion(),
+											HardwareName(), HardwareVendor(), HardwareChipset()
 	{
 	}
 

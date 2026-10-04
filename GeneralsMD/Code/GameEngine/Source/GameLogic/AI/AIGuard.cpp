@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -211,6 +212,15 @@ AIGuardMachine::~AIGuardMachine()
 }
 
 //--------------------------------------------------------------------------------------
+/*static*/ Real AIGuardMachine::getGuardRange(const Object* obj)
+{
+	// The standard range is the unit's own vision, so a mixed group used to guard a different
+	// circle per unit type.  A player's order carries one radius for the whole group.
+	const Real radius = obj->getAI()->getGuardRadius();
+	return radius > 0.0f ? radius : getStdGuardRange(obj);
+}
+
+//--------------------------------------------------------------------------------------
 Bool AIGuardMachine::lookForInnerTarget(void)
 {
 	Object* owner = getOwner();
@@ -276,7 +286,7 @@ Bool AIGuardMachine::lookForInnerTarget(void)
 	// (getNextMoodTarget's UNFOGGED). It picks from what its player can see now.
 	filters[count++] = &filterFogged;
 
-	Real visionRange = AIGuardMachine::getStdGuardRange(owner);
+	Real visionRange = AIGuardMachine::getGuardRange(owner);
 
 	if (area) 
 	{
@@ -423,7 +433,7 @@ StateReturnType AIGuardInnerState::onEnter( void )
 			return STATE_SUCCESS;
 		}
 		m_exitConditions.m_center = pos;
-		m_exitConditions.m_radiusSqr = sqr(AIGuardMachine::getStdGuardRange(getMachineOwner()));
+		m_exitConditions.m_radiusSqr = sqr(AIGuardMachine::getGuardRange(getMachineOwner()));
 		m_exitConditions.m_conditionsToConsider = (ExitConditions::ATTACK_ExitIfOutsideRadius | 
 																								ExitConditions::ATTACK_ExitIfNoUnitFound);
 
@@ -538,6 +548,9 @@ StateReturnType AIGuardOuterState::onEnter( void )
 	Object *obj = getMachineOwner();
 
 	Real range = TheAI->getAdjustedVisionRangeForObject(obj, AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
+	// the chase leash never ends inside the circle the player drew
+	if (range < obj->getAI()->getGuardRadius())
+		range = obj->getAI()->getGuardRadius();
 
 	const PolygonTrigger *area = getGuardMachine()->getAreaToGuard();
 	if (area) 
@@ -584,7 +597,7 @@ StateReturnType AIGuardOuterState::update( void )
 		deltaAggr.x = m_exitConditions.m_center.x - goalObj->getPosition()->x;
 		deltaAggr.y = m_exitConditions.m_center.y - goalObj->getPosition()->y;
 		deltaAggr.z = m_exitConditions.m_center.z - goalObj->getPosition()->z;
-		Real visionSqr = sqr(AIGuardMachine::getStdGuardRange(getMachineOwner()));
+		Real visionSqr = sqr(AIGuardMachine::getGuardRange(getMachineOwner()));
 		if (deltaAggr.lengthSqr() <= visionSqr) 
 		{
 			// reset the counter
@@ -842,7 +855,7 @@ StateReturnType AIGuardAttackAggressorState::onEnter( void )
 	Coord3D pos = targetToGuard ? *targetToGuard->getPosition() : *getGuardMachine()->getPositionToGuard();
 	//Don't allow guarding units to leave their guard radius!
 	m_exitConditions.m_center = pos;
-	m_exitConditions.m_radiusSqr = sqr(AIGuardMachine::getStdGuardRange(getMachineOwner()));
+	m_exitConditions.m_radiusSqr = sqr(AIGuardMachine::getGuardRange(getMachineOwner()));
 	m_exitConditions.m_attackGiveUpFrame = TheGameLogic->getFrame() + TheAI->getAiData()->m_guardChaseUnitFrames;
 	m_exitConditions.m_conditionsToConsider = (ExitConditions::ATTACK_ExitIfExpiredDuration | 
 																						 ExitConditions::ATTACK_ExitIfNoUnitFound |

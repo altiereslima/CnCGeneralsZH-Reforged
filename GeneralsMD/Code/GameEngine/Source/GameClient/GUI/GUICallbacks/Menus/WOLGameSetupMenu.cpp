@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,6 +31,9 @@
 ///////////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
+
+#include "Lib/WideCharFns.h"
 
 #include "Common/GameEngine.h"
 #include "Common/GameState.h"
@@ -84,7 +89,7 @@ void slotListDebugLog(const char *fmt, ...)
 	static char buf[1024];
 	va_list va;
 	va_start( va, fmt );
-	_vsnprintf(buf, 1024, fmt, va );
+	vsnprintf(buf, 1024, fmt, va );
 	va_end( va );
 	buf[1023] = 0;
 
@@ -119,7 +124,7 @@ void SendStatsToOtherPlayers(const GameInfo *game)
 	subStats.locale = fullStats.locale;
 	subStats.gamesAsRandom = fullStats.gamesAsRandom;
 	GetAdditionalDisconnectsFromUserFile(&subStats);
-	fullStr.format("%d %s", TheGameSpyInfo->getLocalProfileID(), TheGameSpyPSMessageQueue->formatPlayerKVPairs( subStats ));
+	fullStr.format("%d %s", TheGameSpyInfo->getLocalProfileID(), TheGameSpyPSMessageQueue->formatPlayerKVPairs( subStats ).c_str());	// defect 13: was the std::string itself
 	req.options = fullStr.str();
 
 	Int localIndex = game->getLocalSlotNum();
@@ -557,7 +562,7 @@ static void handleColorSelection(int index)
 	GameWindow *combo = comboBoxColor[index];
 	Int color, selIndex;
 	GadgetComboBoxGetSelectedPos(combo, &selIndex);
-	color = (Int)GadgetComboBoxGetItemData(combo, selIndex);
+	color = (Int)(intptr_t)GadgetComboBoxGetItemData(combo, selIndex);
 
 	GameInfo *myGame = TheGameSpyInfo->getCurrentStagingRoom();
 
@@ -620,7 +625,7 @@ static void handlePlayerTemplateSelection(int index)
 	GameWindow *combo = comboBoxPlayerTemplate[index];
 	Int playerTemplate, selIndex;
 	GadgetComboBoxGetSelectedPos(combo, &selIndex);
-	playerTemplate = (Int)GadgetComboBoxGetItemData(combo, selIndex);
+	playerTemplate = (Int)(intptr_t)GadgetComboBoxGetItemData(combo, selIndex);
 	GameInfo *myGame = TheGameSpyInfo->getCurrentStagingRoom();
 
 	if (myGame)
@@ -745,7 +750,7 @@ static void handleTeamSelection(int index)
 	GameWindow *combo = comboBoxTeam[index];
 	Int team, selIndex;
 	GadgetComboBoxGetSelectedPos(combo, &selIndex);
-	team = (Int)GadgetComboBoxGetItemData(combo, selIndex);
+	team = (Int)(intptr_t)GadgetComboBoxGetItemData(combo, selIndex);
 	GameInfo *myGame = TheGameSpyInfo->getCurrentStagingRoom();
 
 	if (myGame)
@@ -791,7 +796,7 @@ static void handleStartingCashSelection()
     GadgetComboBoxGetSelectedPos(comboBoxStartingCash, &selIndex);
     
     Money startingCash;
-    startingCash.deposit( (UnsignedInt)GadgetComboBoxGetItemData( comboBoxStartingCash, selIndex ), FALSE );
+    startingCash.deposit( (UnsignedInt)(uintptr_t)GadgetComboBoxGetItemData( comboBoxStartingCash, selIndex ), FALSE );
     myGame->setStartingCash( startingCash );
     myGame->resetAccepted();
     
@@ -963,12 +968,12 @@ static void StartPressed(void)
 	Bool willTransfer = TRUE;
 	if (mapData)
 	{
-		mapDisplayName.format(L"%ls", mapData->m_displayName.str());
+		mapDisplayName.format(u"%ls", mapData->m_displayName.str());
 		willTransfer = !mapData->m_isOfficial;
 	}
 	else
 	{
-		mapDisplayName.format(L"%hs", myGame->getMap().str());
+		mapDisplayName.format(u"%hs", myGame->getMap().str());
 		willTransfer = WouldMapTransfer(myGame->getMap());
 	}
 	for( int i = 0; i < MAX_SLOTS; i++ )
@@ -1162,7 +1167,7 @@ void WOLDisplayGameOptions( void )
   Int index;
   for ( index = 0; index < itemCount; index++ )
   {
-    Int value  = (Int)GadgetComboBoxGetItemData(comboBoxStartingCash, index);
+    Int value  = (Int)(intptr_t)GadgetComboBoxGetItemData(comboBoxStartingCash, index);
     if ( value == theGame->getStartingCash().countMoney() )
     {
       // Note: must check if combobox is already correct to avoid infinite recursion
@@ -1696,7 +1701,7 @@ void WOLGameSetupMenuInit( WindowLayout *layout, void *userData )
 	WOLPositionStartSpots();
 
 	lastSlotlistTime = 0;
-	enterTime = timeGetTime();
+	enterTime = Clock_Milliseconds();
 
 	// Set Keyboard to chat entry
 	TheWindowManager->winSetFocus( textEntryChat );
@@ -1861,7 +1866,7 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 
 		Bool isHosting = TheGameSpyInfo->amIHost(); // only while in game setup screen
 		isHosting = isHosting || (TheGameSpyGame && TheGameSpyGame->isInGame() && TheGameSpyGame->amIHost()); // while in game
-		if (!isHosting && !lastSlotlistTime && timeGetTime() > enterTime + 10000)
+		if (!isHosting && !lastSlotlistTime && Clock_Milliseconds() > enterTime + 10000)
 		{
 			// don't do this if we're disconnected
 			if (TheGameSpyPeerMessageQueue->isConnected())
@@ -2190,8 +2195,8 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 									}
 									else
 									{
-										SLOTLIST_DEBUG_LOG(("Not from the host!  isHuman:%d, name:'%ls', sender:'%s'\n",
-											game->getSlot(0)->isHuman(), game->getSlot(0)->getName().str(),
+										SLOTLIST_DEBUG_LOG(("Not from the host!  isHuman:%d, name:'%s', sender:'%s'\n",
+											game->getSlot(0)->isHuman(), WideCharAsUtf8( game->getSlot(0)->getName().str() ).str(),
 											resp.nick.c_str()));
 									}
 								}
@@ -2262,8 +2267,8 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 										if (slot && slot->isHuman())
 										{
 											UnicodeString munkee;
-											munkee.format(L"\t%d: %ls", i, slot->getName().str());
-											SLOTLIST_DEBUG_LOG(("%ls\n", munkee.str()));
+											munkee.format(u"\t%d: %ls", i, slot->getName().str());
+											SLOTLIST_DEBUG_LOG(("%s\n", WideCharAsUtf8( munkee.str() ).str()));
 										}
 									}
 								}
@@ -2274,7 +2279,7 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 							newMapCRC = game->getMapCRC();
 							if (isInGame)
 							{
-								lastSlotlistTime = timeGetTime();
+								lastSlotlistTime = Clock_Milliseconds();
 								if ( (oldMapCRC ^ newMapCRC) || (!wasInGame && isInGame) )
 								{
 									// it changed.  send it
@@ -2296,12 +2301,12 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 										Bool willTransfer = TRUE;
 										if (mapData)
 										{
-											mapDisplayName.format(L"%ls", mapData->m_displayName.str());
+											mapDisplayName.format(u"%ls", mapData->m_displayName.str());
 											willTransfer = !mapData->m_isOfficial;
 										}
 										else
 										{
-											mapDisplayName.format(L"%hs", TheGameState->getMapLeafName(game->getMap()).str());
+											mapDisplayName.format(u"%hs", TheGameState->getMapLeafName(game->getMap()).str());
 											willTransfer = WouldMapTransfer(game->getMap());
 										}
 										if (willTransfer)
@@ -2348,13 +2353,13 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 							}
 						}
 					}
-					else if (!stricmp(resp.command.c_str(), "NAT"))
+					else if (!strcasecmp(resp.command.c_str(), "NAT"))
 					{
 						if (TheNAT != NULL) {
 							TheNAT->processGlobalMessage(-1, resp.commandOptions.c_str());
 						}
 					}
-					else if (!stricmp(resp.command.c_str(), "Pings"))
+					else if (!strcasecmp(resp.command.c_str(), "Pings"))
 					{
 						if (!TheGameSpyInfo->amIHost())
 						{
@@ -2392,7 +2397,7 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 					if (game)
 					{
 						Int slotNum = game->getSlotNum(resp.nick.c_str());
-						if ((slotNum >= 0) && (slotNum < MAX_SLOTS) && (!stricmp(resp.command.c_str(), "NAT"))) {
+						if ((slotNum >= 0) && (slotNum < MAX_SLOTS) && (!strcasecmp(resp.command.c_str(), "NAT"))) {
 							// this is a command for NAT negotiations, pass if off to TheNAT
 							if (TheNAT != NULL) {
 								TheNAT->processGlobalMessage(slotNum, resp.commandOptions.c_str());
@@ -2444,12 +2449,12 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 									Bool willTransfer = TRUE;
 									if (mapData)
 									{
-										mapDisplayName.format(L"%ls", mapData->m_displayName.str());
+										mapDisplayName.format(u"%ls", mapData->m_displayName.str());
 										willTransfer = !mapData->m_isOfficial;
 									}
 									else
 									{
-										mapDisplayName.format(L"%hs", game->getMap().str());
+										mapDisplayName.format(u"%hs", game->getMap().str());
 										willTransfer = WouldMapTransfer(game->getMap());
 									}
 									UnicodeString text;
@@ -2577,7 +2582,7 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 								{
 									if (uVal != slot->getIP())
 									{
-										DEBUG_LOG(("setting IP of player %ls from 0x%08x to be 0x%08x", slot->getName().str(), slot->getIP(), uVal));
+										DEBUG_LOG(("setting IP of player %s from 0x%08x to be 0x%08x", WideCharAsUtf8( slot->getName().str() ).str(), slot->getIP(), uVal));
 										slot->setIP(uVal);
 										change = true;
 										shouldUnaccept = true;
@@ -2712,7 +2717,7 @@ Bool handleGameSetupSlashCommands(UnicodeString uText)
 	if (token == "host")
 	{
 		UnicodeString s;
-		s.format(L"Hosting qr2:%d thread:%d", getQR2HostingStatus(), isThreadHosting);
+		s.format(u"Hosting qr2:%d thread:%d", getQR2HostingStatus(), isThreadHosting);
 		TheGameSpyInfo->addText(s, GameSpyColor[GSCOLOR_DEFAULT], NULL);
 		return TRUE; // was a slash command
 	}
@@ -2725,7 +2730,7 @@ Bool handleGameSetupSlashCommands(UnicodeString uText)
 	else if (token == "slots")
 	{
 		g_debugSlots = !g_debugSlots;
-		TheGameSpyInfo->addText(UnicodeString(L"Toggled SlotList debug"), GameSpyColor[GSCOLOR_DEFAULT], NULL);
+		TheGameSpyInfo->addText(UnicodeString(u"Toggled SlotList debug"), GameSpyColor[GSCOLOR_DEFAULT], NULL);
 		return TRUE; // was a slash command
 	}
 	else if (token == "discon")
@@ -2862,7 +2867,7 @@ WindowMsgHandledType WOLGameSetupMenuSystem( GameWindow *window, UnsignedInt msg
 						  // Get
 						  Int pos = -1;
 						  GadgetComboBoxGetSelectedPos(comboBoxPlayer[i], &pos);
-						  SlotState pickedState = (pos >= 0) ? (SlotState)(Int)GadgetComboBoxGetItemData(comboBoxPlayer[i], pos) : SLOT_OPEN;
+						  SlotState pickedState = (pos >= 0) ? (SlotState)(Int)(intptr_t)GadgetComboBoxGetItemData(comboBoxPlayer[i], pos) : SLOT_OPEN;
 						  if( pos >= 0 )
 						  {
 							  if( myGame->getSlot(i)->getState() == SLOT_PLAYER )

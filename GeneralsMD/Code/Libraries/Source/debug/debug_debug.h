@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 /////////////////////////////////////////////////////////////////////////EA-V1
 // $File: //depot/GeneralsMD/Staging/code/Libraries/Source/debug/debug_debug.h $
@@ -31,6 +32,8 @@
 #endif
 #ifndef DEBUG_DEBUG_H // Include guard
 #define DEBUG_DEBUG_H
+
+#include <stdint.h> // uintptr_t, the frame table's key
 
 // this makes sure that whenever this header is included
 // the accompanying OBJ file is linked in as well
@@ -876,7 +879,7 @@ private:
   CmdInterfaceListEntry *firstCmdGroup;
 
   /// \internal current stack frame (used by SkipNext)
-  static unsigned curStackFrame;
+  static uintptr_t curStackFrame;
 
   /** \internal 
   
@@ -924,7 +927,7 @@ private:
     FrameHashEntry *next;
 
     /// frame address
-    unsigned frameAddr;
+    uintptr_t frameAddr;
 
     /// frame type (FrameTypeAssert, FrameTypeCheck, or FrameTypeLog)
     unsigned frameType;
@@ -964,7 +967,7 @@ private:
     \param addr frame address
     \return FrameHashEntry found or 0 if nothing found
   */
-  __forceinline FrameHashEntry *LookupFrame(unsigned addr)
+  __forceinline FrameHashEntry *LookupFrame(uintptr_t addr)
   {
     for (FrameHashEntry *e=frameHash[addr%FRAME_HASH_SIZE];e;e=e->next)
       if (e->frameAddr==addr)
@@ -984,7 +987,7 @@ private:
     \param line line number
     \return the entry just added
   */
-  FrameHashEntry *AddFrameEntry(unsigned addr, unsigned type,
+  FrameHashEntry *AddFrameEntry(uintptr_t addr, unsigned type,
                                 const char *fileOrGroup, int line);
 
   /** \internal
@@ -1006,7 +1009,7 @@ private:
     \param line line number
     \return the entry just added (or the already existing entry)
   */
-  FrameHashEntry *GetFrameEntry(unsigned addr, unsigned type,
+  FrameHashEntry *GetFrameEntry(uintptr_t addr, unsigned type,
                                 const char *fileOrGroup, int line)
   {
     FrameHashEntry *e=LookupFrame(addr);

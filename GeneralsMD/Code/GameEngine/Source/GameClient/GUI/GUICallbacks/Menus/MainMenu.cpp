@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -30,7 +32,7 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
-#include "GameSpy/ghttp/ghttp.h"
+#include "gamespy/ghttp/ghttp.h"
 
 #include "Lib/BaseType.h"
 #include "Common/GameEngine.h"
@@ -39,7 +41,7 @@
 #include "Common/NameKeyGenerator.h"
 #include "Common/RandomValue.h"
 #include "Common/UserPreferences.h"
-#include "Common/Version.h"
+#include "Common/version.h"
 #include "Common/GameLOD.h"
 #include "GameClient/AnimateWindowManager.h"
 #include "GameClient/ExtendedMessageBox.h"
@@ -326,7 +328,7 @@ static MessageBoxReturnType checkCDCallback( void *userData )
 	}
 	else
 	{
-		prepareCampaignGame((GameDifficulty)(Int)(Int *)userData);
+		prepareCampaignGame((GameDifficulty)(Int)(intptr_t)userData);
 		return MB_RETURN_CLOSE;
 	}
 }
@@ -577,7 +579,7 @@ void MainMenuInit( WindowLayout *layout, void *userData )
 	instData.init();
 	BitSet( instData.m_style, GWS_PUSH_BUTTON | GWS_MOUSE_TRACK );
 	instData.m_textLabelString = "Debug: Compress/Decompress Maps";
-	instData.setTooltipText(UnicodeString(L"Only Used in Debug and Internal!"));
+	instData.setTooltipText(UnicodeString(u"Only Used in Debug and Internal!"));
 	buttonCompressTest = TheWindowManager->gogoGadgetPushButton( parentMainMenu, 
 																									 WIN_STATUS_ENABLED | WIN_STATUS_IMAGE, 
 																									 25, 175, 
@@ -589,7 +591,7 @@ void MainMenuInit( WindowLayout *layout, void *userData )
 	BitSet( instData.m_style, GWS_PUSH_BUTTON | GWS_MOUSE_TRACK );
 	instData.m_textLabelString = "Debug: Load Map";
 	
-	instData.setTooltipText(UnicodeString(L"Only Used in Debug and Internal!"));
+	instData.setTooltipText(UnicodeString(u"Only Used in Debug and Internal!"));
 	buttonCampaign = TheWindowManager->gogoGadgetPushButton( parentMainMenu, 
 																									 WIN_STATUS_ENABLED, 
 																									 25, 54, 
@@ -823,7 +825,7 @@ void DoResolutionDialog()
 	
 	UnicodeString resTimerString = TheGameText->fetch("GUI:Resolution");
 	
-	resolutionNew.format(L": %dx%d\n", newDispSettings.xRes , newDispSettings.yRes);
+	resolutionNew.format(u": %dx%d\n", newDispSettings.xRes , newDispSettings.yRes);
 	
 	resTimerString.concat(resolutionNew);
 		
@@ -1024,6 +1026,21 @@ WindowMsgHandledType MainMenuInput( GameWindow *window, UnsignedInt msg,
 	return MSG_IGNORED;
 
 }  // end MainMenuInput
+
+//-------------------------------------------------------------------------------------------------
+/* Starts the map editor beside the game, without waiting for it.  WorldBuilder is a Windows program:
+	 off Windows there is none to start, so this says it failed and the menu shows its "could not
+	 load" box, as it does on Windows when the exe is missing. */
+static Bool startWorldBuilder( const char *exe )
+{
+#if defined(_WIN32)
+	return _spawnl(_P_NOWAIT, exe, exe, NULL) >= 0;
+#else
+	(void)exe;
+	return FALSE;
+#endif
+}
+
 //-------------------------------------------------------------------------------------------------
 /** Main menu window system callback */
 //-------------------------------------------------------------------------------------------------
@@ -1494,13 +1511,13 @@ WindowMsgHandledType MainMenuSystem( GameWindow *window, UnsignedInt msg,
 			else if( controlID == worldBuilderID )
 			{
 #if defined _DEBUG
-				if(_spawnl(_P_NOWAIT,"WorldBuilderD.exe","WorldBuilderD.exe", NULL) < 0)
+				if(!startWorldBuilder("WorldBuilderD.exe"))
 					MessageBoxOk(TheGameText->fetch("GUI:WorldBuilder"), TheGameText->fetch("GUI:WorldBuilderLoadFailed"),NULL);
 #elif defined  _INTERNAL
-				if(_spawnl(_P_NOWAIT,"WorldBuilderI.exe","WorldBuilderI.exe", NULL) < 0)
+				if(!startWorldBuilder("WorldBuilderI.exe"))
 					MessageBoxOk(TheGameText->fetch("GUI:WorldBuilder"), TheGameText->fetch("GUI:WorldBuilderLoadFailed"),NULL);
 #else
-				if(_spawnl(_P_NOWAIT,"WorldBuilder.exe","WorldBuilder.exe", NULL) < 0)
+				if(!startWorldBuilder("WorldBuilder.exe"))
 					MessageBoxOk(TheGameText->fetch("GUI:WorldBuilder"), TheGameText->fetch("GUI:WorldBuilderLoadFailed"),NULL);
 #endif
 			}

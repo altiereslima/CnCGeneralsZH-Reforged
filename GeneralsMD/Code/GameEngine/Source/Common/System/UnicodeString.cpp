@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -44,7 +45,9 @@
 ///////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
+#include "Lib/WideCharFns.h"
 #include "Common/CriticalSection.h"
+
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -63,7 +66,7 @@ void UnicodeString::validate() const
 	if (!m_data) return;
 	DEBUG_ASSERTCRASH(m_data->m_refCount > 0, ("m_refCount is zero"));
 	DEBUG_ASSERTCRASH(m_data->m_numCharsAllocated > 0, ("m_numCharsAllocated is zero"));
-	DEBUG_ASSERTCRASH(wcslen(m_data->peek())+1 <= m_data->m_numCharsAllocated,("str is too long for storage"));
+	DEBUG_ASSERTCRASH(WideCharLen(m_data->peek())+1 <= m_data->m_numCharsAllocated,("str is too long for storage"));
 }
 #endif
 
@@ -86,10 +89,16 @@ void UnicodeString::ensureUniqueBufferOfSize(int numCharsNeeded, Bool preserveDa
 			m_data->m_numCharsAllocated >= numCharsNeeded)
 	{
 		// no buffer manhandling is needed (it's already large enough, and unique to us)
+		// memmove, as AsciiString's: nextToken sets the string to the rest of itself, and a string can
+		// be concatenated onto itself; an overlapping wcscpy or wcscat is undefined, and the loop off
+		// Windows ran past the end of a self-concatenation.
 		if (strToCopy)
-			wcscpy(m_data->peek(), strToCopy);
+			memmove(m_data->peek(), strToCopy, (WideCharLen(strToCopy) + 1) * sizeof(WideChar));
 		if (strToCat)
-			wcscat(m_data->peek(), strToCat);
+		{
+			WideChar *end = m_data->peek() + WideCharLen(m_data->peek());
+			memmove(end, strToCat, (WideCharLen(strToCat) + 1) * sizeof(WideChar));
+		}
 		return;
 	}
 
@@ -97,6 +106,8 @@ void UnicodeString::ensureUniqueBufferOfSize(int numCharsNeeded, Bool preserveDa
 	if (minBytes > MAX_LEN)
 		throw ERROR_OUT_OF_MEMORY;
 
+	if (TheDynamicMemoryAllocator == NULL)
+		preMainInitMemoryManager();	// a string built by a static constructor, before main (GameMemory.h)
 	int actualBytes = TheDynamicMemoryAllocator->getActualAllocationSize(minBytes);
 	UnicodeStringData* newData = (UnicodeStringData*)TheDynamicMemoryAllocator->allocateBytesDoNotZero(actualBytes, "STR_UnicodeString::ensureUniqueBufferOfSize");
 	newData->m_refCount = 1;
@@ -106,16 +117,16 @@ void UnicodeString::ensureUniqueBufferOfSize(int numCharsNeeded, Bool preserveDa
 #endif
 
 	if (m_data && preserveData)
-		wcscpy(newData->peek(), m_data->peek());
+		WideCharCpy(newData->peek(), m_data->peek());
 	else
 		newData->peek()[0] = 0;
 
 	// do these BEFORE releasing the old buffer, so that self-copies
 	// or self-cats will work correctly.
 	if (strToCopy)
-		wcscpy(newData->peek(), strToCopy);
+		WideCharCpy(newData->peek(), strToCopy);
 	if (strToCat)
-		wcscat(newData->peek(), strToCat);
+		WideCharCat(newData->peek(), strToCat);
 
 	releaseBuffer();
 	m_data = newData;
@@ -143,7 +154,7 @@ void UnicodeString::releaseBuffer()
 // -----------------------------------------------------
 UnicodeString::UnicodeString(const WideChar* s) : m_data(0)
 {
-	int len = wcslen(s);
+	int len = WideCharLen(s);
 	if (len)
 	{
 		ensureUniqueBufferOfSize(len + 1, false, s, NULL);
@@ -173,7 +184,7 @@ void UnicodeString::set(const WideChar* s)
 	validate();
 	if (!m_data || s != peek())
 	{
-		int len = s ? wcslen(s) : 0;
+		int len = s ? WideCharLen(s) : 0;
 		if (len)
 		{
 			ensureUniqueBufferOfSize(len + 1, false, s, NULL);
@@ -212,7 +223,7 @@ void UnicodeString::translate(const AsciiString& stringSrc)
 void UnicodeString::concat(const WideChar* s)
 {
 	validate();
-	int addlen = wcslen(s);
+	int addlen = WideCharLen(s);
 	if (addlen == 0)
 		return;	// my, that was easy
 
@@ -237,7 +248,7 @@ void UnicodeString::trim()
 		const WideChar *c = peek();
 
 		//	Strip leading white space from the string.
-		while (c && iswspace(*c))
+		while (c && WideCharIsSpace(*c))
 		{
 			c++;
 		}
@@ -249,10 +260,10 @@ void UnicodeString::trim()
 		if (m_data) // another check, because the previous set() could erase m_data
 		{
 			//	Clip trailing white space from the string.
-			int len = wcslen(peek());
+			int len = WideCharLen(peek());
 			for (int index = len-1; index >= 0; index--)
 			{
-				if (iswspace(getCharAt(index)))
+				if (WideCharIsSpace(getCharAt(index)))
 				{
 					removeLastChar();
 				}
@@ -272,7 +283,7 @@ void UnicodeString::removeLastChar()
 	validate();
 	if (m_data)
 	{
-		int len = wcslen(peek());
+		int len = WideCharLen(peek());
 		if (len > 0)
 		{
 			ensureUniqueBufferOfSize(len+1, true, NULL, NULL);
@@ -309,7 +320,10 @@ void UnicodeString::format_va(const UnicodeString& format, va_list args)
 {
 	validate();
 	WideChar buf[MAX_FORMAT_BUF_LEN];
-  if (_vsnwprintf(buf, sizeof(buf)/sizeof(WideChar)-1, format.str(), args) < 0)
+	// WideCharFormatV, not _vsnwprintf: buf and format are WideChar and the C library has no
+	// char16_t printf on any platform.  It keeps _vsnwprintf's contract - negative means the text
+	// did not fit - which is what the throw below is written against.  See Lib/WideCharFns.h.
+  if (WideCharFormatV(buf, sizeof(buf)/sizeof(WideChar)-1, format.str(), args) < 0)
 			throw ERROR_OUT_OF_MEMORY;
 	set(buf);
 	validate();
@@ -320,7 +334,7 @@ void UnicodeString::format_va(const WideChar* format, va_list args)
 {
 	validate();
 	WideChar buf[MAX_FORMAT_BUF_LEN];
-  if (_vsnwprintf(buf, sizeof(buf)/sizeof(WideChar)-1, format, args) < 0)
+  if (WideCharFormatV(buf, sizeof(buf)/sizeof(WideChar)-1, format, args) < 0)
 			throw ERROR_OUT_OF_MEMORY;
 	set(buf);
 	validate();
@@ -333,21 +347,21 @@ Bool UnicodeString::nextToken(UnicodeString* tok, UnicodeString delimiters)
 		return false;
 
 	if (delimiters.isEmpty())
-		delimiters = UnicodeString(L" \t\n\r");
+		delimiters = UnicodeString(u" \t\n\r");
 
 	Int offset;
 
-	offset = wcsspn(peek(), delimiters.str());
+	offset = WideCharSpn(peek(), delimiters.str());
 	WideChar* start = peek() + offset;
 
-	offset = wcscspn(start, delimiters.str());
+	offset = WideCharCSpn(start, delimiters.str());
 	WideChar* end = start + offset;
 
 	if (end > start)
 	{
 		Int len = end - start;
 		WideChar* tmp = tok->getBufferForRead(len + 1);
-		memcpy(tmp, start, len*2);
+		memcpy(tmp, start, len*sizeof(WideChar));	// was len*2: the same bytes while WideChar is two
 		tmp[len] = 0;
 
 		this->set(end);

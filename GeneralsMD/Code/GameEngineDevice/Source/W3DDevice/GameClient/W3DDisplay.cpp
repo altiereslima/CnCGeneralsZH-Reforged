@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -35,8 +37,13 @@ static void drawFramerateBar(void);
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include <stdlib.h>
+#include "Lib/Clock.h"
+#if defined(_WIN32)
 #include <windows.h>
+#endif
+#if defined(_WIN32)
 #include <io.h>
+#endif
 #include <time.h>
 #include "stringex.h"
 
@@ -63,6 +70,13 @@ static void drawFramerateBar(void);
 #include "GameLogic/Module/PhysicsUpdate.h"
 
 #include "GameClient/Drawable.h"
+#include "W3DDevice/GameClient/W3DSmoothMotion.h"
+#include "GameLogic/Object.h"
+#include "GameClient/Keyboard.h"		// TheKeyboard; on Windows WinMain.h brought it too
+#include "Platform/SleepMilliseconds.h"
+#if !defined(_WIN32)
+#include "Platform/RendererName.h"
+#endif
 #include "GameClient/GameText.h"
 #include "GameClient/GameConsole.h"
 #include "GameClient/GraphDraw.h"
@@ -84,31 +98,35 @@ static void drawFramerateBar(void);
 #include "W3DDevice/GameClient/W3DScene.h"
 #include "W3DDevice/GameClient/W3DTerrainTracks.h"
 #include "W3DDevice/GameClient/W3DWater.h"
-#include "W3DDevice/GameClient/W3DVideoBuffer.h"
+#include "W3DDevice/GameClient/W3DVideobuffer.h"
 #include "W3DDevice/GameClient/W3DShaderManager.h"
 #include "W3DDevice/GameClient/W3DDebugDisplay.h"
 #include "W3DDevice/GameClient/W3DDisplayString.h"
 #include "W3DDevice/GameClient/W3DProjectedShadow.h"
 #include "W3DDevice/GameClient/W3DShroud.h"
-#include "WWMath/WWMath.h"
-#include "WWLib/Registry.h"
-#include "WW3D2/WW3D.h"
-#include "WW3D2/PredLod.h"
-#include "WW3D2/Part_Emt.h"
-#include "WW3D2/Part_Ldr.h"
-#include "WW3D2/DX8Caps.h"
-#include "WW3D2/WW3DFormat.h"
+#include "WWMath/wwmath.h"
+#if defined(_WIN32)
+#include "WWLib/registry.h"
+#endif
+#include "WW3D2/ww3d.h"
+#include "WW3D2/predlod.h"
+#include "WW3D2/part_emt.h"
+#include "WW3D2/part_ldr.h"
+#include "WW3D2/dx8caps.h"
+#include "WW3D2/ww3dformat.h"
 #include "WW3D2/agg_def.h"
-#include "WW3D2/Render2DSentence.h"
-#include "WW3D2/SortingRenderer.h"
-#include "WW3D2/Textureloader.h"
-#include "WW3D2/DX8WebBrowser.h"
-#include "WW3D2/Mesh.h"
-#include "WW3D2/HLOD.h"
-#include "WW3D2/Meshmatdesc.h"
-#include "WW3D2/Meshmdl.h"
+#include "WW3D2/render2dsentence.h"
+#include "WW3D2/sortingrenderer.h"
+#include "WW3D2/textureloader.h"
+#if defined(_WIN32)
+#include "WW3D2/dx8webbrowser.h"
+#endif
+#include "WW3D2/mesh.h"
+#include "WW3D2/hlod.h"
+#include "WW3D2/meshmatdesc.h"
+#include "WW3D2/meshmdl.h"
 #include "WW3D2/rddesc.h"
-#include "targa.h"
+#include "TARGA.H"
 #include "Lib/BaseType.h"
 
 #include "GameLogic/ScriptEngine.h"		// For TheScriptEngine - jkmcd
@@ -117,7 +135,18 @@ static void drawFramerateBar(void);
 #include "GameLogic/PartitionManager.h"
 #endif
 
+#if defined(_WIN32)
 #include "WinMain.h"
+#else
+// The window the device draws into: C2's, and null under -headless.  On Windows, WinMain's HWND, which
+// RenderWindow is there.
+extern RenderWindow ApplicationHWnd;
+// What applyWindowFrame and sizeWindowToClient do to the window on Windows, the window's owner does here.
+#include "W3DDevice/GameClient/W3DWindowHooks.h"
+W3DWindowFrameHook TheW3DWindowFrameHook = NULL;
+W3DWindowSizeHook TheW3DWindowSizeHook = NULL;
+#endif
+#include "zhio.h"		// zh_fopen, zh_remove, zh_mkdir: the engine's Windows-spelled paths (C1)
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -387,14 +416,14 @@ W3DAssetManager *W3DDisplay::m_assetManager = NULL;
 inline Int64 getPerformanceCounter()
 {
 	Int64 tmp;
-	QueryPerformanceCounter((LARGE_INTEGER*)&tmp);
+	tmp = Clock_Ticks();
 	return tmp;
 }
 
 inline Int64 getPerformanceCounterFrequency()
 {
 	Int64 tmp;
-	QueryPerformanceFrequency((LARGE_INTEGER*)&tmp);
+	tmp = Clock_Ticks_Per_Second();
 	return tmp;
 }
 
@@ -437,8 +466,37 @@ static void finishVideo(void);
 // W3DDisplay::~W3DDisplay ====================================================
 /** */
 //=============================================================================
+// R1's aircraft-lead measurement (smoothMotionApply, below), reported by the destructor.
+static double s_aircraftLeadSum = 0.0;
+static unsigned long long s_aircraftLeadCount = 0;
+static Real s_aircraftLeadMax = 0.0f;
+static Real s_aircraftRadiusMax = 0.0f;
+static Int64 s_smoothPassTicks = 0;			// R1's blend and restore, together, over the run
+static unsigned long long s_smoothPasses = 0;
+
 W3DDisplay::~W3DDisplay()
 {
+	// R1: how each captured model was treated per tick, for the snap rules' tuning.
+	{
+		const unsigned long long *counts = SmoothMotion_Counts();
+		unsigned long long total = 0;
+		for (Int i = 0; i < SMOOTH_SNAP_COUNT; ++i)
+			total += counts[i];
+		if (total > 0 && getenv("ZH_SMOOTH_MOTION_STATS") != NULL)
+		{
+			fprintf(stderr, "smooth motion: %llu model ticks:", total);
+			for (Int i = 0; i < SMOOTH_SNAP_COUNT; ++i)
+				fprintf(stderr, " %s %llu;", SmoothMotion_SnapName((SmoothMotionSnap)i), counts[i]);
+			fprintf(stderr, "\n");
+		}
+		if (s_smoothPasses > 0 && getenv("ZH_SMOOTH_MOTION_STATS") != NULL)
+			fprintf(stderr, "smooth motion: blend and restore cost %.1f us a render frame over %llu frames\n",
+				(double)s_smoothPassTicks * 1.0e6 / (double)Clock_Ticks_Per_Second() / (double)s_smoothPasses, s_smoothPasses);
+		if (s_aircraftLeadCount > 0 && getenv("ZH_SMOOTH_MOTION_STATS") != NULL)
+			fprintf(stderr, "smooth motion: aircraft lead (logic position ahead of the drawn one): %llu samples, mean %.2f, max %.2f world units; the largest aircraft's bounding radius %.2f\n",
+				s_aircraftLeadCount, s_aircraftLeadSum / (double)s_aircraftLeadCount, s_aircraftLeadMax, s_aircraftRadiusMax);
+	}
+
 	// a -video run that ended before its range did, on -maxframes or a decided match, still gets its movie
 	finishVideo();
 
@@ -483,6 +541,11 @@ W3DDisplay::~W3DDisplay()
 			twinBuffers, twinBytes / 1024,
 			texturesMirrored, texturesReused, texturesRefused,
 			pipelines, drawsMade, drawsRefused));
+		unsigned programsShipped = 0;
+		unsigned programsHeld = 0;
+		Direct3D11_Program_Statistics( programsShipped, programsHeld );
+		DEBUG_LOG(("-dx11 programs: %u shipped with the game, %u held at the end\n",
+			programsShipped, programsHeld));
 
 		unsigned long long noBuffer = 0;
 		unsigned long long noStage = 0;
@@ -588,8 +651,10 @@ W3DDisplay::~W3DDisplay()
 	delete m_assetManager;
 	WW3D::Shutdown();
 	WWMath::Shutdown();
+#if defined(_WIN32)	// the embedded browser: Windows only
 	if( hadDevice )
 		DX8WebBrowser::Shutdown();
+#endif
 	delete TheW3DFileSystem;
 	TheW3DFileSystem = NULL;
 
@@ -631,6 +696,7 @@ void Reset_D3D_Device(bool active)
 		{	
 			//switch back to desired mode when user alt-tabs back into game
 			WW3D::Set_Render_Device( WW3D::Get_Render_Device(),TheDisplay->getWidth(),TheDisplay->getHeight(),TheDisplay->getBitDepth(),TheDisplay->getWindowed(),true, true);
+#if defined(_WIN32)	// Windows 9x's alt-tab; there is no counterpart anywhere else
 			OSVERSIONINFO	osvi;
 			osvi.dwOSVersionInfoSize=sizeof(OSVERSIONINFO);
 			if (GetVersionEx(&osvi))
@@ -641,6 +707,7 @@ void Reset_D3D_Device(bool active)
 						WW3D::_Invalidate_Textures();
 				}
 			}
+#endif
 		}
 		else
 		{
@@ -672,7 +739,8 @@ static MonitorEntry chosenMonitor( void )
 //=============================================================================
 static void applyWindowFrame( Int mode )
 {
-	extern HWND ApplicationHWnd;
+#if defined(_WIN32)
+	extern RenderWindow ApplicationHWnd;	// WinMain's HWND on Windows
 	extern Bool ApplicationIsBorderless;
 
 	// a headless run has no picture at all, so there is nothing for any of the three to mean
@@ -681,7 +749,7 @@ static void applyWindowFrame( Int mode )
 
 	ApplicationIsBorderless = ( mode == WINDOW_MODE_BORDERLESS );
 
-	DWORD style = WS_POPUP | WS_VISIBLE | WS_SYSMENU;
+	UnsignedInt style = WS_POPUP | WS_VISIBLE | WS_SYSMENU;
 	if( mode == WINDOW_MODE_WINDOWED )
 		style |= WS_DLGFRAME | WS_CAPTION | WS_MINIMIZEBOX;		// see WinMain: windowed means a real window
 
@@ -692,11 +760,23 @@ static void applyWindowFrame( Int mode )
 	// is about to cover the display is put at the monitor's corner now - otherwise it hangs off the
 	// bottom right by however far down the screen it happened to be sitting.
 	//
-	const RECT screen = chosenMonitor().rect;
+	const RenderRect screen = chosenMonitor().rect;
 	const UINT move =( mode == WINDOW_MODE_WINDOWED ) ? SWP_NOMOVE : 0;
 	::SetWindowPos( ApplicationHWnd,
 									( mode == WINDOW_MODE_WINDOWED ) ? HWND_TOP : HWND_TOPMOST,
 									screen.left, screen.top, 0, 0, SWP_NOSIZE | SWP_FRAMECHANGED | move );
+#else
+	// the window is C2's off Windows: the same rules, and the platform layer's hook does the dressing
+	extern RenderWindow ApplicationHWnd;	// SdlGameEngine's window (PosixMain.cpp)
+	extern Bool ApplicationIsBorderless;
+
+	if( ApplicationHWnd == NULL || ( TheGlobalData && TheGlobalData->m_headless ) )
+		return;
+
+	ApplicationIsBorderless = ( mode == WINDOW_MODE_BORDERLESS );
+	if( TheW3DWindowFrameHook != NULL )
+		TheW3DWindowFrameHook( mode );
+#endif
 }
 
 //=============================================================================
@@ -706,14 +786,15 @@ static void applyWindowFrame( Int mode )
 //=============================================================================
 static void sizeWindowToClient( Int mode, Int width, Int height )
 {
-	extern HWND ApplicationHWnd;
+#if defined(_WIN32)
+	extern RenderWindow ApplicationHWnd;	// WinMain's HWND on Windows
 
 	if( ApplicationHWnd == NULL || ( TheGlobalData && TheGlobalData->m_headless ) )
 		return;
 	if( mode == WINDOW_MODE_FULLSCREEN )
 		return;
 
-	RECT rect;
+	RenderRect rect;
 	rect.left = 0;
 	rect.top = 0;
 	rect.right = width;
@@ -723,7 +804,7 @@ static void sizeWindowToClient( Int mode, Int width, Int height )
 	const Int outerW = rect.right - rect.left;
 	const Int outerH = rect.bottom - rect.top;
 
-	const RECT screen = chosenMonitor().rect;
+	const RenderRect screen = chosenMonitor().rect;
 	Int x = screen.left, y = screen.top;
 	if( mode == WINDOW_MODE_WINDOWED )
 	{
@@ -734,6 +815,17 @@ static void sizeWindowToClient( Int mode, Int width, Int height )
 	::SetWindowPos( ApplicationHWnd,
 									( mode == WINDOW_MODE_WINDOWED ) ? HWND_TOP : HWND_TOPMOST,
 									x, y, outerW, outerH, SWP_NOACTIVATE );
+#else
+	extern RenderWindow ApplicationHWnd;	// SdlGameEngine's window (PosixMain.cpp)
+
+	if( ApplicationHWnd == NULL || ( TheGlobalData && TheGlobalData->m_headless ) )
+		return;
+	if( mode == WINDOW_MODE_FULLSCREEN )
+		return;
+
+	if( TheW3DWindowSizeHook != NULL )
+		TheW3DWindowSizeHook( mode, width, height, chosenMonitor().rect );
+#endif
 }
 
 //=============================================================================
@@ -1043,6 +1135,9 @@ void W3DDisplay::init( void )
 	Direct3D11_Enable( TheGlobalData->m_direct3D11 != FALSE );
 	Direct3D11_Present_Enable( TheGlobalData->m_direct3D11 != FALSE );
 	Direct3D11_Dump_Programs_To( TheGlobalData->m_direct3D11DumpPath.str() );
+	// The compiled-program cache is the player's, like Options.ini: an installed game cannot write
+	// next to its exe, and the shipped programs there are read-only anyway.
+	Direct3D11_Set_Shader_Cache_Directory( TheGlobalData->getPath_UserData().str() );
 	pushDirect3D11PostChain();
 	// Classic graphics is read here once and not again: a texture that has looked for its normal
 	// map keeps the answer, and a tile size cannot change under a loaded map.  The menu says the
@@ -1107,13 +1202,34 @@ void W3DDisplay::init( void )
 
 	// Which backend draws what is on screen.  d3d9.dll is loaded either way, because the Direct3D 9
 	// device is always made and the Direct3D 11 one mirrors it, so the loaded dll says nothing.
+#if defined(_WIN32)
 	DEBUG_LOG(("W3DDisplay::init - renderer runtime: %s\n",
 						 Direct3D11_Present_Is_Enabled() ? "Direct3D 11"
 						                                 : "Direct3D 9"));
+	DEBUG_LOG(("W3DDisplay::init - D3DX: %s\n", D3DX9_Runtime_Name()));
+#else
+	DEBUG_LOG(("W3DDisplay::init - renderer runtime: the POSIX Direct3D 9 device (posixd3d9)\n"));
+	// On Windows Set_Render_Device's resize_window gives the window a client area of the resolution;
+	// off Windows dx8wrapper leaves the window to its owner, so the display asks for that here.
+	{
+		extern Bool ApplicationIsBorderless;
+		sizeWindowToClient( getWindowed() ? ( ApplicationIsBorderless ? WINDOW_MODE_BORDERLESS : WINDOW_MODE_WINDOWED )
+																			: WINDOW_MODE_FULLSCREEN,
+												getWidth(), getHeight() );
+	}
+#endif
 	// multisampling is opt-in with "-msaa" / "-msaa N" and silently degrades to whatever the
 	// device supports, so log what was actually granted
 	DEBUG_LOG(("W3DDisplay::init - multisampling: %ux\n", DX8Wrapper::Get_MultiSample_Level()));
+#if defined(_WIN32)
 	DEBUG_LOG(("W3DDisplay::init - vsync: %s\n", DX8Wrapper::Get_Requested_VSync() ? "on" : "off"));
+#else
+	// The POSIX device never reads D3D9's presentation interval: SdlGpuFrame claims the window with SDL's
+	// defaults, whose present mode is VSYNC.  So "off" was only the request, and read as the truth it sent a
+	// 119 fps reading (a locked session: no drawable) looking for a vsync bug.
+	DEBUG_LOG(("W3DDisplay::init - vsync: always on (the SDL GPU swapchain's VSYNC; D3D9 asked for %s, which is not used;"
+		" -offscreen paces by ZH_OFFSCREEN_HZ instead)\n", DX8Wrapper::Get_Requested_VSync() ? "on" : "off"));
+#endif
 	DEBUG_LOG(("W3DDisplay::init - present: %s\n", DX8Wrapper::Is_Flip_Present() ? "flip" : "discard"));
 	if (Direct3D11_Present_Is_Enabled())
 		DEBUG_LOG(("W3DDisplay::init - dx11 swap chain: %s\n",
@@ -1122,16 +1238,17 @@ void W3DDisplay::init( void )
 						 WW3D::Get_Render_Device_Name(WW3D::Get_Render_Device())));
 	{
 		const char *lodName = "off";
-		if (TheGameLODManager && TheGlobalData && TheGlobalData->m_enableDynamicLOD)
+		if (TheGameLODManager && TheGlobalData && TheGlobalData->isDynamicLODEnabled())
 		{
 			const DynamicGameLODLevel lod = TheGameLODManager->getDynamicLODLevel();
 			if (lod >= DYNAMIC_GAME_LOD_LOW && lod < DYNAMIC_GAME_LOD_COUNT)
 				lodName = TheGameLODManager->getDynamicGameLODLevelName(lod);
 		}
-		DEBUG_LOG(("W3DDisplay::init - quality: filter %d aniso %d particles %d shadows vol %d decal %d trees %d heat %d dynamicLOD %s\n",
+		DEBUG_LOG(("W3DDisplay::init - quality: filter %d aniso %d particles %d (in force %d) shadows vol %d decal %d trees %d heat %d dynamicLOD %s\n",
 							 TheGlobalData ? TheGlobalData->m_textureFilterMode : -1,
 							 TheGlobalData ? TheGlobalData->m_anisotropyLevel : -1,
 							 TheGlobalData ? TheGlobalData->m_maxParticleCount : -1,
+							 TheGlobalData ? TheGlobalData->getEffectiveParticleCap() : -1,
 							 TheGlobalData ? (Int)TheGlobalData->m_useShadowVolumes : -1,
 							 TheGlobalData ? (Int)TheGlobalData->m_useShadowDecals : -1,
 							 TheGlobalData ? (Int)TheGlobalData->m_useTrees : -1,
@@ -1184,7 +1301,9 @@ void W3DDisplay::init( void )
 		m_nativeDebugDisplay->setFontWidth( 9 );
 	}
 
+#if defined(_WIN32)	// the embedded browser: Windows only
 	DX8WebBrowser::Initialize();
+#endif
 
 	// we're now online
 	m_initialized = true;
@@ -1390,24 +1509,24 @@ void W3DDisplay::gatherDebugStats( void )
 		Int LOD = TheGlobalData->m_terrainLOD;
 		//unibuffer.format( L"FPS: %.2f, %.2fms mapLOD=%d [cumu FPS=%.2f] draws: %.2f sort: %.2f", fps, ms, LOD, cumuFPS, drawsPerFrame,sortPolysPerFrame);
 		if (TheGlobalData->m_useFpsLimit) 
-				unibuffer.format( L"%.2f/%d FPS, ", fps, TheGameEngine->getFramesPerSecondLimit());
+				unibuffer.format( u"%.2f/%d FPS, ", fps, TheGameEngine->getFramesPerSecondLimit());
 		else
-				unibuffer.format( L"%.2f FPS, ", fps);
+				unibuffer.format( u"%.2f FPS, ", fps);
 
-		unibuffer2.format( L"%.2fms [cumuFPS=%.2f] draws: %d skins: %d sortP: %d skinP: %d LOD %d", ms, cumuFPS, (Int)drawsPerFrame,(Int)skinDrawsPerFrame,(Int)sortPolysPerFrame, (Int)skinPolysPerFrame, LOD);
+		unibuffer2.format( u"%.2fms [cumuFPS=%.2f] draws: %d skins: %d sortP: %d skinP: %d LOD %d", ms, cumuFPS, (Int)drawsPerFrame,(Int)skinDrawsPerFrame,(Int)sortPolysPerFrame, (Int)skinPolysPerFrame, LOD);
 		unibuffer.concat(unibuffer2);
 #else
 		//Int LOD = TheGlobalData->m_terrainLOD;
 		//unibuffer.format( L"FPS: %.2f, %.2fms mapLOD=%d draws: %.2f sort %.2f", fps, ms, LOD, drawsPerFrame,sortPolysPerFrame);
-		unibuffer.format( L"FPS: %.2f, %.2fms draws: %.2f skins: %.2f sort %.2f", fps, ms, drawsPerFrame,skinDrawsPerFrame,sortPolysPerFrame);
+		unibuffer.format( u"FPS: %.2f, %.2fms draws: %.2f skins: %.2f sort %.2f", fps, ms, drawsPerFrame,skinDrawsPerFrame,sortPolysPerFrame);
 		if (TheGlobalData->m_useFpsLimit) 
 		{
-			unibuffer2.format(L", FPSLock %d",TheGlobalData->m_framesPerSecondLimit);
+			unibuffer2.format(u", FPSLock %d",TheGlobalData->m_framesPerSecondLimit);
 			unibuffer.concat(unibuffer2);
 		}
 #endif
 
-		fpsString.format( L"FPS: %.2f", fps);
+		fpsString.format( u"FPS: %.2f", fps);
 		m_benchmarkDisplayString->setText( fpsString );
 
 		Int polyPerFrame = Debug_Statistics::Get_DX8_Polygons();
@@ -1506,10 +1625,10 @@ void W3DDisplay::gatherDebugStats( void )
 			objectMS = 0.0f;
 		}
 		if (statMode != disabled) {
-			unibuffer.format(L"FPS: %.2f, %.2fms - Collecting extended stats.", fps, ms);
+			unibuffer.format(u"FPS: %.2f, %.2fms - Collecting extended stats.", fps, ms);
 		} else if (extendedStats>0) {
 			extendedStats--;
-			unibuffer.format( L"FPS: %.2f, %.2fms - OH %.2fms, Console %.2fms, 3D OH %.2fms, Terrain %.2fms, Obs %.2fms, CPU %.2fms", 
+			unibuffer.format( u"FPS: %.2f, %.2fms - OH %.2fms, Console %.2fms, 3D OH %.2fms, Terrain %.2fms, Obs %.2fms, CPU %.2fms", 
 				fps, ms, gameOverheadMS, consoleMS, threeDOverheadMS, terrainMS, objectMS, overlapMS);
 			if (extendedStats==SHOW_STATS_TIME-2) {
 				char bufferA[ 256 ];
@@ -1542,39 +1661,41 @@ void W3DDisplay::gatherDebugStats( void )
 #endif
 		// check for debug D3D
 		Bool debugD3D=false;
+#if defined(_WIN32)	// the Direct3D debug runtime is a registry switch, and Windows's
 		RegistryClass registry ("Software\\Microsoft\\Direct3d");
 		if (registry.Is_Valid ()) {
 			if (registry.Get_Int ("LoadDebugRuntime", 0) == 1) {
 				debugD3D = true;
 			}
 		}
+#endif
 		if (debugD3D) {
-			unibuffer.concat(L", DEBUG D3D");
+			unibuffer.concat(u", DEBUG D3D");
 		}
 #ifdef _DEBUG
-		unibuffer.concat(L", DEBUG app");
+		unibuffer.concat(u", DEBUG app");
 #endif
 
 		m_displayStrings[FPS]->setText( unibuffer );
 
 		// Actual GameLogic frame number
-		unibuffer.format(L"Frame: %d", TheGameLogic->getFrame());
+		unibuffer.format(u"Frame: %d", TheGameLogic->getFrame());
 		m_displayStrings[Frame]->setText( unibuffer );
 
 		// polygons this frame	
-		unibuffer.format( L"Polygons: per frame %d, per second %d", polyPerFrame,
+		unibuffer.format( u"Polygons: per frame %d, per second %d", polyPerFrame,
 				(Int)(polyPerFrame*fps));
 		m_displayStrings[Polygons]->setText( unibuffer );
 
 		// vertices this frame
-		unibuffer.format( L"Vertices: %d", Debug_Statistics::Get_DX8_Vertices() );
+		unibuffer.format( u"Vertices: %d", Debug_Statistics::Get_DX8_Vertices() );
 		m_displayStrings[Vertices]->setText( unibuffer );		
 
 		//
 		// I'm adjusting the texture memory usage counter by subtracting 
 		// out the terrain alpha texture (since it's really == terrain texture).
 		//
-		unibuffer.format( L"Video RAM: %d", Debug_Statistics::Get_Record_Texture_Size() - 1376256 );
+		unibuffer.format( u"Video RAM: %d", Debug_Statistics::Get_Record_Texture_Size() - 1376256 );
 		m_displayStrings[VideoRam]->setText( unibuffer );
 
 		s_lastUpdateTime64 = time64;
@@ -1584,7 +1705,7 @@ void W3DDisplay::gatherDebugStats( void )
 		s_sortedPolysSinceLastUpdate = 0;
 
 		// terrain stats
-		unibuffer.format( L"3-Way Blends: %d/%d, Shoreline Blends: %d/%d", TheTerrainRenderObject->getNumExtraBlendTiles(TRUE),
+		unibuffer.format( u"3-Way Blends: %d/%d, Shoreline Blends: %d/%d", TheTerrainRenderObject->getNumExtraBlendTiles(TRUE),
 			TheTerrainRenderObject->getNumExtraBlendTiles(FALSE),
 			TheTerrainRenderObject->getNumShoreLineTiles(TRUE),
 			TheTerrainRenderObject->getNumShoreLineTiles(FALSE));
@@ -1602,7 +1723,7 @@ void W3DDisplay::gatherDebugStats( void )
 		Real terrainHeight = TheTacticalView->getTerrainHeightUnderCamera();
 		Real actualHeightAboveGround = TheTacticalView->getCurrentHeightAboveGround();
 
-		unibuffer.format( L"Camera zoom: %g, pitch: %g/%g, yaw: %g, pos: %g, %g, %g, FOV: %g\n       Height above ground: %g Terrain height: %g",
+		unibuffer.format( u"Camera zoom: %g, pitch: %g/%g, yaw: %g, pos: %g, %g, %g, FOV: %g\n       Height above ground: %g Terrain height: %g",
 												zoom,
 												pitch,
 												FXPitch,
@@ -1621,60 +1742,60 @@ void W3DDisplay::gatherDebugStats( void )
 		m_displayStrings[DebugInfo]->setText( unibuffer );
 
 		// display the keyboard modifier and mouse states.
-		unibuffer.format( L"States: " );
+		unibuffer.format( u"States: " );
 		if( TheKeyboard->isShift() )
 		{
-			unibuffer.concat( L"Shift(" );
+			unibuffer.concat( u"Shift(" );
 			if( TheKeyboard->getModifierFlags() & KEY_STATE_LSHIFT )
 			{
-				unibuffer.concat( L"L" );
+				unibuffer.concat( u"L" );
 			}
 			if( TheKeyboard->getModifierFlags() & KEY_STATE_RSHIFT )
 			{
-				unibuffer.concat( L"R" );
+				unibuffer.concat( u"R" );
 			}
-			unibuffer.concat( L") " );
+			unibuffer.concat( u") " );
 		}
 		if( TheKeyboard->isCtrl() )
 		{
-			unibuffer.concat( L"Ctrl(" );
+			unibuffer.concat( u"Ctrl(" );
 			if( TheKeyboard->getModifierFlags() & KEY_STATE_LCONTROL )
 			{
-				unibuffer.concat( L"L" );
+				unibuffer.concat( u"L" );
 			}
 			if( TheKeyboard->getModifierFlags() & KEY_STATE_RCONTROL )
 			{
-				unibuffer.concat( L"R" );
+				unibuffer.concat( u"R" );
 			}
-			unibuffer.concat( L") " );
+			unibuffer.concat( u") " );
 		}
 		if( TheKeyboard->isAlt() )
 		{
-			unibuffer.concat( L"Alt(" );
+			unibuffer.concat( u"Alt(" );
 			if( TheKeyboard->getModifierFlags() & KEY_STATE_LALT )
 			{
-				unibuffer.concat( L"L" );
+				unibuffer.concat( u"L" );
 			}
 			if( TheKeyboard->getModifierFlags() & KEY_STATE_RALT )
 			{
-				unibuffer.concat( L"R" );
+				unibuffer.concat( u"R" );
 			}
-			unibuffer.concat( L") " );
+			unibuffer.concat( u") " );
 		}
 
 		const MouseIO *mouseStatus = TheMouse->getMouseStatus();
 
 		if( mouseStatus->leftState )
 		{
-			unibuffer.concat( L"LMB " );
+			unibuffer.concat( u"LMB " );
 		}
 		if( mouseStatus->middleState )
 		{
-			unibuffer.concat( L"MMB " );
+			unibuffer.concat( u"MMB " );
 		}
 		if( mouseStatus->rightState )
 		{
-			unibuffer.concat( L"RMB " );
+			unibuffer.concat( u"RMB " );
 		}
 
 		Object *object = NULL;
@@ -1687,12 +1808,12 @@ void W3DDisplay::gatherDebugStats( void )
 			object = draw->getObject();
 		if( object )
 		{
-			unibuffer2.format( L"Moused over object: %S (%d) ", object->getTemplate()->getName().str(), object->getID() );
+			unibuffer2.format( u"Moused over object: %S (%d) ", object->getTemplate()->getName().str(), object->getID() );
 			unibuffer.concat( unibuffer2 );
 		}
 		else
 		{
-			unibuffer.concat( L"Moused over object: TERRAIN " );
+			unibuffer.concat( u"Moused over object: TERRAIN " );
 		}
 		
 		m_displayStrings[ KEY_MOUSE_STATES ]->setText( unibuffer );
@@ -1701,38 +1822,38 @@ void W3DDisplay::gatherDebugStats( void )
 		const MouseIO *mouseIO = TheMouse->getMouseStatus();
 		Coord3D worldPos;
 		if( TheTacticalView->screenToTerrain(&mouseIO->pos, &worldPos) )
-			unibuffer.format( L"Mouse position: screen: (%d, %d), world: (%g, %g, %g)", mouseIO->pos.x, mouseIO->pos.y,
+			unibuffer.format( u"Mouse position: screen: (%d, %d), world: (%g, %g, %g)", mouseIO->pos.x, mouseIO->pos.y,
 				worldPos.x, worldPos.y, worldPos.z);
 		else
-			unibuffer.format( L"Mouse position: screen: (%d, %d), world: none", mouseIO->pos.x, mouseIO->pos.y);
+			unibuffer.format( u"Mouse position: screen: (%d, %d), world: none", mouseIO->pos.x, mouseIO->pos.y);
 		m_displayStrings[MousePosition]->setText( unibuffer );
 		
 		//display the number of particles in the world and being displayed on screen
 		Int totalParticles = TheParticleSystemManager->getParticleCount();
 		Int onScreenParticleCount = TheParticleSystemManager->getOnScreenParticleCount();
-		unibuffer.format( L"Particles: %d in world, %d being displayed", totalParticles, onScreenParticleCount );
+		unibuffer.format( u"Particles: %d in world, %d being displayed", totalParticles, onScreenParticleCount );
 		m_displayStrings[Particles]->setText( unibuffer );
 
 		//display the number of objects in the world
 		UnsignedInt objCount = TheGameLogic->getObjectCount();
 		UnsignedInt objScreenCount = TheGameClient->getRenderedObjectCount();
 
-		unibuffer.format(L"Objects: %d in world, %d being displayed", objCount, objScreenCount );
+		unibuffer.format(u"Objects: %d in world, %d being displayed", objCount, objScreenCount );
 		m_displayStrings[Objects]->setText( unibuffer );
 
 		// Network incoming bandwidth stats
 		if (TheNetwork != NULL) {
-			unibuffer.format(L"IN: %.2f bytes/sec, %.2f packets/sec",
+			unibuffer.format(u"IN: %.2f bytes/sec, %.2f packets/sec",
 				TheNetwork->getIncomingBytesPerSecond(), TheNetwork->getIncomingPacketsPerSecond());
 			m_displayStrings[NetIncoming]->setText( unibuffer );
 
 			// Network outgoing bandwidth stats
-			unibuffer.format(L"OUT: %.2f bytes/sec, %.2f packets/sec",
+			unibuffer.format(u"OUT: %.2f bytes/sec, %.2f packets/sec",
 				TheNetwork->getOutgoingBytesPerSecond(), TheNetwork->getOutgoingPacketsPerSecond());
 			m_displayStrings[NetOutgoing]->setText( unibuffer );
 
 			// Network performance stats
-			unibuffer.format(L"Run Ahead: %d, Net FPS: %d, Packet arrival cushion: %d",
+			unibuffer.format(u"Run Ahead: %d, Net FPS: %d, Packet arrival cushion: %d",
 				TheNetwork->getRunAhead(), TheNetwork->getFrameRate(), TheNetwork->getPacketArrivalCushion());
 			m_displayStrings[NetStats]->setText( unibuffer );
 
@@ -1741,7 +1862,7 @@ void W3DDisplay::gatherDebugStats( void )
 			Int numPlayers = TheNetwork->getNumPlayers();
 			for (Int i = 0; i < numPlayers; ++i) {
 				UnicodeString tempstr;
-				tempstr.format(L"%s: %d ", TheNetwork->getPlayerName(i).str(), TheNetwork->getSlotAverageFPS(i));
+				tempstr.format(u"%s: %d ", TheNetwork->getPlayerName(i).str(), TheNetwork->getSlotAverageFPS(i));
 				unibuffer.concat(tempstr);
 			}
 			m_displayStrings[NetFPSAverages]->setText( unibuffer );
@@ -1752,7 +1873,7 @@ void W3DDisplay::gatherDebugStats( void )
 			// Network outgoing bandwidth stats
 //			unibuffer.format(L"OUT: 0.0 bytes/sec, 0.0 packets/sec");
 //			m_displayStrings[NetOutgoing]->setText( unibuffer );
-      unibuffer.format(L"");
+      unibuffer.format(u"");
 //			unibuffer.format(L"Network not present");
 			m_displayStrings[NetOutgoing]->setText(unibuffer);
 			m_displayStrings[NetIncoming]->setText(unibuffer);
@@ -1761,7 +1882,7 @@ void W3DDisplay::gatherDebugStats( void )
 		}
 
 		// selected object info stats
-		unibuffer.format( L"Select Info: '%d' drawables selected", TheInGameUI->getSelectCount() );
+		unibuffer.format( u"Select Info: '%d' drawables selected", TheInGameUI->getSelectCount() );
 		
 
 
@@ -1781,7 +1902,7 @@ void W3DDisplay::gatherDebugStats( void )
 			if( obj && obj->getName().isEmpty() == FALSE )
 				objectName = obj->getName();
 
-			unibuffer.format( L"Select Info: '%S'(%S) at (%.3f,%.3f,%.3f)",
+			unibuffer.format( u"Select Info: '%S'(%S) at (%.3f,%.3f,%.3f)",
 												draw->getTemplate()->getName().str(),
 												objectName.str(),
 												draw->getPosition()->x,
@@ -1795,7 +1916,7 @@ void W3DDisplay::gatherDebugStats( void )
 			const DrawableLocoInfo *locoInfo = draw->getLocoInfo();
 			if( locoInfo )
 			{
-				unibuffer2.format( L"\nPhysics Info -- Turn: %d, Pitch(accel): %.3f(%.3f), Roll(accel): %.3f(%.3f)",
+				unibuffer2.format( u"\nPhysics Info -- Turn: %d, Pitch(accel): %.3f(%.3f), Roll(accel): %.3f(%.3f)",
 													 turnType,
 													 locoInfo->m_accelerationPitch, locoInfo->m_accelerationPitchRate,
 													 locoInfo->m_accelerationRoll, locoInfo->m_accelerationRollRate );
@@ -1816,12 +1937,12 @@ void W3DDisplay::gatherDebugStats( void )
 			}
 			if (rcost.getDrawCallCount() > 0) 
 			{
-				unibuffer2.format( L"\ndraw calls: %d(+%d) sort meshes: %d skins: %d  bones: %d",rcost.getDrawCallCount(),rcost.getShadowDrawCount(),rcost.getSortedMeshCount(),rcost.getSkinMeshCount(),rcost.getBoneCount());
+				unibuffer2.format( u"\ndraw calls: %d(+%d) sort meshes: %d skins: %d  bones: %d",rcost.getDrawCallCount(),rcost.getShadowDrawCount(),rcost.getSortedMeshCount(),rcost.getSkinMeshCount(),rcost.getBoneCount());
 				unibuffer.concat( unibuffer2 );
 			}
 #endif
 
-			unibuffer.concat( L"\nModelStates: " );
+			unibuffer.concat( u"\nModelStates: " );
 			ModelConditionFlags mcFlags = draw->getModelConditionFlags();
 			const int numEntriesPerLine = 4;
 			int lineCount = 0;
@@ -1830,13 +1951,13 @@ void W3DDisplay::gatherDebugStats( void )
 			{
 				if( mcFlags.test( i ) )
 				{
-					unibuffer2.format( L"%S ", ModelConditionFlags::getBitNames()[ i ] );
+					unibuffer2.format( u"%S ", ModelConditionFlags::getBitNames()[ i ] );
 					unibuffer.concat( unibuffer2 );
 					lineCount++;
 					if( lineCount == numEntriesPerLine )
 					{
 						lineCount = 0;
-						unibuffer.concat( L"\n" );
+						unibuffer.concat( u"\n" );
 					}
 				}
 			}
@@ -1980,7 +2101,11 @@ void W3DDisplay::calculateTerrainLOD( void )
 			Int64 time64 = getPerformanceCounter();
 			timeForFrame = (float)((double)(time64-startTime64) / (double)(freq64));
 			sprintf(buf, "%.2fms ", timeForFrame*1000.0f);
+#if defined(_WIN32)
 			::OutputDebugString(buf);
+#else
+			DEBUG_LOG(("%s", buf));
+#endif
 			if (i>=NUM_TO_DISCARD) {
 				frameTime += timeForFrame;
 				if (i>NUM_TO_DISCARD+1 && 
@@ -1993,7 +2118,11 @@ void W3DDisplay::calculateTerrainLOD( void )
 		frameTime /= ((i)-NUM_TO_DISCARD);
 		count++;
 		sprintf(buf, "\n LOD %d, time %.2fms\n", curLOD, frameTime*1000.0f);
+#if defined(_WIN32)
 		::OutputDebugString(buf);
+#else
+		DEBUG_LOG(("%s", buf));
+#endif
 		if (frameTime<maxTimeLimit && goodLOD<curLOD) {
 			goodLOD = curLOD;
 		}
@@ -2041,10 +2170,108 @@ extern Real TheUIDrawMS;
 extern Real TheParticleUpdateMS;
 extern UnsignedInt TheSceneDrawCalls;
 
+//=============================================================================
+// R1, smooth motion (W3DSmoothMotion.h).  Three steps around the scene's render, and only the picture:
+//   smoothMotionBegin    before updateViews: the blend's alpha, and on a new tick each drawable's position
+//                        (the camera's lock follows the blended one)
+//   smoothMotionApply    after the particles, before the render targets and the scene: on a new tick each
+//                        model's transform is captured, then every model is shown blended
+//   smoothMotionRestore  after the render loop: the logic transforms go back before picking and the logic
+//=============================================================================
+bool TheSmoothMotionActive = false;
+float TheSmoothMotionAlpha = 1.0f;
+static UnsignedInt s_smoothPositionFrame = 0xFFFFFFFFu;
+static UnsignedInt s_smoothModelFrame = 0xFFFFFFFFu;
+static Bool s_smoothApplied = FALSE;
+
+static void smoothMotionBegin()
+{
+	TheSmoothMotionActive = TheGlobalData->m_smoothMotion && !TheGlobalData->m_headless;
+	TheSmoothMotionAlpha = TheSmoothMotionActive ? GameEngine_logicTickFraction() : 1.0f;
+	if (!TheSmoothMotionActive)
+		return;
+	const UnsignedInt frame = TheGameClient->getFrame();
+	if (frame == s_smoothPositionFrame)
+		return;
+	s_smoothPositionFrame = frame;
+	for (Drawable *draw = TheGameClient->firstDrawable(); draw != NULL; draw = draw->getNextDrawable())
+		draw->smoothMotionCapturePosition(frame);
+}
+
+static void smoothMotionApply()
+{
+	if (!TheSmoothMotionActive)
+		return;
+	const Int64 passStart = Clock_Ticks();
+	const UnsignedInt frame = TheGameClient->getFrame();
+	const Bool newTick = frame != s_smoothModelFrame;
+	s_smoothModelFrame = frame;
+	for (Drawable *draw = TheGameClient->firstDrawable(); draw != NULL; draw = draw->getNextDrawable())
+	{
+		DrawModule **modules = draw->getDrawModules();
+		if (modules == NULL)
+			continue;
+		if (newTick)
+		{
+			const Bool marked = draw->isMotionDiscontinuous();
+			for (DrawModule **dm = modules; *dm; ++dm)
+				(*dm)->smoothMotionCapture(frame, marked);
+			draw->clearMotionDiscontinuity();
+			// The armed control of R1's proof, and nothing else: ZH_R1_LEAK=1 writes the blended position back
+			// into the Object - exactly what smooth motion must never do - so a run with it has to end on a
+			// different CRC than one without.  Never set outside that test.
+			static const Bool leak = getenv("ZH_R1_LEAK") != NULL;
+			Coord3D shown;
+			if (leak && draw->getObject() != NULL && draw->getSmoothMotionPosition(0.5f, &shown))
+				draw->getObject()->setPosition(&shown);
+		}
+		for (DrawModule **dm = modules; *dm; ++dm)
+			(*dm)->smoothMotionApply(TheSmoothMotionAlpha);
+		// With ZH_SMOOTH_MOTION_STATS, how far an aircraft's logic position - where its exhaust and its health
+		// bar are, which stay on the ticks - leads the place it is drawn (a question about fast units).
+		static const Bool stats = getenv("ZH_SMOOTH_MOTION_STATS") != NULL;
+		Coord3D shown;
+		if (stats && draw->getObject() != NULL && draw->getObject()->isKindOf(KINDOF_AIRCRAFT)
+			&& draw->getSmoothMotionPosition(TheSmoothMotionAlpha, &shown))
+		{
+			const Coord3D *logic = draw->getPosition();
+			const Real dx = logic->x - shown.x, dy = logic->y - shown.y, dz = logic->z - shown.z;
+			const Real lead = sqrtf(dx * dx + dy * dy + dz * dz);
+			s_aircraftLeadSum += lead;
+			++s_aircraftLeadCount;
+			if (lead > s_aircraftLeadMax)
+				s_aircraftLeadMax = lead;
+			const Real radius = draw->getObject()->getGeometryInfo().getBoundingSphereRadius();
+			if (radius > s_aircraftRadiusMax)
+				s_aircraftRadiusMax = radius;
+		}
+	}
+	s_smoothApplied = TRUE;
+	s_smoothPassTicks += Clock_Ticks() - passStart;
+	++s_smoothPasses;
+}
+
+static void smoothMotionRestore()
+{
+	if (!s_smoothApplied)
+		return;
+	s_smoothApplied = FALSE;
+	const Int64 passStart = Clock_Ticks();
+	for (Drawable *draw = TheGameClient->firstDrawable(); draw != NULL; draw = draw->getNextDrawable())
+	{
+		DrawModule **modules = draw->getDrawModules();
+		if (modules == NULL)
+			continue;
+		for (DrawModule **dm = modules; *dm; ++dm)
+			(*dm)->smoothMotionRestore();
+	}
+	s_smoothPassTicks += Clock_Ticks() - passStart;
+}
+
 static Real w3dElapsedMS( const Int64 &from, const Int64 &to )
 {
 	Int64 freq;
-	QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	freq = Clock_Ticks_Per_Second();
 	if( freq < 1 )
 		return 0.0f;
 	return (Real)((double)(to - from) * 1000.0 / (double)freq);
@@ -2056,7 +2283,8 @@ void W3DDisplay::draw( void )
 	USE_PERF_TIMER(W3DDisplay_draw)
 	static UnsignedInt syncTime = 0;
 
-	extern HWND ApplicationHWnd;
+	extern RenderWindow ApplicationHWnd;	// WinMain's HWND on Windows
+#if defined(_WIN32)	// off Windows a minimised window is C2's to report
 	if (ApplicationHWnd && ::IsIconic(ApplicationHWnd)) {
 		// A network game keeps its logic running while minimized (Win32GameEngine::update), and
 		// the particle update below is the only thing that retires a particle system, so skipping
@@ -2066,6 +2294,7 @@ void W3DDisplay::draw( void )
 		TheParticleSystemManager->update();
 		return;
 	}
+#endif
 
 	// -nodevice: there is no device to begin a scene on.  The load screen asks for a draw of its
 	// own while a map loads, so this is reached before the first frame and not only from the loop.
@@ -2074,7 +2303,7 @@ void W3DDisplay::draw( void )
 	}
 
 	updateAverageFPS();
-	if (TheGlobalData->m_enableDynamicLOD && TheGameLogic->getShowDynamicLOD())
+	if (TheGlobalData->isDynamicLODEnabled() && TheGameLogic->getShowDynamicLOD())
 	{
 		DynamicGameLODLevel lod=TheGameLODManager->findDynamicLODLevel(m_averageFPS);
 		TheGameLODManager->setDynamicLODLevel(lod);
@@ -2105,7 +2334,7 @@ AGAIN:
     if ( TheGameLogic->getFrame() > 0 && (TheGameLogic->getFrame() % interval) == 0 )
     {
   	  TheStatDump.dumpStats( TRUE, TRUE );
-    	TheInGameUI->message( UnicodeString( L"-stats is running, at interval: %d." ), TheGlobalData->m_statsInterval );
+    	TheInGameUI->message( UnicodeString( u"-stats is running, at interval: %d." ), TheGlobalData->m_statsInterval );
     }
   }
 
@@ -2214,7 +2443,7 @@ AGAIN:
 		// the animations keep their authored speed at whatever frame rate the machine manages.
 		//
 		static UnsignedInt prevSyncMs = 0;
-		const UnsignedInt nowSyncMs = timeGetTime();
+		const UnsignedInt nowSyncMs = Clock_Milliseconds();
 		if (prevSyncMs == 0)
 			prevSyncMs = nowSyncMs;
 
@@ -2231,9 +2460,9 @@ AGAIN:
 
 	// Fast & Frozen time limits the time to 33 fps.
 	Int minTime = 30;
-	static Int prevTime = timeGetTime(), now;
+	static Int prevTime = Clock_Milliseconds(), now;
 
-	now=timeGetTime();
+	now=Clock_Milliseconds();
 	if (TheTacticalView->getTimeMultiplier()>1) 
 	{
 		static Int timeMultiplierCounter = 1;
@@ -2245,7 +2474,7 @@ AGAIN:
 	}	
 	else 
 	{
-		now = timeGetTime();
+		now = Clock_Milliseconds();
 		prevTime = now - minTime;		 // do the first frame immediately.
 	} 
 
@@ -2266,8 +2495,8 @@ AGAIN:
 				//
 				while(loopForCameraMovement && (now - prevTime) < minTime-1)
 				{
-					::Sleep(1);	// was a pure spin; this loop can run for whole camera pans
-					now = timeGetTime();
+					sleepMilliseconds(1);	// ::Sleep on Windows; was a pure spin; this loop can run for whole camera pans
+					now = Clock_Milliseconds();
 				}
 				prevTime = now;
 			}
@@ -2277,11 +2506,12 @@ AGAIN:
 		if (DX8Wrapper::_Get_D3D_Device() && (DX8Wrapper::_Get_D3D_Device()->TestCooperativeLevel()) == D3D_OK)
 		{	//Checking if we have the device before updating views because the heightmap crashes otherwise while
 			//trying to refresh the visible terrain geometry.
+			smoothMotionBegin();
 //			if(TheGlobalData->m_loadScreenRender != TRUE)
 				updateViews();
 #ifdef DEBUG_LOGGING
 			Int64 tParticleStart, tParticleEnd;
-			QueryPerformanceCounter( (LARGE_INTEGER *)&tParticleStart );
+			tParticleStart = Clock_Ticks();
 #endif
      		TheParticleSystemManager->update();//LORENZEN AND WILCZYNSKI MOVED THIS FROM ITS NATIVE POSITION, ABOVE
                                            //FOR THE PURPOSE OF LETTING THE PARTICLE SYSTEM LOOK UP THE RENDER OBJECT"S
@@ -2293,9 +2523,12 @@ AGAIN:
                                            //-LORENZEN
 
 #ifdef DEBUG_LOGGING
-			QueryPerformanceCounter( (LARGE_INTEGER *)&tParticleEnd );
+			tParticleEnd = Clock_Ticks();
 			TheParticleUpdateMS = w3dElapsedMS( tParticleStart, tParticleEnd );
 #endif
+
+			// R1: after the particles read the logic bones (Lorenzen's note above), before anything renders.
+			smoothMotionApply();
 
 			if (TheWaterRenderObj)
 				TheWaterRenderObj->updateRenderTargetTextures(primaryW3DView->get3DCamera());	//do a render into each texture
@@ -2362,11 +2595,11 @@ AGAIN:
 				// draw all views of the world
 #ifdef DEBUG_LOGGING
 				Int64 tSceneStart, tSceneEnd, tUIEnd;
-				QueryPerformanceCounter( (LARGE_INTEGER *)&tSceneStart );
+				tSceneStart = Clock_Ticks();
 #endif
 				drawViews();
 #ifdef DEBUG_LOGGING
-				QueryPerformanceCounter( (LARGE_INTEGER *)&tSceneEnd );
+				tSceneEnd = Clock_Ticks();
 #endif
 
 				// W3DView::draw has normally run the chain already, at the point where the world
@@ -2378,7 +2611,7 @@ AGAIN:
 				// draw the user interface
 				TheInGameUI->DRAW();
 #ifdef DEBUG_LOGGING
-				QueryPerformanceCounter( (LARGE_INTEGER *)&tUIEnd );
+				tUIEnd = Clock_Ticks();
 				TheSceneDrawMS = w3dElapsedMS( tSceneStart, tSceneEnd );
 				TheUIDrawMS = w3dElapsedMS( tSceneEnd, tUIEnd );
 				TheSceneDrawCalls = DX8Wrapper::Get_Draw_Calls();
@@ -2501,8 +2734,7 @@ AGAIN:
 
 				/* End_Render is where a lost device is noticed and reset, and that reset is the most
 					 dangerous thing this process does: it hands every default-pool resource back and asks
-					 the driver to rebuild the swap chain, and under -d3d12 it has been seen to fault
-					 inside the 9On12 layer.  WW3D2 is built without RELEASE_DEBUG_LOGGING, so its own
+					 the driver to rebuild the swap chain.  WW3D2 is built without RELEASE_DEBUG_LOGGING, so its own
 					 "Resetting device" line does not exist in a shipping build and the log went straight
 					 from an ordinary frame to a crash dump.  This is on the GameEngineDevice side of the
 					 fence, where logging is compiled in. */
@@ -2538,6 +2770,9 @@ AGAIN:
 			TheGameEngine->serviceWindowsOS();
 
 	} while (loopForCameraMovement && !TheTacticalView->isCameraMovementFinished());
+
+	// R1: the logic transforms back on every model, before picking (the message stream) and the logic.
+	smoothMotionRestore();
 
 #ifdef EXTENDED_STATS
 	if (DX8Wrapper::stats.m_disableOverhead) {
@@ -2646,7 +2881,7 @@ void W3DDisplay::createLightPulse( const Coord3D *pos, const RGBColor *color,
 void W3DDisplay::toggleLetterBox(void)
 {
 	m_letterBoxEnabled = !m_letterBoxEnabled;
-	m_letterBoxFadeStartTime = timeGetTime();
+	m_letterBoxFadeStartTime = Clock_Milliseconds();
 
 	//WST  9/18/2002 This is not a script api to prevent cheat. JSC Integrated 5/20/03
 	if( TheTacticalView )
@@ -2662,7 +2897,7 @@ void W3DDisplay::enableLetterBox(Bool enable)
 		if (!m_letterBoxEnabled)
 		{	//letterbox mode not previously enabled
 			m_letterBoxEnabled = TRUE;
-			m_letterBoxFadeStartTime = timeGetTime();
+			m_letterBoxFadeStartTime = Clock_Milliseconds();
 
 			//WST  9/18/2002 - This is not a script api to prevent cheat.  JSC Integrated 5/20/03
 			if( TheTacticalView )
@@ -2676,7 +2911,7 @@ void W3DDisplay::enableLetterBox(Bool enable)
 		if (m_letterBoxEnabled)
 		{	//letterbox mode no previously disabled
 			m_letterBoxEnabled = FALSE;
-			m_letterBoxFadeStartTime = timeGetTime();
+			m_letterBoxFadeStartTime = Clock_Milliseconds();
 
 			//WST  9/18/2002. JSC Integrated 5/20/03
 			if( TheTacticalView )
@@ -3545,88 +3780,54 @@ void W3DDisplay::setShroudLevel( Int x, Int y, CellShroudStatus setting )
 
 //=============================================================================
 ///Utility function to dump data into a .BMP file
-static void CreateBMPFile(LPTSTR pszFile, char *image, Int width, Int height)
-{ 
-     HANDLE hf;                 // file handle 
-    BITMAPFILEHEADER hdr;       // bitmap file-header 
-    PBITMAPINFOHEADER pbih;     // bitmap info-header 
-    LPBYTE lpBits;              // memory pointer 
-    DWORD dwTotal;              // total count of bytes 
-    DWORD cb;                   // incremental count of bytes 
-    BYTE *hp;                   // byte pointer 
-    DWORD dwTmp; 
-
-    PBITMAPINFO pbmi; 
-
-    pbmi = (PBITMAPINFO) LocalAlloc(LPTR,sizeof(BITMAPINFOHEADER));
-    pbmi->bmiHeader.biSize = sizeof(BITMAPINFOHEADER); 
-    pbmi->bmiHeader.biWidth = width; 
-    pbmi->bmiHeader.biHeight = height; 
-    pbmi->bmiHeader.biPlanes = 1; 
-    pbmi->bmiHeader.biBitCount = 24;
-    pbmi->bmiHeader.biCompression = BI_RGB;
-    pbmi->bmiHeader.biSizeImage = (pbmi->bmiHeader.biWidth + 7) /8 * pbmi->bmiHeader.biHeight * 24;
-    pbmi->bmiHeader.biClrImportant = 0; 
-
-
-    pbih = (PBITMAPINFOHEADER) pbmi; 
-    lpBits = (LPBYTE) image;
-
-    // Create the .BMP file. 
-    hf = CreateFile(pszFile, 
-                   GENERIC_READ | GENERIC_WRITE, 
-                   (DWORD) 0, 
-                    NULL, 
-                   CREATE_ALWAYS, 
-                   FILE_ATTRIBUTE_NORMAL, 
-                   (HANDLE) NULL); 
-    if (hf == INVALID_HANDLE_VALUE) 
+static void CreateBMPFile(char *pszFile, char *image, Int width, Int height)
+{
+	// A 24-bit bottom-up .bmp written by hand, on every platform: the two headers are little-endian
+	// fields, put a byte at a time.  Each row is padded to four bytes, as the format requires, and only
+	// the image's own 3 * width * height bytes are read.  The Windows writer this replaces sized the image
+	// (width + 7) / 8 * height * 24 bytes and wrote that many out of a 3 * width * height buffer: past its
+	// end whenever the width is not a multiple of 8 (a 1366-wide screen), and with unpadded rows, so a
+	// skewed picture, whenever it is not a multiple of 4 (port defect 18).
+	FILE *fp = zh_fopen(pszFile, "wb");
+	if (fp == NULL)
 		return;
-    hdr.bfType = 0x4d42;        // 0x42 = "B" 0x4d = "M" 
-    // Compute the size of the entire file. 
-    hdr.bfSize = (DWORD) (sizeof(BITMAPFILEHEADER) + 
-                 pbih->biSize + pbih->biClrUsed 
-                 * sizeof(RGBQUAD) + pbih->biSizeImage); 
-    hdr.bfReserved1 = 0; 
-    hdr.bfReserved2 = 0; 
-
-    // Compute the offset to the array of color indices. 
-    hdr.bfOffBits = (DWORD) sizeof(BITMAPFILEHEADER) + 
-                    pbih->biSize + pbih->biClrUsed 
-                    * sizeof (RGBQUAD); 
-
-    // Copy the BITMAPFILEHEADER into the .BMP file. 
-    if (!WriteFile(hf, (LPVOID) &hdr, sizeof(BITMAPFILEHEADER), 
-        (LPDWORD) &dwTmp,  NULL)) 
-		return;
-
-    // Copy the BITMAPINFOHEADER and RGBQUAD array into the file. 
-    if (!WriteFile(hf, (LPVOID) pbih, sizeof(BITMAPINFOHEADER) + pbih->biClrUsed * sizeof (RGBQUAD),(LPDWORD) &dwTmp, NULL)) 
-		return;
-
-    // Copy the array of color indices into the .BMP file. 
-    dwTotal = cb = pbih->biSizeImage; 
-    hp = lpBits; 
-    if (!WriteFile(hf, (LPSTR) hp, (int) cb, (LPDWORD) &dwTmp,NULL)) 
-		return;
-
-    // Close the .BMP file. 
-     if (!CloseHandle(hf))
-		 return;
-
-    // Free memory. 
-	LocalFree( (HLOCAL) pbmi);
+	const UnsignedInt rowBytes = 3 * (UnsignedInt)width;
+	const UnsignedInt stride = (rowBytes + 3) & ~3u;
+	const UnsignedInt imageBytes = stride * (UnsignedInt)height;
+	unsigned char header[54];
+	memset(header, 0, sizeof(header));
+	struct Put
+	{
+		static void u16(unsigned char *at, UnsignedInt v) { at[0] = (unsigned char)v; at[1] = (unsigned char)(v >> 8); }
+		static void u32(unsigned char *at, UnsignedInt v) { u16(at, v & 0xFFFF); u16(at + 2, v >> 16); }
+	};
+	Put::u16(header + 0, 0x4d42);			// "BM"
+	Put::u32(header + 2, 54 + imageBytes);	// the file's size
+	Put::u32(header + 10, 54);				// where the pixels start
+	Put::u32(header + 14, 40);				// the info header's size
+	Put::u32(header + 18, (UnsignedInt)width);
+	Put::u32(header + 22, (UnsignedInt)height);
+	Put::u16(header + 26, 1);				// planes
+	Put::u16(header + 28, 24);				// bits per pixel
+	Put::u32(header + 34, imageBytes);
+	fwrite(header, 1, sizeof(header), fp);
+	static const unsigned char pad[3] = { 0, 0, 0 };
+	for (Int row = 0; row < height; ++row) {
+		fwrite(image + row * rowBytes, 1, rowBytes, fp);
+		fwrite(pad, 1, stride - rowBytes, fp);
+	}
+	fclose(fp);
 }
 
 // A system-memory copy of the back buffer (32-bit, not multisampled), NULL when that is
 // not possible.  Taken at the end of draw(), before Present: the front-buffer path is a
-// desktop capture, and on the Direct3D 12 (9On12) runtime the window is presented through
-// a DXGI flip swap chain that desktop captures do not see - the old code saved black.
+// desktop capture, and a window presented through a DXGI flip swap chain is one that
+// desktop captures do not see - the old code saved black.
 static IDirect3DSurface9 *captureBackBuffer(void)
 {
 	IDirect3DDevice9 *dev = DX8Wrapper::_Get_D3D_Device();
 	IDirect3DSurface9 *bb = NULL;
-	if (dev == NULL || FAILED(dev->GetBackBuffer(PRIMARY_SWAP_CHAIN, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || bb == NULL)
+	if (dev == NULL || Render_Failed(dev->GetBackBuffer(PRIMARY_SWAP_CHAIN, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || bb == NULL)
 		return NULL;
 
 	D3DSURFACE_DESC desc;
@@ -3643,17 +3844,17 @@ static IDirect3DSurface9 *captureBackBuffer(void)
 		IDirect3DSurface9 *resolved = NULL;
 		IDirect3DSurface9 *source = bb;
 		if (desc.MultiSampleType != D3DMULTISAMPLE_NONE
-			&& SUCCEEDED(dev->CreateRenderTarget(desc.Width, desc.Height, desc.Format,
+			&& Render_Succeeded(dev->CreateRenderTarget(desc.Width, desc.Height, desc.Format,
 					D3DMULTISAMPLE_NONE, 0, FALSE, &resolved, NULL))
-			&& SUCCEEDED(dev->StretchRect(bb, NULL, resolved, NULL, D3DTEXF_NONE)))
+			&& Render_Succeeded(dev->StretchRect(bb, NULL, resolved, NULL, D3DTEXF_NONE)))
 		{
 			source = resolved;
 		}
 
-		if (SUCCEEDED(source->GetDesc(&desc)) && desc.MultiSampleType == D3DMULTISAMPLE_NONE
-			&& SUCCEEDED(dev->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format,
+		if (Render_Succeeded(source->GetDesc(&desc)) && desc.MultiSampleType == D3DMULTISAMPLE_NONE
+			&& Render_Succeeded(dev->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format,
 					D3DPOOL_SYSTEMMEM, &copy, NULL)) && copy != NULL
-			&& FAILED(dev->GetRenderTargetData(source, copy)))
+			&& Render_Failed(dev->GetRenderTargetData(source, copy)))
 		{
 			copy->Release();
 			copy = NULL;
@@ -3711,20 +3912,28 @@ static Bool writeFrameBMP(char *pathname)
 		return TRUE;
 	}
 
-	RECT bounds;
+	RenderRect bounds;
 	IDirect3DSurface9 *fb = captureBackBuffer();
 	if (fb != NULL)
 	{
 		D3DSURFACE_DESC desc;
 		fb->GetDesc(&desc);
+#if defined(_WIN32)
 		SetRect(&bounds, 0, 0, desc.Width, desc.Height);
+#else
+		bounds.left = 0;
+		bounds.top = 0;
+		bounds.right = (Int)desc.Width;
+		bounds.bottom = (Int)desc.Height;
+#endif
 	}
 	else
 	{
+#if defined(_WIN32)
 		// Lock front buffer and copy
 		fb=DX8Wrapper::_Get_DX8_Front_Buffer();
 
-		POINT point;
+		RenderPoint point;
 		GetClientRect(ApplicationHWnd,&bounds);
 		point.x=bounds.left; point.y=bounds.top;
 		ClientToScreen(ApplicationHWnd, &point);
@@ -3732,6 +3941,10 @@ static Bool writeFrameBMP(char *pathname)
 		point.x=bounds.right; point.y=bounds.bottom;
 		ClientToScreen(ApplicationHWnd, &point);
 		bounds.right=point.x; bounds.bottom=point.y;
+#else
+		// The front buffer is a desktop capture, which only Windows has; the back buffer is all there is.
+		bounds.left = bounds.top = bounds.right = bounds.bottom = 0;
+#endif
 	}
 
 	// The front-buffer path above turns the window's client area into desktop coordinates, and a
@@ -3740,12 +3953,12 @@ static Bool writeFrameBMP(char *pathname)
 	// inside the copy loop below, which is a screenshot taking the game down. Clamp to the surface.
 	{
 		D3DSURFACE_DESC fbDesc;
-		if (fb != NULL && SUCCEEDED(fb->GetDesc(&fbDesc)))
+		if (fb != NULL && Render_Succeeded(fb->GetDesc(&fbDesc)))
 		{
 			if (bounds.left < 0) bounds.left = 0;
 			if (bounds.top < 0) bounds.top = 0;
-			if (bounds.right > (LONG)fbDesc.Width) bounds.right = (LONG)fbDesc.Width;
-			if (bounds.bottom > (LONG)fbDesc.Height) bounds.bottom = (LONG)fbDesc.Height;
+			if (bounds.right > (Int)fbDesc.Width) bounds.right = (Int)fbDesc.Width;
+			if (bounds.bottom > (Int)fbDesc.Height) bounds.bottom = (Int)fbDesc.Height;
 		}
 
 		if (fb == NULL || bounds.right <= bounds.left || bounds.bottom <= bounds.top)
@@ -3859,7 +4072,7 @@ static void saveScreenShot(void)
 #endif
 		strlcpy(pathname, TheGlobalData->getPath_UserData().str(), ARRAY_SIZE(pathname));
 		strlcat(pathname, leafname, ARRAY_SIZE(pathname));
-		if (_access( pathname, 0 ) == -1)
+		if (access( pathname, 0 ) == -1)
 			done = true;
 	}
 
@@ -3902,8 +4115,13 @@ static void deleteVideoFrames(void)
 	for (Int index = 0; ; ++index)
 	{
 		buildVideoFramePath(pathname, ARRAY_SIZE(pathname), index);
+#if defined(_WIN32)
 		if (!DeleteFileA(pathname))
 			return;
+#else
+		if (zh_remove(pathname) != 0)
+			return;
+#endif
 	}
 }
 
@@ -3918,6 +4136,11 @@ static void finishVideo(void)
 	if (s_videoFramesWritten == 0)
 		return;
 
+#if !defined(_WIN32)
+	// Off Windows the encoder is not started for you: the frames stay, and this is how to make the movie.
+	DEBUG_LOG(("VIDEO: encode with: ffmpeg -framerate %d -i \"%s%s\" -c:v libx264 -pix_fmt yuv420p out.mp4\n",
+		LOGICFRAMES_PER_SECOND, s_videoDirectory, VIDEO_FRAME_PATTERN));
+#else
 	char encoderPath[_MAX_PATH];
 	if (SearchPathA(NULL, VIDEO_ENCODER, NULL, ARRAY_SIZE(encoderPath), encoderPath, NULL) == 0)
 	{
@@ -3966,6 +4189,7 @@ static void finishVideo(void)
 	deleteVideoFrames();
 	RemoveDirectoryA(s_videoDirectory);
 	DEBUG_LOG(("VIDEO: wrote %s\n", moviePath));
+#endif
 }
 
 static void captureVideoFrame(void)
@@ -3989,10 +4213,18 @@ static void captureVideoFrame(void)
 		s_videoStarted = TRUE;
 		snprintf(s_videoDirectory, ARRAY_SIZE(s_videoDirectory), "%sVideos\\",
 			TheGlobalData->getPath_UserData().str());
+#if defined(_WIN32)
 		CreateDirectoryA(s_videoDirectory, NULL);
+#else
+		zh_mkdir(s_videoDirectory);
+#endif
 		strlcat(s_videoDirectory, TheGlobalData->m_videoName.str(), ARRAY_SIZE(s_videoDirectory));
 		strlcat(s_videoDirectory, "\\", ARRAY_SIZE(s_videoDirectory));
+#if defined(_WIN32)
 		CreateDirectoryA(s_videoDirectory, NULL);
+#else
+		zh_mkdir(s_videoDirectory);
+#endif
 
 		// a directory left over from an earlier run would hand ffmpeg its tail as well
 		deleteVideoFrames();
@@ -4025,13 +4257,21 @@ void W3DDisplay::toggleMovieCapture(void)
 
 /** Asks the device rather than the switch: a machine that cannot make a Direct3D 11 device carries
 	* on with Direct3D 9 whatever -d3d9 said, and the corner has to name what is actually drawing.
-	* A 64-bit exe says so beside it. */
-const wchar_t *W3DDisplay::getRendererName(void) const
+	* A 64-bit exe names its architecture beside it. */
+const WideChar *W3DDisplay::getRendererName(void) const
 {
-#ifdef _WIN64
-	return Direct3D11_Is_Active() ? L"DX11 x64" : L"DX9 x64";
+#if defined(_WIN32)
+#if defined(_M_ARM64)
+	return Direct3D11_Is_Active() ? u"DX11 arm64" : u"DX9 arm64";
+#elif defined(_WIN64)
+	return Direct3D11_Is_Active() ? u"DX11 x64" : u"DX9 x64";
 #else
-	return Direct3D11_Is_Active() ? L"DX11" : L"DX9";
+	return Direct3D11_Is_Active() ? u"DX11" : u"DX9";
+#endif
+#else
+	// Off Windows the picture is drawn by the SDL3 GPU device: its backend, "Metal arm64" or "Vulkan x64",
+	// or "Headless" with no window (Platform/RendererName.h).
+	return PosixRenderer_Name();
 #endif
 }
 
@@ -4209,7 +4449,7 @@ void W3DDisplay::dumpAssetUsage(const char* mapname)
 	while (true)
 	{
 		sprintf(buf, "AssetUsage_%s_%04d.txt",leafname,idx);
-		if (_access(buf, 0) != 0)
+		if (access(buf, 0) != 0)
 			break;	// it exists, we're good
 		++idx;
 	}
@@ -4230,8 +4470,8 @@ void W3DDisplay::dumpAssetUsage(const char* mapname)
 //-------------------------------------------------------------------------------------------------
 static void drawFramerateBar(void)
 {
-	static DWORD prevTime = timeGetTime();
-	DWORD now = timeGetTime();
+	static UnsignedInt prevTime = Clock_Milliseconds();
+	UnsignedInt now = Clock_Milliseconds();
 	Real percTime = (1000.0f / (now - prevTime) ) / (1000.0f / TheGlobalData->m_framesPerSecondLimit);
 
 	if (percTime > 1.0f)

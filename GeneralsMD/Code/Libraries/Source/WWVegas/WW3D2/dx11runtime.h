@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*
 ** The one Direct3D 11 device and backend the process has, and the switch that asks for them.
@@ -25,16 +26,36 @@
 ** happened rather than what was asked for, and everything that branches on the backend branches on
 ** that.
 **
-** RENDERER-ROADMAP.md's phase 2 is not finished while this is here: the engine still reaches the
-** Direct3D 9 device directly from 236 places, and until those go through DX8Wrapper a -dx11 run
-** has a backend that only the wrapper's own state calls reach.  Enable_Reports says how far that
-** has got on any given run rather than leaving it to be guessed.
+** The funnel is not finished while this is here: the engine still reaches the Direct3D 9 device
+** past DX8Wrapper, and until those calls go through the wrapper a -dx11 run has a backend that
+** only the wrapper's own state calls reach.
+**
+** Measured 2026-09-22, before the port changed the renderer: 125 references to _Get_D3D_Device()/_Get_D3D() in
+** GeneralsMD/Code, 89 of them outside dx8wrapper.{cpp,h}, which between them make 148 calls on the
+** device - 47 straight through the accessor and 101 through a pointer captured into a local or a
+** member first.  There are 22 DX8CALL sites outside the wrapper on top of that.
+**
+** This comment used to say 236, counted on 2026-09-09 by bfb60e17, which is the same measure taken
+** before ef8303a9 removed 111 of them the same day.  A call-site survey (D1) recorded the
+** categories, the file list and the order the rest of them move in; re-measure rather than quoting
+** either number.
+**
+** What the shutdown log reports - the refusal counters and the foreign shader list at the bottom
+** of this header, written out by W3DDisplay - says how far that has got on any given run rather
+** than leaving it to be guessed.  (An earlier draft of this comment named an Enable_Reports; there
+** has never been one.)
 */
 
 #ifndef DX11RUNTIME_H
 #define DX11RUNTIME_H
 
+#if defined(_WIN32)
 #include <windows.h>
+#endif
+// RenderWindow, RenderRect and RenderPoint: on Windows HWND, RECT and POINT themselves (A0).  Off
+// Windows there is no Direct3D 11, and dx11runtime_posix.cpp answers every call as a machine without
+// it would: nothing is ever active.
+#include "Platform/RenderTypes.h"
 
 #include <string>
 
@@ -48,7 +69,7 @@ bool Direct3D11_Is_Enabled();
 
 // Built once the window and its size are known.  False means the machine could not make one, and
 // the caller carries on with Direct3D 9 rather than failing to start.
-bool Direct3D11_Create(HWND window, unsigned width, unsigned height);
+bool Direct3D11_Create(RenderWindow window, unsigned width, unsigned height);
 void Direct3D11_Release();
 
 // The swap chain's buffers at a new resolution.  Nothing if they already are that size.
@@ -71,13 +92,13 @@ void Direct3D11_Mirror_Sampler_State(unsigned sampler, unsigned state, unsigned 
 
 // The rest of what the fixed-function vertex pipeline reads.  The matrix is sixteen floats in the
 // order D3D9 stores them, which is by rows; the material is five colours and a power; a light is
-// the six four-float fields ffvertex declares, and a null one disables that index.
+// the seven four-float fields ffvertex declares, and a null one disables that index.
 void Direct3D11_Mirror_Transform(unsigned transform, const float matrix[16]);
 void Direct3D11_Mirror_Material(const float ambient[4], const float diffuse[4],
 	const float specular[4], const float emissive[4], float power);
 void Direct3D11_Mirror_Light(unsigned index, unsigned type, const float position[4],
 	const float direction[4], const float diffuse[4], const float specular[4],
-	const float attenuation[4], const float spot[4]);
+	const float attenuation[4], const float spot[4], const float ambient[4]);
 void Direct3D11_Mirror_Light_Disabled(unsigned index);
 
 // The Direct3D 11 copy of a vertex or index buffer the engine is about to create, or null on an
@@ -119,6 +140,22 @@ void Direct3D11_Set_Shadow_Parameters(float bias, float strength, float widest_r
 	float sky_fill);
 void Direct3D11_Clear_Shadow_Parameters();
 
+// The smoke in the sun's light, after Direct3D11_End_Shadow_Map and from the sun it drew with: five
+// floats a caster (world x, y, z, radius, optical depth through its middle) and how dark the
+// thickest smoke leaves what is behind it.  Called every frame the map is drawn; no casters is a
+// frame without smoke.  False when there is no backend or the device cannot hold the map, and the
+// caller keeps its older shade under the clouds.
+bool Direct3D11_Fill_Smoke_Map(const float * casters, unsigned count, float strength);
+
+// The scene camera's view, in the device's layout, set by the shadow pass once the frame's camera is
+// back.  A draw made in camera space (identity view, perspective projection: the sorted particles)
+// looks its shadow up through it.
+void Direct3D11_Set_Scene_View(const float view[16]);
+
+// The draws that follow carry a fire's glow in their normals, to be added after the shade
+// (DX11BackendClass::Set_Smoke_Glow).  The sorting pool sets it around the smoke billboards' runs.
+void Direct3D11_Set_Smoke_Glow(bool glow);
+
 // The CPU has just written this surface.  The next bind of its texture fills the Direct3D 11 copy
 // again.  A no-op when the backend is not running.
 void Direct3D11_Mark_Surface_Dirty(struct IDirect3DSurface9 * surface);
@@ -130,8 +167,8 @@ void Direct3D11_Mirror_Render_Target(struct IDirect3DSurface9 * surface);
 // One of the engine's surface copies, carried into the copy of the destination texture.  This is
 // how a default-pool texture the CPU cannot read - the shroud - reaches D3D11 at all.
 void Direct3D11_Mirror_Surface_Copy(struct IDirect3DSurface9 * destination,
-	struct IDirect3DSurface9 * source, const struct tagRECT * source_rectangle,
-	const struct tagPOINT * destination_point);
+	struct IDirect3DSurface9 * source, const RenderRect * source_rectangle,
+	const RenderPoint * destination_point);
 
 // The frame, alongside Direct3D 9's own.  Begin binds the back buffer and the viewport, Clear
 // takes the same arguments DX8Wrapper::Clear was given, and End presents only when the run asked
@@ -146,6 +183,9 @@ void Direct3D11_End_Scene(bool flip_frames);
 // screenshots back from it.  Without it nothing on screen changes when -dx11 is passed.
 // -dx11dump: write every generated program to this directory as it is built.
 void Direct3D11_Dump_Programs_To(const char * directory);
+// Where the user's compiled programs are kept (the game's user data folder); before the device exists.
+// Unset, the working directory.
+void Direct3D11_Set_Shader_Cache_Directory(const char * directory);
 
 void Direct3D11_Present_Enable(bool enabled);
 bool Direct3D11_Present_Is_Enabled();
@@ -252,6 +292,10 @@ const char * Direct3D11_Texture_Copy_Shape(unsigned index);
 // says nothing about it otherwise.
 void Direct3D11_Statistics(unsigned & pipelines_built, unsigned long long & draws_made,
 	unsigned long long & draws_refused);
+
+// How many compiled programs came with the game (dx11shaders.shipped) and how many the backend holds now,
+// shipped, cached and compiled together: a run whose held count exceeds the shipped one compiled something.
+void Direct3D11_Program_Statistics(unsigned & shipped, unsigned & held);
 
 // What the frame since the last call spent building pipelines and copying textures, and how many
 // of each.  Taking it resets it.

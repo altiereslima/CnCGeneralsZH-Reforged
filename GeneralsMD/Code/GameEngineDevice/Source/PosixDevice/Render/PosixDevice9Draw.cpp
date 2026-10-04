@@ -1,0 +1,1127 @@
+/*
+**	Copyright 2026 İlyas Akın
+**	Additional terms under GNU GPL section 7 apply: see LICENSE.md.
+**
+**	This program is free software: you can redistribute it and/or modify
+**	it under the terms of the GNU General Public License as published by
+**	the Free Software Foundation, either version 3 of the License, or
+**	(at your option) any later version.
+**
+**	This program is distributed in the hope that it will be useful,
+**	but WITHOUT ANY WARRANTY; without even the implied warranty of
+**	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+**	GNU General Public License for more details.
+**
+**	You should have received a copy of the GNU General Public License
+**	along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+// Portions adapted from GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/dx11backend.cpp by Olcay Seygan (upstream CnCGeneralsZH-Reforged), GPL-3.0-or-later.
+
+// The draw's resolve (decision 7, phase A3c): the device's D3D9 state, as set, into D3's generator
+// descriptions and the constants their programs read.  It reads the state the way dx11backend reads its
+// mirror of the same state (Build_Combiner_Description, Build_Vertex_Description, Upload_Constants), so
+// the two backends hand the generators the same thing; dx11backend's own additions (normal maps, the
+// shadow map) are not A3's.  And D3D9's documented initial states, which the draw is the first to read.
+
+#include "PosixDevice9.h"
+#include "PosixResources9.h"
+#include "SdlConstants.h"
+#include "SdlCreationLog.h"
+#include "SdlGpuFrame.h"
+#include "SdlPipelineCache.h"
+#include "SdlProgramCache.h"
+#include "SdlResourceMirror.h"
+
+#include "engineshader.h"
+#include "ffshader.h"
+#include "ffvertex.h"
+
+#include <SDL3/SDL.h>
+
+#include <math.h>
+#include <set>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+//-------------------------------------------------------------------------------------------------
+// D3D9's initial state, from its documentation of each state.  A float state holds its float's bits.
+//-------------------------------------------------------------------------------------------------
+
+static RenderUInt32 float_bits(float value)
+{
+	RenderUInt32 bits;
+	memcpy(&bits, &value, sizeof(bits));
+	return bits;
+}
+
+void PosixDevice9::Set_Default_States()
+{
+	RenderUInt32 *rs = RenderStates;
+	rs[D3DRS_ZENABLE] = Parameters.EnableAutoDepthStencil ? D3DZB_TRUE : D3DZB_FALSE;
+	rs[D3DRS_FILLMODE] = D3DFILL_SOLID;
+	rs[D3DRS_SHADEMODE] = D3DSHADE_GOURAUD;
+	rs[D3DRS_ZWRITEENABLE] = 1;
+	rs[D3DRS_ALPHATESTENABLE] = 0;
+	rs[D3DRS_LASTPIXEL] = 1;
+	rs[D3DRS_SRCBLEND] = D3DBLEND_ONE;
+	rs[D3DRS_DESTBLEND] = D3DBLEND_ZERO;
+	rs[D3DRS_CULLMODE] = D3DCULL_CCW;
+	rs[D3DRS_ZFUNC] = D3DCMP_LESSEQUAL;
+	rs[D3DRS_ALPHAREF] = 0;
+	rs[D3DRS_ALPHAFUNC] = D3DCMP_ALWAYS;
+	rs[D3DRS_DITHERENABLE] = 0;
+	rs[D3DRS_ALPHABLENDENABLE] = 0;
+	rs[D3DRS_FOGENABLE] = 0;
+	rs[D3DRS_SPECULARENABLE] = 0;
+	rs[D3DRS_FOGCOLOR] = 0;
+	rs[D3DRS_FOGTABLEMODE] = D3DFOG_NONE;
+	rs[D3DRS_FOGSTART] = float_bits(0.0f);
+	rs[D3DRS_FOGEND] = float_bits(1.0f);
+	rs[D3DRS_FOGDENSITY] = float_bits(1.0f);
+	rs[D3DRS_RANGEFOGENABLE] = 0;
+	rs[D3DRS_STENCILENABLE] = 0;
+	rs[D3DRS_STENCILFAIL] = D3DSTENCILOP_KEEP;
+	rs[D3DRS_STENCILZFAIL] = D3DSTENCILOP_KEEP;
+	rs[D3DRS_STENCILPASS] = D3DSTENCILOP_KEEP;
+	rs[D3DRS_STENCILFUNC] = D3DCMP_ALWAYS;
+	rs[D3DRS_STENCILREF] = 0;
+	rs[D3DRS_STENCILMASK] = 0xFFFFFFFFu;
+	rs[D3DRS_STENCILWRITEMASK] = 0xFFFFFFFFu;
+	rs[D3DRS_TEXTUREFACTOR] = 0xFFFFFFFFu;
+	rs[D3DRS_CLIPPING] = 1;
+	rs[D3DRS_LIGHTING] = 1;
+	rs[D3DRS_AMBIENT] = 0;
+	rs[D3DRS_FOGVERTEXMODE] = D3DFOG_NONE;
+	rs[D3DRS_COLORVERTEX] = 1;
+	rs[D3DRS_LOCALVIEWER] = 1;
+	rs[D3DRS_NORMALIZENORMALS] = 0;
+	rs[D3DRS_DIFFUSEMATERIALSOURCE] = D3DMCS_COLOR1;
+	rs[D3DRS_SPECULARMATERIALSOURCE] = D3DMCS_COLOR2;
+	rs[D3DRS_AMBIENTMATERIALSOURCE] = D3DMCS_MATERIAL;
+	rs[D3DRS_EMISSIVEMATERIALSOURCE] = D3DMCS_MATERIAL;
+	rs[D3DRS_VERTEXBLEND] = D3DVBF_DISABLE;
+	rs[D3DRS_CLIPPLANEENABLE] = 0;
+	rs[D3DRS_POINTSIZE] = float_bits(1.0f);
+	rs[D3DRS_POINTSIZE_MIN] = float_bits(1.0f);
+	rs[D3DRS_POINTSPRITEENABLE] = 0;
+	rs[D3DRS_POINTSCALEENABLE] = 0;
+	rs[D3DRS_MULTISAMPLEANTIALIAS] = 1;
+	rs[D3DRS_MULTISAMPLEMASK] = 0xFFFFFFFFu;
+	rs[D3DRS_POINTSIZE_MAX] = float_bits(64.0f);
+	rs[D3DRS_COLORWRITEENABLE] = 0x0000000Fu;
+	rs[D3DRS_BLENDOP] = D3DBLENDOP_ADD;
+	rs[D3DRS_SCISSORTESTENABLE] = 0;
+	rs[D3DRS_SLOPESCALEDEPTHBIAS] = 0;
+	rs[D3DRS_DEPTHBIAS] = 0;
+	rs[D3DRS_TWOSIDEDSTENCILMODE] = 0;
+	rs[D3DRS_CCW_STENCILFAIL] = D3DSTENCILOP_KEEP;
+	rs[D3DRS_CCW_STENCILZFAIL] = D3DSTENCILOP_KEEP;
+	rs[D3DRS_CCW_STENCILPASS] = D3DSTENCILOP_KEEP;
+	rs[D3DRS_CCW_STENCILFUNC] = D3DCMP_ALWAYS;
+	rs[D3DRS_SEPARATEALPHABLENDENABLE] = 0;
+	rs[D3DRS_SRCBLENDALPHA] = D3DBLEND_ONE;
+	rs[D3DRS_DESTBLENDALPHA] = D3DBLEND_ZERO;
+	rs[D3DRS_BLENDOPALPHA] = D3DBLENDOP_ADD;
+	rs[D3DRS_BLENDFACTOR] = 0xFFFFFFFFu;
+
+	// Stage 0 modulates the texture with the diffuse colour and takes the texture's alpha; every other
+	// stage is disabled.  Each stage reads the coordinate set of its own number.
+	for (int stage = 0; stage < TEXTURE_STAGE_COUNT; ++stage) {
+		RenderUInt32 *ts = TextureStageStates[stage];
+		ts[D3DTSS_COLOROP] = stage == 0 ? D3DTOP_MODULATE : D3DTOP_DISABLE;
+		ts[D3DTSS_COLORARG1] = D3DTA_TEXTURE;
+		ts[D3DTSS_COLORARG2] = D3DTA_CURRENT;
+		ts[D3DTSS_ALPHAOP] = stage == 0 ? D3DTOP_SELECTARG1 : D3DTOP_DISABLE;
+		ts[D3DTSS_ALPHAARG1] = D3DTA_TEXTURE;
+		ts[D3DTSS_ALPHAARG2] = D3DTA_CURRENT;
+		ts[D3DTSS_TEXCOORDINDEX] = (RenderUInt32)stage;
+		ts[D3DTSS_TEXTURETRANSFORMFLAGS] = D3DTTFF_DISABLE;
+		ts[D3DTSS_COLORARG0] = D3DTA_CURRENT;
+		ts[D3DTSS_ALPHAARG0] = D3DTA_CURRENT;
+		ts[D3DTSS_RESULTARG] = D3DTA_CURRENT;
+	}
+	for (int sampler = 0; sampler < SAMPLER_COUNT; ++sampler) {
+		RenderUInt32 *ss = SamplerStates[sampler];
+		ss[D3DSAMP_ADDRESSU] = D3DTADDRESS_WRAP;
+		ss[D3DSAMP_ADDRESSV] = D3DTADDRESS_WRAP;
+		ss[D3DSAMP_ADDRESSW] = D3DTADDRESS_WRAP;
+		ss[D3DSAMP_BORDERCOLOR] = 0;
+		ss[D3DSAMP_MAGFILTER] = D3DTEXF_POINT;
+		ss[D3DSAMP_MINFILTER] = D3DTEXF_POINT;
+		ss[D3DSAMP_MIPFILTER] = D3DTEXF_NONE;
+		ss[D3DSAMP_MIPMAPLODBIAS] = 0;
+		ss[D3DSAMP_MAXMIPLEVEL] = 0;
+		ss[D3DSAMP_MAXANISOTROPY] = 1;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+// The descriptions.
+//-------------------------------------------------------------------------------------------------
+
+bool PosixDevice9::Stage_Ends_Cascade(unsigned int stage) const
+{
+	// A disabled stage ends it; so does one whose COLORARG1 is the texture when none is bound.  That
+	// second case is D3D9's documented one (FFReference's N20, from the D3DTA and texture blending
+	// pages); ffshader's own answer for a stage with no texture is opaque white, which D3 left for a
+	// Windows measurement to settle, and a stage that reads the texture only elsewhere still gets it.
+	const RenderUInt32 *ts = TextureStageStates[stage];
+	return ts[D3DTSS_COLOROP] == D3DTOP_DISABLE
+		|| ((ts[D3DTSS_COLORARG1] & D3DTA_SELECTMASK) == D3DTA_TEXTURE && Textures[stage] == NULL);
+}
+
+void PosixDevice9::Build_Combiner_Description(CombinerDescription &description) const
+{
+	// memset first, as dx11backend's does: descriptions are compared with memcmp, padding included.
+	memset(&description, 0, sizeof(description));
+
+	// The alpha test and the fog are pipeline state under D3D9 and instructions in the program here.
+	description.PixelPipeline.AlphaTestEnabled = RenderStates[D3DRS_ALPHATESTENABLE] != 0;
+	description.PixelPipeline.AlphaFunction = RenderStates[D3DRS_ALPHAFUNC];
+	description.PixelPipeline.FogEnabled = RenderStates[D3DRS_FOGENABLE] != 0;
+	description.SpecularAdd = RenderStates[D3DRS_SPECULARENABLE] != 0;
+
+	if (Stage_Ends_Cascade(0)) {
+		// No texturing: D3D9 draws the diffuse colour and its alpha.  The generator ends its chain at a
+		// disabled stage and would refuse, so this is the one-stage combiner that means the same.
+		CombinerStage &stage = description.Stages[0];
+		stage.ColourOperation = D3DTOP_SELECTARG1;
+		stage.ColourArgument1 = D3DTA_DIFFUSE;
+		stage.ColourArgument2 = D3DTA_CURRENT;
+		stage.ColourArgument0 = D3DTA_CURRENT;
+		stage.AlphaOperation = D3DTOP_SELECTARG1;
+		stage.AlphaArgument1 = D3DTA_DIFFUSE;
+		stage.AlphaArgument2 = D3DTA_CURRENT;
+		stage.AlphaArgument0 = D3DTA_CURRENT;
+		stage.TextureCoordinateIndex = 0;
+		stage.TextureBound = false;
+		description.StageCount = 1;
+		return;
+	}
+
+	for (unsigned index = 0; index < MAXIMUM_COMBINER_STAGES; ++index) {
+		const RenderUInt32 *ts = TextureStageStates[index];
+		if (Stage_Ends_Cascade(index)) {
+			break;
+		}
+		CombinerStage &stage = description.Stages[index];
+		stage.ColourOperation = ts[D3DTSS_COLOROP];
+		stage.ColourArgument0 = ts[D3DTSS_COLORARG0];
+		stage.ColourArgument1 = ts[D3DTSS_COLORARG1];
+		stage.ColourArgument2 = ts[D3DTSS_COLORARG2];
+		stage.AlphaOperation = ts[D3DTSS_ALPHAOP];
+		stage.AlphaArgument0 = ts[D3DTSS_ALPHAARG0];
+		stage.AlphaArgument1 = ts[D3DTSS_ALPHAARG1];
+		stage.AlphaArgument2 = ts[D3DTSS_ALPHAARG2];
+		stage.TextureCoordinateIndex = ts[D3DTSS_TEXCOORDINDEX];
+		stage.TextureBound = Textures[index] != NULL;
+		description.StageCount = index + 1;
+	}
+}
+
+// A material source as D3D9 reads it: COLOR1 or COLOR2 names the vertex's diffuse or specular colour,
+// and with COLORVERTEX off, or a vertex that has not got that colour, the material's own is used
+// ("D3DMATERIALCOLORSOURCE").  The generator reads no vertex specular, so COLOR2 it can take only as that
+// fallback.
+static RenderUInt32 material_source(RenderUInt32 source, RenderUInt32 fvf, bool colour_vertex)
+{
+	if (source == D3DMCS_COLOR1 && (!colour_vertex || (fvf & D3DFVF_DIFFUSE) == 0)) {
+		return D3DMCS_MATERIAL;
+	}
+	if (source == D3DMCS_COLOR2 && (!colour_vertex || (fvf & D3DFVF_SPECULAR) == 0)) {
+		return D3DMCS_MATERIAL;
+	}
+	return source;
+}
+
+bool PosixDevice9::Build_Vertex_Description(VertexPipelineDescription &description, std::string *refusal) const
+{
+	memset(&description, 0, sizeof(description));
+	description.FVF = FVF;
+	// Pretransformed vertices skip transform and lighting altogether.
+	description.LightingEnabled = RenderStates[D3DRS_LIGHTING] != 0 && (FVF & D3DFVF_POSITION_MASK) != D3DFVF_XYZRHW;
+	description.SpecularEnabled = RenderStates[D3DRS_SPECULARENABLE] != 0;
+	description.LocalViewer = RenderStates[D3DRS_LOCALVIEWER] != 0;
+	description.ColourVertexEnabled = RenderStates[D3DRS_COLORVERTEX] != 0;
+	const bool colour_vertex = description.ColourVertexEnabled;
+	description.DiffuseMaterialSource = material_source(RenderStates[D3DRS_DIFFUSEMATERIALSOURCE], FVF, colour_vertex);
+	description.AmbientMaterialSource = material_source(RenderStates[D3DRS_AMBIENTMATERIALSOURCE], FVF, colour_vertex);
+	description.EmissiveMaterialSource = material_source(RenderStates[D3DRS_EMISSIVEMATERIALSOURCE], FVF, colour_vertex);
+	description.SpecularMaterialSource = material_source(RenderStates[D3DRS_SPECULARMATERIALSOURCE], FVF, colour_vertex);
+
+	// The enabled lights, packed down in order: the program declares them contiguously, and
+	// Build_Constants packs their fields the same way.  Unlit, the program has none.
+	description.LightCount = 0;
+	for (unsigned index = 0; index < LIGHT_COUNT && description.LightingEnabled; ++index) {
+		if (!LightsEnabled[index]) {
+			continue;
+		}
+		if (description.LightCount == MAXIMUM_VERTEX_LIGHTS) {
+			if (refusal != NULL) *refusal = "more lights enabled than the generator carries";
+			return false;
+		}
+		description.Lights[description.LightCount].Type = Lights[index].Type;
+		++description.LightCount;
+	}
+
+	// The same stages the combiner walk takes: the program only carries coordinates for those.  A
+	// disabled stage 0 is the one-stage diffuse combiner, which reads no coordinates but has a stage.
+	// With a pixel shader bound the cascade is the program's, and every stage still gets its coordinates
+	// from its TEXCOORDINDEX: the engine's programs sample stages whose COLOROP is DISABLE (the terrain's
+	// cloud and noise, the water's highlights and shroud), as dx11backend's every_stage has it (A3e-3:
+	// without this they sampled at (0, 0), found against the tests' shader interpreter).
+	const bool every_stage = PixelShader != NULL;
+	description.StageCount = 0;
+	for (unsigned index = 0; index < MAXIMUM_VERTEX_STAGES; ++index) {
+		if (!every_stage && index > 0 && Stage_Ends_Cascade(index)) {
+			break;
+		}
+		if (!every_stage && index == 0 && Stage_Ends_Cascade(0)) {
+			description.StageCount = 1;
+			break;
+		}
+		description.Stages[index].TextureCoordinateIndex = TextureStageStates[index][D3DTSS_TEXCOORDINDEX];
+		description.Stages[index].TextureTransformFlags = TextureStageStates[index][D3DTSS_TEXTURETRANSFORMFLAGS];
+		description.StageCount = index + 1;
+	}
+
+	description.FogEnabled = RenderStates[D3DRS_FOGENABLE] != 0;
+	description.FogVertexMode = RenderStates[D3DRS_FOGVERTEXMODE];
+	// The engine fogs per vertex, LINEAR (dx8wrapper's defaults); the generator has no table fog, and no
+	// fog factor taken from the specular alpha, which is D3D9's answer with both modes NONE.
+	if (description.FogEnabled && RenderStates[D3DRS_FOGTABLEMODE] != D3DFOG_NONE) {
+		if (refusal != NULL) *refusal = "table fog";
+		return false;
+	}
+	if (description.FogEnabled && description.FogVertexMode == D3DFOG_NONE) {
+		if (refusal != NULL) *refusal = "fog from the specular alpha (both fog modes NONE)";
+		return false;
+	}
+	return true;
+}
+
+//-------------------------------------------------------------------------------------------------
+// The constants.  Row major, D3D9's order, which is how the programs declare their matrices.
+//-------------------------------------------------------------------------------------------------
+
+static void multiply(const float left[16], const float right[16], float result[16])
+{
+	for (unsigned row = 0; row < 4; ++row) {
+		for (unsigned column = 0; column < 4; ++column) {
+			float sum = 0.0f;
+			for (unsigned index = 0; index < 4; ++index) {
+				sum += left[row * 4 + index] * right[index * 4 + column];
+			}
+			result[row * 4 + column] = sum;
+		}
+	}
+}
+
+// A light is set in world space and lit in camera space: its position and direction go through the
+// view matrix once per light, as the fixed-function pipeline carries them.
+static void transform_point(const float source[3], const float matrix[16], float result[4])
+{
+	for (unsigned column = 0; column < 4; ++column) {
+		result[column] = source[0] * matrix[column] + source[1] * matrix[4 + column]
+			+ source[2] * matrix[8 + column] + matrix[12 + column];
+	}
+}
+
+static void transform_direction(const float source[3], const float matrix[16], float result[4])
+{
+	for (unsigned column = 0; column < 4; ++column) {
+		result[column] = source[0] * matrix[column] + source[1] * matrix[4 + column] + source[2] * matrix[8 + column];
+	}
+}
+
+// The inverse transpose of the upper three by three, for the normals: the cofactors over the
+// determinant.  A singular matrix gives the identity, as dx11backend's does.
+static void inverse_transpose(const float s[16], float result[16])
+{
+	const float a = s[0], b = s[1], c = s[2];
+	const float d = s[4], e = s[5], f = s[6];
+	const float g = s[8], h = s[9], i = s[10];
+	const float determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+	memset(result, 0, 16 * sizeof(float));
+	result[0] = result[5] = result[10] = result[15] = 1.0f;
+	if (determinant == 0.0f) {
+		return;
+	}
+	const float scale = 1.0f / determinant;
+	result[0] = (e * i - f * h) * scale;
+	result[1] = (f * g - d * i) * scale;
+	result[2] = (d * h - e * g) * scale;
+	result[4] = (c * h - b * i) * scale;
+	result[5] = (a * i - c * g) * scale;
+	result[6] = (b * g - a * h) * scale;
+	result[8] = (b * f - c * e) * scale;
+	result[9] = (c * d - a * f) * scale;
+	result[10] = (a * e - b * d) * scale;
+}
+
+static void colour_of(RenderUInt32 argb, float out[4])
+{
+	out[0] = (float)((argb >> 16) & 0xFF) / 255.0f;
+	out[1] = (float)((argb >> 8) & 0xFF) / 255.0f;
+	out[2] = (float)(argb & 0xFF) / 255.0f;
+	out[3] = (float)((argb >> 24) & 0xFF) / 255.0f;
+}
+
+static void colour_value(const D3DCOLORVALUE &colour, float out[4])
+{
+	out[0] = colour.r;
+	out[1] = colour.g;
+	out[2] = colour.b;
+	out[3] = colour.a;
+}
+
+void PosixDevice9::Build_Constants(SdlVertexConstants &vertex, SdlPixelConstants &pixel) const
+{
+	memset(&vertex, 0, sizeof(vertex));
+	memset(&pixel, 0, sizeof(pixel));
+
+	const float *world = &Transforms[D3DTS_WORLD]._11;
+	const float *view = &Transforms[D3DTS_VIEW]._11;
+	const float *projection = &Transforms[D3DTS_PROJECTION]._11;
+	float world_view[16];
+	multiply(world, view, world_view);
+	multiply(world_view, projection, vertex.WorldViewProjection);
+	memcpy(vertex.WorldView, world_view, sizeof(world_view));
+	inverse_transpose(world_view, vertex.NormalTransform);
+	for (unsigned stage = 0; stage < MAXIMUM_VERTEX_STAGES; ++stage) {
+		memcpy(vertex.TextureMatrix[stage], &Transforms[D3DTS_TEXTURE0 + stage]._11, 16 * sizeof(float));
+	}
+
+	colour_value(Material.Ambient, vertex.MaterialAmbient);
+	colour_value(Material.Diffuse, vertex.MaterialDiffuse);
+	colour_value(Material.Specular, vertex.MaterialSpecular);
+	colour_value(Material.Emissive, vertex.MaterialEmissive);
+	vertex.MaterialPower[0] = Material.Power;
+	colour_of(RenderStates[D3DRS_AMBIENT], vertex.GlobalAmbient);
+
+	// Fog start, end and density are floats carried in DWORD states.
+	memcpy(&vertex.FogParameters[0], &RenderStates[D3DRS_FOGSTART], sizeof(float));
+	memcpy(&vertex.FogParameters[1], &RenderStates[D3DRS_FOGEND], sizeof(float));
+	memcpy(&vertex.FogParameters[2], &RenderStates[D3DRS_FOGDENSITY], sizeof(float));
+	vertex.ViewportInverse[0] = Viewport.Width != 0 ? 1.0f / (float)Viewport.Width : 0.0f;
+	vertex.ViewportInverse[1] = Viewport.Height != 0 ? 1.0f / (float)Viewport.Height : 0.0f;
+
+	// The enabled lights in the order Build_Vertex_Description packed them.  The attenuation and the
+	// spot cone as DX8Wrapper hands them to the Direct3D 11 backend: {a0, a1, a2, range} and
+	// {cos(theta / 2), cos(phi / 2), falloff, 0}.
+	unsigned slot = 0;
+	for (unsigned index = 0; index < LIGHT_COUNT && slot < MAXIMUM_VERTEX_LIGHTS; ++index) {
+		if (!LightsEnabled[index]) {
+			continue;
+		}
+		const D3DLIGHT9 &light = Lights[index];
+		const float position[3] = { light.Position.x, light.Position.y, light.Position.z };
+		const float direction[3] = { light.Direction.x, light.Direction.y, light.Direction.z };
+		float (*fields)[4] = vertex.LightFields[slot];
+		transform_point(position, view, fields[0]);
+		transform_direction(direction, view, fields[1]);
+		colour_value(light.Diffuse, fields[2]);
+		colour_value(light.Specular, fields[3]);
+		fields[4][0] = light.Attenuation0;
+		fields[4][1] = light.Attenuation1;
+		fields[4][2] = light.Attenuation2;
+		fields[4][3] = light.Range;
+		fields[5][0] = cosf(light.Theta * 0.5f);
+		fields[5][1] = cosf(light.Phi * 0.5f);
+		fields[5][2] = light.Falloff;
+		fields[5][3] = 0.0f;
+		colour_value(light.Ambient, fields[6]);
+		++slot;
+	}
+
+	colour_of(RenderStates[D3DRS_TEXTUREFACTOR], pixel.TextureFactor);
+	colour_of(RenderStates[D3DRS_FOGCOLOR], pixel.FogColour);
+	// A whole level, as D3D9 compares it: the program rounds the pixel's alpha to a level first.
+	pixel.AlphaReference[0] = (float)(RenderStates[D3DRS_ALPHAREF] & 0xFF);
+}
+
+//-------------------------------------------------------------------------------------------------
+// The draws (A3c): recorded on the GPU with a window, nothing without one.
+//-------------------------------------------------------------------------------------------------
+
+// The vertices a primitive count reads; for an indexed draw, the indices.
+static unsigned vertices_of(D3DPRIMITIVETYPE type, unsigned count)
+{
+	switch (type) {
+		case D3DPT_POINTLIST:		return count;
+		case D3DPT_LINELIST:		return count * 2;
+		case D3DPT_LINESTRIP:		return count + 1;
+		case D3DPT_TRIANGLELIST:	return count * 3;
+		case D3DPT_TRIANGLESTRIP:	return count + 2;
+		case D3DPT_TRIANGLEFAN:		return count + 2;
+		default:					return 0;
+	}
+}
+
+// A fan as a list: triangle k is (0, k + 1, k + 2) of the fan's vertices, D3D9's winding.
+template <class Index>
+static void expand_fan(const Index *fan, unsigned first, unsigned count, Index *list)
+{
+	for (unsigned k = 0; k < count; ++k) {
+		list[k * 3] = fan != NULL ? fan[0] : (Index)first;
+		list[k * 3 + 1] = fan != NULL ? fan[k + 1] : (Index)(first + k + 1);
+		list[k * 3 + 2] = fan != NULL ? fan[k + 2] : (Index)(first + k + 2);
+	}
+}
+
+static bool is_dynamic(IDirect3DVertexBuffer9 *buffer)
+{
+	D3DVERTEXBUFFER_DESC desc;
+	return buffer->GetDesc(&desc) == D3D_OK && (desc.Usage & D3DUSAGE_DYNAMIC) != 0;
+}
+
+static bool is_dynamic(IDirect3DIndexBuffer9 *buffer)
+{
+	D3DINDEXBUFFER_DESC desc;
+	return buffer->GetDesc(&desc) == D3D_OK && (desc.Usage & D3DUSAGE_DYNAMIC) != 0;
+}
+
+void PosixDevice9::Refuse_Draw(const std::string &reason)
+{
+	unsigned int &count = DrawRefusals[reason];
+	if (count++ == 0) {
+		fprintf(stderr, "PosixDevice9: a draw refused: %s\n", reason.c_str());
+	}
+}
+
+// A development aid until A3d's capture: ZH_GPU_TRACE="1024x1024" prints the state of each draw whose
+// stage-0 texture is that size, once per distinct program pair and texture, with its first vertices.
+void PosixDevice9::Trace_Draw_If_Asked(const DrawCall &call, const std::string &programs,
+	PosixVertexBuffer9 *vertex_buffer, unsigned int stride)
+{
+	static const char *trace = getenv("ZH_GPU_TRACE");
+	if (trace == NULL || Textures[0] == NULL || Textures[0]->GetType() != D3DRTYPE_TEXTURE) {
+		return;
+	}
+	if (strcmp(trace, "alphatest") == 0) {
+		// Every alpha-tested draw: the trees, the foliage, the cut-out models.
+		if (RenderStates[D3DRS_ALPHATESTENABLE] == 0) {
+			return;
+		}
+	}
+	else {
+		unsigned int width = 0, height = 0;
+		if (sscanf(trace, "%ux%u", &width, &height) != 2) {
+			return;
+		}
+		D3DSURFACE_DESC desc;
+		static_cast<IDirect3DTexture9 *>(Textures[0])->GetLevelDesc(0, &desc);
+		if (desc.Width != width || desc.Height != height) {
+			return;
+		}
+	}
+	static std::set<std::string> seen;
+	char texture_name[32];
+	snprintf(texture_name, sizeof(texture_name), "%p", (void *)Textures[0]);
+	if (!seen.insert(programs + " " + texture_name).second || seen.size() > 64) {
+		return;
+	}
+	fprintf(stderr, "TRACE draw: type %u, %u primitives, FVF 0x%x, stride %u, programs %s\n", (unsigned)call.Type,
+		call.PrimitiveCount, (unsigned)FVF, stride, programs.c_str());
+	for (unsigned int stage = 0; stage < 3; ++stage) {
+		const RenderUInt32 *ts = TextureStageStates[stage];
+		unsigned int w = 0, h = 0, format = 0;
+		if (Textures[stage] != NULL && Textures[stage]->GetType() == D3DRTYPE_TEXTURE) {
+			D3DSURFACE_DESC d;
+			static_cast<IDirect3DTexture9 *>(Textures[stage])->GetLevelDesc(0, &d);
+			w = d.Width; h = d.Height; format = d.Format;
+		}
+		fprintf(stderr, "TRACE   stage %u: colour op %u (%x,%x,%x) alpha op %u (%x,%x,%x) tci 0x%x ttff %u; texture %ux%u fmt %u;"
+			" sampler u%u v%u min%u mag%u mip%u\n", stage, (unsigned)ts[D3DTSS_COLOROP], (unsigned)ts[D3DTSS_COLORARG0],
+			(unsigned)ts[D3DTSS_COLORARG1], (unsigned)ts[D3DTSS_COLORARG2], (unsigned)ts[D3DTSS_ALPHAOP],
+			(unsigned)ts[D3DTSS_ALPHAARG0], (unsigned)ts[D3DTSS_ALPHAARG1], (unsigned)ts[D3DTSS_ALPHAARG2],
+			(unsigned)ts[D3DTSS_TEXCOORDINDEX], (unsigned)ts[D3DTSS_TEXTURETRANSFORMFLAGS], w, h, format,
+			(unsigned)SamplerStates[stage][D3DSAMP_ADDRESSU], (unsigned)SamplerStates[stage][D3DSAMP_ADDRESSV],
+			(unsigned)SamplerStates[stage][D3DSAMP_MINFILTER], (unsigned)SamplerStates[stage][D3DSAMP_MAGFILTER],
+			(unsigned)SamplerStates[stage][D3DSAMP_MIPFILTER]);
+	}
+	const RenderUInt32 *rs = RenderStates;
+	fprintf(stderr, "TRACE   lighting %u colorvertex %u sources d%u a%u e%u s%u; blend %u %u/%u op %u; alphatest %u ref %u func %u;"
+		" z %u/%u; cull %u; fog %u; tfactor 0x%08x; ambient 0x%08x; specular %u\n", (unsigned)rs[D3DRS_LIGHTING],
+		(unsigned)rs[D3DRS_COLORVERTEX], (unsigned)rs[D3DRS_DIFFUSEMATERIALSOURCE], (unsigned)rs[D3DRS_AMBIENTMATERIALSOURCE],
+		(unsigned)rs[D3DRS_EMISSIVEMATERIALSOURCE], (unsigned)rs[D3DRS_SPECULARMATERIALSOURCE], (unsigned)rs[D3DRS_ALPHABLENDENABLE],
+		(unsigned)rs[D3DRS_SRCBLEND], (unsigned)rs[D3DRS_DESTBLEND], (unsigned)rs[D3DRS_BLENDOP], (unsigned)rs[D3DRS_ALPHATESTENABLE],
+		(unsigned)rs[D3DRS_ALPHAREF], (unsigned)rs[D3DRS_ALPHAFUNC], (unsigned)rs[D3DRS_ZENABLE], (unsigned)rs[D3DRS_ZWRITEENABLE],
+		(unsigned)rs[D3DRS_CULLMODE], (unsigned)rs[D3DRS_FOGENABLE], (unsigned)rs[D3DRS_TEXTUREFACTOR], (unsigned)rs[D3DRS_AMBIENT],
+		(unsigned)rs[D3DRS_SPECULARENABLE]);
+	fprintf(stderr, "TRACE   material diffuse %.2f %.2f %.2f %.2f ambient %.2f %.2f %.2f emissive %.2f %.2f %.2f; lights on:",
+		Material.Diffuse.r, Material.Diffuse.g, Material.Diffuse.b, Material.Diffuse.a, Material.Ambient.r, Material.Ambient.g,
+		Material.Ambient.b, Material.Emissive.r, Material.Emissive.g, Material.Emissive.b);
+	for (unsigned int i = 0; i < LIGHT_COUNT; ++i) {
+		if (LightsEnabled[i]) fprintf(stderr, " %u(type %u diffuse %.2f %.2f %.2f)", i, (unsigned)Lights[i].Type,
+			Lights[i].Diffuse.r, Lights[i].Diffuse.g, Lights[i].Diffuse.b);
+	}
+	fprintf(stderr, "\n");
+	const uint8_t *bytes = NULL;
+	if (call.UserVertices != NULL) {
+		bytes = (const uint8_t *)call.UserVertices;
+	}
+	else if (vertex_buffer != NULL) {
+		const unsigned int first = call.Indexed ? (unsigned int)call.BaseVertex + call.MinVertex : call.StartVertex;
+		bytes = vertex_buffer->storage().bytes() + StreamOffsets[0] + (size_t)first * stride;
+	}
+	for (unsigned int v = 0; bytes != NULL && v < 3; ++v) {
+		fprintf(stderr, "TRACE   vertex %u:", v);
+		for (unsigned int word = 0; word < stride / 4; ++word) {
+			uint32_t bits;
+			memcpy(&bits, bytes + (size_t)v * stride + word * 4, 4);
+			float value;
+			memcpy(&value, &bits, 4);
+			fprintf(stderr, " %08x(%g)", bits, value);
+		}
+		fprintf(stderr, "\n");
+	}
+}
+
+SDL_GPUTexture *PosixDevice9::Gpu_Texture_Of(IDirect3DSurface9 *surface, std::string &refusal)
+{
+	if (surface == BackBuffer) {
+		return Gpu->Back_Buffer();
+	}
+	// A level of a render-target texture draws into that texture's GPU copy, which its draws then sample.
+	IDirect3DTexture9 *texture = NULL;
+	if (surface->GetContainer(IID_IDirect3DTexture9, (void **)&texture) == D3D_OK && texture != NULL) {
+		IDirect3DSurface9 *level0 = NULL;
+		texture->GetSurfaceLevel(0, &level0);
+		const bool first_level = level0 == surface;
+		if (level0 != NULL) {
+			level0->Release();
+		}
+		SDL_GPUTexture *result = NULL;
+		if (first_level) {
+			result = Mirrors->Texture(texture, refusal);
+		}
+		else {
+			refusal = "a texture level other than the first as a render target";
+		}
+		texture->Release();
+		return result;
+	}
+	return Mirrors->Surface(surface, false, refusal);
+}
+
+bool PosixDevice9::Resolve_Target(SdlTarget &target, std::string &refusal)
+{
+	if (RenderTargets[1] != NULL || RenderTargets[2] != NULL || RenderTargets[3] != NULL) {
+		refusal = "more than one render target";
+		return false;
+	}
+	IDirect3DSurface9 *colour = RenderTargets[0];
+	if (colour == NULL) {
+		refusal = "no render target";
+		return false;
+	}
+	if (colour == BackBuffer) {
+		target = Gpu->Back_Buffer_Target();
+	}
+	else {
+		D3DSURFACE_DESC desc;
+		colour->GetDesc(&desc);
+		target.Colour = Gpu_Texture_Of(colour, refusal);
+		target.Width = desc.Width;
+		target.Height = desc.Height;
+		if (target.Colour == NULL) {
+			return false;
+		}
+		target.Depth = NULL;
+	}
+	// The depth-stencil: the implicit one where it fits, a size-matched scratch one where it does not
+	// (D3D9 lets a smaller target borrow the bigger surface; SDL3 GPU wants one size a pass), and a
+	// created depth surface's own.  With none bound, the draw's depth state is off and any one serves.
+	if (DepthStencil != NULL && DepthStencil != DepthSurface) {
+		D3DSURFACE_DESC desc;
+		DepthStencil->GetDesc(&desc);
+		if (desc.Width == target.Width && desc.Height == target.Height) {
+			target.Depth = Mirrors->Surface(DepthStencil, true, refusal);
+			return target.Depth != NULL;
+		}
+	}
+	target.Depth = Gpu->Depth_For(target.Width, target.Height);
+	if (target.Depth == NULL) {
+		refusal = "no depth-stencil of the target's size";
+		return false;
+	}
+	return true;
+}
+
+bool PosixDevice9::Engine_Program_Of(const void *shader, const char *stage, int &program)
+{
+	const std::string name = Engine_Name_Of(shader);
+	program = EngineShader_From_File(name.c_str());
+	if (program == ENGINE_SHADER_NONE) {
+		Refuse_Draw(std::string("a ") + stage + " shader with no transcription: "
+			+ (name.empty() ? std::string("one never registered") : name));
+		return false;
+	}
+	return true;
+}
+
+RenderResult PosixDevice9::DrawPrimitive(D3DPRIMITIVETYPE type, unsigned int start_vertex, unsigned int primitive_count)
+{
+	DrawCall call;
+	memset(&call, 0, sizeof(call));
+	call.Type = type;
+	call.PrimitiveCount = primitive_count;
+	call.StartVertex = start_vertex;
+	return Gpu_Draw(call);
+}
+
+RenderResult PosixDevice9::DrawIndexedPrimitive(D3DPRIMITIVETYPE type, int base_vertex, unsigned int min_vertex,
+	unsigned int vertex_count, unsigned int start_index, unsigned int primitive_count)
+{
+	DrawCall call;
+	memset(&call, 0, sizeof(call));
+	call.Type = type;
+	call.PrimitiveCount = primitive_count;
+	call.Indexed = true;
+	call.BaseVertex = base_vertex;
+	call.MinVertex = min_vertex;
+	call.VertexCount = vertex_count;
+	call.StartIndex = start_index;
+	return Gpu_Draw(call);
+}
+
+RenderResult PosixDevice9::DrawPrimitiveUP(D3DPRIMITIVETYPE type, unsigned int primitive_count, const void *vertices,
+	unsigned int stride)
+{
+	if (vertices == NULL) {
+		return D3DERR_INVALIDCALL;
+	}
+	DrawCall call;
+	memset(&call, 0, sizeof(call));
+	call.Type = type;
+	call.PrimitiveCount = primitive_count;
+	call.UserVertices = vertices;
+	call.UserStride = stride;
+	const RenderResult result = Gpu_Draw(call);
+	// D3D9: "After calling DrawPrimitiveUP, the stream 0 settings ... are set to NULL."
+	Posix_Bind(Streams[0], (IDirect3DVertexBuffer9 *)NULL);
+	StreamOffsets[0] = 0;
+	StreamStrides[0] = 0;
+	return result;
+}
+
+RenderResult PosixDevice9::Gpu_Draw(const DrawCall &call)
+{
+	// PERF1: the CPU time spent here, added to the frame's when ZH_GPU_TIMING asks.
+	struct DrawTimer
+	{
+		double *Into;
+		Uint64 Start;
+		explicit DrawTimer(double *into) : Into(into), Start(into != NULL ? SDL_GetTicksNS() : 0) {}
+		~DrawTimer() { if (Into != NULL) *Into += (double)(SDL_GetTicksNS() - Start) / 1.0e6; }
+	} timer(Timing_Is_Asked() ? &TimingDrawMs : NULL);
+	// PERF1's hitch hunt: with ZH_GPU_CREATION_LOG, a draw over 20 ms says how long each of its phases took.
+	struct PhaseClock
+	{
+		bool On;
+		double Start, Last;
+		double Took[8];
+		const char *Names[8];
+		int Count;
+		double Parts[3];	// inside the copies: textures, samplers, buffers
+		int Rounds;
+		explicit PhaseClock(bool on) : On(on), Start(on ? Sdl_Now_Ms() : 0.0), Last(Start), Count(0), Rounds(0) { Parts[0] = Parts[1] = Parts[2] = 0.0; }
+		double Now() const { return On ? Sdl_Now_Ms() : 0.0; }
+		void Part(int which, double since) { if (On) Parts[which] += Sdl_Now_Ms() - since; }
+		void Mark(const char *name)
+		{
+			if (!On || Count == 8) return;
+			const double now = Sdl_Now_Ms();
+			Names[Count] = name;
+			Took[Count++] = now - Last;
+			Last = now;
+		}
+		~PhaseClock()
+		{
+			const double now = Sdl_Now_Ms();
+			if (!On || now - Start <= 20.0) return;
+			char line[512];
+			int used = snprintf(line, sizeof(line), "PosixDevice9 create: t %10.1f ms  SLOW DRAW %8.2f ms:", Start, now - Start);
+			for (int i = 0; i < Count && used > 0 && (size_t)used < sizeof(line); ++i) {
+				used += snprintf(line + used, sizeof(line) - used, " %s %.2f", Names[i], Took[i]);
+			}
+			if (used > 0 && (size_t)used < sizeof(line)) {
+				snprintf(line + used, sizeof(line) - used, " rest %.2f (copies: textures %.2f samplers %.2f buffers %.2f rounds %d)",
+					now - Last, Parts[0], Parts[1], Parts[2], Rounds);
+			}
+			Sdl_Creation_Log_Line(line);
+		}
+	} phases(Sdl_Creation_Log_Asked());
+
+	const unsigned int reads = vertices_of(call.Type, call.PrimitiveCount);
+	if (reads == 0 && call.PrimitiveCount != 0) {
+		return D3DERR_INVALIDCALL;
+	}
+	if (Gpu == NULL || call.PrimitiveCount == 0) {
+		return D3D_OK;		// -headless: drawn into a window nobody sees
+	}
+
+	// The engine's own programs (A3e).  The device never runs D3D bytecode: a bound shader is drawn from
+	// D3's transcription of the program it was registered as (Platform/EngineShaderName.h), the other half
+	// from the generators, as the Direct3D 11 backend draws them.  A shader that cannot be named is refused
+	// by its name, never drawn as something close.
+	int vertex_engine = ENGINE_SHADER_NONE;
+	int pixel_engine = ENGINE_SHADER_NONE;
+	if (VertexShader != NULL && !Engine_Program_Of(VertexShader, "vertex", vertex_engine)) {
+		return D3D_OK;
+	}
+	if (PixelShader != NULL && !Engine_Program_Of(PixelShader, "pixel", pixel_engine)) {
+		return D3D_OK;
+	}
+	if (vertex_engine != ENGINE_SHADER_NONE && pixel_engine != ENGINE_SHADER_NONE) {
+		Refuse_Draw("an engine vertex program with an engine pixel program (a pair the game does not make)");
+		return D3D_OK;
+	}
+	// The stream's layout is the FVF's with a transcribed program too: D3's Trees reads the tree buffer's
+	// FVF slots, as the Direct3D 11 backend lays it out, and its D3D8 declaration only made the shader.
+	if (FVF == 0) {
+		Refuse_Draw("a vertex declaration and no FVF");
+		return D3D_OK;
+	}
+	if (RenderStates[D3DRS_CLIPPLANEENABLE] != 0) {
+		Refuse_Draw("user clip planes");
+		return D3D_OK;
+	}
+
+	Mirrors->Collect_Dead();
+	if (Gpu->Batch_Is_Full()) {
+		Gpu->Flush();
+	}
+	phases.Mark("dead+full");
+
+	// Where it draws (A3d): the back buffer, or a render target's GPU texture.
+	std::string target_refusal;
+	SdlTarget target;
+	if (!Resolve_Target(target, target_refusal)) {
+		Refuse_Draw("the render target: " + target_refusal);
+		return D3D_OK;
+	}
+
+	// The programs and the pipeline.
+	std::string refusal;
+	SdlVertexLayout layout;
+	if (!Sdl_Vertex_Layout(FVF, layout, refusal)) {
+		Refuse_Draw("the vertex format: " + refusal);
+		return D3D_OK;
+	}
+	CombinerDescription combiner;
+	VertexPipelineDescription vertex;
+	Build_Combiner_Description(combiner);
+	if (vertex_engine == ENGINE_SHADER_NONE && !Build_Vertex_Description(vertex, &refusal)) {
+		Refuse_Draw(refusal);
+		return D3D_OK;
+	}
+	const SdlProgram &vertex_program = vertex_engine != ENGINE_SHADER_NONE
+		? Programs->Engine_Vertex_Program(vertex_engine) : Programs->Vertex_Program(vertex);
+	const SdlProgram &pixel_program = pixel_engine != ENGINE_SHADER_NONE
+		? Programs->Engine_Pixel_Program(pixel_engine, combiner.PixelPipeline) : Programs->Pixel_Program(combiner);
+	if (vertex_program.Shader == NULL || pixel_program.Shader == NULL) {
+		Refuse_Draw(vertex_program.Shader == NULL ? "a vertex program refused" : "a pixel program refused");
+		return D3D_OK;
+	}
+	if (pixel_program.SamplerSlots > SdlRecordedDraw::MAXIMUM_SAMPLERS || vertex_program.SamplerSlots != 0) {
+		Refuse_Draw("more sampler slots than a draw binds");
+		return D3D_OK;
+	}
+	// Every pass has the frame's depth-stencil, so every pipeline has its format; a draw with no depth
+	// surface bound has D3D9's answer instead, depth and stencil off.
+	const RenderUInt32 *states = RenderStates;
+	RenderUInt32 without_depth[RENDER_STATE_COUNT];
+	if (DepthStencil == NULL) {
+		memcpy(without_depth, RenderStates, sizeof(without_depth));
+		without_depth[D3DRS_ZENABLE] = D3DZB_FALSE;
+		without_depth[D3DRS_ZWRITEENABLE] = 0;
+		without_depth[D3DRS_STENCILENABLE] = 0;
+		states = without_depth;
+	}
+	SdlPipelineKey key;
+	if (!Sdl_Pipeline_Key(states, call.Type, vertex_program.Shader, pixel_program.Shader, FVF,
+		SdlGpuFrame::Target_Format(), Gpu->Depth_Format(), key, refusal)) {
+		Refuse_Draw("the pipeline: " + refusal);
+		return D3D_OK;
+	}
+	phases.Mark("target+programs");
+	SdlRecordedDraw draw;
+	memset(&draw, 0, sizeof(draw));
+	draw.Pipeline = Pipelines->Pipeline(key);
+	phases.Mark("pipeline");
+	if (draw.Pipeline == NULL) {
+		Refuse_Draw("the GPU refused a pipeline");
+		return D3D_OK;
+	}
+
+	// The vertex and index sources.
+	const bool user = call.UserVertices != NULL;
+	const unsigned int stride = user ? call.UserStride : StreamStrides[0];
+	PosixVertexBuffer9 *vertex_buffer = user ? NULL : static_cast<PosixVertexBuffer9 *>(Streams[0]);
+	PosixIndexBuffer9 *index_buffer = call.Indexed ? static_cast<PosixIndexBuffer9 *>(Indices) : NULL;
+	if ((!user && vertex_buffer == NULL) || (call.Indexed && index_buffer == NULL)) {
+		return D3DERR_INVALIDCALL;
+	}
+	if (stride != layout.Stride) {
+		Refuse_Draw("a stream stride that is not the FVF's");
+		return D3D_OK;
+	}
+	const bool fan = call.Type == D3DPT_TRIANGLEFAN;
+	const bool stage_vertices = user || is_dynamic(vertex_buffer);
+	const bool stage_indices = call.Indexed && (fan || is_dynamic(index_buffer));
+	const unsigned int index_size = (call.Indexed && index_buffer->format() == D3DFMT_INDEX32) ? 4 : 2;
+
+	// The GPU copies.  Bringing one up to date can flush the batch, which leaves the ones already asked
+	// for marked as used by the batch before: so ask again until a round flushes nothing.
+	for (int round = 0; round < 3; ++round) {
+		const uint64_t batch = Gpu->Batch();
+		++phases.Rounds;
+		draw.SamplerCount = pixel_program.SamplerSlots;
+		for (unsigned int slot = 0; slot < pixel_program.SamplerSlots; ++slot) {
+			const int texture_stage = pixel_program.SlotTexture[slot];
+			const int sampler_stage = pixel_program.SlotSampler[slot];
+			if (texture_stage < 0 || texture_stage >= SAMPLER_COUNT || sampler_stage < 0 || sampler_stage >= SAMPLER_COUNT) {
+				Refuse_Draw("a program slot past the device's stages");
+				return D3D_OK;
+			}
+			IDirect3DBaseTexture9 *texture = Textures[texture_stage];
+			double since = phases.Now();
+			draw.Textures[slot] = texture != NULL ? Mirrors->Texture(texture, refusal) : Mirrors->White();
+			phases.Part(0, since);
+			if (draw.Textures[slot] != NULL && draw.Textures[slot] == target.Colour) {
+				// Undefined in D3D9, and an error on SDL3 GPU: the pass would read what it writes.
+				Refuse_Draw("sampling the render target it draws into");
+				return D3D_OK;
+			}
+			if (draw.Textures[slot] == NULL) {
+				Refuse_Draw("the texture: " + refusal);
+				return D3D_OK;
+			}
+			since = phases.Now();
+			draw.Samplers[slot] = Samplers->Sampler(SamplerStates[sampler_stage]);
+			phases.Part(1, since);
+			if (draw.Samplers[slot] == NULL) {
+				Refuse_Draw("the sampler: " + Samplers->Refusal());
+				return D3D_OK;
+			}
+		}
+		const double buffers_since = phases.Now();
+		if (!stage_vertices) {
+			draw.VertexBuffer = Mirrors->Buffer(vertex_buffer, vertex_buffer->storage(), refusal);
+		}
+		if (call.Indexed && !stage_indices) {
+			draw.IndexBuffer = Mirrors->Buffer(index_buffer, index_buffer->storage(), refusal);
+		}
+		phases.Part(2, buffers_since);
+		if ((!stage_vertices && draw.VertexBuffer == NULL) || (call.Indexed && !stage_indices && draw.IndexBuffer == NULL)) {
+			Refuse_Draw("the buffer: " + refusal);
+			return D3D_OK;
+		}
+		if (Gpu->Batch() == batch) {
+			break;
+		}
+	}
+
+	phases.Mark("copies");
+	// The vertices: a static buffer's copy is bound where the stream points, and a dynamic buffer's or
+	// the caller's bytes are staged.  An indexed draw reads vertices MinVertex to MinVertex + VertexCount - 1 past
+	// its base, and only those are staged: the stream is then bound MinVertex vertices before them, so each index
+	// still lands on its own vertex.  The engine's dynamic buffer is one buffer filled front to back through a
+	// frame, and copying from the base instead (every vertex before MinVertex too) copied the whole buffer so far
+	// on every draw: in a particle-heavy frame nine bytes in ten were never read, and a Steam Deck's frames went from
+	// 15 to 60 ms and more.  The binding cannot start before the stream does, so a draw whose vertices would land
+	// too near its start still stages from its base, as before.
+	if (stage_vertices) {
+		unsigned int first = 0;
+		unsigned int count = reads;
+		unsigned int skipped = 0;		// vertices before MinVertex, not staged
+		if (!user) {
+			if (call.Indexed && call.BaseVertex < 0) {
+				Refuse_Draw("a negative base vertex into a dynamic buffer");
+				return D3D_OK;
+			}
+			first = call.Indexed ? (unsigned int)call.BaseVertex : call.StartVertex;
+			count = call.Indexed ? call.MinVertex + call.VertexCount : reads;
+			if (call.Indexed) {
+				skipped = call.MinVertex;
+			}
+		}
+#ifndef NDEBUG
+		// Debug builds check what the staging rests on: no index of the draw below MinVertex, none past its range.
+		if (!user && call.Indexed) {
+			const size_t index_start = (size_t)call.StartIndex * index_size;
+			if (index_start + (size_t)reads * index_size <= index_buffer->storage().length()) {
+				const uint8_t *indices = index_buffer->storage().bytes() + index_start;
+				for (unsigned int k = 0; k < reads; ++k) {
+					const unsigned int index = index_size == 4 ? ((const uint32_t *)indices)[k] : ((const uint16_t *)indices)[k];
+					if (index < call.MinVertex || index >= call.MinVertex + call.VertexCount) {
+						fprintf(stderr, "PosixDevice9: a draw reads index %u outside MinVertex %u + VertexCount %u (start index %u, "
+							"%u primitives, base vertex %d, programs %s | %s)\n", index, call.MinVertex, call.VertexCount,
+							call.StartIndex, call.PrimitiveCount, call.BaseVertex, vertex_program.Key.c_str(), pixel_program.Key.c_str());
+						abort();
+					}
+				}
+			}
+		}
+#endif
+		const size_t start = user ? 0 : (size_t)StreamOffsets[0] + (size_t)first * stride;
+		const size_t size = (size_t)count * stride;
+		if (!user && start + size > vertex_buffer->storage().length()) {
+			return D3DERR_INVALIDCALL;
+		}
+		const uint8_t *source = user ? (const uint8_t *)call.UserVertices : vertex_buffer->storage().bytes() + start;
+		const size_t shift = (size_t)skipped * stride;
+		uint32_t staged = 0;
+		if (shift != 0 && Gpu->Stage_Offset_Next() >= shift) {
+			memcpy(Gpu->Stage((uint32_t)(size - shift), staged), source + shift, size - shift);
+			draw.VertexOffset = staged - (uint32_t)shift;
+		}
+		else {
+			memcpy(Gpu->Stage((uint32_t)size, staged), source, size);
+			draw.VertexOffset = staged;
+		}
+		draw.First = 0;
+		draw.BaseVertex = 0;
+	}
+	else {
+		draw.VertexOffset = StreamOffsets[0];
+		draw.First = call.StartVertex;
+		draw.BaseVertex = call.BaseVertex;
+	}
+
+	// The indices.
+	if (call.Indexed) {
+		const size_t start = (size_t)call.StartIndex * index_size;
+		if (start + (size_t)reads * index_size > index_buffer->storage().length()) {
+			return D3DERR_INVALIDCALL;
+		}
+		const uint8_t *source = index_buffer->storage().bytes() + start;
+		draw.IndexSize = index_size;
+		if (fan) {
+			draw.Count = call.PrimitiveCount * 3;
+			uint8_t *list = Gpu->Stage(draw.Count * index_size, draw.IndexOffset);
+			if (index_size == 4) {
+				expand_fan((const uint32_t *)source, 0, call.PrimitiveCount, (uint32_t *)list);
+			}
+			else {
+				expand_fan((const uint16_t *)source, 0, call.PrimitiveCount, (uint16_t *)list);
+			}
+			draw.First = 0;
+		}
+		else if (stage_indices) {
+			draw.Count = reads;
+			memcpy(Gpu->Stage(reads * index_size, draw.IndexOffset), source, (size_t)reads * index_size);
+			draw.First = 0;
+		}
+		else {
+			draw.Count = reads;
+			draw.IndexOffset = 0;
+			draw.First = call.StartIndex;
+		}
+	}
+	else if (fan) {
+		// Staged vertices start at the fan's first; a static buffer's copy is indexed from its start.
+		const unsigned int first = stage_vertices ? 0 : call.StartVertex;
+		draw.Count = call.PrimitiveCount * 3;
+		if (first + reads > 0xFFFF) {
+			draw.IndexSize = 4;
+			expand_fan((const uint32_t *)NULL, first, call.PrimitiveCount, (uint32_t *)Gpu->Stage(draw.Count * 4, draw.IndexOffset));
+		}
+		else {
+			draw.IndexSize = 2;
+			expand_fan((const uint16_t *)NULL, first, call.PrimitiveCount, (uint16_t *)Gpu->Stage(draw.Count * 2, draw.IndexOffset));
+		}
+		draw.First = 0;
+	}
+	else {
+		draw.Count = reads;
+	}
+
+	Trace_Draw_If_Asked(call, vertex_program.Key + " | " + pixel_program.Key,
+		vertex_buffer, stride);
+	if (Capture_Is_Asked()) {
+		// The signature: both programs' keys, and the pipeline key's bytes (the pipeline's states, formats
+		// and target format), so every pipeline the game makes has a draw to replay.  The key's shaders are
+		// left out of the hash: they are the programs already named, and their addresses change run to run.
+		SdlPipelineKey stable = key;
+		stable.VertexShader = NULL;
+		stable.PixelShader = NULL;
+		uint64_t hash = 14695981039346656037ull;
+		const uint8_t *key_bytes = (const uint8_t *)&stable;
+		for (size_t i = 0; i < sizeof(stable); ++i) {
+			hash = (hash ^ key_bytes[i]) * 1099511628211ull;
+		}
+		char pipeline[40];
+		snprintf(pipeline, sizeof(pipeline), " | pipeline %016llx", (unsigned long long)hash);
+		unsigned int sampled = 0;
+		for (unsigned int slot = 0; slot < pixel_program.SamplerSlots; ++slot) {
+			sampled |= 1u << pixel_program.SlotTexture[slot];
+		}
+		Capture_Draw(call, vertex_program.Key + " | " + pixel_program.Key + pipeline, stride, reads, sampled,
+			target.Width, target.Height);
+	}
+
+	phases.Mark("staging");
+	// The constants, pushed only when they change.
+	SdlVertexConstants vertex_constants;
+	SdlPixelConstants pixel_constants;
+	Build_Constants(vertex_constants, pixel_constants);
+	if (vertex_program.UniformBuffers != 0 && vertex_engine != ENGINE_SHADER_NONE) {
+		// A transcribed vertex program reads the engine's own register bank, c0 to c95, as its b0.
+		const uint32_t size = ENGINE_SHADER_CONSTANTS * sizeof(VertexShaderConstants[0]);
+		draw.VertexConstants = Gpu->Constants(0, VertexShaderConstants, size);
+		draw.VertexConstantsSize = size;
+	}
+	else if (vertex_program.UniformBuffers != 0) {
+		draw.VertexConstants = Gpu->Constants(0, &vertex_constants, sizeof(vertex_constants));
+		draw.VertexConstantsSize = sizeof(vertex_constants);
+	}
+	if (pixel_program.UniformBuffers != 0 && pixel_engine != ENGINE_SHADER_NONE) {
+		SdlEnginePixelConstants engine_constants;
+		memset(&engine_constants, 0, sizeof(engine_constants));
+		engine_constants.Combiner = pixel_constants;
+		draw.PixelConstants = Gpu->Constants(1, &engine_constants, sizeof(engine_constants));
+		draw.PixelConstantsSize = sizeof(engine_constants);
+	}
+	else if (pixel_program.UniformBuffers != 0) {
+		draw.PixelConstants = Gpu->Constants(1, &pixel_constants, sizeof(pixel_constants));
+		draw.PixelConstantsSize = sizeof(pixel_constants);
+	}
+
+	// D3D9's pixel centres are at integer coordinates, SDL3 GPU's (Metal's, Vulkan's) at half-integers:
+	// the viewport moves half a pixel right and down, as dx11backend's Set_Viewport does.  The scissor
+	// keeps the draw inside the viewport D3D9 would have clipped it to.
+	draw.Viewport[0] = (float)Viewport.X + 0.5f;
+	draw.Viewport[1] = (float)Viewport.Y + 0.5f;
+	draw.Viewport[2] = (float)Viewport.Width;
+	draw.Viewport[3] = (float)Viewport.Height;
+	draw.Viewport[4] = Viewport.MinZ;
+	draw.Viewport[5] = Viewport.MaxZ;
+	// The scissor is the viewport cut to the target: SDL3 GPU validates it against the attachment, and
+	// D3D9 draws nothing outside the target either.
+	const int32_t right = (int32_t)(Viewport.X + Viewport.Width) < (int32_t)target.Width
+		? (int32_t)(Viewport.X + Viewport.Width) : (int32_t)target.Width;
+	const int32_t bottom = (int32_t)(Viewport.Y + Viewport.Height) < (int32_t)target.Height
+		? (int32_t)(Viewport.Y + Viewport.Height) : (int32_t)target.Height;
+	draw.Scissor[0] = (int32_t)Viewport.X;
+	draw.Scissor[1] = (int32_t)Viewport.Y;
+	draw.Scissor[2] = right > draw.Scissor[0] ? right - draw.Scissor[0] : 0;
+	draw.Scissor[3] = bottom > draw.Scissor[1] ? bottom - draw.Scissor[1] : 0;
+	if (draw.Scissor[2] == 0 || draw.Scissor[3] == 0) {
+		return D3D_OK;		// the viewport is off the target: nothing to draw
+	}
+	phases.Mark("constants");
+	Gpu->Set_Target(target);
+	draw.StencilReference = RenderStates[D3DRS_STENCILREF] & 0xFF;
+	draw.BlendFactor = RenderStates[D3DRS_BLENDFACTOR];
+	Gpu->Record_Draw(draw);
+	++DrawsRecorded;
+	if (vertex_engine != ENGINE_SHADER_NONE || pixel_engine != ENGINE_SHADER_NONE) {
+		++EngineProgramDraws[EngineShader_Name((EngineShaderProgram)(vertex_engine != ENGINE_SHADER_NONE
+			? vertex_engine : pixel_engine))];
+	}
+	return D3D_OK;
+}

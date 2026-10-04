@@ -71,9 +71,20 @@ static const unsigned BLOOM_BLUR_PASSES = 2;
 //
 // An intensity of 1.5 against a quiet frame with nothing burning costs half a level a channel,
 // which is the cost of having this on when there is nothing for it to do.
+//
+// Those two are the defaults.  The game replaces them every frame from its Bloom option.
 static const float BLOOM_THRESHOLD = 1.0f;
 static const float BLOOM_INTENSITY = 1.5f;
 static const float TONE_CURVE_KNEE = 0.8f;
+
+static float BloomThreshold = BLOOM_THRESHOLD;
+static float BloomIntensity = BLOOM_INTENSITY;
+
+void DX11Post_Set_Bloom(float threshold, float intensity)
+{
+	BloomThreshold = (threshold > 0.0f) ? threshold : 0.0f;
+	BloomIntensity = (intensity > 0.0f) ? intensity : 0.0f;
+}
 
 // How dark a fully occluded pixel goes, how far a neighbour may be in front before it counts as a
 // different object rather than a corner, and how wide the ring reaches at one unit of depth.  The
@@ -782,8 +793,8 @@ void DX11PostProcessClass::Draw_Pass(const PassSetup & pass)
 	block.BlurDirection[1] = pass.BlurY;
 	block.BlurDirection[2] = 0.0f;
 	block.BlurDirection[3] = 0.0f;
-	block.Tuning[0] = BLOOM_THRESHOLD;
-	block.Tuning[1] = BLOOM_INTENSITY;
+	block.Tuning[0] = BloomThreshold;
+	block.Tuning[1] = BloomIntensity;
 	block.Tuning[2] = TONE_CURVE_KNEE;
 	block.Tuning[3] = 0.0f;
 	if (pass.Occlusion) {
@@ -898,7 +909,25 @@ bool DX11PostProcessClass::Finish(const DX11PostEffect * effects, unsigned count
 		// Bloom is the only effect that reads the half float scene, and the frame is eight bits by
 		// the time it hands over. If it is also the last thing in the chain it writes the screen.
 		const bool alone = (count == 1);
-		source = Run_Bloom(alone ? back_buffer : ChainTargets[0].View);
+		ID3D11RenderTargetView * bloom_destination = alone ? back_buffer : ChainTargets[0].View;
+		if (BloomIntensity > 0.0f) {
+			source = Run_Bloom(bloom_destination);
+		} else {
+			// Bloom switched off in the options: no glow, but the scene is still half floats and
+			// still has to come down to eight bits, the same way Copy_Through brings it down.  The
+			// chain keeps its shape so turning it back on costs no rebuild of the targets.
+			PassSetup tone;
+			memset(&tone, 0, sizeof(tone));
+			tone.Shader = ToneMapShader;
+			tone.Source = SceneTarget.Resource;
+			tone.Destination = bloom_destination;
+			tone.DestinationWidth = Width;
+			tone.DestinationHeight = Height;
+			tone.SourceWidth = Width;
+			tone.SourceHeight = Height;
+			Draw_Pass(tone);
+			source = ChainTargets[0].Resource;
+		}
 		if (alone) {
 			Resolved = true;
 			return true;

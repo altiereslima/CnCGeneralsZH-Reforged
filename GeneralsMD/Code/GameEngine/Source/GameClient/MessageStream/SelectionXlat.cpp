@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -428,9 +430,12 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			}
 
 			// with attack move or guard armed a left drag draws the order line over in CommandXlat, so
-			// no selection box grows under it
-			const Bool leftDrawsLine = TheInGameUI->isLineOrderArmed() && TheInGameUI->getSelectCount() > 0;
-			if (m_leftMouseButtonIsDown && !leftDrawsLine)
+			// no selection box grows under it.  Search and destroy has no line to draw, and its drag
+			// is no box either: the key stays armed for the click that aims it
+			const Bool leftDragIsOrder = (TheInGameUI->isLineOrderArmed()
+																		|| TheInGameUI->getAreaOrderArmed() != InGameUI::AREA_ORDER_NONE)
+																	 && TheInGameUI->getSelectCount() > 0;
+			if (m_leftMouseButtonIsDown && !leftDragIsOrder)
 			{
 				ICoord2D delta;
 
@@ -1330,61 +1335,54 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 		case GameMessage::MSG_META_ADD_TEAM8:
 		case GameMessage::MSG_META_ADD_TEAM9:
 		{
+			// Shift and a number puts the selection into that squad and keeps what the squad already
+			// held.  Retail used the key the other way round, to add the squad to the selection.  The
+			// logic only fills a squad from scratch, so the squad goes out again whole as a create: its
+			// members as the logic will hold them when this lands, then the selection after them.
 			Int group = t - GameMessage::MSG_META_ADD_TEAM0;
 			if ( isValidHotkeySquadIndex( group ) )
 			{
-				DEBUG_LOG(("META: select team %d\n",group));
-
-				UnsignedInt now = TheGameLogic->getFrame();
-				if ( m_lastGroupSelTime == 0 )
+				std::vector<ObjectID> members;
+				if ( isSquadPending( group ) )
 				{
-					m_lastGroupSelTime = now;
-				}
-
-				// check for double-press to jump view
-
-				if ( now - m_lastGroupSelTime < 20 && group == m_lastGroupSelGroup )
-				{
-					DEBUG_LOG(("META: DOUBLETAP select team %d\n",group));
-					Player *player = ThePlayerList->getLocalPlayer();
-					if (player)
-					{
-						Squad *selectedSquad = player->getHotkeySquad(group);
-						if (selectedSquad != NULL)
-						{
-							VecObjectPtr objlist = selectedSquad->getLiveObjects();
-							Int numObjs = objlist.size();
-							if (numObjs > 0)
-							{
-								// if theres someone in the group, center the camera on them.
-								TheTacticalView->lookAt( objlist[numObjs-1]->getDrawable()->getPosition() );
-							}
-						}
-					}
-
+					members = m_pendingSquad[ group ];
 				}
 				else
 				{
+					// every member, not just the selectable ones: a unit riding in a transport stays in the squad
+					const VecObjectPtr &objlist = ThePlayerList->getLocalPlayer()->getHotkeySquad( group )->getAllObjects();
+					for ( size_t i = 0; i < objlist.size(); ++i )
+						members.push_back( objlist[ i ]->getID() );
+				}
 
-					Drawable *draw = TheInGameUI->getFirstSelectedDrawable();
-					if( draw && draw->isKindOf( KINDOF_STRUCTURE ) )
-					{
-						//Kris: Jan 12, 2005
-						//Can't select other units if you have a structure selected. So deselect the structure to prevent
-						//group force attack exploit.
-						TheInGameUI->deselectAllDrawables();
-					}
+				std::vector<ObjectID> squad;
+				for ( size_t i = 0; i < members.size(); ++i )
+				{
+					if ( !isTakenByLaterSquad( members[ i ], group ) )
+						squad.push_back( members[ i ] );
+				}
 
-					// no need to send two messages for selecting the same group.
-					TheMessageStream->appendMessage((GameMessage::Type)(GameMessage::MSG_ADD_TEAM0 + group));
-					Player *player = ThePlayerList->getLocalPlayer();
-					if (player)
+				Bool added = FALSE;
+				for ( Drawable *drawable = TheGameClient->getDrawableList(); drawable != NULL; drawable = drawable->getNextDrawable() )
+				{
+					Object *obj = drawable->getObject();
+					if ( drawable->isSelected() && obj && obj->isLocallyControlled()
+							&& std::find( squad.begin(), squad.end(), obj->getID() ) == squad.end() )
 					{
-						selectHotkeySquad( player, group, FALSE );
+						squad.push_back( obj->getID() );
+						added = TRUE;
 					}
 				}
-				m_lastGroupSelTime = now;
-				m_lastGroupSelGroup = group;
+
+				if ( added )
+				{
+					DEBUG_LOG(("META: add selection to team %d\n",group));
+					GameMessage *newmsg = TheMessageStream->appendMessage((GameMessage::Type)(GameMessage::MSG_CREATE_TEAM0 + group));
+					for ( size_t i = 0; i < squad.size(); ++i )
+						newmsg->appendObjectIDArgument( squad[ i ] );
+					m_pendingSquad[ group ] = squad;
+					m_pendingSquadLands[ group ] = TheNetwork ? (UnsignedInt)TheNetwork->getExecutionFrame() + 1 : 0;
+				}
 			}
 			disp = DESTROY_MESSAGE;
 			break;
@@ -1443,7 +1441,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			if ( !TheGameLogic->isInMultiplayerGame() )
 			{
 				m_HandOfGodSelectionMode = !m_HandOfGodSelectionMode;
-				TheInGameUI->message( UnicodeString( L"Meta Hand-Of-God Mode is %s" ), m_HandOfGodSelectionMode ? L"ON" : L"OFF" );
+				TheInGameUI->message( UnicodeString( u"Meta Hand-Of-God Mode is %s" ), m_HandOfGodSelectionMode ? u"ON" : u"OFF" );
 				disp = DESTROY_MESSAGE;
 			}
 			break;
@@ -1457,7 +1455,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			if ( !TheGameLogic->isInMultiplayerGame() )
 			{
 				m_HandOfGodSelectionMode = !m_HandOfGodSelectionMode;
-				TheInGameUI->message( UnicodeString( L"Hand-Of-God Mode is %s" ), m_HandOfGodSelectionMode ? L"ON" : L"OFF" );
+				TheInGameUI->message( UnicodeString( u"Hand-Of-God Mode is %s" ), m_HandOfGodSelectionMode ? u"ON" : u"OFF" );
 				disp = DESTROY_MESSAGE;
 			}
 			break;
@@ -1471,7 +1469,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			if ( !TheGameLogic->isInMultiplayerGame() )
 			{
 				TheHurtSelectionMode = !TheHurtSelectionMode;
-				TheInGameUI->message( UnicodeString( L"Hurt-Me Mode is %s" ), TheHurtSelectionMode ? L"ON" : L"OFF" );
+				TheInGameUI->message( UnicodeString( u"Hurt-Me Mode is %s" ), TheHurtSelectionMode ? u"ON" : u"OFF" );
 				disp = DESTROY_MESSAGE;
 			}
 			break;
@@ -1483,7 +1481,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 		case GameMessage::MSG_META_DEMO_DEBUG_SELECTION:
 		{
 			TheDebugSelectionMode = !TheDebugSelectionMode;
-			TheInGameUI->message( UnicodeString( L"Debug-Selected-Item Mode is %s" ), TheDebugSelectionMode ? L"ON" : L"OFF" );
+			TheInGameUI->message( UnicodeString( u"Debug-Selected-Item Mode is %s" ), TheDebugSelectionMode ? u"ON" : u"OFF" );
 		#ifdef DEBUG_OBJECT_ID_EXISTS
 			TheObjectIDToDebug = INVALID_ID;
 		#endif
@@ -1532,15 +1530,32 @@ Bool SelectionTranslator::isSquadPending( Int group ) const
 }
 
 //-----------------------------------------------------------------------------
+/** A team key on the way takes this unit into another squad after this squad's own key lands, and
+	* the logic removes a unit from every squad but its new one. */
+//-----------------------------------------------------------------------------
+Bool SelectionTranslator::isTakenByLaterSquad( ObjectID id, Int group ) const
+{
+	const UnsignedInt groupLands = isSquadPending( group ) ? m_pendingSquadLands[ group ] : 0;
+	for( Int other = 0; other < NUM_HOTKEY_SQUADS; ++other )
+	{
+		if( other == group || !isSquadPending( other ) || m_pendingSquadLands[ other ] <= groupLands )
+			continue;
+		const std::vector<ObjectID> &sent = m_pendingSquad[ other ];
+		if( std::find( sent.begin(), sent.end(), id ) != sent.end() )
+			return TRUE;
+	}
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
 /** Select on screen what the logic will hold in this squad by the time a select sent now lands:
 	* the members a team key sent for it if they are still on the way, and never a unit that a key
-	* on the way takes into another squad, which the logic removes from every squad but its new one. */
+	* on the way takes into another squad. */
 //-----------------------------------------------------------------------------
 void SelectionTranslator::selectHotkeySquad( Player *player, Int group, Bool ownOnly )
 {
 	VecObjectPtr objlist;
-	const UnsignedInt groupLands = isSquadPending( group ) ? m_pendingSquadLands[ group ] : 0;
-	if( groupLands != 0 )
+	if( isSquadPending( group ) )
 	{
 		for( size_t i = 0; i < m_pendingSquad[ group ].size(); ++i )
 		{
@@ -1563,16 +1578,7 @@ void SelectionTranslator::selectHotkeySquad( Player *player, Int group, Bool own
 		if( ownOnly && obj->getControllingPlayer() != player )
 			continue;
 
-		Bool movedAway = FALSE;
-		for( Int other = 0; other < NUM_HOTKEY_SQUADS && !movedAway; ++other )
-		{
-			// only a key that lands after this squad's own can still take a member out of it
-			if( other == group || !isSquadPending( other ) || m_pendingSquadLands[ other ] <= groupLands )
-				continue;
-			const std::vector<ObjectID> &sent = m_pendingSquad[ other ];
-			movedAway = std::find( sent.begin(), sent.end(), obj->getID() ) != sent.end();
-		}
-		if( !movedAway )
+		if( !isTakenByLaterSquad( obj->getID(), group ) )
 			TheInGameUI->selectDrawable( obj->getDrawable() );
 	}
 }

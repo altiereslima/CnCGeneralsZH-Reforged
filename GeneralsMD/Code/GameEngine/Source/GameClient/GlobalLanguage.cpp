@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -51,11 +53,17 @@
 // USER INCLUDES //////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 #include "PreRTS.h"
+#include "Platform/IsWindows9x.h"
 
 #include "Common/INI.h"
 #include "Common/Registry.h"
 #include "GameClient/GlobalLanguage.h"
-#include "Common/Filesystem.h"
+#if !defined(_WIN32)
+#include "glyphrasteriser.h"
+#include "posixpath.h"
+#include <string>
+#endif
+#include "Common/FileSystem.h"
 
 //-----------------------------------------------------------------------------
 // DEFINES ////////////////////////////////////////////////////////////////////
@@ -107,6 +115,33 @@ void INI::parseLanguageDefinition( INI *ini )
 	ini->initFromINI( TheGlobalLanguageData, TheGlobalLanguageDataFieldParseTable );
 }
 
+/* The font files a language ships next to the game (Language.ini's LocalFontFile entries, kept in
+	 m_localFonts).  On Windows they are installed for this process with AddFontResource and removed on
+	 shutdown, and GDI draws every glyph from them.  Elsewhere FreeType draws them (D6): the file is
+	 registered with the glyph rasteriser, which finds it by its family name before its substitution
+	 table, as GDI finds an installed font before its font mapper does.  The name is the engine's spelling,
+	 relative to the working directory as AddFontResource took it, and is resolved to the file on disk. */
+static Bool installLocalFont( const AsciiString &font )
+{
+#if defined(_WIN32)
+	return AddFontResource(font.str()) != 0;
+#else
+	std::string path;
+	return PosixPath_Resolve( font.str(), POSIX_PATH_EXISTING, path ) && GlyphRasteriserClass::Register_Font_File( path.c_str() );
+#endif
+}
+
+static void removeLocalFont( const AsciiString &font )
+{
+#if defined(_WIN32)
+	RemoveFontResource(font.str());
+#else
+	std::string path;
+	if (PosixPath_Resolve( font.str(), POSIX_PATH_EXISTING, path ))
+		GlyphRasteriserClass::Unregister_Font_File( path.c_str() );
+#endif
+}
+
 GlobalLanguage::GlobalLanguage()
 {
 	m_unicodeFontName.clear();
@@ -127,7 +162,7 @@ GlobalLanguage::~GlobalLanguage()
 	while( it != m_localFonts.end())
 	{
 		AsciiString font = *it;
-		RemoveFontResource(font.str());
+		removeLocalFont(font);
 		//SendMessage( HWND_BROADCAST, WM_FONTCHANGE, 0, 0);
 		++it;
 	}
@@ -140,14 +175,11 @@ void GlobalLanguage::init( void )
 	AsciiString fname;
 	fname.format("Data\\%s\\Language.ini", GetRegistryLanguage().str());
 
-	OSVERSIONINFO	osvi;
-	osvi.dwOSVersionInfoSize=sizeof(OSVERSIONINFO);
-
 	//GS NOTE: Must call doesFileExist in either case so that NameKeyGenerator will stay in sync
 	AsciiString tempName;
 	tempName.format("Data\\%s\\Language9x.ini", GetRegistryLanguage().str());
 	bool isExist = TheFileSystem->doesFileExist(tempName.str());
-	if (GetVersionEx(&osvi)  &&  osvi.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS  && isExist)
+	if (isWindows9x()  && isExist)
 	{	//check if we're running Win9x variant since they may need different fonts
 		fname = tempName;
 	}
@@ -165,7 +197,7 @@ void GlobalLanguage::init( void )
 	while( it != m_localFonts.end())
 	{
 		AsciiString font = *it;
-		if(AddFontResource(font.str()) == 0)
+		if(!installLocalFont(font))
 		{
 			DEBUG_ASSERTCRASH(FALSE,("GlobalLanguage::init Failed to add font %s", font.str()));
 		}

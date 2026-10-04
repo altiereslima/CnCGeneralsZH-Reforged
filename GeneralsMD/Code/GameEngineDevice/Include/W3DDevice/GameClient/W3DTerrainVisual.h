@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -99,6 +100,7 @@ public:
 	virtual void addWaterVelocity( Real worldX, Real worldY, 
 																 Real velocity, Real preferredHeight );
 	virtual Bool getWaterGridHeight( Real worldX, Real worldY, Real *height);
+	virtual void updateWaterGrid( UnsignedInt logicFrame );
 
 	virtual void setTerrainTracksDetail(void);
 	virtual void setShoreLineDetail(void);

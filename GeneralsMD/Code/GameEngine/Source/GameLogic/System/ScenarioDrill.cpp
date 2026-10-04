@@ -26,6 +26,7 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
 #include "Common/BuildAssistant.h"
+#include "Common/DrawnPath.h"
 #include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "Common/GlobalData.h"
@@ -49,8 +50,12 @@
 #include "GameLogic/TerrainLogic.h"
 #include "GameClient/ControlBar.h"	// COMMAND_FIRED_BY_SCRIPT, the flag every script-fired power carries
 #include "GameClient/ParticleSys.h"
+#include "GameLogic/PartitionManager.h"
+#include "GameLogic/Module/BodyModule.h"
+#include "GameLogic/Weapon.h"
 
 #include <algorithm>
+#include <map>
 #include <vector>
 
 // ------------------------------------------------------------------------------------------------
@@ -83,10 +88,15 @@ static const Int SCENARIO_TOKENS_SPAWN = 6;
 static const Int SCENARIO_TOKENS_ARRIVE = 5;
 static const Int SCENARIO_TOKENS_SHIFTPOWER = 7;
 static const Int SCENARIO_TOKENS_SHIFTUPGRADE = 5;
+static const Int SCENARIO_TOKENS_STANCE = 5;
 
 // where the name sits in the lines that carry one
 static const Int SCENARIO_SHIFTPOWER_NAME_TOKEN = 6;
 static const Int SCENARIO_SHIFTUPGRADE_NAME_TOKEN = 4;
+static const Int SCENARIO_STANCE_NAME_TOKEN = 4;
+
+/// a hunt's circle when the line does not say, the key's own before the wheel
+static const Real SCENARIO_DEFAULT_SWEEP_RADIUS = 300.0f;
 
 // where the position starts in each line that has one
 static const Int SCENARIO_SPAWN_POSITION_TOKEN = 5;
@@ -205,6 +215,10 @@ static Bool parseActionType( const AsciiString &token, ScenarioActionType *actio
 		*action = SCENARIO_ACTION_SHIFTUPGRADE;
 	else if (token == "construct")
 		*action = SCENARIO_ACTION_CONSTRUCT;
+	else if (token == "stance")
+		*action = SCENARIO_ACTION_STANCE;
+	else if (token == "hunt")
+		*action = SCENARIO_ACTION_HUNT;
 	else
 		return FALSE;
 
@@ -287,6 +301,8 @@ static Int tokensNeededFor( ScenarioActionType action )
 		case SCENARIO_ACTION_SHIFTATTACKMOVE:	return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_SHIFTGUARD:	return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_CONSTRUCT:		return SCENARIO_TOKENS_MOVE;
+		case SCENARIO_ACTION_HUNT:				return SCENARIO_TOKENS_MOVE;
+		case SCENARIO_ACTION_STANCE:			return SCENARIO_TOKENS_STANCE;
 		case SCENARIO_ACTION_SHIFTATTACK:	return SCENARIO_TOKENS_ATTACK;
 		case SCENARIO_ACTION_SHIFTPOWER:	return SCENARIO_TOKENS_SHIFTPOWER;
 		case SCENARIO_ACTION_SHIFTUPGRADE:	return SCENARIO_TOKENS_SHIFTUPGRADE;
@@ -367,13 +383,18 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 		case SCENARIO_ACTION_SHIFTATTACKMOVE:
 		case SCENARIO_ACTION_SHIFTGUARD:
 		case SCENARIO_ACTION_CONSTRUCT:
+		case SCENARIO_ACTION_HUNT:
 		{
 			Int next = SCENARIO_ORDER_POSITION_TOKEN;
 			const ScenarioParseResult position = parseScenarioPosition( tokens, count, &next, action );
 			if (position != SCENARIO_PARSE_OK)
 				return position;
+			if (actionType == SCENARIO_ACTION_HUNT)
+				action->radius = (count > next) ? (Real)atof( tokens[ next ].str() ) : SCENARIO_DEFAULT_SWEEP_RADIUS;
 			if (actionType == SCENARIO_ACTION_ARRIVE && count > next)
 				action->radius = (Real)atof( tokens[ next ].str() );
+			if (actionType == SCENARIO_ACTION_SHIFTGUARD)
+				action->radius = (count > next) ? (Real)atof( tokens[ next ].str() ) : 0.0f;	// the wheeled radius, none by default
 			if (actionType == SCENARIO_ACTION_POWER && count > next)
 				action->targetSelector = tokens[ next ];	// fire only the power of this name
 			break;
@@ -395,6 +416,12 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 
 		case SCENARIO_ACTION_SHIFTUPGRADE:
 			action->name = tokens[ SCENARIO_SHIFTUPGRADE_NAME_TOKEN ];
+			break;
+
+		case SCENARIO_ACTION_STANCE:
+			action->name = tokens[ SCENARIO_STANCE_NAME_TOKEN ];
+			if (action->name != "aggressive" && action->name != "defensive")
+				return SCENARIO_PARSE_BAD_ACTION;
 			break;
 
 		case SCENARIO_ACTION_PRODUCE:
@@ -872,8 +899,121 @@ static void updateArrivals( UnsignedInt now )
 	}
 }
 
+/** Statues: a unit with an enemy it could shoot inside its own reach that has neither moved nor fired
+	  for STATUE_FRAMES.  Counted once per stop, by what the unit was doing when it reached the mark,
+	  and per second for as long as it keeps standing there.  Read-only, and only with a scenario. */
+struct StatueTrack
+{
+	Coord3D lastSeenAt;
+	UnsignedInt lastShot;
+	Int stillFor;
+	Bool counted;
+	Bool seen;
+};
+static const Int STATUE_FRAMES = 3 * LOGICFRAMES_PER_SECOND;
+static const Int STATUE_DETAIL_LINES = 40;
+static std::map<ObjectID, StatueTrack> theStatueTracks;
+static Int theStatueStops = 0;
+static Int theStatueInfantryStops = 0;
+static Int theStatueSeconds = 0;
+static Int theStatueWaiting = 0;
+static Int theStatueBlocked = 0;
+static Int theStatueNoVictim = 0;
+static Int theStatueVictimInRange = 0;
+static Int theStatueVictimOutOfRange = 0;
+static Int theStatueByState[ NUM_AI_STATES ];
+
+static void updateStatues( UnsignedInt now )
+{
+	for( Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
+	{
+		if (!(obj->isKindOf( KINDOF_INFANTRY ) || obj->isKindOf( KINDOF_VEHICLE )) || obj->isKindOf( KINDOF_AIRCRAFT ))
+			continue;
+		if (obj->isEffectivelyDead() || obj->getContainedBy() != NULL || obj->isDisabled())
+			continue;
+		AIUpdateInterface *ai = obj->getAIUpdateInterface();
+		const Weapon *weapon = obj->getCurrentWeapon();
+		if (ai == NULL || weapon == NULL)
+			continue;
+
+		StatueTrack &track = theStatueTracks[ obj->getID() ];
+		const Coord3D *pos = obj->getPosition();
+		const Real sx = pos->x - track.lastSeenAt.x;
+		const Real sy = pos->y - track.lastSeenAt.y;
+		const Bool moved = sx * sx + sy * sy >= SCENARIO_STILL_DISTANCE * SCENARIO_STILL_DISTANCE;
+		const Bool fired = obj->getLastShotFiredFrame() != track.lastShot;
+		track.lastSeenAt = *pos;
+		track.lastShot = obj->getLastShotFiredFrame();
+		if (!track.seen || moved || fired)
+		{
+			track.seen = TRUE;
+			track.stillFor = 0;
+			track.counted = FALSE;
+			continue;
+		}
+		++track.stillFor;
+		if (track.stillFor < STATUE_FRAMES || (track.stillFor % LOGICFRAMES_PER_SECOND) != 0)
+			continue;
+
+		PartitionFilterRelationship enemies( obj, PartitionFilterRelationship::ALLOW_ENEMIES );
+		PartitionFilterAlive alive;
+		PartitionFilterPossibleToAttack attackable( ATTACK_NEW_TARGET, obj, CMD_FROM_AI );
+		PartitionFilter *filters[] = { &enemies, &alive, &attackable, NULL };
+		Real enemyDist = 0.0f;
+		Object *enemy = ThePartitionManager->getClosestObject( obj, weapon->getAttackRange( obj ), FROM_BOUNDINGSPHERE_2D, filters, &enemyDist );
+		if (enemy == NULL)
+			continue;
+
+		++theStatueSeconds;
+		if (track.counted)
+			continue;
+		track.counted = TRUE;
+
+		++theStatueStops;
+		if (obj->isKindOf( KINDOF_INFANTRY ))
+			++theStatueInfantryStops;
+		const StateID state = ai->getCurrentStateID();
+		if (state >= 0 && state < NUM_AI_STATES)
+			++theStatueByState[ state ];
+		Object *victim = ai->getCurrentVictim();
+		if (ai->isWaitingForPath())
+			++theStatueWaiting;
+		else if (ai->getNumFramesBlocked() > 0 || ai->isBlockedAndStuck())
+			++theStatueBlocked;
+		else if (victim == NULL)
+			++theStatueNoVictim;
+		else if (weapon->isWithinAttackRange( obj, victim ))
+			++theStatueVictimInRange;
+		else
+			++theStatueVictimOutOfRange;
+
+		if (theStatueStops <= STATUE_DETAIL_LINES)
+		{
+			DEBUG_LOG(("STATUE: frame %d id %d '%s' state %d idle %d waiting %d blocked %d victim %d '%s' at %.0f health %.0f, enemy %d '%s' at %.0f, range %.0f, weapon '%s' status %d\n",
+								 now, obj->getID(), obj->getTemplate()->getName().str(), (Int)state, ai->isIdle(),
+								 ai->isWaitingForPath(), ai->getNumFramesBlocked(),
+								 victim ? victim->getID() : 0, victim ? victim->getTemplate()->getName().str() : "",
+								 victim ? sqrt( ThePartitionManager->getDistanceSquared( obj, victim, FROM_BOUNDINGSPHERE_2D ) ) : 0.0f,
+								 victim ? victim->getBodyModule()->getHealth() : 0.0f,
+								 enemy->getID(), enemy->getTemplate()->getName().str(), enemyDist,
+								 weapon->getAttackRange( obj ), weapon->getName().str(), (Int)weapon->getStatus()));
+		}
+	}
+}
+
+static void logStatues( void )
+{
+	DEBUG_LOG(("HEADLESS STATUE: %d stops of %.0f s or more with an enemy in reach and no shot (%d infantry), %d unit-seconds - %d waiting for a path, %d blocked, %d no target, %d target in range, %d target out of range\n",
+						 theStatueStops, (Real)STATUE_FRAMES / (Real)LOGICFRAMES_PER_SECOND, theStatueInfantryStops, theStatueSeconds,
+						 theStatueWaiting, theStatueBlocked, theStatueNoVictim, theStatueVictimInRange, theStatueVictimOutOfRange));
+	for( Int s = 0; s < NUM_AI_STATES; ++s )
+		if (theStatueByState[ s ] > 0)
+			DEBUG_LOG(("HEADLESS STATUE STATE: state %d, %d stops\n", s, theStatueByState[ s ]));
+}
+
 void ScenarioDrill_logArrivals( void )
 {
+	logStatues();
 	for( std::vector<ScenarioArrival>::const_iterator it = theScenarioArrivals.begin();
 			 it != theScenarioArrivals.end(); ++it )
 	{
@@ -1103,7 +1243,11 @@ static Bool executeShiftOrder( const ScenarioAction &action, Player *player, con
 		if (type == GameMessage::MSG_DO_ATTACKMOVETO)
 			msg->appendBooleanArgument( FALSE );
 		if (type == GameMessage::MSG_DO_GUARD_POSITION)
+		{
 			msg->appendIntegerArgument( GUARDMODE_GUARD_WITHOUT_PURSUIT );
+			if (action.radius > 0.0f)
+				msg->appendRealArgument( action.radius );
+		}
 	}
 
 	player->getOrderQueue()->setNextOrderMode( ORDER_QUEUE_APPEND );
@@ -1117,11 +1261,23 @@ static Bool executeShiftOrder( const ScenarioAction &action, Player *player, con
 
 /** Shift on an object upgrade button, once for every unit that matches: the two messages the command
 	  bar sends, handed to the dispatcher the way they arrive.  An upgrade names the unit that buys it, so
-	  unlike the other shift verbs this one needs nothing selected. */
-static Bool executeShiftUpgrade( const ScenarioAction &action, Player *player, AIGroup *group, Int taken )
+	  unlike the other shift verbs this one needs nothing selected - and the buyer can be a building,
+	  which takes no orders: a barracks researching Capture Building is a shift-click on its button too. */
+static Bool executeShiftUpgrade( const ScenarioAction &action, Player *player )
 {
-	const std::vector<ObjectID> buyers = group->getAllIDs();
-	TheAI->destroyGroup( group );
+	std::vector<ObjectID> buyers;
+	for( Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
+	{
+		if (obj->getControllingPlayer() == player && !obj->isEffectivelyDead() && selectorMatches( action.selector, obj ))
+			buyers.push_back( obj->getID() );
+	}
+	const Int taken = (Int)buyers.size();
+	if (taken == 0)
+	{
+		DEBUG_LOG(("SCENARIO: frame %d: slot %d owns nothing matching '%s'\n",
+							 action.frame, action.slot, action.selector.str()));
+		return FALSE;
+	}
 
 	const UpgradeTemplate *upgrade = TheUpgradeCenter->findUpgrade( action.name );
 	if (upgrade == NULL)
@@ -1151,8 +1307,77 @@ static Bool executeShiftUpgrade( const ScenarioAction &action, Player *player, A
 	return TRUE;
 }
 
+/** The stance key: MSG_SET_STANCE handed to the dispatcher with the matching units as the selection,
+	  which is how it arrives from a player.  The dispatcher destroys the group. */
+static Bool executeStance( const ScenarioAction &action, Player *player, AIGroup *group, Int taken )
+{
+	GameMessage *msg = newInstance( GameMessage )( GameMessage::MSG_SET_STANCE );
+	msg->friend_setPlayerIndex( player->getPlayerIndex() );
+	msg->appendIntegerArgument( action.name == "aggressive" ? 1 : 0 );
+	TheGameLogic->logicMessageDispatcher( msg, group );
+	msg->deleteInstance();
+
+	DEBUG_LOG(("SCENARIO: frame %d stance slot %d '%s' x%d %s\n",
+						 action.frame, action.slot, action.selector.str(), taken, action.name.str()));
+	return TRUE;
+}
+
+/** The search and destroy key: the ring sweepRoute gives this seat round the point, from where the
+	  units stand, each point handed to the order queue the way the key's messages arrive - the first
+	  fresh, the rest behind it - and then a guard of the whole circle.  Each message gets a group of
+	  its own, because the queue destroys the one it takes. */
+static Bool executeSweep( const ScenarioAction &action, Player *player, const Coord3D &center, AIGroup *group, Int taken )
+{
+	Coord3D from;
+	from.zero();
+	const VecObjectID ids = group->getAllIDs();
+	for( VecObjectID::const_iterator it = ids.begin(); it != ids.end(); ++it )
+	{
+		const Object *obj = TheGameLogic->findObjectByID( *it );
+		from.x += obj->getPosition()->x;
+		from.y += obj->getPosition()->y;
+	}
+	from.x /= taken;
+	from.y /= taken;
+	TheAI->destroyGroup( group );
+
+	std::vector<Coord3D> route;
+	sweepRoute( player->getPlayerIndex(), center, action.radius, from, route );
+	route.push_back( center );
+
+	for( size_t i = 0; i < route.size(); i++ )
+	{
+		const Bool last = i + 1 == route.size();
+		const GameMessage::Type type = last ? GameMessage::MSG_DO_GUARD_POSITION : GameMessage::MSG_DO_ATTACKMOVETO;
+		GameMessage *msg = newInstance( GameMessage )( type );
+		msg->friend_setPlayerIndex( player->getPlayerIndex() );
+		msg->appendLocationArgument( route[ i ] );
+		if( type == GameMessage::MSG_DO_GUARD_POSITION )
+		{
+			msg->appendIntegerArgument( GUARDMODE_NORMAL );
+			msg->appendRealArgument( action.radius );
+		}
+
+		AIGroup *members = TheAI->createGroup();
+		gatherIntoGroup( player, action.selector, members );
+		player->getOrderQueue()->setNextOrderMode( i == 0 ? ORDER_QUEUE_FRESH : ORDER_QUEUE_APPEND );
+		player->getOrderQueue()->takeMessage( msg, members, player );
+		msg->deleteInstance();
+
+		DEBUG_LOG(("SCENARIO: frame %d hunt slot %d '%s' step %d of %d at (%.0f,%.0f)\n", action.frame,
+							 action.slot, action.selector.str(), (Int)i + 1, (Int)route.size(), route[ i ].x, route[ i ].y));
+	}
+
+	DEBUG_LOG(("SCENARIO: frame %d hunt slot %d '%s' x%d round (%.0f,%.0f) radius %.0f\n", action.frame,
+						 action.slot, action.selector.str(), taken, center.x, center.y, action.radius));
+	return TRUE;
+}
+
 static Bool executeOrder( const ScenarioAction &action, Player *player, const Coord3D &dest )
 {
+	if (action.action == SCENARIO_ACTION_SHIFTUPGRADE)
+		return executeShiftUpgrade( action, player );
+
 	AIGroup *group = TheAI->createGroup();
 	const Int taken = gatherIntoGroup( player, action.selector, group );
 	if (taken == 0)
@@ -1229,8 +1454,11 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 		case SCENARIO_ACTION_SHIFTPOWER:
 			return executeShiftOrder( action, player, dest, group, taken );		// the group is gone either way
 
-		case SCENARIO_ACTION_SHIFTUPGRADE:
-			return executeShiftUpgrade( action, player, group, taken );
+		case SCENARIO_ACTION_STANCE:
+			return executeStance( action, player, group, taken );		// the dispatcher destroys the group
+
+		case SCENARIO_ACTION_HUNT:
+			return executeSweep( action, player, dest, group, taken );		// and so does this
 
 		case SCENARIO_ACTION_STOP:
 		{
@@ -1341,6 +1569,8 @@ void ScenarioDrill_tick( void )
 
 	if (!theScenarioLoaded)
 		loadScenario();
+
+	updateStatues( now );
 
 	while (theScenarioCursor < (Int)theScenarioActions.size()
 				 && theScenarioActions[ theScenarioCursor ].frame <= now)

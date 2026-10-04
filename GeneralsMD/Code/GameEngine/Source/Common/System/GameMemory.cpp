@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -43,8 +45,20 @@
 // ----------------------------------------------------------------------------
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
 
-// SYSTEM INCLUDES 
+// SYSTEM INCLUDES
+#ifndef _MSC_VER
+#include <new>			// std::nothrow_t, for the nothrow forms of the global operators below
+#endif
+#ifndef _WIN32
+#include <stdlib.h>
+#if defined(__APPLE__)
+#include <malloc/malloc.h>		// malloc_size
+#elif defined(__linux__)
+#include <malloc.h>						// malloc_usable_size
+#endif
+#endif
 
 // USER INCLUDES 
 #include "Common/GameMemory.h"
@@ -215,7 +229,6 @@ static void memset32(void* ptr, Int value, Int bytesToFill);
 static void doStackDumpOutput(const char* m);
 static void doStackDump(void **stacktrace, int size);
 #endif
-static void preMainInitMemoryManager();
 
 // ----------------------------------------------------------------------------
 // PRIVATE FUNCTIONS 
@@ -229,7 +242,41 @@ static Int roundUpMemBound(Int i)
 }
 
 //-----------------------------------------------------------------------------
-/** 
+/* The operating system's allocator, which sysAllocateDoNotZero and sysFree below are built on.
+	 Windows: GlobalAlloc(GMEM_FIXED), GlobalSize and GlobalFree, as this file always called them.
+	 Elsewhere: malloc and free, and the block's usable size from the C library.
+
+	 One difference, Debug builds only: GlobalSize reports what was asked for, and the usable size can
+	 be more.  sysMemorySize is only used under MEMORYPOOL_DEBUG - the filler value and the
+	 system-allocation totals - so off Windows those totals can read higher than Windows' for the same
+	 allocations, and the filler covers the slack as well.  Release is unaffected.
+
+	 Alignment: nothing here needs more than 4 bytes (MEM_BOUND_ALIGNMENT; memset32; the Debug check
+	 in allocateBytesDoNotZeroImplementation), and where blocks sit inside a blob is fixed by
+	 MEM_BOUND_ALIGNMENT and the block header, not by this allocator.  GlobalAlloc promises 8-byte
+	 alignment; malloc gives 16 on Darwin and on glibc for x86-64 and arm64. */
+#ifdef _WIN32
+static void *sysMemoryAllocate(Int numBytes) { return ::GlobalAlloc(GMEM_FIXED, numBytes); }
+static void sysMemoryRelease(void *p) { ::GlobalFree(p); }
+#ifdef MEMORYPOOL_DEBUG
+static size_t sysMemorySize(void *p) { return ::GlobalSize(p); }
+#endif
+#else
+static void *sysMemoryAllocate(Int numBytes) { return ::malloc(numBytes); }
+static void sysMemoryRelease(void *p) { ::free(p); }
+#ifdef MEMORYPOOL_DEBUG
+#if defined(__APPLE__)
+static size_t sysMemorySize(void *p) { return ::malloc_size(p); }
+#elif defined(__linux__)
+static size_t sysMemorySize(void *p) { return ::malloc_usable_size(p); }
+#else
+#error "GameMemory: find a malloc'd block's usable size on this platform"
+#endif
+#endif
+#endif
+
+//-----------------------------------------------------------------------------
+/**
 	this is the low-level allocator that we use to request memory from the OS.
 	all (repeat, all) memory allocations in this module should ultimately
 	go thru this routine (or sysAllocate).
@@ -238,7 +285,7 @@ static Int roundUpMemBound(Int i)
 */
 static void* sysAllocateDoNotZero(Int numBytes)
 {
-	void* p = ::GlobalAlloc(GMEM_FIXED, numBytes);
+	void* p = sysMemoryAllocate(numBytes);
 	if (!p)
 		throw ERROR_OUT_OF_MEMORY;
 #ifdef MEMORYPOOL_DEBUG
@@ -247,10 +294,10 @@ static void* sysAllocateDoNotZero(Int numBytes)
 		#ifdef USE_FILLER_VALUE
 		{
 			USE_PERF_TIMER(MemoryPoolInitFilling)
-			::memset32(p, s_initFillerValue, ::GlobalSize(p));
+			::memset32(p, s_initFillerValue, sysMemorySize(p));
 		}
 		#endif
-		theTotalSystemAllocationInBytes += ::GlobalSize(p);
+		theTotalSystemAllocationInBytes += sysMemorySize(p);
 		if (thePeakSystemAllocationInBytes < theTotalSystemAllocationInBytes)
 			thePeakSystemAllocationInBytes = theTotalSystemAllocationInBytes;
 	}
@@ -270,11 +317,11 @@ static void sysFree(void* p)
 #ifdef MEMORYPOOL_DEBUG
 		{
 			USE_PERF_TIMER(MemoryPoolDebugging)
-			::memset32(p, GARBAGE_FILL_VALUE, ::GlobalSize(p));
-			theTotalSystemAllocationInBytes -= ::GlobalSize(p);
+			::memset32(p, GARBAGE_FILL_VALUE, sysMemorySize(p));
+			theTotalSystemAllocationInBytes -= sysMemorySize(p);
 		}
 #endif
-		::GlobalFree(p);
+		sysMemoryRelease(p);
 	}
 }
 
@@ -1560,7 +1607,7 @@ MemoryPoolBlob* MemoryPool::createBlob(Int allocationCount)
 {
 	DEBUG_ASSERTCRASH(allocationCount > 0 && allocationCount%MEM_BOUND_ALIGNMENT==0, ("bad allocationCount (must be >0 and evenly divisible by %d)",MEM_BOUND_ALIGNMENT));
 
-	MemoryPoolBlob* blob = new (::sysAllocateDoNotZero(sizeof MemoryPoolBlob)) MemoryPoolBlob;	// will throw on failure
+	MemoryPoolBlob* blob = new (::sysAllocateDoNotZero(sizeof(MemoryPoolBlob))) MemoryPoolBlob;	// will throw on failure
 
 	blob->initBlob(this, allocationCount);	// will throw on failure
 
@@ -2266,7 +2313,7 @@ void *DynamicMemoryAllocator::allocateBytesDoNotZeroImplementation(Int numBytes 
 
 #if defined(_DEBUG) || defined(_INTERNAL)
   // check alignment
-  if (unsigned(result)&3)
+  if ((uintptr_t)result&3)
     throw ERROR_OUT_OF_MEMORY;
 #endif
 
@@ -2682,7 +2729,7 @@ MemoryPool *MemoryPoolFactory::createMemoryPool(const char *poolName, Int alloca
 		throw ERROR_OUT_OF_MEMORY;
 	}
 
-	pool = new (::sysAllocateDoNotZero(sizeof MemoryPool)) MemoryPool;	// will throw on failure
+	pool = new (::sysAllocateDoNotZero(sizeof(MemoryPool))) MemoryPool;	// will throw on failure
 	pool->init(this, poolName, allocationSize, initialAllocationCount, overflowAllocationCount);	// will throw on failure
 
 	pool->addToList(&m_firstPoolInFactory);
@@ -2737,7 +2784,7 @@ DynamicMemoryAllocator *MemoryPoolFactory::createDynamicMemoryAllocator(Int numS
 {
 	DynamicMemoryAllocator *dma;
 
-	dma = new (::sysAllocateDoNotZero(sizeof DynamicMemoryAllocator)) DynamicMemoryAllocator;	// will throw on failure
+	dma = new (::sysAllocateDoNotZero(sizeof(DynamicMemoryAllocator))) DynamicMemoryAllocator;	// will throw on failure
 	dma->init(this, numSubPools, pParms);	// will throw on failure
 
 	dma->addToList(&m_firstDmaInFactory);
@@ -2996,7 +3043,7 @@ void MemoryPoolFactory::memoryPoolUsageReport( const char* filename, FILE *appen
 		char tmp[256];
 		strlcpy(tmp, filename, ARRAY_SIZE(tmp));
 		strlcat(tmp, ".csv", ARRAY_SIZE(tmp));
-		perfStatsFile = fopen(tmp, "w");
+		perfStatsFile = zh_fopen(tmp, "w");
 	}
 	else
 	{
@@ -3173,7 +3220,7 @@ void MemoryPoolFactory::debugMemoryReport(Int flags, Int startCheckpoint, Int en
 		DEBUG_LOG(("------------------------------------------\n"));
 		DEBUG_LOG(("Begin Pool Underflow Report\n"));
 		DEBUG_LOG(("------------------------------------------\n"));
-		for (pool = m_firstPoolInFactory; pool; pool = pool->getNextPoolInList())
+		for (MemoryPool *pool = m_firstPoolInFactory; pool; pool = pool->getNextPoolInList())
 		{
 			Int peak = pool->getPeakBlockCount()*pool->getAllocationSize();
 			Int initial = pool->getInitialBlockCount()*pool->getAllocationSize();
@@ -3267,7 +3314,14 @@ void MemoryPoolFactory::debugMemoryReport(Int flags, Int startCheckpoint, Int en
 	#pragma comment(linker, "/force:multiple")
 #endif
 
+#ifdef ZH_SANITIZER_BUILD
+// Atomic in a sanitizer build: every new and delete counts here, from every thread, and TSan reports the
+// plain int's increments as the races they are (harmless for a counter only initMemoryManager reads).
+#include <atomic>
+static std::atomic<int> theLinkTester(0);
+#else
 static int theLinkTester = 0;
+#endif
 
 //-----------------------------------------------------------------------------
 void* STLSpecialAlloc::allocate(size_t __n) 
@@ -3287,6 +3341,20 @@ void STLSpecialAlloc::deallocate(void* __p, size_t)
 	TheDynamicMemoryAllocator->freeBytes(__p); 
 }
 
+//-----------------------------------------------------------------------------
+/**
+	ZH_SANITIZER_BUILD (CMake's ZH_SANITIZE, sanitizer builds only): the global operators below take
+	their blocks from calloc and give them back to free, which the sanitizer's runtime intercepts, instead
+	of from TheDynamicMemoryAllocator.  The ones below keep a whole game consistent with itself, but not
+	with a system framework loaded beside a sanitizer: on macOS Apple's Metal driver got a block from this
+	operator new and freed it through ASan's operator delete.  A block from calloc is one any of the
+	runtime's frees accepts.  calloc, not malloc, because this operator new zeroes (allocateBytes), and the
+	engine reads members nothing else set: with the sanitizer's own unzeroed new the game crashed loading
+	its .big files.  The pools stay (MemoryPoolObject classes have operators of their own), and so do the
+	strings, which allocate from TheDynamicMemoryAllocator by name.  Without the define, as in every
+	normal build, this file is what it was.
+*/
+#ifndef ZH_SANITIZER_BUILD
 //-----------------------------------------------------------------------------
 /**
 	overload for global operator new; send requests to TheDynamicMemoryAllocator.
@@ -3315,7 +3383,7 @@ void *operator new[](size_t size)
 /**
 	overload for global operator delete; send requests to TheDynamicMemoryAllocator.
 */
-void operator delete(void *p)
+void operator delete(void *p) WW_NOEXCEPT_DELETE
 {
 	++theLinkTester;
 	preMainInitMemoryManager();
@@ -3327,13 +3395,61 @@ void operator delete(void *p)
 /**
 	overload for global operator delete[]; send requests to TheDynamicMemoryAllocator.
 */
-void operator delete[](void *p)
+void operator delete[](void *p) WW_NOEXCEPT_DELETE
 {
 	++theLinkTester;
 	preMainInitMemoryManager();
 	DEBUG_ASSERTCRASH(TheDynamicMemoryAllocator != NULL, ("must init memory manager before calling global operator delete"));
 	TheDynamicMemoryAllocator->freeBytes(p);
 }
+
+//-----------------------------------------------------------------------------
+/**
+	The sized forms (C++14) and the nothrow forms, forwarded to the four above.  The standard library's
+	own versions of these already forward there - its nothrow new calls operator new inside a try and
+	answers NULL for a throw - so a normal build allocates and frees exactly as before.  A sanitizer's
+	runtime supplies all of these itself, though, and without ours they would be the ones found: a
+	sized delete then frees a block TheDynamicMemoryAllocator made with the sanitizer's allocator (TSan
+	stopped before main on it), and a nothrow new hands out a block our delete cannot free
+	(PosixResources9's new (std::nothrow)).  WW_NOEXCEPT_DELETE on the nothrow news too, for the same
+	reason it is on the deletes.
+	Not under MSVC, which keeps the CRT's own forms and compiles exactly what it did before.  No
+	sanitizer runtime is in play there, and one of ours would not be equivalent: the build is /EHa, so
+	the nothrow news' catch (...) would also catch a structured exception (an access violation inside
+	allocateBytes) and answer NULL, where the CRT's, compiled /EHsc, lets it reach the crash handler.
+	MSVC's STL reaches the nothrow new too (stable_sort's temporary buffer), found on a second review.
+*/
+#ifndef _MSC_VER
+void operator delete(void *p, size_t) WW_NOEXCEPT_DELETE
+{
+	operator delete(p);
+}
+
+void operator delete[](void *p, size_t) WW_NOEXCEPT_DELETE
+{
+	operator delete[](p);
+}
+
+void *operator new(size_t size, const std::nothrow_t &) WW_NOEXCEPT_DELETE
+{
+	try { return operator new(size); } catch (...) { return NULL; }
+}
+
+void *operator new[](size_t size, const std::nothrow_t &) WW_NOEXCEPT_DELETE
+{
+	try { return operator new[](size); } catch (...) { return NULL; }
+}
+
+void operator delete(void *p, const std::nothrow_t &) WW_NOEXCEPT_DELETE
+{
+	operator delete(p);
+}
+
+void operator delete[](void *p, const std::nothrow_t &) WW_NOEXCEPT_DELETE
+{
+	operator delete[](p);
+}
+#endif
 
 //-----------------------------------------------------------------------------
 /**
@@ -3390,6 +3506,37 @@ void operator delete[](void * p, const char *, int)
 	DEBUG_ASSERTCRASH(TheDynamicMemoryAllocator != NULL, ("must init memory manager before calling global operator delete"));
 	TheDynamicMemoryAllocator->freeBytes(p);
 }
+#else
+// A sanitizer build: every form from calloc, zeroed as allocateBytes zeroes, and back to free.  They count
+// in theLinkTester as the forms above do, so initMemoryManager's link test holds unchanged.
+static void *sanitizerAllocate(size_t size)
+{
+	++theLinkTester;
+	void *p = calloc(1, size != 0 ? size : 1);
+	if (p == NULL)
+		throw ERROR_OUT_OF_MEMORY;
+	return p;
+}
+static void sanitizerFree(void *p)
+{
+	++theLinkTester;
+	free(p);
+}
+void *operator new(size_t size) { return sanitizerAllocate(size); }
+void *operator new[](size_t size) { return sanitizerAllocate(size); }
+void operator delete(void *p) WW_NOEXCEPT_DELETE { sanitizerFree(p); }
+void operator delete[](void *p) WW_NOEXCEPT_DELETE { sanitizerFree(p); }
+void operator delete(void *p, size_t) WW_NOEXCEPT_DELETE { sanitizerFree(p); }
+void operator delete[](void *p, size_t) WW_NOEXCEPT_DELETE { sanitizerFree(p); }
+void *operator new(size_t size, const std::nothrow_t &) WW_NOEXCEPT_DELETE { return calloc(1, size != 0 ? size : 1); }
+void *operator new[](size_t size, const std::nothrow_t &) WW_NOEXCEPT_DELETE { return calloc(1, size != 0 ? size : 1); }
+void operator delete(void *p, const std::nothrow_t &) WW_NOEXCEPT_DELETE { free(p); }
+void operator delete[](void *p, const std::nothrow_t &) WW_NOEXCEPT_DELETE { free(p); }
+void* operator new(size_t size, const char *, int) { return sanitizerAllocate(size); }
+void operator delete(void * p, const char *, int) { sanitizerFree(p); }
+void* operator new[](size_t size, const char *, int) { return sanitizerAllocate(size); }
+void operator delete[](void * p, const char *, int) { sanitizerFree(p); }
+#endif // ZH_SANITIZER_BUILD
 
 //-----------------------------------------------------------------------------
 #ifdef MEMORYPOOL_OVERRIDE_MALLOC
@@ -3444,7 +3591,7 @@ void initMemoryManager()
 		Int numSubPools;
 		const PoolInitRec *pParms;
 		userMemoryManagerGetDmaParms(&numSubPools, &pParms);
-		TheMemoryPoolFactory = new (::sysAllocateDoNotZero(sizeof MemoryPoolFactory)) MemoryPoolFactory;	// will throw on failure
+		TheMemoryPoolFactory = new (::sysAllocateDoNotZero(sizeof(MemoryPoolFactory))) MemoryPoolFactory;	// will throw on failure
 		TheMemoryPoolFactory->init();	// will throw on failure
 		TheDynamicMemoryAllocator = TheMemoryPoolFactory->createDynamicMemoryAllocator(numSubPools, pParms);	// will throw on failure
 		userMemoryManagerInitPools();
@@ -3466,17 +3613,20 @@ void initMemoryManager()
 	
 	theLinkTester = 0; 
 
-	linktest = new char;
-	delete linktest;
+	// The operators are called by name, not through new-expressions.  Since C++14 a compiler may
+	// leave out a new-expression's allocation together with its matching delete, and clang at -O3
+	// leaves out all six: theLinkTester stayed 0 and this exited, silently in a release build.  An
+	// explicit call to ::operator new is an ordinary function call, which no compiler may drop.
+	linktest = (char*)::operator new(sizeof(char));
+	::operator delete(linktest);
 
-	linktest = new char[8];
-	delete [] linktest;
+	linktest = (char*)::operator new[](8);
+	::operator delete[](linktest);
 
-	// Was new char("",1): VC6 read the parentheses as an initializer with a comma
-	// operator, i.e. a third plain scalar new, which is what theLinkTester == 6
-	// counts.  Modern C++ reads it as a two-argument initializer and rejects it.
-	linktest = new char(1);
-	delete linktest;
+	// The third plain scalar pair.  It was new char("",1), which VC6 read as a comma operator
+	// inside an initializer, i.e. one more scalar new - what theLinkTester == 6 counts.
+	linktest = (char*)::operator new(sizeof(char));
+	::operator delete(linktest);
 
 #ifdef MEMORYPOOL_OVERRIDE_MALLOC
 	linktest = (char*)malloc(1);
@@ -3510,9 +3660,10 @@ Bool isMemoryManagerOfficiallyInited()
 /**
 	Initialize the memory manager, and create TheMemoryPoolFactory and TheDynamicMemoryAllocator.
 	This is only called if memory is allocated prior to the normal call to initMemoryManager
-	(generally via a static C++ ctor).
+	(generally via a static C++ ctor): by the global operators new and delete, and by AsciiString and
+	UnicodeString when TheDynamicMemoryAllocator is not there yet.
 */
-static void preMainInitMemoryManager()
+void preMainInitMemoryManager()
 {
 	if (TheMemoryPoolFactory == NULL)
 	{
@@ -3522,7 +3673,7 @@ static void preMainInitMemoryManager()
 		Int numSubPools;
 		const PoolInitRec *pParms;
 		userMemoryManagerGetDmaParms(&numSubPools, &pParms);
-		TheMemoryPoolFactory = new (::sysAllocateDoNotZero(sizeof MemoryPoolFactory)) MemoryPoolFactory;	// will throw on failure
+		TheMemoryPoolFactory = new (::sysAllocateDoNotZero(sizeof(MemoryPoolFactory))) MemoryPoolFactory;	// will throw on failure
 		TheMemoryPoolFactory->init();	// will throw on failure
 
 		TheDynamicMemoryAllocator = TheMemoryPoolFactory->createDynamicMemoryAllocator(numSubPools, pParms);	// will throw on failure

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -49,6 +50,12 @@ public:
 	virtual Bool getFileInfo(const AsciiString& filename, FileInfo *fileInfo) const;
 
 	virtual Bool createDirectory(AsciiString directory);
+
+	virtual Bool copyFile(const Char *from, const Char *to, Bool failIfExists);
+	virtual Bool deleteFile(const Char *path);
+	virtual Bool moveFileReplacing(const Char *from, const Char *to);
+	virtual void getFilesInDirectory(const AsciiString& directory, const AsciiString& searchName, std::vector<AsciiString> &names) const;
+	virtual AsciiString getCurrentDirectory() const;
 
 protected:
 };

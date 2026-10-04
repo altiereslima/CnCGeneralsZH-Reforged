@@ -15,12 +15,18 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 #include "ffprobe.h"
+#if !defined(_WIN32)
+#include "zhio.h"
+#endif
+#include "bittype.h"		// uint32
 
 #include <map>
 #include <stdio.h>
 #include <vector>
+#include "Platform/RenderTypes.h"
 
 // A stage is read until one turns its colour operation off, which is where the fixed-function
 // pipeline stops looking as well.  Eight is the device maximum the wrapper allows for.
@@ -55,7 +61,7 @@ static const size_t PIXEL_RENDER_STATE_COUNT = sizeof(PIXEL_RENDER_STATES)/sizeo
 // A combination is the render states, then one block of stage states per live stage, then a flag
 // for whether a vertex shader was doing the transform.  Compared and ordered as a plain sequence,
 // which is all a std::map needs of it.
-typedef std::vector<DWORD> Combination;
+typedef std::vector<uint32> Combination;
 
 static bool _Enabled = false;
 static bool _CombinerShadersEnabled = false;
@@ -105,7 +111,7 @@ void FixedFunctionProbe_Record(IDirect3DDevice9 * device)
 	combination.clear();
 
 	for (size_t index = 0; index < PIXEL_RENDER_STATE_COUNT; ++index) {
-		DWORD value = 0;
+		RenderUInt32 value = 0;
 		device->GetRenderState(PIXEL_RENDER_STATES[index], &value);
 		combination.push_back(value);
 	}
@@ -140,13 +146,13 @@ void FixedFunctionProbe_Record(IDirect3DDevice9 * device)
 	combination.push_back(0);
 
 	for (unsigned stage = 0; stage < MAXIMUM_STAGES; ++stage) {
-		DWORD colour_operation = D3DTOP_DISABLE;
+		RenderUInt32 colour_operation = D3DTOP_DISABLE;
 		device->GetTextureStageState(stage, D3DTSS_COLOROP, &colour_operation);
 		if (colour_operation == D3DTOP_DISABLE) {
 			break;
 		}
 		for (size_t index = 0; index < STAGE_STATE_COUNT; ++index) {
-			DWORD value = 0;
+			RenderUInt32 value = 0;
 			device->GetTextureStageState(stage, STAGE_STATES[index], &value);
 			combination.push_back(value);
 		}
@@ -208,7 +214,13 @@ void FixedFunctionProbe_Dump(const char * path)
 		return;
 	}
 
+#if defined(_WIN32)
 	FILE * file = fopen(path, "wt");
+#else
+	// Through zh_fopen, so a read-only install root (P1) refuses this relative dump rather than taking
+	// it: the probe is always on, and off Windows the working directory is the player's install
+	FILE * file = zh_fopen(path, "wt");
+#endif
 	if (file == NULL) {
 		return;
 	}

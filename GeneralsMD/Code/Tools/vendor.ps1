@@ -81,6 +81,29 @@ function Install-Lzhl {
   Step "LZH-Light 1.0 -> Libraries\Source\Compression\LZHCompress"
 }
 
+# --- The fork's one change to LZH-Light, Libraries\Source\lzhl-clear-history.patch: LZBuffer's history
+# starts cleared (vendor.sh says why).  Windows compiles LZH-Light too, so it gets the same patch, and a
+# copy fetched before the patch existed gets it on the next build.
+function Install-LzhlPatch {
+  $destination = Join-Path $libraries 'Source\Compression\LZHCompress\CompLibHeader'
+  $header = Join-Path $destination '_lz.h'
+  if (Select-String -LiteralPath $header -Pattern 'Zero Hour Reforged: altered' -SimpleMatch -Quiet) { return }
+  # The patch with the header's own line endings: the fetched header is LF, and a checkout made before
+  # .gitattributes pinned the patch to LF holds a CRLF copy of it (core.autocrlf), which matches no line.
+  $text = [IO.File]::ReadAllText((Join-Path $libraries 'Source\lzhl-clear-history.patch')) -replace "`r`n", "`n"
+  if ([IO.File]::ReadAllText($header).Contains("`r`n")) { $text = $text -replace "`n", "`r`n" }
+  $patch = Join-Path $work 'lzhl-clear-history.patch'
+  [IO.File]::WriteAllText($patch, $text)
+  # without the ceiling git finds this checkout around the folder and skips the patch as outside it
+  $env:GIT_CEILING_DIRECTORIES = Join-Path $libraries 'Source'
+  try { git -C $destination -c core.autocrlf=false apply $patch }
+  finally { Remove-Item Env:GIT_CEILING_DIRECTORIES }
+  if (-not (Select-String -LiteralPath $header -Pattern 'Zero Hour Reforged: altered' -SimpleMatch -Quiet)) {
+    throw "lzhl-clear-history.patch did not apply to Libraries\Source\Compression\LZHCompress"
+  }
+  Step "lzhl-clear-history.patch -> Libraries\Source\Compression\LZHCompress"
+}
+
 # --- DirectX 8 headers and import libraries. extra\ is not wholesale-copyable: basetsd.h, d3d.h,
 # ddraw.h and dsound.h there shadow the modern Windows SDK and break winnt.h. Three files from it
 # are needed, because ww3d2\pointgr.cpp includes D3DXMath.h.
@@ -262,10 +285,24 @@ function Install-Art {
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 Install-Zlib
 Install-Lzhl
+Install-LzhlPatch
 Install-DirectX
 Install-GameSpy
 Install-Litehtml
 Install-LitehtmlPatch
 Install-Nanosvg
+# SDL3 and miniaudio are the platform layer for everything that is not Windows (decision 3 in
+# PORTING.md). Windows keeps Win32Device and Miles, so they are not fetched here;
+# vendor.sh fetches them, and says it skips DirectX the same way. The same holds for SDL3's Metal patch,
+# Libraries\Source\sdl3-metal-windowless.patch: vendor.sh applies it, and there is nothing here to apply.
+Step 'skipping SDL3 and miniaudio: not Windows, and vendor.sh is what fetches them'
+# glslang, SPIRV-Cross and SDL_shadercross compile the shader generators' SDL3 GPU target (decision 4).
+# Windows compiles the D3D11 target with d3dcompiler_47.dll, so they are not fetched here.
+Step 'skipping glslang, SPIRV-Cross and SDL_shadercross: the SDL3 GPU shader path, vendor.sh fetches them'
+# FreeType rasterises text off Windows (decision 6); Windows draws it with GDI, so it is not fetched here.
+Step 'skipping FreeType: text off Windows, vendor.sh fetches it'
+# FFmpeg's source is built only off Windows (V1); Windows links the committed dist/ that
+# Tools/ffmpeg-build.sh made, so the tarball is not fetched here.
+Step 'skipping the FFmpeg source: the POSIX movie decoder, vendor.sh fetches it'
 Install-Art
 Step 'everything the build needs is in place'

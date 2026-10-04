@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,12 +30,17 @@
 
 // USER INCLUDES //////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
 
 #include "Common/XferCRC.h"
 #include "Common/XferDeepCRC.h"
-#include "Common/CRC.h"
+#include "Common/crc.h"
 #include "Common/Snapshot.h"
+#if defined(_WIN32)
 #include "winsock2.h" // for htonl
+#else
+#include <arpa/inet.h> // htonl, which winsock2.h supplies on Windows
+#endif
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
@@ -232,7 +238,7 @@ void XferDeepCRC::open( AsciiString identifier )
 	Xfer::open( identifier );
 
 	// open the file
-	m_fileFP = fopen( identifier.str(), "w+b" );
+	m_fileFP = zh_fopen( identifier.str(), "w+b" );
 	if( m_fileFP == NULL )
 	{
 		

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -28,6 +30,9 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
+
+#include "Lib/WideCharFns.h"
 
 #include "Common/AudioAffect.h"
 #include "Common/AudioHandleSpecialValues.h"
@@ -517,7 +522,7 @@ void ScriptActions::doCreateReinforcements(const AsciiString& team, const AsciiS
 
 	destination = *way->getLocation();
 	if (!theTeamProto) {
-		DEBUG_LOG(("***WARNING - Team %s not found.\n", team));
+		DEBUG_LOG(("***WARNING - Team %s not found.\n", team.str()));
 		return;
 	}
 	const TeamTemplateInfo *pInfo = theTeamProto->getTemplateInfo();
@@ -1789,7 +1794,7 @@ void ScriptActions::doTeamMoveToSkirmishApproachPath(const AsciiString& teamName
 		 timed apart so the next person does not have to guess which one it is. */
 #ifdef DEBUG_LOGGING
 	Int64 tStart, tWaypoint, tEnd, tFreq;
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tStart );
+	tStart = Clock_Ticks();
 #endif
 	Waypoint *way = TheTerrainLogic->getClosestWaypointOnPath( &pos, pathLabel );
 	if (!way) {
@@ -1797,12 +1802,12 @@ void ScriptActions::doTeamMoveToSkirmishApproachPath(const AsciiString& teamName
 	}
 	DEBUG_ASSERTLOG(TheTerrainLogic->isPurposeOfPath(way, pathLabel), ("***Wrong waypoint purpose. Make jba fix this.\n"));
 #ifdef DEBUG_LOGGING
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tWaypoint );
+	tWaypoint = Clock_Ticks();
 #endif
 	theGroup->groupMoveToPosition(way->getLocation(), false, CMD_FROM_SCRIPT);
 #ifdef DEBUG_LOGGING
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tEnd );
-	QueryPerformanceFrequency( (LARGE_INTEGER *)&tFreq );
+	tEnd = Clock_Ticks();
+	tFreq = Clock_Ticks_Per_Second();
 	if( tFreq > 0 )
 	{
 		const Real wayMS = (Real)((double)(tWaypoint - tStart) * 1000.0 / (double)tFreq);
@@ -2604,7 +2609,12 @@ void ScriptActions::doDisplayCinematicText(const AsciiString& displayText, const
 	char buf[256];
 	char *c;
 	strcpy(buf, fontType.str());
-	for( c = buf; c != '\0'; *c++ )
+	/* KNOWN DEFECT, kept on purpose (port defect 8, found in the shipping game): this
+		 compared the pointer with '\0', which MSVC read as a null pointer constant, so the test is
+		 `c != NULL` and always true.  The loop ends only on a ' ' or '-'; without one it reads past
+		 the string, and it advances c twice a pass.  Spelled as MSVC compiled it, so every platform
+		 behaves as Windows does; the rewrite needs its own test. */
+	for( c = buf; c != NULL; *c++ )
 	{
 		if( *c != ' ' && *c++ != '-' ) 
 			fontName.concat(c);
@@ -3093,7 +3103,7 @@ void ScriptActions::doRevealMapEntire(const AsciiString& playerName)
 	Player* player = TheScriptEngine->getPlayerFromAsciiString(playerName);
 	if (player && playerName.isNotEmpty())
 	{
-		DEBUG_LOG(("ScriptActions::doRevealMapEntire() for player named '%ls' in position %d\n", player->getPlayerDisplayName().str(), player->getPlayerIndex()));
+		DEBUG_LOG(("ScriptActions::doRevealMapEntire() for player named '%s' in position %d\n", WideCharAsUtf8( player->getPlayerDisplayName().str() ).str(), player->getPlayerIndex()));
 		ThePartitionManager->revealMapForPlayer( player->getPlayerIndex() );
 	}
 	else
@@ -6785,7 +6795,7 @@ void ScriptActions::executeAction( ScriptAction *pAction )
 				                     pAction->getParameter(2)->getInt());
 			return;
 		case ScriptAction::DEBUG_CRASH_BOX:
-#if defined(_DEBUG) || defined(_INTERNAL)
+#if (defined(_DEBUG) || defined(_INTERNAL)) && defined(DEBUG_CRASHING)	// only the crash reads MSG and MSG2
 			{
 				const char* MSG = "Your Script requested the following message be displayed:\n\n";
 				const char* MSG2 = "\n\nTHIS IS NOT A BUG. DO NOT REPORT IT.";

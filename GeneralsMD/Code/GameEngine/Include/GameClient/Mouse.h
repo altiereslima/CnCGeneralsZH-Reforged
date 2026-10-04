@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -92,6 +94,27 @@ class DisplayString;
 
 #define MAX_2D_CURSOR_ANIM_FRAMES 21
 #define MAX_2D_CURSOR_DIRECTIONS 8
+
+/** The frame of an animated cursor to show: its running frame count cut to a frame, or the first frame
+	* for anything outside [0, frames).  Mouse.ini's FPS can make the count NaN (inf) or negative, and the
+	* frame indexes a surface table: Windows' INT_MIN, or a negative frame, read before it. */
+inline Int mouseCursorFrame( Real animFrame, Int frames )
+{
+	const Int frame = floatToIntAsMsvc( animFrame );
+	return ( frame >= 0 && frame < frames ) ? frame : 0;
+}
+
+/** The predrawn direction of a scrolling cursor nearest theta (radians, 0 to two pi; frame 0 points
+	* right, and they go clockwise), or the first for anything outside [0, directions).  A scroll speed of
+	* inf in GameData.ini makes theta NaN, which Windows converted to INT_MIN and indexed with. */
+inline Int mouseCursorDirection( Real theta, Int directions )
+{
+	// double, as the M_PI this was written with is (WWLib/visualc.h's digits): the same arithmetic, and a
+	// header the whole engine includes cannot count on M_PI being defined under MSVC
+	const double pi = 3.14159265358979323846;
+	const Int frame = floatToIntAsMsvc( theta / ( 2.0f * pi / (Real)directions ) + 0.5f );
+	return ( frame >= 0 && frame < directions ) ? frame : 0;
+}
 // MouseIO --------------------------------------------------------------------
 /** @todo this mouse structure needs to be revisited to allow for devices
 with more than 3 buttons */

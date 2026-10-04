@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -43,16 +45,17 @@
 //			  and alpha.
 //-----------------------------------------------------------------------------
 
-#include "W3DDevice/GameClient/heightmap.h"
+#include "W3DDevice/GameClient/HeightMap.h"
+#include "Lib/Clock.h"
 #include "W3DDevice/GameClient/W3DWaterTracks.h"
 #include "W3DDevice/GameClient/W3DShaderManager.h"
 #include "W3DDevice/GameClient/W3DShroud.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/Water.h"
 #include "GameLogic/TerrainLogic.h"
-#include "common/GlobalData.h"
-#include "common/UnicodeString.h"
-#include "Common/File.h"
+#include "Common/GlobalData.h"
+#include "Common/UnicodeString.h"
+#include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "texture.h"
 #include "colmath.h"
@@ -60,7 +63,8 @@
 #include "rinfo.h"
 #include "camera.h"
 #include "assetmgr.h"
-#include "WW3D2/DX8Wrapper.h"
+#include "WW3D2/dx8wrapper.h"
+#include "Platform/RenderTypes.h"
 
 //#pragma optimize("", off)
 
@@ -80,7 +84,7 @@ WaterTracksRenderSystem *TheWaterTracksRenderSystem=NULL;	///< singleton for tra
 
 static Bool pauseWaves=FALSE;
 
-enum waveType
+enum waveType : int
 {
 	WaveTypeFirst,
 	WaveTypePond=WaveTypeFirst,
@@ -92,6 +96,23 @@ enum waveType
 	WaveTypeStationary,
 	WaveTypeMax,
 };
+
+/// A .wak file's record: two end points and a wave type.
+enum { WAK_RECORD_BYTES = 2 * 2 * sizeof(Real) + sizeof(Int) };
+static_assert(sizeof(waveType) == sizeof(Int), "a .wak file stores the wave type as an int");
+
+Bool isWakWaveType(Int type)
+{
+	return type >= WaveTypeFirst && type < WaveTypeMax;
+}
+
+Int wakTrackCount(Int fileSize, Int claimed)
+{
+	const Int held = fileSize >= 4 ? (fileSize - 4) / (Int)WAK_RECORD_BYTES : 0;	// the count is the last four bytes
+	if (claimed < 0)
+		return 0;
+	return claimed < held ? claimed : held;
+}
 
 struct waveInfo
 {
@@ -870,19 +891,19 @@ void WaterTracksRenderSystem::update()
 	// third of its motion to the cast every frame. The counter is the performance counter and not
 	// timeGetTime for the same reason: a 1 ms tick quantises a 3 ms frame by a third.
 	//
-	static LARGE_INTEGER perfFreq = { 0 };
-	static LARGE_INTEGER lastCount = { 0 };
+	static long long perfFreq = 0;
+	static long long lastCount = 0;
 	static Real carryMs = 0.0f;
-	LARGE_INTEGER nowCount;
 
-	if (perfFreq.QuadPart == 0)
-		QueryPerformanceFrequency(&perfFreq);
-	QueryPerformanceCounter(&nowCount);
-	if (lastCount.QuadPart == 0)
-		lastCount.QuadPart = nowCount.QuadPart;
+	if (perfFreq == 0)
+		perfFreq = Clock_Ticks_Per_Second();
+	const long long nowCount = Clock_Ticks();
+	if (lastCount == 0)
+		lastCount = nowCount;
 
-	Real elapsedMs = (Real)((double)(nowCount.QuadPart - lastCount.QuadPart) * 1000.0 / (double)perfFreq.QuadPart);
-	lastCount.QuadPart = nowCount.QuadPart;
+	Real elapsedMs = (perfFreq != 0)
+		? (Real)((double)(nowCount - lastCount) * 1000.0 / (double)perfFreq) : 0.0f;
+	lastCount = nowCount;
 	if (elapsedMs > 100.0f)
 		elapsedMs = 100.0f;		// a level load must not run the surf forward
 
@@ -905,7 +926,7 @@ void WaterTracksRenderSystem::update()
 }
 
 
-void TestWaterUpdate(void);
+static void TestWaterUpdate(void);	// static, as its definition is
 void setFPMode( void );
 
 //=============================================================================
@@ -1087,20 +1108,28 @@ void WaterTracksRenderSystem::loadTracks(void)
 
 	if (file)
 	{
+		/* The file sits beside the map, and a map sent in a multiplayer game can bring one: a network
+			 transfer accepts .wak.  So nothing in it is trusted.  The count is capped by what the file
+			 holds, a short read ends the list, and a wave type outside the table is skipped: every one
+			 of those used to index waveTypeInfo, or loop, on whatever the file said.  A duplicate is
+			 skipped as it always was, now without reading on past the count. */
 		file->seek(-4,File::END);
 		file->read(&trackCount,sizeof(trackCount));
+		trackCount = wakTrackCount(file->size(), trackCount);
 		file->seek(0, File::START);
 		for (Int i=0; i<trackCount; i++)
 		{
-		tryagain:
-			file->read(&startPos,sizeof(startPos));
-			file->read(&endPos,sizeof(endPos));
-			file->read(&wtype,sizeof(wtype));
+			Int type = 0;
+			if (file->read(&startPos,sizeof(startPos)) != sizeof(startPos)
+				|| file->read(&endPos,sizeof(endPos)) != sizeof(endPos)
+				|| file->read(&type,sizeof(type)) != sizeof(type))
+				break;
+			if (!isWakWaveType(type))
+				continue;
+			wtype = (waveType)type;
 			//Check if this track already exists.
 			if (findTrack(startPos,endPos,wtype))
-			{	i++;
-				goto tryagain;
-			}
+				continue;
 
 			umod=TheWaterTracksRenderSystem->bindTrack(wtype);
 			if (umod)
@@ -1157,20 +1186,23 @@ void WaterTracksRenderSystem::loadTracks(void)
 Will need to move this code to an external editor at some pont. */
 #include "GameClient/Display.h"
 
+#if defined(_WIN32)
 extern HWND ApplicationHWnd;
+#endif
 
 //TODO: Fix editor so it actually draws the wave segment instead of line while editing
 //Could freeze all the water while editing?  Or keep setting elapsed time on current segment.
 //Have to make it so seamless merge of segments at final position.
 static void TestWaterUpdate(void)
 {
+#if defined(_WIN32)	// a developer's wave editor, polling the Win32 keyboard and cursor directly
 	static Int doInit=1;
 	static WaterTracksObj *track=NULL,*track2=NULL;
 	static Int trackEditMode=0;
 	static waveType currentWaveType = WaveTypeOcean;
-	POINT	screenPoint;
-	POINT	endPoint;
-	static POINT	mouseAnchor;
+	RenderPoint	screenPoint;
+	RenderPoint	endPoint;
+	static RenderPoint	mouseAnchor;
 	static Int		haveStart=0;
 	static Int		haveEnd=0;
 	static Coord3D	terrainPointStart,terrainPointEnd;
@@ -1206,16 +1238,16 @@ static void TestWaterUpdate(void)
 			if (trackEditMode)
 			{
 				UnicodeString string;
-				string.format(L"Leaving Water Track Edit Mode");
+				string.format(u"Leaving Water Track Edit Mode");
 				TheInGameUI->message(string);
 			}
 			else
 			{
 				UnicodeString string;
-				string.format(L"Entering Water Track Edit Mode");
+				string.format(u"Entering Water Track Edit Mode");
 				TheInGameUI->message(string);
 
-				string.format(L"Wave Type: %hs",waveTypeInfo[currentWaveType].m_waveTypeName);
+				string.format(u"Wave Type: %hs",waveTypeInfo[currentWaveType].m_waveTypeName);
 				TheInGameUI->message(string);
 			}
 
@@ -1248,7 +1280,7 @@ static void TestWaterUpdate(void)
 						TheTacticalView->screenToTerrain( (ICoord2D *)&screenPoint, &terrainPointStart);
 						haveStart=1;
 						UnicodeString string;
-						string.format(L"Added Start");
+						string.format(u"Added Start");
 						TheInGameUI->message(string);
 					}
 					else
@@ -1283,7 +1315,7 @@ static void TestWaterUpdate(void)
 							}
 
 							UnicodeString string;
-							string.format(L"Added End");
+							string.format(u"Added End");
 							TheInGameUI->message(string);
 						}
 						haveStart=0;	//reset for next segment
@@ -1320,7 +1352,7 @@ static void TestWaterUpdate(void)
 						currentWaveType = WaveTypeFirst;
 
 					UnicodeString string;
-					string.format(L"Wave Type: %hs",waveTypeInfo[currentWaveType].m_waveTypeName);
+					string.format(u"Wave Type: %hs",waveTypeInfo[currentWaveType].m_waveTypeName);
 					TheInGameUI->message(string);
 				}
 			}
@@ -1337,7 +1369,7 @@ static void TestWaterUpdate(void)
 					track=NULL;
 					track2=NULL;
 					UnicodeString string;
-					string.format(L"Saved Tracks");
+					string.format(u"Saved Tracks");
 					TheInGameUI->message(string);
 				}
 			}
@@ -1355,7 +1387,7 @@ static void TestWaterUpdate(void)
 					track=NULL;
 					track2=NULL;
 					UnicodeString string;
-					string.format(L"Loaded Tracks");
+					string.format(u"Loaded Tracks");
 					TheInGameUI->message(string);
 				}
 			}
@@ -1385,4 +1417,5 @@ static void TestWaterUpdate(void)
 //			OutputDebugString (buffer);
 		}
 	}
+#endif
 }

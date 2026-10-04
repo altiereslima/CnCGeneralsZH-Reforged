@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -76,7 +77,7 @@ class DLDestroyListClass : public DLListClass<T>
 public:
 	virtual ~DLDestroyListClass()
 	{
-		while (T* t=Head()) {		
+		while (T* t=this->Head()) {		// Head is the dependent base's: standard two-phase lookup needs this->		
 			delete t;
 		}
 	}

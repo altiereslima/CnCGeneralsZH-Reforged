@@ -1,0 +1,23 @@
+# A wide battle on the snow plateau of Fortress Avalanche, between its two lakes, for the 2.4.0
+# Shorts: America from the south-west and China from the north-east, spawned close on the snow
+# round 2110,2070 (the middle of the snow in the probe of 2026-10-03) and attack-moving onto it,
+# an A-10 strike called into the middle.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 5000 -map "Maps\Fortress Avalanche\Fortress Avalanche.map" -autoskirmish 2
+#     -takeover -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario s240_snow
+#     -cinema s240_snow -video 150 560 s240_snow -maxframes 570
+
+10    spawn      0  AmericaCommandCenter            1   start0:240:60
+
+30    spawn      0  AmericaTankCrusader             8   2000 1990  36
+30    spawn      0  AmericaTankPaladin              3   1950 1940  40
+30    spawn      0  AmericaInfantryRanger           10  2060 2020  18
+30    spawn      1  ChinaTankBattleMaster           8   2220 2150  40
+30    spawn      1  ChinaTankOverlord               2   2270 2200  50
+30    spawn      1  ChinaTankGattling               3   2180 2200  36
+30    spawn      1  ChinaInfantryRedguard           10  2160 2120  18
+60    attackmove 0  *  2110 2070
+60    attackmove 1  *  2110 2070
+
+300   power      0  AmericaCommandCenter  2120 2080  SuperweaponA10ThunderboltMissileStrike

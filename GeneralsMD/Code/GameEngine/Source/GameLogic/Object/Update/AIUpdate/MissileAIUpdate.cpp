@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -304,6 +305,39 @@ void MissileAIUpdate::projectileFireAtObjectOrPosition( const Object *victim, co
 
   setCurrentVictim( victim );/// extending access to the victim via the parent class
 	m_prevPos = *getObject()->getPosition();
+}
+
+//-------------------------------------------------------------------------------------------------
+// A shot at a point flies there and goes off, and a victim moving across the line of fire has left it
+// by then: a rocket at infantry is always such a shot, its scatter makes it one. Move the point as far
+// as a victim on the ground goes in the missile's flight. A Stinger Site at twelve Rangers walking
+// past killed one and took 447 health off them before, three and 627 after, over six seeds. A missile
+// that follows its victim leads it on the way instead (Locomotor::moveTowardsPositionThrust), and a
+// victim standing still keeps the shot it had.
+//-------------------------------------------------------------------------------------------------
+void MissileAIUpdate::projectileLeadVictim( const Object *victim )
+{
+	const PhysicsBehavior *victimPhysics = victim->getPhysics();
+	if (m_isTrackingTarget || victimPhysics == NULL || victim->isAboveTerrain())
+		return;
+
+	const Coord3D *from = getObject()->getPosition();
+	Coord3D toVictim;
+	toVictim.set(victim->getPosition()->x - from->x, victim->getPosition()->y - from->y, victim->getPosition()->z - from->z);
+	Coord3D lead = Locomotor_groundLead(toVictim, *victimPhysics->getVelocity(), getCurLocomotor()->getMaxSpeedForCondition(BODY_PRISTINE));
+	if (lead.x == 0.0f && lead.y == 0.0f)
+		return;
+
+	// keep the point as high over the ground as it was: on the ground for a scattered shot
+	Real groundBefore = TheTerrainLogic->getLayerHeight(m_originalTargetPos.x, m_originalTargetPos.y, victim->getLayer());
+	m_originalTargetPos.x += lead.x;
+	m_originalTargetPos.y += lead.y;
+	m_originalTargetPos.z += TheTerrainLogic->getLayerHeight(m_originalTargetPos.x, m_originalTargetPos.y, victim->getLayer()) - groundBefore;
+
+	Coord3D initialPos = m_originalTargetPos;
+	if (getMissileAIUpdateModuleData()->m_lockDistance > 0.0f)
+		initialPos.z += APPROACH_HEIGHT;
+	aiMoveToPosition(&initialPos, CMD_FROM_AI);
 }
 
 //-------------------------------------------------------------------------------------------------

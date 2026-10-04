@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -50,7 +52,8 @@ public:
 };
 
 #else
-#include "WW3D2/RendObj.h"
+#include "WW3D2/rendobj.h"
+#include "W3DDevice/GameClient/W3DSmoothMotion.h"
 #endif
 #include "Common/SparseMatchFinder.h"
 #include "GameClient/ParticleSys.h"
@@ -62,7 +65,6 @@ class RenderObjClass;
 class Shadow;
 class TerrainTracksRenderObjClass;
 class HAnimClass;
-enum GameLODLevel;
 //-------------------------------------------------------------------------------------------------
 /** The default client update module */
 //-------------------------------------------------------------------------------------------------
@@ -376,6 +378,11 @@ public:
 	virtual void reactToTransformChange(const Matrix3D* oldMtx, const Coord3D* oldPos, Real oldAngle);
 	virtual void reactToGeometryChange() { }
 
+	// R1, smooth motion (W3DSmoothMotion.h): W3DDisplay::draw's capture, blend and restore.
+	virtual void smoothMotionCapture(UnsignedInt clientFrame, Bool marked);
+	virtual void smoothMotionApply(Real alpha);
+	virtual void smoothMotionRestore();
+
 	// this method must ONLY be called from the client, NEVER From the logic, not even indirectly.
 	virtual Bool clientOnly_getRenderObjInfo(Coord3D* pos, Real* boundingSphereRadius, Matrix3D* transform) const;
 	virtual Bool clientOnly_getRenderObjBoundBox(OBBoxClass * boundbox) const;
@@ -455,6 +462,8 @@ protected:
 	Real getCurAnimDistanceCovered() const;
 	Bool setCurAnimDurationInMsec(Real duration);
 
+	UnsignedInt stepGroundMotion(Real& forward, Real& turn);	///< distance driven along the heading and angle turned since the last call; returns the logic frames between
+
 
 	inline Bool getFullyObscuredByShroud() const { return m_fullyObscuredByShroud; }
 
@@ -504,6 +513,9 @@ private:
 	Int														m_whichAnimInCurState;						///< the index of the currently playing anim in cur state (if any)
 	WeaponRecoilInfoVec						m_weaponRecoilInfoVec[WEAPONSLOT_COUNT];
 	Bool													m_needRecalcBoneParticleSystems;
+	Coord3D												m_groundMotionPos;								///< where stepGroundMotion last saw the unit
+	Real													m_groundMotionAngle;
+	UnsignedInt										m_groundMotionFrame;							///< and on which logic frame, 0 before the first call
 	Bool													m_fullyObscuredByShroud;
 	Bool													m_shadowEnabled;	///< cached state of shadow.  Used to determine if shadows should be enabled via options screen.
 	Bool													m_hasModelShadow;	///< this drawable's shape is being cast by the tree buffer, so it wants no decal of its own
@@ -517,6 +529,7 @@ private:
 	Bool													m_hideHeadlights;
 	Bool													m_pauseAnimation;
 	Int														m_animationMode;
+	SmoothMotionTrack							m_smoothMotion;										///< R1: the render object's last two logic transforms
 
 	void adjustAnimation(const ModelConditionInfo* prevState, Real prevAnimFraction);
 	Real getCurrentAnimFraction() const;

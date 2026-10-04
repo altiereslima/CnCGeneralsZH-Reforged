@@ -221,7 +221,7 @@ namespace
 	   only ever compares them. */
 	void *fake_old(int i)
 	{
-		return (void *)(0x10000 + i * 16);
+		return (void *)(uintptr_t)(0x10000 + i * 16);
 	}
 
 	/* Registers a definition and hands back the pointer so the test can
@@ -718,6 +718,64 @@ TEST(persist_object_round_trips_through_its_factory)
 		CHECK(&typed->Get_Factory() == &original.Get_Factory());
 
 		delete loaded;
+	}
+}
+
+/* The round-trip above checks the object's DATA survives, and it passed right through the x64
+   port while the pointer token was being lost completely - it never asks what Load() would hand to
+   Register_Pointer.  This one does.
+
+   SimplePersistFactoryClass::Save writes the object's address into its own chunk, and Load reads it
+   back as the key that lets pointers held by other objects in the same stream be remapped onto the
+   new instance.  Save used to write sizeof(uint32) while Load has always read sizeof(T *).  On a
+   64-bit build that is 4 bytes written against 8 asked for, and ChunkLoadClass::Read refuses a read
+   that would overrun the chunk - it returns 0 and does not touch the buffer - so old_obj kept its
+   NULL initialiser and every object registered under the key NULL.  Not a degraded remap: an
+   absent one.
+
+   Put `uint32 objptr = (uint32)obj` and `sizeof(uint32)` back in persistfactory.h and this goes red
+   on any 64-bit build.  It stays green on a 32-bit one, which is exactly why it survived: the
+   defect arrived with the x64 port and nothing here was looking at this chunk. */
+TEST(persist_factory_writes_a_pointer_token_load_can_read)
+{
+	static char storage[4096];
+	int written = 0;
+
+	TestPersistClass original;
+	original.Number = 4242;
+
+	{
+		RAMFileClass file(storage, sizeof(storage));
+		file.Open(FileClass::WRITE);
+		ChunkSaveClass csave(&file);
+		original.Get_Factory().Save(csave, &original);
+		written = file.Size();
+		file.Close();
+	}
+	CHECK(written > 0);
+
+	{
+		RAMFileClass file(storage, written);
+		file.Open(FileClass::READ);
+		ChunkLoadClass cload(&file);
+
+		/* The first chunk is SIMPLEFACTORY_CHUNKID_OBJPOINTER, and these are the same two calls
+		   SimplePersistFactoryClass::Load makes on it. */
+		cload.Open_Chunk();
+		CHECK_EQ(cload.Cur_Chunk_ID(), (uint32)0x00100100);
+
+		/* The width agreement, which is the defect itself. */
+		CHECK_EQ(cload.Cur_Chunk_Length(), (uint32)sizeof(TestPersistClass *));
+
+		TestPersistClass *old_obj = NULL;
+		CHECK_EQ(cload.Read(&old_obj, sizeof(TestPersistClass *)),
+		         (uint32)sizeof(TestPersistClass *));
+
+		/* And it is the address Save was given, not NULL and not a truncation of it. */
+		CHECK_EQ((void *)old_obj, (void *)(PersistClass *)&original);
+
+		cload.Close_Chunk();
+		file.Close();
 	}
 }
 

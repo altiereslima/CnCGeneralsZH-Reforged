@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -49,7 +50,7 @@
 #include "wwstring.h"
 #include "simplevec.h"
 #include "refcount.h"
-#include "vector.h"
+#include "Vector.H"
 #include "dx8list.h"
 #include "shader.h"
 #include "dx8wrapper.h"
@@ -158,7 +159,7 @@ protected:
 	bool														AnyDelayedPassesToRender;
 
 	void Generate_Texture_Categories(Vertex_Split_Table& split_table,unsigned vertex_offset);
-	void DX8FVFCategoryContainer::Insert_To_Texture_Category(
+	void Insert_To_Texture_Category(
 		Vertex_Split_Table& split_table,
 		TextureClass** textures,
 		VertexMaterialClass* mat,

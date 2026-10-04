@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,11 +31,13 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"
+#include "zhio.h"
 
-#include "Common/File.h"
+#include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "Common/GameState.h"
 #include "Common/GameStateMap.h"
+#include "Common/LocalFileSystem.h"
 #include "Common/GlobalData.h"
 #include "Common/Xfer.h"
 #include "GameClient/CampaignManager.h"
@@ -134,7 +138,7 @@ static void embedPristineMap( AsciiString map, Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 static void embedInUseMap( AsciiString map, Xfer *xfer )
 {
-	FILE *fp = fopen( map.str(), "rb" );
+	FILE *fp = zh_fopen( map.str(), "rb" );
 
 	// sanity
 	if( fp == NULL )
@@ -192,7 +196,7 @@ static void extractAndSaveMap( AsciiString mapToSave, Xfer *xfer )
 	UnsignedInt dataSize;
 
 	// open handle to output file
-	FILE *fp = fopen( mapToSave.str(), "w+b" );
+	FILE *fp = zh_fopen( mapToSave.str(), "w+b" );
 	if( fp == NULL )
 	{
 
@@ -462,68 +466,19 @@ void GameStateMap::xfer( Xfer *xfer )
 void GameStateMap::clearScratchPadMaps( void )
 {
 
-	// remember the current directory
-	char currentDirectory[ _MAX_PATH ];
-	GetCurrentDirectory( _MAX_PATH, currentDirectory );
+	// every file in the save directory, listed there rather than by changing into it (C1).  Listed
+	// in full before the first delete, as the search used to find the next file before deleting one.
+	std::vector< AsciiString > files;
+	TheLocalFileSystem->getFilesInDirectory( TheGameState->getSaveDirectory(), AsciiString( "*" ), files );
 
-	// switch into the save directory
-	SetCurrentDirectory( TheGameState->getSaveDirectory().str() );
-
-	// iterate all items in the directory
-	AsciiString fileToDelete;
-	WIN32_FIND_DATA item;  // search item
-	HANDLE hFile = INVALID_HANDLE_VALUE;  // handle for search resources
-	Bool done = FALSE;
-	Bool first = TRUE;
-	while( done == FALSE )
+	for( size_t i = 0; i < files.size(); ++i )
 	{
 
-		// first, clear flag for deleting file
-		fileToDelete.clear();
+		// see if there is a ".map" at end of this filename
+		const Char *c = strrchr( files[ i ].str(), '.' );
+		if( c && strcasecmp( c, ".map" ) == 0 )
+			TheLocalFileSystem->deleteFile( TheGameState->getFilePathInSaveDirectory( files[ i ] ).str() );
 
-		// if our first time through we need to start the search
-		if( first )
-		{
-
-			// start search
-			hFile = FindFirstFile( "*", &item );
-			if( hFile == INVALID_HANDLE_VALUE )
-				return;
-
-			// we are no longer on our first item
-			first = FALSE;
-
-		}  // end if, first
-
-		// see if this is a file, and therefore a possible .map file
-		if( !(item.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) )
-		{
-
-			// see if there is a ".map" at end of this filename
-			Char *c = strrchr( item.cFileName, '.' );
-			if( c && stricmp( c, ".map" ) == 0 )
-				fileToDelete.set( item.cFileName );  // we want to delete this one
-
-		}  // end if
-
-		//
-		// find the next file before we delete this one, this is probably not necessary
-		// to strcuture things this way so that the find next occurs before the file
-		// delete, but it seems more correct to do so
-		//
-		if( FindNextFile( hFile, &item ) == 0 )
-			done = TRUE;
-
-		// delete file if set
-		if( fileToDelete.isEmpty() == FALSE )
-			DeleteFile( fileToDelete.str() );
-
-	}  // end while
-
-	// close search resources
-	FindClose( hFile );
-
-	// restore our directory to the current directory
-	SetCurrentDirectory( currentDirectory );
+	}  // end for
 
 }  // end clearScratchPadMaps

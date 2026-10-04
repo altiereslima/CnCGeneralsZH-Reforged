@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -28,6 +30,7 @@
 // Description: LAN API Callbacks
 ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
 #include "strtok_r.h"
 #include "Common/GameEngine.h"
@@ -131,7 +134,7 @@ void LANAPI::OnAccept( UnsignedInt playerIP, Bool status )
 		{
 			UnicodeString text;
 			text = TheGameText->fetch("GUI:HostWantsToStart");
-			OnChat(UnicodeString(L"SYSTEM"), m_localIP, text, LANCHAT_SYSTEM);				
+			OnChat(UnicodeString(u"SYSTEM"), m_localIP, text, LANCHAT_SYSTEM);				
 		}
 	}
 }// void LANAPI::OnAccept( UnicodeString player, Bool status ) 
@@ -158,13 +161,13 @@ void LANAPI::OnHasMap( UnsignedInt playerIP, Bool status )
 			Bool willTransfer = TRUE;
 			if (mapData)
 			{
-				mapDisplayName.format(L"%ls", mapData->m_displayName.str());
+				mapDisplayName.format(u"%ls", mapData->m_displayName.str());
 				if (mapData->m_isOfficial)
 					willTransfer = FALSE;
 			}
 			else
 			{
-				mapDisplayName.format(L"%hs", m_currentGame->getMap().str());
+				mapDisplayName.format(u"%hs", m_currentGame->getMap().str());
 				willTransfer = WouldMapTransfer(m_currentGame->getMap());
 			}
 			if (!status)
@@ -174,7 +177,7 @@ void LANAPI::OnHasMap( UnsignedInt playerIP, Bool status )
 					text.format(TheGameText->fetch("GUI:PlayerNoMapWillTransfer"), m_currentGame->getLANSlot(i)->getName().str(), mapDisplayName.str());
 				else
 					text.format(TheGameText->fetch("GUI:PlayerNoMap"), m_currentGame->getLANSlot(i)->getName().str(), mapDisplayName.str());
-				OnChat(UnicodeString(L"SYSTEM"), m_localIP, text, LANCHAT_SYSTEM);
+				OnChat(UnicodeString(u"SYSTEM"), m_localIP, text, LANCHAT_SYSTEM);
 			}
 			lanUpdateSlotList();
 		}
@@ -213,13 +216,13 @@ Bool LANAPI::StartAutomatedGame( AsciiString mapName, Int seed, const UnsignedIn
 
 	LANGameInfo *game = NEW LANGameInfo;
 	game->enterGame();
-	/* enterGame() resets, and reset() seeds itself from GetTickCount() - so the seed we were
+	/* enterGame() resets, and reset() seeds itself from Clock_Milliseconds_Coarse() - so the seed we were
 		 handed has to be set after it, or the replay header records a clock reading and plays back
 		 a different game than the one that ran. */
 	game->setSeed( seed );
 
 	UnicodeString gameName;
-	gameName.format( L"%8.8X", slotIPs[0] );
+	gameName.format( u"%8.8X", slotIPs[0] );
 	game->setName( gameName );
 
 	/* -teams splits the slot list into allied blocks the same way it splits an -autoskirmish lobby:
@@ -237,7 +240,7 @@ Bool LANAPI::StartAutomatedGame( AsciiString mapName, Int seed, const UnsignedIn
 		/* The names have to differ: GameInfo looks players up by name, and the player list ends up
 			 with one side per slot named after it. */
 		UnicodeString playerName;
-		playerName.format( L"Player%d", i + 1 );
+		playerName.format( u"Player%d", i + 1 );
 
 		Int teamNumber = -1;
 		if (slotsPerTeam > 0)
@@ -253,7 +256,7 @@ Bool LANAPI::StartAutomatedGame( AsciiString mapName, Int seed, const UnsignedIn
 			slot.setState( SLOT_PLAYER, playerName );
 			slot.setIP( slotIPs[i] );
 			slot.setPort( NETWORK_BASE_PORT_NUMBER );	// one address per player, so one port does for all
-			slot.setLastHeard( timeGetTime() );
+			slot.setLastHeard( Clock_Milliseconds() );
 			slot.setLogin( m_userName );
 			slot.setHost( m_hostName );
 		}
@@ -278,7 +281,7 @@ Bool LANAPI::StartAutomatedGame( AsciiString mapName, Int seed, const UnsignedIn
 	game->setTechRespawn( TheGlobalData->m_techRespawn );
 	game->setSupplyPileLimit( TheGlobalData->m_supplyPileLimit );
 	game->setIsDirectConnect( FALSE );
-	game->setLastHeard( timeGetTime() );
+	game->setLastHeard( Clock_Milliseconds() );
 	game->setLocalIP( m_localIP );
 
 	/* The map is not transferred, so both machines have to already have it - but say what we have,
@@ -332,7 +335,7 @@ void LANAPI::OnGameStartTimer( Int seconds )
 		text.format(TheGameText->fetch("LAN:GameStartTimerSingular"), seconds);
 	else
 		text.format(TheGameText->fetch("LAN:GameStartTimerPlural"), seconds);
-	OnChat(UnicodeString(L"SYSTEM"), m_localIP, text, LANCHAT_SYSTEM);
+	OnChat(UnicodeString(u"SYSTEM"), m_localIP, text, LANCHAT_SYSTEM);
 }
 
 void LANAPI::OnGameStart( void )
@@ -436,7 +439,7 @@ void LANAPI::OnGameOptions( UnsignedInt playerIP, Int playerSlot, AsciiString op
 
 	if (playerSlot == 0 && !m_currentGame->amIHost())
 	{
-		m_currentGame->setLastHeard(timeGetTime());
+		m_currentGame->setLastHeard(Clock_Milliseconds());
 		AsciiString oldOptions = GameInfoToAsciiString(m_currentGame); // save these off for if we get booted
 		if(ParseGameOptionsString(m_currentGame,options))
 		{
@@ -490,11 +493,11 @@ void LANAPI::OnGameOptions( UnsignedInt playerIP, Int playerSlot, AsciiString op
 		{
 			if (options.compare("HELLO") == 0)
 			{
-				m_currentGame->setPlayerLastHeard(playerSlot, timeGetTime());
+				m_currentGame->setPlayerLastHeard(playerSlot, Clock_Milliseconds());
 			}
 			else
 			{
-				m_currentGame->setPlayerLastHeard(playerSlot, timeGetTime());
+				m_currentGame->setPlayerLastHeard(playerSlot, Clock_Milliseconds());
 				Bool change = false;
 				Bool shouldUnaccept = false;
 				AsciiString key;
@@ -795,7 +798,7 @@ void LANAPI::OnPlayerList( LANPlayer *playerList )
 		GadgetListBoxGetSelected(listboxPlayers, &selectedIndex);
 		
 		if (selectedIndex != -1 )
-			selectedIP = (UnsignedInt) GadgetListBoxGetItemData(listboxPlayers, selectedIndex, 0);
+			selectedIP = (UnsignedInt) (uintptr_t)GadgetListBoxGetItemData(listboxPlayers, selectedIndex, 0);
 
 		GadgetListBoxReset(listboxPlayers);
 
@@ -803,7 +806,7 @@ void LANAPI::OnPlayerList( LANPlayer *playerList )
 		while (player)
 		{
 			Int addedIndex = GadgetListBoxAddEntryText(listboxPlayers, player->getName(), playerColor, -1, -1);
-			GadgetListBoxSetItemData(listboxPlayers, (void *)player->getIP(),addedIndex, 0 );
+			GadgetListBoxSetItemData(listboxPlayers, (void *)(uintptr_t)player->getIP(),addedIndex, 0 );
 
 			if (selectedIP == player->getIP())
 				indexToSelect = addedIndex;
@@ -848,14 +851,14 @@ void LANAPI::OnChat( UnicodeString player, UnsignedInt ip, UnicodeString message
 	switch (format)
 	{
 		case LANAPIInterface::LANCHAT_SYSTEM:
-			unicodeChat = L"";
+			unicodeChat = u"";
 			unicodeChat.concat(message);
-			unicodeChat.concat(L"");
+			unicodeChat.concat(u"");
 			index =GadgetListBoxAddEntryText(chatWindow, unicodeChat, chatSystemColor, -1, -1);
 			break;
 		case LANAPIInterface::LANCHAT_EMOTE:
 			unicodeChat = player;
-			unicodeChat.concat(L' ');
+			unicodeChat.concat(u' ');
 			unicodeChat.concat(message);
 			if (ip == m_localIP)
 				index =GadgetListBoxAddEntryText(chatWindow, unicodeChat, chatLocalActionColor, -1, -1);
@@ -884,9 +887,9 @@ void LANAPI::OnChat( UnicodeString player, UnsignedInt ip, UnicodeString message
 				}
 			}
 			
-			unicodeChat = L"[";
+			unicodeChat = u"[";
 			unicodeChat.concat(player);
-			unicodeChat.concat(L"] ");
+			unicodeChat.concat(u"] ");
 			unicodeChat.concat(message);
 			if (ip == m_localIP)
 				index =GadgetListBoxAddEntryText(chatWindow, unicodeChat, chatColor, -1, -1);

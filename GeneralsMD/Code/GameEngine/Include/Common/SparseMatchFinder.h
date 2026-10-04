@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -131,7 +133,7 @@ private:
 		AsciiString curBestMatchStr, dupMatchStr;
 	#endif
 
-		for (std::vector<MATCHABLE>::const_iterator it = v.begin(); it != v.end(); ++it)
+		for (typename std::vector<MATCHABLE>::const_iterator it = v.begin(); it != v.end(); ++it)
 		{
 			for (Int i = it->getConditionsYesCount()-1; i >= 0; --i)
 			{
@@ -214,7 +216,7 @@ public:
 	//-------------------------------------------------------------------------------------------------
 	const MATCHABLE* findBestInfo(const std::vector<MATCHABLE>& v, const BITSET& bits) const
 	{
-		MatchMap::const_iterator it = m_bestMatches.find(bits);
+		typename MatchMap::const_iterator it = m_bestMatches.find(bits);
 
 		const MATCHABLE *first = NULL;
 		if (it != m_bestMatches.end())

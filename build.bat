@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 
-rem Build C&C Generals Zero Hour, x64. Double-click it, or:
+rem Build C&C Generals Zero Hour, x64 (or ARM64: PLATFORM below). Double-click it, or:
 rem
 rem   build.bat                    configure (if needed) + build Release
 rem   build.bat Debug              build another config (Release|RelWithDebInfo|Debug)
@@ -23,11 +23,18 @@ set "VS_EDITIONS=Community Professional Enterprise BuildTools"
 set "GENERATOR=Visual Studio 17 2022"
 set "DEFAULT_CONFIG=Release"
 set "BUILD="
+rem x64, or ARM64 for Windows on Arm.  An ARM64 machine builds ARM64, into build-arm64 unless BUILD says
+rem otherwise; build.local.bat can still ask it for x64.
+set "PLATFORM=x64"
+if /i "%PROCESSOR_ARCHITECTURE%"=="ARM64" set "PLATFORM=ARM64"
 
 if exist "%~dp0build.local.bat" (
     echo [build] reading build.local.bat
     call "%~dp0build.local.bat"
 )
+rem A caller that names the platform wins over both: windows-ci.ps1 -Platform sets ZH_PLATFORM (x64 or
+rem ARM64), so an ARM64 machine can build and test the x64 game as a second CI lane.
+if defined ZH_PLATFORM set "PLATFORM=%ZH_PLATFORM%"
 
 rem Double-clicked from Explorer, the window closes on the last line and nobody reads it.
 rem A double-click passes no arguments and puts this file's own name in the parent command line.
@@ -36,6 +43,7 @@ if "%~1"=="" echo %cmdcmdline% | find /i "%~nx0" >nul && set "PAUSE_AT_END=1"
 
 set "ROOT=%~dp0"
 set "SRC=%ROOT%GeneralsMD\Code"
+if not defined BUILD if /i "%PLATFORM%"=="ARM64" set "BUILD=%ROOT%build-arm64"
 if not defined BUILD set "BUILD=%ROOT%build64"
 set "CONFIG=%~1"
 set "ARG2=%~2"
@@ -84,7 +92,7 @@ if !errorlevel! neq 0 (
 rem --- configure (only when the cache is missing) ---
 if not exist "%BUILD%\CMakeCache.txt" (
     echo [build] configuring %SRC% -^> %BUILD%
-    "%CMAKE%" -S "%SRC%" -B "%BUILD%" -G "%GENERATOR%" -A x64
+    "%CMAKE%" -S "%SRC%" -B "%BUILD%" -G "%GENERATOR%" -A %PLATFORM%
     if !errorlevel! neq 0 (
         echo [build] ERROR: configure failed.
         goto :fail

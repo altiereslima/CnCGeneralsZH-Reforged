@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -37,7 +39,7 @@
 // MBL Update for CNC3 INCURSION - 10.23.2002 - Expanded param handling, Added STOP command
 //
 
-#include <string.h>	// stricmp()
+#include <string.h>	// strcasecmp()
 #include "animatedsoundmgr.h"
 #include "ini.h"
 #include "inisup.h"
@@ -47,13 +49,15 @@
 #include "definition.h"
 #include "definitionmgr.h"
 #include "definitionclassids.h"
-#include "wwaudio.h"
-#include "audiblesound.h"
+#if defined(_WIN32)	// WWAudio is Miles's, Windows only; sound reaches the game through SoundLibraryBridgeClass
+#include "WWAudio.h"
+#include "AudibleSound.h"
+#endif
 #include "htree.h"
 #include "hanim.h"
 #include "soundlibrarybridge.h"
 
-#include "WWDebug.h"
+#include "wwdebug.h"
 
 //////////////////////////////////////////////////////////////////////
 //	Static member initialization
@@ -123,7 +127,7 @@ Build_List_From_String
 			//
 			// Move past the current delimiter (if necessary)
 			//
-			if ((::strnicmp (entry, delimiter, delim_len) == 0) && (count > 0)) {
+			if ((::strncasecmp (entry, delimiter, delim_len) == 0) && (count > 0)) {
 				entry += delim_len;
 			}
 
@@ -150,7 +154,7 @@ Build_List_From_String
 				//
 				// Move past the current delimiter (if necessary)
 				//
-				if ((::strnicmp (entry, delimiter, delim_len) == 0) && (count > 0)) {
+				if ((::strncasecmp (entry, delimiter, delim_len) == 0) && (count > 0)) {
 					entry += delim_len;
 				}
 
@@ -227,7 +231,7 @@ Is_In_Param_List
 			// OutputDebugString( param_to_check );
 			// OutputDebugString( "\n" );
 
-			// if ( stricmp( string.Peek_Buffer(), param_to_check ) == 0 ) // Breaks with whitespaces
+			// if ( strcasecmp( string.Peek_Buffer(), param_to_check ) == 0 ) // Breaks with whitespaces
 			if ( strstr( string.Peek_Buffer(), param_to_check ) != 0 )
 			{
 			 	return( true );

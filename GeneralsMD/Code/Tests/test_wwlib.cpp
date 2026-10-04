@@ -14,6 +14,10 @@
  */
 #include "test_harness.h"
 
+#include <atomic>	/* the B14 thread tests below share flags between threads */
+#include <string>	/* next_thread_name */
+#include <chrono>	/* mutexclass_timed_acquire_gives_up_and_says_so times its wait finer than Clock_Milliseconds_Coarse */
+
 #include "global.h"       /* UINT4 / PROTO_LIST, which md5.h assumes */
 #include "realcrc.h"
 #include "crc.h"
@@ -33,7 +37,7 @@
 #include "nstrdup.h"
 #include "strtok_r.h"
 #include "gcd_lcm.h"
-#include "vector.h"
+#include "Vector.H"
 #include "simplevec.h"
 #include "hash.h"
 #include "multilist.h"
@@ -41,11 +45,19 @@
 #include "ramfile.h"
 #include "chunkio.h"
 #include "wwfile.h"
+#include "rawfile.h"
+#include "mixfile.h"
+#include "ffactory.h"
 #include "thread.h"
 #include "mutex.h"
+#include "Lib/Clock.h"	/* Clock_Milliseconds_Coarse: GetTickCount on Windows, by Clock.h's contract */
 
 #include <stdlib.h>
+#if defined(_WIN32)
 #include <windows.h>
+#else
+#include <sys/time.h>	/* utimes, for the RawFileClass date test */
+#endif
 
 //////////////////////////////////////////////////////////////////////////////
 // Helpers
@@ -148,6 +160,23 @@ TEST(crcengine_byte_at_a_time_matches_block)
 	/* Feeding one byte at a time has to land on the same accumulator - the
 	   staging buffer exists precisely to make partial blocks equivalent. */
 	CHECK_EQ((long)drip, whole);
+}
+
+TEST(crcengine_accumulator_is_32_bits_wide)
+{
+	/* The test above cannot see the bug this one exists for.  CRCEngine's accumulator was `long`
+	   and its staging buffer was char[sizeof(long)], so on Windows it rotated within 32 bits and
+	   blocked on four bytes, and on an LP64 platform it would rotate within 64 and block on eight -
+	   computing a different CRC from the same input.  Byte-at-a-time and bulk stay equal to each
+	   other either way, so a self-consistency check passes on both and says nothing.
+
+	   The value below is the four-byte-blocking answer, which is what every Windows build has
+	   produced since 1996.  If a platform disagrees with it the CRC has changed width underneath
+	   somebody, and this fails loudly instead of a .big index or an obfuscated string quietly
+	   hashing differently. */
+	CRCEngine engine;
+	const long crc = engine("Westwood Studios", 16);
+	CHECK_EQ((unsigned long)(unsigned int)crc, 0x93b0f838UL);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -406,6 +435,21 @@ TEST(lcw_round_trip)
 		CHECK_EQ(out_len, (int)sizeof(src));
 		CHECK_MEM(src, back, sizeof(src));
 	}
+}
+
+// A long run (0xFE) that ends the output exactly.  From an aligned start the run writes 4 bytes to reach
+// alignment and then its aligned part a word at a time; 16 bytes leave 12 for the words, which is 4 mod 8,
+// where the words used to go in pairs and the last pair wrote 4 bytes past the run - here past the output,
+// into the canaries.  No sanitizer needed: the canaries are the check.
+TEST(lcw_long_run_stays_inside_the_output)
+{
+	static const unsigned char stream[] = { 0xFE, 16, 0, 0x5A, 0x80 };
+	alignas(16) unsigned char out[32];
+	memset(out, 0xC3, sizeof(out));
+	int out_len = LCW_Uncomp(stream, out, 16);
+	CHECK_EQ(out_len, 16);
+	for (int i = 0; i < 16; ++i) CHECK_EQ((int)out[i], 0x5A);
+	for (int i = 16; i < 32; ++i) CHECK_EQ((int)out[i], 0xC3);
 }
 
 TEST(lcw_compresses_repetitive_data)
@@ -709,6 +753,11 @@ TEST(stringclass_long_strings_survive_reassignment)
 	}
 }
 
+/* These two test WideStringClass's wide half, which is _WIN32-only by B1's agreed decision: its only
+   implementations are Win32 calls, and off Windows it is guarded out of wwstring.h and widestring.h
+   rather than given a second UTF-16 conversion beside the engine's own.  They come back when B1's
+   char16_t work gives that half a body everywhere.  Guarded, not deleted, so they are still here. */
+#if defined(_WIN32)
 TEST(widestring_basics)
 {
 	WideStringClass w(L"wide");
@@ -739,6 +788,27 @@ TEST(widestring_compare_and_format)
 	WideStringClass f;
 	f.Format(L"%d-%d", 4, 5);
 	CHECK(f == L"4-5");
+}
+#endif	// _WIN32: WideStringClass's wide half, B1
+
+/* _strlwr/_strupr turn asset and definition names into hash keys, so both builds must produce the
+   same key.  On Windows this runs MSVC's own; elsewhere, MSVCCompat.h's.  The expected strings are
+   written out by hand: ASCII letters convert, digits and punctuation do not, and 0xC9 - a Latin-1
+   E-acute, which a locale-aware conversion would change - is left alone, because nothing here ever
+   leaves the "C" locale.  Both return their argument, which font3d.cpp relies on. */
+TEST(strlwr_and_strupr_are_ascii_only_and_in_place)
+{
+	char lower[] = "Tank_\xC9" "Crew.W3D";
+	CHECK(_strlwr(lower) == lower);
+	CHECK_STR(lower, "tank_\xC9" "crew.w3d");
+
+	char upper[] = "Tank_\xE9" "crew.w3d";
+	CHECK(_strupr(upper) == upper);
+	CHECK_STR(upper, "TANK_\xE9" "CREW.W3D");
+
+	char plain[] = "MiXeD9";
+	CHECK_STR(strlwr(plain), "mixed9");
+	CHECK_STR(strupr(plain), "MIXED9");
 }
 
 TEST(strtrim_in_place)
@@ -1115,6 +1185,241 @@ TEST(ramfile_read_write_seek)
 	file.Close();
 }
 
+//////////////////////////////////////////////////////////////////////////////
+// RawFileClass, against the disk
+//
+// These go through the real file system, on purpose: RawFileClass's platform
+// arms are the thing under test.  They were written for B5's POSIX port, whose
+// predecessor - an _UNIX arm on stdio - truncated a file opened READ|WRITE,
+// answered 0 from every seek and returned Unix time where callers keep DOS
+// time.  What they do NOT establish: share modes (POSIX has none), behaviour
+// past 2GB, or anything about a path with a backslash in it (C1's).
+//////////////////////////////////////////////////////////////////////////////
+
+static const char *RAWFILE_TEST_NAME = "test_wwlib_rawfile.tmp";
+
+static void rawfile_write_fresh(const char *text)
+{
+	RawFileClass file(RAWFILE_TEST_NAME);
+	CHECK(file.Open(FileClass::WRITE) != 0);
+	CHECK_EQ(file.Write(text, (int)strlen(text)), (int)strlen(text));
+	file.Close();
+}
+
+/* The file's last-write time, set through the OS rather than through the class
+   under test, so the check below has an answer that does not come from
+   RawFileClass. */
+static bool rawfile_set_mtime_utc(const char *path, long long unix_seconds)
+{
+#if defined(_WIN32)
+	HANDLE h = CreateFileA(path, FILE_WRITE_ATTRIBUTES, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return false;
+	/* 100ns ticks since 1601-01-01, which is 11644473600 seconds before 1970. */
+	unsigned long long ticks = ((unsigned long long)unix_seconds + 11644473600ULL) * 10000000ULL;
+	FILETIME ft;
+	ft.dwLowDateTime = (DWORD)ticks;
+	ft.dwHighDateTime = (DWORD)(ticks >> 32);
+	BOOL ok = SetFileTime(h, NULL, &ft, &ft);
+	CloseHandle(h);
+	return ok != 0;
+#else
+	struct timeval tv[2];
+	tv[0].tv_sec = tv[1].tv_sec = (time_t)unix_seconds;
+	tv[0].tv_usec = tv[1].tv_usec = 0;
+	return utimes(path, tv) == 0;
+#endif
+}
+
+TEST(rawfile_read_write_open_keeps_what_is_there)
+{
+	rawfile_write_fresh("hello world");
+
+	/* SKB's OPEN_ALWAYS: opening READ|WRITE must not destroy the contents. */
+	RawFileClass file(RAWFILE_TEST_NAME);
+	CHECK(file.Open(FileClass::READ | FileClass::WRITE) != 0);
+	file.Close();
+	CHECK_EQ(file.Size(), 11);
+
+	char back[32];
+	memset(back, 0, sizeof(back));
+	CHECK(file.Open(FileClass::READ) != 0);
+	CHECK_EQ(file.Read(back, sizeof(back)), 11);	/* a short count at end of file */
+	CHECK_STR(back, "hello world");
+	file.Close();
+
+	/* WRITE is CREATE_ALWAYS, and does truncate.  A fresh object to ask: Size()
+	   leaves its answer in BiasLength, so the one above would say 11 forever -
+	   on every platform, since that part is shared code. */
+	rawfile_write_fresh("bye");
+	RawFileClass again(RAWFILE_TEST_NAME);
+	CHECK_EQ(again.Size(), 3);
+	CHECK(again.Delete() != 0);
+	CHECK(!again.Is_Available());
+}
+
+TEST(rawfile_seek_answers_the_new_position)
+{
+	rawfile_write_fresh("0123456789");
+
+	RawFileClass file(RAWFILE_TEST_NAME);
+	CHECK(file.Open(FileClass::READ) != 0);
+	CHECK_EQ(file.Seek(4, SEEK_SET), 4);
+	CHECK_EQ(file.Seek(2, SEEK_CUR), 6);
+	char c = 0;
+	CHECK_EQ(file.Read(&c, 1), 1);
+	CHECK_EQ(c, '6');
+	CHECK_EQ(file.Seek(-1, SEEK_END), 9);
+	CHECK_EQ(file.Seek(0, SEEK_END), 10);
+	file.Close();
+	file.Delete();
+}
+
+TEST(rawfile_date_time_is_dos_packed_utc)
+{
+	rawfile_write_fresh("x");
+
+	/* 1000000000 is 2001-09-09 01:46:40 UTC.  DOS date: (2001-1980)<<9 | 9<<5 | 9
+	   = 0x2B29; DOS time: 1<<11 | 46<<5 | 40/2 = 0x0DD4.  Worked by hand and by
+	   Python's datetime, not by the code under test.  On Windows this is also
+	   the check that FileTimeToDosDateTime does not move a UTC FILETIME into
+	   local time, which RawFileClass's POSIX arm assumes. */
+	CHECK(rawfile_set_mtime_utc(RAWFILE_TEST_NAME, 1000000000LL));
+
+	RawFileClass file(RAWFILE_TEST_NAME);
+	CHECK_EQ(file.Get_Date_Time(), 0x2B290DD4UL);	/* closed: opens, reads, closes */
+	CHECK(file.Open(FileClass::READ) != 0);
+	CHECK_EQ(file.Get_Date_Time(), 0x2B290DD4UL);	/* open */
+	file.Close();
+
+	/* And back the other way.  DOS time has two-second resolution, so the value
+	   written here is one it can hold exactly. */
+	CHECK(file.Open(FileClass::READ | FileClass::WRITE) != 0);
+	CHECK(file.Set_Date_Time(0x3A5C8B2EUL));	/* 2009-02-28 17:25:28 */
+	file.Close();
+	CHECK_EQ(file.Get_Date_Time(), 0x3A5C8B2EUL);
+
+	/* A month of 13 is not a date. */
+	CHECK(file.Open(FileClass::READ | FileClass::WRITE) != 0);
+	CHECK(!file.Set_Date_Time(((0x3A5CUL & ~(0xFUL << 5)) | (13UL << 5)) << 16));
+	file.Close();
+	file.Delete();
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Mix files
+//
+// A Renegade-era archive that Zero Hour never opens (ThumbnailManagerClass's
+// Pre_Init and Add_Thumbnail_Manager have no callers) but still links.  The
+// format's fields are 4 bytes; they were `long`, so on LP64 the reader took
+// 8-byte fields and misread every mix file, including its own writer's.  The
+// expected bytes below were built by hand in Python - struct.pack("<i") and
+// zlib.crc32 over the upper-cased name - not by the code under test, so a
+// writer and reader that agree with each other at the wrong width still fail.
+// What this does not establish: anything about a mix file from a real game
+// install, which Zero Hour does not ship.
+//////////////////////////////////////////////////////////////////////////////
+
+static const unsigned char MIX_EXPECTED[90] = {
+	0x4D, 0x49, 0x58, 0x31, 0x28, 0x00, 0x00, 0x00, 0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,	/* MIX1, table 40, names 68, unused */
+	0x61, 0x6C, 0x70, 0x68, 0x61, 0x00, 0x00, 0x00,													/* "alpha", padded to 8 */
+	0x62, 0x72, 0x61, 0x76, 0x6F, 0x21, 0x21, 0x21, 0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,	/* "bravo!!!!", padded */
+	0x02, 0x00, 0x00, 0x00,																			/* two files, sorted by CRC: */
+	0x88, 0xB8, 0xAC, 0x8B, 0x18, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00,							/* DIR\B.TXT 0x8BACB888 @24, 9 */
+	0x34, 0x9A, 0x8D, 0x96, 0x10, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00,							/* A.TXT     0x968D9A34 @16, 5 */
+	0x02, 0x00, 0x00, 0x00,																			/* names, same order: */
+	0x0A, 0x64, 0x69, 0x72, 0x5C, 0x42, 0x2E, 0x54, 0x58, 0x54, 0x00,								/* "dir\B.TXT" - backslash kept */
+	0x06, 0x41, 0x2E, 0x54, 0x58, 0x54, 0x00,														/* "A.TXT" */
+};
+
+static void mix_write_source(const char *name, const char *text)
+{
+	RawFileClass file(name);
+	CHECK(file.Open(FileClass::WRITE) != 0);
+	file.Write(text, (int)strlen(text));
+	file.Close();
+}
+
+static bool mix_read_member(MixFileFactoryClass &mix, const char *name, char *out, int size)
+{
+	memset(out, 0, size);
+	FileClass *file = mix.Get_File(name);
+	if (file == NULL) return false;
+	file->Open();
+	int got = file->Read(out, size - 1);
+	mix.Return_File(file);
+	return got > 0;
+}
+
+TEST(mixfile_writes_the_format_byte_for_byte)
+{
+	mix_write_source("test_wwlib_mix_a.tmp", "alpha");
+	mix_write_source("test_wwlib_mix_b.tmp", "bravo!!!!");
+	{
+		MixFileCreator creator("test_wwlib.mix");
+		creator.Add_File("test_wwlib_mix_a.tmp", "A.TXT");
+		creator.Add_File("test_wwlib_mix_b.tmp", "dir\\B.TXT");	/* archive-internal: keeps its backslash */
+	}	/* the destructor writes the table and patches the header */
+
+	RawFileClass raw("test_wwlib.mix");
+	unsigned char bytes[128];
+	memset(bytes, 0xCD, sizeof(bytes));
+	CHECK(raw.Open(FileClass::READ) != 0);
+	CHECK_EQ(raw.Read(bytes, sizeof(bytes)), (int)sizeof(MIX_EXPECTED));
+	raw.Close();
+	CHECK_MEM(bytes, MIX_EXPECTED, sizeof(MIX_EXPECTED));
+
+	RawFileClass("test_wwlib_mix_a.tmp").Delete();
+	RawFileClass("test_wwlib_mix_b.tmp").Delete();
+	raw.Delete();
+}
+
+TEST(mixfile_reads_and_flushes_through_the_real_file_system)
+{
+	/* Written from the expected bytes, not by MixFileCreator, so the reader is
+	   checked against the format rather than against the writer. */
+	{
+		RawFileClass out("test_wwlib.mix");
+		CHECK(out.Open(FileClass::WRITE) != 0);
+		CHECK_EQ(out.Write(MIX_EXPECTED, sizeof(MIX_EXPECTED)), (int)sizeof(MIX_EXPECTED));
+		out.Close();
+	}
+
+	SimpleFileFactoryClass ff;
+	char text[32];
+	{
+		MixFileFactoryClass mix("test_wwlib.mix", &ff);
+		CHECK(mix.Is_Valid());
+		DynamicVectorClass<StringClass> names;
+		CHECK(mix.Build_Filename_List(names));
+		CHECK_EQ(names.Count(), 2);
+
+		/* Member lookup is by CRC of the upper-cased name, so case does not matter. */
+		CHECK(mix_read_member(mix, "a.txt", text, sizeof(text)));
+		CHECK_STR(text, "alpha");
+		CHECK(mix_read_member(mix, "DIR\\b.txt", text, sizeof(text)));
+		CHECK_STR(text, "bravo!!!!");
+
+		/* Flush_Changes: the _splitpath, temp-name and delete/rename path.  Delete_File edits the
+		   internal list, which only Build_Internal_Filename_List fills; without it the delete
+		   matches nothing and the flush is correctly a no-op. */
+		CHECK(mix.Build_Internal_Filename_List());
+		mix.Delete_File("A.TXT");
+		mix.Flush_Changes();
+	}
+	CHECK(!RawFileClass("_tmpmix01.dat").Is_Available());	/* renamed over the original */
+
+	MixFileFactoryClass after("test_wwlib.mix", &ff);
+	CHECK(after.Is_Valid());
+	DynamicVectorClass<StringClass> left;
+	CHECK(after.Build_Filename_List(left));
+	CHECK_EQ(left.Count(), 1);
+	CHECK(!mix_read_member(after, "A.TXT", text, sizeof(text)));
+	CHECK(mix_read_member(after, "dir\\B.TXT", text, sizeof(text)));
+	CHECK_STR(text, "bravo!!!!");
+
+	RawFileClass("test_wwlib.mix").Delete();
+}
+
 TEST(chunkio_nested_chunks_round_trip)
 {
 	char storage[1024];
@@ -1265,6 +1570,7 @@ TEST(chunkio_seek_skips_payload)
 
 TEST(cpudetect_reports_something_sane)
 {
+#ifdef CPUDETECT_X86
 	/* Anything this port can run on has CPUID and RDTSC. */
 	CHECK(CPUDetectClass::Has_CPUID_Instruction());
 	CHECK(CPUDetectClass::Has_RDTSC_Instruction());
@@ -1273,6 +1579,22 @@ TEST(cpudetect_reports_something_sane)
 
 	CHECK(CPUDetectClass::Get_Processor_Speed() > 0);
 	CHECK(CPUDetectClass::Get_Processor_Ticks_Per_Second() > 0);
+#else
+	/* No x86 feature is present, and saying so is the correct answer rather than a missing one:
+	   anything that branches on SSE or MMX must take its plain path here. */
+	CHECK(!CPUDetectClass::Has_CPUID_Instruction());
+	CHECK(!CPUDetectClass::Has_RDTSC_Instruction());
+	CHECK(!CPUDetectClass::Has_MMX_Instruction_Set());
+	CHECK(!CPUDetectClass::Has_SSE_Instruction_Set());
+	CHECK_EQ((int)CPUDetectClass::Get_Processor_Manufacturer(), (int)CPUDetectClass::MANUFACTURER_UNKNOWN);
+
+	/* The open tier decision in cpudetect.h, by name, so changing it is seen here. */
+	CHECK_EQ(CPUDetectClass::Get_Processor_Speed(), CPUDETECT_UNMEASURED_PROCESSOR_MHZ);
+	CHECK_EQ(CPUDetectClass::Get_Processor_Ticks_Per_Second(), (sint64)0);
+
+	/* Memory and the OS used to be read only inside the CPUID block, which never runs here. */
+	CHECK(CPUDetectClass::Get_Available_Physical_Memory() > 0);
+#endif
 	CHECK(CPUDetectClass::Get_Total_Physical_Memory() > 0);
 
 	const char *name = CPUDetectClass::Get_Processor_Manufacturer_Name();
@@ -1326,6 +1648,20 @@ TEST(cpudetect_logs_are_printable)
 }
 
 //-------------------------------------------------------------------------------------------------
+// Worker names ------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+//
+// Except.cpp's thread list finds a thread by its name to unregister it, and asserts that the entry
+// it finds has that thread's ID; a Debug build aborts there (W3).  Two live threads with one name
+// break that, and so does a thread Stop() had to terminate: it never unregisters, so the next thread
+// with its name finds the stale entry first.  So every worker below is named once per instance.
+static std::string next_thread_name(const char *base)
+{
+	static std::atomic<int> serial(0);
+	return std::string(base) + std::to_string(++serial);
+}
+
+//-------------------------------------------------------------------------------------------------
 // ThreadClass::Stop() deadlock pattern -----------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 //
@@ -1345,20 +1681,39 @@ TEST(cpudetect_logs_are_printable)
 class LockLoopWorker : public ThreadClass
 {
 public:
-	LockLoopWorker(FastCriticalSectionClass &lock) : ThreadClass("LockLoopWorker"), m_lock(lock) {}
+	LockLoopWorker(FastCriticalSectionClass &lock) : ThreadClass(next_thread_name("LockLoopWorker").c_str()), m_lock(lock), m_looping(false) {}
+
+	/// Until the worker has taken the lock once, or about a second: true when it has
+	bool Wait_Until_Looping()
+	{
+		for (int i = 0; i < 1000 && !m_looping.load(); ++i)
+			ThreadClass::Sleep_Ms(1);
+		return m_looping.load();
+	}
 
 protected:
+	/* One difference from the loader: running is read only while the lock is held.  Read before taking
+	   it, as the loader does, the worker can release the lock, be preempted, and read running false
+	   after the test thread took the lock and called Stop() - so it exits without ever blocking, and
+	   Stop() returns early.  That window failed the deadlock test under ctest -j4 on a four-core Linux
+	   host (twice, the second in a CI run).  Read under the lock, a worker
+	   can only see running after acquiring the lock, which the test holds through Stop(), so the stall
+	   the test pins is certain; unlocked, the worker takes the lock, sees running false and exits. */
 	virtual void Thread_Function()
 	{
-		while (running)
+		for (;;)
 		{
 			FastCriticalSectionClass::LockClass lock(m_lock);
+			if (!running)
+				break;
+			m_looping.store(true);
 			for (volatile int i = 0; i < 2000; ++i) {}
 		}
 	}
 
 private:
 	FastCriticalSectionClass &m_lock;
+	std::atomic<bool> m_looping;
 };
 
 TEST(threadclass_stop_deadlocks_if_the_caller_holds_the_workers_lock)
@@ -1370,14 +1725,18 @@ TEST(threadclass_stop_deadlocks_if_the_caller_holds_the_workers_lock)
 	FastCriticalSectionClass lock;
 	LockLoopWorker worker(lock);
 	worker.Execute();
-	ThreadClass::Sleep_Ms(20); // let it get into its loop
+	/* In its loop before the lock is taken here, not after a fixed 20 ms sleep.  This check failed once
+	   (elapsed < 250) under ctest -j4 on a four-core machine (L1b, Linux x86_64) and not in 60 runs since;
+	   the likely reading is a worker not yet started, which sees running false and exits at once, so
+	   Stop() returns early.  Waiting for the loop removes that reading whichever it was. */
+	CHECK(worker.Wait_Until_Looping());
 
-	unsigned start = GetTickCount();
+	unsigned start = Clock_Milliseconds_Coarse();
 	{
 		FastCriticalSectionClass::LockClass held(lock);
 		worker.Stop(300);
 	}
-	unsigned elapsed = GetTickCount() - start;
+	unsigned elapsed = Clock_Milliseconds_Coarse() - start;
 
 	CHECK(elapsed >= 250);
 }
@@ -1392,11 +1751,212 @@ TEST(threadclass_stop_returns_promptly_when_called_unlocked)
 	worker.Execute();
 	ThreadClass::Sleep_Ms(20);
 
-	unsigned start = GetTickCount();
+	unsigned start = Clock_Milliseconds_Coarse();
 	worker.Stop(300);
-	unsigned elapsed = GetTickCount() - start;
+	unsigned elapsed = Clock_Milliseconds_Coarse() - start;
 
 	CHECK(elapsed < 250);
+}
+
+//-------------------------------------------------------------------------------------------------
+// The guarantees B14's rewrite has to keep ---------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+//
+// mutex.h's three lock classes and ThreadClass stopped being Win32 primitives and became standard
+// library ones.  Each of these pins a property that the Win32 version provided and that a
+// plausible "simplification" of the replacement would quietly take away - a non-recursive mutex
+// where a recursive one was needed, a poll that blocks, a thread id that is the same for every
+// thread.  None of them would fail as a wrong answer; they fail as a hang or as an assert that
+// passes from the wrong thread.
+//
+// Note the std::atomic on every flag these worker classes share with the thread that starts them.
+// The first draft of these tests used `volatile bool`, which is exactly the defect B14 had just
+// removed from ThreadClass::running - and ThreadSanitizer reported it, in the tests, on the run
+// meant to prove the fix.  `volatile` is the reflex; it orders nothing and it is not an atomic.
+// Anything shared with a worker here wants std::atomic, including in a test.
+
+TEST(criticalsectionclass_is_recursive)
+{
+	/* A Win32 CRITICAL_SECTION can be re-acquired by the thread that holds it, and this class
+	   was one.  Built against a std::mutex instead, this deadlocks on the second line - not
+	   eventually and not on some machines, but here, every time.  That is why the replacement is
+	   a std::recursive_mutex, and this test is what says so to whoever wonders why. */
+	CriticalSectionClass cs;
+	CriticalSectionClass::LockClass outer(cs);
+	CriticalSectionClass::LockClass inner(cs);
+	CHECK(true);	// reaching this line is the assertion
+}
+
+TEST(mutexclass_is_recursive)
+{
+	/* Likewise: a Win32 mutex is owned by a thread and re-acquiring it from that thread succeeds
+	   rather than blocking. */
+	MutexClass m;
+	MutexClass::LockClass a(m);
+	CHECK(!a.Failed());
+	MutexClass::LockClass b(m);
+	CHECK(!b.Failed());
+}
+
+class LockHolderWorker : public ThreadClass
+{
+public:
+	LockHolderWorker(MutexClass &m) : ThreadClass(next_thread_name("LockHolderWorker").c_str()), Held(false), m_mutex(m) {}
+	std::atomic<bool> Held;
+protected:
+	virtual void Thread_Function()
+	{
+		MutexClass::LockClass held(m_mutex);
+		Held = true;
+		while (running) { ThreadClass::Sleep_Ms(1); }
+	}
+private:
+	MutexClass &m_mutex;
+};
+
+TEST(mutexclass_poll_fails_rather_than_blocking)
+{
+	/* Lock(0) is WaitForSingleObject with a zero timeout: a poll.  Five GameSpy call sites take
+	   their mutex that way and carry on when it fails, so a replacement that blocked instead
+	   would turn a skipped update into a stalled network thread. */
+	MutexClass m;
+	LockHolderWorker worker(m);
+	worker.Execute();
+	while (!worker.Held) { ThreadClass::Sleep_Ms(1); }
+
+	MutexClass::LockClass poll(m, 0);
+	CHECK(poll.Failed());
+
+	worker.Stop(1000);
+}
+
+TEST(mutexclass_timed_acquire_gives_up_and_says_so)
+{
+	MutexClass m;
+	LockHolderWorker worker(m);
+	worker.Execute();
+	while (!worker.Held) { ThreadClass::Sleep_Ms(1); }
+
+	/* Timed with steady_clock (QueryPerformanceCounter on MSVC), not Clock_Milliseconds_Coarse: on Windows that
+	   is GetTickCount, in 15.625 ms ticks at the default timer resolution, and a 60 ms wait reads as 46.9 ms
+	   whenever only three tick boundaries fall inside it.  It failed the integration gate once (2026-09-27);
+	   on the VM, 200 such waits read as low as 47 ms by GetTickCount and never under 61 ms by steady_clock.
+	   The other coarse-clock bounds in this file allow 50 ms or more. */
+	std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+	{
+		MutexClass::LockClass timed(m, 60);
+		CHECK(timed.Failed());
+	}
+	CHECK(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() >= 50);
+
+	worker.Stop(1000);
+}
+
+class IdWorker : public ThreadClass
+{
+public:
+	IdWorker() : ThreadClass(next_thread_name("IdWorker").c_str()), Id(0), Stable(false) {}
+	std::atomic<unsigned> Id;
+	std::atomic<bool> Stable;
+protected:
+	virtual void Thread_Function()
+	{
+		Id = ThreadClass::_Get_Current_Thread_ID();
+		Stable = (Id == ThreadClass::_Get_Current_Thread_ID());
+		while (running) { ThreadClass::Sleep_Ms(1); }
+	}
+};
+
+TEST(thread_ids_are_distinct_stable_and_never_zero)
+{
+	/* Every use of _Get_Current_Thread_ID in the tree is an equality test against one stored
+	   earlier: DX8_THREAD_ASSERT, TextureLoader's three main-thread asserts, wwmemlog's
+	   per-thread category stack.  An id that repeats makes those pass from the wrong thread, and
+	   zero - which the old _UNIX branch returned for every thread - makes all of them pass from
+	   every thread. */
+	const unsigned mine = ThreadClass::_Get_Current_Thread_ID();
+	CHECK(mine != 0);
+	CHECK(mine == ThreadClass::_Get_Current_Thread_ID());
+
+	IdWorker a, b;
+	a.Execute();
+	b.Execute();
+	while (a.Id == 0 || b.Id == 0) { ThreadClass::Sleep_Ms(1); }
+
+	CHECK(a.Stable);
+	CHECK(b.Stable);
+	CHECK(a.Id != 0);
+	CHECK(b.Id != 0);
+	CHECK(a.Id != b.Id);
+	CHECK(a.Id != mine);
+	CHECK(b.Id != mine);
+
+	a.Stop(1000);
+	b.Stop(1000);
+}
+
+class CountingWorker : public ThreadClass
+{
+public:
+	CountingWorker() : ThreadClass(next_thread_name("CountingWorker").c_str()), Ticks(0) {}
+	std::atomic<long> Ticks;
+protected:
+	virtual void Thread_Function() { while (running) { ++Ticks; ThreadClass::Sleep_Ms(0); } }
+};
+
+TEST(threadclass_running_flag_reaches_the_worker)
+{
+	/* `running` was a volatile bool written by Stop() on one thread and read by Thread_Function
+	   on another.  MSVC's /volatile:ms gave that acquire/release semantics; clang gives it none,
+	   and ThreadSanitizer called it a data race on the first armed run.  It is a std::atomic<bool>
+	   now.  What this test pins is the consequence rather than the mechanism: a worker that never
+	   observes the write runs until Stop's timeout instead of stopping, so a prompt Stop is the
+	   evidence that the write got there. */
+	CountingWorker w;
+	CHECK(!w.Is_Running());
+	w.Execute();
+	CHECK(w.Is_Running());
+	ThreadClass::Sleep_Ms(30);
+
+	unsigned start = Clock_Milliseconds_Coarse();
+	w.Stop(3000);
+	CHECK((Clock_Milliseconds_Coarse() - start) < 1000);
+	CHECK(!w.Is_Running());
+	CHECK(w.Ticks > 0);
+}
+
+TEST(fastcriticalsection_serialises_a_plain_counter)
+{
+	/* The one lock in this header that is not recursive and never was - its own comment says so,
+	   and the old spin enforced it by spinning forever on a flag only the holder could clear.
+	   What it does guarantee is exclusion, over a counter that is deliberately not atomic so
+	   that a lock which stopped locking would show up as a wrong total rather than as nothing. */
+	FastCriticalSectionClass lock;
+	static long counter;	// static so the lambda-free worker below can reach it
+	counter = 0;
+
+	struct Bumper : public ThreadClass
+	{
+		/* Each its own name: WWLib's Unregister_Thread_ID finds a thread by name and asserts the id, so four
+		   live threads called "Bumper" failed that assert in a Debug build (W3). */
+		Bumper(FastCriticalSectionClass &l, long *c, const char *name) : ThreadClass(name), m_lock(l), m_counter(c) {}
+		virtual void Thread_Function()
+		{
+			for (int i = 0; i < 20000; ++i) {
+				FastCriticalSectionClass::LockClass held(m_lock);
+				++(*m_counter);
+			}
+			running = false;
+		}
+		FastCriticalSectionClass &m_lock;
+		long *m_counter;
+	};
+
+	Bumper a(lock, &counter, "BumperA"), b(lock, &counter, "BumperB"), c(lock, &counter, "BumperC"), d(lock, &counter, "BumperD");
+	a.Execute(); b.Execute(); c.Execute(); d.Execute();
+	a.Stop(30000); b.Stop(30000); c.Stop(30000); d.Stop(30000);
+
+	CHECK_EQ(counter, 4L * 20000L);
 }
 
 /* ---------------------------------------------------------------------------------------------
@@ -1489,4 +2049,108 @@ TEST(wcslcpy_and_wcslcat_count_characters_not_bytes)
 	wcscpy(dst, L"abc");
 	CHECK_EQ(6u, (unsigned)wcslcat(dst, L"def", 8));
 	CHECK(wcscmp(dst, L"abcdef") == 0);
+}
+
+//-------------------------------------------------------------------------------------------------
+//
+// threadwake.h: WW3D's texture loader thread sleeps on a ThreadWakeClass between tasks, where it used to
+// look at its queue every millisecond (textureloader.cpp).  WakeWorker plays that thread exactly: its loop
+// waits for work and takes one item a turn, and its own destructor Stop()s the wake before ~ThreadClass
+// joins it, as LoaderThreadClass's does.  A wake that could be lost leaves an item unserved; a Stop() that
+// could not reach a sleeping worker hangs the join.
+//
+#include "threadwake.h"
+
+class WakeWorker : public ThreadClass
+{
+public:
+	WakeWorker(ThreadWakeClass &wake, std::atomic<int> &pending, std::atomic<int> &served)
+		: ThreadClass("WakeWorker"), m_wake(wake), m_pending(pending), m_served(served) {}
+	~WakeWorker() { m_wake.Stop(); }
+
+	void Thread_Function()
+	{
+		while (running) {
+			if (!m_wake.Wait([this] { return m_pending.load() > 0; }))
+				break;
+			--m_pending;
+			++m_served;
+		}
+	}
+
+private:
+	ThreadWakeClass &m_wake;
+	std::atomic<int> &m_pending;
+	std::atomic<int> &m_served;
+};
+
+/// Until served reaches want, or about five seconds: true when it did.
+static bool wait_for_served(const std::atomic<int> &served, int want)
+{
+	for (int i = 0; i < 5000 && served.load() < want; ++i)
+		ThreadClass::Sleep_Ms(1);
+	return served.load() >= want;
+}
+
+static long long ms_since(std::chrono::steady_clock::time_point start)
+{
+	return (long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+}
+
+TEST(threadwake_serves_work_queued_while_the_worker_sleeps)
+{
+	ThreadWakeClass wake;
+	std::atomic<int> pending(0), served(0);
+	WakeWorker *worker = new WakeWorker(wake, pending, served);
+	worker->Execute();
+	ThreadClass::Sleep_Ms(100);		// asleep in Wait by now
+	CHECK_EQ(served.load(), 0);
+	for (int item = 1; item <= 3; ++item) {
+		++pending;
+		wake.Wake();
+		CHECK(wait_for_served(served, item));
+	}
+	const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+	delete worker;						// ~WakeWorker Stop()s the wake, then ~ThreadClass joins
+	CHECK(ms_since(start) < 1000);
+	CHECK_EQ(served.load(), 3);
+}
+
+TEST(threadwake_work_queued_before_the_first_wait_is_not_lost)
+{
+	ThreadWakeClass wake;
+	std::atomic<int> pending(1), served(0);
+	WakeWorker *worker = new WakeWorker(wake, pending, served);
+	worker->Execute();					// no Wake(): the work was there before the worker looked
+	CHECK(wait_for_served(served, 1));
+	delete worker;
+}
+
+TEST(threadwake_stop_ends_a_sleeping_worker_at_once)
+{
+	ThreadWakeClass wake;
+	std::atomic<int> pending(0), served(0);
+	WakeWorker *worker = new WakeWorker(wake, pending, served);
+	worker->Execute();
+	ThreadClass::Sleep_Ms(100);
+	const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+	wake.Stop();
+	delete worker;
+	CHECK(ms_since(start) < 1000);
+	CHECK(!wake.Wait([] { return true; }));	// stopped: even work does not keep a worker
+	CHECK_EQ(served.load(), 0);
+}
+
+TEST(threadwake_restart_lets_a_new_worker_run)
+{
+	ThreadWakeClass wake;
+	std::atomic<int> pending(0), served(0);
+	wake.Stop();
+	wake.Restart();						// as TextureLoader::Init does before Execute()
+	WakeWorker *worker = new WakeWorker(wake, pending, served);
+	worker->Execute();
+	++pending;
+	wake.Wake();
+	CHECK(wait_for_served(served, 1));
+	delete worker;
 }

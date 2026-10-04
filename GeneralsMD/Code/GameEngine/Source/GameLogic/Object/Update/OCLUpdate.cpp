@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -51,7 +53,7 @@ void parseFactionObjectCreationList( INI *ini, void *instance, void *store, cons
 
 	const char *token = ini->getNextToken( ini->getSepsColon() );
 
-	if ( stricmp(token, "Faction") == 0 )
+	if ( strcasecmp(token, "Faction") == 0 )
 	{
 		token = ini->getNextTokenOrNull( ini->getSepsColon() );
 		if (!token)	throw INI_INVALID_DATA;
@@ -63,7 +65,7 @@ void parseFactionObjectCreationList( INI *ini, void *instance, void *store, cons
 
 
 	token = ini->getNextTokenOrNull( ini->getSepsColon() );
-	if ( stricmp(token, "OCL") == 0 )
+	if ( strcasecmp(token, "OCL") == 0 )
 		ini->parseObjectCreationList( ini, instance, &info.m_ocl, NULL );
 	else
 		throw INI_INVALID_DATA;

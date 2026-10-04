@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /****************************************************************************
 *
@@ -60,11 +62,15 @@
 *
 ****************************************************************************/
 
-#include "targa.h"
+#include "TARGA.H"
 #ifndef TGA_USES_WWLIB_FILE_CLASSES
 #include <stdio.h>
 #endif
-#include <malloc.h>
+#if defined(_MSC_VER)
+#include <malloc.h>   // Microsoft puts malloc, _msize and _alloca here
+#else
+#include "Platform/MSVCCompat.h"   // <stdlib.h> and <alloca.h>, and _alloca's spelling
+#endif
 #include <memory.h>
 #include <string.h>
 #ifdef TGA_USES_WWLIB_FILE_CLASSES
@@ -73,7 +79,7 @@
 #else
 #include <io.h>
 #include <fcntl.h>
-#include <sys\stat.h>
+#include <sys/stat.h>
 #endif
 
 

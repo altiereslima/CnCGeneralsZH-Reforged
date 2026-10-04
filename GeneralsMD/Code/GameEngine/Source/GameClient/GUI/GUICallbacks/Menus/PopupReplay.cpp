@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -46,6 +47,7 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
 #include "Common/LocalFileSystem.h"
 #include "Common/MessageStream.h"
@@ -177,7 +179,7 @@ void PopupReplayUpdate( WindowLayout *layout, void *userData )
 	{
 		// the replay save confirmation popup is up
 		// check to see if its time to take it down.
-		if ((timeGetTime() - s_fileSavePopupStartTime) >= s_fileSavePopupDuration) 
+		if ((Clock_Milliseconds() - s_fileSavePopupStartTime) >= s_fileSavePopupDuration) 
 		{
 			ShowReplaySavedPopup(FALSE);
 
@@ -285,12 +287,23 @@ void reallySaveReplay(void)
 
 	if (TheLocalFileSystem->doesFileExist(filename.str()))
 	{
-		if(DeleteFile(filename.str()) == 0)
+		if(!TheLocalFileSystem->deleteFile(filename.str()))
 		{
-			wchar_t buffer[1024];
-			FormatMessageW ( FORMAT_MESSAGE_FROM_SYSTEM, NULL, GetLastError(), 0, buffer, sizeof(buffer), NULL);
+#if defined(_WIN32)
+			// Win32 only: WideChar and WCHAR are the same two bytes there, which is what makes the cast
+			// honest.  The size is in characters, as FormatMessageW takes it; it used to be
+			// sizeof(buffer), twice that.
+			WideChar buffer[1024];
+			FormatMessageW( FORMAT_MESSAGE_FROM_SYSTEM, NULL, GetLastError(), 0, reinterpret_cast<LPWSTR>( buffer ),
+				sizeof( buffer ) / sizeof( buffer[0] ), NULL );
 			UnicodeString errorStr;
 			errorStr.set(buffer);
+#else
+			// The system's reason, as the Windows branch shows it.  strerror is ASCII in the "C" locale
+			// the game keeps (see the port's locale rule), so translate() is exact here.
+			UnicodeString errorStr;
+			errorStr.translate(AsciiString(strerror(errno)));
+#endif
 			errorStr.trim();
 			if(messageBoxWin)
 			{
@@ -310,12 +323,21 @@ void reallySaveReplay(void)
 	}
 
 	// copy the replay to the right place
-	if(CopyFile(oldFilename.str(),filename.str(), FALSE) == 0)
+	if(!TheLocalFileSystem->copyFile(oldFilename.str(),filename.str(), FALSE))
 	{
-		wchar_t buffer[1024];
-		FormatMessageW( FORMAT_MESSAGE_FROM_SYSTEM, NULL, GetLastError(), 0, buffer, sizeof(buffer), NULL);
+#if defined(_WIN32)
+		// Win32 only: WideChar and WCHAR are the same two bytes there, which is what makes the cast
+		// honest.  The size is in characters, as FormatMessageW takes it; it used to be
+		// sizeof(buffer), twice that.
+		WideChar buffer[1024];
+		FormatMessageW( FORMAT_MESSAGE_FROM_SYSTEM, NULL, GetLastError(), 0, reinterpret_cast<LPWSTR>( buffer ),
+			sizeof( buffer ) / sizeof( buffer[0] ), NULL );
 		UnicodeString errorStr;
 		errorStr.set(buffer);
+#else
+		UnicodeString errorStr;
+		errorStr.translate(AsciiString(strerror(errno)));		// as the delete above
+#endif
 		errorStr.trim();
 		if(messageBoxWin)
 		{
@@ -334,7 +356,7 @@ void reallySaveReplay(void)
 	PopulateReplayFileListbox(listboxGames);
 
 	ShowReplaySavedPopup(TRUE);
-	s_fileSavePopupStartTime = timeGetTime();
+	s_fileSavePopupStartTime = Clock_Milliseconds();
 }
 
 //-------------------------------------------------------------------------------------------------

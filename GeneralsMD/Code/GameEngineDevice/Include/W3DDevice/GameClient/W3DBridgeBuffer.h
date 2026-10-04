@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -58,7 +60,7 @@
 #include "shader.h"
 #include "vertmaterial.h"
 #include "Lib/BaseType.h"
-#include "common/GameType.h"
+#include "Common/GameType.h"
 #include "Common/Dict.h"
 #include "Common/AsciiString.h"
 
@@ -69,6 +71,7 @@ class MeshClass;
 class W3DTerrainLogic;
 class W3DAssetManager;
 class SimpleSceneClass;
+enum BodyDamageType : Int;		// BodyModule.h; m_curDamageState below names it
 
 //-----------------------------------------------------------------------------
 //           Type Defines
@@ -158,6 +161,8 @@ public:
 	void clearAllBridges(void);
 	/// Draws the bridges.  Uses camera for culling.
 	void drawBridges(CameraClass * camera, Bool wireframe, TextureClass *cloudTexture);
+	/// Draws the decks into whatever depth target is bound, for the sun's shadow map.
+	void drawBridgeShadowCasters(void);
 	/// Called when the view changes, and sort key needs to be recalculated.
 	/// Normally sortKey gets calculated when a bridge becomes visible.
 	void doFullUpdate(void) {m_updateVis = true;};

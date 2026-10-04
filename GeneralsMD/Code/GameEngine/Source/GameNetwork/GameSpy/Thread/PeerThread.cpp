@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -30,11 +32,12 @@
 // Author: Matthew D. Campbell, June 2002
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
 #include "Common/Registry.h"
 #include "Common/StackDump.h"
 #include "Common/UserPreferences.h"
-#include "Common/Version.h"
+#include "Common/version.h"
 #include "GameNetwork/IPEnumeration.h"
 #include "GameNetwork/GameSpy/BuddyThread.h"
 #include "GameNetwork/GameSpy/PeerDefs.h"
@@ -95,6 +98,10 @@ static UnsignedInt s_lastStateChangedHeartbeat = 0;
 static Bool s_wantStateChangedHeartbeat = FALSE;
 static UnsignedInt s_heartbeatInterval = 10000;
 
+#if !defined(_WIN32)
+// winsock's name for a failed socket call's result; POSIX calls return -1 (ControlServer.cpp does the same).
+#define SOCKET_ERROR (-1)
+#endif
 static SOCKET qr2Sock = INVALID_SOCKET;
 
 enum
@@ -249,7 +256,7 @@ public:
 	UnsignedInt exeCRC( void ) { return m_exeCRC; }
 	UnsignedInt iniCRC( void ) { return m_iniCRC; }
 	UnsignedInt gameVersion( void ) { return m_gameVersion; }
-	std::wstring getLocalStagingServerName( void ) { return m_localStagingServerName; }
+	WideCharString getLocalStagingServerName( void ) { return m_localStagingServerName; }
 	Int getLocalRoomID( void ) { return m_localRoomID; }
 	std::string ladderIP( void ) { return m_ladderIP; }
 	UnsignedShort ladderPort( void ) { return m_ladderPort; }
@@ -331,7 +338,7 @@ private:
 
 	Int m_nextStagingServer;
 	std::map<Int, SBServer> m_stagingServers;
-	std::wstring m_localStagingServerName;
+	WideCharString m_localStagingServerName;
 	Int m_localRoomID;
 
 	void doQuickMatch( PEER peer );
@@ -513,7 +520,7 @@ Int PeerThreadClass::findServer( SBServer server )
 	return addServerToMap(server);
 }
 
-static enum CallbackType
+enum CallbackType
 {
 	CALLBACK_CONNECT,
 	CALLBACK_ERROR,
@@ -1143,7 +1150,11 @@ void checkQR2Queries( PEER peer, SOCKET sock )
 {
 	static char indata[INBUF_LEN];
 	struct sockaddr_in saddr;
+#if defined(_WIN32)
 	int saddrlen = sizeof(struct sockaddr_in);
+#else
+	socklen_t saddrlen = sizeof(struct sockaddr_in);		// recvfrom's length is a socklen_t off Windows
+#endif
 	fd_set set;
 	struct timeval timeout = {0,0};
 	int error;
@@ -1171,7 +1182,7 @@ static UnsignedInt localIP = 0;
 void PeerThreadClass::Thread_Function()
 {
 	try {
-	_set_se_translator( DumpExceptionInfo ); // Hook that allows stack trace.
+	InstallThreadExceptionTranslator(); // Hook that allows stack trace.
 
 	PEER peer;
 
@@ -1282,7 +1293,7 @@ void PeerThreadClass::Thread_Function()
 	peerSetRoomWatchKeys(peer, GroupRoom, 1, &key, PEERTrue);
 
 	m_localRoomID = 0;
-	m_localStagingServerName = L"";
+	m_localStagingServerName = u"";
 
 	m_qmStatus = QM_IDLE;
 
@@ -1500,24 +1511,24 @@ void PeerThreadClass::Thread_Function()
 
 					// Testing alternate way to push stats
 #ifdef USE_BROADCAST_KEYS
-					_snprintf(s_valueBuffers[0], 20, "%d", incomingRequest.statsToPush.locale);
-					_snprintf(s_valueBuffers[1], 20, "%d", incomingRequest.statsToPush.wins);
-					_snprintf(s_valueBuffers[2], 20, "%d", incomingRequest.statsToPush.losses);
-					_snprintf(s_valueBuffers[3], 20, "%d", incomingRequest.statsToPush.rankPoints);
-					_snprintf(s_valueBuffers[4], 20, "%d", incomingRequest.statsToPush.side);
-					_snprintf(s_valueBuffers[5], 20, "%d", incomingRequest.statsToPush.preorder);
+					snprintf(s_valueBuffers[0], 20, "%d", incomingRequest.statsToPush.locale);
+					snprintf(s_valueBuffers[1], 20, "%d", incomingRequest.statsToPush.wins);
+					snprintf(s_valueBuffers[2], 20, "%d", incomingRequest.statsToPush.losses);
+					snprintf(s_valueBuffers[3], 20, "%d", incomingRequest.statsToPush.rankPoints);
+					snprintf(s_valueBuffers[4], 20, "%d", incomingRequest.statsToPush.side);
+					snprintf(s_valueBuffers[5], 20, "%d", incomingRequest.statsToPush.preorder);
 					pushStatsToRoom(peer);
 #else
 					const char *keys[6] = { "locale", "wins", "losses", "points", "side", "pre" };
 					char valueStrings[6][20];
 					char *values[6] = { valueStrings[0], valueStrings[1], valueStrings[2],
 						valueStrings[3], valueStrings[4], valueStrings[5]};
-					_snprintf(values[0], 20, "%d", incomingRequest.statsToPush.locale);
-					_snprintf(values[1], 20, "%d", incomingRequest.statsToPush.wins);
-					_snprintf(values[2], 20, "%d", incomingRequest.statsToPush.losses);
-					_snprintf(values[3], 20, "%d", incomingRequest.statsToPush.rankPoints);
-					_snprintf(values[4], 20, "%d", incomingRequest.statsToPush.side);
-					_snprintf(values[5], 20, "%d", incomingRequest.statsToPush.preorder);
+					snprintf(values[0], 20, "%d", incomingRequest.statsToPush.locale);
+					snprintf(values[1], 20, "%d", incomingRequest.statsToPush.wins);
+					snprintf(values[2], 20, "%d", incomingRequest.statsToPush.losses);
+					snprintf(values[3], 20, "%d", incomingRequest.statsToPush.rankPoints);
+					snprintf(values[4], 20, "%d", incomingRequest.statsToPush.side);
+					snprintf(values[5], 20, "%d", incomingRequest.statsToPush.preorder);
 					peerSetGlobalKeys(peer, 6, (const char **)keys, (const char **)values);
 					peerSetGlobalWatchKeys(peer, GroupRoom,   0, NULL, PEERFalse);
 					peerSetGlobalWatchKeys(peer, StagingRoom, 0, NULL, PEERFalse);
@@ -1551,7 +1562,7 @@ void PeerThreadClass::Thread_Function()
 
 #ifdef DEBUG_LOGGING
 					static UnsignedInt prev = 0;
-					UnsignedInt now = timeGetTime();
+					UnsignedInt now = Clock_Milliseconds();
 					UnsignedInt diff = now - prev;
 					prev = now;
 #endif
@@ -1644,7 +1655,7 @@ void PeerThreadClass::Thread_Function()
 							peerJoinGroupRoom( peer, oldGroupID, joinRoomCallback, (void *)this, PEERTrue );
 						}
 						m_isHosting = FALSE;
-						m_localStagingServerName = L"";
+						m_localStagingServerName = u"";
 						m_playerNames[0] = "";
 					}
 					else
@@ -1654,7 +1665,7 @@ void PeerThreadClass::Thread_Function()
 							peerLeaveRoom( peer, GroupRoom, NULL );
 						}
 						isThreadHosting = 1; // debugging
-						s_lastStateChangedHeartbeat = timeGetTime(); // wait the full interval before updating state
+						s_lastStateChangedHeartbeat = Clock_Milliseconds(); // wait the full interval before updating state
 						s_wantStateChangedHeartbeat = FALSE;
 						m_isHosting = TRUE;
 						m_allowObservers = incomingRequest.stagingRoomCreation.allowObservers;
@@ -1745,7 +1756,7 @@ void PeerThreadClass::Thread_Function()
 
 		if (isThreadHosting && s_wantStateChangedHeartbeat)
 		{
-			UnsignedInt now = timeGetTime();
+			UnsignedInt now = Clock_Milliseconds();
 			if (now > s_lastStateChangedHeartbeat + s_heartbeatInterval)
 			{
 				s_lastStateChangedHeartbeat = now;
@@ -1754,7 +1765,7 @@ void PeerThreadClass::Thread_Function()
 
 #ifdef DEBUG_LOGGING
 				static UnsignedInt prev = 0;
-				UnsignedInt now = timeGetTime();
+				UnsignedInt now = Clock_Milliseconds();
 				UnsignedInt diff = now - prev;
 				prev = now;
 #endif
@@ -1779,7 +1790,7 @@ void PeerThreadClass::Thread_Function()
 		Switch_Thread();
 	}
 
-	DEBUG_LOG(("voluntarily ending peer thread %d\n", running));
+	DEBUG_LOG(("voluntarily ending peer thread %d\n", (Int)running.load()));	// an atomic cannot go through varargs; B14 made it one
 	peerShutdown( peer );
 
 	} catch ( ... ) {
@@ -1849,7 +1860,7 @@ void PeerThreadClass::handleQMMatch(PEER peer, Int mapIndex, Int seed,
 		Int i;
 		for (i =0; i<MAX_SLOTS; ++i)
 		{
-			if (playerName[i] && stricmp(playerName[i], m_loginName.c_str()))
+			if (playerName[i] && strcasecmp(playerName[i], m_loginName.c_str()))
 			{
 				peerMessagePlayer( peer, playerName[i], "We're matched!", NormalMessage );
 			}
@@ -2001,37 +2012,37 @@ void PeerThreadClass::doQuickMatch( PEER peer )
 								char buf[64];
 								buf[63] = '\0';
 								std::string msg = "\\CINFO";
-								_snprintf(buf, 63, "\\Widen\\%d", m_qmInfo.QM.widenTime);
+								snprintf(buf, 63, "\\Widen\\%d", m_qmInfo.QM.widenTime);
 								msg.append(buf);
-								_snprintf(buf, 63, "\\LadID\\%d", m_qmInfo.QM.ladderID);
+								snprintf(buf, 63, "\\LadID\\%d", m_qmInfo.QM.ladderID);
 								msg.append(buf);
-								_snprintf(buf, 63, "\\LadPass\\%d", m_qmInfo.QM.ladderPassCRC);
+								snprintf(buf, 63, "\\LadPass\\%d", m_qmInfo.QM.ladderPassCRC);
 								msg.append(buf);
-								_snprintf(buf, 63, "\\PointsMin\\%d", m_qmInfo.QM.minPointPercentage);
+								snprintf(buf, 63, "\\PointsMin\\%d", m_qmInfo.QM.minPointPercentage);
 								msg.append(buf);
-								_snprintf(buf, 63, "\\PointsMax\\%d", m_qmInfo.QM.maxPointPercentage);
+								snprintf(buf, 63, "\\PointsMax\\%d", m_qmInfo.QM.maxPointPercentage);
 								msg.append(buf);
-								_snprintf(buf, 63, "\\Points\\%d", m_qmInfo.QM.points);
+								snprintf(buf, 63, "\\Points\\%d", m_qmInfo.QM.points);
 								msg.append(buf);
-								_snprintf(buf, 63, "\\Discons\\%d", m_qmInfo.QM.discons);
+								snprintf(buf, 63, "\\Discons\\%d", m_qmInfo.QM.discons);
 								msg.append(buf);
-								_snprintf(buf, 63, "\\DisconMax\\%d", m_qmInfo.QM.maxDiscons);
+								snprintf(buf, 63, "\\DisconMax\\%d", m_qmInfo.QM.maxDiscons);
 								msg.append(buf);
-								_snprintf(buf, 63, "\\NumPlayers\\%d", m_qmInfo.QM.numPlayers);
+								snprintf(buf, 63, "\\NumPlayers\\%d", m_qmInfo.QM.numPlayers);
 								msg.append(buf);
-								_snprintf(buf, 63, "\\Pings\\%s", m_qmInfo.QM.pings);
+								snprintf(buf, 63, "\\Pings\\%s", m_qmInfo.QM.pings);
 								msg.append(buf);
-								_snprintf(buf, 63, "\\IP\\%d", ntohl(peerGetLocalIP(peer)));// not ntohl(localIP), as we need EXTERNAL address for proper NAT negotiation!
+								snprintf(buf, 63, "\\IP\\%d", ntohl(peerGetLocalIP(peer)));// not ntohl(localIP), as we need EXTERNAL address for proper NAT negotiation!
 								msg.append(buf);
-								_snprintf(buf, 63, "\\Side\\%d", m_qmInfo.QM.side);
+								snprintf(buf, 63, "\\Side\\%d", m_qmInfo.QM.side);
 								msg.append(buf);
-								_snprintf(buf, 63, "\\Color\\%d", m_qmInfo.QM.color);
+								snprintf(buf, 63, "\\Color\\%d", m_qmInfo.QM.color);
 								msg.append(buf);
-								_snprintf(buf, 63, "\\NAT\\%d", m_qmInfo.QM.NAT);
+								snprintf(buf, 63, "\\NAT\\%d", m_qmInfo.QM.NAT);
 								msg.append(buf);
-								_snprintf(buf, 63, "\\EXE\\%d", m_qmInfo.QM.exeCRC);
+								snprintf(buf, 63, "\\EXE\\%d", m_qmInfo.QM.exeCRC);
 								msg.append(buf);
-								_snprintf(buf, 63, "\\INI\\%d", m_qmInfo.QM.iniCRC);
+								snprintf(buf, 63, "\\INI\\%d", m_qmInfo.QM.iniCRC);
 								msg.append(buf);
 								buf[0] = 0;
 								msg.append("\\Maps\\");
@@ -2721,7 +2732,7 @@ void playerLeftCallback(PEER peer, RoomType roomType, const char * nick, const c
 //	DEBUG_ASSERTCRASH(t, ("No Peer thread!"));
 	if (t->getQMStatus() != QM_IDLE && t->getQMStatus() != QM_STOPPED)
 	{
-		if (!stricmp(t->getQMBotName().c_str(), nick))
+		if (!strcasecmp(t->getQMBotName().c_str(), nick))
 		{
 			// matchbot left - bail
 			PeerResponse resp;
@@ -2905,9 +2916,9 @@ static void listingGamesCallback(PEER peer, PEERBool success, const char * name,
 		const char *ladIPStr = SBServerGetStringValue(server, LADIP_STR, "000000");
 		const char *pingStr = SBServerGetStringValue(server, PINGSTR_STR, "FFFFFFFFFFFFFFFF");
 		UnsignedShort ladPort = (UnsignedShort)SBServerGetIntValue(server, LADPORT_STR, 0);
-		UnsignedInt verVal = strtoul(verStr, NULL, 10);
-		UnsignedInt exeVal = strtoul(exeStr, NULL, 10);
-		UnsignedInt iniVal = strtoul(iniStr, NULL, 10);
+		UnsignedInt verVal = strtoulAsWindows(verStr);
+		UnsignedInt exeVal = strtoulAsWindows(exeStr);
+		UnsignedInt iniVal = strtoulAsWindows(iniStr);
 		resp.stagingRoom.requiresPassword = hasPassword;
 		resp.stagingRoom.allowObservers = allowObservers;
     resp.stagingRoom.useStats = usesStats;

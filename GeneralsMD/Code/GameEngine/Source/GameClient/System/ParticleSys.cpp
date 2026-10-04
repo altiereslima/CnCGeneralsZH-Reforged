@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -62,6 +64,20 @@
 //#include "Common/PerfTimer.h"
 
 //static PerfTimer s_particleSys("ParticleSys::update", false, PERFMETRICS_LOGIC_STARTFRAME, PERFMETRICS_LOGIC_STOPFRAME);
+//-------------------------------------------------------------------------------------------------
+/* An INI timer, in frames.  A negative one (no shipped particle system has one) never runs out, as the
+	 Windows build is understood to behave; C leaves converting it to an unsigned count undefined, and
+	 ARM64 made it 0: a system that started at once, and a negative BurstDelay that burst every frame.
+	 "Never" is 2^24 frames, six days, small enough that the burst delay's LOD coefficient cannot push
+	 it out of range.  Anything from -1 up converts as it always did. */
+static UnsignedInt particleTimerFrames( Real value )
+{
+	const UnsignedInt never = 1u << 24;
+	if( !(value > -1.0f) || !(value < (Real)never) )
+		return never;
+	return (UnsignedInt)value;
+}
+
 //-------------------------------------------------------------------------------------------------
 
 // the singleton
@@ -344,6 +360,21 @@ Particle::~Particle()
 	TheParticleSystemManager->removeParticle(this);
 
 	//DEBUG_ASSERTLOG(!(totalParticleCount % 100 == 0), ( "TotalParticleCount = %d\n", m_totalParticleCount ));
+}
+
+// ------------------------------------------------------------------------------------------------
+/** See ParticleSys.h.  The density scales the optical depth the alpha implies and is untuned; a
+ * particle fainter than the thinnest casts nothing. */
+// ------------------------------------------------------------------------------------------------
+Real particleSunMapOpticalDepth( Real alpha, UnsignedInt layers )
+{
+	const Real SUN_MAP_DENSITY = 1.0f;
+	const Real SUN_MAP_THINNEST = 0.02f;
+	if (alpha < SUN_MAP_THINNEST)
+		return 0.0f;
+	if (alpha > 0.95f)
+		alpha = 0.95f;
+	return -(Real)log( 1.0f - alpha ) * (Real)( layers > 1 ? layers : 1 ) * SUN_MAP_DENSITY;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1330,7 +1361,7 @@ ParticleSystem::ParticleSystem( const ParticleSystemTemplate *sysTemplate,
 
 	m_isOneShot = sysTemplate->m_isOneShot;
 
-	m_delayLeft = (UnsignedInt)sysTemplate->m_initialDelay.getValue();
+	m_delayLeft = particleTimerFrames( sysTemplate->m_initialDelay.getValue() );
 
 	m_startTimestamp = TheGameClient->getFrame();
 	m_systemLifetimeLeft = sysTemplate->m_systemLifetime;
@@ -1404,6 +1435,7 @@ ParticleSystem::ParticleSystem( const ParticleSystemTemplate *sysTemplate,
 	m_personalityStore = 0;
 	m_controlParticle = NULL;
 	m_groundShadow = NULL;
+	m_inSunMap = FALSE;
 
 	// A system built without an id yet - the load path does that, so it can restore the saved id
 	// first - registers itself once it has one, rather than here where the manager would file it
@@ -1948,9 +1980,7 @@ Particle *ParticleSystem::createParticle( const ParticleInfo *info,
 		{
 			// "-particlecap" stands in for the options slider, which the LOD manager applies long
 			// after the command line is parsed
-			Int shippedCap = (TheGlobalData->m_particleCapOverride > 0)
-												 ? TheGlobalData->m_particleCapOverride
-												 : TheGlobalData->m_maxParticleCount;
+			Int shippedCap = TheGlobalData->getEffectiveParticleCap();
 			Int particleCap = particleSmokeParticleCap( shippedCap, TheGlobalData->m_smokeThickness );
 			int numInExcess = TheParticleSystemManager->getParticleCount() - (UnsignedInt)particleCap;
 			if ( numInExcess > 0)
@@ -2041,7 +2071,7 @@ const ParticleInfo *ParticleSystem::generateParticleInfo( Int particleNum, Int p
 	info.m_angleZ = m_angleZ.getValue();
 	info.m_angularRateZ = m_angularRateZ.getValue();
 
-	info.m_lifetime = (UnsignedInt)m_lifetime.getValue();
+	info.m_lifetime = particleTimerFrames( m_lifetime.getValue() );
 
 	info.m_size = m_startSize.getValue()*m_sizeCoeff*TheGlobalData->m_particleScale;
 	info.m_sizeRate = m_sizeRate.getValue()*m_sizeCoeff*TheGlobalData->m_particleScale;
@@ -2244,7 +2274,9 @@ Bool ParticleSystem::updateEmission( Int localPlayerIndex, Bool *keepSystem )
 					// emit a burst of particles
 					Int count = REAL_TO_INT(m_burstCount.getValue());
 
-					count *= m_countCoeff;
+					// Windows' conversion: a huge count scaled past the int range is INT_MIN there, no burst,
+					// where ARM64 saturated to INT_MAX and emitted until the loop ran out
+					count = floatToIntAsMsvc(count * m_countCoeff);
 
 					for( Int i=0; i<count; i++ )
 					{
@@ -2280,7 +2312,7 @@ Bool ParticleSystem::updateEmission( Int localPlayerIndex, Bool *keepSystem )
 					}
 						
 					// compute next burst delay
-					m_burstDelayLeft = (UnsignedInt)m_burstDelay.getValue();
+					m_burstDelayLeft = particleTimerFrames( m_burstDelay.getValue() );
 					m_burstDelayLeft *= m_delayCoeff;
 				}
 				else
@@ -2494,6 +2526,10 @@ Bool ParticleSystem::shouldCastGroundShadow( void ) const
 		return FALSE;
 
 	if (m_shaderType != ALPHA && m_shaderType != ALPHA_TEST)
+		return FALSE;
+
+	// the sun's map holds this cloud already and shades the ground under it through its own density
+	if (m_inSunMap)
 		return FALSE;
 
 	if (m_isGroundAligned)

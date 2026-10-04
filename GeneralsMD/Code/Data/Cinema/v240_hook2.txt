@@ -1,0 +1,5 @@
+# The 2.4.0 video's opening, close and low from the other side: the same match as v240_hook.txt,
+# looking the opposite way over the American line, held still so the fight crosses the frame.
+
+26.0  cut     1000 2100 0.45 -135 14
+50.3  end

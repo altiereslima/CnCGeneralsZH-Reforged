@@ -17,6 +17,10 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#ifdef _WIN32
+#include <io.h>
+#endif
 
 namespace
 {
@@ -508,9 +512,25 @@ TEST(file_exists_and_remove_file)
 	CHECK(!cMiscUtil::File_Exists("no_such_directory_here\\no_such_file.xyz"));
 }
 
+/* Sets or clears write permission, the way each platform spells read only. */
+static void set_temp_file_read_only(bool read_only)
+{
+#ifdef _WIN32
+	_chmod(TEMP_FILE, read_only ? _S_IREAD : (_S_IREAD | _S_IWRITE));
+#else
+	chmod(TEMP_FILE, read_only ? 0444 : 0644);
+#endif
+}
+
 TEST(file_is_read_only)
 {
 	write_temp_file("wwutil");
+	CHECK(!cMiscUtil::File_Is_Read_Only(TEMP_FILE));
+
+	/* The case that says yes, without which a function answering "no" to everything passes. */
+	set_temp_file_read_only(true);
+	CHECK(cMiscUtil::File_Is_Read_Only(TEMP_FILE));
+	set_temp_file_read_only(false);	/* DeleteFile refuses a read-only file */
 	CHECK(!cMiscUtil::File_Is_Read_Only(TEMP_FILE));
 
 	/* A missing file reports "not read only" rather than failing. */
@@ -537,7 +557,11 @@ TEST(get_file_id_string_strips_the_directory)
 	write_temp_file("abc");
 
 	char with_dot[128];
+#ifdef _WIN32
 	sprintf(with_dot, ".\\%s", TEMP_FILE);
+#else
+	sprintf(with_dot, "./%s", TEMP_FILE);
+#endif
 
 	StringClass id;
 	cMiscUtil::Get_File_Id_String(with_dot, id);

@@ -1,0 +1,18 @@
+# Infantry before and after e30331cd, over Scenarios/infantrywalk.txt on Twilight Flame, seed 7:
+# the Red Guard's episode. Reverse west at frame 3040, back east at 3160, stop at 3280, move at
+# 3340 and attack-move past the Hacker at 3460. Followed from its spawn at 900,3500; heading 0 puts
+# east on the right of the frame. Camera taken at 3 s for the reason inf_jam.txt gives; the view
+# there is absolute 3.58 on this map, so 0.14 is absolute 0.5. At 0.09 (absolute 0.32) every
+# picture came out black. At 114 s the follow lets go for a held frame with the Red Guard on the
+# left and the Hacker (1428,3538) on the right; followed at absolute 0.61 the Hacker was off frame.
+#
+#   -observer -takeover -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario infantrywalk
+#   -cinema inf_walk -video 3000 3580 <name> -maxframes 3590
+
+3      cut     900 3500 0.3 0 -10
+84.5   follow  ChinaInfantryRedguard
+96     zoom    0.14 2
+100.2  shot
+114    cut     1355 3570 0.26 0 -10
+117    shot
+120    end

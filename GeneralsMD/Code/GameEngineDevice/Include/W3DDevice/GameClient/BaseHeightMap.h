@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -37,7 +39,8 @@
 #include "shader.h"
 #include "vertmaterial.h"
 #include "Lib/BaseType.h"
-#include "common/GameType.h"
+#include "GameLogic/TerrainHeightSampling.h"
+#include "Common/GameType.h"
 #include "WorldHeightMap.h"
 
 #define MAX_ENABLED_DYNAMIC_LIGHTS 20
@@ -148,22 +151,10 @@ public:
   }
 
 
+	/// TerrainHeightSampling::getClipHeight on this object's map (the text was here; T1 moved it to gameengine).
 	inline UnsignedByte getClipHeight(Int x, Int y) const
 	{
-		Int xextent = m_map->getXExtent() - 1;
-		Int yextent = m_map->getYExtent() - 1;
-
-		if (x < 0) 
-			x = 0; 
-		else if (x > xextent) 
-			x = xextent;
-
-		if (y < 0) 
-			y = 0; 
-		else if (y > yextent) 
-			y = yextent;
-
-		return m_map->getDataPtr()[x + y*m_map->getXExtent()];
+		return TerrainHeightSampling::getClipHeight(m_map, x, y);
 	}
 
 	/// Update the macro texture (pass 3).
@@ -211,6 +202,7 @@ public:
 	void removeTerrainBibHighlighting(void);
 
 	W3DShroud *getShroud()	{return m_shroud;}
+	W3DBridgeBuffer *getBridgeBuffer()	{return m_bridgeBuffer;}
 	void updateShorelineTiles(Int minX, Int minY, Int maxX, Int maxY, WorldHeightMap *pMap);	///<figure out which tiles on this map cross water plane
 	void updateShorelineTile(Int X, Int Y, Int Border, WorldHeightMap *pMap);	///<figure out which tiles on this map cross water plane
 	void recordShoreLineSortInfos(void);

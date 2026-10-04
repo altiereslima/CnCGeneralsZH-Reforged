@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -46,7 +48,7 @@
 #include "GameClient/GadgetTextEntry.h"
 #include "GameClient/GadgetStaticText.h"
 #include "GameClient/GadgetPushButton.h"
-#include "GameClient/GadgetCheckbox.h"
+#include "GameClient/GadgetCheckBox.h"
 #include "GameClient/MapUtil.h"
 #include "GameClient/Mouse.h"
 #include "GameClient/GameWindowTransitions.h"
@@ -283,7 +285,7 @@ void StartPressed(void)
 		{
 			UnicodeString text;
 			text.format(TheGameText->fetch("LAN:TooManyPlayers"), (md)?md->m_numPlayers:0);
-			TheLAN->OnChat(UnicodeString(L"SYSTEM"), TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
+			TheLAN->OnChat(UnicodeString(u"SYSTEM"), TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
 		}
 		return;
 	}
@@ -294,7 +296,7 @@ void StartPressed(void)
 		if (TheLAN->AmIHost())
 		{
 			UnicodeString text = TheGameText->fetch("GUI:NeedHumanPlayers");
-			TheLAN->OnChat(UnicodeString(L"SYSTEM"), TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
+			TheLAN->OnChat(UnicodeString(u"SYSTEM"), TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
 		}
 		return;
 	}
@@ -306,7 +308,7 @@ void StartPressed(void)
 		{
 			UnicodeString text;
 			text.format(TheGameText->fetch("LAN:NeedMorePlayers"),numUsers);
-			TheLAN->OnChat(UnicodeString(L"SYSTEM"), TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
+			TheLAN->OnChat(UnicodeString(u"SYSTEM"), TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
 		}
 		return;
 	}
@@ -335,7 +337,7 @@ void StartPressed(void)
 		{
 			UnicodeString text;
 			text.format(TheGameText->fetch("LAN:NeedMoreTeams"));
-			TheLAN->OnChat(UnicodeString(L"SYSTEM"), TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
+			TheLAN->OnChat(UnicodeString(u"SYSTEM"), TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
 		}
 		return;
 	}
@@ -344,7 +346,7 @@ void StartPressed(void)
 	{
 		UnicodeString text;
 		text.format(TheGameText->fetch("GUI:SandboxMode"));
-			TheLAN->OnChat(UnicodeString(L"SYSTEM"), TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
+			TheLAN->OnChat(UnicodeString(u"SYSTEM"), TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
 	}
 
 	// see if everyone's accepted and count the number of players in the game
@@ -353,12 +355,12 @@ void StartPressed(void)
 	Bool willTransfer = TRUE;
 	if (mapData)
 	{
-		mapDisplayName.format(L"%ls", mapData->m_displayName.str());
+		mapDisplayName.format(u"%ls", mapData->m_displayName.str());
 		willTransfer = !mapData->m_isOfficial;
 	}
 	else
 	{
-		mapDisplayName.format(L"%hs", myGame->getMap().str());
+		mapDisplayName.format(u"%hs", myGame->getMap().str());
 		willTransfer = WouldMapTransfer(myGame->getMap());
 	}
 	for( i = 0; i < MAX_SLOTS; i++ )
@@ -451,7 +453,7 @@ static void handleColorSelection(int index)
 	GameWindow *combo = comboBoxColor[index];
 	Int color, selIndex;
 	GadgetComboBoxGetSelectedPos(combo, &selIndex);
-	color = (Int)GadgetComboBoxGetItemData(combo, selIndex);
+	color = (Int)(intptr_t)GadgetComboBoxGetItemData(combo, selIndex);
 
 	LANGameInfo *myGame = TheLAN->GetMyGame();
 
@@ -509,7 +511,7 @@ static void handlePlayerTemplateSelection(int index)
 	GameWindow *combo = comboBoxPlayerTemplate[index];
 	Int playerTemplate, selIndex;
 	GadgetComboBoxGetSelectedPos(combo, &selIndex);
-	playerTemplate = (Int)GadgetComboBoxGetItemData(combo, selIndex);
+	playerTemplate = (Int)(intptr_t)GadgetComboBoxGetItemData(combo, selIndex);
 	LANGameInfo *myGame = TheLAN->GetMyGame();
 
 	if (myGame)
@@ -621,7 +623,7 @@ static void handleTeamSelection(int index)
 	GameWindow *combo = comboBoxTeam[index];
 	Int team, selIndex;
 	GadgetComboBoxGetSelectedPos(combo, &selIndex);
-	team = (Int)GadgetComboBoxGetItemData(combo, selIndex);
+	team = (Int)(intptr_t)GadgetComboBoxGetItemData(combo, selIndex);
 	LANGameInfo *myGame = TheLAN->GetMyGame();
 
 	if (myGame)
@@ -666,7 +668,7 @@ static void handleStartingCashSelection()
     GadgetComboBoxGetSelectedPos(comboBoxStartingCash, &selIndex);
 
     Money startingCash;
-    startingCash.deposit( (UnsignedInt)GadgetComboBoxGetItemData( comboBoxStartingCash, selIndex ), FALSE );
+    startingCash.deposit( (UnsignedInt)(uintptr_t)GadgetComboBoxGetItemData( comboBoxStartingCash, selIndex ), FALSE );
     myGame->setStartingCash( startingCash );
     myGame->resetAccepted();
 
@@ -1149,7 +1151,7 @@ void updateGameOptions( void )
 		const MapMetaData *mapData = TheMapCache->findMap( TheLAN->GetMyGame()->getMap() );
 		if (mapData && localSlot && localSlot->hasMap())
 		{
-			mapDisplayName.format(L"%ls", mapData->m_displayName.str());
+			mapDisplayName.format(u"%ls", mapData->m_displayName.str());
 		}
 		else
 		{
@@ -1158,7 +1160,7 @@ void updateGameOptions( void )
 			{
 				s = s.reverseFind('\\') + 1;
 			}
-			mapDisplayName.format(L"%hs", s.str());
+			mapDisplayName.format(u"%hs", s.str());
 		}
 		UnicodeString old = GadgetStaticTextGetText(textEntryMapDisplay);
 		if(old.compare(mapDisplayName) != 0)
@@ -1171,7 +1173,7 @@ void updateGameOptions( void )
     Int index;
     for ( index = 0; index < itemCount; index++ )
     {
-      Int value  = (Int)GadgetComboBoxGetItemData(comboBoxStartingCash, index);
+      Int value  = (Int)(intptr_t)GadgetComboBoxGetItemData(comboBoxStartingCash, index);
       if ( value == theGame->getStartingCash().countMoney() )
       {
         GadgetComboBoxSetSelectedPos(comboBoxStartingCash, index, TRUE);
@@ -1398,7 +1400,7 @@ WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt m
 						  // Get
 						  Int pos = -1;
 						  GadgetComboBoxGetSelectedPos(comboBoxPlayer[i], &pos);
-						  SlotState pickedState = (pos >= 0) ? (SlotState)(Int)GadgetComboBoxGetItemData(comboBoxPlayer[i], pos) : SLOT_OPEN;
+						  SlotState pickedState = (pos >= 0) ? (SlotState)(Int)(intptr_t)GadgetComboBoxGetItemData(comboBoxPlayer[i], pos) : SLOT_OPEN;
 						  if( pos >= 0 )
 						  {
 							  if( myGame->getLANSlot(i)->getState() == SLOT_PLAYER )

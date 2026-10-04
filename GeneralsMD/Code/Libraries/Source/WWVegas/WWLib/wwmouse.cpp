@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -122,7 +123,7 @@ void CALLBACK Callback_Process_Mouse( UINT, UINT, DWORD, DWORD, DWORD  )
  *   03/10/1997 JLB : Created.                                                                 *
  *=============================================================================================*/
 WWMouseClass::WWMouseClass(Surface * surfaceptr, HWND window) :
-	Blocked(false),
+	Blocked(0),
 	MouseState(-1),
 	IsCaptured(false),
 	MouseX(0),
@@ -701,7 +702,7 @@ void WWMouseClass::Show_Mouse(void)
 		ShowCursor(TRUE);
 	} else {
 		Block_Mouse();
-		InterlockedIncrement(&MouseState);
+		MouseState.fetch_add(1, std::memory_order_acq_rel);
 		if (MouseState == 0) {
 			Low_Show_Mouse();
 		}
@@ -733,7 +734,7 @@ void WWMouseClass::Hide_Mouse(void)
 		ShowCursor(FALSE);
 	} else {
 		Block_Mouse();
-		InterlockedDecrement(&MouseState);
+		MouseState.fetch_sub(1, std::memory_order_acq_rel);
 		if (MouseState == -1) {
 			Low_Hide_Mouse();
 		}

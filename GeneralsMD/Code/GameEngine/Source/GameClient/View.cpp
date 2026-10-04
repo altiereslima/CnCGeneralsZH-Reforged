@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -333,7 +335,6 @@ void View::xfer( Xfer *xfer )
 	// camera angle
 	Real angle = getAngle();
 	xfer->xferReal( &angle );
-	setAngle( angle );
 
 	// view position
 	Coord3D viewPos;
@@ -341,6 +342,14 @@ void View::xfer( Xfer *xfer )
 	xfer->xferReal( &viewPos.x );
 	xfer->xferReal( &viewPos.y );
 	xfer->xferReal( &viewPos.z );
-	lookAt( &viewPos );
+
+	// Only when loading: setting the camera to where it already is re-applies it, and the replay
+	// viewer saves a checkpoint every 900 frames, so the camera was nudged, or a move in progress
+	// stopped, at each one (the client twin of port defect 20).
+	if( xfer->getXferMode() == XFER_LOAD )
+	{
+		setAngle( angle );
+		lookAt( &viewPos );
+	}
 
 }  // end xfer

@@ -70,8 +70,9 @@ static const UnsignedInt DIRECTOR_SIGHT_FRAMES = 8 * LOGICFRAMES_PER_SECOND;
 static const size_t DIRECTOR_SEEN_COUNT = 3;
 /// further apart than this the camera cuts rather than pans: a pan across the map shows nothing
 static const Real CUT_DISTANCE = 700.0f;
-/// the camera found further than this from where it was put was moved by something else, the radar
-/// most likely; the edge of the map pulls it back by less
+/// the camera found further than this from where it was put was moved by something else, a click on
+/// the production strip or a jump to a group; the edge of the map pulls it back by less.  The radar
+/// hands the camera over itself, since a click near the camera and a drag both move it by less
 static const Real HAND_JUMP_DISTANCE = 400.0f;
 /// how quickly the camera closes on where it is going, in seconds to cover about two thirds of it
 static const Real DIRECTOR_PAN_SECONDS = 0.35f;

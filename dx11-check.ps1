@@ -1,7 +1,7 @@
 # Photograph the same frame of the same match twice, once through Direct3D 9 and once through the
 # Direct3D 11 backend, and count the pixels between them.
 #
-# This is RENDERER-ROADMAP.md phase 2's exit measurement.  Everything else about the backend is a
+# This is the Direct3D 11 backend's exit measurement.  Everything else about the backend is a
 # count - buffers mirrored, pipelines built, draws made and refused - and a run can have all of
 # those right and still draw the wrong picture: the white terrain had a correct atlas, a correct
 # program and a correct draw count for two sessions.  Only two pictures of one frame settle it.
@@ -32,8 +32,8 @@
 # UI-MAP.md that between them frame terrain, trees, water, roads, shadows and the command bar.
 
 # -Map narrows the run to the views whose map name contains it, for the middle of a hunt where one
-# view answers the question and eight of them is twenty-four launches.  The table in
-# RENDERER-ROADMAP.md is only ever written from a full run.
+# view answers the question and eight of them is twenty-four launches.  The table that goes into a
+# pull request is only ever written from a full run.
 #
 # -BackendNoise takes the repeated pair through the Direct3D 11 backend instead, which answers a
 # different question: the printed floor is Direct3D 9 against itself, and a backend with a
@@ -52,6 +52,7 @@
 # and after is a pair of pictures.
 param([double]$Margin = 1.0, [double]$MeanMargin = 1.0, [string]$Map = '',
   [switch]$BackendNoise, [switch]$CountRule, [string[]]$Extra = @())
+$env:ZH_UNATTENDED = "1"	# every game this starts is unattended: no box may wait on a person (EarlyCommandLine.h)
 
 Add-Type -AssemblyName System.Drawing
 $run = Join-Path $PSScriptRoot "GeneralsMD\Run"
@@ -73,19 +74,24 @@ $cases = @(
 # -msaa 0 for tree-check.ps1's reason: a multisampled back buffer cannot be read back, the capture
 # falls through to a desktop grab, and whatever window is over the game lands in the .bmp.  The shot
 # folder is emptied first so an empty one is a stated failure rather than the previous view's file.
-function Shoot($c, $tag, $extra) {
+# The run's own switches are $switches: PowerShell's names ignore case, so a parameter called $extra was the
+# script's -Extra too, and -Extra (-noDynamicLOD, -noaudio ...) never reached the game while the renderer
+# switch went in twice.
+function Shoot($c, $tag, $switches) {
   Get-ChildItem "$shots\sshot*.bmp" -ErrorAction SilentlyContinue | Remove-Item -Force
-  $arguments = @('-win','-xres','1280','-yres','720','-quickstart','-noshellmap','-multiInstance',
+  # -showHudOverlay: off by default in Release, and every evidence picture shows the corner readout
+  $arguments = @('-win','-xres','1280','-yres','720','-quickstart','-noshellmap','-multiInstance','-showHudOverlay',
     '-msaa','0','-dx11post','off','-map',"`"Maps\$($c.map)\$($c.map).map`"",'-autoskirmish','4','-aidiff','easy',
     '-seed','5','-maxframes',($c.f+80),'-screenshot',$c.f,'-camera',$c.x,$c.y,
-    '-logPrefix',"dx11chk_$tag`_",'-turbo') + $extra + $Extra
+    '-logPrefix',"dx11chk_$tag`_",'-turbo') + $switches + $Extra
+  $process = Start-Process (Join-Path $run 'generals.exe') -ArgumentList $arguments -WorkingDirectory $run -PassThru
   try {
-    $process = Start-Process (Join-Path $run 'generals.exe') -ArgumentList $arguments -WorkingDirectory $run -PassThru
     $process.PriorityClass = 'AboveNormal'
     $null = $process.WaitForExit(900000)
   }
   finally {
-    Get-Process -Name generals -ErrorAction SilentlyContinue | Stop-Process -Force
+    # By id: another session's game on the same machine is not this script's to end.
+    if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
   }
   $file = Get-ChildItem "$shots\sshot*.bmp" -ErrorAction SilentlyContinue |
           Sort-Object LastWriteTime | Select-Object -Last 1

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -83,7 +84,7 @@ int MaterialInfoClass::Add_Texture(TextureClass * tex)
 int MaterialInfoClass::Get_Texture_Index(const char * name)
 {
 	for (int i=0; i<Textures.Count(); i++) {
-		if (stricmp(name,Textures[i]->Get_Texture_Name()) == 0) {
+		if (strcasecmp(name,Textures[i]->Get_Texture_Name()) == 0) {
 			return i;
 		}
 	}

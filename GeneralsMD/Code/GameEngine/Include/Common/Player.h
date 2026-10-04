@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -107,9 +109,9 @@ class SpecialPowerModule;
 
 class BattlePlanBonuses;
 
-enum BattlePlanStatus;
-enum UpgradeStatusType;
-enum CommandSourceType;
+enum BattlePlanStatus : Int;
+enum UpgradeStatusType : Int;
+enum CommandSourceType : Int;
 
 enum ScienceAvailabilityType
 {
@@ -151,6 +153,19 @@ Int UnitLimitPerPlayer( Int nonObserverPlayers );
 // Whether a build that adds unitsItAdds (a transport and its payload) goes past the share.  0 is no cap.
 Bool UnitCapRefuses( Int unitsTowardCap, Int unitsItAdds, UnsignedInt unitCap );
 
+// Superweapons are paid for in base defences: every DEFENSES_PER_SUPERWEAPON finished defences a
+// player stands allow him one superweapon, counted across every type.  Whether one more is refused,
+// given the finished defences and the superweapons he already has, foundations included.  It sits
+// on top of the lobby's rule and never loosens it.
+enum { DEFENSES_PER_SUPERWEAPON = 4 };
+Bool SuperweaponDefenseCapRefuses( Int finishedDefenses, Int superweapons );
+// Only a defence somebody paid for counts.  The Sneak Attack tunnel, its Start and every general's
+// copy are the only FS_BASE_DEFENSE templates with no BuildCost: a power drops them for free.
+Bool DefenseCountsForSuperweapons( Int buildCost );
+// The silo whose missile No Superweapons or Pro Rules silences is a shop for China's upgrades, not a
+// weapon, and is not asked for defences.
+Bool SuperweaponNeedsDefenses( const AsciiString &buildingName, Bool proRules, Int superweaponRestriction );
+
 // The lobby's income sharing, an IncomeSharing from GameInfo.h: whether a payment is split in this
 // match, and each ally's cut when it is split evenly between sharers players.  The earner keeps what
 // the cuts leave, so rounding never loses a dollar.
@@ -160,7 +175,7 @@ UnsignedInt IncomeAllyShare( UnsignedInt amount, Int sharers );
 // Pro Rules, PRO-RULES.md: what every skirmish and network match refuses whoever plays it.
 // GameLogic::isProRules() says whether a match is under them; these say what they cover, by name
 // or by type, so a test can ask them without a match.
-enum SpecialPowerType;
+enum SpecialPowerType : Int;
 class Player;
 Bool ProRulesBanThing( const AsciiString &templateName );
 Bool ProRulesExemptSuperweapon( const AsciiString &templateName );

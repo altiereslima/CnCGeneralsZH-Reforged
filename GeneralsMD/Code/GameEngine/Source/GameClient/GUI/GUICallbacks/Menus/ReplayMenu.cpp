@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -32,14 +34,18 @@
 
 
 #include "Lib/BaseType.h"
+#include "Common/LocalFileSystem.h"
+#if !defined(_WIN32)
+#include "Common/EarlyOptions.h"	// findDesktopDirectory
+#endif
 #include "Common/FileSystem.h"
 #include "Common/GameEngine.h"
 #include "Common/GameState.h"
 #include "Common/Recorder.h"
-#include "Common/Version.h"
+#include "Common/version.h"
 #include "GameClient/WindowLayout.h"
 #include "GameClient/Gadget.h"
-#include "GameClient/GadgetListbox.h"
+#include "GameClient/GadgetListBox.h"
 #include "GameClient/Shell.h"
 #include "GameClient/KeyDefs.h"
 #include "GameClient/GameWindowManager.h"
@@ -181,7 +187,7 @@ void PopulateReplayFileListbox(GameWindow *listbox)
 				// was no way to tell last night's game from one in April. Date first, then the time,
 				// both in whatever format the player's own Region settings ask for.
 				UnicodeString displayTimeBuffer = getUnicodeDateBuffer(header.timeVal);
-				displayTimeBuffer.concat( L" " );
+				displayTimeBuffer.concat( u" " );
 				displayTimeBuffer.concat( getUnicodeTimeBuffer(header.timeVal) );
 
 				// version (no-op)
@@ -306,7 +312,7 @@ void ReplayMenuInit( WindowLayout *layout, void *userData )
 	instData.init();
 	BitSet( instData.m_style, GWS_PUSH_BUTTON | GWS_MOUSE_TRACK );
 	instData.m_textLabelString = "Debug: Analyze Replay";
-	instData.setTooltipText(UnicodeString(L"Only Used in Debug and Internal!"));
+	instData.setTooltipText(UnicodeString(u"Only Used in Debug and Internal!"));
 	buttonAnalyzeReplay = TheWindowManager->gogoGadgetPushButton( parentReplayMenu, 
 																									 WIN_STATUS_ENABLED | WIN_STATUS_IMAGE, 
 																									 4, 4, 
@@ -528,7 +534,7 @@ WindowMsgHandledType ReplayMenuSystem( GameWindow *window, UnsignedInt msg,
 					GadgetListBoxGetSelected( listboxReplayFiles,  &selected );
 					if(selected < 0)
 					{
-						MessageBoxOk(UnicodeString(L"Blah Blah"),UnicodeString(L"Please select something munkee boy"), NULL);
+						MessageBoxOk(UnicodeString(u"Blah Blah"),UnicodeString(u"Please select something munkee boy"), NULL);
 						break;
 					}
 
@@ -636,12 +642,16 @@ void deleteReplay( void )
 	filename = TheRecorder->getReplayDir();
 	translate.translate(GetReplayFilenameFromListbox(listboxReplayFiles, selected));
 	filename.concat(translate);
-	if(DeleteFile(filename.str()) == 0)
+	if(!TheLocalFileSystem->deleteFile(filename.str()))
 	{
+#if defined(_WIN32)
 		char buffer[1024];
 		FormatMessage ( FORMAT_MESSAGE_FROM_SYSTEM, NULL, GetLastError(), 0, buffer, sizeof(buffer), NULL);
-		UnicodeString errorStr;
 		translate.set(buffer);
+#else
+		translate.set(strerror(errno));		// ASCII in the "C" locale the game keeps
+#endif
+		UnicodeString errorStr;
 		errorStr.translate(translate);
 		MessageBoxOk(TheGameText->fetch("GUI:Error"),errorStr, NULL);
 	}
@@ -666,20 +676,41 @@ void copyReplay( void )
 	translate.translate(GetReplayFilenameFromListbox(listboxReplayFiles, selected));
 	filename.concat(translate);
 	
+	// The "copy" button puts a copy of the selected replay on the player's Desktop.
 	char path[1024];
+#if defined(_WIN32)
 	LPITEMIDLIST pidl;
 	SHGetSpecialFolderLocation(NULL, CSIDL_DESKTOPDIRECTORY, &pidl);
 	SHGetPathFromIDList(pidl,path);
+#else
+	// ~/Desktop on macOS, xdg-user-dirs' Desktop on Linux (EarlyOptions.h, C1 (e))
+	if (!findDesktopDirectory(path, sizeof(path)))
+	{
+		UnicodeString errorStr;
+		errorStr.translate(AsciiString(strerror(ENOENT)));
+		MessageBoxOk(TheGameText->fetch("GUI:Error"),errorStr, NULL);
+		return;
+	}
+#endif
 	AsciiString newFilename;
 	newFilename.set(path);
 	newFilename.concat("\\");
 	newFilename.concat(translate);
-	if(CopyFile(filename.str(),newFilename.str(), FALSE) == 0)
+	if(!TheLocalFileSystem->copyFile(filename.str(),newFilename.str(), FALSE))
 	{
-		wchar_t buffer[1024];
-		FormatMessageW( FORMAT_MESSAGE_FROM_SYSTEM, NULL, GetLastError(), 0, buffer, sizeof(buffer), NULL);
+#if defined(_WIN32)
+		// Win32 only: WideChar and WCHAR are the same two bytes there, which is what makes the cast
+		// honest.  The size is in characters, as FormatMessageW takes it; it used to be
+		// sizeof(buffer), twice that.
+		WideChar buffer[1024];
+		FormatMessageW( FORMAT_MESSAGE_FROM_SYSTEM, NULL, GetLastError(), 0, reinterpret_cast<LPWSTR>( buffer ),
+			sizeof( buffer ) / sizeof( buffer[0] ), NULL );
 		UnicodeString errorStr;
 		errorStr.set(buffer);
+#else
+		UnicodeString errorStr;
+		errorStr.translate(AsciiString(strerror(errno)));		// ASCII in the "C" locale the game keeps
+#endif
 		errorStr.trim();
 		MessageBoxOk(TheGameText->fetch("GUI:Error"),errorStr, NULL);
 	}

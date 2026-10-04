@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -344,7 +346,7 @@ void ControlBar::populateObserverInfoWindow ( void )
 	mask.set(KINDOF_SCORE);
 	clearmask.set(KINDOF_STRUCTURE);
 	
-	uString.format(L"%d",m_observerLookAtPlayer->countObjects(mask,clearmask));
+	uString.format(u"%d",m_observerLookAtPlayer->countObjects(mask,clearmask));
 	GadgetStaticTextSetText(staticTextNumberOfUnits, uString);
 
 	Int numBuildings = 0;
@@ -361,11 +363,11 @@ void ControlBar::populateObserverInfoWindow ( void )
 	mask.set(KINDOF_SCORE_DESTROY);
 	mask.set(KINDOF_STRUCTURE);
 	numBuildings += m_observerLookAtPlayer->countObjects(mask,clearmask);
-	uString.format(L"%d",numBuildings);
+	uString.format(u"%d",numBuildings);
 	GadgetStaticTextSetText(staticTextNumberOfBuildings, uString);
-	uString.format(L"%d",m_observerLookAtPlayer->getScoreKeeper()->getTotalUnitsDestroyed());
+	uString.format(u"%d",m_observerLookAtPlayer->getScoreKeeper()->getTotalUnitsDestroyed());
 	GadgetStaticTextSetText(staticTextNumberOfUnitsKilled, uString);
-	uString.format(L"%d",m_observerLookAtPlayer->getScoreKeeper()->getTotalUnitsLost());
+	uString.format(u"%d",m_observerLookAtPlayer->getScoreKeeper()->getTotalUnitsLost());
 	GadgetStaticTextSetText(staticTextNumberOfUnitsLost, uString);
 	GadgetStaticTextSetText(staticTextPlayerName, m_observerLookAtPlayer->getPlayerDisplayName());
 	Color color = clientPlayerColor( m_observerLookAtPlayer );

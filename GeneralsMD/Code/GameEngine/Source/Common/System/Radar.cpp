@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -44,7 +45,6 @@
 #include "GameClient/Eva.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/InGameUI.h"
-#include "GameClient/ControlBar.h"
 #include "GameClient/PlayerColorScheme.h"
 
 #include "GameLogic/GameLogic.h"
@@ -1238,8 +1238,6 @@ void Radar::tryUnderAttackEvent( const Object *obj )
 	// if event created, do some more feedback
 	if( eventCreated )
 	{
-
-		TheControlBar->triggerRadarAttackGlow();
 		//
 		///@todo Should make an INI data driven table for radar event strings, and audio events
 		//

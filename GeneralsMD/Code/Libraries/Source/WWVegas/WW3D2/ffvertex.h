@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*
 ** The fixed-function vertex pipeline, written out as HLSL.
@@ -39,7 +40,7 @@
 #ifndef FFVERTEX_H
 #define FFVERTEX_H
 
-#include <d3d9.h>
+#include "ffstate.h"
 
 #include <string>
 
@@ -80,12 +81,12 @@ const unsigned VERTEX_REGISTER_GLOBAL_AMBIENT = VERTEX_REGISTER_MATERIAL_AMBIENT
 const unsigned VERTEX_REGISTER_FOG_PARAMETERS = VERTEX_REGISTER_MATERIAL_AMBIENT + 6;
 const unsigned VERTEX_REGISTER_VIEWPORT = VERTEX_REGISTER_MATERIAL_AMBIENT + 7;
 const unsigned VERTEX_REGISTER_LIGHTS = VERTEX_REGISTER_MATERIAL_AMBIENT + 8;
-const unsigned VERTEX_REGISTERS_PER_LIGHT = 6;
+const unsigned VERTEX_REGISTERS_PER_LIGHT = 7;
 
 struct VertexLightDescription
 {
 	// D3DLIGHT_DIRECTIONAL, D3DLIGHT_POINT or D3DLIGHT_SPOT.
-	DWORD Type;
+	FixedFunctionValue Type;
 };
 
 struct VertexStageDescription
@@ -93,32 +94,38 @@ struct VertexStageDescription
 	// D3DTSS_TEXCOORDINDEX whole: the generation mode in the high half, the coordinate set in the
 	// low one.  Unlike the pixel half, both matter here - generating the coordinate is this
 	// shader's job now.
-	DWORD TextureCoordinateIndex;
+	FixedFunctionValue TextureCoordinateIndex;
 
 	// D3DTSS_TEXTURETRANSFORMFLAGS: a count of how many coordinates the texture matrix produces,
 	// optionally with D3DTTFF_PROJECTED.  D3DTTFF_DISABLE means the matrix is not applied at all.
-	DWORD TextureTransformFlags;
+	FixedFunctionValue TextureTransformFlags;
 };
 
 struct VertexPipelineDescription
 {
 	// The flexible vertex format the draw is reading, which says whether there is a normal and
 	// whether there is a vertex colour to read D3DMCS_COLOR out of.
-	DWORD FVF;
+	FixedFunctionValue FVF;
 
 	bool LightingEnabled;
 	bool SpecularEnabled;
+
+	// D3DRS_LOCALVIEWER, whose Direct3D 9 default is TRUE and which the engine never turns off: the
+	// specular halfway vector is taken towards the vertex's own direction to the eye rather than the
+	// fixed (0, 0, 1).  Only a lit, specular program reads it.  Initialised here for a caller that fills
+	// the rest field by field.
+	bool LocalViewer = false;
 
 	// D3DRS_COLORVERTEX.  With it off the vertex colour is ignored whatever the material sources
 	// say, which is how a lit draw with a colour in its vertices still comes out unlit by it.
 	bool ColourVertexEnabled;
 
-	// D3DMCS_MATERIAL or D3DMCS_COLOR, one each.  D3DMCS_COLOR2 is the specular vertex colour and
-	// nothing in the game selects it.
-	DWORD DiffuseMaterialSource;
-	DWORD AmbientMaterialSource;
-	DWORD EmissiveMaterialSource;
-	DWORD SpecularMaterialSource;
+	// D3DMCS_MATERIAL, D3DMCS_COLOR1 or D3DMCS_COLOR2, one each: the material's colour, or the
+	// vertex's diffuse or specular one where the format has it and COLORVERTEX is on.
+	FixedFunctionValue DiffuseMaterialSource;
+	FixedFunctionValue AmbientMaterialSource;
+	FixedFunctionValue EmissiveMaterialSource;
+	FixedFunctionValue SpecularMaterialSource;
 
 	unsigned LightCount;
 	VertexLightDescription Lights[MAXIMUM_VERTEX_LIGHTS];
@@ -130,7 +137,7 @@ struct VertexPipelineDescription
 
 	// D3DRS_FOGVERTEXMODE: D3DFOG_LINEAR, D3DFOG_EXP or D3DFOG_EXP2.  D3DFOG_NONE with the fog
 	// enabled is table fog, which is the pixel half's business and not this one's.
-	DWORD FogVertexMode;
+	FixedFunctionValue FogVertexMode;
 
 	// Stage zero's texture has a normal map beside it, so the lights are summed per
 	// pixel instead of here.  The program still lights the vertex, and past the fog factor it also
@@ -138,14 +145,23 @@ struct VertexPipelineDescription
 	// not depend on the normal, which ffshader reads to light the pixel again.  An unlit one is the
 	// terrain, whose pixel half (engineshader) reads only the position.  Initialised here for a caller that fills the rest field by field.
 	bool NormalMapped = false;
+
+	// An unlit draw whose normal is not a normal: the sorted smoke billboards put the glow of the
+	// fires near them there, and the program hands it on in the specular colour, which an unlit draw
+	// with no second colour in its vertices otherwise leaves black.  The pixel half adds it after the
+	// shade (CombinerDescription::SmokeGlow).  Refused on a lit draw or a format with no normal.
+	// Initialised here for a caller that fills the rest field by field.
+	bool SmokeGlow = false;
 };
 
 // Which profile the generated text is for.  The two differ in the output semantic and in how the
-// constants are declared; the arithmetic between them is the same text.
+// constants are declared; the arithmetic between them is the same text.  SDL3_GPU is the D3D11 text
+// with its bindings rewritten for SDL3's GPU API (sdl3target.h), for the Metal and Vulkan backend.
 enum VertexShaderTarget
 {
 	VERTEX_SHADER_TARGET_D3D9,
-	VERTEX_SHADER_TARGET_D3D11
+	VERTEX_SHADER_TARGET_D3D11,
+	VERTEX_SHADER_TARGET_SDL3_GPU
 };
 
 bool VertexShader_Generate(const VertexPipelineDescription & description,

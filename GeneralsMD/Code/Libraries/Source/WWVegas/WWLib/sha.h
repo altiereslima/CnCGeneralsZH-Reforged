@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*********************************************************************************************** 
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               *** 
@@ -43,12 +44,13 @@
 **	November of '94. Until the compiler supports this, use the following
 **	definition.
 */
-#include <new.h>
+#include <new>   // was <new.h>, which only MSVC has
 #include "always.h"
 #include	"bool.h"
 #include	<stdio.h>
 #include	<stdlib.h>
 #include	<string.h>
+#include	<stdint.h>
 
 
 /*
@@ -56,15 +58,23 @@
 **	secure hash with no known weaknesses. It generates a 160 bit hash
 **	result given an arbitrary length data source.
 */
+/*
+**	SHA-1 is defined on 32-bit words, and every word here was a `long` - 32 bits on the platform this
+**	was written for and on Win64, 64 on LP64.  There the state, the block expansion and the rounds ran
+**	at twice the width, the source block was 128 bytes instead of 64, and Result() stored the message
+**	length as an 8-byte long into the last 4 bytes of the block.  Every word is uint32_t now, unsigned
+**	so the rounds' wrap-around is defined rather than signed overflow; byte counts (Length, the Hash
+**	API) are counts, not words, and are unchanged.  Pinned by test_wwlib's FIPS 180 vectors.
+*/
 class SHAEngine
 {
 	public:
 		SHAEngine(void) : IsCached(false), Length(0), PartialCount(0) {
-			Acc.Long[0] = (unsigned long)SA;
-			Acc.Long[1] = (unsigned long)SB;
-			Acc.Long[2] = (unsigned long)SC;
-			Acc.Long[3] = (unsigned long)SD;
-			Acc.Long[4] = (unsigned long)SE;
+			Acc.Long[0] = (uint32_t)SA;
+			Acc.Long[1] = (uint32_t)SB;
+			Acc.Long[2] = (uint32_t)SC;
+			Acc.Long[3] = (uint32_t)SD;
+			Acc.Long[4] = (uint32_t)SE;
 		};
 
 		void Init(void) {
@@ -81,7 +91,7 @@ class SHAEngine
 	private:
 
 		typedef union {
-			unsigned long Long[5];
+			uint32_t Long[5];
 			unsigned char Char[20];
 		} SHADigest;
 
@@ -108,13 +118,13 @@ class SHAEngine
 			K4=0xca62c1d6L,		// t=60..79		10^(1/2)/4
 
 			// Source data is grouped into blocks of this size.
-			SRC_BLOCK_SIZE=16*sizeof(long),
+			SRC_BLOCK_SIZE=16*sizeof(uint32_t),
 
 			// Internal processing data is grouped into blocks this size.
-			PROC_BLOCK_SIZE=80*sizeof(long)
+			PROC_BLOCK_SIZE=80*sizeof(uint32_t)
 		};
 
-		long Get_Constant(int index) const {
+		uint32_t Get_Constant(int index) const {
 			if (index < 20) return K1;
 			if (index < 40) return K2;
 			if (index < 60) return K3;
@@ -122,26 +132,26 @@ class SHAEngine
 		};
 
 		// Used for 0..19
-		long Function1(long X, long Y, long Z) const {
+		uint32_t Function1(uint32_t X, uint32_t Y, uint32_t Z) const {
 			return(Z ^ ( X & ( Y ^ Z ) ) );
 		};
 
 		// Used for 20..39
-		long Function2(long X, long Y, long Z) const {
+		uint32_t Function2(uint32_t X, uint32_t Y, uint32_t Z) const {
 			return( X ^ Y ^ Z );
 		};
 
 		// Used for 40..59
-		long Function3(long X, long Y, long Z) const {
+		uint32_t Function3(uint32_t X, uint32_t Y, uint32_t Z) const {
 			return( (X & Y) | (Z & (X | Y) ) );
 		};
 
 		// Used for 60..79
-		long Function4(long X, long Y, long Z) const {
+		uint32_t Function4(uint32_t X, uint32_t Y, uint32_t Z) const {
 			return( X ^ Y ^ Z );
 		};
 
-		long Do_Function(int index, long X, long Y, long Z) const {
+		uint32_t Do_Function(int index, uint32_t X, uint32_t Y, uint32_t Z) const {
 			if (index < 20) return Function1(X, Y, Z);
 			if (index < 40) return Function2(X, Y, Z);
 			if (index < 60) return Function3(X, Y, Z);

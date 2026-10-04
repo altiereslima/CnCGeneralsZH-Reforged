@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -28,6 +30,8 @@
 #ifndef __NETWORKDEFS_H
 #define __NETWORKDEFS_H
 
+
+#include <stddef.h>	// offsetof, for the wire-layout asserts (B4)
 #include "Lib/BaseType.h"
 #include "Common/MessageStream.h"
 
@@ -62,6 +66,19 @@ struct TransportMessageHeader
 //	NetMessageFlags flags;
 };
 #pragma pack(pop)
+
+/* The network's packed structs (this header, TransportMessage's header; FirewallHelper.h's
+	 ManglerData; LANAPI.h's LANMessage) go on the wire as they sit in memory: their sizes are
+	 checked where they are declared, and their integers are in the host's byte order, which is
+	 little-endian on every machine the game has run on.  A big-endian port would need a byte swap at
+	 every read and write of them.  MSVC's targets are all little-endian; other compilers say. */
+static_assert(sizeof(TransportMessageHeader) == 6, "TransportMessageHeader is 6 bytes on the wire");
+static_assert(offsetof(TransportMessageHeader, magic) == 4, "TransportMessageHeader: magic follows the 4-byte crc");
+#if defined(__BYTE_ORDER__)
+static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "the network structs are sent in little-endian byte order");
+#elif !defined(_MSC_VER)
+#error "unknown byte order: the network structs are sent in little-endian byte order"
+#endif
 
 // 2003's answer was a 512 byte datagram: UDP (8 bytes) + IP header (28 bytes) = 36, so 476 of
 // payload.  That is a quarter of what any link today carries, and it is the reason a busy frame
@@ -126,6 +143,18 @@ struct DelayedTransportMessage
 	TransportMessage message;
 };
 #pragma pack(pop)
+
+/* The transport's packed layouts (B4), each from its definition at pack(1): the header's 6, then
+	 MAX_PACKET_SIZE (1094) bytes of data, then length (4), addr (4) and port (2); a delayed message is a
+	 4-byte delivery time in front of one.  MSVC compiles these too: a pack(1) layout that differed there
+	 fails the Windows build rather than a game between the two. */
+static_assert(offsetof(TransportMessage, data) == 6, "TransportMessage: data follows the 6-byte header");
+static_assert(offsetof(TransportMessage, length) == 6 + MAX_PACKET_SIZE, "TransportMessage: length follows the data");
+static_assert(offsetof(TransportMessage, addr) == 10 + MAX_PACKET_SIZE, "TransportMessage: addr follows length");
+static_assert(offsetof(TransportMessage, port) == 14 + MAX_PACKET_SIZE, "TransportMessage: port is the last member");
+static_assert(sizeof(TransportMessage) == 16 + MAX_PACKET_SIZE, "TransportMessage is its members, unpadded");
+static_assert(offsetof(DelayedTransportMessage, message) == 4, "DelayedTransportMessage: message follows the delivery time");
+static_assert(sizeof(DelayedTransportMessage) == 4 + sizeof(TransportMessage), "DelayedTransportMessage is its members, unpadded");
 
 /**
  * Message types

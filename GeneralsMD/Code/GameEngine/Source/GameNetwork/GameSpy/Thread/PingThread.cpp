@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -28,7 +29,14 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
+#if defined(_WIN32)
 #include <winsock.h>	// This one has to be here. Prevents collisions with windsock2.h
+#else
+#include <arpa/inet.h>		// inet_addr, inet_ntoa
+#include <netdb.h>				// gethostbyname
+#include <netinet/in.h>
+typedef struct hostent HOSTENT;		// winsock's name for it
+#endif
 
 #include "GameNetwork/GameSpy/PingThread.h"
 #include "mutex.h"
@@ -248,14 +256,16 @@ AsciiString Pinger::getPingString( Int timeout )
 void PingThreadClass::Thread_Function()
 {
 	try {
-	_set_se_translator( DumpExceptionInfo ); // Hook that allows stack trace.
+	InstallThreadExceptionTranslator(); // Hook that allows stack trace.
 	PingRequest req;
 
+#if defined(_WIN32)
 	WSADATA wsaData;
 
 	// Fire up winsock (prob already done, but doesn't matter)
 	WORD wVersionRequested = MAKEWORD(1, 1);
 	WSAStartup( wVersionRequested, &wsaData );
+#endif
 
 	while ( running )
 	{
@@ -322,7 +332,9 @@ void PingThreadClass::Thread_Function()
 		Switch_Thread();
 	}
 
+#if defined(_WIN32)
 	WSACleanup();
+#endif
 	} catch ( ... ) {
 		DEBUG_CRASH(("Exception in ping thread!"));
 	}
@@ -335,6 +347,11 @@ void PingThreadClass::Thread_Function()
 //-------------------------------------------------------------------------
 //-------------------------------------------------------------------------
 
+/* The ping itself is ICMP echo through icmp.dll, a Windows service with no POSIX counterpart a normal
+	 process may use (raw ICMP sockets need privileges).  GameSpy is a dead service and this only has to
+	 compile and link (the B5 survey: "stub it, do not port it"), so off Windows doPing answers -1, no
+	 reply, which the caller already counts as a failed repetition. */
+#if defined(_WIN32)
 HANDLE WINAPI IcmpCreateFile(VOID); /* INVALID_HANDLE_VALUE on error */
 BOOL WINAPI IcmpCloseHandle(HANDLE IcmpHandle); /* FALSE on error */
 
@@ -570,6 +587,12 @@ cleanup:
 
    return pingTime;
 }
+#else
+Int PingThreadClass::doPing(UnsignedInt, Int)
+{
+	return -1;
+}
+#endif
 
 
 //-------------------------------------------------------------------------

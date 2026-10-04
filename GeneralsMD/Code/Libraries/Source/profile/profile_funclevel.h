@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by Ilyas Akin for the macOS/Linux port; see NOTICE.md and the git history.
 
 /////////////////////////////////////////////////////////////////////////EA-V1
 // $File: //depot/GeneralsMD/Staging/code/Libraries/Source/profile/profile_funclevel.h $
@@ -127,7 +128,7 @@ public:
       \param frame number of recorded frame, or Total
       \return number of calls
     */
-    unsigned _int64 GetCalls(unsigned frame) const;
+    unsigned long long GetCalls(unsigned frame) const;
 
     /**
       \brief Determine time spend in this function and its children.
@@ -135,7 +136,7 @@ public:
       \param frame number of recorded frame, or Total
       \return time spend (in CPU ticks)
     */
-    unsigned _int64 GetTime(unsigned frame) const;
+    unsigned long long GetTime(unsigned frame) const;
 
     /**
       \brief Determine time spend in this function only (exclude
@@ -144,7 +145,7 @@ public:
       \param frame number of recorded frame, or Total
       \return time spend in this function alone (in CPU ticks)
     */
-    unsigned _int64 GetFunctionTime(unsigned frame) const;
+    unsigned long long GetFunctionTime(unsigned frame) const;
 
     /**
       \brief Determine the list of caller Ids.
@@ -185,7 +186,7 @@ public:
     */
     unsigned GetId(void) const
     {
-      return unsigned(m_threadID);
+      return (unsigned)(uintptr_t)m_threadID;
     }
 
   private:

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -88,8 +89,8 @@ inline Real QMag(Real x, Real y, Real z)
 //-----------------------------------------------------------------------------
 inline Real QSin(Real a)
 {  
-   register Real angle = a;
-   register long sgn = 1;
+   Real angle = a;
+   long sgn = 1;
 
    if (angle < 0)       // DO POSITIVE MATH AND PRESERVE SIGN
    {
@@ -108,8 +109,8 @@ inline Real QSin(Real a)
       angle = PI - angle; // FLIP
    }
 
-   register int index = REAL_TO_INT((angle/QUARTER_CIRCLE) * TheQuickTanTableCount);
-   register Real x = TheQuickSinTable[index];
+   int index = REAL_TO_INT((angle/QUARTER_CIRCLE) * TheQuickTanTableCount);
+   Real x = TheQuickSinTable[index];
 
    return x * sgn;
 

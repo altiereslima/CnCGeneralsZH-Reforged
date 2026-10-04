@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -53,8 +55,8 @@
 #include "W3DDevice/Common/W3DRadar.h"
 #include "W3DDevice/GameClient/HeightMap.h"
 #include "W3DDevice/GameClient/W3DShroud.h"
-#include "WW3D2/Texture.h"
-#include "WW3D2/DX8Caps.h"
+#include "WW3D2/texture.h"
+#include "WW3D2/dx8caps.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...

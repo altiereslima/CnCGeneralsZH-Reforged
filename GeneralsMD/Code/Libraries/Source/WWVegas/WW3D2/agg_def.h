@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -44,13 +46,14 @@
 #include "rendobj.h"
 #include "w3d_file.h"
 #include "w3derr.h"
-#include "vector.h"
+#include "Vector.H"
 #include "bittype.h"
 #include <string.h>
 
 #ifdef _UNIX
 #include "osdep.h"
 #endif
+#include "Platform/StrdupAsWindows.h"
 
 
 // Forward declarations
@@ -110,14 +113,14 @@ class AggregateDefClass
 		virtual WW3DErrorType	Load_W3D (ChunkLoadClass &chunk_load);
 		virtual WW3DErrorType	Save_W3D (ChunkSaveClass &chunk_save);
 		const char *				Get_Name (void) const					{ return m_pName; }
-		void							Set_Name (const char *pname)			{ char *name = ::_strdup (pname); SAFE_FREE (m_pName); m_pName = name; }
+		void							Set_Name (const char *pname)			{ char *name = strdupAsWindows(pname); SAFE_FREE (m_pName); m_pName = name; }
 		RenderObjClass *			Create (void);
 		AggregateDefClass *		Clone (void) const						{ return W3DNEW AggregateDefClass (*this); }
 
 		//
 		//	Public accessors
 		//
-		ULONG							Class_ID (void) const					{ return m_MiscInfo.OriginalClassID; }
+		uint32							Class_ID (void) const					{ return m_MiscInfo.OriginalClassID; }
 
 		//
 		//	Initialization
@@ -189,7 +192,7 @@ class AggregateDefClass
 		//
 		//	Private member data
 		//
-		DWORD																m_Version;
+		uint32																m_Version;
 		DynamicVectorClass<W3dAggregateSubobjectStruct *>	m_SubobjectList;
 		W3dAggregateInfoStruct										m_Info;
 		W3dAggregateMiscInfo											m_MiscInfo;

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -31,6 +33,7 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+#include "Platform/DoubleClickTime.h"
 
 #define DEFINE_TERRAIN_LOD_NAMES
 #define DEFINE_TIME_OF_DAY_NAMES
@@ -38,17 +41,18 @@
 #define DEFINE_BODYDAMAGETYPE_NAMES
 #define DEFINE_PANNING_NAMES
 
-#include "Common/CRC.h"
+#include "Common/crc.h"
+#include "BuildFingerprint.h"		// ZH_BUILD_FINGERPRINT, generated at build time (N1)
 #include "Common/EarlyOptions.h"	// findUserDataDirectory
-#include "Common/File.h"
+#include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "Common/GameAudio.h"
 #include "Common/INI.h"
 #include "Common/Monitors.h"
 #include "Common/OptionsCatalog.h"
-#include "Common/registry.h"
+#include "Common/Registry.h"
 #include "Common/UserPreferences.h"
-#include "Common/Version.h"
+#include "Common/version.h"
 
 #include "GameLogic/AI.h"
 #include "GameLogic/Weapon.h"
@@ -67,6 +71,12 @@ GlobalData* TheWritableGlobalData = NULL;				///< The global data singleton
 
 //-------------------------------------------------------------------------------------------------
 GlobalData* GlobalData::m_theOriginal = NULL;
+
+// A key the shipped GameData.ini still carries but nothing reads. It has to stay in the table,
+// because an unknown key throws, so it is parsed into nothing.
+static void parseIgnoredField( INI *, void *, void *, const void * )
+{
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
@@ -99,7 +109,7 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "TerrainLOD",									INI::parseIndexList,	TerrainLODNames,	offsetof( GlobalData, m_terrainLOD ) },
 	{ "TerrainLODTargetTimeMS",			INI::parseInt,				NULL,			offsetof( GlobalData, m_terrainLODTargetTimeMS ) },
 	{ "RightMouseAlwaysScrolls",		INI::parseBool,				NULL,			offsetof( GlobalData, m_rightMouseAlwaysScrolls ) },
-	{ "UseWaterPlane",							INI::parseBool,				NULL,			offsetof( GlobalData, m_useWaterPlane ) },
+	{ "UseWaterPlane",							parseIgnoredField,		NULL,			0 },
 	{ "UseCloudPlane",							INI::parseBool,				NULL,			offsetof( GlobalData, m_useCloudPlane ) },
 	{ "DownwindAngle",							INI::parseReal,				NULL,			offsetof( GlobalData, m_downwindAngle ) },
 	{ "UseShadowVolumes",						INI::parseBool,				NULL,			offsetof( GlobalData, m_useShadowVolumes ) },
@@ -673,7 +683,6 @@ GlobalData::GlobalData()
 	m_enableDynamicLOD = TRUE;
 	m_enableStaticLOD = TRUE;
 	m_rightMouseAlwaysScrolls = FALSE;
-	m_useWaterPlane = FALSE;
 	m_useCloudPlane = FALSE;
 	m_downwindAngle = ( -0.785f );//Northeast!
 	m_useShadowVolumes = FALSE;
@@ -683,6 +692,8 @@ GlobalData::GlobalData()
 	m_startAtMaxZoom = TRUE;		//open a game framed as wide as the player could zoom by hand
 	m_shadowsForProps = TRUE;				//likewise: scenery with no shadow of its own gets one
 	m_shadowsForParticles = TRUE;	//on by default: the shipped INI has no entry for it
+	m_volumetricSmokeShadows = TRUE;
+	m_smokeFireLighting = TRUE;
 	m_classicGraphics = FALSE;
 	m_shadowMap = TRUE;						//the sun's own shadows are what the game draws with now
 	m_shadowMapOnly = TRUE;				//and they replace the stencil volumes rather than joining them
@@ -927,6 +938,7 @@ GlobalData::GlobalData()
 	m_particleGroundBounce = FALSE;
 	m_smokeThickness = 0.0f;
 	m_particleCapOverride = 0;
+	m_noDynamicLODOverride = FALSE;
 	m_maxFieldParticleCount = 30;
 	
 	// End Add
@@ -940,6 +952,13 @@ GlobalData::GlobalData()
 	// what this fork has always done, so nobody's game changes until they say so
 	m_healthBarMode = HEALTH_BAR_ALWAYS;
 	m_hudScale = 0;
+	// The menus' shape off 4:3: Fit off Windows, where the Deck's 16:10 panel is where it showed;
+	// Windows keeps EA's stretch unless a player picks Fit.
+#if defined(_WIN32)
+	m_menuLayout = MENU_LAYOUT_STRETCH;
+#else
+	m_menuLayout = MENU_LAYOUT_FIT;
+#endif
 	// the lobby's own colours until somebody asks for something else
 	m_playerColorScheme = PLAYER_COLORS_ORIGINAL;
 	// the words the game shipped with until somebody picks a translation
@@ -1133,6 +1152,14 @@ GlobalData::GlobalData()
 	m_snapCameraRotateTo45 = TRUE;
 	m_zoomToCursor = TRUE;
 	m_isometricCamera = FALSE;
+	// R1, smooth motion: the picture only, one logic tick behind, and never the game (W3DSmoothMotion.h).
+	// On by default off Windows, where 120 and 144 Hz panels are the common case; Windows keeps its
+	// picture as it was unless a player opts in.
+#if defined(_WIN32)
+	m_smoothMotion = FALSE;
+#else
+	m_smoothMotion = TRUE;
+#endif
 	m_closerZoomPercent = 0;
 	m_dragTolerance = 25;		// what Mouse.ini in INIZH.big says, so nothing moves until the slider does
 	// a left drag with the move, attack move or guard key armed draws a formation line
@@ -1149,7 +1176,14 @@ GlobalData::GlobalData()
 	m_moneyPerMinute = 0;
 	m_buildPlacementOpacity = PLACEMENT_SILHOUETTE_OPACITY;
 	m_buildPlacementShadows = TRUE;
+	// The corner readout (InGameUI::drawHudOverlay): on in the developer builds (Debug, _INTERNAL), off in
+	// Release, RELEASE_DEBUG_LOGGING included, which is a Release build that also logs.  A player turns it on
+	// with "ShowHudOverlay = Yes" in GameData.ini; a harness whose pictures must show it passes -showHudOverlay.
+#if defined(_DEBUG) || defined(_INTERNAL)
 	m_showHudOverlay = TRUE;
+#else
+	m_showHudOverlay = FALSE;
+#endif
 	m_showNetBox = TRUE;
 	m_incomeRateMode = INCOME_RATE_PER_SECOND;
 	m_showEmptyBuildingPips = TRUE;
@@ -1160,13 +1194,13 @@ GlobalData::GlobalData()
 	m_detailedBuildTooltips = TRUE;
 	m_archiveReplays = TRUE;
 
-	// Bloom is the one that does NOT default on: it changes how the game looks rather than what it
-	// can do, and the artwork was painted in 2003 for a screen with no glow at all.  Both fields are
-	// percentages and GameData.ini sets them as such - the strength, and the brightness below which
-	// nothing glows.  The options screen offers levels instead and stores one of those in
-	// Options.ini; OptionsCatalog.cpp holds the percentage each level stands for, and 0 and 65 here
-	// are two of them.
-	m_bloomIntensity = 0;
+	// Bloom defaults to the options screen's Medium: 60 percent, which the Direct3D 11 post chain
+	// turns into the 1.5 strength it used to apply unconditionally.  Both fields are percentages and
+	// GameData.ini sets them as such - the strength, and the brightness below which nothing glows.
+	// The options screen offers levels instead and stores one of those in Options.ini;
+	// OptionsCatalog.cpp holds the percentage each level stands for, and 60 and 65 here are two of
+	// them.
+	m_bloomIntensity = 60;
 	m_bloomThreshold = 65;
 	
 	m_animateWindows = TRUE;
@@ -1175,21 +1209,19 @@ GlobalData::GlobalData()
 	m_exeCRC = 0;
 	
 	// lets CRC the executable!  Whee!
+	/* Not the executable's bytes any more, on any platform: the build fingerprint (N1, decision 5 in
+		 PORTING.md), a CRC-32 over the tracked sources that Tools/fingerprint/build_fingerprint
+		 generates at build time.  A Mac or Linux binary can never have generals.exe's bytes, so hashing them
+		 made cross-platform play impossible by construction; two builds of the same source now agree
+		 whatever compiled them, and any source change still separates builds.  What it gives up: noticing
+		 a binary modified after the build.  Its four bytes go in as the platform stores them, which is the
+		 same on every platform the game builds for (little-endian).  The version and the two multiplayer
+		 scripts follow, as before. */
 	const Int blockSize = 65536;
-	Char buffer[ _MAX_PATH ];
 	CRC exeCRC;
-	GetModuleFileName( NULL, buffer, sizeof( buffer ) );
-	File *fp = TheFileSystem->openFile(buffer, File::READ | File::BINARY);
-	if (fp != NULL) {
-		unsigned char crcBlock[blockSize];
-		Int amtRead = 0;
-		while ( (amtRead=fp->read(crcBlock, blockSize)) > 0 )
-		{
-			exeCRC.computeCRC(crcBlock, amtRead);
-		}
-		fp->close();
-		fp = NULL;
-	}
+	const UnsignedInt buildFingerprint = ZH_BUILD_FINGERPRINT;
+	exeCRC.computeCRC( &buildFingerprint, sizeof( buildFingerprint ) );
+	File *fp = NULL;
 	if (TheVersion)
 	{
 		UnsignedInt version = TheVersion->getVersionNumber();
@@ -1227,7 +1259,7 @@ GlobalData::GlobalData()
 	m_shouldUpdateTGAToDDS = FALSE;
 	
 	// Default DoubleClickTime to System double click time.
-	m_doubleClickTimeMS = GetDoubleClickTime(); // Note: This is actual MS, not frames.
+	m_doubleClickTimeMS = systemDoubleClickTimeMS(); // Note: This is actual MS, not frames.
 	
 #ifdef DUMP_PERF_STATS
 	m_dumpPerformanceStatistics = FALSE;
@@ -1456,6 +1488,13 @@ void GlobalData::parseGameDataDefinition( INI* ini )
 	TheWritableGlobalData->m_xResolution = xres;
 	TheWritableGlobalData->m_yResolution = yres;
 	TheWritableGlobalData->m_monitor = optionPref["Monitor"];
+#if !defined(_WIN32)
+	// A first run: Options.ini names no resolution, so start at the monitor's own size (Monitors.h).
+	// The platform layer's displays are up by now: SdlGameEngine starts its video before this INI loads.
+	if (optionPref.find( "Resolution" ) == optionPref.end())
+		firstRunResolution( TheWritableGlobalData->m_monitor.str(),
+			&TheWritableGlobalData->m_xResolution, &TheWritableGlobalData->m_yResolution );
+#endif
 
 	// Everything in TheOptionCatalog, in one pass, and last: a row is allowed to overwrite what the
 	// hand-written block above just read.  This is also why the catalog is read here and not in
@@ -1470,6 +1509,7 @@ void GlobalData::parseGameDataDefinition( INI* ini )
 	if (TheWritableGlobalData->m_classicGraphics)
 	{
 		TheWritableGlobalData->m_shadowMap = FALSE;
+		TheWritableGlobalData->m_volumetricSmokeShadows = FALSE;
 		TheWritableGlobalData->m_direct3D11PostChain = "off";
 	}
 

@@ -249,3 +249,35 @@ TEST(ffvertexcompile_a_normal_mapped_pair_compiles_on_d3d11)
 	CHECK(compiles(compile, pixel_hlsl, "ps_4_0"));
 	CHECK(!CombinerShader_Generate(pixel, COMBINER_SHADER_TARGET_D3D9, pixel_hlsl));
 }
+
+// The smoke billboards' glow: the unlit vertex half hands the normal on in the specular slot, keyed
+// apart from the same program without it, and refuses a lit draw, whose normal is a normal.
+TEST(ffvertexcompile_the_smoke_glow_rides_the_specular_slot)
+{
+	VertexPipelineDescription plain = plain_description();
+	VertexPipelineDescription glow = plain;
+	glow.SmokeGlow = true;
+
+	std::string plain_hlsl;
+	std::string glow_hlsl;
+	CHECK(VertexShader_Generate(plain, VERTEX_SHADER_TARGET_D3D11, plain_hlsl));
+	CHECK(VertexShader_Generate(glow, VERTEX_SHADER_TARGET_D3D11, glow_hlsl));
+	CHECK(glow_hlsl.find("output.Specular = float4(input.Normal, 0.0);") != std::string::npos);
+	CHECK(plain_hlsl.find("output.Specular = float4(input.Normal") == std::string::npos);
+	CHECK(VertexShader_Key(glow) == VertexShader_Key(plain) + ":G");
+
+	VertexPipelineDescription lit = glow;
+	lit.LightingEnabled = true;
+	CHECK(!VertexShader_Generate(lit, VERTEX_SHADER_TARGET_D3D11, glow_hlsl));
+	VertexPipelineDescription no_normal = glow;
+	no_normal.FVF = D3DFVF_XYZ|D3DFVF_TEX2|D3DFVF_DIFFUSE;
+	CHECK(!VertexShader_Generate(no_normal, VERTEX_SHADER_TARGET_D3D11, glow_hlsl));
+
+	D3DCompileFunction compile = load_compiler();
+	if (compile == NULL) {
+		printf("  d3dcompiler_47.dll not present, skipping the compile\n");
+		return;
+	}
+	CHECK(VertexShader_Generate(glow, VERTEX_SHADER_TARGET_D3D11, glow_hlsl));
+	CHECK(compiles(compile, glow_hlsl, D3D11_PROFILE));
+}

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 // FILE: SimulationMathCrc.cpp ////////////////////////////////////////////////////////////////////
 // Desc:   A fingerprint of the floating point math the simulation is built on.
@@ -114,12 +115,12 @@ static UnsignedInt runInSimulationFPMode( void (*pass)( XferCRC & ), const char 
 	/* The answer is only comparable between machines if it is computed in the mode the simulation
 		 runs in, so set that mode - and put the caller's back, rather than _fpreset()ing to the C
 		 runtime default.  This is called from the mismatch dump, which happens mid-match. */
-	const UnsignedInt callersMode = _controlfp( 0, 0 );
+	const UnsignedInt callersMode = getFPMode();
 	setFPMode();
 
 	pass( xfer );
 
-	_controlfp( callersMode, FP_MODE_FIELDS );
+	restoreFPMode( callersMode );
 
 	xfer.close();
 

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -44,15 +45,16 @@
 #ifdef INCLUDE_GRANNY_IN_BUILD
 
 #include "W3DDevice/GameClient/W3DGranny.h"
-#include "common/GlobalData.h"
+#include "Lib/Clock.h"
+#include "Common/GlobalData.h"
 #include "texture.h"
 #include "colmath.h"
 #include "coltest.h"
 #include "rinfo.h"
 #include "camera.h"
 #include "assetmgr.h"
-#include "WW3D2/DX8Wrapper.h"
-#include "WW3D2/Scene.h"
+#include "WW3D2/dx8wrapper.h"
+#include "WW3D2/scene.h"
 
 #pragma comment( lib, "granny2" )
 
@@ -139,7 +141,7 @@ GrannyRenderObjClass::GrannyRenderObjClass(const GrannyPrototypeClass &proto)
 		{
 			granny_model *sourceModel =  fileInfo->Models[modelIndex];
 			//ignore bounding boxes since they are never rendered
-			if (stricmp(sourceModel->Name,"AABOX") != 0)
+			if (strcasecmp(sourceModel->Name,"AABOX") != 0)
 				m_modelInstance =  GrannyInstantiateModel(fileInfo->Models[modelIndex]);
 		}
 
@@ -452,7 +454,7 @@ PrototypeClass * GrannyLoaderClass::Load_W3D(const char *filename)
 			for (Int modelIndex=0; modelIndex<fileInfo->ModelCount; modelIndex++)
 			{
 				granny_model *sourceModel =  fileInfo->Models[modelIndex];
-				if (stricmp(sourceModel->Name,"AABOX") == 0)
+				if (strcasecmp(sourceModel->Name,"AABOX") == 0)
 				{	//found a collision box, copy out data
 					int MeshCount = sourceModel->MeshBindingCount;
 					if (MeshCount==1)
@@ -1056,7 +1058,7 @@ void GrannyRenderObjClassSystem::shutdown( void )
 void GrannyRenderObjClassSystem::update()
 {
 
-	Int		iTime=timeGetTime();
+	Int		iTime=Clock_Milliseconds();
 }
 
 

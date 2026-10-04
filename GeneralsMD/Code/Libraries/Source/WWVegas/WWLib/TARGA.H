@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 #ifndef _TARGA_H_
 #define _TARGA_H_
@@ -131,10 +132,13 @@ typedef struct _TGAHeader
  * RsvdChar  - Reserved character, must be ASCII "." (period)
  * BZST      - Binary Zero String Terminator.
  */
+/* The offsets are 32 bits in the file.  They were `long`, which is 32 bits on Windows and 64 on macOS
+ * and Linux, where the footer then read 34 bytes and every TGA failed to open; `int` is 32 everywhere
+ * and is what `long` was on Windows. */
 typedef struct _TGA2Footer
 	{
-	long Extension;
-	long Developer;
+	int Extension;
+	int Developer;
 	char Signature[16];
 	char RsvdChar;
 	char BZST;
@@ -224,14 +228,18 @@ typedef struct _TGA2Extension
 	TGA2TimeStamp JobTime;
 	char          SoftID[41];
 	TGA2SoftVer   SoftVer;
-	long          KeyColor;
+	int           KeyColor;
 	TGA2Ratio     Aspect;
 	TGA2Ratio     Gamma;
-	long          ColorCor;
-	long          PostStamp;
-	long          ScanLine;
+	int           ColorCor;
+	int           PostStamp;
+	int           ScanLine;
 	char          Attributes;
 	} TGA2Extension;
+
+/* Their sizes in a TGA 2.0 file; the code reads and writes them whole. */
+static_assert(sizeof(TGA2Footer) == 26, "TGA2Footer is 26 bytes in the file");
+static_assert(sizeof(TGA2Extension) == 495, "TGA2Extension is 495 bytes in the file");
 
 /* Alpha channel attributes (Extension Area) */
 #define EXTA_NOALPHA 0  /* No alpha data included */

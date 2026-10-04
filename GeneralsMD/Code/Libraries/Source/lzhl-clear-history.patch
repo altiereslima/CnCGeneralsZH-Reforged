@@ -1,0 +1,15 @@
+diff --git a/_lz.h b/_lz.h
+--- a/_lz.h
++++ b/_lz.h
+@@ -93,6 +93,11 @@
+ inline LZBuffer::LZBuffer()
+     {
+     buf= new BYTE[ LZBUFSIZE ];
++    // Zero Hour Reforged: altered - the history starts cleared.  The backward match (Lz.cpp) compares
++    // positions not yet written, so without this the output depends on what the allocator left in the
++    // buffer, and the decompressor rebuilds from its own leftovers.  The game's operator new zero-fills,
++    // so these are the bytes it always saw.
++    memset( buf, 0, LZBUFSIZE );
+     bufPos = 0;
+     }
+ 

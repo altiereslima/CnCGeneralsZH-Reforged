@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -31,7 +32,8 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
-#include "GameSpy/peer/peer.h"
+#include "Lib/WideCharFns.h"
+#include "gamespy/peer/peer.h"
 
 #include "Common/QuotedPrintable.h"
 #include "Common/UserPreferences.h"
@@ -118,8 +120,10 @@ void UpdateRemoteIPList()
 //	UnicodeString newEntry = prefs.getRemoteIPEntry(0);
 	UnicodeString newEntry = unisel;
 	UnicodeString newIP;
-	newEntry.nextToken(&newIP, UnicodeString(L":"));
-	Int numFields = swscanf(newIP.str(), L"%d.%d.%d.%d", &(n1[0]), &(n1[1]), &(n1[2]), &(n1[3]));
+	newEntry.nextToken(&newIP, UnicodeString(u":"));
+	// WideCharScan, not swscanf: newIP.str() is a WideChar* and swscanf reads a wchar_t*, which is
+	// a different width off Windows.  See Lib/WideCharFns.h.
+	Int numFields = WideCharScan(newIP.str(), u"%d.%d.%d.%d", &(n1[0]), &(n1[1]), &(n1[2]), &(n1[3]));
 
 	if (numFields != 4) {
 		// this is not a properly formatted IP, don't change a thing.
@@ -145,9 +149,9 @@ void UpdateRemoteIPList()
 			{
 				UnicodeString oldEntry = uni;
 				UnicodeString oldIP;
-				oldEntry.nextToken(&oldIP, UnicodeString(L":"));
+				oldEntry.nextToken(&oldIP, UnicodeString(u":"));
 
-				swscanf(oldIP.str(), L"%d.%d.%d.%d", &(n2[0]), &(n2[1]), &(n2[2]), &(n2[3]));
+				WideCharScan(oldIP.str(), u"%d.%d.%d.%d", &(n2[0]), &(n2[1]), &(n2[2]), &(n2[3]));
 
 				Bool isEqual = TRUE;
 				for (Int i = 0; (i < 4) && (isEqual == TRUE); ++i) {
@@ -193,7 +197,7 @@ void HostDirectConnectGame()
 
 	UnsignedInt localIP = TheLAN->GetLocalIP();
 	UnicodeString localIPString;
-	localIPString.format(L"%d.%d.%d.%d", localIP >> 24, (localIP & 0xff0000) >> 16, (localIP & 0xff00) >> 8, localIP & 0xff);
+	localIPString.format(u"%d.%d.%d.%d", localIP >> 24, (localIP & 0xff0000) >> 16, (localIP & 0xff00) >> 8, localIP & 0xff);
 
 	UnicodeString name;
 	name = GadgetTextEntryGetText(editPlayerName);
@@ -347,7 +351,7 @@ void NetworkDirectConnectInit( WindowLayout *layout, void *userData )
 	}
 
 	UnsignedInt ip = TheLAN->GetLocalIP();
-	ipstr.format(L"%d.%d.%d.%d", ip >> 24, (ip & 0xff0000) >> 16, (ip & 0xff00) >> 8, ip & 0xff);
+	ipstr.format(u"%d.%d.%d.%d", ip >> 24, (ip & 0xff0000) >> 16, (ip & 0xff00) >> 8, ip & 0xff);
 	GadgetStaticTextSetText(staticLocalIP, ipstr);
 
 	TheLAN->RequestLobbyLeave(true);

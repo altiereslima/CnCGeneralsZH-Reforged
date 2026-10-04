@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -49,6 +51,7 @@
 #include "always.h"
 #include "dllist.h"
 #include <d3d9.h>
+#include "Platform/RenderTypes.h"	// the Win32 types the device interface crosses with, engine-named
 #include "d3dx9runtime.h"
 #include "d3dx9math.h"
 #include "matrix4.h"
@@ -65,6 +68,7 @@
 #include "dx8vertexbuffer.h"
 #include "dx8indexbuffer.h"
 #include "vertmaterial.h"
+#include "Platform/MsvcFloatCasts.h"
 
 /*
 ** Registry value names
@@ -88,11 +92,11 @@ const int MAX_Z_BIAS_LEVEL=15;
 // This renderer creates one implicit swap chain and never asks about another.
 const UINT PRIMARY_SWAP_CHAIN=0;
 // D3D9 can bind several render targets at once and indexes them; this renderer binds one.
-const DWORD PRIMARY_RENDER_TARGET=0;
+const uint32 PRIMARY_RENDER_TARGET=0;
 // D3D8's GetAdapterIdentifier took D3DENUM_NO_WHQL_LEVEL to skip a slow WHQL signature
 // check.  D3D9 removed the flag and never does that check unless asked, so zero is what
 // the old call was actually asking for.
-const DWORD NO_ADAPTER_IDENTIFIER_FLAGS=0;
+const uint32 NO_ADAPTER_IDENTIFIER_FLAGS=0;
 const unsigned MAX_VERTEX_STREAMS=2;
 const unsigned MAX_VERTEX_SHADER_CONSTANTS=96;
 const unsigned MAX_PIXEL_SHADER_CONSTANTS=8;
@@ -222,6 +226,168 @@ struct RenderStateStruct
 	RenderStateStruct& operator= (const RenderStateStruct& src);
 };
 
+/*
+** Geometry a caller builds and draws itself.
+**
+** Five places in the engine keep vertices of their own outside the mesh renderer's buffers - the
+** sea patch and the wave grid, the shadow volumes, the shadow decals, the snow - and every one of
+** them was making a Direct3D 9 buffer, binding it on the device and drawing from it by hand.  That
+** is forty of the call sites D1's survey counts, and it is one problem rather than six: what each
+** of them is asking for is somewhere to put vertices it will draw itself.
+**
+** One of these is that somewhere.  It holds the Direct3D 9 buffers and, on a -dx11 run, the
+** Direct3D 11 copies that have to be filled with the same bytes, which is what lets the draw go
+** through the backend rather than past it.  A lock hands out the copy's block when there is one,
+** exactly as DX8VertexBufferClass's does, so a caller writes its vertices once and both buffers
+** end up holding them.
+**
+** It is deliberately not a VertexBufferClass.  Those are reference counted, registered
+** engine-wide, capped at 65535 vertices and carry an FVF, and none of the five callers wants any
+** of that - the water grid alone is larger than the cap, and two of them describe their vertices
+** with a declaration rather than an FVF.
+**
+** Nothing names Direct3D in the interface, which is the point: D2 replaces what is behind Create
+** and the locks and no caller changes.
+*/
+class OwnedGeometryClass
+{
+public:
+	OwnedGeometryClass();
+	~OwnedGeometryClass();
+
+	// refilled_every_frame is the caller's own dynamic/static choice and decides both the
+	// Direct3D 9 pool and how the Direct3D 11 copy is written.  False from either means the
+	// device refused the buffer and the caller draws nothing, which is what the hand-written
+	// creations did.
+	bool Create_Vertices(unsigned byte_count, bool refilled_every_frame);
+
+	// Index buffers in this engine are 16 bit without exception, so there is no format here and
+	// the backend's own mirror does not take one either.
+	bool Create_Indices(unsigned index_count, bool refilled_every_frame);
+
+	void Release();
+
+	bool Has_Vertices() const { return VertexByteCount != 0; }
+	bool Has_Indices() const { return IndexCount != 0; }
+	unsigned Get_Vertex_Byte_Count() const { return VertexByteCount; }
+	unsigned Get_Index_Count() const { return IndexCount; }
+
+	/*
+	** Scoped write access.  Construct one, write into what Get_Vertices/Get_Indices answers, let
+	** it go out of scope.  A null pointer back means the buffer could not be locked and the
+	** caller writes nothing; it must still let the lock go out of scope.
+	**
+	** discard says the rest of the buffer is not worth keeping, which is D3DLOCK_DISCARD and is
+	** what lets a driver rename a dynamic buffer instead of waiting for the draws still reading
+	** it.  Every caller that refills every frame wants it.
+	*/
+	class VertexLockClass
+	{
+	public:
+		VertexLockClass(OwnedGeometryClass & geometry, unsigned byte_offset, unsigned byte_count,
+			bool discard);
+		~VertexLockClass();
+		void * Get_Vertices() const { return Vertices; }
+	private:
+		VertexLockClass(const VertexLockClass &);
+		VertexLockClass & operator = (const VertexLockClass &);
+		OwnedGeometryClass * Geometry;
+		void * Vertices;
+		DX11BufferLockClass DX11Lock;
+	};
+
+	class IndexLockClass
+	{
+	public:
+		IndexLockClass(OwnedGeometryClass & geometry, unsigned first_index, unsigned index_count,
+			bool discard);
+		~IndexLockClass();
+		unsigned short * Get_Indices() const { return Indices; }
+	private:
+		IndexLockClass(const IndexLockClass &);
+		IndexLockClass & operator = (const IndexLockClass &);
+		OwnedGeometryClass * Geometry;
+		unsigned short * Indices;
+		DX11BufferLockClass DX11Lock;
+	};
+
+private:
+	friend class DX8Wrapper;
+	friend VertexLockClass;			// the nested names, as dx8vertexbuffer.h befriends its own
+	friend IndexLockClass;
+
+	OwnedGeometryClass(const OwnedGeometryClass &);
+	OwnedGeometryClass & operator = (const OwnedGeometryClass &);
+
+	IDirect3DVertexBuffer9 *	Vertices;
+	IDirect3DIndexBuffer9 *		Indices;
+	DX11BufferTwinClass *		VertexTwin;			// null on a run without -dx11
+	DX11BufferTwinClass *		IndexTwin;
+	unsigned					VertexByteCount;
+	unsigned					IndexCount;
+	bool						VerticesAreDynamic;
+	bool						IndicesAreDynamic;
+};
+
+
+/*
+** A vertex program the engine loaded out of the archives, with the vertex layout it came with.
+**
+** Direct3D 8 carried the layout inside the shader; Direct3D 9 split them, and since that split the
+** two halves have been bound one after the other at each of the two call sites that use them - the
+** wave grid and the trees.  Holding them together is not tidiness: a backend that has one form of
+** layout, or no separate layout at all, needs to be told about both at once, and a caller that
+** binds a shader without its layout reads zeros out of the stream.
+**
+** Take is handed what W3DShaderManager::LoadAndCreateD3DVertexShader produced.  It is the one
+** place in the new interface that still names Direct3D 9 types, because the loader that makes
+** them has not moved yet; D3 moves it, and this signature is what it changes.
+*/
+class EngineVertexShaderClass
+{
+public:
+	EngineVertexShaderClass() : Shader(NULL), Layout(NULL) {}
+
+	void Take(IDirect3DVertexShader9 * shader, IDirect3DVertexDeclaration9 * layout)
+		{ Shader = shader; Layout = layout; }
+	bool Is_Loaded() const { return Shader != NULL; }
+
+private:
+	friend class DX8Wrapper;
+	IDirect3DVertexShader9 *		Shader;
+	IDirect3DVertexDeclaration9 *	Layout;		// null when the shader is described by an FVF
+};
+
+
+/*
+** A pixel program the engine carries as assembly text and builds at startup.
+**
+** Four of these live in the water: the river, the environment-mapped sea, the trapezoid and the
+** reflection.  Each was assembled, handed to the device and then registered with the Direct3D 11
+** backend by hand, and a registration that is left out is not an error anywhere - the draw is
+** simply refused later, under a cause that names no file.  Building and registering in one call is
+** what stops that being possible.
+*/
+class AssembledPixelShaderClass
+{
+public:
+	AssembledPixelShaderClass() : Shader(NULL) {}
+	~AssembledPixelShaderClass();
+
+	// name is what the backend's reports call this program when a draw with it bound is refused.
+	// False means the text did not assemble or the device refused it; the caller draws without it,
+	// which is what the hand-written versions did with a failed HRESULT.
+	bool Assemble(const char * source, const char * name);
+	void Release();
+	bool Is_Built() const { return Shader != NULL; }
+
+private:
+	friend class DX8Wrapper;
+	AssembledPixelShaderClass(const AssembledPixelShaderClass &);
+	AssembledPixelShaderClass & operator = (const AssembledPixelShaderClass &);
+	IDirect3DPixelShader9 * Shader;
+};
+
 /**
 ** DX8Wrapper
 **
@@ -307,7 +473,7 @@ public:
 
 	static void Clear(bool clear_color, bool clear_z_stencil, const Vector3 &color, float dest_alpha=0.0f, float z=1.0f, unsigned int stencil=0);
 
-	static void	Set_Viewport(CONST D3DVIEWPORT9* pViewport);
+	static void	Set_Viewport(const D3DVIEWPORT9* pViewport);
 
 	static void Set_Vertex_Buffer(const VertexBufferClass* vb, unsigned stream=0);
 	static void Set_Vertex_Buffer(const DynamicVBAccessClass& vba);
@@ -346,7 +512,7 @@ public:
 
 	static void Set_DX8_Light(int index,D3DLIGHT9* light);
 	static void Set_DX8_Render_State(D3DRENDERSTATETYPE state, unsigned value);
-	static void Set_DX8_Clip_Plane(DWORD Index, CONST float* pPlane);
+	static void Set_DX8_Clip_Plane(uint32 Index, const float* pPlane);
 	static void Set_DX8_Texture_Stage_State(unsigned stage, D3DTEXTURESTAGESTATETYPE state, unsigned value);
 	static void Set_DX8_Texture_Stage_State(unsigned stage, D3DSAMPLERSTATETYPE state, unsigned value);
 	static void Set_DX8_Texture(unsigned int stage, IDirect3DBaseTexture9* texture);
@@ -386,6 +552,72 @@ public:
 		unsigned short index_count,
 		unsigned short min_vertex_index,
 		unsigned short vertex_count);
+
+	/*
+	** Geometry the caller built, and what it takes to draw it.  See OwnedGeometryClass above.
+	**
+	** These are additive: D1's survey found the engine drawing its own geometry straight on the
+	** device from forty places, where a second backend could see neither the buffers, nor the
+	** binding, nor the draw.  Nothing calls them yet - the call sites move in their own pull
+	** requests, because the acceptance test for moving one is a pixel comparison.
+	*/
+
+	// Bind a caller's geometry as the stream and index source.  vertex_stride is the size of one
+	// of its vertices; first_vertex_byte is where in the buffer the vertices start, which is how
+	// the snow draws successive batches out of one buffer.
+	static void Set_Owned_Geometry(const OwnedGeometryClass & geometry, unsigned vertex_stride,
+		unsigned first_vertex_byte = 0);
+
+	// Draw a run of the bound geometry's indices.  as_strip is the topology both water grids are
+	// indexed for; everything else is a list.  first_vertex and vertex_count are the range of the
+	// vertex buffer the indices reach into, which Direct3D 9 wants and a backend may not.
+	static void Draw_Owned_Triangles(unsigned first_index, unsigned triangle_count,
+		unsigned first_vertex, unsigned vertex_count, bool as_strip = false);
+
+	// Vertices with no indices behind them: the snow's particles, which are drawn as points and
+	// sized by the point-scale render states.  The Direct3D 11 backend has no point path, so this
+	// one draws on Direct3D 9 alone and says so rather than pretending to mirror.
+	static void Draw_Owned_Points(unsigned first_vertex, unsigned point_count);
+
+	// A shipped vertex program and the layout that came with it, bound together.  See
+	// EngineVertexShaderClass above for why the two halves are not separable.
+	static void Set_Engine_Vertex_Shader(const EngineVertexShaderClass & shader);
+
+	// A pixel program the engine assembled at startup.  Set_Pixel_Shader's overload; it exists so
+	// that a caller holding one of these does not have to reach inside it.
+	static void Set_Assembled_Pixel_Shader(const AssembledPixelShaderClass & shader);
+
+	/*
+	** The target the frame is being drawn into, and reading it back.
+	*/
+
+	// How big the colour target being drawn into is, and in what format.  False when there is no
+	// device or no target, and the caller makes nothing.
+	//
+	// There is deliberately no Save/Restore pair here.  Writing one showed the wrapper already
+	// has it: Set_Render_Target(surface, depth) keeps the surfaces it displaced and
+	// Set_Render_Target(NULL, NULL) puts them back, so the five call sites that save and restore
+	// by hand are a swap onto what exists rather than anything new.  A second stack of one on top
+	// of that one would fight it.
+	static bool Get_Render_Target_Description(unsigned & width, unsigned & height,
+		WW3DFormat & format);
+
+	// The colour target currently bound, copied into memory the CPU can read.  Null when there is
+	// nothing to read, which is what a device that has gone away gives.  The caller releases what
+	// comes back.
+	static SurfaceClass * Read_Back_Render_Target();
+
+	// The frame the device is about to present, likewise.  Multisampling is resolved first -
+	// Direct3D 9 refuses to read a multisampled surface back, and with anti-aliasing on the back
+	// buffer is exactly that - so this is not the same call as the one above with a different
+	// surface.  Has to be called before the present that discards the frame.
+	static SurfaceClass * Read_Back_Frame();
+
+	// Whether the device can be drawn to at this moment, asked of the device rather than
+	// remembered.  Four places in the engine ask it before touching anything that would build
+	// geometry, and all four ask it the same way; Is_Device_Lost above answers from a flag the
+	// present path last set, which is a different question.
+	static bool Device_Is_Ready();
 
 	/*
 	** Resources
@@ -458,10 +690,10 @@ public:
 
 	static void _Copy_DX8_Rects(
 			IDirect3DSurface9* pSourceSurface,
-			CONST RECT* pSourceRectsArray,
+			const RenderRect* pSourceRectsArray,
 			UINT cRects,
 			IDirect3DSurface9* pDestinationSurface,
-			CONST POINT* pDestPointsArray
+			const RenderPoint* pDestPointsArray
 	);
 
 	static void _Update_Texture(TextureClass *system, TextureClass *video);
@@ -524,7 +756,7 @@ public:
 	**	DX8Wrapper::Set_Render_Target ((IDirect3DSurface9 *)NULL);
 	**
 	*/
-	static IDirect3DSwapChain9 *	Create_Additional_Swap_Chain (HWND render_window);
+	static IDirect3DSwapChain9 *	Create_Additional_Swap_Chain (RenderWindow render_window);
 
 	/*
 	** Render target interface. If render target format is WW3D_FORMAT_UNKNOWN, current display format is used.
@@ -571,14 +803,14 @@ public:
 
 	// D3D8's SetVertexShader took a DWORD that was either an FVF code or a shader
 	// handle, and the engine used it both ways.  D3D9 splits them, so these do too.
-	static void Set_Vertex_Format(DWORD fvf);
+	static void Set_Vertex_Format(uint32 fvf);
 	static void Set_Vertex_Shader(IDirect3DVertexShader9 * vertex_shader);
 	static void Set_Pixel_Shader(IDirect3DPixelShader9 * pixel_shader);
 
 	static void Set_Vertex_Shader_Constant(int reg, const void* data, int count);
 	static void Set_Pixel_Shader_Constant(int reg, const void* data, int count);
 
-	static DWORD Get_Vertex_Processing_Behavior() { return Vertex_Processing_Behavior; }
+	static uint32 Get_Vertex_Processing_Behavior() { return Vertex_Processing_Behavior; }
 
 	// Needed by scene lighting class
 	static void						Set_Ambient(const Vector3& color);
@@ -605,8 +837,10 @@ public:
 
 	static const DX8Caps*	Get_Current_Caps() { WWASSERT(CurrentCaps); return CurrentCaps; }
 
+#if defined(_WIN32)	// the registry: Windows only
 	static bool Registry_Save_Render_Device( const char * sub_key );
 	static bool Registry_Load_Render_Device( const char * sub_key, bool resize_window );
+#endif
 
 	static const char* Get_DX8_Render_State_Name(D3DRENDERSTATETYPE state);
 	static const char* Get_DX8_Texture_Stage_State_Name(D3DTEXTURESTAGESTATETYPE state);
@@ -671,8 +905,10 @@ protected:
 	static int	Get_Device_Resolution_Width(void) { return ResolutionWidth; }
 	static int	Get_Device_Resolution_Height(void) { return ResolutionHeight; }
 
+#if defined(_WIN32)	// the registry: Windows only
 	static bool Registry_Save_Render_Device( const char *sub_key, int device, int width, int height, int depth, bool windowed, int texture_depth);
 	static bool Registry_Load_Render_Device( const char * sub_key, char *device, int device_len, int &width, int &height, int &depth, int &windowed, int &texture_depth);
+#endif
 	static bool Is_Windowed(void) { return IsWindowed; }
 
 	static void	Set_Texture_Bitdepth(int depth)	{ WWASSERT(depth==16 || depth==32); TextureBitDepth = depth; }
@@ -685,6 +921,11 @@ protected:
 	/*
 	** Internal functions
 	*/
+	// One render target surface copied into a system-memory surface the CPU can read.  Both
+	// read-back entry points above end here; they differ only in which surface they hand it and
+	// in whether multisampling had to be resolved first.
+	static SurfaceClass * Copy_Surface_To_System_Memory(IDirect3DSurface9 * source);
+
 	static bool Find_Color_And_Z_Mode(int resx,int resy,int bitdepth,D3DFORMAT * set_colorbuffer,D3DFORMAT * set_backbuffer, D3DFORMAT * set_zmode);
 	static bool Find_Color_Mode(D3DFORMAT colorbuffer, int resx, int resy, UINT *mode);
 	static bool Find_Z_Mode(D3DFORMAT colorbuffer,D3DFORMAT backbuffer, D3DFORMAT *zmode);
@@ -721,7 +962,7 @@ protected:
 	static D3DMATRIX						old_prj;
 
 	// shader system updates KJM v
-	static DWORD							Vertex_Format;
+	static uint32							Vertex_Format;
 	static IDirect3DVertexShader9 *			Vertex_Shader;
 	static IDirect3DPixelShader9 *			Pixel_Shader;
 
@@ -731,7 +972,7 @@ protected:
 	static LightEnvironmentClass*		Light_Environment;
 	static RenderInfoClass*				Render_Info;
 
-	static DWORD							Vertex_Processing_Behavior;
+	static uint32							Vertex_Processing_Behavior;
 
 	static ZTextureClass*				Shadow_Map[MAX_SHADOW_MAPS];
 
@@ -791,7 +1032,7 @@ protected:
 };
 
 // shader system updates KJM v
-WWINLINE void DX8Wrapper::Set_Vertex_Format(DWORD fvf)
+WWINLINE void DX8Wrapper::Set_Vertex_Format(uint32 fvf)
 {
 #if 0 //(gth) some code is bypassing this acessor function so we can't count on this variable...
 	// may be incorrect if shaders are created and destroyed dynamically
@@ -924,8 +1165,8 @@ WWINLINE void DX8Wrapper::Set_Fog(bool enable, const Vector3 &color, float start
 	ShaderClass::Invalidate();
 
 	// Set renderstates which are not affected by the shader
-	Set_DX8_Render_State(D3DRS_FOGSTART, *(DWORD *)(&start));
-	Set_DX8_Render_State(D3DRS_FOGEND,   *(DWORD *)(&end));
+	Set_DX8_Render_State(D3DRS_FOGSTART, *(uint32 *)(&start));
+	Set_DX8_Render_State(D3DRS_FOGEND,   *(uint32 *)(&end));
 }
 
 
@@ -961,12 +1202,12 @@ WWINLINE void DX8Wrapper::Set_DX8_Light(int index, D3DLIGHT9* light)
 	if (light) {
 		DX8_RECORD_LIGHT_CHANGE();
 		DX8CALL(SetLight(index,light));
-		DX8CALL(LightEnable(index,TRUE));
+		DX8CALL(LightEnable(index,true));
 		CurrentDX8LightEnables[index]=true;
 		SNAPSHOT_SAY(("DX8 - SetLight %d\n",index));
 
 		// D3DLIGHT9 keeps the position and the direction as three floats each and the attenuation
-		// and the cone as loose scalars; ffvertex reads six four-float fields, so they are packed
+		// and the cone as loose scalars; ffvertex reads seven four-float fields, so they are packed
 		// here rather than in the backend, which never sees a D3DLIGHT9.
 		const float position[4] = { light->Position.x, light->Position.y, light->Position.z, 1.0f };
 		const float direction[4] = { light->Direction.x, light->Direction.y, light->Direction.z, 0.0f };
@@ -975,12 +1216,13 @@ WWINLINE void DX8Wrapper::Set_DX8_Light(int index, D3DLIGHT9* light)
 		const float spot[4] = { cosf(light->Theta * 0.5f), cosf(light->Phi * 0.5f),
 			light->Falloff, 0.0f };
 		Direct3D11_Mirror_Light(index, light->Type, position, direction,
-			(const float*)&light->Diffuse, (const float*)&light->Specular, attenuation, spot);
+			(const float*)&light->Diffuse, (const float*)&light->Specular, attenuation, spot,
+			(const float*)&light->Ambient);
 	}
 	else if (CurrentDX8LightEnables[index]) {
 		DX8_RECORD_LIGHT_CHANGE();
 		CurrentDX8LightEnables[index]=false;
-		DX8CALL(LightEnable(index,FALSE));
+		DX8CALL(LightEnable(index,false));
 		Direct3D11_Mirror_Light_Disabled(index);
 		SNAPSHOT_SAY(("DX8 - DisableLight %d\n",index));
 	}
@@ -997,7 +1239,7 @@ WWINLINE void DX8Wrapper::Set_DX8_Render_State(D3DRENDERSTATETYPE state, unsigne
 		Get_DX8_Render_State_Value_Name(value_name,state,value);
 		SNAPSHOT_SAY(("DX8 - SetRenderState(state: %s, value: %s)\n",
 			Get_DX8_Render_State_Name(state),
-			value_name));
+			(const char *)value_name));	// a StringClass is not a vararg
 	}
 #endif
 
@@ -1007,7 +1249,7 @@ WWINLINE void DX8Wrapper::Set_DX8_Render_State(D3DRENDERSTATETYPE state, unsigne
 	DX8_RECORD_RENDER_STATE_CHANGE();
 }
 
-WWINLINE void DX8Wrapper::Set_DX8_Clip_Plane(DWORD Index, CONST float* pPlane)
+WWINLINE void DX8Wrapper::Set_DX8_Clip_Plane(uint32 Index, const float* pPlane)
 {
 	DX8CALL(SetClipPlane( Index, pPlane ));
 }
@@ -1028,7 +1270,7 @@ WWINLINE void DX8Wrapper::Set_DX8_Texture_Stage_State(unsigned stage, D3DTEXTURE
 		SNAPSHOT_SAY(("DX8 - SetTextureStageState(stage: %d, state: %s, value: %s)\n",
 			stage,
 			Get_DX8_Texture_Stage_State_Name(state),
-			value_name));
+			(const char *)value_name));	// a StringClass is not a vararg
 	}
 #endif
 
@@ -1056,7 +1298,7 @@ WWINLINE void DX8Wrapper::Set_DX8_Texture_Stage_State(unsigned stage, D3DSAMPLER
 		SNAPSHOT_SAY(("DX8 - SetSamplerState(stage: %d, state: %s, value: %s)\n",
 			stage,
 			Get_DX8_Sampler_State_Name(state),
-			value_name));
+			(const char *)value_name));	// a StringClass is not a vararg
 	}
 #endif
 
@@ -1102,10 +1344,12 @@ WWINLINE Vector4 DX8Wrapper::Convert_Color(unsigned color)
 
 WWINLINE unsigned int DX8Wrapper::Convert_Color(const Vector3& color, const float alpha)
 {
-	const unsigned int a = (unsigned int)(alpha * 255.0f) & 0xff;
-	const unsigned int r = (unsigned int)(color.X * 255.0f) & 0xff;
-	const unsigned int g = (unsigned int)(color.Y * 255.0f) & 0xff;
-	const unsigned int b = (unsigned int)(color.Z * 255.0f) & 0xff;
+	// A channel outside 0..1 wraps, as Windows' conversion did (-0.1 is 231); C leaves converting a
+	// negative float to unsigned undefined, and ARM64 made it 0.  Platform/MsvcFloatCasts.h.
+	const unsigned int a = (unsigned int)floatToIntAsMsvc(alpha * 255.0f) & 0xff;
+	const unsigned int r = (unsigned int)floatToIntAsMsvc(color.X * 255.0f) & 0xff;
+	const unsigned int g = (unsigned int)floatToIntAsMsvc(color.Y * 255.0f) & 0xff;
+	const unsigned int b = (unsigned int)floatToIntAsMsvc(color.Z * 255.0f) & 0xff;
 	return (a << 24) | (r << 16) | (g << 8) | b;
 }
 
@@ -1159,7 +1403,7 @@ WWINLINE void DX8Wrapper::Set_Texture(unsigned stage,TextureBaseClass* texture)
 WWINLINE void DX8Wrapper::Set_Material(const VertexMaterialClass* material)
 {
 /*	if (material && render_state.material &&
-		// !stricmp(material->Get_Name(),render_state.material->Get_Name())) {
+		// !strcasecmp(material->Get_Name(),render_state.material->Get_Name())) {
 		material->Get_CRC()!=render_state.material->Get_CRC()) {
 		return;
 	}
@@ -1182,7 +1426,7 @@ WWINLINE void DX8Wrapper::Set_Shader(const ShaderClass& shader)
 #ifdef MESH_RENDER_SNAPSHOT_ENABLED
 	StringClass str;
 #endif
-	SNAPSHOT_SAY(("DX8Wrapper::Set_Shader(%s)\n",shader.Get_Description(str)));
+	SNAPSHOT_SAY(("DX8Wrapper::Set_Shader(%s)\n",(const char *)shader.Get_Description(str)));
 }
 
 WWINLINE void DX8Wrapper::Set_Projection_Transform_With_Z_Bias(const Matrix4x4& matrix, float znear, float zfar)
@@ -1229,7 +1473,7 @@ WWINLINE void DX8Wrapper::Set_DX8_ZBias(int zbias)
 		// along (d3d8types.cpp, CalcDepthBias), so the bias stays where the picture
 		// already has it.
 		const float depth_bias=ZBias*Get_Depth_Buffer_Epsilon();
-		Set_DX8_Render_State(D3DRS_DEPTHBIAS,*(const DWORD*)&depth_bias);
+		Set_DX8_Render_State(D3DRS_DEPTHBIAS,*(const uint32*)&depth_bias);
 	}
 }
 
@@ -1259,6 +1503,8 @@ WWINLINE void DX8Wrapper::Set_Transform(D3DTRANSFORMSTATETYPE transform,const Ma
 		DX8_RECORD_MATRIX_CHANGE();
 		Matrix4x4 m2=m.Transpose();
 		DX8CALL(SetTransform(transform,(D3DMATRIX*)&m2));
+		// the texture-stage transforms (the scrolling and projecting mappers) reach Direct3D 11 as they reach Direct3D 9
+		Direct3D11_Mirror_Transform(transform,(const float*)&m2);
 		break;
 	}
 }
@@ -1281,6 +1527,7 @@ WWINLINE void DX8Wrapper::Set_Transform(D3DTRANSFORMSTATETYPE transform,const Ma
 		DX8_RECORD_MATRIX_CHANGE();
 		m2=m2.Transpose();
 		DX8CALL(SetTransform(transform,(D3DMATRIX*)&m2));
+		Direct3D11_Mirror_Transform(transform,(const float*)&m2);
 		break;
 	}
 }

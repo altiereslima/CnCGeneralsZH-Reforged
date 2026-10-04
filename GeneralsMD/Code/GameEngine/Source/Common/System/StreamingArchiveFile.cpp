@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -49,7 +50,9 @@
 
 #include <stdio.h>
 #include <fcntl.h>
-#include <io.h>
+#if defined(_WIN32)
+#include <io.h>		// nothing here calls it; kept on Windows so its include set is unchanged
+#endif
 #include <string.h>
 #include <sys/stat.h>
 
@@ -227,6 +230,10 @@ Int StreamingArchiveFile::read( void *buffer, Int bytes )
 		bytes = m_size - m_curPos;
 
 	Int bytesRead = m_file->read(buffer, bytes);
+	// the archive's drive gone under a stream (music, speech): see Win32BIGFile::openFile.  From the audio's
+	// thread GameDataGone only records it, and the main loop stops the game (GameDataGoneCheck).
+	if (bytesRead < 0 && m_file->deviceGone())
+		GameDataGone(m_file->getName());
 
 	m_curPos += bytesRead;
 

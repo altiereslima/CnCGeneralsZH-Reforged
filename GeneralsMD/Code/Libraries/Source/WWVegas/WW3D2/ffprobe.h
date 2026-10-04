@@ -15,11 +15,12 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*
 ** The fixed-function inventory.
 **
-** RENDERER-ROADMAP.md's phase 2 replaces fixed-function multitexture with HLSL, and the first thing
+** Replacing fixed-function multitexture with HLSL is most of the Direct3D 11 backend, and the first thing
 ** that has to be known is how many different things the pipeline is actually asked to compute.  The
 ** bit layout in shader.h can express tens of thousands of combinations; what the game sets during a
 ** match is a far smaller set, and it is the smaller set that has to be written as shaders.

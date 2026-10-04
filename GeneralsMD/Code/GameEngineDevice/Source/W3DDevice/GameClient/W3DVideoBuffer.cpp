@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -48,7 +49,7 @@
 #include "Common/GameMemory.h"
 #include "WW3D2/texture.h"
 #include "WW3D2/textureloader.h"
-#include "W3DDevice/GameClient/W3DVideoBuffer.h"
+#include "W3DDevice/GameClient/W3DVideobuffer.h"
 
 //----------------------------------------------------------------------------
 //         Externals                                                     

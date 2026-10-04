@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -52,7 +53,7 @@
 //           Includes                                                      
 //----------------------------------------------------------------------------
 
-#include "lib/basetype.h"
+#include "Lib/BaseType.h"
 #include "Common/AsciiString.h"
 #include "Common/GameMemory.h"
 // include FileSystem.h as it will be used alot with File.h
@@ -129,15 +130,15 @@ class File : public MemoryPoolObject
 		virtual Bool	open( const Char *filename, Int access = 0 );				///< Open a file for access
 		virtual void	close( void );																			///< Close the file !!! File object no longer valid after this call !!!
 
-		virtual Int		read( void *buffer, Int bytes ) = NULL ;						/**< Read the specified number of bytes from the file in to the 
+		virtual Int		read( void *buffer, Int bytes ) = 0 ;						/**< Read the specified number of bytes from the file in to the 
 																																			  *  memory pointed at by buffer. Returns the number of bytes read.
 																																			  *  Returns -1 if an error occured.
 																																			  */
-		virtual Int		write( const void *buffer, Int bytes ) = NULL ;						/**< Write the specified number of bytes from the    
+		virtual Int		write( const void *buffer, Int bytes ) = 0 ;						/**< Write the specified number of bytes from the    
 																																			  *	 memory pointed at by buffer to the file. Returns the number of bytes written.
 																																			  *	 Returns -1 if an error occured.
 																																			  */
-		virtual Int		seek( Int bytes, seekMode mode = CURRENT ) = NULL;	/**< Sets the file position of the next read/write operation. Returns the new file
+		virtual Int		seek( Int bytes, seekMode mode = CURRENT ) = 0;	/**< Sets the file position of the next read/write operation. Returns the new file
 																																				*  position as the number of bytes from the start of the file.
 																																				*  Returns -1 if an error occured.
 																																				*
@@ -173,6 +174,11 @@ class File : public MemoryPoolObject
 		*/
 		virtual char* readEntireAndClose() = 0;
 		virtual File* convertToRAMFile() = 0;
+
+		/** TRUE when this file's last read or seek failed because the device it is on has gone away: the
+			* drive disconnected, ejected or asleep, while the file was open.  Only LocalFile can tell; the
+			* archive layer asks it when an archive read fails (GameDataGone, Common/Debug.h). */
+		virtual Bool	deviceGone( void ) const { return FALSE; }
 };
 
 

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -28,6 +30,21 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+
+/* The language of the active keyboard layout, the low word of its HKL: Keyboard::initKeyNames names
+	 the numpad keys the French way on a French layout.  Windows asks GetKeyboardLayout, as always (the
+	 HKL is a handle, so it goes through uintptr_t on its way to an integer).  Elsewhere the layout is
+	 C3's to read; until then this is 0, no layout language, and the game's own language decides. */
+static Int keyboardLayoutLanguage( void )
+{
+#if defined(_WIN32)
+	HKL kLayout = GetKeyboardLayout(0);
+	return (Int)((uintptr_t)kLayout & 0xFFFF);
+#else
+	return 0;
+#endif
+}
+#include "Lib/Clock.h"
 
 #include "Common/Language.h"
 #include "Common/GameEngine.h"
@@ -153,7 +170,7 @@ void Keyboard::updateKeys( void )
 
 		m_keyStatus[ m_keys[ index ].key ].state = m_keys[ index ].state;
 		m_keyStatus[ m_keys[ index ].key ].status = m_keys[ index ].status;
-		m_keyStatus[ m_keys[ index ].key ].sequence = timeGetTime();
+		m_keyStatus[ m_keys[ index ].key ].sequence = Clock_Milliseconds();
 
 		// prevent ALT-TAB from causing a TAB event
 		if( m_keys[ index ].key == KEY_TAB )
@@ -221,7 +238,7 @@ Bool Keyboard::checkKeyRepeat( void )
 	while( m_keys[ index ].key != KEY_NONE )
 		index++;
 
-	const UnsignedInt nowMs = timeGetTime();
+	const UnsignedInt nowMs = Clock_Milliseconds();
 
 	// Scan Keyboard status array for first key down
 	// long enough to repeat
@@ -279,74 +296,72 @@ void Keyboard::initKeyNames( void )
 	for( i = 0; i < KEY_NAMES_COUNT; i++ )
 	{
 
-		m_keyNames[ i ].stdKey =		L'\0';
-		m_keyNames[ i ].shifted =		L'\0';
-		m_keyNames[ i ].shifted2 =	L'\0';
+		m_keyNames[ i ].stdKey =		u'\0';
+		m_keyNames[ i ].shifted =		u'\0';
+		m_keyNames[ i ].shifted2 =	u'\0';
 
 	}  // end for i
 
 	m_shift2Key = KEY_NONE;
 
 	// generic to all languages
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_UP );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_DOWN );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_LEFT );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_RIGHT );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_UP );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_DOWN );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_LEFT );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_RIGHT );
 
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_HOME );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_END );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_PGUP );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_PGDN );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_INS );
-	_set_keyname_(L'\b',	L'\b',	L'\0',	KEY_DEL );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_HOME );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_END );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_PGUP );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_PGDN );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_INS );
+	_set_keyname_(u'\b',	u'\b',	u'\0',	KEY_DEL );
 
-	_set_keyname_(L'\b',	L'\b',	L'\0',	KEY_BACKSPACE  );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_ESC  );
-	_set_keyname_(L'\t',	L'\t',	L'\0',	KEY_TAB  );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_CAPS  );
-	_set_keyname_(L'\n',	L'\n',	L'\0',	KEY_ENTER  );
+	_set_keyname_(u'\b',	u'\b',	u'\0',	KEY_BACKSPACE  );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_ESC  );
+	_set_keyname_(u'\t',	u'\t',	u'\0',	KEY_TAB  );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_CAPS  );
+	_set_keyname_(u'\n',	u'\n',	u'\0',	KEY_ENTER  );
 
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_RALT );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_RCTRL );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_RSHIFT  );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_RALT );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_RCTRL );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_RSHIFT  );
 
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_LALT  );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_LCTRL  );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_LSHIFT  );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_LALT  );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_LCTRL  );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_LSHIFT  );
 
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_NUM );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_SCROLL );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_SYSREQ );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_NUM );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_SCROLL );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_SYSREQ );
 
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_F1  );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_F2  );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_F3  );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_F4  );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_F5  );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_F6  );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_F7  );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_F8  );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_F9  );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_F10 );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_F11 );
-	_set_keyname_(L'\0',	L'\0',	L'\0',	KEY_F12 );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_F1  );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_F2  );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_F3  );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_F4  );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_F5  );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_F6  );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_F7  );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_F8  );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_F9  );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_F10 );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_F11 );
+	_set_keyname_(u'\0',	u'\0',	u'\0',	KEY_F12 );
 
-	_set_keyname_(L'1',		L'1',		L'\0',	KEY_KP1 );
-	_set_keyname_(L'2',		L'2',		L'\0',	KEY_KP2 );
-	_set_keyname_(L'3',		L'3',		L'\0',	KEY_KP3 );
-	_set_keyname_(L'4',		L'4',		L'\0',	KEY_KP4 );
-	_set_keyname_(L'5',		L'5',		L'\0',	KEY_KP5 );
-	_set_keyname_(L'6',		L'6',		L'\0',	KEY_KP6 );
-	_set_keyname_(L'7',		L'7',		L'\0',	KEY_KP7 );
-	_set_keyname_(L'8',		L'8',		L'\0',	KEY_KP8 );
-	_set_keyname_(L'9',		L'9',		L'\0',	KEY_KP9 );
-	_set_keyname_(L'0',		L'0',		L'\0',	KEY_KP0 );
+	_set_keyname_(u'1',		u'1',		u'\0',	KEY_KP1 );
+	_set_keyname_(u'2',		u'2',		u'\0',	KEY_KP2 );
+	_set_keyname_(u'3',		u'3',		u'\0',	KEY_KP3 );
+	_set_keyname_(u'4',		u'4',		u'\0',	KEY_KP4 );
+	_set_keyname_(u'5',		u'5',		u'\0',	KEY_KP5 );
+	_set_keyname_(u'6',		u'6',		u'\0',	KEY_KP6 );
+	_set_keyname_(u'7',		u'7',		u'\0',	KEY_KP7 );
+	_set_keyname_(u'8',		u'8',		u'\0',	KEY_KP8 );
+	_set_keyname_(u'9',		u'9',		u'\0',	KEY_KP9 );
+	_set_keyname_(u'0',		u'0',		u'\0',	KEY_KP0 );
 
-	_set_keyname_(L' ',		L' ',		L'\0',	KEY_SPACE  );
+	_set_keyname_(u' ',		u' ',		u'\0',	KEY_SPACE  );
 
-	HKL kLayout = GetKeyboardLayout(0);
-
-	Int low = (UnsignedInt)kLayout & 0xFFFF;
+	Int low = keyboardLayoutLanguage();
 	LanguageID currentLanguage = OurLanguage;
 	if(low == 0x040c
 		 || low == 0x080c
@@ -363,328 +378,328 @@ void Keyboard::initKeyNames( void )
 		case LANGUAGE_ID_JABBER:
 		case LANGUAGE_ID_UNKNOWN:
 		case LANGUAGE_ID_SPANISH:		// not localized
-			_set_keyname_(L'-',				L'-',				L'\0',	KEY_KPMINUS );
-			_set_keyname_(L'+',				L'+',				L'\0',	KEY_KPPLUS );
-			_set_keyname_(L'\n',			L'\n',			L'\0',	KEY_KPENTER );
-			_set_keyname_(L'/',				L'/',				L'\0',	KEY_KPSLASH );
-			_set_keyname_(L'.',				L'.',				L'\0',	KEY_KPDEL );
-			_set_keyname_(L'*',				L'*',				L'\0',	KEY_KPSTAR );
+			_set_keyname_(u'-',				u'-',				u'\0',	KEY_KPMINUS );
+			_set_keyname_(u'+',				u'+',				u'\0',	KEY_KPPLUS );
+			_set_keyname_(u'\n',			u'\n',			u'\0',	KEY_KPENTER );
+			_set_keyname_(u'/',				u'/',				u'\0',	KEY_KPSLASH );
+			_set_keyname_(u'.',				u'.',				u'\0',	KEY_KPDEL );
+			_set_keyname_(u'*',				u'*',				u'\0',	KEY_KPSTAR );
 
-			_set_keyname_(L'a',				L'A',				L'\0',	KEY_A  );
-			_set_keyname_(L'b',				L'B',				L'\0',	KEY_B  );
-			_set_keyname_(L'c',				L'C',				L'\0',	KEY_C  );
-			_set_keyname_(L'd',				L'D',				L'\0',	KEY_D  );
-			_set_keyname_(L'e',				L'E',				L'\0',	KEY_E  );
-			_set_keyname_(L'f',				L'F',				L'\0',	KEY_F  );
-			_set_keyname_(L'g',				L'G',				L'\0',	KEY_G  );
-			_set_keyname_(L'h',				L'H',				L'\0',	KEY_H  );
-			_set_keyname_(L'i',				L'I',				L'\0',	KEY_I  );
-			_set_keyname_(L'j',				L'J',				L'\0',	KEY_J  );
-			_set_keyname_(L'k',				L'K',				L'\0',	KEY_K  );
-			_set_keyname_(L'l',				L'L',				L'\0',	KEY_L  );
-			_set_keyname_(L'm',				L'M',				L'\0',	KEY_M  );
-			_set_keyname_(L'n',				L'N',				L'\0',	KEY_N  );
-			_set_keyname_(L'o',				L'O',				L'\0',	KEY_O  );
-			_set_keyname_(L'p',				L'P',				L'\0',	KEY_P  );
-			_set_keyname_(L'q',				L'Q',				L'\0',	KEY_Q  );
-			_set_keyname_(L'r',				L'R',				L'\0',	KEY_R  );
-			_set_keyname_(L's',				L'S',				L'\0',	KEY_S  );
-			_set_keyname_(L't',				L'T',				L'\0',	KEY_T  );
-			_set_keyname_(L'u',				L'U',				L'\0',	KEY_U  );
-			_set_keyname_(L'v',				L'V',				L'\0',	KEY_V  );
-			_set_keyname_(L'w',				L'W',				L'\0',	KEY_W  );
-			_set_keyname_(L'x',				L'X',				L'\0',	KEY_X  );
-			_set_keyname_(L'y',				L'Y',				L'\0',	KEY_Y  );
-			_set_keyname_(L'z',				L'Z',				L'\0',	KEY_Z  );
+			_set_keyname_(u'a',				u'A',				u'\0',	KEY_A  );
+			_set_keyname_(u'b',				u'B',				u'\0',	KEY_B  );
+			_set_keyname_(u'c',				u'C',				u'\0',	KEY_C  );
+			_set_keyname_(u'd',				u'D',				u'\0',	KEY_D  );
+			_set_keyname_(u'e',				u'E',				u'\0',	KEY_E  );
+			_set_keyname_(u'f',				u'F',				u'\0',	KEY_F  );
+			_set_keyname_(u'g',				u'G',				u'\0',	KEY_G  );
+			_set_keyname_(u'h',				u'H',				u'\0',	KEY_H  );
+			_set_keyname_(u'i',				u'I',				u'\0',	KEY_I  );
+			_set_keyname_(u'j',				u'J',				u'\0',	KEY_J  );
+			_set_keyname_(u'k',				u'K',				u'\0',	KEY_K  );
+			_set_keyname_(u'l',				u'L',				u'\0',	KEY_L  );
+			_set_keyname_(u'm',				u'M',				u'\0',	KEY_M  );
+			_set_keyname_(u'n',				u'N',				u'\0',	KEY_N  );
+			_set_keyname_(u'o',				u'O',				u'\0',	KEY_O  );
+			_set_keyname_(u'p',				u'P',				u'\0',	KEY_P  );
+			_set_keyname_(u'q',				u'Q',				u'\0',	KEY_Q  );
+			_set_keyname_(u'r',				u'R',				u'\0',	KEY_R  );
+			_set_keyname_(u's',				u'S',				u'\0',	KEY_S  );
+			_set_keyname_(u't',				u'T',				u'\0',	KEY_T  );
+			_set_keyname_(u'u',				u'U',				u'\0',	KEY_U  );
+			_set_keyname_(u'v',				u'V',				u'\0',	KEY_V  );
+			_set_keyname_(u'w',				u'W',				u'\0',	KEY_W  );
+			_set_keyname_(u'x',				u'X',				u'\0',	KEY_X  );
+			_set_keyname_(u'y',				u'Y',				u'\0',	KEY_Y  );
+			_set_keyname_(u'z',				u'Z',				u'\0',	KEY_Z  );
 
-			_set_keyname_(L'1',				L'!',				L'\0',	KEY_1  );
-			_set_keyname_(L'2',				L'@',				L'\0',	KEY_2  );
-			_set_keyname_(L'3',				L'#',				L'\0',	KEY_3  );
-			_set_keyname_(L'4',				L'$',				L'\0',	KEY_4  );
-			_set_keyname_(L'5',				L'%',				L'\0',	KEY_5  );
-			_set_keyname_(L'6',				L'^',				L'\0',	KEY_6  );
-			_set_keyname_(L'7',				L'&',				L'\0',	KEY_7  );
-			_set_keyname_(L'8',				L'*',				L'\0',	KEY_8  );
-			_set_keyname_(L'9',				L'(',				L'\0',	KEY_9  );
-			_set_keyname_(L'0',				L')',				L'\0',	KEY_0  );
+			_set_keyname_(u'1',				u'!',				u'\0',	KEY_1  );
+			_set_keyname_(u'2',				u'@',				u'\0',	KEY_2  );
+			_set_keyname_(u'3',				u'#',				u'\0',	KEY_3  );
+			_set_keyname_(u'4',				u'$',				u'\0',	KEY_4  );
+			_set_keyname_(u'5',				u'%',				u'\0',	KEY_5  );
+			_set_keyname_(u'6',				u'^',				u'\0',	KEY_6  );
+			_set_keyname_(u'7',				u'&',				u'\0',	KEY_7  );
+			_set_keyname_(u'8',				u'*',				u'\0',	KEY_8  );
+			_set_keyname_(u'9',				u'(',				u'\0',	KEY_9  );
+			_set_keyname_(u'0',				u')',				u'\0',	KEY_0  );
 
-			_set_keyname_(L',',				L'<',				L'\0',	KEY_COMMA  );
-			_set_keyname_(L'.',				L'>',				L'\0',	KEY_PERIOD  );
-			_set_keyname_(L'/',				L'?',				L'\0',	KEY_SLASH  );
+			_set_keyname_(u',',				u'<',				u'\0',	KEY_COMMA  );
+			_set_keyname_(u'.',				u'>',				u'\0',	KEY_PERIOD  );
+			_set_keyname_(u'/',				u'?',				u'\0',	KEY_SLASH  );
 
-			_set_keyname_(L'[',				L'{',				L'\0',	KEY_LBRACKET  );
-			_set_keyname_(L']',				L'}',				L'\0',	KEY_RBRACKET  );
+			_set_keyname_(u'[',				u'{',				u'\0',	KEY_LBRACKET  );
+			_set_keyname_(u']',				u'}',				u'\0',	KEY_RBRACKET  );
 
-			_set_keyname_(L';',				L':',				L'\0',	KEY_SEMICOLON  );
-			_set_keyname_(L'\'',			L'\"',			L'\0',	KEY_APOSTROPHE  );
-			_set_keyname_(L'`',				L'~',				L'\0',	KEY_TICK  );
-			_set_keyname_(L'\\',			L'|',				L'\0',	KEY_BACKSLASH  );
+			_set_keyname_(u';',				u':',				u'\0',	KEY_SEMICOLON  );
+			_set_keyname_(u'\'',			u'\"',			u'\0',	KEY_APOSTROPHE  );
+			_set_keyname_(u'`',				u'~',				u'\0',	KEY_TICK  );
+			_set_keyname_(u'\\',			u'|',				u'\0',	KEY_BACKSLASH  );
 
-			_set_keyname_(L'-',				L'_',				L'\0',	KEY_MINUS  );
-			_set_keyname_(L'=',				L'+',				L'\0',	KEY_EQUAL  );
+			_set_keyname_(u'-',				u'_',				u'\0',	KEY_MINUS  );
+			_set_keyname_(u'=',				u'+',				u'\0',	KEY_EQUAL  );
 
 			break;
 
 		case LANGUAGE_ID_UK:
-			_set_keyname_(L'-',				L'-',				L'\0',	KEY_KPMINUS );
-			_set_keyname_(L'+',				L'+',				L'\0',	KEY_KPPLUS );
-			_set_keyname_(L'\n',			L'\n',			L'\0',	KEY_KPENTER );
-			_set_keyname_(L'/',				L'/',				L'\0',	KEY_KPSLASH );
-			_set_keyname_(L'.',				L'.',				L'\0',	KEY_KPDEL );
-			_set_keyname_(L'*',				L'*',				L'\0',	KEY_KPSTAR );
+			_set_keyname_(u'-',				u'-',				u'\0',	KEY_KPMINUS );
+			_set_keyname_(u'+',				u'+',				u'\0',	KEY_KPPLUS );
+			_set_keyname_(u'\n',			u'\n',			u'\0',	KEY_KPENTER );
+			_set_keyname_(u'/',				u'/',				u'\0',	KEY_KPSLASH );
+			_set_keyname_(u'.',				u'.',				u'\0',	KEY_KPDEL );
+			_set_keyname_(u'*',				u'*',				u'\0',	KEY_KPSTAR );
 
-			_set_keyname_(L'a',				L'A',				L'\0',	KEY_A  );
-			_set_keyname_(L'b',				L'B',				L'\0',	KEY_B  );
-			_set_keyname_(L'c',				L'C',				L'\0',	KEY_C  );
-			_set_keyname_(L'd',				L'D',				L'\0',	KEY_D  );
-			_set_keyname_(L'e',				L'E',				L'\0',	KEY_E  );
-			_set_keyname_(L'f',				L'F',				L'\0',	KEY_F  );
-			_set_keyname_(L'g',				L'G',				L'\0',	KEY_G  );
-			_set_keyname_(L'h',				L'H',				L'\0',	KEY_H  );
-			_set_keyname_(L'i',				L'I',				L'\0',	KEY_I  );
-			_set_keyname_(L'j',				L'J',				L'\0',	KEY_J  );
-			_set_keyname_(L'k',				L'K',				L'\0',	KEY_K  );
-			_set_keyname_(L'l',				L'L',				L'\0',	KEY_L  );
-			_set_keyname_(L'm',				L'M',				L'\0',	KEY_M  );
-			_set_keyname_(L'n',				L'N',				L'\0',	KEY_N  );
-			_set_keyname_(L'o',				L'O',				L'\0',	KEY_O  );
-			_set_keyname_(L'p',				L'P',				L'\0',	KEY_P  );
-			_set_keyname_(L'q',				L'Q',				L'\0',	KEY_Q  );
-			_set_keyname_(L'r',				L'R',				L'\0',	KEY_R  );
-			_set_keyname_(L's',				L'S',				L'\0',	KEY_S  );
-			_set_keyname_(L't',				L'T',				L'\0',	KEY_T  );
-			_set_keyname_(L'u',				L'U',				L'\0',	KEY_U  );
-			_set_keyname_(L'v',				L'V',				L'\0',	KEY_V  );
-			_set_keyname_(L'w',				L'W',				L'\0',	KEY_W  );
-			_set_keyname_(L'x',				L'X',				L'\0',	KEY_X  );
-			_set_keyname_(L'y',				L'Y',				L'\0',	KEY_Y  );
-			_set_keyname_(L'z',				L'Z',				L'\0',	KEY_Z  );
+			_set_keyname_(u'a',				u'A',				u'\0',	KEY_A  );
+			_set_keyname_(u'b',				u'B',				u'\0',	KEY_B  );
+			_set_keyname_(u'c',				u'C',				u'\0',	KEY_C  );
+			_set_keyname_(u'd',				u'D',				u'\0',	KEY_D  );
+			_set_keyname_(u'e',				u'E',				u'\0',	KEY_E  );
+			_set_keyname_(u'f',				u'F',				u'\0',	KEY_F  );
+			_set_keyname_(u'g',				u'G',				u'\0',	KEY_G  );
+			_set_keyname_(u'h',				u'H',				u'\0',	KEY_H  );
+			_set_keyname_(u'i',				u'I',				u'\0',	KEY_I  );
+			_set_keyname_(u'j',				u'J',				u'\0',	KEY_J  );
+			_set_keyname_(u'k',				u'K',				u'\0',	KEY_K  );
+			_set_keyname_(u'l',				u'L',				u'\0',	KEY_L  );
+			_set_keyname_(u'm',				u'M',				u'\0',	KEY_M  );
+			_set_keyname_(u'n',				u'N',				u'\0',	KEY_N  );
+			_set_keyname_(u'o',				u'O',				u'\0',	KEY_O  );
+			_set_keyname_(u'p',				u'P',				u'\0',	KEY_P  );
+			_set_keyname_(u'q',				u'Q',				u'\0',	KEY_Q  );
+			_set_keyname_(u'r',				u'R',				u'\0',	KEY_R  );
+			_set_keyname_(u's',				u'S',				u'\0',	KEY_S  );
+			_set_keyname_(u't',				u'T',				u'\0',	KEY_T  );
+			_set_keyname_(u'u',				u'U',				u'\0',	KEY_U  );
+			_set_keyname_(u'v',				u'V',				u'\0',	KEY_V  );
+			_set_keyname_(u'w',				u'W',				u'\0',	KEY_W  );
+			_set_keyname_(u'x',				u'X',				u'\0',	KEY_X  );
+			_set_keyname_(u'y',				u'Y',				u'\0',	KEY_Y  );
+			_set_keyname_(u'z',				u'Z',				u'\0',	KEY_Z  );
 
-			_set_keyname_(L'1',				L'!',				L'\0',	KEY_1  );
-			_set_keyname_(L'2',				L'\"',			L'\0',	KEY_2  );
-			_set_keyname_(L'3',				0x00A3,			L'\0',	KEY_3  );	//�
-			_set_keyname_(L'4',				L'$',				L'�',		KEY_4  );
-			_set_keyname_(L'5',				L'%',				L'\0',	KEY_5  );
-			_set_keyname_(L'6',				L'^',				L'\0',	KEY_6  );
-			_set_keyname_(L'7',				L'&',				L'\0',	KEY_7  );
-			_set_keyname_(L'8',				L'*',				L'\0',	KEY_8  );
-			_set_keyname_(L'9',				L'(',				L'\0',	KEY_9  );
-			_set_keyname_(L'0',				L')',				L'\0',	KEY_0  );
+			_set_keyname_(u'1',				u'!',				u'\0',	KEY_1  );
+			_set_keyname_(u'2',				u'\"',			u'\0',	KEY_2  );
+			_set_keyname_(u'3',				0x00A3,			u'\0',	KEY_3  );	//�
+			_set_keyname_(u'4',				u'$',				u'\u20AC',		KEY_4  );
+			_set_keyname_(u'5',				u'%',				u'\0',	KEY_5  );
+			_set_keyname_(u'6',				u'^',				u'\0',	KEY_6  );
+			_set_keyname_(u'7',				u'&',				u'\0',	KEY_7  );
+			_set_keyname_(u'8',				u'*',				u'\0',	KEY_8  );
+			_set_keyname_(u'9',				u'(',				u'\0',	KEY_9  );
+			_set_keyname_(u'0',				u')',				u'\0',	KEY_0  );
 
-			_set_keyname_(L',',				L'<',				L'\0',	KEY_COMMA  );
-			_set_keyname_(L'.',				L'>',				L'\0',	KEY_PERIOD  );
-			_set_keyname_(L'/',				L'?',				L'\0',	KEY_SLASH  );
+			_set_keyname_(u',',				u'<',				u'\0',	KEY_COMMA  );
+			_set_keyname_(u'.',				u'>',				u'\0',	KEY_PERIOD  );
+			_set_keyname_(u'/',				u'?',				u'\0',	KEY_SLASH  );
 
-			_set_keyname_(L'[',				L'{',				L'\0',	KEY_LBRACKET  );
-			_set_keyname_(L']',				L'}',				L'\0',	KEY_RBRACKET  );
+			_set_keyname_(u'[',				u'{',				u'\0',	KEY_LBRACKET  );
+			_set_keyname_(u']',				u'}',				u'\0',	KEY_RBRACKET  );
 
-			_set_keyname_(L';',				L':',				L'\0',	KEY_SEMICOLON  );
-			_set_keyname_(L'\'',			L'@',				L'\0',	KEY_APOSTROPHE  );
-			_set_keyname_(L'`',				0x00AC,			0x00A6,	KEY_TICK  );	//��
-			_set_keyname_(L'#',				L'~',				L'\0',	KEY_BACKSLASH  );
+			_set_keyname_(u';',				u':',				u'\0',	KEY_SEMICOLON  );
+			_set_keyname_(u'\'',			u'@',				u'\0',	KEY_APOSTROPHE  );
+			_set_keyname_(u'`',				0x00AC,			0x00A6,	KEY_TICK  );	//��
+			_set_keyname_(u'#',				u'~',				u'\0',	KEY_BACKSLASH  );
 
-			_set_keyname_(L'-',				L'_',				L'\0',	KEY_MINUS  );
-			_set_keyname_(L'=',				L'+',				L'\0',	KEY_EQUAL  );
+			_set_keyname_(u'-',				u'_',				u'\0',	KEY_MINUS  );
+			_set_keyname_(u'=',				u'+',				u'\0',	KEY_EQUAL  );
 
-			_set_keyname_(L'\\',			L'|',				L'\0',	KEY_102  );
+			_set_keyname_(u'\\',			u'|',				u'\0',	KEY_102  );
 
 			m_shift2Key = KEY_RALT;
 			break;
 
 		case LANGUAGE_ID_GERMAN:
-			_set_keyname_(L'-',				L'-',				L'\0',	KEY_KPMINUS );
-			_set_keyname_(L'+',				L'+',				L'\0',	KEY_KPPLUS );
-			_set_keyname_(L'\n',			L'\n',			L'\0',	KEY_KPENTER );
-			_set_keyname_(L'/',				L'/',				L'\0',	KEY_KPSLASH );
-			_set_keyname_(L',',				L',',				L'\0',	KEY_KPDEL );
-			_set_keyname_(L'*',				L'*',				L'\0',	KEY_KPSTAR );
+			_set_keyname_(u'-',				u'-',				u'\0',	KEY_KPMINUS );
+			_set_keyname_(u'+',				u'+',				u'\0',	KEY_KPPLUS );
+			_set_keyname_(u'\n',			u'\n',			u'\0',	KEY_KPENTER );
+			_set_keyname_(u'/',				u'/',				u'\0',	KEY_KPSLASH );
+			_set_keyname_(u',',				u',',				u'\0',	KEY_KPDEL );
+			_set_keyname_(u'*',				u'*',				u'\0',	KEY_KPSTAR );
 
-			_set_keyname_(L'a',				L'A',				L'\0',	KEY_A  );
-			_set_keyname_(L'b',				L'B',				L'\0',	KEY_B  );
-			_set_keyname_(L'c',				L'C',				L'\0',	KEY_C  );
-			_set_keyname_(L'd',				L'D',				L'\0',	KEY_D  );
-			_set_keyname_(L'e',				L'E',				L'\0',	KEY_E  );
-			_set_keyname_(L'f',				L'F',				L'\0',	KEY_F  );
-			_set_keyname_(L'g',				L'G',				L'\0',	KEY_G  );
-			_set_keyname_(L'h',				L'H',				L'\0',	KEY_H  );
-			_set_keyname_(L'i',				L'I',				L'\0',	KEY_I  );
-			_set_keyname_(L'j',				L'J',				L'\0',	KEY_J  );
-			_set_keyname_(L'k',				L'K',				L'\0',	KEY_K  );
-			_set_keyname_(L'l',				L'L',				L'\0',	KEY_L  );
-			_set_keyname_(L'm',				L'M',				0x00B5,	KEY_M  );	//�
-			_set_keyname_(L'n',				L'N',				L'\0',	KEY_N  );
-			_set_keyname_(L'o',				L'O',				L'\0',	KEY_O  );
-			_set_keyname_(L'p',				L'P',				L'\0',	KEY_P  );
-			_set_keyname_(L'q',				L'Q',				L'@',		KEY_Q  );
-			_set_keyname_(L'r',				L'R',				L'\0',	KEY_R  );
-			_set_keyname_(L's',				L'S',				L'\0',	KEY_S  );
-			_set_keyname_(L't',				L'T',				L'\0',	KEY_T  );
-			_set_keyname_(L'u',				L'U',				L'\0',	KEY_U  );
-			_set_keyname_(L'v',				L'V',				L'\0',	KEY_V  );
-			_set_keyname_(L'w',				L'W',				L'\0',	KEY_W  );
-			_set_keyname_(L'x',				L'X',				L'\0',	KEY_X  );
-			_set_keyname_(L'z',				L'Z',				L'\0',	KEY_Y  );
-			_set_keyname_(L'y',				L'Y',				L'\0',	KEY_Z  );
+			_set_keyname_(u'a',				u'A',				u'\0',	KEY_A  );
+			_set_keyname_(u'b',				u'B',				u'\0',	KEY_B  );
+			_set_keyname_(u'c',				u'C',				u'\0',	KEY_C  );
+			_set_keyname_(u'd',				u'D',				u'\0',	KEY_D  );
+			_set_keyname_(u'e',				u'E',				u'\0',	KEY_E  );
+			_set_keyname_(u'f',				u'F',				u'\0',	KEY_F  );
+			_set_keyname_(u'g',				u'G',				u'\0',	KEY_G  );
+			_set_keyname_(u'h',				u'H',				u'\0',	KEY_H  );
+			_set_keyname_(u'i',				u'I',				u'\0',	KEY_I  );
+			_set_keyname_(u'j',				u'J',				u'\0',	KEY_J  );
+			_set_keyname_(u'k',				u'K',				u'\0',	KEY_K  );
+			_set_keyname_(u'l',				u'L',				u'\0',	KEY_L  );
+			_set_keyname_(u'm',				u'M',				0x00B5,	KEY_M  );	//�
+			_set_keyname_(u'n',				u'N',				u'\0',	KEY_N  );
+			_set_keyname_(u'o',				u'O',				u'\0',	KEY_O  );
+			_set_keyname_(u'p',				u'P',				u'\0',	KEY_P  );
+			_set_keyname_(u'q',				u'Q',				u'@',		KEY_Q  );
+			_set_keyname_(u'r',				u'R',				u'\0',	KEY_R  );
+			_set_keyname_(u's',				u'S',				u'\0',	KEY_S  );
+			_set_keyname_(u't',				u'T',				u'\0',	KEY_T  );
+			_set_keyname_(u'u',				u'U',				u'\0',	KEY_U  );
+			_set_keyname_(u'v',				u'V',				u'\0',	KEY_V  );
+			_set_keyname_(u'w',				u'W',				u'\0',	KEY_W  );
+			_set_keyname_(u'x',				u'X',				u'\0',	KEY_X  );
+			_set_keyname_(u'z',				u'Z',				u'\0',	KEY_Y  );
+			_set_keyname_(u'y',				u'Y',				u'\0',	KEY_Z  );
 
-			_set_keyname_(L'1',				L'!',				L'\0',	KEY_1  );
-			_set_keyname_(L'2',				L'"',				0x00B2,	KEY_2  );	//�
-			_set_keyname_(L'3',				0x00A7,			0x00B3,	KEY_3  );	//��
-			_set_keyname_(L'4',				L'$',				L'\0',	KEY_4  );
-			_set_keyname_(L'5',				L'%',				L'\0',	KEY_5  );
-			_set_keyname_(L'6',				L'&',				L'\0',	KEY_6  );
-			_set_keyname_(L'7',				L'/',				L'{',		KEY_7  );
-			_set_keyname_(L'8',				L'(',				L'[',		KEY_8  );
-			_set_keyname_(L'9',				L')',				L']',		KEY_9  );
-			_set_keyname_(L'0',				L'=',				L'}',		KEY_0  );
+			_set_keyname_(u'1',				u'!',				u'\0',	KEY_1  );
+			_set_keyname_(u'2',				u'"',				0x00B2,	KEY_2  );	//�
+			_set_keyname_(u'3',				0x00A7,			0x00B3,	KEY_3  );	//��
+			_set_keyname_(u'4',				u'$',				u'\0',	KEY_4  );
+			_set_keyname_(u'5',				u'%',				u'\0',	KEY_5  );
+			_set_keyname_(u'6',				u'&',				u'\0',	KEY_6  );
+			_set_keyname_(u'7',				u'/',				u'{',		KEY_7  );
+			_set_keyname_(u'8',				u'(',				u'[',		KEY_8  );
+			_set_keyname_(u'9',				u')',				u']',		KEY_9  );
+			_set_keyname_(u'0',				u'=',				u'}',		KEY_0  );
 
-			_set_keyname_(L',',				L';',				L'\0',	KEY_COMMA  );
-			_set_keyname_(L'.',				L':',				L'\0',	KEY_PERIOD  );
-			_set_keyname_(L'-',				L'_',				L'\0',	KEY_SLASH  );
+			_set_keyname_(u',',				u';',				u'\0',	KEY_COMMA  );
+			_set_keyname_(u'.',				u':',				u'\0',	KEY_PERIOD  );
+			_set_keyname_(u'-',				u'_',				u'\0',	KEY_SLASH  );
 
-			_set_keyname_(0x00FC,			0x00DC,			L'\0',	KEY_LBRACKET  );		//��
-			_set_keyname_(L'+',				L'*',				L'~',		KEY_RBRACKET  );
+			_set_keyname_(0x00FC,			0x00DC,			u'\0',	KEY_LBRACKET  );		//��
+			_set_keyname_(u'+',				u'*',				u'~',		KEY_RBRACKET  );
 
-			_set_keyname_(0x00F6,			0x00D6,			L'\0',	KEY_SEMICOLON  );		//��
-			_set_keyname_(0x00E4,			0x00C4,			L'\0',	KEY_APOSTROPHE  );	//��
-			_set_keyname_(L'^',				0x00B0,			L'\0',	KEY_TICK  );				//�
-			_set_keyname_(L'#',				L'\'',			L'\0',	KEY_BACKSLASH  );
+			_set_keyname_(0x00F6,			0x00D6,			u'\0',	KEY_SEMICOLON  );		//��
+			_set_keyname_(0x00E4,			0x00C4,			u'\0',	KEY_APOSTROPHE  );	//��
+			_set_keyname_(u'^',				0x00B0,			u'\0',	KEY_TICK  );				//�
+			_set_keyname_(u'#',				u'\'',			u'\0',	KEY_BACKSLASH  );
 
-			_set_keyname_(0x00DF,			L'?',				L'\\',	KEY_MINUS  );				//�
-			_set_keyname_(0x00B4,			L'`',				L'\0',	KEY_EQUAL  );				//�
+			_set_keyname_(0x00DF,			u'?',				u'\\',	KEY_MINUS  );				//�
+			_set_keyname_(0x00B4,			u'`',				u'\0',	KEY_EQUAL  );				//�
 
-			_set_keyname_(L'<',				L'>',				L'|',		KEY_102  );
+			_set_keyname_(u'<',				u'>',				u'|',		KEY_102  );
 
 			m_shift2Key = KEY_RALT;
 			break;
 
 		case LANGUAGE_ID_FRENCH:
-			_set_keyname_(L'-',				L'-',				L'\0',	KEY_KPMINUS );
-			_set_keyname_(L'+',				L'+',				L'\0',	KEY_KPPLUS );
-			_set_keyname_(L'\n',			L'\n',			L'\0',	KEY_KPENTER );
-			_set_keyname_(L'/',				L'/',				L'\0',	KEY_KPSLASH );
-			_set_keyname_(L'.',				L'.',				L'\0',	KEY_KPDEL );
-			_set_keyname_(L'*',				L'*',				L'\0',	KEY_KPSTAR );
+			_set_keyname_(u'-',				u'-',				u'\0',	KEY_KPMINUS );
+			_set_keyname_(u'+',				u'+',				u'\0',	KEY_KPPLUS );
+			_set_keyname_(u'\n',			u'\n',			u'\0',	KEY_KPENTER );
+			_set_keyname_(u'/',				u'/',				u'\0',	KEY_KPSLASH );
+			_set_keyname_(u'.',				u'.',				u'\0',	KEY_KPDEL );
+			_set_keyname_(u'*',				u'*',				u'\0',	KEY_KPSTAR );
 
-			_set_keyname_(L'q',				L'Q',				L'\0',	KEY_A  );
-			_set_keyname_(L'b',				L'B',				L'\0',	KEY_B  );
-			_set_keyname_(L'c',				L'C',				L'\0',	KEY_C  );
-			_set_keyname_(L'd',				L'D',				L'\0',	KEY_D  );
-			_set_keyname_(L'e',				L'E',				L'\0',	KEY_E  );
-			_set_keyname_(L'f',				L'F',				L'\0',	KEY_F  );
-			_set_keyname_(L'g',				L'G',				L'\0',	KEY_G  );
-			_set_keyname_(L'h',				L'H',				L'\0',	KEY_H  );
-			_set_keyname_(L'i',				L'I',				L'\0',	KEY_I  );
-			_set_keyname_(L'j',				L'J',				L'\0',	KEY_J  );
-			_set_keyname_(L'k',				L'K',				L'\0',	KEY_K  );
-			_set_keyname_(L'l',				L'L',				L'\0',	KEY_L  );
-			_set_keyname_(L',',				L'?',				L'\0',	KEY_M  );
-			_set_keyname_(L'n',				L'N',				L'\0',	KEY_N  );
-			_set_keyname_(L'o',				L'O',				L'\0',	KEY_O  );
-			_set_keyname_(L'p',				L'P',				L'\0',	KEY_P  );
-			_set_keyname_(L'a',				L'A',				L'\0',	KEY_Q  );
-			_set_keyname_(L'r',				L'R',				L'\0',	KEY_R  );
-			_set_keyname_(L's',				L'S',				L'\0',	KEY_S  );
-			_set_keyname_(L't',				L'T',				L'\0',	KEY_T  );
-			_set_keyname_(L'u',				L'U',				L'\0',	KEY_U  );
-			_set_keyname_(L'v',				L'V',				L'\0',	KEY_V  );
-			_set_keyname_(L'z',				L'Z',				L'\0',	KEY_W  );
-			_set_keyname_(L'x',				L'X',				L'\0',	KEY_X  );
-			_set_keyname_(L'y',				L'Y',				L'\0',	KEY_Y  );
-			_set_keyname_(L'w',				L'W',				L'\0',	KEY_Z  );
+			_set_keyname_(u'q',				u'Q',				u'\0',	KEY_A  );
+			_set_keyname_(u'b',				u'B',				u'\0',	KEY_B  );
+			_set_keyname_(u'c',				u'C',				u'\0',	KEY_C  );
+			_set_keyname_(u'd',				u'D',				u'\0',	KEY_D  );
+			_set_keyname_(u'e',				u'E',				u'\0',	KEY_E  );
+			_set_keyname_(u'f',				u'F',				u'\0',	KEY_F  );
+			_set_keyname_(u'g',				u'G',				u'\0',	KEY_G  );
+			_set_keyname_(u'h',				u'H',				u'\0',	KEY_H  );
+			_set_keyname_(u'i',				u'I',				u'\0',	KEY_I  );
+			_set_keyname_(u'j',				u'J',				u'\0',	KEY_J  );
+			_set_keyname_(u'k',				u'K',				u'\0',	KEY_K  );
+			_set_keyname_(u'l',				u'L',				u'\0',	KEY_L  );
+			_set_keyname_(u',',				u'?',				u'\0',	KEY_M  );
+			_set_keyname_(u'n',				u'N',				u'\0',	KEY_N  );
+			_set_keyname_(u'o',				u'O',				u'\0',	KEY_O  );
+			_set_keyname_(u'p',				u'P',				u'\0',	KEY_P  );
+			_set_keyname_(u'a',				u'A',				u'\0',	KEY_Q  );
+			_set_keyname_(u'r',				u'R',				u'\0',	KEY_R  );
+			_set_keyname_(u's',				u'S',				u'\0',	KEY_S  );
+			_set_keyname_(u't',				u'T',				u'\0',	KEY_T  );
+			_set_keyname_(u'u',				u'U',				u'\0',	KEY_U  );
+			_set_keyname_(u'v',				u'V',				u'\0',	KEY_V  );
+			_set_keyname_(u'z',				u'Z',				u'\0',	KEY_W  );
+			_set_keyname_(u'x',				u'X',				u'\0',	KEY_X  );
+			_set_keyname_(u'y',				u'Y',				u'\0',	KEY_Y  );
+			_set_keyname_(u'w',				u'W',				u'\0',	KEY_Z  );
 
-			_set_keyname_(L'&',				L'1',				L'\0',	KEY_1  );
-			_set_keyname_(0x00E9,			L'2',				L'~',		KEY_2  );	//�
-			_set_keyname_(L'"',				L'3',				L'#',		KEY_3  );
-			_set_keyname_(L'\'',			L'4',				L'{',		KEY_4  );
-			_set_keyname_(L'(',				L'5',				L'[',		KEY_5  );
-			_set_keyname_(L'-',				L'6',				L'|',		KEY_6  );
-			_set_keyname_(0x00E8,			L'7',				L'`',		KEY_7  );	//�
-			_set_keyname_(L'_',				L'8',				L'\\',	KEY_8  );
-			_set_keyname_(0x00E7,			L'9',				L'\0',	KEY_9  );	//�
-			_set_keyname_(0x00E0,			L'0',				L'@',		KEY_0  );	//�
+			_set_keyname_(u'&',				u'1',				u'\0',	KEY_1  );
+			_set_keyname_(0x00E9,			u'2',				u'~',		KEY_2  );	//�
+			_set_keyname_(u'"',				u'3',				u'#',		KEY_3  );
+			_set_keyname_(u'\'',			u'4',				u'{',		KEY_4  );
+			_set_keyname_(u'(',				u'5',				u'[',		KEY_5  );
+			_set_keyname_(u'-',				u'6',				u'|',		KEY_6  );
+			_set_keyname_(0x00E8,			u'7',				u'`',		KEY_7  );	//�
+			_set_keyname_(u'_',				u'8',				u'\\',	KEY_8  );
+			_set_keyname_(0x00E7,			u'9',				u'\0',	KEY_9  );	//�
+			_set_keyname_(0x00E0,			u'0',				u'@',		KEY_0  );	//�
 
-			_set_keyname_(L';',				L'.',				L'\0',	KEY_COMMA  );
-			_set_keyname_(L':',				L'/',				L'\0',	KEY_PERIOD  );
-			_set_keyname_(L'!',				0x00A7,			L'\0',	KEY_SLASH  );				//�
+			_set_keyname_(u';',				u'.',				u'\0',	KEY_COMMA  );
+			_set_keyname_(u':',				u'/',				u'\0',	KEY_PERIOD  );
+			_set_keyname_(u'!',				0x00A7,			u'\0',	KEY_SLASH  );				//�
 
-			_set_keyname_(L'^',				0x00A8,			L'\0',	KEY_LBRACKET  );		//�
-			_set_keyname_(L'$',				0x00A3,			0x00A4,	KEY_RBRACKET  );		//��
+			_set_keyname_(u'^',				0x00A8,			u'\0',	KEY_LBRACKET  );		//�
+			_set_keyname_(u'$',				0x00A3,			0x00A4,	KEY_RBRACKET  );		//��
 
-			_set_keyname_(L'm',				L'M',				L'\0',	KEY_SEMICOLON  );
-			_set_keyname_(0x00F9,			L'%',				L'\0',	KEY_APOSTROPHE  );	//�
-			_set_keyname_(0x00B2,			L'\0',			L'\0',	KEY_TICK  );				//�
-			_set_keyname_(L'*',				0x00B5,			L'\0',	KEY_BACKSLASH  );		//�
+			_set_keyname_(u'm',				u'M',				u'\0',	KEY_SEMICOLON  );
+			_set_keyname_(0x00F9,			u'%',				u'\0',	KEY_APOSTROPHE  );	//�
+			_set_keyname_(0x00B2,			u'\0',			u'\0',	KEY_TICK  );				//�
+			_set_keyname_(u'*',				0x00B5,			u'\0',	KEY_BACKSLASH  );		//�
 
-			_set_keyname_(L')',				0x00B0,			L']',		KEY_MINUS  );				//�
-			_set_keyname_(L'=',				L'+',				L'}',		KEY_EQUAL  );
+			_set_keyname_(u')',				0x00B0,			u']',		KEY_MINUS  );				//�
+			_set_keyname_(u'=',				u'+',				u'}',		KEY_EQUAL  );
 
-			_set_keyname_(L'<',				L'>',				L'\0',	KEY_102  );
+			_set_keyname_(u'<',				u'>',				u'\0',	KEY_102  );
 
 			m_shift2Key = KEY_RALT;
 			break;
 
 		case LANGUAGE_ID_ITALIAN:
-			_set_keyname_(L'-',				L'-',				L'\0',	KEY_KPMINUS );
-			_set_keyname_(L'+',				L'+',				L'\0',	KEY_KPPLUS );
-			_set_keyname_(L'\n',			L'\n',			L'\0',	KEY_KPENTER );
-			_set_keyname_(L'/',				L'/',				L'\0',	KEY_KPSLASH );
-			_set_keyname_(L'.',				L'.',				L'\0',	KEY_KPDEL );
-			_set_keyname_(L'*',				L'*',				L'\0',	KEY_KPSTAR );
+			_set_keyname_(u'-',				u'-',				u'\0',	KEY_KPMINUS );
+			_set_keyname_(u'+',				u'+',				u'\0',	KEY_KPPLUS );
+			_set_keyname_(u'\n',			u'\n',			u'\0',	KEY_KPENTER );
+			_set_keyname_(u'/',				u'/',				u'\0',	KEY_KPSLASH );
+			_set_keyname_(u'.',				u'.',				u'\0',	KEY_KPDEL );
+			_set_keyname_(u'*',				u'*',				u'\0',	KEY_KPSTAR );
 
-			_set_keyname_(L'a',				L'A',				L'\0',	KEY_A  );
-			_set_keyname_(L'b',				L'B',				L'\0',	KEY_B  );
-			_set_keyname_(L'c',				L'C',				L'\0',	KEY_C  );
-			_set_keyname_(L'd',				L'D',				L'\0',	KEY_D  );
-			_set_keyname_(L'e',				L'E',				L'\0',	KEY_E  );
-			_set_keyname_(L'f',				L'F',				L'\0',	KEY_F  );
-			_set_keyname_(L'g',				L'G',				L'\0',	KEY_G  );
-			_set_keyname_(L'h',				L'H',				L'\0',	KEY_H  );
-			_set_keyname_(L'i',				L'I',				L'\0',	KEY_I  );
-			_set_keyname_(L'j',				L'J',				L'\0',	KEY_J  );
-			_set_keyname_(L'k',				L'K',				L'\0',	KEY_K  );
-			_set_keyname_(L'l',				L'L',				L'\0',	KEY_L  );
-			_set_keyname_(L'm',				L'M',				L'\0',	KEY_M  );
-			_set_keyname_(L'n',				L'N',				L'\0',	KEY_N  );
-			_set_keyname_(L'o',				L'O',				L'\0',	KEY_O  );
-			_set_keyname_(L'p',				L'P',				L'\0',	KEY_P  );
-			_set_keyname_(L'q',				L'Q',				L'\0',	KEY_Q  );
-			_set_keyname_(L'r',				L'R',				L'\0',	KEY_R  );
-			_set_keyname_(L's',				L'S',				L'\0',	KEY_S  );
-			_set_keyname_(L't',				L'T',				L'\0',	KEY_T  );
-			_set_keyname_(L'u',				L'U',				L'\0',	KEY_U  );
-			_set_keyname_(L'v',				L'V',				L'\0',	KEY_V  );
-			_set_keyname_(L'w',				L'W',				L'\0',	KEY_W  );
-			_set_keyname_(L'x',				L'X',				L'\0',	KEY_X  );
-			_set_keyname_(L'y',				L'Y',				L'\0',	KEY_Y  );
-			_set_keyname_(L'z',				L'Z',				L'\0',	KEY_Z  );
+			_set_keyname_(u'a',				u'A',				u'\0',	KEY_A  );
+			_set_keyname_(u'b',				u'B',				u'\0',	KEY_B  );
+			_set_keyname_(u'c',				u'C',				u'\0',	KEY_C  );
+			_set_keyname_(u'd',				u'D',				u'\0',	KEY_D  );
+			_set_keyname_(u'e',				u'E',				u'\0',	KEY_E  );
+			_set_keyname_(u'f',				u'F',				u'\0',	KEY_F  );
+			_set_keyname_(u'g',				u'G',				u'\0',	KEY_G  );
+			_set_keyname_(u'h',				u'H',				u'\0',	KEY_H  );
+			_set_keyname_(u'i',				u'I',				u'\0',	KEY_I  );
+			_set_keyname_(u'j',				u'J',				u'\0',	KEY_J  );
+			_set_keyname_(u'k',				u'K',				u'\0',	KEY_K  );
+			_set_keyname_(u'l',				u'L',				u'\0',	KEY_L  );
+			_set_keyname_(u'm',				u'M',				u'\0',	KEY_M  );
+			_set_keyname_(u'n',				u'N',				u'\0',	KEY_N  );
+			_set_keyname_(u'o',				u'O',				u'\0',	KEY_O  );
+			_set_keyname_(u'p',				u'P',				u'\0',	KEY_P  );
+			_set_keyname_(u'q',				u'Q',				u'\0',	KEY_Q  );
+			_set_keyname_(u'r',				u'R',				u'\0',	KEY_R  );
+			_set_keyname_(u's',				u'S',				u'\0',	KEY_S  );
+			_set_keyname_(u't',				u'T',				u'\0',	KEY_T  );
+			_set_keyname_(u'u',				u'U',				u'\0',	KEY_U  );
+			_set_keyname_(u'v',				u'V',				u'\0',	KEY_V  );
+			_set_keyname_(u'w',				u'W',				u'\0',	KEY_W  );
+			_set_keyname_(u'x',				u'X',				u'\0',	KEY_X  );
+			_set_keyname_(u'y',				u'Y',				u'\0',	KEY_Y  );
+			_set_keyname_(u'z',				u'Z',				u'\0',	KEY_Z  );
 
-			_set_keyname_(L'1',				L'!',				L'\0',	KEY_1  );
-			_set_keyname_(L'2',				L'"',				L'\0',	KEY_2  );
-			_set_keyname_(L'3',				0x00A3,			L'\0',	KEY_3  );		//�
-			_set_keyname_(L'4',				L'$',				L'\0',	KEY_4  );
-			_set_keyname_(L'5',				L'%',				L'\0',	KEY_5  );
-			_set_keyname_(L'6',				L'&',				L'\0',	KEY_6  );
-			_set_keyname_(L'7',				L'/',				L'\0',	KEY_7  );
-			_set_keyname_(L'8',				L'(',				L'\0',	KEY_8  );
-			_set_keyname_(L'9',				L')',				L'\0',	KEY_9  );
-			_set_keyname_(L'0',				L'=',				L'\0',	KEY_0  );
+			_set_keyname_(u'1',				u'!',				u'\0',	KEY_1  );
+			_set_keyname_(u'2',				u'"',				u'\0',	KEY_2  );
+			_set_keyname_(u'3',				0x00A3,			u'\0',	KEY_3  );		//�
+			_set_keyname_(u'4',				u'$',				u'\0',	KEY_4  );
+			_set_keyname_(u'5',				u'%',				u'\0',	KEY_5  );
+			_set_keyname_(u'6',				u'&',				u'\0',	KEY_6  );
+			_set_keyname_(u'7',				u'/',				u'\0',	KEY_7  );
+			_set_keyname_(u'8',				u'(',				u'\0',	KEY_8  );
+			_set_keyname_(u'9',				u')',				u'\0',	KEY_9  );
+			_set_keyname_(u'0',				u'=',				u'\0',	KEY_0  );
 
-			_set_keyname_(L',',				L';',				L'\0',	KEY_COMMA  );
-			_set_keyname_(L'.',				L':',				L'\0',	KEY_PERIOD  );
-			_set_keyname_(L'-',				L'_',				L'\0',	KEY_SLASH  );
+			_set_keyname_(u',',				u';',				u'\0',	KEY_COMMA  );
+			_set_keyname_(u'.',				u':',				u'\0',	KEY_PERIOD  );
+			_set_keyname_(u'-',				u'_',				u'\0',	KEY_SLASH  );
 
-			_set_keyname_(0x00E8,			0x00E9,			L'[',		KEY_LBRACKET  );		//��
-			_set_keyname_(L'+',				L'*',				L']',		KEY_RBRACKET  );
+			_set_keyname_(0x00E8,			0x00E9,			u'[',		KEY_LBRACKET  );		//��
+			_set_keyname_(u'+',				u'*',				u']',		KEY_RBRACKET  );
 
-			_set_keyname_(0x00F2,			0x00E7,			L'@',		KEY_SEMICOLON  );		//��
-			_set_keyname_(0x00E0,			0x00B0,			L'#',		KEY_APOSTROPHE  );	//�
-			_set_keyname_(L'\\',			L'|',				L'\0',	KEY_TICK  );
-			_set_keyname_(0x00F9,			0x00A7,			L'\0',	KEY_BACKSLASH  );		//��
+			_set_keyname_(0x00F2,			0x00E7,			u'@',		KEY_SEMICOLON  );		//��
+			_set_keyname_(0x00E0,			0x00B0,			u'#',		KEY_APOSTROPHE  );	//�
+			_set_keyname_(u'\\',			u'|',				u'\0',	KEY_TICK  );
+			_set_keyname_(0x00F9,			0x00A7,			u'\0',	KEY_BACKSLASH  );		//��
 
-			_set_keyname_(L'\'',			L'?',				L'\0',	KEY_MINUS  );
-			_set_keyname_(0x00EC,			L'^',				L'\0',	KEY_EQUAL  );				//�
+			_set_keyname_(u'\'',			u'?',				u'\0',	KEY_MINUS  );
+			_set_keyname_(0x00EC,			u'^',				u'\0',	KEY_EQUAL  );				//�
 
-			_set_keyname_(L'<',				L'>',				L'\0',	KEY_102  );
+			_set_keyname_(u'<',				u'>',				u'\0',	KEY_102  );
 
 			m_shift2Key = KEY_RALT;
 			break;
@@ -1009,7 +1024,7 @@ Bool Keyboard::isAlt()
 WideChar Keyboard::getPrintableKey( UnsignedByte key,  Int state )
 {
 	if((key < 0 || key >=KEY_NAMES_COUNT) || ( state < 0 || state >= MAX_KEY_STATES))
-		return L'\0';
+		return u'\0';
 	if(state == 0)
 		return m_keyNames[key].stdKey;
 	else if(state == 1)

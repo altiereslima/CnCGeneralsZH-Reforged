@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -42,7 +44,7 @@ class DamageInfo;
 class SpecialPowerTemplate;
 class SpecialPowerModule;
 class FXList;
-enum SpecialPowerType;
+enum SpecialPowerType : Int;
 
 #define SPECIAL_ABILITY_HUGE_DISTANCE 10000000.0f
 
@@ -214,6 +216,7 @@ public:
 	virtual void setSpecialPowerOverridableDestination( const Coord3D *loc ) {}
 	virtual Bool isPowerCurrentlyInUse( const CommandButton *command = NULL ) const;
 	virtual Bool getCaptureProgress( ObjectID *targetID, Real *progress ) const;
+	virtual Bool getCaptureTarget( ObjectID *targetID ) const;
 
 //	virtual Bool isBusy() const { return m_isBusy; }
 

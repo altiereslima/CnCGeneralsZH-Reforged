@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*********************************************************************************************** 
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               *** 
@@ -38,6 +40,7 @@
 
 #include	"always.h"
 #include	"lcw.h"
+#include	<stdint.h>	// uintptr_t, in LCW_Uncomp; Apple's headers happened to supply it, glibc's do not
 #include	<string.h>
 
 /***************************************************************************
@@ -125,7 +128,10 @@ int LCW_Uncomp(void const * source, void * dest, unsigned long )
 					word_data  = (word_data << 24) + (word_data << 16) + (word_data << 8) + word_data;
 					source_ptr += 3;
 
-					copy_ptr = dest_ptr + 4 - ((unsigned) dest_ptr & 0x3);
+					// (unsigned) truncates a 64-bit pointer, which clang rejects.  Only the low two
+					// bits are wanted - this is an alignment test - and uintptr_t keeps them without
+					// throwing the rest away.  Same value on both platforms.
+					copy_ptr = dest_ptr + 4 - ((uintptr_t) dest_ptr & 0x3);
 					count -= (copy_ptr - dest_ptr);
 					while (dest_ptr < copy_ptr) *dest_ptr++ = data;
 
@@ -133,10 +139,12 @@ int LCW_Uncomp(void const * source, void * dest, unsigned long )
 
 					dest_ptr += (count & 0xfffffffc);
 
+					// A word at a time up to the run's aligned end.  This wrote them in pairs, so when the
+					// aligned part was 4 mod 8 long the last pair wrote one word past the run: the next
+					// operation overwrote it, but after the last one it landed past the output (ASan under
+					// ZH_SANITIZE).  The bytes of the run itself are the same.
 					while (word_dest_ptr < (unsigned*) dest_ptr) {
-						*word_dest_ptr		= word_data;
-						*(word_dest_ptr + 1) = word_data;
-						word_dest_ptr += 2;
+						*word_dest_ptr++ = word_data;
 					}
 
 					copy_ptr = dest_ptr + (count & 0x3);
@@ -169,7 +177,13 @@ int LCW_Uncomp(void const * source, void * dest, unsigned long )
 }
 
 
-#if defined(_MSC_VER)
+/*
+**	LCW_Comp used to sit inside #if defined(_MSC_VER), from when it was 32-bit inline assembly and
+**	other compilers linked an assembler version through LCW.H's extern "C" declaration.  The x64 port
+**	replaced the body with the portable C below and left the guard, so off MSVC the encoder was
+**	compiled out and LCW.H promised a C-linkage symbol nothing defined - found when test_wwlib first
+**	linked on macOS.  MSVC compiles exactly what it did.
+*/
 
 
 /*********************************************************************************************** 
@@ -267,6 +281,5 @@ int LCW_Comp(void const * source, void * dest, int datasize)
 	}
 	return(retval);
 }
-#endif
 
 

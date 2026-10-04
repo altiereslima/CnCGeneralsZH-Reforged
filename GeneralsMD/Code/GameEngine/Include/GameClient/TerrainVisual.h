@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -170,7 +171,7 @@ class DomeStyleSeismicFilter : public SeismicSimulationFilterBase
 //-------------------------------------------------------------------------------------------------
 /** LOD values for terrain, keep this in sync with TerrainLODNames[] */
 //-------------------------------------------------------------------------------------------------
-typedef enum _TerrainLOD
+typedef enum _TerrainLOD : Int
 { 
 	TERRAIN_LOD_INVALID								= 0,
 	TERRAIN_LOD_MIN										= 1,  // note that this is less than max
@@ -258,6 +259,9 @@ public:
 	virtual void addWaterVelocity( Real worldX, Real worldY, Real velocity, Real preferredHeight ) = 0;
 	/// get height of water grid at specified position
 	virtual Bool getWaterGridHeight( Real worldX, Real worldY, Real *height) = 0;
+	/** move the water grid's mesh one step for this logic frame; a second call for the same frame does
+		nothing.  GameLogic::update calls it at the top of every logic frame (T1c, defect 17). */
+	virtual void updateWaterGrid( UnsignedInt logicFrame ) = 0;
 
 	/// set detail of terrain tracks.
 	virtual void setTerrainTracksDetail(void)=0;

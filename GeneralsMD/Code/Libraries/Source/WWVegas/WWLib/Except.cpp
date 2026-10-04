@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -54,7 +56,7 @@
 #include	"assert.h"
 #include "stringex.h"
 #include "cpudetect.h"
-#include	"except.h"
+#include	"Except.h"
 //#include "debug.h"
 #include "mpu.h"
 //#include "commando\nat.h"
@@ -117,41 +119,19 @@ DynamicVectorClass<ThreadInfoType*> ThreadList;
 /*
 ** Definitions to allow run-time linking to the Imagehlp.dll functions.
 **
+** The 64 entry points, because an address is 64 bits here: the DWORD ones Westwood bound cut it.
+** The other five it bound fed the stack walker, which is gone (see Stack_Walk).
 */
-typedef BOOL  (WINAPI *SymCleanupType) (HANDLE hProcess);
-typedef BOOL  (WINAPI *SymGetSymFromAddrType) (HANDLE hProcess, DWORD Address, LPDWORD Displacement, PIMAGEHLP_SYMBOL Symbol);
+typedef BOOL  (WINAPI *SymGetSymFromAddrType) (HANDLE hProcess, DWORD64 Address, PDWORD64 Displacement, PIMAGEHLP_SYMBOL64 Symbol);
 typedef BOOL  (WINAPI *SymInitializeType) (HANDLE hProcess, LPSTR UserSearchPath, BOOL fInvadeProcess);
-typedef BOOL  (WINAPI *SymLoadModuleType) (HANDLE hProcess, HANDLE hFile, LPSTR ImageName, LPSTR ModuleName, DWORD BaseOfDll, DWORD SizeOfDll);
+typedef DWORD64 (WINAPI *SymLoadModuleType) (HANDLE hProcess, HANDLE hFile, LPSTR ImageName, LPSTR ModuleName, DWORD64 BaseOfDll, DWORD SizeOfDll);
 typedef DWORD (WINAPI *SymSetOptionsType) (DWORD SymOptions);
-typedef BOOL  (WINAPI *SymUnloadModuleType) (HANDLE hProcess, DWORD BaseOfDll);
-typedef BOOL  (WINAPI *StackWalkType) (DWORD MachineType, HANDLE hProcess, HANDLE hThread, LPSTACKFRAME StackFrame, LPVOID ContextRecord, PREAD_PROCESS_MEMORY_ROUTINE ReadMemoryRoutine, PFUNCTION_TABLE_ACCESS_ROUTINE FunctionTableAccessRoutine, PGET_MODULE_BASE_ROUTINE GetModuleBaseRoutine, PTRANSLATE_ADDRESS_ROUTINE TranslateAddress);
-typedef LPVOID (WINAPI *SymFunctionTableAccessType) (HANDLE hProcess, DWORD AddrBase);
-typedef DWORD (WINAPI *SymGetModuleBaseType) (HANDLE hProcess, DWORD dwAddr);
 
 
-static SymCleanupType							_SymCleanup = NULL;
 static SymGetSymFromAddrType				_SymGetSymFromAddr = NULL;
 static SymInitializeType						_SymInitialize = NULL;
 static SymLoadModuleType						_SymLoadModule = NULL;
 static SymSetOptionsType						_SymSetOptions = NULL;
-static SymUnloadModuleType					_SymUnloadModule = NULL;
-static StackWalkType								_StackWalk = NULL;
-static SymFunctionTableAccessType	_SymFunctionTableAccess = NULL;
-static SymGetModuleBaseType				_SymGetModuleBase = NULL;
-
-static char const *ImagehelpFunctionNames[] =
-{
-	"SymCleanup",
-	"SymGetSymFromAddr",
-	"SymInitialize",
-	"SymLoadModule",
-	"SymSetOptions",
-	"SymUnloadModule",
-	"StackWalk",
-	"SymFunctionTableAccess",
-	"SymGetModuleBaseType",
-	NULL
-};
 
 
 
@@ -628,19 +608,10 @@ void Load_Image_Helper(void)
 		ImageHelp = LoadLibrary("IMAGEHLP.DLL");
 
 		if (ImageHelp != NULL) {
-			char const *function_name = NULL;
-			unsigned long *fptr = (unsigned long *) &_SymCleanup;
-			int count = 0;
-
-			do {
-				function_name = ImagehelpFunctionNames[count];
-				if (function_name) {
-					*fptr = (unsigned long) GetProcAddress(ImageHelp, function_name);
-					fptr++;
-					count++;
-				}
-			}
-			while (function_name);
+			_SymGetSymFromAddr = (SymGetSymFromAddrType) GetProcAddress(ImageHelp, "SymGetSymFromAddr64");
+			_SymInitialize = (SymInitializeType) GetProcAddress(ImageHelp, "SymInitialize");
+			_SymLoadModule = (SymLoadModuleType) GetProcAddress(ImageHelp, "SymLoadModule64");
+			_SymSetOptions = (SymSetOptionsType) GetProcAddress(ImageHelp, "SymSetOptions");
 		}
 
 		/*
@@ -703,7 +674,8 @@ bool Lookup_Symbol(void *code_ptr, char *symbol, int &displacement)
 	** Locals.
 	*/
 	char symbol_struct_buf[1024];
-	IMAGEHLP_SYMBOL *symbol_struct_ptr = (IMAGEHLP_SYMBOL *)symbol_struct_buf;
+	IMAGEHLP_SYMBOL64 *symbol_struct_ptr = (IMAGEHLP_SYMBOL64 *)symbol_struct_buf;
+	DWORD64 symbol_displacement = 0;
 
 	/*
 	** Set default values in case of early exit.
@@ -731,14 +703,19 @@ bool Lookup_Symbol(void *code_ptr, char *symbol, int &displacement)
 	*/
 	memset (symbol_struct_ptr, 0, sizeof (symbol_struct_buf));
 	symbol_struct_ptr->SizeOfStruct = sizeof (symbol_struct_buf);
-	symbol_struct_ptr->MaxNameLength = sizeof(symbol_struct_buf)-sizeof (IMAGEHLP_SYMBOL);
+	symbol_struct_ptr->MaxNameLength = sizeof(symbol_struct_buf)-sizeof (IMAGEHLP_SYMBOL64);
 	symbol_struct_ptr->Size = 0;
-	symbol_struct_ptr->Address = (unsigned long)code_ptr;
+	symbol_struct_ptr->Address = (DWORD64)code_ptr;
 
 	/*
 	** See if we have the symbol for that address.
 	*/
-	if (_SymGetSymFromAddr(GetCurrentProcess(), (unsigned long)code_ptr, (unsigned long *)&displacement, symbol_struct_ptr)) {
+	if (_SymGetSymFromAddr(GetCurrentProcess(), (DWORD64)code_ptr, &symbol_displacement, symbol_struct_ptr)) {
+
+		/*
+		** An offset into one function, so it fits the int.
+		*/
+		displacement = (int)symbol_displacement;
 
 		/*
 		** Copy it back into the buffer provided.

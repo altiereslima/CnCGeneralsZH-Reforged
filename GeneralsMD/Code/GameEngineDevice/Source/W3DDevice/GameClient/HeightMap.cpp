@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -47,7 +49,8 @@
 //-----------------------------------------------------------------------------
 
 
-#include "W3DDevice/GameClient/heightmap.h"
+#include "W3DDevice/GameClient/HeightMap.h"
+#include "Lib/Clock.h"
 
 #ifndef USE_FLAT_HEIGHT_MAP // Flat height map uses flattened textures. jba. [3/20/2003]
 
@@ -89,9 +92,9 @@
 #include "W3DDevice/GameClient/W3DShadow.h"
 #include "W3DDevice/GameClient/W3DWater.h"
 #include "W3DDevice/GameClient/W3DShroud.h"
-#include "WW3D2/DX8Wrapper.h"
-#include "WW3D2/Light.h"
-#include "WW3D2/Scene.h"
+#include "WW3D2/dx8wrapper.h"
+#include "WW3D2/light.h"
+#include "WW3D2/scene.h"
 #include "W3DDevice/GameClient/W3DPoly.h"
 #include "W3DDevice/GameClient/W3DCustomScene.h"
 
@@ -950,7 +953,7 @@ void HeightMapRenderObjClass::doPartialUpdate(const IRegion2D &partialRange, Wor
 		if (x >= partialRange.lo.x && x < partialRange.hi.x &&
 			y >= partialRange.lo.y && y < partialRange.hi.y)
 		{	//this tile is inside region being updated so remove it by shifting tile array
-			memcpy(m_extraBlendTilePositions+j,m_extraBlendTilePositions+j+1,(m_numExtraBlendTiles-1-j)*sizeof(Int));
+			memmove(m_extraBlendTilePositions+j,m_extraBlendTilePositions+j+1,(m_numExtraBlendTiles-1-j)*sizeof(Int));
 			m_numExtraBlendTiles--;
 			j--;	//need to look at index j again because this tile was removed
 		}
@@ -1103,44 +1106,37 @@ void HeightMapRenderObjClass::adjustTerrainLOD(Int adj)
 	switch (TheGlobalData->m_terrainLOD) {
 		case	TERRAIN_LOD_MIN: TheWritableGlobalData->m_useCloudMap = false;
 									TheWritableGlobalData->m_useLightMap = false ;
-									TheWritableGlobalData->m_useWaterPlane = false;
 									TheWritableGlobalData->m_stretchTerrain = false;
 									TheWritableGlobalData->m_useHalfHeightMap = true;
 									break;
 		case TERRAIN_LOD_HALF_CLOUDS: TheWritableGlobalData->m_useCloudMap = true;
 									TheWritableGlobalData->m_useLightMap = true;
-									TheWritableGlobalData->m_useWaterPlane = false;
 									TheWritableGlobalData->m_stretchTerrain = false;
 									TheWritableGlobalData->m_useHalfHeightMap = true;
 									break;
 		case TERRAIN_LOD_STRETCH_NO_CLOUDS: TheWritableGlobalData->m_useCloudMap = false;
 									TheWritableGlobalData->m_useLightMap = false;
-									TheWritableGlobalData->m_useWaterPlane = false;
 									TheWritableGlobalData->m_stretchTerrain = true;
 									TheWritableGlobalData->m_useHalfHeightMap = false;
 									break;
 		case TERRAIN_LOD_STRETCH_CLOUDS: TheWritableGlobalData->m_useCloudMap = true;
 									TheWritableGlobalData->m_useLightMap = true;
-									TheWritableGlobalData->m_useWaterPlane = false;
 									TheWritableGlobalData->m_stretchTerrain = true;
 									TheWritableGlobalData->m_useHalfHeightMap = false;
 									break;
 		case TERRAIN_LOD_NO_CLOUDS: TheWritableGlobalData->m_useCloudMap = false;
 									TheWritableGlobalData->m_useLightMap = false;
-									TheWritableGlobalData->m_useWaterPlane = false;
 									TheWritableGlobalData->m_stretchTerrain = false;
 									TheWritableGlobalData->m_useHalfHeightMap = false;
 									break;
 		default:
 		case TERRAIN_LOD_NO_WATER: TheWritableGlobalData->m_useCloudMap = true;
 									TheWritableGlobalData->m_useLightMap = true;
-									TheWritableGlobalData->m_useWaterPlane = false;
 									TheWritableGlobalData->m_stretchTerrain = false;
 									TheWritableGlobalData->m_useHalfHeightMap = false;
 									break;
 		case TERRAIN_LOD_MAX: TheWritableGlobalData->m_useCloudMap = true;
 									TheWritableGlobalData->m_useLightMap = true;
-									TheWritableGlobalData->m_useWaterPlane = true;
 									TheWritableGlobalData->m_stretchTerrain = false;
 									TheWritableGlobalData->m_useHalfHeightMap = false;
 									break;
@@ -1660,10 +1656,10 @@ void HeightMapRenderObjClass::updateCenter(CameraClass *camera , RefRenderObjLis
 			 milliseconds - a visible stutter - and something as small as one grid cell being lowered
 			 by a building foundation asks for it (W3DTerrainVisual::setRawMapHeight).  Logged with
 			 its cost so a stutter report can be tied to it instead of guessed at. */
-		const DWORD fullUpdateStart = timeGetTime();
+		const UnsignedInt fullUpdateStart = Clock_Milliseconds();
 		updateBlock(0, 0, m_x-1, m_y-1, m_map, pLightsIterator);
 		DEBUG_LOG(("TERRAIN FULL UPDATE: %d ms at frame %d\n",
-							 (Int)(timeGetTime() - fullUpdateStart),
+							 (Int)(Clock_Milliseconds() - fullUpdateStart),
 							 TheGameLogic ? TheGameLogic->getFrame() : 0));
 		m_updating = false;
 		return;

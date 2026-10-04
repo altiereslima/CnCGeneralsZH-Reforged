@@ -1,0 +1,31 @@
+# Three of missiledefence.txt's fights moved to the green middle of Fortress Avalanche and run one
+# after another, so a single camera films each in one run: an Avenger under five Tank Hunters on the
+# open grass west of the left lake, a Paladin under four Rocket Buggies on the grass east of the
+# right lake, and two King Raptors making passes over a Stinger Site south of the right lake. Each
+# fight keeps missiledefence.txt's own spacing; only the place and the start frame changed.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 2500 -map "Maps\Fortress Avalanche\Fortress Avalanche.map" -autoskirmish 2
+#     -takeover -side 0 FactionAmerica -side 1 FactionGLA -seed 7 -scenario v240_md
+#     -cinema v240_md -video 120 700 v240_md -maxframes 710
+#
+# Takes: Avenger 128 to 200, Paladin and buggies 322 to 375, Raptors 578 to 685.
+
+30    spawn      0  AmericaTankAvenger            1   1000 1950
+30    spawn      1  ChinaInfantryTankHunter       5   1000 2200  18
+60    attack     1  ChinaInfantryTankHunter       0  AmericaTankAvenger
+
+230   spawn      0  AmericaTankPaladin            1   3300 1900
+230   spawn      1  GLAVehicleRocketBuggy         4   3300 2200  30
+260   attackmove 1  GLAVehicleRocketBuggy             3300 1900
+
+30    spawn      1  GLAStingerSite                1   2850 1800
+380   spawn      0  AirF_AmericaJetRaptor         2   1950 1800  40
+410   move       0  AirF_AmericaJetRaptor             3750 1800
+410   shiftmove  0  AirF_AmericaJetRaptor             1950 1800
+410   shiftmove  0  AirF_AmericaJetRaptor             3750 1800
+
+60    tally      0  AmericaTankAvenger
+400   tally      0  AmericaTankAvenger
+400   tally      0  AmericaTankPaladin
+700   tally      0  AirF_AmericaJetRaptor

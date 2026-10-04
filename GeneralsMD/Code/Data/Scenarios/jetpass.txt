@@ -1,0 +1,43 @@
+# Four jets at cruise, each ordered onto a ground target that is 120 off its wing when the order lands,
+# the target driving away south: the pass that ends with the target under the plane.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 700
+#     -scenario jetpass -logPrefix jetpass_
+#
+# The jets reach x=2200 around frame 250. Measured 2026-10-02: before the fix the Raptor circled the
+# Overlord inside its own minimum range from frame 258 to 330 (a temporary per-frame trace) and the
+# Overlord still had 1100 health at frame 450, 900 at 500 and 700 at 650. After it the Raptor runs
+# out, turns and fires all four, and the Overlord has 700 at frame 400. The other three targets end
+# on the same health in both builds. The 42-pass sweep behind the changelog numbers (attack frame
+# 240 to 300, wing offset 0 to 180, parked and driving) is in the commit message of the fix.
+
+30    spawn      1  ChinaTankOverlord            1   2200 3300
+30    spawn      0  AmericaJetRaptor             1   1000 3420
+31    move       0  AmericaJetRaptor                 4400 3420
+30    spawn      1  ChinaTankBattleMaster        1   2200 3650
+30    spawn      0  ChinaJetMIG                  1   1000 3770
+31    move       0  ChinaJetMIG                      4400 3770
+30    spawn      1  AmericaTankCrusader          1   2200 4000
+30    spawn      0  AmericaJetAurora             1   1000 4120
+31    move       0  AmericaJetAurora                 4400 4120
+30    spawn      1  GLATankScorpion              1   2200 4350
+30    spawn      0  AmericaJetStealthFighter     1   1000 4470
+31    move       0  AmericaJetStealthFighter         4400 4470
+250   attack     0  AmericaJetRaptor             1  ChinaTankOverlord
+250   move       1  ChinaTankOverlord                2200 3000
+250   attack     0  ChinaJetMIG                  1  ChinaTankBattleMaster
+250   move       1  ChinaTankBattleMaster            2200 3350
+250   attack     0  AmericaJetAurora             1  AmericaTankCrusader
+250   move       1  AmericaTankCrusader              2200 3700
+250   attack     0  AmericaJetStealthFighter     1  GLATankScorpion
+250   move       1  GLATankScorpion                  2200 4050
+350   tally      1  ChinaTankOverlord
+400   tally      1  ChinaTankOverlord
+450   tally      1  ChinaTankOverlord
+500   tally      1  ChinaTankOverlord
+650   tally      1  ChinaTankOverlord
+650   tally      1  ChinaTankBattleMaster
+650   tally      1  AmericaTankCrusader
+650   tally      1  GLATankScorpion

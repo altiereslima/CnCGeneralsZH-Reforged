@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 // HtmlOverlay.cpp ////////////////////////////////////////////////////////////////////////////////
 // litehtml's drawing callbacks answered with the game's 2D calls, fonts and mapped images.
@@ -81,7 +82,7 @@ std::string firstFamily( const std::string &families )
 Bool isGenericFamily( const std::string &family )
 {
 	for( size_t index = 0; index < ARRAY_SIZE( GENERIC_FAMILIES ); index++ )
-		if( _stricmp( family.c_str(), GENERIC_FAMILIES[ index ] ) == 0 )
+		if( strcasecmp( family.c_str(), GENERIC_FAMILIES[ index ] ) == 0 )
 			return TRUE;
 	return FALSE;
 }
@@ -89,7 +90,7 @@ Bool isGenericFamily( const std::string &family )
 Bool isSvg( const std::string &source )
 {
 	const size_t extension = strlen( SVG_EXTENSION );
-	return source.size() > extension && _stricmp( source.c_str() + source.size() - extension, SVG_EXTENSION ) == 0;
+	return source.size() > extension && strcasecmp( source.c_str() + source.size() - extension, SVG_EXTENSION ) == 0;
 }
 
 }	// namespace

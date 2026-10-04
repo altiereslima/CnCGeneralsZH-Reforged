@@ -29,7 +29,6 @@
 #include "GameLogic/AI.h"
 #include "GameLogic/AIStateMachine.h"
 #include "GameLogic/GameLogic.h"
-#include "GameLogic/IncomingDamage.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/JetAIUpdate.h"
@@ -214,14 +213,22 @@ static Bool OrderQueue_isUsingAbility( const Object *obj )
 //-------------------------------------------------------------------------------------------------
 /** Is this unit busy with an order the player gave?  A fight it picked for itself while standing
 	* about is not one: the group is done, and the next order takes it off that fight.  Nor is a
-	* guard, which never ends. */
+	* guard, which never ends.  A fight an attack move stopped for is the order itself, though it
+	* marks itself the AI's while it lasts: without this a queued attack move ended the moment it met
+	* anybody, and a search and destroy skipped the rest of its ring at the first enemy. */
 //-------------------------------------------------------------------------------------------------
 static Bool OrderQueue_isWorking( const Object *obj, const AIUpdateInterface *ai )
 {
 	if( OrderQueue_isUsingAbility( obj ) )
 		return TRUE;
 
-	if( ai->isIdle() || ai->getLastCommandSource() != CMD_FROM_PLAYER )
+	if( ai->isIdle() )
+		return FALSE;
+
+	if( ai->getCurrentStateID() == AI_ATTACK_MOVE_TO )
+		return TRUE;
+
+	if( ai->getLastCommandSource() != CMD_FROM_PLAYER )
 		return FALSE;
 
 	switch( ai->getCurrentStateID() )
@@ -252,12 +259,6 @@ static Bool OrderQueue_isWalking( const AIUpdateInterface *ai )
 		default:
 			return FALSE;
 	}
-}
-
-//-------------------------------------------------------------------------------------------------
-static Bool OrderQueue_isAttack( GameMessage::Type type )
-{
-	return type == GameMessage::MSG_DO_ATTACK_OBJECT || type == GameMessage::MSG_DO_FORCE_ATTACK_OBJECT;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -754,11 +755,6 @@ Bool OrderQueue::isStepOver( OrderChain& chain, Player *owner )
 		const Object *target = TheGameLogic->findObjectByID( targetID );
 		if( target == NULL || target->isEffectivelyDead() )
 			return TRUE;
-
-		// a flight fires from range and its missiles take seconds to arrive, so a target with enough
-		// already in the air to kill it is finished as far as the list is concerned
-		if( OrderQueue_isAttack( chain.m_active.getType() ) && IncomingDamageTracker::isAlreadyDoomed( target ) )
-			return TRUE;
 	}
 
 	// a post never ends by itself; the object it guards dying is the one way off it, above
@@ -844,8 +840,7 @@ Bool OrderQueue::advance( OrderChain& chain, Player *owner )
 		if( targetID != INVALID_ID )
 		{
 			const Object *target = TheGameLogic->findObjectByID( targetID );
-			if( target == NULL || target->isEffectivelyDead()
-					|| ( OrderQueue_isAttack( next.getType() ) && IncomingDamageTracker::isAlreadyDoomed( target ) ) )
+			if( target == NULL || target->isEffectivelyDead() )
 				continue;
 
 			// the list was copied when the chain split, and the upgrade belongs to whichever half has the unit

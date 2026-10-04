@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*********************************************************************************************** 
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               *** 
@@ -38,6 +39,7 @@
 
 #include	"always.h"
 #include	"base64.h"
+#include	"wwendian.h"
 //#include	<stddef.h>
 
 /*
@@ -87,7 +89,7 @@ int const PacketChars = 4;
 */
 typedef union {
 	struct {
-#ifdef BIG_ENDIAN
+#if WW_BIG_ENDIAN	// not #ifdef BIG_ENDIAN, which POSIX always defines - see wwendian.h
 		unsigned char C1;
 		unsigned char C2;
 		unsigned char C3;
@@ -99,7 +101,7 @@ typedef union {
 		unsigned char pad;
 	} Char;
 	struct {
-#ifdef BIG_ENDIAN
+#if WW_BIG_ENDIAN	// not #ifdef BIG_ENDIAN, which POSIX always defines - see wwendian.h
 		unsigned O1:6;
 		unsigned O2:6;
 		unsigned O3:6;

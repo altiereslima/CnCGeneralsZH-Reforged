@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -31,10 +33,10 @@
 #define __W3DParticleSys_H_
 
 #include "GameClient/ParticleSys.h"
-#include "WW3D2/PointGr.h"
+#include "WW3D2/pointgr.h"
 #include "WW3D2/streak.h"
-#include "WW3D2/RInfo.h"
-#include "WWLib/BitType.h"
+#include "WW3D2/rinfo.h"
+#include "WWLib/bittype.h"
 
 #include <vector>
 
@@ -78,6 +80,7 @@ public:
 		UnsignedInt															fieldIncrement;		///< 1 if every drawn particle counts against the field budget
 		Int																			drawn;						///< written by the job
 		UnsignedInt															pastLimit;				///< written by the job: on-screen particles past capacity
+		Bool																		glow;							///< written by the job: the fire's glow is in the normals, not the colour
 	};
 
 private:

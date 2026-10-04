@@ -4,20 +4,20 @@ import json
 import sys
 
 EXPECTED_SNAPSHOT = {
-    "head_commit": "fde4810f1797cb3746248b0297059e96dab08a46",
+    "head_commit": "ebdbd6be8bd26e19c38ad8cd5bd07fcf477d54b8",
     "files": {
-        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "7d9766c2f2db9ed7215561e58861e47f6180809a",
-        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "250ad45519840b088a7084b41fd1b188106fc401",
-        "GeneralsMD/Code/GameEngine/Source/GameClient/GameText.cpp": "d6508926872f5e74c9f9493435edb32f91c5dfd8",
-        "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "6f8cdc02170b10df550ccb5efef5e30d3047dfbb",
-        "GeneralsMD/Code/Data/Patch.str": "f48c14e7132e54ceb8d9c5100a92f737af976750",
-        "GeneralsMD/Code/GameEngine/Source/GameClient/GlobalLanguage.cpp": "115d28f739fdd8f061a2622ecf4f685dd620f174",
-        "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DFileSystem.cpp": "b41dc411edf6034177bef575112742f6f92137fb",
-        "GeneralsMD/Code/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp": "23f711877eb038a8f3b2dba5b27644cb71048337",
-        "GeneralsMD/Code/CMakeLists.txt": "4380ab0d3fff88017cbde35f064bea6f11c06ed5",
-        "GeneralsMD/Code/GameEngine/Include/Common/AsciiString.h": "338c83a046b1338a9b60622ead08db762ff7b41a",
-        "GeneralsMD/Code/GameEngine/Include/Common/Debug.h": "708817af5576ace9079e3c8f2900b92eb727882a",
-        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "c678ccbdf73c1332630e847cf63e92f36128411c",
+        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "35367c34bd6c511de82f47fa82e690cd1207f8f4",
+        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "788d14e511c1a14affe6d62bb862723f91714c02",
+        "GeneralsMD/Code/GameEngine/Source/GameClient/GameText.cpp": "6c777176e3249c44a60bc1df7c8fb23030450f12",
+        "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "f6deb6995e855459936662e8d0e44c4330ba253a",
+        "GeneralsMD/Code/Data/Patch.str": "4789660b040997a9ed5955f7f9d334a93407e46d",
+        "GeneralsMD/Code/GameEngine/Source/GameClient/GlobalLanguage.cpp": "1b991cf2edcdd94e4508e886106cb33398426caf",
+        "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DFileSystem.cpp": "61b3a14c2a46b3f297a1535f04b9f581d2d26269",
+        "GeneralsMD/Code/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp": "725e18cc231d4d75ab2df60231132fef95e4c05e",
+        "GeneralsMD/Code/CMakeLists.txt": "e02b2181bc4b5876acab4c9284869ad35788c59e",
+        "GeneralsMD/Code/GameEngine/Include/Common/AsciiString.h": "3b58ca6b46023845e48daa5d0afc4488f2a2e066",
+        "GeneralsMD/Code/GameEngine/Include/Common/Debug.h": "c097a75346d7f14e1288b3d36636c9ada3ded623",
+        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "4943faa6bd51c88eb7607067fe14613372b3476e",
     }
 }
 
@@ -26,6 +26,22 @@ def need(text, needle, name, count=1):
     if found != count:
         raise RuntimeError(f"{name}: esperado {count}, encontrado {found}")
     return found
+
+def unconditional(text, needle, name):
+    """O needle tem de estar fora de qualquer #if: uma inicialização dentro de um bloco de build de
+    desenvolvedor fica sem valor no Release, e a contagem de âncoras não percebe."""
+    pos = text.find(needle)
+    if pos < 0:
+        raise RuntimeError(f"{name}: ausente")
+    depth = 0
+    for line in text[:pos].splitlines():
+        s = line.strip()
+        if s.startswith(("#if", "#ifdef", "#ifndef")):
+            depth += 1
+        elif s.startswith("#endif"):
+            depth -= 1
+    if depth != 0:
+        raise RuntimeError(f"{name}: dentro de um bloco #if")
 
 def parse_str_labels(path):
     lines = path.read_text(encoding="utf-8-sig").splitlines()
@@ -120,29 +136,30 @@ def validate(repo):
 
     # Stage 13: the corner box hidden by default, through upstream's own ShowNetBox switch.
     need(cpp, "\tm_showNetBox = TRUE;\n", "GlobalData.cpp net box default")
+    unconditional(cpp, "\tm_showNetBox = TRUE;\n", "GlobalData.cpp net box default")
     if '{ "ShowNetBox",' not in catalog or "OPT_WND( \"CheckNetBox\" )" not in catalog:
         raise RuntimeError("OptionsCatalog.cpp: ShowNetBox sem a caixa de seleção CheckNetBox no menu")
     test = (code/"Tests/test_gameengine.cpp").read_text(encoding="utf-8-sig")
-    need(test, "\tCHECK( scratch->m_showNetBox );\n\tdef->set( 0 );\n", "test_gameengine net box default check")
+    need(test, "\tCHECK( scratch->m_showNetBox );\n\t// the older plate's own switch", "test_gameengine net box default check")
     result["checks"]["net_box_anchors"] = "PASS"
 
     # Stage 14: lobby AI difficulty names.
     info = (code/"GameEngine/Source/GameNetwork/GameInfo.cpp").read_text(encoding="utf-8-sig")
     need(info, "/** What a seat is called wherever one is listed: the lobby's drop-down, the seat itself, the game\n", "GameInfo.cpp SlotStateName comment")
-    need(info, "\t\tcase SLOT_EASY_AI:\t\t\treturn UnicodeString( L\"Easy AI\" );\n", "GameInfo.cpp Easy AI")
-    need(info, "\t\tcase SLOT_MED_AI:\t\t\t\treturn UnicodeString( L\"Medium AI\" );\n", "GameInfo.cpp Medium AI")
-    need(info, "\t\tcase SLOT_BRUTAL_AI:\t\treturn UnicodeString( L\"Hard AI\" );\n", "GameInfo.cpp Hard AI")
+    need(info, "\t\tcase SLOT_EASY_AI:\t\t\treturn UnicodeString( u\"Easy AI\" );\n", "GameInfo.cpp Easy AI")
+    need(info, "\t\tcase SLOT_MED_AI:\t\t\t\treturn UnicodeString( u\"Medium AI\" );\n", "GameInfo.cpp Medium AI")
+    need(info, "\t\tcase SLOT_BRUTAL_AI:\t\treturn UnicodeString( u\"Hard AI\" );\n", "GameInfo.cpp Hard AI")
     result["checks"]["ai_rung_name_anchors"] = "PASS"
 
     # Stage 16: textured command bar plates by default.
     need(h, "\tBool m_showHudOverlay;\t\t\t\t///< draw the fps / elapsed time / income line in the corner\n", "GlobalData.h HUD overlay member")
-    need(cpp, "\tm_showHudOverlay = TRUE;\n", "GlobalData.cpp HUD overlay default")
     need(catalog, "OPTION_BOOL_ACCESSORS( m_showSuperweaponStrip )\n", "OptionsCatalog.cpp accessors")
     need(catalog, "\t\tget_m_showSuperweaponStrip, set_m_showSuperweaponStrip },\n\n\t{ NULL, NULL, NULL, OPTION_BOOL, APPLY_LIVE, 0, 0, NULL, NULL }\n", "OptionsCatalog.cpp terminator")
     ui = (code/"GameEngine/Source/GameClient/InGameUI.cpp").read_text(encoding="utf-8-sig")
     need(ui, "\tif( m_controlBarPage.empty() )\n\t{\n\t\tTheControlBar->setPageSolids( NULL );\n\t\treturn FALSE;\n\t}\n", "InGameUI.cpp command bar page fallback")
     w3dbar = (code/"GameEngineDevice/Source/W3DDevice/GameClient/GUI/GUICallbacks/W3DControlBar.cpp").read_text(encoding="utf-8-sig")
     need(w3dbar, "TheInGameUI->drawControlBarPage( panels, shown, ControlBar::CB_PANEL_COUNT ) )\n\t\treturn;\n", "W3DControlBar.cpp plates drawn when the page is not")
+    need(ui, "\tconst Bool plate = TheGlobalData->m_showHudOverlay && TheGlobalData->m_showNetBox && !m_controlBarPageShown;\n", "InGameUI.cpp corner plate switch")
     need(ui, "\t\treadHtmlPage( QUIT_MENU_PAGE, m_quitMenuPage );\n\t}\n\tif( m_quitMenuPage.empty() )\n\t\treturn;\n", "InGameUI.cpp Esc menu page fallback")
     quit_menu = (code/"GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/QuitMenu.cpp").read_text(encoding="utf-8-sig")
     need(quit_menu, "\tTheTransitionHandler->setGroup( group );\n\tTheTransitionHandler->remove( group, TRUE );\n}\n", "QuitMenu.cpp showQuitMenuLayout")
@@ -152,7 +169,29 @@ def validate(repo):
     need(button, "extern Real ControlBarHudScale( void );\n", "W3DPushButton.cpp HUD scale declaration")
     from apply_stage16 import BADGE_SCALE_USES
     need(button, "designPoints * ControlBarHudScale()", "W3DPushButton.cpp markings measured by the bar's scale", BADGE_SCALE_USES)
+    bar_cpp = (code/"GameEngine/Source/GameClient/GUI/ControlBar/ControlBar.cpp").read_text(encoding="utf-8-sig")
+    bar_h = (code/"GameEngine/Include/GameClient/ControlBar.h").read_text(encoding="utf-8-sig")
+    radar = (code/"GameEngine/Source/Common/System/Radar.cpp").read_text(encoding="utf-8-sig")
+    need(bar_h, "\tvoid drawSpecialPowerShortcutMultiplierText();\n", "ControlBar.h public block")
+    need(bar_h, "\tvoid setDefaultControlBarConfig( void );\n", "ControlBar.h protected block")
+    need(bar_h, "\tICoord2D m_controlBarBackgroundMarkerPos;\n", "ControlBar.h private block")
+    need(bar_cpp, "\tm_pageSolidsActive = FALSE;\n", "ControlBar.cpp constructor")
+    need(bar_cpp, "\tm_communicatorButton = NULL;\n\tm_animateDownWindow = NULL;\n", "ControlBar.cpp shutdownWindows")
+    need(bar_cpp, "\t\twin = TheWindowManager->winGetWindowFromId(NULL, TheNameKeyGenerator->nameToKey(\"ControlBar.wnd:WinUAttack\"));\n\t\tif(win)\n\t\t\twin->winHide(TRUE);\n", "ControlBar.cpp WinUAttack hidden at init")
+    need(bar_cpp, "\t// do not destroy the rally drawable, it will get destroyed with everythign else during a reset\n\tm_rallyPointDrawableID = INVALID_DRAWABLE_ID;\n", "ControlBar.cpp reset")
+    need(bar_cpp, "\t\tgetStarImage();\n\t}\n", "ControlBar.cpp logic-frame latch")
+    need(bar_cpp, "void ControlBar::initSpecialPowershortcutBar( Player *player)\n", "ControlBar.cpp definitions")
+    need(radar, "#include \"GameClient/InGameUI.h\"\n", "Radar.cpp includes")
+    need(radar, "\tif( eventCreated )\n\t{\n", "Radar.cpp under-attack event")
+    if "triggerRadarAttackGlow" in bar_cpp + bar_h + radar:
+        raise RuntimeError("ControlBar: triggerRadarAttackGlow voltou ao upstream; o passo 9 do estágio 16 duplicaria")
     result["checks"]["classic_interface_anchors"] = "PASS"
+
+    # Stage 17: generals.exe starts without upstream's launcher.
+    from apply_stage17 import LAUNCHER_CHECK
+    winmain = (code/"Main/WinMain.cpp").read_text(encoding="utf-8-sig")
+    need(winmain, LAUNCHER_CHECK, "WinMain.cpp launcher start check")
+    result["checks"]["launcher_check_anchor"] = "PASS"
 
     result["status"] = "PASS"
     return result

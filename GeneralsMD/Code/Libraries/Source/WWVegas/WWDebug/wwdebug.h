@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -95,7 +97,9 @@ void					WWDebug_Profile_Stop( const char * title);
 /*
 ** A message handler to display to DBWIN32
 */
+#ifdef _WIN32
 void					WWDebug_DBWin32_Message_Handler( const char * message);
+#endif
 #endif
 
 
@@ -105,7 +109,9 @@ void					WWDebug_DBWin32_Message_Handler( const char * message);
 ** WWDEBUG_SAY(("dir = %f\n",dir));
 */
 
-#include "..\..\..\..\gameengine\include\common\debug.h"
+// Forward slashes and the real spelling on disk: MSVC takes either separator, clang takes
+// only this one, and a case-sensitive volume takes only this capitalisation.
+#include "../../../../GameEngine/Include/Common/Debug.h"
 
 #ifdef DEBUG_LOGGING
 #define WWDEBUG_SAY(x)							DEBUG_LOG(x)

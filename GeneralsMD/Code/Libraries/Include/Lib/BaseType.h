@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 // FILE: BaseType.h ///////////////////////////////////////////////////////////
 //
@@ -34,6 +36,8 @@
 
 #include <math.h>
 #include <string.h>
+
+#include "Platform/MsvcFloatCasts.h"
 
 /*
 **	Turn off some unneeded warnings.
@@ -97,6 +101,37 @@
 //#define abs(x) (((x) < 0) ? -(x) : (x))
 //#endif
 
+// The min and max macros below are function-like, so every later declaration or call spelled
+// `max(` expands through them - including the C++ library's own std::min/std::max and the headers
+// that call them.  MSVC's library and libc++ guard against that; libstdc++ does not, and the first
+// engine source built against it (on Linux) stopped in <bits/algorithmfwd.h> with "macro max passed
+// 3 arguments".  So off MSVC, the standard headers this tree's headers include are parsed here,
+// before the macros exist, and their include guards keep them from being parsed again under them.
+// A header this list misses fails loudly the same way, never silently.
+// Keyed on the COMPILER'S LIBRARY, hence !_MSC_VER and not !_WIN32: the question is whose <algorithm>
+// this is, not which operating system runs it.  mingw is Windows with libstdc++ and needs the list.
+#if !defined(_MSC_VER) && defined(__cplusplus)
+#include <algorithm>
+#include <atomic>
+#include <bitset>
+#include <chrono>
+#include <deque>
+#include <functional>
+#include <list>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <queue>
+#include <set>
+#include <stack>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+#endif
+
 #ifndef min
 #define min(x,y) (((x)<(y)) ? (x) : (y))
 #endif
@@ -121,6 +156,11 @@
 //--------------------------------------------------------------------
 // Fundamental type definitions
 //--------------------------------------------------------------------
+#include <stdint.h>   // int64_t and uint64_t, for Int64/UnsignedInt64 below
+// __forceinline on the four inline helpers further down, and the CRT spellings for everything
+// that reaches this header - which is most of GameEngine, and all of compression.  always.h
+// brings the same header to WWVegas; this is the other door into it.
+#include "Platform/MSVCCompat.h"
 typedef float							Real;							// 4 bytes 
 typedef int								Int;							// 4 bytes 
 typedef unsigned int			UnsignedInt;	  	// 4 bytes
@@ -133,14 +173,16 @@ typedef unsigned char			UnsignedByte;			// 1 byte		USED TO BE "Byte"
 typedef char							Byte;							// 1 byte		USED TO BE "SignedByte"
 typedef char							Char;							// 1 byte of text
 typedef bool							Bool;							// 
-// note, the types below should use "long long", but MSVC doesn't support it yet
-typedef __int64						Int64;							// 8 bytes 
-typedef unsigned __int64	UnsignedInt64;	  	// 8 bytes 
+// The note that used to be here said MSVC did not support "long long" yet.  It has since 2003, and
+// <cstdint> is the spelling that is the same width on every compiler this builds on - which matters
+// because these two are in save games and in the replay checksum.
+typedef int64_t						Int64;							// 8 bytes 
+typedef uint64_t					UnsignedInt64;	  	// 8 bytes 
 
 #include "Lib/Trig.h"
 
 //-----------------------------------------------------------------------------
-typedef wchar_t WideChar;  ///< multi-byte character representations
+#include "Lib/WideChar.h"	// WideChar: its own header, so WW3D2 can have it without this one
 
 //-----------------------------------------------------------------------------
 template <typename NUM>
@@ -178,12 +220,27 @@ inline Real deg2rad(Real rad) { return rad * (PI/180); }
 // after this one silently rewrites every use below into an intrinsic that takes
 // a LONG* and the game's bit fields stop compiling.  Not <windows.h>: that also
 // drags in winsock.h, and the device code includes winsock2.h.
+//
+// None of that fight exists off Windows: there is no winnt.h to claim the name, so there is
+// nothing to pull in early and nothing to take back.  The #undef below is kept unguarded
+// because undefining a macro that was never defined is well-formed and it keeps the four
+// definitions that follow reading the same on both platforms.  B5.
+#if defined(_WIN32)
+#if defined(_M_ARM64)
+#ifndef _ARM64_
+#define _ARM64_		// the same for Windows on Arm: _AMD64_ there takes winnt.h down the x64 path
+#endif
+#else
 #ifndef _AMD64_
 #define _AMD64_		// windows.h does this before it reaches windef.h, and winnt.h
 #endif				// #errors with "No Target Architecture" without it
+#endif
 #include <windef.h>
+#endif
 #include <string.h>
-#include <emmintrin.h>
+// Was <emmintrin.h>, for fast_float2long_round below.  See Lib/DetRound.h for which
+// instruction each architecture uses and why the rounding is not negotiable.
+#include "Lib/DetRound.h"
 #undef BitTest
 #define BitTest( x, i ) ( ( (x) & (i) ) != 0 )
 #define BitSet( x, i ) ( (x) |= (i) )
@@ -198,9 +255,16 @@ inline Real deg2rad(Real rad) { return rad * (PI/180); }
 //
 // EA's fld/fistp pair, written as cvtss2si: both round in the current mode, which setFPMode pins
 // to nearest.
+// <emmintrin.h> used to be included up in the BitTest block, which had nothing to do with it.
+// It is here, next to its only user, and guarded: the header #errors outright on a non-x86
+// target ("This header is only meant to be used on x86 and x64 architecture").  The function
+// body below is still SSE2 and still does not compile on arm64 - that is B12's, not B5's.
+#if defined(_M_IX86) || defined(_M_X64) || defined(__i386__) || defined(__x86_64__)
+#include <emmintrin.h>
+#endif
 __forceinline long fast_float2long_round(float f)
 {
-	return _mm_cvtss_si32(_mm_set_ss(f));
+	return DetRound::To_Long(f);
 }
 
 // super fast float trunc routine, works always (independent of any FPU modes)
@@ -277,22 +341,27 @@ __forceinline float fast_float_ceil(float f)
  * the value integral.  cvttss2si has no mode to be left in.  The trunc/floor/ceil helpers below are
  * untouched; they still have callers that want a Real back.
  *
- * Pinned by real_to_int_agrees_with_the_assembly_it_replaced in test_gameengine.cpp. */
+ * Pinned by real_to_int_agrees_with_the_assembly_it_replaced in test_gameengine.cpp.
+ *
+ * The cast is MSVC's cvttss2si written out (Platform/MsvcFloatCasts.h), not the C cast itself.  In range
+ * the two are the same instruction's answer.  Out of range or NaN, C leaves the cast undefined; MSVC and
+ * x86 give INT_MIN, while ARM64 saturates and gives 0 for NaN.  The helper gives INT_MIN everywhere, so
+ * every one of these macros is Windows' answer by construction (found by a sweep of the float conversions). */
 
-#define REAL_TO_INT(x)						((Int)(x))
-#define REAL_TO_UNSIGNEDINT(x)		((UnsignedInt)(Int)(x))
-#define REAL_TO_SHORT(x)					((Short)(Int)(x))
-#define REAL_TO_UNSIGNEDSHORT(x)	((UnsignedShort)(Int)(x))
-#define REAL_TO_BYTE(x)						((Byte)(Int)(x))
-#define REAL_TO_UNSIGNEDBYTE(x)		((UnsignedByte)(Int)(x))
-#define REAL_TO_CHAR(x)						((Char)(Int)(x))
+#define REAL_TO_INT(x)						((Int)floatToIntAsMsvc(x))
+#define REAL_TO_UNSIGNEDINT(x)		((UnsignedInt)floatToIntAsMsvc(x))
+#define REAL_TO_SHORT(x)					((Short)floatToIntAsMsvc(x))
+#define REAL_TO_UNSIGNEDSHORT(x)	((UnsignedShort)floatToIntAsMsvc(x))
+#define REAL_TO_BYTE(x)						((Byte)floatToIntAsMsvc(x))
+#define REAL_TO_UNSIGNEDBYTE(x)		((UnsignedByte)floatToIntAsMsvc(x))
+#define REAL_TO_CHAR(x)						((Char)floatToIntAsMsvc(x))
 #define DOUBLE_TO_REAL(x)					((Real) (x))
 #define DOUBLE_TO_INT(x)					((Int)(x))
 #define INT_TO_REAL(x)						((Real) (x))
 
 // once we've ceiled/floored, trunc and round are identical, and currently, round is faster... (srj)
-#define REAL_TO_INT_CEIL(x)				(fast_float2long_round(fast_float_ceil(x)))
-#define REAL_TO_INT_FLOOR(x)			(fast_float2long_round(fast_float_floor(x)))
+#define REAL_TO_INT_CEIL(x)				((Int)fast_float2long_round(fast_float_ceil(x)))
+#define REAL_TO_INT_FLOOR(x)			((Int)fast_float2long_round(fast_float_floor(x)))
 
 #define FAST_REAL_TRUNC(x)        fast_float_trunc(x)
 #define FAST_REAL_CEIL(x)         fast_float_ceil(x)

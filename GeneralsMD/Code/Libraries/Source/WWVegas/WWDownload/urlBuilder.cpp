@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 #include <string>
 #include <stdio.h>
@@ -37,13 +38,13 @@ void FormatURLFromRegistry( std::string& gamePatchURL, std::string& mapPatchURL,
 	GetUnsignedIntFromRegistry("", "MapPackVersion", mapVersion);
 
 	char buf[256];
-	_snprintf(buf, 256, "%s%s-%d.txt", baseURL.c_str(), language.c_str(), version);
+	snprintf(buf, 256, "%s%s-%d.txt", baseURL.c_str(), language.c_str(), version);
 	gamePatchURL = buf;
-	_snprintf(buf, 256, "%smaps-%d.txt", baseURL.c_str(), mapVersion);
+	snprintf(buf, 256, "%smaps-%d.txt", baseURL.c_str(), mapVersion);
 	mapPatchURL = buf;
-	_snprintf(buf, 256, "%sconfig.txt", baseURL.c_str());
+	snprintf(buf, 256, "%sconfig.txt", baseURL.c_str());
 	configURL = buf;
-	_snprintf(buf, 256, "%sMOTD-%s.txt", baseURL.c_str(), language.c_str());
+	snprintf(buf, 256, "%sMOTD-%s.txt", baseURL.c_str(), language.c_str());
 	motdURL = buf;
 }
 

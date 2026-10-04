@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 #include "dx11backend.h"
 
@@ -78,8 +79,39 @@ static D3DCompileFunction compiler_function()
 }
 
 // The cache file is this marker, then one record a program: the hash, the byte count, the bytes.
+// The shipped file (Load_Shipped_Programs) is the same format.
 static const char SHADER_CACHE_MAGIC[8] = { 'D', 'X', '1', '1', 'S', 'C', '1', '\0' };
 static const unsigned SHADER_CACHE_LARGEST_PROGRAM = 1u << 20;
+static const unsigned long SHADER_CACHE_SAVE_INTERVAL_MS = 10000;
+
+// Every record of a cache file into programs, a record whole or not at all: a file cut short by a
+// crash while it was written loses its last record and nothing else.  Returns how many were read.
+static unsigned read_program_file(const char * path,
+	std::map<unsigned long long, std::vector<unsigned char> > & programs)
+{
+	FILE * file = fopen(path, "rb");
+	if (file == NULL) {
+		return 0;
+	}
+	unsigned count = 0;
+	char magic[sizeof(SHADER_CACHE_MAGIC)];
+	if (fread(magic, sizeof(magic), 1, file) == 1
+		&& memcmp(magic, SHADER_CACHE_MAGIC, sizeof(magic)) == 0) {
+		unsigned long long hash = 0;
+		unsigned int size = 0;
+		while (fread(&hash, sizeof(hash), 1, file) == 1 && fread(&size, sizeof(size), 1, file) == 1
+			&& size > 0 && size <= SHADER_CACHE_LARGEST_PROGRAM) {
+			std::vector<unsigned char> bytecode(size);
+			if (fread(&bytecode[0], size, 1, file) != 1) {
+				break;
+			}
+			programs[hash].swap(bytecode);
+			++count;
+		}
+	}
+	fclose(file);
+	return count;
+}
 
 // FNV-1a over the profile and the source, which between them decide the bytecode.  The generated
 // text is the key rather than the pipeline's state key, so a build that changes what a state
@@ -198,6 +230,8 @@ DX11BackendClass::DX11BackendClass()
 	, FrameBuildMilliseconds(0.0)
 	, FrameBuildCount(0)
 	, ShaderCacheChanged(false)
+	, ShippedPrograms(0)
+	, LastShaderCacheSave(0)
 	, TracedUserStrip(false)
 	, MaskWhileTargeted(0)
 	, TargetsBound(0)
@@ -226,6 +260,7 @@ DX11BackendClass::DX11BackendClass()
 	, ShadowUnitsPerDepth(0.0f)
 	, ShadowSkyFill(0.0f)
 	, ShadowReceiving(false)
+	, SmokeGlow(false)
 	, NormalMappedDraws(0)
 	, DrawsMade(0)
 	, DrawsRefused(0)
@@ -270,6 +305,22 @@ DX11BackendClass::DX11BackendClass()
 	set_identity(World);
 	set_identity(View);
 	set_identity(Projection);
+	set_identity(SceneView);
+	SceneViewKnown = false;
+	SmokeMapSurface = NULL;
+	SmokeMapTarget = NULL;
+	SmokeMapTexture = NULL;
+	SmokeMapSampler = NULL;
+	SmokeSplatVertexShader = NULL;
+	SmokeSplatPixelShader = NULL;
+	SmokeSplatLayout = NULL;
+	SmokeSplatBlend = NULL;
+	SmokeSplatRasterizer = NULL;
+	SmokeSplatInstances = NULL;
+	SmokeSplatCapacity = 0;
+	SmokeMapRefused = false;
+	SmokeMapFilled = false;
+	SmokeStrength = 0.0f;
 	for (unsigned stage = 0; stage < DX11_BACKEND_TEXTURE_STAGES; ++stage) {
 		set_identity(TextureTransforms[stage]);
 	}
@@ -426,6 +477,7 @@ void DX11BackendClass::Shutdown()
 	}
 	ShadowMapSize = 0;
 	ShadowMapBound = false;
+	Release_Smoke_Map();
 	RenderStates.Set_Shadow_Caster_Pass(false);
 	Note_Shadow_State_Changed();
 	Device = NULL;
@@ -552,6 +604,365 @@ void DX11BackendClass::Clear_Shadow_Parameters()
 	ShadowReceiving = false;
 	ShadowFromClipValid = false;
 	Note_Shadow_State_Changed();
+}
+
+/* The smoke's map.  A quarter of the depth map's width is plenty: 3.5 world units a texel over the
+	 1800 unit box, and nothing in a smoke cloud is that sharp.  Four 32-bit channels because the third
+	 sum is a square, and in half floats a plume 200 units deep vanished into the rounding of a depth
+	 near 0.5 squared.  512 square of that is 4 MB. */
+static const unsigned SMOKE_MAP_TEXELS = 512;
+static const unsigned SMOKE_MAP_SLOT = DX11_BACKEND_TEXTURE_STAGES + 2;		///< t6 and s6, after the depth map's
+static const unsigned SMOKE_SPLAT_FLOATS = 6;		///< per caster: sun clip x, y, z, radius, optical depth, depth spread
+static const unsigned SMOKE_MOST_CASTERS = 16384;
+// How a smoke particle shades itself (VOLUMETRIC_SAMPLING, smoke_reaching): how dark one on its
+// plume's far side goes, and the power on the share of the plume ahead of it that keeps the sun
+// side lit.  The 2026-10-04 sweep: at 16 white smoke's sun side came out 6.2% under the unshaded
+// plume and its far side 0.85 of the sun side, soot 2.4% and 0.87; at 8 white lost 10.8% on its sun
+// side, and at 32 soot went flat.
+static const float SMOKE_SELF_SHADOW_GAIN = 0.8f;
+static const float SMOKE_SELF_SHADOW_CURVE = 16.0f;
+
+// Each caster is a disc facing the sun, drawn as a four corner strip whose corners come from the
+// vertex number, so the only buffer is the one holding the casters.
+static const char SMOKE_SPLAT_VERTEX_PROGRAM[] =
+	"struct Caster\n"
+	"{\n"
+	"    float4 Centre : CENTRE;\n"	// the sun's clip x, y and depth, and the radius in clip units
+	"    float2 Shape  : SHAPE;\n"	// optical depth through the middle, and the spread in depth
+	"};\n"
+	"struct Splat\n"
+	"{\n"
+	"    float4 Position : SV_Position;\n"
+	"    float2 Corner   : TEXCOORD0;\n"
+	"    float3 Moment   : TEXCOORD1;\n"
+	"};\n"
+	"Splat main(Caster caster, uint corner : SV_VertexID)\n"
+	"{\n"
+	"    Splat splat;\n"
+	"    splat.Corner = float2((corner & 1u) ? 1.0 : -1.0, (corner & 2u) ? 1.0 : -1.0);\n"
+	"    splat.Position = float4(caster.Centre.xy + splat.Corner * caster.Centre.w, 0.5, 1.0);\n"
+	"    splat.Moment = float3(caster.Shape.x, caster.Centre.z, caster.Shape.y);\n"
+	"    return splat;\n"
+	"}\n";
+
+// The three sums VOLUMETRIC_SAMPLING reads back, added up by the blend, and in alpha the depth of
+// the particle nearest the sun, kept by a minimum blend: the plume's own front, which a particle
+// with nothing ahead of it is measured from.  The disc is thickest in its middle and thins to
+// nothing at its rim, which is the shape every smoke sprite in the game has; outside it the quad's
+// corners leave the front alone.
+static const char SMOKE_SPLAT_PIXEL_PROGRAM[] =
+	"struct Splat\n"
+	"{\n"
+	"    float4 Position : SV_Position;\n"
+	"    float2 Corner   : TEXCOORD0;\n"
+	"    float3 Moment   : TEXCOORD1;\n"
+	"};\n"
+	"float4 main(Splat splat) : SV_Target\n"
+	"{\n"
+	"    float rim = saturate(1.0 - dot(splat.Corner, splat.Corner));\n"
+	"    float thickness = splat.Moment.x * rim * rim;\n"
+	"    float depth = splat.Moment.y;\n"
+	"    float spread = splat.Moment.z;\n"
+	"    return float4(thickness, thickness * depth, thickness * (depth * depth + spread * spread),\n"
+	"        rim > 0.0 ? depth : 1.0);\n"
+	"}\n";
+
+void DX11BackendClass::Release_Smoke_Map()
+{
+	IUnknown ** const held[] = {
+		(IUnknown **)&SmokeMapTexture, (IUnknown **)&SmokeMapTarget, (IUnknown **)&SmokeMapSurface,
+		(IUnknown **)&SmokeMapSampler, (IUnknown **)&SmokeSplatVertexShader,
+		(IUnknown **)&SmokeSplatPixelShader, (IUnknown **)&SmokeSplatLayout,
+		(IUnknown **)&SmokeSplatBlend, (IUnknown **)&SmokeSplatRasterizer,
+		(IUnknown **)&SmokeSplatInstances,
+	};
+	for (unsigned index = 0; index < sizeof(held) / sizeof(held[0]); ++index) {
+		if (*held[index] != NULL) {
+			(*held[index])->Release();
+			*held[index] = NULL;
+		}
+	}
+	SmokeSplatCapacity = 0;
+	SmokeMapRefused = false;
+	SmokeMapFilled = false;
+}
+
+bool DX11BackendClass::Make_Smoke_Map()
+{
+	if (SmokeMapTarget != NULL) {
+		return true;
+	}
+	if (SmokeMapRefused) {
+		return false;
+	}
+
+	ID3D11Device * device = Device->Get_Device();
+	const UINT wanted = D3D11_FORMAT_SUPPORT_TEXTURE2D | D3D11_FORMAT_SUPPORT_RENDER_TARGET
+		| D3D11_FORMAT_SUPPORT_BLENDABLE | D3D11_FORMAT_SUPPORT_SHADER_SAMPLE;
+	UINT support = 0;
+	if (FAILED(device->CheckFormatSupport(DXGI_FORMAT_R32G32B32A32_FLOAT, &support))
+		|| (support & wanted) != wanted) {
+		Note_Refusal("the device cannot blend and filter the smoke's 32-bit float map");
+		SmokeMapRefused = true;
+		return false;
+	}
+
+	D3D11_TEXTURE2D_DESC description;
+	memset(&description, 0, sizeof(description));
+	description.Width = SMOKE_MAP_TEXELS;
+	description.Height = SMOKE_MAP_TEXELS;
+	description.MipLevels = 1;
+	description.ArraySize = 1;
+	description.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+	description.SampleDesc.Count = 1;
+	description.Usage = D3D11_USAGE_DEFAULT;
+	description.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+	D3D11_SAMPLER_DESC sampler;
+	memset(&sampler, 0, sizeof(sampler));
+	sampler.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+	sampler.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+	sampler.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+	sampler.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+	sampler.ComparisonFunc = D3D11_COMPARISON_NEVER;
+	sampler.MaxLOD = D3D11_FLOAT32_MAX;
+
+	D3D11_BLEND_DESC blend;
+	memset(&blend, 0, sizeof(blend));
+	blend.RenderTarget[0].BlendEnable = TRUE;
+	blend.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+	blend.RenderTarget[0].DestBlend = D3D11_BLEND_ONE;
+	blend.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+	blend.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+	blend.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
+	blend.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_MIN;		// the front, nearest the sun
+	blend.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+
+	D3D11_RASTERIZER_DESC rasterizer;
+	memset(&rasterizer, 0, sizeof(rasterizer));
+	rasterizer.FillMode = D3D11_FILL_SOLID;
+	rasterizer.CullMode = D3D11_CULL_NONE;
+	rasterizer.DepthClipEnable = FALSE;
+
+	const D3D11_INPUT_ELEMENT_DESC elements[] = {
+		{ "CENTRE", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+		{ "SHAPE", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 16, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+	};
+
+	std::vector<unsigned char> vertex_code;
+	std::vector<unsigned char> pixel_code;
+	const bool made = SUCCEEDED(device->CreateTexture2D(&description, NULL, &SmokeMapSurface))
+		&& SUCCEEDED(device->CreateRenderTargetView(SmokeMapSurface, NULL, &SmokeMapTarget))
+		&& SUCCEEDED(device->CreateShaderResourceView(SmokeMapSurface, NULL, &SmokeMapTexture))
+		&& SUCCEEDED(device->CreateSamplerState(&sampler, &SmokeMapSampler))
+		&& SUCCEEDED(device->CreateBlendState(&blend, &SmokeSplatBlend))
+		&& SUCCEEDED(device->CreateRasterizerState(&rasterizer, &SmokeSplatRasterizer))
+		&& Compile_Program(SMOKE_SPLAT_VERTEX_PROGRAM, "smokesplat", VERTEX_PROFILE, vertex_code)
+		&& Compile_Program(SMOKE_SPLAT_PIXEL_PROGRAM, "smokesplat", PIXEL_PROFILE, pixel_code)
+		&& SUCCEEDED(device->CreateVertexShader(&vertex_code[0], vertex_code.size(), NULL,
+			&SmokeSplatVertexShader))
+		&& SUCCEEDED(device->CreatePixelShader(&pixel_code[0], pixel_code.size(), NULL,
+			&SmokeSplatPixelShader))
+		&& SUCCEEDED(device->CreateInputLayout(elements, 2, &vertex_code[0], vertex_code.size(),
+			&SmokeSplatLayout));
+	if (!made) {
+		Note_Refusal("the device would not make the smoke's map or the program that fills it");
+		Release_Smoke_Map();
+		SmokeMapRefused = true;
+		return false;
+	}
+	return true;
+}
+
+bool DX11BackendClass::Fill_Smoke_Map(const float * casters, unsigned count, float strength)
+{
+	if (SmokeMapFilled) {
+		SmokeMapFilled = false;
+		ConstantsChanged = true;
+	}
+	if (Device == NULL || ShadowMapBound) {
+		return false;
+	}
+	// Nothing to draw is not a reason to make the map; whether it could be made is answered the
+	// first time there is.  A ground strength of nought still fills it for the smoke's own shade.
+	if (casters == NULL || count == 0) {
+		return !SmokeMapRefused;
+	}
+	if (!Make_Smoke_Map()) {
+		return false;
+	}
+	if (count > SMOKE_MOST_CASTERS) {
+		count = SMOKE_MOST_CASTERS;
+	}
+
+	/* Into the sun's clip space through the matrix the depth pass drew with, on the CPU: the sun is
+		 orthographic, so a sphere's radius is the same number of clip units wherever it stands and
+		 the disc needs no projection of its own.  How many clip units a world unit is comes off the
+		 matrix's own columns. */
+	const float * sun = SunViewProjection;
+	const float across = sqrtf(sun[0] * sun[0] + sun[4] * sun[4] + sun[8] * sun[8]);
+	const float deep = sqrtf(sun[2] * sun[2] + sun[6] * sun[6] + sun[10] * sun[10]);
+
+	SmokeSplats.resize(count * SMOKE_SPLAT_FLOATS);
+	unsigned splats = 0;
+	for (unsigned index = 0; index < count; ++index) {
+		const float * caster = casters + index * 5;
+		const float w = caster[0] * sun[3] + caster[1] * sun[7] + caster[2] * sun[11] + sun[15];
+		if (w <= 0.0f || caster[3] <= 0.0f || caster[4] <= 0.0f) {
+			continue;
+		}
+		const float x = (caster[0] * sun[0] + caster[1] * sun[4] + caster[2] * sun[8] + sun[12]) / w;
+		const float y = (caster[0] * sun[1] + caster[1] * sun[5] + caster[2] * sun[9] + sun[13]) / w;
+		const float z = (caster[0] * sun[2] + caster[1] * sun[6] + caster[2] * sun[10] + sun[14]) / w;
+		const float radius = caster[3] * across;
+		// A ball's depth along the ray spreads about half its radius either side of its middle.
+		const float spread = 0.5f * caster[3] * deep;
+		if (x < -1.0f - radius || x > 1.0f + radius || y < -1.0f - radius || y > 1.0f + radius
+			|| z < -spread || z > 1.0f + spread) {
+			continue;
+		}
+		float * splat = &SmokeSplats[splats * SMOKE_SPLAT_FLOATS];
+		splat[0] = x;
+		splat[1] = y;
+		splat[2] = z;
+		splat[3] = radius;
+		splat[4] = caster[4];
+		splat[5] = spread;
+		++splats;
+	}
+	if (splats == 0) {
+		return true;
+	}
+
+	ID3D11Device * device = Device->Get_Device();
+	ID3D11DeviceContext * context = Device->Get_Context();
+	if (SmokeSplatCapacity < splats) {
+		if (SmokeSplatInstances != NULL) {
+			SmokeSplatInstances->Release();
+			SmokeSplatInstances = NULL;
+		}
+		SmokeSplatCapacity = 0;
+		unsigned capacity = 1024;
+		while (capacity < splats) {
+			capacity *= 2;
+		}
+		D3D11_BUFFER_DESC buffer;
+		memset(&buffer, 0, sizeof(buffer));
+		buffer.ByteWidth = capacity * SMOKE_SPLAT_FLOATS * sizeof(float);
+		buffer.Usage = D3D11_USAGE_DYNAMIC;
+		buffer.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+		buffer.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+		if (FAILED(device->CreateBuffer(&buffer, NULL, &SmokeSplatInstances))) {
+			Note_Refusal("the device refused the smoke casters' buffer");
+			SmokeSplatInstances = NULL;
+			return false;
+		}
+		SmokeSplatCapacity = capacity;
+	}
+	D3D11_MAPPED_SUBRESOURCE mapped;
+	if (FAILED(context->Map(SmokeSplatInstances, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+		return false;
+	}
+	memcpy(mapped.pData, &SmokeSplats[0], splats * SMOKE_SPLAT_FLOATS * sizeof(float));
+	context->Unmap(SmokeSplatInstances, 0);
+
+	// The map is still bound for reading from the frame before, and a view cannot be both.  What the
+	// frame is drawing into comes back afterwards, the way End_Shadow_Map puts it back.
+	ID3D11ShaderResourceView * const none = NULL;
+	context->PSSetShaderResources(SMOKE_MAP_SLOT, 1, &none);
+	ID3D11RenderTargetView * const saved_target = CurrentTarget;
+	const unsigned saved_width = ViewportWidth;
+	const unsigned saved_height = ViewportHeight;
+
+	const float empty[4] = { 0.0f, 0.0f, 0.0f, 1.0f };		// no smoke, and its front at the far plane
+	context->OMSetRenderTargets(1, &SmokeMapTarget, NULL);
+	context->ClearRenderTargetView(SmokeMapTarget, empty);
+	Set_Viewport(0, 0, SMOKE_MAP_TEXELS, SMOKE_MAP_TEXELS);
+
+	const UINT stride = SMOKE_SPLAT_FLOATS * sizeof(float);
+	const UINT offset = 0;
+	context->IASetInputLayout(SmokeSplatLayout);
+	context->IASetVertexBuffers(0, 1, &SmokeSplatInstances, &stride, &offset);
+	context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+	context->VSSetShader(SmokeSplatVertexShader, NULL, 0);
+	context->PSSetShader(SmokeSplatPixelShader, NULL, 0);
+	context->OMSetBlendState(SmokeSplatBlend, NULL, 0xffffffff);
+	context->OMSetDepthStencilState(NULL, 0);
+	context->RSSetState(SmokeSplatRasterizer);
+	context->DrawInstanced(4, splats, 0, 0);
+
+	Set_Render_Target(saved_target);
+	if (saved_width != 0 && saved_height != 0) {
+		Set_Viewport(0, 0, saved_width, saved_height);
+	}
+	Forget_Bindings();
+
+	SmokeMapFilled = true;
+	SmokeStrength = strength;
+	ConstantsChanged = true;
+	return true;
+}
+
+bool DX11BackendClass::Camera_Space_Draw() const
+{
+	static const float IDENTITY[16] = {
+		1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f };
+	// A perspective projection's third column ends in one; an orthographic one, the interface's and
+	// the sun's own, ends in nought.
+	return Projection[11] != 0.0f && memcmp(View, IDENTITY, sizeof(IDENTITY)) == 0;
+}
+
+void DX11BackendClass::Set_Scene_View(const float view[16])
+{
+	if (!SceneViewKnown || memcmp(SceneView, view, sizeof(SceneView)) != 0) {
+		memcpy(SceneView, view, sizeof(SceneView));
+		SceneViewKnown = true;
+		ConstantsChanged = true;
+	}
+}
+
+void DX11BackendClass::Set_Smoke_Glow(bool glow)
+{
+	if (SmokeGlow != glow) {
+		SmokeGlow = glow;
+		PipelineChanged = true;
+	}
+}
+
+bool DX11BackendClass::Smoke_Glow() const
+{
+	return SmokeGlow && VertexProgram == ENGINE_SHADER_NONE && PixelProgram == ENGINE_SHADER_NONE
+		&& RenderStates.Get_Render_State(D3DRS_LIGHTING) == FALSE
+		&& (VertexFormat & D3DFVF_NORMAL) != 0 && (VertexFormat & D3DFVF_XYZRHW) == 0;
+}
+
+bool DX11BackendClass::Views_Current_Target(unsigned stage, ID3D11ShaderResourceView * texture) const
+{
+	if (texture == NULL || CurrentTarget == NULL) {
+		return false;
+	}
+	// The whole scene is drawn into a target when the screen filters are on, and asking every
+	// texture of every draw which resource it views went through the runtime twice a stage: 4% of
+	// the fireball frame. The answer only changes with the view or the target, and a new target
+	// calls Forget_Bindings, which clears these.
+	if (texture != TargetCheckedViews[stage]) {
+		ID3D11Resource * resource = NULL;
+		texture->GetResource(&resource);
+		resource->Release();
+		TargetCheckedViews[stage] = texture;
+		TargetCheckedIsTarget[stage] = resource == CurrentTargetResource;
+	}
+	return TargetCheckedIsTarget[stage];
+}
+
+bool DX11BackendClass::Samples_Current_Target() const
+{
+	for (unsigned stage = 0; stage < DX11_BACKEND_TEXTURE_STAGES; ++stage) {
+		if (Views_Current_Target(stage, Textures[stage])) {
+			return true;
+		}
+	}
+	return false;
 }
 
 /** The inverse of a four by four, by cofactors.  Nothing else in the backend needed one: every
@@ -697,6 +1108,16 @@ void DX11BackendClass::Set_Texture(unsigned stage, ID3D11ShaderResourceView * te
 	if (stage < DX11_BACKEND_TEXTURE_STAGES) {
 		if ((Textures[stage] == NULL) != (texture == NULL)) {
 			PipelineChanged = true;
+		}
+		// Sampling the current target takes a draw off the shadow receivers (Shadow_Receiving), so a
+		// change into or out of that is a change of pipeline.  The old view's answer is in the cache
+		// when it was drawn with; when it is not, it is taken as yes.
+		else if (texture != Textures[stage] && CurrentTarget != NULL) {
+			const bool was_target = (TargetCheckedViews[stage] == Textures[stage])
+				? TargetCheckedIsTarget[stage] : true;
+			if (was_target || Views_Current_Target(stage, texture)) {
+				PipelineChanged = true;
+			}
 		}
 		Textures[stage] = texture;
 	}
@@ -857,7 +1278,7 @@ void DX11BackendClass::Set_Material(const float ambient[4], const float diffuse[
 
 void DX11BackendClass::Set_Light(unsigned index, DWORD type, const float position[4],
 	const float direction[4], const float diffuse[4], const float specular[4],
-	const float attenuation[4], const float spot[4])
+	const float attenuation[4], const float spot[4], const float ambient[4])
 {
 	if (index >= MAXIMUM_VERTEX_LIGHTS) {
 		return;
@@ -872,6 +1293,7 @@ void DX11BackendClass::Set_Light(unsigned index, DWORD type, const float positio
 	memcpy(light.Specular, specular, sizeof(light.Specular));
 	memcpy(light.Attenuation, attenuation, sizeof(light.Attenuation));
 	memcpy(light.Spot, spot, sizeof(light.Spot));
+	memcpy(light.Ambient, ambient, sizeof(light.Ambient));
 	ConstantsChanged = true;
 	PipelineChanged = true;
 }
@@ -924,29 +1346,28 @@ void DX11BackendClass::Set_Shader_Cache_Path(const char * path)
 	if (ShaderCachePath.empty()) {
 		return;
 	}
+	read_program_file(ShaderCachePath.c_str(), CompiledPrograms);
+}
 
-	FILE * file = fopen(ShaderCachePath.c_str(), "rb");
-	if (file == NULL) {
+void DX11BackendClass::Load_Shipped_Programs(const char * path)
+{
+	if (path != NULL && path[0] != '\0') {
+		ShippedPrograms = read_program_file(path, CompiledPrograms);
+	}
+}
+
+void DX11BackendClass::Save_Shader_Cache_If_Due()
+{
+	if (!ShaderCacheChanged) {
 		return;
 	}
-
-	// A file cut short by a crash while it was written loses its last record and nothing else:
-	// every record is read whole or not at all.
-	char magic[sizeof(SHADER_CACHE_MAGIC)];
-	if (fread(magic, sizeof(magic), 1, file) == 1
-		&& memcmp(magic, SHADER_CACHE_MAGIC, sizeof(magic)) == 0) {
-		unsigned long long hash = 0;
-		unsigned int size = 0;
-		while (fread(&hash, sizeof(hash), 1, file) == 1 && fread(&size, sizeof(size), 1, file) == 1
-			&& size > 0 && size <= SHADER_CACHE_LARGEST_PROGRAM) {
-			std::vector<unsigned char> bytecode(size);
-			if (fread(&bytecode[0], size, 1, file) != 1) {
-				break;
-			}
-			CompiledPrograms[hash].swap(bytecode);
-		}
+	const unsigned long now = GetTickCount();
+	if (LastShaderCacheSave != 0 && now - LastShaderCacheSave < SHADER_CACHE_SAVE_INTERVAL_MS) {
+		return;
 	}
-	fclose(file);
+	Save_Shader_Cache();
+	ShaderCacheChanged = false;
+	LastShaderCacheSave = now;
 }
 
 void DX11BackendClass::Save_Shader_Cache() const
@@ -955,7 +1376,9 @@ void DX11BackendClass::Save_Shader_Cache() const
 		return;
 	}
 
-	FILE * file = fopen(ShaderCachePath.c_str(), "wb");
+	// Into a file beside it, then over it: a run killed while writing leaves the previous cache whole.
+	const std::string writing = ShaderCachePath + ".writing";
+	FILE * file = fopen(writing.c_str(), "wb");
 	if (file == NULL) {
 		return;
 	}
@@ -968,7 +1391,11 @@ void DX11BackendClass::Save_Shader_Cache() const
 		fwrite(&size, sizeof(size), 1, file);
 		fwrite(&entry->second[0], size, 1, file);
 	}
+	const bool written = ferror(file) == 0;
 	fclose(file);
+	if (!written || !MoveFileExA(writing.c_str(), ShaderCachePath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+		DeleteFileA(writing.c_str());
+	}
 }
 
 bool DX11BackendClass::Compile_Program(const std::string & source, const char * name,
@@ -1214,6 +1641,7 @@ bool DX11BackendClass::Build_Combiner_Description(CombinerDescription & descript
 		RenderStates.Get_Render_State(D3DRS_ALPHATESTENABLE) != FALSE;
 	description.PixelPipeline.AlphaFunction = RenderStates.Get_Render_State(D3DRS_ALPHAFUNC);
 	description.PixelPipeline.FogEnabled = RenderStates.Get_Render_State(D3DRS_FOGENABLE) != FALSE;
+	description.SpecularAdd = RenderStates.Get_Render_State(D3DRS_SPECULARENABLE) != FALSE;
 
 	description.StageCount = 0;
 	for (unsigned stage = 0; stage < MAXIMUM_COMBINER_STAGES; ++stage) {
@@ -1236,6 +1664,7 @@ bool DX11BackendClass::Build_Combiner_Description(CombinerDescription & descript
 	}
 	description.NormalMapped = description.StageCount > 0 && Normal_Mapped();
 	description.ShadowReceiving = description.StageCount > 0 && Shadow_Receiving();
+	description.SmokeGlow = Smoke_Glow();
 	return description.StageCount > 0;
 }
 
@@ -1260,6 +1689,9 @@ bool DX11BackendClass::Shadow_Receiving() const
 	if ((VertexFormat & D3DFVF_XYZRHW) != 0) {
 		return false;		// already in screen space: the interface, the filters, the darkening quad
 	}
+	if (Samples_Current_Target()) {
+		return false;		// the heat haze: a copy of a picture that took its shadows already
+	}
 	if (RenderStates.Get_Render_State(D3DRS_ALPHABLENDENABLE) != FALSE) {
 		const DWORD source = RenderStates.Get_Render_State(D3DRS_SRCBLEND);
 		const DWORD destination = RenderStates.Get_Render_State(D3DRS_DESTBLEND);
@@ -1277,6 +1709,7 @@ bool DX11BackendClass::Build_Vertex_Description(VertexPipelineDescription & desc
 	description.FVF = VertexFormat;
 	description.LightingEnabled = RenderStates.Get_Render_State(D3DRS_LIGHTING) != FALSE;
 	description.SpecularEnabled = RenderStates.Get_Render_State(D3DRS_SPECULARENABLE) != FALSE;
+	description.LocalViewer = RenderStates.Get_Render_State(D3DRS_LOCALVIEWER) != FALSE;
 	description.ColourVertexEnabled = RenderStates.Get_Render_State(D3DRS_COLORVERTEX) != FALSE;
 	description.DiffuseMaterialSource = RenderStates.Get_Render_State(D3DRS_DIFFUSEMATERIALSOURCE);
 	description.AmbientMaterialSource = RenderStates.Get_Render_State(D3DRS_AMBIENTMATERIALSOURCE);
@@ -1314,6 +1747,7 @@ bool DX11BackendClass::Build_Vertex_Description(VertexPipelineDescription & desc
 	description.FogVertexMode = RenderStates.Get_Render_State(D3DRS_FOGVERTEXMODE);
 	description.NormalMapped = (Normal_Mapped()
 		&& StageStates[0][D3DTSS_COLOROP] != D3DTOP_DISABLE) || Terrain_Bumped();
+	description.SmokeGlow = Smoke_Glow();
 	return true;
 }
 
@@ -1608,6 +2042,7 @@ void DX11BackendClass::Upload_Constants()
 		memcpy(vertex_block.LightFields[slot][3], Lights[index].Specular, sizeof(float) * 4);
 		memcpy(vertex_block.LightFields[slot][4], Lights[index].Attenuation, sizeof(float) * 4);
 		memcpy(vertex_block.LightFields[slot][5], Lights[index].Spot, sizeof(float) * 4);
+		memcpy(vertex_block.LightFields[slot][6], Lights[index].Ambient, sizeof(float) * 4);
 		++slot;
 	}
 
@@ -1680,20 +2115,29 @@ void DX11BackendClass::Upload_Constants()
 		}
 	}
 
+	// A camera space draw's pixels go back to the world through the scene camera's view, not through
+	// the identity it was drawn with; see Set_Scene_View in the header.
+	const bool camera_space = Camera_Space_Draw();
+	const float * const world_to_camera = (camera_space && SceneViewKnown) ? SceneView : View;
+
 	if (ShadowReceiving) {
 		if (!ShadowFromClipValid
-			|| memcmp(ShadowFromClipView, View, sizeof(View)) != 0
+			|| memcmp(ShadowFromClipView, world_to_camera, sizeof(View)) != 0
 			|| memcmp(ShadowFromClipProjection, Projection, sizeof(Projection)) != 0) {
 			float scene_clip[16];
 			float clip_to_world[16];
-			multiply(View, Projection, scene_clip);
+			multiply(world_to_camera, Projection, scene_clip);
 			if (invert(scene_clip, clip_to_world)) {
 				multiply(clip_to_world, SunViewProjection, ShadowFromClip);
-				memcpy(ShadowFromClipView, View, sizeof(View));
+				memcpy(ShadowFromClipView, world_to_camera, sizeof(View));
 				memcpy(ShadowFromClipProjection, Projection, sizeof(Projection));
 				ShadowFromClipValid = true;
 			}
 		}
+		pixel_block.VolumeParameters[0] = SmokeMapFilled ? SmokeStrength : 0.0f;
+		pixel_block.VolumeParameters[1] = SmokeMapFilled ? SMOKE_SELF_SHADOW_GAIN : 0.0f;
+		pixel_block.VolumeParameters[2] = camera_space ? 1.0f : 0.0f;
+		pixel_block.VolumeParameters[3] = SMOKE_SELF_SHADOW_CURVE;
 		memcpy(pixel_block.ShadowFromClip, ShadowFromClip, sizeof(pixel_block.ShadowFromClip));
 		pixel_block.ShadowParameters[0] = (ShadowMapSize > 0)
 			? 1.0f / static_cast<float>(ShadowMapSize) : 0.0f;
@@ -1884,6 +2328,9 @@ void DX11BackendClass::Forget_Bindings()
 	memset(&Bound, 0, sizeof(Bound));
 	memset(TargetCheckedViews, 0, sizeof(TargetCheckedViews));
 	memset(TargetCheckedIsTarget, 0, sizeof(TargetCheckedIsTarget));
+	// Whether a draw samples its own target is part of its pipeline (Shadow_Receiving), and every
+	// target change comes through here.
+	PipelineChanged = true;
 }
 
 void DX11BackendClass::Bind_State_Objects()
@@ -1952,9 +2399,14 @@ void DX11BackendClass::Bind_State_Objects()
 			description.MaxLOD = D3D11_FLOAT32_MAX;
 			Device->Get_Device()->CreateSamplerState(&description, &ShadowMapSampler);
 		}
-		context->PSSetShaderResources(DX11_BACKEND_TEXTURE_STAGES + 1, 1, &ShadowMapTexture);
+		// The smoke's map beside it at t6 and s6, or nothing on a frame without smoke, which the
+		// program never reads: its strength is zero then.
+		ID3D11ShaderResourceView * const maps[2] = { ShadowMapTexture, Smoke_Map() };
+		context->PSSetShaderResources(DX11_BACKEND_TEXTURE_STAGES + 1, 2, maps);
 		if (ShadowMapSampler != NULL) {
-			context->PSSetSamplers(DX11_BACKEND_TEXTURE_STAGES + 1, 1, &ShadowMapSampler);
+			ID3D11SamplerState * const samplers_of_maps[2] = { ShadowMapSampler, SmokeMapSampler };
+			context->PSSetSamplers(DX11_BACKEND_TEXTURE_STAGES + 1, (SmokeMapSampler != NULL) ? 2 : 1,
+				samplers_of_maps);
 		}
 	}
 }
@@ -2009,22 +2461,7 @@ void DX11BackendClass::Bind_Pipeline(const Pipeline & pipeline, ID3D11Buffer * v
 ID3D11ShaderResourceView * DX11BackendClass::Readable_Texture(unsigned stage,
 	ID3D11ShaderResourceView * texture)
 {
-	if (texture == NULL || CurrentTarget == NULL) {
-		return texture;
-	}
-
-	// The whole scene is drawn into a target when the screen filters are on, and asking every
-	// texture of every draw which resource it views went through the runtime twice a stage: 4% of
-	// the fireball frame. The answer only changes with the view or the target, and a new target
-	// calls Forget_Bindings, which clears these.
-	if (texture != TargetCheckedViews[stage]) {
-		ID3D11Resource * resource = NULL;
-		texture->GetResource(&resource);
-		resource->Release();
-		TargetCheckedViews[stage] = texture;
-		TargetCheckedIsTarget[stage] = resource == CurrentTargetResource;
-	}
-	if (!TargetCheckedIsTarget[stage]) {
+	if (!Views_Current_Target(stage, texture)) {
 		return texture;
 	}
 	ID3D11Resource * resource = CurrentTargetResource;

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -51,7 +52,16 @@
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
+#if defined(_WIN32)
 #include "Win32Device/GameClient/Win32Mouse.h"
+#else
+#include "SdlDevice/GameClient/SdlMouse.h"
+/* Off Windows W3DMouse's base is SdlMouse (C3b), under the name W3DMouse.cpp calls it by:
+	 "Win32Mouse::init()", "Win32Mouse::setCursor( ... )".  Win32Mouse is the engine's own class name, not
+	 anything of the Windows SDK's, and the alias is here only so that W3DMouse.cpp's text is the same on
+	 both platforms.  SdlMouse has the members W3DMouse uses (m_directionFrame and Mouse's own). */
+typedef SdlMouse Win32Mouse;
+#endif
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////
 class CameraClass;

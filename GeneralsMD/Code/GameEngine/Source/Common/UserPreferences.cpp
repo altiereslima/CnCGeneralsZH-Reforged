@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -32,6 +34,7 @@
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
 
 //-----------------------------------------------------------------------------
 // USER INCLUDES //////////////////////////////////////////////////////////////
@@ -129,7 +132,7 @@ Bool UserPreferences::load(AsciiString fname)
 	m_filename = TheGlobalData->getPath_UserData();
 	m_filename.concat(fname);
 
-	FILE *fp = fopen(m_filename.str(), "r");
+	FILE *fp = zh_fopen(m_filename.str(), "r");
 	if (fp)
 	{
 		char buf[LINE_LEN];
@@ -161,7 +164,7 @@ Bool UserPreferences::write( void )
 	if (m_filename.isEmpty())
 		return false;
 
-	FILE *fp = fopen(m_filename.str(), "w");
+	FILE *fp = zh_fopen(m_filename.str(), "w");
 	if (fp)
 	{
 		PreferenceMap::const_iterator it = begin();
@@ -566,7 +569,7 @@ Bool CustomMatchPreferences::usesSystemMapDir(void)
 	if (it == end())
 		return TRUE;
 
-	if (stricmp(it->second.str(), "1") == 0) {
+	if (strcasecmp(it->second.str(), "1") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -586,7 +589,7 @@ Bool CustomMatchPreferences::usesLongGameList(void)
 	if (it == end())
 		return FALSE;
 
-	if (stricmp(it->second.str(), "1") == 0) {
+	if (strcasecmp(it->second.str(), "1") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -605,7 +608,7 @@ Bool CustomMatchPreferences::allowsObservers(void)
 	if (it == end())
 		return TRUE;
 
-	if (stricmp(it->second.str(), "1") == 0) {
+	if (strcasecmp(it->second.str(), "1") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -631,7 +634,7 @@ Bool CustomMatchPreferences::getDisallowAsianText( void )
 			return TRUE;
 	}
 
-	if (stricmp(it->second.str(), "1") == 0) {
+	if (strcasecmp(it->second.str(), "1") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -651,7 +654,7 @@ Bool CustomMatchPreferences::getDisallowNonAsianText( void )
 	if (it == end())
 		return FALSE;
 
-	if (stricmp(it->second.str(), "1") == 0) {
+	if (strcasecmp(it->second.str(), "1") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -734,7 +737,7 @@ Money CustomMatchPreferences::getStartingCash(void) const
   }
   
   Money money;
-  money.deposit( strtoul( it->second.str(), NULL, 10 ), FALSE  );
+  money.deposit( strtoulAsWindows( it->second.str() ), FALSE  );
   
   return money;
 }

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -47,6 +48,16 @@
 #include "wwdebug.h"
 #include "win.h"
 #include "wwstring.h"
+
+/*
+**	The wide half of WideStringClass is Win32-only, and deliberately not shimmed.  its whole interface is WCHAR and it already
+**	includes win.h, so WCHAR here is not a character type this code is generic over -
+**	it is the argument type of a Windows API.  A `typedef wchar_t WCHAR` would make fourteen
+**	translation units compile and leave these three declarations with no possible body off Windows,
+**	or invite a second UTF-16-to-narrow conversion beside the engine's own.  B1 owns what the
+**	engine's text narrows through; see PORTING.md ("Wide characters").
+*/
+#if defined(_WIN32)
 #include "trim.h"
 #include <wchar.h>
 #ifdef _UNIX
@@ -781,6 +792,8 @@ WideStringClass::Convert_To (StringClass &string) const
 {
 	return (string.Copy_Wide (m_Buffer));
 }
+
+#endif // _WIN32 - the wide string class
 
 #endif //__WIDESTRING_H
 

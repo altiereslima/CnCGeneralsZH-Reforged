@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -298,17 +299,17 @@ void GameSpyInfo::addChat( PlayerInfo p, UnicodeString msg, Bool isPublic, Bool 
 	UnicodeString fullMsg;
 	if (isAction)
 	{
-		fullMsg.format( L"%ls %ls", name.str(), msg.str() );
+		fullMsg.format( u"%ls %ls", name.str(), msg.str() );
 	}
 	else
 	{
-		fullMsg.format( L"[%ls] %ls", name.str(), msg.str() );
+		fullMsg.format( u"[%ls] %ls", name.str(), msg.str() );
 	}
 
 	Int index = addText(fullMsg, GameSpyColor[style], win);
 	if (index >= 0)
 	{
-		GadgetListBoxSetItemData(win, (void *)p.m_profileID, index);
+		GadgetListBoxSetItemData(win, (void *)(intptr_t)p.m_profileID, index);
 	}
 }
 

@@ -1,0 +1,20 @@
+# X2's texture-transform check: models whose materials scroll by a per-second mapper, standing still under the
+# camera, so that two frames a second apart differ only where the mappers move the textures.  The suspicion is that the
+# Direct3D 11 path never receives the texture-stage transforms; under it these would freeze while -d3d9 moves them.
+#   Fountain1, Fountain2  PMFountain3/4: the water, VPerSec 0.1 to 0.8
+#   CBNukeA               CBNUKEA: VPerSec -1, one whole texture a second
+#   GLATankScorpion       UVLiteTank: the treads, UPerSec 1.0
+#
+#   generals -win -xres 1280 -yres 720 -quickstart -noshellmap -multiInstance -noFPSLimit -msaa 0
+#     -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover -seed 1
+#     -scenario mappers -camera 760 850 -maxframes 640 -video 600 615 mappers
+#
+# Half a second, not one: CBNukeA scrolls one whole texture a second, so frames a second apart match again.
+# Compare boxes around the objects, never the whole frame: the trees sway and the cloud shadows move.
+#
+#   <frame> spawn <slot> <template> <count> <position> [spacing]
+
+30    spawn      0  Fountain1          1  700 850
+30    spawn      0  Fountain2          1  760 800
+30    spawn      0  CBNukeA            1  840 850
+30    spawn      0  GLATankScorpion    3  760 900   40

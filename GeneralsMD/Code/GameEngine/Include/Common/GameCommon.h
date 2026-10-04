@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -232,7 +234,7 @@ extern const char *TheVeterancyNames[];
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
-enum CommandSourceType 
+enum CommandSourceType : Int 
 { 
 
 	CMD_FROM_PLAYER = 0, 
@@ -304,19 +306,29 @@ typedef UnsignedInt VeterancyLevelFlags;
 const VeterancyLevelFlags VETERANCY_LEVEL_FLAGS_ALL = 0xffffffff;
 const VeterancyLevelFlags VETERANCY_LEVEL_FLAGS_NONE = 0x00000000;
 
+/* A level's bit in VeterancyLevelFlags: bit (level - 1), as EA wrote it, the shift count taken modulo 32.
+	 LEVEL_REGULAR is 0, so EA's `1UL << (dt - 1)` shifted by -1.  Built as it shipped, with a 32-bit
+	 unsigned long and x86's shl reading the count's low five bits, that is bit 31, which ALL includes and
+	 "+REGULAR" sets.  With a 64-bit unsigned long (macOS, Linux) it was bit 63, outside the flags, so no
+	 die module with default flags ever ran for a regular unit.  The mask gives Windows' bit everywhere. */
+inline VeterancyLevelFlags veterancyLevelFlagBit(VeterancyLevel dt)
+{
+	return (VeterancyLevelFlags)1 << (((Int)dt - 1) & 31);
+}
+
 inline Bool getVeterancyLevelFlag(VeterancyLevelFlags flags, VeterancyLevel dt)
 {
-	return (flags & (1UL << (dt - 1))) != 0;
+	return (flags & veterancyLevelFlagBit(dt)) != 0;
 }
 
 inline VeterancyLevelFlags setVeterancyLevelFlag(VeterancyLevelFlags flags, VeterancyLevel dt)
 {
-	return (flags | (1UL << (dt - 1)));
+	return (flags | veterancyLevelFlagBit(dt));
 }
 
 inline VeterancyLevelFlags clearVeterancyLevelFlag(VeterancyLevelFlags flags, VeterancyLevel dt)
 {
-	return (flags & ~(1UL << (dt - 1)));
+	return (flags & ~veterancyLevelFlagBit(dt));
 }
 
 // ----------------------------------------------------------------------------------------------
@@ -515,6 +527,35 @@ enum Relationship
 
 // TheRelationShipNames is defined in Common/GameCommon.cpp
 extern const char *TheRelationshipNames[];
+
+// ------------------------------------------------------------------------
+/** strtoul( text, NULL, 10 ) as Windows answers it, where unsigned long is 32 bits: a number past
+	* 0xFFFFFFFF is 0xFFFFFFFF, and a negative one is its magnitude negated modulo 2^32.  A 64-bit
+	* unsigned long keeps the low 32 bits of a big number instead, so text from the network, a replay
+	* or a preferences file ("SC=4294967296") would give another amount off Windows. */
+#if defined(_WIN32)
+inline UnsignedInt strtoulAsWindows( const char *text )
+{
+	return strtoul( text, NULL, 10 );
+}
+#else
+inline UnsignedInt strtoulAsWindows( const char *text )
+{
+	while (*text == ' ' || (*text >= '\t' && *text <= '\r'))
+		++text;
+	Bool negative = FALSE;
+	if (*text == '+' || *text == '-')
+		negative = (*text++ == '-');
+	unsigned long long magnitude = 0;
+	for (; *text >= '0' && *text <= '9'; ++text)
+	{
+		magnitude = magnitude * 10 + (unsigned long long)(*text - '0');
+		if (magnitude > 0xFFFFFFFFull)
+			return 0xFFFFFFFFu;			// out of range, whatever the sign: ULONG_MAX
+	}
+	return negative ? 0u - (UnsignedInt)magnitude : (UnsignedInt)magnitude;
+}
+#endif
 
 #endif // _GAMECOMMON_H_
 

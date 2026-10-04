@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -26,6 +28,7 @@
 // The Artificial Intelligence system
 // Author: Michael S. Booth, November 2000
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
 #include "Common/CRCDebug.h"
 #include "Common/GameState.h"
@@ -46,6 +49,7 @@
 #include "GameLogic/AIPlayer.h"		// for the per-frame AI profile the slow-frame report prints
 #include "GameLogic/Weapon.h"
 #include "GameLogic/WeaponSet.h"
+#include "Platform/MsvcFloatCasts.h"
 
 extern void addIcon(const Coord3D *pos, Real width, Int numFramesDuration, RGBColor color);
 
@@ -376,7 +380,7 @@ static Real aiElapsedMS( const Int64 &from, const Int64 &to )
 {
 	static Int64 freq = 0;
 	if( freq == 0 )
-		QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+		freq = Clock_Ticks_Per_Second();
 	if( freq == 0 )
 		return 0.0f;
 	return (Real)( (double)(to - from) * 1000.0 / (double)freq );
@@ -385,7 +389,7 @@ static Real aiElapsedMS( const Int64 &from, const Int64 &to )
 void AI::update( void )
 {
 	Int64 start, afterPathfind, end;
-	QueryPerformanceCounter( (LARGE_INTEGER *)&start );
+	start = Clock_Ticks();
 
 	// Age the flow maps before anything reads them: the traffic left by last frame's jams decays,
 	// and a clearance field made stale by a building going up is rebuilt at most once a second.
@@ -395,7 +399,7 @@ void AI::update( void )
 	// Do pathfinding.
 	m_pathfinder->processPathfindQueue();
 
-	QueryPerformanceCounter( (LARGE_INTEGER *)&afterPathfind );
+	afterPathfind = Clock_Ticks();
 
 	// run player updates
 	{
@@ -403,7 +407,7 @@ void AI::update( void )
 		ThePlayerList->UPDATE();
 	}
 
-	QueryPerformanceCounter( (LARGE_INTEGER *)&end );
+	end = Clock_Ticks();
 	s_lastPathfindMS = aiElapsedMS( start, afterPathfind );
 	s_lastPlayerUpdateMS = aiElapsedMS( afterPathfind, end );
 }
@@ -875,7 +879,7 @@ Object *AI::findClosestEnemy( const Object *me, Real range, UnsignedInt qualifie
 
 		Real distSqr = ThePartitionManager->getDistanceSquared(me, theEnemy, FROM_BOUNDINGSPHERE_2D);
 		Real dist = sqrt(distSqr);
-		Int modifier = dist/TheAI->getAiData()->m_attackPriorityDistanceModifier;
+		Int modifier = floatToIntAsMsvc(dist/TheAI->getAiData()->m_attackPriorityDistanceModifier);
 		Int modPriority = curPriority-modifier;
 		if (modPriority < 1)
 			modPriority = 1;
@@ -1129,6 +1133,62 @@ Real aiRetreatRatio( Real myHealth, Real myPower, Real enemyHealth, Real enemyPo
 
 	Real ratio = howLongILast / howLongTheyLast;
 	return (ratio > NOT_A_FIGHT) ? NOT_A_FIGHT : ratio;
+}
+
+static Bool gunsReach( Real x, Real y, const Real *guns, Int gunCount )
+{
+	for( Int g = 0; g < gunCount; ++g )
+	{
+		const Real gx = x - guns[ 3 * g ];
+		const Real gy = y - guns[ 3 * g + 1 ];
+		if( gx * gx + gy * gy <= guns[ 3 * g + 2 ] * guns[ 3 * g + 2 ] )
+			return TRUE;
+	}
+	return FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Where a force that is losing stops falling back: walking from (fromX, fromY) towards home in
+	* steps, the first spot no gun in guns[] reaches with one more step of clear ground past it, and
+	* that next step is where it stands, so the edge of a reach is never the place.  guns holds x, y
+	* and reach for each of gunCount guns.  FALSE, with home in the answer, when the line never leaves
+	* their reach before it gets home. */
+//-------------------------------------------------------------------------------------------------
+Bool aiRetreatFallbackPoint( Real fromX, Real fromY, Real homeX, Real homeY, Real step,
+														 const Real *guns, Int gunCount, Real *outX, Real *outY )
+{
+	*outX = homeX;
+	*outY = homeY;
+	const Real dx = homeX - fromX;
+	const Real dy = homeY - fromY;
+	const Real homeDist = (Real)sqrt( dx * dx + dy * dy );
+	for( Real along = step; along + step < homeDist; along += step )
+	{
+		const Real x = fromX + dx * (along + step) / homeDist;
+		const Real y = fromY + dy * (along + step) / homeDist;
+		if( gunsReach( fromX + dx * along / homeDist, fromY + dy * along / homeDist, guns, gunCount ) ||
+				gunsReach( x, y, guns, gunCount ) )
+			continue;
+		*outX = x;
+		*outY = y;
+		return TRUE;
+	}
+	return FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** What a force that fell back does next.  It holds until it has stopped and minHold has passed;
+	* then it goes back the moment the fight it left no longer reads as lost (ratioThere at or over
+	* resumeRatio, which an empty fight always is), and gives up and goes home at maxHold. */
+//-------------------------------------------------------------------------------------------------
+AIFallbackDecision aiRetreatHoldDecision( Bool arrived, UnsignedInt heldFrames, Real ratioThere, Real resumeRatio,
+																					UnsignedInt minHold, UnsignedInt maxHold )
+{
+	if( heldFrames < minHold || (!arrived && heldFrames < maxHold) )
+		return AIFALLBACK_HOLD;
+	if( ratioThere >= resumeRatio )
+		return AIFALLBACK_RESUME;
+	return heldFrames >= maxHold ? AIFALLBACK_GO_HOME : AIFALLBACK_HOLD;
 }
 
 //-------------------------------------------------------------------------------------------------

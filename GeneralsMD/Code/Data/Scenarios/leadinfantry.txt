@@ -1,0 +1,21 @@
+# A Stinger Site shooting at Rangers walking across in front of it, for issue #46.
+#
+# A rocket at infantry is a shot at a point: ScatterRadiusVsInfantry turns it into a coordinate shot,
+# and a Ranger walking across the line of fire is somewhere else by the time the rocket lands there.
+# The Rangers walk 550 units across the open grass of the small generated map, passing 150 to the side
+# of the site, and the two tallies say how much of the squad was left. Nothing is ordered to shoot:
+# the site picks its own targets as the Rangers come into range, and a building does not chase.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionGLA -side 1 FactionAmerica -seed 1 -maxframes 1100
+#     -scenario leadinfantry -logPrefix leadinfantry_
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn      0  GLAStingerSite                  1   700 800
+30    spawn      1  AmericaInfantryRanger          12   850 550  15
+
+60    move       1  AmericaInfantryRanger                850 1100
+60    tally      1  AmericaInfantryRanger
+1080  tally      1  AmericaInfantryRanger

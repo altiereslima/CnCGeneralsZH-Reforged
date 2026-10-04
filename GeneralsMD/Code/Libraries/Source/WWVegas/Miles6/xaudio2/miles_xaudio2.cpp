@@ -306,6 +306,7 @@ struct Engine
 };
 
 Engine g_engine;
+S32 g_linearFalloff;	// AIL_ex_set_3D_linear_falloff
 
 AILFILEOPENCB g_fileOpen;
 AILFILECLOSECB g_fileClose;
@@ -359,14 +360,7 @@ void computeSpatialGain(const Sample &sample, float *volumeOut, float *panOut)
 	const float dz = sample.positionZ - listener.positionZ;
 	const float distance = (float)sqrt(dx * dx + dy * dy + dz * dz);
 
-	float attenuation = 1.0f;
-	if (sample.maxDistance > sample.minDistance) {
-		if (distance >= sample.maxDistance) {
-			attenuation = 0.0f;
-		} else if (distance > sample.minDistance) {
-			attenuation = (sample.maxDistance - distance) / (sample.maxDistance - sample.minDistance);
-		}
-	}
+	float attenuation = AIL_ex_3D_distance_gain(distance, sample.minDistance, sample.maxDistance, g_linearFalloff);
 	attenuation *= clampUnit(1.0f - sample.occlusion);
 
 	float pan = DEFAULT_PAN;
@@ -1484,6 +1478,13 @@ void AILCALL AIL_set_3D_sample_distances(H3DSAMPLE handle, F32 max_dist, F32 min
 	sample->minDistance = min_dist;
 	refreshSampleOutput(sample);
 	LeaveCriticalSection(&g_engine.lock);
+}
+
+void AILCALL AIL_ex_set_3D_linear_falloff(S32 linear)
+{
+	// No lock: it may come before AIL_startup has one, and a playing sample takes it at its next
+	// position update.
+	g_linearFalloff = linear;
 }
 
 void AILCALL AIL_set_3D_sample_occlusion(H3DSAMPLE handle, F32 occlusion)

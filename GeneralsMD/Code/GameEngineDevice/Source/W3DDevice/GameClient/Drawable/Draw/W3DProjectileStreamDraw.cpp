@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -27,15 +28,15 @@
 // Graham Smallwood, May 2002
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "GameClient/Drawable.h"	// before Xfer.h: see W3DSupplyDraw.cpp
 #include "Common/Xfer.h"
-#include "GameClient/Drawable.h"
 #include "GameLogic/Object.h"
 #include "W3DDevice/GameClient/Module/W3DProjectileStreamDraw.h"
 #include "W3DDevice/GameClient/W3DDisplay.h"
 #include "W3DDevice/GameClient/W3DScene.h"
-#include "WW3D2/AssetMgr.h"
-#include "WW3D2/Segline.h"
-#include "WWMath/Vector3.h"
+#include "WW3D2/assetmgr.h"
+#include "WW3D2/segline.h"
+#include "WWMath/vector3.h"
 
 //-------------------------------------------------------------------------------------------------
 W3DProjectileStreamDrawModuleData::W3DProjectileStreamDrawModuleData() 

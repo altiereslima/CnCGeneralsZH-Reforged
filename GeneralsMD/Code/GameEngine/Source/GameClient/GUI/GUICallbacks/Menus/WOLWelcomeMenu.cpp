@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -31,7 +33,7 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
-#include "GameSpy/peer/peer.h"
+#include "gamespy/peer/peer.h"
 
 #include "Common/GameEngine.h"
 #include "Common/GameSpyMiscPreferences.h"
@@ -249,7 +251,7 @@ static void updateNumPlayersOnline(void)
 		//This was a Harvard initiated fix.
 		headingStr.format(TheGameText->fetch("MOTD:NumPlayersHeading"));
 
-		while (headingStr.nextToken(&line, UnicodeString(L"\n")))
+		while (headingStr.nextToken(&line, UnicodeString(u"\n")))
 		{
 			if (line.getCharAt(line.getLength()-1) == '\r')
 				line.removeLastChar();	// there is a trailing '\r'
@@ -258,12 +260,12 @@ static void updateNumPlayersOnline(void)
 
 			if (line.isEmpty())
 			{
-				line = UnicodeString(L" ");
+				line = UnicodeString(u" ");
 			}
 
 			GadgetListBoxAddEntryText(listboxInfo, line, GameSpyColor[GSCOLOR_MOTD_HEADING], -1, -1);
 		}
-		GadgetListBoxAddEntryText(listboxInfo, UnicodeString(L" "), GameSpyColor[GSCOLOR_MOTD_HEADING], -1, -1);
+		GadgetListBoxAddEntryText(listboxInfo, UnicodeString(u" "), GameSpyColor[GSCOLOR_MOTD_HEADING], -1, -1);
 
 		while (aMotd.nextToken(&aLine, "\n"))
 		{
@@ -526,9 +528,9 @@ void WOLWelcomeMenuInit( WindowLayout *layout, void *userData )
 		const char *keys[3] = { "locale", "wins", "losses" };
 		char valueStrings[3][20];
 		char *values[3] = { valueStrings[0], valueStrings[1], valueStrings[2] };
-		_snprintf(values[0], 20, "%s", TheGameSpyPlayerInfo->getLocale().str());
-		_snprintf(values[1], 20, "%d", TheGameSpyPlayerInfo->getWins());
-		_snprintf(values[2], 20, "%d", TheGameSpyPlayerInfo->getLosses());
+		snprintf(values[0], 20, "%s", TheGameSpyPlayerInfo->getLocale().str());
+		snprintf(values[1], 20, "%d", TheGameSpyPlayerInfo->getWins());
+		snprintf(values[2], 20, "%d", TheGameSpyPlayerInfo->getLosses());
 		peerSetGlobalKeys(TheGameSpyChat->getPeer(), 3, (const char **)keys, (const char **)values);
 		peerSetGlobalWatchKeys(TheGameSpyChat->getPeer(), GroupRoom,   3, keys, PEERFalse);
 		peerSetGlobalWatchKeys(TheGameSpyChat->getPeer(), StagingRoom, 3, keys, PEERFalse);
@@ -649,7 +651,7 @@ void WOLWelcomeMenuUpdate( WindowLayout * layout, void *userData)
 					room.m_groupID = resp.groupRoom.id;
 					room.m_maxWaiting = resp.groupRoom.maxWaiting;
 					room.m_name = resp.groupRoomName.c_str();
-					room.m_translatedName = UnicodeString(L"TEST");
+					room.m_translatedName = UnicodeString(u"TEST");
 					room.m_numGames = resp.groupRoom.numGames;
 					room.m_numPlaying = resp.groupRoom.numPlaying;
 					room.m_numWaiting = resp.groupRoom.numWaiting;

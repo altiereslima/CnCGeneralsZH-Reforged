@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***                            Confidential - Westwood Studios                              ***
@@ -38,8 +39,16 @@
 #ifndef _SYSTIMER_H
 
 #include "always.h"
+#include "Lib/Clock.h"
+/*
+**	Nothing below uses either of these since B2 moved Get onto Lib/Clock.h.  They stay on Windows
+**	because every Windows includer of this header has had <windows.h> and <mmsystem.h> through it,
+**	and nobody here can check which of them depends on that.  B5.
+*/
+#if defined(_WIN32)
 #include <windows.h>
 #include "mmsys.h"
+#endif
 
 #define TIMEGETTIME SystemTime.Get
 #define MS_TIMER_SECOND 1000
@@ -77,14 +86,22 @@ class SysTimeClass
 	private:
 
 		/*
+		**	Both are unsigned int, not the unsigned long they were.  Lib/Clock.h's millisecond clock
+		**	wraps at 2^32 and says so, and `WrapAdd = 0 - StartTime` and `time + WrapAdd` are correct
+		**	only in 32-bit arithmetic.  unsigned long is 32 bits on Windows, so this is the same
+		**	arithmetic there; on LP64 it is 64 bits, and the wrapped branch of Get would return
+		**	2^64 - (StartTime - time) instead of the elapsed time.  B5.
+		*/
+
+		/*
 		** Time we were first called.
 		*/
-		unsigned long StartTime;
+		unsigned int StartTime;
 
 		/*
 		** Time to add after timer wraps.
 		*/
-		unsigned long WrapAdd;
+		unsigned int WrapAdd;
 
 };
 
@@ -118,7 +135,7 @@ WWINLINE unsigned long SysTimeClass::Get(void)
 		is_init = true;
 	}
 
-	unsigned long time = timeGetTime();
+	unsigned int time = Clock_Milliseconds();
 	if (time > StartTime) {
 		return(time - StartTime);
 	}
@@ -131,10 +148,12 @@ WWINLINE unsigned long SysTimeClass::Get(void)
 
 
 
-#ifdef timeGetTime
-#undef timeGetTime
-#define timeGetTime SystemTime.Get
-#endif //timeGetTime
+/* This used to redirect timeGetTime to SystemTime.Get, but only #ifdef timeGetTime - and
+	 timeGetTime is a function in mmsystem.h, never a macro, so the redirect has never once fired.
+	 Removed rather than ported: a macro that renames a clock out from under its callers is the last
+	 thing a sweep like B2's wants to meet, and this one was doing nothing.  Callers that want the
+	 since-start clock call SysTimeClass::Get; callers that want the raw one call
+	 Clock_Milliseconds. */
 
 
 

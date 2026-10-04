@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -62,10 +64,14 @@
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 
-#include <new.h>
+#include <new>   // was <new.h>, which only MSVC has
 #include <stdio.h>
 #ifdef MEMORYPOOL_OVERRIDE_MALLOC
-	#include <malloc.h>
+	#if defined(_MSC_VER)
+#include <malloc.h>   // Microsoft puts malloc, _msize and _alloca here
+#else
+#include "Platform/MSVCCompat.h"   // <stdlib.h> and <alloca.h>, and _alloca's spelling
+#endif
 #endif
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
@@ -819,9 +825,11 @@ extern Bool isMemoryManagerOfficiallyInited();
 	call to shutdownMemoryManager() [since there's no safe way to ensure that shutdownMemoryManager
 	will execute after all static destructors].
 
-	(Note: this function is actually not externally visible, but is documented here for clarity.)
+	The global operators new and delete call it, and so do AsciiString and UnicodeString, which
+	allocate from TheDynamicMemoryAllocator directly: a string a static constructor builds (LogClass's
+	file name, for one) would otherwise find it NULL whenever that constructor runs first.
 */
-/* extern void preMainInitMemoryManager(); */
+extern void preMainInitMemoryManager();
 
 /**
 	Shut down the memory manager. Throw away TheMemoryPoolFactory and 
@@ -863,10 +871,10 @@ extern void userMemoryAdjustPoolSize(const char *poolName, Int& initialAllocatio
 	#define _OPERATOR_NEW_DEFINED_
 
 	extern void * __cdecl operator new		(size_t size);
-	extern void __cdecl operator delete		(void *p);
+	extern void __cdecl operator delete		(void *p) WW_NOEXCEPT_DELETE;
 
 	extern void * __cdecl operator new[]	(size_t size);
-	extern void __cdecl operator delete[]	(void *p);
+	extern void __cdecl operator delete[]	(void *p) WW_NOEXCEPT_DELETE;
 
 	// additional overloads to account for VC/MFC funky versions
 	extern void* __cdecl operator new(size_t nSize, const char *, int);
@@ -878,7 +886,10 @@ extern void userMemoryAdjustPoolSize(const char *poolName, Int& initialAllocatio
 	// additional overloads for 'placement new'
 	//inline void* __cdecl operator new							(size_t s, void *p) { return p; }
 	//inline void __cdecl operator delete						(void *, void *p)		{ }
-	#if _MSC_VER < 1300
+	// Was `#if _MSC_VER < 1300`, which is true off MSVC, where an undefined macro reads as 0: every
+	// standard <new> already defines these two, so clang reported a redefinition.  always.h made the
+	// same correction.  MSVC evaluates both spellings the same way.
+	#if defined(_MSC_VER) && _MSC_VER < 1300
 	// vcruntime declares the placement array forms itself now, exactly as
 	// WWLib/always.h already had to work around.
 	inline void* __cdecl operator new[]						(size_t s, void *p) { return p; }

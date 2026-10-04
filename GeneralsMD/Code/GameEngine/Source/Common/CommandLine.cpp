@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -24,13 +26,14 @@
 
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+#include "zhio.h"
 
 #include "Common/ArchiveFileSystem.h"
 #include "Common/CommandLine.h"
 #include "Common/CRCDebug.h"
 #include "Common/LocalFileSystem.h"
 #include "Common/OptionsCatalog.h"
-#include "Common/Version.h"
+#include "Common/version.h"
 #include "GameClient/TerrainVisual.h" // for TERRAIN_LOD_MIN definition
 #include "GameClient/GameText.h"
 #include "GameClient/ChromaKeyboard.h"
@@ -485,11 +488,11 @@ Int parseRandomMap(char *args[], int num)
 	else if (num > eaten)
 	{
 		RandomMapSize size = RANDOM_MAP_SIZE_COUNT;
-		if (stricmp( args[eaten], "small" ) == 0)
+		if (strcasecmp( args[eaten], "small" ) == 0)
 			size = RANDOM_MAP_SIZE_SMALL;
-		else if (stricmp( args[eaten], "normal" ) == 0)
+		else if (strcasecmp( args[eaten], "normal" ) == 0)
 			size = RANDOM_MAP_SIZE_NORMAL;
-		else if (stricmp( args[eaten], "large" ) == 0)
+		else if (strcasecmp( args[eaten], "large" ) == 0)
 			size = RANDOM_MAP_SIZE_LARGE;
 
 		if (size != RANDOM_MAP_SIZE_COUNT)
@@ -599,14 +602,6 @@ Int parseLowDetail(char *args[], int num)
 
 //=============================================================================
 //=============================================================================
-Int parseNoDynamicLOD(char *args[], int num)
-{
-	if (TheWritableGlobalData)
-	{
-		TheWritableGlobalData->m_enableDynamicLOD = FALSE;
-	}
-	return 1;
-}
 
 //=============================================================================
 //=============================================================================
@@ -769,7 +764,7 @@ Int parseLogAssets( char *args[], int num )
 {
 	if( TheWritableGlobalData )
 	{
-		FILE *logfile=fopen("PreloadedAssets.txt","w");
+		FILE *logfile=zh_fopen("PreloadedAssets.txt","w");
 		if (logfile)	//clear the file
 			fclose(logfile);
 		TheWritableGlobalData->m_preloadReport = TRUE;
@@ -902,6 +897,23 @@ Int parseSmoke(char *args[], int num)
 	return 1;
 }
 
+/* -noDynamicLOD: the detail level does not follow the frame rate, and every effect draws at the highest
+	 level (W3DDisplay::draw forces it).  EA had it in the Debug and Internal builds only, so a Release build
+	 ignored it (measured: a Release run with it still dropped to Medium); it is for every build now, like
+	 -particlecap, because a comparison of two renderers or two machines has to draw the same effects.
+	 GameLODManager::init applies the static preset after the command line is parsed and sets
+	 m_enableDynamicLOD from it, so the switch is a flag of its own, read where the game acts on dynamic LOD
+	 (GlobalData::isDynamicLODEnabled).  m_enableDynamicLOD, the setting the options menu shows and saves, is
+	 not touched, so a run with the switch never saves it as the player's choice. */
+Int parseNoDynamicLOD(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_noDynamicLODOverride = TRUE;
+	}
+	return 1;
+}
+
 /* -particlecap <n>: stand in for the options menu's particle slider for one run.
 
 	 The slider writes MaxParticleCount into the player's own Options.ini and the LOD manager
@@ -975,6 +987,28 @@ Int parseNoParticleShadows(char *args[], int)
 	return 1;
 }
 
+/* -novolumetricsmoke: smoke and dust out of the sun's map for one run, which is the other half of
+	 any picture of what they shade.  The blob under each cloud comes back with it, as it does on a
+	 machine with no Direct3D 11 device. */
+Int parseNoVolumetricSmoke(char *args[], int)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_volumetricSmokeShadows = FALSE;
+	}
+	return 1;
+}
+
+/* -nosmokefirelight: smoke left unlit by the fire beside it, for one run. */
+Int parseNoSmokeFireLight(char *args[], int)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_smokeFireLighting = FALSE;
+	}
+	return 1;
+}
+
 Int parseNoShaders(char *args[], int)
 {
 	if (TheWritableGlobalData)
@@ -984,7 +1018,6 @@ Int parseNoShaders(char *args[], int)
 	return 1;
 }
 
-#if (defined(_DEBUG) || defined(_INTERNAL))
 Int parseNoLogo(char *args[], int)
 {
 	if (TheWritableGlobalData)
@@ -995,7 +1028,6 @@ Int parseNoLogo(char *args[], int)
 	}
 	return 1;
 }
-#endif
 
 Int parseNoSizzle( char *args[], int )
 {
@@ -1413,6 +1445,16 @@ Int parseMaxGameFrames(char *args[], int num)
 	 * graphics work in the upstream ledger sits unclosed - not because the code is hard, because
 	 * nobody could see the result. Combine with -autoskirmish, -map and -maxframes; -headless draws
 	 * nothing and says so. The file goes next to the save games, as sshotNNN.bmp. */
+/** -showHudOverlay: the corner readout on, whatever the build's default (off in Release) and GameData.ini
+	* say.  The harnesses whose screenshots are evidence pass it, so every picture names its renderer, clock
+	* and frame; the command line is read after GameData.ini, so nothing there turns it back off. */
+Int parseShowHudOverlay(char *args[], int)
+{
+	if (TheWritableGlobalData)
+		TheWritableGlobalData->m_showHudOverlay = TRUE;
+	return 1;
+}
+
 Int parseScreenShot(char *args[], int num)
 {
 	if (TheWritableGlobalData && num > 1)
@@ -1614,7 +1656,7 @@ Int parseTextLanguage(char *args[], int num)
 	{
 		for (Int language = 0; language < TEXT_LANGUAGE_COUNT; ++language)
 		{
-			if (stricmp(args[1], TheTextLanguageNames[language]) == 0)
+			if (strcasecmp(args[1], TheTextLanguageNames[language]) == 0)
 			{
 				TheWritableGlobalData->m_textLanguage = language;
 				DEBUG_LOG(("-language: %s\n", TheTextLanguageNames[language]));
@@ -2315,14 +2357,14 @@ Int parseMod(char *args[], Int num)
 		}
 
 		// now check for dir-ness
-		struct _stat statBuf;
-		if (_stat(modPath.str(), &statBuf) != 0)
+		struct stat statBuf;
+		if (zh_stat(modPath.str(), &statBuf) != 0)
 		{
 			DEBUG_LOG(("Could not _stat() mod.\n"));
 			return 2; // could not stat the file/dir.
 		}
 
-		if (statBuf.st_mode & _S_IFDIR)
+		if (statBuf.st_mode & S_IFDIR)
 		{
 			if (!modPath.endsWith("\\") && !modPath.endsWith("/"))
 				modPath.concat('\\');
@@ -2357,11 +2399,18 @@ static CommandLineParam params[] =
 	{ "-particlebounce", parseParticleBounce },
 	{ "-smoke", parseSmoke },
 	{ "-particlecap", parseParticleCap },
+	{ "-noDynamicLOD", parseNoDynamicLOD },
 	{ "-nochroma", parseNoChroma },
 	{ "-shadowmapreport", parseShadowMapReport },
 	{ "-shadowmapboth", parseShadowMapBoth },
 	{ "-noparticleshadows", parseNoParticleShadows },
+	{ "-novolumetricsmoke", parseNoVolumetricSmoke },
+	{ "-nosmokefirelight", parseNoSmokeFireLight },
 	{ "-quickstart", parseQuickStart },
+	/* In every build: EA kept them to Debug and Internal, so a Release run could not skip the logo or the
+		 movies. */
+	{ "-nologo", parseNoLogo },
+	{ "-novideo", parseNoVideo },
 
 	{ "-packetloss", parsePacketLoss },
 	{ "-latAvg", parseLatencyAverage },
@@ -2380,9 +2429,7 @@ static CommandLineParam params[] =
 	{ "-ReplayCRCInterval", parseReplayCRCInterval },
 
 #if (defined(_DEBUG) || defined(_INTERNAL))
-	{ "-noaudio", parseNoAudio },
 	{ "-nomusic", parseNoMusic },
-	{ "-novideo", parseNoVideo },
 	{ "-noLogOrCrash", parseNoLogOrCrash },
 	{ "-FPUPreserve", parseFPUPreserve },
 	{ "-benchmark", parseBenchmark },
@@ -2401,7 +2448,6 @@ static CommandLineParam params[] =
 	{ "-nocinematic", parseNoCinematic },
 	{ "-noViewLimit", parseNoViewLimit },
 	{ "-lowDetail", parseLowDetail },
-	{ "-noDynamicLOD", parseNoDynamicLOD },
 	{ "-noStaticLOD", parseNoStaticLOD },
 	{ "-useWaveEditor", parseUseWaveEditor },
 	{ "-wireframe", parseWireframe },
@@ -2431,7 +2477,6 @@ static CommandLineParam params[] =
 	{ "-noshadowvolumes", parseNoShadows },
 	{ "-nofx", parseNoFX },
 	{ "-ignoresync", parseSync },
-	{ "-nologo", parseNoLogo },
 	{ "-shellmap", parseShellMap },
 	{ "-noShellAnim", parseNoWindowAnimation },
 	{ "-winCursors", parseWinCursors },
@@ -2461,8 +2506,12 @@ static CommandLineParam params[] =
 	{ "-notactics", parseNoTactics },
 	{ "-observer", parseObserver },
 	{ "-headless", parseHeadless },
+	/* -noaudio was in the Debug/Internal block above, so a Release build ignored it and a windowed run
+		 opened the audio device.  It turns every sound off as -headless does: the device is never opened. */
+	{ "-noaudio", parseNoAudio },
 	{ "-maxframes", parseMaxGameFrames },
 	{ "-screenshot", parseScreenShot },
+	{ "-showHudOverlay", parseShowHudOverlay },
 	{ "-video", parseVideo },
 	{ "-wav", parseWav },
 	{ "-turbo", parseTurbo },
@@ -2547,7 +2596,7 @@ void parseCommandLine(int argc, char *argv[])
 			int len2 = strlen(argv[arg]);
 			if (len2 != len)
 				continue;
-			if (!strnicmp(argv[arg], params[param].name, len))
+			if (!strncasecmp(argv[arg], params[param].name, len))
 			{
 				arg += params[param].func(argv+arg, argc-arg);
 				found = true;

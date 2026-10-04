@@ -1,0 +1,37 @@
+The fork's one change to SDL3 3.4.16: a Metal GPU device with no window, for -offscreen.
+
+Why: a host with no window server (a build Mac reached over ssh as an account with no GUI login; CI) has
+Metal - MTLCreateSystemDefaultDevice, render passes and read-backs all work there - but SDL3 will not
+make its GPU device. Its video subsystem must be up, the cocoa driver adds no displays without a window
+server, and the dummy driver, which does start, has no Metal_CreateView, which METAL_PrepareDriver
+requires. The view only matters to a claimed window (its CAMetalLayer and drawables); a device that
+draws into its own textures, submits and reads back never touches it. -offscreen starts the dummy
+driver and sets ZH_SDL_GPU_METAL_WINDOWLESS=1.
+
+Hint-gated: with the hint unset or 0 the expression is exactly upstream's, so every other run is
+unchanged.
+
+Upstream (checked 2026-09-27): SDL main, 3.5.0, has the same check in METAL_PrepareDriver and no hint
+or property for a windowless Metal device; SDL_GPUSelectBackend still requires the video subsystem.
+libsdl-org/SDL issue 12737 is about headless GPU rendering (its leaks), not this gate.
+
+Remove when: SDL gains a supported way to make a Metal GPU device without a view (a hint, a property,
+or a video driver with Metal_CreateView that needs no display), or when this project stops needing
+-offscreen on hosts with no window server. Applied by Tools/vendor.sh; vendor.ps1 does not fetch
+SDL3, so it has nothing to apply.
+
+diff --git a/src/gpu/metal/SDL_gpu_metal.m b/src/gpu/metal/SDL_gpu_metal.m
+index 3a02f8f..5471a94 100644
+--- a/src/gpu/metal/SDL_gpu_metal.m
++++ b/src/gpu/metal/SDL_gpu_metal.m
+@@ -4347,7 +4347,9 @@ static bool METAL_PrepareDriver(SDL_VideoDevice *this, SDL_PropertiesID props)
+     }
+ 
+     if (@available(macOS 10.14, iOS 13.0, tvOS 13.0, *)) {
+-        return (this->Metal_CreateView != NULL);
++        /* Zero Hour Reforged: windowless Metal.  A device that never claims a window needs no view, and
++           the dummy video driver has none to make: ZH_SDL_GPU_METAL_WINDOWLESS lets it through. */
++        return (this->Metal_CreateView != NULL) || SDL_GetHintBoolean("ZH_SDL_GPU_METAL_WINDOWLESS", false);
+     }
+     return false;
+ }

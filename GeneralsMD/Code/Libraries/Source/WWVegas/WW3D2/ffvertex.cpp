@@ -15,16 +15,18 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 #include "ffvertex.h"
+#include "sdl3target.h"
 
 #include <stdio.h>
 
 // The high half of D3DTSS_TEXCOORDINDEX is the generation mode and the low half the coordinate set.
-static const DWORD COORDINATE_SET_MASK = 0xffff;
+static const FixedFunctionValue COORDINATE_SET_MASK = 0xffff;
 
 // D3DTTFF_PROJECTED sits above the count, which is the low three bits.
-static const DWORD TEXTURE_TRANSFORM_COUNT_MASK = 0x07;
+static const FixedFunctionValue TEXTURE_TRANSFORM_COUNT_MASK = 0x07;
 
 // The constant registers the D3D9 profile uses, in the order they are declared.  A vs_2_0 shader
 // has 256 float4 registers and this uses fewer than 70 of them, so the layout is written for
@@ -34,11 +36,11 @@ static const DWORD TEXTURE_TRANSFORM_COUNT_MASK = 0x07;
 // has to fill the same registers.  These are the short names this file reads them by.
 //
 // The viewport's reciprocal sits before the lights because the D3D11 block declares only as many
-// lights as the description has, and anything after them would move with that count.  Six registers
-// a light, the same six whatever type it is: where it is, which way it points, its diffuse and
-// specular colours, its three attenuation terms with its range, and its cone.  A directional light
-// reads two of them and a spot light reads all six, and the layout stays uniform so the register a
-// light starts at is a multiplication rather than a running total over types.
+// lights as the description has, and anything after them would move with that count.  Seven
+// registers a light, the same seven whatever type it is: where it is, which way it points, its diffuse
+// and specular colours, its three attenuation terms with its range, its cone, and its ambient colour.
+// Every light reads its ambient, a spot light reads all seven, and the layout stays uniform so the
+// register a light starts at is a multiplication rather than a running total over types.
 static const unsigned REGISTERS_PER_MATRIX = VERTEX_REGISTERS_PER_MATRIX;
 static const unsigned REGISTER_WORLD_VIEW_PROJECTION = VERTEX_REGISTER_WORLD_VIEW_PROJECTION;
 static const unsigned REGISTER_WORLD_VIEW = VERTEX_REGISTER_WORLD_VIEW;
@@ -55,24 +57,29 @@ static const unsigned REGISTER_VIEWPORT = VERTEX_REGISTER_VIEWPORT;
 static const unsigned REGISTER_LIGHTS = VERTEX_REGISTER_LIGHTS;
 static const unsigned REGISTERS_PER_LIGHT = VERTEX_REGISTERS_PER_LIGHT;
 
-static bool has_normal(DWORD fvf)
+static bool has_normal(FixedFunctionValue fvf)
 {
-	return (fvf & D3DFVF_NORMAL) != 0;
+	return (fvf & FF_FVF_NORMAL) != 0;
 }
 
-static bool has_diffuse(DWORD fvf)
+static bool has_diffuse(FixedFunctionValue fvf)
 {
-	return (fvf & D3DFVF_DIFFUSE) != 0;
+	return (fvf & FF_FVF_DIFFUSE) != 0;
 }
 
-static bool is_pretransformed(DWORD fvf)
+static bool has_specular(FixedFunctionValue fvf)
 {
-	return (fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW;
+	return (fvf & FF_FVF_SPECULAR) != 0;
 }
 
-static unsigned texture_coordinate_set_count(DWORD fvf)
+static bool is_pretransformed(FixedFunctionValue fvf)
 {
-	return (fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
+	return (fvf & FF_FVF_POSITION_MASK) == FF_FVF_XYZRHW;
+}
+
+static unsigned texture_coordinate_set_count(FixedFunctionValue fvf)
+{
+	return (fvf & FF_FVF_TEXCOUNT_MASK) >> FF_FVF_TEXCOUNT_SHIFT;
 }
 
 // A material source resolves to a constant or to a vertex colour.  D3DMCS_COLOR1 reads the diffuse
@@ -80,17 +87,28 @@ static unsigned texture_coordinate_set_count(DWORD fvf)
 // back to the material in both of those cases rather than reading a register that is not there.
 // D3DMCS_COLOR2 is the specular vertex colour, which no format in the game carries, so a
 // description asking for it is refused rather than quietly given the material instead.
-static bool material_source_expression(DWORD source, const char * material_constant,
+static bool material_source_expression(FixedFunctionValue source, const char * material_constant,
 	const VertexPipelineDescription & description, std::string & expression)
 {
 	switch (source) {
-	case D3DMCS_MATERIAL:
+	case FF_MCS_MATERIAL:
 		expression = material_constant;
 		return true;
 
-	case D3DMCS_COLOR1:
+	case FF_MCS_COLOR1:
 		if (has_diffuse(description.FVF) && description.ColourVertexEnabled) {
 			expression = "input.Diffuse";
+		}
+		else {
+			expression = material_constant;
+		}
+		return true;
+
+	case FF_MCS_COLOR2:
+		// The vertex's specular colour, where it has one and COLORVERTEX is on; the material's
+		// otherwise, as D3DMCS_COLOR1 does with the diffuse ("D3DMATERIALCOLORSOURCE").
+		if (has_specular(description.FVF) && description.ColourVertexEnabled) {
+			expression = "input.Specular";
 		}
 		else {
 			expression = material_constant;
@@ -102,7 +120,8 @@ static bool material_source_expression(DWORD source, const char * material_const
 	}
 }
 
-static void append_light(std::string & body, unsigned index, DWORD type, const char * accumulator)
+static void append_light(std::string & body, unsigned index, FixedFunctionValue type, const char * accumulator,
+	bool local_viewer)
 {
 	char line[1024];
 
@@ -112,7 +131,7 @@ static void append_light(std::string & body, unsigned index, DWORD type, const c
 		"        float attenuation;\n");
 	body += line;
 
-	if (type == D3DLIGHT_DIRECTIONAL) {
+	if (type == FF_LIGHT_DIRECTIONAL) {
 		// A directional light's direction is the way the light travels, so the vector towards it
 		// is the negative of it and there is nothing to attenuate.
 		snprintf(line, sizeof(line),
@@ -134,7 +153,7 @@ static void append_light(std::string & body, unsigned index, DWORD type, const c
 		body += line;
 	}
 
-	if (type == D3DLIGHT_SPOT) {
+	if (type == FF_LIGHT_SPOT) {
 		// D3D9's cone is a smooth falloff between the inner and the outer cosine raised to the
 		// falloff power.  Light%uSpot carries cos(theta/2), cos(phi/2) and the falloff.
 		snprintf(line, sizeof(line),
@@ -145,16 +164,27 @@ static void append_light(std::string & body, unsigned index, DWORD type, const c
 		body += line;
 	}
 
+	// The light's own ambient, attenuated and coned like the rest of it ("Ambient Lighting": the
+	// ambient sum is Atten * Spot * La over the lights).  W3D gives point lights one: the light
+	// environment's (dx8wrapper.cpp, getPointAmbient) and the dynamic lights W3DDisplay makes.
+	snprintf(line, sizeof(line), "        ambient_light += Light%uAmbient.rgb * attenuation;\n", index);
+	body += line;
+
 	snprintf(line, sizeof(line),
 		"        float lambert = max(dot(view_normal, to_light), 0.0);\n"
 		"        %s += Light%uDiffuse.rgb * lambert * attenuation;\n",
 		accumulator, index);
 	body += line;
 
-	// The specular term is Blinn's half vector, which is what D3D9's fixed-function pipeline uses
-	// with D3DRS_LOCALVIEWER off - and the engine never turns it on.
+	// The specular term is Blinn's half vector ("Specular Lighting"): between the light and the eye,
+	// where the eye is the vertex's own direction to the camera with D3DRS_LOCALVIEWER, which is D3D9's
+	// default and which the engine never turns off, and the fixed (0, 0, -1) without it.  The page says
+	// (0, 0, 1); Windows' own D3D9 (WARP and REF, Tests/ffreference/knownprobe_windows.cpp, N27) draws with (0, 0, -1), which is
+	// also where the local viewer's direction points for a vertex straight ahead.
+	body += local_viewer
+		? "        float3 half_vector = normalize(to_light + normalize(-view_position.xyz));\n"
+		: "        float3 half_vector = normalize(to_light + float3(0.0, 0.0, -1.0));\n";
 	snprintf(line, sizeof(line),
-		"        float3 half_vector = normalize(to_light + float3(0.0, 0.0, 1.0));\n"
 		"        float highlight = pow(max(dot(view_normal, half_vector), 0.0), MaterialPower.x);\n"
 		"        specular_light += Light%uSpecular.rgb * highlight * attenuation"
 		" * step(0.0001, lambert);\n"
@@ -167,12 +197,12 @@ static bool append_texture_coordinates(std::string & body,
 {
 	for (unsigned stage = 0; stage < description.StageCount; ++stage) {
 		const VertexStageDescription & source = description.Stages[stage];
-		const DWORD generation = source.TextureCoordinateIndex & ~COORDINATE_SET_MASK;
+		const FixedFunctionValue generation = source.TextureCoordinateIndex & ~COORDINATE_SET_MASK;
 		const unsigned set = source.TextureCoordinateIndex & COORDINATE_SET_MASK;
 
 		char line[1024];
 		switch (generation) {
-		case D3DTSS_TCI_PASSTHRU:
+		case FF_TSS_TCI_PASSTHRU:
 			if (set >= texture_coordinate_set_count(description.FVF)) {
 				// The format does not carry the set the stage is asking for, which the engine does
 				// on purpose: a shadow quad has a texture stage on and no coordinates in its
@@ -181,25 +211,38 @@ static bool append_texture_coordinates(std::string & body,
 				snprintf(line, sizeof(line),
 					"    float4 generated%u = float4(0.0, 0.0, 0.0, 1.0);\n", stage);
 			}
+			else if ((source.TextureTransformFlags & TEXTURE_TRANSFORM_COUNT_MASK) != FF_TTFF_DISABLE) {
+				// Through a texture transform D3D9 pads a two-element set as (u, v, 1, 0), so the
+				// matrix's third row is the one that translates it ("Texture Coordinate Formats"), and
+				// W3D's scrolling mappers put their scroll there (mapper.cpp: "According to the docs
+				// this should work since its 2D").  Padded (u, v, 0, 1), the scroll read the fourth
+				// row, which is zero, and every scrolling texture stood still.
+				snprintf(line, sizeof(line),
+					"    float4 generated%u = float4(input.TexCoord%u, 1.0, 0.0);\n", stage, set);
+			}
 			else {
 				snprintf(line, sizeof(line),
 					"    float4 generated%u = float4(input.TexCoord%u, 0.0, 1.0);\n", stage, set);
 			}
 			break;
 
-		case D3DTSS_TCI_CAMERASPACEPOSITION:
+		case FF_TSS_TCI_CAMERASPACEPOSITION:
 			snprintf(line, sizeof(line), "    float4 generated%u = float4(view_position.xyz, 1.0);\n",
 				stage);
 			break;
 
-		case D3DTSS_TCI_CAMERASPACENORMAL:
+		case FF_TSS_TCI_CAMERASPACENORMAL:
 			snprintf(line, sizeof(line), "    float4 generated%u = float4(view_normal, 1.0);\n",
 				stage);
 			break;
 
-		case D3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR:
-			snprintf(line, sizeof(line),
-				"    float4 generated%u = float4(reflect(normalize(view_position.xyz), view_normal), 1.0);\n",
+		case FF_TSS_TCI_CAMERASPACEREFLECTIONVECTOR:
+			// R = 2(N.E)N - E, E the unit direction to the eye: the vertex's own with D3DRS_LOCALVIEWER,
+			// and the fixed (0, 0, -1) without it, as Windows' D3D9 draws it (knownprobe_windows.cpp, N14).
+			// reflect(I, N) is I - 2(N.I)N, so I is -E: the camera-space position, or (0, 0, 1).
+			snprintf(line, sizeof(line), description.LocalViewer
+				? "    float4 generated%u = float4(reflect(normalize(view_position.xyz), view_normal), 1.0);\n"
+				: "    float4 generated%u = float4(reflect(float3(0.0, 0.0, 1.0), view_normal), 1.0);\n",
 				stage);
 			break;
 
@@ -208,13 +251,13 @@ static bool append_texture_coordinates(std::string & body,
 		}
 		body += line;
 
-		const DWORD transform_count = source.TextureTransformFlags & TEXTURE_TRANSFORM_COUNT_MASK;
-		if (transform_count != D3DTTFF_DISABLE) {
+		const FixedFunctionValue transform_count = source.TextureTransformFlags & TEXTURE_TRANSFORM_COUNT_MASK;
+		if (transform_count != FF_TTFF_DISABLE) {
 			snprintf(line, sizeof(line), "    generated%u = mul(generated%u, TextureMatrix%u);\n",
 				stage, stage, stage);
 			body += line;
 
-			if ((source.TextureTransformFlags & D3DTTFF_PROJECTED) != 0) {
+			if ((source.TextureTransformFlags & FF_TTFF_PROJECTED) != 0) {
 				// A projected transform divides by the last coordinate the count named, which for
 				// every projected stage the game sets is the third.
 				snprintf(line, sizeof(line),
@@ -272,9 +315,10 @@ static void append_constants_d3d9(std::string & hlsl, const VertexPipelineDescri
 			"float4 Light%uDiffuse : register(c%u);\n"
 			"float4 Light%uSpecular : register(c%u);\n"
 			"float4 Light%uAttenuation : register(c%u);\n"
-			"float4 Light%uSpot : register(c%u);\n",
+			"float4 Light%uSpot : register(c%u);\n"
+			"float4 Light%uAmbient : register(c%u);\n",
 			index, base, index, base + 1, index, base + 2,
-			index, base + 3, index, base + 4, index, base + 5);
+			index, base + 3, index, base + 4, index, base + 5, index, base + 6);
 		hlsl += line;
 	}
 }
@@ -317,8 +361,9 @@ static void append_constants_d3d11(std::string & hlsl,
 			"    float4 Light%uDiffuse;\n"
 			"    float4 Light%uSpecular;\n"
 			"    float4 Light%uAttenuation;\n"
-			"    float4 Light%uSpot;\n",
-			index, index, index, index, index, index);
+			"    float4 Light%uSpot;\n"
+			"    float4 Light%uAmbient;\n",
+			index, index, index, index, index, index, index);
 		hlsl += line;
 	}
 	hlsl += "};\n";
@@ -389,6 +434,9 @@ static bool generate_pretransformed(const VertexPipelineDescription & descriptio
 	if (has_diffuse(description.FVF)) {
 		hlsl += "    float4 Diffuse  : COLOR0;\n";
 	}
+	if (has_specular(description.FVF)) {
+		hlsl += "    float4 Specular : COLOR1;\n";
+	}
 	append_input_coordinate_sets(hlsl, coordinate_sets);
 	hlsl +=
 		"};\n"
@@ -431,8 +479,11 @@ static bool generate_pretransformed(const VertexPipelineDescription & descriptio
 		hlsl += "    output.Diffuse = float4(1.0, 1.0, 1.0, 1.0);\n";
 	}
 
+	// An unlit vertex's specular colour is its own, which the pixel adds with D3DRS_SPECULARENABLE.
+	hlsl += has_specular(description.FVF)
+		? "    output.Specular = input.Specular;\n"
+		: "    output.Specular = float4(0.0, 0.0, 0.0, 0.0);\n";
 	hlsl +=
-		"    output.Specular = float4(0.0, 0.0, 0.0, 0.0);\n"
 		"    output.Fog = 1.0;\n"
 		"    return output;\n"
 		"}\n";
@@ -442,6 +493,12 @@ static bool generate_pretransformed(const VertexPipelineDescription & descriptio
 bool VertexShader_Generate(const VertexPipelineDescription & description,
 	VertexShaderTarget target, std::string & hlsl)
 {
+	// The SDL3 GPU program is the D3D11 one with its bindings rewritten, so everything below only
+	// ever sees the two profiles it was written for.
+	if (target == VERTEX_SHADER_TARGET_SDL3_GPU) {
+		return VertexShader_Generate(description, VERTEX_SHADER_TARGET_D3D11, hlsl)
+			&& SDL3_Shader_Retarget(hlsl, true);
+	}
 	if (description.StageCount > MAXIMUM_VERTEX_STAGES
 		|| description.LightCount > MAXIMUM_VERTEX_LIGHTS) {
 		return false;
@@ -455,6 +512,10 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 	if (description.NormalMapped && is_pretransformed(description.FVF)) {
 		return false;
 	}
+	if (description.SmokeGlow
+		&& (description.LightingEnabled || !has_normal(description.FVF) || is_pretransformed(description.FVF))) {
+		return false;
+	}
 
 	// A pre-transformed vertex has been through the transform, the lighting and the coordinate
 	// generation already: its position is in pixels, its colour is in the vertex, and D3D9 reads
@@ -466,8 +527,8 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 	}
 
 	for (unsigned index = 0; index < description.LightCount; ++index) {
-		const DWORD type = description.Lights[index].Type;
-		if (type != D3DLIGHT_DIRECTIONAL && type != D3DLIGHT_POINT && type != D3DLIGHT_SPOT) {
+		const FixedFunctionValue type = description.Lights[index].Type;
+		if (type != FF_LIGHT_DIRECTIONAL && type != FF_LIGHT_POINT && type != FF_LIGHT_SPOT) {
 			return false;
 		}
 	}
@@ -502,17 +563,20 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 		// was 13.2% from the Direct3D 9 frame and Golden Oasis in daylight 2.57%, and the geometry
 		// was in the right place in both.
 		//
-		// A light's own ambient is not in that second sum because DX11BackendClass::Set_Light does
-		// not carry one; every light W3D creates leaves it black.
+		// Each light's own ambient is in that second sum (ambient_light, summed in append_light).  It
+		// was left out once on the belief that W3D's lights all have a black one; its point lights do
+		// not (dx8wrapper.cpp's light environment, W3DDisplay's dynamic lights).
 		// A normal mapped draw lights its directional lights per pixel.  A point or spot light - the
 		// flash of a gun, the glow of a fire - stays per vertex and is summed on its own, so it can
 		// be handed to the pixel half as part of the base it adds the bumped light to.
 		body += "    float3 diffuse_light = float3(0.0, 0.0, 0.0);\n";
 		body += "    float3 local_light = float3(0.0, 0.0, 0.0);\n";
 		body += "    float3 specular_light = float3(0.0, 0.0, 0.0);\n";
+		body += "    float3 ambient_light = float3(0.0, 0.0, 0.0);\n";
 		for (unsigned index = 0; index < description.LightCount; ++index) {
-			const DWORD type = description.Lights[index].Type;
-			append_light(body, index, type, type == D3DLIGHT_DIRECTIONAL ? "diffuse_light" : "local_light");
+			const FixedFunctionValue type = description.Lights[index].Type;
+			append_light(body, index, type, type == FF_LIGHT_DIRECTIONAL ? "diffuse_light" : "local_light",
+				description.LocalViewer);
 		}
 		body += "    diffuse_light += local_light;\n";
 
@@ -529,14 +593,14 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 		}
 
 		body += "    output.Diffuse.rgb = saturate(" + diffuse + ".rgb * diffuse_light + "
-			+ ambient + ".rgb * GlobalAmbient.rgb + " + emissive + ".rgb);\n";
+			+ ambient + ".rgb * (GlobalAmbient.rgb + ambient_light) + " + emissive + ".rgb);\n";
 		body += "    output.Diffuse.a = " + diffuse + ".a;\n";
 
 		if (description.NormalMapped) {
 			body += "    output.ViewPosition = view_position.xyz;\n";
 			body += "    output.ViewNormal = view_normal;\n";
 			body += "    output.LitBase = " + diffuse + ".rgb * local_light + " + ambient
-				+ ".rgb * GlobalAmbient.rgb + " + emissive + ".rgb;\n";
+				+ ".rgb * (GlobalAmbient.rgb + ambient_light) + " + emissive + ".rgb;\n";
 			body += "    output.LitMaterial = " + diffuse + ".rgb;\n";
 		}
 
@@ -562,21 +626,30 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 		else {
 			body += "    output.Diffuse = float4(1.0, 1.0, 1.0, 1.0);\n";
 		}
-		body += "    output.Specular = float4(0.0, 0.0, 0.0, 0.0);\n";
+		// And the specular colour is the vertex's where there is one, which the pixel adds with
+		// D3DRS_SPECULARENABLE (dx8renderer.cpp gives a mesh with a second colour array one).
+		if (description.SmokeGlow) {
+			body += "    output.Specular = float4(input.Normal, 0.0);\n";
+		}
+		else {
+			body += has_specular(description.FVF)
+				? "    output.Specular = input.Specular;\n"
+				: "    output.Specular = float4(0.0, 0.0, 0.0, 0.0);\n";
+		}
 	}
 
 	if (description.FogEnabled) {
 		// FogParameters carries the start, the end and the density; the mode picks which two of
 		// them are read.  D3D9's factor is the weight of the unfogged colour, so 1 is no fog.
 		switch (description.FogVertexMode) {
-		case D3DFOG_LINEAR:
+		case FF_FOG_LINEAR:
 			body += "    output.Fog = saturate((FogParameters.y - view_position.z)"
 				" / max(FogParameters.y - FogParameters.x, 0.0001));\n";
 			break;
-		case D3DFOG_EXP:
+		case FF_FOG_EXP:
 			body += "    output.Fog = saturate(exp(-FogParameters.z * view_position.z));\n";
 			break;
-		case D3DFOG_EXP2:
+		case FF_FOG_EXP2:
 			body += "    output.Fog = saturate(exp(-FogParameters.z * FogParameters.z"
 				" * view_position.z * view_position.z));\n";
 			break;
@@ -630,6 +703,9 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 	if (has_diffuse(description.FVF)) {
 		hlsl += "    float4 Diffuse  : COLOR0;\n";
 	}
+	if (has_specular(description.FVF)) {
+		hlsl += "    float4 Specular : COLOR1;\n";
+	}
 	append_input_coordinate_sets(hlsl, coordinate_sets);
 	hlsl +=
 		"};\n"
@@ -662,21 +738,37 @@ std::string VertexShader_Key(const VertexPipelineDescription & description)
 	char field[64];
 
 	snprintf(field, sizeof(field), "%lu:%u%u%u:%lu,%lu,%lu,%lu",
-		description.FVF, description.LightingEnabled ? 1u : 0u,
+		(unsigned long)description.FVF, description.LightingEnabled ? 1u : 0u,
 		description.SpecularEnabled ? 1u : 0u, description.ColourVertexEnabled ? 1u : 0u,
-		description.DiffuseMaterialSource, description.AmbientMaterialSource,
-		description.EmissiveMaterialSource, description.SpecularMaterialSource);
+		(unsigned long)description.DiffuseMaterialSource, (unsigned long)description.AmbientMaterialSource,
+		(unsigned long)description.EmissiveMaterialSource, (unsigned long)description.SpecularMaterialSource);
 	key += field;
 
 	for (unsigned index = 0; index < description.LightCount; ++index) {
-		snprintf(field, sizeof(field), ":L%lu", description.Lights[index].Type);
+		snprintf(field, sizeof(field), ":L%lu", (unsigned long)description.Lights[index].Type);
 		key += field;
 	}
 
 	for (unsigned stage = 0; stage < description.StageCount; ++stage) {
-		snprintf(field, sizeof(field), ":T%lu,%lu", description.Stages[stage].TextureCoordinateIndex,
-			description.Stages[stage].TextureTransformFlags);
+		snprintf(field, sizeof(field), ":T%lu,%lu", (unsigned long)description.Stages[stage].TextureCoordinateIndex,
+			(unsigned long)description.Stages[stage].TextureTransformFlags);
 		key += field;
+	}
+
+	// Every lit program writes the halfway vector, the local viewer's or the fixed one, whether or not
+	// its specular is kept; so every lit program's key says which, and a key names one text.
+	if (description.LightingEnabled && description.LocalViewer) {
+		key += ":V";
+	}
+	// An unlit program reads LOCALVIEWER only through a reflection vector, and then only its absence
+	// changes the text, so only that is keyed: every key the engine makes (LOCALVIEWER on) stays as it was.
+	if (!description.LightingEnabled && !description.LocalViewer) {
+		for (unsigned stage = 0; stage < description.StageCount; ++stage) {
+			if ((description.Stages[stage].TextureCoordinateIndex & ~COORDINATE_SET_MASK) == FF_TSS_TCI_CAMERASPACEREFLECTIONVECTOR) {
+				key += ":E";
+				break;
+			}
+		}
 	}
 
 	snprintf(field, sizeof(field), ":F%u,%lu", description.FogEnabled ? 1u : 0u,
@@ -684,6 +776,9 @@ std::string VertexShader_Key(const VertexPipelineDescription & description)
 	key += field;
 	if (description.NormalMapped) {
 		key += ":N";
+	}
+	if (description.SmokeGlow) {
+		key += ":G";
 	}
 	return key;
 }

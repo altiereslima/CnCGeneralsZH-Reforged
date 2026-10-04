@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -41,10 +43,12 @@
 #include "always.h"
 #include "wwmemlog.h"
 #include "wwdebug.h"
-#include "vector.h"
+#include "Vector.H"
 #include "fastallocator.h"
-#include <windows.h>
-#include <intrin.h>
+#include "thread.h"
+
+#include <atomic>
+#include <mutex>
 
 #define USE_FAST_ALLOCATOR
 
@@ -252,18 +256,33 @@ private:
 static MemLogClass *				_TheMemLog = NULL;
 static bool							_MemLogAllocated = false;
 
+/* B14: the three Win32 primitives behind these three switches became the three standard-library
+	 ones.  MEMLOG_USE_CRITICALSECTION is the branch that is actually on (see the #defines above);
+	 the other two are compiled out in every configuration and are carried across so that the next
+	 person to flip a switch does not find 2003 waiting behind it.
+
+	 The critical section is a std::recursive_mutex and not a std::mutex.  A Win32 CRITICAL_SECTION
+	 is recursive, and this lock is taken by a memory log that the allocator calls into: re-entry
+	 is exactly the shape that would hide here, and a std::mutex would make it undefined behaviour
+	 rather than a deadlock anybody would see.  Preserving what CRITICAL_SECTION did costs an owner
+	 check it was already paying. */
 #if MEMLOG_USE_MUTEX
-static void *						_MemLogMutex = NULL;
 static int							_MemLogLockCounter = 0;
 #endif
 
-#if MEMLOG_USE_CRITICALSECTION
-static bool							_MemLogCriticalSectionAllocated = false;
-static char							_MemLogCriticalSectionHandle[sizeof(CRITICAL_SECTION)];
+#if MEMLOG_USE_CRITICALSECTION || MEMLOG_USE_MUTEX
+/* Function-local so the standard guarantees the initialisation is thread safe.  The old code
+	 lazily InitializeCriticalSection'd behind an unsynchronised `_MemLogCriticalSectionAllocated`
+	 bool, which two threads arriving together could both pass. */
+static std::recursive_mutex & Mem_Log_Mutex(void)
+{
+	static std::recursive_mutex the_mutex;
+	return the_mutex;
+}
 #endif
 
 #if MEMLOG_USE_FASTCRITICALSECTION
-volatile unsigned					_MemLogSemaphore = 0;
+static std::atomic_flag				_MemLogSemaphore = ATOMIC_FLAG_INIT;
 #endif
 
 /*
@@ -271,24 +290,10 @@ volatile unsigned					_MemLogSemaphore = 0;
 */
 WWINLINE void * Get_Mem_Log_Mutex(void)
 {
-#if MEMLOG_USE_MUTEX
-
-	if (_MemLogMutex == NULL) {
-		_MemLogMutex=CreateMutex(NULL,false,NULL);
-		WWASSERT(_MemLogMutex);
-	}
-	return _MemLogMutex;
-
-#endif
-
-#if MEMLOG_USE_CRITICALSECTION
-
-	if (_MemLogCriticalSectionAllocated == false) {
-		InitializeCriticalSection((CRITICAL_SECTION*)_MemLogCriticalSectionHandle);
-		_MemLogCriticalSectionAllocated = true;
-	}
-	return _MemLogCriticalSectionHandle;
-
+#if MEMLOG_USE_CRITICALSECTION || MEMLOG_USE_MUTEX
+	return (void *)&Mem_Log_Mutex();
+#else
+	return NULL;
 #endif
 }
 
@@ -297,24 +302,20 @@ WWINLINE void Lock_Mem_Log_Mutex(void)
 #if MEMLOG_USE_MUTEX
 
 	void * mutex = Get_Mem_Log_Mutex();
-#ifdef DEBUG_CRASHING
-	int res =
-#endif
-		WaitForSingleObject(mutex,INFINITE);
-	WWASSERT(res==WAIT_OBJECT_0);
+	(void)mutex;
+	Mem_Log_Mutex().lock();
 	_MemLogLockCounter++;
 #endif
 
 #if MEMLOG_USE_CRITICALSECTION
 
-	Get_Mem_Log_Mutex();
-	EnterCriticalSection((CRITICAL_SECTION*)_MemLogCriticalSectionHandle);
+	Mem_Log_Mutex().lock();
 
 #endif
 
 #if MEMLOG_USE_FASTCRITICALSECTION
 
-	while (_interlockedbittestandset((volatile long *)&_MemLogSemaphore, 0))
+	while (_MemLogSemaphore.test_and_set(std::memory_order_acquire))
 		ThreadClass::Switch_Thread();
 
 #endif
@@ -324,24 +325,18 @@ WWINLINE void Unlock_Mem_Log_Mutex(void)
 {
 #if MEMLOG_USE_MUTEX
 
-	void * mutex = Get_Mem_Log_Mutex();
 	_MemLogLockCounter--;
-#ifdef DEBUG_CRASHING
-	int res=
-#endif
-		ReleaseMutex(mutex);
-	WWASSERT(res);
+	Mem_Log_Mutex().unlock();
 
 #endif
 #if MEMLOG_USE_CRITICALSECTION
 
-	Get_Mem_Log_Mutex();
-	LeaveCriticalSection((CRITICAL_SECTION*)_MemLogCriticalSectionHandle);
+	Mem_Log_Mutex().unlock();
 
 #endif
 
 #if MEMLOG_USE_FASTCRITICALSECTION
-	_MemLogSemaphore = 0;
+	_MemLogSemaphore.clear(std::memory_order_release);
 #endif
 }
 
@@ -378,7 +373,10 @@ ActiveCategoryStackClass::operator = (const ActiveCategoryStackClass & that)
 ***************************************************************************************************/
 ActiveCategoryStackClass & ActiveCategoryClass::Get_Active_Stack(void)
 {
-	int current_thread = ::GetCurrentThreadId();
+	/* Was ::GetCurrentThreadId().  ThreadClass hands out the same kind of value portably, and
+		 every use of it here and everywhere else in the tree is an equality test against a stored
+		 one - see the note on _Get_Current_Thread_ID in thread.cpp. */
+	int current_thread = (int)ThreadClass::_Get_Current_Thread_ID();
 
 	/*
 	** If we already have an allocated category stack for the current thread,

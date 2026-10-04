@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
  /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -757,7 +759,7 @@ void	Render2DTextClass::Set_Font( Font3DInstanceClass *font )
 /*
 **
 */
-void	Render2DTextClass::Draw_Char( WCHAR ch, unsigned long color )
+void	Render2DTextClass::Draw_Char( WideChar ch, unsigned long color )
 {
 	float char_spacing	= Font->Char_Spacing( ch );
 	float char_height		= Font->Char_Height();
@@ -775,7 +777,7 @@ void	Render2DTextClass::Draw_Char( WCHAR ch, unsigned long color )
 		is_clipped = true;
 	}
 
-	if ( ch != (WCHAR)' ' && !is_clipped ) {
+	if ( ch != (WideChar)' ' && !is_clipped ) {
 		RectClass screen( Cursor.X, Cursor.Y, Cursor.X + Font->Char_Width(ch), Cursor.Y + char_height );
 
 		Internal_Add_Quad_Indicies( Vertices.Count() );
@@ -792,12 +794,25 @@ void	Render2DTextClass::Draw_Char( WCHAR ch, unsigned long color )
 void	Render2DTextClass::Draw_Text( const char * text, unsigned long color )
 {
 	WWMEMLOG(MEM_GEOMETRY);
+#if defined(_WIN32)
 	WideStringClass wide(0,true);
 	wide.Convert_From( text );
-	Draw_Text( wide, color );
+	//	WideStringClass holds WCHAR, which is WideChar's two bytes on Windows.
+	Draw_Text( reinterpret_cast<const WideChar *>( wide.Peek_Buffer() ), color );
+#else
+	// WideStringClass converts through the Windows code page, which exists only there.  Each byte is
+	// widened as it stands instead, as UnicodeString::translate does: the same text for ASCII and for
+	// Latin-1, and different from Windows-1252 only for 0x80-0x9F (curly quotes, the euro sign).
+	DynamicVectorClass<WideChar> wide;
+	for (const char *p = text; *p != 0; ++p) {
+		wide.Add( (WideChar)(unsigned char)*p );
+	}
+	wide.Add( 0 );
+	Draw_Text( &wide[0], color );
+#endif
 }
 
-void	Render2DTextClass::Draw_Text( const WCHAR * text, unsigned long color )
+void	Render2DTextClass::Draw_Text( const WideChar * text, unsigned long color )
 {
 	WWMEMLOG(MEM_GEOMETRY);
 
@@ -808,16 +823,16 @@ void	Render2DTextClass::Draw_Text( const WCHAR * text, unsigned long color )
 	}
 
 	while (*text) {
-		WCHAR ch = *text++;
+		WideChar ch = *text++;
 
 		//	Check to see if we need to move to a newline or not
-		bool wrap = ( ch == (WCHAR)'\n' );
+		bool wrap = ( ch == (WideChar)'\n' );
 
 		// if the current char is a space, and the next word length puts us past our Width, wrap
-		if ( ch == (WCHAR)' ' && WrapWidth > 0 ) {
-			const WCHAR * word = text;
+		if ( ch == (WideChar)' ' && WrapWidth > 0 ) {
+			const WideChar * word = text;
 			float word_width = Font->Char_Spacing(ch);
-			while ( (*word != (WCHAR)0) && (*word > (WCHAR)' ') ) {
+			while ( (*word != (WideChar)0) && (*word > (WideChar)' ') ) {
 				word_width += Font->Char_Spacing(*word++);
 			}
 			wrap = ( (Cursor.X + word_width) >= (Location.X + WrapWidth) );
@@ -844,15 +859,15 @@ void	Render2DTextClass::Draw_Block( const RectClass & screen, unsigned long colo
 	TotalExtents += screen;
 }
 
-Vector2	Render2DTextClass::Get_Text_Extents( const WCHAR * text )
+Vector2	Render2DTextClass::Get_Text_Extents( const WideChar * text )
 {
 	Vector2 extent (0, Font->Char_Height());
 
 	if (text) {
 		while (*text) {
-			WCHAR ch = *text++;
+			WideChar ch = *text++;
 
-			if ( ch != (WCHAR)'\n' ) {
+			if ( ch != (WideChar)'\n' ) {
 				extent.X += Font->Char_Spacing( ch );
 			}
 		}

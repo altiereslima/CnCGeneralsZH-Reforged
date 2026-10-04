@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -42,12 +44,14 @@
 //
 // ----------------------------------------------------------------------------
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
 
 // SYSTEM INCLUDES
 
 // USER INCLUDES 
 #include "Lib/BaseType.h"
 #include "Common/GameMemory.h"
+#include "Common/ExecutableDirectory.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -556,6 +560,9 @@ static PoolSizeRec sizes[] =
 	{ "AttackPriorityInfo", 32, 32 },
 	{ "SequentialScript", 32, 32 },
 	{ "Win32LocalFile", 1024, 256 },
+#if !defined(_WIN32)
+	{ "PosixLocalFile", 1024, 256 },		// Win32LocalFile's pool, under the POSIX class's name (C1)
+#endif
 	{ "RAMFile", 32, 32 },
 	{ "BattlePlanBonuses", 32, 32 },
 	{ "KindOfPercentProductionChange", 32, 32 },
@@ -762,20 +769,10 @@ void userMemoryManagerInitPools()
 	// since we're called prior to main, the cur dir might not be what
 	// we expect. so do it the hard way.
 	char buf[_MAX_PATH];
-	::GetModuleFileName(NULL, buf, sizeof(buf));
-	char* pEnd = buf + strlen(buf);
-	while (pEnd != buf) 
-	{
-		if (*pEnd == '\\') 
-		{
-			*pEnd = 0;
-			break;
-		}
-		--pEnd;
-	}
+	getExecutableDirectory(buf, sizeof(buf), FALSE);
 	strlcat(buf, "\\Data\\INI\\MemoryPools.ini", ARRAY_SIZE(buf));
 
-	FILE* fp = fopen(buf, "r");
+	FILE* fp = zh_fopen(buf, "r");
 	if (fp)
 	{
 		char poolName[256];
@@ -788,7 +785,7 @@ void userMemoryManagerInitPools()
 			{
 				for (PoolSizeRec* p = sizes; p->name != NULL; ++p)
 				{
-					if (stricmp(p->name, poolName) == 0)
+					if (strcasecmp(p->name, poolName) == 0)
 					{
 						// currently, these must be multiples of 4. so round up.
 						p->initial = roundUpMemBound(initial);

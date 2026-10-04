@@ -1,0 +1,30 @@
+# Does the aggressive stance go after what it sees, and the defensive one leave it?
+#
+# Two posts of two Crusaders, 600 apart on the open middle of the small generated map, each with an
+# unarmed worker standing 230 east of it.  A Crusader's gun reaches 150, so neither post can shoot
+# its worker from where it stands, but both can see it: a player's unit looks out to its vision
+# times GuardOuterModifierHuman, 330 for a Crusader, and the post clears the shroud to 300.  The
+# north post is put on the defensive stance and the south one on the aggressive stance, both with
+# the stance key's own message.  The north worker should still be standing at the end and the
+# south one dead.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 900
+#     -scenario stance -logPrefix stance_
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn   0  AmericaTankCrusader        2  900 600   30
+30    spawn   1  GLAInfantryWorker          1  1130 600
+
+30    spawn   0  SupW_AmericaTankCrusader   2  900 1200  30
+30    spawn   1  Chem_GLAInfantryWorker     1  1130 1200
+
+40    stance  0  AmericaTankCrusader        defensive
+40    stance  0  SupW_AmericaTankCrusader   aggressive
+
+41    tally   1  GLAInfantryWorker
+41    tally   1  Chem_GLAInfantryWorker
+880   tally   1  GLAInfantryWorker
+880   tally   1  Chem_GLAInfantryWorker

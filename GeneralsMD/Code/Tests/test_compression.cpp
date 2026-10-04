@@ -11,6 +11,14 @@
 #include "Compression.h"
 
 #include <stdlib.h>
+#include <string.h>
+
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 
 //////////////////////////////////////////////////////////////////////////////
 // Helpers
@@ -247,6 +255,94 @@ TEST(noxlzh_refuses_inputs_under_four_bytes)
 
 	CHECK(CompressionManager::compressData(COMPRESSION_NOXLZH, src, 4,
 	                                       packed, sizeof(packed)) > 0);
+}
+
+/* `len` bytes that end exactly where an inaccessible page begins, so reading one byte past them faults with
+   or without a sanitizer.  Released by guarded_free. */
+struct Guarded
+{
+	char *base;
+	size_t size;
+	char *data;
+};
+
+static Guarded guarded_alloc(size_t len)
+{
+	Guarded g = { NULL, 0, NULL };
+#if defined(_WIN32)
+	SYSTEM_INFO info;
+	GetSystemInfo(&info);
+	const size_t page = info.dwPageSize;
+#else
+	const size_t page = (size_t)sysconf(_SC_PAGESIZE);
+#endif
+	const size_t pages = (len + page - 1) / page;
+	g.size = (pages + 1) * page;
+#if defined(_WIN32)
+	g.base = (char *)VirtualAlloc(NULL, g.size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	DWORD old;
+	if (g.base == NULL || !VirtualProtect(g.base + pages * page, page, PAGE_NOACCESS, &old))
+		return g;
+#else
+	void *p = mmap(NULL, g.size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+	if (p == MAP_FAILED)
+		return g;
+	g.base = (char *)p;
+	if (mprotect(g.base + pages * page, page, PROT_NONE) != 0)
+		return g;
+#endif
+	g.data = g.base + pages * page - len;
+	return g;
+}
+
+static void guarded_free(Guarded &g)
+{
+	if (g.base == NULL)
+		return;
+#if defined(_WIN32)
+	VirtualFree(g.base, 0, MEM_RELEASE);
+#else
+	munmap(g.base, g.size);
+#endif
+	g.base = g.data = NULL;
+}
+
+/* A match that runs to the last byte: LZH-Light hashed LZMATCH bytes ahead of each position it matched, so
+   the last four positions hashed past the input (NoxCompress.cpp).  A period that repeats to the end makes
+   that match; a pure run and plain text are the other shapes.  Sizes cross the lazy match's reach, and one
+   is over NoxCompress's 500000-byte block, where the last block is not the first. */
+TEST(noxlzh_reads_nothing_past_its_input)
+{
+	static const int SIZES[] = { 4, 5, 6, 9, 16, 37, 64, 255, 1000, 4096, 70000, 500000 + 777 };
+	for (int s = 0; s < (int)(sizeof(SIZES) / sizeof(SIZES[0])); ++s)
+	{
+		const int len = SIZES[s];
+		for (int shape = 0; shape < 3; ++shape)
+		{
+			Guarded g = guarded_alloc(len);
+			CHECK(g.data != NULL);
+			if (g.data == NULL)
+			{
+				guarded_free(g);
+				return;
+			}
+			for (int i = 0; i < len; ++i)
+				g.data[i] = shape == 0 ? "abcdefgh"[i % 8] : 'z';
+			if (shape == 2)
+				fill_text(g.data, len, s);
+
+			const int max_out = CompressionManager::getMaxCompressedSize(len, COMPRESSION_NOXLZH);
+			char *packed = (char *)malloc(max_out);
+			char *back = (char *)malloc(len);
+			const int packed_len = CompressionManager::compressData(COMPRESSION_NOXLZH, g.data, len, packed, max_out);
+			CHECK(packed_len > 0);
+			CHECK_EQ(CompressionManager::decompressData(packed, packed_len, back, len), len);
+			CHECK_MEM(g.data, back, len);
+			free(back);
+			free(packed);
+			guarded_free(g);
+		}
+	}
 }
 
 TEST(max_compressed_size_covers_adversarial_payloads)

@@ -1,0 +1,63 @@
+# The opening shot of the 2.4.0 video: trailer_chaos.txt's three armies, general's powers and three
+# superweapons moved to the open grass in the west of Fortress Avalanche, a bright map, by the same
+# offset (-135,-1596) for every unit and target, so the fight centres on 1000,2100 instead of
+# Twilight Flame's 1135,3696. The superweapons and command centres stay at the start positions.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 5000 -map "Maps\Fortress Avalanche\Fortress Avalanche.map" -autoskirmish 3
+#     -takeover -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA -seed 7
+#     -scenario v240_hook -cinema v240_hook -video 800 1500 v240_hook -maxframes 1510
+
+10    spawn      0  AmericaParticleCannonUplink     1   start0:0:-200
+10    spawn      0  AmericaPowerPlant               3   start0:-260:40    90
+10    spawn      0  AmericaCommandCenter            1   start0:240:60
+10    spawn      1  ChinaNuclearMissileLauncher     1   start1:0:200
+10    spawn      1  ChinaPowerPlant                 3   start1:260:-40    90
+10    spawn      1  ChinaCommandCenter              1   start1:-260:60
+10    spawn      2  GLAScudStorm                    1   start2:0:200
+10    spawn      2  GLACommandCenter                1   start2:-260:0
+
+30    spawn      0  AmericaTankCrusader             12  655 1824   36
+30    spawn      0  AmericaTankPaladin              6   565 1924   40
+30    spawn      0  AmericaVehicleTomahawk          4   555 1784   40
+30    spawn      0  AmericaTankMicrowave            3   725 1734   40
+30    spawn      0  AmericaInfantryRanger           16  745 1884   18
+30    spawn      0  AmericaVehicleComanche          6   565 1704   60
+30    spawn      0  AmericaJetRaptor                4   505 1654   70
+30    spawn      1  ChinaTankOverlord               5   1345 2384  50
+30    spawn      1  ChinaTankBattleMaster           10  1265 2444  40
+30    spawn      1  ChinaTankGattling               5   1425 2304  36
+30    spawn      1  ChinaTankDragon                 4   1245 2324  36
+30    spawn      1  ChinaVehicleInfernoCannon       4   1405 2464  40
+30    spawn      1  ChinaInfantryRedguard           16  1195 2414  18
+30    spawn      1  ChinaVehicleHelix               3   1465 2454  60
+30    spawn      1  ChinaJetMIG                     4   1515 2524  70
+30    spawn      2  GLATankScorpion                 10  1325 1804  36
+30    spawn      2  GLATankMarauder                 5   1405 1844  40
+30    spawn      2  GLAVehicleRocketBuggy           6   1265 1734  32
+30    spawn      2  GLAVehicleQuadCannon            4   1385 1734  36
+30    spawn      2  GLAVehicleToxinTruck            3   1465 1784  36
+30    spawn      2  GLAVehicleTechnical             6   1245 1864  30
+30    spawn      2  GLAInfantryRebel                16  1315 1904  18
+60    attackmove 0  *  1000 2100
+60    attackmove 1  *  1000 2100
+60    attackmove 2  *  1000 2100
+
+600   spawn      0  AmericaTankCrusader             8   655 1824   36
+600   spawn      0  AmericaTankPaladin              4   565 1924   40
+600   spawn      1  ChinaTankBattleMaster           8   1265 2444  40
+600   spawn      1  ChinaTankOverlord               3   1345 2384  50
+600   spawn      2  GLATankScorpion                 8   1325 1804  36
+600   spawn      2  GLATankMarauder                 3   1405 1844  40
+630   attackmove 0  *  1000 2100
+630   attackmove 1  *  1000 2100
+630   attackmove 2  *  1000 2100
+
+450   power      0  AmericaCommandCenter  1000 2100  SuperweaponSpectreGunship
+560   power      0  AmericaCommandCenter  845 2004   SuperweaponA10ThunderboltMissileStrike
+640   power      1  ChinaCommandCenter    1165 2104  Early_SuperweaponChinaCarpetBomb
+700   power      2  GLACommandCenter      1015 1964  SuperweaponAnthraxBomb
+
+830   power      1  ChinaNuclearMissileLauncher  925 2194
+930   power      0  AmericaParticleCannonUplink  945 2144
+930   power      2  GLAScudStorm                 1065 2044

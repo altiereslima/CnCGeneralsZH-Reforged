@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -162,6 +163,12 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 					TheInGameUI->placesRow() )
 			{
 				TheInGameUI->adjustPlacementRowGap( msg->getArgument( 1 )->real );
+				return DESTROY_MESSAGE;
+			}
+			// and while a guard is armed it sizes the circle the guard will hold
+			if( TheInGameUI->isAreaPicking() )
+			{
+				TheInGameUI->adjustAreaPickRadius( msg->getArgument( 1 )->real );
 				return DESTROY_MESSAGE;
 			}
 			break;

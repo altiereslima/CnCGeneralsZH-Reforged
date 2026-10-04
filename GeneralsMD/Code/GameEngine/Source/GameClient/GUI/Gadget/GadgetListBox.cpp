@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -48,6 +50,8 @@
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Platform/DoubleClickTime.h"
+#include "Lib/Clock.h"
 
 #include "Common/AudioEventRTS.h"
 #include "Common/Language.h"
@@ -72,7 +76,7 @@
 // DEFINES ////////////////////////////////////////////////////////////////////
 // Sets up the user's OS set doubleclick time so if they don't like it... they can
 // change it in their OS.
-static UnsignedInt doubleClickTime = GetDoubleClickTime();
+static UnsignedInt doubleClickTime = systemDoubleClickTimeMS();
 
 // PRIVATE TYPES //////////////////////////////////////////////////////////////
 typedef struct _AddMessageStruct
@@ -827,7 +831,7 @@ WindowMsgHandledType GadgetListBoxInput( GameWindow *window, UnsignedInt msg,
 			}
 			
 			//Bool dblClicked = FALSE;
-			if( list->doubleClickTime + doubleClickTime > timeGetTime() && 
+			if( list->doubleClickTime + doubleClickTime > Clock_Milliseconds() && 
 					(i == oldPos || (oldPos == -1 && ( i>=0 && i<list->endPos ) )) )
 			{
 				int temp;
@@ -856,7 +860,7 @@ WindowMsgHandledType GadgetListBoxInput( GameWindow *window, UnsignedInt msg,
 			{
 				list->selectPos = oldPos;
 			}
-			list->doubleClickTime = timeGetTime();
+			list->doubleClickTime = Clock_Milliseconds();
 			TheWindowManager->winSendSystemMsg( window->winGetOwner(), 
 																					GLM_SELECTED,
 																					(WindowMsgData)window, 
@@ -2208,7 +2212,7 @@ Int GadgetListBoxAddEntryText( GameWindow *listbox,
 	if (!listbox)
 		return -1;
 	if (text.isEmpty())
-		text = UnicodeString(L" ");
+		text = UnicodeString(u" ");
 	Int index;
 	AddMessageStruct addInfo;
 	addInfo.row = row;

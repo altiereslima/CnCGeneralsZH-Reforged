@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -30,6 +32,9 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
+
+#include "Lib/WideCharFns.h"
 
 #include "Common/AudioEventRTS.h"
 #include "Common/PlayerList.h"
@@ -98,7 +103,7 @@ static GameWindow *parentIgnore = NULL;
 static GameWindow *listboxIgnore = NULL;
 
 static Bool isOverlayActive = false;
-void insertChat( BuddyMessage msg );
+static void insertChat( BuddyMessage msg );
 // RightClick pointers ---------------------------------------------------------------------
 static GameWindow *rcMenu = NULL;
 static WindowLayout *noticeLayout = NULL;
@@ -220,8 +225,8 @@ WindowMsgHandledType BuddyControlSystem( GameWindow *window, UnsignedInt msg,
 					if(rc->pos < 0)
 						break;
 
-					GPProfile profileID = (GPProfile)GadgetListBoxGetItemData(control, rc->pos, 0);
-					RCItemType itemType = (RCItemType)(Int)GadgetListBoxGetItemData(control, rc->pos, 1);
+					GPProfile profileID = (GPProfile)(intptr_t)GadgetListBoxGetItemData(control, rc->pos, 0);
+					RCItemType itemType = (RCItemType)(Int)(intptr_t)GadgetListBoxGetItemData(control, rc->pos, 1);
 					UnicodeString nick = GadgetListBoxGetText(control, rc->pos);
 
 					GadgetListBoxSetSelected(control, rc->pos);
@@ -272,7 +277,7 @@ WindowMsgHandledType BuddyControlSystem( GameWindow *window, UnsignedInt msg,
 				GadgetListBoxGetSelected(buddyControls.listboxBuddies, &selected);
 				if (selected >= 0)
 				{
-					GPProfile selectedProfile = (GPProfile)GadgetListBoxGetItemData(buddyControls.listboxBuddies, selected);
+					GPProfile selectedProfile = (GPProfile)(intptr_t)GadgetListBoxGetItemData(buddyControls.listboxBuddies, selected);
 					BuddyInfoMap *m = TheGameSpyInfo->getBuddyMap();
 					BuddyInfoMap::iterator recipIt = m->find(selectedProfile);
 					if (recipIt == m->end())
@@ -309,7 +314,7 @@ WindowMsgHandledType BuddyControlSystem( GameWindow *window, UnsignedInt msg,
 						// Send the message
 						BuddyRequest req;
 						req.buddyRequestType = BuddyRequest::BUDDYREQUEST_MESSAGE;
-						wcsncpy(req.arg.message.text, txtInput.str(), MAX_BUDDY_CHAT_LEN);
+						WideCharNCpy(req.arg.message.text, txtInput.str(), MAX_BUDDY_CHAT_LEN);
 						req.arg.message.text[MAX_BUDDY_CHAT_LEN-1] = 0;
 						req.arg.message.recipient = selectedProfile;
 						TheGameSpyBuddyMessageQueue->addRequest(req);
@@ -360,7 +365,7 @@ static void insertChat( BuddyMessage msg )
 		UnicodeString timeStr;
 		if (localSender /*&& recipientIt != m->end()*/)
 		{
-			s.format(L"[%hs -> %hs] %s", TheGameSpyInfo->getLocalBaseName().str(), msg.m_recipientNick.str(), msg.m_message.str());
+			s.format(u"[%hs -> %hs] %s", TheGameSpyInfo->getLocalBaseName().str(), msg.m_recipientNick.str(), msg.m_message.str());
 			Int index = GadgetListBoxAddEntryText( buddyControls.listboxChat, s, GameSpyColor[GSCOLOR_PLAYER_SELF], -1, -1 );
 			GadgetListBoxAddEntryText( buddyControls.listboxChat, timeStr, GameSpyColor[GSCOLOR_PLAYER_SELF], index, 1);
 		}
@@ -374,7 +379,7 @@ static void insertChat( BuddyMessage msg )
 			}
 			else
 			{
-				s.format(L"[%hs] %s", msg.m_senderNick.str(), msg.m_message.str());
+				s.format(u"[%hs] %s", msg.m_senderNick.str(), msg.m_message.str());
 				Int index = GadgetListBoxAddEntryText( buddyControls.listboxChat, s, GameSpyColor[GSCOLOR_PLAYER_BUDDY], -1, -1 );
 				GadgetListBoxAddEntryText( buddyControls.listboxChat, timeStr, GameSpyColor[GSCOLOR_PLAYER_BUDDY], index, 1);
 			}
@@ -399,7 +404,7 @@ void updateBuddyInfo( void )
 
 	GadgetListBoxGetSelected(buddyControls.listboxBuddies, &selected);
 	if (selected >= 0)
-		selectedProfile = (GPProfile)GadgetListBoxGetItemData(buddyControls.listboxBuddies, selected);
+		selectedProfile = (GPProfile)(intptr_t)GadgetListBoxGetItemData(buddyControls.listboxBuddies, selected);
 
 	selected = -1;
 	GadgetListBoxReset(buddyControls.listboxBuddies);
@@ -421,23 +426,23 @@ void updateBuddyInfo( void )
 
 		// insert status into box
 		AsciiString marker;
-		marker.format("Buddy:%ls", info.m_statusString.str());
-		if (!info.m_statusString.compareNoCase(L"Offline") ||
-			!info.m_statusString.compareNoCase(L"Online") ||
-			!info.m_statusString.compareNoCase(L"Matching"))
+		marker.format("Buddy:%s", WideCharAsUtf8( info.m_statusString.str() ).str());
+		if (!info.m_statusString.compareNoCase(u"Offline") ||
+			!info.m_statusString.compareNoCase(u"Online") ||
+			!info.m_statusString.compareNoCase(u"Matching"))
 		{
 			formatStr = TheGameText->fetch(marker);
 		}
-		else if (!info.m_statusString.compareNoCase(L"Staging") ||
-			!info.m_statusString.compareNoCase(L"Loading") ||
-			!info.m_statusString.compareNoCase(L"Playing"))
+		else if (!info.m_statusString.compareNoCase(u"Staging") ||
+			!info.m_statusString.compareNoCase(u"Loading") ||
+			!info.m_statusString.compareNoCase(u"Playing"))
 		{
 			formatStr.format(TheGameText->fetch(marker), info.m_locationString.str());
 		}
-		else if (!info.m_statusString.compareNoCase(L"Chatting"))
+		else if (!info.m_statusString.compareNoCase(u"Chatting"))
 		{
 			UnicodeString roomName;
-			GroupRoomMap::iterator gIt = TheGameSpyInfo->getGroupRoomList()->find( _wtoi(info.m_locationString.str()) );
+			GroupRoomMap::iterator gIt = TheGameSpyInfo->getGroupRoomList()->find( atoi( WideCharAsUtf8( info.m_locationString.str() ).str() ) );	// was _wtoi, MSVC-only; the same number for the ASCII digits a room id holds
 			if (gIt != TheGameSpyInfo->getGroupRoomList()->end())
 			{
 				AsciiString s;
@@ -451,7 +456,7 @@ void updateBuddyInfo( void )
 			formatStr = info.m_statusString;
 		}
 		GadgetListBoxAddEntryText(buddyControls.listboxBuddies, formatStr, GameSpyColor[GSCOLOR_DEFAULT], index, 1);
-		GadgetListBoxSetItemData(buddyControls.listboxBuddies, (void *)(profileID), index, 0 );
+		GadgetListBoxSetItemData(buddyControls.listboxBuddies, (void *)(intptr_t)(profileID), index, 0 );
 		GadgetListBoxSetItemData(buddyControls.listboxBuddies, (void *)(ITEM_BUDDY), index, 1 );
 
 		if (profileID == selectedProfile)
@@ -469,7 +474,7 @@ void updateBuddyInfo( void )
 		UnicodeString formatStr;
 		formatStr.translate(info.m_name.str());
 		int index = GadgetListBoxAddEntryText(buddyControls.listboxBuddies, formatStr, GameSpyColor[GSCOLOR_DEFAULT], -1, -1);
-		GadgetListBoxSetItemData(buddyControls.listboxBuddies, (void *)(profileID), index, 0 );
+		GadgetListBoxSetItemData(buddyControls.listboxBuddies, (void *)(intptr_t)(profileID), index, 0 );
 
 		// insert status into box
 		formatStr = TheGameText->fetch("GUI:BuddyAddReq");
@@ -514,7 +519,7 @@ void HandleBuddyResponses( void )
 				break;
 			case BuddyResponse::BUDDYRESPONSE_MESSAGE:
 				{
-					if ( !wcscmp(resp.arg.message.text, L"I have authorized your request to add me to your list") )
+					if ( !WideCharCmp(resp.arg.message.text, u"I have authorized your request to add me to your list") )
 						break;
 
 					if (TheGameSpyInfo->isSavedIgnored(resp.profile))
@@ -619,7 +624,7 @@ void HandleBuddyResponses( void )
 					{
 						// insert status into box
 						AsciiString marker;
-						marker.format("Buddy:%lsNotification", info.m_statusString.str());
+						marker.format("Buddy:%sNotification", WideCharAsUtf8( info.m_statusString.str() ).str());
 
 						lastNotificationWasStatus = TRUE;
 						if (newStatus != GP_OFFLINE)
@@ -644,7 +649,7 @@ void HandleBuddyResponses( void )
 	{
 		DEBUG_CRASH(("No buddy message queue!\n"));
 	}
-	if(noticeLayout && timeGetTime() > noticeExpires)
+	if(noticeLayout && Clock_Milliseconds() > noticeExpires)
 	{
 		deleteNotificationBox();
 	}
@@ -677,7 +682,7 @@ void showNotificationBox( AsciiString nick, UnicodeString message)
 		message.format(message, nick.str());
 	GadgetButtonSetText(win, message);
 	//GadgetStaticTextSetText(win, message);
-	noticeExpires = timeGetTime() + NOTIFICATION_EXPIRES;
+	noticeExpires = Clock_Milliseconds() + NOTIFICATION_EXPIRES;
 	noticeLayout->bringForward();
 
 	AudioEventRTS buttonClick("GUICommunicatorIncoming");
@@ -892,7 +897,7 @@ WindowMsgHandledType WOLBuddyOverlaySystem( GameWindow *window, UnsignedInt msg,
 						break;
 
 					Bool isBuddy = false, isRequest = false;
-					GPProfile profileID = (GPProfile)GadgetListBoxGetItemData(control, rc->pos);
+					GPProfile profileID = (GPProfile)(intptr_t)GadgetListBoxGetItemData(control, rc->pos);
 					UnicodeString nick = GadgetListBoxGetText(control, rc->pos);
 					BuddyInfoMap *buddies = TheGameSpyInfo->getBuddyMap();
 					BuddyInfoMap::iterator bIt;
@@ -1192,7 +1197,7 @@ void RequestBuddyAdd(Int profileID, AsciiString nick)
 	req.arg.addbuddy.id = profileID;
 	UnicodeString buddyAddstr;
 	buddyAddstr = TheGameText->fetch("GUI:BuddyAddReq");
-	wcsncpy(req.arg.addbuddy.text, buddyAddstr.str(), MAX_BUDDY_CHAT_LEN);
+	WideCharNCpy(req.arg.addbuddy.text, buddyAddstr.str(), MAX_BUDDY_CHAT_LEN);
 	req.arg.addbuddy.text[MAX_BUDDY_CHAT_LEN-1] = 0;
 	TheGameSpyBuddyMessageQueue->addRequest(req);
 
@@ -1425,7 +1430,7 @@ void refreshIgnoreList( void )
 		UnicodeString name;
 		name.translate(it->second);
 		Int pos = GadgetListBoxAddEntryText(listboxIgnore, name, GameMakeColor(255,100,100,255),-1);
-		GadgetListBoxSetItemData(listboxIgnore, (void *)it->first,pos );
+		GadgetListBoxSetItemData(listboxIgnore, (void *)(intptr_t)it->first,pos );
 		++it;
 	}
 	IgnoreList tempList;

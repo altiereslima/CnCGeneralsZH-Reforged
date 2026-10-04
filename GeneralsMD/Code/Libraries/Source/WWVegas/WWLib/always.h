@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -41,6 +43,11 @@
 #define ALWAYS_H
 
 #include <assert.h>
+// size_t, for the operator new declarations below.  MSVC's <assert.h> drags it in and clang's does
+// not, so it was never declared here on purpose - it was declared here by accident.
+#include <stddef.h>
+// __cdecl on those same declarations, and the CRT spellings for everything that includes this.
+#include "Platform/MSVCCompat.h"
 
 // Disable warning about exception handling not being enabled. It's used as part of STL - in a part of STL we don't use.
 #pragma warning(disable : 4530)
@@ -78,10 +85,10 @@
 	#define _OPERATOR_NEW_DEFINED_
 
 	extern void * __cdecl operator new		(size_t size);
-	extern void __cdecl operator delete		(void *p);
+	extern void __cdecl operator delete		(void *p) WW_NOEXCEPT_DELETE;
 
 	extern void * __cdecl operator new[]	(size_t size);
-	extern void __cdecl operator delete[]	(void *p);
+	extern void __cdecl operator delete[]	(void *p) WW_NOEXCEPT_DELETE;
 
 	// additional overloads to account for VC/MFC funky versions
 	extern void* __cdecl operator new			(size_t nSize, const char *, int);
@@ -93,7 +100,11 @@
 	// additional overloads for 'placement new'
 	//inline void* __cdecl operator new							(size_t s, void *p) { return p; }
 	//inline void __cdecl operator delete						(void *, void *p)		{ }
-#if !defined(_MSC_VER) || _MSC_VER < 1300	// VC7+ <new> already defines array placement new/delete
+// Was #if !defined(_MSC_VER) || _MSC_VER < 1300.  The comment is right about the reason and the
+// condition was right about MSVC, but it read "or any compiler that is not MSVC at all", and
+// every standard <new> defines these two - libc++ included, where declaring them again is a
+// redefinition with a mismatched exception specification.  Only pre-VC7 lacked them.
+#if defined(_MSC_VER) && _MSC_VER < 1300	// VC7+ <new> already defines array placement new/delete
 	inline void* __cdecl operator new[]						(size_t s, void *p) { return p; }
 	inline void __cdecl operator delete[]					(void *, void *p)		{ }
 #endif

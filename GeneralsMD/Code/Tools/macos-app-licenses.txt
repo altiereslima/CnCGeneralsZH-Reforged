@@ -1,0 +1,59 @@
+# Which licence covers each library generals links (P1 step 5).  Tools/make-macos-app.sh reads the
+# executable's link line from build.ninja and fails the bundle if any linked static library is not named
+# here, so a new dependency cannot ship without its licence.  Frameworks and system libraries (-lm, the
+# Apple frameworks) are the platform's and are not listed.
+#
+#   <library, as lib<name>.a on the link line>  <licence entry>
+# An entry is one of make-macos-app.sh's license_entry names.  A line "+ <entry>" adds an entry for code
+# compiled into another library, which the link line cannot show.
+
+# the game and the port's own libraries: GPL-3 with EA's additional terms (LICENSE.md)
+benchmark             game
+binkvideo             game
+compression           game
+d3dx9runtime          game
+engineshader          game
+ffshader              game
+ffvertex              game
+gameengine            game
+glyphrasteriser       game
+installroot           game
+milesaudio            game
+milesaudiomanager     game
+posixd3d9             game
+posixdevice           game
+sdl3shadercompile     game
+sdldevice             game
+sdlinput              game
+w3ddevice             game
+ww3d2                 game
+wwdebug               game
+wwlib                 game
+wwmath                game
+wwsaveload            game
+wwutil                game
+
+# vendored
+avcodec               ffmpeg
+avformat              ffmpeg
+avutil                ffmpeg
+swresample            ffmpeg
+swscale               ffmpeg
+SDL3                  sdl3
+sdl3_shadercross      shadercross
+freetype              freetype
+glslang               glslang
+glslang-default-resource-limits  glslang
+spirv-cross-c         spirv-cross
+spirv-cross-core      spirv-cross
+spirv-cross-glsl      spirv-cross
+spirv-cross-msl       spirv-cross
+litehtml              litehtml
+gumbo                 gumbo
+miniaudio             miniaudio
+gamespy               gamespy
+
+# compiled into another library
++ zlib                # Compression/ZLib, inside libcompression
++ lzhl                # Compression/LZHCompress (LZH-Light, Sergey Ignatchenko), inside libcompression
++ nanosvg             # compiled into HtmlOverlay.cpp, inside libgameengine
