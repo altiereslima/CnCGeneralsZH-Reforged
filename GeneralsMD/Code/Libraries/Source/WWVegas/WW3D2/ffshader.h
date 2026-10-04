@@ -15,11 +15,12 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*
 ** The fixed-function texture stages, written out as HLSL.
 **
-** D3D11 has no texture stage combiners, so RENDERER-ROADMAP.md's phase 2 has to say in a shader
+** D3D11 has no texture stage combiners, so the Direct3D 11 backend has to say in a shader
 ** what the stages were computing.  -ffprobe counted what the game actually asks for across four
 ** maps: 28 distinct combiner programs, never more than two stages, and a vocabulary of five
 ** operations over four arguments.  This turns one of those descriptions into the shader.
@@ -35,7 +36,7 @@
 #ifndef FFSHADER_H
 #define FFSHADER_H
 
-#include <d3d9.h>
+#include "ffstate.h"
 
 #include <string>
 
@@ -48,15 +49,15 @@ const unsigned MAXIMUM_COMBINER_STAGES = 4;
 // D3DTA_ALPHAREPLICATE the way the device does; the generator applies both.
 struct CombinerStage
 {
-	DWORD ColourOperation;
-	DWORD ColourArgument0;
-	DWORD ColourArgument1;
-	DWORD ColourArgument2;
-	DWORD AlphaOperation;
-	DWORD AlphaArgument0;
-	DWORD AlphaArgument1;
-	DWORD AlphaArgument2;
-	DWORD TextureCoordinateIndex;
+	FixedFunctionValue ColourOperation;
+	FixedFunctionValue ColourArgument0;
+	FixedFunctionValue ColourArgument1;
+	FixedFunctionValue ColourArgument2;
+	FixedFunctionValue AlphaOperation;
+	FixedFunctionValue AlphaArgument0;
+	FixedFunctionValue AlphaArgument1;
+	FixedFunctionValue AlphaArgument2;
+	FixedFunctionValue TextureCoordinateIndex;
 	bool  TextureBound;
 };
 
@@ -70,7 +71,7 @@ struct PixelPipelineDescription
 	bool AlphaTestEnabled;
 
 	// D3DCMP_*, the comparison the surviving alpha has to pass.
-	DWORD AlphaFunction;
+	FixedFunctionValue AlphaFunction;
 
 	bool FogEnabled;
 };
@@ -95,6 +96,21 @@ struct CombinerDescription
 	// position comes from SV_Position and one matrix, which is what keeps this off the varyings the
 	// two generators have to agree on.  SHADOW-MAP-PLAN.md phase 2.
 	bool ShadowReceiving = false;
+
+	// D3DRS_SPECULARENABLE: after the stages the pixel gains the vertex's specular colour, RGB only
+	// (D3DRENDERSTATETYPE: "added to the base color after the texture cascade but before alpha
+	// blending").  Every profile writes it, D3D9's included: D3D9 does the add only for its
+	// fixed-function stages, and a bound pixel shader, which the D3D9 profile's program is, replaces
+	// it ("Writing HLSL Shaders in Direct3D 9").  A normal mapped program adds its own highlight
+	// instead.  Initialised here for a caller that fills the rest field by field.
+	bool SpecularAdd = false;
+
+	// D3D11 only: the vertex half carries a fire's glow in the specular slot (VertexPipelineDescription::
+	// SmokeGlow), and it is added after the shadow and the smoke's own shade, scaled by the last
+	// stage's texel the way the stages scale the diffuse colour.  Baked into the vertex colour, the
+	// glow of a fire behind a plume went dark with the plume's far side.  Replaces SpecularAdd, whose
+	// slot it takes.  Initialised here for a caller that fills the rest field by field.
+	bool SmokeGlow = false;
 };
 
 // The normal mapped pixel program reads this many directional lights from its constants.  Slots
@@ -195,9 +211,112 @@ const unsigned NORMAL_MAPPED_LIGHTS = 4;
 // gentler one took a good share of the shadow off every building while the ground beside it took
 // all of it, which reads as the two being lit by different suns.  Full shadow from about a sixth
 // of white upward; only what is darker than that is protected.
-#define SHADOW_APPLY \
-	"    float shadow_lit = saturate(dot(current.rgb, float3(0.3333, 0.3333, 0.3333)) * 6.0);\n" \
+#define SHADOW_LIT \
+	"    float shadow_lit = saturate(dot(current.rgb, float3(0.3333, 0.3333, 0.3333)) * 6.0);\n"
+#define SHADOW_APPLY SHADOW_LIT \
 	"    current.rgb *= lerp(1.0, sun_reaching(input.Position), shadow_lit);\n"
+
+// The smoke in the sun's light, for the Direct3D 11 programs only: written after SHADOW_SAMPLING,
+// whose map and matrix it reads, and kept out of the SDL3 GPU text, which declares neither the
+// field it adds to the constant block nor a texture at t6.
+//
+// The smoke has a map of its own over the same sun (DX11BackendClass::Fill_Smoke_Map).  Each texel
+// holds three sums over the particles the sun sees through it: their optical depth, that times
+// their depth, and that times their depth squared plus their own thickness squared; its alpha holds
+// the depth of the one nearest the sun, which the particles' own shade is measured from.  Taken
+// together that is the smoke along the ray as one bell curve, with an amount, a centre and a
+// width, and how much of it lies between the sun and a pixel is the curve's integral up to the
+// pixel's depth.  A pixel under a plume gets all of it, a particle on the plume's near side gets
+// a little and one on its far side most, which is the self-shading.  Bilinear filtering is right
+// for this map where it is wrong for a depth map: the sums of a mixture are the mixture of the
+// sums.
+//
+// VolumeParameters.x is how dark a pixel behind the thickest smoke goes, zero on a frame with no
+// smoke in the map, and .y the same for a particle shading itself, with .w the power that keeps its
+// plume's sun side lit.  .z is one for a draw whose vertices are in camera space already, which is the
+// particles: they take the sun's map through four wide taps, because a smoke sprite drawn twenty
+// deep would otherwise pay the fifty taps the ground pays, twenty times over.
+#define VOLUMETRIC_SAMPLING \
+	"Texture2D SmokeMap : register(t6);\n" \
+	"SamplerState SmokeSampler : register(s6);\n" \
+	"\n" \
+	"bool sun_point(float4 position, out float3 sun)\n" \
+	"{\n" \
+	"    float2 ndc = float2(position.x * ShadowViewport.x * 2.0 - 1.0,\n" \
+	"                        1.0 - position.y * ShadowViewport.y * 2.0);\n" \
+	"    float4 at = mul(float4(ndc, position.z, 1.0), ShadowFromClip);\n" \
+	"    sun = float3(0.0, 0.0, 0.0);\n" \
+	"    if (at.w <= 0.0) return false;\n" \
+	"    at /= at.w;\n" \
+	"    sun = float3(0.5 * at.x + 0.5, 0.5 - 0.5 * at.y, at.z);\n" \
+	"    return sun.x >= 0.0 && sun.x <= 1.0 && sun.y >= 0.0 && sun.y <= 1.0;\n" \
+	"}\n" \
+	"\n" \
+	"float smoke_reaching(float4 position)\n" \
+	"{\n" \
+	"    float3 sun;\n" \
+	"    bool particle = VolumeParameters.z > 0.5;\n" \
+	"    float gain = particle ? VolumeParameters.y : VolumeParameters.x;\n" \
+	"    if (gain <= 0.0 || !sun_point(position, sun)) return 1.0;\n" \
+	"    float4 sums = SmokeMap.SampleLevel(SmokeSampler, sun.xy, 0);\n" \
+	"    if (sums.x < 0.001) return 1.0;\n" \
+	"    float centre = sums.y / sums.x;\n" \
+	"    float width = sqrt(max(sums.z / sums.x - centre * centre, 1e-10));\n" \
+	"    float behind = (sun.z - centre) / width;\n" \
+	"    float ahead;\n" \
+	"    if (particle) {\n" \
+	"        // A particle inside its own plume, measured from the plume's front: the particle\n" \
+	"        // nearest the sun in this texel (the map's alpha) has none of it ahead, and the share\n" \
+	"        // reaches all of it as far behind the centre as the front is ahead of it.  Raised to a\n" \
+	"        // power the sun side stays at nothing and the back darkens.  The bell curve's tails, and\n" \
+	"        // a ramp from a width in front of the centre, both darkened the sun side as well.  A\n" \
+	"        // front that bilinear filtering pulled back past the centre, at the plume's edge in the\n" \
+	"        // map, falls back to a width in front of it.\n" \
+	"        float front = (sums.w < centre) ? sums.w : centre - width;\n" \
+	"        float span = max(2.0 * (centre - front), 1e-6);\n" \
+	"        ahead = pow(saturate((sun.z - front) / span), VolumeParameters.w);\n" \
+	"    }\n" \
+	"    else {\n" \
+	"        // the bell curve's integral up to here, the logistic stand-in for the normal distribution\n" \
+	"        ahead = 1.0 / (1.0 + exp(-1.702 * behind));\n" \
+	"    }\n" \
+	"    return 1.0 - gain * (1.0 - exp(-sums.x * ahead));\n" \
+	"}\n" \
+	"\n" \
+	"float sun_reaching_coarse(float4 position)\n" \
+	"{\n" \
+	"    float3 sun;\n" \
+	"    if (ShadowParameters.z <= 0.0 || !sun_point(position, sun)) return 1.0;\n" \
+	"    if (sun.z < 0.0 || sun.z > 1.0) return 1.0;\n" \
+	"    float reach = ShadowParameters.x * ShadowParameters.w * 0.5;\n" \
+	"    float bias = ShadowParameters.y * 2.0;\n" \
+	"    float blocked = 0.0;\n" \
+	"    blocked += (ShadowMap.SampleLevel(ShadowSampler, sun.xy + float2(-reach, -reach), 0).r + bias < sun.z) ? 1.0 : 0.0;\n" \
+	"    blocked += (ShadowMap.SampleLevel(ShadowSampler, sun.xy + float2( reach, -reach), 0).r + bias < sun.z) ? 1.0 : 0.0;\n" \
+	"    blocked += (ShadowMap.SampleLevel(ShadowSampler, sun.xy + float2(-reach,  reach), 0).r + bias < sun.z) ? 1.0 : 0.0;\n" \
+	"    blocked += (ShadowMap.SampleLevel(ShadowSampler, sun.xy + float2( reach,  reach), 0).r + bias < sun.z) ? 1.0 : 0.0;\n" \
+	"    return 1.0 - ShadowParameters.z * (1.0 - ShadowSoftness.w) * (blocked * 0.25);\n" \
+	"}\n" \
+	"\n" \
+	"float light_reaching(float4 position)\n" \
+	"{\n" \
+	"    float sun = 1.0;\n" \
+	"    if (VolumeParameters.z > 0.5) sun = sun_reaching_coarse(position);\n" \
+	"    else sun = sun_reaching(position);\n" \
+	"    return sun * smoke_reaching(position);\n" \
+	"}\n" \
+	"\n"
+
+// The constant block's field for it, declared after SkyUp: DX11BackendClass::PixelConstantBlock.
+#define VOLUMETRIC_CONSTANTS \
+	"    float4 VolumeParameters;\n"
+
+// SHADOW_APPLY with the smoke in it.  A particle takes the shade whatever its own brightness: the
+// threshold is there for ground under the shroud, and on smoke it tied the shade to the colour, so
+// the fire's glow, lifting a dark plume over the threshold, made it take more shade and go darker.
+#define VOLUMETRIC_SHADOW_APPLY SHADOW_LIT \
+	"    if (VolumeParameters.z > 0.5) shadow_lit = 1.0;\n" \
+	"    current.rgb *= lerp(1.0, light_reaching(input.Position), shadow_lit);\n"
 
 // The HLSL for one description, or false when the description names an operation or an argument
 // this does not generate.  A refusal is not a failure: the caller keeps the fixed-function path for
@@ -206,10 +325,14 @@ const unsigned NORMAL_MAPPED_LIGHTS = 4;
 // is a sampler2D read with tex2D in one and a Texture2D beside a SamplerState read with Sample in
 // the other, the output semantic is COLOR against SV_Target, and the texture factor is a constant
 // register against a constant buffer.  The arithmetic between them is the same text.
+//
+// SDL3_GPU is the D3D11 text with its bindings rewritten for SDL3's GPU API (sdl3target.h): what the
+// Metal and Vulkan backend compiles through glslang and SPIRV-Cross (decision 4).
 enum CombinerShaderTarget
 {
 	COMBINER_SHADER_TARGET_D3D9,
-	COMBINER_SHADER_TARGET_D3D11
+	COMBINER_SHADER_TARGET_D3D11,
+	COMBINER_SHADER_TARGET_SDL3_GPU
 };
 
 bool CombinerShader_Generate(const CombinerDescription & description, CombinerShaderTarget target,

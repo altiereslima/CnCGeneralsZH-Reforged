@@ -14,7 +14,8 @@ feature that disappears without a word is the fastest way to have a pull request
 
 ## Commit messages
 
-English, Conventional Commits, imperative, and under 72 characters on the first line:
+English, Conventional Commits, imperative, lowercase, no full stop at the end, and under 72
+characters on the first line:
 
 ```
 type(scope): summary
@@ -22,7 +23,9 @@ type(scope): summary
 
 The type is one of `feat`, `fix`, `perf`, `build`, `refactor`, `docs` or `test`. The scope is the
 library or target the change lives in, such as `gameclient`, `gameengine`, `w3ddevice`, `ww3d2`,
-`wwlib` or `cmake`. A `docs` commit may leave the scope out.
+`wwlib` or `cmake`. A `docs` commit may leave the scope out. There is no `chore`, `wip` or `revert`:
+squash a work-in-progress commit into the one it belongs to, and undo a mistake by fixing it in a
+new commit.
 
 ```
 fix(gameclient): keep the minimap drag alive while the arrow keys scroll
@@ -32,17 +35,14 @@ docs: explain the pull request process
 
 Every pull request runs a check that reads the first line of each of its commits and fails the ones
 that do not match. Fix a failing message with `git rebase -i` on your own branch and force push it;
-nobody minds a rewritten pull request branch.
+nobody minds a rewritten pull request branch. The same check fails a merge commit inside the pull
+request, so bring your branch up to date with `git rebase main` rather than merging `main` into it.
 
 ## Before you open it
 
-Build Release and run the tests. The build is x64 only, and `-A Win32` stops at configure.
-
-```console
-cmake -S GeneralsMD/Code -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
-```
+Build Release and run the tests. One command does both on each platform: `build.bat Release test`
+on Windows, `./build-macos.sh Release test` on a Mac and `./build-linux.sh Release test` on Linux.
+The build is 64-bit only, and `-A Win32` stops at configure.
 
 A change to how the game behaves leaves a test behind that fails without it. Put the fix back to
 the old behaviour once and watch the test go red before you trust it.

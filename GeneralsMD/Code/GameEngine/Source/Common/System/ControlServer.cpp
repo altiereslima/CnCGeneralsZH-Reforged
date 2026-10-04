@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 // FILE: ControlServer.cpp ///////////////////////////////////////////////////////////////////////
 //
@@ -53,6 +54,33 @@
 // windows.h, which PreRTS.h already pulled in, brings Winsock 1.1 with it.  That is every call
 // this file makes, so it takes the one already on the table rather than starting the winsock2
 // header fight described in the hard constraints.
+//
+// Off Windows the same calls are BSD sockets, which Winsock copied.  The three names that are
+// only spelled differently get file-local POSIX definitions here, so the call sites below read as
+// they always did; the places where the two genuinely behave differently (startup, non-blocking,
+// SIGPIPE, EINTR, SO_REUSEADDR) are #if'd where they happen, each with its reason.
+#if !defined(_WIN32)
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+typedef int SOCKET;
+static const SOCKET INVALID_SOCKET = -1;
+static inline int closesocket( SOCKET s ) { return close( s ); }
+#endif
+
+// A send() to a client that has gone away raises SIGPIPE on POSIX, and its default is to end the
+// process: the ordinary way a -control session ends would kill the game.  Windows returns an
+// error instead.  macOS and the BSDs switch it off per socket (SO_NOSIGPIPE, set on accept below);
+// Linux has no such option and takes MSG_NOSIGNAL on each send instead.
+#if defined(MSG_NOSIGNAL) && !defined(SO_NOSIGPIPE)
+#define CONTROL_SEND_FLAGS MSG_NOSIGNAL
+#else
+#define CONTROL_SEND_FLAGS 0
+#endif
 
 // ------------------------------------------------------------------------------------------------
 // sizes and constants
@@ -245,7 +273,9 @@ Bool ControlServer_computeAcceptKey( const char *clientKey, char *out, Int outSi
 
 static SOCKET theListenSocket = INVALID_SOCKET;
 static SOCKET theClientSocket = INVALID_SOCKET;
+#if defined(_WIN32)
 static Bool theWinsockStarted = FALSE;
+#endif
 static Bool theHandshakeDone = FALSE;
 static std::vector<char> theIncoming;
 static std::vector<AsciiString> thePendingCommands;
@@ -264,12 +294,18 @@ static void closeClient( void )
 
 static Bool setNonBlocking( SOCKET s )
 {
+#if !defined(_WIN32)
+	const int flags = fcntl( s, F_GETFL, 0 );
+	return flags != -1 && fcntl( s, F_SETFL, flags | O_NONBLOCK ) == 0;
+#else
 	unsigned long nonBlocking = 1;
 	return ioctlsocket( s, FIONBIO, &nonBlocking ) == 0;
+#endif
 }
 
 static Bool openListenSocket( Int port )
 {
+#if defined(_WIN32)
 	WSADATA wsaData;
 	if (!theWinsockStarted)
 	{
@@ -280,6 +316,7 @@ static Bool openListenSocket( Int port )
 		}
 		theWinsockStarted = TRUE;
 	}
+#endif
 
 	theListenSocket = socket( AF_INET, SOCK_STREAM, IPPROTO_TCP );
 	if (theListenSocket == INVALID_SOCKET)
@@ -293,6 +330,16 @@ static Bool openListenSocket( Int port )
 	address.sin_family = AF_INET;
 	address.sin_port = htons( (unsigned short)port );
 	address.sin_addr.s_addr = htonl( CONTROL_LOOPBACK_ONLY );
+
+#if !defined(_WIN32)
+	/* POSIX only, and on purpose.  Here SO_REUSEADDR only lets bind() reuse a port still in
+		 TIME_WAIT from the last session; a second live listener is still refused, so "loopback only,
+		 therefore no authentication" holds.  Without it a restart within a minute or two gets
+		 EADDRINUSE, and the poll below then turns -control off for the whole run.  On Windows the
+		 same option lets another process bind over a live listener, so it is not set there. */
+	const int reuse = 1;
+	setsockopt( theListenSocket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof( reuse ) );
+#endif
 
 	if (bind( theListenSocket, (sockaddr *)&address, sizeof( address ) ) != 0
 			|| listen( theListenSocket, CONTROL_BACKLOG ) != 0
@@ -345,7 +392,7 @@ static void sendFrame( unsigned char opcode, const char *payload, Int length )
 	for( Int i = 0; i < length; ++i )
 		frame.push_back( payload[ i ] );
 
-	send( theClientSocket, &frame[ 0 ], (Int)frame.size(), 0 );
+	send( theClientSocket, &frame[ 0 ], (Int)frame.size(), CONTROL_SEND_FLAGS );
 }
 
 static void sendText( const char *text )
@@ -487,7 +534,7 @@ static Bool tryHandshake( void )
 					 "Connection: Upgrade\r\n"
 					 "Sec-WebSocket-Accept: %s\r\n\r\n",
 					 acceptKey );
-	send( theClientSocket, reply, (Int)strlen( reply ), 0 );
+	send( theClientSocket, reply, (Int)strlen( reply ), CONTROL_SEND_FLAGS );
 
 	const Int consumed = (Int)(end - request) + 4;
 	theIncoming.erase( theIncoming.begin(), theIncoming.begin() + consumed );
@@ -901,6 +948,10 @@ void ControlServer_poll( void )
 			return;
 		theClientSocket = accepted;
 		setNonBlocking( theClientSocket );
+#if defined(SO_NOSIGPIPE)
+		const int noSigPipe = 1;			// see CONTROL_SEND_FLAGS
+		setsockopt( theClientSocket, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, sizeof( noSigPipe ) );
+#endif
 		theHandshakeDone = FALSE;
 		theIncoming.clear();
 	}
@@ -930,7 +981,14 @@ void ControlServer_poll( void )
 			return;
 		}
 
+#if !defined(_WIN32)
+		// A signal interrupting recv() is not the client; Windows has no counterpart to retry for.
+		if (errno == EINTR)
+			continue;
+		if (errno != EAGAIN && errno != EWOULDBLOCK)
+#else
 		if (WSAGetLastError() != WSAEWOULDBLOCK)
+#endif
 		{
 			closeClient();
 			return;
@@ -997,9 +1055,11 @@ void ControlServer_shutdown( void )
 		theListenSocket = INVALID_SOCKET;
 	}
 
+#if defined(_WIN32)
 	if (theWinsockStarted)
 	{
 		WSACleanup();
 		theWinsockStarted = FALSE;
 	}
+#endif
 }

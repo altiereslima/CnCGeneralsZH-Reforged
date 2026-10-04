@@ -1,0 +1,47 @@
+# Two Comanches, in slot 1 so the targets in slot 0 take the scenario's orders rather than the
+# computer's. The first hovers while an Overlord, which cannot shoot at aircraft, drives two laps of
+# a circle 100 round it with the Comanche on it. The second is put on four Red Guards and 50 frames
+# later sent 800 east, past them 130 off its line.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 1300
+#     -scenario comturret -logPrefix comturret_
+#
+# Measured 2026-10-03 with a temporary per-frame log of heading, gun angle and last shot. Before,
+# the cannon and the missiles shared a turret that could not turn, so the gun always pointed down
+# the nose: the strafing Comanche turned 132 degrees to keep its nose on the Red Guards and slid
+# along beside them. After, it turns 34 degrees, flies with its nose 64 degrees off the target on
+# average, and the chin gun swings 207 degrees, out to the full 120 off the nose, and stays within
+# 4 degrees of the target; 18 shots against 19. Against the circling Overlord the missiles still
+# turn the nose, and between volleys the gun takes over: the body turned 673 degrees over two laps
+# where it turned 712, the gun 689 out to 120 off the nose, and the nose sat 63 degrees off the tank
+# on average where it sat on it. 256 shots against 285; the Overlord ended on 84 health against 42.
+
+30    spawn         1  AmericaVehicleComanche        1   1200 3700
+30    spawn         0  ChinaTankOverlord             1   1300 3700
+150   attack        1  AmericaVehicleComanche        0  ChinaTankOverlord
+160   move          0  ChinaTankOverlord                 1271 3771
+220   move          0  ChinaTankOverlord                 1200 3800
+280   move          0  ChinaTankOverlord                 1129 3771
+340   move          0  ChinaTankOverlord                 1100 3700
+400   move          0  ChinaTankOverlord                 1129 3629
+460   move          0  ChinaTankOverlord                 1200 3600
+520   move          0  ChinaTankOverlord                 1271 3629
+580   move          0  ChinaTankOverlord                 1300 3700
+640   move          0  ChinaTankOverlord                 1271 3771
+700   move          0  ChinaTankOverlord                 1200 3800
+760   move          0  ChinaTankOverlord                 1129 3771
+820   move          0  ChinaTankOverlord                 1100 3700
+880   move          0  ChinaTankOverlord                 1129 3629
+940   move          0  ChinaTankOverlord                 1200 3600
+1000  move          0  ChinaTankOverlord                 1271 3629
+1060  move          0  ChinaTankOverlord                 1300 3700
+1200  tally         0  ChinaTankOverlord
+
+30    spawn         1  AirF_AmericaVehicleComanche   1   1100 4500
+30    spawn         0  ChinaInfantryRedguard         4   1300 4630
+150   attack        1  AirF_AmericaVehicleComanche   0  ChinaInfantryRedguard
+200   move          1  AirF_AmericaVehicleComanche       1900 4500
+200   tally         0  ChinaInfantryRedguard
+500   tally         0  ChinaInfantryRedguard

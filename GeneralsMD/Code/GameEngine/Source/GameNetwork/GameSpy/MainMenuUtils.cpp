@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -30,12 +32,19 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
 
 #include <fcntl.h>
+#if !defined(_WIN32)
+#include <netdb.h>			// gethostbyname, for the patch server lookup
+#include <sys/stat.h>
+#include <thread>				// the lookup's worker, where Windows uses CreateThread
+#include <unistd.h>
+#endif
 
 //#include "Common/Registry.h"
 #include "Common/UserPreferences.h"
-#include "Common/Version.h"
+#include "Common/version.h"
 #include "GameClient/GameText.h"
 #include "GameClient/MessageBox.h"
 #include "GameClient/Shell.h"
@@ -43,9 +52,9 @@
 
 #include "GameClient/ShellHooks.h"
 
-#include "GameSpy/ghttp/ghttp.h"
+#include "gamespy/ghttp/ghttp.h"
 // Must follow ghttp.h: gsavailable.h uses gsi_char without including gsplatform.h.
-#include "GameSpy/gsavailable.h"
+#include "gamespy/gsavailable.h"
 
 #include "GameNetwork/DownloadManager.h"
 #include "GameNetwork/GameSpy/BuddyThread.h"
@@ -54,7 +63,7 @@
 #include "GameNetwork/GameSpy/PeerThread.h"
 
 #include "WWDownload/Registry.h"
-#include "WWDownload/URLBuilder.h"
+#include "WWDownload/urlBuilder.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -86,7 +95,9 @@ GameWindow *onlineCancelWindow = NULL;
 static Bool s_asyncDNSThreadDone = TRUE;
 static Bool s_asyncDNSThreadSucceeded = FALSE;
 static Bool s_asyncDNSLookupInProgress = FALSE;
+#if defined(_WIN32)
 static HANDLE s_asyncDNSThreadHandle = NULL;
+#endif
 enum {
 	LOOKUP_INPROGRESS,
 	LOOKUP_FAILED,
@@ -167,16 +178,26 @@ static Bool hasWriteAccess()
 {
 	const char* filename = "PatchAccessTest.txt";	
 
-	remove(filename);
+	zh_remove(filename);
 
-	int handle = _open( filename, _O_CREAT | _O_RDWR, _S_IREAD | _S_IWRITE);
+#if defined(_WIN32)
+	int handle = zh_open( filename, _O_CREAT | _O_RDWR, _S_IREAD | _S_IWRITE);
+#else
+	// Through zh_open like the Windows line, so a read-only install root (P1) answers "no write
+	// access" here rather than being written to
+	int handle = zh_open( filename, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR );
+#endif
 	if (handle == -1)
 	{
 		return false;
 	}
 
+#if defined(_WIN32)
 	_close(handle);
-	remove(filename);
+#else
+	close(handle);
+#endif
+	zh_remove(filename);
 	
 	unsigned int val;
 	if (!GetUnsignedIntFromRegistry("", "Version", val))
@@ -347,7 +368,7 @@ static GHTTPBool motdCallback( GHTTPRequest request, GHTTPResult result,
 	// the SDK widened its byte count to 64 bits; the body wants the old Int.
 	Int bufferLen = (Int)bufferLen64;
 	(void)bufferLen;	// only read by DEBUG_LOG in some of these, which Release compiles out
-	Int run = (Int)param;
+	Int run = (Int)(intptr_t)param;
 	if (run != timeThroughOnline)
 	{
 		DEBUG_CRASH(("Old callback being called!"));
@@ -390,7 +411,7 @@ static GHTTPBool configCallback( GHTTPRequest request, GHTTPResult result,
 	// the SDK widened its byte count to 64 bits; the body wants the old Int.
 	Int bufferLen = (Int)bufferLen64;
 	(void)bufferLen;	// only read by DEBUG_LOG in some of these, which Release compiles out
-	Int run = (Int)param;
+	Int run = (Int)(intptr_t)param;
 	if (run != timeThroughOnline)
 	{
 		DEBUG_CRASH(("Old callback being called!"));
@@ -427,7 +448,7 @@ static GHTTPBool configCallback( GHTTPRequest request, GHTTPResult result,
 
 	AsciiString fname;
 	fname.format("%sGeneralsOnline\\Config.txt", TheGlobalData->getPath_UserData().str());
-	FILE *fp = fopen(fname.str(), "wb");
+	FILE *fp = zh_fopen(fname.str(), "wb");
 	if (fp)
 	{
 		fwrite(configBuffer, bufferLen, 1, fp);
@@ -458,7 +479,7 @@ static GHTTPBool configHeadCallback( GHTTPRequest request, GHTTPResult result,
 	// the SDK widened its byte count to 64 bits; the body wants the old Int.
 	Int bufferLen = (Int)bufferLen64;
 	(void)bufferLen;	// only read by DEBUG_LOG in some of these, which Release compiles out
-	Int run = (Int)param;
+	Int run = (Int)(intptr_t)param;
 	if (run != timeThroughOnline)
 	{
 		DEBUG_CRASH(("Old callback being called!"));
@@ -485,7 +506,7 @@ static GHTTPBool configHeadCallback( GHTTPRequest request, GHTTPResult result,
 				Int fileLen = 0;
 				AsciiString fname;
 				fname.format("%sGeneralsOnline\\Config.txt", TheGlobalData->getPath_UserData().str());
-				FILE *fp = fopen(fname.str(), "rb");
+				FILE *fp = zh_fopen(fname.str(), "rb");
 				if (fp)
 				{
 					fseek(fp, 0, SEEK_END);
@@ -512,7 +533,7 @@ static GHTTPBool configHeadCallback( GHTTPRequest request, GHTTPResult result,
 
 					AsciiString fname;
 					fname.format("%sGeneralsOnline\\Config.txt", TheGlobalData->getPath_UserData().str());
-					FILE *fp = fopen(fname.str(), "rb");
+					FILE *fp = zh_fopen(fname.str(), "rb");
 					if (fp)
 					{
 						configBuffer = NEW char[fileLen];
@@ -548,7 +569,7 @@ static GHTTPBool gamePatchCheckCallback( GHTTPRequest request, GHTTPResult resul
 	// the SDK widened its byte count to 64 bits; the body wants the old Int.
 	Int bufferLen = (Int)bufferLen64;
 	(void)bufferLen;	// only read by DEBUG_LOG in some of these, which Release compiles out
-	Int run = (Int)param;
+	Int run = (Int)(intptr_t)param;
 	if (run != timeThroughOnline)
 	{
 		DEBUG_CRASH(("Old callback being called!"));
@@ -704,6 +725,7 @@ void CheckNumPlayersOnline( void )
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
+#if defined(_WIN32)
 DWORD WINAPI asyncGethostbynameThreadFunc( void * szName )
 {
 	HOSTENT *he = gethostbyname( (const char *)szName );
@@ -720,24 +742,48 @@ DWORD WINAPI asyncGethostbynameThreadFunc( void * szName )
 	s_asyncDNSThreadDone = TRUE;
 	return 0;
 }
+#else
+/* The same lookup, on a std::thread where Windows uses CreateThread: gethostbyname is POSIX too.  The
+	 two flags are shared with the polling below exactly as they are on Windows, unsynchronised; the
+	 host is a dead service's and the answer only decides whether to offer a patch check. */
+static void asyncGethostbynameThreadFunc( const char *szName )
+{
+	struct hostent *he = gethostbyname( szName );
+	s_asyncDNSThreadSucceeded = (he != NULL) ? TRUE : FALSE;
+	s_asyncDNSThreadDone = TRUE;
+}
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
 int asyncGethostbyname(char * szName)
 {
 	static int            stat = 0;
+#if defined(_WIN32)
 	static unsigned long  threadid;
+#endif
 
 	if( stat == 0 )
 	{
 		/* Kick off gethostname thread */
 		s_asyncDNSThreadDone = FALSE;
+#if defined(_WIN32)
 		s_asyncDNSThreadHandle = CreateThread( NULL, 0, asyncGethostbynameThreadFunc, szName, 0, &threadid );
 
 		if( s_asyncDNSThreadHandle == NULL )
 		{
 			return( LOOKUP_FAILED );
 		}
+#else
+		try
+		{
+			std::thread( asyncGethostbynameThreadFunc, (const char *)szName ).detach();
+		}
+		catch( ... )		// a thread that cannot start, as a NULL handle from CreateThread above
+		{
+			return( LOOKUP_FAILED );
+		}
+#endif
 		stat = 1;
 	}
 	if( stat == 1 )
@@ -747,7 +793,9 @@ int asyncGethostbyname(char * szName)
 			/* Thread finished */
 			stat = 0;
 			s_asyncDNSLookupInProgress = FALSE;
+#if defined(_WIN32)
 			s_asyncDNSThreadHandle = NULL;
+#endif
 			return( (s_asyncDNSThreadSucceeded)?LOOKUP_SUCCEEDED:LOOKUP_FAILED );
 		}
 	}
@@ -822,6 +870,7 @@ void HTTPThinkWrapper( void )
 
 void StopAsyncDNSCheck( void )
 {
+#if defined(_WIN32)
 	if (s_asyncDNSThreadHandle)
 	{
 #ifdef DEBUG_CRASHING
@@ -831,6 +880,10 @@ void StopAsyncDNSCheck( void )
 		DEBUG_ASSERTCRASH(res, ("Could not terminate the Async DNS Lookup thread!"));	// Thread still not killed!
 	}
 	s_asyncDNSThreadHandle = NULL;
+#endif
+	// Off Windows the lookup's thread is detached and cannot be killed: it finishes its lookup and
+	// sets flags that nothing is polling for any more.  Its host name is a string literal, so nothing
+	// it reads goes away under it.
 	s_asyncDNSLookupInProgress = FALSE;
 }
 
@@ -890,10 +943,10 @@ static void reallyStartPatchCheck( void )
 	DEBUG_LOG(("Map patch check: [%s]\n", mapURL.c_str()));
 	DEBUG_LOG(("Config: [%s]\n", configURL.c_str()));
 	DEBUG_LOG(("MOTD: [%s]\n", motdURL.c_str()));
-	ghttpGet(gameURL.c_str(), GHTTPFalse, gamePatchCheckCallback, (void *)timeThroughOnline);
-	ghttpGet(mapURL.c_str(), GHTTPFalse, gamePatchCheckCallback, (void *)timeThroughOnline);
-	ghttpHead(configURL.c_str(), GHTTPFalse, configHeadCallback, (void *)timeThroughOnline);
-	ghttpGet(motdURL.c_str(), GHTTPFalse, motdCallback, (void *)timeThroughOnline);
+	ghttpGet(gameURL.c_str(), GHTTPFalse, gamePatchCheckCallback, (void *)(intptr_t)timeThroughOnline);
+	ghttpGet(mapURL.c_str(), GHTTPFalse, gamePatchCheckCallback, (void *)(intptr_t)timeThroughOnline);
+	ghttpHead(configURL.c_str(), GHTTPFalse, configHeadCallback, (void *)(intptr_t)timeThroughOnline);
+	ghttpGet(motdURL.c_str(), GHTTPFalse, motdCallback, (void *)(intptr_t)timeThroughOnline);
 	
 	// check total game stats
 	CheckOverallStats();

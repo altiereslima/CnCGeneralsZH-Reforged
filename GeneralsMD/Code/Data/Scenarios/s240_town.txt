@@ -1,0 +1,26 @@
+# A wide battle at the town crossroads of Tournament Desert (1020,1350) for the 2.4.0 Shorts:
+# America from the south, the GLA from the north, both attack-moving onto the crossroads, an A-10
+# strike and an anthrax bomb called into it.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 5000 -map "Maps\Tournament Desert\Tournament Desert.map" -autoskirmish 2
+#     -takeover -side 0 FactionAmerica -side 1 FactionGLA -seed 7 -scenario s240_town
+#     -cinema s240_town -video 360 780 s240_town -maxframes 790
+
+10    spawn      0  AmericaCommandCenter            1   start0:240:60
+10    spawn      1  GLACommandCenter                1   start1:-260:0
+
+30    spawn      0  AmericaTankCrusader             10  1020 960   36
+30    spawn      0  AmericaTankPaladin              4   960 900    40
+30    spawn      0  AmericaInfantryRanger           12  1080 1000  18
+30    spawn      0  AmericaVehicleComanche          3   1000 860   60
+30    spawn      1  GLATankScorpion                 10  1020 1740  36
+30    spawn      1  GLATankMarauder                 4   960 1800   40
+30    spawn      1  GLAVehicleRocketBuggy           6   1090 1790  32
+30    spawn      1  GLAVehicleQuadCannon            3   1100 1700  36
+30    spawn      1  GLAInfantryRebel                12  1000 1690  18
+60    attackmove 0  *  1020 1350
+60    attackmove 1  *  1020 1350
+
+460   power      0  AmericaCommandCenter  1040 1330  SuperweaponA10ThunderboltMissileStrike
+540   power      1  GLACommandCenter      990 1370   SuperweaponAnthraxBomb

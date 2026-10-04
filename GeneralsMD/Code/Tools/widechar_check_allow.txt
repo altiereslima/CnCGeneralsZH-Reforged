@@ -1,0 +1,28 @@
+# widechar_check's exceptions: wchar_t in the POSIX build that is meant to be wchar_t.
+# One per line: path<TAB>token<TAB>reason.  A token is what the check reports (wchar_t, L", L',
+# wstring, or a function name), or * for every finding in the file.  An entry without a reason fails
+# the check.  Adding a line here is a claim that no WideChar text passes through the named code;
+# write down why that is true, not merely that the check complained.
+
+GameEngine/Source/Common/System/WideCharFns.cpp	*	the POSIX format funnel's own internals: it builds one-conversion wchar_t sub-formats for swprintf and uses vswscanf, converting explicitly to and from WideChar at its edges (B1)
+Tests/widechar_gate_msvc_crt.cpp	*	emulates MSVC's two-byte CRT for the -fshort-wchar gate; wchar_t IS the subject
+GameEngine/Include/Common/EarlyCommandLine.h	*	reads GetCommandLineW's wchar_t command line before the parser exists - Windows' only intact copy of it; must not be retyped (B1 survey 1.2); off Windows the same reader runs over argv joined into the same wchar_t shape (processCommandLineW, C2), a byte per unit, never WideChar text
+GameEngine/Source/Common/System/Debug.cpp	L"	-headless and -logPrefix, passed to EarlyCommandLine.h's wchar_t reader
+GameEngine/Source/Common/System/JobSystem.cpp	L"	-jobthreads, passed to EarlyCommandLine.h's wchar_t reader
+Tests/test_gameengine.cpp	L"	an_option_read_before_the_parser_exists_is_read_on_word_boundaries tests EarlyCommandLine.h's wchar_t reader
+Tests/test_gameengine.cpp	wchar_t	the same EarlyCommandLine.h test's command line
+Tests/test_early_command_line.cpp	L"	option names passed to EarlyCommandLine.h's wchar_t reader, the test's subject
+Tests/test_early_command_line.cpp	L'	the separator in processCommandLineW's wchar_t command line, which the test walks
+Tests/test_early_command_line.cpp	wchar_t	processCommandLineW's wchar_t command line, which the test walks
+Main/PosixMain.cpp	L"	-multiInstance, passed to EarlyCommandLine.h's wchar_t reader as WinMain.cpp does
+Tests/test_wwlib.cpp	*	tests WWLib's wchar_t helpers (WideStringClass, wcstrim, wcslcpy), which are not WideChar
+Libraries/Source/WWVegas/WWLib/trim.cpp	*	WWLib's wchar_t wcstrim; takes wchar_t*, so WideChar text cannot reach it without a compile error
+Libraries/Source/WWVegas/WWLib/trim.h	*	declares WWLib's wchar_t wcstrim (see trim.cpp)
+Libraries/Source/WWVegas/WWLib/readline.cpp	*	WWLib's wchar_t line reader for WideStringClass; not engine text, and a WideChar* would not compile
+Libraries/Source/WWVegas/WWLib/readline.h	*	declares WWLib's wchar_t line reader (see readline.cpp)
+Libraries/Source/WWVegas/WWLib/stringex.h	*	WWLib's generic wcslcpy/wcslcat over wchar_t, beside strlcpy; a WideChar* would not compile
+Libraries/Source/WWVegas/WWLib/wwstring.cpp	*	StringClass's wchar_t conversions for WWLib's own wide strings; not WideChar
+Libraries/Source/WWVegas/WWLib/ini.h	*	INIClass::Put_Wide_String/Get_Wide_String take WWLib's wchar_t strings; no engine caller (B1 survey)
+Libraries/Include/Platform/MSVCCompat.h	*	_wcsnicmp, whose one caller is EarlyCommandLine.h matching option names against the wchar_t command line (see that entry); takes wchar_t*, so WideChar text cannot reach it without a compile error
+Tests/test_widechar_file.cpp	L'	the control test writes one wchar_t with fputwc on a byte-oriented stream, to show the replay defect C1 (g) removed; no WideChar text is involved
+Tests/test_widechar_file.cpp	fputwc	the same control test (see the L' entry)

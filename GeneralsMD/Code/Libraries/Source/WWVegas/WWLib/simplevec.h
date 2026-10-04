@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -252,7 +253,11 @@ inline bool SimpleVecClass<T>::Uninitialised_Grow(int newsize)
 ** objects.  This will cause it to resize to at least that size if it needs to resize.  Just
 ** leave the parameter at its default value for default behavior.
 */
-template <class T> class SimpleDynVecClass : public SimpleVecClass<T>
+template <class T> // this-> on Vector, Length and VectorMax in this class: they are members of SimpleVecClass<T>, a
+// dependent base, so the standard does not look them up until instantiation.  MSVC under
+// /permissive binds them at definition time - this is the 'simplevec.h et al' that the comment
+// in CMakeLists.txt is about.  ActiveCount is this class's own and needs no qualification.
+class SimpleDynVecClass : public SimpleVecClass<T>
 {
 public:
 
@@ -261,8 +266,8 @@ public:
 
 	// Array-like access (does not grow)
 	int				Count(void) const						{ return(ActiveCount); }
-	T &				operator[](int index)				{ assert(index < ActiveCount); return(Vector[index]); } 
-	T const &		operator[](int index) const		{ assert(index < ActiveCount); return(Vector[index]); }
+	T &				operator[](int index)				{ assert(index < ActiveCount); return(this->Vector[index]); } 
+	T const &		operator[](int index) const		{ assert(index < ActiveCount); return(this->Vector[index]); }
 
 	// Change maximum size of vector
 	virtual bool	Resize(int newsize);
@@ -325,9 +330,9 @@ inline SimpleDynVecClass<T>::SimpleDynVecClass(int size) :
 template<class T>
 inline SimpleDynVecClass<T>::~SimpleDynVecClass(void)
 {
-	if (Vector != NULL) {
-		delete[] Vector;
-		Vector = NULL;
+	if (this->Vector != NULL) {
+		delete[] this->Vector;
+		this->Vector = NULL;
 	}
 }
 
@@ -348,7 +353,7 @@ template<class T>
 inline bool SimpleDynVecClass<T>::Resize(int newsize)
 {
 	if (SimpleVecClass<T>::Resize(newsize)) {
-		if (Length() < ActiveCount) ActiveCount = Length();
+		if (this->Length() < ActiveCount) ActiveCount = this->Length();
 		return(true);
 	}
 	return(false);
@@ -370,7 +375,7 @@ inline bool SimpleDynVecClass<T>::Resize(int newsize)
 template<class T>
 inline bool SimpleDynVecClass<T>::Add(T const & object,int new_size_hint)
 {
-	if (ActiveCount >= VectorMax) {
+	if (ActiveCount >= this->VectorMax) {
 		
 		/*
 		** We are out of space so tell the vector to grow
@@ -406,7 +411,7 @@ inline T *  SimpleDynVecClass<T>::Add_Multiple( int number_to_add )
 	int index = ActiveCount;
 	ActiveCount += number_to_add;
 
-	if (ActiveCount >= VectorMax) {
+	if (ActiveCount >= this->VectorMax) {
 		
 		/*
 		** We are out of space so tell the vector to grow
@@ -414,7 +419,7 @@ inline T *  SimpleDynVecClass<T>::Add_Multiple( int number_to_add )
 		Grow( ActiveCount );
 	}
 
-	return &Vector[index];
+	return &this->Vector[index];
 }
 
 
@@ -445,7 +450,7 @@ inline bool SimpleDynVecClass<T>::Delete(int index,bool allow_shrink)
 	** cannot be used for classes that cannot be memcopied!!
 	*/
 	if (index < ActiveCount-1) {
-		memmove(&(Vector[index]),&(Vector[index+1]),(ActiveCount - index - 1) * sizeof(T));
+		memmove(&(this->Vector[index]),&(this->Vector[index+1]),(ActiveCount - index - 1) * sizeof(T));
 	}
 	ActiveCount--;
 
@@ -514,7 +519,7 @@ inline bool SimpleDynVecClass<T>::Delete_Range(int start,int count,bool allow_sh
 	** cannot be used for classes that cannot be memcopied!!
 	*/
 	if (start < ActiveCount - count) {
-		memmove(&(Vector[start]),&(Vector[start + count]),(ActiveCount - start - count) * sizeof(T));
+		memmove(&(this->Vector[start]),&(this->Vector[start + count]),(ActiveCount - start - count) * sizeof(T));
 	}
 
 	ActiveCount -= count;
@@ -577,7 +582,7 @@ inline bool SimpleDynVecClass<T>::Grow(int new_size_hint)
 	** Vector should grow to 25% bigger, grow at least 4 elements,
 	** and grow at least up to the user's new_size_hint
 	*/
-	int new_size = MAX(Length() + Length()/4,Length() + 4);
+	int new_size = MAX(this->Length() + this->Length()/4,this->Length() + 4);
 	new_size = MAX(new_size,new_size_hint);
 	
 	return Resize(new_size);
@@ -603,7 +608,7 @@ inline bool SimpleDynVecClass<T>::Shrink(void)
 	/*
 	** Shrink the array if it is wasting more than 25%
 	*/
-	if (ActiveCount < VectorMax/4) {
+	if (ActiveCount < this->VectorMax/4) {
 		return Resize(ActiveCount);
 	}
 	return true;

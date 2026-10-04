@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -39,6 +40,8 @@
 
 #include	"win.h"
 #include	"xmouse.h"
+
+#include <atomic>
 
 class BSurface;
 
@@ -127,13 +130,18 @@ class WWMouseClass : public Mouse {
 		**	and the mouse class maintain a strict master/slave relationship, a
 		**	simple critial section flag is all that is needed.
 		*/
-		long Blocked;
+		/* Both of these were plain `long`s driven by InterlockedIncrement/Decrement (B14).
+			 std::atomic<long> says it in the type rather than at five call sites, and the reads -
+			 Is_Blocked and Is_Hidden, which load values another thread writes - become defined rather
+			 than merely usually-right.  Both stay signed: MouseState starts at -1 and Blocked was
+			 allowed to go negative. */
+		std::atomic<long> Blocked;
 
 		/*
 		**	Mouse hide/show state. If zero or greater, the mouse is visible. Otherwise
 		**	it is invisible.
 		*/
-		long MouseState;
+		std::atomic<long> MouseState;
 
 		/*
 		**	If the mouse is being managed by this class (for the game), then this flag
@@ -232,11 +240,11 @@ class WWMouseClass : public Mouse {
 		void Low_Show_Mouse(void);
 		void Low_Hide_Mouse(void);
 
-		void Block_Mouse(void) {InterlockedIncrement(&Blocked);/*Blocked++;*/}
-		void Unblock_Mouse(void) {InterlockedDecrement(&Blocked);/*Blocked--;*/}
-		bool Is_Blocked(void) const {return(Blocked != 0);}
+		void Block_Mouse(void) {Blocked.fetch_add(1, std::memory_order_acq_rel);}
+		void Unblock_Mouse(void) {Blocked.fetch_sub(1, std::memory_order_acq_rel);}
+		bool Is_Blocked(void) const {return(Blocked.load(std::memory_order_acquire) != 0);}
 
-		bool Is_Hidden(void) const {return(MouseState < 0);}
+		bool Is_Hidden(void) const {return(MouseState.load(std::memory_order_acquire) < 0);}
 };
 
 #endif

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,7 +31,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#if defined(_WIN32)
 #include <windows.h>
+#endif
 
 #include "Common/GameState.h"
 #include "Common/GlobalData.h"
@@ -57,14 +61,14 @@
 #include "W3DDevice/GameClient/W3DTerrainTracks.h"
 #include "W3DDevice/GameClient/W3DGranny.h"
 #include "W3DDevice/GameClient/W3DShadow.h"
-#include "W3DDevice/GameClient/heightmap.h"
-#include "W3DDevice/GameClient/FlatHeightmap.h"
+#include "W3DDevice/GameClient/HeightMap.h"
+#include "W3DDevice/GameClient/FlatHeightMap.h"
 #include "W3DDevice/GameClient/W3DSmudge.h"
 #include "W3DDevice/GameClient/Module/W3DModelDraw.h"
-#include "WW3D2/Light.h"
-#include "WW3D2/RendObj.h"
-#include "WW3D2/ColType.h"
-#include "WW3D2/ColTest.h"
+#include "WW3D2/light.h"
+#include "WW3D2/rendobj.h"
+#include "WW3D2/coltype.h"
+#include "WW3D2/coltest.h"
 #include "WW3D2/assetmgr.h"
 
 
@@ -918,6 +922,15 @@ void W3DTerrainVisual::addWaterVelocity( Real worldX, Real worldY,
 		m_waterRenderObject->addVelocity( worldX, worldY, velocity, preferredHeight );
 
 }  // end addWaterVelocity
+
+// ------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
+void W3DTerrainVisual::updateWaterGrid( UnsignedInt logicFrame )
+{
+	// whether or not the grid is drawn: the simulation reads it either way, as update() stepped it
+	if( m_waterRenderObject )
+		m_waterRenderObject->updateMeshMotion( logicFrame );
+}  // end updateWaterGrid
 
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------

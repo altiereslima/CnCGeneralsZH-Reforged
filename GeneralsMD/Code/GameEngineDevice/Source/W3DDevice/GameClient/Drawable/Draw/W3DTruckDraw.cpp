@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -422,6 +423,12 @@ void W3DTruckDraw::doDrawModule(const Matrix3D* transformMtx)
 	const Coord3D *vel = physics->getVelocity();
 	Real speed = physics->getVelocityMagnitude();
 
+	// wheels turn by the ground covered since the last picture, and the cab and trailer swing once a
+	// logic frame: both used to step every picture, four times as fast at 120 a second
+	Real forward, turn;
+	UnsignedInt frames = stepGroundMotion(forward, turn);
+	Real swing = 1.0f - pow(1.0f - moduleData->m_rotationDampingFactor, (Real)frames);
+
 	const TWheelInfo *wheelInfo = getDrawable()->getWheelInfo();	// note, can return null!
 	AIUpdateInterface *ai = obj->getAI();
 	if (m_cabBone && wheelInfo) {
@@ -447,7 +454,7 @@ void W3DTruckDraw::doDrawModule(const Matrix3D* transformMtx)
 		}	
 
 		Real deltaAngle = desiredAngle - m_curCabRotation;
-		deltaAngle *= moduleData->m_rotationDampingFactor;
+		deltaAngle *= swing;
 		m_curCabRotation += deltaAngle;
 		cabXfrm.Rotate_Z(m_curCabRotation);
 		getRenderObject()->Capture_Bone( m_cabBone );
@@ -455,7 +462,7 @@ void W3DTruckDraw::doDrawModule(const Matrix3D* transformMtx)
 		if (m_trailerBone && wheelInfo) {
 			desiredAngle = -wheelInfo->m_wheelAngle*moduleData->m_trailerRotationFactor;
 			Real deltaAngle = desiredAngle - m_curTrailerRotation;
-			deltaAngle *= moduleData->m_rotationDampingFactor;
+			deltaAngle *= swing;
 			m_curTrailerRotation += deltaAngle;
 			cabXfrm.Make_Identity();
 			cabXfrm.Rotate_Z(m_curTrailerRotation);
@@ -466,25 +473,18 @@ void W3DTruckDraw::doDrawModule(const Matrix3D* transformMtx)
 
 	if (m_frontLeftTireBone || m_rearLeftTireBone) 
 	{
-		Real powerslideRotationAddition = moduleData->m_powerslideRotationAddition;
-		if (ai) {
-			Locomotor *loco = ai->getCurLocomotor();
-			if (loco) {
-				if (loco->isMovingBackwards()) {
-					speed = -speed; // rotate wheels backwards.  jba.
-					powerslideRotationAddition = -powerslideRotationAddition;
-				}
-			}
-		}
+		Real powerslideRotationAddition = frames * moduleData->m_powerslideRotationAddition;
+		if (forward < 0.0f)
+			powerslideRotationAddition = -powerslideRotationAddition;	// rotate wheels backwards.  jba.
 		const Real rotationFactor = moduleData->m_rotationSpeedMultiplier;
-		m_frontWheelRotation += rotationFactor*speed;
-		if (m_isPowersliding) 
+		m_frontWheelRotation += rotationFactor*forward;
+		if (m_isPowersliding)
 		{
-			m_rearWheelRotation += rotationFactor*(speed + powerslideRotationAddition);
-		} 
-		else 
+			m_rearWheelRotation += rotationFactor*(forward + powerslideRotationAddition);
+		}
+		else
 		{
-			m_rearWheelRotation += rotationFactor*speed;
+			m_rearWheelRotation += rotationFactor*forward;
 		}
 
 		// For now, just use the same values for mid wheels -- may want to do independent calcs later...

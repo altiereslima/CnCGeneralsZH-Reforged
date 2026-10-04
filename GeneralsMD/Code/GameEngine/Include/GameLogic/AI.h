@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -52,11 +54,11 @@ class ThingTemplate;
 class UpgradeTemplate;
 class WeaponTemplate;
 
-enum GUICommandType;
-enum HackerAttackMode;
-enum WeaponSetType;
-enum WeaponLockType;
-enum SpecialPowerType;
+enum GUICommandType : Int;
+enum HackerAttackMode : Int;
+enum WeaponSetType : Int;
+enum WeaponLockType : Int;
+enum SpecialPowerType : Int;
 
 typedef std::vector<ObjectID> VecObjectID;
 typedef VecObjectID::iterator VecObjectIDIt;
@@ -64,7 +66,7 @@ typedef VecObjectID::iterator VecObjectIDIt;
 typedef std::list<Object *> ListObjectPtr;
 typedef ListObjectPtr::iterator ListObjectPtrIt;
 
-enum AIDebugOptions
+enum AIDebugOptions : Int
 {
 	AI_DEBUG_NONE = 0, 
 	AI_DEBUG_PATHS,
@@ -220,9 +222,11 @@ struct AIEnemyComposition
 	Real m_infantry;
 	Real m_stealth;			///< ... that can go invisible
 	Real m_totalThreat;	///< and the absolute total the shares are taken from, for C2's massing
+	Int m_infantryCount;	///< how many known enemy soldiers, and ground vehicles, by head rather than threat
+	Int m_vehicleCount;
 
 	AIEnemyComposition() : m_air(0.0f), m_armour(0.0f), m_infantry(0.0f), m_stealth(0.0f),
-												 m_totalThreat(0.0f) {}
+												 m_totalThreat(0.0f), m_infantryCount(0), m_vehicleCount(0) {}
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -233,6 +237,17 @@ struct AIVisibleEnemy
 	const ThingTemplate *m_template;
 	Real m_weight;			///< summed combat power of every visible unit of this kind
 	Real m_cost;				///< what one of them cost its owner
+};
+
+//-------------------------------------------------------------------------------------------------
+/** An enemy gun the AI knows of, and how far it reaches at anything and at aircraft. */
+//-------------------------------------------------------------------------------------------------
+struct AIKnownGun
+{
+	Real m_x;
+	Real m_y;
+	Real m_reach;
+	Real m_airReach;		///< 0 for a gun that cannot aim at a helicopter
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -284,6 +299,16 @@ Real aiMatchupScore( Real myFramesToKill, Real theirFramesToKill, Real myCost, R
 	*
 	* 'power' is a stand-in for damage per second - the threat value the data already carries. */
 Real aiRetreatRatio( Real myHealth, Real myPower, Real enemyHealth, Real enemyPower );
+
+/** Where a force losing a fight stops: the first spot on its line home that none of the fight's
+	* guns reach (x, y, reach triples), plus one step.  FALSE and home when there is none short of it. */
+Bool aiRetreatFallbackPoint( Real fromX, Real fromY, Real homeX, Real homeY, Real step,
+														 const Real *guns, Int gunCount, Real *outX, Real *outY );
+
+/** A force holding where it fell back to: stay, go back to the fight it left, or give up and go home. */
+enum AIFallbackDecision { AIFALLBACK_HOLD, AIFALLBACK_RESUME, AIFALLBACK_GO_HOME };
+AIFallbackDecision aiRetreatHoldDecision( Bool arrived, UnsignedInt heldFrames, Real ratioThere, Real resumeRatio,
+																					UnsignedInt minHold, UnsignedInt maxHold );
 
 /** Hold a finished team at the rally point instead of sending it?
 	*
@@ -646,9 +671,9 @@ class Weapon;
 #undef AI_PASSIVE
 
 // Note - written out in save/load xfer and .map files, don't change these numbers.
-enum AttitudeType { AI_SLEEP = -2, AI_PASSIVE=-1, AI_NORMAL=0, AI_ALERT=1, AI_AGGRESSIVE=2, AI_INVALID=3 };		///< AI "attitude" behavior modifiers
+enum AttitudeType : Int { AI_SLEEP = -2, AI_PASSIVE=-1, AI_NORMAL=0, AI_ALERT=1, AI_AGGRESSIVE=2, AI_INVALID=3 };		///< AI "attitude" behavior modifiers
 
-enum CommandSourceType;
+enum CommandSourceType : Int;
 
 typedef UnsignedInt CommandSourceMask;
 

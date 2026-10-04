@@ -8,6 +8,9 @@
 #
 #   .\tree-check.ps1                 # eight views over five maps, each against its own limit
 #   .\tree-check.ps1 -Limit 4        # one limit for every view; a tree-dense map with long shadows reached ~3.7%
+#   .\tree-check.ps1 -Extra '-d3d9'  # switches added to both builds' command lines
+#   .\tree-check.ps1 -NewEnv 'ZH_D3DX_PORTABLE=1'   # NAME=value set for generals.exe's runs only: with a copy
+#                                    # of the same exe as generals_base.exe, one code path against another
 #
 # Each view carries its own limit (lim in $cases) because the noise is not the same everywhere.  An
 # identical build against itself on 2026-09-27 read 0.35% on ForgottenForestZH and 1.93% on Alpine
@@ -17,12 +20,17 @@
 # the run-to-run shimmer does not.  Re-measure and move them if the reference machine changes.
 #
 # Exit code is the number of views over the limit.
-param([double]$Limit = 0)
+param([double]$Limit = 0, [string[]]$Extra = @(), [string[]]$NewEnv = @())
+$env:ZH_UNATTENDED = "1"	# every game this starts is unattended: no box may wait on a person (EarlyCommandLine.h)
 
 Add-Type -AssemblyName System.Drawing
 $run = Join-Path $PSScriptRoot "GeneralsMD\Run"
-$shots = "$env:USERPROFILE\Documents\Command and Conquer Generals Zero Hour Data"
-$tmp = Join-Path $env:TEMP "treecheck"
+# A user data folder of its own, so the newest screenshot in it is this run's: another checkout's game on the
+# same machine writes its shots into the player's folder, and one of those was once compared as if it were ours.
+$shots = Join-Path $env:TEMP "treecheck_userdata_$PID"
+$env:ZH_USER_DATA_DIR = $shots
+$tmp = Join-Path $env:TEMP "treecheck_$PID"
+"pictures in $tmp"
 if (-not (Test-Path $tmp)) { $null = New-Item -ItemType Directory $tmp }
 
 # -turbo cuts a view from about 90 seconds to about 25, but the cloud shadows scroll on the wall
@@ -59,16 +67,21 @@ $cases = @(
 # reference build from before that draws without it, so the bloom would be the difference counted.
 function Shoot($exe, $c, $tag) {
   Get-ChildItem "$shots\sshot*.bmp" -ErrorAction SilentlyContinue | Remove-Item -Force
-  $args = @('-win','-xres','1280','-yres','720','-quickstart','-noshellmap','-multiInstance','-msaa','0','-dx11post','off',
+  # -showHudOverlay: off by default in Release, and every evidence picture shows the corner readout
+  $args = @('-win','-xres','1280','-yres','720','-quickstart','-noshellmap','-multiInstance','-showHudOverlay','-msaa','0','-dx11post','off',
             '-map',"`"Maps\$($c.map)\$($c.map).map`"",'-autoskirmish','4','-aidiff','easy','-seed','5',
-            '-maxframes',($c.f+80),'-screenshot',$c.f,'-camera',$c.x,$c.y,'-logPrefix',"chk_$tag`_") + $pace
+            '-maxframes',($c.f+80),'-screenshot',$c.f,'-camera',$c.x,$c.y,'-logPrefix',"chk_$tag`_") + $pace + $Extra
+  $environment = if ($exe -eq 'generals.exe') { $NewEnv } else { @() }
   try {
+    foreach ($e in $environment) { $n, $v = $e -split '=', 2; Set-Item "env:$n" $v }
     $p = Start-Process (Join-Path $run $exe) -ArgumentList $args -WorkingDirectory $run -PassThru
     $p.PriorityClass = 'AboveNormal'
     $null = $p.WaitForExit(900000)
   }
   finally {
-    Get-Process -Name generals -ErrorAction SilentlyContinue | Stop-Process -Force
+    foreach ($e in $environment) { Remove-Item ("env:" + ($e -split '=', 2)[0]) -ErrorAction SilentlyContinue }
+    # By id: another checkout's game running on the same machine is not this script's to end.
+    if ($null -ne $p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force }
   }
   $f = Get-ChildItem "$shots\sshot*.bmp" -ErrorAction SilentlyContinue |
        Sort-Object LastWriteTime | Select-Object -Last 1

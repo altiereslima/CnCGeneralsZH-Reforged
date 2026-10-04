@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 // compress.c
 // Compress interface for packets and files
@@ -22,8 +24,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "Lib/basetype.h"
-#include "Noxcompress.h"
+#include <string.h>
+#include "Lib/BaseType.h"
+#include "NoxCompress.h"
 #include "CompLibHeader/lzhl.h"
 
 #ifdef _INTERNAL
@@ -37,6 +40,36 @@
 #define DbgMalloc malloc
 #define DbgFree free
 #define DEBUG_LOG(x) {}
+
+/* LZH-Light's compressor reads up to four bytes past the block it is handed.  Its _updateTable (Lz.cpp)
+	 hashes each position of a match with the LZMATCH (5) bytes that start there, so a match that ends
+	 within LZMATCH bytes of the block's end hashes bytes after it.  Inside the input those are the next
+	 block's own bytes, and the table the compressor keeps carries them into that block, so every block
+	 but the last is handed over in place.  After the last block they are whatever follows the caller's
+	 buffer: ASan's global-buffer-overflow in test_compression.  Nothing reads what they steer - a block
+	 that ends that close to a match ends with its raw tail straight after, and the compressor is then
+	 destroyed - so the last block is compressed from a copy with zeroed slack, and the output is the
+	 same bytes it always was. */
+#define LZHL_READ_PAST 8		// more than LZMATCH - 1
+
+/// One block into `dst`; FALSE only when the last block's copy cannot be allocated.
+static Bool compressBlock( LZHL_CHANDLE compressor, void *dst, const void *src, UnsignedInt len, Bool last,
+	UnsignedInt &compressed )
+{
+	if (!last)
+	{
+		compressed = (UnsignedInt)LZHLCompress( compressor, dst, src, len );
+		return TRUE;
+	}
+	UnsignedByte *copy = (UnsignedByte *)DbgMalloc( len + LZHL_READ_PAST );
+	if (copy == NULL)
+		return FALSE;
+	memcpy( copy, src, len );
+	memset( copy + len, 0, LZHL_READ_PAST );
+	compressed = (UnsignedInt)LZHLCompress( compressor, dst, copy, len );
+	DbgFree( copy );
+	return TRUE;
+}
 
 Bool DecompressFile		(char *infile, char *outfile)
 {
@@ -165,7 +198,13 @@ Bool CompressFile			(char *infile, char *outfile)
 		for ( i = 0; i < rawSize; i += BLOCKSIZE )
 		{
 			blocklen = min((UnsignedInt)BLOCKSIZE, rawSize - i);
-			compressed = LZHLCompress(compressor, outBlock + compressedSize, inBlock + i, blocklen);
+			if (!compressBlock(compressor, outBlock + compressedSize, inBlock + i, blocklen, i + blocklen >= rawSize, compressed))
+			{
+				LZHLDestroyCompressor(compressor);
+				DbgFree(inBlock);
+				DbgFree(outBlock);
+				return FALSE;
+			}
 			compressedSize += compressed;
 		}
 
@@ -285,7 +324,11 @@ Bool CompressMemory			(void *inBufferVoid, Int inSize, void *outBufferVoid, Int&
 	for ( i = 0; i < rawSize; i += BLOCKSIZE )
 	{
 		blocklen = min((UnsignedInt)BLOCKSIZE, rawSize - i);
-		compressed = LZHLCompress(compressor, outBuffer + compressedSize, inBuffer + i, blocklen);
+		if (!compressBlock(compressor, outBuffer + compressedSize, inBuffer + i, blocklen, i + blocklen >= rawSize, compressed))
+		{
+			LZHLDestroyCompressor(compressor);
+			return FALSE;
+		}
 		compressedSize += compressed;
 	}
 

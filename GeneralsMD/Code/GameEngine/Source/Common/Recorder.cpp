@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -23,10 +25,13 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
 
+#include "Lib/WideCharFns.h"
 #include "Common/Recorder.h"
+#include "Common/LocalFileSystem.h"
 #include "Common/FileSystem.h"
-#include "Common/playerlist.h"
+#include "Common/PlayerList.h"
 #include "Common/Player.h"
 #include "Common/GlobalData.h"
 #include "Common/GameEngine.h"
@@ -43,7 +48,7 @@
 #include "GameLogic/GameLogic.h"
 #include "Common/RandomValue.h"
 #include "Common/CRCDebug.h"
-#include "Common/Version.h"
+#include "Common/version.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -99,7 +104,7 @@ void RecorderClass::logGameStart(AsciiString options)
 			TheFileSystem->createDirectory(statsFile);
 			statsFile.concat(computerName);
 			statsFile.concat(".txt");
-			FILE *logFP = fopen(statsFile.str(), "a+");
+			FILE *logFP = zh_fopen(statsFile.str(), "a+");
 			if (!logFP)
 			{
 				// try again locally
@@ -107,7 +112,7 @@ void RecorderClass::logGameStart(AsciiString options)
 				statsFile = TheGlobalData->m_baseStatsDir;
 				statsFile.concat(computerName);
 				statsFile.concat(".txt");
-				logFP = fopen(statsFile.str(), "a+");
+				logFP = zh_fopen(statsFile.str(), "a+");
 			}
 			if (logFP)
 			{
@@ -157,13 +162,13 @@ void RecorderClass::logPlayerDisconnect(UnicodeString player, Int slot)
 		AsciiString statsFile = TheGlobalData->m_baseStatsDir;
 		statsFile.concat(computerName);
 		statsFile.concat(".txt");
-		FILE *logFP = fopen(statsFile.str(), "a+");
+		FILE *logFP = zh_fopen(statsFile.str(), "a+");
 		if (logFP)
 		{
 			time_t t;
 			time(&t);
 			struct tm *t2 = localtime(&t);
-			fprintf(logFP, "\tPlayer %ls dropped at %s", player.str(), asctime(t2));
+			fprintf(logFP, "\tPlayer %s dropped at %s", WideCharAsUtf8( player.str() ).str(), asctime(t2));
 			fclose(logFP);
 		}
 	}
@@ -203,7 +208,7 @@ void RecorderClass::logCRCMismatch( void )
 		AsciiString statsFile = TheGlobalData->m_baseStatsDir;
 		statsFile.concat(computerName);
 		statsFile.concat(".txt");
-		FILE *logFP = fopen(statsFile.str(), "a+");
+		FILE *logFP = zh_fopen(statsFile.str(), "a+");
 		if (logFP)
 		{
 			time_t t;
@@ -258,7 +263,7 @@ void RecorderClass::logGameEnd( void )
 			AsciiString statsFile = TheGlobalData->m_baseStatsDir;
 			statsFile.concat(computerName);
 			statsFile.concat(".txt");
-			FILE *logFP = fopen(statsFile.str(), "a+");
+			FILE *logFP = zh_fopen(statsFile.str(), "a+");
 			if (logFP)
 			{
 				struct tm *t2 = localtime(&t);
@@ -297,7 +302,7 @@ void RecorderClass::cleanUpReplayFile( void )
 		DEBUG_LOG(("Saving replay to %s\n", fname));
 		AsciiString oldFname;
 		oldFname.format("%s%s", getReplayDir().str(), m_fileName.str());
-		CopyFile(oldFname.str(), fname, TRUE);
+		TheLocalFileSystem->copyFile(oldFname.str(), fname, TRUE);
 #ifdef DEBUG_FILE_NAME
 		AsciiString debugFname = fname;
 		debugFname.removeLastChar();
@@ -305,7 +310,7 @@ void RecorderClass::cleanUpReplayFile( void )
 		debugFname.removeLastChar();
 		debugFname.concat("txt");
 		UnsignedInt fileSize = 0;
-		FILE *fp = fopen(DEBUG_FILE_NAME, "rb");
+		FILE *fp = zh_fopen(DEBUG_FILE_NAME, "rb");
 		if (fp)
 		{
 			fseek(fp, 0, SEEK_END);
@@ -319,13 +324,13 @@ void RecorderClass::cleanUpReplayFile( void )
 		if (fileSize <= MAX_DEBUG_SIZE || TheGlobalData->m_saveAllStats)
 		{
 			DEBUG_LOG(("Using CopyFile to copy %s\n", DEBUG_FILE_NAME));
-			CopyFile(DEBUG_FILE_NAME, debugFname.str(), TRUE);
+			TheLocalFileSystem->copyFile(DEBUG_FILE_NAME, debugFname.str(), TRUE);
 		}
 		else
 		{
 			DEBUG_LOG(("manual copy of %s\n", DEBUG_FILE_NAME));
-			FILE *ifp = fopen(DEBUG_FILE_NAME, "rb");
-			FILE *ofp = fopen(debugFname.str(), "wb");
+			FILE *ifp = zh_fopen(DEBUG_FILE_NAME, "rb");
+			FILE *ofp = zh_fopen(debugFname.str(), "wb");
 			if (ifp && ofp)
 			{
 				fseek(ifp, fileSize-MAX_DEBUG_SIZE, SEEK_SET);
@@ -561,7 +566,7 @@ void RecorderClass::startRecording(GameDifficulty diff, Int originalGameMode, In
 	m_fileName = getLastReplayFileName();
 	m_fileName.concat(getReplayExtention());
 	filepath.concat(m_fileName);
-	m_file = fopen(filepath.str(), "wb");
+	m_file = zh_fopen(filepath.str(), "wb");
 	if (m_file == NULL) {
 		DEBUG_ASSERTCRASH(m_file != NULL, ("Failed to create replay file"));
 		return;
@@ -589,24 +594,30 @@ void RecorderClass::startRecording(GameDifficulty diff, Int originalGameMode, In
 	}
 
 	// Print out the name of the replay.
+	//
+	// WideCharFileWrite and WideCharFilePut rather than fwprintf and fputwc: this FILE* also carries
+	// fwrite, and a stream may not mix wide and byte calls - MSVC tolerated it, a POSIX C library
+	// fails one kind.  They write what the wide calls wrote on a binary stream, each code unit as
+	// two bytes, low first, so the format is unchanged; readUnicodeString reads it back with
+	// WideCharFileGet.  See Lib/WideCharFns.h.
 	UnicodeString replayName;
 	replayName = TheGameText->fetch("GUI:LastReplay");
-	fwprintf(m_file, L"%ws", replayName.str());
-	fputwc(0, m_file);
+	WideCharFileWrite(m_file, replayName.str());
+	WideCharFilePut(m_file, 0);
 
 	// Date and Time
-	SYSTEMTIME systemTime;
-	GetLocalTime( &systemTime );
-	fwrite(&systemTime, sizeof(SYSTEMTIME), 1, m_file);
+	WallClockTime systemTime;
+	getLocalWallClock( &systemTime );
+	fwrite(&systemTime, sizeof(WallClockTime), 1, m_file);
 
 	// write out version info
 	UnicodeString versionString = TheVersion->getUnicodeVersion();
 	UnicodeString versionTimeString = TheVersion->getUnicodeBuildTime();
 	UnsignedInt versionNumber = TheVersion->getVersionNumber();
-	fwprintf(m_file, L"%ws", versionString.str());
-	fputwc(0, m_file);
-	fwprintf(m_file, L"%ws", versionTimeString.str());
-	fputwc(0, m_file);
+	WideCharFileWrite(m_file, versionString.str());
+	WideCharFilePut(m_file, 0);
+	WideCharFileWrite(m_file, versionTimeString.str());
+	WideCharFilePut(m_file, 0);
 	fwrite(&versionNumber, sizeof(UnsignedInt), 1, m_file);
 	fwrite(&(TheGlobalData->m_exeCRC), sizeof(UnsignedInt), 1, m_file);
 	fwrite(&(TheGlobalData->m_iniCRC), sizeof(UnsignedInt), 1, m_file);
@@ -747,8 +758,8 @@ void RecorderClass::stopRecording() {
  */
 void RecorderClass::archiveReplay(const AsciiString& fileName)
 {
-	SYSTEMTIME st;
-	GetLocalTime(&st);
+	WallClockTime st;
+	getLocalWallClock(&st);
 
 	AsciiString sourcePath = getReplayDir();
 	sourcePath.concat(fileName);
@@ -761,7 +772,7 @@ void RecorderClass::archiveReplay(const AsciiString& fileName)
 	destPath.concat(stamp);
 	destPath.concat(getReplayExtention());
 
-	if (!CopyFile(sourcePath.str(), destPath.str(), FALSE))
+	if (!TheLocalFileSystem->copyFile(sourcePath.str(), destPath.str(), FALSE))
 		DEBUG_LOG(("RecorderClass::archiveReplay - failed to copy %s to %s\n", sourcePath.str(), destPath.str()));
 }
 
@@ -858,7 +869,7 @@ Bool RecorderClass::readReplayHeader(ReplayHeader& header)
 {
 	AsciiString filepath = getReplayDir();
 	filepath.concat(header.filename.str());
-	m_file = fopen(filepath.str(), "rb");
+	m_file = zh_fopen(filepath.str(), "rb");
 	if (m_file == NULL)
 	{
 		DEBUG_LOG(("Can't open %s (%s)\n", filepath.str(), header.filename.str()));
@@ -893,7 +904,7 @@ Bool RecorderClass::readReplayHeader(ReplayHeader& header)
 	header.replayName = readUnicodeString();
 
 	// Read the date and time.  We don't really do anything with this either. Oh well.
-	fread(&header.timeVal, sizeof(SYSTEMTIME), 1, m_file);
+	fread(&header.timeVal, sizeof(WallClockTime), 1, m_file);
 
 	// Read in the Version info
 	header.versionString = readUnicodeString();
@@ -978,23 +989,17 @@ Int RecorderClass::getPlaybackFramesPerSecond( void )
 CRCInfo::CRCInfo()
 {
 	m_localPlayer = ~0;
-	m_skipOneCRC = FALSE;
+	m_alignment = ALIGN_NONE;
 	m_sawCRCMismatch = FALSE;
 }
 
-Bool replayIsMissingFirstCRC( Int originalGameMode )
+Bool replayMayLackFirstCRC( Int originalGameMode )
 {
 	return originalGameMode == GAME_LAN || originalGameMode == GAME_INTERNET;
 }
 
 void CRCInfo::addCRC(UnsignedInt val)
 {
-	if (m_skipOneCRC)
-	{
-		m_skipOneCRC = FALSE;
-		return;
-	}
-
 	m_data.push_back(val);
 	//DEBUG_LOG(("CRCInfo::addCRC() - crc %8.8X pushes list to %d entries (full=%d)\n", val, m_data.size(), !m_data.empty()));
 }
@@ -1011,6 +1016,24 @@ UnsignedInt CRCInfo::readCRC(void)
 	m_data.pop_front();
 	//DEBUG_LOG(("CRCInfo::readCRC() - returning %8.8X, full=%d, size=%d\n", val, !m_data.empty(), m_data.size()));
 	return val;
+}
+
+UnsignedInt CRCInfo::readCRCFor(UnsignedInt recorded)
+{
+	if (m_alignment == ALIGN_PENDING)
+	{
+		std::list<UnsignedInt>::const_iterator it = m_data.begin();
+		if (it != m_data.end() && *it == recorded)
+			m_alignment = ALIGN_FROM_FRAME_0;
+		else if (it != m_data.end() && ++it != m_data.end() && *it == recorded)
+		{
+			m_alignment = ALIGN_FRAME_0_MISSING;
+			m_data.pop_front();
+		}
+		else
+			m_alignment = ALIGN_UNDECIDED;
+	}
+	return readCRC();
 }
 
 void RecorderClass::handleCRCMessage(UnsignedInt newCRC, Int playerIndex, Bool fromPlayback)
@@ -1031,7 +1054,16 @@ void RecorderClass::handleCRCMessage(UnsignedInt newCRC, Int playerIndex, Bool f
 		samePlayer = TRUE;
 	if (samePlayer || (localPlayerIndex < 0))
 	{
-		UnsignedInt playbackCRC = m_crcInfo->readCRC();
+		const Bool aligning = (m_crcInfo->getAlignment() == CRCInfo::ALIGN_PENDING);
+		UnsignedInt playbackCRC = m_crcInfo->readCRCFor(newCRC);
+		if (aligning)
+		{
+			// say which kind of recording this was, so a reader of the log can tell (Recorder.h)
+			const CRCInfo::Alignment how = m_crcInfo->getAlignment();
+			DEBUG_LOG(("Replay CRCs: %s\n", how == CRCInfo::ALIGN_FROM_FRAME_0 ? "recorded from frame 0"
+				: how == CRCInfo::ALIGN_FRAME_0_MISSING ? "legacy: frame 0 missing"
+				: "neither alignment fits the first recorded CRC"));
+		}
 		//DEBUG_LOG(("RecorderClass::handleCRCMessage() - Comparing CRCs of %8.8X/%8.8X from %d\n", newCRC, playbackCRC, playerIndex));
 		if (TheGameLogic->getFrame() > 0 && newCRC != playbackCRC && !m_crcInfo->sawCRCMismatch())
 		{
@@ -1041,7 +1073,7 @@ void RecorderClass::handleCRCMessage(UnsignedInt newCRC, Int playerIndex, Bool f
 				 different game than the one that was recorded used to do it in complete silence.  Say so in
 				 the log, which release builds do write. */
 			DEBUG_LOG(("Replay has gone out of sync on frame %d: recorded %8.8X, played back %8.8X\n",
-				TheGameLogic->getFrame(), playbackCRC, newCRC));
+				TheGameLogic->getFrame(), newCRC, playbackCRC));
 
 			//Kris: Patch 1.01 November 10, 2003 (integrated changes from Matt Campbell)
 			// Since we don't seem to have any *visible* desyncs when replaying games, but get this warning
@@ -1049,8 +1081,8 @@ void RecorderClass::handleCRCMessage(UnsignedInt newCRC, Int playerIndex, Bool f
 			// tail end of patch season, let's just disable the message, and hope the users believe the
 			// problem is fixed. -MDC 3/20/2003
 			//TheInGameUI->message("GUI:CRCMismatch");
-			DEBUG_CRASH(("Replay has gone out of sync!  All bets are off!\nOld:%8.8X New:%8.8X\nFrame:%d",
-				playbackCRC, newCRC, TheGameLogic->getFrame()));
+			DEBUG_CRASH(("Replay has gone out of sync!  All bets are off!\nRecorded:%8.8X Played back:%8.8X\nFrame:%d",
+				newCRC, playbackCRC, TheGameLogic->getFrame()));
 		}
 		return;
 	}
@@ -1110,9 +1142,9 @@ Bool RecorderClass::playbackFile(AsciiString filename)
 	if (!openPlayback(filename, difficulty, rankPoints, maxFPS))
 		return FALSE;
 
-	if (replayIsMissingFirstCRC( m_originalGameMode ))
+	if (replayMayLackFirstCRC( m_originalGameMode ))
 	{
-		m_crcInfo->skipFirstCRC();
+		m_crcInfo->allowMissingFirstCRC();
 	}
 
 	m_nextFrame = 0;	// the last playback may have left -1 here, and readNextFrame reads forward from it
@@ -1195,12 +1227,12 @@ Bool RecorderClass::openPlayback(AsciiString filename, Int &difficulty, Int &ran
 		debugString = "EXE is different:\n";
 		if (versionStringDiff)
 		{
-			tempStr.format("   Version [%ls] vs [%ls]\n", TheVersion->getUnicodeVersion().str(), header.versionString.str());
+			tempStr.format("   Version [%s] vs [%s]\n", WideCharAsUtf8( TheVersion->getUnicodeVersion().str() ).str(), WideCharAsUtf8( header.versionString.str() ).str());
 			debugString.concat(tempStr);
 		}
 		if (versionTimeStringDiff)
 		{
-			tempStr.format("   Build Time [%ls] vs [%ls]\n", TheVersion->getUnicodeBuildTime().str(), header.versionTimeString.str());
+			tempStr.format("   Build Time [%s] vs [%s]\n", WideCharAsUtf8( TheVersion->getUnicodeBuildTime().str() ).str(), WideCharAsUtf8( header.versionTimeString.str() ).str());
 			debugString.concat(tempStr);
 		}
 		if (versionNumberDiff)
@@ -1228,8 +1260,8 @@ Bool RecorderClass::openPlayback(AsciiString filename, Int &difficulty, Int &ran
 #ifdef DEBUG_LOGGING
 	if (header.localPlayerIndex >= 0)
 	{
-		DEBUG_LOG(("Local player is %ls (slot %d, IP %8.8X)\n",
-			m_gameInfo.getSlot(header.localPlayerIndex)->getName().str(), header.localPlayerIndex, m_gameInfo.getSlot(header.localPlayerIndex)->getIP()));
+		DEBUG_LOG(("Local player is %s (slot %d, IP %8.8X)\n",
+			WideCharAsUtf8( m_gameInfo.getSlot(header.localPlayerIndex)->getName().str() ).str(), header.localPlayerIndex, m_gameInfo.getSlot(header.localPlayerIndex)->getIP()));
 	}
 #endif
 
@@ -1260,10 +1292,10 @@ Bool RecorderClass::openPlayback(AsciiString filename, Int &difficulty, Int &ran
 UnicodeString RecorderClass::readUnicodeString() {
 	// Was UnsignedShort: VC6's wchar_t was a typedef for it, so L"" initialised it
 	// and UnicodeString took it.  wchar_t is its own type now.
-	WideChar str[1024] = L"";
+	WideChar str[1024] = u"";
 	Int index = 0;
 
-	Int c = fgetwc(m_file);
+	Int c = WideCharFileGet(m_file);
 	if (c == EOF) {
 		str[index] = 0;
 	}
@@ -1273,14 +1305,14 @@ UnicodeString RecorderClass::readUnicodeString() {
 	// last iteration stored one element past the end of the buffer.
 	while (index < 1023 && str[index] != 0) {
 		++index;
-		Int c = fgetwc(m_file);
+		Int c = WideCharFileGet(m_file);
 		if (c == EOF) {
 			str[index] = 0;
 			break;
 		}
 		str[index] = c;
 	}
-	str[1023] = L'\0';
+	str[1023] = u'\0';
 
 	UnicodeString retval(str);
 	return retval;
@@ -1646,7 +1678,7 @@ AsciiString RecorderClass::getLastReplayFileName()
 				if (slot && slot->isHuman())
 				{
 					AsciiString player;
-					player.format("%ls_", slot->getName().str());
+					player.format("%s_", WideCharAsUtf8( slot->getName().str() ).str());
 					players.concat(player);
 				}
 			}
@@ -1655,7 +1687,7 @@ AsciiString RecorderClass::getLastReplayFileName()
 			testString.format("%s%s%s", getReplayDir().str(), full.str(), replayExtention);
 
 			FILE *fp;
-			fp = fopen(testString.str(), "rb");
+			fp = zh_fopen(testString.str(), "rb");
 			if (fp)
 			{
 				fclose(fp);
@@ -1669,7 +1701,7 @@ AsciiString RecorderClass::getLastReplayFileName()
 			{
 				fullPlusNum.format("%s_%d", full.str(), test);
 				testString.format("%s%s%s", getReplayDir().str(), fullPlusNum.str(), replayExtention);
-				fp = fopen(testString.str(), "rb");
+				fp = zh_fopen(testString.str(), "rb");
 				if (fp)
 				{
 					fclose(fp);

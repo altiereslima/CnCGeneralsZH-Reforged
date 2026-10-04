@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*
 ** The engine's own shaders, rewritten as HLSL.
@@ -40,6 +41,7 @@
 #define ENGINESHADER_H
 
 #include "ffshader.h"
+#include "ffvertex.h"
 
 #include <string>
 
@@ -76,10 +78,12 @@ enum EngineShaderProgram
 // from text at run time.  The comparison is on the last path component and it ignores case.
 EngineShaderProgram EngineShader_From_File(const char * file_path);
 
-// The program as HLSL for the D3D11 profile.  False for ENGINE_SHADER_NONE, for a program of the
-// other kind, and for anything whose transcription is not written yet, which keeps that draw a
-// refusal.
-bool EngineShader_Vertex_Program(EngineShaderProgram program, std::string & hlsl);
+// The program as HLSL for the D3D11 profile, or for SDL3_GPU, which is the same text with its
+// bindings rewritten (sdl3target.h).  False for ENGINE_SHADER_NONE, for a program of the other kind,
+// for the D3D9 target, and for anything whose transcription is not written yet, which keeps that
+// draw a refusal.
+bool EngineShader_Vertex_Program(EngineShaderProgram program, std::string & hlsl,
+	VertexShaderTarget target = VERTEX_SHADER_TARGET_D3D11);
 
 // The pixel half.  The alpha test and the fog come from the render state and are written into the
 // program the way ffshader writes them, because D3D9 applies both around a bound pixel shader and
@@ -89,7 +93,8 @@ bool EngineShader_Vertex_Program(EngineShaderProgram program, std::string & hlsl
 // by how much the bumped surface faces the sun more or less than the flat one does.  Only the three
 // blending terrain programs take it; for any other the call is refused.
 bool EngineShader_Pixel_Program(EngineShaderProgram program,
-	const PixelPipelineDescription & pipeline, std::string & hlsl, bool bumped = false);
+	const PixelPipelineDescription & pipeline, std::string & hlsl, bool bumped = false,
+	CombinerShaderTarget target = COMBINER_SHADER_TARGET_D3D11);
 
 // Whether a program is one bumped can be asked of.
 bool EngineShader_Can_Bump(EngineShaderProgram program);

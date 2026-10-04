@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -1980,7 +1981,7 @@ FilenameListParameterClass::operator== (const FilenameListParameterClass &src)
 		for (int index = 0; (index < count1) && retval; index ++) {
 			StringClass &filename1 = (*m_FilenameList)[index];
 			StringClass &filename2 = (*src.m_FilenameList)[index];
-			retval &= (::stricmp (filename1, filename2) == 0);
+			retval &= (::strcasecmp (filename1, filename2) == 0);
 		}
 	}
 
@@ -2124,7 +2125,7 @@ ScriptListParameterClass::Are_Lists_Identical
 	for (int index = 0; (index < count1) && retval; index ++) {
 		StringClass &string1 = list1[index];
 		StringClass &string2 = list2[index];
-		retval &= (::stricmp (string1, string2) == 0);
+		retval &= (::strcasecmp (string1, string2) == 0);
 	}
 
 	return retval;

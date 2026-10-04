@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -60,6 +62,7 @@
 #include "GameLogic/ScriptEngine.h"
 #include "GameLogic/Scripts.h"
 #include "GameLogic/VictoryConditions.h"
+#include "Platform/MsvcFloatCasts.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -91,7 +94,7 @@ namespace rts
 		T sum(std::vector<T>& vecOfValues )
 	{
 		T retVal = 0;
-		std::vector<T>::iterator it;
+		typename std::vector<T>::iterator it;
 		for (it = vecOfValues.begin(); it != vecOfValues.end(); ++it) {
 			retVal += (*it);
 		}
@@ -955,7 +958,8 @@ Bool ScriptConditions::evaluateUnitHealth(Parameter *pUnitParm, Parameter* pComp
 
 	Real curHealth = theObj->getBodyModule()->getHealth();
 	Real initialHealth = theObj->getBodyModule()->getInitialHealth();
-	Int curPercent = (curHealth*100 + initialHealth/2)/initialHealth;
+	// 0/0 for an object with no health (a prop, a hulk): Windows' answer, INT_MIN, on every platform
+	Int curPercent = floatToIntAsMsvc((curHealth*100 + initialHealth/2)/initialHealth);
 
 	switch (pComparisonParm->getInt())
 	{

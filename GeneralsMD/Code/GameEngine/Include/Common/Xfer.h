@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -43,10 +44,10 @@
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////
 class Snapshot;
 typedef Int Color;
-enum ObjectID;
-enum DrawableID;
-enum KindOfType;
-enum ScienceType;
+enum ObjectID : Int;
+enum DrawableID : Int;
+enum KindOfType : Int;
+enum ScienceType : Int;
 class Matrix3D;
 
 // ------------------------------------------------------------------------------------------------

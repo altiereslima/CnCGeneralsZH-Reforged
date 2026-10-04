@@ -15,9 +15,10 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 #include "fastallocator.h"
-#include <new.h>
+#include <new>   // was <new.h>, which only MSVC has
 
 static FastAllocatorGeneral* generalAllocator; //This general allocator will do all allocations for us.
 

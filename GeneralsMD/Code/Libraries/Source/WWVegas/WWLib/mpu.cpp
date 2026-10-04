@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -68,6 +70,14 @@ typedef union {
  *=============================================================================================*/
 unsigned long Get_CPU_Rate(unsigned long & high)
 {
+/* B2 left this file's QueryPerformance* calls where they are, on purpose.
+	 The rest of the tree reads a clock to know the time; this reads the performance counter as a
+	 reference oscillator to measure the CPU's own frequency against __rdtsc, and it does that
+	 through LARGE_INTEGER's LowPart/HighPart halves, with REALTIME_PRIORITY_CLASS around it.
+	 Swapping four calls for Clock_Ticks() would leave a file that is still x86-and-Windows from
+	 top to bottom and buy nothing.  It wants one decision, by whoever ports cpudetect: either
+	 macOS answers the CPU frequency from sysctl, or it answers zero and the callers cope. */
+
 	union {
 		LARGE_INTEGER LargeInt;
 		struct {
@@ -222,7 +232,10 @@ int Get_RDTSC_CPU_Speed(void)
 
 		total = ( freq + freq2 + freq3 );		// Total last three frequency calcs
 
-	} while ( (tries < 3 ) || (tries < 20) && ((abs(3 * freq -total) > 3*TOLERANCE )|| (abs(3 * freq2-total) > 3*TOLERANCE )|| (abs(3 * freq3-total) > 3*TOLERANCE )));
+	// abs of an int, as this always was: DWORD is unsigned long, and once <stdlib.h>'s C++ overloads
+	// (long, long long) are declared, as Platform/MSVCCompat.h now has them, MSVC finds abs(unsigned long)
+	// ambiguous (W2).  int and long are both 32 bits on Windows, so either overload gave these bits.
+	} while ( (tries < 3 ) || (tries < 20) && ((abs((int)(3 * freq -total)) > 3*TOLERANCE )|| (abs((int)(3 * freq2-total)) > 3*TOLERANCE )|| (abs((int)(3 * freq3-total)) > 3*TOLERANCE )));
 
 	SetThreadPriority(thread, threadPri);
 	SetPriorityClass(process, processPri);

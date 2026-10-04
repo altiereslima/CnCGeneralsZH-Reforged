@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -47,7 +48,7 @@
 
 #include "GameClient/MapUtil.h"
 #include "Common/FileSystem.h"
-#include "Common/File.h"
+#include "Common/file.h"
 
 #include "Common/PerfTimer.h"
 enum { NUM_TIMES = 1 };

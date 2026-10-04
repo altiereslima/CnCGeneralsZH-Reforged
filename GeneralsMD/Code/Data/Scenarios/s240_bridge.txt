@@ -1,0 +1,13 @@
+# A column crossing the long stone bridge of Golden Oasis for the 2.4.0 Shorts' bridge shadow shot:
+# six Crusaders and two Humvees from bpark_l.txt's spawn on the south-west bank, sent to the far
+# bank past the north end (bpark_e.txt's spawn), so they drive the whole deck.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 2500 -map "Maps\Golden Oasis\Golden Oasis.map" -autoskirmish 2
+#     -takeover -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -scenario s240_bridge
+#     -cinema s240_bridge -video 230 720 s240_bridge -maxframes 730
+
+30    spawn      0  AmericaTankCrusader             6   2417 893   30
+30    spawn      0  AmericaVehicleHumvee            2   2360 840   30
+60    move       0  AmericaTankCrusader                 3150 1800
+75    move       0  AmericaVehicleHumvee                3150 1800

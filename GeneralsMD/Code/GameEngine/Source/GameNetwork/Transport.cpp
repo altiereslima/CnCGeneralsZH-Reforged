@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -24,8 +26,9 @@
 
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
-#include "Common/CRC.h"
+#include "Common/crc.h"
 #include "GameNetwork/LinkSimulation.h"
 #include "GameNetwork/Transport.h"
 #include "GameNetwork/NetworkInterface.h"
@@ -82,6 +85,10 @@ Transport::Transport(void)
 	// a Transport that is used before init() would have run on whatever was on the heap.
 	m_useLatency = false;
 	m_usePacketLoss = false;
+#if !defined(_WIN32)
+	m_shareAddress = false;
+	m_broadcastsOnly = false;
+#endif
 }
 
 Transport::~Transport(void)
@@ -97,6 +104,8 @@ Bool Transport::init( AsciiString ip, UnsignedShort port )
 Bool Transport::init( UnsignedInt ip, UnsignedShort port )
 {
 	// ----- Initialize Winsock -----
+	// (Windows only: POSIX sockets need no start-up, so m_winsockInit stays false there.)
+#if defined(_WIN32)
 	if (!m_winsockInit)
 	{
 		WORD verReq = MAKEWORD(2, 2);
@@ -113,6 +122,7 @@ Bool Transport::init( UnsignedInt ip, UnsignedShort port )
 		}
 		m_winsockInit = true;
 	}
+#endif
 
 	// ------- Bind our port --------
 	if (m_udpsock)
@@ -123,9 +133,16 @@ Bool Transport::init( UnsignedInt ip, UnsignedShort port )
 		return false;
 	
 	int retval = -1;
-	time_t now = timeGetTime();
-	while ((retval != 0) && ((timeGetTime() - now) < 1000)) {
+	time_t now = Clock_Milliseconds();
+#if !defined(_WIN32)
+	m_udpsock->ShareAddress(m_shareAddress);
+#endif
+	while ((retval != 0) && ((Clock_Milliseconds() - now) < 1000)) {
+#if !defined(_WIN32)
+		retval = m_broadcastsOnly ? m_udpsock->BindForBroadcasts(port) : m_udpsock->Bind(ip, port);
+#else
 		retval = m_udpsock->Bind(ip, port);
+#endif
 	}
 
 	if (retval != 0) {
@@ -155,7 +172,7 @@ Bool Transport::init( UnsignedInt ip, UnsignedShort port )
 		m_unknownPackets[i] = 0;
 	}
 	m_statisticsSlot = 0;
-	m_lastSecond = timeGetTime();
+	m_lastSecond = Clock_Milliseconds();
 
 	m_port = port;
 
@@ -173,6 +190,30 @@ Bool Transport::init( UnsignedInt ip, UnsignedShort port )
 	return true;
 }
 
+#if !defined(_WIN32)
+Bool Transport::initBroadcastListener( UnsignedShort port )
+{
+	m_broadcastsOnly = true;
+	return init( (UnsignedInt)INADDR_ANY, port );
+}
+
+void Transport::moveReceivedInto( Transport &inbox )
+{
+	Int slot = 0;
+	for (Int i = 0; i < MAX_MESSAGES; ++i)
+	{
+		if (m_inBuffer[i].length <= 0)
+			continue;
+		while (slot < MAX_MESSAGES && inbox.m_inBuffer[slot].length > 0)
+			++slot;
+		if (slot == MAX_MESSAGES)
+			return;
+		inbox.m_inBuffer[slot] = m_inBuffer[i];
+		m_inBuffer[i].length = 0;
+	}
+}
+#endif
+
 void Transport::reset( void )
 {
 	if (m_udpsock)
@@ -181,11 +222,13 @@ void Transport::reset( void )
 		m_udpsock = NULL;
 	}
 
+#if defined(_WIN32)
 	if (m_winsockInit)
 	{
 		WSACleanup();
 		m_winsockInit = false;
 	}
+#endif
 }
 
 Bool Transport::update( void )
@@ -195,12 +238,12 @@ Bool Transport::update( void )
 	{
 		retval = FALSE;
 	}
-	DEBUG_ASSERTLOG(retval, ("WSA error is %s\n", GetWSAErrorString(WSAGetLastError()).str()));
+	DEBUG_ASSERTLOG(retval, ("WSA error is %s\n", GetWSAErrorString(lastSocketError()).str()));
 	if (doSend() == FALSE && m_udpsock && m_udpsock->GetStatus() == UDP::ADDRNOTAVAIL)
 	{
 		retval = FALSE;
 	}
-	DEBUG_ASSERTLOG(retval, ("WSA error is %s\n", GetWSAErrorString(WSAGetLastError()).str()));
+	DEBUG_ASSERTLOG(retval, ("WSA error is %s\n", GetWSAErrorString(lastSocketError()).str()));
 	return retval;
 }
 
@@ -214,7 +257,7 @@ Bool Transport::doSend() {
 	Bool retval = TRUE;
 
 	// Statistics gathering
-	UnsignedInt now = timeGetTime();
+	UnsignedInt now = Clock_Milliseconds();
 	if (m_lastSecond + 1000 < now)
 	{
 		m_lastSecond = now;
@@ -292,7 +335,7 @@ Bool Transport::doRecv()
 
 	// Read in anything on our socket
 	sockaddr_in from;
-	UnsignedInt now = timeGetTime();
+	UnsignedInt now = Clock_Milliseconds();
 
 	TransportMessage incomingMessage;
 	unsigned char *buf = (unsigned char *)&incomingMessage;
@@ -328,7 +371,7 @@ Bool Transport::doRecv()
 		}
 
 		// Something there; stick it somewhere
-//		DEBUG_LOG(("Saw %d bytes from %d:%d\n", len, ntohl(from.sin_addr.S_un.S_addr), ntohs(from.sin_port)));
+//		DEBUG_LOG(("Saw %d bytes from %d:%d\n", len, ntohl(from.sin_addr.s_addr), ntohs(from.sin_port)));
 		m_incomingPackets[m_statisticsSlot]++;
 		m_incomingBytes[m_statisticsSlot] += len;
 
@@ -345,7 +388,7 @@ Bool Transport::doRecv()
 						TheGlobalData->m_latencyPeriod,
 						GameClientRandomValue(-TheGlobalData->m_latencyNoise, TheGlobalData->m_latencyNoise) );
 					m_delayedInBuffer[i].message.length = incomingMessage.length;
-					m_delayedInBuffer[i].message.addr = ntohl(from.sin_addr.S_un.S_addr);
+					m_delayedInBuffer[i].message.addr = ntohl(from.sin_addr.s_addr);
 					m_delayedInBuffer[i].message.port = ntohs(from.sin_port);
 					memcpy(&m_delayedInBuffer[i].message, buf, len);
 					break;
@@ -357,7 +400,7 @@ Bool Transport::doRecv()
 				{
 					// Empty slot; use it
 					m_inBuffer[i].length = incomingMessage.length;
-					m_inBuffer[i].addr = ntohl(from.sin_addr.S_un.S_addr);
+					m_inBuffer[i].addr = ntohl(from.sin_addr.s_addr);
 					m_inBuffer[i].port = ntohs(from.sin_port);
 					memcpy(&m_inBuffer[i], buf, len);
 					break;

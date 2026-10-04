@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -145,7 +146,7 @@ LookupTableClass * LookupTableMgrClass::Get_Table(const char * name,bool try_to_
 	// check if we already have this table loaded...
 	RefMultiListIterator<LookupTableClass> it(&Tables);
 	for (it.First(); !it.Is_Done(); it.Next()) {
-		if (stricmp(it.Peek_Obj()->Get_Name(),name) == 0) {
+		if (strcasecmp(it.Peek_Obj()->Get_Name(),name) == 0) {
 			return it.Get_Obj(); // add a reference for the user...
 		}
 	}

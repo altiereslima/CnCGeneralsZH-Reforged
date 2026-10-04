@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -46,11 +48,12 @@
 //         Includes                                                      
 //-----------------------------------------------------------------------------
 #include <stdlib.h>
+#include "Lib/Clock.h"
 
 #include "W3DDevice/GameClient/TerrainTex.h"
 #include "W3DDevice/GameClient/WorldHeightMap.h"
 #include "W3DDevice/GameClient/TileData.h"
-#include "common/GlobalData.h"
+#include "Common/GlobalData.h"
 #include "WW3D2/dx8wrapper.h"
 #include "d3dx9runtime.h"
 
@@ -1067,7 +1070,7 @@ void CloudMapTerrainTextureClass::Apply(unsigned int stage)
 	D3DXMATRIX offset;
 
 	Int delta = m_curTick;
-	m_curTick = ::GetTickCount();
+	m_curTick = Clock_Milliseconds_Coarse();
 	delta = m_curTick-delta;
 	m_xOffset += m_xSlidePerSecond*delta/1000;
 	m_yOffset += m_ySlidePerSecond*delta/1000;

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -41,34 +42,28 @@
 CriticalSectionClass::CriticalSectionClass():
 inside(false)
 {
-#ifndef _UNIX
-	InitializeCriticalSection(&Bar);
-#endif
 }
 
 CriticalSectionClass::~CriticalSectionClass()
 {
-#ifndef _UNIX
-	DeleteCriticalSection(&Bar);
-#endif
+	WWASSERT(inside==false);	// Can't delete a locked critical section
 }
 
 void CriticalSectionClass::Enter()
 {
-	WWASSERT(inside==false);
-#ifndef _UNIX	
-	EnterCriticalSection(&Bar);
+	Bar.lock();
+	WWASSERT(inside==false);	// see the note in critsection.h: after the acquire, not before
 	inside=true;
-#endif
+	Owner=std::this_thread::get_id();
 }
 
 void CriticalSectionClass::Exit()
 {
 	WWASSERT(inside==true);
-#ifndef _UNIX	
+	WWASSERT(Owner==std::this_thread::get_id());
 	inside=false;
-	LeaveCriticalSection(&Bar);	
-#endif
+	Owner=std::thread::id();
+	Bar.unlock();
 }
 
 CriticalSectionClass::LockClass::LockClass(CriticalSectionClass &c):

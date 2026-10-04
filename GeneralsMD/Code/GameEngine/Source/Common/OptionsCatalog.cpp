@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 // OptionsCatalog.cpp
 //
@@ -59,6 +60,7 @@ OPTION_BOOL_ACCESSORS( m_edgeScrollInWindowedMode )
 OPTION_BOOL_ACCESSORS( m_snapCameraRotateTo45 )
 OPTION_BOOL_ACCESSORS( m_zoomToCursor )
 OPTION_BOOL_ACCESSORS( m_isometricCamera )
+OPTION_BOOL_ACCESSORS( m_smoothMotion )
 OPTION_BOOL_ACCESSORS( m_startAtMaxZoom )
 
 // The view copied its closest height out of GlobalData once, when it was made, so a change from
@@ -94,6 +96,7 @@ OPTION_BOOL_ACCESSORS( m_vsync )
 OPTION_BOOL_ACCESSORS( m_classicGraphics )
 OPTION_INT_ACCESSORS( m_healthBarMode )
 OPTION_INT_ACCESSORS( m_hudScale )
+OPTION_INT_ACCESSORS( m_menuLayout )
 OPTION_INT_ACCESSORS( m_playerColorScheme )
 OPTION_INT_ACCESSORS( m_textLanguage )
 OPTION_BOOL_ACCESSORS( m_showOrderLines )
@@ -105,6 +108,8 @@ OPTION_BOOL_ACCESSORS( m_shadowsForProjectiles )
 OPTION_BOOL_ACCESSORS( m_shadowsForProps )
 OPTION_BOOL_ACCESSORS( m_shadowsForParticles )
 OPTION_BOOL_ACCESSORS( m_particleGroundBounce )
+OPTION_BOOL_ACCESSORS( m_volumetricSmokeShadows )
+OPTION_BOOL_ACCESSORS( m_smokeFireLighting )
 OPTION_BOOL_ACCESSORS( m_showSkillStrip )
 OPTION_BOOL_ACCESSORS( m_showSuperweaponStrip )
 
@@ -258,6 +263,12 @@ const OptionDef TheOptionCatalog[] =
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_isometricCamera, set_m_isometricCamera },
 
+	// R1: models drawn between their last two logic states on every render frame, so motion is smooth
+	// on a panel faster than the 30 Hz logic.  The picture only, one logic tick behind; never the game.
+	// Its default is GlobalData's: on off Windows, off on Windows.  On Options > Display.
+	{ "SmoothMotion",							OPT_WND( "CheckSmoothMotion" ), "GUI:SmoothMotion",
+		OPTION_BOOL, APPLY_LIVE, 0, 1,
+		get_m_smoothMotion, set_m_smoothMotion },
 	// A match opens as far out as the wheel goes, or at the height the map's author framed it for.
 	// Read when the map loads, so it counts from the next match.  On Options > Controls.
 	{ "StartAtMaxZoom",						OPT_WND( "CheckStartAtMaxZoom" ), "GUI:StartAtMaxZoom",
@@ -309,17 +320,19 @@ const OptionDef TheOptionCatalog[] =
 
 	// 0 bilinear, 1 trilinear, 2 anisotropic. Retail shipped bilinear with point mip selection,
 	// which is a 2003 fill-rate budget and is why distant ground used to shimmer; 2 is the default
-	// here. The filter table is built when the device is made, so this needs a device reset.  A combo
-	// box on the Graphics page; stored as the same decimal the hand-edited key always was.
+	// here. The filter table is built when the device is made, and W3DDisplay::init is the only place
+	// that hands this value to WW3D2 - a reset from the display page does not push it again - so it
+	// waits for the next launch.  A combo box on the Graphics page; stored as the same decimal the
+	// hand-edited key always was.
 	{ "TextureFilter",						OPT_WND( "ComboBoxTextureFilter" ), "GUI:TextureFilter",
-		OPTION_ENUM, APPLY_DEVICE_RESET, 0, TEXTURE_FILTER_MODE_COUNT - 1,
+		OPTION_ENUM, APPLY_RESTART, 0, TEXTURE_FILTER_MODE_COUNT - 1,
 		get_m_textureFilterMode, set_m_textureFilterMode },
 
 	// Samples anisotropic filtering may take. 0 means whatever the card offers, capped at 16, and
 	// asking for more than the card has still gets you the card's answer. Only read when the filter
-	// above is anisotropic.  The slider beside the filter box.
+	// above is anisotropic.  The slider beside the filter box; pushed in by W3DDisplay::init with it.
 	{ "Anisotropy",								OPT_WND( "SliderAnisotropy" ), "GUI:Anisotropy",
-		OPTION_INT, APPLY_DEVICE_RESET, 0, 16,
+		OPTION_INT, APPLY_RESTART, 0, 16,
 		get_m_anisotropyLevel, set_m_anisotropyLevel },
 
 	// Eight rows used to sit here: grid and nudge build placement, snap-to-45 building rotation, the
@@ -328,9 +341,9 @@ const OptionDef TheOptionCatalog[] =
 	// constructor, so there is nothing left to load or save.  Gameplay is health bars and nothing
 	// else.
 
-	// Off, subtle, normal, strong.  Off is the default, which is what GameData.ini says: the game's
-	// artwork has no HDR range in it, so how much glow looks right is a matter of taste rather than
-	// something to pick on the player's behalf.  The key is "Bloom", not "BloomLevel" - it predates
+	// Off, subtle, normal, strong.  Normal (60, the menu's Medium) is the default, set in
+	// GlobalData's constructor: it is the strength the Direct3D 11 frame applied before there was a
+	// setting at all, so a fresh install looks the way it did.  The key is "Bloom", not "BloomLevel" - it predates
 	// the levels and an Options.ini in the wild already spells it this way.
 	{ "Bloom",										OPT_WND( "ComboBoxBloom" ), "GUI:Bloom",
 		OPTION_ENUM, APPLY_LIVE, 0, BLOOM_LEVEL_COUNT - 1,
@@ -353,9 +366,10 @@ const OptionDef TheOptionCatalog[] =
 
 	// Multisampling, as an index into 0/2/4/8/16 rather than a sample count - the device offers
 	// those and nothing between them, so a slider would spend most of its travel on values that
-	// silently round down.
+	// silently round down.  W3DDisplay::init hands it to the device once, and only to a Direct3D 9
+	// frame: the default Direct3D 11 picture asks for no samples and smooths its edges with FXAA.
 	{ "MSAA",											OPT_WND( "ComboBoxMSAA" ), "GUI:MSAA",
-		OPTION_ENUM, APPLY_DEVICE_RESET, 0, OPTION_MSAA_LEVEL_COUNT - 1,
+		OPTION_ENUM, APPLY_RESTART, 0, OPTION_MSAA_LEVEL_COUNT - 1,
 		get_m_msaaLevel, set_m_msaaLevel },
 
 	// Wait for the monitor.  Off is what the uncapped picture shipped as: D3D9 honours the
@@ -384,6 +398,13 @@ const OptionDef TheOptionCatalog[] =
 	{ "HudScale",									OPT_WND( "ComboBoxHudScale" ), "GUI:HudScale",
 		OPTION_ENUM, APPLY_LIVE, 0, HUD_SCALE_COUNT - 1,
 		get_m_hudScale, set_m_hudScale },
+
+	// How the menus meet a screen that is not 4:3: stretched to it, as EA drew them, or fitted and
+	// centred at their own shape (GlobalData.h).  Layouts are read once as they are built, so Accept
+	// builds the shell again.
+	{ "MenuLayout",								OPT_WND( "ComboBoxMenuLayout" ), "GUI:MenuLayout",
+		OPTION_ENUM, APPLY_SHELL_REBUILD, 0, MENU_LAYOUT_COUNT - 1,
+		get_m_menuLayout, set_m_menuLayout },
 
 	// Whose colour a player is drawn in.  Purely local: the match still agrees on the lobby's
 	// colours and this only changes what this screen puts on top of them, so two people in the same
@@ -430,23 +451,36 @@ const OptionDef TheOptionCatalog[] =
 		get_m_textLanguage, set_m_textLanguage },
 
 	// The Effects page.  These four sat in GameData.ini with no control, all on.  Each is read when the
-	// thing that casts the shadow is made, so a change shows on the next map rather than on the units
-	// already standing there - except smoke clouds, which ask every frame.
+	// thing that casts the shadow is made (fillShadowInfoFromTemplate, promoteSkinShadowToVolume), so a
+	// change shows on the next map rather than on the units already standing there - except smoke
+	// clouds, which ask every frame.
 	{ "UseShadowVolumesForSkins",	OPT_WND( "CheckInfantryShadows" ), "GUI:InfantryShadows",
-		OPTION_BOOL, APPLY_LIVE, 0, 1,
+		OPTION_BOOL, APPLY_NEXT_MAP, 0, 1,
 		get_m_useShadowVolumesForSkins, set_m_useShadowVolumesForSkins },
 
 	{ "ShadowsForProjectiles",		OPT_WND( "CheckProjectileShadows" ), "GUI:ProjectileShadows",
-		OPTION_BOOL, APPLY_LIVE, 0, 1,
+		OPTION_BOOL, APPLY_NEXT_MAP, 0, 1,
 		get_m_shadowsForProjectiles, set_m_shadowsForProjectiles },
 
 	{ "ShadowsForProps",					OPT_WND( "CheckPropShadows" ), "GUI:PropShadows",
-		OPTION_BOOL, APPLY_LIVE, 0, 1,
+		OPTION_BOOL, APPLY_NEXT_MAP, 0, 1,
 		get_m_shadowsForProps, set_m_shadowsForProps },
 
 	{ "ShadowsForParticles",			OPT_WND( "CheckParticleShadows" ), "GUI:ParticleShadows",
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_shadowsForParticles, set_m_shadowsForParticles },
+
+	// Smoke and dust in the sun's map: a cloud shades the ground, the units and the smoke behind it
+	// by how thick it is, and darkens on its own far side.  Read by the shadow pass every frame.  No
+	// control yet; Options.ini and -novolumetricsmoke reach it.
+	{ "VolumetricSmokeShadows",		"", "",
+		OPTION_BOOL, APPLY_LIVE, 0, 1,
+		get_m_volumetricSmokeShadows, set_m_volumetricSmokeShadows },
+
+	// Smoke lit by the fire beside it.  No control yet; -nosmokefirelight turns it off for a run.
+	{ "SmokeFireLighting",				"", "",
+		OPTION_BOOL, APPLY_LIVE, 0, 1,
+		get_m_smokeFireLighting, set_m_smokeFireLighting },
 
 	// -smoke and -particlebounce as settings.  Both are spent on the particle system templates while
 	// the particle manager starts, so they wait for the next launch.  The command line is parsed after
@@ -480,7 +514,7 @@ const Int TheOptionCatalogCount = (sizeof( TheOptionCatalog ) / sizeof( TheOptio
 const OptionDef *findOptionDef( const char *iniKey )
 {
 	for( Int i = 0; i < TheOptionCatalogCount; ++i )
-		if( stricmp( TheOptionCatalog[ i ].iniKey, iniKey ) == 0 )
+		if( strcasecmp( TheOptionCatalog[ i ].iniKey, iniKey ) == 0 )
 			return &TheOptionCatalog[ i ];
 
 	return NULL;
@@ -499,7 +533,7 @@ Int clampOptionValue( const OptionDef& def, Int value )
 //-----------------------------------------------------------------------------
 /** Read one stored string.
 	*
-	* The option getters this replaces tested `stricmp(s, "yes") == 0` and called everything else
+	* The option getters this replaces tested `strcasecmp(s, "yes") == 0` and called everything else
 	* false, so a hand-edited `ZoomToCursor = true` silently did nothing.  UserPreferences::getBool
 	* has always been the lenient one; the catalog follows it.  Writing still produces "yes"/"no". */
 static Int parseOptionValue( const OptionDef& def, const AsciiString& stored )
@@ -507,12 +541,12 @@ static Int parseOptionValue( const OptionDef& def, const AsciiString& stored )
 	if( def.kind == OPTION_BOOL )
 	{
 		const char *s = stored.str();
-		const Bool on = stricmp( s, "yes" ) == 0
-									|| stricmp( s, "true" ) == 0
-									|| stricmp( s, "on" ) == 0
-									|| stricmp( s, "y" ) == 0
-									|| stricmp( s, "t" ) == 0
-									|| stricmp( s, "1" ) == 0;
+		const Bool on = strcasecmp( s, "yes" ) == 0
+									|| strcasecmp( s, "true" ) == 0
+									|| strcasecmp( s, "on" ) == 0
+									|| strcasecmp( s, "y" ) == 0
+									|| strcasecmp( s, "t" ) == 0
+									|| strcasecmp( s, "1" ) == 0;
 		return on ? 1 : 0;
 	}
 

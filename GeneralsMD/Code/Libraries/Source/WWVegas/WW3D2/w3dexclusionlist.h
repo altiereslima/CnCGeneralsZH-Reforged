@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /* $Header: /Commando/Code/ww3d2/w3dexclusionlist.h 1     12/12/02 3:36p Greg_h $ */
 /*********************************************************************************************** 
@@ -43,7 +44,7 @@
 #define W3DEXCLUSIONLIST_H
 
 #include "always.h"
-#include "vector.h"
+#include "Vector.H"
 #include "wwstring.h"
 #include "hashtemplate.h"
 

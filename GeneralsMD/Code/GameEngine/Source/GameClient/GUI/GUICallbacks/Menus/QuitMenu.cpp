@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -106,7 +108,7 @@ static void initGadgetsNoSaveQuit( void )
 	buttonReturn = TheNameKeyGenerator->nameToKey( AsciiString( "QuitNoSave.wnd:ButtonReturn" ) );
 	buttonOptions = TheNameKeyGenerator->nameToKey( AsciiString( "QuitNoSave.wnd:ButtonOptions" ) );
 	buttonSaveLoad = NAMEKEY_INVALID;
-	
+
 	buttonRestartWin	= TheWindowManager->winGetWindowFromId( NULL, buttonRestart );
 	buttonOptionsWin = TheWindowManager->winGetWindowFromId( NULL, buttonOptions );
 	buttonSaveLoadWin = NULL;
@@ -394,7 +396,7 @@ void ToggleQuitMenu()
 	// BGC- this is kind of hackish, but its the safest way to do it I think.
 	// Basically we're seeing if either the save/load window or the options window is up
 	// and if one of them is, we quit out of them rather than toggle the quit menu.
-	if (TheShell->getOptionsLayout(FALSE) != FALSE) {
+	if (TheShell->getOptionsLayout(FALSE) != NULL) {
 		WindowLayout *optLayout = TheShell->getOptionsLayout(FALSE);
 		GameWindow *optionsParent = optLayout->getFirstWindow();
 		DEBUG_ASSERTCRASH(optionsParent != NULL, ("Not able to get the options layout parent window"));

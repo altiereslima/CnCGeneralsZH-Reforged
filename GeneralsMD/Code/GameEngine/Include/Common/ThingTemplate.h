@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -60,10 +62,10 @@ class ProductionPrerequisite;
 struct FieldParse;
 class Player;
 class INI;
-enum RadarPriorityType;
-enum ScienceType;
-enum EditorSortingType;
-enum ShadowType;
+enum RadarPriorityType : Int;
+enum ScienceType : Int;
+enum EditorSortingType : Int;
+enum ShadowType : Int;
 class WeaponTemplateSet;
 class ArmorTemplateSet;
 class FXList;
@@ -214,7 +216,7 @@ static const char *BuildCompletionNames[] =
 };
 #endif  // end DEFINE_BUILD_COMPLETION_NAMES
 
-enum BuildableStatus
+enum BuildableStatus : Int
 {
 	// saved into savegames... do not change or remove values!
 	BSTATUS_YES = 0,
@@ -279,7 +281,7 @@ public:
 	ModuleInfo() { }
 
 	void addModuleInfo( ThingTemplate *thingTemplate, const AsciiString& name, const AsciiString& moduleTag, const ModuleData* data, Int interfaceMask, Bool inheritable, Bool overrideableByLikeKind = FALSE );
-	const ModuleInfo::Nugget *ModuleInfo::getNuggetWithTag( const AsciiString& tag ) const;
+	const ModuleInfo::Nugget *getNuggetWithTag( const AsciiString& tag ) const;
 
 	Int getCount() const 
 	{ 
@@ -434,6 +436,7 @@ public:
 	
 	// This function is only for use by the AIUpdateModuleData::parseLocomotorSet function.
 	AIUpdateModuleData *friend_getAIModuleInfo(void);
+	Int friend_getLocomotorSetsLostToReplace(void) const { return m_locomotorSetsLostToReplace; }
 
 	ShadowType getShadowType() const { return (ShadowType)m_shadowType; }
 	Real getShadowSizeX() const { return m_shadowSizeX; }
@@ -623,6 +626,7 @@ public:
 	void setCopiedFromDefault();
 
 	void setReskinnedFrom(const ThingTemplate* tt) { DEBUG_ASSERTCRASH(m_reskinnedFrom == NULL, ("should be null")); m_reskinnedFrom = tt; }
+	const ThingTemplate* friend_getReskinnedFrom() const { return m_reskinnedFrom; }	///< port defect 34's load-time check
 
 	Bool isPrerequisite() const { return m_isPrerequisite; }
 
@@ -785,6 +789,7 @@ private:
 	Byte					m_structureRubbleHeight;
 	Byte					m_shadowType;								///< settings which determine the type of shadow rendered
 	Byte					m_moduleParsingMode;
+	Byte					m_locomotorSetsLostToReplace;	///< port defect 33: locomotor sets a ReplaceModule of the AI module discarded (0: none); see ThingFactory's checkLocomotors
 	UnsignedByte	m_crusherLevel;							///< crusher > crushable level to actually crush
 	UnsignedByte	m_crushableLevel;						///< Specifies the level of crushability (must be hit by a crusher greater than this to crush me).
 

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -115,7 +116,7 @@ Bool SabotageInternetCenterCrateCollide::isValidToExecute( const Object *other )
 
 static void disableHacker( Object *obj, void *userData )
 {
-	UnsignedInt frame = (UnsignedInt)userData;
+	UnsignedInt frame = (UnsignedInt)(uintptr_t)userData;
 	if( obj )
 	{
 		obj->setDisabledUntil( DISABLED_HACKED, frame );
@@ -126,7 +127,7 @@ static void disableInternetCenterSpyVision( Object *obj, void *userData )
 {
 	if( obj && obj->isKindOf( KINDOF_FS_INTERNET_CENTER ) )
 	{
-		UnsignedInt frame = (UnsignedInt)userData;
+		UnsignedInt frame = (UnsignedInt)(uintptr_t)userData;
 
 		//Loop through all it's SpyVisionUpdates() and wake them all up so they can be shut down. This is weird because
 		//it's one of the few update modules that is actually properly sleepified.
@@ -176,7 +177,7 @@ Bool SabotageInternetCenterCrateCollide::executeCrateBehavior( Object *other )
 	//doesn't need to change.
 	// This loop goes before the Disabled_Hacked one since that will use the normal disabled code with its cool timers.
 	// This loop is for the other centers, but it hits the main one too.
-	other->getControllingPlayer()->iterateObjects( disableInternetCenterSpyVision, (void*)frame );
+	other->getControllingPlayer()->iterateObjects( disableInternetCenterSpyVision, (void*)(uintptr_t)frame );
 
 	//Disable the internet center. Note this is purely fluff... because the spy vision update will still run even
 	//though we are disabling it. We have to disable the spyvision updates manually because other centers need to
@@ -185,7 +186,7 @@ Bool SabotageInternetCenterCrateCollide::executeCrateBehavior( Object *other )
 
 	//Disable all the hackers inside.
 	ContainModuleInterface *contain = other->getContain();
-	contain->iterateContained( disableHacker, (void*)frame, FALSE );
+	contain->iterateContained( disableHacker, (void*)(uintptr_t)frame, FALSE );
 		
 	return TRUE;
 }

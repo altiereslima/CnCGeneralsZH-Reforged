@@ -15,11 +15,12 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*
 ** The Direct3D 11 device, its swap chain and the two views that hang off it.
 **
-** This is the bottom of RENDERER-ROADMAP.md's phase 2 and it knows nothing about the game: a
+** This is the bottom of the Direct3D 11 backend and it knows nothing about the game: a
 ** device, a back buffer, a depth buffer, a clear and a present.  Everything above it - the state
 ** translation, the combiner programs -ffshader generates, the two .vso rewrites - is built on this
 ** and can be written against a device that already exists rather than one being designed at the
@@ -27,7 +28,8 @@
 **
 ** It creates on hardware and falls back to WARP, and it can be created with no window at all,
 ** which is what lets a test run it: a device with no swap chain has no back buffer and cannot
-** present, and Create_Offscreen says so by refusing both.
+** present, and Create_Offscreen says so by refusing both.  ZH_DX11_DRIVER (warp or null) forces the
+** driver for measuring; the NULL driver's back buffer is a texture and its present does nothing.
 **
 ** Nothing here is bound to D3D9's rules.  A D3D11 device is not lost by an alt-tab, so there is no
 ** TestCooperativeLevel and no Reset_Device; a resize is DXGI's ResizeBuffers and the views are

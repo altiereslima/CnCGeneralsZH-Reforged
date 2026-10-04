@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -28,7 +29,14 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
+#if defined(_WIN32)
 #include <winsock.h>	// This one has to be here. Prevents collisions with winsock2.h
+#else
+#include <arpa/inet.h>		// inet_addr, inet_ntoa
+#include <netdb.h>				// gethostbyname
+#include <netinet/in.h>
+typedef struct hostent HOSTENT;		// winsock's name for it
+#endif
 
 #include "GameNetwork/GameSpy/GameResultsThread.h"
 #include "mutex.h"
@@ -36,6 +44,9 @@
 
 #include "Common/StackDump.h"
 #include "Common/SubsystemInterface.h"
+
+#include <condition_variable>
+#include <mutex>
 
 //-------------------------------------------------------------------------
 
@@ -67,6 +78,9 @@ public:
 
 	virtual Bool areGameResultsBeingSent( void );
 
+	/// The worker's wait: the next request, blocking until there is one; FALSE once endThreads has begun.
+	Bool waitForRequest( GameResultsRequest& req );
+
 private:
 	MutexClass m_requestMutex;
 	MutexClass m_responseMutex;
@@ -74,6 +88,15 @@ private:
 	ResponseQueue m_responses;
 	Int m_requestCount;
 	Int m_responseCount;
+
+	/* The worker used to poll getRequest with a 1 ms sleep between tries: a thousand wakeups a second for
+		 the whole session, for a queue that is written at most once, after an online ladder game.  It now
+		 sleeps on m_wake.  m_wakeLock orders a worker's check of the queue before its wait against
+		 addRequest's notify, so a request is never left waiting; m_stopping, under the same lock, is what
+		 endThreads wakes it with. */
+	std::mutex m_wakeLock;
+	std::condition_variable m_wake;
+	Bool m_stopping;
 
 	GameResultsThreadClass *m_workerThreads[NumWorkerThreads];
 };
@@ -91,18 +114,22 @@ class GameResultsThreadClass : public ThreadClass
 {
 
 public:
-	GameResultsThreadClass() : ThreadClass() {}
+	/* The queue it serves.  The worker read the global TheGameResultsQueue instead, which GameEngine::init
+		 assigns only after this thread is already running: a data race on every start (TSan). */
+	explicit GameResultsThreadClass( GameResultsQueue *queue ) : ThreadClass(), m_queue(queue) {}
 
 	void Thread_Function();
 
 private:
 	Int sendGameResults( UnsignedInt IP, UnsignedShort port, const std::string& results );
+
+	GameResultsQueue *m_queue;
 };
 
 
 //-------------------------------------------------------------------------
 
-GameResultsQueue::GameResultsQueue() : m_requestCount(0), m_responseCount(0)
+GameResultsQueue::GameResultsQueue() : m_requestCount(0), m_responseCount(0), m_stopping(FALSE)
 {
 	for (Int i=0; i<NumWorkerThreads; ++i)
 	{
@@ -120,15 +147,26 @@ GameResultsQueue::~GameResultsQueue()
 void GameResultsQueue::startThreads( void )
 {
 	endThreads();
+	{
+		std::lock_guard<std::mutex> wake(m_wakeLock);
+		m_stopping = FALSE;
+	}
 	for (Int i=0; i<NumWorkerThreads; ++i)
 	{
-		m_workerThreads[i] = NEW GameResultsThreadClass;
+		m_workerThreads[i] = NEW GameResultsThreadClass(this);
 		m_workerThreads[i]->Execute();
 	}
 }
 
 void GameResultsQueue::endThreads( void )
 {
+	// A worker asleep in waitForRequest never looks at ThreadClass::running, so wake it to leave before
+	// ~ThreadClass stops and joins it.
+	{
+		std::lock_guard<std::mutex> wake(m_wakeLock);
+		m_stopping = TRUE;
+	}
+	m_wake.notify_all();
 	for (Int i=0; i<NumWorkerThreads; ++i)
 	{
 		if (m_workerThreads[i])
@@ -154,10 +192,37 @@ Bool GameResultsQueue::areThreadsRunning( void )
 
 void GameResultsQueue::addRequest( const GameResultsRequest& req )
 {
-	MutexClass::LockClass m(m_requestMutex);
+	{
+		MutexClass::LockClass m(m_requestMutex);
 
-	++m_requestCount;
-	m_requests.push(req);
+		++m_requestCount;
+		m_requests.push(req);
+	}
+	// Under m_wakeLock, so this lands before the worker looks at the queue or after it is waiting.
+	std::lock_guard<std::mutex> wake(m_wakeLock);
+	m_wake.notify_one();
+}
+
+Bool GameResultsQueue::waitForRequest( GameResultsRequest& req )
+{
+	std::unique_lock<std::mutex> wake(m_wakeLock);
+	for (;;)
+	{
+		if (m_stopping)
+			return FALSE;
+		{
+			// A blocking lock, where getRequest tries once: a try that lost to areGameResultsBeingSent
+			// would go back to sleep with the request still queued.
+			MutexClass::LockClass m(m_requestMutex);
+			if (!m_requests.empty())
+			{
+				req = m_requests.front();
+				m_requests.pop();
+				return TRUE;
+			}
+		}
+		m_wake.wait(wake);
+	}
 }
 
 Bool GameResultsQueue::getRequest( GameResultsRequest& req )
@@ -210,19 +275,22 @@ Bool GameResultsQueue::areGameResultsBeingSent( void )
 void GameResultsThreadClass::Thread_Function()
 {
 	try {
-	_set_se_translator( DumpExceptionInfo ); // Hook that allows stack trace.
+	InstallThreadExceptionTranslator(); // Hook that allows stack trace.
 	GameResultsRequest req;
 
+#if defined(_WIN32)
 	WSADATA wsaData;
 
 	// Fire up winsock (prob already done, but doesn't matter)
 	WORD wVersionRequested = MAKEWORD(1, 1);
 	WSAStartup( wVersionRequested, &wsaData );
+#endif
 
 	while ( running )
 	{
-		// deal with requests
-		if (TheGameResultsQueue && TheGameResultsQueue->getRequest(req))
+		// deal with requests: asleep until there is one, and out when the queue shuts down
+		if (!m_queue->waitForRequest(req))
+			break;
 		{
 			// resolve the hostname
 			const char *hostnameBuffer = req.hostname.c_str();
@@ -247,9 +315,13 @@ void GameResultsThreadClass::Thread_Function()
 					//   callback.
 					IP = 0xFFFFFFFF;   // flag for IP resolve failed
 				}
-				hostNode = (in_addr *) hostStruct->h_addr;
-				IP = hostNode->s_addr;
-				DEBUG_LOG(("sending game results to %s IP = %s\n", hostnameBuffer, inet_ntoa(*hostNode) ));
+				else
+				{
+					// The lookup's failure used to fall through to here and read h_addr through NULL.
+					hostNode = (in_addr *) hostStruct->h_addr;
+					IP = hostNode->s_addr;
+					DEBUG_LOG(("sending game results to %s IP = %s\n", hostnameBuffer, inet_ntoa(*hostNode) ));
+				}
 			}
 
 			int result = sendGameResults( IP, req.port, req.results );
@@ -259,12 +331,11 @@ void GameResultsThreadClass::Thread_Function()
 			resp.sentOk = (result == req.results.length());
 
 		}
-
-		// end our timeslice
-		Switch_Thread();
 	}
 
+#if defined(_WIN32)
 	WSACleanup();
+#endif
 	} catch ( ... ) {
 		DEBUG_CRASH(("Exception in results thread!"));
 	}
@@ -272,6 +343,10 @@ void GameResultsThreadClass::Thread_Function()
 
 //-------------------------------------------------------------------------
 
+/* The results go to GameSpy's server over a winsock TCP connection, with winsock's error names in the
+	 log.  GameSpy is a dead service and only has to compile and link (the B5 survey: stub, do not port),
+	 so off Windows sendGameResults answers -1, which the thread reports as not sent. */
+#if defined(_WIN32)
 #ifdef DEBUG_LOGGING
 #define CASE(x) case (x): return #x;
 
@@ -389,6 +464,12 @@ Int GameResultsThreadClass::sendGameResults( UnsignedInt IP, UnsignedShort port,
 
 	return results.length();
 }
+#else
+Int GameResultsThreadClass::sendGameResults( UnsignedInt, UnsignedShort, const std::string& )
+{
+	return -1;
+}
+#endif
 
 
 //-------------------------------------------------------------------------

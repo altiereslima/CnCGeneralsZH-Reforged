@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -133,10 +135,14 @@ public:
 	static WW3DErrorType		On_Activate_App( void );
 	static WW3DErrorType		On_Deactivate_App( void );
 
+#if defined(_WIN32)
+	// The render device's settings in the Windows registry, which only Windows has; nothing outside WW3D2
+	// calls these.
 	static WW3DErrorType		Registry_Save_Render_Device( const char * sub_key );
 	static WW3DErrorType		Registry_Save_Render_Device( const char * sub_key, int device, int width, int height, int depth, bool windowed, int texture_depth );
 	static WW3DErrorType		Registry_Load_Render_Device( const char * sub_key, bool resize_window = false );
 	static bool					Registry_Load_Render_Device( const char * sub_key, char *device, int device_len, int &width, int &height, int &depth, int &windowed, int& texture_depth);
+#endif
 
 	// 0 = bilinear, 1 = trilinear, 2 = anisotropic
 	static void					Set_Texture_Filter(int filter);

@@ -1,4 +1,4 @@
-# dist/ is committed, unlike every other vendored library here.
+# dist/ (x64) and dist-arm64/ (ARM64) are committed, unlike every other vendored library here.
 #
 # It is 5MB, it is our own build rather than a download (Tools/ffmpeg-build.bat made it, and holds
 # only the codecs this game opens), and without it nothing links. Committing it is what makes one
@@ -12,3 +12,5 @@
 !.gitignore
 !dist/
 !dist/**
+!dist-arm64/
+!dist-arm64/**

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -43,7 +45,7 @@
 #include "shader.h"
 #include "w3d_file.h"
 #include "wwdebug.h"
-#include "Dx8Wrapper.h"
+#include "dx8wrapper.h"
 #include "dx8caps.h"
 
 
@@ -430,7 +432,7 @@ void ShaderClass::Apply()
 
 	if(diff & (ShaderClass::MASK_COLORMASK | ShaderClass::MASK_SRCBLEND | ShaderClass::MASK_DSTBLEND | ShaderClass::MASK_ALPHATEST))
 	{
-		ULONG planeMask = 0xffffff;
+		uint32 planeMask = 0xffffff;
 
 		if(Get_Color_Mask() != ShaderClass::COLOR_WRITE_ENABLE)
 			planeMask = 0;
@@ -452,17 +454,17 @@ void ShaderClass::Apply()
 			blendAlpha |= dstBlendLUT[ int(Get_Dst_Blend_Func()) ].useAlpha;
 		}
 
-		BOOL blendOn = FALSE;
+		BOOL blendOn = false;
 
 		if(sf != D3DBLEND_ONE || df != D3DBLEND_ZERO)
 		{
 			DX8Wrapper::Set_DX8_Render_State(D3DRS_SRCBLEND,sf);
 			DX8Wrapper::Set_DX8_Render_State(D3DRS_DESTBLEND,df);
-			blendOn = TRUE;
+			blendOn = true;
 		}
 		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE,blendOn);
 
-		BOOL alphaTest = FALSE;
+		BOOL alphaTest = false;
 
 		if(Get_Alpha_Test() == ShaderClass::ALPHATEST_ENABLE)
 		{
@@ -479,7 +481,7 @@ void ShaderClass::Apply()
 				DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHAFUNC,D3DCMP_GREATEREQUAL);
 			}
 			blendAlpha = true;
-			alphaTest = TRUE;
+			alphaTest = true;
 		}
 		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHATESTENABLE,alphaTest);
 
@@ -494,24 +496,24 @@ void ShaderClass::Apply()
 		// can defer the "fog enabled" check inside the "fog settings changed" check.
 		if (DX8Wrapper::Get_Current_Caps()->Is_Fog_Allowed() && DX8Wrapper::Get_Fog_Enable()) {
 
-			BOOL fm = FALSE;
+			BOOL fm = false;
 			D3DCOLOR fogColor = DX8Wrapper::Get_Fog_Color();
 			
 			switch(Get_Fog_Func())
 			{
 			case ShaderClass::FOG_ENABLE:
-				fm = TRUE;
+				fm = true;
 				break;
 			case ShaderClass::FOG_SCALE_FRAGMENT:
 				fogColor = 0;	
-				fm = TRUE;
+				fm = true;
 				break;
 			case ShaderClass::FOG_WHITE:
 				fogColor = 0xffffff;
-				fm = TRUE;
+				fm = true;
 				break;
 			case ShaderClass::FOG_DISABLE:
-				fm = FALSE;
+				fm = false;
 				break;
 			}
 
@@ -523,7 +525,7 @@ void ShaderClass::Apply()
 			}
 
 		} else {
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_FOGENABLE,FALSE);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_FOGENABLE,false);
 		}
 		
 		diff &= ~(ShaderClass::MASK_FOG);
@@ -534,20 +536,20 @@ void ShaderClass::Apply()
 	// Defaults
 	
 	D3DTEXTUREOP	PricOp	= D3DTOP_SELECTARG1;
-	DWORD				PricArg1 = D3DTA_DIFFUSE;
-	DWORD				PricArg2 = D3DTA_DIFFUSE;
+	uint32				PricArg1 = D3DTA_DIFFUSE;
+	uint32				PricArg2 = D3DTA_DIFFUSE;
 
 	D3DTEXTUREOP	PriaOp	 = D3DTOP_SELECTARG1;	
-	DWORD			PriaArg1 = D3DTA_DIFFUSE;
-	DWORD			PriaArg2 = D3DTA_DIFFUSE;
+	uint32			PriaArg1 = D3DTA_DIFFUSE;
+	uint32			PriaArg2 = D3DTA_DIFFUSE;
 
 	D3DTEXTUREOP	SeccOp	 = D3DTOP_DISABLE;
-	DWORD			SeccArg1 = D3DTA_TEXTURE;
-	DWORD			SeccArg2 = D3DTA_CURRENT;
+	uint32			SeccArg1 = D3DTA_TEXTURE;
+	uint32			SeccArg2 = D3DTA_CURRENT;
 
 	D3DTEXTUREOP	SecaOp	 = D3DTOP_DISABLE;
-	DWORD			SecaArg1 = D3DTA_TEXTURE;
-	DWORD			SecaArg2 = D3DTA_CURRENT;
+	uint32			SecaArg1 = D3DTA_TEXTURE;
+	uint32			SecaArg2 = D3DTA_CURRENT;
 
 	bool voodoo3=(DX8Wrapper::Get_Current_Caps()->Get_Vendor()==DX8Caps::VENDOR_3DFX) &&
 					 (DX8Wrapper::Get_Current_Caps()->Get_Device()==DX8Caps::DEVICE_3DFX_VOODOO_3);
@@ -925,7 +927,7 @@ void ShaderClass::Apply()
 			// If stage 0 has a diffuse input
 			// and stage 1 has an input put the diffuse in stage 2			
 			
-			DWORD tex_arg=D3DTA_CURRENT;
+			uint32 tex_arg=D3DTA_CURRENT;
 			if(Get_Texturing() == ShaderClass::TEXTURING_ENABLE) {
 				tex_arg=D3DTA_TEXTURE;
 			}

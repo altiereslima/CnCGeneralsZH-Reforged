@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -27,6 +29,9 @@
 // Author: Michael S. Booth, February 2001
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
+
+#include "Lib/WideCharFns.h"
 
 #include "stdlib.h"				// VC++ wants this here, or gives compile error...
 
@@ -1005,7 +1010,10 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 			// a posted unit holds its spot and shoots what walks into range, rather than chasing it
 			// off the post the player put it on
 			if (msgType == GameMessage::MSG_DO_GUARD_POSITION)
+			{
 				movemsg->appendIntegerArgument( GUARDMODE_GUARD_WITHOUT_PURSUIT );
+				movemsg->appendRealArgument( TheInGameUI->getAreaPickRadius() );
+			}
 
 		}  // end if
 	}
@@ -1602,6 +1610,16 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 																														 const Coord3D *pos, 
 																														 CommandEvaluateType type )
 {
+	// the search and destroy key sweeps a circle round the point, whatever stands on it
+	if( TheInGameUI->getAreaOrderArmed() != InGameUI::AREA_ORDER_NONE && TheInGameUI->areSelectedObjectsControllable() )
+	{
+		if( type == DO_COMMAND )
+			TheInGameUI->issueAreaSweep( *pos );
+		else if( type == DO_HINT )
+			TheMessageStream->appendMessage( GameMessage::MSG_DO_MOVETO_HINT )->appendLocationArgument( *pos );
+		return type == DO_COMMAND ? GameMessage::MSG_DO_MOVETO : GameMessage::MSG_DO_MOVETO_HINT;
+	}
+
 	Object *obj = draw ? draw->getObject() : NULL;
 	Drawable *drawableInWay = draw;
 
@@ -2549,7 +2567,7 @@ Bool takeControlOfPlayer( Player *p )
 	TheControlBar->showSpecialPowerShortcutInstantly(p);
 	TheControlBar->markUIDirty();
 	TheGameClient->updateFakeDrawables();
-	TheInGameUI->message(UnicodeString(L"Now playing: %s"), p->getPlayerDisplayName().str());
+	TheInGameUI->message(UnicodeString(u"Now playing: %s"), p->getPlayerDisplayName().str());
 	return TRUE;
 }
 
@@ -2597,7 +2615,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			enum { SELECT_MATCHING_AGAIN_MS = 500 };		///< real time: the client frame rate is uncapped
 			static UnsignedInt s_lastMatchingMs = 0;
 
-			const UnsignedInt now = timeGetTime();
+			const UnsignedInt now = Clock_Milliseconds();
 			const Bool again = ( s_lastMatchingMs != 0
 														&& now - s_lastMatchingMs <= SELECT_MATCHING_AGAIN_MS );
 			s_lastMatchingMs = now;
@@ -3663,8 +3681,8 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 				#endif
 				{
 					TheWritableGlobalData->m_TiVOFastMode = 1 - TheGlobalData->m_TiVOFastMode;
-					TheInGameUI->message( UnicodeString( L"m_TiVOFastMode: %s" ),
-																TheGlobalData->m_TiVOFastMode ? L"ON" : L"OFF" );
+					TheInGameUI->message( UnicodeString( u"m_TiVOFastMode: %s" ),
+																TheGlobalData->m_TiVOFastMode ? u"ON" : u"OFF" );
 				}
 			}  // end if
 
@@ -3706,8 +3724,8 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 				{
 
 					TheWritableGlobalData->m_specialPowerUsesDelay = 1 - TheGlobalData->m_specialPowerUsesDelay;
-					TheInGameUI->message( UnicodeString( L"Special Power (Superweapon) Delay: %s" ),
-																TheGlobalData->m_specialPowerUsesDelay ? L"ON" : L"OFF" );
+					TheInGameUI->message( UnicodeString( u"Special Power (Superweapon) Delay: %s" ),
+																TheGlobalData->m_specialPowerUsesDelay ? u"ON" : u"OFF" );
 
 				}  // end if
 
@@ -3818,7 +3836,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 						}
 					}
 				}
-				TheInGameUI->message( UnicodeString( L"Granting all sciences!" ));
+				TheInGameUI->message( UnicodeString( u"Granting all sciences!" ));
 				disp = DESTROY_MESSAGE;
 			}
 			break;
@@ -3830,7 +3848,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 				Player *player = ThePlayerList->getLocalPlayer();
 				if (player)
 					player->addSciencePurchasePoints(1);
-				TheInGameUI->message( UnicodeString( L"Adding a SciencePurchasePoint" ));
+				TheInGameUI->message( UnicodeString( u"Adding a SciencePurchasePoint" ));
 				disp = DESTROY_MESSAGE;
 			}
 			break;
@@ -3840,8 +3858,8 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			if ( !TheGameLogic->isInMultiplayerGame() )
 			{
 				TheWritableGlobalData->m_showObjectHealth = 1 - TheGlobalData->m_showObjectHealth;
-				TheInGameUI->message( UnicodeString( L"Object Health %s" ),
-															TheGlobalData->m_showObjectHealth ? L"ON" : L"OFF" );
+				TheInGameUI->message( UnicodeString( u"Object Health %s" ),
+															TheGlobalData->m_showObjectHealth ? u"ON" : u"OFF" );
 				disp = DESTROY_MESSAGE;
 			}
 			break;
@@ -4552,7 +4570,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_DEMO_TOGGLE_BW_VIEW:
 		{   //We're not testing BW mode anymore, so use this message for toggling wireframe mode.
-			static mode=0;
+			static Int mode=0;
 			if (mode == 0)
 			{	//First turn on wireframe
 				TheTacticalView->set3DWireFrameMode(TRUE);
@@ -4645,7 +4663,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			TheGameLODManager->setDynamicLODLevel((DynamicGameLODLevel)level);
 
 			UnicodeString lodName;
-			lodName.format(L"Dynamic Game Detail %hs",TheGameLODManager->getDynamicGameLODLevelName((DynamicGameLODLevel)level));
+			lodName.format(u"Dynamic Game Detail %hs",TheGameLODManager->getDynamicGameLODLevelName((DynamicGameLODLevel)level));
 			TheInGameUI->message(lodName);
 
 			disp = DESTROY_MESSAGE;
@@ -4759,7 +4777,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_DEBUG_INCR_ANIM_SKATE_SPEED:
 		{
 			TheSkateDistOverride += 0.25f;
-			TheInGameUI->message( UnicodeString( L"Skate Distance Override is now %f" ), TheSkateDistOverride );
+			TheInGameUI->message( UnicodeString( u"Skate Distance Override is now %f" ), TheSkateDistOverride );
 			break;
 		}
 
@@ -4768,7 +4786,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_DEBUG_DECR_ANIM_SKATE_SPEED:
 		{
 			TheSkateDistOverride -= 0.25f;
-			TheInGameUI->message( UnicodeString( L"Skate Distance Override is now %f" ), TheSkateDistOverride );
+			TheInGameUI->message( UnicodeString( u"Skate Distance Override is now %f" ), TheSkateDistOverride );
 			break;
 		}
 
@@ -4834,7 +4852,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 						UnicodeString umsg;
 						umsg.translate(msg);
 						TheInGameUI->message(umsg);
-						DEBUG_LOG(("%ls\n", msg.str()));
+						DEBUG_LOG(("%s\n", msg.str()));
 
 						pObject->setGeometryInfo( newGeometry );
 					}
@@ -4908,7 +4926,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_DEMO_TOGGLE_WATERPLANE:
 		{
-			TheWritableGlobalData->m_useWaterPlane = !TheGlobalData->m_useWaterPlane;
+			// The water plane it toggled is gone; the message is kept so the enum does not shift.
 			disp = DESTROY_MESSAGE;
 			break;
 		}  
@@ -5082,10 +5100,10 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		{
 			if (TheAudio->isMusicPlaying()) {
 				TheAudio->stopAudio(AudioAffect_Music);
-				TheInGameUI->message( UnicodeString( L"Stopping Music" ));
+				TheInGameUI->message( UnicodeString( u"Stopping Music" ));
 			} else {
 				TheAudio->resumeAudio(AudioAffect_Music);
-				TheInGameUI->message( UnicodeString( L"Resuming Music" ));
+				TheInGameUI->message( UnicodeString( u"Resuming Music" ));
 			}
 
 			disp = DESTROY_MESSAGE;
@@ -5098,7 +5116,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		{
 			TheAudio->nextMusicTrack();
 			UnicodeString ustr;
-			ustr.format(L"Playing Track: %hs", TheAudio->getMusicTrackName().str());
+			ustr.format(u"Playing Track: %hs", TheAudio->getMusicTrackName().str());
 			TheInGameUI->message( ustr );
 			disp = DESTROY_MESSAGE;
 			break;
@@ -5110,7 +5128,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		{
 			TheAudio->prevMusicTrack();
 			UnicodeString ustr;
-			ustr.format(L"Playing Track: %hs", TheAudio->getMusicTrackName().str());
+			ustr.format(u"Playing Track: %hs", TheAudio->getMusicTrackName().str());
 			TheInGameUI->message( ustr );
 			disp = DESTROY_MESSAGE;
 			break;
@@ -5140,8 +5158,8 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			if (TheGlobalData->m_debugAI >= AI_DEBUG_END) 
 				TheWritableGlobalData->m_debugAI=AI_DEBUG_NONE;
 			UnicodeString line;
-			line.format(L"Level %d", TheGlobalData->m_debugAI);
-			TheInGameUI->message( UnicodeString( L"Debug AI Mode is %s" ), TheGlobalData->m_debugAI ? line.str() : L"OFF" );
+			line.format(u"Level %d", TheGlobalData->m_debugAI);
+			TheInGameUI->message( UnicodeString( u"Debug AI Mode is %s" ), TheGlobalData->m_debugAI ? line.str() : u"OFF" );
 			disp = DESTROY_MESSAGE;
 			break;
 		}
@@ -5152,7 +5170,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		{
 			TheWritableGlobalData->m_debugSupplyCenterPlacement = !TheWritableGlobalData->m_debugSupplyCenterPlacement;
 
-			TheInGameUI->message( UnicodeString( L"Log SupplyCenter Placement is %s" ), TheGlobalData->m_debugSupplyCenterPlacement ? L"ON" : L"OFF" );
+			TheInGameUI->message( UnicodeString( u"Log SupplyCenter Placement is %s" ), TheGlobalData->m_debugSupplyCenterPlacement ? u"ON" : u"OFF" );
 			disp = DESTROY_MESSAGE;
 			break;
 		}
@@ -5164,7 +5182,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			Player *player = ThePlayerList->getLocalPlayer();
 			if (player)
 				player->addSciencePurchasePoints(1);
-			TheInGameUI->message( UnicodeString( L"Adding a SciencePurchasePoint" ));
+			TheInGameUI->message( UnicodeString( u"Adding a SciencePurchasePoint" ));
 			disp = DESTROY_MESSAGE;
 			break;
 		}
@@ -5187,7 +5205,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 					}
 				}
 			}
-			TheInGameUI->message( UnicodeString( L"Granting all sciences!" ));
+			TheInGameUI->message( UnicodeString( u"Granting all sciences!" ));
 			disp = DESTROY_MESSAGE;
 			break;
 		}
@@ -5199,7 +5217,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			Player *player = ThePlayerList->getLocalPlayer();
 			if (player)
 				player->setRankLevel(player->getRankLevel() + 1);
-			TheInGameUI->message( UnicodeString( L"Adding a RankLevel" ));
+			TheInGameUI->message( UnicodeString( u"Adding a RankLevel" ));
 			disp = DESTROY_MESSAGE;
 			break;
 		}
@@ -5211,7 +5229,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			Player *player = ThePlayerList->getLocalPlayer();
 			if (player)
 				player->setRankLevel(player->getRankLevel() - 1);
-			TheInGameUI->message( UnicodeString( L"Subtracting a RankLevel" ));
+			TheInGameUI->message( UnicodeString( u"Subtracting a RankLevel" ));
 			disp = DESTROY_MESSAGE;
 			break;
 		}
@@ -5221,7 +5239,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_DEMO_TOGGLE_CAMERA_DEBUG:
 		{
 			TheWritableGlobalData->m_debugCamera = !TheGlobalData->m_debugCamera;
-			TheInGameUI->message( UnicodeString( L"Debug Camera Mode is %s" ), TheGlobalData->m_debugCamera ? L"On" : L"OFF" );
+			TheInGameUI->message( UnicodeString( u"Debug Camera Mode is %s" ), TheGlobalData->m_debugCamera ? u"On" : u"OFF" );
 			disp = DESTROY_MESSAGE;
 			break;
 		}
@@ -5253,7 +5271,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 				Int numObjects = 0;
 				pPlayer->iterateObjects( countObjects, &numObjects );
-				line.format("Player %d (%ls) has %d non-dead objects", i, pPlayer->getPlayerDisplayName().str(), numObjects);
+				line.format("Player %d (%s) has %d non-dead objects", i, WideCharAsUtf8( pPlayer->getPlayerDisplayName().str() ).str(), numObjects);
 				TheScriptEngine->AppendDebugMessage(line, FALSE);
 
 				if (numObjects && (numObjects <= 5 || t == GameMessage::MSG_META_DEBUG_DUMP_ALL_PLAYER_OBJECTS))
@@ -5295,7 +5313,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_DEMO_TOGGLE_VISIONDEBUG:
 		{
 			TheWritableGlobalData->m_debugVisibility = !TheGlobalData->m_debugVisibility;
-			TheInGameUI->message( UnicodeString( L"Debug Vision Mode is %s" ), TheGlobalData->m_debugVisibility? L"On" : L"OFF" );
+			TheInGameUI->message( UnicodeString( u"Debug Vision Mode is %s" ), TheGlobalData->m_debugVisibility? u"On" : u"OFF" );
 			disp = DESTROY_MESSAGE;
 			break;
 		}
@@ -5305,7 +5323,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_DEMO_TOGGLE_PROJECTILEDEBUG:
 		{
 			TheWritableGlobalData->m_debugProjectilePath = !TheGlobalData->m_debugProjectilePath;
-			TheInGameUI->message( UnicodeString( L"Debug Projectile Path Mode is %s" ), TheGlobalData->m_debugProjectilePath? L"On" : L"OFF" );
+			TheInGameUI->message( UnicodeString( u"Debug Projectile Path Mode is %s" ), TheGlobalData->m_debugProjectilePath? u"On" : u"OFF" );
 			disp = DESTROY_MESSAGE;
 			break;
 		}
@@ -5318,7 +5336,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			if (TheGlobalData->m_debugThreatMap) {
 				TheWritableGlobalData->m_debugCashValueMap = false;
 			}
-			TheInGameUI->message( UnicodeString( L"Debug Threat Map is %s" ), TheGlobalData->m_debugThreatMap? L"On" : L"OFF" );
+			TheInGameUI->message( UnicodeString( u"Debug Threat Map is %s" ), TheGlobalData->m_debugThreatMap? u"On" : u"OFF" );
 			disp = DESTROY_MESSAGE;
 			break;
 		}
@@ -5331,7 +5349,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			if (TheGlobalData->m_debugCashValueMap) {
 				TheWritableGlobalData->m_debugThreatMap = false;
 			}
-			TheInGameUI->message( UnicodeString( L"Debug Cash Value Map is %s" ), TheGlobalData->m_debugCashValueMap? L"On" : L"OFF" );
+			TheInGameUI->message( UnicodeString( u"Debug Cash Value Map is %s" ), TheGlobalData->m_debugCashValueMap? u"On" : u"OFF" );
 			disp = DESTROY_MESSAGE;
 			break;
 		}
@@ -5349,16 +5367,16 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_DEBUG_SHOW_EXTENTS:
 			TheWritableGlobalData->m_showCollisionExtents = 1 - TheGlobalData->m_showCollisionExtents;
-			TheInGameUI->message( UnicodeString( L"Show Object Extents %s" ),
-				                    TheGlobalData->m_showCollisionExtents ? L"ON" : L"OFF" );
+			TheInGameUI->message( UnicodeString( u"Show Object Extents %s" ),
+				                    TheGlobalData->m_showCollisionExtents ? u"ON" : u"OFF" );
 			break;
 
     //------------------------------------------------------------------------------- DEMO MESSAGES
     //-----------------------------------------------------------------------------------------
     case GameMessage::MSG_META_DEBUG_SHOW_AUDIO_LOCATIONS:
       TheWritableGlobalData->m_showAudioLocations = 1 - TheGlobalData->m_showAudioLocations;
-      TheInGameUI->message( UnicodeString( L"Show AudioLocations %s" ),
-                            TheGlobalData->m_showAudioLocations ? L"ON" : L"OFF" );
+      TheInGameUI->message( UnicodeString( u"Show AudioLocations %s" ),
+                            TheGlobalData->m_showAudioLocations ? u"ON" : u"OFF" );
       break;       
 
     //------------------------------------------------------------------------------- DEMO MESSAGES
@@ -5367,8 +5385,8 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		{
 
 			TheWritableGlobalData->m_showObjectHealth = 1 - TheGlobalData->m_showObjectHealth;
-			TheInGameUI->message( UnicodeString( L"Object Health %s" ),
-				                    TheGlobalData->m_showObjectHealth ? L"ON" : L"OFF" );
+			TheInGameUI->message( UnicodeString( u"Object Health %s" ),
+				                    TheGlobalData->m_showObjectHealth ? u"ON" : u"OFF" );
 			break;
 	
 		}
@@ -5397,8 +5415,8 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			{
 
 				TheTacticalView->setZoomLimited( !TheTacticalView->isZoomLimited() );
-				TheInGameUI->message( UnicodeString( L"Camera Zoom Limit: %s" ),
-				                      TheTacticalView->isZoomLimited() ? L"ON" : L"OFF" );
+				TheInGameUI->message( UnicodeString( u"Camera Zoom Limit: %s" ),
+				                      TheTacticalView->isZoomLimited() ? u"ON" : u"OFF" );
 
 			}  // end if
 
@@ -5416,8 +5434,8 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			{
 
 				TheWritableGlobalData->m_specialPowerUsesDelay = 1 - TheGlobalData->m_specialPowerUsesDelay;
-				TheInGameUI->message( UnicodeString( L"Special Power (Superweapon) Delay: %s" ),
-															TheGlobalData->m_specialPowerUsesDelay ? L"ON" : L"OFF" );
+				TheInGameUI->message( UnicodeString( u"Special Power (Superweapon) Delay: %s" ),
+															TheGlobalData->m_specialPowerUsesDelay ? u"ON" : u"OFF" );
 
 			}  // end if
 
@@ -5464,7 +5482,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_DEBUG_VTUNE_ON:
 		{
 			TheScriptEngine->setEnableVTune(true);
-			TheInGameUI->message( UnicodeString( L"VTune Gathering is ON" ));
+			TheInGameUI->message( UnicodeString( u"VTune Gathering is ON" ));
 			disp = DESTROY_MESSAGE;
 			break;
 		}
@@ -5475,7 +5493,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_DEBUG_VTUNE_OFF:
 		{
 			TheScriptEngine->setEnableVTune(false);
-			TheInGameUI->message( UnicodeString( L"VTune Gathering is OFF" ));
+			TheInGameUI->message( UnicodeString( u"VTune Gathering is OFF" ));
 			disp = DESTROY_MESSAGE;
 			break;
 		}
@@ -5499,7 +5517,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_DEBUG_WIN:
 		{
 			TheScriptEngine->debugVictory();
-			TheInGameUI->message( UnicodeString( L"Instant Win" ));
+			TheInGameUI->message( UnicodeString( u"Instant Win" ));
 			disp = DESTROY_MESSAGE;
 			break;
 		}
@@ -5520,7 +5538,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_DEBUG_SLEEPY_UPDATE_PERFORMANCE:
 		{
-			TheInGameUI->message( UnicodeString(L"Number of Sleepy Modules: %d."), TheGameLogic->getNumberSleepyUpdates() );
+			TheInGameUI->message( UnicodeString(u"Number of Sleepy Modules: %d."), TheGameLogic->getNumberSleepyUpdates() );
 			break;
 		}
 
@@ -5530,46 +5548,46 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		{
 			static __int64 startTime64;
 			static __int64 endTime64,freq64;
-			QueryPerformanceCounter((LARGE_INTEGER *)&startTime64);
-			QueryPerformanceFrequency((LARGE_INTEGER *)&freq64);
+			startTime64 = Clock_Ticks();
+			freq64 = Clock_Ticks_Per_Second();
 			Int numberLookups = 10000;
 			for( Int testindex = 1; testindex < numberLookups; testindex++ )
 			{
 				Object *objPtr = TheGameLogic->findObjectByID((ObjectID)testindex);
 				objPtr++;
 			}
-			QueryPerformanceCounter((LARGE_INTEGER *)&endTime64);
+			endTime64 = Clock_Ticks();
 			double timeToUpdate = ((double)(endTime64-startTime64) / (double)(freq64));
 
-			TheInGameUI->message( UnicodeString(L"Time to run %d ObjectID lookups is %f.  Next index is %d."), numberLookups, timeToUpdate, (Int)TheGameLogic->getObjectIDCounter() );
+			TheInGameUI->message( UnicodeString(u"Time to run %d ObjectID lookups is %f.  Next index is %d."), numberLookups, timeToUpdate, (Int)TheGameLogic->getObjectIDCounter() );
 
 
-			QueryPerformanceCounter((LARGE_INTEGER *)&startTime64);
-			QueryPerformanceFrequency((LARGE_INTEGER *)&freq64);
+			startTime64 = Clock_Ticks();
+			freq64 = Clock_Ticks_Per_Second();
 			numberLookups = 100000;
-			for( testindex = 1; testindex < numberLookups; testindex++ )
+			for( Int testindex = 1; testindex < numberLookups; testindex++ )
 			{
 				Object *objPtr = TheGameLogic->findObjectByID((ObjectID)testindex);
 				objPtr++;
 			}
-			QueryPerformanceCounter((LARGE_INTEGER *)&endTime64);
+			endTime64 = Clock_Ticks();
 			timeToUpdate = ((double)(endTime64-startTime64) / (double)(freq64));
 
-			TheInGameUI->message( UnicodeString(L"Time to run %d ObjectID lookups is %f.  Next index is %d."), numberLookups, timeToUpdate, (Int)TheGameLogic->getObjectIDCounter() );
+			TheInGameUI->message( UnicodeString(u"Time to run %d ObjectID lookups is %f.  Next index is %d."), numberLookups, timeToUpdate, (Int)TheGameLogic->getObjectIDCounter() );
 
 
-			QueryPerformanceCounter((LARGE_INTEGER *)&startTime64);
-			QueryPerformanceFrequency((LARGE_INTEGER *)&freq64);
+			startTime64 = Clock_Ticks();
+			freq64 = Clock_Ticks_Per_Second();
 			numberLookups = 1000000;
-			for( testindex = 1; testindex < numberLookups; testindex++ )
+			for( Int testindex = 1; testindex < numberLookups; testindex++ )
 			{
 				Object *objPtr = TheGameLogic->findObjectByID((ObjectID)testindex);
 				objPtr++;
 			}
-			QueryPerformanceCounter((LARGE_INTEGER *)&endTime64);
+			endTime64 = Clock_Ticks();
 			timeToUpdate = ((double)(endTime64-startTime64) / (double)(freq64));
 
-			TheInGameUI->message( UnicodeString(L"Time to run %d ObjectID lookups is %f.  Next index is %d."), numberLookups, timeToUpdate, (Int)TheGameLogic->getObjectIDCounter() );
+			TheInGameUI->message( UnicodeString(u"Time to run %d ObjectID lookups is %f.  Next index is %d."), numberLookups, timeToUpdate, (Int)TheGameLogic->getObjectIDCounter() );
 
 			break;
 		}
@@ -5580,46 +5598,46 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		{
 			static __int64 startTime64;
 			static __int64 endTime64,freq64;
-			QueryPerformanceCounter((LARGE_INTEGER *)&startTime64);
-			QueryPerformanceFrequency((LARGE_INTEGER *)&freq64);
+			startTime64 = Clock_Ticks();
+			freq64 = Clock_Ticks_Per_Second();
 			Int numberLookups = 10000;
 			for( Int testindex = 1; testindex < numberLookups; testindex++ )
 			{
 				Drawable *drawPtr = TheGameClient->findDrawableByID((DrawableID)testindex);
 				drawPtr++;
 			}
-			QueryPerformanceCounter((LARGE_INTEGER *)&endTime64);
+			endTime64 = Clock_Ticks();
 			double timeToUpdate = ((double)(endTime64-startTime64) / (double)(freq64));
 
-			TheInGameUI->message( UnicodeString(L"Time to run %d DrawableID lookups is %f.  Next index is %d."), numberLookups, timeToUpdate, (Int)TheGameClient->getDrawableIDCounter() );
+			TheInGameUI->message( UnicodeString(u"Time to run %d DrawableID lookups is %f.  Next index is %d."), numberLookups, timeToUpdate, (Int)TheGameClient->getDrawableIDCounter() );
 
 
-			QueryPerformanceCounter((LARGE_INTEGER *)&startTime64);
-			QueryPerformanceFrequency((LARGE_INTEGER *)&freq64);
+			startTime64 = Clock_Ticks();
+			freq64 = Clock_Ticks_Per_Second();
 			numberLookups = 100000;
-			for( testindex = 1; testindex < numberLookups; testindex++ )
+			for( Int testindex = 1; testindex < numberLookups; testindex++ )
 			{
 				Drawable *drawPtr = TheGameClient->findDrawableByID((DrawableID)testindex);
 				drawPtr++;
 			}
-			QueryPerformanceCounter((LARGE_INTEGER *)&endTime64);
+			endTime64 = Clock_Ticks();
 			timeToUpdate = ((double)(endTime64-startTime64) / (double)(freq64));
 
-			TheInGameUI->message( UnicodeString(L"Time to run %d DrawableID lookups is %f.  Next index is %d."), numberLookups, timeToUpdate, (Int)TheGameClient->getDrawableIDCounter() );
+			TheInGameUI->message( UnicodeString(u"Time to run %d DrawableID lookups is %f.  Next index is %d."), numberLookups, timeToUpdate, (Int)TheGameClient->getDrawableIDCounter() );
 
 
-			QueryPerformanceCounter((LARGE_INTEGER *)&startTime64);
-			QueryPerformanceFrequency((LARGE_INTEGER *)&freq64);
+			startTime64 = Clock_Ticks();
+			freq64 = Clock_Ticks_Per_Second();
 			numberLookups = 1000000;
-			for( testindex = 1; testindex < numberLookups; testindex++ )
+			for( Int testindex = 1; testindex < numberLookups; testindex++ )
 			{
 				Drawable *drawPtr = TheGameClient->findDrawableByID((DrawableID)testindex);
 				drawPtr++;
 			}
-			QueryPerformanceCounter((LARGE_INTEGER *)&endTime64);
+			endTime64 = Clock_Ticks();
 			timeToUpdate = ((double)(endTime64-startTime64) / (double)(freq64));
 
-			TheInGameUI->message( UnicodeString(L"Time to run %d DrawableID lookups is %f.  Next index is %d."), numberLookups, timeToUpdate, (Int)TheGameClient->getDrawableIDCounter() );
+			TheInGameUI->message( UnicodeString(u"Time to run %d DrawableID lookups is %f.  Next index is %d."), numberLookups, timeToUpdate, (Int)TheGameClient->getDrawableIDCounter() );
 
 			break;
 		}
@@ -5650,7 +5668,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_DEMO_PERFORM_STATISTICAL_DUMP:
 			//Dump performance statistics for this frame.
 			TheWritableGlobalData->m_dumpPerformanceStatistics = TRUE;
-			TheInGameUI->message( UnicodeString( L"Statistics dump made on frame: %d" ), TheGameLogic->getFrame() );
+			TheInGameUI->message( UnicodeString( u"Statistics dump made on frame: %d" ), TheGameLogic->getFrame() );
 			disp = DESTROY_MESSAGE;
 			break;
 #endif // DUMP_PERF_STATS

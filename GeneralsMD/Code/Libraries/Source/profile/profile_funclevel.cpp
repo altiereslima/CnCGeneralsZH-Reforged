@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by Ilyas Akin for the macOS/Linux port; see NOTICE.md and the git history.
 
 /////////////////////////////////////////////////////////////////////////EA-V1
 // $File: //depot/GeneralsMD/Staging/code/Libraries/Source/profile/profile_funclevel.cpp $
@@ -784,4 +785,6 @@ ProfileFuncLevel::ProfileFuncLevel(void)
 #endif // !defined HAS_PROFILE
 
 ProfileFuncLevel ProfileFuncLevel::Instance;
-HANDLE ProfileFastCS::testEvent=::CreateEvent(NULL,FALSE,FALSE,"");
+// ProfileFastCS::testEvent was defined here, and made an unnamed event at startup that nothing waited
+// on: the class no longer declares it (internal.h, its lock is an atomic flag now), so MSVC refused the
+// definition (W2).

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -53,9 +54,10 @@
 // USER INCLUDES //////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 #include "PreRTS.h"
+#include "Platform/IsWindows9x.h"
 
 #include "Common/INI.h"
-#include "Common/Filesystem.h"
+#include "Common/FileSystem.h"
 #include "Common/Registry.h"
 #include "GameClient/HeaderTemplate.h"
 #include "GameClient/GameFont.h"
@@ -144,17 +146,13 @@ void HeaderTemplateManager::init( void )
 	INI ini;
 	AsciiString fname;
 	fname.format("Data\\%s\\HeaderTemplate.ini", GetRegistryLanguage().str());
-	OSVERSIONINFO	osvi;
-	osvi.dwOSVersionInfoSize=sizeof(OSVERSIONINFO);
-	if (GetVersionEx(&osvi))
+	if (isWindows9x())
 	{	//check if we're running Win9x variant since they may need different fonts
-		if (osvi.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS)
-		{	AsciiString tempName;
+		AsciiString tempName;
 
-			tempName.format("Data\\%s\\HeaderTemplate9x.ini", GetRegistryLanguage().str());
-			if (TheFileSystem->doesFileExist(tempName.str()))
-				fname = tempName;
-		}
+		tempName.format("Data\\%s\\HeaderTemplate9x.ini", GetRegistryLanguage().str());
+		if (TheFileSystem->doesFileExist(tempName.str()))
+			fname = tempName;
 	}
 	ini.load( fname, INI_LOAD_OVERWRITE, NULL );
 	populateGameFonts();

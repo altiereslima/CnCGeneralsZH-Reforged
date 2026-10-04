@@ -1,0 +1,32 @@
+# A Crusader and a Humvee on open ground, for the chassis lean, the tread scroll and the wheel spin.
+# The Crusader pulls away east and stops, pivots to face south and drives, then turns back west on a
+# long diagonal. The Humvee drives east, swings north-west through a turn and comes back east.
+#
+#   generals.exe -win -turbo -quickstart -noshellmap -observer -multiInstance
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 700
+#     -scenario vehiclelean -logPrefix vehiclelean_
+#
+# -turbo draws one picture a logic frame. The same line without -turbo and with -noFPSLimit drew
+# 9421 pictures over 663 logic frames, about 14 each. Measured 2026-10-03 with temporary log lines
+# of the chassis lean, pitch and lift, the tread offsets and the wheel angles, one per unit per logic
+# frame: the two runs wrote the same 945 lines, digit for digit, up to frame 182, where the paced run
+# stalled 1.2 seconds and drew nothing for several logic frames. From there the catch-up steps on
+# an averaged change of speed, and the pitch differs by 0.00004 rad at the 95th percentile and
+# 0.0027 at most. -drawdelay 45 (20 pictures a second, half the logic frames undrawn) stays within
+# 0.0034 rad at the 95th percentile, and the lean itself within 0.0004.
+#
+# With the locomotor's acceleration ramped over about 36 frames, the Crusader squats 1.5 degrees
+# pulling away (frames 63 to 110, 305 to 345, 500 to 525), dives 1.2 braking (frames 260 to 300 and
+# 430 to 490) and rolls 2.1 to 2.5 degrees through the turns after frame 500. On the turn after
+# frame 300 its two treads run against each other. The Humvee backs off at frame 63, pitches 1.7
+# degrees either way and rolls 1.4 through the turns at 340 to 370 and 585 to 625.
+
+30    spawn      0  AmericaTankCrusader      1   1000 3500
+30    spawn      0  AmericaVehicleHumvee     1   1000 3750
+60    move       0  AmericaTankCrusader          1200 3500
+60    move       0  AmericaVehicleHumvee         1350 3750
+300   move       0  AmericaTankCrusader          1200 3350
+300   move       0  AmericaVehicleHumvee         1050 3950
+480   move       0  AmericaTankCrusader          950 3500
+480   move       0  AmericaVehicleHumvee         1350 3750

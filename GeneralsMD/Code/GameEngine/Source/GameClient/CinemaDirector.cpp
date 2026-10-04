@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 // FILE: CinemaDirector.cpp ///////////////////////////////////////////////////////////////////////
 //
@@ -34,6 +35,7 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
 #include "Common/file.h"
 #include "Common/FileSystem.h"
@@ -382,10 +384,10 @@ static CinemaTween theCinemaZoom;
 static CinemaTween theCinemaAngle;
 static CinemaTween theCinemaPitch;
 static UnsignedInt theCinemaSeenFrame = 0;
-static DWORD theCinemaSeenFrameAt = 0;
+static UnsignedInt theCinemaSeenFrameAt = 0;
 static Bool theCinemaClockStarted = FALSE;
 static Real theCinemaClock = 0.0f;
-static DWORD theCinemaClockWall = 0;
+static UnsignedInt theCinemaClockWall = 0;
 
 static Bool cinemaShotIsEarlier( const CinemaShot &left, const CinemaShot &right )
 {
@@ -460,7 +462,7 @@ static void loadCinema( void )
 static Real cinemaNow( void )
 {
 	const UnsignedInt frame = TheGameLogic->getFrame();
-	const DWORD wall = timeGetTime();
+	const UnsignedInt wall = Clock_Milliseconds();
 	if (frame != theCinemaSeenFrame)
 	{
 		theCinemaSeenFrame = frame;

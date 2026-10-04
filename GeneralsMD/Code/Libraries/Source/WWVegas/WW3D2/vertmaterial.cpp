@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -953,7 +955,7 @@ void VertexMaterialClass::Apply(void) const
 	DX8Wrapper::Set_DX8_Material(Material);
 
 	if (WW3D::Is_Coloring_Enabled())
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_LIGHTING,FALSE);
+		DX8Wrapper::Set_DX8_Render_State(D3DRS_LIGHTING,false);
 	else
 		DX8Wrapper::Set_DX8_Render_State(D3DRS_LIGHTING,UseLighting);
 	DX8Wrapper::Set_DX8_Render_State(D3DRS_AMBIENTMATERIALSOURCE,AmbientColorSource);
@@ -983,7 +985,7 @@ void VertexMaterialClass::Apply_Null(void)
 		1.0f									// power
 	};
 
-	DX8Wrapper::Set_DX8_Render_State(D3DRS_LIGHTING,FALSE);
+	DX8Wrapper::Set_DX8_Render_State(D3DRS_LIGHTING,false);
 	DX8Wrapper::Set_DX8_Material(&default_settings);
 
 	DX8Wrapper::Set_DX8_Render_State(D3DRS_AMBIENTMATERIALSOURCE,D3DMCS_MATERIAL);

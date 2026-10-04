@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
@@ -231,7 +233,11 @@ UpdateSleepTime SpecialAbilityUpdate::update( void )
     onExit( false );
     return calcSleepTime();
   }
-	if( abilityBrokenByMovement( ai->isMoving(), isPowerCurrentlyInUse(), ai->isTurningToFace() ) )
+	// AI_BUSY is the ability's own pack and unpack, and only this module ends it; any order that walks the
+	// unit away replaces it first.  isMoving() can still read true in it, and a capture broken there left
+	// its rifleman busy and standing still for the rest of the match: 0.4 of them a side at every look
+	// over 16 Hard matches, a median of three minutes each
+	if( abilityBrokenByMovement( ai->isMoving(), isPowerCurrentlyInUse(), ai->isTurningToFace() || ai->getCurrentStateID() == AI_BUSY ) )
   {
 		// Capture is broken by movement just as if we had been given a direct command (above check).
 		// However, the time of Facing the target is considered isPowerCurrentlyInUse, but isMoving.  So let that slide.
@@ -612,19 +618,28 @@ Bool SpecialAbilityUpdate::isPowerCurrentlyInUse( const CommandButton *command )
 //-------------------------------------------------------------------------------------------------
 Bool SpecialAbilityUpdate::getCaptureProgress( ObjectID *targetID, Real *progress ) const
 {
-	if( !m_active || m_prepFrames == 0 || m_targetID == INVALID_ID )
-		return FALSE;
-
-	const SpecialPowerType type = getSpecialPowerType();
-	if( type != SPECIAL_INFANTRY_CAPTURE_BUILDING && type != SPECIAL_BLACKLOTUS_CAPTURE_BUILDING )
+	if( m_prepFrames == 0 || !getCaptureTarget( targetID ) )
 		return FALSE;
 
 	const UnsignedInt total = getSpecialAbilityUpdateModuleData()->m_preparationFrames;
 	if( total == 0 || m_prepFrames > total )
 		return FALSE;
 
-	*targetID = m_targetID;
 	*progress = 1.0f - (Real)m_prepFrames / (Real)total;
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool SpecialAbilityUpdate::getCaptureTarget( ObjectID *targetID ) const
+{
+	if( !m_active || m_targetID == INVALID_ID )
+		return FALSE;
+
+	const SpecialPowerType type = getSpecialPowerType();
+	if( type != SPECIAL_INFANTRY_CAPTURE_BUILDING && type != SPECIAL_BLACKLOTUS_CAPTURE_BUILDING )
+		return FALSE;
+
+	*targetID = m_targetID;
 	return TRUE;
 }
 
@@ -772,7 +787,7 @@ void SpecialAbilityUpdate::startPacking(Bool success)
   const SpecialAbilityUpdateModuleData* data = getSpecialAbilityUpdateModuleData();
   m_packingState = STATE_PACKING;
   Real variation = GameLogicRandomValueReal( 1.0f - data->m_packUnpackVariationFactor, 1.0f + data->m_packUnpackVariationFactor );
-  m_animFrames = data->m_packTime * variation;
+  m_animFrames = floatToUnsignedAsMsvc(data->m_packTime * variation);	// S8: a variation factor over 1 can make it negative
 
   //Set the animation state
   getObject()->clearAndSetModelConditionFlags( 
@@ -825,7 +840,7 @@ void SpecialAbilityUpdate::startUnpacking()
   const SpecialAbilityUpdateModuleData* data = getSpecialAbilityUpdateModuleData();
   m_packingState = STATE_UNPACKING;
   Real variation = GameLogicRandomValueReal( 1.0f - data->m_packUnpackVariationFactor, 1.0f + data->m_packUnpackVariationFactor );
-  m_animFrames = data->m_unpackTime * variation;
+  m_animFrames = floatToUnsignedAsMsvc(data->m_unpackTime * variation);	// S8
 
   //Set the animation state
   getObject()->clearAndSetModelConditionFlags( 

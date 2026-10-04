@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 #pragma once
 
@@ -33,16 +34,36 @@
 // Monitor and what ChangeDisplaySettingsEx takes.  A name that is empty, or that no monitor answers
 // to any more because it was unplugged, means the primary.
 
+#if defined(_WIN32)
 #include <windows.h>
+#else
+#include <strings.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 
+/* Where a monitor sits, and how long its device name can be: Windows' own RECT and CCHDEVICENAME
+	 there, so WinMain can keep taking a RECT; the same shape and the same 32 elsewhere. */
+#if defined(_WIN32)
+typedef RECT MonitorRect;
+enum { MONITOR_DEVICE_NAME_LENGTH = CCHDEVICENAME };
+#else
+struct MonitorRect
+{
+	long left;
+	long top;
+	long right;
+	long bottom;
+};
+enum { MONITOR_DEVICE_NAME_LENGTH = 32 };
+#endif
+
 struct MonitorEntry
 {
-	char	device[CCHDEVICENAME];	///< "\\.\DISPLAY2"
+	char	device[MONITOR_DEVICE_NAME_LENGTH];	///< "\\.\DISPLAY2"
 	char	name[128];							///< what the monitor calls itself, "Lenovo Y27-30"; can be empty
 	int		number;									///< the 2 in DISPLAY2, and what the options menu shows first
-	RECT	rect;										///< where it sits on the desktop, in pixels
+	MonitorRect	rect;							///< where it sits on the desktop, in pixels
 	bool	primary;
 };
 
@@ -66,6 +87,7 @@ enum
 	MIN_DISPLAY_MODE_BITS = 24,
 };
 
+#if defined(_WIN32)
 struct MonitorCollection
 {
 	MonitorEntry	*entries;
@@ -130,7 +152,7 @@ inline MonitorEntry findMonitor( const char *device )
 	int primary = -1;
 	for (int index = 0; index < count; ++index)
 	{
-		if (::_stricmp( monitors[index].device, device ) == 0)
+		if (::strcasecmp( monitors[index].device, device ) == 0)
 			return monitors[index];
 		if (monitors[index].primary)
 			primary = index;
@@ -182,3 +204,124 @@ inline int listDisplayModes( const char *device, DisplayModeEntry *entries, int 
 	}
 	return count;
 }
+#else
+/* Off Windows the displays belong to the platform layer that owns the window: C2's SdlGameEngine
+	 installs ThePlatformDisplays, over SDL3's display list, once its video is up.  This header cannot
+	 call SDL itself (gameengine does not link it), so it asks through that table.
+
+	 With no table there is one monitor, the primary, the size of the game's floor (800x600), offering
+	 that one mode: a headless run, which starts no video, and the tests.  That is Windows' own answer
+	 above when it has no desktop to enumerate, with the floor for a size: an empty rect would give
+	 borderless mode a 0x0 resolution, and empty lists would give the options menu nothing to select. */
+struct PlatformDisplays
+{
+	/** Every monitor, in the order of their numbers; as listMonitors. */
+	int (*listMonitors)( MonitorEntry *entries, int capacity );
+	/** The sizes the named monitor can be set to, smallest first and each once; as listDisplayModes. */
+	int (*listDisplayModes)( const char *device, DisplayModeEntry *entries, int capacity );
+	/** The named monitor's panel, in its own pixels, where the desktop is drawn at another size and scaled
+		* to it (macOS's scaled modes); false where the platform cannot say.  May be NULL. */
+	bool (*panelSize)( const char *device, int *width, int *height );
+};
+inline const PlatformDisplays *ThePlatformDisplays = NULL;
+
+inline MonitorEntry fallbackMonitorEntry( void )
+{
+	MonitorEntry screen;
+	::memset( &screen, 0, sizeof( screen ) );
+	screen.number = 1;
+	screen.rect.right = MIN_DISPLAY_MODE_WIDTH;
+	screen.rect.bottom = MIN_DISPLAY_MODE_HEIGHT;
+	screen.primary = true;
+	return screen;
+}
+
+inline int listMonitors( MonitorEntry *entries, int capacity )
+{
+	if (capacity < 1)
+		return 0;
+	if (ThePlatformDisplays != NULL)
+	{
+		const int count = ThePlatformDisplays->listMonitors( entries, capacity );
+		if (count > 0)
+			return count;
+	}
+	entries[0] = fallbackMonitorEntry();
+	return 1;
+}
+
+/** The monitor with this device name, or the primary when none has it; as on Windows. */
+inline MonitorEntry findMonitor( const char *device )
+{
+	MonitorEntry monitors[MAX_MONITOR_ENTRIES];
+	const int count = listMonitors( monitors, MAX_MONITOR_ENTRIES );
+
+	int primary = -1;
+	for (int index = 0; index < count; ++index)
+	{
+		if (device != NULL && ::strcasecmp( monitors[index].device, device ) == 0)
+			return monitors[index];
+		if (monitors[index].primary)
+			primary = index;
+	}
+	return monitors[primary >= 0 ? primary : 0];
+}
+
+inline int listDisplayModes( const char *device, DisplayModeEntry *entries, int capacity )
+{
+	if (capacity < 1)
+		return 0;
+	if (ThePlatformDisplays != NULL)
+	{
+		const int count = ThePlatformDisplays->listDisplayModes( device, entries, capacity );
+		if (count > 0)
+			return count;
+	}
+	entries[0].width = MIN_DISPLAY_MODE_WIDTH;
+	entries[0].height = MIN_DISPLAY_MODE_HEIGHT;
+	return 1;
+}
+
+/** A monitor's size, brought down to its panel's where the panel has fewer pixels.  A Mac in a scaled
+	* mode ("More Space") draws its desktop at 3420x2224 and shows it on a 2560x1664 panel: drawing the game
+	* at the larger size costs 1.8 times the pixels, which the scaler then throws away.  A panel of the same
+	* shape (within 1%) gives its own size, so the game's pixels are the panel's; another shape keeps the
+	* monitor's, scaled to fit the panel.  A panel no smaller, or none known (0), leaves the size as it is. */
+inline void fitToPanel( int monitorWidth, int monitorHeight, int panelWidth, int panelHeight, int *width, int *height )
+{
+	*width = monitorWidth;
+	*height = monitorHeight;
+	if (panelWidth <= 0 || panelHeight <= 0 || monitorWidth <= 0 || monitorHeight <= 0
+			|| (panelWidth >= monitorWidth && panelHeight >= monitorHeight))
+		return;
+	const double monitorShape = (double)monitorWidth / monitorHeight;
+	const double panelShape = (double)panelWidth / panelHeight;
+	if (panelShape > monitorShape * 0.99 && panelShape < monitorShape * 1.01)
+	{
+		*width = panelWidth;
+		*height = panelHeight;
+		return;
+	}
+	const double scaleX = (double)panelWidth / monitorWidth, scaleY = (double)panelHeight / monitorHeight;
+	const double scale = scaleX < scaleY ? scaleX : scaleY;
+	*width = (int)(monitorWidth * scale + 0.5);
+	*height = (int)(monitorHeight * scale + 0.5);
+}
+
+/** The resolution a first run starts at, when Options.ini names none: the monitor's own size, in pixels,
+	* or its panel's where that is smaller (fitToPanel).
+	* Windows starts at GameData's 800x600, and its fullscreen sets the monitor to that size.  Fullscreen
+	* here is the desktop at its own size, so 800x600 would be stretched over it, and a window would be
+	* a small box in the middle.  With no platform table (headless, the tests) this is the floor-sized
+	* monitor's 800x600, as before. */
+inline void firstRunResolution( const char *device, int *width, int *height )
+{
+	const MonitorEntry monitor = findMonitor( device );
+	int panelWidth = 0, panelHeight = 0;
+	if (ThePlatformDisplays != NULL && ThePlatformDisplays->panelSize != NULL
+			&& !ThePlatformDisplays->panelSize( monitor.device, &panelWidth, &panelHeight ))
+		panelWidth = panelHeight = 0;
+	fitToPanel( (int)(monitor.rect.right - monitor.rect.left), (int)(monitor.rect.bottom - monitor.rect.top),
+		panelWidth, panelHeight, width, height );
+}
+#endif

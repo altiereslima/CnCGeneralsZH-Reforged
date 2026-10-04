@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -45,7 +47,10 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
+#include "Lib/WideCharFns.h"
+
 #include "GameClient/GameText.h"
+#include "GameClient/ApplicationWindowTitle.h"
 #include "Common/Language.h"
 #include "Common/Registry.h"
 #include "GameClient/LanguageFilter.h"
@@ -53,7 +58,7 @@
 #include "Common/UnicodeString.h"
 #include "Common/AsciiString.h"
 #include "Common/GlobalData.h"
-#include "Common/File.h"
+#include "Common/file.h"
 #include "Common/FileSystem.h"
 
 
@@ -265,7 +270,7 @@ GameTextManager::GameTextManager()
 #endif
 	m_mapStringInfo(NULL),
 	m_mapStringLUT(NULL),
-	m_failed(L"***FATAL*** String Manager failed to initilaize properly")
+	m_failed(u"***FATAL*** String Manager failed to initilaize properly")
 {
 	// Added By Sadullah Nader
 	// Initializations missing and needed
@@ -294,6 +299,34 @@ GameTextManager::~GameTextManager()
 
 extern const Char *g_strFile;
 extern const Char *g_csfFile;
+
+#if !defined(_WIN32)
+ApplicationWindowTitleHook TheApplicationWindowTitleHook = NULL;
+#endif
+
+/* Names the game's window.  On Windows that is ApplicationHWnd, set here as it always was.  Elsewhere
+	 the window is the platform layer's (C2's SdlGameEngine), which names it through the hook it sets;
+	 with no window, as in a headless run, there is nothing to name. */
+static void setApplicationWindowTitle( const UnicodeString &ourName, const AsciiString &ourNameA )
+{
+#if defined(_WIN32)
+	extern HWND ApplicationHWnd;  ///< our application window handle
+	if (ApplicationHWnd) {
+		//Set it twice because Win 9x does not support SetWindowTextW.
+		::SetWindowText(ApplicationHWnd, ourNameA.str());
+		// Win32's W API: WideChar and WCHAR are the same two bytes on Windows, which makes the cast honest.
+		::SetWindowTextW(ApplicationHWnd, reinterpret_cast<LPCWSTR>(ourName.str()));
+	}
+#else
+	if (TheApplicationWindowTitleHook != NULL)
+	{
+		char title[ 512 ];
+		WideCharToUtf8( ourName.str(), title, sizeof( title ) );
+		TheApplicationWindowTitleHook( title );
+	}
+	(void)ourNameA;
+#endif
+}
 
 void GameTextManager::init( void )
 {
@@ -432,7 +465,7 @@ void GameTextManager::init( void )
 		Int kept = 1;
 		for ( Int i = 1; i < m_textCount; i++ )
 		{
-			// stricmp, the same comparison compareLUT sorts and bsearch searches with
+			// strcasecmp, the same comparison compareLUT sorts and bsearch searches with
 			if ( m_stringLUT[i].label->compareNoCase( m_stringLUT[kept - 1].label->str() ) == 0 )
 			{
 				if ( m_stringLUT[i].info > m_stringLUT[kept - 1].info )
@@ -449,12 +482,7 @@ void GameTextManager::init( void )
 	AsciiString ourNameA;
 	ourNameA.translate(ourName);	//get ASCII version for Win 9x
 
-	extern HWND ApplicationHWnd;  ///< our application window handle
-	if (ApplicationHWnd) {
-		//Set it twice because Win 9x does not support SetWindowTextW.
-		::SetWindowText(ApplicationHWnd, ourNameA.str());
-		::SetWindowTextW(ApplicationHWnd, ourName.str());
-	}
+	setApplicationWindowTitle( ourName, ourNameA );
 
 }
 
@@ -484,7 +512,7 @@ void GameTextManager::deinit( void )
 	DEBUG_LOG(("\n*** Missing strings ***\n"));
 	while ( noString )
 	{
-		DEBUG_LOG(("*** %ls ***\n", noString->text.str()));
+		DEBUG_LOG(("*** %s ***\n", WideCharAsUtf8( noString->text.str() ).str()));
 		NoString *next = noString->next;
 		delete noString;
 		noString = next;
@@ -574,7 +602,7 @@ void GameTextManager::removeLeadingAndTrailing ( Char *buffer )
 
 	ptr = first = buffer;
 
-	while ( (ch = *first) != 0 && iswspace ( ch ))
+	while ( (ch = *first) != 0 && WideCharIsSpace( ch ))
 	{
 			first++;
 	}
@@ -583,7 +611,7 @@ void GameTextManager::removeLeadingAndTrailing ( Char *buffer )
 
 	ptr -= 2;;
 
-	while ( (ptr > buffer) && (ch = *ptr) != 0 && iswspace ( ch ) )
+	while ( (ptr > buffer) && (ch = *ptr) != 0 && WideCharIsSpace( ch ) )
 	{
 		ptr--;
 	}
@@ -652,7 +680,7 @@ void GameTextManager::readToEndOfQuote( File *file, Char *in, Char *out, Char *w
 			slash = FALSE;
 		}
 
-		if ( iswspace ( ch ))
+		if ( WideCharIsSpace( ch ))
 		{
 			ch = ' ';
 		}
@@ -689,7 +717,7 @@ void GameTextManager::readToEndOfQuote( File *file, Char *in, Char *out, Char *w
 		{
 
 			case 0:
-				if ( iswspace ( ch ) || ch == '=' )
+				if ( WideCharIsSpace( ch ) || ch == '=' )
 				{
 					break;
 				}
@@ -831,7 +859,7 @@ void GameTextManager::translateCopy( WideChar *outbuf, Char *inbuf )
 	}
 	else if( m_munkee )
 	{
-		wcscpy(outbuf, L"Munkee");
+		WideCharCpy(outbuf, u"Munkee");
 		return;
 	}
 #endif
@@ -924,7 +952,7 @@ Bool GameTextManager::getStringCount( const char *filename, Int& textCount )
 				m_buffer[ len+1] = 0;
 			readToEndOfQuote( file, &m_buffer[1], m_buffer2, m_buffer3, MAX_UITEXT_LENGTH );
 		}
-		else if( !stricmp( m_buffer, "END") )
+		else if( !strcasecmp( m_buffer, "END") )
 		{
 			textCount++;
 		}
@@ -1135,7 +1163,7 @@ Bool GameTextManager::parseStringFile( const char *filename )
 
 		for ( Int i = 0; i < listCount; i++ )
 		{
-			if ( !stricmp ( m_stringInfo[i].label.str(), m_buffer ))
+			if ( !strcasecmp ( m_stringInfo[i].label.str(), m_buffer ))
 			{
 				DEBUG_ASSERTCRASH ( FALSE, ("String label '%s' multiply defined!", m_buffer ));
 			}
@@ -1186,7 +1214,7 @@ Bool GameTextManager::parseStringFile( const char *filename )
 					readString = TRUE;
 				}
 			}
-			else if ( !stricmp ( m_buffer, "END" ))
+			else if ( !strcasecmp ( m_buffer, "END" ))
 			{
 				break;
 			}
@@ -1266,7 +1294,7 @@ Bool GameTextManager::parseMapStringFile( const char *filename )
 
 		for ( Int i = 0; i < listCount; i++ )
 		{
-			if ( !stricmp ( m_mapStringInfo[i].label.str(), m_buffer ))
+			if ( !strcasecmp ( m_mapStringInfo[i].label.str(), m_buffer ))
 			{
 				DEBUG_ASSERTCRASH ( FALSE, ("String label '%s' multiply defined!", m_buffer ));
 			}
@@ -1321,7 +1349,7 @@ Bool GameTextManager::parseMapStringFile( const char *filename )
 					readString = TRUE;
 				}
 			}
-			else if ( !stricmp ( m_buffer, "END" ))
+			else if ( !strcasecmp ( m_buffer, "END" ))
 			{
 				break;
 			}
@@ -1376,7 +1404,7 @@ UnicodeString GameTextManager::fetch( const Char *label, Bool *exists )
 
 		// See if we already have the missing string
 		UnicodeString missingString;
-		missingString.format(L"MISSING: '%hs'", label);
+		missingString.format(u"MISSING: '%hs'", label);
 
 		NoString *noString = m_noStringList;
 
@@ -1485,5 +1513,5 @@ static int __cdecl compareLUT ( const void *i1,  const void*i2)
 	StringLookUp *lut1 = (StringLookUp*) i1;
 	StringLookUp *lut2 = (StringLookUp*) i2;
 
-	return stricmp( lut1->label->str(), lut2->label->str());
+	return strcasecmp( lut1->label->str(), lut2->label->str());
 }

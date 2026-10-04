@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -31,7 +32,7 @@
 #ifndef __USER_H
 #define __USER_H
 
-#include "GameNetwork/networkdefs.h"
+#include "GameNetwork/NetworkDefs.h"
 #include "Common/UnicodeString.h"
 
 class User : public MemoryPoolObject

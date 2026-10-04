@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 #include "ffshadercache.h"
 
@@ -23,6 +24,7 @@
 #include <map>
 #include <string.h>
 #include <string>
+#include "Platform/RenderTypes.h"
 
 // ps_2_0 rather than ps_1_1: the generated arithmetic is written as HLSL and a two-stage combiner
 // with a dot product does not fit the older model's instruction set.  Every card that runs this
@@ -43,9 +45,14 @@ void CombinerShaderCache_Read_Device(IDirect3DDevice9 * device, CombinerDescript
 	// key, and a key built out of uninitialised memory is a cache that never hits.
 	memset(&description, 0, sizeof(description));
 
+	// The specular add, which the bound program replaces on D3D9 and so has to do itself.
+	RenderUInt32 specular = 0;
+	device->GetRenderState(D3DRS_SPECULARENABLE, &specular);
+	description.SpecularAdd = specular != 0;
+
 	description.StageCount = 0;
 	for (unsigned stage = 0; stage < MAXIMUM_COMBINER_STAGES; ++stage) {
-		DWORD colour_operation = D3DTOP_DISABLE;
+		RenderUInt32 colour_operation = D3DTOP_DISABLE;
 		device->GetTextureStageState(stage, D3DTSS_COLOROP, &colour_operation);
 		if (colour_operation == D3DTOP_DISABLE) {
 			return;
@@ -74,7 +81,7 @@ void CombinerShaderCache_Read_Device(IDirect3DDevice9 * device, CombinerDescript
 
 	// A third live stage is a description the generator refuses anyway, but it has to be seen as
 	// three rather than silently truncated to two, or the wrong shader is handed back for it.
-	DWORD third_stage_operation = D3DTOP_DISABLE;
+	RenderUInt32 third_stage_operation = D3DTOP_DISABLE;
 	device->GetTextureStageState(MAXIMUM_COMBINER_STAGES, D3DTSS_COLOROP, &third_stage_operation);
 	if (third_stage_operation != D3DTOP_DISABLE) {
 		description.StageCount = MAXIMUM_COMBINER_STAGES + 1;
@@ -109,15 +116,15 @@ IDirect3DPixelShader9 * CombinerShaderCache_Get(IDirect3DDevice9 * device,
 
 	LPD3DXBUFFER compiled = NULL;
 	LPD3DXBUFFER errors = NULL;
-	const HRESULT result = D3DXCompileShader(hlsl.c_str(), (UINT)hlsl.size(), NULL, NULL,
+	const RenderResult result = D3DXCompileShader(hlsl.c_str(), (unsigned int)hlsl.size(), NULL, NULL,
 		COMPILE_ENTRY_POINT, COMPILE_PROFILE, 0, &compiled, &errors, NULL);
 	if (errors != NULL) {
 		errors->Release();
 	}
 
 	IDirect3DPixelShader9 * shader = NULL;
-	if (SUCCEEDED(result) && compiled != NULL) {
-		device->CreatePixelShader((const DWORD *)compiled->GetBufferPointer(), &shader);
+	if (Render_Succeeded(result) && compiled != NULL) {
+		device->CreatePixelShader((const RenderUInt32 *)compiled->GetBufferPointer(), &shader);
 	}
 	if (compiled != NULL) {
 		compiled->Release();

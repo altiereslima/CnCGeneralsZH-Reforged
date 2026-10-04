@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -37,6 +38,7 @@
 
 #include "rcfile.h"
 #include <stdlib.h>
+#include "Platform/StrdupAsWindows.h"
 
 const char * RESOURCE_FILE_TYPE_NAME = "File";
 
@@ -76,7 +78,7 @@ char const * ResourceFileClass::Set_Name(char const *filename)
 		ResourceName = NULL;
 	}
 	if (filename) {
-		ResourceName = strdup(filename);
+		ResourceName = strdupAsWindows(filename);
 	} 
 	return ResourceName;
 }

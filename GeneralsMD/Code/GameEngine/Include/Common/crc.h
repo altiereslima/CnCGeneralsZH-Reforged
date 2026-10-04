@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -32,7 +34,11 @@
 #define _CRC_H_
 
 #include "Lib/BaseType.h"
+#if defined(_WIN32)
 #include "winsock2.h" // for htonl
+#else
+#include <arpa/inet.h> // htonl, which winsock2.h supplies on Windows
+#endif
 
 #ifdef _DEBUG
 

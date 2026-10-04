@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -27,14 +29,14 @@
 // Author: Mark Wilczynski, June 2003
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-#include "Lib/Basetype.h"
+#include "Lib/BaseType.h"
 #include "always.h"
 #include "W3DDevice/GameClient/W3DSmudge.h"
 #include "W3DDevice/GameClient/W3DShaderManager.h"
 #include "Common/GameMemory.h"
 #include "Common/GlobalData.h"
-#include "GameClient/view.h"
-#include "GameClient/display.h"
+#include "GameClient/View.h"
+#include "GameClient/Display.h"
 #include "WW3D2/texture.h"
 #include "WW3D2/dx8indexbuffer.h"
 #include "WW3D2/dx8wrapper.h"
@@ -42,6 +44,7 @@
 #include "WW3D2/rinfo.h"
 #include "WW3D2/camera.h"
 #include "WW3D2/sortingrenderer.h"
+#include "Platform/RenderTypes.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -148,7 +151,7 @@ Int copyRect(unsigned char *buf, Int bufSize, int oX, int oY, int width, int hei
  	IDirect3DSurface9 *surface=NULL;	///<previous render target
  	IDirect3DSurface9 *tempSurface=NULL;
 	Int result = 0;
-	HRESULT hr = S_OK;
+	RenderResult hr = D3D_OK;
 	unsigned int surfaceSize = 0;
 
  	LPDIRECT3DDEVICE9 m_pDev=DX8Wrapper::_Get_D3D_Device();
@@ -165,19 +168,19 @@ Int copyRect(unsigned char *buf, Int bufSize, int oX, int oY, int width, int hei
  
  	surface->GetDesc(&desc);
  
-	RECT srcRect;
+	RenderRect srcRect;
 	srcRect.left=oX;
 	srcRect.top=oY;
 	srcRect.right=oX+width;
 	srcRect.bottom=oY+height;
 
-	POINT dstPoint;
+	RenderPoint dstPoint;
 	dstPoint.x=0;
 	dstPoint.y=0;
 
  	hr=m_pDev->CreateOffscreenPlainSurface(width, height, desc.Format, D3DPOOL_SYSTEMMEM, &tempSurface, NULL);
 
-	if (hr != S_OK)
+	if (hr != D3D_OK)
 		goto error;
 
 	// The source is the render target, so this is the one direction CopyRects had that
@@ -187,24 +190,24 @@ Int copyRect(unsigned char *buf, Int bufSize, int oX, int oY, int width, int hei
 		IDirect3DSurface9 *wholeTarget = NULL;
 		hr=m_pDev->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format,
 			D3DPOOL_SYSTEMMEM, &wholeTarget, NULL);
-		if (hr == S_OK)
+		if (hr == D3D_OK)
 		{
 			hr=m_pDev->GetRenderTargetData(surface, wholeTarget);
-			if (hr == S_OK)
+			if (hr == D3D_OK)
 				hr=D3DXLoadSurfaceFromSurface(tempSurface, NULL, NULL, wholeTarget, NULL, &srcRect,
 					D3DX_FILTER_NONE, 0);
 			wholeTarget->Release();
 		}
 	}
 
-	if (hr != S_OK)
+	if (hr != D3D_OK)
 		goto error;
 
  	D3DLOCKED_RECT lrect;
  
  	hr=tempSurface->LockRect(&lrect,NULL,D3DLOCK_READONLY);
 
-	if (hr != S_OK)
+	if (hr != D3D_OK)
 		goto error;
 
  	tempSurface->GetDesc(&desc);
@@ -259,7 +262,7 @@ Bool W3DSmudgeManager::testHardwareSupport(void)
 
 		struct _TRANS_LIT_TEX_VERTEX {
 			Vector4 p;
-			DWORD color;   // diffuse color    
+			UnsignedInt color;   // diffuse color    
 			float	u;
 			float	v;
 		} v[4];
@@ -290,7 +293,7 @@ Bool W3DSmudgeManager::testHardwareSupport(void)
 
 		DX8Wrapper::_Draw_DX8_Primitive_UP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(_TRANS_LIT_TEX_VERTEX));
 
-		DWORD refData[BLOCK_SIZE*BLOCK_SIZE];
+		UnsignedInt refData[BLOCK_SIZE*BLOCK_SIZE];
 		memset(refData,0,sizeof(refData));
 		Int bufSize=copyRect((unsigned char *)refData,sizeof(refData),0,0,BLOCK_SIZE,BLOCK_SIZE);	//copy area we just rendered using solid color
 		if (!bufSize)
@@ -301,7 +304,7 @@ Bool W3DSmudgeManager::testHardwareSupport(void)
 
 		DX8Wrapper::Set_DX8_Texture(0,backTexture);
 
-		DWORD testData[BLOCK_SIZE*BLOCK_SIZE];
+		UnsignedInt testData[BLOCK_SIZE*BLOCK_SIZE];
 		memset(testData,0xff,sizeof(testData));
 
 		v[0].color = 0xffffffff;

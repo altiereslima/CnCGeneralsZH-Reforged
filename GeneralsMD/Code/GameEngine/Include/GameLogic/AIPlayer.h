@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -346,8 +347,28 @@ protected:
 	Bool queueExtraFactory(Object *dozer, KindOfType kind, Bool unlimited);	///< one more of this factory, beside a held expansion or around the base
 	Real knownFirepowerAlongPath(Waypoint *way);	///< what this AI has seen that can shoot, along an approach
 	AsciiString secondApproachLabel(const Coord3D *from, const AsciiString &taken, Int pathSuffix);	///< the quietest other road, or empty
-	void loadGunships(void);	///< the parked wave's infantry boards the gunships at home
+	Bool loadGunships(void);	///< infantry boards the transports it can shoot out of: the wave's anything at home, a team's its own; TRUE while a firing gunship is still filling
+	Int buyGunshipRiders(Int freeSeats);	///< Medium and up train the men for the firing seats nobody fills; how many are in training
+	void buyGunshipChinook(void);	///< Medium and up buy a supply-center transport the riders shoot out of, as a gunship
+	void doShuttles(void);	///< the transport Chinooks load at home, fly the wave's ground units to its road and come back
+	void buyTransportChinook(void);	///< one more transport Chinook while the last wave needs more lift than there is
+	void lendDutyChinook(void);	///< a duty Chinook gathers only while no gatherer can exist otherwise
+	void computeShuttleFront(Waypoint *way, AIGroup *wave);	///< where the transport Chinooks put this wave's units down
+	Int loadShuttle(Object *ship);	///< call the attack teams' ground units at home into one Chinook; how many were called
+	Bool flightIsQuiet(const Coord3D *from, Real x, Real y) const;	///< a straight flight crosses nothing the AI has seen shoot
+	void doHelixes(void);	///< China's Helixes: the upgrade the enemy army calls for, healers behind the wave, bomb raids
+	void buyDutyHelix(void);	///< Medium and up buy the healers and raiders their Helixes' buttons allow
+	Int helixRoleWanted(const ThingTemplate *tmpl) const;	///< the job a Helix of this kind would take now, -1 for none
+	void takeDutyHelix(Object *helix);	///< a Helix buyDutyHelix ordered comes out and takes its job
+	void upgradeHelix(Object *helix, Int role, AIEnemyComposition *enemy, Bool *enemyRead);	///< the upgrade this Helix's job or the enemy army calls for
+	void collectKnownGuns(std::vector<AIKnownGun> *guns) const;	///< every enemy gun this AI knows of, in object list order
+	void steerHealer(Int slot, const std::vector<AIKnownGun> &guns);	///< a healer over our hurt behind the line, clear of every known gun
+	void flyRaid(Int slot, const std::vector<AIKnownGun> &guns);	///< a raider's bomb run on an enemy building, in and out the quiet side
+	Bool pickRaidTarget(const Object *raider, const std::vector<AIKnownGun> &guns, Object **target, Coord3D *entry, Int *gunsOnRun) const;
+	Coord3D rearOf(const Coord3D *from, const std::vector<AIKnownGun> &guns) const;	///< the nearest point toward home no known gun reaches
+	Bool isGunshipRider(const Object *obj) const;	///< infantry loadGunships may put in a transport
 	void sendIdleAttackTeams(void);	///< attack teams standing at home join the next wave instead of waiting for the script's signal
+	Real addHomeStrays(AIGroup *wave) const;	///< the default team's fighters idle at home go with the wave
 	Real knownFirepowerNear(const Coord3D *pos);	///< what this AI has seen that can shoot, near a point
 	Bool forwardHoldPoint(const AsciiString &approach, Int pathSuffix, const Coord3D *enemyPos, Coord3D *hold);	///< where a wave gathers on its road
 	void sendWave(AIGroup *wave, const AsciiString &approach, Int pathSuffix, Int teams, Real power, UnsignedInt heldFrames);
@@ -398,6 +419,12 @@ public:
 		how often, and it is a function of the player index alone - the simulation stays deterministic.
 	*/
 	static Int computeUpdatePhase( Int playerIndex, Int cycleFrames );
+
+	Bool isGunshipChinook( const Object *obj ) const;	///< a Chinook this AI bought to carry riders, not to gather
+	Bool isGunshipAircraft( const Object *obj ) const;	///< a helicopter, or one of those Chinooks
+	Bool isTransportChinook( const Object *obj ) const;	///< a plain Chinook this AI bought to fly its wave, not to gather
+	Bool isDutyChinook( const Object *obj ) const;	///< either of those, which the gatherer counts leave out
+	Bool isDutyHelix( const Object *obj ) const;	///< a Helix this AI bought to heal or to raid, which nothing else gives orders
 protected:
 
 	/**
@@ -444,6 +471,45 @@ protected:
 	ObjectID	m_capturerID;						///< the unit currently out taking tech buildings for us
 	ObjectID	m_ferryID;							///< the helicopter flying the capturer to its target, INVALID_ID for none
 	std::vector<ObjectID>	m_droppedRiders;	///< infantry a helicopter is putting down at a fight, sent on once out
+	enum { MAX_GUNSHIP_CHINOOKS = 2 };
+	ObjectID	m_gunshipChinook[ MAX_GUNSHIP_CHINOOKS ];	///< Combat Chinooks bought to carry riders; INVALID_ID for a free slot
+	UnsignedInt m_boardWaitFrame;			///< a wave ready to leave first waited for its gunships' riders on this frame; 0 for none
+	/// A plain Chinook bought to fly the wave's ground units to the front, never to gather
+	enum { SHUTTLE_HOME, SHUTTLE_LOADING, SHUTTLE_OUT, SHUTTLE_RETURNING };
+	struct ShuttleChinook
+	{
+		ObjectID		id;					///< INVALID_ID for a free slot
+		Int					phase;			///< SHUTTLE_HOME, SHUTTLE_LOADING, SHUTTLE_OUT or SHUTTLE_RETURNING
+		UnsignedInt	frame;			///< when the phase began
+		Int					load;				///< units aboard when it took off
+		Bool				aborted;		///< hit on the way out, and putting its load down where it was
+		Coord3D			drop;				///< where this trip puts them down
+		Coord3D			home;				///< where it waits and loads; set the first time it loads
+	};
+	enum { MAX_TRANSPORT_CHINOOKS = 4 };
+	ShuttleChinook	m_shuttle[ MAX_TRANSPORT_CHINOOKS ];
+	Coord3D			m_shuttleFront;			///< the drop point on the last wave's road, short of what the AI has seen shoot
+	UnsignedInt	m_shuttleFrontFrame;	///< when that wave left; 0 for no wave yet
+	Int					m_lastWaveSlots;		///< transport slots the last wave's ground units take
+	ObjectID		m_lentChinook;			///< a duty Chinook gathering because no gatherer can exist otherwise
+	/// A Helix bought for a job of its own outside the teams: a healer behind the wave, or a raider
+	enum { HELIX_HEALER, HELIX_RAIDER };
+	enum { RAID_HOME, RAID_OUT, RAID_IN, RAID_BACK };
+	enum { HEAL_HOME, HEAL_PATIENT, HEAL_REAR, HEAL_PULLBACK };
+	struct DutyHelix
+	{
+		ObjectID		id;					///< INVALID_ID for a free slot
+		Int					role;				///< HELIX_HEALER or HELIX_RAIDER
+		Int					phase;			///< a raider's RAID_*, a healer's HEAL_*
+		UnsignedInt	frame;			///< when the phase began
+		ObjectID		target;			///< a raider's building, a healer's patient
+		Coord3D			spot;				///< a raider's way in and out, a healer's last ordered spot
+		Real				targetHealth;	///< the building's health when the bomb went
+	};
+	enum { MAX_DUTY_HELIXES = 5 };
+	DutyHelix		m_dutyHelix[ MAX_DUTY_HELIXES ];
+	Int					m_healerSeconds;		///< for the log only, not saved: healer seconds counted, and those clear of the nearest gun's reach
+	Int					m_healerClearSeconds;
 	Int				m_captureTimer;					///< frames until the next look for something to capture
 	ObjectID	m_hijackerID;						///< the thief currently out after an enemy vehicle
 	Int				m_hijackTimer;					///< frames until the next look for a vehicle to take
@@ -553,11 +619,18 @@ protected:
 		Int					savedAttitude;		///< its mood before a step calmed it, AI_INVALID when it has its own
 		UnsignedInt	lastKiteFrame;		///< last time it stepped back from something it outranges, 0 for never
 		UnsignedInt	lastSeenFrame;		///< a unit not looked at for a while has died or left, and its row goes
+		Bool				fallingBack;			///< pulled out of a lost fight to a safe spot, and goes back once it is safe
+		Coord3D			fallbackFrom;			///< the fight it was pulled out of
+		UnsignedInt	fallbackFrame;		///< when it was pulled out
 	};
 	std::vector<TacticalStep>	m_tactics;
 	TacticalStep *findTacticalStep(ObjectID unit);
 	TacticalStep *tacticalStepFor(ObjectID unit);		///< ... making the row if there is none
 	void leaveTacticsAlone(ObjectID unit);
+	Bool isFallingBack(ObjectID unit);		///< holding at a safe spot after a lost fight, for doRetreats to send back
+	void measureFight(const Coord3D *centre, Bool countHolders, Real *myHealth, Real *myPower,
+		Real *enemyHealth, Real *enemyPower, std::vector<Real> *enemyGuns);
+	Bool doFallback(Team *team);		///< TRUE when it sent the team's holders back or home on this pass
 	void stepCalmly(Object *obj, TacticalStep *step, const Coord3D *spot);	///< a move the unit's mood cannot turn into an attack move
 	void restoreMood(Object *obj, TacticalStep *step);
 	Bool pickTacticalSpot(const Object *obj, const Coord3D *from, const Coord3D *awayFrom, Real distance,

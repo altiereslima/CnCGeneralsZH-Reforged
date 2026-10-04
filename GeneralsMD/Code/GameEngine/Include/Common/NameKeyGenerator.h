@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -48,7 +50,7 @@
 	determined at runtime. (The generated code is basically identical, of course.)
 */
 //------------------------------------------------------------------------------------------------- 
-enum NameKeyType
+enum NameKeyType : int
 {
 	NAMEKEY_INVALID					= 0,
 	NAMEKEY_MAX							= 1<<23,					// max ordinal value of a NameKey (some code relies on these fitting into 24 bits safely)
@@ -149,7 +151,11 @@ private:
 	mutable NameKeyType m_key;
 	const char* m_name;
 public:
-	StaticNameKey(const char* p) : m_key(NAMEKEY_INVALID), m_name(p) {}
+	// constexpr so that every StaticNameKey with static storage - the 128 well-known keys among them -
+	// is constant-initialized: set at load time, before any dynamic initializer in any translation
+	// unit runs, on every compiler.  It stores a sentinel and a pointer and key() resolves the name
+	// lazily, so there is no initialization order to get wrong.  WellKnownKeys.cpp checks it (B6).
+	constexpr StaticNameKey(const char* p) : m_key(NAMEKEY_INVALID), m_name(p) {}
 	NameKeyType key() const;
 	// ugh, this is a little hokey, but lets us pretend that a StaticNameKey == NameKeyType
 	inline operator NameKeyType() const { return key(); }

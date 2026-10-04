@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -43,13 +45,14 @@
 
 #include "always.h"
 #pragma warning (push, 3)
-#include "Mss.H"
+#include "Mss.h"
 #pragma warning (pop)
 
 #include "Vector.H"
-#include "SoundBuffer.H"
-#include "AudioEvents.H"
+#include "SoundBuffer.h"
+#include "AudioEvents.h"
 #include "wwstring.h"
+#include "Platform/StrdupAsWindows.h"
 
 /////////////////////////////////////////////////////////////////////////////////
 // Forward declaration
@@ -509,7 +512,7 @@ private:
 		_CACHE_ENTRY_STRUCT (void)
 			: string_id (0), buffer (NULL) {}
 
-		_CACHE_ENTRY_STRUCT &operator= (const _CACHE_ENTRY_STRUCT &src) { string_id = ::strdup (src.string_id); REF_PTR_SET (buffer, src.buffer); return *this; }
+		_CACHE_ENTRY_STRUCT &operator= (const _CACHE_ENTRY_STRUCT &src) { string_id = strdupAsWindows(src.string_id); REF_PTR_SET (buffer, src.buffer); return *this; }
 		bool operator== (const _CACHE_ENTRY_STRUCT &src) { return false; }
 		bool operator!= (const _CACHE_ENTRY_STRUCT &src) { return true; }
 	} CACHE_ENTRY_STRUCT;

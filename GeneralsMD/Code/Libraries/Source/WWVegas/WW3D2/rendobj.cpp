@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /* $Header: /Commando/Code/ww3d2/rendobj.cpp 16    12/17/01 8:06p Byon_g $ */
 /*********************************************************************************************** 
@@ -74,7 +76,9 @@
 
 #include "rendobj.h"
 #include "assetmgr.h"
-#include "_mono.h"
+#if defined(_WIN32)
+#include "_mono.h"	// the monochrome debug monitor: Windows only, and unused here
+#endif
 #include "bsurface.h"
 #include "pot.h"
 #include "scene.h"
@@ -92,6 +96,7 @@
 #include "saveload.h"
 #include "ww3dids.h"
 #include "intersec.h"
+#include <string.h>	// memset, strcpy, strlen
 
 
 #ifdef _INTERNAL
@@ -114,7 +119,7 @@ Filename_From_Asset_Name (const char *asset_name)
 		//
 		// Copy the model name into a new filename buffer
 		//
-		::lstrcpy (filename.Get_Buffer (::lstrlen (asset_name) + 5), asset_name);
+		strcpy (filename.Get_Buffer (strlen (asset_name) + 5), asset_name);
 		
 		//
 		// Do we need to strip off the model's suffix?
@@ -532,7 +537,7 @@ RenderObjClass * RenderObjClass::Get_Sub_Object_By_Name(const char * name, int *
 	for (i=0; i<Get_Num_Sub_Objects(); i++) {
 		RenderObjClass * robj = Get_Sub_Object(i);
 		if (robj) {
-			if (stricmp(robj->Get_Name(),name) == 0) {
+			if (strcasecmp(robj->Get_Name(),name) == 0) {
 				if (index) *index=i;
 				return robj;
 			} else {
@@ -553,7 +558,7 @@ RenderObjClass * RenderObjClass::Get_Sub_Object_By_Name(const char * name, int *
 				subobjname = subobjname+1;
 			}
 
-			if (stricmp(subobjname,name) == 0) {
+			if (strcasecmp(subobjname,name) == 0) {
 				if (index) *index=i;
 				return robj;
 			} else {
@@ -1155,7 +1160,7 @@ void RenderObjClass::Add_Dependencies_To_List
 		const HTreeClass *phtree = Get_HTree ();
 		if (phtree != NULL) {
 			const char *htree_name = phtree->Get_Name ();
-			if (::lstrcmpi (htree_name, model_name) != 0) {
+			if (strcasecmp (htree_name, model_name) != 0) {
 								
 				//
 				// Add this file to the list

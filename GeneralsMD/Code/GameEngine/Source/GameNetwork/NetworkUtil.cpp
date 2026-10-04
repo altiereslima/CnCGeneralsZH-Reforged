@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -346,7 +348,7 @@ static TransferFileType getTransferFileType(const char *extension)
 {
 	for (Int i = 0; i < TransferFileType_Count; ++i)
 	{
-		if (stricmp(extension, transferFileRules[i].ext) == 0)
+		if (strcasecmp(extension, transferFileRules[i].ext) == 0)
 			return (TransferFileType)i;
 	}
 	return TransferFileType_Invalid;
@@ -465,22 +467,22 @@ Bool IsValidTransferFileContent(const AsciiString &filePath, const UnsignedByte 
 
 static Bool isCharacterANameMayNotHold(const WideChar c)
 {
-	return c < L' '														// C0 controls
-		|| c == L',' || c == L':' || c == L';'							// the game state separators
-		|| (c >= L'\x007f' && c <= L'\x009f')							// DEL and the C1 controls
-		|| c == L'\x2028' || c == L'\x2029'								// line and paragraph separators
-		|| (c >= L'\xd800' && c <= L'\xdfff');							// lone surrogates
+	return c < u' '														// C0 controls
+		|| c == u',' || c == u':' || c == u';'							// the game state separators
+		|| (c >= u'\x007f' && c <= u'\x009f')							// DEL and the C1 controls
+		|| c == u'\x2028' || c == u'\x2029'								// line and paragraph separators
+		|| (c >= u'\xd800' && c <= u'\xdfff');							// lone surrogates
 }
 
 static Bool isSpaceCharacter(const WideChar c)
 {
-	return c == L' '
-		|| c == L'\xa0'													// no-break space
-		|| c == L'\x1680'												// ogham space mark
-		|| (c >= L'\x2000' && c <= L'\x200a')							// en/em, figure, thin, hair
-		|| c == L'\x202f'												// narrow no-break space
-		|| c == L'\x205f'												// medium mathematical space
-		|| c == L'\x3000';												// ideographic space
+	return c == u' '
+		|| c == u'\xa0'													// no-break space
+		|| c == u'\x1680'												// ogham space mark
+		|| (c >= u'\x2000' && c <= u'\x200a')							// en/em, figure, thin, hair
+		|| c == u'\x202f'												// narrow no-break space
+		|| c == u'\x205f'												// medium mathematical space
+		|| c == u'\x3000';												// ideographic space
 }
 
 Bool IsUsablePlayerName(const WideChar *playerName)

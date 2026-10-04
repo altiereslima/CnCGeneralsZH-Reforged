@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -48,6 +50,7 @@
 #include "GameLogic/AIGuardRetaliate.h"
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/Armor.h"
+#include "GameLogic/ExperienceTracker.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/Damage.h"
@@ -616,6 +619,11 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 		damageInfo->out.m_actualDamageDealt = amount;
 		damageInfo->out.m_actualDamageClipped = m_prevHealth - m_currentHealth;
 
+		// remember which enemy took how much health off, for splitting the kill (Object::scoreTheKill)
+		if( !alreadyHandled && damageInfo->out.m_actualDamageClipped > 0.0f && damager && damager != obj
+				&& damager->getRelationship( obj ) == ENEMIES )
+			obj->getExperienceTracker()->recordDamage( damager->getID(), REAL_TO_INT_CEIL( damageInfo->out.m_actualDamageClipped ) );
+
 		// then copy the whole DamageInfo struct for easy lookup 
 		// (object pointer loses scope as soon as atteptdamage's caller ends)
 		// m_lastDamageTimestamp is initialized to FFFFFFFFFF, so doing a < compare is problematic.
@@ -907,6 +915,11 @@ void ActiveBody::attemptHealing( DamageInfo *damageInfo )
 		damageInfo->out.m_actualDamageDealt = amount;
 		damageInfo->out.m_actualDamageClipped = m_currentHealth - m_prevHealth;
 
+		// whoever put the health back may earn experience for it (Object::scoreTheHeal)
+		Object *healer = TheGameLogic->findObjectByID( damageInfo->in.m_sourceID );
+		if( damageInfo->out.m_actualDamageClipped > 0.0f && healer && healer != obj )
+			healer->scoreTheHeal( obj, damageInfo->out.m_actualDamageClipped, m_maxHealth );
+
 		//
 		// Only the healing timestamp is stamped here. This used to overwrite m_lastDamageInfo and
 		// m_lastDamageTimestamp with the heal record as well, which lied to everything that means
@@ -1098,7 +1111,8 @@ void ActiveBody::createParticleSystems( const AsciiString &boneBaseName,
 
 		// find the actual bone location to use and mark that bone index as used
 		Int count = 0;
-		for( Int j = 0; j < numBones; j++ )
+		Int j;	// read by the assert after the loop (VC6 scoped it to the function)
+		for( j = 0; j < numBones; j++ )
 		{
 
 			// ignore bone positions that have already been used

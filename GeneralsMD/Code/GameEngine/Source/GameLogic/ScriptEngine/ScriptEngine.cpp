@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -27,9 +29,10 @@
 // Author: John Ahlquist, Nov. 2001
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
-#include "common/DataChunk.h"
-#include "Common/File.h"
+#include "Common/DataChunk.h"
+#include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "Common/GameEngine.h"
 #include "Common/GameState.h"
@@ -71,7 +74,26 @@ static Bool st_AppIsFast = false;
 static void _appendMessage(const AsciiString& str, Bool isTrueMessage = true, Bool shouldPause = false);
 static void _adjustVariable(const AsciiString& str, Int value, Bool shouldPause = false);
 static void _updateFrameNumber( void );
-static HMODULE st_DebugDLL;
+/* The script debugger and the particle editor are Windows developer tools, DebugWindow.dll and
+	 ParticleEditor.dll (and vtuneapi.dll in _INTERNAL builds), loaded only when -scriptDebug or
+	 -particleEdit asks.  On Windows these are LoadLibrary, GetProcAddress and FreeLibrary, as they
+	 always were.  Off Windows there is no such DLL: loadToolDLL answers NULL, and every call into a
+	 tool below is skipped, exactly as on Windows without those flags. */
+#if defined(_WIN32)
+typedef HMODULE ToolModule;
+typedef FARPROC ToolProc;
+static ToolModule loadToolDLL( const char *name ) { return ::LoadLibrary( name ); }
+static ToolProc findToolProc( ToolModule module, const char *name ) { return ::GetProcAddress( module, name ); }
+static void freeToolDLL( ToolModule module ) { ::FreeLibrary( module ); }
+#else
+typedef void *ToolModule;
+typedef void (*ToolProc)( void );
+static ToolModule loadToolDLL( const char * ) { return NULL; }
+static ToolProc findToolProc( ToolModule, const char * ) { return NULL; }
+static void freeToolDLL( ToolModule ) {}
+#endif
+
+static ToolModule st_DebugDLL;
 // That's it for debugger window
 
 // These are for particle editor
@@ -97,7 +119,7 @@ static void _writeOutINI( void );
 extern void _writeSingleParticleSystem( File *out, ParticleSystemTemplate *particleTemplate );
 static void _reloadTextures( void );
 
-static HMODULE st_ParticleDLL;
+static ToolModule st_ParticleDLL;
 ParticleSystem *st_particleSystem;
 Bool st_particleSystemNeedsStopping = FALSE; ///< Set along with st_particleSystem if the particle system has infinite life
 #define ARBITRARY_BUFF_SIZE	128
@@ -115,7 +137,7 @@ Bool st_particleSystemNeedsStopping = FALSE; ///< Set along with st_particleSyst
 	typedef void (*VTProc)();
 	
 	static Bool						st_EnableVTune = false;
-	static HMODULE				st_vTuneDLL = NULL;
+	static ToolModule				st_vTuneDLL = NULL;
 	static VTProc VTPause = NULL;
 	static VTProc VTResume = NULL;
 
@@ -487,22 +509,22 @@ m_ChooseVictimAlwaysUsesNormal(false)
 ScriptEngine::~ScriptEngine()
 {
 	if (st_DebugDLL) {
-		FARPROC proc = GetProcAddress(st_DebugDLL, "DestroyDebugDialog");
+		ToolProc proc = findToolProc(st_DebugDLL, "DestroyDebugDialog");
 		if (proc) {
 			proc();
 		}
 
-		FreeLibrary(st_DebugDLL);
+		freeToolDLL(st_DebugDLL);
 		st_DebugDLL = NULL;
 	}
 
 	if (st_ParticleDLL) {
-		FARPROC proc = GetProcAddress(st_ParticleDLL, "DestroyParticleSystemDialog");
+		ToolProc proc = findToolProc(st_ParticleDLL, "DestroyParticleSystemDialog");
 		if (proc) {
 			proc();
 		}
 
-		FreeLibrary(st_ParticleDLL);
+		freeToolDLL(st_ParticleDLL);
 		st_ParticleDLL = NULL;
 	}
 
@@ -534,26 +556,26 @@ void ScriptEngine::init( void )
 {
 	if (TheGlobalData->m_windowed)
 		if (TheGlobalData->m_scriptDebug) {
-			st_DebugDLL = LoadLibrary("DebugWindow.dll");
+			st_DebugDLL = loadToolDLL("DebugWindow.dll");
 		} else {
 			st_DebugDLL = NULL;
 		}
 		
 		if (TheGlobalData->m_particleEdit) {
-			st_ParticleDLL = LoadLibrary("ParticleEditor.dll");
+			st_ParticleDLL = loadToolDLL("ParticleEditor.dll");
 		} else {
 			st_ParticleDLL = NULL;
 		}
 
 		if (st_DebugDLL) {
-			FARPROC proc = GetProcAddress(st_DebugDLL, "CreateDebugDialog");
+			ToolProc proc = findToolProc(st_DebugDLL, "CreateDebugDialog");
 			if (proc) {
 				proc();
 			}
 		}
 
 	if (st_ParticleDLL) {
-		FARPROC proc = GetProcAddress(st_ParticleDLL, "CreateParticleSystemDialog");
+		ToolProc proc = findToolProc(st_ParticleDLL, "CreateParticleSystemDialog");
 		if (proc) {
 			proc();
 		}
@@ -5385,7 +5407,10 @@ void ScriptEngine::reset( void )
 
 	VecSequentialScriptPtrIt seqScriptIt;
 	for (seqScriptIt = m_sequentialScripts.begin(); seqScriptIt != m_sequentialScripts.end(); ) {
-		cleanupSequentialScript(seqScriptIt, TRUE);
+		// the iterator cleanupSequentialScript returns, as every other caller takes it: the one passed in
+		// was erased from the vector (port defect 32's idiom; release builds walked on by accident, since a
+		// vector iterator is a pointer and the next script moves into the erased slot)
+		seqScriptIt = cleanupSequentialScript(seqScriptIt, TRUE);
 	}
 
 	// clear out all the lists of object types that were in the old map.
@@ -5546,14 +5571,14 @@ static Int64 theSeqSubStart = 0;
 
 static void seqSubBegin( void )
 {
-	QueryPerformanceCounter( (LARGE_INTEGER *)&theSeqSubStart );
+	theSeqSubStart = Clock_Ticks();
 }
 
 static Real seqSubEnd( void )
 {
 	Int64 now, freq;
-	QueryPerformanceCounter( (LARGE_INTEGER *)&now );
-	QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	now = Clock_Ticks();
+	freq = Clock_Ticks_Per_Second();
 	if( freq < 1 )
 		return 0.0f;
 	return (Real)((double)(now - theSeqSubStart) * 1000.0 / (double)freq);
@@ -5565,14 +5590,14 @@ static Real seqSubEnd( void )
 
 static void scriptPhaseBegin( void )
 {
-	QueryPerformanceCounter( (LARGE_INTEGER *)&theScriptPhaseStart );
+	theScriptPhaseStart = Clock_Ticks();
 }
 
 static void scriptPhaseEnd( Int phase )
 {
 	Int64 now, freq;
-	QueryPerformanceCounter( (LARGE_INTEGER *)&now );
-	QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	now = Clock_Ticks();
+	freq = Clock_Ticks_Per_Second();
 	if( freq > 0 )
 		theScriptPhaseMS[ phase ] += (Real)((double)(now - theScriptPhaseStart) * 1000.0 / (double)freq);
 }
@@ -5606,11 +5631,11 @@ void ScriptEngine::update( void )
 	USE_PERF_TIMER(ScriptEngine)
 #ifdef SPECIAL_SCRIPT_PROFILING
 #ifdef DEBUG_LOGGING
-	__int64 startTime64;
+	Int64 startTime64;
 	double timeToUpdate=0.0f;
-	__int64 endTime64,freq64;
-	QueryPerformanceFrequency((LARGE_INTEGER *)&freq64);//LORENZEN'S NOTE_TO_SELF: USE THIS
-	QueryPerformanceCounter((LARGE_INTEGER *)&startTime64);//LORENZEN'S NOTE_TO_SELF: USE THIS
+	Int64 endTime64,freq64;
+	freq64 = Clock_Ticks_Per_Second();//LORENZEN'S NOTE_TO_SELF: USE THIS
+	startTime64 = Clock_Ticks();//LORENZEN'S NOTE_TO_SELF: USE THIS
 /* dump out the named objects table.  For extremely intense debug only.  jba. :P
 	for (VecNamedRequestsIt it = m_namedObjects.begin(); it != m_namedObjects.end(); ++it) {
 		AsciiString name = it->first;
@@ -5747,7 +5772,7 @@ void ScriptEngine::update( void )
 
 #ifdef SPECIAL_SCRIPT_PROFILING
 #ifdef DEBUG_LOGGING
-	QueryPerformanceCounter((LARGE_INTEGER *)&endTime64);//LORENZEN'S NOTE_TO_SELF: USE THIS
+	endTime64 = Clock_Ticks();//LORENZEN'S NOTE_TO_SELF: USE THIS
 	timeToUpdate = ((double)(endTime64-startTime64) / (double)(freq64));//LORENZEN'S NOTE_TO_SELF: USE THIS
 	m_numFrames++;
 	m_totalUpdateTime+=timeToUpdate;
@@ -7106,11 +7131,11 @@ void ScriptEngine::executeScript( Script *pScript )
 	}
 #ifdef DEBUG_LOGGING
 #ifdef SPECIAL_SCRIPT_PROFILING
-	__int64 startTime64;
+	Int64 startTime64;
 	Real timeToEvaluate=0.0f;
-	__int64 endTime64,freq64;
-	QueryPerformanceFrequency((LARGE_INTEGER *)&freq64);
-	QueryPerformanceCounter((LARGE_INTEGER *)&startTime64);
+	Int64 endTime64,freq64;
+	freq64 = Clock_Ticks_Per_Second();
+	startTime64 = Clock_Ticks();
 #endif
 #endif
 
@@ -7174,7 +7199,7 @@ void ScriptEngine::executeScript( Script *pScript )
 	}
 #ifdef DEBUG_LOGGING
 #ifdef SPECIAL_SCRIPT_PROFILING
-	QueryPerformanceCounter((LARGE_INTEGER *)&endTime64);
+	endTime64 = Clock_Ticks();
 	timeToEvaluate = ((Real)(endTime64-startTime64) / (Real)(freq64));
 	pScript->setCurTime(timeToEvaluate);
 	{
@@ -7736,11 +7761,11 @@ Bool ScriptEngine::evaluateConditions( Script *pScript, Team *thisTeam, Player *
 #define COLLECT_CONDITION_EVAL_TIMES
 #endif
 #ifdef COLLECT_CONDITION_EVAL_TIMES
-	__int64 startTime64;
+	Int64 startTime64;
 	Real timeToEvaluate=0.0f;
-	__int64 endTime64,freq64;
-	QueryPerformanceFrequency((LARGE_INTEGER *)&freq64);
-	QueryPerformanceCounter((LARGE_INTEGER *)&startTime64);
+	Int64 endTime64,freq64;
+	freq64 = Clock_Ticks_Per_Second();
+	startTime64 = Clock_Ticks();
 #endif
 	OrCondition *pCurCondition;
 	for (pCurCondition = pConditionHead; pCurCondition; pCurCondition = pCurCondition->getNextOrCondition()) {
@@ -7760,7 +7785,7 @@ Bool ScriptEngine::evaluateConditions( Script *pScript, Team *thisTeam, Player *
 		}
 	}
 #ifdef COLLECT_CONDITION_EVAL_TIMES
-	QueryPerformanceCounter((LARGE_INTEGER *)&endTime64);
+	endTime64 = Clock_Ticks();
 	timeToEvaluate = ((Real)(endTime64-startTime64) / (Real)(freq64));
 	pScript->incrementConditionCount();
 	pScript->addToConditionTime(timeToEvaluate);
@@ -8636,7 +8661,7 @@ Bool ScriptEngine::isTimeFrozenDebug(void)
 		if (st_LastCurrentFrame != st_CurrentFrame) {
 			st_LastCurrentFrame = st_CurrentFrame;
 
-			FARPROC proc = GetProcAddress(st_DebugDLL, "CanAppContinue");
+			ToolProc proc = findToolProc(st_DebugDLL, "CanAppContinue");
 			if (proc) {
 				st_CanAppCont = ((funcptr)proc)();
 
@@ -8657,8 +8682,8 @@ Bool ScriptEngine::isTimeFast(void)
 	typedef Bool (*funcptr)(void);
 
 	if (st_DebugDLL) {
-		FARPROC proc = GetProcAddress(st_DebugDLL, "CanAppContinue");
- 		proc = GetProcAddress(st_DebugDLL, "RunAppFast");
+		ToolProc proc = findToolProc(st_DebugDLL, "CanAppContinue");
+ 		proc = findToolProc(st_DebugDLL, "RunAppFast");
 		if (proc && ((funcptr)proc)()) {
 			st_AppIsFast = true;
 		} else {
@@ -8683,7 +8708,7 @@ void ScriptEngine::forceUnfreezeTime(void)
 	typedef void (*funcptr)(void);
 
 	if (st_DebugDLL) {
-		FARPROC proc = GetProcAddress(st_DebugDLL, "ForceAppContinue");
+		ToolProc proc = findToolProc(st_DebugDLL, "ForceAppContinue");
 		if (proc) {
 			((funcptr)proc)();
 		}
@@ -8700,11 +8725,11 @@ void ScriptEngine::AppendDebugMessage(const AsciiString& strToAdd, Bool forcePau
 		return;
 	}
 
-	FARPROC proc;
+	ToolProc proc;
 	if (forcePause) {
-		proc = GetProcAddress(st_DebugDLL, "AppendMessageAndPause");
+		proc = findToolProc(st_DebugDLL, "AppendMessageAndPause");
 	} else {
-		proc = GetProcAddress(st_DebugDLL, "AppendMessage");
+		proc = findToolProc(st_DebugDLL, "AppendMessage");
 	}
 
 	if (!proc) {
@@ -9575,11 +9600,11 @@ void _appendMessage(const AsciiString& str, Bool isTrueMessage, Bool shouldPause
 		return;
 	}
 
-	FARPROC proc;
+	ToolProc proc;
 	if (shouldPause) {
-		proc = GetProcAddress(st_DebugDLL, "AppendMessageAndPause");
+		proc = findToolProc(st_DebugDLL, "AppendMessageAndPause");
 	} else {
-		proc = GetProcAddress(st_DebugDLL, "AppendMessage");
+		proc = findToolProc(st_DebugDLL, "AppendMessage");
 	}
 	if (!proc) {
 		return;
@@ -9595,11 +9620,11 @@ void _adjustVariable(const AsciiString& str, Int value, Bool shouldPause)
 		return;
 	}
 
-	FARPROC proc;
+	ToolProc proc;
 	if (shouldPause) {
-		proc = GetProcAddress(st_DebugDLL, "AdjustVariableAndPause");
+		proc = findToolProc(st_DebugDLL, "AdjustVariableAndPause");
 	} else {
-		proc = GetProcAddress(st_DebugDLL, "AdjustVariable");
+		proc = findToolProc(st_DebugDLL, "AdjustVariable");
 	}
 
 	if (!proc) {
@@ -9620,8 +9645,8 @@ void _updateFrameNumber( void )
 		return;
 	}
 
-	FARPROC proc;
-	proc = GetProcAddress(st_DebugDLL, "SetFrameNumber");
+	ToolProc proc;
+	proc = findToolProc(st_DebugDLL, "SetFrameNumber");
 	if (!proc) {
 		return;
 	}
@@ -9637,16 +9662,16 @@ void _appendAllParticleSystems( void )
 	if (!st_ParticleDLL) {
 		return;
 	}
-	FARPROC proc;
+	ToolProc proc;
 
-	proc = GetProcAddress(st_ParticleDLL, "RemoveAllParticleSystems");
+	proc = findToolProc(st_ParticleDLL, "RemoveAllParticleSystems");
 	if (proc) {
 		proc();
 	} else {
 		return;
 	}
 
-	proc = GetProcAddress(st_ParticleDLL, "AppendParticleSystem");
+	proc = findToolProc(st_ParticleDLL, "AppendParticleSystem");
 	if (!proc) {
 		return;
 	}
@@ -9666,16 +9691,16 @@ void _appendAllThingTemplates( void )
 	if (!st_ParticleDLL) {
 		return;
 	}
-	FARPROC proc;
+	ToolProc proc;
 
-	proc = GetProcAddress(st_ParticleDLL, "RemoveAllThingTemplates");
+	proc = findToolProc(st_ParticleDLL, "RemoveAllThingTemplates");
 	if (proc) {
 		proc();
 	} else {
 		return;
 	}
 
-	proc = GetProcAddress(st_ParticleDLL, "AppendThingTemplate");
+	proc = findToolProc(st_ParticleDLL, "AppendThingTemplate");
 	if (!proc) {
 		return;
 	}
@@ -9701,13 +9726,13 @@ void _addUpdatedParticleSystem( AsciiString particleSystemName )
 		return;
 	}
 	
-	FARPROC proc, proc2;
-	proc = GetProcAddress(st_ParticleDLL, "AppendParticleSystem");
+	ToolProc proc, proc2;
+	proc = findToolProc(st_ParticleDLL, "AppendParticleSystem");
 	if (!proc) {
 		return;
 	}
 
-	proc2 = GetProcAddress(st_ParticleDLL, "UpdateSystemUseParameters");
+	proc2 = findToolProc(st_ParticleDLL, "UpdateSystemUseParameters");
 	if (!proc2) {
 		return;
 	}
@@ -9730,8 +9755,8 @@ AsciiString _getParticleSystemName( void )
 		return AsciiString::TheEmptyString;
 	}
 
-	FARPROC proc;
-	proc = GetProcAddress(st_ParticleDLL, "GetSelectedParticleSystemName");
+	ToolProc proc;
+	proc = findToolProc(st_ParticleDLL, "GetSelectedParticleSystemName");
 	if (!proc) {
 		return AsciiString::TheEmptyString;
 	}
@@ -9751,8 +9776,8 @@ void _updatePanelParameters( ParticleSystemTemplate *particleTemplate )
 		return;
 	}
 
-	FARPROC proc;	
-	proc = GetProcAddress(st_ParticleDLL, "UpdateCurrentParticleSystem");
+	ToolProc proc;	
+	proc = findToolProc(st_ParticleDLL, "UpdateCurrentParticleSystem");
 	if (!proc) {
 		return;
 	}
@@ -9768,8 +9793,8 @@ void _updateAsciiStringParmsToSystem( ParticleSystemTemplate *particleTemplate )
 		return;
 	}
 
-	FARPROC proc;	
-	proc = GetProcAddress(st_ParticleDLL, "GetSelectedParticleAsciiStringParm");
+	ToolProc proc;	
+	proc = findToolProc(st_ParticleDLL, "GetSelectedParticleAsciiStringParm");
 
 	if (!proc) {
 		return;
@@ -9803,8 +9828,8 @@ extern void _updateAsciiStringParmsFromSystem( ParticleSystemTemplate *particleT
 		return;
 	}
 
-	FARPROC proc;	
-	proc = GetProcAddress(st_ParticleDLL, "UpdateParticleAsciiStringParm");
+	ToolProc proc;	
+	proc = findToolProc(st_ParticleDLL, "UpdateParticleAsciiStringParm");
 
 	if (!proc) {
 		return;
@@ -10286,8 +10311,8 @@ static int _getEditorBehavior( void )
 		return 0x00;
 	}
 
-	FARPROC proc;	
-	proc = GetProcAddress(st_ParticleDLL, "NextParticleEditorBehavior");
+	ToolProc proc;	
+	proc = findToolProc(st_ParticleDLL, "NextParticleEditorBehavior");
 
 	if (!proc) {
 		return 0x00;
@@ -10434,8 +10459,8 @@ static int _getNewCurrentParticleCap( void )
 		return -1;
 	}
 
-	FARPROC proc;	
-	proc = GetProcAddress(st_ParticleDLL, "GetNewParticleCap");
+	ToolProc proc;	
+	proc = findToolProc(st_ParticleDLL, "GetNewParticleCap");
 
 	if (!proc) {
 		return -1;
@@ -10452,8 +10477,8 @@ static void _updateCurrentParticleCap( void )
 		return;
 	}
 
-	FARPROC proc;	
-	proc = GetProcAddress(st_ParticleDLL, "UpdateCurrentParticleCap");
+	ToolProc proc;	
+	proc = findToolProc(st_ParticleDLL, "UpdateCurrentParticleCap");
 
 	if (!proc) {
 		return;
@@ -10470,8 +10495,8 @@ static void _updateCurrentParticleCount( void )
 		return;
 	}
 
-	FARPROC proc;	
-	proc = GetProcAddress(st_ParticleDLL, "UpdateCurrentNumParticles");
+	ToolProc proc;	
+	proc = findToolProc(st_ParticleDLL, "UpdateCurrentNumParticles");
 
 	if (!proc) {
 		return;
@@ -10490,14 +10515,14 @@ static void _reloadTextures( void )
 static void _initVTune()
 {
 	// always try loading it, even if -vtune wasn't specified.
-	st_vTuneDLL = ::LoadLibrary("vtuneapi.dll");
+	st_vTuneDLL = loadToolDLL("vtuneapi.dll");
 // nope, not here...
 //DEBUG_ASSERTCRASH(st_vTuneDLL != NULL, "VTuneAPI DLL not found!"));
 	
 	if (st_vTuneDLL)
 	{
-		VTPause = (VTProc)::GetProcAddress(st_vTuneDLL, "VTPause");
-		VTResume = (VTProc)::GetProcAddress(st_vTuneDLL, "VTResume");
+		VTPause = (VTProc)::findToolProc(st_vTuneDLL, "VTPause");
+		VTResume = (VTProc)::findToolProc(st_vTuneDLL, "VTResume");
 		DEBUG_ASSERTCRASH(VTPause != NULL && VTResume != NULL, ("VTuneAPI procs not found!\n"));
 	}
 	else
@@ -10545,7 +10570,7 @@ static void _cleanUpVTune()
 {
 	if (st_vTuneDLL) 
 	{
-		FreeLibrary(st_vTuneDLL);
+		freeToolDLL(st_vTuneDLL);
 	}
 	st_vTuneDLL = NULL;
 	VTPause = NULL;

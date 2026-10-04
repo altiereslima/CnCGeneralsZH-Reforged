@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*************************************************************************** 
  ***    C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S     *** 
@@ -77,7 +79,7 @@
 #include "statistics.h"
 #include "simplevec.h"
 #include "texture.h"
-#include "vector.h"
+#include "Vector.H"
 #include "vp.h"
 #include "matrix4.h"
 #include "dx8wrapper.h"
@@ -1069,7 +1071,7 @@ void PointGroupClass::Reserve_Sorted_Billboards(int quads, SortingBillboardRange
  * the same Insert_Quads, from a range the jobs have already written.      *
  *========================================================================*/
 void PointGroupClass::Insert_Sorted_Billboards(SortingBillboardRange *range, int quads,
-	TextureClass *texture, const ShaderClass &shader)
+	TextureClass *texture, const ShaderClass &shader, bool glow)
 {
 	if (quads > 0)
 	{
@@ -1093,7 +1095,7 @@ void PointGroupClass::Insert_Sorted_Billboards(SortingBillboardRange *range, int
 		const unsigned short vertices=(unsigned short)(quads*4);
 		DX8Wrapper::Set_Index_Buffer(SortingQuads, 0);
 		DX8Wrapper::Set_Sorting_Vertex_Range(range->Array, range->Offset, vertices);
-		SortingRendererClass::Insert_Quads((unsigned short)quads, 0, vertices);
+		SortingRendererClass::Insert_Quads((unsigned short)quads, 0, vertices, glow);
 
 		DX8Wrapper::Set_Transform(D3DTS_VIEW,view);
 	}
@@ -1130,9 +1132,9 @@ void PointGroupClass::Update_Arrays(
 
 	if (VertexLoc.Length() < total_vnum) {
 		// Resize arrays (2x guardband to prevent frequent reallocations).
-		VertexLoc.Resize(total_vnum * 2, false);		
-		VertexUV.Resize(total_vnum * 2, false);
-		VertexDiffuse.Resize(total_vnum * 2, false);
+		VertexLoc.Resize(total_vnum * 2, NULL);		
+		VertexUV.Resize(total_vnum * 2, NULL);
+		VertexDiffuse.Resize(total_vnum * 2, NULL);
 	}
 
 	int vert, i, j;

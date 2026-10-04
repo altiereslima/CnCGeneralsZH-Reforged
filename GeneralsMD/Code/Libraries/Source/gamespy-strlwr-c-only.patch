@@ -1,0 +1,15 @@
+diff --git a/include/gamespy/gsplatform.h b/include/gamespy/gsplatform.h
+--- a/include/gamespy/gsplatform.h
++++ b/include/gamespy/gsplatform.h
+@@ -429,7 +429,10 @@ extern "C" {
+ #define strncasecmp _strnicmp
+ #endif
+ 
+-#if !defined(_WIN32)
++// Zero Hour Reforged: C only.  GameSpy's C code gets these from gsplatformutil.c.  C++ gets
++// MSVCCompat.h's inlines, and a second declaration of the same name with C linkage is ill-formed
++// there.  Applied by Tools/vendor.sh; see Libraries/Source/gamespy-strlwr-c-only.patch.
++#if !defined(_WIN32) && !defined(__cplusplus)
+ char* _strlwr(char* string);
+ char* _strupr(char* string);
+ #endif

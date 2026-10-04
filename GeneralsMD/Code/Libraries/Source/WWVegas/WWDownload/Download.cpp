@@ -15,9 +15,12 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 // Download.cpp : Implementation of CDownload
+#include "Platform/MSVCCompat.h"	// mkdir with a mode and strncasecmp, below, on MSVC too (W2)
 #include "DownloadDebug.h"
+#include "Lib/Clock.h"
 #include "download.h"
 #include <mmsystem.h>
 #include <assert.h>
@@ -66,7 +69,7 @@ HRESULT CDownload::DownloadFile(LPCSTR server, LPCSTR username, LPCSTR password,
 	}
 
 	// Make sure we have a download directory
-	_mkdir("download");
+	mkdir("download", 0777);   // POSIX takes a mode; the shim drops it again on Windows
 
 	// Copy parameters to member variables.
 	strncpy( m_Server, server, sizeof( m_Server ) );
@@ -279,7 +282,7 @@ HRESULT CDownload::PumpMessages()
 			struct _stat statdata;
 			if (	(_stat(m_LocalFile, &statdata) == 0) && 
 					(statdata.st_size == m_FileSize) && 
-					(_strnicmp(m_LocalFile, "patches\\", strlen("patches\\"))==0)) {
+					(strncasecmp(m_LocalFile, "patches\\", strlen("patches\\"))==0)) {
 				// OK, no need to download this again....
 
 				m_Status				= DOWNLOADSTATUS_FINDINGFILE;  // ready to find another file
@@ -337,7 +340,7 @@ HRESULT CDownload::PumpMessages()
 		if( m_TimeStarted == 0 )
 		{
 			// This is the first time through here - record the starting time.
-			m_TimeStarted = timeGetTime();
+			m_TimeStarted = Clock_Milliseconds();
 		}
 
 		if( iResult == FTP_SUCCEEDED )
@@ -357,7 +360,7 @@ HRESULT CDownload::PumpMessages()
 		// Calculate time taken so far, and predict how long there is left.
 		// The prediction returned is the average of the last 8 predictions.
 
-		timetaken = ( timeGetTime() - m_TimeStarted ) / 1000;
+		timetaken = ( Clock_Milliseconds() - m_TimeStarted ) / 1000;
 
 		//////////if( m_BytesRead > 0 ) // NAK - RP said this is wrong
       if( ( m_BytesRead - m_StartPosition ) > 0 )

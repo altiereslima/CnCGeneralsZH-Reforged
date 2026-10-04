@@ -49,6 +49,9 @@
 #include "GameLogic/AI.h"
 
 // DEFINES ////////////////////////////////////////////////////////////////////
+/// the widest circle a player's guard order may give; the message is network input, so logic holds it here
+const Real GUARD_RADIUS_MAX = 800.0f;
+
 // TYPE DEFINES ///////////////////////////////////////////////////////////////
 enum
 {
@@ -133,6 +136,7 @@ public:
 	Bool lookForInnerTarget(void);
 
 	static Real getStdGuardRange(const Object* obj);
+	static Real getGuardRange(const Object* obj);		///< the player's radius when the order gave one, else the standard range
 };
 
 //--------------------------------------------------------------------------------------

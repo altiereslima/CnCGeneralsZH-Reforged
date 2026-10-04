@@ -86,6 +86,7 @@ protected:
 	Bool m_inRange;
 	Int m_nextScanFrames;
 	Int m_nextShotAvailableInFrames;
+	Int m_shotsFiredFromClip;		///< against the weapon's ClipSize; EA's point defense has none and never counts
 };
 
 

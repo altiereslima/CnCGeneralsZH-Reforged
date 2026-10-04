@@ -15,14 +15,19 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*
 ** The Direct3D 11 renderer, driven the way the engine drives a Direct3D 9 device.
 **
 ** The engine sets one thing at a time and then draws: a render state, a texture stage state, a
-** texture, a transform, a stream, and eventually a DrawIndexedPrimitive.  There are 236 places that
-** do it and 5600 calls between them, and rewriting those into something D3D11 shaped is not a
-** phase, it is a different program.  So this takes the calls as they are and resolves them at the
+** texture, a transform, a stream, and eventually a DrawIndexedPrimitive.  Several hundred places
+** do it and several thousand calls a frame come out of them, and rewriting those into something
+** D3D11 shaped is not a phase, it is a different program.  (This said "236 places and 5600 calls"
+** when it was written on 2026-09-09; the first number was a count of every mention of the device
+** accessor in the sources, taken before ef8303a9 cut it by 45%, and the second was never a static
+** count of anything.  A call-site survey (D1, 2026-09-22) replaced it with a measurement.)
+** So this takes the calls as they are and resolves them at the
 ** moment of the draw, which is the only moment where everything needed to build a D3D11 pipeline is
 ** known at once.
 **
@@ -123,7 +128,7 @@ public:
 		const float emissive[4], float power);
 	void Set_Light(unsigned index, DWORD type, const float position[4], const float direction[4],
 		const float diffuse[4], const float specular[4], const float attenuation[4],
-		const float spot[4]);
+		const float spot[4], const float ambient[4]);
 	void Disable_Light(unsigned index);
 
 	// Write every program this builds to a file in this directory, named by the state it was built
@@ -131,10 +136,21 @@ public:
 	// description is a key, and the key is not the code.
 	void Set_Dump_Directory(const char * directory);
 
-	// Keep every compiled program in this file across runs: read now, written at Shutdown when a
-	// program was compiled that the file did not hold.  A program compiled mid-match costs 25 to
-	// 60ms on the frame that first needs it, which is the stutter a new explosion brought.
+	// Keep every compiled program in this file across runs: read now, written while the game runs
+	// (Save_Shader_Cache_If_Due) and at Shutdown when a program was compiled that the file did not
+	// hold.  A program compiled mid-match costs 25 to 60ms on the frame that first needs it, which is
+	// the stutter a new explosion brought.
 	void Set_Shader_Cache_Path(const char * path);
+	// The programs that ship with the game, compiled by Microsoft's d3dcompiler_47 when the file was
+	// recorded (Tools/record-dx11-shaders.ps1): read after the user's cache, so for the same source a
+	// shipped program wins.  A first start then compiles only what the recording never met.  Under
+	// Wine, whose d3dcompiler is vkd3d-shader, a single compile took minutes (measured on a Steam Deck, X2).
+	void Load_Shipped_Programs(const char * path);
+	unsigned Shipped_Program_Count() const { return ShippedPrograms; }
+	// Writes the cache if a program was compiled since the last write and the last write is at least
+	// SHADER_CACHE_SAVE_INTERVAL_MS old: called once a frame, so a run that dies before Shutdown, or
+	// is killed, keeps what it compiled.
+	void Save_Shader_Cache_If_Due();
 	unsigned Compiled_Program_Count() const { return static_cast<unsigned>(CompiledPrograms.size()); }
 
 	// Binds the swap chain's back buffer and depth buffer and sets the viewport over the whole of
@@ -168,6 +184,29 @@ public:
 	void Clear_Shadow_Parameters();
 	bool Shadow_Map_Bound() const { return ShadowMapBound; }
 	ID3D11ShaderResourceView * Shadow_Map() const { return ShadowMapTexture; }
+
+	// The smoke's own map over the same sun, filled once a frame after End_Shadow_Map from the sun
+	// it held.  A caster is five floats: its centre in world units, its radius and the optical
+	// depth through its middle.  Strength is how dark the thickest smoke leaves what is behind it;
+	// zero casters or zero strength is a frame with no smoke in the light, and so is a frame that
+	// never calls this.  True means the map holds every caster handed over that stands in the sun's
+	// box; false that it holds none of them (no blendable, filterable four channel 32-bit float
+	// target, or a buffer the device refused), which the caller reads as the smoke not being in the
+	// sun's light and keeps its older shade.  ffshader.h, VOLUMETRIC_SAMPLING, says what the map holds.
+	bool Fill_Smoke_Map(const float * casters, unsigned count, float strength);
+	ID3D11ShaderResourceView * Smoke_Map() const { return SmokeMapFilled ? SmokeMapTexture : NULL; }
+
+	// The scene camera's view, which a camera space draw's pixels go back to the world through: the
+	// sorted particles are written in camera space and drawn with an identity world and view
+	// (PointGroupClass::Insert_Sorted_Billboards), so the view the backend holds for them says
+	// nothing about where they are.  Set by the shadow pass every frame it fills the map, after the
+	// frame's camera is back; until the first one, such a draw uses the view it was drawn with.
+	void Set_Scene_View(const float view[16]);
+
+	// The draws that follow carry the glow of the fires near them in their normals and want it added
+	// after the shade (ffvertex.h and ffshader.h, SmokeGlow).  Only the sorting pool sets it, around
+	// the smoke billboards' runs.  An unlit draw with a normal takes it; any other ignores it.
+	void Set_Smoke_Glow(bool glow);
 
 	// What is in the map, read back through a staging copy: how much of it was drawn into and how
 	// near the nearest thing is.  A caster pass that drew nothing leaves a map that is all one
@@ -267,7 +306,7 @@ private:
 		// One over the viewport's width and height, for the pre-transformed draws.  It goes before
 		// the lights because the generated block declares only as many lights as the state has.
 		float ViewportInverse[4];
-		float LightFields[MAXIMUM_VERTEX_LIGHTS][6][4];
+		float LightFields[MAXIMUM_VERTEX_LIGHTS][VERTEX_REGISTERS_PER_LIGHT][4];
 	};
 
 	// The normal map fields go last: a program that is not normal mapped declares the first three
@@ -295,6 +334,10 @@ private:
 		// share of the zenith colour in its own.
 		float Sky[4];
 		float SkyUp[4];
+		// The smoke in the sun's light (VOLUMETRIC_SAMPLING): how dark the thickest smoke leaves
+		// what is behind it, zero on a frame without; the same for a particle shading itself; one
+		// for a draw in camera space; and the power on the self-shade.
+		float VolumeParameters[4];
 	};
 	// A model under directional lights, drawn by generated programs.
 	bool Normal_Mapped() const;
@@ -384,6 +427,36 @@ private:
 	float ShadowFromClipProjection[16];
 	bool ShadowFromClipValid;
 
+	// Set_Scene_View's matrix, and whether it has been set.
+	float SceneView[16];
+	bool SceneViewKnown;
+	bool Camera_Space_Draw() const;
+	bool SmokeGlow;
+	bool Smoke_Glow() const;
+	// A stage samples the target the draw is going into: the heat haze, which bends a picture that
+	// already took its shadows, and would take them a second time.
+	bool Samples_Current_Target() const;
+
+	// The smoke's map (Fill_Smoke_Map), the program that splats the casters into it and what it
+	// draws with.  Made on the first fill and kept; refused for good if the device cannot.
+	ID3D11Texture2D * SmokeMapSurface;
+	ID3D11RenderTargetView * SmokeMapTarget;
+	ID3D11ShaderResourceView * SmokeMapTexture;
+	ID3D11SamplerState * SmokeMapSampler;
+	ID3D11VertexShader * SmokeSplatVertexShader;
+	ID3D11PixelShader * SmokeSplatPixelShader;
+	ID3D11InputLayout * SmokeSplatLayout;
+	ID3D11BlendState * SmokeSplatBlend;
+	ID3D11RasterizerState * SmokeSplatRasterizer;
+	ID3D11Buffer * SmokeSplatInstances;
+	unsigned SmokeSplatCapacity;
+	std::vector<float> SmokeSplats;
+	bool SmokeMapRefused;
+	bool SmokeMapFilled;
+	float SmokeStrength;
+	bool Make_Smoke_Map();
+	void Release_Smoke_Map();
+
 	float MaterialAmbient[4];
 	float MaterialDiffuse[4];
 	float MaterialSpecular[4];
@@ -400,6 +473,7 @@ private:
 		float Specular[4];
 		float Attenuation[4];
 		float Spot[4];
+		float Ambient[4];
 	};
 	Light Lights[MAXIMUM_VERTEX_LIGHTS];
 
@@ -542,9 +616,11 @@ private:
 	ID3D11Texture2D * TargetCopy;
 	ID3D11ShaderResourceView * TargetCopyView;
 	ID3D11ShaderResourceView * Readable_Texture(unsigned stage, ID3D11ShaderResourceView * texture);
-	// Per stage, the last view asked about and whether it views the current target.
-	ID3D11ShaderResourceView * TargetCheckedViews[DX11_BACKEND_TEXTURE_STAGES];
-	bool TargetCheckedIsTarget[DX11_BACKEND_TEXTURE_STAGES];
+	// Per stage, the last view asked about and whether it views the current target.  Mutable because
+	// Shadow_Receiving asks the same question while the pipeline is described.
+	bool Views_Current_Target(unsigned stage, ID3D11ShaderResourceView * texture) const;
+	mutable ID3D11ShaderResourceView * TargetCheckedViews[DX11_BACKEND_TEXTURE_STAGES];
+	mutable bool TargetCheckedIsTarget[DX11_BACKEND_TEXTURE_STAGES];
 
 	// Keyed by the description itself and ordered by its bytes, which is safe for the ResolveMemo's
 	// reason: every Build_*_Description memsets first.  They were keyed by the bytes copied into a
@@ -643,6 +719,8 @@ private:
 	std::map<unsigned long long, std::vector<unsigned char> > CompiledPrograms;
 	std::string ShaderCachePath;
 	bool ShaderCacheChanged;
+	unsigned ShippedPrograms;
+	unsigned long LastShaderCacheSave;
 
 	unsigned long long RefusedNoBuffer;
 	unsigned long long RefusedNoStage;

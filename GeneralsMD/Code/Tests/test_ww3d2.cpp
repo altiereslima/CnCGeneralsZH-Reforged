@@ -1639,7 +1639,7 @@ TEST(fontchars_returns_its_glyph_buffers_to_the_pool)
 	const int allocs = theW3DPoolAllocs, frees = theW3DPoolFrees;
 	FontCharsClass *font = W3DNEW FontCharsClass;
 	font->Initialize_GDI_Font("Arial", 12, false);
-	CHECK(font->Get_Char_Width(L'A') > 0);	/* stores the glyph -> allocates a FontCharsBuffer */
+	CHECK(font->Get_Char_Width(u'A') > 0);	/* stores the glyph -> allocates a FontCharsBuffer */
 	font->Release_Ref();
 	CHECK(theW3DPoolAllocs - allocs >= 2);	/* at least the font and one buffer */
 	CHECK_EQ(theW3DPoolFrees - frees, theW3DPoolAllocs - allocs);

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -47,6 +48,9 @@
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
+
+#include "Lib/WideCharFns.h"
 
 //-----------------------------------------------------------------------------
 // USER INCLUDES //////////////////////////////////////////////////////////////
@@ -129,7 +133,7 @@ void StatsCollector::reset( void )
 	// zero out
 	zeroOutStats();
 
-	m_lastUpdate = TheGameLogic->getFrame(); // timeGetTime();
+	m_lastUpdate = TheGameLogic->getFrame(); // Clock_Milliseconds();
 }	
 
 // Msgs pass through here so we can track whichever ones we want
@@ -196,7 +200,7 @@ void StatsCollector::update( void )
 
 	zeroOutStats();
 
-	m_lastUpdate = TheGameLogic->getFrame(); //timeGetTime();
+	m_lastUpdate = TheGameLogic->getFrame(); //Clock_Milliseconds();
 	
 }
 
@@ -222,7 +226,7 @@ void StatsCollector::incrementMoveCount( void )
 void StatsCollector::writeFileEnd( void )
 {
 	//open the file
-	FILE *f = fopen(m_statsFileName.str(), "a");
+	FILE *f = zh_fopen(m_statsFileName.str(), "a");
 	if(!f)
 	{
 		DEBUG_ASSERTCRASH(f, ("Unable to open file %s to write", m_statsFileName.str()));
@@ -342,7 +346,7 @@ void StatsCollector::createFileName( void )
 					if (slot && slot->isHuman())
 					{
 						AsciiString player;
-						player.format("%ls_", slot->getName().str());
+						player.format("%s_", WideCharAsUtf8( slot->getName().str() ).str());
 						players.concat(player);
 					}
 				}
@@ -369,7 +373,7 @@ void StatsCollector::createFileName( void )
 void StatsCollector::writeInitialFileInfo()
 {
 	//open the file
-	FILE *f = fopen(m_statsFileName.str(), "w");
+	FILE *f = zh_fopen(m_statsFileName.str(), "w");
 	if(!f)
 	{
 		DEBUG_ASSERTCRASH(f, ("Unable to open file %s to write", m_statsFileName.str()));
@@ -407,7 +411,7 @@ void StatsCollector::writeInitialFileInfo()
 void StatsCollector::writeStatInfo()
 {
 	//open the file
-	FILE *f = fopen(m_statsFileName.str(), "a");
+	FILE *f = zh_fopen(m_statsFileName.str(), "a");
 	if(!f)
 	{
 		DEBUG_ASSERTCRASH(f, ("Unable to open file %s to write", m_statsFileName.str()));

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -37,7 +38,7 @@
 #include "GameLogic/Module/DamageModule.h" 
 
 //#include "GameLogic/Module/BodyModule.h" -- Yikes... not necessary to include this! (KM)
-enum BodyDamageType; //Ahhhh much better!
+enum BodyDamageType : int; //Ahhhh much better!
 
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////

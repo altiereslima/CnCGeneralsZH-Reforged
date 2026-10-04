@@ -87,9 +87,10 @@
   .on .box { background-image: url(PowerBarGreen); border-color: #b8f08a; }
 
   /* ---- the right column: the camera, and under it the board ---- */
-  /* under ControlBar.html's #net, 37px tall with the network line a player knocked out of an
-     online match still gets */
-  #right { position: absolute; right: 4px; top: 40px; width: 172px; }
+  /* under Net.html's #net, 37px tall with the network line a player knocked out of an online match
+     still gets.  That page is drawn a console scale over 0.7 and this one at the console's, so its
+     37px are 53 of these: 57 keeps the column where 40 put it before this page took the console's scale */
+  #right { position: absolute; right: 4px; top: 57px; width: 172px; }
   #watch { padding: 0 0 1px 0; margin-bottom: 4px; }
   #board { padding: 0 0 3px 0; }
   .head { height: 16px; padding: 0 3px; position: relative; }

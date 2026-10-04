@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -44,6 +46,7 @@
 #include "GameClient/InGameUI.h" // selection logic
 #include "GameLogic/ExperienceTracker.h" //veterancy logic
 #include "GameLogic/Module/StealthUpdate.h"
+#include "Platform/MsvcFloatCasts.h"
 
 
 #define NONE_SPAWNED_YET (0xffffffff)
@@ -1030,7 +1033,7 @@ void SpawnBehavior::computeAggregateStates(void)
 		avgHealthMax /= spawnCount;
 		Real perfectTotalHealth = avgHealthMax * spawnCountMax;
 		Real actualHealth  = acrHealth / perfectTotalHealth;
-		obj->getBodyModule()->setInitialHealth(100.0f * actualHealth);
+		obj->getBodyModule()->setInitialHealth(floatToIntAsMsvc(100.0f * actualHealth));
 	}
 	else
 	{

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,6 +31,7 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
 #include "Common/RandomValue.h"
 #include "GameClient/Shell.h"
@@ -205,9 +208,9 @@ void Shell::reset( void )
 //-------------------------------------------------------------------------------------------------
 void Shell::update( void )
 {
-	static Int lastUpdate = timeGetTime();
+	static Int lastUpdate = Clock_Milliseconds();
 	static const Int shellUpdateDelay = 30;  // try to update 30 frames a second
-	Int now = timeGetTime();
+	Int now = Clock_Milliseconds();
 	
 	//
 	// we keep the shell updates fixed in time so that we can write consitent animation
@@ -328,7 +331,7 @@ void Shell::push( AsciiString filename, Bool shutdownImmediate )
 	{
 	
 		DEBUG_LOG(( "Unable to load screen '%s', max '%d' reached\n",
-								filename, MAX_SHELL_STACK ));
+								filename.str(), MAX_SHELL_STACK ));
 		return;
 
 	}  // end if

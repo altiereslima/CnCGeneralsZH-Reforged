@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,6 +30,7 @@
 
 // USER INCLUDES //////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+#include "zhio.h"
 #include "Common/Debug.h"
 #include "Common/GameState.h"
 #include "Common/Snapshot.h"
@@ -80,7 +82,7 @@ void XferLoad::open( AsciiString identifier )
 	Xfer::open( identifier );
 
 	// open the file
-	m_fileFP = fopen( identifier.str(), "rb" );
+	m_fileFP = zh_fopen( identifier.str(), "rb" );
 	if( m_fileFP == NULL )
 	{
 		

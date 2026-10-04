@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -26,6 +27,45 @@
 
 #include "GameNetwork/IPEnumeration.h"
 
+#if !defined(_WIN32)
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <vector>
+
+/* The machine's IPv4 addresses, off Windows.  Windows asks the resolver for its own host name, which
+	 answers with the address of every adapter that has one, and 127.0.0.1 when none has; POSIX's
+	 resolver may answer with 127.0.1.1 (Debian's /etc/hosts) or not at all, so the interfaces are read
+	 instead: every IPv4 address on an interface that is up, loopback only when nothing else is.  They
+	 come back in the interfaces' order, network byte order; getAddresses sorts them as it does on
+	 Windows. */
+static void getInterfaceAddresses( std::vector<in_addr> &addresses )
+{
+	struct ifaddrs *interfaces = NULL;
+	if (getifaddrs(&interfaces) != 0)
+	{
+		DEBUG_LOG(("Failed call to getifaddrs; errno is %d\n", errno));
+		return;
+	}
+
+	std::vector<in_addr> loopback;
+	for (struct ifaddrs *ifa = interfaces; ifa; ifa = ifa->ifa_next)
+	{
+		if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET || !(ifa->ifa_flags & IFF_UP))
+			continue;
+
+		const in_addr address = ((const struct sockaddr_in *)ifa->ifa_addr)->sin_addr;
+		if (ifa->ifa_flags & IFF_LOOPBACK)
+			loopback.push_back(address);
+		else
+			addresses.push_back(address);
+	}
+	freeifaddrs(interfaces);
+
+	if (addresses.empty())
+		addresses = loopback;
+}
+#endif
+
 IPEnumeration::IPEnumeration( void )
 {
 	m_IPlist = NULL;
@@ -34,11 +74,13 @@ IPEnumeration::IPEnumeration( void )
 
 IPEnumeration::~IPEnumeration( void )
 {
+#if defined(_WIN32)
 	if (m_isWinsockInitialized)
 	{
 		WSACleanup();
 		m_isWinsockInitialized = false;
 	}
+#endif
 
 	EnumeratedIP *ip = m_IPlist;
 	while (ip)
@@ -54,6 +96,8 @@ EnumeratedIP * IPEnumeration::getAddresses( void )
 	if (m_IPlist)
 		return m_IPlist;
 
+	// (Windows only: POSIX sockets need no start-up, so m_isWinsockInitialized stays false there.)
+#if defined(_WIN32)
 	if (!m_isWinsockInitialized)
 	{
 		WORD verReq = MAKEWORD(2, 2);
@@ -70,16 +114,18 @@ EnumeratedIP * IPEnumeration::getAddresses( void )
 		}
 		m_isWinsockInitialized = true;
 	}
+#endif
 
 	// get the local machine's host name
 	char hostname[256];
 	if (gethostname(hostname, sizeof(hostname)))
 	{
-		DEBUG_LOG(("Failed call to gethostname; WSAGetLastError returned %d\n", WSAGetLastError()));
+		DEBUG_LOG(("Failed call to gethostname; WSAGetLastError returned %d\n", lastSocketError()));
 		return NULL;
 	}
 	DEBUG_LOG(("Hostname is '%s'\n", hostname));
 	
+#if defined(_WIN32)
 	// get host information from the host name
 	HOSTENT* hostEnt = gethostbyname(hostname);
 	if (hostEnt == NULL)
@@ -87,6 +133,21 @@ EnumeratedIP * IPEnumeration::getAddresses( void )
 		DEBUG_LOG(("Failed call to gethostnyname; WSAGetLastError returned %d\n", WSAGetLastError()));
 		return NULL;
 	}
+#else
+	// The interfaces' addresses, in the shape gethostbyname gives them, for the loop below.
+	std::vector<in_addr> addresses;
+	getInterfaceAddresses(addresses);
+	std::vector<char *> addressList;
+	for (size_t i = 0; i < addresses.size(); ++i)
+		addressList.push_back((char *)&addresses[i]);
+	addressList.push_back(NULL);
+
+	struct hostent interfaceHost = {};
+	interfaceHost.h_addrtype = AF_INET;
+	interfaceHost.h_length = sizeof(in_addr);
+	interfaceHost.h_addr_list = addressList.data();
+	struct hostent *hostEnt = &interfaceHost;
+#endif
 	
 	// sanity-check the length of the IP adress
 	if (hostEnt->h_length != 4)
@@ -154,6 +215,8 @@ EnumeratedIP * IPEnumeration::getAddresses( void )
 
 AsciiString IPEnumeration::getMachineName( void )
 {
+	// (Windows only: POSIX sockets need no start-up, so m_isWinsockInitialized stays false there.)
+#if defined(_WIN32)
 	if (!m_isWinsockInitialized)
 	{
 		WORD verReq = MAKEWORD(2, 2);
@@ -170,14 +233,23 @@ AsciiString IPEnumeration::getMachineName( void )
 		}
 		m_isWinsockInitialized = true;
 	}
+#endif
 
 	// get the local machine's host name
 	char hostname[256];
 	if (gethostname(hostname, sizeof(hostname)))
 	{
-		DEBUG_LOG(("Failed call to gethostname; WSAGetLastError returned %d\n", WSAGetLastError()));
+		DEBUG_LOG(("Failed call to gethostname; WSAGetLastError returned %d\n", lastSocketError()));
 		return NULL;
 	}
+
+#if !defined(_WIN32)
+	// Windows names the machine by its one-label name; POSIX's host name may carry the domain
+	// ("name.local" on macOS).
+	char *dot = strchr(hostname, '.');
+	if (dot)
+		*dot = 0;
+#endif
 
 	return AsciiString(hostname);
 }

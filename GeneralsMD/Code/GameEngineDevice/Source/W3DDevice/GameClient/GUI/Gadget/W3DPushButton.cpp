@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -249,7 +251,7 @@ static DisplayString *badgeString( const UnicodeString &text, GameFont *font )
 static void drawCountBadge( GameWindow *window, Int count )
 {
 	UnicodeString text;
-	text.format( L"%d", count );
+	text.format( u"%d", count );
 	drawBadge( window, text, COUNT_BADGE_DESIGN_POINTS, HUD_READOUT_BOTTOM_RIGHT, GameMakeColor( 255, 255, 255, 255 ) );
 
 }  // end drawCountBadge
@@ -303,8 +305,8 @@ static void drawBadge( GameWindow *window, const UnicodeString &text, Real desig
 static void drawSecondsBadge( GameWindow *window, Int seconds )
 {
 	UnicodeString text, bare;
-	text.format( L"%ds", seconds );
-	bare.format( L"%d", seconds );
+	text.format( u"%ds", seconds );
+	bare.format( u"%d", seconds );
 	drawBadge( window, text, BADGE_DESIGN_POINTS, HUD_READOUT_BOTTOM_LEFT, GameMakeColor( 255, 255, 255, 255 ), bare );
 
 }  // end drawSecondsBadge
@@ -317,8 +319,8 @@ static void drawSecondsBadge( GameWindow *window, Int seconds )
 static void drawCostBadge( GameWindow *window, Int cost )
 {
 	UnicodeString text, bare;
-	text.format( L"$%d", cost );
-	bare.format( L"%d", cost );
+	text.format( u"$%d", cost );
+	bare.format( u"%d", cost );
 	drawBadge( window, text, BADGE_DESIGN_POINTS, HUD_READOUT_TOP_RIGHT, GameMakeColor( 235, 210, 120, 255 ), bare );
 
 }  // end drawCostBadge
@@ -336,7 +338,7 @@ static void drawPowerBadge( GameWindow *window, Int power )
 	const Int draws = -power;
 
 	UnicodeString text;
-	text.format( draws > 0 ? L"-%d" : L"+%d", draws > 0 ? draws : -draws );
+	text.format( draws > 0 ? u"-%d" : u"+%d", draws > 0 ? draws : -draws );
 	drawBadge( window, text, BADGE_DESIGN_POINTS, HUD_READOUT_BOTTOM_RIGHT,
 						 draws > 0 ? GameMakeColor( 255, 170, 90, 255 )			// spends it
 											 : GameMakeColor( 130, 220, 255, 255 ) );	// supplies it

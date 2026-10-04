@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,7 +31,12 @@
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Platform/SleepMilliseconds.h"
+#include "Lib/Clock.h"
 #include "GameClient/GameClient.h"
+#if !defined(_WIN32)
+#include "cpudetect.h"		// getPreloadMemoryStatus, off Windows
+#endif
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "Common/ActionManager.h"
@@ -618,6 +625,7 @@ void GameClient::update( void )
 			TheDisplay->playLogoMovie("EALogoMovie", 5000, 3000);
 		else
 			TheDisplay->playLogoMovie("EALogoMovie640", 5000, 3000);
+		DEBUG_LOG(("GameClient: the EA logo movie %s\n", TheDisplay->isMoviePlaying() ? "is playing" : "did not start (no stream: video off, or no file)"));
 		// Escape gets you out of this one too. The flag is what the key handler asks, and it was
 		// only ever raised once the logo had finished playing itself out, so the one movie you see
 		// on every single launch was the one you could not skip.
@@ -653,13 +661,13 @@ void GameClient::update( void )
 				{				
 					legal->hide(FALSE);
 					legal->bringForward();
-					Int beginTime = timeGetTime();
-					while(beginTime + 4000 > timeGetTime() )
+					Int beginTime = Clock_Milliseconds();
+					while(beginTime + 4000 > Clock_Milliseconds() )
 					{
 						TheWindowManager->update();
 						// redraw all views, update the GUI
 						TheDisplay->draw();
-						Sleep(100);
+						sleepMilliseconds( 100 );
 					}
 					setFPMode();
 
@@ -675,6 +683,12 @@ void GameClient::update( void )
 
 			TheShell->showShellMap(TRUE);
 			TheShell->showShell();
+			// A start from the command line (-file, a replay, a save) has no main menu: showShell returns
+			// before pushing one, and MainMenuInit is what clears this flag.  Left set, W3DDisplay never
+			// begins a frame, so a campaign map started that way, whose load screen does not clear it either,
+			// drew nothing and presented nothing for the whole mission.  Render-only: nothing else reads it.
+			if( !TheGlobalData->m_initialFile.isEmpty() )
+				TheWritableGlobalData->m_breakTheMovie = FALSE;
 			TheWritableGlobalData->m_afterIntro = FALSE;
 		}
 	}
@@ -918,13 +932,13 @@ void GameClient::update( void )
 		{
 #ifdef DEBUG_LOGGING
 			Int64 drawStart, drawEnd;
-			QueryPerformanceCounter( (LARGE_INTEGER *)&drawStart );
+			drawStart = Clock_Ticks();
 #endif
 			TheDisplay->DRAW();
 #ifdef DEBUG_LOGGING
-			QueryPerformanceCounter( (LARGE_INTEGER *)&drawEnd );
+			drawEnd = Clock_Ticks();
 			Int64 freq;
-			QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+			freq = Clock_Ticks_Per_Second();
 			if( freq > 0 )
 				TheClientDrawMS = (Real)((double)(drawEnd - drawStart) * 1000.0 / (double)freq);
 #endif
@@ -1322,6 +1336,36 @@ void GameClient::allocateShadows(void)
 }
 
 //-------------------------------------------------------------------------------------------------
+/* The memory figures preloadAssets logs before and after each step: the three it reads of Windows'
+	 MEMORYSTATUS.  Windows fills them from GlobalMemoryStatus, as preloadAssets always did.  Elsewhere
+	 they come from CPUDetectClass::Query_Memory, the platform code CPUDetectClass itself uses (sysctl
+	 and Mach on Darwin, sysconf on Linux), asked again each time and unclamped: CPUDetectClass's own
+	 getters stop at 2GB-1, and before and after would read the same on any machine with 2GB free. */
+struct PreloadMemoryStatus
+{
+	size_t availPageFile;
+	size_t availPhys;
+	size_t availVirtual;
+};
+
+static void getPreloadMemoryStatus( PreloadMemoryStatus &status )
+{
+#if defined(_WIN32)
+	MEMORYSTATUS memory;
+	GlobalMemoryStatus( &memory );
+	status.availPageFile = memory.dwAvailPageFile;
+	status.availPhys = memory.dwAvailPhys;
+	status.availVirtual = memory.dwAvailVirtual;
+#else
+	unsigned long long totalPhys, availPhys, totalPage, availPage, totalVirtual, availVirtual;
+	CPUDetectClass::Query_Memory( totalPhys, availPhys, totalPage, availPage, totalVirtual, availVirtual );
+	status.availPageFile = (size_t)availPage;
+	status.availPhys = (size_t)availPhys;
+	status.availVirtual = (size_t)availVirtual;
+#endif
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Preload assets for the currently loaded map.  Those assets include all the damage states
 	* for every building loaded, as well as any faction units/structures we can build and
 	* all their damage states */
@@ -1329,8 +1373,8 @@ void GameClient::allocateShadows(void)
 void GameClient::preloadAssets( TimeOfDay timeOfDay )
 {
 
-	MEMORYSTATUS before, after;
-	GlobalMemoryStatus(&before);
+	PreloadMemoryStatus before, after;
+	getPreloadMemoryStatus(before);
 
 	// first, for every drawable in the map load the assets for all states we care about
 	Drawable *draw;
@@ -1345,7 +1389,7 @@ void GameClient::preloadAssets( TimeOfDay timeOfDay )
 	const ThingTemplate *tTemplate;
 	Int preloaded = 0, considered = 0;
 	Int64 preloadStart, preloadEnd, preloadFreq = 0;
-	QueryPerformanceCounter( (LARGE_INTEGER *)&preloadStart );
+	preloadStart = Clock_Ticks();
 	for( tTemplate = TheThingFactory->firstTemplate();
 			 tTemplate;
 			 tTemplate = tTemplate->friend_getNextTemplate() )
@@ -1371,18 +1415,18 @@ void GameClient::preloadAssets( TimeOfDay timeOfDay )
 		}  // end if
 
 	}  // end for
-	QueryPerformanceCounter( (LARGE_INTEGER *)&preloadEnd );
-	QueryPerformanceFrequency( (LARGE_INTEGER *)&preloadFreq );
+	preloadEnd = Clock_Ticks();
+	preloadFreq = Clock_Ticks_Per_Second();
 	DEBUG_LOG(("PRELOAD: %d of %d templates in %.0f ms\n", preloaded, considered,
 						 preloadFreq ? (Real)((double)(preloadEnd - preloadStart) * 1000.0 / (double)preloadFreq) : 0.0f));
-	GlobalMemoryStatus(&after);
+	getPreloadMemoryStatus(after);
 
 	DEBUG_LOG(("Preloading memory dwAvailPageFile %d --> %d : %d\n",
-		before.dwAvailPageFile, after.dwAvailPageFile, before.dwAvailPageFile - after.dwAvailPageFile));
+		before.availPageFile, after.availPageFile, before.availPageFile - after.availPageFile));
 	DEBUG_LOG(("Preloading memory dwAvailPhys     %d --> %d : %d\n",
-		before.dwAvailPhys, after.dwAvailPhys, before.dwAvailPhys - after.dwAvailPhys));
+		before.availPhys, after.availPhys, before.availPhys - after.availPhys));
 	DEBUG_LOG(("Preloading memory dwAvailVirtual  %d --> %d : %d\n",
-		before.dwAvailVirtual, after.dwAvailVirtual, before.dwAvailVirtual - after.dwAvailVirtual));
+		before.availVirtual, after.availVirtual, before.availVirtual - after.availVirtual));
 	/*
 	DEBUG_LOG(("Preloading memory dwLength        %d --> %d : %d\n",
 		before.dwLength, after.dwLength, before.dwLength - after.dwLength));
@@ -1396,7 +1440,7 @@ void GameClient::preloadAssets( TimeOfDay timeOfDay )
 		before.dwTotalVirtual , after.dwTotalVirtual, before.dwTotalVirtual - after.dwTotalVirtual));
 	*/
 
-	GlobalMemoryStatus(&before);
+	getPreloadMemoryStatus(before);
 	extern std::vector<AsciiString>	debrisModelNamesGlobalHack;
 	// i is used after the loop; VC6 for-scope let it escape.
 	Int i;
@@ -1404,28 +1448,28 @@ void GameClient::preloadAssets( TimeOfDay timeOfDay )
 	{
 		TheDisplay->preloadModelAssets(debrisModelNamesGlobalHack[i]);
 	}
-	GlobalMemoryStatus(&after);
+	getPreloadMemoryStatus(after);
 	debrisModelNamesGlobalHack.clear();
 
 	DEBUG_LOG(("Preloading memory dwAvailPageFile %d --> %d : %d\n",
-		before.dwAvailPageFile, after.dwAvailPageFile, before.dwAvailPageFile - after.dwAvailPageFile));
+		before.availPageFile, after.availPageFile, before.availPageFile - after.availPageFile));
 	DEBUG_LOG(("Preloading memory dwAvailPhys     %d --> %d : %d\n",
-		before.dwAvailPhys, after.dwAvailPhys, before.dwAvailPhys - after.dwAvailPhys));
+		before.availPhys, after.availPhys, before.availPhys - after.availPhys));
 	DEBUG_LOG(("Preloading memory dwAvailVirtual  %d --> %d : %d\n",
-		before.dwAvailVirtual, after.dwAvailVirtual, before.dwAvailVirtual - after.dwAvailVirtual));
+		before.availVirtual, after.availVirtual, before.availVirtual - after.availVirtual));
 
 	TheControlBar->preloadAssets( timeOfDay );
 
-	GlobalMemoryStatus(&before);
+	getPreloadMemoryStatus(before);
 	TheParticleSystemManager->preloadAssets( timeOfDay );
-	GlobalMemoryStatus(&after);
+	getPreloadMemoryStatus(after);
 
 	DEBUG_LOG(("Preloading memory dwAvailPageFile %d --> %d : %d\n",
-		before.dwAvailPageFile, after.dwAvailPageFile, before.dwAvailPageFile - after.dwAvailPageFile));
+		before.availPageFile, after.availPageFile, before.availPageFile - after.availPageFile));
 	DEBUG_LOG(("Preloading memory dwAvailPhys     %d --> %d : %d\n",
-		before.dwAvailPhys, after.dwAvailPhys, before.dwAvailPhys - after.dwAvailPhys));
+		before.availPhys, after.availPhys, before.availPhys - after.availPhys));
 	DEBUG_LOG(("Preloading memory dwAvailVirtual  %d --> %d : %d\n",
-		before.dwAvailVirtual, after.dwAvailVirtual, before.dwAvailVirtual - after.dwAvailVirtual));
+		before.availVirtual, after.availVirtual, before.availVirtual - after.availVirtual));
 
 	char *textureNames[] = {
 		"ptspruce01.tga",
@@ -1469,17 +1513,17 @@ void GameClient::preloadAssets( TimeOfDay timeOfDay )
 		""
 	};
 
-	GlobalMemoryStatus(&before);
+	getPreloadMemoryStatus(before);
 	for (i=0; *textureNames[i]; ++i)
 		TheDisplay->preloadTextureAssets(textureNames[i]);
-	GlobalMemoryStatus(&after);
+	getPreloadMemoryStatus(after);
 
 	DEBUG_LOG(("Preloading memory dwAvailPageFile %d --> %d : %d\n",
-		before.dwAvailPageFile, after.dwAvailPageFile, before.dwAvailPageFile - after.dwAvailPageFile));
+		before.availPageFile, after.availPageFile, before.availPageFile - after.availPageFile));
 	DEBUG_LOG(("Preloading memory dwAvailPhys     %d --> %d : %d\n",
-		before.dwAvailPhys, after.dwAvailPhys, before.dwAvailPhys - after.dwAvailPhys));
+		before.availPhys, after.availPhys, before.availPhys - after.availPhys));
 	DEBUG_LOG(("Preloading memory dwAvailVirtual  %d --> %d : %d\n",
-		before.dwAvailVirtual, after.dwAvailVirtual, before.dwAvailVirtual - after.dwAvailVirtual));
+		before.availVirtual, after.availVirtual, before.availVirtual - after.availVirtual));
 
 //	preloadTextureNamesGlobalHack2 = preloadTextureNamesGlobalHack;
 //	preloadTextureNamesGlobalHack.clear();

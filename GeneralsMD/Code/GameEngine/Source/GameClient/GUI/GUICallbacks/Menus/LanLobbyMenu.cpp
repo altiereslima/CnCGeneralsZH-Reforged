@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -32,7 +34,7 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
 #include "Lib/BaseType.h"
-#include "Common/CRC.h"
+#include "Common/crc.h"
 #include "Common/GameEngine.h"
 #include "Common/GlobalData.h"
 #include "Common/MultiplayerSettings.h"
@@ -152,7 +154,7 @@ Bool LANPreferences::usesSystemMapDir(void)
 	if (it == end())
 		return TRUE;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -217,9 +219,9 @@ UnicodeString LANPreferences::getRemoteIPEntry(Int i)
 	ret.translate(ipstr);
 	if (asciientry.getLength() > 0)
 	{
-		ret.concat(L"(");
+		ret.concat(u"(");
 		ret.concat(QuotedPrintableToUnicodeString(asciientry));
-		ret.concat(L")");
+		ret.concat(u")");
 	}
 
 	return ret;
@@ -255,7 +257,7 @@ Money LANPreferences::getStartingCash(void) const
   }
 
   Money money;
-  money.deposit( strtoul( it->second.str(), NULL, 10 ), FALSE  );
+  money.deposit( strtoulAsWindows( it->second.str() ), FALSE  );
 
   return money;
 }
@@ -328,7 +330,7 @@ static void playerTooltip(GameWindow *window,
 		return;
 	}
 
-	UnsignedInt playerIP = (UnsignedInt)GadgetListBoxGetItemData( window, row, col );
+	UnsignedInt playerIP = (UnsignedInt)(uintptr_t)GadgetListBoxGetItemData( window, row, col );
 	LANPlayer *player = TheLAN->LookupPlayer(playerIP);
 	if (!player)
 	{
@@ -772,7 +774,7 @@ WindowMsgHandledType LanLobbyMenuSystem( GameWindow *window, UnsignedInt msg,
 				} //if ( controlID == buttonBack )
 				else if ( controlID == buttonHostID )
 				{
-					TheLAN->RequestGameCreate( UnicodeString(L""), FALSE);
+					TheLAN->RequestGameCreate( UnicodeString(u""), FALSE);
 					
 				}//else if ( controlID == buttonHostID )
 				else if ( controlID == buttonClearID )
@@ -843,7 +845,7 @@ WindowMsgHandledType LanLobbyMenuSystem( GameWindow *window, UnsignedInt msg,
 
 					// Clean up the text (remove leading/trailing chars, etc)
 					const WideChar *c = txtInput.str();
-					while (c && (iswspace(*c)))
+					while (c && (WideCharIsSpace(*c)))
 						c++;
 
 					if (c)
@@ -854,13 +856,13 @@ WindowMsgHandledType LanLobbyMenuSystem( GameWindow *window, UnsignedInt msg,
 					while (txtInput.getLength() > g_lanPlayerNameLength)
 						txtInput.removeLastChar();
 					
-					if (!txtInput.isEmpty() && txtInput.getCharAt(txtInput.getLength()-1) == L',')
+					if (!txtInput.isEmpty() && txtInput.getCharAt(txtInput.getLength()-1) == u',')
 						txtInput.removeLastChar(); // we use , for strtok's so we can't allow them in names.  :(
 
-					if (!txtInput.isEmpty() && txtInput.getCharAt(txtInput.getLength()-1) == L':')
+					if (!txtInput.isEmpty() && txtInput.getCharAt(txtInput.getLength()-1) == u':')
 						txtInput.removeLastChar(); // we use : for strtok's so we can't allow them in names.  :(
 
-					if (!txtInput.isEmpty() && txtInput.getCharAt(txtInput.getLength()-1) == L';')
+					if (!txtInput.isEmpty() && txtInput.getCharAt(txtInput.getLength()-1) == u';')
 						txtInput.removeLastChar(); // we use ; for strtok's so we can't allow them in names.  :(
 
 					// send it over the network
@@ -894,7 +896,7 @@ WindowMsgHandledType LanLobbyMenuSystem( GameWindow *window, UnsignedInt msg,
 					// Clear the text entry line
 					GadgetTextEntrySetText(textEntryChat, UnicodeString::TheEmptyString);
 					// Clean up the text (remove leading/trailing chars, etc)
-					while (!txtInput.isEmpty() && iswspace(txtInput.getCharAt(0)))
+					while (!txtInput.isEmpty() && WideCharIsSpace(txtInput.getCharAt(0)))
 						txtInput = UnicodeString(txtInput.str()+1);
 
 					// Echo the user's input to the chat window

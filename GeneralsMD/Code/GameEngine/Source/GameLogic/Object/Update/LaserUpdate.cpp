@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -30,8 +32,8 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
-#include "Common\Player.h"
-#include "Common\PlayerList.h"
+#include "Common/Player.h"
+#include "Common/PlayerList.h"
 #include "Common/Xfer.h"
 #include "Common/DrawModule.h"
 #include "Common/ThingTemplate.h"
@@ -41,7 +43,7 @@
 #include "GameLogic/Object.h" 
 #include "GameLogic/GameLogic.h" // For frame number
 #include "GameLogic/Module/LaserUpdate.h"
-#include "WWMath/Vector3.h"
+#include "WWMath/vector3.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...

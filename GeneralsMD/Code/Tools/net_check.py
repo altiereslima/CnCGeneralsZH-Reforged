@@ -11,6 +11,7 @@ desync and show the check is looking.
     python net_check.py --each "-latAvg 120 -latNoise 60 -packetloss 5"
     python net_check.py --slot-args 1 "-drawdelay 100"    # one slow renderer
     python net_check.py --prove                           # must report a mismatch
+    python net_check.py --each "-scenario netstance" --keys "KEY_A CTRL,KEY_H"   # the stance key, both ways
 
 It prints one line per copy and exits 1 when any log holds "CRC Mismatch" (0 with --prove means the
 detector did not fire, which is the failure then). docs: the multiplayer reference in the wrapper.
@@ -52,6 +53,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--tag", default="net", help="log prefix; copy n logs to Run/<tag><n>_DebugLogFile.txt")
     parser.add_argument("--prove", action="store_true", help="spawn on copy 0 alone at frame 300")
     parser.add_argument("--prove-at", default="2192 3537", help="map position for --prove")
+    parser.add_argument("--keys", default=",".join(PRESSES),
+                        help="the presses, comma separated, each as the control socket's key command takes it")
     return parser.parse_args()
 
 
@@ -104,10 +107,11 @@ def play(arguments: argparse.Namespace, games: list) -> list:
     frames = list(start)
     proved = False
     press = 0
+    presses = arguments.keys.split(",")
     try:
         while min(frames) < arguments.frames:
             for game in games:
-                game.send("key " + PRESSES[press % len(PRESSES)])
+                game.send("key " + presses[press % len(presses)])
             press += 1
             if arguments.prove and not proved and frames[0] >= PROVE_FRAME:
                 games[0].send(PROVE_SPAWN % arguments.prove_at)

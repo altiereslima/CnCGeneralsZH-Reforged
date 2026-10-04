@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -41,7 +43,7 @@
 // #define MAINTAIN_LEGACY_FILES
 
 #include "Common/Debug.h"
-#include "Common/File.h"
+#include "Common/file.h"
 #include "stringex.h"
 #include "Common/FileSystem.h"
 #include "Common/GlobalData.h"
@@ -50,7 +52,9 @@
 #include "W3DDevice/GameClient/W3DFileSystem.h"
 // DEFINES ////////////////////////////////////////////////////////////////////////////////////////
 
+#if defined(_WIN32)
 #include <io.h>
+#endif
 
 //-------------------------------------------------------------------------------------------------
 /** Game file access.  At present this allows us to access test assets, assets from
@@ -177,11 +181,11 @@ char const * GameFileClass::Set_Name( char const *filename )
 
 	// test the extension to recognize a few key file types
 	GameFileType fileType = FILE_TYPE_COMPLETELY_UNKNOWN;  // MBL FILE_TYPE_UNKNOWN change due to compile error
-	if( stricmp( extension, ".w3d" ) == 0 )
+	if( strcasecmp( extension, ".w3d" ) == 0 )
 		fileType = FILE_TYPE_W3D;
-	else if( stricmp( extension, ".tga" ) == 0 )
+	else if( strcasecmp( extension, ".tga" ) == 0 )
 		fileType = FILE_TYPE_TGA;
-	else if( stricmp( extension, ".dds" ) == 0 )
+	else if( strcasecmp( extension, ".dds" ) == 0 )
 		fileType = FILE_TYPE_DDS;
 
 

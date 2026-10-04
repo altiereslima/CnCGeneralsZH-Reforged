@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -32,6 +34,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+#include "zhio.h"
 
 #include "Common/GameLOD.h"
 #include "GameClient/TerrainVisual.h"
@@ -306,7 +309,7 @@ void GameLODManager::init(void)
 			
 			if (TheGlobalData->m_forceBenchmark)
 			{	//we want to see the numbers.  So dump them to a logfile.
-				FILE *fp=fopen("Benchmark.txt","w");
+				FILE *fp=zh_fopen("Benchmark.txt","w");
 				if (fp)
 				{
 					fprintf(fp,"BenchProfile = %s %d %f %f %f", CPUNames[m_cpuType], m_cpuFreq, m_intBenchIndex, m_floatBenchIndex, m_memBenchIndex);
@@ -439,7 +442,7 @@ void INI::parseStaticGameLODLevel( INI* ini, void * , void *store, const void*)
 {
 	const char *tok=ini->getNextToken();
 	for (Int i=0; i<STATIC_GAME_LOD_COUNT; i++)
-		if( stricmp(tok, StaticGameLODNames[i]) == 0 )
+		if( strcasecmp(tok, StaticGameLODNames[i]) == 0 )
 		{	*(StaticGameLODLevel*)store = (StaticGameLODLevel)i;
 			return;
 		}
@@ -638,7 +641,7 @@ void INI::parseDynamicGameLODLevel( INI* ini, void * , void *store, const void*)
 {
 	const char *tok=ini->getNextToken();
 	for (Int i=0; i<DYNAMIC_GAME_LOD_COUNT; i++)
-		if( stricmp(tok, DynamicGameLODNames[i]) == 0 )
+		if( strcasecmp(tok, DynamicGameLODNames[i]) == 0 )
 		{	*(DynamicGameLODLevel*)store = (DynamicGameLODLevel)i;
 			return;
 		}

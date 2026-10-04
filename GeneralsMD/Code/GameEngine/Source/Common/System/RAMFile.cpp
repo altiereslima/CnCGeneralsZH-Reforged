@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -49,7 +51,9 @@
 
 #include <stdio.h>
 #include <fcntl.h>
-#include <io.h>
+#if defined(_WIN32)
+#include <io.h>		// nothing here calls it; kept on Windows so its include set is unchanged
+#endif
 #include <string.h>
 #include <sys/stat.h>
 

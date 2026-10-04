@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,6 +31,7 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
@@ -212,7 +215,7 @@ Bool handleInGameSlashCommands(UnicodeString uText)
 	if (token == "host")
 	{
 		UnicodeString s;
-		s.format(L"Hosting qr2:%d thread:%d", getQR2HostingStatus(), isThreadHosting);
+		s.format(u"Hosting qr2:%d thread:%d", getQR2HostingStatus(), isThreadHosting);
 		TheInGameUI->message(s);
 		return TRUE; // was a slash command
 	}
@@ -230,7 +233,7 @@ void ToggleInGameChat( Bool immediate )
 	// so opening the chat again after a line took two presses.  The second of one press comes within
 	// the same few frames; a press of its own does not.
 	static UnsignedInt hiddenAtMs = 0;
-	if (timeGetTime() - hiddenAtMs < SAME_PRESS_MS)
+	if (Clock_Milliseconds() - hiddenAtMs < SAME_PRESS_MS)
 		return;
 
 	if (TheGameLogic->isInReplayGame())
@@ -286,7 +289,7 @@ void ToggleInGameChat( Bool immediate )
 				}
 				GadgetTextEntrySetText( chatTextEntry, UnicodeString::TheEmptyString );
 				HideInGameChat( immediate );
-				hiddenAtMs = timeGetTime();
+				hiddenAtMs = Clock_Milliseconds();
 			}
 		}
 	}

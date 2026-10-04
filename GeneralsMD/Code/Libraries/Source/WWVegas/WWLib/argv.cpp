@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /* $Header: /VSS_Sync/wwlib/argv.cpp 11    8/29/01 10:25p Vss_sync $ */
 /*********************************************************************************************** 
@@ -40,6 +41,7 @@
  *   *ArgvClass::Get_Cur_Value -- Get value of current argugment.                              * 
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 #include "argv.h"
+#include "zhio.h"
 
 #include <assert.h>
 #include <ctype.h>
@@ -48,6 +50,7 @@
 #include <string.h>
 #include "ffactory.h"
 #include "rawfile.h"
+#include "Platform/StrdupAsWindows.h"
 int   	 ArgvClass::Argc = 0;
 char 		*ArgvClass::Argv[MAX_ARGC];
 
@@ -55,7 +58,7 @@ char 		*ArgvClass::Argv[MAX_ARGC];
  * CurrentPos -- Create an instance to parse argv with.                                        * 
  *                                                                                             * 
  * INPUT:                                                                                      * 
- *    	bool case_sensitive - Do you want to perform a case sensitive search (stricmp)?		  *
+ *    	bool case_sensitive - Do you want to perform a case sensitive search (strcasecmp)?		  *
  *			bool exact_size     - Do you want string of same lenght (strncmp) ?						  *
  *                                                                                             * 
  * OUTPUT:                                                                                     * 
@@ -122,7 +125,7 @@ const char *ArgvClass::Find_Again(const char *arg)
 			if (Is_Exact_Size()) {
 				// Note case sensitive, Exact Size.
 				for (; CurrentPos < Argc; CurrentPos++) {
-					if (!stricmp(arg, Argv[CurrentPos])) {
+					if (!strcasecmp(arg, Argv[CurrentPos])) {
 						return Argv[CurrentPos];
 					}
 				}
@@ -130,7 +133,7 @@ const char *ArgvClass::Find_Again(const char *arg)
 				// Note case sensitive, Match first strlen(arg).
 				int len = strlen(arg);
 				for (; CurrentPos < Argc; CurrentPos++) {
-					if (!strnicmp(arg, Argv[CurrentPos], len)) {
+					if (!strncasecmp(arg, Argv[CurrentPos], len)) {
 						return Argv[CurrentPos];
 					}
 				}
@@ -213,7 +216,7 @@ int ArgvClass::Init(char *lpCmdLine, char *fileprefix)
 		// If it was not the file or the load failed...then add parameter.
 		if (!was_file) {
 			// Copy string over and continue.
-			Argv[Argc] = strdup(ptr);
+			Argv[Argc] = strdupAsWindows(ptr);
 			Argc++;
 		}
 
@@ -244,7 +247,7 @@ int ArgvClass::Init(char *lpCmdLine, char *fileprefix)
  *=============================================================================================*/
 bool ArgvClass::Load_File(const char *fname)
 {
-	FILE *fp = fopen(fname, "r");
+	FILE *fp = zh_fopen(fname, "r");
 
 	if (fp)  {							
 		while (Argc < MAX_ARGC) {
@@ -274,7 +277,7 @@ bool ArgvClass::Load_File(const char *fname)
 
 				// If there is anyting in the string. (NAK: old code used to fail for 1 char options)
 				if (strlen(string)) {
-					Argv[Argc] = strdup(string);
+					Argv[Argc] = strdupAsWindows(string);
 					Argc++;
 				}
 			}
@@ -405,13 +408,13 @@ void ArgvClass::Update_Value(const char *attrib, const char *value)
 		if (((CurrentPos+1) < Argc) && (Argv[CurrentPos+1][0] != '-'))  // update old value
 		{
 			free(Argv[CurrentPos+1]);
-			Argv[CurrentPos+1]=strdup(value);
+			Argv[CurrentPos+1]=strdupAsWindows(value);
 		}
 		else  // add new value
 		{
 			// shift vals down to make room
 			memmove(&(Argv[CurrentPos+2]),&(Argv[CurrentPos+1]),sizeof(char *) * (MAX_ARGC-CurrentPos-2));
-			Argv[CurrentPos+1]=strdup(value);
+			Argv[CurrentPos+1]=strdupAsWindows(value);
 			Argc++;
 		}
 	}
@@ -438,12 +441,12 @@ void ArgvClass::Add_Value(const char *attrib, const char *value)
 {
 	if (attrib)
 	{
-		Argv[Argc]=strdup(attrib);
+		Argv[Argc]=strdupAsWindows(attrib);
 		Argc++;
 
 		if (value)
 		{
-			Argv[Argc]=strdup(value);
+			Argv[Argc]=strdupAsWindows(value);
 			Argc++;
 		}
 	}

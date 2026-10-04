@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*************************************************************************** 
  ***    C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S     *** 
@@ -49,7 +50,7 @@
 //   but the fact that you can't call a function that uses strtok()
 //   during a series of strtok() calls is really annoying.
 //
-#ifndef _UNIX
+#if defined(_MSC_VER)   /* POSIX already has this; see strtok_r.h */
 char *strtok_r(char *strptr, const char *delimiters, char **lasts)
 {
 	if (strptr)

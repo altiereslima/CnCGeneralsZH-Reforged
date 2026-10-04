@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -73,8 +75,10 @@ void RadiusDecalTemplate::createRadiusDecal(const Coord3D& pos, Real radius, con
 	// it is now considered nonEmpty, regardless of the state of m_decal, etc
 	result.m_empty = false;
 
-	if (!m_onlyVisibleToOwningPlayer ||
-			owningPlayer->getPlayerIndex() == ThePlayerList->getLocalPlayer()->getPlayerIndex())
+	// No decal manager without a renderer (headless, or off Windows until the D track): no decal.
+	if (TheProjectedShadowManager != NULL &&
+			(!m_onlyVisibleToOwningPlayer ||
+			 owningPlayer->getPlayerIndex() == ThePlayerList->getLocalPlayer()->getPlayerIndex()))
 	{
 		Shadow::ShadowTypeInfo decalInfo;
 		decalInfo.allowUpdates = FALSE;										// shadow texture will never update

@@ -150,6 +150,8 @@ NEW_CONTROLS = [
     (COMBO,  "ComboBoxPlayerColors",   None),
     (LABEL,  "LabelHudScale",          "GUI:HudScale"),
     (COMBO,  "ComboBoxHudScale",       None),
+    (LABEL,  "LabelMenuLayout",        "GUI:MenuLayout"),
+    (COMBO,  "ComboBoxMenuLayout",     None),
     (LABEL,  "LabelLanguage",          "GUI:Language"),
     (COMBO,  "ComboBoxLanguage",       None),
     (CHECK,  "CheckOrderLines",        "GUI:OrderLines"),
@@ -159,6 +161,7 @@ NEW_CONTROLS = [
     (CHECK,  "CheckEmptyBuildingPips", "GUI:EmptyBuildingPips"),
     (CHECK,  "CheckZoomToCursor",      "GUI:ZoomToCursor"),
     (CHECK,  "CheckIsometricCamera",   "GUI:IsometricCamera"),
+    (CHECK,  "CheckSmoothMotion",      "GUI:SmoothMotion"),
     (CHECK,  "CheckStartAtMaxZoom",    "GUI:StartAtMaxZoom"),
     (LABEL,  "LabelCloserZoom",        "GUI:CloserZoom"),
     (SLIDER, "SliderCloserZoom",       None),
@@ -182,6 +185,17 @@ READOUTS = [
     "ValueMusicVolume", "ValueSFXVolume", "ValueVoiceVolume", "ValueScrollSpeed",
     "ValueCloserZoom", "ValueDragTolerance",
 ]
+
+# Lines of small grey text under a control that say what its current choice does, written by
+# OptionsMenu.cpp.  The detail preset is the one that needs it: picking Ultra only fills in the boxes,
+# and nothing on the shipped screen said that Accept is what applies them.
+#   (name, label key whose entries 0..count-1 it shows, count)
+NOTES = [("DetailNote", "GUI:DetailNote", 5)]
+NOTE_HEIGHT = 80
+NOTE_FONT = 'NAME: "Arial", SIZE: 10, BOLD: 0'
+NOTE_COLOR = ("ENABLED:  192 192 192 255, ENABLEDBORDER:  0 0 0 255, "
+              "DISABLED: 192 192 192 255, DISABLEDBORDER: 0 0 0 255, "
+              "HILITE:   192 192 192 255, HILITEBORDER:   0 0 0 255")
 
 # a cloned slider keeps its template's range unless it is given one; selfcheck holds these to the
 # catalog row's own bounds
@@ -233,13 +247,16 @@ GROUP_LAYOUT = [
         setting("LabelMonitor", "ComboBoxMonitor"),
         setting("ResolutionLabel", "ComboBoxResolution"),
         setting("LabelWindowMode", "ComboBoxWindowMode"),
+        setting("LabelMenuLayout", "ComboBoxMenuLayout"),
         ("check", "CheckVSync")]),
     ("PageDisplay",  1, "GUI:OptionsGroupPicture", [
-        setting("GammaLabel", "SliderGamma", "ValueGamma")]),
+        setting("GammaLabel", "SliderGamma", "ValueGamma"),
+        ("check", "CheckSmoothMotion")]),
 
     ("PageGraphics", 0, "GUI:OptionsGroupDetail", [
         ("check", "CheckClassicGraphics"),
         setting("DetailLabel", "ComboBoxDetail"),
+        ("note", "DetailNote"),
         setting("LabelTextureResolution", "LowResSlider", "ValueTextureResolution"),
         setting("LabelParticleCap", "ParticleCapSlider", "ValueParticleCap")]),
     ("PageGraphics", 1, "GUI:OptionsGroupImage", [
@@ -397,6 +414,15 @@ def make_readout(label_template, name):
     return readout
 
 
+def make_note(label_template, name):
+    """A readout in the combo boxes' 10 point lettering and a quieter grey, tall enough to wrap."""
+    note = make_readout(label_template, name)
+    note.set_prop("FONT", NOTE_FONT)
+    note.set_prop("HEADERTEMPLATE", '"LabelRegular"')
+    note.set_prop("TEXTCOLOR", NOTE_COLOR)
+    return note
+
+
 def setting_of(name):
     """The setting a control belongs to, which is its name without the kind in front.  A label and
     the combo box under it are two controls for one setting and share one tooltip string."""
@@ -475,6 +501,8 @@ def build(layout):
         waiting[name] = make_control(templates[template], name, text, 0, 0, 1, 1)
     for name in READOUTS:
         waiting[name] = make_readout(templates[LABEL], name)
+    for name, _key, _count in NOTES:
+        waiting[name] = make_note(templates[LABEL], name)
     for name, low, high in SLIDER_RANGES:
         waiting[name].put_prop("SLIDERDATA", "MINVALUE: %d, MAXVALUE: %d" % (low, high))
     for name, key in TEXT_OVERRIDES:
@@ -520,6 +548,9 @@ def build(layout):
             elif item[0] == "check":
                 put(page_name, item[1], left, top, COLUMN_WIDTH, ROW_HEIGHT, CHECK)
                 top += CHECK_PITCH
+            elif item[0] == "note":
+                put(page_name, item[1], left - TEXT_NUDGE, top, COLUMN_WIDTH, NOTE_HEIGHT)
+                top += NOTE_HEIGHT + 4
             else:
                 put(page_name, item[1], left, top, 160, ROW_HEIGHT)
                 top += BUTTON_PITCH
@@ -680,9 +711,13 @@ def selfcheck():
         if key not in keys:
             problems.append("caption %s is not in Patch.str" % key)
 
-    for name in READOUTS + GRAPHICS_CHECKS + MENU_CHECKS + MENU_COMBOS:
+    for name in READOUTS + GRAPHICS_CHECKS + MENU_CHECKS + MENU_COMBOS + [n for n, _k, _c in NOTES]:
         if name not in controls:
             problems.append("OptionsMenu.wnd has no %s, which OptionsMenu.cpp fills in" % name)
+    for name, key, count in NOTES:
+        for entry in range(count):
+            if "%s%d" % (key, entry) not in keys:
+                problems.append("%s needs %s%d in Patch.str" % (name, key, entry))
     for name in MENU_COMBOS:
         for key in ("GUI:%s" % setting_of(name), "TOOLTIP:%s" % setting_of(name)):
             if key not in keys:

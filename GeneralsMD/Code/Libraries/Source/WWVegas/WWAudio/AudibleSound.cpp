@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -36,6 +37,7 @@
 
 
 #include "audiblesound.h"
+#include "Lib/Clock.h"
 #include "wwaudio.h"
 #include "ww3d.h"
 #include "wwdebug.h"
@@ -346,7 +348,7 @@ AudibleSoundClass::Play (bool alloc_handle)
 	if (m_State != STATE_PLAYING) {
 		WWAudioClass::Get_Instance ()->Add_To_Playlist (this);
 		m_State				= STATE_PLAYING;
-		m_Timestamp			= ::GetTickCount ();
+		m_Timestamp			= Clock_Milliseconds_Coarse();
 		m_LoopsLeft			= m_LoopCount;		
 
 		// If we have a valid handle, then start playing the sample
@@ -515,7 +517,7 @@ AudibleSoundClass::Seek (unsigned long milliseconds)
 		// from this information
 		m_CurrentPosition = milliseconds;
 		if (m_State == STATE_PLAYING) {
-			m_Timestamp = ::GetTickCount () - m_CurrentPosition;
+			m_Timestamp = Clock_Milliseconds_Coarse() - m_CurrentPosition;
 		}
 
 		// Update the actual sound data if we are playing the sound
@@ -940,7 +942,7 @@ void
 AudibleSoundClass::Update_Play_Position (void)
 {
 	// Determine the current offset from the beginning of the sound buffer.
-	unsigned long play_time = ::GetTickCount () - m_Timestamp;
+	unsigned long play_time = Clock_Milliseconds_Coarse() - m_Timestamp;
 	m_CurrentPosition = play_time;
 
 	// Have we gone past the end of a sounds play-time?
@@ -948,7 +950,7 @@ AudibleSoundClass::Update_Play_Position (void)
 
 		// Normalize our position and timestamp information
 		m_CurrentPosition = m_CurrentPosition % m_Length;
-		m_Timestamp = ::GetTickCount () - m_CurrentPosition;
+		m_Timestamp = Clock_Milliseconds_Coarse() - m_CurrentPosition;
 
 		// Decrement our count of remaining loops (if necessary)
 		if (m_LoopCount != INFINITE_LOOPS) {

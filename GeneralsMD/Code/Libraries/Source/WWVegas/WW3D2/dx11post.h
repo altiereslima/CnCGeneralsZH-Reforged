@@ -101,6 +101,13 @@ bool DX11Post_Parse_Chain(const char * text, DX11PostEffect effects[DX11_POST_CH
 // The name a parsed effect goes back to, for the report line.
 const char * DX11Post_Effect_Name(DX11PostEffect effect);
 
+// Bloom's threshold and strength in the scene's own units, where one is white.  The game's Bloom
+// option sets them every frame through W3DShaderManager, since nothing in this library may read
+// GlobalData.  An intensity of zero skips the bright pass and the blur and leaves only the tone
+// curve, so the half float scene still reaches eight bits.  Until somebody calls this the chain
+// runs at the values it was tuned at, which is what the tests measure.
+void DX11Post_Set_Bloom(float threshold, float intensity);
+
 class DX11PostProcessClass
 {
 public:

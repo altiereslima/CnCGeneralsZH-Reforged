@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -26,7 +27,7 @@
 #include "hanim.h"
 #include "proto.h"
 #include "rendobj.h"
-#include "LightEnvironment.h"
+#include "lightenvironment.h"
 #include "w3d_file.h"
 #include "dx8vertexbuffer.h"
 #include "dx8indexbuffer.h"

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -1062,7 +1064,8 @@ WideChar IMEManager::convertCharToWide( WPARAM wParam )
 
 	WideChar uniString[2];
 
-	if ( MultiByteToWideChar( CP_ACP, 0, dcbsString, strlen( dcbsString ), uniString, 1 ) == 1 )
+	// WideChar is WCHAR's two bytes on Windows; the W API needs the cast, not a conversion.
+	if ( MultiByteToWideChar( CP_ACP, 0, dcbsString, strlen( dcbsString ), reinterpret_cast<LPWSTR>( uniString ), 1 ) == 1 )
 	{
 		return uniString[0];
 	}
@@ -1126,7 +1129,8 @@ void IMEManager::updateCompositionString( void )
 			{
 				tempBuf[ result ] = '\0';
 			
-				int convRes = MultiByteToWideChar( CP_ACP, 0, tempBuf, -1, m_compositionString, MAX_COMPSTRINGLEN );
+				// WideChar is WCHAR's two bytes on Windows; the W API needs the cast, not a conversion.
+				int convRes = MultiByteToWideChar( CP_ACP, 0, tempBuf, -1, reinterpret_cast<LPWSTR>( m_compositionString ), MAX_COMPSTRINGLEN );
 				GameArrayEnd(m_compositionString);
 			
 				if ( convRes < 0)
@@ -1192,7 +1196,8 @@ void IMEManager::getResultsString ( void )
 			{
 				tempBuf[ result ] = '\0';
 			
-				int convRes = MultiByteToWideChar( CP_ACP, 0, tempBuf, strlen(tempBuf), m_resultsString, MAX_COMPSTRINGLEN );
+				// WideChar is WCHAR's two bytes on Windows; the W API needs the cast, not a conversion.
+				int convRes = MultiByteToWideChar( CP_ACP, 0, tempBuf, strlen(tempBuf), reinterpret_cast<LPWSTR>( m_resultsString ), MAX_COMPSTRINGLEN );
 			
 				if ( convRes < 0)
 				{
@@ -1227,7 +1232,8 @@ void IMEManager::convertToUnicode ( Char *mbcs, UnicodeString &unicode )
 
 	if ( buffer )
 	{
-		size = MultiByteToWideChar( CP_ACP, 0, mbcs, strlen(mbcs), buffer, size );
+		// WideChar is WCHAR's two bytes on Windows; the W API needs the cast, not a conversion.
+		size = MultiByteToWideChar( CP_ACP, 0, mbcs, strlen(mbcs), reinterpret_cast<LPWSTR>( buffer ), size );
 		
 		if ( size <= 0 )
 		{

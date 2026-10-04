@@ -1,0 +1,12 @@
+# The 2.4.0 video's helicopter takes over Scenarios/v240_heli.txt on Fortress Avalanche: the
+# backward flight over the left lake (frames 140 to 310), the strafe past the Overlord (375 to 540)
+# and the gattling Helix with the Crusader circling it (900 to 1110). Each camera stands where the
+# helicopter films' did relative to its subject.
+
+4.6   cut     1850 2125 0.24 0 0
+4.7   follow  AmericaVehicleComanche
+12.5  cut     1000 2000 0.24 180 4
+12.6  follow  SupW_AmericaVehicleComanche
+30.0  cut     3300 2000 0.3 0 4
+30.1  follow  ChinaVehicleHelix
+37.2  end

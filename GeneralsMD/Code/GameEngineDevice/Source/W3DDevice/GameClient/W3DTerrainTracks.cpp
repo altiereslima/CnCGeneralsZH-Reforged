@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -44,18 +46,18 @@
 //-----------------------------------------------------------------------------
 
 #include "W3DDevice/GameClient/W3DTerrainTracks.h"
-#include "W3DDevice/GameClient/heightmap.h"
+#include "W3DDevice/GameClient/HeightMap.h"
 #include "Common/PerfTimer.h"
-#include "common/GlobalData.h"
-#include "common/Debug.h"
+#include "Common/GlobalData.h"
+#include "Common/Debug.h"
 #include "texture.h"
 #include "colmath.h"
 #include "coltest.h"
 #include "rinfo.h"
 #include "camera.h"
 #include "assetmgr.h"
-#include "WW3D2/DX8Wrapper.h"
-#include "WW3D2/Scene.h"
+#include "WW3D2/dx8wrapper.h"
+#include "WW3D2/scene.h"
 #include "GameLogic/TerrainLogic.h"
 #include "GameLogic/Object.h"
 #include "GameClient/Drawable.h"

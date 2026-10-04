@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -28,7 +30,9 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
+#if defined(_WIN32)
 #include "windows.h"
+#endif
 
 #include "Common/GameType.h"
 #include "Common/MessageStream.h"
@@ -57,7 +61,7 @@
 
 LookAtTranslator *TheLookAtTranslator = NULL;
 
-static enum
+enum
 {
 	DIR_UP = 0,
 	DIR_DOWN,

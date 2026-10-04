@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -41,7 +42,7 @@
 struct FieldParse;
 
 // USEFUL DECLARATIONS ////////////////////////////////////////////////////////////////////////////
-enum AudioType
+enum AudioType : Int
 {
 	AT_Music,
 	AT_Streaming,
@@ -49,7 +50,7 @@ enum AudioType
 };
 
 extern char *theAudioPriorityNames[];
-enum AudioPriority
+enum AudioPriority : Int
 {
 	AP_LOWEST,
 	AP_LOW,

@@ -1,0 +1,13 @@
+# The 2.4.0 Shorts' helicopter takes over Scenarios/s240_heli.txt on Fortress Avalanche, looking
+# down steeper than the game's own tilt so a hovering helicopter draws close to its ground point:
+# the Comanche from behind, the Battlemasters at the top of the frame, backing down the frame
+# towards the camera while it fires up it, the camera following it once it backs away; then the
+# Helix held still with the Crusader circling it. Relative zoom 0.52 (absolute 1.81) drew the
+# Comanche about 50 pixels long, too small to read; 0.35 is absolute 1.2.
+
+7.7   cut     1000 2200 0.35 0 -20
+11.0  follow  AmericaVehicleComanche
+12.5  shot
+17.7  cut     3300 2030 0.42 0 -12
+24.0  shot
+31.3  end

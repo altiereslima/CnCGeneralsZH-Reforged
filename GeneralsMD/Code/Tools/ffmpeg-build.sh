@@ -15,12 +15,23 @@
 #
 # The version matters: the library majors decide the DLL names (avcodec-62 and friends), which
 # CMakeLists.txt and launcher/build-payload.js both name.
+#
+# ZH_FFMPEG_ARCH=aarch64 (ffmpeg-build.bat arm64) builds Windows on ARM64 into dist-arm64 instead,
+# without FFmpeg's assembly: its AArch64 .S files need gas-preprocessor in front of armasm64, and the
+# C paths are what the other ports' decoders are checked against anyway.
 set -e
+
+FFMPEG_ARCH="${ZH_FFMPEG_ARCH:-x86_64}"
+case "$FFMPEG_ARCH" in
+  x86_64)  DIST_NAME=dist;       ARCH_FLAGS="" ;;
+  aarch64) DIST_NAME=dist-arm64; ARCH_FLAGS="--disable-asm" ;;
+  *) echo "ZH_FFMPEG_ARCH is x86_64 or aarch64, not '$FFMPEG_ARCH'" >&2; exit 1 ;;
+esac
 
 FFMPEG_VERSION=8.1.2
 SOURCE_ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
-DIST="$SOURCE_ROOT/GeneralsMD/Code/Libraries/Source/FFmpeg/dist"
-WORK="${TMPDIR:-/tmp}/zhr-ffmpeg-$FFMPEG_VERSION"
+DIST="$SOURCE_ROOT/GeneralsMD/Code/Libraries/Source/FFmpeg/$DIST_NAME"
+WORK="${TMPDIR:-/tmp}/zhr-ffmpeg-$FFMPEG_VERSION-$FFMPEG_ARCH"
 TARBALL="ffmpeg-$FFMPEG_VERSION.tar.xz"
 
 mkdir -p "$WORK"
@@ -47,7 +58,7 @@ trap restore_link EXIT
 ./configure \
   --prefix="$WORK/out" \
   --toolchain=msvc \
-  --arch=x86_64 \
+  --arch="$FFMPEG_ARCH" \
   --target-os=win64 \
   --enable-shared \
   --disable-static \
@@ -64,7 +75,8 @@ trap restore_link EXIT
   --enable-demuxer=bink,mp3,wav \
   --enable-decoder=bink,binkaudio_dct,binkaudio_rdft,mp3,mp3float,pcm_s16le,pcm_s16be,pcm_u8,pcm_s24le,pcm_s32le,pcm_f32le,adpcm_ima_wav,adpcm_ms \
   --enable-parser=mpegaudio \
-  --enable-protocol=file
+  --enable-protocol=file \
+  $ARCH_FLAGS
 
 # configure takes an unknown component name without a word. The first build of this asked for a
 # decoder called "binkvideo", which is that decoder's display name rather than the name configure

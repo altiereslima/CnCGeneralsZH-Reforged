@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*********************************************************************************
  ***          C O N F I D E N T I A L  ---  E A  P A C I F I C                 ***
@@ -45,7 +46,7 @@
 #include "shader.h"
 #include "simplevec.h"
 #include "seglinerenderer.h"
-#include "streakrender.h"
+#include "streakRender.h"
 
 class TextureClass;
 
@@ -64,7 +65,7 @@ class StreakLineClass : public RenderObjClass
 
 		StreakLineClass(void);
 		StreakLineClass(const StreakLineClass & src);
-		StreakLineClass & StreakLineClass::operator = (const StreakLineClass &that);
+		StreakLineClass & operator = (const StreakLineClass &that);
 //		virtual ~StreakLineClass(void);
 
 		void					Reset_Line(void);

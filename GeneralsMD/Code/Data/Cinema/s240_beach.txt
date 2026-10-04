@@ -1,0 +1,7 @@
+# Scenarios/s240_beach.txt on Flash Effect, wide: looking north across the fight on the sand to
+# the sea, a slow turn while the two lines meet.
+
+12.5  cut     1700 1480 0.53 0 10
+12.6  orbit   -10 13
+19.0  shot
+25.9  end

@@ -1,0 +1,7 @@
+# The 2.4.0 video's opening, wide: Scenarios/v240_hook.txt on Fortress Avalanche, the three armies
+# meeting on 1000,2100 under the nuke, the particle beam and the SCUD storm. Slow push-in and turn.
+
+26.0  cut     1000 2100 0.75 45 8
+26.1  zoom    0.6 24
+26.1  orbit   15 24
+50.3  end

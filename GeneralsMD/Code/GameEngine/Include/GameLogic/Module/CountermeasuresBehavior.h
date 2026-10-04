@@ -61,9 +61,11 @@ public:
 	UnsignedInt						m_missileDecoyFrames;
 	UnsignedInt						m_countermeasureReactionFrames;
 	Bool									m_mustReloadAtAirfield;
+	Bool									m_startsActive;					///< fitted from birth: no upgrade, and no decoy on the ground where no flare can fly
 
 	CountermeasuresBehaviorModuleData()
 	{
+		m_startsActive					= FALSE;
     m_volleySize            = 0;
 		m_volleyArcAngle				= 0.0f;
     m_framesBetweenVolleys  = 0;
@@ -91,6 +93,7 @@ public:
 			{ "MustReloadAtAirfield",		INI::parseBool,									NULL, offsetof( CountermeasuresBehaviorModuleData, m_mustReloadAtAirfield ) },
 			{ "MissileDecoyDelay",			INI::parseDurationUnsignedInt,	NULL, offsetof( CountermeasuresBehaviorModuleData, m_missileDecoyFrames ) },
 			{ "ReactionLaunchLatency",	INI::parseDurationUnsignedInt,	NULL, offsetof( CountermeasuresBehaviorModuleData, m_countermeasureReactionFrames ) },
+			{ "StartsActive",						INI::parseBool,									NULL, offsetof( CountermeasuresBehaviorModuleData, m_startsActive ) },
 			{ 0, 0, 0, 0 }
 		};
 

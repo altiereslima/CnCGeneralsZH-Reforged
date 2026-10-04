@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -458,7 +459,7 @@ void BoxRenderObjClass::render_box(RenderInfoClass & rinfo,const Vector3 & cente
 		/*
 		** Dump the box vertices into the sorting dynamic vertex buffer. 
 		*/
-		DWORD color = DX8Wrapper::Convert_Color(Color,Opacity);
+		uint32 color = DX8Wrapper::Convert_Color(Color,Opacity);
 		
 		int buffer_type = BUFFER_TYPE_DYNAMIC_DX8;
 

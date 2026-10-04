@@ -1,0 +1,40 @@
+# helislide.txt for the other helicopters. A Chinook and a Helix are each sent 300 behind
+# themselves, then 300 beside, then on a long flight east and back west. A General Tsing Shi Tao
+# Helix buys its gattling cannon and is then put on a Crusader, which cannot shoot at aircraft, and
+# ordered across in front of it.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 2200
+#     -scenario helitypes -logPrefix helitypes_
+#
+# Measured 2026-10-03 with a temporary per-frame log of position, facing, velocity and acceleration.
+# Both pass Locomotor::isHelicopter, as does every Chinook and Helix in the INI. Before helicopters
+# flew free, each turned its nose 178 degrees before it went behind itself. Now the Chinook and the
+# Helix go backwards and sideways without turning, are 30 out after 32 frames, end every leg within
+# 0.7 of the goal with no overshoot, and turn into the long westward flight while moving, the nose
+# winding up to 6 degrees a frame. Acceleration changes by at most 0.01 a frame. Their lean,
+# replayed from the logged motion, tops out at 12.5 degrees and moves 1.5 a frame at most. The
+# gattling Helix takes the Crusader from 448 to 378 health while it slides across in front of it.
+
+30    spawn         0  AmericaVehicleChinook         1   1100 3200
+150   move          0  AmericaVehicleChinook             800 3200
+450   move          0  AmericaVehicleChinook             800 3500
+750   move          0  AmericaVehicleChinook             2500 3200
+1300  move          0  AmericaVehicleChinook             800 3200
+
+30    spawn         1  ChinaVehicleHelix             1   1100 2600
+150   move          1  ChinaVehicleHelix                 800 2600
+450   move          1  ChinaVehicleHelix                 800 2900
+750   move          1  ChinaVehicleHelix                 2000 2600
+1450  move          1  ChinaVehicleHelix                 800 2600
+
+30    spawn         1  Tank_ChinaVehicleHelix        1   1180 4480
+40    shiftupgrade  1  Tank_ChinaVehicleHelix            Upgrade_ChinaHelixGattlingCannon
+760   spawn         0  AmericaTankCrusader           1   1300 4560
+770   attack        1  Tank_ChinaVehicleHelix        0  AmericaTankCrusader
+820   move          1  Tank_ChinaVehicleHelix            1420 4480
+820   tally         0  AmericaTankCrusader
+880   tally         0  AmericaTankCrusader
+940   tally         0  AmericaTankCrusader
+1000  tally         0  AmericaTankCrusader

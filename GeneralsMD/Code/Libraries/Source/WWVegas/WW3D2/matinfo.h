@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -44,7 +45,7 @@
 
 #include "always.h"
 #include "wwdebug.h"
-#include "vector.h"
+#include "Vector.H"
 #include "vertmaterial.h"
 #include "texture.h"
 #include "shader.h"
@@ -236,7 +237,7 @@ inline int MaterialInfoClass::Add_Vertex_Material(VertexMaterialClass * vmat)
 inline int MaterialInfoClass::Get_Vertex_Material_Index(const char * name)
 {
 	for (int i=0; i<VertexMaterials.Count(); i++) {
-		if (stricmp(name,VertexMaterials[i]->Get_Name()) == 0) {
+		if (strcasecmp(name,VertexMaterials[i]->Get_Name()) == 0) {
 			return i;
 		}
 	}

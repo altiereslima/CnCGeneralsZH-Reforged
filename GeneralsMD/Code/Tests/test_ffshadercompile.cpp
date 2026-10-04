@@ -205,3 +205,75 @@ TEST(ffshadercompile_the_tree_shadow_program_compiles)
 	CHECK(compiles(compile, hlsl, D3D9_PROFILE));
 	CHECK(compiles(compile, eleven, D3D11_PROFILE));
 }
+
+// A program that takes the sun's shadow takes the smoke's with it on Direct3D 11: the smoke's map at
+// t6 and the field after SkyUp.  The SDL3 GPU text is made from the same generator and must stay
+// without both, because that backend binds no map there and uploads no such field.
+TEST(ffshadercompile_a_shadow_receiving_program_reads_the_smoke_on_d3d11_only)
+{
+	CombinerDescription description;
+	memset(&description, 0, sizeof(description));
+	description.StageCount = 1;
+	description.Stages[0] = one_stage(D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE,
+		D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE, 0, true);
+	description.ShadowReceiving = true;
+	description.PixelPipeline.FogEnabled = true;
+
+	std::string eleven;
+	CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_D3D11, eleven));
+	CHECK(eleven.find("register(t6)") != std::string::npos);
+	CHECK(eleven.find("VolumeParameters") > eleven.find("SkyUp"));
+	CHECK(eleven.find("light_reaching(input.Position)") != std::string::npos);
+
+	std::string sdl;
+	CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_SDL3_GPU, sdl));
+	CHECK(sdl.find("SmokeMap") == std::string::npos);
+	CHECK(sdl.find("VolumeParameters") == std::string::npos);
+
+	D3DCompileFunction compile = load_compiler();
+	if (compile == NULL) {
+		printf("  d3dcompiler_47.dll not present, skipping the compile\n");
+		return;
+	}
+	CHECK(compiles(compile, eleven, D3D11_PROFILE));
+}
+
+// A fire's glow on smoke goes on after the sun's shadow and the smoke's own shade, and before the
+// fog: added before them, the glow of a fire behind a plume went dark with the plume's far side.  It
+// takes the specular slot, so a program asking for both does not add the slot twice.
+TEST(ffshadercompile_the_smoke_glow_is_added_after_the_shade)
+{
+	CombinerDescription description;
+	memset(&description, 0, sizeof(description));
+	description.StageCount = 1;
+	description.Stages[0] = one_stage(D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE,
+		D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE, 0, true);
+	description.ShadowReceiving = true;
+	description.PixelPipeline.FogEnabled = true;
+
+	std::string plain;
+	CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_D3D11, plain));
+	CHECK(plain.find("input.Specular.rgb * texel.rgb") == std::string::npos);
+	const std::string plain_key = CombinerShader_Key(description);
+
+	description.SmokeGlow = true;
+	description.SpecularAdd = true;
+	std::string eleven;
+	CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_D3D11, eleven));
+	const size_t shade = eleven.find("light_reaching(input.Position)");
+	const size_t glow = eleven.find("current.rgb + input.Specular.rgb * texel.rgb");
+	const size_t fog = eleven.find("FogColour.rgb, current.rgb");
+	CHECK(shade != std::string::npos);
+	CHECK(glow != std::string::npos);
+	CHECK(fog != std::string::npos);
+	CHECK(shade < glow && glow < fog);
+	CHECK(eleven.find("current.rgb + input.Specular.rgb);") == std::string::npos);
+	CHECK(CombinerShader_Key(description) == plain_key + ":SP:G");
+
+	D3DCompileFunction compile = load_compiler();
+	if (compile == NULL) {
+		printf("  d3dcompiler_47.dll not present, skipping the compile\n");
+		return;
+	}
+	CHECK(compiles(compile, eleven, D3D11_PROFILE));
+}

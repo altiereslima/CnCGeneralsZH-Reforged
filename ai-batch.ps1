@@ -73,6 +73,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$env:ZH_UNATTENDED = "1"	# every game this starts is unattended: no box may wait on a person (EarlyCommandLine.h)
 
 # PowerShell variable names are case-insensitive, so this must not be called $exe: it would be the
 # same variable as the -Exe parameter and the summary line would print the whole path back.

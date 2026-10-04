@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -40,7 +41,12 @@
 
 
 #include "refcount.h"
-#include <windows.h>
+/*
+**	breakIntoDebugger, for BreakOnReference in the !NDEBUG half: DebugBreak() on Windows, which is what
+**	this file called before, and raise(SIGTRAP) elsewhere.  The header includes <windows.h> on Windows,
+**	as this file did here.
+*/
+#include "Platform/BreakIntoDebugger.h"
 
 
 #ifndef NDEBUG
@@ -174,7 +180,7 @@ void RefCountClass::Add_Ref(void) const
 
 	// See if programmer set break on for a specific address.
 	if (this == BreakOnReference) {
-		DebugBreak();  // trigger the debugger
+		breakIntoDebugger();  // trigger the debugger
 	}
 	Inc_Total_Refs(this);
 }
@@ -201,7 +207,7 @@ void	RefCountClass::Dec_Total_Refs(const RefCountClass * obj)
 
 	// See if programmer set break on for a specific address.
 	if (obj == BreakOnReference) {
-		 DebugBreak();  // trigger the debugger
+		 breakIntoDebugger();  // trigger the debugger
 	}
 }
 

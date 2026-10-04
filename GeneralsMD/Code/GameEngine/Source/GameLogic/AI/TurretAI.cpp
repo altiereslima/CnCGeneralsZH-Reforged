@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -37,7 +38,6 @@
 #include "Common/Xfer.h"
 
 #include "GameLogic/GameLogic.h"
-#include "GameLogic/IncomingDamage.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/PartitionManager.h"
@@ -186,6 +186,7 @@ TurretAIData::TurretAIData()
 	m_turnRate = DEFAULT_TURN_RATE;
 	m_pitchRate = DEFAULT_PITCH_RATE;
 	m_naturalTurretAngle = 0.0f;
+	m_yawLimit = PI;
 	m_naturalTurretPitch = 0.0f;
 	for( Int slotIndex = 0; slotIndex < WEAPONSLOT_COUNT; ++slotIndex )
 	{
@@ -248,6 +249,7 @@ void TurretAIData::buildFieldParse(MultiIniFieldParse& p)
 		{ "TurretTurnRate",					INI::parseAngularVelocityReal,				NULL, offsetof( TurretAIData, m_turnRate ) },
 		{ "TurretPitchRate",				INI::parseAngularVelocityReal,				NULL, offsetof( TurretAIData, m_pitchRate ) },
 		{ "NaturalTurretAngle",			INI::parseAngleReal,									NULL, offsetof( TurretAIData, m_naturalTurretAngle ) },
+		{ "TurretYawLimit",					INI::parseAngleReal,									NULL, offsetof( TurretAIData, m_yawLimit ) },
 		{ "NaturalTurretPitch",			INI::parseAngleReal,									NULL, offsetof( TurretAIData, m_naturalTurretPitch ) },
 		{ "FirePitch",							INI::parseAngleReal,									NULL, offsetof( TurretAIData, m_firePitch ) },
 		{ "MinPhysicalPitch",				INI::parseAngleReal,									NULL, offsetof( TurretAIData, m_minPitch ) },
@@ -407,6 +409,29 @@ Bool TurretAI::friend_turnTowardsAngle(Real desiredAngle, Real rateModifier, Rea
 	Real turnRate = getTurnRate() * rateModifier;
 	Real angleDiff = normalizeAngle(desiredAngle - actualAngle);
 
+	/* A turret with a limited arc stops at its edge when the angle asked for is outside it, and is
+		 not aligned there. Measured from the natural angle both ends sit inside the arc, so the turn
+		 between them never takes the short way round through the back it cannot reach. */
+	Bool beyondArc = FALSE;
+	Real limit = getYawLimit();
+	if (limit < PI)
+	{
+		Real natural = getNaturalTurretAngle();
+		Real wanted = normalizeAngle(desiredAngle - natural);
+		if (wanted > limit)
+		{
+			wanted = limit;
+			beyondArc = TRUE;
+		}
+		else if (wanted < -limit)
+		{
+			wanted = -limit;
+			beyondArc = TRUE;
+		}
+		desiredAngle = normalizeAngle(natural + wanted);
+		angleDiff = wanted - normalizeAngle(actualAngle - natural);
+	}
+
 	// Are we close enough to the desired angle to just snap there?
 	if (fabs(angleDiff) < turnRate)
 	{
@@ -431,9 +456,31 @@ Bool TurretAI::friend_turnTowardsAngle(Real desiredAngle, Real rateModifier, Rea
 	if( m_angle != origAngle )
 		getOwner()->reactToTurretChange( m_whichTurret, origAngle, m_pitch );
 
-	Bool aligned = fabs(m_angle - desiredAngle) <= relThresh;
+	// normalized, or a turret just either side of straight back reads as a full turn away
+	Bool aligned = fabs(normalizeAngle(m_angle - desiredAngle)) <= relThresh && !beyondArc;
 
 	return aligned;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+	How far the turret's owner has to turn so a target at relAngle from its nose sits inside the
+	turret's arc, ARC_MARGIN in from the edge so it does not hang on the boundary; 0 when it is inside
+	already or the turret goes all the way round.
+*/
+Real TurretAI::getArcShortfall(Real relAngle) const
+{
+	const Real ARC_MARGIN = 0.17f;	// about 10 degrees
+	Real limit = getYawLimit();
+	if (limit >= PI)
+		return 0.0f;
+
+	Real off = normalizeAngle(relAngle - getNaturalTurretAngle());
+	if (off > limit)
+		return off - (limit - ARC_MARGIN);
+	if (off < -limit)
+		return off + (limit - ARC_MARGIN);
+	return 0.0f;
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -1050,15 +1097,6 @@ StateReturnType TurretAIAimTurretState::update()
 				return STATE_FAILURE;
 			}
 
-			// The fire state holds the round on a victim already paid for and hands back to this state, which
-			// never looks for another target, so a turret that had picked the target on its own sat silent
-			// until the booking lapsed.  Drop it; hold scans again, and its scan passes over doomed targets.
-			if (turret->friend_getTargetWasSetByIdleMood() && IncomingDamageTracker::isSpokenFor(enemy, obj->getID()))
-			{
-				turret->setTurretTargetObject(NULL, FALSE);
-				return STATE_FAILURE;
-			}
-
 			// aim turret towards enemy (turret angle is relative to its parent object)
 			if (enemy->isKindOf(KINDOF_BRIDGE)) 
 			{
@@ -1130,7 +1168,11 @@ StateReturnType TurretAIAimTurretState::update()
 	}
 
 	const Real REL_THRESH = 0.035f;	// about 2 degrees. (getRelativeAngle2D is current only accurate to about 1.25 degrees)
-	Bool turnAlignedToNemesis = turret->friend_turnTowardsAngle(aimAngle, turnSpeedModifier, REL_THRESH);
+	// A gun that fires while it turns (the Gattling's) opens up 15 degrees out and walks its fire onto the
+	// target. With the 2 degree window it held fire for as long as a turning hull kept it chasing.
+	const Real FIRES_WHILE_TURNING_THRESH = 0.26f;
+	Real relThresh = turret->friend_getFiresWhileTurning() ? FIRES_WHILE_TURNING_THRESH : REL_THRESH;
+	Bool turnAlignedToNemesis = turret->friend_turnTowardsAngle(aimAngle, turnSpeedModifier, relThresh);
 
 	// this section we do even if sweep is "disabled", so that we can start firing
 	// once we get into sweep "range"

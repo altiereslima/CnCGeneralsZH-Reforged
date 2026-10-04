@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 #ifndef THREAD_H
 #define THREAD_H
@@ -27,7 +28,10 @@
 #endif
 
 #include "always.h"
-#include "vector.h"
+#include "Vector.H"
+
+#include <atomic>
+#include <thread>
 
 struct _EXCEPTION_POINTERS;
 
@@ -86,7 +90,22 @@ protected:
 	// User defined thread function. The thread function should check for "running" flag every now and then
 	// and exit the thread if running is false.
 	virtual void Thread_Function() = 0;
-	volatile bool running;
+
+	/* Was `volatile bool` (B14).  ThreadSanitizer found the race on the very first armed run of
+	   the real source: Stop() writes this on one thread while Thread_Function reads it on
+	   another, and volatile is not an atomic - it orders nothing and promises no atomicity.
+
+	   It worked on Windows by an accident of the compiler.  MSVC's default /volatile:ms gives
+	   every volatile access acquire/release semantics, so this one read and this one write were
+	   correctly ordered there and nowhere else.  Under clang on arm64 they are not, and the
+	   failure is the one that matters: a worker that never sees `running` go false and spins
+	   until Stop() times out, every shutdown.
+
+	   std::atomic<bool> is a drop-in for all ten call sites outside the tests - eight
+	   `while (running)` reads in derived Thread_Functions (TextureLoader, W3DMouse and the six
+	   GameSpy threads) and the two writes in thread.cpp - because the conversion and the
+	   assignment both do what the plain bool did. */
+	std::atomic<bool> running;
 
 	// Name of thread.
 	char ThreadName[64];
@@ -98,8 +117,15 @@ protected:
 	ExceptionHandlerType ExceptionHandler;
 
 private:
-	static void __cdecl Internal_Thread_Function(void*);
-	volatile unsigned long handle;
+	/* Was `static void __cdecl Internal_Thread_Function(void*)` and a `volatile unsigned long
+	   handle`.  The handle was _beginthread's return value, and it did double duty: the thread
+	   function zeroed it on the way out so that Is_Running() could read it as a flag.  B14 splits
+	   those back apart - std::thread holds the thread, an atomic holds the flag - and the entry
+	   point becomes an ordinary member, because std::thread can call one and _beginthread could
+	   not.  All three are private; no consumer of this class sees any of it. */
+	void Internal_Thread_Function();
+	std::thread Thread;
+	std::atomic<bool> ThreadIsRunning;
 	int thread_priority;
 };
 

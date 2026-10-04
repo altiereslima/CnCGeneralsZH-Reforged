@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -121,7 +123,7 @@ private:
 	std::string m_nick, m_email, m_pass;
 };
 
-static enum CallbackType
+enum CallbackType
 {
 	CALLBACK_CONNECT,
 	CALLBACK_ERROR,
@@ -133,7 +135,7 @@ static enum CallbackType
 
 void callbackWrapper( GPConnection *con, void *arg, void *param )
 {
-	CallbackType info = (CallbackType)(Int)param;
+	CallbackType info = (CallbackType)(Int)(intptr_t)param;
 	BuddyThreadClass *thread = MESSAGE_QUEUE->getThread() ? MESSAGE_QUEUE->getThread() : NULL /*(TheGameSpyBuddyMessageQueue)?TheGameSpyBuddyMessageQueue->getThread():NULL*/;
 	if (!thread)
 		return;
@@ -267,7 +269,7 @@ GPProfile GameSpyBuddyMessageQueue::getLocalProfileID( void )
 void BuddyThreadClass::Thread_Function()
 {
 	try {
-	_set_se_translator( DumpExceptionInfo ); // Hook that allows stack trace.
+	InstallThreadExceptionTranslator(); // Hook that allows stack trace.
 	GPConnection gpCon;
 	GPConnection *con = &gpCon;
 	// the vendored SDK is newer than the 2003 one and wants namespace/partner ids
@@ -526,8 +528,8 @@ void BuddyThreadClass::messageCallback( GPConnection *con, GPRecvBuddyMessageArg
 	// get info about the person asking to be our buddy
 	gpGetInfo( con, arg->profile, GP_CHECK_CACHE, GP_BLOCKING, (GPCallback)getNickForMessage, &messageResponse);
 
-	std::wstring s = MultiByteToWideCharSingleLine( arg->message );
-	wcsncpy(messageResponse.arg.message.text, s.c_str(), MAX_BUDDY_CHAT_LEN);
+	WideCharString s = MultiByteToWideCharSingleLine( arg->message );
+	WideCharNCpy(messageResponse.arg.message.text, s.c_str(), MAX_BUDDY_CHAT_LEN);
 	messageResponse.arg.message.text[MAX_BUDDY_CHAT_LEN-1] = 0;
 	messageResponse.arg.message.date = arg->date;
 	DEBUG_LOG(("Got a buddy message from %d [%ls]\n", arg->profile, s.c_str()));
@@ -643,8 +645,8 @@ void BuddyThreadClass::requestCallback( GPConnection *con, GPRecvBuddyRequestArg
 	// get info about the person asking to be our buddy
 	gpGetInfo( con, arg->profile, GP_CHECK_CACHE, GP_BLOCKING, (GPCallback)getInfoResponseForRequest, &response);
 
-	std::wstring s = MultiByteToWideCharSingleLine( arg->reason );
-	wcsncpy(response.arg.request.text, s.c_str(), GP_REASON_LEN);
+	WideCharString s = MultiByteToWideCharSingleLine( arg->reason );
+	WideCharNCpy(response.arg.request.text, s.c_str(), GP_REASON_LEN);
 	response.arg.request.text[GP_REASON_LEN-1] = 0;
 
 	TheGameSpyBuddyMessageQueue->addResponse( response );

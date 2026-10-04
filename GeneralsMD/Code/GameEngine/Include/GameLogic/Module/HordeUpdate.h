@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -46,7 +48,7 @@ class UpgradeTemplate;
 
 // the horde action picks which of the two bonus rules a horde module follows.  every horde module
 // the game ships names HORDE explicitly, so the default only affects new content.
-enum HordeActionType
+enum HordeActionType : Int
 {
 	HORDEACTION_HORDE = 0,	///< classic: nationalism and fanaticism are never taken away again once granted
 	HORDEACTION_HORDE_FIXED,	///< horde, nationalism and fanaticism all follow the horde status

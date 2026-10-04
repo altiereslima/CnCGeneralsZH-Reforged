@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -66,6 +68,7 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
 #include "Common/GlobalData.h"
 #include "Common/BuildAssistant.h"
@@ -85,7 +88,7 @@
 #include "GameClient/GameText.h"
 #include "GameClient/GUICallbacks.h"
 #include "GameClient/InGameUI.h"
-#include "GameClient/Controlbar.h"
+#include "GameClient/ControlBar.h"
 #include "GameClient/DisplayStringManager.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Damage.h"
@@ -420,7 +423,7 @@ enum
 static void putUpgradeTargets( BuildTooltipCard &card, const UpgradeTemplate *upgrade, const Player *player )
 {
 	const UpgradeEffect plain = {};
-	std::set< std::wstring > named;
+	std::set< WideCharString > named;
 	for( const CommandButton *button = TheControlBar->getCommandButtons(); button; button = button->getNext() )
 	{
 		if( card.upgrades.size() >= UPGRADE_TARGETS_SHOWN )
@@ -485,7 +488,7 @@ void ControlBar::showBuildTooltipLayout( GameWindow *cmdButton )
 	if(prevWindow == cmdButton)	
 	{
 		m_showBuildToolTipLayout = TRUE;
-		if(!isInitialized &&  beginWaitTime + cmdButton->getTooltipDelay() < timeGetTime())
+		if(!isInitialized &&  beginWaitTime + cmdButton->getTooltipDelay() < Clock_Milliseconds())
 		{
 			//DEBUG_LOG(("%d beginwaittime, %d tooltipdelay, %dtimegettime\n", beginWaitTime, cmdButton->getTooltipDelay(), timeGetTime()));
 			passedWaitTime = TRUE;
@@ -518,7 +521,7 @@ void ControlBar::showBuildTooltipLayout( GameWindow *cmdButton )
 	if(!passedWaitTime)
 	{
 		prevWindow = cmdButton;
-		beginWaitTime = timeGetTime();
+		beginWaitTime = Clock_Milliseconds();
 		isInitialized = FALSE;
 		return;
 	}
@@ -739,7 +742,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 							obi = (*bmi)->getOverchargeBehaviorInterface();
 							if( obi )
 							{
-								descrip.concat( L"\n" );
+								descrip.concat( u"\n" );
 								if( obi->isOverchargeActive() )
 									descrip.concat( TheGameText->fetch( "TOOLTIP:TooltipNukeReactorOverChargeIsOn" ) );
 								else
@@ -841,7 +844,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 					if (firstRequirement)
 						firstRequirement = false;
 					else
-						requires.concat(L", ");
+						requires.concat(u", ");
 				}
 				requires.concat(requiresList);
 			}
@@ -953,7 +956,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 						if (firstRequirement)
 							firstRequirement = false;
 						else
-							requires.concat(L", ");
+							requires.concat(u", ");
 					}
 					requires.concat(requiresList);
 				}
@@ -1017,7 +1020,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 	// still needs
 	if( !card.warning.isEmpty() )
 	{
-		descrip.concat( L"\n\n" );
+		descrip.concat( u"\n\n" );
 		descrip.concat( card.warning );
 	}
 	if( card.hasStats )
@@ -1029,7 +1032,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 			UnicodeString weapon;
 			// the gap is here rather than in the string: the string table collapses runs of spaces
 			weapon.format( TheGameText->fetch( "TOOLTIP:WeaponStats" ), card.damage, card.range );
-			stats.concat( L"   " );
+			stats.concat( u"   " );
 			stats.concat( weapon );
 		}
 		descrip.concat( stats );
@@ -1037,7 +1040,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 	if( !card.requires.isEmpty() )
 	{
 		if( !descrip.isEmpty() )
-			descrip.concat( L"\n" );
+			descrip.concat( u"\n" );
 		descrip.concat( card.requires );
 	}
 

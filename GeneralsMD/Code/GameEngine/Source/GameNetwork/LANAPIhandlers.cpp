@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,8 +31,11 @@
 ///////////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
-#include "Common/CRC.h"
+#include "Lib/WideCharFns.h"
+
+#include "Common/crc.h"
 #include "Common/GameState.h"
 #include "Common/Registry.h"
 #include "Common/GlobalData.h"
@@ -51,7 +56,7 @@ void LANAPI::handleRequestLocations( LANMessage *msg, UnsignedInt senderIP )
 		reply.LANMessageType = LANMessage::MSG_LOBBY_ANNOUNCE;
 
 		sendMessage(&reply);
-		m_lastResendTime = timeGetTime();
+		m_lastResendTime = Clock_Milliseconds();
 	}
 	else
 	{
@@ -65,7 +70,7 @@ void LANAPI::handleRequestLocations( LANMessage *msg, UnsignedInt senderIP )
 				reply.LANMessageType = LANMessage::MSG_GAME_ANNOUNCE;
 				AsciiString gameOpts = GenerateGameOptionsString();
 				strlcpy(reply.GameInfo.options,gameOpts.str(),ARRAY_SIZE(reply.GameInfo.options));
-				wcsncpy(reply.GameInfo.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
+				WideCharNCpy(reply.GameInfo.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
 				reply.GameInfo.gameName[g_lanGameNameLength] = 0;
 				reply.GameInfo.inProgress = m_currentGame->isGameInProgress();
 
@@ -93,7 +98,7 @@ void LANAPI::handleRequestLocations( LANMessage *msg, UnsignedInt senderIP )
 	player->setName(UnicodeString(msg->name));
 	player->setHost(msg->hostName);
 	player->setLogin(msg->userName);
-	player->setLastHeard(timeGetTime());
+	player->setLastHeard(Clock_Milliseconds());
 
 	addPlayer(player);
 
@@ -125,7 +130,7 @@ void LANAPI::handleGameAnnounce( LANMessage *msg, UnsignedInt senderIP )
 			Bool success = ParseGameOptionsString(game,AsciiString(msg->GameInfo.options));
 			game->setGameInProgress(msg->GameInfo.inProgress);
 			game->setIsDirectConnect(msg->GameInfo.isDirectConnect);
-			game->setLastHeard(timeGetTime());
+			game->setLastHeard(Clock_Milliseconds());
 			if (!success)
 			{
 				// remove from list
@@ -149,7 +154,7 @@ void LANAPI::handleGameAnnounce( LANMessage *msg, UnsignedInt senderIP )
 		Bool success = ParseGameOptionsString(game,AsciiString(msg->GameInfo.options));
 		game->setGameInProgress(msg->GameInfo.inProgress);
 		game->setIsDirectConnect(msg->GameInfo.isDirectConnect);
-		game->setLastHeard(timeGetTime());
+		game->setLastHeard(Clock_Milliseconds());
 		if (!success)
 		{
 			// remove from list
@@ -179,7 +184,7 @@ void LANAPI::handleLobbyAnnounce( LANMessage *msg, UnsignedInt senderIP )
 	player->setName(UnicodeString(msg->name));
 	player->setHost(msg->hostName);
 	player->setLogin(msg->userName);
-	player->setLastHeard(timeGetTime());
+	player->setLastHeard(Clock_Milliseconds());
 
 	addPlayer(player);
 
@@ -201,7 +206,7 @@ void LANAPI::handleRequestGameInfo( LANMessage *msg, UnsignedInt senderIP )
 			if (gameOpts.isEmpty())
 				return;
 			strlcpy(reply.GameInfo.options,gameOpts.str(),ARRAY_SIZE(reply.GameInfo.options));
-			wcsncpy(reply.GameInfo.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
+			WideCharNCpy(reply.GameInfo.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
 			reply.GameInfo.gameName[g_lanGameNameLength] = 0;
 			reply.GameInfo.inProgress = m_currentGame->isGameInProgress();
 			reply.GameInfo.isDirectConnect = m_currentGame->getIsDirectConnect();
@@ -350,7 +355,7 @@ void LANAPI::handleRequestJoin( LANMessage *msg, UnsignedInt senderIP )
 				{
 					// OK, add him in.
 					reply.LANMessageType = LANMessage::MSG_JOIN_ACCEPT;
-					wcsncpy(reply.GameJoined.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
+					WideCharNCpy(reply.GameJoined.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
 					reply.GameJoined.gameName[g_lanGameNameLength] = 0;
 					reply.GameJoined.slotPosition = player;
 					reply.GameJoined.gameIP = m_localIP;
@@ -360,10 +365,10 @@ void LANAPI::handleRequestJoin( LANMessage *msg, UnsignedInt senderIP )
 					newSlot.setState(SLOT_PLAYER, UnicodeString(msg->name));
 					newSlot.setIP(senderIP);
 					newSlot.setPort(NETWORK_BASE_PORT_NUMBER);
-					newSlot.setLastHeard(timeGetTime());
+					newSlot.setLastHeard(Clock_Milliseconds());
 					newSlot.setSerial(msg->GameToJoin.serial);
 					m_currentGame->setSlot(player,newSlot);
-					DEBUG_LOG(("LANAPI::handleRequestJoin - added player %ls at ip 0x%08x to the game\n", msg->name, senderIP));
+					DEBUG_LOG(("LANAPI::handleRequestJoin - added player %s at ip 0x%08x to the game\n", WideCharAsUtf8( msg->name ).str(), senderIP));
 
 					OnPlayerJoin(player, UnicodeString(msg->name));
 					responseIP = 0;
@@ -374,7 +379,7 @@ void LANAPI::handleRequestJoin( LANMessage *msg, UnsignedInt senderIP )
 			if (canJoin && player == MAX_SLOTS)
 			{
 				reply.LANMessageType = LANMessage::MSG_JOIN_DENY;
-				wcsncpy(reply.GameNotJoined.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
+				WideCharNCpy(reply.GameNotJoined.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
 				reply.GameNotJoined.gameName[g_lanGameNameLength] = 0;
 				reply.GameNotJoined.reason = LANAPIInterface::RET_GAME_FULL;
 				reply.GameNotJoined.gameIP = m_localIP;
@@ -487,7 +492,7 @@ void LANAPI::handleRequestGameLeave( LANMessage *msg, UnsignedInt senderIP )
 					lanPlayer->setName(UnicodeString(m_name));
 					lanPlayer->setHost(m_hostName);
 					lanPlayer->setLogin(m_userName);
-					lanPlayer->setLastHeard(timeGetTime());
+					lanPlayer->setLastHeard(Clock_Milliseconds());
 					addPlayer(lanPlayer);
 
 				}
@@ -596,17 +601,17 @@ void LANAPI::handleChat( LANMessage *msg, UnsignedInt senderIP )
 		if((player=LookupPlayer(senderIP)) != 0)
 		{
 			OnChat(UnicodeString(player->getName()), player->getIP(), UnicodeString(msg->Chat.message), msg->Chat.chatType);
-			player->setLastHeard(timeGetTime());
+			player->setLastHeard(Clock_Milliseconds());
 		}
 	}
 	else
 	{
 		if (LookupGame(UnicodeString(msg->Chat.gameName)) != m_currentGame)
 		{
-			DEBUG_LOG(("Game '%ls' is not my game\n", msg->Chat.gameName));
+			DEBUG_LOG(("Game '%s' is not my game\n", WideCharAsUtf8( msg->Chat.gameName ).str()));
 			if (m_currentGame)
 			{
-				DEBUG_LOG(("Current game is '%ls'\n", m_currentGame->getName().str()));
+				DEBUG_LOG(("Current game is '%s'\n", WideCharAsUtf8( m_currentGame->getName().str() ).str()));
 			}
 			return;
 		}

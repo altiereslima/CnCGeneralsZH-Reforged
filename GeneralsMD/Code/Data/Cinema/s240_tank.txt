@@ -1,0 +1,14 @@
+# The 2.4.0 Shorts' tank takes over Scenarios/s240_tank.txt on Fortress Avalanche, wider than
+# v240_tank.txt (absolute zoom 1.2 to 1.3 where that list was 0.5 to 0.7) and held still, so each
+# moment stays inside an 864 pixel column of the 1920 frame.
+
+# Marauder, coming towards the camera from the west, the crawlers to its right
+5.8   cut     1000 2040 0.38 -70 8
+9.5   shot
+# Crusader, driving up and right at 45 degrees, braking, backing down and left
+13.2  cut     905 2400 0.35 45 6
+19.0  shot
+# Humvee with Rangers aboard, coming towards the camera, rebels on its right
+23.8  cut     3270 1990 0.38 -90 8
+27.0  shot
+30.3  end

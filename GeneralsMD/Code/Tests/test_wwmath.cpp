@@ -14,6 +14,11 @@
  */
 #include "test_harness.h"
 
+#include <limits>
+#include <cmath>
+#include <stdint.h>
+#include <string.h>
+
 #include "wwmath.h"
 #include "vector2.h"
 #include "vector3.h"
@@ -340,6 +345,49 @@ TEST(vector3_is_valid_rejects_nan_and_inf)
 	CHECK(!Vector3(0.0f, inf_bits.f, 0.0f).Is_Valid());
 }
 
+// Is_Valid_Float and Is_Valid_Double against std::isfinite over every class - normal, denormal, both
+// zeroes, both infinities, quiet and signalling NaNs, the largest finite values - and a stride through every
+// float's bits and every double's high word.  Both read their argument through unsigned long once, which is
+// 8 bytes on LP64: ASan under ZH_SANITIZE catches that here, and Is_Valid_Double answered for the bytes
+// after its argument.
+TEST(is_valid_float_and_double_every_class)
+{
+	static const uint32_t FLOATS[] = { 0x00000000u, 0x80000000u, 0x00000001u, 0x807FFFFFu, 0x00800000u,
+		0x3F800000u, 0xBF800000u, 0x7F7FFFFFu, 0xFF7FFFFFu, 0x7F800000u, 0xFF800000u, 0x7FC00000u, 0xFFC00000u,
+		0x7F800001u, 0x7FBFFFFFu };
+	for (size_t i = 0; i < sizeof(FLOATS) / sizeof(FLOATS[0]); ++i) {
+		float f;
+		memcpy(&f, &FLOATS[i], sizeof(f));
+		CHECK(WWMath::Is_Valid_Float(f) == (std::isfinite(f) != 0));
+	}
+	int float_mismatches = 0;
+	for (uint64_t u = 0; u <= 0xFFFFFFFFull; u += 0x10001ull) {
+		const uint32_t bits = (uint32_t)u;
+		float f;
+		memcpy(&f, &bits, sizeof(f));
+		float_mismatches += WWMath::Is_Valid_Float(f) != (std::isfinite(f) != 0);
+	}
+	CHECK_EQ(float_mismatches, 0);
+
+	static const uint64_t DOUBLES[] = { 0x0000000000000000ull, 0x8000000000000000ull, 0x0000000000000001ull,
+		0x000FFFFFFFFFFFFFull, 0x0010000000000000ull, 0x3FF0000000000000ull, 0xBFF0000000000000ull,
+		0x7FEFFFFFFFFFFFFFull, 0x7FF0000000000000ull, 0xFFF0000000000000ull, 0x7FF8000000000000ull,
+		0x7FF0000000000001ull, 0xFFF8000000000000ull };
+	for (size_t i = 0; i < sizeof(DOUBLES) / sizeof(DOUBLES[0]); ++i) {
+		double d;
+		memcpy(&d, &DOUBLES[i], sizeof(d));
+		CHECK(WWMath::Is_Valid_Double(d) == (std::isfinite(d) != 0));
+	}
+	int double_mismatches = 0;
+	for (uint64_t high = 0; high <= 0xFFFFFFFFull; high += 0x10001ull) {
+		const uint64_t bits = (high << 32) | 0x12345678ull;
+		double d;
+		memcpy(&d, &bits, sizeof(d));
+		double_mismatches += WWMath::Is_Valid_Double(d) != (std::isfinite(d) != 0);
+	}
+	CHECK_EQ(double_mismatches, 0);
+}
+
 TEST(vector3_equal_within_epsilon)
 {
 	Vector3 a(1.0f, 1.0f, 1.0f);
@@ -440,7 +488,10 @@ TEST(matrix3d_get_inverse_general_affine)
 	/* This is the function that was rewritten to drop D3DXMatrixInverse, so it
 	   gets the hardest cases: rotation+translation, and non-uniform scale where
 	   the transpose shortcut is wrong. */
-	Matrix3D rot(Vector3(0.3f, -0.7f, 0.65f), 1.1f);
+	/* Matrix3D's axis-angle form asserts a unit axis; a Debug build aborts on anything else. */
+	Vector3 axis(0.3f, -0.7f, 0.65f);
+	axis.Normalize();
+	Matrix3D rot(axis, 1.1f);
 	rot.Set_Translation(Vector3(12.0f, -4.5f, 3.25f));
 
 	Matrix3D inv, prod;
@@ -472,7 +523,10 @@ TEST(matrix3d_get_inverse_general_affine)
 
 TEST(matrix3d_inverse_transform_point_roundtrip)
 {
-	Matrix3D m(Vector3(0.1f, 0.9f, -0.4f), 0.77f);
+	/* Matrix3D's axis-angle form asserts a unit axis; a Debug build aborts on anything else. */
+	Vector3 axis(0.1f, 0.9f, -0.4f);
+	axis.Normalize();
+	Matrix3D m(axis, 0.77f);
 	m.Set_Translation(Vector3(-3.0f, 11.0f, 0.5f));
 
 	Matrix3D inv;
@@ -556,7 +610,10 @@ TEST(matrix4x4_identity_and_multiply)
 
 TEST(matrix4x4_from_matrix3d_agrees_on_points)
 {
-	Matrix3D m3(Vector3(0.3f, 0.2f, 0.93f), 0.5f);
+	/* Matrix3D's axis-angle form asserts a unit axis; a Debug build aborts on anything else. */
+	Vector3 axis(0.3f, 0.2f, 0.93f);
+	axis.Normalize();
+	Matrix3D m3(axis, 0.5f);
 	m3.Set_Translation(Vector3(2.0f, 3.0f, 4.0f));
 
 	Matrix4x4 m4(m3);
@@ -1045,7 +1102,10 @@ TEST(colmath_box_tri_intersection)
 
 TEST(vp_transform_matches_scalar)
 {
-	Matrix3D m(Vector3(0.3f, 0.6f, 0.74f), 0.9f);
+	/* Matrix3D's axis-angle form asserts a unit axis; a Debug build aborts on anything else. */
+	Vector3 axis(0.3f, 0.6f, 0.74f);
+	axis.Normalize();
+	Matrix3D m(axis, 0.9f);
 	m.Set_Translation(Vector3(5.0f, -2.0f, 1.0f));
 
 	/* Deliberately not a multiple of 4: the asm paths process blocks and hand
@@ -1288,6 +1348,28 @@ TEST(dettrig_DEFECT_atan2_ignores_the_sign_of_a_zero_y)
 	   so this is pinned rather than special-cased - a future change to it should
 	   be a decision. */
 	CHECK_EQ(DetTrig::ATan2(-0.0f, -1.0f), DetTrig::ATan2(0.0f, -1.0f));
+}
+
+// A NaN or an infinity has no angle.  fixedAngle takes it as 0, and arcTanUnit takes a NaN ratio as 0,
+// explicitly now, where both used to go through an undefined conversion.  These are the answers that
+// conversion gave on ARM64 and on x86 alike (measured: this test passes without the guards on both), so
+// the test cannot catch the old code; it pins the answers against a future change.  Locomotor feeds
+// Sin/Cos a NaN whenever a missile's nose is already on its goal.
+TEST(dettrig_nan_and_infinity_have_the_answers_arm64_always_gave)
+{
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	const float inf = std::numeric_limits<float>::infinity();
+	CHECK_EQ(DetTrig::Sin(nan), DetTrig::Sin(0.0f));
+	CHECK_EQ(DetTrig::Cos(nan), DetTrig::Cos(0.0f));
+	CHECK_EQ(DetTrig::Sin(inf), DetTrig::Sin(0.0f));
+	CHECK_EQ(DetTrig::Cos(-inf), DetTrig::Cos(0.0f));
+	CHECK_EQ(DetTrig::Tan(nan), DetTrig::Tan(0.0f));
+	CHECK_EQ(DetTrig::ATan2(inf, inf), 0.0f);							// inf / inf is a NaN ratio
+	CHECK_EQ(DetTrig::ATan2(nan, 1.0f), DetTrig::ATan2(-1.0f, 0.0f));	// the quadrant tests all fail
+	CHECK_EQ(DetTrig::ATan2(1.0f, nan), DetTrig::ATan2(1.0f, 0.0f));	// x >= 0 fails, y >= 0 holds
+	CHECK_EQ(DetTrig::ACos(nan), -DetTrig::ACos(-1.0f));
+	CHECK_EQ(DetTrig::ASin(nan), DetTrig::ATan2(-1.0f, 0.0f));
+	CHECK_EQ(DetTrig::ATan(nan), DetTrig::ATan2(-1.0f, 0.0f));
 }
 
 TEST(dettrig_acos_and_asin_track_the_reference)

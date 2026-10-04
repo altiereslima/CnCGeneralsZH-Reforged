@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -55,7 +57,7 @@ void ControlBar::updateConstructionTextDisplay( Object *obj )
 	DEBUG_ASSERTCRASH( descWindow, ("Under construction window not found\n") );
 
 	// format the message: seconds left rather than percent
-	text.format( L"%ds", obj->getConstructionSecondsRemaining() );
+	text.format( u"%ds", obj->getConstructionSecondsRemaining() );
 	GadgetStaticTextSetText( descWindow, text );
 
 	// record this as the last value displayed

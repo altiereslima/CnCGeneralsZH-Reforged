@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -126,7 +128,7 @@ protected:
 //-------------------------------------------------------------------------------------------------
 /** Radar priorities.  Keep this in sync with the priority names list below */
 //-------------------------------------------------------------------------------------------------
-enum RadarPriorityType
+enum RadarPriorityType : Int
 {
 	RADAR_PRIORITY_INVALID,					// a priority that has not been set (in general it won't show up on the radar)
 	RADAR_PRIORITY_NOT_ON_RADAR,		// object specifically forbidden from being on the radar

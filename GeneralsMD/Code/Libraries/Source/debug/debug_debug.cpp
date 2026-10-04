@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /////////////////////////////////////////////////////////////////////////EA-V1
 // $File: //depot/GeneralsMD/Staging/code/Libraries/Source/debug/debug_debug.cpp $
@@ -33,6 +35,7 @@
 #include <new>      // needed for placement new prototype
 #include <stdint.h>
 #include <intrin.h>
+#include "Common/EarlyCommandLine.h"   // -headless, read as Debug.cpp's isUnattendedRun reads it
 
 // a little dummy variable that makes the linker actually include
 // us...
@@ -63,7 +66,7 @@ Debug::LogDescription::LogDescription(const char *fileOrGroup, const char *descr
 Debug Debug::Instance;
 
 // more class static members
-unsigned Debug::curStackFrame;
+uintptr_t Debug::curStackFrame;
 
 // this constructor is empty on purpose because all construction
 // work is done in PreStaticInit (and some in PostStaticInit)
@@ -283,8 +286,7 @@ bool Debug::SkipNext(void)
 
   // do not implement this function inline, we do need
   // a valid frame pointer here!
-  // The return address is only a hash key for the frame table, so on x64 its low 32 bits do.
-  curStackFrame=(unsigned)(uintptr_t)_ReturnAddress();
+  curStackFrame=(uintptr_t)_ReturnAddress();
 
   // do we know if to skip the following code?
   FrameHashEntry *e=Instance.LookupFrame(curStackFrame);
@@ -695,8 +697,19 @@ bool Debug::CrashDone(bool die)
     else
 #endif
     {
-      MessageBox(NULL,help,"Game crash",
-                          MB_OK|MB_ICONSTOP|MB_TASKMODAL|MB_SETFOREGROUND);
+      // A -headless run has nobody to click OK: it waited on this box forever (W2, a purecall under
+      // port defect 32's old loop).  The text goes where a harness can read it, and the run ends as the box would.
+      if (isUnattendedProcess())	// -headless or ZH_UNATTENDED
+      {
+        fputs("Game crash: ",stderr);
+        fputs(help,stderr);
+        fputs("\n",stderr);
+        fflush(stderr);
+        OutputDebugStringA(help);
+      }
+      else
+        MessageBox(NULL,help,"Game crash",
+                            MB_OK|MB_ICONSTOP|MB_TASKMODAL|MB_SETFOREGROUND);
       curFrameEntry=NULL;
       _exit(1);
     }
@@ -849,8 +862,8 @@ Debug& Debug::operator<<(const void *ptr)
   (*this) << "ptr:";
   if (ptr)
   {
-    char help[9];
-    (*this) << "0x" << _ultoa((unsigned long)ptr,help,16);
+    char help[17];
+    (*this) << "0x" << _ui64toa((uintptr_t)ptr,help,16);
   }
   else
     (*this) << "NULL";
@@ -881,8 +894,8 @@ Debug& Debug::operator<<(const MemDump &dump)
   for (unsigned i=0;i<dump.m_numItems;i+=itemPerLine,cur+=itemPerLine*dump.m_bytePerItem)
   {
     // address
-    char buf[9];
-    sprintf(buf,"%08x",dump.m_absAddr?unsigned(cur):cur-dump.m_startPtr);
+    char buf[17];
+    sprintf(buf,"%08llx",(unsigned long long)(dump.m_absAddr?(uintptr_t)cur:(uintptr_t)(cur-dump.m_startPtr)));
     operator<<(buf);
 
     // items
@@ -960,9 +973,9 @@ bool Debug::IsLogEnabled(const char *fileOrGroup)
   // to be used from the D_ISLOG macros only and those guarantee
   // that we are having real static strings let's use
   // that strings address as frame address...
-  FrameHashEntry *e=Instance.LookupFrame((unsigned)fileOrGroup);
+  FrameHashEntry *e=Instance.LookupFrame((uintptr_t)fileOrGroup);
   if (!e)
-    e=Instance.AddFrameEntry((unsigned)fileOrGroup,FrameTypeLog,fileOrGroup,0);
+    e=Instance.AddFrameEntry((uintptr_t)fileOrGroup,FrameTypeLog,fileOrGroup,0);
   if (e->status==Unknown)
     Instance.UpdateFrameStatus(*e);
   return e->status==NoSkip;
@@ -1153,7 +1166,7 @@ void Debug::Update(void)
   }
 }
 
-Debug::FrameHashEntry* Debug::AddFrameEntry(unsigned addr, unsigned type,
+Debug::FrameHashEntry* Debug::AddFrameEntry(uintptr_t addr, unsigned type,
                                             const char *fileOrGroup, int line)
 {
   __ASSERT(LookupFrame(addr)==NULL);

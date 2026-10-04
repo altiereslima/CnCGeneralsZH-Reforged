@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -26,6 +28,7 @@
 // Encapsulation of a simple group of AI agents
 // Author: Michael S. Booth, January 2002
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
 
 #include "Common/ActionManager.h"
@@ -2029,7 +2032,7 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 		 team taking an approach path is the slowest frame left in a four-player match. */
 #ifdef DEBUG_LOGGING
 	Int64 corridorStart, corridorEnd, corridorFreq;
-	QueryPerformanceCounter( (LARGE_INTEGER *)&corridorStart );
+	corridorStart = Clock_Ticks();
 #endif
 	if (!addWaypoint && !isFormation && !gatherOnPoint) {
 		friend_computeGroundPath(pos, cmdSource);
@@ -2037,8 +2040,8 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 		didVehicles = friend_moveVehicleToPos(pos, cmdSource);
 	}
 #ifdef DEBUG_LOGGING
-	QueryPerformanceCounter( (LARGE_INTEGER *)&corridorEnd );
-	QueryPerformanceFrequency( (LARGE_INTEGER *)&corridorFreq );
+	corridorEnd = Clock_Ticks();
+	corridorFreq = Clock_Ticks_Per_Second();
 	const Real corridorMS = corridorFreq > 0
 		? (Real)((double)(corridorEnd - corridorStart) * 1000.0 / (double)corridorFreq) : 0.0f;
 #endif
@@ -2476,7 +2479,7 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 		 care of gets its own destination adjusted and its own path. */
 #ifdef DEBUG_LOGGING
 	Int64 ordersEnd;
-	QueryPerformanceCounter( (LARGE_INTEGER *)&ordersEnd );
+	ordersEnd = Clock_Ticks();
 	if( corridorFreq > 0 )
 	{
 		const Real ordersMS =
@@ -3664,18 +3667,15 @@ static Bool mayPlayerSell( const Object *obj )
 	*/
 void AIGroup::groupSell( CommandSourceType cmdSource )
 {
-	std::list<Object *>::iterator i, thisIterator;
-	Object *obj;
-
-	for( i = m_memberList.begin(); i != m_memberList.end(); /*empty*/ )
+	// sellObject deselects what it sells, and deselecting rebuilds the player's selection as a new
+	// group: every other member leaves this one, which deletes itself once it is empty.  Walking
+	// m_memberList through that read freed list nodes on the second building of a selection.
+	const VecObjectID members = getAllIDs();
+	for( VecObjectID::const_iterator i = members.begin(); i != members.end(); ++i )
 	{
-
-		// work off of 'thisIterator' as we may change the contents of this list
-		thisIterator = i;
-		++i;
-
-		// get object
-		obj = *thisIterator;
+		Object *obj = TheGameLogic->findObjectByID( *i );
+		if( obj == NULL )
+			continue;
 
 		if( cmdSource == CMD_FROM_PLAYER && !mayPlayerSell( obj ) )
 			continue;
@@ -3791,15 +3791,15 @@ void AIGroup::groupCombatDrop( Object *target, const Coord3D &pos, CommandSource
 //-------------------------------------------------------------------------------------
 void AIGroup::groupDoCommandButton( const CommandButton *commandButton, CommandSourceType cmdSource )
 {
-	std::list<Object *>::iterator i;
-	Object *source;
-
-	for( i = m_memberList.begin(); i != m_memberList.end(); ++i )
+	// A sell button sells through BuildAssistant::sellObject, which empties and deletes this group
+	// the way groupSell explains, so the members are taken down first.
+	const VecObjectID members = getAllIDs();
+	for( VecObjectID::const_iterator i = members.begin(); i != members.end(); ++i )
 	{
+		Object *source = TheGameLogic->findObjectByID( *i );
+		if( source == NULL )
+			continue;
 
-		// get object
-		source = *i;
-		
 		source->doCommandButton( commandButton, cmdSource );
 	}  // end for, i
 }

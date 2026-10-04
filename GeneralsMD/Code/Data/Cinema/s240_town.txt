@@ -1,0 +1,7 @@
+# Scenarios/s240_town.txt on Tournament Desert, wide: the crossroads seen diagonally, the two
+# armies meeting between the town houses, held with a slow push.
+
+11.5  cut     1020 1350 0.56 45 10
+11.6  zoom    0.48 14
+19.0  shot
+25.9  end

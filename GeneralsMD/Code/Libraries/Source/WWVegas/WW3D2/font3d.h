@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*********************************************************************************************** 
  ***                            Confidential - Westwood Studios                              *** 
@@ -40,6 +41,7 @@
 #ifndef FONT3D_H
 #define FONT3D_H
 
+#include "Lib/WideChar.h"	// WideChar, the engine's text type (B1); its own header, so WW3D2 needs no BaseType.h
 #include "always.h"
 #include "refcount.h"
 #include "vector4.h"
@@ -89,17 +91,17 @@ public:
 	** access character width and height in pixels (clamp char to 0.255)
 	*/
 	
-	unsigned char	Char_Width( WCHAR ch = (WCHAR)'H' )			{ return CharWidthTable[ch&0xFF]; }// & 0xFF]; } // No need to "& 0xff" with chars!!!
-	unsigned char	Char_Height( WCHAR /*ch = 'H'*/ )			{ return CharHeight; }
+	unsigned char	Char_Width( WideChar ch = (WideChar)'H' )			{ return CharWidthTable[ch&0xFF]; }// & 0xFF]; } // No need to "& 0xff" with chars!!!
+	unsigned char	Char_Height( WideChar /*ch = 'H'*/ )			{ return CharHeight; }
 
 	// u and v are in normalized texture space
-	inline float	Char_U_Offset( WCHAR ch = (WCHAR)'H')		{ return UOffsetTable[ch&0xFF]; }// & 0xFF]; }
-	inline float	Char_V_Offset( WCHAR ch = (WCHAR)'H')		{ return VOffsetTable[ch&0xFF]; }// & 0xFF]; }
-	inline float	Char_U_Width( WCHAR ch = (WCHAR)'H' )		{ return UWidthTable[ch&0xFF]; }// & 0xFF]; }
-	inline float	Char_V_Height( WCHAR /*ch = 'H'*/)			{ return VHeight; }
+	inline float	Char_U_Offset( WideChar ch = (WideChar)'H')		{ return UOffsetTable[ch&0xFF]; }// & 0xFF]; }
+	inline float	Char_V_Offset( WideChar ch = (WideChar)'H')		{ return VOffsetTable[ch&0xFF]; }// & 0xFF]; }
+	inline float	Char_U_Width( WideChar ch = (WideChar)'H' )		{ return UWidthTable[ch&0xFF]; }// & 0xFF]; }
+	inline float	Char_V_Height( WideChar /*ch = 'H'*/)			{ return VHeight; }
 	
 	// get all four UV values as one vector4
-	Vector4 Char_UV_Corners( WCHAR ch = (WCHAR)'H' )
+	Vector4 Char_UV_Corners( WideChar ch = (WideChar)'H' )
 	{
 //		ch &= 0xFF;
 		return Vector4( UOffsetTable[ch], VOffsetTable[ch], 
@@ -180,27 +182,27 @@ public:
    /*
 	** The scaled character pixel width, height, and spacing data (clamp char to 0.255)
 	*/
-	float	Char_Width( WCHAR ch ) const		{ return ScaledWidthTable[ch&0xFF]; }
-	float	Char_Spacing( WCHAR ch ) const	{ return ScaledSpacingTable[ch&0xFF]; }
+	float	Char_Width( WideChar ch ) const		{ return ScaledWidthTable[ch&0xFF]; }
+	float	Char_Spacing( WideChar ch ) const	{ return ScaledSpacingTable[ch&0xFF]; }
 	float	Char_Height( void ) const			{ return ScaledHeight; }
 
 
 	/*
 	** The scaled pixel width of a string; useful before printing to avoid screen overflows.
 	*/
-	float String_Width( const WCHAR *test_str );
+	float String_Width( const WideChar *test_str );
 	float String_Width( const char *test_str );
 
 	/*
 	** Char UVs
 	*/
 	// u and v are in normalized texture space
-	//	inline float	Char_U_Offset( WCHAR ch = (WCHAR)'H') { return FontData->Char_U_Offset( ch & 0xFF ); }
-	//	inline float	Char_V_Offset( WCHAR ch = (WCHAR)'H') { return FontData->Char_V_Offset( ch & 0xFF ); }
-	//	inline float	Char_U_Width( WCHAR ch = (WCHAR)'H' ) { return FontData->Char_U_Width( ch & 0xFF );  }
-	//	inline float	Char_V_Height( WCHAR ch = (WCHAR)'H') { return FontData->Char_V_Height( ch & 0xFF ); }
-	//	Vector4 Char_UV_Corners( WCHAR ch = (WCHAR)'H' )	{ return FontData->Char_UV_Corners( ch & 0xFF ); }
-	RectClass		Char_UV( WCHAR ch )	{ return RectClass(	FontData->Char_U_Offset(ch), 
+	//	inline float	Char_U_Offset( WideChar ch = (WideChar)'H') { return FontData->Char_U_Offset( ch & 0xFF ); }
+	//	inline float	Char_V_Offset( WideChar ch = (WideChar)'H') { return FontData->Char_V_Offset( ch & 0xFF ); }
+	//	inline float	Char_U_Width( WideChar ch = (WideChar)'H' ) { return FontData->Char_U_Width( ch & 0xFF );  }
+	//	inline float	Char_V_Height( WideChar ch = (WideChar)'H') { return FontData->Char_V_Height( ch & 0xFF ); }
+	//	Vector4 Char_UV_Corners( WideChar ch = (WideChar)'H' )	{ return FontData->Char_UV_Corners( ch & 0xFF ); }
+	RectClass		Char_UV( WideChar ch )	{ return RectClass(	FontData->Char_U_Offset(ch), 
 																				FontData->Char_V_Offset(ch), 
 																				FontData->Char_U_Offset(ch) + FontData->Char_U_Width(ch), 
 																				FontData->Char_V_Offset(ch) + FontData->Char_V_Height(ch) ); }

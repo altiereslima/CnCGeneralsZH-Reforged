@@ -1,0 +1,28 @@
+# The 2.4.0 Shorts' tank takes on Fortress Avalanche: v240_tank.txt's Marauder past four Troop
+# Crawlers and its Crusader that pulls away, brakes and backs up, plus a Humvee carrying four
+# Rangers past six rebels on the grass by the right lake, the Rangers shooting from inside.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 2500 -map "Maps\Fortress Avalanche\Fortress Avalanche.map" -autoskirmish 2
+#     -takeover -side 0 FactionAmerica -side 1 FactionChina -seed 1 -scenario s240_tank
+#     -cinema s240_tank -video 175 910 s240_tank -maxframes 920
+#
+# Moments: Marauder 190 to 390, Crusader 400 to 700, Humvee 720 to 900.
+
+5     spawn         0  GLATankMarauder             1   750 2000
+20    spawn         1  ChinaVehicleTroopCrawler    4   1000 2100 14
+30    playermove    0  GLATankMarauder                 1250 2000
+
+400   spawn         0  AmericaTankCrusader         1   800 2400
+430   move          0  AmericaTankCrusader             1000 2400
+560   move          0  AmericaTankCrusader             910 2400
+
+30    spawn         0  AmericaVehicleHumvee        1   3100 1950
+30    spawn         0  AmericaInfantryRanger       4   3060 1900 20
+60    enter         0  AmericaInfantryRanger       0  AmericaVehicleHumvee
+700   spawn         1  GLAInfantryRebel            6   3280 2060 20
+740   move          0  AmericaVehicleHumvee            3480 1950
+
+20    tally         1  ChinaVehicleTroopCrawler
+400   tally         1  ChinaVehicleTroopCrawler
+900   tally         1  GLAInfantryRebel

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -44,6 +45,7 @@
 #define WWPROFILE_H
 
 #include "wwstring.h"
+#include <stdint.h>   // int64_t: the tick counts below, which MSVC spelled __int64 - the same type there
 
 #ifdef _UNIX
 typedef signed long long __int64;
@@ -55,7 +57,7 @@ typedef signed long long _int64;
 #define ENABLE_WWPROFILE	
 #endif
 
-extern unsigned WWProfile_Get_System_Time();	// timeGetTime() wrapper
+extern unsigned WWProfile_Get_System_Time();	// Clock_Milliseconds() wrapper
 class FileClass;
 			
 /*
@@ -98,7 +100,7 @@ protected:
 	const char *					Name;
 	int								TotalCalls;
 	float								TotalTime;
-	__int64							StartTime;
+	int64_t							StartTime;
 	int								RecursionCounter;
 	unsigned						ProfileStringID;
 
@@ -231,7 +233,7 @@ private:
 	static	WWProfileHierachyNodeClass *	CurrentNode;
 	static	WWProfileHierachyNodeClass *	CurrentRootNode;
 	static	int									FrameCounter;
-	static	__int64								ResetTime;
+	static	int64_t								ResetTime;
 	static	bool									IsProfileEnabled;
 
 	friend	class		WWProfileInOrderIterator;
@@ -281,7 +283,7 @@ public:
 	~WWTimeItClass( void );
 private:
 	const char * Name;
-	__int64	Time;
+	int64_t	Time;
 };
 
 #ifdef ENABLE_WWPROFILE
@@ -302,7 +304,7 @@ public:
 	~WWMeasureItClass( void );
 
 private:
-	__int64	Time;
+	int64_t	Time;
 	float *  PResult;
 };
 

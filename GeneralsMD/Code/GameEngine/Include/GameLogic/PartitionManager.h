@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -94,9 +96,22 @@ class Squad;
 class Team;
 class ThingTemplate;
 class GhostObject;
+
+// The scanline callbacks PartitionManager befriends, below.  Declared here so that its friend
+// declarations name these functions and ordinary lookup finds them: MSVC found them through the
+// friend declarations alone, which standard C++ does not, and then accepted their static
+// definitions as the same functions.  They are defined in PartitionManager.cpp.
+void hLineAddLooker(Int x1, Int x2, Int y, void *playerIndex);
+void hLineRemoveLooker(Int x1, Int x2, Int y, void *playerIndex);
+void hLineAddShrouder(Int x1, Int x2, Int y, void *playerIndex);
+void hLineRemoveShrouder(Int x1, Int x2, Int y, void *playerIndex);
+void hLineAddThreat(Int x1, Int x2, Int y, void *threatValueParms);
+void hLineRemoveThreat(Int x1, Int x2, Int y, void *threatValueParms);
+void hLineAddValue(Int x1, Int x2, Int y, void *threatValueParms);
+void hLineRemoveValue(Int x1, Int x2, Int y, void *threatValueParms);
 class CommandButton;
 
-enum CommandSourceType;
+enum CommandSourceType : Int;
 
 // ----------------------------------------------------------------------------------------------
 enum ValueOrThreat
@@ -1289,7 +1304,7 @@ protected:
 		This is an internal function that is used to implement the public 
 		getClosestObject and iterateObjects calls. 
 	*/
-	Object *PartitionManager::getClosestObjects(
+	Object *getClosestObjects(
 		const Object *obj, 
 		const Coord3D *pos, 
 		Real maxDist, 

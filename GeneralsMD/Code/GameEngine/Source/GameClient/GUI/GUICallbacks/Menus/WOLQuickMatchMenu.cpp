@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -30,6 +31,9 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
+
+#include "Lib/WideCharFns.h"
 
 #include "Common/GameEngine.h"
 #include "Common/QuickmatchPreferences.h"
@@ -237,7 +241,7 @@ void UpdateStartButton(void)
 	Int index;
 	Int selected;
 	GadgetComboBoxGetSelectedPos( comboBoxLadder, &selected );
-	index = (Int)GadgetComboBoxGetItemData( comboBoxLadder, selected );
+	index = (Int)(intptr_t)GadgetComboBoxGetItemData( comboBoxLadder, selected );
 	const LadderInfo *li = TheLadderList->findLadderByIndex( index );
 	if (li)
 	{
@@ -278,7 +282,7 @@ static void populateQMColorComboBox(QuickMatchPreferences& pref)
 
 		colorName = TheGameText->fetch(def->getTooltipName().str());
 		newIndex = GadgetComboBoxAddEntry(comboBoxColor, colorName, def->getColor());
-		GadgetComboBoxSetItemData(comboBoxColor, newIndex, (void *)c);
+		GadgetComboBoxSetItemData(comboBoxColor, newIndex, (void *)(intptr_t)c);
 	}
 	GadgetComboBoxSetSelectedPos(comboBoxColor, pref.getColor());
 }
@@ -332,7 +336,7 @@ static void populateQMSideComboBox(Int favSide, const LadderInfo *li = NULL)
 		seenSides.insert(side);
 
 		newIndex = GadgetComboBoxAddEntry(comboBoxSide, TheGameText->fetch(side), def->getColor());
-		GadgetComboBoxSetItemData(comboBoxSide, newIndex, (void *)c);
+		GadgetComboBoxSetItemData(comboBoxSide, newIndex, (void *)(intptr_t)c);
 
 		if (c == favSide)
 			entryToSelect = newIndex;
@@ -427,7 +431,7 @@ void PopulateQMLadderListBox( GameWindow *win )
 	{
 		usedLadders.insert(info);
 		index = GadgetListBoxAddEntryText( win, info->name, favoriteColor, -1 );
-		GadgetListBoxSetItemData( win, (void *)(info->index), index );
+		GadgetListBoxSetItemData( win, (void *)(intptr_t)(info->index), index );
 		selectedPos = index;
 	}
 
@@ -446,7 +450,7 @@ void PopulateQMLadderListBox( GameWindow *win )
 		{
 			usedLadders.insert(info);
 			index = GadgetListBoxAddEntryText( win, info->name, favoriteColor, -1 );
-			GadgetListBoxSetItemData( win, (void *)(info->index), index );
+			GadgetListBoxSetItemData( win, (void *)(intptr_t)(info->index), index );
 		}
 	}
 
@@ -460,7 +464,7 @@ void PopulateQMLadderListBox( GameWindow *win )
 		{
 			usedLadders.insert(info);
 			index = GadgetListBoxAddEntryText( win, info->name, specialColor, -1 );
-			GadgetListBoxSetItemData( win, (void *)(info->index), index );
+			GadgetListBoxSetItemData( win, (void *)(intptr_t)(info->index), index );
 		}
 	}
 
@@ -473,7 +477,7 @@ void PopulateQMLadderListBox( GameWindow *win )
 		{
 			usedLadders.insert(info);
 			index = GadgetListBoxAddEntryText( win, info->name, normalColor, -1 );
-			GadgetListBoxSetItemData( win, (void *)(info->index), index );
+			GadgetListBoxSetItemData( win, (void *)(intptr_t)(info->index), index );
 		}
 	}
 
@@ -486,7 +490,7 @@ static const LadderInfo * getLadderInfo( void )
 	Int index;
 	Int selected;
 	GadgetComboBoxGetSelectedPos( comboBoxLadder, &selected );
-	index = (Int)GadgetComboBoxGetItemData( comboBoxLadder, selected );
+	index = (Int)(intptr_t)GadgetComboBoxGetItemData( comboBoxLadder, selected );
 	const LadderInfo *li = TheLadderList->findLadderByIndex( index );
 	return li;
 }
@@ -518,7 +522,7 @@ void PopulateQMLadderComboBox( void )
 	{
 		usedLadders.insert(info);
 		index = GadgetComboBoxAddEntry( comboBoxLadder, info->name, specialColor );
-		GadgetComboBoxSetItemData( comboBoxLadder, index, (void *)(info->index) );
+		GadgetComboBoxSetItemData( comboBoxLadder, index, (void *)(intptr_t)(info->index) );
 		selectedPos = index;
 
 		// we selected a ladder?  No game size choice for us...
@@ -544,7 +548,7 @@ void PopulateQMLadderComboBox( void )
 		{
 			usedLadders.insert(info);
 			index = GadgetComboBoxAddEntry( comboBoxLadder, info->name, normalColor );
-			GadgetComboBoxSetItemData( comboBoxLadder, index, (void *)(info->index) );
+			GadgetComboBoxSetItemData( comboBoxLadder, index, (void *)(intptr_t)(info->index) );
 		}
 	}
 
@@ -565,7 +569,7 @@ static void populateQuickMatchMapSelectListbox( QuickMatchPreferences& pref )
 	Int index;
 	Int selected;
 	GadgetComboBoxGetSelectedPos( comboBoxLadder, &selected );
-	index = (Int)GadgetComboBoxGetItemData( comboBoxLadder, selected );
+	index = (Int)(intptr_t)GadgetComboBoxGetItemData( comboBoxLadder, selected );
 	const LadderInfo *li = TheLadderList->findLadderByIndex( index );
 	//listboxMapSelect->winEnable( li == NULL || li->randomMaps == FALSE );
 
@@ -624,7 +628,7 @@ static void saveQuickMatchOptions( void )
 	Int index;
 	Int selected;
 	GadgetComboBoxGetSelectedPos( comboBoxLadder, &selected );
-	index = (Int)GadgetComboBoxGetItemData( comboBoxLadder, selected );
+	index = (Int)(intptr_t)GadgetComboBoxGetItemData( comboBoxLadder, selected );
 	const LadderInfo *li = TheLadderList->findLadderByIndex( index );
 	Int numPlayers = 0;
 
@@ -680,7 +684,7 @@ static void saveQuickMatchOptions( void )
 
 	Int item;
 	GadgetComboBoxGetSelectedPos(comboBoxSide, &selected);
-	item = (Int)GadgetComboBoxGetItemData(comboBoxSide, selected);
+	item = (Int)(intptr_t)GadgetComboBoxGetItemData(comboBoxSide, selected);
 	pref.setSide(max(0, item));
 	GadgetComboBoxGetSelectedPos(comboBoxColor, &selected);
 	pref.setColor(max(0, selected));
@@ -864,7 +868,7 @@ void WOLQuickMatchMenuInit( WindowLayout *layout, void *userData )
 	GadgetComboBoxAddEntry( comboBoxMaxDisconnects, TheGameText->fetch("GUI:Any"), c);
 	for( i = 1; i < MAX_DISCONNECTS_COUNT; ++i )
 	{
-		s.format(L"%d", MAX_DISCONNECTS[i]);
+		s.format(u"%d", MAX_DISCONNECTS[i]);
 		GadgetComboBoxAddEntry( comboBoxMaxDisconnects, s, c );
 	}
 	Int maxDisconIndex = max(0, pref.getMaxDisconnects());
@@ -932,7 +936,7 @@ void WOLQuickMatchMenuShutdown( WindowLayout *layout, void *userData )
 {
 	TheGameSpyInfo->unregisterTextWindow(quickmatchTextWindow);
 
-	if (!TheGameEngine->getQuitting())
+	if (TheGameEngine != NULL && !TheGameEngine->getQuitting())	// NULL when the shell's destructor runs this on exit
 		saveQuickMatchOptions();
 
 	parentWOLQuickMatch = NULL;
@@ -1100,8 +1104,8 @@ void WOLQuickMatchMenuUpdate( WindowLayout * layout, void *userData)
 		}
 
 #ifdef PERF_TEST
-		UnsignedInt start = timeGetTime();
-		UnsignedInt end = timeGetTime();
+		UnsignedInt start = Clock_Milliseconds();
+		UnsignedInt end = Clock_Milliseconds();
 		std::list<Int> responses;
 		Int numMessages = 0;
 #endif // PERF_TEST
@@ -1119,7 +1123,7 @@ void WOLQuickMatchMenuUpdate( WindowLayout * layout, void *userData)
 			{
 			case PeerResponse::PEERRESPONSE_PLAYERUTM:
 				{
-					if (!stricmp(resp.command.c_str(), "STATS"))
+					if (!strcasecmp(resp.command.c_str(), "STATS"))
 					{
 						DEBUG_LOG(("Saw STATS from %s, data was '%s'\n", resp.nick.c_str(), resp.commandOptions.c_str()));
 						AsciiString data = resp.commandOptions.c_str();
@@ -1148,7 +1152,7 @@ void WOLQuickMatchMenuUpdate( WindowLayout * layout, void *userData)
 						}
 					}
 					Int slotNum = TheGameSpyGame->getSlotNum(resp.nick.c_str());
-					if ((slotNum >= 0) && (slotNum < MAX_SLOTS) && (!stricmp(resp.command.c_str(), "NAT"))) {
+					if ((slotNum >= 0) && (slotNum < MAX_SLOTS) && (!strcasecmp(resp.command.c_str(), "NAT"))) {
 						// this is a command for NAT negotiations, pass if off to TheNAT
 						sawImportantMessage = TRUE;
 						if (TheNAT != NULL) {
@@ -1250,13 +1254,13 @@ void WOLQuickMatchMenuUpdate( WindowLayout * layout, void *userData)
 					{
 						// Woohoo!  On to our next screen!
 						UnicodeString str;
-						str.format(L"Created staging room");
+						str.format(u"Created staging room");
 						TheGameSpyInfo->addText(str, GameSpyColor[GSCOLOR_DEFAULT], quickmatchTextWindow);
 					}
 					else
 					{
 						UnicodeString s;
-						s.format(L"createStagingRoom result: %d", resp.createStagingRoom.result);
+						s.format(u"createStagingRoom result: %d", resp.createStagingRoom.result);
 						TheGameSpyInfo->addText( s, GameSpyColor[GSCOLOR_DEFAULT], quickmatchTextWindow );
 					}
 				}
@@ -1267,13 +1271,13 @@ void WOLQuickMatchMenuUpdate( WindowLayout * layout, void *userData)
 					{
 						// Woohoo!  On to our next screen!
 						UnicodeString s;
-						s.format(L"joinStagingRoom result: %d", resp.joinStagingRoom.ok);
+						s.format(u"joinStagingRoom result: %d", resp.joinStagingRoom.ok);
 						TheGameSpyInfo->addText( s, GameSpyColor[GSCOLOR_DEFAULT], quickmatchTextWindow );
 					}
 					else
 					{
 						UnicodeString s;
-						s.format(L"joinStagingRoom result: %d", resp.joinStagingRoom.ok);
+						s.format(u"joinStagingRoom result: %d", resp.joinStagingRoom.ok);
 						TheGameSpyInfo->addText( s, GameSpyColor[GSCOLOR_DEFAULT], quickmatchTextWindow );
 					}
 				}
@@ -1281,7 +1285,7 @@ void WOLQuickMatchMenuUpdate( WindowLayout * layout, void *userData)
 			case PeerResponse::PEERRESPONSE_STAGINGROOM:
 				{
 					UnicodeString str;
-					str.format(L"Staging room list callback", resp.nick.c_str());
+					str.format(u"Staging room list callback", resp.nick.c_str());
 					TheGameSpyInfo->addText(str, GameSpyColor[GSCOLOR_DEFAULT], quickmatchTextWindow);
 				}
 				break;
@@ -1447,14 +1451,14 @@ void WOLQuickMatchMenuUpdate( WindowLayout * layout, void *userData)
 		}
 #ifdef PERF_TEST
 		// check performance
-		end = timeGetTime();
+		end = Clock_Milliseconds();
 		UnsignedInt frameTime = end-start;
 		if (frameTime > 100 || responses.size() > 20)
 		{
 			UnicodeString munkee;
-			munkee.format(L"inQM:%d %d ms, %d messages", s_inQM, frameTime, responses.size());
+			munkee.format(u"inQM:%d %d ms, %d messages", s_inQM, frameTime, responses.size());
 			TheGameSpyInfo->addText(munkee, GameSpyColor[GSCOLOR_DEFAULT], quickmatchTextWindow);
-			PERF_LOG(("%ls\n", munkee.str()));
+			PERF_LOG(("%s\n", WideCharAsUtf8( munkee.str() ).str()));
 
 			std::list<Int>::const_iterator it;
 			for (it = responses.begin(); it != responses.end(); ++it)
@@ -1563,7 +1567,7 @@ WindowMsgHandledType WOLQuickMatchMenuSystem( GameWindow *window, UnsignedInt ms
 					if (pos >= 0)
 					{
 						QuickMatchPreferences pref;
-						Int ladderID = (Int)GadgetComboBoxGetItemData(control, pos);
+						Int ladderID = (Int)(intptr_t)GadgetComboBoxGetItemData(control, pos);
 						if (ladderID == 0)
 						{
 							// no ladder selected - enable buttons
@@ -1689,7 +1693,7 @@ WindowMsgHandledType WOLQuickMatchMenuSystem( GameWindow *window, UnsignedInt ms
 
 					Int ladderIndex, index, selected;
 					GadgetComboBoxGetSelectedPos( comboBoxLadder, &selected );
-					ladderIndex = (Int)GadgetComboBoxGetItemData( comboBoxLadder, selected );
+					ladderIndex = (Int)(intptr_t)GadgetComboBoxGetItemData( comboBoxLadder, selected );
 					const LadderInfo *ladderInfo = NULL;
 					if (ladderIndex < 0)
 					{
@@ -1710,7 +1714,7 @@ WindowMsgHandledType WOLQuickMatchMenuSystem( GameWindow *window, UnsignedInt ms
 					index = -1;
 					GadgetComboBoxGetSelectedPos( comboBoxSide, &selected );
 					if (selected >= 0)
-						index = (Int)GadgetComboBoxGetItemData( comboBoxSide, selected );
+						index = (Int)(intptr_t)GadgetComboBoxGetItemData( comboBoxSide, selected );
 					req.QM.side = index;
 					if (ladderInfo && ladderInfo->randomFactions)
 					{
@@ -1749,7 +1753,7 @@ WindowMsgHandledType WOLQuickMatchMenuSystem( GameWindow *window, UnsignedInt ms
 						{
 							Int numberComboBoxEntries = GadgetComboBoxGetLength(comboBoxSide);
 							Int randomPick = GameClientRandomValue(0, numberComboBoxEntries - 1);
-							index = (Int)GadgetComboBoxGetItemData( comboBoxSide, randomPick );
+							index = (Int)(intptr_t)GadgetComboBoxGetItemData( comboBoxSide, randomPick );
 							req.QM.side = index;
 
 							randomTries++;
@@ -1759,7 +1763,7 @@ WindowMsgHandledType WOLQuickMatchMenuSystem( GameWindow *window, UnsignedInt ms
 					index = -1;
 					GadgetComboBoxGetSelectedPos( comboBoxColor, &selected );
 					if (selected >= 0)
-						index = (Int)GadgetComboBoxGetItemData( comboBoxColor, selected );
+						index = (Int)(intptr_t)GadgetComboBoxGetItemData( comboBoxColor, selected );
 					req.QM.color = index;
 
 					OptionPreferences natPref;

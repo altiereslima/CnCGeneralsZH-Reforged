@@ -8,6 +8,7 @@
 #include "test_harness.h"
 
 #include <stdlib.h>
+#include <chrono>
 
 namespace
 {
@@ -63,20 +64,62 @@ void test_check(bool ok, const char *expr, const char *file, int line)
 int main(int argc, char *argv[])
 {
 	/* Optional substring filter, so a single failing test can be re-run alone:
-	   test_wwlib.exe crc  */
-	const char *filter = (argc > 1) ? argv[1] : 0;
+	   test_wwlib.exe crc
+	   and "--exclude=<substring>", repeatable, for the tests another ctest entry runs by themselves
+	   (test_gameengine's money sweep, one entry per player count, so ctest -j runs them side by side). */
+	const char *filter = 0;
+	const char *excluded[16];
+	int numExcluded = 0;
+	for (int a = 1; a < argc; ++a)
+	{
+		if (strncmp(argv[a], "--exclude=", 10) == 0)
+		{
+			if (numExcluded == (int)(sizeof(excluded) / sizeof(excluded[0])))
+			{
+				fprintf(stderr, "too many --exclude arguments\n");
+				return 1;
+			}
+			excluded[numExcluded++] = argv[a] + 10;
+		}
+		else if (!filter)
+			filter = argv[a];
+	}
 	int ran = 0;
+
+	/* ZH_TEST_PROGRESS names each test as it starts and says how long it took, flushed, so a run
+	   that times out shows where it was (a Debug build of test_gameengine, W3).  Unset, the output
+	   is the failures and the summary, as always. */
+	const bool progress = getenv("ZH_TEST_PROGRESS") != 0;
 
 	for (int i = 0; i < g_numTests; ++i)
 	{
 		if (filter && !strstr(g_tests[i].name, filter))
+			continue;
+		bool skip = false;
+		for (int e = 0; e < numExcluded; ++e)
+			skip = skip || strstr(g_tests[i].name, excluded[e]) != 0;
+		if (skip)
 			continue;
 
 		g_currentTest = g_tests[i].name;
 		g_currentFails = 0;
 		++ran;
 
+		const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+		if (progress)
+		{
+			printf("RUN  %s\n", g_currentTest);
+			fflush(stdout);
+		}
+
 		g_tests[i].fn();
+
+		if (progress)
+		{
+			printf("DONE %s %.1f s\n", g_currentTest,
+				std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count());
+			fflush(stdout);
+		}
 
 		if (g_currentFails)
 		{

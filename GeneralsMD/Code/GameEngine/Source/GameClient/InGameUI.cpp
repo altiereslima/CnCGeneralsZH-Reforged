@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -28,9 +30,15 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#if !defined(_WIN32)
+#include <unistd.h>		// getpid, for the replay checkpoint folder
+#endif
+#include "Lib/Clock.h"
+#include "Lib/WideCharFns.h"
 
 #define DEFINE_SHADOW_NAMES
 
+#include "Common/LocalFileSystem.h"
 #include "Common/ActionManager.h"
 #include "Common/DrawnPath.h"
 #include "Common/GameAudio.h"
@@ -56,6 +64,7 @@
 #include "Common/SpecialPower.h"
 
 #include "GameClient/Anim2D.h"
+#include "GameClient/CommandXlat.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/ControlBarScheme.h"
 #include "GameClient/MetaEvent.h"
@@ -200,7 +209,7 @@ static void formatStripSeconds( UnicodeString *text, Int seconds )
 	if( seconds < 0 )
 		seconds = 0;
 
-	text->format( L"%ds", seconds );
+	text->format( u"%ds", seconds );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1247,10 +1256,12 @@ InGameUI::InGameUI()
 	m_promotionFrontOverlay = NULL;
 	for( Int grid = 0; grid < CELL_GRID_COUNT; grid++ )
 		m_cellFrontOverlay[ grid ] = NULL;
-	m_orderKeysShown = FALSE;
 	m_orderKeyPoints = 0;
 	for( Int orderKey = 0; orderKey < ORDER_KEYS; orderKey++ )
+	{
 		m_orderKeyString[ orderKey ] = NULL;
+		m_orderKeyPlace[ orderKey ] = -1;
+	}
 	m_promotionPageLoaded = FALSE;
 	m_promotionShownMs = 0;
 	m_promotionDrawnAt = 0;
@@ -1326,6 +1337,8 @@ InGameUI::InGameUI()
 	m_attackMoveToMode	= false;
 	m_forceAttackArmed	= false;
 	m_guardArmed				= false;
+	m_areaOrder					= AREA_ORDER_NONE;
+	m_areaPickScale			= 1.0f;
 	m_moveArmed					= false;
 	m_orderKeyKeptByShift	= false;
 	m_preferSelection		= false;
@@ -1582,7 +1595,8 @@ void InGameUI::setRadiusCursor(RadiusCursorType cursorType, const SpecialPowerTe
 			radius = w ? w->getContinueAttackRange() : 0.0f;
 			break;
 		case RADIUSCURSOR_GUARD_AREA:
-			radius = AIGuardMachine::getStdGuardRange(obj);
+			// no decal: its size was fixed when the button was pressed, and the wheel changes the radius
+			// after that.  The area pick ring takes its place (isAreaPicking)
 			break;
 		case RADIUSCURSOR_FRIENDLY_SPECIALPOWER:
 		case RADIUSCURSOR_OFFENSIVE_SPECIALPOWER:
@@ -1813,7 +1827,11 @@ static Real templatePlacementRange( const ThingTemplate *tmpl )
 static Real templateReach( const ThingTemplate *tmpl )
 {
 	const Real range = templatePlacementRange( tmpl );
-	return range > 0.0f ? range + tmpl->getTemplateGeometryInfo().getBoundingCircleRadius() : 0.0f;
+	// an AttackRange of inf (sscanf takes it, and 1e39, from a mod's INI) has no circle to draw: its
+	// outline went NaN, and Windows' INT_MIN for a NaN angle read the outline out of bounds
+	if( !( range > 0.0f && range <= FLT_MAX ) )
+		return 0.0f;
+	return range + tmpl->getTemplateGeometryInfo().getBoundingCircleRadius();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2065,7 +2083,7 @@ static void fillSpectatorPlayers( const std::vector< SpectatorStats > &players, 
 		const Image *portrait = side ? side->getEnabledImage() : NULL;
 		const Int value = stats.*stat.value;
 
-		std::wstring name( stats.player->getPlayerDisplayName().str() );
+		WideCharString name( stats.player->getPlayerDisplayName().str() );
 		if( name.size() > PLAYER_NAME_CHARS )
 			name.resize( PLAYER_NAME_CHARS );
 
@@ -2150,7 +2168,7 @@ static std::string spectatorSide( void )
 /** A player's name as the page writes it, cut where there is no clipping to hide the rest. */
 static std::string spectatorName( Player *player )
 {
-	std::wstring name( player->getPlayerDisplayName().str() );
+	WideCharString name( player->getPlayerDisplayName().str() );
 	if( name.size() > PLAYER_NAME_CHARS )
 		name.resize( PLAYER_NAME_CHARS );
 	return WideCharStringToMultiByte( name.c_str() );
@@ -2274,7 +2292,7 @@ static void fillReplayValues( HtmlValues &values, Int floor )
 
 	// Spectator.html's #replay with its padding and its borders, and a gap under it
 	enum { REPLAY_STRIP_WIDTH = 322, REPLAY_STRIP_HEIGHT = 52 };
-	const Real scale = ControlBarHudPageScale();
+	const Real scale = ControlBarHudScale();
 	const UnsignedInt frame = TheGameLogic->getFrame();
 	const UnsignedInt length = replayLength();
 	values[ "replay" ] = "on";
@@ -2327,7 +2345,11 @@ static void seekReplay( UnsignedInt target )
 static AsciiString replayCheckpointFolder( void )
 {
 	AsciiString leaf;
+#if defined(_WIN32)
 	leaf.format( "%s\\%u", REPLAY_CHECKPOINT_FOLDER, (UnsignedInt)GetCurrentProcessId() );
+#else
+	leaf.format( "%s\\%u", REPLAY_CHECKPOINT_FOLDER, (UnsignedInt)getpid() );
+#endif
 	return TheGameState->getFilePathInSaveDirectory( leaf );
 }
 
@@ -2335,19 +2357,13 @@ static AsciiString replayCheckpointFolder( void )
 static void forgetReplayCheckpoints( void )
 {
 	const AsciiString folder = replayCheckpointFolder();
-	AsciiString pattern;
-	pattern.format( "%s\\*.sav", folder.str() );
-	WIN32_FIND_DATAA found;
-	HANDLE search = FindFirstFileA( pattern.str(), &found );
-	if( search != INVALID_HANDLE_VALUE )
+	std::vector< AsciiString > files;
+	TheLocalFileSystem->getFilesInDirectory( folder, AsciiString( "*.sav" ), files );
+	for( size_t i = 0; i < files.size(); ++i )
 	{
-		do
-		{
-			AsciiString path;
-			path.format( "%s\\%s", folder.str(), found.cFileName );
-			DeleteFileA( path.str() );
-		} while( FindNextFileA( search, &found ) );
-		FindClose( search );
+		AsciiString path;
+		path.format( "%s\\%s", folder.str(), files[ i ].str() );
+		TheLocalFileSystem->deleteFile( path.str() );
 	}
 	TheReplayCheckpoints.clear();
 }
@@ -2361,11 +2377,11 @@ static void collectPostedCRCs( GameMessageList *list, std::vector< std::pair< In
 
 static void takeReplayCheckpoint( UnsignedInt frame )
 {
-	const DWORD startMs = timeGetTime();
-	CreateDirectoryA( TheGameState->getSaveDirectory().str(), NULL );
-	CreateDirectoryA( TheGameState->getFilePathInSaveDirectory( REPLAY_CHECKPOINT_FOLDER ).str(), NULL );
+	const UnsignedInt startMs = Clock_Milliseconds();
+	TheLocalFileSystem->createDirectory( TheGameState->getSaveDirectory() );
+	TheLocalFileSystem->createDirectory( TheGameState->getFilePathInSaveDirectory( REPLAY_CHECKPOINT_FOLDER ) );
 	const AsciiString folder = replayCheckpointFolder();
-	CreateDirectoryA( folder.str(), NULL );
+	TheLocalFileSystem->createDirectory( folder );
 
 	ReplayCheckpoint &checkpoint = TheReplayCheckpoints[ frame ];
 	checkpoint.path.format( "%s\\%u.sav", folder.str(), frame );
@@ -2375,7 +2391,7 @@ static void takeReplayCheckpoint( UnsignedInt frame )
 	collectPostedCRCs( TheCommandList, checkpoint.postedCRCs );
 	collectPostedCRCs( TheMessageStream, checkpoint.postedCRCs );
 	TheGameState->saveCheckpoint( checkpoint.path );
-	DEBUG_LOG(( "REPLAY CHECKPOINT frame %u in %u ms\n", frame, (UnsignedInt)( timeGetTime() - startMs ) ));
+	DEBUG_LOG(( "REPLAY CHECKPOINT frame %u in %u ms\n", frame, (UnsignedInt)( Clock_Milliseconds() - startMs ) ));
 }
 
 /** Load the last checkpoint at or before the frame, or the first one if the frame is before it.  The
@@ -2395,7 +2411,7 @@ static void rewindReplay( UnsignedInt target )
 	const Real pitch = TheTacticalView->getPitch();
 	const Real zoom = TheTacticalView->getZoom();
 	const Int framesPerSecond = TheGameEngine->getFramesPerSecondLimit();
-	const DWORD startMs = timeGetTime();
+	const UnsignedInt startMs = Clock_Milliseconds();
 
 	TheGameState->loadCheckpoint( checkpoint.path,
 		[ & ]() { TheRecorder->resumePlayback( replayFile, checkpoint.cursor ); } );
@@ -2414,7 +2430,7 @@ static void rewindReplay( UnsignedInt target )
 	TheTacticalView->setZoom( zoom );
 	TheGameEngine->setFramesPerSecondLimit( framesPerSecond );
 	DEBUG_LOG(( "REPLAY REWIND to frame %u from the checkpoint at %u, loaded in %u ms\n",
-		target, at->first, (UnsignedInt)( timeGetTime() - startMs ) ));
+		target, at->first, (UnsignedInt)( Clock_Milliseconds() - startMs ) ));
 }
 
 /** Every client pass, between two logic frames: the checkpoints are taken here, a seek back is carried
@@ -2521,7 +2537,9 @@ void InGameUI::drawSpectatorPage( void )
 	if( m_spectatorOverlay == NULL )
 	{
 		m_spectatorOverlay = new HtmlOverlay( m_superweaponNormalFont );
-		m_spectatorOverlay->setHudPage( TRUE );
+		// the console's own scale: the column and the replay strip standing on the console were left
+		// at the old size when the console was cut to CONTROL_BAR_HUD_PERCENT
+		m_spectatorOverlay->setHud( TRUE );
 	}
 
 	// a unit selected turns the page to his side's steel the same frame, not half a second on
@@ -2788,6 +2806,23 @@ static Bool templateNeedsLineOfSight( const ThingTemplate *tmpl )
 }
 
 //-------------------------------------------------------------------------------------------------
+/** How many rings a blind-spot view of this radius is cut into.  Never more than the map is long corner
+	* to corner (mapSpan: its width plus its height), so a range longer than any map - 1e6 already held
+	* hundreds of megabytes and froze every platform, and inf gave ARM64 2^31 rings whose 180-a-ring grid
+	* overflowed Int - costs no more than the map does.  Converted as Windows converts; never negative. */
+//-------------------------------------------------------------------------------------------------
+Int blindSpotRingCount( Real radius, Real mapSpan )
+{
+	Int rings = floatToIntAsMsvc( ceil( radius / BLIND_SPOT_RING_WIDTH ) );
+	Int most = ( INT_MAX / BLIND_SPOT_RAYS ) - 1;		// never a grid Int cannot count
+	if( mapSpan > 0.0f && mapSpan < (Real)most * BLIND_SPOT_RING_WIDTH )
+		most = floatToIntAsMsvc( ceil( mapSpan / BLIND_SPOT_RING_WIDTH ) ) + 1;
+	if( rings > most )
+		rings = most;
+	return rings < 0 ? 0 : rings;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Fill in which cells of the grid a defence cannot see from eyeZ.  Along one sector the walk keeps
 	* the steepest terrain seen so far, which is the horizon: a target whose top sits under that slope
 	* is behind a hill.  Everything from the first building cell outwards is behind that building, the
@@ -2795,7 +2830,10 @@ static Bool templateNeedsLineOfSight( const ThingTemplate *tmpl )
 //-------------------------------------------------------------------------------------------------
 static void lookRoundReach( ReachView &view, Real eyeZ, ObjectID self )
 {
-	view.rings = (Int)ceil( view.radius / BLIND_SPOT_RING_WIDTH );
+	Region3D extent;
+	extent.zero();
+	TheTerrainLogic->getExtent( &extent );
+	view.rings = blindSpotRingCount( view.radius, extent.width() + extent.height() );
 	view.blocked.assign( BLIND_SPOT_RAYS * view.rings, FALSE );
 
 	for( Int ray = 0; ray < BLIND_SPOT_RAYS; ray++ )
@@ -2832,7 +2870,7 @@ static Bool reachViewHits( const ReachView &view, Real x, Real y )
 	const Real dx = x - view.center.x;
 	const Real dy = y - view.center.y;
 	const Real distance = sqrtf( sqr( dx ) + sqr( dy ) );
-	if( distance >= view.radius )
+	if( !( distance < view.radius ) )		// a NaN distance is outside, not let through
 		return FALSE;
 
 	Real angle = atan2( dy, dx );
@@ -3170,7 +3208,7 @@ static void traceReachCircle( ReachCircle &circle, const ThingTemplate *tmpl )
 static Real reachAtAngle( const ReachCircle &circle, Real angle )
 {
 	const Real at = angle * REACH_OUTLINE_SEGMENTS / ( 2.0f * PI );
-	const Int from = min( (Int)at, REACH_OUTLINE_SEGMENTS - 1 );
+	const Int from = at >= 0.0f ? min( (Int)at, REACH_OUTLINE_SEGMENTS - 1 ) : 0;	// NaN: the first corner
 	const Real part = at - from;
 	return circle.outline[ from ] * ( 1.0f - part ) + circle.outline[ ( from + 1 ) % REACH_OUTLINE_SEGMENTS ] * part;
 }
@@ -3180,7 +3218,7 @@ static Bool insideReach( const ReachCircle &circle, Real x, Real y )
 	const Real dx = x - circle.center.x;
 	const Real dy = y - circle.center.y;
 	const Real distanceSqr = sqr( dx ) + sqr( dy );
-	if( distanceSqr >= sqr( circle.radius ) )
+	if( !( distanceSqr < sqr( circle.radius ) ) )		// a NaN distance is outside, not let through
 		return FALSE;
 
 	Real angle = atan2( dy, dx );
@@ -3737,6 +3775,10 @@ void InGameUI::update( void )
 
 	updateReplaySeek();
 
+	// the wheeled radius belongs to the order it was wheeled for; a shift-kept key keeps it
+	if( !isAreaPicking() )
+		m_areaPickScale = 1.0f;
+
 	/// @todo make sure this code gets called even when the UI is not being drawn
 	if ( m_videoStream && m_videoBuffer )
 	{
@@ -3791,7 +3833,7 @@ void InGameUI::update( void )
 			// so far and apply only the ones not applied yet, so nothing drifts however long it
 			// runs.  See FINDINGS.md 7.2.
 			//
-			const UnsignedInt nowMs = timeGetTime();
+			const UnsignedInt nowMs = Clock_Milliseconds();
 			if( m_subtitleFreezeStartMs == 0 )
 			{
 				m_subtitleFreezeStartMs = nowMs;
@@ -3840,7 +3882,7 @@ void InGameUI::update( void )
 				// first grab the letter we want to add
 				WideChar tempWChar = m_militarySubtitle->subtitle.getCharAt(m_militarySubtitle->index);
 				// if that letter is a return, add a new line
-				if(tempWChar == L'\n')
+				if(tempWChar == u'\n')
 				{
 					// increment the Block position's Y value to draw it on the next line
 					Int height;
@@ -4005,7 +4047,7 @@ void InGameUI::update( void )
 	// frames the wall clock says went by.  Capped at four, so coming back from a hitch or an
 	// alt-tab does not fling the camera across the map on the first frame.  See FINDINGS.md 7.4.
 	//
-	const UnsignedInt cameraNowMs = timeGetTime();
+	const UnsignedInt cameraNowMs = Clock_Milliseconds();
 
 	// a watcher's camera is driven for him while it is not in his own hands (ObserverCamera.h)
 	if( TheGameLogic->isInGame() && localPlayerWatching() )
@@ -4194,6 +4236,8 @@ void InGameUI::reset( void )
 	m_attackMoveToMode	= false;
 	m_forceAttackArmed	= false;
 	m_guardArmed				= false;
+	m_areaOrder					= AREA_ORDER_NONE;
+	m_areaPickScale			= 1.0f;
 	m_moveArmed					= false;
 	m_orderKeyKeptByShift	= false;
 	m_preferSelection		= false;
@@ -4245,7 +4289,9 @@ void InGameUI::message( AsciiString stringManagerLabel, ... )
 	WideChar buf[ UnicodeString::MAX_FORMAT_BUF_LEN ];
   // truncate rather than throw: an uncaught engine exception aborts with 0xC0000409 and no log
   // at all, so an over-long chat or script message used to be a silent hard crash.
-  if( _vsnwprintf(buf, sizeof( buf )/sizeof( WideChar ) - 1, stringManagerString.str(), args ) < 0 )
+  // WideCharFormatV, not _vsnwprintf: buf is WideChar and there is no char16_t printf anywhere.
+  // It keeps _vsnwprintf's contract, so the negative test below still means "it did not fit".
+  if( WideCharFormatV(buf, sizeof( buf )/sizeof( WideChar ) - 1, stringManagerString.str(), args ) < 0 )
 			DEBUG_LOG(("InGameUI::message - text truncated to %d characters\n", (Int)(sizeof( buf )/sizeof( WideChar ) - 1)));
 	buf[ sizeof( buf )/sizeof( WideChar ) - 1 ] = 0;
 	formattedMessage.set( buf );
@@ -4270,7 +4316,7 @@ void InGameUI::message( UnicodeString format, ... )
 	WideChar buf[ UnicodeString::MAX_FORMAT_BUF_LEN ];
   // truncate rather than throw: an uncaught engine exception aborts with 0xC0000409 and no log
   // at all, so an over-long chat or script message used to be a silent hard crash.
-  if( _vsnwprintf(buf, sizeof( buf )/sizeof( WideChar ) - 1, format.str(), args ) < 0 )
+  if( WideCharFormatV(buf, sizeof( buf )/sizeof( WideChar ) - 1, format.str(), args ) < 0 )
 			DEBUG_LOG(("InGameUI::message - text truncated to %d characters\n", (Int)(sizeof( buf )/sizeof( WideChar ) - 1)));
 	buf[ sizeof( buf )/sizeof( WideChar ) - 1 ] = 0;
 	formattedMessage.set( buf );
@@ -4423,7 +4469,7 @@ void InGameUI::alertSuperweapon( Player *owner, const UnicodeString &name, const
 	else
 		alert.whose = local->getRelationship( owner->getDefaultTeam() ) == ENEMIES ? "enemy" : "ally";
 	if( m_alerts.empty() )
-		m_alertStartMs = timeGetTime();
+		m_alertStartMs = Clock_Milliseconds();
 	m_alerts.push_back( alert );
 }
 
@@ -4449,7 +4495,7 @@ void InGameUI::drawAlertPage( void )
 {
 	enum { ALERT_GAP = 14, ALERT_WIDTH = 360, ALERT_OPAQUE = 255 };	// the gap clear of the plates, the owner's "a bit lower"
 	m_alertBottom = 0;
-	const UnsignedInt nowMs = timeGetTime();
+	const UnsignedInt nowMs = Clock_Milliseconds();
 	while( !m_alerts.empty() && nowMs - m_alertStartMs >= alertHoldMs( m_alerts.size() - 1 ) )
 	{
 		m_alerts.erase( m_alerts.begin() );
@@ -4853,7 +4899,7 @@ void InGameUI::noteAllyCursor( Int playerIndex, Real x, Real y )
 	cursor.position.x = x;
 	cursor.position.y = y;
 	cursor.position.z = TheTerrainLogic->getGroundHeight( x, y );
-	cursor.heardMs = timeGetTime();
+	cursor.heardMs = Clock_Milliseconds();
 
 	// the first report of a match arrives wherever that ally is looking, which is nowhere near the
 	// origin the marker starts at - easing in from there would draw a line across the whole map
@@ -4896,7 +4942,7 @@ Real InGameUI::getAllyCursorFade( Int playerIndex ) const
 	if( cursor.known == FALSE )
 		return 0.0f;
 
-	const UnsignedInt ageMs = timeGetTime() - cursor.heardMs;
+	const UnsignedInt ageMs = Clock_Milliseconds() - cursor.heardMs;
 	if( ageMs >= ALLY_CURSOR_GONE_MS )
 		return 0.0f;
 	if( ageMs <= ALLY_CURSOR_HOLD_MS )
@@ -4912,7 +4958,7 @@ Real InGameUI::getAllyCursorFade( Int playerIndex ) const
 //-------------------------------------------------------------------------------------------------
 void InGameUI::updateAllyCursors( void )
 {
-	const UnsignedInt nowMs = timeGetTime();
+	const UnsignedInt nowMs = Clock_Milliseconds();
 	const UnsignedInt elapsedMs = ( m_allyCursorEasedMs == 0 ) ? 0 : ( nowMs - m_allyCursorEasedMs );
 	m_allyCursorEasedMs = nowMs;
 
@@ -4975,7 +5021,7 @@ void InGameUI::sendLocalAllyCursor( void )
 	if( TheNetwork == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
 		return;
 
-	const UnsignedInt nowMs = timeGetTime();
+	const UnsignedInt nowMs = Clock_Milliseconds();
 	if( m_allyCursorSentMs != 0 && ( nowMs - m_allyCursorSentMs ) < ALLY_CURSOR_SEND_INTERVAL_MS )
 		return;
 
@@ -5221,6 +5267,15 @@ void InGameUI::collectOrderHints( void )
 		Coord3D resolvedGoal;
 		Bool goalResolved = FALSE;
 		Bool legsDrawn = FALSE;		// the order drew its own threads, and the shift list follows on from them
+
+		// a capture walks its man to the door with a plain move of its own and then stands him idle
+		// while the building turns, so the state machine reads as a move and then as nothing at all.
+		// The ability knows better, and the thread is the capture's for as long as it runs
+		ObjectID capturedID = INVALID_ID;
+		const Object *captured = obj->getCaptureTarget( &capturedID ) ? TheGameLogic->findObjectByID( capturedID ) : NULL;
+		if( captured && isHiddenByShroud( captured ) )
+			captured = NULL;
+
 		switch( ai->getCurrentStateID() )
 		{
 			case AI_MOVE_TO:
@@ -5330,6 +5385,9 @@ void InGameUI::collectOrderHints( void )
 				if( !getGuardedSpot( ai, resolvedGoal ) )
 					continue;
 				goalResolved = TRUE;
+				// and the circle it holds there
+				if( ai->getCurrentStateID() == AI_GUARD )
+					hint.radius = AIGuardMachine::getGuardRange( obj );
 				break;
 			}
 
@@ -5338,10 +5396,17 @@ void InGameUI::collectOrderHints( void )
 				// gave it, and that order is held out of reach of the goal until the wheels are up.
 				// Ask for it, or an air strike shows nothing at all during the seconds the plane spends
 				// taxiing, which is exactly when the player wants to see where it is going
-				if( !getHeldAircraftOrder( obj, hint.kind, resolvedGoal ) )
+				if( captured == NULL && !getHeldAircraftOrder( obj, hint.kind, resolvedGoal ) )
 					continue;
 				goalResolved = TRUE;
 				break;
+		}
+
+		if( captured )
+		{
+			hint.kind = ORDER_HINT_CAPTURE;
+			resolvedGoal = *captured->getPosition();
+			goalResolved = TRUE;
 		}
 
 		if( !legsDrawn )
@@ -5704,7 +5769,7 @@ void InGameUI::addOrderHint( OrderHint& hint, const std::vector<OrderHint>& prev
 			ordinal++;
 	}
 
-	hint.bornMs = timeGetTime();
+	hint.bornMs = Clock_Milliseconds();
 
 	Int seen = 0;
 	for( std::vector<OrderHint>::const_iterator it = previous.begin();
@@ -6293,21 +6358,21 @@ void InGameUI::createMouseoverHint( const GameMessage *msg )
 				{
 					if (!teamName.isEmpty())
 					{
-						str.format(L"%hs(%hs): %s", teamName.str(), objName.str(), str.str());
+						str.format(u"%hs(%hs): %s", teamName.str(), objName.str(), str.str());
 					}
 					else
 					{
-						str.format(L"%hs: %s", objName.str(), str.str());
+						str.format(u"%hs: %s", objName.str(), str.str());
 					}
 				}
 				else
 				{
 					if (!teamName.isEmpty())
 					{
-						str.format(L"%hs: %s", teamName.str(), str.str());
+						str.format(u"%hs: %s", teamName.str(), str.str());
 					}
 				}
-				str.format(L"%s - %hs", str.str(), stateName.str());
+				str.format(u"%s - %hs", str.str(), stateName.str());
 
 			}
 #endif
@@ -6342,7 +6407,7 @@ void InGameUI::createMouseoverHint( const GameMessage *msg )
 				UnicodeString tooltip;
 				//if (TheRecorder->isMultiplayer() && player->getPlayerType() == PLAYER_HUMAN)
 				if (TheRecorder->isMultiplayer() && player->isPlayableSide())
-					tooltip.format(L"%s\n%s", str.str(), ((Player *)player)->getPlayerDisplayName().str());
+					tooltip.format(u"%s\n%s", str.str(), ((Player *)player)->getPlayerDisplayName().str());
 				else
 					tooltip = str;
 
@@ -6552,6 +6617,8 @@ void InGameUI::createCommandHint( const GameMessage *msg )
 					{
 						if( !drawSelectable && srcObj && srcObj->isLocallyControlled() && srcObj->isKindOf(KINDOF_STRUCTURE))
 							setMouseCursor( Mouse::GENERIC_INVALID );
+						else if( m_areaOrder != AREA_ORDER_NONE )
+							setMouseCursor( Mouse::CROSS );	// a sweep circles the point whatever stands on it, own units included
 						else if( drawSelectable && obj->isLocallyControlled() && !obj->isKindOf(KINDOF_MINE))
 							setMouseCursor( Mouse::SELECTING );
 						else if( TheRadar->isRadarWindow( window ) &&
@@ -7295,6 +7362,154 @@ void InGameUI::adjustPlacementRowGap( Real spin )
 	}
 
 }  // end adjustPlacementRowGap
+
+static const Real AREA_PICK_RADIUS_MIN = 50.0f;
+static const Real AREA_PICK_STEP = 1.15f;		///< what one notch of the wheel multiplies the radius by
+static const Real AREA_SWEEP_RADIUS = 300.0f;	///< a search and destroy's circle before the wheel
+
+//-------------------------------------------------------------------------------------------------
+/** The guard key, the search and destroy key, or one of EA's guard buttons waiting for
+	* its click. */
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::isAreaPicking( void ) const
+{
+	if( m_guardArmed || m_areaOrder != AREA_ORDER_NONE )
+		return TRUE;
+
+	const CommandButton *command = m_pendingGUICommand;
+	return command && ( command->getCommandType() == GUI_COMMAND_GUARD ||
+											command->getCommandType() == GUI_COMMAND_GUARD_WITHOUT_PURSUIT ||
+											command->getCommandType() == GUI_COMMAND_GUARD_FLYING_UNITS_ONLY );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The radius the armed order starts from before the wheel touches it.  A guard used to cover
+	* each unit's own vision, so riflemen and rocket troops on one spot held two different circles;
+	* the whole selection now takes the widest of them.  A sweep's circle is the ground to cover, which
+	* has nothing to do with how far its units see, so it starts the same for every selection. */
+//-------------------------------------------------------------------------------------------------
+static Real areaPickBaseRadius( const DrawableList& selected, Bool sweeping )
+{
+	if( sweeping )
+		return AREA_SWEEP_RADIUS;
+
+	Real widest = 0.0f;
+	for( DrawableList::const_iterator it = selected.begin(); it != selected.end(); ++it )
+	{
+		const Object *obj = (*it)->getObject();
+		if( obj && obj->isLocallyControlled() && obj->getAI() )
+			widest = max( widest, AIGuardMachine::getStdGuardRange( obj ) );
+	}
+	return widest;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real InGameUI::getAreaPickRadius( void ) const
+{
+	const Real radius = areaPickBaseRadius( m_selectedDrawables, m_areaOrder != AREA_ORDER_NONE ) * m_areaPickScale;
+	return min( max( radius, AREA_PICK_RADIUS_MIN ), GUARD_RADIUS_MAX );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A notch away from the player grows the circle by a fixed share, so the wheel feels the same on a
+	* small circle as on a big one.  The scale stops where the radius does, so the wheel never winds
+	* up travel that has to be undone before the circle moves again. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::adjustAreaPickRadius( Real notches )
+{
+	const Real base = areaPickBaseRadius( m_selectedDrawables, m_areaOrder != AREA_ORDER_NONE );
+	if( base <= 0.0f )
+		return;
+
+	m_areaPickScale *= (Real)pow( AREA_PICK_STEP, notches );
+	m_areaPickScale = min( max( m_areaPickScale, AREA_PICK_RADIUS_MIN / base ), GUARD_RADIUS_MAX / base );
+}
+
+//-------------------------------------------------------------------------------------------------
+void InGameUI::toggleAreaOrderArmed( AreaOrder order )
+{
+	m_areaOrder = ( m_areaOrder == order ) ? AREA_ORDER_NONE : order;
+	m_areaPickScale = 1.0f;
+	m_attackMoveToMode = FALSE;
+	m_forceAttackArmed = FALSE;
+	m_guardArmed = FALSE;
+	m_moveArmed = FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The first unit of the player's in the selection with a stance to read, for the stance key's face
+	* and for which stance a press switches the selection to. */
+//-------------------------------------------------------------------------------------------------
+static Bool isSelectionAggressive( void )
+{
+	const DrawableList *selected = TheInGameUI->getAllSelectedLocalDrawables();
+	for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
+	{
+		const Object *obj = (*it)->getObject();
+		if( obj && obj->getAI() )
+			return obj->getAI()->hasAggressiveStance();
+	}
+	return FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
+void InGameUI::pressOrderKey( Int key )
+{
+	if( key == ORDER_KEY_HUNT )
+		toggleAreaOrderArmed( AREA_ORDER_HUNT );
+	else if( key == ORDER_KEY_STANCE && getSelectCount() > 0 )
+	{
+		GameMessage *stance = TheMessageStream->appendMessage( GameMessage::MSG_SET_STANCE );
+		stance->appendIntegerArgument( isSelectionAggressive() ? 0 : 1 );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The ring is walked from the point nearest the selection, each point an order of its own on the
+	* units' list (OrderQueue.h): the first replaces what they were doing, unless shift puts the whole
+	* sweep behind it.  Search and destroy attack moves the ring, so it fights what it meets, and
+	* ends guarding the circle it was given. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::issueAreaSweep( const Coord3D &center )
+{
+	const DrawableList *selected = getAllSelectedLocalDrawables();
+	Coord3D from;
+	from.zero();
+	Int count = 0;
+	for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
+	{
+		const Object *obj = (*it)->getObject();
+		if( obj == NULL )
+			continue;
+		from.x += obj->getPosition()->x;
+		from.y += obj->getPosition()->y;
+		count++;
+	}
+	if( count == 0 )
+		return;
+	from.x /= count;
+	from.y /= count;
+
+	const Real radius = getAreaPickRadius();
+	std::vector<Coord3D> route;
+	sweepRoute( ThePlayerList->getLocalPlayer()->getPlayerIndex(), center, radius, from, route );
+
+	const GameMessage::Type step = GameMessage::MSG_DO_ATTACKMOVETO;
+	for( size_t i = 0; i < route.size(); i++ )
+	{
+		markNextOrderQueued( ( i == 0 && !isInWaypointMode() ) ? ORDER_QUEUE_FRESH : ORDER_QUEUE_APPEND );
+		TheMessageStream->appendMessage( step )->appendLocationArgument( route[ i ] );
+	}
+	markNextOrderQueued( ORDER_QUEUE_APPEND );
+	GameMessage *guard = TheMessageStream->appendMessage( GameMessage::MSG_DO_GUARD_POSITION );
+	guard->appendLocationArgument( center );
+	guard->appendIntegerArgument( GUARDMODE_NORMAL );
+	guard->appendRealArgument( radius );
+
+	pickAndPlayUnitVoiceResponse( selected, step );
+	DEBUG_LOG(( "area sweep: hunt round (%.0f,%.0f) radius %.0f, %d points, %d units\n",
+							center.x, center.y, radius, (Int)route.size(), count ));
+}
 
 //-------------------------------------------------------------------------------------------------
 /** Every piece faces 'angle', the heading on the ghost before the drag began: the drag is spent on
@@ -8203,13 +8418,13 @@ void InGameUI::postDraw( void )
 					Int sec = readySecs - min*60;
 					
 					if (!info->isCountdown)
-						line.format(L"%s %d", info->timerText.str(), framesLeft);
+						line.format(u"%s %d", info->timerText.str(), framesLeft);
 					else
 					{
 						if (sec >= 10)
-							line.format(L"%s %d:%d", info->timerText.str(), min, sec);
+							line.format(u"%s %d:%d", info->timerText.str(), min, sec);
 						else
-							line.format(L"%s %d:0%d", info->timerText.str(), min, sec);
+							line.format(u"%s %d:0%d", info->timerText.str(), min, sec);
 					}
 					info->displayString->setText(line);
 				}
@@ -8493,7 +8708,7 @@ void InGameUI::militarySubtitle( const AsciiString& label, Int duration )
 	// make sure we actually will be displaying something
 	if( title.isEmpty() || duration <= 0)
 	{
-		DEBUG_CRASH(("Trying to create a military subtitle but either title is empty (%ls) or duration is <= 0 (%d)",title.str(), duration));
+		DEBUG_CRASH(("Trying to create a military subtitle but either title is empty (%s) or duration is <= 0 (%d)",WideCharAsUtf8( title.str() ).str(), duration));
 		return;
 	}
 
@@ -9444,6 +9659,11 @@ enum
 //-------------------------------------------------------------------------------------------------
 void InGameUI::addSignalMark( SignalKind kind, const Coord3D &pos, Color color, ParticleSystemID smoke )
 {
+	// No decal manager without a renderer (headless, or off Windows until the D track): no mark.
+	// GameLogicDispatch calls this for every signal a player sends, replays included.
+	if( TheProjectedShadowManager == NULL )
+		return;
+
 	Shadow::ShadowTypeInfo decalInfo;
 	decalInfo.allowUpdates = FALSE;
 	decalInfo.allowWorldAlign = TRUE;		// wrapped over the terrain it lands on
@@ -9623,8 +9843,11 @@ void InGameUI::updateFloatingText( void )
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 /** A one-line heads-up overlay: render rate and elapsed game time.
-	* Off unless ShowHudOverlay is set in Options.ini.  Retail only ever showed the frame rate, and
-	* only behind -displayDebug together with a screenful of engine internals. */
+	* GlobalData's m_showHudOverlay: on by default in the developer builds (Debug, _INTERNAL) and off in
+	* Release, a project rule.  A player turns it on with ShowHudOverlay = Yes in GameData.ini; the harnesses
+	* whose screenshots are evidence pass -showHudOverlay.  Nothing shipped forces it on: the staged overlay
+	* and the packages refuse a ShowHudOverlay = Yes.  Retail only ever showed the frame rate, and only behind
+	* -displayDebug together with a screenful of engine internals. */
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 /** How the last ten seconds of peace time animate, as fractions of one second. */
@@ -9766,7 +9989,7 @@ void InGameUI::drawPeaceCountdown( UnsignedInt framesLeft )
 									TRUE ) );
 
 	UnicodeString text;
-	text.format( L"%d", (Int)secondsLeft );
+	text.format( u"%d", (Int)secondsLeft );
 	m_peaceCountdownDisplayString->setText( text );
 
 	// the same string the plate at the top uses, in its own size: the two are never up together
@@ -9834,7 +10057,7 @@ void InGameUI::drawHudOverlay( void )
 	++m_hudDrawCount;
 	const UnsignedInt clientFrame = m_hudDrawCount;
 	const UnsignedInt logicFrame = TheGameLogic->getFrame();
-	UnsignedInt nowMs = timeGetTime();
+	UnsignedInt nowMs = Clock_Milliseconds();
 	// a replay wound back runs the frame number backwards, and the unsigned difference read as tens
 	// of millions of logic frames a second; the reading starts over from there instead
 	if( m_hudLastSampleFrame == 0 || logicFrame < m_hudLastSampleLogicFrame )
@@ -9872,11 +10095,11 @@ void InGameUI::drawHudOverlay( void )
 	UnsignedInt realSecs = (nowMs - m_hudRealClockBaseMs) / 1000;
 
 	// the machine's own clock first, for a player who wants to know when to stop
-	SYSTEMTIME wallClock;
-	GetLocalTime( &wallClock );
+	WallClockTime wallClock;
+	getLocalWallClock( &wallClock );
 
 	UnicodeString text;
-	text.format( L"%02d:%02d   %02d:%02d:%02d(%02d:%02d:%02d)   %dhz(%dfps) %s",
+	text.format( u"%02d:%02d   %02d:%02d:%02d(%02d:%02d:%02d)   %dhz(%dfps) %s",
 							 wallClock.wHour, wallClock.wMinute,
 							 gameSecs / 3600, (gameSecs / 60) % 60, gameSecs % 60,
 							 realSecs / 3600, (realSecs / 60) % 60, realSecs % 60,
@@ -9884,7 +10107,7 @@ void InGameUI::drawHudOverlay( void )
 							 TheDisplay->getRendererName() );
 
 	UnicodeString frameText;
-	frameText.format( L"   frame %d", (Int)logicFrame );
+	frameText.format( u"   frame %d", (Int)logicFrame );
 	text.concat( frameText );
 
 	// in a network game, how far ahead the room can play without waiting on anybody, out of the
@@ -9893,7 +10116,7 @@ void InGameUI::drawHudOverlay( void )
 	if( TheNetwork != NULL )
 	{
 		UnicodeString netText;
-		netText.format( L"   ready %d/%d   room %dfps", (Int)TheNetwork->getFramesReady(),
+		netText.format( u"   ready %d/%d   room %dfps", (Int)TheNetwork->getFramesReady(),
 										(Int)TheNetwork->getRunAhead(), (Int)TheNetwork->getFrameRate() );
 		text.concat( netText );
 	}
@@ -9905,7 +10128,7 @@ void InGameUI::drawHudOverlay( void )
 	if( unitCap > 0 && localPlayer && !localPlayer->isPlayerObserver() )
 	{
 		UnicodeString units;
-		units.format( L"   %d/%d units", localPlayer->countUnitsTowardCap(), unitCap );
+		units.format( u"   %d/%d units", localPlayer->countUnitsTowardCap(), unitCap );
 		text.concat( units );
 	}
 
@@ -10385,7 +10608,7 @@ void InGameUI::drawStripSeconds( Int which, Int x, Int y, Int w, Int h, Int seco
 
 	UnicodeString text, number;
 	formatStripSeconds( &text, seconds );
-	number.format( L"%d", seconds > 0 ? seconds : 0 );
+	number.format( u"%d", seconds > 0 ? seconds : 0 );
 
 	//
 	// Its own string, kept between frames - see m_stripSecondsString.  Every countdown in a strip is
@@ -10515,7 +10738,7 @@ void InGameUI::drawStripQuantity( Int which, Int x, Int y, Int w, Int h, Int qua
 	const IRegion2D cell = { { x, y }, { x + w, y + h } };
 
 	UnicodeString text;
-	text.format( L"x%d", quantity );
+	text.format( u"x%d", quantity );
 
 	DisplayString *quantityString = fitStripString( m_stripQuantityString[ which ], text, PRODUCTION_STRIP_SECS, cell );
 	HudReadout_draw( quantityString, cell, HUD_READOUT_TOP_RIGHT, GameMakeColor( 255, 255, 255, 255 ) );
@@ -11110,7 +11333,7 @@ std::string InGameUI::scoreboardHtml( void )
 			// a free for all is one section of players with no team between them
 			UnicodeString label = TheGameText->fetch( "GUI:ScoreboardPlayer" );
 			if( seats[ first ].section >= 0 )
-				label.format( L"%s %s", TheGameText->fetch( "GUI:ScoreboardTeam" ).str(), scoreboardTeamLabel( seats[ first ].slot ).str() );
+				label.format( u"%s %s", TheGameText->fetch( "GUI:ScoreboardTeam" ).str(), scoreboardTeamLabel( seats[ first ].slot ).str() );
 			band[ "side" ] = "team";
 			band[ "label" ] = WideCharStringToMultiByte( label.str() );
 		}
@@ -11154,16 +11377,14 @@ static void standDownPromotionScreen( void );
 static const char *const CONTROL_BAR_WINDOWS[] =
 {
 	"LeftHUD", "RightHUD", "CameoWindow", "CommandWindow", "MoneyDisplay", "PowerWindow", "GeneralsExp",
-	"ButtonGeneral", "ButtonLarge", "ButtonOptions", "ButtonIdleWorker", "PopupCommunicator",
-	"WinUAttack"
+	"ButtonGeneral", "ButtonLarge", "ButtonOptions", "ButtonIdleWorker", "PopupCommunicator"
 };
 
 /** The bar's windows the page draws instead of letting them paint themselves: the promotion and
-	* minimise buttons and the radar's under-attack light.  They still take their clicks; only their
-	* pictures are the page's. */
+	* minimise buttons among them.  They still take their clicks; only their pictures are the page's. */
 static const char *const CONTROL_BAR_CUSTOM[] =
 {
-	"ButtonGeneral", "ButtonLarge", "WinUAttack", "PowerWindow", "GeneralsExp", "ExpBarForeground", "RightHUD",
+	"ButtonGeneral", "ButtonLarge", "PowerWindow", "GeneralsExp", "ExpBarForeground", "RightHUD",
 	"WinUnitSelected"
 };
 
@@ -11351,7 +11572,8 @@ static void armSignalFromPage( const std::string &kind )
 //-------------------------------------------------------------------------------------------------
 /** data-click="order:attack", "order:hold" or "order:move", the command panel's orders no command set
 	* has a button for: what the A, C and V keys do, force fire armed for the next click, hold position,
-	* and a move armed for the next click. */
+	* and a move armed for the next click.  "order:hunt" and "order:stance" are the keys after them,
+	* pressOrderKey's. */
 //-------------------------------------------------------------------------------------------------
 static void orderFromPage( const std::string &order )
 {
@@ -11359,6 +11581,10 @@ static void orderFromPage( const std::string &order )
 		TheInGameUI->toggleForceAttackArmed();
 	else if( order == "move" )
 		TheInGameUI->toggleMoveArmed();
+	else if( order == "hunt" )
+		TheInGameUI->pressOrderKey( ORDER_KEY_HUNT );
+	else if( order == "stance" )
+		TheInGameUI->pressOrderKey( ORDER_KEY_STANCE );
 	else if( order == "hold" && TheInGameUI->getSelectCount() > 0 )
 	{
 		GameMessage *hold = TheMessageStream->appendMessage( GameMessage::MSG_DO_HOLD_POSITION );
@@ -11378,8 +11604,8 @@ static const Int UPGRADE_CAMEOS = 5;		///< UnitUpgrade1 to 5, a single unit's up
 	* the radar with the experience bar beside it, then the command grid, six by three, with the power
 	* bar lying along its top and the money on the power bar's left end, then the portrait bar on the
 	* screen's bottom edge.  Since 2026-10-01 the radar's keys stand in the selection's header instead,
-	* the idle worker's key, the skills key and the under-attack light from its left, the smoke signals
-	* after them, and the radar has the height of its header too. */
+	* the idle worker's key and the skills key from its left, the smoke signals after them, and the
+	* radar has the height of its header too. */
 enum
 {
 	COMMAND_BUTTON_WIDTH	= 50,		///< a command button as ControlBar.wnd authors it, the promotion screen's cell
@@ -11401,10 +11627,10 @@ enum
 	EXPERIENCE_GAP				= 4,		///< between it and the radar
 	PANEL_FOOT						= 4,		///< a grid's ring over the screen's bottom edge, the steel under it
 	HEADER_SLOTS					= 7,		///< the selection's header, in slots of a seventh of it: the idle worker's key,
-																///< the skills key two, the under-attack light, and a smoke signal's key each
+																///< the skills key two and a smoke signal's key each; the last slot is bare
+																///< steel since the under-attack light went, so the keys kept their size
 	IDLE_SLOTS						= 1,
 	SKILLS_SLOTS					= 2,
-	ALERT_SLOTS						= 1,
 	SIGNAL_BUTTONS				= 3,		///< attack, defend, look, a slot each
 	SIGNAL_STEP_HEIGHT		= 24,		///< how far each smoke signal key rises into its place
 	MONEY_TEXT_MARGIN			= 5,		///< the money's well each side of its figure, which sets the well's width
@@ -11947,20 +12173,22 @@ void InGameUI::drawCellGridFront( Int grid )
 	// once, in a box with no width of its own, which this layout engine gives no background: the
 	// letter stood bare on the picture in a lighter face than its neighbours'.
 	//
-	if( grid == CELL_GRID_COMMAND && m_orderKeysShown )
+	if( grid == CELL_GRID_COMMAND )
 	{
-		static const Int ORDER_KEY_PLACES[ ORDER_KEYS ] = { COMMAND_PLACE_ATTACK, COMMAND_PLACE_HOLD, COMMAND_PLACE_MOVE };
 		enum { ORDER_KEY_POINTS = 7 };		// W3DPushButton.cpp's BADGE_DESIGN_POINTS, the buttons' corner markings
 		const AsciiString fontName = numberedWindow( "ButtonCommand", 1 )->winGetFont()->nameString;
 		const Int points = max( (Int)HUD_READOUT_POINTS_LEAST, (Int)REAL_TO_INT_FLOOR( ORDER_KEY_POINTS * ControlBarHudScale() ) );
 		for( Int key = 0; key < ORDER_KEYS; key++ )
 		{
+			if( m_orderKeyPlace[ key ] < 0 )
+				continue;
+
 			// a letter never changes by itself, so a new HUD Size is what letters it again
 			if( points != m_orderKeyPoints && m_orderKeyString[ key ] != NULL )
 				m_orderKeyString[ key ]->setText( UnicodeString::TheEmptyString );
 
 			UnicodeString letter;
-			letter.translate( AsciiString( commandSlotKey( ORDER_KEY_PLACES[ key ] ).c_str() ) );
+			letter.translate( AsciiString( commandSlotKey( m_orderKeyPlace[ key ] ).c_str() ) );
 			HudReadout_draw( fitReadoutString( m_orderKeyString[ key ], letter, fontName, points, m_orderKeyCell[ key ] ),
 											 m_orderKeyCell[ key ], HUD_READOUT_TOP_LEFT, GameMakeColor( 255, 255, 255, 255 ) );
 		}
@@ -12059,7 +12287,13 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	const Int gridWellWidth = REAL_TO_INT( COMMAND_COLUMNS * ( COMMAND_CELL_WIDTH + CELL_GAP ) * scale );
 	const ICoord2D cell = cellSize();
 	const Int cellGap = REAL_TO_INT( SKILL_CELL_GAP * scale );
-	Int consoleWidth = radarWellWidth + border + selectionWellWidth;
+	// a watcher with nothing selected has no portrait to show: the selection's well beside the radar
+	// goes and the console is the radar alone, until a click on a unit brings it back.  Read from the
+	// selection itself, not the portrait panel's state, which stayed up for an -observer start
+	const Bool selectionShown = !watching || centreShown || getSelectCount() > 0;
+	Int consoleWidth = radarWellWidth;
+	if( selectionShown )
+		consoleWidth += border + selectionWellWidth;
 	if( centreShown )
 		consoleWidth += border + gridWellWidth + powersTrayWidth( scale );
 
@@ -12070,7 +12304,7 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 
 	IRegion2D wells;
 	wells.lo.x = radarWell.lo.x;
-	wells.hi.x = centreShown ? gridWell.hi.x : selectionWell.hi.x;
+	wells.hi.x = centreShown ? gridWell.hi.x : selectionShown ? selectionWell.hi.x : radarWell.hi.x;
 	wells.lo.y = consoleTopLine;
 	wells.hi.y = foot;
 	const IRegion2D consoleBox = framed( wells, border );
@@ -12084,7 +12318,7 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	std::vector< HtmlValues > &wellList = lists[ "wells" ];
 	size_t wellsFilled = 0;
 	putWell( wellList, wellsFilled, radarWell, leftFound, FALSE, scale );
-	putWell( wellList, wellsFilled, selectionWell, consoleShown, TRUE, scale );
+	putWell( wellList, wellsFilled, selectionWell, consoleShown && selectionShown, TRUE, scale );
 	putWell( wellList, wellsFilled, gridWell, centreShown, TRUE, scale );
 	wellList.resize( wellsFilled );
 
@@ -12098,11 +12332,10 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	putExperienceBar( values, lists[ "expcells" ], lists[ "rankstars" ] );
 
 	// in the selection's header, on its grid of HEADER_SLOTS from its left: the idle worker's key, the
-	// skills key - the rank's stars, and the button that opens the promotion screen - the under-attack
-	// light, and in a multiplayer game the three smoke signals.  A key that is not there leaves no gap:
-	// a watcher, or a player beaten, has no idle worker's key and no promotions to buy, and only the
-	// light is left at the header's left end.  Every edge is a whole slot from the header's left, each
-	// rounded once, so two tabs share theirs
+	// skills key - the rank's stars, and the button that opens the promotion screen - and in a
+	// multiplayer game the three smoke signals.  A key that is not there leaves no gap: a watcher, or a
+	// player beaten, has no idle worker's key and no promotions to buy.  Every edge is a whole slot
+	// from the header's left, each rounded once, so two tabs share theirs
 	const Bool idleShown = leftFound && centreShown;
 	const Bool skillsShown = leftFound && ThePlayerList->getLocalPlayer()->isPlayerActive();
 	const IRegion2D header = wellHeader( selectionWell, scale );
@@ -12121,13 +12354,11 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	Int slot = 0;
 	const IRegion2D idleTab = Slots::take( header, slotWidth, slot, idleShown ? IDLE_SLOTS : 0 );
 	const IRegion2D skillsTab = Slots::take( header, slotWidth, slot, skillsShown ? SKILLS_SLOTS : 0 );
-	const IRegion2D alertTab = Slots::take( header, slotWidth, slot, ALERT_SLOTS );
 	const IRegion2D signalTabs = Slots::take( header, slotWidth, slot, signalsShown ? SIGNAL_BUTTONS : 0 );
 	putPageRect( values, "idletab", idleTab, idleShown, scale );
 	putPageRect( values, "skillstab", skillsTab, skillsShown, scale );
-	putPageRect( values, "alerttab", alertTab, leftFound, scale );
 	putPageRect( values, "signals", signalTabs, signalsShown, scale );
-	const UnsignedInt nowMs = timeGetTime();
+	const UnsignedInt nowMs = Clock_Milliseconds();
 
 	// the idle worker's key flashes while a worker stands idle, which is when the bar enables its
 	// window: lit and dark in turn, a beat the eye catches at the edge of the screen
@@ -12155,6 +12386,12 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	// attack, hold position and move have no button in any command set: the page's keys do what A, C
 	// and V do, for anything that attack moves
 	taken[ COMMAND_PLACE_ATTACK ] = taken[ COMMAND_PLACE_HOLD ] = taken[ COMMAND_PLACE_MOVE ] = fights;
+	// and search and destroy and the stance key wherever there is room for them
+	Int extraKeys[ ORDER_KEY_EXTRAS ];
+	TheControlBar->getOrderKeyPlaces( extraKeys );
+	for( Int key = 0; key < ORDER_KEY_EXTRAS; key++ )
+		if( extraKeys[ key ] >= 0 )
+			taken[ extraKeys[ key ] ] = TRUE;
 
 	// The power bar lies in the command grid's header strip, as long as the strip less a margin each end
 	const IRegion2D gridHeader = wellHeader( gridWell, scale );
@@ -12285,14 +12522,17 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	for( Int button = 0; button < COMMAND_BUTTONS; button++ )
 		if( where[ button ] >= 0 )
 			TheControlBar->placeWindowAt( numberedWindow( "ButtonCommand", button + 1 ), place[ where[ button ] ] );
-	putPageRect( values, "attackkey", place[ COMMAND_PLACE_ATTACK ], centreShown && fights, scale );
-	putPageRect( values, "holdkey", place[ COMMAND_PLACE_HOLD ], centreShown && fights, scale );
-	putPageRect( values, "movekey", place[ COMMAND_PLACE_MOVE ], centreShown && fights, scale );
-	// their letters are drawCellGridFront's, on the command buttons' own plate
-	m_orderKeysShown = centreShown && fights;
-	m_orderKeyCell[ 0 ] = place[ COMMAND_PLACE_ATTACK ];
-	m_orderKeyCell[ 1 ] = place[ COMMAND_PLACE_HOLD ];
-	m_orderKeyCell[ 2 ] = place[ COMMAND_PLACE_MOVE ];
+	// the page's own keys; their letters are drawCellGridFront's, on the command buttons' own plate
+	static const char *const ORDER_KEY_NAMES[ ORDER_KEYS ] = { "attackkey", "holdkey", "movekey", "huntkey", "stancekey" };
+	const Int orderKeyPlaces[ ORDER_KEYS ] = { fights ? COMMAND_PLACE_ATTACK : -1, fights ? COMMAND_PLACE_HOLD : -1,
+		fights ? COMMAND_PLACE_MOVE : -1, extraKeys[ ORDER_KEY_HUNT ], extraKeys[ ORDER_KEY_STANCE ] };
+	for( Int key = 0; key < ORDER_KEYS; key++ )
+	{
+		m_orderKeyPlace[ key ] = centreShown ? orderKeyPlaces[ key ] : -1;
+		m_orderKeyCell[ key ] = place[ max( m_orderKeyPlace[ key ], 0 ) ];
+		putPageRect( values, ORDER_KEY_NAMES[ key ], m_orderKeyCell[ key ], m_orderKeyPlace[ key ] >= 0, scale );
+	}
+	values[ "stance" ] = isSelectionAggressive() ? "aggressive" : "defensive";
 
 	// the selection's well left of the grid: a lone unit's portrait and upgrades, or a group's types,
 	// the owner's rule.  A watcher has no command panel and keeps the portrait of what he clicked
@@ -12779,7 +13019,7 @@ void InGameUI::drawPromotionPage( GameWindow *parent, Bool front )
 	// the back draws first each picture and moves the coming up on for both layers
 	if( !front )
 	{
-		const UnsignedInt now = timeGetTime();
+		const UnsignedInt now = Clock_Milliseconds();
 		if( m_promotionShownMs == PROMOTION_NOT_DRAWN )
 			m_promotionShownMs = 0;
 		else
@@ -12998,7 +13238,7 @@ void InGameUI::drawQuitMenuPage( GameWindow *parent )
 
 	// the coming up starts on the menu's first picture and moves on with the wall clock, but never
 	// by more than QUIT_MENU_MOST_MS_A_PICTURE a picture
-	const UnsignedInt now = timeGetTime();
+	const UnsignedInt now = Clock_Milliseconds();
 	if( m_quitMenuShownMs == QUIT_MENU_NOT_DRAWN )
 		m_quitMenuShownMs = 0;
 	else
@@ -13331,7 +13571,7 @@ void InGameUI::drawProductionStripColumn( Int left, Int bottomY )
 		const IRegion2D cell = { { moreX, moreY }, { moreX + cameoW, moreY + cameoH } };
 
 		UnicodeString text;
-		text.format( L"+%d", hidden );
+		text.format( u"+%d", hidden );
 
 		// the column's own "+N" - see m_stripSecondsString
 		DisplayString *overflow = fitStripString( m_productionStripOverflow[ STRIP_OVERFLOW_PRODUCTION ], text,
@@ -13526,7 +13766,7 @@ void InGameUI::drawSuperweaponStrip( void )
 	// slows at both ends where a blink would snap.  It runs off the wall clock.  It is a picture,
 	// and the match's frames are not its to read: it breathes the same paused or fast-forwarded.
 	//
-	const Real breath = (Real)( timeGetTime() % SUPERWEAPON_BREATH_MS ) / SUPERWEAPON_BREATH_MS;
+	const Real breath = (Real)( Clock_Milliseconds() % SUPERWEAPON_BREATH_MS ) / SUPERWEAPON_BREATH_MS;
 	const Real pulse = 0.5f - 0.5f * (Real)cos( 2.0 * PI * breath );
 
 	//
@@ -13717,7 +13957,7 @@ extern Real TheStripDrawMS;
 static Real stripElapsedMS( const Int64 &from, const Int64 &to )
 {
 	Int64 freq;
-	QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	freq = Clock_Ticks_Per_Second();
 	if( freq == 0 )
 		return 0.0f;
 	return (Real)((double)( to - from ) * 1000.0 / (double)freq );
@@ -13729,7 +13969,7 @@ void InGameUI::drawProductionStrip( void )
 {
 #ifdef DEBUG_LOGGING
 	Int64 tGatherStart, tGatherEnd, tDrawEnd;
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tGatherStart );
+	tGatherStart = Clock_Ticks();
 	tGatherEnd = tGatherStart;
 	tDrawEnd = tGatherStart;
 	TheStripGatherMS = 0.0f;
@@ -13789,7 +14029,7 @@ void InGameUI::drawProductionStrip( void )
 	player->iterateObjects( gatherStripEverything, &gather );
 
 #ifdef DEBUG_LOGGING
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tGatherEnd );
+	tGatherEnd = Clock_Ticks();
 	TheStripGatherMS = stripElapsedMS( tGatherStart, tGatherEnd );
 #endif
 
@@ -13845,7 +14085,7 @@ void InGameUI::drawProductionStrip( void )
 	}
 
 #ifdef DEBUG_LOGGING
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tDrawEnd );
+	tDrawEnd = Clock_Ticks();
 	TheStripDrawMS = stripElapsedMS( tGatherEnd, tDrawEnd );
 #endif
 }
@@ -14305,7 +14545,7 @@ void InGameUI::selectNextIdleWorker( void )
 	Int index = ThePlayerList->getLocalPlayer()->getPlayerIndex();
 	if(m_idleWorkers[index].empty())
 	{
-		DEBUG_ASSERTCRASH(FALSE, ("InGameUI::selectNextIdleWorker We're trying to select a worker when our list is empty for player %ls", ThePlayerList->getLocalPlayer()->getPlayerDisplayName().str()));
+		DEBUG_ASSERTCRASH(FALSE, ("InGameUI::selectNextIdleWorker We're trying to select a worker when our list is empty for player %s", WideCharAsUtf8( ThePlayerList->getLocalPlayer()->getPlayerDisplayName().str() ).str()));
 		return;
 	}
 	Object *selectThisObject = NULL;
@@ -14614,19 +14854,19 @@ enum
 //-------------------------------------------------------------------------------------------------
 static void putTooltipLines( const UnicodeString &text, std::vector< HtmlValues > &lines )
 {
-	const std::wstring whitespace = L" \t\r";
-	const std::wstring whole = text.str();
+	const WideCharString whitespace = u" \t\r";
+	const WideCharString whole = text.str();
 	Bool gapOwed = FALSE;
 	for( size_t start = 0; start <= whole.size(); )
 	{
-		size_t end = whole.find( L'\n', start );
-		if( end == std::wstring::npos )
+		size_t end = whole.find( u'\n', start );
+		if( end == WideCharString::npos )
 			end = whole.size();
-		std::wstring line = whole.substr( start, end - start );
+		WideCharString line = whole.substr( start, end - start );
 		start = end + 1;
 
 		const size_t first = line.find_first_not_of( whitespace );
-		if( first == std::wstring::npos )
+		if( first == WideCharString::npos )
 		{
 			gapOwed = !lines.empty();
 			continue;
@@ -14642,9 +14882,9 @@ static void putTooltipLines( const UnicodeString &text, std::vector< HtmlValues 
 		}
 
 		HtmlValues entry;
-		const size_t colon = line.find( L':' );
-		const size_t valueStart = colon == std::wstring::npos ? colon : line.find_first_not_of( whitespace, colon + 1 );
-		if( colon != std::wstring::npos && colon <= TOOLTIP_LABEL_LIMIT && valueStart != std::wstring::npos )
+		const size_t colon = line.find( u':' );
+		const size_t valueStart = colon == WideCharString::npos ? colon : line.find_first_not_of( whitespace, colon + 1 );
+		if( colon != WideCharString::npos && colon <= TOOLTIP_LABEL_LIMIT && valueStart != WideCharString::npos )
 		{
 			entry[ "kind" ] = "row";
 			entry[ "label" ] = WideCharStringToMultiByte( line.substr( 0, colon ).c_str() );
@@ -14664,9 +14904,9 @@ static void putTooltipLines( const UnicodeString &text, std::vector< HtmlValues 
 //-------------------------------------------------------------------------------------------------
 static std::string tooltipName( const UnicodeString &label )
 {
-	std::wstring name = label.str();
-	const size_t marker = name.find( L'&' );
-	if( marker != std::wstring::npos )
+	WideCharString name = label.str();
+	const size_t marker = name.find( u'&' );
+	if( marker != WideCharString::npos )
 		name.erase( marker, 1 );
 	return WideCharStringToMultiByte( name.c_str() );
 }
@@ -14753,7 +14993,30 @@ Bool InGameUI::drawTooltipPage( const UnicodeString &cursorText, const RGBColor 
 	if( !isTooltipPageReady() )
 		return FALSE;
 
+	const ICoord2D &mouse = TheMouse->getMouseStatus()->pos;
 	const BuildTooltipCard *card = TheControlBar->getBuildTooltipCard();
+
+	// the attack, hold position and move keys and the two after them are the page's own, with no
+	// window behind them for the bar's tooltip to find, so their cards are made here and stand on the
+	// console as a button's does.  The stance key's card names the stance the selection is on
+	static const char *const ORDER_KEY_LABELS[ ORDER_KEYS ] = { "GUI:OrderForceAttack", "GUI:OrderHoldPosition", "GUI:OrderMove",
+		"GUI:OrderSearchAndDestroy", "GUI:OrderStanceDefensive" };
+	BuildTooltipCard orderCard = BuildTooltipCard();
+	if( m_controlBarPageShown && !areTooltipsDisabled() && !isQuitMenuVisible() )
+	{
+		for( Int key = 0; key < ORDER_KEYS; key++ )
+		{
+			const IRegion2D &cell = m_orderKeyCell[ key ];
+			if( m_orderKeyPlace[ key ] < 0 || mouse.x < cell.lo.x || mouse.x >= cell.hi.x || mouse.y < cell.lo.y || mouse.y >= cell.hi.y )
+				continue;
+			AsciiString label = ( key == ORDER_KEYS - 1 && isSelectionAggressive() ) ? "GUI:OrderStanceAggressive" : ORDER_KEY_LABELS[ key ];
+			orderCard.name = TheGameText->fetch( label );
+			label.concat( "Description" );
+			orderCard.description = TheGameText->fetch( label );
+			orderCard.anchor = cell;
+			card = &orderCard;
+		}
+	}
 	if( card == NULL && cursorText.isEmpty() )
 		return TRUE;
 
@@ -14789,7 +15052,6 @@ Bool InGameUI::drawTooltipPage( const UnicodeString &cursorText, const RGBColor 
 
 	const Int screenWidth = TheDisplay->getWidth();
 	const Int screenHeight = TheDisplay->getHeight();
-	const ICoord2D &mouse = TheMouse->getMouseStatus()->pos;
 	const Int gap = REAL_TO_INT( TOOLTIP_ANCHOR_GAP * ControlBarHudPageScale() );
 	for( Int pass = 0; pass < TOOLTIP_LAYOUT_PASSES; pass++ )
 	{

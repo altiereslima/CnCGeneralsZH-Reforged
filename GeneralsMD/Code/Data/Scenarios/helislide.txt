@@ -1,0 +1,45 @@
+# Three Comanches on open ground. The first is sent 300 behind itself, then 300 beside itself, then
+# on two long flights, east and back west. The second is sent past a supply truck that cannot shoot
+# back, 120 off its line and inside its guns' 200. The third is put on an Overlord, which cannot
+# shoot at aircraft, and a second later ordered across in front of it.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 1800
+#     -scenario helislide -logPrefix helislide_
+#
+# Measured 2026-10-03 with a temporary per-frame log of position, facing and velocity. Before
+# helicopters flew free, the first Comanche turned its nose through 178 degrees before it went
+# behind itself and was 30 out after 46 frames, and its velocity never strayed more than 36 degrees
+# off its nose. The second passed the truck with its nose 90 degrees off it on average and never
+# fired. The third pointed 84 degrees off the Overlord on average while it moved. After, the first
+# flies backwards (180 degrees off its nose) and sideways without turning, is 30 out after 30
+# frames, and turns its nose 165 degrees on the westward flight while already moving. The second
+# turns to the truck and takes 50 off it. The third stays within 0.9 degrees of the Overlord.
+#
+# Eased the same day. The first Comanche's acceleration now changes by at most 0.01 a frame, where
+# it jumped by up to 0.25; the westward turn winds up to 6 degrees a frame and changes rate by 0.6
+# a frame at most, where it jumped by 3; it ends every leg with no overshoot. Its lean, replayed
+# from the logged motion, tops out at 12.4 degrees and moves 1.3 a frame at most, where the first
+# free-flight build hit 22.9 and moved 30 in a frame when it braked.
+#
+# On the westward flight the nose used to finish its 170 degree turn by the time the Comanche was
+# 30 out (34 frames). With the turn rate held down until the speed builds it is 85 degrees off the
+# course at that point and comes round by frame 55, while the travel itself is unchanged.
+
+30    spawn      0  AmericaVehicleComanche     1   1100 3500
+150   move       0  AmericaVehicleComanche         800 3500
+400   move       0  AmericaVehicleComanche         800 3800
+650   move       0  AmericaVehicleComanche         2500 3500
+1150  move       0  AmericaVehicleComanche         800 3500
+30    spawn      1  ChinaVehicleSupplyTruck    1   1300 4170
+30    spawn      0  AirF_AmericaVehicleComanche  1   800 4050
+150   move       0  AirF_AmericaVehicleComanche      1800 4050
+200   tally      1  ChinaVehicleSupplyTruck
+400   tally      1  ChinaVehicleSupplyTruck
+30    spawn      1  ChinaTankOverlord          1   1300 4600
+30    spawn      0  SupW_AmericaVehicleComanche  1   1180 4480
+90    attack     0  SupW_AmericaVehicleComanche  1  ChinaTankOverlord
+150   move       0  SupW_AmericaVehicleComanche      1420 4480
+150   tally      1  ChinaTankOverlord
+400   tally      1  ChinaTankOverlord

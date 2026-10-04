@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -38,7 +40,7 @@
 #define DEFINE_WEAPONRELOAD_NAMES
 #define DEFINE_WEAPONPREFIRE_NAMES
 
-#include "Common/CRC.h"
+#include "Common/crc.h"
 #include "Common/CRCDebug.h"
 #include "Common/GameAudio.h"
 #include "Common/GameState.h"
@@ -57,7 +59,6 @@
 #include "GameLogic/Damage.h"
 #include "GameLogic/ExperienceTracker.h"
 #include "GameLogic/GameLogic.h"
-#include "GameLogic/IncomingDamage.h"
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/Module/BehaviorModule.h"
 #include "GameLogic/Module/BodyModule.h"
@@ -73,6 +74,7 @@
 #include "GameLogic/Weapon.h"
 
 #include "GameLogic/Module/AIUpdate.h"
+#include "GameLogic/Locomotor.h"
 #include "GameLogic/Module/AssistedTargetingUpdate.h"
 #include "GameLogic/Module/ProjectileStreamUpdate.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
@@ -423,12 +425,12 @@ void WeaponTemplate::reset( void )
 
 	const char* token = ini->getNextTokenOrNull(ini->getSepsColon());
 
-	if( stricmp(token, MIN_LABEL) == 0 )
+	if( strcasecmp(token, MIN_LABEL) == 0 )
 	{
 		// Two entry min/max
 		self->m_minDelayBetweenShots = INI::scanInt(ini->getNextToken(ini->getSepsColon()));
 		token = ini->getNextTokenOrNull(ini->getSepsColon());
-		if( stricmp(token, MAX_LABEL) != 0 )
+		if( strcasecmp(token, MAX_LABEL) != 0 )
 		{
 			// Messed up double entry
 			self->m_maxDelayBetweenShots = self->m_minDelayBetweenShots;
@@ -1128,15 +1130,6 @@ UnsignedInt WeaponTemplate::fireWeaponTemplate
 				when = TheGameLogic->getFrame() + delayInWholeFrames;
 				//DEBUG_LOG(("WeaponTemplate::fireWeaponTemplate: firing weapon in %d frames (= %d)!\n", delayInWholeFrames,when));
 				TheWeaponStore->setDelayedDamage(this, damagePos, when, sourceID, damageID, bonus);
-
-				// This damage is already spoken for: book it so nothing else spends a shot on a target
-				// that is dead as soon as this lands.
-				if (damageID != INVALID_ID && victimObj != NULL)
-				{
-					IncomingDamageTracker::bookShot(damageID, sourceID,
-						estimateWeaponTemplateDamage(sourceObj, victimObj, NULL, bonus),
-						TheGameLogic->getFrame(), when);
-				}
 			}
 
 			//-extraLogging 
@@ -1191,19 +1184,6 @@ UnsignedInt WeaponTemplate::fireWeaponTemplate
 
 		firingWeapon->newProjectileFired( sourceObj, projectile, victimObj, victimPos );//The actual logic weapon needs to know this was created. 
 
-		// Book the projectile's damage against its victim for the length of its flight, so the rest of
-		// the squad can see that this target is already accounted for. The flight time is only an
-		// estimate - a guided projectile flies on its own locomotor - and the booking lapses on its own.
-		if (inflictDamage && victimObj != NULL && victimID != INVALID_ID)
-		{
-			const Real flightFrames = sqrtf(distSqr) / getWeaponSpeed();
-			const UnsignedInt now = TheGameLogic->getFrame();
-			IncomingDamageTracker::bookShot(victimID, sourceID,
-				estimateWeaponTemplateDamage(sourceObj, victimObj, NULL, bonus),
-				now, now + REAL_TO_INT_CEIL(flightFrames));
-		}
-
-
 		ProjectileUpdateInterface* pui = NULL;
 		for (BehaviorModule** u = projectile->getBehaviorModules(); *u; ++u)
 		{
@@ -1222,6 +1202,8 @@ UnsignedInt WeaponTemplate::fireWeaponTemplate
 			{
 				pui->projectileLaunchAtObjectOrPosition(victimObj, &projectileDestination, sourceObj, wslot, specificBarrelToUse, this, m_projectileExhausts[v]);
 			}
+			if( victimObj )
+				pui->projectileLeadVictim( victimObj );
 		}
 		else
 		{
@@ -1583,9 +1565,6 @@ void WeaponTemplate::dealDamageInternal(ObjectID sourceID, ObjectID victimID, co
 			}
 
 			curVictim->attemptDamage(&damageInfo);
-
-			// whatever was booked for this shot has now been spent
-			IncomingDamageTracker::shotLanded(curVictim->getID(), damageInfo.in.m_sourceID);
 			//DEBUG_ASSERTLOG(damageInfo.out.m_noEffect, ("WeaponTemplate::dealDamageInternal: dealt to %s %08lx: attempted %f, actual %f (%f)\n",
 			//	curVictim->getTemplate()->getName().str(),curVictim,
 			//	damageInfo.in.m_amount, damageInfo.out.m_actualDamageDealt, damageInfo.out.m_actualDamageClipped));
@@ -1655,7 +1634,7 @@ void WeaponStore::createAndFireTempWeapon(const WeaponTemplate* wt, const Object
 //-------------------------------------------------------------------------------------------------
 const WeaponTemplate *WeaponStore::findWeaponTemplate( AsciiString name ) const 
 { 
-	if (stricmp(name.str(), "None") == 0)
+	if (strcasecmp(name.str(), "None") == 0)
 		return NULL;
 	const WeaponTemplate * wt = findWeaponTemplatePrivate( TheNameKeyGenerator->nameToKey( name ) );
 	DEBUG_ASSERTCRASH(wt != NULL, ("Weapon %s not found!\n",name.str()));
@@ -1737,8 +1716,6 @@ void WeaponStore::update()
 			++ddi;
 		}
 	}
-
-	IncomingDamageTracker::update(TheGameLogic->getFrame());
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1787,7 +1764,6 @@ void WeaponStore::reset()
 
 	deleteAllDelayedDamage();
 	deleteWeaponsNow();
-	IncomingDamageTracker::reset();
 	resetWeaponTemplates();
 }
 
@@ -2160,7 +2136,7 @@ void Weapon::reloadWithBonus(const Object *sourceObj, const WeaponBonus& bonus, 
 	m_status = RELOADING_CLIP;
 	Real reloadTime = loadInstantly ? 0 : m_template->getClipReloadTime(bonus);
 	m_whenLastReloadStarted = TheGameLogic->getFrame();
-	m_whenWeCanFireAgain = m_whenLastReloadStarted + reloadTime;			
+	m_whenWeCanFireAgain = floatToUnsignedAsMsvc(m_whenLastReloadStarted + reloadTime);	// S8: a zero rate-of-fire bonus makes it infinite			
 	//CRCDEBUG_LOG(("Just set m_whenWeCanFireAgain to %d in Weapon::reloadWithBonus 1\n", m_whenWeCanFireAgain));
 
 			// if we are sharing reload times
@@ -2308,9 +2284,22 @@ Bool Weapon::computeApproachTarget(const Object *source, const Object *target, c
 			// +/-PI seam measured as ~6 rad and read as "facing away".
 			Real relAngle = stdAngleDiff( source->getOrientation(), angle );
 			if (fabs(relAngle)<PI/2) {
-				dir.x = -dir.x;
-				dir.y = -dir.y;
-				dir.z = -dir.z;
+				// A jet holds its heading over the top and comes back round from past the target.
+				// Steering for the far side turned it toward a target beside it and kept it there: the
+				// far side moved as the jet turned, and a Raptor circled a slow tank inside its own
+				// minimum range for two and a half seconds.
+				const AIUpdateInterface *ai = source->getAI();
+				if (ai && ai->getCurLocomotor() && ai->getCurLocomotor()->getAppearance() == LOCO_WINGS &&
+						!(target && target->isAirborneTarget()))
+				{
+					dir = *source->getUnitDirectionVector2D();
+				}
+				else
+				{
+					dir.x = -dir.x;
+					dir.y = -dir.y;
+					dir.z = -dir.z;
+				}
 			}
 		}
 

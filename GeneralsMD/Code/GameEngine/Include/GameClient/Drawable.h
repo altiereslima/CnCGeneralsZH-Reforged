@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -38,7 +40,7 @@
 #include "Common/Thing.h"
 #include "Common/Geometry.h"
 #include "GameClient/Color.h"
-#include "WWMath/Matrix3D.h"
+#include "WWMath/matrix3d.h"
 #include "GameClient/DrawableInfo.h"
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////
@@ -57,7 +59,7 @@ class ModuleInfo;
 class Anim2DTemplate;
 class Image;
 class DynamicAudioEventInfo;
-enum BodyDamageType;
+enum BodyDamageType : Int;
 
 // this is a very worthwhile performance win. left conditionally defined for now, just 
 // in case, but probably should be made permanent soon. (srj)
@@ -175,6 +177,18 @@ public:
 	Real m_wobble;							///< for wobbling
   Real m_yawModulator;        ///< for the swimmy soft hover of a helicopter
   Real m_pitchModulator;        ///< for the swimmy soft hover of a helicopter
+	Real m_leanPitch[2];				///< a helicopter's pitch target, smoothed through two stages once a logic frame
+	Real m_leanRoll[2];					///< the same for roll
+	UnsignedInt m_leanFrame;		///< the logic frame the lean targets were last stepped on
+	Real m_groundLeanStages[2][3];	///< a ground vehicle's pitch and roll lean, smoothed through three stages once a logic frame
+	UnsignedInt m_groundFrame;	///< the logic frame those were last stepped on
+	Real m_prevForwardSpeed;		///< a ground vehicle's forward speed on that frame
+	Real m_prevAngle;						///< and its heading
+	Real m_groundLeanPitch;			///< a ground vehicle's lean from starting, braking and turning, on top of terrain and recoil
+	Real m_groundLeanRoll;
+	Real m_groundPitch;					///< a ground vehicle's chassis pitch, roll and lift from that frame, drawn until the next one
+	Real m_groundRoll;
+	Real m_groundZ;
 	TWheelInfo m_wheelInfo;			///< Wheel offset & angle info for a wheeled type locomotor.
 
 	DrawableLocoInfo();
@@ -235,7 +249,7 @@ private:
 EMPTY_DTOR(TintEnvelope)
 
 //-----------------------------------------------------------------------------
-enum StealthLookType
+enum StealthLookType : Int
 {
 	STEALTHLOOK_NONE,								///< unit is not stealthed at all
 	STEALTHLOOK_VISIBLE_FRIENDLY,		///< unit is stealthed-but-visible due to friendly status
@@ -276,7 +290,7 @@ enum TintStatus
 // Note: these values are saved in save files, so you MUST NOT REMOVE OR CHANGE
 // existing values!
 //
-enum TerrainDecalType
+enum TerrainDecalType : Int
 {
 #ifdef ALLOW_DEMORALIZE
 	TERRAIN_DECAL_DEMORALIZED = 0,
@@ -319,6 +333,17 @@ public:
   void onLevelStart();                                                ///< run from GameLogic::startNewGame
 
 	Drawable *getNextDrawable( void ) const { return m_nextDrawable; }	///< return the next drawable in the global list
+
+	/** R1, smooth motion: the logic moved this drawable in one step it did not travel (a teleport, a
+		container's exit, a parachute rider placed): show the new place at once rather than blend to it. */
+	void markMotionDiscontinuity( void ) { m_motionDiscontinuity = TRUE; }
+	Bool isMotionDiscontinuous( void ) const { return m_motionDiscontinuity; }
+	void clearMotionDiscontinuity( void ) { m_motionDiscontinuity = FALSE; }
+	/** R1: the client's record of this drawable's position on its last two logic ticks, taken at the
+		start of a render pass, and the blend of them the picture shows (the camera's lock follows it).
+		FALSE, with the logic position, when there is nothing to blend. */
+	void smoothMotionCapturePosition( UnsignedInt clientFrame );
+	Bool getSmoothMotionPosition( Real alpha, Coord3D *pos ) const;
 	Drawable *getPrevDrawable( void ) const { return m_prevDrawable; }  ///< return the prev drawable in the global list
 	DrawableID getID( void ) const;																			///< return this drawable's unique ID
 
@@ -646,6 +671,7 @@ protected:
 	Bool calcPhysicsXform(PhysicsXformInfo& info);
 	void calcPhysicsXformThrust(const Locomotor *locomotor, PhysicsXformInfo& info);
 	void calcPhysicsXformHoverOrWings(const Locomotor *locomotor, PhysicsXformInfo& info);
+	void calcPhysicsXformGround(const Locomotor *locomotor, PhysicsXformInfo& info);
 	void calcPhysicsXformTreads(const Locomotor *locomotor, PhysicsXformInfo& info);
 	void calcPhysicsXformWheels(const Locomotor *locomotor, PhysicsXformInfo& info);
 	void calcPhysicsXformMotorcycle( const Locomotor *locomotor, PhysicsXformInfo& info );
@@ -686,6 +712,11 @@ private:
 		
 	DrawableID m_id;						///< this drawable's unique ID
 	Drawable *m_nextDrawable; 
+	Coord3D m_smoothPrevPos;		///< R1: the position on the logic tick before m_smoothCurPos
+	Coord3D m_smoothCurPos;			///< R1: the position on the last logic tick the client saw
+	UnsignedInt m_smoothFrame;		///< R1: the client frame m_smoothCurPos was taken on
+	Bool m_smoothHavePrev;			///< R1: m_smoothPrevPos is the tick just before, and continuous with it
+	Bool m_motionDiscontinuity;		///< R1: markMotionDiscontinuity since the last capture
 	Drawable *m_prevDrawable;		///< list links
 
   DynamicAudioEventInfo *m_customSoundAmbientInfo; ///< If not NULL, info about the ambient sound to attach to this object

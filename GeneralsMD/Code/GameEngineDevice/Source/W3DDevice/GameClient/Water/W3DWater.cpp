@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -32,8 +34,9 @@
 										 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "stdio.h"
+#include "Lib/Clock.h"
 #include "W3DDevice/GameClient/W3DWater.h"
-#include "W3DDevice/GameClient/heightmap.h"
+#include "W3DDevice/GameClient/HeightMap.h"
 #include "W3DDevice/GameClient/W3DShroud.h"
 #include "W3DDevice/GameClient/W3DWaterTracks.h"
 #include "W3DDevice/GameClient/W3DAssetManager.h"
@@ -125,7 +128,7 @@ typedef VertexFormatXYZDUV2 MaterMeshVertexFormat;
 #endif
 
 // Converts a FLOAT to a DWORD for use in SetRenderState() calls
-static inline DWORD F2DW( FLOAT f ) { return *((DWORD*)&f); }
+static inline UnsignedInt F2DW( float f ) { return *((UnsignedInt*)&f); }
 
 //The Direct3D 11 copies of m_vertexBufferD3D and m_indexBufferD3D, null on a run without -dx11.
 //Both members are created with CreateVertexBuffer/CreateIndexBuffer straight on the device rather
@@ -490,12 +493,12 @@ RenderObjClass *	 WaterRenderObjClass::Clone(void) const
 /** Copies raw bits from pBumpSrc (a regular grayscale texture) into a D3D
 	*   bump-map format. */
 //-------------------------------------------------------------------------------------------------
-HRESULT WaterRenderObjClass::initBumpMap(LPDIRECT3DTEXTURE9 *pTex, TextureClass *pBumpSource)
+RenderResult WaterRenderObjClass::initBumpMap(LPDIRECT3DTEXTURE9 *pTex, TextureClass *pBumpSource)
 {
     SurfaceClass::SurfaceDescription    d3dsd;
 	SurfaceClass * surf;
     D3DLOCKED_RECT     d3dlr;
-	DWORD dwSrcPitch;
+	UnsignedInt dwSrcPitch;
 	BYTE* pSrc;
 	Int numLevels;
 
@@ -507,7 +510,7 @@ HRESULT WaterRenderObjClass::initBumpMap(LPDIRECT3DTEXTURE9 *pTex, TextureClass 
 	{
 		// LORENZEN WAS BUGGED BY THIS, 
 		//		DEBUG_CRASH(("WaterRenderObjClass::Invalid BumpMap format - Was it compressed?") );
-		return S_OK;
+		return D3D_OK;
 	}
 	
 	if (pBumpSource->Peek_D3D_Texture())
@@ -515,7 +518,7 @@ HRESULT WaterRenderObjClass::initBumpMap(LPDIRECT3DTEXTURE9 *pTex, TextureClass 
 		numLevels=pBumpSource->Peek_D3D_Texture()->GetLevelCount();
 	}
 	else
-		return S_OK;
+		return D3D_OK;
 
 	pTex[0]=DX8Wrapper::_Create_DX8_Texture(d3dsd.Width,d3dsd.Height,WW3D_FORMAT_U8V8,MIP_LEVELS_ALL,D3DPOOL_MANAGED,false);
 
@@ -526,10 +529,10 @@ HRESULT WaterRenderObjClass::initBumpMap(LPDIRECT3DTEXTURE9 *pTex, TextureClass 
 		pSrc=(unsigned char *)surf->Lock((int *)&dwSrcPitch);
 
 		pTex[0]->LockRect( level, &d3dlr, 0, 0 );
-		DWORD dwDstPitch = (DWORD)d3dlr.Pitch;
+		UnsignedInt dwDstPitch = (UnsignedInt)d3dlr.Pitch;
 		BYTE* pDst       = (BYTE*)d3dlr.pBits;
 
-		for( DWORD y=0; y<d3dsd.Height; y++ )
+		for( UnsignedInt y=0; y<d3dsd.Height; y++ )
 		{
 			BYTE* pDstT  = pDst;
 			BYTE* pSrcB0 = (BYTE*)pSrc;
@@ -541,16 +544,16 @@ HRESULT WaterRenderObjClass::initBumpMap(LPDIRECT3DTEXTURE9 *pTex, TextureClass 
 			if( y == 0 )               // Don't go before first line
 				pSrcB2 = pSrcB0;
 
-			for( DWORD x=0; x<d3dsd.Width; x++ )
+			for( UnsignedInt x=0; x<d3dsd.Width; x++ )
 			{
-				LONG v00 = 256-*(pSrcB0+0); // Get the current pixel
-				LONG v01 = 256-*(pSrcB0+4); // and the pixel to the right
-				LONG vM1 = 256-*(pSrcB0-4); // and the pixel to the left
-				LONG v10 = 256-*(pSrcB1+0); // and the pixel one line below.
-				LONG v1M = 256-*(pSrcB2+0); // and the pixel one line above.
+				Int v00 = 256-*(pSrcB0+0); // Get the current pixel
+				Int v01 = 256-*(pSrcB0+4); // and the pixel to the right
+				Int vM1 = 256-*(pSrcB0-4); // and the pixel to the left
+				Int v10 = 256-*(pSrcB1+0); // and the pixel one line below.
+				Int v1M = 256-*(pSrcB2+0); // and the pixel one line above.
 
-				LONG iDu = (vM1-v01); // The delta-u bump value
-				LONG iDv = (v1M-v10); // The delta-v bump value
+				Int iDu = (vM1-v01); // The delta-u bump value
+				Int iDv = (v1M-v10); // The delta-v bump value
 
 				if( (v00 < vM1) && (v00 < v01) )  // If we are at valley
 				{
@@ -609,10 +612,10 @@ HRESULT WaterRenderObjClass::initBumpMap(LPDIRECT3DTEXTURE9 *pTex, TextureClass 
     // a private format.
 
     m_pBumpTexture[i]->LockRect( 0, &d3dlr, 0, 0 );
-    DWORD dwDstPitch = (DWORD)d3dlr.Pitch;
+    UnsignedInt dwDstPitch = (UnsignedInt)d3dlr.Pitch;
     BYTE* pDst       = (BYTE*)d3dlr.pBits;
 
-    for( DWORD y=0; y<d3dsd.Height; y++ )
+    for( UnsignedInt y=0; y<d3dsd.Height; y++ )
     {
         BYTE* pDstT  = pDst;
         BYTE* pSrcB0 = (BYTE*)pSrc;
@@ -624,16 +627,16 @@ HRESULT WaterRenderObjClass::initBumpMap(LPDIRECT3DTEXTURE9 *pTex, TextureClass 
         if( y == 0 )               // Don't go before first line
             pSrcB2 = pSrcB0;
 
-        for( DWORD x=0; x<d3dsd.Width; x++ )
+        for( UnsignedInt x=0; x<d3dsd.Width; x++ )
         {
-            LONG v00 = 256-*(pSrcB0+0); // Get the current pixel
-            LONG v01 = 256-*(pSrcB0+4); // and the pixel to the right
-            LONG vM1 = 256-*(pSrcB0-4); // and the pixel to the left
-            LONG v10 = 256-*(pSrcB1+0); // and the pixel one line below.
-            LONG v1M = 256-*(pSrcB2+0); // and the pixel one line above.
+            Int v00 = 256-*(pSrcB0+0); // Get the current pixel
+            Int v01 = 256-*(pSrcB0+4); // and the pixel to the right
+            Int vM1 = 256-*(pSrcB0-4); // and the pixel to the left
+            Int v10 = 256-*(pSrcB1+0); // and the pixel one line below.
+            Int v1M = 256-*(pSrcB2+0); // and the pixel one line above.
 
-            LONG iDu = (vM1-v01); // The delta-u bump value
-            LONG iDv = (v1M-v10); // The delta-v bump value
+            Int iDu = (vM1-v01); // The delta-u bump value
+            Int iDv = (v1M-v10); // The delta-v bump value
 
             if( (v00 < vM1) && (v00 < v01) )  // If we are at valley
             {
@@ -679,13 +682,13 @@ HRESULT WaterRenderObjClass::initBumpMap(LPDIRECT3DTEXTURE9 *pTex, TextureClass 
     surf->Unlock();
 #endif
 
-    return S_OK;
+    return D3D_OK;
 }
 
 //-------------------------------------------------------------------------------------------------
 /** Create and fill a D3D vertex buffer with water surface vertices */
 //-------------------------------------------------------------------------------------------------
-HRESULT WaterRenderObjClass::generateVertexBuffer( Int sizeX, Int sizeY, Int vertexSize, Bool doStatic)
+RenderResult WaterRenderObjClass::generateVertexBuffer( Int sizeX, Int sizeY, Int vertexSize, Bool doStatic)
 {
 	m_numVertices=sizeX*sizeY;
 	//Assuming dynamic vertex buffer, allocate maximum multiple of required size to allow rendering from
@@ -696,12 +699,12 @@ HRESULT WaterRenderObjClass::generateVertexBuffer( Int sizeX, Int sizeY, Int ver
 
 	Setting *setting=&m_settings[m_tod];
 
-	HRESULT hr;
+	RenderResult hr;
 
 	//default setting for a dynamic vertex buffer
 	D3DPOOL pool = D3DPOOL_DEFAULT;
-	DWORD usage = D3DUSAGE_WRITEONLY | D3DUSAGE_DYNAMIC;
-	DWORD fvf = WATER_MESH_FVF;
+	UnsignedInt usage = D3DUSAGE_WRITEONLY | D3DUSAGE_DYNAMIC;
+	UnsignedInt fvf = WATER_MESH_FVF;
 
 	if (doStatic)
 	{	//change settings for a static vertex buffer
@@ -714,7 +717,7 @@ HRESULT WaterRenderObjClass::generateVertexBuffer( Int sizeX, Int sizeY, Int ver
 	if (m_vertexBufferD3D == NULL)
 	{	// Create vertex buffer
 
-		if (FAILED(hr=m_pDev->CreateVertexBuffer
+		if (Render_Failed(hr=m_pDev->CreateVertexBuffer
 		(
 			m_numVertices*vertexSize,
 			usage,
@@ -733,10 +736,10 @@ HRESULT WaterRenderObjClass::generateVertexBuffer( Int sizeX, Int sizeY, Int ver
 	m_vertexBufferD3DOffset=0;
 
 	if (!doStatic)
-		return S_OK;	//only create the buffer, other code will fill it.
+		return D3D_OK;	//only create the buffer, other code will fill it.
 
 	// load results into buffer
-	if (FAILED(hr=m_vertexBufferD3D->Lock
+	if (Render_Failed(hr=m_vertexBufferD3D->Lock
 	(
 		0,
 		m_numVertices*sizeof(SEA_PATCH_VERTEX),
@@ -768,17 +771,17 @@ HRESULT WaterRenderObjClass::generateVertexBuffer( Int sizeX, Int sizeY, Int ver
 
 	vertexLock.End();
 
-	if (FAILED(hr=m_vertexBufferD3D->Unlock())) return hr;
+	if (Render_Failed(hr=m_vertexBufferD3D->Unlock())) return hr;
 
-	return S_OK;
+	return D3D_OK;
 }
 
 //-------------------------------------------------------------------------------------------------
 /** Create and fill a D3D index buffer with water surface strip indices */
 //-------------------------------------------------------------------------------------------------
-HRESULT WaterRenderObjClass::generateIndexBuffer(Int sizeX, Int sizeY)
+RenderResult WaterRenderObjClass::generateIndexBuffer(Int sizeX, Int sizeY)
 {
-	HRESULT hr;
+	RenderResult hr;
 
 	//Will need SizeY-1 strips, each of length SizeX*2 (2 indices per strip segment).
 	//Will also need 2 extra indices to connect each strip to next one (except last strip)
@@ -791,7 +794,7 @@ HRESULT WaterRenderObjClass::generateIndexBuffer(Int sizeX, Int sizeY)
 	// Create index buffer
 	WORD* pIndices;
 
-	if (FAILED(hr=m_pDev->CreateIndexBuffer
+	if (Render_Failed(hr=m_pDev->CreateIndexBuffer
 	(
 		(m_numIndices+2)*sizeof(WORD), 
 		D3DUSAGE_WRITEONLY, 
@@ -805,7 +808,7 @@ HRESULT WaterRenderObjClass::generateIndexBuffer(Int sizeX, Int sizeY)
 	delete waterIndexTwin;
 	waterIndexTwin=Direct3D11_Twin_Index_Buffer((m_numIndices+2)*sizeof(WORD), false);
 
-	if (FAILED(hr=m_indexBufferD3D->Lock
+	if (Render_Failed(hr=m_indexBufferD3D->Lock
 	(
 		0,
 		m_numIndices*sizeof(WORD),
@@ -880,9 +883,9 @@ HRESULT WaterRenderObjClass::generateIndexBuffer(Int sizeX, Int sizeY)
 */
 	indexLock.End();
 
-	if (FAILED(hr=m_indexBufferD3D->Unlock())) return hr;
+	if (Render_Failed(hr=m_indexBufferD3D->Unlock())) return hr;
 
-	return S_OK;
+	return D3D_OK;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -936,7 +939,7 @@ void WaterRenderObjClass::ReleaseResources(void)
 //-------------------------------------------------------------------------------------------------
 void WaterRenderObjClass::ReAcquireResources(void)
 {
-	HRESULT hr;
+	RenderResult hr;
 
 	m_indexBuffer=NEW_REF(DX8IndexBufferClass,(6));
 	// Fill up the IB
@@ -964,22 +967,22 @@ void WaterRenderObjClass::ReAcquireResources(void)
 	if (m_meshData)
 	{
 		//Create new grid data
-		if (FAILED(generateIndexBuffer(m_gridCellsX+1,m_gridCellsY+1)))
+		if (Render_Failed(generateIndexBuffer(m_gridCellsX+1,m_gridCellsY+1)))
 			return;
-		if (FAILED(generateVertexBuffer(m_gridCellsX+1,m_gridCellsY+1,sizeof(MaterMeshVertexFormat),false)))
+		if (Render_Failed(generateVertexBuffer(m_gridCellsX+1,m_gridCellsY+1,sizeof(MaterMeshVertexFormat),false)))
 			return;
 	}
 	else
 	if (m_waterType == WATER_TYPE_2_PVSHADER)
 	{	//pixel/vertex shader based water assets.
-		if (FAILED(hr=generateIndexBuffer(PATCH_SIZE,PATCH_SIZE)))
+		if (Render_Failed(hr=generateIndexBuffer(PATCH_SIZE,PATCH_SIZE)))
 			return;
 
-		if (FAILED(hr=generateVertexBuffer(PATCH_SIZE,PATCH_SIZE,sizeof(SEA_PATCH_VERTEX),true)))
+		if (Render_Failed(hr=generateVertexBuffer(PATCH_SIZE,PATCH_SIZE,sizeof(SEA_PATCH_VERTEX),true)))
 			return;
 
 		//shader decleration
-		DWORD Declaration[]=
+		RenderUInt32 Declaration[]=
 		{
 			(D3DVSD_STREAM(0)),
 			(D3DVSD_REG(0, D3DVSDT_FLOAT3)), // Position
@@ -989,11 +992,11 @@ void WaterRenderObjClass::ReAcquireResources(void)
 		};
 
 		hr = W3DShaderManager::LoadAndCreateD3DPixelShader("shaders\\wave.pso", &m_dwWavePixelShader);
-		if (FAILED(hr))
+		if (Render_Failed(hr))
 			return;
 
 		hr = W3DShaderManager::LoadAndCreateD3DVertexShader("shaders\\wave.vso", &Declaration[0], &m_dwWaveVertexShader, &m_waveVertexDeclaration);
-		if (FAILED(hr))
+		if (Render_Failed(hr))
 			return;
 
 		// Create reflection texture
@@ -1024,7 +1027,7 @@ void WaterRenderObjClass::ReAcquireResources(void)
 			add r0.rgb, r0, r1\n";
 		hr = D3DXAssembleShader( shader, (UINT)strlen(shader), NULL, NULL, 0, &compiledShader, NULL);
 		if (hr==0) {
-			hr = 	DX8Wrapper::_Get_D3D_Device()->CreatePixelShader((DWORD*)compiledShader->GetBufferPointer(), &m_riverWaterPixelShader);
+			hr = 	DX8Wrapper::_Get_D3D_Device()->CreatePixelShader((RenderUInt32*)compiledShader->GetBufferPointer(), &m_riverWaterPixelShader);
 			compiledShader->Release();
 			Direct3D11_Register_Engine_Shader(m_riverWaterPixelShader, "river water ps.1.1");
 		}
@@ -1038,7 +1041,7 @@ void WaterRenderObjClass::ReAcquireResources(void)
 			add r0.rgb, r0, r1";
 		hr = D3DXAssembleShader( shader, (UINT)strlen(shader), NULL, NULL, 0, &compiledShader, NULL);
 		if (hr==0) {
-			hr = 	DX8Wrapper::_Get_D3D_Device()->CreatePixelShader((DWORD*)compiledShader->GetBufferPointer(), &m_waterPixelShader);
+			hr = 	DX8Wrapper::_Get_D3D_Device()->CreatePixelShader((RenderUInt32*)compiledShader->GetBufferPointer(), &m_waterPixelShader);
 			compiledShader->Release();
 			Direct3D11_Register_Engine_Shader(m_waterPixelShader, "environment water ps.1.1");
 		}
@@ -1054,7 +1057,7 @@ void WaterRenderObjClass::ReAcquireResources(void)
 			;\n";
 		hr = D3DXAssembleShader( shader, (UINT)strlen(shader), NULL, NULL, 0, &compiledShader, NULL);
 		if (hr==0) {
-			hr = 	DX8Wrapper::_Get_D3D_Device()->CreatePixelShader((DWORD*)compiledShader->GetBufferPointer(), &m_trapezoidWaterPixelShader);
+			hr = 	DX8Wrapper::_Get_D3D_Device()->CreatePixelShader((RenderUInt32*)compiledShader->GetBufferPointer(), &m_trapezoidWaterPixelShader);
 			compiledShader->Release();
 			Direct3D11_Register_Engine_Shader(m_trapezoidWaterPixelShader, "trapezoid water ps.1.1");
 		}
@@ -1071,7 +1074,7 @@ void WaterRenderObjClass::ReAcquireResources(void)
 			+mov r0.a, c0\n";
 		hr = D3DXAssembleShader( shader, (UINT)strlen(shader), NULL, NULL, 0, &compiledShader, NULL);
 		if (hr==0) {
-			hr = 	DX8Wrapper::_Get_D3D_Device()->CreatePixelShader((DWORD*)compiledShader->GetBufferPointer(), &m_reflectionPixelShader);
+			hr = 	DX8Wrapper::_Get_D3D_Device()->CreatePixelShader((RenderUInt32*)compiledShader->GetBufferPointer(), &m_reflectionPixelShader);
 			compiledShader->Release();
 			Direct3D11_Register_Engine_Shader(m_reflectionPixelShader, "water reflection ps.1.1");
 		}
@@ -1122,7 +1125,7 @@ Int WaterRenderObjClass::init(Real waterLevel, Real dx, Real dy, SceneClass *par
 	m_dy=dy;
 	m_level=waterLevel;
 
-	m_LastUpdateTime=timeGetTime();
+	m_LastUpdateTime=Clock_Milliseconds();
 	m_uScrollPerMs=0.001f;
 	m_vScrollPerMs=0.001f;
 	m_uOffset=0;
@@ -1328,9 +1331,9 @@ void WaterRenderObjClass::enableWaterGrid(Bool state)
 		releaseWaterTwins();
 
 		//Create new grid data
-		if (FAILED(generateIndexBuffer(m_gridCellsX+1,m_gridCellsY+1)))
+		if (Render_Failed(generateIndexBuffer(m_gridCellsX+1,m_gridCellsY+1)))
 			return;
-		if (FAILED(generateVertexBuffer(m_gridCellsX+1,m_gridCellsY+1,sizeof(MaterMeshVertexFormat),false)))
+		if (Render_Failed(generateVertexBuffer(m_gridCellsX+1,m_gridCellsY+1,sizeof(MaterMeshVertexFormat),false)))
 			return;
 	}
 }
@@ -1368,18 +1371,18 @@ void WaterRenderObjClass::update( void )
 		// several hundred frames a second, so the per-frame delta alternated between 0 and 1ms
 		// and the surface advanced in visible lurches. The performance counter is sub-microsecond.
 		//
-		static LARGE_INTEGER perfFreq = { 0 };
-		static LARGE_INTEGER lastCount = { 0 };
-		LARGE_INTEGER nowCount;
+		static long long perfFreq = 0;
+		static long long lastCount = 0;
 
-		if (perfFreq.QuadPart == 0)
-			QueryPerformanceFrequency(&perfFreq);
-		QueryPerformanceCounter(&nowCount);
-		if (lastCount.QuadPart == 0)
-			lastCount.QuadPart = nowCount.QuadPart;
+		if (perfFreq == 0)
+			perfFreq = Clock_Ticks_Per_Second();
+		const long long nowCount = Clock_Ticks();
+		if (lastCount == 0)
+			lastCount = nowCount;
 
-		Real elapsedSec = (Real)((double)(nowCount.QuadPart - lastCount.QuadPart) / (double)perfFreq.QuadPart);
-		lastCount.QuadPart = nowCount.QuadPart;
+		Real elapsedSec = (perfFreq != 0)
+			? (Real)((double)(nowCount - lastCount) / (double)perfFreq) : 0.0f;
+		lastCount = nowCount;
 		if (elapsedSec > 0.1f)
 			elapsedSec = 0.1f;		// a level load must not jump the surface forward
 
@@ -1409,93 +1412,21 @@ void WaterRenderObjClass::update( void )
 		}
 	}
 
-	static UnsignedInt lastLogicFrame = 0;
-	UnsignedInt currLogicFrame = 0;
-
-	if( TheGameLogic )
-		currLogicFrame = TheGameLogic->getFrame();
-
-	// the rest is gameplay-visible mesh motion and stays on the logic clock
-	if( lastLogicFrame != currLogicFrame )
-	{
-		// for vertex animated water we need to update the vector field
-		if( m_doWaterGrid && m_meshInMotion == TRUE )
-		{
-			const Real PREFERRED_HEIGHT_FUDGE = 1.0f;		///< this is close enough to at rest
-			const Real AT_REST_VELOCITY_FUDGE = 1.0f;		///< when we're close enought to at rest height and velocity we will stop
-			const Real WATER_DAMPENING = 0.93f;					///< use with up force of 15.0
-			Int i, j;
-			Int	mx = m_gridCellsX+1;
-			Int my = m_gridCellsY+1;
-			WaterMeshData *pData;
-
-			//
-			// we will mark the mesh as clean now ... if any of the fields are still in motion
-			// they will continue to mark the mesh as dirty so processing continues next frame
-			//
-			m_meshInMotion = FALSE;
-
-			// go through each mesh point and adjust the height according to the velocity
-			for( j = 0, pData = m_meshData; j < (my + 2); j++ )
-			{	
-
-				for( i = 0; i < (mx + 2); i++ )
-				{
-
-					// only pay attention to mesh points that are in motion
-					if( BitTest( pData->status, WaterRenderObjClass::IN_MOTION ) )
-					{
-
-						// DAMPENING to slow the changes down
-						pData->velocity *= WATER_DAMPENING;
-
-						// if the height here is below our preferred height, we want to add upward force to counteract it
-						if( pData->height < pData->preferredHeight )
-							pData->velocity -= TheGlobalData->m_gravity * 3.0f;
-						else				
-							pData->velocity += TheGlobalData->m_gravity * 3.0f;
-
-						// adjust the height at this grid location according to the current velocity		
-						pData->height = pData->height + pData->velocity;
-
-						//
-						// if we are close enough to our preferred height and our velocity is small enough
-						// this will be our resting location
-						//
-						if( fabs( pData->height - pData->preferredHeight ) < PREFERRED_HEIGHT_FUDGE &&
-								fabs( pData->velocity ) < AT_REST_VELOCITY_FUDGE )
-						{
-
-							BitClear( pData->status, WaterRenderObjClass::IN_MOTION );
-							pData->height = pData->preferredHeight;
-							pData->velocity = 0.0f;
-
-						}  // end if
-						else
-						{
-
-							// there is still motion in the mesh, we need to process next frame
-							m_meshInMotion = TRUE;
-
-						}  // end else
-
-					}  // end if
-
-					// on to the next one
-					pData++;
-
-				}  // end for i
-
-			}  // end for j
-
-		}  // end if
-
-		// mark the last logic frame we processed on
-		lastLogicFrame = currLogicFrame;
-
-	}  // end if, a logic frame has passed
+	/* The mesh motion that was here - the part of the water the simulation reads - is stepped by the
+	   logic now, once per logic frame: updateMeshMotion, from GameLogic::update (T1c, defect 17). */
 
 }  // end update
+
+// ------------------------------------------------------------------------------------------------
+/** The water grid's mesh motion for one logic frame.  GameLogic::update calls this, through
+	* TerrainVisual::updateWaterGrid, at the top of every logic frame: where EA's client pass stepped it,
+	* just ahead of the frame, but once per logic frame however many frames a pass runs.  The step, and
+	* the gate that makes a second call for the same frame do nothing, are WaterGridMotion's. */
+// ------------------------------------------------------------------------------------------------
+void WaterRenderObjClass::updateMeshMotion( UnsignedInt logicFrame )
+{
+	WaterGridMotion::updateForLogicFrame( logicFrame, m_doWaterGrid, m_meshInMotion, m_meshData, m_gridCellsX, m_gridCellsY );
+}
 
 
 //-------------------------------------------------------------------------------------------------
@@ -1947,36 +1878,6 @@ void WaterRenderObjClass::Render(RenderInfoClass & rinfo)
 				/*************************************************************************************/
 			#endif
 
-			#if 0	// No longer do simple rendering.
-				if (TheGlobalData->m_useWaterPlane)
-				{
-					//@todo : Would it be better to create a new camera or change the transform of the
-					//existing one?
-					rinfo.Camera.Set_Transform( reflectedTransform );
-					rinfo.Camera.Apply();	//force an update of all the camera dependent parameters like frustum clip planes
-
-					if(m_useCloudLayer)
-					{	
-						if (TheGlobalData && TheGlobalData->m_drawEntireTerrain)
-							m_skyBox->Render(rinfo);
-						else
-						{
-							renderSky();
-							if (m_tod == TIME_OF_DAY_NIGHT)
-								renderSkyBody(&reflectedTransform);
-						}
-					}
-
-					WW3D::Render(m_parentScene,&rinfo.Camera);
-
-					rinfo.Camera.Set_Transform(OldCameraMatrix);	//restore original non-reflected matrix
-					rinfo.Camera.Apply();	//force an update of all the camera dependent parameters like frustum clip planes
-
-					//clear the z-buffer to remove changes made by objects inside mirror
-					DX8Wrapper::Clear(false,true,Vector3(0.1f,0.1f,0.1f));
-				}
-			#endif
-
 			#ifdef CLIP_GEOMETRY_TO_PLANE
 				//restore default culling mode
 			//	DX8Wrapper::Set_DX8_Render_State(D3DRS_CLIPPLANEENABLE, 0 );	//turn off first clip plane
@@ -2332,7 +2233,7 @@ void WaterRenderObjClass::renderSky(void)
 
 	Setting *setting=&m_settings[m_tod];
 
-	timeNow=timeGetTime();
+	timeNow=Clock_Milliseconds();
 
 	timeDiff=timeNow-m_LastUpdateTime;
 	m_LastUpdateTime=timeNow;
@@ -3208,7 +3109,7 @@ void WaterRenderObjClass::drawRiverWater(PolygonTrigger *pTrig)
 		DX8Wrapper::Set_DX8_Render_State(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA );
 
 	if (m_riverWaterPixelShader) DX8Wrapper::Set_Pixel_Shader(m_riverWaterPixelShader);
- 	DWORD cull;
+ 	RenderUInt32 cull;
 	DX8Wrapper::_Get_D3D_Device()->GetRenderState(D3DRS_CULLMODE, &cull);
 	DX8Wrapper::Set_DX8_Render_State(D3DRS_CULLMODE, D3DCULL_NONE);
 
@@ -3640,7 +3541,7 @@ void WaterRenderObjClass::drawTrapezoidWater(Vector3 points[4])
 	}
 
 
- 	DWORD cull;
+ 	RenderUInt32 cull;
 	DX8Wrapper::_Get_D3D_Device()->GetRenderState(D3DRS_CULLMODE, &cull);
 	DX8Wrapper::Set_DX8_Render_State(D3DRS_CULLMODE, D3DCULL_NONE);
 

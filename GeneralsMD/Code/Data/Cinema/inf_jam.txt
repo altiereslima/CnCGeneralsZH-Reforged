@@ -1,0 +1,16 @@
+# Infantry before and after b7514253, over Scenarios/infconvoy.txt on Alpine Assault, seed 1:
+# the Rangers walking 760,920 to 1400,1400 meet the Crusaders and Humvees coming the other way
+# on the dirt road beside the town houses. Held frame; heading 37 lays the street left to right,
+# infantry walking right, vehicles left. Ranger 238 stood at 1081,1125 frames 629-764 before.
+#
+# The list takes the camera at 3 s, not 0. Relative zoom is measured from the view at the first
+# verb, and a cut at 0 lands while the map is still loading: the same list framed absolute 1.76 on
+# one build and 1.88 on the other. At 3 s the view is the observer's own, absolute 4.03 on this map
+# on both, so 0.186 is absolute 0.75.
+#
+#   -observer -takeover -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -scenario infconvoy
+#   -cinema inf_jam -video 420 1020 <name> -maxframes 1030
+
+3     cut   1090 1150 0.186 37 -20
+14.5  shot
+40    end

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -54,7 +56,7 @@
 #endif
 
 // PRIVATE ////////////////////////////////////////////////////////////////////////////////////////
-static enum CommandStatus
+enum CommandStatus
 {
 	COMMAND_INCOMPLETE = 0,
 	COMMAND_COMPLETE
@@ -228,6 +230,7 @@ static CommandStatus doGuardCommand( const CommandButton *command, GuardMode gua
 			msg = TheMessageStream->appendMessage( GameMessage::MSG_DO_GUARD_OBJECT );
 			msg->appendObjectIDArgument( target->getID() );
 			msg->appendIntegerArgument(guardMode);
+			msg->appendRealArgument( TheInGameUI->getAreaPickRadius() );
 			pickAndPlayUnitVoiceResponse(TheInGameUI->getAllSelectedDrawables(), GameMessage::MSG_DO_GUARD_OBJECT);
 		}
 	}
@@ -252,6 +255,7 @@ static CommandStatus doGuardCommand( const CommandButton *command, GuardMode gua
 		msg = TheMessageStream->appendMessage( GameMessage::MSG_DO_GUARD_POSITION );
 		msg->appendLocationArgument(world);
 		msg->appendIntegerArgument(guardMode);
+		msg->appendRealArgument( TheInGameUI->getAreaPickRadius() );
 		pickAndPlayUnitVoiceResponse(TheInGameUI->getAllSelectedDrawables(), GameMessage::MSG_DO_GUARD_POSITION);
 	}
 

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -43,7 +45,7 @@ class INI;
 // IMPORTANT NOTE: you should endeavor to set up states such that the most "normal"
 // state is defined by the bit being off. That is, the typical "normal" condition
 // has all condition flags set to zero.
-enum ArmorSetType
+enum ArmorSetType : Int
 {
 	// The access and use of this enum has the bit shifting built in, so this is a 0,1,2,3,4,5 enum
 	ARMORSET_VETERAN		= 0,

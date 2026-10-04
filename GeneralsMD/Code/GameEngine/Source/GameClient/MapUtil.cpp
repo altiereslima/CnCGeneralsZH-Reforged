@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,11 +31,14 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
 
-#include "Common/CRC.h"
+#include "Lib/WideCharFns.h"
+
+#include "Common/crc.h"
 #include "Common/FileSystem.h"
 #include "Common/LocalFileSystem.h"
-#include "Common/File.h"
+#include "Common/file.h"
 #include "Common/GlobalData.h"
 #include "Common/GameState.h"
 #include "Common/GameEngine.h"
@@ -418,7 +423,7 @@ void MapCache::writeCacheINI( Bool userDir )
 	TheFileSystem->createDirectory(mapDir);
 
 	filepath.concat(m_mapCacheName);
-	FILE *fp = fopen(filepath.str(), "w");
+	FILE *fp = zh_fopen(filepath.str(), "w");
 	DEBUG_ASSERTCRASH(fp != NULL, ("Failed to create %s", filepath.str()));
 	if (fp == NULL) {
 		return;
@@ -771,7 +776,7 @@ Bool MapCache::addMap( AsciiString dirName, AsciiString fname, FileInfo *fileInf
 				if (md.m_numPlayers >= 2)
 				{
 					UnicodeString extension;
-					extension.format(L" (%d)", md.m_numPlayers);
+					extension.format(u" (%d)", md.m_numPlayers);
 					(*this)[lowerFname].m_displayName.concat(extension);
 				}
 			}
@@ -782,7 +787,7 @@ Bool MapCache::addMap( AsciiString dirName, AsciiString fname, FileInfo *fileInf
 				if (md.m_numPlayers >= 2)
 				{
 					UnicodeString extension;
-					extension.format(L" (%d)", md.m_numPlayers);
+					extension.format(u" (%d)", md.m_numPlayers);
 					(*this)[lowerFname].m_displayName.concat(extension);
 				}
 			}
@@ -800,7 +805,30 @@ Bool MapCache::addMap( AsciiString dirName, AsciiString fname, FileInfo *fileInf
 
 	DEBUG_LOG(("MapCache::addMap(): caching '%s' because '%s' was not found\n", fname.str(), lowerFname.str()));
 
-	loadMap(fname); // Just load for querying the data, since we aren't playing this map.
+	// Just load for querying the data, since we aren't playing this map.  A user's map is a file
+	// nobody here made, and one the chunk reader could not parse (ERROR_CORRUPT_FILE_FORMAT) used to
+	// stop the game at startup, along with every good map in the same folder.  It is left out of the
+	// list instead.  A shipped map that does not load under -buildMapCache is still an error.
+	try
+	{
+		loadMap(fname);
+	}
+	catch (ErrorCode ec)
+	{
+		if (isOfficial)
+			throw;
+		DEBUG_LOG(("MapCache::addMap(): skipping '%s', it does not load (ErrorCode 0x%08x)\n", fname.str(), (UnsignedInt)ec));
+		resetMap();
+		return FALSE;
+	}
+	catch (...)
+	{
+		if (isOfficial)
+			throw;
+		DEBUG_LOG(("MapCache::addMap(): skipping '%s', it does not load (not an ErrorCode)\n", fname.str()));
+		resetMap();
+		return FALSE;
+	}
 
 	// The map is now loaded.  Pick out what we need.
 	md.m_fileName = lowerFname;
@@ -827,7 +855,7 @@ Bool MapCache::addMap( AsciiString dirName, AsciiString fname, FileInfo *fileInf
 		if (md.m_numPlayers >= 2)
 		{
 			UnicodeString extension;
-			extension.format(L" (%d)", md.m_numPlayers);
+			extension.format(u" (%d)", md.m_numPlayers);
 			md.m_displayName.concat(extension);
 		}
 		TheGameText->reset();
@@ -844,10 +872,10 @@ Bool MapCache::addMap( AsciiString dirName, AsciiString fname, FileInfo *fileInf
 		if (md.m_numPlayers >= 2)
 		{
 			UnicodeString extension;
-			extension.format(L" (%d)", md.m_numPlayers);
+			extension.format(u" (%d)", md.m_numPlayers);
 			md.m_displayName.concat(extension);
 		}
-		DEBUG_LOG(("Map name is now '%ls'\n", md.m_displayName.str()));
+		DEBUG_LOG(("Map name is now '%s'\n", WideCharAsUtf8( md.m_displayName.str() ).str()));
 		TheGameText->reset();
 	}
 
@@ -856,7 +884,7 @@ Bool MapCache::addMap( AsciiString dirName, AsciiString fname, FileInfo *fileInf
 	(*this)[lowerFname] = md;
 
 	DEBUG_LOG(("  filesize = %d bytes\n", md.m_filesize));
-	DEBUG_LOG(("  displayName = %ls\n", md.m_displayName.str()));
+	DEBUG_LOG(("  displayName = %s\n", WideCharAsUtf8( md.m_displayName.str() ).str()));
 	DEBUG_LOG(("  CRC = %X\n", md.m_CRC));
 	DEBUG_LOG(("  timestamp = %d\n", md.m_timestamp));
 	DEBUG_LOG(("  isOfficial = %s\n", (md.m_isOfficial)?"yes":"no"));
@@ -1051,7 +1079,7 @@ typedef MapDisplayToFileNameList::iterator MapDisplayToFileNameListIter;
 
 				if (numColumns > 1)
 				{
-					GadgetListBoxSetItemData( listbox, (void *)imageItemData, index, 1 );
+					GadgetListBoxSetItemData( listbox, (void *)(intptr_t)imageItemData, index, 1 );
 				}
 			}
 			++tempit;

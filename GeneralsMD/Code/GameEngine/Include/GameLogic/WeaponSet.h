@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -43,8 +45,8 @@ class Object;
 class Weapon;
 class WeaponTemplate;
 
-enum CommandSourceType;
-enum DamageType;
+enum CommandSourceType : Int;
+enum DamageType : Int;
 
 // for WeaponSetType. Part of detangling.
 #include "GameLogic/WeaponSetType.h"
@@ -107,7 +109,7 @@ static const ModelConditionFlagType TheWeaponSetTypeToModelConditionTypeMap[WEAP
 #endif
 
 //-------------------------------------------------------------------------------------------------
-enum WeaponSetConditionType
+enum WeaponSetConditionType : Int
 {
 	WSF_INVALID = -1,
 
@@ -170,14 +172,14 @@ typedef std::vector<WeaponTemplateSet> WeaponTemplateSetVector;
 typedef SparseMatchFinder<WeaponTemplateSet, WeaponSetFlags> WeaponTemplateSetFinder;
 
 //-------------------------------------------------------------------------------------------------
-enum WeaponChoiceCriteria
+enum WeaponChoiceCriteria : Int
 {
 	PREFER_MOST_DAMAGE,		///< choose the weapon that will do the most damage
 	PREFER_LONGEST_RANGE	///< choose the weapon with the longest range (that will do nonzero damage)
 };
 
 //-------------------------------------------------------------------------------------------------
-enum WeaponLockType
+enum WeaponLockType : Int
 {
 	NOT_LOCKED,							///< Weapon is not locked
 	LOCKED_TEMPORARILY,			///< Weapon is locked until clip is empty, or current "attack" state exits
@@ -185,7 +187,7 @@ enum WeaponLockType
 };
 
 //-------------------------------------------------------------------------------------------------
-enum CanAttackResult
+enum CanAttackResult : Int
 {
 	//Worst scenario to best scenario -- These must be done this way now!
 	ATTACKRESULT_NOT_POSSIBLE,					//Can't possibly attack target.

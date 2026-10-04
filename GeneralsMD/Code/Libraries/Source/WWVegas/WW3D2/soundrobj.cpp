@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -37,13 +38,14 @@
 #if noWWAUDIO //(gth) removing dependency on wwaudio
 
 #include "soundrobj.h"
-#include "audiblesound.h"
-#include "sound3d.h"
-#include "wwaudio.h"
+#include "AudibleSound.h"
+#include "Sound3D.h"
+#include "WWAudio.h"
 #include "ffactory.h"
 #include "wwfile.h"
 #include "chunkio.h"
 #include "scene.h"
+#include <stdio.h>	// snprintf
 
 
 //////////////////////////////////////////////////////////////////////////////////
@@ -577,7 +579,7 @@ SoundRenderObjDefClass::Save_W3D (ChunkSaveClass &csave)
 	//
 	// Begin a chunk that identifies a sound render object
 	//
-	if (csave.Begin_Chunk (W3D_CHUNK_SOUNDROBJ) == TRUE) {
+	if (csave.Begin_Chunk (W3D_CHUNK_SOUNDROBJ) == true) {
 		
 		//
 		// Attempt to save the different sections of the aggregate definition
@@ -676,7 +678,7 @@ SoundRenderObjDefClass::Write_Header (ChunkSaveClass &csave)
 	//
 	// Begin a chunk that identifies the aggregate
 	//
-	if (csave.Begin_Chunk (W3D_CHUNK_SOUNDROBJ_HEADER) == TRUE) {
+	if (csave.Begin_Chunk (W3D_CHUNK_SOUNDROBJ_HEADER) == true) {
 		
 		//
 		// Fill the header structure
@@ -684,7 +686,7 @@ SoundRenderObjDefClass::Write_Header (ChunkSaveClass &csave)
 		W3dSoundRObjHeaderStruct header = { 0 };
 		header.Version	= W3D_CURRENT_AGGREGATE_VERSION;
 		header.Flags	= Flags;
-		::lstrcpyn (header.Name, (const char *)Name, sizeof (header.Name));
+		snprintf (header.Name, sizeof (header.Name), "%s", (const char *)Name);
 		header.Name[sizeof (header.Name) - 1] = 0;
 
 		//
@@ -715,7 +717,7 @@ SoundRenderObjDefClass::Write_Definition (ChunkSaveClass &csave)
 	//
 	// Save the definition to its own chunk
 	//
-	if (csave.Begin_Chunk (W3D_CHUNK_SOUNDROBJ_DEFINITION) == TRUE) {		
+	if (csave.Begin_Chunk (W3D_CHUNK_SOUNDROBJ_DEFINITION) == true) {		
 		if (Definition.Save (csave)) {
 			retval = WW3D_ERROR_OK;
 		}

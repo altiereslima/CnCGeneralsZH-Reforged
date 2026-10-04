@@ -15,10 +15,13 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 #include "dx11device.h"
 
 #include <dxgi1_5.h>
+#include <stdlib.h>	// getenv
+#include <string.h>
 
 // The back buffer is the same format the D3D9 device asks for, so a picture taken off one can be
 // compared against the other without a conversion standing between them.
@@ -138,8 +141,22 @@ bool DX11DeviceClass::Create_Device(bool with_swap_chain, HWND window, unsigned 
 
 	// Hardware first, WARP second.  WARP draws the same picture on a machine with no D3D11 driver,
 	// which is what makes the device creatable on a build agent as well as on this one.
-	const D3D_DRIVER_TYPE driver_types[] = { D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP };
-	const unsigned driver_type_count = sizeof(driver_types)/sizeof(driver_types[0]);
+	D3D_DRIVER_TYPE driver_types[] = { D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP };
+	unsigned driver_type_count = sizeof(driver_types)/sizeof(driver_types[0]);
+
+	// ZH_DX11_DRIVER is for measuring, not playing.  "warp" takes WARP even where there is hardware.
+	// "null" takes the NULL driver, which accepts every call and draws nothing, so a run times the
+	// game's own submission work with no rasterizer in it: it has no swap chain, so Create_Views
+	// gives it a texture for a back buffer and Present does nothing.  Unset, or anything else, the
+	// order above stands.  The Direct3D 9 side's counterpart is ZH_D3D9_DEVTYPE (dx8wrapper.cpp).
+	const char * requested = getenv("ZH_DX11_DRIVER");
+	if (requested != NULL && _stricmp(requested, "warp") == 0) {
+		driver_types[0] = D3D_DRIVER_TYPE_WARP;
+		driver_type_count = 1;
+	} else if (requested != NULL && _stricmp(requested, "null") == 0) {
+		driver_types[0] = D3D_DRIVER_TYPE_NULL;
+		driver_type_count = 1;
+	}
 
 	// With the layer asked for, try it first and fall back to the same driver type without it.  A
 	// machine without the graphics tools feature refuses the create outright, and a refusal there
@@ -153,15 +170,17 @@ bool DX11DeviceClass::Create_Device(bool with_swap_chain, HWND window, unsigned 
 		for (unsigned flag_index = flag_start; flag_index < flag_choice_count; ++flag_index) {
 			for (unsigned chain_index = chain_start; chain_index < chain_choice_count; ++chain_index) {
 				const UINT flags = flag_choices[flag_index];
-				const HRESULT result = Create_Device_Guarded(with_swap_chain, driver_types[index], flags,
-					chain_choices[chain_index]);
+				// The NULL driver has no swap chain to make (ZH_DX11_DRIVER=null, above).
+				const bool null_driver = (driver_types[index] == D3D_DRIVER_TYPE_NULL);
+				const HRESULT result = Create_Device_Guarded(with_swap_chain && !null_driver,
+					driver_types[index], flags, chain_choices[chain_index]);
 				if (FAILED(result)) {
 					continue;
 				}
 
 				Software = (driver_types[index] == D3D_DRIVER_TYPE_WARP);
 				DebugLayerPresent = (flags & D3D11_CREATE_DEVICE_DEBUG) != 0;
-				Tearing = (chain_choices[chain_index] == &flip_chain);
+				Tearing = !null_driver && (chain_choices[chain_index] == &flip_chain);
 				Width = width;
 				Height = height;
 				if (!with_swap_chain) {
@@ -171,7 +190,7 @@ bool DX11DeviceClass::Create_Device(bool with_swap_chain, HWND window, unsigned 
 				// behind the game's back.  A flip chain presenting with tearing is refused there
 				// and the picture freezes, and the game already has its own fullscreen.
 				IDXGIFactory1 * factory = NULL;
-				if (SUCCEEDED(SwapChain->GetParent(__uuidof(IDXGIFactory1),
+				if (SwapChain != NULL && SUCCEEDED(SwapChain->GetParent(__uuidof(IDXGIFactory1),
 						reinterpret_cast<void **>(&factory)))) {
 					factory->MakeWindowAssociation(window, DXGI_MWA_NO_ALT_ENTER);
 					factory->Release();
@@ -216,7 +235,23 @@ HRESULT DX11DeviceClass::Create_Device_Guarded(bool with_swap_chain, D3D_DRIVER_
 bool DX11DeviceClass::Create_Views()
 {
 	ID3D11Texture2D * back_buffer = NULL;
-	if (FAILED(SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D),
+	if (SwapChain == NULL) {
+		// ZH_DX11_DRIVER=null: no swap chain, so the back buffer is a texture of the size and format
+		// a swap chain's would have.  The view below holds the only reference that outlives this.
+		D3D11_TEXTURE2D_DESC buffer;
+		ZeroMemory(&buffer, sizeof(buffer));
+		buffer.Width = Width;
+		buffer.Height = Height;
+		buffer.MipLevels = 1;
+		buffer.ArraySize = 1;
+		buffer.Format = BACK_BUFFER_FORMAT;
+		buffer.SampleDesc.Count = 1;
+		buffer.Usage = D3D11_USAGE_DEFAULT;
+		buffer.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+		if (FAILED(Device->CreateTexture2D(&buffer, NULL, &back_buffer))) {
+			return false;
+		}
+	} else if (FAILED(SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D),
 			reinterpret_cast<void **>(&back_buffer)))) {
 		return false;
 	}
@@ -302,9 +337,10 @@ void DX11DeviceClass::Release()
 bool DX11DeviceClass::Resize(unsigned width, unsigned height)
 {
 	Release_Views();
+	// With no swap chain (ZH_DX11_DRIVER=null) the views alone are the buffers, made again below.
 	// ResizeBuffers has to be handed the flags the chain was made with, or it refuses.
 	const UINT chain_flags = Tearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
-	if (FAILED(SwapChain->ResizeBuffers(SWAP_CHAIN_BUFFER_COUNT, width, height,
+	if (SwapChain != NULL && FAILED(SwapChain->ResizeBuffers(SWAP_CHAIN_BUFFER_COUNT, width, height,
 			BACK_BUFFER_FORMAT, chain_flags))) {
 		return false;
 	}
@@ -325,6 +361,10 @@ void DX11DeviceClass::Clear(float red, float green, float blue, float alpha, boo
 
 bool DX11DeviceClass::Present(unsigned present_interval)
 {
+	// ZH_DX11_DRIVER=null has a back buffer and nowhere to show it; an offscreen device has neither.
+	if (SwapChain == NULL) {
+		return BackBufferView != NULL;
+	}
 	if (!Tearing) {
 		LastPresentResult = SwapChain->Present(present_interval, 0);
 		return SUCCEEDED(LastPresentResult);

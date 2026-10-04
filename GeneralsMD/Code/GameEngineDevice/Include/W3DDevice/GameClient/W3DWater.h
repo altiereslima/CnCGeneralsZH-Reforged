@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -40,6 +42,8 @@
 #include "Lib/BaseType.h"
 #include "Common/GameType.h"
 #include "Common/Snapshot.h"
+#include "GameLogic/WaterGridMotion.h"
+#include "Platform/RenderTypes.h"
 
 #define INVALID_WATER_HEIGHT 0.0f	///water height guaranteed to be below all terrain.
 
@@ -104,6 +108,7 @@ public:
 	void reset( void );  ///< reset any resources we need to
 	void load(void);	///< load/setup any map dependent features
 	void update( void ); ///< update phase of the water
+	void updateMeshMotion( UnsignedInt logicFrame );	///< the grid's motion, once per logic frame (WaterGridMotion.h)
 	void enableWaterGrid(Bool state);	///< used to active custom water for special maps. (i.e DAM).
 	void updateMapOverrides(void);	///< used to update any map specific map overrides for water appearance.
 	void setTimeOfDay(TimeOfDay tod); ///<change sky/water for time of day
@@ -185,15 +190,9 @@ protected:
 	enum WaterMeshStatus
 	{
 		AT_REST = 0x00,
-		IN_MOTION = 0x01
+		IN_MOTION = WaterGridMotion::IN_MOTION	///< 0x01, as it always was
 	};
-	struct WaterMeshData
-	{
-		Real height;										///< height of the 3D mesh at this point
-		Real velocity;									///< velocity in Z that this point is moving up and down
-		UnsignedByte status;						///< status for this grid point
-		UnsignedByte preferredHeight;		///< the hight we prefer to be
-	};
+	typedef WaterGridMotion::MeshPoint WaterMeshData;	///< moved, unchanged, with the step that moves it (T1c)
 	WaterMeshData *m_meshData;  ///< heightmap data for 3D Mesh based water.
 	UnsignedInt m_meshDataSize;	///< size of m_meshData 
 	Bool m_meshInMotion;				///< TRUE once we've messed with velocities and are in motion
@@ -237,12 +236,12 @@ protected:
 		TextureClass	*waterTexture;
 		Int				waterRepeatCount;
 		Real			skyTexelsPerUnit;	//texel density of sky plane (higher value repeats texture more).
-		DWORD			vertex00Diffuse;		
-		DWORD			vertex10Diffuse;		
-		DWORD			vertex11Diffuse;		
-		DWORD			vertex01Diffuse;
-		DWORD			waterDiffuse;
-		DWORD			transparentWaterDiffuse;
+		UnsignedInt			vertex00Diffuse;		
+		UnsignedInt			vertex10Diffuse;		
+		UnsignedInt			vertex11Diffuse;		
+		UnsignedInt			vertex01Diffuse;
+		UnsignedInt			waterDiffuse;
+		UnsignedInt			transparentWaterDiffuse;
 		Real			uScrollPerMs;		
 		Real			vScrollPerMs;
 	};
@@ -255,7 +254,7 @@ protected:
 	void testCurvedWater(void);	///<draw the sky layer (clouds, stars, etc.)
 	void renderSkyBody(Matrix3D *mat);	///<draw the sky body (sun, moon, etc.)
 	void renderWaterMesh(void);			///<draw the water surface mesh (deformed 3d mesh).
-	HRESULT initBumpMap(LPDIRECT3DTEXTURE9 *pTex, TextureClass *pBumpSource);	///<copies data into bump-map format.
+	RenderResult initBumpMap(LPDIRECT3DTEXTURE9 *pTex, TextureClass *pBumpSource);	///<copies data into bump-map format.
 	void renderMirror(CameraClass *cam, Real level);	///< Draw reflected scene into texture
 	void drawReflection(Int triangleCount, Int vertexCount);	///< Lay the reflection over the water just drawn
 	void drawSea(RenderInfoClass & rinfo);	///< Draw the surface of the water
@@ -267,8 +266,8 @@ protected:
 	void cleanupJbaWaterShader(void);
 
 	//Methods used for GeForce3 specific water
-	HRESULT WaterRenderObjClass::generateIndexBuffer(int sizeX, int sizeY);	///<Generate static index buufer
-	HRESULT WaterRenderObjClass::generateVertexBuffer( Int sizeX, Int sizeY, Int vertexSize, Bool doFill);///<Generate static vertex buffer
+	RenderResult generateIndexBuffer(int sizeX, int sizeY);	///<Generate static index buufer
+	RenderResult generateVertexBuffer( Int sizeX, Int sizeY, Int vertexSize, Bool doFill);///<Generate static vertex buffer
 
 	// snapshot methods for save/load
 	virtual void crc( Xfer *xfer );

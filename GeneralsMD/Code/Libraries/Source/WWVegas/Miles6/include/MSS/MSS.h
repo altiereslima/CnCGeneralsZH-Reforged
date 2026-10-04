@@ -25,6 +25,7 @@
 
 /* The real Mss.H pulls in the Windows multimedia headers; WWAudio relies on
  * that for LPWAVEFORMAT in its Miles-facing signatures. */
+#if defined(_WIN32)
 #include <windows.h>
 #include <mmsystem.h>
 
@@ -32,9 +33,28 @@
 #ifndef AILCALLBACK
 #define AILCALLBACK __stdcall
 #endif
+#else
+/* Off Windows the same surface is implemented on miniaudio (Miles6/miniaudio, decision 3).  There
+ * is no DLL to bind to, so there is no calling convention to match, and the two names mmsystem.h
+ * supplied come from here instead.  C4. */
+#include <stdint.h>
+#include <stdio.h>
+#define AILCALL
+#ifndef AILCALLBACK
+#define AILCALLBACK
+#endif
+#ifndef WAVE_FORMAT_PCM
+#define WAVE_FORMAT_PCM 1
+#endif
+#endif
 
 /* Miles' scalar names are the long family (S32 = signed long), and the game
- * passes long* where the API wants S32* - keep the real SDK's choice. */
+ * passes long* where the API wants S32* - keep the real SDK's choice.
+ * On LP64 that makes S32 and U32 64 bits wide, and it stays that way on purpose, unlike the
+ * width fixes elsewhere in this port: MilesAudioManager.cpp:2842 hands AIL_stream_ms_position a
+ * long*, and that file is not to change.  Nothing here reaches a file or a network - the API is
+ * in-process between the game and its own backend - and every value through it is an index, a
+ * millisecond count or a rate.  C4. */
 typedef signed char        S8;
 typedef unsigned char      U8;
 typedef signed short       S16;
@@ -112,7 +132,11 @@ typedef void (AILCALLBACK *AIL3DSAMPLECB) (H3DSAMPLE sample);
 typedef void (AILCALLBACK *AILSTREAMCB)   (HSTREAM stream);
 /* The file handle is whatever the host wants it to be and this game puts a File* in it, so it is
    pointer sized.  On Win32 that is the U32 the retail DLL's ABI expects; x64 needs all 64 bits. */
+#if defined(_WIN32)
 typedef UINT_PTR AILFILEHANDLE;
+#else
+typedef uintptr_t AILFILEHANDLE;
+#endif
 typedef U32  (AILCALLBACK *AILFILEOPENCB) (const char *filename, AILFILEHANDLE *file_handle);
 typedef void (AILCALLBACK *AILFILECLOSECB)(AILFILEHANDLE file_handle);
 typedef S32  (AILCALLBACK *AILFILESEEKCB) (AILFILEHANDLE file_handle, S32 offset, U32 type);
@@ -130,6 +154,7 @@ typedef AILFILEREADCB  AIL_file_read_callback;
 /* The version string lives in the DLL's string table, resource id 1; the real
  * header reads it the same way instead of importing a function. */
 #define MSSDLLNAME "MSS32.DLL"
+#if defined(_WIN32)
 #define AIL_MSS_version(str, len)                \
 {                                                \
 	HINSTANCE mssvl = LoadLibraryA(MSSDLLNAME);  \
@@ -140,6 +165,13 @@ typedef AILFILEREADCB  AIL_file_read_callback;
 		FreeLibrary(mssvl);                      \
 	}                                            \
 }
+#else
+/* No DLL and no string table: the one caller logs it, so say what is actually underneath. */
+#define AIL_MSS_version(str, len)                \
+{                                                \
+	snprintf((str), (size_t)(len), "%s", "Miles 6.5 surface on miniaudio"); \
+}
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -231,6 +263,12 @@ void      AILCALL AIL_quick_set_volume(HAUDIO audio, F32 volume, F32 extravol);
 S32       AILCALL AIL_ex_start_capture(const char *pathname);
 void      AILCALL AIL_ex_stop_capture(void);
 
+/* ---- distance falloff -------------------------------------------------- */
+/* Not Miles.  Nonzero makes every 3D sample fall off in a straight line from min_dist to max_dist
+   instead of Miles' min_dist / distance; MilesAudioManager passes AudioSettings.ini's
+   RangeVolumeFade, so what plays and what getEffectiveVolume culls follow one curve. */
+void      AILCALL AIL_ex_set_3D_linear_falloff(S32 linear);
+
 /* ---- file format helpers ---------------------------------------------- */
 S32       AILCALL AIL_WAV_info(const void *data, AILSOUNDINFO *info);
 S32       AILCALL AIL_decompress_ADPCM(const AILSOUNDINFO *info, void **outdata, U32 *outsize);
@@ -239,5 +277,20 @@ void      AILCALL AIL_mem_free_lock(void *ptr);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
+
+/* Not Miles: the distance curve both backends play a 3D sample at and the one
+   MilesAudioManager::getEffectiveVolume culls with, kept in one place so the two cannot drift.  Full
+   inside min_dist, then min_dist / distance (Miles' rolloff), or a straight line to zero when linear
+   is set, and silent from max_dist on. */
+static inline F32 AIL_ex_3D_distance_gain(F32 distance, F32 min_dist, F32 max_dist, S32 linear)
+{
+	if (distance >= max_dist)
+		return 0.0f;
+	if (distance <= min_dist)
+		return 1.0f;
+	if (linear && max_dist > min_dist)
+		return 1.0f - (distance - min_dist) / (max_dist - min_dist);
+	return min_dist / distance;
+}
 
 #endif /* MSS_H */

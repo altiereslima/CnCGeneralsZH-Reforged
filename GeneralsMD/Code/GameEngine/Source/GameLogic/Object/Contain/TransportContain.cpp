@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -377,7 +379,7 @@ void TransportContain::onRemoving( Object *rider )
 	DEBUG_ASSERTCRASH(transportSlotCount > 0, ("Hmm, this object isnt transportable"));
 	m_extraSlotsInUse -= transportSlotCount - 1;
 
-#if (defined(_DEBUG) || defined(_INTERNAL))
+#if (defined(_DEBUG) || defined(_INTERNAL)) && defined(DEBUG_CRASHING)	// only the assert reads them
 	UnsignedInt containCount = getContainCount();
 	UnsignedInt containMax = getContainMax();
 	DEBUG_ASSERTCRASH(m_extraSlotsInUse >= 0 && m_extraSlotsInUse + containCount <= containMax, ("Hmm, bad slot count"));
@@ -592,7 +594,7 @@ Bool TransportContain::isSpecificRiderFreeToExit(Object* specificObject)
 		return FALSE;
 
 	const Locomotor *hisLocomotor = specificObject->getAIUpdateInterface()->getCurLocomotor();
-	if( hisLocomotor == FALSE )
+	if( hisLocomotor == NULL )
    	return FALSE;
  
   // He can't get to this spot naturally, so I can't force him there.  (amphib transport)

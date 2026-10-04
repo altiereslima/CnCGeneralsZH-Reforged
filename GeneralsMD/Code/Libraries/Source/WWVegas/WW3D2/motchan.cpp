@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /* $Header: /Commando/Code/ww3d2/motchan.cpp 6     11/29/01 1:07p Jani_p $ */
 /*********************************************************************************************** 
@@ -47,7 +49,7 @@
 #include "motchan.h"
 #include "w3d_file.h"
 #include "chunkio.h"
-#include "vector.h"
+#include "Vector.H"
 #include "wwmath.h"
 #include "quat.h"
 #include "wwmath.h"
@@ -1309,7 +1311,7 @@ return;
 		value-=ValueOffset;
 		value*=inv_scale;
 		int ivalue=WWMath::Float_To_Int_Floor(value);
-		CompressedData[i]=unsigned short(ivalue);
+		CompressedData[i]=(unsigned short)(ivalue);
 
 		float new_scale=ValueScale/65535.0f;
 		float new_value=int(CompressedData[i]);

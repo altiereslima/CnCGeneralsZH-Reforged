@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -54,6 +55,7 @@
 #include "Lib/BaseType.h"
 #include "Common/Debug.h"
 #include "Common/Errors.h"
+#include "Lib/WideCharFns.h"	// the engine's own wcs*: WideChar is char16_t, which the C library has no functions for
 
 class AsciiString;
 
@@ -258,11 +260,11 @@ public:
 	*/
 	int compare(const WideChar* s) const;
 	/**
-		Conceptually identical to _wcsicmp().
+		Conceptually identical to WideCharICmp().
 	*/
 	int compareNoCase(const UnicodeString& stringSrc) const;
 	/**
-		Conceptually identical to _wcsicmp().
+		Conceptually identical to WideCharICmp().
 	*/
 	int compareNoCase(const WideChar* s) const;
 
@@ -316,7 +318,7 @@ inline UnicodeString::~UnicodeString()
 inline int UnicodeString::getLength() const
 {
 	validate();
-	return m_data ? wcslen(peek()) : 0;
+	return m_data ? WideCharLen(peek()) : 0;
 }
 
 // -----------------------------------------------------
@@ -390,64 +392,64 @@ inline void UnicodeString::concat(const WideChar c)
 inline int UnicodeString::compare(const UnicodeString& stringSrc) const
 {
 	validate();
-	return wcscmp(this->str(), stringSrc.str());
+	return WideCharCmp(this->str(), stringSrc.str());
 }
 
 // -----------------------------------------------------
 inline int UnicodeString::compare(const WideChar* s) const
 {
 	validate();
-	return wcscmp(this->str(), s);
+	return WideCharCmp(this->str(), s);
 }
 
 // -----------------------------------------------------
 inline int UnicodeString::compareNoCase(const UnicodeString& stringSrc) const
 {
 	validate();
-	return _wcsicmp(this->str(), stringSrc.str());
+	return WideCharICmp(this->str(), stringSrc.str());
 }
 
 // -----------------------------------------------------
 inline int UnicodeString::compareNoCase(const WideChar* s) const
 {
 	validate();
-	return _wcsicmp(this->str(), s);
+	return WideCharICmp(this->str(), s);
 }
 
 // -----------------------------------------------------
 inline Bool operator==(const UnicodeString& s1, const UnicodeString& s2)
 {
-	return wcscmp(s1.str(), s2.str()) == 0;
+	return WideCharCmp(s1.str(), s2.str()) == 0;
 }
 
 // -----------------------------------------------------
 inline Bool operator!=(const UnicodeString& s1, const UnicodeString& s2)
 {
-	return wcscmp(s1.str(), s2.str()) != 0;
+	return WideCharCmp(s1.str(), s2.str()) != 0;
 }
 
 // -----------------------------------------------------
 inline Bool operator<(const UnicodeString& s1, const UnicodeString& s2)
 {
-	return wcscmp(s1.str(), s2.str()) < 0;
+	return WideCharCmp(s1.str(), s2.str()) < 0;
 }
 
 // -----------------------------------------------------
 inline Bool operator<=(const UnicodeString& s1, const UnicodeString& s2)
 {
-	return wcscmp(s1.str(), s2.str()) <= 0;
+	return WideCharCmp(s1.str(), s2.str()) <= 0;
 }
 
 // -----------------------------------------------------
 inline Bool operator>(const UnicodeString& s1, const UnicodeString& s2)
 {
-	return wcscmp(s1.str(), s2.str()) > 0;
+	return WideCharCmp(s1.str(), s2.str()) > 0;
 }
 
 // -----------------------------------------------------
 inline Bool operator>=(const UnicodeString& s1, const UnicodeString& s2)
 {
-	return wcscmp(s1.str(), s2.str()) >= 0;
+	return WideCharCmp(s1.str(), s2.str()) >= 0;
 }
 
 #endif // UNICODESTRING_H

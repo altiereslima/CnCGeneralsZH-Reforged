@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -50,6 +52,7 @@
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/LanguageFilter.h"
 #include "GameClient/CommandXlat.h"
+#include "GameClient/ObserverCamera.h"
 
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/ScriptEngine.h"
@@ -85,6 +88,17 @@ static Bool radarPixelToWorld( const ICoord2D *pixel, Coord3D *world )
 	return (TheRadar->isRadarHidden() == FALSE || TheRadar->isRadarForced()) &&
 		TheRadar->localPixelToRadar( pixel, &radar ) &&
 		TheRadar->radarToWorld( &radar, world );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The camera to the spot under the radar.  A watcher's camera is his from then on: left with the
+	* director or a player's screen it was eased straight back, a click less than a jump away and every
+	* step of a drag (ObserverCamera.h). */
+//-------------------------------------------------------------------------------------------------
+static void radarLookAt( const Coord3D *world )
+{
+	TheTacticalView->lookAt( world );
+	TheObserverCamera.setMode( OBSERVER_CAMERA_FREE );
 }
 
 
@@ -284,7 +298,7 @@ WindowMsgHandledType LeftHUDInput( GameWindow *window, UnsignedInt msg,
 
 			Coord3D world;
 			if( radarPixelToWorld( &mouse, &world ) )
-				TheTacticalView->lookAt( &world );
+				radarLookAt( &world );
 			break;
 		}
 
@@ -325,7 +339,7 @@ WindowMsgHandledType LeftHUDInput( GameWindow *window, UnsignedInt msg,
 				// Left on the radar looks and right orders, the same division the world has.
 				if( drawableList->empty() || msg == GWM_LEFT_DOWN )
 				{
-					TheTacticalView->lookAt( &world );
+					radarLookAt( &world );
 					s_radarLookDrag = (msg == GWM_LEFT_DOWN) ? GWM_LEFT_DRAG : GWM_RIGHT_DRAG;
 					break;
 				}
@@ -495,7 +509,7 @@ WindowMsgHandledType ControlBarSystem( GameWindow *window, UnsignedInt msg,
 					{
 						msg->appendWideCharArgument( *c++ );
 					}
-					msg->appendWideCharArgument( L'\0' ); // trailing NULL
+					msg->appendWideCharArgument( u'\0' ); // trailing NULL
 				}
 			}
 			break;

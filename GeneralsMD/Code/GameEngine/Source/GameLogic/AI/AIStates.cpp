@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -43,7 +45,7 @@
 #include "Common/ThingFactory.h"
 #include "Common/TunnelTracker.h"
 #include "Common/Xfer.h"
-#include "Common/XFerCRC.h"
+#include "Common/XferCRC.h"
 
 #include "GameClient/ControlBar.h"
 #include "GameClient/FXList.h"
@@ -55,7 +57,6 @@
 #include "GameLogic/AITNGuard.h"
 #include "GameLogic/AIStateMachine.h"
 #include "GameLogic/AIPathfind.h"
-#include "GameLogic/IncomingDamage.h"
 #include "GameLogic/Locomotor.h"
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/PolygonTrigger.h"
@@ -1268,7 +1269,7 @@ Bool outOfWeaponRangePosition( State *thisState, void* userData )
  */
 static Bool cannotPossiblyAttackObject( State *thisState, void* userData )
 {
-	AbleToAttackType attackType = (AbleToAttackType)(UnsignedInt)userData;
+	AbleToAttackType attackType = (AbleToAttackType)(UnsignedInt)(uintptr_t)userData;
 	Object *obj = thisState->getMachineOwner();
 	Object *victim = thisState->getMachineGoalObject();
 
@@ -2673,11 +2674,12 @@ StateReturnType AIAttackApproachTargetState::onEnter()
 		// Check here:  If we are a player, and we got to this state via an ai command (ie we auto-acquired),
 		// we don't want to chase the unit. isAllowedToChase is set when we are in a deploy and attack state (troop crawler).
 		// Kris (July 2003): If we are retaliating... don't fail out!
+		// A player's unit on the aggressive stance chases by the computer player's rule.
 		if( ai->getCurrentStateID() != AI_GUARD_RETALIATE )
 		{
-			if (source->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN) 
+			if (source->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN && !ai->hasAggressiveStance())
 			{
-				if (ai->getLastCommandSource() == CMD_FROM_AI && !ai->isAllowedToChase() ) 
+				if (ai->getLastCommandSource() == CMD_FROM_AI && !ai->isAllowedToChase() )
 				{
 					if (!weapon->isContactWeapon()) 
 					{
@@ -3045,11 +3047,12 @@ StateReturnType AIAttackPursueTargetState::onEnter()
 	// Check here:  If we are a player, and we got to this state via an ai command (ie we auto-acquired), 
 	// we don't want to chase the unit. 
 	// Kris (July 2003): If we are retaliating... don't succeed out!
+	// The aggressive stance chases, as above.
 	if( ai->getCurrentStateID() != AI_GUARD_RETALIATE )
 	{
-		if (source->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN) 
+		if (source->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN && !ai->hasAggressiveStance())
 		{
-			if (ai->getLastCommandSource() == CMD_FROM_AI) 
+			if (ai->getLastCommandSource() == CMD_FROM_AI)
 			{
 				return STATE_SUCCESS;
 
@@ -3699,6 +3702,10 @@ StateReturnType AIAttackMoveToState::onEnter()
 	m_frameToApproachOn = 0;
 	// spread the scans of a group that was all ordered on the same frame over the scan interval.
 	m_frameToScanOn = TheGameLogic->getFrame() + ((UnsignedInt)owner->getID() % ATTACK_MOVE_SCAN_RATE);
+	/* A soldier looks before he steps. Spread like the rest, a Ranger walked three steps towards the
+		 move point, stopped and turned on an enemy that had been in sight from the start. */
+	if (owner->isKindOf(KINDOF_INFANTRY))
+		m_frameToScanOn = TheGameLogic->getFrame();
 
 	return AIMoveToState::onEnter();
 }
@@ -5420,12 +5427,14 @@ void AIAttackAimAtTargetState::crc( Xfer *xfer )
 void AIAttackAimAtTargetState::xfer( Xfer *xfer )
 {
   // version
-  XferVersion currentVersion = 1;
+  XferVersion currentVersion = 2;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
 
 	xfer->xferBool(&m_canTurnInPlace);
 	xfer->xferBool(&m_setLocomotor);
+	if (version >= 2)
+		xfer->xferBool(&m_isRunningOut);
 
 }  // end xfer
 
@@ -5449,9 +5458,10 @@ StateReturnType AIAttackAimAtTargetState::onEnter()
 
 	Locomotor* curLoco = sourceAI->getCurLocomotor();
 	m_canTurnInPlace = curLoco ? curLoco->getMinSpeed() == 0.0f : false;
+	m_isRunningOut = FALSE;
 
 
-//	if (!victim) 
+//	if (!victim)
 //		return STATE_CONTINUE; // Just continue till we get a victim.
 // Ick.  This was originally a safety to a single line that required victim, and was never meant
 // as an early return to all cases.  We now want to use preattack frames on ground position targets
@@ -5536,18 +5546,92 @@ StateReturnType AIAttackAimAtTargetState::onEnter()
 
 //----------------------------------------------------------------------------------------------------------
 /**
- * Put this unit's intended shot on the ledger before it is fired. Said again every frame the unit is
- * still lining the shot up, and forgotten a few frames after it stops saying it.
+ * Would a plane that turns toward its target as hard as it can get the target inside its aim cone while it
+ * is still minDist or more away?  relX is how far the target lies ahead of the nose, relY how far to the
+ * side, both in the plane's own frame; cosAimDelta is the cosine of the weapon's aim cone.  The turn is
+ * walked round the circle of turnRadius on the target's side in 5 degree steps.  A target inside that
+ * circle never enters the cone at all, which is the orbit a jet flew round a tank it could never point its
+ * nose at; one that enters it too close is the pass that ends with the target under the plane.  Plain
+ * arithmetic with a fixed rotation step, so every machine walks the same points.  No Object involved, so
+ * test_gameengine can link straight to it, the same trick as AIAttackMove_leashBroken.
  */
-static void announceIntendedShot(Object *shooter, Object *victim)
+Bool AIAttackAim_needsRunOut( Real relX, Real relY, Real turnRadius, Real cosAimDelta, Real minDist )
 {
-	Weapon *weapon = shooter->getCurrentWeapon();
-	if (weapon == NULL)
-		return;
+	const Real STEP_COS = 0.99619470f;	// cos(5 deg)
+	const Real STEP_SIN = 0.08715574f;	// sin(5 deg)
+	const Real side = relY < 0.0f ? -1.0f : 1.0f;
 
-	IncomingDamageTracker::claimShot(victim->getID(), shooter->getID(),
-																	 weapon->estimateWeaponDamage(shooter, victim),
-																	 TheGameLogic->getFrame());
+	// heading (hx, hy) and the point on the turn circle the plane is at, centre (0, side*R)
+	Real hx = 1.0f, hy = 0.0f;
+	for (Int step = 0; step < 72; ++step)
+	{
+		const Real px = turnRadius * hy * side;
+		const Real py = side * turnRadius * (1.0f - hx);
+		const Real tx = relX - px;
+		const Real ty = relY - py;
+		const Real distSqr = tx*tx + ty*ty;
+		const Real along = tx*hx + ty*hy;
+		// in the cone, or the turn has just swung the nose past it (a cone narrower than a step)
+		const Bool swungPast = side*(hx*ty - hy*tx) <= 0.0f;
+		if (along > 0.0f && (swungPast || along*along >= cosAimDelta*cosAimDelta*distSqr))
+			return distSqr < minDist*minDist;
+
+		const Real nx = hx*STEP_COS - hy*side*STEP_SIN;
+		hy = hy*STEP_COS + hx*side*STEP_SIN;
+		hx = nx;
+	}
+	return TRUE;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * Where a jet steers while it lines up a ground target.  Straight at it, unless turning toward it would
+ * not bring it into the aim cone before it is inside the weapon's minimum range: beside the cockpit, or
+ * just behind.  Turning in from there only ever ends with the target under the plane, so the jet holds its
+ * heading instead until the target is the minimum range and a full turn circle away, then comes back round
+ * with that much straight run left to fire in.  Aircraft against aircraft keep the straight chase.
+ */
+Coord3D AIAttackAimAtTargetState::computeAttackRunGoal( Object *source, const Weapon *weapon, const Coord3D &targetPos,
+																												Real relAngle, Real aimDelta )
+{
+	const Locomotor *loco = source->getAI()->getCurLocomotor();
+	const Object *victim = m_isAttackingObject ? getMachineGoalObject() : NULL;
+	// a building with a gun and no turret aims through here too, and has no locomotor at all
+	if (weapon == NULL || loco == NULL || loco->getAppearance() != LOCO_WINGS || !source->isAboveTerrain() ||
+			(victim && victim->isAirborneTarget()))
+	{
+		m_isRunningOut = FALSE;
+		return targetPos;
+	}
+
+	const Coord3D *pos = source->getPosition();
+	const Coord3D *dir = source->getUnitDirectionVector2D();
+	const Real dx = targetPos.x - pos->x;
+	const Real dy = targetPos.y - pos->y;
+
+	// a hard turn bleeds speed toward the locomotor's minimum, so the circle tightens as it goes
+	const Real speed = 0.5f*(max(source->getPhysics()->getForwardSpeed2D(), loco->getMinSpeed()) + loco->getMinSpeed());
+	const Real turnRadius = speed / loco->getMaxTurnRate(source->getBodyModule()->getDamageState());
+
+	// range is measured between the bounding spheres, so the minimum range seen from the centres is longer
+	Real minRange = weapon->getTemplate()->getMinimumAttackRange() + source->getGeometryInfo().getBoundingSphereRadius();
+	if (victim)
+		minRange += victim->getGeometryInfo().getBoundingSphereRadius();
+	const Real runOutDist = minRange + 2.0f*turnRadius;
+
+	if (m_isRunningOut)
+		m_isRunningOut = dx*dx + dy*dy < sqr(runOutDist);
+	else if (fabs(relAngle) >= aimDelta)
+		m_isRunningOut = AIAttackAim_needsRunOut(dx*dir->x + dy*dir->y, dir->x*dy - dir->y*dx, turnRadius,
+																						 Cos(aimDelta), minRange);
+
+	if (!m_isRunningOut)
+		return targetPos;
+
+	Coord3D ahead = *pos;
+	ahead.x += dir->x * runOutDist;
+	ahead.y += dir->y * runOutDist;
+	return ahead;
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -5569,11 +5653,6 @@ StateReturnType AIAttackAimAtTargetState::update()
 	{
 		if (!victim || victim->isEffectivelyDead())
 			return STATE_FAILURE;	// can't aim at dead things
-
-		// tell everyone else what this shot is going to take off the victim while it is still being
-		// aimed, so a second unit lining up the same target can see the kill is covered before it
-		// commits to the trip rather than on the frame the first round launches
-		announceIntendedShot(source, victim);
 	}
 
 	WhichTurretType tur = sourceAI->getWhichTurretForCurWeapon();
@@ -5590,8 +5669,23 @@ StateReturnType AIAttackAimAtTargetState::update()
 		// if we have a turret, but it is incapable of turning, turn ourself.
 		// (gotta do this for units like the Comanche, which have fake "turrets"
 		// solely to allow for attacking-on-the-move...)
-		if (sourceAI->getTurretTurnRate(tur) != 0.0f)	
+		if (sourceAI->getTurretTurnRate(tur) != 0.0f)
 		{
+			// a turret with a limited arc (the Comanche's chin gun) needs the body turned just far enough
+			// to bring a target behind it into the arc; inside it, the body is left alone
+			if (m_canTurnInPlace)
+			{
+				Real relAngle = m_isAttackingObject ?
+													ThePartitionManager->getRelativeAngle2D( source, victim ) :
+													ThePartitionManager->getRelativeAngle2D( source, getMachineGoalPosition() );
+				Real shortfall = sourceAI->getTurretArcShortfall(tur, relAngle);
+				if (shortfall != 0.0f)
+				{
+					sourceAI->setLocomotorGoalOrientation(source->getOrientation() + shortfall);
+					m_setLocomotor = true;
+				}
+			}
+
 			// The Body can never return Success if the weapon is on the turret, or else we end
 			// up shooting the current weapon (which is on the turret) in the wrong direction.
 			// We always say Continue, so the Turret can do its own Aiming state.
@@ -5599,22 +5693,33 @@ StateReturnType AIAttackAimAtTargetState::update()
 //				return STATE_SUCCESS;
 //			}
 
-			// The fire state holds the round when the victim is already paid for, and falls back to aiming,
-			// which is fine for a unit that leaves this state; a turret's aim never does.  A Gattling Cannon
-			// that had picked the tank itself went silent until the booking lapsed, with a second tank
-			// driving up.  Let go of a target we chose ourselves: the scan that chose it passes over doomed
-			// ones.  An order is kept, as the fire state promises.
-			if (m_isAttackingObject && sourceAI->getLastCommandSource() == CMD_FROM_AI &&
-					IncomingDamageTracker::isSpokenFor(victim, source->getID()))
-			{
-				return STATE_FAILURE;
-			}
 			return STATE_CONTINUE;
 		}
 
 		// else fall thru!
 	}
-	
+
+	// a fixed gun reloading its clip cannot fire, so a turret that turns has the aiming meanwhile
+	// (the Comanche's chin gun between missile volleys) and the body turns only for its arc
+	Bool noseAims;
+	WhichTurretType aimTurret = sourceAI->getAimingTurret(&noseAims);
+	if (!noseAims)
+	{
+		if (m_canTurnInPlace)
+		{
+			Real relAngle = m_isAttackingObject ?
+												ThePartitionManager->getRelativeAngle2D( source, victim ) :
+												ThePartitionManager->getRelativeAngle2D( source, getMachineGoalPosition() );
+			Real shortfall = sourceAI->getTurretArcShortfall(aimTurret, relAngle);
+			if (shortfall != 0.0f)
+			{
+				sourceAI->setLocomotorGoalOrientation(source->getOrientation() + shortfall);
+				m_setLocomotor = true;
+			}
+		}
+		return STATE_CONTINUE;
+	}
+
 	// no else here!
 	{
 		Real relAngle = m_isAttackingObject ?
@@ -5632,9 +5737,13 @@ StateReturnType AIAttackAimAtTargetState::update()
 		}
 
 		//DEBUG_LOG(("AIM: desired %f, actual %f, delta %f, aimDelta %f, goalpos %f %f\n",rad2deg(obj->getOrientation() + relAngle),rad2deg(obj->getOrientation()),rad2deg(relAngle),rad2deg(aimDelta),victim->getPosition()->x,victim->getPosition()->y));
+		// a helicopter whose carried turret is already on the victim keeps its heading; its own fixed
+		// gun fires when the victim comes past the nose
+		const Locomotor *loco = sourceAI->getCurLocomotor();
+		Bool headingFree = m_isAttackingObject && loco && loco->isHelicopter(source) && sourceAI->isCarriedGunOn(victim);
 		if (m_canTurnInPlace)
 		{
-			if (fabs(relAngle) > aimDelta) 
+			if (fabs(relAngle) > aimDelta && !headingFree)
 			{
 				Real desiredAngle = source->getOrientation() + relAngle;
 				sourceAI->setLocomotorGoalOrientation(desiredAngle);
@@ -5643,7 +5752,8 @@ StateReturnType AIAttackAimAtTargetState::update()
 		}
 		else
 		{
-			sourceAI->setLocomotorGoalPositionExplicit(m_isAttackingObject ? *victim->getPosition() : *getMachineGoalPosition());
+			const Coord3D &targetPos = m_isAttackingObject ? *victim->getPosition() : *getMachineGoalPosition();
+			sourceAI->setLocomotorGoalPositionExplicit(computeAttackRunGoal(source, weapon, targetPos, relAngle, aimDelta));
 		}
 
 		if (fabs(relAngle) < aimDelta /*&& !m_preAttackFrames*/ )
@@ -5817,31 +5927,6 @@ StateReturnType AIAttackFireWeaponState::update()
 		// if our target is dead, go ahead and stop.
 		if (!victim || victim->isEffectivelyDead())
 			return STATE_FAILURE;
-
-		//
-		// What is in the air, plus what other units have announced they are about to fire, adds up to
-		// more than the victim has left: this round would be spent on something that is dead the
-		// moment the rest of it lands.
-		//
-		// Hold the shot.  Failing out of the fire state goes back to aiming rather than out of the
-		// attack, so nothing is given up: the unit keeps the victim and keeps its aim, it just does
-		// not spend the round.  A unit that picked this target itself gets a fresh scan out of the
-		// thing that put it here - guarding, attack moving, the idle scan - and that scan passes over
-		// a doomed victim, so it moves on.  One under orders waits for whoever re-aims it, which is
-		// what an attack circle working down its target list does, and arrives at the next victim
-		// with a full load instead of an empty one.
-		//
-		// A player order used to be exempt from this and fire regardless, which is what put all four
-		// loads of a four plane flight into the first tank they reached: missiles are seconds in the
-		// air, and the other three planes could not see that the kill was already paid for.  Booked
-		// damage lapses on its own if the shot never lands, so nothing holds fire forever.
-		//
-		if (IncomingDamageTracker::isSpokenFor(victim, obj->getID()))
-			return STATE_FAILURE;
-
-		// still ours to take, so keep saying so: the wind-up before a shot can run for a second and
-		// nothing is in the air during it
-		announceIntendedShot(obj, victim);
 	}
 	WeaponSlotType wslot;
 	Weapon* weapon = obj->getCurrentWeapon(&wslot);
@@ -5906,9 +5991,14 @@ StateReturnType AIAttackFireWeaponState::update()
 		//to transfer attackers (AIUpdateInterface::transferAttack), it is unable to modify our current victim in our attack state
 		//machine. When we move immediately to the aim state in the same frame as the transfer (after this call in fact), the victim
 		//was still pointing to the building and not the hole we transferred to. This code fixes that.
-		if( victim != obj->getAI()->getCurrentVictim() )
+		// Only when the AI has a victim to hand over. A turret's machine runs this state too, and a target the
+		// turret picked for itself on the move has no attack state behind it: the AI's victim is null, and
+		// copying that over dropped the target after every shot, so a tank driving past fired once per mood
+		// check instead of at its rate of fire.
+		Object *aiVictim = obj->getAI()->getCurrentVictim();
+		if( aiVictim && victim != aiVictim )
 		{
-			getMachine()->setGoalObject( obj->getAI()->getCurrentVictim() );
+			getMachine()->setGoalObject( aiVictim );
 		}
 
 		// clear this, just in case.
@@ -6377,6 +6467,7 @@ void AIAttackState::onExit( StateExitType status )
 	if (ai) 
 	{	
 		//ai->notifyVictimIsDead();	no, do NOT do this here.
+		ai->noteWithdrawTarget(ai->getCurrentVictim());
 		ai->setCurrentVictim(NULL);
 		for (int i = 0; i < MAX_TURRETS; ++i)
 			ai->setTurretTargetObject((WhichTurretType)i, NULL, NULL);

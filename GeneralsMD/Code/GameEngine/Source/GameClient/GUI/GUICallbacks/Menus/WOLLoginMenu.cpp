@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -30,10 +32,14 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
+#include "Lib/Clock.h"
+
+#include "Lib/WideCharFns.h"
 
 #include "Common/STLTypedefs.h"
 
-#include "Common/File.h"
+#include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "Common/GameEngine.h"
 #include "Common/GameSpyMiscPreferences.h"
@@ -117,20 +123,20 @@ static AsciiString obfuscate( AsciiString in )
 {
 	char *buf = NEW char[in.getLength() + 1];
 	strcpy(buf, in.str());
-	static const char *xor = "1337Munkee";
+	static const char *xorKey = "1337Munkee";		// not "xor": that is a C++ keyword, the ^ operator's other spelling
 	char *c = buf;
-	const char *c2 = xor;
+	const char *c2 = xorKey;
 	while (*c)
 	{
 		if (!*c2)
-			c2 = xor;
+			c2 = xorKey;
 		if (*c != *c2)
 			*c = *c++ ^ *c2++;
 		else
 			c++, c2++;
 	}
 	AsciiString out = buf;
-	delete buf;
+	delete[] buf;		// NEW char[] above; `delete buf` was a mismatch both CRTs tolerated
 	return out;
 }
 
@@ -185,7 +191,7 @@ Bool GameSpyLoginPreferences::write( void )
 	if (m_filename.isEmpty())
 		return false;
 
-	FILE *fp = fopen(m_filename.str(), "w");
+	FILE *fp = zh_fopen(m_filename.str(), "w");
 	if (fp)
 	{
 		fprintf(fp, "lastEmail = %s\n",   ((*this)["lastEmail"].str()));
@@ -812,7 +818,7 @@ void WOLLoginMenuUpdate( WindowLayout * layout, void *userData)
 					room.m_groupID = resp.groupRoom.id;
 					room.m_maxWaiting = resp.groupRoom.maxWaiting;
 					room.m_name = resp.groupRoomName.c_str();
-					room.m_translatedName = UnicodeString(L"TEST");
+					room.m_translatedName = UnicodeString(u"TEST");
 					room.m_numGames = resp.groupRoom.numGames;
 					room.m_numPlaying = resp.groupRoom.numPlaying;
 					room.m_numWaiting = resp.groupRoom.numWaiting;
@@ -861,7 +867,7 @@ void WOLLoginMenuUpdate( WindowLayout * layout, void *userData)
 		checkLogin();
 	}
 
-	if (TheGameSpyInfo && !buttonPushed && loginAttemptTime && (loginAttemptTime + loginTimeoutInMS < timeGetTime()))
+	if (TheGameSpyInfo && !buttonPushed && loginAttemptTime && (loginAttemptTime + loginTimeoutInMS < Clock_Milliseconds()))
 	{
 		// timed out a login attempt, so say so
 		loginAttemptTime = 0;
@@ -934,20 +940,45 @@ WindowMsgHandledType WOLLoginMenuInput( GameWindow *window, UnsignedInt msg,
 
 static Bool isNickOkay(UnicodeString nick)
 {
-	static const WideChar * legalIRCChars = L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789[]`_^{|}-";
+	static const WideChar * legalIRCChars = u"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789[]`_^{|}-";
 
 	Int len = nick.getLength();
 	if (len == 0)
 		return TRUE;
 
-	if (len == 1 && nick.getCharAt(0) == L'-')
+	if (len == 1 && nick.getCharAt(0) == u'-')
 		return FALSE;
 
 	WideChar newChar = nick.getCharAt(len-1);
-	if (wcschr(legalIRCChars, newChar) == NULL)
+	if (WideCharChr(legalIRCChars, newChar) == NULL)
 		return FALSE;
 
 	return TRUE;
+}
+
+/* Today's year, month or day, as a number: "yyyy", "MM" or "dd".  Windows asks GetDateFormat with that
+	 numeric picture, as isAgeOkay always did; elsewhere it is localtime's, which is the same local date
+	 and depends on no locale category. */
+#define DATE_BUFFER_SIZE 256
+static Int todaysDatePart( const char *picture )
+{
+#if defined(_WIN32)
+	char dateBuffer[ DATE_BUFFER_SIZE ];
+	GetDateFormat( LOCALE_SYSTEM_DEFAULT,
+								 0, NULL,
+								 picture,
+								 dateBuffer, DATE_BUFFER_SIZE );
+	return atoi(dateBuffer);
+#else
+	const time_t now = time( NULL );
+	struct tm local;
+	localtime_r( &now, &local );
+	if (strcmp( picture, "yyyy" ) == 0)
+		return local.tm_year + 1900;
+	if (strcmp( picture, "MM" ) == 0)
+		return local.tm_mon + 1;
+	return local.tm_mday;
+#endif
 }
 
 static Bool isAgeOkay(AsciiString &month, AsciiString &day, AsciiString year)
@@ -965,35 +996,21 @@ static Bool isAgeOkay(AsciiString &month, AsciiString &day, AsciiString year)
 	day.format("%02.2d",dayInt);
 
 	// test the year first
-	#define DATE_BUFFER_SIZE 256
-	char dateBuffer[ DATE_BUFFER_SIZE ];
-	GetDateFormat( LOCALE_SYSTEM_DEFAULT,
-								 0, NULL,
-								 "yyyy",
-								 dateBuffer, DATE_BUFFER_SIZE );
-	Int sysVal = atoi(dateBuffer);
+	Int sysVal = todaysDatePart("yyyy");
 	Int userVal = atoi(year.str());
 	if(sysVal - userVal >= 14)
 		return TRUE;
 	else if( sysVal - userVal <= 12)
 		return FALSE;
 
-	GetDateFormat( LOCALE_SYSTEM_DEFAULT,
-								 0, NULL,
-								 "MM",
-								 dateBuffer, DATE_BUFFER_SIZE );
-	sysVal = atoi(dateBuffer);
+	sysVal = todaysDatePart("MM");
 	userVal = atoi(month.str());
 	if(sysVal - userVal >0 )
 		return TRUE;
 	else if( sysVal -userVal < 0 )
 		return FALSE;
 //	month.format("%02.2d",userVal);
-	GetDateFormat( LOCALE_SYSTEM_DEFAULT,
-								 0, NULL,
-								 "dd",
-								 dateBuffer, DATE_BUFFER_SIZE );
-	sysVal = atoi(dateBuffer);
+	sysVal = todaysDatePart("dd");
 	userVal = atoi(day.str());
 	if(sysVal - userVal< 0)
 		return FALSE;
@@ -1048,16 +1065,16 @@ WindowMsgHandledType WOLLoginMenuSystem( GameWindow *window, UnsignedInt msg,
 				trimmedEmail.trim();
 				if (!trimmedNick.isEmpty())
 				{
-					if (trimmedNick.getCharAt(trimmedNick.getLength()-1) == L'\\')
+					if (trimmedNick.getCharAt(trimmedNick.getLength()-1) == u'\\')
 						trimmedNick.removeLastChar();
-					if (trimmedNick.getCharAt(trimmedNick.getLength()-1) == L'/')
+					if (trimmedNick.getCharAt(trimmedNick.getLength()-1) == u'/')
 						trimmedNick.removeLastChar();
 				}
 				if (!trimmedEmail.isEmpty())
 				{
-					if (trimmedEmail.getCharAt(trimmedEmail.getLength()-1) == L'\\')
+					if (trimmedEmail.getCharAt(trimmedEmail.getLength()-1) == u'\\')
 						trimmedEmail.removeLastChar();
-					if (trimmedEmail.getCharAt(trimmedEmail.getLength()-1) == L'/')
+					if (trimmedEmail.getCharAt(trimmedEmail.getLength()-1) == u'/')
 						trimmedEmail.removeLastChar();
 				}
 				if (trimmedEmail.getLength() != uEmail.getLength())
@@ -1243,7 +1260,7 @@ WindowMsgHandledType WOLLoginMenuSystem( GameWindow *window, UnsignedInt msg,
 
 						if ( !email.isEmpty() && !login.isEmpty() && !password.isEmpty() )
 						{
-							loginAttemptTime = timeGetTime();
+							loginAttemptTime = Clock_Milliseconds();
 							BuddyRequest req;
 							req.buddyRequestType = BuddyRequest::BUDDYREQUEST_LOGINNEW;
 							strcpy(req.arg.login.nick, login.str());
@@ -1332,7 +1349,7 @@ WindowMsgHandledType WOLLoginMenuSystem( GameWindow *window, UnsignedInt msg,
 
 						if ( !email.isEmpty() && !login.isEmpty() && !password.isEmpty() )
 						{
-							loginAttemptTime = timeGetTime();
+							loginAttemptTime = Clock_Milliseconds();
 							BuddyRequest req;
 							req.buddyRequestType = BuddyRequest::BUDDYREQUEST_LOGIN;
 							strcpy(req.arg.login.nick, login.str());
@@ -1396,7 +1413,7 @@ WindowMsgHandledType WOLLoginMenuSystem( GameWindow *window, UnsignedInt msg,
 
 						if ( !login.isEmpty() )
 						{
-							loginAttemptTime = timeGetTime();
+							loginAttemptTime = Clock_Milliseconds();
 							PeerRequest req;
 							req.peerRequestType = PeerRequest::PEERREQUEST_LOGIN;
 							req.nick = login.str();
@@ -1451,7 +1468,7 @@ WindowMsgHandledType WOLLoginMenuSystem( GameWindow *window, UnsignedInt msg,
 									int len = uniLine.getLength();
 									for (int index = len-1; index >= 0; index--)
 									{
-										if (iswspace(uniLine.getCharAt(index)))
+										if (WideCharIsSpace(uniLine.getCharAt(index)))
 										{
 											uniLine.removeLastChar();
 										}
@@ -1461,7 +1478,7 @@ WindowMsgHandledType WOLLoginMenuSystem( GameWindow *window, UnsignedInt msg,
 										}
 									}
 									//uniLine.trim();
-									DEBUG_LOG(("adding TOS line: [%ls]\n", uniLine.str()));
+									DEBUG_LOG(("adding TOS line: [%s]\n", WideCharAsUtf8( uniLine.str() ).str()));
 									GadgetListBoxAddEntryText(listboxTOS, uniLine, tosColor, -1);
 								}
 

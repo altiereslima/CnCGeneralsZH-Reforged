@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -42,6 +44,7 @@ class Bridge;
 class Object;
 class Weapon;
 class PathfindZoneManager;
+class PathfindCell;		// PathfindCellInfo names it before its definition; a friend declaration alone does not declare it
 
 // How close is close enough when moving.
 
@@ -193,6 +196,10 @@ struct ClosestPointOnPathInfo
 	Real								distAlongPath;
 	Coord3D							posOnPath;
 	PathfindLayerEnum		layer;
+	/// how far along the route the next bend is, and the cosine of the angle it turns through;
+	/// 0 and 1 when the route runs straight to its end, which a vehicle brakes for anyway
+	Real								bendDist;
+	Real								bendCos;
 };
 
 /**

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -1069,13 +1071,25 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	// that has FMA3 and a plain SSE2 one on a CPU that does not, and the two differ in the last bit.
 	// Logic routes its trig through DetTrig, but the computer player's matchup score takes a log(),
 	// and one bit there is a different unit bought and a network game that falls apart.  One path
-	// for every machine; v1.1.4 was a 32-bit build and never had the choice.
+	// for every machine; v1.1.4 was a 32-bit build and never had the choice.  Windows on Arm's
+	// runtime has no FMA3 routine to choose: whether its libm answers that log() as x64 does is E1's
+	// question, as it is off Windows (PosixMain.cpp).
+#if defined(_M_X64)
 	_set_FMA3_enable( 0 );
+#endif
 
 	// Without this Windows scales the whole window by the display's scaling setting, so at 125% a
 	// 1920x1080 game on a 1920x1080 screen is drawn 2400x1350 and hangs off the bottom right.  The
 	// game sizes everything in real pixels, which is what DPI awareness hands it.
 	::SetProcessDPIAware();
+
+	if (findEarlyCommandLineOption( L"-rk7" ) == NULL &&
+			findEarlyCommandLineOption( L"-multiInstance" ) == NULL &&
+			!isUnattendedProcess())
+	{
+		::MessageBoxA( NULL, "Please start Zero Hour Reforged from its launcher.", "Zero Hour Reforged", MB_OK | MB_ICONINFORMATION );
+		return 1;
+	}
 
 #ifdef _PROFILE
   Profile::StartRange("init");
@@ -1145,12 +1159,12 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		while (argc < MAXIMUM_ARGUMENTS && token != NULL) {
 			argv[argc++] = strtrim(token);
 			//added a preparse step for this flag because it affects window creation style
-			if (stricmp(token,"-win")==0)
+			if (strcasecmp(token,"-win")==0)
 			{
 				ApplicationIsWindowed=true;
 				ApplicationIsBorderless=false;	// an explicit -win beats a borderless Options.ini
 			}
-			if (stricmp(token,"-fullscreen")==0)
+			if (strcasecmp(token,"-fullscreen")==0)
 			{
 				ApplicationIsWindowed=false;
 				ApplicationIsBorderless=false;
@@ -1159,7 +1173,7 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 			// or frame, covering the display at the desktop resolution - so it implies -win.  Parsed
 			// here rather than from Options.ini because the window exists long before the engine's
 			// preferences do.
-			if (stricmp(token,"-borderless")==0)
+			if (strcasecmp(token,"-borderless")==0)
 			{
 				ApplicationIsWindowed=true;
 				ApplicationIsBorderless=true;
@@ -1170,7 +1184,7 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 			// nothing is ever drawn into it, it is never shown either: a batch of matches used to
 			// throw a hundred little windows on the desktop and steal the focus off whatever the
 			// machine was really doing.
-			if (stricmp(token,"-headless")==0)
+			if (strcasecmp(token,"-headless")==0)
 			{
 				ApplicationIsWindowed=true;
 				ApplicationIsHeadless=true;
@@ -1188,14 +1202,14 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 			Int i;
 			DEBUG_LOG(("\n--- DX STACK DUMP\n"));
 			for (i=2; i<argc; i++) {
-				Int pc;
+				unsigned long long pc;
 				pc = 0;
-				sscanf(argv[i], "%x",  &pc);
+				sscanf(argv[i], "%llx",  &pc);
 				char name[_MAX_PATH], file[_MAX_PATH];
 				unsigned int line;
 				unsigned int addr;
-				GetFunctionDetails((void*)pc, name, ARRAY_SIZE(name), file, ARRAY_SIZE(file), &line, &addr);
-				DEBUG_LOG(("0x%x - %s, %s, line %d address 0x%x\n", pc, name, file, line, addr));
+				GetFunctionDetails((void*)(uintptr_t)pc, name, ARRAY_SIZE(name), file, ARRAY_SIZE(file), &line, &addr);
+				DEBUG_LOG(("0x%llx - %s, %s, line %d address 0x%x\n", pc, name, file, line, addr));
 			}
 			DEBUG_LOG(("\n--- END OF DX STACK DUMP\n"));
 			return 0;

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -47,8 +49,13 @@
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 #define WIN32_LEAN_AND_MEAN
+#if defined(_WIN32)
 #include <windows.h>
+#endif
+#include "Lib/Clock.h"
+#if defined(_WIN32)
 #include <mmsystem.h>
+#endif
 #include <time.h>
 //-----------------------------------------------------------------------------
 // USER INCLUDES //////////////////////////////////////////////////////////////
@@ -75,7 +82,7 @@
 // DEFINES ////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 
-void drawText( GameWindow *window, WinInstanceData *instData );
+static void drawText( GameWindow *window, WinInstanceData *instData );	// static, as its definition is
 static Color BrownishColor = GameMakeColor(167,134,94,255);
 static IRegion2D clipRegion;
 //-----------------------------------------------------------------------------
@@ -111,8 +118,8 @@ static void advancePosition(GameWindow *window, const Image *image, UnsignedInt 
 	static Int x = -800;
 	static Int y = pos.y - (image->getImageHeight()/2);
 
-	static UnsignedInt m_startTime = timeGetTime();
-	Int time = timeGetTime() - m_startTime;
+	static UnsignedInt m_startTime = Clock_Milliseconds();
+	Int time = Clock_Milliseconds() - m_startTime;
 	Real percentDone = INT_TO_REAL(time) / 10000;
 	
 	if(goingForward)
@@ -120,7 +127,7 @@ static void advancePosition(GameWindow *window, const Image *image, UnsignedInt 
 		if(percentDone >= 1)
 		{
 			y = pos.y + size.y - (image->getImageHeight()/2);
-			m_startTime = timeGetTime();
+			m_startTime = Clock_Milliseconds();
 			goingForward = FALSE;
 		}
 		else
@@ -134,7 +141,7 @@ static void advancePosition(GameWindow *window, const Image *image, UnsignedInt 
 		if(percentDone >= 1)
 		{
 			y = pos.y - (image->getImageHeight()/2);
-			m_startTime = timeGetTime();
+			m_startTime = Clock_Milliseconds();
 			goingForward = TRUE;
 		}
 		else
@@ -172,19 +179,19 @@ void W3DMainMenuDraw( GameWindow *window, WinInstanceData *instData )
 	IRegion2D	topHorizontal1 ={pos.x, pos.y, pos.x + size.x, pos.y	};
 	IRegion2D	topHorizontal1drop ={pos.x, pos.y+1, pos.x + size.x, pos.y+1	};
 
-	IRegion2D	topHorizontal2 ={pos.x, pos.y + (size.y * .1) , pos.x + size.x, pos.y + (size.y * .1)	};
-	IRegion2D	topHorizontal2drop ={pos.x, pos.y + (size.y * .12) , pos.x + size.x, pos.y + (size.y * .12)	};
+	IRegion2D	topHorizontal2 ={pos.x, (Int)(pos.y + (size.y * .1)) , pos.x + size.x, (Int)(pos.y + (size.y * .1))	};
+	IRegion2D	topHorizontal2drop ={pos.x, (Int)(pos.y + (size.y * .12)) , pos.x + size.x, (Int)(pos.y + (size.y * .12))	};
 
-	IRegion2D	bottomHorizontal1={pos.x, pos.y + (size.y * .9), pos.x + size.x, pos.y + (size.y * .9)	};
-	IRegion2D	bottomHorizontal1drop={pos.x, pos.y + (size.y * .92), pos.x + size.x, pos.y + (size.y * .92)	};
+	IRegion2D	bottomHorizontal1={pos.x, (Int)(pos.y + (size.y * .9)), pos.x + size.x, (Int)(pos.y + (size.y * .9))	};
+	IRegion2D	bottomHorizontal1drop={pos.x, (Int)(pos.y + (size.y * .92)), pos.x + size.x, (Int)(pos.y + (size.y * .92))	};
 
 	IRegion2D	bottomHorizontal2= {pos.x, pos.y + size.y, pos.x + size.x, pos.y + size.y 	};
 	IRegion2D	bottomHorizontal2drop= {pos.x, pos.y + size.y + 1, pos.x + size.x, pos.y + size.y + 1	};
 
-	IRegion2D	verticle1 ={pos.x + (size.x * .225), pos.y , pos.x + (size.x * .225), height 	};
-	IRegion2D	verticle2 ={pos.x + (size.x * .445), pos.y, pos.x + (size.x * .445), height 	};
-	IRegion2D	verticle3 ={pos.x + (size.x * .6662), pos.y, pos.x + (size.x * .6662), height 	};
-	IRegion2D	verticle4 ={pos.x + (size.x * .885), pos.y , pos.x + (size.x * .885), height 	};
+	IRegion2D	verticle1 ={(Int)(pos.x + (size.x * .225)), pos.y , (Int)(pos.x + (size.x * .225)), height 	};
+	IRegion2D	verticle2 ={(Int)(pos.x + (size.x * .445)), pos.y, (Int)(pos.x + (size.x * .445)), height 	};
+	IRegion2D	verticle3 ={(Int)(pos.x + (size.x * .6662)), pos.y, (Int)(pos.x + (size.x * .6662)), height 	};
+	IRegion2D	verticle4 ={(Int)(pos.x + (size.x * .885)), pos.y , (Int)(pos.x + (size.x * .885)), height 	};
 //	static IRegion2D	verticle5 ={pos.x + (size.x * .7250), pos.y + (size.y * .12), pos.x + (size.x * .7250), pos.y + (size.y * .86) 	};
 //	static IRegion2D	verticle6 ={pos.x + (size.x * .9062), pos.y + (size.y * .12), pos.x + (size.x * .9062), pos.y + (size.y * .86) 	};
 
@@ -236,19 +243,19 @@ void W3DMainMenuFourDraw( GameWindow *window, WinInstanceData *instData )
 	IRegion2D	topHorizontal1 ={pos.x, pos.y, pos.x + size.x, pos.y	};
 	IRegion2D	topHorizontal1drop ={pos.x, pos.y+1, pos.x + size.x, pos.y+1	};
 
-	IRegion2D	topHorizontal2 ={pos.x, pos.y + (size.y * .1) , pos.x + size.x, pos.y + (size.y * .1)	};
-	IRegion2D	topHorizontal2drop ={pos.x, pos.y + (size.y * .12) , pos.x + size.x, pos.y + (size.y * .12)	};
+	IRegion2D	topHorizontal2 ={pos.x, (Int)(pos.y + (size.y * .1)) , pos.x + size.x, (Int)(pos.y + (size.y * .1))	};
+	IRegion2D	topHorizontal2drop ={pos.x, (Int)(pos.y + (size.y * .12)) , pos.x + size.x, (Int)(pos.y + (size.y * .12))	};
 
-	IRegion2D	bottomHorizontal1={pos.x, pos.y + (size.y * .9), pos.x + size.x, pos.y + (size.y * .9)	};
-	IRegion2D	bottomHorizontal1drop={pos.x, pos.y + (size.y * .92), pos.x + size.x, pos.y + (size.y * .92)	};
+	IRegion2D	bottomHorizontal1={pos.x, (Int)(pos.y + (size.y * .9)), pos.x + size.x, (Int)(pos.y + (size.y * .9))	};
+	IRegion2D	bottomHorizontal1drop={pos.x, (Int)(pos.y + (size.y * .92)), pos.x + size.x, (Int)(pos.y + (size.y * .92))	};
 
 	IRegion2D	bottomHorizontal2= {pos.x, pos.y + size.y, pos.x + size.x, pos.y + size.y 	};
 	IRegion2D	bottomHorizontal2drop= {pos.x, pos.y + size.y + 1, pos.x + size.x, pos.y + size.y + 1	};
 
-	IRegion2D	verticle1 ={pos.x + (size.x * .295), pos.y , pos.x + (size.x * .295), height 	};
-	IRegion2D	verticle2 ={pos.x + (size.x * .59), pos.y, pos.x + (size.x * .59), height 	};
+	IRegion2D	verticle1 ={(Int)(pos.x + (size.x * .295)), pos.y , (Int)(pos.x + (size.x * .295)), height 	};
+	IRegion2D	verticle2 ={(Int)(pos.x + (size.x * .59)), pos.y, (Int)(pos.x + (size.x * .59)), height 	};
 	//IRegion2D	verticle3 ={pos.x + (size.x * .6662), pos.y, pos.x + (size.x * .6662), height 	};
-	IRegion2D	verticle4 ={pos.x + (size.x * .885), pos.y , pos.x + (size.x * .885), height 	};
+	IRegion2D	verticle4 ={(Int)(pos.x + (size.x * .885)), pos.y , (Int)(pos.x + (size.x * .885)), height 	};
 //	static IRegion2D	verticle5 ={pos.x + (size.x * .7250), pos.y + (size.y * .12), pos.x + (size.x * .7250), pos.y + (size.y * .86) 	};
 //	static IRegion2D	verticle6 ={pos.x + (size.x * .9062), pos.y + (size.y * .12), pos.x + (size.x * .9062), pos.y + (size.y * .86) 	};
 

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -106,7 +108,7 @@ static void parseTimeAndLocationInfo( INI *ini, void *instance,
 
 	// delay label
 	const char *token = ini->getNextToken( ini->getSepsColon() );
-	if( stricmp( token, "Delay" ) != 0 )
+	if( strcasecmp( token, "Delay" ) != 0 )
 	{
 
 		DEBUG_CRASH(( "Expected 'Delay' token, found '%s'\n", token ));
@@ -123,7 +125,7 @@ static void parseTimeAndLocationInfo( INI *ini, void *instance,
 	{
 
 		// token must be a label for bone location
-		if( stricmp( token, "Bone" ) != 0 )
+		if( strcasecmp( token, "Bone" ) != 0 )
 		{
 
 			DEBUG_CRASH(( "Expected 'Bone' token, found '%s'\n", token ));
@@ -156,7 +158,7 @@ static void parseTimeAndLocationInfo( INI *ini, void *instance,
 
 	// fx list label
 	token = ini->getNextToken( ini->getSepsColon() );
-	if( stricmp( token, "FX" ) != 0 )
+	if( strcasecmp( token, "FX" ) != 0 )
 	{
 
 		DEBUG_CRASH(( "Expected 'FX' token, found '%s'\n", token ));
@@ -197,7 +199,7 @@ static void parseTimeAndLocationInfo( INI *ini, void *instance,
 
 	// fx list label
 	token = ini->getNextToken( ini->getSepsColon() );
-	if( stricmp( token, "OCL" ) != 0 )
+	if( strcasecmp( token, "OCL" ) != 0 )
 	{
 
 		DEBUG_CRASH(( "Expected 'OCL' token, found '%s'\n", token ));

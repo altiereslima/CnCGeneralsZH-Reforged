@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -27,9 +29,13 @@
 // Desc: Draw module reacts to SupplyStatus setting by hiding an equal number of the specified bone array.
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-#include "Common/Xfer.h"
+// Drawable.h before Xfer.h: Xfer.h reaches BitFlagsIO.h, whose templates use Xfer, before it has
+// declared Xfer.  MSVC parses a template body late and never noticed; clang parses it where it stands.
 #include "GameClient/Drawable.h"
+#include "Common/Xfer.h"
 #include "W3DDevice/GameClient/Module/W3DSupplyDraw.h"
+
+#include <limits.h>	// INT_MAX: MSVC and libc++ bring it in by other headers, libstdc++ does not
 
 //-------------------------------------------------------------------------------------------------
 W3DSupplyDrawModuleData::W3DSupplyDrawModuleData() 

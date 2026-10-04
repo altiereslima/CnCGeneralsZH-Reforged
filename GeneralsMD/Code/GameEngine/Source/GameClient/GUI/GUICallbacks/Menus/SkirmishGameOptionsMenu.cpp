@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,6 +31,7 @@
 ///////////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
 
 #include "Common/BattleHonors.h"
@@ -169,7 +172,7 @@ static void populateSkirmishBattleHonors( void );
 // x0.75 is 22.5, which a whole frame rate cannot hold, so it runs at 23.  The preference keeps the
 // frame rate, so one saved by the old 15 to 60 slider lands on the nearest entry.
 static const Int SKIRMISH_GAME_SPEEDS[] = { 15, 23, 30, 45, 60 };
-static const WideChar *SKIRMISH_GAME_SPEED_CAPTIONS[] = { L"x0.5", L"x0.75", L"x1", L"x1.5", L"x2" };
+static const WideChar *SKIRMISH_GAME_SPEED_CAPTIONS[] = { u"x0.5", u"x0.75", u"x1", u"x1.5", u"x2" };
 static const Int SKIRMISH_GAME_SPEED_COUNT = sizeof( SKIRMISH_GAME_SPEEDS ) / sizeof( SKIRMISH_GAME_SPEEDS[ 0 ] );
 
 static Int nearestGameSpeedIndex( Int framesPerSecond )
@@ -297,7 +300,7 @@ Bool SkirmishPreferences::usesSystemMapDir(void)
 	if (it == end())
 		return TRUE;
 
-	if (stricmp(it->second.str(), "yes") == 0) {
+	if (strcasecmp(it->second.str(), "yes") == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -354,7 +357,7 @@ Money SkirmishPreferences::getStartingCash(void) const
   }
   
   Money money;
-  money.deposit( strtoul( it->second.str(), NULL, 10 ), FALSE  );
+  money.deposit( strtoulAsWindows( it->second.str() ), FALSE  );
   
   return money;
 }
@@ -505,7 +508,7 @@ void CheckForCDAtGameStart( gameStartCallback callback )
 	{
 		// popup a dialog asking for a CD
 		ExMessageBoxOkCancel(TheGameText->fetch("GUI:InsertCDPrompt"), TheGameText->fetch("GUI:InsertCDMessage"),
-			callback, checkCDCallback, cancelStartBecauseOfNoCD);
+			(void *)callback, checkCDCallback, cancelStartBecauseOfNoCD);
 	}
 	else
 	{
@@ -517,7 +520,7 @@ Bool sandboxOk = FALSE;
 static void startPressed(void)
 {
 
-	BOOL isReady = FALSE;
+	Bool isReady = FALSE;
 	Int playerCount = TheSkirmishGameInfo->getNumPlayers();
 	AsciiString lowerMap = TheSkirmishGameInfo->getMap();
 	lowerMap.toLower();
@@ -913,7 +916,7 @@ static void handlePlayerSelection(int index)
 	Int playerType, selIndex;
 	GadgetComboBoxGetSelectedPos(combo, &selIndex);
   UnicodeString title = GadgetComboBoxGetText(combo);
-	playerType = (Int)GadgetComboBoxGetItemData(combo, selIndex);
+	playerType = (Int)(intptr_t)GadgetComboBoxGetItemData(combo, selIndex);
 	GameInfo *myGame = TheSkirmishGameInfo;
 
 	if (myGame)
@@ -932,7 +935,7 @@ static void handleColorSelection(int index)
 	GameWindow *combo = comboBoxColor[index];
 	Int color, selIndex;
 	GadgetComboBoxGetSelectedPos(combo, &selIndex);
-	color = (Int)GadgetComboBoxGetItemData(combo, selIndex);
+	color = (Int)(intptr_t)GadgetComboBoxGetItemData(combo, selIndex);
 
 	GameInfo *myGame = TheSkirmishGameInfo;
 
@@ -972,7 +975,7 @@ static void handlePlayerTemplateSelection(int index)
 	GameWindow *combo = comboBoxPlayerTemplate[index];
 	Int playerTemplate, selIndex;
 	GadgetComboBoxGetSelectedPos(combo, &selIndex);
-	playerTemplate = (Int)GadgetComboBoxGetItemData(combo, selIndex);
+	playerTemplate = (Int)(intptr_t)GadgetComboBoxGetItemData(combo, selIndex);
 	GameInfo *myGame = TheSkirmishGameInfo;
 
 	if (myGame)
@@ -1025,7 +1028,7 @@ static void handleTeamSelection(int index)
 	GameWindow *combo = comboBoxTeam[index];
 	Int team, selIndex;
 	GadgetComboBoxGetSelectedPos(combo, &selIndex);
-	team = (Int)GadgetComboBoxGetItemData(combo, selIndex);
+	team = (Int)(intptr_t)GadgetComboBoxGetItemData(combo, selIndex);
 	GameInfo *myGame = TheSkirmishGameInfo;
 
 	if (myGame)
@@ -1058,7 +1061,7 @@ static void handleStartingCashSelection()
       return;
 
     Money startingCash;
-    startingCash.deposit( (UnsignedInt)GadgetComboBoxGetItemData( comboBoxStartingCash, selIndex ), FALSE );
+    startingCash.deposit( (UnsignedInt)(uintptr_t)GadgetComboBoxGetItemData( comboBoxStartingCash, selIndex ), FALSE );
     myGame->setStartingCash( startingCash );
   }
 }
@@ -1333,7 +1336,7 @@ void updateSkirmishGameOptions( void )
   Int index;
   for ( index = 0; index < itemCount; index++ )
   {
-    Int value  = (Int)GadgetComboBoxGetItemData(comboBoxStartingCash, index);
+    Int value  = (Int)(intptr_t)GadgetComboBoxGetItemData(comboBoxStartingCash, index);
     if ( value == TheSkirmishGameInfo->getStartingCash().countMoney() )
     {
       GadgetComboBoxSetSelectedPos(comboBoxStartingCash, index, TRUE);
@@ -1404,7 +1407,9 @@ void SkirmishGameOptionsMenuInit( WindowLayout *layout, void *userData )
 	TheSkirmishGameInfo->setSlot(1, gSlot);
 
 	ParseAsciiStringToGameInfo(TheSkirmishGameInfo, prefs.getSlotList());
-	TheSkirmishGameInfo->setSeed(GetTickCount());
+	// -seed repeats a match set up here too, as it does -autoskirmish's (GameEngine.cpp): the same match from the
+	// same choices
+	TheSkirmishGameInfo->setSeed((TheGlobalData->m_fixedSeed >= 0) ? TheGlobalData->m_fixedSeed : Clock_Milliseconds_Coarse());
 
 	UnsignedInt isPreorder = 0;
 	GetUnsignedIntFromRegistry("", "Preorder", isPreorder);
@@ -1877,25 +1882,25 @@ void populateSkirmishBattleHonors(void)
 	GameWindow *streakWindow = TheWindowManager->winGetWindowFromId( NULL, NAMEKEY("SkirmishGameOptionsMenu.wnd:StaticTextStreakValue") );
 	if (streakWindow)
 	{
-		uStr.format(L"%d", stats.getWinStreak());
+		uStr.format(u"%d", stats.getWinStreak());
 		GadgetStaticTextSetText(streakWindow, uStr);
 	}
 	GameWindow *bestStreakWindow = TheWindowManager->winGetWindowFromId( NULL, NAMEKEY("SkirmishGameOptionsMenu.wnd:StaticTextBestStreakValue") );
 	if (bestStreakWindow)
 	{
-		uStr.format(L"%d", stats.getBestWinStreak());
+		uStr.format(u"%d", stats.getBestWinStreak());
 		GadgetStaticTextSetText(bestStreakWindow, uStr);
 	}
 	GameWindow *winsWindow = TheWindowManager->winGetWindowFromId( NULL, NAMEKEY("SkirmishGameOptionsMenu.wnd:StaticTextWinsValue") );
 	if (winsWindow)
 	{
-		uStr.format(L"%d", stats.getWins());
+		uStr.format(u"%d", stats.getWins());
 		GadgetStaticTextSetText(winsWindow, uStr);
 	}
 	GameWindow *lossesWindow = TheWindowManager->winGetWindowFromId( NULL, NAMEKEY("SkirmishGameOptionsMenu.wnd:StaticTextLossesValue") );
 	if (lossesWindow)
 	{
-		uStr.format(L"%d", stats.getLosses());
+		uStr.format(u"%d", stats.getLosses());
 		GadgetStaticTextSetText(lossesWindow, uStr);
 	}
 
@@ -2093,7 +2098,7 @@ void populateSkirmishBattleHonors(void)
 
 	// TEST FOR STREAK HONOR
 	Int streak = stats.getBestWinStreak();
-	uStr.format(L"%10d", streak);
+	uStr.format(u"%10d", streak);
 	if (streak >= 1000)
 	{
 		InsertBattleHonor(list, TheMappedImageCollection->findImageByName("HonorStreak_1000"), TRUE,
@@ -2132,7 +2137,7 @@ void populateSkirmishBattleHonors(void)
 
 	// TEST FOR DOMINATION HONOR
 	Int totalWins = stats.getWins();
-	uStr.format(L"%10d", totalWins);
+	uStr.format(u"%10d", totalWins);
 	if (totalWins >= 10000)
 	{
 		InsertBattleHonor(list, TheMappedImageCollection->findImageByName("Domination_10000"), TRUE,

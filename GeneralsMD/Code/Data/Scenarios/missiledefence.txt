@@ -1,0 +1,79 @@
+# Missile defence, four fights at once, far enough apart not to meet: two King Raptors flying seven
+# passes over a Stinger Site, an Avenger under five Tank Hunters, a Paladin under four Rocket Buggies
+# and a Paladin rushed by six Terrorists.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 7 -maxframes 2400
+#     -scenario missiledefence -logPrefix missiledefence_
+#
+# Measured 2026-10-03, seeds 7 and 8, with a temporary log of every missile fired, every hit and
+# every missile shot down or decoyed, when the point defense lasers gave way to flares on the Air
+# Force General's aircraft and a hard-kill charge on the Paladin and the Avenger. Before, after:
+#
+#   King Raptors: 54 and 63 Stingers, 53 and 60 shot down, 5 and 9 hits, 150 and 270 damage of 480,
+#     one Raptor down on frame 2396 of seed 8. After: 54 and 54 Stingers, 48 and 49 turned onto a
+#     flare, 6 and 5 hits, 180 and 150 damage, none down.
+#   Avenger: 29 and 30 missiles, 14 and 16 shot down, dead on frame 261 and 265. After: 29 and 29,
+#     8 and 8 shot down (both clips go in the first volleys, the reload is still running when it
+#     dies), dead on 261 and 261. Fifteen hits kill it either way.
+#   Paladin and buggies: 36 rockets, 4 shot down, dead on 376 and 380. After: 36, 4, dead on 380
+#     and 381. The buggies outrange it and it never reaches them.
+#   Paladin and Terrorists: one Terrorist gets through and kills it, frame 378 and 397, the other
+#     five left on 540 and 398 health of 600. After: frame 397 and 398, 380 and 422.
+#
+# The charge then went from DeathType EXPLODED to DETONATED for missiles, because EXPLODED made every
+# missile it burst play EA's full Explosion and grey cloud. A missile's death draws from the logic
+# random stream, so the runs moved, read from the tallies and the KILLXP lines: the Raptors took 60
+# and 150, the Avenger died on 261 and 261, the Paladin under buggies on 381 and 381, the Paladin
+# under Terrorists on 397 and 450, and its infantry charge killed a Terrorist on frame 385 of seed 7.
+#
+# Worth filming: flares come off a Raptor and Stingers turn onto them around 2620,3005 at about 95
+# high on frames 250 to 256 (seed 7); the Avenger at 2195,3906 bursts Tank Hunter missiles about 90
+# north of it on frames 150 to 190, and the Paladin at 3300,3800 a buggy rocket 60 north on 146.
+
+30    spawn      1  GLAStingerSite                1   2600 3000
+30    spawn      0  AirF_AmericaJetRaptor         2   1700 3000  40
+60    move       0  AirF_AmericaJetRaptor             3500 3000
+60    shiftmove  0  AirF_AmericaJetRaptor             1700 3000
+60    shiftmove  0  AirF_AmericaJetRaptor             3500 3000
+60    shiftmove  0  AirF_AmericaJetRaptor             1700 3000
+60    shiftmove  0  AirF_AmericaJetRaptor             3500 3000
+60    shiftmove  0  AirF_AmericaJetRaptor             1700 3000
+60    shiftmove  0  AirF_AmericaJetRaptor             3500 3000
+60    shiftmove  0  AirF_AmericaJetRaptor             1700 3000
+
+30    spawn      0  AmericaTankAvenger            1   2200 3900
+30    spawn      1  ChinaInfantryTankHunter       5   2200 4150  18
+60    attack     1  ChinaInfantryTankHunter       0  AmericaTankAvenger
+
+30    spawn      0  AmericaTankPaladin            1   3300 3800
+30    spawn      1  GLAVehicleRocketBuggy         4   3300 4100  30
+60    attackmove 1  GLAVehicleRocketBuggy             3300 3800
+
+30    spawn      0  AmericaTankPaladin            1   1100 3700
+30    spawn      1  GLAInfantryTerrorist          6   1100 3950  18
+60    attackmove 1  GLAInfantryTerrorist              1100 3700
+
+60    tally      0  AirF_AmericaJetRaptor
+60    tally      0  AmericaTankAvenger
+60    tally      0  AmericaTankPaladin
+600   tally      0  AirF_AmericaJetRaptor
+600   tally      0  AmericaTankAvenger
+600   tally      0  AmericaTankPaladin
+600   tally      1  GLAVehicleRocketBuggy
+600   tally      1  GLAInfantryTerrorist
+600   tally      1  ChinaInfantryTankHunter
+1200  tally      0  AirF_AmericaJetRaptor
+1200  tally      0  AmericaTankAvenger
+1200  tally      0  AmericaTankPaladin
+1200  tally      1  GLAVehicleRocketBuggy
+1200  tally      1  GLAInfantryTerrorist
+1200  tally      1  ChinaInfantryTankHunter
+2350  tally      0  AirF_AmericaJetRaptor
+2350  tally      0  AmericaTankAvenger
+2350  tally      0  AmericaTankPaladin
+2350  tally      1  GLAVehicleRocketBuggy
+2350  tally      1  GLAInfantryTerrorist
+2350  tally      1  ChinaInfantryTankHunter
+2350  tally      1  GLAStingerSite

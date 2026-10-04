@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /* dettrig.cpp - see dettrig.h for why this exists at all.
  *
@@ -82,7 +83,10 @@ enum
 	 4194303, for 2.8e12.  gentrigtables.py asserts those two step sizes, so a
 	 regenerated table cannot quietly outgrow this. */
 
-typedef __int64 DetInt64;
+// int64_t, not __int64: this is the integer arithmetic the determinism story rests on, so the
+// width has to be exactly 64 on every compiler rather than whatever a vendor keyword means.
+#include <stdint.h>
+typedef int64_t DetInt64;
 
 static const double TURN_SCALE				= 4294967296.0;								// 2^32, one turn
 static const double TURNS_PER_RADIAN	= 0.15915494309189533577;			// 1 / (2 PI)
@@ -105,6 +109,12 @@ static const float	HALF_PI						= 1.57079632679489661923f;
 // ----------------------------------------------------------------------------
 static unsigned int fixedAngle( float radians )
 {
+	// A NaN or an infinity has no angle.  The conversion below would be undefined for it; every platform
+	// happened to land on 0 (x86's INT64_MIN masked to its low 32 bits, ARM64's 0), so 0 it is, explicitly.
+	// Locomotor's calcArcTurnToGoal hands in a NaN whenever a missile's nose is already on its goal.
+	if( !(radians - radians == 0.0f) )
+		return 0;
+
 	double turns = (double)radians * TURNS_PER_RADIAN;
 	turns -= floor( turns );
 	return (unsigned int)((DetInt64)(turns * TURN_SCALE) & 0xFFFFFFFF);
@@ -161,6 +171,12 @@ static int fixedSin( unsigned int angle )
 // ----------------------------------------------------------------------------
 static int arcTanUnit( float ratio )
 {
+	// A NaN ratio (a NaN into ATan2, ACos or ASin, or ATan2 of two infinities) is taken as 0.  The
+	// conversion below would otherwise be undefined.  Every platform happened to answer as for 0: ARM64
+	// converts NaN to 0, and x86's INT64_MIN shifted down and cut to an int is index 0 as well.
+	if( ratio != ratio )
+		ratio = 0.0f;
+
 	// a ratio of exactly one scales to 2^32, so this is measured in 64 bits all
 	// the way down
 	DetInt64 fixed = (DetInt64)((double)ratio * TURN_SCALE);

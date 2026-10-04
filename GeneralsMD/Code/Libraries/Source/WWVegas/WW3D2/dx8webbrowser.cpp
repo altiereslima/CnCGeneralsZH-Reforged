@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 //******************************************************************************************
 //
@@ -180,7 +181,10 @@ void	DX8WebBrowser::CreateBrowser(const char* browsername, const char* url, int 
 	if(pBrowser)
 	{
 		_bstr_t brsname(browsername);
-		pBrowser->CreateBrowser(brsname, _bstr_t(url), reinterpret_cast<long>(hWnd), x, y, w, h, options, gamedispatch);
+		// The type library's parameter is a 32-bit long and cannot change.  A window handle fits it:
+		// Windows keeps user handles 32 bits significant on x64, and HandleToLong is its own
+		// conversion for exactly this.
+		pBrowser->CreateBrowser(brsname, _bstr_t(url), HandleToLong(hWnd), x, y, w, h, options, gamedispatch);
 		pBrowser->SetUpdateRate(brsname, updateticks);
 	}
 }

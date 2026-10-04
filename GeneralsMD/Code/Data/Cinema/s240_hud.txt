@@ -1,0 +1,14 @@
+# Scenarios/s240_hud.txt on Fortress Avalanche from the local player's seat with the interface on:
+# a player's view of the base, heading 0, pitch 0, at about the release's own furthest zoom, the
+# GLA camp along the top edge. Repeated cuts so a pointer resting on the window edge cannot scroll
+# it away for long.
+
+3.0   hud     on
+3.0   cut     1000 2080 0.76 0 0
+22.5  cut     1000 2080 0.76 0 0
+26.0  cut     1000 2080 0.76 0 0
+29.0  cut     1000 2080 0.76 0 0
+32.0  cut     1000 2080 0.76 0 0
+35.0  cut     1000 2080 0.76 0 0
+38.0  cut     1000 2080 0.76 0 0
+40.2  end

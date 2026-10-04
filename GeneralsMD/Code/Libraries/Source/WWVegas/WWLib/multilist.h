@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -488,9 +489,11 @@ template <class ObjectType>
 class PriorityMultiListIterator : public MultiListIterator<ObjectType>
 {
 public:
+	// this->First(): First is a member of MultiListIterator<ObjectType>, a dependent base, so the
+	// standard does not look it up until instantiation.  MSVC under /permissive binds it here.
 	PriorityMultiListIterator(MultiListClass<ObjectType> *list)
 		:	OriginalHead (NULL),
-			MultiListIterator<ObjectType>(list)			{ First (); }
+			MultiListIterator<ObjectType>(list)			{ this->First (); }
 
 	bool
 	Process_Head (ObjectType **object)
@@ -499,14 +502,18 @@ public:
 
 		//	Check to ensure we don't wrap around the list (stop after iterating
 		// the list once).
-		if (CurNode != NULL && CurNode->Object != NULL && OriginalHead != CurNode) {
-			OriginalHead		= (OriginalHead == NULL) ? CurNode : OriginalHead;
-			(*object)			= (ObjectType *)CurNode->Object;
+		// this-> on CurNode and Remove_Current_Object: both come from the dependent base
+		// MultiListIterator<ObjectType>.  OriginalHead is this class's own.  Note that List was
+		// already written PriorityMultiListIterator::List below - somebody met this once and
+		// qualified one name.
+		if (this->CurNode != NULL && this->CurNode->Object != NULL && OriginalHead != this->CurNode) {
+			OriginalHead		= (OriginalHead == NULL) ? this->CurNode : OriginalHead;
+			(*object)			= (ObjectType *)this->CurNode->Object;
 
 
 			// Remove the node from the head of the list and
 			// add it to the tail of the list
-			Remove_Current_Object();
+			this->Remove_Current_Object();
 			((MultiListClass<ObjectType> *)PriorityMultiListIterator::List)->Add_Tail ((*object));
 
 			retval = true;

@@ -16,6 +16,8 @@
 
 #include "test_harness.h"
 
+#include <limits>
+
 #include "Common/AsciiString.h"
 #include "Common/CommandLine.h"
 #include "Common/UnicodeString.h"
@@ -31,6 +33,10 @@
 #include "Common/MapObject.h"
 #include "Common/RandomMapGenerator.h"
 #include "Common/StackDump.h"
+#if defined(__linux__)
+#include <dlfcn.h>
+#include <unistd.h>
+#endif
 #include "Lib/Trig.h"
 #include "GameNetwork/Connection.h"
 #include "GameLogic/CRCSnapshotRing.h"
@@ -44,6 +50,9 @@
 #include "GameNetwork/LinkSimulation.h"
 #include "Common/Energy.h"
 #include "Common/RandomValue.h"
+#include "Common/GameCommon.h"
+#include "GameLogic/Damage.h"
+#include "GameNetwork/RankPointValue.h"
 #include "GameClient/ChromaKeyboard.h"
 #include "GameClient/MetaEvent.h"
 #include "GameClient/ClickTolerance.h"
@@ -58,6 +67,7 @@
 #include "Common/ThingTemplate.h"
 #include "Common/SimulationMathCrc.h"
 #include "GameLogic/FPUControl.h"
+#include "GameLogic/ExperienceTracker.h"
 #include <float.h>
 #include "Common/AudioRandomValue.h"
 #include "GameNetwork/CrcAgreement.h"
@@ -67,6 +77,42 @@
 #include "Common/GlobalData.h"
 #include "Common/EarlyOptions.h"
 #include "Common/Monitors.h"
+
+#if !defined(_WIN32)
+/* Two Win32 calls these tests make, off Windows, so that each test's text is the same on both.
+	 - _controlfp's rounding field, over <cfenv>.  Tests that put the FPU in a mode the simulation never
+	   uses name it the MSVC way.  There is no x87 precision field here (as on x64 Windows), so the
+	   precision bits are accepted and ignored; the values are MSVC's own, so a word read back and
+	   handed in again round-trips.  The two tests that need the exception masks, or compare
+	   getFPMode() with MSVC's bit layout, are Windows' alone; fpucontrol_selfcheck is POSIX's.
+	 - GetSystemMetrics' primary-display size.  Off Windows the displays are C2's, and until C2 the
+	   primary is Monitors.h's fallback, the 800x600 floor - which is what borderless mode must then
+	   size itself to.  The expectation is that floor, not a call back into findMonitor. */
+#include <cfenv>
+#include <dirent.h>
+#include <limits.h>
+#include <sys/stat.h>
+enum { _MCW_RC = 0x00000300, _RC_NEAR = 0x00000000, _RC_DOWN = 0x00000100, _RC_UP = 0x00000200,
+	_RC_CHOP = 0x00000300, _MCW_PC = 0x00030000, _PC_24 = 0x00020000, _PC_53 = 0x00010000,
+	_PC_64 = 0x00000000 };
+#define FP_MODE_FIELDS ( _MCW_RC )
+static UnsignedInt _controlfp( UnsignedInt value, UnsignedInt mask )
+{
+	static const int modes[ 4 ] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
+	if( mask & _MCW_RC )
+		fesetround( modes[ ( value & _MCW_RC ) >> 8 ] );
+	const int current = fegetround();
+	for( UnsignedInt i = 0; i < 4; ++i )
+		if( modes[ i ] == current )
+			return i << 8;
+	return 0;
+}
+enum { SM_CXSCREEN, SM_CYSCREEN };
+static int GetSystemMetrics( int which )
+{
+	return which == SM_CXSCREEN ? MIN_DISPLAY_MODE_WIDTH : MIN_DISPLAY_MODE_HEIGHT;
+}
+#endif
 #include "Common/OptionsCatalog.h"
 #include "Common/SubsystemInterface.h"
 #include "GameClient/GameText.h"
@@ -105,7 +151,6 @@
 #include "GameClient/InGameUI.h"
 #include "GameClient/GlobalLanguage.h"
 #include "GameClient/View.h"
-#include "GameLogic/IncomingDamage.h"
 #include "GameLogic/AIPlayer.h"
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/CrowdModel.h"
@@ -136,6 +181,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <atomic>
+#include <chrono>
+#include <thread>
 
 //////////////////////////////////////////////////////////////////////////////
 // Boot scaffolding
@@ -189,6 +237,11 @@ public:
 																			 const AsciiString&, FilenameList&, Bool ) const {}
 	virtual Bool getFileInfo( const AsciiString&, FileInfo* ) const { return FALSE; }
 	virtual Bool createDirectory( AsciiString ) { return FALSE; }
+	virtual Bool copyFile( const Char *, const Char *, Bool ) { return FALSE; }
+	virtual Bool deleteFile( const Char * ) { return FALSE; }
+	virtual Bool moveFileReplacing( const Char *, const Char * ) { return FALSE; }
+	virtual void getFilesInDirectory( const AsciiString&, const AsciiString&, std::vector<AsciiString>& ) const {}
+	virtual AsciiString getCurrentDirectory() const { return AsciiString::TheEmptyString; }
 };
 
 /* The subsystems below are globals the engine owns; bring them up once and
@@ -266,7 +319,7 @@ TEST(boot_memory_manager)
 
 	UnicodeString u;
 	u.translate( a );
-	CHECK( wcscmp( u.str(), L"Command & Conquer: Generals" ) == 0 );
+	CHECK( WideCharCmp( u.str(), u"Command & Conquer: Generals" ) == 0 );
 }
 
 /* winnt.h defines BitTest as the _bittest intrinsic, which takes a LONG*, so if
@@ -584,7 +637,8 @@ TEST(balance_patch_edits_a_weapon_in_place)
 	 a regeneration that loses the LightPulse ships a file that lights nothing and still refuses
 	 every player who does not have that exact copy.  Since then the file also carries fixes that
 	 are not lights: the Artillery Barrage's sound, with EA's own light, and the Superweapon uplink's
-	 pink death, which has none and is the one block the count leaves out. */
+	 pink death, which has none and is the one block the count leaves out.  The Paladin's and the
+	 Avenger's hard-kill charge added two of the fork's own, its launch and its blast, lit too. */
 static const char *const s_unlitReforgedFXList = "FXList SupW_FX_ParticleUplinkDeathInitial";
 
 TEST(fxlist_reforged_ini_parses_and_keeps_its_light)
@@ -633,7 +687,7 @@ TEST(fxlist_reforged_ini_parses_and_keeps_its_light)
 	}
 	fclose( fp );
 
-	CHECK_EQ( blocks, 90 );
+	CHECK_EQ( blocks, 92 );
 	CHECK_EQ( lit, blocks );
 }
 
@@ -656,10 +710,43 @@ TEST(stackdump_walks_the_callers)
 
 	s_stackText[ 0 ] = 0;
 	::StackDumpFromAddresses( frames, 12, collectStackLine );
+#if defined(__linux__)
+	/* glibc's dladdr names only .dynsym's symbols, and this function is static, so no link flag names
+	   it in-process (-rdynamic exports globals only, and would let a dlopened Vulkan driver bind its
+	   zlib calls to the game's own zlib).  StackDumpPosix.cpp then writes "<module>+0x<offset>", which
+	   is resolved offline as atos does on macOS.  So here the check is that the dump carries that
+	   offset and that it resolves, through the executable's own symbol table, to this function:
+	   binutils' addr2line, which every GCC build has beside it (GCC assembles with binutils' as). */
+	{
+		CHECK( strstr( s_stackText, "test_gameengine+0x" ) != NULL );
+		char exe[ 1024 ];
+		const ssize_t n = readlink( "/proc/self/exe", exe, sizeof( exe ) - 1 );
+		CHECK( n > 0 );
+		exe[ n > 0 ? n : 0 ] = 0;
+		Dl_info info;
+		CHECK( dladdr( frames[ 0 ], &info ) != 0 && info.dli_fbase != NULL );
+		char command[ 1400 ];
+		snprintf( command, sizeof( command ), "addr2line -f -e '%s' 0x%lx 2>&1", exe,
+							(unsigned long)( (char *)frames[ 0 ] - (char *)info.dli_fbase ) );
+		char resolved[ 512 ] = "";
+		FILE *pipe = popen( command, "r" );
+		CHECK( pipe != NULL );
+		if( pipe != NULL )
+		{
+			if( fgets( resolved, sizeof( resolved ), pipe ) == NULL )
+				resolved[ 0 ] = 0;
+			pclose( pipe );
+		}
+		if( strstr( resolved, "stackdump_walks_the_callers" ) == NULL )
+			printf( "%s\n  %s -> %s\n", s_stackText, command, resolved );
+		CHECK( strstr( resolved, "stackdump_walks_the_callers" ) != NULL );
+	}
+#else
 	/* Needs the PDB next to the exe; without symbols this is where it shows. */
 	if( strstr( s_stackText, "stackdump_walks_the_callers" ) == NULL )
 		printf( "%s\n", s_stackText );
 	CHECK( strstr( s_stackText, "stackdump_walks_the_callers" ) != NULL );
+#endif
 }
 
 /* fast_float_trunc was an __asm block in a header everything includes, and it wrote to registers
@@ -764,7 +851,9 @@ TEST(real_to_int_does_not_care_what_rounding_mode_it_is_called_in)
 	// truncation toward zero, in every one of them
 	CHECK_EQ( chop, -3 * 1000 + 3 );
 
-	_controlfp( callersMode, _MCW_PC | _MCW_RC );
+	/* The rounding field alone, as above: x64 has no precision field, and a Debug CRT asserts on a
+		 mask that names _MCW_PC (W3). */
+	_controlfp( callersMode, _MCW_RC );
 }
 
 /* computeCRC was assembly that used EBX, ESI and EDI without handing them back, and a witness here
@@ -1099,6 +1188,71 @@ TEST(income_sharing_splits_evenly_and_keeps_the_remainder)
 	CHECK_EQ( IncomeAllyShare( 100, 3 ), 33u );
 	/* nobody to share with keeps it all */
 	CHECK_EQ( IncomeAllyShare( 200, 1 ), 0u );
+}
+
+/* ExperienceTracker.cpp: a kill's experience split by the damage each attacker dealt. */
+TEST(kill_xp_splits_by_damage_and_the_killing_blow_keeps_the_remainder)
+{
+	KillXPDamager slots[KILL_XP_DAMAGER_SLOTS] = {};
+	Int shares[KILL_XP_DAMAGER_SLOTS];
+
+	/* nobody remembered: the killer takes it all, as before */
+	CHECK_EQ( KillXPSplit( 100, slots, 1000, shares ), 100 );
+	CHECK_EQ( shares[0], 0 );
+
+	/* 7 hits 300, 9 hits 100: the 75 goes 56/18, the killer keeps 25 and the odd point */
+	KillXPRecordDamage( slots, (ObjectID)7, 200, 1000 );
+	KillXPRecordDamage( slots, (ObjectID)9, 100, 1000 );
+	KillXPRecordDamage( slots, (ObjectID)7, 100, 1001 );
+	CHECK_EQ( slots[0].m_damage, 300 );
+	CHECK_EQ( KillXPSplit( 100, slots, 1001, shares ), 26 );
+	CHECK_EQ( shares[0], 56 );
+	CHECK_EQ( shares[1], 18 );
+	CHECK_EQ( shares[2], 0 );
+
+	/* outside the window a hit earns nothing, and hitting again starts its count over */
+	UnsignedInt late = 1001 + KILL_XP_WINDOW_FRAMES + 1;
+	CHECK_EQ( KillXPSplit( 100, slots, late, shares ), 100 );
+	KillXPRecordDamage( slots, (ObjectID)7, 10, late );
+	CHECK_EQ( slots[0].m_damage, 10 );
+
+	/* full: a new attacker takes the weakest slot, the oldest of equals, the first of those */
+	KillXPDamager full[KILL_XP_DAMAGER_SLOTS] = {};
+	for( Int i = 0; i < KILL_XP_DAMAGER_SLOTS; ++i )
+		KillXPRecordDamage( full, (ObjectID)(100 + i), 50, 2000 );
+	KillXPRecordDamage( full, (ObjectID)100, 10, 2001 );		/* slot 0 is now the strongest */
+	KillXPRecordDamage( full, (ObjectID)200, 5, 2002 );
+	CHECK_EQ( (Int)full[1].m_id, 200 );
+	CHECK_EQ( full[1].m_damage, 5 );
+}
+
+/* ExperienceTracker.cpp: healing pays half a kill for a full heal, pro rata, and carries the fraction. */
+TEST(heal_xp_is_half_a_kill_per_full_heal_and_carries_the_fraction)
+{
+	Int carry = 0;
+
+	/* a full heal of something worth 200 pays 100, nothing left over */
+	CHECK_EQ( HealXPAccrue( &carry, 200, 1000, 1000 ), 100 );
+	CHECK_EQ( carry, 0 );
+
+	/* a quarter heal of something worth 10 is 1.25 points: 1 now, the quarter kept */
+	CHECK_EQ( HealXPAccrue( &carry, 10, 250, 1000 ), 1 );
+	CHECK_EQ( carry, HEAL_XP_SCALE / 4 );
+
+	/* a thousandth of the health a frame, on something worth 50, is 0.025 points: nothing for 39
+	   frames, the first point on the 40th, and the whole heal still makes 25 */
+	carry = 0;
+	Int total = 0;
+	for( Int frame = 1; frame <= 1000; ++frame )
+	{
+		total += HealXPAccrue( &carry, 50, 100, 100000 );
+		if( frame == 39 )
+			CHECK_EQ( total, 0 );
+		if( frame == 40 )
+			CHECK_EQ( total, 1 );
+	}
+	CHECK_EQ( total, 25 );
+	CHECK_EQ( carry, 0 );
 }
 
 /* CommandXlat.cpp: with the move, attack move or guard key armed, a left drag spreads the selection
@@ -1537,6 +1691,43 @@ TEST(attack_move_leashes_ground_units_but_never_aircraft)
 	CHECK( !AIAttackMove_leashBroken( false, true,  500.0f*cell, 0.0f, LEASH ) );
 }
 
+/* AIStates.cpp: a jet aiming at a ground target it cannot turn onto holds its heading and
+   comes back round, rather than circling it with the target forever beside the cockpit. */
+extern Bool AIAttackAim_needsRunOut( Real relX, Real relY, Real turnRadius, Real cosAimDelta, Real minDist );
+
+TEST(jet_runs_out_from_a_target_it_cannot_turn_onto)
+{
+	const Real R = 80.0f;
+	const Real COS30 = 0.8660254f;		/* the Raptor's and the MiG's 30 degree aim cone */
+
+	/* inside the turn circle on either side: no turn ever brings it into the cone, even with no
+	   minimum range at all.  This is the orbit. */
+	CHECK(  AIAttackAim_needsRunOut( 0.0f,   100.0f, R, COS30, 0.0f ) );
+	CHECK(  AIAttackAim_needsRunOut( 0.0f,  -100.0f, R, COS30, 0.0f ) );
+	CHECK(  AIAttackAim_needsRunOut( 20.0f,   70.0f, R, COS30, 0.0f ) );
+
+	/* just outside it the turn does bring it into the cone, but close: fine for a weapon with no
+	   minimum range, a pass that ends over the top of it for one with 100. */
+	CHECK( !AIAttackAim_needsRunOut( 0.0f,   170.0f, R, COS30, 0.0f ) );
+	CHECK(  AIAttackAim_needsRunOut( 0.0f,   170.0f, R, COS30, 100.0f ) );
+
+	/* already in the cone: the answer is just whether it is far enough away to shoot. */
+	CHECK(  AIAttackAim_needsRunOut( 150.0f,   0.0f, R, COS30, 151.0f ) );
+	CHECK( !AIAttackAim_needsRunOut( 150.0f,   0.0f, R, COS30, 149.0f ) );
+
+	/* far ahead or far behind, the turn leaves room: chase it as before. */
+	CHECK( !AIAttackAim_needsRunOut( 400.0f,  20.0f, R, COS30, 140.0f ) );
+	CHECK( !AIAttackAim_needsRunOut( -300.0f,  0.0f, R, COS30, 140.0f ) );
+
+	/* just behind: the turn comes round with it closer than the minimum range, so run out. */
+	CHECK(  AIAttackAim_needsRunOut( -100.0f,  0.0f, R, COS30, 170.0f ) );
+
+	/* a wider cone forgives a tighter spot: the Aurora's 45 degrees takes a target the 30 degree
+	   weapons have to run out for. */
+	CHECK(  AIAttackAim_needsRunOut( 60.0f,   60.0f, R, COS30, 0.0f ) );
+	CHECK( !AIAttackAim_needsRunOut( 60.0f,   60.0f, R, 0.7071068f, 0.0f ) );
+}
+
 /* AIStates.cpp: telling a firing pass from a failed approach when the attack move
    disengages.  A fight the unit spent rounds on was real however short; only one it
    never fired in is charged the re-acquire delay.  The ammunition count is the state
@@ -1915,6 +2106,20 @@ static void blobFeed(ParticleShadowBlob *blob, Int count, Real size, Real alpha)
 		particleShadowBlobAdd(blob, (Real)i, 0.0f, size, alpha);
 }
 
+// A plain billboard system answers 0 to getVolumeParticleDepth, and the first cut of the smoke map
+// multiplied by that: every ordinary smoke particle went in with no thickness at all, the backend
+// dropped it, and its cloud lost the blob as well.  One layer, whatever the depth says.
+TEST(sun_map_takes_a_plain_particle_as_one_layer)
+{
+	const Real plain = particleSunMapOpticalDepth(0.5f, 0);
+	CHECK_NEAR(plain, 0.6931f, 0.001f);
+	CHECK_NEAR(particleSunMapOpticalDepth(0.5f, 1), plain, 0.0001f);
+	CHECK_NEAR(particleSunMapOpticalDepth(0.5f, 4), plain * 4.0f, 0.001f);
+	// too faint to cast, and a fully opaque one held short of infinity
+	CHECK_EQ(particleSunMapOpticalDepth(0.01f, 0), 0.0f);
+	CHECK(particleSunMapOpticalDepth(1.0f, 0) < 3.1f);
+}
+
 TEST(blob_reset_leaves_nothing_to_resolve)
 {
 	ParticleShadowBlob blob;
@@ -2099,145 +2304,6 @@ TEST(smoke_cap_grows_with_the_thickness_and_stops_at_the_ceiling)
 	CHECK_EQ(particleSmokeParticleCap(2500, 2.0f), 5000);
 	CHECK(particleSmokeParticleCap(2500, 4.0f) > particleSmokeParticleCap(2500, 2.0f));
 	CHECK_EQ(particleSmokeParticleCap(20000, 8.0f), 20000);
-}
-
-//////////////////////////////////////////////////////////////////////////////
-// The in-flight damage ledger
-//////////////////////////////////////////////////////////////////////////////
-
-/*
- * A delayed shot - a projectile in flight, or a hitscan weapon far enough away that its
- * damage is scheduled for a later frame - used to leave no trace anywhere between the
- * muzzle and the impact.  Every other unit went on reading full health off the victim and
- * kept firing, so a squad routinely spent a whole volley killing something the first two
- * shots had already killed.  IncomingDamageTracker books each such shot against its victim
- * and auto-targeting reads it back.
- *
- * These drive the ledger with hand-picked frame numbers, which is why the frame is a
- * parameter rather than a read of TheGameLogic - there is no game logic in this binary.
- */
-
-static const ObjectID VICTIM_A = (ObjectID)101;
-static const ObjectID VICTIM_B = (ObjectID)102;
-static const ObjectID SHOOTER_1 = (ObjectID)201;
-static const ObjectID SHOOTER_2 = (ObjectID)202;
-
-TEST(incomingdamage_books_and_sums_per_victim)
-{
-	IncomingDamageTracker::reset();
-	CHECK_EQ(IncomingDamageTracker::getBookedDamage(VICTIM_A), 0.0f);
-
-	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_1, 40.0f, 100, 110);
-	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_2, 25.0f, 100, 112);
-	IncomingDamageTracker::bookShot(VICTIM_B, SHOOTER_1, 10.0f, 100, 110);
-
-	CHECK_NEAR(IncomingDamageTracker::getBookedDamage(VICTIM_A), 65.0f, 0.001f);
-	CHECK_NEAR(IncomingDamageTracker::getBookedDamage(VICTIM_B), 10.0f, 0.001f);
-
-	IncomingDamageTracker::reset();
-	CHECK_EQ(IncomingDamageTracker::getBookedDamage(VICTIM_A), 0.0f);
-}
-
-TEST(incomingdamage_doomed_only_once_the_booking_covers_the_health)
-{
-	IncomingDamageTracker::reset();
-
-	// nothing booked: never doomed, however little health is left
-	CHECK(!IncomingDamageTracker::isAlreadyDoomed(VICTIM_A, 1.0f));
-
-	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_1, 40.0f, 100, 110);
-	CHECK(!IncomingDamageTracker::isAlreadyDoomed(VICTIM_A, 100.0f));
-	CHECK(IncomingDamageTracker::isAlreadyDoomed(VICTIM_A, 40.0f));	// exactly lethal counts
-
-	// a second shooter's shell tips it over: this is the overkill the ledger exists to stop
-	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_2, 70.0f, 100, 112);
-	CHECK(IncomingDamageTracker::isAlreadyDoomed(VICTIM_A, 100.0f));
-
-	// and the victim next to it is unaffected
-	CHECK(!IncomingDamageTracker::isAlreadyDoomed(VICTIM_B, 1.0f));
-
-	IncomingDamageTracker::reset();
-}
-
-TEST(incomingdamage_landing_releases_one_booking_from_that_shooter)
-{
-	IncomingDamageTracker::reset();
-
-	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_1, 40.0f, 100, 110);
-	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_1, 40.0f, 101, 111);
-	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_2, 25.0f, 100, 112);
-
-	// one landing releases one shot, not the shooter's whole account
-	IncomingDamageTracker::shotLanded(VICTIM_A, SHOOTER_1);
-	CHECK_NEAR(IncomingDamageTracker::getBookedDamage(VICTIM_A), 65.0f, 0.001f);
-
-	IncomingDamageTracker::shotLanded(VICTIM_A, SHOOTER_1);
-	CHECK_NEAR(IncomingDamageTracker::getBookedDamage(VICTIM_A), 25.0f, 0.001f);
-
-	// a landing nobody booked is not an error, and takes nothing with it
-	IncomingDamageTracker::shotLanded(VICTIM_A, SHOOTER_1);
-	IncomingDamageTracker::shotLanded(VICTIM_B, SHOOTER_1);
-	CHECK_NEAR(IncomingDamageTracker::getBookedDamage(VICTIM_A), 25.0f, 0.001f);
-
-	IncomingDamageTracker::shotLanded(VICTIM_A, SHOOTER_2);
-	CHECK_EQ(IncomingDamageTracker::getBookedDamage(VICTIM_A), 0.0f);
-
-	IncomingDamageTracker::reset();
-}
-
-/*
- * The reservation has to lapse on its own, or a missile shot down by a point defence - or
- * lured away by countermeasures - would reserve its target forever and the squad would
- * stand there holding its fire.
- */
-TEST(incomingdamage_booking_lapses_after_the_impact_it_predicted)
-{
-	IncomingDamageTracker::reset();
-
-	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_1, 40.0f, 100, 110);
-
-	// still honored while the shot is plausibly in the air
-	IncomingDamageTracker::update(110);
-	CHECK_NEAR(IncomingDamageTracker::getBookedDamage(VICTIM_A), 40.0f, 0.001f);
-
-	// ...and released once the impact is well past and nothing landed
-	IncomingDamageTracker::update(200);
-	CHECK_EQ(IncomingDamageTracker::getBookedDamage(VICTIM_A), 0.0f);
-	CHECK(!IncomingDamageTracker::isAlreadyDoomed(VICTIM_A, 1.0f));
-
-	IncomingDamageTracker::reset();
-}
-
-/*
- * An impact frame that has already gone by (or is this very frame) must not wrap the
- * unsigned subtraction into a four-billion-frame reservation.
- */
-TEST(incomingdamage_impact_in_the_past_still_expires)
-{
-	IncomingDamageTracker::reset();
-
-	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_1, 40.0f, 500, 400);
-	CHECK_NEAR(IncomingDamageTracker::getBookedDamage(VICTIM_A), 40.0f, 0.001f);
-
-	IncomingDamageTracker::update(600);
-	CHECK_EQ(IncomingDamageTracker::getBookedDamage(VICTIM_A), 0.0f);
-
-	IncomingDamageTracker::reset();
-}
-
-/* A shot that would do nothing is not worth reserving a target over. */
-TEST(incomingdamage_ignores_harmless_shots)
-{
-	IncomingDamageTracker::reset();
-
-	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_1, 0.0f, 100, 110);
-	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_1, -5.0f, 100, 110);
-	IncomingDamageTracker::bookShot(INVALID_ID, SHOOTER_1, 40.0f, 100, 110);
-
-	CHECK_EQ(IncomingDamageTracker::getBookedDamage(VICTIM_A), 0.0f);
-	CHECK(!IncomingDamageTracker::isAlreadyDoomed(VICTIM_A, 1.0f));
-
-	IncomingDamageTracker::reset();
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -2882,6 +2948,13 @@ TEST(statemachine_outlives_the_owner_that_lets_go_of_it_mid_update)
 {
 	CHECK(bootOnce());
 
+	/* A Debug build (STATE_MACHINE_DEBUG) asks TheGlobalData, from internalClear(), whether to log each
+	   clear.  The engine always has one; this harness has one only while a test makes it, and run on
+	   its own this test read through a NULL TheGlobalData. */
+	GlobalData *savedGlobals = TheWritableGlobalData;
+	if (savedGlobals == NULL)
+		TheWritableGlobalData = NEW GlobalData;
+
 	s_witnessMachineDestroyed = FALSE;
 	StateMachine *machine = newInstance(WitnessStateMachine);
 	CHECK_EQ(machine->Num_Refs(), 1);
@@ -2899,9 +2972,17 @@ TEST(statemachine_outlives_the_owner_that_lets_go_of_it_mid_update)
 	machine->Release_Ref();
 	CHECK(s_witnessMachineDestroyed);
 
-	/* and deleteInstance() still tolerates a NULL machine, the way the pool one did */
+	/* and deleteInstance() still tolerates a NULL machine, the way the pool one did.  The engine calls
+	   deleteInstance() on NULL everywhere; this line is the tripwire for -fno-delete-null-pointer-checks
+	   (CMakeLists.txt), without which an optimizing GCC removes the `if (this)` guard and this crashes. */
 	machine = NULL;
 	machine->deleteInstance();
+
+	if (savedGlobals == NULL)
+	{
+		delete TheWritableGlobalData;
+		TheWritableGlobalData = NULL;
+	}
 }
 
 
@@ -3457,6 +3538,82 @@ TEST(controlbar_command_places_go_in_rows_by_what_they_are_for)
 	const Int manyPlaces[ SLOTS ] = { Z, X, CC, V, B, M, A, -1, -1, -1, -1, -1, -1, -1 };
 	for( Int slot = 0; slot < SLOTS; slot++ )
 		CHECK_EQ( places[ slot ], manyPlaces[ slot ] );
+}
+
+TEST(controlbar_hunt_and_stance_keys_take_what_the_buttons_leave)
+{
+	enum { SLOTS = 14 };
+	Int places[ SLOTS ];
+	Int keys[ ORDER_KEY_EXTRAS ];
+	const Int N = GUI_COMMAND_NONE, ab = COMMAND_GROUP_ABILITY, pa = COMMAND_GROUP_PASSENGER;
+	const Int nothingPinned[ SLOTS ] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
+
+	/* a Ranger: two abilities, attack move, guard, stop.  Search and destroy on F and the stance on H,
+	   their own places */
+	const Int ranger[ SLOTS ] = { GUI_COMMAND_FIRE_WEAPON, GUI_COMMAND_SPECIAL_POWER, N, N, N, N, N, N, N, N,
+		GUI_COMMAND_ATTACK_MOVE, N, GUI_COMMAND_GUARD, GUI_COMMAND_STOP };
+	const Int rangerGroups[ SLOTS ] = { ab, ab, ab, ab, ab, ab, ab, ab, ab, ab, ab, ab, ab, ab };
+	Bool fights = ControlBar_commandPlaces( ranger, rangerGroups, nothingPinned, SLOTS, places );
+	CHECK( fights );
+	ControlBar_orderKeyPlaces( places, SLOTS, fights, keys );
+	CHECK_EQ( keys[ ORDER_KEY_HUNT ], (Int)COMMAND_PLACE_F );
+	CHECK_EQ( keys[ ORDER_KEY_STANCE ], (Int)COMMAND_PLACE_H );
+
+	/* the Humvee's set, as in the test above: passengers hold F G H B N and the drones Q W E, so the
+	   two go on in reading order, R T, and never move a button */
+	const Int humvee[ SLOTS ] = { GUI_COMMAND_OBJECT_UPGRADE, GUI_COMMAND_OBJECT_UPGRADE, GUI_COMMAND_OBJECT_UPGRADE,
+		GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EXIT_CONTAINER,
+		GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EVACUATE, N, GUI_COMMAND_ATTACK_MOVE, N, GUI_COMMAND_GUARD, GUI_COMMAND_STOP };
+	const Int humveeGroups[ SLOTS ] = { ab, ab, ab, pa, pa, pa, pa, pa, ab, ab, ab, ab, ab, ab };
+	fights = ControlBar_commandPlaces( humvee, humveeGroups, nothingPinned, SLOTS, places );
+	ControlBar_orderKeyPlaces( places, SLOTS, fights, keys );
+	CHECK_EQ( keys[ ORDER_KEY_HUNT ], (Int)COMMAND_PLACE_R );
+	CHECK_EQ( keys[ ORDER_KEY_STANCE ], (Int)COMMAND_PLACE_T );
+
+	/* a Radar Van: a scan and an upgrade, nothing to attack move with, so neither key */
+	const Int van[ SLOTS ] = { GUI_COMMAND_SPECIAL_POWER, GUI_COMMAND_OBJECT_UPGRADE, N, N, N, N, N, N, N, N, N, N, N, GUI_COMMAND_STOP };
+	fights = ControlBar_commandPlaces( van, rangerGroups, nothingPinned, SLOTS, places );
+	CHECK( !fights );
+	ControlBar_orderKeyPlaces( places, SLOTS, fights, keys );
+	CHECK_EQ( keys[ ORDER_KEY_HUNT ], -1 );
+	CHECK_EQ( keys[ ORDER_KEY_STANCE ], -1 );
+
+	/* a grid with no room: every key stays off it */
+	Int full[ SLOTS + 4 ];
+	for( Int place = 0; place < COMMAND_PLACE_COUNT; place++ )
+		full[ place ] = place;
+	ControlBar_orderKeyPlaces( full, COMMAND_PLACE_COUNT, TRUE, keys );
+	for( Int key = 0; key < ORDER_KEY_EXTRAS; key++ )
+		CHECK_EQ( keys[ key ], -1 );
+}
+
+/* The search and destroy key walks a ring at seven tenths of the circle, starting on the
+   side the selection stands and going round clockwise, four to eight points by size, never off the map. */
+TEST(sweep_points_go_round_the_ring_from_the_selection_side)
+{
+	std::vector<Coord3D> points;
+	sweepPoints( 1000.0f, 1000.0f, 300.0f, 1000.0f, 0.0f, 0.0f, 0.0f, 4000.0f, 4000.0f, points );
+	CHECK_EQ( (Int)points.size(), 5 );		// 2 pi 210 / 300 is 4.4
+	CHECK_NEAR( points[ 0 ].x, 1000.0f, 0.01f );
+	CHECK_NEAR( points[ 0 ].y, 790.0f, 0.01f );
+	// clockwise from six o'clock is towards nine
+	CHECK( points[ 1 ].x < 1000.0f - 150.0f );
+	for( size_t i = 0; i < points.size(); i++ )
+	{
+		const Real dx = points[ i ].x - 1000.0f, dy = points[ i ].y - 1000.0f;
+		CHECK_NEAR( (Real)sqrt( dx * dx + dy * dy ), 210.0f, 0.5f );
+	}
+
+	sweepPoints( 1000.0f, 1000.0f, 50.0f, 1000.0f, 1000.0f, 0.0f, 0.0f, 4000.0f, 4000.0f, points );
+	CHECK_EQ( (Int)points.size(), 4 );
+	CHECK_NEAR( points[ 0 ].x, 1035.0f, 0.01f );		// standing on the centre starts east
+	sweepPoints( 1000.0f, 1000.0f, 800.0f, 0.0f, 0.0f, 0.0f, 0.0f, 4000.0f, 4000.0f, points );
+	CHECK_EQ( (Int)points.size(), 8 );
+
+	// a circle on the map's corner keeps every point on the map
+	sweepPoints( 50.0f, 50.0f, 400.0f, 500.0f, 500.0f, 0.0f, 0.0f, 4000.0f, 4000.0f, points );
+	for( size_t i = 0; i < points.size(); i++ )
+		CHECK( points[ i ].x >= 0.0f && points[ i ].y >= 0.0f );
 }
 
 /* The money plate follows its figure's width: wider at once, narrower only once the narrower figure
@@ -4038,8 +4195,12 @@ TEST(gamedatamatch_refuses_a_machine_that_reports_no_data_at_all)
 	 Two machines only compute the same floats if the FPU control word says the same thing on both.
 	 Nothing in the process guarantees that - Direct3D sets it when it creates a device, and any DLL
 	 in the process can set it and never put it back - so GameLogic::update re-asserts it at the top
-	 of every logic frame.  These pin what "asserts it" means. */
+	 of every logic frame.  These pin what "asserts it" means.
 
+	 They read MSVC's _controlfp word, so they are Windows' tests.  setFPMode's POSIX branch, which
+	 writes the <cfenv> state instead, is fpucontrol_selfcheck's (Tests/test_fpucontrol.cpp). */
+
+#if defined(_WIN32)
 TEST(setfpmode_pins_the_control_word_from_whatever_it_finds)
 {
 	UnsignedInt entry = _controlfp( 0, 0 );		// leave the process the way we found it
@@ -4091,6 +4252,7 @@ TEST(setfpmode_leaves_the_exception_mask_in_a_known_state)
 
 	_controlfp( entry, _MCW_PC | _MCW_RC | _MCW_EM );
 }
+#endif	// _WIN32: the _controlfp tests
 
 // ---------------------------------------------------------------------------------------------
 // The disconnect screen's decision (MULTIPLAYER 2.3).  DisconnectManager::update used to bring
@@ -5830,27 +5992,27 @@ TEST(a_transferred_file_has_to_be_what_its_name_says_it_is)
 	 everyone's idea of who is in the room.  It was taken exactly as sent. */
 TEST(a_player_name_from_another_machine_cannot_rewrite_the_lobby)
 {
-	CHECK( IsUsablePlayerName( L"Olcay" ) );
-	CHECK( IsUsablePlayerName( L"[GLA] scud" ) );
-	CHECK( IsUsablePlayerName( L"\x00fcmit" ) );				// accents and non-latin are fine
+	CHECK( IsUsablePlayerName( u"Olcay" ) );
+	CHECK( IsUsablePlayerName( u"[GLA] scud" ) );
+	CHECK( IsUsablePlayerName( u"\x00fcmit" ) );				// accents and non-latin are fine
 
 	// the three separators the game state string is cut on
-	CHECK( !IsUsablePlayerName( L"a,b" ) );
-	CHECK( !IsUsablePlayerName( L"a:b" ) );
-	CHECK( !IsUsablePlayerName( L"a;b" ) );
+	CHECK( !IsUsablePlayerName( u"a,b" ) );
+	CHECK( !IsUsablePlayerName( u"a:b" ) );
+	CHECK( !IsUsablePlayerName( u"a;b" ) );
 
 	// control characters, in both bands, and the line separators
-	CHECK( !IsUsablePlayerName( L"a\nb" ) );
-	CHECK( !IsUsablePlayerName( L"a\x0085" "b" ) );
-	CHECK( !IsUsablePlayerName( L"a\x2028" "b" ) );
+	CHECK( !IsUsablePlayerName( u"a\nb" ) );
+	CHECK( !IsUsablePlayerName( u"a\x0085" "b" ) );
+	CHECK( !IsUsablePlayerName( u"a\x2028" "b" ) );
 
 	// half a surrogate pair is not a character
-	CHECK( !IsUsablePlayerName( L"a\xd800" "b" ) );
+	CHECK( !IsUsablePlayerName( u"a\xd800" "b" ) );
 
 	// a name has to have something in it
-	CHECK( !IsUsablePlayerName( L"" ) );
-	CHECK( !IsUsablePlayerName( L"   " ) );
-	CHECK( !IsUsablePlayerName( L"\x3000\x00a0" ) );			// ideographic and no-break spaces
+	CHECK( !IsUsablePlayerName( u"" ) );
+	CHECK( !IsUsablePlayerName( u"   " ) );
+	CHECK( !IsUsablePlayerName( u"\x3000\x00a0" ) );			// ideographic and no-break spaces
 	CHECK( !IsUsablePlayerName( NULL ) );
 }
 
@@ -5893,7 +6055,7 @@ static NetCommandRef *makeChat( const WideChar *body, Int length )
 	UnicodeString text;
 	Int k;
 	for( k = 0; k < length; ++k )
-		text.concat( body ? body[k] : (WideChar)(L'a' + (k % 26)) );
+		text.concat( body ? body[k] : (WideChar)(u'a' + (k % 26)) );
 	chat->setText( text );
 	chat->setPlayerMask( 0xFF );
 	chat->setPlayerID( 1 );
@@ -6637,6 +6799,55 @@ static int scanSourceForRuntimeMath(const char *path, const char *displayName)
 
 static int scanTreeForRuntimeMath(const char *dir, const char *display, int *filesScanned)
 {
+#if !defined(_WIN32)
+	/* The same walk over readdir: '/' between names, and the same files skipped.  The roots arrive
+		 spelled with '\\', as Windows takes them; a POSIX path takes '/' only. */
+	char posixDir[PATH_MAX];
+	snprintf(posixDir, sizeof(posixDir), "%s", dir);
+	for (char *c = posixDir; *c != 0; ++c)
+		if (*c == '\\')
+			*c = '/';
+	dir = posixDir;
+	DIR *d = opendir(dir);
+	if (d == NULL)
+		return 0;
+
+	int hits = 0;
+	for (struct dirent *entry = readdir(d); entry != NULL; entry = readdir(d))
+	{
+		if (entry->d_name[0] == '.')
+			continue;
+
+		char child[PATH_MAX];
+		char childDisplay[PATH_MAX];
+		snprintf(child, sizeof(child), "%s/%s", dir, entry->d_name);
+		snprintf(childDisplay, sizeof(childDisplay), "%s/%s", display, entry->d_name);
+
+		struct stat info;
+		if (stat(child, &info) != 0)
+			continue;
+		if (S_ISDIR(info.st_mode))
+		{
+			hits += scanTreeForRuntimeMath(child, childDisplay, filesScanned);
+			continue;
+		}
+
+		const char *dot = strrchr(entry->d_name, '.');
+		if (dot == NULL || (strcmp(dot, ".cpp") != 0 && strcmp(dot, ".h") != 0))
+			continue;
+
+		if (strcmp(entry->d_name, "SimulationMathCrc.cpp") == 0
+			|| strcmp(entry->d_name, "MiniLog.cpp") == 0
+			|| strcmp(entry->d_name, "MiniLog.h") == 0)
+			continue;
+
+		++(*filesScanned);
+		hits += scanSourceForRuntimeMath(child, childDisplay);
+	}
+
+	closedir(d);
+	return hits;
+#else
 	char pattern[MAX_PATH];
 	sprintf(pattern, "%s\\*", dir);
 
@@ -6680,6 +6891,7 @@ static int scanTreeForRuntimeMath(const char *dir, const char *display, int *fil
 
 	FindClose(h);
 	return hits;
+#endif
 }
 
 /* Promised by Libraries/Include/Lib/Trig.h, and the only thing that keeps the conversion from
@@ -7146,7 +7358,7 @@ TEST(original_scheme_and_unknown_colors_pass_through_untouched)
 	TheWritableGlobalData = NEW GlobalData;
 	invalidatePlayerColorScheme();
 
-	const Color sample[] = { 0xFF102030, 0xE6FF0000, 0x00000000, 0xFFFFFFFF };
+	const Color sample[] = { (Color)0xFF102030, (Color)0xE6FF0000, (Color)0x00000000, (Color)0xFFFFFFFF };
 
 	for( Int i = 0; i < 4; ++i )
 		CHECK_EQ( (Int)clientColor( sample[ i ] ), (Int)sample[ i ] );
@@ -7349,6 +7561,7 @@ TEST(an_enemy_plan_is_hidden_even_where_the_viewer_has_sight)
 }
 
 extern Coord3D Locomotor_interceptOffset( const Coord3D& toVictim, const Coord3D& victimVelocity, Real speed );
+extern Coord3D Locomotor_groundLead( const Coord3D& toVictim, const Coord3D& victimVelocity, Real speed );
 
 /** A locked missile curves towards where it will meet a moving victim. Curving towards where the
 	 victim is now left a rocket barely faster than a helicopter trailing it with its nose 40 degrees
@@ -7383,6 +7596,36 @@ TEST(a_locked_missile_aims_where_it_will_meet_a_moving_victim)
 	fleeing.set( 12.0f, 0.0f, 0.0f );
 	offset = Locomotor_interceptOffset( toVictim, fleeing, 10.0f );
 	CHECK_NEAR( offset.x, 100.0f, 0.001f );
+}
+
+/** A missile shot at infantry flies to a point, and a Rebel walking across the line of fire was gone
+	 from it when the rocket landed. The point moves as far as the victim walks in the flight, over the
+	 ground only, and not at all for a victim standing still. */
+TEST(a_missile_aims_ahead_of_a_victim_moving_on_the_ground)
+{
+	Coord3D toVictim;
+	toVictim.set( 100.0f, 0.0f, -20.0f );
+	Coord3D lead;
+
+	Coord3D standing;
+	standing.set( 0.0f, 0.0f, 0.0f );
+	lead = Locomotor_groundLead( toVictim, standing, 10.0f );
+	CHECK( lead.x == 0.0f && lead.y == 0.0f && lead.z == 0.0f );
+
+	// crossing at 3 a frame against 10: |(100, 3t, -20)| = 10t meets at t = 10.69, 32 to the side
+	Coord3D crossing;
+	crossing.set( 0.0f, 3.0f, 0.0f );
+	lead = Locomotor_groundLead( toVictim, crossing, 10.0f );
+	CHECK_NEAR( lead.x, 0.0f, 0.001f );
+	CHECK_NEAR( lead.y, 3.0f * 10.6904f, 0.01f );
+	CHECK_NEAR( lead.z, 0.0f, 0.001f );
+
+	// walking up a slope the climb is not led: the same crossing, the same point
+	Coord3D climbing;
+	climbing.set( 0.0f, 3.0f, 1.5f );
+	Coord3D climbLead = Locomotor_groundLead( toVictim, climbing, 10.0f );
+	CHECK_NEAR( climbLead.y, lead.y, 0.001f );
+	CHECK_NEAR( climbLead.z, 0.0f, 0.001f );
 }
 
 /** There is nothing to stop about a building that is still going up, so the stop key calls it off
@@ -9012,73 +9255,115 @@ static Bool RMGParsedMapIsPlayable( void )
 	return TRUE;
 }
 
-TEST(every_start_reaches_its_money_and_has_two_ways_out)
+/* The seeds the sweep below checks for one player count: 1 to 12, four and three spread by primes, one
+	more, and one named seed each (2-player seed 0, 4-player 12345, 8-player 7), without repeats. */
+static std::vector<Int> moneySweepSeeds( Int players )
+{
+	std::vector<Int> listed;
+	Int s;
+	for( s = 1; s <= 12; s++ )
+		listed.push_back( s );
+	for( s = 1; s <= 4; s++ )
+		listed.push_back( s * 7919 + players );
+	for( s = 1; s <= 3; s++ )
+		listed.push_back( s * 104729 + players );
+	listed.push_back( 1000 + players );
+	if( players == 2 )
+		listed.push_back( 0 );
+	if( players == 4 )
+		listed.push_back( 12345 );
+	if( players == 8 )
+		listed.push_back( 7 );
+
+	std::vector<Int> seeds;
+	for( s = 0; s < (Int)listed.size(); s++ )
+	{
+		Bool already = FALSE;
+		for( Int t = 0; t < (Int)seeds.size(); t++ )
+		{
+			if( seeds[t] == listed[s] )
+				already = TRUE;
+		}
+		if( !already )
+			seeds.push_back( listed[s] );
+	}
+	return seeds;
+}
+
+/* One player count's part of the sweep: every seed's map must let each start reach its money and leave
+	its ring two ways.  Before the playability repair, 2-player seed 1 and 4-player seed 12345 (and 32
+	others on this sweep) failed the ring check; they stay in the seed list.
+
+	A Debug build checks part of the sweep: the named seeds (1, 7, 0, 12345) and every third of the
+	others, counted across the three player counts in the order 2, 4, 8 as when this was one case, so
+	the same 26 of the 62 maps.  The full sweep takes about 230 s in Release and five times that and
+	more in an MSVC Debug build; Release checks every map.  It is three cases, one per player count, each
+	its own ctest entry, so ctest -j runs them side by side. */
+static void moneySweep( Int players )
 {
 	CHECK( bootOnce() );
 
-	/* Before the playability repair, 2-player seed 1 and 4-player seed 12345 (and 32 others on
-		this sweep) failed the ring check. They stay in the seed list below. */
-
+	Int considered = 0;
 	static const Int thePlayers[] = { 2, 4, 8 };
-	const Int numPlayers = sizeof(thePlayers) / sizeof(thePlayers[0]);
+	for( Int p = 0; p < (Int)(sizeof(thePlayers) / sizeof(thePlayers[0])) && thePlayers[p] != players; p++ )
+		considered += (Int)moneySweepSeeds( thePlayers[p] ).size();
+	const Int first = considered;
 
+	const std::vector<Int> seeds = moneySweepSeeds( players );
 	Int maps = 0;
 	Int failed = 0;
-
-	for( Int p = 0; p < numPlayers; p++ )
+	for( Int s = 0; s < (Int)seeds.size(); s++ )
 	{
-		Int players = thePlayers[p];
-		std::vector<Int> seeds;
-		Int s;
-		for( s = 1; s <= 12; s++ )
-			seeds.push_back( s );
-		for( s = 1; s <= 4; s++ )
-			seeds.push_back( s * 7919 + players );
-		for( s = 1; s <= 3; s++ )
-			seeds.push_back( s * 104729 + players );
-		seeds.push_back( 1000 + players );
-		if( players == 2 )
-			seeds.push_back( 0 );
-		if( players == 4 )
-			seeds.push_back( 12345 );
-		if( players == 8 )
-			seeds.push_back( 7 );
+		Int seed = seeds[s];
+		considered++;
+#if defined(_DEBUG)
+		const Bool named = ( seed == 1 || seed == 7 || seed == 0 || seed == 12345 );
+		if( !named && ( considered % 3 ) != 0 )
+			continue;
+#endif
 
-		for( s = 0; s < (Int)seeds.size(); s++ )
+		RandomMapSettings settings;
+		settings.m_seed = seed;
+		settings.m_numPlayers = players;
+		settings.m_playableCells = RandomMapGenerator::cellsFor( RANDOM_MAP_SIZE_NORMAL, players );
+
+		std::vector<char> bytes;
+		RandomMapGenerator::generate( settings, bytes );
+		parseGeneratedMap( bytes );
+		maps++;
+
+		if( !RMGParsedMapIsPlayable() )
 		{
-			Int seed = seeds[s];
-			Bool already = FALSE;
-			for( Int t = 0; t < s; t++ )
-			{
-				if( seeds[t] == seed )
-					already = TRUE;
-			}
-			if( already )
-				continue;
-
-			RandomMapSettings settings;
-			settings.m_seed = seed;
-			settings.m_numPlayers = players;
-			settings.m_playableCells = RandomMapGenerator::cellsFor( RANDOM_MAP_SIZE_NORMAL, players );
-
-			std::vector<char> bytes;
-			RandomMapGenerator::generate( settings, bytes );
-			parseGeneratedMap( bytes );
-			maps++;
-
-			if( !RMGParsedMapIsPlayable() )
-			{
-				failed++;
-				RMGDescribePlayabilityFailure( players, seed );
-			}
-
-			CHECK( RMGParsedMapIsPlayable() );
+			failed++;
+			RMGDescribePlayabilityFailure( players, seed );
 		}
+
+		CHECK( RMGParsedMapIsPlayable() );
 	}
 
-	CHECK( maps >= 12 * numPlayers );
+	CHECK( considered - first >= 12 );
+#if defined(_DEBUG)
+	printf( "Debug: %d of %d %d-player maps\n", maps, considered - first, players );
+#else
+	CHECK( maps == considered - first );
+#endif
 	if( failed == 0 )
-		printf( "PASS every_start_reaches_its_money_and_has_two_ways_out (%d maps)\n", maps );
+		printf( "PASS every_start_reaches_its_money_and_has_two_ways_out, %d players (%d maps)\n", players, maps );
+}
+
+TEST(every_start_reaches_its_money_and_has_two_ways_out_2_players)
+{
+	moneySweep( 2 );
+}
+
+TEST(every_start_reaches_its_money_and_has_two_ways_out_4_players)
+{
+	moneySweep( 4 );
+}
+
+TEST(every_start_reaches_its_money_and_has_two_ways_out_8_players)
+{
+	moneySweep( 8 );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -9474,6 +9759,52 @@ TEST(the_slow_frame_bar_moves_only_for_a_positive_number)
 	TheWritableGlobalData = saved;
 }
 
+/* -noaudio turns every sound off in every build.  It was registered in the Debug and Internal builds only,
+   so a Release build ignored it and a windowed run with it opened the audio device.  ctest runs this in
+   the configuration it built, which is Release on every gate. */
+TEST(noaudio_switch_turns_every_sound_off_in_every_build)
+{
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+	CHECK( TheGlobalData->m_audioOn );
+	CHECK( TheGlobalData->m_musicOn );
+	CHECK( TheGlobalData->m_soundsOn );
+	CHECK( TheGlobalData->m_speechOn );
+
+	char exe[] = "generals.exe";
+	char noAudio[] = "-noaudio";
+	char *argv[] = { exe, noAudio };
+	parseCommandLine( 2, argv );
+	CHECK( !TheGlobalData->m_audioOn );
+	CHECK( !TheGlobalData->m_musicOn );
+	CHECK( !TheGlobalData->m_soundsOn );
+	CHECK( !TheGlobalData->m_speechOn );
+
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = saved;
+}
+
+/* -nologo and -novideo skip the logo and the movies in every build, Release included, whatever the
+   environment says. */
+TEST(nologo_and_novideo_skip_videos_in_every_build)
+{
+	GlobalData *savedData = TheWritableGlobalData;
+	char exe[] = "generals.exe";
+	char noLogo[] = "-nologo";
+	char noVideo[] = "-novideo";
+	char *argv[] = { exe, noLogo, noVideo };
+
+	TheWritableGlobalData = NEW GlobalData;
+	CHECK( TheGlobalData->m_playIntro );
+	CHECK( TheGlobalData->m_videoOn );
+	parseCommandLine( 3, argv );
+	CHECK_EQ( (Int)TheGlobalData->m_playIntro, 0 );
+	CHECK_EQ( (Int)TheGlobalData->m_playSizzle, 0 );
+	CHECK_EQ( (Int)TheGlobalData->m_videoOn, 0 );
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = savedData;
+}
+
 TEST(a_netgame_slot_list_is_the_player_order_on_every_machine)
 {
 	/* -netgame carries what the LAN lobby otherwise agrees on: who plays, at which address, in
@@ -9575,41 +9906,63 @@ TEST(the_serial_check_is_waived_only_between_two_addresses_on_this_machine)
 }
 
 /* A replay is checked by comparing the CRCs it carries against the ones playback recomputes, one
-	 for one, out of a queue.  A game played over a network never gets its frame 0 CRC into the file
-	 - the logic makes it after that frame's commands have already gone out, so it is never sent,
-	 never executed and never recorded - and playback, having no network to lose it to, makes one
-	 anyway.  Unless playback throws that one away every comparison after it is a frame out, and a
-	 replay that is perfectly in sync reports a desync on its first interval frame. */
-TEST(replay_crc_queue_drops_the_frame_the_network_never_recorded)
+	 for one, out of a queue.  A network game's replay may or may not carry frame 0's CRC: until
+	 d9eccdda the network deleted it while still in pregame (every retail replay starts at frame 1),
+	 and since then it is sent and recorded.  Playback makes one either way, so for a network replay the
+	 queue decides at the first comparison: keep the head if it is the recorded CRC, drop it if the next
+	 one is, and otherwise compare as it stands so a real first-frame desync is still reported.  Either
+	 blind rule reports a desync on every replay of the other kind (Recorder.h). */
+TEST(replay_crc_queue_aligns_to_either_kind_of_network_recording)
 {
-	// only a game that was played over a network is missing that first CRC
-	CHECK( replayIsMissingFirstCRC( GAME_LAN ) );
-	CHECK( replayIsMissingFirstCRC( GAME_INTERNET ) );
-	CHECK( !replayIsMissingFirstCRC( GAME_SKIRMISH ) );
-	CHECK( !replayIsMissingFirstCRC( GAME_SINGLE_PLAYER ) );
-	CHECK( !replayIsMissingFirstCRC( GAME_REPLAY ) );
-	CHECK( !replayIsMissingFirstCRC( GAME_SHELL ) );
-	CHECK( !replayIsMissingFirstCRC( GAME_NONE ) );
+	// only a game that was played over a network can lack that first CRC
+	CHECK( replayMayLackFirstCRC( GAME_LAN ) );
+	CHECK( replayMayLackFirstCRC( GAME_INTERNET ) );
+	CHECK( !replayMayLackFirstCRC( GAME_SKIRMISH ) );
+	CHECK( !replayMayLackFirstCRC( GAME_SINGLE_PLAYER ) );
+	CHECK( !replayMayLackFirstCRC( GAME_REPLAY ) );
+	CHECK( !replayMayLackFirstCRC( GAME_SHELL ) );
+	CHECK( !replayMayLackFirstCRC( GAME_NONE ) );
 
-	// left alone the queue hands back what it was given, in order
+	// computed by playback: frames 0, 1, 2, 3
+	const UnsignedInt computed[ 4 ] = { 0x11111111, 0x22222222, 0x33333333, 0x44444444 };
+
+	// a solo replay is compared one for one from frame 0, and never aligned
 	CRCInfo solo;
-	solo.addCRC( 0x11111111 );
-	solo.addCRC( 0x22222222 );
-	solo.addCRC( 0x33333333 );
-	CHECK_EQ( 0x11111111, solo.readCRC() );
+	for (Int i = 0; i < 4; ++i)
+		solo.addCRC( computed[i] );
+	CHECK_EQ( 0x11111111, solo.readCRCFor( 0x22222222 ) );		// a mismatch it must report
+	CHECK_EQ( (Int)CRCInfo::ALIGN_NONE, (Int)solo.getAlignment() );
 	CHECK_EQ( 0x22222222, solo.readCRC() );
-	CHECK_EQ( 0x33333333, solo.readCRC() );
-	CHECK_EQ( 0, solo.readCRC() );		// an empty queue reads as 0
 
-	// armed, it swallows exactly one - the frame the recording is missing - and no more
-	CRCInfo net;
-	net.skipFirstCRC();
-	net.addCRC( 0x11111111 );
-	net.addCRC( 0x22222222 );
-	net.addCRC( 0x33333333 );
-	CHECK_EQ( 0x22222222, net.readCRC() );
-	CHECK_EQ( 0x33333333, net.readCRC() );
-	CHECK_EQ( 0, net.readCRC() );
+	// a network replay recorded from frame 0 (since d9eccdda): nothing is dropped
+	CRCInfo fromZero;
+	fromZero.allowMissingFirstCRC();
+	for (Int i = 0; i < 4; ++i)
+		fromZero.addCRC( computed[i] );
+	CHECK_EQ( 0x11111111, fromZero.readCRCFor( 0x11111111 ) );
+	CHECK_EQ( (Int)CRCInfo::ALIGN_FROM_FRAME_0, (Int)fromZero.getAlignment() );
+	CHECK_EQ( 0x22222222, fromZero.readCRCFor( 0x22222222 ) );
+	CHECK_EQ( 0x33333333, fromZero.readCRCFor( 0x33333333 ) );
+
+	// a legacy network replay (retail, or before d9eccdda): frame 0's is dropped, once
+	CRCInfo legacy;
+	legacy.allowMissingFirstCRC();
+	for (Int i = 0; i < 4; ++i)
+		legacy.addCRC( computed[i] );
+	CHECK_EQ( 0x22222222, legacy.readCRCFor( 0x22222222 ) );
+	CHECK_EQ( (Int)CRCInfo::ALIGN_FRAME_0_MISSING, (Int)legacy.getAlignment() );
+	CHECK_EQ( 0x33333333, legacy.readCRCFor( 0x33333333 ) );
+	CHECK_EQ( 0x44444444, legacy.readCRCFor( 0x44444444 ) );		// and no more than one
+	CHECK_EQ( 0, legacy.readCRC() );
+
+	// a real desync on the very first CRC is neither kind: compared as it stands, so it is reported
+	CRCInfo desync;
+	desync.allowMissingFirstCRC();
+	for (Int i = 0; i < 4; ++i)
+		desync.addCRC( computed[i] );
+	CHECK_EQ( 0x11111111, desync.readCRCFor( 0x99999999 ) );
+	CHECK_EQ( (Int)CRCInfo::ALIGN_UNDECIDED, (Int)desync.getAlignment() );
+	CHECK_EQ( 0x22222222, desync.readCRCFor( 0x22222222 ) );		// decided once: nothing shifts later
 }
 
 
@@ -10070,6 +10423,66 @@ TEST(the_retreat_never_orders_an_aircraft_home)
 	CHECK( !AIRetreat_canBeOrderedHome( true, true, false ) );
 	CHECK( !AIRetreat_canBeOrderedHome( false, false, false ) );
 	CHECK( !AIRetreat_canBeOrderedHome( false, true, true ) );
+}
+
+
+/** AI.cpp: a team that loses a fight stops at the first ground on its way home that none of the
+	 fight's guns reach, a step past it, rather than walking the whole map back to its base. */
+TEST(a_losing_team_falls_back_out_of_reach_not_home)
+{
+	Real x = 0.0f, y = 0.0f;
+
+	// home is 2000 east; one gun at the fight reaching 150: covered up to 150, first clear sample at
+	// 180, one 60 step past it
+	const Real oneGun[] = { 0.0f, 0.0f, 150.0f };
+	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, oneGun, 1, &x, &y ) );
+	CHECK_NEAR( 240.0f, x, 0.01f );
+	CHECK_NEAR( 0.0f, y, 0.01f );
+
+	// a second gun further down the road home (200..600 covered) pushes the stop past its reach too:
+	// the gap at 180 is clear, but the step past it is not, and a stop inside a reach is no stop
+	const Real twoGuns[] = { 0.0f, 0.0f, 150.0f,  400.0f, 0.0f, 200.0f };
+	CHECK( aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, twoGuns, 2, &x, &y ) );
+	CHECK_NEAR( 720.0f, x, 0.01f );
+
+	// any direction: home to the south-west
+	CHECK( aiRetreatFallbackPoint( 1000.0f, 1000.0f, 0.0f, 1000.0f, 60.0f, NULL, 0, &x, &y ) );
+	CHECK_NEAR( 880.0f, x, 0.01f );
+	CHECK_NEAR( 1000.0f, y, 0.01f );
+
+	// guns covering the whole road: home, and FALSE says so
+	const Real bigGun[] = { 0.0f, 0.0f, 5000.0f };
+	CHECK( !aiRetreatFallbackPoint( 0.0f, 0.0f, 2000.0f, 0.0f, 60.0f, bigGun, 1, &x, &y ) );
+	CHECK_NEAR( 2000.0f, x, 0.01f );
+
+	// a fight on the doorstep: no room short of home either
+	CHECK( !aiRetreatFallbackPoint( 0.0f, 0.0f, 100.0f, 0.0f, 60.0f, NULL, 0, &x, &y ) );
+	CHECK_NEAR( 100.0f, x, 0.01f );
+}
+
+
+/** AI.cpp: what a team holding at its safe spot does next. */
+TEST(a_fallen_back_team_goes_back_once_the_fight_turns)
+{
+	const UnsignedInt MIN = 150, MAX = 900;
+
+	// too soon, or still walking: hold, however the fight reads
+	CHECK_EQ( (Int)AIFALLBACK_HOLD, (Int)aiRetreatHoldDecision( TRUE, 100, 1000.0f, 1.0f, MIN, MAX ) );
+	CHECK_EQ( (Int)AIFALLBACK_HOLD, (Int)aiRetreatHoldDecision( FALSE, 400, 1000.0f, 1.0f, MIN, MAX ) );
+
+	// stopped, and the fight it left is empty or won: back to it
+	CHECK_EQ( (Int)AIFALLBACK_RESUME, (Int)aiRetreatHoldDecision( TRUE, 200, 1000.0f, 1.0f, MIN, MAX ) );
+	CHECK_EQ( (Int)AIFALLBACK_RESUME, (Int)aiRetreatHoldDecision( TRUE, 200, 1.2f, 1.0f, MIN, MAX ) );
+
+	// still lost, or only as good as the reading it ran from: keep holding, not a yo-yo
+	CHECK_EQ( (Int)AIFALLBACK_HOLD, (Int)aiRetreatHoldDecision( TRUE, 200, 0.4f, 1.0f, MIN, MAX ) );
+	CHECK_EQ( (Int)AIFALLBACK_HOLD, (Int)aiRetreatHoldDecision( TRUE, 200, 0.9f, 1.0f, MIN, MAX ) );
+
+	// still lost at the limit: home, where the next wave picks it up
+	CHECK_EQ( (Int)AIFALLBACK_GO_HOME, (Int)aiRetreatHoldDecision( TRUE, MAX, 0.4f, 1.0f, MIN, MAX ) );
+	// ... and a team stuck walking is decided at the limit too, not held forever
+	CHECK_EQ( (Int)AIFALLBACK_GO_HOME, (Int)aiRetreatHoldDecision( FALSE, MAX, 0.4f, 1.0f, MIN, MAX ) );
+	CHECK_EQ( (Int)AIFALLBACK_RESUME, (Int)aiRetreatHoldDecision( FALSE, MAX, 1000.0f, 1.0f, MIN, MAX ) );
 }
 
 
@@ -10687,13 +11100,13 @@ TEST(every_ai_rung_is_named_the_same_way_as_every_other)
 
 		// and one style for the lot: "Easy Army" beside "Medium AI" is what this is here to stop
 		// (CHECK_STR is narrow-char, and casting a WideChar* into it compares one byte and passes)
-		CHECK( wcscmp( name.str() + name.getLength() - 3, L" AI" ) == 0 );
+		CHECK( WideCharCmp( name.str() + name.getLength() - 3, u" AI" ) == 0 );
 	}
 
 	// no two rungs share a name, or the drop-down cannot say which one you picked
 	for (Int a = 0; a < numRungs; ++a)
 		for (Int b = a + 1; b < numRungs; ++b)
-			CHECK( wcscmp( SlotStateName( rungs[a] ).str(), SlotStateName( rungs[b] ).str() ) != 0 );
+			CHECK( WideCharCmp( SlotStateName( rungs[a] ).str(), SlotStateName( rungs[b] ).str() ) != 0 );
 }
 /* Nine is what the strip shows before the rest of the queue folds into the "+N" that closes it as a
 	 tenth cell: two rows of five standing on the console over the selection.  It used to be sixteen
@@ -10919,26 +11332,26 @@ enum { JOB_TEST_MAX = 4096 };
 static Int s_jobVisits[ JOB_TEST_MAX ];
 static UnsignedInt s_jobFPMode[ JOB_TEST_MAX ];
 static Int s_jobWorkerFlag[ JOB_TEST_MAX ];
-static volatile LONG s_jobWorkerSeen = 0;
-static volatile LONG s_jobWaitedOnce = 0;
+static std::atomic<Int> s_jobWorkerSeen( 0 );
+static std::atomic<Int> s_jobWaitedOnce( 0 );
 
 /* The forking thread works the queue too, and a job body that does nothing at all is finished long
-	 before a worker is out of WaitForSingleObject - so a test that wants to observe a worker has to
+	 before a worker is out of the pool's wait - so a test that wants to observe a worker has to
 	 hold the first item until one turns up.  One bounded wait per fork, and none at all once a
 	 worker has been seen, so this costs nothing when the pool is behaving. */
 static void jobTestWaitForAWorker( void )
 {
 	if( JobSystem::isWorkerThread() )
 	{
-		InterlockedExchange( (LONG *)&s_jobWorkerSeen, 1 );
+		s_jobWorkerSeen.store( 1 );
 		return;
 	}
-	if( s_jobWorkerSeen || InterlockedExchange( (LONG *)&s_jobWaitedOnce, 1 ) != 0 )
+	if( s_jobWorkerSeen.load() || s_jobWaitedOnce.exchange( 1 ) != 0 )
 		return;
 
-	const DWORD deadline = ::GetTickCount() + 500;
-	while( !s_jobWorkerSeen && ::GetTickCount() < deadline )
-		::Sleep( 0 );
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds( 500 );
+	while( !s_jobWorkerSeen.load() && std::chrono::steady_clock::now() < deadline )
+		std::this_thread::yield();
 }
 
 static void jobTestCount( Int index, void * )
@@ -10967,8 +11380,8 @@ static void jobTestAllocate( Int index, void * )
 
 static void resetJobVisits( void )
 {
-	s_jobWorkerSeen = 0;
-	s_jobWaitedOnce = 0;
+	s_jobWorkerSeen.store( 0 );
+	s_jobWaitedOnce.store( 0 );
 	for( Int i = 0; i < JOB_TEST_MAX; ++i )
 	{
 		s_jobVisits[ i ] = 0;
@@ -11111,7 +11524,7 @@ TEST(parallel_for_covers_forks_back_to_back_and_forks_after_a_pause)
 {
 	static const Int BACK_TO_BACK_FORKS = 2000;
 	static const Int PAUSED_FORKS = 20;
-	static const DWORD PAUSE_MS = 5;
+	static const Int PAUSE_MS = 5;
 	static const Int ITEMS = 64;
 
 	JobSystem::shutdown();
@@ -11120,7 +11533,7 @@ TEST(parallel_for_covers_forks_back_to_back_and_forks_after_a_pause)
 	for( Int fork = 0; fork < BACK_TO_BACK_FORKS + PAUSED_FORKS; ++fork )
 	{
 		if( fork >= BACK_TO_BACK_FORKS )
-			::Sleep( PAUSE_MS );
+			std::this_thread::sleep_for( std::chrono::milliseconds( PAUSE_MS ) );
 
 		resetJobVisits();
 		JobSystem::parallel_for( ITEMS, 1, jobTestCount, NULL );
@@ -11256,8 +11669,8 @@ TEST(borderless_asks_for_a_windowed_device_the_size_of_the_desktop)
 	CHECK_EQ( scratch->m_xResolution, 1280 );
 	CHECK_EQ( scratch->m_yResolution, 720 );
 
+	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
-	delete scratch;
 }
 
 TEST(every_side_has_three_plates_and_every_general_wears_its_sides)
@@ -11982,7 +12395,7 @@ TEST(option_catalog_rows_are_well_formed)
 			CHECK( strncmp( def.widgetName, "OptionsMenu.wnd:", 16 ) == 0 );
 
 		for( Int j = 0; j < i; ++j )
-			CHECK_NE( stricmp( TheOptionCatalog[ j ].iniKey, def.iniKey ), 0 );
+			CHECK_NE( strcasecmp( TheOptionCatalog[ j ].iniKey, def.iniKey ), 0 );
 	}
 
 	/* the table is terminated as well as counted, so a walk may use either */
@@ -11999,7 +12412,7 @@ TEST(string_file_bytes_decode_utf8_and_keep_latin1)
 
 	const unsigned char plain[] = "K";
 	CHECK_EQ( decodeStringFileCharacter( plain, &decoded ), 1 );
-	CHECK_EQ( (Int)decoded, (Int)L'K' );
+	CHECK_EQ( (Int)decoded, (Int)u'K' );
 
 	const unsigned char dotlessI[] = { 0xC4, 0xB1, 0 };						// U+0131, the ı in Kışla
 	CHECK_EQ( decodeStringFileCharacter( dotlessI, &decoded ), 2 );
@@ -12061,8 +12474,14 @@ TEST(gameplay_conveniences_are_forced_on_and_left_the_catalog)
 	CHECK( scratch->m_showPlacementRangeRing );
 	CHECK( scratch->m_workersReturnToSupply );
 	CHECK( scratch->m_detailedBuildTooltips );
-	CHECK( scratch->m_showHudOverlay );
 	CHECK( scratch->m_archiveReplays );
+	/* The HUD overlay is out of the catalog too, but its default is the build's: on in the developer
+		 builds, off in Release (a project rule; GameData.ini or -showHudOverlay turns it on). */
+#if defined(_DEBUG) || defined(_INTERNAL)
+	CHECK( scratch->m_showHudOverlay );
+#else
+	CHECK( !scratch->m_showHudOverlay );
+#endif
 
 	/* HealthBars is what is left, and it is still a menu row. */
 	const OptionDef *bars = findOptionDef( "HealthBars" );
@@ -12082,8 +12501,8 @@ TEST(gameplay_conveniences_are_forced_on_and_left_the_catalog)
 		CHECK( def->widgetName == NULL || def->widgetName[ 0 ] == '\0' );
 	}
 
+	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
-	delete scratch;
 }
 
 TEST(an_options_ini_naming_the_removed_input_scheme_and_wasd_keys_still_loads)
@@ -12119,8 +12538,8 @@ TEST(an_options_ini_naming_the_removed_input_scheme_and_wasd_keys_still_loads)
 	saveOptionsToPreferences( pref );
 	CHECK_STR( pref[ AsciiString( "OrderLines" ) ].str(), "no" );
 
+	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
-	delete scratch;
 }
 
 TEST(order_lines_are_a_live_check_box_that_starts_on)
@@ -12144,8 +12563,8 @@ TEST(order_lines_are_a_live_check_box_that_starts_on)
 	CHECK( !scratch->m_showOrderLines );
 	CHECK_EQ( def->get(), 0 );
 
+	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
-	delete scratch;
 }
 
 TEST(option_catalog_round_trips_every_key_through_options_ini)
@@ -12178,8 +12597,8 @@ TEST(option_catalog_round_trips_every_key_through_options_ini)
 		CHECK_EQ( def.get(), def.hi );
 	}
 
+	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
-	delete scratch;
 }
 
 TEST(option_catalog_writes_bools_as_yes_and_no)
@@ -12219,8 +12638,8 @@ TEST(option_catalog_writes_bools_as_yes_and_no)
 	loadOptionsFromPreferences( pref );
 	CHECK_EQ( zoom->get(), 0 );
 
+	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
-	delete scratch;
 }
 
 TEST(option_catalog_clamps_and_leaves_an_absent_key_alone)
@@ -12249,8 +12668,8 @@ TEST(option_catalog_clamps_and_leaves_an_absent_key_alone)
 	loadOptionsFromPreferences( pref );
 	CHECK_EQ( speed->get(), 142 );
 
+	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
-	delete scratch;
 }
 
 /** Bloom is picked as a level and stored as one, and the shader still reads the percentage it
@@ -12273,6 +12692,7 @@ TEST(bloom_levels_carry_the_percentages_the_shader_reads)
 	// what GlobalData's constructor put there, before anything below scribbles on it
 	const Int shippedIntensity = TheGlobalData->m_bloomIntensity;
 	const Int shippedThreshold = TheGlobalData->m_bloomThreshold;
+	CHECK_EQ( bloom->get(), 2 );		// a fresh install starts on Medium, not Off
 
 	// off is off, and nothing else is: a level that mapped to 0 would be a silent second Off entry
 	bloom->set( 0 );
@@ -12321,8 +12741,8 @@ TEST(bloom_levels_carry_the_percentages_the_shader_reads)
 	CHECK_EQ( TheGlobalData->m_bloomIntensity, shippedIntensity );
 	CHECK_EQ( TheGlobalData->m_bloomThreshold, shippedThreshold );
 
+	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
-	delete scratch;
 }
 
 TEST(msaa_levels_map_to_the_counts_a_device_offers)
@@ -12367,8 +12787,8 @@ TEST(vsync_is_off_until_the_player_asks)
 	vsync->set( 0 );
 	CHECK_EQ( TheGlobalData->m_vsync, FALSE );
 
+	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
-	delete scratch;
 }
 
 TEST(texture_filter_defaults_to_anisotropic)
@@ -12396,8 +12816,8 @@ TEST(texture_filter_defaults_to_anisotropic)
 	CHECK_EQ( scratch->m_anisotropyLevel, 0 );
 	CHECK_EQ( scratch->m_vsync, FALSE );
 
+	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
-	delete scratch;
 }
 
 /* Three rows on the Controls page.  The zoom one may only ever bring the camera nearer: the far
@@ -12471,10 +12891,12 @@ TEST(net_box_is_a_check_box_that_starts_on_under_its_own_key)
 	TheWritableGlobalData = scratch;
 
 	CHECK( scratch->m_showNetBox );
+	// the older plate's own switch is not this one's to move.  Its default is the build's (on in the
+	// developer builds, off in Release), so what is checked is that the net box leaves it as it was.
+	const Bool hudOverlayBefore = scratch->m_showHudOverlay;
 	def->set( 0 );
 	CHECK( !scratch->m_showNetBox );
-	// the older plate's own switch is not this one's to move
-	CHECK( scratch->m_showHudOverlay );
+	CHECK_EQ( (Int)scratch->m_showHudOverlay, (Int)hudOverlayBefore );
 
 	TheWritableGlobalData = saved;
 	delete scratch;
@@ -12639,8 +13061,8 @@ TEST(effects_page_rows_reach_the_fields_the_command_line_switches_set)
 	bounce->set( 1 );
 	CHECK_EQ( (Int)scratch->m_particleGroundBounce, 1 );
 
+	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
-	delete scratch;
 }
 
 TEST(window_mode_derives_the_boolean_the_device_layer_reads)
@@ -12675,8 +13097,8 @@ TEST(window_mode_derives_the_boolean_the_device_layer_reads)
 	CHECK_EQ( TheGlobalData->m_yResolution, (Int)::GetSystemMetrics( SM_CYSCREEN ) );
 	CHECK_EQ( (Int)TheGlobalData->m_edgeScrollInWindowedMode, 1 );
 
+	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
-	delete scratch;
 }
 
 /* The monitor list and the sizes each monitor offers, read off whatever desktop the test runs on.
@@ -12729,8 +13151,8 @@ TEST(borderless_covers_the_monitor_options_ini_names)
 	CHECK_EQ( TheGlobalData->m_xResolution, (Int)( chosen.rect.right - chosen.rect.left ) );
 	CHECK_EQ( TheGlobalData->m_yResolution, (Int)( chosen.rect.bottom - chosen.rect.top ) );
 
+	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
-	delete scratch;
 }
 
 TEST(window_mode_survives_a_round_trip_through_options_ini)
@@ -12762,8 +13184,8 @@ TEST(window_mode_survives_a_round_trip_through_options_ini)
 	loadOptionsFromPreferences( pref );
 	CHECK_EQ( mode->get(), (Int)WINDOW_MODE_COUNT - 1 );
 
+	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
-	delete scratch;
 }
 
 TEST(early_options_reads_the_same_file_userpreferences_writes)
@@ -13555,8 +13977,8 @@ TEST(menu_transition_speed_scales_the_step_rate_and_never_reaches_zero)
 	scratch->m_menuTransitionSpeed = 100000;
 	CHECK_NEAR( GameClient_menuAnimStepsPerSec(), UI_ANIM_STEPS_PER_SEC * 4.0f, 0.0001f );
 
+	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
-	delete scratch;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -13566,7 +13988,9 @@ TEST(menu_transition_speed_scales_the_step_rate_and_never_reaches_zero)
 //-------------------------------------------------------------------------------------------------
 TEST(build_placement_preview_defaults_are_the_ones_the_game_always_used)
 {
+	GlobalData *saved = TheWritableGlobalData;
 	GlobalData *scratch = NEW GlobalData;
+	TheWritableGlobalData = scratch;
 
 	CHECK_NEAR( scratch->m_buildPlacementOpacity, PLACEMENT_SILHOUETTE_OPACITY, 0.0001f );
 	CHECK( scratch->m_buildPlacementShadows );
@@ -13578,7 +14002,8 @@ TEST(build_placement_preview_defaults_are_the_ones_the_game_always_used)
 	// unless somebody turns it off
 	CHECK( scratch->m_formationDrag );
 
-	delete scratch;
+	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
+	TheWritableGlobalData = saved;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -13693,6 +14118,56 @@ TEST(asciistring_nextToken_empties_the_token_when_the_source_runs_out)
 	AsciiString self( "a\\b" );
 	CHECK( !self.nextToken( &self, "\\/" ) );
 	CHECK_STR( self.str(), "a\\b" );
+}
+
+/* A string set to part of itself, or concatenated onto itself.  nextToken sets the source to the rest
+	 of itself, and the in-place path copied that tail over the front with strcpy: overlapping, so
+	 undefined.  MSVC's forward copy and ARM64 macOS's both happened to get it right; macOS x86_64's did
+	 not, and the archive directory lost a random subset of its paths (the x86_64 test_bigfilesystem is
+	 the measured case).  On ARM64 this test could not fail the old code - it pins the answers, over
+	 every tail length and start offset a path walk produces, and self-concatenation, which the old
+	 strcat and the wide loop could overrun. */
+TEST(strings_set_from_their_own_text_copy_it_whole)
+{
+	for( Int depth = 1; depth <= 40; ++depth )
+	{
+		AsciiString path;
+		std::string expected;
+		for( Int i = 0; i < depth; ++i )
+		{
+			char part[32];
+			snprintf( part, sizeof(part), "%s%d", ( i % 3 ) ? "dir" : "a_longer_directory_", i );
+			path.concat( part );
+			path.concat( '\\' );
+			expected += part;
+			expected += '|';
+		}
+		AsciiString tok;
+		std::string walked;
+		while( path.nextToken( &tok, "\\" ) )
+		{
+			walked += tok.str();
+			walked += '|';
+		}
+		CHECK( walked == expected );
+	}
+
+	AsciiString twice( "abcdefghij" );
+	twice.concat( twice.str() );
+	CHECK_STR( twice.str(), "abcdefghijabcdefghij" );
+
+	UnicodeString wide( u"one\\two\\three" );
+	UnicodeString wideTok;
+	CHECK( wide.nextToken( &wideTok, UnicodeString( u"\\" ) ) );
+	CHECK( WideCharCmp( wideTok.str(), u"one" ) == 0 );
+	CHECK( wide.nextToken( &wideTok, UnicodeString( u"\\" ) ) );
+	CHECK( WideCharCmp( wideTok.str(), u"two" ) == 0 );
+	CHECK( wide.nextToken( &wideTok, UnicodeString( u"\\" ) ) );
+	CHECK( WideCharCmp( wideTok.str(), u"three" ) == 0 );
+
+	UnicodeString wideTwice( u"abcdefghij" );
+	wideTwice.concat( wideTwice.str() );
+	CHECK( WideCharCmp( wideTwice.str(), u"abcdefghijabcdefghij" ) == 0 );
 }
 
 /* -map "Maps\Twilight Flame\Twilight Flame.map" loses its quotes to WinMain's tokenizer and
@@ -13924,6 +14399,39 @@ TEST(an_open_dropdown_owns_the_rows_that_hang_past_its_panel)
 	// and it never claims a click beside itself - PLAY GAME sits under the same rows
 	CHECK( !OpenWindowOwnsPoint( TRUE, boxX, boxY, boxWidth, boxHeightOpen, 300, rowPastPanel ) );
 	CHECK( !OpenWindowOwnsPoint( TRUE, boxX, boxY, boxWidth, boxHeightOpen, 900, 660 ) );
+}
+
+/* Four finished base defences buy one superweapon, eight buy two, whatever mix of silo, uplink and
+	 storm they go to.  Player::canBuildMoreOfType counts and asks this; the lobby's cap is checked
+	 beside it and still refuses on its own. */
+TEST(four_finished_defenses_pay_for_each_superweapon)
+{
+	// fewer than four buys nothing
+	CHECK( SuperweaponDefenseCapRefuses( 0, 0 ) );
+	CHECK( SuperweaponDefenseCapRefuses( 3, 0 ) );
+
+	// four buy the first, and a foundation already down spends it
+	CHECK( !SuperweaponDefenseCapRefuses( 4, 0 ) );
+	CHECK( SuperweaponDefenseCapRefuses( 4, 1 ) );
+	CHECK( SuperweaponDefenseCapRefuses( 7, 1 ) );
+
+	// eight the second
+	CHECK( !SuperweaponDefenseCapRefuses( 8, 1 ) );
+	CHECK( SuperweaponDefenseCapRefuses( 8, 2 ) );
+
+	// losing defences never pulls a standing superweapon down, it only stops the next one
+	CHECK( SuperweaponDefenseCapRefuses( 4, 2 ) );
+
+	// a Sneak Attack tunnel costs nothing and buys nothing; a Tunnel Network at 800 does
+	CHECK( !DefenseCountsForSuperweapons( 0 ) );
+	CHECK( DefenseCountsForSuperweapons( 800 ) );
+
+	// a silo whose missile is silenced sells China's upgrades and asks for no defences
+	CHECK( !SuperweaponNeedsDefenses( AsciiString( "ChinaNuclearMissileLauncher" ), FALSE, SUPERWEAPONS_NONE ) );
+	CHECK( !SuperweaponNeedsDefenses( AsciiString( "Tank_ChinaNuclearMissileLauncher" ), TRUE, SUPERWEAPONS_ALLOW ) );
+	CHECK( SuperweaponNeedsDefenses( AsciiString( "ChinaNuclearMissileLauncher" ), FALSE, SUPERWEAPONS_LIMIT ) );
+	CHECK( SuperweaponNeedsDefenses( AsciiString( "SupW_AmericaParticleCannonUplink" ), FALSE, SUPERWEAPONS_NONE ) );
+	CHECK( SuperweaponNeedsDefenses( AsciiString( "GLAScudStorm" ), TRUE, SUPERWEAPONS_ALLOW ) );
 }
 
 /* The superweapon rule is a mode, and what a mode leaves you depends on who you are playing.  The
@@ -14317,6 +14825,9 @@ TEST(scenario_parses_the_order_lines)
 	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_SHIFTATTACKMOVE );
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftguard 0 * 900 700", &action ), (Int)SCENARIO_PARSE_OK );
 	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_SHIFTGUARD );
+	CHECK( action.radius == 0.0f );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftguard 0 * 900 700 350", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK( action.radius == 350.0f );
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftattack 0 * 1 AmericaCommandCenter", &action ), (Int)SCENARIO_PARSE_OK );
 	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_SHIFTATTACK );
 	CHECK_STR( action.targetSelector.str(), "AmericaCommandCenter" );
@@ -14342,6 +14853,19 @@ TEST(scenario_parses_the_order_lines)
 	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_TALLY );
 	CHECK_STR( action.selector.str(), "ChinaGattlingCannon" );
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "1800 tally 1", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
+
+	// the stance key, and the sweep with the key's own circle unless the line sizes it
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "60 stance 0 AmericaTankCrusader aggressive", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_STANCE );
+	CHECK_STR( action.name.str(), "aggressive" );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "60 stance 0 * bold", &action ), (Int)SCENARIO_PARSE_BAD_ACTION );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "60 stance 0 *", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "60 hunt 0 * 900 700", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_HUNT );
+	CHECK( action.radius == 300.0f );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "60 hunt 0 * 900 700 450", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_HUNT );
+	CHECK( action.radius == 450.0f );
 
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "700 power 1 GLAScudStorm start0:0:300", &action ),
 						(Int)SCENARIO_PARSE_OK );
@@ -14650,8 +15174,8 @@ TEST(camera_preferences_default_to_a_finite_map_margin)
 		bounds->set(0);
 		CHECK(!scratch->m_useCameraConstraints);
 	}
+	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
-	delete scratch;
 }
 // The Razer grid is six rows of twenty-two with the logo strip in column zero and
 // escape, tab, caps and shift in column one, so the top left key the command bar
@@ -14941,7 +15465,234 @@ TEST(the_spectator_page_has_its_pieces_and_no_option_clicks)
 #include "test_camera_behavior.inc"
 #include "test_observer_camera.inc"
 #include "test_production_input.inc"
+// A defence's blind-spot grid is cut into rings half a pathfind cell wide.  A range longer than the map
+// asks for no more rings than the map is long corner to corner: a mod's AttackRange of 1e6 held hundreds of
+// megabytes and froze every platform, and inf gave ARM64 2^31 rings, whose 180-a-ring grid overflowed Int.
+TEST(blind_spot_rings_never_outgrow_the_map)
+{
+	const Real ring = PATHFIND_CELL_SIZE_F * 0.5f;
+	const Real span = 2.0f * 4000.0f;							// a 4,000-unit square map: width plus height
+	CHECK_EQ(blindSpotRingCount(0.0f, span), 0);
+	CHECK_EQ(blindSpotRingCount(ring, span), 1);
+	CHECK_EQ(blindSpotRingCount(300.0f, span), (Int)ceil(300.0f / ring));	// every real reach: as before
+	CHECK_EQ(blindSpotRingCount(1.0e6f, span), (Int)ceil(span / ring) + 1);	// capped by the map
+	CHECK_EQ(blindSpotRingCount(std::numeric_limits<float>::infinity(), span), 0);	// Windows' INT_MIN, floored
+	CHECK_EQ(blindSpotRingCount(std::numeric_limits<float>::quiet_NaN(), span), 0);
+	// no extent known: never a grid whose ring count times 180 rays overflows Int
+	CHECK((long long)blindSpotRingCount(1.0e9f, 0.0f) * 180 <= INT_MAX);
+}
+
+// The two cursor indexes a float decides.  Mouse.ini's FPS or GameData.ini's scroll speed of inf or NaN
+// made them INT_MIN on Windows and indexed a table with that; a negative FPS made a negative frame on
+// every platform.  Anything outside the table is its first entry now, and every in-range index is the one
+// the old expression gave.
+TEST(cursor_frames_and_directions_stay_in_their_tables)
+{
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	const float inf = std::numeric_limits<float>::infinity();
+	CHECK_EQ(mouseCursorFrame(2.7f, 5), 2);
+	CHECK_EQ(mouseCursorFrame(4.99f, 5), 4);
+	CHECK_EQ(mouseCursorFrame(5.0f, 5), 0);
+	CHECK_EQ(mouseCursorFrame(-3.2f, 5), 0);
+	CHECK_EQ(mouseCursorFrame(nan, 5), 0);
+	CHECK_EQ(mouseCursorFrame(inf, 5), 0);
+
+	CHECK_EQ(mouseCursorDirection(nan, 8), 0);
+	CHECK_EQ(mouseCursorDirection(inf, 8), 0);
+	CHECK_EQ(mouseCursorDirection(-1.0f, 8), 0);
+	const double pi = 3.14159265358979323846;
+	for (Int directions = 1; directions <= MAX_2D_CURSOR_DIRECTIONS; ++directions) {
+		for (Int k = 0; k < 2000; ++k) {
+			const Real theta = (Real)(k * 2.0 * pi / 2000.0);
+			Int old = (Int)(theta / (2.0f * pi / (Real)directions) + 0.5f);
+			if (old >= directions)
+				old = 0;
+			CHECK_EQ(mouseCursorDirection(theta, directions), old);
+		}
+	}
+}
+
+// The rank walk.  RankPoints is ten Int thresholds followed by five Real multipliers, and the menus walked
+// it with `while (points >= m_ranks[i + 1]) ++i`, unbounded.  This models that walk over the struct's own
+// fifteen words, with the shipped thresholds and multipliers and Windows' float-to-int conversion for the
+// points, and says where it stops or that it walks off the struct.  rankForPoints is the bounded walk.
+namespace {
+
+Int oldRankWalk(const Int (&words)[15], Int points)
+{
+	Int i = 0;
+	for (;;) {
+		if (i + 1 >= 15)
+			return -1;					// the next read is past the struct
+		if (points >= words[i + 1])
+			++i;
+		else
+			return i;
+	}
+}
+
+} // namespace
+
+TEST(rank_walk_stops_at_the_table_end_and_the_old_one_did_not)
+{
+	static_assert(sizeof(RankPoints) == 15 * sizeof(Int), "ten thresholds and five multipliers, no padding");
+	static_assert(offsetof(RankPoints, m_winMultiplier) == 10 * sizeof(Int), "the multipliers follow the table");
+	static const Int shippedRanks[MAX_RANKS] = { 0, 5, 10, 20, 50, 100, 200, 500, 1000, 2000 };
+	static const Real shippedMultipliers[5] = { 3.0f, 0.0f, 1.0f, 5.0f, -1.0f };	// win, lost, hour, solo, discon
+	Int words[15];
+	memcpy(words, shippedRanks, sizeof(shippedRanks));
+	memcpy(words + MAX_RANKS, shippedMultipliers, sizeof(shippedMultipliers));
+	CHECK_EQ(words[10], 1077936128);			// 3.0f read as an Int: 0x40400000
+
+	// the old walk, as Windows ran it
+	const Int points[] = { 1999, 2000, 1077936127, 1077936129, 2147483520, 2147483647 };
+	const Int oldStops[] = { 8, 9, 9, 12, -1, -1 };
+	for (Int k = 0; k < (Int)(sizeof(points) / sizeof(points[0])); ++k) {
+		const Int stop = oldRankWalk(words, points[k]);
+		printf("  old walk: %d points -> %s %d\n", points[k], stop < 0 ? "off the struct after index" : "stops at index",
+			stop < 0 ? 14 : stop);
+		CHECK_EQ(stop, oldStops[k]);
+	}
+
+	// a stats record reaches those points on Windows without any overflow: 400,000,000 wins at 3 each, and
+	// 715,000,000, are both inside the int range of Windows' conversion
+	CHECK_EQ(floatToIntAsMsvc(0 + 400000000 * shippedMultipliers[0]), 1200000000);
+	CHECK(floatToIntAsMsvc(0 + 715000000 * shippedMultipliers[0]) > 2144999900);
+	CHECK_EQ(words[13], 1084227584);			// 5.0f: anything above it passes every multiplier
+	CHECK_EQ(oldRankWalk(words, floatToIntAsMsvc(0 + 400000000 * shippedMultipliers[0])), -1);
+	CHECK_EQ(oldRankWalk(words, floatToIntAsMsvc(0 + 715000000 * shippedMultipliers[0])), -1);
+
+	// the bounded walk: every legitimate rank as before, and never past Commander in Chief
+	CHECK_EQ(rankForPoints(shippedRanks, 0), (Int)RANK_PRIVATE);
+	CHECK_EQ(rankForPoints(shippedRanks, 4), (Int)RANK_PRIVATE);
+	CHECK_EQ(rankForPoints(shippedRanks, 5), (Int)RANK_CORPORAL);
+	CHECK_EQ(rankForPoints(shippedRanks, 1999), (Int)RANK_GENERAL);
+	CHECK_EQ(rankForPoints(shippedRanks, 2000), (Int)RANK_COMMANDER_IN_CHIEF);
+	CHECK_EQ(rankForPoints(shippedRanks, 1077936129), (Int)RANK_COMMANDER_IN_CHIEF);
+	CHECK_EQ(rankForPoints(shippedRanks, 2147483647), (Int)RANK_COMMANDER_IN_CHIEF);
+	for (Int p = 0; p <= 2100; ++p) {
+		const Int old = oldRankWalk(words, p);
+		CHECK_EQ(rankForPoints(shippedRanks, p), old);			// identical wherever the old walk was sane
+	}
+}
+
+// The dynamic LOD level follows this machine's frame rate, so nothing the simulation reads may come from
+// it: SlowDeathScale (how long a death takes) and DebrisSkipMask (whether a debris object is created) are
+// parsed from GameLOD.ini and deliberately not applied (GameLOD.cpp, applyDynamicLODLevel).  A peer on a
+// slower machine would otherwise run different deaths and split a network game.
+TEST(dynamic_lod_never_reaches_what_the_simulation_reads)
+{
+	GameLODManager lod;
+	for (Int level = 0; level < DYNAMIC_GAME_LOD_COUNT; ++level) {
+		lod.m_dynamicGameLODInfo[level].m_slowDeathScale = 0.5f;		// as a GameLOD.ini line would set them
+		lod.m_dynamicGameLODInfo[level].m_dynamicDebrisSkipMask = 0xFF;
+	}
+	// visit every level, each from a different one, so every application actually runs
+	const DynamicGameLODLevel order[] = { DYNAMIC_GAME_LOD_LOW, DYNAMIC_GAME_LOD_MEDIUM, DYNAMIC_GAME_LOD_VERY_HIGH,
+		DYNAMIC_GAME_LOD_HIGH };
+	for (Int i = 0; i < (Int)(sizeof(order) / sizeof(order[0])); ++i) {
+		CHECK(lod.setDynamicLODLevel(order[i]));
+		CHECK_EQ(lod.getSlowDeathScale(), 1.0f);
+		Int skipped = 0;
+		for (Int n = 0; n < 256; ++n)
+			skipped += lod.isDebrisSkipped() ? 1 : 0;
+		CHECK_EQ(skipped, 0);
+	}
+}
+
+/* -noDynamicLOD is its own flag.  GameLODManager::init applies the static preset after the command line is
+   parsed, and the preset sets m_enableDynamicLOD, so the switch, when it only cleared that flag, was undone
+   before the first frame (a -noDynamicLOD run on a slow machine still dropped to Medium).  The preset still
+   decides the player's setting; the switch decides this run. */
+TEST(no_dynamic_lod_switch_outlives_the_static_preset)
+{
+	GlobalData *saved = TheWritableGlobalData;
+	GlobalData *scratch = NEW GlobalData;
+	TheWritableGlobalData = scratch;
+	CHECK( TheGlobalData->m_enableStaticLOD );
+
+	for (Int withSwitch = 0; withSwitch < 2; ++withSwitch) {
+		scratch->m_noDynamicLODOverride = withSwitch ? TRUE : FALSE;
+		GameLODManager lod;
+		lod.m_staticGameLODInfo[STATIC_GAME_LOD_HIGH].m_enableDynamicLOD = TRUE;		// as the shipped High preset says
+		CHECK( lod.setStaticLODLevel( STATIC_GAME_LOD_HIGH ) );
+		CHECK( TheGlobalData->m_enableDynamicLOD );								// the preference: the preset's
+		CHECK_EQ( (Int)TheGlobalData->isDynamicLODEnabled(), withSwitch ? 0 : 1 );	// this run: the switch's
+	}
+
+	delete scratch;					// while it is the current one: ~GlobalData reads TheWritableGlobalData
+	TheWritableGlobalData = saved;
+}
+
+/* The particle ceiling in force is -particlecap's when it is given, and the slider's otherwise. */
+TEST(particle_cap_in_force_is_the_switch_else_the_slider)
+{
+	GlobalData *saved = TheWritableGlobalData;
+	GlobalData *scratch = NEW GlobalData;
+	TheWritableGlobalData = scratch;
+	scratch->m_maxParticleCount = 3000;
+	scratch->m_particleCapOverride = 0;
+	CHECK_EQ( scratch->getEffectiveParticleCap(), 3000 );
+	scratch->m_particleCapOverride = 20000;
+	CHECK_EQ( scratch->getEffectiveParticleCap(), 20000 );
+	delete scratch;
+	TheWritableGlobalData = saved;
+}
+
+// A veterancy level's or death type's flag bit is bit (value - 1) with the count taken modulo 32, which is
+// what EA's `1UL << (dt - 1)` gave on Windows, where unsigned long is 32 bits and shl reads five bits of the
+// count.  REGULAR and NORMAL are 0: bit 31, inside ALL.  With a 64-bit unsigned long it was bit 63, outside
+// the flags, and no die module with default flags ran for a regular unit or a normal death.
+TEST(death_and_veterancy_flags_put_value_zero_at_bit_31_as_windows_does)
+{
+	CHECK_EQ(deathTypeFlagBit(DEATH_NORMAL), 0x80000000u);
+	CHECK_EQ(veterancyLevelFlagBit(LEVEL_REGULAR), 0x80000000u);
+	for (Int dt = 1; dt < 32; ++dt) {
+		CHECK_EQ(deathTypeFlagBit((DeathType)dt), 1u << (dt - 1));
+		CHECK_EQ(veterancyLevelFlagBit((VeterancyLevel)dt), 1u << (dt - 1));
+	}
+	CHECK(getDeathTypeFlag(DEATH_TYPE_FLAGS_ALL, DEATH_NORMAL));
+	CHECK(getVeterancyLevelFlag(VETERANCY_LEVEL_FLAGS_ALL, LEVEL_REGULAR));
+	CHECK(!getDeathTypeFlag(DEATH_TYPE_FLAGS_NONE, DEATH_NORMAL));
+	CHECK_EQ(setDeathTypeFlag(DEATH_TYPE_FLAGS_NONE, DEATH_NORMAL), 0x80000000u);		// "+NORMAL"
+	CHECK_EQ(clearDeathTypeFlag(DEATH_TYPE_FLAGS_ALL, DEATH_NORMAL), 0x7fffffffu);	// "-NORMAL"
+	CHECK_EQ(setVeterancyLevelFlag(VETERANCY_LEVEL_FLAGS_NONE, LEVEL_REGULAR), 0x80000000u);
+	CHECK_EQ(clearVeterancyLevelFlag(VETERANCY_LEVEL_FLAGS_ALL, LEVEL_ELITE), 0xfffffffdu);
+	// every death type and level has a bit of its own
+	UnsignedInt seen = 0;
+	for (Int dt = 0; dt < DEATH_NUM_TYPES; ++dt) {
+		CHECK((seen & deathTypeFlagBit((DeathType)dt)) == 0);
+		seen |= deathTypeFlagBit((DeathType)dt);
+	}
+	seen = 0;
+	for (Int level = LEVEL_FIRST; level <= LEVEL_LAST; ++level) {
+		CHECK((seen & veterancyLevelFlagBit((VeterancyLevel)level)) == 0);
+		seen |= veterancyLevelFlagBit((VeterancyLevel)level);
+	}
+}
+
+// strtoul( text, NULL, 10 ) as Windows' 32-bit unsigned long answers it: the starting cash in a game's
+// options string (SC=) and the lobby's version numbers go through it.  Past 0xFFFFFFFF it saturates;
+// a 64-bit unsigned long would keep the low bits instead ("4294967296" would be 0).
+TEST(unsigned_text_parses_as_windows_32_bit_strtoul)
+{
+	CHECK_EQ(strtoulAsWindows("10000"), 10000u);
+	CHECK_EQ(strtoulAsWindows("  42abc"), 42u);
+	CHECK_EQ(strtoulAsWindows("+7"), 7u);
+	CHECK_EQ(strtoulAsWindows("4294967295"), 0xFFFFFFFFu);
+	CHECK_EQ(strtoulAsWindows("4294967296"), 0xFFFFFFFFu);		// the low bits would be 0
+	CHECK_EQ(strtoulAsWindows("99999999999999999999999"), 0xFFFFFFFFu);
+	CHECK_EQ(strtoulAsWindows("-1"), 0xFFFFFFFFu);
+	CHECK_EQ(strtoulAsWindows("-5"), 0xFFFFFFFBu);
+	CHECK_EQ(strtoulAsWindows("-4294967296"), 0xFFFFFFFFu);
+	CHECK_EQ(strtoulAsWindows(""), 0u);
+	CHECK_EQ(strtoulAsWindows("x1"), 0u);
+	CHECK_EQ(strtoulAsWindows("-"), 0u);
+}
+
 #include "test_minimap_input.inc"
 #include "test_selection_priority.inc"
+#include "test_widechar_width.inc"
 #include "test_supply_center_save.inc"
 #include "test_cinema.inc"
+#include "test_game_results.inc"

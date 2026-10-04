@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,7 +30,7 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
 #include "GameClient/GameText.h"
-#include "Common/Version.h"
+#include "Common/version.h"
 
 Version *TheVersion = NULL;	///< The Version singleton
 
@@ -98,11 +99,11 @@ UnicodeString Version::getUnicodeVersion( void )
 #endif // defined _DEBUG || defined _INTERNAL
 
 #ifdef _DEBUG
-	version.concat(UnicodeString(L" Debug"));
+	version.concat(UnicodeString(u" Debug"));
 #endif
 
 #ifdef _INTERNAL
-	version.concat(UnicodeString(L" Internal"));
+	version.concat(UnicodeString(u" Internal"));
 #endif
 
 	return version;
@@ -119,11 +120,11 @@ UnicodeString Version::getFullUnicodeVersion( void )
 			m_buildUser.getCharAt(0), m_buildUser.getCharAt(1));
 
 #ifdef _DEBUG
-	version.concat(UnicodeString(L" Debug"));
+	version.concat(UnicodeString(u" Debug"));
 #endif
 
 #ifdef _INTERNAL
-	version.concat(UnicodeString(L" Internal"));
+	version.concat(UnicodeString(u" Internal"));
 #endif
 
 	return version;

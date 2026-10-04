@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /* $Header: /G/wwlib/tagblock.cpp 5     11/30/99 3:46p Scott_b $ */
 /*********************************************************************************************** 
@@ -471,7 +472,7 @@ TagBlockIndex *TagBlockFile::Find_Block(const char *tagname)
 			// Is it a match?
          assert(name != NULL);
          assert(tagname != NULL);
-			if (!strcmpi(name, tagname)) {
+			if (!strcasecmp(name, tagname)) {
 				return(cur);
 			}
 		}

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -28,6 +30,7 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include <stdlib.h>
+#include "Lib/Clock.h"
 
 #include "Common/GlobalData.h"
 #include "Common/Player.h"
@@ -59,10 +62,10 @@
 #include "W3DDevice/GameClient/W3DDisplay.h"
 #include "W3DDevice/GameClient/W3DScene.h"
 #include "W3DDevice/Common/W3DConvert.h"
-#include "WW3D2/WW3D.h"
-#include "WW3D2/HAnim.h"
-#include "WW3D2/Texture.h"
-#include "WW3D2/DX8Wrapper.h"
+#include "WW3D2/ww3d.h"
+#include "WW3D2/hanim.h"
+#include "WW3D2/texture.h"
+#include "WW3D2/dx8wrapper.h"
 #include "WW3D2/dx8vertexbuffer.h"
 #include "WW3D2/dx8indexbuffer.h"
 #include "WW3D2/vertmaterial.h"
@@ -79,9 +82,9 @@
 
 #ifdef _DEBUG
 #include "W3DDevice/GameClient/HeightMap.h"
-#include "WW3D2/DX8IndexBuffer.h"
-#include "WW3D2/DX8VertexBuffer.h"
-#include "WW3D2/VertMaterial.h"
+#include "WW3D2/dx8indexbuffer.h"
+#include "WW3D2/dx8vertexbuffer.h"
+#include "WW3D2/vertmaterial.h"
 class DebugHintObject : public RenderObjClass
 {	
 
@@ -346,7 +349,7 @@ static void loadText( char *filename, GameWindow *listboxText )
 		line.translate(buffer);
 		line.trim();
 		if (line.isEmpty())
-			line = UnicodeString(L" ");
+			line = UnicodeString(u" ");
 		GadgetListBoxAddEntryText(listboxText, line, color, -1, -1);
 	}  // end while
 
@@ -404,6 +407,8 @@ void W3DInGameUI::reset( void )
 
 }  // end reset
 
+static void drawGroundRing( const Coord3D& center, Real radius, UnsignedInt color, Real width );
+
 //-------------------------------------------------------------------------------------------------
 /** Draw member for the W3D implemenation of the game user interface */
 //-------------------------------------------------------------------------------------------------
@@ -437,6 +442,21 @@ void W3DInGameUI::draw( void )
 	// the attack circle, while the left button is still sweeping it out
 	if( isAttackCircling() )
 		drawAttackCircle();
+
+	// which of the local player's units are holding a guard
+	drawGuardMarkers();
+
+	// the circle an armed guard will hold, under the cursor, at the size the wheel left it.  A drag
+	// is drawing a guard line instead, where every unit holds its own station.  A search and
+	// destroy's circle is the attack move colour, as its hint is
+	if( isAreaPicking() && !m_isFormationDragging )
+	{
+		Coord3D center;
+		TheTacticalView->screenToTerrain( &TheMouse->getMouseStatus()->pos, &center );
+		const UnsignedInt color = getAreaOrderArmed() == AREA_ORDER_HUNT ? 0xCCFF66CC
+														: 0xCC55CCFF;		// the guard blue the hints use
+		drawGroundRing( center, getAreaPickRadius(), color, 2.0f );
+	}
 
 	// for each view draw hints
 	/// @todo should the UI be iterating through views like this?
@@ -479,7 +499,7 @@ void W3DInGameUI::draw( void )
 	extern Real TheUIPostDrawMS;
 	extern Real TheWindowRepaintMS;
 	Int64 tPostStart, tPostEnd, tWinEnd, freq;
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tPostStart );
+	tPostStart = Clock_Ticks();
 #endif
 
 	// While the map loads the display calls this every pass to paint the load screen's windows, and
@@ -490,14 +510,14 @@ void W3DInGameUI::draw( void )
 		postDraw();
 
 #ifdef DEBUG_LOGGING
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tPostEnd );
+	tPostEnd = Clock_Ticks();
 #endif
 
 	TheWindowManager->winRepaint();
 
 #ifdef DEBUG_LOGGING
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tWinEnd );
-	QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	tWinEnd = Clock_Ticks();
+	freq = Clock_Ticks_Per_Second();
 	if( freq > 0 )
 	{
 		TheUIPostDrawMS = (Real)((double)(tPostEnd - tPostStart) * 1000.0 / (double)freq);
@@ -911,19 +931,12 @@ void W3DInGameUI::drawFormationLine( void )
 }  // end drawFormationLine
 
 //-------------------------------------------------------------------------------------------------
-/** draw the circle a left drag is sweeping targets out of.  It is a circle on the ground, not on
-	* the screen, so it follows the terrain the way the selection it is about to make does */
+/** A circle on the ground, not on the screen, so it follows the terrain the way the units it is
+	* about do */
 //-------------------------------------------------------------------------------------------------
-void W3DInGameUI::drawAttackCircle( void )
+static void drawGroundRing( const Coord3D& center, Real radius, UnsignedInt color, Real width )
 {
-	Coord3D center;
-	Real radius;
-	if( !getAttackCircleGround( center, radius ) )
-		return;
-
 	const Int segments = 48;
-	const UnsignedInt color = 0xCCFF5555;  //0xAARRGGBB, the attack red the hints use
-	const Real width = 2.0f;
 
 	ICoord2D previous;
 	Bool havePrevious = FALSE;
@@ -948,6 +961,19 @@ void W3DInGameUI::drawAttackCircle( void )
 		previous = screen;
 		havePrevious = TRUE;
 	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** draw the circle a left drag is sweeping targets out of */
+//-------------------------------------------------------------------------------------------------
+void W3DInGameUI::drawAttackCircle( void )
+{
+	Coord3D center;
+	Real radius;
+	if( !getAttackCircleGround( center, radius ) )
+		return;
+
+	drawGroundRing( center, radius, 0xCCFF5555, 2.0f );		// the attack red the hints use
 
 	// and the radius itself, so the drag reads as a radius rather than a rubber band
 	ICoord2D middle;
@@ -960,9 +986,10 @@ void W3DInGameUI::drawAttackCircle( void )
 
 //-------------------------------------------------------------------------------------------------
 /** The thread is coloured by what it is for: anything that ends in a shot is red, an attack move
-	* is pink, a post to be held is blue, everything else is green.  The marker on the end of it is
-	* the plain pointer in the same colour - one shape for every order, so the colour is the whole
-	* message.  A dot and a ring were tried in its place and players wanted the pointer back. */
+	* is pink, a post to be held is blue, a building to be taken is gold, everything else is green.
+	* The marker on the end of it is the plain pointer in the same colour - one shape for every
+	* order, so the colour is the whole message.  A dot and a ring were tried in its place and
+	* players wanted the pointer back. */
 //-------------------------------------------------------------------------------------------------
 static UnsignedInt orderHintLineColor( InGameUI::OrderHintKind kind )
 {
@@ -976,6 +1003,8 @@ static UnsignedInt orderHintLineColor( InGameUI::OrderHintKind kind )
 			return 0x66FF5555;
 		case InGameUI::ORDER_HINT_GUARD:
 			return 0x6655CCFF;
+		case InGameUI::ORDER_HINT_CAPTURE:
+			return 0x66FFCC33;
 		default:
 			return 0x6655FF55;
 	}
@@ -1002,6 +1031,7 @@ static OrderCursorArt s_orderCursorArt[ Mouse::NUM_MOUSE_CURSORS ];
 //-------------------------------------------------------------------------------------------------
 static const Image *loadOrderCursorImage( Mouse::MouseCursor cursor, ICoord2D *hotSpot )
 {
+#if defined(_WIN32)	// the .ANI cursor through Win32's cursor API; off Windows the cursor is C3's
 	const AsciiString& name = TheMouse->m_cursorInfo[ cursor ].textureName;
 	if( name.isEmpty() )
 		return NULL;
@@ -1097,6 +1127,11 @@ static const Image *loadOrderCursorImage( Mouse::MouseCursor cursor, ICoord2D *h
 		DeleteObject( info.hbmMask );
 
 	return result;
+#else
+	(void)cursor;
+	(void)hotSpot;
+	return NULL;
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1118,7 +1153,8 @@ static const Image *orderCursorImage( Mouse::MouseCursor cursor, ICoord2D *hotSp
 
 //-------------------------------------------------------------------------------------------------
 /** The cursor a kind of order is given with, for the kinds whose colour is the plain green and so
-	* says nothing on its own.  Mouse::NONE for the rest. */
+	* says nothing on its own, and for a capture, whose gold is new enough to want saying twice.
+	* Mouse::NONE for the rest. */
 //-------------------------------------------------------------------------------------------------
 static Mouse::MouseCursor orderHintCursor( InGameUI::OrderHintKind kind )
 {
@@ -1173,7 +1209,7 @@ void W3DInGameUI::drawOrderStep( const OrderHint& hint, const ICoord2D& tip, Uns
 			number->setFont( TheWindowManager->winFindFont( AsciiString( "Arial" ),
 																TheGlobalLanguageData->adjustFontSize( ORDER_STEP_POINT_SIZE ), TRUE ) );
 			UnicodeString text;
-			text.format( L"%d", hint.step );
+			text.format( u"%d", hint.step );
 			number->setText( text );
 		}
 
@@ -1223,11 +1259,26 @@ void W3DInGameUI::drawOrderHints( void )
 	const UnsignedInt MARKER_SLIDE_MS = 130;
 	const Real MARKER_SLIDE_PIXELS = 13.0f;
 
-	const UnsignedInt nowMs = timeGetTime();
+	const UnsignedInt nowMs = Clock_Milliseconds();
+
+	// a group on one guard order is one circle, not one per unit stacked into an opaque band
+	std::vector<const OrderHint *> ringsDrawn;
 
 	for( std::vector<OrderHint>::const_iterator it = hints.begin(); it != hints.end(); ++it )
 	{
 		const UnsignedInt lineColor = orderHintLineColor( it->kind );
+
+		if( it->radius > 0.0f )
+		{
+			Bool drawn = FALSE;
+			for( size_t r = 0; r < ringsDrawn.size() && !drawn; ++r )
+				drawn = ringsDrawn[ r ]->radius == it->radius && ringsDrawn[ r ]->to.x == it->to.x && ringsDrawn[ r ]->to.y == it->to.y;
+			if( !drawn )
+			{
+				drawGroundRing( it->to, it->radius, lineColor, width );
+				ringsDrawn.push_back( &(*it) );
+			}
+		}
 
 		const UnsignedInt ageMs = nowMs - it->bornMs;
 		Real arrival = 1.0f;
@@ -1277,7 +1328,8 @@ void W3DInGameUI::drawOrderHints( void )
 																			| ( (UnsignedInt)REAL_TO_INT( 255.0f * eased ) << 24 );
 			TheDisplay->drawImage( image, x, y, x + w, y + h, markerColor );
 
-			if( it->step > 0 || it->icon )
+			// a capture carries its cursor even alone: a lone one is the case that looked like a walk
+			if( it->step > 0 || it->icon || it->kind == ORDER_HINT_CAPTURE )
 			{
 				ICoord2D tip;
 				tip.x = to.x + slide;
@@ -1336,6 +1388,68 @@ void W3DInGameUI::drawBuildPlanNumbers( void )
 	}
 
 }  // end drawBuildPlanNumbers
+
+//-------------------------------------------------------------------------------------------------
+/** A heater shield filled one screen row at a time: straight sides for the upper part, then a
+	* curve closing to the point at the bottom. */
+//-------------------------------------------------------------------------------------------------
+static void drawShieldShape( Int x, Int y, Int width, Int height, UnsignedInt color )
+{
+	const Real SHOULDER = 0.45f;		// share of the height above the taper
+	for( Int row = 0; row < height; ++row )
+	{
+		const Real t = ( row + 0.5f ) / height;
+		Real half = width * 0.5f;
+		if( t > SHOULDER )
+			half *= sqrtf( ( 1.0f - t ) / ( 1.0f - SHOULDER ) );
+		const Int span = REAL_TO_INT( half * 2.0f + 0.5f );
+		if( span > 0 )
+			TheDisplay->drawFillRect( x + ( width - span ) / 2, y + row, span, 1, color );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A guarding unit looks like an idle one until something walks into its circle, so each of the
+	* local player's guards wears a small shield over its head, selected or not.  Two groups on
+	* overlapping posts can then be told apart from the ones simply standing about. */
+//-------------------------------------------------------------------------------------------------
+void W3DInGameUI::drawGuardMarkers( void )
+{
+	const Real MARKER_HEIGHT = 14.0f;
+	const Real MARKER_LIFT = 6.0f;		// clear of the health bar's line over the model's top
+	const UnsignedInt EDGE_COLOR = 0xDD101418;
+	const UnsignedInt FACE_COLOR = 0xDDC8D2DC;		// the command bar's steel
+
+	const Real scale = orderStepScale();
+	const Int height = max( REAL_TO_INT( MARKER_HEIGHT * scale ), 6 );
+	const Int width = height * 4 / 5;
+	const Int lift = REAL_TO_INT( MARKER_LIFT * scale );
+
+	// ponytail: walks every object each frame, like drawBuildPlanNumbers; share one walk if it shows
+	for( Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
+	{
+		if( !obj->isLocallyControlled() || obj->isEffectivelyDead() || obj->getContainedBy() )
+			continue;
+		const AIUpdateInterface *ai = obj->getAI();
+		if( ai == NULL || ai->getCurrentStateID() != AI_GUARD )
+			continue;
+		const Drawable *draw = obj->getDrawable();
+		if( draw == NULL || draw->isDrawableEffectivelyHidden() )
+			continue;
+
+		Coord3D top = *obj->getPosition();
+		top.z += obj->getGeometryInfo().getMaxHeightAbovePosition();
+		ICoord2D spot;
+		if( !TheTacticalView->worldToScreen( &top, &spot ) )
+			continue;
+
+		const Int x = spot.x - width / 2;
+		const Int y = spot.y - lift - height;
+		drawShieldShape( x, y, width, height, EDGE_COLOR );
+		drawShieldShape( x + 1, y + 1, width - 2, height - 3, FACE_COLOR );
+	}
+
+}  // end drawGuardMarkers
 
 //-------------------------------------------------------------------------------------------------
 /** A patch of the ally's own colour on the ground under their cursor.  It is a fan of rings whose

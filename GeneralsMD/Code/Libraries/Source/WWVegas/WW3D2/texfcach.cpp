@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /* $Header: /Commando/Code/ww3d2/texfcach.cpp 5     8/24/01 3:23p Jani_p $ */
 /*********************************************************************************************** 
@@ -67,12 +68,15 @@
 #include <srColorSurface.hpp>
 #include <srTextureIFace.hpp>
 						  
+#if defined(_WIN32)
 #include <direct.h>
+#endif
 #include <stdlib.h>
 #include <stdio.h>
 #ifdef _UNIX
 #include "osdep.h"
 #endif
+#include "Platform/StrdupAsWindows.h"
 
 #define FILE_HEADER_NAME	"Texture File Cache Header"
 
@@ -124,7 +128,7 @@ int Compressor::Compress( const unsigned char * in, unsigned int in_len,
 												 unsigned char * out, unsigned int * out_len )
 {
 	if (!in || !out || !out_len)
-		return FALSE;
+		return false;
 
 	if (in_len <= 0)
 		return false;
@@ -133,14 +137,14 @@ int Compressor::Compress( const unsigned char * in, unsigned int in_len,
 
 	*out_len = in_len;
 
-	return TRUE;
+	return true;
 }
 
 int Compressor::Decompress( const unsigned char * in, unsigned int in_len,
 													 unsigned char * out, unsigned int * out_len )
 {
 	if (!in || !out || !out_len)
-		return FALSE;
+		return false;
 
 	if (in_len <= 0)
 		return false;
@@ -149,7 +153,7 @@ int Compressor::Decompress( const unsigned char * in, unsigned int in_len,
 
 	*out_len = in_len;
 
-	return TRUE;
+	return true;
 }
 
 
@@ -376,7 +380,7 @@ bool TextureFileCache::Save_Texture(const char *texturename, srTextureIFace::Mul
 
 
 		// Lots-o-test to make sure that the compression did what we want.
-		assert(retcode == TRUE);
+		assert(retcode == true);
 		Verify_Compression_Buffer();
 
 		int readin = TextureHandle->Write(Get_Compression_Buffer(compsize), compsize);
@@ -646,7 +650,7 @@ void TextureFileCache::Read_Texture(int offsetidx, srColorSurface *surface)
 														(unsigned *)			&decompsize);
 
 	// Lots-o-test to make sure that the compression did what we want.
-	assert(retcode == TRUE);
+	assert(retcode == true);
 	assert(decompsize == Texture_Size(offsetidx));
 	Verify_Compression_Buffer();
 }	
@@ -697,14 +701,14 @@ bool TextureFileCache::Open_Texture_Handle(const char *fname)
 {
 	if (TextureHandle) {
 		assert(CurrentTexture);
-		if (!strcmpi(fname, CurrentTexture)) {
+		if (!strcasecmp(fname, CurrentTexture)) {
 			return(true);
 		}
 		// Wrong texture, close it down so we can open another.
 		Close_Texture_Handle();
 	}
 	if (!CurrentTexture) {
-		CurrentTexture = strdup(fname);
+		CurrentTexture = strdupAsWindows(fname);
 	}			  
 			
 	#if 0					 

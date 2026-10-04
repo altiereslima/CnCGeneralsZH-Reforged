@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -57,7 +58,8 @@
 
 class UnicodeString;
 
-#include "windows.h"
+#include <atomic>
+#include <new>
 
 // -----------------------------------------------------
 /**
@@ -94,7 +96,27 @@ private:
 #if defined(_DEBUG) || defined(_INTERNAL)
 		const char* m_debugptr;	// just makes it easier to read in the debugger
 #endif
-		unsigned short	m_refCount;						// reference count
+		/* B13: std::atomic, and deliberately still 16 bits - the struct's size and every offset in
+			 it are unchanged, which matters because these are pool-allocated and the block sizes are
+			 computed from sizeof(AsciiStringData).  Verified identical on arm64 and x86-64, in both
+			 the debug layout (with m_debugptr) and the release one.
+
+			 What it replaces was InterlockedIncrement((long *)&m_refCount): a THIRTY-TWO bit atomic
+			 read-modify-write on a SIXTEEN bit field.  m_numCharsAllocated is at offset 2 and long is
+			 4 bytes on both Win32 and Win64, so every refcount operation was also reading and writing
+			 back its neighbour.  The old comment - "yes, I know it's not a DWord but we're
+			 incrementing so we're safe" - is the author noting that a count which never wraps never
+			 carries out of its low half, and that part is true.
+
+			 Being accurate about how bad this was, because the fix is free either way and overclaiming
+			 it would be worse than not finding it: it is type-punning UB, but it was not corrupting
+			 anything reachable.  The 32-bit access was correctly aligned (MEM_BOUND_ALIGNMENT is 4),
+			 and m_numCharsAllocated is written in exactly one place - AsciiString.cpp:148, on a buffer
+			 that has just been allocated and is not shared yet - so no thread can be writing it while
+			 another increments the count.  A 16-bit atomic touches two bytes, the pun goes away, and
+			 nothing has to depend on that argument staying true.  std::atomic<unsigned short> is
+			 lock-free everywhere this builds (ATOMIC_SHORT_LOCK_FREE == 2). */
+		std::atomic<unsigned short>	m_refCount;		// reference count
 		unsigned short	m_numCharsAllocated;  // length of data allocated
 		// char m_stringdata[];
 
@@ -267,11 +289,11 @@ public:
 	*/
 	int compare(const char* s) const;
 	/**
-		Conceptually identical to _stricmp().
+		Conceptually identical to strcasecmp().
 	*/
 	int compareNoCase(const AsciiString& stringSrc) const;
 	/**
-		Conceptually identical to _stricmp().
+		Conceptually identical to strcasecmp().
 	*/
 	int compareNoCase(const char* s) const;
 
@@ -374,25 +396,33 @@ inline AsciiString::AsciiString(const char* s) : m_data(0)
 // -----------------------------------------------------
 inline AsciiString::AsciiString(const AsciiString& stringSrc) : m_data(stringSrc.m_data)
 {
-  // don't need this if we're using InterlockedIncrement
-  // FastCriticalSectionClass::LockClass lock(TheAsciiStringCriticalSection);
 	if (m_data)
-		// ++m_data->m_refCount;
-    // yes, I know it's not a DWord but we're incrementing so we're safe
-    InterlockedIncrement((long *)&m_data->m_refCount);
+		/* relaxed: the caller already holds a reference to stringSrc, so the buffer cannot be
+			 destroyed underneath this and no memory is being published by the increment.  This is
+			 the same ordering every standard library uses for a shared_ptr's use count.  The
+			 decrement is the one that needs ordering - see releaseBuffer. */
+		m_data->m_refCount.fetch_add(1, std::memory_order_relaxed);
 	validate();
 }
 
 // -----------------------------------------------------
 inline void AsciiString::releaseBuffer()
 {
-  // FastCriticalSectionClass::LockClass lock(TheAsciiStringCriticalSection);
-
 	validate();
 	if (m_data)
 	{
-    InterlockedDecrement((long *)&m_data->m_refCount);
-		if (!m_data->m_refCount)
+		/* acq_rel, and the result is used rather than re-read.
+		
+			 The release half publishes this thread's writes to the buffer before anyone can free it;
+			 the acquire half means the thread that observes the last reference going away sees every
+			 other thread's writes before it runs freeBytes().  Without it the buffer can be handed
+			 back to the allocator while another core still has stores to it in flight.
+		
+			 Using fetch_sub's return value is not a style preference either.  The old code decremented
+			 and then read m_refCount back as a separate, unsynchronised load, so two threads dropping
+			 the last two references could both observe zero and both call freeBytes() - a double free.
+			 fetch_sub returns the value from before the subtraction, so exactly one caller sees 1. */
+		if (m_data->m_refCount.fetch_sub(1, std::memory_order_acq_rel) == 1)
 			freeBytes();
 		m_data = 0;
 	}
@@ -447,23 +477,22 @@ inline const char* AsciiString::str() const
 // -----------------------------------------------------
 inline void AsciiString::set(const AsciiString& stringSrc)
 {
-  //FastCriticalSectionClass::LockClass lock(TheAsciiStringCriticalSection);
-
 	validate();
 	if (&stringSrc != this)
 	{
-    // do not call releaseBuffer(); here, it locks the CS twice
-    // from the same thread which is illegal using fast CS's
+		// This still does not call releaseBuffer().  The reason in the original comment was that
+		// the FastCriticalSectionClass lock above it was not recursive; that lock is gone and the
+		// reason is now simply that releaseBuffer() would also clear m_data, which is about to be
+		// reassigned.  Same orderings as releaseBuffer and the copy constructor; see those.
 		if (m_data)
-    {
-      InterlockedDecrement((long *)&m_data->m_refCount);
-		  if (!m_data->m_refCount)
-			  freeBytes();
-    }
+		{
+			if (m_data->m_refCount.fetch_sub(1, std::memory_order_acq_rel) == 1)
+				freeBytes();
+		}
 
 		m_data = stringSrc.m_data;
 		if (m_data)
-      InterlockedIncrement((long *)&m_data->m_refCount);
+			m_data->m_refCount.fetch_add(1, std::memory_order_relaxed);
 	}
 	validate();
 }
@@ -560,14 +589,14 @@ inline int AsciiString::compare(const char* s) const
 inline int AsciiString::compareNoCase(const AsciiString& stringSrc) const
 {
 	validate();
-	return _stricmp(this->str(), stringSrc.str());
+	return strcasecmp(this->str(), stringSrc.str());
 }
 
 // -----------------------------------------------------
 inline int AsciiString::compareNoCase(const char* s) const
 {
 	validate();
-	return _stricmp(this->str(), s);
+	return strcasecmp(this->str(), s);
 }
 
 // -----------------------------------------------------

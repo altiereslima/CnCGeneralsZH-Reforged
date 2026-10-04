@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -251,7 +253,7 @@ Bool ControlBar::describePortraitBarWindow( GameWindow *window, UnicodeString &n
 		if( window != m_multiSelectTiles[ tile ] )
 			continue;
 
-		name.format( L"%ls (%d)", m_multiSelectGroupTemplate[ tile ]->getDisplayName().str(), m_multiSelectGroupSize[ tile ] );
+		name.format( u"%ls (%d)", m_multiSelectGroupTemplate[ tile ]->getDisplayName().str(), m_multiSelectGroupSize[ tile ] );
 		description.clear();
 		return TRUE;
 	}

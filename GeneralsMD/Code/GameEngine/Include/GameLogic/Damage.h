@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -47,7 +49,7 @@ class ThingTemplate;
 //-------------------------------------------------------------------------------------------------
 /** Damage types, keep this in sync with DamageTypeFlags::s_bitNameList[] */
 //-------------------------------------------------------------------------------------------------
-enum DamageType
+enum DamageType : int
 {	
 	DAMAGE_EXPLOSION							= 0,			
 	DAMAGE_CRUSH									= 1,					
@@ -236,19 +238,26 @@ typedef UnsignedInt DeathTypeFlags;
 const DeathTypeFlags DEATH_TYPE_FLAGS_ALL = 0xffffffff;
 const DeathTypeFlags DEATH_TYPE_FLAGS_NONE = 0x00000000;
 
+/* A death type's bit in DeathTypeFlags: bit (type - 1), the shift count taken modulo 32, so DEATH_NORMAL
+	 (0) is bit 31 as it is on Windows.  See veterancyLevelFlagBit (Common/GameCommon.h) for why. */
+inline DeathTypeFlags deathTypeFlagBit(DeathType dt)
+{
+	return (DeathTypeFlags)1 << (((Int)dt - 1) & 31);
+}
+
 inline Bool getDeathTypeFlag(DeathTypeFlags flags, DeathType dt)
 {
-	return (flags & (1UL << (dt - 1))) != 0;
+	return (flags & deathTypeFlagBit(dt)) != 0;
 }
 
 inline DeathTypeFlags setDeathTypeFlag(DeathTypeFlags flags, DeathType dt)
 {
-	return (flags | (1UL << (dt - 1)));
+	return (flags | deathTypeFlagBit(dt));
 }
 
 inline DeathTypeFlags clearDeathTypeFlag(DeathTypeFlags flags, DeathType dt)
 {
-	return (flags & ~(1UL << (dt - 1)));
+	return (flags & ~deathTypeFlagBit(dt));
 }
 
 //-------------------------------------------------------------------------------------------------

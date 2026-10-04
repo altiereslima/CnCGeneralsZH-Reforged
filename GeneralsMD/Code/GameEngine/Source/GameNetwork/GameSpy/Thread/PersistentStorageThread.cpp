@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -41,6 +43,7 @@
 
 #include "Common/StackDump.h"
 #include "Common/SubsystemInterface.h"
+#include "Platform/StrdupAsWindows.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -627,7 +630,7 @@ Bool PSThreadClass::tryLogin( Int id, std::string nick, std::string password, st
 	client will create the validation token using GenerateAuth, and send it
 	back to the server for use in PreAuthenticatePlayerPM
 	***********/
-	char *munkeeHack = strdup(password.c_str()); // GenerateAuth takes a char*, not a const char* :P
+	char *munkeeHack = strdupAsWindows(password.c_str()); // GenerateAuth takes a char*, not a const char* :P
 	GenerateAuth(GetChallenge(NULL), munkeeHack, validate);
 	free (munkeeHack);
 
@@ -815,7 +818,7 @@ static void getPreorderCallback(int localid, int profileid, persisttype_t type, 
 void PSThreadClass::Thread_Function()
 {
 	try {
-	_set_se_translator( DumpExceptionInfo ); // Hook that allows stack trace.
+	InstallThreadExceptionTranslator(); // Hook that allows stack trace.
 	/*********
 	First step, set our game authentication info
 	We could do:
@@ -995,7 +998,7 @@ void PSThreadClass::Thread_Function()
 						if (TheGameSpyPSMessageQueue)
 							TheGameSpyPSMessageQueue->trackPlayerStats(req.player);
 
-						char *munkeeHack = strdup(GameSpyPSMessageQueueInterface::formatPlayerKVPairs(req.player).c_str()); // GS takes a char* for some reason
+						char *munkeeHack = strdupAsWindows(GameSpyPSMessageQueueInterface::formatPlayerKVPairs(req.player).c_str()); // GS takes a char* for some reason
 						incrOpCount();
 						DEBUG_LOG(("Setting values %s\n", munkeeHack));
 						SetPersistDataValues(0, req.player.id, pd_public_rw, 0, munkeeHack, setPersistentDataCallback, this);
@@ -1021,7 +1024,7 @@ void PSThreadClass::Thread_Function()
 						cdAuthInfo.id = 0;
 						char cdkeyHash[33] = "";
 						char validationToken[33] = "";
-						char *munkeeHack = strdup(req.cdkey.c_str()); // GenerateAuth takes a char*, not a const char* :P
+						char *munkeeHack = strdupAsWindows(req.cdkey.c_str()); // GenerateAuth takes a char*, not a const char* :P
 
 						GenerateAuth(GetChallenge(NULL), munkeeHack, validationToken); // validation token
 						GenerateAuth("", munkeeHack, cdkeyHash); // cdkey hash
@@ -1365,14 +1368,14 @@ std::string GameSpyPSMessageQueueInterface::formatPlayerKVPairs( PSPlayerStats s
 
 	if (stats.options.length())
 	{
-		_snprintf(kvbuf, 256, "\\options\\%s", stats.options.c_str());
+		snprintf(kvbuf, 256, "\\options\\%s", stats.options.c_str());
 		kvbuf[255] = 0;
 		s.append(kvbuf);
 	}
 
 	if (stats.systemSpec.length())
 	{
-		_snprintf(kvbuf, 256, "\\systemSpec\\%s", stats.systemSpec.c_str());
+		snprintf(kvbuf, 256, "\\systemSpec\\%s", stats.systemSpec.c_str());
 		kvbuf[255] = 0;
 		s.append(kvbuf);
 	}
@@ -1469,7 +1472,7 @@ std::string GameSpyPSMessageQueueInterface::formatPlayerKVPairs( PSPlayerStats s
 	}
 	if (stats.lastLadderHost.length())
 	{
-		_snprintf(kvbuf, 256, "\\ladderHost\\%s", stats.lastLadderHost.c_str());
+		snprintf(kvbuf, 256, "\\ladderHost\\%s", stats.lastLadderHost.c_str());
 		kvbuf[255] = 0;
 		s.append(kvbuf);
 	}

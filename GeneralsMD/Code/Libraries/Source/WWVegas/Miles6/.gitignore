@@ -7,9 +7,14 @@
 # cannot re-fetch files we wrote ourselves).  MSS/MSS.h is the one true header
 # (reconstructed API surface) and Mss.h just forwards to it; xaudio2/ is that
 # API implemented over XAudio2 and FFmpeg, which is what the game links.
+# miniaudio/ is the same API over miniaudio, what the game links everywhere else (C4).
 !include/
 !include/Mss.h
 !include/MSS/
 !include/MSS/MSS.h
+# mss_ex_pcm.h: miniaudio's pushed-PCM voice for the movies (V1), declared beside it.
+!include/MSS/mss_ex_pcm.h
 !xaudio2/
 !xaudio2/miles_xaudio2.cpp
+!miniaudio/
+!miniaudio/miles_miniaudio.cpp

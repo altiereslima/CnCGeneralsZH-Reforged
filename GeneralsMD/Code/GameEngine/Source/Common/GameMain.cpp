@@ -43,9 +43,13 @@ void GameMain( int argc, char *argv[] )
 	// run it
 	TheGameEngine->execute();
 
-	// since execute() returned, we are exiting the game
-	delete TheGameEngine;
+	// since execute() returned, we are exiting the game.  The global goes first: teardown can
+	// pump the window procedure (a crash dialog's ShowWindow sends WM_ACTIVATEAPP), and WndProc
+	// would otherwise call into an engine whose subsystems are half gone.  Every reader on the
+	// teardown path checks it for NULL.
+	GameEngine *engine = TheGameEngine;
 	TheGameEngine = NULL;
+	delete engine;
 
 }
 

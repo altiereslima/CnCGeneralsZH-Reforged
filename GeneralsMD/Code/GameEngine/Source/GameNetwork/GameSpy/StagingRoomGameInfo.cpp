@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -73,6 +75,12 @@ GameSpyGameSlot::GameSpyGameSlot()
 	m_pingStr.clear();
 }
 
+/* GetLocalChatConnectionAddress walks the SNMP MIB-II tables (inetmib1.dll and snmpapi.dll) for the
+	 local end of the connection to GameSpy's chat server.  GameSpy is a dead service and only has to
+	 compile and link (the B5 survey: stub it, or getifaddrs if anyone ever cares), so off Windows there
+	 is no answer: localIP is 0 and the result FALSE.  PeerThread, its only live caller, uses localIP
+	 without testing the result, so it is set rather than left as it came. */
+#if defined(_WIN32)
 // Helper Functions ----------------------------------------
 /*
 ** Function definitions for the MIB-II entry points.
@@ -446,6 +454,13 @@ Bool GetLocalChatConnectionAddress(AsciiString serverName, UnsignedShort serverP
 	FreeLibrary(mib_ii_dll);
 	return(found);
 }
+#else
+Bool GetLocalChatConnectionAddress(AsciiString, UnsignedShort, UnsignedInt& localIP)
+{
+	localIP = 0;
+	return FALSE;
+}
+#endif
 
 // GameSpyGameSlot ----------------------------------------
 

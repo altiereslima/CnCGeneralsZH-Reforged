@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
  /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -35,6 +37,10 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "render2dsentence.h"
+#if !defined(_WIN32)
+#include "glyphrasteriser.h"
+#include <math.h>
+#endif
 #include "surfaceclass.h"
 #include "texture.h"
 #include "wwprofile.h"
@@ -268,14 +274,14 @@ Render2DSentenceClass::Set_Location (const Vector2 &loc)
 //
 ////////////////////////////////////////////////////////////////////////////////////
 Vector2
-Render2DSentenceClass::Get_Text_Extents (const WCHAR *text)
+Render2DSentenceClass::Get_Text_Extents (const WideChar *text)
 {
 	Vector2 extent (0, Font->Get_Char_Height());
 
 	while (*text) {
-		WCHAR ch = *text++;
+		WideChar ch = *text++;
 
-		if ( ch != (WCHAR)'\n' ) {
+		if ( ch != (WideChar)'\n' ) {
 			extent.X += Font->Get_Char_Spacing( ch );
 		}
 	}
@@ -290,7 +296,7 @@ Render2DSentenceClass::Get_Text_Extents (const WCHAR *text)
 //
 ////////////////////////////////////////////////////////////////////////////////////
 Vector2
-Render2DSentenceClass::Get_Formatted_Text_Extents (const WCHAR *text)
+Render2DSentenceClass::Get_Formatted_Text_Extents (const WideChar *text)
 {
 	return Build_Sentence_Not_Centered(text, NULL, NULL, true);
 }
@@ -630,7 +636,7 @@ Render2DSentenceClass::Record_Sentence_Chunk (void)
 //
 ////////////////////////////////////////////////////////////////////////////////////
 void
-Render2DSentenceClass::Allocate_New_Surface (const WCHAR *text, bool justCalcExtents)
+Render2DSentenceClass::Allocate_New_Surface (const WideChar *text, bool justCalcExtents)
 {
 	if (!justCalcExtents)
 	{
@@ -728,7 +734,7 @@ Render2DSentenceClass::Allocate_New_Surface (const WCHAR *text, bool justCalcExt
 	return ;
 }
 
-float FindStartingXPos( const WCHAR *text )
+float FindStartingXPos( const WideChar *text )
 {
 
 	return 1;
@@ -738,13 +744,13 @@ float FindStartingXPos( const WCHAR *text )
 //	Build_Sentence_Centered
 //
 ////////////////////////////////////////////////////////////////////////////////////
-void	Render2DSentenceClass::Build_Sentence_Centered (const WCHAR *text, int *hkX, int *hkY)
+void	Render2DSentenceClass::Build_Sentence_Centered (const WideChar *text, int *hkX, int *hkY)
 {
 	float char_height = Font->Get_Char_Height ();
 	int		wordWidth = 0;
 	int notCenteredHotkeyX = 0;
 	int notCenteredHotkeyY = 0;
-	Vector2 extent = Build_Sentence_Not_Centered(text,&notCenteredHotkeyX, &notCenteredHotkeyY, TRUE); //Get_Formatted_Text_Extents(text);
+	Vector2 extent = Build_Sentence_Not_Centered(text,&notCenteredHotkeyX, &notCenteredHotkeyY, true); //Get_Formatted_Text_Extents(text);
 	
 	//
 	//	Start fresh
@@ -765,7 +771,7 @@ void	Render2DSentenceClass::Build_Sentence_Centered (const WCHAR *text, int *hkX
 	//	Loop over all the characters in the string
 	//
 	bool end = false;
-	const WCHAR *word;
+	const WideChar *word;
 	int word_width	= 0;
 	int line_width	= 0;
 	int charCount = 0;
@@ -792,16 +798,16 @@ void	Render2DSentenceClass::Build_Sentence_Centered (const WCHAR *text, int *hkX
 			// read a word
 			//
 			int charWidth = 0;
-			while ((*word != 0) && (*word > L' ') && (*word != L'\n')) {
-				if( ParseHotKey && (*word == L'&') && (*word+1 != 0) && (*word+1 > L' ') && (*word+1 != L'\n'))
+			while ((*word != 0) && (*word > u' ') && (*word != u'\n')) {
+				if( ParseHotKey && (*word == u'&') && (*word+1 != 0) && (*word+1 > u' ') && (*word+1 != u'\n'))
 				{
 					int offset = 0;
 					//Added By Saad
 					if (word_width != 0 )
 					{
-						const WCHAR *word_back = word;
+						const WideChar *word_back = word;
 						*word_back--;
-						if (*word_back == L' ')
+						if (*word_back == u' ')
 						{
 							line_width -= word_width;
 							offset =-1;
@@ -857,7 +863,7 @@ void	Render2DSentenceClass::Build_Sentence_Centered (const WCHAR *text, int *hkX
 			//
 			// We were some a new line character break and process
 			//
-			if(*word != L' ')
+			if(*word != u' ')
 				break;
 			//
 			// add the space to our width
@@ -880,14 +886,14 @@ void	Render2DSentenceClass::Build_Sentence_Centered (const WCHAR *text, int *hkX
 		}
 		
 		for(int i = 0; i <= charCount; i++) {
-			WCHAR ch = *text++;
+			WideChar ch = *text++;
 			//
 			//	Determine how much horizontal space this character requires.  A hotkey '&' is
 			//	dropped and the letter after it drawn like any other: the grid keys are the
 			//	shortcuts now, and the letter used to be left out here for a second renderer to
 			//	paint in yellow, which drew nothing at all for a letter outside ASCII.
 			//
-			if(ParseHotKey && (ch == L'&') && (*text != 0) && (*text > L' ') && (*text != L'\n'))
+			if(ParseHotKey && (ch == u'&') && (*text != 0) && (*text > u' ') && (*text != u'\n'))
 			{
 				ch = *text++;
 			}
@@ -897,7 +903,7 @@ void	Render2DSentenceClass::Build_Sentence_Centered (const WCHAR *text, int *hkX
 			//	that is what has to fit: tested on the spacing alone, the last few columns of a glyph
 			//	near the edge ran on into the next texel row and wiped the first letter of the line.
 			bool exceeded_texture_width	= ((TextureOffset.I + Font->Get_Char_Width (ch)) >= CurrTextureSize);
-			bool encountered_break_char	= (ch == L' ' || ch == L'\n' || ch == 0);
+			bool encountered_break_char	= (ch == u' ' || ch == u'\n' || ch == 0);
 			
 			//
 			//	Do we need to record this portion of the sentence to its own chunk?
@@ -914,9 +920,9 @@ void	Render2DSentenceClass::Build_Sentence_Centered (const WCHAR *text, int *hkX
 				//
 				//	Adjust the output coordinates
 				//
-				if (ch == L' ') {
+				if (ch == u' ') {
 					Cursor.X += char_spacing;
-				} else if ((ch == 0 )|| (ch == L'\n')) {
+				} else if ((ch == 0 )|| (ch == u'\n')) {
 					break;
 				}
 								
@@ -939,7 +945,7 @@ void	Render2DSentenceClass::Build_Sentence_Centered (const WCHAR *text, int *hkX
 			//
 			//	Adjust the output coordinates
 			//
-			if (ch != L'\n' && ch != L' ') {
+			if (ch != u'\n' && ch != u' ') {
 				
 				//
 				//	Ensure the surface is locked	
@@ -981,7 +987,7 @@ void	Render2DSentenceClass::Build_Sentence_Centered (const WCHAR *text, int *hkX
 //	Build_Sentence_NotCentered
 //
 ////////////////////////////////////////////////////////////////////////////////////
-Vector2	Render2DSentenceClass::Build_Sentence_Not_Centered (const WCHAR *text, int *hkX, int *hkY, bool justCalcExtents)
+Vector2	Render2DSentenceClass::Build_Sentence_Not_Centered (const WideChar *text, int *hkX, int *hkY, bool justCalcExtents)
 {
 	Vector2 cursor = Cursor;
 	int textureStartX = TextureStartX;
@@ -1018,12 +1024,12 @@ Vector2	Render2DSentenceClass::Build_Sentence_Not_Centered (const WCHAR *text, i
 	//	Loop over all the characters in the string
 	//
 	while (text != NULL) {
-		WCHAR ch = *text++;
+		WideChar ch = *text++;
 		//
 		//	Determine how much horizontal space this character requires; a hotkey '&' is
 		//	dropped and its letter drawn like the rest, as in Build_Sentence_Centered
 		//
-		if(ParseHotKey && (ch == L'&') && (*text != 0) && (*text > L' ') && (*text != L'\n'))
+		if(ParseHotKey && (ch == u'&') && (*text != 0) && (*text > u' ') && (*text != u'\n'))
 		{
 				hotKeyPosY = Cursor.Y;
 			if (calcHotKeyX)
@@ -1037,7 +1043,7 @@ Vector2	Render2DSentenceClass::Build_Sentence_Not_Centered (const WCHAR *text, i
 
 		// the whole width Blit_Char writes, as in Build_Sentence_Centered
 		bool exceeded_texture_width	= ((TextureOffset.I + Font->Get_Char_Width (ch)) >= CurrTextureSize);
-		bool encountered_break_char	= (ch == L' ' || ch == L'\n' || ch == 0);
+		bool encountered_break_char	= (ch == u' ' || ch == u'\n' || ch == 0);
 		bool wordBiggerThenLine = ((useHardWordWrap) && ( WrapWidth != 0 ) &&((Cursor.X + TextureOffset.I -TextureStartX + char_spacing) >= WrapWidth));
 		//
 		//	Do we need to record this portion of the sentence to its own chunk?
@@ -1058,7 +1064,7 @@ Vector2	Render2DSentenceClass::Build_Sentence_Not_Centered (const WCHAR *text, i
 			//
 			//	Adjust the output coordinates
 			//
-			if (ch == L' ') {
+			if (ch == u' ') {
 				//Cursor.X += char_spacing;
 				//maxX = max(maxX, Cursor.X);
 
@@ -1070,10 +1076,10 @@ Vector2	Render2DSentenceClass::Build_Sentence_Not_Centered (const WCHAR *text, i
 					//
 					//	Find the length of the next word
 					//
-					const WCHAR *word	= text;
+					const WideChar *word	= text;
 					float word_width	= char_spacing;
-					while ((*word != 0) && (*word > L' ')) {
-						if(ParseHotKey && (*word == L'&') && (*word+1 != 0) && (*word+1 > L' ') && (*word+1 != L'\n'))
+					while ((*word != 0) && (*word > u' ')) {
+						if(ParseHotKey && (*word == u'&') && (*word+1 != 0) && (*word+1 > u' ') && (*word+1 != u'\n'))
 							*word++;
 						word_width += Font->Get_Char_Spacing (*word++);
 					}
@@ -1088,7 +1094,7 @@ Vector2	Render2DSentenceClass::Build_Sentence_Not_Centered (const WCHAR *text, i
 					}
 				}
 
-			} else if (ch == L'\n') {
+			} else if (ch == u'\n') {
 				Cursor.X = 0;
 				Cursor.Y += char_height;
 			} else if (ch == 0) {
@@ -1116,7 +1122,7 @@ Vector2	Render2DSentenceClass::Build_Sentence_Not_Centered (const WCHAR *text, i
 			}
 		}
 		
-		if (ch != L'\n' ) {
+		if (ch != u'\n' ) {
 
 			//
 			//	Ensure the surface is locked	
@@ -1168,7 +1174,7 @@ Vector2	Render2DSentenceClass::Build_Sentence_Not_Centered (const WCHAR *text, i
 //
 ////////////////////////////////////////////////////////////////////////////////////
 void
-Render2DSentenceClass::Build_Sentence (const WCHAR *text, int *hkX, int *hkY)
+Render2DSentenceClass::Build_Sentence (const WideChar *text, int *hkX, int *hkY)
 {
 	if (text == NULL) {
 		return ;
@@ -1183,7 +1189,12 @@ Render2DSentenceClass::Build_Sentence (const WCHAR *text, int *hkX, int *hkY)
 		return;
 	}
 
-	if(Centered && (WrapWidth > 0 || wcschr(text,L'\n')))
+	//	WideChar is char16_t, which the C library's wcschr does not take: look for the newline by hand.
+	bool has_newline = false;
+	for (const WideChar *p = text; *p != 0 && !has_newline; ++p)
+		has_newline = (*p == u'\n');
+
+	if(Centered && (WrapWidth > 0 || has_newline))
 		Build_Sentence_Centered(text, hkX, hkY);
 	else
 		Build_Sentence_Not_Centered(text, hkX, hkY);
@@ -1199,12 +1210,16 @@ Render2DSentenceClass::Build_Sentence (const WCHAR *text, int *hkX, int *hkY)
 //
 ////////////////////////////////////////////////////////////////////////////////////
 FontCharsClass::FontCharsClass (void) :
+#if defined(_WIN32)
 	OldGDIFont(	NULL ),
 	OldGDIBitmap( NULL ),
 	GDIFont( NULL ),
 	GDIBitmap( NULL ),
 	GDIBitmapBits ( NULL ),
 	MemDC( NULL ),
+#else
+	Rasteriser( NULL ),
+#endif
 	CurrPixelOffset( 0 ),
 	PointSize( 0 ),
 	CharHeight( 0 ),
@@ -1249,7 +1264,7 @@ FontCharsClass::~FontCharsClass (void)
 //
 ////////////////////////////////////////////////////////////////////////////////////
 const FontCharsClassCharDataStruct *
-FontCharsClass::Get_Char_Data (WCHAR ch)
+FontCharsClass::Get_Char_Data (WideChar ch)
 {
 	const FontCharsClassCharDataStruct *retval = NULL;
 
@@ -1285,7 +1300,7 @@ FontCharsClass::Get_Char_Data (WCHAR ch)
 //
 ////////////////////////////////////////////////////////////////////////////////////
 int
-FontCharsClass::Get_Char_Width (WCHAR ch)
+FontCharsClass::Get_Char_Width (WideChar ch)
 {
 	const FontCharsClassCharDataStruct	* data = Get_Char_Data( ch );
 	if ( data != NULL ) {
@@ -1302,7 +1317,7 @@ FontCharsClass::Get_Char_Width (WCHAR ch)
 //
 ////////////////////////////////////////////////////////////////////////////////////
 int
-FontCharsClass::Get_Char_Spacing (WCHAR ch)
+FontCharsClass::Get_Char_Spacing (WideChar ch)
 {
 	const FontCharsClassCharDataStruct	* data = Get_Char_Data( ch );
 	if ( data != NULL ) {
@@ -1321,7 +1336,7 @@ FontCharsClass::Get_Char_Spacing (WCHAR ch)
 //
 ////////////////////////////////////////////////////////////////////////////////////
 void
-FontCharsClass::Blit_Char (WCHAR ch, uint16 *dest_ptr, int dest_stride, int x, int y)
+FontCharsClass::Blit_Char (WideChar ch, uint16 *dest_ptr, int dest_stride, int x, int y)
 {
 	const FontCharsClassCharDataStruct	* data = Get_Char_Data( ch );
 	if ( data != NULL && data->Width != 0 ) {
@@ -1359,8 +1374,9 @@ FontCharsClass::Blit_Char (WCHAR ch, uint16 *dest_ptr, int dest_stride, int x, i
 //
 ////////////////////////////////////////////////////////////////////////////////////
 const FontCharsClassCharDataStruct *
-FontCharsClass::Store_GDI_Char (WCHAR ch)
+FontCharsClass::Store_GDI_Char (WideChar ch)
 {
+#if defined(_WIN32)
 	int width	= PointSize * 2;
 	int height	= PointSize * 2;
 
@@ -1372,13 +1388,14 @@ FontCharsClass::Store_GDI_Char (WCHAR ch)
 	if (ch == 'W') {
 		xOrigin = 1;
 	}
-	::ExtTextOutW( MemDC, xOrigin, 0, ETO_OPAQUE, &rect, &ch, 1, NULL);
+	// GDI's wide API wants a WCHAR, which on Windows is WideChar's two bytes: the cast is honest there.
+	::ExtTextOutW( MemDC, xOrigin, 0, ETO_OPAQUE, &rect, reinterpret_cast<LPCWSTR>( &ch ), 1, NULL);
 
 	//
 	//	Get the size of the character we just drew
 	//
 	SIZE char_size = { 0 };
-	::GetTextExtentPoint32W( MemDC, &ch, 1, &char_size );	
+	::GetTextExtentPoint32W( MemDC, reinterpret_cast<LPCWSTR>( &ch ), 1, &char_size );	
 	char_size.cx += PixelOverlap + xOrigin;
 	//
 	//	Get a pointer to the surface that this character should use
@@ -1481,6 +1498,52 @@ FontCharsClass::Store_GDI_Char (WCHAR ch)
 	//	Return the index of the entry we just added
 	//
 	return char_data;
+#else
+	/* GDI's steps with FreeType (D6): the character drawn into the (2 x PointSize) square box at
+		 (xOrigin, 0) - 'W' one pixel in, as above - its width the one-character extent plus the overlap
+		 and the origin, its rows the font's height, and each pixel's coverage through the same square
+		 root into the same 4-bit alpha.  Without a font (none could be found or opened) each glyph is
+		 blank and zero wide, as it was before there was a rasteriser. */
+	const int box = PointSize * 2;
+	int xOrigin = 0;
+	if (ch == 'W') {
+		xOrigin = 1;
+	}
+	int cx = 0;
+	int cy = CharHeight;
+	const uint8_t *coverage = NULL;
+	if ( Rasteriser != NULL ) {
+		Rasteriser->Draw_Char( ch, xOrigin );
+		coverage = Rasteriser->Get_Coverage();
+		cx = Rasteriser->Get_Advance( ch ) + PixelOverlap + xOrigin;	// GetTextExtentPoint32W's cx, then as above
+	}
+	Update_Current_Buffer( cx );
+	uint16* curr_buffer_p = BufferList[BufferList.Count () - 1]->Buffer;
+	curr_buffer_p += CurrPixelOffset;
+	for (int row = 0; row < cy; row ++) {
+		for (int col = 0; col < cx; col ++) {
+			const uint8 pixel_value = (coverage != NULL && row < box && col < box) ? coverage[row * box + col] : 0;
+			uint16 pixel_color = 0;
+			if (pixel_value != 0) {
+				pixel_color = 0x0FFF;
+			}
+			uint8 alpha_value	= (uint8)( sqrt( pixel_value / 255.0 ) * 15.0 + 0.5 );
+			*curr_buffer_p++	= pixel_color | (alpha_value << 12);
+		}
+	}
+
+	FontCharsClassCharDataStruct *char_data	= W3DNEW FontCharsClassCharDataStruct;
+	char_data->Value				= ch;
+	char_data->Width				= cx;
+	char_data->Buffer				= BufferList[BufferList.Count () - 1]->Buffer + CurrPixelOffset;
+	if ( ch < 256 ) {
+		ASCIICharArray[ch] = char_data;
+	} else {
+		UnicodeCharArray[ch - FirstUnicodeChar] = char_data;
+	}
+	CurrPixelOffset += ((cx+PixelOverlap) * CharHeight);
+	return char_data;
+#endif
 }
 
 
@@ -1528,6 +1591,7 @@ FontCharsClass::Update_Current_Buffer (int char_width)
 void
 FontCharsClass::Create_GDI_Font (const char *font_name)
 {
+#if defined(_WIN32)
 	HDC screen_dc = ::GetDC ((HWND)WW3D::Get_Window());
 
 	const char *fontToUseForGenerals = "Arial";
@@ -1619,6 +1683,46 @@ FontCharsClass::Create_GDI_Font (const char *font_name)
 	if (doingGenerals) {
 		CharOverhang = 0;
 	}
+#else
+	/* GDI's font with FreeType (D6): the same face, height, width and weight as the CreateFont above -
+		 "Generals" is Arial squeezed to an lfWidth of 0.40 x its height - and the TEXTMETRIC's three
+		 numbers from the same file's own tables (glyphrasteriser.h says which).  Without a font, the
+		 glyphs are blank and a line is still a point size tall, so layout divides by nothing. */
+	const char *fontToUseForGenerals = "Arial";
+	bool doingGenerals = false;
+	if (strcmp(font_name, "Generals")==0) {
+		font_name = fontToUseForGenerals;
+		doingGenerals = true;
+	}
+	const int dotsPerInch = 96; // always use 96.	jba.
+	const int font_height = -((PointSize * dotsPerInch + 36) / 72);	// -MulDiv (PointSize, dotsPerInch, 72), for a positive size
+	int fontWidth = 0; // use font default.
+	if (doingGenerals) {
+		fontWidth = -font_height*0.40f; // one pixel tighter
+	}
+	PixelOverlap = (-font_height)/8;
+	if (PixelOverlap<0) PixelOverlap = 0;
+	if (PixelOverlap>4) PixelOverlap = 4;
+
+	delete Rasteriser;		// a second Create without a Free, if one ever comes
+	Rasteriser = new GlyphRasteriserClass;
+	if ( Rasteriser->Create_Font( font_name, -font_height, fontWidth, IsBold, PointSize * 2 ) ) {
+		CharHeight = Rasteriser->Get_Metrics().Height;
+		CharAscent = Rasteriser->Get_Metrics().Ascent;
+		CharOverhang = Rasteriser->Get_Metrics().Overhang;
+		if (doingGenerals) {
+			CharOverhang = 0;
+		}
+	} else {
+		WWDEBUG_SAY(("FontCharsClass: no font file for '%s'; its glyphs are blank\n", font_name));
+		delete Rasteriser;
+		Rasteriser = NULL;
+		CharHeight = PointSize;
+		CharAscent = PointSize;
+		CharOverhang = 0;
+		PixelOverlap = 0;
+	}
+#endif
 }
 
 
@@ -1630,6 +1734,7 @@ FontCharsClass::Create_GDI_Font (const char *font_name)
 void
 FontCharsClass::Free_GDI_Font (void)
 {
+#if defined(_WIN32)
 	//
 	//	Select the old font back into the DC and delete
 	// our font object
@@ -1657,6 +1762,10 @@ FontCharsClass::Free_GDI_Font (void)
 		::DeleteDC( MemDC );
 		MemDC = NULL;
 	}
+#else
+	delete Rasteriser;
+	Rasteriser = NULL;
+#endif
 
 	return ;
 }
@@ -1720,7 +1829,7 @@ FontCharsClass::Is_Font (const char *font_name, int point_size, bool is_bold)
 //
 ////////////////////////////////////////////////////////////////////////////////////
 void
-FontCharsClass::Grow_Unicode_Array (WCHAR ch)
+FontCharsClass::Grow_Unicode_Array (WideChar ch)
 {
 	//
 	//	Don't do anything if character is in the ASCII range

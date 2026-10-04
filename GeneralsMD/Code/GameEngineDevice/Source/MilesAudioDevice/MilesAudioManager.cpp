@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -38,8 +40,11 @@
 /*		7/18/2002 : Initial creation                                           */
 /*---------------------------------------------------------------------------*/
 
+#if defined(_WIN32)
 #include <dsound.h>
-#include "Lib/Basetype.h"
+#endif
+#include "Lib/Clock.h"
+#include "Lib/BaseType.h"
 #include "MilesAudioDevice/MilesAudioManager.h"
 
 #include "Common/AudioAffect.h"
@@ -66,7 +71,24 @@
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/TerrainLogic.h"
 
-#include "Common/File.h"
+#include "Common/file.h"
+#if !defined(_WIN32)
+#include "Common/LocalFileSystem.h"
+
+/* Off Windows (C4): InterlockedCompareExchange's job on PlayingAudio::m_status.  Every call site
+	 casts the 4-byte PlayingStatus to (volatile long *), which is the same width under Windows' LLP64
+	 and twice it under LP64 (macOS, Linux): a like-for-like stand-in would compare and swap eight bytes
+	 over a four-byte member.  So this takes the member's own type and works on its own four bytes, with
+	 the full barrier every Interlocked* call is.  It returns the value that was there, as that does. */
+static inline PlayingStatus playingStatusCompareExchange( volatile PlayingStatus *status,
+	PlayingStatus exchange, PlayingStatus comparand )
+{
+	static_assert( sizeof( PlayingStatus ) == sizeof( Int ), "the status is compared and swapped as its own four bytes" );
+	Int expected = (Int)comparand;
+	__atomic_compare_exchange_n( (volatile Int *)status, &expected, (Int)exchange, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST );
+	return (PlayingStatus)expected;
+}
+#endif
 
 #ifdef _INTERNAL
 //#pragma optimize("", off)
@@ -513,7 +535,11 @@ static void updateSoundCapture( void )
 {
 	static Bool recording = FALSE;
 	static Bool finished = FALSE;
+#if defined(_WIN32)
 	static __int64 startTicks = 0;
+#else
+	static Int64 startTicks = 0;
+#endif
 
 	if (TheGlobalData->m_wavEndFrame <= 0 || finished)
 		return;
@@ -536,7 +562,11 @@ static void updateSoundCapture( void )
 	{
 		char directory[_MAX_PATH];
 		snprintf(directory, ARRAY_SIZE(directory), "%sVideos", TheGlobalData->getPath_UserData().str());
+#if defined(_WIN32)
 		CreateDirectoryA(directory, NULL);
+#else
+		TheLocalFileSystem->createDirectory(AsciiString(directory));
+#endif
 
 		char pathname[_MAX_PATH];
 		snprintf(pathname, ARRAY_SIZE(pathname), "%s\\%s.wav", directory, TheGlobalData->m_wavName.str());
@@ -548,7 +578,7 @@ static void updateSoundCapture( void )
 		}
 
 		recording = TRUE;
-		QueryPerformanceCounter((LARGE_INTEGER *)&startTicks);
+		startTicks = Clock_Ticks();
 		DEBUG_LOG(("AUDIO: recording logic frames %d to %d into %s\n",
 			TheGlobalData->m_wavStartFrame, TheGlobalData->m_wavEndFrame, pathname));
 		return;
@@ -560,10 +590,15 @@ static void updateSoundCapture( void )
 	finished = TRUE;
 	AIL_ex_stop_capture();
 
+#if defined(_WIN32)
 	__int64 nowTicks = 0;
 	__int64 ticksPerSecond = 0;
-	QueryPerformanceCounter((LARGE_INTEGER *)&nowTicks);
-	QueryPerformanceFrequency((LARGE_INTEGER *)&ticksPerSecond);
+#else
+	Int64 nowTicks = 0;
+	Int64 ticksPerSecond = 0;
+#endif
+	nowTicks = Clock_Ticks();
+	ticksPerSecond = Clock_Ticks_Per_Second();
 	const Real recordedSeconds = (Real)(nowTicks - startTicks) / (Real)ticksPerSecond;
 	const Real pictureSeconds = (Real)(frame - TheGlobalData->m_wavStartFrame) / LOGICFRAMES_PER_SECONDS_REAL;
 	DEBUG_LOG(("AUDIO: recorded %.2f seconds of sound for %.2f seconds of picture, %.2f adrift\n",
@@ -1063,7 +1098,11 @@ void MilesAudioManager::stopAudioEvent( AudioHandle handle )
 		if (audio->m_audioEventRTS->getPlayingHandle() == handle) {
 			// found it
 			// Ask it to stop; the next processPlayingList sweep does the Miles side and the free.
+#if defined(_WIN32)
 			InterlockedCompareExchange( (volatile long *)&audio->m_status, PS_Stopping, PS_Playing );
+#else
+			playingStatusCompareExchange( &audio->m_status, PS_Stopping, PS_Playing );
+#endif
 			notifyOfAudioCompletion((UnsignedIntPtr)(audio->m_stream), PAT_Stream);
 			break;
 		}
@@ -1279,8 +1318,16 @@ void MilesAudioManager::releasePlayingAudio( PlayingAudio *release )
 void MilesAudioManager::stopPlayingAudio( PlayingAudio *release )
 {
 	// Playing -> Stopping, then Stopping -> Stopped.  Whoever wins the second one does the work.
+#if defined(_WIN32)
 	InterlockedCompareExchange( (volatile long *)&release->m_status, PS_Stopping, PS_Playing );
+#else
+	playingStatusCompareExchange( &release->m_status, PS_Stopping, PS_Playing );
+#endif
+#if defined(_WIN32)
 	const long prevStatus = InterlockedCompareExchange( (volatile long *)&release->m_status, PS_Stopped, PS_Stopping );
+#else
+	const long prevStatus = playingStatusCompareExchange( &release->m_status, PS_Stopped, PS_Stopping );
+#endif
 	if (prevStatus != PS_Stopping) {
 		return;
 	}
@@ -1642,6 +1689,7 @@ void MilesAudioManager::openDevice( void )
 
 	// AIL_quick_startup should be replaced later with a call to actually pick which device to use, etc
 	const AudioSettings *audioSettings = getAudioSettings();
+	AIL_ex_set_3D_linear_falloff(audioSettings->m_rangeVolumeFade);
 	m_selectedSpeakerType = TheAudio->translateSpeakerTypeToUnsignedInt(m_prefSpeaker);
 
 	retval = AIL_quick_startup(audioSettings->m_useDigital, audioSettings->m_useMidi, audioSettings->m_outputRate, audioSettings->m_outputBits, audioSettings->m_outputChannels);
@@ -1816,7 +1864,11 @@ void MilesAudioManager::notifyOfAudioCompletion( UnsignedIntPtr audioCompleted, 
 
 	// Ask for the stop rather than declaring it: this runs on the Miles thread, and the half that
 	// talks back to Miles and frees the object belongs to the main thread's next sweep.
+#if defined(_WIN32)
 	InterlockedCompareExchange( (volatile long *)&playing->m_status, PS_Stopping, PS_Playing );
+#else
+	playingStatusCompareExchange( &playing->m_status, PS_Stopping, PS_Playing );
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1923,9 +1975,15 @@ void MilesAudioManager::selectProvider( UnsignedInt providerNdx )
 		unselectProvider();
 	}
 
+#if defined(_WIN32)
+	/* Never runs, on Windows either: AIL_get_DirectSound_info answers NULL in both backends under this
+		 manager (XAudio2's and miniaudio's), so useDolby stays FALSE.  Kept on Windows as it was; off
+		 Windows there is no DirectSound to name (C4). */
 	LPDIRECTSOUND lpDirectSoundInfo;
 	AIL_get_DirectSound_info( NULL, (void**)&lpDirectSoundInfo, NULL );
+#endif
 	Bool useDolby = FALSE;
+#if defined(_WIN32)
 	if( lpDirectSoundInfo )
 	{
 		DWORD speakerConfig;
@@ -1963,6 +2021,7 @@ void MilesAudioManager::selectProvider( UnsignedInt providerNdx )
 				break;
 		}
 	}
+#endif
 
 	Bool success = FALSE;
 	if( useDolby )
@@ -2552,7 +2611,7 @@ void MilesAudioManager::processPlayingList( void )
 				else
 				{
 					Real volForConsideration = getEffectiveVolume(playing->m_audioEventRTS);
-					volForConsideration /= (m_sound3DVolume > 0.0f ? m_soundVolume : 1.0f);
+					volForConsideration /= (m_sound3DVolume > 0.0f ? m_sound3DVolume : 1.0f);
 					Bool playAnyways = BitTest( playing->m_audioEventRTS->getAudioEventInfo()->m_type, ST_GLOBAL) || playing->m_audioEventRTS->getAudioEventInfo()->m_priority == AP_CRITICAL;
 					if( volForConsideration < m_audioSettings->m_minVolume && !playAnyways )
 					{
@@ -2683,7 +2742,9 @@ void MilesAudioManager::processFadingList( void )
 
 			case PAT_3DSample:
 			{
-				AIL_set_3D_sample_volume(playing->m_3DSample, volume);
+				// Not volume: that carries the distance falloff, which the backend applies again.
+				AIL_set_3D_sample_volume(playing->m_3DSample, getVoiceMixedVolume(playing->m_audioEventRTS, m_sound3DVolume)
+					* (1.0f - 1.0f * playing->m_framesFaded / getAudioSettings()->m_fadeAudioFrames));
 				break;
 			}
 			
@@ -2935,22 +2996,10 @@ Real MilesAudioManager::getEffectiveVolume(AudioEventRTS *event) const
 				// zero, so the hard cut at the maximum range makes a sound you are walking away
 				// from stop dead instead of fading out. The linear one reaches zero exactly where
 				// the cut is. Off by default: it changes how every 3D sound in the game attenuates,
-				// and that is a listening decision, not a bug fix.
-				if( TheAudio->getAudioSettings()->m_rangeVolumeFade &&
-						objMaxDistance > objMinDistance )
-				{
-					if( objDistance > objMinDistance )
-						volume *= 1.0f - (objDistance - objMinDistance) / (objMaxDistance - objMinDistance);
-				}
-				else if( objDistance > objMinDistance )
-				{
-					volume *= 1 / (objDistance / objMinDistance);
-				}
-
-				if( objDistance >= objMaxDistance )
-				{
-					volume = 0.0f;
-				}
+				// and that is a listening decision, not a bug fix.  The curve is the audio backend's
+				// own, so a sound is culled on the same curve it is heard at.
+				volume *= AIL_ex_3D_distance_gain( objDistance, objMinDistance, objMaxDistance,
+					TheAudio->getAudioSettings()->m_rangeVolumeFade );
 			}
 		} 
 		else 
@@ -2980,7 +3029,11 @@ Bool MilesAudioManager::startNextLoop( PlayingAudio *looping )
 			// fake it out so that this sound appears done, but also so that it will not
 			// delete the sound on completion (which would suck)
 			looping->m_cleanupAudioEventRTS = false;
+#if defined(_WIN32)
 			InterlockedCompareExchange( (volatile long *)&looping->m_status, PS_Stopping, PS_Playing );
+#else
+			playingStatusCompareExchange( &looping->m_status, PS_Stopping, PS_Playing );
+#endif
 			
 			
 			AudioRequest *req = allocateAudioRequest(true);
@@ -3053,11 +3106,13 @@ void *MilesAudioManager::playSample3D( AudioEventRTS *event, H3DSAMPLE sample3D 
 			// Prep any sort of filtering, etc, here
 			AIL_register_3D_EOS_callback(sample3D, set3DSampleCompleted);
 
-			// Set the position values of the sample here
+			// Set the position values of the sample here.  Miles takes the maximum first; EA passed the
+			// minimum first, and with the pair backwards every world sound played at full volume out to
+			// its cut-off, so far-reaching ambient loops drowned the fighting next to the camera.
 			if (event->getAudioEventInfo()->m_type & ST_GLOBAL) {
-				AIL_set_3D_sample_distances(sample3D, TheAudio->getAudioSettings()->m_globalMinRange, TheAudio->getAudioSettings()->m_globalMaxRange );
+				AIL_set_3D_sample_distances(sample3D, TheAudio->getAudioSettings()->m_globalMaxRange, TheAudio->getAudioSettings()->m_globalMinRange );
 			} else {
-				AIL_set_3D_sample_distances(sample3D, event->getAudioEventInfo()->m_minDistance, event->getAudioEventInfo()->m_maxDistance );
+				AIL_set_3D_sample_distances(sample3D, event->getAudioEventInfo()->m_maxDistance, event->getAudioEventInfo()->m_minDistance );
 			}
 			
 			// Set the position of the sample here
@@ -3323,7 +3378,11 @@ U32 AILCALLBACK streamingFileRead(AILFILEHANDLE file_handle, void *buffer, U32 b
 //-------------------------------------------------------------------------------------------------
 AudioFileCache::AudioFileCache() : m_maxSize(0), m_currentlyUsedSize(0), m_mutexName("AudioFileCacheMutex")
 {
+#if defined(_WIN32)
 	m_mutex = CreateMutex(NULL, FALSE, m_mutexName);
+#else
+	m_mutex = new std::timed_mutex;	// the process's own: Windows' name made it every process's, by accident
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3345,7 +3404,11 @@ AudioFileCache::~AudioFileCache()
 		}
 	}
 
+#if defined(_WIN32)
 	CloseHandle(m_mutex);
+#else
+	delete m_mutex;
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------

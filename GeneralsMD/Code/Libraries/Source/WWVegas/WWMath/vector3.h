@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 /* $Header: /Commando/Code/wwmath/vector3.h 40    5/11/01 7:11p Jani_p $ */
 /*********************************************************************************************** 

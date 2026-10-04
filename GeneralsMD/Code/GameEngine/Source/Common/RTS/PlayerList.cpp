@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -43,6 +45,8 @@
 //-----------------------------------------------------------------------------
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+
+#include "Lib/WideCharFns.h"
 
 #include "Common/Errors.h"
 #include "Common/DataChunk.h"
@@ -349,8 +353,8 @@ void PlayerList::setLocalPlayer(Player *player)
 	{
 		DEBUG_LOG(("\n----------\n"));
 		// did you know? you can use "%ls" to print a doublebyte string, even in a single-byte printf...
-		DEBUG_LOG(("Switching local players. The new player is named '%ls' (%s) and owns the following objects:\n",
-			player->getPlayerDisplayName().str(),
+		DEBUG_LOG(("Switching local players. The new player is named '%s' (%s) and owns the following objects:\n",
+			WideCharAsUtf8( player->getPlayerDisplayName().str() ).str(),
 			TheNameKeyGenerator->keyToName(player->getPlayerNameKey()).str()
 		));
 		for (Object *obj = player->getFirstOwnedObject(); obj; obj = obj->getNextOwnedObject())

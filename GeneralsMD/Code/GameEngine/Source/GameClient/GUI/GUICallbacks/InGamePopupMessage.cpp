@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -54,7 +55,7 @@
 
 #include "Common/GlobalData.h"
 #include "Common/NameKeyGenerator.h"
-#include "Common/Version.h"
+#include "Common/version.h"
 #include "Common/MessageStream.h"
 #include "GameClient/WindowLayout.h"
 #include "GameClient/Gadget.h"
@@ -78,7 +79,7 @@ static GameWindow *staticTextMessage = NULL;
 static GameWindow *buttonOk = NULL;
 
 
-static Bool pause = FALSE;
+static Bool thePopupPauses = FALSE;	// not "pause": POSIX <unistd.h> declares pause()
 //-----------------------------------------------------------------------------
 // PUBLIC FUNCTIONS ///////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
@@ -124,7 +125,7 @@ void InGamePopupMessageInit( WindowLayout *layout, void *userData )
 	staticTextMessage->winSetSize( pMData->width - 4, height + 7);
 	buttonOk->winSetPosition(pMData->width - widthOk - 2, height + 7 + 2 + 2);
 	staticTextMessage->winSetEnabledTextColors(pMData->textColor, 0);
-	pause = pMData->pause;
+	thePopupPauses = pMData->pause;
 	if(pMData->pause)
 		TheWindowManager->winSetModal( parent );
 	
@@ -228,7 +229,7 @@ WindowMsgHandledType InGamePopupMessageSystem( GameWindow *window, UnsignedInt m
      
       if( controlID == buttonOkID )
 			{
-				if(!pause)
+				if(!thePopupPauses)
 					TheMessageStream->appendMessage( GameMessage::MSG_CLEAR_INGAME_POPUP_MESSAGE );
 				else
 					TheInGameUI->clearPopupMessageData();

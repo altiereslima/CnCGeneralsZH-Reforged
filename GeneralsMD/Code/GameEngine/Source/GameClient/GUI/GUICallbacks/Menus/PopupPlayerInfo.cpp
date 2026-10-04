@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -30,13 +32,14 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Platform/IsWindows9x.h"
 
 #include "Common/PlayerTemplate.h"
 #include "Common/BattleHonors.h"
 #include "Common/CustomMatchPreferences.h"
 #include "Common/GameSpyMiscPreferences.h"
-#include "Common/Filesystem.h"
-#include "GameClient/mouse.h"
+#include "Common/FileSystem.h"
+#include "GameClient/Mouse.h"
 #include "GameClient/GameText.h"
 #include "GameClient/WindowLayout.h"
 #include "GameClient/Gadget.h"
@@ -312,8 +315,8 @@ void BattleHonorTooltip(GameWindow *window,
 		return;
 	}
 
-	Int battleHonor = (Int)GadgetListBoxGetItemData( window, row, col );
-	Int extraValue = (Int)GadgetListBoxGetItemData( window, row - 1, col );
+	Int battleHonor = (Int)(intptr_t)GadgetListBoxGetItemData( window, row, col );
+	Int extraValue = (Int)(intptr_t)GadgetListBoxGetItemData( window, row - 1, col );
 	if (battleHonor == 0)
 	{
 		//DEBUG_CRASH(("No Battle Honor in listbox row %d, col %d!", row, col));
@@ -491,8 +494,8 @@ void InsertBattleHonor(GameWindow *list, const Image *image, Bool enabled, Int i
 		itemData |= BATTLE_HONOR_NOT_GAINED;
 
 	GadgetListBoxAddEntryImage(list, image, row, column, height, width, TRUE, color);
-	GadgetListBoxSetItemData(list, (void *)itemData, row, column );
-	GadgetListBoxSetItemData(list, (void *)extra, row - 1, column );
+	GadgetListBoxSetItemData(list, (void *)(intptr_t)itemData, row, column );
+	GadgetListBoxSetItemData(list, (void *)(intptr_t)extra, row - 1, column );
 
 	/*
 	** removing text, since every place that adds text has alternate displays of the same thing
@@ -580,7 +583,7 @@ static void populateBattleHonors(const PSPlayerStats& stats, Int battleHonors, I
 	// TEST FOR STREAK HONOR
 	UnicodeString uStr;
 	Int streak = stats.winsInARow;
-	uStr.format(L"%10d", streak);
+	uStr.format(u"%10d", streak);
 	if (streak >= 1000)
 	{
 		InsertBattleHonor(list, TheMappedImageCollection->findImageByName("HonorStreak_1000"), TRUE,
@@ -624,7 +627,7 @@ static void populateBattleHonors(const PSPlayerStats& stats, Int battleHonors, I
 	{
 		totalWins += pit->second;
 	}
-	uStr.format(L"%10d", totalWins);
+	uStr.format(u"%10d", totalWins);
 	if (totalWins >= 10000)
 	{
 		InsertBattleHonor(list, TheMappedImageCollection->findImageByName("Domination_10000"), TRUE,
@@ -764,21 +767,23 @@ Int CalculateRank( const PSPlayerStats& stats )
 	{
 		numGames += it->second;
 	}
-	rankPoints += (numGames * TheRankPointValues->m_winMultiplier);
+	// Each sum is converted as Windows converts it (Platform/MsvcFloatCasts.h): a hostile stats record past
+	// the int range is INT_MIN there, which the max() below turns into 0, where ARM64 saturated to INT_MAX.
+	rankPoints = floatToIntAsMsvc(rankPoints + numGames * TheRankPointValues->m_winMultiplier);
 	
 	numGames = 0;
 	for(it =stats.losses.begin(); it != stats.losses.end(); ++it)
 	{
 		numGames += it->second;
 	}
-	rankPoints += (numGames * TheRankPointValues->m_lostMultiplier);
+	rankPoints = floatToIntAsMsvc(rankPoints + numGames * TheRankPointValues->m_lostMultiplier);
 
 	numGames = 0;
 	for(it =stats.duration.begin(); it != stats.duration.end(); ++it)
 	{
 		numGames += it->second;
 	}
-	rankPoints += (numGames / 60) * TheRankPointValues->m_hourSpentOnlineMultiplier;
+	rankPoints = floatToIntAsMsvc(rankPoints + (numGames / 60) * TheRankPointValues->m_hourSpentOnlineMultiplier);
 
 	numGames = 0;
 	for(it =stats.discons.begin(); it != stats.discons.end(); ++it)
@@ -789,11 +794,11 @@ Int CalculateRank( const PSPlayerStats& stats )
 	{
 		numGames += it->second;
 	}
-	rankPoints += numGames * TheRankPointValues->m_disconnectMultiplier;
+	rankPoints = floatToIntAsMsvc(rankPoints + numGames * TheRankPointValues->m_disconnectMultiplier);
 
 	if(BitTest(stats.battleHonors, BATTLE_HONOR_CAMPAIGN_USA | BATTLE_HONOR_CAMPAIGN_CHINA |BATTLE_HONOR_CAMPAIGN_GLA))
 	{
-		rankPoints += 1 * TheRankPointValues->m_completedSoloCampaigns;
+		rankPoints = floatToIntAsMsvc(rankPoints + 1 * TheRankPointValues->m_completedSoloCampaigns);
 	}
 
 	rankPoints = max(0, rankPoints); // clip off negative values, since discons can push us below 0.
@@ -834,12 +839,8 @@ void PopulatePlayerInfoWindows( AsciiString parentWindowName )
 		weHaveStats = TRUE;
 	}
 	
-	Int currentRank = 0;
 	Int rankPoints = CalculateRank(stats);
-	Int i = 0;
-	while( rankPoints >= TheRankPointValues->m_ranks[i + 1])
-		++i;
-	currentRank = i;
+	Int currentRank = rankForPoints( TheRankPointValues->m_ranks, rankPoints );
 
 	PerGeneralMap::iterator it;
 	Int numWins = 0;
@@ -881,32 +882,32 @@ void PopulatePlayerInfoWindows( AsciiString parentWindowName )
 	win = findWindow(NULL, parentWindowName, "StaticTextGamesPlayedValue");
 	if(win)
 	{
-		uStr.format(L"%d", numGames);
+		uStr.format(u"%d", numGames);
 		GadgetStaticTextSetText(win, uStr);
 	}
 	win = findWindow(NULL, parentWindowName, "StaticTextWinsValue");
 	if(win)
 	{
-		uStr.format(L"%d", numWins);
+		uStr.format(u"%d", numWins);
 		GadgetStaticTextSetText(win, uStr);
 	}
 	win = findWindow(NULL, parentWindowName, "StaticTextLossesValue");
 	if(win)
 	{
-		uStr.format(L"%d", numLosses);
+		uStr.format(u"%d", numLosses);
 		GadgetStaticTextSetText(win, uStr);
 	}
 	win = findWindow(NULL, parentWindowName, "StaticTextDisconnectsValue");
 	if(win)
 	{
-		uStr.format(L"%d", numDiscons);
+		uStr.format(u"%d", numDiscons);
 		GadgetStaticTextSetText(win, uStr);
 	}
 
 	win = findWindow(NULL, parentWindowName, "StaticTextBestStreakValue");
 	if (win)
 	{
-		uStr.format(L"%d", stats.maxWinsInARow);
+		uStr.format(u"%d", stats.maxWinsInARow);
 		GadgetStaticTextSetText(win, uStr);
 	}
 
@@ -926,7 +927,7 @@ void PopulatePlayerInfoWindows( AsciiString parentWindowName )
 	if(win)
 	{
 		Int streak = max(stats.lossesInARow, stats.winsInARow);
-		uStr.format(L"%d", streak);
+		uStr.format(u"%d", streak);
 		GadgetStaticTextSetText(win, uStr);
 	}
 
@@ -938,7 +939,7 @@ void PopulatePlayerInfoWindows( AsciiString parentWindowName )
 		{
 			numGames += it->second;
 		}
-		uStr.format(L"%d", numGames);
+		uStr.format(u"%d", numGames);
 		GadgetStaticTextSetText(win, uStr);
 	}
 	win = findWindow(NULL, parentWindowName, "StaticTextTotalDeathsValue");
@@ -949,7 +950,7 @@ void PopulatePlayerInfoWindows( AsciiString parentWindowName )
 		{
 			numGames += it->second;
 		}
-		uStr.format(L"%d", numGames);
+		uStr.format(u"%d", numGames);
 		GadgetStaticTextSetText(win, uStr);
 	}
 	win = findWindow(NULL, parentWindowName, "StaticTextTotalBuiltValue");
@@ -960,7 +961,7 @@ void PopulatePlayerInfoWindows( AsciiString parentWindowName )
 		{
 			numGames += it->second;
 		}
-		uStr.format(L"%d", numGames);
+		uStr.format(u"%d", numGames);
 		GadgetStaticTextSetText(win, uStr);
 	}
 	win = findWindow(NULL, parentWindowName, "StaticTextBuildingsKilledValue");
@@ -971,7 +972,7 @@ void PopulatePlayerInfoWindows( AsciiString parentWindowName )
 		{
 			numGames += it->second;
 		}
-		uStr.format(L"%d", numGames);
+		uStr.format(u"%d", numGames);
 		GadgetStaticTextSetText(win, uStr);
 	}
 	win = findWindow(NULL, parentWindowName, "StaticTextBuildingsLostValue");
@@ -982,7 +983,7 @@ void PopulatePlayerInfoWindows( AsciiString parentWindowName )
 		{
 			numGames += it->second;
 		}
-		uStr.format(L"%d", numGames);
+		uStr.format(u"%d", numGames);
 		GadgetStaticTextSetText(win, uStr);
 	}
 	win = findWindow(NULL, parentWindowName, "StaticTextBuildingsBuiltValue");
@@ -993,7 +994,7 @@ void PopulatePlayerInfoWindows( AsciiString parentWindowName )
 		{
 			numGames += it->second;
 		}
-		uStr.format(L"%d", numGames);
+		uStr.format(u"%d", numGames);
 		GadgetStaticTextSetText(win, uStr);
 	}
 
@@ -1328,17 +1329,12 @@ void GameSpyPlayerInfoOverlayInit( WindowLayout *layout, void *userData )
 	GadgetCheckBoxSetChecked(checkBoxAsianFont,!pref.getDisallowAsianText());
 	GadgetCheckBoxSetChecked(checkBoxNonAsianFont,!pref.getDisallowNonAsianText());
 
-	OSVERSIONINFO	osvi;
-	osvi.dwOSVersionInfoSize=sizeof(OSVERSIONINFO);
-	if (GetVersionEx(&osvi))
+	if (isWindows9x())
 	{	//check if we're running Win9x variant since they may need different fonts
-		if (osvi.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS)
-		{
-			if (checkBoxAsianFont)
-				checkBoxAsianFont->winEnable(FALSE);
-			if (checkBoxNonAsianFont)
-				checkBoxNonAsianFont->winEnable(FALSE);
-		}
+		if (checkBoxAsianFont)
+			checkBoxAsianFont->winEnable(FALSE);
+		if (checkBoxNonAsianFont)
+			checkBoxNonAsianFont->winEnable(FALSE);
 	}
 
 	//TheWindowManager->winSetModal(parent);
@@ -1415,7 +1411,7 @@ WindowMsgHandledType GameSpyPlayerInfoOverlayInput( GameWindow *window, Unsigned
 
 	return MSG_IGNORED;
 }// GameSpyPlayerInfoOverlayInput
-void messageBoxYes( void );
+static void messageBoxYes( void );
 //-------------------------------------------------------------------------------------------------
 /** Overlay window system callback */
 //-------------------------------------------------------------------------------------------------

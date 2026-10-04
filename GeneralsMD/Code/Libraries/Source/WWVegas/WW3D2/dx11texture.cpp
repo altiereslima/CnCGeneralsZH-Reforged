@@ -51,6 +51,10 @@ static const GUID DX11_TEXTURE_DIRTY =
 // {2E2E9C25-1B2A-4C7E-9E2F-1D0B7E9A5C01}
 static const GUID DX11_TEXTURE_UPDATE =
 	{ 0x2e2e9c25, 0x1b2a, 0x4c7e, { 0x9e, 0x2f, 0x1d, 0x0b, 0x7e, 0x9a, 0x5c, 0x01 } };
+// The D3D9 level of detail the view was last made for, so a SetLOD after the copy exists is seen.
+// {2E2E9C26-1B2A-4C7E-9E2F-1D0B7E9A5C01}
+static const GUID DX11_TEXTURE_LOD =
+	{ 0x2e2e9c26, 0x1b2a, 0x4c7e, { 0x9e, 0x2f, 0x1d, 0x0b, 0x7e, 0x9a, 0x5c, 0x01 } };
 
 // The source rows of the last sixteen bit update, so the next one into the same rectangle of the
 // same texture expands and sends only the rows that differ.  The shroud copies its whole visible
@@ -414,6 +418,57 @@ static CopyShapeCounts & copy_shape(IDirect3DBaseTexture9 * texture)
 	return entry->second;
 }
 
+// Direct3D 9's SetLOD keeps the top levels of a managed texture out of video memory, and that is
+// all the texture quality option does to the terrain atlas, the tree atlas and the scorch marks.
+// The copy holds every level, so its view starts at the same level instead.  The option can change
+// in a match, so the level the view was made for is kept on the texture and checked at each bind.
+// GetLOD answers zero for anything not managed, which is every copy made with one level.
+static ID3D11ShaderResourceView * apply_lod(ID3D11Device * device, IDirect3DBaseTexture9 * texture,
+	ID3D11ShaderResourceView * view)
+{
+	const DWORD level_count = texture->GetLevelCount();
+	DWORD lod = texture->GetLOD();
+	if (level_count > 0 && lod >= level_count) {
+		lod = level_count - 1;
+	}
+
+	DWORD applied = 0;
+	DWORD size = sizeof(applied);
+	if (FAILED(texture->GetPrivateData(DX11_TEXTURE_LOD, &applied, &size))) {
+		applied = 0;
+	}
+	if (lod == applied) {
+		return view;
+	}
+
+	D3D11_SHADER_RESOURCE_VIEW_DESC description;
+	view->GetDesc(&description);
+	if (description.ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2D) {
+		return view;
+	}
+	description.Texture2D.MostDetailedMip = lod;
+	description.Texture2D.MipLevels = (UINT)-1;
+
+	ID3D11Resource * resource = NULL;
+	view->GetResource(&resource);
+	ID3D11ShaderResourceView * replacement = NULL;
+	const bool made = resource != NULL
+		&& SUCCEEDED(device->CreateShaderResourceView(resource, &description, &replacement));
+	if (resource != NULL) {
+		resource->Release();
+	}
+	if (!made) {
+		return view;
+	}
+
+	// Replacing the private data releases the old view; a context still binding it holds its own
+	// reference until the next bind moves off it.
+	texture->SetPrivateData(DX11_TEXTURE_VIEW, replacement, sizeof(replacement), D3DSPD_IUNKNOWN);
+	replacement->Release();
+	texture->SetPrivateData(DX11_TEXTURE_LOD, &lod, sizeof(lod), 0);
+	return replacement;
+}
+
 ID3D11ShaderResourceView * DX11Texture_Mirror(ID3D11Device * device, ID3D11DeviceContext * context,
 	IDirect3DBaseTexture9 * texture)
 {
@@ -432,7 +487,7 @@ ID3D11ShaderResourceView * DX11Texture_Mirror(ID3D11Device * device, ID3D11Devic
 			++copy_shape(texture).Refreshes;
 		}
 		++Reused;
-		return view;
+		return apply_lod(device, texture, view);
 	}
 
 	unsigned char refused = 0;
@@ -457,7 +512,7 @@ ID3D11ShaderResourceView * DX11Texture_Mirror(ID3D11Device * device, ID3D11Devic
 	view->Release();
 	clear_dirty(texture);
 	++Mirrored;
-	return view;
+	return apply_lod(device, texture, view);
 }
 
 void DX11Texture_Mark_Dirty(IDirect3DSurface9 * surface)

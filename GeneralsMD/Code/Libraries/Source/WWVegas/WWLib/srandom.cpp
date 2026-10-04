@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 //
 // SecureRandomClass - Generate random values
@@ -23,6 +24,7 @@
 #pragma warning(disable : 4514)	// unreferenced inline function removed....
 
 #include "srandom.h"
+#include "Lib/Clock.h"
 #include <stdlib.h>
 #include <stdio.h>
 #ifdef _UNIX
@@ -37,7 +39,11 @@ extern "C" {
 #else
 
 #include "win.h"
-#include <process.h>
+#if defined(_MSC_VER)
+#include <process.h>   // Microsoft declares getpid here
+#else
+#include <unistd.h>    // POSIX declares it here
+#endif
 #endif
 #include <time.h>
 #include <assert.h>
@@ -212,7 +218,7 @@ void SecureRandomClass::Generate_Seed(void)
 		else if ((i % 4) == 1)
 			int_seeds[i]^=getpid();
 		else if ((i % 4) == 2)
-			int_seeds[i]^=GetTickCount();
+			int_seeds[i]^=Clock_Milliseconds_Coarse();
 		else if ((i % 4) == 3)
 			int_seeds[i]^=i;
 	}

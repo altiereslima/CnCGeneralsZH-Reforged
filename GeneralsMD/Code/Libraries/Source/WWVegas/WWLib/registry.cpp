@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -66,7 +67,6 @@ RegistryClass::RegistryClass( const char * sub_key, bool create ) :
 	IsValid( false )
 {
 	HKEY key;
-	assert( sizeof(HKEY) == sizeof(int) );
 
 	LONG result = -1;
 
@@ -80,7 +80,7 @@ RegistryClass::RegistryClass( const char * sub_key, bool create ) :
 
 	if (ERROR_SUCCESS == result) {
 		IsValid = true;
-		Key = (int)key;
+		Key = key;
 	}
 }
 

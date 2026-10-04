@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -31,8 +32,10 @@
 #ifndef __DOWNLOADMANAGER_H__
 #define __DOWNLOADMANAGER_H__
 
-#include "WWDownload/downloadDefs.h"
+#if defined(_WIN32)
+#include "WWDownload/downloaddefs.h"
 #include "WWDownload/download.h"
+#endif
 
 class CDownload;
 class QueuedDownload
@@ -50,6 +53,7 @@ public:
 /////////////////////////////////////////////////////////////////////////////
 // DownloadManager
 
+#if defined(_WIN32)
 class DownloadManager : public IDownload
 {
 public:
@@ -92,6 +96,24 @@ private:
 protected:
 	std::list<QueuedDownload> m_queuedDownloads;
 };
+
+#else
+/* Off Windows there is no downloader: WWDownload is FTP over winsock, for patches from a dead
+	 service.  Only DownloadMenuInit creates TheDownloadManager, and only on Windows, so here it stays
+	 NULL (DownloadManagerPosix.cpp) and every caller already tests it before use.  These are the
+	 members callers name, doing nothing; no caller reads what update or downloadNextQueuedFile
+	 return, which is an HRESULT on Windows. */
+class DownloadManager
+{
+public:
+	virtual ~DownloadManager() {}
+
+	void update( void ) {}
+	Bool isDone( void ) { return TRUE; }
+	void queueFileForDownload( AsciiString, AsciiString, AsciiString, AsciiString, AsciiString, AsciiString, Bool ) {}
+	void downloadNextQueuedFile( void ) {}
+};
+#endif
 
 extern DownloadManager *TheDownloadManager;
 

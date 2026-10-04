@@ -1,0 +1,53 @@
+# Infantry column meets vehicles on a road: thirty-six infantry walk the Alpine Assault street from
+# 760,920 to 1400,1400 while twelve vehicles drive it the other way, one right click for the soldiers and one each
+# for the tanks and the Humvees.
+#
+# Until the change measured at the bottom of this header, a vehicle let a moving allied soldier
+# heading within 60 degrees of it through, but one coming head-on was told to step aside
+# (AIUpdate::processCollision, aiMoveAwayFromUnit), lost his path and stood about a second before
+# he asked again (PATHFINDING-ANALYSIS.md, step-aside yield). This puts thirty-six soldiers in
+# front of twelve vehicles on the one street where that can happen.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 3000
+#     -scenario infconvoy -logPrefix infconvoy_
+#
+# 2026-10-04, main at 8c7195a1, seeds 1 / 2 / 3. Stops of a second, then last arrival in frames:
+#
+#   Rangers            7 / 11 / 10 (4 / 4 / 5 held back, 3 / 5 / 5 blocked)   1480 / 1426 / 1662
+#   Missile Defenders  4 / 3 / 0                                              1101 / 1242 / 1171
+#   Crusaders          10 / 11 / 9 (8 / 8 / 5 blocked)                         1418 / 1256 / 1520
+#   Humvees            3 / 5 / 2                                              1096 / 1157 / 997
+#
+# The same file with the vehicle lines taken out: no stops, Rangers last 1018 (mean 936), Missile
+# Defenders 918, every seed. With the infantry lines taken out: no Crusader stops, last 1310 to
+# 1374. So the vehicles cost the Rangers 400 to 650 frames on the last man and about 300 on the
+# mean, while the soldiers cost the tanks little; eight tanks already queue in this street alone
+# (one Crusader by itself takes 724). -tracemove 238 on seed 1: Ranger 238 stands at 1081,1125
+# from frame 629 to 764 with Crusader 264 twenty units ahead, its allowed speed 0 on every frame;
+# the Crusader is itself stopped behind Crusader 263.
+#
+# 2026-10-04, after a soldier touching a vehicle walks along its side and half a step out from it
+# instead of stopping, and a vehicle creeps at a third of its speed behind a marching soldier
+# instead of telling him to step aside. Same seeds:
+#
+#   Rangers            3 / 0 / 3 (none held back or blocked)                 1122 / 1119 / 1227
+#   Missile Defenders  0 / 0 / 0                                              1022 / 1010 / 1020
+#   Crusaders          0 / 2 / 1                                              1338 / 1253 / 1390
+#   Humvees            1 / 0 / 1                                              997 / 966 / 989
+#
+# Ranger mean arrival 1256 / 1215 / 1220 before, 1038 / 1031 / 1091 after. The six Ranger stops
+# left are counted "with a path and no reason", the longest 73 frames.
+
+30    spawn       0  AmericaInfantryRanger           24  760 920   18
+30    spawn       0  AmericaInfantryMissileDefender  12  760 1000  18
+30    spawn       0  AmericaTankCrusader              8  1400 1400 40
+30    spawn       0  AmericaVehicleHumvee             4  1480 1400 40
+60    playermove  0  AmericaInfantry*                1400 1400
+60    playermove  0  AmericaVehicleHumvee            760 920
+60    playermove  0  AmericaTank*                    760 920
+60    arrive      0  AmericaInfantryRanger           1400 1400 200
+60    arrive      0  AmericaInfantryMissileDefender  1400 1400 200
+60    arrive      0  AmericaTankCrusader             760 920 200
+60    arrive      0  AmericaVehicleHumvee            760 920 200

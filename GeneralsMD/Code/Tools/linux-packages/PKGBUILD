@@ -1,0 +1,45 @@
+# The Arch Linux package of Zero Hour Reforged (Tools/linux-packages.sh runs makepkg on it).  It packages the
+# portable folder Tools/linux-portable.sh --no-art made and checked, as its .tar.zst, laid out as the .deb and
+# .rpm are (Tools/linux-packages/CMakeLists.txt): the folder in /usr/lib/zero-hour-reforged, a link to its
+# launcher in /usr/bin.  No game files: the player's Zero Hour is found or asked for on the first start, and
+# the upscaled art is read from the user data folder's ReforgedArt when something has put it there.
+# linux-packages.sh puts the tarball beside this file and passes ZH_PACKAGE_VERSION and ZH_TARBALL_SHA256.
+
+pkgname=zero-hour-reforged
+pkgver="${ZH_PACKAGE_VERSION:-3.0.0}"
+pkgrel=1
+pkgdesc="Command & Conquer Generals Zero Hour engine (needs your own copy of the game)"
+arch=('x86_64')
+url="https://github.com/olcayseygan/CnCGeneralsZH-Reforged"
+# the game, then what is built into it (usr/share/licenses/zero-hour-reforged has each text)
+license=('GPL-3.0-or-later' 'LGPL-2.1-or-later' 'GPL-2.0-or-later' 'Zlib' 'BSD-3-Clause' 'BSD-2-Clause' 'MIT'
+	'Apache-2.0' 'Unlicense OR MIT-0' 'CC0-1.0' 'LicenseRef-LZH-Light')
+depends=('glibc' 'fontconfig')
+optdepends=('vulkan-icd-loader: drawing, through Vulkan'
+	'vulkan-driver: drawing (mesa for AMD and Intel, nvidia-utils, or lavapipe in vulkan-swrast)'
+	'alsa-lib: sound' 'libpulse: sound through PulseAudio or PipeWire'
+	'libx11: an X11 window' 'libxkbcommon: the keyboard' 'wayland: a Wayland window'
+	'dbus: the folder chooser, through the desktop portal' 'xdg-desktop-portal: the folder chooser'
+	'zenity: the folder chooser without a portal')
+options=('!strip' '!debug')
+source=("ZeroHourReforged-linux-x86_64.tar.zst")
+sha256sums=("${ZH_TARBALL_SHA256:-SKIP}")
+
+package() {
+	local folder="$srcdir/ZeroHourReforged-linux-x86_64" lib="$pkgdir/usr/lib/zero-hour-reforged"
+	install -d "$lib" "$pkgdir/usr/bin" "$pkgdir/usr/share/applications" "$pkgdir/usr/share/doc/$pkgname" \
+		"$pkgdir/usr/share/licenses/$pkgname" "$pkgdir/usr/share/icons/hicolor/48x48/apps" \
+		"$pkgdir/usr/share/icons/hicolor/128x128/apps"
+	cp -a "$folder/." "$lib/"
+	# its debug file stays in the tarball; the menu entry and icon go where desktops look
+	rm -rf "$lib/bin/generals.debug" "$lib/README.txt" "$lib/share/applications" "$lib/share/icons"
+	ln -s ../lib/zero-hour-reforged/zero-hour-reforged.sh "$pkgdir/usr/bin/zero-hour-reforged"
+	sed -e 's/^Exec=.*/Exec=zero-hour-reforged/' -e '/^# a template/d' \
+		"$folder/share/applications/zero-hour-reforged.desktop" > "$pkgdir/usr/share/applications/zero-hour-reforged.desktop"
+	local size
+	for size in 48x48 128x128; do
+		install -m 644 "$folder/share/icons/hicolor/$size/apps/zero-hour-reforged.png" "$pkgdir/usr/share/icons/hicolor/$size/apps/"
+	done
+	install -m 644 "$folder/README.txt" "$folder/VERSION" "$pkgdir/usr/share/doc/$pkgname/"
+	cp -a "$folder/share/zero-hour-reforged/licenses/." "$pkgdir/usr/share/licenses/$pkgname/"
+}

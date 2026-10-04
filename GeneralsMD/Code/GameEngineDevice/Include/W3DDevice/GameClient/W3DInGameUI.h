@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -42,9 +44,9 @@
 #include "GameClient/InGameUI.h"
 #include "GameClient/View.h"
 #include "W3DDevice/GameClient/W3DView.h"
-#include "WW3D2/Render2D.h"
-#include "WW3D2/RendObj.h"
-#include "WW3D2/Line3D.h"
+#include "WW3D2/render2d.h"
+#include "WW3D2/rendobj.h"
+#include "WW3D2/line3d.h"
 
 class HAnimClass;
 
@@ -86,6 +88,7 @@ protected:
 	void drawAllyCursors( void );									///< each ally's pointer and name, over the world
 	void drawOrderStep( const OrderHint& hint, const ICoord2D& tip, UnsignedInt color );	///< a shift list step's number and what it is
 	void drawBuildPlanNumbers( void );						///< each waiting plan's turn in its builder's queue
+	void drawGuardMarkers( void );								///< the guard badge over each of the local player's guarding units
 
 	RenderObjClass *m_buildingPlacementAnchor;
 	RenderObjClass *m_buildingPlacementArrow;

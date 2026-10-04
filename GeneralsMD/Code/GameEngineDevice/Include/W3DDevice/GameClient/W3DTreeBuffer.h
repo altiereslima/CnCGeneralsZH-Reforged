@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -53,15 +55,15 @@
 #include "always.h"
 #include "rendobj.h"
 #include "w3d_file.h"
-#include "Texture.h"
+#include "texture.h"
 #include "dx8vertexbuffer.h"
 #include "dx8indexbuffer.h"
 #include "shader.h"
 #include "vertmaterial.h"
 #include "Lib/BaseType.h"
-#include "common/GameType.h"
+#include "Common/GameType.h"
 #include "Common/AsciiString.h"
-#include "common/GlobalData.h"
+#include "Common/GlobalData.h"
 
 //-----------------------------------------------------------------------------
 //           Forward References

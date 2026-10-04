@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -132,7 +133,7 @@ void DisconnectMenu::setPlayerName(Int playerNum, UnicodeString name) {
 
 	if (control != NULL) {
 		if (name.getLength() > 0) {
-			GadgetStaticTextSetText(control, UnicodeString(L""));
+			GadgetStaticTextSetText(control, UnicodeString(u""));
 		}
 	}
 
@@ -148,7 +149,7 @@ void DisconnectMenu::setPlayerTimeoutTime(Int playerNum, time_t newTime) {
 	GameWindow *control = TheWindowManager->winGetWindowFromId(NULL, id);
 
 	char str[33]; // itoa uses a max of 33 bytes.
-	itoa(newTime, str, 10);
+	snprintf(str, sizeof(str), "%d", newTime);
 	AsciiString asciiNum;
 	asciiNum.set(str);
 	UnicodeString uninum;
@@ -224,7 +225,7 @@ void DisconnectMenu::showPacketRouterTimeout() {
 	control = TheWindowManager->winGetWindowFromId(NULL, id);
 
 	if (control != NULL) {
-		GadgetStaticTextSetText(control, UnicodeString(L"")); // start it off with a blank string.
+		GadgetStaticTextSetText(control, UnicodeString(u"")); // start it off with a blank string.
 		control->winHide(FALSE);
 	}
 }
@@ -250,7 +251,7 @@ void DisconnectMenu::setPacketRouterTimeoutTime(time_t newTime) {
 	GameWindow *control = TheWindowManager->winGetWindowFromId(NULL, id);
 
 	char str[33]; // itoa uses a max of 33 bytes.
-	itoa(newTime, str, 10);
+	snprintf(str, sizeof(str), "%d", newTime);
 	AsciiString asciiNum;
 	asciiNum.set(str);
 	UnicodeString uninum;
@@ -304,7 +305,7 @@ void DisconnectMenu::updateVotes(Int slot, Int votes) {
 
 	if (control != NULL) {
 		char votestr[16];
-		itoa(votes, votestr, 10);
+		snprintf(votestr, sizeof(votestr), "%d", votes);
 		AsciiString asciivotes;
 		asciivotes.set(votestr);
 		UnicodeString unistr;

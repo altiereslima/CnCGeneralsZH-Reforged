@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -77,7 +79,7 @@ void parseUpgradePair( INI *ini, void *instance, void *store, const void *userDa
 
 	const char *token = ini->getNextToken( ini->getSepsColon() );
 
-	if ( stricmp(token, "UpgradeType") == 0 )
+	if ( strcasecmp(token, "UpgradeType") == 0 )
 	{
 		token = ini->getNextTokenOrNull( ini->getSepsColon() );
 		if (!token)	throw INI_INVALID_DATA;
@@ -89,7 +91,7 @@ void parseUpgradePair( INI *ini, void *instance, void *store, const void *userDa
 
 
 	token = ini->getNextTokenOrNull( ini->getSepsColon() );
-	if ( stricmp(token, "Boost") == 0 )
+	if ( strcasecmp(token, "Boost") == 0 )
 		info.amount = INI::scanInt(ini->getNextToken( ini->getSepsColon() ));
 	else
 		throw INI_INVALID_DATA;

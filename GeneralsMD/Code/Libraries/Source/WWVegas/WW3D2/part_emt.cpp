@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*************************************************************************** 
  ***    C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S     *** 
@@ -50,6 +52,8 @@
 #include <gcd_lcm.h>
 #include "texture.h"
 #include "part_ldr.h"
+#include "Platform/MsvcFloatCasts.h"
+#include "Platform/StrdupAsWindows.h"
 
 
 // Global variable which is only used to communicate the worldspace emitter
@@ -82,7 +86,9 @@ ParticleEmitterClass::ParticleEmitterClass(float emit_rate, unsigned int burst_s
 			const W3dEmitterLinePropertiesStruct * line_props
 ) :
 	RenderObjClass(),
-	EmitRate(emit_rate > 0.0f ? (unsigned int)(1000.0f / emit_rate) : 1000U),
+	// a rate so small that its interval leaves an unsigned int (asset data) emits never rather than
+	// through an undefined conversion
+	EmitRate(emit_rate > 0.0f ? ((1000.0f / emit_rate) < 4294967295.0f ? (unsigned int)(1000.0f / emit_rate) : 0xFFFFFFFFu) : 1000U),
 	BurstSize(burst_size != 0	? burst_size : 1),
 	OneTimeBurstSize(1),
 	OneTimeBurst(false),
@@ -100,7 +106,7 @@ ParticleEmitterClass::ParticleEmitterClass(float emit_rate, unsigned int burst_s
 	ParticlesLeft(max_particles),
 	MaxParticles(max_particles),
 	IsComplete(false),
-	NameString(::_strdup ("ParticleEmitter")),
+	NameString(::strdup ("ParticleEmitter")),
 	UserString(NULL),
 	RemoveOnComplete(DefaultRemoveOnComplete),
 	IsInScene(false),
@@ -114,7 +120,9 @@ ParticleEmitterClass::ParticleEmitterClass(float emit_rate, unsigned int burst_s
 	// The maximum number of particles is determined by the emission rate, burst size and lifetime.
 	// However, it is capped both by the particle cap and by the maximum buffer size, if these are
 	// active.
-	int max_num = BurstSize * emit_rate * (max_age + 1);
+	// converted as Windows converts it: past the int range (W3D data) that is INT_MIN, which MAX below
+	// makes 2, where ARM64 saturated to INT_MAX and, with no cap in effect, asked for a buffer that size
+	int max_num = floatToIntAsMsvc(BurstSize * emit_rate * (max_age + 1));
 	if (max_particles > 0) max_num = MIN(max_num, max_particles);
 	if (max_buffer_size > 0) max_num = MIN(max_num, max_buffer_size);
 	max_num = MAX(max_num, 2);	// max_num of 1 causes problems
@@ -126,6 +134,7 @@ ParticleEmitterClass::ParticleEmitterClass(float emit_rate, unsigned int burst_s
 }
 
 
+// A name or user string may be NULL: copied as Windows copies it (Platform/StrdupAsWindows.h, port defect 31).
 ParticleEmitterClass::ParticleEmitterClass(const ParticleEmitterClass & src) :
 	RenderObjClass(src),
 	EmitRate(src.EmitRate),
@@ -146,8 +155,8 @@ ParticleEmitterClass::ParticleEmitterClass(const ParticleEmitterClass & src) :
 	ParticlesLeft(src.ParticlesLeft),
 	MaxParticles(src.MaxParticles),
 	IsComplete(false),
-	NameString(::_strdup (src.NameString)),
-	UserString(::_strdup (src.UserString)),
+	NameString(strdupAsWindows(src.NameString)),
+	UserString(strdupAsWindows(src.UserString)),
 	RemoveOnComplete(src.RemoveOnComplete),
 	IsInScene(false),
 	GroupID(0),
@@ -849,8 +858,9 @@ ParticleEmitterClass::Save (ChunkSaveClass &chunk_save) const
 void
 ParticleEmitterClass::Set_Name (const char *pname)
 {
-	// Copy before freeing the old name: pname may point into it.
-	char *name = ::_strdup (pname);
+	// Copy before freeing the old name: pname may point into it (upstream). strdupAsWindows: a NULL
+	// name copies as NULL, as the UCRT's _strdup does (port defect 31's class).
+	char *name = strdupAsWindows(pname);
 	::free (NameString);
 	NameString = name;
 	return ;

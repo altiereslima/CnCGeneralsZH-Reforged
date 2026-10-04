@@ -15,8 +15,9 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
-// D3DX9 for the native Direct3D 9 renderer.  RENDERER-ROADMAP.md phase 1.
+// D3DX9 for the native Direct3D 9 renderer.
 //
 // The Windows SDK ships d3d9.h and d3d9.lib but no D3DX9: that library only ever
 // came with the DirectX SDK, which was retired in 2012.  Seventeen of its entry points
@@ -32,6 +33,8 @@
 #define D3DX9RUNTIME_H
 
 #include <d3d9.h>
+
+#if defined(_WIN32)
 
 // D3DX filter and default values, from the DirectX SDK's d3dx9tex.h.  They are plain
 // constants: the DLL reads them, it does not define them.
@@ -124,14 +127,18 @@ extern D3DXLoadSurfaceFromSurfaceFunction	D3DXLoadSurfaceFromSurface;
 extern D3DXGetFVFVertexSizeFunction			D3DXGetFVFVertexSize;
 
 // Loads d3dx9_43.dll and resolves all seventeen entry points, this header's and
-// d3dx9math.h's.  Returns false and leaves every pointer null if the DLL is missing or
-// any one of them is not exported, so a caller that checks the return value never has
-// to check the pointers.  Calling it a second time is free and reports the first call.
+// d3dx9math.h's.  Calling it a second time is free and reports the first call.  On ARM64,
+// on x64 with ZH_D3DX_PORTABLE=1, and on x64 when the DLL is missing or any one of them
+// is not exported, it binds the port's own bodies instead (D3DX9_Runtime_Name says which)
+// and returns true, so on Windows it does not fail.
 bool Bind_D3DX9_Runtime(void);
 
 // Frees the DLL and nulls every pointer, so the next Bind_D3DX9_Runtime tries again.
 // Belongs beside the device teardown, since nothing may call a D3DX entry point after it.
 void Unbind_D3DX9_Runtime(void);
+
+// What the bind landed on, for the log: "d3dx9_43.dll", the port's own, or "none".
+const char * D3DX9_Runtime_Name(void);
 
 // d3dx9_43.dll does not export D3DXGetErrorStringA, which dx8wrapper.cpp's two error
 // loggers used.  This names the D3DERR and D3D_OK codes the renderer actually returns
@@ -143,5 +150,111 @@ const char * Get_D3D_Error_String(HRESULT result);
 // transform path, so it binds the runtime itself rather than trusting the caller to have
 // done it.  Returns 0 if D3DX9 is not there at all.
 UINT Get_FVF_Vertex_Size(DWORD fvf);
+
+
+#else // !_WIN32
+
+// Off Windows there is no d3dx9_43.dll: <d3d9.h> is Platform/D3D9Posix.h (decision 7), and the same
+// names are bound by Bind_D3DX9_Runtime to bodies of our own in d3dx9posix.cpp.  They are pointers,
+// as on Windows, because call sites test them: d3d8shadertranslate.cpp and dx8wrapper.cpp read a
+// null D3DXAssembleShader as "no D3DX".  Every one is bound, so a call site that does not test one
+// (W3DWater.cpp) gets a failure, not a null call:
+//   - the matrix functions (d3dx9math.h) compute;
+//   - the texture functions fail with D3DERR_NOTAVAILABLE, logged once each, until the device holds
+//     resources (A2), and with D3DERR_INVALIDCALL on a null device, as D3DX does;
+//   - the shader compiler and disassembler fail with D3DERR_NOTAVAILABLE for good: the SDL3 GPU draw
+//     (A3) takes generated HLSL, not D3D9 bytecode;
+//   - the shader "assembler" is not one: it wraps the source text in a comment token of an otherwise
+//     empty token stream, so the water's run-time programs reach CreatePixelShader and are registered
+//     by name, which is all the POSIX device reads (A3e; d3dx9posix.cpp).
+// A palette is never passed (every call site gives NULL), so it is an untyped pointer rather than
+// wingdi's PALETTEENTRY.
+
+#define D3DX_DEFAULT			((unsigned int)-1)
+#define D3DX_FILTER_NONE		(1 << 0)
+#define D3DX_FILTER_POINT		(2 << 0)
+#define D3DX_FILTER_LINEAR		(3 << 0)
+#define D3DX_FILTER_TRIANGLE	(4 << 0)
+#define D3DX_FILTER_BOX			(5 << 0)
+
+class ID3DXBuffer : public D3D9PosixUnknown
+{
+public:
+	virtual void * GetBufferPointer() = 0;
+	virtual RenderUInt32 GetBufferSize() = 0;
+};
+class ID3DXInclude;
+
+typedef ID3DXBuffer * LPD3DXBUFFER;
+typedef ID3DXInclude * LPD3DXINCLUDE;
+
+struct D3DXMACRO
+{
+	const char * Name;
+	const char * Definition;
+};
+
+struct D3DXIMAGE_INFO
+{
+	unsigned int Width;
+	unsigned int Height;
+	unsigned int Depth;
+	unsigned int MipLevels;
+	D3DFORMAT Format;
+	D3DRESOURCETYPE ResourceType;
+	RenderUInt32 ImageFileFormat;
+};
+
+typedef RenderResult (* D3DXAssembleShaderFunction)(const char * source, unsigned int source_length,
+	const D3DXMACRO * defines, LPD3DXINCLUDE include, RenderUInt32 flags,
+	LPD3DXBUFFER * shader, LPD3DXBUFFER * errors);
+typedef RenderResult (* D3DXCompileShaderFunction)(const char * source, unsigned int source_length,
+	const D3DXMACRO * defines, LPD3DXINCLUDE include, const char * entry_point, const char * profile,
+	RenderUInt32 flags, LPD3DXBUFFER * shader, LPD3DXBUFFER * errors, void ** constant_table);
+typedef RenderResult (* D3DXDisassembleShaderFunction)(const RenderUInt32 * shader, int colour_code,
+	const char * comments, LPD3DXBUFFER * disassembly);
+typedef RenderResult (* D3DXCreateTextureFunction)(LPDIRECT3DDEVICE9 device,
+	unsigned int width, unsigned int height, unsigned int mip_levels, RenderUInt32 usage,
+	D3DFORMAT format, D3DPOOL pool, LPDIRECT3DTEXTURE9 * texture);
+typedef RenderResult (* D3DXCreateCubeTextureFunction)(LPDIRECT3DDEVICE9 device,
+	unsigned int edge_length, unsigned int mip_levels, RenderUInt32 usage, D3DFORMAT format,
+	D3DPOOL pool, LPDIRECT3DCUBETEXTURE9 * texture);
+typedef RenderResult (* D3DXCreateVolumeTextureFunction)(LPDIRECT3DDEVICE9 device,
+	unsigned int width, unsigned int height, unsigned int depth, unsigned int mip_levels,
+	RenderUInt32 usage, D3DFORMAT format, D3DPOOL pool, LPDIRECT3DVOLUMETEXTURE9 * texture);
+typedef RenderResult (* D3DXCreateTextureFromFileExFunction)(LPDIRECT3DDEVICE9 device,
+	const char * file_name, unsigned int width, unsigned int height, unsigned int mip_levels,
+	RenderUInt32 usage, D3DFORMAT format, D3DPOOL pool, RenderUInt32 filter, RenderUInt32 mip_filter,
+	D3DCOLOR colour_key, D3DXIMAGE_INFO * info, void * palette, LPDIRECT3DTEXTURE9 * texture);
+typedef RenderResult (* D3DXFilterTextureFunction)(LPDIRECT3DBASETEXTURE9 texture,
+	const void * palette, unsigned int source_level, RenderUInt32 filter);
+typedef RenderResult (* D3DXLoadSurfaceFromSurfaceFunction)(LPDIRECT3DSURFACE9 destination,
+	const void * destination_palette, const RenderRect * destination_rect,
+	LPDIRECT3DSURFACE9 source, const void * source_palette, const RenderRect * source_rect,
+	RenderUInt32 filter, D3DCOLOR colour_key);
+
+extern D3DXAssembleShaderFunction			D3DXAssembleShader;
+extern D3DXCompileShaderFunction			D3DXCompileShader;
+extern D3DXDisassembleShaderFunction		D3DXDisassembleShader;
+extern D3DXCreateTextureFunction			D3DXCreateTexture;
+extern D3DXCreateCubeTextureFunction		D3DXCreateCubeTexture;
+extern D3DXCreateVolumeTextureFunction		D3DXCreateVolumeTexture;
+extern D3DXCreateTextureFromFileExFunction	D3DXCreateTextureFromFileExA;
+extern D3DXFilterTextureFunction			D3DXFilterTexture;
+extern D3DXLoadSurfaceFromSurfaceFunction	D3DXLoadSurfaceFromSurface;
+
+// As on Windows: binds every pointer above (never fails here, since nothing is loaded), and nulls
+// them again.
+bool Bind_D3DX9_Runtime(void);
+void Unbind_D3DX9_Runtime(void);
+
+// The D3DERR and D3D_OK codes by name, or the raw hex.  Never returns null.
+const char * Get_D3D_Error_String(RenderResult result);
+
+// The size in bytes of a vertex in the given FVF, computed from the FVF bits as D3DX does.  Needs no
+// binding: FVFInfoClass calls it before there is a device.
+unsigned int Get_FVF_Vertex_Size(RenderUInt32 fvf);
+
+#endif // _WIN32
 
 #endif // D3DX9RUNTIME_H

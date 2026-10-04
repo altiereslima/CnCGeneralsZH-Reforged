@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -146,8 +147,10 @@ void SubsystemInterfaceList::addSubsystem(SubsystemInterface* sys)
 void SubsystemInterfaceList::removeSubsystem(SubsystemInterface* sys)
 {
 #ifdef DUMP_PERF_STATS
-	for (SubsystemList::iterator it = m_allSubsystems.begin(); it != m_subsystems.end(); ++it)
-	{	 
+	// m_allSubsystems' own end: the loop compared it with m_subsystems.end(), another vector's, so it
+	// could walk off the end of m_allSubsystems, and MSVC's Debug STL stopped a shutdown there
+	for (SubsystemList::iterator it = m_allSubsystems.begin(); it != m_allSubsystems.end(); ++it)
+	{
 		if ( (*it) == sys) {
 			m_allSubsystems.erase(it);
 			break;

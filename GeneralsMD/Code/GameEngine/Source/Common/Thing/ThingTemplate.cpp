@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -512,7 +514,7 @@ void ThingTemplate::parseModuleName(INI* ini, void *instance, void* store, const
 {
 	ThingTemplate* self = (ThingTemplate*)instance;
 	ModuleInfo* mi = (ModuleInfo*)store;
-	ModuleType type = (ModuleType)(UnsignedInt)userData;
+	ModuleType type = (ModuleType)(UnsignedInt)(uintptr_t)userData;
 	const char* token = ini->getNextToken();
 	AsciiString tokenStr = token;
 
@@ -570,6 +572,16 @@ void ThingTemplate::parseModuleName(INI* ini, void *instance, void* store, const
 			throw INI_INVALID_DATA;
 		}
 	}
+	else if (self->m_moduleParsingMode == MODULEPARSE_ADD_REMOVE_REPLACE)
+	{
+		/* Port defect 34: a module inside ReplaceModule or AddModule in a normal load.  The block names exactly what it
+			 replaces, as it does in an override file (above), so it clears nothing else.  The clearing below is
+			 for an object that restates its own modules: run here, it erased every copied module sharing an
+			 interface with the new one, and upstream's fbe8dc6f, replacing the death module of two ObjectReskins
+			 (Demo_GLAVehicleTechnicalChassisTwo, Three), left live Technicals with no AI, physics, contain or
+			 die modules - and the first AI that recruited one crashed, every platform.  EA's own INIs use no
+			 ReplaceModule or AddModule, so their loading is unchanged. */
+	}
 	else
 	{
 
@@ -619,7 +631,7 @@ void ThingTemplate::parseModuleName(INI* ini, void *instance, void* store, const
 //-------------------------------------------------------------------------------------------------
 void ThingTemplate::parseIntList(INI* ini, void *instance, void* store, const void* userData)
 {
-	Int numberEntries = (Int)userData;
+	Int numberEntries = (Int)(intptr_t)userData;
 	Int *intList = (Int*)store;
 
 	for( Int intIndex = 0; intIndex < numberEntries; intIndex ++ )
@@ -683,7 +695,7 @@ static void parseArbitraryFXIntoMap( INI* ini, void *instance, void* /* store */
 	const char* name = (const char*)userData;
 	const char* token = ini->getNextToken();
 	const FXList* fxl = TheFXListStore->findFXList(token);	// could be null!
-	DEBUG_ASSERTCRASH(fxl != NULL || stricmp(token, "None") == 0, ("FXList %s not found!\n",token));
+	DEBUG_ASSERTCRASH(fxl != NULL || strcasecmp(token, "None") == 0, ("FXList %s not found!\n",token));
 	mapFX->insert(std::make_pair(AsciiString(name), fxl));	
 }
 
@@ -793,12 +805,23 @@ void ThingTemplate::parseReplaceModule(INI *ini, void *instance, void *store, co
 
 	// The object's Locomotor lines are stored in its AI module's data, so a replaced AI module takes
 	// them along: Lazr_AmericaVehicleChinook's replaced ChinookAIUpdate left it no locomotor, and the
-	// first move order it got off the pad read a null one.
+	// first move order it got off the pad read a null one. (Upstream's fix, below: an emptied
+	// replacement gets the old sets back. The port's fix for port defect 33 re-stated them in FixesReforged.ini too.)
 	const AIUpdateModuleData *aiBefore = self->friend_getAIModuleInfo();
 	const LocomotorTemplateMap locomotorsBefore = aiBefore ? aiBefore->m_locomotorTemplates : LocomotorTemplateMap();
 
 	const char *modToRemove = ini->getNextToken();
 	AsciiString removedModuleName;
+	/* Port defect 33's guard: the sets the replaced AI module had are counted here, and ThingFactory's
+		 checkLocomotors reports any thing whose replacement still has none once everything has loaded.
+		 With upstream's carry-over below that can only fire if the carry-over itself fails. */
+	Int setsBefore = 0;
+	if (aiBefore != NULL)
+	{
+		for (LocomotorTemplateMap::const_iterator it = aiBefore->m_locomotorTemplates.begin(); it != aiBefore->m_locomotorTemplates.end(); ++it)
+			if (!it->second.empty())
+				++setsBefore;
+	}
 	// A missing tag means the new module is simply added, for the same installs RemoveModule skips for.
 	if (!self->removeModuleInfo(modToRemove, removedModuleName))
 		DEBUG_LOG(("[LINE: %d - FILE: '%s'] ReplaceModule %s was not found for %s; adding the new module.\n",
@@ -815,6 +838,8 @@ void ThingTemplate::parseReplaceModule(INI *ini, void *instance, void *store, co
 		aiAfter->m_locomotorTemplates = locomotorsBefore;
 	self->m_moduleBeingReplacedName.clear();
 	self->m_moduleBeingReplacedTag.clear();
+	if (replacesAIModule && setsBefore > 0)
+		self->m_locomotorSetsLostToReplace = (Byte)(setsBefore > 127 ? 127 : setsBefore);
 
 	self->m_moduleParsingMode = oldMode;
 }
@@ -998,7 +1023,7 @@ void ThingTemplate::parseMaxSimultaneous(INI *ini, void *instance, void *store, 
   DEBUG_ASSERTCRASH ( &myTemplate->m_maxSimultaneousOfType == store, ("Bad store passed to parseMaxSimultaneous" ) );
 
   const char * token = ini->getNextToken();
-  if ( stricmp( token, DETERMINED_BY_SUPERWEAPON_KEYWORD ) == 0 )
+  if ( strcasecmp( token, DETERMINED_BY_SUPERWEAPON_KEYWORD ) == 0 )
   {
     myTemplate->m_maxSimultaneousDeterminedBySuperweaponRestriction = true;
     *(UnsignedShort *)store = 0;
@@ -1024,6 +1049,7 @@ ThingTemplate::ThingTemplate() :
 	m_geometryInfo(GEOMETRY_SPHERE, FALSE, 1, 1, 1)
 {
 	m_moduleParsingMode = MODULEPARSE_NORMAL;
+	m_locomotorSetsLostToReplace = 0;
 	m_reskinnedFrom = NULL;
 	m_radarPriority = RADAR_PRIORITY_INVALID;
 

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -41,7 +43,7 @@
 /** Kind of flags for determining groups of things that belong together
 	* NOTE: You *MUST* keep this in the same order as the KindOfNames[] below */
 //-------------------------------------------------------------------------------------------------
-enum KindOfType
+enum KindOfType : int
 {
 	KINDOF_INVALID = -1,
 	KINDOF_FIRST = 0,

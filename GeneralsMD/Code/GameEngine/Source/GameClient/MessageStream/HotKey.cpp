@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -55,7 +57,7 @@
 #include "GameClient/MetaEvent.h"
 #include "GameClient/GameWindow.h"
 #include "GameClient/GameWindowManager.h"
-#include "GameClient/keyboard.h"
+#include "GameClient/Keyboard.h"
 #include "GameClient/GameText.h"
 #include "Common/AudioEventRTS.h"
 //-----------------------------------------------------------------------------
@@ -235,7 +237,7 @@ AsciiString HotKeyManager::searchHotKey( const UnicodeString& uStr )
 	const WideChar *marker = (const WideChar *)uStr.str();
 	while (marker && *marker)
 	{
-		if (*marker == L'&')
+		if (*marker == u'&')
 		{
 			// found a '&' - now look for the next char
 			UnicodeString tmp = UnicodeString::TheEmptyString;

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -39,9 +40,9 @@
 #include "GameClient/FXList.h"
 #include "GameLogic/TerrainLogic.h"
 
-#include "WW3D2/HAnim.h"
-#include "WW3D2/HLod.h"
-#include "WW3D2/RendObj.h"
+#include "WW3D2/hanim.h"
+#include "WW3D2/hlod.h"
+#include "WW3D2/rendobj.h"
 #include "W3DDevice/GameClient/Module/W3DDefaultDraw.h"
 #include "W3DDevice/GameClient/W3DAssetManager.h"
 #include "W3DDevice/GameClient/W3DDisplay.h"

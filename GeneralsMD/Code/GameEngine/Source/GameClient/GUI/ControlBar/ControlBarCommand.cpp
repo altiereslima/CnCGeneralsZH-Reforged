@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -707,7 +709,7 @@ void ControlBar::resetBuildQueueButtons( void )
 		m_queueData[ i ].control->winClearStatus( WIN_STATUS_USE_OVERLAY_STATES );
 
 		// set the text of the window to nothing by default
-		GadgetButtonSetText( m_queueData[ i ].control, UnicodeString( L"" ) );
+		GadgetButtonSetText( m_queueData[ i ].control, UnicodeString( u"" ) );
 
 		//Clear any potential veterancy rank, or else we'll see it when it's empty!
 		GadgetButtonDrawOverlayImage( m_queueData[ i ].control, NULL );

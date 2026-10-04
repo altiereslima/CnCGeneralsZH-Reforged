@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -24,6 +26,7 @@
 
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
 #include "Common/Recorder.h"
 #include "GameClient/DisconnectMenu.h"
@@ -104,14 +107,14 @@ void DisconnectManager::init() {
 
 void DisconnectManager::update(ConnectionManager *conMgr) {
 	if (m_lastFrameTime == -1) {
-		m_lastFrameTime = timeGetTime();
+		m_lastFrameTime = Clock_Milliseconds();
 	}
 
 	// The game logic stalls on the frame we are currently waiting for commands on,
 	// so we have to check for the current logic frame being one higher than
 	// the last one we had the commands ready for.
 	if (TheGameLogic->getFrame() == m_lastFrame) {
-		time_t curTime = timeGetTime();
+		time_t curTime = Clock_Milliseconds();
 		UnsignedInt stallMS = (UnsignedInt)(curTime - m_lastFrameTime);
 
 		/* EA popped the disconnect screen on stall duration alone, so a slow machine or a jittery
@@ -144,7 +147,7 @@ void DisconnectManager::update(ConnectionManager *conMgr) {
 		// check to see if we need to send pings
 		if (m_pingFrame < TheGameLogic->getFrame())
 		{
-			time_t curTime = timeGetTime();
+			time_t curTime = Clock_Milliseconds();
 			if ((curTime - m_lastFrameTime) > 10000) /// @todo: plug in some better measure here
 			{
 				m_pingFrame = TheGameLogic->getFrame();
@@ -224,7 +227,7 @@ void DisconnectManager::updateDisconnectStatus(ConnectionManager *conMgr) {
 		if (conMgr->isPlayerConnected(i)) {
 			Int slot = translatedSlotPosition(i, conMgr->getLocalPlayerID());
 			if (slot != -1) {
-				time_t curTime = timeGetTime();
+				time_t curTime = Clock_Milliseconds();
 				time_t newTime = TheGlobalData->m_networkPlayerTimeoutTime - (curTime - m_playerTimeouts[slot]);
 
 // if someone is more than 2/3 timed out, lets get our frame numbers sync'd up.  Also if someone is voted out
@@ -277,7 +280,7 @@ void DisconnectManager::updateDisconnectStatus(ConnectionManager *conMgr) {
 
 void DisconnectManager::updateWaitForPacketRouter(ConnectionManager *conMgr) {
 /*
-	time_t curTime = timeGetTime();
+	time_t curTime = Clock_Milliseconds();
 	time_t newTime = TheGlobalData->m_networkPlayerTimeoutTime - (curTime - m_packetRouterTimeout);
 	if (newTime < 0) {
 		newTime = 0;
@@ -457,7 +460,7 @@ void DisconnectManager::applyDisconnectVote(Int slot, UnsignedInt frame, Int fro
 
 void DisconnectManager::nextFrame(UnsignedInt frame, ConnectionManager *conMgr) {
 	m_lastFrame = frame;
-	m_lastFrameTime = timeGetTime();
+	m_lastFrameTime = Clock_Milliseconds();
 	resetPlayerTimeouts(conMgr);
 }
 
@@ -487,7 +490,7 @@ Bool DisconnectManager::allowedToContinue() {
 }
 
 void DisconnectManager::sendKeepAlive(ConnectionManager *conMgr) {
-	time_t curTime = timeGetTime();
+	time_t curTime = Clock_Milliseconds();
 
 	if (((curTime - m_lastKeepAliveSendTime) > 500) || (m_lastKeepAliveSendTime == -1)) {
 		NetDisconnectKeepAliveCommandMsg *msg = newInstance(NetDisconnectKeepAliveCommandMsg);
@@ -550,11 +553,11 @@ void DisconnectManager::resetPlayerTimeouts(ConnectionManager *conMgr) {
 }
 
 void DisconnectManager::resetPlayerTimeout(Int slot) {
-	m_playerTimeouts[slot] = timeGetTime();
+	m_playerTimeouts[slot] = Clock_Milliseconds();
 }
 
 void DisconnectManager::resetPacketRouterTimeout() {
-	m_packetRouterTimeout = timeGetTime();
+	m_packetRouterTimeout = Clock_Milliseconds();
 }
 
 void DisconnectManager::turnOnScreen(ConnectionManager *conMgr) {
@@ -568,7 +571,7 @@ void DisconnectManager::turnOnScreen(ConnectionManager *conMgr) {
 
 	m_haveNotifiedOtherPlayersOfCurrentFrame = FALSE;
 
-	m_timeOfDisconnectScreenOn = timeGetTime();
+	m_timeOfDisconnectScreenOn = Clock_Milliseconds();
 	DEBUG_LOG(("DisconnectManager::turnOnScreen - turned on screen at time %d\n", m_timeOfDisconnectScreenOn));
 }
 
@@ -722,7 +725,7 @@ Bool DisconnectManager::hasPlayerTimedOut(Int slot) {
 		return FALSE;
 	}
 
-	time_t newTime = TheGlobalData->m_networkPlayerTimeoutTime - (timeGetTime() - m_playerTimeouts[slot]);
+	time_t newTime = TheGlobalData->m_networkPlayerTimeoutTime - (Clock_Milliseconds() - m_playerTimeouts[slot]);
 	if (newTime <= 0) {
 		return TRUE;
 	}

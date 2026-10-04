@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -46,10 +47,63 @@
 #include "always.h"
 #include "wwstring.h"
 
+/*
+**	sint64 was declared for WIN32 or for _UNIX and for nothing else, so on a compiler that is neither
+**	it simply did not exist and Get_Processor_Ticks_Per_Second had no return type.  _UNIX is not the
+**	answer - see PORTING.md ("Never define _UNIX") - and `long long`
+**	is exactly 64 bits everywhere this builds, so the else does not need a platform behind it at all.
+*/
 #ifdef WIN32
 typedef signed __int64 sint64;
-#elif defined (_UNIX)
+#else
 typedef signed long long sint64;
+#endif
+
+/*
+**	Whether this class can ask the processor itself - CPUID and RDTSC - or has to leave everything
+**	they answer at "unknown".  MSVC's own x86 and x64 macros, so the Windows build compiles exactly the
+**	code it always has; everything else, Apple Silicon included, takes the no-CPUID path.  An Intel Mac
+**	would too, which is out of scope and would want <cpuid.h> rather than <intrin.h>.
+*/
+#if defined(_M_IX86) || defined(_M_X64)
+#define CPUDETECT_X86
+#endif
+
+/*
+**	=================================================================================================
+**	OPEN DECISION - NOT A PORTING ONE.  What processor speed, in MHz, a processor reports when it has
+**	no cycle counter this class can time.  Only non-x86 builds read it; Windows never compiles it.
+**	=================================================================================================
+**
+**	Apple Silicon has no RDTSC and publishes no clock rate (there is no hw.cpufrequency on arm64), so
+**	nothing can be measured.  Whatever goes here is chosen, and it is chosen for one reader:
+**	W3DShaderManager::testMinimumRequirements hands it to GameLODManager as the machine's MHz, beside a
+**	CpuType, and GameLODManager picks the default detail preset from the pair.  On arm64 the CpuType
+**	is XX, unknown, because the manufacturer and model tables are x86 tables.  That has two effects:
+**
+**	  - First launch, with no saved "IdealStaticGameLOD", XX sends GameLOD to RunBenchmark, which is
+**	    a stub returning constants set to beat every 2003 BenchProfile.  The preset comes from that,
+**	    and GameLOD overwrites its own MHz with the matched profile's.  This value does not matter then.
+**	  - Every later launch skips the benchmark and keeps THIS value as m_cpuFreq.  Below ReallyLowMHz
+**	    (400 unless GameLOD.ini says otherwise) isReallyLowMHz() is true and the shell map is turned off.
+**
+**	0 is the placeholder because it is what this file already reports for a processor it cannot time,
+**	so it adds no behaviour of its own.  Its consequence is the second bullet: the shell map runs on
+**	the first launch and never again.  Options, for whoever decides:
+**
+**	  (a) 0, as now.  Honest, and the shell map goes after one launch.
+**	  (b) A nominal figure at or above the top preset's MHz, e.g. 3000.  Every later launch then
+**	      agrees with the first.  Not a measurement, and it would be logged as one.
+**	  (c) Report 0 here and have testMinimumRequirements treat an unknown CPU as fast.  The same
+**	      outcome as (b), decided in the renderer's code rather than claimed by this class.
+**	  (d) Name a CpuType for arm64 (P4 is the top of XX/P3/P4/K7) in testMinimumRequirements, and skip
+**	      the benchmark stub altogether.  The most explicit; touches GameEngineDevice and GameLOD's
+**	      preset tables.
+**
+**	test_wwlib's cpudetect test checks this value by name, so changing it cannot go unnoticed.
+*/
+#ifndef CPUDETECT_X86
+#define CPUDETECT_UNMEASURED_PROCESSOR_MHZ	0
 #endif
 
 class CPUDetectInitClass;
@@ -200,6 +254,12 @@ public:
 	static unsigned Get_Available_Page_File_Size() { return AvailablePageMemory; }
 	static unsigned Get_Total_Virtual_Memory() { return TotalVirtualMemory; }
 	static unsigned Get_Available_Virtual_Memory() { return AvailableVirtualMemory; }
+#if !defined(WIN32)
+	// The same figures, unclamped and asked again now; see cpudetect.cpp.
+	static void Query_Memory(unsigned long long& totalPhysical, unsigned long long& availablePhysical,
+		unsigned long long& totalPage, unsigned long long& availablePage,
+		unsigned long long& totalVirtual, unsigned long long& availableVirtual);
+#endif
 
 	static unsigned Get_Processor_Type() { return ProcessorType; }
 

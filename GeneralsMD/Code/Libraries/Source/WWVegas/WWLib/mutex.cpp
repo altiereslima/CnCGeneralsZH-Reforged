@@ -15,58 +15,59 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 #include "mutex.h"
 #include "wwdebug.h"
-#include <windows.h>
+
+#include <chrono>
 
 
 // ----------------------------------------------------------------------------
 
-MutexClass::MutexClass(const char* name) : handle(NULL), locked(false)
+/*
+	The #ifdef _UNIX arms these functions used to carry were not a port; they were a hole.  Each
+	one returned success having taken no lock at all - MutexClass::Lock answered true, Unlock did
+	nothing, and the constructor built nothing - with a commented-out assert where the
+	implementation should have been.  Anything built with _UNIX defined ran the whole engine's
+	WWVegas locking as no-ops and would have looked like it worked until two threads met.  They
+	are gone: there is one implementation now and it is the same one on every platform.
+*/
+
+MutexClass::MutexClass(const char* name) : locked(0)
 {
-	#ifdef _UNIX
-		//assert(0);
-	#else
-		handle=CreateMutex(NULL,false,name);
-		WWASSERT(handle);
-	#endif
+	// See the note in mutex.h: a named, cross-process mutex has no standard equivalent, and
+	// nothing in this tree asks for one.
+	WWASSERT(name == NULL);
+	(void)name;
 }
 
 MutexClass::~MutexClass()
 {
-	#ifdef _UNIX
-		//assert(0);
-	#else
-		WWASSERT(!locked); // Can't delete locked mutex!
-		CloseHandle(handle);
-	#endif
+	WWASSERT(!locked); // Can't delete locked mutex!
 }
 
 bool MutexClass::Lock(int time)
 {
-	#ifdef _UNIX
-		//assert(0);
-		return true;
-	#else
-		int res = WaitForSingleObject(handle,time==WAIT_INFINITE ? INFINITE : time);
-		if (res!=WAIT_OBJECT_0) return false;
-		locked++;
-		return true;
-	#endif
+	if (time == WAIT_INFINITE) {
+		Mutex.lock();
+	}
+	else if (time <= 0) {
+		// WaitForSingleObject with a zero timeout is a poll, and callers pass 0 for exactly that.
+		if (!Mutex.try_lock()) return false;
+	}
+	else {
+		if (!Mutex.try_lock_for(std::chrono::milliseconds(time))) return false;
+	}
+	locked++;
+	return true;
 }
 
 void MutexClass::Unlock()
 {
-	#ifdef _UNIX
-		//assert(0);
-	#else
-		WWASSERT(locked);
-		locked--;
-		int res=ReleaseMutex(handle);
-		res;	// silence compiler warnings
-		WWASSERT(res);
-	#endif
+	WWASSERT(locked);
+	locked--;
+	Mutex.unlock();
 }
 
 // ----------------------------------------------------------------------------
@@ -89,46 +90,29 @@ MutexClass::LockClass::~LockClass()
 
 // ----------------------------------------------------------------------------
 
-CriticalSectionClass::CriticalSectionClass() : handle(NULL), locked(false)
+CriticalSectionClass::CriticalSectionClass() : locked(0)
 {
-	#ifdef _UNIX
-		//assert(0);
-	#else
-		handle=W3DNEWARRAY char[sizeof(CRITICAL_SECTION)];
-		InitializeCriticalSection((CRITICAL_SECTION*)handle);
-	#endif
+	// The CRITICAL_SECTION this used to hold was heap-allocated as a char array of its size and
+	// reached through a void*, which is what you do when a header may not include windows.h.  The
+	// mutex is a member now, so the allocation and the cast are both gone.
 }
 
 CriticalSectionClass::~CriticalSectionClass()
 {
-	#ifdef _UNIX
-		//assert(0);
-	#else
-		WWASSERT(!locked); // Can't delete locked mutex!
-		DeleteCriticalSection((CRITICAL_SECTION*)handle);
-		delete[] handle;
-	#endif
+	WWASSERT(!locked); // Can't delete locked mutex!
 }
 
 void CriticalSectionClass::Lock()
 {
-	#ifdef _UNIX
-		//assert(0);
-	#else
-		EnterCriticalSection((CRITICAL_SECTION*)handle);
-		locked++;
-	#endif
+	Mutex.lock();
+	locked++;
 }
 
 void CriticalSectionClass::Unlock()
 {
-	#ifdef _UNIX
-		//assert(0);
-	#else
-		WWASSERT(locked);
-		locked--;
-		LeaveCriticalSection((CRITICAL_SECTION*)handle);
-	#endif
+	WWASSERT(locked);
+	locked--;
+	Mutex.unlock();
 }
 
 // ----------------------------------------------------------------------------

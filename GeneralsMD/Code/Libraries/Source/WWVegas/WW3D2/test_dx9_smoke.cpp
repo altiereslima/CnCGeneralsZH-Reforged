@@ -1,5 +1,5 @@
-// Native Direct3D 9 checkpoint for RENDERER-ROADMAP.md phase 1.  test_dx8_smoke.cpp
-// proves the D3D8 path through our d3d8to9 d3d8.dll; this one calls Direct3DCreate9
+// Native Direct3D 9 checkpoint for the move off the translating DLL.  The D3D8 path went
+// through our d3d8to9 d3d8.dll; this one calls Direct3DCreate9
 // itself, with no translating DLL anywhere, and answers the questions that decide
 // whether the phase-1 rename is a rename or a rewrite:
 //
@@ -22,6 +22,9 @@
 
 #include "d3dx9runtime.h"
 #include "d3dx9math.h"
+#include "d3dx_golden.h"
+
+#include <intrin.h>
 
 static const int WINDOW_EDGE = 64;
 static const int BACK_BUFFER_WIDTH = 640;
@@ -360,7 +363,17 @@ int main(int argument_count, char ** arguments)
 	// d3dx9runtime.cpp is what the renderer will bind, so the test binds the same thing
 	// rather than a copy of it: a missing entry point fails here before it fails in a match.
 	BoundD3DX9Runtime d3dx9;
-	if (!d3dx9.Is_Bound()) {
+	// Without the DLL the bind lands on the port's own D3DX and still succeeds, so ask what it bound.
+	const bool boundDLL = d3dx9.Is_Bound() && strcmp(D3DX9_Runtime_Name(), "d3dx9_43.dll") == 0;
+#if defined(_M_ARM64)
+	// There is no d3dx9_43.dll for ARM64, so the rest of this - the DLL's assembler, its math against the
+	// signatures, its CPU dispatch - has nothing to run against.  The device checks above have run.
+	if (!boundDLL) {
+		printf("SKIP: no d3dx9_43.dll exists for ARM64; the D3DX half of this check needs it\n");
+		return 77;
+	}
+#endif
+	if (!boundDLL) {
 		printf("FAIL: d3dx9_43.dll did not bind; all seventeen entry points are phase 1 dependencies\n");
 		return 1;
 	}
@@ -379,7 +392,7 @@ int main(int argument_count, char ** arguments)
 			 1.0f,  0.0f,  0.0f, 0.0f);
 		const D3DXVECTOR4 unitTime(1.0f, 1.0f, 1.0f, 1.0f);
 		D3DXVECTOR4 transformed(0.0f, 0.0f, 0.0f, 0.0f);
-		D3DXVec4Transform(&transformed, &unitTime, &bezierBasis);
+		D3DXVec4TransformFromDLL(&transformed, &unitTime, &bezierBasis);
 
 		// Each output component is the sum of one column, and the columns of this
 		// matrix sum to 0, 0, 0 and 1.
@@ -391,6 +404,69 @@ int main(int argument_count, char ** arguments)
 		if (!transformIsRight || dot != 4.0f) {
 			printf("FAIL: the hand-declared D3DX math signatures do not match the DLL\n");
 			return 1;
+		}
+	}
+
+	// The Windows capture B17 left for E1.  d3dx9_43.dll picks its D3DXVec4Transform body by CPU:
+	// GenuineIntel sums pairwise, every other vendor and the scalar fallback sum left to right, and
+	// the two disagree on lane x of the Bezier basis.  That was read out of the DLL's dispatch code
+	// on a Mac, and each body's arithmetic was run there under Rosetta.  What a Mac cannot see is
+	// which body a real Windows process lands on.  This prints every golden row as this machine's
+	// DLL computes it, and which body that was, so the reading can be checked against a real run.
+	// It fails only if the result matches neither body; a vendor/body mismatch is reported, not
+	// failed, because HKLM\Software\Microsoft\Direct3D DisableD3DXPSGP=1 legitimately causes one.
+	// The game no longer calls the DLL for this: D3DXVec4Transform is d3dxportable.h on every
+	// platform, and it matches the left-to-right body.  This block calls D3DXVec4TransformFromDLL
+	// on purpose.  Pointed at the game's own function it would compare d3dxportable.h with itself
+	// and could no longer see the dispatch.
+	{
+		char vendor[13];
+#if defined(_M_ARM64)
+		// ARM64 has no CPUID and no d3dx9_43.dll: Microsoft shipped the DLL for x86 and x64 only,
+		// so an ARM64 build fails at the bind above and never gets here.  This only has to compile.
+		strcpy(vendor, "(arm64)");
+#else
+		int registers[4];
+		__cpuid(registers, 0);
+		memcpy(vendor + 0, &registers[1], 4);
+		memcpy(vendor + 4, &registers[3], 4);
+		memcpy(vendor + 8, &registers[2], 4);
+		vendor[12] = '\0';
+#endif
+
+		D3DXMATRIX basis;
+		memcpy(&basis, D3DX_GOLDEN_BASIS, sizeof(basis));
+		unsigned int leftToRightRows = 0;
+		unsigned int intelRows = 0;
+		for (unsigned int row = 0; row < D3DX_GOLDEN_ROW_COUNT; ++row) {
+			D3DXVECTOR4 in;
+			memcpy(&in, D3DX_GOLDEN_ROWS[row].in, sizeof(in));
+			D3DXVECTOR4 out;
+			D3DXVec4TransformFromDLL(&out, &in, &basis);
+			unsigned int bits[4];
+			memcpy(bits, &out, sizeof(bits));
+			printf("d3dx9 capture: row %2u -> %08x %08x %08x %08x\n", row, bits[0], bits[1], bits[2],
+				bits[3]);
+			const unsigned int * want = D3DX_GOLDEN_ROWS[row].out;
+			const bool yzw = bits[1] == want[1] && bits[2] == want[2] && bits[3] == want[3];
+			if (yzw && bits[0] == want[0]) {
+				++leftToRightRows;
+			}
+			if (yzw && bits[0] == D3DX_GOLDEN_ROWS[row].intel_x) {
+				++intelRows;
+			}
+		}
+		const bool leftToRight = leftToRightRows == D3DX_GOLDEN_ROW_COUNT;
+		const bool intel = intelRows == D3DX_GOLDEN_ROW_COUNT;
+		printf("d3dx9 capture: CPU vendor %s; D3DXVec4Transform ran the %s body\n", vendor,
+			leftToRight ? "left-to-right (scalar or non-Intel)" : intel ? "GenuineIntel pairwise" : "UNRECOGNISED");
+		if (!leftToRight && !intel) {
+			printf("FAIL: D3DXVec4Transform matches neither body recorded in d3dx_golden.h\n");
+			return 1;
+		}
+		if (intel != (strcmp(vendor, "GenuineIntel") == 0)) {
+			printf("NOTE: the body is not the one d3dxportable.h predicts for this vendor - "
+				"check DisableD3DXPSGP, and tell B17/E1\n");
 		}
 	}
 

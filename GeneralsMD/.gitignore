@@ -2,12 +2,16 @@
 # Ignore RUNable folder
 [Rr]un
 
-# Build output folders
-[Rr]elease*
-[Pp]rofile*
-[Ii]nternal*
-[Dd]ebug*
-[Hh]ybrid*
+# Build output folders.  Directories only (trailing slash): unanchored, these also ignored any new
+# FILE whose name began with Debug, Release, Profile, Internal or Hybrid - a new Debug*.h was
+# silently left out of a commit on 2026-09-26 - and every new file under the tracked library
+# directory Code/Libraries/Source/debug/.
+[Rr]elease*/
+[Pp]rofile*/
+[Ii]nternal*/
+[Dd]ebug*/
+[Hh]ybrid*/
+!/Code/Libraries/Source/debug/
 [Ee]nglish
 [Ff]rench
 [Gg]erman

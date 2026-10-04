@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -30,6 +32,7 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
 #include "Common/GameEngine.h"
 #include "Common/GameState.h"
@@ -37,7 +40,7 @@
 #include "Common/MultiplayerSettings.h"
 #include "Common/PlayerTemplate.h"
 #include "Common/CustomMatchPreferences.h"
-#include "Common/Version.h"
+#include "Common/version.h"
 #include "GameClient/AnimateWindowManager.h"
 #include "GameClient/WindowLayout.h"
 #include "GameClient/Gadget.h"
@@ -75,8 +78,8 @@
 //#pragma optimize("", off)
 //#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
 #endif
-void refreshGameList( Bool forceRefresh = FALSE );
-void refreshPlayerList( Bool forceRefresh = FALSE );
+static void refreshGameList( Bool forceRefresh = FALSE );
+static void refreshPlayerList( Bool forceRefresh = FALSE );
 
 #ifdef DEBUG_LOGGING
 #define PERF_TEST
@@ -164,7 +167,7 @@ Bool handleLobbySlashCommands(UnicodeString uText)
 	if (token == "host")
 	{
 		UnicodeString s;
-		s.format(L"Hosting qr2:%d thread:%d", getQR2HostingStatus(), isThreadHosting);
+		s.format(u"Hosting qr2:%d thread:%d", getQR2HostingStatus(), isThreadHosting);
 		TheGameSpyInfo->addText(s, GameSpyColor[GSCOLOR_DEFAULT], NULL);
 		return TRUE; // was a slash command
 	}
@@ -206,13 +209,13 @@ Bool handleLobbySlashCommands(UnicodeString uText)
 	else if (token == "fakecrc")
 	{
 		g_fakeCRC = !g_fakeCRC;
-		TheGameSpyInfo->addText(UnicodeString(L"Toggled CRC fakery"), GameSpyColor[GSCOLOR_DEFAULT], NULL);
+		TheGameSpyInfo->addText(UnicodeString(u"Toggled CRC fakery"), GameSpyColor[GSCOLOR_DEFAULT], NULL);
 		return TRUE; // was a slash command
 	}
 	else if (token == "slots")
 	{
 		g_debugSlots = !g_debugSlots;
-		TheGameSpyInfo->addText(UnicodeString(L"Toggled SlotList debug"), GameSpyColor[GSCOLOR_DEFAULT], NULL);
+		TheGameSpyInfo->addText(UnicodeString(u"Toggled SlotList debug"), GameSpyColor[GSCOLOR_DEFAULT], NULL);
 		return TRUE; // was a slash command
 	}
 #endif
@@ -311,11 +314,7 @@ static void playerTooltip(GameWindow *window,
 		tooltip.concat(playerInfo);
 	}
 
-	Int rank = 0;
-	Int i = 0;
-	while( info->m_rankPoints >= TheRankPointValues->m_ranks[i + 1])
-		++i;
-	rank = i;
+	Int rank = rankForPoints( TheRankPointValues->m_ranks, info->m_rankPoints );
 	AsciiString sideName = "GUI:RandomSide";
 	if (info->m_side > 0)
 	{		
@@ -328,7 +327,7 @@ static void playerTooltip(GameWindow *window,
 	AsciiString rankName;
 	rankName.format("GUI:GSRank%d", rank);
 	UnicodeString tmp;
-	tmp.format(L"\n%ls %ls", TheGameText->fetch(sideName).str(), TheGameText->fetch(rankName).str());
+	tmp.format(u"\n%ls %ls", TheGameText->fetch(sideName).str(), TheGameText->fetch(rankName).str());
 	tooltip.concat(tmp);
 
 	TheMouse->setCursorTooltip( tooltip, -1, NULL, 1.5f ); // the text and width are the only params used.  the others are the default values.
@@ -353,13 +352,13 @@ static void populateGroupRoomListbox(GameWindow *lb)
 			if (room.m_groupID == TheGameSpyInfo->getCurrentGroupRoom())
 			{
 				Int selected = GadgetComboBoxAddEntry(lb, room.m_translatedName, GameSpyColor[GSCOLOR_CURRENTROOM]);
-				GadgetComboBoxSetItemData(lb, selected, (void *)(room.m_groupID));
+				GadgetComboBoxSetItemData(lb, selected, (void *)(intptr_t)(room.m_groupID));
 				indexToSelect = selected;
 			}
 			else
 			{
 				Int selected = GadgetComboBoxAddEntry(lb, room.m_translatedName, GameSpyColor[GSCOLOR_ROOM]);
-				GadgetComboBoxSetItemData(lb, selected, (void *)(room.m_groupID));
+				GadgetComboBoxSetItemData(lb, selected, (void *)(intptr_t)(room.m_groupID));
 			}
 		}
 		else
@@ -389,11 +388,7 @@ const Image* LookupSmallRankImage(Int side, Int rankPoints)
 	if (rankPoints == 0)
 		return NULL;
 
-	Int rank = 0;
-	Int i = 0;
-	while( rankPoints >= TheRankPointValues->m_ranks[i + 1])
-		++i;
-	rank = i;
+	Int rank = rankForPoints( TheRankPointValues->m_ranks, rankPoints );
 
 	if (rank < 0 || rank >= 10)
 		return NULL;
@@ -869,14 +864,14 @@ static void refreshGameList( Bool forceRefresh )
 {
 	Int refreshInterval = gameListRefreshInterval;
 
-	if (forceRefresh || ((gameListRefreshTime == 0) || ((gameListRefreshTime + refreshInterval) <= timeGetTime())))
+	if (forceRefresh || ((gameListRefreshTime == 0) || ((gameListRefreshTime + refreshInterval) <= Clock_Milliseconds())))
 	{
 		if (TheGameSpyInfo->hasStagingRoomListChanged())
 		{
 			//DEBUG_LOG(("################### refreshing game list\n"));
 			//DEBUG_LOG(("gameRefreshTime=%d, refreshInterval=%d, now=%d\n", gameListRefreshTime, refreshInterval, timeGetTime()));
 			RefreshGameListBoxes();
-			gameListRefreshTime = timeGetTime();
+			gameListRefreshTime = Clock_Milliseconds();
 		} else {
 			//DEBUG_LOG(("-"));
 		}
@@ -892,10 +887,10 @@ static void refreshPlayerList( Bool forceRefresh )
 {
 		Int refreshInterval = playerListRefreshInterval;
 
-		if (forceRefresh ||((playerListRefreshTime == 0) || ((playerListRefreshTime + refreshInterval) <= timeGetTime())))
+		if (forceRefresh ||((playerListRefreshTime == 0) || ((playerListRefreshTime + refreshInterval) <= Clock_Milliseconds())))
 		{
 				PopulateLobbyPlayerListbox();
-				playerListRefreshTime = timeGetTime();
+				playerListRefreshTime = Clock_Milliseconds();
 		}
 }
 //-------------------------------------------------------------------------------------------------
@@ -937,8 +932,8 @@ void WOLLobbyMenuUpdate( WindowLayout * layout, void *userData)
 		HandlePersistentStorageResponses();
 
 #ifdef PERF_TEST
-		UnsignedInt start = timeGetTime();
-		UnsignedInt end = timeGetTime();
+		UnsignedInt start = Clock_Milliseconds();
+		UnsignedInt end = Clock_Milliseconds();
 		std::list<Int> responses;
 		Int numMessages = 0;
 #endif // PERF_TEST
@@ -1286,7 +1281,7 @@ void WOLLobbyMenuUpdate( WindowLayout * layout, void *userData)
 
 #ifdef PERF_TEST
 		// check performance
-		end = timeGetTime();
+		end = Clock_Milliseconds();
 		PERF_LOG(("Frame time was %d ms\n", end-start));
 		std::list<Int>::const_iterator it;
 		for (it = responses.begin(); it != responses.end(); ++it)
@@ -1300,14 +1295,14 @@ void WOLLobbyMenuUpdate( WindowLayout * layout, void *userData)
 // Removed 2-17-03 to pull out into a function so we can do the same checks 
 		Int refreshInterval = gameListRefreshInterval;
 
-		if ((gameListRefreshTime == 0) || ((gameListRefreshTime + refreshInterval) <= timeGetTime()))
+		if ((gameListRefreshTime == 0) || ((gameListRefreshTime + refreshInterval) <= Clock_Milliseconds()))
 		{
 			if (TheGameSpyInfo->hasStagingRoomListChanged())
 			{
 				//DEBUG_LOG(("################### refreshing game list\n"));
 				//DEBUG_LOG(("gameRefreshTime=%d, refreshInterval=%d, now=%d\n", gameListRefreshTime, refreshInterval, timeGetTime()));
 				RefreshGameListBoxes();
-				gameListRefreshTime = timeGetTime();
+				gameListRefreshTime = Clock_Milliseconds();
 			} else {
 				//DEBUG_LOG(("-"));
 			}
@@ -1473,7 +1468,7 @@ WindowMsgHandledType WOLLobbyMenuSystem( GameWindow *window, UnsignedInt msg,
 
 						PeerRequest req;
 						req.peerRequestType = PeerRequest::PEERREQUEST_GETEXTENDEDSTAGINGROOMINFO;
-						req.stagingRoom.id = (Int)GadgetListBoxGetItemData(control, rowSelected, 0);
+						req.stagingRoom.id = (Int)(intptr_t)GadgetListBoxGetItemData(control, rowSelected, 0);
 
 						if (lastID != req.stagingRoom.id || now > lastFrame + 60)
 						{
@@ -1551,7 +1546,7 @@ WindowMsgHandledType WOLLobbyMenuSystem( GameWindow *window, UnsignedInt msg,
 					GadgetListBoxGetSelected(GetGameListBox(), &selected);
 					if (selected >= 0)
 					{
-						Int selectedID = (Int)GadgetListBoxGetItemData(GetGameListBox(), selected);
+						Int selectedID = (Int)(intptr_t)GadgetListBoxGetItemData(GetGameListBox(), selected);
 						if (selectedID > 0)
 						{
 							StagingRoomMap *srm = TheGameSpyInfo->getStagingRoomList();
@@ -1662,7 +1657,7 @@ WindowMsgHandledType WOLLobbyMenuSystem( GameWindow *window, UnsignedInt msg,
 					if (rowSelected >= 0)
 					{
 						Int groupID;
-						groupID = (Int)GadgetComboBoxGetItemData(comboLobbyGroupRooms, rowSelected);
+						groupID = (Int)(intptr_t)GadgetComboBoxGetItemData(comboLobbyGroupRooms, rowSelected);
 						DEBUG_LOG(("ItemData was %d, current Group Room is %d\n", groupID, TheGameSpyInfo->getCurrentGroupRoom()));
 						if (groupID && groupID != TheGameSpyInfo->getCurrentGroupRoom())
 						{
@@ -1787,7 +1782,7 @@ WindowMsgHandledType WOLLobbyMenuSystem( GameWindow *window, UnsignedInt msg,
 						break;
 					}
 
-					Int selectedID = (Int)GadgetListBoxGetItemData(control, rc->pos);
+					Int selectedID = (Int)(intptr_t)GadgetListBoxGetItemData(control, rc->pos);
 					if (selectedID > 0)
 					{
 						StagingRoomMap *srm = TheGameSpyInfo->getStagingRoomList();
@@ -1812,7 +1807,7 @@ WindowMsgHandledType WOLLobbyMenuSystem( GameWindow *window, UnsignedInt msg,
 								rcMenu->winHide(FALSE);
 								rcMenu->winSetPosition(rc->mouseX, rc->mouseY);
 								
-								rcMenu->winSetUserData((void *)selectedID);
+								rcMenu->winSetUserData((void *)(intptr_t)selectedID);
 								TheWindowManager->winSetLoneWindow(rcMenu);
 							}
 						}

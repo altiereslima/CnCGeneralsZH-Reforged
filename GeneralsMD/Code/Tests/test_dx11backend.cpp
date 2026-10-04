@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 // The backend driven the way the engine drives a device: set a transform, set a stage state, set a
 // stream, draw.  Nothing here builds a shader or a state object by hand, because the point is that
@@ -279,7 +280,7 @@ TEST(dx11backend_a_light_is_carried_into_camera_space)
 	const float direction[4] = { 0.0f, -1.0f, 0.0f, 0.0f };
 	const float attenuation[4] = { 1.0f, 0.0f, 0.0f, 100000.0f };
 	backend.Set_Light(0, D3DLIGHT_DIRECTIONAL, black, direction, light_diffuse, black,
-		attenuation, black);
+		attenuation, black, black);
 
 	ID3D11Buffer * vertices = NULL;
 	CHECK(DX11Resource_Create_Vertex_Buffer(d3d, sizeof(QUAD_VERTICES), D3DPOOL_MANAGED, 0,
@@ -364,6 +365,92 @@ TEST(dx11backend_the_same_state_resolves_to_one_pipeline)
 
 	indices->Release();
 	vertices->Release();
+	backend.Shutdown();
+}
+
+// The sorted smoke billboards carry a fire's glow in their normals, and the backend adds it to what
+// the stages made.  The quad's normal is (0, 0, 1), so with the glow on the blue channel goes to full
+// and the other two keep the vertex colour; the glow is its own pipeline and turning it off goes
+// back to the first one without building a third.
+TEST(dx11backend_the_smoke_glow_is_read_from_the_normal)
+{
+	DX11DeviceClass device;
+	CHECK(device.Create_Offscreen());
+	ID3D11Device * d3d = device.Get_Device();
+
+	DX11BackendClass backend;
+	CHECK(backend.Initialise(&device));
+
+	D3D11_TEXTURE2D_DESC target_description;
+	memset(&target_description, 0, sizeof(target_description));
+	target_description.Width = TARGET_SIZE;
+	target_description.Height = TARGET_SIZE;
+	target_description.MipLevels = 1;
+	target_description.ArraySize = 1;
+	target_description.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+	target_description.SampleDesc.Count = 1;
+	target_description.Usage = D3D11_USAGE_DEFAULT;
+	target_description.BindFlags = D3D11_BIND_RENDER_TARGET;
+
+	ID3D11Texture2D * target = NULL;
+	CHECK(SUCCEEDED(d3d->CreateTexture2D(&target_description, NULL, &target)));
+
+	D3D11_TEXTURE2D_DESC staging_description = target_description;
+	staging_description.Usage = D3D11_USAGE_STAGING;
+	staging_description.BindFlags = 0;
+	staging_description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+	ID3D11Texture2D * staging = NULL;
+	CHECK(SUCCEEDED(d3d->CreateTexture2D(&staging_description, NULL, &staging)));
+
+	ID3D11RenderTargetView * target_view = NULL;
+	CHECK(SUCCEEDED(d3d->CreateRenderTargetView(target, NULL, &target_view)));
+	device.Get_Context()->OMSetRenderTargets(1, &target_view, NULL);
+
+	backend.Set_Viewport(0, 0, TARGET_SIZE, TARGET_SIZE);
+	configure_unlit_pass_through(backend);
+
+	ID3D11Buffer * vertices = NULL;
+	CHECK(DX11Resource_Create_Vertex_Buffer(d3d, sizeof(QUAD_VERTICES), D3DPOOL_MANAGED, 0,
+		QUAD_VERTICES, &vertices));
+	ID3D11Buffer * indices = NULL;
+	CHECK(DX11Resource_Create_Index_Buffer(d3d, sizeof(QUAD_INDICES), D3DPOOL_MANAGED, 0,
+		QUAD_INDICES, &indices));
+	backend.Set_Stream_Source(vertices, sizeof(BackendVertex), 0);
+	backend.Set_Indices(indices, DXGI_FORMAT_R16_UINT);
+
+	CHECK(backend.Draw_Indexed_Triangles(6, 0, 0));
+	backend.Set_Smoke_Glow(true);
+	CHECK(backend.Draw_Indexed_Triangles(6, 0, 0));
+
+	device.Get_Context()->CopyResource(staging, target);
+	D3D11_MAPPED_SUBRESOURCE mapped;
+	CHECK(SUCCEEDED(device.Get_Context()->Map(staging, 0, D3D11_MAP_READ, 0, &mapped)));
+	const unsigned char * centre = static_cast<const unsigned char *>(mapped.pData)
+		+ mapped.RowPitch * (TARGET_SIZE / 2) + (TARGET_SIZE / 2) * 4;
+	CHECK_EQ(centre[0], 0xff);
+	CHECK_EQ(centre[1], EXPECTED_GREEN);
+	CHECK_EQ(centre[2], EXPECTED_RED);
+	device.Get_Context()->Unmap(staging, 0);
+
+	unsigned pipelines = 0;
+	unsigned long long made = 0;
+	unsigned long long refused = 0;
+	backend.Statistics(pipelines, made, refused);
+	CHECK_EQ(pipelines, 2u);
+
+	backend.Set_Smoke_Glow(false);
+	CHECK(backend.Draw_Indexed_Triangles(6, 0, 0));
+	backend.Statistics(pipelines, made, refused);
+	CHECK_EQ(pipelines, 2u);
+	CHECK_EQ(made, 3ull);
+	CHECK_EQ(refused, 0ull);
+
+	indices->Release();
+	vertices->Release();
+	target_view->Release();
+	staging->Release();
+	target->Release();
 	backend.Shutdown();
 }
 
@@ -670,5 +757,84 @@ TEST(dx11backend_a_draw_with_nothing_bound_is_counted_as_refused)
 	CHECK_EQ(made, 0ull);
 	CHECK_EQ(refused, 1ull);
 
+	backend.Shutdown();
+}
+
+// The smoke's map holds three sums under each caster: its optical depth, that times its depth in the
+// sun's clip space, and that times the depth squared plus its own spread squared.  The receivers
+// rebuild the cloud along the ray out of exactly those, so a sum in the wrong channel, a depth
+// through the wrong column of the sun's matrix or a disc off its centre is a shadow somewhere else.
+//
+// The sun here sees a hundred world units either side of the middle and puts depth z at
+// z / 1000 + 0.5.  One caster at height 100, radius 50, optical depth 2 lands in the middle texel
+// with depth 0.6 and a spread of half its radius, 0.025.  One outside the box draws nothing.
+TEST(dx11backend_the_smoke_map_holds_each_casters_three_sums)
+{
+	DX11DeviceClass device;
+	CHECK(device.Create_Offscreen());
+	ID3D11Device * d3d = device.Get_Device();
+
+	DX11BackendClass backend;
+	CHECK(backend.Initialise(&device));
+
+	float identity[16];
+	set_identity(identity);
+	float sun[16];
+	set_identity(sun);
+	sun[0] = 0.01f;
+	sun[5] = 0.01f;
+	sun[10] = 0.001f;
+	sun[14] = 0.5f;
+	backend.Set_Transform(D3DTS_VIEW, identity);
+	backend.Set_Transform(D3DTS_PROJECTION, sun);
+	CHECK(backend.Begin_Shadow_Map(64));
+	backend.End_Shadow_Map();
+
+	const float outside[5] = { 500.0f, 0.0f, 100.0f, 50.0f, 2.0f };
+	CHECK(backend.Fill_Smoke_Map(outside, 1, 0.5f));
+	CHECK(backend.Smoke_Map() == NULL);
+
+	const float caster[5] = { 0.0f, 0.0f, 100.0f, 50.0f, 2.0f };
+	CHECK(backend.Fill_Smoke_Map(caster, 1, 0.5f));
+	ID3D11ShaderResourceView * map = backend.Smoke_Map();
+	CHECK(map != NULL);
+	if (map == NULL) {
+		backend.Shutdown();
+		return;
+	}
+
+	ID3D11Resource * resource = NULL;
+	map->GetResource(&resource);
+	ID3D11Texture2D * texture = static_cast<ID3D11Texture2D *>(resource);
+	D3D11_TEXTURE2D_DESC description;
+	texture->GetDesc(&description);
+	description.Usage = D3D11_USAGE_STAGING;
+	description.BindFlags = 0;
+	description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+	ID3D11Texture2D * staging = NULL;
+	CHECK(SUCCEEDED(d3d->CreateTexture2D(&description, NULL, &staging)));
+	device.Get_Context()->CopyResource(staging, texture);
+
+	D3D11_MAPPED_SUBRESOURCE mapped;
+	CHECK(SUCCEEDED(device.Get_Context()->Map(staging, 0, D3D11_MAP_READ, 0, &mapped)));
+	const float * middle = reinterpret_cast<const float *>(static_cast<const unsigned char *>(mapped.pData)
+		+ mapped.RowPitch * (description.Height / 2)) + (description.Width / 2) * 4;
+	const float * corner = static_cast<const float *>(mapped.pData);
+	printf("  middle texel %.5f %.5f %.5f %.5f\n", middle[0], middle[1], middle[2], middle[3]);
+	CHECK_NEAR(middle[0], 2.0f, 0.05f);
+	CHECK_NEAR(middle[1] / middle[0], 0.6f, 0.0001f);
+	CHECK_NEAR(middle[2] / middle[0], 0.6f * 0.6f + 0.025f * 0.025f, 0.0001f);
+	// the front, nearest the sun: the one caster's depth, and the far plane where nothing stands
+	CHECK_NEAR(middle[3], 0.6f, 0.0001f);
+	CHECK_EQ(corner[0], 0.0f);
+	CHECK_EQ(corner[3], 1.0f);
+	device.Get_Context()->Unmap(staging, 0);
+
+	// Nothing handed over is a frame without smoke: the receivers stop reading the map.
+	CHECK(backend.Fill_Smoke_Map(NULL, 0, 0.5f));
+	CHECK(backend.Smoke_Map() == NULL);
+
+	staging->Release();
+	resource->Release();
 	backend.Shutdown();
 }

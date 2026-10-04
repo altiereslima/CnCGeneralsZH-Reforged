@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -26,19 +28,29 @@
 // Bryan Cleveland, August 2002
 /////////////////////////////////////////////////////////////
 
+// Built off Windows too (C1 (f)): nothing below is Win32 but ntohl and one message box, so macOS and
+// Linux mount archives with this same code rather than a copy whose load order could drift.
+#if defined(_WIN32)
 #include <winsock2.h>
 #include <windows.h>	// MessageBox, for the one thing a player has to be told before the menu
+#else
+#include <arpa/inet.h>	// ntohl
+#include "Common/MessageBoxFlags.h"
+#endif
 #include "Common/AudioAffect.h"
 #include "Common/ArchiveFile.h"
 #include "Common/ArchiveFileSystem.h"
-#include "Common/File.h"
+#include "Common/file.h"
 #include "Common/GameAudio.h"
 #include "Common/GameMemory.h"
 #include "Common/LocalFileSystem.h"
 #include "Win32Device/Common/Win32BIGFile.h"
 #include "Win32Device/Common/Win32BIGFileSystem.h"
-#include "Common/registry.h"
+#include "Common/Registry.h"
 #include "Common/EarlyOptions.h"
+#include "Common/EarlyCommandLine.h"
+#include <stdio.h>
+#include <stdlib.h>
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -81,12 +93,32 @@ static Bool holdsBaseGameArchives(const char *directory)
 static void reportMissingBaseGame(void)
 {
 	DEBUG_LOG(("Win32BIGFileSystem::init - no base game archives anywhere; most of the art and audio will be missing.\n"));
+	// An unattended run (-headless or ZH_UNATTENDED) has nobody to press OK: a box here held a CI run for 38
+	// minutes (W-ARM64), and a run without the base game's art could not have told anyone anything anyway.
+	// The reason on stderr, and out.
+	if (isUnattendedProcess())
+	{
+		fprintf(stderr, "generals: none of the base game's .big files could be found (Textures.big in the "
+			"registered Generals folder, ZH_Generals or a sibling Command & Conquer Generals folder); an "
+			"unattended run stops here rather than wait on a message box\n");
+		fflush(stderr);
+		_exit(2);
+	}
+#if defined(_WIN32)
 	::MessageBox(NULL,
 		"Zero Hour shares most of its artwork, sound effects and music with Command & Conquer Generals, "
 		"and none of the base game's .big files could be found.\n\n"
 		"Install Generals, or copy its .big files into a folder named ZH_Generals next to generals.exe.",
 		"Zero Hour Reforged",
 		MB_OK | MB_ICONWARNING | MB_TASKMODAL);
+#else
+	MessageBoxWrapper(
+		"Zero Hour shares most of its artwork, sound effects and music with Command & Conquer Generals, "
+		"and none of the base game's .big files could be found.\n\n"
+		"Install Generals, or copy its .big files into a folder named ZH_Generals beside the game.",
+		"Zero Hour Reforged",
+		MSGBOX_OK | MSGBOX_ICONWARNING | MSGBOX_TASKMODAL);
+#endif
 }
 
 Win32BIGFileSystem::Win32BIGFileSystem() : ArchiveFileSystem() {
@@ -105,7 +137,7 @@ static Bool isReforgedArchive(const AsciiString &path)
 {
 	const char *name = strrchr(path.str(), '\\');
 	name = (name != NULL) ? name + 1 : path.str();
-	return _strnicmp(name, REFORGED_ARCHIVE_PREFIX, sizeof(REFORGED_ARCHIVE_PREFIX) - 1) == 0;
+	return strncasecmp(name, REFORGED_ARCHIVE_PREFIX, sizeof(REFORGED_ARCHIVE_PREFIX) - 1) == 0;
 }
 
 void Win32BIGFileSystem::init() {
@@ -215,7 +247,15 @@ ArchiveFile * Win32BIGFileSystem::openArchiveFile(const Char *filename) {
 	fp->read(buffer, 4); // read the "BIG" at the beginning of the file.
 	buffer[4] = 0;
 	if (strcmp(buffer, BIGFileIdentifier) != 0) {
+#if defined(_WIN32)
 		DEBUG_CRASH(("Error reading BIG file identifier in file %s", filename));
+#else
+		// Quietly, and once for each such file: macOS leaves a "._" AppleDouble companion beside every
+		// file it copies onto exFAT or FAT, and "*.big" finds them, so an install that came off such a
+		// volume has twenty of these.  They are not archives and nothing is lost by leaving them out
+		// (C1, PR (f)).
+		DEBUG_LOG(("Win32BIGFileSystem::openArchiveFile - %s is not a BIG archive (no BIGF), left out\n", filename));
+#endif
 		fp->close();
 		fp = NULL;
 		return NULL;
@@ -271,7 +311,8 @@ ArchiveFile * Win32BIGFileSystem::openArchiveFile(const Char *filename) {
 		} while (buffer[pathIndex] != 0);
 
 		Int filenameIndex = pathIndex;
-		while ((buffer[filenameIndex] != '\\') && (buffer[filenameIndex] != '/') && (filenameIndex >= 0)) {
+		// the index test first: a name with no separator used to read buffer[-1] before the test stopped it
+		while ((filenameIndex >= 0) && (buffer[filenameIndex] != '\\') && (buffer[filenameIndex] != '/')) {
 			--filenameIndex;
 		}
 
@@ -307,13 +348,13 @@ void Win32BIGFileSystem::closeArchiveFile(const Char *filename) {
 		return;
 	}
 
-	if (stricmp(filename, MUSIC_BIG) == 0) {
+	if (strcasecmp(filename, MUSIC_BIG) == 0) {
 		// Stop the current audio
 		TheAudio->stopAudio(AudioAffect_Music);
 
 		// No need to turn off other audio, as the lookups will just fail.
 	}
-	DEBUG_ASSERTCRASH(stricmp(filename, MUSIC_BIG) == 0, ("Attempting to close Archive file '%s', need to add code to handle its shutdown correctly.", filename));
+	DEBUG_ASSERTCRASH(strcasecmp(filename, MUSIC_BIG) == 0, ("Attempting to close Archive file '%s', need to add code to handle its shutdown correctly.", filename));
 
 	// may need to do some other processing here first.
 	

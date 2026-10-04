@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -40,25 +42,26 @@
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "always.h"
 #include "GameClient/View.h"
-#include "WW3D2/Camera.h"
-#include "WW3D2/Light.h"
-#include "WW3D2/DX8Wrapper.h"
-#include "WW3D2/HLod.h"
+#include "WW3D2/camera.h"
+#include "WW3D2/light.h"
+#include "WW3D2/dx8wrapper.h"
+#include "WW3D2/hlod.h"
 #include "WW3D2/mesh.h"
 #include "WW3D2/meshmdl.h"
 #include "Lib/BaseType.h"
 #include "W3DDevice/GameClient/W3DGranny.h"
-#include "W3DDevice/GameClient/Heightmap.h"
+#include "W3DDevice/GameClient/HeightMap.h"
+#include "W3DDevice/GameClient/W3DBridgeBuffer.h"
 #include "d3dx9math.h"
-#include "common/GlobalData.h"
-#include "common/drawmodule.h"
+#include "Common/GlobalData.h"
+#include "Common/DrawModule.h"
 #include "W3DDevice/GameClient/W3DVolumetricShadow.h"
 #include "W3DDevice/GameClient/W3DShadow.h"
 #include "WW3D2/statistics.h"
 #include "Common/PerfTimer.h"
 #include "GameLogic/TerrainLogic.h"
 #include "GameLogic/GameLogic.h"
-#include "WW3D2/DX8Caps.h"
+#include "WW3D2/dx8caps.h"
 #include "GameClient/Drawable.h"
 #include "wwshade/shdmesh.h"
 #include "wwshade/shdsubmesh.h"
@@ -67,6 +70,11 @@
 #include "WW3D2/dx11runtime.h"
 #include "WW3D2/sortingrenderer.h"
 #include "GameClient/View.h"
+#include "Platform/RenderTypes.h"
+#include "Lib/Clock.h"		// Clock_Ticks: QueryPerformanceCounter on Windows, a monotonic clock elsewhere
+#include "GameClient/ParticleSys.h"
+#include <algorithm>
+#include <vector>
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -110,6 +118,10 @@ const Real cosAngleToCare = cos ((0.2 * PI) / 180.0);	//1.5 degree difference
 // fully blocked pixel goes, and how far the filter reaches in texels.  The first is the one that
 // decides between a surface shadowing itself in stripes and a shadow lifting off its own caster.
 #define SHADOW_MAP_DEPTH_BIAS 0.0015f
+// How far a bridge deck is pushed back in the map, in multiples of its own depth slope across one
+// texel.  The decks are the one caster drawn with both faces, so this is their only guard against
+// shadowing themselves.
+#define SHADOW_MAP_BRIDGE_SLOPE_BIAS 2.0f
 // 0.55 was picked on a frame with one base in it; over fourteen buildings a wide shadow on the
 // ground read at a quarter of the sunlit sand, black in front of every wall, and the owner took
 // 0.45 from three panels of the same base on 2026-09-21.
@@ -125,6 +137,12 @@ const Real cosAngleToCare = cos ((0.2 * PI) / 180.0);	//1.5 degree difference
 #define SHADOW_MAP_NARROWEST_TEXELS 0.9f
 #define SHADOW_MAP_PENUMBRA_PER_UNIT 0.01f
 #define SHADOW_MAP_SKY_FILL 0.12f
+// The smoke in the sun's light.  The strength is how dark the thickest cloud leaves the ground and
+// the smoke behind it, under the solid casters' 0.45 because the sky still lights the ground under a
+// cloud and the smoke itself scatters some of the sun on; it held up on Golden Oasis on 2026-10-03.
+// How thick each particle is to the sun is particleSunMapOpticalDepth's, and how a particle shades
+// itself is the backend's (SMOKE_SELF_SHADOW_* in dx11backend.cpp).
+#define SMOKE_SHADOW_STRENGTH 0.4f
 
 // Whether the sun's map took this frame.  The volumes read it to know whether to stand down, and it
 // is false on a machine with no Direct3D 11 device, which is what keeps that machine's shadows.
@@ -143,7 +161,7 @@ struct SHADOW_STATIC_VOLUME_VERTEX	//vertex structure passed to D3D
 	struct SHADOW_DYNAMIC_VOLUME_VERTEX	//vertex structure passed to D3D
 	{
 			float x,y,z;
-			DWORD diffuse;
+			UnsignedInt diffuse;
 	}; 
 	#define SHADOW_DYNAMIC_VOLUME_FVF	D3DFVF_XYZ|D3DFVF_DIFFUSE
 #else
@@ -323,11 +341,11 @@ class W3DShadowGeometryMesh
 	friend class W3DVolumetricShadow;
 	
 public:
-	W3DShadowGeometryMesh::W3DShadowGeometryMesh( void );
+	W3DShadowGeometryMesh( void );
 #ifdef DO_TERRAIN_SHADOW_VOLUMES
 	virtual
 #endif
-	W3DShadowGeometryMesh::~W3DShadowGeometryMesh( void );
+	~W3DShadowGeometryMesh( void );
 
 	/// @todo: Cache/Store face normals someplace so they are not recomputed when lights move.
 	const Vector3& GetPolygonNormal(long dwPolyNormId) const
@@ -1005,7 +1023,7 @@ Int W3DShadowGeometry::init(RenderObjClass *robj)
 	for (Int modelIndex=0; modelIndex<fileInfo->ModelCount; modelIndex++)
 	{
 		granny_model *sourceModel =  fileInfo->Models[modelIndex];
-		if (stricmp(sourceModel->Name,"AABOX") == 0)
+		if (strcasecmp(sourceModel->Name,"AABOX") == 0)
 		{	//found a collision box, copy out data
 			int MeshCount = sourceModel->MeshBindingCount;
 			if (MeshCount==1)
@@ -1574,7 +1592,7 @@ void W3DVolumetricShadow::RenderMeshVolume(Int meshIndex, Int lightIndex, const 
 	// and this pass sets a world matrix per mesh and never puts the old one back.  The Direct3D 11
 	// backend is told separately, which is all it needs.
 	Matrix4x4 mWorldTransposed = mWorld.Transpose();
-	m_pDev->SetTransform(D3DTS_WORLD,(_D3DMATRIX *)&mWorldTransposed);
+	m_pDev->SetTransform(D3DTS_WORLD,(D3DMATRIX *)&mWorldTransposed);
 	Direct3D11_Mirror_Transform(D3DTS_WORLD,(const float *)&mWorldTransposed);
 
 	W3DBufferManager::W3DVertexBufferSlot *vbSlot=m_shadowVolumeVB[lightIndex][ meshIndex ];
@@ -1736,7 +1754,7 @@ void W3DVolumetricShadow::RenderDynamicMeshVolume(Int meshIndex, Int lightIndex,
 	Matrix4x4 mWorld(*meshXform);
 	Matrix4x4 mWorldTransposed = mWorld.Transpose();
 
-	m_pDev->SetTransform(D3DTS_WORLD,(_D3DMATRIX *)&mWorldTransposed);
+	m_pDev->SetTransform(D3DTS_WORLD,(D3DMATRIX *)&mWorldTransposed);
 	Direct3D11_Mirror_Transform(D3DTS_WORLD,(const float *)&mWorldTransposed);
 
 	if (shadowVertexBufferD3D != lastActiveVertexBuffer)
@@ -1896,7 +1914,8 @@ void W3DVolumetricShadow::RenderMeshVolumeBounds(Int meshIndex, Int lightIndex, 
 	//todo: replace this with mesh transform
 	Matrix4x4 mWorld(1);	//identity since boxes are pre-transformed to world space.
 
-	m_pDev->SetTransform(D3DTS_WORLD,(_D3DMATRIX *)&mWorld.Transpose());
+	Matrix4x4 mWorldT = mWorld.Transpose();	// a named copy: ISO C++ takes no address of a temporary
+	m_pDev->SetTransform(D3DTS_WORLD,(D3DMATRIX *)&mWorldT);
 	
 	m_pDev->SetStreamSource(0,shadowVertexBufferD3D,0,sizeof(SHADOW_DYNAMIC_VOLUME_VERTEX));
 	m_pDev->SetFVF(SHADOW_DYNAMIC_VOLUME_FVF);
@@ -3757,7 +3776,7 @@ void W3DVolumetricShadowManager::renderStencilShadows( void )
 
 	struct _TRANSLITVERTEX {
 	    D3DXVECTOR4 p;
-		DWORD color;   // diffuse color    
+		UnsignedInt color;   // diffuse color    
 	} v[4];
 
 	Int xpos, ypos, width, height;
@@ -3819,6 +3838,140 @@ DECLARE_PERF_TIMER(stencilShadows)
 DECLARE_PERF_TIMER(shadowVolumeUpdate)
 DECLARE_PERF_TIMER(shadowVolumeSubmit)
 
+/** Nothing of this frame's smoke is in the map: every system keeps its blob. */
+static void forgetSmokeInSunMap( void )
+{
+	if (TheParticleSystemManager == NULL)
+		return;
+	ParticleSystemManager::ParticleSystemList &systems = TheParticleSystemManager->getAllParticleSystems();
+	for (ParticleSystemManager::ParticleSystemListIt it = systems.begin(); it != systems.end(); ++it)
+		if (*it)
+			(*it)->setInSunMap( FALSE );
+}
+
+/** One particle on its way into the smoke map, with the system it came from and how far it is from
+		what the camera looks at, which decides who goes in when there are more than the map takes. */
+struct SmokeCaster
+{
+	Real x, y, z, radius, opticalDepth;
+	Real distanceSqr;
+	ParticleSystem *system;
+	bool operator<( const SmokeCaster &other ) const { return distanceSqr < other.distanceSqr; }
+};
+
+/** The smoke into the sun's light: every alpha-blended billboard particle as a soft ball, its optical
+		depth the one its own alpha implies (particleSunMapOpticalDepth), handed to the backend's smoke
+		map.  The systems are read as the last client update left them, because the pass runs before
+		the frame's particles are drawn.  Fire is additive and casts nothing; a ground-aligned system is
+		a decal already.  Only what stands in the sun's box counts, and past the map's limit the
+		particles nearest the camera's focus win, so a new fire on screen is never starved by old smoke
+		at the edge.  Every system with a particle in the map is marked, and those lose their blob;
+		with the option off, or the map refused, none is. */
+static void fillSmokeMap( const Matrix3D &sunTransform, const Vector3 &focus )
+{
+	static std::vector<SmokeCaster> found;	// kept: a burning base is thousands of particles every frame
+	static std::vector<Real> packed;
+	static Bool reported = FALSE;
+	static UnsignedInt nextReportFrame = 0;
+	const size_t mostCasters = 16384;		// the backend's own SMOKE_MOST_CASTERS
+
+	forgetSmokeInSunMap();
+	found.clear();
+	packed.clear();
+
+	if (TheGlobalData->m_volumetricSmokeShadows && TheParticleSystemManager != NULL)
+	{
+		ParticleSystemManager::ParticleSystemList &systems = TheParticleSystemManager->getAllParticleSystems();
+		for (ParticleSystemManager::ParticleSystemListIt it = systems.begin(); it != systems.end(); ++it)
+		{
+			ParticleSystem *sys = *it;
+			if (sys == NULL || sys->getShaderType() != ParticleSystemInfo::ALPHA || !sys->shouldBillboard()
+					|| sys->isUsingDrawables() || sys->isUsingStreak() || sys->isUsingSmudge())
+				continue;
+			// the heat haze's texture names start with SMUD, as W3DParticleSystemManager::doParticles tests
+			if (*((UnsignedInt *)sys->getParticleTypeName().str()) == 0x44554D53)
+				continue;
+
+			const UnsignedInt layers = sys->getVolumeParticleDepth();
+			for (Particle *p = sys->getFirstParticle(); p; p = p->m_systemNext)
+			{
+				const Real opticalDepth = particleSunMapOpticalDepth( p->getAlpha(), layers );
+				if (opticalDepth <= 0.0f)
+					continue;
+				const Coord3D *pos = p->getPosition();
+				const Real radius = p->getSize() * 0.5f;		// the billboard's size is its full width
+				if (radius <= 0.0f)
+					continue;
+
+				// the box the depth map covers, in the sun's own frame: it looks down its -Z
+				Vector3 inSun;
+				Matrix3D::Inverse_Transform_Vector( sunTransform, Vector3( pos->x, pos->y, pos->z ), &inSun );
+				const Real reach = SHADOW_MAP_HALF_WIDTH + radius;
+				if (inSun.X < -reach || inSun.X > reach || inSun.Y < -reach || inSun.Y > reach
+						|| -inSun.Z < SHADOW_MAP_NEAR_CLIP - radius || -inSun.Z > SHADOW_MAP_FAR_CLIP + radius)
+					continue;
+
+				SmokeCaster caster;
+				caster.x = pos->x;
+				caster.y = pos->y;
+				caster.z = pos->z;
+				caster.radius = radius;
+				caster.opticalDepth = opticalDepth;
+				const Real dx = pos->x - focus.X;
+				const Real dy = pos->y - focus.Y;
+				caster.distanceSqr = dx * dx + dy * dy;
+				caster.system = sys;
+				found.push_back( caster );
+			}
+		}
+	}
+
+	const size_t inBox = found.size();
+	if (found.size() > mostCasters)
+	{
+		std::nth_element( found.begin(), found.begin() + mostCasters, found.end() );
+		found.resize( mostCasters );
+	}
+
+	packed.reserve( found.size() * 5 );
+	for (size_t i = 0; i < found.size(); ++i)
+	{
+		packed.push_back( found[ i ].x );
+		packed.push_back( found[ i ].y );
+		packed.push_back( found[ i ].z );
+		packed.push_back( found[ i ].radius );
+		packed.push_back( found[ i ].opticalDepth );
+	}
+
+	const Bool held = Direct3D11_Fill_Smoke_Map( packed.empty() ? NULL : &packed[ 0 ],
+		(unsigned)found.size(), SMOKE_SHADOW_STRENGTH );
+	if (!held)
+		return;
+
+	Int systemsHeld = 0;
+	for (size_t i = 0; i < found.size(); ++i)
+	{
+		if (!found[ i ].system->isInSunMap())
+		{
+			found[ i ].system->setInSunMap( TRUE );
+			++systemsHeld;
+		}
+	}
+
+	// A run's log says whether the smoke was in the map at all: the first frame it held any, and
+	// every ten seconds while it does.
+	const UnsignedInt frame = TheGameLogic ? TheGameLogic->getFrame() : 0;
+	if (!found.empty() && (!reported || frame >= nextReportFrame))
+	{
+		nextReportFrame = frame + 10 * LOGICFRAMES_PER_SECOND;
+		reported = TRUE;
+		DEBUG_LOG(("SMOKEMAP: frame %u, %d casters from %d systems in the sun's map, %d more past its limit;"
+			" fire light %s\n",
+			frame, (Int)found.size(), systemsHeld, (Int)( inBox - found.size() ),
+			TheGlobalData->m_smokeFireLighting ? "on" : "off"));
+	}
+}
+
 /** The sun's depth pass.  The casters are the ones that cast a volume today, drawn again from the
 		sun into a depth buffer nothing samples yet, so this phase can be proved on its own: with it
 		off the frame is what it was, and with it on the map has the world in it and the frame is
@@ -3829,11 +3982,15 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 {
 	theShadowMapHoldsTheFrame = FALSE;
 
-	if (!TheGlobalData->m_shadowMap || m_shadowList == NULL || TheTacticalView == NULL)
+	if (!TheGlobalData->m_shadowMap || m_shadowList == NULL || TheTacticalView == NULL
+		|| !Direct3D11_Begin_Shadow_Map( SHADOW_MAP_TEXELS ))
+	{
+		//no Direct3D 11 device, or it refused the surface: the volumes keep the frame, no smoke is
+		//read out of a map the last frame filled, and every cloud keeps its blob
+		Direct3D11_Fill_Smoke_Map( NULL, 0, 0.0f );
+		forgetSmokeInSunMap();
 		return;
-
-	if (!Direct3D11_Begin_Shadow_Map( SHADOW_MAP_TEXELS ))
-		return;		//no Direct3D 11 device, or it refused the surface: the volumes keep the frame
+	}
 
 #ifdef DEBUG_LOGGING
 	// The scene timer includes this pass and cannot say so.
@@ -3843,7 +4000,7 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 	Int castersCounted = 0;
 	Int64 tShadowStart;
 	const unsigned shadowDrawsBefore = DX8Wrapper::Get_Draw_Calls();
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tShadowStart );
+	tShadowStart = Clock_Ticks();
 #endif
 
 	Coord3D look;
@@ -3933,16 +4090,44 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 		 while the pass runs and cuts it at its alpha, which keeps the blades. */
 	SortingRendererClass::Flush();
 
+	/* The bridge decks are not casters in the list above and have to be in the map all the same:
+		 without them the sun reached through a deck, and a tank crossing it laid one shadow on the
+		 deck and a second on the ground under the bridge.  Drawn last so the bias below reaches no
+		 other caster.  A deck goes in with both faces, so the map holds its top, and a top that
+		 tilts away from the sun would shadow its own far edge in stripes; the slope bias pushes it
+		 back by what its tilt across a texel or two is worth, which is nothing next to the height
+		 of a bridge over the ground and leaves a unit on the deck nearer the sun than the deck.
+		 Nothing else in the game sets this state, so it goes back to zero rather than to the
+		 wrapper's cached value, which an invalidate leaves as a sentinel. */
+	const float bridgeSlopeBias = SHADOW_MAP_BRIDGE_SLOPE_BIAS;
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_SLOPESCALEDEPTHBIAS, *(const DWORD *)&bridgeSlopeBias );
+	TheTerrainRenderObject->getBridgeBuffer()->drawBridgeShadowCasters();
+	DX8Wrapper::Set_DX8_Render_State( D3DRS_SLOPESCALEDEPTHBIAS, 0 );
+
 	DX8Wrapper::Set_DX8_Render_State( D3DRS_COLORWRITEENABLE,
 		D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE
 		| D3DCOLORWRITEENABLE_ALPHA );
 
 	Direct3D11_End_Shadow_Map();
 
+	// The smoke goes into a map of its own through the sun the casters were just drawn with.
+	fillSmokeMap( transform, focus );
+
 	// The frame's own camera, put back: the view, the projection and the viewport all went with the
 	// sun.  Without this everything drawn after the pass is drawn from the sun's seat, which is the
 	// whole picture rather than a corner of it.
 	sceneCamera.Apply();
+
+	/* And its view said to the backend outright.  The sorted particles are written in this camera's
+		 space and drawn with an identity view, and their pixels go back to the world through this
+		 matrix; a guess at it from whatever perspective draw came last picked up the camera-relative
+		 view the aligned spheres draw with.  In the layout DX8Wrapper hands the device. */
+	{
+		Matrix4x4 view;
+		DX8Wrapper::Get_Transform( D3DTS_VIEW, view );
+		const Matrix4x4 deviceView = view.Transpose();
+		Direct3D11_Set_Scene_View( (const float *)&deviceView );
+	}
 
 	/* And what turns the map into a shadow.  The matrix that takes a pixel from the frame's clip
 		 space into the sun's is built in the backend, out of the sun's own view and projection as it
@@ -3978,8 +4163,8 @@ void W3DVolumetricShadowManager::renderShadowMap( CameraClass &sceneCamera )
 #ifdef DEBUG_LOGGING
 	{
 		Int64 tShadowEnd, freq;
-		QueryPerformanceCounter( (LARGE_INTEGER *)&tShadowEnd );
-		QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+		tShadowEnd = Clock_Ticks();
+		freq = Clock_Ticks_Per_Second();
 		if( freq > 0 )
 			TheShadowMapMS += (Real)((double)(tShadowEnd - tShadowStart) * 1000.0 / (double)freq);
 		TheShadowMapCasters += castersCounted;
@@ -4078,7 +4263,7 @@ void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
 		DX8Wrapper::Set_DX8_Texture(0,NULL);
 		DX8Wrapper::Set_DX8_Texture(1,NULL);
 
-		DWORD oldColorWriteEnable=0x12345678;
+		RenderUInt32 oldColorWriteEnable=0x12345678;
 
 	#ifdef SV_DEBUG
 		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE , TRUE);
@@ -4377,7 +4562,7 @@ Bool W3DVolumetricShadowManager::ReAcquireResources(void)
 
 	DEBUG_ASSERTCRASH(m_pDev, ("Trying to ReAquireResources on W3DVolumetricShadowManager without device"));
 
-	if (FAILED(m_pDev->CreateIndexBuffer
+	if (Render_Failed(m_pDev->CreateIndexBuffer
 	(
 		SHADOW_INDEX_SIZE*sizeof(WORD), 
 		D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC, 
@@ -4393,7 +4578,7 @@ Bool W3DVolumetricShadowManager::ReAcquireResources(void)
 	if (shadowVertexBufferD3D == NULL)
 	{	// Create vertex buffer
 
-		if (FAILED(m_pDev->CreateVertexBuffer
+		if (Render_Failed(m_pDev->CreateVertexBuffer
 		(
 			SHADOW_VERTEX_SIZE*sizeof(SHADOW_DYNAMIC_VOLUME_VERTEX),
 			D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC, 

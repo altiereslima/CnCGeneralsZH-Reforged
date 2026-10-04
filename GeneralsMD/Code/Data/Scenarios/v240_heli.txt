@@ -1,0 +1,34 @@
+# Three helicopter moments for the 2.4.0 video in the green middle of Fortress Avalanche, each far
+# enough from the others not to meet: a Comanche sent 300 behind itself over the left lake, a SupW
+# Comanche ordered across in front of the Overlord it is shooting on the grass west of it, and a
+# gattling Helix with a Crusader driving circles round it on the grass east of the right lake.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 2500 -map "Maps\Fortress Avalanche\Fortress Avalanche.map" -autoskirmish 2
+#     -takeover -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario v240_heli
+#     -cinema v240_heli -video 140 1110 v240_heli -maxframes 1120
+#
+# The spacing inside each moment is helislide.txt's and helixturret.txt's.
+
+30    spawn         0  AmericaVehicleComanche          1   1850 2125
+150   move          0  AmericaVehicleComanche              1550 2125
+
+30    spawn         1  ChinaTankOverlord               1   1120 2120
+30    spawn         0  SupW_AmericaVehicleComanche     1   1000 2000
+330   attack        0  SupW_AmericaVehicleComanche     1  ChinaTankOverlord
+390   move          0  SupW_AmericaVehicleComanche         1240 2000
+
+30    spawn         1  ChinaVehicleHelix               1   3300 2000
+40    shiftupgrade  1  ChinaVehicleHelix                   Upgrade_ChinaHelixGattlingCannon
+700   spawn         0  AmericaTankCrusader             1   3400 2000
+720   attack        1  ChinaVehicleHelix               0  AmericaTankCrusader
+740   move          0  AmericaTankCrusader                 3371 2071
+800   move          0  AmericaTankCrusader                 3300 2100
+860   move          0  AmericaTankCrusader                 3229 2071
+920   move          0  AmericaTankCrusader                 3200 2000
+980   move          0  AmericaTankCrusader                 3229 1929
+1040  move          0  AmericaTankCrusader                 3300 1900
+1100  move          0  AmericaTankCrusader                 3371 1929
+
+1100  tally         0  AmericaTankCrusader
+1100  tally         1  ChinaTankOverlord

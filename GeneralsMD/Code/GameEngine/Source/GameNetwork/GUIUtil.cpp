@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -279,7 +281,7 @@ void PopulateColorComboBox(Int comboBox, GameWindow *comboArray[], GameInfo *myG
 
 		colorName = TheGameText->fetch(def->getTooltipName().str());
 		newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], colorName, def->getColor());
-		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)c);
+		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)(intptr_t)c);
 	}
 	if (wasObserver)
 		GadgetComboBoxSetSelectedPos(comboArray[comboBox], 0);
@@ -330,7 +332,7 @@ void PopulatePlayerTemplateComboBox(Int comboBox, GameWindow *comboArray[], Game
 		seenSides.insert(side);
 
 		newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], TheGameText->fetch(side), def->getColor());
-		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)c);
+		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)(intptr_t)c);
 	}
 	seenSides.clear();
 
@@ -370,7 +372,7 @@ void PopulateTeamComboBox(Int comboBox, GameWindow *comboArray[], GameInfo *myGa
 		teamStr.format("Team:%d", c + 1);
 		teamName = TheGameText->fetch(teamStr.str());
 		newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], teamName, def->getColor());
-		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)c);
+		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)(intptr_t)c);
 	}
 	GadgetComboBoxSetSelectedPos(comboArray[comboBox], 0);
 }
@@ -396,7 +398,7 @@ void PopulateStartingCashComboBox(GameWindow *comboBox, GameInfo *myGame)
   {
     Int newIndex = GadgetComboBoxAddEntry(comboBox, formatMoneyForStartingCashComboBox( *it ), 
                                           comboBox->winGetEnabled() ? comboBox->winGetEnabledTextColor() : comboBox->winGetDisabledTextColor());
-    GadgetComboBoxSetItemData(comboBox, newIndex, (void *)it->countMoney());
+    GadgetComboBoxSetItemData(comboBox, newIndex, (void *)(uintptr_t)it->countMoney());
 
     if ( myGame->getStartingCash().amountEqual( *it ) )
     {
@@ -410,7 +412,7 @@ void PopulateStartingCashComboBox(GameWindow *comboBox, GameInfo *myGame)
     // entry of its own. The item data read the loop's end iterator here.
     currentSelectionIndex = GadgetComboBoxAddEntry(comboBox, formatMoneyForStartingCashComboBox( myGame->getStartingCash() ),
                                           comboBox->winGetEnabled() ? comboBox->winGetEnabledTextColor() : comboBox->winGetDisabledTextColor());
-    GadgetComboBoxSetItemData(comboBox, currentSelectionIndex, (void *)myGame->getStartingCash().countMoney() );
+    GadgetComboBoxSetItemData(comboBox, currentSelectionIndex, (void *)(uintptr_t)myGame->getStartingCash().countMoney() );
   }
 
   GadgetComboBoxSetSelectedPos(comboBox, currentSelectionIndex);
@@ -436,7 +438,7 @@ void PopulatePeaceTimeComboBox(GameWindow *comboBox, GameInfo *myGame, Bool host
       text.format( TheGameText->fetch( "GUI:PeaceTimeFormat" ), thePeaceTimeChoices[i] );
 
     Int newIndex = GadgetComboBoxAddEntry(comboBox, text, color);
-    GadgetComboBoxSetItemData(comboBox, newIndex, (void *)thePeaceTimeChoices[i]);
+    GadgetComboBoxSetItemData(comboBox, newIndex, (void *)(intptr_t)thePeaceTimeChoices[i]);
   }
 
   UpdatePeaceTimeComboBox(comboBox, myGame, hostMayEdit);
@@ -451,7 +453,7 @@ void UpdatePeaceTimeComboBox(GameWindow *comboBox, GameInfo *myGame, Bool hostMa
   Int itemCount = GadgetComboBoxGetLength(comboBox);
   for ( Int index = 0; index < itemCount; index++ )
   {
-    if ( (Int)GadgetComboBoxGetItemData(comboBox, index) == myGame->getPeaceTime() )
+    if ( (Int)(intptr_t)GadgetComboBoxGetItemData(comboBox, index) == myGame->getPeaceTime() )
     {
       Int selected = -1;
       GadgetComboBoxGetSelectedPos( comboBox, &selected );
@@ -472,7 +474,7 @@ Int PeaceTimeFromComboBox(GameWindow *comboBox)
   GadgetComboBoxGetSelectedPos(comboBox, &selIndex);
   if ( selIndex < 0 )
     return 0;
-  return (Int)GadgetComboBoxGetItemData(comboBox, selIndex);
+  return (Int)(intptr_t)GadgetComboBoxGetItemData(comboBox, selIndex);
 }
 
 // -----------------------------------------------------------------------------
@@ -497,7 +499,7 @@ void PopulateSuperweaponComboBox(GameWindow *comboBox, GameInfo *myGame, Bool ho
   for ( Int i = 0; i < (Int)(sizeof(theSuperweaponChoices)/sizeof(theSuperweaponChoices[0])); i++ )
   {
     Int newIndex = GadgetComboBoxAddEntry(comboBox, TheGameText->fetch( theSuperweaponCaptions[i] ), color);
-    GadgetComboBoxSetItemData(comboBox, newIndex, (void *)theSuperweaponChoices[i]);
+    GadgetComboBoxSetItemData(comboBox, newIndex, (void *)(intptr_t)theSuperweaponChoices[i]);
   }
 
   UpdateSuperweaponComboBox(comboBox, myGame, hostMayEdit);
@@ -511,7 +513,7 @@ void UpdateSuperweaponComboBox(GameWindow *comboBox, GameInfo *myGame, Bool host
   Int itemCount = GadgetComboBoxGetLength(comboBox);
   for ( Int index = 0; index < itemCount; index++ )
   {
-    if ( (Int)GadgetComboBoxGetItemData(comboBox, index) == restriction )
+    if ( (Int)(intptr_t)GadgetComboBoxGetItemData(comboBox, index) == restriction )
     {
       Int selected = -1;
       GadgetComboBoxGetSelectedPos( comboBox, &selected );
@@ -532,7 +534,7 @@ Int SuperweaponRestrictionFromComboBox(GameWindow *comboBox)
   GadgetComboBoxGetSelectedPos(comboBox, &selIndex);
   if ( selIndex < 0 )
     return SUPERWEAPONS_ALLOW;
-  return (Int)GadgetComboBoxGetItemData(comboBox, selIndex);
+  return (Int)(intptr_t)GadgetComboBoxGetItemData(comboBox, selIndex);
 }
 
 void UpdateUnitLimitCheckBox(GameWindow *checkBox, GameInfo *myGame, Bool hostMayEdit)
@@ -877,7 +879,7 @@ void UpdateSlotList( GameInfo *myGame, GameWindow *comboPlayer[],
 				Int pos = slot->getState();
 				for (Int item = 0; comboPlayer[i] && item < GadgetComboBoxGetLength(comboPlayer[i]); ++item)
 				{
-					if ((Int)GadgetComboBoxGetItemData(comboPlayer[i], item) == slot->getState())
+					if ((Int)(intptr_t)GadgetComboBoxGetItemData(comboPlayer[i], item) == slot->getState())
 					{
 						pos = item;
 						break;
@@ -906,7 +908,7 @@ void UpdateSlotList( GameInfo *myGame, GameWindow *comboPlayer[],
 				max = GadgetComboBoxGetLength(comboColor[i]);
 				for (idx=0; idx<max; ++idx)
 				{
-					Int color = (Int)GadgetComboBoxGetItemData(comboColor[i], idx);
+					Int color = (Int)(intptr_t)GadgetComboBoxGetItemData(comboColor[i], idx);
 					if (color == slot->getColor())
 					{
 						GadgetComboBoxSetSelectedPos(comboColor[i], idx, TRUE);
@@ -919,7 +921,7 @@ void UpdateSlotList( GameInfo *myGame, GameWindow *comboPlayer[],
 				max = GadgetComboBoxGetLength(comboTeam[i]);
 				for (idx=0; idx<max; ++idx)
 				{
-					Int team = (Int)GadgetComboBoxGetItemData(comboTeam[i], idx);
+					Int team = (Int)(intptr_t)GadgetComboBoxGetItemData(comboTeam[i], idx);
 					if (team == slot->getTeamNumber())
 					{
 						GadgetComboBoxSetSelectedPos(comboTeam[i], idx, TRUE);
@@ -932,7 +934,7 @@ void UpdateSlotList( GameInfo *myGame, GameWindow *comboPlayer[],
 				max = GadgetComboBoxGetLength(comboPlayerTemplate[i]);
 				for (idx=0; idx<max; ++idx)
 				{
-					Int playerTemplate = (Int)GadgetComboBoxGetItemData(comboPlayerTemplate[i], idx);
+					Int playerTemplate = (Int)(intptr_t)GadgetComboBoxGetItemData(comboPlayerTemplate[i], idx);
 					if (playerTemplate == slot->getPlayerTemplate())
 					{
 						GadgetComboBoxSetSelectedPos(comboPlayerTemplate[i], idx, TRUE);

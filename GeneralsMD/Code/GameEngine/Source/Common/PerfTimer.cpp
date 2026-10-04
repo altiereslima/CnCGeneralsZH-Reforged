@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -27,6 +29,8 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
+#include "Lib/Clock.h"
 
 #include "Common/PerfTimer.h"
 
@@ -34,11 +38,6 @@
 #include "GameClient/DebugDisplay.h"
 #include "GameClient/Display.h"
 #include "GameClient/GraphDraw.h"
-
-__forceinline void ProfileGetTime(__int64 &t)
-{
-  t = (__int64)__rdtsc();
-}
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -63,142 +62,25 @@ void GetPrecisionTimerTicksPerSec(Int64* t)
 	*t = s_ticksPerSec;
 }
 
-//Kris: Plugged in Martin's code to optimize timer setup.
-#define HOFFESOMMER_REPLACEMENT_CODE
-
 //-------------------------------------------------------------------------------------------------
+/* GetPrecisionTimer now reads the same clock Clock_Ticks_Per_Second describes, so there is nothing
+	 left to calibrate: the rate is asked for rather than measured.  What was here measured the time
+	 stamp counter against the performance counter over three 20ms samples, which cost 60ms of every
+	 startup of a build that defined DUMP_PERF_STATS - and was wrong the moment the reading stopped
+	 being a TSC reading.  See the note in PerfTimer.h. */
 void InitPrecisionTimer()
 {
-#ifdef HOFFESOMMER_REPLACEMENT_CODE
-
-  // measure clock cycles 3 times for 20 msec each
-  // then take the 2 counts that are closest, average
-  _int64 n[ 3 ];
-  for( int k = 0; k < 3; k++ )
-  {
-    // wait for end of current tick
-    unsigned timeEnd = timeGetTime() + 2;
-    while( timeGetTime() < timeEnd ); //do nothing
- 
-    // get cycles
-    _int64 start, startQPC, endQPC;
-    QueryPerformanceCounter( (LARGE_INTEGER *)&startQPC );
-    ProfileGetTime( start );
-    timeEnd += 20;
-    while( timeGetTime() < timeEnd ); //do nothing
-    ProfileGetTime( n[ k ] );
-    n[ k ] -= start;
- 
-    // convert to 1 second
-    if( QueryPerformanceCounter( (LARGE_INTEGER*)&endQPC ) )
-    {
-      QueryPerformanceFrequency( (LARGE_INTEGER*)&s_ticksPerSec );
-      n[ k ] = ( n[ k ] * s_ticksPerSec ) / ( endQPC - startQPC );
-    }
-    else
-    {
-      n[ k ] = ( n[ k ] * 1000 ) / 20;
-    }
-  }
- 
-  // find two closest values
-  _int64 d01 = n[ 1 ] - n[ 0 ];
-	_int64 d02 = n[ 2 ] - n[ 0 ];
-	_int64 d12 = n[ 2 ] - n[ 1 ];
-
-  if( d01 < 0 )
+	s_ticksPerSec = (Int64)Clock_Ticks_Per_Second();
+	if (s_ticksPerSec <= 0)
 	{
-		d01 = -d01;
+		// A machine that will not answer.  Anything derived from this is a division, so leave the
+		// rates at something that cannot divide by zero and let the numbers be obviously wrong.
+		s_ticksPerSec = 1;
 	}
-  if( d02 < 0 ) 
-	{
-		d02 = -d02;
-	}
-  if( d12 < 0 )
-	{
-		d12 = -d12;
-	}
-
-  _int64 avg;
-  if( d01 < d02 )
-  {
-    avg = d01 < d12 ? n[ 0 ] + n[ 1 ] : n[ 1 ] + n[ 2 ];
-  }
-  else
-  {
-    avg = d02 < d12 ? n[ 0 ] + n[ 2 ] : n[ 1 ] + n[ 2 ];
-  }
-
-	//s_ticksPerMSec = 1.0 * TotalTicks / totalTime;
-	s_ticksPerMSec = avg / 2000.0f;
-	s_ticksPerSec = s_ticksPerMSec * 1000.0f;
-	s_ticksPerUSec = s_ticksPerSec / 1000000.0f;
-
-	
-#else
-
-	//Kris: With total disrespect, this code costs 5 real seconds of init time
-	//whenever we fire up the game.
-
-	#ifdef USE_QPF
-		QueryPerformanceFrequency((LARGE_INTEGER*)&s_ticksPerSec);
-	#else
-		// Init the precision timers
-		Int64 totalTime = 0;
-		Int64	TotalTicks = 0;
-		static int TESTS = 5;
-		
-		for (int i = 0; i < TESTS; ++i) 
-		{
-			int        TimeStart;
-			int        TimeStop;
-			Int64		   StartTicks;
-			Int64		   EndTicks;
-
-			TimeStart = timeGetTime();
-			GetPrecisionTimer(&StartTicks);
-			for(;;)
-			{
-				TimeStop = timeGetTime();
-				if ((TimeStop - TimeStart) > 1000)
-				{
-					GetPrecisionTimer(&EndTicks);
-					break;
-				}
-			}
-
-			TotalTicks += (EndTicks - StartTicks);
-
-			totalTime += (TimeStop - TimeStart);
-		}
-
-		s_ticksPerMSec = 1.0 * TotalTicks / totalTime;
-		s_ticksPerSec = s_ticksPerMSec * 1000.0f;
-	#endif
-		s_ticksPerMSec = s_ticksPerSec / 1000.0f;
-		s_ticksPerUSec = s_ticksPerSec / 1000000.0f;
-
-	#ifdef NOT_IN_USE
-		Int64 bogus[8];
-		GetPrecisionTimer(&start);
-		for (Int ii = 0; ii < ITERS; ++ii)
-		{
-			GetPrecisionTimer(&bogus[0]);
-			GetPrecisionTimer(&bogus[1]);
-			GetPrecisionTimer(&bogus[2]);
-			GetPrecisionTimer(&bogus[3]);
-			GetPrecisionTimer(&bogus[4]);
-			GetPrecisionTimer(&bogus[5]);
-			GetPrecisionTimer(&bogus[6]);
-			GetPrecisionTimer(&bogus[7]);
-		}
-		TheTicksToGetTicks = (bogus[7] - start) / (ITERS*8);
-		DEBUG_LOG(("TheTicksToGetTicks is %d (%f usec)\n",(int)TheTicksToGetTicks,TheTicksToGetTicks/s_ticksPerUSec));
-	#endif
-		
-#endif
-
+	s_ticksPerMSec = s_ticksPerSec / 1000.0;
+	s_ticksPerUSec = s_ticksPerSec / 1000000.0;
 }
+
 #endif // defined(PERF_TIMERS) || defined(DUMP_PERF_STATS)
 
 //-------------------------------------------------------------------------------------------------
@@ -482,7 +364,7 @@ static UnsignedInt s_framesAccumulated = 0;
 	strlcpy(tmp, s_buf, ARRAY_SIZE(tmp));
 	strlcat(tmp, ".csv", ARRAY_SIZE(tmp));
 
-	s_perfStatsFile = fopen(tmp, "w");
+	s_perfStatsFile = zh_fopen(tmp, "w");
 	s_perfDumpOptions = options;
 
 	if (s_perfStatsFile == NULL)

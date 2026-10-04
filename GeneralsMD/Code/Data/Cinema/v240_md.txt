@@ -1,0 +1,10 @@
+# The 2.4.0 video's missile defence takes over Scenarios/v240_md.txt on Fortress Avalanche. Each
+# camera stands where the missile defence film's did relative to its fight, cut a second or so
+# before the fight starts. The Raptor camera looks north with the right lake behind the Stinger Site.
+
+4.0   cut     1000 1990 0.2 0 6
+4.1   follow  AmericaTankAvenger
+10.0  cut     3300 1930 0.2 0 6
+10.1  follow  AmericaTankPaladin
+18.5  cut     2870 1930 0.24 0 0
+23.5  end

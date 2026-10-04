@@ -1,0 +1,18 @@
+# The 2.4.0 Shorts' opening, from Scenarios/v240_hook.txt on Fortress Avalanche, watched with no
+# interface. First the three armies in contact from the south-west with the left lake in shot
+# (frames 600 to 810), then the superweapons wide from the south-west, pushing in slowly as the
+# nuke, the particle beam and the SCUD storm land (frames 810 to 1260).
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 5000 -map "Maps\Fortress Avalanche\Fortress Avalanche.map" -autoskirmish 3
+#     -takeover -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA -seed 7
+#     -scenario v240_hook -cinema s240_hook_wide -video 600 1260 s240_hook_wide -maxframes 1270
+
+19.5  cut     1000 2100 0.64 -135 10
+19.6  orbit   10 8
+23.5  shot
+27.0  cut     1000 2120 0.8 30 10
+27.1  zoom    0.66 14
+27.1  orbit   12 14
+35.0  shot
+41.9  end

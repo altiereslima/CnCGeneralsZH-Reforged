@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
 
 /* $Header: /Commando/Code/ww3d2/hanimmgr.cpp 3     1/16/02 9:51a Jani_p $ */
 /*********************************************************************************************** 

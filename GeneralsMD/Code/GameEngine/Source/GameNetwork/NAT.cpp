@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -30,6 +32,9 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
+
+#include "Lib/WideCharFns.h"
 
 #include "GameNetwork/NAT.h"
 #include "GameNetwork/Transport.h"
@@ -209,7 +214,7 @@ NATStateType NAT::update() {
 		}
 		// check for timeout.  Timing out is not a fatal error - it just means we didn't get the other
 		// player's stats.  We'll see 0/0 as his record, but we can still play him just fine.
-		UnsignedInt now = timeGetTime();
+		UnsignedInt now = Clock_Milliseconds();
 		if (now > s_startStatWaitTime + MS_TO_WAIT_FOR_STATS)
 		{
 			DEBUG_LOG(("Timed out waiting for stats.  Let's just start the dang game.\n"));
@@ -229,7 +234,7 @@ NATStateType NAT::update() {
 			// we finished this round, move on to the next one.
 			++m_connectionRound;
 //			m_roundTimeout = timeGetTime() + TheGameSpyConfig->getRoundTimeout();
-			m_roundTimeout = timeGetTime() + m_timeForRoundTimeout;
+			m_roundTimeout = Clock_Milliseconds() + m_timeForRoundTimeout;
 			DEBUG_LOG(("NAT::update - done with connection round, moving on to round %d\n", m_connectionRound));
 
 			// we finished that round, now check to see if we're done, or if there are more rounds to go.
@@ -241,7 +246,7 @@ NATStateType NAT::update() {
 				// so therefore we don't need to refresh our NAT even if we previously thought we had to.
 				TheFirewallHelper->flagNeedToRefresh(FALSE);
 
-				s_startStatWaitTime = timeGetTime();
+				s_startStatWaitTime = Clock_Milliseconds();
 				DEBUG_LOG(("NAT::update - done with all connections, woohoo!!\n"));
 				/*
 				m_NATState = NATSTATE_DONE;
@@ -257,7 +262,7 @@ NATStateType NAT::update() {
 		}
 		NATConnectionState state = connectionUpdate();
 
-		if (timeGetTime() > m_roundTimeout) {
+		if (Clock_Milliseconds() > m_roundTimeout) {
 			DEBUG_LOG(("NAT::update - round timeout expired\n"));
 			setConnectionState(m_localNodeNumber, NATCONNECTIONSTATE_FAILED);
 			notifyUsersOfConnectionFailed(m_localNodeNumber);
@@ -307,16 +312,16 @@ NATConnectionState NAT::connectionUpdate() {
 	}
 
 	if (m_beenProbed == FALSE) {
-		if (timeGetTime() >= m_nextPortSendTime) {
+		if (Clock_Milliseconds() >= m_nextPortSendTime) {
 //			sendMangledPortNumberToTarget(m_previousSourcePort, targetSlot);
 			sendMangledPortNumberToTarget(m_sourcePorts[m_targetNodeNumber], targetSlot);
 //			m_nextPortSendTime = timeGetTime() + TheGameSpyConfig->getRetryInterval();
-			m_nextPortSendTime = timeGetTime() + m_timeBetweenRetries;
+			m_nextPortSendTime = Clock_Milliseconds() + m_timeBetweenRetries;
 		}
 	}
 
 	// check to see if its time to send out our keepalives.
-	if (timeGetTime() >= m_nextKeepaliveTime) {
+	if (Clock_Milliseconds() >= m_nextKeepaliveTime) {
 		for (Int node = 0; node < m_numNodes; ++node) {
 			if (m_myConnections[node] == TRUE) {
 				// we've made this connection, send a keepalive.
@@ -332,7 +337,7 @@ NATConnectionState NAT::connectionUpdate() {
 			}
 		}
 //		m_nextKeepaliveTime = timeGetTime() + TheGameSpyConfig->getKeepaliveInterval();
-		m_nextKeepaliveTime = timeGetTime() + m_keepaliveInterval;
+		m_nextKeepaliveTime = Clock_Milliseconds() + m_keepaliveInterval;
 	}
 
 	m_transport->update();
@@ -387,7 +392,7 @@ NATConnectionState NAT::connectionUpdate() {
 	// we are waiting for our target to tell us that they have received our probe.
 	if (m_connectionStates[m_localNodeNumber] == NATCONNECTIONSTATE_WAITINGFORRESPONSE) {
 		// check to see if it's time to probe our target.
-		if ((m_timeTillNextSend != -1) && (m_timeTillNextSend <= timeGetTime())) {
+		if ((m_timeTillNextSend != -1) && (m_timeTillNextSend <= Clock_Milliseconds())) {
 			if (m_numRetries > m_maxNumRetriesAllowed) {
 				DEBUG_LOG(("NAT::connectionUpdate - too many retries, connection failed.\n"));
 				setConnectionState(m_localNodeNumber, NATCONNECTIONSTATE_FAILED);
@@ -398,7 +403,7 @@ NATConnectionState NAT::connectionUpdate() {
 				// Send a probe.
 				sendAProbe(targetSlot->getIP(), targetSlot->getPort(), m_localNodeNumber);
 //				m_timeTillNextSend = timeGetTime() + TheGameSpyConfig->getRetryInterval();
-				m_timeTillNextSend = timeGetTime() + m_timeBetweenRetries;
+				m_timeTillNextSend = Clock_Milliseconds() + m_timeBetweenRetries;
 
 				// tell the target they've been probed. In other words, our port is open.
 				notifyTargetOfProbe(targetSlot);
@@ -422,7 +427,7 @@ NATConnectionState NAT::connectionUpdate() {
 			TheFirewallHelper->closeSpareSocket(m_spareSocketPort);
 			m_spareSocketPort = 0;
 		} else {
-			if (timeGetTime() >= m_manglerRetryTime) {
+			if (Clock_Milliseconds() >= m_manglerRetryTime) {
 				++m_manglerRetries;
 //				if (m_manglerRetries > TheGameSpyConfig->getMaxManglerRetries()) {
 				if (m_manglerRetries > m_maxAllowedManglerRetries) {
@@ -439,14 +444,14 @@ NATConnectionState NAT::connectionUpdate() {
 						TheFirewallHelper->sendToManglerFromPort(m_manglerAddress, m_spareSocketPort, m_packetID);
 					}
 //					m_manglerRetryTime = TheGameSpyConfig->getRetryInterval() + timeGetTime();
-					m_manglerRetryTime = m_manglerRetryTimeInterval + timeGetTime();
+					m_manglerRetryTime = m_manglerRetryTimeInterval + Clock_Milliseconds();
 				}
 			}
 		}
 	}
 
 	if (m_connectionStates[m_localNodeNumber] == NATCONNECTIONSTATE_WAITINGFORMANGLEDPORT) {
-		if (timeGetTime() > m_timeoutTime) {
+		if (Clock_Milliseconds() > m_timeoutTime) {
 			DEBUG_LOG(("NAT::connectionUpdate - waiting too long to get the other player's port number, failed.\n"));
 			setConnectionState(m_localNodeNumber, NATCONNECTIONSTATE_FAILED);
 
@@ -485,7 +490,7 @@ void NAT::establishConnectionPaths() {
 	for (i = 0; i < MAX_SLOTS; ++i) {
 		if (m_slotList[i] != NULL) {
 			if (m_slotList[i]->isHuman()) {
-				DEBUG_LOG(("NAT::establishConnectionPaths - slot %d is %ls\n", i, m_slotList[i]->getName().str()));
+				DEBUG_LOG(("NAT::establishConnectionPaths - slot %d is %s\n", i, WideCharAsUtf8( m_slotList[i]->getName().str() ).str()));
 				++m_numNodes;
 			}
 		}
@@ -535,7 +540,7 @@ void NAT::establishConnectionPaths() {
 					m_connectionNodes[nodeindex].m_behavior = m_slotList[i]->getNATBehavior();
 					connectionAssigned[i] = TRUE;
 					otherNetgearNum = nodeindex;
-					DEBUG_LOG(("NAT::establishConnectionPaths - first netgear in pair. assigning node %d to slot %d (%ls)\n", nodeindex, i, m_slotList[i]->getName().str()));
+					DEBUG_LOG(("NAT::establishConnectionPaths - first netgear in pair. assigning node %d to slot %d (%s)\n", nodeindex, i, WideCharAsUtf8( m_slotList[i]->getName().str() ).str()));
 				} else {
 					// this is the second in the pair of netgears, pair this up with the other one
 					// for the first round.
@@ -547,7 +552,7 @@ void NAT::establishConnectionPaths() {
 					m_connectionNodes[nodeindex].m_behavior = m_slotList[i]->getNATBehavior();
 					connectionAssigned[i] = TRUE;
 					otherNetgearNum = -1;
-					DEBUG_LOG(("NAT::establishConnectionPaths - second netgear in pair. assigning node %d to slot %d (%ls)\n", nodeindex, i, m_slotList[i]->getName().str()));
+					DEBUG_LOG(("NAT::establishConnectionPaths - second netgear in pair. assigning node %d to slot %d (%s)\n", nodeindex, i, WideCharAsUtf8( m_slotList[i]->getName().str() ).str()));
 				}
 			}
 		}
@@ -570,7 +575,7 @@ void NAT::establishConnectionPaths() {
 		while (m_connectionNodes[nodeindex].m_slotIndex != -1) {
 			++nodeindex;
 		}
-		DEBUG_LOG(("NAT::establishConnectionPaths - assigning node %d to slot %d (%ls)\n", nodeindex, i, m_slotList[i]->getName().str()));
+		DEBUG_LOG(("NAT::establishConnectionPaths - assigning node %d to slot %d (%s)\n", nodeindex, i, WideCharAsUtf8( m_slotList[i]->getName().str() ).str()));
 		m_connectionNodes[nodeindex].m_slotIndex = i;
 		m_connectionNodes[nodeindex].m_behavior = m_slotList[i]->getNATBehavior();
 		connectionAssigned[i] = TRUE;
@@ -609,7 +614,7 @@ void NAT::establishConnectionPaths() {
 	}
 
 //	m_roundTimeout = timeGetTime() + TheGameSpyConfig->getRoundTimeout();
-	m_roundTimeout = timeGetTime() + m_timeForRoundTimeout;
+	m_roundTimeout = Clock_Milliseconds() + m_timeForRoundTimeout;
 
 	// make the connections for this round.
 	// this song is cool.
@@ -623,7 +628,7 @@ void NAT::attachSlotList(GameSlot *slotList[], Int localSlot, UnsignedInt localI
 	DEBUG_LOG(("NAT::attachSlotList - initting the transport socket with address %d.%d.%d.%d:%d\n",
 							m_localIP >> 24, (m_localIP >> 16) & 0xff, (m_localIP >> 8) & 0xff, m_localIP & 0xff, getSlotPort(localSlot)));
 
-	m_startingPortNumber = NETWORK_BASE_PORT_NUMBER + ((timeGetTime() / 1000) % 20000);
+	m_startingPortNumber = NETWORK_BASE_PORT_NUMBER + ((Clock_Milliseconds() / 1000) % 20000);
 	DEBUG_LOG(("NAT::attachSlotList - using %d as the starting port number\n", m_startingPortNumber));
 	generatePortNumbers(slotList, localSlot);
 	m_transport->init(m_localIP, getSlotPort(localSlot));
@@ -683,7 +688,7 @@ void NAT::doThisConnectionRound() {
 
 				DEBUG_ASSERTCRASH(localSlot != NULL, ("local slot is NULL"));
 				DEBUG_ASSERTCRASH(targetSlot != NULL, ("trying to negotiate with a NULL target slot, slot is %d", m_connectionPairs[m_connectionPairIndex][m_connectionRound][i]));
-				DEBUG_LOG(("NAT::doThisConnectionRound - Target slot index = %d (%ls)\n", targetSlotIndex, m_slotList[targetSlotIndex]->getName().str()));
+				DEBUG_LOG(("NAT::doThisConnectionRound - Target slot index = %d (%s)\n", targetSlotIndex, WideCharAsUtf8( m_slotList[targetSlotIndex]->getName().str() ).str()));
 				DEBUG_LOG(("NAT::doThisConnectionRound - Target slot has NAT behavior 0x%8X, local slot has NAT behavior 0x%8X\n", targetSlot->getNATBehavior(), localSlot->getNATBehavior()));
 				
 #if defined(DEBUG_LOGGING)
@@ -711,9 +716,9 @@ void NAT::doThisConnectionRound() {
 				DEBUG_LOG(("NAT::doThisConnectionRound - About to attempt to get the next mangled source port\n"));
 				sendMangledSourcePort();
 //				m_nextPortSendTime = timeGetTime() + TheGameSpyConfig->getRetryInterval();
-				m_nextPortSendTime = timeGetTime() + m_timeBetweenRetries;
+				m_nextPortSendTime = Clock_Milliseconds() + m_timeBetweenRetries;
 //				m_timeoutTime = timeGetTime() + TheGameSpyConfig->getPortTimeout();
-				m_timeoutTime = timeGetTime() + m_timeToWaitForPort;
+				m_timeoutTime = Clock_Milliseconds() + m_timeToWaitForPort;
 			} else {
 				// this is someone else that needs to connect to someone, so wait till they tell us
 				// that they're done.
@@ -766,7 +771,7 @@ void NAT::sendMangledSourcePort() {
 		UnsignedInt targetip = targetSlot->getIP();
 #endif
 		DEBUG_LOG(("NAT::sendMangledSourcePort - target and I are behind the same NAT, no mangling\n"));
-		DEBUG_LOG(("NAT::sendMangledSourcePort - I am %ls, target is %ls, my IP is %d.%d.%d.%d, target IP is %d.%d.%d.%d\n", localSlot->getName().str(), targetSlot->getName().str(),
+		DEBUG_LOG(("NAT::sendMangledSourcePort - I am %s, target is %s, my IP is %d.%d.%d.%d, target IP is %d.%d.%d.%d\n", WideCharAsUtf8( localSlot->getName().str() ).str(), WideCharAsUtf8( targetSlot->getName().str() ).str(),
 								localip >> 24, (localip >> 16) & 0xff, (localip >> 8) & 0xff, localip & 0xff,
 								targetip >> 24, (targetip >> 16) & 0xff, (targetip >> 8) & 0xff, targetip & 0xff));
 
@@ -835,7 +840,7 @@ void NAT::sendMangledSourcePort() {
 	DEBUG_LOG(("NAT::sendMangledSourcePort - NAT behavior = 0x%08x\n", fwType));
 
 //	m_manglerRetryTime = TheGameSpyConfig->getRetryInterval() + timeGetTime();
-	m_manglerRetryTime = m_manglerRetryTimeInterval + timeGetTime();
+	m_manglerRetryTime = m_manglerRetryTimeInterval + Clock_Milliseconds();
 	m_manglerRetries = 0;
 
 	if (TheFirewallHelper != NULL) {
@@ -843,7 +848,7 @@ void NAT::sendMangledSourcePort() {
 		TheFirewallHelper->openSpareSocket(m_spareSocketPort);
 		TheFirewallHelper->sendToManglerFromPort(m_manglerAddress, m_spareSocketPort, m_packetID);
 //		m_manglerRetryTime = TheGameSpyConfig->getRetryInterval() + timeGetTime();
-		m_manglerRetryTime = m_manglerRetryTimeInterval + timeGetTime();
+		m_manglerRetryTime = m_manglerRetryTimeInterval + Clock_Milliseconds();
 	}
 
 	setConnectionState(m_localNodeNumber, NATCONNECTIONSTATE_WAITINGFORMANGLERRESPONSE);
@@ -995,7 +1000,7 @@ void NAT::probed(Int nodeNumber) {
 				setConnectionState(m_localNodeNumber, NATCONNECTIONSTATE_WAITINGFORMANGLEDPORT);
 				DEBUG_LOG(("NAT::probed - still waiting for mangled port\n"));
 			} else {
-				DEBUG_LOG(("NAT::probed - sending a probe to %ls\n", targetSlot->getName().str()));
+				DEBUG_LOG(("NAT::probed - sending a probe to %s\n", WideCharAsUtf8( targetSlot->getName().str() ).str()));
 				sendAProbe(targetSlot->getIP(), targetSlot->getPort(), m_localNodeNumber);
 				notifyTargetOfProbe(targetSlot);
 				setConnectionState(m_localNodeNumber, NATCONNECTIONSTATE_WAITINGFORRESPONSE);
@@ -1035,7 +1040,7 @@ void NAT::gotMangledPort(Int nodeNumber, UnsignedShort mangledPort) {
 	}
 
 	targetSlot->setPort(mangledPort);
-	DEBUG_LOG(("NAT::gotMangledPort - got mangled port number %d from our target node (%ls)\n", mangledPort, targetSlot->getName().str()));
+	DEBUG_LOG(("NAT::gotMangledPort - got mangled port number %d from our target node (%s)\n", mangledPort, WideCharAsUtf8( targetSlot->getName().str() ).str()));
 	if (((localSlot->getNATBehavior() & FirewallHelperClass::FIREWALL_TYPE_NETGEAR_BUG) == 0) || (m_beenProbed == TRUE) ||
 			(((localSlot->getNATBehavior() & FirewallHelperClass::FIREWALL_TYPE_NETGEAR_BUG) != 0) && ((targetSlot->getNATBehavior() & FirewallHelperClass::FIREWALL_TYPE_NETGEAR_BUG) != 0))) {
 #ifdef DEBUG_LOGGING
@@ -1090,7 +1095,7 @@ void NAT::notifyTargetOfProbe(GameSlot *targetSlot) {
 	req.nick = hostName.str();
 	req.options = options.str();
 	TheGameSpyPeerMessageQueue->addRequest(req);
-	DEBUG_LOG(("NAT::notifyTargetOfProbe - notifying %ls that we have probed them.\n", targetSlot->getName().str()));
+	DEBUG_LOG(("NAT::notifyTargetOfProbe - notifying %s that we have probed them.\n", WideCharAsUtf8( targetSlot->getName().str() ).str()));
 }
 
 void NAT::notifyUsersOfConnectionDone(Int nodeIndex) {

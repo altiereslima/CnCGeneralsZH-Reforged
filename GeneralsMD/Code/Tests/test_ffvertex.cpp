@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 // The fixed-function vertex pipeline written out as HLSL.  What is checked here is the shape of
 // the program - which term is present, which register it reads, which case is refused - because
@@ -23,12 +24,12 @@
 
 #include "test_harness.h"
 
-#include "ffvertex.h"
+#include "ffvertex.h"		// and its FF_ names, Direct3D's values under names every platform has (ffstate_values.h)
 
 #include <string.h>
 
-static const DWORD FVF_XYZNDUV2 = D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_TEX2|D3DFVF_DIFFUSE;
-static const DWORD FVF_XYZUV1 = D3DFVF_XYZ|D3DFVF_TEX1;
+static const FixedFunctionValue FVF_XYZNDUV2 = FF_FVF_XYZ|FF_FVF_NORMAL|FF_FVF_TEX2|FF_FVF_DIFFUSE;
+static const FixedFunctionValue FVF_XYZUV1 = FF_FVF_XYZ|FF_FVF_TEX1;
 
 static bool contains(const std::string & text, const char * fragment)
 {
@@ -45,16 +46,16 @@ static VertexPipelineDescription plain_description()
 	description.LightingEnabled = false;
 	description.SpecularEnabled = false;
 	description.ColourVertexEnabled = true;
-	description.DiffuseMaterialSource = D3DMCS_COLOR1;
-	description.AmbientMaterialSource = D3DMCS_MATERIAL;
-	description.EmissiveMaterialSource = D3DMCS_MATERIAL;
-	description.SpecularMaterialSource = D3DMCS_MATERIAL;
+	description.DiffuseMaterialSource = FF_MCS_COLOR1;
+	description.AmbientMaterialSource = FF_MCS_MATERIAL;
+	description.EmissiveMaterialSource = FF_MCS_MATERIAL;
+	description.SpecularMaterialSource = FF_MCS_MATERIAL;
 	description.LightCount = 0;
 	description.StageCount = 1;
-	description.Stages[0].TextureCoordinateIndex = D3DTSS_TCI_PASSTHRU | 0;
-	description.Stages[0].TextureTransformFlags = D3DTTFF_DISABLE;
+	description.Stages[0].TextureCoordinateIndex = FF_TSS_TCI_PASSTHRU | 0;
+	description.Stages[0].TextureTransformFlags = FF_TTFF_DISABLE;
 	description.FogEnabled = false;
-	description.FogVertexMode = D3DFOG_NONE;
+	description.FogVertexMode = FF_FOG_NONE;
 	return description;
 }
 
@@ -87,7 +88,7 @@ TEST(ffvertex_a_directional_light_needs_no_attenuation)
 	VertexPipelineDescription description = plain_description();
 	description.LightingEnabled = true;
 	description.LightCount = 1;
-	description.Lights[0].Type = D3DLIGHT_DIRECTIONAL;
+	description.Lights[0].Type = FF_LIGHT_DIRECTIONAL;
 
 	std::string hlsl;
 	CHECK(VertexShader_Generate(description, VERTEX_SHADER_TARGET_D3D9, hlsl));
@@ -108,7 +109,7 @@ TEST(ffvertex_a_point_light_attenuates_and_stops_at_its_range)
 	VertexPipelineDescription description = plain_description();
 	description.LightingEnabled = true;
 	description.LightCount = 1;
-	description.Lights[0].Type = D3DLIGHT_POINT;
+	description.Lights[0].Type = FF_LIGHT_POINT;
 
 	std::string hlsl;
 	CHECK(VertexShader_Generate(description, VERTEX_SHADER_TARGET_D3D9, hlsl));
@@ -127,8 +128,8 @@ TEST(ffvertex_a_normal_mapped_draw_carries_its_point_lights_in_the_base)
 	description.LightingEnabled = true;
 	description.NormalMapped = true;
 	description.LightCount = 2;
-	description.Lights[0].Type = D3DLIGHT_DIRECTIONAL;
-	description.Lights[1].Type = D3DLIGHT_POINT;
+	description.Lights[0].Type = FF_LIGHT_DIRECTIONAL;
+	description.Lights[1].Type = FF_LIGHT_POINT;
 
 	std::string hlsl;
 	CHECK(VertexShader_Generate(description, VERTEX_SHADER_TARGET_D3D11, hlsl));
@@ -143,7 +144,7 @@ TEST(ffvertex_a_spot_light_adds_the_cone_to_the_point_light_terms)
 	VertexPipelineDescription description = plain_description();
 	description.LightingEnabled = true;
 	description.LightCount = 1;
-	description.Lights[0].Type = D3DLIGHT_SPOT;
+	description.Lights[0].Type = FF_LIGHT_SPOT;
 
 	std::string hlsl;
 	CHECK(VertexShader_Generate(description, VERTEX_SHADER_TARGET_D3D9, hlsl));
@@ -153,7 +154,8 @@ TEST(ffvertex_a_spot_light_adds_the_cone_to_the_point_light_terms)
 }
 
 // D3D9 spends the scene ambient once, through the ambient material:
-//     sum(atten * spot * Ldiffuse * Cdiffuse * N.L) + Cambient * Gambient + Cemissive
+//     sum(atten * spot * Ldiffuse * Cdiffuse * N.L) + Cambient * (Gambient + sum(atten * spot * Lambient)) + Cemissive
+// (each light's own ambient joins the scene's since the fix for port defect 23)
 // The generator used to seed the light sum with GlobalAmbient as well, which scaled it by the
 // diffuse material a second time and made every lit model brighter than Direct3D 9 draws it.  On a
 // dusk map that was 13.2% of the frame with the geometry in exactly the right place, so nothing
@@ -163,7 +165,7 @@ TEST(ffvertex_the_scene_ambient_is_spent_once)
 	VertexPipelineDescription lit = plain_description();
 	lit.LightingEnabled = true;
 	lit.LightCount = 1;
-	lit.Lights[0].Type = D3DLIGHT_DIRECTIONAL;
+	lit.Lights[0].Type = FF_LIGHT_DIRECTIONAL;
 
 	std::string hlsl;
 	CHECK(VertexShader_Generate(lit, VERTEX_SHADER_TARGET_D3D9, hlsl));
@@ -171,7 +173,7 @@ TEST(ffvertex_the_scene_ambient_is_spent_once)
 	// The light sum starts empty and the ambient enters only through the ambient material.
 	CHECK(contains(hlsl, "float3 diffuse_light = float3(0.0, 0.0, 0.0);"));
 	CHECK(!contains(hlsl, "float3 diffuse_light = GlobalAmbient.rgb;"));
-	CHECK(contains(hlsl, "MaterialAmbient.rgb * GlobalAmbient.rgb"));
+	CHECK(contains(hlsl, "MaterialAmbient.rgb * (GlobalAmbient.rgb + ambient_light)"));
 }
 
 // D3DMCS_COLOR1 reads the diffuse vertex colour, but only where the format carries one and
@@ -182,8 +184,8 @@ TEST(ffvertex_a_colour_material_source_falls_back_to_the_material)
 	VertexPipelineDescription lit = plain_description();
 	lit.LightingEnabled = true;
 	lit.LightCount = 1;
-	lit.Lights[0].Type = D3DLIGHT_DIRECTIONAL;
-	lit.DiffuseMaterialSource = D3DMCS_COLOR1;
+	lit.Lights[0].Type = FF_LIGHT_DIRECTIONAL;
+	lit.DiffuseMaterialSource = FF_MCS_COLOR1;
 
 	std::string with_colour;
 	CHECK(VertexShader_Generate(lit, VERTEX_SHADER_TARGET_D3D9, with_colour));
@@ -197,7 +199,7 @@ TEST(ffvertex_a_colour_material_source_falls_back_to_the_material)
 
 	// And with the colour allowed but absent from the format.
 	lit.ColourVertexEnabled = true;
-	lit.FVF = D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_TEX1;
+	lit.FVF = FF_FVF_XYZ|FF_FVF_NORMAL|FF_FVF_TEX1;
 	std::string without_format;
 	CHECK(VertexShader_Generate(lit, VERTEX_SHADER_TARGET_D3D9, without_format));
 	CHECK(contains(without_format, "MaterialDiffuse.rgb * diffuse_light"));
@@ -210,33 +212,46 @@ TEST(ffvertex_each_coordinate_generation_mode_produces_its_own_vector)
 {
 	VertexPipelineDescription description = plain_description();
 
-	description.Stages[0].TextureCoordinateIndex = D3DTSS_TCI_CAMERASPACEPOSITION;
+	description.Stages[0].TextureCoordinateIndex = FF_TSS_TCI_CAMERASPACEPOSITION;
 	std::string position;
 	CHECK(VertexShader_Generate(description, VERTEX_SHADER_TARGET_D3D9, position));
 	CHECK(contains(position, "generated0 = float4(view_position.xyz, 1.0)"));
 
-	description.Stages[0].TextureCoordinateIndex = D3DTSS_TCI_CAMERASPACENORMAL;
+	description.Stages[0].TextureCoordinateIndex = FF_TSS_TCI_CAMERASPACENORMAL;
 	std::string normal;
 	CHECK(VertexShader_Generate(description, VERTEX_SHADER_TARGET_D3D9, normal));
 	CHECK(contains(normal, "generated0 = float4(view_normal, 1.0)"));
 
-	description.Stages[0].TextureCoordinateIndex = D3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR;
+	// The reflection vector reads LOCALVIEWER: the vertex's own eye with it (D3D9's default, and every draw
+	// the engine makes), and without it the fixed eye E = (0, 0, -1), as Windows' own D3D9 draws it
+	// (knownprobe_windows.cpp, N14).  reflect(I, N) = I - 2(N.I)N with I = -E = (0, 0, 1) is 2(N.E)N - E.
+	description.Stages[0].TextureCoordinateIndex = FF_TSS_TCI_CAMERASPACEREFLECTIONVECTOR;
+	description.LocalViewer = true;
 	std::string reflection;
 	CHECK(VertexShader_Generate(description, VERTEX_SHADER_TARGET_D3D9, reflection));
 	CHECK(contains(reflection, "reflect(normalize(view_position.xyz), view_normal)"));
+
+	description.LocalViewer = false;
+	std::string reflection_fixed_eye;
+	CHECK(VertexShader_Generate(description, VERTEX_SHADER_TARGET_D3D9, reflection_fixed_eye));
+	CHECK(contains(reflection_fixed_eye, "reflect(float3(0.0, 0.0, 1.0), view_normal)"));
+	CHECK(!contains(reflection_fixed_eye, "normalize(view_position.xyz)"));
+	const std::string fixed_eye_key = VertexShader_Key(description);
+	description.LocalViewer = true;
+	CHECK(fixed_eye_key != VertexShader_Key(description));	// the unlit program is keyed :E for the fixed eye
 }
 
 TEST(ffvertex_a_texture_matrix_is_applied_and_a_projected_one_divides)
 {
 	VertexPipelineDescription description = plain_description();
-	description.Stages[0].TextureTransformFlags = D3DTTFF_COUNT2;
+	description.Stages[0].TextureTransformFlags = FF_TTFF_COUNT2;
 
 	std::string plain_matrix;
 	CHECK(VertexShader_Generate(description, VERTEX_SHADER_TARGET_D3D9, plain_matrix));
 	CHECK(contains(plain_matrix, "generated0 = mul(generated0, TextureMatrix0);"));
 	CHECK(!contains(plain_matrix, "generated0.xy /="));
 
-	description.Stages[0].TextureTransformFlags = D3DTTFF_COUNT3 | D3DTTFF_PROJECTED;
+	description.Stages[0].TextureTransformFlags = FF_TTFF_COUNT3 | FF_TTFF_PROJECTED;
 	std::string projected;
 	CHECK(VertexShader_Generate(description, VERTEX_SHADER_TARGET_D3D9, projected));
 	CHECK(contains(projected, "generated0 = mul(generated0, TextureMatrix0);"));
@@ -248,17 +263,17 @@ TEST(ffvertex_the_three_fog_modes_each_write_their_own_factor)
 	VertexPipelineDescription description = plain_description();
 	description.FogEnabled = true;
 
-	description.FogVertexMode = D3DFOG_LINEAR;
+	description.FogVertexMode = FF_FOG_LINEAR;
 	std::string linear;
 	CHECK(VertexShader_Generate(description, VERTEX_SHADER_TARGET_D3D9, linear));
 	CHECK(contains(linear, "FogParameters.y - view_position.z"));
 
-	description.FogVertexMode = D3DFOG_EXP;
+	description.FogVertexMode = FF_FOG_EXP;
 	std::string exponential;
 	CHECK(VertexShader_Generate(description, VERTEX_SHADER_TARGET_D3D9, exponential));
 	CHECK(contains(exponential, "exp(-FogParameters.z * view_position.z)"));
 
-	description.FogVertexMode = D3DFOG_EXP2;
+	description.FogVertexMode = FF_FOG_EXP2;
 	std::string squared;
 	CHECK(VertexShader_Generate(description, VERTEX_SHADER_TARGET_D3D9, squared));
 	CHECK(contains(squared, "FogParameters.z * FogParameters.z"));
@@ -312,7 +327,7 @@ TEST(ffvertex_puts_a_pretransformed_vertex_back_into_clip_space)
 	// smudges - come in with x and y already in pixels.  D3D9 takes them as they are; D3D11 has no
 	// such thing, so the program divides by the viewport and does not touch the world transform.
 	VertexPipelineDescription pretransformed = plain_description();
-	pretransformed.FVF = D3DFVF_XYZRHW|D3DFVF_DIFFUSE|D3DFVF_TEX1;
+	pretransformed.FVF = FF_FVF_XYZRHW|FF_FVF_DIFFUSE|FF_FVF_TEX1;
 
 	std::string hlsl;
 	CHECK(VertexShader_Generate(pretransformed, VERTEX_SHADER_TARGET_D3D11, hlsl));
@@ -337,8 +352,8 @@ TEST(ffvertex_reads_zero_for_a_coordinate_set_the_format_lacks)
 	// The shadow quads keep a texture stage on and carry no texture coordinates at all.  D3D9
 	// reads zeroes there and draws them; refusing left 202 draws a match out of the picture.
 	VertexPipelineDescription missing_set = plain_description();
-	missing_set.FVF = D3DFVF_XYZ|D3DFVF_NORMAL;
-	missing_set.Stages[0].TextureCoordinateIndex = D3DTSS_TCI_PASSTHRU | 0;
+	missing_set.FVF = FF_FVF_XYZ|FF_FVF_NORMAL;
+	missing_set.Stages[0].TextureCoordinateIndex = FF_TSS_TCI_PASSTHRU | 0;
 
 	std::string hlsl;
 	CHECK(VertexShader_Generate(missing_set, VERTEX_SHADER_TARGET_D3D11, hlsl));
@@ -352,7 +367,7 @@ TEST(ffvertex_refuses_what_it_cannot_generate)
 
 	// Lighting with no normal to light.
 	VertexPipelineDescription unlit_format = plain_description();
-	unlit_format.FVF = D3DFVF_XYZ|D3DFVF_TEX1;
+	unlit_format.FVF = FF_FVF_XYZ|FF_FVF_TEX1;
 	unlit_format.LightingEnabled = true;
 	CHECK(!VertexShader_Generate(unlit_format, VERTEX_SHADER_TARGET_D3D9, hlsl));
 
@@ -367,14 +382,16 @@ TEST(ffvertex_refuses_what_it_cannot_generate)
 	too_many_stages.StageCount = MAXIMUM_VERTEX_STAGES + 1;
 	CHECK(!VertexShader_Generate(too_many_stages, VERTEX_SHADER_TARGET_D3D9, hlsl));
 
-	// D3DMCS_COLOR2 is the specular vertex colour and no format in the game carries one.  Handing
-	// back the material instead would draw something, and it would be the wrong thing quietly.
+	// D3DMCS_COLOR2 is no longer refused: since the fix for port defect 26 it reads a mesh's second vertex
+	// colour, and where the format carries none it falls back to the material, as D3D9 does.  This
+	// test was registered on Windows only and kept the old refusal until W2's first Windows ctest.
 	VertexPipelineDescription specular_source = plain_description();
 	specular_source.LightingEnabled = true;
 	specular_source.LightCount = 1;
-	specular_source.Lights[0].Type = D3DLIGHT_DIRECTIONAL;
-	specular_source.DiffuseMaterialSource = D3DMCS_COLOR2;
-	CHECK(!VertexShader_Generate(specular_source, VERTEX_SHADER_TARGET_D3D9, hlsl));
+	specular_source.Lights[0].Type = FF_LIGHT_DIRECTIONAL;
+	specular_source.DiffuseMaterialSource = FF_MCS_COLOR2;
+	CHECK(VertexShader_Generate(specular_source, VERTEX_SHADER_TARGET_D3D9, hlsl));
+	CHECK(contains(hlsl, "MaterialDiffuse.rgb * diffuse_light"));		// FVF_XYZNDUV2 has no specular colour
 }
 
 // The key is what a cache is built on, so two descriptions that generate the same text have to
@@ -386,10 +403,10 @@ TEST(ffvertex_the_key_follows_the_shape_and_not_the_constants)
 	VertexPipelineDescription lit = plain;
 	lit.LightingEnabled = true;
 	lit.LightCount = 1;
-	lit.Lights[0].Type = D3DLIGHT_DIRECTIONAL;
+	lit.Lights[0].Type = FF_LIGHT_DIRECTIONAL;
 
 	VertexPipelineDescription point_lit = lit;
-	point_lit.Lights[0].Type = D3DLIGHT_POINT;
+	point_lit.Lights[0].Type = FF_LIGHT_POINT;
 
 	CHECK_NE(VertexShader_Key(plain), VertexShader_Key(lit));
 	CHECK_NE(VertexShader_Key(lit), VertexShader_Key(point_lit));

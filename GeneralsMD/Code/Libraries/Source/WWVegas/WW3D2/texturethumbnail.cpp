@@ -15,11 +15,12 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 #include "texturethumbnail.h"
 #include "hashtemplate.h"
 #include "missingtexture.h"
-#include "targa.h"
+#include "TARGA.H"
 #include "ww3dformat.h"
 #include "ddsfile.h"
 #include "textureloader.h"
@@ -28,7 +29,9 @@
 #include "rawfile.h"
 #include "mixfile.h"
 #include "wwprofile.h"
+#if defined(_WIN32)
 #include <windows.h>
+#endif
 
 static DLListClass<ThumbnailManagerClass> ThumbnailManagerList;
 static ThumbnailManagerClass* GlobalThumbnailManager;
@@ -41,7 +44,7 @@ static void Create_Hash_Name(StringClass& name, const StringClass& thumb_name)
 {
 	name=thumb_name;
 	int len=name.Get_Length();
-	WWASSERT(!stricmp(&name[len-4],".tga") || !stricmp(&name[len-4],".dds"));
+	WWASSERT(!strcasecmp(&name[len-4],".tga") || !strcasecmp(&name[len-4],".dds"));
 	name[len-4]='\0';
 	_strlwr(name.Peek_Buffer());
 }
@@ -274,7 +277,7 @@ void ThumbnailManagerClass::Create_Thumbnails()
 		mix.Build_Filename_List(list);
 		for (int i=0;i<list.Count();++i) {
 			int len=list[i].Get_Length();
-			if (!stricmp(&list[i][len-4],".tga") || !stricmp(&list[i][len-4],".dds")) {
+			if (!strcasecmp(&list[i][len-4],".tga") || !strcasecmp(&list[i][len-4],".dds")) {
 				StringClass tex_name(list[i]);
 				if (!Peek_Thumbnail_Instance(tex_name)) {
 					new ThumbnailClass(this,tex_name);
@@ -534,7 +537,7 @@ void ThumbnailManagerClass::Add_Thumbnail_Manager(const char* thumbnail_filename
 	// so we'll do pure string compares here...
 
 	// Must NOT add global manager with this function
-	WWASSERT(stricmp(thumbnail_filename,GLOBAL_THUMBNAIL_MANAGER_FILENAME));
+	WWASSERT(strcasecmp(thumbnail_filename,GLOBAL_THUMBNAIL_MANAGER_FILENAME));
 
 	ThumbnailManagerClass* man=Peek_Thumbnail_Manager(thumbnail_filename);
 	if (man) return;
@@ -685,6 +688,7 @@ void ThumbnailManagerClass::Update_Thumbnail_File(const char* mix_file_name,bool
 
 	if (display_message_box && !message_box_displayed) {
 		message_box_displayed=true;
+#if defined(_WIN32)
 		::MessageBox(NULL,
 			"Some or all texture thumbnails need to be updated.\n"
 			"This will take a while. The update will only be done once\n"
@@ -692,6 +696,9 @@ void ThumbnailManagerClass::Update_Thumbnail_File(const char* mix_file_name,bool
 			"updated.",
 			"Updating texture thumbnails",
 			MB_OK);
+#else
+		WWDEBUG_SAY(("Updating texture thumbnails; this is done once each time a mix file changes\n"));
+#endif
 	}
 
 	// we don't currently have a thumbnail file (either we just deleted it or it never existed, we don't care)
@@ -717,6 +724,7 @@ void ThumbnailManagerClass::Pre_Init(bool display_message_box)
 	// Collect all mix file names
 	DynamicVectorClass<StringClass> mix_names;
 
+#if defined(_WIN32)	// nothing calls Pre_Init; off Windows it lists no mix files (C1's listing, if it is ever wanted)
 	char cur_dir[256];
 	GetCurrentDirectory(sizeof(cur_dir),cur_dir);
 	StringClass new_dir(cur_dir,true);
@@ -737,6 +745,7 @@ void ThumbnailManagerClass::Pre_Init(bool display_message_box)
 		}
 	}
 	SetCurrentDirectory(cur_dir);
+#endif
 
 	// First generate thumbnails for always.dat
 	Update_Thumbnail_File("always.dat",display_message_box);

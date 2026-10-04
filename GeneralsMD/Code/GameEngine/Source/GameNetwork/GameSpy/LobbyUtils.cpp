@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -34,7 +36,7 @@
 #include "Common/GameEngine.h"
 #include "Common/MultiplayerSettings.h"
 #include "Common/PlayerTemplate.h"
-#include "Common/Version.h"
+#include "Common/version.h"
 #include "GameClient/AnimateWindowManager.h"
 #include "GameClient/WindowLayout.h"
 #include "GameClient/Gadget.h"
@@ -70,7 +72,7 @@
 
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
 // Note: if you add more columns, you must modify the .wnd files and change the listbox properties (yuck!)
-static enum {
+enum {
 	COLUMN_NAME = 0,
 	COLUMN_MAP,
 	COLUMN_LADDER,
@@ -212,7 +214,7 @@ static void gameTooltip(GameWindow *window,
 		return;
 	}
 
-	Int gameID = (Int)GadgetListBoxGetItemData(window, row, 0);
+	Int gameID = (Int)(intptr_t)GadgetListBoxGetItemData(window, row, 0);
 	GameSpyStagingRoom *room = TheGameSpyInfo->findStagingRoomByID(gameID);
 	if (!room)
 	{
@@ -224,7 +226,7 @@ static void gameTooltip(GameWindow *window,
 	{
 #if 0 //def DEBUG_LOGGING
 		UnicodeString s;
-		s.format(L"Ping is %d ms (cutoffs are %d ms and %d ms\n%hs local pings\n%hs remote pings",
+		s.format(u"Ping is %d ms (cutoffs are %d ms and %d ms\n%hs local pings\n%hs remote pings",
 			room->getPingAsInt(), TheGameSpyConfig->getPingCutoffGood(), TheGameSpyConfig->getPingCutoffBad(),
 			TheGameSpyInfo->getPingString().str(), room->getPingString().str()
 		);
@@ -244,8 +246,8 @@ static void gameTooltip(GameWindow *window,
 		if (room->getHasPassword())
 		{
 			UnicodeString checkTooltip =TheGameText->fetch("TOOTIP:Password");
-			if(!checkTooltip.compare(L"Password required to joing game"))
-				checkTooltip.set(L"Password required to join game");
+			if(!checkTooltip.compare(u"Password required to joing game"))
+				checkTooltip.set(u"Password required to join game");
 			TheMouse->setCursorTooltip( checkTooltip, 10, NULL, 2.0f ); // the text and width are the only params used.  the others are the default values.
 		}
 		else
@@ -324,7 +326,7 @@ static void gameTooltip(GameWindow *window,
 		else if (slot && slot->isAI())
 		{
 			++numPlayers;
-			tooltip.concat(L'\n');
+			tooltip.concat(u'\n');
 			tooltip.concat(SlotStateName(slot->getState()));
 		}
 	}
@@ -502,10 +504,10 @@ struct GameSortStruct
 		switch(theGameSortType)
 		{
 		case GAMESORT_ALPHA_ASCENDING:
-			return wcsicmp(g1->getGameName().str(), g2->getGameName().str()) < 0;
+			return WideCharICmp(g1->getGameName().str(), g2->getGameName().str()) < 0;
 			break;
 		case GAMESORT_ALPHA_DESCENDING:
-			return wcsicmp(g1->getGameName().str(),g2->getGameName().str()) > 0;
+			return WideCharICmp(g1->getGameName().str(),g2->getGameName().str()) > 0;
 			break;
 		case GAMESORT_PING_ASCENDING:
 			return g1->getPingAsInt() < g2->getPingAsInt();
@@ -562,7 +564,7 @@ static Int insertGame( GameWindow *win, GameSpyStagingRoom *game, Bool showMap )
 
 
 	Int index = GadgetListBoxAddEntryText(win, game->getGameName(), gameColor, -1, COLUMN_NAME);
-	GadgetListBoxSetItemData(win, (void *)game->getID(), index);
+	GadgetListBoxSetItemData(win, (void *)(intptr_t)game->getID(), index);
 
 	UnicodeString s;
 
@@ -605,11 +607,11 @@ static Int insertGame( GameWindow *win, GameSpyStagingRoom *game, Bool showMap )
 	}
 	else
 	{
-		GadgetListBoxAddEntryText(win, UnicodeString(L" "), gameColor, index, COLUMN_MAP);
-		GadgetListBoxAddEntryText(win, UnicodeString(L" "), gameColor, index, COLUMN_LADDER);
+		GadgetListBoxAddEntryText(win, UnicodeString(u" "), gameColor, index, COLUMN_MAP);
+		GadgetListBoxAddEntryText(win, UnicodeString(u" "), gameColor, index, COLUMN_LADDER);
 	}
 
-	s.format(L"%d/%d", game->getReportedNumPlayers(), game->getReportedMaxPlayers());
+	s.format(u"%d/%d", game->getReportedNumPlayers(), game->getReportedMaxPlayers());
 	GadgetListBoxAddEntryText(win, s, gameColor, index, COLUMN_NUMPLAYERS);
 
 	if (game->getHasPassword())
@@ -625,7 +627,7 @@ static Int insertGame( GameWindow *win, GameSpyStagingRoom *game, Bool showMap )
 	}
 	else
 	{
-		GadgetListBoxAddEntryText(win, UnicodeString(L" "), gameColor, index, COLUMN_PASSWORD);
+		GadgetListBoxAddEntryText(win, UnicodeString(u" "), gameColor, index, COLUMN_PASSWORD);
 	}
 
 	if (game->getAllowObservers())
@@ -635,7 +637,7 @@ static Int insertGame( GameWindow *win, GameSpyStagingRoom *game, Bool showMap )
 	}
 	else
 	{
-		GadgetListBoxAddEntryText(win, UnicodeString(L" "), gameColor, index, COLUMN_OBSERVER);
+		GadgetListBoxAddEntryText(win, UnicodeString(u" "), gameColor, index, COLUMN_OBSERVER);
 	}
 
   {
@@ -647,7 +649,7 @@ static Int insertGame( GameWindow *win, GameSpyStagingRoom *game, Bool showMap )
     
   }
   
-	s.format(L"%d", game->getPingAsInt());
+	s.format(u"%d", game->getPingAsInt());
 	GadgetListBoxAddEntryText(win, s, gameColor, index, COLUMN_PING);
 	Int ping = game->getPingAsInt();
 	Int width = 10, height = 10;
@@ -685,7 +687,7 @@ void RefreshGameListBox( GameWindow *win, Bool showMap )
 	GadgetListBoxGetSelected(win, &selectedIndex);
 	if (selectedIndex != -1 )
 	{
-		selectedID = (Int)GadgetListBoxGetItemData(win, selectedIndex);
+		selectedID = (Int)(intptr_t)GadgetListBoxGetItemData(win, selectedIndex);
 	}
 	int prevPos = GadgetListBoxGetTopVisibleEntry( win );
 
@@ -876,7 +878,7 @@ void playerTemplateComboBoxTooltip(GameWindow *wndComboBox, WinInstanceData *ins
 {
 	Int index = 0;
 	GadgetComboBoxGetSelectedPos(wndComboBox, &index);
-	Int templateNum = (Int)GadgetComboBoxGetItemData(wndComboBox, index);
+	Int templateNum = (Int)(intptr_t)GadgetComboBoxGetItemData(wndComboBox, index);
 	UnicodeString ustringTooltip;
 	if (templateNum == -1)
 	{
@@ -907,7 +909,7 @@ void playerTemplateListBoxTooltip(GameWindow *wndListBox, WinInstanceData *instD
 	if (row == -1 || col == -1)
 		return;
 
-	Int templateNum = (Int)GadgetListBoxGetItemData(wndListBox, row, col);
+	Int templateNum = (Int)(intptr_t)GadgetListBoxGetItemData(wndListBox, row, col);
 	UnicodeString ustringTooltip;
 	if (templateNum == -1)
 	{

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -28,6 +30,7 @@
 #ifndef __LANGUAGEFILTER_H
 #define __LANGUAGEFILTER_H
 
+#include "Lib/WideCharFns.h"
 #include "Common/STLTypedefs.h"
 #include "Common/AsciiString.h"
 #include "Common/UnicodeString.h"
@@ -55,7 +58,7 @@ struct UnicodeStringsEqual
 	Bool operator()(UnicodeString a, UnicodeString b) const
 	{
 		Bool retval = (a.compareNoCase(b) == 0);
-		DEBUG_LOG(("Comparing %ls with %ls, return value is ", a.str(), b.str()));
+		DEBUG_LOG(("Comparing %s with %s, return value is ", WideCharAsUtf8( a.str() ).str(), WideCharAsUtf8( b.str() ).str()));
 		if (retval) {
 			DEBUG_LOG(("true.\n"));
 		} else {

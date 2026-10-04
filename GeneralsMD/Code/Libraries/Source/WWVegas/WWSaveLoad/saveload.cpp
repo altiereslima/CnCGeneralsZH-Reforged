@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -46,7 +47,11 @@
 #include "wwprofile.h"
 
 #pragma warning(disable:4201) // warning C4201: nonstandard extension used : nameless struct/union
+// Nothing in this file names a Win32 type or call; the clock it reads is systimer.h's, on Lib/Clock.h
+// since B2.  Kept on Windows for any includer that leaned on it, as systimer.h does.
+#if defined(_WIN32)
 #include <windows.h>
+#endif
 #include "systimer.h"
 
 

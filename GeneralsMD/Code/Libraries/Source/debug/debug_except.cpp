@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /////////////////////////////////////////////////////////////////////////EA-V1
 // $File: //depot/GeneralsMD/Staging/code/Libraries/Source/debug/debug_except.cpp $
@@ -28,6 +30,7 @@
 //////////////////////////////////////////////////////////////////////////////
 #include "_pch.h"
 #include <commctrl.h>
+#include "Common/EarlyCommandLine.h"   // isUnattendedProcess: -headless or ZH_UNATTENDED
 
 #pragma comment (lib,"comctl32")
 
@@ -108,7 +111,11 @@ const char *DebugExceptionhandler::GetExceptionType(struct _EXCEPTION_POINTERS *
 // The faulting instruction's address.
 static size_t ContextIP(const struct _CONTEXT &ctx)
 {
+#if defined(_M_ARM64)
+  return (size_t)ctx.Pc;
+#else
   return (size_t)ctx.Rip;
+#endif
 }
 
 void DebugExceptionhandler::LogExceptionLocation(Debug &dbg, struct _EXCEPTION_POINTERS *exptr)
@@ -124,6 +131,19 @@ void DebugExceptionhandler::LogRegisters(Debug &dbg, struct _EXCEPTION_POINTERS 
 {
   struct _CONTEXT &ctx=*exptr->ContextRecord;
 
+#if defined(_M_ARM64)
+  dbg << Debug::FillChar('0')
+      << Debug::Hex()
+      <<  "PC:" << Debug::Width(16) << ctx.Pc
+      << " SP:" << Debug::Width(16) << ctx.Sp
+      << " FP:" << Debug::Width(16) << ctx.Fp
+      << " LR:" << Debug::Width(16) << ctx.Lr << "\n"
+      <<  "X0:" << Debug::Width(16) << ctx.X0
+      << " X1:" << Debug::Width(16) << ctx.X1
+      << " X2:" << Debug::Width(16) << ctx.X2
+      << " X3:" << Debug::Width(16) << ctx.X3 << "\n"
+      << Debug::Dec() << Debug::FillChar(' ');
+#else
   dbg << Debug::FillChar('0')
       << Debug::Hex()
       <<  "RIP:" << Debug::Width(16) << ctx.Rip
@@ -136,6 +156,7 @@ void DebugExceptionhandler::LogRegisters(Debug &dbg, struct _EXCEPTION_POINTERS 
       << " RSI:" << Debug::Width(16) << ctx.Rsi
       << " RDI:" << Debug::Width(16) << ctx.Rdi << "\n"
       << Debug::Dec() << Debug::FillChar(' ');
+#endif
 }
 
 void DebugExceptionhandler::LogFPURegisters(Debug &dbg, struct _EXCEPTION_POINTERS *exptr)
@@ -144,12 +165,21 @@ void DebugExceptionhandler::LogFPURegisters(Debug &dbg, struct _EXCEPTION_POINTE
 
   // There is no x87 save area to walk: every float the game computes is in an SSE register, and
   // the four the calling convention passes arguments in are the ones worth naming.
+#if defined(_M_ARM64)
+  dbg << Debug::FillChar('0') << Debug::Hex()
+      <<  "V0:" << Debug::Width(16) << ctx.V[0].Low
+      << " V1:" << Debug::Width(16) << ctx.V[1].Low << "\n"
+      <<  "V2:" << Debug::Width(16) << ctx.V[2].Low
+      << " V3:" << Debug::Width(16) << ctx.V[3].Low << "\n"
+      << Debug::Dec() << Debug::FillChar(' ');
+#else
   dbg << Debug::FillChar('0') << Debug::Hex()
       <<  "XMM0:" << Debug::Width(16) << ctx.Xmm0.Low
       << " XMM1:" << Debug::Width(16) << ctx.Xmm1.Low << "\n"
       <<  "XMM2:" << Debug::Width(16) << ctx.Xmm2.Low
       << " XMM3:" << Debug::Width(16) << ctx.Xmm3.Low << "\n"
       << Debug::Dec() << Debug::FillChar(' ');
+#endif
 }
 
 // include exception dialog box
@@ -366,6 +396,17 @@ LONG __stdcall DebugExceptionhandler::ExceptionFilter(struct _EXCEPTION_POINTERS
   // shut down real Debug module now
   // (atexit code never gets called in exception case)
   Debug::StaticExit();
+
+  // A run nobody watches (-headless, ZH_UNATTENDED) has nobody to click OK: the dialog waited for ever,
+  // unseen in a service session, and a test that crashed looked like a hang until ctest's limit (W3).
+  // The report is already in the debug log; say where on stderr, and end the run as OK would.
+  if (isUnattendedProcess())
+  {
+    fprintf(stderr,"Unhandled exception 0x%08lX at %p; the report is in the debug log (unattended, so no dialog)\n",
+            (unsigned long)pExPtrs->ExceptionRecord->ExceptionCode,pExPtrs->ExceptionRecord->ExceptionAddress);
+    fflush(stderr);
+    return EXCEPTION_EXECUTE_HANDLER;
+  }
 
   // Show a dialog box
   InitCommonControls();

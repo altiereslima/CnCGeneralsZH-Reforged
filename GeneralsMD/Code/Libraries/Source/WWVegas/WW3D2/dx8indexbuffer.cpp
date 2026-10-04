@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -152,14 +154,14 @@ void IndexBufferClass::Copy(unsigned int* indices,unsigned first_index,unsigned 
 		DX8IndexBufferClass::AppendLockClass l(this,first_index,count);
 		unsigned short* inds=l.Get_Index_Array();
 		for (unsigned v=0;v<count;++v) {
-			*inds++=unsigned short(*indices++);
+			*inds++=(unsigned short)(*indices++);
 		}
 	}
 	else {
 		DX8IndexBufferClass::WriteLockClass l(this);
 		unsigned short* inds=l.Get_Index_Array();
 		for (unsigned v=0;v<count;++v) {
-			*inds++=unsigned short(*indices++);
+			*inds++=(unsigned short)(*indices++);
 		}
 	}
 }
@@ -347,7 +349,7 @@ DX8IndexBufferClass::DX8IndexBufferClass(unsigned short index_count_,UsageType u
 		usage_flags|=D3DUSAGE_SOFTWAREPROCESSING;
 	}
 
-	HRESULT ret=DX8Wrapper::_Get_D3D_Device()->CreateIndexBuffer(
+	RenderResult ret=DX8Wrapper::_Get_D3D_Device()->CreateIndexBuffer(
 		sizeof(WORD)*index_count,
 		usage_flags,
 		D3DFMT_INDEX16,
@@ -355,7 +357,7 @@ DX8IndexBufferClass::DX8IndexBufferClass(unsigned short index_count_,UsageType u
 		&index_buffer,
 		NULL);	// pSharedHandle, D3D9's extra parameter, reserved and always null
 
-	if (SUCCEEDED(ret)) {
+	if (Render_Succeeded(ret)) {
 		return;
 	}
 
@@ -380,7 +382,7 @@ DX8IndexBufferClass::DX8IndexBufferClass(unsigned short index_count_,UsageType u
 			&index_buffer,
 			NULL);	// pSharedHandle, D3D9's extra parameter, reserved and always null
 
-		if (SUCCEEDED(ret)) {
+		if (Render_Succeeded(ret)) {
 			WWDEBUG_SAY(("...Index buffer creation succesful\n"));
 			return;
 		}

@@ -1,0 +1,30 @@
+# A calm China base on the open grass of Fortress Avalanche for the 2.4.0 Shorts' HUD shot, seat 0
+# being the local player: barracks (its ten empty garrison boxes), a bunker with three Red Guards in
+# it (three of five boxes lit), two power plants, a war factory, two oil derricks paying in (the
+# "+N/s" beside the money) and two Nuke Cannons shelling a GLA camp 340 to the north, so their
+# amber reload bars fill while they are selected. The shoot script selects them with Ctrl+W over
+# -control and later opens the console's trainer panel.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 2500 -map "Maps\Fortress Avalanche\Fortress Avalanche.map" -autoskirmish 2
+#     -takeover -side 0 FactionChina -side 1 FactionGLA -seed 7 -scenario s240_hud
+#     -cinema s240_hud -control 8812 -video 690 1200 s240_hud -maxframes 1210
+
+# China's radar is an upgrade at the command center (Upgrade_ChinaRadar, 20 s); without it the
+# radar panel is an empty brown box.
+40    shiftupgrade 0  ChinaCommandCenter                Upgrade_ChinaRadar
+
+30    spawn      0  ChinaBarracks                   1   820 2130
+30    spawn      0  ChinaPowerPlant                 2   790 1975  95
+30    spawn      0  ChinaWarFactory                 1   1210 2000
+30    spawn      0  ChinaBunker                     1   1060 2265
+30    spawn      0  TechOilDerrick                  2   1260 2200  110
+30    spawn      0  ChinaVehicleNukeLauncher        2   960 2130  70
+30    spawn      0  ChinaInfantryRedguard           3   1040 2190  16
+30    spawn      0  ChinaInfantryRedguard           5   900 2260  16
+60    enter      0  ChinaInfantryRedguard           0  ChinaBunker
+
+30    spawn      1  GLABarracks                     1   1000 2480
+30    spawn      1  GLASupplyStash                  1   860 2480
+30    spawn      1  GLAArmsDealer                   1   1140 2490
+90    attack     0  ChinaVehicleNukeLauncher        1  GLABarracks

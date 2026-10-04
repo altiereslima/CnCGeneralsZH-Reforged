@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -54,28 +56,34 @@
 //-----------------------------------------------------------------------------
 
 #include "dx8wrapper.h"
+#include "Lib/Clock.h"
 #include "assetmgr.h"
 #include "Lib/BaseType.h"
-#include "Common/File.h"
+#include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "W3DDevice/GameClient/W3DShaderManager.h"
 #include "W3DDevice/GameClient/W3DShroud.h"
 #include "W3DDevice/GameClient/HeightMap.h"
 #include "W3DDevice/GameClient/W3DCustomScene.h"
 #include "W3DDevice/GameClient/W3DSmudge.h"
-#include "GameClient/view.h"
+#include "GameClient/View.h"
 #include "GameClient/CommandXlat.h"
-#include "GameClient/display.h"
+#include "GameClient/Display.h"
 #include "GameClient/Water.h"
 #include "GameClient/UiAnimClock.h"
 #include "GameLogic/GameLogic.h"
-#include "common/GlobalData.h"
-#include "common/GameLOD.h"
+#include "Common/GlobalData.h"
+#include "Common/GameLOD.h"
 #include "d3dx9runtime.h"
+#include "WW3D2/dx11runtime.h"
+#if defined(_WIN32)
+#include "dx11post.h"	//DX11Post_Set_Bloom; the library is not built off Windows
+#endif
 #include "d3d8shadertranslate.h"
 #include "dx8caps.h"
-#include "common/gamelod.h"
-#include "Benchmark.h"
+#include "Common/GameLOD.h"
+#include "benchmark.h"
+#include <string.h>	// memset, strcpy, strlen
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -117,7 +125,7 @@ static Bool fadeStepDue( void )
 {
 	static UnsignedInt lastMs = 0;
 	static Real accumMs = 0.0f;
-	return GameClient_isUiAnimStepDue( lastMs, accumMs, timeGetTime(), UI_ANIM_STEPS_PER_SEC );
+	return GameClient_isUiAnimStepDue( lastMs, accumMs, Clock_Milliseconds(), UI_ANIM_STEPS_PER_SEC );
 }
 
 /** Interface definition for custom shaders we define in our app.  These shaders can perform more complex
@@ -149,7 +157,7 @@ FilterTypes W3DShaderManager::m_currentFilter=FT_NULL_FILTER; ///< Last filter t
 Int W3DShaderManager::m_currentShaderPass;
 ChipsetType W3DShaderManager::m_currentChipset;
 GraphicsVenderID W3DShaderManager::m_currentVendor;
-__int64 W3DShaderManager::m_driverVersion;
+Int64 W3DShaderManager::m_driverVersion;
 
 Bool W3DShaderManager::m_renderingToTexture = false;
 IDirect3DSurface9 *W3DShaderManager::m_oldRenderSurface=NULL;	///<previous render target
@@ -185,9 +193,9 @@ W3DFilterInterface *ScreenDefaultFilterList[]=
 };
 
 /*=========  Bloom	=============================================================*/
-/// Retail had no bloom and every texture in the game is LDR, so this is opt-in and tunable
-/// rather than a fixed look: m_bloomIntensity is the strength in percent (0, off, which is the
-/// default) and m_bloomThreshold the brightness, in percent, below which nothing glows.  The
+/// Retail had no bloom and every texture in the game is LDR, so this is tunable rather than a
+/// fixed look: m_bloomIntensity is the strength in percent (0 is off, 60 the default) and
+/// m_bloomThreshold the brightness, in percent, below which nothing glows.  The
 /// options screen sets both from one of a handful of named levels; nothing here knows that.
 /// It rides on ScreenDefaultFilter, which already renders the scene into a full-screen texture
 /// on the frames the smudge effects need one, so the only new work is a quarter-size bright
@@ -201,7 +209,7 @@ static IDirect3DTexture9 *s_bloomTexture[2];	///< ping-pong render targets for t
 static IDirect3DSurface9 *s_bloomSurface[2];
 static Int s_bloomWidth, s_bloomHeight;
 
-/** Bloom strength in percent - Options.ini's "Bloom" - 0 when it was never set.  Read every
+/** Bloom strength in percent - Options.ini's "Bloom" - 60 when it was never set.  Read every
 	frame rather than cached, so editing the key and reloading the options takes effect. */
 static Int bloomIntensity(void)
 {
@@ -222,6 +230,26 @@ static Int bloomThreshold(void)
 	return threshold;
 }
 
+/** The fixed-function bloom's strength, which is zero on Direct3D 11: there the post chain's own
+	bloom in dx11post.cpp follows the option instead, and running this one too would stack two
+	glows.  Everywhere else it is the option. */
+static Int fixedFunctionBloomIntensity(void)
+{
+	if (Direct3D11_Is_Active())
+	{
+#if defined(_WIN32)
+		//The option in the post chain's units, where 1.0 is white.  The chain was tuned at a
+		//threshold of 1.0 and an intensity of 1.5, so the default threshold (65%) lands on 1.0 and
+		//the middle level (60%) on 1.5; 35% and 85% fall either side, 45% and 85% thresholds at
+		//0.69 and 1.31.  Pushed every frame, so a change on the options screen shows at once.
+		const Int percent = TheGlobalData != NULL ? TheGlobalData->m_bloomThreshold : 65;
+		DX11Post_Set_Bloom((Real)percent / 65.0f, (Real)bloomIntensity() * 0.025f);
+#endif
+		return 0;
+	}
+	return bloomIntensity();
+}
+
 static void releaseBloomTargets(void)
 {
 	for (Int i = 0; i < 2; i++)
@@ -239,7 +267,7 @@ static Bool createBloomTargets(IDirect3DTexture9 *sceneTexture)
 	if (s_bloomTexture[0] && s_bloomTexture[1]) return TRUE;
 
 	D3DSURFACE_DESC desc;
-	if (FAILED(sceneTexture->GetLevelDesc(0, &desc))) return FALSE;
+	if (Render_Failed(sceneTexture->GetLevelDesc(0, &desc))) return FALSE;
 	s_bloomWidth  = desc.Width  / BLOOM_DOWNSAMPLE;
 	s_bloomHeight = desc.Height / BLOOM_DOWNSAMPLE;
 	if (s_bloomWidth < 1 || s_bloomHeight < 1) return FALSE;
@@ -247,9 +275,9 @@ static Bool createBloomTargets(IDirect3DTexture9 *sceneTexture)
 	LPDIRECT3DDEVICE9 pDev = DX8Wrapper::_Get_D3D_Device();
 	for (Int i = 0; i < 2; i++)
 	{
-		if (FAILED(pDev->CreateTexture(s_bloomWidth, s_bloomHeight, 1, D3DUSAGE_RENDERTARGET,
+		if (Render_Failed(pDev->CreateTexture(s_bloomWidth, s_bloomHeight, 1, D3DUSAGE_RENDERTARGET,
 																	 desc.Format, D3DPOOL_DEFAULT, &s_bloomTexture[i], NULL))
-				|| FAILED(s_bloomTexture[i]->GetSurfaceLevel(0, &s_bloomSurface[i])))
+				|| Render_Failed(s_bloomTexture[i]->GetSurfaceLevel(0, &s_bloomSurface[i])))
 		{
 			releaseBloomTargets();
 			DEBUG_LOG(("Bloom: could not create %dx%d render targets - disabled\n", s_bloomWidth, s_bloomHeight));
@@ -264,11 +292,11 @@ static Bool createBloomTargets(IDirect3DTexture9 *sceneTexture)
 /** One screen-aligned quad covering the given rectangle of the current render target, sampling
 	[u0,v0]..[u1,v1] of whatever texture is in stage 0, modulated by colour. */
 static void drawBloomQuad(Real x, Real y, Real w, Real h,
-													Real u0, Real v0, Real u1, Real v1, DWORD color)
+													Real u0, Real v0, Real u1, Real v1, UnsignedInt color)
 {
 	struct _TRANS_LIT_TEX_VERTEX {
 		D3DXVECTOR4 p;
-		DWORD color;
+		UnsignedInt color;
 		Real u, v;
 	} v[4];
 
@@ -296,7 +324,7 @@ static void renderBloom(IDirect3DTexture9 *sceneTexture, Real x, Real y, Real w,
 
 	LPDIRECT3DDEVICE9 pDev = DX8Wrapper::_Get_D3D_Device();
 	IDirect3DSurface9 *oldTarget = NULL, *oldDepth = NULL;
-	if (FAILED(pDev->GetRenderTarget(PRIMARY_RENDER_TARGET, &oldTarget)) || oldTarget == NULL) return;
+	if (Render_Failed(pDev->GetRenderTarget(PRIMARY_RENDER_TARGET, &oldTarget)) || oldTarget == NULL) return;
 	pDev->GetDepthStencilSurface(&oldDepth);	//can legitimately be NULL
 
 	//Bright pass.  Anything darker than the threshold subtracts away to black and what survives
@@ -385,7 +413,9 @@ Bool ScreenDefaultFilter::preRender(Bool &skipRender, CustomScenePassModes &scen
 {
 	//Right now this filter is only used for smudges, so don't bother if none are present -
 	//unless bloom is on, which needs the scene in a texture on every frame.
-	if (TheSmudgeManager && bloomIntensity() == 0)
+	//Called before the smudge check so the Direct3D 11 chain gets the option every frame.
+	const Int fixedBloom = fixedFunctionBloomIntensity();
+	if (TheSmudgeManager && fixedBloom == 0)
 	{	if (((W3DSmudgeManager *)TheSmudgeManager)->getSmudgeCountLastFrame() == 0)
 			return FALSE;
 	}
@@ -403,7 +433,7 @@ Bool ScreenDefaultFilter::postRender(enum FilterModes mode, Coord2D &scrollDelta
 
 	struct _TRANS_LIT_TEX_VERTEX {
 		D3DXVECTOR4 p;
-		DWORD color;   // diffuse color    
+		UnsignedInt color;   // diffuse color    
 		float	u;
 		float	v;
 	} v[4];
@@ -439,7 +469,7 @@ Bool ScreenDefaultFilter::postRender(enum FilterModes mode, Coord2D &scrollDelta
 	DX8Wrapper::_Draw_DX8_Primitive_UP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(_TRANS_LIT_TEX_VERTEX));
 
 	//v[3] is the top left corner of the viewport inside the scene texture, v[0] the bottom right
-	if (bloomIntensity() > 0)
+	if (fixedFunctionBloomIntensity() > 0)
 		renderBloom(tex, (Real)xpos, (Real)ypos, (Real)width, (Real)height,
 								v[3].u, v[3].v, v[0].u, v[0].v);
 
@@ -497,7 +527,7 @@ W3DFilterInterface *ScreenBWFilterList[]=
 Int ScreenBWFilter::init(void)
 {
 	Int res;
-	HRESULT hr;
+	RenderResult hr;
 
 	m_dwBWPixelShader = NULL;
 	m_curFadeFrame = 0;
@@ -513,7 +543,7 @@ Int ScreenBWFilter::init(void)
 		{
 			//this shader needs some assets that need to be loaded
 			//shader decleration
-			DWORD Declaration[]=
+			RenderUInt32 Declaration[]=
 			{
 				(D3DVSD_STREAM(0)),
 				(D3DVSD_REG(0, D3DVSDT_FLOAT3)), // Position
@@ -524,7 +554,7 @@ Int ScreenBWFilter::init(void)
 
 			//Monochrome pixel shader.
 			hr = W3DShaderManager::LoadAndCreateD3DPixelShader("shaders\\monochrome.pso", &m_dwBWPixelShader);
-			if (FAILED(hr))
+			if (Render_Failed(hr))
 				return FALSE;
 
 			W3DFilters[FT_VIEW_BW_FILTER]=&screenBWFilter;
@@ -552,7 +582,7 @@ Bool ScreenBWFilter::postRender(enum FilterModes mode, Coord2D &scrollDelta,Bool
 
 	struct _TRANS_LIT_TEX_VERTEX {
 		D3DXVECTOR4 p;
-		DWORD color;   // diffuse color    
+		UnsignedInt color;   // diffuse color    
 		float	u;
 		float	v;
 	} v[4];
@@ -741,7 +771,7 @@ Bool ScreenBWFilterDOT3::postRender(enum FilterModes mode, Coord2D &scrollDelta,
 
 	struct _TRANS_LIT_TEX_VERTEX {
 		D3DXVECTOR4 p;
-		DWORD color;   // diffuse color    
+		UnsignedInt color;   // diffuse color    
 		float	u;
 		float	v;
 	} v[4];
@@ -765,7 +795,7 @@ Bool ScreenBWFilterDOT3::postRender(enum FilterModes mode, Coord2D &scrollDelta,
 	v[3].p = D3DXVECTOR4(  xpos-0.5f,  ypos-0.5f, 0.0f, 1.0f );
 	v[3].u = (Real)(xpos)/(Real)TheDisplay->getWidth();	v[3].v = (Real)(ypos)/(Real)TheDisplay->getHeight();
 	
-	DWORD currentFade=(((Int)((1.0f-m_curFadeValue) * 255.0f))<<24) | 0x00ffffff;	//store alpha value
+	UnsignedInt currentFade=(((Int)((1.0f-m_curFadeValue) * 255.0f))<<24) | 0x00ffffff;	//store alpha value
 
 	v[0].color = currentFade;
 	v[1].color = currentFade;
@@ -1002,7 +1032,7 @@ Bool ScreenCrossFadeFilter::postRender(enum FilterModes mode, Coord2D &scrollDel
 
 	struct _TRANS_LIT_TEX_VERTEX {
 		D3DXVECTOR4 p;
-		DWORD color;   // diffuse color    
+		UnsignedInt color;   // diffuse color    
 		float	u;
 		float	v;
 		float	u1;
@@ -1049,7 +1079,7 @@ Bool ScreenCrossFadeFilter::postRender(enum FilterModes mode, Coord2D &scrollDel
 	v[3].u = (Real)(xpos)/(Real)TheDisplay->getWidth();	v[3].v = (Real)(ypos)/(Real)TheDisplay->getHeight();
 	v[3].u1 = 0.5f-radius;	v[3].v1 = 0.5f-radius;
 
-	DWORD diffuse = 0xffffffff;//((Int)((m_curFadeValue) * 255.0f) << 24) | 0x00ffffff;	//store alpha value in vertex diffuse
+	UnsignedInt diffuse = 0xffffffff;//((Int)((m_curFadeValue) * 255.0f) << 24) | 0x00ffffff;	//store alpha value in vertex diffuse
 
 	v[0].color = diffuse;
 	v[1].color = diffuse;
@@ -1171,7 +1201,7 @@ Bool ScreenMotionBlurFilter::postRender(enum FilterModes mode, Coord2D &scrollDe
 	Bool continueEffect = true;
 	struct _TRANS_LIT_TEX_VERTEX {
 		D3DXVECTOR4 p;
-		DWORD color;   // diffuse color    
+		UnsignedInt color;   // diffuse color    
 		float	u;
 		float	v;
 	} v[4];
@@ -1780,7 +1810,7 @@ Int TerrainShader2Stage::init( void )
 	m_xSlidePerSecond = -0.02f;	 
 	m_ySlidePerSecond =  1.50f * m_xSlidePerSecond;
 	m_curTick = 0;
-	m_curTick = WW3D::Get_Sync_Time();//::GetTickCount();
+	m_curTick = WW3D::Get_Sync_Time();//Clock_Milliseconds_Coarse();
 	m_xOffset = 0;
 	m_yOffset = 0;
 
@@ -1825,7 +1855,7 @@ void TerrainShader2Stage::updateNoise1(D3DXMATRIX *destMatrix,D3DXMATRIX *curVie
 	D3DXMATRIX offset;
 
 	Int delta = m_curTick;
-	m_curTick = WW3D::Get_Sync_Time();//::GetTickCount();
+	m_curTick = WW3D::Get_Sync_Time();//Clock_Milliseconds_Coarse();
 	delta = m_curTick-delta;
 	m_xOffset += m_xSlidePerSecond*delta/1000;
 	m_yOffset += m_ySlidePerSecond*delta/1000;
@@ -2189,7 +2219,7 @@ Int TerrainShaderPixelShader::init( void )
 		{
 			//this shader needs some assets that need to be loaded
 			//shader decleration
-			DWORD Declaration[]=
+			RenderUInt32 Declaration[]=
 			{
 				(D3DVSD_STREAM(0)),
 				(D3DVSD_REG(0, D3DVSDT_FLOAT3)), // Position
@@ -2200,18 +2230,18 @@ Int TerrainShaderPixelShader::init( void )
 			};
 
 			//base version which doesn't apply any noise textures.
-			HRESULT hr = W3DShaderManager::LoadAndCreateD3DPixelShader("shaders\\terrain.pso", &m_dwBasePixelShader);
-			if (FAILED(hr))
+			RenderResult hr = W3DShaderManager::LoadAndCreateD3DPixelShader("shaders\\terrain.pso", &m_dwBasePixelShader);
+			if (Render_Failed(hr))
 				return FALSE;
 
 			//version which blends 1 noise texture.
 			hr = W3DShaderManager::LoadAndCreateD3DPixelShader("shaders\\terrainnoise.pso", &m_dwBaseNoise1PixelShader);
-			if (FAILED(hr))
+			if (Render_Failed(hr))
 				return FALSE;
 
 			//version which blends 2 noise textures.
 			hr = W3DShaderManager::LoadAndCreateD3DPixelShader("shaders\\terrainnoise2.pso", &m_dwBaseNoise2PixelShader);
-			if (FAILED(hr))
+			if (Render_Failed(hr))
 				return FALSE;
 
 			W3DShaders[W3DShaderManager::ST_TERRAIN_BASE]=&terrainShaderPixelShader;
@@ -2488,7 +2518,7 @@ Int RoadShaderPixelShader::init( void )
 		{
 			//this shader needs some assets that need to be loaded
 			//shader decleration
-			DWORD Declaration[]=
+			RenderUInt32 Declaration[]=
 			{
 				(D3DVSD_STREAM(0)),
 				(D3DVSD_REG(0, D3DVSDT_FLOAT3)), // Position
@@ -2498,8 +2528,8 @@ Int RoadShaderPixelShader::init( void )
 			};
 
 			//version which blends 2 noise textures.
-			HRESULT hr = W3DShaderManager::LoadAndCreateD3DPixelShader("shaders\\roadnoise2.pso", &m_dwBaseNoise2PixelShader);
-			if (FAILED(hr))
+			RenderResult hr = W3DShaderManager::LoadAndCreateD3DPixelShader("shaders\\roadnoise2.pso", &m_dwBaseNoise2PixelShader);
+			if (Render_Failed(hr))
 				return FALSE;
 
 			//Only set this shader for use in dual noise mode.  The 2Stage shader will take care of
@@ -2840,27 +2870,27 @@ void W3DShaderManager::init(void)
 		m_currentChipset = res;	//cache the current chipset.
 
 		//Some of our effects require an offscreen render target, so try creating it here.
-		HRESULT hr=DX8Wrapper::_Get_D3D_Device()->GetRenderTarget(PRIMARY_RENDER_TARGET, &m_oldRenderSurface);
+		RenderResult hr=DX8Wrapper::_Get_D3D_Device()->GetRenderTarget(PRIMARY_RENDER_TARGET, &m_oldRenderSurface);
 
 		m_oldRenderSurface->GetDesc(&desc);
 
 		hr=DX8Wrapper::_Get_D3D_Device()->CreateTexture(desc.Width,desc.Height,1,D3DUSAGE_RENDERTARGET,desc.Format,D3DPOOL_DEFAULT,&m_renderTexture,NULL);
 
-		if (hr != S_OK)
+		if (hr != D3D_OK)
 		{
 			if (m_oldRenderSurface) m_oldRenderSurface->Release();
 			m_oldRenderSurface = NULL;
 			m_renderTexture = NULL;
 		} else {
 			hr = m_renderTexture->GetSurfaceLevel(0, &m_newRenderSurface);
-			if (hr != S_OK)
+			if (hr != D3D_OK)
 			{
 				if (m_renderTexture) m_renderTexture->Release();
 				m_renderTexture = NULL;
 				m_newRenderSurface = NULL;
 			}	else {
 				hr = DX8Wrapper::_Get_D3D_Device()->GetDepthStencilSurface(&m_oldDepthSurface);
-				if (hr != S_OK)
+				if (hr != D3D_OK)
 				{
 					if (m_newRenderSurface) m_newRenderSurface->Release();
 					if (m_renderTexture) m_renderTexture->Release();
@@ -3021,7 +3051,7 @@ Bool W3DShaderManager::filterSetup(FilterTypes filter, enum FilterModes mode)
 static void rttComplain( const char *why )
 {
 	static UnsignedInt lastComplaintMs = 0;
-	const UnsignedInt now = timeGetTime();
+	const UnsignedInt now = Clock_Milliseconds();
 	if( lastComplaintMs != 0 && now - lastComplaintMs < 1000 )
 		return;
 	lastComplaintMs = now;
@@ -3034,7 +3064,7 @@ void W3DShaderManager::drawViewport(Int color)
 
 	struct _TRANS_LIT_TEX_VERTEX {
 		D3DXVECTOR4 p;
-		DWORD color;   // diffuse color    
+		UnsignedInt color;   // diffuse color    
 		float	u;
 		float	v;
 	} v[4];
@@ -3092,9 +3122,9 @@ void W3DShaderManager::startRenderToTexture(void)
 	IDirect3DSurface9 *depthSurface = DX8Wrapper::_Get_Non_MultiSampled_Depth_Buffer();
 	if (depthSurface == NULL) depthSurface = m_oldDepthSurface;
 	DX8Wrapper::_Set_DX8_Render_Target(m_newRenderSurface,depthSurface);
-	HRESULT hr = S_OK;
-	DEBUG_ASSERTCRASH(hr==S_OK, ("Set target failed unexpectedly."));
-	if (hr != S_OK)
+	RenderResult hr = D3D_OK;
+	DEBUG_ASSERTCRASH(hr==D3D_OK, ("Set target failed unexpectedly."));
+	if (hr != D3D_OK)
 	{
 		rttComplain( "SetRenderTarget(texture) failed" );
 		return;
@@ -3108,7 +3138,7 @@ void W3DShaderManager::startRenderToTexture(void)
 		//a black world under a live UI, which is what bloom looked like with MSAA on.
 		D3DSURFACE_DESC depthDesc;
 		depthSurface->GetDesc(&depthDesc);
-		DWORD clearFlags = D3DCLEAR_ZBUFFER;
+		UnsignedInt clearFlags = D3DCLEAR_ZBUFFER;
 		if (depthDesc.Format == D3DFMT_D24S8 || depthDesc.Format == D3DFMT_D24X4S4 || depthDesc.Format == D3DFMT_D15S1)
 			clearFlags |= D3DCLEAR_STENCIL;
 		DX8Wrapper::_Get_D3D_Device()->Clear(0, NULL, clearFlags, 0, 1.0f, 0);
@@ -3150,11 +3180,11 @@ IDirect3DTexture9 *W3DShaderManager::endRenderToTexture(void)
 		return NULL;
 	}
 	DX8Wrapper::_Set_DX8_Render_Target(m_oldRenderSurface,m_oldDepthSurface);	//restore original render target
-	HRESULT hr = S_OK;
-	DEBUG_ASSERTCRASH(hr==S_OK, ("Set target failed unexpectedly."));
-	if (hr != S_OK)
+	RenderResult hr = D3D_OK;
+	DEBUG_ASSERTCRASH(hr==D3D_OK, ("Set target failed unexpectedly."));
+	if (hr != D3D_OK)
 		rttComplain( "SetRenderTarget(back buffer) failed - the frame is stuck in the texture" );
-	if (hr == S_OK)
+	if (hr == D3D_OK)
 	{
 		//assume render target texure will be in stage 0.  Most hardware has "conditional" support for
 		//non-power-of-2 textures so we must force some required states:
@@ -3178,7 +3208,7 @@ IDirect3DTexture9 *W3DShaderManager::getRenderTexture(void)
 	return m_renderTexture;
 }
 
-enum GraphicsVenderID
+enum GraphicsVenderID : int
 {
 	DC_NVIDIA_VENDOR_ID	= 0x10DE,
 	DC_3DFX_VENDOR_ID	= 0x121A,
@@ -3203,9 +3233,13 @@ ChipsetType W3DShaderManager::getChipset( void )
 	{
 
 		D3DADAPTER_IDENTIFIER9 did;
-		::ZeroMemory(&did, sizeof(D3DADAPTER_IDENTIFIER9));
+		memset(&did,0, sizeof(D3DADAPTER_IDENTIFIER9));
 	/*	HRESULT res = */ d3d8Interface->GetAdapterIdentifier(0,NO_ADAPTER_IDENTIFIER_FLAGS,&did);
+#if defined(_WIN32)
 		*((LARGE_INTEGER*)&m_driverVersion) = did.DriverVersion;
+#else
+		m_driverVersion = did.DriverVersion;	// D3D9Posix.h's DriverVersion is an int64_t: the same eight bytes
+#endif
 
 		if(did.VendorId == DC_NVIDIA_VENDOR_ID)
 		{
@@ -3285,7 +3319,7 @@ ChipsetType W3DShaderManager::getChipset( void )
 //=============================================================================
 /** Reads a compiled shader out of the file system into a buffer the caller frees with
 	HeapFree.  Returns NULL and leaves nothing allocated if the file is not there. */
-static const DWORD* readShaderBytecode(const char* strFilePath)
+static const RenderUInt32* readShaderBytecode(const char* strFilePath)
 {
 	File *file = TheFileSystem->openFile(strFilePath, File::READ | File::BINARY);
 	if (file == NULL)
@@ -3296,9 +3330,13 @@ static const DWORD* readShaderBytecode(const char* strFilePath)
 
 	FileInfo fileInfo;
 	TheFileSystem->getFileInfo(AsciiString(strFilePath), &fileInfo);
-	const DWORD dwFileSize = fileInfo.sizeLow;
+	const UnsignedInt dwFileSize = fileInfo.sizeLow;
 
-	const DWORD* pShader = (DWORD*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, dwFileSize);
+#if defined(_WIN32)
+	const RenderUInt32* pShader = (RenderUInt32*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, dwFileSize);
+#else
+	const RenderUInt32* pShader = (RenderUInt32*)calloc(1, dwFileSize);	// zeroed, as HEAP_ZERO_MEMORY is
+#endif
 	if (pShader != NULL)
 	{
 		file->read((void *)pShader, dwFileSize);
@@ -3307,65 +3345,73 @@ static const DWORD* readShaderBytecode(const char* strFilePath)
 	return pShader;
 }
 
-HRESULT W3DShaderManager::LoadAndCreateD3DPixelShader(const char* strFilePath, IDirect3DPixelShader9** shader)
+RenderResult W3DShaderManager::LoadAndCreateD3DPixelShader(const char* strFilePath, IDirect3DPixelShader9** shader)
 {
 	if (getChipset() < DC_GENERIC_PIXEL_SHADER_1_1)
-		return E_FAIL;	//don't allow loading any shaders if hardware can't handle it.
+		return RENDER_FAIL;	//don't allow loading any shaders if hardware can't handle it.
 
-	const DWORD* pShader = readShaderBytecode(strFilePath);
+	const RenderUInt32* pShader = readShaderBytecode(strFilePath);
 	if (pShader == NULL)
-		return E_FAIL;
+		return RENDER_FAIL;
 
 	// The bytecode was compiled for D3D8 and does not load on a D3D9 device untouched;
 	// see d3d8shadertranslate.h for what has to be repaired and why.
 	std::string source;
-	const HRESULT hr = Create_Translated_Pixel_Shader(DX8Wrapper::_Get_D3D_Device(), pShader, shader,
+	const RenderResult hr = Create_Translated_Pixel_Shader(DX8Wrapper::_Get_D3D_Device(), pShader, shader,
 		&source);
+#if defined(_WIN32)
 	HeapFree(GetProcessHeap(), 0, (void*)pShader);
+#else
+	free((void*)pShader);
+#endif
 	dumpEngineShaderSource(strFilePath, source);
 
-	if (FAILED(hr))
+	if (Render_Failed(hr))
 	{
-		DEBUG_LOG(("SHADER: %s did not translate to Direct3D 9, hr=0x%08lx\n",
-			strFilePath, (unsigned long)hr));
-		return E_FAIL;
+		DEBUG_LOG(("SHADER: %s did not translate to Direct3D 9, hr=0x%08x\n",
+			strFilePath, (unsigned int)hr));
+		return RENDER_FAIL;
 	}
 
 	// Nothing transcribes a .pso yet, so this registration buys one thing: a refused draw can say
 	// which shader it was refused for instead of only that it was one of them.
 	Direct3D11_Register_Engine_Shader(*shader, strFilePath);
 
-	return S_OK;
+	return D3D_OK;
 }
 
-HRESULT W3DShaderManager::LoadAndCreateD3DVertexShader(const char* strFilePath, const DWORD* pDeclaration,
+RenderResult W3DShaderManager::LoadAndCreateD3DVertexShader(const char* strFilePath, const RenderUInt32* pDeclaration,
 	IDirect3DVertexShader9** shader, IDirect3DVertexDeclaration9** declaration)
 {
 	if (getChipset() < DC_GENERIC_PIXEL_SHADER_1_1)
-		return E_FAIL;	//don't allow loading any shaders if hardware can't handle it.
+		return RENDER_FAIL;	//don't allow loading any shaders if hardware can't handle it.
 
-	const DWORD* pShader = readShaderBytecode(strFilePath);
+	const RenderUInt32* pShader = readShaderBytecode(strFilePath);
 	if (pShader == NULL)
-		return E_FAIL;
+		return RENDER_FAIL;
 
 	std::string source;
-	const HRESULT hr = Create_Translated_Vertex_Shader(DX8Wrapper::_Get_D3D_Device(),
+	const RenderResult hr = Create_Translated_Vertex_Shader(DX8Wrapper::_Get_D3D_Device(),
 		pDeclaration, pShader, shader, declaration, &source);
+#if defined(_WIN32)
 	HeapFree(GetProcessHeap(), 0, (void*)pShader);
+#else
+	free((void*)pShader);
+#endif
 	dumpEngineShaderSource(strFilePath, source);
 
-	if (FAILED(hr))
+	if (Render_Failed(hr))
 	{
-		DEBUG_LOG(("SHADER: %s did not translate to Direct3D 9, hr=0x%08lx\n",
-			strFilePath, (unsigned long)hr));
-		return E_FAIL;
+		DEBUG_LOG(("SHADER: %s did not translate to Direct3D 9, hr=0x%08x\n",
+			strFilePath, (unsigned int)hr));
+		return RENDER_FAIL;
 	}
 
 	// The Direct3D 11 backend has a hand-written HLSL copy of some of these; the pointer is what
 	// tells a later bind which file it is looking at.
 	Direct3D11_Register_Engine_Shader(*shader, strFilePath);
 
-	return S_OK;
+	return D3D_OK;
 }
 
 //For the MP test, we're enforcing high min-spec requirements that need to be verified.
@@ -3376,6 +3422,39 @@ HRESULT W3DShaderManager::LoadAndCreateD3DVertexShader(const char* strFilePath, 
 #define MIN_ACCEPTED_TEXTURE_MEMORY	(1024*1024*30)	//30 MB
 
 /**Hack to give gameengine access to this function*/
+#if defined(CPUDETECT_UNMEASURED_PROCESSOR_MHZ)
+/* The speed reported for a CPU cpudetect cannot time: 3049 is the fastest processor GameLODPresets.ini
+	 names (BenchProfile = P4 3049), so it meets every BenchProfile and LODPreset the shipped file has and
+	 is far above its ReallyLowMHz (600).  test_render_hooks checks that against the game's own file. */
+enum { UNMEASURED_CPU_REPORTED_MHZ = 3049 };
+#endif
+
+/* The chipset reported for a device getChipset cannot place: the top of the table (R300), which every
+	 LODPreset any GameLODPresets.ini can name (GameLOD.cpp's VideoNames, XX to R300) meets.  Decision 2,
+	 extended to the GPU: getChipset's table ends at the GeForce4 and the Radeon 9700, so any later card
+	 (and the POSIX device, which has no vendor ID at all) comes back DC_UNKNOWN or placed only by its
+	 caps, GameLOD presumed a TNT2, and every shipped preset - LOW included - asks for a GF3 or GF4, so a
+	 first launch fell to LOW on Windows and Mac alike.  Only the preset choice sees this value: it is what
+	 testMinimumRequirements hands GameLOD, while the renderer keeps asking getChipset itself.  An
+	 override (-noshaders, GlobalData's ChipsetType) is not DC_UNKNOWN and is reported as it is.
+	 test_render_hooks checks the value against the game's own file. */
+enum { UNKNOWN_CHIPSET_REPORTED = DC_MAX - 1 };
+
+/* Which chipset the presets see for the one getChipset found (testMinimumRequirements, a function of its
+	 own so test_render_hooks can table it).  Placing a device only by its caps is not placing it: the
+	 POSIX device claims pixel shader 1.1 (A3e) and a Windows adapter the table does not name is read off
+	 whatever caps the D3D9 device admits to, and DC_GENERIC_PIXEL_SHADER_1_1 is below the GF3 every
+	 shipped preset asks for.  An override (-noshaders, GlobalData's ChipsetType) is reported as it is. */
+ChipsetType chipsetForPresets(ChipsetType detected, Bool overridden)
+{
+	if (overridden)
+		return detected;
+	if (detected == DC_UNKNOWN || detected == DC_GENERIC_PIXEL_SHADER_1_1 || detected == DC_GENERIC_PIXEL_SHADER_1_4
+			|| detected == DC_GENERIC_PIXEL_SHADER_2_0)
+		return (ChipsetType)UNKNOWN_CHIPSET_REPORTED;
+	return detected;
+}
+
 Bool testMinimumRequirements(ChipsetType *videoChipType, CpuType *cpuType, Int *cpuFreq, Int *numRAM, Real *intBenchIndex, Real *floatBenchIndex, Real *memBenchIndex)
 {
 	return W3DShaderManager::testMinimumRequirements(videoChipType,cpuType,cpuFreq,numRAM,intBenchIndex,floatBenchIndex,memBenchIndex);
@@ -3384,7 +3463,11 @@ Bool testMinimumRequirements(ChipsetType *videoChipType, CpuType *cpuType, Int *
 Bool W3DShaderManager::testMinimumRequirements(ChipsetType *videoChipType, CpuType *cpuType, Int *cpuFreq, Int *numRAM, Real *intBenchIndex, Real *floatBenchIndex, Real *memBenchIndex)
 {
 	if (videoChipType)
-		*videoChipType = getChipset();
+	{
+		// Decision 2 for the GPU: a device the chipset table cannot place counts as meeting every preset
+		// (chipsetForPresets), on every platform.
+		*videoChipType = chipsetForPresets(getChipset(), TheGlobalData != NULL && TheGlobalData->m_chipSetType != DC_UNKNOWN);
+	}
 
 	if (cpuType)
 	{
@@ -3406,7 +3489,17 @@ Bool W3DShaderManager::testMinimumRequirements(ChipsetType *videoChipType, CpuTy
 	}
 
 	if (cpuFreq)
+	{
 		*cpuFreq=CPUDetectClass::Get_Processor_Speed();
+#if defined(CPUDETECT_UNMEASURED_PROCESSOR_MHZ)
+		// Decision 2 (B19, option (c)): a CPU cpudetect cannot time, as every arm64 one is, is treated
+		// as fast.  A first launch adopts a benchmark profile's speed and a later one takes this, and at
+		// cpudetect's honest 0 the later launch turned the shell map off where the first had left it on.
+		// cpudetect defines the macro only where it cannot time the CPU, so Windows on x86 never gets here.
+		if (*cpuFreq == CPUDETECT_UNMEASURED_PROCESSOR_MHZ)
+			*cpuFreq = UNMEASURED_CPU_REPORTED_MHZ;
+#endif
+	}
 
 	if (numRAM)
 		*numRAM=CPUDetectClass::Get_Total_Physical_Memory();
@@ -3451,9 +3544,9 @@ Real W3DShaderManager::GetCPUBenchTime(void)
 	float ztot, yran, ymult, ymod, x, y, z, pi, prod;
     long int low, ixran, itot, j, iprod;
 
-  	__int64 endTime64,freq64,startTime64;
-	QueryPerformanceFrequency((LARGE_INTEGER *)&freq64);
-	QueryPerformanceCounter((LARGE_INTEGER *)&startTime64);
+  	Int64 endTime64,freq64,startTime64;
+	freq64 = Clock_Ticks_Per_Second();
+	startTime64 = Clock_Ticks();
 
     ztot = 0.0;
     low = 1;
@@ -3480,7 +3573,7 @@ Real W3DShaderManager::GetCPUBenchTime(void)
 	}
 	pi = 4.0 * (float)low/(float)itot;
 
-	QueryPerformanceCounter((LARGE_INTEGER *)&endTime64);
+	endTime64 = Clock_Ticks();
 	return ((double)(endTime64-startTime64)/(double)(freq64));
 }
 
@@ -3805,7 +3898,7 @@ Int FlatTerrainShaderPixelShader::init( void )
 		{
 			//this shader needs some assets that need to be loaded
 			//shader decleration
-			DWORD Declaration[]=
+			RenderUInt32 Declaration[]=
 			{
 				(D3DVSD_STREAM(0)),
 				(D3DVSD_REG(0, D3DVSDT_FLOAT3)), // Position
@@ -3816,23 +3909,23 @@ Int FlatTerrainShaderPixelShader::init( void )
 			};
 
 			//base version which doesn't apply any noise textures.
-			HRESULT hr = W3DShaderManager::LoadAndCreateD3DPixelShader("shaders\\fterrain.pso", &m_dwBasePixelShader);
-			if (FAILED(hr))
+			RenderResult hr = W3DShaderManager::LoadAndCreateD3DPixelShader("shaders\\fterrain.pso", &m_dwBasePixelShader);
+			if (Render_Failed(hr))
 				return FALSE;
 
 			//base version which doesn't apply any shroud textures.
 			hr = W3DShaderManager::LoadAndCreateD3DPixelShader("shaders\\fterrain0.pso", &m_dwBase0PixelShader);
-			if (FAILED(hr))
+			if (Render_Failed(hr))
 				return FALSE;
 
 			//version which blends 1 noise texture.
 			hr = W3DShaderManager::LoadAndCreateD3DPixelShader("shaders\\fterrainnoise.pso", &m_dwBaseNoise1PixelShader);
-			if (FAILED(hr))
+			if (Render_Failed(hr))
 				return FALSE;
 
 			//version which blends 2 noise textures.
 			hr = W3DShaderManager::LoadAndCreateD3DPixelShader("shaders\\fterrainnoise2.pso", &m_dwBaseNoise2PixelShader);
-			if (FAILED(hr))
+			if (Render_Failed(hr))
 				return FALSE;
 
 			W3DShaders[W3DShaderManager::ST_FLAT_TERRAIN_BASE]=&flatTerrainShaderPixelShader;

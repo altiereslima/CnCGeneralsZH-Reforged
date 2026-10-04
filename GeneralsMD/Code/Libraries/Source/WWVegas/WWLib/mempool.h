@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /***********************************************************************************************
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               ***
@@ -53,7 +55,7 @@
 #include "bittype.h"
 #include "wwdebug.h"
 #include "mutex.h"
-#include <new.h>
+#include <new>   // was <new.h>, which only MSVC has
 #include <stdlib.h>
 #include <stddef.h>
 
@@ -160,8 +162,19 @@ private:
 ** Macro to declare the allocator for your class.  Put this in the cpp file for
 ** the class.
 */
+// template<> is the standard spelling for an explicit specialization of a class template's static
+// data member, and MSVC accepts it as readily as it accepts leaving it out.  One line here covers
+// all ten DEFINE_AUTO_POOL users rather than ten edits at the call sites.
+//
+// The {} is what makes it a definition.  Without an initializer an explicit specialization of a
+// static data member is only a declaration ([temp.expl.spec]), so clang emitted no Allocator at all
+// and every pool was an unresolved symbol at link time - invisible until something linked.  It does
+// not change what the object starts as: ObjectPoolClass has a user-provided default constructor, so
+// {} value-initializes by calling it, exactly as the bare form default-initialized by calling it, and
+// the zero-initialization every static gets first happens either way.  Still a dynamic initializer,
+// in the same place in its translation unit.  B5 follow-up.
 #define DEFINE_AUTO_POOL(T,BLOCKSIZE) \
-ObjectPoolClass<T,BLOCKSIZE> AutoPoolClass<T,BLOCKSIZE>::Allocator;
+template<> ObjectPoolClass<T,BLOCKSIZE> AutoPoolClass<T,BLOCKSIZE>::Allocator{};
 
 
 /***********************************************************************************************

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -31,6 +33,7 @@
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
 
 #include "Common/GameEngine.h"
 #include "Common/MessageStream.h"
@@ -38,7 +41,7 @@
 #include "Common/PlayerList.h"
 #include "GameNetwork/NetworkInterface.h"
 #include "GameNetwork/CushionMetrics.h"
-#include "GameNetwork/Udp.h"
+#include "GameNetwork/udp.h"
 #include "GameNetwork/Transport.h"
 #include "strtok_r.h"
 #include "GameClient/Shell.h"
@@ -212,9 +215,9 @@ protected:
 	Int m_lastFrameCompleted;
 	Bool m_didSelfSlug;
 	time_t m_stallStart;																			///< When the frame we are waiting on stopped being ready; 0 when not waiting.
-	__int64 m_perfCountFreq;														///< The frequency of the performance counter.
+	Int64 m_perfCountFreq;														///< The frequency of the performance counter.
 
-	__int64 m_nextFrameTime;														///< When did we execute the last frame?  For slugging the GameLogic...
+	Int64 m_nextFrameTime;														///< When did we execute the last frame?  For slugging the GameLogic...
 
 	Bool m_frameDataReady;																		///< Is the frame data for the next frame ready to be executed by TheGameLogic?
 
@@ -350,7 +353,7 @@ void Network::init()
 
 	m_localStatus = NETLOCALSTATUS_PREGAME;
 
-	QueryPerformanceFrequency((LARGE_INTEGER *)&m_perfCountFreq);
+	m_perfCountFreq = Clock_Ticks_Per_Second();
 	m_nextFrameTime = 0;
 	m_sawCRCMismatch = FALSE;
 	m_checkCRCsThisFrame = FALSE;
@@ -753,9 +756,9 @@ void Network::update( void )
 	Bool ready = AllCommandsReady(TheGameLogic->getFrame());
 	if (m_conMgr != NULL && m_localStatus == NETLOCALSTATUS_INGAME) {
 		if (!ready && m_stallStart == 0) {
-			m_stallStart = timeGetTime();
+			m_stallStart = Clock_Milliseconds();
 		} else if (ready && m_stallStart != 0) {
-			m_conMgr->addNetworkStall(timeGetTime() - m_stallStart);
+			m_conMgr->addNetworkStall(Clock_Milliseconds() - m_stallStart);
 			m_stallStart = 0;
 		}
 	}
@@ -805,9 +808,9 @@ void Network::endOfGameCheck() {
 }
 
 Bool Network::timeForNewFrame() {
-	__int64 curTime;
-	QueryPerformanceCounter((LARGE_INTEGER *)&curTime);
-	__int64 frameDelay = m_perfCountFreq / m_frameRate;
+	Int64 curTime;
+	curTime = Clock_Ticks();
+	Int64 frameDelay = m_perfCountFreq / m_frameRate;
 
 	/*
 	 * If we're pushing up against the edge of our run ahead, we should slow the framerate down a bit

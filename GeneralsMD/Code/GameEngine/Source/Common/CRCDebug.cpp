@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -24,6 +25,7 @@
 
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
 
 #include "Common/CRCDebug.h"
 #include "Common/Debug.h"
@@ -83,7 +85,7 @@ CRCVerification::~CRCVerification()
 	{
 		if (TheInGameUI)
 		{
-			TheInGameUI->message(UnicodeString(L"GameLogic changed outside of GameLogic::update() - call Matt (x36804)!"));
+			TheInGameUI->message(UnicodeString(u"GameLogic changed outside of GameLogic::update() - call Matt (x36804)!"));
 		}
 		CRCDEBUG_LOG(("GameLogic changed outside of GameLogic::update()!!!\n"));
 	}
@@ -100,7 +102,7 @@ void outputCRCDebugLines( void )
 	IPEnumeration ips;
 	AsciiString fname;
 	fname.format("crcDebug%s.txt", ips.getMachineName().str());
-	FILE *fp = fopen(fname.str(), "wt");
+	FILE *fp = zh_fopen(fname.str(), "wt");
 	int start = 0;
 	int end = nextDebugString;
 	if (numDebugStrings >= MaxStrings)
@@ -134,7 +136,15 @@ void outputCRCDumpLines( void )
 
 static AsciiString getFname(AsciiString path)
 {
-	return path.reverseFind('\\') + 1;
+	// __FILE__ is backslashed under MSVC and forward-slashed elsewhere.  reverseFind answers NULL for a
+	// separator that is not there, and NULL + 1 was the whole of the old answer off Windows: the first
+	// dump of a -DebugCRCFromFrame run took strlen of address 1.
+	const char *back = path.reverseFind('\\');
+	const char *forward = path.reverseFind('/');
+	const char *last = back;
+	if (forward != NULL && (last == NULL || forward > last))
+		last = forward;
+	return last != NULL ? AsciiString(last + 1) : path;
 }
 
 Int lastCRCDebugFrame = 0;
@@ -160,7 +170,7 @@ void addCRCDebugLine(const char *fmt, ...)
 
 		va_list va;
 		va_start( va, fmt );
-		_vsnprintf(DebugStrings[nextDebugString]+len, 1024-len, fmt, va );
+		vsnprintf(DebugStrings[nextDebugString]+len, 1024-len, fmt, va );
 		DebugStrings[nextDebugString][1023] = 0;
 		va_end( va );
 
@@ -192,7 +202,7 @@ void addCRCGenLine(const char *fmt, ...)
 	static char buf[1024];
 	va_list va;
 	va_start( va, fmt );
-	_vsnprintf(buf, 1024, fmt, va );
+	vsnprintf(buf, 1024, fmt, va );
 	va_end( va );
 	buf[1023] = 0;
 	addCRCDebugLine("%s", buf);
@@ -205,7 +215,7 @@ void addCRCDumpLine(const char *fmt, ...)
 	/*
 	va_list va;
 	va_start( va, fmt );
-	_vsnprintf(DumpStrings[nextDumpString], 1024, fmt, va );
+	vsnprintf(DumpStrings[nextDumpString], 1024, fmt, va );
 	DumpStrings[nextDumpString][1023] = 0;
 	va_end( va );
 

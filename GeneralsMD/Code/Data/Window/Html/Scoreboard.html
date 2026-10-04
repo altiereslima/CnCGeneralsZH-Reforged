@@ -58,17 +58,21 @@
   .gla #board { border-top-color: #473f23; }
 
   /* every column's left edge, shared by the captions and the seats; the Turkish captions are the
-     long ones, so a number column is as wide as its caption rather than its digits, and
-     "DAKIKADA(SANIYEDE)" is the longest.  The columns are packed against the right edge, the
-     favourite unit last, and the name takes what is left: at 98 pixels "USA Air Force General" ran
-     into the team */
+     long ones, so a number column is as wide as its caption rather than its digits.  A 7px caption
+     is drawn in 7 point Arial, about 9.3 of these pixels high, and up to 10 at the scales where
+     the point size rounds up: "DAKIKADA (SANIYEDE)" then measures 111, "RUTBE" 34 and "PARA" 27,
+     and the widest figures, six bold digits of money and "99999 (9999)", 44 and 78.  The money
+     and the two kill columns gave up what their digits never used, so the income column holds its
+     caption: at 90 pixels it ran 18 into "PARA".  The columns are packed against the right edge,
+     the favourite unit last, and the name takes what is left: at 98 pixels "USA Air Force General"
+     ran into the team */
   .c-name { left: 30px; }
   .c-team { left: 192px; width: 34px; }
-  .c-rank { left: 228px; width: 34px; text-align: right; }
-  .c-cash { left: 264px; width: 70px; text-align: right; }
-  .c-income { left: 336px; width: 90px; text-align: right; white-space: nowrap; }
-  .c-kills { left: 428px; width: 46px; text-align: right; }
-  .c-losses { left: 476px; width: 46px; text-align: right; }
+  .c-rank { left: 228px; width: 36px; text-align: right; }
+  .c-cash { left: 266px; width: 54px; text-align: right; }
+  .c-income { left: 322px; width: 124px; text-align: right; white-space: nowrap; }
+  .c-kills { left: 448px; width: 36px; text-align: right; }
+  .c-losses { left: 486px; width: 36px; text-align: right; }
   .c-skills { left: 530px; }
   .c-favourite { left: 682px; }
 
@@ -145,7 +149,7 @@
     <span class="c-team">{{text:GUI:ScoreboardTeam}}</span>
     <span class="c-rank">{{text:GUI:ScoreboardLevel}}</span>
     <span class="c-cash">{{text:GUI:ScoreboardMoney}}</span>
-    <span class="c-income">{{text:GUI:ScoreboardPerMinute}}({{text:GUI:ScoreboardPerSecond}})</span>
+    <span class="c-income">{{text:GUI:ScoreboardPerMinute}} ({{text:GUI:ScoreboardPerSecond}})</span>
     <span class="c-kills">{{text:GUI:ScoreboardKills}}</span>
     <span class="c-losses">{{text:GUI:ScoreboardDeaths}}</span>
     <span class="c-skills">{{text:GUI:ScoreboardPowers}}</span>
@@ -162,7 +166,7 @@
       <span class="cell team c-team">{{team}}</span>
       <span class="cell num c-rank">{{rank}}</span>
       <span class="cell num cash c-cash">{{cash}}</span>
-      <span class="cell num income c-income">{{income}}<span class="persecond">({{persecond}})</span></span>
+      <span class="cell num income c-income">{{income}} <span class="persecond">({{persecond}})</span></span>
       <span class="cell num c-kills">{{kills}}</span>
       <span class="cell num c-losses">{{losses}}</span>
       <img class="skill" src="{{skill0}}" data-tip="{{skill0.tip}}" style="left: 530px">

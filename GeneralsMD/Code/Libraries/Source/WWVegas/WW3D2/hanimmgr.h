@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /* $Header: /Commando/Code/ww3d2/hanimmgr.h 1     1/22/01 3:36p Greg_h $ */
 /*********************************************************************************************** 
@@ -46,7 +47,7 @@
 #include "always.h"
 #include "hash.h"
 #include "wwstring.h"
-#include "vector.h"
+#include "Vector.H"
 
 class HAnimClass;
 class ChunkLoadClass;

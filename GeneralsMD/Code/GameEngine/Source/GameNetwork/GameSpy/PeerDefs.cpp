@@ -15,14 +15,20 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 // FILE: PeerDefs.cpp //////////////////////////////////////////////////////
 // Generals GameSpy Peer (chat) definitions
 // Author: Matthew D. Campbell, June 2002
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+
+#include "Lib/WideCharFns.h"
+#include "Lib/Clock.h"
 #include <set>
 
+#include "Common/LocalFileSystem.h"
 #include "Common/GameState.h"
 #include "Common/RandomValue.h"
 #include "Common/IgnorePreferences.h"
@@ -58,7 +64,7 @@ void deleteNotificationBox( void );
 
 bool AsciiComparator::operator()(AsciiString s1, AsciiString s2) const
 {
-	return stricmp(s1.str(), s2.str()) < 0;
+	return strcasecmp(s1.str(), s2.str()) < 0;
 }
 
 GameSpyInfo::GameSpyInfo()
@@ -336,7 +342,7 @@ void GameSpyInfo::addGroupRoom( GameSpyGroupRoom room )
 				GameSpyGroupRoom room = iter->second;
 				if (room.m_groupID != TheGameSpyConfig->getQMChannel())
 				{
-					room.m_translatedName.format(L"%ls %d", names[nameIndex].str(), timesThrough);
+					room.m_translatedName.format(u"%ls %d", names[nameIndex].str(), timesThrough);
 					nameIndex = (nameIndex+1)%names.size();
 					m_groupRooms[room.m_groupID] = room;
 					if (!nameIndex)
@@ -355,7 +361,7 @@ void GameSpyInfo::addGroupRoom( GameSpyGroupRoom room )
 		groupLabel.format("GUI:%s", room.m_name.str());
 		room.m_translatedName = TheGameText->fetch(groupLabel);
 		m_groupRooms[room.m_groupID] = room;
-		if ( !stricmp("quickmatch", room.m_name.str()) )
+		if ( !strcasecmp("quickmatch", room.m_name.str()) )
 		{
 			DEBUG_LOG(("Group room %d (%s) is the QuickMatch room\n", room.m_groupID, room.m_name.str()));
 			TheGameSpyConfig->setQMChannel(room.m_groupID);
@@ -541,7 +547,7 @@ void GameSpyInfo::markAsStagingRoomHost( void )
 
   m_localStagingRoom.reset();
 	m_localStagingRoom.enterGame();
-	m_localStagingRoom.setSeed(GetTickCount());
+	m_localStagingRoom.setSeed(Clock_Milliseconds_Coarse());
   
   m_localStagingRoom.setUseStats( useStats );
   m_localStagingRoom.setOldFactionsOnly( oldFactionsOnly );
@@ -586,7 +592,7 @@ void GameSpyInfo::markAsStagingRoomJoiner( Int game )
 		m_localStagingRoom.setAllowObservers(info->getAllowObservers());
 		m_localStagingRoom.setHasPassword(info->getHasPassword());
 		m_localStagingRoom.setGameName(info->getGameName());
-		DEBUG_LOG(("Joining game: host is %ls\n", m_localStagingRoom.getConstSlot(0)->getName().str()));
+		DEBUG_LOG(("Joining game: host is %s\n", WideCharAsUtf8( m_localStagingRoom.getConstSlot(0)->getName().str() ).str()));
 	}
 }
 
@@ -620,11 +626,11 @@ void SetUpGameSpy( const char *motdBuffer, const char *configBuffer )
 	TearDownGameSpy();
 
 	AsciiString dir = TheGlobalData->getPath_UserData();
-	CreateDirectory(dir.str(), NULL);
+	TheLocalFileSystem->createDirectory(dir);
 	dir.format("%sGeneralsOnline", TheGlobalData->getPath_UserData().str());
-	CreateDirectory(dir.str(), NULL);
+	TheLocalFileSystem->createDirectory(dir);
 	dir.format("%sGeneralsOnline\\Ladders", TheGlobalData->getPath_UserData().str());
-	CreateDirectory(dir.str(), NULL);
+	TheLocalFileSystem->createDirectory(dir);
 
 	TheGameSpyBuddyMessageQueue = GameSpyBuddyMessageQueueInterface::createNewMessageQueue();
 	TheGameSpyBuddyMessageQueue->startThread();

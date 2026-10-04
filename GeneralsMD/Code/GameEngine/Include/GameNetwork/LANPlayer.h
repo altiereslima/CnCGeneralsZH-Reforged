@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -39,7 +40,7 @@
 class LANPlayer
 {
 public:
-	LANPlayer() { m_name = m_login = m_host = L""; m_lastHeard = 0; m_next = NULL; m_IP = 0; }
+	LANPlayer() { m_name = m_login = m_host = u""; m_lastHeard = 0; m_next = NULL; m_IP = 0; }
 
 	// Access functions
 	inline UnicodeString getName( void ) { return m_name; }

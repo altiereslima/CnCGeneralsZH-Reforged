@@ -1,0 +1,31 @@
+# Two Comanches are each put on three Battlemasters, which cannot shoot at aircraft, and 50 frames
+# into the attack, with missiles still in the pod, the first is sent 350 straight back away from
+# them and the second 350 off to the side.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 500
+#     -scenario hitrun -logPrefix hitrun_
+#
+# Measured 2026-10-03 with a temporary per-frame log of heading, gun target and last shot. Before,
+# each Comanche fired once more after the order and its gun let go of the tank within 6 frames.
+# After, the first fires 10 more shots backing straight away and the second 14 sliding off to the
+# side, both with the nose dead on the tank (0 degrees off) until it passes out of range 40 and 56
+# frames in. The moves themselves are untouched: 30 out at frame 32 and the same end point both
+# times. The missile pod was empty by then, so the extra shots are cannon rounds, which barely
+# scratch a Battlemaster. The tanks lost 174 and 179 between frames 200 and 450 against 190 each
+# before. Why the total came out lower is not pinned down; the pod's last missile left on frame 202
+# in one run and 206 in the other.
+
+30    spawn         0  AmericaVehicleComanche        1   1100 3500
+30    spawn         0  AirF_AmericaVehicleComanche   1   1100 4300
+140   spawn         1  ChinaTankBattleMaster         3   1300 3500
+140   spawn         1  Tank_ChinaTankBattleMaster    3   1300 4300
+150   attack        0  AmericaVehicleComanche        1  ChinaTankBattleMaster
+150   attack        0  AirF_AmericaVehicleComanche   1  Tank_ChinaTankBattleMaster
+200   move          0  AmericaVehicleComanche            750 3500
+200   move          0  AirF_AmericaVehicleComanche       1000 4650
+200   tally         1  ChinaTankBattleMaster
+450   tally         1  ChinaTankBattleMaster
+200   tally         1  Tank_ChinaTankBattleMaster
+450   tally         1  Tank_ChinaTankBattleMaster

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -27,6 +29,15 @@
 // Author: Michael S. Booth, April 2001
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+#include "zhio.h"
+#include "Common/MessageBoxFlags.h"	// MessageBoxWrapper and its flags
+#include "Platform/SleepMilliseconds.h"
+#if !defined(_WIN32)
+#include <unistd.h>		// getpid, for the model-checksum cache's scratch file
+#endif
+#include "Lib/Clock.h"
+
+#include "Lib/WideCharFns.h"
 
 #include "Common/ActionManager.h"
 #include "Common/AudioAffect.h"
@@ -44,7 +55,7 @@
 #include "Common/INIException.h"
 #include "Common/MessageStream.h"
 #include "Common/ThingFactory.h"
-#include "Common/File.h"
+#include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "Common/ArchiveFileSystem.h"
 #include "Common/LocalFileSystem.h"
@@ -122,7 +133,7 @@
 #include "GameNetwork/NetworkUtil.h"
 #include "GameNetwork/GameSpy/GameResultsThread.h"
 
-#include "Common/Version.h"
+#include "Common/version.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -186,8 +197,10 @@ void initSubsystem(SUBSYSTEM*& sysref, AsciiString name, SUBSYSTEM* sys, Xfer *p
 }
 
 //-------------------------------------------------------------------------------------------------
+#if defined(_WIN32)
 extern HINSTANCE ApplicationHInstance;  ///< our application instance
-extern CComModule _Module;
+extern CComModule _Module;		// ATL's module, for the embedded browser's COM; nothing off Windows uses COM
+#endif
 
 //-------------------------------------------------------------------------------------------------
 static void updateTGAtoDDS();
@@ -229,7 +242,7 @@ static AsciiString modelChecksumCachePath( void )
 static ModelChecksumMap readModelChecksumCache( void )
 {
 	ModelChecksumMap cache;
-	FILE *cacheFile = fopen( modelChecksumCachePath().str(), "r" );
+	FILE *cacheFile = zh_fopen( modelChecksumCachePath().str(), "r" );
 	if (cacheFile == NULL)
 		return cache;		// the first start on this machine, or the file was deleted
 
@@ -256,9 +269,13 @@ static void writeModelChecksumCache( const ModelChecksumMap &cache )
 {
 	AsciiString finalPath = modelChecksumCachePath();
 	AsciiString scratchPath;
+#if defined(_WIN32)
 	scratchPath.format( "%s.%u", finalPath.str(), (UnsignedInt)GetCurrentProcessId() );
+#else
+	scratchPath.format( "%s.%u", finalPath.str(), (UnsignedInt)getpid() );
+#endif
 
-	FILE *cacheFile = fopen( scratchPath.str(), "w" );
+	FILE *cacheFile = zh_fopen( scratchPath.str(), "w" );
 	if (cacheFile == NULL)
 		return;		// a read-only user folder costs the next start a full read, nothing else
 
@@ -269,8 +286,8 @@ static void writeModelChecksumCache( const ModelChecksumMap &cache )
 			entry.source.timestampHigh, entry.source.timestampLow, it->first.c_str() );
 	}
 	fclose( cacheFile );
-	if (!MoveFileExA( scratchPath.str(), finalPath.str(), MOVEFILE_REPLACE_EXISTING ))
-		DeleteFileA( scratchPath.str() );		// another copy holds it open; its own write will do
+	if (!TheLocalFileSystem->moveFileReplacing( scratchPath.str(), finalPath.str() ))
+		TheLocalFileSystem->deleteFile( scratchPath.str() );		// another copy holds it open; its own write will do
 }
 
 static Bool isSameFile( const FileInfo &left, const FileInfo &right )
@@ -382,7 +399,7 @@ void GameEngine::sampleLogicRate( void )
 		return;
 	}
 
-	const UnsignedInt nowMs = timeGetTime();
+	const UnsignedInt nowMs = Clock_Milliseconds();
 	const UnsignedInt frame = TheGameLogic->getFrame();
 	if( m_logicRateSampleMs == 0 || frame < m_logicRateSampleFrame )
 	{
@@ -412,7 +429,7 @@ Int GameEngine::getLogicFramesPerSecond( void )
 GameEngine::GameEngine( void )
 {
 	// Set the time slice size to 1 ms.
-	timeBeginPeriod(1);
+	Clock_Begin_Fine_Resolution();
 
 	// initialize to non garbage values
 	m_maxFPS = 0;
@@ -421,7 +438,9 @@ GameEngine::GameEngine( void )
 	m_quitting = FALSE;
 	m_isActive = FALSE;
 
+#if defined(_WIN32)
 	_Module.Init(NULL, ApplicationHInstance);
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -481,7 +500,9 @@ GameEngine::~GameEngine()
 
 	Drawable::killStaticImages();
 
+#if defined(_WIN32)
 	_Module.Term();
+#endif
 
 	/* After everything that could still fork.  parallel_for never returns with work in flight, so
 		 there is nothing to drain here - but a worker parked on the semaphore still has to be told
@@ -493,7 +514,7 @@ GameEngine::~GameEngine()
 #endif
 
 	// Restore the previous time slice for Windows.
-	timeEndPeriod(1);
+	Clock_End_Fine_Resolution();
 }
 
 void GameEngine::setFramesPerSecondLimit( Int fps )
@@ -543,9 +564,8 @@ static void startPendingSaveGame( void )
 		return;
 	}
 
-	// getSaveGameInfoFromFile opens the name it is handed as-is - the menu path gets away with a
-	// leaf only because it is called from inside iterateSaveFiles, which has chdir'd into the save
-	// directory first. Give it the path.
+	// getSaveGameInfoFromFile opens the name it is handed as-is, so give it the path (the menu's
+	// iterateSaveFiles callback does the same).
 	TheGameState->getSaveGameInfoFromFile(
 		TheGameState->getFilePathInSaveDirectory( thePendingSaveFile ), &gameInfo.saveGameInfo );
 
@@ -702,7 +722,7 @@ static void startAutoSkirmish( Int numPlayersWanted )
 	/* -seed makes the whole run repeatable: the seed drives the factions, the colours, the start
 		 positions and every logic random draw after them, so the same command line replays the same
 		 match. */
-	const Int seed = (TheGlobalData->m_fixedSeed >= 0) ? TheGlobalData->m_fixedSeed : GetTickCount();
+	const Int seed = (TheGlobalData->m_fixedSeed >= 0) ? TheGlobalData->m_fixedSeed : Clock_Milliseconds_Coarse();
 	TheSkirmishGameInfo->setSeed( seed );
 	TheSkirmishGameInfo->startGame( 0 );
 
@@ -871,12 +891,6 @@ void GameEngine::init( int argc, char *argv[] )
 		// Create the low-level file system interface
 		TheFileSystem = createFileSystem();
 
-		//Kris: Patch 1.01 - November 17, 2003
-		//I was unable to resolve the RTPatch method of deleting a shipped file. English, Chinese, and Korean
-		//SKU's shipped with two INIZH.big files. One properly in the Run directory and the other in Run\INI\Data.
-		//We need to toast the latter in order for the game to patch properly.
-		DeleteFile( "Data\\INI\\INIZH.big" );
-
 		// not part of the subsystem list, because it should normally never be reset!
 		TheNameKeyGenerator = MSGNEW("GameEngineSubsystem") NameKeyGenerator;
 		TheNameKeyGenerator->init();
@@ -908,6 +922,14 @@ void GameEngine::init( int argc, char *argv[] )
 
 		initSubsystem(TheLocalFileSystem, "TheLocalFileSystem", createLocalFileSystem(), NULL);
 
+		//Kris: Patch 1.01 - November 17, 2003
+		//I was unable to resolve the RTPatch method of deleting a shipped file. English, Chinese, and Korean
+		//SKU's shipped with two INIZH.big files. One properly in the Run directory and the other in Run\INI\Data.
+		//We need to toast the latter in order for the game to patch properly.
+		// (C1: moved here from just after createFileSystem, to go through TheLocalFileSystem; nothing
+		// between the two places touched the file, and the archives still mount after it is gone.)
+		TheLocalFileSystem->deleteFile( "Data\\INI\\INIZH.big" );
+
 
     	#ifdef DUMP_PERF_STATS///////////////////////////////////////////////////////////////////////////
 	GetPrecisionTimer(&endTime64);//////////////////////////////////////////////////////////////////
@@ -932,14 +954,13 @@ void GameEngine::init( int argc, char *argv[] )
 		// EA's "viruses, overheated hardware" box, which names nothing they can act on.
 		if (!TheFileSystem->doesFileExist("Data\\INI\\Default\\GameData.ini"))
 		{
-			Char gameDirectory[ _MAX_PATH ];
-			GetCurrentDirectory( ARRAY_SIZE(gameDirectory), gameDirectory );
+			const AsciiString currentDirectory = TheLocalFileSystem->getCurrentDirectory();
+			const Char *gameDirectory = currentDirectory.str();
 			DEBUG_LOG(("GameEngine::init - Data\\INI\\Default\\GameData.ini is in no archive under %s\n", gameDirectory));
 
 			AsciiString message;
 			message.format("Zero Hour's game files are not in\n\n%s\n\nThis generals.exe has to be in the Zero Hour folder, the one with INIZH.big in it. Run install.bat from the zip instead of starting the game in the folder it was unzipped to.", gameDirectory);
-			extern int MessageBoxWrapper( LPCSTR lpText, LPCSTR lpCaption, UINT uType );
-			MessageBoxWrapper( message.str(), "Command & Conquer Generals Zero Hour", MB_OK | MB_TASKMODAL | MB_ICONERROR );
+			MessageBoxWrapper( message.str(), "Command & Conquer Generals Zero Hour", MSGBOX_OK | MSGBOX_TASKMODAL | MSGBOX_ICONERROR );
 			_exit(1);
 		}
 
@@ -949,8 +970,7 @@ void GameEngine::init( int argc, char *argv[] )
 		{
 			DEBUG_LOG(("GameEngine::init - Art\\Textures\\TWWater01.dds is in no archive, the base game's are missing\n"));
 
-			extern int MessageBoxWrapper( LPCSTR lpText, LPCSTR lpCaption, UINT uType );
-			MessageBoxWrapper( "The original Generals game files are missing.\n\nZero Hour needs them next to it: a Steam install keeps them in the ZH_Generals folder beside generals.exe, with Textures.big and Terrain.big among them. Verify the game's files in Steam, or reinstall Command & Conquer Generals.", "Command & Conquer Generals Zero Hour", MB_OK | MB_TASKMODAL | MB_ICONERROR );
+			MessageBoxWrapper( "The original Generals game files are missing.\n\nZero Hour needs them next to it: a Steam install keeps them in the ZH_Generals folder beside generals.exe, with Textures.big and Terrain.big among them. Verify the game's files in Steam, or reinstall Command & Conquer Generals.", "Command & Conquer Generals Zero Hour", MSGBOX_OK | MSGBOX_TASKMODAL | MSGBOX_ICONERROR );
 			_exit(1);
 		}
 
@@ -1028,6 +1048,13 @@ void GameEngine::init( int argc, char *argv[] )
 	DEBUG_LOG(("%s", Buf));////////////////////////////////////////////////////////////////////////////
 	#endif/////////////////////////////////////////////////////////////////////////////////////////////
 		initSubsystem(TheAudio,"TheAudio", createAudioManager(), NULL);
+		// Whether this run can make a sound, in its log: a device handle exists only if the audio manager
+		// went on to open one, which it does not do with audio off (-noaudio, -headless, and off Windows a
+		// hidden window or -offscreen).
+		if (!TheGlobalData->m_audioOn)
+			DEBUG_LOG(("TheAudio: audio off, no device opened\n"));
+		else
+			DEBUG_LOG(("TheAudio: audio on, device handle %s\n", TheAudio->getDevice() != NULL ? "set" : "none (no device could be opened)"));
 		//
 		// Missing music used to end the process here, with setQuitting and not one word anywhere: the
 		// game started, the window appeared for a moment and it closed again.  A player who deleted
@@ -1410,9 +1437,14 @@ void GameEngine::reset( void )
 
 	WindowLayout *background = TheWindowManager->winCreateLayout("Menus/BlankWindow.wnd");
 	DEBUG_ASSERTCRASH(background,("We Couldn't Load Menus/BlankWindow.wnd"));
-	background->hide(FALSE);
-	background->bringForward();
-	background->getFirstWindow()->winClearStatus(WIN_STATUS_IMAGE);
+	// NULL when the file could not be read, which with the stock data means its drive has gone
+	// (GameDataGone normally ends the game first); the backdrop is cosmetic, so go on without it
+	if (background != NULL)
+	{
+		background->hide(FALSE);
+		background->bringForward();
+		background->getFirstWindow()->winClearStatus(WIN_STATUS_IMAGE);
+	}
 	Bool deleteNetwork = false;
 	if (TheGameLogic->isInMultiplayerGame())
 		deleteNetwork = true;
@@ -1465,6 +1497,28 @@ Bool GameEngine_mayStartAnotherCatchupTick( Int ticksSoFar, Int maxTicks, Real e
 	if (ticksSoFar >= maxTicks)
 		return FALSE;
 	return elapsedMsInLoop < LOGIC_CATCHUP_BUDGET_MS;
+}
+
+/* R1, smooth motion: when the last logic tick finished and how long a tick lasts, so the renderer can
+	 show models between their last two logic states (W3DSmoothMotion.h).  Read, never written, by the
+	 client; nothing here reaches the logic. */
+static Int64 s_lastLogicTickTicks = 0;
+static Real s_msPerLogicTick = 0.0f;
+
+void GameEngine_noteLogicTickDone( Int logicFps, Bool fastMode )
+{
+	s_lastLogicTickTicks = Clock_Ticks();
+	// Fast mode runs one tick per pass however long it takes: there is no tick length to blend over.
+	s_msPerLogicTick = (logicFps > 0 && !fastMode) ? 1000.0f / (Real)logicFps : 0.0f;
+}
+
+Real GameEngine_logicTickFraction( void )
+{
+	if (s_msPerLogicTick <= 0.0f)
+		return 1.0f;
+	const Real ms = (Real)(Clock_Ticks() - s_lastLogicTickTicks) * 1000.0f / (Real)Clock_Ticks_Per_Second();
+	const Real fraction = ms / s_msPerLogicTick;
+	return fraction < 0.0f ? 0.0f : (fraction > 1.0f ? 1.0f : fraction);
 }
 
 Bool GameEngine_isLogicFrameDue( Real& accumMs, Real elapsedMs, Int logicFps )
@@ -1544,7 +1598,7 @@ static ParticleCostTotals theParticleCost;
 static Real engineElapsedMS( const Int64 &from, const Int64 &to )
 {
 	Int64 freq;
-	QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	freq = Clock_Ticks_Per_Second();
 	if( freq < 1 )
 		return 0.0f;
 	return (Real)((double)(to - from) * 1000.0 / (double)freq);
@@ -1721,16 +1775,17 @@ static void reportFrameTimeStats( void )
 	if (TheGlobalData)
 	{
 		const char *lodName = "off";
-		if (TheGameLODManager && TheGlobalData->m_enableDynamicLOD)
+		if (TheGameLODManager && TheGlobalData->isDynamicLODEnabled())
 		{
 			const DynamicGameLODLevel lod = TheGameLODManager->getDynamicLODLevel();
 			if (lod >= DYNAMIC_GAME_LOD_LOW && lod < DYNAMIC_GAME_LOD_COUNT)
 				lodName = TheGameLODManager->getDynamicGameLODLevelName(lod);
 		}
-		DEBUG_LOG(("QUALITY: filter %d aniso %d particles %d msaaLevel %d vsync %d shadows vol %d decal %d trees %d heat %d dynamicLOD %s\n",
+		DEBUG_LOG(("QUALITY: filter %d aniso %d particles %d (in force %d) msaaLevel %d vsync %d shadows vol %d decal %d trees %d heat %d dynamicLOD %s\n",
 							 TheGlobalData->m_textureFilterMode,
 							 TheGlobalData->m_anisotropyLevel,
 							 TheGlobalData->m_maxParticleCount,
+							 TheGlobalData->getEffectiveParticleCap(),
 							 TheGlobalData->m_msaaLevel,
 							 (Int)TheGlobalData->m_vsync,
 							 (Int)TheGlobalData->m_useShadowVolumes,
@@ -1929,22 +1984,22 @@ static void updateResDrill( void )
 		 The wait is on the wall clock and not on logic frames because stage one opens the quit menu,
 		 the way a player reaches the options screen in a match, and that menu pauses the game.  A
 		 paused single-player game runs no logic at all, so a frame count here would never come due. */
-	const DWORD RES_DRILL_DISMISS_DELAY_MS = 2000;
+	const UnsignedInt RES_DRILL_DISMISS_DELAY_MS = 2000;
 
 	static Bool applied = FALSE;
 	static Bool dismissed = FALSE;
-	static DWORD appliedTimeMs = 0;
+	static UnsignedInt appliedTimeMs = 0;
 
 	if( applied )
 	{
-		if( dismissed || timeGetTime() - appliedTimeMs < RES_DRILL_DISMISS_DELAY_MS )
+		if( dismissed || Clock_Milliseconds() - appliedTimeMs < RES_DRILL_DISMISS_DELAY_MS )
 			return;
 		dismissed = TRUE;
 		ResolutionDrillDismiss( TheGlobalData->m_resDrillKeep );
 		return;
 	}
 	applied = TRUE;
-	appliedTimeMs = timeGetTime();
+	appliedTimeMs = Clock_Milliseconds();
 
 	if( TheGlobalData->m_headless )
 	{
@@ -2110,6 +2165,44 @@ const char *GameEngine_headlessRunResult( UnsignedInt frame, UnsignedInt victory
 extern void AIUpdate_resetMoveTrace( void );	///< -tracemove: forget the unit the last match followed
 
 /** -----------------------------------------------------------------------------------------------
+ * -maxframes' own frame.  One engine pass can run several logic frames to catch up with the clock, and
+ * the end of an unattended run is only looked at after the pass, so under load a run could end a frame
+ * or two past its limit: two copies of a network game stopped on 1801 and 1802 and were compared
+ * there, which can only disagree.  So the catch-up stops on the limit's frame, and that frame's CRC is
+ * logged the moment the logic finishes it ("HEADLESS CRC AT LIMIT"), whatever happens after.
+ *
+ * ZH_TEST_FRAME_LIMIT_OVERSHOOT=<n>, a test's switch and never a player's: the run goes on n frames
+ * past the limit, so a harness can show that it compares at the limit however far a run went.
+ */
+static Int frameLimitOvershoot( void )
+{
+	static Int overshoot = -1;
+	if (overshoot < 0)
+	{
+		const char *value = getenv( "ZH_TEST_FRAME_LIMIT_OVERSHOOT" );
+		overshoot = value != NULL ? atoi( value ) : 0;
+		if (overshoot < 0)
+			overshoot = 0;
+	}
+	return overshoot;
+}
+
+/// TRUE once the logic has finished -maxframes' frame; on that frame itself, its CRC goes to the log
+static Bool noteFrameLimit( void )
+{
+	static Bool logged = FALSE;
+	const Int limit = TheGlobalData->m_maxGameFrames;
+	if (limit <= 0 || TheGameLogic->getFrame() < (UnsignedInt)limit)
+		return FALSE;
+	if (!logged && TheGameLogic->getFrame() == (UnsignedInt)limit)
+	{
+		logged = TRUE;
+		DEBUG_LOG(("HEADLESS CRC AT LIMIT: 0x%08X at frame %d\n", TheGameLogic->getCRC( CRC_RECALC ), limit));
+	}
+	return TRUE;
+}
+
+/** -----------------------------------------------------------------------------------------------
  * -headless: decide whether the unattended run is finished, and if it is, write down how it went
  * and quit.  Two ways to finish: the match is decided, or -maxframes ran out.
  */
@@ -2174,12 +2267,12 @@ static void updateHeadlessRun( void )
 	if (!unattended || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame())
 		return;
 
-	static DWORD runStartTime = 0;
+	static UnsignedInt runStartTime = 0;
 	static UnsignedInt runStartFrame = 0;
 	static Int peakUnits[ MAX_PLAYER_COUNT ];
 	if (runStartTime == 0)
 	{
-		runStartTime = timeGetTime();
+		runStartTime = Clock_Milliseconds();
 		runStartFrame = TheGameLogic->getFrame();
 		for( Int i = 0; i < MAX_PLAYER_COUNT; ++i )
 			peakUnits[ i ] = 0;
@@ -2247,13 +2340,15 @@ static void updateHeadlessRun( void )
 	Int maxGameFrames = TheGlobalData->m_maxGameFrames;
 	if (maxGameFrames > 0 && !TheGlobalData->m_headless && TheGlobalData->m_videoEndFrame >= maxGameFrames)
 		maxGameFrames = TheGlobalData->m_videoEndFrame + 1;
+	if (maxGameFrames > 0)
+		maxGameFrames += frameLimitOvershoot();		// a test's overshoot: 0 for every real run
 
 	const char *why = GameEngine_headlessRunResult( frame, TheVictoryConditions->getEndFrame(),
 																									maxGameFrames );
 	if (why == NULL)
 		return;
 
-	const DWORD wallMs = timeGetTime() - runStartTime;
+	const UnsignedInt wallMs = Clock_Milliseconds() - runStartTime;
 	const Real logicFps = wallMs ? (Real)(frame - runStartFrame) * 1000.0f / (Real)wallMs : 0.0f;
 
 	DEBUG_LOG(("HEADLESS RESULT: %s on frame %d (%d frames in %.1fs wall, %.0f logic fps, %.1fx real time)\n",
@@ -2325,8 +2420,8 @@ static void updateHeadlessRun( void )
 		const Int team = (slot >= 0 && TheGameInfo) ? TheGameInfo->getConstSlot( slot )->getTeamNumber() : -1;
 
 		ScoreKeeper *score = p->getScoreKeeper();
-		DEBUG_LOG(("HEADLESS PLAYER %d '%ls': %s | score %d | money %d earned %d spent | units %d built %d lost %d killed peak %d | buildings %d built %d lost | slot %d team %d\n",
-							 i, p->getPlayerDisplayName().str(),
+		DEBUG_LOG(("HEADLESS PLAYER %d '%s': %s | score %d | money %d earned %d spent | units %d built %d lost %d killed peak %d | buildings %d built %d lost | slot %d team %d\n",
+							 i, WideCharAsUtf8( p->getPlayerDisplayName().str() ).str(),
 							 TheVictoryConditions->hasAchievedVictory(p) ? "WON" :
 								 (TheVictoryConditions->hasSinglePlayerBeenDefeated(p) ? "eliminated" : "alive"),
 							 score->calculateScore(),
@@ -2360,7 +2455,7 @@ void GameEngine::update( void )
 		static Real fpsClientTotal = 0.0f, fpsClientMax = 0.0f;
 		static Real fpsLogicTotal = 0.0f, fpsLogicMax = 0.0f;
 		static Int fpsLogicTicks = 0, fpsCatchupPasses = 0;
-		static DWORD fpsWindowStart = timeGetTime();
+		static UnsignedInt fpsWindowStart = Clock_Milliseconds();
 		static Real fpsRadarTotal = 0.0f, fpsAudioTotal = 0.0f, fpsDrawTotal = 0.0f, fpsDrawMax = 0.0f;
 		static Real fpsSceneTotal = 0.0f, fpsUITotal = 0.0f, fpsPostTotal = 0.0f, fpsWinTotal = 0.0f;
 		static Real fpsStripGatherTotal = 0.0f, fpsStripDrawTotal = 0.0f;
@@ -2382,7 +2477,7 @@ void GameEngine::update( void )
 		TheSortingEntries = 0;
 		TheShadowMapCasters = 0;
 		TheShadowMapDraws = TheSceneDrawCalls = 0;
-		QueryPerformanceCounter( (LARGE_INTEGER *)&tClientStart );
+		tClientStart = Clock_Ticks();
 #endif
 
 		{
@@ -2392,14 +2487,14 @@ void GameEngine::update( void )
 
 			TheRadar->UPDATE();
 #ifdef DEBUG_LOGGING
-			QueryPerformanceCounter( (LARGE_INTEGER *)&tRadarEnd );
+			tRadarEnd = Clock_Ticks();
 #endif
 
 			/// @todo Move audio init, update, etc, into GameClient update
 
 			TheAudio->UPDATE();
 #ifdef DEBUG_LOGGING
-			QueryPerformanceCounter( (LARGE_INTEGER *)&tAudioEnd );
+			tAudioEnd = Clock_Ticks();
 #endif
 			TheGameClient->UPDATE();
 			if (TheGlobalData->m_drawDelayMS > 0)
@@ -2407,10 +2502,10 @@ void GameEngine::update( void )
 				// The jitter is the performance counter's low bits: client side, and no random stream
 				// either half of the game draws from is touched.
 				Int64 now;
-				QueryPerformanceCounter( (LARGE_INTEGER *)&now );
+				now = Clock_Ticks();
 				const Int jitter = TheGlobalData->m_drawDelayJitterMS > 0
 					? (Int)( now % ( TheGlobalData->m_drawDelayJitterMS + 1 ) ) : 0;
-				::Sleep( TheGlobalData->m_drawDelayMS + jitter );
+				sleepMilliseconds( TheGlobalData->m_drawDelayMS + jitter );
 			}
 			TheMessageStream->propagateMessages();
 
@@ -2426,7 +2521,7 @@ void GameEngine::update( void )
 			updateChromaKeyboard();
 		}
 #ifdef DEBUG_LOGGING
-		QueryPerformanceCounter( (LARGE_INTEGER *)&tClientEnd );
+		tClientEnd = Clock_Ticks();
 		clientMS = engineElapsedMS( tClientStart, tClientEnd );
 		radarMS = engineElapsedMS( tClientStart, tRadarEnd );
 		audioMS = engineElapsedMS( tRadarEnd, tAudioEnd );
@@ -2469,9 +2564,9 @@ void GameEngine::update( void )
 														 && videoLogicFrame + 1 >= TheGlobalData->m_videoStartFrame
 														 && videoLogicFrame <= TheGlobalData->m_videoEndFrame );
 
-		static DWORD prevLogicTime = timeGetTime();
+		static UnsignedInt prevLogicTime = Clock_Milliseconds();
 		static Real logicAccumMs = 0.0f;
-		DWORD now = timeGetTime();
+		UnsignedInt now = Clock_Milliseconds();
 		Real elapsedMs = (Real)(now - prevLogicTime);
 		prevLogicTime = now;
 
@@ -2521,7 +2616,7 @@ void GameEngine::update( void )
 		else if (logicFrameDue)
 		{
 #ifdef DEBUG_LOGGING
-			QueryPerformanceCounter( (LARGE_INTEGER *)&tLogicStart );
+			tLogicStart = Clock_Ticks();
 #endif
 			// Pay off the wall clock's debt.  Every pass after the first is a logic frame this call
 			// already owes, and it runs without a client pass in front of it: a render frame is what
@@ -2535,15 +2630,19 @@ void GameEngine::update( void )
 				 25ms ticks back to back with no picture in between is the 113ms freeze; one of them
 				 plus the render is a dropped frame nobody files a bug about. */
 			Int64 tCatchupStart, tCatchupNow;
-			QueryPerformanceCounter( (LARGE_INTEGER *)&tCatchupStart );
+			tCatchupStart = Clock_Ticks();
 			for( ;; )
 			{
 				TheGameLogic->UPDATE();
 				++logicTicksThisPass;
 
+				// -maxframes' frame ends the burst, its CRC logged as it finishes (noteFrameLimit)
+				if (noteFrameLimit() && frameLimitOvershoot() == 0)
+					break;
+
 				if (!mayCatchUp)
 					break;
-				QueryPerformanceCounter( (LARGE_INTEGER *)&tCatchupNow );
+				tCatchupNow = Clock_Ticks();
 				if (!GameEngine_mayStartAnotherCatchupTick( logicTicksThisPass, maxTicksThisPass,
 																									 engineElapsedMS( tCatchupStart, tCatchupNow ) ))
 					break;
@@ -2576,8 +2675,9 @@ void GameEngine::update( void )
 				else if (!GameEngine_isLogicFrameDue(logicAccumMs, 0.0f, m_maxFPS))
 					break;
 			}
+			GameEngine_noteLogicTickDone( networkPaced ? TheGlobalData->m_framesPerSecondLimit : m_maxFPS, fastMode );
 #ifdef DEBUG_LOGGING
-			QueryPerformanceCounter( (LARGE_INTEGER *)&tLogicEnd );
+			tLogicEnd = Clock_Ticks();
 			logicMS = engineElapsedMS( tLogicStart, tLogicEnd );
 			logicTicks = logicTicksThisPass;
 			// One pass can pay off several ticks of debt; charge the histogram per tick, or a
@@ -2647,8 +2747,8 @@ void GameEngine::update( void )
 		if( clientMS > fpsClientMax ) fpsClientMax = clientMS;
 		if( logicMS > fpsLogicMax ) fpsLogicMax = logicMS;
 		{
-			const DWORD nowMS = timeGetTime();
-			const DWORD windowMS = nowMS - fpsWindowStart;
+			const UnsignedInt nowMS = Clock_Milliseconds();
+			const UnsignedInt windowMS = nowMS - fpsWindowStart;
 			if( windowMS >= 1000 )
 			{
 				const Real fps = (Real)fpsFrames * 1000.0f / (Real)windowMS;
@@ -2706,22 +2806,26 @@ void GameEngine::update( void )
 
 // Horrible reference, but we really, really need to know if we are windowed.
 extern bool DX8Wrapper_IsWindowed;
+#if defined(_WIN32)
 extern HWND ApplicationHWnd;
+#endif
 
 /** -----------------------------------------------------------------------------------------------
  * The "main loop" of the game engine. It will not return until the game exits. 
  */
 void GameEngine::execute( void )
 {
-	DWORD prevLoopTime = timeGetTime();
+	UnsignedInt prevLoopTime = Clock_Milliseconds();
 #if defined(_DEBUG) || defined(_INTERNAL)
-	DWORD startTime = timeGetTime() / 1000;
+	UnsignedInt startTime = Clock_Milliseconds() / 1000;
 #endif
 
 	// pretty basic for now
 	while( !m_quitting )
 	{
 		Real thisFrameMS = 0.0f;		// how long this pass took, for the stutter report at the bottom
+
+		GameDataGoneCheck();		// the game's drive went away under another thread's read: stop here (Debug.h)
 
 		//if (TheGlobalData->m_vTune)
 		{
@@ -2737,7 +2841,7 @@ void GameEngine::execute( void )
 				// enter only if in benchmark mode
 				if (TheGlobalData->m_benchmarkTimer > 0)
 				{
-					DWORD currentTime = timeGetTime() / 1000;
+					UnsignedInt currentTime = Clock_Milliseconds() / 1000;
 					if (TheGlobalData->m_benchmarkTimer < currentTime - startTime)
 					{
 						if (TheGameLogic->isInGame())
@@ -2759,7 +2863,7 @@ void GameEngine::execute( void )
 					 the next, not just the parts somebody remembered to instrument.  Two
 					 QueryPerformanceCounter reads a frame, which is why this is not behind a switch. */
 				Int64 tFrameStart, tFrameEnd;
-				QueryPerformanceCounter( (LARGE_INTEGER *)&tFrameStart );
+				tFrameStart = Clock_Ticks();
 				try
 				{
 					// compute a frame
@@ -2786,7 +2890,7 @@ void GameEngine::execute( void )
 					}
 					RELEASE_CRASH(("Uncaught Exception in GameEngine::update"));
 				}	// catch
-				QueryPerformanceCounter( (LARGE_INTEGER *)&tFrameEnd );
+				tFrameEnd = Clock_Ticks();
 				thisFrameMS = engineElapsedMS( tFrameStart, tFrameEnd );
 				GameEngine_noteFrameTime( thisFrameMS,
 																	TheGameLogic ? TheGameLogic->getFrame() : 0 );
@@ -2798,7 +2902,7 @@ void GameEngine::execute( void )
 				// menus no longer need a capped loop either: AnimateWindowManager::update paces
 				// its own stepping off the wall clock, so the window animations keep the cadence
 				// they were tuned for however fast the loop runs.
-				prevLoopTime = timeGetTime();
+				prevLoopTime = Clock_Milliseconds();
 
 		#if defined(_DEBUG) || defined(_INTERNAL)
 				// I'm disabling this in internal because many people need alt-tab capability.  If you happen to be
@@ -2921,4 +3025,8 @@ void updateTGAtoDDS()
 // If we're using the Wide character version of MessageBox, then there's no additional
 // processing necessary. Please note that this is a sleazy way to get this information,
 // but pending a better one, this'll have to do.
+#if defined(_WIN32)
 extern const Bool TheSystemIsUnicode = (((void*) (::MessageBox)) == ((void*) (::MessageBoxW)));
+#else
+extern const Bool TheSystemIsUnicode = TRUE;		// every text API off Windows takes Unicode (UTF-8)
+#endif

@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -65,7 +67,6 @@
 
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/GameLogic.h"
-#include "GameLogic/IncomingDamage.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/BodyModule.h"
@@ -91,7 +92,7 @@
 #endif
 
 #ifdef PM_CACHE_TERRAIN_HEIGHT
-#include "common/mapobject.h"
+#include "Common/MapObject.h"
 #endif
 
 /* Range queries this logic frame, and objects looked at inside them. Zeroed by
@@ -1450,7 +1451,7 @@ UnsignedInt PartitionCell::getThreatValue( Int playerIndex )
 void PartitionCell::addThreatValue( Int playerIndex, UnsignedInt threatValue )
 {
 	if (playerIndex >= 0 && playerIndex < MAX_PLAYER_COUNT) {
-#ifdef _DEBUG
+#if defined(_DEBUG) && defined(DEBUG_CRASHING)	// only the assert reads it
 		UnsignedInt oldThreatVal = m_threatValue[playerIndex];
 		DEBUG_ASSERTCRASH(oldThreatVal <= oldThreatVal + threatValue, ("adding new threat value overflowed allotted storage."));
 #endif
@@ -1462,7 +1463,7 @@ void PartitionCell::addThreatValue( Int playerIndex, UnsignedInt threatValue )
 void PartitionCell::removeThreatValue( Int playerIndex, UnsignedInt threatValue )
 {
 	if (playerIndex >= 0 && playerIndex < MAX_PLAYER_COUNT) {
-#ifdef _DEBUG
+#if defined(_DEBUG) && defined(DEBUG_CRASHING)	// only the assert reads it
 		UnsignedInt oldThreatVal = m_threatValue[playerIndex];
 		DEBUG_ASSERTCRASH(oldThreatVal >= oldThreatVal - threatValue, ("removing new threat value underflowed allotted storage."));
 #endif
@@ -1483,7 +1484,7 @@ UnsignedInt PartitionCell::getCashValue( Int playerIndex )
 void PartitionCell::addCashValue( Int playerIndex, UnsignedInt cashValue )
 {
 	if (playerIndex >= 0 && playerIndex < MAX_PLAYER_COUNT) {
-#ifdef _DEBUG
+#if defined(_DEBUG) && defined(DEBUG_CRASHING)	// only the assert reads it
 		UnsignedInt oldCashVal = m_cashValue[playerIndex];
 		DEBUG_ASSERTCRASH(oldCashVal <= oldCashVal + cashValue, ("adding new cash value overflowed allotted storage."));
 #endif
@@ -1495,7 +1496,7 @@ void PartitionCell::addCashValue( Int playerIndex, UnsignedInt cashValue )
 void PartitionCell::removeCashValue( Int playerIndex, UnsignedInt cashValue )
 {
 	if (playerIndex >= 0 && playerIndex < MAX_PLAYER_COUNT) {
-#ifdef _DEBUG
+#if defined(_DEBUG) && defined(DEBUG_CRASHING)	// only the assert reads it
 		UnsignedInt oldCashVal = m_cashValue[playerIndex];
 		DEBUG_ASSERTCRASH(oldCashVal >= oldCashVal - cashValue, ("removing new cash value underflowed allotted storage."));
 #endif
@@ -4149,7 +4150,7 @@ void PartitionManager::doShroudReveal(Real centerX, Real centerY, Real radius, P
 		const Player *currentPlayer = ThePlayerList->getNthPlayer( currentIndex );
 		if( BitTest( playerMask, currentPlayer->getPlayerMask() ) )
 		{
-			circle.drawCircle(hLineAddLooker, (void*)currentIndex);
+			circle.drawCircle(hLineAddLooker, (void*)(intptr_t)currentIndex);
 		}
 	}
 }
@@ -4217,7 +4218,7 @@ void PartitionManager::undoShroudReveal(Real centerX, Real centerY, Real radius,
 		const Player *currentPlayer = ThePlayerList->getNthPlayer( currentIndex );
 		if( BitTest( playerMask, currentPlayer->getPlayerMask() ) )
 		{
-			circle.drawCircle(hLineRemoveLooker, (void*)currentIndex);
+			circle.drawCircle(hLineRemoveLooker, (void*)(intptr_t)currentIndex);
 		}
 	}
 }
@@ -4489,7 +4490,7 @@ void PartitionManager::doShroudCover(Real centerX, Real centerY, Real radius, Pl
 		const Player *currentPlayer = ThePlayerList->getNthPlayer( currentIndex );
 		if( BitTest( playerMask, currentPlayer->getPlayerMask() ) )
 		{
-			circle.drawCircle(hLineAddShrouder, (void*)currentIndex);
+			circle.drawCircle(hLineAddShrouder, (void*)(intptr_t)currentIndex);
 		}
 	}
 }
@@ -4511,7 +4512,7 @@ void PartitionManager::undoShroudCover(Real centerX, Real centerY, Real radius, 
 		const Player *currentPlayer = ThePlayerList->getNthPlayer( currentIndex );
 		if( BitTest( playerMask, currentPlayer->getPlayerMask() ) )
 		{
-			circle.drawCircle(hLineRemoveShrouder, (void*)currentIndex);
+			circle.drawCircle(hLineRemoveShrouder, (void*)(intptr_t)currentIndex);
 		}
 	}
 }
@@ -5837,18 +5838,6 @@ Bool PartitionFilterPossibleToAttack::allow(Object *objOther)
 	DEBUG_ASSERTCRASH(m_obj && m_obj->isAbleToAttack(), ("if the object is unable to attack at all, you should filter that out ahead of time!"));
 #endif
 	//
-	// Someone else's shots, in the air or announced and about to be fired, already add up to more
-	// than this thing has left, so acquiring it would spend a volley on a corpse.  Our own
-	// announcement does not count against us, or a unit re-scanning would refuse the target it is
-	// currently lining up.  Skipping it here is what spreads a
-	// group's fire over several targets instead of piling all of it onto the nearest one.  This
-	// filter is only ever used to acquire a target on the unit's own initiative - guarding, attack
-	// moving, idle scanning - so an explicit attack order is never touched by it.
-	//
-	if (IncomingDamageTracker::isSpokenFor(objOther, m_obj->getID()))
-		return FALSE;
-
-	//
 	// A capturable tech building is income, not a target.  The computer razed the enemy's oil derricks
 	// on sight - the one thing you can do with a derrick that earns nobody anything - when it could
 	// have walked an infantryman in and owned it.  As above, this filter only ever runs when a unit is
@@ -6087,12 +6076,12 @@ static int cellValueProc(PartitionCell* cell, void* userData)
 }
 
 // -----------------------------------------------------------------------------
-static void hLineAddLooker(Int x1, Int x2, Int y, void *playerIndexVoid)
+void hLineAddLooker(Int x1, Int x2, Int y, void *playerIndexVoid)
 {
 	if (y < 0 || y >= ThePartitionManager->m_cellCountY || x1 >= ThePartitionManager->m_cellCountX || x2 < 0)
 		return;
 
-	Int playerIndex = (Int)(playerIndexVoid);
+	Int playerIndex = (Int)(intptr_t)(playerIndexVoid);
 
 	PartitionCell* cell = &ThePartitionManager->m_cells[y * ThePartitionManager->m_cellCountX + x1];	// yes, this could be invalid. we'll skip the bad ones.
 	for (Int x = x1; x <= x2; ++x, ++cell)
@@ -6104,12 +6093,12 @@ static void hLineAddLooker(Int x1, Int x2, Int y, void *playerIndexVoid)
 }
 
 // -----------------------------------------------------------------------------
-static void hLineRemoveLooker(Int x1, Int x2, Int y, void *playerIndexVoid)
+void hLineRemoveLooker(Int x1, Int x2, Int y, void *playerIndexVoid)
 {
 	if (y < 0 || y >= ThePartitionManager->m_cellCountY || x1 >= ThePartitionManager->m_cellCountX || x2 < 0)
 		return;
 
-	Int playerIndex = (Int)(playerIndexVoid);
+	Int playerIndex = (Int)(intptr_t)(playerIndexVoid);
 
 	PartitionCell* cell = &ThePartitionManager->m_cells[y * ThePartitionManager->m_cellCountX + x1];	// yes, this could be invalid. we'll skip the bad ones.
 	for (Int x = x1; x <= x2; ++x, ++cell)
@@ -6121,12 +6110,12 @@ static void hLineRemoveLooker(Int x1, Int x2, Int y, void *playerIndexVoid)
 }
 
 // -----------------------------------------------------------------------------
-static void hLineAddShrouder(Int x1, Int x2, Int y, void *playerIndexVoid)
+void hLineAddShrouder(Int x1, Int x2, Int y, void *playerIndexVoid)
 {
 	if (y < 0 || y >= ThePartitionManager->m_cellCountY || x1 >= ThePartitionManager->m_cellCountX || x2 < 0)
 		return;
 
-	Int playerIndex = (Int)(playerIndexVoid);
+	Int playerIndex = (Int)(intptr_t)(playerIndexVoid);
 
 	PartitionCell* cell = &ThePartitionManager->m_cells[y * ThePartitionManager->m_cellCountX + x1];	// yes, this could be invalid. we'll skip the bad ones.
 	for (Int x = x1; x <= x2; ++x, ++cell)
@@ -6138,12 +6127,12 @@ static void hLineAddShrouder(Int x1, Int x2, Int y, void *playerIndexVoid)
 }
 
 // -----------------------------------------------------------------------------
-static void hLineRemoveShrouder(Int x1, Int x2, Int y, void *playerIndexVoid)
+void hLineRemoveShrouder(Int x1, Int x2, Int y, void *playerIndexVoid)
 {
 	if (y < 0 || y >= ThePartitionManager->m_cellCountY || x1 >= ThePartitionManager->m_cellCountX || x2 < 0)
 		return;
 
-	Int playerIndex = (Int)(playerIndexVoid);
+	Int playerIndex = (Int)(intptr_t)(playerIndexVoid);
 
 	PartitionCell* cell = &ThePartitionManager->m_cells[y * ThePartitionManager->m_cellCountX + x1];	// yes, this could be invalid. we'll skip the bad ones.
 	for (Int x = x1; x <= x2; ++x, ++cell)
@@ -6155,7 +6144,7 @@ static void hLineRemoveShrouder(Int x1, Int x2, Int y, void *playerIndexVoid)
 }
 
 // -----------------------------------------------------------------------------
-static void hLineAddThreat(Int x1, Int x2, Int y, void *threatValueParms)
+void hLineAddThreat(Int x1, Int x2, Int y, void *threatValueParms)
 {
 	if (y < 0 || y >= ThePartitionManager->m_cellCountY || x1 >= ThePartitionManager->m_cellCountX || x2 < 0)
 		return;
@@ -6183,7 +6172,7 @@ static void hLineAddThreat(Int x1, Int x2, Int y, void *threatValueParms)
 }
 
 // -----------------------------------------------------------------------------
-static void hLineRemoveThreat(Int x1, Int x2, Int y, void *threatValueParms)
+void hLineRemoveThreat(Int x1, Int x2, Int y, void *threatValueParms)
 {
 	if (y < 0 || y >= ThePartitionManager->m_cellCountY || x1 >= ThePartitionManager->m_cellCountX || x2 < 0)
 		return;
@@ -6211,7 +6200,7 @@ static void hLineRemoveThreat(Int x1, Int x2, Int y, void *threatValueParms)
 }
 
 // -----------------------------------------------------------------------------
-static void hLineAddValue(Int x1, Int x2, Int y, void *threatValueParms)
+void hLineAddValue(Int x1, Int x2, Int y, void *threatValueParms)
 {
 	if (y < 0 || y >= ThePartitionManager->m_cellCountY || x1 >= ThePartitionManager->m_cellCountX || x2 < 0)
 		return;
@@ -6239,7 +6228,7 @@ static void hLineAddValue(Int x1, Int x2, Int y, void *threatValueParms)
 }
 
 // -----------------------------------------------------------------------------
-static void hLineRemoveValue(Int x1, Int x2, Int y, void *threatValueParms)
+void hLineRemoveValue(Int x1, Int x2, Int y, void *threatValueParms)
 {
 	if (y < 0 || y >= ThePartitionManager->m_cellCountY || x1 >= ThePartitionManager->m_cellCountX || x2 < 0)
 		return;

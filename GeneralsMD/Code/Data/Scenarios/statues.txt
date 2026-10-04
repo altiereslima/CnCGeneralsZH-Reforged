@@ -1,0 +1,32 @@
+# Statues: soldiers that stand in a heavy fight with an enemy in reach and neither move nor shoot.
+#
+# A player report: "where the fighting is heavy, soldiers stand like statues". Two infantry-heavy
+# armies with tanks behind them attack-move into each other on Twilight Flame, and a second wave
+# follows each into the same fight. HEADLESS STATUE counts every unit that stood three seconds or
+# more without a shot while an enemy it could hit was inside its weapon's reach, and says what it
+# was doing at that moment; the STATUE lines name the first forty.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 2700
+#     -scenario statues -logPrefix statues_
+
+30    spawn      0  AmericaInfantryRanger           50  start0:250:300  16
+30    spawn      0  AmericaInfantryMissileDefender  20  start0:-250:300 16
+30    spawn      0  AmericaTankCrusader             15  start0:0:300    40
+30    spawn      1  ChinaInfantryRedguard           60  start1:250:300  16
+30    spawn      1  ChinaInfantryTankHunter         20  start1:-250:300 16
+30    spawn      1  ChinaTankBattleMaster           15  start1:0:300    40
+60    attackmove 0  *  start1
+60    attackmove 1  *  start0
+
+900   spawn      0  AmericaInfantryRanger           40  start0:250:300  16
+900   spawn      0  AmericaTankCrusader             10  start0:0:300    40
+900   spawn      1  ChinaInfantryRedguard           40  start1:250:300  16
+900   spawn      1  ChinaTankBattleMaster           10  start1:0:300    40
+930   attackmove 0  *  start1
+930   attackmove 1  *  start0
+
+# What is left of each side at the end, which says whether the fight played out differently.
+2690  tally      0  *
+2690  tally      1  *

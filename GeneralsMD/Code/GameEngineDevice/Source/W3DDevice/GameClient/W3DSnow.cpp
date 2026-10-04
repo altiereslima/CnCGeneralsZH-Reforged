@@ -15,16 +15,19 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 // FILE: W3DSnow.h /////////////////////////////////////////////////////////
 
 #include "W3DDevice/GameClient/W3DSnow.h"
-#include "W3DDevice/GameClient/heightmap.h"
+#include "W3DDevice/GameClient/HeightMap.h"
 #include "GameClient/View.h"
 #include "WW3D2/dx8wrapper.h"
 #include "WW3D2/rinfo.h"
 #include "WW3D2/camera.h"
 #include "WW3D2/assetmgr.h"
+#include "Platform/RenderTypes.h"
 
 
 #ifdef _INTERNAL
@@ -105,7 +108,7 @@ Bool W3DSnowManager::ReAcquireResources(void)
 		if (m_VertexBufferD3D == NULL)
 		{	// Create vertex buffer
 
-			if (FAILED(m_pDev->CreateVertexBuffer
+			if (Render_Failed(m_pDev->CreateVertexBuffer
 			(
 				SNOW_BUFFER_SIZE*sizeof(POINTVERTEX),
 				D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC|D3DUSAGE_POINTS, 
@@ -163,7 +166,7 @@ void W3DSnowManager::updateIniSettings(void)
 	//Call base class
 	SnowManager::updateIniSettings();
 
-	if (m_snowTexture && stricmp(m_snowTexture->Get_Texture_Name(),TheWeatherSetting->m_snowTexture.str()) != 0)
+	if (m_snowTexture && strcasecmp(m_snowTexture->Get_Texture_Name(),TheWeatherSetting->m_snowTexture.str()) != 0)
 	{	
 		REF_PTR_RELEASE(m_snowTexture);
 		m_snowTexture = WW3DAssetManager::Get_Instance()->Get_Texture(TheWeatherSetting->m_snowTexture.str());
@@ -189,7 +192,7 @@ void W3DSnowManager::update(void)
 #define MODPOW2(x,y) ((x) & (y-1))		//mod '%' operator for powers of 2.
 
 // Helper function to stuff a FLOAT into a DWORD argument
-inline DWORD FtoDW( FLOAT f ) { return *((DWORD*)&f); }
+inline UnsignedInt FtoDW( float f ) { return *((UnsignedInt*)&f); }
 
 /*Recursively subdivide the large snow box enclosing the camera until we reach some predefined leaf size.  This
 method is used so that very few off-screen particles end up getting rendered.  Culling them individually would

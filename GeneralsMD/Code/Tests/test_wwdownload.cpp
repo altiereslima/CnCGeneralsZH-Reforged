@@ -388,7 +388,7 @@ TEST(urlbuilder_shapes)
 	CHECK(mapversion.length() > 0);
 	CHECK_EQ(mapversion.find_first_not_of("0123456789"), std::string::npos);
 
-	/* _snprintf(buf, 256, ...) is the ceiling on every one of them. */
+	/* snprintf(buf, 256, ...) is the ceiling on every one of them. */
 	CHECK(game.length() < 256);
 	CHECK(maps.length() < 256);
 	CHECK(config.length() < 256);

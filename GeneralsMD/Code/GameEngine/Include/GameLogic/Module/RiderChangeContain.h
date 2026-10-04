@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -37,9 +38,9 @@
 
 #define MAX_RIDERS 8 //***NOTE: If you change this, make sure you update the parsing section!
 
-enum WeaponSetType;
-enum ObjectStatusType;
-enum LocomotorSetType;
+enum WeaponSetType : Int;
+enum ObjectStatusType : Int;
+enum LocomotorSetType : Int;
 
 struct RiderInfo
 {

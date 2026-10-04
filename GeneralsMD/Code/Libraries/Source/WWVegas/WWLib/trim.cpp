@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*********************************************************************************************** 
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               *** 
@@ -67,8 +68,12 @@ char* strtrim(char* buffer)
 			++source;
 		}
 
+		// memmove, not strcpy: source and buffer overlap, and strcpy between overlapping regions is
+		// undefined.  It happened to work for twenty years, until glibc's aarch64 strcpy under GCC
+		// wrote the tail before reading the middle and test_wwlib's strtrim_in_place came back
+		// corrupted.  memmove gives the result strcpy was always meant to, everywhere.
 		if (source != buffer) {
-			strcpy(buffer, source);
+			memmove(buffer, source, (strlen(source) + 1) * sizeof(char));
 		}
 
 		/* Clip trailing white space from the string. */
@@ -95,8 +100,9 @@ wchar_t* wcstrim(wchar_t* buffer)
 			++source;
 		}
 		
+		// memmove, not wcscpy, for the same reason as strtrim above.
 		if (source != buffer) {
-			wcscpy(buffer, source);
+			memmove(buffer, source, (wcslen(source) + 1) * sizeof(wchar_t));
 		}
 
 		/* Clip trailing white space from the string. */

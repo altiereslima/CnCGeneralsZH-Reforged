@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -38,7 +40,7 @@
 
 #include "GameLogic/Damage.h"
 
-#include "WWMath/Matrix3D.h"
+#include "WWMath/matrix3d.h"
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////
 struct FieldParse;
@@ -50,7 +52,7 @@ class Weapon;
 class WeaponTemplate;
 class INI;
 class ParticleSystemTemplate;
-enum NameKeyType;
+enum NameKeyType : Int;
 
 //-------------------------------------------------------------------------------------------------
 const Int NO_MAX_SHOTS_LIMIT = 0x7fffffff;
@@ -169,7 +171,7 @@ static const char *TheWeaponCollideMaskNames[] =
 // Note: these values are saved in save files, so you MUST NOT REMOVE OR CHANGE
 // existing values!
 //
-enum WeaponBonusConditionType
+enum WeaponBonusConditionType : Int
 {
 	// The access and use of this enum has the bit shifting built in, so this is a 0,1,2,3,4,5 enum
 	WEAPONBONUSCONDITION_INVALID = -1,

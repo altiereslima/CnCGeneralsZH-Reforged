@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -40,7 +42,7 @@
 #include "Common/SubsystemInterface.h"
 #include "GameClient/ClientRandomValue.h"
 
-#include "WWMath/Matrix3D.h"		///< @todo Replace with our own matrix library
+#include "WWMath/matrix3d.h"		///< @todo Replace with our own matrix library
 #include "Common/STLTypedefs.h"
 #include <vector>
 
@@ -58,7 +60,7 @@ class DebugWindowDialog;		// really ParticleEditorDialog
 class RenderInfoClass;			// ick
 class Shadow;
 
-enum ParticleSystemID
+enum ParticleSystemID : Int
 {
 	INVALID_PARTICLE_SYSTEM_ID = 0
 };
@@ -89,7 +91,7 @@ struct RGBColorKeyframe
 	UnsignedInt frame;
 };
 
-enum ParticlePriorityType
+enum ParticlePriorityType : Int
 {
 	INVALID_PRIORITY = 0, 
 	PARTICLE_PRIORITY_LOWEST = 1,
@@ -333,6 +335,14 @@ extern void particleShadowBlobAdd( ParticleShadowBlob *blob, Real x, Real y, Rea
  */
 extern Bool particleShadowBlobResolve( const ParticleShadowBlob *blob, Real *centerX, Real *centerY,
 																			 Real *sizeX, Real *sizeY, Int *opacity );
+
+/**
+ * The optical depth through the middle of one particle in the sun's smoke map: the one its own
+ * alpha implies, the one the eye sees through it, times how many layers it is drawn.  A plain
+ * billboard is one layer whatever getVolumeParticleDepth says (it answers 0 for anything that is
+ * not a volume particle).  Zero for a particle too faint to cast.
+ */
+extern Real particleSunMapOpticalDepth( Real alpha, UnsignedInt layers );
 
 /**
  * What "-smoke <thickness>" does to one smoke system.  A single number on the command line is
@@ -719,6 +729,12 @@ public:
 						 ? MAX_VOLUME_PARTICLE_DEPTH : m_volumeParticleDepth;
 	}
 
+	/// The renderer put at least one of this system's particles into the sun's smoke map on its
+	/// last frame, so the cloud shades the ground already and its blob would shade it twice.
+	/// Written by the shadow pass every frame it runs, read by shouldCastGroundShadow.
+	void setInSunMap( Bool inSunMap ) { m_inSunMap = inSunMap; }
+	Bool isInSunMap( void ) const { return m_inSunMap; }
+
 	Bool shouldBillboard( void ) { return !m_isGroundAligned; }
 
 	ParticleShaderType getShaderType( void ) { return m_shaderType; }
@@ -805,6 +821,7 @@ protected:
 	ParticleShadowBlob	m_pendingShadowBlob;				///< the survivors' footprint, gathered by updateParticlesMark
 	Bool								m_pendingCastsGroundShadow;	///< decided by updateEmission, where update() always decided it
 	UnsignedInt					m_pendingDeaths;						///< particles updateParticlesMark marked; the reap stops once it has removed them
+	Bool								m_inSunMap;									///< setInSunMap: client-only, never xfered
 
 protected:
 	Particle *				m_systemParticlesHead;

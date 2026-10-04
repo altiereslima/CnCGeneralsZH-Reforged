@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -51,8 +53,8 @@
 #include <string.h>
 #include <assetmgr.h>
 #include <texture.h>
-#include "common/GlobalData.h"
-#include "common/RandomValue.h"
+#include "Common/GlobalData.h"
+#include "Common/RandomValue.h"
 //#include "Common/GameFileSystem.h"
 #include "Common/FileSystem.h" // for LOAD_TEST_ASSETS
 #include "GameClient/TerrainRoads.h"
@@ -62,11 +64,11 @@
 #include "W3DDevice/GameClient/W3DDynamicLight.h"
 #include "W3DDevice/GameClient/WorldHeightMap.h"
 #include "W3DDevice/GameClient/W3DShaderManager.h"
-#include "WW3D2/Camera.h"
-#include "WW3D2/DX8Wrapper.h"
-#include "WW3D2/DX8Renderer.h"
-#include "WW3D2/Mesh.h"
-#include "WW3D2/MeshMdl.h"
+#include "WW3D2/camera.h"
+#include "WW3D2/dx8wrapper.h"
+#include "WW3D2/dx8renderer.h"
+#include "WW3D2/mesh.h"
+#include "WW3D2/meshmdl.h"
 
 static const Real TEE_WIDTH_ADJUSTMENT = 1.03f;
 
@@ -557,6 +559,24 @@ void W3DRoadBuffer::loadFloatSection(RoadSegment *pRoad, Vector2 loc,
 
 //=============================================================================
 // W3DRoadBuffer::loadFloat4PtSection
+/** How many columns a road section of this length is cut into: one a cell, and never fewer than two.
+	* Never more than the map is long in cells either, corner to corner (xExtent + yExtent bounds that), so a
+	* road point far outside the map (map data) cannot ask for 2^31 of them: ARM64's saturated conversion
+	* did, while Windows' INT_MIN fell to two. */
+Int W3DRoadBuffer::roadColumnCountFor(Real roadLen, Int xExtent, Int yExtent)
+{
+	Int columns = floatToIntAsMsvc((roadLen/MAP_XY_FACTOR)+1);
+	const Int longest = xExtent + yExtent + 2;
+	if (columns > longest) columns = longest;
+	if (columns < 2) columns = 2;
+	return columns;
+}
+
+Int W3DRoadBuffer::roadColumnCount(Real roadLen) const
+{
+	return roadColumnCountFor(roadLen, m_map ? m_map->getXExtent() : 0, m_map ? m_map->getYExtent() : 0);
+}
+
 //=============================================================================
 /** Loads a section of road using a mesh that floats a little above the 
 terrain.  The road is loaded into the quadrilateral defined by the
@@ -597,9 +617,8 @@ void W3DRoadBuffer::loadFloat4PtSection(RoadSegment *pRoad, Vector2 loc,
 	roadNormal.Normalize();
 	roadVector.Normalize();
 	Vector2 curVector;
-	Int uCount = (roadLen/MAP_XY_FACTOR)+1;
-	if (uCount<2) uCount = 2;
-	Int vCount = (2*halfHeight/MAP_XY_FACTOR)+1;
+	Int uCount = roadColumnCount(roadLen);
+	Int vCount = floatToIntAsMsvc((2*halfHeight/MAP_XY_FACTOR)+1);
 	if (vCount<2) vCount = 2;
 
 
@@ -703,7 +722,7 @@ void W3DRoadBuffer::loadFloat4PtSection(RoadSegment *pRoad, Vector2 loc,
 			// Write out the vertices.
 			for (j=0; j<vCount; j++) {
 				Real U, V;
-				if (numRoadVertices >= MAX_SEG_INDEX) {
+				if (numRoadVertices >= MAX_SEG_VERTEX) {	// vb holds MAX_SEG_VERTEX; this tested MAX_SEG_INDEX
 					break;
 				}
 				curVector.Set(curColumn.vtx[j].X - loc.X, curColumn.vtx[j].Y - loc.Y);
@@ -725,7 +744,7 @@ void W3DRoadBuffer::loadFloat4PtSection(RoadSegment *pRoad, Vector2 loc,
 					break;
 				}
 			}
-			if (numRoadVertices >= MAX_SEG_INDEX) {
+			if (numRoadVertices >= MAX_SEG_VERTEX) {
 				break;
 			}
 			if (i>1) {
@@ -733,7 +752,7 @@ void W3DRoadBuffer::loadFloat4PtSection(RoadSegment *pRoad, Vector2 loc,
 				j = 0;
 				k = 0;
 				while (j<vCount-1 && k<vCount-1) {
-					if (numRoadIndices >= MAX_SEG_INDEX) {
+					if (numRoadIndices + 6 > MAX_SEG_INDEX) {	// a step writes up to six; this let the last run five past ib
 						break;
 					}
 					UnsignedShort *curIb = ib+numRoadIndices;
@@ -822,8 +841,11 @@ void W3DRoadBuffer::loadLit4PtSection(RoadSegment *pRoad, UnsignedShort *ib, Ver
 	info.roadNormal.Normalize();
 	info.roadVector.Normalize();
 	Vector2 curVector;
-	Int uCount = (roadLen/MAP_XY_FACTOR)+1;
-	Int vCount = (2*halfHeight/MAP_XY_FACTOR)+1;
+	Int uCount = roadColumnCount(roadLen);
+	// never below two rows, as the float section has it: vtx[vCount-1] is read below, and a width past
+	// the int range (mod data) converted to INT_MIN on Windows
+	Int vCount = floatToIntAsMsvc((2*halfHeight/MAP_XY_FACTOR)+1);
+	if (vCount<2) vCount = 2;
 
 
 	const int maxRows = 100;

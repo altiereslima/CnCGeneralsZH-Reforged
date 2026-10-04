@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 #pragma once
 
@@ -71,6 +72,8 @@ enum OptionApply
 	APPLY_LIVE,					///< whoever reads the GlobalData field reads it every frame; nothing else to do
 	APPLY_DEVICE_RESET,	///< the D3D device has to be recreated before it shows
 	APPLY_RESTART,			///< only read once, before the engine exists - see EarlyOptions.h
+	APPLY_SHELL_REBUILD,	///< read as the menus are laid out: Accept builds the shell again, as a resolution change does
+	APPLY_NEXT_MAP,			///< read when a drawable is made, so what already stands keeps the old value until the next map
 };
 
 //-----------------------------------------------------------------------------

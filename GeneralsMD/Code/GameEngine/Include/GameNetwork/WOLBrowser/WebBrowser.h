@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -46,11 +48,15 @@
 #define __WEBBROWSER_H__
 
 #include "Common/SubsystemInterface.h"
+#if defined(_WIN32)
 #include <atlbase.h>
 #include <windows.h>
+#endif
 #include <Common/GameMemory.h>
+#if defined(_WIN32)
 #include "EABrowserDispatch/BrowserDispatch.h"
 #include "FEBDispatch.h"
+#endif
 
 class GameWindow;
 
@@ -76,6 +82,7 @@ public:
 
 
 
+#if defined(_WIN32)
 class WebBrowser :
 		public FEBDispatch<WebBrowser, IBrowserDispatch, &IID_IBrowserDispatch>,
 		public SubsystemInterface
@@ -127,4 +134,27 @@ class WebBrowser :
 	};
 
 extern CComObject<WebBrowser> *TheWebBrowser;
+#else
+/* Off Windows there is no embedded browser: the one above is an ATL/COM object around Internet
+	 Explorer, for the WOL ladder, message board and terms-of-service pages of a dead service.  It is
+	 never created on Windows either - Win32GameEngine::createWebBrowser has no caller - so every
+	 caller already tests TheWebBrowser for NULL and does nothing.  This is the same interface without
+	 COM, and TheWebBrowser is NULL (WebBrowserPosix.cpp), so those callers compile and do the same
+	 nothing. */
+class WebBrowser
+{
+public:
+	virtual Bool createBrowserWindow(char *tag, GameWindow *win) = 0;
+	virtual void closeBrowserWindow(GameWindow *win) = 0;
+
+	WebBrowserURL *makeNewURL(AsciiString tag);
+	WebBrowserURL *findURL(AsciiString tag);
+
+protected:
+	WebBrowser();
+	virtual ~WebBrowser();
+};
+
+extern WebBrowser *TheWebBrowser;
+#endif
 #endif // __WEBBROWSER_H__

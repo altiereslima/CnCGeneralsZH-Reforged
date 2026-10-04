@@ -10,7 +10,7 @@
 #
 #   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
 #     -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover
-#     -side 0 FactionChina -side 1 FactionAmerica -seed 1 -maxframes 2400
+#     -side 0 FactionChina -side 1 FactionAmerica -seed 1 -maxframes 4500
 #     -scenario shiftorders -logPrefix shiftorders_
 #
 # See mobstress.txt for the line grammar.
@@ -37,5 +37,34 @@
 # post. This line has to report 0 of 1.
 65    arrive         0  ChinaTankOverlord         950 1750 100
 
-2390  tally          0  AmericaSupplyCenter
-2390  tally          1  AmericaSupplyCenter
+4490  tally          0  AmericaSupplyCenter
+4490  tally          1  AmericaSupplyCenter
+
+# The rifleman's capture, the Red Guard's and the Ranger's, which walk up and go in by the door where
+# Black Lotus hacks from range. Both stay paused until the player owns Capture Building, so the
+# barracks researches it first (30 s, done at frame 930) and the lists go out once it is. Each list
+# is a walk, a capture and a walk on, and a capture at the door runs about 650 frames: the arrive
+# lines say each finished, the tallies whose buildings they are. The Ranger is China's here so
+# nobody in this file fires on anybody else.
+30    spawn          0  ChinaBarracks             1  400 700
+31    shiftupgrade   0  ChinaBarracks             Upgrade_InfantryCaptureBuilding
+30    spawn          0  ChinaInfantryRedguard     1  600 850
+30    spawn          0  AmericaInfantryRanger     1  600 1000
+30    spawn          1  AmericaPowerPlant         1  1300 800
+30    spawn          1  AmericaBarracks           1  1300 1450
+
+960   shiftmove      0  ChinaInfantryRedguard     1000 950
+961   shiftpower     0  ChinaInfantryRedguard     1 AmericaPowerPlant SpecialAbilityRedGuardCaptureBuilding
+962   shiftmove      0  ChinaInfantryRedguard     800 1250
+
+960   shiftmove      0  AmericaInfantryRanger     1000 1300
+961   shiftpower     0  AmericaInfantryRanger     1 AmericaBarracks SpecialAbilityRangerCaptureBuilding
+962   shiftmove      0  AmericaInfantryRanger     700 1500
+
+965   arrive         0  ChinaInfantryRedguard     800 1250 150
+965   arrive         0  AmericaInfantryRanger     700 1500 150
+
+4490  tally          0  AmericaPowerPlant
+4490  tally          1  AmericaPowerPlant
+4490  tally          0  AmericaBarracks
+4490  tally          1  AmericaBarracks

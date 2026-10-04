@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -24,13 +26,16 @@
 
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "Lib/Clock.h"
+
+#include "Lib/WideCharFns.h"
 
 #include "Compression.h"
 #include "strtok_r.h"
 #include "Common/AudioEventRTS.h"
 #include "Common/CRCDebug.h"
 #include "Common/Debug.h"
-#include "Common/File.h"
+#include "Common/file.h"
 #include "Common/GameAudio.h"
 #include "Common/LocalFileSystem.h"
 #include "Common/Player.h"
@@ -57,6 +62,7 @@
 #include "GameLogic/VictoryConditions.h"
 #include "GameClient/DisconnectMenu.h"
 #include "GameClient/InGameUI.h"
+#include "Platform/StrdupAsWindows.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -407,7 +413,7 @@ void ConnectionManager::doRelay() {
 					 will do - the point is only that the player still exists.  See StallJudgement.h. */
 				UnsignedInt fromSlot = cmd->getCommand()->getPlayerID();
 				if (fromSlot < MAX_SLOTS) {
-					m_lastHeardFrom[fromSlot] = timeGetTime();
+					m_lastHeardFrom[fromSlot] = Clock_Milliseconds();
 				}
 
 				if (CommandRequiresAck(cmd->getCommand())) {
@@ -673,7 +679,7 @@ void ConnectionManager::processDisconnectChat(NetDisconnectChatCommandMsg *msg)
 	} else if (isPlayerConnected(playerID)) {
 		name = m_connections[playerID]->getUser()->GetName();
 	}
-	unitext.format(L"[%ls] %ls", name.str(), msg->getText().str());
+	unitext.format(u"[%ls] %ls", name.str(), msg->getText().str());
 //	DEBUG_LOG(("ConnectionManager::processDisconnectChat - got message from player %d, message is %ls\n", playerID, unitext.str()));
 	TheDisconnectMenu->showChat(unitext); // <-- need to implement this
 }
@@ -695,7 +701,7 @@ void ConnectionManager::processChat(NetChatCommandMsg *msg)
 		name = m_connections[playerID]->getUser()->GetName();
 		//DEBUG_LOG(("connection is non-NULL, using %ls\n", name.str()));
 	}
-	unitext.format(L"[%ls] %ls", name.str(), msg->getText().str());
+	unitext.format(u"[%ls] %ls", name.str(), msg->getText().str());
 //	DEBUG_LOG(("ConnectionManager::processChat - got message from player %d (mask %8.8X), message is %ls\n", playerID, msg->getPlayerMask(), unitext.str()));
 	
 	AsciiString playerName;
@@ -703,7 +709,7 @@ void ConnectionManager::processChat(NetChatCommandMsg *msg)
 	Player *player = ThePlayerList->findPlayerWithNameKey( TheNameKeyGenerator->nameToKey( playerName ) );
 	if (!player)
 	{
-		TheInGameUI->message(UnicodeString(L"%ls"), unitext.str());
+		TheInGameUI->message(UnicodeString(u"%ls"), unitext.str());
 		return;
 	}
 	
@@ -725,8 +731,8 @@ void ConnectionManager::processFile(NetFileCommandMsg *msg)
 {
 #ifdef _INTERNAL
 	UnicodeString log;
-	log.format(L"Saw file transfer: '%hs' of %d bytes from %d", msg->getPortableFilename().str(), msg->getFileLength(), msg->getPlayerID());
-	DEBUG_LOG(("%ls\n", log.str()));
+	log.format(u"Saw file transfer: '%hs' of %d bytes from %d", msg->getPortableFilename().str(), msg->getFileLength(), msg->getPlayerID());
+	DEBUG_LOG(("%s\n", WideCharAsUtf8( log.str() ).str()));
 #endif
 
 	AsciiString realFileName = msg->getRealFilename();
@@ -1290,7 +1296,7 @@ void ConnectionManager::update(Bool isInGame) {
 
 void ConnectionManager::updateRunAhead(Int oldRunAhead, Int frameRate, Bool didSelfSlug, Int nextExecutionFrame) {
 	static time_t lasttimesent = 0;
-	time_t curTime = timeGetTime();
+	time_t curTime = Clock_Milliseconds();
 
 	if ((lasttimesent == 0) || ((curTime - lasttimesent) > TheGlobalData->m_networkRunAheadMetricsTime)) {
 		if (m_localSlot == m_packetRouterSlot) {
@@ -1695,7 +1701,7 @@ Bool ConnectionManager::allCommandsReady(UnsignedInt frame, Bool justTesting /* 
 		 announcement is the thing that was lost.  Ask for it.  See FrameResendPolicy.h for why the
 		 wait is the connection's own retry timeout rather than a constant. */
 	if ((notReadyPlayer >= 0) && (justTesting == FALSE)) {
-		time_t now = timeGetTime();
+		time_t now = Clock_Milliseconds();
 
 		if (frame != m_resendWatchFrame) {
 			m_resendWatchFrame = frame;
@@ -1797,7 +1803,7 @@ void ConnectionManager::determineRouterFallbackPlan() {
 */
 
 void ConnectionManager::doKeepAlive() {
-	time_t curTime = timeGetTime();
+	time_t curTime = Clock_Milliseconds();
 
 	if (m_keepAliveRoundStart == 0) {
 		m_keepAliveRoundStart = curTime;
@@ -1862,7 +1868,7 @@ PlayerLeaveCode ConnectionManager::disconnectPlayer(Int slot) {
 		if( player )
 			TheInGameUI->playerMessage( player, left );
 		else
-			TheInGameUI->message( UnicodeString( L"%ls" ), left.str() );
+			TheInGameUI->message( UnicodeString( u"%ls" ), left.str() );
 
 		// People are boneheads. Also play a sound
 		static AudioEventRTS leftGameSound("GUIMessageReceived");
@@ -2061,7 +2067,7 @@ void ConnectionManager::parseUserList(const GameInfo *game)
 		return;
 	}
 
-	char * list = strdup(buf);
+	char * list = strdupAsWindows(buf);
 	char *listPtr = list;
 	if (!list)
 		return;
@@ -2235,7 +2241,7 @@ void ConnectionManager::sendChat(UnicodeString text, Int playerMask, UnsignedInt
 	{
 		msg->setID(GenerateNextCommandID());
 	}
-	DEBUG_LOG(("Chat message has ID of %d, mask of %8.8X, text of %ls\n", msg->getID(), msg->getPlayerMask(), msg->getText().str()));
+	DEBUG_LOG(("Chat message has ID of %d, mask of %8.8X, text of %s\n", msg->getID(), msg->getPlayerMask(), WideCharAsUtf8( msg->getText().str() ).str()));
 
 	sendLocalCommand(msg, 0xff ^ (1 << m_localSlot));
 	processChat(msg);
@@ -2300,10 +2306,10 @@ UnsignedShort ConnectionManager::sendFileAnnounce(AsciiString path, UnsignedByte
 	if (!theFile || !theFile->size())
 	{
 		UnicodeString log;
-		log.format(L"Not sending file '%hs' to %X\n", path.str(), playerMask);
-		DEBUG_LOG(("%ls\n", log.str()));
+		log.format(u"Not sending file '%hs' to %X\n", path.str(), playerMask);
+		DEBUG_LOG(("%s\n", WideCharAsUtf8( log.str() ).str()));
 		if (TheLAN)
-			TheLAN->OnChat(UnicodeString(L"sendFile"), 0, log, LANAPI::LANCHAT_SYSTEM);
+			TheLAN->OnChat(UnicodeString(u"sendFile"), 0, log, LANAPI::LANCHAT_SYSTEM);
 		return 0;
 	}
 
@@ -2338,10 +2344,10 @@ void ConnectionManager::sendFile(AsciiString path, UnsignedByte playerMask, Unsi
 	if (!theFile || !theFile->size())
 	{
 		UnicodeString log;
-		log.format(L"Not sending file '%hs' to %X\n", path.str(), playerMask);
-		DEBUG_LOG(("%ls\n", log.str()));
+		log.format(u"Not sending file '%hs' to %X\n", path.str(), playerMask);
+		DEBUG_LOG(("%s\n", WideCharAsUtf8( log.str() ).str()));
 		if (TheLAN)
-			TheLAN->OnChat(UnicodeString(L"sendFile"), 0, log, LANAPI::LANCHAT_SYSTEM);
+			TheLAN->OnChat(UnicodeString(u"sendFile"), 0, log, LANAPI::LANCHAT_SYSTEM);
 		return;
 	}
 
@@ -2517,7 +2523,7 @@ UnsignedInt ConnectionManager::getTimeSinceLastPacketFrom( Int slot ) const
 	if (m_lastHeardFrom[slot] == 0)
 		return 0;
 
-	time_t now = timeGetTime();
+	time_t now = Clock_Milliseconds();
 	if (now <= m_lastHeardFrom[slot])
 		return 0;
 

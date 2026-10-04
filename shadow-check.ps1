@@ -7,6 +7,7 @@
 #   .\shadow-check.ps1 -Only 3    # one view, while a knob is being turned
 
 param([int]$Only = 0)
+$env:ZH_UNATTENDED = "1"	# every game this starts is unattended: no box may wait on a person (EarlyCommandLine.h)
 
 Add-Type -AssemblyName System.Drawing
 $run = Join-Path $PSScriptRoot "GeneralsMD\Run"
@@ -28,19 +29,21 @@ $cases = @(
 
 function Shoot($case, $tag, $extra) {
   Get-ChildItem "$shots\sshot*.bmp" -ErrorAction SilentlyContinue | Remove-Item -Force
-  $arguments = @('-win','-xres','1280','-yres','720','-quickstart','-noshellmap','-multiInstance',
+  # -showHudOverlay: off by default in Release, and every evidence picture shows the corner readout
+  $arguments = @('-win','-xres','1280','-yres','720','-quickstart','-noshellmap','-multiInstance','-showHudOverlay',
     '-msaa','0','-dx11post','off','-map',"`"Maps\$($case.map)\$($case.map).map`"",
     '-autoskirmish','4','-aidiff','easy','-seed','5','-maxframes',($case.f+80),
     '-screenshot',$case.f,'-camera',$case.x,$case.y,'-logPrefix',"shd_$tag`_",'-turbo')
   if ($extra) { $arguments += $extra }
+  $process = Start-Process (Join-Path $run "generals.exe") -ArgumentList $arguments `
+    -WorkingDirectory $run -PassThru
   try {
-    $process = Start-Process (Join-Path $run "generals.exe") -ArgumentList $arguments `
-      -WorkingDirectory $run -PassThru
     $process.PriorityClass = 'AboveNormal'
     $null = $process.WaitForExit(900000)
   }
   finally {
-    Get-Process -Name generals -ErrorAction SilentlyContinue | Stop-Process -Force
+    # By id: another session's game on the same machine is not this script's to end.
+    if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
   }
   # The picture is written on the frame it was asked for and the process runs on to its frame
   # limit, so the file can land a moment after the wait returns.  A view that still has none is

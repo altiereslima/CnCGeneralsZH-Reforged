@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -31,6 +33,8 @@
 #ifndef _LANAPI_H_
 #define _LANAPI_H_
 
+
+#include <stddef.h>	// offsetof, for the wire-layout asserts (B4)
 #include "GameNetwork/Transport.h"
 #include "GameNetwork/NetworkInterface.h"
 #include "GameNetwork/NetworkDefs.h"
@@ -262,6 +266,15 @@ protected:
 
 	UnsignedInt					m_localIP;
 	Transport*					m_transport;
+#if !defined(_WIN32)
+	/* Port defect 29: the wildcard socket that takes the broadcasts m_transport, bound to m_localIP, cannot
+		 hear off Windows (udp.h).  listenForBroadcasts (re)binds it whenever m_transport is bound to an
+		 address; collectBroadcasts moves what it heard into m_transport's inbox, so every lobby message
+		 goes through the one loop in update(), and its own-address filter, exactly once. */
+	Transport*					m_broadcastListener;
+	void listenForBroadcasts( void );
+	void collectBroadcasts( void );
+#endif
 
 	UnsignedInt					m_broadcastAddr;
 
@@ -435,6 +448,31 @@ struct LANMessage
 // The lobby broadcast is read at fixed offsets out of one datagram, so it has to fit in one.
 static_assert(sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE,
 	"LANMessage must fit in a single LAN datagram");
+// And its layout is the wire format, shared with every other build of the game (see NetworkDefs.h).
+static_assert(sizeof(LANMessage) == 471, "LANMessage is 471 bytes on the wire");
+/* And where the handlers read each field (B4), from the definition at pack(1): the 4-byte type, name
+	 (13 WideChars), userName (2), hostName (2), then the union at 34.  Every arm starts there; the fields
+	 after each arm's gameName (17 WideChars, 34 bytes) start at 68.  GameInfo is the longest arm and
+	 fills the struct: 34 + 34 + inProgress (1) + options (401) + isDirectConnect (1) = 471. */
+static_assert(offsetof(LANMessage, name) == 4, "LANMessage: name follows the type");
+static_assert(offsetof(LANMessage, userName) == 30, "LANMessage: userName follows name");
+static_assert(offsetof(LANMessage, hostName) == 32, "LANMessage: hostName follows userName");
+static_assert(offsetof(LANMessage, StartTimer.seconds) == 34, "LANMessage: the union starts at 34");
+static_assert(offsetof(LANMessage, GameToLeave.gameName) == 34, "LANMessage::GameToLeave");
+static_assert(offsetof(LANMessage, GameInfo.inProgress) == 68, "LANMessage::GameInfo.inProgress");
+static_assert(offsetof(LANMessage, GameInfo.options) == 69, "LANMessage::GameInfo.options");
+static_assert(offsetof(LANMessage, GameInfo.isDirectConnect) == 470, "LANMessage::GameInfo.isDirectConnect is the last byte");
+static_assert(offsetof(LANMessage, PlayerInfo.playerName) == 38, "LANMessage::PlayerInfo.playerName");
+static_assert(offsetof(LANMessage, GameToJoin.exeCRC) == 38, "LANMessage::GameToJoin.exeCRC");
+static_assert(offsetof(LANMessage, GameToJoin.iniCRC) == 42, "LANMessage::GameToJoin.iniCRC");
+static_assert(offsetof(LANMessage, GameToJoin.serial) == 46, "LANMessage::GameToJoin.serial");
+static_assert(offsetof(LANMessage, GameJoined.slotPosition) == 76, "LANMessage::GameJoined.slotPosition");
+static_assert(offsetof(LANMessage, GameNotJoined.reason) == 76, "LANMessage::GameNotJoined.reason");
+static_assert(offsetof(LANMessage, Accept.isAccepted) == 68, "LANMessage::Accept.isAccepted");
+static_assert(offsetof(LANMessage, MapStatus.hasMap) == 72, "LANMessage::MapStatus.hasMap");
+static_assert(offsetof(LANMessage, Chat.chatType) == 68, "LANMessage::Chat.chatType");
+static_assert(offsetof(LANMessage, Chat.message) == 72, "LANMessage::Chat.message");
+static_assert(offsetof(LANMessage, GameOptions.options) == 34, "LANMessage::GameOptions.options");
 
 
 #endif // _LANAPI_H_

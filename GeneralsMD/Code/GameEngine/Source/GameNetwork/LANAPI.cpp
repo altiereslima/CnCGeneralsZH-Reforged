@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -23,10 +25,14 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
+#include "Lib/Clock.h"
+
+#include "Lib/WideCharFns.h"
 
 #define WIN32_LEAN_AND_MEAN  // only bare bones windows stuff wanted
 
-#include "Common/CRC.h"
+#include "Common/crc.h"
 #include "Common/GameState.h"
 #include "Common/Registry.h"
 #include "GameNetwork/LANAPI.h"
@@ -79,7 +85,7 @@ LANAPI::LANAPI( void ) : m_transport(NULL)
 	//
 	m_lobbyPlayers = NULL;
 	m_games = NULL;
-	m_name = L""; // safe default?
+	m_name = u""; // safe default?
 	m_pendingAction = ACT_NONE;
 	m_expiration = 0;
 	m_localIP = 0;
@@ -92,6 +98,10 @@ LANAPI::LANAPI( void ) : m_transport(NULL)
 	m_lastUpdate = 0;
 	m_transport = new Transport;
 	m_isActive = TRUE;
+#if !defined(_WIN32)
+	m_transport->shareAddress(TRUE);		// port defect 29: another copy's broadcast listener may hold the port
+	m_broadcastListener = new Transport;
+#endif
 }
 
 LANAPI::~LANAPI( void )
@@ -99,6 +109,9 @@ LANAPI::~LANAPI( void )
 	reset();
 	if (m_transport)
 		delete m_transport;
+#if !defined(_WIN32)
+	delete m_broadcastListener;
+#endif
 }
 
 void LANAPI::init( void )
@@ -108,6 +121,9 @@ void LANAPI::init( void )
 	m_transport->reset();
 	m_transport->init(m_localIP, lobbyPort);
 	m_transport->allowBroadcasts(true);
+#if !defined(_WIN32)
+	listenForBroadcasts();
+#endif
 
 	m_pendingAction = ACT_NONE;
 	m_expiration = 0;
@@ -279,7 +295,7 @@ void LANAPI::checkMOTD( void )
 		UnsignedInt newMOTDCRC = 0;
 		AsciiString asciiMOTD;
 		char buf[4096];
-		FILE *fp = fopen(TheGlobalData->m_MOTDPath.str(), "r");
+		FILE *fp = zh_fopen(TheGlobalData->m_MOTDPath.str(), "r");
 		Int len;
 		if (fp)
 		{
@@ -311,7 +327,7 @@ void LANAPI::checkMOTD( void )
 
 				UnicodeString uniLine;
 				uniLine.translate(line);
-				OnChat( UnicodeString(L"MOTD"), 0, uniLine, LANCHAT_SYSTEM );
+				OnChat( UnicodeString(u"MOTD"), 0, uniLine, LANCHAT_SYSTEM );
 			}
 		}
 	}
@@ -325,7 +341,7 @@ void LANAPI::update( void )
 	if(LANbuttonPushed)
 		return;
 	static const UnsignedInt LANAPIUpdateDelay = 200;
-	UnsignedInt now = timeGetTime();
+	UnsignedInt now = Clock_Milliseconds();
 	
 	if( now > m_lastUpdate + LANAPIUpdateDelay)
 	{
@@ -342,6 +358,9 @@ void LANAPI::update( void )
 			LANSocketErrorDetected = TRUE;
 		}
 	}
+#if !defined(_WIN32)
+	collectBroadcasts();
+#endif
 
 	// Handle any new messages
 	int i;
@@ -522,7 +541,7 @@ void LANAPI::update( void )
 			LANMessage msg;
 			fillInLANMessage( &msg );
 			msg.LANMessageType = LANMessage::MSG_REQUEST_GAME_LEAVE;
-			wcsncpy(msg.name, m_currentGame->getPlayerName(0).str(), g_lanPlayerNameLength);
+			WideCharNCpy(msg.name, m_currentGame->getPlayerName(0).str(), g_lanPlayerNameLength);
 			msg.name[g_lanPlayerNameLength] = 0;
 			handleRequestGameLeave(&msg, m_currentGame->getIP(0));
 			UnicodeString text;
@@ -541,7 +560,7 @@ void LANAPI::update( void )
 					UnicodeString theStr;
 					theStr.format(TheGameText->fetch("LAN:PlayerDropped"), m_currentGame->getPlayerName(p).str());
 					msg.LANMessageType = LANMessage::MSG_REQUEST_GAME_LEAVE;
-					wcsncpy(msg.name, m_currentGame->getPlayerName(p).str(), g_lanPlayerNameLength);
+					WideCharNCpy(msg.name, m_currentGame->getPlayerName(p).str(), g_lanPlayerNameLength);
 					msg.name[g_lanPlayerNameLength] = 0;
 					handleRequestGameLeave(&msg, m_currentGame->getIP(p));
 					OnChat(UnicodeString::TheEmptyString, m_localIP, theStr, LANCHAT_SYSTEM);
@@ -656,7 +675,7 @@ void LANAPI::RequestGameJoin( LANGameInfo *game, UnsignedInt ip /* = 0 */ )
 	sendMessage(&msg, ip);
 
 	m_pendingAction = ACT_JOIN;
-	m_expiration = timeGetTime() + m_actionTimeout;
+	m_expiration = Clock_Milliseconds() + m_actionTimeout;
 }
 
 void LANAPI::RequestGameJoinDirectConnect(UnsignedInt ipaddress)
@@ -681,13 +700,13 @@ void LANAPI::RequestGameJoinDirectConnect(UnsignedInt ipaddress)
 	msg.PlayerInfo.ip = GetLocalIP();
 	// Every other copy in this file is bounded by the field, this one was bounded by the source:
 	// a name longer than the field ran the copy and then the terminator past the end of it.
-	wcsncpy(msg.PlayerInfo.playerName, m_name.str(), g_lanPlayerNameLength);
+	WideCharNCpy(msg.PlayerInfo.playerName, m_name.str(), g_lanPlayerNameLength);
 	msg.PlayerInfo.playerName[g_lanPlayerNameLength] = 0;
 
 	sendMessage(&msg, ipaddress);
 
 	m_pendingAction = ACT_JOINDIRECTCONNECT;
-	m_expiration = timeGetTime() + m_actionTimeout;
+	m_expiration = Clock_Milliseconds() + m_actionTimeout;
 }
 
 void LANAPI::RequestGameLeave( void )
@@ -695,7 +714,7 @@ void LANAPI::RequestGameLeave( void )
 	LANMessage msg;
 	msg.LANMessageType = LANMessage::MSG_REQUEST_GAME_LEAVE;
 	fillInLANMessage( &msg );
-	wcsncpy(msg.GameToLeave.gameName, (m_currentGame)?m_currentGame->getName().str():L"", g_lanGameNameLength);
+	WideCharNCpy(msg.GameToLeave.gameName, (m_currentGame)?m_currentGame->getName().str():u"", g_lanGameNameLength);
 	msg.GameToLeave.gameName[g_lanGameNameLength] = 0;
 	sendMessage(&msg);
 	m_transport->update();  // Send immediately, before OnPlayerLeave below resets everything.
@@ -711,7 +730,7 @@ void LANAPI::RequestGameLeave( void )
 	else
 	{
 		m_pendingAction = ACT_LEAVE;
-		m_expiration = timeGetTime() + m_actionTimeout;
+		m_expiration = Clock_Milliseconds() + m_actionTimeout;
 	}
 }
 
@@ -730,7 +749,7 @@ void LANAPI::RequestGameAnnounce( void )
 			if (gameOpts.isEmpty())
 				return;
 			strlcpy(reply.GameInfo.options,gameOpts.str(),ARRAY_SIZE(reply.GameInfo.options));
-			wcsncpy(reply.GameInfo.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
+			WideCharNCpy(reply.GameInfo.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
 			reply.GameInfo.gameName[g_lanGameNameLength] = 0;
 			reply.GameInfo.inProgress = m_currentGame->isGameInProgress();
 			reply.GameInfo.isDirectConnect = m_currentGame->getIsDirectConnect();
@@ -749,7 +768,7 @@ void LANAPI::RequestAccept( void )
 	fillInLANMessage( &msg );
 	msg.LANMessageType = LANMessage::MSG_SET_ACCEPT;
 	msg.Accept.isAccepted = true;
-	wcsncpy(msg.Accept.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
+	WideCharNCpy(msg.Accept.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
 	msg.Accept.gameName[g_lanGameNameLength] = 0;
 	sendMessage(&msg);
 }
@@ -763,7 +782,7 @@ void LANAPI::RequestHasMap( void )
 	fillInLANMessage( &msg );
 	msg.LANMessageType = LANMessage::MSG_MAP_AVAILABILITY;
 	msg.MapStatus.hasMap = m_currentGame->getSlot(m_currentGame->getLocalSlotNum())->hasMap();
-	wcsncpy(msg.MapStatus.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
+	WideCharNCpy(msg.MapStatus.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
 	msg.MapStatus.gameName[g_lanGameNameLength] = 0;
 	CRC mapNameCRC;
 //mapNameCRC.computeCRC(m_currentGame->getMap().str(), m_currentGame->getMap().getLength());
@@ -780,20 +799,20 @@ void LANAPI::RequestHasMap( void )
 		Bool willTransfer = TRUE;
 		if (mapData)
 		{
-			mapDisplayName.format(L"%ls", mapData->m_displayName.str());
+			mapDisplayName.format(u"%ls", mapData->m_displayName.str());
 			if (mapData->m_isOfficial)
 				willTransfer = FALSE;
 		}
 		else
 		{
-			mapDisplayName.format(L"%hs", TheGameState->getMapLeafName(m_currentGame->getMap()).str());
+			mapDisplayName.format(u"%hs", TheGameState->getMapLeafName(m_currentGame->getMap()).str());
 			willTransfer = WouldMapTransfer(m_currentGame->getMap());
 		}
 		if (willTransfer)
 			text.format(TheGameText->fetch("GUI:LocalPlayerNoMapWillTransfer"), mapDisplayName.str());
 		else
 			text.format(TheGameText->fetch("GUI:LocalPlayerNoMap"), mapDisplayName.str());
-		OnChat(UnicodeString(L"SYSTEM"), m_localIP, text, LANCHAT_SYSTEM);
+		OnChat(UnicodeString(u"SYSTEM"), m_localIP, text, LANCHAT_SYSTEM);
 	}
 }
 
@@ -801,11 +820,11 @@ void LANAPI::RequestChat( UnicodeString message, ChatType format )
 {
 	LANMessage msg;
 	fillInLANMessage( &msg );
-	wcsncpy(msg.Chat.gameName, (m_currentGame)?m_currentGame->getName().str():L"", g_lanGameNameLength);
+	WideCharNCpy(msg.Chat.gameName, (m_currentGame)?m_currentGame->getName().str():u"", g_lanGameNameLength);
 	msg.Chat.gameName[g_lanGameNameLength] = 0;
 	msg.LANMessageType = LANMessage::MSG_CHAT;
 	msg.Chat.chatType = format;
-	wcsncpy(msg.Chat.message, message.str(), g_lanMaxChatLength);
+	WideCharNCpy(msg.Chat.message, message.str(), g_lanMaxChatLength);
 	msg.Chat.message[g_lanMaxChatLength] = 0;
 	sendMessage(&msg);
 
@@ -837,7 +856,7 @@ void LANAPI::RequestGameStartTimer( Int seconds )
 	if (m_inLobby || !m_currentGame || m_currentGame->getIP(0) != m_localIP)
 		return;
 
-	UnsignedInt now = timeGetTime();
+	UnsignedInt now = Clock_Milliseconds();
 	m_gameStartTime = now + 1000;
 	m_gameStartSeconds = (seconds) ? seconds - 1 : 0;
 
@@ -904,12 +923,12 @@ void LANAPI::RequestGameCreate( UnicodeString gameName, Bool isDirectConnect )
 	m_inLobby = false;
 	LANGameInfo *myGame = NEW LANGameInfo;
 	
-	myGame->setSeed(GetTickCount());
+	myGame->setSeed(Clock_Milliseconds_Coarse());
 	
 //	myGame->setInProgress(false);
 	myGame->enterGame();
 	UnicodeString s;
-	s.format(L"%8.8X%8.8X", m_localIP, myGame->getSeed());
+	s.format(u"%8.8X%8.8X", m_localIP, myGame->getSeed());
 	if (gameName.isEmpty())
 		s.concat(m_name);
 	else
@@ -918,7 +937,7 @@ void LANAPI::RequestGameCreate( UnicodeString gameName, Bool isDirectConnect )
 	while (s.getLength() > g_lanGameNameLength)
 		s.removeLastChar();
 
-	DEBUG_LOG(("Setting local game name to '%ls'\n", s.str()));
+	DEBUG_LOG(("Setting local game name to '%s'\n", WideCharAsUtf8( s.str() ).str()));
 
 	myGame->setName(s);
 
@@ -939,7 +958,7 @@ void LANAPI::RequestGameCreate( UnicodeString gameName, Bool isDirectConnect )
 	myGame->setMap(mapName);
 	myGame->setIsDirectConnect(isDirectConnect);
 	
-	myGame->setLastHeard(timeGetTime());
+	myGame->setLastHeard(Clock_Milliseconds());
 	m_currentGame = myGame;
 
 /// @todo: Need to initialize the players elsewere.
@@ -957,12 +976,12 @@ void LANAPI::RequestGameCreate( UnicodeString gameName, Bool isDirectConnect )
 	//RequestSlotList();
 /*
 	LANMessage msg;
-	wcsncpy(msg.name, m_name.str(), g_lanPlayerNameLength);
+	WideCharNCpy(msg.name, m_name.str(), g_lanPlayerNameLength);
 	msg.name[g_lanPlayerNameLength] = 0;
-	wcscpy(msg.GameInfo.gameName, myGame->getName().str());
+	WideCharCpy(msg.GameInfo.gameName, myGame->getName().str());
 	for (player=0; player<MAX_SLOTS; ++player)
 	{
-		wcscpy(msg.GameInfo.name[player], myGame->getPlayerName(player).str());
+		WideCharCpy(msg.GameInfo.name[player], myGame->getPlayerName(player).str());
 		msg.GameInfo.ip[player] = myGame->getIP(player);
 		msg.GameInfo.playerAccepted[player] = myGame->getAccepted(player);
 	}
@@ -1034,17 +1053,17 @@ void LANAPI::RequestSlotList( void )
 
 	LANMessage reply;
 	reply.LANMessageType = LANMessage::MSG_GAME_ANNOUNCE;
-	wcsncpy(reply.name, m_name.str(), g_lanPlayerNameLength);
+	WideCharNCpy(reply.name, m_name.str(), g_lanPlayerNameLength);
 	reply.name[g_lanPlayerNameLength] = 0;
 	int player;
 	for (player = 0; player < MAX_SLOTS; ++player)
 	{
-		wcsncpy(reply.GameInfo.name[player], m_currentGame->getPlayerName(player).str(), g_lanPlayerNameLength);
+		WideCharNCpy(reply.GameInfo.name[player], m_currentGame->getPlayerName(player).str(), g_lanPlayerNameLength);
 		reply.GameInfo.name[player][g_lanPlayerNameLength] = 0;
 		reply.GameInfo.ip[player] = m_currentGame->getIP(player);
 		reply.GameInfo.playerAccepted[player] = m_currentGame->getSlot(player)->isAccepted();
 	}
-	wcsncpy(reply.GameInfo.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
+	WideCharNCpy(reply.GameInfo.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
 	reply.GameInfo.gameName[g_lanGameNameLength] = 0;
 	reply.GameInfo.inProgress = m_currentGame->isGameInProgress();
 
@@ -1064,7 +1083,7 @@ void LANAPI::RequestSetName( UnicodeString newName )
 	}
 
 	// Set up timer
-	m_lastResendTime = timeGetTime();
+	m_lastResendTime = Clock_Milliseconds();
 
 	if (m_inLobby && m_pendingAction == ACT_NONE)
 	{
@@ -1088,7 +1107,7 @@ void LANAPI::RequestSetName( UnicodeString newName )
 		player->setName(m_name);
 		player->setHost(m_hostName);
 		player->setLogin(m_userName);
-		player->setLastHeard(timeGetTime());
+		player->setLastHeard(Clock_Milliseconds());
 
 		addPlayer(player);
 
@@ -1101,7 +1120,7 @@ void LANAPI::fillInLANMessage( LANMessage *msg )
 	if (!msg)
 		return;
 
-	wcsncpy(msg->name, m_name.str(), g_lanPlayerNameLength);
+	WideCharNCpy(msg->name, m_name.str(), g_lanPlayerNameLength);
 	msg->name[g_lanPlayerNameLength] = 0;
 	strncpy(msg->userName, m_userName.str(), g_lanLoginNameLength);
 	msg->userName[g_lanLoginNameLength] = 0;
@@ -1278,6 +1297,30 @@ void LANAPI::addPlayer( LANPlayer *player )
 	}
 }
 
+#if !defined(_WIN32)
+void LANAPI::listenForBroadcasts( void )
+{
+	m_broadcastListener->reset();
+	/* A lobby bound to the wildcard address (init() before SetLocalIP chooses one) hears broadcasts
+		 itself, and a second wildcard socket would take each one twice. */
+	if (m_localIP == 0 || m_localIP == INADDR_ANY)
+		return;
+	if (!m_broadcastListener->initBroadcastListener(lobbyPort))
+	{
+		DEBUG_LOG(("LANAPI::listenForBroadcasts - no broadcast listener on port %d (error %d): other hosts' games will not be listed\n",
+			lobbyPort, lastSocketError()));
+	}
+}
+
+void LANAPI::collectBroadcasts( void )
+{
+	if (!m_broadcastListener->isOpen())
+		return;
+	m_broadcastListener->update();
+	m_broadcastListener->moveReceivedInto( *m_transport );
+}
+#endif
+
 Bool LANAPI::SetLocalIP( UnsignedInt localIP )
 {
 	Bool retval = TRUE;
@@ -1286,6 +1329,9 @@ Bool LANAPI::SetLocalIP( UnsignedInt localIP )
 	m_transport->reset();
 	retval = m_transport->init(m_localIP, lobbyPort);
 	m_transport->allowBroadcasts(true);
+#if !defined(_WIN32)
+	listenForBroadcasts();
+#endif
 
 	return retval;
 }

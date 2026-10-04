@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -50,6 +52,12 @@
 
 /** The above in logic frames, at a given game speed: 3 at the retail 30fps, 6 at 60. */
 Int GameEngine_logicCatchupMaxFrames( Int logicFps );
+
+/** R1, smooth motion: the renderer's blend reads how far into the next logic tick the wall clock is
+	(0 just after a tick, 1 a whole tick later or more; always 1 in fast mode or before the first tick).
+	The logic loop notes each pass's last tick with GameEngine_noteLogicTickDone. */
+void GameEngine_noteLogicTickDone( Int logicFps, Bool fastMode );
+Real GameEngine_logicTickFraction( void );
 
 /**	How long the catch-up loop may keep starting new logic ticks before it gives up for this pass.
 

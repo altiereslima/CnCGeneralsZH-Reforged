@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /* GLOBAL.H - RSAREF types and constants
  */
@@ -36,7 +37,13 @@ typedef unsigned char *POINTER;
 typedef unsigned short int UINT2;
 
 /* UINT4 defines a four byte word */
-typedef unsigned long int UINT4;
+/* It was `unsigned long int`, which is four bytes only where long is: RSAREF's era, and Windows.
+   On LP64 it is eight, and MD5's ROTATE_LEFT, Decode and bit count all assume 32, so every digest
+   was wrong there.  uint32_t is exactly what the comment above always said.  GameSpy carries its
+   own RSAREF MD5 with its own UINT4, already `unsigned int`; this header is included only by
+   WWLib's md5.cpp and test_wwlib.  B5 follow-up. */
+#include <stdint.h>
+typedef uint32_t UINT4;
 
 /* PROTO_LIST is defined depending on how PROTOTYPES is defined above.
 If using PROTOTYPES, then PROTO_LIST returns the list, otherwise it

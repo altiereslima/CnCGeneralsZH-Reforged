@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -29,6 +31,8 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+
+#include "Lib/WideCharFns.h"
 
 #include "Common/CRCDebug.h"
 #include "Common/DrawnPath.h"
@@ -60,6 +64,7 @@
 #include "GameLogic/ObjectIter.h"
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/AI.h"
+#include "GameLogic/AIGuard.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/DozerAIUpdate.h"
 #include "GameLogic/Module/SupplyTruckAIUpdate.h"
@@ -134,7 +139,7 @@ static void considerBuilderProc( Object *obj, void *userData )
 #include "GameClient/GameText.h"
 #include "GameClient/GameWindowTransitions.h"
 #include "GameClient/GameWindowManager.h"
-#include "GameClient/GuiCallbacks.h"
+#include "GameClient/GUICallbacks.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/KeyDefs.h"
 #include "GameClient/Mouse.h"
@@ -291,6 +296,32 @@ static void doClearRallyPoint( Object *obj )
 
 }
 
+// ------------------------------------------------------------------------------------------------
+/** A guard order's last argument is the radius the player wheeled to, one circle for the whole
+	* group.  A message without it, a double-click guard or a replay recorded before it, leaves each
+	* unit on its own vision-based range.  The number came over the network, so anything that is not
+	* a sane distance reads as none, or as the cap. */
+// ------------------------------------------------------------------------------------------------
+static void setGroupGuardRadius( AIGroup *group, const GameMessage *msg, Int argIndex )
+{
+	Real radius = 0.0f;
+	if( msg->getArgumentCount() > argIndex && msg->getArgumentDataType( argIndex ) == ARGUMENTDATATYPE_REAL )
+		radius = msg->getArgument( argIndex )->real;
+	if( !( radius >= 0.0f ) )		// NaN fails this too
+		radius = 0.0f;
+	if( radius > GUARD_RADIUS_MAX )
+		radius = GUARD_RADIUS_MAX;
+	DEBUG_LOG(( "GUARD RADIUS: frame %d player %d radius %.0f\n", TheGameLogic->getFrame(), msg->getPlayerIndex(), radius ));
+
+	const VecObjectID& ids = group->getAllIDs();
+	for( VecObjectID::const_iterator it = ids.begin(); it != ids.end(); ++it )
+	{
+		Object *obj = TheGameLogic->findObjectByID( *it );
+		if( obj && obj->getAIUpdateInterface() )
+			obj->getAIUpdateInterface()->setGuardRadius( radius );
+	}
+}
+
 static Object * getSingleObjectFromSelection(const AIGroup *currentlySelectedGroup)
 {
 	// an empty group is not the same as no group: the iterator below was taken from an empty
@@ -406,10 +437,15 @@ void GameLogic::prepareNewGame( Int gameMode, GameDifficulty diff, Int rankPoint
 	{
 		m_background = TheWindowManager->winCreateLayout("Menus/BlankWindow.wnd");
 		DEBUG_ASSERTCRASH(m_background,("We Couldn't Load Menus/BlankWindow.wnd"));
-		m_background->hide(FALSE);
-		m_background->bringForward();
+		// as GameEngine::reset: NULL when the file could not be read; the backdrop is cosmetic
+		if (m_background)
+		{
+			m_background->hide(FALSE);
+			m_background->bringForward();
+		}
 	}
-	m_background->getFirstWindow()->winClearStatus(WIN_STATUS_IMAGE);
+	if (m_background)
+		m_background->getFirstWindow()->winClearStatus(WIN_STATUS_IMAGE);
 	TheGameLogic->setGameMode( gameMode );
 	if (!TheGlobalData->m_pendingFile.isEmpty())
 	{
@@ -558,8 +594,8 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 #if 0
 	if (commandName.isNotEmpty() /*&& msg->getType() != GameMessage::MSG_FRAME_TICK*/)
 	{
-		DEBUG_LOG(("Frame %d: GameLogic::logicMessageDispatcher() saw a %s from player %d (%ls)\n", getFrame(), commandName.str(),
-			msg->getPlayerIndex(), thisPlayer->getPlayerDisplayName().str()));
+		DEBUG_LOG(("Frame %d: GameLogic::logicMessageDispatcher() saw a %s from player %d (%s)\n", getFrame(), commandName.str(),
+			msg->getPlayerIndex(), WideCharAsUtf8( thisPlayer->getPlayerDisplayName().str() ).str()));
 	}
 #endif
 #endif // DEBUG_LOGGING
@@ -718,6 +754,30 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 
 			break;
 
+		}
+
+		//---------------------------------------------------------------------------------------------
+		// The stance key (fork): every selected unit of the sender's takes the stance.  The number came
+		// over the network, so only 0 and 1 mean anything
+		case GameMessage::MSG_SET_STANCE:
+		{
+			if( currentlySelectedGroup == NULL || msg->getArgumentCount() < 1
+					|| msg->getArgumentDataType( 0 ) != ARGUMENTDATATYPE_INTEGER )
+				break;
+			const Int stance = msg->getArgument( 0 )->integer;
+			if( stance != 0 && stance != 1 )
+				break;
+
+			const VecObjectID& ids = currentlySelectedGroup->getAllIDs();
+			for( VecObjectID::const_iterator it = ids.begin(); it != ids.end(); ++it )
+			{
+				Object *obj = TheGameLogic->findObjectByID( *it );
+				if( obj && obj->getControllingPlayer() == thisPlayer && obj->getAIUpdateInterface() )
+					obj->getAIUpdateInterface()->setAggressiveStance( stance == 1 );
+			}
+			DEBUG_LOG(( "STANCE: frame %d player %d %s, %d selected\n", TheGameLogic->getFrame(),
+									msg->getPlayerIndex(), stance == 1 ? "aggressive" : "defensive", (Int)ids.size() ));
+			break;
 		}
 
 		//---------------------------------------------------------------------------------------------
@@ -1065,6 +1125,7 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 			GuardMode gm = (GuardMode)msg->getArgument( 1 )->integer;
 			if (currentlySelectedGroup)
 			{
+				setGroupGuardRadius( currentlySelectedGroup, msg, 2 );
 				currentlySelectedGroup->groupGuardPosition(&loc, gm, CMD_FROM_PLAYER);
 			}
 
@@ -1091,7 +1152,10 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 
 					AIUpdateInterface *ai = obj->getAIUpdateInterface();
 					if (ai)
+					{
+						ai->setGuardRadius( 0.0f );
 						ai->aiGuardPosition( obj->getPosition(), gm, CMD_FROM_PLAYER );
+					}
 				}
 			}
 
@@ -1167,7 +1231,10 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 				station.z = TheTerrainLogic->getGroundHeight( station.x, station.y );
 
 				if (guardAlong)
+				{
+					movers[ i ]->getAIUpdateInterface()->setGuardRadius( 0.0f );
 					movers[ i ]->getAIUpdateInterface()->aiGuardPosition( &station, GUARDMODE_GUARD_WITHOUT_PURSUIT, CMD_FROM_PLAYER );
+				}
 				else if (fireAlong)
 					movers[ i ]->getAIUpdateInterface()->aiAttackPosition( &station, NO_MAX_SHOTS_LIMIT, CMD_FROM_PLAYER );
 				else if (attackAlong)
@@ -1189,6 +1256,7 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 			GuardMode gm = (GuardMode)msg->getArgument( 1 )->integer;
 			if (currentlySelectedGroup)
 			{
+				setGroupGuardRadius( currentlySelectedGroup, msg, 2 );
 				currentlySelectedGroup->groupGuardObject(obj, gm, CMD_FROM_PLAYER);
 			}
 

@@ -193,6 +193,57 @@ GUI:StopDescription
 "Stops what the selected units are doing."
 END
 
+// The command grid's own attack, hold position and move keys, which stand in no command set:
+// the cards they show under the pointer.
+
+GUI:OrderForceAttack
+"Force Attack"
+END
+
+GUI:OrderForceAttackDescription
+"The next click attacks whatever is under the pointer, the ground and your own side included. Click the key again to call it off."
+END
+
+GUI:OrderHoldPosition
+"Hold Position"
+END
+
+GUI:OrderHoldPositionDescription
+"The selected units guard the spot they stand on and fight whatever comes near, without chasing it out of the area."
+END
+
+GUI:OrderMove
+"Move"
+END
+
+GUI:OrderMoveDescription
+"The next click on the ground sends the selected units there. Drag instead and they spread out along the line you draw."
+END
+
+GUI:OrderSearchAndDestroy
+"Search and Destroy"
+END
+
+GUI:OrderSearchAndDestroyDescription
+"Click a spot and the selected units attack move round it, fighting whatever they run into, then stay and guard the whole circle. Roll the mouse wheel before you click to size the circle."
+END
+
+GUI:OrderStanceDefensive
+"Stance: Defensive"
+END
+
+GUI:OrderStanceDefensiveDescription
+"The selected units shoot what comes into range and hold the ground you put them on. Click to make them aggressive: they go after any enemy they see."
+END
+
+GUI:OrderStanceAggressive
+"Stance: Aggressive"
+END
+
+GUI:OrderStanceAggressiveDescription
+"The selected units go after any enemy they see and chase it. Click to make them defensive again: they only shoot what comes into range and stay where they are."
+END
+
 // Smoke signals.  The three ...Placed lines are what an ally reads; %s is the sender's name.  The
 // ...Label words are written over the smoke, which is in the sender's colour.
 GUI:SignalAttack
@@ -397,11 +448,111 @@ GUI:TreeSway
 END
 
 TOOLTIP:TreeSway
-"Trees and shrubs lean in the wind. Takes effect on the next map."
+"Trees and shrubs lean in the wind. Applies from the next map."
 END
 
 TOOLTIP:ExtraAnimations
-"Buildings rise inside scaffolding while they are built. Swaying trees have a box of their own."
+"Buildings rise inside scaffolding while they are built. Applies from the next map."
+END
+
+GUI:ExtraAnimations
+"Building Scaffolding"
+END
+
+GUI:Detail
+"Detail Preset"
+END
+
+GUI:DetailNote0
+"Every box on, the most particles and thick smoke, and detail never drops in a big fight. Picking it only fills in the boxes; Accept applies it."
+END
+
+GUI:DetailNote1
+"All the shadows and full-size textures, with the original smoke. Picking it only fills in the boxes; Accept applies it."
+END
+
+GUI:DetailNote2
+"Flat shadows in place of cast ones and fewer particles, for a modest graphics card. Picking it only fills in the boxes; Accept applies it."
+END
+
+GUI:DetailNote3
+"No shadows, half-size textures and the fewest particles, for an old machine. Picking it only fills in the boxes; Accept applies it."
+END
+
+GUI:DetailNote4
+"Your own mix of the boxes on this page and on Effects. Accept keeps it as it is."
+END
+
+GUI:Shadows3D
+"Cast Shadows"
+END
+
+TOOLTIP:Shadows3D
+"Shadows that units, buildings and trees throw on the ground and on each other. Off turns all of them off, the sun's shadows included, and Infantry Shadows needs it on. Applies when you press Accept; a few shadows only change on the next map."
+END
+
+GUI:Shadows2D
+"Flat Shadows"
+END
+
+TOOLTIP:Shadows2D
+"The flat dark patch drawn under a unit or a missile that has no cast shadow. Costs little. Applies when you press Accept."
+END
+
+TOOLTIP:CloudShadows
+"Cloud shadows drift across the ground. Costs little. Applies when you press Accept."
+END
+
+GUI:GroundLighting
+"Ground Pattern"
+END
+
+TOOLTIP:GroundLighting
+"A faint pattern of light and dark laid over the ground, so its repeating tiles show less. Costs little. Applies when you press Accept."
+END
+
+GUI:SmoothWater
+"Soft Shorelines"
+END
+
+TOOLTIP:SmoothWater
+"Water fades out at the shore instead of ending on a hard line. Applies from the next map."
+END
+
+GUI:ShowProps
+"Trees And Bushes"
+END
+
+TOOLTIP:ShowProps
+"Trees and bushes on the map. Off helps a slow machine. Network games always show them. Applies from the next map."
+END
+
+GUI:HeatEffects
+"Heat Haze"
+END
+
+TOOLTIP:HeatEffects
+"Hot air shimmers, as it does over the Microwave Tank's beam. Applies when you press Accept."
+END
+
+GUI:BehindBuilding
+"Units Behind Buildings"
+END
+
+TOOLTIP:BehindBuilding
+"A unit hidden behind a building shows through it as a silhouette in its player's colour. Applies when you press Accept."
+END
+
+TOOLTIP:NoDynamicLOD
+"When the frame rate drops in a big fight, the game thins out effects to keep up. On, it never does: the picture stays full and the frame rate takes the hit."
+END
+
+TOOLTIP:LowResSlider
+"How sharp the textures are. Lower saves graphics memory on an old card. Applies when you press Accept."
+END
+
+TOOLTIP:ParticleCapSlider
+"How many particles of smoke, fire and sparks can exist at once. Big fights reach the limit first; lower it if explosions slow the game down. Applies when you press Accept."
 END
 
 GUI:TextureFilter
@@ -421,7 +572,7 @@ GUI:TextureFilter2
 END
 
 TOOLTIP:TextureFilter
-"How textures are sampled as they recede from the camera. Bilinear is what the game shipped with and makes distant ground shimmer; anisotropic keeps it sharp. Takes effect the next time the display device is reset."
+"How textures are sampled as they recede from the camera. Bilinear is what the game shipped with and makes distant ground shimmer; anisotropic keeps it sharp. Applies the next time the game starts."
 END
 
 GUI:Anisotropy
@@ -429,7 +580,7 @@ GUI:Anisotropy
 END
 
 TOOLTIP:Anisotropy
-"How many samples anisotropic filtering may take. Auto lets the graphics card decide, up to 16. Only used when texture filtering is anisotropic."
+"How many samples anisotropic filtering may take. Auto lets the graphics card decide, up to 16. Only used when texture filtering is anisotropic. Applies the next time the game starts."
 END
 
 GUI:AnisotropyCardMaximum
@@ -571,7 +722,7 @@ GUI:MSAA4
 END
 
 TOOLTIP:MSAA
-"Smooths the stair steps along model edges. A level your card does not offer drops to the highest one it does. Applied when the display device is next reset."
+"Smooths the stair steps along model edges. Only the Direct3D 9 renderer uses it: the default renderer smooths edges on its own and ignores this setting. A level your card does not offer drops to the highest one it does. Applies the next time the game starts."
 END
 
 GUI:Bloom
@@ -639,7 +790,7 @@ GUI:InfantryShadows
 END
 
 TOOLTIP:InfantryShadows
-"Soldiers and the other animated models cast 3D shadows too. Needs 3D Shadows. Takes effect on the next map."
+"Soldiers and the other animated models cast real shadows too. Needs Cast Shadows. Applies from the next map."
 END
 
 GUI:ProjectileShadows
@@ -647,7 +798,7 @@ GUI:ProjectileShadows
 END
 
 TOOLTIP:ProjectileShadows
-"Missiles and bombs the artists gave no shadow get one on the ground. Takes effect on the next map."
+"Missiles and bombs the artists gave no shadow get one on the ground. Applies from the next map."
 END
 
 GUI:PropShadows
@@ -655,7 +806,7 @@ GUI:PropShadows
 END
 
 TOOLTIP:PropShadows
-"Fences, rubbish and shrubs, which the original drew with no shadow at all, get one. Takes effect on the next map."
+"Fences, rubbish and shrubs, which the original drew with no shadow at all, get one. Applies from the next map."
 END
 
 GUI:ParticleShadows
@@ -663,7 +814,7 @@ GUI:ParticleShadows
 END
 
 TOOLTIP:ParticleShadows
-"Big clouds of smoke and dust lay a soft shadow on the ground under them."
+"Big clouds of smoke and dust lay a soft shadow on the ground under them. Applies when you press Accept."
 END
 
 GUI:Smoke
@@ -740,6 +891,14 @@ END
 
 TOOLTIP:IsometricCamera
 "The battlefield seen from far off, so a unit is the same size at the top of the screen as at the bottom. You still turn and zoom the camera."
+END
+
+GUI:SmoothMotion
+"Smooth Motion"
+END
+
+TOOLTIP:SmoothMotion
+"Units are drawn between the game's 30 steps a second, so they move smoothly on a fast display. The picture is one step (33 ms) behind; the game itself is unchanged."
 END
 
 GUI:EdgeScrollWindowed
@@ -908,6 +1067,22 @@ END
 
 TOOLTIP:HudScale
 "Draws the command bar and the rest of the bottom HUD larger than your resolution would."
+END
+
+GUI:MenuLayout
+"Menu Layout"
+END
+
+GUI:MenuLayout0
+"Stretch"
+END
+
+GUI:MenuLayout1
+"Fit"
+END
+
+TOOLTIP:MenuLayout
+"Fit keeps the menus in the shape they were drawn in and centres them on a wide screen. Stretch widens them to the screen's edges, as the game always did."
 END
 
 GUI:OptionsGroupInput

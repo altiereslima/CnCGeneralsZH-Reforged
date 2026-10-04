@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /* $Header: /Commando/Code/ww3d2/assetmgr.cpp 43    11/01/01 1:11a Jani_p $ */
 /*********************************************************************************************** 
@@ -78,6 +80,9 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "assetmgr.h"
+#if !defined(_WIN32)
+#include "Platform/LoadTiming.h"
+#endif
 #include <assert.h>
 
 #include "bittype.h"
@@ -112,7 +117,9 @@
 #include "metalmap.h"
 #include "w3dexclusionlist.h"
 #include <ini.h>
+#if defined(_WIN32)
 #include <windows.h>
+#endif
 #include <stdio.h>
 #include "d3dx9runtime.h"
 #include "texture.h"
@@ -631,6 +638,24 @@ void WW3DAssetManager::Create_Asset_List(DynamicVectorClass<StringClass> & model
 bool WW3DAssetManager::Load_3D_Assets( const char * filename )
 {
 	bool result = false;
+#if !defined(_WIN32)
+	// PERF1's hitch hunt (Platform/LoadTiming.h): a model load's time, and how much of it was reading.
+	struct LoadTimer
+	{
+		const char *Name;
+		double Start, ReadStart;
+		explicit LoadTimer(const char *name) : Name(name), Start(zhLoadTimingAsked() ? zhLoadNowMs() : 0.0),
+			ReadStart(zhLoadReadMs()) {}
+		~LoadTimer()
+		{
+			if (!zhLoadTimingAsked()) return;
+			const double took = zhLoadNowMs() - Start, read = zhLoadReadMs() - ReadStart;
+			if (took > ZH_LOAD_TIMING_REPORT_MS)
+				fprintf(stderr, "LOAD w3d   t %10.1f ms  %7.1f ms  %s thread  read %.1f ms, parse and build %.1f ms  %s\n",
+					Start, took, zhLoadThread(), read, took - read, Name);
+		}
+	} timer(filename);
+#endif
 
 	FileClass * file = _TheFileFactory->Get_File( filename );
 	if ( file ) {
@@ -810,8 +835,8 @@ RenderObjClass * WW3DAssetManager::Create_Render_Obj(const char * name)
 		char filename [MAX_PATH];
 		const char *mesh_name = ::strchr (name, '.');
 		if (mesh_name != NULL) {
-			::lstrcpyn (filename, name, ((int)mesh_name) - ((int)name) + 1);
-			::lstrcat (filename, ".w3d");
+			snprintf (filename, (int)(mesh_name - name) + 1, "%s", name);
+			strcat (filename, ".w3d");
 		} else {
 			sprintf( filename, "%s.w3d", name);
 		}
@@ -1352,7 +1377,7 @@ Font3DDataClass * WW3DAssetManager::Get_Font3DData( const char *name )
 	// loop through and see if the Font3D we are looking for has already been
 	// allocated and thus we can just return it.
 	for (	SLNode<Font3DDataClass> *node = Font3DDatas.Head(); node; node = node->Next()) {
-		if (!stricmp(name, node->Data()->Name)) {
+		if (!strcasecmp(name, node->Data()->Name)) {
 			node->Data()->Add_Ref();
 			return node->Data();
 		}
@@ -1600,7 +1625,7 @@ void WW3DAssetManager::Remove_Prototype(PrototypeClass *proto)
 			  test = test->friend_getNextHash()) {
 			
 			// Is this the prototype?
-			if (::stricmp (test->Get_Name(), pname) == 0) {
+			if (::strcasecmp (test->Get_Name(), pname) == 0) {
 				
 				// Remove this prototype from the linked list for this hash index.
 				if (prev == NULL) {
@@ -1672,7 +1697,7 @@ void WW3DAssetManager::Remove_Prototype(const char *name)
 PrototypeClass * WW3DAssetManager::Find_Prototype(const char * name)
 {
 	// Special case Null render object.  So we always have it...
-	if (stricmp(name,"NULL") == 0) {
+	if (strcasecmp(name,"NULL") == 0) {
 		return &(_NullPrototype);
 	}
 	
@@ -1681,7 +1706,7 @@ PrototypeClass * WW3DAssetManager::Find_Prototype(const char * name)
 	PrototypeClass * test = PrototypeHashTable[hash];
 
 	while (test != NULL) {
-		if (stricmp(test->Get_Name(),name) == 0) {
+		if (strcasecmp(test->Get_Name(),name) == 0) {
 			return test;
 		}
 		test = test->friend_getNextHash();

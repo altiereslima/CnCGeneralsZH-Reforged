@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -40,6 +42,7 @@ class STLSpecialAlloc;
 // different .cpp files, so I bit the bullet and included it here.
 // PLEASE DO NOT ABUSE WINDOWS OR IT WILL BE REMOVED ENTIRELY. :-)
 //--------------------------------------------------------------------------------- System Includes 
+#if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 // winuser.h declares AnimateWindow() only for WINVER >= 0x0500, which VC6 never
 // reached, so GameClient could name a class AnimateWindow.  A modern SDK always
@@ -94,6 +97,28 @@ class STLSpecialAlloc;
 #endif
 
 #include <dinput.h>
+#else
+// Everything above that is not Windows, and nothing that is.  Each of these is also on the Windows
+// side, in the same relative order, so a file that leaned on one of them sees the same thing here.
+// <wchar.h> is the one addition: MSVC's <string.h> declares wcslen and the other wide-string
+// functions itself, and glibc's and Darwin's do not.
+#include <assert.h>
+#include <ctype.h>
+#include <float.h>
+#include <limits.h>
+#include <math.h>
+#include <memory.h>
+#include <stdarg.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/timeb.h>
+#include <sys/types.h>
+#include <time.h>
+#include <wchar.h>
+#endif
 
 //------------------------------------------------------------------------------------ STL Includes
 // srj sez: no, include STLTypesdefs below, instead, thanks
@@ -110,7 +135,7 @@ class STLSpecialAlloc;
 
 //------------------------------------------------------------------------------------ RTS Includes
 // Icky. These have to be in this order.
-#include "Lib/Basetype.h"
+#include "Lib/BaseType.h"
 #include "Common/STLTypedefs.h"
 #include "Common/Errors.h"
 #include "Common/Debug.h"

@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 /*********************************************************************************************** 
  ***              C O N F I D E N T I A L  ---  W E S T W O O D  S T U D I O S               *** 
@@ -62,7 +63,7 @@ void CRCEngine::operator() (char datum)
 {
 	StagingBuffer.Buffer[Index++] = datum;
 
-	if (Index == sizeof(long))  {
+	if (Index == sizeof(int32_t))  {
 		CRC = Value();
 		StagingBuffer.Composite = 0;
 		Index = 0;
@@ -110,11 +111,11 @@ long CRCEngine::operator() (void const * buffer, int length)
 		**	Perform the fast 'bulk' processing by reading long word sized
 		**	data blocks.
 		*/
-		long const * longptr = (long const *)dataptr;
-		int longcount = bytes_left / sizeof(long);		// Whole 'long' elements remaining.
+		int32_t const * longptr = (int32_t const *)dataptr;
+		int longcount = bytes_left / sizeof(int32_t);		// Whole 32-bit elements remaining.
 		while (longcount--) {
-			CRC = _lrotl(CRC, 1) + *longptr++;
-			bytes_left -= sizeof(long);
+			CRC = (int32_t)(Rotate_Left_32((uint32_t)CRC) + (uint32_t)*longptr++);
+			bytes_left -= sizeof(int32_t);
 		}
 
 		/*

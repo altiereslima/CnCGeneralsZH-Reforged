@@ -15,6 +15,7 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -52,7 +53,7 @@
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "GameClient/GameWindow.h"
-#include "WW3D2/Render2DSentence.h"
+#include "WW3D2/render2dsentence.h"
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////
 

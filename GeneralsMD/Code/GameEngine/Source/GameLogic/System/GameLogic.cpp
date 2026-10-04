@@ -15,6 +15,8 @@
 **	You should have received a copy of the GNU General Public License
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+// Modified 2025-2026 by Olcay Seygan for Zero Hour Reforged; see the git history.
+// Modified 2026 by İlyas Akın for the macOS/Linux port; see NOTICE.md and the git history.
 
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
@@ -28,6 +30,10 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "zhio.h"
+#include "Platform/SleepMilliseconds.h"
+#include "Lib/Clock.h"
+#include "Lib/WideCharFns.h"
 
 #include "Common/AudioAffect.h"
 #include "Common/AudioHandleSpecialValues.h"
@@ -130,7 +136,7 @@ FILE *g_UT_timingLog=NULL;
 FILE *g_UT_commaLog=NULL;
 // Note - this is only for gathering timing data!  DO NOT DO THIS IN REGULAR CODE!!!  JBA
 #define BRUTAL_TIMING_HACK
-#include "../../gameenginedevice/include/W3DDevice/GameClient/Module/W3DModelDraw.h"
+#include "../../GameEngineDevice/Include/W3DDevice/GameClient/Module/W3DModelDraw.h"
 extern void externalAddTree(Coord3D location, Real scale, Real angle, AsciiString name);
 #endif
 
@@ -503,15 +509,15 @@ static Object * placeObjectAtPosition(Int slotNum, AsciiString objectTemplateNam
 	DEBUG_ASSERTCRASH(btt, ("TheThingFactory didn't find a template in placeObjectAtPosition()") );
 
 	Object *obj = TheThingFactory->newObject( btt, pPlayer->getDefaultTeam() );
-	DEBUG_ASSERTCRASH(obj, ("TheThingFactory didn't give me a valid Object for player %d's (%ls) starting building\n",
-		slotNum, pTemplate->getDisplayName().str()));
+	DEBUG_ASSERTCRASH(obj, ("TheThingFactory didn't give me a valid Object for player %d's (%s) starting building\n",
+		slotNum, WideCharAsUtf8( pTemplate->getDisplayName().str() ).str()));
 	if (obj)
 	{
 		obj->setOrientation(obj->getTemplate()->getPlacementViewAngle());	
 		obj->setPosition( &pos );
 
 		//DEBUG_LOG(("Placed a starting building for %s at waypoint %s\n", playerName.str(), waypointName.str()));
-		CRCDEBUG_LOG(("Placed an object for %ls at pos (%g,%g,%g)\n", pPlayer->getPlayerDisplayName().str(),
+		CRCDEBUG_LOG(("Placed an object for %s at pos (%g,%g,%g)\n", WideCharAsUtf8( pPlayer->getPlayerDisplayName().str() ).str(),
 			pos.x, pos.y, pos.z));
 		DUMPCOORD3D(&pos);
 
@@ -564,8 +570,8 @@ static void placeNetworkBuildingsForPlayer(Int slotNum, const GameSlot *pSlot, P
 
 	AsciiString buildingTemplateName = pTemplate->getStartingBuilding();
 
-	DEBUG_ASSERTCRASH(!buildingTemplateName.isEmpty(), ("no starting building type for player %d (playertemplate %ls)\n",
-		slotNum, pTemplate->getDisplayName().str()));
+	DEBUG_ASSERTCRASH(!buildingTemplateName.isEmpty(), ("no starting building type for player %d (playertemplate %s)\n",
+		slotNum, WideCharAsUtf8( pTemplate->getDisplayName().str() ).str()));
 	if (buildingTemplateName.isEmpty())
 		return;
 
@@ -1556,7 +1562,7 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 		Dict d;
 		d.setAsciiString(TheKey_playerName, "ReplayObserver");
 		d.setBool(TheKey_playerIsHuman, TRUE);
-		d.setUnicodeString(TheKey_playerDisplayName, UnicodeString(L"Observer"));
+		d.setUnicodeString(TheKey_playerDisplayName, UnicodeString(u"Observer"));
 		const PlayerTemplate* pt;
 		pt = ThePlayerTemplateStore->findPlayerTemplate( TheNameKeyGenerator->nameToKey("FactionObserver") );
 		if (pt)
@@ -1825,7 +1831,7 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 
 	// reveal the map for the permanent observer
 	ThePartitionManager->revealMapForPlayerPermanently( ThePlayerList->findPlayerWithNameKey(TheNameKeyGenerator->nameToKey("ReplayObserver"))->getPlayerIndex() );
-	DEBUG_LOG(("Reveal shroud for %ls whose index is %d\n", ThePlayerList->findPlayerWithNameKey(TheNameKeyGenerator->nameToKey("ReplayObserver"))->getPlayerDisplayName().str(),ThePlayerList->findPlayerWithNameKey(TheNameKeyGenerator->nameToKey("ReplayObserver"))->getPlayerIndex()));
+	DEBUG_LOG(("Reveal shroud for %s whose index is %d\n", WideCharAsUtf8( ThePlayerList->findPlayerWithNameKey(TheNameKeyGenerator->nameToKey("ReplayObserver"))->getPlayerDisplayName().str() ).str(),ThePlayerList->findPlayerWithNameKey(TheNameKeyGenerator->nameToKey("ReplayObserver"))->getPlayerIndex()));
 	
 	if (game)
 	{
@@ -1879,7 +1885,7 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 	}
 
 	progressCount = LOAD_PROGRESS_LOOP_ALL_THE_FREAKN_OBJECTS;
-	Int timer = timeGetTime();
+	Int timer = Clock_Milliseconds();
 	if( loadingSaveGame ) {
 		// Loading a loadingSaveGame, need to add the trees to the client. jba. [8/11/2003]
 		for (pMapObj = MapObject::getFirstMapObject(); pMapObj; pMapObj = pMapObj->getNext()) 
@@ -2015,12 +2021,12 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 
 			}  // end if
 		
-			if(timeGetTime() > timer + 500)
+			if(Clock_Milliseconds() > timer + 500)
 			{
 				if(progressCount < LOAD_PROGRESS_MAX_ALL_THE_FREAKN_OBJECTS)
 					progressCount ++;
 				updateLoadProgress(progressCount);
-				timer = timeGetTime();
+				timer = Clock_Milliseconds();
 			}
 
 		}	// for, loading map objects
@@ -2289,8 +2295,8 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 			if (pPlayer)
 			{
 				pPlayer->addSkillPoints(m_rankPointsToAddAtGameStart);
-				DEBUG_LOG(("GameLogic::startNewGame() - adding m_rankPointsToAddAtGameStart==%d to player %d(%ls)\n",
-					m_rankPointsToAddAtGameStart, i, pPlayer->getPlayerDisplayName().str()));
+				DEBUG_LOG(("GameLogic::startNewGame() - adding m_rankPointsToAddAtGameStart==%d to player %d(%s)\n",
+					m_rankPointsToAddAtGameStart, i, WideCharAsUtf8( pPlayer->getPlayerDisplayName().str() ).str()));
 			}
 		}
 	}
@@ -2307,7 +2313,9 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 	{
 		updateLoadProgress(101); // keep greater then 100
 		testTimeOut();
-		Sleep(100);
+		/* A wall-clock wait between polls, not a simulation step: no logic frame runs in this loop
+			 or the fade below, and how many times either polls is not part of any CRC. */
+		sleepMilliseconds( 100 );
 	}
 
 	// if we're in a load game, don't fade yet
@@ -2321,7 +2329,7 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 			{
 				TheDisplay->draw();
 				setFPMode();
-				Sleep(33);
+				sleepMilliseconds( 33 );
 			}
 			
 		}
@@ -2384,7 +2392,7 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 			TheRadar->forceOn(TRUE);
 			ThePartitionManager->refreshShroudForLocalPlayer();
 			TheControlBar->setControlBarSchemeByPlayer( ThePlayerList->getLocalPlayer());
-			DEBUG_LOG(("Start of a replay game %ls, %d\n",ThePlayerList->getLocalPlayer()->getPlayerDisplayName().str(), ThePlayerList->getLocalPlayer()->getPlayerIndex()));
+			DEBUG_LOG(("Start of a replay game %s, %d\n",WideCharAsUtf8( ThePlayerList->getLocalPlayer()->getPlayerDisplayName().str() ).str(), ThePlayerList->getLocalPlayer()->getPlayerIndex()));
 		}
 		else
 			TheControlBar->setControlBarSchemeByPlayer(ThePlayerList->getLocalPlayer());
@@ -2398,8 +2406,8 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 	g_UT_curThing = TheThingFactory->firstTemplate();
 	g_UT_startTiming = true;
 	g_UT_gotUnit = false;
-	g_UT_timingLog = fopen("TimingLog.txt", "w");	 
-	g_UT_commaLog = fopen("TimingCDL.txt", "w");
+	g_UT_timingLog = zh_fopen("TimingLog.txt", "w");	 
+	g_UT_commaLog = zh_fopen("TimingCDL.txt", "w");
 	fputs("Full,100*ms,NoPart-NoSpawn,,No Spawn,100*ms,Logic,100*ms,Thing,Model,Kind,Side,DrawCalls All,DrawCalls NoPart-NoSpawn,DrawCalls NoSpawn\n", g_UT_commaLog); 
 
 	// Turn off shadows
@@ -2555,7 +2563,7 @@ void GameLogic::loadMapINI( AsciiString mapName )
 	// Keep what parsed up to the bad line and play on: every machine in a match has the same file,
 	// the map CRC sees to that, so each stops at the same line and the rules still agree.
 	//
-	_snprintf(fullFledgeFilename, _MAX_PATH, "%s\\map.ini", filename); fullFledgeFilename[_MAX_PATH-1] = 0;
+	snprintf(fullFledgeFilename, _MAX_PATH, "%s\\map.ini", filename); fullFledgeFilename[_MAX_PATH-1] = 0;
 	if (TheFileSystem->doesFileExist(fullFledgeFilename)) {
 		DEBUG_LOG(("Loading map.ini\n"));
 		INI ini;
@@ -2567,7 +2575,7 @@ void GameLogic::loadMapINI( AsciiString mapName )
 		}
 	}
 
-	_snprintf(fullFledgeFilename, _MAX_PATH, "%s\\solo.ini", filename); fullFledgeFilename[_MAX_PATH-1] = 0;
+	snprintf(fullFledgeFilename, _MAX_PATH, "%s\\solo.ini", filename); fullFledgeFilename[_MAX_PATH-1] = 0;
 	if (TheFileSystem->doesFileExist(fullFledgeFilename)) {
 		DEBUG_LOG(("Loading solo.ini\n"));
 		INI ini;
@@ -2589,7 +2597,7 @@ void GameLogic::loadMapINI( AsciiString mapName )
 	// No error here. There could've just *not* been a map.ini file.
 
 	// now look for a string file
-	_snprintf(fullFledgeFilename, _MAX_PATH, "%s\\map.str", filename); fullFledgeFilename[_MAX_PATH-1] = 0;
+	snprintf(fullFledgeFilename, _MAX_PATH, "%s\\map.str", filename); fullFledgeFilename[_MAX_PATH-1] = 0;
 
 	if (TheFileSystem->doesFileExist(fullFledgeFilename)) {
 		TheGameText->initMapStringFile(fullFledgeFilename);
@@ -2599,7 +2607,7 @@ void GameLogic::loadMapINI( AsciiString mapName )
 	if (TheDisplay)
 	{
 		const char* ASSET_USAGE_FILE_NAME = "AssetUsage.txt";
-		_snprintf(fullFledgeFilename, _MAX_PATH, "%s\\%s", filename, ASSET_USAGE_FILE_NAME); fullFledgeFilename[_MAX_PATH-1] = 0;
+		snprintf(fullFledgeFilename, _MAX_PATH, "%s\\%s", filename, ASSET_USAGE_FILE_NAME); fullFledgeFilename[_MAX_PATH-1] = 0;
 		// note: call this EVEN IF THE FILE IN QUESTION DOES NOT EXIST.
 		TheDisplay->doSmartAssetPurgeAndPreload(fullFledgeFilename);
 	}
@@ -2770,8 +2778,8 @@ void GameLogic::processCommandList( CommandList *list )
 			for (std::map<Int, UnsignedInt>::const_iterator crcIt = m_cachedCRCs.begin(); crcIt != m_cachedCRCs.end(); ++crcIt)
 			{
 				Player *player = ThePlayerList->getNthPlayer(crcIt->first);
-				DEBUG_LOG(("CRC from player %d (%ls) = %X\n", crcIt->first,
-					player?player->getPlayerDisplayName().str():L"<NONE>", crcIt->second));
+				DEBUG_LOG(("CRC from player %d (%s) = %X\n", crcIt->first,
+					WideCharAsUtf8( player?player->getPlayerDisplayName().str():u"<NONE>" ).str(), crcIt->second));
 			}
 #endif DEBUG_LOGGING
 			TheNetwork->setSawCRCMismatch();
@@ -2812,7 +2820,7 @@ void GameLogic::writeMismatchDump( Int numPlayers )
 	fname.concat( "MismatchDump.txt" );
 
 	// a file the user's disk may refuse to give us - the one place a guard is earned
-	FILE *fp = fopen( fname.str(), "w" );
+	FILE *fp = zh_fopen( fname.str(), "w" );
 	if( fp == NULL )
 	{
 		DEBUG_LOG(( "writeMismatchDump - could not open %s\n", fname.str() ));
@@ -3000,7 +3008,7 @@ void GameLogic::deselectObject(Object *obj, PlayerMaskType playerMask, Bool affe
 inline void GameLogic::validateSleepyUpdate() const
 {
 // pretty slow, so do only for DEBUG for now. turn on if you suspect wonkiness.
-#ifdef _DEBUG
+#if defined(_DEBUG) && defined(DEBUG_CRASHING)	// it only asserts
 	#define SLEEPY_DEBUG
 #endif
 #ifdef SLEEPY_DEBUG
@@ -3118,8 +3126,11 @@ Int GameLogic::rebalanceChildSleepyUpdate(Int i)
 
 	// our children are i*2 and i*2+1
   Int child = ((i+1)<<1)-1;
-	UpdateModulePtr* pChild = &m_sleepyUpdates[child];
-	UpdateModulePtr* pSZ = &m_sleepyUpdates[m_sleepyUpdates.size()];	// yes, this is off the end.
+	// data() + n, not &m_sleepyUpdates[n]: both are only addresses until the loop below has checked
+	// them against pSZ, and the same addresses in a release build, but a Debug build's checked
+	// operator[] aborts on any n past the end, which child and size() often are (W3).
+	UpdateModulePtr* pChild = m_sleepyUpdates.data() + child;
+	UpdateModulePtr* pSZ = m_sleepyUpdates.data() + m_sleepyUpdates.size();	// yes, this is off the end.
 
   while (pChild < pSZ) 
 	{
@@ -3150,7 +3161,7 @@ Int GameLogic::rebalanceChildSleepyUpdate(Int i)
 		pI = pChild;
 
 		child = ((i+1)<<1)-1;
-		pChild = &m_sleepyUpdates[child];
+		pChild = m_sleepyUpdates.data() + child;
   }
 #else
 	// our children are i*2 and i*2+1
@@ -3426,8 +3437,8 @@ static void unitTimings(void)
 		settleFrames--;
 		if (settleFrames>0) return;
 
-		QueryPerformanceCounter((LARGE_INTEGER *)&startTime64);
-		QueryPerformanceFrequency((LARGE_INTEGER *)&freq64);
+		startTime64 = Clock_Ticks();
+		freq64 = Clock_Ticks_Per_Second();
 		timeFrames = TIME_FRAMES;
 
 		// reset the draw counter
@@ -3439,7 +3450,7 @@ static void unitTimings(void)
 		timeFrames--;
 		if (timeFrames>0) return;
 		
-		QueryPerformanceCounter((LARGE_INTEGER *)&endTime64);
+		endTime64 = Clock_Ticks();
 		double timeToUpdate = ((double)(endTime64-startTime64) / (double)(freq64));
 
 //		Real timeToUpdateMicrosec = timeToUpdate*1E6/(TIME_FRAMES * TOTAL_UNITS);
@@ -3858,7 +3869,7 @@ static Real logicElapsedMS( const Int64 &from, const Int64 &to )
 {
 	static Int64 freq = 0;
 	if( freq == 0 )
-		QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+		freq = Clock_Ticks_Per_Second();
 	if( freq == 0 )
 		return 0.0f;
 	return (Real)( (double)(to - from) * 1000.0 / (double)freq );
@@ -3970,7 +3981,7 @@ static const char *getModuleProfileReport( void )
 {
 	static char report[ 512 ];
 	Int64 freq = 0;
-	QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	freq = Clock_Ticks_Per_Second();
 
 	if( theWorstModuleKey == NAMEKEY_INVALID )
 	{
@@ -4437,6 +4448,16 @@ void GameLogic::update( void )
 #endif
 
 	setFPMode();
+
+	/* The water grid's mesh motion, which isUnderwater reads, steps here, once per logic frame (T1c,
+		 defect 17).  EA stepped it on the client pass, gated on the logic frame having changed; with one
+		 pass per logic frame that was one step a frame, taken just ahead of the frame, which is where
+		 this stands - before a new game starts, before the scripts, before anything in the frame reads
+		 or writes the grid.  The logic catch-up runs frames with no client pass in front of them, and
+		 there the grid fell a step behind for each: grid heights depended on the machine's frame rate.
+		 The gate stays: a frozen or held frame, which does not advance, does not step twice. */
+	if (TheTerrainVisual)
+		TheTerrainVisual->updateWaterGrid( m_frame );
 	
 	/// @todo remove this hack
 	if ( m_startNewGame && !TheDisplay->isMoviePlaying())
@@ -4492,7 +4513,7 @@ void GameLogic::update( void )
 		 worst frames (101 of 115 ms on one), and it is five unrelated pieces of end-of-frame cleanup.
 		 Split so the log names which one. */
 	Int64 tDestroy = 0, tCommandList = 0, tStores = 0, tVictory = 0;
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tFrameStart );
+	tFrameStart = Clock_Ticks();
 	PartitionManager::resetQueryCounts();	// counted per logic frame, reported by the slow-frame log
 	AI::resetEnemyScanCount();
 	Pathfinder::resetProfile();
@@ -4505,7 +4526,7 @@ void GameLogic::update( void )
 		TheScriptEngine->UPDATE();
 	}
 
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tScripts );
+	tScripts = Clock_Ticks();
 
 	/* A camera move that freezes time ends on this machine's wall clock, and the scripts above run
 		 once per frozen pass: in a multiplayer or skirmish session a machine whose camera took longer
@@ -4672,7 +4693,7 @@ void GameLogic::update( void )
 				const ObjectID profModuleObjID = u->friend_getObject() ? u->friend_getObject()->getID() : INVALID_ID;
 				const Int profModuleQueriesBefore = PartitionManager::getQueryCountThisFrame();
 				Int64 profModuleStart;
-				QueryPerformanceCounter( (LARGE_INTEGER *)&profModuleStart );
+				profModuleStart = Clock_Ticks();
 #endif
 
 				sleepLen = u->update();
@@ -4680,7 +4701,7 @@ void GameLogic::update( void )
 #ifdef DEBUG_LOGGING
 				{
 					Int64 profModuleEnd;
-					QueryPerformanceCounter( (LARGE_INTEGER *)&profModuleEnd );
+					profModuleEnd = Clock_Ticks();
 					theModuleUpdateCount++;
 					const Int64 profModuleTicks = profModuleEnd - profModuleStart;
 					addModuleProfile( profModuleKey, profModuleTicks,
@@ -4722,14 +4743,14 @@ void GameLogic::update( void )
 
 	validateSleepyUpdate();
 
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tObjects );
+	tObjects = Clock_Ticks();
 
 	// update the Artificial Intelligence system
 	{
 		TheAI->UPDATE();
 	}
 
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tAI );
+	tAI = Clock_Ticks();
 
 	// production updates
 	{
@@ -4741,7 +4762,7 @@ void GameLogic::update( void )
 		ThePartitionManager->UPDATE();
 	}
 
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tPartition );
+	tPartition = Clock_Ticks();
 
 	//
 	// End of frame clean-up
@@ -4750,21 +4771,21 @@ void GameLogic::update( void )
 	// destroy all pending objects
 	processDestroyList();
 
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tDestroy );
+	tDestroy = Clock_Ticks();
 
 	// reset the command list, destroying all messages
 	TheCommandList->reset();
 
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tCommandList );
+	tCommandList = Clock_Ticks();
 
 	TheWeaponStore->UPDATE();	
 	TheLocomotorStore->UPDATE();	
 
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tStores );
+	tStores = Clock_Ticks();
 
 	TheVictoryConditions->UPDATE();
 
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tVictory );
+	tVictory = Clock_Ticks();
 
 #ifdef DO_COPY_PROTECTION
 	if (!isInShellGame() && isInGame())
@@ -4794,7 +4815,7 @@ void GameLogic::update( void )
 
 
 	// how long did that take?  only a frame that ran over budget is worth a line in the log
-	QueryPerformanceCounter( (LARGE_INTEGER *)&tFrameEnd );
+	tFrameEnd = Clock_Ticks();
 	{
 		// the logic gets 1/30th of a second, 33ms, per frame; -slowframe lowers the bar for a hunt
 		const Real SLOW_FRAME_MS = TheGlobalData ? TheGlobalData->m_slowFrameMS : 20.0f;
@@ -5165,10 +5186,10 @@ void GameLogic::sendObjectCreated( Object *obj )
 		 of a barracks cost 18ms of a 33ms frame.  The preload in startNewGame is what keeps this
 		 quiet; a line here is one that got past it, which is the only way anybody would notice. */
 	Int64 firstDrawStart, firstDrawEnd, firstDrawFreq = 0;
-	QueryPerformanceCounter( (LARGE_INTEGER *)&firstDrawStart );
+	firstDrawStart = Clock_Ticks();
 	Drawable *draw = TheThingFactory->newDrawable(obj->getTemplate());
-	QueryPerformanceCounter( (LARGE_INTEGER *)&firstDrawEnd );
-	QueryPerformanceFrequency( (LARGE_INTEGER *)&firstDrawFreq );
+	firstDrawEnd = Clock_Ticks();
+	firstDrawFreq = Clock_Ticks_Per_Second();
 	{
 		const Real ASSET_LOAD_WORTH_LOGGING_MS = 3.0f;
 		const Real drawMS = firstDrawFreq
@@ -5352,7 +5373,7 @@ void GameLogic::lastHeardFrom( Int playerId )
 {
 	if( playerId < 0 || playerId >= MAX_SLOTS)
 		return;
-	m_progressCompleteTimeout[playerId] = timeGetTime();
+	m_progressCompleteTimeout[playerId] = Clock_Milliseconds();
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -5363,7 +5384,7 @@ void GameLogic::testTimeOut( void )
 	if(isProgressComplete())
 		return;
 
-	Int curTime = timeGetTime();
+	Int curTime = Clock_Milliseconds();
 	// Loop and test everyone in our game.
 	for(Int i =0; i < MAX_SLOTS; ++i)
 	{
@@ -5396,7 +5417,7 @@ void GameLogic::initTimeOutValues( void )
 	// start the match without him
 	for(Int i = 0; i < MAX_SLOTS; ++i)
 	{
-		m_progressCompleteTimeout[i] = timeGetTime();
+		m_progressCompleteTimeout[i] = Clock_Milliseconds();
 	}
 }
 

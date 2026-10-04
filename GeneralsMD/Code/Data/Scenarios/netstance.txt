@@ -1,0 +1,12 @@
+# The stance key across a network match.  Every copy of a -netgame match plays the same file on the
+# same frame, so each seat gets three Crusaders beside its base; net_check.py then presses Ctrl+A and
+# H, the stance key's place for a selection that attack moves, on every copy, which sends
+# MSG_SET_STANCE through the network both ways.  Each copy's log carries a STANCE line for every
+# seat that pressed it, and the CRC covers the stance.
+#
+#   python net_check.py --each "-scenario netstance" --keys "KEY_A CTRL,KEY_H" --tag netstance
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn   0  AmericaTankCrusader   3  start0:250:0   30
+30    spawn   1  AmericaTankCrusader   3  start1:250:0   30
