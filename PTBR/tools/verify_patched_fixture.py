@@ -99,6 +99,11 @@ def main():
     need(button,"TheGlobalData->m_classicInterface )\n\t\treturn ControlBarUniformScale();","classic bar's markings at the uniform scale")
     if "designPoints * ControlBarHudScale()" in button or "designPoints * badgeBarScale()" not in button:
         raise RuntimeError("missing postcondition: every marking measured by badgeBarScale")
+    bar_cpp=(code/"GameEngine/Source/GameClient/GUI/ControlBar/ControlBar.cpp").read_text(encoding="utf-8")
+    radar=(code/"GameEngine/Source/Common/System/Radar.cpp").read_text(encoding="utf-8")
+    need(bar_cpp,"if(win && TheGlobalData->m_classicInterface)\n\t\t\tm_radarAttackGlowWindow = win;","classic bar keeps WinUAttack")
+    need(bar_cpp,"\t\tupdateRadarAttackGlow();\n","blink advanced on the logic frame")
+    need(radar,"TheControlBar->triggerRadarAttackGlow();","radar sets the blink off")
     checks["classic_interface"]="PASS"
 
     winmain=(code/"Main/WinMain.cpp").read_text(encoding="utf-8")

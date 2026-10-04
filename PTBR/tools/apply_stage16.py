@@ -29,6 +29,9 @@ import sys
 # deixa ligado só nos builds de desenvolvedor, e o m_showHudOverlay = TRUE que servia de âncora para
 # o padrão daqui mora dentro desse #if. Na barra clássica não há a caixa de rede da página, então a
 # plaquinha volta a obedecer só à opção "Caixa de Relógio e FPS", e o padrão vai para fora do #if.
+#
+# A v2.4.0 também tirou da barra o piscar de "sob ataque" da EA (a janela WinUAttack). Ele é da barra
+# original, então a interface clássica o mantém; com as páginas fica como o upstream decidiu.
 
 def fail(msg):
     raise SystemExit("STAGE16: " + msg)
@@ -224,8 +227,143 @@ def main():
         "\t\t&& TheGlobalData->m_showNetBox && !m_controlBarPageShown;\n",
     )
 
+    # 9) O piscar de "sob ataque" da EA (a janela WinUAttack do ControlBar.wnd) na barra clássica. A
+    #    v2.4.0 tirou a lâmpada da página e, junto, esse piscar da barra pintada, escondendo a janela.
+    #    Com a interface clássica ele volta como era: a janela pisca por 150 quadros de lógica quando
+    #    o radar registra um ataque. Sem a janela guardada (página ligada) o gatilho não faz nada.
+    bar_cpp = code / "GameEngine" / "Source" / "GameClient" / "GUI" / "ControlBar" / "ControlBar.cpp"
+    bar_h = code / "GameEngine" / "Include" / "GameClient" / "ControlBar.h"
+    radar = code / "GameEngine" / "Source" / "Common" / "System" / "Radar.cpp"
+    replace_once(
+        bar_h,
+        "\tvoid drawSpecialPowerShortcutMultiplierText();\n",
+        "\tvoid triggerRadarAttackGlow( void );\t\t///< PT-BR edition: EA's under-attack blink on the classic bar\n"
+        "\n"
+        "\tvoid drawSpecialPowerShortcutMultiplierText();\n",
+    )
+    replace_once(
+        bar_h,
+        "\tvoid setDefaultControlBarConfig( void );\n",
+        "\tvoid updateRadarAttackGlow( void );\n"
+        "\n"
+        "\tvoid setDefaultControlBarConfig( void );\n",
+    )
+    replace_once(
+        bar_h,
+        "\tICoord2D m_controlBarBackgroundMarkerPos;\n",
+        "\tICoord2D m_controlBarBackgroundMarkerPos;\n"
+        "\n"
+        "\t// PT-BR edition: EA's under-attack blink, kept on the classic bar\n"
+        "\tBool m_radarAttackGlowOn;\n"
+        "\tInt m_remainingRadarAttackGlowFrames;\n"
+        "\tGameWindow *m_radarAttackGlowWindow;\n",
+    )
+    replace_once(
+        bar_cpp,
+        "\tm_pageSolidsActive = FALSE;\n",
+        "\tm_radarAttackGlowOn = FALSE;\n"
+        "\tm_remainingRadarAttackGlowFrames = 0;\n"
+        "\tm_radarAttackGlowWindow = NULL;\n"
+        "\tm_pageSolidsActive = FALSE;\n",
+    )
+    replace_once(
+        bar_cpp,
+        "\tm_communicatorButton = NULL;\n"
+        "\tm_animateDownWindow = NULL;\n",
+        "\tm_communicatorButton = NULL;\n"
+        "\tm_radarAttackGlowWindow = NULL;\n"
+        "\tm_animateDownWindow = NULL;\n",
+    )
+    replace_once(
+        bar_cpp,
+        "\t\twin = TheWindowManager->winGetWindowFromId(NULL, TheNameKeyGenerator->nameToKey(\"ControlBar.wnd:WinUAttack\"));\n"
+        "\t\tif(win)\n"
+        "\t\t\twin->winHide(TRUE);\n",
+        "\t\twin = TheWindowManager->winGetWindowFromId(NULL, TheNameKeyGenerator->nameToKey(\"ControlBar.wnd:WinUAttack\"));\n"
+        "\t\t// PT-BR edition: the classic bar keeps EA's blink, which Radar::tryUnderAttackEvent sets off\n"
+        "\t\tif(win && TheGlobalData->m_classicInterface)\n"
+        "\t\t\tm_radarAttackGlowWindow = win;\n"
+        "\t\telse if(win)\n"
+        "\t\t\twin->winHide(TRUE);\n",
+    )
+    replace_once(
+        bar_cpp,
+        "\t// do not destroy the rally drawable, it will get destroyed with everythign else during a reset\n"
+        "\tm_rallyPointDrawableID = INVALID_DRAWABLE_ID;\n",
+        "\t// do not destroy the rally drawable, it will get destroyed with everythign else during a reset\n"
+        "\tm_rallyPointDrawableID = INVALID_DRAWABLE_ID;\n"
+        "\tif(m_radarAttackGlowWindow)\n"
+        "\t\tm_radarAttackGlowWindow->winEnable(TRUE);\n"
+        "\tm_radarAttackGlowOn = FALSE;\n"
+        "\tm_remainingRadarAttackGlowFrames = 0;\n",
+    )
+    # no quadro de lógica, como antes da v2.4.0: chamado por quadro renderizado, piscava rápido demais
+    replace_once(
+        bar_cpp,
+        "\t\tgetStarImage();\n"
+        "\t}\n",
+        "\t\tgetStarImage();\n"
+        "\t\tupdateRadarAttackGlow();\n"
+        "\t}\n",
+    )
+    replace_once(
+        bar_cpp,
+        "void ControlBar::initSpecialPowershortcutBar( Player *player)\n",
+        "// PT-BR edition: EA's under-attack blink, as it was up to 2.3.\n"
+        "enum{\n"
+        "\tRADAR_ATTACK_GLOW_FRAMES = 150,\n"
+        "\tRADAR_ATTACK_GLOW_NUM_TIMES = 15  ///< number of times we'll flash\n"
+        "};\n"
+        "\n"
+        "void ControlBar::triggerRadarAttackGlow( void )\n"
+        "{\n"
+        "\tif(!m_radarAttackGlowWindow)\n"
+        "\t\treturn;\n"
+        "\tm_radarAttackGlowOn = TRUE;\n"
+        "\tm_remainingRadarAttackGlowFrames = RADAR_ATTACK_GLOW_FRAMES;\n"
+        "\tif(BitTest(m_radarAttackGlowWindow->winGetStatus(),WIN_STATUS_ENABLED) == TRUE)\n"
+        "\t\tm_radarAttackGlowWindow->winEnable(FALSE);\n"
+        "}\n"
+        "\n"
+        "void ControlBar::updateRadarAttackGlow( void )\n"
+        "{\n"
+        "\tif(!m_radarAttackGlowOn || !m_radarAttackGlowWindow)\n"
+        "\t\treturn;\n"
+        "\tm_remainingRadarAttackGlowFrames--;\n"
+        "\tif(m_remainingRadarAttackGlowFrames <= 0)\n"
+        "\t{\n"
+        "\t\tm_radarAttackGlowOn = FALSE;\n"
+        "\t\tm_radarAttackGlowWindow->winEnable(TRUE);\n"
+        "\t\treturn;\n"
+        "\t}\n"
+        "\n"
+        "\tif(m_remainingRadarAttackGlowFrames % RADAR_ATTACK_GLOW_NUM_TIMES == 0)\n"
+        "\t{\n"
+        "\t\tm_radarAttackGlowWindow->winEnable(!BitTest(m_radarAttackGlowWindow->winGetStatus(),WIN_STATUS_ENABLED));\n"
+        "\t}\n"
+        "}\n"
+        "\n"
+        "void ControlBar::initSpecialPowershortcutBar( Player *player)\n",
+    )
+    replace_once(
+        radar,
+        "#include \"GameClient/InGameUI.h\"\n",
+        "#include \"GameClient/InGameUI.h\"\n"
+        "#include \"GameClient/ControlBar.h\"\n",
+    )
+    replace_once(
+        radar,
+        "\tif( eventCreated )\n"
+        "\t{\n",
+        "\tif( eventCreated )\n"
+        "\t{\n"
+        "\t\t// PT-BR edition: the classic bar's under-attack blink; nothing without its window\n"
+        "\t\tif( TheControlBar != NULL )\n"
+        "\t\t\tTheControlBar->triggerRadarAttackGlow();\n",
+    )
+
     print("STAGE16 APPLY PASS")
-    print("Original command bar plates and Esc menu; ClassicInterface = no in Options.ini shows the HTML pages.")
+    print("Original command bar plates, Esc menu and under-attack blink; ClassicInterface = no in Options.ini shows the HTML pages.")
 
 if __name__ == "__main__":
     main()

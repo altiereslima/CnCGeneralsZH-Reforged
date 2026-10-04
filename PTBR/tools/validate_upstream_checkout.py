@@ -169,6 +169,22 @@ def validate(repo):
     need(button, "extern Real ControlBarHudScale( void );\n", "W3DPushButton.cpp HUD scale declaration")
     from apply_stage16 import BADGE_SCALE_USES
     need(button, "designPoints * ControlBarHudScale()", "W3DPushButton.cpp markings measured by the bar's scale", BADGE_SCALE_USES)
+    bar_cpp = (code/"GameEngine/Source/GameClient/GUI/ControlBar/ControlBar.cpp").read_text(encoding="utf-8-sig")
+    bar_h = (code/"GameEngine/Include/GameClient/ControlBar.h").read_text(encoding="utf-8-sig")
+    radar = (code/"GameEngine/Source/Common/System/Radar.cpp").read_text(encoding="utf-8-sig")
+    need(bar_h, "\tvoid drawSpecialPowerShortcutMultiplierText();\n", "ControlBar.h public block")
+    need(bar_h, "\tvoid setDefaultControlBarConfig( void );\n", "ControlBar.h protected block")
+    need(bar_h, "\tICoord2D m_controlBarBackgroundMarkerPos;\n", "ControlBar.h private block")
+    need(bar_cpp, "\tm_pageSolidsActive = FALSE;\n", "ControlBar.cpp constructor")
+    need(bar_cpp, "\tm_communicatorButton = NULL;\n\tm_animateDownWindow = NULL;\n", "ControlBar.cpp shutdownWindows")
+    need(bar_cpp, "\t\twin = TheWindowManager->winGetWindowFromId(NULL, TheNameKeyGenerator->nameToKey(\"ControlBar.wnd:WinUAttack\"));\n\t\tif(win)\n\t\t\twin->winHide(TRUE);\n", "ControlBar.cpp WinUAttack hidden at init")
+    need(bar_cpp, "\t// do not destroy the rally drawable, it will get destroyed with everythign else during a reset\n\tm_rallyPointDrawableID = INVALID_DRAWABLE_ID;\n", "ControlBar.cpp reset")
+    need(bar_cpp, "\t\tgetStarImage();\n\t}\n", "ControlBar.cpp logic-frame latch")
+    need(bar_cpp, "void ControlBar::initSpecialPowershortcutBar( Player *player)\n", "ControlBar.cpp definitions")
+    need(radar, "#include \"GameClient/InGameUI.h\"\n", "Radar.cpp includes")
+    need(radar, "\tif( eventCreated )\n\t{\n", "Radar.cpp under-attack event")
+    if "triggerRadarAttackGlow" in bar_cpp + bar_h + radar:
+        raise RuntimeError("ControlBar: triggerRadarAttackGlow voltou ao upstream; o passo 9 do estágio 16 duplicaria")
     result["checks"]["classic_interface_anchors"] = "PASS"
 
     # Stage 17: generals.exe starts without upstream's launcher.

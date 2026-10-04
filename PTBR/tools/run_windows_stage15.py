@@ -31,6 +31,9 @@ PATCHED_SOURCE_FILES = [
     "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/QuitMenu.cpp",
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DPushButton.cpp",
     "GeneralsMD/Code/Main/WinMain.cpp",
+    "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/ControlBar/ControlBar.cpp",
+    "GeneralsMD/Code/GameEngine/Include/GameClient/ControlBar.h",
+    "GeneralsMD/Code/GameEngine/Source/Common/System/Radar.cpp",
 ]
 
 # Casos de teste que falham sem culpa do patch PT-BR. Só estes nomes são tolerados;
