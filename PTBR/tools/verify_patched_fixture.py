@@ -101,6 +101,12 @@ def main():
         raise RuntimeError("missing postcondition: every marking measured by badgeBarScale")
     checks["classic_interface"]="PASS"
 
+    winmain=(code/"Main/WinMain.cpp").read_text(encoding="utf-8")
+    if "Please start Zero Hour Reforged from its launcher." in winmain:
+        raise RuntimeError("missing postcondition: generals.exe still refuses to start without the launcher")
+    need(winmain,"PT-BR edition: started straight from generals.exe","launcher check removed")
+    checks["starts_without_launcher"]="PASS"
+
     loc=code/"Data/PortugueseBrazil"
     miss_core=[x for x in CORE_LOCALE_FILES if not (loc/x).is_file()]
     if miss_core:

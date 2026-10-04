@@ -171,6 +171,12 @@ def validate(repo):
     need(button, "designPoints * ControlBarHudScale()", "W3DPushButton.cpp markings measured by the bar's scale", BADGE_SCALE_USES)
     result["checks"]["classic_interface_anchors"] = "PASS"
 
+    # Stage 17: generals.exe starts without upstream's launcher.
+    from apply_stage17 import LAUNCHER_CHECK
+    winmain = (code/"Main/WinMain.cpp").read_text(encoding="utf-8-sig")
+    need(winmain, LAUNCHER_CHECK, "WinMain.cpp launcher start check")
+    result["checks"]["launcher_check_anchor"] = "PASS"
+
     result["status"] = "PASS"
     return result
 
