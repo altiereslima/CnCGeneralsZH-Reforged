@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 import argparse, json
+from validate_upstream_checkout import unconditional
 
 CORE_LOCALE_FILES=["Generals.str","Language.ini"]
 MEDIA_LOCALE_FILES=[
@@ -70,6 +71,7 @@ def main():
     checks["cmake_locale_copy"]="PASS"
 
     need(cpp,"m_showNetBox = FALSE;","corner box off by default")
+    unconditional(cpp,"\tm_showNetBox = FALSE;\n","corner box default in every build")
     catalog=(code/"GameEngine/Source/Common/OptionsCatalog.cpp").read_text(encoding="utf-8")
     need(catalog,'{ "ShowNetBox",',"ShowNetBox option the player turns it back on with")
     if '{ "ShowHudOverlay",' in catalog:
@@ -85,10 +87,12 @@ def main():
 
     need(h,"Bool m_classicInterface;","classic interface member")
     need(cpp,"m_classicInterface = TRUE;","classic interface default")
+    unconditional(cpp,"\tm_classicInterface = TRUE;\n","classic interface default in every build")
     need(catalog,'{ "ClassicInterface",',"ClassicInterface Options.ini key")
     ui=(code/"GameEngine/Source/GameClient/InGameUI.cpp").read_text(encoding="utf-8")
     need(ui,"m_controlBarPage.empty() || TheGlobalData->m_classicInterface","plates unless the page is asked for")
     need(ui,"m_quitMenuPage.empty() || TheGlobalData->m_classicInterface","original Esc menu unless the page is asked for")
+    need(ui,"( TheGlobalData->m_showHudOverlay || TheGlobalData->m_classicInterface )\n\t\t&& TheGlobalData->m_showNetBox","classic bar's corner box follows the menu option")
     quit_menu=(code/"GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/QuitMenu.cpp").read_text(encoding="utf-8")
     need(quit_menu,'TheTransitionHandler->reverse( "QuitFullBack" );',"original Esc menu closing transition")
     button=(code/"GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DPushButton.cpp").read_text(encoding="utf-8")

@@ -7,6 +7,9 @@ import sys
 # por rótulos próprios do fork (GUI:SlotEasyAI etc.). Um idioma sem esses rótulos, e os testes,
 # que rodam sem TheGameText, continuam com os nomes em inglês. Na rede e no replay a IA viaja
 # como código ("C" + letra), não pelo nome, então jogadores em idiomas diferentes seguem juntos.
+#
+# Desde a v2.4.0 (porte para macOS/Linux) WideChar é char16_t em toda plataforma e os literais
+# largos do upstream são u"..."; L"..." (wchar_t) não converte mais para WideChar.
 
 def fail(msg):
     raise SystemExit("STAGE14: " + msg)
@@ -55,12 +58,12 @@ def main():
     )
     replace_once(
         info,
-        "\t\tcase SLOT_EASY_AI:\t\t\treturn UnicodeString( L\"Easy AI\" );\n"
-        "\t\tcase SLOT_MED_AI:\t\t\t\treturn UnicodeString( L\"Medium AI\" );\n"
-        "\t\tcase SLOT_BRUTAL_AI:\t\treturn UnicodeString( L\"Hard AI\" );\n",
-        "\t\tcase SLOT_EASY_AI:\t\t\treturn AIRungName( \"GUI:SlotEasyAI\", L\"Easy AI\" );\n"
-        "\t\tcase SLOT_MED_AI:\t\t\t\treturn AIRungName( \"GUI:SlotMediumAI\", L\"Medium AI\" );\n"
-        "\t\tcase SLOT_BRUTAL_AI:\t\treturn AIRungName( \"GUI:SlotHardAI\", L\"Hard AI\" );\n",
+        "\t\tcase SLOT_EASY_AI:\t\t\treturn UnicodeString( u\"Easy AI\" );\n"
+        "\t\tcase SLOT_MED_AI:\t\t\t\treturn UnicodeString( u\"Medium AI\" );\n"
+        "\t\tcase SLOT_BRUTAL_AI:\t\treturn UnicodeString( u\"Hard AI\" );\n",
+        "\t\tcase SLOT_EASY_AI:\t\t\treturn AIRungName( \"GUI:SlotEasyAI\", u\"Easy AI\" );\n"
+        "\t\tcase SLOT_MED_AI:\t\t\t\treturn AIRungName( \"GUI:SlotMediumAI\", u\"Medium AI\" );\n"
+        "\t\tcase SLOT_BRUTAL_AI:\t\treturn AIRungName( \"GUI:SlotHardAI\", u\"Hard AI\" );\n",
     )
 
     print("STAGE14 APPLY PASS")

@@ -24,6 +24,11 @@ import sys
 # passaram a usar a escala do HUD em qualquer caso, inclusive para decidir quando tirar o "$" ou o
 # "s" por falta de espaço. Com a interface clássica as duas medidas voltam à escala da barra em que
 # os botões estão.
+#
+# Desde a v2.4.0 a plaquinha do canto (relógio e FPS) também pede o m_showHudOverlay, que o upstream
+# deixa ligado só nos builds de desenvolvedor, e o m_showHudOverlay = TRUE que servia de âncora para
+# o padrão daqui mora dentro desse #if. Na barra clássica não há a caixa de rede da página, então a
+# plaquinha volta a obedecer só à opção "Caixa de Relógio e FPS", e o padrão vai para fora do #if.
 
 def fail(msg):
     raise SystemExit("STAGE16: " + msg)
@@ -69,11 +74,13 @@ def main():
         "\tBool m_classicInterface;\t\t\t///< PT-BR edition: the original command bar plates and Esc menu\n",
     )
 
-    # 2) Padrão: interface original.
+    # 2) Padrão: interface original. Ao lado do m_showNetBox que o estágio 13 deixou desligado, fora
+    #    de qualquer #if: desde a v2.4.0 o m_showHudOverlay = TRUE do upstream só existe nos builds de
+    #    desenvolvedor, e uma linha posta ao lado dele ficaria sem valor no Release.
     replace_once(
         code / "GameEngine" / "Source" / "Common" / "GlobalData.cpp",
-        "\tm_showHudOverlay = TRUE;\n",
-        "\tm_showHudOverlay = TRUE;\n"
+        "\tm_showNetBox = FALSE;\n",
+        "\tm_showNetBox = FALSE;\n"
         "\t// PT-BR edition: the command bar keeps its textured plates and the Esc menu its original\n"
         "\t// layout; ClassicInterface = no in Options.ini draws upstream's HTML pages instead.\n"
         "\tm_classicInterface = TRUE;\n",
@@ -204,6 +211,18 @@ def main():
     # Todo lugar que mede uma marcação pela escala da barra: o tamanho da fonte (getBadgeFont) e,
     # desde a v2.3.0, o teste que tira o "$" ou o "s" quando a marcação não cabe (drawBadge).
     replace_all(button, "designPoints * ControlBarHudScale()", "designPoints * badgeBarScale()", BADGE_SCALE_USES)
+
+    # 8) A caixa do canto na barra clássica. Sem a página não há caixa de rede, e a plaquinha do
+    #    drawHudOverlay é a caixa do relógio e FPS. Desde a v2.4.0 ela também pede o m_showHudOverlay,
+    #    desligado no Release; com a interface clássica basta a opção "Caixa de Relógio e FPS".
+    replace_once(
+        ui,
+        "\tconst Bool plate = TheGlobalData->m_showHudOverlay && TheGlobalData->m_showNetBox && !m_controlBarPageShown;\n",
+        "\t// PT-BR edition: with the classic bar there is no page to carry the network box, so this plate\n"
+        "\t// is the corner box, and the Clock And Frame Rate Box option alone shows it, in Release too\n"
+        "\tconst Bool plate = ( TheGlobalData->m_showHudOverlay || TheGlobalData->m_classicInterface )\n"
+        "\t\t&& TheGlobalData->m_showNetBox && !m_controlBarPageShown;\n",
+    )
 
     print("STAGE16 APPLY PASS")
     print("Original command bar plates and Esc menu; ClassicInterface = no in Options.ini shows the HTML pages.")
