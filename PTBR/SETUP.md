@@ -20,7 +20,7 @@ O que a edição PT-BR muda no jogo, e a chave do `Options.ini` que volta ao com
 - interface Clássica: desde a 2.5 é a do upstream, a que abre quando o jogo é iniciado direto
   (placas texturizadas, menu Esc e piscar de "sob ataque" da EA, sem páginas HTML); a edição só
   acerta o tamanho dos números nos botões. A interface Reforged abre com `-interface reforged`;
-- caixa do relógio e FPS escondida na interface Reforged: a opção "Caixa de Relógio e FPS" do
+- caixa do relógio e FPS escondida na interface Reforged: a opção "Caixa de Informações" do
   menu (`ShowNetBox = yes`) mostra (a Clássica, como o HUD da EA, não tem essa caixa);
 - nomes das IAs do lobby traduzidos;
 - abre direto pelo `generals.exe`: desde a 2.4.0 o executável do upstream só abre pelo launcher

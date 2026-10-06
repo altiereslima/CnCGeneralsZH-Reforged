@@ -6,7 +6,7 @@ import sys
 # vem ligada para todos no upstream. A edição PT-BR começa com ela escondida.
 #
 # Desde a v2.3.0 o upstream deu à caixa uma chave própria, com controle no menu de opções:
-# ShowNetBox ("Clock And Frame Rate Box"). A edição PT-BR só muda o padrão para desligado;
+# ShowNetBox ("Info Box" desde a 2.6). A edição PT-BR só muda o padrão para desligado;
 # marcar a opção no menu, ou "ShowNetBox = yes" no Options.ini, traz a caixa de volta. Desde a
 # 2.5 isso vale para a interface Reforged (-interface reforged): a Classic do upstream, a que a
 # edição abre, segue o HUD da EA, sem caixa no canto e sem essa opção no menu dela.
@@ -44,7 +44,7 @@ def main():
     replace_once(
         code / "GameEngine" / "Source" / "Common" / "GlobalData.cpp",
         "\tm_showNetBox = TRUE;\n",
-        "\t// PT-BR edition: the corner box starts hidden; the Clock And Frame Rate Box option\n"
+        "\t// PT-BR edition: the corner box starts hidden; the Info Box option\n"
         "\t// (ShowNetBox in Options.ini) brings it back.\n"
         "\tm_showNetBox = FALSE;\n",
     )
@@ -60,7 +60,7 @@ def main():
     )
 
     print("STAGE13 APPLY PASS")
-    print("Corner box hidden by default; the Clock And Frame Rate Box option (ShowNetBox) shows it.")
+    print("Corner box hidden by default; the Info Box option (ShowNetBox) shows it.")
 
 if __name__ == "__main__":
     main()
