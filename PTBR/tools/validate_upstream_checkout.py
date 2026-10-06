@@ -134,6 +134,11 @@ def validate(repo):
         raise RuntimeError("OptionsCatalog.cpp: TextLanguage não acompanha TEXT_LANGUAGE_COUNT")
     result["checks"]["options_language_range"] = "PASS"
 
+    command_line = (code/"GameEngine/Source/Common/CommandLine.cpp").read_text(encoding="utf-8-sig")
+    need(command_line, '\tstatic const char *const TheTextLanguageNames[ TEXT_LANGUAGE_COUNT ] = { "english", "turkish", "german" };\n', "CommandLine.cpp -language names")
+    need(command_line, "/* -language <english|turkish|german>: ", "CommandLine.cpp -language comment")
+    result["checks"]["command_line_language_anchor"] = "PASS"
+
     # Stage 13: the corner box hidden by default, through upstream's own ShowNetBox switch.
     need(cpp, "\tm_showNetBox = TRUE;\n", "GlobalData.cpp net box default")
     unconditional(cpp, "\tm_showNetBox = TRUE;\n", "GlobalData.cpp net box default")

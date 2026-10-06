@@ -28,6 +28,7 @@ PATCHED_SOURCE_FILES = [
     "GeneralsMD/Code/GameEngine/Source/GameNetwork/GameInfo.cpp",
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DPushButton.cpp",
     "GeneralsMD/Code/Main/WinMain.cpp",
+    "GeneralsMD/Code/GameEngine/Source/Common/CommandLine.cpp",
 ]
 
 # Casos de teste que falham sem culpa do patch PT-BR. Só estes nomes são tolerados;

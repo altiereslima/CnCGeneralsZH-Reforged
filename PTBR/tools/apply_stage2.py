@@ -193,7 +193,22 @@ def main():
         "          ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Data/PortugueseBrazil\n"
     )
 
-    # 10) Seed locale file.
+    # 10) -language takes the edition's language by name too. The names table has TEXT_LANGUAGE_COUNT
+    #     slots, and the slot the enum above adds was a null that the loop compared an unknown name
+    #     against.
+    p = code / "GameEngine" / "Source" / "Common" / "CommandLine.cpp"
+    replace_once(
+        p,
+        "\tstatic const char *const TheTextLanguageNames[ TEXT_LANGUAGE_COUNT ] = { \"english\", \"turkish\", \"german\" };\n",
+        "\tstatic const char *const TheTextLanguageNames[ TEXT_LANGUAGE_COUNT ] = { \"english\", \"turkish\", \"german\", \"portuguese\" };\n"
+    )
+    replace_once(
+        p,
+        "/* -language <english|turkish|german>: ",
+        "/* -language <english|turkish|german|portuguese>: "
+    )
+
+    # 11) Seed locale file.
     src = pkg / "payload" / "GeneralsMD" / "Code" / "Data" / "PortugueseBrazil" / "Generals.str"
     dst = code / "Data" / "PortugueseBrazil" / "Generals.str"
     dst.parent.mkdir(parents=True, exist_ok=True)

@@ -35,6 +35,19 @@ def main():
     need(cpp,"m_textLanguage = TEXT_LANGUAGE_PORTUGUESE_BRAZIL;","default PTBR")
     checks["globaldata_cpp"]="PASS"
 
+    # every table with a slot per text language has one entry per language, PT-BR's included: a slot
+    # left out is a null, and -language compared an unknown name against it
+    import re
+    tables=re.compile(r"\[\s*TEXT_LANGUAGE_COUNT\s*\]\s*=\s*\{([^}]*)\}")
+    for src in sorted((code/"GameEngine").rglob("*.cpp")):
+        for body in tables.findall(src.read_text(encoding="utf-8",errors="replace")):
+            entries=[e for e in (x.strip() for x in re.sub(r"//[^\n]*","",body).split(",")) if e]
+            if len(entries)!=4:
+                raise RuntimeError(f"{src.name}: a TEXT_LANGUAGE_COUNT table has {len(entries)} entries, not 4")
+    command_line=(code/"GameEngine/Source/Common/CommandLine.cpp").read_text(encoding="utf-8")
+    need(command_line,'"german", "portuguese" };',"-language knows portuguese")
+    checks["language_tables"]="PASS"
+
     gt=(code/"GameEngine/Source/GameClient/GameText.cpp").read_text(encoding="utf-8")
     need(gt,'"Data\\\\PortugueseBrazil\\\\Generals.str"',"PTBR overlay")
     checks["game_text_overlay"]="PASS"
