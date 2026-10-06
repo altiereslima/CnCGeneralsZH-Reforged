@@ -37,6 +37,8 @@
 class DisplayString;
 class GameFont;
 class HtmlOverlay;
+class GameWindow;
+class WindowLayout;
 
 /**
  * The console's own scrollback, input line and command table.  One global, TheGameConsole,
@@ -63,11 +65,18 @@ public:
 	/// Draw the panel.  Called from the display's 2D overlay pass.
 	void render( void );
 
-	/// The cheat panel, Window/Html/Cheats.html, that "trainer" opens: every cheat a click away.
+	/// The cheat panel that "trainer" opens: every cheat a click away.  Window/Html/Cheats.html in
+	/// Reforged; in Classic Window/Trainer.wnd, drawn like EA's diplomacy screen.
 	Bool isCheatPanelOpen( void ) const { return m_cheatPanelOpen; }
 	void closeCheatPanel( void ) { m_cheatPanelOpen = FALSE; }
 	/// TRUE when the pointer is on the panel; with `act`, a click there runs what it was on.
 	Bool handleCheatPanelMouse( const ICoord2D &mouse, Bool act );
+	/// What a key or a row of the panel sends: "close", or a cheat and its amount as typed.
+	void runCheatPanelAction( const std::string &action );
+	/// Row `row` of the Classic panel's list was clicked.
+	void runCheatWindowRow( Int row );
+	/// Throw the Classic panel's windows away now, where diplomacy's are thrown away.
+	void resetCheatWindow( void );
 
 private:
 
@@ -75,6 +84,7 @@ private:
 	void runCommand( AsciiString commandLine );
 	void recallHistory( Int direction );
 	void renderCheatPanel( void );
+	void updateCheatWindow( void );
 
 	typedef std::deque<UnicodeString> ScrollbackLines;
 	typedef std::vector<AsciiString> CommandHistory;
@@ -94,9 +104,15 @@ private:
 	Bool m_cheatPanelLogged;			///< its keys' places written to the log once for each opening
 	std::string m_cheatPage;			///< Window/Html/Cheats.html as read, empty until the first opening
 	HtmlOverlay *m_cheatOverlay;
+	WindowLayout *m_cheatLayout;	///< the Classic panel while it is up
+	GameWindow *m_cheatList;			///< its list, one row for each thing a click does
+	Int m_cheatListState;					///< the toggles' bits its rows were last written for, -1 for none
 };
 
 extern GameConsole *TheGameConsole;
+
+/// -freecam x y z heading tilt: the console's "freecam" with that pose, run once the match is up
+void GameConsole_setStartupFreeCamera( const char *pose );
 
 /**
  * Sits ahead of the window system on the message stream so the console gets the key above Tab

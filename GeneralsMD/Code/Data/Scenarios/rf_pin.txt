@@ -1,0 +1,9 @@
+# Orders nothing. Any -scenario pins slot i to start i, and that is all this file is for: the
+# Reforged trailer's computer match (beats 21, 22, 26 and 27) on Tournament Desert, so the same
+# seed puts each side in the same corner on every run. The tally only gives the file a line.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Tournament Desert\Tournament Desert.map" -autoskirmish 2 -aidiff brutal
+#     -side 0 FactionAmerica -side 1 FactionChina -seed <s> -scenario rf_pin -maxframes 22000
+
+21000 tally  0  *

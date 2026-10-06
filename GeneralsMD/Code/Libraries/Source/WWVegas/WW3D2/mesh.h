@@ -156,6 +156,9 @@ public:
 	// Do old .w3d mesh files get fog turned on or off?
 	static bool						Legacy_Meshes_Fogged;
 
+	// Meshes a shadow pass left out as light rather than matter, counted until the caller resets it.
+	static int						Shadow_Pass_Light_Meshes;
+
 	void								Replace_Texture(TextureClass* texture,TextureClass* new_texture);
 	void								Replace_VertexMaterial(VertexMaterialClass* vmat,VertexMaterialClass* new_vmat);
 

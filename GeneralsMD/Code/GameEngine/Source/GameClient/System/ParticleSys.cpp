@@ -2303,10 +2303,41 @@ Bool ParticleSystem::updateEmission( Int localPlayerIndex, Bool *keepSystem )
 							// create a slave particle, if necessary
 							if (m_slaveSystem)
 							{
+								// the merge below draws a fresh master particle, so the place has to be read first
+								const Coord3D rootPos = info->m_pos;
+
 								ParticleInfo mergeInfo = ParticleSystem::mergeRelatedParticleSystems(this, m_slaveSystem, false);
 
 								// create slaved particle
 								m_slaveSystem->createParticle( &mergeInfo, priority );
+
+								// A slave never emits and has no transform of its own, so EA's data never hung a
+								// slave off a slave.  The fork's missile smoke hangs off the lens flare: every
+								// system further down the chain is fed from here, in its own look and size rather
+								// than scaled by the master's.  Its BurstCount is spread evenly over the path from
+								// the last feed to this particle, so a rocket that covers 40 between two of its
+								// master's bursts leaves a line rather than beads.  Nothing moves a slave's own
+								// m_pos, so it holds the last feed point.
+								for (ParticleSystem *chained = m_slaveSystem->m_slaveSystem; chained; chained = chained->m_slaveSystem)
+								{
+									const Coord3D from = chained->m_isFirstPos ? rootPos : chained->m_pos;
+									chained->m_isFirstPos = false;
+									chained->m_pos = rootPos;
+
+									const Int chainedCount = floatToIntAsMsvc( REAL_TO_INT( chained->m_burstCount.getValue() ) * chained->m_countCoeff );
+									const Coord3D *offset = chained->getSlavePositionOffset();
+									for (Int k = 1; k <= chainedCount; ++k)
+									{
+										const Real along = INT_TO_REAL( k ) / chainedCount;
+										ParticleInfo chainedInfo = *chained->generateParticleInfo( 1, 1 );
+										chainedInfo.m_pos.x = from.x + (rootPos.x - from.x) * along + offset->x;
+										chainedInfo.m_pos.y = from.y + (rootPos.y - from.y) * along + offset->y;
+										chainedInfo.m_pos.z = from.z + (rootPos.z - from.z) * along + offset->z;
+										// its own priority, not the master's: the LOD and cap checks then drop the
+										// chained smoke before the streak it rides on
+										chained->createParticle( &chainedInfo, chained->getPriority() );
+									}
+								}
 							}
 						}
 					}
@@ -2483,8 +2514,16 @@ Bool ParticleSystem::finishUpdate( const ParticleShadowBlob *blob )
 		// check if time is up
 		if (m_systemLifetimeLeft == 0)
 		{
-			if (m_slaveSystem == NULL || m_slaveSystem->isSystemForever())
+			if (m_slaveSystem == NULL)
 				return false;
+			// A slave that never ends was left behind here with no master, emitting on its own at the
+			// world origin and never removed: every blast whose flare carries a ReforgedHotCore left
+			// one, 900 of them after 15000 frames of a four-AI match.  It goes with its master now.
+			if (m_slaveSystem->isSystemForever())
+			{
+				m_slaveSystem->destroy();
+				return false;
+			}
 			m_isDestroyed = true;
 		}
 	}

@@ -203,7 +203,7 @@ public:
 	virtual void setZoom(Real z);
 	virtual void setZoomToDefault( void );									///< Set zoom to default value
 	virtual void setZoomToMax( void );												///< Set zoom as far out as the player may zoom by hand
-	void setZoomToHeight( Real heightAboveGround );				///< Frame the camera at this height above the terrain
+	virtual void setZoomToHeight( Real heightAboveGround );				///< Frame the camera at this height above the terrain
 	virtual void anchorZoomAt( const ICoord2D *pixel );
 
 	virtual void setFieldOfView( Real angle );							///< Set the horizontal field of view angle
@@ -238,8 +238,25 @@ public:
 
 	virtual void setGuardBandBias( const Coord2D *gb ) { m_guardBandBias.x = gb->x; m_guardBandBias.y = gb->y; }
 
+	virtual void setFreeCamera( Bool on );
+	virtual Bool isFreeCamera( void ) const { return m_freeCamera; }
+	virtual void setFreeCameraPose( const Coord3D *eye, Real heading, Real tilt );
+	virtual void getFreeCameraPose( Coord3D *eye, Real *heading, Real *tilt ) const;
+	virtual void setFreeCameraKeys( UnsignedInt keys ) { m_freeCameraKeys = keys; }
+
 
 private:
+
+	Bool m_freeCamera;															///< the console's freecam has the view
+	Vector3 m_freeCameraEye;
+	Real m_freeCameraHeading;												///< radians, 0 looks along +x
+	Real m_freeCameraTilt;													///< radians, 0 is level, up positive
+	UnsignedInt m_freeCameraKeys;										///< View::FreeCameraKeys held
+	UnsignedInt m_freeCameraLastStep;								///< Clock_Milliseconds of the last flight step
+	ICoord2D m_freeCameraMouse;											///< where the pointer was left after the last step
+	Bool m_freeCameraMouseValid;
+	void stepFreeCamera( void );										///< fly and turn by what the keys and the mouse did since the last step
+	void setFreeCameraTransform( void );						///< the freecam's view, clip planes out to the far corner of the map
 
 	CameraClass *m_3DCamera;												///< camera representation for 3D scene
 	CameraClass *m_2DCamera;												///< camera for UI overlayed on top of 3D scene

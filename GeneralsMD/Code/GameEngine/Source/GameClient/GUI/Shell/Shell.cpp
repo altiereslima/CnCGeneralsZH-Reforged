@@ -913,13 +913,22 @@ WindowLayout *Shell::getPopupReplayLayout( void )
 }  // end getSaveLoadMenuLayout
 
 // ------------------------------------------------------------------------------------------------
+/** Classic's options screen leaves out the settings the Classic interface overrules, and flows
+	* what is left so no page has a gap (Tools/optionsmenu_layout.py writes both files). */
+// ------------------------------------------------------------------------------------------------
+const char *Shell::optionsLayoutFile( void )
+{
+	return TheGlobalData->isClassicUI() ? "Menus/OptionsMenuClassic.wnd" : "Menus/OptionsMenu.wnd";
+}
+
+// ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
 WindowLayout *Shell::getOptionsLayout( Bool create )
 {
 	// if layout has not been created, create it now
 	if ((m_optionsLayout == NULL) && (create == TRUE))
 	{
-		m_optionsLayout = TheWindowManager->winCreateLayout( AsciiString( "Menus/OptionsMenu.wnd" ) );
+		m_optionsLayout = TheWindowManager->winCreateLayout( AsciiString( optionsLayoutFile() ) );
 
 		// sanity
 		DEBUG_ASSERTCRASH( m_optionsLayout, ("Unable to create options menu layout\n") );

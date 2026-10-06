@@ -1,0 +1,17 @@
+# The YouTube thumbnail's background, second setup: Scenarios/rf_thumb_fa.txt on Fortress Avalanche,
+# rf_hook.txt's view from the west a little wider and higher, held through the beam, the nuke and
+# the SCUDs. The shot at 3.5 s, before anything moves, is the check of where the buildings landed.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 12000 -noDynamicLOD -map "Maps\Fortress Avalanche\Fortress Avalanche.map"
+#     -autoskirmish 3 -takeover -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA
+#     -seed 7 -scenario rf_thumb_fa -cinema rf_thumb_fa -video 930 1230 rf_thumb_fa -maxframes 1240
+
+3.0   cut     1000 2100 0.52 -135 12
+3.5   shot
+36.0  shot
+37.0  shot
+38.0  shot
+38.5  shot
+39.0  shot
+39.5  shot

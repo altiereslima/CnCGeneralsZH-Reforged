@@ -76,7 +76,19 @@
 #include "WW3D2/rendobj.h"
 #include "WW3D2/mesh.h"
 #include "WW3D2/meshmdl.h"
+#include "WW3D2/dx11runtime.h"
+#include "WW3D2/ffshader.h"
 #include "Common/BitFlagsIO.h"
+
+#include <algorithm>
+
+/// Models whose headlights were showing the last time the drawables were drawn.  A render pass
+/// draws them only when the logic clock has moved (W3DView::update), which with the frame rate
+/// uncapped is a few passes in ten, so the list is kept between draws and only a pass that drew
+/// something takes off what it did not draw (W3DModelDraw::lightHeadlights).
+static std::vector<W3DModelDraw*> s_headlightQueue;
+static UnsignedInt s_headlightPass = 1;
+static Bool s_headlightDrawn = FALSE;
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -1743,6 +1755,9 @@ W3DModelDraw::W3DModelDraw(Thing *thing, const ModuleData* moduleData) : DrawMod
 	int i;
 	m_animationMode = RenderObjClass::ANIM_MODE_LOOP;
 	m_hideHeadlights = true;
+	m_hasHeadlights = false;
+	m_headlightQueued = false;
+	m_headlightPass = 0;
 	m_pauseAnimation = false;
 	m_curState = NULL;
 	m_hexColor = 0;
@@ -1818,6 +1833,13 @@ void W3DModelDraw::onDrawableBoundToObject(void)
 //-------------------------------------------------------------------------------------------------
 W3DModelDraw::~W3DModelDraw(void)
 {
+	if (m_headlightQueued)
+	{
+		std::vector<W3DModelDraw*>::iterator it = std::find(s_headlightQueue.begin(), s_headlightQueue.end(), this);
+		if (it != s_headlightQueue.end())
+			s_headlightQueue.erase(it);
+	}
+
 	if (m_trackRenderObject && TheTerrainTracksRenderObjClassSystem)
 	{	
 		TheTerrainTracksRenderObjClassSystem->unbindTrack(m_trackRenderObject);
@@ -2386,11 +2408,31 @@ void W3DModelDraw::doDrawModule(const Matrix3D* transformMtx)
   
   const W3DModelDrawModuleData *modData = getW3DModelDrawModuleData();
   if ( modData->m_particlesAttachedToAnimatedBones )
-    updateBonesForClientParticleSystems();// LORENZEN ADDED THIS 
+    updateBonesForClientParticleSystems();// LORENZEN ADDED THIS
                                           // IT REPOSITIONS PARTICLESYSTEMS TO TSTAY IN SYNC WITH ANIMATED BONES
-	
+
   handleClientRecoil();
 
+	// A vehicle on a night map lights what is in front of it (lightHeadlights).  Drawable::draw has
+	// already returned for anything hidden, stealthed or under the shroud, so an enemy's lamps never
+	// show where the enemy does not.  Rooftop lamps on buildings and aircraft lights stay beams only.
+	s_headlightDrawn = TRUE;
+	if (m_hasHeadlights && !m_hideHeadlights && m_renderObject && !m_renderObject->Is_Hidden()
+		&& Direct3D11_Is_Active())
+	{
+		const Drawable* draw = getDrawable();
+		const Object* obj = draw->getObject();
+		if (!draw->isKindOf(KINDOF_STRUCTURE) && !draw->isKindOf(KINDOF_AIRCRAFT)
+			&& (obj == NULL || !obj->isEffectivelyDead()))
+		{
+			m_headlightPass = s_headlightPass;
+			if (!m_headlightQueued)
+			{
+				m_headlightQueued = true;
+				s_headlightQueue.push_back(this);
+			}
+		}
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3166,18 +3208,162 @@ void W3DModelDraw::hideGarrisonFlags(Bool hide)
 /** Hides all subobjects which are headlights.  Used to disable lights on models during the day.*/
 void W3DModelDraw::hideAllHeadlights(Bool hide)
 {
+	m_hasHeadlights = false;
 	if (m_renderObject)
 	{
 		for (Int subObj = 0; subObj < m_renderObject->Get_Num_Sub_Objects(); subObj++)
-		{	
+		{
 			RenderObjClass* test = m_renderObject->Get_Sub_Object(subObj);
 			if (strstr(test->Get_Name(),"HEADLIGHT"))
 			{
 				test->Set_Hidden(hide);
+				m_hasHeadlights = true;
 			}
 			test->Release_Ref();
 		}
 	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Where this model's headlights shine from and which way, out of its visible HEADLIGHT beam meshes:
+	* the beam starts at the mesh's pivot and runs along whichever of its own axes reaches furthest
+	* from it, +Y on 84 of the 95 beams in W3DZH.big and +X on the Avenger and the train.  The origin
+	* is the middle of the mesh across that axis, so a mesh holding both lamps puts one light between
+	* them.  Several meshes are averaged into one light.  FALSE when no beam is showing. */
+Bool W3DModelDraw::headlightBeam(Vector3& origin, Vector3& direction, Real& reach) const
+{
+	origin.Set(0.0f, 0.0f, 0.0f);
+	direction.Set(0.0f, 0.0f, 0.0f);
+	reach = 0.0f;
+	if (m_renderObject == NULL)
+		return FALSE;
+	Int beams = 0;
+	for (Int subObj = 0; subObj < m_renderObject->Get_Num_Sub_Objects(); subObj++)
+	{
+		RenderObjClass* test = m_renderObject->Get_Sub_Object(subObj);
+		if (!test->Is_Hidden() && strstr(test->Get_Name(), "HEADLIGHT"))
+		{
+			AABoxClass box;
+			test->Get_Obj_Space_Bounding_Box(box);
+			const Vector3 lo = box.Center - box.Extent;
+			const Vector3 hi = box.Center + box.Extent;
+			Int axis = 0;
+			Real length = 0.0f;
+			Real sign = 1.0f;
+			for (Int a = 0; a < 3; ++a)
+			{
+				if (hi[a] > length) { length = hi[a]; axis = a; sign = 1.0f; }
+				if (-lo[a] > length) { length = -lo[a]; axis = a; sign = -1.0f; }
+			}
+			// a lamp lens a unit long (the Thunderbolt's) lights nothing
+			if (length > 5.0f)
+			{
+				Vector3 start = box.Center;
+				start[axis] = (sign > 0.0f) ? lo[axis] : hi[axis];
+				Vector3 local(0.0f, 0.0f, 0.0f);
+				local[axis] = sign;
+				const Matrix3D& tm = test->Get_Transform();
+				Vector3 worldStart, worldWay;
+				Matrix3D::Transform_Vector(tm, start, &worldStart);
+				Matrix3D::Rotate_Vector(tm, local, &worldWay);
+				origin += worldStart;
+				direction += worldWay;
+				if (length > reach)
+					reach = length;
+				++beams;
+			}
+		}
+		test->Release_Ref();
+	}
+	if (beams == 0 || direction.Length2() < 1e-6f)
+		return FALSE;
+	origin /= (Real)beams;
+	direction.Normalize();
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
+// ponytail: one spot light per vehicle and a fixed slot count; per-lamp lights or a tiled light
+// list if a convoy close to the camera ever needs more than HEADLIGHT_SLOTS.
+void W3DModelDraw::lightHeadlights(const Vector3& cameraPosition)
+{
+	// a pass that drew the drawables drops whatever it did not find lit
+	if (s_headlightDrawn)
+	{
+		size_t kept = 0;
+		for (size_t i = 0; i < s_headlightQueue.size(); ++i)
+		{
+			W3DModelDraw* draw = s_headlightQueue[i];
+			if (draw->m_headlightPass == s_headlightPass)
+				s_headlightQueue[kept++] = draw;
+			else
+				draw->m_headlightQueued = false;
+		}
+		s_headlightQueue.resize(kept);
+		s_headlightDrawn = FALSE;
+		++s_headlightPass;
+	}
+
+	// Nearest the camera first, and only those the slots can hold get their beams worked out.  The
+	// light only reaches the pixels of the Direct3D 11 frame's shadow-receiving programs, so the
+	// Classic graphics setting (no sun's map) and -d3d9 keep the beam meshes alone.
+	static std::vector< std::pair<Real, W3DModelDraw*> > nearest;
+	nearest.clear();
+	for (size_t i = 0; i < s_headlightQueue.size(); ++i)
+	{
+		W3DModelDraw* draw = s_headlightQueue[i];
+		const Coord3D* pos = draw->getDrawable()->getPosition();
+		const Real dx = pos->x - cameraPosition.X, dy = pos->y - cameraPosition.Y, dz = pos->z - cameraPosition.Z;
+		nearest.push_back(std::make_pair(dx * dx + dy * dy + dz * dz, draw));
+	}
+	std::sort(nearest.begin(), nearest.end());
+
+	// The light reaches two and a half beam meshes (the Humvee's is 39 units, so about 100), and its
+	// cone opens 32 degrees either side of the beam, which takes in both lamps' spread.  The beam
+	// meshes do not agree on their pitch (the Humvee's leans up), so the light keeps only their
+	// heading and dips a fixed 11 degrees from it, onto the ground in front.
+	const Real CONE_EDGE_COS = 0.85f;
+	const Real REACH_PER_BEAM = 2.5f;
+	const Real TILT_DOWN = 0.2f;
+
+	float lights[HEADLIGHT_SLOTS][8];
+	unsigned count = 0;
+	// a model whose beams give no light does not take a slot from the next one out
+	for (size_t i = 0; i < nearest.size() && count < HEADLIGHT_SLOTS; ++i)
+	{
+		Vector3 origin, direction;
+		Real beam;
+		if (!nearest[i].second->headlightBeam(origin, direction, beam))
+			continue;
+		direction.Z = 0.0f;
+		if (direction.Length2() < 1e-4f)
+			continue;	// a beam pointing straight up or down has no heading
+		direction.Normalize();
+		direction.Z = -TILT_DOWN;
+		direction.Normalize();
+		float* light = lights[count++];
+		light[0] = origin.X; light[1] = origin.Y; light[2] = origin.Z;
+		light[3] = WWMath::Clamp(beam * REACH_PER_BEAM, 60.0f, 200.0f);
+		light[4] = direction.X; light[5] = direction.Y; light[6] = direction.Z;
+		light[7] = CONE_EDGE_COS;
+	}
+	// A warm white lamp over the light the map's terrain is lit by: what a pixel the moon lit gains
+	// per unit of the lamp's light, channel by channel.  Divided by each channel of the moon alone,
+	// Dark Night's blue one (0.29, 0.39, 0.87 summed) turned the lit ground orange, so each channel
+	// is taken halfway towards the moon's mean.  The floor keeps a near black map from turning a
+	// lamp into a floodlight.
+	const Real LAMP[3] = { 1.6f, 1.48f, 1.25f };
+	const RGBColor& ambient = TheGlobalData->m_terrainAmbient[0];
+	const RGBColor& diffuse = TheGlobalData->m_terrainDiffuse[0];
+	const Real map[3] = { ambient.red + diffuse.red, ambient.green + diffuse.green, ambient.blue + diffuse.blue };
+	const Real mean = (map[0] + map[1] + map[2]) / 3.0f;
+	float gain[3];
+	for (Int c = 0; c < 3; ++c)
+	{
+		const Real moon = sqrtf((map[c] > 0.15f ? map[c] : 0.15f) * (mean > 0.15f ? mean : 0.15f));
+		gain[c] = LAMP[c] / moon;
+	}
+	Direct3D11_Set_Headlights(&lights[0][0], count, gain);
 }
 
 //-------------------------------------------------------------------------------------------------

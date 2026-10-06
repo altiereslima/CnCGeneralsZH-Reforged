@@ -1,0 +1,7 @@
+# Zero Hour Reforged trailer, beat 23 (PF_MASS): Scenarios/rf_mass840.txt on Tournament Plains, high
+# over the field looking west, held while 840 units set off on one right click towards the town
+# block at the top of the frame. Relative zoom 1.2 is absolute 5.0 here; at 1.6 the field moved
+# but the units were specks.
+
+3.0   cut     2800 1245 1.2 90 -30
+20.3  end

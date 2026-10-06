@@ -1,11 +1,12 @@
 # Three Comanches on open ground. The first is sent 300 behind itself, then 300 beside itself, then
-# on two long flights, east and back west. The second is sent past a supply truck that cannot shoot
-# back, 120 off its line and inside its guns' 200. The third is put on an Overlord, which cannot
-# shoot at aircraft, and a second later ordered across in front of it.
+# on two long flights, east and back west, then 100 behind, 30 beside and 60 beside. The second is
+# sent past a supply truck that cannot shoot back, 120 off its line and inside its guns' 200. The
+# third is put on an Overlord, which cannot shoot at aircraft, and a second later ordered across in
+# front of it.
 #
 #   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
 #     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
-#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 1800
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 2300
 #     -scenario helislide -logPrefix helislide_
 #
 # Measured 2026-10-03 with a temporary per-frame log of position, facing and velocity. Before
@@ -26,12 +27,26 @@
 # On the westward flight the nose used to finish its 170 degree turn by the time the Comanche was
 # 30 out (34 frames). With the turn rate held down until the speed builds it is 85 degrees off the
 # course at that point and comes round by frame 55, while the travel itself is unchanged.
+#
+# Players found the backwards and sideways flying too much, and on 2026-10-05 the nose turns into
+# every move longer than 40, starting at half the turn rate from a hover where it started at a
+# quarter. Measured the same way: sent 300 behind, the first Comanche turns 179 degrees, is 64 off
+# its course 30 out (frame 32) and within 10 by frame 44; of the 299 it flies, 20 go more than 90
+# degrees off the nose and 20 more past 45. 300 beside, the nose is on the course by frame 23. On
+# the westward flight it is 49 off at 30 out and within 10 by frame 43. 100 behind turns 178 and is
+# within 10 by frame 44; 60 beside turns 88 by frame 24; 30 beside still slides with the nose where
+# it was. Every leg finished before the next order ends within 1.1 of its goal. The truck took no damage in this run. The third
+# Comanche is shooting and keeps the old rule, under which a move of 400 or less leaves its nose on
+# the Overlord, and it does not turn at all.
 
 30    spawn      0  AmericaVehicleComanche     1   1100 3500
 150   move       0  AmericaVehicleComanche         800 3500
 400   move       0  AmericaVehicleComanche         800 3800
 650   move       0  AmericaVehicleComanche         2500 3500
 1150  move       0  AmericaVehicleComanche         800 3500
+1750  move       0  AmericaVehicleComanche         900 3500
+1950  move       0  AmericaVehicleComanche         900 3530
+2100  move       0  AmericaVehicleComanche         900 3590
 30    spawn      1  ChinaVehicleSupplyTruck    1   1300 4170
 30    spawn      0  AirF_AmericaVehicleComanche  1   800 4050
 150   move       0  AirF_AmericaVehicleComanche      1800 4050

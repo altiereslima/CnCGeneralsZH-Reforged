@@ -1,0 +1,63 @@
+# Website hero loop 06, snow: America and China meeting on the open snow in the middle of Winter Wolf
+# (rf_snow's ground, 1100,1120), America from screen left and China from screen right under
+# Cinema/hero_loop_06's heading -45, with waves at 420, 560, 700 and 840 so the middle stays full
+# for frames 600 to 1049, and air powers landing all through it. No particle beam: it stays 300
+# frames, as long as the loop, and would fade out across the seam.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer
+#     -multiInstance -particlecap 30000 -map "Maps\Winter Wolf\Winter Wolf.map" -autoskirmish 2
+#     -takeover -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario hero_loop_06
+#     -cinema hero_loop_06 -video 600 1049 hero_loop_06 -maxframes 1070
+10    spawn      0  AmericaCommandCenter            1   start0:240:60
+10    spawn      1  ChinaCommandCenter              1   start1:-260:60
+# --- America from screen left ---------------------------------------------------------------
+150   spawn      0  AmericaTankCrusader             16  831 1445  34
+150   spawn      0  AmericaTankPaladin              8   690 1375  38
+150   spawn      0  AmericaInfantryRanger           24  952 1509  14
+150   spawn      0  AmericaInfantryMissileDefender  14  718 823   14
+150   spawn      0  AmericaVehicleHumvee            8   690 1375  36
+150   spawn      0  AmericaVehicleTomahawk          5   690 1375  40
+150   spawn      0  AmericaVehicleComanche          2   831 1445  60
+# --- China from screen right ----------------------------------------------------------------
+150   spawn      1  ChinaTankBattleMaster           16  1369 795   36
+150   spawn      1  ChinaTankOverlord               6   1510 865   50
+150   spawn      1  ChinaTankGattling               6   1248 731   36
+150   spawn      1  ChinaTankDragon                 6   1482 1417  36
+150   spawn      1  ChinaInfantryRedguard           24  1248 731   14
+150   spawn      1  ChinaInfantryTankHunter         14  1362 1594  14
+150   spawn      1  ChinaVehicleInfernoCannon       4   1510 865   40
+150   spawn      1  ChinaVehicleHelix               1   1369 795   60
+160   attackmove 0  *  1100 1120
+160   attackmove 1  *  1100 1120
+# --- waves ----------------------------------------------------------------------------------
+420   spawn      0  AmericaTankCrusader             12  831 1445  34
+420   spawn      0  AmericaInfantryRanger           18  952 1509  14
+420   spawn      1  ChinaTankBattleMaster           12  1369 795   36
+420   spawn      1  ChinaInfantryRedguard           18  1248 731   14
+430   attackmove 0  *  1100 1120
+430   attackmove 1  *  1100 1120
+560   spawn      0  AmericaTankPaladin              8   690 1375  38
+560   spawn      0  AmericaTankCrusader             8   952 1509  34
+560   spawn      1  ChinaTankOverlord               4   1510 865   50
+560   spawn      1  ChinaTankGattling               6   1482 1417  36
+570   attackmove 0  *  1100 1120
+570   attackmove 1  *  1100 1120
+700   spawn      0  AmericaTankCrusader             12  831 1445  34
+700   spawn      0  AmericaInfantryRanger           18  718 823   14
+700   spawn      1  ChinaTankBattleMaster           12  1369 795   36
+700   spawn      1  ChinaInfantryRedguard           18  1362 1594  14
+710   attackmove 0  *  1100 1120
+710   attackmove 1  *  1100 1120
+840   spawn      0  AmericaTankCrusader             10  831 1445  34
+840   spawn      0  AmericaTankPaladin              4   690 1375  38
+840   spawn      1  ChinaTankBattleMaster           10  1369 795   36
+840   spawn      1  ChinaTankOverlord               3   1510 865   50
+850   attackmove 0  *  1100 1120
+850   attackmove 1  *  1100 1120
+# --- the sky: a general's power lands about 400 frames after the call ------------------------
+300   power      0  AmericaCommandCenter  1100 1120  SuperweaponSpectreGunship
+340   power      0  AmericaCommandCenter  1135 1056  SuperweaponA10ThunderboltMissileStrike
+400   power      1  ChinaCommandCenter    1079 1184  Early_SuperweaponChinaCarpetBomb
+470   power      0  AmericaCommandCenter  1079 1184  SuperweaponA10ThunderboltMissileStrike
+530   power      1  ChinaCommandCenter    1135 1056  Early_SuperweaponChinaCarpetBomb
+590   power      0  AmericaCommandCenter  1100 1120  SuperweaponA10ThunderboltMissileStrike

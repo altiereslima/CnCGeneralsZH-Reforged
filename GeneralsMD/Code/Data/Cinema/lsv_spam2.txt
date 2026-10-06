@@ -1,0 +1,9 @@
+# Laser glow video, shot 5: Scenarios/missilespam.txt on Twilight Flame, seed 7, the wave of frame
+# 1640. Side on to the east-west rocket fire, low (pitch 10), so the grey trails and their shade on
+# the ground separate. Sun from the east, on the right of the frame.
+#
+#   ...the scenario's switches... -cinema lsv_spam2 -video 1650 1900 lsv_spam2 -maxframes 1915
+
+55.0  cut     1600 3700 0.6 0 10
+55.1  move    1680 3700 8
+63.6  end

@@ -90,66 +90,14 @@ TerrainTextureClass::TerrainTextureClass(int height, int width) :
 {
 }
 
-TerrainTextureClass::TerrainTextureClass(int height, WW3DFormat format) :
-	TextureClass(TEXTURE_WIDTH, height, format, MIP_LEVELS_3 )
-{
-}
-
-int TerrainTextureClass::update(WorldHeightMap *htMap)
-{
-	return fill(htMap, false);
-}
-
-int TerrainTextureClass::updateNormals(WorldHeightMap *htMap)
-{
-	return fill(htMap, true);
-}
-
-// How steep the ground's own detail is made: a brightness step of one across a pixel tilts the
-// normal by this much.  Chosen by eye on the desert and grass tiles; the backend's
-// NORMAL_MAP_STRENGTH scales it again at draw time.
-static const Real TERRAIN_BUMP_DEPTH = 6.0f;
-
-/** One tile's normals, stored the way the tile's own data is (bottom row first), which is what
-	fill turns the right way up.  Brightness stands in for height, so every grain, crack and pebble
-	gets a slope and a flat patch of paint stays flat.  Rows here run against v in the atlas, hence
-	the sign on the green channel.  It wraps at the tile's own edge: right for a class of one tile,
-	a faint seam between the tiles of a bigger one. */
-static void terrainTileNormals(const UnsignedByte *tileBGRA, Int extent, UnsignedByte *normalsBGRA)
-{
-	static Real height[MAX_TILE_PIXEL_EXTENT*MAX_TILE_PIXEL_EXTENT];
-	for (Int pixel = 0; pixel < extent*extent; ++pixel) {
-		const UnsignedByte *source = tileBGRA + pixel*TILE_BYTES_PER_PIXEL;
-		height[pixel] = (0.114f*source[0] + 0.587f*source[1] + 0.299f*source[2]) / 255.0f;
-	}
-	for (Int row = 0; row < extent; ++row) {
-		for (Int column = 0; column < extent; ++column) {
-			const Int left = row*extent + (column + extent - 1) % extent;
-			const Int right = row*extent + (column + 1) % extent;
-			const Int below = ((row + extent - 1) % extent)*extent + column;
-			const Int above = ((row + 1) % extent)*extent + column;
-			const Real slopeU = (height[right] - height[left]) * 0.5f * TERRAIN_BUMP_DEPTH;
-			// The row above in the tile is the row before in the atlas, so v grows downwards here.
-			const Real slopeV = (height[below] - height[above]) * 0.5f * TERRAIN_BUMP_DEPTH;
-			const Real length = sqrtf(slopeU*slopeU + slopeV*slopeV + 1.0f);
-			UnsignedByte *target = normalsBGRA + (row*extent + column)*TILE_BYTES_PER_PIXEL;
-			target[0] = (UnsignedByte)((1.0f/length*0.5f + 0.5f)*255.0f + 0.5f);		// z in blue
-			target[1] = (UnsignedByte)((-slopeV/length*0.5f + 0.5f)*255.0f + 0.5f);	// y in green
-			target[2] = (UnsignedByte)((-slopeU/length*0.5f + 0.5f)*255.0f + 0.5f);	// x in red
-			target[3] = 0xff;
-		}
-	}
-}
-
 //=============================================================================
-// TerrainTextureClass::fill
+// TerrainTextureClass::update
 //=============================================================================
 /** Sets the tile bitmap data into the texture.  The tiles are placed with 4
 	pixel borders around them, so that when the tiles are scaled and bilinearly
-	interpolated, you don't get seams between the tiles.  With normals, each
-	tile's normals go where its colours would, into a 32 bit texture. */
+	interpolated, you don't get seams between the tiles. */
 //=============================================================================
-int TerrainTextureClass::fill(WorldHeightMap *htMap, Bool normals)
+int TerrainTextureClass::update(WorldHeightMap *htMap)
 {
 	// D3DTexture is our texture;
 
@@ -197,13 +145,9 @@ int TerrainTextureClass::fill(WorldHeightMap *htMap, Bool normals)
 			ICoord2D position = pTile->m_tileLocationInTexture;
 			if (position.x<=0) continue; // all real tile offsets start at 2.  jba.
 
-			static UnsignedByte tileNormals[DATA_LEN_BYTES];
-			if (normals) {
-				terrainTileNormals(pTile->getRGBDataForWidth(tilePixelExtent), tilePixelExtent, tileNormals);
-			}
 			Int i,j;
 			for (j=0; j<tilePixelExtent; j++) {
-				UnsignedByte *pBGR = normals ? tileNormals : pTile->getRGBDataForWidth(tilePixelExtent);
+				UnsignedByte *pBGR = pTile->getRGBDataForWidth(tilePixelExtent);
 				pBGR += (tilePixelExtent-1-j)*TILE_BYTES_PER_PIXEL*tilePixelExtent; // invert to match.
 				Int row = position.y+j;
 				UnsignedByte *pBGRX = ((UnsignedByte*)locked_rect.pBits) +

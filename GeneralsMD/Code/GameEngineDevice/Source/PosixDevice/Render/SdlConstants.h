@@ -63,8 +63,9 @@ struct SdlPixelConstants
 
 /// What an engine pixel program's b0 declares (A3e, engineshader.cpp's write_pixel_preamble): the Direct3D
 /// 11 backend's PixelConstantBlock, field for field.  The first three are SdlPixelConstants; the rest -
-/// the normal mapped lights, the terrain's sun, the shadow and the sky - serve the bumped terrain and
-/// the fork's Direct3D 11 additions, which A3e does not draw, and stay zero: zero shadow parameters
+/// the normal mapped lights, the terrain's sun, the shadow and the sky - are unread padding from the
+/// normal maps taken out on 2026-10-06 and the fork's Direct3D 11 additions, which A3e does not
+/// draw, and stay zero: zero shadow parameters
 /// read as a pixel the sun reaches.
 struct SdlEnginePixelConstants
 {

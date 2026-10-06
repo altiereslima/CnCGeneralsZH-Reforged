@@ -61,6 +61,10 @@ public:
 	void lookAt(const Coord3D *pos) { ++lookAtCalls; setPosition(pos); }
 	void anchorZoomAt(const ICoord2D *pixel) { zoomAnchor = *pixel; ++zoomAnchors; }
 	void forceCameraConstraintRecalc() { ++constraintRecalcs; }
+	// what the opening zoom asked for: -1 the map's default, -2 as far out as the wheel goes
+	void setZoomToHeight(Real height) { setHeightAboveGround(height); }
+	void setZoomToDefault() { setHeightAboveGround(-1.0f); }
+	void setZoomToMax() { setHeightAboveGround(-2.0f); }
 	void scrollBy(Coord2D *delta) { last = *delta; ++samples; }
 	Drawable *pickDrawable(const ICoord2D*, Bool, PickType) { return NULL; }
 	Int iterateDrawablesInRegion(IRegion2D*, Bool (*)(Drawable*, void*), void*) { return 0; }
@@ -121,6 +125,8 @@ struct CameraInputFixture
 		static GameLogic *logic = NEW GameLogic;
 		TheGameLogic = logic;
 		global->m_saveCameraInReplay = FALSE;
+		// the tests below are Reforged's camera unless they switch to Classic themselves
+		global->m_interfaceStyle = INTERFACE_STYLE_REFORGED;
 	}
 	~CameraInputFixture()
 	{
@@ -186,12 +192,24 @@ TEST(camera_margin_preferences_load_and_rebuild_constraints)
 	CHECK(f.global->m_useCameraConstraints);
 	CHECK_EQ(f.global->m_cameraBoundaryMargin, 300);
 	CHECK_EQ(f.view.constraintRecalcs, 1);
+
+	// Classic keeps the constraint on whatever the box says, and runs past the edge as far: a pan
+	// puts the margin back the way it does in Reforged
+	f.global->m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
+	f.global->m_useCameraConstraints = FALSE;
+	GameMessage *key = newInstance(GameMessage)(GameMessage::MSG_RAW_KEY_DOWN);
+	key->appendIntegerArgument(KEY_RIGHT);
+	key->appendIntegerArgument(KEY_STATE_DOWN);
+	f.camera.translateGameMessage(key);
+	key->deleteInstance();
+	CHECK(f.ui->scrolling);
+	CHECK_EQ(f.view.constraintRecalcs, 2);
 }
 
 TEST(camera_wheel_anchors_zoom_to_cursor_only_with_the_box_ticked)
 {
 	// Pull request 5 asked for zoom to cursor to go; it stayed as a menu box instead.
-	const OptionDef *def = findOptionDef("ZoomToCursor");
+	const OptionDef *def = findOptionDef("WheelZoomToCursor");
 	CHECK(def != NULL);
 	if (def == NULL)
 		return;
@@ -211,15 +229,24 @@ TEST(camera_wheel_anchors_zoom_to_cursor_only_with_the_box_ticked)
 		message->deleteInstance();
 	};
 
-	CHECK(f.global->m_zoomToCursor);
+	// off by default: the wheel zooms on the middle of the screen, as the game shipped
+	CHECK(!f.global->m_zoomToCursor);
+	spinWheel();
+	CHECK_EQ(f.view.zoomAnchors, 0);
+
+	f.global->m_zoomToCursor = TRUE;
 	spinWheel();
 	CHECK_EQ(f.view.zoomAnchors, 1);
 	CHECK_EQ(f.view.zoomAnchor.x, cursor.x);
 	CHECK_EQ(f.view.zoomAnchor.y, cursor.y);
 
+	// Classic honours the box too
+	f.global->m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
+	spinWheel();
+	CHECK_EQ(f.view.zoomAnchors, 2);
 	f.global->m_zoomToCursor = FALSE;
 	spinWheel();
-	CHECK_EQ(f.view.zoomAnchors, 1);
+	CHECK_EQ(f.view.zoomAnchors, 2);
 }
 
 TEST(ctrl_wheel_zooms_five_notches_for_one)
@@ -246,6 +273,58 @@ TEST(ctrl_wheel_zooms_five_notches_for_one)
 	// Shift is the row placement's key and changes nothing here
 	f.keyboard.modifiers(KEY_STATE_LSHIFT);
 	CHECK_NEAR(1000.0f - heightAfterOneNotch(), plain, 0.01f);
+
+	// Classic's Ctrl is force fire, so its notch is the plain one, Ctrl or not, as fast as Reforged's
+	f.global->m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
+	f.keyboard.modifiers(KEY_STATE_LCONTROL);
+	CHECK_NEAR(1000.0f - heightAfterOneNotch(), plain, 0.01f);
+
+	// Zoom Speed scales the notch in both interfaces, and the scroll speed does not touch it
+	f.keyboard.modifiers(0);
+	CHECK_EQ(f.global->m_zoomSpeed, 100);
+	f.global->m_zoomSpeed = 200;
+	CHECK_NEAR(1000.0f - heightAfterOneNotch(), 2.0f * plain, 0.01f);
+	f.global->m_zoomSpeed = 100;
+	f.global->m_keyboardScrollFactor = 1.0f;
+	CHECK_NEAR(1000.0f - heightAfterOneNotch(), plain, 0.01f);
+}
+
+TEST(right_drag_follows_the_scroll_speed)
+{
+	CHECK(bootOnce());
+	CameraInputFixture f;
+	GameClient *savedClient = TheGameClient;
+	TheGameClient = getTestGameClient();
+	f.global->m_windowed = TRUE;
+	f.global->m_edgeScrollInWindowedMode = FALSE;
+	f.mouse.m_dragTolerance = 4;
+	f.view.setHeightAboveGround(f.global->m_maxCameraHeight);
+	const auto mouse = [&f](GameMessage::Type type, Int x, Int y)
+	{
+		GameMessage *message = newInstance(GameMessage)(type);
+		const ICoord2D pixel = {x, y};
+		message->appendPixelArgument(pixel);
+		f.camera.translateGameMessage(message);
+		message->deleteInstance();
+	};
+	const auto dragStep = [&f, &mouse](Real speed)
+	{
+		f.global->m_keyboardScrollFactor = speed;
+		mouse(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN, 300, 300);
+		mouse(GameMessage::MSG_RAW_MOUSE_POSITION, 340, 300);
+		GameMessage *tick = newInstance(GameMessage)(GameMessage::MSG_FRAME_TICK);
+		f.camera.translateGameMessage(tick);
+		tick->deleteInstance();
+		mouse(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP, 340, 300);
+		return f.view.last.x;
+	};
+
+	const Real normal = dragStep(f.global->m_keyboardDefaultScrollFactor);
+	CHECK(normal > 0.0f);
+	// the drag's own pull doubled with the slider; before, only the small floor under it moved
+	const Real doubled = dragStep(2.0f * f.global->m_keyboardDefaultScrollFactor);
+	CHECK(doubled > 1.9f * normal);
+	TheGameClient = savedClient;
 }
 
 TEST(edge_scroll_ramps_from_the_band_to_the_old_three_pixels)
@@ -299,6 +378,63 @@ TEST(arrow_keys_scroll_the_camera_and_w_a_s_d_stay_grid_keys)
 	CHECK(!f.ui->scrolling);
 }
 
+TEST(a_match_opens_300_over_the_ground_in_both_interfaces)
+{
+	CHECK(bootOnce());
+	CameraInputFixture f;
+	CHECK(!f.global->m_startAtMaxZoom);
+	for (Int style = 0; style < 2; ++style)
+	{
+		f.global->m_interfaceStyle = style ? INTERFACE_STYLE_CLASSIC : INTERFACE_STYLE_REFORGED;
+		f.global->m_startAtMaxZoom = FALSE;
+		f.view.setZoomToStart(FALSE);
+		CHECK_NEAR(f.view.getHeightAboveGround(), 300.0f, 0.001f);
+		// the shell map behind the menus keeps its own framing
+		f.view.setZoomToStart(TRUE);
+		CHECK_NEAR(f.view.getHeightAboveGround(), -1.0f, 0.001f);
+		// the box ticked opens it as far out as the wheel goes, Classic too
+		f.global->m_startAtMaxZoom = TRUE;
+		f.view.setZoomToStart(FALSE);
+		CHECK_NEAR(f.view.getHeightAboveGround(), -2.0f, 0.001f);
+	}
+}
+
+TEST(scroll_speed_follows_the_zoom_in_both_interfaces)
+{
+	CHECK(bootOnce());
+	CameraInputFixture f;
+	const auto stepAt = [&f](Real height)
+	{
+		f.view.setHeightAboveGround(height);
+		GameMessage *message = newInstance(GameMessage)(GameMessage::MSG_FRAME_TICK);
+		f.camera.translateGameMessage(message);
+		message->deleteInstance();
+		return f.view.last.x;
+	};
+	GameMessage *key = newInstance(GameMessage)(GameMessage::MSG_RAW_KEY_DOWN);
+	key->appendIntegerArgument(KEY_RIGHT);
+	key->appendIntegerArgument(KEY_STATE_DOWN);
+	f.camera.translateGameMessage(key);
+	key->deleteInstance();
+	CHECK(f.ui->scrolling);
+
+	const Real maxHeight = f.global->m_maxCameraHeight;
+	for (Int style = 0; style < 2; ++style)
+	{
+		f.global->m_interfaceStyle = style ? INTERFACE_STYLE_CLASSIC : INTERFACE_STYLE_REFORGED;
+		f.global->m_keyboardScrollFactor = 0.5f;
+		// where a map opens, the step the arrow keys always took: SCROLL_AMT 100 times the speed
+		const Real opening = stepAt(maxHeight);
+		CHECK_NEAR(opening, f.global->m_horizontalScrollSpeedFactor * 100.0f * 0.5f, 0.001f);
+		// from the farthest zoom it is 2.9 times that, so the ground crosses the screen as fast
+		CHECK_NEAR(stepAt(maxHeight * 2.9f), 2.9f * opening, 0.001f);
+		// and the scroll speed still sets the pace at every height
+		f.global->m_keyboardScrollFactor = 1.0f;
+		CHECK_NEAR(stepAt(maxHeight * 2.9f), 2.0f * 2.9f * opening, 0.001f);
+		CHECK_NEAR(stepAt(maxHeight * 0.3f), 2.0f * 0.3f * opening, 0.001f);
+	}
+}
+
 TEST(right_drag_pans_past_the_drag_tolerance_and_middle_drag_turns)
 {
 	CHECK(bootOnce());
@@ -346,6 +482,14 @@ TEST(right_drag_pans_past_the_drag_tolerance_and_middle_drag_turns)
 	CHECK(f.view.getAngle() != before);
 	mouse(GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_UP, 350, 300);
 	CHECK(!f.camera.isMovingCamera());
+
+	// Classic's right drag is the same retail scroll
+	f.global->m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
+	mouse(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN, 300, 300);
+	mouse(GameMessage::MSG_RAW_MOUSE_POSITION, 340, 300);
+	CHECK(f.camera.isRightDragPanning());
+	mouse(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP, 340, 300);
+	CHECK(!f.camera.isRightDragPanning());
 
 	TheGameClient = savedClient;
 }

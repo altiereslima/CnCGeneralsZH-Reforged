@@ -335,22 +335,31 @@ static void restartMissionMenu()
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The menu comes and goes at once.  Its transitions flash the rectangles each window had when
-	* they started, and InGameUI::themeQuitMenu lays the menu out compact only as it draws, so the
-	* flashes lit the old layout's places somewhere else on the screen.  Skipping the group leaves
-	* every window where the group's end puts it, as the flashes did when they finished. */
+/** The menu's coming and going.  Drawn as the page, it fades itself in and out: the layout's
+	* transitions flash the rectangles each window had when they started, and
+	* InGameUI::themeQuitMenu lays the menu out compact only as it draws, so the flashes would light
+	* the old layout's places somewhere else on the screen.  Skipping the group leaves every window
+	* where the group's end puts it.  Classic draws the layout where it stands, so its own flashes
+	* play, as the game shipped. */
 //-------------------------------------------------------------------------------------------------
 static void showQuitMenuLayout( const char *group )
 {
 	TheTransitionHandler->remove( group );
 	TheTransitionHandler->setGroup( group );
-	TheTransitionHandler->remove( group, TRUE );
+	if( !TheGlobalData->m_animateWindows || TheInGameUI->isQuitMenuPageShown() )
+		TheTransitionHandler->remove( group, TRUE );
 }
 
 static void hideQuitMenuLayout( void )
 {
-	if( quitMenuLayout )
+	if( quitMenuLayout == NULL )
+		return;
+	if( !TheGlobalData->m_animateWindows )
 		quitMenuLayout->hide( TRUE );
+	else if( TheInGameUI->isQuitMenuPageShown() )
+		TheInGameUI->closeQuitMenuPage();
+	else
+		TheTransitionHandler->reverse( quitMenuLayout == noSaveLoadQuitMenuLayout ? "QuitNoSaveBack" : "QuitFullBack" );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -441,6 +450,7 @@ void ToggleQuitMenu()
 		TheMouse->setCursor( Mouse::ARROW );
 
 		TheControlBar->hidePurchaseScience();
+		const char *group;
 		if ( TheGameLogic->isInMultiplayerGame()  || TheGameLogic->isInReplayGame() )
 		{
 			// we don't want to show the save load button.
@@ -448,7 +458,7 @@ void ToggleQuitMenu()
 				noSaveLoadQuitMenuLayout = TheWindowManager->winCreateLayout( AsciiString( "Menus/QuitNoSave.wnd" ) );
 			quitMenuLayout = noSaveLoadQuitMenuLayout;
 			initGadgetsNoSaveQuit();
-			showQuitMenuLayout( "QuitNoSave" );
+			group = "QuitNoSave";
 		}
 		else
 		{
@@ -456,7 +466,7 @@ void ToggleQuitMenu()
 				fullQuitMenuLayout= TheWindowManager->winCreateLayout( AsciiString( "Menus/QuitMenu.wnd" ) );
 			quitMenuLayout = fullQuitMenuLayout;
 			initGadgetsFullQuit();
-			showQuitMenuLayout( "QuitFull" );
+			group = "QuitFull";
 		}
 
 		// load the quit menu from the layout file if needed
@@ -467,7 +477,9 @@ void ToggleQuitMenu()
 			TheInGameUI->setQuitMenuVisible(FALSE);
 			return;
 		}
+		// themed first: whether the page draws it decides whether the layout's flashes play
 		TheInGameUI->themeQuitMenu( quitMenuLayout->getFirstWindow() );
+		showQuitMenuLayout( group );
 
 		//quitMenuLayout->hide(FALSE);
 

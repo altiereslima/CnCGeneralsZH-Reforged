@@ -1,0 +1,17 @@
+# The Dragon Tank's plain flame on a Crusader 70 away, inside its 75.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover
+#     -side 0 FactionChina -side 1 FactionAmerica -seed 1 -maxframes 600
+#     -scenario dragonflame -logPrefix dragonflame_
+#
+# Measured 2026-10-06: every one of 262 flames burst on its fuel 106 from the Dragon, which is EA's
+# FuelLifetime 350 at the locomotor's 300 a second. The attack went out with no victim, and the
+# Crusader was still at 480 of 480 on frame 590; left alone, neither tank fired at the other at all,
+# so the two seats may not be enemies in this setup. Not explained yet.
+
+30    spawn         0  ChinaTankDragon       1   600 920
+30    spawn         1  AmericaTankCrusader   1   670 920
+60    attack        0  ChinaTankDragon       1   AmericaTankCrusader
+120   tally         1  AmericaTankCrusader
+590   tally         1  AmericaTankCrusader

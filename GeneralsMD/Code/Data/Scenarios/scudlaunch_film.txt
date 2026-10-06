@@ -1,0 +1,12 @@
+# One GLA Scud Storm on the open scrub of Golden Oasis (UI-MAP's empty ground at 2192,3537), fired
+# at frame 40 at a point 1200 to the south, for a close film of the launch: the missiles rising and
+# their shadows sliding across the ground (Cinema/scudlaunch_film.txt). The missiles leave the silo
+# from about frame 137.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -fps 120 -noFPSLimit -quickstart -noshellmap
+#     -observer -multiInstance -map "Maps\Golden Oasis\Golden Oasis.map" -autoskirmish 2 -takeover
+#     -side 0 FactionChina -side 1 FactionGLA -seed 1 -scenario scudlaunch_film
+#     -cinema scudlaunch_film -video 100 330 scudlaunch_film -maxframes 340
+
+10    spawn   1  GLAScudStorm   1   2192 3537
+40    power   1  GLAScudStorm   2192 2337

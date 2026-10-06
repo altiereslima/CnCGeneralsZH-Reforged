@@ -688,7 +688,8 @@ void W3DTankTruckDraw::doDrawModule(const Matrix3D* transformMtx)
 #endif
 	//Update movement of treads: these vehicles steer with their wheels, so every tread runs over the
 	//distance driven, at TreadAnimationRate per top speed's worth of it, and backwards in reverse.
-	const Locomotor *loco = obj->getAIUpdateInterface()->getCurLocomotor();
+	const AIUpdateInterface *ai = obj->getAIUpdateInterface();	// none on a hulk drawn with this module
+	const Locomotor *loco = ai ? ai->getCurLocomotor() : NULL;
 	Real maxSpeed = loco ? loco->getMaxSpeedForCondition(BODY_PRISTINE) : 0.0f;
 	if (m_treadCount && maxSpeed > 0.0f)
 	{

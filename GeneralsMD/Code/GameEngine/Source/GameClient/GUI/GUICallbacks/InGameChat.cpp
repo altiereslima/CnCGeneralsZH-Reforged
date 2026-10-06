@@ -97,9 +97,13 @@ void ShowInGameChat( Bool immediate )
 		static NameKeyType chatTypeStaticTextID = TheNameKeyGenerator->nameToKey( "InGameChat.wnd:StaticTextChatType" );
 		chatTypeStaticText = TheWindowManager->winGetWindowFromId( NULL, chatTypeStaticTextID );
 
-		chatWindow->winSetDrawFunc( drawChatNothing );
-		for( GameWindow *child = chatWindow->winGetChild(); child; child = child->winGetNext() )
-			child->winSetDrawFunc( drawChatNothing );
+		// the Classic interface has no page: EA's layout draws itself where InGameChat.wnd puts it
+		if( !TheGlobalData->isClassicUI() )
+		{
+			chatWindow->winSetDrawFunc( drawChatNothing );
+			for( GameWindow *child = chatWindow->winGetChild(); child; child = child->winGetNext() )
+				child->winSetDrawFunc( drawChatNothing );
+		}
 	}
 	TheWindowManager->winSetFocus( chatTextEntry );
 	SetInGameChatType( INGAME_CHAT_EVERYONE );

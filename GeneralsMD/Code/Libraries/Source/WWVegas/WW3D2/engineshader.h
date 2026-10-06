@@ -88,16 +88,9 @@ bool EngineShader_Vertex_Program(EngineShaderProgram program, std::string & hlsl
 // The pixel half.  The alpha test and the fog come from the render state and are written into the
 // program the way ffshader writes them, because D3D9 applies both around a bound pixel shader and
 // D3D11 applies neither.
-//
-// bumped is the terrain's normal atlas at work: the ground is shaded again through the normal atlas at t4,
-// by how much the bumped surface faces the sun more or less than the flat one does.  Only the three
-// blending terrain programs take it; for any other the call is refused.
 bool EngineShader_Pixel_Program(EngineShaderProgram program,
-	const PixelPipelineDescription & pipeline, std::string & hlsl, bool bumped = false,
+	const PixelPipelineDescription & pipeline, std::string & hlsl,
 	CombinerShaderTarget target = COMBINER_SHADER_TARGET_D3D11);
-
-// Whether a program is one bumped can be asked of.
-bool EngineShader_Can_Bump(EngineShaderProgram program);
 
 // Which transcribed programs paint the ground, and so read the sun's shadow map.  The water and
 // the trees are not among them: both have shadows of their own.

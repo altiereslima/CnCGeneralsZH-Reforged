@@ -71,6 +71,7 @@
 #include "GameClient/InGameUI.h"
 
 #include "GameLogic/Object.h"
+#include "GameLogic/TerrainLogic.h"
 
 #include "GameLogic/Module/AIUpdate.h"
 
@@ -195,7 +196,96 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 	// isInWaypointMode() (shift held) was true. The shift queue now has its own colored, per-order
 	// hint threads (InGameUI::updateOrderHints / W3DInGameUI::drawOrderHints), which cover the same
 	// ground and stay up after the key is let go, so the white duplicate is gone rather than merely
-	// hidden - its only firing condition was this same isInWaypointMode() check.
+	// hidden - its only firing condition was this same isInWaypointMode() check.  Classic has no
+	// threads and its waypoint key is Alt, so it draws the white path the game shipped with.
+	if( TheGlobalData->isClassicUI() && TheInGameUI->isInWaypointMode() )
+	{
+		//Create a default light environment with no lights and only full ambient.
+		//@todo: Fix later by copying default scene light environement from W3DScene.cpp.
+		LightEnvironmentClass lightEnv;
+		lightEnv.Reset(Vector3(0,0,0), Vector3(1.0f,1.0f,1.0f));
+		lightEnv.Pre_Render_Update(rinfo.Camera.Get_Transform());
+		RenderInfoClass localRinfo(rinfo.Camera);
+		localRinfo.light_environment=&lightEnv;
+		Vector3 points[ MAX_DISPLAY_NODES + 1 ]; //Lines have nodes + 1 points.
+
+		const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
+		for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
+		{
+			Object *obj = (*it)->getObject();
+			Int numPoints = 1;
+			if( obj && ! obj->isKindOf( KINDOF_IGNORED_IN_GUI ))//so mobs and stuff sont make a gazillion lines
+			{
+				AIUpdateInterface *ai = obj->getAI();
+				Int goalSize = ai ? ai->friend_getWaypointGoalPathSize() : 0;
+				Int gpIdx = ai ? ai->friend_getCurrentGoalPathIndex() : 0;
+
+				if( ai && gpIdx >= 0 && gpIdx < goalSize )
+				{
+					const Coord3D *pos = obj->getPosition();
+					points[ 0 ].Set( Vector3( pos->x, pos->y, pos->z ) );
+
+					for( int i = gpIdx; i < goalSize; i++ )
+					{
+						const Coord3D *waypoint = ai->friend_getGoalPathPosition( i );
+						if( waypoint )
+						{
+							if( numPoints < MAX_DISPLAY_NODES + 1 )
+							{
+								points[ numPoints ].Set( Vector3( waypoint->x, waypoint->y, waypoint->z ) );
+								numPoints++;
+							}
+
+							m_waypointNodeRobj->Set_Position(Vector3(waypoint->x,waypoint->y,waypoint->z));
+							WW3D::Render(*m_waypointNodeRobj,localRinfo);
+						}
+					}
+					//Now render the lines in one pass!
+					queueLine( numPoints, points );
+				}
+			}
+		}
+	}
+
+	// Reforged draws every order the selection is on the way a building's rally point is drawn: this
+	// line, the puck on each point short of the end and on any unit or building it is aimed at, and
+	// the rally flag on the last bit of ground (a drawable of its own, InGameUI::updateOrderFlags).
+	// The hints are rebuilt off the units every frame, so a puck on a target follows it.
+	// not in the water's mirror pass: the ground is left out of the reflection, and a PASS_ALWAYS
+	// line would lie on top of the water
+	if( !TheGlobalData->isClassicUI() && !TheInGameUI->getOrderHints().empty() && !ShaderClass::Is_Backface_Culling_Inverted() )
+	{
+		LightEnvironmentClass lightEnv;
+		lightEnv.Reset(Vector3(0,0,0), Vector3(1.0f,1.0f,1.0f));
+		lightEnv.Pre_Render_Update(rinfo.Camera.Get_Transform());
+		RenderInfoClass localRinfo(rinfo.Camera);
+		localRinfo.light_environment=&lightEnv;
+
+		const std::vector<InGameUI::OrderHint>& hints = TheInGameUI->getOrderHints();
+		for( std::vector<InGameUI::OrderHint>::const_iterator it = hints.begin(); it != hints.end(); ++it )
+		{
+			if( it->mark == InGameUI::ORDER_MARK_NONE )
+				continue;		// an upgrade or ability bought where the step before ends: no line, no point
+
+			// an order's point can carry a zero height; nothing goes under the ground, and an aircraft
+			// at either end keeps its own height
+			Vector3 points[ 2 ];
+			points[ 0 ].Set( it->from.x, it->from.y, max( it->from.z, TheTerrainLogic->getGroundHeight( it->from.x, it->from.y ) ) );
+			points[ 1 ].Set( it->to.x, it->to.y, max( it->to.z, TheTerrainLogic->getGroundHeight( it->to.x, it->to.y ) ) );
+
+			// Order Lines off in the options takes the lines away and leaves the points
+			if( TheGlobalData->m_showOrderLines )
+				queueLine( 2, points );
+
+			if( it->mark == InGameUI::ORDER_MARK_JOINT )
+			{
+				m_waypointNodeRobj->Set_Position( points[ 1 ] );
+				WW3D::Render( *m_waypointNodeRobj, localRinfo );		// the little hockey puck
+			}
+		}
+		// the lines stay queued: the rally and placement pucks below would flush them into the
+		// terrain pass, under the buildings (see queueLine)
+	}
 
 	// Rally points, drawn whenever we are not actively laying down waypoints. This used to be the
 	// else of the block above, which is why turning that block on full time hid every rally line.
@@ -515,7 +605,6 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 				
 			}
 		}
-		renderQueuedLines( localRinfo );
 
 	}
 
@@ -557,9 +646,19 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 				points[ 0 ] = exitLoc;
 				points[ 1 ] = rallyLoc;
 				queueLine( 2, points );
-				renderQueuedLines( localRinfo );
 			}
 		}
+	}
+
+	// every line of every block above goes out after the last puck
+	if( m_linesUsed > 0 )
+	{
+		LightEnvironmentClass lightEnv;
+		lightEnv.Reset(Vector3(0,0,0), Vector3(1.0f,1.0f,1.0f));
+		lightEnv.Pre_Render_Update(rinfo.Camera.Get_Transform());
+		RenderInfoClass localRinfo(rinfo.Camera);
+		localRinfo.light_environment=&lightEnv;
+		renderQueuedLines( localRinfo );
 	}
 }
 

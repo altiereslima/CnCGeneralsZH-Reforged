@@ -1,0 +1,7 @@
+# Hero loop 02: the wide shot. Fallen Empire's Great Wall across the middle of the
+# frame with a fight on each side of it, Scenarios/hero_loop_02.txt, frames 600 to 1019 (command
+# line there). Locked so the edit can dissolve the tail into the head.
+
+5     cut        1390 1250 1.2 -45 -8
+25    shot
+35    end

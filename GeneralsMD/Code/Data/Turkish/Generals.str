@@ -962,7 +962,7 @@ GUI:3DSound
 END
 
 GUI:ScrollSpeed
-"Kaydırma Hızı"
+"Kamera Kaydırma Hızı"
 END
 
 GUI:Resolution
@@ -3674,7 +3674,7 @@ CONTROLBAR:Demoralize
 END
 
 CONTROLBAR:CIAIntelligence
-"&İstihbarat"
+"İ&stihbarat"
 END
 
 CONTROLBAR:CombatDrop
@@ -3718,7 +3718,7 @@ CONTROLBAR:FireWall
 END
 
 CONTROLBAR:UpgradeGLAArmTheMob
-"&Kalabalığı Silahlandır"
+"Ka&labalığı Silahlandır"
 END
 
 CONTROLBAR:UpgradeChinaOverlordGattlingCannon
@@ -3730,7 +3730,7 @@ CONTROLBAR:UpgradeChinaOverlordPropagandaTower
 END
 
 CONTROLBAR:UpgradeChinaOverlordBattleBunker
-"&Savaş Sığınağı"
+"Sa&vaş Sığınağı"
 END
 
 CONTROLBAR:FireBomb
@@ -3754,7 +3754,7 @@ CONTROLBAR:InitiateBattlePlanBombardment
 END
 
 CONTROLBAR:InitiateBattlePlanHoldTheLine
-"&Hattı Koru Savaş Planı"
+"Hattı Koru Savaş &Planı"
 END
 
 CONTROLBAR:InitiateBattlePlanSearchAndDestroy
@@ -3766,11 +3766,11 @@ CONTROLBAR:CleanupAreaDescription
 END
 
 CONTROLBAR:ConstructAmericaCommandCenter
-"&Komuta Merkezi"
+"Komu&ta Merkezi"
 END
 
 CONTROLBAR:ConstructAmericaPowerPlant
-"&Soğuk Füzyon Reaktörü"
+"Soğuk Füz&yon Reaktörü"
 END
 
 CONTROLBAR:ConstructAmericaBarracks
@@ -3778,7 +3778,7 @@ CONTROLBAR:ConstructAmericaBarracks
 END
 
 CONTROLBAR:ConstructAmericaSupplyCenter
-"&İkmal Merkezi"
+"İkmal Me&rkezi"
 END
 
 CONTROLBAR:ConstructAmericaWall
@@ -3786,7 +3786,7 @@ CONTROLBAR:ConstructAmericaWall
 END
 
 CONTROLBAR:ConstructAmericaWarFactory
-"&Savaş Fabrikası"
+"Sa&vaş Fabrikası"
 END
 
 CONTROLBAR:ConstructAmericaGuardianControlCenter
@@ -3794,7 +3794,7 @@ CONTROLBAR:ConstructAmericaGuardianControlCenter
 END
 
 CONTROLBAR:ConstructAmericaPatriotBattery
-"&Patriot Füze Sistemi"
+"Patriot &Füze Sistemi"
 END
 
 CONTROLBAR:ConstructAmericaParticleCannonUplink
@@ -3802,11 +3802,11 @@ CONTROLBAR:ConstructAmericaParticleCannonUplink
 END
 
 CONTROLBAR:ConstructAmericaStrategyCenter
-"&Strateji Merkezi"
+"Strate&ji Merkezi"
 END
 
 CONTROLBAR:ConstructAmericaSupplyDropZone
-"&İkmal İndirme Bölgesi"
+"İkmal İndirme &Bölgesi"
 END
 
 CONTROLBAR:ConstructAmericaDetentionCamp
@@ -3818,7 +3818,7 @@ CONTROLBAR:ConstructAmericaInfantryRanger
 END
 
 CONTROLBAR:Evacuate
-"&Tahliye Et"
+"Tahliye &Et"
 END
 
 CONTROLBAR:ExecuteRailedTransport
@@ -3830,7 +3830,7 @@ CONTROLBAR:TransportExit
 END
 
 CONTROLBAR:ConstructGLACommandCenter
-"&Komuta Merkezi"
+"Komuta Merke&zi"
 END
 
 CONTROLBAR:ConstructGLADemoTrap
@@ -3842,7 +3842,7 @@ CONTROLBAR:ConstructGLABarracks
 END
 
 CONTROLBAR:ConstructGLASupplyStash
-"&İkmal Deposu"
+"İkmal &Deposu"
 END
 
 CONTROLBAR:ConstructGLABurningBarricade
@@ -3850,15 +3850,15 @@ CONTROLBAR:ConstructGLABurningBarricade
 END
 
 CONTROLBAR:ConstructGLAArmsDealer
-"&Silah Tüccarı"
+"Si&lah Tüccarı"
 END
 
 CONTROLBAR:ConstructChinaCommandCenter
-"&Komuta Merkezi"
+"Komuta Merke&zi"
 END
 
 CONTROLBAR:ConstructChinaPowerPlant
-"&Nükleer Reaktör"
+"Nükl&eer Reaktör"
 END
 
 CONTROLBAR:ConstructChinaBarracks
@@ -3866,7 +3866,7 @@ CONTROLBAR:ConstructChinaBarracks
 END
 
 CONTROLBAR:ConstructChinaSupplyCenter
-"&İkmal Merkezi"
+"İkma&l Merkezi"
 END
 
 CONTROLBAR:ConstructChinaConcreteWall
@@ -3874,19 +3874,19 @@ CONTROLBAR:ConstructChinaConcreteWall
 END
 
 CONTROLBAR:ConstructChinaWarFactory
-"&Savaş Fabrikası"
+"Sa&vaş Fabrikası"
 END
 
 CONTROLBAR:ConstructAmericaDozer
-"&İnşaat Dozeri"
+"İnşaat &Dozeri"
 END
 
 CONTROLBAR:ConstructGLAWorker
-"&İşçi"
+"İşç&i"
 END
 
 CONTROLBAR:ConstructChinaDozer
-"&İnşaat Dozeri"
+"İnşaat &Dozeri"
 END
 
 CONTROLBAR:ConstructGLATankMarauder
@@ -3898,7 +3898,7 @@ CONTROLBAR:ConstructGLAVehicleRocketBuggy
 END
 
 CONTROLBAR:ConstructGLAVehicleRadarVan
-"&Radar Aracı"
+"Radar &Aracı"
 END
 
 CONTROLBAR:ConstructChinaTankGattling
@@ -3910,7 +3910,7 @@ CONTROLBAR:ConstructGLAInfantryRebel
 END
 
 CONTROLBAR:ConstructChinaInfantryRedguard
-"&Kızıl Muhafız"
+"Kızıl &Muhafız"
 END
 
 CONTROLBAR:ConstructGLAVehicleSupplyTruck
@@ -3918,7 +3918,7 @@ CONTROLBAR:ConstructGLAVehicleSupplyTruck
 END
 
 CONTROLBAR:ConstructChinaVehicleSupplyTruck
-"&İkmal Kamyonu"
+"İk&mal Kamyonu"
 END
 
 CONTROLBAR:ConstructAmericaJetRaptor
@@ -3946,7 +3946,7 @@ CONTROLBAR:ConstructAmericaInfantryBiohazardTech
 END
 
 CONTROLBAR:ConstructAmericaVehicleMedic
-"&Ambulans"
+"Am&bulans"
 END
 
 CONTROLBAR:ConstructAmericaVehicleHumvee
@@ -3954,11 +3954,11 @@ CONTROLBAR:ConstructAmericaVehicleHumvee
 END
 
 CONTROLBAR:ConstructAmericaVehicleBattleDrone
-"&Savaş Dronu"
+"Sa&vaş Dronu"
 END
 
 CONTROLBAR:ConstructAmericaVehicleScoutDrone
-"&Keşif Dronu"
+"Keşi&f Dronu"
 END
 
 CONTROLBAR:ConstructChinaJetMIG
@@ -3966,7 +3966,7 @@ CONTROLBAR:ConstructChinaJetMIG
 END
 
 CONTROLBAR:ConstructChinaInfantryTankHunter
-"&Tank Avcısı"
+"Tank &Avcısı"
 END
 
 CONTROLBAR:ConstructChinaInfantrySecretPolice
@@ -3978,7 +3978,7 @@ CONTROLBAR:ConstructChinaInfantryHacker
 END
 
 CONTROLBAR:ConstructChinaBunker
-"&Sığınak"
+"Sığın&ak"
 END
 
 CONTROLBAR:ConstructChinaPropagandaCenter
@@ -4002,7 +4002,7 @@ CONTROLBAR:ConstructChinaNuclearMissileLauncher
 END
 
 CONTROLBAR:ConstructChinaSpeakerTower
-"&Hoparlör Kulesi"
+"H&oparlör Kulesi"
 END
 
 CONTROLBAR:ConstructChinaVehicleInfernoCannon
@@ -4010,11 +4010,11 @@ CONTROLBAR:ConstructChinaVehicleInfernoCannon
 END
 
 CONTROLBAR:ConstructChinaVehicleNukeLauncher
-"&Nükleer Top"
+"Nükleer To&p"
 END
 
 CONTROLBAR:ConstructChinaVehicleTroopCrawler
-"&Birlik Taşıyıcı"
+"Bi&rlik Taşıyıcı"
 END
 
 CONTROLBAR:ConstructChinaTankSeismic
@@ -4022,7 +4022,7 @@ CONTROLBAR:ConstructChinaTankSeismic
 END
 
 CONTROLBAR:ConstructChinaTankDragon
-"&Ejder Tankı"
+"E&jder Tankı"
 END
 
 CONTROLBAR:ConstructChinaVehiclePropagandaBlimp
@@ -4030,7 +4030,7 @@ CONTROLBAR:ConstructChinaVehiclePropagandaBlimp
 END
 
 CONTROLBAR:ConstructGLAInfantryTerrorist
-"&Terörist"
+"T&erörist"
 END
 
 CONTROLBAR:ConstructGLAInfantryRPGTrooper
@@ -4042,15 +4042,15 @@ CONTROLBAR:ConstructGLATunnelNetwork
 END
 
 CONTROLBAR:ConstructGLAPalace
-"&Saray"
+"Sa&ray"
 END
 
 CONTROLBAR:ConstructGLABlackMarket
-"&Karaborsa"
+"Kara&borsa"
 END
 
 CONTROLBAR:ConstructGLAStingerSite
-"&Stinger Mevzii"
+"Stinger Me&vzii"
 END
 
 CONTROLBAR:ConstructGLAScudStorm
@@ -4062,19 +4062,19 @@ CONTROLBAR:ConstructGLAPrison
 END
 
 CONTROLBAR:ConstructGLAVehicleToxinTruck
-"&Toksin Traktörü"
+"Toks&in Traktörü"
 END
 
 CONTROLBAR:ConstructGLAVehicleTechnical
-"&Silahlı Pikap"
+"Silahlı &Pikap"
 END
 
 CONTROLBAR:ConstructGLAInfantryHijacker
-"&Korsan"
+"Korsa&n"
 END
 
 CONTROLBAR:ConstructGLAInfantryAngryMob
-"&Öfkeli Kalabalık"
+"Ö&fkeli Kalabalık"
 END
 
 CONTROLBAR:ConstructGLAVehicleQuadCannon
@@ -4086,15 +4086,15 @@ CONTROLBAR:ConstructGLAVehicleBombTruck
 END
 
 CONTROLBAR:ConstructGLAVehicleScudLauncher
-"&SCUD Rampası"
+"S&CUD Rampası"
 END
 
 CONTROLBAR:UpgradeAmericaAdvancedTraining
-"&İleri Eğitim"
+"İleri &Eğitim"
 END
 
 CONTROLBAR:UpgradeAmericaDroneArmor
-"&Dron Zırhı"
+"Dron &Zırhı"
 END
 
 CONTROLBAR:UpgradeChinaMines
@@ -4106,7 +4106,7 @@ CONTROLBAR:UpgradeAmericaScoutDrones
 END
 
 CONTROLBAR:UpgradeAmericaAdvancedControlRods
-"&Kontrol Çubukları"
+"Kon&trol Çubukları"
 END
 
 CONTROLBAR:UpgradeAmericaLaserMissiles
@@ -4118,11 +4118,11 @@ CONTROLBAR:UpgradeAmericaExtraFuel
 END
 
 CONTROLBAR:UpgradeAmericaFlashBangGrenade
-"&Şok Bombaları"
+"Şok Bo&mbaları"
 END
 
 CONTROLBAR:UpgradeAmericaCompositeArmor
-"&Kompozit Zırh"
+"Kompozi&t Zırh"
 END
 
 CONTROLBAR:UpgradeAmericaTomahawkRemoteControl
@@ -4134,11 +4134,11 @@ CONTROLBAR:UpgradeAmericaAircraftFuel
 END
 
 CONTROLBAR:UpgradeAmericaTOWMissile
-"&TOW Füzesi"
+"TOW &Füzesi"
 END
 
 CONTROLBAR:UpgradeComancheRocketPods
-"&Roket Kovanları"
+"Roket Ko&vanları"
 END
 
 CONTROLBAR:UpgradeAmericaRailGun
@@ -4166,7 +4166,7 @@ CONTROLBAR:UpgradeChinaIRGoggles
 END
 
 CONTROLBAR:UpgradeChinaBlackNapalm
-"&Kara Napalm"
+"Kara Napa&lm"
 END
 
 CONTROLBAR:UpgradeChinaChainGuns
@@ -4182,7 +4182,7 @@ CONTROLBAR:UpgradeChinaUraniumShells
 END
 
 CONTROLBAR:UpgradeChinaNuclearTanks
-"&Nükleer Tanklar"
+"Nükleer &Tanklar"
 END
 
 CONTROLBAR:UpgradeChinaStunBullets
@@ -4194,7 +4194,7 @@ CONTROLBAR:UpgradeGLARadarVanScan
 END
 
 CONTROLBAR:UpgradeGLAScorpionRocket
-"&Scorpion Roketi"
+"Scorpio&n Roketi"
 END
 
 CONTROLBAR:UpgradeGLABuggyAmmo
@@ -4214,11 +4214,11 @@ CONTROLBAR:UpgradeGLABombTruckHighExplosiveBomb
 END
 
 CONTROLBAR:UpgradeGLAAnthraxBeta
-"&Şarbon Beta"
+"Şarbon &Beta"
 END
 
 CONTROLBAR:UpgradeGLAToxinShells
-"&Toksin Mermileri"
+"Toksin &Mermileri"
 END
 
 CONTROLBAR:UpgradeGLAJunkRepair
@@ -4226,7 +4226,7 @@ CONTROLBAR:UpgradeGLAJunkRepair
 END
 
 CONTROLBAR:UpgradeGLAAPBullets
-"&Zırh Delici Mermiler"
+"Zırh &Delici Mermiler"
 END
 
 CONTROLBAR:UpgradeGLAAPRockets
@@ -4234,7 +4234,7 @@ CONTROLBAR:UpgradeGLAAPRockets
 END
 
 CONTROLBAR:UpgradeGLACamouflage
-"&Kamuflaj"
+"Kamu&flaj"
 END
 
 CONTROLBAR:UpgradeGLATranqDarts
@@ -4270,7 +4270,7 @@ CONTROLBAR:FireRocket
 END
 
 CONTROLBAR:AnthraxWarhead
-"&Şarbon Savaş Başlığı"
+"Şarbon Savaş &Başlığı"
 END
 
 CONTROLBAR:ExplosiveWarhead
@@ -4298,7 +4298,7 @@ CONTROLBAR:DaisyCutter
 END
 
 CONTROLBAR:NeutronMissile
-"&Nükleer Füze"
+"Nükleer &Füze"
 END
 
 CONTROLBAR:ScudStorm
@@ -4306,11 +4306,11 @@ CONTROLBAR:ScudStorm
 END
 
 CONTROLBAR:NapalmStrike
-"&Napalm Saldırısı"
+"Napalm &Saldırısı"
 END
 
 CONTROLBAR:A10ThunderboltMissileStrike
-"&A10 Füze Saldırısı"
+"A10 &Füze Saldırısı"
 END
 
 CONTROLBAR:CashHack
@@ -4326,7 +4326,7 @@ CONTROLBAR:BlackMarketNuke
 END
 
 CONTROLBAR:AnthraxBomb
-"&Şarbon Bombası"
+"Şarbon &Bombası"
 END
 
 CONTROLBAR:Paradrop
@@ -4346,7 +4346,7 @@ CONTROLBAR:EMPPulse
 END
 
 CONTROLBAR:ArtilleryBarrage
-"&Topçu Barajı"
+"Topçu &Barajı"
 END
 
 CONTROLBAR:CrateDrop
@@ -4354,7 +4354,7 @@ CONTROLBAR:CrateDrop
 END
 
 CONTROLBAR:SpySatellite
-"&Casus Uydu"
+"Casus &Uydu"
 END
 
 CONTROLBAR:SpyDrone
@@ -4374,7 +4374,7 @@ CONTROLBAR:Bayonet
 END
 
 CONTROLBAR:SniperAttack
-"&Keskin Nişancı Atışı"
+"Keskin Nişancı &Atışı"
 END
 
 CONTROLBAR:CaptureBuilding
@@ -4390,7 +4390,7 @@ CONTROLBAR:StealCashHack
 END
 
 CONTROLBAR:InternetHack
-"&İnterneti Hackle"
+"İnterneti &Hackle"
 END
 
 CONTROLBAR:DisableBuildingHack
@@ -4434,7 +4434,7 @@ CONTROLBAR:RemoteDemoCharge
 END
 
 CONTROLBAR:DetonateCharges
-"&Şarjları Patlat"
+"Şarjları &Patlat"
 END
 
 CONTROLBAR:DetonateNuke
@@ -4494,7 +4494,7 @@ CONTROLBAR:CommunicatorDescription
 END
 
 CONTROLBAR:AmbulanceCleanupArea
-"&Toksin Temizle"
+"Toksi&n Temizle"
 END
 
 RADAR:UnitUnderAttack
@@ -7490,7 +7490,7 @@ CONTROLBAR:StructureExit
 END
 
 CONTROLBAR:UpgradeChinaAircraftArmor
-"&MiG Zırhı"
+"MiG &Zırhı"
 END
 
 CONTROLBAR:RangerMachineGun
@@ -7506,7 +7506,7 @@ CONTROLBAR:RebelMachineGun
 END
 
 CONTROLBAR:FlashBangGrenadeMode
-"&Şok Bombası"
+"Ş&ok Bombası"
 END
 
 CONTROLBAR:TranqDartsMode
@@ -7642,7 +7642,7 @@ TOOLTIP:Brightness
 END
 
 TOOLTIP:ScrollSpeed
-"Harita kaydırma hızını ayarlayın"
+"Kameranın kayma hızı: ekran kenarında, ok tuşlarıyla ve sağ fare tuşuyla sürüklerken. Fare tekerleğinin kendi Yakınlaştırma Hızı var. Kabul ile uygulanır."
 END
 
 TOOLTIP:SendDelay
@@ -7886,11 +7886,11 @@ GUI:PlayerHasBeenDefeated
 END
 
 CONTROLBAR:UpgradeAmericaRangerCaptureBuilding
-"&Binayı Ele Geçir"
+"Binayı &Ele Geçir"
 END
 
 CONTROLBAR:UpgradeChinaRedguardCaptureBuilding
-"&Binayı Ele Geçir"
+"Binayı &Ele Geçir"
 END
 
 CONTROLBAR:UpgradeGLARebelCaptureBuilding
@@ -7898,7 +7898,7 @@ CONTROLBAR:UpgradeGLARebelCaptureBuilding
 END
 
 CONTROLBAR:DetonateBombTruck
-"&Şimdi Patlat!"
+"Şimdi &Patlat!"
 END
 
 UPGRADE:RangerCaptureBuilding
@@ -10850,7 +10850,7 @@ CONTROLBAR:UpgradeChinaHelixPropagandaTower
 END
 
 CONTROLBAR:UpgradeChinaHelixBattleBunker
-"&Savaş Sığınağı"
+"Sa&vaş Sığınağı"
 END
 
 CONTROLBAR:UpgradeChinaHelixGattlingCannon
@@ -10858,7 +10858,7 @@ CONTROLBAR:UpgradeChinaHelixGattlingCannon
 END
 
 CONTROLBAR:UpgradeHelixNukeBomb
-"&Nükleer Bomba"
+"Nükleer &Bomba"
 END
 
 CONTROLBAR:ConstructAmericaFireBase
@@ -10886,15 +10886,15 @@ CONTROLBAR:FireBaseExit
 END
 
 CONTROLBAR:ConstructFakeGLACommandCenter
-"&Sahte Komuta Merkezi"
+"Sahte Komuta &Merkezi"
 END
 
 CONTROLBAR:ConstructFakeGLABarracks
-"&Sahte Kışla"
+"Sahte &Kışla"
 END
 
 CONTROLBAR:ConstructFakeGLASupplyStash
-"&Sahte İkmal Deposu"
+"Sahte İkmal &Deposu"
 END
 
 CONTROLBAR:ConstructFakeGLAArmsDealer
@@ -10902,15 +10902,15 @@ CONTROLBAR:ConstructFakeGLAArmsDealer
 END
 
 CONTROLBAR:ConstructChinaInternetCenter
-"&İnternet Merkezi"
+"İnte&rnet Merkezi"
 END
 
 CONTROLBAR:ConstructGLAVehicleCombatBike
-"&Savaş Motoru"
+"Sa&vaş Motoru"
 END
 
 CONTROLBAR:ConstructChinaTankEmperor
-"&Emperor Overlord"
+"Emperor &Overlord"
 END
 
 CONTROLBAR:ConstructGLAInfantrySaboteur
@@ -10926,7 +10926,11 @@ CONTROLBAR:ConstructChinaInfantryMiniGunner
 END
 
 CONTROLBAR:ConstructAmericaJetKingRaptor
-"&King Raptor"
+"King Ra&ptor"
+END
+
+CONTROLBAR:ConstructAmericaVehicleTomahawk
+"Tomaha&wk"
 END
 
 CONTROLBAR:ConstructAmericaJetFuelAirAurora
@@ -10938,7 +10942,7 @@ CONTROLBAR:ConstructGLAInfantrySniper
 END
 
 CONTROLBAR:ConstructAmericaVehicleSentryDrone
-"&Nöbetçi Dronu"
+"Nöb&etçi Dronu"
 END
 
 CONTROLBAR:ConstructAmericaVehicleHellfireDrone
@@ -10962,7 +10966,7 @@ CONTROLBAR:ConstructChinaVehicleListeningOutpost
 END
 
 CONTROLBAR:ConstructFakeGLABlackMarket
-"&Sahte Karaborsa"
+"Sa&hte Karaborsa"
 END
 
 CONTROLBAR:ConstructAmericaTomahawkStorm
@@ -10970,11 +10974,11 @@ CONTROLBAR:ConstructAmericaTomahawkStorm
 END
 
 CONTROLBAR:ConstructGLAVehicleBattleBus
-"&Savaş Otobüsü"
+"Savaş &Otobüsü"
 END
 
 CONTROLBAR:UpgradeAmericaSentryDroneGun
-"&Nöbetçi Dronu Silahı"
+"Nöbetçi &Dronu Silahı"
 END
 
 CONTROLBAR:UpgradeGLAQuadCannonSnipe
@@ -10982,11 +10986,11 @@ CONTROLBAR:UpgradeGLAQuadCannonSnipe
 END
 
 CONTROLBAR:UpgradeAmericaSupplyLines
-"&İkmal Hatları"
+"İk&mal Hatları"
 END
 
 CONTROLBAR:UpgradeAmericaMOAB
-"&Bombaların Anası"
+"Bomba&ların Anası"
 END
 
 CONTROLBAR:BecomeRealGLACommandCenter
@@ -11014,11 +11018,11 @@ CONTROLBAR:UpgradeAmericaBunkerBusters
 END
 
 CONTROLBAR:UpgradeAmericaCountermeasures
-"&Karşı Tedbirler"
+"Karşı Te&dbirler"
 END
 
 CONTROLBAR:UpgradeAmericaChemicalSuits
-"&Kimyasal Koruma Giysileri"
+"Kimyasal Koruma &Giysileri"
 END
 
 CONTROLBAR:UpgradeChinaSatelliteHackOne
@@ -11042,7 +11046,7 @@ CONTROLBAR:UpgradeChinaTankAutoLoader
 END
 
 CONTROLBAR:UpgradeChinaNeutronShells
-"&Nötron Mermileri"
+"Nöt&ron Mermileri"
 END
 
 CONTROLBAR:UpgradeChinaFusionReactors
@@ -11058,23 +11062,23 @@ CONTROLBAR:ChinaUpgradeHelixNukeBomb
 END
 
 CONTROLBAR:UpgradeHelixNapalmBomb
-"&Napalm Bombası"
+"Napalm &Bombası"
 END
 
 CONTROLBAR:UpgradeGLAFortifiedStructure
-"&Tahkimli Yapı"
+"Ta&hkimli Yapı"
 END
 
 CONTROLBAR:UpgradeGLABoobyTrap
-"&Bubi Tuzağı"
+"Bubi Tu&zağı"
 END
 
 CONTROLBAR:DetonateFakeBuilding
-"&Şimdi Patlat!"
+"Şimdi &Patlat!"
 END
 
 CONTROLBAR:UpgradeGLAWorkerFakeCommandSet
-"&Sahte Yapılara Geç"
+"Sahte &Yapılara Geç"
 END
 
 CONTROLBAR:UpgradeGLAWorkerRealCommandSet
@@ -11090,11 +11094,11 @@ CONTROLBAR:UpgradeGLACamoNetting
 END
 
 CONTROLBAR:UpgradeGLAAnthraxGamma
-"&Şarbon Gama"
+"Şarbon &Gama"
 END
 
 CONTROLBAR:UpgradeGLAWorkerShoes
-"&İşçi Ayakkabıları"
+"İşçi A&yakkabıları"
 END
 
 CONTROLBAR:UpgradeEMPMines
@@ -11102,7 +11106,7 @@ CONTROLBAR:UpgradeEMPMines
 END
 
 CONTROLBAR:NukeWarhead
-"&Nükleer Mermi"
+"Nükleer &Mermi"
 END
 
 CONTROLBAR:NeutronWarhead
@@ -11154,7 +11158,7 @@ CONTROLBAR:NukeDrop
 END
 
 CONTROLBAR:Frenzy
-"&Hiddet"
+"H&iddet"
 END
 
 CONTROLBAR:RadarVanScanShortcut
@@ -11182,11 +11186,11 @@ CONTROLBAR:ECMDisableVehicle
 END
 
 CONTROLBAR:BoobyTrapAttack
-"&Bubi Tuzağı Kur"
+"Bubi &Tuzağı Kur"
 END
 
 CONTROLBAR:GPSScrambler
-"&GPS Karıştırıcı"
+"GP&S Karıştırıcı"
 END
 
 CONTROLBAR:FireParticleUplinkCannonShortcut
@@ -11322,7 +11326,7 @@ UPGRADE:AmericaCountermeasures
 END
 
 UPGRADE:UpgradeChinaIsotopeStability
-"&İzotop Kararlılığı"
+"İ&zotop Kararlılığı"
 END
 
 CONTROLBAR:TooltipUpgradeChinaIsotopeStability
@@ -14018,7 +14022,7 @@ CONTROLBAR:Infa_TooltipParaDrop
 END
 
 CONTROLBAR:Infa_ConstructChinaInfantryHacker
-"&Süper Hacker"
+"Süper &Hacker"
 END
 
 CONTROLBAR:Infa_ToolTipChinaBuildHacker
@@ -14034,11 +14038,11 @@ CONTROLBAR:Infa_ConstructChinaVehicleListeningOutpost
 END
 
 CONTROLBAR:Infa_ConstructChinaVehicleTroopCrawler
-"&Taarruz Birlik Taşıyıcısı"
+"Taarruz &Birlik Taşıyıcısı"
 END
 
 CONTROLBAR:Infa_ConstructChinaVehicleHelix
-"&Taarruz Helix'i"
+"Taarruz &Helix'i"
 END
 
 CONTROLBAR:Infa_ToolTipChinaBuildHelix
@@ -14078,7 +14082,7 @@ CONTROLBAR:AirF_ToolTipUSABUildChinook
 END
 
 CONTROLBAR:SuicideAttack
-"&İntihar"
+"İ&ntihar"
 END
 
 CONTROLBAR:ToolTipGLASuicideAttack
@@ -14126,7 +14130,7 @@ CONTROLBAR:ToolTipGLAScienceSneakAttack
 END
 
 CONTROLBAR:Chem_ConstructGLAInfantryRebel
-"&Toksin Asisi"
+"Toksin &Asisi"
 END
 
 CONTROLBAR:Chem_ToolTipGLABuildRebel
@@ -14142,7 +14146,7 @@ OBJECT:Chem_Terrorist
 END
 
 CONTROLBAR:Chem_ConstructGLAInfantryTerrorist
-"&Toksin Teröristi"
+"To&ksin Teröristi"
 END
 
 CONTROLBAR:Chem_ToolTipGLABuildTerrorist
@@ -14410,7 +14414,7 @@ CONTROLBAR:Demo_ConstructGLADemoTrap
 END
 
 CONTROLBAR:Nuke_ConstructChinaPowerPlant
-"&Gelişmiş Nükleer Reaktör"
+"Gelişmiş Nükleer Reak&tör"
 END
 
 CONTROLBAR:SupW_UpgradeAmericaAdvancedControlRods
@@ -14418,7 +14422,7 @@ CONTROLBAR:SupW_UpgradeAmericaAdvancedControlRods
 END
 
 CONTROLBAR:Nuke_CarpetBomb
-"&Nükleer Bombacı"
+"Nük&leer Bombacı"
 END
 
 OBJECT:Nuke_NuclearReactor
@@ -15021,8 +15025,8 @@ GUI:OptionsTabControls
 "Kontroller"
 END
 
-GUI:OptionsTabGameplay
-"Oynanış"
+GUI:OptionsTabInterface
+"Arayüz"
 END
 
 GUI:OptionsTabNetwork
@@ -15129,8 +15133,16 @@ GUI:OptionsGroupVolume
 "Ses Düzeyi"
 END
 
-GUI:OptionsGroupScrolling
-"Kaydırma"
+GUI:OptionsGroupCamera
+"Kamera"
+END
+
+GUI:OptionsGroupPlacement
+"Bina Yerleştirme"
+END
+
+GUI:OptionsGroupLighting
+"Işık ve Parlama"
 END
 
 GUI:OptionsGroupOrders
@@ -15151,10 +15163,6 @@ END
 
 GUI:OptionsGroupProxy
 "Vekil Sunucu"
-END
-
-GUI:OptionsGroupTerrain
-"Arazi"
 END
 
 GUI:OptionsGroupShadows
@@ -15186,7 +15194,27 @@ GUI:WindowMode2
 END
 
 TOOLTIP:WindowMode
-"Tam ekran, görüntü modunu devralır; kenarlıksız, ekranı bir pencereyle kaplar ve alt-tab anında gerçekleşir. Kenarlıksız monitörün kendi çözünürlüğünü alır; diğer iki modda yukarıdaki listeden siz seçersiniz."
+"Tam ekran, monitörü yukarıdaki çözünürlükte kaplar, küçükse ekrana büyütür, alt-tab'da kenara çekilir. Kenarlıksız her zaman monitörün kendi çözünürlüğünde çizer ve diğer pencerelerin arkasında yerinde durur."
+END
+
+GUI:ResolutionNote0
+"Monitör bu modu destekliyor"
+END
+
+GUI:FullscreenScaling
+"Tam Ekran Sığdırma"
+END
+
+GUI:FullscreenScaling0
+"Ekranı doldur"
+END
+
+GUI:FullscreenScaling1
+"Oranı koru, şerit ekle"
+END
+
+TOOLTIP:FullscreenScaling
+"Çözünürlüğün oranı monitörünkiyle aynı değilse tam ekranın nasıl dolacağı; 1920x1200 ekranda 1920x1080 ya da geniş ekranda 1024x768 gibi. Ekranı doldur her pikseli kaplar; diğeri görüntünün oranını korur, kenarlara siyah şerit koyar."
 END
 
 GUI:Monitor
@@ -15342,7 +15370,7 @@ GUI:ZoomToCursor
 END
 
 TOOLTIP:ZoomToCursor
-"Tekerlek, ekranın ortası yerine imlecin üzerinde durduğu yere doğru yakınlaştırır. Yalnızca Modern kontrollerde."
+"Tekerlek, ekranın ortası yerine imlecin üzerinde durduğu yere doğru yakınlaştırır."
 END
 
 GUI:StartAtMaxZoom
@@ -15350,15 +15378,15 @@ GUI:StartAtMaxZoom
 END
 
 TOOLTIP:StartAtMaxZoom
-"Maç, kamera tekerleğin gittiği en uzak noktadayken açılır. Kapalıyken haritanın kendisi için ayarlanan yükseklikte açılır."
+"Maç, kamera tekerleğin gittiği en uzak noktadayken açılır. Kapalıyken yakından, oyunun orijinalinde kullanılan yükseklikte açılır."
 END
 
-GUI:CloserZoom
-"Daha Yakın Kamera"
+GUI:ZoomSpeed
+"Yakınlaştırma Hızı"
 END
 
-TOOLTIP:CloserZoom
-"Tekerleğin kamerayı yere ne kadar daha yaklaştırabileceği. Yüzde 0 oyunun kendi sınırıdır."
+TOOLTIP:ZoomSpeed
+"Fare tekerleğinin bir çentiği kamerayı ne kadar yaklaştırıp uzaklaştırır. 100'de oyunun orijinalindeki kadar gider. Kabul ile uygulanır."
 END
 
 GUI:DragTolerance
@@ -15367,6 +15395,14 @@ END
 
 TOOLTIP:DragTolerance
 "Bir tuş basılıyken fare kaç piksel oynarsa tıklamanın sürüklemeye döneceği. Seçim kutuları yanlışlıkla açılıyorsa yükseltin, sürüklemeler tıklama sayılıyorsa düşürün."
+END
+
+GUI:AmbientVolume
+"Ortam Sesi"
+END
+
+TOOLTIP:AmbientVolume
+"Kuşlar, rüzgâr, su ve kasabanın uğultusu. Efekt Sesi artık bunları değiştirmez; çatışma yüksek kalırken çevresi sessiz kalabilir."
 END
 
 GUI:IsometricCamera
@@ -15406,7 +15442,7 @@ GUI:GridBuild
 END
 
 TOOLTIP:GridBuild
-"Yapılar yol bulucunun kendi 10 birimlik ızgarasına oturur; böylece göz kararı yerleştirilen iki bina, arada yürünemeyecek kadar dar bir boşluk bırakmak yerine kenar kenara durur."
+"Yapılar yol bulucunun kendi 10 birimlik ızgarasına oturur, ızgara da yerleştirirken binanın altında çizilir; böylece göz kararı yerleştirilen iki bina, arada yürünemeyecek kadar dar bir boşluk bırakmak yerine kenar kenara durur. Kapalıyken yalnızca bina konamayan hücreler işaretlenir."
 END
 
 GUI:NudgeBuild
@@ -15423,6 +15459,14 @@ END
 
 TOOLTIP:SnapBuild45
 "Sürükleyerek döndürme sekiz 45 derecelik yönden birine oturur; üssün kenarı boyunca dizilen duvarlar ve savunmalar için gereken de budur."
+END
+
+GUI:SnapBuildNeighbour
+"Yakındaki Binalara Yapıştır"
+END
+
+TOOLTIP:SnapBuildNeighbour
+"Başka bir yapının bir hücre kadar gerisine konan yapı onun kenarına çekilir, iki bina arasında boşluk kalmaz."
 END
 
 GUI:RangeRing
@@ -15458,7 +15502,7 @@ TOOLTIP:HudOverlay
 END
 
 GUI:NetBox
-"Saat ve Kare Hızı Kutusu"
+"Bilgi Kutusu"
 END
 
 TOOLTIP:NetBox
@@ -15466,7 +15510,7 @@ TOOLTIP:NetBox
 END
 
 GUI:OptionsGroupHud
-"Arayüz"
+"Göstergeler"
 END
 
 GUI:IncomeRate
@@ -15535,22 +15579,6 @@ END
 
 TOOLTIP:HudScale
 "Komuta çubuğunu ve alttaki arayüzü çözünürlüğün seçtiğinden daha büyük çizer."
-END
-
-GUI:MenuLayout
-"Menü Düzeni"
-END
-
-GUI:MenuLayout0
-"Esnet"
-END
-
-GUI:MenuLayout1
-"Sığdır"
-END
-
-TOOLTIP:MenuLayout
-"Sığdır, menüleri çizildikleri biçimde tutar ve geniş ekranda ortalar. Esnet, oyunun her zaman yaptığı gibi onları ekranın kenarlarına kadar genişletir."
 END
 
 GUI:OptionsGroupInput
@@ -15805,6 +15833,22 @@ TOOLTIP:StatNewWeaponFigures
 "%d hasar, %d menzil"
 END
 
+TOOLTIP:StatShortDamagePerSecond
+"DPS"
+END
+
+TOOLTIP:StatVsGuns
+"Mermi"
+END
+
+TOOLTIP:StatVsShells
+"Top"
+END
+
+TOOLTIP:StatVsRockets
+"Roket"
+END
+
 TOOLTIP:Upgrades
 "GELİŞTİRMELER"
 END
@@ -15891,6 +15935,10 @@ END
 
 GUI:CheatPanelTitle
 "Hileler"
+END
+
+GUI:CheatPanelClose
+"Kapat"
 END
 
 GUI:CheatMoney

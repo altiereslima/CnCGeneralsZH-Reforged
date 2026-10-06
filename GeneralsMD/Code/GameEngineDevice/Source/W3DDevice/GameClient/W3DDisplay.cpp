@@ -71,6 +71,7 @@ static void drawFramerateBar(void);
 
 #include "GameClient/Drawable.h"
 #include "W3DDevice/GameClient/W3DSmoothMotion.h"
+#include "W3DDevice/GameClient/Module/W3DModelDraw.h"
 #include "GameLogic/Object.h"
 #include "GameClient/Keyboard.h"		// TheKeyboard; on Windows WinMain.h brought it too
 #include "Platform/SleepMilliseconds.h"
@@ -517,11 +518,6 @@ W3DDisplay::~W3DDisplay()
 
 	// Same reason as above: WW3D2 has no logging in a shipping build, and a -dx11 run that made no
 	// device at all would otherwise look exactly like one that made a device nothing drew through.
-	if( Direct3D11_Normal_Maps_Active() )
-	{
-		DEBUG_LOG(("NORMALMAPS: %I64u draws lit per pixel\n", Direct3D11_Normal_Mapped_Draws()));
-	}
-
 	if( Direct3D11_Is_Enabled() )
 	{
 		unsigned pipelines = 0;
@@ -685,13 +681,12 @@ void Reset_D3D_Device(bool active)
 {
 	if (TheDisplay && WW3D::Is_Initted() && !TheDisplay->getWindowed())
 	{
-		// Under the Direct3D 11 picture nothing owns the display exclusively, so leaving loses no
-		// device: the mode and the window covering it go, and come back with the game.
-		if (Direct3D11_Present_Is_Enabled())
-		{
-			DX8Wrapper::Apply_Fullscreen_Display(active);
-			return;
-		}
+		// On Windows nothing owns the display exclusively under either renderer, so leaving loses no
+		// device: the window covering the monitor goes, and comes back with the game.
+#if defined(_WIN32)
+		DX8Wrapper::Apply_Fullscreen_Display(active);
+		return;
+#endif
 		if (active)
 		{	
 			//switch back to desired mode when user alt-tabs back into game
@@ -835,6 +830,8 @@ static void sizeWindowToClient( Int mode, Int width, Int height )
 // and share the back buffer's depth with it.
 static void pushDirect3D11PostChain( void )
 {
+	// Classic graphics is the game's own picture, which is what -d3d9 draws: hard edged sprites.
+	Direct3D11_Allow_Soft_Particles( !TheGlobalData->m_classicGraphics );
 	const AsciiString & requested = TheGlobalData->m_direct3D11PostChain;
 	if( !Direct3D11_Post_Chain( requested.str() ) && !requested.isEmpty() )
 	{
@@ -855,6 +852,7 @@ Bool W3DDisplay::setDisplayMode( UnsignedInt xres, UnsignedInt yres, UnsignedInt
 	{
 		DX8Wrapper::Set_Requested_VSync( TheGlobalData->m_vsync != FALSE );
 		Direct3D11_Set_VSync( TheGlobalData->m_vsync != FALSE );
+		DX8Wrapper::Set_Requested_Fullscreen_Keep_Aspect( TheGlobalData->m_fullscreenScaling == FULLSCREEN_SCALING_KEEP_ASPECT );
 		pushDirect3D11PostChain();
 	}
 	DX8Wrapper::Set_Requested_Monitor( chosenMonitor().device );
@@ -1127,6 +1125,7 @@ void W3DDisplay::init( void )
 	DX8Wrapper::Set_Requested_VSync( TheGlobalData->m_vsync != FALSE );
 	Direct3D11_Set_VSync( TheGlobalData->m_vsync != FALSE );
 	DX8Wrapper::Set_Requested_Monitor( chosenMonitor().device );
+	DX8Wrapper::Set_Requested_Fullscreen_Keep_Aspect( TheGlobalData->m_fullscreenScaling == FULLSCREEN_SCALING_KEEP_ASPECT );
 
 	// Same reason: WW3D2 cannot see GlobalData, so the backend choice is pushed in from here.  The
 	// fixed-function probe and the generated combiner shaders are always on.
@@ -1139,10 +1138,8 @@ void W3DDisplay::init( void )
 	// next to its exe, and the shipped programs there are read-only anyway.
 	Direct3D11_Set_Shader_Cache_Directory( TheGlobalData->getPath_UserData().str() );
 	pushDirect3D11PostChain();
-	// Classic graphics is read here once and not again: a texture that has looked for its normal
-	// map keeps the answer, and a tile size cannot change under a loaded map.  The menu says the
-	// setting waits for the next launch.
-	Direct3D11_Normal_Maps_Enable( !TheGlobalData->m_classicGraphics );
+	// Classic graphics is read here once and not again: a tile size cannot change under a loaded
+	// map.  The menu says the setting waits for the next launch.
 	// Before any map is read: every tile and the atlas are sized by it.  A headless run draws no
 	// ground, so it keeps EA's tile and the memory, and classic graphics keeps EA's tile to look it.
 	TheTilePixelExtent = (TheGlobalData->m_headless || TheGlobalData->m_classicGraphics)
@@ -2186,7 +2183,7 @@ static Bool s_smoothApplied = FALSE;
 
 static void smoothMotionBegin()
 {
-	TheSmoothMotionActive = TheGlobalData->m_smoothMotion && !TheGlobalData->m_headless;
+	TheSmoothMotionActive = TheGlobalData->m_smoothMotion && !TheGlobalData->m_headless && !TheGlobalData->isClassicUI();
 	TheSmoothMotionAlpha = TheSmoothMotionActive ? GameEngine_logicTickFraction() : 1.0f;
 	if (!TheSmoothMotionActive)
 		return;
@@ -2530,6 +2527,10 @@ AGAIN:
 			// R1: after the particles read the logic bones (Lorenzen's note above), before anything renders.
 			smoothMotionApply();
 
+			// After the smooth motion, so a lamp's light sits where its model is drawn this frame.
+			if (primaryW3DView && primaryW3DView->get3DCamera())
+				W3DModelDraw::lightHeadlights(primaryW3DView->get3DCamera()->Get_Position());
+
 			if (TheWaterRenderObj)
 				TheWaterRenderObj->updateRenderTargetTextures(primaryW3DView->get3DCamera());	//do a render into each texture
 
@@ -2571,11 +2572,6 @@ AGAIN:
 		{
 			USE_PERF_TIMER(BigAssRenderLoop)
 			static Bool couldRender = true;
-			// The bumped ground is shaded against the first terrain light, the one its
-			// vertex colours were lit by.  A script can change the time of day, so every frame.
-			const Coord3D &sun = TheGlobalData->m_terrainLightPos[0];
-			const float sunDirection[3] = { sun.x, sun.y, sun.z };
-			Direct3D11_Set_Terrain_Sun( sunDirection );
 			if ((TheGlobalData->m_breakTheMovie == FALSE) && (TheGlobalData->m_disableRender == false) && WW3D::Begin_Render( true, true, Vector3( 0.0f, 0.0f, 0.0f ), TheWaterTransparency->m_minWaterOpacity ) == WW3D_ERROR_OK)		
 			{
 				
@@ -2721,10 +2717,11 @@ AGAIN:
 					unsigned pipelines = 0;
 					double textureMS = 0.0;
 					unsigned textures = 0;
-					Direct3D11_Take_Frame_Cost( pipelineMS, pipelines, textureMS, textures );
+					unsigned depthCopies = 0;
+					Direct3D11_Take_Frame_Cost( pipelineMS, pipelines, textureMS, textures, depthCopies );
 					if( pipelineMS + textureMS > DX11_FRAME_COST_REPORT_MS )
-						DEBUG_LOG(("DX11 FRAME COST frame %d: %u pipelines built in %.1f ms, %u textures copied in %.1f ms\n",
-							TheGameLogic->getFrame(), pipelines, pipelineMS, textures, textureMS));
+						DEBUG_LOG(("DX11 FRAME COST frame %d: %u pipelines built in %.1f ms, %u textures copied in %.1f ms, %u soft particle depth copies\n",
+							TheGameLogic->getFrame(), pipelines, pipelineMS, textures, textureMS, depthCopies));
 
 					long presentResult = 0;
 					if( Direct3D11_Take_Present_Failure( presentResult ) )
@@ -4393,6 +4390,21 @@ void W3DDisplay::preloadTextureAssets( AsciiString texture )
 	}  // end if
 
 }  // end preloadModelAssets
+
+//-------------------------------------------------------------------------------------------------
+/** The asset manager keeps the first TextureClass made under a name, and Render2D's Set_Texture
+	* reuses it.  Preloaded with Get_Texture's defaults it had every mip level and went through the
+	* Texture Quality reduction, so a 4096 wide bar painting was drawn at 2048 below the top setting.
+	* Asked for the way Render2D asks, one level, which the loader never reduces. */
+//-------------------------------------------------------------------------------------------------
+void W3DDisplay::preloadImageTexture( AsciiString texture )
+{
+	if( m_assetManager )
+	{
+		TextureClass *theTexture = m_assetManager->Get_Texture( texture.str(), MIP_LEVELS_1 );
+		theTexture->Release_Ref();
+	}
+}
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------

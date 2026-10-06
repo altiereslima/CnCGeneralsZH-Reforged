@@ -1,0 +1,24 @@
+# Laser beams in one view, for pictures of the beam glow: a Paladin under four Rocket Buggies, an
+# Avenger under five Tank Hunters (both point defense lasers burst missiles), and a Laser General
+# Crusader and Avenger firing their own beams at the buggies. Draws, so -win and not -headless:
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -noFPSLimit -turbo -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 7 -maxframes 260 -camera 3330 3900
+#     -video 130 230 laserglow_d3d11 -scenario laserglow -logPrefix laserglow_d3d11_
+#
+# The same with -d3d9 and the names changed is the reference device. Positions are the Paladin and
+# Avenger fights of missiledefence.txt pulled together.
+
+30    spawn      0  AmericaTankPaladin            1   3260 3820
+30    spawn      1  GLAVehicleRocketBuggy         4   3260 4100  30
+60    attackmove 1  GLAVehicleRocketBuggy             3260 3820
+
+30    spawn      0  AmericaTankAvenger            1   3400 3820
+30    spawn      1  ChinaInfantryTankHunter       5   3400 4060  18
+60    attack     1  ChinaInfantryTankHunter       0  AmericaTankAvenger
+
+30    spawn      0  Lazr_AmericaTankCrusader      1   3300 3740
+30    spawn      0  Lazr_AmericaTankAvenger       1   3360 3740
+60    attack     0  Lazr_AmericaTankCrusader      1  GLAVehicleRocketBuggy
+60    attack     0  Lazr_AmericaTankAvenger       1  ChinaInfantryTankHunter

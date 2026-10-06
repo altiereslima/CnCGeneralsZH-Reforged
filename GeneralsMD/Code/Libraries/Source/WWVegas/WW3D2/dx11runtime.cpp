@@ -35,7 +35,6 @@ static HRESULT PresentFailure = S_OK;
 static bool PresentFailureReported = false;
 static bool VSyncRequested = false;
 static bool Active = false;
-static bool NormalMapsEnabled = true;
 static DX11DeviceClass Device;
 static DX11BackendClass Backend;
 static DX11PostProcessClass Post;
@@ -255,44 +254,44 @@ void Direct3D11_Mirror_Texture(unsigned stage, struct IDirect3DBaseTexture9 * te
 		: DX11Texture_Mirror(Device.Get_Device(), Device.Get_Context(), texture);
 	Backend.Set_Texture(stage, view);
 	Backend.Set_Texture_Missing(stage, texture != NULL && view == NULL);
-
-	// A new texture at stage zero drops the old one's normal map.  TextureClass::Apply hands over
-	// the new one's right after this, and a texture bound any other way has none.
-	if (stage == 0) {
-		Backend.Set_Normal_Map(NULL);
-	}
 }
 
-void Direct3D11_Normal_Maps_Enable(bool enabled)
-{
-	NormalMapsEnabled = enabled;
-}
-
-bool Direct3D11_Normal_Maps_Active()
-{
-	return Active && NormalMapsEnabled;
-}
-
-void Direct3D11_Mirror_Normal_Map(struct IDirect3DBaseTexture9 * normal_map)
-{
-	if (!Active) {
-		return;
-	}
-	Backend.Set_Normal_Map(normal_map == NULL
-		? NULL
-		: DX11Texture_Mirror(Device.Get_Device(), Device.Get_Context(), normal_map));
-}
-
-void Direct3D11_Set_Terrain_Sun(const float direction[3])
+void Direct3D11_Set_Headlights(const float * lights, unsigned count, const float gain[3])
 {
 	if (Active) {
-		Backend.Set_Terrain_Sun(direction);
+		Backend.Set_Headlights(lights, count, gain);
 	}
 }
 
-unsigned long long Direct3D11_Normal_Mapped_Draws()
+void Direct3D11_Set_Blast_Lights(const float * lights, unsigned count)
 {
-	return Active ? Backend.Normal_Mapped_Draw_Count() : 0;
+	if (Active) {
+		Backend.Set_Blast_Lights(lights, count);
+	}
+}
+
+bool Direct3D11_Lights_Per_Pixel()
+{
+	return Active && Backend.Lights_Per_Pixel();
+}
+
+void Direct3D11_Set_Soft_Particles(bool soft)
+{
+	if (Active) {
+		Backend.Set_Soft_Particles(soft);
+	}
+}
+
+void Direct3D11_Take_Scene_Depth()
+{
+	if (Active) {
+		Backend.Take_Scene_Depth();
+	}
+}
+
+void Direct3D11_Allow_Soft_Particles(bool allowed)
+{
+	Backend.Allow_Soft_Particles(allowed);
 }
 
 bool Direct3D11_Begin_Shadow_Map(unsigned size)
@@ -770,12 +769,14 @@ void Direct3D11_Program_Statistics(unsigned & shipped, unsigned & held)
 }
 
 void Direct3D11_Take_Frame_Cost(double & pipeline_milliseconds, unsigned & pipelines,
-	double & texture_milliseconds, unsigned & textures)
+	double & texture_milliseconds, unsigned & textures, unsigned & depth_copies)
 {
 	pipeline_milliseconds = 0.0;
 	pipelines = 0;
+	depth_copies = 0;
 	if (Active) {
 		Backend.Take_Frame_Build_Cost(pipeline_milliseconds, pipelines);
+		depth_copies = Backend.Take_Frame_Depth_Copies();
 	}
 	DX11Texture_Take_Frame_Cost(texture_milliseconds, textures);
 }

@@ -383,7 +383,7 @@ static void append_input_coordinate_sets(std::string & hlsl, unsigned coordinate
 // What every generated vertex program writes, whatever it was generated from.  Shader model 4
 // links the stages by slot in declaration order, so this structure and ffshader's input structure
 // are one thing in two files: a program that writes a different set links against nothing.
-static void append_output_structure(std::string & hlsl, bool for_d3d11, bool normal_mapped)
+static void append_output_structure(std::string & hlsl, bool for_d3d11)
 {
 	hlsl +=
 		"struct Output\n"
@@ -400,9 +400,6 @@ static void append_output_structure(std::string & hlsl, bool for_d3d11, bool nor
 	}
 
 	hlsl += "    float Fog : FOG;\n";
-	if (normal_mapped) {
-		hlsl += NORMAL_MAPPED_VARYINGS;
-	}
 	hlsl +=
 		"};\n"
 		"\n";
@@ -441,7 +438,7 @@ static bool generate_pretransformed(const VertexPipelineDescription & descriptio
 	hlsl +=
 		"};\n"
 		"\n";
-	append_output_structure(hlsl, for_d3d11, false);
+	append_output_structure(hlsl, for_d3d11);
 	hlsl +=
 		"Output main(Input input)\n"
 		"{\n"
@@ -509,9 +506,6 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 	if (description.LightingEnabled && !has_normal(description.FVF)) {
 		return false;
 	}
-	if (description.NormalMapped && is_pretransformed(description.FVF)) {
-		return false;
-	}
 	if (description.SmokeGlow
 		&& (description.LightingEnabled || !has_normal(description.FVF) || is_pretransformed(description.FVF))) {
 		return false;
@@ -566,9 +560,9 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 		// Each light's own ambient is in that second sum (ambient_light, summed in append_light).  It
 		// was left out once on the belief that W3D's lights all have a black one; its point lights do
 		// not (dx8wrapper.cpp's light environment, W3DDisplay's dynamic lights).
-		// A normal mapped draw lights its directional lights per pixel.  A point or spot light - the
-		// flash of a gun, the glow of a fire - stays per vertex and is summed on its own, so it can
-		// be handed to the pixel half as part of the base it adds the bumped light to.
+		// A point or spot light is summed on its own and folded in after the loop.  The split served
+		// the normal mapped path, which is gone; it stays because the text is what the shader cache
+		// is keyed by.
 		body += "    float3 diffuse_light = float3(0.0, 0.0, 0.0);\n";
 		body += "    float3 local_light = float3(0.0, 0.0, 0.0);\n";
 		body += "    float3 specular_light = float3(0.0, 0.0, 0.0);\n";
@@ -595,14 +589,6 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 		body += "    output.Diffuse.rgb = saturate(" + diffuse + ".rgb * diffuse_light + "
 			+ ambient + ".rgb * (GlobalAmbient.rgb + ambient_light) + " + emissive + ".rgb);\n";
 		body += "    output.Diffuse.a = " + diffuse + ".a;\n";
-
-		if (description.NormalMapped) {
-			body += "    output.ViewPosition = view_position.xyz;\n";
-			body += "    output.ViewNormal = view_normal;\n";
-			body += "    output.LitBase = " + diffuse + ".rgb * local_light + " + ambient
-				+ ".rgb * (GlobalAmbient.rgb + ambient_light) + " + emissive + ".rgb;\n";
-			body += "    output.LitMaterial = " + diffuse + ".rgb;\n";
-		}
 
 		if (description.SpecularEnabled) {
 			std::string specular;
@@ -661,17 +647,6 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 		body += "    output.Fog = 1.0;\n";
 	}
 
-	// An unlit normal mapped draw is the terrain, whose light is baked into its vertex colour.  The
-	// pixel half only wants the position from it, to rebuild the surface frame; the lit colour it
-	// would otherwise be handed is not used.
-	if (description.NormalMapped && !description.LightingEnabled) {
-		body +=
-			"    output.ViewPosition = view_position.xyz;\n"
-			"    output.ViewNormal = view_normal;\n"
-			"    output.LitBase = float3(0.0, 0.0, 0.0);\n"
-			"    output.LitMaterial = float3(0.0, 0.0, 0.0);\n";
-	}
-
 	const bool for_d3d11 = (target == VERTEX_SHADER_TARGET_D3D11);
 
 	hlsl = "// Generated from a fixed-function vertex pipeline description.  See ffvertex.h.\n";
@@ -710,7 +685,7 @@ bool VertexShader_Generate(const VertexPipelineDescription & description,
 	hlsl +=
 		"};\n"
 		"\n";
-	append_output_structure(hlsl, for_d3d11, description.NormalMapped);
+	append_output_structure(hlsl, for_d3d11);
 	hlsl +=
 		"Output main(Input input)\n"
 		"{\n"
@@ -774,9 +749,6 @@ std::string VertexShader_Key(const VertexPipelineDescription & description)
 	snprintf(field, sizeof(field), ":F%u,%lu", description.FogEnabled ? 1u : 0u,
 		description.FogEnabled ? description.FogVertexMode : 0ul);
 	key += field;
-	if (description.NormalMapped) {
-		key += ":N";
-	}
 	if (description.SmokeGlow) {
 		key += ":G";
 	}

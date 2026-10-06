@@ -43,7 +43,9 @@
 #include "Common/GameType.h"
 #include "WorldHeightMap.h"
 
-#define MAX_ENABLED_DYNAMIC_LIGHTS 20
+// The lights one terrain relight takes in, the rest dropped.  Only the vertex path reads it: the
+// Direct3D 11 frame lights the ground per pixel and takes BLAST_LIGHT_SLOTS (32) instead.  Was 20.
+#define MAX_ENABLED_DYNAMIC_LIGHTS 32
 typedef UnsignedByte HeightSampleType;	//type of data to store in heightmap
 class W3DTreeBuffer;
 class W3DBibBuffer;
@@ -221,6 +223,7 @@ public:
 	Bool isCliffCell(Real x, Real y);	///<return height and normal at given point
 	Real getMinHeight(void) const {return m_minHeight;}	///<return minimum height of entire terrain
 	Real getMaxHeight(void) const {return m_maxHeight;}	///<return maximum height of entire terrain
+	void getDrawnExtent(Region3D *extent);	///<everything the terrain draws, the border ring past the playable map included, lowest to highest ground
 	Real getMaxCellHeight(Real x, Real y) const;	///< returns maximum height of the 4 cell corners.
 	WorldHeightMap *getMap(void) {return m_map;}	///< returns object holding the heightmap samples - need this for fast access.
 	Bool isClearLineOfSight(const Coord3D& pos, const Coord3D& posOther) const;
@@ -251,9 +254,12 @@ protected:
 	Int	m_y;	///< dimensions of heightmap
 
 #ifdef DO_SCORCH
-	enum { MAX_SCORCH_VERTEX=32768, 
-					MAX_SCORCH_INDEX=65535, 
-					MAX_SCORCH_MARKS=500,
+	// ponytail: one 16-bit buffer pair, so the indices cap the drawn marks at about 680 of radius
+	// fifteen whatever MAX_SCORCH_MARKS says (DX8IndexBufferClass counts in an unsigned short); the
+	// newest are drawn and the oldest wait in the list.  A second buffer pair when that shows.
+	enum { MAX_SCORCH_VERTEX=65535,
+					MAX_SCORCH_INDEX=65535,
+					MAX_SCORCH_MARKS=1000,
 					SCORCH_MARKS_IN_TEXTURE=9,
 					SCORCH_PER_ROW = 3};
 	DX8VertexBufferClass	*m_vertexScorch;	///<Scorch vertex buffer.
@@ -296,6 +302,29 @@ protected:
 
 	// STL is "smart." This is a variable sized bitset. Very memory efficient.
 	std::vector<bool> m_showAsVisibleCliff;
+
+	/** getStaticDiffuse's answer per height sample.  The 3-way blend pass asks for four of them per
+		visible tile on every render pass, and the answer only moves with the five heights it reads
+		(kept here as the key) and with the lights, whose every input sits in m_staticDiffuseInputs
+		as raw bits; a change there bumps m_staticDiffuseGeneration and so retires every cell.
+		The inputs are walked once a render frame, on every 3-way pass, and again after anything
+		that says the lighting moved (m_staticDiffuseStale), not on every call. */
+	struct StaticDiffuseCell
+	{
+		Int diffuse;
+		UnsignedShort generation;	///< 0 is never valid
+		UnsignedByte heights[5];	///< centre, left, right, below, above
+	};
+	std::vector<StaticDiffuseCell> m_staticDiffuseCells;
+	std::vector<UnsignedInt> m_staticDiffuseInputs;
+	UnsignedShort m_staticDiffuseGeneration;
+	Bool m_staticDiffuseStale;				///< lighting or map changed since the last walk
+	UnsignedInt m_staticDiffuseFrame;	///< WW3D frame of the last walk
+	void refreshStaticDiffuseInputs(void);
+
+	/// Bumped by anything that can change what the ground draws: heights, lighting, the 3-way tile
+	/// list.  A cache of terrain vertices that saw the same value has nothing to rebuild.
+	Int m_terrainContentVersion;
 
 
 	ShaderClass m_shaderClass; ///<shader or rendering state for heightmap

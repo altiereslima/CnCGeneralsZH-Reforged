@@ -1,0 +1,74 @@
+# Hero loop 01: America from the south against the GLA from the north, meeting on the
+# Tournament Desert crossroads at 1020,1350, with waves at 420, 540, 660 and 800 so the middle stays
+# busy over frames 600 to 1019, and powers timed to land between 700 and 1020.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -particlecap 30000 -quickstart
+#     -noshellmap -observer -multiInstance -map "Maps\Tournament Desert\Tournament Desert.map"
+#     -autoskirmish 2 -takeover -side 0 FactionAmerica -side 1 FactionGLA -seed 7
+#     -scenario hero_loop_01 -cinema hero_loop_01 -video 600 1019 hero_loop_01 -maxframes 1040
+# --- buildings, at the starts, out of frame -------------------------------------------------------
+10    spawn  0  AmericaParticleCannonUplink     1   start0:0:-200
+10    spawn  0  AmericaPowerPlant               3   start0:-260:40    90
+10    spawn  0  AmericaCommandCenter            1   start0:240:60
+10    spawn  1  GLAScudStorm                    1   start1:0:200
+10    spawn  1  GLACommandCenter                1   start1:-260:0
+# --- America, from the south ---------------------------------------------------------------------
+150   spawn  0  AmericaTankCrusader             20  1138 989   34
+150   spawn  0  AmericaTankCrusader             20  898 990    34
+150   spawn  0  AmericaTankPaladin              14  1018 900   38
+150   spawn  0  AmericaInfantryRanger           30  1258 989   14
+150   spawn  0  AmericaInfantryMissileDefender  24  778 990    14
+150   spawn  0  AmericaVehicleTomahawk          8   1137 809   40
+150   spawn  0  AmericaTankMicrowave            5   897 810    40
+150   spawn  0  AmericaVehicleHumvee            10  1258 899   36
+150   spawn  0  AmericaVehicleComanche          3   1018 900   60
+150   spawn  0  AmericaJetRaptor                6   1017 810   70
+# --- the GLA, from the north ---------------------------------------------------------------------
+150   spawn  1  GLATankScorpion                 20  1141 1709  34
+150   spawn  1  GLATankScorpion                 20  901 1710   34
+150   spawn  1  GLATankMarauder                 12  1021 1799  40
+150   spawn  1  GLAVehicleRocketBuggy           12  1261 1799  32
+150   spawn  1  GLAVehicleQuadCannon            8   781 1800   36
+150   spawn  1  GLAVehicleToxinTruck            6   1142 1889  36
+150   spawn  1  GLAVehicleTechnical             10  902 1890   30
+150   spawn  1  GLAVehicleBattleBus             4   1022 1889  40
+150   spawn  1  GLAInfantryRebel                30  1261 1709  14
+150   spawn  1  GLAInfantryTunnelDefender       24  781 1710   14
+160   attackmove 0  *  1020 1350
+160   attackmove 1  *  1020 1350
+# --- waves ---------------------------------------------------------------------------------------
+420   spawn  0  AmericaTankCrusader             16  1018 900   34
+420   spawn  0  AmericaInfantryRanger           24  1258 899   14
+420   spawn  1  GLATankScorpion                 16  1021 1799  34
+420   spawn  1  GLAInfantryRebel                24  1261 1799  14
+430   attackmove 0  *  1020 1350
+430   attackmove 1  *  1020 1350
+540   spawn  0  AmericaTankPaladin              10  1018 900   38
+540   spawn  1  GLATankMarauder                 10  1021 1799  40
+540   spawn  1  GLAVehicleRocketBuggy           8   781 1800   32
+550   attackmove 0  *  1020 1350
+550   attackmove 1  *  1020 1350
+660   spawn  0  AmericaTankCrusader             16  1018 900   34
+660   spawn  0  AmericaTankPaladin              6   898 900    38
+660   spawn  0  AmericaInfantryRanger           24  1258 899   14
+660   spawn  1  GLATankScorpion                 16  1021 1799  34
+660   spawn  1  GLATankMarauder                 6   901 1800   40
+660   spawn  1  GLAInfantryRebel                24  1261 1799  14
+670   attackmove 0  *  1020 1350
+670   attackmove 1  *  1020 1350
+800   spawn  0  AmericaTankCrusader             16  1018 900   34
+800   spawn  0  AmericaTankPaladin              6   898 900    38
+800   spawn  1  GLATankScorpion                 16  1021 1799  34
+800   spawn  1  GLAVehicleRocketBuggy           8   781 1800   32
+810   attackmove 0  *  1020 1350
+810   attackmove 1  *  1020 1350
+# --- powers: a general's power reaches its target about 400 frames after the call, the beam 75 and
+# stays 300, the SCUDs about 130 ------------------------------------------------------------------
+330   power  0  AmericaCommandCenter  1020 1350  SuperweaponSpectreGunship
+380   power  0  AmericaCommandCenter  960 1300   SuperweaponA10ThunderboltMissileStrike
+420   power  1  GLACommandCenter      1080 1300  SuperweaponAnthraxBomb
+520   power  0  AmericaCommandCenter  1080 1400  SuperweaponA10ThunderboltMissileStrike
+600   power  1  GLACommandCenter      960 1400   SuperweaponAnthraxBomb
+640   power  0  AmericaParticleCannonUplink  1060 1330
+780   power  1  GLAScudStorm          990 1370
+880   power  1  GLAScudStorm          1040 1320

@@ -75,7 +75,7 @@ void CinemaDirector_routePoint( const Real *xs, const Real *ys, Int count, Real 
 /// once a render pass, after the logic tick
 void CinemaDirector_update( void );
 
-/// the interface is off: nothing but the world is drawn
+/// the interface is off, under -cinema or the console's freecam: nothing but the world is drawn
 Bool CinemaDirector_hidesHud( void );
 
 #endif // __CINEMADIRECTOR_H_

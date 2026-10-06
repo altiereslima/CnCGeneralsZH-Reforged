@@ -396,8 +396,8 @@ install_gamespy_unix_patch() {
 # pin a choice that C4 has not made, and M1 is a headless build that links neither binkvideo nor
 # milesaudio, so nothing before M2 needs it.
 
-# --- The fork's own upscaled art: every 3D texture at twice its size, the normal maps the models
-# are lit through, and the ground. Not in git - ReforgedTextures.big alone is a gigabyte, ten times
+# --- The fork's own upscaled art: every 3D texture at twice its size, and the ground. Not in git -
+# ReforgedTextures.big alone is a gigabyte, ten times
 # what GitHub takes in a file, and LFS in a fork is billed to the parent repository.
 #
 # It comes from the release channel, the same place a player's launcher takes it from, and the
@@ -415,7 +415,10 @@ install_gamespy_unix_patch() {
 #
 # With neither, the step is skipped: the game plays at the textures it shipped with, and
 # experiments/doku-upscale is where the art is made.
-art_pattern='Reforged.*\.big$'
+#
+# ReforgedNormals.big, the generated normal maps, is left out: the game stopped reading them on
+# 2026-10-06, and a channel release from before that still lists the archive.
+art_pattern='Reforged(?!Normals).*\.big$'
 art_release='https://github.com/olcayseygan/CnCGeneralsZH-Reforged/releases/download/art-latest'
 
 # --- litehtml 0.10, the whole repository: the HTML and CSS layout engine behind the pages upstream
@@ -708,11 +711,12 @@ get_art_from_release() {
   local manifest
   if ! manifest=$(curl -fsSL "$art_release/art.json" 2>/dev/null); then return 0; fi
   printf '%s' "$manifest" | python3 -c '
-import json, sys
-base = sys.argv[1]
+import json, re, sys
+base, pattern = sys.argv[1], re.compile(sys.argv[2])
 for f in json.load(sys.stdin)["files"]:
-    print("\t".join([f["name"], base + "/" + f["name"], str(f["size"]), f["sha256"]]))
-' "$art_release"
+    if pattern.search(f["name"]):
+        print("\t".join([f["name"], base + "/" + f["name"], str(f["size"]), f["sha256"]]))
+' "$art_release" "$art_pattern"
 }
 
 install_art() {

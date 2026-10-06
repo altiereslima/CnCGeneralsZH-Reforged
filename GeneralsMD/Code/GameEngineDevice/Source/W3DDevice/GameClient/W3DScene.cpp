@@ -71,7 +71,12 @@
 #include "WW3D2/colorspace.h"
 
 #include "WW3D2/shdlib.h"
+#include "WW3D2/dx11runtime.h"
+#include "WW3D2/ffshader.h"
 #include "Platform/RenderTypes.h"
+
+#include <algorithm>
+#include <vector>
 #ifdef _INTERNAL
 // for occasional debugging...
 //#pragma optimize("", off)
@@ -807,7 +812,9 @@ void RTS3DScene::renderOneObject(RenderInfoClass &rinfo, RenderObjClass *robj, I
 			}
 		}
 
-    if( draw && draw->getReceivesDynamicLights() )
+    // On the Direct3D 11 frame the dynamic lights reach every pixel instead (handBlastLights), and
+    // added here as well they would light the model twice.
+    if( draw && draw->getReceivesDynamicLights() && !Direct3D11_Lights_Per_Pixel() )
     {
 		  // dynamic lights
 		  RefRenderObjListIterator dynaLightIt(&m_dynamicLightList);	
@@ -1160,6 +1167,67 @@ void RTS3DScene::Render(RenderInfoClass & rinfo)
 /** Custom render method for the RTS3DScene, custom render properties for our
   * particular game go here */
 //=============================================================================
+//-------------------------------------------------------------------------------------------------
+/** The dynamic point lights (explosions, muzzle flashes, burning wrecks) for the Direct3D 11 frame
+		to light per pixel (BLAST_LIGHT_SAMPLING), the BLAST_LIGHT_SLOTS nearest the camera.  The
+		colours go over divided by the map's terrain light, the way the headlights' gain is worked out
+		(W3DModelDraw::lightHeadlights), so the shader multiplies the lit pixel by one plus the sum.
+		Lights the terrain relight would skip (a near reach under a tenth of a unit) are skipped here
+		too.  Client only: the lights are what FX lists put up and nothing in logic reads them. */
+static void handBlastLights(RefRenderObjListClass &dynamicLights, const Vector3 &camera)
+{
+	if (!Direct3D11_Lights_Per_Pixel())
+		return;
+
+	static std::vector< std::pair<Real, W3DDynamicLight*> > nearest;
+	nearest.clear();
+	RefRenderObjListIterator it(&dynamicLights);
+	for (it.First(); !it.Is_Done(); it.Next())
+	{
+		W3DDynamicLight *light = (W3DDynamicLight*)it.Peek_Obj();
+		if (!light->isEnabled() || light->Get_Type() != LightClass::POINT)
+			continue;
+		float nearReach, farReach;
+		light->Get_Far_Attenuation_Range(nearReach, farReach);
+		if (nearReach < 0.1f || farReach <= 0.0f)
+			continue;
+		const Vector3 d = light->Get_Position() - camera;
+		nearest.push_back(std::make_pair(d.Length2(), light));
+	}
+	// ponytail: nearest the camera, not nearest the screen's middle; weigh by on-screen reach if a
+	// barrage just off the edge ever steals slots from the fight in view.
+	std::sort(nearest.begin(), nearest.end(),
+		[](const std::pair<Real, W3DDynamicLight*> &a, const std::pair<Real, W3DDynamicLight*> &b)
+		{ return a.first < b.first; });
+
+	const RGBColor &ambient = TheGlobalData->m_terrainAmbient[0];
+	const RGBColor &diffuse = TheGlobalData->m_terrainDiffuse[0];
+	const Real map[3] = { ambient.red + diffuse.red, ambient.green + diffuse.green, ambient.blue + diffuse.blue };
+	const Real mean = (map[0] + map[1] + map[2]) / 3.0f;
+	Real base[3];
+	for (Int c = 0; c < 3; ++c)
+		base[c] = sqrtf((map[c] > 0.15f ? map[c] : 0.15f) * (mean > 0.15f ? mean : 0.15f));
+
+	static float lights[BLAST_LIGHT_SLOTS][BLAST_LIGHT_FLOATS];
+	unsigned count = 0;
+	for (size_t i = 0; i < nearest.size() && count < BLAST_LIGHT_SLOTS; ++i)
+	{
+		W3DDynamicLight *light = nearest[i].second;
+		float nearReach, farReach;
+		light->Get_Far_Attenuation_Range(nearReach, farReach);
+		Vector3 position = light->Get_Position(), lightDiffuse, lightAmbient;
+		light->Get_Diffuse(&lightDiffuse);
+		light->Get_Ambient(&lightAmbient);
+		float *slot = lights[count++];
+		slot[0] = position.X; slot[1] = position.Y; slot[2] = position.Z; slot[3] = farReach;
+		slot[4] = lightDiffuse.X / base[0]; slot[5] = lightDiffuse.Y / base[1]; slot[6] = lightDiffuse.Z / base[2];
+		slot[7] = nearReach;
+		slot[8] = lightAmbient.X / base[0]; slot[9] = lightAmbient.Y / base[1]; slot[10] = lightAmbient.Z / base[2];
+		slot[11] = 0.0f;
+	}
+	Direct3D11_Set_Blast_Lights(&lights[0][0], count);
+}
+
 void RTS3DScene::Customized_Render( RenderInfoClass &rinfo )
 {
 #ifdef DIRTY_CONDITION_FLAGS
@@ -1213,6 +1281,10 @@ void RTS3DScene::Customized_Render( RenderInfoClass &rinfo )
 			it.Peek_Obj()->On_Frame_Update();
 		}
 	}
+
+	// After the lights' fade has stepped and before the terrain and the models are lit.
+	if (m_customPassMode == SCENE_PASS_DEFAULT && !ShaderClass::Is_Backface_Culling_Inverted())
+		handBlastLights(m_dynamicLightList, rinfo.Camera.Get_Position());
 
 	//terrain needs to be rendered first
 	if (terrainObject)	// Don't check visibility - terrain is always visible. jba.

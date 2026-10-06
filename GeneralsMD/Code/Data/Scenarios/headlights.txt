@@ -1,0 +1,24 @@
+# Vehicle headlights on Dark Night: twenty vehicles of seat 0 with lamps (Humvees, Avengers, big
+# rigs, double-decker buses) and four Crusaders without drive onto the village square from the
+# south-west, so their lights fall across the paving, the towers and the trees round it, and on
+# each other.  Used for the headlight before/after pictures and the frame-time measurement with
+# twenty lit vehicles in view.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -noFPSLimit -map "Maps\Dark Night\Dark Night.map" -autoskirmish 2 -takeover -observer
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 1 -scenario headlights
+#     -cinema headlights -turbo -screenshot 420 -maxframes 480
+#
+# 2026-10-05: 20 lit, the nearest 16 shining.  Frame time without -turbo, -maxframes 1200, three
+# runs a side: 2.67ms a frame mean without the lights and 2.63ms with, CRC 0x1366F3D5 both.
+
+30    spawn       0  AmericaVehicleHumvee   10  1600 1640  35
+30    spawn       0  AmericaTankAvenger     6   1640 1540  40
+30    spawn       0  BigRig                 2   1520 1720  50
+30    spawn       0  DoubleDeckerTourBus    2   1500 1600  50
+30    spawn       0  AmericaTankCrusader    4   1700 1480  40
+60    move        0  AmericaVehicleHumvee   1860 1800
+60    move        0  AmericaTankAvenger     1880 1720
+60    move        0  BigRig                 1820 1840
+60    move        0  DoubleDeckerTourBus    1800 1760
+60    move        0  AmericaTankCrusader    1900 1660

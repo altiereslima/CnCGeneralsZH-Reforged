@@ -51,6 +51,7 @@
 // base class keeps it clear of OptionsMenu.cpp - which is where OptionPreferences' constructor
 // lives, and which drags in the shell, the audio manager and GameSpy behind it.
 class UserPreferences;
+class AsciiString;
 
 //-----------------------------------------------------------------------------
 /** How a setting is stored in Options.ini and what kind of control shows it. */
@@ -106,6 +107,14 @@ extern const OptionDef *findOptionDef( const char *iniKey );
 
 /** Clamp a raw value the way the row says. */
 extern Int clampOptionValue( const OptionDef& def, Int value );
+
+/** Typed text -> a value for this row, for the console's "set".  Stricter than reading Options.ini:
+	* a bool takes yes/no, true/false, on/off, y/n, t/f or 1/0, a number has to be whole and inside
+	* [lo,hi], and anything else is FALSE with `value` untouched rather than clamped or read as "no". */
+extern Bool parseOptionText( const OptionDef& def, const char *text, Int *value );
+
+/** A value as Options.ini stores it: "yes"/"no" for a bool, the clamped decimal otherwise. */
+extern AsciiString formatOptionValue( const OptionDef& def, Int value );
 
 //-----------------------------------------------------------------------------
 // Multisampling is stored as an index rather than a sample count, because that is what a combo box

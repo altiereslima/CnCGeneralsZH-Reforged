@@ -144,6 +144,7 @@ public:
 #endif
 	virtual void preloadModelAssets( AsciiString model );			///< preload model asset
 	virtual void preloadTextureAssets( AsciiString texture );	///< preload texture asset
+	virtual void preloadImageTexture( AsciiString texture );
 
 	/// @todo Need a scene abstraction
 	static RTS3DScene *m_3DScene;							///< our 3d scene representation

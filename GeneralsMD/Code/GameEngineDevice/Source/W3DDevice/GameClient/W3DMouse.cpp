@@ -520,10 +520,12 @@ void W3DMouse::draw(void)
 			if (TheDisplay && !TheDisplay->getWindowed())
 			{	//if we're full-screen, need to manually move cursor image
 #if defined(_WIN32)
+				// The device is a windowed one on Windows, fullscreen included, and a windowed device
+				// takes desktop coordinates here.  The window's own are only the same thing when it
+				// sits at the desktop's origin, which a scaled picture with bars does not.
 				POINT ptCursor;
 
 				GetCursorPos( &ptCursor );
-				ScreenToClient( ApplicationHWnd, &ptCursor );
 				m_pDev->SetCursorPosition( ptCursor.x, ptCursor.y, D3DCURSOR_IMMEDIATE_UPDATE);
 #else
 				// where the pointer is over the window, in the game's pixels, as GetCursorPos and

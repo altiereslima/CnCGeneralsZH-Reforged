@@ -1,0 +1,22 @@
+# The attack key's click (A, then a left click on the target) for a Sentry Drone with no gun, on a
+# Technical 120 away, inside the drone gun's 150, and for a Humvee on a Rocket Buggy 400 away.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 1900
+#     -scenario sentryattack -logPrefix sentryattack_
+#
+# Measured 2026-10-05. The drone has no weapon until the war factory researches the Sentry Drone Gun,
+# so its click sends nothing ("none of ... can shoot" in the log) and the Technical is untouched at
+# frame 1890; the Humvee's Buggy is dead. With the gun researched (add a power plant, a war factory
+# and "20 shiftupgrade 0 AmericaWarFactory Upgrade_AmericaSentryDroneGun") the drone kills a
+# Technical at 120 and at 400 alike, on forceattack, shiftattack and a script attack.
+
+30    spawn         0  AmericaVehicleSentryDrone      1   1000 3700
+30    spawn         0  AmericaVehicleHumvee           1   1000 3300
+1000  spawn         1  GLAVehicleTechnical            1   1120 3700
+1000  spawn         1  GLAVehicleRocketBuggy          1   1400 3300
+1010  forceattack   0  AmericaVehicleSentryDrone      1  GLAVehicleTechnical*
+1010  forceattack   0  AmericaVehicleHumvee           1  GLAVehicleRocketBuggy
+1890  tally         1  GLAVehicleTechnical*
+1890  tally         1  GLAVehicleRocketBuggy

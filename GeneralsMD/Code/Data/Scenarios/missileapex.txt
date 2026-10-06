@@ -1,0 +1,22 @@
+# Nuke and Scud Storm flights: how high each missile climbs and how long it takes to land, at a far
+# target (seats 0 and 1, start to start, about 1570) and a near one (seats 2 and 3, 500 away).
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 4 -takeover
+#     -side 0 FactionChina -side 1 FactionGLA -side 2 FactionChina -side 3 FactionGLA
+#     -seed 1 -maxframes 700 -scenario missileapex -logPrefix missileapex_
+#
+# The flight itself is only in the log with a temporary per-frame trace of each missile's position
+# and the ground under it, a DEBUG_LOG at the end of NeutronMissileUpdate::update and
+# MissileAIUpdate::update. The numbers it gave are in BalanceReforged.ini, at the nuke and the Scud.
+
+10    spawn   0  ChinaNuclearMissileLauncher  1   start0:0:250
+10    spawn   0  ChinaPowerPlant              3   start0:260:-40    90
+10    spawn   1  GLAScudStorm                 1   start1:0:250
+10    spawn   2  ChinaNuclearMissileLauncher  1   start2:0:250
+10    spawn   2  ChinaPowerPlant              3   start2:260:-40    90
+10    spawn   3  GLAScudStorm                 1   start3:0:250
+40    power   0  ChinaNuclearMissileLauncher  start1
+40    power   1  GLAScudStorm                 start0
+40    power   2  ChinaNuclearMissileLauncher  start2:500:250
+40    power   3  GLAScudStorm                 start3:-500:-250

@@ -1,0 +1,48 @@
+# Explosions and falling buildings in one place: Overlord shells and a War Factory coming down,
+# two bomb trucks on a power plant, then the Scud Storm and the nuke on open ground beside it, for
+# the white-hot cores, the heat rings, the lights, the scorches and the collapse dust of
+# ParticleSystemReforged.ini and FXListReforged.ini. Twilight Flame, three seats, everyone hostile.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 3 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA -seed 7
+#     -scenario blastcheck -maxframes 1500 -logPrefix blastcheck_
+#
+# Drawn, with Cinema/blastcheck.txt: swap -headless for -win -xres 1920 -yres 1080 -msaa 0
+# -particlecap 5000 -cinema blastcheck.
+
+# the superweapons, back at the starts and powered, fired with the power verb
+10    spawn      1  ChinaNuclearMissileLauncher     1   start1:0:200
+10    spawn      1  ChinaPowerPlant                 3   start1:260:-40    90
+10    spawn      2  GLAScudStorm                    1   start2:0:200
+
+# the targets
+20    spawn      0  AmericaWarFactory               1   1100 3700
+20    spawn      0  AmericaPowerPlant               2   1230 3640   140
+20    spawn      0  AmericaPatriotBattery           1   1000 3640
+
+# Overlords on the War Factory, then the power plants
+40    spawn      1  ChinaTankOverlord               6   1150 3950   45
+60    attack     1  ChinaTankOverlord                   0 AmericaWarFactory
+500   attack     1  ChinaTankOverlord                   0 AmericaPowerPlant
+
+# two bomb trucks on a power plant
+40    spawn      2  GLAVehicleBombTruck             2   1450 3500   40
+80    attack     2  GLAVehicleBombTruck                 0 AmericaPowerPlant
+
+# the Scud Storm and the nuke on open ground east of the fight
+700   power      2  GLAScudStorm                        1450 3800
+1000  power      1  ChinaNuclearMissileLauncher         1500 3450
+
+60    tally      0  *
+120   tally      0  *
+180   tally      0  *
+240   tally      0  *
+300   tally      0  *
+360   tally      0  *
+420   tally      0  *
+480   tally      0  *
+540   tally      0  *
+600   tally      0  *
+700   tally      0  *
+800   tally      0  *

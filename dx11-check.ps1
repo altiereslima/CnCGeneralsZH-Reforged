@@ -51,7 +51,7 @@
 # by design and this script would be measuring the effect rather than the backend.  Its own before
 # and after is a pair of pictures.
 param([double]$Margin = 1.0, [double]$MeanMargin = 1.0, [string]$Map = '',
-  [switch]$BackendNoise, [switch]$CountRule, [string[]]$Extra = @())
+  [switch]$BackendNoise, [switch]$CountRule, [string[]]$Extra = @(), [string]$Exe = 'generals.exe')
 $env:ZH_UNATTENDED = "1"	# every game this starts is unattended: no box may wait on a person (EarlyCommandLine.h)
 
 Add-Type -AssemblyName System.Drawing
@@ -84,7 +84,7 @@ function Shoot($c, $tag, $switches) {
     '-msaa','0','-dx11post','off','-map',"`"Maps\$($c.map)\$($c.map).map`"",'-autoskirmish','4','-aidiff','easy',
     '-seed','5','-maxframes',($c.f+80),'-screenshot',$c.f,'-camera',$c.x,$c.y,
     '-logPrefix',"dx11chk_$tag`_",'-turbo') + $switches + $Extra
-  $process = Start-Process (Join-Path $run 'generals.exe') -ArgumentList $arguments -WorkingDirectory $run -PassThru
+  $process = Start-Process (Join-Path $run $Exe) -ArgumentList $arguments -WorkingDirectory $run -PassThru
   try {
     $process.PriorityClass = 'AboveNormal'
     $null = $process.WaitForExit(900000)

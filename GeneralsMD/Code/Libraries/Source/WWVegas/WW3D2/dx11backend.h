@@ -56,6 +56,7 @@
 #include <map>
 #include <string.h>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // Two everywhere except the water, which binds four: the river texture, the sparkles, the noise
@@ -87,15 +88,39 @@ public:
 	void Set_Sampler_State(unsigned sampler, D3DSAMPLERSTATETYPE state, DWORD value);
 	void Set_Texture(unsigned stage, ID3D11ShaderResourceView * texture);
 
-	// The normal map that goes with the texture at stage zero, or null when it has none.  A lit
-	// draw with directional lights only is then lit per pixel through it, and so is the terrain;
-	// every other draw ignores it.
-	void Set_Normal_Map(ID3D11ShaderResourceView * normal_map);
-	unsigned long long Normal_Mapped_Draw_Count() const { return NormalMappedDraws; }
+	// The vehicle headlights for the frame, eight floats a light: world position, reach, world
+	// direction, cosine of the cone's edge.  Past HEADLIGHT_SLOTS the rest are dropped; the caller
+	// sorts them nearest first.  Zero lights leaves every program's pixels as they were.  The gain
+	// is what a pixel gains per channel per unit of light (HEADLIGHT_SAMPLING).
+	void Set_Headlights(const float * lights, unsigned count, const float gain[3]);
 
-	// The way the sun's light travels, in world space: the terrain has no D3D light of its own, its
-	// light is baked into the vertices, so its bump is shaded against this.
-	void Set_Terrain_Sun(const float direction[3]);
+	// The scene's dynamic point lights for the frame, BLAST_LIGHT_FLOATS a light: world position and
+	// far reach, diffuse colour and near reach, ambient colour and one unused.  The colours are
+	// already divided by the map's terrain light (BLAST_LIGHT_SAMPLING).  Past BLAST_LIGHT_SLOTS the
+	// rest are dropped; the caller sorts them nearest first.
+	void Set_Blast_Lights(const float * lights, unsigned count);
+
+	// Whether the shadow-receiving programs, which carry the per-pixel lights, are drawing this
+	// frame.  While they are, the engine leaves the dynamic lights out of its own vertex lighting.
+	bool Lights_Per_Pixel() const { return ShadowReceiving && ShadowMapTexture != NULL; }
+
+	// The draws that follow are sorted particle billboards, which fade where they meet the scene's
+	// depth (SOFT_PARTICLE_SAMPLING).  Only the sorting pool sets it, around the billboards' runs.
+	void Set_Soft_Particles(bool soft);
+
+	// Copy the scene's depth for the soft particles if anything wrote it since the last copy.  The
+	// sorting pool calls it at the top of each flush, before any particle run resolves its program.
+	void Take_Scene_Depth();
+	// How many depth copies Take_Scene_Depth made since the last call.  Taking it resets it.
+	unsigned Take_Frame_Depth_Copies();
+	// Off under the Classic graphics setting, whose picture is -d3d9's: no draw fades, no copy.
+	void Allow_Soft_Particles(bool allowed)
+	{
+		if (SoftParticlesAllowed != allowed) {
+			SoftParticlesAllowed = allowed;
+			PipelineChanged = true;
+		}
+	}
 
 	// The engine bound a texture at this stage that has no D3D11 copy - a render target it drew
 	// into, most often.  Sampling white there paints a full screen quad over the frame, so a draw
@@ -309,8 +334,11 @@ private:
 		float LightFields[MAXIMUM_VERTEX_LIGHTS][VERTEX_REGISTERS_PER_LIGHT][4];
 	};
 
-	// The normal map fields go last: a program that is not normal mapped declares the first three
-	// and nothing else, which a larger buffer serves.
+	// A program that receives no shadow declares the first three fields and nothing else, which a
+	// larger buffer serves.  The four after AlphaReference, and Sky and SkyUp, belonged to the normal
+	// maps taken out on 2026-10-06; nothing reads them and nothing writes them, but the generated
+	// programs still declare them, and every field behind them is found by its offset.  They stay
+	// until the generators and the cached programs move together.
 	struct PixelConstantBlock
 	{
 		float TextureFactor[4];
@@ -338,11 +366,23 @@ private:
 		// what is behind it, zero on a frame without; the same for a particle shading itself; one
 		// for a draw in camera space; and the power on the self-shade.
 		float VolumeParameters[4];
+		// The headlights (HEADLIGHT_SAMPLING): the pixel's way back to the world, how many slots
+		// are lit and the gain per channel, then each slot's position and reach and its direction
+		// and cone edge.
+		float WorldFromClip[16];
+		float HeadlightParameters[4];
+		float HeadlightPosition[HEADLIGHT_SLOTS][4];
+		float HeadlightDirection[HEADLIGHT_SLOTS][4];
+		// The dynamic point lights (BLAST_LIGHT_SAMPLING): how many are lit, then each slot's
+		// position and far reach, diffuse and near reach, and ambient.
+		float BlastLightParameters[4];
+		float BlastLightPosition[BLAST_LIGHT_SLOTS][4];
+		float BlastLightDiffuse[BLAST_LIGHT_SLOTS][4];
+		float BlastLightAmbient[BLAST_LIGHT_SLOTS][4];
+		// A soft particle's way from a depth back to a distance, and one over the distance its fade
+		// takes (SOFT_PARTICLE_SAMPLING).  Last, so only a program that fades has to declare it.
+		float SoftParticleDepth[4];
 	};
-	// A model under directional lights, drawn by generated programs.
-	bool Normal_Mapped() const;
-	// The ground, drawn by one of the transcribed terrain programs with its light baked in.
-	bool Terrain_Bumped() const;
 	// A draw that is painting the world and can take a shadow from the sun's map.
 	bool Shadow_Receiving() const;
 
@@ -350,6 +390,8 @@ private:
 	bool Build_Vertex_Description(VertexPipelineDescription & description) const;
 	bool Build_Combiner_Description(CombinerDescription & description) const;
 	void Upload_Constants();
+	void Upload_Vertex_Constants();
+	void Upload_Pixel_Constants();
 
 	// Both indexed draws land here; only the topology differs.
 	bool Draw_Indexed(unsigned index_count, unsigned start_index, unsigned base_vertex,
@@ -372,9 +414,6 @@ private:
 	DX11SamplerBlockClass Samplers[DX11_BACKEND_TEXTURE_STAGES];
 	DWORD StageStates[DX11_BACKEND_TEXTURE_STAGES][DX11_BACKEND_STAGE_STATES];
 	ID3D11ShaderResourceView * Textures[DX11_BACKEND_TEXTURE_STAGES];
-	ID3D11ShaderResourceView * NormalMap;
-	unsigned long long NormalMappedDraws;
-	float TerrainSun[3];
 
 	DWORD VertexFormat;
 	ID3D11Buffer * StreamBuffer;
@@ -423,6 +462,7 @@ private:
 	// kept until one of them changes, because an inverse a draw does not need is an inverse nobody
 	// should pay for.
 	float ShadowFromClip[16];
+	float WorldFromClip[16];
 	float ShadowFromClipView[16];
 	float ShadowFromClipProjection[16];
 	bool ShadowFromClipValid;
@@ -454,6 +494,25 @@ private:
 	bool SmokeMapRefused;
 	bool SmokeMapFilled;
 	float SmokeStrength;
+	// Set_Headlights' slots, eight floats each, how many are lit and the gain per channel.
+	float Headlights[HEADLIGHT_SLOTS][8];
+	unsigned HeadlightCount;
+	float HeadlightGain[3];
+	// Set_Blast_Lights' slots and how many are lit.
+	float BlastLights[BLAST_LIGHT_SLOTS][BLAST_LIGHT_FLOATS];
+	unsigned BlastLightCount;
+	// Set_Soft_Particles, and which fade the current draw takes (a SOFT_PARTICLE_* value).
+	bool SoftParticles;
+	bool SoftParticlesAllowed;
+	unsigned Soft_Particle() const;
+	// The scene's depth as a texture, copied when a soft particle first needs it after anything
+	// wrote depth: a depth buffer cannot be sampled while it is the one being tested against.
+	ID3D11Texture2D * SceneDepthCopy;
+	ID3D11ShaderResourceView * SceneDepthCopyView;
+	bool SceneDepthStale;
+	bool SceneDepthRefused;		///< the device would not make the copy; no draw fades again
+	unsigned FrameDepthCopies;
+	void Release_Scene_Depth();
 	bool Make_Smoke_Map();
 	void Release_Smoke_Map();
 
@@ -519,8 +578,17 @@ private:
 	// input to any of them needs its setter to raise the flag here, or the draw after it reads the
 	// previous batch's lighting.
 	bool ConstantsChanged;
+	// An input of one block only: the world and texture transforms and the material reach only the
+	// vertex block, the terrain sun, the scene view and the smoke only the pixel block.  A mesh
+	// changes its world transform every draw, and rebuilding the pixel block for it was a rebuild
+	// whose bytes always matched.  ConstantsChanged stands for both.
+	bool VertexConstantsChanged;
+	bool PixelConstantsChanged;
 	bool PipelineChanged;
 	bool SamplerChanged[DX11_BACKEND_TEXTURE_STAGES];
+	// A stage's texture changed, or the last draw sampled the current target and so needs a fresh
+	// copy of it: either way the stages have to be looked at again before the next draw binds.
+	bool TexturesChanged;
 	// A render state, or the shadow caster pass that answers for some of them, changed since the
 	// three state objects were last looked up.
 	bool StateObjectsChanged;
@@ -585,8 +653,45 @@ private:
 	ResolveMemo Memos[RESOLVE_MEMO_ENTRIES];
 	unsigned LastMemo;		///< the entry the last hit or write used; checked first
 	unsigned NextMemo;		///< the entry the next miss writes over
-	void Remember_Resolution(const std::string & key, const Pipeline & resolved,
+	void Remember_Resolution(PipelineUse * use, const Pipeline & resolved,
 		const VertexPipelineDescription & vertex, const CombinerDescription & combiner);
+
+	// Every resolution a memo miss has already worked out, keyed by the state's own bytes.  A frame
+	// asks for more pipelines in turn than the memo holds, and each miss built the string key again:
+	// about twenty snprintf calls to find a pipeline it had found many times.  The string key is
+	// built once per state here and kept, for a refusal's count.  The key is memset before it is
+	// filled, so hashing and comparing its bytes is safe for the memo's reason; the map is dropped
+	// in Release_Cached with the pipelines it names.
+	struct ResolveKey
+	{
+		DWORD Format;
+		EngineShaderProgram VertexProgram;
+		EngineShaderProgram PixelProgram;
+		VertexPipelineDescription Vertex;
+		CombinerDescription Combiner;
+	};
+	struct ResolveKey_Hash
+	{
+		size_t operator()(const ResolveKey & key) const;
+	};
+	struct ResolveKey_Equal
+	{
+		bool operator()(const ResolveKey & left, const ResolveKey & right) const
+		{
+			return memcmp(&left, &right, sizeof(ResolveKey)) == 0;
+		}
+	};
+	struct Resolution
+	{
+		bool Refused;
+		unsigned Reason;		///< a RefusalReason, as RefusedPipelines holds it
+		Pipeline Resolved;
+		PipelineUse * Use;
+		std::string Key;
+	};
+	typedef std::unordered_map<ResolveKey, Resolution, ResolveKey_Hash, ResolveKey_Equal>
+		ResolutionMap;
+	ResolutionMap Resolutions;
 
 	// Where the draws are landing.  Null means the device's own back buffer and depth buffer.
 	// The first few target changes, in order, with the draw count at each one.  Which target is
@@ -675,7 +780,12 @@ private:
 		ID3D11RasterizerState * Rasterizer;
 		ID3D11SamplerState * Samplers[DX11_BACKEND_TEXTURE_STAGES];
 		ID3D11ShaderResourceView * Textures[DX11_BACKEND_TEXTURE_STAGES];
-		ID3D11ShaderResourceView * NormalMap;
+		// The sun's map and the smoke's at t5 and t6, and their samplers as last passed: the
+		// second sampler is null when only the first was set.
+		ID3D11ShaderResourceView * Maps[2];
+		ID3D11SamplerState * MapSamplers[2];
+		// The scene's depth copy at t7, for the soft particles.
+		ID3D11ShaderResourceView * SceneDepth;
 		ID3D11InputLayout * Layout;
 		ID3D11Buffer * VertexBuffer;
 		UINT VertexStride;

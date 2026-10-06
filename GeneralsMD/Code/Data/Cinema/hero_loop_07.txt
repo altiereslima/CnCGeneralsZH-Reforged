@@ -1,0 +1,6 @@
+# Hero loop 07 (command line in Scenarios/hero_loop_07.txt): the three-way fight on
+# Fortress Avalanche's western grass, low and close from the north-east, pitch 26, locked so the
+# edit's dissolve joins matching frames.
+
+5     cut        1000 2100 0.45 -135 26
+36    end

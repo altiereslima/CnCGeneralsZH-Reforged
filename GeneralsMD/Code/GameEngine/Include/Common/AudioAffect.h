@@ -39,7 +39,8 @@ enum AudioAffect : int
 	AudioAffect_Sound		= 0x02,
 	AudioAffect_Sound3D	= 0x04,
 	AudioAffect_Speech	= 0x08,
-	AudioAffect_All			= (AudioAffect_Music | AudioAffect_Sound | AudioAffect_Sound3D | AudioAffect_Speech),
+	AudioAffect_Ambient	= 0x20,		///< looping world ambience (AudioManager::isAmbientSound); system setting only
+	AudioAffect_All			= (AudioAffect_Music | AudioAffect_Sound | AudioAffect_Sound3D | AudioAffect_Speech | AudioAffect_Ambient),
 
 	AudioAffect_SystemSetting = 0x10,
 };

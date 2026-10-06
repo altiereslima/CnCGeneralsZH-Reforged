@@ -185,8 +185,8 @@ function Install-Nanosvg {
   Step "nanosvg -> Libraries\Source\nanosvg"
 }
 
-# --- The fork's own upscaled art: every 3D texture at twice its size, the normal maps the models
-# are lit through, and the ground. Not in git - ReforgedTextures.big alone is a gigabyte, ten times
+# --- The fork's own upscaled art: every 3D texture at twice its size, and the ground. Not in git -
+# ReforgedTextures.big alone is a gigabyte, ten times
 # what GitHub takes in a file, and LFS in a fork is billed to the parent repository.
 #
 # It comes from the release channel, the same place a player's launcher takes it from, and the
@@ -204,7 +204,10 @@ function Install-Nanosvg {
 #
 # With neither, the step is skipped: the game plays at the textures it shipped with, and
 # experiments/doku-upscale is where the art is made.
-$artPattern = 'Reforged.*\.big$'
+#
+# ReforgedNormals.big, the generated normal maps, is left out: the game stopped reading them on
+# 2026-10-06, and a channel release from before that still lists the archive.
+$artPattern = 'Reforged(?!Normals).*\.big$'
 $artRelease = 'https://github.com/olcayseygan/CnCGeneralsZH-Reforged/releases/download/art-latest'
 
 function Get-ChannelUrl {
@@ -244,7 +247,7 @@ function Get-ArtFromRelease {
   } catch {
     return @()
   }
-  @($manifest.files | ForEach-Object {
+  @($manifest.files | Where-Object { $_.name -match $artPattern } | ForEach-Object {
     [pscustomobject]@{
       name   = $_.name
       url    = "$artRelease/$($_.name)"

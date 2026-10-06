@@ -102,6 +102,11 @@ protected:
 	enum { MAX_ORDER_STEP_NUMBERS = 30 };
 	DisplayString *m_orderStepNumbers[ MAX_ORDER_STEP_NUMBERS ];
 
+	// Classic's move rings, EA's own
+	void drawMoveHints( View *view );
+	RenderObjClass *m_moveHintRenderObj[ MAX_MOVE_HINTS ];
+	HAnimClass		 *m_moveHintAnim[ MAX_MOVE_HINTS ];
+
 };  // end class W3DInGameUI
 
 #endif  // end __W3DINGAMEUI_H_

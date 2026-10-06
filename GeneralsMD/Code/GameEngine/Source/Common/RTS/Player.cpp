@@ -102,6 +102,7 @@
 #include "GameLogic/Module/SupplyTruckAIUpdate.h"
 #include "GameLogic/Module/BattlePlanUpdate.h"
 #include "GameLogic/Module/ProductionUpdate.h"
+#include "GameLogic/Module/RebuildHoleBehavior.h"
 #include "GameLogic/Module/TransportContain.h"
 #include "GameLogic/VictoryConditions.h"
 
@@ -3303,7 +3304,8 @@ Bool SuperweaponNeedsDefenses( const AsciiString &buildingName, Bool proRules, I
 }
 
 /* A defence counts once it stands finished, so a foundation put down and cancelled never unlocks
-   anything.  A superweapon counts from its foundation, so two cannot be placed on one allowance. */
+   anything.  A superweapon counts from its foundation, so two cannot be placed on one allowance,
+   and a GLA one knocked down still counts while its hole waits to put it back for nothing. */
 struct SuperweaponDefenseCount
 {
   Int defenses;
@@ -3321,6 +3323,23 @@ static void countSuperweaponDefenses( Object *obj, void *userData )
   else if ( obj->isKindOf( KINDOF_FS_BASE_DEFENSE ) && !obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION )
     && DefenseCountsForSuperweapons( obj->getTemplate()->friend_getBuildCost() ) )
     count->defenses++;
+  else if ( obj->isKindOf( KINDOF_REBUILD_HOLE ) )
+  {
+    RebuildHoleBehaviorInterface *hole = RebuildHoleBehavior::getRebuildHoleBehaviorInterfaceFromObject( obj );
+    if ( hole == NULL )
+      return;
+
+    const ThingTemplate *rebuild = hole->getRebuildTemplate();
+    const Object *standing = TheGameLogic->findObjectByID( hole->getReconstructedBuildingID() );
+    if ( RebuildHoleHoldsSuperweapon( rebuild && rebuild->isKindOf( KINDOF_FS_SUPERWEAPON ),
+                                      standing && !standing->isEffectivelyDead() ) )
+      count->superweapons++;
+  }
+}
+
+Bool RebuildHoleHoldsSuperweapon( Bool rebuildsSuperweapon, Bool rebuildStanding )
+{
+  return rebuildsSuperweapon && !rebuildStanding;
 }
 
 //=============================================================================

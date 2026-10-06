@@ -124,7 +124,7 @@ void AsciiString::ensureUniqueBufferOfSize(int numCharsNeeded, Bool preserveData
 	validate();
 
 	if (m_data &&
-			m_data->m_refCount.load(std::memory_order_relaxed) == 1 &&
+			m_data->m_refCount.load(std::memory_order_acquire) == 1 &&	// acquire: the last other holder's reads of the buffer happen before this thread writes it
 			m_data->m_numCharsAllocated >= numCharsNeeded)
 	{
 		// no buffer manhandling is needed (it's already large enough, and unique to us)

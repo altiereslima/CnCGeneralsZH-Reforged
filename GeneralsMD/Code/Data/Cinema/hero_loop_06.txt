@@ -1,0 +1,11 @@
+# Hero loop 06 (command line in Scenarios/hero_loop_06.txt): the snow fight in the
+# middle of Winter Wolf, a slow lateral drift. The camera sways 150 units along the screen's
+# horizontal and back with a ten second period from 20 s, so it is in the same place at video
+# seconds 3.5 to 5.0 and 13.5 to 15.0 and the edit's dissolve joins matching frames.
+
+5     cut        1047 1173 0.5 -45 10
+20    move       1153 1067 5
+25    move       1047 1173 5
+30    move       1153 1067 5
+35    move       1047 1173 5
+36    end

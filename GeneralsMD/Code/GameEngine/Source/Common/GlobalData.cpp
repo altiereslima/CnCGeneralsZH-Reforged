@@ -659,6 +659,7 @@ GlobalData::GlobalData()
 	m_chipSetType = 0;
 	m_windowed = 0;
 	m_windowMode = WINDOW_MODE_FULLSCREEN;
+	m_fullscreenScaling = FULLSCREEN_SCALING_STRETCH;	// what EA's fullscreen mode change gave on most monitors
 	m_msaaLevel = 0;
 	m_vsync = FALSE;
 	m_direct3D11 = TRUE;
@@ -689,7 +690,7 @@ GlobalData::GlobalData()
 	m_useShadowVolumesForSkins = TRUE;	//on by default: the shipped INI has no entry for it
 	m_useShadowDecals = FALSE;
 	m_shadowsForProjectiles = TRUE;	//on by default: the shipped INI has no entry for it
-	m_startAtMaxZoom = TRUE;		//open a game framed as wide as the player could zoom by hand
+	m_startAtMaxZoom = FALSE;		//off, a match opens at START_CAMERA_HEIGHT (View.cpp); on, as far out as the wheel goes
 	m_shadowsForProps = TRUE;				//likewise: scenery with no shadow of its own gets one
 	m_shadowsForParticles = TRUE;	//on by default: the shipped INI has no entry for it
 	m_volumetricSmokeShadows = TRUE;
@@ -952,13 +953,8 @@ GlobalData::GlobalData()
 	// what this fork has always done, so nobody's game changes until they say so
 	m_healthBarMode = HEALTH_BAR_ALWAYS;
 	m_hudScale = 0;
-	// The menus' shape off 4:3: Fit off Windows, where the Deck's 16:10 panel is where it showed;
-	// Windows keeps EA's stretch unless a player picks Fit.
-#if defined(_WIN32)
-	m_menuLayout = MENU_LAYOUT_STRETCH;
-#else
-	m_menuLayout = MENU_LAYOUT_FIT;
-#endif
+	// the game as it shipped unless the launcher passes -interface reforged
+	m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
 	// the lobby's own colours until somebody asks for something else
 	m_playerColorScheme = PLAYER_COLORS_ORIGINAL;
 	// the words the game shipped with until somebody picks a translation
@@ -1129,6 +1125,9 @@ GlobalData::GlobalData()
   m_musicVolumeFactor = 0.5f;
  	m_SFXVolumeFactor = 0.5f;
   m_voiceVolumeFactor = 0.5f;
+	// Half the effects slider's 80: birds, wind and water used to play at the battle's volume and
+	// covered the replies and the guns.
+	m_ambientVolume = 40;
   m_3DSoundPref = false;
 
 	m_keyboardDefaultScrollFactor = m_keyboardScrollFactor = 0.5f;
@@ -1141,16 +1140,21 @@ GlobalData::GlobalData()
 	// nobody saw them: an Options.ini that predates them simply has no such key, so every one of
 	// them stayed off and the features looked like they had never been added.
 	//
-	// The first four are still catalog rows, so Options.ini can still turn them off by name even
-	// though the menu no longer shows them. The rest are not: they left TheOptionCatalog with the
+	// The camera rows, grid placement and snap-to-45 building rotation are still catalog rows, so
+	// Options.ini (and for some the menu) can turn them off. The rest are not: they left TheOptionCatalog with the
 	// controls that used to set them, and what is written here is what every game gets. GameData.ini
 	// remains the way to change one, because the field table above still names it.
+	//
+	// The snaps are the exception: the camera's and a building's 45 degree steps, grid placement, the
+	// snap to a neighbour's edge, the nudge off a blocked spot and zoom to cursor start off, ticked on
+	// Options > Controls by whoever wants them.
 	//
 	m_useCameraConstraints = TRUE;
 	m_cameraBoundaryMargin = 200;
 	m_edgeScrollInWindowedMode = TRUE;
-	m_snapCameraRotateTo45 = TRUE;
-	m_zoomToCursor = TRUE;
+	m_snapCameraRotateTo45 = FALSE;
+	m_zoomToCursor = FALSE;		// the wheel zooms on the middle of the screen, as 1.04 did, until ticked
+	m_zoomSpeed = 100;				// a notch moves the camera the 60 units it always did
 	m_isometricCamera = FALSE;
 	// R1, smooth motion: the picture only, one logic tick behind, and never the game (W3DSmoothMotion.h).
 	// On by default off Windows, where 120 and 144 Hz panels are the common case; Windows keeps its
@@ -1160,7 +1164,6 @@ GlobalData::GlobalData()
 #else
 	m_smoothMotion = TRUE;
 #endif
-	m_closerZoomPercent = 0;
 	m_dragTolerance = 25;		// what Mouse.ini in INIZH.big says, so nothing moves until the slider does
 	// a left drag with the move, attack move or guard key armed draws a formation line
 	m_formationDrag = TRUE;
@@ -1170,9 +1173,10 @@ GlobalData::GlobalData()
 	m_textureFilterMode = 2;	// anisotropic; retail shipped bilinear on a 2003 fill-rate budget
 	m_anisotropyLevel = 0;		// whatever the card offers, capped at 16 in _Init_Filters
 
-	m_snapBuildPlacementTo45 = TRUE;
-	m_gridBuildPlacement = TRUE;
-	m_nudgeBuildPlacement = TRUE;
+	m_snapBuildPlacementTo45 = FALSE;
+	m_gridBuildPlacement = FALSE;
+	m_snapBuildToNeighbour = FALSE;
+	m_nudgeBuildPlacement = FALSE;
 	m_moneyPerMinute = 0;
 	m_buildPlacementOpacity = PLACEMENT_SILHOUETTE_OPACITY;
 	m_buildPlacementShadows = TRUE;
@@ -1295,6 +1299,7 @@ GlobalData::GlobalData()
 	//m_allAdvice = FALSE;
 
 	m_clientRetaliationModeEnabled = TRUE; //On by default.
+	m_useAlternateMouse = FALSE;
 
 }  // end GlobalData
 
@@ -1457,6 +1462,7 @@ void GlobalData::parseGameDataDefinition( INI* ini )
 
 	// override INI values with user preferences
 	OptionPreferences optionPref;
+	TheWritableGlobalData->m_useAlternateMouse = optionPref.getAlternateMouseModeEnabled();
 	TheWritableGlobalData->m_clientRetaliationModeEnabled = optionPref.getRetaliationModeEnabled();
 	TheWritableGlobalData->m_doubleClickAttackMove = optionPref.getDoubleClickAttackMoveEnabled();
 	TheWritableGlobalData->m_keyboardScrollFactor = optionPref.getScrollFactor();

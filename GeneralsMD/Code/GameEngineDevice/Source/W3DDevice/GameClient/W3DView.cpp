@@ -60,7 +60,10 @@
 #include "GameClient/CommandXlat.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/GameClient.h"
+#include "GameClient/GameConsole.h"
 #include "GameClient/GameWindowManager.h"
+#include "GameClient/Keyboard.h"
+#include "GameClient/Mouse.h"
 #include "GameClient/Image.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/Line2D.h"
@@ -209,6 +212,15 @@ W3DView::W3DView()
 	m_zoomAnchorTerrainHeight = 0.0f;
 	m_scrollWheelHeight = 0.0f;
 
+	m_freeCamera = FALSE;
+	m_freeCameraEye.Set( 0.0f, 0.0f, 0.0f );
+	m_freeCameraHeading = 0.0f;
+	m_freeCameraTilt = 0.0f;
+	m_freeCameraKeys = 0;
+	m_freeCameraLastStep = 0;
+	m_freeCameraMouse.x = m_freeCameraMouse.y = 0;
+	m_freeCameraMouseValid = FALSE;
+
 }  // end W3DView
 
 //-------------------------------------------------------------------------------------------------
@@ -324,7 +336,9 @@ void W3DView::setOrigin( Int x, Int y)
 // how far past the map's default max camera height the player may zoom out by hand.
 // only the manual zoom limit is stretched - the default/scripted views still use
 // m_maxHeightAboveGround, so a map still opens framed the way its author meant it to.
-#define ZOOM_OUT_LIMIT_FACTOR (3.2f)
+// 2.9 puts the ceiling at 899 over GameData.ini's MaxCameraHeight of 310; it was 3.2 (992).
+// Classic shares the reach and keeps EA's 10 unit wheel step (View.cpp).
+#define ZOOM_OUT_LIMIT_FACTOR (2.9f)
 void W3DView::buildCameraTransform( Matrix3D *transform )
 {
 	Vector3 sourcePos, targetPos;
@@ -340,7 +354,8 @@ void W3DView::buildCameraTransform( Matrix3D *transform )
 	pos.x += m_shakeOffset.x;
 	pos.y += m_shakeOffset.y;
 
-	if (TheGlobalData->m_useCameraConstraints && m_cameraConstraintValid)
+	// Classic keeps the game's own constraint whatever Options.ini says
+	if ((TheGlobalData->m_useCameraConstraints || TheGlobalData->isClassicUI()) && m_cameraConstraintValid)
 	{
 		pos = constrainCameraPosition(pos, m_cameraConstraint);
 	}
@@ -855,6 +870,12 @@ Bool W3DView::wantsIsometric( void ) const
 void W3DView::setCameraTransform( void )
 {
 	m_cameraHasMovedSinceRequest = true;
+	if (m_freeCamera)
+	{
+		// every setter that dirties the player's camera ends here, and none of them owns the view now
+		setFreeCameraTransform();
+		return;
+	}
 	Matrix3D cameraTransform( 1 );
 	
 	Real nearZ, farZ;
@@ -888,7 +909,7 @@ void W3DView::setCameraTransform( void )
 	}
 
 	m_3DCamera->Set_Clip_Planes(nearZ, farZ);
-	if (TheGlobalData->m_useCameraConstraints)
+	if (TheGlobalData->m_useCameraConstraints || TheGlobalData->isClassicUI())
 	{
 		if (!m_cameraConstraintValid)
 		{
@@ -961,6 +982,170 @@ void W3DView::setCameraTransform( void )
 }
 
 //-------------------------------------------------------------------------------------------------
+// The freecam.  A map cell is ten units, so a 300 cell map is 3000 across and the plain speed
+// crosses it in seven and a half seconds; Shift is four times that.
+static const Real FREECAM_SPEED = 400.0f;									///< world units a second
+static const Real FREECAM_FAST = 4.0f;
+static const Real FREECAM_TURN_PER_PIXEL = 0.0025f;				///< radians of heading or tilt per pixel of mouse
+// Look_At has no up straight up or straight down; half a degree short of either is the only limit
+static const Real FREECAM_STEEPEST = DEG_TO_RADF( 89.5f );
+// past the far corner of the map, for whatever stands on the edge or flies beyond it
+static const Real FREECAM_FAR_MARGIN = 1000.0f;
+
+static Real freeCameraTilt( Real tilt )
+{
+	return WWMath::Clamp( tilt, -FREECAM_STEEPEST, FREECAM_STEEPEST );
+}
+
+static Vector3 freeCameraForward( Real heading, Real tilt )
+{
+	const Real level = cos( tilt );
+	return Vector3( level * cos( heading ), level * sin( heading ), sin( tilt ) );
+}
+
+//-------------------------------------------------------------------------------------------------
+void W3DView::setFreeCamera( Bool on )
+{
+	if (on == m_freeCamera)
+		return;
+
+	if (on)
+	{
+		// take off from where the player's camera is, looking where it looks (a W3D camera looks down -Z)
+		const Matrix3D &transform = m_3DCamera->Get_Transform();
+		const Vector3 forward = -transform.Get_Z_Vector();
+		m_freeCameraEye = transform.Get_Translation();
+		m_freeCameraHeading = atan2( forward.Y, forward.X );
+		m_freeCameraTilt = freeCameraTilt( asin( WWMath::Clamp( forward.Z, -1.0f, 1.0f ) ) );
+	}
+	else if (TheMouse)
+	{
+		TheMouse->setVisibility( TRUE );
+	}
+
+	m_freeCamera = on;
+	m_freeCameraKeys = 0;
+	m_freeCameraMouseValid = FALSE;
+	m_freeCameraLastStep = Clock_Milliseconds();
+	// leaving, the player's camera is rebuilt from its look point, which never moved
+	setCameraTransform();
+}
+
+//-------------------------------------------------------------------------------------------------
+void W3DView::setFreeCameraPose( const Coord3D *eye, Real heading, Real tilt )
+{
+	m_freeCameraEye.Set( eye->x, eye->y, eye->z );
+	m_freeCameraHeading = heading;
+	m_freeCameraTilt = freeCameraTilt( tilt );
+	if (m_freeCamera)
+		setFreeCameraTransform();
+}
+
+//-------------------------------------------------------------------------------------------------
+void W3DView::getFreeCameraPose( Coord3D *eye, Real *heading, Real *tilt ) const
+{
+	eye->set( m_freeCameraEye.X, m_freeCameraEye.Y, m_freeCameraEye.Z );
+	*heading = m_freeCameraHeading;
+	*tilt = m_freeCameraTilt;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** One render frame of flight.  The mouse turns the view with no button held: the pointer is put
+	* back in the middle of the view after every step, so it never stops at a screen edge, and it is
+	* hidden.  Only Win32Mouse can move the pointer so far, so on SDL the mouse does not turn the
+	* freecam yet (ponytail: SdlMouse::warpCursor through SDL_WarpMouseInWindow would add it).
+	* While the console is open the pointer and the keys are the console's. */
+//-------------------------------------------------------------------------------------------------
+void W3DView::stepFreeCamera( void )
+{
+	const UnsignedInt now = Clock_Milliseconds();
+	Real seconds = (Real)(now - m_freeCameraLastStep) * 0.001f;
+	m_freeCameraLastStep = now;
+	if (seconds > 0.1f)
+		seconds = 0.1f;	// a hitch is not a reason to jump across the map
+
+	const Bool consoleOpen = TheGameConsole && TheGameConsole->isOpen();
+	if (TheMouse && !consoleOpen)
+	{
+		const ICoord2D pos = TheMouse->getMouseStatus()->pos;
+		if (m_freeCameraMouseValid)
+		{
+			m_freeCameraHeading -= (Real)(pos.x - m_freeCameraMouse.x) * FREECAM_TURN_PER_PIXEL;
+			m_freeCameraTilt = freeCameraTilt( m_freeCameraTilt - (Real)(pos.y - m_freeCameraMouse.y) * FREECAM_TURN_PER_PIXEL );
+			m_freeCameraHeading = WWMath::Wrap( m_freeCameraHeading, (Real)-PI, (Real)PI );
+		}
+		ICoord2D middle;
+		middle.x = m_originX + m_width / 2;
+		middle.y = m_originY + m_height / 2;
+		// a step that could not put the pointer back turns nothing next time either: the pointer is
+		// another window's while ours is not in front, and whatever it did there is not a turn
+		m_freeCameraMouse = middle;
+		m_freeCameraMouseValid = TheMouse->warpCursor( middle.x, middle.y );
+		if (TheMouse->getVisibility())
+			TheMouse->setVisibility( FALSE );
+	}
+	else
+	{
+		m_freeCameraMouseValid = FALSE;
+		if (TheMouse && !TheMouse->getVisibility())
+			TheMouse->setVisibility( TRUE );
+	}
+
+	const Vector3 forward = freeCameraForward( m_freeCameraHeading, m_freeCameraTilt );
+	const Vector3 right( sin( m_freeCameraHeading ), -cos( m_freeCameraHeading ), 0.0f );
+	const Vector3 up( 0.0f, 0.0f, 1.0f );
+	Vector3 move( 0.0f, 0.0f, 0.0f );
+	const UnsignedInt keys = consoleOpen ? 0 : m_freeCameraKeys;
+	if (keys & FREECAM_FORWARD)	move += forward;
+	if (keys & FREECAM_BACK)			move -= forward;
+	if (keys & FREECAM_RIGHT)		move += right;
+	if (keys & FREECAM_LEFT)			move -= right;
+	if (keys & FREECAM_UP)				move += up;
+	if (keys & FREECAM_DOWN)			move -= up;
+	const Real speed = FREECAM_SPEED * ((TheKeyboard && TheKeyboard->isShift()) ? FREECAM_FAST : 1.0f);
+	m_freeCameraEye += move * (speed * seconds);
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The freecam's camera.  The far plane reaches the furthest corner of the map from wherever the
+	* eye is, so the whole map draws to its edges: every terrain, tree, water, particle and shadow
+	* cull in the renderer is a test against this frustum, and the terrain itself is the whole map
+	* on every map.  The perspective lens is the player's, never the isometric one. */
+//-------------------------------------------------------------------------------------------------
+void W3DView::setFreeCameraTransform( void )
+{
+	Matrix3D transform( 1 );
+	transform.Look_At( m_freeCameraEye, m_freeCameraEye + freeCameraForward( m_freeCameraHeading, m_freeCameraTilt ), 0.0f );
+
+	Real farthest = 0.0f;
+	if (TheTerrainRenderObject)
+	{
+		Region3D extent;
+		TheTerrainRenderObject->getDrawnExtent( &extent );
+		for (Int corner = 0; corner < 8; ++corner)
+		{
+			const Vector3 at( (corner & 1) ? extent.hi.x : extent.lo.x, (corner & 2) ? extent.hi.y : extent.lo.y,
+				(corner & 4) ? extent.hi.z : extent.lo.z );
+			farthest = WWMath::Max( farthest, (at - m_freeCameraEye).Length() );
+		}
+	}
+	m_3DCamera->Set_Clip_Planes( MAP_XY_FACTOR, farthest + FREECAM_FAR_MARGIN );
+	m_3DCamera->Set_View_Plane( perspectiveHorizontalFov( getWidth() ), -1 );
+	m_isometricApplied = false;
+	m_3DCamera->Set_Transform( transform );
+
+	if (TheTerrainRenderObject)
+	{
+		RefRenderObjListIterator *it = W3DDisplay::m_3DScene->createLightsIterator();
+		TheTerrainRenderObject->updateCenter( m_3DCamera, it );
+		if (it)
+			W3DDisplay::m_3DScene->destroyLightsIterator( it );
+	}
+	if (TheRadar)
+		TheRadar->notifyViewChanged();
+}
+
+//-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 void W3DView::init( void )
 {
@@ -1011,6 +1196,15 @@ const Coord3D& W3DView::get3DCameraPosition() const
 void W3DView::reset( void )
 {
 	View::reset();
+
+	// a match that ends in the freecam leaves it there; the next one starts on the player's camera
+	if (m_freeCamera)
+	{
+		m_freeCamera = FALSE;
+		m_freeCameraKeys = 0;
+		if (TheMouse)
+			TheMouse->setVisibility( TRUE );
+	}
 
 	// Just in case...
 	setTimeMultiplier(1); // Set time rate back to 1.
@@ -1492,6 +1686,29 @@ void W3DView::update(void)
 		}
 	}
 
+	/* The freecam owns the view outright: no lock, no script, no shake, no height settle.  The look
+		 point is left where it was, and every drawable on the map is updated, not just the ones under
+		 the player's frame, because the freecam can see the whole map at once. */
+	if (m_freeCamera)
+	{
+		stepFreeCamera();
+		setFreeCameraTransform();
+		m_recalcCamera = false;
+		if (TheScriptEngine->isTimeFast() || TheTerrainRenderObject == NULL)
+			return;
+		Region3D wholeMap;
+		TheTerrainRenderObject->getDrawnExtent( &wholeMap );
+		wholeMap.lo.x -= DRAWABLE_OVERSCAN;
+		wholeMap.lo.y -= DRAWABLE_OVERSCAN;
+		wholeMap.hi.x += DRAWABLE_OVERSCAN;
+		wholeMap.hi.y += DRAWABLE_OVERSCAN;
+		wholeMap.lo.z -= 999999.0f;
+		wholeMap.hi.z += 999999.0f;
+		if (WW3D::Get_Frame_Time())
+			TheGameClient->iterateDrawablesInRegion( &wholeMap, drawDrawable, this );
+		return;
+	}
+
 	static Real followFactor = -1;
 	ObjectID cameraLock = getCameraLock();
 	if (cameraLock == INVALID_ID) 
@@ -1711,8 +1928,13 @@ void W3DView::update(void)
 			m_shakeOffset.x = m_shakeIntensity * m_shakeAngleCos;
 			m_shakeOffset.y = m_shakeIntensity * m_shakeAngleSin;
 
-			// fake a stiff spring/damper
-			const Real dampingCoeff = 0.75f;
+			// fake a stiff spring/damper.  A big kick settles at EA's rate and what is left of it rumbles
+			// on: the damping eases from 0.75 a step at an intensity of two or more to 0.88 near rest, so
+			// a heavy blast trails off over about a second instead of stopping dead after half of one.
+			const Real HARD_DAMPING = 0.75f;
+			const Real TAIL_DAMPING = 0.88f;
+			const Real hardness = WWMath::Clamp(m_shakeIntensity * 0.5f, 0.0f, 1.0f);
+			const Real dampingCoeff = TAIL_DAMPING + (HARD_DAMPING - TAIL_DAMPING) * hardness;
 			m_shakeIntensity *= dampingCoeff;
 
 			// spring is so "stiff", it pulls 180 degrees opposite each frame
@@ -3979,15 +4201,20 @@ void W3DView::shake( const Coord3D *epicenter, CameraShakeType shakeType )
 	if (dist > TheGlobalData->m_maxShakeRange)
 		return;
 
-	intensity *= 1.0f - (dist/TheGlobalData->m_maxShakeRange);
+	// A square of the remaining distance rather than a straight line, and half as much again at the
+	// epicentre: a shell landing under the camera kicks it hard, one at the edge of the range barely
+	// moves it.  The two meet the old line at about a third of the range.
+	const Real SHAKE_NEAR_BOOST = 1.5f;
+	const Real nearness = 1.0f - (dist/TheGlobalData->m_maxShakeRange);
+	intensity *= SHAKE_NEAR_BOOST * nearness * nearness;
 
 	// add intensity and clamp
 	m_shakeIntensity += intensity;
 
-	//const Real maxIntensity = 10.0f;
-	const Real maxIntensity = 3.0f;
+	// Held at the ceiling.  EA's line put it back to 3.0 once the sum passed MaxShakeIntensity, so
+	// the hit that took a barrage over the top shook the camera less than the one before it.
 	if (m_shakeIntensity > TheGlobalData->m_maxShakeIntensity)
-		m_shakeIntensity = maxIntensity;
+		m_shakeIntensity = TheGlobalData->m_maxShakeIntensity;
 }
 
 //-------------------------------------------------------------------------------------------------

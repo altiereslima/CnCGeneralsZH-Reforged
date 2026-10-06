@@ -1,0 +1,20 @@
+# A queued route drawn on the ground for the Reforged trailer (beat 19), on the open snow in the
+# middle of Winter Wolf. Seat 0 is the local player, so no -observer. The route is clicked, not
+# written here: shift verbs from a scenario go into the order queue but draw no threads (tried
+# 2026-10-04, units selected), so the shoot script posts the clicks to the window once the camera
+# has cut to the tanks on frame 90: a left drag from client 250,470 to 730,800 boxes them (Ctrl+W
+# writes "Selected across screen" in the feed, a box does not), the socket's "key KEY_KP5 SHIFT
+# HOLD" turns waypoint mode on, then right clicks at 1000,250 (move), 1467,520 (attack the stash)
+# and 1250,720 (move), "key KEY_D SHIFT" and a left click at 900,760 (attack move), a right click
+# there to put D down, "key KEY_X SHIFT" and a left click at 620,600 (guard), and KP5 RELEASE:
+# green, red, green, pink and blue threads with numbered markers 1 to 5.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Winter Wolf\Winter Wolf.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 7 -scenario rf_orders -cinema rf_orders
+#     -control 8813 -video 280 560 rf_orders
+
+10    spawn            0  AmericaTankCrusader    8  900 1060  40
+10    spawn            0  AmericaTankPaladin     4  900 960   40
+10    spawn            1  GLASupplyStash         1  1330 1140
+10    spawn            1  GLATankScorpion        2  1340 1330  40

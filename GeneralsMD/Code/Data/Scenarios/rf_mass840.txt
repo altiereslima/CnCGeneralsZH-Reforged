@@ -1,0 +1,17 @@
+# The whole unit limit leaving on one order, for the Reforged trailer (beat 23): mass840.txt moved
+# onto the open grass east of the industrial block in the middle of Tournament Plains. 420
+# Crusaders and 420 Rangers for seat 0 and one playermove, a right click, to the grass west of
+# the block, so the field flows round the town on both sides.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -map "Maps\Tournament Plains\Tournament Plains.map" -autoskirmish 2 -takeover -observer
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 3 -peacetime 10 -scenario rf_mass840
+#     -cinema rf_mass -video 90 600 rf_mass -maxframes 610
+#
+# Grep HEADLESS SCENARIO for the 840 made and HEADLESS ARRIVE for how many got there.
+
+30    spawn         0  AmericaTankCrusader    420  2650 1245  40
+30    spawn         0  AmericaInfantryRanger  420  3200 1245  20
+90    playermove    0  *                           700 1245
+90    arrive        0  AmericaTankCrusader         700 1245  900
+90    arrive        0  AmericaInfantryRanger       700 1245  900

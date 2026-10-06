@@ -1,0 +1,25 @@
+# Does the Alpha Aurora take an attack order? An Alpha Aurora and a plain Aurora at cruise, each
+# ordered onto its own parked tank 120 off its wing.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 700
+#     -scenario alphaaurora -logPrefix alphaaurora_
+#
+# Measured 2026-10-05. Before the fix the Alpha Aurora refused the order (AIAttackState::onEnter
+# found no weapon, since SupW_AuroraFuelBombWeapon estimated zero damage) and the Scorpion ended on
+# 370 of 370. After it the Alpha Aurora drops at frame 269 and the Scorpion dies at 332 (frames from
+# a temporary log), and the plain Aurora's Crusader ends on 80 of 480. Swapping attack for
+# shiftattack, forceattack, attackmove to the Scorpion's spot or shiftguard on it gave the same
+# before and after; forceattack before the fix was refused outright ("can shoot ... sends nothing").
+
+30    spawn      1  GLATankScorpion              1   2200 3700
+30    spawn      0  SupW_AmericaJetAurora        1   1000 3820
+31    move       0  SupW_AmericaJetAurora            4400 3820
+30    spawn      1  AmericaTankCrusader          1   2200 3200
+30    spawn      0  AmericaJetAurora             1   1000 3320
+31    move       0  AmericaJetAurora                 4400 3320
+250   attack     0  SupW_AmericaJetAurora        1  GLATankScorpion
+250   attack     0  AmericaJetAurora             1  AmericaTankCrusader
+650   tally      1  GLATankScorpion
+650   tally      1  AmericaTankCrusader

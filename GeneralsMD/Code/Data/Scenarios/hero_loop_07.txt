@@ -1,0 +1,87 @@
+# Website hero loop 07, green: v240_hook's three armies on the open grass in the west of Fortress
+# Avalanche (1000,2100), seen low from the north-east under Cinema/hero_loop_07's heading -135:
+# China comes in from screen left, America from screen right and the GLA down the frame towards the
+# camera, all from about 300 out so they are in contact before frame 700. Waves at 420, 560, 700
+# and 840 keep the middle full for frames 600 to 1049; the SCUDs land about 900, and every air
+# power lands before 1000 so the loop's tail matches its head. No nuke or particle beam: on the
+# first take the nuke's white dome filled the middle for most of the loop.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer
+#     -multiInstance -particlecap 30000 -map "Maps\Fortress Avalanche\Fortress Avalanche.map"
+#     -autoskirmish 3 -takeover -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA
+#     -seed 7 -scenario hero_loop_07 -cinema hero_loop_07 -video 600 1049 hero_loop_07
+#     -maxframes 1070
+10    spawn      0  AmericaCommandCenter            1   start0:240:60
+10    spawn      1  ChinaCommandCenter              1   start1:-260:60
+10    spawn      2  GLAScudStorm                    1   start2:0:200
+10    spawn      2  GLACommandCenter                1   start2:-260:0
+# --- America from screen right --------------------------------------------------------------
+150   spawn      0  AmericaTankCrusader             16  781 1923   36
+150   spawn      0  AmericaTankPaladin              8   830 1817   40
+150   spawn      0  AmericaVehicleTomahawk          5   731 2001   40
+150   spawn      0  AmericaTankMicrowave            3   830 1817   40
+150   spawn      0  AmericaInfantryRanger           24  731 2001   16
+150   spawn      0  AmericaVehicleHumvee            6   781 1923   36
+150   spawn      0  AmericaVehicleComanche          2   830 1817   60
+150   spawn      0  AmericaJetRaptor                4   731 2001   70
+# --- China from screen left -----------------------------------------------------------------
+150   spawn      1  ChinaTankBattleMaster           16  1219 2277   40
+150   spawn      1  ChinaTankOverlord               6   1170 2383   50
+150   spawn      1  ChinaTankGattling               6   1269 2199   36
+150   spawn      1  ChinaTankDragon                 5   1219 2277   36
+150   spawn      1  ChinaVehicleInfernoCannon       4   1170 2383   40
+150   spawn      1  ChinaInfantryRedguard           24  1269 2199   16
+150   spawn      1  ChinaVehicleHelix               1   1219 2277   60
+150   spawn      1  ChinaJetMIG                     4   1170 2383   70
+# --- the GLA from the far side, down the frame ----------------------------------------------
+150   spawn      2  GLATankScorpion                 14  1198 1845   36
+150   spawn      2  GLATankMarauder                 7   1325 1930   40
+150   spawn      2  GLAVehicleRocketBuggy           8   1198 1845   32
+150   spawn      2  GLAVehicleQuadCannon            5   1325 1930   36
+150   spawn      2  GLAVehicleToxinTruck            4   1325 1930   36
+150   spawn      2  GLAVehicleTechnical             8   1198 1845   30
+150   spawn      2  GLAInfantryRebel                24  1156 1775   16
+160   attackmove 0  *  1000 2100
+160   attackmove 1  *  1000 2100
+160   attackmove 2  *  1000 2100
+# --- waves ----------------------------------------------------------------------------------
+420   spawn      0  AmericaTankCrusader             12  781 1923   36
+420   spawn      0  AmericaInfantryRanger           16  731 2001   16
+420   spawn      1  ChinaTankBattleMaster           12  1219 2277   40
+420   spawn      1  ChinaInfantryRedguard           16  1269 2199   16
+420   spawn      2  GLATankScorpion                 12  1198 1845   36
+420   spawn      2  GLAInfantryRebel                16  1325 1930   16
+430   attackmove 0  *  1000 2100
+430   attackmove 1  *  1000 2100
+430   attackmove 2  *  1000 2100
+560   spawn      0  AmericaTankPaladin              8   830 1817   40
+560   spawn      1  ChinaTankOverlord               5   1170 2383   50
+560   spawn      2  GLATankMarauder                 8   1325 1930   40
+560   spawn      2  GLAVehicleRocketBuggy           8   1198 1845   32
+570   attackmove 0  *  1000 2100
+570   attackmove 1  *  1000 2100
+570   attackmove 2  *  1000 2100
+700   spawn      0  AmericaTankCrusader             12  781 1923   36
+700   spawn      0  AmericaTankPaladin              4   731 2001   40
+700   spawn      1  ChinaTankBattleMaster           12  1219 2277   40
+700   spawn      1  ChinaTankOverlord               3   1269 2199   50
+700   spawn      2  GLATankScorpion                 12  1198 1845   36
+700   spawn      2  GLATankMarauder                 4   1325 1930   40
+710   attackmove 0  *  1000 2100
+710   attackmove 1  *  1000 2100
+710   attackmove 2  *  1000 2100
+840   spawn      0  AmericaTankCrusader             10  781 1923   36
+840   spawn      1  ChinaTankBattleMaster           10  1219 2277   40
+840   spawn      2  GLATankScorpion                 10  1198 1845   36
+850   attackmove 0  *  1000 2100
+850   attackmove 1  *  1000 2100
+850   attackmove 2  *  1000 2100
+# --- the sky: a general's power lands about 400 frames after the call ------------------------
+300   power      0  AmericaCommandCenter  1000 2100  SuperweaponSpectreGunship
+340   power      0  AmericaCommandCenter  936 2065   SuperweaponA10ThunderboltMissileStrike
+400   power      1  ChinaCommandCenter    1064 2121  Early_SuperweaponChinaCarpetBomb
+450   power      2  GLACommandCenter      1049 2022  SuperweaponAnthraxBomb
+520   power      0  AmericaCommandCenter  1064 2121  SuperweaponA10ThunderboltMissileStrike
+580   power      1  ChinaCommandCenter    936 2065   Early_SuperweaponChinaCarpetBomb
+# --- the SCUDs take about 130 frames ----------------------------------------------------------
+770   power      2  GLAScudStorm                 990 2120

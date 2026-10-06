@@ -536,6 +536,10 @@ void ControlBar::pressCommandButton( Int place )
 //-------------------------------------------------------------------------------------------------
 void ControlBar::makeBuildPageButtons( void )
 {
+	// Classic's command sets are EA's slot for slot: no pages
+	if( TheGlobalData->isClassicUI() )
+		return;
+
 	AsciiString name;
 	for( Int page = 0; page < BUILD_PAGE_COUNT; page++ )
 	{
@@ -1345,18 +1349,23 @@ void CommandSet::parseCommandButton( INI* ini, void *instance, void *store, cons
 
 	// get find the command button from this name
 	const CommandButton *commandButton = TheControlBar->findCommandButton( AsciiString( token ) );
-	if( commandButton == NULL )
-	{
-
-		DEBUG_CRASH(( "[LINE: %d - FILE: '%s'] Unknown command '%s' found in command set\n",
-								  ini->getLineNum(), ini->getFilename().str(), token ));
-		throw INI_INVALID_DATA;
-
-	}  // end if
-
 	// get the index to store the command at, and the command array itself
 	const CommandButton **buttonArray = (const CommandButton **)store;
 	Int buttonIndex = (Int)(intptr_t)userData;
+
+	if( commandButton == NULL )
+	{
+		/* A mod's CommandButton.ini can lack a button the fork's CommandSetReforged.ini names: Contra X
+			 Beta 2 has no Early_Command_ChinaCarpetBomb, and slot 2 of Infa_ChinaCommandCenterCommandSetUpgrade
+			 threw and stopped the game at start.  The slot keeps what it held: empty for a new set and for a
+			 patched one, which parseCommandSetDefinition clears first, the parent's button for a map.ini
+			 override, which starts as a copy.  Every reader already passes over an empty slot, and the
+			 outcome depends only on the files, which are in the INI and map checksums. */
+		DEBUG_LOG(( "[LINE: %d - FILE: '%s'] CommandSet %s slot %d names unknown button '%s'; the slot is skipped.\n",
+								ini->getLineNum(), ini->getFilename().str(), ((CommandSet *)instance)->getName().str(),
+								buttonIndex + 1, token ));
+		return;
+	}  // end if
 
 	// sanity
 	DEBUG_ASSERTCRASH( buttonIndex < MAX_COMMANDS_PER_SET, ("parseCommandButton: button index '%d' out of range\n", 
@@ -1553,6 +1562,8 @@ ControlBar::ControlBar( void )
 	updateCommanBarBorderColors(GAME_COLOR_UNDEFINED,GAME_COLOR_UNDEFINED,GAME_COLOR_UNDEFINED,GAME_COLOR_UNDEFINED);
 
 	m_pageSolidsActive = FALSE;
+	m_radarAttackGlowWindow = NULL;
+	m_remainingRadarAttackGlowFrames = 0;
 
 #if defined( _INTERNAL ) || defined( _DEBUG )
 	m_lastFrameMarkedDirty = 0;
@@ -1600,6 +1611,7 @@ ControlBar::~ControlBar( void )
 
 }  // end ~ControlBar
 void ControlBarPopupDescriptionUpdateFunc( WindowLayout *layout, void *param );
+void ControlBarPopupDescription_forgetOffset( void );
 
 //-------------------------------------------------------------------------------------------------
 // Three-panel control bar layout -----------------------------------------------------------------
@@ -1642,6 +1654,19 @@ static const IRegion2D thePanelDesignRect[ ControlBar::CB_PANEL_COUNT ] =
 static const Real thePanelAnchorFraction[ ControlBar::CB_PANEL_COUNT ] = { 0.0f, 0.5f, 1.0f };
 /// ...and which authored x that anchor is, so at 4:3 the three plates reassemble the shipped bar
 static const Real thePanelAnchorDesignX[ ControlBar::CB_PANEL_COUNT ] = { 0.0f, 400.0f, 800.0f };
+
+/// The Classic interface.  Its bar is laid out as Reforged's is, three plates at one scale, and keeps
+/// EA's habits on top: the beacon button, the under-attack lamp, and minimising as one piece.
+static Bool barIsClassic( void )
+{
+	return TheGlobalData != NULL && TheGlobalData->isClassicUI();
+}
+
+/// Where a panel's design x 0 lands on screen.
+static Real panelOriginX( Int panel, Real dispW, Real s )
+{
+	return dispW * thePanelAnchorFraction[ panel ] - thePanelAnchorDesignX[ panel ] * s;
+}
 
 //-------------------------------------------------------------------------------------------------
 /** One scale for both axes, the smaller of the two, so nothing anywhere in the HUD is distorted.
@@ -1689,7 +1714,7 @@ Real ControlBarHudScale( void )
 	// the player's HudScale option on top, 100/115/130/150%
 	static const Real steps[] = { 1.0f, 1.15f, 1.3f, 1.5f };
 	Int step = TheGlobalData ? TheGlobalData->m_hudScale : 0;
-	if( step < 0 || step > 3 )
+	if( step < 0 || step > 3 || barIsClassic() )		// EA's HUD has the one size
 		step = 0;
 
 	return ControlBarHudScaleFit( ControlBarHudScaleFor( TheDisplay->getWidth(), TheDisplay->getHeight() ) * steps[ step ],
@@ -1801,8 +1826,7 @@ Bool ControlBarPanelDesignToScreen( Int panel, const IRegion2D *design,
 	const Real loadScaleY = dispH / CONTROL_BAR_DESIGN_H;
 	const Real s = loadScaleX < loadScaleY ? loadScaleX : loadScaleY;
 
-	const Real originX = dispW * thePanelAnchorFraction[ panel ]
-											 - thePanelAnchorDesignX[ panel ] * s;
+	const Real originX = panelOriginX( panel, dispW, s );
 
 	rectOut->lo.x = REAL_TO_INT_FLOOR( originX + design->lo.x * s );
 	rectOut->hi.x = REAL_TO_INT_CEIL ( originX + design->hi.x * s );
@@ -2129,6 +2153,15 @@ void ControlBar::setPageSolids( const std::vector< IRegion2D > *solids, const st
 }
 
 //-------------------------------------------------------------------------------------------------
+void ControlBar::triggerRadarAttackGlow( void )
+{
+	if( m_radarAttackGlowWindow == NULL )
+		return;
+	m_remainingRadarAttackGlowFrames = 150;
+	m_radarAttackGlowWindow->winEnable( FALSE );
+}
+
+//-------------------------------------------------------------------------------------------------
 Bool ControlBar::letsClickThrough( GameWindow *window, Int x, Int y )
 {
 	GameWindow *frame = window->winGetParent();
@@ -2217,8 +2250,7 @@ void ControlBar::placeInPanel( GameWindow *win, Int panel,
 	const Real loadScaleX = dispW / CONTROL_BAR_DESIGN_W;
 	const Real loadScaleY = dispH / CONTROL_BAR_DESIGN_H;
 	const Real s = ControlBarUniformScale();
-	const Real originX = dispW * thePanelAnchorFraction[ panel ]
-											 - thePanelAnchorDesignX[ panel ] * s;
+	const Real originX = panelOriginX( panel, dispW, s );
 
 	ICoord2D rel, size;
 	win->winGetPosition( &rel.x, &rel.y );
@@ -2510,7 +2542,8 @@ void ControlBar::updatePanelSlide( void )
 //-------------------------------------------------------------------------------------------------
 void ControlBar::showPanel( Int panel, Bool show, Bool immediate )
 {
-	if( panel < 0 || panel >= CB_PANEL_COUNT )
+	// EA's bar is one piece and minimises as one (setLowControlBarConfig)
+	if( panel < 0 || panel >= CB_PANEL_COUNT || barIsClassic() )
 		return;
 
 	m_panelSlideTo[ panel ] = show ? 0.0f : 1.0f;
@@ -2616,10 +2649,13 @@ void ControlBar_logPlacement( const char *tag, Int frame )
 			tip->hide( TRUE );
 	}
 
-	DEBUG_LOG(("UIDRILL: frame %d %s top %d money %d origin (%d,%d) marker (%d,%d) live (%d,%d) tip (%d,%d %dx%d) screen %dx%d\n",
+	// what the bar shows against what is selected: an empty selection showing a command set is a
+	// builder standing in, which only Reforged has
+	DEBUG_LOG(("UIDRILL: frame %d %s top %d money %d origin (%d,%d) marker (%d,%d) live (%d,%d) tip (%d,%d %dx%d) screen %dx%d selected %d context %d\n",
 		frame, tag, top, money, origin->x, origin->y, markX, markY, liveX, liveY,
 		tipX, tipY, tipW, tipH,
-		TheDisplay->getWidth(), TheDisplay->getHeight()));
+		TheDisplay->getWidth(), TheDisplay->getHeight(),
+		TheInGameUI ? TheInGameUI->getSelectCount() : -1, (Int)TheControlBar->getCurrentContext()));
 }
 
 void ControlBar::forEachPlacedWindow( Int *topOut, Int *moneyOut )
@@ -2755,7 +2791,7 @@ void ControlBar::layoutPanels( void )
 	//
 	for( p = 0; p < CB_PANEL_COUNT; p++ )
 		m_panelDropCap[ p ] = 0;
-	if( m_controlBarSchemeManager )
+	if( m_controlBarSchemeManager && !barIsClassic() )
 	{
 		const ControlBarPlate *rightPlate =
 			ControlBarPlateForSide( m_controlBarSchemeManager->getCurrentSide(), CB_PANEL_RIGHT );
@@ -2901,6 +2937,8 @@ void ControlBar::shutdownWindows( void )
 	m_rightHUDCameoWindow = NULL;
 	m_rightHUDUnitSelectParent = NULL;
 	m_communicatorButton = NULL;
+	m_radarAttackGlowWindow = NULL;
+	m_remainingRadarAttackGlowFrames = 0;
 	m_animateDownWindow = NULL;
 	m_multiSelectTiles.clear();
 	m_sideSelectAnimateDown = FALSE;
@@ -3086,9 +3124,15 @@ void ControlBar::initWindows( void )
 			setControlCommand(win, findCommandButton("NonCommand_IdleWorker") );
 			win->winSetTooltipFunc(commandButtonTooltip);
 		}
-		// the bar carries no beacon button; nothing below shows it again
+		// the Reforged bar carries no beacon button; nothing below shows it again.  Classic keeps EA's
 		win = TheWindowManager->winGetWindowFromId(NULL,TheNameKeyGenerator->nameToKey("ControlBar.wnd:ButtonPlaceBeacon"));
-		win->winHide(TRUE);
+		if( win && barIsClassic() )
+		{
+			setControlCommand( win, findCommandButton( "NonCommand_Beacon" ) );
+			win->winSetTooltipFunc( commandButtonTooltip );
+		}
+		else if( win )
+			win->winHide(TRUE);
 		win = TheWindowManager->winGetWindowFromId(NULL,TheNameKeyGenerator->nameToKey("ControlBar.wnd:ButtonGeneral"));
 		if(win)
 		{
@@ -3118,10 +3162,12 @@ void ControlBar::initWindows( void )
 			win->winSetTooltipFunc(commandButtonTooltip);
 		}
 
-		// the radar's under-attack light is gone from the bar: the radar ping, the EVA line and the
-		// message say it already
+		// the radar's under-attack light is gone from the Reforged bar: the radar ping, the EVA line
+		// and the message say it already.  Classic keeps it flashing, as EA's did
 		win = TheWindowManager->winGetWindowFromId(NULL, TheNameKeyGenerator->nameToKey("ControlBar.wnd:WinUAttack"));
-		if(win)
+		if( win && barIsClassic() )
+			m_radarAttackGlowWindow = win;
+		else if(win)
 			win->winHide(TRUE);
 
 
@@ -3139,6 +3185,7 @@ void ControlBar::initWindows( void )
 		if(!m_animateWindowManagerForGenShortcuts)
 			m_animateWindowManagerForGenShortcuts = NEW AnimateWindowManager;
 		m_buildToolTipLayout = TheWindowManager->winCreateLayout( "ControlBarPopupDescription.wnd" );
+		ControlBarPopupDescription_forgetOffset();
 		if(m_buildToolTipLayout)
 		{
 			m_buildToolTipLayout->hide(TRUE);
@@ -3297,6 +3344,15 @@ void ControlBar::update( void )
 	if( logicTick )
 	{
 		getStarImage();
+
+		// EA's lamp: 150 frames, flipping every 15.  winEnable(FALSE) is the lit image
+		if( m_radarAttackGlowWindow && m_remainingRadarAttackGlowFrames > 0 )
+		{
+			if( --m_remainingRadarAttackGlowFrames <= 0 )
+				m_radarAttackGlowWindow->winEnable( TRUE );
+			else if( m_remainingRadarAttackGlowFrames % 15 == 0 )
+				m_radarAttackGlowWindow->winEnable( !BitTest( m_radarAttackGlowWindow->winGetStatus(), WIN_STATUS_ENABLED ) );
+		}
 	}
 
 	//
@@ -3538,7 +3594,8 @@ void ControlBar::update( void )
 														m_currentSelectedDrawable ) ? m_currentSelectedDrawable->getObject()
 																												: NULL;
 		const ExperienceTracker *xp = portraitObj ? portraitObj->getExperienceTracker() : NULL;
-		if( xp && portraitObj->isLocallyControlled() && xp->isTrainable() &&
+		// Classic's portrait is EA's picture alone: the bar stays empty
+		if( xp && !TheGlobalData->isClassicUI() && portraitObj->isLocallyControlled() && xp->isTrainable() &&
 				xp->getVeterancyLevel() < LEVEL_LAST )
 		{
 			const ThingTemplate *tmpl = portraitObj->getTemplate();
@@ -4143,6 +4200,10 @@ CommandSet *ControlBar::newCommandSetOverride( CommandSet *setToOverride )
 //-------------------------------------------------------------------------------------------------
 Int getBuildBatchCount( void )
 {
+	// Classic's click is one unit, as the game shipped
+	if( TheGlobalData->isClassicUI() )
+		return 1;
+
 	if( TheKeyboard->isCtrl() )
 		return TheKeyboard->isShift() ? CTRL_SHIFT_BUILD_QUEUE_COUNT : CTRL_BUILD_QUEUE_COUNT;
 
@@ -4325,6 +4386,11 @@ static void findStandInBuilderProc( Object *obj, void *userData )
 
 Drawable *ControlBar::findStandInBuilder( Bool freeOnly )
 {
+	// Classic's bar is 1.04's: nothing selected is an empty bar, and a build needs a selected worker.
+	// A stand-in kept the dozer's build menu up after the dozer was let go.
+	if( barIsClassic() )
+		return NULL;
+
 	Player *player = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
 	if( player == NULL )
 		return NULL;
@@ -5202,7 +5268,28 @@ void ControlBar::setControlCommand( GameWindow *button, const CommandButton *com
 	setCommandBarBorder(button, commandButton->getCommandButtonMappedBorderType());
 	
 	// the key in the button's top left corner is its place's, and a place is only known once the
-	// whole set is on the bar: labelCommandPlaces paints it
+	// whole set is on the bar: labelCommandPlaces paints it.  Classic has no places: its key is the
+	// game's own, the letter after the '&' in the button's label - the English label's in every
+	// language, so a Turkish or German player presses what an English one does - and it wears it
+	// on the button the way Reforged wears a grid key
+	if( TheHotKeyManager && TheGlobalData->isClassicUI() )
+	{
+		WideChar letter = TheGameText ? TheGameText->fetchEnglishHotKey( commandButton->getTextLabel() ) : 0;
+		if( letter >= u'a' && letter <= u'z' )
+			letter -= ( u'a' - u'A' );
+		if( letter != 0 )
+		{
+			TheHotKeyManager->addHotKey( button, HotKeyManager::nameOf( letter ) );
+			const WideChar text[ 2 ] = { letter, 0 };
+			GadgetButtonSetText( button, UnicodeString( text ) );
+			button->winSetStatus( WIN_STATUS_SHORTCUT_BUTTON );
+		}
+		else
+		{
+			GadgetButtonSetText( button, UnicodeString( u"" ) );
+			button->winClearStatus( WIN_STATUS_SHORTCUT_BUTTON );
+		}
+	}
 
 	GadgetButtonSetAltSound(button, "GUICommandBarClick");
 
@@ -5438,6 +5525,13 @@ void ControlBar::setPortraitByObject( Object *obj )
 		m_rightHUDWindow->winClearStatus( WIN_STATUS_IMAGE );
 		m_rightHUDCameoWindow->winSetStatus( WIN_STATUS_IMAGE );
 
+		// a player's upgrades are his research, which nobody else can see on the battlefield, so they
+		// light only for the local player, his allies and a watcher; an enemy's or a neutral's portrait
+		// lights only what the unit carries itself, its drones and add-ons.  Retail lit them all
+		Player *local = ThePlayerList->getLocalPlayer();
+		const Bool researchShown = player && ( !local->isPlayerActive() || player == local
+																					 || local->getRelationship( player->getDefaultTeam() ) == ALLIES );
+
 		for(Int i = 0; i < MAX_UPGRADE_CAMEO_UPGRADES; ++i)
 		{
 			AsciiString upgradeName = thing->getUpgradeCameoName(i);
@@ -5461,7 +5555,7 @@ void ControlBar::setPortraitByObject( Object *obj )
 				//Object level upgrades
 				m_rightHUDUpgradeCameos[i]->winEnable( TRUE );
 			}
-			else if( player && player->hasUpgradeComplete( ut ) )
+			else if( researchShown && player->hasUpgradeComplete( ut ) )
 			{
 				//Player level upgrades
 				m_rightHUDUpgradeCameos[i]->winEnable( TRUE );
@@ -5577,6 +5671,9 @@ void ControlBar::setControlBarSchemeByPlayer(Player *p)
 	{
 		switchToContext( CB_CONTEXT_NONE, NULL );
 		m_isObserverCommandBar = FALSE;
+		// what was showing is gone, and no selection event will bring it back: the selection's or
+		// the stand-in builder's command set has to be evaluated again
+		markUIDirty();
 
 		if (buttonIdleWorker)
 			buttonIdleWorker->winHide(FALSE);
@@ -5626,6 +5723,9 @@ void ControlBar::setControlBarSchemeByPlayerTemplate( const PlayerTemplate *pt)
 	{
 		switchToContext( CB_CONTEXT_NONE, NULL );
 		m_isObserverCommandBar = FALSE;
+		// what was showing is gone, and no selection event will bring it back: the selection's or
+		// the stand-in builder's command set has to be evaluated again
+		markUIDirty();
 
 		if (buttonIdleWorker)
 			buttonIdleWorker->winHide(FALSE);
@@ -5764,11 +5864,18 @@ void ControlBar::showPurchaseScience( void )
 	m_purchaseScienceOpen = TRUE;
 	//switchToContext(CB_CONTEXT_PURCHASE_SCIENCE, NULL);
 	m_contextParent[ CP_PURCHASE_SCIENCE ]->winHide(FALSE);
+	// the screen's foot (to 434 of 600) runs under the command bar's top edge (416), and the first
+	// window under the pointer takes the click, so the screen goes in front of the bar while it is up
+	m_contextParent[ CP_PURCHASE_SCIENCE ]->winBringToTop();
 	TheInGameUI->openPromotionPage();
 	// the fade holds the screen hidden for nine frames and draws the side's old painting of it fading
 	// in, which the page has replaced
 	if (TheGlobalData->m_animateWindows && !TheInGameUI->isPromotionPageShown())
+	{
+		// a fade still running out is ended first, or it would hide the screen it just showed
+		TheTransitionHandler->remove("GenExpFade");
 		TheTransitionHandler->setGroup("GenExpFade");
+	}
 		//m_generalsScreenAnimate->registerGameWindow( m_contextParent[ CP_PURCHASE_SCIENCE ], WIN_ANIMATION_SLIDE_TOP, TRUE, 200 );
 
 }
@@ -5777,7 +5884,28 @@ void ControlBar::hidePurchaseScience( void )
 {
 	clearPurchaseScienceColumn();
 
+	const Bool wasOpen = m_purchaseScienceOpen;
 	m_purchaseScienceOpen = FALSE;
+
+	//
+	// Closing plays the opening backwards.  The page fades itself out and hides the window when it
+	// is gone; Classic's painted screen runs its fade in reverse, which hides it at the end.  The
+	// window stays up meanwhile, which is why the open state is ours and not its hidden flag.
+	//
+	GameWindow *screen = m_contextParent[ CP_PURCHASE_SCIENCE ];
+	if( wasOpen && screen && TheGlobalData->m_animateWindows )
+	{
+		if( !TheInGameUI->isPromotionPageShown() )
+		{
+			TheTransitionHandler->reverse( "GenExpFade" );
+			return;
+		}
+		if( !screen->winIsHidden() )
+		{
+			TheInGameUI->closePromotionPage();
+			return;
+		}
+	}
 
 	//
 	// The fade drives winHide on this window itself, frame by frame, and it holds the window hidden
@@ -5793,20 +5921,6 @@ void ControlBar::hidePurchaseScience( void )
 	{
 		m_contextParent[ CP_PURCHASE_SCIENCE ]->winHide( TRUE );
 	}
-//	if (!TheGlobalData->m_animateWindows)
-//		{
-//			if( m_contextParent[ CP_PURCHASE_SCIENCE ] )
-//			{
-//				m_contextParent[ CP_PURCHASE_SCIENCE ]->winHide( TRUE );
-//			}
-//		}
-//		else
-//		{
-//			//if (m_generalsScreenAnimate->isFinished())
-//			if(TheTransitionHandler->isFinished())
-//				TheTransitionHandler->reverse("GenExpFade");
-//				//m_generalsScreenAnimate->reverseAnimateWindow();
-//		}
 }
 
 Bool ControlBar::isPurchaseScienceVisible( void )
@@ -5936,8 +6050,13 @@ void ControlBar::updatePurchaseScienceHotKeys( void )
 	{
 		GameWindow *candidate = purchaseScienceCandidate( column );
 
+		// Classic's number keys pick teams on this screen as they did in 1.04 (SelectionXlat), so a
+		// column key here would name a key that buys nothing
 		UnicodeString label;
-		if( m_purchaseScienceColumn < 0 || m_purchaseScienceColumn == column )
+		if( barIsClassic() )
+		{
+		}
+		else if( m_purchaseScienceColumn < 0 || m_purchaseScienceColumn == column )
 			label = getMetaKeyLabel( (GameMessage::Type)( GameMessage::MSG_META_SELECT_TEAM1 + column ) );
 
 		for( Int depth = 0; depth < PURCHASE_SCIENCE_COLUMN_DEPTH; depth++ )
@@ -6109,6 +6228,17 @@ void ControlBar::setLowControlBarConfig( void )
 	// down with the selection panel and stops it on the bottom edge of the screen.
 	//
 	TheTacticalView->setHeight((Int)(TheDisplay->getHeight()));
+
+	// EA's: the whole bar drops to a tenth of the screen from the bottom, its top edge still showing
+	if( barIsClassic() )
+	{
+		m_contextParent[ CP_MASTER ]->winSetPosition( m_defaultControlBarPosition.x,
+			REAL_TO_INT( TheDisplay->getHeight() - 0.1f * TheDisplay->getHeight() ) );
+		m_contextParent[ CP_MASTER ]->winHide(FALSE);
+		setUpDownImages();
+		return;
+	}
+
 	m_contextParent[ CP_MASTER ]->winSetPosition(m_defaultControlBarPosition.x, m_defaultControlBarPosition.y);
 	m_contextParent[ CP_MASTER ]->winHide(FALSE);
 
@@ -6331,7 +6461,21 @@ void ControlBar::initSpecialPowershortcutBar( Player *player)
 //-------------------------------------------------------------------------------------------------
 void ControlBar::arrangeSpecialPowerShortcutGrid( void )
 {
-	if( m_specialPowerShortcutParent == NULL || m_currentlyUsedSpecialPowersButtons < 2 )
+	if( m_specialPowerShortcutParent == NULL )
+		return;
+
+	//
+	// Classic keeps the shipped column, stretched with the bar, on the right edge of the screen and
+	// climbing from the top of the bar as 1.04's did.  Its frame runs most of the screen's height and
+	// took every click over the battlefield and the promotion screen beside the powers; the frame
+	// takes none now, its slots and buttons still do
+	//
+	if( barIsClassic() )
+	{
+		m_specialPowerShortcutParent->winSetStatus( WIN_STATUS_NO_INPUT );
+		return;
+	}
+	if( m_currentlyUsedSpecialPowersButtons < 2 )
 		return;
 
 	//
@@ -6947,8 +7091,12 @@ void ControlBar::drawSpecialPowerShortcutMultiplierText()
 		// Which key a slot number means is up to CommandMap.ini - getMetaKeyLabel returns
 		// nothing for an unbound one.
 		//
+		// Classic's powers wear no key, only how many are ready, as the game shipped
 		Int keySlot = -1;
-		if( m_specialPowerShortcutRow < 0 )
+		if( barIsClassic() )
+		{
+		}
+		else if( m_specialPowerShortcutRow < 0 )
 		{
 			if( i % SPECIAL_POWER_SHORTCUT_COLS == 0 )
 				keySlot = i / SPECIAL_POWER_SHORTCUT_COLS;

@@ -102,14 +102,14 @@ public:
 	explicit HtmlOverlayContainer( const AsciiString &defaultFont );
 	~HtmlOverlayContainer( void );
 
-	void setPage( const std::string &html );
+	void setPage( const std::string &html, Bool same );
 	void draw( void );
 	Bool hover( const ICoord2D &mouse );
 	std::string click( const ICoord2D &mouse );
 	std::string tip( IRegion2D &rect );
 	Int bottomOf( const char *selector );
 	void rectsOf( const char *selector, std::vector< IRegion2D > &rects );
-	void setAlpha( Int alpha ) { m_alpha = alpha; }
+	void setAlpha( Int alpha ) { m_drawnValid = m_drawnValid && alpha == m_alpha; m_alpha = alpha; }
 
 	litehtml::uint_ptr create_font( const litehtml::font_description &description, const litehtml::document *document,
 																	litehtml::font_metrics *metrics ) override;
@@ -170,6 +170,20 @@ private:
 	};
 	typedef std::vector< SvgRun > SvgRuns;
 
+	/** One 2D call the last draw made: text when `string` is set, else a mapped image when `image`
+		* names one, from x, y to width, height as its right and bottom, else a fill. */
+	struct DrawnCall
+	{
+		DisplayString *string;
+		AsciiString image;
+		Int x;
+		Int y;
+		Int width;
+		Int height;
+		Color color;
+		Color dropColor;
+	};
+
 	/** A colour with its alpha scaled by the whole page's, setAlpha's. */
 	Color tint( Int red, Int green, Int blue, Int alpha ) const { return GameMakeColor( red, green, blue, alpha * m_alpha / OPAQUE_ALPHA ); }
 	Color tint( const litehtml::web_color &color ) const { return tint( color.red, color.green, color.blue, color.alpha ); }
@@ -181,6 +195,10 @@ private:
 	DisplayString *displayString( GameFont *font, const char *text );
 	void freeStrings( Bool all );
 	void fillBox( const litehtml::position &box, const litehtml::web_color &color );
+	void fillRect( Int x, Int y, Int width, Int height, Color color );
+	void record( const DrawnCall &call );
+	void play( const DrawnCall &call );
+	void changed( void );
 	NSVGimage *svgImage( const std::string &source );
 	const SvgRuns &svgRuns( const std::string &source, Int width, Int height );
 
@@ -201,6 +219,13 @@ private:
 	UnsignedInt							m_stamp;
 	std::string							m_clicked;
 	Int											m_alpha;			///< the whole page's, OPAQUE_ALPHA unless it is fading
+	std::vector< DrawnCall >	m_drawn;			///< what the last draw of this layout made, in order
+	Bool										m_drawnValid;	///< and nothing it was drawn from has changed since
+	ICoord2D								m_hoverMouse;
+	Bool										m_hoverValid;	///< hover() at m_hoverMouse would find what it found last
+	Bool										m_hovered;
+	std::map< std::string, std::vector< IRegion2D > >	m_rects;	///< rectsOf() by selector, for this layout
+	std::map< std::string, Int >	m_bottoms;	///< bottomOf() by selector, for this layout
 public:
 	Bool										m_hud;				///< laid out at ControlBarHudScale(), the bottom HUD's own
 	Bool										m_hudPage;		///< laid out at ControlBarHudPageScale(), the in-match HUD's other pages
@@ -216,6 +241,9 @@ HtmlOverlayContainer::HtmlOverlayContainer( const AsciiString &defaultFont ) :
 	m_screenHeight( 0 ),
 	m_stamp( 0 ),
 	m_alpha( OPAQUE_ALPHA ),
+	m_drawnValid( FALSE ),
+	m_hoverValid( FALSE ),
+	m_hovered( FALSE ),
 	m_hud( FALSE ),
 	m_hudPage( FALSE ),
 	m_screenPixels( FALSE )
@@ -235,12 +263,13 @@ HtmlOverlayContainer::~HtmlOverlayContainer( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-void HtmlOverlayContainer::setPage( const std::string &html )
+/** `same` when `html` is known to be the text the last call was handed, so it need not be compared. */
+void HtmlOverlayContainer::setPage( const std::string &html, Bool same )
 {
 	const Int width = TheDisplay->getWidth();
 	const Int height = TheDisplay->getHeight();
 	const Real scale = m_screenPixels ? 1.0f : m_hud ? ControlBarHudScale() : m_hudPage ? ControlBarHudPageScale() : ControlBarUniformScale();
-	if( m_document && html == m_page && width == m_screenWidth && height == m_screenHeight && scale == m_scale )
+	if( m_document && ( same || html == m_page ) && width == m_screenWidth && height == m_screenHeight && scale == m_scale )
 		return;
 
 	m_page = html;
@@ -274,20 +303,81 @@ void HtmlOverlayContainer::setPage( const std::string &html )
 	m_document = litehtml::document::createFromString( litehtml::estring( body, litehtml::encoding::utf_8 ), this, "", "",
 																										 &m_masterCss, &m_pageCss );
 	m_document->render( viewportWidth() );
+	changed();
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The layout, the styles or what is under the pointer moved: what was drawn, hit and selected from
+	* the page before is not what it would be now. */
+void HtmlOverlayContainer::changed( void )
+{
+	m_drawnValid = FALSE;
+	m_hoverValid = FALSE;
+	m_rects.clear();
+	m_bottoms.clear();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Walking litehtml's tree to make the same 2D calls as the pass before was most of what a page cost
+	* while nothing on it changed, at near two hundred passes a second; the calls are kept and made
+	* again instead until the page is laid out, restyled, hovered onto something else or faded. */
 void HtmlOverlayContainer::draw( void )
 {
 	if( !m_document )
 		return;
 
+	TheDisplay->beginBatch2D();
+	if( m_drawnValid )
+	{
+		for( std::vector< DrawnCall >::const_iterator call = m_drawn.begin(); call != m_drawn.end(); ++call )
+			play( *call );
+		TheDisplay->endBatch2D();
+		return;
+	}
+
+	m_drawn.clear();
 	m_stamp++;
 	const litehtml::position clip( 0, 0, viewportWidth(), viewportHeight() );
-	TheDisplay->beginBatch2D();
 	m_document->draw( 0, 0, 0, &clip );
 	TheDisplay->endBatch2D();
 	freeStrings( FALSE );
+	m_drawnValid = TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
+void HtmlOverlayContainer::record( const DrawnCall &call )
+{
+	m_drawn.push_back( call );
+	play( call );
+}
+
+//-------------------------------------------------------------------------------------------------
+void HtmlOverlayContainer::play( const DrawnCall &call )
+{
+	if( call.string )
+		call.string->draw( call.x, call.y, call.color, call.dropColor );
+	else if( call.image.isEmpty() )
+		TheDisplay->drawFillRect( call.x, call.y, call.width, call.height, call.color );
+	else
+	{
+		const Image *image = TheMappedImageCollection->findImageByName( call.image );
+		if( image )
+			TheDisplay->drawImage( image, call.x, call.y, call.width, call.height, call.color );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+void HtmlOverlayContainer::fillRect( Int x, Int y, Int width, Int height, Color color )
+{
+	DrawnCall call;
+	call.string = NULL;
+	call.x = x;
+	call.y = y;
+	call.width = width;
+	call.height = height;
+	call.color = color;
+	call.dropColor = 0;
+	record( call );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -296,15 +386,28 @@ Bool HtmlOverlayContainer::hover( const ICoord2D &mouse )
 	if( !m_document )
 		return FALSE;
 
+	// a pointer that has not moved over a page that has not changed is over what it was over: the
+	// same point in the same layout finds the same element, already hovered
+	if( m_hoverValid && mouse.x == m_hoverMouse.x && mouse.y == m_hoverMouse.y )
+		return m_hovered;
+
 	litehtml::position::vector redraw;
 	const litehtml::pixel_t x = page( mouse.x );
 	const litehtml::pixel_t y = page( mouse.y );
-	if( m_document->on_mouse_over( x, y, x, y, redraw ) )
+	const std::shared_ptr< const litehtml::element > was = m_document->get_over_element();
+	const Bool restyled = m_document->on_mouse_over( x, y, x, y, redraw );
+	if( restyled )
 		m_document->render( viewportWidth() );
+	if( restyled || m_document->get_over_element() != was )
+		changed();
 
 	// the root and the body span the whole screen; only what is drawn on them is the page's
 	std::shared_ptr< const litehtml::element > over = m_document->get_over_element();
-	return over && over->parent() && !over->is_body();
+	m_hovered = over && over->parent() && !over->is_body();
+	m_hoverMouse = mouse;
+	// laid out again, the page may have put something else under the same point
+	m_hoverValid = !restyled;
+	return m_hovered;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -319,6 +422,7 @@ std::string HtmlOverlayContainer::click( const ICoord2D &mouse )
 	const litehtml::pixel_t y = page( mouse.y );
 	m_document->on_lbutton_down( x, y, x, y, redraw );
 	m_document->on_lbutton_up( x, y, x, y, redraw );
+	changed();
 	return m_clicked;
 }
 
@@ -351,19 +455,36 @@ Int HtmlOverlayContainer::bottomOf( const char *selector )
 	if( !m_document )
 		return 0;
 
+	std::map< std::string, Int >::iterator found = m_bottoms.find( selector );
+	if( found != m_bottoms.end() )
+		return found->second;
+
+	Int &bottom = m_bottoms[ selector ];
+	bottom = 0;
 	litehtml::element::ptr element = m_document->root()->select_one( selector );
-	if( !element )
-		return 0;
-	const litehtml::position placement = element->get_placement();
-	return screen( placement.y + placement.height );
+	if( element )
+	{
+		const litehtml::position placement = element->get_placement();
+		bottom = screen( placement.y + placement.height );
+	}
+	return bottom;
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Matched once for each layout: the command bar asked for its keys and solids every pass, and
+	* matching a selector against every element of the page was its own share of the frame. */
 void HtmlOverlayContainer::rectsOf( const char *selector, std::vector< IRegion2D > &rects )
 {
 	rects.clear();
 	if( !m_document )
 		return;
+
+	std::map< std::string, std::vector< IRegion2D > >::iterator found = m_rects.find( selector );
+	if( found != m_rects.end() )
+	{
+		rects = found->second;
+		return;
+	}
 
 	const litehtml::elements_list elements = m_document->root()->select_all( selector );
 	for( litehtml::elements_list::const_iterator element = elements.begin(); element != elements.end(); ++element )
@@ -379,6 +500,7 @@ void HtmlOverlayContainer::rectsOf( const char *selector, std::vector< IRegion2D
 		rect.hi.y = screen( placement.y + placement.height );
 		rects.push_back( rect );
 	}
+	m_rects[ selector ] = rects;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -473,8 +595,14 @@ void HtmlOverlayContainer::draw_text( litehtml::uint_ptr hdc, const char *text, 
 	if( font == 0 || color.alpha == 0 )
 		return;
 
-	displayString( (GameFont *)font, text )->draw( screen( place.x ), screen( place.y ), tint( color ),
-																								 tint( 0, 0, 0, color.alpha ) );
+	DrawnCall call;
+	call.string = displayString( (GameFont *)font, text );
+	call.x = screen( place.x );
+	call.y = screen( place.y );
+	call.width = call.height = 0;
+	call.color = tint( color );
+	call.dropColor = tint( 0, 0, 0, color.alpha );
+	record( call );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -514,14 +642,25 @@ void HtmlOverlayContainer::draw_image( litehtml::uint_ptr hdc, const litehtml::b
 		{
 			UnsignedByte red, green, blue, alpha;
 			GameGetColorComponents( run->color, &red, &green, &blue, &alpha );
-			TheDisplay->drawFillRect( left + run->x, top + run->y, run->length, 1, tint( red, green, blue, alpha ) );
+			fillRect( left + run->x, top + run->y, run->length, 1, tint( red, green, blue, alpha ) );
 		}
 		return;
 	}
 
-	const Image *image = TheMappedImageCollection->findImageByName( AsciiString( url.c_str() ) );
-	if( image )
-		TheDisplay->drawImage( image, left, top, right, bottom, tint( OPAQUE_ALPHA, OPAQUE_ALPHA, OPAQUE_ALPHA, OPAQUE_ALPHA ) );
+	// kept by name and found again on every replay, as it was on every draw: a name the collection
+	// gives a new image draws the new one.  No name names no image, and would replay as a fill
+	if( url.empty() )
+		return;
+	DrawnCall call;
+	call.string = NULL;
+	call.image = url.c_str();
+	call.x = left;
+	call.y = top;
+	call.width = right;
+	call.height = bottom;
+	call.color = tint( OPAQUE_ALPHA, OPAQUE_ALPHA, OPAQUE_ALPHA, OPAQUE_ALPHA );
+	call.dropColor = 0;
+	record( call );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -604,7 +743,7 @@ void HtmlOverlayContainer::fillBox( const litehtml::position &box, const litehtm
 	const Int right = screen( box.x + box.width );
 	const Int bottom = screen( box.y + box.height );
 	if( color.alpha > 0 && right > left && bottom > top )
-		TheDisplay->drawFillRect( left, top, right - left, bottom - top, tint( color ) );
+		fillRect( left, top, right - left, bottom - top, tint( color ) );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -663,9 +802,9 @@ void HtmlOverlayContainer::draw_linear_gradient( litehtml::uint_ptr hdc, const l
 															REAL_TO_INT( from.blue + ( to.blue - from.blue ) * share ),
 															REAL_TO_INT( from.alpha + ( to.alpha - from.alpha ) * share ) );
 		if( across )
-			TheDisplay->drawFillRect( pixel, top, 1, bottom - top, color );
+			fillRect( pixel, top, 1, bottom - top, color );
 		else
-			TheDisplay->drawFillRect( left, pixel, right - left, 1, color );
+			fillRect( left, pixel, right - left, 1, color );
 	}
 }
 
@@ -739,8 +878,7 @@ void HtmlOverlayContainer::draw_borders( litehtml::uint_ptr hdc, const litehtml:
 	{
 		const IRegion2D &edge = edges[ side ];
 		if( sides[ side ]->color.alpha > 0 && edge.hi.x > edge.lo.x && edge.hi.y > edge.lo.y )
-			TheDisplay->drawFillRect( edge.lo.x, edge.lo.y, edge.hi.x - edge.lo.x, edge.hi.y - edge.lo.y,
-																tint( sides[ side ]->color ) );
+			fillRect( edge.lo.x, edge.lo.y, edge.hi.x - edge.lo.x, edge.hi.y - edge.lo.y, tint( sides[ side ]->color ) );
 	}
 }
 
@@ -803,7 +941,8 @@ void HtmlOverlayContainer::get_language( litehtml::string &language, litehtml::s
 
 //-------------------------------------------------------------------------------------------------
 HtmlOverlay::HtmlOverlay( const AsciiString &defaultFont ) :
-	m_container( new HtmlOverlayContainer( defaultFont ) )
+	m_container( new HtmlOverlayContainer( defaultFont ) ),
+	m_expandedSent( FALSE )
 {
 }
 
@@ -813,7 +952,23 @@ HtmlOverlay::~HtmlOverlay( void )
 	delete m_container;
 }
 
-void HtmlOverlay::setPage( const std::string &html )	{ m_container->setPage( html ); }
+void HtmlOverlay::setPage( const std::string &html )	{ m_expandedSent = FALSE; m_container->setPage( html, FALSE ); }
+
+//-------------------------------------------------------------------------------------------------
+/** Filling 38 KB of command bar in again every pass, to hand litehtml the page it already had, was a
+	* share of the frame of its own. */
+void HtmlOverlay::setPage( const std::string &written, const HtmlValues &values, const HtmlLists &lists,
+													 const HtmlLookup &lookup )
+{
+	// compared against the page it made last time, as it would be filled in now: only the names the
+	// page uses are read, where comparing every value and list entry kept, and copying them all on
+	// every change, was most of a pass's page cost
+	const Bool same = m_expandedSent && HtmlTemplate_matches( written, values, lists, lookup, m_expanded );
+	if( !same )
+		m_expanded = HtmlTemplate_expand( written, values, lists, lookup );
+	m_container->setPage( m_expanded, same );
+	m_expandedSent = TRUE;
+}
 void HtmlOverlay::draw( void )													{ m_container->draw(); }
 void HtmlOverlay::setHud( Bool hud )										{ m_container->m_hud = hud; }
 void HtmlOverlay::setHudPage( Bool hudPage )						{ m_container->m_hudPage = hudPage; }

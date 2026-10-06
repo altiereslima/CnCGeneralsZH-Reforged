@@ -50,6 +50,11 @@ typedef std::function< Bool( const std::string &name, std::string &value ) > Htm
 extern std::string HtmlTemplate_expand( const std::string &page, const HtmlValues &values,
 																				const HtmlLists &lists, const HtmlLookup &lookup );
 
+/** HtmlTemplate_expand( page, values, lists, lookup ) == expanded, found without making the page: it
+	* reads only what the page names, stops at the first difference and builds no string. */
+extern Bool HtmlTemplate_matches( const std::string &page, const HtmlValues &values, const HtmlLists &lists,
+																	const HtmlLookup &lookup, const std::string &expanded );
+
 /** The text with & < > " and ' written as entities, so a player's name cannot open a tag. */
 extern std::string HtmlTemplate_escape( const std::string &text );
 

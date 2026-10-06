@@ -73,4 +73,9 @@ protected:
 
 extern W3DShadowManager *TheW3DShadowManager;
 
+class FrustumClass;
+class SphereClass;
+Bool shadowCanReachView( const FrustumClass &view, const SphereClass &body, Real groundZ, Real runX, Real runY );	///< whether a body's shadow, running runX, runY sideways per unit of drop down to groundZ, can reach the view
+Bool volumeShadowCanReachView( const FrustumClass &view, const SphereClass &body, Real groundZ );	///< the same along the ray from the shadow light's position
+
 #endif	//__W3DSHADOW_H_

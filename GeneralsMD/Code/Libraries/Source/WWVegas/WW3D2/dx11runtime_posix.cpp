@@ -59,11 +59,12 @@ DX11BufferTwinClass * Direct3D11_Twin_Vertex_Buffer(unsigned, bool) { return NUL
 DX11BufferTwinClass * Direct3D11_Twin_Index_Buffer(unsigned, bool) { return NULL; }
 void Direct3D11_Mirror_Texture(unsigned, struct IDirect3DBaseTexture9 *) {}
 
-void Direct3D11_Normal_Maps_Enable(bool) {}
-bool Direct3D11_Normal_Maps_Active() { return false; }
-void Direct3D11_Mirror_Normal_Map(struct IDirect3DBaseTexture9 *) {}
-void Direct3D11_Set_Terrain_Sun(const float [3]) {}
-unsigned long long Direct3D11_Normal_Mapped_Draws() { return 0; }
+void Direct3D11_Set_Headlights(const float *, unsigned, const float [3]) {}
+void Direct3D11_Set_Blast_Lights(const float *, unsigned) {}
+bool Direct3D11_Lights_Per_Pixel() { return false; }
+void Direct3D11_Set_Soft_Particles(bool) {}
+void Direct3D11_Take_Scene_Depth() {}
+void Direct3D11_Allow_Soft_Particles(bool) {}
 
 bool Direct3D11_Begin_Shadow_Map(unsigned) { return false; }
 void Direct3D11_End_Shadow_Map() {}
@@ -150,12 +151,13 @@ void Direct3D11_Program_Statistics(unsigned & shipped, unsigned & held)
 	held = 0;
 }
 void Direct3D11_Take_Frame_Cost(double & pipeline_milliseconds, unsigned & pipelines,
-	double & texture_milliseconds, unsigned & textures)
+	double & texture_milliseconds, unsigned & textures, unsigned & depth_copies)
 {
 	pipeline_milliseconds = 0.0;
 	pipelines = 0;
 	texture_milliseconds = 0.0;
 	textures = 0;
+	depth_copies = 0;
 }
 void Direct3D11_Refusals(unsigned long long & no_buffer, unsigned long long & no_stage,
 	unsigned long long & no_layout, unsigned long long & no_program,

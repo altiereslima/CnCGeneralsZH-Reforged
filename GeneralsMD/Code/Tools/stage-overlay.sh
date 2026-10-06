@@ -24,7 +24,7 @@
 #
 # The shipped overlay, from generals' Windows post-build list (CMakeLists.txt) less what package.bat
 # leaves out, as P1 inferred it (to be confirmed against upstream's release tooling):
-#   Data/INI/, Data/Patch.str, Data/Scripts/, Data/Turkish/, Install_Final.bmp, Art/Textures/, Window/
+#   Data/INI/, Data/Patch.str, Data/Scripts/, Data/Turkish/, Data/German/, Install_Final.bmp, Art/Textures/, Window/
 # and the fork's art archives, Reforged*.big from the Run folder when vendor.sh has fetched them,
 # LINKED here (1.65 GB): the bundle step copies them through the links.
 # --dev stages the development-only folders instead, Scenarios/ and Cinema/ (-scenario, -cinema),
@@ -74,6 +74,7 @@ else
 	copy Patch.str Data/Patch.str
 	copy Scripts Data/Scripts
 	copy Turkish Data/Turkish
+	copy German Data/German
 	copy Install_Final.bmp Install_Final.bmp
 	copy Art/Textures Art/Textures
 	copy Window Window

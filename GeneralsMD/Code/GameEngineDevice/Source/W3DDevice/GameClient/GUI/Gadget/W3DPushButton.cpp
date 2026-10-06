@@ -59,6 +59,7 @@
 #include "GameClient/Display.h"
 #include "GameClient/DisplayStringManager.h"
 #include "GameClient/InGameUI.h"		// HudReadout_draw, the plate every corner marking stands on
+#include "Common/GlobalData.h"
 #include "W3DDevice/GameClient/W3DGameWindow.h"
 #include "W3DDevice/GameClient/W3DDisplay.h"
 #include "W3DDevice/GameClient/W3DGadget.h"
@@ -107,6 +108,9 @@ static const Int BADGE_LEAST_POINTS = 6;
 	* nobody found without looking for it.  It gets its own size, and an opaque plate under it. */
 static const Real COUNT_BADGE_DESIGN_POINTS = 11.0f;
 
+/** Classic's key letter, the only place its keys are shown. */
+static const Real CLASSIC_KEY_BADGE_DESIGN_POINTS = 12.0f;
+
 // getBadgeFont ===============================================================
 /** The font the corner markings wear.
 	*
@@ -142,6 +146,7 @@ static GameFont *getBadgeFont( GameWindow *window, Real designPoints = BADGE_DES
 
 static void drawBadge( GameWindow *window, const UnicodeString &text, Real designPoints,
 											 HudReadoutCorner corner, Color color, const UnicodeString &bare = UnicodeString::TheEmptyString );
+static void drawClassicKeyBadge( GameWindow *window, const UnicodeString &text, Color color );
 
 // drawButtonText =============================================================
 /** Draw button text to the screen */
@@ -185,6 +190,14 @@ static void drawButtonText( GameWindow *window, WinInstanceData *instData )
 	// left corner, which the button's own art could be any colour under
 	if( BitTest( window->winGetStatus(), WIN_STATUS_SHORTCUT_BUTTON ) )
 	{
+		// Classic has no grid places to learn the keys from, so the letter is the one way in: set
+		// larger, and in gold while the button can be pressed
+		if( TheGlobalData->isClassicUI() )
+		{
+			const Bool enabled = BitTest( window->winGetStatus(), WIN_STATUS_ENABLED );
+			drawClassicKeyBadge( window, text->getText(), enabled ? GameMakeColor( 255, 210, 60, 255 ) : textColor );
+			return;
+		}
 		drawBadge( window, text->getText(), BADGE_DESIGN_POINTS, HUD_READOUT_TOP_LEFT, textColor );
 		return;
 	}
@@ -297,6 +310,39 @@ static void drawBadge( GameWindow *window, const UnicodeString &text, Real desig
 	HudReadout_draw( badge, cell, corner, color );
 
 }  // end drawBadge
+
+// drawClassicKeyBadge ========================================================
+/** Classic's key letter on a square plate in the button's top left corner, the letter in the
+	* middle of it.  The plate is the line's height square whatever the letter, so an "I" and an "M"
+	* stand on the same plate and a row of buttons reads as one set of keys. */
+//=============================================================================
+static void drawClassicKeyBadge( GameWindow *window, const UnicodeString &text, Color color )
+{
+	ICoord2D origin, size;
+	window->winGetScreenPosition( &origin.x, &origin.y );
+	window->winGetSize( &size.x, &size.y );
+
+	DisplayString *badge = badgeString( text, getBadgeFont( window, CLASSIC_KEY_BADGE_DESIGN_POINTS ) );
+	if( badge == NULL )
+		return;
+
+	Int textWidth = 0, textHeight = 0;
+	badge->getSize( &textWidth, &textHeight );
+	if( textWidth <= 0 || textHeight <= 0 )
+		return;
+
+	// one pixel in from the button's edge, never more than half the button
+	const Int side = min( textHeight, min( size.x, size.y ) / 2 );
+	const Int left = origin.x + 1;
+	const Int top = origin.y + 1;
+	TheDisplay->drawFillRect( left, top, side, side, GameMakeColor( 2, 4, 5, 230 ) );
+	TheDisplay->drawOpenRect( left, top, side, side, 1, GameMakeColor( 90, 90, 90, 255 ) );
+
+	IRegion2D plate = { { left, top }, { left + side, top + side } };
+	badge->setClipRegion( &plate );
+	badge->draw( left + ( side - textWidth ) / 2, top + ( side - textHeight ) / 2, color, GameMakeColor( 0, 0, 0, 255 ) );
+
+}  // end drawClassicKeyBadge
 
 // drawSecondsBadge ===========================================================
 /** Draw a small "12s" label in the button's bottom left corner - how long the

@@ -1,0 +1,17 @@
+# The YouTube thumbnail's background: Scenarios/rf_thumb_fe.txt on Flash Effect, looking north over
+# the derrick beach the three islands meet at, held, so every corner of the frame has its own part of
+# the fight. The shot at 3.5 s, before anything moves, is the check of where the buildings landed.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 12000 -noDynamicLOD -map "Maps\Flash Effect\Flash Effect.map" -autoskirmish 3
+#     -takeover -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA -seed 7
+#     -scenario rf_thumb_fe -cinema rf_thumb_fe -video 930 1230 rf_thumb_fe -maxframes 1240
+
+3.0   cut     1700 1560 0.47 0 12
+3.5   shot
+36.0  shot
+37.0  shot
+37.5  shot
+38.0  shot
+38.5  shot
+39.0  shot

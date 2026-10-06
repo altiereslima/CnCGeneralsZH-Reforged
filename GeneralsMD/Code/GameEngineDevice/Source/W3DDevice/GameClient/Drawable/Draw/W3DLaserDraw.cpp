@@ -60,6 +60,98 @@
 //#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
 #endif
 
+// BEAM GLOW //////////////////////////////////////////////////////////////////////////////////////
+// Weapon lasers get two more additive lines per segment over EA's beams: a wide halo in the beam's
+// own hue and a narrow core run toward white. Both draw through one texture made here, a falloff
+// across the width that reaches zero at the edge, so the halo has no visible border. The core
+// stacks past white on top of EA's layers, which the Direct3D 11 bloom then picks up; under -d3d9
+// the halo alone is the glow. Draw side only: nothing here is read by GameLogic or parsed from INI.
+static const Real GLOW_HALO_WIDTH_SCALE	= 2.8f;		// halo width over the beam's widest layer
+static const Real GLOW_HALO_MIN_WIDTH		= 16.0f;
+static const Real GLOW_HALO_INTENSITY		= 0.75f;
+static const Real GLOW_CORE_WIDTH_SCALE	= 0.3f;
+static const Real GLOW_CORE_MIN_WIDTH		= 3.0f;
+static const Real GLOW_CORE_WHITEN			= 0.7f;		// how far the core's hue is run toward white
+static const Int GLOW_LAYERS						= 2;			// [0] halo, [1] core
+static const Int GLOW_TEXTURE_SIZE			= 64;
+
+static TextureClass *s_glowTexture = NULL;
+
+// ponytail: chosen by template name so no INI field and no checksum change; a "Glow" field in
+// W3DLaserDraw is the upgrade if a mod ever wants it per beam. Every weapon laser in ZH ends in
+// LaserBeam; the data streams, the waypoint line and the Particle Cannon's beams do not.
+static Bool beamGlows( const Thing *thing )
+{
+	return thing && thing->getTemplate() && thing->getTemplate()->getName().endsWith( "LaserBeam" );
+}
+
+static TextureClass *acquireGlowTexture()
+{
+	if( !s_glowTexture )
+	{
+		s_glowTexture = MSGNEW("TextureClass") TextureClass( GLOW_TEXTURE_SIZE, 1, WW3D_FORMAT_A8R8G8B8, MIP_LEVELS_1 );
+		SurfaceClass *surf = s_glowTexture->Get_Surface_Level();
+		if( surf )
+		{
+			Int pitch;
+			UnsignedInt *pData = (UnsignedInt*)surf->Lock( &pitch );
+			if( pData )
+			{
+				const Real edge = expf( -4.0f );
+				for( Int x = 0; x < GLOW_TEXTURE_SIZE; x++ )
+				{
+					Real d = ( x + 0.5f ) / GLOW_TEXTURE_SIZE * 2.0f - 1.0f;	// -1..1 across the beam
+					Real v = ( expf( -4.0f * d * d ) - edge ) / ( 1.0f - edge );
+					UnsignedInt c = (UnsignedInt)( MAX( v, 0.0f ) * 255.0f + 0.5f );
+					pData[ x ] = ( c << 24 ) | ( c << 16 ) | ( c << 8 ) | c;
+				}
+				surf->Unlock();
+			}
+			REF_PTR_RELEASE( surf );
+		}
+		s_glowTexture->Get_Filter().Set_U_Addr_Mode( TextureFilterClass::TEXTURE_ADDRESS_CLAMP );
+		s_glowTexture->Get_Filter().Set_V_Addr_Mode( TextureFilterClass::TEXTURE_ADDRESS_CLAMP );
+	}
+	s_glowTexture->Add_Ref();
+	return s_glowTexture;
+}
+
+static void releaseGlowTexture()
+{
+	if( !s_glowTexture )
+		return;
+	// the static pointer holds one reference of its own; the last beam takes it with it
+	s_glowTexture->Release_Ref();
+	if( s_glowTexture->Num_Refs() == 1 )
+		REF_PTR_RELEASE( s_glowTexture );
+}
+
+// The beam's hue at full brightness: whichever of the two INI colours is more saturated, so a
+// white-cored red laser glows red and a grey-edged orange one glows orange.
+static Vector3 glowHue( Color inner, Color outer )
+{
+	Real c[ 2 ][ 4 ];
+	GameGetColorComponentsReal( inner, &c[0][0], &c[0][1], &c[0][2], &c[0][3] );
+	GameGetColorComponentsReal( outer, &c[1][0], &c[1][1], &c[1][2], &c[1][3] );
+	Int best = 0;
+	Real bestSat = -1.0f;
+	for( Int i = 0; i < 2; i++ )
+	{
+		Real hi = MAX( c[i][0], MAX( c[i][1], c[i][2] ) );
+		Real lo = MIN( c[i][0], MIN( c[i][1], c[i][2] ) );
+		Real sat = ( hi > 0.0f ) ? ( hi - lo ) / hi : -1.0f;
+		if( sat > bestSat )
+		{
+			bestSat = sat;
+			best = i;
+		}
+	}
+	Real hi = MAX( c[best][0], MAX( c[best][1], c[best][2] ) );
+	if( hi <= 0.0f )
+		return Vector3( 1.0f, 1.0f, 1.0f );
+	return Vector3( c[best][0] / hi, c[best][1] / hi, c[best][2] / hi );
+}
+
 // PUBLIC FUNCTIONS ///////////////////////////////////////////////////////////////////////////////
 
 //-------------------------------------------------------------------------------------------------
@@ -118,6 +210,7 @@ void W3DLaserDrawModuleData::buildFieldParse(MultiIniFieldParse& p)
 W3DLaserDraw::W3DLaserDraw( Thing *thing, const ModuleData* moduleData ) : 
 	DrawModule( thing, moduleData ),
 	m_line3D(NULL),
+	m_glow3D(NULL),
 	m_texture(NULL),
 	m_textureAspectRatio(1.0f),
 	m_selfDirty(TRUE)
@@ -219,6 +312,29 @@ W3DLaserDraw::W3DLaserDraw( Thing *thing, const ModuleData* moduleData ) :
 
 	} //end segment loop
 
+	if( beamGlows( thing ) )
+	{
+		TextureClass *glowTexture = acquireGlowTexture();
+		Vector3 hue = glowHue( data->m_innerColor, data->m_outerColor );
+		Vector3 white( 1.0f, 1.0f, 1.0f );
+		Vector3 colors[ GLOW_LAYERS ] = { hue * GLOW_HALO_INTENSITY, hue * ( 1.0f - GLOW_CORE_WHITEN ) + white * GLOW_CORE_WHITEN };
+
+		const Int glowCount = (Int)data->m_segments * GLOW_LAYERS;
+		m_glow3D = NEW SegmentedLineClass *[ glowCount ];
+		for( Int g = 0; g < glowCount; g++ )
+		{
+			SegmentedLineClass *line = NEW SegmentedLineClass;
+			m_glow3D[ g ] = line;
+			line->Set_Texture( glowTexture );
+			line->Set_Shader( ShaderClass::_PresetAdditiveShader );
+			line->Set_Color( colors[ g % GLOW_LAYERS ] );
+			line->Set_Texture_Mapping_Mode( SegLineRendererClass::UNIFORM_WIDTH_TEXTURE_MAP );	// u runs across the width
+			W3DDisplay::m_3DScene->Add_Render_Object( line );
+			line->Set_Visible( 0 );
+		}
+		// this beam's reference on glowTexture is given back by releaseGlowTexture in the destructor
+	}
+
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -239,6 +355,17 @@ W3DLaserDraw::~W3DLaserDraw( void )
 	}  // end for i
 
 	delete [] m_line3D;
+
+	if( m_glow3D )
+	{
+		for( Int g = 0; g < (Int)data->m_segments * GLOW_LAYERS; g++ )
+		{
+			W3DDisplay::m_3DScene->Remove_Render_Object( m_glow3D[ g ] );
+			REF_PTR_RELEASE( m_glow3D[ g ] );
+		}
+		delete [] m_glow3D;
+		releaseGlowTexture();
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -424,6 +551,23 @@ void W3DLaserDraw::doDrawModule(const Matrix3D* transformMtx)
 
 				m_line3D[ index ]->Set_Width( width );
 				m_line3D[ index ]->Set_Points( 2, &laserPoints[0] );
+			}
+
+			if( m_glow3D )
+			{
+				Real widest = MAX( data->m_innerBeamWidth, data->m_outerBeamWidth );
+				Real widthScale = update->getWidthScale();
+				Real widths[ GLOW_LAYERS ] =
+				{
+					MAX( widest * GLOW_HALO_WIDTH_SCALE, GLOW_HALO_MIN_WIDTH ) * widthScale,
+					MAX( widest * GLOW_CORE_WIDTH_SCALE, GLOW_CORE_MIN_WIDTH ) * widthScale
+				};
+				for( Int g = 0; g < GLOW_LAYERS; g++ )
+				{
+					SegmentedLineClass *line = m_glow3D[ segment * GLOW_LAYERS + g ];
+					line->Set_Width( widths[ g ] );
+					line->Set_Points( 2, &laserPoints[0] );
+				}
 			}
 		}
 	}

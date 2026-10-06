@@ -41,6 +41,7 @@
 #include "Common/GlobalData.h"
 #include "Common/Xfer.h"
 
+#include "GameClient/ControlBar.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/Eva.h"
 #include "GameClient/GameWindowManager.h"
@@ -284,6 +285,9 @@ void Radar::clearAllEvents( void )
 //-------------------------------------------------------------------------------------------------
 RadarLandmarkType Radar::landmarkTypeOf( const Object *obj )
 {
+	// Classic's radar is EA's: no money piles, no tech buildings it was not already showing
+	if( TheGlobalData->isClassicUI() )
+		return RADAR_LANDMARK_NONE;
 
 	if( obj->isKindOf( KINDOF_SUPPLY_SOURCE ) )
 		return RADAR_LANDMARK_SUPPLY;
@@ -1238,6 +1242,9 @@ void Radar::tryUnderAttackEvent( const Object *obj )
 	// if event created, do some more feedback
 	if( eventCreated )
 	{
+		// the lamp beside the radar; only the Classic bar has one to light
+		if( TheControlBar )
+			TheControlBar->triggerRadarAttackGlow();
 		//
 		///@todo Should make an INI data driven table for radar event strings, and audio events
 		//

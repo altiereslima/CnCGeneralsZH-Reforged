@@ -768,6 +768,9 @@ public:
 	void setClipPercentFull(Real percent, Bool allowReduction);
 	UnsignedInt getSuspendFXFrame( void ) const { return m_suspendFXFrame; }
 
+	/// the bonuses `source` fires this weapon with now; a read, which the selected unit's figures on the bar use
+	void computeBonus(const Object *source, WeaponBonusConditionFlags extraBonusFlags, WeaponBonus& bonus) const;
+
 protected:
 
 	Weapon(const WeaponTemplate* tmpl, WeaponSlotType wslot);
@@ -789,8 +792,6 @@ protected:
 	void processRequestAssistance( const Object *requestingObject, Object *victimObject ); ///< Weapons can call for extra attacks from nearby objects
 
 	void getFiringLineOfSightOrigin(const Object* source, Coord3D& origin) const;
-
-	void computeBonus(const Object *source, WeaponBonusConditionFlags extraBonusFlags, WeaponBonus& bonus) const;
 
 	void rebuildScatterTargets();
 

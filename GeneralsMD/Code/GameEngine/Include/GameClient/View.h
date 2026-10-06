@@ -191,7 +191,8 @@ public:
 	virtual void anchorZoomAt( const ICoord2D *pixel ) { }											///< ZoomToCursor: hold the ground under this pixel there while the zoom settles
 	virtual void setZoomToDefault( void ) { }														///< Set zoom to default value
 	virtual void setZoomToMax( void ) { }																///< Set zoom as far out as the player may zoom by hand
-	void setMinHeightAboveGround( Real height ) { m_minHeightAboveGround = height; }	///< CloserZoom: how near the ground the wheel may come
+	virtual void setZoomToHeight( Real heightAboveGround ) { }								///< Frame the camera at this height above the terrain
+	void setZoomToStart( Bool shellMap );																	///< the zoom a match opens at: max under StartAtMaxZoom, else START_CAMERA_HEIGHT
 	virtual void setOkToAdjustHeight( Bool val ) { m_okToAdjustHeight = val; }	///< Set this to adjust camera height
 
 	// for debugging
@@ -240,6 +241,27 @@ public:
 	virtual Real getFXPitch( void ) const { return 1.0f; }					///< returns the FX pitch angle
 	virtual void forceCameraConstraintRecalc(void) {}
 	virtual void setGuardBandBias( const Coord2D *gb ) = 0;
+
+	/** The console's freecam, a photo mode: the camera flies on its own from an eye point with a
+		* heading and a tilt, free of the look point, the zoom, the pitch range and the map's edges, and
+		* draws the whole map.  The look point (getPosition) stays where it was, so nothing that reads
+		* it sees the flight.  Client only. */
+	enum FreeCameraKeys
+	{
+		FREECAM_FORWARD = 0x01,
+		FREECAM_BACK		= 0x02,
+		FREECAM_LEFT		= 0x04,
+		FREECAM_RIGHT		= 0x08,
+		FREECAM_UP			= 0x10,
+		FREECAM_DOWN		= 0x20,
+	};
+	virtual void setFreeCamera( Bool on ) { }
+	virtual Bool isFreeCamera( void ) const { return FALSE; }
+	/// eye in world units, heading and tilt in radians (heading 0 looks along +x, tilt 0 is level)
+	virtual void setFreeCameraPose( const Coord3D *eye, Real heading, Real tilt ) { }
+	virtual void getFreeCameraPose( Coord3D *eye, Real *heading, Real *tilt ) const { }
+	/// which of the FreeCameraKeys are held
+	virtual void setFreeCameraKeys( UnsignedInt keys ) { }
 
 protected:
 
@@ -347,13 +369,6 @@ class ViewLocation
 // middle-drag rotate share exactly one copy of it.
 extern Real View_snapAngleToEighth( Real angle );					///< nearest multiple of 45 degrees
 extern Real View_stepAngleByEighths( Real angle, Int steps );	///< snap, then move that many eighths
-
-// CLOSEST ZOOM ///////////////////////////////////////////////////////////////////////////////////
-// The CloserZoom option takes a percentage off GameData.ini's MinCameraHeight.  It can only bring
-// the camera nearer: the far limit is how much of the map a player sees, and that stays the same
-// for everyone in the match.  A free function for the reason above, and so View::init and the
-// option's setter share one copy.
-extern Real View_closestCameraHeight( Real minCameraHeight, Int closerZoomPercent );
 
 // EXTERNALS //////////////////////////////////////////////////////////////////////////////////////
 extern View *TheTacticalView;		///< the main tactical interface to the game world

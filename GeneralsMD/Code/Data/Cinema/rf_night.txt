@@ -1,0 +1,5 @@
+# Zero Hour Reforged trailer, beat 06 (LK_NIGHT): Scenarios/rf_night.txt on Dark Night, held on
+# the fire: right of centre, the plume leaning up and left over the moonlit paving.
+
+3.0   cut     1920 1790 0.3 180 14
+16.5  end

@@ -133,6 +133,11 @@ int	nShadowDecalVertsInBatch=0;
 //darkness the multiplicative blob was asking for: shadow.dds is 45% grey at its centre with an
 //alpha of about 0.85 there, and 1 - 0.85*160/255 is the same 45%.
 #define DECAL_SHADOW_ALPHA 160
+//queueDecal lays the long axis of anything this high above the ground down the sun ray, and lets it
+//grow to at most this many times the decal's own length doing it.
+#define DECAL_AIRBORNE_HEIGHT 1.0f
+#define DECAL_AIRBORNE_BLEND 10.0f
+#define DECAL_MAX_STRETCH 4.0f
 int SHADOW_DECAL_VERTEX_SIZE=32768;
 int SHADOW_DECAL_INDEX_SIZE=65536;
 
@@ -299,32 +304,45 @@ Bool W3DProjectedShadowManager::ReAcquireResources(void)
 	DEBUG_ASSERTCRASH(m_pDev, ("Trying to ReAquireResources on W3DProjectedShadowManager without device"));
 	DEBUG_ASSERTCRASH(shadowDecalIndexBufferD3D == NULL && shadowDecalIndexBufferD3D == NULL, ("ReAquireResources not released in W3DProjectedShadowManager"));
 
-	if (Render_Failed(m_pDev->CreateIndexBuffer
+	//The result is logged because a failure here is what leaves the decal buffers null after a reset,
+	//and which of lost device, video memory or a refused call it was is not something the code can
+	//tell afterwards.
+	RenderResult hr = m_pDev->CreateIndexBuffer
 	(
-		SHADOW_DECAL_INDEX_SIZE*sizeof(WORD), 
-		D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC, 
-		D3DFMT_INDEX16, 
+		SHADOW_DECAL_INDEX_SIZE*sizeof(WORD),
+		D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC,
+		D3DFMT_INDEX16,
 		D3DPOOL_DEFAULT,
 		&shadowDecalIndexBufferD3D,
 		NULL	// pSharedHandle, D3D9's extra parameter, reserved and always null
-	)))
+	);
+	if (Render_Failed(hr))
+	{
+		DEBUG_LOG(("SHADOW DECAL BUFFERS: index buffer refused, 0x%08X, cooperative level 0x%08X\n",
+			(UnsignedInt)hr, (UnsignedInt)m_pDev->TestCooperativeLevel()));
 		return FALSE;
+	}
 
 	shadowDecalIndexTwin = Direct3D11_Twin_Index_Buffer(SHADOW_DECAL_INDEX_SIZE*sizeof(WORD), true);
 
 	if (shadowDecalVertexBufferD3D == NULL)
 	{	// Create vertex buffer
 
-		if (Render_Failed(m_pDev->CreateVertexBuffer
+		hr = m_pDev->CreateVertexBuffer
 		(
 			SHADOW_DECAL_VERTEX_SIZE*sizeof(SHADOW_DECAL_VERTEX),
-			D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC, 
+			D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC,
 			0,
 			D3DPOOL_DEFAULT,
 			&shadowDecalVertexBufferD3D,
 			NULL	// pSharedHandle, D3D9's extra parameter, reserved and always null
-		)))
+		);
+		if (Render_Failed(hr))
+		{
+			DEBUG_LOG(("SHADOW DECAL BUFFERS: vertex buffer refused, 0x%08X, cooperative level 0x%08X\n",
+				(UnsignedInt)hr, (UnsignedInt)m_pDev->TestCooperativeLevel()));
 			return FALSE;
+		}
 
 		shadowDecalVertexTwin = Direct3D11_Twin_Vertex_Buffer(
 			SHADOW_DECAL_VERTEX_SIZE*sizeof(SHADOW_DECAL_VERTEX), true);
@@ -406,6 +424,9 @@ Int W3DProjectedShadowManager::renderProjectedTerrainShadow(W3DProjectedShadow *
 		LPDIRECT3DDEVICE9 m_pDev=DX8Wrapper::_Get_D3D_Device();
 
 		if (!m_pDev)	return 0;
+
+		//the volumetric manager's streaming buffers, null when its ReAcquireResources was refused (see queueDecal)
+		if (shadowVertexBufferD3D == NULL || shadowIndexBufferD3D == NULL)	return 0;
 
 		//Get terrain cell index for area with shadow
 		Int startX=REAL_TO_INT_FLOOR(((cx - dx)*mapScaleInv));
@@ -875,12 +896,28 @@ void testShadowDecal(void)
 }
 */
 
+/** Whether a caster the camera does not see would be drawn if it were on the screen.  A shadow decal
+		lies where the sun puts it, and that need not be on the screen with its caster: a Scud climbing
+		off the top of the picture at full zoom-out lays its streak across the middle of it, and
+		gating the decal on the caster's own visibility took the streak away the moment the missile
+		left the frame.  This is the scene's visibility test (RTS3DScene::Visibility_Check) less its
+		frustum cull: hidden, stealthed and fogged casters still cast nothing.  A decal that lands off
+		the screen too costs what its cells inside the drawn terrain cost, and queueDecal clips it to
+		that. */
+static Bool isShownOffScreen(RenderObjClass *robj)
+{
+	if (!robj->Is_Not_Hidden_At_All() || robj->Get_User_Data() == NULL)
+		return FALSE;
+	Drawable *draw = ((DrawableInfo *)robj->Get_User_Data())->m_drawable;
+	return !draw->isDrawableEffectivelyHidden() && !draw->getFullyObscuredByShroud();
+}
+
 #define BRIDGE_OFFSET_FACTOR 1.5f
 /**Decals have a low poly count so its better to render large numbers at once.  This system will queue them
 up until the buffers fill up.  It will then flush the buffer (draw decals) and be ready for new decals.  This
 is an optimized system that only uses the render objects bounding box to determine shadow visibility.
 */
-void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow)
+void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow, Bool sunCast)
 {
 	int i,j,k;
 	Vector3 hmapVertex,objPos;
@@ -894,6 +931,12 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow)
 	Int borderSize;
 	RenderObjClass *robj=shadow->m_robj;
 	Real layerHeight=0;
+
+	//ReAcquireResources leaves these null when the device refuses the allocation after a reset (it
+	//logs SHADOW DECAL BUFFERS with the HRESULT).  A v2.4.0 player locked the null one right after a
+	//resolution change; without them there is no decal to draw this frame.
+	if (shadowDecalVertexBufferD3D == NULL || shadowDecalIndexBufferD3D == NULL)
+		return;
 
 	if (TheTerrainRenderObject)
 	{
@@ -940,12 +983,16 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow)
 
 			 Not for something on a bridge: that decal is already drawn at the bridge's own height, and
 			 sliding it sideways would drop the shadow in the river. */
+		Bool sunCasts = FALSE;
+		Vector3 toSun(0.0f, 0.0f, 1.0f);
+		Real heightAboveGround = 0.0f;
 		if (layerHeight == 0.0f && TheW3DShadowManager != NULL && TheTerrainLogic != NULL)
 		{
-			const Real heightAboveGround = objPos.Z - TheTerrainLogic->getGroundHeight(objPos.X, objPos.Y);
-			const Vector3 &toSun = TheW3DShadowManager->getLightPosWorld(0);
+			heightAboveGround = objPos.Z - TheTerrainLogic->getGroundHeight(objPos.X, objPos.Y);
+			toSun = TheW3DShadowManager->getLightPosWorld(0);
 			const Real MIN_SUN_HEIGHT = 0.01f;		// a sun on the horizon casts a shadow of infinite length
-			if (heightAboveGround > 0.0f && toSun.Z > MIN_SUN_HEIGHT)
+			sunCasts = sunCast && toSun.Z > MIN_SUN_HEIGHT;	//a marker ring stays under its object
+			if (heightAboveGround > 0.0f && sunCasts)
 			{
 				const Real alongRay = heightAboveGround / toSun.Z;
 				objPos.X -= toSun.X * alongRay;
@@ -956,6 +1003,46 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow)
 		objPos.Z=0.0f;	//the decal itself is flat on the terrain
 
 		uVector=objXform.Get_X_Vector();
+
+		/* The decal's long axis goes down the sun ray too, not straight down.  Dropping the axis's
+			 height and normalising what was left laid every shadow down as if its object were level: a
+			 Scud climbing nose up threw a missile lying on its side, and since the level part of an
+			 axis pointing at the sky is nothing but the locomotor's wobble, that lying missile swung
+			 to a new heading every frame.  Projected along the ray, a vertical missile throws the
+			 streak a pole throws, pointing away from the sun and as long as the sun makes it, and the
+			 shadow of the model's middle rather than of its tail is what sits at the decal's centre.
+			 Only for something in the air: a unit on a slope is pitched as well, and its decal is a
+			 footprint on that slope, not a shadow on a level floor.  The change is eased in over
+			 DECAL_AIRBORNE_BLEND above that height, so a tank bouncing on its suspension or riding over
+			 a crushed car, and a Scud leaving its silo, do not flip between the two from frame to frame.
+
+			 Under a low sun the streak is capped at DECAL_MAX_STRETCH and the centre is pulled in by the
+			 same fraction, so a capped streak still starts at the shadow of the tail rather than
+			 floating off it. */
+		Real stretch = 1.0f;
+		if (sunCasts && heightAboveGround > DECAL_AIRBORNE_HEIGHT)
+		{
+			const Real lift = __min((heightAboveGround - DECAL_AIRBORNE_HEIGHT) / DECAL_AIRBORNE_BLEND, 1.0f);
+			const Real axisLength = uVector.Length();
+			const Real fullDown = uVector.Z / toSun.Z;
+			Real down = lift * fullDown;
+			if (axisLength > 0.0f)
+			{
+				const Real projectedX = uVector.X - toSun.X * fullDown;
+				const Real projectedY = uVector.Y - toSun.Y * fullDown;
+				const Real ratio = WWMath::Sqrt(projectedX * projectedX + projectedY * projectedY) / axisLength;
+				//never narrower than the decal is wide, unless it was that already
+				const Real minStretch = __min(1.0f, fabs(shadow->m_decalSizeY) / shadow->m_decalSizeX);
+				const Real capped = __max(__min(ratio, DECAL_MAX_STRETCH), minStretch);
+				stretch = 1.0f + lift * (capped - 1.0f);
+				const Real centreDown = (ratio > DECAL_MAX_STRETCH) ? down * DECAL_MAX_STRETCH / ratio : down;
+				objPos.X -= toSun.X * centreDown * shadow->m_decalCenterU;
+				objPos.Y -= toSun.Y * centreDown * shadow->m_decalCenterU;
+			}
+			uVector.X -= toSun.X * down;
+			uVector.Y -= toSun.Y * down;
+			uVector.Z = 0.0f;
+		}
 
 		uVector.Z=0.0f;
 		vecLength=uVector.Length();
@@ -980,7 +1067,7 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow)
 
 		//Compute bounding box of projection
 		Vector3 boxCorners[4];	//top-left, top-right, bottom-right, bottom-left
-		dx = shadow->m_decalSizeX;
+		dx = shadow->m_decalSizeX * stretch;
 		dy = shadow->m_decalSizeY;
 		Vector3 left_x=-dx * (uVector * (0.5f + shadow->m_decalOffsetU));
 		Vector3 right_x = dx * (uVector * (0.5f - shadow->m_decalOffsetU));
@@ -1004,7 +1091,7 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow)
 			min_y = __min(min_y,boxCorners[bi].Y);
 		}
 
-		uVector *= shadow->m_oowDecalSizeX;
+		uVector *= shadow->m_oowDecalSizeX / stretch;
 		vVector *= shadow->m_oowDecalSizeY;
 		uOffset = shadow->m_decalOffsetU + 0.5f;
 		vOffset = shadow->m_decalOffsetV + 0.5f;
@@ -1283,6 +1370,10 @@ void W3DProjectedShadowManager::queueSimpleDecal(W3DProjectedShadow *shadow)
 	Vector3 uVector,vVector;
 	Coord3D normal;
 
+	//see queueDecal
+	if (shadowDecalVertexBufferD3D == NULL || shadowDecalIndexBufferD3D == NULL)
+		return;
+
 	if (TheTerrainRenderObject)
 	{
 		LPDIRECT3DDEVICE9 m_pDev=DX8Wrapper::_Get_D3D_Device();
@@ -1502,10 +1593,9 @@ Int W3DProjectedShadowManager::renderShadows(RenderInfoClass & rinfo)
 						lastShadowDecalTexture=shadow->m_shadowTexture[0];
 						lastShadowType=shadow->m_type;
 					}
-					///@todo: may need to fix this if shadows are large enough to be seen while object is not visible
-					if (shadow->m_robj->Is_Really_Visible())
+					if (shadow->m_robj->Is_Really_Visible() || isShownOffScreen(shadow->m_robj))
 					{	//queueSimpleDecal(shadow);
-						queueDecal(shadow);	//only draw shadow if casting object is visible
+						queueDecal(shadow);
 						projectionCount++;
 					}
 					continue;
@@ -1617,7 +1707,7 @@ Int W3DProjectedShadowManager::renderShadows(RenderInfoClass & rinfo)
 				///@todo: may need to fix this if shadows are large enough to be seen while object is not visible
 				if (!(shadow->m_robj && !shadow->m_robj->Is_Really_Visible()))
 				{	//queueSimpleDecal(shadow);
-					queueDecal(shadow);	//only draw shadow if casting object is visible
+					queueDecal(shadow, FALSE);	//a marker (horde ring, crate glow), not a shadow: the sun does not move it
 					projectionCount++;
 				}
 			}//shadow is enabled
@@ -2034,6 +2124,7 @@ W3DProjectedShadow* W3DProjectedShadowManager::addShadow(RenderObjClass *robj, S
 
 	shadow->m_decalOffsetU= decalOffsetX;
 	shadow->m_decalOffsetV= decalOffsetY;
+	shadow->m_decalCenterU= box.Center.X;
 
 	shadow->m_flags	= allowSunDirection;
 
@@ -2294,6 +2385,7 @@ W3DProjectedShadow::W3DProjectedShadow(void)
 	m_lastObjPosition.Set(0,0,0);
 	m_type = SHADOW_NONE;		/// type of projection
 	m_allowWorldAlign = FALSE;	/// wrap shadow around world geometry - else align perpendicular to local z-axis.
+	m_decalCenterU = 0.0f;
 	m_isEnabled = TRUE;
 	m_isInvisibleEnabled = FALSE;
 	for (Int i=0; i<MAX_SHADOW_LIGHTS; i++)

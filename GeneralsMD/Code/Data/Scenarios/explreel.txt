@@ -1,0 +1,41 @@
+# Footage of the explosion work (white-hot cores, blast light, heat rings, collapse dust, scorch,
+# craters) on Twilight Flame, staged in time order for one -video run with Cinema/explreel.txt:
+# the War Factory of blastcheck.txt under Overlord fire and falling (frames 60 to 360), a tank
+# fight on open ground from frame 330 that the Scud Storm lands on at about 470, then the nuke at
+# about 730 beside a barracks, two power plants and parked armour.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -particlecap 5000 -quickstart
+#     -noshellmap -observer -multiInstance -map "Maps\Twilight Flame\Twilight Flame.map"
+#     -autoskirmish 3 -takeover -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA
+#     -seed 7 -scenario explreel -cinema explreel -video 30 990 explreel -maxframes 1010
+
+# the superweapons, back at the starts; the Scud Storm takes about 455 frames, the nuke about 170
+10    spawn      1  ChinaNuclearMissileLauncher     1   start1:0:200
+10    spawn      1  ChinaPowerPlant                 3   start1:260:-40    90
+10    spawn      2  GLAScudStorm                    1   start2:0:200
+
+# the base that falls and the one the nuke lights
+20    spawn      0  AmericaWarFactory               1   1100 3700
+20    spawn      0  AmericaPowerPlant               2   1230 3640   140
+20    spawn      0  AmericaPatriotBattery           1   1000 3640
+20    spawn      0  AmericaBarracks                 1   1340 3480
+20    spawn      0  AmericaTankPaladin              4   1640 3560   45
+
+# Overlords on the War Factory
+40    spawn      1  ChinaTankOverlord               6   1150 3950   45
+60    attack     1  ChinaTankOverlord                   0 AmericaWarFactory
+
+# the tank fight the Scud Storm lands on
+300   spawn      0  AmericaVehicleHumvee            4   1430 3700   40
+300   spawn      0  AmericaTankCrusader             3   1500 3700   45
+300   spawn      1  ChinaTankBattleMaster           5   1460 3880   45
+315   attackmove 1  ChinaTankBattleMaster               1460 3680
+315   attackmove 0  AmericaTankCrusader                 1460 3880
+315   attackmove 0  AmericaVehicleHumvee                1460 3880
+
+60    power      2  GLAScudStorm                        1460 3790
+560   power      1  ChinaNuclearMissileLauncher         1500 3450
+
+300   tally      0  *
+460   tally      0  *
+900   tally      0  *

@@ -1,0 +1,42 @@
+# Five main tanks, each alone in its own lane 200 apart, sent 400 west over the open grass of the small
+# generated map. They spawn facing east, so the order is straight behind them and far enough that
+# none backs up to it: each has to come round 180 degrees and then drive off. For the vehicle
+# TurnRate in BalanceReforged.ini. -tracemove follows one unit, so it takes one run per tank: 57 is
+# the Crusader, 58 the Battlemaster, 59 the Overlord, 60 the Scorpion, 61 the Paladin. The number is
+# the first MOVETRACE frame whose forward speed (last column) reaches 90% of top speed (seventh),
+# counted from the order on frame 60.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 1 -maxframes 1000
+#     -scenario vehicleturn -tracemove 57 -logPrefix vehicleturn57_
+#
+# The Overlord runs in the last lane: at y 850, the lane vehicleaccel.txt gives it, the path detours
+# round blocked ground and the heading never settles on west. The Battlemaster's and Paladin's points
+# are moved by the pathfinder on this seed, so their arrive lines report none.
+#
+# Measured 2026-10-06, frames from the order, before / after TurnRate +25% with a floor of 120
+# (90% counts only once the heading is within 15 degrees of west):
+#   starts rolling   Crusader 33 / 28, Battlemaster 32 / 27, Overlord 86 / 46, Scorpion 34 / 29, Paladin 34 / 29
+#   90% of top       Crusader 58 / 53, Battlemaster 57 / 52, Overlord 131 / 74, Scorpion 57 / 52, Paladin 59 / 54
+#   arrival          Crusader 447 / 442, Overlord 706 / 653, Scorpion 352 / 346
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn   0  AmericaTankCrusader      1   700 450
+30    spawn   0  ChinaTankBattleMaster    1   700 650
+30    spawn   0  ChinaTankOverlord        1   700 1450
+30    spawn   0  GLATankScorpion          1   700 1050
+30    spawn   0  AmericaTankPaladin       1   700 1250
+
+60    move    0  AmericaTankCrusader          300 450
+60    move    0  ChinaTankBattleMaster        300 650
+60    move    0  ChinaTankOverlord            300 1450
+60    move    0  GLATankScorpion              300 1050
+60    move    0  AmericaTankPaladin           300 1250
+
+60    arrive  0  AmericaTankCrusader          300 450  10
+60    arrive  0  ChinaTankBattleMaster        300 650  10
+60    arrive  0  ChinaTankOverlord            300 1450 10
+60    arrive  0  GLATankScorpion              300 1050 10
+60    arrive  0  AmericaTankPaladin           300 1250 10

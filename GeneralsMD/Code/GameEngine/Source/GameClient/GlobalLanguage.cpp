@@ -191,7 +191,9 @@ void GlobalLanguage::init( void )
 	// grow at the full rate, so on a 1920x1080 screen every label was drawn a size or two smaller than
 	// the box drawn for it, and on 2560x1440 a tooltip's text filled half its panel.  The text keeps
 	// pace with its panel now, which is also the size it was authored at on 800x600.
-	m_resolutionFontSizeAdjustment = TEXT_GROWS_WITH_LAYOUT;
+	// The Classic interface is EA's and keeps EA's rate.
+	if( !TheGlobalData->isClassicUI() )
+		m_resolutionFontSizeAdjustment = TEXT_GROWS_WITH_LAYOUT;
 
 	StringListIt it = m_localFonts.begin();
 	while( it != m_localFonts.end())
@@ -232,9 +234,13 @@ const Real GlobalLanguage::TEXT_GROWS_WITH_LAYOUT = 1.0f;
 
 Int GlobalLanguage::adjustFontSize(Int theFontSize)
 {
-	return adjustFontSizeForScreen( theFontSize, TheGlobalData->m_xResolution,
-																	TheGlobalData->m_yResolution,
-																	m_resolutionFontSizeAdjustment );
+	const Int size = adjustFontSizeForScreen( theFontSize, TheGlobalData->m_xResolution,
+																						TheGlobalData->m_yResolution,
+																						m_resolutionFontSizeAdjustment );
+	// the Classic interface letters at EA's rate (init leaves Language.ini's damping) and EA's 2x cap
+	if( TheGlobalData->isClassicUI() && size > theFontSize * 2 )
+		return theFontSize * 2;
+	return size;
 }
 
 Int GlobalLanguage::adjustFontSizeForScreen(Int theFontSize, Int screenWidth, Int screenHeight,

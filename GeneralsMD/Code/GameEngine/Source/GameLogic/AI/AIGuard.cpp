@@ -284,7 +284,11 @@ Bool AIGuardMachine::lookForInnerTarget(void)
 	filters[count++] = &filterMapStatus;
 	// A guard used to lock onto enemies standing in fog, which every other auto-target refuses
 	// (getNextMoodTarget's UNFOGGED). It picks from what its player can see now.
-	filters[count++] = &filterFogged;
+	// Aircraft keep EA's rule: a guarding plane flies to the post and circles it, so it sees only
+	// its own sight radius of a circle that can be 800 wide, and an enemy at the edge was never
+	// taken. It reveals whatever it flies at anyway.
+	if (!owner->isKindOf(KINDOF_AIRCRAFT))
+		filters[count++] = &filterFogged;
 
 	Real visionRange = AIGuardMachine::getGuardRange(owner);
 

@@ -698,9 +698,13 @@ static void Flush_Sorting_Batch(const TempIndexStruct* entries,unsigned entry_co
 		if (entry_node!=node_id) {
 			SortingNodeStruct* state=overlapping_nodes[node_id];
 			SortingNodeStruct* next=overlapping_nodes[entry_node];
-			if (state->glow!=next->glow || !Same_Draw_State(state->sorting_state,next->sorting_state)) {
+			// A run of billboards fades into the depth behind it and a run of meshes does not, so the
+			// two never share a draw even in one state.
+			if (state->glow!=next->glow || state->quads!=next->quads ||
+				!Same_Draw_State(state->sorting_state,next->sorting_state)) {
 				Apply_Render_State(state->sorting_state);
 				Direct3D11_Set_Smoke_Glow(state->glow);
+				Direct3D11_Set_Soft_Particles(state->quads);
 				DX8Wrapper::Draw_Triangles(run_first_index,run_triangles,run_first_vertex,vertex_cursor-run_first_vertex);
 				run_first_index=index_cursor;
 				run_first_vertex=vertex_cursor;
@@ -715,8 +719,10 @@ static void Flush_Sorting_Batch(const TempIndexStruct* entries,unsigned entry_co
 
 	Apply_Render_State(overlapping_nodes[node_id]->sorting_state);
 	Direct3D11_Set_Smoke_Glow(overlapping_nodes[node_id]->glow);
+	Direct3D11_Set_Soft_Particles(overlapping_nodes[node_id]->quads);
 	DX8Wrapper::Draw_Triangles(run_first_index,run_triangles,run_first_vertex,vertex_cursor-run_first_vertex);
 	Direct3D11_Set_Smoke_Glow(false);
+	Direct3D11_Set_Soft_Particles(false);
 
 	tDrawEnd = Clock_Ticks();
 	flush_profile_draw_ms += flushProfileElapsedMS(tCopyEnd, tDrawEnd);
@@ -737,6 +743,16 @@ void SortingRendererClass::Flush_Sorting_Pool()
 	if (!overlapping_node_count) return;
 
 	SNAPSHOT_SAY(("SortingSystem - Flush \n"));
+
+	// Before any run resolves its program: the soft particles fade into this copy of the depth, and
+	// a sorted mesh writing depth between two of their runs costs no second one.  A pool with no
+	// billboards in it takes none.
+	for (unsigned node=0;node<overlapping_node_count;++node) {
+		if (overlapping_nodes[node]->quads) {
+			Direct3D11_Take_Scene_Depth();
+			break;
+		}
+	}
 
 	flush_profile_entries += overlapping_entry_count;
 	long long tSortStart, tSortEnd;

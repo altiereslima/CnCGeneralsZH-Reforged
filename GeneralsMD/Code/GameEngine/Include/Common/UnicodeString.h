@@ -56,6 +56,8 @@
 #include "Common/Debug.h"
 #include "Common/Errors.h"
 #include "Lib/WideCharFns.h"	// the engine's own wcs*: WideChar is char16_t, which the C library has no functions for
+#include <atomic>
+#include <new>
 
 class AsciiString;
 
@@ -94,7 +96,7 @@ private:
 #if defined(_DEBUG) || defined(_INTERNAL)
 		const WideChar* m_debugptr;	// just makes it easier to read in the debugger
 #endif
-		unsigned short	m_refCount;						// reference count
+		std::atomic<unsigned short>	m_refCount;		// reference count; atomic as AsciiStringData's, no lock
 		unsigned short	m_numCharsAllocated;  // length of data allocated
 		// WideChar m_stringdata[];
 

@@ -1,0 +1,60 @@
+# Website hero loop 09, desert: a fight for the Kandahar bridge on Golden Oasis, seen from high
+# above under Cinema/hero_loop_09. America comes up the cracked-mud road from the south-east
+# (bpark_k's 2043,1136), the GLA down from the north-west bank (bridgecross's 1471,1859), and
+# both attack-move onto the middle of the deck, 1757,1497. Waves keep both ends fed through frames
+# 600 to 1049, the SCUDs land about 900, the air powers all through it.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer
+#     -multiInstance -particlecap 30000 -map "Maps\Golden Oasis\Golden Oasis.map" -autoskirmish 2
+#     -takeover -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -scenario hero_loop_09
+#     -cinema hero_loop_09 -video 600 1049 hero_loop_09 -maxframes 1070
+10    spawn      0  AmericaCommandCenter            1   start0:240:60
+10    spawn      1  GLACommandCenter                1   start1:-260:0
+10    spawn      1  GLAScudStorm                    1   start1:0:200
+# --- America from the south-east bank --------------------------------------------------------
+150   spawn      0  AmericaTankCrusader             14  2043 1136  34
+150   spawn      0  AmericaTankPaladin              6   2150 1060  38
+150   spawn      0  AmericaInfantryRanger           20  2110 1220  14
+150   spawn      0  AmericaVehicleHumvee            6   2150 1060  36
+150   spawn      0  AmericaVehicleTomahawk          4   2200 1150  40
+150   spawn      0  AmericaVehicleComanche          3   2043 1136  60
+# --- the GLA from the north-west bank --------------------------------------------------------
+150   spawn      1  GLATankScorpion                 14  1471 1859  34
+150   spawn      1  GLATankMarauder                 6   1400 1940  40
+150   spawn      1  GLAVehicleRocketBuggy           8   1380 1820  32
+150   spawn      1  GLAVehicleQuadCannon            4   1400 1940  36
+150   spawn      1  GLAVehicleTechnical             8   1471 1859  30
+150   spawn      1  GLAInfantryRebel                20  1430 1780  14
+150   spawn      1  GLAInfantryTunnelDefender       12  1380 1820  14
+160   attackmove 0  *  1757 1497
+160   attackmove 1  *  1757 1497
+# --- waves ----------------------------------------------------------------------------------
+420   spawn      0  AmericaTankCrusader             10  2043 1136  34
+420   spawn      0  AmericaInfantryRanger           14  2110 1220  14
+420   spawn      1  GLATankScorpion                 10  1471 1859  34
+420   spawn      1  GLAInfantryRebel                14  1430 1780  14
+430   attackmove 0  *  1757 1497
+430   attackmove 1  *  1757 1497
+560   spawn      0  AmericaTankPaladin              6   2150 1060  38
+560   spawn      1  GLATankMarauder                 6   1400 1940  40
+560   spawn      1  GLAVehicleRocketBuggy           6   1380 1820  32
+570   attackmove 0  *  1757 1497
+570   attackmove 1  *  1757 1497
+700   spawn      0  AmericaTankCrusader             10  2043 1136  34
+700   spawn      0  AmericaInfantryRanger           14  2110 1220  14
+700   spawn      1  GLATankScorpion                 10  1471 1859  34
+700   spawn      1  GLAInfantryRebel                14  1430 1780  14
+710   attackmove 0  *  1757 1497
+710   attackmove 1  *  1757 1497
+840   spawn      0  AmericaTankCrusader             8   2043 1136  34
+840   spawn      1  GLATankScorpion                 8   1471 1859  34
+850   attackmove 0  *  1757 1497
+850   attackmove 1  *  1757 1497
+# --- the sky: a general's power lands about 400 frames after the call ------------------------
+300   power      0  AmericaCommandCenter  1757 1497  SuperweaponSpectreGunship
+350   power      0  AmericaCommandCenter  1697 1527  SuperweaponA10ThunderboltMissileStrike
+420   power      1  GLACommandCenter      1827 1477  SuperweaponAnthraxBomb
+490   power      0  AmericaCommandCenter  1777 1587  SuperweaponA10ThunderboltMissileStrike
+590   power      0  AmericaCommandCenter  1727 1417  SuperweaponA10ThunderboltMissileStrike
+# the SCUDs take about 130 frames
+770   power      1  GLAScudStorm                1800 1440

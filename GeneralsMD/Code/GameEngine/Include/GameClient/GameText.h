@@ -84,6 +84,10 @@ class GameTextInterface : public SubsystemInterface
 		virtual AsciiStringVec& getStringsWithLabelPrefix(AsciiString label) = 0;
 
 		virtual void					initMapStringFile( const AsciiString& filename ) = 0;
+
+		/// the letter after '&' in the English text of this label (the game's own table and Patch.str,
+		/// before any translation), or 0: Classic's command keys are the English ones in every language
+		virtual WideChar			fetchEnglishHotKey( const AsciiString& label ) { return 0; }
 };
 
 

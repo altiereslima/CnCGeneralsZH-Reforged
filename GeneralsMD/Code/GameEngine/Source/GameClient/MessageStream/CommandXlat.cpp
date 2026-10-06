@@ -177,6 +177,10 @@ SignalKind Command_signalKindForMeta( GameMessage::Type meta )
 
 static Bool isFormationDragArmed( void )
 {
+	// Classic's left drag is the selection box it always was
+	if( TheGlobalData->isClassicUI() )
+		return FALSE;
+
 	return Command_formationDragArmed( TheGlobalData->m_formationDrag,
 																		 TheInGameUI->getSelectCount() > 0
 																			&& TheInGameUI->areSelectedObjectsControllable(),
@@ -978,8 +982,13 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 		Bool forceAttackHere = isForceAttackTargeting() && isForceAttackable;
 
 		// the guard key posts the selection where it is pointed.  Under shift it joins the list as its
-		// last order: clear this, then sit there
-		if( TheInGameUI->isGuardArmed() )
+		// last order: clear this, then sit there.  Classic's waypoint key is the game's own: Alt held
+		// adds a point to the path instead of queueing an order
+		if( TheGlobalData->isClassicUI() && TheInGameUI->isInWaypointMode() )
+		{
+			msgType = GameMessage::MSG_ADD_WAYPOINT;
+		}
+		else if( TheInGameUI->isGuardArmed() )
 		{
 			msgType = GameMessage::MSG_DO_GUARD_POSITION;
 		}
@@ -1012,7 +1021,9 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 			if (msgType == GameMessage::MSG_DO_GUARD_POSITION)
 			{
 				movemsg->appendIntegerArgument( GUARDMODE_GUARD_WITHOUT_PURSUIT );
-				movemsg->appendRealArgument( TheInGameUI->getAreaPickRadius() );
+				// Classic sends the game's own two arguments and the logic guards its standard range
+				if( !TheGlobalData->isClassicUI() )
+					movemsg->appendRealArgument( TheInGameUI->getAreaPickRadius() );
 			}
 
 		}  // end if
@@ -1559,13 +1570,16 @@ GameMessage::Type CommandTranslator::evaluateForceAttack( Drawable *draw, const 
 				TheMessageStream->appendMessage( retVal );
 			}
 		}
-		else if( result == ATTACKRESULT_INVALID_SHOT && type == DO_HINT )
+		// Nobody selected can shoot this at all: a Sentry Drone before its gun is researched has no weapon.
+		// With no hint the attack key's cursor stayed as it was over the target, and the click did nothing
+		// without a word, so it read as a broken key rather than as an unarmed unit.
+		else if( ( result == ATTACKRESULT_INVALID_SHOT || result == ATTACKRESULT_NOT_POSSIBLE ) && type == DO_HINT )
 		{
 			retVal = GameMessage::MSG_IMPOSSIBLE_ATTACK_HINT;
 			TheMessageStream->appendMessage( retVal );
 		}
-	} 
-	else if( pos ) 
+	}
+	else if( pos )
 	{
 		CanAttackResult result = canAnyForceAttack( allSelected, NULL, pos );
 
@@ -1588,7 +1602,7 @@ GameMessage::Type CommandTranslator::evaluateForceAttack( Drawable *draw, const 
 				TheMessageStream->appendMessage( retVal );
 			}
 		}
-		else if( result == ATTACKRESULT_INVALID_SHOT && type == DO_HINT )
+		else if( ( result == ATTACKRESULT_INVALID_SHOT || result == ATTACKRESULT_NOT_POSSIBLE ) && type == DO_HINT )
 		{
 			retVal = GameMessage::MSG_IMPOSSIBLE_ATTACK_HINT;
 			TheMessageStream->appendMessage( retVal );
@@ -1672,6 +1686,23 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 			|| (command && command->getCommandType() == GUI_COMMAND_SPECIAL_POWER_FROM_SHORTCUT))
 	{
 		GameMessage *hintMessage;
+
+		// Classic keeps the game's waypoint mode: with Alt held every click is a point on the path
+		if( TheGlobalData->isClassicUI() && TheInGameUI->isInWaypointMode() )
+		{
+			if( type == DO_COMMAND || type == EVALUATE_ONLY )
+			{
+				if( TheTerrainLogic )
+					msgType = issueMoveToLocationCommand( pos, draw, type );
+			}
+			else
+			{
+				msgType = GameMessage::MSG_ADD_WAYPOINT_HINT;
+				hintMessage = TheMessageStream->appendMessage( msgType );
+				hintMessage->appendLocationArgument( *pos );
+			}
+			return msgType;
+		}
 
 		// shift used to turn every click into a point on the path.  Now whatever the click orders - an
 		// attack, a capture, a ride in a transport - goes on the end of the units' list, and the logic
@@ -2389,8 +2420,9 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 		// ********************************************************************************************
 		// A right click on a selected building takes the rally point away from everything selected.
 		// Only the click is answered: the hover and SelectionXlat's EVALUATE_ONLY fall through as
-		// they always did, so the building keeps its selection cursor.
-		else if( type == DO_COMMAND && draw && draw->isSelected()
+		// they always did, so the building keeps its selection cursor.  The game as shipped had no
+		// such order, and Classic sends none.
+		else if( type == DO_COMMAND && draw && draw->isSelected() && !TheGlobalData->isClassicUI()
 						 && TheInGameUI->canSelectedObjectsDoAction( InGameUI::ACTIONTYPE_SET_RALLY_POINT, NULL, InGameUI::SELECTION_ALL, FALSE ) )
 		{
 			msgType = GameMessage::MSG_CLEAR_RALLY_POINT;
@@ -4147,7 +4179,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		//-----------------------------------------------------------------------------
 		case GameMessage::MSG_MOUSE_RIGHT_DOUBLE_CLICK:
 		{
-			if( TheGlobalData->m_doubleClickAttackMove )
+			if( TheGlobalData->m_doubleClickAttackMove && TheGlobalData->rightButtonOrders() )
 			{
 				// create the message and append arguments for a guard location
 				GameMessage *newMsg = TheMessageStream->appendMessage( GameMessage::MSG_DO_GUARD_POSITION );
@@ -4166,6 +4198,13 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		}
 		case GameMessage::MSG_MOUSE_RIGHT_CLICK:
 		{
+			// The Classic right button orders only under EA's Alternate Mouse Setup, and then exactly
+			// as 1.04 did: the click below and nothing else.  Without it it scrolls and deselects,
+			// which LookAtXlat and SelectionXlat do, as the game shipped.
+			if( !TheGlobalData->rightButtonOrders() )
+				break;
+			const Bool classic = TheGlobalData->isClassicUI();
+
 			// A right click is an order.  A right drag pans the camera (LookAtXlat), so a release that
 			// travelled past the drag tolerance, or was held too long, gives no order at all.
 			const Bool isRightClick = TheMouse->isClick(&m_mouseRightDragAnchor, &m_mouseRightDragLift,
@@ -4174,8 +4213,9 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 			// The one exception is the move, attack, attack move or guard key.  Those orders are aimed
 			// with the left button, so a right click while one is armed puts the key down and gives no
-			// order.  A pan leaves the key armed.
-			if( TheInGameUI->isOrderKeyArmed() )
+			// order.  A pan leaves the key armed.  Classic's alternate mouse aims its attack move with
+			// this click, as 1.04 did.
+			if( !classic && TheInGameUI->isOrderKeyArmed() )
 			{
 				if( isRightClick )
 					TheInGameUI->clearAttackMoveToMode();
@@ -4224,6 +4264,26 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 		//-----------------------------------------------------------------------------
 		case GameMessage::MSG_MOUSE_LEFT_DOUBLE_CLICK:
+		{
+			// Classic's orders are on the left button, so its double-click guard is here, the game's
+			// own guard with its own two arguments.  Reforged's, and the alternate mouse's, is on the
+			// right button.
+			if( TheGlobalData->leftButtonOrders() && TheGlobalData->m_doubleClickAttackMove )
+			{
+				GameMessage *newMsg = TheMessageStream->appendMessage( GameMessage::MSG_DO_GUARD_POSITION );
+				Coord3D pos;
+				TheTacticalView->screenToTerrain( &msg->getArgument( 0 )->pixel, &pos );
+				newMsg->appendLocationArgument(pos);
+				newMsg->appendIntegerArgument(GUARDMODE_NORMAL);
+
+				ThePlayerList->getLocalPlayer()->getAcademyStats()->recordDoubleClickAttackMoveOrderGiven();
+
+				TheInGameUI->triggerDoubleClickAttackMoveGuardHint();
+
+				break;
+			}
+			//intentional fall through
+		}
 		case GameMessage::MSG_MOUSE_LEFT_CLICK:
 		{
 			Bool isPoint = (msg->getArgument(0)->pixelRegion.height() == 0 && msg->getArgument(0)->pixelRegion.width() == 0);
@@ -4251,9 +4311,13 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 			// The left button selects and nothing else.  The exceptions are a GUI command that is
 			// already armed and waiting for a target, and the attack, attack move and guard keys: all of
-			// them are aimed with the left button, because the right one cancels them.
+			// them are aimed with the left button, because the right one cancels them.  In Classic the
+			// left button is the order button as well, as it was in the game as shipped, unless EA's
+			// Alternate Mouse Setup is on: then only a GUI command waiting for a target fires here.
+			const Bool classic = TheGlobalData->isClassicUI();
 			const Bool isOrderKey = TheInGameUI->isOrderKeyArmed();
-			if( !isFiringGUICommand && !isOrderKey )
+			if( classic ? !TheGlobalData->leftButtonOrders() && !isFiringGUICommand
+									: !isFiringGUICommand && !isOrderKey )
 				break;
 
 			Bool controllable = TheInGameUI->areSelectedObjectsControllable()
@@ -4272,7 +4336,10 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 				}
 
 				disp = DESTROY_MESSAGE;
-				TheInGameUI->spendOrderKey();
+				if( classic )
+					TheInGameUI->clearAttackMoveToMode();
+				else
+					TheInGameUI->spendOrderKey();
 
 				//issueMoveToLocationCommand( &pos, draw, DO_COMMAND );
 			}
@@ -5546,8 +5613,8 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_DEBUG_OBJECT_ID_PERFORMANCE:
 		{
-			static __int64 startTime64;
-			static __int64 endTime64,freq64;
+			static Int64 startTime64;
+			static Int64 endTime64,freq64;
 			startTime64 = Clock_Ticks();
 			freq64 = Clock_Ticks_Per_Second();
 			Int numberLookups = 10000;
@@ -5596,8 +5663,8 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_DEBUG_DRAWABLE_ID_PERFORMANCE:
 		{
-			static __int64 startTime64;
-			static __int64 endTime64,freq64;
+			static Int64 startTime64;
+			static Int64 endTime64,freq64;
 			startTime64 = Clock_Ticks();
 			freq64 = Clock_Ticks_Per_Second();
 			Int numberLookups = 10000;

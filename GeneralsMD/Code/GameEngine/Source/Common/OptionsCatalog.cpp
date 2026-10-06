@@ -24,6 +24,8 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 #include "Common/OptionsCatalog.h"
+#include "Common/AudioAffect.h"
+#include "Common/GameAudio.h"
 #include "Common/GlobalData.h"
 #include "Common/UserPreferences.h"
 #include "GameClient/Mouse.h"
@@ -58,20 +60,15 @@ static void set_m_cameraBoundaryMargin( Int value )
 }
 OPTION_BOOL_ACCESSORS( m_edgeScrollInWindowedMode )
 OPTION_BOOL_ACCESSORS( m_snapCameraRotateTo45 )
+OPTION_BOOL_ACCESSORS( m_gridBuildPlacement )
+OPTION_BOOL_ACCESSORS( m_snapBuildPlacementTo45 )
+OPTION_BOOL_ACCESSORS( m_snapBuildToNeighbour )
+OPTION_BOOL_ACCESSORS( m_nudgeBuildPlacement )
 OPTION_BOOL_ACCESSORS( m_zoomToCursor )
+OPTION_INT_ACCESSORS( m_zoomSpeed )
 OPTION_BOOL_ACCESSORS( m_isometricCamera )
 OPTION_BOOL_ACCESSORS( m_smoothMotion )
 OPTION_BOOL_ACCESSORS( m_startAtMaxZoom )
-
-// The view copied its closest height out of GlobalData once, when it was made, so a change from
-// the menu has to be handed to it.  It is not moved: the next turn of the wheel meets the new limit.
-static Int get_m_closerZoomPercent( void ) { return TheGlobalData->m_closerZoomPercent; }
-static void set_m_closerZoomPercent( Int value )
-{
-	TheWritableGlobalData->m_closerZoomPercent = value;
-	if (TheTacticalView)
-		TheTacticalView->setMinHeightAboveGround( View_closestCameraHeight( TheGlobalData->m_minCameraHeight, value ) );
-}
 
 // This catalog loads before there is a mouse, so the value waits in GlobalData and Mouse::parseIni
 // takes it from there.  The menu changes it with the mouse up, which is the branch below.
@@ -82,6 +79,15 @@ static void set_m_dragTolerance( Int value )
 	if (TheMouse)
 		TheMouse->m_dragTolerance = (UnsignedInt)value;
 }
+// The catalog loads before there is an audio manager, which takes the value from GlobalData in its
+// init; the menu's Accept pushes it in from here.
+static Int get_m_ambientVolume( void ) { return TheGlobalData->m_ambientVolume; }
+static void set_m_ambientVolume( Int value )
+{
+	TheWritableGlobalData->m_ambientVolume = value;
+	if (TheAudio)
+		TheAudio->setVolume( value / 100.0f, (AudioAffect)(AudioAffect_Ambient | AudioAffect_SystemSetting) );
+}
 OPTION_BOOL_ACCESSORS( m_formationDrag )
 OPTION_BOOL_ACCESSORS( m_showAllyCursors )
 OPTION_BOOL_ACCESSORS( m_chromaLighting )
@@ -91,12 +97,12 @@ OPTION_INT_ACCESSORS( m_menuTransitionSpeed )
 OPTION_INT_ACCESSORS( m_textureFilterMode )
 OPTION_INT_ACCESSORS( m_anisotropyLevel )
 OPTION_INT_ACCESSORS( m_windowMode )
+OPTION_INT_ACCESSORS( m_fullscreenScaling )
 OPTION_INT_ACCESSORS( m_msaaLevel )
 OPTION_BOOL_ACCESSORS( m_vsync )
 OPTION_BOOL_ACCESSORS( m_classicGraphics )
 OPTION_INT_ACCESSORS( m_healthBarMode )
 OPTION_INT_ACCESSORS( m_hudScale )
-OPTION_INT_ACCESSORS( m_menuLayout )
 OPTION_INT_ACCESSORS( m_playerColorScheme )
 OPTION_INT_ACCESSORS( m_textLanguage )
 OPTION_BOOL_ACCESSORS( m_showOrderLines )
@@ -245,17 +251,52 @@ const OptionDef TheOptionCatalog[] =
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_edgeScrollInWindowedMode, set_m_edgeScrollInWindowedMode },
 
-	{ "SnapCameraRotateTo45",			"", "",
+	// On Options > Controls in both interfaces, with the three building placement rows below it, and
+	// all four off until ticked.  Their keys are new: the old ones (SnapCameraRotateTo45,
+	// GridBuildPlacement, SnapBuildPlacementTo45) sit in every Options.ini saved while they defaulted
+	// on, as a "yes" nobody chose, and would have kept the snaps on.  GameData.ini keeps the old names.
+	{ "CameraSnapTo45",						OPT_WND( "CheckSnapCamera45" ), "GUI:SnapCamera45",
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_snapCameraRotateTo45, set_m_snapCameraRotateTo45 },
+
+	// Off, a structure goes wherever the cursor is and the white grid lines under the ghost go
+	// with it; the red wash over cells nothing can stand on stays (W3DInGameUI::drawBuildGrid).
+	{ "BuildGrid",								OPT_WND( "CheckGridBuild" ), "GUI:GridBuild",
+		OPTION_BOOL, APPLY_LIVE, 0, 1,
+		get_m_gridBuildPlacement, set_m_gridBuildPlacement },
+
+	{ "BuildSnapTo45",						OPT_WND( "CheckSnapBuild45" ), "GUI:SnapBuild45",
+		OPTION_BOOL, APPLY_LIVE, 0, 1,
+		get_m_snapBuildPlacementTo45, set_m_snapBuildPlacementTo45 },
+
+	// InGameUI::snapPlacementToNeighbour: a structure dropped within a few cells of another lands
+	// flush against its edge.
+	{ "BuildSnapToNeighbour",			OPT_WND( "CheckSnapBuildNeighbour" ), "GUI:SnapBuildNeighbour",
+		OPTION_BOOL, APPLY_LIVE, 0, 1,
+		get_m_snapBuildToNeighbour, set_m_snapBuildToNeighbour },
+
+	// InGameUI::nudgePlacementToLegal: a structure whose spot is blocked slides to the nearest one it
+	// fits.  A key of its own: NudgeBuildPlacement, the one it had before it was forced on, can still
+	// be a "yes" in an Options.ini saved back then.
+	{ "BuildNudge",								OPT_WND( "CheckNudgeBuild" ), "GUI:NudgeBuild",
+		OPTION_BOOL, APPLY_LIVE, 0, 1,
+		get_m_nudgeBuildPlacement, set_m_nudgeBuildPlacement },
 
 	// MiddleMousePans used to sit here.  There is nothing left to choose: a right drag pans and a
 	// middle drag turns the camera.
 
-	// Back on Options > Controls: players split on whether the wheel should chase the cursor.
-	{ "ZoomToCursor",							OPT_WND( "CheckZoomToCursor" ), "GUI:ZoomToCursor",
+	// On Options > Controls in both interfaces, off until ticked: players split on whether the wheel
+	// should chase the cursor.  A new key for the snaps' reason above: ZoomToCursor is a "yes" in
+	// every Options.ini saved while it defaulted on.
+	{ "WheelZoomToCursor",				OPT_WND( "CheckZoomToCursor" ), "GUI:ZoomToCursor",
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_zoomToCursor, set_m_zoomToCursor },
+
+	// How far one wheel notch moves the camera, in percent of the 60 units it always moved.  The
+	// scroll speed above never touched the wheel; this is the wheel's own.  On Options > Controls.
+	{ "ZoomSpeed",								OPT_WND( "SliderZoomSpeed" ), "GUI:ZoomSpeed",
+		OPTION_INT, APPLY_LIVE, 25, 300,
+		get_m_zoomSpeed, set_m_zoomSpeed },
 
 	// The battlefield from far off down a narrow cone, so a unit is the same size wherever it
 	// stands on the screen.  The heading stays the player's.  On Options > Controls.
@@ -269,19 +310,12 @@ const OptionDef TheOptionCatalog[] =
 	{ "SmoothMotion",							OPT_WND( "CheckSmoothMotion" ), "GUI:SmoothMotion",
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_smoothMotion, set_m_smoothMotion },
-	// A match opens as far out as the wheel goes, or at the height the map's author framed it for.
-	// Read when the map loads, so it counts from the next match.  On Options > Controls.
-	{ "StartAtMaxZoom",						OPT_WND( "CheckStartAtMaxZoom" ), "GUI:StartAtMaxZoom",
+	// A match opens as far out as the wheel goes, or 300 over the ground (View::setZoomToStart).
+	// Read when the map loads, so it counts from the next match.  On Options > Controls in both
+	// interfaces.  A new key for the snaps' reason above: StartAtMaxZoom is a "yes" in old files.
+	{ "OpenAtMaxZoom",						OPT_WND( "CheckStartAtMaxZoom" ), "GUI:StartAtMaxZoom",
 		OPTION_BOOL, APPLY_LIVE, 0, 1,
 		get_m_startAtMaxZoom, set_m_startAtMaxZoom },
-
-	// Percent taken off GameData.ini's MinCameraHeight, so the wheel comes nearer the ground than
-	// the 120 units the game ships with; 60 leaves 48.  There is no row for the far end and there
-	// will not be one: how much of the map a player sees is an advantage, and Options.ini is outside
-	// the mismatch check.  This one only ever shows less.
-	{ "CloserZoom",								OPT_WND( "SliderCloserZoom" ), "GUI:CloserZoom",
-		OPTION_INT, APPLY_LIVE, 0, 60,
-		get_m_closerZoomPercent, set_m_closerZoomPercent },
 
 	// Pixels the pointer may travel with a button held before the press stops being a click and
 	// starts a selection box, a camera drag or a formation line.  Mouse.ini says 25, which is the
@@ -289,6 +323,12 @@ const OptionDef TheOptionCatalog[] =
 	{ "DragTolerance",						OPT_WND( "SliderDragTolerance" ), "GUI:DragTolerance",
 		OPTION_INT, APPLY_LIVE, 2, 50,
 		get_m_dragTolerance, set_m_dragTolerance },
+
+	// Looping world ambience - birds, wind, water, a town - on a slider of its own beside Sound FX,
+	// which no longer reaches it.  AudioManager::isAmbientSound says what counts.  On Options > Audio.
+	{ "AmbientVolume",						OPT_WND( "SliderAmbientVolume" ), "GUI:AmbientVolume",
+		OPTION_INT, APPLY_LIVE, 0, 100,
+		get_m_ambientVolume, set_m_ambientVolume },
 
 	// With the move, attack move or guard key armed, a left drag over the ground spreads the
 	// selection along the line drawn instead of sending everyone to one point.  On by default, and
@@ -335,11 +375,11 @@ const OptionDef TheOptionCatalog[] =
 		OPTION_INT, APPLY_RESTART, 0, 16,
 		get_m_anisotropyLevel, set_m_anisotropyLevel },
 
-	// Eight rows used to sit here: grid and nudge build placement, snap-to-45 building rotation, the
-	// placement range ring, workers returning to supply, detailed build tooltips, the HUD overlay
-	// and replay archiving.  Every one of them is now on for everybody, decided in GlobalData's
-	// constructor, so there is nothing left to load or save.  Gameplay is health bars and nothing
-	// else.
+	// Five rows used to sit here: the placement range ring, workers returning to supply, detailed
+	// build tooltips, the HUD overlay and replay archiving.  Every one of them is now on for
+	// everybody, decided in GlobalData's constructor, so there is nothing left to load or save.
+	// Grid placement, snap-to-45 building rotation and the nudge left with them and came back to
+	// Options > Controls, above, off until ticked.
 
 	// Off, subtle, normal, strong.  Normal (60, the menu's Medium) is the default, set in
 	// GlobalData's constructor: it is the strength the Direct3D 11 frame applied before there was a
@@ -363,6 +403,13 @@ const OptionDef TheOptionCatalog[] =
 	{ "WindowMode",								OPT_WND( "ComboBoxWindowMode" ), "GUI:WindowMode",
 		OPTION_ENUM, APPLY_DEVICE_RESET, 0, WINDOW_MODE_COUNT - 1,
 		get_m_windowMode, set_m_windowMode },
+
+	// How fullscreen fills a monitor whose shape the picture does not have: stretched, or the
+	// picture's own shape with black bars.  The monitor keeps its mode and DX8Wrapper places the
+	// window (Apply_Fullscreen_Display); W3DDisplay::setDisplayMode pushes the choice in.
+	{ "FullscreenScaling",				OPT_WND( "ComboBoxFullscreenScaling" ), "GUI:FullscreenScaling",
+		OPTION_ENUM, APPLY_DEVICE_RESET, 0, FULLSCREEN_SCALING_COUNT - 1,
+		get_m_fullscreenScaling, set_m_fullscreenScaling },
 
 	// Multisampling, as an index into 0/2/4/8/16 rather than a sample count - the device offers
 	// those and nothing between them, so a slider would spend most of its travel on values that
@@ -399,12 +446,9 @@ const OptionDef TheOptionCatalog[] =
 		OPTION_ENUM, APPLY_LIVE, 0, HUD_SCALE_COUNT - 1,
 		get_m_hudScale, set_m_hudScale },
 
-	// How the menus meet a screen that is not 4:3: stretched to it, as EA drew them, or fitted and
-	// centred at their own shape (GlobalData.h).  Layouts are read once as they are built, so Accept
-	// builds the shell again.
-	{ "MenuLayout",								OPT_WND( "ComboBoxMenuLayout" ), "GUI:MenuLayout",
-		OPTION_ENUM, APPLY_SHELL_REBUILD, 0, MENU_LAYOUT_COUNT - 1,
-		get_m_menuLayout, set_m_menuLayout },
+	// MenuLayout (stretch or fit) used to sit here.  Every menu is fitted now, in both interfaces.
+	// InterfaceStyle is not a row either: the launcher picks it with -interface for each run, and a
+	// run without the switch is Classic whatever an older Options.ini says.
 
 	// Whose colour a player is drawn in.  Purely local: the match still agrees on the lobby's
 	// colours and this only changes what this screen puts on top of them, so two people in the same
@@ -554,7 +598,34 @@ static Int parseOptionValue( const OptionDef& def, const AsciiString& stored )
 }
 
 //-----------------------------------------------------------------------------
-static AsciiString formatOptionValue( const OptionDef& def, Int value )
+Bool parseOptionText( const OptionDef& def, const char *text, Int *value )
+{
+	if( def.kind == OPTION_BOOL )
+	{
+		// off and on in pairs, so a word's index modulo two is its value
+		static const char *const TheBoolWords[] = { "no", "yes", "false", "true", "off", "on", "n", "y", "f", "t", "0", "1" };
+		for( Int i = 0; i < (Int)( sizeof( TheBoolWords ) / sizeof( TheBoolWords[ 0 ] ) ); ++i )
+		{
+			if( strcasecmp( text, TheBoolWords[ i ] ) == 0 )
+			{
+				*value = i % 2;
+				return TRUE;
+			}
+		}
+		return FALSE;
+	}
+
+	char *end;
+	const long number = strtol( text, &end, 10 );
+	if( end == text || *end != '\0' || number < def.lo || number > def.hi )
+		return FALSE;
+
+	*value = (Int)number;
+	return TRUE;
+}
+
+//-----------------------------------------------------------------------------
+AsciiString formatOptionValue( const OptionDef& def, Int value )
 {
 	if( def.kind == OPTION_BOOL )
 		return AsciiString( value ? "yes" : "no" );

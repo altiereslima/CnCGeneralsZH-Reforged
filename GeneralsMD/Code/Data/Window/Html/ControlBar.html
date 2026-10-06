@@ -56,9 +56,14 @@
     data-each="portraitcells" the selection's cells, the portrait's first and then only what it
                            holds, each {{cell.x}} .y .w .h
     {{selinfo.x}} ...      beside a lone unit's portrait: {{sel.name}}, data-each="selstars" a star
-                           at {{x}} for each veterancy level, and the health bar's dark groove,
-                           {{sel.healthshown}} "hidden" for an enemy in disguise.  The health's
-                           figure and its lit length are Window/Html/Readout.html's
+                           at {{x}} from the right for each veterancy level, the health bar's dark
+                           groove, {{sel.healthshown}} "hidden" for an enemy in disguise, and
+                           data-each="selweapon" the main weapon's damage, damage a second and
+                           range and data-each="selarmor" the armour's change to three kinds of
+                           damage, each at {{x}} with {{label}} over {{value}} and {{state}}
+                           "strong", "weak" or nothing; both empty for a disguise, the weapon's
+                           for an unarmed unit.  The health's figure and its lit length are
+                           Window/Html/Readout.html's
     data-each="skillcells" a cell behind each of the general's powers, each {{cell.x}} .y .w .h
     data-each="powersteel" the powers' steel, a column of it under each column of their cells from
                            the left, {{plate.x}} .y .w .h, against the console's right hand end and
@@ -185,14 +190,26 @@
   .china .hollow { border-bottom-color: #d98a72; border-right-color: #d98a72; background-color: #290f09; }
   .gla .hollow { border-bottom-color: #cbbf82; border-right-color: #cbbf82; background-color: #282311; }
 
-  /* a lone unit's name, its veterancy as gold stars, and its health's groove, which Readout.html
-     lights and writes the figure under; the text column beside the portrait is narrow, so the name
-     takes two lines */
+  /* a lone unit's name, its health's groove, which Readout.html lights and writes the figure under,
+     its veterancy as gold stars at the right hand end of that figure's line, and then two rows of
+     figures, a small grey label over each: its main weapon's, and what its armour does to the damage
+     most of the fighting deals, green where it takes less and red where it takes more.  The column
+     beside the portrait is 108 by 78 page pixels from just under the well's top, so the name takes
+     two lines and every row is cut to the pixel to fit.  The game's 9 pixel bold font sets a name's
+     letters 10 high and its 7 pixel font a label's 8, so a name's line is 11, a label's 8, and its
+     figure starts a pixel under that */
   .selinfo .name { position: absolute; left: 0; top: 0; height: 22px; line-height: 11px; font-size: 9px; font-weight: bold;
                    color: #f1f4f6; }
-  .selinfo .vet { position: absolute; top: 25px; width: 10px; height: 10px; background-size: 100% 100%;
+  .selinfo .vet { position: absolute; top: 29px; width: 9px; height: 9px; background-size: 100% 100%;
                   background-repeat: no-repeat; background-image: url(Icons/RankStar.svg); }
-  .selinfo .health { position: absolute; left: 0; top: 40px; height: 8px; background-color: #0d1512; border-bottom: 1px solid #3f4650; }
+  .selinfo .health { position: absolute; left: 0; top: 23px; height: 4px; background-color: #0d1512; border-bottom: 1px solid #3f4650; }
+  .selinfo .figure { position: absolute; height: 18px; white-space: nowrap; }
+  .selinfo .weapon { top: 40px; }
+  .selinfo .armor { top: 60px; }
+  .selinfo .figure .label { position: absolute; left: 0; top: 0; height: 8px; line-height: 8px; font-size: 7px; color: #8a949f; }
+  .selinfo .figure .value { position: absolute; left: 0; top: 9px; height: 9px; line-height: 9px; font-size: 8px; font-weight: bold; color: #f1f4f6; }
+  .selinfo .figure.strong .value { color: #7fd36a; }
+  .selinfo .figure.weak .value { color: #ef6a4c; }
 
   /* the general's powers' steel, a column at a time: the console's steel with its light top line,
      and a dark line down the part of its right hand side that faces the battlefield */
@@ -422,11 +439,13 @@
   </div>
   <!-- the money, under the clock; the figure is the bar's own window over its well -->
   <div class="piece moneywell {{moneyblock.shown}}" style="left: {{moneyblock.x}}px; top: {{moneyblock.y}}px; width: {{moneyblock.w}}px; height: {{moneyblock.h}}px"><div class="lip"></div></div>
-  <!-- a lone unit's name, veterancy and health beside its portrait in the selection's well -->
+  <!-- a lone unit's name, health, veterancy, weapon and armour beside its portrait in the selection's well -->
   <div class="piece selinfo {{selinfo.shown}}" style="left: {{selinfo.x}}px; top: {{selinfo.y}}px; width: {{selinfo.w}}px; height: {{selinfo.h}}px">
     <div class="name" style="width: {{selinfo.w}}px">{{sel.name}}</div>
-    <div class="vet" data-each="selstars" style="left: {{x}}px"></div>
+    <div class="vet" data-each="selstars" style="right: {{x}}px"></div>
     <div class="health {{sel.healthshown}}" style="width: {{selinfo.w}}px"></div>
+    <div class="figure weapon {{state}}" data-each="selweapon" style="left: {{x}}px"><div class="label">{{label}}</div><div class="value">{{value}}</div></div>
+    <div class="figure armor {{state}}" data-each="selarmor" style="left: {{x}}px"><div class="label">{{label}}</div><div class="value">{{value}}</div></div>
   </div>
   <div class="piece commandcell" data-each="commandcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="edge" style="left: -{{ring}}px; top: -{{ring}}px; right: -{{ring}}px; bottom: -{{ring}}px; border-width: {{ring}}px"></div><div class="bevel"></div></div>
   <div class="piece commandcell" data-each="portraitcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="edge" style="left: -{{ring}}px; top: -{{ring}}px; right: -{{ring}}px; bottom: -{{ring}}px; border-width: {{ring}}px"></div><div class="bevel"></div></div>

@@ -1,0 +1,14 @@
+# Zero Hour Reforged trailer, beats 07 and 24 (LK_TEXTURE, PF_BATTLE): Scenarios/s240_town.txt on
+# Tournament Desert. First at a tank's distance on the street south of the crossroads, looking east
+# so the American column crosses the frame right to left with the low sun on its side; then wide on
+# the crossroads from the south-east for the A-10 run and the anthrax bomb. Heading 135 keeps the
+# map's edge out of the top corners.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Tournament Desert\Tournament Desert.map" -autoskirmish 2
+#     -takeover -observer -side 0 FactionAmerica -side 1 FactionGLA -seed 7 -scenario s240_town
+#     -cinema rf_town -video 120 780 rf_town -maxframes 790
+
+3.0   cut     1020 1150 0.22 -90 14
+13.0  cut     1020 1350 0.5 135 10
+26.5  end

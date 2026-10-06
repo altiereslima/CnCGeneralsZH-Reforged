@@ -11429,7 +11429,17 @@ Bool Pathfinder::isAttackViewBlockedByObstacle(const Object* attacker, const Coo
 		if (victim)
 			viewBlocked = !w->isClearGoalFiringLineOfSightTerrain(attacker, attackerPos, victim);
 		else
-			viewBlocked = !w->isClearGoalFiringLineOfSightTerrain(attacker, attackerPos, victimPos);
+		{
+			// A point on open ground lies on the terrain itself, and the line test takes the highest
+			// corner of every cell it crosses, so on any slope the cells just short of the point stood
+			// above it and the shot read as blocked. A tank told to shell the ground in range then drove
+			// off looking for a clear spot, turning its hull under its turret, before it fired. Look at
+			// the point the way an object target is looked at: something standing there, as tall as the
+			// shooter.
+			Coord3D aimPos = victimPos;
+			aimPos.z += attacker->getGeometryInfo().getMaxHeightAbovePosition();
+			viewBlocked = !w->isClearGoalFiringLineOfSightTerrain(attacker, attackerPos, aimPos);
+		}
 
 		if (viewBlocked)
 		{

@@ -85,6 +85,16 @@ extern Real Drawable_effectiveOpacity( Real explicitOpacity, Real stealthOpacity
 extern Bool Drawable_structureShowsHealthBar( Bool isBridge, Bool isUnowned, Bool isGarrisonable,
 																							Bool isCapturable );
 
+///< whether an object of these kinds is a thing that wears a health bar at all
+extern Bool Drawable_kindShowsHealthBar( const KindOfMaskType& kinds );
+
+///< whether a weapon fires slowly enough (over three seconds a shot, clip and reload counted) to wear a reload bar;
+///< a mine-clearing weapon (DamageType DISARM) never does
+extern Bool Drawable_weaponWearsReloadBar( Int clipSize, UnsignedInt delayFrames, UnsignedInt clipReloadFrames, Bool disarms );
+
+///< how far a weapon's wait has come, 0 to 1, or -1 when there is no wait worth a bar
+extern Real Drawable_reloadBarFraction( UnsignedInt now, UnsignedInt started, UnsignedInt ready, UnsignedInt longest );
+
 ///< whether the health bar setting lets this object show one right now
 extern Bool Drawable_healthBarModeShows( Int healthBarMode, Bool isSelected, Bool isMousedOver,
 																				 Bool isDamaged );

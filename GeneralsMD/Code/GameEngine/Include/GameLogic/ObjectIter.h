@@ -93,18 +93,25 @@ class SimpleObjectIterator : public ObjectIterator
 	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(SimpleObjectIterator, "SimpleObjectIteratorPool" )		
 private:
 
-	class Clump : public MemoryPoolObject
+	class PooledClump;
+
+	struct Clump
 	{
-		MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(Clump, "SimpleObjectIteratorClumpPool" )		
-	public:
-
-		Clump			*m_nextClump;
-		Object		*m_obj;
-		Real			m_numeric;	// typically, dist-squared
-
-		Clump();
-	//~Clump();
+		Clump				*m_nextClump;
+		Object			*m_obj;
+		PooledClump	*m_pooled;	// NULL when the clump is one of m_inlineClumps
+		Real				m_numeric;	// typically, dist-squared
 	};
+
+	// a query that finds more than INLINE_CLUMPS objects takes the rest from the pool
+	class PooledClump : public MemoryPoolObject
+	{
+		MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(PooledClump, "SimpleObjectIteratorClumpPool" )
+	public:
+		Clump m_clump;
+	};
+
+	enum { INLINE_CLUMPS = 64 };
 
 	typedef Real (*ClumpCompareProc)(Clump *a, Clump *b);
 	static ClumpCompareProc theClumpCompareProcs[];
@@ -118,6 +125,8 @@ private:
 	Clump				*m_firstClump;
 	Clump				*m_curClump;
 	Int					m_clumpCount;
+	Int					m_inlineClumpsUsed;
+	Clump				m_inlineClumps[INLINE_CLUMPS];
 
 	void reset();
 

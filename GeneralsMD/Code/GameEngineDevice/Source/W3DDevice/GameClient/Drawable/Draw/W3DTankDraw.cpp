@@ -342,8 +342,12 @@ void W3DTankDraw::doDrawModule(const Matrix3D* transformMtx)
 		 worth of distance. A pivot runs them against each other, a reverse runs them backwards. */
 	Real forward, turn;
 	stepGroundMotion(forward, turn);
-	// undamaged top speed: a damaged tank is slower, and its treads still have to match the ground
-	const Locomotor *loco = obj->getAIUpdateInterface()->getCurLocomotor();
+	// undamaged top speed: a damaged tank is slower, and its treads still have to match the ground.
+	// A thing with no AI has no locomotor and its treads stand still. No retail object pairs this
+	// module with no AI, but data that draws a hulk with it does, and EA only asked for the AI when
+	// the model had treads; v2.4.0 asked every frame and crashed (crash report 134).
+	const AIUpdateInterface *ai = obj->getAIUpdateInterface();
+	const Locomotor *loco = ai ? ai->getCurLocomotor() : NULL;
 	Real maxSpeed = loco ? loco->getMaxSpeedForCondition(BODY_PRISTINE) : 0.0f;
 	if (m_treadCount && maxSpeed > 0.0f)
 	{

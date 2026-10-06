@@ -1,0 +1,37 @@
+# One of each main tank and a Humvee, each alone in its own lane 200 apart, sent 300 east from a
+# standstill over the open grass of the small generated map. They spawn facing east, so no turn
+# holds the speed down and the start is the Acceleration alone. A short run, so getting up to
+# speed and braking at the end are a large share of the arrival frame. For the vehicle
+# Acceleration and Braking in BalanceReforged.ini; add -tracemove 57 (the Crusader) or 59 (the
+# Overlord) for the speed frame by frame.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 1 -maxframes 900
+#     -scenario vehicleaccel -logPrefix vehicleaccel_
+#
+# Measured 2026-10-06, frames from the order (frame 60), before / after the quarter more
+# Acceleration and Braking:
+#   arrival     Crusader 314 / 310, Battlemaster 371 / 368, Scorpion 242 / 238, Humvee 170 / 166
+#   90% of top  Crusader 33 / 27, Overlord 37 / 30
+#   99% of top  Crusader 41 / 35, Overlord 45 / 38
+# The Overlord's point is blocked on this seed: it stops at (664,915), so it has no arrive line.
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn   0  AmericaTankCrusader      1   400 450
+30    spawn   0  ChinaTankBattleMaster    1   400 650
+30    spawn   0  ChinaTankOverlord        1   400 850
+30    spawn   0  GLATankScorpion          1   400 1050
+30    spawn   0  AmericaVehicleHumvee     1   400 1250
+
+60    move    0  AmericaTankCrusader          700 450
+60    move    0  ChinaTankBattleMaster        700 650
+60    move    0  ChinaTankOverlord            700 850
+60    move    0  GLATankScorpion              700 1050
+60    move    0  AmericaVehicleHumvee         700 1250
+
+60    arrive  0  AmericaTankCrusader          700 450  10
+60    arrive  0  ChinaTankBattleMaster        700 650  10
+60    arrive  0  GLATankScorpion              700 1050 10
+60    arrive  0  AmericaVehicleHumvee         700 1250 10

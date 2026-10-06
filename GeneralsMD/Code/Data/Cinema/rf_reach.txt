@@ -1,0 +1,13 @@
+# Zero Hour Reforged trailer, beat 20 (CC_REACH): Scenarios/rf_reach.txt in Alpine Assault's rail
+# yard from the local player's seat with the interface on. The battery sits dead centre, where the
+# shoot script's click lands, and the reach's circle takes in the crane, the war factory and the
+# rock face with the shaded wedges behind them. Repeated cuts hold the view against a resting
+# pointer.
+
+3.0   hud     on
+3.0   cut     760 920 0.7 -45 0
+6.0   cut     760 920 0.7 -45 0
+9.0   cut     760 920 0.7 -45 0
+12.0  cut     760 920 0.7 -45 0
+15.0  cut     760 920 0.7 -45 0
+16.2  end

@@ -162,6 +162,10 @@ Bool SuperweaponDefenseCapRefuses( Int finishedDefenses, Int superweapons );
 // Only a defence somebody paid for counts.  The Sneak Attack tunnel, its Start and every general's
 // copy are the only FS_BASE_DEFENSE templates with no BuildCost: a power drops them for free.
 Bool DefenseCountsForSuperweapons( Int buildCost );
+// A GLA superweapon knocked down leaves a hole whose worker puts it back 20 seconds later at no
+// cost.  Until that rebuild stands the hole counts as the superweapon, or a second one could go
+// down on the same allowance in those 20 seconds and the hole would make it two.
+Bool RebuildHoleHoldsSuperweapon( Bool rebuildsSuperweapon, Bool rebuildStanding );
 // The silo whose missile No Superweapons or Pro Rules silences is a shop for China's upgrades, not a
 // weapon, and is not asked for defences.
 Bool SuperweaponNeedsDefenses( const AsciiString &buildingName, Bool proRules, Int superweaponRestriction );

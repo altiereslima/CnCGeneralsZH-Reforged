@@ -1,0 +1,6 @@
+# Hero loop 10 (command line in Scenarios/hero_loop_10.txt): Flash Effect's palm beach,
+# wide, looking north across the fight on the sand to the sea. Locked so the edit's dissolve joins
+# matching frames.
+
+5     cut        1700 1480 0.8 0 12
+36    end

@@ -1,0 +1,7 @@
+# Zero Hour Reforged trailer, beat 06's daylight fallback (LK_NIGHT_DAY): Scenarios/rf_nightday.txt
+# on Golden Oasis. First looking east into the sun, so the plume shows the side away from the light
+# with the fire under it, then side-lit from the south for the second choice.
+
+3.0   cut     2192 3537 0.3 -90 10
+12.5  cut     2192 3537 0.3 0 10
+18.9  end

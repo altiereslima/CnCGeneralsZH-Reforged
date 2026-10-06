@@ -55,7 +55,9 @@
 #include "GameNetwork/RankPointValue.h"
 #include "GameClient/ChromaKeyboard.h"
 #include "GameClient/MetaEvent.h"
+#include "GameClient/HotKey.h"
 #include "GameClient/ClickTolerance.h"
+#include "Common/version.h"
 #include "GameClient/HtmlTemplate.h"
 #include "GameClient/KeyDownInfo.h"
 #include "GameClient/GameWindowTransitions.h"
@@ -65,6 +67,8 @@
 #include "GameLogic/LogicRandomValue.h"
 #include "GameClient/ClientRandomValue.h"
 #include "Common/ThingTemplate.h"
+#include "Common/ThingFactory.h"
+#include "Common/ModuleFactory.h"
 #include "Common/SimulationMathCrc.h"
 #include "GameLogic/FPUControl.h"
 #include "GameLogic/ExperienceTracker.h"
@@ -183,6 +187,7 @@ static int GetSystemMetrics( int which )
 #include <math.h>
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <thread>
 
 //////////////////////////////////////////////////////////////////////////////
@@ -336,6 +341,17 @@ TEST(bittest_macro_is_the_games_not_the_intrinsics)
 	CHECK( BitTest( flags, 0x04 ) == 0 );
 	/* the intrinsic takes a bit *index*, the macro takes a mask - 0x0A & 0x0A */
 	CHECK( BitTest( flags, 0x0A ) );
+}
+
+/* The options screen shows this; it has to read the way the release tags do, minor unpadded. */
+TEST(release_version_matches_the_tag_form)
+{
+	CHECK( bootOnce() );
+	Version v;
+	v.setVersion( 2, 6, 0, 0, "cmake", "Windows", "", "" );
+	CHECK_STR( v.getReleaseVersion().str(), "v2.6.0" );
+	v.setVersion( 2, 10, 3, 7, "cmake", "Windows", "", "" );
+	CHECK_STR( v.getReleaseVersion().str(), "v2.10.3" );
 }
 
 TEST(name_key_generator_round_trips)
@@ -520,6 +536,29 @@ TEST(ini_missing_file_throws)
 	CHECK( threw );
 }
 
+/* Player report #39: Language=german in the registry, only English data installed, and
+   GlobalLanguage::init threw on Data\german\Language.ini at startup.  GameEngine::init now asks
+   installedLanguage once the archives are up and falls back to the first retail language that has
+   data (issue #63: a German-only install has no english either), or to nothing at all. */
+TEST(installed_language_falls_back_to_english_when_its_data_is_missing)
+{
+	CHECK( bootOnce() );
+
+	/* on POSIX the backslashed name is one flat file in the working directory, which is also
+	   what the test file system's fopen looks for */
+	std::error_code ec;
+	std::filesystem::create_directories( "Data/zhtestlang", ec );
+	writeFile( "Data\\zhtestlang\\Language.ini", "; test\n" );
+
+	CHECK_STR( TheFileSystem->installedLanguage( AsciiString( "zhtestlang" ) ).str(), "zhtestlang" );
+	// no retail language has data here, so there is nothing to fall back to
+	CHECK_STR( TheFileSystem->installedLanguage( AsciiString( "zhtestnodata" ) ).str(), "" );
+
+	remove( "Data\\zhtestlang\\Language.ini" );
+	std::filesystem::remove( "Data/zhtestlang", ec );
+	std::filesystem::remove( "Data", ec );		// only if this test made it; a non-empty one stays
+}
+
 /* An unknown block name aborts the whole file - INI::load throws
    INI_UNKNOWN_TOKEN and the blocks after it never get read.  Worth pinning:
    nothing in the loader skips unknown blocks, so an INI written for a newer
@@ -629,6 +668,92 @@ TEST(balance_patch_edits_a_weapon_in_place)
 	remove( TEST_INI );
 }
 
+/* BalanceReforged.ini replaces Tank_ChinaBunker's ModuleTag_05 with a StructureBody.  Under the
+	 Shockwave mod that tag holds another module, and the type check in ThingTemplate::parseModuleName
+	 threw and stopped the game at start.  The block is skipped now: the template keeps the module it
+	 had, and the lines after the block still parse. */
+TEST(replace_module_of_another_type_is_skipped)
+{
+	CHECK( bootOnce() );
+
+	GlobalData *savedGlobals = TheWritableGlobalData;
+	if( savedGlobals == NULL )
+		TheWritableGlobalData = NEW GlobalData;
+	if( TheModuleFactory == NULL )
+	{
+		TheModuleFactory = NEW ModuleFactory;
+		TheModuleFactory->init();
+	}
+	if( TheThingFactory == NULL )
+		TheThingFactory = NEW ThingFactory;
+
+	writeFile( TEST_INI,
+		"Object ReplaceModuleProbe\r\n"
+		"  Body = ActiveBody ModuleTag_01\r\n"
+		"    MaxHealth = 100.0\r\n"
+		"    InitialHealth = 100.0\r\n"
+		"  End\r\n"
+		"  Behavior = DestroyDie ModuleTag_02\r\n"
+		"  End\r\n"
+		"End\r\n" );
+	CHECK( loadIni( TEST_INI ) );
+
+	writeFile( TEST_INI,
+		"Object ReplaceModuleProbe\r\n"
+		"  ReplaceModule ModuleTag_02\r\n"
+		"    Body = StructureBody ModuleTag_02_Override\r\n"
+		"      MaxHealth = 500.0\r\n"
+		"      InitialHealth = 500.0\r\n"
+		"    End\r\n"
+		"  End\r\n"
+		"  ReplaceModule ModuleTag_01\r\n"
+		"    Body = ActiveBody ModuleTag_01_Override\r\n"
+		"      MaxHealth = 250.0\r\n"
+		"      InitialHealth = 250.0\r\n"
+		"    End\r\n"
+		"  End\r\n"
+		"End\r\n" );
+	Bool threw = FALSE;
+	try
+	{
+		INI patch;
+		patch.load( AsciiString( TEST_INI ), INI_LOAD_MULTIFILE, NULL );
+	}
+	catch( ... )
+	{
+		threw = TRUE;
+	}
+	CHECK( threw == FALSE );
+
+	const ThingTemplate *probe = TheThingFactory->findTemplate( "ReplaceModuleProbe" );
+	CHECK( probe != NULL );
+	if( probe != NULL )
+	{
+		const ModuleInfo &modules = probe->getBehaviorModuleInfo();
+		CHECK_EQ( modules.getCount(), 2 );
+		Bool keptDie = FALSE, droppedReplacement = TRUE, replacedBody = FALSE;
+		for( Int i = 0; i < modules.getCount(); ++i )
+		{
+			if( modules.getNthTag( i ) == "ModuleTag_02" && modules.getNthName( i ) == "DestroyDie" )
+				keptDie = TRUE;
+			if( modules.getNthTag( i ) == "ModuleTag_02_Override" )
+				droppedReplacement = FALSE;
+			if( modules.getNthTag( i ) == "ModuleTag_01_Override" && modules.getNthName( i ) == "ActiveBody" )
+				replacedBody = TRUE;
+		}
+		CHECK( keptDie );
+		CHECK( droppedReplacement );
+		CHECK( replacedBody );
+	}
+
+	remove( TEST_INI );
+	if( savedGlobals == NULL )
+	{
+		delete TheWritableGlobalData;
+		TheWritableGlobalData = NULL;
+	}
+}
+
 /* Data\INI\FXListReforged.ini is the fork's own explosion light: 89 of EA's FXLists, each repeated
 	 whole with one LightPulse added.  Whole, because FXListStore::parseFXListDefinition clears an
 	 entry before re-reading it - a half-copied block does not add a light, it deletes an explosion.
@@ -638,7 +763,9 @@ TEST(balance_patch_edits_a_weapon_in_place)
 	 every player who does not have that exact copy.  Since then the file also carries fixes that
 	 are not lights: the Artillery Barrage's sound, with EA's own light, and the Superweapon uplink's
 	 pink death, which has none and is the one block the count leaves out.  The Paladin's and the
-	 Avenger's hard-kill charge added two of the fork's own, its launch and its blast, lit too. */
+	 Avenger's hard-kill charge added two of the fork's own, its launch and its blast, lit too.
+	 The explosion pass added 22 more of EA's, from the structure deaths to the nukes, each with
+	 the light it lacked. */
 static const char *const s_unlitReforgedFXList = "FXList SupW_FX_ParticleUplinkDeathInitial";
 
 TEST(fxlist_reforged_ini_parses_and_keeps_its_light)
@@ -687,7 +814,7 @@ TEST(fxlist_reforged_ini_parses_and_keeps_its_light)
 	}
 	fclose( fp );
 
-	CHECK_EQ( blocks, 92 );
+	CHECK_EQ( blocks, 112 );
 	CHECK_EQ( lit, blocks );
 }
 
@@ -1144,6 +1271,57 @@ TEST(force_fire_is_the_attack_key_and_nothing_else)
 	/* neither key: nothing force fires, which is what ctrl held down now gets. */
 	CHECK( !CommandXlat_isForceAttackTargeting( false, false ) );
 	CHECK( !CommandXlat_isForceAttackTargeting( false, true ) );
+}
+
+/* HotKey.cpp: a label's '&' letter and the key a Turkish keyboard types meet on one map key. */
+TEST(hotkey_names_fold_turkish_letters_and_case)
+{
+	CHECK_STR( HotKeyManager::nameOf( L'B' ).str(), "b" );
+	CHECK_STR( HotKeyManager::nameOf( L'b' ).str(), "b" );
+	CHECK( HotKeyManager::nameOf( 0x0130 ) == HotKeyManager::nameOf( L'i' ) );	// İptal against the i key
+	CHECK( HotKeyManager::nameOf( 0x0131 ) == HotKeyManager::nameOf( L'I' ) );
+	CHECK( HotKeyManager::nameOf( 0x015E ) == HotKeyManager::nameOf( 0x015F ) );	// Ş ş
+	CHECK( HotKeyManager::nameOf( 0x00C7 ) == HotKeyManager::nameOf( 0x00E7 ) );	// Ç ç
+	CHECK( HotKeyManager::nameOf( 0x011E ) == HotKeyManager::nameOf( 0x011F ) );	// Ğ ğ
+	CHECK( HotKeyManager::nameOf( 0x015E ) != HotKeyManager::nameOf( L'^' ) );	// not its low byte
+}
+
+/* InGameUI.cpp: Classic is the game as shipped, where ctrl held was force fire. */
+extern Bool InGameUI_isForceFireOn( Bool forceAttackArmed, Bool ctrlHeld, Bool classicUI );
+
+TEST(ctrl_force_fires_in_classic_and_only_there)
+{
+	CHECK(  InGameUI_isForceFireOn( FALSE, TRUE,  TRUE ) );
+	CHECK( !InGameUI_isForceFireOn( FALSE, TRUE,  FALSE ) );
+	CHECK(  InGameUI_isForceFireOn( TRUE,  FALSE, FALSE ) );
+	CHECK( !InGameUI_isForceFireOn( FALSE, FALSE, TRUE ) );
+}
+
+/* GlobalData.h: which button orders.  Classic is 1.04's left button, or the right under EA's Alternate
+   Mouse Setup (UseAlternateMouse, off out of the box); Reforged is the right whatever Options.ini says. */
+TEST(alternate_mouse_moves_the_order_button_in_classic_only)
+{
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+	CHECK( !TheGlobalData->m_useAlternateMouse );
+
+	TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
+	CHECK(  TheGlobalData->leftButtonOrders() );
+	CHECK( !TheGlobalData->rightButtonOrders() );
+
+	TheWritableGlobalData->m_useAlternateMouse = TRUE;
+	CHECK( !TheGlobalData->leftButtonOrders() );
+	CHECK(  TheGlobalData->rightButtonOrders() );
+
+	TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_REFORGED;
+	CHECK( !TheGlobalData->leftButtonOrders() );
+	CHECK(  TheGlobalData->rightButtonOrders() );
+	TheWritableGlobalData->m_useAlternateMouse = FALSE;
+	CHECK( !TheGlobalData->leftButtonOrders() );
+	CHECK(  TheGlobalData->rightButtonOrders() );
+
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = saved;
 }
 
 /* Player.cpp: the lobby's unit limit is 840 units shared out by the players who are not watching. */
@@ -7172,6 +7350,83 @@ TEST(an_owned_structure_always_wears_a_health_bar)
 	CHECK( Drawable_structureShowsHealthBar( FALSE, FALSE, TRUE, FALSE ) == TRUE );
 }
 
+static KindOfMaskType healthBarKinds( KindOfType a, KindOfType b = KINDOF_INVALID, KindOfType c = KINDOF_INVALID )
+{
+	KindOfMaskType m = MAKE_KINDOF_MASK( a );
+	if( b != KINDOF_INVALID ) m.set( b );
+	if( c != KINDOF_INVALID ) m.set( c );
+	return m;
+}
+
+/** A soldier killed by toxin or fire is replaced by a ToxicInfantry or FlamingInfantry, a live
+	 50 hit point INFANTRY with no SELECTABLE that melts or burns for three seconds. It wore a full bar
+	 the whole time. A unit the cursor can reach keeps its bar, and so does a building. */
+TEST(a_toxin_or_fire_death_puppet_wears_no_health_bar)
+{
+	CHECK( Drawable_kindShowsHealthBar( healthBarKinds( KINDOF_CAN_CAST_REFLECTIONS, KINDOF_INFANTRY ) ) == FALSE );
+	CHECK( Drawable_kindShowsHealthBar( healthBarKinds( KINDOF_INFANTRY, KINDOF_SELECTABLE ) ) == TRUE );
+	CHECK( Drawable_kindShowsHealthBar( healthBarKinds( KINDOF_STRUCTURE ) ) == TRUE );
+	CHECK( Drawable_kindShowsHealthBar( healthBarKinds( KINDOF_IMMOBILE, KINDOF_SELECTABLE ) ) == FALSE );
+	CHECK( Drawable_kindShowsHealthBar( healthBarKinds( KINDOF_PROJECTILE, KINDOF_SELECTABLE ) ) == FALSE );
+}
+
+/** The Spy Drone is VEHICLE DRONE SELECTABLE INERT NO_SELECT. INERT kept the toxin fields bare and
+	 took the drone's bar with them, so its owner never saw its health. A field stays bare. */
+TEST(the_spy_drone_wears_a_health_bar_and_a_toxin_field_does_not)
+{
+	CHECK( Drawable_kindShowsHealthBar( healthBarKinds( KINDOF_SELECTABLE, KINDOF_INERT, KINDOF_NO_SELECT ) ) == TRUE );
+	CHECK( Drawable_kindShowsHealthBar( healthBarKinds( KINDOF_INERT ) ) == FALSE );
+	CHECK( Drawable_kindShowsHealthBar( healthBarKinds( KINDOF_INERT, KINDOF_SELECTABLE ) ) == FALSE );
+}
+
+/** The planes a general's power sends over carry no SELECTABLE, and the cargo planes and the
+	 carpet bomber are FORCEATTACKABLE as well. The death puppet rule took their bars; anti-air
+	 shoots them down, so an aircraft keeps one. The artillery barrage's UNATTACKABLE dummy does not. */
+TEST(a_strike_or_cargo_plane_wears_a_health_bar)
+{
+	CHECK( Drawable_kindShowsHealthBar( healthBarKinds( KINDOF_VEHICLE, KINDOF_AIRCRAFT, KINDOF_CAN_ATTACK ) ) == TRUE );		// A-10, B-52, MiG
+	CHECK( Drawable_kindShowsHealthBar( healthBarKinds( KINDOF_AIRCRAFT, KINDOF_TRANSPORT, KINDOF_FORCEATTACKABLE ) ) == TRUE );	// cargo plane
+	CHECK( Drawable_kindShowsHealthBar( healthBarKinds( KINDOF_AIRCRAFT, KINDOF_SELECTABLE ) ) == TRUE );		// a Raptor you built
+	CHECK( Drawable_kindShowsHealthBar( healthBarKinds( KINDOF_AIRCRAFT, KINDOF_UNATTACKABLE ) ) == FALSE );	// artillery barrage dummy
+	CHECK( Drawable_kindShowsHealthBar( healthBarKinds( KINDOF_FORCEATTACKABLE ) ) == FALSE );					// a fence
+	CHECK( Drawable_kindShowsHealthBar( healthBarKinds( KINDOF_INFANTRY ) ) == FALSE );							// a pedestrian, a death puppet
+}
+
+/** Only a slow gun wears the amber reload bar: over three seconds a shot, a clip's reload spread
+	 over the shots in it. Frames, at 30 a second. */
+TEST(only_a_slow_firing_weapon_wears_a_reload_bar)
+{
+	CHECK( Drawable_weaponWearsReloadBar( 0, 300, 0, FALSE ) == TRUE );		// Nuke Cannon, 10 s
+	CHECK( Drawable_weaponWearsReloadBar( 0, 120, 0, FALSE ) == TRUE );		// Inferno Cannon, 4 s
+	CHECK( Drawable_weaponWearsReloadBar( 1, 0, 300, FALSE ) == TRUE );		// SCUD, one missile and a 10 s reload
+	CHECK( Drawable_weaponWearsReloadBar( 2, 6, 450, FALSE ) == TRUE );		// Scorpion's two missiles, 15 s reload
+	CHECK( Drawable_weaponWearsReloadBar( 0, 60, 0, FALSE ) == FALSE );		// a tank gun, 2 s
+	CHECK( Drawable_weaponWearsReloadBar( 0, 90, 0, FALSE ) == FALSE );		// exactly three seconds is not over three
+	CHECK( Drawable_weaponWearsReloadBar( 6, 6, 180, FALSE ) == FALSE );		// Rocket Buggy, six rockets, 6 s reload
+	CHECK( Drawable_weaponWearsReloadBar( 2, 7, 120, FALSE ) == FALSE );		// Paladin's point defence laser
+	CHECK( Drawable_weaponWearsReloadBar( 20, 6, 900, FALSE ) == FALSE );	// Comanche rocket pods
+}
+
+/** The Dozer's mine-clearing scoop is one shot and a 4 s reload, slow enough for the bar on the
+	 numbers alone, and the Dozer wore it after every mine. A DISARM weapon is not a gun. */
+TEST(a_mine_clearing_weapon_wears_no_reload_bar)
+{
+	CHECK( Drawable_weaponWearsReloadBar( 1, 0, 120, FALSE ) == TRUE );		// the same numbers on a gun
+	CHECK( Drawable_weaponWearsReloadBar( 1, 0, 120, TRUE ) == FALSE );		// DozerMineDisarmingWeapon
+	CHECK( Drawable_weaponWearsReloadBar( 0, 30, 0, TRUE ) == FALSE );		// WorkerMineDisarmingWeapon
+}
+
+/** A launcher that shares its reload is told when it can fire next and keeps an old start frame;
+	 the bar is measured against the longest wait its data allows, not a minute of nothing. */
+TEST(a_reload_bar_ignores_a_stale_start_frame)
+{
+	CHECK_NEAR( Drawable_reloadBarFraction( 150, 0, 300, 300 ), 0.5f, 0.001f );
+	CHECK_NEAR( Drawable_reloadBarFraction( 1150, 0, 1300, 300 ), 0.5f, 0.001f );
+	CHECK( Drawable_reloadBarFraction( 300, 0, 300, 300 ) < 0.0f );				// ready
+	CHECK( Drawable_reloadBarFraction( 10, 0, 0x7fffffff, 300 ) < 0.0f );		// empty, waits for an airfield
+	CHECK( Drawable_reloadBarFraction( 100, 100, 106, 450 ) < 0.0f );			// between two missiles
+}
+
 /** Being carried is not a malfunction, so a unit inside a transport keeps its owner's colour.
 	 Anything else that disables it turns the bar blue - and the pair together used to fail: the old
 	 test asked `isDisabled() && !isDisabledByType(DISABLED_HELD)`, so a held unit that was then EMP'd
@@ -7293,6 +7548,32 @@ TEST(player_color_scheme_round_trips_through_options_ini)
 
 	TheWritableGlobalData->m_playerColorScheme = PLAYER_COLORS_ORIGINAL;
 	invalidatePlayerColorScheme();
+
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = saved;
+}
+
+TEST(interface_style_is_classic_unless_the_switch_says_otherwise)
+{
+	/* The launcher picks the interface with -interface; Options.ini has no say, so an InterfaceStyle
+		 key an earlier build saved there cannot turn a run without the switch into Reforged.  MenuLayout
+		 went with it: every menu is fitted now. */
+	CHECK( findOptionDef( "InterfaceStyle" ) == NULL );
+	CHECK( findOptionDef( "MenuLayout" ) == NULL );
+
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+
+	CHECK_EQ( TheGlobalData->m_interfaceStyle, (Int)INTERFACE_STYLE_CLASSIC );
+	CHECK( TheGlobalData->isClassicUI() );
+
+	UserPreferences pref;
+	pref[ AsciiString( "InterfaceStyle" ) ] = AsciiString( "1" );
+	loadOptionsFromPreferences( pref );
+	CHECK( TheGlobalData->isClassicUI() );
+
+	TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_REFORGED;
+	CHECK( !TheGlobalData->isClassicUI() );
 
 	delete TheWritableGlobalData;
 	TheWritableGlobalData = saved;
@@ -11762,6 +12043,63 @@ TEST(the_three_panels_are_one_bar_at_4x3_and_pull_apart_on_a_wide_screen)
 	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_LEFT, &whole, 0, 0, &left ) == FALSE );
 }
 
+TEST(the_classic_bar_is_three_plates_on_the_screen_edges_at_one_scale)
+{
+	/* The menus keep the 4:3 box.  The Classic bar is the three plates Reforged's arithmetic puts on
+		 the screen's edges, at every shape of screen: radar on the left edge, grid centred, selection
+		 on the right edge, every one of them the same scale across as down. */
+	CHECK_EQ( UIRectForScreen( 1920, 1080 ).x, 240 );
+	CHECK_EQ( UIRectForScreen( 1920, 1080 ).w, 1440 );
+	CHECK_EQ( UIRectForScreen( 1920, 1080 ).h, 1080 );
+	CHECK_EQ( UIRectForScreen( 2560, 1080 ).x, 560 );
+	CHECK_EQ( UIRectForScreen( 1024, 768 ).x, 0 );
+	CHECK_EQ( UIRectForScreen( 1024, 768 ).w, 1024 );
+	CHECK_EQ( UIRectForScreen( 1280, 1024 ).y, 64 );		// narrower than 4:3: full width, on the bottom with the bar
+
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+	TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
+
+	static const Int screens[][ 2 ] =
+	{
+		{ 1024, 768 }, { 1280, 1024 }, { 1680, 1050 }, { 1920, 1080 }, { 1920, 1200 }, { 2560, 1440 },
+		{ 3840, 2160 }, { 2560, 1080 }, { 3440, 1440 }, { 5120, 1440 }
+	};
+	const IRegion2D *radar = &ControlBarPlateForSide( "America", ControlBar::CB_PANEL_LEFT )->design;
+	const IRegion2D *grid = &ControlBarPlateForSide( "America", ControlBar::CB_PANEL_CENTER )->design;
+	const IRegion2D *selection = &ControlBarPlateForSide( "America", ControlBar::CB_PANEL_RIGHT )->design;
+	for( Int i = 0; i < (Int)( sizeof( screens ) / sizeof( screens[ 0 ] ) ); i++ )
+	{
+		const Int w = screens[ i ][ 0 ];
+		const Int h = screens[ i ][ 1 ];
+		const Real s = ControlBarUniformScaleFor( w, h );
+		IRegion2D left, centre, right;
+		CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_LEFT, radar, w, h, &left ) );
+		CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_CENTER, grid, w, h, &centre ) );
+		CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_RIGHT, selection, w, h, &right ) );
+
+		// the radar on the left edge, the selection on the right, the grid in the middle
+		CHECK_EQ( left.lo.x, 0 );
+		CHECK_EQ( right.hi.x, w );
+		CHECK_NEAR( ( centre.lo.x + centre.hi.x ) * 0.5f, w * 0.5f + ( ( grid->lo.x + grid->hi.x ) * 0.5f - 400.0f ) * s, 2.0f );
+		CHECK_EQ( left.hi.y, h );
+		CHECK_EQ( centre.hi.y, h );
+		CHECK_EQ( right.hi.y, h );
+
+		// nothing stretched: the grid plate is as many times its design width across as down, down
+		// being to the screen's bottom edge, which the plate is snapped onto
+		CHECK_NEAR( (Real)centre.width() / grid->width(), (Real)centre.height() / ( 600 - grid->lo.y ), 0.02f );
+		CHECK_NEAR( (Real)centre.width() / grid->width(), s, 0.02f );
+
+		// the three never overlap past the seams the art already shares at 4:3
+		CHECK( left.hi.x <= centre.lo.x + REAL_TO_INT_CEIL( 4.0f * s ) );
+		CHECK( centre.hi.x <= right.lo.x + REAL_TO_INT_CEIL( 14.0f * s ) );
+	}
+
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = saved;
+}
+
 TEST(a_plate_covers_the_windows_its_panel_is_responsible_for)
 {
 	/* The plates are cuts of the shipped painting and the windows are at the coordinates the .wnd
@@ -12450,16 +12788,17 @@ TEST(text_language_row_offers_every_language)
 
 TEST(gameplay_conveniences_are_forced_on_and_left_the_catalog)
 {
-	/* The Gameplay page is one control now, health bars, and the eight settings that used to share
-		 it are decided here instead of by the player.  Two halves have to agree or the removal is a
-		 feature switched off by accident: the row must be gone from the catalog, so nothing loads a
-		 stale "no" out of an Options.ini written before this change, and the constructor must say
-		 TRUE, because with the row gone the constructor is the only thing left that says anything. */
+	/* Five settings that used to share the Gameplay page are decided here instead of by the player.
+		 Two halves have to agree or the removal is a feature switched off by accident: the row must
+		 be gone from the catalog, so nothing loads a stale "no" out of an Options.ini written before
+		 this change, and the constructor must say TRUE, because with the row gone the constructor is
+		 the only thing left that says anything.  Grid placement, snap-to-45 building rotation and the
+		 nudge left with them and came back as Controls check boxes under new keys, so they are below
+		 with the menu rows; their old keys stay out of the catalog. */
 	static const char *const forced[] =
 	{
-		"GridBuildPlacement", "NudgeBuildPlacement", "SnapBuildPlacementTo45",
-		"ShowPlacementRangeRing", "WorkersReturnToSupply", "DetailedBuildTooltips",
-		"ShowHudOverlay", "ArchiveReplays", NULL
+		"NudgeBuildPlacement", "ShowPlacementRangeRing", "WorkersReturnToSupply",
+		"DetailedBuildTooltips", "ShowHudOverlay", "ArchiveReplays", NULL
 	};
 	for( Int i = 0; forced[ i ] != NULL; ++i )
 		CHECK( findOptionDef( forced[ i ] ) == NULL );
@@ -12468,9 +12807,6 @@ TEST(gameplay_conveniences_are_forced_on_and_left_the_catalog)
 	GlobalData *scratch = NEW GlobalData;
 	TheWritableGlobalData = scratch;
 
-	CHECK( scratch->m_gridBuildPlacement );
-	CHECK( scratch->m_nudgeBuildPlacement );
-	CHECK( scratch->m_snapBuildPlacementTo45 );
 	CHECK( scratch->m_showPlacementRangeRing );
 	CHECK( scratch->m_workersReturnToSupply );
 	CHECK( scratch->m_detailedBuildTooltips );
@@ -12492,7 +12828,7 @@ TEST(gameplay_conveniences_are_forced_on_and_left_the_catalog)
 		 Options.ini that names one still wins over the default.  ZoomToCursor came back to the menu. */
 	static const char *const hidden[] =
 	{
-		"FormationDrag", "EdgeScrollInWindowedMode", "SnapCameraRotateTo45", NULL
+		"FormationDrag", "EdgeScrollInWindowedMode", NULL
 	};
 	for( Int i = 0; hidden[ i ] != NULL; ++i )
 	{
@@ -12500,6 +12836,31 @@ TEST(gameplay_conveniences_are_forced_on_and_left_the_catalog)
 		CHECK( def != NULL );
 		CHECK( def->widgetName == NULL || def->widgetName[ 0 ] == '\0' );
 	}
+
+	/* The snaps, grid placement and the opening zoom are Controls check boxes, off by default, under
+		 keys of their own: the old ones are a "yes" in every Options.ini saved while they defaulted on. */
+	static const char *const menu[] =
+	{
+		"CameraSnapTo45", "BuildGrid", "BuildSnapTo45", "BuildSnapToNeighbour", "OpenAtMaxZoom",
+		"WheelZoomToCursor", "BuildNudge", NULL
+	};
+	for( Int i = 0; menu[ i ] != NULL; ++i )
+	{
+		const OptionDef *def = findOptionDef( menu[ i ] );
+		CHECK( def != NULL );
+		if( def == NULL )
+			continue;
+		CHECK( def->kind == OPTION_BOOL );
+		CHECK( def->widgetName != NULL && def->widgetName[ 0 ] != '\0' );
+		CHECK_EQ( def->get(), 0 );
+	}
+	static const char *const retired[] =
+	{
+		"SnapCameraRotateTo45", "GridBuildPlacement", "SnapBuildPlacementTo45", "StartAtMaxZoom",
+		"ZoomToCursor", NULL
+	};
+	for( Int i = 0; retired[ i ] != NULL; ++i )
+		CHECK( findOptionDef( retired[ i ] ) == NULL );
 
 	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
@@ -12519,7 +12880,7 @@ TEST(an_options_ini_naming_the_removed_input_scheme_and_wasd_keys_still_loads)
 	TheWritableGlobalData = scratch;
 
 	const OptionDef *orderLines = findOptionDef( "OrderLines" );
-	const OptionDef *zoom = findOptionDef( "ZoomToCursor" );
+	const OptionDef *zoom = findOptionDef( "WheelZoomToCursor" );
 	CHECK( orderLines != NULL && zoom != NULL );
 	orderLines->set( 1 );
 	zoom->set( 1 );
@@ -12528,7 +12889,7 @@ TEST(an_options_ini_naming_the_removed_input_scheme_and_wasd_keys_still_loads)
 	pref[ AsciiString( "InputScheme" ) ] = AsciiString( "1" );
 	pref[ AsciiString( "WasdCamera" ) ] = AsciiString( "yes" );
 	pref[ AsciiString( "OrderLines" ) ] = AsciiString( "no" );
-	pref[ AsciiString( "ZoomToCursor" ) ] = AsciiString( "no" );
+	pref[ AsciiString( "WheelZoomToCursor" ) ] = AsciiString( "no" );
 	loadOptionsFromPreferences( pref );
 
 	CHECK_EQ( orderLines->get(), 0 );
@@ -12611,30 +12972,30 @@ TEST(option_catalog_writes_bools_as_yes_and_no)
 	TheWritableGlobalData = scratch;
 
 	UserPreferences pref;
-	const OptionDef *zoom = findOptionDef( "ZoomToCursor" );
+	const OptionDef *zoom = findOptionDef( "WheelZoomToCursor" );
 	CHECK( zoom != NULL );
 
 	zoom->set( 1 );
 	saveOptionsToPreferences( pref );
-	CHECK_STR( pref[ AsciiString( "ZoomToCursor" ) ].str(), "yes" );
+	CHECK_STR( pref[ AsciiString( "WheelZoomToCursor" ) ].str(), "yes" );
 
 	zoom->set( 0 );
 	saveOptionsToPreferences( pref );
-	CHECK_STR( pref[ AsciiString( "ZoomToCursor" ) ].str(), "no" );
+	CHECK_STR( pref[ AsciiString( "WheelZoomToCursor" ) ].str(), "no" );
 
 	/* Reading is deliberately more forgiving than writing.  The getters this replaces accepted the
 		 single string "yes", so a file hand-edited to "true" read as off - which looks like the
 		 setting not working rather than like the file being spelled wrong. */
-	pref[ AsciiString( "ZoomToCursor" ) ] = AsciiString( "true" );
+	pref[ AsciiString( "WheelZoomToCursor" ) ] = AsciiString( "true" );
 	loadOptionsFromPreferences( pref );
 	CHECK_EQ( zoom->get(), 1 );
 
 	zoom->set( 0 );
-	pref[ AsciiString( "ZoomToCursor" ) ] = AsciiString( "1" );
+	pref[ AsciiString( "WheelZoomToCursor" ) ] = AsciiString( "1" );
 	loadOptionsFromPreferences( pref );
 	CHECK_EQ( zoom->get(), 1 );
 
-	pref[ AsciiString( "ZoomToCursor" ) ] = AsciiString( "no" );
+	pref[ AsciiString( "WheelZoomToCursor" ) ] = AsciiString( "no" );
 	loadOptionsFromPreferences( pref );
 	CHECK_EQ( zoom->get(), 0 );
 
@@ -12820,53 +13181,35 @@ TEST(texture_filter_defaults_to_anisotropic)
 	TheWritableGlobalData = saved;
 }
 
-/* Three rows on the Controls page.  The zoom one may only ever bring the camera nearer: the far
-	 limit is how much of the map a player sees, Options.ini is outside the mismatch check, and a row
-	 whose range let the floor climb past the ceiling would push the ceiling up with it in
-	 W3DView::setDefaultView. */
-TEST(start_zoom_closer_zoom_and_drag_threshold_are_rows_that_change_nothing_until_asked)
+/* Two rows on the Controls page.  The camera's near and far limits are not among them: they are
+	 fixed in View.cpp and W3DView.cpp for everyone, because Options.ini is outside the mismatch
+	 check and the far one is how much of the map a player sees. */
+TEST(start_zoom_and_drag_threshold_are_rows_that_change_nothing_until_asked)
 {
-	const OptionDef *start = findOptionDef( "StartAtMaxZoom" );
-	const OptionDef *closer = findOptionDef( "CloserZoom" );
+	const OptionDef *start = findOptionDef( "OpenAtMaxZoom" );
 	const OptionDef *drag = findOptionDef( "DragTolerance" );
-	CHECK( start != NULL && closer != NULL && drag != NULL );
-	if( start == NULL || closer == NULL || drag == NULL )
+	CHECK( start != NULL && drag != NULL );
+	if( start == NULL || drag == NULL )
 		return;
 
 	CHECK_EQ( (Int)start->kind, (Int)OPTION_BOOL );
-	CHECK_EQ( (Int)closer->kind, (Int)OPTION_INT );
 	CHECK_EQ( (Int)drag->kind, (Int)OPTION_INT );
 	CHECK( strstr( start->widgetName, "CheckStartAtMaxZoom" ) != NULL );
-	CHECK( strstr( closer->widgetName, "SliderCloserZoom" ) != NULL );
 	CHECK( strstr( drag->widgetName, "SliderDragTolerance" ) != NULL );
 
 	GlobalData *saved = TheWritableGlobalData;
 	GlobalData *scratch = NEW GlobalData;
 	TheWritableGlobalData = scratch;
 
-	// an Options.ini with none of the three keys plays the way the last version did
-	CHECK_EQ( start->get(), 1 );
-	CHECK_EQ( closer->get(), 0 );
+	// an Options.ini with neither key opens close in and drags at Mouse.ini's tolerance
+	CHECK_EQ( start->get(), 0 );
 	CHECK_EQ( drag->get(), 25 );	// DragTolerance in INIZH.big's Mouse.ini
 	CHECK( drag->lo > 0 && drag->lo <= 25 && drag->hi >= 25 );
 
-	start->set( 0 );
-	CHECK_EQ( (Int)scratch->m_startAtMaxZoom, 0 );
+	start->set( 1 );
+	CHECK_EQ( (Int)scratch->m_startAtMaxZoom, 1 );
 	drag->set( 8 );
 	CHECK_EQ( scratch->m_dragTolerance, 8 );
-	closer->set( 40 );
-	CHECK_EQ( scratch->m_closerZoomPercent, 40 );
-
-	// the slider's left end is GameData.ini's own limit, and no position on it is above that
-	CHECK_EQ( closer->lo, 0 );
-	CHECK( closer->hi < 100 );
-	CHECK_NEAR( View_closestCameraHeight( 120.0f, closer->lo ), 120.0f, 0.001f );
-	CHECK_NEAR( View_closestCameraHeight( 120.0f, 60 ), 48.0f, 0.001f );
-	for( Int percent = closer->lo; percent <= closer->hi; ++percent )
-	{
-		const Real height = View_closestCameraHeight( 120.0f, percent );
-		CHECK( height > 0.0f && height <= 120.0f );
-	}
 
 	TheWritableGlobalData = saved;
 	delete scratch;
@@ -12900,6 +13243,42 @@ TEST(net_box_is_a_check_box_that_starts_on_under_its_own_key)
 
 	TheWritableGlobalData = saved;
 	delete scratch;
+}
+
+/* The console's "set" types a value rather than reading one back from Options.ini, so a typo has to
+	 be refused instead of turning a box off ("set ShowNetBox maybe" read leniently is "no") or being
+	 clamped into some other number. */
+TEST(console_set_parses_only_what_the_row_takes)
+{
+	const OptionDef *box = findOptionDef( "ShowNetBox" );
+	const OptionDef *drag = findOptionDef( "DragTolerance" );
+	CHECK( box != NULL && drag != NULL );
+	if( box == NULL || drag == NULL )
+		return;
+
+	Int value = -1;
+	CHECK( parseOptionText( *box, "no", &value ) && value == 0 );
+	CHECK( parseOptionText( *box, "ON", &value ) && value == 1 );
+	CHECK( parseOptionText( *box, "0", &value ) && value == 0 );
+	CHECK( parseOptionText( *box, "true", &value ) && value == 1 );
+	value = 7;
+	CHECK( !parseOptionText( *box, "maybe", &value ) );
+	CHECK( !parseOptionText( *box, "", &value ) );
+	CHECK( !parseOptionText( *box, "2", &value ) );
+	CHECK_EQ( value, 7 );
+
+	CHECK( parseOptionText( *drag, "2", &value ) && value == 2 );
+	CHECK( parseOptionText( *drag, "50", &value ) && value == 50 );
+	value = 7;
+	CHECK( !parseOptionText( *drag, "1", &value ) );
+	CHECK( !parseOptionText( *drag, "51", &value ) );
+	CHECK( !parseOptionText( *drag, "10px", &value ) );
+	CHECK( !parseOptionText( *drag, "", &value ) );
+	CHECK_EQ( value, 7 );
+
+	CHECK( formatOptionValue( *box, 0 ) == "no" );
+	CHECK( formatOptionValue( *drag, 12 ) == "12" );
+	CHECK( findOptionDef( "showsuperweaponstrip" ) != NULL );
 }
 
 /* The income beside the money, per second as it always was until the player picks otherwise.
@@ -12964,6 +13343,28 @@ TEST(build_plans_are_numbered_in_the_order_their_builder_takes_them)
 	CHECK_EQ( plans[ 2 ].step, 2 );
 	CHECK_EQ( (Int)plans[ 3 ].plan, 25 );
 	CHECK_EQ( plans[ 3 ].step, 3 );
+}
+
+TEST(an_order_ends_in_a_flag_on_ground_and_a_joint_on_a_target)
+{
+	// the last ground point of a move, an attack move, a shot at the ground or a guarded spot: flag
+	CHECK_EQ( (Int)InGameUI::markForOrderHint( InGameUI::ORDER_HINT_MOVE, FALSE, TRUE ), (Int)InGameUI::ORDER_MARK_FLAG );
+	CHECK_EQ( (Int)InGameUI::markForOrderHint( InGameUI::ORDER_HINT_ATTACK_MOVE, FALSE, TRUE ), (Int)InGameUI::ORDER_MARK_FLAG );
+	CHECK_EQ( (Int)InGameUI::markForOrderHint( InGameUI::ORDER_HINT_ATTACK_GROUND, FALSE, TRUE ), (Int)InGameUI::ORDER_MARK_FLAG );
+	CHECK_EQ( (Int)InGameUI::markForOrderHint( InGameUI::ORDER_HINT_GUARD, FALSE, TRUE ), (Int)InGameUI::ORDER_MARK_FLAG );
+
+	// a unit or building it is sent at: the joint, never a flag
+	CHECK_EQ( (Int)InGameUI::markForOrderHint( InGameUI::ORDER_HINT_ATTACK, TRUE, TRUE ), (Int)InGameUI::ORDER_MARK_JOINT );
+	CHECK_EQ( (Int)InGameUI::markForOrderHint( InGameUI::ORDER_HINT_ENTER, TRUE, TRUE ), (Int)InGameUI::ORDER_MARK_JOINT );
+	CHECK_EQ( (Int)InGameUI::markForOrderHint( InGameUI::ORDER_HINT_CAPTURE, TRUE, TRUE ), (Int)InGameUI::ORDER_MARK_JOINT );
+	CHECK_EQ( (Int)InGameUI::markForOrderHint( InGameUI::ORDER_HINT_GUARD, TRUE, TRUE ), (Int)InGameUI::ORDER_MARK_JOINT );
+
+	// a shift list's points short of the last: joints
+	CHECK_EQ( (Int)InGameUI::markForOrderHint( InGameUI::ORDER_HINT_MOVE, FALSE, FALSE ), (Int)InGameUI::ORDER_MARK_JOINT );
+
+	// an upgrade or ability bought where the step before ends draws nothing of its own
+	CHECK_EQ( (Int)InGameUI::markForOrderHint( InGameUI::ORDER_HINT_UPGRADE, FALSE, TRUE ), (Int)InGameUI::ORDER_MARK_NONE );
+	CHECK_EQ( (Int)InGameUI::markForOrderHint( InGameUI::ORDER_HINT_ABILITY, FALSE, FALSE ), (Int)InGameUI::ORDER_MARK_NONE );
 }
 
 TEST(empty_building_slots_are_a_check_box_that_starts_on)
@@ -14252,6 +14653,42 @@ TEST(the_bars_windows_can_be_torn_down_twice_without_taking_the_bar_with_them)
 	CHECK( bar.findCommandButton( AsciiString( "NoSuchCommandButton" ) ) == NULL );
 }
 
+/* CommandSetReforged.ini names EA's Early_Command_ChinaCarpetBomb in slot 2 of a China command center
+	 set.  Contra X Beta 2 has no such button, and CommandSet::parseCommandButton threw and stopped the
+	 game at start.  The slot is skipped now: it stays empty and the slots after it still parse. */
+TEST(command_set_slot_naming_an_unknown_button_is_skipped)
+{
+	CHECK( bootOnce() );
+
+	ControlBar bar;
+	ControlBar *savedBar = TheControlBar;
+	TheControlBar = &bar;
+
+	writeFile( TEST_INI,
+		"CommandButton ProbeButton\r\n"
+		"End\r\n"
+		"CommandSet ProbeCommandSet\r\n"
+		"  1 = ProbeButton\r\n"
+		"  2 = NoSuchCommandButton\r\n"
+		"  3 = ProbeButton\r\n"
+		"End\r\n" );
+	CHECK( loadIni( TEST_INI ) );
+
+	const CommandButton *probe = bar.findCommandButton( AsciiString( "ProbeButton" ) );
+	const CommandSet *set = bar.findCommandSet( AsciiString( "ProbeCommandSet" ) );
+	CHECK( probe != NULL );
+	CHECK( set != NULL );
+	if( set != NULL )
+	{
+		CHECK( set->getCommandButton( 0 ) == probe );
+		CHECK( set->getCommandButton( 1 ) == NULL );
+		CHECK( set->getCommandButton( 2 ) == probe );
+	}
+
+	remove( TEST_INI );
+	TheControlBar = savedBar;
+}
+
 /* ControlBarScheme.cpp: the scheme places the money readout, the two general's tabs and the toolbar
 	 column by reading their parent's screen position and subtracting it, and layoutPanels then runs
 	 over the answer.  Asking for the panels back is not the same as having them back - the slide is
@@ -14425,6 +14862,12 @@ TEST(four_finished_defenses_pay_for_each_superweapon)
 	// a Sneak Attack tunnel costs nothing and buys nothing; a Tunnel Network at 800 does
 	CHECK( !DefenseCountsForSuperweapons( 0 ) );
 	CHECK( DefenseCountsForSuperweapons( 800 ) );
+
+	// a Scud Storm's hole holds its storm until the rebuild stands, then the rebuild counts itself;
+	// a Stinger Site's hole holds nothing
+	CHECK( RebuildHoleHoldsSuperweapon( TRUE, FALSE ) );
+	CHECK( !RebuildHoleHoldsSuperweapon( TRUE, TRUE ) );
+	CHECK( !RebuildHoleHoldsSuperweapon( FALSE, FALSE ) );
 
 	// a silo whose missile is silenced sells China's upgrades and asks for no defences
 	CHECK( !SuperweaponNeedsDefenses( AsciiString( "ChinaNuclearMissileLauncher" ), FALSE, SUPERWEAPONS_NONE ) );
@@ -14832,6 +15275,27 @@ TEST(scenario_parses_the_order_lines)
 	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_SHIFTATTACK );
 	CHECK_STR( action.targetSelector.str(), "AmericaCommandCenter" );
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftattack 0 * 1", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 forceattack 0 AmericaVehicleSentryDrone 1 GLAVehicleTechnical*", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_FORCEATTACK );
+	CHECK_EQ( action.targetSlot, 1 );
+	CHECK_STR( action.targetSelector.str(), "GLAVehicleTechnical*" );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 forceattack 0 * 1", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
+
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "1400 weaponat 1 AmericaVehicleComanche 2050 3700", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_WEAPONAT );
+	CHECK_NEAR( action.at.x, 2050.0f, 0.01f );
+	CHECK_STR( action.name.str(), "tertiary" );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "1400 weaponat 1 * start0:100:0 primary", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_STR( action.name.str(), "primary" );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "1400 weaponat 1 * 2050 3700 quaternary", &action ), (Int)SCENARIO_PARSE_BAD_ACTION );
+
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "240 forceground 0 AmericaTankCrusader 980 3500", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_FORCEGROUND );
+	CHECK_NEAR( action.at.y, 3500.0f, 0.01f );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "240 respond 0 * start0:-120:0", &action ), (Int)SCENARIO_PARSE_OK );
+	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_RESPOND );
+	CHECK_EQ( action.atStart, 0 );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "240 respond 0 *", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
 
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "200 shiftpower 0 * 1 AmericaSupplyCenter SpecialAbilityBlackLotusCaptureBuilding",
 																					 &action ), (Int)SCENARIO_PARSE_OK );
@@ -15412,6 +15876,88 @@ TEST(html_template_fills_values_and_repeats_each)
 		"<ul><li class=\"t9\" data-each=\"players\"><li>&lt;b&gt;&amp;</li></li></ul>"
 		"lookedU" );
 	CHECK_STR( HtmlTemplate_expand( "a {{ open", values, lists, lookup ).c_str(), "a {{ open" );
+}
+
+// HtmlOverlay skips filling a page in again when HtmlTemplate_matches says it would come out as the
+// page it already has, so matches has to say exactly what expand() == old would: a changed value,
+// list entry or lookup answer, and an old page longer or shorter than the new one, all differ.
+TEST(html_template_matches_says_what_expand_would)
+{
+	const std::string page =
+		"<p class=\"{{option:A}}\">{{title}}</p>"
+		"<ul><li class=\"t{{team}}\" data-each=\"players\">{{name}}</li></ul>{{text:Label}}";
+
+	HtmlValues values;
+	values[ "option:A" ] = "on";
+	values[ "title" ] = "T&";
+	values[ "team" ] = "9";
+	HtmlLists lists;
+	HtmlValues player;
+	player[ "name" ] = "<b>";
+	lists[ "players" ].push_back( player );
+	player[ "name" ] = "Bo";
+	player[ "team" ] = "1";
+	lists[ "players" ].push_back( player );
+
+	std::string answer = "looked";
+	const HtmlLookup lookup = [ &answer ]( const std::string &name, std::string &value ) -> Bool
+	{
+		if( name != "text:Label" )
+			return FALSE;
+		value = answer;
+		return TRUE;
+	};
+
+	const std::string old = HtmlTemplate_expand( page, values, lists, lookup );
+	CHECK( HtmlTemplate_matches( page, values, lists, lookup, old ) );
+	CHECK( !HtmlTemplate_matches( page, values, lists, lookup, old + "x" ) );
+	CHECK( !HtmlTemplate_matches( page, values, lists, lookup, old.substr( 0, old.size() - 1 ) ) );
+	CHECK( !HtmlTemplate_matches( page, values, lists, lookup, std::string() ) );
+
+	HtmlValues changedValues = values;
+	changedValues[ "title" ] = "U&";
+	CHECK( !HtmlTemplate_matches( page, changedValues, lists, lookup, old ) );
+	// a value the page never names changes nothing
+	changedValues = values;
+	changedValues[ "unused" ] = "x";
+	CHECK( HtmlTemplate_matches( page, changedValues, lists, lookup, old ) );
+
+	HtmlLists changedLists = lists;
+	changedLists[ "players" ][ 1 ][ "name" ] = "Bob";
+	CHECK( !HtmlTemplate_matches( page, values, changedLists, lookup, old ) );
+	changedLists = lists;
+	changedLists[ "players" ].pop_back();
+	CHECK( !HtmlTemplate_matches( page, values, changedLists, lookup, old ) );
+
+	answer = "other";
+	CHECK( !HtmlTemplate_matches( page, values, lists, lookup, old ) );
+	answer = "looked";
+
+	// against expand itself, over values that shift lengths and escaping from case to case
+	const char *const pieces[] = { "", "a", "&", "<>", "<b>", "T&", "9", "\"'", "Bo", "on" };
+	const UnsignedInt count = (UnsignedInt)( sizeof( pieces ) / sizeof( pieces[ 0 ] ) );
+	UnsignedInt seed = 12345;
+	Int agreed = 0;
+	for( Int round = 0; round < 64; round++ )
+	{
+		HtmlValues tryValues = values;
+		HtmlLists tryLists = lists;
+		seed = seed * 1103515245u + 12345u;
+		const char *const piece = pieces[ ( seed >> 8 ) % count ];
+		switch( ( seed >> 16 ) % 5 )
+		{
+			case 0:	break;	// the inputs it was made from
+			case 1:	tryValues[ "title" ] = piece; break;
+			case 2:	tryValues[ "team" ] = piece; break;
+			case 3:	tryLists[ "players" ][ 0 ][ "name" ] = piece; break;
+			case 4:	tryLists[ "players" ][ 1 ][ "team" ] = piece; break;
+		}
+		const Bool same = HtmlTemplate_expand( page, tryValues, tryLists, lookup ) == old;
+		CHECK_EQ( HtmlTemplate_matches( page, tryValues, tryLists, lookup, old ), same );
+		agreed += same ? 1 : 0;
+	}
+	// both answers came up, so the loop is not checking one side only
+	CHECK( agreed > 0 && agreed < 64 );
 }
 
 // litehtml builds an element for every word and every white space character, so the page it is

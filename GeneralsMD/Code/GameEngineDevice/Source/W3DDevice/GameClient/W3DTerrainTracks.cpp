@@ -837,10 +837,17 @@ Try improving the fit to vertical surfaces like cliffs.
 	diffuseLight = REAL_TO_INT(shadeB) | (REAL_TO_INT(shadeG) << 8) | (REAL_TO_INT(shadeR) << 16);
 	Real numFadedEdges=m_maxTankTrackEdges-m_maxTankTrackOpaqueEdges;
 
-	//check if there is anything to draw and fill vertex buffer
-	if (m_edgesToFlush >= 2)
+	// Lock only the vertices this pass writes.  A whole-buffer lock is every track the detail level
+	// allows times every edge, and with Direct3D 11 its unlock copied all of it twice on every pass.
+	Int vertsToWrite = 0;
+	for (mod=m_usedModules; mod; mod=mod->m_nextSystem)
+		if (mod->m_activeEdgeCount >= 2 && mod->Is_Really_Visible())
+			vertsToWrite += mod->m_activeEdgeCount*2;
+
+	//check if there is anything to draw and fill vertex buffer (a zero-length lock means the whole buffer)
+	if (m_edgesToFlush >= 2 && vertsToWrite > 0)
 	{
-		DX8VertexBufferClass::WriteLockClass lockVtxBuffer(m_vertexBuffer);
+		DX8VertexBufferClass::AppendLockClass lockVtxBuffer(m_vertexBuffer, 0, vertsToWrite);
 		VertexFormatXYZDUV1 *verts = (VertexFormatXYZDUV1*)lockVtxBuffer.Get_Vertex_Array();
 
 		//

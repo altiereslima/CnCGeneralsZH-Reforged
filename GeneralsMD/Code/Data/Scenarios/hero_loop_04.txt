@@ -1,0 +1,73 @@
+# Hero loop 04: China from the south-west start against the GLA from the north-east
+# start on Flash Fire, meeting in the trees at 1351,1368, the midpoint of the two starts. Waves at
+# 420, 540, 660 and 800 keep it fed over frames 600 to 1019.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -particlecap 30000 -quickstart
+#     -noshellmap -observer -multiInstance -map "Maps\Flash Fire\Flash Fire.map"
+#     -autoskirmish 2 -takeover -side 0 FactionChina -side 1 FactionGLA -seed 7
+#     -scenario hero_loop_04 -cinema hero_loop_04 -video 600 1019 hero_loop_04 -maxframes 1040
+# --- buildings, at the starts, out of frame -------------------------------------------------------
+10    spawn  0  ChinaNuclearMissileLauncher     1   start0:0:-200
+10    spawn  0  ChinaCommandCenter              1   start0:240:60
+10    spawn  1  GLAScudStorm                    1   start1:0:200
+10    spawn  1  GLACommandCenter                1   start1:-260:0
+# --- China, from the south-west ------------------------------------------------------------------
+150   spawn  0  ChinaTankBattleMaster           20  1176 1030  36
+150   spawn  0  ChinaTankBattleMaster           20  1009 1202  36
+150   spawn  0  ChinaTankOverlord               8   1028 1054  50
+150   spawn  0  ChinaTankGattling               10  1195 882   36
+150   spawn  0  ChinaTankDragon                 8   861 1226   36
+150   spawn  0  ChinaVehicleInfernoCannon       6   1047 905   40
+150   spawn  0  ChinaVehicleNukeLauncher        3   880 1077   50
+150   spawn  0  ChinaInfantryRedguard           30  1260 944   14
+150   spawn  0  ChinaInfantryTankHunter         20  925 1288   14
+150   spawn  0  ChinaVehicleHelix               2   1028 1054  60
+150   spawn  0  ChinaJetMIG                     6   963 991    70
+# --- the GLA, from the north-east ----------------------------------------------------------------
+150   spawn  1  GLATankScorpion                 20  1692 1533  34
+150   spawn  1  GLATankScorpion                 20  1525 1705  34
+150   spawn  1  GLATankMarauder                 12  1673 1681  40
+150   spawn  1  GLAVehicleRocketBuggy           12  1840 1509  32
+150   spawn  1  GLAVehicleQuadCannon            8   1506 1853  36
+150   spawn  1  GLAVehicleToxinTruck            6   1821 1658  36
+150   spawn  1  GLAVehicleTechnical             10  1654 1830  30
+150   spawn  1  GLAVehicleBattleBus             4   1738 1744  40
+150   spawn  1  GLAInfantryRebel                30  1776 1447  14
+150   spawn  1  GLAInfantryTunnelDefender       24  1441 1791  14
+160   attackmove 0  *  1351 1368
+160   attackmove 1  *  1351 1368
+# --- waves ---------------------------------------------------------------------------------------
+420   spawn  0  ChinaTankBattleMaster           16  1028 1054  36
+420   spawn  0  ChinaInfantryRedguard           24  1195 882   14
+420   spawn  1  GLATankScorpion                 16  1673 1681  34
+420   spawn  1  GLAInfantryRebel                24  1840 1509  14
+430   attackmove 0  *  1351 1368
+430   attackmove 1  *  1351 1368
+540   spawn  0  ChinaTankOverlord               6   1028 1054  50
+540   spawn  1  GLATankMarauder                 10  1673 1681  40
+540   spawn  1  GLAVehicleRocketBuggy           8   1506 1853  32
+550   attackmove 0  *  1351 1368
+550   attackmove 1  *  1351 1368
+660   spawn  0  ChinaTankBattleMaster           16  1028 1054  36
+660   spawn  0  ChinaTankOverlord               4   944 1140   50
+660   spawn  0  ChinaInfantryRedguard           24  1195 882   14
+660   spawn  1  GLATankScorpion                 16  1673 1681  34
+660   spawn  1  GLATankMarauder                 6   1589 1767  40
+660   spawn  1  GLAInfantryRebel                24  1840 1509  14
+670   attackmove 0  *  1351 1368
+670   attackmove 1  *  1351 1368
+800   spawn  0  ChinaTankBattleMaster           16  1028 1054  36
+800   spawn  0  ChinaTankGattling               8   1195 882   36
+800   spawn  1  GLATankScorpion                 16  1673 1681  34
+800   spawn  1  GLAVehicleRocketBuggy           8   1506 1853  32
+810   attackmove 0  *  1351 1368
+810   attackmove 1  *  1351 1368
+# --- powers --------------------------------------------------------------------------------------
+330   power  0  ChinaCommandCenter    1351 1368  Early_SuperweaponChinaCarpetBomb
+400   power  1  GLACommandCenter      1300 1330  SuperweaponAnthraxBomb
+480   power  0  ChinaCommandCenter    1400 1410  Early_SuperweaponChinaCarpetBomb
+580   power  1  GLACommandCenter      1400 1330  SuperweaponAnthraxBomb
+640   power  1  GLAScudStorm          1330 1390
+700   power  0  ChinaNuclearMissileLauncher  1380 1350
+780   power  1  GLAScudStorm          1370 1340
+840   power  0  ChinaNuclearMissileLauncher  1320 1400

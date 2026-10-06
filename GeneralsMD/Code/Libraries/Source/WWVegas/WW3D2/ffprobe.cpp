@@ -96,12 +96,14 @@ bool CombinerShaders_Are_Enabled()
 	return _CombinerShadersEnabled;
 }
 
+bool FixedFunctionProbe_Samples_Draw()
+{
+	return _Enabled && _DrawsSeen++ % SAMPLE_STRIDE == 0;
+}
+
 void FixedFunctionProbe_Record(IDirect3DDevice9 * device)
 {
 	if (!_Enabled || device == NULL) {
-		return;
-	}
-	if (_DrawsSeen++ % SAMPLE_STRIDE != 0) {
 		return;
 	}
 	++_DrawsSampled;

@@ -31,8 +31,8 @@ argument, and Turkish writes a percentage as "%10", which is a directive.
     python gametext.py selfcheck
 
 round-trips synthetic strings through the writer and the parser, proves check catches a changed
-directive, and checks the tracked Turkish master: on its own always, and against the English when
-Run/EnglishZH.big is there.  Run by CTest as gametext_selfcheck.
+directive, and checks the tracked Turkish and German masters: on their own always, and against the
+English when Run/EnglishZH.big is there.  Run by CTest as gametext_selfcheck.
 """
 
 import argparse
@@ -48,7 +48,8 @@ import bigfile
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _CODE = os.path.dirname(_HERE)
 
-TURKISH_MASTER = os.path.join(_CODE, "Data", "Turkish", "Generals.str")
+MASTERS = [(language, os.path.join(_CODE, "Data", language, "Generals.str"))
+           for language in ("Turkish", "German")]
 PATCH_STRINGS = os.path.join(_CODE, "Data", "Patch.str")
 ENGLISH_ARCHIVE = os.path.join(_CODE, "..", "Run", "EnglishZH.big")
 
@@ -345,16 +346,16 @@ def selfcheck(_arguments):
     if check_translation([("GUI:Cost", "Bedel: %d")], english):
         problems.append("check refused a string whose directives are the English ones")
 
-    if not os.path.exists(TURKISH_MASTER):
-        problems.append("there is no %s" % TURKISH_MASTER)
+    reference = None
+    if os.path.exists(ENGLISH_ARCHIVE):
+        reference = english_entries(ENGLISH_ARCHIVE, [PATCH_STRINGS])
     else:
-        translated = parse_str(TURKISH_MASTER)
-        reference = None
-        if os.path.exists(ENGLISH_ARCHIVE):
-            reference = english_entries(ENGLISH_ARCHIVE, [PATCH_STRINGS])
+        print("gametext: no %s, so the masters are checked on their own" % ENGLISH_ARCHIVE)
+    for language, master in MASTERS:
+        if not os.path.exists(master):
+            problems.append("there is no %s" % master)
         else:
-            print("gametext: no %s, so the master is checked on its own" % ENGLISH_ARCHIVE)
-        problems.extend(report("Turkish", translated, reference))
+            problems.extend(report(language, parse_str(master), reference))
 
     for problem in problems:
         print("gametext: %s" % problem)

@@ -52,6 +52,7 @@
 #include "Common/AudioAffect.h"
 #include "Common/AudioEventInfo.h"
 #include "Common/AudioEventRTS.h"
+#include "Common/AudioHandleSpecialValues.h"
 #include "Common/AudioSettings.h"
 #include "Common/FileSystem.h"
 #include "Common/GameAudio.h"
@@ -166,6 +167,16 @@ public:
 		processRequestList();
 		processPlayingList();
 		processFadingList();
+	}
+	// Music streams still on the playing list at full voice: neither stopping nor fading out
+	int musicPlaying( void ) const
+	{
+		int n = 0;
+		for (std::list<PlayingAudio *>::const_iterator it = m_playingStreams.begin(); it != m_playingStreams.end(); ++it)
+			if (*it && !(*it)->m_fade && (*it)->m_status == PS_Playing
+					&& (*it)->m_audioEventRTS->getAudioEventInfo()->m_soundType == AT_Music)
+				++n;
+		return n;
 	}
 	void runFor( int ms, bool ticking = true )
 	{
@@ -493,6 +504,33 @@ TEST(music_plays_and_a_stop_brings_silence)
 	printf( "  music: %s, %s: level %.4f playing, %.4f after the stop\n", pick.name.str(), pick.file.str(), during, after );
 	CHECK( during > 0.001 );
 	CHECK( after < during * 0.05 );
+}
+
+TEST(two_track_changes_in_one_update_leave_one_track_playing)
+{
+	TestAudio *audio = theAudio();
+	const Pick pick = pickEvent( AT_Music, 0, 0, 10.0 );
+	CHECK( !pick.name.isEmpty() );
+	if (pick.name.isEmpty())
+		return;
+	play( pick );
+	audio->runFor( 200 );
+	CHECK_EQ( audio->musicPlaying(), 1 );
+	// doMusicTrackChange twice before the next update: the second stop used to find the faded track again
+	for (int i = 0; i < 2; ++i)
+	{
+		TheAudio->removeAudioEvent( AHSV_StopTheMusicFade );
+		play( pick );
+	}
+	audio->tick();
+	CHECK_EQ( audio->musicPlaying(), 1 );
+	// a track started with no stop in front of it replaces the one playing
+	play( pick );
+	audio->tick();
+	CHECK_EQ( audio->musicPlaying(), 1 );
+	TheAudio->removeAudioEvent( AHSV_StopTheMusic );
+	audio->runFor( 100 );
+	CHECK_EQ( audio->musicPlaying(), 0 );
 }
 
 TEST(with_sound_switched_off_nothing_is_heard)

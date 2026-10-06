@@ -66,6 +66,39 @@ Vector3 LightPosWorld[ MAX_SHADOW_LIGHTS ] =
 	Vector3( 94.0161f, 50.499f, 200.0f)
 };
 
+/** Whether anything a body casts can land in the view.  The body is its bounding sphere and its
+		shadow is that sphere swept down to groundZ, the lowest the shadow can land, moving runX, runY
+		sideways for every unit it drops: the sun's own slope, or whatever the caller's shadow is held
+		to.  Only the four sides of the view are tested, which is all a shadow lying on the ground
+		needs, and each on its own, so a capsule past a corner of the view can pass when it misses it:
+		the test can let in a caster that reaches nothing, never leave out one that does.  A caster
+		just off the edge of the screen whose shadow falls onto it passes, so its shadow does not go
+		out the moment its body leaves the frame. */
+Bool shadowCanReachView( const FrustumClass &view, const SphereClass &body, Real groundZ, Real runX, Real runY )
+{
+	const Real drop = WWMath::Max( body.Center.Z - groundZ + body.Radius, 0.0f );
+	const Vector3 downwind = body.Center + Vector3( runX, runY, -1.0f ) * drop;
+	for (Int side = 1; side <= 4; ++side)
+	{
+		const PlaneClass &plane = view.Planes[ side ];
+		if (Vector3::Dot_Product( plane.N, body.Center ) - plane.D > body.Radius
+				&& Vector3::Dot_Product( plane.N, downwind ) - plane.D > body.Radius)
+			return FALSE;
+	}
+	return TRUE;
+}
+
+/** The same for a stencil volume, which is pushed away from the light's position rather than along
+		one direction for the whole map: from a caster in the far corner the light stands some way off
+		the direction it has from the map's origin. */
+Bool volumeShadowCanReachView( const FrustumClass &view, const SphereClass &body, Real groundZ )
+{
+	const Vector3 toLight = TheW3DShadowManager->getLightPosWorld( 0 ) - body.Center;
+	if (toLight.Z <= 0.01f * toLight.Length())
+		return TRUE;	// a light at the horizon throws every shadow across the whole map
+	return shadowCanReachView( view, body, groundZ, -toLight.X / toLight.Z, -toLight.Y / toLight.Z );
+}
+
 DECLARE_PERF_TIMER(shadowsRender)
 void DoShadows(RenderInfoClass & rinfo, Bool stencilPass)
 {

@@ -1,0 +1,12 @@
+# Zero Hour Reforged trailer, beats 01 and 02 (HK_CLASSIC, HK_REFORGED): Scenarios/v240_hook.txt
+# on Fortress Avalanche, low and close from the west over the American line, held so the fight
+# crosses the frame. Run twice with the same switches, once with ClassicGraphics = yes in the
+# Options.ini of the run's ZH_USER_DATA_DIR, so the 2003 look and today's share every frame.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Fortress Avalanche\Fortress Avalanche.map" -autoskirmish 3
+#     -takeover -observer -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA -seed 7
+#     -scenario v240_hook -cinema rf_hook -video 780 1200 rf_hook -maxframes 1210
+
+3.0   cut     1000 2100 0.45 -135 14
+40.6  end

@@ -46,13 +46,7 @@ SimpleObjectIterator::ClumpCompareProc SimpleObjectIterator::theClumpCompareProc
 };
 
 //=============================================================================
-SimpleObjectIterator::Clump::Clump()
-{
-	m_nextClump = NULL;
-}
-
-//=============================================================================
-SimpleObjectIterator::Clump::~Clump()
+SimpleObjectIterator::PooledClump::~PooledClump()
 {
 }
 
@@ -62,6 +56,7 @@ SimpleObjectIterator::SimpleObjectIterator()
 	m_firstClump = NULL;
 	m_curClump = NULL;
 	m_clumpCount = 0;
+	m_inlineClumpsUsed = 0;
 }
 
 //=============================================================================
@@ -71,21 +66,31 @@ SimpleObjectIterator::~SimpleObjectIterator()
 }
 
 //=============================================================================
-/* Recycling these through a free list instead of the pool was tried and measured at nothing.
-
-	 A gathering range query keeps every object it finds in one of these and an eight-player match
-	 makes 111 such queries a logic frame, so this is thousands of pool allocations and frees a
-	 frame, every one of them taking the global memory lock that THREADING-ROADMAP section 1.1 is
-	 about. Recycling removes all of them, comes back bit-identical over four matches, and moves the
-	 mean logic frame from 1.24ms to 1.26 - which is to say it does nothing. The pool is a free list
-	 already and the lock is uncontended in a single-threaded logic frame, so the 16,523
-	 critical-section operations a frame are cheap operations. Worth knowing before anybody spends a
-	 fortnight on the allocator. */
+/* The first INLINE_CLUMPS objects a query finds go into the iterator's own array, and only the
+	 rest take a pool block each. A gathering range query used to allocate one per object found.
+	 On an eight-player match (111 such queries a logic frame) recycling them through a free list
+	 measured at nothing, 1.24ms to 1.26, since the pool is a free list already and its lock is
+	 uncontended. A dense fight of several hundred units makes far more of these queries, each one
+	 finding dozens of neighbours, and that is the case this array is for; its gain there has not
+	 been measured yet. Which slot a clump lives
+	 in never reaches the order: insert still pushes at the head and sort compares only m_numeric
+	 or the build cost, so the output is the same object sequence as before. */
 void SimpleObjectIterator::insert(Object *obj, Real numeric)
 {
 	DEBUG_ASSERTCRASH(obj, ("sorry, no nulls allowed here"));
 
-	Clump *clump = newInstance(Clump)();
+	Clump *clump;
+	if (m_inlineClumpsUsed < INLINE_CLUMPS)
+	{
+		clump = &m_inlineClumps[m_inlineClumpsUsed++];
+		clump->m_pooled = NULL;
+	}
+	else
+	{
+		PooledClump *pooled = newInstance(PooledClump);
+		clump = &pooled->m_clump;
+		clump->m_pooled = pooled;
+	}
 
 	clump->m_nextClump = m_firstClump;
 	m_firstClump = clump;
@@ -126,7 +131,8 @@ void SimpleObjectIterator::makeEmpty()
 	while (m_firstClump)
 	{
 		Clump *next = m_firstClump->m_nextClump;
-		m_firstClump->deleteInstance();
+		if (m_firstClump->m_pooled)
+			m_firstClump->m_pooled->deleteInstance();
 		m_firstClump = next;
 		--m_clumpCount;
 	}
@@ -135,6 +141,7 @@ void SimpleObjectIterator::makeEmpty()
 	m_firstClump = NULL;
 	m_curClump = NULL;
 	m_clumpCount = 0;
+	m_inlineClumpsUsed = 0;
 }
 
 //=============================================================================

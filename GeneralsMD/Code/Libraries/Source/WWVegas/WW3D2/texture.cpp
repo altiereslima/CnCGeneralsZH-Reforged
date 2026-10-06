@@ -121,8 +121,6 @@ TextureBaseClass::TextureBaseClass
 :	MipLevelCount(mip_level_count),
 	D3DTexture(NULL),
 	Initialized(false),
-	NormalMap(NULL),
-	NormalMapLooked(false),
    Name(""),
 	FullPath(""),
 	texture_id(unused_texture_id++),
@@ -161,7 +159,6 @@ TextureBaseClass::~TextureBaseClass(void)
 		D3DTexture->Release();
 		D3DTexture = NULL;
 	}
-	REF_PTR_RELEASE(NormalMap);
 
 	DX8TextureManagerClass::Remove(this);
 }
@@ -1012,83 +1009,7 @@ void TextureClass::Apply(unsigned int stage)
 		DX8Wrapper::Set_DX8_Texture(stage, NULL);
 	}
 
-	if (stage == 0 && Direct3D11_Normal_Maps_Active())
-	{
-		TextureClass * normal_map = Find_Normal_Map();
-		Direct3D11_Mirror_Normal_Map(normal_map != NULL ? normal_map->Peek_D3D_Base_Texture() : NULL);
-	}
-
 	Filter.Apply(stage);
-}
-
-void TextureClass::Set_Normal_Map(TextureClass * normal_map)
-{
-	REF_PTR_SET(NormalMap, normal_map);
-	NormalMapLooked = true;
-}
-
-bool Texture_Name_Is_Damage_State(const char * name)
-{
-	static const char STATE_LETTERS[] = "desgnr";
-	static const size_t LONGEST_STATE_TAG = 4;
-
-	const char * tag = strrchr(name, '_');
-	if (tag == NULL)
-	{
-		return false;
-	}
-	++tag;
-
-	size_t length = 0;
-	bool damaged = false;
-	for (; tag[length] != '\0' && tag[length] != '.'; ++length)
-	{
-		const char letter = (char)tolower((unsigned char)tag[length]);
-		if (strchr(STATE_LETTERS, letter) == NULL)
-		{
-			return false;
-		}
-		damaged = damaged || letter == 'd' || letter == 'e';
-	}
-	return damaged && length <= LONGEST_STATE_TAG;
-}
-
-TextureClass * TextureClass::Find_Normal_Map()
-{
-	static const char NORMAL_MAP_SUFFIX[] = "_nrm.dds";
-
-	// A damage state is a separate texture a quarter the size of the building's own, so its normal
-	// map spread a texel of relief over a whole panel: the damaged walls lit up as black and white
-	// marble.  It draws flat, as it did in 2003.
-	if (!NormalMapLooked && Texture_Name_Is_Damage_State(Get_Texture_Name()))
-	{
-		NormalMapLooked = true;
-	}
-
-	if (!NormalMapLooked)
-	{
-		NormalMapLooked = true;
-		char name[_MAX_PATH];
-		strncpy(name, Get_Texture_Name(), sizeof(name) - sizeof(NORMAL_MAP_SUFFIX));
-		name[sizeof(name) - sizeof(NORMAL_MAP_SUFFIX)] = '\0';
-		char * extension = strrchr(name, '.');
-		if (extension != NULL)
-		{
-			*extension = '\0';
-		}
-		strcat(name, NORMAL_MAP_SUFFIX);
-
-		file_auto_ptr file(_TheFileFactory, name);
-		if (file->Is_Available())
-		{
-			NormalMap = WW3DAssetManager::Get_Instance()->Get_Texture(name);
-		}
-	}
-	if (NormalMap != NULL && !NormalMap->Is_Initialized())
-	{
-		NormalMap->Init();
-	}
-	return NormalMap;
 }
 
 //**********************************************************************************************

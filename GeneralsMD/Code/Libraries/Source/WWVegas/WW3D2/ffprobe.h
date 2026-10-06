@@ -46,7 +46,11 @@ bool FixedFunctionProbe_Is_Enabled();
 void CombinerShaders_Enable(bool enabled);
 bool CombinerShaders_Are_Enabled();
 
-// One draw call's worth: reads the stage combiners and the pixel-affecting render states off the
+// Counts one draw and says whether it is one of the draws the probe reads, one in sixteen.  Asked
+// before Record so that a caller owing the device state sends it only for those.
+bool FixedFunctionProbe_Samples_Draw();
+
+// One sampled draw's worth: reads the stage combiners and the pixel-affecting render states off the
 // device and counts the combination.
 void FixedFunctionProbe_Record(IDirect3DDevice9 * device);
 

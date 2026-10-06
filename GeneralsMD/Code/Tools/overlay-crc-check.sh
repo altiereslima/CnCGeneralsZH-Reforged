@@ -37,7 +37,7 @@
 #     which runs through: its INI CRC must differ. That is the INI check being able to fail.
 #
 # The overlay is what ships (P1): Data/INI, Data/Patch.str, Data/Scripts, Data/Turkish,
-# Install_Final.bmp, Art/Textures and Window from Code/Data, and the fork's Reforged*.big from
+# Data/German, Install_Final.bmp, Art/Textures and Window from Code/Data, and the fork's Reforged*.big from
 # GeneralsMD/Run when vendor.sh has fetched them (linked, not copied: 1.65 GB). Both layouts get the
 # same files, so what differs is only where they sit.
 #

@@ -1,0 +1,46 @@
+# Does a defence fire at everything inside the reach ring it shows?
+#
+# Three human-owned defences, each with one enemy well inside what it can shoot and one further
+# out on the same line, inside the ring the build drew before the ring was cut down to the guns
+# that pick their own ground targets.  Nobody on slot 1 thinks (-takeover), so nothing moves.  The
+# inner target of each pair dies and the outer one is left whole: the outer ones stood in the old
+# ring and were never shot.
+#
+#   Patriot: old ring 485 from its centre (the assist weapon, which only fires when another
+#     Patriot asks), new ring 248 (the ground missile).  Humvee at 190, Troop Crawler at 380.
+#   Gattling Cannon: old ring 431 (the anti-air gun), new ring 248 (the ground gun).  Scud
+#     Launcher at 190, Dozer at 360.
+#   Fire Base: no shot under 50 from its edge, a shaded hole 87 from its centre.  Dozer at 70,
+#     Technical at 200.
+#
+# Measured 2026-10-05, before and after the ring change (the logic is the same in both): Humvee,
+# Scud Launcher and Technical dead; Troop Crawler and both Dozers whole.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Fortress Avalanche\Fortress Avalanche.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 1500
+#     -scenario defencereach -logPrefix defencereach_
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn      0  AmericaPowerPlant              1  1000 2700
+30    spawn      0  ChinaPowerPlant                1  1100 2700
+
+30    spawn      0  AmericaPatriotBattery          1  1000 2100
+30    spawn      1  AmericaVehicleHumvee           1  1190 2100
+30    spawn      1  ChinaVehicleTroopCrawler       1  1380 2100
+
+30    spawn      0  ChinaGattlingCannon            1  3250 1950
+30    spawn      1  GLAVehicleScudLauncher         1  3060 1950
+30    spawn      1  ChinaVehicleDozer              1  2890 1950
+
+30    spawn      0  AmericaFireBase                1  1000 1600
+30    spawn      1  AmericaVehicleDozer            1  1070 1600
+30    spawn      1  GLAVehicleTechnical            1  1200 1600
+
+1450  tally      1  AmericaVehicleHumvee
+1450  tally      1  ChinaVehicleTroopCrawler
+1450  tally      1  GLAVehicleScudLauncher
+1450  tally      1  ChinaVehicleDozer
+1450  tally      1  AmericaVehicleDozer
+1450  tally      1  GLAVehicleTechnical*

@@ -1,0 +1,21 @@
+# Scenarios/explreel.txt filmed in one -video run (command line in the scenario's header). Every
+# view the edit needs, in the order the scenario plays them: the War Factory falling, the tank fight
+# close, the Scud Storm landing on it, the nuke beside the base, the scorched ground after.
+
+0.5   cut     1150 3760 0.45 -45 8
+1.0   cut     1150 3760 0.45 -45 8
+2.0   zoom    0.38 9
+2.0   orbit   12 9
+
+11.2  cut     1460 3780 0.3 -45 14
+11.3  orbit   -15 4
+
+15.0  cut     1460 3790 0.62 -45 10
+15.1  zoom    0.55 5
+
+20.5  cut     1440 3560 0.85 -45 8
+21.0  zoom    0.75 9
+
+30.3  cut     1470 3620 0.75 -45 22
+30.4  orbit   15 2.5
+33.0  end

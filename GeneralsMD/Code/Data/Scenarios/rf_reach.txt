@@ -1,0 +1,17 @@
+# A selected Patriot battery's reach, shaded where buildings and the rock face hide the ground, for
+# the Reforged trailer (beat 20): reachshot.txt's battery in Alpine Assault's rail yard without its
+# grid of 120, with a war factory, a barracks and two power plants round it for the reach to be
+# blocked by. Seat 0 is the local player; the shoot script clicks the battery at the frame centre
+# over -control.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 1 -scenario rf_reach -cinema rf_reach
+#     -control 8814 -video 120 470 rf_reach
+#
+# The socket's "click 960 540" on frame 100 selects the battery.
+
+30    spawn      0  AmericaPatriotBattery  1    760 920
+30    spawn      0  AmericaWarFactory      1    880 990
+30    spawn      0  AmericaBarracks        1    650 1010
+30    spawn      0  AmericaPowerPlant      2    820 820  70

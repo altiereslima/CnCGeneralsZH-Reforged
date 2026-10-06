@@ -1,0 +1,12 @@
+# The nuke and the Scud Storm climbing out of the top of the picture, Scenarios/missileapex_film.txt
+# on Twilight Flame. One locked-off frame at full zoom-out (zoom 1 is where StartAtMaxZoom opens the
+# match, 992 over the ground at pitch 0's 37.5 degrees), looking south with both silos low in the
+# picture and both targets 600 further on, so each missile rises off the top edge and comes back down
+# into the frame. The frame does not move: the top edge is what the clip is about.
+#
+#   ...the scenario's switches... -cinema missileapex_film -video 100 540 missileapex_film -maxframes 550
+
+1.0   cut     2450 3557 1.0 180 0
+3.5   shot
+11.0  shot
+18.3  end

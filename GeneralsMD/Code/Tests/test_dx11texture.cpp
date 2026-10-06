@@ -396,3 +396,89 @@ TEST(dx11texture_a_repeated_sixteen_bit_copy_carries_only_what_changed)
 	source->Release();
 	texture->Release();
 }
+
+// The sixty-four pixels of an eight by eight texture, between them holding every value of every
+// channel of the format.
+static unsigned short every_channel_value(D3DFORMAT format, unsigned index)
+{
+	switch (format) {
+	case D3DFMT_A1R5G5B5:
+		return (unsigned short)((index >> 5) << 15 | ((index * 3) & 0x1f) << 10
+			| ((index + 7) & 0x1f) << 5 | (index & 0x1f));
+	case D3DFMT_R5G6B5:
+		return (unsigned short)(((index * 3) & 0x1f) << 11 | index << 5 | ((index + 7) & 0x1f));
+	default:
+		return (unsigned short)(((index * 5) & 0xf) << 12 | ((index * 3) & 0xf) << 8
+			| ((index + 7) & 0xf) << 4 | (index & 0xf));
+	}
+}
+
+// The widening as it was written before it became lookup tables: a divide per channel.
+static void widen_by_divide(D3DFORMAT format, unsigned pixel, unsigned char out[4])
+{
+	switch (format) {
+	case D3DFMT_A1R5G5B5:
+		out[0] = (unsigned char)((pixel & 0x1f) * 255 / 31);
+		out[1] = (unsigned char)(((pixel >> 5) & 0x1f) * 255 / 31);
+		out[2] = (unsigned char)(((pixel >> 10) & 0x1f) * 255 / 31);
+		out[3] = (unsigned char)(((pixel >> 15) & 0x01) * 255);
+		break;
+	case D3DFMT_R5G6B5:
+		out[0] = (unsigned char)((pixel & 0x1f) * 255 / 31);
+		out[1] = (unsigned char)(((pixel >> 5) & 0x3f) * 255 / 63);
+		out[2] = (unsigned char)(((pixel >> 11) & 0x1f) * 255 / 31);
+		out[3] = 0xff;
+		break;
+	default:
+		out[0] = (unsigned char)((pixel & 0x0f) * 255 / 15);
+		out[1] = (unsigned char)(((pixel >> 4) & 0x0f) * 255 / 15);
+		out[2] = (unsigned char)(((pixel >> 8) & 0x0f) * 255 / 15);
+		out[3] = (unsigned char)(((pixel >> 12) & 0x0f) * 255 / 15);
+		break;
+	}
+}
+
+TEST(dx11texture_sixteen_bit_formats_widen_as_the_divide_did)
+{
+	Direct3D9Fixture d3d9;
+	if (!d3d9.Create()) {
+		printf("skip: no Direct3D 9 device on this machine\n");
+		return;
+	}
+
+	DX11DeviceClass d3d11;
+	CHECK(d3d11.Create_Offscreen());
+
+	const D3DFORMAT formats[] = { D3DFMT_A1R5G5B5, D3DFMT_R5G6B5, D3DFMT_A4R4G4B4 };
+	for (unsigned f = 0; f < sizeof(formats) / sizeof(formats[0]); ++f) {
+		IDirect3DTexture9 * texture = NULL;
+		if (FAILED(d3d9.Get()->CreateTexture(TEXTURE_SIZE, TEXTURE_SIZE, ONE_LEVEL, 0, formats[f],
+				D3DPOOL_MANAGED, &texture, NULL))) {
+			printf("skip: no managed texture in format %u on this machine\n", (unsigned)formats[f]);
+			continue;
+		}
+
+		D3DLOCKED_RECT locked;
+		CHECK(SUCCEEDED(texture->LockRect(0, &locked, NULL, 0)));
+		for (unsigned row = 0; row < TEXTURE_SIZE; ++row) {
+			unsigned short * out = (unsigned short *)((unsigned char *)locked.pBits + row * locked.Pitch);
+			for (unsigned column = 0; column < TEXTURE_SIZE; ++column) {
+				out[column] = every_channel_value(formats[f], row * TEXTURE_SIZE + column);
+			}
+		}
+		texture->UnlockRect(0);
+
+		ID3D11ShaderResourceView * view =
+			DX11Texture_Mirror(d3d11.Get_Device(), d3d11.Get_Context(), texture);
+		CHECK(view != NULL);
+		unsigned char pixels[TEXTURE_SIZE * TEXTURE_SIZE * 4];
+		CHECK(read_back(d3d11, view, pixels, TEXTURE_SIZE * 4));
+		for (unsigned index = 0; index < TEXTURE_SIZE * TEXTURE_SIZE; ++index) {
+			unsigned char expected[4];
+			widen_by_divide(formats[f], every_channel_value(formats[f], index), expected);
+			CHECK_MEM(pixels + index * 4, expected, 4);
+		}
+
+		texture->Release();
+	}
+}

@@ -130,6 +130,16 @@ GameMessageDisposition HintSpyTranslator::translateGameMessage(const GameMessage
 			TheInGameUI->createGarrisonHint( msg );
 			break;
 
+		//-----------------------------------------------------------------------------
+		// Classic's ring where a move lands, EA's own; Reforged draws its order markers instead
+		case GameMessage::MSG_DO_MOVETO:
+		case GameMessage::MSG_DO_ATTACKMOVETO:
+		case GameMessage::MSG_DO_FORCEMOVETO:
+		case GameMessage::MSG_ADD_WAYPOINT:
+			if( TheGlobalData->isClassicUI() )
+				TheInGameUI->createMoveHint( msg );
+			break;
+
 	}	
 	return disp;
 }

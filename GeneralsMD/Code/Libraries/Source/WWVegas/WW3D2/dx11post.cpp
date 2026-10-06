@@ -247,12 +247,17 @@ static const char * const SHARPEN_SHADER_BODY =
 	"{\n"
 	"    float2 texel = TexelSize.xy;\n"
 	"    float4 centre = Source.Sample(Sampler, input.Texture);\n"
-	"    float3 neighbours = Source.Sample(Sampler, input.Texture + float2(-texel.x, 0.0)).rgb\n"
-	"        + Source.Sample(Sampler, input.Texture + float2(texel.x, 0.0)).rgb\n"
-	"        + Source.Sample(Sampler, input.Texture + float2(0.0, -texel.y)).rgb\n"
-	"        + Source.Sample(Sampler, input.Texture + float2(0.0, texel.y)).rgb;\n"
+	"    float3 left = Source.Sample(Sampler, input.Texture + float2(-texel.x, 0.0)).rgb;\n"
+	"    float3 right = Source.Sample(Sampler, input.Texture + float2(texel.x, 0.0)).rgb;\n"
+	"    float3 up = Source.Sample(Sampler, input.Texture + float2(0.0, -texel.y)).rgb;\n"
+	"    float3 down = Source.Sample(Sampler, input.Texture + float2(0.0, texel.y)).rgb;\n"
+	"    float3 neighbours = left + right + up + down;\n"
 	"    float3 sharpened = centre.rgb + (centre.rgb - neighbours * 0.25) * SHARPEN_AMOUNT;\n"
-	"    return float4(saturate(sharpened), centre.a);\n"
+	"    // never past the brightest or the darkest of the five: overshooting them drew a white rim\n"
+	"    // around every dark wreck inside a nuke's white cloud\n"
+	"    float3 lowest = min(centre.rgb, min(min(left, right), min(up, down)));\n"
+	"    float3 highest = max(centre.rgb, max(max(left, right), max(up, down)));\n"
+	"    return float4(clamp(sharpened, lowest, highest), centre.a);\n"
 	"}\n";
 
 // Ambient occlusion out of the frame's own depth, and nothing else.  Every pixel asks a ring of
@@ -295,6 +300,13 @@ static const char * const AO_SHADER_BODY =
 	"        occlusion += (nearer > 0.05 && nearer < radius) ? (1.0 - nearer / radius) : 0.0;\n"
 	"    }\n"
 	"    occlusion /= (float)AO_TAPS;\n"
+	"    // Light does not take a corner's shade.  Fire, glow and a nuke's cloud write no depth, so\n"
+	"    // the depth here is the ground and the wrecks behind them, and darkened by it a white cloud\n"
+	"    // showed every tree and wreck under it as a grey line drawing.  Keyed on the dimmest\n"
+	"    // channel: a white cloud has all three high, sunlit sand and concrete keep a low blue and\n"
+	"    // keep their corners.\n"
+	"    float bright = min(scene.r, min(scene.g, scene.b));\n"
+	"    occlusion *= 1.0 - smoothstep(0.7, 0.95, bright);\n"
 	"    return float4(scene * (1.0 - saturate(occlusion) * AO_STRENGTH), 1.0);\n"
 	"}\n";
 

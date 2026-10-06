@@ -1,0 +1,7 @@
+# Vehicle headlights on Dark Night, the camera for Scenarios/headlights.txt: the village square
+# from the south-west, the column of lit vehicles left of the tall tower with the paving in front of
+# them.  The cut is repeated because one at the start of a match does not always hold.  Shot at
+# frame 420 with -screenshot, and the frame-time runs keep it for 1200 frames.
+0.5   cut   1820 1740 0.9 45 14
+1.0   cut   1820 1740 0.9 45 14
+5.0   cut   1820 1740 0.9 45 14

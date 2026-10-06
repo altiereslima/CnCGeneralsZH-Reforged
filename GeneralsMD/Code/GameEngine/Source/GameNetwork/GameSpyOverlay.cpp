@@ -33,6 +33,7 @@
 #include "GameClient/GameText.h"
 #include "GameClient/MessageBox.h"
 #include "GameClient/ShellHooks.h"
+#include "GameClient/Shell.h"
 //#include "GameNetwork/GameSpy.h"
 //#include "GameNetwork/GameSpyGP.h"
 
@@ -223,7 +224,8 @@ void GameSpyOpenOverlay( GSOverlayType overlay )
 	}
 	else
 	{
-		overlayLayouts[overlay] = TheWindowManager->winCreateLayout( AsciiString( gsOverlays[overlay] ) );
+		overlayLayouts[overlay] = TheWindowManager->winCreateLayout( AsciiString(
+			overlay == GSOVERLAY_OPTIONS ? Shell::optionsLayoutFile() : gsOverlays[overlay] ) );
 		overlayLayouts[overlay]->runInit();
 		overlayLayouts[overlay]->hide( FALSE );
 		overlayLayouts[overlay]->bringForward();

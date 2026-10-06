@@ -15,7 +15,7 @@
                            {{peace.time}} m:ss, empty for the last ten seconds, which the game
                            counts out under the plate
     {{selinfo.x}} .y .w .h the column beside a lone unit's portrait, {{selinfo.shown}} the same;
-                           {{sel.health}} "820/1000", {{sel.healthw}} the bar's lit length out of
+                           {{sel.health}} "820/1000", "82%" for an enemy's, {{sel.healthw}} the bar's lit length out of
                            selinfo.w, {{sel.healthstate}} "green", "yellow" or "red", and
                            {{sel.healthshown}} "hidden" for an enemy in disguise
   In the page's pixels, laid out at ControlBarHudScale() as the bar's page is.
@@ -39,11 +39,12 @@
      well */
   .peace { text-align: center; font-size: 11px; font-weight: bold; color: #ff3030; white-space: nowrap; }
 
-  /* the health over ControlBar.html's groove, which stands at the same place */
-  .fill { position: absolute; left: 0; top: 40px; height: 8px; background-color: #3fbf3f; }
+  /* the health over ControlBar.html's groove, which stands at the same place, and its figure on the
+     line under it, whose right hand end holds that page's veterancy stars */
+  .fill { position: absolute; left: 0; top: 23px; height: 4px; background-color: #3fbf3f; }
   .fill.yellow { background-color: #e8c83a; }
   .fill.red { background-color: #d8402a; }
-  .figure { position: absolute; left: 0; top: 52px; height: 10px; line-height: 10px; color: #c9d2d9; }
+  .figure { position: absolute; left: 0; top: 29px; height: 9px; line-height: 9px; color: #c9d2d9; }
 </style>
 </head>
 <body>

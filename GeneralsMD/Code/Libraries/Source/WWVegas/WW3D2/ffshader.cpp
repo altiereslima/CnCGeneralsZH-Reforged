@@ -233,57 +233,6 @@ static bool alpha_test_expression(FixedFunctionValue function, std::string & exp
 	}
 }
 
-// The vertex colour lit again with the normal the map gives, written over input.Diffuse before the
-// stages read it, and the highlight the stages add afterwards.  The map carries no tangents and
-// the game's meshes have none either, so the frame is rebuilt per pixel from how the position and
-// the coordinate change across the screen: a tangent is whichever way u grows and a bitangent
-// whichever way v grows, which is the convention the maps are written in and which holds on a
-// mirrored island too.  The light directions are the way the light travels, in camera space.
-static void append_normal_mapped_lighting(std::string & hlsl, unsigned coordinate_set)
-{
-	char line[2048];
-	snprintf(line, sizeof(line),
-		"    float3 surface_normal = normalize(input.ViewNormal);\n"
-		"    float3 position_dx = ddx(input.ViewPosition);\n"
-		"    float3 position_dy = ddy(input.ViewPosition);\n"
-		"    float2 coordinate_dx = ddx(input.TexCoord%u);\n"
-		"    float2 coordinate_dy = ddy(input.TexCoord%u);\n"
-		"    float3 across_dy = cross(position_dy, surface_normal);\n"
-		"    float3 across_dx = cross(surface_normal, position_dx);\n"
-		"    float3 tangent = across_dy * coordinate_dx.x + across_dx * coordinate_dy.x;\n"
-		"    float3 bitangent = across_dy * coordinate_dx.y + across_dx * coordinate_dy.y;\n"
-		"    float frame_scale = rsqrt(max(max(dot(tangent, tangent), dot(bitangent, bitangent)), 1e-20));\n"
-		"    float4 normal_texel = NormalMap.Sample(Sampler0, input.TexCoord%u);\n"
-		"    float3 bump = normal_texel.xyz * 2.0 - 1.0;\n"
-		"    bump.xy *= NormalMapParameters.x;\n"
-		"    float3 bumped = normalize((tangent * bump.x + bitangent * bump.y) * frame_scale"
-		" + surface_normal * bump.z);\n"
-		"    float3 to_eye = normalize(-input.ViewPosition);\n"
-		"    float3 bumped_light = float3(0.0, 0.0, 0.0);\n"
-		"    float3 highlight = float3(0.0, 0.0, 0.0);\n"
-		"    for (int light = 0; light < %u; ++light) {\n"
-		"        float3 to_light = -NormalLightDirection[light].xyz;\n"
-		"        bumped_light += NormalLightDiffuse[light].rgb * saturate(dot(bumped, to_light));\n"
-		"        highlight += NormalLightDiffuse[light].rgb"
-		" * pow(saturate(dot(bumped, normalize(to_light + to_eye))), NormalMapParameters.y);\n"
-		"    }\n"
-		"    highlight *= normal_texel.a * NormalMapParameters.z;\n"
-		/* What makes metal read as metal from a camera this far out is not the sun's own dot on it,
-			 which is one small spot, but the sky it mirrors over its whole flank.  There is no cubemap
-			 here and none is needed: the sky over this game is a gradient and a sun, so the mirrored
-			 direction is turned into a colour rather than looked up.  Sky.rgb is the map's own light,
-			 Sky.a how much of it metal returns, and the share grows towards the grazing angles where a
-			 real surface turns into a mirror.  The gloss map gates it, so cloth and sand get none. */
-		"    float3 mirrored = reflect(-to_eye, bumped);\n"
-		"    float sky_height = saturate(dot(mirrored, SkyUp.xyz) * 0.5 + 0.5);\n"
-		"    float3 sky = lerp(Sky.rgb * SkyUp.w, Sky.rgb, sky_height);\n"
-		"    float grazing = pow(1.0 - saturate(dot(bumped, to_eye)), 4.0);\n"
-		"    highlight += sky * Sky.a * normal_texel.a * (0.3 + 0.7 * grazing);\n"
-		"    input.Diffuse.rgb = saturate(input.LitMaterial * bumped_light + input.LitBase);\n",
-		coordinate_set, coordinate_set, coordinate_set, NORMAL_MAPPED_LIGHTS);
-	hlsl += line;
-}
-
 static bool generate_combiners(const CombinerDescription & description,
 	CombinerShaderTarget target, std::string & hlsl, bool volumetric);
 
@@ -303,12 +252,11 @@ bool CombinerShader_Generate(const CombinerDescription & description, CombinerSh
 static bool generate_combiners(const CombinerDescription & description,
 	CombinerShaderTarget target, std::string & hlsl, bool volumetric)
 {
+	// The soft particles ride on the Direct3D 11 text for the smoke's reason: the SDL3 backend binds
+	// nothing at t7 and uploads nothing past SkyUp.
+	const bool soft = volumetric && description.SoftParticle != SOFT_PARTICLE_NONE;
 	volumetric = volumetric && description.ShadowReceiving;
 	if (description.StageCount == 0 || description.StageCount > MAXIMUM_COMBINER_STAGES) {
-		return false;
-	}
-	if (description.NormalMapped
-		&& (target != COMBINER_SHADER_TARGET_D3D11 || !description.Stages[0].TextureBound)) {
 		return false;
 	}
 
@@ -408,10 +356,11 @@ static bool generate_combiners(const CombinerDescription & description,
 			"    float4 FogColour;\n"
 			"    float4 AlphaReference;\n";
 		// A shader declares a prefix of the block the backend uploads, so a field is found by what
-		// comes before it and not by its name.  The shadow fields sit behind the normal mapped ones
-		// and the terrain's sun, so a program that reads them has to declare those too, used or
-		// not: without them a shadow matrix lands where the first light's direction is.
-		if (description.NormalMapped || description.ShadowReceiving) {
+		// comes before it and not by its name.  The shadow fields sit behind the old normal mapped
+		// ones and the terrain's sun, so a program that reads them has to declare those too, unused:
+		// without them a shadow matrix lands where the first light's direction is.  A soft particle's
+		// field closes the block, so a program that fades declares all of it.
+		if (description.ShadowReceiving || soft) {
 			char line[256];
 			snprintf(line, sizeof(line),
 				"    float4 NormalLightDirection[%u];\n"
@@ -419,8 +368,6 @@ static bool generate_combiners(const CombinerDescription & description,
 				"    float4 NormalMapParameters;\n",
 				NORMAL_MAPPED_LIGHTS, NORMAL_MAPPED_LIGHTS);
 			hlsl += line;
-		}
-		if (description.NormalMapped || description.ShadowReceiving) {
 			hlsl +=
 				"    float4 TerrainSunDirection;\n"
 				// row_major for the reason the vertex half gives: every matrix the engine has is a
@@ -434,18 +381,18 @@ static bool generate_combiners(const CombinerDescription & description,
 				"    float4 Sky;\n"
 				"    float4 SkyUp;\n";
 		}
-		if (volumetric) {
+		if (volumetric || soft) {
 			hlsl += VOLUMETRIC_CONSTANTS;
 		}
 		hlsl += "};\n";
-		if (description.NormalMapped) {
-			hlsl += "Texture2D NormalMap : register(t4);\n";
-		}
 		if (description.ShadowReceiving) {
 			hlsl += SHADOW_SAMPLING;
 		}
 		if (volumetric) {
 			hlsl += VOLUMETRIC_SAMPLING;
+		}
+		if (soft) {
+			hlsl += SOFT_PARTICLE_SAMPLING;
 		}
 	}
 	else {
@@ -483,9 +430,6 @@ static bool generate_combiners(const CombinerDescription & description,
 	if (target == COMBINER_SHADER_TARGET_D3D11) {
 		hlsl += "    float Fog        : FOG;\n";
 	}
-	if (description.NormalMapped) {
-		hlsl += NORMAL_MAPPED_VARYINGS;
-	}
 	hlsl +=
 		"};\n"
 		"\n";
@@ -495,16 +439,9 @@ static bool generate_combiners(const CombinerDescription & description,
 	hlsl +=
 		"{\n"
 		"    float4 texel;\n";
-	if (description.NormalMapped) {
-		append_normal_mapped_lighting(hlsl,
-			stage_register(target, 0, description.Stages[0].TextureCoordinateIndex));
-	}
 	hlsl += "    float4 current = input.Diffuse;\n";
 	hlsl += body;
-	if (description.NormalMapped) {
-		hlsl += "    current.rgb = saturate(current.rgb + highlight);\n";
-	}
-	else if (description.SpecularAdd && !description.SmokeGlow) {
+	if (description.SpecularAdd && !description.SmokeGlow) {
 		// Before the fog and the alpha test, as D3D9 orders them; the alpha is the stages'.
 		hlsl += "    current.rgb = saturate(current.rgb + input.Specular.rgb);\n";
 	}
@@ -522,6 +459,14 @@ static bool generate_combiners(const CombinerDescription & description,
 	if (target == COMBINER_SHADER_TARGET_D3D11
 		&& !CombinerShader_Append_Pixel_Pipeline(description.PixelPipeline, hlsl)) {
 		return false;
+	}
+
+	// After the alpha test: faded before it, a sprite's edge against the ground would be clipped to
+	// a hard line again, only a little further out.
+	if (soft) {
+		hlsl += (description.SoftParticle == SOFT_PARTICLE_COLOUR)
+			? "    current *= soft_particle_fade(input.Position);\n"
+			: "    current.a *= soft_particle_fade(input.Position);\n";
 	}
 
 	hlsl +=
@@ -589,9 +534,6 @@ std::string CombinerShader_Key(const CombinerDescription & description)
 	// both, which costs a D3D9 cache entry that generates the same text as another and buys one
 	// cache that is right for either profile.
 	key += CombinerShader_Pipeline_Key(description.PixelPipeline);
-	if (description.NormalMapped) {
-		key += ":N";
-	}
 	if (description.ShadowReceiving) {
 		key += ":S";
 	}
@@ -600,6 +542,10 @@ std::string CombinerShader_Key(const CombinerDescription & description)
 	}
 	if (description.SmokeGlow) {
 		key += ":G";
+	}
+	if (description.SoftParticle != SOFT_PARTICLE_NONE) {
+		snprintf(field, sizeof(field), ":Z%u", description.SoftParticle);
+		key += field;
 	}
 	return key;
 }

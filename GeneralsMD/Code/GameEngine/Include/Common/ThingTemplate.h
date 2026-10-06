@@ -412,6 +412,8 @@ public:
 	{
 		return TEST_KINDOFMASK_ANY(m_kindof, anyKindOf);
 	}
+
+	inline const KindOfMaskType& getKindOfMask() const { return m_kindof; }
 	
 	/// set the display name
 	const UnicodeString& getDisplayName() const { return m_displayName; }  ///< return display name
@@ -790,6 +792,7 @@ private:
 	Byte					m_shadowType;								///< settings which determine the type of shadow rendered
 	Byte					m_moduleParsingMode;
 	Byte					m_locomotorSetsLostToReplace;	///< port defect 33: locomotor sets a ReplaceModule of the AI module discarded (0: none); see ThingFactory's checkLocomotors
+	Byte					m_replaceModuleSkipped;				///< set by parseModuleName when a ReplaceModule block names a module of another type; parseReplaceModule then undoes the block
 	UnsignedByte	m_crusherLevel;							///< crusher > crushable level to actually crush
 	UnsignedByte	m_crushableLevel;						///< Specifies the level of crushability (must be hit by a crusher greater than this to crush me).
 

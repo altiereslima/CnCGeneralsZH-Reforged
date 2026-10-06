@@ -597,9 +597,16 @@ void ThingTemplate::parseModuleName(INI* ini, void *instance, void* store, const
 			&& self->m_moduleBeingReplacedName.isNotEmpty()
 			&& self->m_moduleBeingReplacedName != tokenStr)
 	{
-		DEBUG_CRASH(("[LINE: %d - FILE: '%s'] ReplaceModule must replace modules with another module of the same type, but you are attempting to replace a %s with a %s for Object %s.\n",
-			ini->getLineNum(), ini->getFilename().str(), self->m_moduleBeingReplacedName.str(), tokenStr.str(), self->getName().str()));
-		throw INI_INVALID_DATA;
+		/* A tag that holds a module of another type means a mod's data numbered the object's modules
+			 differently: Shockwave's Tank_ChinaBunker ModuleTag_05 is no StructureBody, and BalanceReforged.ini's
+			 replacement of it stopped the game at start.  The module is read to its End and dropped, so the
+			 parse stays in step, and parseReplaceModule puts the template back as it was before the block. */
+		DEBUG_LOG(("[LINE: %d - FILE: '%s'] ReplaceModule %s on %s holds a %s, not a %s; the block is skipped.\n",
+			ini->getLineNum(), ini->getFilename().str(), self->m_moduleBeingReplacedTag.str(), self->getName().str(),
+			self->m_moduleBeingReplacedName.str(), tokenStr.str()));
+		TheModuleFactory->newModuleDataFromINI(ini, tokenStr, type, moduleTagStr);
+		self->m_replaceModuleSkipped = TRUE;
+		return;
 	}
 
 	if (self->m_moduleParsingMode == MODULEPARSE_ADD_REMOVE_REPLACE 
@@ -810,6 +817,12 @@ void ThingTemplate::parseReplaceModule(INI *ini, void *instance, void *store, co
 	const AIUpdateModuleData *aiBefore = self->friend_getAIModuleInfo();
 	const LocomotorTemplateMap locomotorsBefore = aiBefore ? aiBefore->m_locomotorTemplates : LocomotorTemplateMap();
 
+	// What the block may have to be undone to: parseModuleName skips a replacement of another type.
+	const ModuleInfo behaviorBefore = self->m_behaviorModuleInfo;
+	const ModuleInfo drawBefore = self->m_drawModuleInfo;
+	const ModuleInfo clientUpdateBefore = self->m_clientUpdateModuleInfo;
+	self->m_replaceModuleSkipped = FALSE;
+
 	const char *modToRemove = ini->getNextToken();
 	AsciiString removedModuleName;
 	/* Port defect 33's guard: the sets the replaced AI module had are counted here, and ThingFactory's
@@ -833,13 +846,23 @@ void ThingTemplate::parseReplaceModule(INI *ini, void *instance, void *store, co
 	self->m_moduleBeingReplacedTag = modToRemove;
 	ini->initFromINI(self, self->getFieldParse());
 
-	AIUpdateModuleData *aiAfter = self->friend_getAIModuleInfo();
-	if (replacesAIModule && aiAfter != NULL && aiAfter->m_locomotorTemplates.empty())
-		aiAfter->m_locomotorTemplates = locomotorsBefore;
 	self->m_moduleBeingReplacedName.clear();
 	self->m_moduleBeingReplacedTag.clear();
-	if (replacesAIModule && setsBefore > 0)
-		self->m_locomotorSetsLostToReplace = (Byte)(setsBefore > 127 ? 127 : setsBefore);
+	if (self->m_replaceModuleSkipped)
+	{
+		self->m_behaviorModuleInfo = behaviorBefore;
+		self->m_drawModuleInfo = drawBefore;
+		self->m_clientUpdateModuleInfo = clientUpdateBefore;
+		self->m_replaceModuleSkipped = FALSE;
+	}
+	else
+	{
+		AIUpdateModuleData *aiAfter = self->friend_getAIModuleInfo();
+		if (replacesAIModule && aiAfter != NULL && aiAfter->m_locomotorTemplates.empty())
+			aiAfter->m_locomotorTemplates = locomotorsBefore;
+		if (replacesAIModule && setsBefore > 0)
+			self->m_locomotorSetsLostToReplace = (Byte)(setsBefore > 127 ? 127 : setsBefore);
+	}
 
 	self->m_moduleParsingMode = oldMode;
 }
@@ -1050,6 +1073,7 @@ ThingTemplate::ThingTemplate() :
 {
 	m_moduleParsingMode = MODULEPARSE_NORMAL;
 	m_locomotorSetsLostToReplace = 0;
+	m_replaceModuleSkipped = FALSE;
 	m_reskinnedFrom = NULL;
 	m_radarPriority = RADAR_PRIORITY_INVALID;
 

@@ -1,0 +1,68 @@
+# Hero loop 05: the GLA from the south-west start against the Tank General from the
+# north-east start on Dust Devil, meeting at the oil derricks at 1207,1212, the midpoint of the two
+# starts. Waves at 420, 540, 660 and 800 keep it fed over frames 600 to 1019.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -particlecap 30000 -quickstart
+#     -noshellmap -observer -multiInstance -map "Maps\Dust Devil\Dust Devil.map"
+#     -autoskirmish 2 -takeover -side 0 FactionGLA -side 1 FactionChinaTankGeneral -seed 7
+#     -scenario hero_loop_05 -cinema hero_loop_05 -video 600 1019 hero_loop_05 -maxframes 1040
+# --- buildings, at the starts, out of frame -------------------------------------------------------
+10    spawn  0  GLAScudStorm                    1   start0:0:-200
+10    spawn  0  GLACommandCenter                1   start0:240:60
+10    spawn  1  Tank_ChinaNuclearMissileLauncher 1  start1:0:200
+10    spawn  1  Tank_ChinaCommandCenter         1   start1:-260:60
+# --- the GLA, from the south-west ----------------------------------------------------------------
+150   spawn  0  GLATankScorpion                 20  1058 862   34
+150   spawn  0  GLATankScorpion                 20  878 1022   34
+150   spawn  0  GLATankMarauder                 12  908 875    40
+150   spawn  0  GLAVehicleRocketBuggy           12  1088 716   32
+150   spawn  0  GLAVehicleQuadCannon            8   728 1034   36
+150   spawn  0  GLAVehicleToxinTruck            6   938 728    36
+150   spawn  0  GLAVehicleTechnical             10  759 887    30
+150   spawn  0  GLAVehicleBattleBus             4   848 807    40
+150   spawn  0  GLAInfantryRebel                30  1147 783   14
+150   spawn  0  GLAInfantryTunnelDefender       24  788 1101   14
+# --- the Tank General, from the north-east -------------------------------------------------------
+150   spawn  1  Tank_ChinaTankEmperor           12  1505 1548  50
+150   spawn  1  Tank_ChinaTankBattleMaster      20  1535 1401  36
+150   spawn  1  Tank_ChinaTankBattleMaster      20  1355 1561  36
+150   spawn  1  Tank_ChinaTankGattling          10  1685 1389  36
+150   spawn  1  Tank_ChinaTankDragon            8   1325 1707  36
+150   spawn  1  Tank_ChinaInfantryRedguard      30  1625 1322  14
+150   spawn  1  Tank_ChinaInfantryTankHunter    20  1266 1640  14
+150   spawn  1  Tank_ChinaVehicleHelix          2   1505 1548  60
+150   spawn  1  Tank_ChinaJetMIG                6   1565 1616  70
+160   attackmove 0  *  1207 1212
+160   attackmove 1  *  1207 1212
+# --- waves ---------------------------------------------------------------------------------------
+420   spawn  0  GLATankScorpion                 16  908 875    34
+420   spawn  0  GLAInfantryRebel                24  1088 716   14
+420   spawn  1  Tank_ChinaTankBattleMaster      16  1505 1548  36
+420   spawn  1  Tank_ChinaInfantryRedguard      24  1685 1389  14
+430   attackmove 0  *  1207 1212
+430   attackmove 1  *  1207 1212
+540   spawn  0  GLATankMarauder                 10  908 875    40
+540   spawn  0  GLAVehicleRocketBuggy           8   728 1034   32
+540   spawn  1  Tank_ChinaTankEmperor           8   1505 1548  50
+550   attackmove 0  *  1207 1212
+550   attackmove 1  *  1207 1212
+660   spawn  0  GLATankScorpion                 16  908 875    34
+660   spawn  0  GLATankMarauder                 6   818 954    40
+660   spawn  0  GLAInfantryRebel                24  1088 716   14
+660   spawn  1  Tank_ChinaTankBattleMaster      16  1505 1548  36
+660   spawn  1  Tank_ChinaTankEmperor           6   1415 1628  50
+660   spawn  1  Tank_ChinaInfantryRedguard      24  1685 1389  14
+670   attackmove 0  *  1207 1212
+670   attackmove 1  *  1207 1212
+800   spawn  0  GLATankScorpion                 16  908 875    34
+800   spawn  0  GLAVehicleRocketBuggy           8   728 1034   32
+800   spawn  1  Tank_ChinaTankBattleMaster      16  1505 1548  36
+800   spawn  1  Tank_ChinaTankGattling          8   1685 1389  36
+810   attackmove 0  *  1207 1212
+810   attackmove 1  *  1207 1212
+# --- powers --------------------------------------------------------------------------------------
+# Only the paradrop and two SCUD volleys. At this distance a nuke, a carpet bomb or an anthrax cloud
+# turns the whole frame white or purple for a second; with all of them the fight could not be seen.
+460   power  1  Tank_ChinaCommandCenter  1240 1170  Tank_SuperweaponTankParadrop
+640   power  0  GLAScudStorm             1220 1190
+780   power  0  GLAScudStorm             1190 1230

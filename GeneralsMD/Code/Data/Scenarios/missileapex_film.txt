@@ -1,0 +1,16 @@
+# The nuke and the Scud Storm side by side on open ground in the middle of Twilight Flame, for a
+# film of both missiles leaving the top of the picture at full zoom-out (Cinema/missileapex_film.txt).
+# Seat 2's silo stands left of seat 3's Scud Storm as the camera sees them from the north (heading
+# 180). The Scud Storm fires first and lands about frame 330; the nuke is called at 260, leaves the
+# silo about 40 frames later and lands about frame 440, so the fireball closes the clip.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -fps 120 -noFPSLimit -quickstart -noshellmap
+#     -observer -multiInstance -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 4 -takeover
+#     -side 0 FactionChina -side 1 FactionGLA -side 2 FactionChina -side 3 FactionGLA -seed 1
+#     -scenario missileapex_film -cinema missileapex_film -video 100 540 missileapex_film -maxframes 550
+
+10    spawn   2  ChinaNuclearMissileLauncher  1   2600 3900
+10    spawn   2  ChinaPowerPlant              3   2900 4000    90
+10    spawn   3  GLAScudStorm                 1   2300 3900
+40    power   3  GLAScudStorm                 2050 3300
+260   power   2  ChinaNuclearMissileLauncher  2850 3300

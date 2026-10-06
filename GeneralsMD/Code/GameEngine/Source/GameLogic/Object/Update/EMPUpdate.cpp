@@ -246,6 +246,11 @@ void EMPUpdate::doDisableAttack( void )
 			if (!curVictim->isKindOfMulti(data->m_victimKindOf, data->m_victimKindOfNot))
 				continue;
 
+			// DoesNotAffect = ALLIES spares the owner's side and its allies whatever they are. EA asked
+			// it after the aircraft and structure branches, so a friendly aircraft in the sky was killed
+			// and a teammate's building disabled before the question came up.
+			if ( (data->m_rejectMask & WEAPON_AFFECTS_ALLIES) && curVictim->getRelationship( object ) == ALLIES )
+				continue;
 
 
 
@@ -295,11 +300,6 @@ void EMPUpdate::doDisableAttack( void )
 			{
 				if ( ! curVictim->isFactionStructure() )
 					continue;
-			}
-			// handle cases where we do not want allies to be hit by it's own EMP weapons
-			else if ( (data->m_rejectMask & WEAPON_AFFECTS_ALLIES) && curVictim->getRelationship( object ) == ALLIES) 
-			{
-				continue;
 			}
 
 			//Disable the target for a specified amount of time.

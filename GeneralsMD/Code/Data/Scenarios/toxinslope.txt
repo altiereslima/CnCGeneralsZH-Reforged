@@ -1,0 +1,27 @@
+# Toxin pools on uneven ground, for a picture of the puddles lying on the terrain: a Scud Storm's
+# large field on the mound at 1075,3775 on Twilight Flame (the ground 140 out, the field's edge, is
+# 15 to 17 lower on every side), and a Toxin Tractor spraying a power plant on the slope south of
+# 1550,3650, its small pools at the impact points. The Scud fires at frame 300 and its field lasts
+# 45 seconds, so 900 to 1400 is the window; the tractor's pools come and go from about 200 on.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -fps 120 -noFPSLimit -quickstart -noshellmap
+#     -observer -multiInstance -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 3
+#     -takeover -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA -seed 7
+#     -camera 1075 3775 -screenshot 1100 -maxframes 1180 -scenario toxinslope -logPrefix toxinslope_
+#
+# -d3d9 on the same line is the other device.  generals_base.exe (an older build) on the same line
+# shows the flat pools: the outer puddles in the air over the mound's flanks.
+
+# the Scud Storm, back at its start and powered by the verb
+10    spawn      2  GLAScudStorm                    1   start2:0:200
+
+# the power plant on the slope and the tractor that sprays it
+20    spawn      0  AmericaPowerPlant               1   1550 3600
+40    spawn      2  GLAVehicleToxinTruck            1   1420 3650
+60    attack     2  GLAVehicleToxinTruck                0 AmericaPowerPlant
+
+# the Scud Storm on the mound
+300   power      2  GLAScudStorm                        1075 3775
+
+200   tally      0  *
+900   tally      0  *

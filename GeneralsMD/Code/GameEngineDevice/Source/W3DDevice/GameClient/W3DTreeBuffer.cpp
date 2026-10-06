@@ -298,6 +298,41 @@ static ShaderClass modelShadowShader(SC_MODEL_SHADOW);
 // knows nothing about. Cap the stretch at this many tree heights.
 #define TREE_SHADOW_MAX_STRETCH 3.0f
 
+// The sun, as how far a tree's shadow reaches sideways for every unit of height.  Both kinds of
+// tree shadow are the same shear about the ground, and this is the number it shears by.  FALSE
+// with no sun high enough to cast one.
+static Bool treeShadowStretch(Real &stretchX, Real &stretchY)
+{
+	stretchX = 0.0f;
+	stretchY = 0.0f;
+	if (TheW3DShadowManager == NULL) {
+		return false;
+	}
+	Vector3 &sunPos = TheW3DShadowManager->getLightPosWorld(0);
+	if (sunPos.Z <= 1.0f) {
+		return false;
+	}
+	stretchX = -sunPos.X / sunPos.Z;
+	stretchY = -sunPos.Y / sunPos.Z;
+	Real stretchSq = stretchX*stretchX + stretchY*stretchY;
+	if (stretchSq > TREE_SHADOW_MAX_STRETCH*TREE_SHADOW_MAX_STRETCH) {
+		Real scale = TREE_SHADOW_MAX_STRETCH / WWMath::Sqrt(stretchSq);
+		stretchX *= scale;
+		stretchY *= scale;
+	}
+	return true;
+}
+
+// Shadows are wanted under either option.  The silhouette pass needs the vertex shader, since
+// flattening the tree onto the ground is the shader's own sway arithmetic with different constants.
+// Hardware without one keeps the blob, and so does classic graphics, because the blob is what every
+// tree had in 2003.
+static Bool treeSilhouetteShadows(IDirect3DVertexShader9 *treeVertexShader)
+{
+	return (TheGlobalData->m_useShadowDecals || TheGlobalData->m_useShadowVolumes) && treeVertexShader != 0
+		&& TheW3DShadowManager != NULL && !TheGlobalData->m_classicGraphics;
+}
+
 
 /*
 #define SC_ALPHA_DETAIL ( SHADE_CNST(ShaderClass::PASS_LEQUAL, ShaderClass::DEPTH_WRITE_ENABLE, ShaderClass::COLOR_WRITE_ENABLE, ShaderClass::SRCBLEND_ONE, \
@@ -355,9 +390,18 @@ void W3DTreeBuffer::cull(const CameraClass * camera)
 	float z = zmod * camera_matrix[2][2] ;
 	m_cameraLookAtVector.Set(x,y,z);
 
+	/* A tree's silhouette shadow is drawn out of the same batch as the tree, so a tree culled by its
+		 own outline took its shadow with it: the shadow of a tree just past the edge of the screen lay
+		 on the ground in view and went out all at once.  Where that shadow is drawn, a tree whose
+		 shadow can reach the view is in the batch too.  It lies flat at the tree's base. */
+	Real stretchX, stretchY;
+	const Bool castsSilhouette = treeSilhouetteShadows(m_dwTreeVertexShader) && treeShadowStretch(stretchX, stretchY);
 	for (curTree=0; curTree<m_numTrees; curTree++) {
 		Bool doKey = false;	// We calculate the key when a tree becomes visible.
 		Bool visible = !camera->Cull_Sphere(m_trees[curTree].bounds);
+		if (!visible && castsSilhouette)
+			visible = shadowCanReachView(camera->Get_Frustum(), m_trees[curTree].bounds, m_trees[curTree].location.Z,
+				stretchX, stretchY);
 		if (visible != m_trees[curTree].visible) {
 			m_trees[curTree].visible=visible;
 			m_anythingChanged = true;
@@ -1822,6 +1866,12 @@ void W3DTreeBuffer::drawModelShadows(CameraClass *camera, Real stretchX, Real st
 				ms.visible = true;
 			}
 		}
+		//and when its shadow can reach the screen, not only its trunk: one standing just past the edge
+		//lays its shadow in view, and culling by the trunk took that out all at once
+		for (k=0; k<ms.numMesh && !ms.visible; k++) {
+			ms.visible = shadowCanReachView(camera->Get_Frustum(), ms.mesh[k]->Get_Bounding_Sphere(), ms.baseZ,
+				stretchX, stretchY);
+		}
 		if (ms.visible) {
 			numVisible++;
 		}
@@ -2111,11 +2161,7 @@ void W3DTreeBuffer::drawTrees(CameraClass * camera, RefRenderObjListIterator *pD
 	// Shadows are wanted under either option: the loop used to be gated on m_useShadowDecals alone,
 	// so with volume shadows picked trees were the one thing in the scene standing on nothing.
 	Bool drawShadows = TheGlobalData->m_useShadowDecals || TheGlobalData->m_useShadowVolumes;
-	// The silhouette pass needs the vertex shader, since flattening the tree onto the ground is the
-	// shader's own sway arithmetic with different constants.  Hardware without one keeps the blob,
-	// and so does classic graphics, because the blob is what every tree had in 2003.
-	Bool silhouetteShadows = drawShadows && m_dwTreeVertexShader != 0 && TheW3DShadowManager != NULL &&
-		!TheGlobalData->m_classicGraphics;
+	Bool silhouetteShadows = treeSilhouetteShadows(m_dwTreeVertexShader);
 
 	// Draw tree shadows.
 	// Trees are batched vertices with no render object of their own, so the one shared blob decal
@@ -2252,27 +2298,8 @@ void W3DTreeBuffer::drawTrees(CameraClass * camera, RefRenderObjListIterator *pD
 #endif
 
 
-	//
-	// The sun, as how far a shadow reaches sideways for every unit of height.  Both kinds of tree
-	// shadow are the same shear about the ground, and this is the number it shears by.
-	//
-	Real stretchX = 0.0f;
-	Real stretchY = 0.0f;
-	Bool haveSun = false;
-	if (TheW3DShadowManager) {
-		Vector3 &sunPos = TheW3DShadowManager->getLightPosWorld(0);
-		if (sunPos.Z > 1.0f) {
-			stretchX = -sunPos.X / sunPos.Z;
-			stretchY = -sunPos.Y / sunPos.Z;
-			Real stretchSq = stretchX*stretchX + stretchY*stretchY;
-			if (stretchSq > TREE_SHADOW_MAX_STRETCH*TREE_SHADOW_MAX_STRETCH) {
-				Real scale = TREE_SHADOW_MAX_STRETCH / WWMath::Sqrt(stretchSq);
-				stretchX *= scale;
-				stretchY *= scale;
-			}
-			haveSun = true;
-		}
-	}
+	Real stretchX, stretchY;
+	Bool haveSun = treeShadowStretch(stretchX, stretchY);
 
 	//
 	// The trees the map placed as objects are not in this buffer, so they are drawn whether it has

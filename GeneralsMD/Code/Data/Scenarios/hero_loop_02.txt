@@ -1,0 +1,112 @@
+# Hero loop 02: four armies on Fallen Empire either side of the Great Wall, which runs
+# east-west through 1390,1250. America and China fight south of it on 1390,1040, the GLA and the
+# Tank General north of it on 1390,1460, close enough that both pairs shoot across the wall. Waves at
+# 420, 540, 660 and 800 keep it fed over frames 600 to 1019.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -particlecap 30000 -quickstart
+#     -noshellmap -observer -multiInstance -map "Maps\Fallen Empire\Fallen Empire.map"
+#     -autoskirmish 4 -takeover -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA
+#     -side 3 FactionChinaTankGeneral -seed 7 -scenario hero_loop_02 -cinema hero_loop_02
+#     -video 600 1019 hero_loop_02 -maxframes 1040
+# --- buildings, at the starts, out of frame -------------------------------------------------------
+10    spawn  0  AmericaParticleCannonUplink     1   start0:200:0
+10    spawn  0  AmericaCommandCenter            1   start0:240:200
+10    spawn  1  ChinaNuclearMissileLauncher     1   start1:-200:0
+10    spawn  1  ChinaCommandCenter              1   start1:-240:200
+10    spawn  2  GLAScudStorm                    1   start2:-200:0
+10    spawn  2  GLACommandCenter                1   start2:-240:-200
+10    spawn  3  Tank_ChinaNuclearMissileLauncher 1  start3:200:0
+10    spawn  3  Tank_ChinaCommandCenter         1   start3:240:-200
+# --- America, south-west -------------------------------------------------------------------------
+150   spawn  0  AmericaTankCrusader             18  1080 1040  34
+150   spawn  0  AmericaTankPaladin              10  1080 940   38
+150   spawn  0  AmericaInfantryRanger           26  1000 1100  14
+150   spawn  0  AmericaInfantryMissileDefender  20  980 990    14
+150   spawn  0  AmericaVehicleTomahawk          6   920 1040   40
+150   spawn  0  AmericaVehicleHumvee            8   900 940    36
+150   spawn  0  AmericaVehicleComanche          2   1080 940   60
+150   spawn  0  AmericaJetRaptor                5   900 940    70
+# --- China, south-east ---------------------------------------------------------------------------
+150   spawn  1  ChinaTankBattleMaster           18  1700 1040  36
+150   spawn  1  ChinaTankOverlord               6   1700 940   50
+150   spawn  1  ChinaTankGattling               8   1780 1100  36
+150   spawn  1  ChinaTankDragon                 6   1800 990   36
+150   spawn  1  ChinaInfantryRedguard           26  1860 1040  14
+150   spawn  1  ChinaInfantryTankHunter         16  1880 940   14
+150   spawn  1  ChinaVehicleInfernoCannon       5   1880 940   40
+150   spawn  1  ChinaJetMIG                     5   1880 940   70
+# --- the GLA, north-east -------------------------------------------------------------------------
+150   spawn  2  GLATankScorpion                 18  1700 1460  34
+150   spawn  2  GLATankMarauder                 10  1700 1560  40
+150   spawn  2  GLAVehicleRocketBuggy           10  1780 1400  32
+150   spawn  2  GLAVehicleQuadCannon            6   1800 1510  36
+150   spawn  2  GLAVehicleToxinTruck            5   1860 1460  36
+150   spawn  2  GLAVehicleTechnical             8   1880 1560  30
+150   spawn  2  GLAInfantryRebel                26  1860 1460  14
+150   spawn  2  GLAInfantryTunnelDefender       20  1880 1560  14
+# --- the Tank General, north-west ----------------------------------------------------------------
+150   spawn  3  Tank_ChinaTankEmperor           8   1080 1560  50
+150   spawn  3  Tank_ChinaTankBattleMaster      18  1080 1460  36
+150   spawn  3  Tank_ChinaTankGattling          8   1000 1400  36
+150   spawn  3  Tank_ChinaTankDragon            6   980 1510   36
+150   spawn  3  Tank_ChinaInfantryRedguard      26  920 1460   14
+150   spawn  3  Tank_ChinaInfantryTankHunter    16  900 1560   14
+150   spawn  3  Tank_ChinaVehicleHelix          1   1080 1560  60
+150   spawn  3  Tank_ChinaJetMIG                5   900 1560   70
+160   attackmove 0  *  1390 1040
+160   attackmove 1  *  1390 1040
+160   attackmove 2  *  1390 1460
+160   attackmove 3  *  1390 1460
+# --- waves ---------------------------------------------------------------------------------------
+420   spawn  0  AmericaTankCrusader             14  1080 1040  34
+420   spawn  0  AmericaInfantryRanger           20  1000 1100  14
+420   spawn  1  ChinaTankBattleMaster           14  1700 1040  36
+420   spawn  1  ChinaInfantryRedguard           20  1860 1040  14
+420   spawn  2  GLATankScorpion                 14  1700 1460  34
+420   spawn  2  GLAInfantryRebel                20  1860 1460  14
+420   spawn  3  Tank_ChinaTankBattleMaster      14  1080 1460  36
+420   spawn  3  Tank_ChinaInfantryRedguard      20  920 1460   14
+540   spawn  0  AmericaTankPaladin              8   1080 940   38
+540   spawn  1  ChinaTankOverlord               5   1700 940   50
+540   spawn  2  GLATankMarauder                 8   1700 1560  40
+540   spawn  3  Tank_ChinaTankEmperor           5   1080 1560  50
+660   spawn  0  AmericaTankCrusader             14  1080 1040  34
+660   spawn  0  AmericaInfantryRanger           20  1000 1100  14
+660   spawn  1  ChinaTankBattleMaster           14  1700 1040  36
+660   spawn  1  ChinaInfantryRedguard           20  1860 1040  14
+660   spawn  2  GLATankScorpion                 14  1700 1460  34
+660   spawn  2  GLAInfantryRebel                20  1860 1460  14
+660   spawn  3  Tank_ChinaTankBattleMaster      14  1080 1460  36
+660   spawn  3  Tank_ChinaInfantryRedguard      20  920 1460   14
+800   spawn  0  AmericaTankPaladin              8   1080 940   38
+800   spawn  1  ChinaTankGattling               8   1780 1100  36
+800   spawn  2  GLAVehicleRocketBuggy           8   1780 1400  32
+800   spawn  3  Tank_ChinaTankGattling          8   1000 1400  36
+430   attackmove 0  *  1390 1040
+430   attackmove 1  *  1390 1040
+430   attackmove 2  *  1390 1460
+430   attackmove 3  *  1390 1460
+550   attackmove 0  *  1390 1040
+550   attackmove 1  *  1390 1040
+550   attackmove 2  *  1390 1460
+550   attackmove 3  *  1390 1460
+670   attackmove 0  *  1390 1040
+670   attackmove 1  *  1390 1040
+670   attackmove 2  *  1390 1460
+670   attackmove 3  *  1390 1460
+810   attackmove 0  *  1390 1040
+810   attackmove 1  *  1390 1040
+810   attackmove 2  *  1390 1460
+810   attackmove 3  *  1390 1460
+# --- powers --------------------------------------------------------------------------------------
+330   power  0  AmericaCommandCenter     1390 1460  SuperweaponA10ThunderboltMissileStrike
+380   power  1  ChinaCommandCenter       1330 1460  Early_SuperweaponChinaCarpetBomb
+430   power  2  GLACommandCenter         1440 1040  SuperweaponAnthraxBomb
+480   power  3  Tank_ChinaCommandCenter  1350 1040  SuperweaponChinaCarpetBomb
+560   power  0  AmericaCommandCenter     1420 1480  SuperweaponSpectreGunship
+620   power  3  Tank_ChinaCommandCenter  1440 1020  SuperweaponChinaCarpetBomb
+640   power  0  AmericaParticleCannonUplink       1390 1250
+700   power  1  ChinaNuclearMissileLauncher       1300 1480
+760   power  2  GLAScudStorm                      1440 1060
+840   power  3  Tank_ChinaNuclearMissileLauncher  1480 1040
+880   power  2  GLAScudStorm                      1340 1440

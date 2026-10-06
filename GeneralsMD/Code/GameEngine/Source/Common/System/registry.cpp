@@ -361,19 +361,23 @@ Bool GetUnsignedIntFromRegistry(AsciiString path, AsciiString key, UnsignedInt& 
 }
 #endif
 
+// NOTE: static causes a memory leak, but we have to keep it because the value is cached.
+static AsciiString s_registryLanguage = "english";
+static Bool s_registryLanguageCached = FALSE;
+
 AsciiString GetRegistryLanguage(void)
 {
-	static Bool cached = FALSE;
-	// NOTE: static causes a memory leak, but we have to keep it because the value is cached.
-	static AsciiString val = "english";
-	if (cached) {
-		return val;
-	} else {
-		cached = TRUE;
+	if (!s_registryLanguageCached) {
+		s_registryLanguageCached = TRUE;
+		GetStringFromRegistry("", "Language", s_registryLanguage);
 	}
+	return s_registryLanguage;
+}
 
-	GetStringFromRegistry("", "Language", val);
-	return val;
+void SetRegistryLanguage(const AsciiString &language)
+{
+	s_registryLanguageCached = TRUE;
+	s_registryLanguage = language;
 }
 
 AsciiString GetRegistryGameName(void)

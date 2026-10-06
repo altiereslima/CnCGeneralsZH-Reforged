@@ -451,11 +451,21 @@ void W3DSmudgeManager::render(RenderInfoClass &rinfo)
 			//Ge uv coordinates by interpolating corner uv coordinates and applying desired offset.
 			uvSpanX=verts[3].uv.X - verts[0].uv.X;
 			uvSpanY=verts[1].uv.Y - verts[0].uv.Y;
-			verts[4].uv.X=verts[0].uv.X+uvSpanX*(0.5f+smudge->m_offset.X);
+			// The pull at the centre is a share of the smudge's own width, which is a shimmer on a
+			// smoke puff and a second copy of the ground on a nuke's heat ring: those are 200 to 350
+			// pixels across at the default zoom, sixteen to twenty-four of them overlap, and each
+			// blended a copy of the ground shifted by up to twenty pixels over the unshifted one,
+			// on both devices.  Held to a few pixels of the view it stays a shimmer at any size.
+			// 0.004 kept the doubling off and the nuke's ring with it, readable for half a second;
+			// 0.006 stacked shifted copies of the flash's white edge into stepped bands
+			const Real MAX_PULL = 0.005f;	// of the view's width and height, about 10 pixels at 1920
+			const Real pullX = WWMath::Clamp(uvSpanX*smudge->m_offset.X, -MAX_PULL*texClampX, MAX_PULL*texClampX);
 			// .Y, not .X: the vertical offset was rolled, clamped against the top and bottom of the
 			// view a dozen lines up, and then never read - the centre vertex took the horizontal
 			// one on both axes, so every smudge pulled the background along one diagonal.
-			verts[4].uv.Y=verts[0].uv.Y+uvSpanY*(0.5f+smudge->m_offset.Y);
+			const Real pullY = WWMath::Clamp(uvSpanY*smudge->m_offset.Y, -MAX_PULL*texClampY, MAX_PULL*texClampY);
+			verts[4].uv.X=verts[0].uv.X+uvSpanX*0.5f+pullX;
+			verts[4].uv.Y=verts[0].uv.Y+uvSpanY*0.5f+pullY;
 
 			count++;	//increment visible smudge count.
 			smudge=smudge->Succ();

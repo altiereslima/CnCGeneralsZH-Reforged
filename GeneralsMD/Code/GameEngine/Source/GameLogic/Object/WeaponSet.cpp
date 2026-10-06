@@ -266,23 +266,49 @@ void WeaponSet::xfer( Xfer *xfer )
 		wsFlags.xfer( xfer );
 	}
 
+	//
+	// On a load the set just read decides which slots hold a weapon, and the save fills in their
+	// state.  Object's constructor has already filled the slots of whatever set its own flags chose
+	// then (a production veteran gets the VETERAN set), and a slot the save holds empty used to keep
+	// that weapon.  A save written before the data moved a weapon to another slot (Boss_ScudStorm's
+	// went from PRIMARY to SECONDARY in v2.2.0) names a slot the set no longer has; that weapon is
+	// read and dropped.  The old fallback to slot 0 handed the Weapon constructor a null template
+	// whenever slot 0 was the empty one.
+	//
+	Bool layoutChanged = FALSE;
 	for (Int i = 0; i < WEAPONSLOT_COUNT; ++i)
 	{
 		Bool hasWeaponInSlot = (m_weapons[i] != NULL);
 		xfer->xferBool(&hasWeaponInSlot);
-		if (hasWeaponInSlot)
+		if (xfer->getXferMode() == XFER_LOAD)
 		{
-			if (xfer->getXferMode() == XFER_LOAD && m_weapons[i] == NULL)
+			const WeaponTemplate* wt = m_curWeaponTemplateSet ? m_curWeaponTemplateSet->getNth((WeaponSlotType)i) : NULL;
+			if (m_weapons[i] != NULL && (!hasWeaponInSlot || wt == NULL))
 			{
-				const WeaponTemplate* wt = m_curWeaponTemplateSet->getNth((WeaponSlotType)i);
-				if (wt==NULL) {
-					DEBUG_CRASH(("xfer backwards compatibility code - old save file??? jba."));
-					wt = m_curWeaponTemplateSet->getNth((WeaponSlotType)0);
-				}
-				m_weapons[i] = TheWeaponStore->allocateNewWeapon(wt, (WeaponSlotType)i);
+				m_weapons[i]->deleteInstance();
+				m_weapons[i] = NULL;
 			}
-			xfer->xferSnapshot(m_weapons[i]);
+			if (hasWeaponInSlot && wt == NULL)
+			{
+				// Weapon::xfer takes its template from the file, so any of the set's will do to read it into
+				const WeaponTemplate* any = NULL;
+				for (Int j = 0; j < WEAPONSLOT_COUNT && any == NULL && m_curWeaponTemplateSet != NULL; ++j)
+					any = m_curWeaponTemplateSet->getNth((WeaponSlotType)j);
+				if (any == NULL)
+					throw INI_INVALID_DATA;
+				Weapon* dropped = TheWeaponStore->allocateNewWeapon(any, (WeaponSlotType)i);
+				xfer->xferSnapshot(dropped);
+				dropped->deleteInstance();
+				layoutChanged = TRUE;
+				continue;
+			}
+			if (hasWeaponInSlot && m_weapons[i] == NULL)
+				m_weapons[i] = TheWeaponStore->allocateNewWeapon(wt, (WeaponSlotType)i);
+			if (!hasWeaponInSlot && wt != NULL)
+				layoutChanged = TRUE;
 		}
+		if (hasWeaponInSlot)
+			xfer->xferSnapshot(m_weapons[i]);
 	}
 	xfer->xferUser(&m_curWeapon, sizeof(m_curWeapon));
 	xfer->xferUser(&m_curWeaponLockedStatus, sizeof(m_curWeaponLockedStatus));
@@ -300,6 +326,21 @@ void WeaponSet::xfer( Xfer *xfer )
 	}
 
 	m_totalDamageTypeMask.xfer(xfer);// BitSet has built in xfer
+
+	if (layoutChanged)
+	{
+		// The set's slots the save had nothing for start empty and reload first, as a new Weapon does;
+		// the totals in the file describe the old layout.
+		for (Int i = 0; i < WEAPONSLOT_COUNT; ++i)
+			if (m_weapons[i] == NULL && m_curWeaponTemplateSet->getNth((WeaponSlotType)i) != NULL)
+				m_weapons[i] = TheWeaponStore->allocateNewWeapon(m_curWeaponTemplateSet->getNth((WeaponSlotType)i), (WeaponSlotType)i);
+		recountWeapons();
+		if (m_weapons[m_curWeapon] == NULL)
+		{
+			releaseWeaponLock(LOCKED_PERMANENTLY);
+			m_curWeapon = PRIMARY_WEAPON;
+		}
+	}
 
 }
 
@@ -324,11 +365,6 @@ void WeaponSet::updateWeaponSet(const Object* obj)
 			releaseWeaponLock(LOCKED_PERMANENTLY);	// release all locks. sorry!
 			m_curWeapon = PRIMARY_WEAPON;
 		}
-		m_filledWeaponSlotMask = 0;
-		m_totalAntiMask = 0;
-		m_totalDamageTypeMask.clear();
-		m_hasPitchLimit = false;
-		m_hasDamageWeapon = false;
 		for (Int i = WEAPONSLOT_COUNT - 1; i >= PRIMARY_WEAPON ; --i)
 		{
 			if (m_weapons[i] != NULL)
@@ -344,13 +380,6 @@ void WeaponSet::updateWeaponSet(const Object* obj)
 			{
 				m_weapons[i] = TheWeaponStore->allocateNewWeapon(set->getNth((WeaponSlotType)i), (WeaponSlotType)i);
 				m_weapons[i]->loadAmmoNow(obj);	// start 'em all with full clips.
-				m_filledWeaponSlotMask |= (1 << i);
-				m_totalAntiMask |= m_weapons[i]->getAntiMask();
-				m_totalDamageTypeMask.set(m_weapons[i]->getDamageType());
-				if (m_weapons[i]->isPitchLimited())
-					m_hasPitchLimit = true;
-				if (m_weapons[i]->isDamageWeapon())
-					m_hasDamageWeapon = true;
 
 				// no, do NOT do this; always start with the cur weapon being primary, even if there is no primary
 				// weapon. this is by design, to allow us to have units that have only "spell" weapons and no
@@ -359,7 +388,30 @@ void WeaponSet::updateWeaponSet(const Object* obj)
 			}
 		}
 		m_curWeaponTemplateSet = set;
+		recountWeapons();
 		//DEBUG_LOG(("WeaponSet::updateWeaponSet -- changed curweapon to %s\n",getCurWeapon()->getName().str()));
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+void WeaponSet::recountWeapons()
+{
+	m_filledWeaponSlotMask = 0;
+	m_totalAntiMask = 0;
+	m_totalDamageTypeMask.clear();
+	m_hasPitchLimit = false;
+	m_hasDamageWeapon = false;
+	for (Int i = 0; i < WEAPONSLOT_COUNT; ++i)
+	{
+		if (m_weapons[i] == NULL)
+			continue;
+		m_filledWeaponSlotMask |= (1 << i);
+		m_totalAntiMask |= m_weapons[i]->getAntiMask();
+		m_totalDamageTypeMask.set(m_weapons[i]->getDamageType());
+		if (m_weapons[i]->isPitchLimited())
+			m_hasPitchLimit = true;
+		if (m_weapons[i]->isDamageWeapon())
+			m_hasDamageWeapon = true;
 	}
 }
 

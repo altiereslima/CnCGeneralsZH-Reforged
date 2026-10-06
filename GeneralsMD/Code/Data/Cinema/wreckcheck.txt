@@ -1,0 +1,16 @@
+# Scenarios/wreckcheck.txt on Twilight Flame: the tank fight east of the middle and its wreckage.
+# A Battlemaster dies about frame 93, the Paladins about 201, the Crusaders about 261, so the shots
+# run from the Paladins going up to the plates lying on the ground three seconds later.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -turbo -quickstart -noshellmap -observer
+#     -multiInstance -noFPSLimit -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2
+#     -takeover -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario wreckcheck
+#     -cinema wreckcheck -maxframes 480 -logPrefix wreckcheck_shot_
+
+0.5   cut     1430 3780 0.8 -45 8
+7.0   shot
+9.0   shot
+9.6   shot
+11.0  shot
+13.5  shot
+15.0  end

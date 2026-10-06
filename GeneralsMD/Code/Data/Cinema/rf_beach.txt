@@ -1,0 +1,12 @@
+# Zero Hour Reforged trailer, beats 04 and 29 (HK_BEACH, END_BG): Scenarios/s240_beach.txt on
+# Flash Effect, s240_beach.txt's framing (looking north over the derricks to the sea, a slow turn)
+# without its early end, so the beach after the strike stays in shot for the end card.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Flash Effect\Flash Effect.map" -autoskirmish 2 -takeover
+#     -observer -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario s240_beach
+#     -cinema rf_beach -video 390 960 rf_beach -maxframes 970
+
+12.5  cut     1700 1480 0.53 0 10
+12.6  orbit   -10 13
+32.5  end

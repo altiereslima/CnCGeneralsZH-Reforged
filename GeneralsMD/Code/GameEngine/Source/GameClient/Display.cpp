@@ -30,6 +30,7 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 #include "Lib/Clock.h"
+#include "Common/GlobalData.h"
 
 #include "GameClient/Display.h"
 #include "GameClient/Mouse.h"
@@ -42,6 +43,19 @@
 
 /// The Display singleton instance.
 Display *TheDisplay = NULL;
+
+UIRect TheUIRect( void )
+{
+	if( TheDisplay == NULL )
+	{
+		UIRect none = { 0, 0, 800, 600 };
+		return none;
+	}
+	if( TheGlobalData && TheGlobalData->isClassicUI() )
+		return UIRectForScreen( TheDisplay->getWidth(), TheDisplay->getHeight() );
+	UIRect screen = { 0, 0, (Int)TheDisplay->getWidth(), (Int)TheDisplay->getHeight() };
+	return screen;
+}
 
 
 Display::Display()

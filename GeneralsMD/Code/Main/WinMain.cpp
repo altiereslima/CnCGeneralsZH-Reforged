@@ -578,6 +578,14 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message,
 				{
 					isDisplayShownActive = isWinMainActive;
 					Reset_D3D_Device(isWinMainActive);
+					// A fullscreen game is minimized while away, and Alt+Tab activates it while it is
+					// still minimized, when DefWindowProc gives an active window no keyboard focus.
+					// The restore above activates nothing, so the window came back active with no
+					// focus: every key arrived as WM_SYSKEYDOWN and beeped, and no WM_SETFOCUS came to
+					// reset the keyboard or take the mouse out of its lost-focus state, where it
+					// leaves the Windows arrow on screen (issue #54).
+					if (isWinMainActive)
+						::SetFocus(hWnd);
 				}
 				return 0;
 			}

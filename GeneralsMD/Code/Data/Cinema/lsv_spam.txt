@@ -1,0 +1,8 @@
+# Laser glow video, shot 4: Scenarios/missilespam.txt on Twilight Flame, seed 7. Looking east into
+# the sun over the ground fight, so the trails' shade runs towards the camera; Comanche pods from 1400.
+#
+#   ...the scenario's switches... -cinema lsv_spam -video 1400 1600 lsv_spam -maxframes 1615
+
+46.6  cut     1620 3700 0.55 -90 12
+46.7  orbit   15 6.6
+53.5  end

@@ -20,7 +20,8 @@
  * the generators write, under the SDL3 GPU target, taken the whole way to what SDL's GPU backends
  * accept (decision 4).
  *
- * For each program in shader_cases.h - the 49 decision 4 was measured on, and the extras - it:
+ * For each program in shader_cases.h - the 49 decision 4 was measured on less the three bumped
+ * terrain programs that went with the normal maps, and the extras - it:
  *   1. generates the SDL3_GPU text,
  *   2. compiles it to SPIR-V through SDL3_Compile_HLSL_To_SPIRV (the one place the HLSL front end is
  *      named, so this test follows the compiler if decision 4's exit is ever taken),
@@ -39,9 +40,7 @@
  *     binds Trees.vso and no pixel shader (it loads Trees.pso and never binds it), and engineshader
  *     transcribes no Trees pixel program;
  *   - the engine's pixel programs (water, terrain, road, monochrome) meet ffvertex's programs only:
- *     their draws bind a .pso over the fixed-function vertex pipeline;
- *   - a normal mapped pixel program meets only vertex programs that write the normal mapped
- *     varyings, as ffshader.h requires of its callers.
+ *     their draws bind a .pso over the fixed-function vertex pipeline.
  * Trees against a water or terrain pixel program does not link - they read coordinate sets 2 and 3
  * and Trees writes two - and the game never draws it.
  *
@@ -196,11 +195,6 @@ bool vertex_layout(const std::string & hlsl, std::vector<SDL_GPUVertexAttribute>
 	return !attributes.empty();
 }
 
-bool writes_normal_mapped_varyings(const std::string & hlsl)
-{
-	return hlsl.find("ViewPosition : TEXCOORD4") != std::string::npos;
-}
-
 TEST(every_generated_program_reaches_sdl3_gpu)
 {
 	const char * spirv_val = getenv("ZH_SPIRV_VAL");
@@ -293,7 +287,7 @@ TEST(every_generated_program_reaches_sdl3_gpu)
 
 	print_tally("reference set", reference, validating, metal);
 	print_tally("beyond it", extra, validating, metal);
-	CHECK_EQ(reference.programs, 49u);
+	CHECK_EQ(reference.programs, 46u);
 	CHECK(extra.programs > 0);
 
 	if (device != NULL) {
@@ -321,7 +315,6 @@ TEST(every_vertex_program_links_with_every_pixel_program_it_can_meet)
 		std::string name;
 		std::string hlsl;
 		SDL_GPUShader * shader;
-		bool normal_mapped;
 		bool engine;
 	};
 	std::vector<Built> vertex, pixel;
@@ -338,8 +331,6 @@ TEST(every_vertex_program_links_with_every_pixel_program_it_can_meet)
 		}
 		built.shader = SDL3_Create_Shader(device, spirv, cases[i].VertexStage, log);
 		built.engine = cases[i].Kind == SHADER_CASE_ENGINE;
-		built.normal_mapped = cases[i].VertexStage ? writes_normal_mapped_varyings(built.hlsl)
-			: built.hlsl.find("ViewPosition : TEXCOORD4") != std::string::npos;
 		if (built.shader == NULL) {
 			CHECK(false);
 			continue;
@@ -365,7 +356,6 @@ TEST(every_vertex_program_links_with_every_pixel_program_it_can_meet)
 		target.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
 
 		for (size_t p = 0; p < pixel.size(); ++p) {
-			if (pixel[p].normal_mapped && !vertex[v].normal_mapped) continue;
 			if (vertex[v].engine && pixel[p].engine) continue;	// the game never draws that pair
 			++pairs;
 			SDL_GPUGraphicsPipelineCreateInfo info;

@@ -30,9 +30,11 @@
 #include "Common/FileSystem.h"
 #include "Common/GameEngine.h"
 #include "Common/MessageStream.h"
+#include "Common/OptionsCatalog.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "Common/Recorder.h"
+#include "Common/UserPreferences.h"
 #include "GameLogic/GameLogic.h"
 #include "GameNetwork/GameSpy/ThreadUtils.h"
 
@@ -43,12 +45,19 @@
 #include "GameClient/DisplayString.h"
 #include "GameClient/DisplayStringManager.h"
 #include "GameClient/GameFont.h"
+#include "GameClient/Gadget.h"
+#include "GameClient/GadgetListBox.h"
+#include "GameClient/GameWindowManager.h"
+#include "GameClient/WindowLayout.h"
+#include "Common/GlobalData.h"
+#include "Common/NameKeyGenerator.h"
 #include "GameClient/GameText.h"
 #include "GameClient/HtmlOverlay.h"
 #include "GameClient/HtmlTemplate.h"
 #include "GameClient/KeyDefs.h"
 #include "GameClient/Keyboard.h"
 #include "GameClient/Mouse.h"
+#include "GameClient/View.h"
 
 GameConsole *TheGameConsole = NULL;
 
@@ -71,6 +80,8 @@ static const WideChar CONSOLE_FIRST_PRINTABLE_CHAR = u' ';
 
 static const Color CONSOLE_PANEL_COLOR = GameMakeColor( 0, 0, 0, 225 );
 static const Color CONSOLE_EDGE_COLOR = GameMakeColor( 90, 90, 90, 255 );
+static const Color CONSOLE_CLASSIC_PANEL_COLOR = GameMakeColor( 0, 0, 0, 190 );	///< Diplomacy.wnd's parent
+static const Color CONSOLE_CLASSIC_EDGE_COLOR = GameMakeColor( 47, 55, 168, 255 );
 static const Color CONSOLE_INPUT_COLOR = GameMakeColor( 255, 255, 255, 255 );
 static const Color CONSOLE_TEXT_COLOR = GameMakeColor( 190, 190, 190, 255 );
 static const Color CONSOLE_SHADOW_COLOR = GameMakeColor( 0, 0, 0, 0 );
@@ -169,6 +180,136 @@ static AsciiString runSpeed( AsciiString arguments )
 }
 
 //-------------------------------------------------------------------------------------------------
+/** "Key = value (range)" for a row of TheOptionCatalog, the value this run is using. */
+//-------------------------------------------------------------------------------------------------
+static AsciiString describeOption( const OptionDef &def )
+{
+	AsciiString result;
+	if( def.kind == OPTION_BOOL )
+		result.format( "%s = %s (yes/no)", def.iniKey, formatOptionValue( def, def.get() ).str() );
+	else
+		result.format( "%s = %s (%d..%d)", def.iniKey, formatOptionValue( def, def.get() ).str(), def.lo, def.hi );
+	return result;
+}
+
+static AsciiString unknownOption( const char *command, AsciiString key )
+{
+	AsciiString result;
+	result.format( "%s: no setting called '%s'; 'get' lists them", command, key.str() );
+	return result;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Any setting in the options catalog by its Options.ini key, written to Options.ini the way the
+	* options menu's Accept writes it.  A row that shows the moment its GlobalData field changes is
+	* changed now too; the rest wait for the next launch, because the device reset or shell rebuild
+	* the menu runs after them is not the console's to start. */
+//-------------------------------------------------------------------------------------------------
+static AsciiString runSetOption( AsciiString arguments )
+{
+	AsciiString key;
+	arguments.nextToken( &key );
+	arguments.trim();
+
+	const OptionDef *def = findOptionDef( key.str() );
+	if( def == NULL )
+		return unknownOption( "set", key );
+
+	AsciiString result;
+	Int value;
+	if( !parseOptionText( *def, arguments.str(), &value ) )
+	{
+		if( def->kind == OPTION_BOOL )
+			result.format( "set: %s takes yes or no, not '%s'", def->iniKey, arguments.str() );
+		else
+			result.format( "set: %s takes a whole number from %d to %d, not '%s'", def->iniKey, def->lo, def->hi, arguments.str() );
+		return result;
+	}
+
+	OptionPreferences pref;
+	pref[ AsciiString( def->iniKey ) ] = formatOptionValue( *def, value );
+	pref.write();
+
+	if( def->apply != APPLY_LIVE )
+	{
+		result.format( "%s = %s saved, from the next launch", def->iniKey, formatOptionValue( *def, value ).str() );
+		return result;
+	}
+
+	def->set( value );
+	return describeOption( *def );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The freecam, a photo mode: the tactical view flies free and draws the whole map, the interface
+	* goes, and the keys and the mouse belong to the camera until it lands.  Nothing of it reaches the
+	* logic, so it is offered in every match, network games and replays included. */
+//-------------------------------------------------------------------------------------------------
+static const char *const FREECAM_HELP =
+	"freecam on: W/S forward and back, A/D left and right, R up, F down, mouse turns, Shift faster; Esc or 'freecam' lands";
+static const UnsignedInt FREECAM_STARTUP_FRAME = 2;	///< -freecam waits for the map's own opening view to land
+
+static AsciiString theStartupFreeCamera;		///< -freecam's console line, run once the match is up
+
+void GameConsole_setStartupFreeCamera( const char *pose )
+{
+	theStartupFreeCamera.format( "freecam %s", pose );
+}
+
+static AsciiString describeFreeCameraPose( void )
+{
+	Coord3D eye;
+	Real heading, tilt;
+	TheTacticalView->getFreeCameraPose( &eye, &heading, &tilt );
+	AsciiString result;
+	result.format( "%.0f %.0f %.0f %.1f %.1f", eye.x, eye.y, eye.z, heading * 180.0f / PI, tilt * 180.0f / PI );
+	return result;
+}
+
+static AsciiString runFreeCamera( AsciiString arguments )
+{
+	AsciiString result;
+	if( TheTacticalView == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+	{
+		result = "freecam: in a match or a replay only";
+		return result;
+	}
+
+	Real pose[ 5 ];
+	const Int given = arguments.isEmpty() ? 0
+		: sscanf( arguments.str(), "%f %f %f %f %f", &pose[ 0 ], &pose[ 1 ], &pose[ 2 ], &pose[ 3 ], &pose[ 4 ] );
+	if( !arguments.isEmpty() && given != 5 )
+	{
+		result = "freecam: takes nothing, or x y z heading tilt with the angles in degrees";
+		return result;
+	}
+
+	if( given == 5 )
+	{
+		TheTacticalView->setFreeCamera( TRUE );
+		Coord3D eye;
+		eye.set( pose[ 0 ], pose[ 1 ], pose[ 2 ] );
+		TheTacticalView->setFreeCameraPose( &eye, pose[ 3 ] * PI / 180.0f, pose[ 4 ] * PI / 180.0f );
+	}
+	else if( TheTacticalView->isFreeCamera() )
+	{
+		// where it landed, in the form 'freecam x y z heading tilt' takes back
+		result.format( "freecam off, was at %s", describeFreeCameraPose().str() );
+		TheTacticalView->setFreeCamera( FALSE );
+		return result;
+	}
+	else
+	{
+		TheTacticalView->setFreeCamera( TRUE );
+	}
+
+	if( TheGameConsole )
+		TheGameConsole->closeCheatPanel();	// it would be in every picture
+	result = FREECAM_HELP;
+	return result;
+}
+
+//-------------------------------------------------------------------------------------------------
 GameConsole::GameConsole()
 	: m_isOpen( FALSE ),
 		m_historyCursor( 0 ),
@@ -178,7 +319,10 @@ GameConsole::GameConsole()
 		m_cheatPanelOpen( FALSE ),
 		m_cheatPanelShown( FALSE ),
 		m_cheatPanelLogged( FALSE ),
-		m_cheatOverlay( NULL )
+		m_cheatOverlay( NULL ),
+		m_cheatLayout( NULL ),
+		m_cheatList( NULL ),
+		m_cheatListState( -1 )
 {
 	m_font = TheFontLibrary->getFont( AsciiString( CONSOLE_FONT_NAME ),
 																		CONSOLE_FONT_POINT_SIZE,
@@ -215,6 +359,7 @@ void GameConsole::toggle( void )
 	m_isOpen = !m_isOpen;
 	if( !m_isOpen )
 		m_inputLine.clear();
+	DEBUG_LOG(( "Console: %s\n", m_isOpen ? "open" : "shut" ));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -338,6 +483,13 @@ void GameConsole::runCommand( AsciiString commandLine )
 		printLine( AsciiString( "clear         empty the scrollback" ) );
 		printLine( AsciiString( "echo <text>   print the text back" ) );
 		printLine( AsciiString( "speed [n]     game speed in percent, 100 is normal, 'reset' goes back" ) );
+		printLine( AsciiString( "get [key]     a setting by its Options.ini key; no key lists them all" ) );
+		printLine( AsciiString( "set <key> <v> change a setting and save it, e.g. 'set ShowNetBox no' hides the" ) );
+		printLine( AsciiString( "              top right info box, 'set ShowSuperweaponStrip no' the superweapon timers" ) );
+		printLine( AsciiString( "freecam       photo mode: fly the camera anywhere, the whole map drawn, no interface." ) );
+		printLine( AsciiString( "              W/S forward and back, A/D left and right, R up, F down, mouse turns," ) );
+		printLine( AsciiString( "              Shift faster; Esc or 'freecam' again lands.  'freecam x y z heading tilt'" ) );
+		printLine( AsciiString( "              flies to a pose, angles in degrees" ) );
 		if( areCheatsAvailable() )
 		{
 			printLine( AsciiString( "cheats        single-player cheats" ) );
@@ -392,6 +544,34 @@ void GameConsole::runCommand( AsciiString commandLine )
 		return;
 	}
 
+	if( command == "freecam" )
+	{
+		printLine( runFreeCamera( arguments ) );
+		// out of the way of the picture, and of the keys the camera now takes
+		if( TheTacticalView && TheTacticalView->isFreeCamera() )
+			close();
+		return;
+	}
+
+	if( command == "get" )
+	{
+		if( arguments.isEmpty() )
+		{
+			for( Int i = 0; i < TheOptionCatalogCount; ++i )
+				printLine( describeOption( TheOptionCatalog[ i ] ) );
+			return;
+		}
+		const OptionDef *def = findOptionDef( arguments.str() );
+		printLine( def == NULL ? unknownOption( "get", arguments ) : describeOption( *def ) );
+		return;
+	}
+
+	if( command == "set" )
+	{
+		printLine( runSetOption( arguments ) );
+		return;
+	}
+
 	UnicodeString unknown( u"unknown command: " );
 	UnicodeString name;
 	name.translate( command );
@@ -402,6 +582,15 @@ void GameConsole::runCommand( AsciiString commandLine )
 //-------------------------------------------------------------------------------------------------
 void GameConsole::render( void )
 {
+	if( !theStartupFreeCamera.isEmpty() && TheGameLogic->isInGame() && !TheGameLogic->isInShellGame()
+			&& TheGameLogic->getFrame() >= FREECAM_STARTUP_FRAME )
+	{
+		const AsciiString line = theStartupFreeCamera;
+		theStartupFreeCamera.clear();
+		runCommand( line );
+		DEBUG_LOG(( "-freecam: %s\n", line.str() ));
+	}
+
 	renderCheatPanel();		// under the console, which covers it when it drops
 
 	if( !m_isOpen )
@@ -411,9 +600,11 @@ void GameConsole::render( void )
 	const Int panelHeight = REAL_TO_INT( TheDisplay->getHeight() * CONSOLE_HEIGHT_FRACTION );
 	const Int lineHeight = m_font->height + CONSOLE_LINE_GAP;
 
-	TheDisplay->drawFillRect( 0, 0, screenWidth, panelHeight, CONSOLE_PANEL_COLOR );
+	// Classic wears EA's diplomacy and chat frame: its see-through black over a blue edge
+	const Bool classic = TheGlobalData->isClassicUI();
+	TheDisplay->drawFillRect( 0, 0, screenWidth, panelHeight, classic ? CONSOLE_CLASSIC_PANEL_COLOR : CONSOLE_PANEL_COLOR );
 	TheDisplay->drawFillRect( 0, panelHeight - CONSOLE_EDGE_THICKNESS,
-														screenWidth, CONSOLE_EDGE_THICKNESS, CONSOLE_EDGE_COLOR );
+														screenWidth, CONSOLE_EDGE_THICKNESS, classic ? CONSOLE_CLASSIC_EDGE_COLOR : CONSOLE_EDGE_COLOR );
 
 	Int y = panelHeight - CONSOLE_EDGE_THICKNESS - CONSOLE_PADDING - lineHeight;
 
@@ -521,13 +712,15 @@ static void fillCheatPanelCells( std::vector< HtmlValues > &cells, std::vector< 
 void GameConsole::renderCheatPanel( void )
 {
 	m_cheatPanelShown = FALSE;
-	if( !m_cheatPanelOpen )
-		return;
-	if( !areCheatsAvailable() )
-	{
+	if( m_cheatPanelOpen && !areCheatsAvailable() )
 		m_cheatPanelOpen = FALSE;
+	if( TheGlobalData->isClassicUI() )
+	{
+		updateCheatWindow();
 		return;
 	}
+	if( !m_cheatPanelOpen )
+		return;
 
 	if( m_cheatPage.empty() )
 	{
@@ -552,7 +745,7 @@ void GameConsole::renderCheatPanel( void )
 	std::vector< std::string > clicks;
 	fillCheatPanelCells( lists[ "cells" ], clicks );
 
-	m_cheatOverlay->setPage( HtmlTemplate_expand( m_cheatPage, values, lists, lookupCheatPanelText ) );
+	m_cheatOverlay->setPage( m_cheatPage, values, lists, lookupCheatPanelText );
 	m_cheatOverlay->hover( TheMouse->getMouseStatus()->pos );
 	m_cheatOverlay->draw();
 	m_cheatPanelShown = TRUE;
@@ -580,11 +773,17 @@ Bool GameConsole::handleCheatPanelMouse( const ICoord2D &mouse, Bool act )
 	if( !act )
 		return TRUE;
 
-	const std::string action = m_cheatOverlay->click( mouse );
+	runCheatPanelAction( m_cheatOverlay->click( mouse ) );
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
+void GameConsole::runCheatPanelAction( const std::string &action )
+{
 	if( action == CHEAT_PANEL_CLOSE )
 	{
 		closeCheatPanel();
-		return TRUE;
+		return;
 	}
 
 	AsciiString arguments( action.c_str() );
@@ -600,7 +799,207 @@ Bool GameConsole::handleCheatPanelMouse( const ICoord2D &mouse, Bool act )
 			DEBUG_LOG(( "Cheat panel: %s\n", result.str() ));
 		}
 	}
-	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The Classic panel's rows: a toggle is one row, an amount cheat one row for each ready amount. */
+//-------------------------------------------------------------------------------------------------
+struct CheatWindowRow
+{
+	Int cheat;
+	Int amount;		///< zero for a toggle
+};
+
+static const Int CHEAT_WINDOW_MAX_ROWS = CONSOLE_CHEAT_COUNT * CHEAT_PANEL_AMOUNTS;
+
+static Int cheatWindowRows( CheatWindowRow *rows )
+{
+	Int count = 0;
+	for( Int i = 0; i < CONSOLE_CHEAT_COUNT; ++i )
+	{
+		const ConsoleCheat &cheat = CONSOLE_CHEATS[ i ];
+		for( Int each = 0; each < CHEAT_PANEL_AMOUNTS && ( each == 0 || cheat.amounts[ each ] != 0 ); ++each )
+		{
+			rows[ count ].cheat = i;
+			rows[ count ].amount = cheat.amounts[ each ];
+			++count;
+			if( cheat.defaultAmount == 0 )
+				break;
+		}
+	}
+	return count;
+}
+
+static std::string cheatWindowAction( const CheatWindowRow &row )
+{
+	const ConsoleCheat &cheat = CONSOLE_CHEATS[ row.cheat ];
+	if( row.amount == 0 )
+		return cheat.name;
+	char text[ 64 ];
+	sprintf( text, "%s %d", cheat.name, row.amount );
+	return text;
+}
+
+/// EA's diplomacy text colours: white, and the green its rows light in
+static const Color CHEAT_WINDOW_TEXT_COLOR = GameMakeColor( 254, 254, 254, 255 );
+static const Color CHEAT_WINDOW_ON_COLOR = GameMakeColor( 3, 196, 0, 255 );
+
+static WindowMsgHandledType cheatWindowSystem( GameWindow *window, UnsignedInt msg, WindowMsgData mData1, WindowMsgData mData2 )
+{
+	static const NameKeyType buttonHideID = NAMEKEY( "Trainer.wnd:ButtonHide" );
+	switch( msg )
+	{
+		case GBM_SELECTED:
+			if( ((GameWindow *)mData1)->winGetWindowId() == buttonHideID )
+				TheGameConsole->closeCheatPanel();
+			return MSG_HANDLED;
+		case GLM_SELECTED:
+			TheGameConsole->runCheatWindowRow( (Int)mData2 );
+			return MSG_HANDLED;
+	}
+	return MSG_IGNORED;
+}
+
+//-------------------------------------------------------------------------------------------------
+void GameConsole::runCheatWindowRow( Int row )
+{
+	CheatWindowRow rows[ CHEAT_WINDOW_MAX_ROWS ];
+	if( row < 0 || row >= cheatWindowRows( rows ) )
+		return;
+	runCheatPanelAction( cheatWindowAction( rows[ row ] ) );
+	GadgetListBoxSetSelected( m_cheatList, -1 );	// so a second click on the same row runs it again
+}
+
+//-------------------------------------------------------------------------------------------------
+void GameConsole::resetCheatWindow( void )
+{
+	if( m_cheatLayout )
+	{
+		m_cheatLayout->destroyWindows();
+		m_cheatLayout->deleteInstance();
+	}
+	m_cheatLayout = NULL;
+	m_cheatList = NULL;
+	m_cheatListState = -1;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The Classic interface's panel: Window/Trainer.wnd, EA's diplomacy frame with one list row for
+	* each click, and a toggle's row green while it is on.  The windows are thrown away when it
+	* shuts, never from inside their own callback. */
+//-------------------------------------------------------------------------------------------------
+void GameConsole::updateCheatWindow( void )
+{
+	if( !m_cheatPanelOpen )
+	{
+		resetCheatWindow();
+		return;
+	}
+
+	CheatWindowRow rows[ CHEAT_WINDOW_MAX_ROWS ];
+	const Int rowCount = cheatWindowRows( rows );
+	if( m_cheatLayout == NULL )
+	{
+		m_cheatLayout = TheWindowManager->winCreateLayout( AsciiString( "Trainer.wnd" ) );
+		GameWindow *parent = m_cheatLayout ? m_cheatLayout->getFirstWindow() : NULL;
+		m_cheatList = parent ? TheWindowManager->winGetWindowFromId( parent, NAMEKEY( "Trainer.wnd:ListboxCheats" ) ) : NULL;
+		if( m_cheatList == NULL )
+		{
+			printLine( AsciiString( "trainer: Window/Trainer.wnd is missing" ) );
+			resetCheatWindow();
+			m_cheatPanelOpen = FALSE;
+			return;
+		}
+		parent->winSetSystemFunc( cheatWindowSystem );
+		for( Int row = 0; row < rowCount; ++row )
+			GadgetListBoxAddEntryText( m_cheatList, TheGameText->fetch( CONSOLE_CHEATS[ rows[ row ].cheat ].label ),
+																 CHEAT_WINDOW_TEXT_COLOR, -1, 0 );
+		m_cheatLayout->hide( FALSE );
+	}
+
+	const Player *local = ThePlayerList->getLocalPlayer();
+	Int state = 0;
+	for( Int i = 0; i < CONSOLE_CHEAT_COUNT; ++i )
+		if( CONSOLE_CHEATS[ i ].defaultAmount == 0 && local->hasCheat( CONSOLE_CHEATS[ i ].kind ) )
+			state |= 1 << i;
+	if( state == m_cheatListState )
+		return;
+	const Bool firstFill = m_cheatListState < 0;
+	m_cheatListState = state;
+
+	for( Int row = 0; row < rowCount; ++row )
+	{
+		const ConsoleCheat &cheat = CONSOLE_CHEATS[ rows[ row ].cheat ];
+		const Bool on = rows[ row ].amount == 0 && ( state & ( 1 << rows[ row ].cheat ) ) != 0;
+		UnicodeString text;
+		if( rows[ row ].amount == 0 )
+			text = TheGameText->fetch( on ? "GUI:CheatOn" : "GUI:CheatOff" );
+		else if( cheat.amounts[ 1 ] == 0 )
+			text = TheGameText->fetch( "GUI:CheatApply" );
+		else
+			text.format( u"+%d", rows[ row ].amount );
+		const Color color = on ? CHEAT_WINDOW_ON_COLOR : CHEAT_WINDOW_TEXT_COLOR;
+		GadgetListBoxAddEntryText( m_cheatList, TheGameText->fetch( cheat.label ), color, row, 0 );
+		GadgetListBoxAddEntryText( m_cheatList, text, color, row, 1 );
+	}
+
+	// where each row landed, so a script driving the game over -control knows where to click
+	if( firstFill )
+	{
+		const ListboxData *list = (const ListboxData *)m_cheatList->winGetUserData();
+		Int x, y, width, height;
+		m_cheatList->winGetScreenPosition( &x, &y );
+		m_cheatList->winGetSize( &width, &height );
+		for( Int row = 0; list && row < rowCount && row < list->endPos; ++row )
+		{
+			const Int top = row > 0 ? list->listData[ row - 1 ].listHeight : 0;
+			DEBUG_LOG(( "Cheat window: \"%s\" at %d %d\n", cheatWindowAction( rows[ row ] ).c_str(),
+									x + width / 2, y + ( top + list->listData[ row ].listHeight ) / 2 ));
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** While the freecam flies every key is the camera's, so nothing reaches a hotkey or an order:
+	* W/A/S/D/R/F are held for the flight, Esc lands on its release (the press is eaten too, so the
+	* quit menu never sees either half), and F12 still takes a picture. */
+//-------------------------------------------------------------------------------------------------
+static UnsignedInt theFreeCameraKeys = 0;
+
+static GameMessageDisposition translateFreeCameraKey( UnsignedByte key, UnsignedShort keyState )
+{
+	const Bool down = BitTest( keyState, KEY_STATE_DOWN );
+	UnsignedInt bit = 0;
+	switch( key )
+	{
+		case KEY_W: bit = View::FREECAM_FORWARD; break;
+		case KEY_S: bit = View::FREECAM_BACK; break;
+		case KEY_A: bit = View::FREECAM_LEFT; break;
+		case KEY_D: bit = View::FREECAM_RIGHT; break;
+		case KEY_R: bit = View::FREECAM_UP; break;
+		case KEY_F: bit = View::FREECAM_DOWN; break;
+
+		case KEY_ESC:
+			if( !down )
+			{
+				TheGameConsole->printLine( runFreeCamera( AsciiString::TheEmptyString ) );
+				theFreeCameraKeys = 0;
+			}
+			return DESTROY_MESSAGE;
+
+		case KEY_F12:
+			return KEEP_MESSAGE;
+	}
+
+	if( bit != 0 )
+	{
+		if( down )
+			theFreeCameraKeys |= bit;
+		else
+			theFreeCameraKeys &= ~bit;
+		TheTacticalView->setFreeCameraKeys( theFreeCameraKeys );
+	}
+	return DESTROY_MESSAGE;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -608,6 +1007,10 @@ GameMessageDisposition GameConsoleTranslator::translateGameMessage( const GameMe
 {
 	if( TheGameConsole == NULL )
 		return KEEP_MESSAGE;
+
+	const Bool freeCamera = TheTacticalView && TheTacticalView->isFreeCamera();
+	if( !freeCamera )
+		theFreeCameraKeys = 0;
 
 	switch( msg->getType() )
 	{
@@ -627,9 +1030,18 @@ GameMessageDisposition GameConsoleTranslator::translateGameMessage( const GameMe
 
 			if( TheGameConsole->isOpen() )
 			{
+				// a flight key let go while the console had it would otherwise stay held
+				if( freeCamera && theFreeCameraKeys != 0 )
+				{
+					theFreeCameraKeys = 0;
+					TheTacticalView->setFreeCameraKeys( 0 );
+				}
 				TheGameConsole->handleKey( key, keyState );
 				return DESTROY_MESSAGE;
 			}
+
+			if( freeCamera )
+				return translateFreeCameraKey( key, keyState );
 
 			// Esc shuts the cheat panel rather than opening the quit menu: the press is eaten, and the
 			// release shuts it so that release is not left to open the menu either
@@ -645,8 +1057,13 @@ GameMessageDisposition GameConsoleTranslator::translateGameMessage( const GameMe
 		// the wheel carries no position, and the cursor's moves are everybody's
 		case GameMessage::MSG_RAW_MOUSE_POSITION:
 		case GameMessage::MSG_RAW_MOUSE_WHEEL:
-			return KEEP_MESSAGE;
+			return freeCamera ? DESTROY_MESSAGE : KEEP_MESSAGE;
 	}
+
+	// the freecam's mouse only turns the view (W3DView reads the pointer itself): no click selects,
+	// orders or scrolls anything while it flies
+	if( freeCamera && msg->getType() > GameMessage::MSG_RAW_MOUSE_BEGIN && msg->getType() < GameMessage::MSG_RAW_MOUSE_END )
+		return DESTROY_MESSAGE;
 
 	// A press on the cheat panel is the panel's, and so is everything that button does until it is
 	// let go, wherever the pointer has gone by then: nothing after this sees a press it never saw

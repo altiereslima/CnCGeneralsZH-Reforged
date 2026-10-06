@@ -2,6 +2,7 @@
 # shipping one so both exes can sit in Run/ at once (THREADING-ROADMAP.md section 0).
 build/
 build-perf/
+build-fx/
 # build-mac/ and build-linux/ are build-macos.sh's and build-linux.sh's trees (see PORTING.md).
 build-mac/
 build-linux/

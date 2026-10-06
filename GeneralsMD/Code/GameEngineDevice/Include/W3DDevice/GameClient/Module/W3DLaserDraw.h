@@ -97,6 +97,7 @@ public:
 protected:
 
 	SegmentedLineClass **m_line3D;  ///< line 3D for effect
+	SegmentedLineClass **m_glow3D;  ///< halo and hot core per segment, NULL for beams that do not glow
 	TextureClass *m_texture;
 	Real m_textureAspectRatio;			///< aspect ratio of texture
 	Bool m_selfDirty;								// not saved

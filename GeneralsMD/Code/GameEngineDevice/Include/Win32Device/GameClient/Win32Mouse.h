@@ -79,6 +79,7 @@ public:
 	virtual void releaseCapture( void );						///< release mouse capture
 
 	virtual void setVisibility(Bool visible);
+	virtual Bool warpCursor( Int x, Int y );
 
 	virtual Bool isCursorInWindow( void ) const { return m_cursorInWindow; }
 

@@ -1,0 +1,6 @@
+# Zero Hour Reforged trailer, beat 28 (ST_SNOW): Scenarios/rf_snow.txt on Winter Wolf, the fight on
+# the bright open snow from the south-east with a slow ten degree turn, the A-10 run at 10 s.
+
+3.0   cut     1100 1120 0.42 -45 10
+5.1   orbit   10 13
+20.3  end

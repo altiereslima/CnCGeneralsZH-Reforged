@@ -366,7 +366,11 @@ class MetaMap : public SubsystemInterface
 	friend class MetaEventTranslator;
 
 private:
-	MetaMapRec *m_metaMaps;
+	MetaMapRec *m_metaMaps;				///< Reforged: the language's CommandMap.ini with CommandMapReforged.ini over it
+	MetaMapRec *m_classicMaps;		///< Classic: the language's CommandMap.ini alone, the game's own keys
+	Bool m_parsingClassic;				///< parseMetaMap is filling m_classicMaps
+
+	static void freeList( MetaMapRec *&list );
 
 protected:
 	GameMessage::Type findGameMessageMetaType(const char* name);
@@ -383,7 +387,14 @@ public:
 
 	static void parseMetaMap(INI* ini);
 
-	const MetaMapRec *getFirstMetaMapRec() const { return m_metaMaps; }
+	/** Fill the Classic list from the language's CommandMap.ini alone, the game's own map out of its
+		* own archives.  Everything this fork binds is in CommandMapReforged.ini, and only the Reforged
+		* list reads that. */
+	void loadClassicBindings( const AsciiString& languageMapFile );
+
+	/// the bindings the interface style in use answers to
+	const MetaMapRec *getFirstMetaMapRec() const;
+	const MetaMapRec *getFirstMetaMapRec( Bool classic ) const { return classic ? m_classicMaps : m_metaMaps; }
 };
 
 extern MetaMap *TheMetaMap;

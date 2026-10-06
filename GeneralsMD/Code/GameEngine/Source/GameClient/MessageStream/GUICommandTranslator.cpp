@@ -230,7 +230,9 @@ static CommandStatus doGuardCommand( const CommandButton *command, GuardMode gua
 			msg = TheMessageStream->appendMessage( GameMessage::MSG_DO_GUARD_OBJECT );
 			msg->appendObjectIDArgument( target->getID() );
 			msg->appendIntegerArgument(guardMode);
-			msg->appendRealArgument( TheInGameUI->getAreaPickRadius() );
+			// Classic sends the game's own guard and the logic guards its standard range
+			if( !TheGlobalData->isClassicUI() )
+				msg->appendRealArgument( TheInGameUI->getAreaPickRadius() );
 			pickAndPlayUnitVoiceResponse(TheInGameUI->getAllSelectedDrawables(), GameMessage::MSG_DO_GUARD_OBJECT);
 		}
 	}
@@ -255,7 +257,8 @@ static CommandStatus doGuardCommand( const CommandButton *command, GuardMode gua
 		msg = TheMessageStream->appendMessage( GameMessage::MSG_DO_GUARD_POSITION );
 		msg->appendLocationArgument(world);
 		msg->appendIntegerArgument(guardMode);
-		msg->appendRealArgument( TheInGameUI->getAreaPickRadius() );
+		if( !TheGlobalData->isClassicUI() )
+			msg->appendRealArgument( TheInGameUI->getAreaPickRadius() );
 		pickAndPlayUnitVoiceResponse(TheInGameUI->getAllSelectedDrawables(), GameMessage::MSG_DO_GUARD_POSITION);
 	}
 

@@ -69,20 +69,47 @@ std::string trimmed( const std::string &text )
 	return text.substr( first, last - first );
 }
 
-void appendEscaped( std::string &out, const std::string &text )
+/** Where a page is filled in: onto the end of `out`, or, with `against` set instead, over a page
+	* already made, to learn whether it would come out the same without making it. */
+struct Sink
 {
+	std::string *out;
+	const std::string *against;
+	size_t at;
+	Bool same;
+
+	void put( const char *text, size_t length )
+	{
+		if( out )
+		{
+			out->append( text, length );
+			return;
+		}
+		same = same && at + length <= against->size() && memcmp( against->data() + at, text, length ) == 0;
+		at += length;
+	}
+};
+
+void putEscaped( Sink &sink, const std::string &text )
+{
+	size_t run = 0;
 	for( size_t index = 0; index < text.size(); index++ )
 	{
+		const char *entity = NULL;
 		switch( text[ index ] )
 		{
-			case '&':		out += "&amp;"; break;
-			case '<':		out += "&lt;"; break;
-			case '>':		out += "&gt;"; break;
-			case '"':		out += "&quot;"; break;
-			case '\'':	out += "&#39;"; break;
-			default:		out += text[ index ]; break;
+			case '&':		entity = "&amp;"; break;
+			case '<':		entity = "&lt;"; break;
+			case '>':		entity = "&gt;"; break;
+			case '"':		entity = "&quot;"; break;
+			case '\'':	entity = "&#39;"; break;
+			default:		continue;
 		}
+		sink.put( text.data() + run, index - run );
+		sink.put( entity, strlen( entity ) );
+		run = index + 1;
 	}
+	sink.put( text.data() + run, text.size() - run );
 }
 
 /** A stretch of page: literal text, or the trimmed name inside one {{name}}. */
@@ -123,14 +150,14 @@ void split( const std::string &text, Pieces &pieces )
 	}
 }
 
-void fill( std::string &out, const Pieces &pieces, const HtmlValues *entry, const HtmlValues &values,
+void fill( Sink &sink, const Pieces &pieces, const HtmlValues *entry, const HtmlValues &values,
 					 const HtmlLookup &lookup, std::string &looked )
 {
-	for( Pieces::const_iterator piece = pieces.begin(); piece != pieces.end(); ++piece )
+	for( Pieces::const_iterator piece = pieces.begin(); piece != pieces.end() && sink.same; ++piece )
 	{
 		if( !piece->name )
 		{
-			out += piece->text;
+			sink.put( piece->text.data(), piece->text.size() );
 			continue;
 		}
 
@@ -139,7 +166,7 @@ void fill( std::string &out, const Pieces &pieces, const HtmlValues *entry, cons
 			HtmlValues::const_iterator found = entry->find( piece->text );
 			if( found != entry->end() )
 			{
-				appendEscaped( out, found->second );
+				putEscaped( sink, found->second );
 				continue;
 			}
 		}
@@ -147,13 +174,13 @@ void fill( std::string &out, const Pieces &pieces, const HtmlValues *entry, cons
 		HtmlValues::const_iterator found = values.find( piece->text );
 		if( found != values.end() )
 		{
-			appendEscaped( out, found->second );
+			putEscaped( sink, found->second );
 			continue;
 		}
 
 		looked.clear();
 		if( lookup && lookup( piece->text, looked ) )
-			appendEscaped( out, looked );
+			putEscaped( sink, looked );
 	}
 }
 
@@ -225,19 +252,9 @@ void compile( const std::string &written, Blocks &blocks )
 	}
 }
 
-}	// namespace
-
-//-------------------------------------------------------------------------------------------------
-std::string HtmlTemplate_escape( const std::string &text )
-{
-	std::string escaped;
-	appendEscaped( escaped, text );
-	return escaped;
-}
-
-//-------------------------------------------------------------------------------------------------
-std::string HtmlTemplate_expand( const std::string &written, const HtmlValues &values,
-																 const HtmlLists &lists, const HtmlLookup &lookup )
+/** The page filled in into `sink`. */
+void expandInto( Sink &sink, const std::string &written, const HtmlValues &values, const HtmlLists &lists,
+								 const HtmlLookup &lookup )
 {
 	// the command bar's page alone is 38 KB and was lowercased and searched four times a frame;
 	// keyed by its text, so a page that changes is cut again rather than served stale.
@@ -250,23 +267,51 @@ std::string HtmlTemplate_expand( const std::string &written, const HtmlValues &v
 		compile( written, found->second );
 	}
 
-	std::string out;
-	out.reserve( written.size() );
 	std::string looked;
-	for( Blocks::const_iterator block = found->second.begin(); block != found->second.end(); ++block )
+	for( Blocks::const_iterator block = found->second.begin(); block != found->second.end() && sink.same; ++block )
 	{
 		if( !block->each )
 		{
-			fill( out, block->pieces, NULL, values, lookup, looked );
+			fill( sink, block->pieces, NULL, values, lookup, looked );
 			continue;
 		}
 
 		HtmlLists::const_iterator list = lists.find( block->list );
 		if( list != lists.end() )
-			for( size_t entry = 0; entry < list->second.size(); entry++ )
-				fill( out, block->pieces, &list->second[ entry ], values, lookup, looked );
+			for( size_t entry = 0; entry < list->second.size() && sink.same; entry++ )
+				fill( sink, block->pieces, &list->second[ entry ], values, lookup, looked );
 	}
+}
+
+}	// namespace
+
+//-------------------------------------------------------------------------------------------------
+std::string HtmlTemplate_escape( const std::string &text )
+{
+	std::string escaped;
+	Sink sink = { &escaped, NULL, 0, TRUE };
+	putEscaped( sink, text );
+	return escaped;
+}
+
+//-------------------------------------------------------------------------------------------------
+std::string HtmlTemplate_expand( const std::string &written, const HtmlValues &values,
+																 const HtmlLists &lists, const HtmlLookup &lookup )
+{
+	std::string out;
+	out.reserve( written.size() );
+	Sink sink = { &out, NULL, 0, TRUE };
+	expandInto( sink, written, values, lists, lookup );
 	return out;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool HtmlTemplate_matches( const std::string &written, const HtmlValues &values, const HtmlLists &lists,
+													 const HtmlLookup &lookup, const std::string &expanded )
+{
+	Sink sink = { NULL, &expanded, 0, TRUE };
+	expandInto( sink, written, values, lists, lookup );
+	return sink.same && sink.at == expanded.size();
 }
 
 //-------------------------------------------------------------------------------------------------

@@ -1045,10 +1045,11 @@ protected:
 			PhysicsBehavior *objectPhysics = obj->getPhysics();
 			if( sourcePhysics && objectPhysics )
 			{
-				// this is a velocity, not a force: applyForce divides by mass, so heavy debris
-				// used to inherit almost none of its source's motion.
-				objectPhysics->addVelocityTo( sourcePhysics->getVelocity() );
-			}
+				// EA's: the source's velocity applied as a force, so the new object keeps 1/mass of it.
+				// EA's masses are tuned against that. A Dragon's fire wall segment (mass 50) took the
+				// whole 9 units a frame of the flame that spawned it as a velocity and slid up to 1000
+				// units away; a napalm bomb (mass 75) would fly on as fast as its plane.
+				objectPhysics->applyForce( sourcePhysics->getVelocity() );			}
 		}
 
 		if( BitTest( m_disposition, LIKE_EXISTING ) )

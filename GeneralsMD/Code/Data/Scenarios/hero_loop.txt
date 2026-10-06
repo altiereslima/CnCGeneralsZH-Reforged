@@ -1,0 +1,141 @@
+# Website hero loop: the trailer_chaos_v2 four-way fight at 2450,2450 on Twilight Flame (copied in
+# whole, because -scenario is not repeatable: a second -scenario replaces the first), with two more
+# waves, a second round of general's powers and more superweapons so the middle stays full and lit
+# for frames 600 to 1019, fourteen seconds, where trailer_chaos_v2 is built for 600 to 899. A
+# quarter of its helicopters: attack-moved on one point they hover there in a stack, and at the
+# full count they covered the ground fight in the middle of the frame.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer
+#     -multiInstance -particlecap 30000 -map "Maps\Twilight Flame\Twilight Flame.map"
+#     -autoskirmish 4 -takeover -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA
+#     -side 3 FactionChinaTankGeneral -seed 7 -scenario hero_loop -cinema hero_loop
+#     -video 600 1019 hero_loop -maxframes 1040
+# --- the buildings, at the start positions, far out of frame ------------------------------------
+10    spawn      0  AmericaParticleCannonUplink     1   start0:0:-200
+10    spawn      0  AmericaPowerPlant               3   start0:-260:40    90
+10    spawn      0  AmericaCommandCenter            1   start0:240:60
+10    spawn      1  ChinaNuclearMissileLauncher     1   start1:0:200
+10    spawn      1  ChinaPowerPlant                 3   start1:260:-40    90
+10    spawn      1  ChinaCommandCenter              1   start1:-260:60
+10    spawn      2  GLAScudStorm                    1   start2:0:200
+10    spawn      2  GLACommandCenter                1   start2:-260:0
+10    spawn      3  Tank_ChinaNuclearMissileLauncher 1  start3:0:-200
+10    spawn      3  Tank_ChinaPowerPlant            3   start3:260:40     90
+10    spawn      3  Tank_ChinaCommandCenter         1   start3:-260:-60
+# --- America, from screen left --------------------------------------------------------------
+150   spawn      0  AmericaTankCrusader             25  2075 2556  34
+150   spawn      0  AmericaTankCrusader             25  2344 2825  34
+150   spawn      0  AmericaTankPaladin              16  2210 2690  38
+150   spawn      0  AmericaInfantryRanger           40  2054 2704  14
+150   spawn      0  AmericaInfantryMissileDefender  30  2196 2846  14
+150   spawn      0  AmericaVehicleTomahawk          10  2040 2860  40
+150   spawn      0  AmericaTankMicrowave            6   2040 2860  40
+150   spawn      0  AmericaVehicleHumvee            12  2054 2704  36
+150   spawn      0  AmericaVehicleComanche          3   2210 2690  60
+150   spawn      0  AmericaJetRaptor                8   2040 2860  70
+# --- China, from the far side -----------------------------------------------------------------
+150   spawn      1  ChinaTankBattleMaster           25  2577 2846  36
+150   spawn      1  ChinaTankBattleMaster           25  2846 2577  36
+150   spawn      1  ChinaTankOverlord               12  2711 2711  50
+150   spawn      1  ChinaTankGattling               12  2726 2867  36
+150   spawn      1  ChinaTankDragon                 10  2867 2726  36
+150   spawn      1  ChinaVehicleInfernoCannon       8   2881 2881  40
+150   spawn      1  ChinaVehicleNukeLauncher        4   2881 2881  50
+150   spawn      1  ChinaInfantryRedguard           40  2726 2867  14
+150   spawn      1  ChinaInfantryTankHunter         25  2867 2726  14
+150   spawn      1  ChinaVehicleHelix               2   2711 2711  60
+150   spawn      1  ChinaJetMIG                     10  2881 2881  70
+# --- the GLA, from screen right ---------------------------------------------------------------
+150   spawn      2  GLATankScorpion                 25  2556 2075  34
+150   spawn      2  GLATankScorpion                 25  2825 2344  34
+150   spawn      2  GLATankMarauder                 14  2690 2210  40
+150   spawn      2  GLAVehicleRocketBuggy           14  2704 2054  32
+150   spawn      2  GLAVehicleQuadCannon            10  2846 2196  36
+150   spawn      2  GLAVehicleToxinTruck            8   2860 2040  36
+150   spawn      2  GLAVehicleTechnical             14  2860 2040  30
+150   spawn      2  GLAVehicleBattleBus             6   2690 2210  40
+150   spawn      2  GLAInfantryRebel                40  2704 2054  14
+150   spawn      2  GLAInfantryTunnelDefender       30  2846 2196  14
+# --- the Tank General, from under the camera --------------------------------------------------
+150   spawn      3  Tank_ChinaTankEmperor           14  2189 2189  50
+150   spawn      3  Tank_ChinaTankBattleMaster      25  2054 2323  36
+150   spawn      3  Tank_ChinaTankBattleMaster      25  2323 2054  36
+150   spawn      3  Tank_ChinaTankGattling          12  2033 2174  36
+150   spawn      3  Tank_ChinaTankDragon            10  2174 2033  36
+150   spawn      3  Tank_ChinaInfantryRedguard      40  2033 2174  14
+150   spawn      3  Tank_ChinaInfantryTankHunter    25  2174 2033  14
+150   spawn      3  Tank_ChinaVehicleHelix          2   2189 2189  60
+150   spawn      3  Tank_ChinaJetMIG                10  2019 2019  70
+160   attackmove 0  *  2450 2450
+160   attackmove 1  *  2450 2450
+160   attackmove 2  *  2450 2450
+160   attackmove 3  *  2450 2450
+# --- waves from the same ground, so the fight is fed all through the fourteen seconds ----------
+420   spawn      0  AmericaTankCrusader             20  2210 2690  34
+420   spawn      0  AmericaInfantryRanger           30  2054 2704  14
+420   spawn      1  ChinaTankBattleMaster           20  2711 2711  36
+420   spawn      1  ChinaInfantryRedguard           30  2726 2867  14
+420   spawn      2  GLATankScorpion                 20  2690 2210  34
+420   spawn      2  GLAInfantryRebel                30  2704 2054  14
+420   spawn      3  Tank_ChinaTankBattleMaster      20  2189 2189  36
+420   spawn      3  Tank_ChinaInfantryRedguard      30  2033 2174  14
+430   attackmove 0  *  2450 2450
+430   attackmove 1  *  2450 2450
+430   attackmove 2  *  2450 2450
+430   attackmove 3  *  2450 2450
+540   spawn      0  AmericaTankPaladin              12  2210 2690  38
+540   spawn      1  ChinaTankOverlord               8   2711 2711  50
+540   spawn      2  GLATankMarauder                 12  2690 2210  40
+540   spawn      2  GLAVehicleRocketBuggy           10  2704 2054  32
+540   spawn      3  Tank_ChinaTankEmperor           8   2189 2189  50
+550   attackmove 0  *  2450 2450
+550   attackmove 1  *  2450 2450
+550   attackmove 2  *  2450 2450
+550   attackmove 3  *  2450 2450
+660   spawn      0  AmericaTankCrusader             20  2210 2690  34
+660   spawn      0  AmericaTankPaladin              8   2075 2556  38
+660   spawn      0  AmericaInfantryRanger           30  2054 2704  14
+660   spawn      1  ChinaTankBattleMaster           20  2711 2711  36
+660   spawn      1  ChinaTankOverlord               6   2846 2577  50
+660   spawn      1  ChinaInfantryRedguard           30  2726 2867  14
+660   spawn      2  GLATankScorpion                 20  2690 2210  34
+660   spawn      2  GLATankMarauder                 8   2556 2075  40
+660   spawn      2  GLAInfantryRebel                30  2704 2054  14
+660   spawn      3  Tank_ChinaTankBattleMaster      20  2189 2189  36
+660   spawn      3  Tank_ChinaTankEmperor           6   2323 2054  50
+660   spawn      3  Tank_ChinaInfantryRedguard      30  2033 2174  14
+670   attackmove 0  *  2450 2450
+670   attackmove 1  *  2450 2450
+670   attackmove 2  *  2450 2450
+670   attackmove 3  *  2450 2450
+800   spawn      0  AmericaTankCrusader             20  2210 2690  34
+800   spawn      0  AmericaTankPaladin              8   2075 2556  38
+800   spawn      1  ChinaTankBattleMaster           20  2711 2711  36
+800   spawn      1  ChinaTankOverlord               4   2846 2577  50
+800   spawn      2  GLATankScorpion                 20  2690 2210  34
+800   spawn      2  GLAVehicleRocketBuggy           10  2704 2054  32
+800   spawn      3  Tank_ChinaTankBattleMaster      20  2189 2189  36
+800   spawn      3  Tank_ChinaTankGattling          8   2033 2174  36
+810   attackmove 0  *  2450 2450
+810   attackmove 1  *  2450 2450
+810   attackmove 2  *  2450 2450
+810   attackmove 3  *  2450 2450
+# --- the sky: a general's power reaches its target about 400 frames after the call ------------
+200   power      0  AmericaCommandCenter     2450 2450  SuperweaponSpectreGunship
+240   power      0  AmericaCommandCenter     2302 2514  SuperweaponA10ThunderboltMissileStrike
+290   power      1  ChinaCommandCenter       2613 2401  Early_SuperweaponChinaCarpetBomb
+330   power      2  GLACommandCenter         2549 2634  SuperweaponAnthraxBomb
+360   power      3  Tank_ChinaCommandCenter  2337 2620  SuperweaponChinaCarpetBomb
+400   power      3  Tank_ChinaCommandCenter  2521 2238  Tank_SuperweaponTankParadrop
+460   power      0  AmericaCommandCenter     2400 2500  SuperweaponA10ThunderboltMissileStrike
+500   power      1  ChinaCommandCenter       2500 2400  Early_SuperweaponChinaCarpetBomb
+540   power      3  Tank_ChinaCommandCenter  2420 2380  SuperweaponChinaCarpetBomb
+580   power      2  GLACommandCenter         2480 2520  SuperweaponAnthraxBomb
+# --- the superweapons: the beam lands 75 frames after the call and stays 300, a nuke takes about
+# 170 frames from the silo, the SCUDs about 130 ---------------------------------------------------
+525   power      0  AmericaParticleCannonUplink       2521 2464
+535   power      3  Tank_ChinaNuclearMissileLauncher  2351 2719
+620   power      2  GLAScudStorm                      2478 2365
+655   power      1  ChinaNuclearMissileLauncher       2761 2365
+760   power      2  GLAScudStorm                      2400 2470
+830   power      0  AmericaParticleCannonUplink       2420 2500

@@ -534,7 +534,7 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 					Drawable *nextBuilder = builderObj ? builderObj->getDrawable() : NULL;
 					if( row )
 						TheInGameUI->placeBuildAvailable( NULL, NULL );
-					else if( TheKeyboard && TheKeyboard->isShift() && nextBuilder )
+					else if( TheKeyboard && TheKeyboard->isShift() && nextBuilder && !TheGlobalData->isClassicUI() )
 						TheInGameUI->placeBuildAvailable( build, nextBuilder );
 					else
 						TheInGameUI->placeBuildAvailable( NULL, NULL );

@@ -260,7 +260,7 @@ SDL_GPUShader *generatedShader(SDL_GPUDevice *device, const std::string &hlsl, b
 // The mesh draw's fixed-function state, as W3D sets it for a lit, textured, uncoloured mesh.
 VertexPipelineDescription meshVertexState()
 {
-	VertexPipelineDescription description = VertexPipelineDescription();	// zero, and NormalMapped false
+	VertexPipelineDescription description = VertexPipelineDescription();	// zero, and the flags false
 	description.FVF = FF_FVF_XYZ | FF_FVF_NORMAL | FF_FVF_TEX1;
 	description.LightingEnabled = true;
 	description.LightCount = 1;
@@ -294,7 +294,6 @@ CombinerDescription meshPixelState(bool alphaTest)
 	memset(&description.PixelPipeline, 0, sizeof(description.PixelPipeline));
 	description.PixelPipeline.AlphaTestEnabled = alphaTest;
 	description.PixelPipeline.AlphaFunction = FF_CMP_GREATEREQUAL;
-	description.NormalMapped = false;
 	description.ShadowReceiving = false;
 	return description;
 }

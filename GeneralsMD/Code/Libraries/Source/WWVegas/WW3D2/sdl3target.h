@@ -49,9 +49,9 @@
 **   5. Every texture read through its own sampler, at its own slot.  SDL binds textures and
 **      samplers as pairs, slot n being texture n with sampler n, and SDL_shadercross pairs them by
 **      that rule too: a texture read through another slot's sampler is given no slot of its own and
-**      collides with texture 0 on Metal.  The generators do exactly that with the normal map (t4),
-**      read through stage 0's sampler - and in the bumped terrain through stage 1's as well, for the
-**      far layer.  So each such read is rebound:
+**      collides with texture 0 on Metal.  The generators did exactly that with the normal map (t4),
+**      read through stage 0's sampler, until the normal maps were taken out on 2026-10-06; the
+**      rebinding stays for any such read.  So each such read is rebound:
 **        - the reads through the lowest-numbered sampler keep the texture's own slot, with a sampler
 **          of that slot beside it;
 **        - the reads through any other sampler read a second name for the same texture, at the next

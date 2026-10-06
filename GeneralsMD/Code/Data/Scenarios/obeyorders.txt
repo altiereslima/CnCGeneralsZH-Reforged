@@ -1,0 +1,69 @@
+# How fast a vehicle in the middle of a fight takes up a new order. Five rows of two vehicles each
+# shell a building 150 east of them. At frame 240 every row is told to attack the ground 120 behind
+# it (the attack key on open ground), at 480 to attack its building again, and at 720 to drive 200
+# west. respond lines measure, from the order, the frames to the gun pointing within 15 degrees of
+# the new point, to the first shot fired with it pointed there, and to standing 20 closer.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 900
+#     -scenario obeyorders -logPrefix obey_
+#
+# Measured 2026-10-06 (HEADLESS RESPOND, frames from the frame-240 ground order, mean/worst). Before,
+# the terrain line test read the ground point as hidden for one Battlemaster and both Scorpions; they
+# took an approach path to a "clear" spot (the Scorpions to 905,4015, 140 off) and drove there with
+# the turret firing: Battlemaster aimed 61.5/81, first aimed shot 64.5/84; Scorpions wandered about
+# 200 and their frame-480 re-attack fired 166/184. After (the point looked at from the shooter's
+# height): Battlemaster aimed 42/42, shot 45/45; Scorpions stand, re-attack shot 54/54. Crusader
+# 28/42, Rocket Buggy 56/60 and Tomahawk (mid clip reload) unchanged: turret turn and reload.
+
+10    spawn         1  ChinaCommandCenter        1   1260 3500
+10    spawn         1  ChinaWarFactory           1   1260 3700
+10    spawn         1  ChinaBarracks             1   1260 3900
+10    spawn         1  ChinaSupplyCenter         1   1260 4100
+10    spawn         1  ChinaPropagandaCenter     1   1260 4300
+
+20    spawn         0  AmericaTankCrusader       2   1100 3500 40
+20    spawn         0  ChinaTankBattleMaster     2   1100 3700 40
+20    spawn         0  GLATankScorpion           2   1100 3900 40
+20    spawn         0  GLAVehicleRocketBuggy     2   1100 4100 40
+20    spawn         0  AmericaVehicleTomahawk    2   1100 4300 40
+
+40    forceattack   0  AmericaTankCrusader       1  ChinaCommandCenter
+40    forceattack   0  ChinaTankBattleMaster     1  ChinaWarFactory
+40    forceattack   0  GLATankScorpion           1  ChinaBarracks
+40    forceattack   0  GLAVehicleRocketBuggy     1  ChinaSupplyCenter
+40    forceattack   0  AmericaVehicleTomahawk    1  ChinaPropagandaCenter
+
+240   forceground   0  AmericaTankCrusader       980 3500
+240   forceground   0  ChinaTankBattleMaster     980 3700
+240   forceground   0  GLATankScorpion           980 3900
+240   forceground   0  GLAVehicleRocketBuggy     980 4100
+240   forceground   0  AmericaVehicleTomahawk    980 4300
+240   respond       0  AmericaTankCrusader       980 3500
+240   respond       0  ChinaTankBattleMaster     980 3700
+240   respond       0  GLATankScorpion           980 3900
+240   respond       0  GLAVehicleRocketBuggy     980 4100
+240   respond       0  AmericaVehicleTomahawk    980 4300
+
+480   forceattack   0  AmericaTankCrusader       1  ChinaCommandCenter
+480   forceattack   0  ChinaTankBattleMaster     1  ChinaWarFactory
+480   forceattack   0  GLATankScorpion           1  ChinaBarracks
+480   forceattack   0  GLAVehicleRocketBuggy     1  ChinaSupplyCenter
+480   forceattack   0  AmericaVehicleTomahawk    1  ChinaPropagandaCenter
+480   respond       0  AmericaTankCrusader       1260 3500
+480   respond       0  ChinaTankBattleMaster     1260 3700
+480   respond       0  GLATankScorpion           1260 3900
+480   respond       0  GLAVehicleRocketBuggy     1260 4100
+480   respond       0  AmericaVehicleTomahawk    1260 4300
+
+720   playermove    0  AmericaTankCrusader       900 3500
+720   playermove    0  ChinaTankBattleMaster     900 3700
+720   playermove    0  GLATankScorpion           900 3900
+720   playermove    0  GLAVehicleRocketBuggy     900 4100
+720   playermove    0  AmericaVehicleTomahawk    900 4300
+720   respond       0  AmericaTankCrusader       900 3500
+720   respond       0  ChinaTankBattleMaster     900 3700
+720   respond       0  GLATankScorpion           900 3900
+720   respond       0  GLAVehicleRocketBuggy     900 4100
+720   respond       0  AmericaVehicleTomahawk    900 4300

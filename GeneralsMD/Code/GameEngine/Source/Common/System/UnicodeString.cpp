@@ -46,7 +46,6 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
 #include "Lib/WideCharFns.h"
-#include "Common/CriticalSection.h"
 
 
 #ifdef _INTERNAL
@@ -64,7 +63,7 @@
 void UnicodeString::validate() const
 {
 	if (!m_data) return;
-	DEBUG_ASSERTCRASH(m_data->m_refCount > 0, ("m_refCount is zero"));
+	DEBUG_ASSERTCRASH(m_data->m_refCount.load(std::memory_order_relaxed) > 0, ("m_refCount is zero"));
 	DEBUG_ASSERTCRASH(m_data->m_numCharsAllocated > 0, ("m_numCharsAllocated is zero"));
 	DEBUG_ASSERTCRASH(WideCharLen(m_data->peek())+1 <= m_data->m_numCharsAllocated,("str is too long for storage"));
 }
@@ -73,9 +72,12 @@ void UnicodeString::validate() const
 // -----------------------------------------------------
 UnicodeString::UnicodeString(const UnicodeString& stringSrc) : m_data(stringSrc.m_data)
 {
-	ScopedCriticalSection scopedCriticalSection(TheUnicodeStringCriticalSection);
+	/* The refcount is atomic, with AsciiString's orderings (AsciiString.h, the copy constructor and
+		 releaseBuffer), so TheUnicodeStringCriticalSection is no longer taken here or anywhere.  That
+		 lock only ever covered the count: a race on one UnicodeString object itself - one thread
+		 copying it while another reassigns it - read m_data outside the lock before, and still does. */
 	if (m_data)
-		++m_data->m_refCount;
+		m_data->m_refCount.fetch_add(1, std::memory_order_relaxed);
 	validate();
 }
 
@@ -85,7 +87,7 @@ void UnicodeString::ensureUniqueBufferOfSize(int numCharsNeeded, Bool preserveDa
 	validate();
 
 	if (m_data &&
-			m_data->m_refCount == 1 &&
+			m_data->m_refCount.load(std::memory_order_acquire) == 1 &&	// acquire: the last other holder's reads of the buffer happen before this thread writes it
 			m_data->m_numCharsAllocated >= numCharsNeeded)
 	{
 		// no buffer manhandling is needed (it's already large enough, and unique to us)
@@ -110,7 +112,7 @@ void UnicodeString::ensureUniqueBufferOfSize(int numCharsNeeded, Bool preserveDa
 		preMainInitMemoryManager();	// a string built by a static constructor, before main (GameMemory.h)
 	int actualBytes = TheDynamicMemoryAllocator->getActualAllocationSize(minBytes);
 	UnicodeStringData* newData = (UnicodeStringData*)TheDynamicMemoryAllocator->allocateBytesDoNotZero(actualBytes, "STR_UnicodeString::ensureUniqueBufferOfSize");
-	newData->m_refCount = 1;
+	new (&newData->m_refCount) std::atomic<unsigned short>(1);	// raw bytes, no constructor ran: start the atomic's lifetime
 	newData->m_numCharsAllocated = (actualBytes - sizeof(UnicodeStringData))/sizeof(WideChar);
 #if defined(_DEBUG) || defined(_INTERNAL)
 	newData->m_debugptr = newData->peek();	// just makes it easier to read in the debugger
@@ -138,12 +140,10 @@ void UnicodeString::ensureUniqueBufferOfSize(int numCharsNeeded, Bool preserveDa
 // -----------------------------------------------------
 void UnicodeString::releaseBuffer()
 {
-	ScopedCriticalSection scopedCriticalSection(TheUnicodeStringCriticalSection);
-
 	validate();
 	if (m_data)
 	{
-		if (--m_data->m_refCount == 0)
+		if (m_data->m_refCount.fetch_sub(1, std::memory_order_acq_rel) == 1)	// exactly one releaser sees 1
 		{
 			TheDynamicMemoryAllocator->freeBytes(m_data);
 		}
@@ -165,15 +165,15 @@ UnicodeString::UnicodeString(const WideChar* s) : m_data(0)
 // -----------------------------------------------------
 void UnicodeString::set(const UnicodeString& stringSrc)
 {
-	ScopedCriticalSection scopedCriticalSection(TheUnicodeStringCriticalSection);
-
 	validate();
 	if (&stringSrc != this)
 	{
+		// Release first is safe without the lock: if both share a buffer the count is at least 2,
+		// so the release cannot free what stringSrc still holds.
 		releaseBuffer();
 		m_data = stringSrc.m_data;
 		if (m_data)
-			++m_data->m_refCount;
+			m_data->m_refCount.fetch_add(1, std::memory_order_relaxed);
 	}
 	validate();
 }

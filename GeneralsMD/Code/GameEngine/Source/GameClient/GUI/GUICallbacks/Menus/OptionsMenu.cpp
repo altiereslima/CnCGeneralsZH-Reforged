@@ -113,6 +113,10 @@ static Int							menuModeCount = 0;
 static NameKeyType    comboBoxDetailID      = NAMEKEY_INVALID;
 static GameWindow *   comboBoxDetail        = NULL; 
 
+// only OptionsMenuClassic.wnd carries it: Reforged has one mouse and no box, so this stays NULL there
+static NameKeyType		checkAlternateMouseID	= NAMEKEY_INVALID;
+static GameWindow *		checkAlternateMouse		= NULL;
+
 static NameKeyType		checkRetaliationID	= NAMEKEY_INVALID;
 static GameWindow *		checkRetaliation		= NULL;
 
@@ -240,7 +244,9 @@ WindowLayout *OptionsLayout = NULL;
 // in the layout, parked off the right edge with HIDDEN set because there was nowhere to put them.
 // The layout now sorts the same controls into seven pages on one grid (Tools/optionsmenu_layout.py);
 // this is the two arrays that name them and the one function that decides which one you are
-// looking at.
+// looking at.  The Classic interface opens OptionsMenuClassic.wnd instead (Shell::getOptionsLayout),
+// the same pages without the settings Classic overrules; their catalog rows find no control there
+// and keep their value.
 //-------------------------------------------------------------------------------------------------
 enum { OPTIONS_PAGE_COUNT = 7 };
 
@@ -251,7 +257,7 @@ static const char *TheOptionsPageNames[ OPTIONS_PAGE_COUNT ] =
 	"OptionsMenu.wnd:PageEffects",
 	"OptionsMenu.wnd:PageAudio",
 	"OptionsMenu.wnd:PageControls",
-	"OptionsMenu.wnd:PageGameplay",
+	"OptionsMenu.wnd:PageInterface",
 	"OptionsMenu.wnd:PageNetwork",
 };
 
@@ -262,7 +268,7 @@ static const char *TheOptionsTabNames[ OPTIONS_PAGE_COUNT ] =
 	"OptionsMenu.wnd:TabEffects",
 	"OptionsMenu.wnd:TabAudio",
 	"OptionsMenu.wnd:TabControls",
-	"OptionsMenu.wnd:TabGameplay",
+	"OptionsMenu.wnd:TabInterface",
 	"OptionsMenu.wnd:TabNetwork",
 };
 
@@ -391,6 +397,18 @@ void OptionPreferences::setOnlineIPAddress( UnsignedInt IP )
 	AsciiString tmp;
 	tmp.format("%d.%d.%d.%d", ((IP & 0xff000000) >> 24), ((IP & 0xff0000) >> 16), ((IP & 0xff00) >> 8), (IP & 0xff));
 	(*this)["GameSpyIPAddress"] = tmp;
+}
+
+Bool OptionPreferences::getAlternateMouseModeEnabled(void)
+{
+	OptionPreferences::const_iterator it = find("UseAlternateMouse");
+	if (it == end())
+		return TheGlobalData->m_useAlternateMouse;
+
+	if (strcasecmp(it->second.str(), "yes") == 0) {
+		return TRUE;
+	}
+	return FALSE;
 }
 
 Bool OptionPreferences::getRetaliationModeEnabled(void)
@@ -899,6 +917,8 @@ static void setDefaults( void )
 	
 	//-------------------------------------------------------------------------------------------------
 	// Mouse Mode
+	if( checkAlternateMouse )
+		GadgetCheckBoxSetChecked(checkAlternateMouse, FALSE);
 	GadgetCheckBoxSetChecked(checkRetaliation, TRUE );
 	GadgetCheckBoxSetChecked( checkDoubleClickAttackMove, FALSE );
 
@@ -971,7 +991,9 @@ static void setDefaults( void )
  		// Extra Animations (buildups) and Swaying Trees checkboxes
 		//
 		GadgetCheckBoxSetChecked( checkExtraAnimations, !TheGlobalData->m_useDrawModuleLOD);
-		GadgetCheckBoxSetChecked( checkTreeSway, TheGlobalData->m_useTreeSway);
+		// the fork's box: a stock or modded OptionsMenu.wnd that wins over Run/Window has none
+		if( checkTreeSway )
+			GadgetCheckBoxSetChecked( checkTreeSway, TheGlobalData->m_useTreeSway);
 
 		//-------------------------------------------------------------------------------------------------
  		// DisableDynamicLOD
@@ -1202,6 +1224,30 @@ static void updateResolutionEnabled( void )
 	comboBoxResolution->winEnable( value != WINDOW_MODE_BORDERLESS );
 }
 
+//-------------------------------------------------------------------------------------------------
+/** The line under the resolution list: "the monitor supports this mode" when the picked size is one
+	* of the modes Windows lists for the picked monitor, nothing when it is not.  Asked of the monitor
+	* again rather than of the list, so the line stays honest whatever the list comes to hold. */
+//-------------------------------------------------------------------------------------------------
+static void updateResolutionNote( void )
+{
+	GameWindow *note = TheWindowManager->winGetWindowFromId( NULL, NAMEKEY( "OptionsMenu.wnd:ResolutionNote" ) );
+	if( note == NULL || comboBoxResolution == NULL )
+		return;
+
+	Int index = -1;
+	GadgetComboBoxGetSelectedPos( comboBoxResolution, &index );
+	Bool supported = FALSE;
+	if( index >= 0 && index < menuModeCount )
+	{
+		DisplayModeEntry modes[ MAX_DISPLAY_MODE_ENTRIES ];
+		const Int count = listDisplayModes( selectedMonitor().device, modes, MAX_DISPLAY_MODE_ENTRIES );
+		for( Int i = 0; i < count && !supported; ++i )
+			supported = ( modes[ i ].width == menuModes[ index ].width && modes[ i ].height == menuModes[ index ].height );
+	}
+	GadgetStaticTextSetText( note, supported ? TheGameText->fetch( "GUI:ResolutionNote0" ) : UnicodeString::TheEmptyString );
+}
+
 static void saveOptions( void )
 {
 	Int index;
@@ -1210,6 +1256,7 @@ static void saveOptions( void )
 	// which of the three the window is wearing right now, before the controls overwrite it
 	const Int oldWindowMode = TheGlobalData->m_windowMode;
 	const Bool oldVSync = TheGlobalData->m_vsync;
+	const Int oldScaling = TheGlobalData->m_fullscreenScaling;
 	const MonitorEntry oldMonitor = findMonitor( TheGlobalData->m_monitor.str() );
 
 	//-------------------------------------------------------------------------------------------------
@@ -1310,7 +1357,8 @@ static void saveOptions( void )
 		TheWritableGlobalData->m_useDrawModuleLOD = !GadgetCheckBoxIsChecked( checkExtraAnimations );
 		(*pref)["ExtraAnimations"] = TheGlobalData->m_useDrawModuleLOD ? AsciiString("no") : AsciiString("yes");
 
-		TheWritableGlobalData->m_useTreeSway = GadgetCheckBoxIsChecked( checkTreeSway );
+		// without the fork's box the trees sway with the extra animations, as retail decided it
+		TheWritableGlobalData->m_useTreeSway = checkTreeSway ? GadgetCheckBoxIsChecked( checkTreeSway ) : !TheGlobalData->m_useDrawModuleLOD;
 		(*pref)["TreeSway"] = TheGlobalData->m_useTreeSway ? AsciiString("yes") : AsciiString("no");
 
 		TheWritableGlobalData->m_enableDynamicLOD = !GadgetCheckBoxIsChecked( checkNoDynamicLod );
@@ -1404,8 +1452,9 @@ static void saveOptions( void )
 	const Bool modeChanged = ( oldWindowMode != TheGlobalData->m_windowMode );
 	const Bool vsyncChanged = ( oldVSync != TheGlobalData->m_vsync );
 	const Bool monitorChanged = ( ::strcasecmp( oldMonitor.device, monitor.device ) != 0 );
+	const Bool scalingChanged = ( oldScaling != TheGlobalData->m_fullscreenScaling );
 
-	if( sizeChanged || modeChanged || vsyncChanged || monitorChanged )
+	if( sizeChanged || modeChanged || vsyncChanged || monitorChanged || scalingChanged )
 	{
 		if( !TheDisplay->setDisplayMode( xres, yres, bitDepth, TheGlobalData->m_windowed ) )
 		{
@@ -1517,7 +1566,13 @@ static void saveOptions( void )
 
 
 	//-------------------------------------------------------------------------------------------------
-	// mouse mode
+	// mouse mode.  Saved only from the Classic screen, so an Accept in Reforged keeps what Classic chose
+	if( checkAlternateMouse )
+	{
+		TheWritableGlobalData->m_useAlternateMouse = GadgetCheckBoxIsChecked(checkAlternateMouse);
+		(*pref)["UseAlternateMouse"] = TheWritableGlobalData->m_useAlternateMouse ? AsciiString("yes") : AsciiString("no");
+	}
+
 	TheWritableGlobalData->m_clientRetaliationModeEnabled = GadgetCheckBoxIsChecked(checkRetaliation);
 	(*pref)["Retaliation"] = TheWritableGlobalData->m_clientRetaliationModeEnabled? AsciiString("yes") : AsciiString("no");
 
@@ -1986,6 +2041,10 @@ static Bool isDetailPresetCatalogControl( const GameWindow *control )
 static void showCatalogValue( const OptionDef &def, Int value )
 {
 	GameWindow *widget = findOptionWidget( def );
+	// every catalog control is the fork's, so a stock or modded OptionsMenu.wnd has none of them
+	if( widget == NULL )
+		return;
+
 	switch( def.kind )
 	{
 		case OPTION_BOOL:
@@ -2030,8 +2089,9 @@ static const SliderReadout TheSliderReadouts[] =
 	{ "OptionsMenu.wnd:SliderMusicVolume",	"OptionsMenu.wnd:ValueMusicVolume",				READOUT_PERCENT },
 	{ "OptionsMenu.wnd:SliderSFXVolume",		"OptionsMenu.wnd:ValueSFXVolume",					READOUT_PERCENT },
 	{ "OptionsMenu.wnd:SliderVoiceVolume",	"OptionsMenu.wnd:ValueVoiceVolume",				READOUT_PERCENT },
+	{ "OptionsMenu.wnd:SliderAmbientVolume",	"OptionsMenu.wnd:ValueAmbientVolume",		READOUT_PERCENT },
 	{ "OptionsMenu.wnd:SliderScrollSpeed",	"OptionsMenu.wnd:ValueScrollSpeed",				READOUT_NUMBER },
-	{ "OptionsMenu.wnd:SliderCloserZoom",		"OptionsMenu.wnd:ValueCloserZoom",				READOUT_PERCENT },
+	{ "OptionsMenu.wnd:SliderZoomSpeed",		"OptionsMenu.wnd:ValueZoomSpeed",					READOUT_PERCENT },
 	{ "OptionsMenu.wnd:SliderDragTolerance",	"OptionsMenu.wnd:ValueDragTolerance",			READOUT_NUMBER },
 };
 
@@ -2108,7 +2168,8 @@ static void showDetailPreset( Int index )
 	GadgetCheckBoxSetChecked( checkExtraAnimations, preset.m_useBuildupScaffolds );
 	GadgetCheckBoxSetChecked( checkHeatEffects, preset.m_useHeatEffects );
 	GadgetCheckBoxSetChecked( checkNoDynamicLod, !preset.m_enableDynamicLOD );
-	GadgetCheckBoxSetChecked( checkTreeSway, preset.m_useTreeSway );
+	if( checkTreeSway )
+		GadgetCheckBoxSetChecked( checkTreeSway, preset.m_useTreeSway );
 	for( Int row = 0; row < DETAIL_PRESET_CATALOG_ROW_COUNT; ++row )
 		showCatalogValue( *findOptionDef( TheDetailPresetCatalogRows[ row ].iniKey ), TheDetailPresetCatalogRows[ row ].values[ index ] );
 	ignoreSelected = FALSE;
@@ -2168,6 +2229,8 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 	comboBoxLANIP					 = TheWindowManager->winGetWindowFromId( NULL,  comboBoxLANIPID);
 	comboBoxOnlineIPID		 = TheNameKeyGenerator->nameToKey( AsciiString( "OptionsMenu.wnd:ComboBoxOnlineIP" ) );
 	comboBoxOnlineIP			 = TheWindowManager->winGetWindowFromId( NULL,  comboBoxOnlineIPID);
+	checkAlternateMouseID  = TheNameKeyGenerator->nameToKey( AsciiString( "OptionsMenu.wnd:CheckAlternateMouse" ) );
+	checkAlternateMouse	   = TheWindowManager->winGetWindowFromId( NULL, checkAlternateMouseID);
 	checkRetaliationID		 = TheNameKeyGenerator->nameToKey( AsciiString( "OptionsMenu.wnd:Retaliation" ) );
 	checkRetaliation	     = TheWindowManager->winGetWindowFromId( NULL, checkRetaliationID);
 	checkDoubleClickAttackMoveID = TheNameKeyGenerator->nameToKey( AsciiString( "OptionsMenu.wnd:CheckDoubleClickAttackMove" ) );
@@ -2273,9 +2336,12 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 
 	NameKeyType versionID = TheNameKeyGenerator->nameToKey( AsciiString("OptionsMenu.wnd:LabelVersion") );
 	GameWindow *labelVersion = TheWindowManager->winGetWindowFromId( NULL, versionID );
-	UnicodeString versionString;
-	versionString.format(TheGameText->fetch("Version:Format2").str(), (GetRegistryVersion() >> 16), (GetRegistryVersion() & 0xffff));
-	
+	// The fork's release number rather than EA's registry "Version 1.04".
+	UnicodeString versionString( u"Reforged " );
+	UnicodeString releaseVersion;
+	releaseVersion.translate( TheVersion->getReleaseVersion() );
+	versionString.concat( releaseVersion );
+
 	if (TheVersion->showFullVersion())
 	{
 		if (TheVersion)
@@ -2461,7 +2527,8 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 
 	GadgetCheckBoxSetChecked( checkExtraAnimations, !TheGlobalData->m_useDrawModuleLOD);
 
-	GadgetCheckBoxSetChecked( checkTreeSway, TheGlobalData->m_useTreeSway);
+	if( checkTreeSway )
+		GadgetCheckBoxSetChecked( checkTreeSway, TheGlobalData->m_useTreeSway);
 
 	GadgetCheckBoxSetChecked( checkNoDynamicLod, !TheGlobalData->m_enableDynamicLOD);
 
@@ -2542,6 +2609,8 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 //	GadgetCheckBoxSetChecked(checkAudioSurround, TheAudio->getSpeakerSurround());
 
 	// set the mouse mode
+	if( checkAlternateMouse )
+		GadgetCheckBoxSetChecked(checkAlternateMouse, TheGlobalData->m_useAlternateMouse);
 	GadgetCheckBoxSetChecked(checkRetaliation, TheGlobalData->m_clientRetaliationModeEnabled);
 	GadgetCheckBoxSetChecked( checkDoubleClickAttackMove, TheGlobalData->m_doubleClickAttackMove );
 
@@ -2626,6 +2695,7 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 
 	// borderless owns the resolution; the list is grey while it is picked
 	updateResolutionEnabled();
+	updateResolutionNote();
 
 	TheWindowManager->winSetModal(parent);
 	ignoreSelected = FALSE;
@@ -2795,6 +2865,7 @@ WindowMsgHandledType OptionsMenuSystem( GameWindow *window, UnsignedInt msg,
 
 				// picking borderless greys the resolution list out, the other two hand it back
 				updateResolutionEnabled();
+				updateResolutionNote();
 			break;
 		}
 

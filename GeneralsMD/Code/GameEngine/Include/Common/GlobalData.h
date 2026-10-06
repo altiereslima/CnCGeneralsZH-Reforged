@@ -77,11 +77,10 @@ enum HealthBarModeType
 /** The HudScale option's steps, 100/115/130/150% of the bottom HUD's own size (ControlBarHudScale). */
 enum { HUD_SCALE_COUNT = 4 };
 
-/** How a menu laid out at 800x600 meets a screen of another shape (GameWindowManagerScript.cpp's
-	* parseScreenRect).  Stretch is EA's: across by W/800 and down by H/600 apiece, so a 16:10 screen draws
-	* every panel, logo and medal 1.2x wide.  Fit scales by the smaller of the two and centres the
-	* 4:3 area; a full-screen backdrop still fills the screen.  At 4:3 the two are the same. */
-enum { MENU_LAYOUT_STRETCH = 0, MENU_LAYOUT_FIT = 1, MENU_LAYOUT_COUNT = 2 };
+/** The interface: the HUD, mouse and keys of Zero Hour 1.04, or this fork's own.  Picked for each
+	* run by -interface (the launcher passes it), Classic without it; Options.ini has no say.  Client
+	* only, and never read by GameLogic: two players on different styles are still in the same game. */
+enum { INTERFACE_STYLE_CLASSIC = 0, INTERFACE_STYLE_REFORGED = 1, INTERFACE_STYLE_COUNT = 2 };
 
 /** The IncomeRate option: what the income beside the money is counted over.  Automatic is per
 	* minute below INCOME_RATE_AUTOMATIC_PER_SECOND_FROM dollars a second and per second from there
@@ -103,8 +102,9 @@ enum TextLanguageType
 {
 	TEXT_LANGUAGE_ENGLISH	= 0,
 	TEXT_LANGUAGE_TURKISH	= 1,
+	TEXT_LANGUAGE_GERMAN	= 2,
 
-	TEXT_LANGUAGE_COUNT		= 2,
+	TEXT_LANGUAGE_COUNT		= 3,
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -162,6 +162,7 @@ public:
 	Bool m_windowed;
 	Int m_windowMode;					///< WindowModeType: fullscreen, borderless or windowed.  m_windowed
 														///< is derived from it and is what the device layer reads.
+	Int m_fullscreenScaling;	///< FullscreenScalingType: a fullscreen picture of another shape stretched or barred
 	AsciiString m_monitor;		///< the monitor the game is on, as its GDI device name ("\\.\DISPLAY2");
 														///< empty is the primary.  See Common/Monitors.h.
 	Int m_msaaLevel;					///< multisampling, as an index into the levels the options menu offers
@@ -187,6 +188,7 @@ public:
 	Bool m_noDynamicLODOverride;	// "-noDynamicLOD": off for this run, whatever the static preset or Options.ini set
 	Bool m_enableStaticLOD;
 	Int m_terrainLODTargetTimeMS;
+	Bool m_useAlternateMouse;			///< EA's Alternate Mouse Setup, Options.ini UseAlternateMouse: Classic only, Reforged never reads it (client only)
 	Bool m_clientRetaliationModeEnabled;
 	Bool m_doubleClickAttackMove;
 	Bool m_rightMouseAlwaysScrolls;
@@ -195,7 +197,7 @@ public:
 	Bool m_useShadowVolumesForSkins;	// "UseShadowVolumesForSkins": also cast volume shadows off skinned meshes
 	Bool m_useShadowDecals;
 	Bool m_shadowsForProjectiles;	// "ShadowsForProjectiles": missiles and bombs that have no shadow of their own get a decal one
-	Bool m_startAtMaxZoom;					// "StartAtMaxZoom": a game opens as far out as the wheel goes, not at the map's own default
+	Bool m_startAtMaxZoom;					// "OpenAtMaxZoom" in Options.ini: a game opens as far out as the wheel goes, not 300 over the ground
 	Bool m_shadowsForProps;				// "ShadowsForProps": fences, rubbish, shrubs - scenery the art gave no shadow at all
 	Bool m_shadowsForParticles;		// "ShadowsForParticles": big alpha-blended particle clouds drop a soft blob on the ground
 	Bool m_volumetricSmokeShadows;	// "VolumetricSmokeShadows": smoke and dust shade the world and themselves through the sun's map (Direct3D 11)
@@ -340,7 +342,12 @@ public:
 	Bool m_showObjectHealth;			///< debug display object health
 	Int m_healthBarMode;					///< HealthBarModeType: which units wear a bar at all
 	Int m_hudScale;								///< HUD size step, 0 = 100%; see ControlBarHudScale (client only)
-	Int m_menuLayout;							///< MENU_LAYOUT_STRETCH or MENU_LAYOUT_FIT, for the Menus/ layouts (client only)
+	Int m_interfaceStyle;					///< INTERFACE_STYLE_CLASSIC or INTERFACE_STYLE_REFORGED, set by -interface only (client only, never GameLogic)
+	Bool isClassicUI() const { return m_interfaceStyle == INTERFACE_STYLE_CLASSIC; }
+	/// which button gives a click on the ground its order.  Reforged: the right.  Classic: the left, as
+	/// 1.04 shipped, or the right under EA's Alternate Mouse Setup, where the left only selects
+	Bool leftButtonOrders() const { return isClassicUI() && !m_useAlternateMouse; }
+	Bool rightButtonOrders() const { return !leftButtonOrders(); }
 	Int m_playerColorScheme;			///< PlayerColorSchemeType: whose colour the client draws (client only)
 	Int m_textLanguage;						///< TextLanguageType: the translation GameText lays over the CSF, read once at startup (client only)
 	Bool m_showOrderLines;				///< draw a line from each selected unit to where it is going, and its queue (client only)
@@ -420,14 +427,15 @@ public:
 	Bool m_snapBuildPlacementTo45;		///< quantize the drag-to-rotate build placement angle to 45 degrees
 	Bool m_snapCameraRotateTo45;		///< quantize the camera heading to 45 degrees when a middle-drag rotate ends
 	Bool m_gridBuildPlacement;			///< quantize structure placement to the pathfinder's build grid
+	Bool m_snapBuildToNeighbour;		///< pull a structure flush against the edge of one already standing beside it
 	Bool m_nudgeBuildPlacement;			///< slide a blocked structure to the nearest spot it does fit
 	Int m_moneyPerMinute;				///< income every player gets once a minute regardless of supply lines; 0 = off
 	Real m_buildPlacementOpacity;		///< how solid the structure riding the cursor is drawn, 0..1
 	Bool m_buildPlacementShadows;		///< whether that structure casts a shadow while it rides the cursor
 	Bool m_zoomToCursor;				///< the mouse wheel zooms toward whatever the cursor is over
+	Int m_zoomSpeed;					///< "ZoomSpeed" in Options.ini: percent of the height one wheel notch moves the camera; 100 is the game's own
 	Bool m_isometricCamera;				///< the tactical view from far off down a narrow cone, near enough orthographic
 	Bool m_smoothMotion;				///< R1: models shown between their last two logic states each render frame (W3DSmoothMotion.h)
-	Int m_closerZoomPercent;			///< percent taken off MinCameraHeight, so the wheel comes nearer the ground; 0 = as GameData.ini has it
 	Int m_dragTolerance;				///< pixels the pointer may travel with a button held before the press is a drag; replaces Mouse.ini's DragTolerance
 	Bool m_formationDrag;				///< with the move, attack move or guard key armed, a left drag spreads the selection along the line drawn
 	Bool m_showAllyCursors;				///< in a network game, draw where each ally's mouse is pointing
@@ -522,6 +530,7 @@ public:
   Real m_musicVolumeFactor;         ///< Factor applied to loudness of music volume
   Real m_SFXVolumeFactor;           ///< Factor applied to loudness of SFX volume
   Real m_voiceVolumeFactor;         ///< Factor applied to loudness of voice volume
+	Int m_ambientVolume;							///< "AmbientVolume" in Options.ini: percent for looping world ambience, in place of the effects slider
   Bool m_3DSoundPref;               ///< Whether user wants to use 3DSound or not
 
 	Bool m_animateWindows;						///< Should we animate window transitions?

@@ -1,0 +1,6 @@
+# Hero loop 09 (command line in Scenarios/hero_loop_09.txt): the Kandahar bridge on
+# Golden Oasis from high above, pitch -32, heading 0, the deck running from bottom right to top
+# left through the middle of the frame. Locked so the edit's dissolve joins matching frames.
+
+5     cut        1757 1497 0.6 0 -32
+36    end

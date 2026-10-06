@@ -258,7 +258,7 @@ const SdlProgram &SdlProgramCache::Engine_Pixel_Program(int program, const Pixel
 		return existing->second;
 	}
 	std::string hlsl;
-	const bool written = EngineShader_Pixel_Program(engine, pipeline, hlsl, false, COMBINER_SHADER_TARGET_SDL3_GPU);
+	const bool written = EngineShader_Pixel_Program(engine, pipeline, hlsl, COMBINER_SHADER_TARGET_SDL3_GPU);
 	const SdlProgram &made = Make(PixelPrograms, key, written, hlsl, false);
 	EnginePixelByBytes.Add(&lookup, sizeof(lookup), &PixelPrograms[key]);
 	return made;

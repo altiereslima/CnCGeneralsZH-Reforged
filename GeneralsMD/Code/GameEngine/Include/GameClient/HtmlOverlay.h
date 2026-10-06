@@ -39,6 +39,7 @@
 
 #include "Lib/BaseType.h"
 #include "Common/AsciiString.h"
+#include "GameClient/HtmlTemplate.h"
 
 #include <string>
 #include <vector>
@@ -54,6 +55,11 @@ public:
 
 	/** Lay this page out, unless it is the page already laid out on a screen of the same size. */
 	void setPage( const std::string &html );
+
+	/** setPage( HtmlTemplate_expand( written, values, lists, lookup ) ), expanded again only when
+		* HtmlTemplate_matches says it would come out different from the last call's. */
+	void setPage( const std::string &written, const HtmlValues &values, const HtmlLists &lists,
+								const HtmlLookup &lookup );
 
 	void draw( void );
 
@@ -91,6 +97,8 @@ public:
 
 private:
 	HtmlOverlayContainer *m_container;
+	std::string						m_expanded;			///< the page the last expanding setPage made
+	Bool									m_expandedSent;	///< and it is what the layout was last handed
 };
 
 #endif // _HTML_OVERLAY_H_

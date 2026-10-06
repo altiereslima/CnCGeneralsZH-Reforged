@@ -1,0 +1,12 @@
+# Hero loop 04: the slow lateral drift. Flash Fire, looking down the line between the
+# two starts (heading -45 looks toward +x+y, so the armies come at each other through the depth of
+# the frame and stay in its middle) over Scenarios/hero_loop_04.txt, frames 600 to 1019 (command
+# line there). The edit loops source 5.0 to 14.0 s, game time 25.0 to 34.0, and dissolves 32.5 to
+# 34.0 into 23.5 to 25.0, so the camera drifts right to left and back inside 25.0 to 32.5 and stands
+# still at the same point through both halves of the dissolve: a cyclic camera with no mismatch.
+
+5     cut        1428 1289 0.7 -45 4
+25    move       1274 1447 3.75
+28.75 move       1428 1289 3.75
+26    shot
+35    end

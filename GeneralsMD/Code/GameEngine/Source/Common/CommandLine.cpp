@@ -37,6 +37,7 @@
 #include "GameClient/TerrainVisual.h" // for TERRAIN_LOD_MIN definition
 #include "GameClient/GameText.h"
 #include "GameClient/ChromaKeyboard.h"
+#include "GameClient/GameConsole.h" // for -freecam
 #include "GameNetwork/GameInfo.h" // for the SlotState -autoskirmish hands the AI slots
 #include "GameNetwork/NetworkUtil.h" // for ResolveIP, which -lanip parses its address with
 #include "Common/FileSystem.h"
@@ -1644,13 +1645,13 @@ Int parseDirect3D9(char *args[], int num)
 	return 1;
 }
 
-/* -language <english|turkish>: the language the game's words are in for this run, over whatever
+/* -language <english|turkish|german>: the language the game's words are in for this run, over whatever
 	 * the Options menu saved.  The string table is built once, while the game starts and after this
 	 * line is read, so this is how the launcher lets a player pick a language before the first menu.
 	 * The names follow TextLanguageType.  A name this build does not know leaves the saved one. */
 Int parseTextLanguage(char *args[], int num)
 {
-	static const char *const TheTextLanguageNames[ TEXT_LANGUAGE_COUNT ] = { "english", "turkish" };
+	static const char *const TheTextLanguageNames[ TEXT_LANGUAGE_COUNT ] = { "english", "turkish", "german" };
 
 	if (TheWritableGlobalData && num > 1)
 	{
@@ -1664,6 +1665,22 @@ Int parseTextLanguage(char *args[], int num)
 			}
 		}
 		DEBUG_LOG(("-language: '%s' is not a language this build knows, keeping the saved one\n", args[1]));
+		return 2;
+	}
+	return 1;
+}
+
+/* -interface <classic|reforged>: the interface for this run, the only way to pick it; the launcher
+	 * passes it, and without it the run is Classic.  Client only. */
+Int parseInterfaceStyle(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+	{
+		if (strcasecmp(args[1], "classic") == 0)
+			TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
+		else if (strcasecmp(args[1], "reforged") == 0)
+			TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_REFORGED;
+		DEBUG_LOG(("-interface: %s\n", TheWritableGlobalData->m_interfaceStyle == INTERFACE_STYLE_CLASSIC ? "classic" : "reforged"));
 		return 2;
 	}
 	return 1;
@@ -1949,6 +1966,22 @@ Int parseCinema(char *args[], int num)
 	{
 		TheWritableGlobalData->m_cinemaScript = args[1];
 		return 2;
+	}
+	return 1;
+}
+
+/* -freecam <x> <y> <z> <heading> <tilt> puts the match into the console's freecam at that pose once
+	 it is up, the way typing 'freecam x y z heading tilt' would.  A screenshot script cannot fly the
+	 camera with the mouse, so this is how a photo-mode picture is taken unattended.  Angles are in
+	 degrees, heading 0 along +x, tilt 0 level and negative looking down. */
+Int parseFreeCamera(char *args[], int num)
+{
+	if (num > 5)
+	{
+		AsciiString pose;
+		pose.format("%s %s %s %s %s", args[1], args[2], args[3], args[4], args[5]);
+		GameConsole_setStartupFreeCamera(pose.str());
+		return 6;
 	}
 	return 1;
 }
@@ -2518,6 +2551,7 @@ static CommandLineParam params[] =
 	{ "-msaa", parseMSAA },
 	{ "-d3d9", parseDirect3D9 },
 	{ "-language", parseTextLanguage },
+	{ "-interface", parseInterfaceStyle },
 	{ "-dx11dump", parseDirect3D11Dump },
 	{ "-dx11post", parseDirect3D11Post },
 	{ "-autocamera", parseAutoCamera },
@@ -2540,6 +2574,7 @@ static CommandLineParam params[] =
 	{ "-nodevice", parseNoDevice },
 	{ "-scenario", parseScenario },
 	{ "-cinema", parseCinema },
+	{ "-freecam", parseFreeCamera },
 	{ "-side", parseSide },
 	{ "-takeover", parseTakeover },
 	{ "-replay", parseReplay },

@@ -84,7 +84,11 @@ enum ScenarioActionType
 	SCENARIO_ACTION_DOCK,							///< dock <slot> <selector> <targetSlot> <targetSelector>; a right click on a supply point or a dock
 	SCENARIO_ACTION_CONSTRUCT,				///< construct <slot> <template> <position>; the local player's placement click, whatever is selected, as a message that is recorded and crosses the network
 	SCENARIO_ACTION_STANCE,						///< stance <slot> <selector> aggressive|defensive; the stance key, as MSG_SET_STANCE
-	SCENARIO_ACTION_HUNT							///< hunt <slot> <selector> <position> [radius]; the search and destroy key's sweep, through the order queue as its messages arrive
+	SCENARIO_ACTION_HUNT,							///< hunt <slot> <selector> <position> [radius]; the search and destroy key's sweep, through the order queue as its messages arrive
+	SCENARIO_ACTION_FORCEATTACK,			///< forceattack <slot> <selector> <targetSlot> <targetSelector>; the attack key's click on one unit, as MSG_DO_FORCE_ATTACK_OBJECT
+	SCENARIO_ACTION_WEAPONAT,					///< weaponat <slot> <selector> <position> [primary|secondary|tertiary]; a FIRE_WEAPON button's click on the ground, as MSG_DO_WEAPON_AT_LOCATION; tertiary when left out
+	SCENARIO_ACTION_FORCEGROUND,			///< forceground <slot> <selector> <position>; the attack key's click on the ground, as MSG_DO_FORCE_ATTACK_GROUND
+	SCENARIO_ACTION_RESPOND						///< respond <slot> <selector> <position>; from now, how long each unit takes to point its gun at the position, fire with it pointed there, and get closer to it
 };
 
 /// ScenarioAction::atStart when the position is plain numbers
@@ -122,7 +126,7 @@ struct ScenarioAction
 	Real radius;									///< how close to the target counts as arrived
 	Int targetSlot;								///< whose units to attack
 	AsciiString targetSelector;		///< which of them
-	AsciiString name;							///< shiftpower's special power, shiftupgrade's upgrade
+	AsciiString name;							///< shiftpower's special power, shiftupgrade's upgrade, weaponat's weapon slot
 };
 
 /** Turn one line of a scenario file into an action.  Pure: no engine state is read, which is what

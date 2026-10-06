@@ -2461,6 +2461,15 @@ static Bool canPursue(Object *source, Weapon *weapon, Object *victim)
 }
 
 //----------------------------------------------------------------------------------------------------------
+/// a helicopter on an attack at a point on the ground (the Comanche's rocket pods), not at an object
+static Bool isHelicopterAttackingGround( const Object *source, Bool attackingObject )
+{
+	const AIUpdateInterface *ai = attackingObject ? NULL : source->getAI();	// none once the machine is being deleted
+	const Locomotor *loco = ai ? ai->getCurLocomotor() : NULL;
+	return loco != NULL && loco->isHelicopter(source);
+}
+
+//----------------------------------------------------------------------------------------------------------
 /**
  * Compute a valid spot to fire our weapon from.
  * Result in m_goalPosition.
@@ -2702,6 +2711,11 @@ StateReturnType AIAttackApproachTargetState::onEnter()
 	} else {
 		// Attacking a position.  For a varitey of reasons, we need to destroy any existing path or we spin. jba. [8/25/2003]
 		ai->destroyPath();
+		// A helicopter ordered to fire at the ground flies on at full speed and stops the approach the moment
+		// the point comes into range (updateInternal). Easing to a stop on the edge of range first cost a
+		// Comanche 1.5 seconds of an 800 run before its rocket pods fired.
+		if (isHelicopterAttackingGround(source, m_isAttackingObject))
+			ai->getCurLocomotor()->setNoSlowDownAsApproachingDest(TRUE);
 	}
 	// If we have a turret, start aiming.
 	WhichTurretType tur = ai->getWhichTurretForCurWeapon();
@@ -2806,7 +2820,7 @@ StateReturnType AIAttackApproachTargetState::updateInternal()
 		// Attacking a position.
 		// find a good spot to shoot from
 		//CRCDEBUG_LOG(("AIAttackApproachTargetState::updateInternal() - calling computePath() to position for object %d\n", getMachineOwner()->getID()));
-		if (m_stopIfInRange && weapon && weapon->isWithinAttackRange(source, &m_goalPosition)) 
+		if ((m_stopIfInRange || isHelicopterAttackingGround(source, m_isAttackingObject)) && weapon && weapon->isWithinAttackRange(source, &m_goalPosition))
 		{
 			Bool viewBlocked = false;
 			if ( ai->isDoingGroundMovement() ) 
@@ -2871,6 +2885,9 @@ void AIAttackApproachTargetState::onExit( StateExitType status )
 {
 	// contained by AIAttackState, so no separate timer
 	AIInternalMoveToState::onExit( status );
+
+	if (isHelicopterAttackingGround(getMachineOwner(), m_isAttackingObject))
+		getMachineOwner()->getAI()->getCurLocomotor()->setNoSlowDownAsApproachingDest(FALSE);
 
 	AIUpdateInterface *ai = getMachineOwner()->getAI();
 	Object *obj = getMachineOwner();

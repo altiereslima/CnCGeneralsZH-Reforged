@@ -1,0 +1,23 @@
+# A bright last battle for the Reforged trailer (beat 28) on the open snow in the middle of Winter
+# Wolf: s240_snow.txt's armies and spacing moved from Fortress Avalanche's plateau to 1100,1120,
+# America from the south-west and China from the north-east attack-moving onto it, an A-10 strike
+# called into the middle on frame 300.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Winter Wolf\Winter Wolf.map" -autoskirmish 2 -takeover
+#     -observer -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario rf_snow
+#     -cinema rf_snow -video 150 600 rf_snow -maxframes 610
+
+10    spawn      0  AmericaCommandCenter            1   start0:240:60
+
+30    spawn      0  AmericaTankCrusader             8   990 1040  36
+30    spawn      0  AmericaTankPaladin              3   940 990   40
+30    spawn      0  AmericaInfantryRanger           10  1050 1070  18
+30    spawn      1  ChinaTankBattleMaster           8   1210 1200  40
+30    spawn      1  ChinaTankOverlord               2   1260 1250  50
+30    spawn      1  ChinaTankGattling               3   1170 1250  36
+30    spawn      1  ChinaInfantryRedguard           10  1150 1170  18
+60    attackmove 0  *  1100 1120
+60    attackmove 1  *  1100 1120
+
+300   power      0  AmericaCommandCenter  1110 1130  SuperweaponA10ThunderboltMissileStrike

@@ -1,0 +1,15 @@
+# Smoke shadows in the sun for the Reforged trailer (beat 05): on the sand by Flash Effect's
+# derricks, three black SootySmokeColumns with a small fire at each foot and one white
+# BeaconSmokeFFFFFF column, the one that shows a lit side and a dark side. Six Crusaders drive
+# east from frame 150, straight under the columns, so they pass through the smoke's shade.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Flash Effect\Flash Effect.map" -autoskirmish 2 -takeover
+#     -observer -side 0 FactionAmerica -side 1 FactionChina -seed 1 -scenario rf_smoke
+#     -cinema rf_smoke -video 150 480 rf_smoke -maxframes 490
+
+30    particles   0  SootySmokeColumn       3  1640 1560  140
+30    particles   0  FireFactionSmall       3  1640 1560  140
+30    particles   0  BeaconSmokeFFFFFF      1  1780 1640
+30    spawn       0  AmericaTankCrusader    6  1350 1560  36
+150   move        0  AmericaTankCrusader       1950 1560

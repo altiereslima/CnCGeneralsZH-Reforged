@@ -216,11 +216,6 @@ protected:
 
 	bool Initialized;
 
-	// What TextureClass::Find_Normal_Map found, and whether it has looked.  Here rather than on
-	// TextureClass because this is the one constructor every texture goes through.
-	TextureClass * NormalMap;
-	bool NormalMapLooked;
-
 	// For debug purposes the texture sets this true if it is a lightmap texture
 	bool IsLightmap;
 	bool IsCompressionAllowed;
@@ -351,18 +346,7 @@ public:
 
 	virtual TextureClass* As_TextureClass() { return this; }
 
-	// Hand a texture built in memory its normal map, for one with no file name to look
-	// one up by - the terrain atlas.
-	void Set_Normal_Map(TextureClass * normal_map);
-
-	// What Set_Normal_Map or an earlier lookup found, without looking.  For a caller that binds the
-	// Direct3D texture itself and so never passes through Apply.
-	TextureClass * Peek_Normal_Map() const { return NormalMap; }
-
 protected:
-
-	// "<name>_nrm.dds" through the file factory, looked for once and kept.
-	TextureClass * Find_Normal_Map();
 
 	WW3DFormat				TextureFormat;
 
@@ -495,10 +479,6 @@ protected:
 
 	int Depth;
 };
-
-// Is this texture file one of a building's damage states - "<name>_d", "_e", or the night, snow
-// and garrison copies of those, "_dn", "_es", "_dsg" and the rest?  Those carry no normal map.
-bool Texture_Name_Is_Damage_State(const char * name);
 
 // Utility functions for loading and saving texture descriptions from/to W3D files
 TextureClass *Load_Texture(ChunkLoadClass & cload);

@@ -246,9 +246,18 @@ struct MinimapInputFixture
 		ui->scrolling = ui->selecting = FALSE;
 		ui->enabled = TRUE;
 		TheInGameUI = ui;
+		// Reforged's radar: left looks, right orders.  Classic swaps them, and says so in its own test
+		savedStyle = TheGlobalData->m_interfaceStyle;
+		savedAlternateMouse = TheGlobalData->m_useAlternateMouse;
+		TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_REFORGED;
+		TheWritableGlobalData->m_useAlternateMouse = FALSE;
 	}
+	Int savedStyle;
+	Bool savedAlternateMouse;
 	~MinimapInputFixture()
 	{
+		TheWritableGlobalData->m_interfaceStyle = savedStyle;
+		TheWritableGlobalData->m_useAlternateMouse = savedAlternateMouse;
 		windows.winDestroyAll();
 		TheRadar = savedRadar;
 		TheTerrainLogic = savedTerrain;
@@ -292,6 +301,42 @@ TEST(minimap_drag_tracks_held_left_click_and_stops_on_release_with_units_selecte
 	CHECK(f.engine.view.lookAtCalls == 3);
 	CHECK(f.windows.winGetGrabWindow() == NULL);
 	CHECK(messages.commands.getFirstMessage() == NULL);
+}
+
+/* Classic's radar is the game as shipped: with units selected the right button looks and drags. */
+TEST(minimap_classic_right_button_looks_with_units_selected)
+{
+	CHECK(bootOnce());
+	MinimapInputFixture f;
+	MinimapMessages messages;
+	messages.stream.attachTranslator(NEW WindowTranslator, 10);
+	TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
+	((MinimapTestUI*)TheInGameUI)->selected.push_back(NULL);
+	f.event(messages, GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN, 120, 220);
+	CHECK(f.engine.view.lookAtCalls == 1);
+	f.event(messages, GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP, 120, 220);
+	CHECK(messages.commands.getFirstMessage() == NULL);
+}
+
+/* EA's Alternate Mouse Setup put the radar's look back on the left button, the world's select button.
+   Reforged's radar looks on the left whether the setting is on or not. */
+TEST(minimap_alternate_mouse_looks_on_the_left_in_classic_and_reforged_ignores_it)
+{
+	CHECK(bootOnce());
+	const Int styles[2] = { INTERFACE_STYLE_CLASSIC, INTERFACE_STYLE_REFORGED };
+	for (Int i = 0; i < 2; ++i)
+	{
+		MinimapInputFixture f;
+		MinimapMessages messages;
+		messages.stream.attachTranslator(NEW WindowTranslator, 10);
+		TheWritableGlobalData->m_interfaceStyle = styles[i];
+		TheWritableGlobalData->m_useAlternateMouse = TRUE;
+		((MinimapTestUI*)TheInGameUI)->selected.push_back(NULL);
+		f.event(messages, GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN, 120, 220);
+		CHECK(f.engine.view.lookAtCalls == 1);
+		f.event(messages, GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP, 120, 220);
+		CHECK(messages.commands.getFirstMessage() == NULL);
+	}
 }
 
 /* Off the radar the drag pins to the picture's edge, so the camera waits at the map's edge instead of

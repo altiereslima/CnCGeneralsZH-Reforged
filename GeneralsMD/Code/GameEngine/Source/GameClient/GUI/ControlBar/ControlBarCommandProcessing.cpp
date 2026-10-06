@@ -721,7 +721,8 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 			DEBUG_LOG(("UpgradeSpread player upgrade '%s' ctx %d selCount %d rep obj %d\n",
 								 upgradeT->getUpgradeName().str(), (Int)m_currContext,
 								 TheInGameUI ? TheInGameUI->getSelectCount() : -1, (Int)obj->getID()));
-			if( m_currContext == CB_CONTEXT_MULTI_SELECT )
+			// Classic buys it from the one object the bar stands for, as the game shipped
+			if( m_currContext == CB_CONTEXT_MULTI_SELECT && !TheGlobalData->isClassicUI() )
 				producer = pickUpgradeProducer( upgradeT, obj );
 
 			ProductionUpdateInterface* pu = producer ? producer->getProductionUpdateInterface() : NULL;
@@ -758,7 +759,7 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 				break;
 
 			// shift: the unit buys it when its list gets there, and the money is looked at then
-			const Bool queued = TheInGameUI->isInWaypointMode();
+			const Bool queued = TheInGameUI->isInWaypointMode() && !TheGlobalData->isClassicUI();
 
 			//Make sure the player can really make this
 			if( !queued && TheUpgradeCenter->canAffordUpgrade( ThePlayerList->getLocalPlayer(), upgradeT, TRUE ) == FALSE )
@@ -786,9 +787,9 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 			// time, since the bar cannot see the queue the previous click just filled until the
 			// next logic frame - so a click on four selected barracks upgraded one of them and
 			// the other three clicks were silently thrown away by the duplicate guard in
-			// ProductionUpdate::queueUpgrade.
+			// ProductionUpdate::queueUpgrade.  Classic keeps that one object.
 			//
-			if( m_currContext == CB_CONTEXT_MULTI_SELECT )
+			if( m_currContext == CB_CONTEXT_MULTI_SELECT && !TheGlobalData->isClassicUI() )
 			{
 				Player *player = ThePlayerList->getLocalPlayer();
 				Int purse = player->getMoney()->countMoney();

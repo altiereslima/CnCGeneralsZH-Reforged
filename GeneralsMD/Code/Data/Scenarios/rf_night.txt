@@ -1,0 +1,18 @@
+# Fire light on its own smoke, Dark Night village square, for the Reforged trailer's night shot
+# (beat 06): one SootySmokeColumn rising through a big fire (one AutoFireLarge01 and four
+# FireFactionLarge) on the paving at 1920,1810, between the tall stone tower and the short lit
+# one, and six Crusaders and six Battlemasters attack-moving onto the square so their shells
+# burst in frame.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Dark Night\Dark Night.map" -autoskirmish 2 -takeover -observer
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 1 -scenario rf_night -cinema rf_night
+#     -video 200 480 rf_night -maxframes 490
+
+30    particles   0  AutoFireLarge01        1  1920 1810
+30    particles   0  FireFactionLarge       4  1920 1810  30
+30    particles   0  SootySmokeColumn       1  1920 1810
+30    spawn       0  AmericaTankCrusader    6  1650 1700  40
+30    spawn       1  ChinaTankBattleMaster  6  2250 1900  40
+120   attackmove  0  *  1960 1760
+120   attackmove  1  *  1960 1760

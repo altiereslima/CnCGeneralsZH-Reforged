@@ -1,0 +1,7 @@
+# Hero loop 01: Tournament Desert crossroads from high up, locked, over the fight of
+# Scenarios/hero_loop_01.txt, frames 600 to 1019 (command line there). Locked so the edit can
+# dissolve the tail into the head with no camera mismatch at the seam.
+
+5     cut        1020 1350 0.8 0 -28
+25    shot
+35    end

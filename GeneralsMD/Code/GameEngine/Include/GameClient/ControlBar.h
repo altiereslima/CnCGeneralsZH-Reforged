@@ -40,6 +40,9 @@
 #include "Common/Overridable.h"
 #include "Common/Science.h"
 #include "GameClient/Color.h"
+#include "Common/BitFlags.h"
+#include "GameLogic/WeaponBonusConditionFlags.h"
+#include "GameLogic/WeaponSetFlags.h"
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////
 class Drawable;
@@ -48,6 +51,7 @@ class Image;
 class Object;
 class ThingTemplate;
 class WeaponTemplate;
+class WeaponBonus;
 class SpecialPowerTemplate;
 class WindowVideoManager;
 class WindowVideoManager;
@@ -59,6 +63,7 @@ class PlayerTemplate;
 class AudioEventRTS;
 class ControlBarSchemeManager;
 class UpgradeTemplate;
+class ProductionUpdateInterface;
 class GameWindowTransitionsHandler;
 class DisplayString;
 
@@ -420,6 +425,10 @@ enum { CTRL_SHIFT_BUILD_QUEUE_COUNT = 100 };
 
 // the count the modifiers currently held ask for; 1 with nothing held
 Int getBuildBatchCount( void );
+
+// how deep a producer's queue may go from the bar: its own MaxQueueEntries, and in Classic no
+// deeper than the nine queue buttons that show it
+UnsignedInt getQueueCap( const ProductionUpdateInterface *pu );
 
 enum { MAX_COMMANDS_PER_SET = 18 };  // user interface max is 14 (but internally it's 18 for script only buttons!)
 
@@ -800,6 +809,42 @@ struct BuildTooltipCard
 	IRegion2D anchor;							///< the hovered window in screen pixels, its top the grid's top for a command button
 };
 
+/** One weapon slot's figures; `weapon` NULL for a slot with nothing in it that hurts. */
+struct WeaponFigures
+{
+	const WeaponTemplate *weapon;
+	Real damage;
+	Real range;
+	Real attacksPerSecond;
+};
+
+/** A unit's health and its weapons, slot by slot. */
+struct UnitFigures
+{
+	Real health;
+	WeaponFigures slots[ WEAPONSLOT_COUNT ];
+
+	/** The slot with the most damage a second, WEAPONSLOT_COUNT for an unarmed unit. */
+	Int mainSlot( void ) const
+	{
+		Int best = WEAPONSLOT_COUNT;
+		for( Int slot = PRIMARY_WEAPON; slot < WEAPONSLOT_COUNT; ++slot )
+			if( slots[ slot ].weapon && ( best == WEAPONSLOT_COUNT || slots[ slot ].damage * slots[ slot ].attacksPerSecond
+																																> slots[ best ].damage * slots[ best ].attacksPerSecond ) )
+				best = slot;
+		return best;
+	}
+};
+
+/** `weapon`'s figures under `bonus`, the build tooltip's and the selected unit's alike
+	* (ControlBarPopupDescription.cpp). */
+WeaponFigures ControlBarWeaponFigures( const WeaponTemplate *weapon, const WeaponBonus &bonus );
+
+/** `thing`'s weapons in the set `setFlags` picks, each under the bonuses `bonusFlags` give it, into
+	* `figures`' slots; a template with no such set leaves them as they are. */
+void ControlBarTemplateWeaponFigures( const ThingTemplate *thing, const WeaponSetFlags &setFlags,
+																			WeaponBonusConditionFlags bonusFlags, UnitFigures &figures );
+
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 class ControlBar : public SubsystemInterface
@@ -1098,6 +1143,7 @@ public:
 
 	/// top edge of the highest visible window the bar owns, and where MoneyDisplay is; see -uidrill
 	void forEachPlacedWindow( Int *topOut, Int *moneyOut );
+	ControlBarContext getCurrentContext( void ) const { return m_currContext; }	///< for -uidrill's log
 
 	/// the window every other one on the bar hangs off, so -uidrill can walk it looking for a button
 	GameWindow *getMasterParent( void ) { return m_contextParent[ CP_MASTER ]; }
@@ -1125,6 +1171,9 @@ public:
 		* `holes` are the page's own buttons: a click on one goes through to the page even inside a
 		* solid panel. */
 	void setPageSolids( const std::vector< IRegion2D > *solids, const std::vector< IRegion2D > *holes = NULL );
+
+	/// the radar's under-attack lamp, EA's: the Classic interface keeps it, Reforged hides the window
+	void triggerRadarAttackGlow( void );
 
 	/** The HUD page's place for the general's powers: the first in `corner`, the bottom left of the
 		* grid, each `cell` big with `gap` between them, a group of SPECIAL_POWER_SHORTCUT_COLS going
@@ -1213,6 +1262,8 @@ protected:
 	void resetContainData( void );			/// reset container data we use to tie controls to objects IDs for containment
 	void resetBuildQueueData( void );			/// reset the build queue data we use to die queue entires to control
 	void resetBuildQueueButtons( void );	/// attach the queue button windows and wipe them to empty
+	void populateBuildQueue( Object *producer );	///< Classic: the producer's queue into the queue buttons
+	void updateClassicBuildQueue( Object *obj, ProductionUpdateInterface *pu );	///< Classic: queue over the portrait while it holds anything
 
 	// the following methods are for populating the context GUI controls for a particular context
 	static void populateButtonProc( Object *obj, void *userData );
@@ -1479,6 +1530,8 @@ protected:
 	std::vector< IRegion2D > m_pageSolids;							///< what the CSS page drew solid, in screen pixels; see setPageSolids
 	std::vector< IRegion2D > m_pageHoles;								///< the page's own buttons, which let their clicks through
 	Bool m_pageSolidsActive;														///< the page is drawing, so m_pageSolids decides clicks and not the plates
+	GameWindow *m_radarAttackGlowWindow;										///< WinUAttack, Classic only; NULL in Reforged
+	Int m_remainingRadarAttackGlowFrames;										///< logic frames left on the lamp's flashing
 	Player *m_watchedSelection;													///< the player the selection last named while watching, NULL for nobody
 
 	WindowLayout *m_buildToolTipLayout;										///< The window that will slide on/display tooltips
@@ -1650,7 +1703,7 @@ extern Real ControlBarHudPageScale( void );
 	* at the given fraction of the screen (0 = left/top edge, 1 = right/bottom, 0.5 = centred) with
 	* the matching fraction of the design space as its fixed point.  This is layoutPanels for a
 	* layout that is one piece rather than three: the generals' power bar hangs off the right edge
-	* with (1,1) and the science screen is centred at the top with (0.5,0).
+	* with (1,1) and the science screen is centred at the top with (0.5,0).  Both interfaces.
 	*
 	* Call it once, on a layout straight out of winCreateLayout.  It reads the authored rectangle
 	* back out of where the loader put each window, so a second call would divide a scale out that

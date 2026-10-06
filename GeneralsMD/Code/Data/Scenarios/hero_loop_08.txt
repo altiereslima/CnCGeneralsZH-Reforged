@@ -1,0 +1,55 @@
+# Website hero loop 08, night town: a tank fight in rf_night's village square on Dark Night, a
+# small fire with a soot column just left of the middle between the stone tower and the lit one
+# (rf_night's large fire, with the bloom, was a white blob over the middle of every frame). America drives in from screen left and China from screen right under Cinema/hero_loop_08's
+# heading 180 (rf_night's own spawn sides), with waves so it keeps going through frames 600 to
+# 1049, and three A-10 runs on the square. No gunship, carpet bomb, nuke or beam: in a frame this
+# tight the carpet bombs and then the gunship's constant shelling, under the bloom, whited out the
+# middle of every frame.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer
+#     -multiInstance -particlecap 30000 -map "Maps\Dark Night\Dark Night.map" -autoskirmish 2
+#     -takeover -side 0 FactionAmerica -side 1 FactionChina -seed 1 -scenario hero_loop_08
+#     -cinema hero_loop_08 -video 600 1049 hero_loop_08 -maxframes 1070
+10    spawn      0  AmericaCommandCenter            1   start0:240:60
+10    spawn      1  ChinaCommandCenter              1   start1:-260:60
+30    particles  0  FireFactionSmall                3   1990 1830  40
+30    particles  0  SootySmokeColumn                1   1990 1830
+# --- America from screen left (east) ----------------------------------------------------------
+150   spawn      0  AmericaTankCrusader             10  2340 1750  36
+150   spawn      0  AmericaTankPaladin              5   2390 1900  40
+150   spawn      0  AmericaInfantryRanger           16  2300 1620  14
+150   spawn      0  AmericaVehicleHumvee            4   2390 1900  36
+# --- China from screen right (west) -----------------------------------------------------------
+150   spawn      1  ChinaTankBattleMaster           10  1500 1830  40
+150   spawn      1  ChinaTankOverlord               3   1450 1680  50
+150   spawn      1  ChinaTankGattling               4   1540 1960  36
+150   spawn      1  ChinaInfantryRedguard           16  1540 1960  14
+150   spawn      1  ChinaVehicleInfernoCannon       3   1450 1680  40
+160   attackmove 0  *  1920 1790
+160   attackmove 1  *  1920 1790
+# --- waves ----------------------------------------------------------------------------------
+420   spawn      0  AmericaTankCrusader             8   2340 1750  36
+420   spawn      0  AmericaInfantryRanger           12  2300 1620  14
+420   spawn      1  ChinaTankBattleMaster           8   1500 1830  40
+420   spawn      1  ChinaInfantryRedguard           12  1540 1960  14
+430   attackmove 0  *  1920 1790
+430   attackmove 1  *  1920 1790
+560   spawn      0  AmericaTankPaladin              5   2390 1900  40
+560   spawn      1  ChinaTankOverlord               3   1450 1680  50
+560   spawn      1  ChinaTankGattling               3   1540 1960  36
+570   attackmove 0  *  1920 1790
+570   attackmove 1  *  1920 1790
+700   spawn      0  AmericaTankCrusader             8   2340 1750  36
+700   spawn      0  AmericaInfantryRanger           12  2300 1620  14
+700   spawn      1  ChinaTankBattleMaster           8   1500 1830  40
+700   spawn      1  ChinaInfantryRedguard           12  1540 1960  14
+710   attackmove 0  *  1920 1790
+710   attackmove 1  *  1920 1790
+840   spawn      0  AmericaTankCrusader             8   2340 1750  36
+840   spawn      1  ChinaTankBattleMaster           8   1500 1830  40
+850   attackmove 0  *  1920 1790
+850   attackmove 1  *  1920 1790
+# --- the sky: a general's power lands about 400 frames after the call ------------------------
+380   power      0  AmericaCommandCenter  1850 1810  SuperweaponA10ThunderboltMissileStrike
+470   power      0  AmericaCommandCenter  1980 1760  SuperweaponA10ThunderboltMissileStrike
+560   power      0  AmericaCommandCenter  1950 1870  SuperweaponA10ThunderboltMissileStrike

@@ -1,0 +1,9 @@
+# Laser glow video, shot 2: Scenarios/missiledefence.txt on Twilight Flame, seed 7. Close on the
+# Avenger at 2200,3900, whose point defense laser bursts Tank Hunter missiles about 90 north of it on
+# frames 150 to 190.
+#
+#   ...the scenario's switches... -cinema lsv_burst -video 120 230 lsv_burst -maxframes 240
+
+4.0   cut     2200 4040 0.34 0 4
+4.1   zoom    0.3 4
+7.8   end

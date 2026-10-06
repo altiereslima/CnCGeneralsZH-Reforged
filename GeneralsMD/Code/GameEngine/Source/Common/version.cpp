@@ -84,6 +84,14 @@ AsciiString Version::getAsciiVersion( void )
 	return version;
 }
 
+AsciiString Version::getReleaseVersion( void )
+{
+	// The numbers come from BuildVersion.h, which CMakeLists.txt writes; the release tags use this form.
+	AsciiString version;
+	version.format("v%d.%d.%d", m_major, m_minor, m_buildNum);
+	return version;
+}
+
 UnicodeString Version::getUnicodeVersion( void )
 {
 	UnicodeString version;

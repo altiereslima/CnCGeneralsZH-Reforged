@@ -757,9 +757,7 @@ void W3DCommandBarBackgroundDraw( GameWindow *window, WinInstanceData *instData 
 
 void W3DCommandBarForegroundDraw( GameWindow *window, WinInstanceData *instData )
 {
-
 	// nothing sits on top of the plates - see W3DCommandBarBackgroundDraw
-
 }
 
 void W3DNoDraw( GameWindow *window, WinInstanceData *instData )

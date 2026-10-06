@@ -336,8 +336,11 @@ WindowMsgHandledType LeftHUDInput( GameWindow *window, UnsignedInt msg,
 				const DrawableList *drawableList = TheInGameUI->getAllSelectedLocalDrawables(); // locally-owned only
 				
 				// see if the user wants to move the tactical view
-				// Left on the radar looks and right orders, the same division the world has.
-				if( drawableList->empty() || msg == GWM_LEFT_DOWN )
+				// Left on the radar looks and right orders, the same division the world has.  Classic
+				// divides the world the other way round, and so did the radar in the game as shipped,
+				// except under EA's Alternate Mouse Setup, which looked with the left.
+				const UnsignedInt lookButton = TheGlobalData->leftButtonOrders() ? GWM_RIGHT_DOWN : GWM_LEFT_DOWN;
+				if( drawableList->empty() || msg == lookButton )
 				{
 					radarLookAt( &world );
 					s_radarLookDrag = (msg == GWM_LEFT_DOWN) ? GWM_LEFT_DRAG : GWM_RIGHT_DRAG;

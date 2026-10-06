@@ -125,6 +125,7 @@
 static unsigned MeshDebugIdCount;
 
 bool MeshClass::Legacy_Meshes_Fogged = true;
+int MeshClass::Shadow_Pass_Light_Meshes = 0;
 static SimpleDynVecClass<uint32> temp_apt;
 
 /*
@@ -661,6 +662,18 @@ void MeshClass::Render(RenderInfoClass & rinfo)
 {
 	WWPROFILE("Mesh::Render");
 	if (Is_Not_Hidden_At_All() == false) {
+		return;
+	}
+
+	/* A shadow pass draws matter, and a mesh that blends on its base pass without the artist's
+		 cast-shadow flag is light: a headlight's beam, a glow, a muzzle flash.  The stencil volumes
+		 have always left a blended mesh like that out (W3DShadowGeometry::initFromHLOD); the sun's
+		 depth pass drew it, and a Humvee laid the cone of its own headlight on the ground.  Alpha
+		 tested meshes (leaves, fences, flags) are not IS_ALPHA and stay, where the volumes drop them,
+		 and every rotor disc in the game carries the flag. */
+	if ((rinfo.Current_Override_Flags() & RenderInfoClass::RINFO_OVERRIDE_SHADOW_RENDERING)
+			&& Is_Alpha() && !Model->Get_Flag(MeshGeometryClass::CAST_SHADOW)) {
+		++Shadow_Pass_Light_Meshes;
 		return;
 	}
 

@@ -1,0 +1,9 @@
+# Hero loop: one locked frame on the hero_loop fight, frames 600 to 1019 (command line
+# in Scenarios/hero_loop.txt). Locked so the edit can cross-fade the tail into the head with no
+# camera mismatch at the seam. Centred on 2450,2450 because the page crops the 16:9 frame to about
+# 1.05:1 around the middle on desktop. Heading -45 as tr_chaos_v2. Zoom 0.7 (logged as 0.89) was
+# too tight: a handful of vehicles under the smoke.
+
+5     cut        2450 2450 1.0 -45 -4
+6     shot
+34    end

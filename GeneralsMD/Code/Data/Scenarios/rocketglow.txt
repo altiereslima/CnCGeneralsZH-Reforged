@@ -1,0 +1,11 @@
+# Three GLA Scud Launchers on the open scrub of Golden Oasis shelling a power plant 300 east, for a
+# picture of the glow behind a Scud in flight. Drawn, Direct3D 11, the camera between the two:
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -noFPSLimit -quickstart -noshellmap -observer
+#     -multiInstance -map "Maps\Golden Oasis\Golden Oasis.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -scenario rocketglow -camera 2342 3537
+#     -video 60 420 rocketglow -maxframes 430 -logPrefix rocketglow_
+
+10    spawn   0  AmericaPowerPlant        1   2492 3537
+10    spawn   1  GLAVehicleScudLauncher   3   2192 3537 50
+30    attack  1  GLAVehicleScudLauncher       0 AmericaPowerPlant

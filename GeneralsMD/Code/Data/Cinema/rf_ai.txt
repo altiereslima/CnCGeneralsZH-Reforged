@@ -1,0 +1,18 @@
+# Zero Hour Reforged trailer, beat 21 (AI_BASE): two Hard computer players on Tournament Desert,
+# America in the south against China in the north, seed 3, nothing pinned but the start positions
+# (Scenarios/rf_pin.txt). America's base at 8:00 from the north, the whole base between the black map
+# edges: factories, power, the supply center with its Chinooks, guns facing out.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Tournament Desert\Tournament Desert.map" -autoskirmish 2 -observer
+#     -aidiff brutal -side 0 FactionAmerica -side 1 FactionChina -seed 3 -scenario rf_pin
+#     -cinema rf_ai -fps 120 -noFPSLimit -video 14380 14560 rf_ai_base -maxframes 14570
+#
+# The first verb is at 30 s, not 3: at -fps 120 the 3 s mark comes before the observer's view has
+# settled, and the relative zoom then came out half again wider than the same cut from 280 s.
+# Relative zoom 1 is absolute 4.1 here. At pitch 8 the map's north-east edge came into the top right
+# corner as a black triangle; pitch 0 and a slightly closer zoom keep the frame on the map.
+
+30.0   cut    1005 584 0.9 -30 8
+470.0  cut    1005 610 0.85 -30 0
+486.0  end

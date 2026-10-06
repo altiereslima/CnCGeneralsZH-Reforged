@@ -465,7 +465,7 @@ public:  // ********************************************************************
 	void feedStructure( Object *structure, Bool finished );
 	void feedScience( Player *player, ScienceType science );
 	virtual void toggleMessages( void ) { m_messagesOn = 1 - m_messagesOn; }	///< toggle messages on/off
-	void openScoreboard( void ) { m_scoreboardOpen = TRUE; }		///< the Tab scoreboard, up while Tab is held
+	void openScoreboard( void );		///< the Tab scoreboard, up while Tab is held; EA's diplomacy screen in Classic
 	void closeScoreboard( void ) { m_scoreboardOpen = FALSE; }
 	Bool pickSpectatorStat( Int commandSlot );	///< a command bar key while watching: TRUE when it picked a stat
 	/** The command bar's page, Window/Html/ControlBar.html, under the bar's windows: its panels are
@@ -484,10 +484,16 @@ public:  // ********************************************************************
 	Bool isPromotionPageShown( void ) const { return m_promotionPageLoaded && !m_promotionPage.empty(); }
 	/** The promotion screen is coming up: its page and the dimmed screen under it fade in from now. */
 	void openPromotionPage( void );
+	/** The promotion screen is going: the page fades out and hides its window when it is gone. */
+	void closePromotionPage( void ) { m_promotionClosing = TRUE; }
 	/** The Esc menu hands its look to Window/Html/QuitMenu.html: `parent` draws the page and its keys
 		* draw nothing and keep their clicks.  Left as it is when there is no page. */
 	void themeQuitMenu( GameWindow *parent );
 	void drawQuitMenuPage( GameWindow *parent );
+	/** TRUE once the Esc menu is the page's, so the layout's own transitions stay off. */
+	Bool isQuitMenuPageShown( void ) const { return m_quitMenuPageLoaded && !m_quitMenuPage.empty(); }
+	/** The Esc menu is going: the page fades out and hides its window when it is gone. */
+	void closeQuitMenuPage( void ) { m_quitMenuClosingMs = 0; }
 	/** The command bar's grids of buttons whose cells the page frames in front of the buttons. */
 	enum CellGrid { CELL_GRID_COMMAND, CELL_GRID_QUEUE, CELL_GRID_POWERS, CELL_GRID_COUNT };
 	/** The steel frames over one grid's buttons, from Window/Html/ControlBar.html, drawn after them. */
@@ -558,9 +564,21 @@ public:  // ********************************************************************
 		ORDER_HINT_ABILITY,					///< use an ability where it stands, from a shift list
 		ORDER_HINT_UPGRADE					///< buy an upgrade where it stands, from a shift list
 	};
+	// What stands on the end of an order's line, in EA's rally point art: the flag on the last bit of
+	// ground a unit is sent to, the line's joint on everything else - a unit or building it is sent
+	// at (which the joint then follows), and every point of a shift list short of the last
+	enum OrderHintMark
+	{
+		ORDER_MARK_NONE = 0,				///< nothing of its own: an upgrade or ability used where the step before ends
+		ORDER_MARK_JOINT,						///< EA's waypoint node
+		ORDER_MARK_FLAG							///< EA's rally flag
+	};
+	static OrderHintMark markForOrderHint( OrderHintKind kind, Bool onObject, Bool lastPoint );
+
 	struct OrderHint
 	{
-		OrderHint( void ) : kind( ORDER_HINT_MOVE ), owner( INVALID_ID ), bornMs( 0 ), step( 0 ), icon( NULL ), radius( 0.0f ) {}
+		OrderHint( void ) : kind( ORDER_HINT_MOVE ), owner( INVALID_ID ), bornMs( 0 ), step( 0 ), icon( NULL ), radius( 0.0f ),
+			onObject( FALSE ), mark( ORDER_MARK_NONE ) {}
 
 		Coord3D from;						///< where the unit is now
 		Coord3D to;							///< where it is going
@@ -570,6 +588,8 @@ public:  // ********************************************************************
 		Int step;								///< its place in the order the unit will get to its points, from 1; 0 when it has only the one
 		const Image *icon;			///< the upgrade's own button art on an upgrade step, NULL otherwise
 		Real radius;						///< the circle a guard holds round 'to', 0 for every other kind
+		Bool onObject;					///< 'to' is a unit or building, read off it every frame
+		OrderHintMark mark;			///< what stands on 'to'
 	};
 	const std::vector<OrderHint>& getOrderHints( void ) const { return m_drawnOrderHints; }
 
@@ -605,6 +625,7 @@ public:  // ********************************************************************
 	/// in front of it.  The logic keeps the list; see OrderQueue.h.
 	void markNextOrderQueued( OrderQueueMode mode );
 
+	void createMoveHint( const GameMessage *msg );							///< Classic: EA's animated ring where a move order lands
 	virtual void createAttackHint( const GameMessage *msg );		///< An attack command has occurred, start graphical "hint"
 	virtual void createForceAttackHint( const GameMessage *msg );		///< A force attack command has occurred, start graphical "hint"
 
@@ -1446,6 +1467,16 @@ protected:
 	std::list<WindowLayout *>		m_windowLayouts;
 	AsciiString									m_currentlyPlayingMovie;											///< Used to push updates to TheScriptEngine
 	DrawableList								m_selectedDrawables;													///< A list of all selected drawables.
+
+	// Classic's move rings, EA's own: where each move order landed and the client frame it did
+	enum { MAX_MOVE_HINTS = 256 };
+	struct MoveHintStruct
+	{
+		Coord3D pos;						///< World coords of destination point
+		UnsignedInt frame;			///< frame the command was issued on
+	};
+	MoveHintStruct							m_moveHint[ MAX_MOVE_HINTS ];
+	Int													m_nextMoveHint;
 	DrawableList								m_selectedLocalDrawables;											///< A list of all selected drawables owned by the local player
 	std::vector<ObjectID>				m_tunnelTripRiders;														///< selected units inside the tunnel network on a move order, selected again when they come out
 	Bool												m_isDragSelecting;														///< If TRUE, an area selection is in progress
@@ -1476,10 +1507,13 @@ protected:
 	void collectOrderHints( void );															///< one hint per selected unit and queued point
 	void bunchOrderHints( void );																///< merge the hints of units going the same way
 	void addOrderHint( OrderHint& hint, const std::vector<OrderHint>& previous );	///< keep a marker's age across the frame the list is rebuilt on
-	Bool getHeldAircraftOrder( const Object *obj, OrderHintKind& kind, Coord3D& to ) const;	///< the order an aircraft is sitting on until it is airborne
+	Bool getHeldAircraftOrder( const Object *obj, OrderHintKind& kind, Coord3D& to, Bool& onObject ) const;	///< the order an aircraft is sitting on until it is airborne
 	void addQueuedOrderTail( OrderHint& hint, const OrderChain& chain, const std::vector<OrderHint>& previous );	///< every order still owed, drawn on from where the hint leaves off
 	Bool getQueuedOrderHint( const QueuedOrder& order, OrderHint& hint ) const;	///< the marker a queued order draws, FALSE for none
 	void numberOrderHints( void );															///< a unit with more than one place to go numbers them
+	void markOrderHints( void );																///< flag or joint on each hint's end
+	void updateOrderFlags( void );															///< stand a rally flag on every flagged hint
+	std::vector<DrawableID>			m_orderFlagIDs;																///< the rally flags updateOrderFlags stands, reused frame to frame
 	Bool isHiddenByShroud( const Object *obj ) const;						///< is the shroud over this, for the player at this machine
 	Bool												m_displayedMaxWarning;                        ///< keeps the warning from being shown over and over
 	const CommandButton *				m_pendingGUICommand;										///< GUI command that needs additional interaction from the user
@@ -1621,12 +1655,14 @@ protected:
 	std::string									m_promotionPage;
 	Int													m_promotionShownMs;				///< how far the promotion screen has come up, -1 before its first picture
 	UnsignedInt									m_promotionDrawnAt;				///< the wall clock at its last picture
+	Bool												m_promotionClosing;				///< fading out, m_promotionShownMs running back to 0
 	HtmlOverlay *								m_quitMenuOverlay;
 	std::vector< HtmlOverlay * >	m_quitMenuKeyOverlays;	///< one for each of the menu's keys, each fading in on its own
 	Bool												m_quitMenuPageLoaded;
 	std::string									m_quitMenuPage;
 	Int													m_quitMenuShownMs;			///< how far the menu's coming up has run, -1 until its first picture
 	UnsignedInt									m_quitMenuDrawnAt;			///< the wall clock at its last picture: the game is paused under it
+	Int													m_quitMenuClosingMs;		///< how far the menu's going has run, -1 while it is not going
 	Bool												m_signalsWereShown;				///< the smoke signal column was up last frame
 	UnsignedInt									m_signalsRiseStartMs;			///< when it last came up, the start of its buttons' rise
 
@@ -1671,6 +1707,26 @@ protected:
 	void clearSignalMarks( void );
 	void addFeedLine( HtmlValues line );
 	void feedAct( Player *player, const Image *cameo, const std::string &what, const char *tag, const char *label );
+
+	//
+	// The Classic interface's message list: EA's column of six lines in the top left corner, each in
+	// its own colour, fading out from the moment it is written.  Reforged writes the event feed.
+	//
+	enum { CLASSIC_MESSAGES = 6 };
+	struct ClassicMessage
+	{
+		DisplayString *text;
+		UnsignedInt frame;					///< the logic frame it was written on
+		Color color;
+	};
+	ClassicMessage							m_classicMessages[ CLASSIC_MESSAGES ];	///< newest first
+	UnsignedInt									m_classicMessageFadeFrame;			///< the last logic frame the fade was stepped on
+	void addClassicMessage( const UnicodeString &text, const Color *color );
+	void fadeClassicMessages( void );
+	void drawClassicMessages( void );
+	void freeClassicMessages( void );
+	void drawClassicSuperweapon( SuperweaponInfo *info, const AsciiString &templateName, Bool isReady, Int readySecs,
+															 Int x, Int *y );
 	void watchDozers( void );
 	void drawFeed( void );
 	Int feedTop( void ) const;

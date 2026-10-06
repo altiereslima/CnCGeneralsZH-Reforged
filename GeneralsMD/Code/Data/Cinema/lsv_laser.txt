@@ -1,0 +1,12 @@
+# Laser glow video, shot 1: Scenarios/laserglow.txt on Twilight Flame, seed 7. Looking north over
+# the Paladin, the Avenger and the Laser General's Crusader and Avenger, the buggies and Tank Hunters
+# coming from the top of the frame. Wide on the whole fight, then closer on the laser tanks.
+# Zoom 0.3 here holds about one tank across the frame.
+#
+#   ...the scenario's switches... -cinema lsv_laser -video 100 280 lsv_laser -maxframes 290
+
+3.2   cut     3330 3880 0.75 0 6
+3.3   zoom    0.6 3
+6.4   cut     3330 3810 0.4 20 8
+6.5   orbit   -25 3
+9.6   end

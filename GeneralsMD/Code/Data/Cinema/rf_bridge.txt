@@ -1,0 +1,12 @@
+# Zero Hour Reforged trailer, beat 15 (MV_BRIDGE): Scenarios/bridgecross.txt on Golden Oasis, the
+# Kandahar deck from above, corner to corner, held while twenty Crusaders cross it. The bridgejam
+# list's framing, which logged absolute zoom 1.26: from the observer's view at 3 s (absolute 4.14
+# on this map) that is relative 0.304.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -map "Maps\Golden Oasis\Golden Oasis.map" -autoskirmish 2 -takeover -observer
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -scenario bridgecross -cinema rf_bridge
+#     -video 300 1100 rf_bridge -maxframes 1110
+
+3.0   cut     1757 1497 0.304 0 -36
+37.2  end

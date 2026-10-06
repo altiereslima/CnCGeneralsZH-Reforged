@@ -28,6 +28,17 @@
 # and 150, the Avenger died on 261 and 261, the Paladin under buggies on 381 and 381, the Paladin
 # under Terrorists on 397 and 450, and its infantry charge killed a Terrorist on frame 385 of seed 7.
 #
+# 2026-10-06 the beam came back (EA's LaserName, bone and FireFX; clips, damage and DETONATED kept)
+# and the infantry shot burns again (LASERED). Seeds 7 and 8: the Avenger shot down 8 and 8 and died
+# on 258 and 258, the Paladin under buggies shot down 4 rockets and died on 381 and 381, the Paladin
+# under Terrorists died on 386 and 396 with no Terrorist killed. Its laser never one-shot a soldier:
+# 100 LASER against HumanArmor's 50% is 50 of a Rebel's or Terrorist's 120.
+#
+# Then the missile weapons went back to EA's LASERED (the disintegrate FX and a debris scrap) in
+# place of DETONATED and the charge's blast. Seeds 7 and 8: Avenger 8 and 8 shot down, dead on 258
+# and 258; Paladin under buggies 4 and 4, dead on 381 and 376; Paladin under Terrorists dead on 386
+# and 396, one Terrorist killed by the Paladin on frame 337 of seed 8.
+#
 # Worth filming: flares come off a Raptor and Stingers turn onto them around 2620,3005 at about 95
 # high on frames 250 to 256 (seed 7); the Avenger at 2195,3906 bursts Tank Hunter missiles about 90
 # north of it on frames 150 to 190, and the Paladin at 3300,3800 a buggy rocket 60 north on 146.

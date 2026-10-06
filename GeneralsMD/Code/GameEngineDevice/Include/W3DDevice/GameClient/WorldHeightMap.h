@@ -171,6 +171,24 @@ protected:
 	/// Tiles that hold the alpha channel info.
 	static TileData *m_alphaTiles[NUM_ALPHA_TILES];
 
+	/** getExtraAlphaUVData's answer per blend tile, because the terrain asks again for every visible
+		3-way tile on every render pass.  The answer depends on the blend tile, the cell's cliff info
+		and where the tiles sit in the terrain texture; the first two are the key, and the last is
+		m_extraBlendUVGeneration, bumped whenever the texture is laid out again. */
+	struct ExtraBlendUV
+	{
+		Real U[4];
+		Real V[4];
+		UnsignedByte alpha[4];
+		Bool flip;
+		Bool cliff;
+		Short cliffInfoNdx;
+		Bool adjustCliff;
+		Int generation;		///< 0 is never valid
+	};
+	std::vector<ExtraBlendUV> m_extraBlendUV;	///< indexed by blend tile, allocated on first use
+	Int m_extraBlendUVGeneration;
+
 
 protected:
 	TileData *getSourceTile(UnsignedInt ndx) { if (ndx<NUM_SOURCE_TILES) return(m_sourceTiles[ndx]); return(NULL); };
@@ -235,6 +253,7 @@ public:  // tile and texture info.
 	Bool getUVData(Int xIndex, Int yIndex, float U[4], float V[4], Bool fullTile);
 
 	Bool getExtraAlphaUVData(Int xIndex, Int yIndex, float U[4], float V[4], UnsignedByte alpha[4], Bool *flip, Bool *cliff);
+	Int getExtraBlendUVGeneration(void) const { return m_extraBlendUVGeneration; }	///< changes when getExtraAlphaUVData's answers can
 	/// UV mapping data for a cell to map into the alpha terrain texture.
 	void getAlphaUVData(Int xIndex, Int yIndex, float U[4], float V[4], UnsignedByte alpha[4], Bool *flip, Bool fullTile);
 	void getTerrainColorAt(Real x, Real y, RGBColor *pColor);

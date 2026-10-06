@@ -230,9 +230,10 @@ public:
 	UnsignedInt getSpecialObjectMax() const;
 	Object* findSpecialObjectWithProducerID( const Object *target );
 	SpecialPowerType getSpecialPowerType( void ) const;
+	/// Ends the ability.  Only an order from outside the AI ends it by itself; a skirmish AI ending one calls this.
+	void onExit( Bool cleanup );
 
 protected:
-	void onExit( Bool cleanup );
 
 	const SpecialPowerTemplate* getTemplate() const;
 

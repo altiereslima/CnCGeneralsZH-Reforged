@@ -4011,6 +4011,7 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 				 turret is already on: a Helix flies where it likes while its gattling cannon tracks. */
 			Coord3D faceTargetPos;
 			const Coord3D *faceTarget = NULL;
+			Bool fighting = FALSE;	// shooting at something, whether or not the nose has to point at it
 			updateWithdrawTarget();
 			if (m_curLocomotor->isHelicopter(getObject()))
 			{
@@ -4027,10 +4028,14 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 					if (target == NULL)
 						target = getCurrentVictim();
 				}
-				if (target && !target->isEffectivelyDead() && !isCarriedGunOn(target))
+				if (target && !target->isEffectivelyDead())
 				{
-					faceTargetPos = *target->getPosition();
-					faceTarget = &faceTargetPos;
+					fighting = TRUE;
+					if (!isCarriedGunOn(target))
+					{
+						faceTargetPos = *target->getPosition();
+						faceTarget = &faceTargetPos;
+					}
 				}
 				else if (!noseAims)
 				{
@@ -4041,6 +4046,7 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 						turretTarget = getCurrentVictim();
 					if (turretTarget && !turretTarget->isEffectivelyDead())
 					{
+						fighting = TRUE;
 						Real shortfall = getTurretArcShortfall(tur, ThePartitionManager->getRelativeAngle2D(getObject(), turretTarget->getPosition()));
 						if (shortfall != 0.0f)
 						{
@@ -4063,7 +4069,7 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 						if( speed == FAST_AS_POSSIBLE || speed > myMaxSpeed )
 							speed = myMaxSpeed;
 						m_curLocomotor->locoUpdate_moveTowardsPosition(getObject(),
-							m_locomotorGoalData, 0.0f, speed, &blocked, faceTarget);
+							m_locomotorGoalData, 0.0f, speed, &blocked, faceTarget, fighting);
 						m_doFinalPosition = FALSE;
 					}
 					break;
@@ -4207,7 +4213,7 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 						}
 
 						m_curLocomotor->locoUpdate_moveTowardsPosition(getObject(), goalPos,
-							onPathDistToGoal+getPathExtraDistance(), speed, &blocked, faceTarget, bendDist, bendCos);
+							onPathDistToGoal+getPathExtraDistance(), speed, &blocked, faceTarget, fighting, bendDist, bendCos);
 
 						m_doFinalPosition = FALSE;
 					}

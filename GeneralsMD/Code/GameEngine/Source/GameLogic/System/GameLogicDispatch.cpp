@@ -136,6 +136,7 @@ static void considerBuilderProc( Object *obj, void *userData )
 #include "GameClient/ControlBar.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/Eva.h"
+#include "GameClient/GameConsole.h"
 #include "GameClient/GameText.h"
 #include "GameClient/GameWindowTransitions.h"
 #include "GameClient/GameWindowManager.h"
@@ -342,6 +343,8 @@ void GameLogic::closeWindows( void )
 {
 	HideDiplomacy();
 	ResetDiplomacy();
+	if( TheGameConsole )
+		TheGameConsole->resetCheatWindow();
 	HideInGameChat();
 	ResetInGameChat();
 	TheControlBar->hidePurchaseScience();

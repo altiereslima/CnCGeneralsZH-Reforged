@@ -1,0 +1,8 @@
+# Zero Hour Reforged trailer, beat 05 (LK_SMOKE): Scenarios/rf_smoke.txt on Flash Effect, looking
+# east into the sun over the derricks, so the black columns lean across the frame with their fires
+# under them, the palm shadows run towards the camera and the Crusaders drive away up the frame
+# through the shade. Held. Of the four headings tried at this point, 270 was the one where the
+# smoke's own shadow reads on the sand.
+
+3.0   cut     1700 1580 0.4 -90 18
+16.3  end

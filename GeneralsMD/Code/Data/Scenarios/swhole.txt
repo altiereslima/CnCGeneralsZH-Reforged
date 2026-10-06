@@ -1,0 +1,42 @@
+# Superweapon allowance and the Scud Storm's rebuild hole.
+#
+# GLA holds four finished Stinger Sites, which pay for one superweapon, and one Scud Storm that
+# spends it.  Overlords knock the storm down; it leaves a hole that sends a worker to rebuild it
+# 20 seconds later.  Placement clicks for a second storm land inside those 20 seconds.  The rule
+# says one superweapon for four defences, so the click must be refused: the hole still holds the
+# storm it is about to put back.  Read the GLAScudStorm tallies from frame 360 on: 0 alive until
+# the hole's rebuild starts and 1 after it is the rule kept; 1 alive at 360 and 2 at the end is the
+# hole letting a second storm through.
+#
+# The Overlords are turned on the palace at 226, the frame after the storm falls, or they shoot the
+# hole down as well.  It still drops to about 100 of its 500 from the shells already in the air.
+# Before the fix this ran to 2 storms at 900 and 2400 on four towers; after it, 0 at 360 and 1 at
+# the end.
+#
+#   generals.exe -headless -quickstart -noshellmap -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionGLA -side 1 FactionChina -seed 7 -maxframes 2400
+#     -scenario swhole -logPrefix swhole_
+
+10    spawn       0  GLAStingerSite     4   start0:-350:-150  80
+10    spawn       0  GLAPalace          1   start0:-200:150
+10    spawn       0  GLAScudStorm       1   start0:250:250
+10    spawn       1  ChinaTankOverlord  12  start0:250:450  40
+30    tally       0  GLAStingerSite
+30    tally       0  GLAScudStorm
+40    attack      1  ChinaTankOverlord  0  GLAScudStorm
+200   tally       0  GLAScudStorm
+226   attack      1  ChinaTankOverlord  0  GLAPalace
+240   tally       0  GLAHoleScudStorm
+260   tally       0  GLAHoleScudStorm
+280   tally       0  GLAHoleScudStorm
+300   tally       0  GLAScudStorm
+300   tally       0  GLAHoleScudStorm
+330   construct   0  GLAScudStorm       start0:-150:-450
+340   construct   0  GLAScudStorm       start0:350:-350
+360   tally       0  GLAScudStorm
+400   move        1  ChinaTankOverlord  start1
+900   tally       0  GLAScudStorm
+900   tally       0  GLAHoleScudStorm
+2390  tally       0  GLAScudStorm
+2390  tally       0  GLAHoleScudStorm

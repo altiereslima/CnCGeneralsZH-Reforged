@@ -1,0 +1,88 @@
+# Rocket spam for a frame-time measurement of the grey smoke behind streak-exhaust missiles: Tank
+# Hunters, Rocket Buggies and Missile Defenders fight Paladins and Overlords from frame 60 in
+# waves, eight Comanches fire their pods from frame 1400, and from frame 1380 Stinger sites and
+# Patriots shoot at the helicopters. Drawn, Direct3D 11, the camera over the fight:
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -turbo -quickstart -noshellmap -observer
+#     -multiInstance -noFPSLimit -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2
+#     -takeover -side 0 FactionChina -side 1 FactionAmerica -seed 7 -maxframes 2600
+#     -camera 1600 3650 -scenario missilespam -logPrefix missilespam_
+#
+# Compare with -novolumetricsmoke (the smoke trail without its shade) and with the
+# MissileExhaustTrail slave lines out of ParticleSystemReforged.ini (no trail).
+
+30    spawn         1  AmericaAirfield                 1   1200 3300
+30    spawn         1  AmericaPowerPlant               2   1500 3300 60
+40    shiftupgrade  1  AmericaAirfield                 Upgrade_ComancheRocketPods
+1340  spawn         1  AmericaVehicleComanche          8   1200 3700 40
+1360  move          1  AmericaVehicleComanche              1250 3700
+
+# ground fight in waves, 24 Tank Hunters and 6 Buggies against 16 Missile Defenders a wave
+60    spawn         1  AmericaTankPaladin              6   1750 3550 40
+60    spawn         0  ChinaTankOverlord               2   1800 3650 60
+60    spawn         0  ChinaInfantryTankHunter         24  1450 3800 15
+60    spawn         0  GLAVehicleRocketBuggy           6   1450 3900 30
+60    spawn         1  AmericaInfantryMissileDefender  16  1450 3500 15
+90    attackmove    0  ChinaInfantryTankHunter             1750 3550
+90    attackmove    0  GLAVehicleRocketBuggy               1750 3550
+90    attackmove    1  AmericaInfantryMissileDefender      1800 3650
+
+310   spawn         1  AmericaTankPaladin              6   1750 3550 40
+310   spawn         0  ChinaTankOverlord               2   1800 3650 60
+310   spawn         0  ChinaInfantryTankHunter         24  1450 3800 15
+310   spawn         0  GLAVehicleRocketBuggy           6   1450 3900 30
+310   spawn         1  AmericaInfantryMissileDefender  16  1450 3500 15
+340   attackmove    0  ChinaInfantryTankHunter             1750 3550
+340   attackmove    0  GLAVehicleRocketBuggy               1750 3550
+340   attackmove    1  AmericaInfantryMissileDefender      1800 3650
+
+560   spawn         1  AmericaTankPaladin              6   1750 3550 40
+560   spawn         0  ChinaTankOverlord               2   1800 3650 60
+560   spawn         0  ChinaInfantryTankHunter         24  1450 3800 15
+560   spawn         0  GLAVehicleRocketBuggy           6   1450 3900 30
+560   spawn         1  AmericaInfantryMissileDefender  16  1450 3500 15
+590   attackmove    0  ChinaInfantryTankHunter             1750 3550
+590   attackmove    0  GLAVehicleRocketBuggy               1750 3550
+590   attackmove    1  AmericaInfantryMissileDefender      1800 3650
+
+810   spawn         1  AmericaTankPaladin              6   1750 3550 40
+810   spawn         0  ChinaTankOverlord               2   1800 3650 60
+810   spawn         0  ChinaInfantryTankHunter         24  1450 3800 15
+810   spawn         0  GLAVehicleRocketBuggy           6   1450 3900 30
+810   spawn         1  AmericaInfantryMissileDefender  16  1450 3500 15
+840   attackmove    0  ChinaInfantryTankHunter             1750 3550
+840   attackmove    0  GLAVehicleRocketBuggy               1750 3550
+840   attackmove    1  AmericaInfantryMissileDefender      1800 3650
+
+1060  spawn         1  AmericaTankPaladin              6   1750 3550 40
+1060  spawn         0  ChinaTankOverlord               2   1800 3650 60
+1060  spawn         0  ChinaInfantryTankHunter         24  1450 3800 15
+1060  spawn         0  GLAVehicleRocketBuggy           6   1450 3900 30
+1060  spawn         1  AmericaInfantryMissileDefender  16  1450 3500 15
+1090  attackmove    0  ChinaInfantryTankHunter             1750 3550
+1090  attackmove    0  GLAVehicleRocketBuggy               1750 3550
+1090  attackmove    1  AmericaInfantryMissileDefender      1800 3650
+
+# the air fight: Stingers and Patriots against the Comanches, which fire their pods from 1400
+1380  spawn         0  GLAStingerSite                  6   1600 3900 40
+1380  spawn         1  AmericaPatriotBattery           4   1600 3450 50
+1380  spawn         0  ChinaInfantryTankHunter         24  1450 3800 15
+1380  spawn         1  AmericaTankPaladin              6   1750 3550 40
+1380  spawn         1  AmericaInfantryMissileDefender  16  1450 3500 15
+1400  weaponat      1  AmericaVehicleComanche              2050 3700
+1410  attackmove    0  ChinaInfantryTankHunter             1750 3550
+1410  attackmove    1  AmericaInfantryMissileDefender      1800 3650
+1430  attackmove    1  AmericaVehicleComanche              1500 3850
+
+1640  spawn         0  ChinaInfantryTankHunter         24  1450 3800 15
+1640  spawn         1  AmericaTankPaladin              6   1750 3550 40
+1640  spawn         1  AmericaInfantryMissileDefender  16  1450 3500 15
+1670  attackmove    0  ChinaInfantryTankHunter             1750 3550
+1670  attackmove    1  AmericaInfantryMissileDefender      1800 3650
+
+1900  spawn         0  ChinaInfantryTankHunter         24  1450 3800 15
+1900  spawn         1  AmericaTankPaladin              6   1750 3550 40
+1900  spawn         1  AmericaInfantryMissileDefender  16  1450 3500 15
+1930  attackmove    0  ChinaInfantryTankHunter             1750 3550
+1930  attackmove    1  AmericaInfantryMissileDefender      1800 3650
+2300  weaponat      1  AmericaVehicleComanche              2050 3700

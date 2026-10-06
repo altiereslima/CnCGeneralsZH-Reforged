@@ -1,0 +1,6 @@
+# Hero loop 08 (command line in Scenarios/hero_loop_08.txt): Dark Night's village
+# square at night, close and tight on the fire and the tanks crossing it, rf_night's heading 180,
+# locked so the edit's dissolve joins matching frames.
+
+5     cut        1920 1790 0.32 180 14
+36    end

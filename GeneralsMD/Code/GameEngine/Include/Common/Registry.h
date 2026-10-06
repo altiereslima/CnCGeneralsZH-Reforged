@@ -48,6 +48,9 @@ Bool GetStringFromRegistry(AsciiString path, AsciiString key, AsciiString& val);
 Bool GetUnsignedIntFromRegistry(AsciiString path, AsciiString key, UnsignedInt& val);
 
 AsciiString GetRegistryLanguage(void); // convenience function
+/// Replaces what GetRegistryLanguage answers from now on; GameEngine::init uses it once the archives are
+/// mounted, when the registry names a language whose data is not installed (FileSystem::installedLanguage).
+void SetRegistryLanguage(const AsciiString &language);
 AsciiString GetRegistryGameName(void); // convenience function
 UnsignedInt GetRegistryVersion(void); // convenience function
 UnsignedInt GetRegistryMapPackVersion(void); // convenience function

@@ -1,0 +1,9 @@
+# Hero loop 03: the low angle. Bombardment Beach, tilted up over the fight of
+# Scenarios/hero_loop_03.txt with the rock ridge behind it, frames 600 to 1019 (command line there).
+# Heading 135 looks back toward the south start. Heading -45 from 1946,1376 put a ridge in front of
+# the fight and the map edge, black, in the top right corner. Locked so the edit can dissolve the
+# tail into the head.
+
+5     cut        1946 1376 0.6 135 18
+25    shot
+35    end

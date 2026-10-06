@@ -1,0 +1,72 @@
+# Hero loop 03: America from the south start against China from the north start on
+# Bombardment Beach, meeting on the grass between the rock ridges at 1946,1376, the midpoint of the
+# two starts. Waves at 420, 540, 660 and 800 keep it fed over frames 600 to 1019.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -particlecap 30000 -quickstart
+#     -noshellmap -observer -multiInstance -map "Maps\Bombardment Beach\Bombardment Beach.map"
+#     -autoskirmish 2 -takeover -side 0 FactionAmerica -side 1 FactionChina -seed 7
+#     -scenario hero_loop_03 -cinema hero_loop_03 -video 600 1019 hero_loop_03 -maxframes 1040
+# --- buildings, at the starts, out of frame -------------------------------------------------------
+10    spawn  0  AmericaParticleCannonUplink     1   start0:0:-200
+10    spawn  0  AmericaCommandCenter            1   start0:240:60
+10    spawn  1  ChinaNuclearMissileLauncher     1   start1:0:200
+10    spawn  1  ChinaCommandCenter              1   start1:-260:60
+# --- America, from the south ---------------------------------------------------------------------
+150   spawn  0  AmericaTankCrusader             20  1944 996   34
+150   spawn  0  AmericaTankCrusader             20  1717 1073  34
+150   spawn  0  AmericaTankPaladin              14  1802 949   38
+150   spawn  0  AmericaInfantryRanger           30  2058 958   14
+150   spawn  0  AmericaInfantryMissileDefender  24  1603 1111  14
+150   spawn  0  AmericaVehicleTomahawk          8   1887 825   40
+150   spawn  0  AmericaTankMicrowave            5   1660 902   40
+150   spawn  0  AmericaVehicleHumvee            10  2030 872   36
+150   spawn  0  AmericaVehicleComanche          3   1802 949   60
+150   spawn  0  AmericaJetRaptor                6   1773 864   70
+# --- China, from the north -----------------------------------------------------------------------
+150   spawn  1  ChinaTankBattleMaster           20  2174 1678  36
+150   spawn  1  ChinaTankBattleMaster           20  1947 1755  36
+150   spawn  1  ChinaTankOverlord               8   2089 1802  50
+150   spawn  1  ChinaTankGattling               10  2316 1725  36
+150   spawn  1  ChinaTankDragon                 8   1861 1879  36
+150   spawn  1  ChinaVehicleInfernoCannon       6   2231 1849  40
+150   spawn  1  ChinaVehicleNukeLauncher        3   2004 1926  50
+150   spawn  1  ChinaInfantryRedguard           30  2288 1640  14
+150   spawn  1  ChinaInfantryTankHunter         20  1833 1793  14
+150   spawn  1  ChinaVehicleHelix               2   2089 1802  60
+150   spawn  1  ChinaJetMIG                     6   2118 1887  70
+160   attackmove 0  *  1946 1376
+160   attackmove 1  *  1946 1376
+# --- waves ---------------------------------------------------------------------------------------
+420   spawn  0  AmericaTankCrusader             16  1802 949   34
+420   spawn  0  AmericaInfantryRanger           24  2030 872   14
+420   spawn  1  ChinaTankBattleMaster           16  2089 1802  36
+420   spawn  1  ChinaInfantryRedguard           24  2316 1725  14
+430   attackmove 0  *  1946 1376
+430   attackmove 1  *  1946 1376
+540   spawn  0  AmericaTankPaladin              10  1802 949   38
+540   spawn  1  ChinaTankOverlord               6   2089 1802  50
+550   attackmove 0  *  1946 1376
+550   attackmove 1  *  1946 1376
+660   spawn  0  AmericaTankCrusader             16  1802 949   34
+660   spawn  0  AmericaTankPaladin              6   1688 987   38
+660   spawn  0  AmericaInfantryRanger           24  2030 872   14
+660   spawn  1  ChinaTankBattleMaster           16  2089 1802  36
+660   spawn  1  ChinaTankOverlord               4   1975 1840  50
+660   spawn  1  ChinaInfantryRedguard           24  2316 1725  14
+670   attackmove 0  *  1946 1376
+670   attackmove 1  *  1946 1376
+800   spawn  0  AmericaTankCrusader             16  1802 949   34
+800   spawn  0  AmericaTankPaladin              6   1688 987   38
+800   spawn  1  ChinaTankBattleMaster           16  2089 1802  36
+800   spawn  1  ChinaTankGattling               8   2316 1725  36
+810   attackmove 0  *  1946 1376
+810   attackmove 1  *  1946 1376
+# --- powers --------------------------------------------------------------------------------------
+330   power  0  AmericaCommandCenter  1946 1376  SuperweaponSpectreGunship
+380   power  1  ChinaCommandCenter    1900 1330  Early_SuperweaponChinaCarpetBomb
+430   power  0  AmericaCommandCenter  1990 1420  SuperweaponA10ThunderboltMissileStrike
+520   power  1  ChinaCommandCenter    2000 1340  Early_SuperweaponChinaCarpetBomb
+600   power  0  AmericaCommandCenter  1900 1410  SuperweaponA10ThunderboltMissileStrike
+640   power  0  AmericaParticleCannonUplink  1980 1360
+700   power  1  ChinaNuclearMissileLauncher  1920 1340
+840   power  1  ChinaNuclearMissileLauncher  1990 1400

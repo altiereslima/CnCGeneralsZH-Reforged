@@ -974,6 +974,26 @@ void GameEngine::init( int argc, char *argv[] )
 			_exit(1);
 		}
 
+		// The first place the archives can answer it, and before anything builds a path under
+		// Data\<language>: GlobalLanguage, GameText, the CommandMap, speech and localized art all ask after this.
+		{
+			const AsciiString registryLanguage = GetRegistryLanguage();
+			const AsciiString language = TheFileSystem->installedLanguage( registryLanguage );
+			if (language.isEmpty())
+			{
+				DEBUG_LOG(("GameEngine::init - no Data\\<language>\\Language.ini in any archive\n"));
+
+				MessageBoxWrapper( "Zero Hour's language files are missing: no Language.ini was found for any language.\n\nVerify the game's files in Steam, or reinstall Command & Conquer Generals Zero Hour.", "Command & Conquer Generals Zero Hour", MSGBOX_OK | MSGBOX_TASKMODAL | MSGBOX_ICONERROR );
+				_exit(1);
+			}
+			if (language.compareNoCase( registryLanguage ) != 0)
+			{
+				DEBUG_LOG(("GameEngine::init - Language=%s has no Data\\%s\\Language.ini, using %s\n",
+					registryLanguage.str(), registryLanguage.str(), language.str()));
+				SetRegistryLanguage( language );
+			}
+		}
+
 		initSubsystem(TheWritableGlobalData, "TheWritableGlobalData", MSGNEW("GameEngineSubsystem") GlobalData(), &xferCRC, "Data\\INI\\Default\\GameData.ini", "Data\\INI\\GameData.ini");
 
 
@@ -1174,6 +1194,8 @@ void GameEngine::init( int argc, char *argv[] )
 		AsciiString fname;
 		fname.format("Data\\%s\\CommandMap.ini", GetRegistryLanguage().str());
 		initSubsystem(TheMetaMap,"TheMetaMap", MSGNEW("GameEngineSubsystem") MetaMap(), NULL, fname.str(), "Data\\INI\\CommandMapReforged.ini");
+		// Classic answers to the game's own map and to nothing this fork binds
+		TheMetaMap->loadClassicBindings(fname);
 
 #if defined(_DEBUG) || defined(_INTERNAL)
 		ini.load("Data\\INI\\CommandMapDebug.ini", INI_LOAD_MULTIFILE, NULL);
@@ -1738,11 +1760,28 @@ void GameEngine_noteFrameTime( Real ms, UnsignedInt logicFrame )
 	theFrameTimes.note( ms, logicFrame );
 }
 
+/* The world's object count once a logic tick, debris and dying objects included, so a data change
+	 that adds objects (more wreckage, more projectiles) is argued with a number.  Read-only, and only
+	 in an unattended run that started counting. */
+static UnsignedInt theObjectPeak = 0;
+static UnsignedInt theObjectPeakFrame = 0;
+static double theObjectSum = 0.0;
+static Int theObjectTicks = 0;
+
 void GameEngine_noteLogicTime( Real ms, UnsignedInt logicFrame )
 {
 	if( !theFrameTimesStarted )
 		return;
 	theLogicTimes.note( ms, logicFrame );
+
+	const UnsignedInt objects = TheGameLogic ? TheGameLogic->getObjectCount() : 0;
+	theObjectSum += objects;
+	++theObjectTicks;
+	if( objects > theObjectPeak )
+	{
+		theObjectPeak = objects;
+		theObjectPeakFrame = logicFrame;
+	}
 }
 
 /** Start counting.  Called when an unattended run actually begins, so the map load, the first
@@ -1752,6 +1791,10 @@ static void startFrameTimeStats( void )
 {
 	theFrameTimes.reset();
 	theLogicTimes.reset();
+	theObjectPeak = 0;
+	theObjectPeakFrame = 0;
+	theObjectSum = 0.0;
+	theObjectTicks = 0;
 	theFrameTimesStarted = TRUE;
 #ifdef DEBUG_LOGGING
 	memset( &theParticleCost, 0, sizeof(theParticleCost) );
@@ -1816,6 +1859,12 @@ static void reportFrameTimeStats( void )
 							 theLogicTimes.percentileMS( 0.99f ), theLogicTimes.percentileMS( 0.999f ),
 							 theLogicTimes.worstMS(), theLogicTimes.worstAtFrame(),
 							 theLogicTimes.countOver( 33.3f )));
+	}
+
+	if( theObjectTicks > 0 )
+	{
+		DEBUG_LOG(("HEADLESS OBJECTS: peak %u (frame %u) | mean %.0f over %d ticks\n",
+							 theObjectPeak, theObjectPeakFrame, theObjectSum / theObjectTicks, theObjectTicks));
 	}
 }
 
@@ -2908,7 +2957,7 @@ void GameEngine::execute( void )
 				// I'm disabling this in internal because many people need alt-tab capability.  If you happen to be
 				// doing performance tuning, please just change this on your local system. -MDC
 				if (TheTacticalView->getTimeMultiplier()<=1 && !TheScriptEngine->isTimeFast())
-					::Sleep(1); // give everyone else a tiny time slice.
+					sleepMilliseconds(1); // give everyone else a tiny time slice.
 		#endif
 			}
 

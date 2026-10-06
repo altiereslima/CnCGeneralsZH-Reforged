@@ -1,0 +1,11 @@
+# Three Comanches over the oasis water of Golden Oasis for the Reforged trailer's palm shadow and
+# water reflection shots (beats 08 and 09). They hover on the near side of the stone bridge, then
+# drift 90 to the north-west so their rotor shadows slide across the water and the sand.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Golden Oasis\Golden Oasis.map" -autoskirmish 2 -takeover
+#     -observer -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -scenario rf_oasis
+#     -cinema rf_oasis -video 90 520 rf_oasis -maxframes 530
+
+30    spawn   0  AmericaVehicleComanche   3  3040 900  60
+240   move    0  AmericaVehicleComanche      3000 980

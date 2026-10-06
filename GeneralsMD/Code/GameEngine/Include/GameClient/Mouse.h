@@ -276,6 +276,9 @@ public:
 	
 	virtual void draw( void );													///< draw the mouse
 	virtual void setPosition( Int x, Int y );						///< set the mouse position
+	/// move the real pointer to this pixel of the game's window; FALSE where the platform cannot, or
+	/// the window is not the one in front
+	virtual Bool warpCursor( Int x, Int y ) { return FALSE; }
 	virtual void setCursor( MouseCursor cursor ) = 0;		///< set mouse cursor
 
 	virtual void capture( void ) = 0;					///< capture the mouse

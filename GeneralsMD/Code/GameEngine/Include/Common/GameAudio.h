@@ -303,6 +303,12 @@ class AudioManager : public SubsystemInterface
     virtual const AudioEventInfoHash & getAllAudioEvents() const { return m_allAudioEventInfo; }
 
 		Real getZoomVolume() const { return m_zoomVolume; }
+
+		// Birds, wind, water, a town's murmur: a looping world sound effect at the lowest priority that
+		// is not hidden by the shroud.  These answer to the Ambient slider instead of the effects one.
+		static Bool isAmbientSound( const AudioEventInfo *info );
+		// The Ambient slider with the script and zoom factors the effects slider would have carried.
+		Real getAmbientVolume( Bool positional ) const;
 	protected:
 
 		// Is the currently selected provider actually HW accelerated?
@@ -353,12 +359,13 @@ class AudioManager : public SubsystemInterface
 		Real m_systemSoundVolume;
 		Real m_systemSound3DVolume;
 		Real m_systemSpeechVolume;
+		Real m_systemAmbientVolume;
 		Real m_zoomVolume;
 
-		
+
 		AudioEventRTS *m_silentAudioEvent;
-		
-		enum { NUM_VOLUME_TYPES = 4 };
+
+		enum { NUM_VOLUME_TYPES = 5 };
 		Real *m_savedValues;
 
 		// Group of 8

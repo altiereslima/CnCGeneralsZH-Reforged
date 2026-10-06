@@ -123,7 +123,8 @@ static Coord2D edgeScrollPull( const ICoord2D& pos )
 {
 	const Int width  = (Int)TheDisplay->getWidth();
 	const Int height = (Int)TheDisplay->getHeight();
-	const Int band = isOverWindow( pos ) ? edgeScrollSize : EdgeScroll_bandForHeight( height );
+	// Classic is the game as shipped: the last three pixels, at full speed, and nothing deeper
+	const Int band = ( TheGlobalData->isClassicUI() || isOverWindow( pos ) ) ? edgeScrollSize : EdgeScroll_bandForHeight( height );
 
 	Coord2D pull;
 	pull.x = EdgeScroll_strength( width - 1 - pos.x, band ) - EdgeScroll_strength( pos.x, band );
@@ -151,7 +152,7 @@ void LookAtTranslator::setScrolling(Int x)
 	TheTacticalView->setMouseLock( TRUE );
 	m_scrollType = x;
 	// A manual pan restores map constraints widened by scripted camera paths.
-	if (TheGlobalData->m_useCameraConstraints && TheGlobalData->m_cameraBoundaryMargin > 0)
+	if ((TheGlobalData->m_useCameraConstraints || TheGlobalData->isClassicUI()) && TheGlobalData->m_cameraBoundaryMargin > 0)
 		TheTacticalView->forceCameraConstraintRecalc();
 	if(TheStatsCollector)
 		TheStatsCollector->startScrollTime();
@@ -238,7 +239,8 @@ static const UnsignedInt CAMERA_NETWORK_FRAMES = LOGICFRAMES_PER_SECOND / 5;
 	* machines, only from somebody still playing, and only when it moved since the last one went. */
 Bool LookAtTranslator::networkCameraDue( const ViewLocation &view )
 {
-	if( !TheGameLogic->isInMultiplayerGame() || !ThePlayerList->getLocalPlayer()->isPlayerActive() )
+	// Classic sends what the game as shipped sent, and that was no camera in a network game
+	if( TheGlobalData->isClassicUI() || !TheGameLogic->isInMultiplayerGame() || !ThePlayerList->getLocalPlayer()->isPlayerActive() )
 		return FALSE;
 
 	const UnsignedInt frame = TheGameLogic->getFrame();
@@ -417,7 +419,8 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			// edge, so believing it would scroll the map for as long as the mouse sat on the desktop.
 			// Nor while a watcher's director or player camera drives: the spectator page stands on the
 			// top and right edges, and the pointer on its way to it took the camera away (ObserverCamera.h).
-			const Bool edgeScrollAllowed = (!TheGlobalData->m_windowed || TheGlobalData->m_edgeScrollInWindowedMode)
+			// Classic keeps retail's rule whatever Options.ini says.
+			const Bool edgeScrollAllowed = (!TheGlobalData->m_windowed || (TheGlobalData->m_edgeScrollInWindowedMode && !TheGlobalData->isClassicUI()))
 																			&& TheMouse->isCursorInWindow() && !TheObserverCamera.isDriving();
 
 			if (m_isScrolling)
@@ -494,8 +497,10 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			// cannot hit an exact eighth of a turn.  Eaten so the same notch does not also zoom.
 			//
 			// Whole notches only: half a touchpad swipe is not a 45 degree turn.
+			// Classic's wheel only ever zooms, as the game shipped, so none of the Ctrl uses below.
+			const Bool classic = TheGlobalData->isClassicUI();
 			const Int rotateSteps = (Int)spin;
-			if (TheKeyboard->isCtrl() && rotateSteps != 0 &&
+			if (!classic && TheKeyboard->isCtrl() && rotateSteps != 0 &&
 					TheInGameUI->rotatePendingPlacement( rotateSteps ))
 				return DESTROY_MESSAGE;
 
@@ -508,8 +513,11 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			// Ctrl+wheel with nothing to place crosses the zoom range in three notches instead of
 			// fifteen.  Ctrl and not Shift: Shift is what lays a row of structures, and the wheel
 			// under it sets that row's gap (PlaceEventTranslator).
-			if (TheKeyboard->isCtrl() && TheInGameUI->getPendingPlaceType() == NULL)
+			if (!classic && TheKeyboard->isCtrl() && TheInGameUI->getPendingPlaceType() == NULL)
 				spin *= CTRL_WHEEL_ZOOM_NOTCHES;
+
+			// Zoom Speed on Options > Controls, in percent of the notch the game always took.
+			spin *= TheGlobalData->m_zoomSpeed / 100.0f;
 
 			if (spin > 0.0f)
 				TheTacticalView->zoomIn( spin );
@@ -571,8 +579,12 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 								m_anchor.y = m_currentPos.y - maxY;
 						}
 
-						offset.x = TheGlobalData->m_horizontalScrollSpeedFactor * (m_currentPos.x - m_anchor.x);
-						offset.y = TheGlobalData->m_verticalScrollSpeedFactor * (m_currentPos.y - m_anchor.y);
+						// The drag's own pull did not follow the scroll speed slider at all; only the
+						// floor added below did.  Scaled against the default so the default drags as it did.
+						const Real dragSpeed = TheGlobalData->m_keyboardDefaultScrollFactor > 0.0f
+							? TheGlobalData->m_keyboardScrollFactor / TheGlobalData->m_keyboardDefaultScrollFactor : 1.0f;
+						offset.x = TheGlobalData->m_horizontalScrollSpeedFactor * (m_currentPos.x - m_anchor.x) * dragSpeed;
+						offset.y = TheGlobalData->m_verticalScrollSpeedFactor * (m_currentPos.y - m_anchor.y) * dragSpeed;
 						Coord2D vec;
 						vec.x = offset.x;
 						vec.y = offset.y;
@@ -617,6 +629,15 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			}
 			else	//not scrolling so reset amount
 				TheInGameUI->setScrollAmount(offset);
+
+			// The view turns this into the same number of world units at any height, so a pan crossed
+			// the screen ten times faster right down on the ground than from the farthest zoom, and
+			// zoomed out no setting of the scroll speed made it feel like it moved.  Scaled by the
+			// height against MaxCameraHeight, where maps open, it crosses the screen at one pace at
+			// every zoom: the pace it always had at that height.
+			const Real zoomScale = TheTacticalView->getHeightAboveGround() / TheGlobalData->m_maxCameraHeight;
+			offset.x *= zoomScale;
+			offset.y *= zoomScale;
 
 			// Advance the pan clock even while stationary, so restarting does not include idle time.
 			TheTacticalView->scrollBy( &offset );

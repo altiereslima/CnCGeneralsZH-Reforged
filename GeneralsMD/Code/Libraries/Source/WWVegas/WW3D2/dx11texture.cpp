@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // Where the copy and the refusal are kept on the D3D9 texture.  The view goes in as an IUnknown,
@@ -134,6 +135,29 @@ static bool is_sixteen_bit_colour(D3DFORMAT format)
 	return format == D3DFMT_A1R5G5B5 || format == D3DFMT_R5G6B5 || format == D3DFMT_A4R4G4B4;
 }
 
+// Each channel width widened to eight bits as value * 255 / maximum, worked out once rather than a
+// divide per channel per pixel.
+struct ChannelScale
+{
+	unsigned char Four[16];
+	unsigned char Five[32];
+	unsigned char Six[64];
+
+	ChannelScale()
+	{
+		for (unsigned value = 0; value < 16; ++value) {
+			Four[value] = (unsigned char)(value * 255 / 15);
+		}
+		for (unsigned value = 0; value < 32; ++value) {
+			Five[value] = (unsigned char)(value * 255 / 31);
+		}
+		for (unsigned value = 0; value < 64; ++value) {
+			Six[value] = (unsigned char)(value * 255 / 63);
+		}
+	}
+};
+static const ChannelScale Scale;
+
 static void expand_sixteen_bit(unsigned char * destination, unsigned destination_pitch,
 	const unsigned char * source, unsigned source_pitch, unsigned width, unsigned height,
 	D3DFORMAT format)
@@ -141,32 +165,34 @@ static void expand_sixteen_bit(unsigned char * destination, unsigned destination
 	for (unsigned row = 0; row < height; ++row) {
 		const unsigned short * in = (const unsigned short *)(source + row * source_pitch);
 		unsigned char * out = destination + row * destination_pitch;
-		for (unsigned column = 0; column < width; ++column) {
-			const unsigned short pixel = in[column];
-			unsigned blue = 0, green = 0, red = 0, alpha = 0xff;
-			switch (format) {
-			case D3DFMT_A1R5G5B5:
-				blue  = ((pixel      ) & 0x1f) * 255 / 31;
-				green = ((pixel >>  5) & 0x1f) * 255 / 31;
-				red   = ((pixel >> 10) & 0x1f) * 255 / 31;
-				alpha = ((pixel >> 15) & 0x01) * 255;
-				break;
-			case D3DFMT_R5G6B5:
-				blue  = ((pixel      ) & 0x1f) * 255 / 31;
-				green = ((pixel >>  5) & 0x3f) * 255 / 63;
-				red   = ((pixel >> 11) & 0x1f) * 255 / 31;
-				break;
-			default:	// D3DFMT_A4R4G4B4
-				blue  = ((pixel      ) & 0x0f) * 255 / 15;
-				green = ((pixel >>  4) & 0x0f) * 255 / 15;
-				red   = ((pixel >>  8) & 0x0f) * 255 / 15;
-				alpha = ((pixel >> 12) & 0x0f) * 255 / 15;
-				break;
+		switch (format) {
+		case D3DFMT_A1R5G5B5:
+			for (unsigned column = 0; column < width; ++column, out += 4) {
+				const unsigned pixel = in[column];
+				out[0] = Scale.Five[pixel & 0x1f];
+				out[1] = Scale.Five[(pixel >> 5) & 0x1f];
+				out[2] = Scale.Five[(pixel >> 10) & 0x1f];
+				out[3] = (unsigned char)((pixel >> 15) * 255);
 			}
-			out[column * 4 + 0] = (unsigned char)blue;
-			out[column * 4 + 1] = (unsigned char)green;
-			out[column * 4 + 2] = (unsigned char)red;
-			out[column * 4 + 3] = (unsigned char)alpha;
+			break;
+		case D3DFMT_R5G6B5:
+			for (unsigned column = 0; column < width; ++column, out += 4) {
+				const unsigned pixel = in[column];
+				out[0] = Scale.Five[pixel & 0x1f];
+				out[1] = Scale.Six[(pixel >> 5) & 0x3f];
+				out[2] = Scale.Five[pixel >> 11];
+				out[3] = 0xff;
+			}
+			break;
+		default:	// D3DFMT_A4R4G4B4
+			for (unsigned column = 0; column < width; ++column, out += 4) {
+				const unsigned pixel = in[column];
+				out[0] = Scale.Four[pixel & 0x0f];
+				out[1] = Scale.Four[(pixel >> 4) & 0x0f];
+				out[2] = Scale.Four[(pixel >> 8) & 0x0f];
+				out[3] = Scale.Four[pixel >> 12];
+			}
+			break;
 		}
 	}
 }
@@ -469,7 +495,7 @@ static ID3D11ShaderResourceView * apply_lod(ID3D11Device * device, IDirect3DBase
 	return replacement;
 }
 
-ID3D11ShaderResourceView * DX11Texture_Mirror(ID3D11Device * device, ID3D11DeviceContext * context,
+static ID3D11ShaderResourceView * mirror(ID3D11Device * device, ID3D11DeviceContext * context,
 	IDirect3DBaseTexture9 * texture)
 {
 	ID3D11ShaderResourceView * view = NULL;
@@ -515,6 +541,92 @@ ID3D11ShaderResourceView * DX11Texture_Mirror(ID3D11Device * device, ID3D11Devic
 	return apply_lod(device, texture, view);
 }
 
+// What mirror() last answered for each texture, so a bind that would get the same answer skips the
+// three private data lookups it asks D3D9 for.  Every texture bind went through them, and they were
+// the d3d9.dll time under TextureClass::Apply in the profile (an unnamed export, Ordinal23, is the
+// nearest label the sampler has for that code).  An entry stands while its texture is alive, has
+// not been written by the CPU since (DX11Texture_Mark_Dirty marks it stale) and answers the same
+// level of detail; the view itself is still owned by the texture.  Main thread only, like every
+// other call here.
+struct MirrorAnswer
+{
+	ID3D11ShaderResourceView * View;
+	DWORD Lod;		///< GetLOD when the answer was taken, before apply_lod clamps it
+	bool Stale;
+};
+typedef std::unordered_map<IDirect3DBaseTexture9 *, MirrorAnswer> MirrorAnswerMap;
+// Never destroyed: a texture still alive when the statics are torn down at exit releases its watch
+// after that, and the watch erases from this.
+static MirrorAnswerMap & MirrorAnswers = *new MirrorAnswerMap;
+
+// Hung on a texture as private data the first time it is answered for, so that D3D9 releasing its
+// private data when the texture goes takes the answer with it before another texture can be made
+// at the same address.
+// {2E2E9C27-1B2A-4C7E-9E2F-1D0B7E9A5C01}
+static const GUID DX11_TEXTURE_WATCH =
+	{ 0x2e2e9c27, 0x1b2a, 0x4c7e, { 0x9e, 0x2f, 0x1d, 0x0b, 0x7e, 0x9a, 0x5c, 0x01 } };
+
+class TextureWatch : public IUnknown
+{
+public:
+	explicit TextureWatch(IDirect3DBaseTexture9 * texture) : References(1), Texture(texture) {}
+
+	HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void ** object)
+	{
+		if (id == IID_IUnknown) {
+			*object = static_cast<IUnknown *>(this);
+			AddRef();
+			return S_OK;
+		}
+		*object = NULL;
+		return E_NOINTERFACE;
+	}
+	ULONG STDMETHODCALLTYPE AddRef() { return ++References; }
+	ULONG STDMETHODCALLTYPE Release()
+	{
+		const ULONG left = --References;
+		if (left == 0) {
+			MirrorAnswers.erase(Texture);
+			delete this;
+		}
+		return left;
+	}
+
+private:
+	ULONG References;
+	IDirect3DBaseTexture9 * Texture;
+};
+
+ID3D11ShaderResourceView * DX11Texture_Mirror(ID3D11Device * device, ID3D11DeviceContext * context,
+	IDirect3DBaseTexture9 * texture)
+{
+	MirrorAnswerMap::iterator answer = MirrorAnswers.find(texture);
+	if (answer != MirrorAnswers.end() && !answer->second.Stale
+			&& answer->second.Lod == texture->GetLOD()) {
+		if (answer->second.View != NULL) {
+			++Reused;
+		}
+		return answer->second.View;
+	}
+
+	ID3D11ShaderResourceView * const view = mirror(device, context, texture);
+	if (answer == MirrorAnswers.end()) {
+		// Without the watch nothing would take the answer back when the texture goes.
+		TextureWatch * const watch = new TextureWatch(texture);
+		const bool watched = SUCCEEDED(texture->SetPrivateData(DX11_TEXTURE_WATCH, watch,
+			sizeof(IUnknown *), D3DSPD_IUNKNOWN));
+		watch->Release();
+		if (!watched) {
+			return view;
+		}
+	}
+	MirrorAnswer & held = MirrorAnswers[texture];
+	held.View = view;
+	held.Lod = texture->GetLOD();
+	held.Stale = false;
+	return view;
+}
+
 void DX11Texture_Mark_Dirty(IDirect3DSurface9 * surface)
 {
 	if (surface == NULL) {
@@ -529,6 +641,10 @@ void DX11Texture_Mark_Dirty(IDirect3DSurface9 * surface)
 
 	const unsigned char dirty = 1;
 	texture->SetPrivateData(DX11_TEXTURE_DIRTY, &dirty, sizeof(dirty), 0);
+	MirrorAnswerMap::iterator answer = MirrorAnswers.find(texture);
+	if (answer != MirrorAnswers.end()) {
+		answer->second.Stale = true;
+	}
 	texture->Release();
 }
 

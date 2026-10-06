@@ -277,3 +277,54 @@ TEST(ffshadercompile_the_smoke_glow_is_added_after_the_shade)
 	}
 	CHECK(compiles(compile, eleven, D3D11_PROFILE));
 }
+
+// A particle sprite fades into the scene's depth at t7 on Direct3D 11, after the alpha test so its
+// edge is not clipped hard again.  An additive sprite takes no shadow and still has to declare the
+// whole constant block, whose last field the fade reads; a smoke sprite takes both.  The receiving
+// programs carry the blast lights after the shade.  SDL3 and D3D9 get neither.
+TEST(ffshadercompile_a_soft_particle_fades_into_the_scene_depth_on_d3d11_only)
+{
+	CombinerDescription description;
+	memset(&description, 0, sizeof(description));
+	description.StageCount = 1;
+	description.Stages[0] = one_stage(D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE,
+		D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE, 0, true);
+	description.PixelPipeline.AlphaTestEnabled = true;
+	description.PixelPipeline.AlphaFunction = D3DCMP_GREATEREQUAL;
+	const std::string hard_key = CombinerShader_Key(description);
+
+	description.SoftParticle = SOFT_PARTICLE_COLOUR;
+	std::string additive;
+	CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_D3D11, additive));
+	CHECK(additive.find("register(t7)") != std::string::npos);
+	CHECK(additive.find("SoftParticleDepth") > additive.find("BlastLightAmbient"));
+	CHECK(additive.find("register(t5)") == std::string::npos);
+	const size_t clip = additive.find("clip(");
+	const size_t fade = additive.find("current *= soft_particle_fade(input.Position);");
+	CHECK(clip != std::string::npos);
+	CHECK(fade != std::string::npos);
+	CHECK(clip < fade);
+	CHECK(CombinerShader_Key(description) == hard_key + ":Z2");
+
+	std::string sdl;
+	std::string nine;
+	CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_SDL3_GPU, sdl));
+	CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_D3D9, nine));
+	CHECK(sdl.find("SceneDepth") == std::string::npos);
+	CHECK(nine.find("SceneDepth") == std::string::npos);
+
+	description.ShadowReceiving = true;
+	description.SoftParticle = SOFT_PARTICLE_ALPHA;
+	std::string smoke;
+	CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_D3D11, smoke));
+	CHECK(smoke.find("current.a *= soft_particle_fade(input.Position);") != std::string::npos);
+	CHECK(smoke.find("blast_reaching(input.Position)") > smoke.find("light_reaching(input.Position)"));
+
+	D3DCompileFunction compile = load_compiler();
+	if (compile == NULL) {
+		printf("  d3dcompiler_47.dll not present, skipping the compile\n");
+		return;
+	}
+	CHECK(compiles(compile, additive, D3D11_PROFILE));
+	CHECK(compiles(compile, smoke, D3D11_PROFILE));
+}

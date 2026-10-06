@@ -1,0 +1,16 @@
+# Zero Hour Reforged trailer, beat 22 (AI_WAVE): the rf_ai.txt match (Tournament Desert, seed 3),
+# the computer's armies meeting in the town crossroads, where the Director camera found the biggest
+# fight between frames 8880 and 9200 and the overview shots of 8836 to 9386 showed explosions. Two
+# held cuts from the south-west, the second lower and closer.
+#
+# Tried and dropped: America's Chinook drop at (1880,1830) on frame 11127 (one vehicle beside a derrick,
+# the map's east edge black in the corner), and three cuts along the straight line China's 11029 wave
+# should take to its front at (123,1243) (the wave went another way; empty desert).
+#
+#   ...rf_ai.txt's switches... -cinema rf_ai_wave -fps 120 -noFPSLimit -video 8880 9300 rf_ai_wave
+#     -maxframes 9310
+
+30.0   cut    1005 584 0.9 -30 8
+296.0  cut    1010 1350 0.5 -45 8
+303.0  cut    1040 1380 0.35 -60 12
+311.0  end

@@ -7,29 +7,35 @@ still in the file, parked off the right edge with HIDDEN set, because there was 
 them.  Seventeen settings later there is no version of "find room" that works.
 
 So the screen becomes seven pages behind seven buttons: Display, Graphics, Effects, Audio, Controls,
-Gameplay and Network.  Every graphics setting is on Graphics or Effects, including the ones EA hid in
-a popup that only opened when Custom was picked from a combo box on another page.  Every page is laid out on the same
-grid of three titled groups, so a heading, a label and a box start in the same place whichever tab
-is open, and every slider has a readout beside it.  Nothing is redrawn: the controls keep the images and tooltips they
-shipped with, a label or a check box takes the lettering of the one next to it, and what is new is
-cloned from a control that is already there.
+Interface and Network.  Every graphics setting is on Graphics or Effects, including the ones EA hid in
+a popup that only opened when Custom was picked from a combo box on another page.  Each page is a list
+of titled groups, sorted by what a setting does, flowed into three columns on one grid, so a heading,
+a label and a box start in the same place whichever tab is open, and every slider has a readout
+beside it.  Nothing is redrawn: the controls keep the images and tooltips they shipped with, a label
+or a check box takes the lettering of the one next to it, and what is new is cloned from a control
+that is already there.
 
-    python optionsmenu_layout.py <shipped OptionsMenu.wnd> <output .wnd>
+Two layouts come out of one run.  OptionsMenu.wnd is the Reforged interface's; OptionsMenuClassic.wnd
+leaves out every control the Classic interface overrules (REFORGED_ONLY) and flows what is left again,
+so no page shows a hole where a setting would have been.  Shell.cpp opens whichever one the run's
+interface wants.
+
+    python optionsmenu_layout.py <shipped OptionsMenu.wnd> <Reforged .wnd> <Classic .wnd>
 
 The input is the file out of WindowZH.big:
 
     python bigfile.py extract ../../Run/WindowZH.big "*/OptionsMenu.wnd" -o wnd
-    python optionsmenu_layout.py wnd/Window/Menus/OptionsMenu.wnd ../Data/Window/Menus/OptionsMenu.wnd
+    python optionsmenu_layout.py wnd/Window/Menus/OptionsMenu.wnd ../Data/Window/Menus/OptionsMenu.wnd ../Data/Window/Menus/OptionsMenuClassic.wnd
 
-The output is the tracked master under Code/Data; the build copies it to Run/Window/Menus/, where a
-loose file beats the archive.  Layouts are not in the multiplayer INI checksum, so this one does not
-have to match across a network game.
+The outputs are the tracked masters under Code/Data; the build copies them to Run/Window/Menus/, where
+a loose file beats the archive.  Layouts are not in the multiplayer INI checksum, so these do not have
+to match across a network game.
 
     python optionsmenu_layout.py selfcheck
 
-reads the three tracked files back and checks they still agree: every widget TheOptionCatalog names
-exists in the layout, and every label, tooltip and combo box entry it needs is in Patch.str.  Run by
-CTest as optionsmenu_selfcheck.
+reads the tracked files back and checks they still agree: every widget TheOptionCatalog names exists
+in the Reforged layout and, unless the Classic interface overrules it, in the Classic one, and every
+label, tooltip and combo box entry it needs is in Patch.str.  Run by CTest as optionsmenu_selfcheck.
 """
 
 import os
@@ -61,7 +67,7 @@ TABS = [
     ("PageEffects",  "TabEffects",  "GUI:OptionsTabEffects"),
     ("PageAudio",    "TabAudio",    "GUI:OptionsTabAudio"),
     ("PageControls", "TabControls", "GUI:OptionsTabControls"),
-    ("PageGameplay", "TabGameplay", "GUI:OptionsTabGameplay"),
+    ("PageInterface", "TabInterface", "GUI:OptionsTabInterface"),
     ("PageNetwork",  "TabNetwork",  "GUI:OptionsTabNetwork"),
 ]
 
@@ -94,7 +100,7 @@ MENU_CHECKS = ["CheckTreeSway"]
 MENU_COMBOS = ["ComboBoxMonitor"]
 
 # The catalog's shadow rows, which stood in GameData.ini with no control until the Effects page.
-SHADOW_CHECKS = ["Check3DShadows", "Check2DShadows", "CheckInfantryShadows",
+SHADOW_CHECKS = ["Check3DShadows", "Check2DShadows", "CheckCloudShadows", "CheckInfantryShadows",
                  "CheckProjectileShadows", "CheckPropShadows", "CheckParticleShadows"]
 
 # The tab a page opens is already captioned with the page's name, so EA's caption inside the panel
@@ -118,9 +124,10 @@ NAME_THE_UNNAMED = [
     ("GUI:Options", "LabelTitle"),
 ]
 
-# Controls that are in the shipped file and are not wanted at all.  CheckAlternateMouse chose
-# between the classic mouse and the alternate one; there is one mouse now.
-DELETE = ["CheckAlternateMouse"]
+# EA's controls that only the Classic page keeps.  CheckAlternateMouse is EA's Alternate Mouse Setup:
+# Classic plays 1.04's mouse and offers its alternate one too, Reforged has one mouse and ignores the
+# setting, so its page drops the box.  OptionsMenu.cpp finds it by name and does without it.
+CLASSIC_ONLY = ["CheckAlternateMouse"]
 
 # The templates new controls are cloned from, and whose lettering the moved ones take.
 CHECK, LABEL, COMBO, SLIDER = "Retaliation", "DetailLabel", "ComboBoxDetail", "SliderGamma"
@@ -132,6 +139,8 @@ NEW_CONTROLS = [
     (COMBO,  "ComboBoxMonitor",        None),
     (LABEL,  "LabelWindowMode",        "GUI:WindowMode"),
     (COMBO,  "ComboBoxWindowMode",     None),
+    (LABEL,  "LabelFullscreenScaling", "GUI:FullscreenScaling"),
+    (COMBO,  "ComboBoxFullscreenScaling", None),
     (CHECK,  "CheckVSync",             "GUI:VSync"),
     (CHECK,  "CheckClassicGraphics",   "GUI:ClassicGraphics"),
     (LABEL,  "LabelMSAA",              "GUI:MSAA"),
@@ -150,8 +159,6 @@ NEW_CONTROLS = [
     (COMBO,  "ComboBoxPlayerColors",   None),
     (LABEL,  "LabelHudScale",          "GUI:HudScale"),
     (COMBO,  "ComboBoxHudScale",       None),
-    (LABEL,  "LabelMenuLayout",        "GUI:MenuLayout"),
-    (COMBO,  "ComboBoxMenuLayout",     None),
     (LABEL,  "LabelLanguage",          "GUI:Language"),
     (COMBO,  "ComboBoxLanguage",       None),
     (CHECK,  "CheckOrderLines",        "GUI:OrderLines"),
@@ -163,8 +170,11 @@ NEW_CONTROLS = [
     (CHECK,  "CheckIsometricCamera",   "GUI:IsometricCamera"),
     (CHECK,  "CheckSmoothMotion",      "GUI:SmoothMotion"),
     (CHECK,  "CheckStartAtMaxZoom",    "GUI:StartAtMaxZoom"),
-    (LABEL,  "LabelCloserZoom",        "GUI:CloserZoom"),
-    (SLIDER, "SliderCloserZoom",       None),
+    (CHECK,  "CheckSnapCamera45",      "GUI:SnapCamera45"),
+    (CHECK,  "CheckGridBuild",         "GUI:GridBuild"),
+    (CHECK,  "CheckSnapBuild45",       "GUI:SnapBuild45"),
+    (CHECK,  "CheckSnapBuildNeighbour", "GUI:SnapBuildNeighbour"),
+    (CHECK,  "CheckNudgeBuild",        "GUI:NudgeBuild"),
     (LABEL,  "LabelDragTolerance",     "GUI:DragTolerance"),
     (SLIDER, "SliderDragTolerance",    None),
     (CHECK,  "CheckTreeSway",          "GUI:TreeSway"),
@@ -176,6 +186,10 @@ NEW_CONTROLS = [
     (COMBO,  "ComboBoxSmoke",          None),
     (CHECK,  "CheckParticleBounce",    "GUI:ParticleBounce"),
     (CHECK,  "CheckChromaLighting",    "GUI:ChromaLighting"),
+    (LABEL,  "LabelAmbientVolume",     "GUI:AmbientVolume"),
+    (SLIDER, "SliderAmbientVolume",    None),
+    (LABEL,  "LabelZoomSpeed",         "GUI:ZoomSpeed"),
+    (SLIDER, "SliderZoomSpeed",        None),
 ]
 
 # A slider on its own says nothing about where it stands, so each one has a readout beside it that
@@ -183,15 +197,21 @@ NEW_CONTROLS = [
 READOUTS = [
     "ValueGamma", "ValueTextureResolution", "ValueParticleCap", "ValueAnisotropy",
     "ValueMusicVolume", "ValueSFXVolume", "ValueVoiceVolume", "ValueScrollSpeed",
-    "ValueCloserZoom", "ValueDragTolerance",
+    "ValueDragTolerance", "ValueAmbientVolume", "ValueZoomSpeed",
 ]
 
 # Lines of small grey text under a control that say what its current choice does, written by
 # OptionsMenu.cpp.  The detail preset is the one that needs it: picking Ultra only fills in the boxes,
 # and nothing on the shipped screen said that Accept is what applies them.
 #   (name, label key whose entries 0..count-1 it shows, count)
-NOTES = [("DetailNote", "GUI:DetailNote", 5)]
+# The resolution's line is one short sentence, shown only when the monitor lists the picked size.
+NOTES = [("DetailNote", "GUI:DetailNote", 5), ("ResolutionNote", "GUI:ResolutionNote", 1)]
 NOTE_HEIGHT = 80
+NOTE_HEIGHTS = {"ResolutionNote": 20}
+
+
+def note_height(name):
+    return NOTE_HEIGHTS.get(name, NOTE_HEIGHT)
 NOTE_FONT = 'NAME: "Arial", SIZE: 10, BOLD: 0'
 NOTE_COLOR = ("ENABLED:  192 192 192 255, ENABLEDBORDER:  0 0 0 255, "
               "DISABLED: 192 192 192 255, DISABLEDBORDER: 0 0 0 255, "
@@ -199,8 +219,8 @@ NOTE_COLOR = ("ENABLED:  192 192 192 255, ENABLEDBORDER:  0 0 0 255, "
 
 # a cloned slider keeps its template's range unless it is given one; selfcheck holds these to the
 # catalog row's own bounds
-SLIDER_RANGES = [("SliderAnisotropy", 0, 16), ("SliderCloserZoom", 0, 60),
-                 ("SliderDragTolerance", 2, 50)]
+SLIDER_RANGES = [("SliderAnisotropy", 0, 16), ("SliderDragTolerance", 2, 50),
+                 ("SliderAmbientVolume", 0, 100), ("SliderZoomSpeed", 25, 300)]
 
 # EA's captions that do not fit the page: two popup headings written in capitals, and a check box
 # caption that ran 20 pixels past the panel's right edge once it stood in a 268 pixel column.
@@ -211,15 +231,15 @@ TEXT_OVERRIDES = [
     ("CheckNoDynamicLOD", "GUI:NeverLowerDetail"),
 ]
 
-# Three titled groups across every page, one spacing scale: 4 8 16 24 32.  Columns 224 wide, 24
-# apart, 4 in from the page edge; a group heading on 150 and its content from 182.  A setting is its
-# label over its control, pitch 56, and a slider stops at 136 with its readout beside it on the same
-# row; a check box takes 28, a button 32.  Grouping follows what a setting does rather than where EA
-# put it: on Graphics the preset and the two sliders it sets, the picture settings, then the terrain;
-# on Effects the shadows, the extra touches, then smoke and particles.
+# Three columns on every page, one spacing scale: 4 8 16 24 32.  Columns 224 wide, 24 apart, 4 in
+# from the page edge; a group's heading on its top and its content 32 below, the first heading on
+# 150.  A setting is its label over its control, pitch 56, and a slider stops at 136 with its readout
+# beside it on the same row; a check box takes 28, a button 32.  A column holds one group, or two
+# stacked 16 apart when a page has more groups than columns.
 COLUMNS = (40, 288, 536)
 COLUMN_WIDTH = 224
 HEADING_TOP, CONTENT_TOP = 150, 182
+HEADING_PITCH, GROUP_GAP = CONTENT_TOP - HEADING_TOP, 16
 ROW_HEIGHT, SETTING_PITCH, CHECK_PITCH, BUTTON_PITCH = 24, 56, 28, 32
 READOUT_LEFT, READOUT_WIDTH = 144, 80
 # A static text draws its first glyph 6px inside its rectangle, so labels, headings and readouts start
@@ -241,87 +261,157 @@ def setting(label, control, readout=None):
     return ("setting", label, control, readout)
 
 
-#   (page, column, heading key, items)
+# Each page's groups in reading order, sorted by what a setting does rather than where EA put it.
+# Display is the screen itself; Graphics what the picture costs and how sharp it is, with the glow;
+# Effects what stands in the world - shadows, scenery, smoke; Controls the camera, the orders, the
+# placement of a building and the input devices; Interface the HUD, what is drawn over the
+# battlefield and the language of the words.
+#   (page, [(heading key, items)])
 GROUP_LAYOUT = [
-    ("PageDisplay",  0, "GUI:OptionsGroupScreen", [
-        setting("LabelMonitor", "ComboBoxMonitor"),
-        setting("ResolutionLabel", "ComboBoxResolution"),
-        setting("LabelWindowMode", "ComboBoxWindowMode"),
-        setting("LabelMenuLayout", "ComboBoxMenuLayout"),
-        ("check", "CheckVSync")]),
-    ("PageDisplay",  1, "GUI:OptionsGroupPicture", [
-        setting("GammaLabel", "SliderGamma", "ValueGamma"),
-        ("check", "CheckSmoothMotion")]),
+    ("PageDisplay", [
+        ("GUI:OptionsGroupScreen", [
+            setting("LabelMonitor", "ComboBoxMonitor"),
+            setting("ResolutionLabel", "ComboBoxResolution"),
+            ("note", "ResolutionNote"),
+            setting("LabelWindowMode", "ComboBoxWindowMode"),
+            setting("LabelFullscreenScaling", "ComboBoxFullscreenScaling"),
+            ("check", "CheckVSync")]),
+        ("GUI:OptionsGroupPicture", [
+            setting("GammaLabel", "SliderGamma", "ValueGamma"),
+            ("check", "CheckSmoothMotion")])]),
 
-    ("PageGraphics", 0, "GUI:OptionsGroupDetail", [
-        ("check", "CheckClassicGraphics"),
-        setting("DetailLabel", "ComboBoxDetail"),
-        ("note", "DetailNote"),
-        setting("LabelTextureResolution", "LowResSlider", "ValueTextureResolution"),
-        setting("LabelParticleCap", "ParticleCapSlider", "ValueParticleCap")]),
-    ("PageGraphics", 1, "GUI:OptionsGroupImage", [
-        setting("LabelMSAA", "ComboBoxMSAA"),
-        setting("LabelBloom", "ComboBoxBloom"),
-        setting("LabelBloomThreshold", "ComboBoxBloomThreshold"),
-        setting("LabelTextureFilter", "ComboBoxTextureFilter"),
-        setting("LabelAnisotropy", "SliderAnisotropy", "ValueAnisotropy")]),
-    ("PageGraphics", 2, "GUI:OptionsGroupTerrain", [
-        ("check", "CheckCloudShadows"),
-        ("check", "CheckGroundLighting"),
-        ("check", "CheckSmoothWater"),
-        ("check", "CheckShowProps")]),
+    ("PageGraphics", [
+        ("GUI:OptionsGroupDetail", [
+            setting("DetailLabel", "ComboBoxDetail"),
+            ("note", "DetailNote"),
+            setting("LabelTextureResolution", "LowResSlider", "ValueTextureResolution"),
+            setting("LabelParticleCap", "ParticleCapSlider", "ValueParticleCap"),
+            ("check", "CheckNoDynamicLOD")]),
+        ("GUI:OptionsGroupImage", [
+            ("check", "CheckClassicGraphics"),
+            setting("LabelMSAA", "ComboBoxMSAA"),
+            setting("LabelTextureFilter", "ComboBoxTextureFilter"),
+            setting("LabelAnisotropy", "SliderAnisotropy", "ValueAnisotropy")]),
+        ("GUI:OptionsGroupLighting", [
+            setting("LabelBloom", "ComboBoxBloom"),
+            setting("LabelBloomThreshold", "ComboBoxBloomThreshold"),
+            ("check", "CheckGroundLighting"),
+            ("check", "CheckHeatEffects")])]),
 
-    ("PageEffects",  0, "GUI:OptionsGroupShadows", [("check", name) for name in SHADOW_CHECKS]),
-    ("PageEffects",  1, "GUI:OptionsGroupExtras", [
-        ("check", "CheckExtraAnimations"),
-        ("check", "CheckTreeSway"),
-        ("check", "CheckHeatEffects"),
-        ("check", "CheckBehindBuilding")]),
-    ("PageEffects",  2, "GUI:OptionsGroupParticles", [
-        setting("LabelSmoke", "ComboBoxSmoke"),
-        ("check", "CheckParticleBounce"),
-        ("check", "CheckNoDynamicLOD")]),
+    ("PageEffects", [
+        ("GUI:OptionsGroupShadows", [("check", name) for name in SHADOW_CHECKS]),
+        ("GUI:OptionsGroupExtras", [
+            ("check", "CheckShowProps"),
+            ("check", "CheckSmoothWater"),
+            ("check", "CheckExtraAnimations"),
+            ("check", "CheckTreeSway"),
+            ("check", "CheckBehindBuilding")]),
+        ("GUI:OptionsGroupParticles", [
+            setting("LabelSmoke", "ComboBoxSmoke"),
+            ("check", "CheckParticleBounce")])]),
 
-    ("PageAudio",    0, "GUI:OptionsGroupVolume", [
-        setting("MusicVolumeLabel", "SliderMusicVolume", "ValueMusicVolume"),
-        setting("SFXVolumeLabel", "SliderSFXVolume", "ValueSFXVolume"),
-        setting("VoiceVolumeLabel", "SliderVoiceVolume", "ValueVoiceVolume")]),
+    ("PageAudio", [
+        ("GUI:OptionsGroupVolume", [
+            setting("MusicVolumeLabel", "SliderMusicVolume", "ValueMusicVolume"),
+            setting("SFXVolumeLabel", "SliderSFXVolume", "ValueSFXVolume"),
+            setting("VoiceVolumeLabel", "SliderVoiceVolume", "ValueVoiceVolume"),
+            setting("LabelAmbientVolume", "SliderAmbientVolume", "ValueAmbientVolume")])]),
 
-    ("PageControls", 0, "GUI:OptionsGroupScrolling", [
-        setting("ScrollSpeedLabel", "SliderScrollSpeed", "ValueScrollSpeed"),
-        ("check", "CheckZoomToCursor"),
-        ("check", "CheckIsometricCamera"),
-        ("check", "CheckStartAtMaxZoom"),
-        setting("LabelCloserZoom", "SliderCloserZoom", "ValueCloserZoom")]),
-    ("PageControls", 1, "GUI:OptionsGroupOrders", [
-        ("check", "Retaliation"),
-        ("check", "CheckDoubleClickAttackMove")]),
-    ("PageControls", 2, "GUI:OptionsGroupInput", [
-        setting("LabelDragTolerance", "SliderDragTolerance", "ValueDragTolerance"),
-        ("check", "CheckChromaLighting")]),
+    ("PageControls", [
+        ("GUI:OptionsGroupCamera", [
+            setting("ScrollSpeedLabel", "SliderScrollSpeed", "ValueScrollSpeed"),
+            setting("LabelZoomSpeed", "SliderZoomSpeed", "ValueZoomSpeed"),
+            ("check", "CheckIsometricCamera"),
+            ("check", "CheckZoomToCursor"),
+            ("check", "CheckStartAtMaxZoom"),
+            ("check", "CheckSnapCamera45")]),
+        ("GUI:OptionsGroupOrders", [
+            ("check", "CheckAlternateMouse"),
+            ("check", "Retaliation"),
+            ("check", "CheckDoubleClickAttackMove")]),
+        ("GUI:OptionsGroupPlacement", [
+            ("check", "CheckGridBuild"),
+            ("check", "CheckSnapBuild45"),
+            ("check", "CheckSnapBuildNeighbour"),
+            ("check", "CheckNudgeBuild")]),
+        ("GUI:OptionsGroupInput", [
+            setting("LabelDragTolerance", "SliderDragTolerance", "ValueDragTolerance"),
+            ("check", "CheckChromaLighting")])]),
 
-    ("PageGameplay", 0, "GUI:OptionsGroupBattlefield", [
-        setting("LabelHealthBars", "ComboBoxHealthBars"),
-        setting("LabelPlayerColors", "ComboBoxPlayerColors"),
-        ("check", "CheckOrderLines"),
-        ("check", "CheckEmptyBuildingPips")]),
-    ("PageGameplay", 1, "GUI:OptionsGroupHud", [
-        setting("LabelHudScale", "ComboBoxHudScale"),
-        setting("LabelIncomeRate", "ComboBoxIncomeRate"),
-        ("check", "CheckNetBox")]),
-    ("PageGameplay", 2, "GUI:OptionsGroupLanguage", [
-        setting("LabelLanguage", "ComboBoxLanguage")]),
+    ("PageInterface", [
+        ("GUI:OptionsGroupHud", [
+            setting("LabelHudScale", "ComboBoxHudScale"),
+            setting("LabelIncomeRate", "ComboBoxIncomeRate"),
+            ("check", "CheckNetBox")]),
+        ("GUI:OptionsGroupBattlefield", [
+            setting("LabelHealthBars", "ComboBoxHealthBars"),
+            setting("LabelPlayerColors", "ComboBoxPlayerColors"),
+            ("check", "CheckOrderLines"),
+            ("check", "CheckEmptyBuildingPips")]),
+        ("GUI:OptionsGroupLanguage", [
+            setting("LabelLanguage", "ComboBoxLanguage")])]),
 
-    ("PageNetwork",  0, "GUI:OptionsGroupAddresses", [
-        setting("StaticTextOnlineIpAddresses", "ComboBoxOnlineIP"),
-        setting("StaticTextLANIpAddresses", "ComboBoxIP")]),
-    ("PageNetwork",  1, "GUI:OptionsGroupFirewall", [
-        setting("StaticTextFirewallPortOverride", "TextEntryFirewallPortOverride"),
-        ("button", "ButtonFirewallRefresh"),
-        ("check", "CheckSendDelay")]),
-    ("PageNetwork",  2, "GUI:OptionsGroupProxy", [
-        setting("StaticTextHTTPProxy", "TextEntryHTTPProxy")]),
+    ("PageNetwork", [
+        ("GUI:OptionsGroupAddresses", [
+            setting("StaticTextOnlineIpAddresses", "ComboBoxOnlineIP"),
+            setting("StaticTextLANIpAddresses", "ComboBoxIP")]),
+        ("GUI:OptionsGroupFirewall", [
+            setting("StaticTextFirewallPortOverride", "TextEntryFirewallPortOverride"),
+            ("button", "ButtonFirewallRefresh"),
+            ("check", "CheckSendDelay")]),
+        ("GUI:OptionsGroupProxy", [
+            setting("StaticTextHTTPProxy", "TextEntryHTTPProxy")])]),
 ]
+
+# Settings the Classic interface overrules whatever Options.ini says, each behind an isClassicUI()
+# gate where the value is read: smooth motion (W3DDisplay.cpp), the HUD scale (ControlBar.cpp), the
+# corner net box (InGameUI.cpp, no HTML pages in Classic), the income beside the money (InGameUI.cpp),
+# health bar mode and empty garrison pips (Drawable.cpp) and order lines (W3DInGameUI.cpp).  Every one
+# is a catalog row, whose menu passes skip a control the layout does not carry, so the Classic layout
+# leaves them out and keeps the value.  Zoom to cursor, the opening zoom, the camera's 45 degree steps
+# the three placement snaps and the nudge are not here: they start off, which is how 1.04 played, and Classic
+# honours them once ticked.
+REFORGED_ONLY = [
+    "CheckSmoothMotion", "ComboBoxHudScale", "CheckNetBox", "ComboBoxIncomeRate", "CheckOrderLines",
+]
+
+
+def item_height(item):
+    if item[0] == "note":
+        return note_height(item[1]) + 4
+    return {"setting": SETTING_PITCH, "check": CHECK_PITCH, "button": BUTTON_PITCH}[item[0]]
+
+
+def group_height(group):
+    return HEADING_PITCH + sum(item_height(item) for item in group[1])
+
+
+def flow(groups):
+    """Groups into columns, in order: one a column while they fit three, otherwise the split into
+    three runs whose tallest column is shortest.  A group never breaks across two columns."""
+    if len(groups) <= len(COLUMNS):
+        return [[group] for group in groups]
+    best = None
+    for first in range(1, len(groups) - 1):
+        for second in range(first + 1, len(groups)):
+            columns = [groups[:first], groups[first:second], groups[second:]]
+            tallest = max(sum(group_height(g) for g in column) + GROUP_GAP * (len(column) - 1)
+                          for column in columns)
+            if best is None or tallest < best[0]:
+                best = (tallest, columns)
+    return best[1]
+
+
+def without(groups, names):
+    """A page with these controls out, and a group left with nothing in it out too.  The Classic page
+    leaves out REFORGED_ONLY, the Reforged page CLASSIC_ONLY."""
+    kept = []
+    for heading, items in groups:
+        items = [item for item in items if (item[2] if item[0] == "setting" else item[1])
+                 not in names]
+        if items:
+            kept.append((heading, items))
+    return kept
 
 # EA controls that ship hidden and stay hidden, parked on a page rather than off the panel
 #   (page, name, column, top)
@@ -470,7 +560,7 @@ def drop_by_text(root, texts):
                          if drawn_text(child) not in wanted]
 
 
-def build(layout):
+def build(layout, classic=False):
     old = layout.find("OptionsMenuParentOld")
     templates = dict((name, layout.find(name))
                      for name in (CHECK, LABEL, COMBO, SLIDER, "VideoParent", "ButtonDefaults"))
@@ -482,7 +572,8 @@ def build(layout):
                 node.name = _named(name)
 
     drop_by_text(layout.root, HEADINGS)
-    drop_by_name(layout.root, DELETE)
+    if not classic:
+        drop_by_name(layout.root, CLASSIC_ONLY)
     for name in RULES + DROP:
         detach(old, name)
 
@@ -521,39 +612,61 @@ def build(layout):
             control.put_prop("STATICTEXTDATA", "CENTERED: 0")
         pages[page_name].children.append(control)
 
-    for page_name, column, heading_key, items in GROUP_LAYOUT:
-        left = COLUMNS[column]
-        heading_name = "GroupHeading%s%d" % (page_name[len("Page"):], column)
-        heading = clone(templates[LABEL], _named(heading_name))
-        heading.children = []
-        heading.put_prop("TEXT", '"%s"' % heading_key)
-        drop_prop(heading, "TOOLTIPTEXT")
-        restyle(heading, templates["ButtonDefaults"], keys=("FONT", "HEADERTEMPLATE"))
-        heading.set_prop("TEXTCOLOR", GROUP_HEADING_COLOR)
-        heading.put_prop("STATICTEXTDATA", "CENTERED: 0")
-        waiting[heading_name] = heading
-        put(page_name, heading_name, left - TEXT_NUDGE, HEADING_TOP, COLUMN_WIDTH, ROW_HEIGHT)
+    if classic:
+        # the control and the label or readout that go with it
+        for _page, groups in GROUP_LAYOUT:
+            for _heading, items in groups:
+                for item in items:
+                    if item[0] == "setting" and item[2] in REFORGED_ONLY:
+                        for name in item[1:]:
+                            if name:
+                                waiting.pop(name)
+                    elif item[0] != "setting" and item[1] in REFORGED_ONLY:
+                        waiting.pop(item[1])
 
-        top = CONTENT_TOP
-        for item in items:
-            if item[0] == "setting":
-                _kind, label, control, readout = item
-                put(page_name, label, left - TEXT_NUDGE, top, COLUMN_WIDTH, ROW_HEIGHT, LABEL)
-                if readout:
-                    put(page_name, readout, left + READOUT_LEFT - TEXT_NUDGE, top + ROW_HEIGHT,
-                        READOUT_WIDTH, ROW_HEIGHT, LABEL)
-                put(page_name, control, left, top + ROW_HEIGHT,
-                    READOUT_LEFT - 8 if readout else COLUMN_WIDTH, ROW_HEIGHT)
-                top += SETTING_PITCH
-            elif item[0] == "check":
-                put(page_name, item[1], left, top, COLUMN_WIDTH, ROW_HEIGHT, CHECK)
-                top += CHECK_PITCH
-            elif item[0] == "note":
-                put(page_name, item[1], left - TEXT_NUDGE, top, COLUMN_WIDTH, NOTE_HEIGHT)
-                top += NOTE_HEIGHT + 4
-            else:
-                put(page_name, item[1], left, top, 160, ROW_HEIGHT)
-                top += BUTTON_PITCH
+    page_bottom = PAGE[1] + PAGE[3]
+    for page_name, groups in GROUP_LAYOUT:
+        groups = without(groups, REFORGED_ONLY if classic else CLASSIC_ONLY)
+        if not groups:
+            raise ValueError("%s has nothing left on it" % page_name)
+        index = 0
+        for column, stack in enumerate(flow(groups)):
+            left = COLUMNS[column]
+            heading_top = HEADING_TOP
+            for heading_key, items in stack:
+                heading_name = "GroupHeading%s%d" % (page_name[len("Page"):], index)
+                index += 1
+                heading = clone(templates[LABEL], _named(heading_name))
+                heading.children = []
+                heading.put_prop("TEXT", '"%s"' % heading_key)
+                drop_prop(heading, "TOOLTIPTEXT")
+                restyle(heading, templates["ButtonDefaults"], keys=("FONT", "HEADERTEMPLATE"))
+                heading.set_prop("TEXTCOLOR", GROUP_HEADING_COLOR)
+                heading.put_prop("STATICTEXTDATA", "CENTERED: 0")
+                waiting[heading_name] = heading
+                put(page_name, heading_name, left - TEXT_NUDGE, heading_top, COLUMN_WIDTH, ROW_HEIGHT)
+
+                top = heading_top + HEADING_PITCH
+                for item in items:
+                    if item[0] == "setting":
+                        _kind, label, control, readout = item
+                        put(page_name, label, left - TEXT_NUDGE, top, COLUMN_WIDTH, ROW_HEIGHT, LABEL)
+                        if readout:
+                            put(page_name, readout, left + READOUT_LEFT - TEXT_NUDGE, top + ROW_HEIGHT,
+                                READOUT_WIDTH, ROW_HEIGHT, LABEL)
+                        put(page_name, control, left, top + ROW_HEIGHT,
+                            READOUT_LEFT - 8 if readout else COLUMN_WIDTH, ROW_HEIGHT)
+                    elif item[0] == "check":
+                        put(page_name, item[1], left, top, COLUMN_WIDTH, ROW_HEIGHT, CHECK)
+                    elif item[0] == "note":
+                        put(page_name, item[1], left - TEXT_NUDGE, top, COLUMN_WIDTH, note_height(item[1]))
+                    else:
+                        put(page_name, item[1], left, top, 160, ROW_HEIGHT)
+                    top += item_height(item)
+                if top > page_bottom:
+                    raise ValueError("%s column %d runs to %d, past the page's %d"
+                                     % (page_name, column, top, page_bottom))
+                heading_top = top + GROUP_GAP
     for page_name, name, column, top in HIDDEN_PARKED:
         put(page_name, name, COLUMNS[column], top, COLUMN_WIDTH, ROW_HEIGHT)
     if waiting:
@@ -596,6 +709,7 @@ _CODE = os.path.dirname(_HERE)
 CATALOG = os.path.join(_CODE, "GameEngine", "Source", "Common", "OptionsCatalog.cpp")
 STRINGS = os.path.join(_CODE, "Data", "Patch.str")
 LAYOUT = os.path.join(_CODE, "Data", "Window", "Menus", "OptionsMenu.wnd")
+LAYOUT_CLASSIC = os.path.join(_CODE, "Data", "Window", "Menus", "OptionsMenuClassic.wnd")
 INCLUDE = os.path.join(_CODE, "GameEngine", "Include")
 
 _ROW = re.compile(
@@ -660,8 +774,30 @@ def selfcheck():
     keys = read_strings()
     layout = wndlayout.load(LAYOUT)
     controls = set((node.name or "").split(":")[-1] for node in layout.root.walk())
+    classic = wndlayout.load(LAYOUT_CLASSIC)
+    classic_controls = set((node.name or "").split(":")[-1] for node in classic.root.walk())
 
     problems = []
+
+    # the Classic layout is the Reforged one less REFORGED_ONLY, and only catalog controls may be
+    # left out: the menu's catalog passes skip a missing control, the hand-written code does not
+    widgets = set(row["widget"] for row in rows if row["widget"])
+    for name in REFORGED_ONLY:
+        if name not in widgets:
+            problems.append("%s is in REFORGED_ONLY and is no catalog row's widget" % name)
+        if name in classic_controls:
+            problems.append("OptionsMenuClassic.wnd still carries %s" % name)
+    for name in sorted(widgets - set(REFORGED_ONLY)):
+        if name not in classic_controls:
+            problems.append("OptionsMenuClassic.wnd has no %s" % name)
+    for name in CLASSIC_ONLY:
+        if name in controls:
+            problems.append("OptionsMenu.wnd still carries %s, which only Classic has" % name)
+        if name not in classic_controls:
+            problems.append("OptionsMenuClassic.wnd has no %s" % name)
+    for page_name, _tab, _text in TABS:
+        if classic.find(page_name) is None:
+            problems.append("OptionsMenuClassic.wnd has no %s" % page_name)
 
     if len(rows) < 9:
         problems.append("only %d catalog rows parsed, the regex has stopped matching" % len(rows))
@@ -714,6 +850,11 @@ def selfcheck():
     for name in READOUTS + GRAPHICS_CHECKS + MENU_CHECKS + MENU_COMBOS + [n for n, _k, _c in NOTES]:
         if name not in controls:
             problems.append("OptionsMenu.wnd has no %s, which OptionsMenu.cpp fills in" % name)
+        if name not in classic_controls:
+            problems.append("OptionsMenuClassic.wnd has no %s, which OptionsMenu.cpp fills in" % name)
+    for group in [g for _page, groups in GROUP_LAYOUT for g in groups]:
+        if group[0] not in keys:
+            problems.append("group heading %s is not in Patch.str" % group[0])
     for name, key, count in NOTES:
         for entry in range(count):
             if "%s%d" % (key, entry) not in keys:
@@ -726,14 +867,16 @@ def selfcheck():
         problems.append("OptionsMenu.wnd still carries %s; its controls are on the Graphics page"
                         % ADVANCED)
     problems.extend(overlaps(layout))
+    problems.extend("Classic: " + found for found in overlaps(classic))
 
     for problem in problems:
         print("optionsmenu: %s" % problem)
     if problems:
         return 1
 
-    print("optionsmenu: %d catalog rows agree with %s and %s"
-          % (len(rows), os.path.basename(LAYOUT), os.path.basename(STRINGS)))
+    print("optionsmenu: %d catalog rows agree with %s, %s and %s"
+          % (len(rows), os.path.basename(LAYOUT), os.path.basename(LAYOUT_CLASSIC),
+             os.path.basename(STRINGS)))
     return 0
 
 
@@ -741,13 +884,14 @@ def main(argv):
     if len(argv) == 2 and argv[1] == "selfcheck":
         return selfcheck()
 
-    if len(argv) != 3:
+    if len(argv) != 4:
         print(__doc__)
         return 2
 
-    layout = wndlayout.load(argv[1])
-    wndlayout.save(build(layout), argv[2])
-    print("%s: %d windows" % (argv[2], sum(1 for _ in layout.root.walk())))
+    for output, classic in ((argv[2], False), (argv[3], True)):
+        layout = wndlayout.load(argv[1])
+        wndlayout.save(build(layout, classic), output)
+        print("%s: %d windows" % (output, sum(1 for _ in layout.root.walk())))
     return 0
 
 

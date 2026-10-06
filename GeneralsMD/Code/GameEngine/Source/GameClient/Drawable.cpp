@@ -68,6 +68,7 @@
 #include "GameLogic/Module/AutoDepositUpdate.h"
 #include "GameLogic/Module/HackInternetAIUpdate.h"
 #include "GameLogic/Module/SupplyTruckAIUpdate.h"
+#include "GameLogic/Module/SupplyWarehouseDockUpdate.h"
 #include "Common/Upgrade.h"
 #include "GameLogic/Module/StealthUpdate.h"
 #include "GameLogic/Module/StickyBombUpdate.h"
@@ -90,6 +91,7 @@
 #include "GameClient/ParticleSys.h"
 #include "GameClient/PlayerColorScheme.h"
 #include "GameClient/LanguageFilter.h"
+#include "GameClient/Mouse.h"
 #include "GameClient/Shadow.h"
 #include "GameClient/GameText.h"
 
@@ -413,6 +415,69 @@ Bool Drawable_structureShowsHealthBar( Bool isBridge, Bool isUnowned, Bool isGar
 		return FALSE;
 
 	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Health bars are always on in this fork, so anything with a body would draw one. Effect objects
+	* (projectiles in flight, toxin and radiation fields, parachutes, fire walls, wrecked hulks,
+	* subobject turrets) are not things the player commands or targets, so their bars are pure
+	* clutter.
+	*
+	* So is the scenery: street lamps, phone boxes, barrels, planters, fire hydrants, rocks, bushes
+	* and the odd tree all carry a BodyModule. The rule is fixed-in-place-and-not-a-building, not a
+	* list of scenery kinds: the shipped data does not tag that furniture as PROP or SHRUBBERY at all
+	* (`KindOf = IMMOBILE CLEARED_BY_BUILD` is the whole of a street lamp), while every real target
+	* is either mobile or a STRUCTURE.
+	*
+	* A booby trap has one hit point and cannot be shot, so its bar was a full green line forever.
+	* Everything force-attackable on the ground is a civilian fence with one hit point.
+	*
+	* And a unit the cursor cannot reach at all - no SELECTABLE, which in EA's data means "the mouse
+	* can interact with it" - never wore a bar in retail, where a bar needed a selection or a mouse
+	* over. The ones that matter are the death puppets: a soldier killed by toxin or fire is removed
+	* and a ToxicInfantry or FlamingInfantry takes his place, a live 50 hit point INFANTRY that melts
+	* or runs burning for three seconds, and always-on bars put a full one over every one of them.
+	* Buildings keep their own rule below.
+	*
+	* Aircraft are the exception to both rules. The planes a general's power or a support building
+	* sends over - the A-10s, the B-52 and B-3, the MiG napalm strike, the carrier's Raptors, the
+	* American, Chinese and GLA cargo planes with their paradrops and supply crates, the Chinese
+	* carpet bomber - carry no SELECTABLE, and the cargo planes and the carpet bomber are
+	* FORCEATTACKABLE besides, yet every one of them is a target with real hit points that anti-air
+	* is meant to bring down. So an AIRCRAFT keeps its bar whether the cursor can reach it or not.
+	* The only plane left bare by the list above is the Chinese artillery barrage's dummy, which is
+	* UNATTACKABLE. The civilian airliner a map sends over gains one too, and it can be shot down.
+	*
+	* INERT is what the toxin and radiation fields carry, and the Spy Drone too: EA tags it INERT so
+	* nothing targets it and NO_SELECT so it cannot be selected, and NO_SELECT is commented in
+	* KindOf.h as "you can mouse over it to see its health (drones!)". So a NO_SELECT object keeps
+	* its bar whatever else it is; without that the owner never saw his drone's health at all. */
+//-------------------------------------------------------------------------------------------------
+Bool Drawable_kindShowsHealthBar( const KindOfMaskType& kinds )
+{
+	if( TEST_KINDOFMASK( kinds, KINDOF_INERT ) && !TEST_KINDOFMASK( kinds, KINDOF_NO_SELECT ) )
+		return FALSE;
+
+	if( TEST_KINDOFMASK( kinds, KINDOF_PROJECTILE ) ||
+			TEST_KINDOFMASK( kinds, KINDOF_BOOBY_TRAP ) ||
+			TEST_KINDOFMASK( kinds, KINDOF_CLEANUP_HAZARD ) ||
+			TEST_KINDOFMASK( kinds, KINDOF_UNATTACKABLE ) ||
+			TEST_KINDOFMASK( kinds, KINDOF_PARACHUTE ) ||
+			TEST_KINDOFMASK( kinds, KINDOF_HULK ) ||
+			TEST_KINDOFMASK( kinds, KINDOF_CLICK_THROUGH ) ||
+			TEST_KINDOFMASK( kinds, KINDOF_CRATE ) )
+		return FALSE;
+
+	if( TEST_KINDOFMASK( kinds, KINDOF_AIRCRAFT ) )
+		return TRUE;
+
+	if( TEST_KINDOFMASK( kinds, KINDOF_FORCEATTACKABLE ) )
+		return FALSE;
+
+	if( TEST_KINDOFMASK( kinds, KINDOF_STRUCTURE ) )
+		return TRUE;
+
+	return !TEST_KINDOFMASK( kinds, KINDOF_IMMOBILE ) && TEST_KINDOFMASK( kinds, KINDOF_SELECTABLE );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1895,8 +1960,12 @@ void Drawable::calcPhysicsXformGround( const Locomotor *locomotor, PhysicsXformI
 	if (steps != 0)
 	{
 		const Object *obj = getObject();
+		// EA's per-appearance versions of this each returned on an object without physics
+		const PhysicsBehavior *physics = obj->getPhysics();
+		if (physics == NULL)
+			return;
 		BodyDamageType bdt = obj->getBodyModule()->getDamageState();
-		Real speed = obj->getPhysics()->getForwardSpeed2D();
+		Real speed = physics->getForwardSpeed2D();
 		Real angle = getOrientation();
 		if (steps > MAX_CATCH_UP_FRAMES)
 		{
@@ -3011,7 +3080,15 @@ static Bool computeHealthRegion( const Drawable *draw, IRegion2D& region )
 
 	Real healthBoxWidth, healthBoxHeight;
 	if (!obj->getHealthBoxDimensions(healthBoxHeight, healthBoxWidth))
-		return FALSE;
+	{
+		// IGNORED_IN_GUI has no box, and the planes a general's power sends over are all IGNORED_IN_GUI;
+		// they wear a bar anyway (Drawable_kindShowsHealthBar), sized as any other unit's would be
+		if( !obj->isKindOf( KINDOF_AIRCRAFT ) )
+			return FALSE;
+		const GeometryInfo& geom = obj->getGeometryInfo();
+		healthBoxHeight = 3.0f;
+		healthBoxWidth = 2.0f * MAX( 20.0f, MIN( 150.0f, geom.getMajorRadius() + geom.getMinorRadius() ) );
+	}
 
 	// scale the health bars according to the zoom
 	Real zoom = TheTacticalView->getZoom();
@@ -4127,7 +4204,10 @@ void Drawable::drawConstructPercent( const IRegion2D *healthBarRegion )
 /** How much money is still in a supply pile, written over it.  The piles were readable only as
 	* art - a full one and a nearly-empty one differ by a few boxes on the model - so deciding which
 	* one to send workers to, or whether an expansion is worth taking, meant guessing.  Written as
-	* cash rather than as boxes because cash is the number the decision is actually about. */
+	* cash rather than as boxes because cash is the number the decision is actually about.
+	* Docks and warehouses (400 boxes at the start) show it all the time; the small piles (150 and
+	* 50) litter the map and show it, smaller, only while the cursor is on or near them.  The class
+	* comes from the starting box count, so a big source does not turn small as it drains. */
 //-------------------------------------------------------------------------------------------------
 void Drawable::drawSupplyCash( const IRegion2D *healthBarRegion )
 {
@@ -4151,11 +4231,36 @@ void Drawable::drawSupplyCash( const IRegion2D *healthBarRegion )
 	if( obj->getShroudedStatus( TheObserverCamera.getShroudPlayerIndex() ) != OBJECTSHROUD_CLEAR )
 		return;
 
+	// only a SupplyWarehouseDockUpdate answers getSupplyCashValue with cash, so this finds one
+	static const NameKeyType warehouseModuleKey = TheNameKeyGenerator->nameToKey( "SupplyWarehouseDockUpdate" );
+	const SupplyWarehouseDockUpdate *warehouse = (const SupplyWarehouseDockUpdate *)obj->findUpdateModule( warehouseModuleKey );
+	const Bool largeSource = warehouse->getStartingBoxes() >= 300;
+
+	Coord3D pos;
+	obj->getHealthBoxPosition( pos );
+	ICoord2D screen;
+	if( !TheTacticalView->worldToScreen( &pos, &screen ) )
+		return;
+
+	if( !largeSource && TheInGameUI->getMousedOverDrawableID() != getID() )
+	{
+		// near enough counts too: a small pile's model is a narrow target to land the cursor on
+		const ICoord2D &mouse = TheMouse->getMouseStatus()->pos;
+		Int dx = mouse.x - screen.x;
+		Int dy = mouse.y - screen.y;
+		const Int nearPixels = 60;
+		if( dx * dx + dy * dy > nearPixels * nearPixels )
+			return;
+	}
+
 	if( m_supplyCashDisplayString == NULL )
 	{
+		Int pointSize = TheInGameUI->getDrawableCaptionPointSize();
+		if( !largeSource )
+			pointSize -= 2;
 		m_supplyCashDisplayString = TheDisplayStringManager->newDisplayString();
 		m_supplyCashDisplayString->setFont( TheFontLibrary->getFont( TheInGameUI->getDrawableCaptionFontName(),
-											TheGlobalLanguageData->adjustFontSize( TheInGameUI->getDrawableCaptionPointSize() ),
+											TheGlobalLanguageData->adjustFontSize( pointSize ),
 											TheInGameUI->isDrawableCaptionBold() ) );
 	}
 
@@ -4166,12 +4271,6 @@ void Drawable::drawSupplyCash( const IRegion2D *healthBarRegion )
 		m_supplyCashDisplayString->setText( buffer );
 		m_lastSupplyCashDisplayed = cash;
 	}
-
-	Coord3D pos;
-	obj->getHealthBoxPosition( pos );
-	ICoord2D screen;
-	if( !TheTacticalView->worldToScreen( &pos, &screen ) )
-		return;
 
 	Int width, height;
 	m_supplyCashDisplayString->getSize( &width, &height );
@@ -4367,41 +4466,95 @@ static Int drawOwnCountdown( DisplayString *&countdown, Int seconds, Int x, Int 
 }
 
 //-------------------------------------------------------------------------------------------------
-/** How far the slowest long reload on this object has come, 0 to 1, or -1 when none is running.
+/** Whether a weapon is slow enough to earn a reload bar, from its data alone: the time a full clip
+	* takes to fire and reload, divided by the shots in it, has to come to more than three seconds a
+	* shot. A clip of 0 is endless and its delay between shots is the whole wait.
 	*
-	* Only a wait longer than three seconds counts. Every direct-fire tank gun in the game waits two
-	* (the Laser General's Crusader 2.3), so a lower line would hang a bar on every main battle tank
-	* that fires and empty it again before it could be read. Above it sit the weapons whose wait is
-	* the whole decision: the Nuke Cannon's ten seconds, artillery, the Inferno Cannon, SCUD and
-	* Tomahawk launchers, the Scorpion's and the Comanche's missiles, the rocket buggy's clip.
+	* Every direct-fire tank gun in the game waits two (the Laser General's Crusader 2.3). Above the
+	* line sit the guns whose wait is the decision: the Nuke Cannon's ten seconds, the Inferno Cannon,
+	* the artillery platform, the SCUD and Tomahawk launchers, the Scorpion's missile and the
+	* Comanche's anti-tank missiles. Below it go the weapons that empty a quick clip and then reload
+	* it - the Rocket Buggy's six rockets, the Comanche's rocket pods, the Paladin's point defence
+	* laser - which fire about as often as a tank does. The old test was the
+	* length of whichever wait was running, and those clip reloads all ran past three seconds, so a
+	* Paladin that touched an infantryman with its laser wore an amber bar for the next four.
+	*
+	* A weapon of DamageType DISARM is not a gun at all. The Dozer's mine-clearing scoop is one shot
+	* and a four-second reload, so the Dozer wore an amber bar after every mine it lifted. The
+	* Worker's clearing weapon is DISARM too, and those two are the only DISARM weapons in the data. */
+//-------------------------------------------------------------------------------------------------
+Bool Drawable_weaponWearsReloadBar( Int clipSize, UnsignedInt delayFrames, UnsignedInt clipReloadFrames, Bool disarms )
+{
+	const UnsignedInt RELOAD_BAR_MIN_FRAMES = 3 * LOGICFRAMES_PER_SECOND;
+	if( disarms )
+		return FALSE;
+
+	if( clipSize <= 0 )
+		return delayFrames > RELOAD_BAR_MIN_FRAMES;
+
+	return clipSize * delayFrames + clipReloadFrames > (UnsignedInt)clipSize * RELOAD_BAR_MIN_FRAMES;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** How far a wait from `started` to `ready` has come at `now`, 0 to 1, or -1 when it is not one
+	* worth a bar. `longest` is the longest wait the weapon's data allows. The start frame is only
+	* written when this weapon fires or reloads, so a launcher sharing its reload with another slot,
+	* or a Combat Bike handing its gun to a new rider, is told when it can fire next and keeps an old
+	* start - a wait that looked a minute long. The span is held to what the data allows. */
+//-------------------------------------------------------------------------------------------------
+Real Drawable_reloadBarFraction( UnsignedInt now, UnsignedInt started, UnsignedInt ready, UnsignedInt longest )
+{
+	const UnsignedInt RELOAD_BAR_MIN_FRAMES = 3 * LOGICFRAMES_PER_SECOND;
+
+	// 0x7fffffff is an empty clip that does not reload itself (a jet waiting for its airfield)
+	if( ready <= now || ready == 0x7fffffff )
+		return -1.0f;
+
+	UnsignedInt span = ready > started ? ready - started : longest;
+	if( span > longest )
+		span = longest;
+	if( span < ready - now )
+		span = ready - now;
+	if( span <= RELOAD_BAR_MIN_FRAMES )
+		return -1.0f;
+
+	return 1.0f - INT_TO_REAL( ready - now ) / INT_TO_REAL( span );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The slowest long reload on this object, 0 to 1, or -1 when none is running.
 	*
 	* A weapon that does less than one point of damage is a dummy that only drives an animation
 	* (the Battle Bus and Troop Crawler passengers' ten-second one, the angry mob's) and the SCUD
 	* Storm's, whose launch already has its own charge bar; none of those is a reload anyone waits on.
 	*
-	* This reads the two frame numbers and nothing else. Weapon::getStatus() writes m_status, which
-	* the logic CRC covers, so calling it from a draw would be the client writing logic state. */
+	* This reads frame numbers and template values and nothing else. Weapon::getStatus() writes
+	* m_status and WeaponTemplate::getDelayBetweenShots() draws from the logic random stream, so
+	* calling either from a draw would be the client writing logic state. */
 //-------------------------------------------------------------------------------------------------
 static Real reloadBarFraction( const Object *obj )
 {
-	const UnsignedInt RELOAD_BAR_MIN_FRAMES = 3 * LOGICFRAMES_PER_SECOND;
 	const UnsignedInt now = TheGameLogic->getFrame();
 	Real least = -1.0f;
 
 	for( Int i = 0; i < WEAPONSLOT_COUNT; ++i )
 	{
 		const Weapon *weapon = obj->getWeaponInWeaponSlot( (WeaponSlotType)i );
-		if( weapon == NULL || weapon->getTemplate()->getPrimaryDamage( WeaponBonus() ) < 1.0f )
+		if( weapon == NULL )
+			continue;
+		const WeaponTemplate *tmpl = weapon->getTemplate();
+		if( tmpl->getPrimaryDamage( WeaponBonus() ) < 1.0f )
 			continue;
 
-		// 0x7fffffff is an empty clip that does not reload itself (a jet waiting for its airfield)
-		const UnsignedInt ready = weapon->getPossibleNextShotFrame();
-		const UnsignedInt started = weapon->getLastReloadStartedFrame();
-		if( ready <= now || ready == 0x7fffffff || ready - started <= RELOAD_BAR_MIN_FRAMES )
+		const UnsignedInt delay = (UnsignedInt)tmpl->getMaxDelayBetweenShots();
+		const UnsignedInt clipReload = (UnsignedInt)tmpl->getClipReloadTime( WeaponBonus() );
+		if( !Drawable_weaponWearsReloadBar( tmpl->getClipSize(), delay, clipReload, tmpl->getDamageType() == DAMAGE_DISARM ) )
 			continue;
 
-		Real fraction = INT_TO_REAL( now - started ) / INT_TO_REAL( ready - started );
-		if( least < 0.0f || fraction < least )
+		const UnsignedInt longest = tmpl->getClipSize() > 0 && clipReload > delay ? clipReload : delay;
+		const Real fraction = Drawable_reloadBarFraction( now, weapon->getLastReloadStartedFrame(),
+																											weapon->getPossibleNextShotFrame(), longest );
+		if( fraction >= 0.0f && ( least < 0.0f || fraction < least ) )
 			least = fraction;
 	}
 
@@ -4424,36 +4577,8 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		if( obj == NULL )
 			return;
 
-		//
-		// health bars are always on in this fork, so anything with a body draws one. Effect
-		// objects (projectiles in flight, toxin and radiation fields, parachutes, fire walls,
-		// wrecked hulks, subobject turrets) are not things the player commands or targets, so
-		// their bars are pure clutter.
-		//
-		// So is the scenery: street lamps, phone boxes, barrels, planters, fire hydrants, rocks,
-		// bushes and the odd tree all carry a BodyModule and so all drew a bar, and a built-up map
-		// came up wearing hundreds of them over things nobody fights.
-		//
-		// The rule is fixed-in-place-and-not-a-building, not a list of scenery kinds: the shipped
-		// data does not tag that furniture as PROP or SHRUBBERY at all (`KindOf = IMMOBILE
-		// CLEARED_BY_BUILD` is the whole of a street lamp, and `IMMOBILE` the whole of a rock), so
-		// a kind list catches almost none of it, while every real target is either mobile or a
-		// STRUCTURE. Buildings keep their bars - a civilian building is cover to garrison, a tech
-		// building is worth capturing, bridges are STRUCTURE too - and so does anything that can
-		// move.
-		//
-		// A booby trap has one hit point and cannot be shot, so its bar was a full green line
-		// forever, over something that is meant to be hidden.
-		if( obj->isKindOf( KINDOF_PROJECTILE ) ||
-				obj->isKindOf( KINDOF_BOOBY_TRAP ) ||
-				obj->isKindOf( KINDOF_INERT ) ||
-				obj->isKindOf( KINDOF_CLEANUP_HAZARD ) ||
-				obj->isKindOf( KINDOF_UNATTACKABLE ) ||
-				obj->isKindOf( KINDOF_PARACHUTE ) ||
-				obj->isKindOf( KINDOF_HULK ) ||
-				obj->isKindOf( KINDOF_CLICK_THROUGH ) ||
-				obj->isKindOf( KINDOF_CRATE ) ||
-				( obj->isKindOf( KINDOF_IMMOBILE ) && !obj->isKindOf( KINDOF_STRUCTURE ) ) )
+		// effect objects, scenery and death puppets wear none (Drawable_kindShowsHealthBar)
+		if( !Drawable_kindShowsHealthBar( obj->getTemplate()->getKindOfMask() ) )
 			return;
 
 		if( obj->isKindOf( KINDOF_STRUCTURE ) )
@@ -4475,15 +4600,6 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 																						 contain != NULL && contain->isGarrisonable(),
 																						 obj->isKindOf( KINDOF_CAPTURABLE ) ) )
 				return;
-		}
-
-		if( obj->isKindOf( KINDOF_FORCEATTACKABLE ) )
-		{
-			//Currently (Nov 2002), everything that is forceattackable are civ fences, and they all have a
-			//single hit point and they aren't selectable. However, a bug is when you force attack it, it shows
-			//the healthbar. Well, this stops it, however, should force attackable kindofs change, then this
-			//will require reevaluation.
-			return;
 		}
 
 		// get body module of object
@@ -5678,7 +5794,9 @@ Bool Drawable::isSelectable( void ) const
 //-------------------------------------------------------------------------------------------------
 Bool Drawable::isMassSelectable( void ) const
 {
-	return getObject() && getObject()->isMassSelectable();
+	// Classic is the game as shipped, where a structure was only ever selected on its own
+	return getObject() && getObject()->isMassSelectable()
+				 && !( TheGlobalData->isClassicUI() && getObject()->isKindOf( KINDOF_STRUCTURE ) );
 }
 
 //-------------------------------------------------------------------------------------------------

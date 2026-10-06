@@ -1,0 +1,10 @@
+# The Scud Storm launch close up, Scenarios/scudlaunch_film.txt on Golden Oasis. The Scud Storm sits
+# in the middle of the frame at about half the full zoom-out, looking north with the sun to the
+# right, so each missile's shadow slides off to the left across the scrub as it climbs. A slow push
+# in runs over the launch.
+#
+#   ...the scenario's switches... -cinema scudlaunch_film -video 100 330 scudlaunch_film -maxframes 340
+
+1.0   cut     2192 3537 0.55 0 6
+3.4   zoom    0.45 7.5
+11.2  end

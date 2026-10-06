@@ -1,0 +1,13 @@
+# Zero Hour Reforged trailer, beats 13 and 14 (MV_COMANCHE, MV_HELIX): Scenarios/s240_heli.txt on
+# Fortress Avalanche with s240_heli.txt's cameras and no screenshots: the Comanche backing away
+# from three Battlemasters, then the gattling Helix holding its heading over a circling Crusader.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Fortress Avalanche\Fortress Avalanche.map" -autoskirmish 2
+#     -takeover -observer -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario s240_heli
+#     -cinema rf_heli -video 230 940 rf_heli -maxframes 950
+
+7.7   cut     1000 2200 0.35 0 -20
+11.0  follow  AmericaVehicleComanche
+17.7  cut     3300 2030 0.42 0 -12
+31.7  end

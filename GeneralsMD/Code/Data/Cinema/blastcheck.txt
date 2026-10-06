@@ -1,0 +1,34 @@
+# Scenarios/blastcheck.txt on Twilight Flame: the War Factory under Overlord fire and coming down,
+# then the Scud Storm and the nuke on the open ground east of it. Shots dense around each event,
+# because the frame a blast peaks on is only known to a few frames.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -particlecap 5000 -turbo -quickstart
+#     -noshellmap -observer -multiInstance -noFPSLimit -map "Maps\Twilight Flame\Twilight Flame.map"
+#     -autoskirmish 3 -takeover -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA
+#     -seed 7 -scenario blastcheck -cinema blastcheck -maxframes 1330 -logPrefix blastcheck_shot_
+
+0.5   cut     1150 3760 0.45 -45 8
+4.0   shot
+5.3   shot
+7.0   shot
+8.0   shot
+8.5   shot
+9.0   shot
+9.5   shot
+10.5  shot
+12.0  shot
+
+20.0  cut     1420 3700 0.85 -45 8
+26.0  shot
+27.0  shot
+28.0  shot
+29.0  shot
+30.0  shot
+31.0  shot
+33.0  shot
+38.5  shot
+39.2  shot
+40.0  shot
+41.5  shot
+43.5  shot
+44.2  end

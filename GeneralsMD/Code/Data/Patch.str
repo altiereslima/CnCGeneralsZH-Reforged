@@ -423,8 +423,8 @@ GUI:OptionsTabControls
 "Controls"
 END
 
-GUI:OptionsTabGameplay
-"Gameplay"
+GUI:OptionsTabInterface
+"Interface"
 END
 
 GUI:OptionsTabNetwork
@@ -623,8 +623,16 @@ GUI:OptionsGroupVolume
 "Volume"
 END
 
-GUI:OptionsGroupScrolling
-"Scrolling"
+GUI:OptionsGroupCamera
+"Camera"
+END
+
+GUI:OptionsGroupPlacement
+"Building Placement"
+END
+
+GUI:OptionsGroupLighting
+"Light And Glow"
 END
 
 GUI:OptionsGroupOrders
@@ -645,10 +653,6 @@ END
 
 GUI:OptionsGroupProxy
 "Proxy"
-END
-
-GUI:OptionsGroupTerrain
-"Terrain"
 END
 
 GUI:OptionsGroupShadows
@@ -686,7 +690,27 @@ GUI:WindowMode2
 END
 
 TOOLTIP:WindowMode
-"Fullscreen takes the display mode, borderless covers it with a window and alt-tabs instantly. Borderless takes the monitor's own resolution, so the list above is yours in the other two."
+"Fullscreen covers the monitor at the resolution above, scaled up to it when smaller, and steps aside on alt-tab. Borderless always draws at the monitor's own resolution and stays put behind other windows."
+END
+
+GUI:ResolutionNote0
+"Monitor supports this mode"
+END
+
+GUI:FullscreenScaling
+"Fullscreen Fit"
+END
+
+GUI:FullscreenScaling0
+"Stretch to fill"
+END
+
+GUI:FullscreenScaling1
+"Keep shape, add bars"
+END
+
+TOOLTIP:FullscreenScaling
+"How fullscreen fills a monitor whose shape your resolution does not have, such as 1920x1080 on a 1920x1200 screen or 1024x768 on a widescreen. Stretch fills every pixel; the other keeps the picture's proportions with black bars."
 END
 
 GUI:Monitor
@@ -858,7 +882,7 @@ GUI:ZoomToCursor
 END
 
 TOOLTIP:ZoomToCursor
-"The wheel zooms towards whatever the cursor is over instead of the middle of the screen. Modern controls only."
+"The wheel zooms towards whatever the cursor is over instead of the middle of the screen."
 END
 
 GUI:StartAtMaxZoom
@@ -866,15 +890,23 @@ GUI:StartAtMaxZoom
 END
 
 TOOLTIP:StartAtMaxZoom
-"A match opens with the camera as far out as the wheel goes. Off, it opens at the height the map was framed for."
+"A match opens with the camera as far out as the wheel goes. Off, it opens close in, at the height the original game used."
 END
 
-GUI:CloserZoom
-"Closer Zoom"
+GUI:ScrollSpeed
+"Camera Scroll Speed"
 END
 
-TOOLTIP:CloserZoom
-"How much nearer the ground the wheel may bring the camera. 0% is the game's own limit."
+TOOLTIP:ScrollSpeed
+"How fast the camera pans: at the screen edge, on the arrow keys and while you drag with the right mouse button. The mouse wheel has its own Zoom Speed. Takes effect on Accept."
+END
+
+GUI:ZoomSpeed
+"Zoom Speed"
+END
+
+TOOLTIP:ZoomSpeed
+"How far one turn of the mouse wheel moves the camera in or out. At 100 it moves as far as in the original game. Takes effect on Accept."
 END
 
 GUI:DragTolerance
@@ -883,6 +915,14 @@ END
 
 TOOLTIP:DragTolerance
 "How many pixels the mouse may move with a button held before a click becomes a drag. Raise it if selection boxes start by accident, lower it if drags read as clicks."
+END
+
+GUI:AmbientVolume
+"Ambient Volume"
+END
+
+TOOLTIP:AmbientVolume
+"Birds, wind, water and the hum of a town. Sound FX no longer moves these, so the battle can stay loud while the world around it stays quiet."
 END
 
 GUI:IsometricCamera
@@ -922,7 +962,7 @@ GUI:GridBuild
 END
 
 TOOLTIP:GridBuild
-"Structures land on the pathfinder's own 10-unit grid, so two buildings put down by eye share an edge instead of leaving a gap too narrow to walk through."
+"Structures land on the pathfinder's own 10-unit grid, drawn under the building while you place it, so two buildings put down by eye share an edge instead of leaving a gap too narrow to walk through. Off, only the cells nothing can be built on are marked."
 END
 
 GUI:NudgeBuild
@@ -939,6 +979,14 @@ END
 
 TOOLTIP:SnapBuild45
 "Drag-to-rotate clicks to the eight 45 degree headings, which is what walls and defenses along a base edge want."
+END
+
+GUI:SnapBuildNeighbour
+"Snap to Nearby Buildings"
+END
+
+TOOLTIP:SnapBuildNeighbour
+"A structure put down a cell or so short of another one is pulled flush against its edge, so the two leave no gap."
 END
 
 GUI:RangeRing
@@ -974,7 +1022,7 @@ TOOLTIP:HudOverlay
 END
 
 GUI:NetBox
-"Clock And Frame Rate Box"
+"Info Box"
 END
 
 TOOLTIP:NetBox
@@ -1069,22 +1117,6 @@ TOOLTIP:HudScale
 "Draws the command bar and the rest of the bottom HUD larger than your resolution would."
 END
 
-GUI:MenuLayout
-"Menu Layout"
-END
-
-GUI:MenuLayout0
-"Stretch"
-END
-
-GUI:MenuLayout1
-"Fit"
-END
-
-TOOLTIP:MenuLayout
-"Fit keeps the menus in the shape they were drawn in and centres them on a wide screen. Stretch widens them to the screen's edges, as the game always did."
-END
-
 GUI:OptionsGroupInput
 "Input"
 END
@@ -1142,6 +1174,10 @@ END
 
 GUI:Language1
 "Türkçe"
+END
+
+GUI:Language2
+"Deutsch"
 END
 
 TOOLTIP:Language
@@ -1228,6 +1264,25 @@ END
 
 TOOLTIP:StatNewWeaponFigures
 "%d damage, %d range"
+END
+
+// Beside a lone unit's portrait, short enough for a column of a third of it: damage a second,
+// and the armour's change to three kinds of damage.
+
+TOOLTIP:StatShortDamagePerSecond
+"DPS"
+END
+
+TOOLTIP:StatVsGuns
+"Gun"
+END
+
+TOOLTIP:StatVsShells
+"Shell"
+END
+
+TOOLTIP:StatVsRockets
+"Rocket"
 END
 
 // Under the figures: a unit's upgrades, or on an upgrade's card the units it changes.
@@ -1478,6 +1533,10 @@ END
 // The cheat panel the console's "trainer" command opens, Window/Html/Cheats.html.
 GUI:CheatPanelTitle
 "Cheats"
+END
+
+GUI:CheatPanelClose
+"Close"
 END
 
 GUI:CheatMoney

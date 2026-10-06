@@ -1,0 +1,33 @@
+# Four Comanches fire their rocket pods at a spot 800 ahead of them, from the button, as the player's
+# MSG_DO_WEAPON_AT_LOCATION. The airfield buys the pods (40 seconds); the move puts them in the air
+# facing east first.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionChina -side 1 FactionAmerica -seed 7 -maxframes 2700
+#     -scenario comanchepods -logPrefix comanchepods_
+#
+# Measured 2026-10-05 with a temporary log of every pod shot, frames from the order to each
+# Comanche's first rocket. The same file with the spot moved gives the other cases.
+#
+#   spot                         before      after
+#   2050 3700, 800 ahead         229-251     181-192    flies in at full speed, stops the approach in range
+#   1400 3700, 150 ahead         1-4         1          AcceptableAimDelta 20 on the pods
+#   1250 3850, 150 to the side   13-16       10-13
+#   1100 3700, 150 behind        28-31       25-28      the 180 degree turn is the rest
+#
+# On the 800 run each Comanche crosses the edge of range at full speed and brakes from there. It
+# came to rest 57 past the edge and then backed 33 of that up again under its own volley; with the
+# helicopter's pull eased off before a standstill (steerHelicopter) it comes to rest 60 past and
+# moves 0.9 after. helislide and hitrun end every leg where they did, within 0.04; helitypes plays
+# to the same CRC.
+#
+# A Comanche whose pods are reloading (one fired 400 frames earlier) waits out the 30 second clip
+# reload before and after, 617-620 frames, while the three beside it fire on frame 1.
+
+30    spawn         1  AmericaAirfield             1   1200 3300
+30    spawn         1  AmericaPowerPlant           2   1500 3300 60
+30    spawn         1  AmericaVehicleComanche      4   1200 3700 40
+40    shiftupgrade  1  AmericaAirfield             Upgrade_ComancheRocketPods
+60    move          1  AmericaVehicleComanche          1250 3700
+1400  weaponat      1  AmericaVehicleComanche          2050 3700

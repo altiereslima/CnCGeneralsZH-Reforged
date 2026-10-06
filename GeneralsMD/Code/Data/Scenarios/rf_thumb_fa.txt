@@ -1,0 +1,133 @@
+# The YouTube thumbnail of the Reforged trailer, second setup: v240_hook.txt's three armies and three
+# superweapons on the west grass of Fortress Avalanche, with what that fight left empty filled in for
+# Cinema/rf_thumb_fa.txt's frame (heading -135, the lake top left): GLA buildings along the top,
+# China's on the left by the lake, America's on the right, a burning stash and a buggy raid top
+# right, a tank duel along the bottom, napalm and artillery on the edges, King Raptors, MiGs and a
+# Chinook in the air. The nuke is called late, so its fireball does not cover the beam.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -particlecap 12000 -noDynamicLOD -map "Maps\Fortress Avalanche\Fortress Avalanche.map"
+#     -autoskirmish 3 -takeover -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA
+#     -seed 7 -scenario rf_thumb_fa -cinema rf_thumb_fa -video 930 1230 rf_thumb_fa -maxframes 1240
+
+# --- v240_hook.txt, unchanged ----------------------------------------------------------------
+10    spawn      0  AmericaParticleCannonUplink     1   start0:0:-200
+10    spawn      0  AmericaPowerPlant               3   start0:-260:40    90
+10    spawn      0  AmericaCommandCenter            1   start0:240:60
+10    spawn      0  AmericaAirfield                 1   start0:0:300
+10    spawn      1  ChinaNuclearMissileLauncher     1   start1:0:200
+10    spawn      1  ChinaPowerPlant                 3   start1:260:-40    90
+10    spawn      1  ChinaCommandCenter              1   start1:-260:60
+10    spawn      2  GLAScudStorm                    1   start2:0:200
+10    spawn      2  GLACommandCenter                1   start2:-260:0
+20    shiftupgrade 0 AmericaAirfield  Upgrade_AmericaCountermeasures
+
+30    spawn      0  AmericaTankCrusader             12  655 1824   36
+30    spawn      0  AmericaTankPaladin              6   565 1924   40
+30    spawn      0  AmericaVehicleTomahawk          4   555 1784   40
+30    spawn      0  AmericaTankMicrowave            3   725 1734   40
+30    spawn      0  AmericaInfantryRanger           16  745 1884   18
+30    spawn      0  AmericaVehicleComanche          6   565 1704   60
+30    spawn      0  AmericaJetRaptor                4   505 1654   70
+30    spawn      1  ChinaTankOverlord               5   1345 2384  50
+30    spawn      1  ChinaTankBattleMaster           10  1265 2444  40
+30    spawn      1  ChinaTankGattling               5   1425 2304  36
+30    spawn      1  ChinaTankDragon                 4   1245 2324  36
+30    spawn      1  ChinaVehicleInfernoCannon       4   1405 2464  40
+30    spawn      1  ChinaInfantryRedguard           16  1195 2414  18
+30    spawn      1  ChinaVehicleHelix               3   1465 2454  60
+30    spawn      1  ChinaJetMIG                     4   1515 2524  70
+30    spawn      2  GLATankScorpion                 10  1325 1804  36
+30    spawn      2  GLATankMarauder                 5   1405 1844  40
+30    spawn      2  GLAVehicleRocketBuggy           6   1265 1734  32
+30    spawn      2  GLAVehicleQuadCannon            4   1385 1734  36
+30    spawn      2  GLAVehicleToxinTruck            3   1465 1784  36
+30    spawn      2  GLAVehicleTechnical             6   1245 1864  30
+30    spawn      2  GLAInfantryRebel                16  1315 1904  18
+60    attackmove 0  *  1000 2100
+60    attackmove 1  *  1000 2100
+60    attackmove 2  *  1000 2100
+
+600   spawn      0  AmericaTankCrusader             8   655 1824   36
+600   spawn      0  AmericaTankPaladin              4   565 1924   40
+600   spawn      1  ChinaTankBattleMaster           8   1265 2444  40
+600   spawn      1  ChinaTankOverlord               3   1345 2384  50
+600   spawn      2  GLATankScorpion                 8   1325 1804  36
+600   spawn      2  GLATankMarauder                 3   1405 1844  40
+630   attackmove 0  *  1000 2100
+630   attackmove 1  *  1000 2100
+630   attackmove 2  *  1000 2100
+
+450   power      0  AmericaCommandCenter  1000 2100  SuperweaponSpectreGunship
+560   power      0  AmericaCommandCenter  845 2004   SuperweaponA10ThunderboltMissileStrike
+640   power      1  ChinaCommandCenter    1165 2104  Early_SuperweaponChinaCarpetBomb
+700   power      2  GLACommandCenter      1015 1964  SuperweaponAnthraxBomb
+
+# v240_hook calls the nuke at 830 and its fireball covered the middle third of the frame from
+# frame 1080 on; called at 1000 it lands about 1200, when the beam has been burning for six seconds.
+1000  power      1  ChinaNuclearMissileLauncher  925 2194
+930   power      0  AmericaParticleCannonUplink  945 2144
+930   power      2  GLAScudStorm                 1065 2044
+
+# --- buildings on the edges of the frame ------------------------------------------------------
+10    spawn      2  GLAPalace                       1   1200 1930
+10    spawn      2  GLAArmsDealer                   1   1290 1870
+10    spawn      2  GLAStingerSite                  1   1130 1990
+10    spawn      1  ChinaBunker                     1   1240 2190
+10    spawn      1  ChinaGattlingCannon             1   1300 2120
+10    spawn      0  AmericaPatriotBattery           1   900 1800
+10    spawn      0  AmericaFireBase                 1   840 1900
+
+600   particles  2  SootySmokeColumn02   1  1200 1930
+600   particles  2  FireFactionLarge     1  1200 1930
+620   particles  1  SootySmokeColumn02   1  1240 2190
+620   particles  1  FireFactionLarge     1  1240 2190
+640   particles  0  SootySmokeColumn02   1  840 1900
+640   particles  0  FireFactionMedium    1  840 1900
+660   particles  0  SootySmokeColumn02   2  900 2330  80
+660   particles  0  FireFactionSmall     2  900 2330  80
+
+# --- a tank duel along the bottom of the frame -------------------------------------------------
+700   spawn      0  AmericaTankPaladin              5   620 2150  40
+700   spawn      1  ChinaTankOverlord               4   1050 2450  50
+710   attackmove 0  AmericaTankPaladin               880 2300
+710   attackmove 1  ChinaTankOverlord                760 2220
+
+# --- powers on the edges -----------------------------------------------------------------------
+700   power      1  ChinaCommandCenter    1220 1920  SuperweaponNapalmStrike
+760   power      1  ChinaCommandCenter    880 1880   SuperweaponArtilleryBarrage
+
+# --- the top right, which the first take left as bare grass ----------------------------------------
+10    spawn      2  GLASupplyStash                  1   1080 1450
+600   particles  2  SootySmokeColumn02   1  1080 1450
+600   particles  2  FireFactionLarge     1  1080 1450
+600   particles  2  SootySmokeColumn02   1  990 1560
+600   particles  2  FireFactionMedium    1  990 1560
+700   spawn      2  GLAVehicleRocketBuggy           6   1250 1450  32
+700   spawn      0  AmericaVehicleHumvee            6   760 1560   34
+710   attackmove 2  GLAVehicleRocketBuggy            1000 1560
+710   attackmove 0  AmericaVehicleHumvee             1060 1480
+
+# --- the far top band, bare grass in the second take ---------------------------------------------
+10    spawn      2  GLAArmsDealer                   1   1560 1760
+10    spawn      2  GLABarracks                     1   1350 1540
+600   particles  2  SootySmokeColumn02   1  1560 1760
+600   particles  2  FireFactionLarge     1  1560 1760
+600   particles  2  SootySmokeColumn02   1  1350 1540
+600   particles  2  FireFactionMedium    1  1350 1540
+600   particles  2  SootySmokeColumn02   1  1720 1980
+600   particles  2  FireFactionMedium    1  1720 1980
+# A general's own template, so the order moves this squad and not the main army's Scorpions.
+850   spawn      2  Demo_GLATankScorpion            6   1560 1640  36
+850   spawn      0  AirF_AmericaVehicleHumvee       6   1150 1400  34
+860   attackmove 2  Demo_GLATankScorpion             1300 1520
+860   attackmove 0  AirF_AmericaVehicleHumvee        1450 1620
+
+# --- the air at the peak ---------------------------------------------------------------------
+# The palace has fallen by 840 in this match, so the jets are sent onto the GLA ground instead.
+940   spawn      0  AirF_AmericaJetRaptor           4   500 1900   60
+940   spawn      1  ChinaJetMIG                     4   1500 2600   70
+945   attackmove 0  AirF_AmericaJetRaptor            1200 1900
+945   attack     1  ChinaJetMIG                     0  AmericaPatriotBattery
+1000  spawn      0  AmericaVehicleChinook           1   700 1640
+1005  move       0  AmericaVehicleChinook               1500 2260

@@ -75,6 +75,7 @@
 #include "GameClient/GameText.h"
 #include "GameClient/HeaderTemplate.h"
 #include "GameClient/GlobalLanguage.h"
+#include "GameLogic/GameLogic.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -504,15 +505,23 @@ static Bool parseTooltip( char *token, WinInstanceData *instData,
 	* and adjust to make the screen rect coords relative to any parent
 	* if present */
 //=============================================================================
-// Whether the layout being read is laid out Fit rather than stretched (GlobalData.h, MenuLayout):
-// set by winCreateFromScript for each file, read by parseScreenRect for each window in it.
-static Bool theLayoutFits = FALSE;
+// How the layout being read is put on the screen: set by winCreateFromScript for each file, read by
+// parseScreenRect for each window in it.
+enum LayoutPlacement
+{
+	LAYOUT_STRETCH,		///< stretched to the whole screen, x and y apart, as EA shipped every layout
+	LAYOUT_FIT				///< one scale, the smaller, its 800x600 standing at theLayoutAnchor
+};
+static LayoutPlacement theLayoutPlacement = LAYOUT_STRETCH;
+/// where a fitted layout stands: the same fraction of the screen and of the layout, (0.5,0.5) centred
+static Coord2D theLayoutAnchor = { 0.5f, 0.5f };
 
-// The menus are Fit's: the shell's screens and the dialogs a match opens over the battlefield, all
-// centred on a 4:3 panel of their own.  The rest of Window/ is the battlefield's own furniture - the
-// command bar, which scales itself (ControlBarUniformScale), and windows that hold a screen edge
-// (the general's powers bar, the build tooltip) or follow the battlefield (chat, diplomacy, the
-// general's promotion screen, replay controls, IME) - and stays stretched.
+// The dialogs a match opens over the battlefield are fitted in both interfaces, centred on a 4:3 panel
+// of their own; the shell's screens are stretched (layoutIsShellScreen).  In Reforged the rest of
+// Window/ is the battlefield's own furniture - the command bar, which scales itself
+// (ControlBarUniformScale), and windows that hold a screen edge (the general's powers bar, the build
+// tooltip) or follow the battlefield (chat, diplomacy, the general's promotion screen, replay
+// controls, IME) - and stays stretched.
 // Whether a path starts with this folder name (lower case), any case, then '/' or '\\'.
 static Bool startsWithFolder( const char *path, const char *folder )
 {
@@ -522,14 +531,81 @@ static Bool startsWithFolder( const char *path, const char *folder )
 	return *path == '/' || *path == '\\';
 }
 
-static Bool layoutFits( const char *filename )
+// The Classic interface fits everything at one scale, battlefield furniture and all, except the
+// command bar's own layouts: layoutPanels and ControlBarLayoutUniform divide the loader's stretch
+// back out of those, so they must be given it.
+static Bool barLaysOutItself( const char *filename )
 {
-	if( TheGlobalData == NULL || TheGlobalData->m_menuLayout != MENU_LAYOUT_FIT || filename == NULL )
+	static const char *const own[] = { "controlbar.wnd", "generalsexppoints.wnd", "genpowersshortcutbar" };
+	for( Int i = 0; i < (Int)ARRAY_SIZE( own ); i++ )
+		if( strncasecmp( filename, own[ i ], strlen( own[ i ] ) ) == 0 )
+			return TRUE;
+	return FALSE;
+}
+
+// Where a fitted Classic layout stands.  The match's own furniture keeps the corner EA drew it in, as
+// the bar's radar and selection keep theirs: the build tooltip and the chat line over the radar in the
+// bottom left, diplomacy in the top left, the replay controls over the middle of the bar.  Every other
+// layout, the shell's and the dialogs a match opens, is centred.  Matched on the file's own name,
+// whatever folder it was asked for under.
+static Coord2D classicLayoutAnchor( const char *filename )
+{
+	const char *name = filename;
+	for( const char *c = filename; *c; c++ )
+		if( *c == '/' || *c == '\\' )
+			name = c + 1;
+	static const struct { const char *name; Real x, y; } anchors[] =
+	{
+		{ "controlbarpopupdescription.wnd", 0.0f, 1.0f },
+		{ "ingamechat.wnd", 0.0f, 1.0f },
+		{ "diplomacy.wnd", 0.0f, 0.0f },
+		{ "trainer.wnd", 0.0f, 0.0f },	// the console's cheat panel, drawn as diplomacy is
+		{ "replaycontrol.wnd", 0.5f, 1.0f },
+	};
+	Coord2D anchor = { 0.5f, 0.5f };
+	for( Int i = 0; i < (Int)ARRAY_SIZE( anchors ); i++ )
+		if( strcasecmp( name, anchors[ i ].name ) == 0 )
+		{
+			anchor.x = anchors[ i ].x;
+			anchor.y = anchors[ i ].y;
+		}
+	return anchor;
+}
+
+// The shell's screens, the load screens and the score screen fill the whole screen in both
+// interfaces, stretched as EA shipped them: players took a 4:3 menu between black bars on a wide
+// monitor for a broken game.  Only a match's own furniture and the dialogs it opens are fitted.  The
+// furniture lies outside Menus/ and is built at startup, while the shell is up, so only a Menus/
+// layout asks whether a match is on screen.
+static Bool layoutIsShellScreen( const char *filename )
+{
+	if( !startsWithFolder( filename, "menus" ) )
 		return FALSE;
+	for( const char *c = filename; *c; c++ )
+		if( strncasecmp( c, "loadscreen", 10 ) == 0 || strncasecmp( c, "scorescreen", 11 ) == 0 )
+			return TRUE;
+	// not the shell's own flag: a match's options screen is pushed onto the shell, over the battlefield
+	return !( TheGameLogic && TheGameLogic->isInGame() && !TheGameLogic->isInShellGame() );
+}
+
+static LayoutPlacement layoutPlacement( const char *filename )
+{
+	theLayoutAnchor.x = theLayoutAnchor.y = 0.5f;
+	if( TheGlobalData == NULL || filename == NULL )
+		return LAYOUT_STRETCH;
 	// "Menus/X.wnd" as the shell names them, or the whole "Window\\Menus\\X.wnd"
 	if( startsWithFolder( filename, "window" ) )
 		filename += 7;
-	return startsWithFolder( filename, "menus" );
+	if( layoutIsShellScreen( filename ) )
+		return LAYOUT_STRETCH;
+	if( TheGlobalData->isClassicUI() )
+	{
+		if( barLaysOutItself( filename ) )
+			return LAYOUT_STRETCH;
+		theLayoutAnchor = classicLayoutAnchor( filename );
+		return LAYOUT_FIT;
+	}
+	return startsWithFolder( filename, "menus" ) ? LAYOUT_FIT : LAYOUT_STRETCH;
 }
 
 static Bool parseScreenRect( char *token, char *buffer,
@@ -567,19 +643,20 @@ static Bool parseScreenRect( char *token, char *buffer,
 	Real yScale = (Real)TheDisplay->getHeight() / (Real)createRes.y;
 
 	//
-	// Fit (MenuLayout): one scale both ways, the smaller, with the layout's 4:3 area centred, so a
+	// Fit: one scale both ways, the smaller, with the layout's 4:3 area centred, so a
 	// panel, a logo or a medal keeps the shape it was drawn in.  A window that covers the whole
-	// layout - within two pixels, as a few parents are drawn - still fills the screen: it is the
-	// backdrop, or the parent everything else sits in.  At 4:3 the scales are equal and the offsets
+	// layout - within two pixels, as a few parents are drawn - still fills the screen in Reforged: it
+	// is the backdrop, or the parent everything else sits in.  Classic keeps a match dialog's backdrop
+	// in the box with the rest, over the battlefield.  At 4:3 the scales are equal and the offsets
 	// nothing, and this is the stretch to the pixel.
 	//
 	const Bool fullScreen = screenRegion.lo.x <= 2 && screenRegion.lo.y <= 2 &&
 		screenRegion.hi.x >= createRes.x - 2 && screenRegion.hi.y >= createRes.y - 2;
-	if( theLayoutFits && !fullScreen )
+	if( theLayoutPlacement == LAYOUT_FIT && ( !fullScreen || TheGlobalData->isClassicUI() ) )
 	{
 		const Real scale = min( xScale, yScale );
-		const Real left = ((Real)TheDisplay->getWidth() - (Real)createRes.x * scale) / 2.0f;
-		const Real top = ((Real)TheDisplay->getHeight() - (Real)createRes.y * scale) / 2.0f;
+		const Real left = ((Real)TheDisplay->getWidth() - (Real)createRes.x * scale) * theLayoutAnchor.x;
+		const Real top = ((Real)TheDisplay->getHeight() - (Real)createRes.y * scale) * theLayoutAnchor.y;
 		screenRegion.lo.x = (Int)((Real)screenRegion.lo.x * scale + left);
 		screenRegion.lo.y = (Int)((Real)screenRegion.lo.y * scale + top);
 		screenRegion.hi.x = (Int)((Real)screenRegion.hi.x * scale + left);
@@ -2789,7 +2866,7 @@ GameWindow *GameWindowManager::winCreateFromScript( AsciiString filenameString,
   // Reset the window stack
   resetWindowStack();
 	resetWindowDefaults();
-	theLayoutFits = layoutFits( filename );
+	theLayoutPlacement = layoutPlacement( filename );
 
 	//
 	// get the filename from the parameter, if it doesn't contain a '\' it is

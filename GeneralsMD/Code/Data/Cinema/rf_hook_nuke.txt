@@ -1,0 +1,13 @@
+# Zero Hour Reforged trailer, beat 03 (HK_NUKE): the same match as rf_hook.txt, cut at frame 930, as
+# the particle cannon fires, to a higher view from the south-west looking north-east, so the beam,
+# the nuke's trail, the flash at about frame 1043 and the first second of the fireball fall inside a
+# slow turn. Heading 45 (the 2.4.0 framing) looked at the map's west edge and put a black band
+# across the top left; -45 looks into the map. The first cut is rf_hook's, which keeps the relative
+# zoom measured from the same view.
+#
+#   ...rf_hook's switches... -cinema rf_hook_nuke -video 900 1250 rf_hook_nuke -maxframes 1260
+
+3.0   cut     1000 2100 0.45 -135 14
+31.0  cut     1000 2100 0.75 -45 8
+31.1  orbit   12 8
+42.3  end

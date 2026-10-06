@@ -81,6 +81,7 @@
 #include "GameClient/Drawable.h"
 #include "GameClient/GadgetPushButton.h"
 #include "GameClient/GameClient.h"
+#include "GameClient/GameConsole.h"
 #include "GameClient/GameWindowGlobal.h"
 #include "GameClient/GameWindowID.h"
 #include "GameClient/GUICallbacks.h"
@@ -116,6 +117,7 @@
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/JetAIUpdate.h"
 #include "GameLogic/Weapon.h"
+#include "GameLogic/Armor.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/RankInfo.h"
 #include "GameLogic/GameLogic.h"
@@ -180,7 +182,8 @@ enum
 
 static const Real REACH_OUTLINE_WIDTH = 1.0f;
 
-static const Real BLIND_SPOT_TARGET_HEIGHT = 10.0f;	///< top of a tank, the height a defence has to see over a hill
+static const Real BLIND_SPOT_TARGET_HEIGHT = 7.5f;	///< top of a Rocket Buggy, Combat Cycle or Technical, the lowest
+																										///  thing that raids a base: ground that is clear is clear for all
 static const Real LOS_TERRAIN_SLOP = 0.5f;					///< the terrain line-of-sight test's own fudge
 static const Real BLIND_SPOT_RING_WIDTH = PATHFIND_CELL_SIZE_F * 0.5f;	///< two looks a pathfind cell, so a corner is not stepped over
 
@@ -305,7 +308,7 @@ static Bool kindOfUnitSelection( Drawable *test, void *userData )
 					&& !object->isContained() 
 					&& !object->getDrawable()->isSelected() 
 					&& !object->isEffectivelyDead()
-					&& object->isMassSelectable()
+					&& object->getDrawable()->isMassSelectable()
 					&& !object->isOffMap()
 				)
 		{
@@ -364,7 +367,7 @@ static Bool similarUnitSelection( Drawable *test, void *userData )
 			  && object->isLocallyControlled() 
 				&& !object->isContained()
 				&& !( object->getDrawable()->isSelected() ) 
-				&& object->isMassSelectable() // And only if they can be multiply selected. (otherwise the drawable will be, but the object will not be)
+				&& object->getDrawable()->isMassSelectable() // And only if they can be multiply selected. (otherwise the drawable will be, but the object will not be)
 				&& !object->isOffMap()
 				)
 		{
@@ -1091,7 +1094,13 @@ InGameUI::InGameUI()
 {
 	Int i;
 
-	
+	for( i = 0; i < MAX_MOVE_HINTS; i++ )
+	{
+		m_moveHint[ i ].pos.zero();
+		m_moveHint[ i ].frame = 0;
+	}
+	m_nextMoveHint = 0;
+
   m_inputEnabled = true;
 	m_isDragSelecting = false;
 	m_isFormationDragging = FALSE;
@@ -1123,6 +1132,13 @@ InGameUI::InGameUI()
 	m_messagePointSize = 10;
 	m_messageBold = FALSE;
 	m_messageDelayMS = 5000;
+	for( i = 0; i < CLASSIC_MESSAGES; i++ )
+	{
+		m_classicMessages[ i ].text = NULL;
+		m_classicMessages[ i ].frame = 0;
+		m_classicMessages[ i ].color = 0;
+	}
+	m_classicMessageFadeFrame = 0;
 
 	m_militaryCaptionColor.red   = 200;
 	m_militaryCaptionColor.green = 200;
@@ -1265,10 +1281,12 @@ InGameUI::InGameUI()
 	m_promotionPageLoaded = FALSE;
 	m_promotionShownMs = 0;
 	m_promotionDrawnAt = 0;
+	m_promotionClosing = FALSE;
 	m_quitMenuOverlay = NULL;
 	m_quitMenuPageLoaded = FALSE;
 	m_quitMenuShownMs = 0;
 	m_quitMenuDrawnAt = 0;
+	m_quitMenuClosingMs = -1;
 	m_controlBarPageShown = FALSE;
 	m_tooltipOverlay = NULL;
 	m_tooltipPageLoaded = FALSE;
@@ -1468,8 +1486,10 @@ void InGameUI::init( void )
 		if (TheGlobalLanguageData->m_superweaponCountdownNormalFont.name.isNotEmpty())
 		{	m_superweaponNormalFont = TheGlobalLanguageData->m_superweaponCountdownNormalFont.name;
 			m_superweaponNormalPointSize = TheGlobalLanguageData->m_superweaponCountdownNormalFont.size;
-			// these are overlay text on the battlefield, not panel text - take them down a notch
-			m_superweaponNormalPointSize = max( 8, (m_superweaponNormalPointSize * 4) / 5 );
+			// these are overlay text on the battlefield, not panel text - take them down a notch, except
+			// in the Classic interface, which draws EA's column of them at EA's size
+			if( !TheGlobalData->isClassicUI() )
+				m_superweaponNormalPointSize = max( 8, (m_superweaponNormalPointSize * 4) / 5 );
 			m_superweaponNormalBold = TheGlobalLanguageData->m_superweaponCountdownNormalFont.bold;
 		}
 
@@ -1495,7 +1515,9 @@ void InGameUI::init( void )
 	// the message list is overlay text in the top-left corner of the battlefield, not panel text -
 	// take it down a notch, same as the superweapon countdown above. (line spacing follows the
 	// font height in postDraw(), so the whole stack shrinks with it.)
-	m_messagePointSize = max( 8, (m_messagePointSize * 4) / 5 );
+	// The Classic interface's list is EA's, at EA's size.
+	if( !TheGlobalData->isClassicUI() )
+		m_messagePointSize = max( 8, (m_messagePointSize * 4) / 5 );
 
 	/**@ todo we used to put in the hint spy translator, but it's difficult
 	to order the translators when the code is not centralized so it has
@@ -1596,7 +1618,10 @@ void InGameUI::setRadiusCursor(RadiusCursorType cursorType, const SpecialPowerTe
 			break;
 		case RADIUSCURSOR_GUARD_AREA:
 			// no decal: its size was fixed when the button was pressed, and the wheel changes the radius
-			// after that.  The area pick ring takes its place (isAreaPicking)
+			// after that.  The area pick ring takes its place (isAreaPicking).  Classic has no ring and
+			// no wheel, so it wears EA's decal at the standard range the guard will hold
+			if( TheGlobalData->isClassicUI() )
+				radius = AIGuardMachine::getStdGuardRange(obj);
 			break;
 		case RADIUSCURSOR_FRIENDLY_SPECIALPOWER:
 		case RADIUSCURSOR_OFFENSIVE_SPECIALPOWER:
@@ -1749,29 +1774,54 @@ void InGameUI::evaluateSoloNexus( Drawable *newlyAddedDrawable )
 
 
 //-------------------------------------------------------------------------------------------------
-/** The longest weapon range anything in this template's weapon sets can reach.  Every set is
-	* walked, not just the one an empty condition mask happens to select: a defence whose gun lives
-	* in a conditional set (an upgrade, a garrisoned variant) would otherwise report no range.  The
-	* range is the one the weapon is tested with, which the game trims a little from the INI number. */
+/** Whether a defence shoots this weapon at the ground on its own: the weapon hits ground targets,
+	* and the set lets a target the defence picked for itself choose it, the test the weapon set's
+	* chooser makes for CMD_FROM_AI.  A Patriot's 450 assist missile is NONE there and only fires
+	* when another Patriot asks, a Gattling Cannon's 400 gun is anti-air, and both used to be the
+	* ring while the ground gun that does the shooting reaches 225. */
 //-------------------------------------------------------------------------------------------------
-static Real templateWeaponRange( const ThingTemplate *tmpl )
+static Bool picksGroundTargetsWith( const WeaponTemplateSet &set, WeaponSlotType slot )
 {
+	const WeaponTemplate *wt = set.getNth( slot );
+	if( wt == NULL || ( wt->getAntiMask() & WEAPON_ANTI_GROUND ) == 0 )
+		return FALSE;
+	const UnsignedInt sources = set.getNthCommandSourceMask( slot );
+	return ( sources & ( 1 << CMD_FROM_AI ) ) != 0 || ( sources & CMD_DEFAULT_SWITCH_WEAPON ) != 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The longest range, and the shortest minimum range, of the guns this template shoots at the
+	* ground with (picksGroundTargetsWith).  Every set is walked, not just the one an empty condition
+	* mask happens to select: a defence whose gun lives in a conditional set (an upgrade, a garrisoned
+	* variant) would otherwise report no range.  The range is the one the weapon is tested with,
+	* which the game trims a little from the INI number.  No structure carries a range bonus (battle
+	* plans leave out STRUCTURE), so the bare range is the live one. */
+//-------------------------------------------------------------------------------------------------
+static Real templateWeaponRange( const ThingTemplate *tmpl, Real *minimumRange = NULL )
+{
+	if( minimumRange )
+		*minimumRange = 0.0f;
 	if( tmpl == NULL )
 		return 0.0f;
 
 	const WeaponBonus noBonus;
 	Real range = 0.0f;
+	Real closest = FLT_MAX;
 	const WeaponTemplateSetVector& sets = tmpl->getWeaponTemplateSets();
 	for( WeaponTemplateSetVector::const_iterator si = sets.begin(); si != sets.end(); ++si )
 	{
 		for( Int ws = PRIMARY_WEAPON; ws < WEAPONSLOT_COUNT; ++ws )
 		{
+			if( !picksGroundTargetsWith( *si, (WeaponSlotType)ws ) )
+				continue;
 			const WeaponTemplate *wt = si->getNth( (WeaponSlotType)ws );
-			if( wt )
-				range = max( range, wt->getAttackRange( noBonus ) );
+			range = max( range, wt->getAttackRange( noBonus ) );
+			closest = min( closest, wt->getMinimumAttackRange() );
 		}
 	}
 
+	if( minimumRange && range > 0.0f )
+		*minimumRange = closest;
 	return range;
 }
 
@@ -1786,11 +1836,12 @@ static Real templateWeaponRange( const ThingTemplate *tmpl )
 	*
 	* Only a structure the INI marks SPAWNS_ARE_THE_WEAPONS counts its spawns.  A GLA supply stash
 	* spawns workers too, and a worker carries a mine-disarming weapon, so reading every spawner's
-	* spawns put a reach circle round the stash. */
+	* spawns put a reach circle round the stash.  Spawns walk about the site, so they get no
+	* minimum range hole. */
 //-------------------------------------------------------------------------------------------------
-static Real templatePlacementRange( const ThingTemplate *tmpl )
+static Real templatePlacementRange( const ThingTemplate *tmpl, Real *minimumRange = NULL )
 {
-	Real range = templateWeaponRange( tmpl );
+	Real range = templateWeaponRange( tmpl, minimumRange );
 	if( range > 0.0f || tmpl == NULL || TheThingFactory == NULL )
 		return range;
 	if( !tmpl->isKindOf( KINDOF_SPAWNS_ARE_THE_WEAPONS ) )
@@ -1832,6 +1883,16 @@ static Real templateReach( const ThingTemplate *tmpl )
 	if( !( range > 0.0f && range <= FLT_MAX ) )
 		return 0.0f;
 	return range + tmpl->getTemplateGeometryInfo().getBoundingCircleRadius();
+}
+
+/// the hole in the middle of templateReach that a minimum range leaves (a Fire Base's 50, a Strategy
+/// Center's 100), from the centre the same way; 0 for a defence that shoots at its own feet
+static Real templateHole( const ThingTemplate *tmpl )
+{
+	Real minimumRange = 0.0f;
+	if( templatePlacementRange( tmpl, &minimumRange ) <= 0.0f || minimumRange <= 0.0f )
+		return 0.0f;
+	return minimumRange + tmpl->getTemplateGeometryInfo().getBoundingCircleRadius();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1903,6 +1964,9 @@ enum
 static void readHtmlPage( const char *path, std::string &page )
 {
 	page.clear();
+	// the Classic interface is EA's, and every page here has EA's windows, or nothing, to fall back on
+	if( TheGlobalData->isClassicUI() )
+		return;
 	File *file = TheFileSystem->openFile( path, File::READ | File::BINARY );
 	if( file == NULL )
 	{
@@ -1934,13 +1998,41 @@ static Bool stripSwitchedOff( Bool GlobalData::* flag )
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Labels the string table had, by {{text:Label}} name, already turned into UTF-8.  The game's own
+	* table is read once at startup and searched before the map's, so a label found there answers the
+	* same all session; one only the map's map.str has answers the same until reset() at the match's
+	* end, the resetAll that also drops the map's table.  A missing label is asked again every time.
+	* ponytail: map.str reloaded mid-match (the map cache's scan) would leave a map-only label stale;
+	* no page asks for one. */
+static std::map< std::string, std::string > s_gameTexts;
+
+/** What drawProductionStrip's last sweep was of, and how many slots it filled. */
+static struct
+{
+	Bool valid;
+	UnsignedInt frame;
+	const Player *player;
+	ObjectID selected;
+	Int count;
+	Int total;
+} s_stripGather;
+
 /** {{text:Label}}: a string table label, in the player's language. */
 //-------------------------------------------------------------------------------------------------
 static Bool lookupGameText( const std::string &name, std::string &value )
 {
 	if( name.compare( 0, TEXT_LOOKUP.size(), TEXT_LOOKUP ) != 0 )
 		return FALSE;
-	value = WideCharStringToMultiByte( TheGameText->fetch( name.substr( TEXT_LOOKUP.size() ).c_str() ).str() );
+	std::map< std::string, std::string >::const_iterator found = s_gameTexts.find( name );
+	if( found != s_gameTexts.end() )
+	{
+		value = found->second;
+		return TRUE;
+	}
+	Bool exists = FALSE;
+	value = WideCharStringToMultiByte( TheGameText->fetch( name.substr( TEXT_LOOKUP.size() ).c_str(), &exists ).str() );
+	if( exists )
+		s_gameTexts[ name ] = value;
 	return TRUE;
 }
 
@@ -2575,7 +2667,7 @@ void InGameUI::drawSpectatorPage( void )
 	for( std::set< std::string >::const_iterator name = m_spectatorFlipped.begin(); name != m_spectatorFlipped.end(); ++name )
 		values[ FLIP_ACTION + *name ] = "flipped";
 
-	m_spectatorOverlay->setPage( HtmlTemplate_expand( m_spectatorPage, values, m_spectatorLists, lookupGameText ) );
+	m_spectatorOverlay->setPage( m_spectatorPage, values, m_spectatorLists, lookupGameText );
 	m_spectatorOverlay->hover( TheMouse->getMouseStatus()->pos );
 	m_spectatorOverlay->draw();
 	m_spectatorPageShown = TRUE;
@@ -2775,13 +2867,14 @@ static void fillSpanRows( std::vector< std::vector< ICoord2D > > &rows, Color co
 //-------------------------------------------------------------------------------------------------
 /** A defence's reach cut into the blind-spot polar grid: sector ray covers the angles from ray to
 	* ray + 1, ring ring the distances from ring to ring + 1 ring widths.  reach is how far each sector
-	* goes, longer down a slope, and radius the longest of them.  blocked is empty for a defence that
-	* shoots whatever is in range. */
+	* goes, longer down a slope, and radius the longest of them; nothing nearer than hole is hit
+	* either.  blocked is empty for a defence that shoots whatever is in range. */
 //-------------------------------------------------------------------------------------------------
 struct ReachView
 {
 	Coord3D center;
 	Real radius;
+	Real hole;
 	std::vector< Real > reach;
 	Int rings;
 	std::vector< Bool > blocked;
@@ -2791,6 +2884,7 @@ static void traceReachView( ReachView &view, const ThingTemplate *tmpl )
 {
 	const Real flatReach = templateReach( tmpl );
 	const Real range = templatePlacementRange( tmpl );
+	view.hole = templateHole( tmpl );
 	view.reach.resize( BLIND_SPOT_RAYS );
 	view.radius = 0.0f;
 	for( Int ray = 0; ray < BLIND_SPOT_RAYS; ray++ )
@@ -2803,6 +2897,12 @@ static void traceReachView( ReachView &view, const ThingTemplate *tmpl )
 static Bool templateNeedsLineOfSight( const ThingTemplate *tmpl )
 {
 	return TheAI->getAiData()->m_attackUsesLineOfSight && tmpl->isKindOf( KINDOF_ATTACK_NEEDS_LINE_OF_SIGHT );
+}
+
+/// ground inside the reach that the defence still cannot hit: behind a hill or a building, or too close
+static Bool templateHasBlindSpots( const ThingTemplate *tmpl )
+{
+	return templateNeedsLineOfSight( tmpl ) || templateHole( tmpl ) > 0.0f;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2826,9 +2926,10 @@ Int blindSpotRingCount( Real radius, Real mapSpan )
 /** Fill in which cells of the grid a defence cannot see from eyeZ.  Along one sector the walk keeps
 	* the steepest terrain seen so far, which is the horizon: a target whose top sits under that slope
 	* is behind a hill.  Everything from the first building cell outwards is behind that building, the
-	* building's own ground included; the defence's own cells, self, are not in its way. */
+	* building's own ground included; the defence's own cells, self, are not in its way.  Without
+	* lineOfSight only the minimum range hole is filled in. */
 //-------------------------------------------------------------------------------------------------
-static void lookRoundReach( ReachView &view, Real eyeZ, ObjectID self )
+static void lookRoundReach( ReachView &view, Real eyeZ, ObjectID self, Bool lineOfSight )
 {
 	Region3D extent;
 	extent.zero();
@@ -2859,8 +2960,9 @@ static void lookRoundReach( ReachView &view, Real eyeZ, ObjectID self )
 			const Bool behindHill = targetSlope < horizonSlope;
 			horizonSlope = max( horizonSlope, ( groundZ - LOS_TERRAIN_SLOP - eyeZ ) / along );
 
-			const Bool inReach = ( ring + 0.5f ) * BLIND_SPOT_RING_WIDTH < view.reach[ ray ];
-			view.blocked[ ray * view.rings + ring ] = inReach && ( behindBuilding || behindHill );
+			const Real middle = ( ring + 0.5f ) * BLIND_SPOT_RING_WIDTH;
+			const Bool unseen = lineOfSight && ( behindBuilding || behindHill );
+			view.blocked[ ray * view.rings + ring ] = middle < view.reach[ ray ] && ( unseen || middle < view.hole );
 		}
 	}
 }
@@ -2877,7 +2979,7 @@ static Bool reachViewHits( const ReachView &view, Real x, Real y )
 	if( angle < 0.0f )
 		angle += 2.0f * PI;
 	const Int ray = min( (Int)( angle * BLIND_SPOT_RAYS / ( 2.0f * PI ) ), BLIND_SPOT_RAYS - 1 );
-	if( distance >= view.reach[ ray ] )
+	if( distance >= view.reach[ ray ] || distance < view.hole )
 		return FALSE;
 	if( view.blocked.empty() )
 		return TRUE;
@@ -2965,7 +3067,7 @@ static void buildBlindSpotShade( BlindSpotShade &shade, const ThingTemplate *tmp
 {
 	shade.view.center = center;
 	traceReachView( shade.view, tmpl );
-	lookRoundReach( shade.view, eyeZ, self );
+	lookRoundReach( shade.view, eyeZ, self, templateNeedsLineOfSight( tmpl ) );
 
 	const Int cornerRings = shade.view.rings + 1;
 	shade.corners.resize( BLIND_SPOT_RAYS * cornerRings );
@@ -3057,7 +3159,7 @@ static const ReachView &guardView( const Object *obj )
 	guard.rings = 0;
 	traceReachView( guard, obj->getTemplate() );
 	if( templateNeedsLineOfSight( obj->getTemplate() ) )
-		lookRoundReach( guard, obj->getPosition()->z + obj->getGeometryInfo().getMaxHeightAbovePosition(), obj->getID() );
+		lookRoundReach( guard, obj->getPosition()->z + obj->getGeometryInfo().getMaxHeightAbovePosition(), obj->getID(), TRUE );
 	return guard;
 }
 
@@ -3148,12 +3250,13 @@ static const BlindSpotShade &selectedBlindSpotShade( const Object *obj )
 	* own ground included.  The blocked cells are projected corner by corner onto the terrain and
 	* filled as one shape, row by row, so the shade follows the ground and has no seams in it.
 	*
-	* A Stinger Site, a bunker and anything else that does not need the line of sight gets no shading,
-	* because none of that ground is out of its reach. */
+	* A defence with a minimum range, a Fire Base or a Strategy Center, gets the ground too close to
+	* fire at shaded the same way.  A Stinger Site, a bunker and anything else that needs neither gets
+	* no shading, because none of that ground is out of its reach. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawBlindSpots( void )
 {
-	if( m_pendingPlaceType != NULL && m_placementRangeRingUp && templateNeedsLineOfSight( m_pendingPlaceType ) )
+	if( m_pendingPlaceType != NULL && m_placementRangeRingUp && templateHasBlindSpots( m_pendingPlaceType ) )
 	{
 		refreshStructureKeys();
 		Coord3D center = *m_placeIcon[ 0 ]->getPosition();
@@ -3166,7 +3269,7 @@ void InGameUI::drawBlindSpots( void )
 		fillBlindSpotShade( pending );
 	}
 
-	if( !TheGlobalData->m_showPlacementRangeRing )
+	if( !TheGlobalData->m_showPlacementRangeRing || TheGlobalData->isClassicUI() )
 		return;
 
 	// a selected defence shows its own blind spots only, not what its neighbours cover for it
@@ -3175,7 +3278,7 @@ void InGameUI::drawBlindSpots( void )
 		const Object *obj = (*it)->getObject();
 		if( obj == NULL || !obj->isKindOf( KINDOF_STRUCTURE ) || templateReach( obj->getTemplate() ) <= 0.0f )
 			continue;
-		if( !templateNeedsLineOfSight( obj->getTemplate() ) || !reachRevealedToLocal( obj ) )
+		if( !templateHasBlindSpots( obj->getTemplate() ) || !reachRevealedToLocal( obj ) )
 			continue;
 
 		refreshStructureKeys();
@@ -3367,8 +3470,9 @@ static void drawReachSegment( const ReachSegment &segment, const Player *owner )
 /** While a structure is on the cursor, the reach of every armed building in sight: yours, your
 	* allies', and the one on the cursor if it is armed.  An enemy's is never drawn.
 	*
-	* Each circle is exactly the distance a shot is allowed at: the weapon range the game tests with,
-	* measured from the edge of the shooter's bounding circle, so from the centre it is that range
+	* Each circle is exactly the distance a shot is allowed at: the range the game tests with of the
+	* guns the building fires at the ground on its own (picksGroundTargetsWith), measured from the
+	* edge of the shooter's bounding circle, so from the centre it is that range
 	* plus the bounding radius.  Each is drawn in its owner's colour.  Where one player's circles
 	* overlap they are one area: the thin outline leaves out every stretch of a circle that runs inside
 	* another of the same player's, cutting it where the two cross.  An ally's building under fog is
@@ -3376,7 +3480,7 @@ static void drawReachSegment( const ReachSegment &segment, const Player *owner )
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawPlacementReach( void )
 {
-	if( !TheGlobalData->m_showPlacementRangeRing )
+	if( !TheGlobalData->m_showPlacementRangeRing || TheGlobalData->isClassicUI() )
 		return;
 
 	// on the cursor, or clicked: a selected armed building brings the circles up just the same
@@ -3455,7 +3559,7 @@ void InGameUI::handleBuildPlacements( void )
 		// so a defense can be sited against what it actually covers. The radius comes off the
 		// template - there is no Object yet - and drawPlacementReach draws it under the cursor.
 		//
-		if( TheGlobalData->m_showPlacementRangeRing )
+		if( TheGlobalData->m_showPlacementRangeRing && !TheGlobalData->isClassicUI() )
 		{
 			m_placementRingRadius = templateReach( m_pendingPlaceType );
 			m_placementRangeRingUp = ( m_placementRingRadius > 0.0f );
@@ -3997,8 +4101,12 @@ void InGameUI::update( void )
 		{
 			UnicodeString buffer;
 
-			buffer.format( TheGameText->fetch( perMinute ? "GUI:ControlBarMoneyEarningMinute" : "GUI:ControlBarMoneyEarning" ),
-										 currentMoney, currentEarning );
+			// Classic's readout is EA's: the money and nothing beside it
+			if( TheGlobalData->isClassicUI() )
+				buffer.format( TheGameText->fetch( "GUI:ControlBarMoneyDisplay" ), currentMoney );
+			else
+				buffer.format( TheGameText->fetch( perMinute ? "GUI:ControlBarMoneyEarningMinute" : "GUI:ControlBarMoneyEarning" ),
+											 currentMoney, currentEarning );
 			GadgetStaticTextSetText( moneyWin, buffer );
 			m_lastMoneyDisplayed = currentMoney;
 			m_lastEarningDisplayed = currentEarning;
@@ -4141,10 +4249,22 @@ void InGameUI::unregisterWindowLayout( WindowLayout *layout )
 //-------------------------------------------------------------------------------------------------
 void InGameUI::reset( void )
 {
+	for( Int i = 0; i < MAX_MOVE_HINTS; i++ )
+	{
+		m_moveHint[ i ].pos.zero();
+		m_moveHint[ i ].frame = 0;
+	}
+	m_nextMoveHint = 0;
+
+	// the flags went with the match's drawables, and their ids are handed out again from the start
+	m_orderFlagIDs.clear();
+
 	m_isQuitMenuVisible = FALSE;
 	m_scoreboardOpen = FALSE;
 	m_scoreboardPageLoaded = FALSE;
 	m_scoreboardHtml.clear();
+	s_gameTexts.clear();				// the map's string table goes with the map
+	s_stripGather.valid = FALSE;	// and the strip's sweep with the match it was of
 	m_earnedReadingCount = 0;		// a new match and a loaded save both come through here
 	m_controlBarPageLoaded = FALSE;
 	m_netPageLoaded = FALSE;
@@ -4268,7 +4388,150 @@ void InGameUI::reset( void )
 void InGameUI::freeMessageResources( void )
 {
 	m_feedLines.clear();
+	freeClassicMessages();
 }  // end freeMessageResources
+
+//-------------------------------------------------------------------------------------------------
+void InGameUI::freeClassicMessages( void )
+{
+	for( Int i = 0; i < CLASSIC_MESSAGES; i++ )
+	{
+		if( m_classicMessages[ i ].text )
+			TheDisplayStringManager->freeDisplayString( m_classicMessages[ i ].text );
+		m_classicMessages[ i ].text = NULL;
+		m_classicMessages[ i ].frame = 0;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** EA's InGameUI::addMessageText: the oldest line falls off the end, the new one goes in at the top
+	* in white or grey by turns, or in the colour it was given. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::addClassicMessage( const UnicodeString &text, const Color *color )
+{
+	const Color color1 = color ? ( *color | GameMakeColor( 0, 0, 0, 255 ) ) : m_messageColor1;
+	const Color color2 = color ? ( *color | GameMakeColor( 0, 0, 0, 255 ) ) : m_messageColor2;
+
+	if( m_classicMessages[ CLASSIC_MESSAGES - 1 ].text )
+		TheDisplayStringManager->freeDisplayString( m_classicMessages[ CLASSIC_MESSAGES - 1 ].text );
+	for( Int i = CLASSIC_MESSAGES - 1; i >= 1; i-- )
+		m_classicMessages[ i ] = m_classicMessages[ i - 1 ];
+
+	ClassicMessage &added = m_classicMessages[ 0 ];
+	added.frame = TheGameLogic->getFrame();
+	added.text = TheDisplayStringManager->newDisplayString();
+	added.text->setFont( TheFontLibrary->getFont( m_messageFont,
+		TheGlobalLanguageData->adjustFontSize( m_messagePointSize ), m_messageBold ) );
+	added.text->setText( text );
+	added.color = ( m_classicMessages[ 1 ].text == NULL || m_classicMessages[ 1 ].color == color2 ) ? color1 : color2;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** EA's fade, once a logic frame: a line loses alpha by a hundredth of its age every frame from the
+	* start (MessageDelayMS divided by the frame rate and by a thousand is 0 in EA's arithmetic), so a
+	* line is gone about seven seconds after it came. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::fadeClassicMessages( void )
+{
+	const UnsignedInt now = TheGameLogic->getFrame();
+	if( now == m_classicMessageFadeFrame )
+		return;
+	m_classicMessageFadeFrame = now;
+
+	const UnsignedInt timeout = m_messageDelayMS / LOGICFRAMES_PER_SECOND / 1000;
+	for( Int i = CLASSIC_MESSAGES - 1; i >= 0; i-- )
+	{
+		ClassicMessage &line = m_classicMessages[ i ];
+		if( line.text == NULL || now - line.frame <= timeout )
+			continue;
+		UnsignedByte r, g, b, a;
+		GameGetColorComponents( line.color, &r, &g, &b, &a );
+		const Int amount = REAL_TO_INT( ( now - line.frame ) * 0.01f );
+		a = ( a - amount < 0 ) ? 0 : a - amount;
+		line.color = GameMakeColor( r, g, b, a );
+		if( a == 0 )
+		{
+			TheDisplayStringManager->freeDisplayString( line.text );
+			line.text = NULL;
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Where an x EA gave as a fraction of its 800 wide screen lands at the HUD's one scale: as far from
+	* the nearer side edge as EA's was, so a column EA put on the right stays on the right of a 32:9
+	* screen.  At 4:3 this is EA's own position. */
+//-------------------------------------------------------------------------------------------------
+static Int hudEdgeX( Real fraction )
+{
+	const Real s = ControlBarUniformScale();
+	if( fraction < 0.5f )
+		return REAL_TO_INT( fraction * 800.0f * s );
+	return TheDisplay->getWidth() - REAL_TO_INT( ( 1.0f - fraction ) * 800.0f * s );
+}
+
+//-------------------------------------------------------------------------------------------------
+void InGameUI::drawClassicMessages( void )
+{
+	fadeClassicMessages();
+	if( !m_messagesOn )
+		return;
+
+	// the screen's own top left corner, not the menus' 4:3 box
+	const Int x = m_messagePosition.x;
+	Int y = m_messagePosition.y;
+	for( Int i = CLASSIC_MESSAGES - 1; i >= 0; i-- )
+	{
+		ClassicMessage &line = m_classicMessages[ i ];
+		if( line.text == NULL )
+			continue;
+		UnsignedByte r, g, b, a;
+		GameGetColorComponents( line.color, &r, &g, &b, &a );
+		line.text->draw( x, y, line.color, GameMakeColor( 0, 0, 0, a ) );
+		y += line.text->getFont()->height;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** EA's countdown line: the power's name right-aligned to x and its clock after it, in its owner's
+	* colour, the ready one bold and flashing.  The text is only set again when the second, the
+	* readiness or a forced refresh changes it. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::drawClassicSuperweapon( SuperweaponInfo *info, const AsciiString &templateName, Bool isReady,
+																			 Int readySecs, Int x, Int *y )
+{
+	if( readySecs != (Int)info->m_timestamp || isReady != info->m_ready || info->m_forceUpdateText )
+	{
+		if( isReady )
+			info->setFont( m_superweaponReadyFont, m_superweaponReadyPointSize, m_superweaponReadyBold );
+		else if( info->m_timestamp == 0 )
+			info->setFont( m_superweaponNormalFont, m_superweaponNormalPointSize, m_superweaponNormalBold );
+		info->m_forceUpdateText = false;
+		info->m_ready = isReady;
+		info->m_timestamp = readySecs;
+		AsciiString label;
+		label.format( "GUI:%s", templateName.str() );
+		UnicodeString name, time;
+		name.format( u"%ls: ", TheGameText->fetch( label.str() ).str() );
+		time.format( u"%d:%2.2d", readySecs / 60, readySecs % 60 );
+		info->setText( name, time );
+	}
+
+	Color color = 0;
+	if( isReady && m_superweaponFlashDuration != 0.0f )
+	{
+		if( TheGameLogic->getFrame() >= m_superweaponLastFlashFrame + (Int)m_superweaponFlashDuration )
+		{
+			m_superweaponUsedFlashColor = !m_superweaponUsedFlashColor;
+			m_superweaponLastFlashFrame = TheGameLogic->getFrame();
+		}
+		color = m_superweaponUsedFlashColor ? 0 : m_superweaponFlashColor;
+	}
+	const Color drop = GameMakeColor( 0, 0, 0, 255 );
+	info->drawName( x, *y, color, drop );
+	info->drawTime( x, *y, color, drop );
+	*y += REAL_TO_INT( info->getHeight() );
+}
 
 //-------------------------------------------------------------------------------------------------
 /** Same as the unicode message method, but this takes an ascii string which is assumed
@@ -4333,6 +4596,11 @@ void InGameUI::message( UnicodeString format, ... )
 //-------------------------------------------------------------------------------------------------
 void InGameUI::addMessageText( const UnicodeString& formattedMessage )
 {
+	if( TheGlobalData->isClassicUI() )
+	{
+		addClassicMessage( formattedMessage, NULL );
+		return;
+	}
 	HtmlValues line;
 	line[ "kind" ] = "note";
 	line[ "before" ] = WideCharStringToMultiByte( formattedMessage.str() );
@@ -4345,6 +4613,13 @@ void InGameUI::addMessageText( const UnicodeString& formattedMessage )
 //-------------------------------------------------------------------------------------------------
 void InGameUI::playerMessage( Player *player, const UnicodeString &text )
 {
+	// EA wrote these lines in the player's colour
+	if( TheGlobalData->isClassicUI() )
+	{
+		const Color color = player->getPlayerColor();
+		addClassicMessage( text, &color );
+		return;
+	}
 	HtmlValues line = spectatorHead( player );
 	line[ "kind" ] = "player";
 	line[ "portrait" ] = line[ "image" ];
@@ -4395,6 +4670,9 @@ static std::string buttonName( const CommandButton *button )
 //-------------------------------------------------------------------------------------------------
 void InGameUI::feedAct( Player *player, const Image *cameo, const std::string &what, const char *tag, const char *label )
 {
+	// the feed's own lines, a power fired or a promotion bought: EA's list never carried them
+	if( TheGlobalData->isClassicUI() )
+		return;
 	HtmlValues line = spectatorHead( player );
 	line[ "kind" ] = "act";
 	line[ "portrait" ] = line[ "image" ];
@@ -4527,7 +4805,7 @@ void InGameUI::drawAlertPage( void )
 	values[ "top" ] = std::to_string( REAL_TO_INT_FLOOR( m_topBarBottom / scale + 0.5f ) + ALERT_GAP );
 	values[ "whose" ] = alert.whose;
 	values[ "text" ] = alert.text;
-	m_alertOverlay->setPage( HtmlTemplate_expand( m_alertPage, values, HtmlLists(), lookupGameText ) );
+	m_alertOverlay->setPage( m_alertPage, values, HtmlLists(), lookupGameText );
 
 	const UnsignedInt left = alertHoldMs( m_alerts.size() - 1 ) - ( nowMs - m_alertStartMs );
 	m_alertOverlay->setAlpha( left < ALERT_FADE_MS ? (Int)( ALERT_OPAQUE * left / ALERT_FADE_MS ) : ALERT_OPAQUE );
@@ -4675,7 +4953,7 @@ void InGameUI::drawFeed( void )
 
 	HtmlValues values;
 	values[ "top" ] = std::to_string( REAL_TO_INT_FLOOR( feedTop() / ControlBarHudPageScale() ) );
-	m_feedOverlay->setPage( HtmlTemplate_expand( m_feedPage, values, lists, lookupGameText ) );
+	m_feedOverlay->setPage( m_feedPage, values, lists, lookupGameText );
 	m_feedOverlay->draw();
 }
 
@@ -4701,6 +4979,15 @@ enum
 //-------------------------------------------------------------------------------------------------
 void InGameUI::chatMessage( Player *player, const UnicodeString &text )
 {
+	// EA's: "[name] text" in the message list, in the sender's colour
+	if( TheGlobalData->isClassicUI() )
+	{
+		UnicodeString said;
+		said.format( u"[%ls] %ls", player->getPlayerDisplayName().str(), text.str() );
+		const Color color = player->getPlayerColor();
+		addClassicMessage( said, &color );
+		return;
+	}
 	FeedLine line;
 	line.values = spectatorHead( player );
 	line.values[ "text" ] = WideCharStringToMultiByte( text.str() );
@@ -4720,7 +5007,8 @@ void InGameUI::chatMessage( Player *player, const UnicodeString &text )
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawChat( void )
 {
-	if( !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+	// Classic: EA's InGameChat.wnd draws itself where it was laid out, and the lines are messages
+	if( !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() || TheGlobalData->isClassicUI() )
 		return;
 
 	// shut, the chat is the talk around its newest line: every line that came within CHAT_LINE_FRAMES
@@ -4768,7 +5056,7 @@ void InGameUI::drawChat( void )
 	values[ "typed" ] = WideCharStringToMultiByte( typed.str() );
 	values[ "caret" ] = frame / CHAT_CARET_FRAMES % 2 == 0 ? "lit" : "";
 	values[ "audience" ] = WideCharStringToMultiByte( audience.str() );
-	m_chatOverlay->setPage( HtmlTemplate_expand( m_chatPage, values, lists, lookupGameText ) );
+	m_chatOverlay->setPage( m_chatPage, values, lists, lookupGameText );
 	m_chatOverlay->setAlpha( open ? OPAQUE_PAGE : min( (Int)OPAQUE_PAGE, (Int)( newestUntil - frame ) * OPAQUE_PAGE / CHAT_FADE_FRAMES ) );
 	m_chatOverlay->draw();
 }
@@ -5014,7 +5302,8 @@ Int InGameUI::allyPlayerMask( void ) const
 //-------------------------------------------------------------------------------------------------
 void InGameUI::sendLocalAllyCursor( void )
 {
-	if( !TheGlobalData->m_showAllyCursors )
+	// the game as shipped sent no cursor to anybody
+	if( !TheGlobalData->m_showAllyCursors || TheGlobalData->isClassicUI() )
 		return;
 
 	// TheNetwork is the whole test for "is this a game with other people in it"
@@ -5117,7 +5406,20 @@ void InGameUI::updateFormationHints( void )
 	* attack by handing its state machine to the takeoff sequence and putting the order aside, so
 	* neither the state id nor the goal names the thing the player pointed at until it is flying. */
 //-------------------------------------------------------------------------------------------------
-Bool InGameUI::getHeldAircraftOrder( const Object *obj, OrderHintKind& kind, Coord3D& to ) const
+//-------------------------------------------------------------------------------------------------
+/** Where an order aimed at a unit or building ends: just over the top of it.  The joint EA's rally
+	* line puts on the ground sits inside the model there and the model hides it, and at the top of
+	* the geometry a turret still covers it. */
+//-------------------------------------------------------------------------------------------------
+static Coord3D orderTargetSpot( const Object *target )
+{
+	const Real CLEARANCE = 8.0f;
+	Coord3D spot = *target->getPosition();
+	spot.z += target->getGeometryInfo().getMaxHeightAbovePosition() + CLEARANCE;
+	return spot;
+}
+
+Bool InGameUI::getHeldAircraftOrder( const Object *obj, OrderHintKind& kind, Coord3D& to, Bool& onObject ) const
 {
 	const AIUpdateInterface *ai = obj->getAIUpdateInterface();
 	const JetAIUpdate *jet = ai->getJetAIUpdate();
@@ -5165,12 +5467,13 @@ Bool InGameUI::getHeldAircraftOrder( const Object *obj, OrderHintKind& kind, Coo
 			return FALSE;
 	}
 
-	if( targetID != INVALID_ID )
+	onObject = ( targetID != INVALID_ID );
+	if( onObject )
 	{
 		const Object *target = TheGameLogic->findObjectByID( targetID );
 		if( target == NULL )
 			return FALSE;
-		to = *target->getPosition();
+		to = orderTargetSpot( target );
 	}
 	else
 	{
@@ -5185,8 +5488,9 @@ Bool InGameUI::getHeldAircraftOrder( const Object *obj, OrderHintKind& kind, Coo
 	* so the machine's goal position is the origin and reading it drew every guard marker in the
 	* bottom left corner of the map.  What the unit is guarding is kept on the AI itself. */
 //-------------------------------------------------------------------------------------------------
-static Bool getGuardedSpot( const AIUpdateInterface *ai, Coord3D& spot )
+static Bool getGuardedSpot( const AIUpdateInterface *ai, Coord3D& spot, Bool& onObject )
 {
+	onObject = ( ai->getGuardTargetType() == GUARDTARGET_OBJECT );
 	switch( ai->getGuardTargetType() )
 	{
 		case GUARDTARGET_LOCATION:
@@ -5198,7 +5502,7 @@ static Bool getGuardedSpot( const AIUpdateInterface *ai, Coord3D& spot )
 			const Object *guarded = TheGameLogic->findObjectByID( ai->getGuardObject() );
 			if( guarded == NULL )
 				return FALSE;
-			spot = *guarded->getPosition();
+			spot = orderTargetSpot( guarded );
 			return TRUE;
 		}
 
@@ -5227,13 +5531,106 @@ void InGameUI::updateOrderHints( void )
 	if( m_isFormationDragging )
 	{
 		updateFormationHints();
+		markOrderHints();
 		m_drawnOrderHints = m_orderHints;
-		return;
+	}
+	else
+	{
+		collectOrderHints();
+		numberOrderHints();
+		markOrderHints();
+		bunchOrderHints();
 	}
 
-	collectOrderHints();
-	numberOrderHints();
-	bunchOrderHints();
+	updateOrderFlags();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** EA's rally point says "go here" with a flag and marks every bend of its line with a joint.  An
+	* order reads the same way: the flag goes on the last bit of ground a unit is sent to, and a unit
+	* or building it is sent at gets the joint instead, so a flag never stands on a tank. */
+//-------------------------------------------------------------------------------------------------
+InGameUI::OrderHintMark InGameUI::markForOrderHint( OrderHintKind kind, Bool onObject, Bool lastPoint )
+{
+	if( kind == ORDER_HINT_ABILITY || kind == ORDER_HINT_UPGRADE )
+		return ORDER_MARK_NONE;
+	return ( lastPoint && !onObject ) ? ORDER_MARK_FLAG : ORDER_MARK_JOINT;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A unit's hints sit together, in the order it gets to them.  The flag goes on the last of them
+	* that is ground, even when an attack on something is queued after it. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::markOrderHints( void )
+{
+	size_t first = 0;
+	while( first < m_orderHints.size() )
+	{
+		size_t end = first + 1;
+		while( end < m_orderHints.size() && m_orderHints[ end ].owner == m_orderHints[ first ].owner )
+			++end;
+
+		size_t last = end;
+		for( size_t i = first; i < end; ++i )
+			if( markForOrderHint( m_orderHints[ i ].kind, m_orderHints[ i ].onObject, TRUE ) == ORDER_MARK_FLAG )
+				last = i;
+
+		for( size_t i = first; i < end; ++i )
+			m_orderHints[ i ].mark = markForOrderHint( m_orderHints[ i ].kind, m_orderHints[ i ].onObject, i == last );
+
+		first = end;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** EA's rally flag (the RallyPointMarker the control bar stands on a building's rally point) on
+	* every flagged destination.  Client-only drawables, kept from frame to frame and moved, so the
+	* flag's flutter does not restart every frame.  Reforged only; Classic has EA's move ring. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::updateOrderFlags( void )
+{
+	size_t used = 0;
+	const ThingTemplate *flagTemplate = TheGlobalData->isClassicUI() ? NULL : TheThingFactory->findTemplate( "RallyPointMarker" );
+	Player *player = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
+	if( flagTemplate && player )
+	{
+		const Color color = ( TheGlobalData->m_timeOfDay == TIME_OF_DAY_NIGHT ) ? player->getPlayerNightColor() : player->getPlayerColor();
+		for( std::vector<OrderHint>::const_iterator it = m_drawnOrderHints.begin(); it != m_drawnOrderHints.end(); ++it )
+		{
+			if( it->mark != ORDER_MARK_FLAG )
+				continue;
+
+			Drawable *flag = NULL;
+			if( used < m_orderFlagIDs.size() )
+				flag = TheGameClient->findDrawableByID( m_orderFlagIDs[ used ] );
+			if( flag == NULL )
+			{
+				flag = TheThingFactory->newDrawable( flagTemplate );
+				if( flag == NULL )
+					break;
+				flag->setDrawableStatus( DRAWABLE_STATUS_NO_SAVE );
+				if( used < m_orderFlagIDs.size() )
+					m_orderFlagIDs[ used ] = flag->getID();
+				else
+					m_orderFlagIDs.push_back( flag->getID() );
+			}
+
+			Coord3D spot = it->to;
+			spot.z = TheTerrainLogic->getGroundHeight( spot.x, spot.y );
+			flag->setPosition( &spot );
+			flag->setOrientation( TheGlobalData->m_downwindAngle );
+			flag->setIndicatorColor( color );
+			++used;
+		}
+	}
+
+	while( m_orderFlagIDs.size() > used )
+	{
+		Drawable *flag = TheGameClient->findDrawableByID( m_orderFlagIDs.back() );
+		if( flag )
+			TheGameClient->destroyDrawable( flag );
+		m_orderFlagIDs.pop_back();
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5266,6 +5663,7 @@ void InGameUI::collectOrderHints( void )
 		hint.owner = obj->getID();
 		Coord3D resolvedGoal;
 		Bool goalResolved = FALSE;
+		Bool resolvedOnObject = FALSE;		// the resolved goal is a unit or building, not ground
 		Bool legsDrawn = FALSE;		// the order drew its own threads, and the shift list follows on from them
 
 		// a capture walks its man to the door with a plain move of its own and then stands him idle
@@ -5343,12 +5741,14 @@ void InGameUI::collectOrderHints( void )
 				{
 					hint.kind = ( ai->getTunnelTripEnd() == TUNNEL_TRIP_ATTACK_MOVE ) ? ORDER_HINT_ATTACK_MOVE : ORDER_HINT_MOVE;
 					hint.from = *obj->getPosition();
-					hint.to = *entrance->getPosition();
+					hint.to = orderTargetSpot( entrance );
+					hint.onObject = TRUE;
 					addOrderHint( hint, previous );
 
 					const Object *exit = local->getTunnelSystem()->findQuietTunnelNear( ai->getTunnelTripGoal() );
 					hint.from = ( exit != NULL ) ? *exit->getPosition() : hint.to;
 					hint.to = *ai->getTunnelTripGoal();
+					hint.onObject = FALSE;
 					addOrderHint( hint, previous );
 					legsDrawn = TRUE;
 					break;
@@ -5382,7 +5782,7 @@ void InGameUI::collectOrderHints( void )
 				// behind is the origin - and the marker landed in the bottom left corner of the map
 				// every time.  The spot being guarded lives on the AI itself, so ask it there.
 				hint.kind = ORDER_HINT_GUARD;
-				if( !getGuardedSpot( ai, resolvedGoal ) )
+				if( !getGuardedSpot( ai, resolvedGoal, resolvedOnObject ) )
 					continue;
 				goalResolved = TRUE;
 				// and the circle it holds there
@@ -5396,7 +5796,7 @@ void InGameUI::collectOrderHints( void )
 				// gave it, and that order is held out of reach of the goal until the wheels are up.
 				// Ask for it, or an air strike shows nothing at all during the seconds the plane spends
 				// taxiing, which is exactly when the player wants to see where it is going
-				if( captured == NULL && !getHeldAircraftOrder( obj, hint.kind, resolvedGoal ) )
+				if( captured == NULL && !getHeldAircraftOrder( obj, hint.kind, resolvedGoal, resolvedOnObject ) )
 					continue;
 				goalResolved = TRUE;
 				break;
@@ -5405,8 +5805,9 @@ void InGameUI::collectOrderHints( void )
 		if( captured )
 		{
 			hint.kind = ORDER_HINT_CAPTURE;
-			resolvedGoal = *captured->getPosition();
+			resolvedGoal = orderTargetSpot( captured );
 			goalResolved = TRUE;
+			resolvedOnObject = TRUE;
 		}
 
 		if( !legsDrawn )
@@ -5418,9 +5819,11 @@ void InGameUI::collectOrderHints( void )
 			// stays there after the key is let go
 			const Int pathSize = ai->friend_getWaypointGoalPathSize();
 			const Int pathIndex = ai->friend_getCurrentGoalPathIndex();
+			hint.onObject = FALSE;
 			if( goalResolved )
 			{
 				hint.to = resolvedGoal;
+				hint.onObject = resolvedOnObject;
 			}
 			else if( pathSize > 0 && pathIndex >= 0 && pathIndex < pathSize )
 			{
@@ -5441,8 +5844,9 @@ void InGameUI::collectOrderHints( void )
 				// waiting for its path has only the order's point to show
 				Object *goalObj = ai->getGoalObject();
 				Path *path = ai->getPath();
+				hint.onObject = ( goalObj != NULL );
 				if( goalObj )
-					hint.to = *goalObj->getPosition();
+					hint.to = orderTargetSpot( goalObj );
 				else if( path )
 					hint.to = *path->getLastNode()->getPosition();
 				else
@@ -5549,7 +5953,7 @@ void InGameUI::bunchOrderHints( void )
 		for( size_t i = 0; i < m_drawnOrderHints.size(); ++i )
 		{
 			OrderHint& bunch = m_drawnOrderHints[ i ];
-			if( bunch.kind != hint->kind || bunch.step != hint->step || bunch.icon != hint->icon )
+			if( bunch.kind != hint->kind || bunch.step != hint->step || bunch.icon != hint->icon || bunch.mark != hint->mark )
 				continue;
 			const Real fromX = bunch.from.x - hint->from.x;
 			const Real fromY = bunch.from.y - hint->from.y;
@@ -5613,6 +6017,7 @@ void InGameUI::addQueuedOrderTail( OrderHint& hint, const OrderChain& chain, con
 Bool InGameUI::getQueuedOrderHint( const QueuedOrder& order, OrderHint& hint ) const
 {
 	hint.icon = NULL;
+	hint.onObject = FALSE;
 
 	switch( order.getType() )
 	{
@@ -5723,7 +6128,8 @@ Bool InGameUI::getQueuedOrderHint( const QueuedOrder& order, OrderHint& hint ) c
 	if( target == NULL || target->isEffectivelyDead() || isHiddenByShroud( target ) )
 		return FALSE;
 
-	hint.to = *target->getPosition();
+	hint.to = orderTargetSpot( target );
+	hint.onObject = TRUE;
 	return TRUE;
 }
 
@@ -6147,8 +6553,36 @@ Bool InGameUI::isHiddenByShroud( const Object *obj ) const
 //-------------------------------------------------------------------------------------------------
 void InGameUI::markNextOrderQueued( OrderQueueMode mode )
 {
+	// the game as shipped had no order list, and Classic sends the logic nothing it did not have
+	if( TheGlobalData->isClassicUI() )
+		return;
+
 	GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_QUEUE_NEXT_ORDER );
 	msg->appendIntegerArgument( mode );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A move command has occurred: Classic starts EA's ring where it lands (W3DInGameUI::drawMoveHints). */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::createMoveHint( const GameMessage *msg )
+{
+	if( getSelectCount() == 1 )
+	{
+		Drawable *draw = getFirstSelectedDrawable();
+		Object *obj = draw ? draw->getObject() : NULL;
+		if( obj && obj->isKindOf( KINDOF_IMMOBILE ) )
+		{
+			//Don't allow move hints to be created if our selected object can't move!
+			return;
+		}
+	}
+
+	m_moveHint[ m_nextMoveHint ].frame = TheGameClient->getFrame();
+	m_moveHint[ m_nextMoveHint ].pos = msg->getArgument( 0 )->location;
+
+	m_nextMoveHint++;
+	if (m_nextMoveHint == InGameUI::MAX_MOVE_HINTS)
+		m_nextMoveHint = 0;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -6385,7 +6819,7 @@ void InGameUI::createMouseoverHint( const GameMessage *msg )
 				Int boxes = warehouseModule->getBoxesStored();
 				Int value = boxes * TheGlobalData->m_baseValuePerSupplyBox;
 				Int startingBoxes = warehouseModule->getStartingBoxes();
-				if( startingBoxes > 0 )
+				if( startingBoxes > 0 && !TheGlobalData->isClassicUI() )
 				{
 					// what is left against what the pile began the match with; it can be stocked past that
 					Int percent = min( 100, boxes * 100 / startingBoxes );
@@ -6792,11 +7226,17 @@ void InGameUI::createCommandHint( const GameMessage *msg )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Force fire is the attack key alone. */
+/** Force fire is the attack key alone in Reforged.  Ctrl held is how the game as shipped force
+	* fired, and Classic is that game. */
 //-------------------------------------------------------------------------------------------------
+Bool InGameUI_isForceFireOn( Bool forceAttackArmed, Bool ctrlHeld, Bool classicUI )
+{
+	return forceAttackArmed || ( classicUI && ctrlHeld );
+}
+
 Bool InGameUI::isForceFireOn( void ) const
 {
-	return m_forceAttackArmed;
+	return InGameUI_isForceFireOn( m_forceAttackArmed, m_forceAttackMode, TheGlobalData->isClassicUI() );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -7246,7 +7686,7 @@ Real InGameUI::computePlacementAngle( const ICoord2D *start, const ICoord2D *end
 
 	Real angle = v.toAngle();
 
-	// optional 45 degree snap (SnapBuildPlacementTo45 in Options.ini) - lines walls and
+	// optional 45 degree snap (BuildSnapTo45 in Options.ini) - lines walls and
 	// defenses up with the base instead of leaving them at whatever the drag produced.
 	if( TheGlobalData->m_snapBuildPlacementTo45 )
 		angle = snapAngleTo45( angle );
@@ -7316,7 +7756,8 @@ void InGameUI::snapPlacementToGrid( Coord3D *world, const ThingTemplate *what, R
 //-------------------------------------------------------------------------------------------------
 Bool InGameUI::placesRow( void )
 {
-	return m_pendingPlaceType != NULL && TheKeyboard &&
+	// Classic places one structure a click, as the game shipped
+	return m_pendingPlaceType != NULL && TheKeyboard && !TheGlobalData->isClassicUI() &&
 				 ( TheKeyboard->isShift() || TheKeyboard->isAlt() ) &&
 				 !TheBuildAssistant->isLineBuildTemplate( m_pendingPlaceType );
 }
@@ -7373,6 +7814,10 @@ static const Real AREA_SWEEP_RADIUS = 300.0f;	///< a search and destroy's circle
 //-------------------------------------------------------------------------------------------------
 Bool InGameUI::isAreaPicking( void ) const
 {
+	// Classic's guard holds the standard range: no ring under the cursor and nothing for the wheel
+	if( TheGlobalData->isClassicUI() )
+		return FALSE;
+
 	if( m_guardArmed || m_areaOrder != AREA_ORDER_NONE )
 		return TRUE;
 
@@ -7668,7 +8113,7 @@ Bool InGameUI::overlapsPendingPlacement( const Coord3D *world, const ThingTempla
 //-------------------------------------------------------------------------------------------------
 void InGameUI::snapPlacementToNeighbour( Coord3D *world, const ThingTemplate *what, Real angle ) const
 {
-	if( TheBuildAssistant->isLineBuildTemplate( what ) )
+	if( !TheGlobalData->m_snapBuildToNeighbour || TheBuildAssistant->isLineBuildTemplate( what ) )
 		return;
 
 	const Real largestFootprint = 150.0f;		// half-diagonal of the biggest structure it may lean on
@@ -8177,6 +8622,7 @@ void InGameUI::postDraw( void )
 	drawSpectatorPage();
 	drawFeed();
 	drawChat();
+	drawClassicMessages();
 
 	if( m_militarySubtitle )
 	{
@@ -8219,6 +8665,13 @@ void InGameUI::postDraw( void )
 		//
 		m_superweaponIconCount = 0;
 		m_spectatorSuperweapons.clear();
+
+		// the Classic interface writes EA's column of names and clocks instead, in the top right
+		const Bool classic = TheGlobalData->isClassicUI();
+		const Int screenH = TheDisplay->getHeight();
+		const Int classicX = hudEdgeX( m_superweaponPosition.x );
+		Int classicY = REAL_TO_INT( m_superweaponPosition.y * screenH );
+		const Int classicBottom = REAL_TO_INT( screenH * 0.8f * 0.82f );	// EA's: the view above its bar
 
 		for (Int i=0; i<MAX_PLAYER_COUNT; ++i)
 		{
@@ -8328,8 +8781,13 @@ void InGameUI::postDraw( void )
                     info->m_evaReadyPlayed = false; // Reset Eva for next time
                 }
               
+                if ( classic )
+                {
+                  if ( !m_superweaponHiddenByScript && classicY < classicBottom )
+                    drawClassicSuperweapon( info, mapIt->first, isReady, readySecs, classicX, &classicY );
+                }
                 // hand it to the strip
-                if ( !m_superweaponHiddenByScript )
+                else if ( !m_superweaponHiddenByScript )
                 {
                   info->m_forceUpdateText = false;
                   info->m_ready = isReady;
@@ -8370,7 +8828,8 @@ void InGameUI::postDraw( void )
 			}
 		}
 
-		drawSuperweaponStrip();
+		if( !classic )
+			drawSuperweaponStrip();
 	}
 
 	// draw named timers
@@ -8378,7 +8837,9 @@ void InGameUI::postDraw( void )
 	{
 //		Int namedTimerCount = 0;
 		Bool reverseXDir = (m_namedTimerPosition.x >= 0.5f);
-		Int startX = (Int)(m_namedTimerPosition.x * TheDisplay->getWidth());
+		// Classic keeps EA's column as far in from the right edge as EA had it, at the HUD's scale
+		Int startX = TheGlobalData->isClassicUI() ? hudEdgeX( m_namedTimerPosition.x )
+																							: (Int)(m_namedTimerPosition.x * TheDisplay->getWidth());
 		Int startY = (Int)(m_namedTimerPosition.y * TheDisplay->getHeight());
 		Color bgColor = GameMakeColor( 0, 0, 0, 255 );
 		for (NamedTimerMapIt mapIt = m_namedTimers.begin(); mapIt != m_namedTimers.end(); ++mapIt)
@@ -8720,10 +9181,14 @@ void InGameUI::militarySubtitle( const AsciiString& label, Int duration )
 	TheInGameUI->disableTooltipsUntil(messageTimeout);
 	
 	// calculate where this screen position should be since the position being passed in is based off 8x6
+	// Classic: at the HUD's one scale from the screen's top left, as the messages are
 	Coord2D multiplier;
-	multiplier.x = (float)TheDisplay->getWidth() / 800.0f;
-	multiplier.y = (float)TheDisplay->getHeight() / 600.0f;
-	
+	const UIRect box = { 0, 0, (Int)TheDisplay->getWidth(), (Int)TheDisplay->getHeight() };
+	multiplier.x = (float)box.w / 800.0f;
+	multiplier.y = (float)box.h / 600.0f;
+	if( TheGlobalData->isClassicUI() )
+		multiplier.x = multiplier.y = ControlBarUniformScale();
+
 	// lets bring out the data structure!
 	m_militarySubtitle = NEW MilitarySubtitleData;
 
@@ -8731,8 +9196,8 @@ void InGameUI::militarySubtitle( const AsciiString& label, Int duration )
 	m_militarySubtitle->blockDrawn = TRUE;
 	m_militarySubtitle->blockBeginFrame = currLogicFrame;
 	m_militarySubtitle->lifetime = messageTimeout;
-	m_militarySubtitle->blockPos.x =  m_militarySubtitle->position.x = m_militaryCaptionPosition.x * multiplier.x;
-	m_militarySubtitle->blockPos.y =  m_militarySubtitle->position.y = m_militaryCaptionPosition.y * multiplier.y;
+	m_militarySubtitle->blockPos.x =  m_militarySubtitle->position.x = box.x + m_militaryCaptionPosition.x * multiplier.x;
+	m_militarySubtitle->blockPos.y =  m_militarySubtitle->position.y = box.y + m_militaryCaptionPosition.y * multiplier.y;
 	m_militarySubtitle->incrementOnFrame = currLogicFrame + (Int)(((Real)LOGICFRAMES_PER_SECOND * TheGlobalLanguageData->m_militaryCaptionDelayMS)/1000.0f);
 	m_militarySubtitle->index = 0;
 	for (int i = 1; i < MAX_SUBTITLE_LINES; i ++)
@@ -10187,8 +10652,9 @@ void InGameUI::drawHudOverlay( void )
 	// screen grew: the lettering inside it scales and the margin around it did not, so a 1440-tall
 	// shot and a 1080-tall one did not overlay however the text was sized.
 	const Int pad = stripPixels( 2 );
-	Int x = TheDisplay->getWidth() - textWidth - pad - stripPixels( 4 );
-	Int y = stripPixels( 2 );
+	const UIRect box = TheUIRect();
+	Int x = box.x + box.w - textWidth - pad - stripPixels( 4 );
+	Int y = box.y + stripPixels( 2 );
 
 	// a plate behind it, so it stays legible over bright terrain
 	TheDisplay->drawFillRect( x - pad, y - 1, textWidth + pad*2, textHeight + 2,
@@ -10865,7 +11331,7 @@ static Int gatherPlayerSkills( const Player *player, const CommandButton **butto
 void InGameUI::drawSkillStrip( void )
 {
 	// the spectator page's left panel lists them instead; the page's flag is the last frame's here
-	if( stripSwitchedOff( &GlobalData::m_showSkillStrip ) || m_spectatorPageShown )
+	if( stripSwitchedOff( &GlobalData::m_showSkillStrip ) || m_spectatorPageShown || TheGlobalData->isClassicUI() )
 		return;
 	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
 		return;
@@ -11233,6 +11699,18 @@ static void putSeatQueue( HtmlValues &row, Player *player )
 	* band of kind "band" carrying its {{label}}, how many seats are {{standing}} of {{seats}}, and
 	* {{side}} "allies", "enemies" or "team". */
 //-------------------------------------------------------------------------------------------------
+void InGameUI::openScoreboard( void )
+{
+	// the key that holds the scoreboard up is EA's diplomacy key, and Classic gives it back to diplomacy
+	if( TheGlobalData->isClassicUI() )
+	{
+		ToggleDiplomacy( FALSE );
+		return;
+	}
+	m_scoreboardOpen = TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
 void InGameUI::drawScoreboard( void )
 {
 	TheControlBar->hideBoardCard();
@@ -11469,9 +11947,10 @@ static void putPowerBar( HtmlValues &values, std::vector< HtmlValues > &cells )
 	* right panel: `cells` from the bottom up, each {{lit}} "lit" up to the way from this rank to the
 	* next, at {{y}} and {{h}} pixels inside the lip, and `stars` one per rank, {{lit}} up to the rank
 	* reached.  The groove's border goes on top of its size in the page, so expframe.w and .h are cut
-	* to its inside here.  Watching, it is the watched player's. */
+	* to its inside here.  `player` is the general it is of, the watched one while watching and NULL
+	* when nobody is, which leaves the groove empty; the caller stands the groove down then. */
 //-------------------------------------------------------------------------------------------------
-static void putExperienceBar( HtmlValues &values, std::vector< HtmlValues > &cells, std::vector< HtmlValues > &stars )
+static void putExperienceBar( HtmlValues &values, const Player *player, std::vector< HtmlValues > &cells, std::vector< HtmlValues > &stars )
 {
 	enum { FRAME_BORDER = 2, FRAME_LIP = 1, EXPERIENCE_CELLS = 10, FULL = 100 };
 
@@ -11481,8 +11960,6 @@ static void putExperienceBar( HtmlValues &values, std::vector< HtmlValues > &cel
 	values[ "expframe.h" ] = std::to_string( max( 0, height ) );
 	values[ "expframe.innerw" ] = std::to_string( max( 0, width - 2 * FRAME_LIP ) );
 
-	const Player *player = TheControlBar->isObserverControlBarOn() ? TheControlBar->getObserverLookAtPlayer()
-																																 : ThePlayerList->getLocalPlayer();
 	if( player == NULL )
 	{
 		cells.clear();
@@ -11743,6 +12220,25 @@ static Bool controlBarUnion( const char *const *names, IRegion2D &box )
 	return found;
 }
 
+/** The values `name`.x, `name`.y and so on, their keys built in one string kept from call to call:
+	* name + ".x" made a new string for every key of every rectangle on the bar, every pass.  One at a
+	* time: a second one alive at once would write over the first's key. */
+struct HtmlValueKey
+{
+	HtmlValueKey( HtmlValues &values, const std::string &name ) : m_values( values ), m_stem( name.size() ) { s_key.assign( name ); }
+	std::string &at( const char *suffix )
+	{
+		s_key.resize( m_stem );
+		s_key += suffix;
+		return m_values[ s_key ];
+	}
+
+	HtmlValues &m_values;
+	size_t m_stem;
+	static std::string s_key;
+};
+std::string HtmlValueKey::s_key;
+
 static void putPageRect( HtmlValues &values, const std::string &name, const IRegion2D &rect, Bool shown,
 												 Real scale = ControlBarUniformScale() );
 
@@ -11812,15 +12308,16 @@ static void putFrame( HtmlValues &values, const std::string &name, const IRegion
 	const Int innerRight = Edge::page( content.hi.x, scale ), innerBottom = Edge::page( content.hi.y, scale );
 	const Int right = Edge::page( box.hi.x, scale ), bottom = Edge::page( box.hi.y, scale );
 
-	values[ name + ".x" ] = std::to_string( left );
-	values[ name + ".y" ] = std::to_string( top );
-	values[ name + ".w" ] = std::to_string( shown ? max( 0, innerRight - innerLeft ) : 0 );
-	values[ name + ".h" ] = std::to_string( shown ? max( 0, innerBottom - innerTop ) : 0 );
-	values[ name + ".bl" ] = std::to_string( max( 0, innerLeft - left ) );
-	values[ name + ".bt" ] = std::to_string( max( 0, innerTop - top ) );
-	values[ name + ".br" ] = std::to_string( max( 0, right - innerRight ) );
-	values[ name + ".bb" ] = std::to_string( max( 0, bottom - innerBottom ) );
-	values[ name + ".shown" ] = shown ? "shown" : "hidden";
+	HtmlValueKey key( values, name );
+	key.at( ".x" ) = std::to_string( left );
+	key.at( ".y" ) = std::to_string( top );
+	key.at( ".w" ) = std::to_string( shown ? max( 0, innerRight - innerLeft ) : 0 );
+	key.at( ".h" ) = std::to_string( shown ? max( 0, innerBottom - innerTop ) : 0 );
+	key.at( ".bl" ) = std::to_string( max( 0, innerLeft - left ) );
+	key.at( ".bt" ) = std::to_string( max( 0, innerTop - top ) );
+	key.at( ".br" ) = std::to_string( max( 0, right - innerRight ) );
+	key.at( ".bb" ) = std::to_string( max( 0, bottom - innerBottom ) );
+	key.at( ".shown" ) = shown ? "shown" : "hidden";
 }
 
 /** The console's next well, `width` screen pixels wide from `left` between `top` and `bottom`, and
@@ -11857,33 +12354,74 @@ static void putWell( std::vector< HtmlValues > &wells, size_t &filled, const IRe
 	putPageRect( entry, "header", wellHeader( well, scale ), headed, scale );
 }
 
-/** A lone unit's name, rank and health for the page, beside its portrait `portrait` in the
-	* selection's well `well`: {{selinfo.x}} .y .w .h, {{sel.name}}, data-each="selstars" a star for
-	* each veterancy level it has, {{sel.health}} "820/1000", {{sel.healthw}} the bar's lit width in
-	* page pixels out of selinfo.w, and {{sel.healthstate}} "green", "yellow" or "red". */
-static void putSelectedUnit( HtmlValues &values, std::vector< HtmlValues > &stars, const IRegion2D &portrait,
-														 const IRegion2D &well, Bool shown )
+/** The damage a lone unit's armour is shown against, the three most of the fighting deals, each under
+	* its label in the string table. */
+static const struct { DamageType type; const char *label; } SHOWN_ARMOR[] =
 {
-	enum { INFO_GAP = 6, HEALTH_YELLOW_PERCENT = 50, HEALTH_RED_PERCENT = 25, STAR_PITCH = 11 };
+	{ DAMAGE_SMALL_ARMS, "TOOLTIP:StatVsGuns" },
+	{ DAMAGE_ARMOR_PIERCING, "TOOLTIP:StatVsShells" },
+	{ DAMAGE_INFANTRY_MISSILE, "TOOLTIP:StatVsRockets" },
+};
+
+/** Where each column of figures stands in the 108 page pixels beside the portrait.  Not thirds: the
+	* game's 7 pixel font writes "Damage" 37 pixels wide and "Rocket" 31, so the first column takes
+	* what "Damage" needs and a gap of seven, and the last one keeps 32 for "Range", "Rocket" and "+100%". */
+static const Int FIGURE_COLUMN_X[] = { 0, 44, 76 };
+
+/** One column of the figures under a lone unit's health, {{x}} its left in page pixels, {{label}}
+	* over {{value}}, and {{state}} "strong", "weak" or nothing. */
+static void putFigureColumn( std::vector< HtmlValues > &columns, Int column, const char *label, const std::string &value,
+														 const char *state )
+{
+	HtmlValues &entry = listEntry( columns, column );
+	entry[ "x" ] = std::to_string( FIGURE_COLUMN_X[ column ] );
+	entry[ "label" ] = WideCharStringToMultiByte( TheGameText->fetch( label ).str() );
+	entry[ "value" ] = value;
+	entry[ "state" ] = state;
+}
+
+/** A lone unit's name, rank, health, main weapon and armour for the page, beside its portrait
+	* `portrait` in the selection's well `well`: {{selinfo.x}} .y .w .h, {{sel.name}},
+	* data-each="selstars" a star for each veterancy level it has, {{sel.health}} "820/1000" or "82%",
+	* {{sel.healthw}} the bar's lit width in page pixels out of selinfo.w, {{sel.healthstate}} "green",
+	* "yellow" or "red", data-each="selweapon" the main weapon's damage, damage a second and range and
+	* data-each="selarmor" what its armour does to each of SHOWN_ARMOR, "-75%".  Both are the object's
+	* as it stands - the weapon set it carries, its veterancy, upgrades and container, the armour set
+	* its upgrades put on - read through the same const calls the logic makes. */
+static void putSelectedUnit( HtmlValues &values, HtmlLists &lists, const IRegion2D &portrait, const IRegion2D &well, Bool shown )
+{
+	enum { INFO_GAP = 6, INFO_TOP = 4, HEALTH_YELLOW_PERCENT = 50, HEALTH_RED_PERCENT = 25, STAR_PITCH = 11, WEAPON_FIGURES = 3 };
 	const Real scale = ControlBarHudScale();
+	// from just under the well's top rather than the portrait's, which stands a dozen page pixels
+	// lower: a two line name and the two rows of figures need that room to keep clear of each other
 	IRegion2D info = portrait;
 	info.lo.x = portrait.hi.x + REAL_TO_INT( INFO_GAP * scale );
 	info.hi.x = well.hi.x - REAL_TO_INT( INFO_GAP * scale );
+	info.lo.y = well.lo.y + REAL_TO_INT( INFO_TOP * scale );
 	// the drawable the bar's portrait is of, which is the one selected
 	const Drawable *drawable = TheControlBar->getContextDrawable();
 	const Object *object = drawable ? drawable->getObject() : NULL;
 	shown = shown && object != NULL;
 	putPageRect( values, "selinfo", info, shown, scale );
+	std::vector< HtmlValues > &stars = lists[ "selstars" ];
+	std::vector< HtmlValues > &weaponColumns = lists[ "selweapon" ];
+	std::vector< HtmlValues > &armorColumns = lists[ "selarmor" ];
 	stars.clear();
 	if( !shown )
+	{
+		weaponColumns.clear();
+		armorColumns.clear();
 		return;
+	}
 
 	// an enemy in disguise is what he looks like, as his portrait is (ControlBar::setPortraitByObject):
-	// the disguise's name, and no rank or health, which are his own
+	// the disguise's name, and no rank, health, weapon or armour, which are his own
 	if( drawable->getStealthLook() == STEALTHLOOK_DISGUISED_ENEMY )
 	{
 		values[ "sel.name" ] = WideCharStringToMultiByte( drawable->getTemplate()->getDisplayName().str() );
 		values[ "sel.healthshown" ] = "hidden";
+		weaponColumns.clear();
+		armorColumns.clear();
 		return;
 	}
 
@@ -11896,13 +12434,72 @@ static void putSelectedUnit( HtmlValues &values, std::vector< HtmlValues > &star
 		stars.push_back( star );
 	}
 
+	// a unit of the local player's or an ally's shows its figures as they stand; anybody else's only
+	// with the veterancy his stars show already, since his upgrades, battle plans and horde are what
+	// he has researched and planned.  A watcher is in nobody's match and sees everything
+	const Player *local = ThePlayerList->getLocalPlayer();
+	const Bool ours = localPlayerWatching() || object->getControllingPlayer() == local
+										|| local->getRelationship( object->getTeam() ) == ALLIES;
+
+	// an enemy's health as a share of his whole: the whole is research too, Composite Armor and the
+	// armour upgrades raise it, and the bar over the unit only ever showed the share
 	const BodyModuleInterface *body = object->getBodyModule();
 	const Int health = (Int)REAL_TO_INT_CEIL( body->getHealth() );
 	const Int maxHealth = max( 1, (Int)REAL_TO_INT_CEIL( body->getMaxHealth() ) );
 	const Int percent = health * PERCENT / maxHealth;
-	values[ "sel.health" ] = std::to_string( health ) + "/" + std::to_string( maxHealth );
+	values[ "sel.health" ] = ours ? std::to_string( health ) + "/" + std::to_string( maxHealth ) : std::to_string( percent ) + "%";
 	values[ "sel.healthw" ] = std::to_string( atoi( values[ "selinfo.w" ].c_str() ) * health / maxHealth );
 	values[ "sel.healthstate" ] = percent <= HEALTH_RED_PERCENT ? "red" : percent <= HEALTH_YELLOW_PERCENT ? "yellow" : "green";
+
+	UnitFigures figures = {};
+	if( ours )
+	{
+		for( Int slot = PRIMARY_WEAPON; slot < WEAPONSLOT_COUNT; slot++ )
+		{
+			const Weapon *weapon = object->getWeaponInWeaponSlot( (WeaponSlotType)slot );
+			if( weapon == NULL )
+				continue;
+			WeaponBonus bonus;
+			weapon->computeBonus( object, 0, bonus );
+			figures.slots[ slot ] = ControlBarWeaponFigures( weapon->getTemplate(), bonus );
+		}
+	}
+	else
+	{
+		enum { VETERANCY_BONUSES = ( 1 << WEAPONBONUSCONDITION_VETERAN ) | ( 1 << WEAPONBONUSCONDITION_ELITE ) | ( 1 << WEAPONBONUSCONDITION_HERO ) };
+		WeaponSetFlags setFlags = object->getWeaponSetFlags();
+		setFlags.set( WEAPONSET_PLAYER_UPGRADE, 0 );
+		ControlBarTemplateWeaponFigures( object->getTemplate(), setFlags, object->getWeaponBonusCondition() & VETERANCY_BONUSES, figures );
+	}
+	const Int main = figures.mainSlot();
+	if( main == WEAPONSLOT_COUNT )
+		weaponColumns.clear();
+	else
+	{
+		const WeaponFigures &weapon = figures.slots[ main ];
+		putFigureColumn( weaponColumns, 0, "TOOLTIP:StatDamage", std::to_string( REAL_TO_INT( weapon.damage ) ), "" );
+		putFigureColumn( weaponColumns, 1, "TOOLTIP:StatShortDamagePerSecond",
+										 std::to_string( REAL_TO_INT( weapon.damage * weapon.attacksPerSecond ) ), "" );
+		putFigureColumn( weaponColumns, 2, "TOOLTIP:StatRange", std::to_string( REAL_TO_INT( weapon.range ) ), "" );
+		weaponColumns.resize( WEAPON_FIGURES );
+	}
+
+	// the armour, and for our own the body's damage scalar on top of it, which is where a battle plan
+	// such as Hold the Line goes (ActiveBody::attemptDamage)
+	ArmorSetFlags armorFlags;
+	for( Int set = 0; set < ARMORSET_COUNT; set++ )
+		if( object->testArmorSetFlag( (ArmorSetType)set ) && ( ours || set != ARMORSET_PLAYER_UPGRADE ) )
+			armorFlags.set( set );
+	const Armor armor( object->getTemplate()->findArmorTemplateSet( armorFlags )->getArmorTemplate() );
+	const Real scalar = ours ? object->getBodyModule()->getDamageScalar() : 1.0f;
+	const Int shownArmor = (Int)ARRAY_SIZE( SHOWN_ARMOR );
+	for( Int each = 0; each < shownArmor; each++ )
+	{
+		const Int change = REAL_TO_INT_FLOOR( armor.adjustDamage( SHOWN_ARMOR[ each ].type, PERCENT ) * scalar + 0.5f ) - PERCENT;
+		putFigureColumn( armorColumns, each, SHOWN_ARMOR[ each ].label,
+										 ( change > 0 ? "+" : "" ) + std::to_string( change ) + "%", change < 0 ? "strong" : change > 0 ? "weak" : "" );
+	}
+	armorColumns.resize( shownArmor );
 }
 
 static GameWindow *numberedWindow( const char *prefix, Int number )
@@ -12067,11 +12664,12 @@ static void putPageRect( HtmlValues &values, const std::string &name, const IReg
 	const Int top = REAL_TO_INT_FLOOR( rect.lo.y / scale + 0.5f );
 	const Int right = REAL_TO_INT_FLOOR( rect.hi.x / scale + 0.5f );
 	const Int bottom = REAL_TO_INT_FLOOR( rect.hi.y / scale + 0.5f );
-	values[ name + ".x" ] = std::to_string( left );
-	values[ name + ".y" ] = std::to_string( top );
-	values[ name + ".w" ] = std::to_string( shown ? right - left : 0 );
-	values[ name + ".h" ] = std::to_string( shown ? bottom - top : 0 );
-	values[ name + ".shown" ] = shown ? "shown" : "hidden";
+	HtmlValueKey key( values, name );
+	key.at( ".x" ) = std::to_string( left );
+	key.at( ".y" ) = std::to_string( top );
+	key.at( ".w" ) = std::to_string( shown ? right - left : 0 );
+	key.at( ".h" ) = std::to_string( shown ? bottom - top : 0 );
+	key.at( ".shown" ) = shown ? "shown" : "hidden";
 }
 
 static void drawCommandGridFront( GameWindow *window, WinInstanceData *instData )
@@ -12131,7 +12729,7 @@ void InGameUI::drawNetPage( void )
 	// into the readings themselves rather than a copy of them made every frame; nothing else reads
 	// them, and the next sample clears them
 	m_hudValues[ "side" ] = spectatorSide();
-	m_netOverlay->setPage( HtmlTemplate_expand( m_netPage, m_hudValues, HtmlLists(), lookupGameText ) );
+	m_netOverlay->setPage( m_netPage, m_hudValues, HtmlLists(), lookupGameText );
 	m_netOverlay->draw();
 }
 
@@ -12154,7 +12752,7 @@ void InGameUI::drawReadoutPage( const HtmlValues &values )
 		m_readoutOverlay->setHud( TRUE );
 	}
 
-	m_readoutOverlay->setPage( HtmlTemplate_expand( m_readoutPage, values, HtmlLists(), lookupGameText ) );
+	m_readoutOverlay->setPage( m_readoutPage, values, HtmlLists(), lookupGameText );
 	m_readoutOverlay->draw();
 }
 
@@ -12202,7 +12800,7 @@ void InGameUI::drawCellGridFront( Int grid )
 	// lent to the page and taken back, rather than copied every frame
 	std::vector< HtmlValues > &frontCells = lists[ "frontcells" ];
 	frontCells.swap( m_cellFrontCells[ grid ] );
-	overlay->setPage( HtmlTemplate_expand( m_controlBarPage, values, lists, lookupGameText ) );
+	overlay->setPage( m_controlBarPage, values, lists, lookupGameText );
 	frontCells.swap( m_cellFrontCells[ grid ] );
 	overlay->draw();
 }
@@ -12282,7 +12880,10 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	const Int wellHeight = REAL_TO_INT( COMMAND_ROWS * ( COMMAND_CELL_HEIGHT + CELL_GAP ) * scale );
 	const Int consoleTopLine = foot - wellHeight - REAL_TO_INT( ( HEADER_GAP + HEADER_HEIGHT ) * scale );
 	const Int radarWidth = ( foot - consoleTopLine ) * RADAR_WIDTH / RADAR_HEIGHT;
-	const Int radarWellWidth = radarWidth + REAL_TO_INT( ( EXPERIENCE_GAP + EXPERIENCE_WIDTH ) * scale );
+	// a watcher who has picked nobody to follow has no general's experience to show, and the groove
+	// and the room for it go
+	const Player *experiencePlayer = watching ? TheControlBar->getObserverLookAtPlayer() : ThePlayerList->getLocalPlayer();
+	const Int radarWellWidth = radarWidth + ( experiencePlayer ? REAL_TO_INT( ( EXPERIENCE_GAP + EXPERIENCE_WIDTH ) * scale ) : 0 );
 	const Int selectionWellWidth = REAL_TO_INT( PORTRAIT_PLACES * ( CELL_WIDTH + CELL_GAP ) * scale );
 	const Int gridWellWidth = REAL_TO_INT( COMMAND_COLUMNS * ( COMMAND_CELL_WIDTH + CELL_GAP ) * scale );
 	const ICoord2D cell = cellSize();
@@ -12328,8 +12929,8 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	TheControlBar->placeWindowAt( radarWindow, radar );
 	IRegion2D experience = radarWell;
 	experience.lo.x = experience.hi.x - REAL_TO_INT( EXPERIENCE_WIDTH * scale );
-	putPageRect( values, "expframe", experience, leftFound, scale );
-	putExperienceBar( values, lists[ "expcells" ], lists[ "rankstars" ] );
+	putPageRect( values, "expframe", experience, leftFound && experiencePlayer != NULL, scale );
+	putExperienceBar( values, experiencePlayer, lists[ "expcells" ], lists[ "rankstars" ] );
 
 	// in the selection's header, on its grid of HEADER_SLOTS from its left: the idle worker's key, the
 	// skills key - the rank's stars, and the button that opens the promotion screen - and in a
@@ -12572,7 +13173,7 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	if( multi )
 		portraitCell.hi.x = portraitCell.lo.x;
 	TheControlBar->placeWindowAt( portraitWindow, portraitCell );
-	putSelectedUnit( values, lists[ "selstars" ], portraitCell, selectionWell, portraitShown && !multi );
+	putSelectedUnit( values, lists, portraitCell, selectionWell, portraitShown && !multi );
 
 	std::vector< HtmlValues > &portraitCells = lists[ "portraitcells" ];
 	size_t portraitFilled = 0;
@@ -12684,7 +13285,7 @@ Bool InGameUI::drawControlBarPage( const IRegion2D *panels, const Bool *shown, I
 	if( !m_promotionPage.empty() )
 		standDownPromotionScreen();
 
-	m_controlBarOverlay->setPage( HtmlTemplate_expand( m_controlBarPage, values, lists, lookupGameText ) );
+	m_controlBarOverlay->setPage( m_controlBarPage, values, lists, lookupGameText );
 	// swapped rather than copied: the front windows get this frame's cells, and the lists get the
 	// front windows' old ones to write the next frame over
 	m_cellFrontCells[ CELL_GRID_COMMAND ].swap( commandCells );
@@ -12982,7 +13583,11 @@ static const Int PROMOTION_NOT_DRAWN = -1;
 
 void InGameUI::openPromotionPage( void )
 {
-	m_promotionShownMs = PROMOTION_NOT_DRAWN;
+	// opened again while it was still going, it comes back up from where the going had got to
+	if( m_promotionClosing )
+		m_promotionClosing = FALSE;
+	else
+		m_promotionShownMs = TheGlobalData->m_animateWindows ? PROMOTION_NOT_DRAWN : PROMOTION_FADE_MS;
 }
 
 void InGameUI::drawPromotionPage( GameWindow *parent, Bool front )
@@ -13016,16 +13621,26 @@ void InGameUI::drawPromotionPage( GameWindow *parent, Bool front )
 	screen.hi.y = TheDisplay->getHeight();
 	putPageRect( values, "screen", screen, TRUE );
 
-	// the back draws first each picture and moves the coming up on for both layers
+	// the back draws first each picture and moves the coming up, or the going, on for both layers;
+	// gone, the screen is hidden and draws no more
 	if( !front )
 	{
 		const UnsignedInt now = Clock_Milliseconds();
-		if( m_promotionShownMs == PROMOTION_NOT_DRAWN )
+		const Int step = min( (Int)( now - m_promotionDrawnAt ), PROMOTION_MOST_MS_A_PICTURE );
+		if( m_promotionClosing )
+			m_promotionShownMs = max( 0, m_promotionShownMs ) - step;
+		else if( m_promotionShownMs == PROMOTION_NOT_DRAWN )
 			m_promotionShownMs = 0;
 		else
-			m_promotionShownMs = min( m_promotionShownMs + min( (Int)( now - m_promotionDrawnAt ), PROMOTION_MOST_MS_A_PICTURE ),
-																PROMOTION_FADE_MS );
+			m_promotionShownMs = min( m_promotionShownMs + step, PROMOTION_FADE_MS );
 		m_promotionDrawnAt = now;
+		if( m_promotionClosing && m_promotionShownMs <= 0 )
+		{
+			m_promotionClosing = FALSE;
+			m_promotionShownMs = 0;
+			parent->winHide( TRUE );
+			return;
+		}
 	}
 	overlay->setAlpha( max( 0, m_promotionShownMs ) * OPAQUE_PAGE / PROMOTION_FADE_MS );
 
@@ -13090,7 +13705,7 @@ void InGameUI::drawPromotionPage( GameWindow *parent, Bool front )
 		headings.push_back( entry );
 	}
 
-	overlay->setPage( HtmlTemplate_expand( m_promotionPage, values, lists, lookupGameText ) );
+	overlay->setPage( m_promotionPage, values, lists, lookupGameText );
 	overlay->hover( TheMouse->getMouseStatus()->pos );
 	overlay->draw();
 }
@@ -13130,6 +13745,9 @@ enum
 	* keys had all come in within four pictures: they seemed to pop up with no fade at all. */
 static const Int QUIT_MENU_MOST_MS_A_PICTURE = 25;
 static const Int QUIT_MENU_NOT_DRAWN = -1;	///< m_quitMenuShownMs until the menu's first picture
+static const Int QUIT_MENU_NOT_CLOSING = -1;	///< m_quitMenuClosingMs while the menu is not going
+/** Far enough into the coming up that every one of the five keys is in and done flashing. */
+static const Int QUIT_MENU_WHOLE_MS = QUIT_MENU_KEY_FIRST_MS + 4 * QUIT_MENU_KEY_STEP_MS + QUIT_MENU_KEY_FLASH_MS;
 
 /** A window of the same layout as `parent`, by its name there. */
 static GameWindow *quitMenuWindow( GameWindow *parent, const char *name )
@@ -13154,7 +13772,9 @@ void InGameUI::themeQuitMenu( GameWindow *parent )
 	if( m_quitMenuPage.empty() )
 		return;
 
-	m_quitMenuShownMs = QUIT_MENU_NOT_DRAWN;
+	// with window animation off the menu is simply there, every key already in
+	m_quitMenuShownMs = TheGlobalData->m_animateWindows ? QUIT_MENU_NOT_DRAWN : QUIT_MENU_WHOLE_MS;
+	m_quitMenuClosingMs = QUIT_MENU_NOT_CLOSING;
 	parent->winSetDrawFunc( drawQuitMenu );
 	for( Int key = 0; key < (Int)ARRAY_SIZE( QUIT_MENU_KEYS ); key++ )
 	{
@@ -13238,14 +13858,27 @@ void InGameUI::drawQuitMenuPage( GameWindow *parent )
 
 	// the coming up starts on the menu's first picture and moves on with the wall clock, but never
 	// by more than QUIT_MENU_MOST_MS_A_PICTURE a picture
+	// The going is the page fading out over QUIT_MENU_FADE_MS from wherever the coming up had got
+	// to, and the menu hidden at the end of it
 	const UnsignedInt now = Clock_Milliseconds();
-	if( m_quitMenuShownMs == QUIT_MENU_NOT_DRAWN )
+	const Int step = min( (Int)( now - m_quitMenuDrawnAt ), QUIT_MENU_MOST_MS_A_PICTURE );
+	if( m_quitMenuClosingMs != QUIT_MENU_NOT_CLOSING )
+		m_quitMenuClosingMs += step;
+	else if( m_quitMenuShownMs == QUIT_MENU_NOT_DRAWN )
 		m_quitMenuShownMs = 0;
 	else
-		m_quitMenuShownMs += min( (Int)( now - m_quitMenuDrawnAt ), QUIT_MENU_MOST_MS_A_PICTURE );
+		m_quitMenuShownMs += step;
 	m_quitMenuDrawnAt = now;
-	const Int openMs = m_quitMenuShownMs;
-	const Int pageAlpha = min( 255, openMs * 255 / QUIT_MENU_FADE_MS );
+	if( m_quitMenuClosingMs >= QUIT_MENU_FADE_MS )
+	{
+		m_quitMenuClosingMs = QUIT_MENU_NOT_CLOSING;
+		parent->winHide( TRUE );
+		return;
+	}
+	const Int openMs = max( 0, m_quitMenuShownMs );
+	Int pageAlpha = min( 255, openMs * 255 / QUIT_MENU_FADE_MS );
+	if( m_quitMenuClosingMs != QUIT_MENU_NOT_CLOSING )
+		pageAlpha = pageAlpha * ( QUIT_MENU_FADE_MS - m_quitMenuClosingMs ) / QUIT_MENU_FADE_MS;
 
 	// a key still fading in is drawn alone on the same page with the rest of it bare, the page having
 	// no opacity of its own for one element; the keys already whole are on the menu's page
@@ -13280,7 +13913,7 @@ void InGameUI::drawQuitMenuPage( GameWindow *parent )
 			keys.push_back( entry );
 	}
 
-	m_quitMenuOverlay->setPage( HtmlTemplate_expand( m_quitMenuPage, values, lists, lookupGameText ) );
+	m_quitMenuOverlay->setPage( m_quitMenuPage, values, lists, lookupGameText );
 	m_quitMenuOverlay->setAlpha( pageAlpha );
 	m_quitMenuOverlay->draw();
 
@@ -13290,7 +13923,7 @@ void InGameUI::drawQuitMenuPage( GameWindow *parent )
 		if( m_quitMenuKeyOverlays.size() <= each )
 			m_quitMenuKeyOverlays.push_back( new HtmlOverlay( m_superweaponNormalFont ) );
 		keys.assign( 1, fading[ each ].entry );
-		m_quitMenuKeyOverlays[ each ]->setPage( HtmlTemplate_expand( m_quitMenuPage, values, lists, lookupGameText ) );
+		m_quitMenuKeyOverlays[ each ]->setPage( m_quitMenuPage, values, lists, lookupGameText );
 		m_quitMenuKeyOverlays[ each ]->setAlpha( fading[ each ].alpha );
 		m_quitMenuKeyOverlays[ each ]->draw();
 	}
@@ -13667,7 +14300,7 @@ void InGameUI::drawQueueTray( void )
 		m_queueFrontOverlay->setHud( TRUE );
 	}
 	values[ "layer" ] = "back";
-	m_queueOverlay->setPage( HtmlTemplate_expand( m_queuePage, values, lists, lookupGameText ) );
+	m_queueOverlay->setPage( m_queuePage, values, lists, lookupGameText );
 	m_queueOverlay->draw();
 
 	TheDisplay->beginBatch2D();
@@ -13675,7 +14308,7 @@ void InGameUI::drawQueueTray( void )
 	TheDisplay->endBatch2D();
 
 	values[ "layer" ] = "front";
-	m_queueFrontOverlay->setPage( HtmlTemplate_expand( m_queuePage, values, lists, lookupGameText ) );
+	m_queueFrontOverlay->setPage( m_queuePage, values, lists, lookupGameText );
 	m_queueFrontOverlay->draw();
 }
 
@@ -13878,7 +14511,7 @@ void InGameUI::drawSuperweaponStrip( void )
 		m_superweaponOverlay = new HtmlOverlay( m_superweaponNormalFont );
 		m_superweaponOverlay->setScreenPixels( TRUE );
 	}
-	m_superweaponOverlay->setPage( HtmlTemplate_expand( m_queuePage, values, lists, lookupGameText ) );
+	m_superweaponOverlay->setPage( m_queuePage, values, lists, lookupGameText );
 	m_superweaponOverlay->draw();
 
 	// a cameo has no frame drawn over its edge, so a readout's plate stands in its very corner: the
@@ -13979,7 +14612,8 @@ void InGameUI::drawProductionStrip( void )
 	m_productionStripCount = 0;
 	m_productionStripTotal = 0;
 
-	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+	// EA's HUD has no strip: the queue is read off the building's own command bar
+	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() || TheGlobalData->isClassicUI() )
 		return;
 
 	Player *player = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
@@ -14002,6 +14636,7 @@ void InGameUI::drawProductionStrip( void )
 	// An enemy's or a neutral's never gets here, and a watcher left above.
 	//
 	ObjectID selected = INVALID_ID;
+	Object *leader = NULL;
 	if( getSelectCount() == 1 && !m_selectedDrawables.empty() )
 	{
 		Object *sel = m_selectedDrawables.front()->getObject();
@@ -14009,24 +14644,60 @@ void InGameUI::drawProductionStrip( void )
 								 isAllyOfLocalPlayer( sel->getControllingPlayer()->getPlayerIndex() ) ) )
 		{
 			selected = sel->getID();
-			appendProducerQueue( sel, m_productionStrip, &m_productionStripCount, PRODUCTION_STRIP_ROW_MAX,
-													 &m_productionStripTotal, TRUE );
+			leader = sel;
 		}
 	}
 
 	//
-	// One sweep, one column: the queues and the buildings going up are gathered into the same
-	// cells and sorted against each other, so the strip is a single run of what the base has
-	// coming.  A dozer raising a war factory now sits in the queue where its finishing time puts
-	// it instead of standing in a column of its own beside it.
+	// What the sweep finds is the logic's - queues, building sites, build times - and the logic only
+	// changes inside a logic frame, each of which moves getFrame() on; the new match or loaded save
+	// that starts it over comes through reset().  So within one frame, for the same player and the
+	// same building leading, the sweep finds what it found last pass, and with five or six passes
+	// drawn to a frame, walking every object the player owns for it each time was a share of its own.
+	// Only the slots' places are the drawing's, and they go back to the sweep's zero.
 	//
-	ProductionStripGather gather;
-	gather.slot = m_productionStrip;
-	gather.count = &m_productionStripCount;
-	gather.total = &m_productionStripTotal;
-	gather.max = PRODUCTION_STRIP_ROW_MAX;
-	gather.skip = selected;
-	player->iterateObjects( gatherStripEverything, &gather );
+	// Except while time is frozen: GameLogic::update still runs the scripts on every frozen pass and
+	// returns before the frame moves, so a cinematic can change a queue with the frame standing still.
+	// The same test as the update's own freeze return.
+	const Bool timeFrozen = ( !TheGameEngine->isMultiplayerSession() && TheTacticalView->isTimeFrozen()
+														&& !TheTacticalView->isCameraMovementFinished() )
+													|| TheScriptEngine->isTimeFrozenDebug() || TheScriptEngine->isTimeFrozenScript();
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	if( !timeFrozen && s_stripGather.valid && s_stripGather.frame == frame && s_stripGather.player == player
+			&& s_stripGather.selected == selected )
+	{
+		m_productionStripCount = s_stripGather.count;
+		m_productionStripTotal = s_stripGather.total;
+		for( Int i = 0; i < m_productionStripCount; i++ )
+			m_productionStrip[ i ].pos.x = m_productionStrip[ i ].pos.y = 0;
+	}
+	else
+	{
+		if( leader )
+			appendProducerQueue( leader, m_productionStrip, &m_productionStripCount, PRODUCTION_STRIP_ROW_MAX,
+													 &m_productionStripTotal, TRUE );
+
+		//
+		// One sweep, one column: the queues and the buildings going up are gathered into the same
+		// cells and sorted against each other, so the strip is a single run of what the base has
+		// coming.  A dozer raising a war factory now sits in the queue where its finishing time puts
+		// it instead of standing in a column of its own beside it.
+		//
+		ProductionStripGather gather;
+		gather.slot = m_productionStrip;
+		gather.count = &m_productionStripCount;
+		gather.total = &m_productionStripTotal;
+		gather.max = PRODUCTION_STRIP_ROW_MAX;
+		gather.skip = selected;
+		player->iterateObjects( gatherStripEverything, &gather );
+
+		s_stripGather.valid = TRUE;
+		s_stripGather.frame = frame;
+		s_stripGather.player = player;
+		s_stripGather.selected = selected;
+		s_stripGather.count = m_productionStripCount;
+		s_stripGather.total = m_productionStripTotal;
+	}
 
 #ifdef DEBUG_LOGGING
 	tGatherEnd = Clock_Ticks();
@@ -14224,8 +14895,9 @@ void InGameUI::popupMessage( const AsciiString& identifier, Int x, Int y, Int wi
 	if( y < 0 )
 		y = 0;
 
-	m_popupMessageData->x = TheDisplay->getWidth() * (INT_TO_REAL(x) / 100);
-	m_popupMessageData->y = TheDisplay->getHeight() * (INT_TO_REAL(y) / 100);
+	const UIRect box = TheUIRect();
+	m_popupMessageData->x = box.x + box.w * (INT_TO_REAL(x) / 100);
+	m_popupMessageData->y = box.y + box.h * (INT_TO_REAL(y) / 100);
 	// cap the lower limit of the width
 	if(width < 50)
 		width = 50;
@@ -14824,6 +15496,8 @@ void InGameUI::notifyResolutionChange( void )
 
 	ResetDiplomacy();
 	ResetInGameChat();
+	if( TheGameConsole )
+		TheGameConsole->resetCheatWindow();
 
 	if( m_replayWindow )
 	{
@@ -15076,7 +15750,7 @@ Bool InGameUI::drawTooltipPage( const UnicodeString &cursorText, const RGBColor 
 		box.hi.x = box.lo.x + m_tooltipSize.x;
 		box.hi.y = box.lo.y + m_tooltipSize.y;
 		putPageRect( values, "box", box, TRUE, ControlBarHudPageScale() );
-		m_tooltipOverlay->setPage( HtmlTemplate_expand( m_tooltipPage, values, lists, lookupGameText ) );
+		m_tooltipOverlay->setPage( m_tooltipPage, values, lists, lookupGameText );
 
 		std::vector< IRegion2D > laidOut;
 		m_tooltipOverlay->rectsOf( "#box", laidOut );

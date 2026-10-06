@@ -1,0 +1,25 @@
+# Two Sentry Drones with the gun, which a war factory researches from frame 20 to 919, parked from
+# frame 30 so they have long gone invisible when three Rebels walk past them 100 to the east and a
+# Technical parks beside them on frame 1000. Nobody orders the drones to do anything.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 1700
+#     -scenario sentrydrone -logPrefix sentrydrone_
+#
+# Measured 2026-10-05. Before, with EA's AutoAcquireEnemiesWhenIdle = Yes, the hidden drones never
+# fired: the frame 1690 tally had all three Rebels and the Technical alive and untouched. With
+# Stealthed added (FixesReforged.ini) they open fire and all four are dead by then. A drone spawned
+# beside the enemy fired either way, because it had not gone invisible yet.
+
+5     spawn         0  AmericaPowerPlant              1   700 2700
+5     spawn         0  AmericaWarFactory              1   700 3000
+20    shiftupgrade  0  AmericaWarFactory                  Upgrade_AmericaSentryDroneGun
+30    spawn         0  AmericaVehicleSentryDrone      2   1200 3700 20
+1000  spawn         1  GLAInfantryRebel               3   1300 3900 14
+1000  spawn         1  GLAVehicleTechnical            1   1300 3760
+1000  move          1  GLAInfantryRebel                   1300 3500
+1000  tally         0  AmericaVehicleSentryDrone
+1690  tally         1  GLAInfantryRebel
+1690  tally         1  GLAVehicleTechnical*
+1690  tally         0  AmericaVehicleSentryDrone

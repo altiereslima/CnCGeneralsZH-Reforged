@@ -300,6 +300,12 @@ W3DInGameUI::W3DInGameUI()
 	for( Int i = 0; i < MAX_ORDER_STEP_NUMBERS; ++i )
 		m_orderStepNumbers[ i ] = NULL;
 
+	for( Int i = 0; i < MAX_MOVE_HINTS; i++ )
+	{
+		m_moveHintRenderObj[ i ] = NULL;
+		m_moveHintAnim[ i ] = NULL;
+	}
+
 }  // end W3DInGameUI
 
 //-------------------------------------------------------------------------------------------------
@@ -322,6 +328,12 @@ W3DInGameUI::~W3DInGameUI()
 			TheDisplayStringManager->freeDisplayString( m_orderStepNumbers[ i ] );
 			m_orderStepNumbers[ i ] = NULL;
 		}
+
+	for( Int i = 0; i < MAX_MOVE_HINTS; i++ )
+	{
+		REF_PTR_RELEASE( m_moveHintRenderObj[ i ] );
+		REF_PTR_RELEASE( m_moveHintAnim[ i ] );
+	}
 
 }  // end ~W3DInGameUI
 
@@ -430,21 +442,31 @@ void W3DInGameUI::draw( void )
 	if( m_isFormationDragging )
 		drawFormationLine();
 
-	// and where everything selected is headed, drag or no drag
-	drawOrderHints();
+	// Classic draws what the game as shipped drew: none of the threads, plan numbers, ally pointers
+	// or guard shields below, and its waypoint path is W3DWaypointBuffer's.  A move order gets
+	// EA's animated ground ring (drawMoveHints) in place of the order markers
+	const Bool classic = TheGlobalData->isClassicUI();
+
+	// and where everything selected is headed, drag or no drag.  Classic has EA's ring instead,
+	// drawMoveHints below
+	if( !classic )
+		drawOrderHints();
 
 	// and which of the plans each builder puts up next
-	drawBuildPlanNumbers();
+	if( !classic )
+		drawBuildPlanNumbers();
 
 	// where the allies are pointing, which is the one thing on this screen somebody else is doing
-	drawAllyCursors();
+	if( !classic )
+		drawAllyCursors();
 
 	// the attack circle, while the left button is still sweeping it out
 	if( isAttackCircling() )
 		drawAttackCircle();
 
 	// which of the local player's units are holding a guard
-	drawGuardMarkers();
+	if( !classic )
+		drawGuardMarkers();
 
 	// the circle an armed guard will hold, under the cursor, at the size the wheel left it.  A drag
 	// is drawing a guard line instead, where every unit holds its own station.  A search and
@@ -470,6 +492,9 @@ void W3DInGameUI::draw( void )
 		{
 
 			// draw attack hints
+			// draw move hints
+			drawMoveHints( view );
+
 			drawAttackHints( view );
 
 			// draw placement angle selection if needed
@@ -532,7 +557,8 @@ void W3DInGameUI::draw( void )
 	// the one reading you want visible exactly when something is going wrong.
 	//
 	// the peace time clock across the top middle, and the clock plate in the corner beside it
-	if( matchOnScreen )
+	// Classic's screen is EA's, which had neither plate
+	if( matchOnScreen && !TheGlobalData->isClassicUI() )
 	{
 		drawPeaceTimer();
 		drawHudOverlay();
@@ -675,7 +701,8 @@ static void setGroundOverlayState( void )
 
 //-------------------------------------------------------------------------------------------------
 /** Draw the pathfinder's own cell grid under the structure sitting on the cursor, and cross out
-	* the cells it cannot go on.  GridBuildPlacement snaps a footprint's edges to these very lines
+	* the cells it cannot go on.  The lines only under GridBuildPlacement; the red cells always.
+	* GridBuildPlacement snaps a footprint's edges to these very lines
 	* (see snapPlacementToGrid), so being able to see them is the difference between guessing at a
 	* flush row of buildings and laying one out.
 	*
@@ -696,9 +723,11 @@ static void setGroundOverlayState( void )
 //-------------------------------------------------------------------------------------------------
 void W3DInGameUI::drawBuildGrid( void )
 {
-	// the grid you see is the grid you snap to: with the snap off it would mean nothing
-	if( m_pendingPlaceType == NULL || TheGlobalData->m_gridBuildPlacement == FALSE )
+	if( m_pendingPlaceType == NULL )
 		return;
+	// the grid you see is the grid you snap to: with the snap off the lines would mean nothing, but
+	// the cells nothing can stand on still do
+	const Bool drawLines = TheGlobalData->m_gridBuildPlacement;
 	if( m_placeIcon == NULL || m_placeIcon[ 0 ] == NULL )
 		return;
 	if( TheTerrainLogic == NULL || TheAI == NULL )
@@ -717,7 +746,7 @@ void W3DInGameUI::drawBuildGrid( void )
 	enum { GRID_CELLS = GRID_RADIUS * 2 + 1, GRID_POINTS = GRID_CELLS + 1 };
 
 	// half the width of a painted line, in world units - a cell is PLACEMENT_CELL (10) across
-	const Real LINE_HALF_WIDTH = 0.45f;
+	const Real LINE_HALF_WIDTH = 0.3f;
 	// the ground is sampled at the line, so a line running across a slope would sink into the hill
 	// on one side; lifting the whole sheet a hair keeps it out of the dirt without floating
 	const Real GRID_LIFT = 0.35f;
@@ -762,9 +791,10 @@ void W3DInGameUI::drawBuildGrid( void )
 
 	GroundOverlayQuads &quads = theGroundOverlayQuads;
 
-	// the lines themselves, one quad per cell edge so they follow the ground over every bump
-	const Real LINE_ALPHA = 0x58;
-	for( iy = 0; iy < GRID_POINTS; ++iy )
+	// the lines themselves, one quad per cell edge so they follow the ground over every bump.  Faint
+	// on purpose: players said the brighter grid hid the ground they were trying to read
+	const Real LINE_ALPHA = 0x26;
+	for( iy = 0; drawLines && iy < GRID_POINTS; ++iy )
 	{
 		for( ix = 0; ix < GRID_POINTS; ++ix )
 		{
@@ -794,7 +824,7 @@ void W3DInGameUI::drawBuildGrid( void )
 
 	// and a red wash over every cell a structure cannot stand on.  Filling the cell reads at a
 	// glance where an X drawn in thin lines did not.
-	const Real BLOCKED_ALPHA = 0x44;
+	const Real BLOCKED_ALPHA = 0x30;
 	for( iy = 0; iy < GRID_CELLS; ++iy )
 	{
 		for( ix = 0; ix < GRID_CELLS; ++ix )
@@ -985,11 +1015,9 @@ void W3DInGameUI::drawAttackCircle( void )
 }  // end drawAttackCircle
 
 //-------------------------------------------------------------------------------------------------
-/** The thread is coloured by what it is for: anything that ends in a shot is red, an attack move
-	* is pink, a post to be held is blue, a building to be taken is gold, everything else is green.
-	* The marker on the end of it is the plain pointer in the same colour - one shape for every
-	* order, so the colour is the whole message.  A dot and a ring were tried in its place and
-	* players wanted the pointer back. */
+/** An order's colour: anything that ends in a shot is red, an attack move is pink, a post to be
+	* held is blue, a building to be taken is gold, everything else is green.  The line itself is
+	* EA's rally line now; the colour is left on the guard circle and the step numbers. */
 //-------------------------------------------------------------------------------------------------
 static UnsignedInt orderHintLineColor( InGameUI::OrderHintKind kind )
 {
@@ -1235,10 +1263,8 @@ void W3DInGameUI::drawOrderStep( const OrderHint& hint, const ICoord2D& tip, Uns
 }
 
 //-------------------------------------------------------------------------------------------------
-/** One faint line per bunch of selected units going the same way, from where they stand to where
-	* they are going, with the order's own cursor sitting on the destination.  Green for a move, pink
-	* for an attack-move, red for an attack.  The goals are read off the units every frame, so the
-	* lines last as long as the orders do and go when the units arrive or the selection changes. */
+/** The screen-space part of the order hints: a guard's circle and the numbers of a shift list.  The
+	* goals are read off the units every frame, so both last as long as the orders do. */
 //-------------------------------------------------------------------------------------------------
 void W3DInGameUI::drawOrderHints( void )
 {
@@ -1248,18 +1274,10 @@ void W3DInGameUI::drawOrderHints( void )
 
 	const Real width = 1.0f;
 
-	// how far right of the spot an upgrade or an ability stands: past the pointer and the number of
-	// the step that ends there, both of which grow with the screen
+	// how far right of the spot an upgrade or an ability stands: past the number of the step that
+	// ends there, which grows with the screen
 	const Real IN_PLACE_MARKER_OFFSET = 44.0f;
 	const Int inPlaceOffset = REAL_TO_INT( IN_PLACE_MARKER_OFFSET * orderStepScale() );
-
-	// A new marker slides up out of the bottom right and fades in over this long, so an order that
-	// has just been given announces itself instead of appearing fully formed.  Wall clock rather
-	// than frames: the picture is uncapped, so a frame count would run at the frame rate.
-	const UnsignedInt MARKER_SLIDE_MS = 130;
-	const Real MARKER_SLIDE_PIXELS = 13.0f;
-
-	const UnsignedInt nowMs = Clock_Milliseconds();
 
 	// a group on one guard order is one circle, not one per unit stacked into an opaque band
 	std::vector<const OrderHint *> ringsDrawn;
@@ -1280,63 +1298,22 @@ void W3DInGameUI::drawOrderHints( void )
 			}
 		}
 
-		const UnsignedInt ageMs = nowMs - it->bornMs;
-		Real arrival = 1.0f;
-		if( ageMs < MARKER_SLIDE_MS )
-			arrival = (Real)ageMs / (Real)MARKER_SLIDE_MS;
-
-		// eased out, so it comes in fast and settles rather than sliding at one speed and stopping
-		const Real remaining = 1.0f - arrival;
-		const Real eased = 1.0f - remaining * remaining * remaining;
-
-		// a unit off the edge of the screen still has a destination worth seeing, and the line to it
-		// says which way it went.  WTS_OUTSIDE_FRUSTUM still gives usable pixels, so only points
-		// behind the camera are dropped
-		ICoord2D from, to;
-		if( TheTacticalView->worldToScreenTriReturn( &it->from, &from ) == View::WTS_INVALID )
-			continue;
+		// The line, the joint and the flag are EA's rally point art in the 3D scene
+		// (W3DWaypointBuffer::drawWaypoints and InGameUI::updateOrderFlags).  What is left here is
+		// the step number and the art of a step whose kind the line cannot tell apart from a move.
+		// WTS_OUTSIDE_FRUSTUM still gives usable pixels, so only points behind the camera are dropped
+		ICoord2D to;
 		if( TheTacticalView->worldToScreenTriReturn( &it->to, &to ) == View::WTS_INVALID )
 			continue;
 
-		// an upgrade or an ability is used on the spot the step before it ends on, whose marker is
-		// already there, so this one stands beside it rather than on top of it and draws no thread
-		const Bool inPlace = it->kind == ORDER_HINT_UPGRADE || it->kind == ORDER_HINT_ABILITY;
-		if( inPlace )
+		// an upgrade or an ability is used on the spot the step before it ends on, whose number is
+		// already there, so this one stands beside it rather than on top of it
+		if( it->kind == ORDER_HINT_UPGRADE || it->kind == ORDER_HINT_ABILITY )
 			to.x += inPlaceOffset;
 
-		// Order Lines off in the options takes the lines away and leaves the markers: where a unit is
-		// going is still worth a glance when the thread across the map is not
-		if( TheGlobalData->m_showOrderLines && !inPlace )
-			TheDisplay->drawLine( from.x, from.y, to.x, to.y, width, lineColor );
-
-		// the marker is the plain pointer, tinted: its white body takes the order colour and the
-		// dark outline stays.  The hot spot is the pixel the player aims with, so that is the pixel
-		// that goes on the destination - a pointer hung by its top left corner points at the wrong
-		// ground
-		ICoord2D hotSpot;
-		const Image *image = orderCursorImage( Mouse::ARROW, &hotSpot );
-		if( image )
-		{
-			const Int w = image->getImageWidth();
-			const Int h = image->getImageHeight();
-			const Int slide = REAL_TO_INT_FLOOR( ( 1.0f - eased ) * MARKER_SLIDE_PIXELS );
-			const Int x = to.x - hotSpot.x + slide;
-			const Int y = to.y - hotSpot.y + slide;
-
-			// the tint carries the fade as well as the order's colour
-			const UnsignedInt markerColor = ( orderHintMarkerColor( it->kind ) & 0x00FFFFFF )
-																			| ( (UnsignedInt)REAL_TO_INT( 255.0f * eased ) << 24 );
-			TheDisplay->drawImage( image, x, y, x + w, y + h, markerColor );
-
-			// a capture carries its cursor even alone: a lone one is the case that looked like a walk
-			if( it->step > 0 || it->icon || it->kind == ORDER_HINT_CAPTURE )
-			{
-				ICoord2D tip;
-				tip.x = to.x + slide;
-				tip.y = to.y + slide;
-				drawOrderStep( *it, tip, markerColor );
-			}
-		}
+		// a capture carries its cursor even alone: a lone one is the case that looked like a walk
+		if( it->step > 0 || it->icon || it->kind == ORDER_HINT_CAPTURE )
+			drawOrderStep( *it, to, orderHintMarkerColor( it->kind ) );
 	}
 
 }  // end drawOrderHints
@@ -1461,7 +1438,7 @@ void W3DInGameUI::drawGuardMarkers( void )
 //-------------------------------------------------------------------------------------------------
 void W3DInGameUI::drawAllyCursorLights( void )
 {
-	if( !TheGlobalData->m_showAllyCursors )
+	if( !TheGlobalData->m_showAllyCursors || TheGlobalData->isClassicUI() )
 		return;
 
 	enum { LIGHT_SEGMENTS = 20, LIGHT_RINGS = 5 };
@@ -1596,6 +1573,78 @@ void W3DInGameUI::drawAllyCursors( void )
 	}
 
 }  // end drawAllyCursors
+
+//-------------------------------------------------------------------------------------------------
+/** Classic: EA's animated ring on the ground where a move order landed, 40 client frames each.
+	* EA's own code, deleted by fec052cc, back for Classic only (InGameUI::createMoveHint fills it). */
+//-------------------------------------------------------------------------------------------------
+void W3DInGameUI::drawMoveHints( View *view )
+{
+	const Bool classic = TheGlobalData->isClassicUI();
+	for( Int i = 0; i < MAX_MOVE_HINTS; i++ )
+	{
+		Int elapsed = TheGameClient->getFrame() - m_moveHint[i].frame;
+
+		if( classic && m_moveHint[ i ].frame != 0 && elapsed <= 40 )
+		{
+			// create render object and add to scene of needed
+			if( m_moveHintRenderObj[ i ] == NULL )
+			{
+				RenderObjClass *hint = W3DDisplay::m_assetManager->Create_Render_Obj(TheGlobalData->m_moveHintName.str());
+
+				AsciiString animName;
+				animName.format("%s.%s", TheGlobalData->m_moveHintName.str(), TheGlobalData->m_moveHintName.str());
+				HAnimClass *anim = W3DDisplay::m_assetManager->Get_HAnim(animName.str());
+
+				if( hint == NULL )
+				{
+					REF_PTR_RELEASE( anim );
+					return;
+				}
+
+				// a fresh render object comes back visible, and the add below only runs for a hidden
+				// one: start it hidden so it reaches the scene
+				hint->Set_Hidden( 1 );
+				m_moveHintRenderObj[ i ] = hint;
+				// 'anim' comes back from Get_HAnim with an AddRef already
+				REF_PTR_RELEASE(m_moveHintAnim[i]);
+				m_moveHintAnim[i] = anim;
+			}
+
+			// show the render object if hidden
+			if( m_moveHintRenderObj[ i ]->Is_Hidden() == 1 ) {
+				m_moveHintRenderObj[ i ]->Set_Hidden( 0 );
+				W3DDisplay::m_3DScene->Add_Render_Object( m_moveHintRenderObj[ i ] );
+				if (m_moveHintAnim[i])
+					m_moveHintRenderObj[i]->Set_Animation(m_moveHintAnim[i], 0, RenderObjClass::ANIM_MODE_ONCE);
+			}
+
+			// move this hint render object to the position and align with terrain
+			Matrix3D transform;
+			PathfindLayerEnum layer = TheTerrainLogic->alignOnTerrain( 0, m_moveHint[ i ].pos, true, transform );
+
+			Real waterZ;
+			if (layer == LAYER_GROUND && TheTerrainLogic->isUnderwater(m_moveHint[ i ].pos.x, m_moveHint[ i ].pos.y, &waterZ))
+			{
+				Coord3D tmp = m_moveHint[ i ].pos;
+				tmp.z = waterZ;
+				Coord3D normal;
+				normal.x = 0;
+				normal.y = 0;
+				normal.z = 1;
+				makeAlignToNormalMatrix(0, tmp, normal, transform);
+			}
+
+			m_moveHintRenderObj[ i ]->Set_Transform( transform );
+		}
+		else if( m_moveHintRenderObj[ i ] && m_moveHintRenderObj[ i ]->Is_Hidden() == 0 )
+		{
+			// hide hint marker
+			m_moveHintRenderObj[ i ]->Set_Hidden( 1 );
+			W3DDisplay::m_3DScene->Remove_Render_Object( m_moveHintRenderObj[ i ] );
+		}
+	}
+}
 
 //-------------------------------------------------------------------------------------------------
 /** Draw visual back for clicking to attack a unit in the world */

@@ -58,6 +58,7 @@
 #include "Common/GameEngine.h"
 #include "Common/GameMusic.h"
 #include "Common/GameSounds.h"
+#include "Common/GlobalData.h"
 #include "Common/MiscAudio.h"
 #include "Common/OSDisplay.h"
 #include "Common/Player.h"
@@ -172,6 +173,8 @@ AudioManager::AudioManager() :
 	m_systemSound3DVolume = 0.0f;
 	m_systemSoundVolume   = 0.0f; 
 	m_systemSpeechVolume  = 0.0f;
+	m_systemAmbientVolume = 0.0f;
+	m_zoomVolume = 1.0f;
 	m_volumeHasChanged			= FALSE;
 	//
 
@@ -263,6 +266,7 @@ void AudioManager::init()
 	m_systemSoundVolume = getAudioSettings() ? getAudioSettings()->m_preferredSoundVolume : 0.75f;
 	m_systemSound3DVolume = getAudioSettings() ? getAudioSettings()->m_preferred3DSoundVolume: 0.75f;
 	m_systemSpeechVolume = getAudioSettings() ? getAudioSettings()->m_preferredSpeechVolume : 0.55f;
+	m_systemAmbientVolume = TheGlobalData->m_ambientVolume / 100.0f;	// the catalog loaded it from Options.ini
 
 	m_scriptMusicVolume = 1.0f;
 	m_scriptSoundVolume = 1.0f;
@@ -745,6 +749,12 @@ void AudioManager::setVolume( Real volume, AudioAffect whichToAffect )
 		m_speechVolume = m_scriptSpeechVolume * m_systemSpeechVolume;
 	}
 
+	// No script volume of its own: a script that turns the effects down turns ambience down with them,
+	// through the effects' script factor in getAmbientVolume.
+	if ((whichToAffect & AudioAffect_Ambient) && (whichToAffect & AudioAffect_SystemSetting)) {
+		m_systemAmbientVolume = volume;
+	}
+
 	m_volumeHasChanged = true;
 }
 
@@ -757,6 +767,8 @@ Real AudioManager::getVolume( AudioAffect whichToGet )
 		return m_soundVolume;
 	} else if (whichToGet & AudioAffect_Sound3D) {
 		return m_sound3DVolume;
+	} else if (whichToGet & AudioAffect_Ambient) {
+		return m_systemAmbientVolume;
 	}
 
 	// Speech
@@ -764,8 +776,28 @@ Real AudioManager::getVolume( AudioAffect whichToGet )
 }
 
 //-------------------------------------------------------------------------------------------------
+Bool AudioManager::isAmbientSound( const AudioEventInfo *info )
+{
+	return info != NULL
+		&& info->m_soundType == AT_SoundEffect
+		&& BitTest( info->m_type, ST_WORLD )
+		&& !BitTest( info->m_type, ST_UI | ST_VOICE | ST_SHROUDED )
+		&& BitTest( info->m_control, AC_LOOP )
+		&& info->m_priority == AP_LOWEST;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real AudioManager::getAmbientVolume( Bool positional ) const
+{
+	const Real volume = positional ? m_zoomVolume * m_scriptSound3DVolume * m_systemAmbientVolume
+		: m_scriptSoundVolume * m_systemAmbientVolume;
+	return MIN( 1.0f, MAX( 0.0f, volume ) );
+}
+
+//-------------------------------------------------------------------------------------------------
 void AudioManager::set3DVolumeAdjustment( Real volumeAdjustment )
 {
+	m_zoomVolume = volumeAdjustment;
 	m_sound3DVolume = volumeAdjustment * m_scriptSound3DVolume * m_systemSound3DVolume;
 	
 	// clamp
@@ -1211,6 +1243,7 @@ void AudioManager::loseFocus( void )
 	m_savedValues[1] = m_systemSoundVolume;
 	m_savedValues[2] = m_systemSound3DVolume;
 	m_savedValues[3] = m_systemSpeechVolume;
+	m_savedValues[4] = m_systemAmbientVolume;
 
 	// Now, set them all to 0.
 	setVolume(0.0f, (AudioAffect) (AudioAffect_All | AudioAffect_SystemSetting));
@@ -1228,6 +1261,7 @@ void AudioManager::regainFocus( void )
 	setVolume(m_savedValues[1], (AudioAffect) (AudioAffect_Sound | AudioAffect_SystemSetting));
 	setVolume(m_savedValues[2], (AudioAffect) (AudioAffect_Sound3D | AudioAffect_SystemSetting));
 	setVolume(m_savedValues[3], (AudioAffect) (AudioAffect_Speech | AudioAffect_SystemSetting));
+	setVolume(m_savedValues[4], (AudioAffect) (AudioAffect_Ambient | AudioAffect_SystemSetting));
 
 	// Now, blow away the old volumes.
 	delete [] m_savedValues;

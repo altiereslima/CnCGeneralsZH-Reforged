@@ -158,6 +158,7 @@ public:
 	WindowLayout *getSaveLoadMenuLayout( void );		///< create if necessary and return layout for save load menu
 	WindowLayout *getPopupReplayLayout( void );			///< create if necessary and return layout for replay save menu
 	WindowLayout *getOptionsLayout( Bool create );	///< return layout for options menu, create if necessary and we are allowed to.
+	static const char *optionsLayoutFile( void );		///< the options menu's layout, which the Classic interface has its own of
 	void destroyOptionsLayout( void );							///< destroy the shell's options layout.
 
 protected:

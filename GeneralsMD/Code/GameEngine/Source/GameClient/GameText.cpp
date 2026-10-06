@@ -60,6 +60,8 @@
 #include "Common/GlobalData.h"
 #include "Common/file.h"
 #include "Common/FileSystem.h"
+#include <map>
+#include <string>
 
 
 #ifdef _INTERNAL
@@ -159,8 +161,12 @@ class GameTextManager : public GameTextInterface
 		virtual AsciiStringVec& getStringsWithLabelPrefix(AsciiString label);
 
 		virtual void					initMapStringFile( const AsciiString& filename );
+		virtual WideChar			fetchEnglishHotKey( const AsciiString& label );
 
 	protected:
+
+		/// label (lower case) -> its English hotkey letter, filled once the table is read
+		std::map< std::string, WideChar > m_englishHotKeys;
 
 		Int							m_textCount;
 		Int							m_maxLabelLen;
@@ -222,6 +228,7 @@ static const char *const TheTextLanguageOverlays[ TEXT_LANGUAGE_COUNT ] =
 {
 	NULL,
 	"Data\\Turkish\\Generals.str",
+	"Data\\German\\Generals.str",
 };
 
 //----------------------------------------------------------------------------
@@ -426,6 +433,7 @@ void GameTextManager::init( void )
 	// the tail in turn and restore afterwards.
 	StringInfo *wholeTable = m_stringInfo;
 	Int filled = mainCount;
+	Int englishEnd = mainCount;		// the CSF and Patch.str: everything before the translation
 	for ( Int overlay = 0; overlay < OVERLAY_COUNT; ++overlay )
 	{
 		if ( overlayCounts[ overlay ] == 0 )
@@ -437,9 +445,26 @@ void GameTextManager::init( void )
 		{
 			filled += overlayCounts[ overlay ];
 		}
+		if ( overlay == 0 )
+			englishEnd = filled;
 	}
 	m_stringInfo = wholeTable;
 	m_textCount = filled;
+
+	// Classic's command keys are the English labels' letters whatever language the text is in, so
+	// every player presses the same key.  Read in table order, so Patch.str overrules the CSF.
+	m_englishHotKeys.clear();
+	for ( Int i = 0; i < englishEnd; i++ )
+	{
+		const WideChar *amp = m_stringInfo[ i ].text.str();
+		while ( amp && *amp && *amp != u'&' )
+			amp++;
+		if ( amp == NULL || *amp == 0 || amp[ 1 ] <= u' ' )
+			continue;
+		AsciiString label = m_stringInfo[ i ].label;
+		label.toLower();
+		m_englishHotKeys[ label.str() ] = amp[ 1 ];
+	}
 
 	m_stringLUT = NEW StringLookUp[m_textCount];
 
@@ -1436,6 +1461,18 @@ UnicodeString GameTextManager::fetch( const Char *label, Bool *exists )
 UnicodeString GameTextManager::fetch( AsciiString label, Bool *exists )
 {
 	return fetch(label.str(), exists);
+}
+
+//============================================================================
+// GameTextManager::fetchEnglishHotKey
+//============================================================================
+
+WideChar GameTextManager::fetchEnglishHotKey( const AsciiString& label )
+{
+	AsciiString key = label;
+	key.toLower();
+	std::map< std::string, WideChar >::const_iterator it = m_englishHotKeys.find( key.str() );
+	return it == m_englishHotKeys.end() ? 0 : it->second;
 }
 
 //============================================================================

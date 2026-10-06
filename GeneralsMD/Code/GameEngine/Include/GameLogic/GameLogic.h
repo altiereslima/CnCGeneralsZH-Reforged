@@ -111,6 +111,13 @@ typedef void (*GameLogicFuncPtr)( Object *obj, void *userData );
 
 typedef std::vector<Object*> ObjectPtrVector;
 
+/// One slot of GameLogic's sleepy-update heap: the module and its friend_getPriority() beside it.
+struct SleepyEntry
+{
+	UnsignedInt priority;
+	UpdateModulePtr module;
+};
+
 // ------------------------------------------------------------------------------------------------
 /**
  * The implementation of GameLogic 
@@ -379,7 +386,10 @@ private:
 	// never modify it directly; please use the proper access methods.
 	// (for an excellent discussion of priority queues, please see:
 	// http://dogma.net/markn/articles/pq_stl/priority.htm)
-	std::vector<UpdateModulePtr> m_sleepyUpdates;
+	// Each entry carries a copy of its module's friend_getPriority() so the heap compares without
+	// touching the pooled module. The copy must equal the module's value whenever a heap operation
+	// runs: every friend_setNextCallFrame on a queued module writes the entry at its index too.
+	std::vector<SleepyEntry> m_sleepyUpdates;
 	
 #ifdef ALLOW_NONSLEEPY_UPDATES
 	// this is a plain old list, not a pq.

@@ -1,0 +1,9 @@
+# Zero Hour Reforged trailer, beats 08 and 09 (LK_PALMS, LK_REFLECT): Scenarios/rf_oasis.txt on
+# Golden Oasis. First the near bank looking east, palms laying long shadows across the sand towards
+# the camera with the Comanches over the water beyond (the website's palm-shadows.jpg); then along
+# the oasis at the stone bridge, the palms and the arches upside down in the pond
+# (water-reflection.jpg).
+
+3.0   cut     3040 900 0.45 -90 10
+10.0  cut     2900 1050 0.3 0 14
+17.6  end

@@ -1,0 +1,10 @@
+# Zero Hour Reforged trailer, beat 26 (CC_OBSERVER): the rf_ai.txt match again from the observer's
+# seat with the interface on and no camera verb, so the camera is the observer's own. The shoot
+# script sends "spectator camera:director" over -control on frame 8880 and the Director picks the
+# fight in the town crossroads.
+#
+#   ...rf_ai.txt's switches... -cinema rf_watch -control 8815 -fps 120 -noFPSLimit
+#     -video 9000 9200 rf_watch
+
+3.0    hud    on
+308.0  end

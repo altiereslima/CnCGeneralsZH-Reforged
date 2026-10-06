@@ -232,12 +232,14 @@ public:
 
 	/**
 		faceTarget, when not null, is where a helicopter keeps its nose while it flies to goalPos.
-		Every other locomotor ignores it. bendDist and bendCos are the next bend in the route
+		fighting says a helicopter is shooting at something, nose on it or not; it then turns its
+		nose into the flight only on a long one, so a short pull-back keeps the target in its sights.
+		Every other locomotor ignores both. bendDist and bendCos are the next bend in the route
 		(ClosestPointOnPathInfo), which a ground vehicle brakes into; the defaults mean none.
 	*/
 	void locoUpdate_moveTowardsPosition(Object* obj, const Coord3D& goalPos,
 		Real onPathDistToGoal, Real desiredSpeed, Bool *blocked, const Coord3D *faceTarget = NULL,
-		Real bendDist = 0.0f, Real bendCos = 1.0f);
+		Bool fighting = FALSE, Real bendDist = 0.0f, Real bendCos = 1.0f);
 	void locoUpdate_moveTowardsAngle(Object* obj, Real angle);
 	/**
 		Kill any current (2D) velocity (but stay at current position, or as close as possible)
@@ -399,8 +401,8 @@ protected:
 	void moveTowardsPositionWheels(Object* obj, PhysicsBehavior *physics, const Coord3D& goalPos, Real onPathDistToGoal, Real desiredSpeed);
 	void moveTowardsPositionTreads(Object* obj, PhysicsBehavior *physics, const Coord3D& goalPos, Real onPathDistToGoal, Real desiredSpeed);
 	void moveTowardsPositionOther(Object* obj, PhysicsBehavior *physics, const Coord3D& goalPos, Real onPathDistToGoal, Real desiredSpeed);
-	void moveTowardsPositionHover(Object* obj, PhysicsBehavior *physics, const Coord3D& goalPos, Real onPathDistToGoal, Real desiredSpeed, const Coord3D *faceTarget);
-	void moveTowardsPositionHelicopter(Object* obj, PhysicsBehavior *physics, const Coord3D& goalPos, Real onPathDistToGoal, Real desiredSpeed, const Coord3D *faceTarget);
+	void moveTowardsPositionHover(Object* obj, PhysicsBehavior *physics, const Coord3D& goalPos, Real onPathDistToGoal, Real desiredSpeed, const Coord3D *faceTarget, Bool fighting);
+	void moveTowardsPositionHelicopter(Object* obj, PhysicsBehavior *physics, const Coord3D& goalPos, Real onPathDistToGoal, Real desiredSpeed, const Coord3D *faceTarget, Bool fighting);
 	void brakeHelicopter(Object* obj, PhysicsBehavior *physics);
 	PhysicsTurningType turnHelicopter(Object* obj, const Coord3D *toward, Real rateShare = 1.0f);
 	void steerHelicopter(Object* obj, PhysicsBehavior *physics, Real wantX, Real wantY);

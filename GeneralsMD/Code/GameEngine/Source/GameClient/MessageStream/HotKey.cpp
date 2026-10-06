@@ -100,21 +100,28 @@ GameMessageDisposition HotKeyTranslator::translateGameMessage(const GameMessage 
 		}
 		// shift is allowed through: a shift-click on a build button queues a batch of units, and
 		// the label hotkey is meant to be that click's equal. Ctrl and alt still block the hotkey.
-		if(newModState & ~SHIFT)
+		// Classic blocks every modifier, as the game shipped
+		if( TheGlobalData->isClassicUI() ? newModState != 0 : ( newModState & ~SHIFT ) != 0 )
 			return disp;
 		// Ctrl+F let go of Ctrl first ends on a bare F release; it is still Ctrl+F
 		if( keyState & KEY_STATE_PRESSED_WITH_CTRL_ALT )
 			return disp;
-		// NUL-terminate it: UnicodeString::set() runs wcslen over what it is given, and this used
-		// to hand it a single un-terminated WideChar on the stack.
-		WideChar key[2];
-		key[0] = TheKeyboard->getPrintableKey(msg->getArgument(0)->integer, 0);
-		key[1] = 0;
-		UnicodeString uKey;
-		uKey.set(key);
-		AsciiString aKey;
-		aKey.translate(uKey);
-		if(TheHotKeyManager && TheHotKeyManager->executeHotKey(aKey))
+		const UnsignedByte scanCode = (UnsignedByte)msg->getArgument(0)->integer;
+		WideChar typed = TheKeyboard->getPrintableKey(scanCode, 0);
+#if defined(_WIN32)
+		// The game's own key tables know four layouts and name every key by its US position, so on a
+		// Turkish keyboard the key marked i read as an apostrophe.  The letter the player's layout
+		// puts on that key is the one a label's '&' means.
+		{
+			HKL layout = GetKeyboardLayout(0);
+			const UINT virtualKey = MapVirtualKeyExW(scanCode, MAPVK_VSC_TO_VK, layout);
+			BYTE keys[256] = { 0 };
+			WCHAR out[4] = { 0 };
+			if( virtualKey != 0 && ToUnicodeEx(virtualKey, scanCode, keys, out, 4, 0x4, layout) == 1 )
+				typed = (WideChar)out[0];
+		}
+#endif
+		if(TheHotKeyManager && TheHotKeyManager->executeHotKey(HotKeyManager::nameOf(typed)))
 			disp = DESTROY_MESSAGE;
 	}
 	return disp;
@@ -223,6 +230,38 @@ Bool HotKeyManager::executeHotKey( const AsciiString& keyIn )
 }
 
 //-----------------------------------------------------------------------------
+/** The map key for a letter: lower case, as UTF-8, so a Turkish letter is itself rather than the
+	* low byte of itself.  I, dotted İ and dotless ı are all one key: a Turkish label's İptal and an
+	* English player's I key have to meet, and so do the I key of a Turkish Q layout and a label's I. */
+AsciiString HotKeyManager::nameOf( WideChar c )
+{
+	if( c == 0x0130 || c == 0x0131 || c == L'I' )
+		c = L'i';
+	else if( c >= L'A' && c <= L'Z' )
+		c = c + ( L'a' - L'A' );
+	else if( c >= 0x00C0 && c <= 0x00DE && c != 0x00D7 )
+		c = c + 0x20;
+	else if( c >= 0x0100 && c <= 0x017F && ( c & 1 ) == 0 )
+		c = c + 1;	// Latin Extended-A pairs: Ğ ğ, Ş ş
+
+	char utf8[ 4 ] = { 0 };
+	if( c < 0x80 )
+		utf8[ 0 ] = (char)c;
+	else if( c < 0x800 )
+	{
+		utf8[ 0 ] = (char)( 0xC0 | ( c >> 6 ) );
+		utf8[ 1 ] = (char)( 0x80 | ( c & 0x3F ) );
+	}
+	else
+	{
+		utf8[ 0 ] = (char)( 0xE0 | ( c >> 12 ) );
+		utf8[ 1 ] = (char)( 0x80 | ( ( c >> 6 ) & 0x3F ) );
+		utf8[ 2 ] = (char)( 0x80 | ( c & 0x3F ) );
+	}
+	return AsciiString( utf8 );
+}
+
+//-----------------------------------------------------------------------------
 AsciiString HotKeyManager::searchHotKey( const AsciiString& label)
 {
 	return searchHotKey(TheGameText->fetch(label));
@@ -240,11 +279,7 @@ AsciiString HotKeyManager::searchHotKey( const UnicodeString& uStr )
 		if (*marker == u'&')
 		{
 			// found a '&' - now look for the next char
-			UnicodeString tmp = UnicodeString::TheEmptyString;
-			tmp.concat(*(marker+1));
-			AsciiString retStr;
-			retStr.translate(tmp);
-			return retStr;
+			return nameOf( *(marker+1) );
 		}
 		marker++;
 	}

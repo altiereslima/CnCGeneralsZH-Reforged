@@ -819,5 +819,6 @@ void CinemaDirector_update( void )
 
 Bool CinemaDirector_hidesHud( void )
 {
-	return theCinemaHudHidden;
+	// the console's freecam is a photo mode, and the interface is the first thing out of a photo
+	return theCinemaHudHidden || (TheTacticalView != NULL && TheTacticalView->isFreeCamera());
 }

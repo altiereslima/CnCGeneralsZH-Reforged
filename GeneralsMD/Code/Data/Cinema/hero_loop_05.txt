@@ -1,0 +1,7 @@
+# Hero loop 05: the close shot. Dust Devil's oil derricks at a tank's distance, looking
+# from the Tank General's side toward the GLA's, over Scenarios/hero_loop_05.txt, frames 600 to
+# 1019 (command line there). Locked so the edit can dissolve the tail into the head.
+
+5     cut        1160 1160 0.45 135 8
+25    shot
+35    end

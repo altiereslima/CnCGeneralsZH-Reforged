@@ -290,6 +290,8 @@ public:
 	void preloadAssets( TimeOfDay timeOfDay );									///< preload the assets
 
 private:
+	ControlBarScheme *findSchemeForSide( const AsciiString& side ) const;	///< the widest of that side's schemes the screen can wear
+
 	ControlBarScheme *m_currentScheme;													///< the current scheme that everythign uses
 	Coord2D m_multiplyer;																	
 	

@@ -1,0 +1,17 @@
+# The daylight fallback for the Reforged trailer's fire-lit smoke shot (beat 06): rf_night.txt's
+# fire, plume and tank fight moved onto the open scrub of Golden Oasis at 2192,3537. A second
+# column on frame 300 keeps the plume standing past the first one's 500 frames.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Golden Oasis\Golden Oasis.map" -autoskirmish 2 -takeover
+#     -observer -side 0 FactionAmerica -side 1 FactionChina -seed 1 -scenario rf_nightday
+#     -cinema rf_nightday -video 200 560 rf_nightday -maxframes 570
+
+30    particles   0  AutoFireLarge01        1  2192 3537
+30    particles   0  FireFactionLarge       4  2192 3537  30
+30    particles   0  SootySmokeColumn       1  2192 3537
+300   particles   0  SootySmokeColumn       1  2192 3537
+30    spawn       0  AmericaTankCrusader    6  1920 3420  40
+30    spawn       1  ChinaTankBattleMaster  6  2520 3620  40
+120   attackmove  0  *  2230 3510
+120   attackmove  1  *  2230 3510

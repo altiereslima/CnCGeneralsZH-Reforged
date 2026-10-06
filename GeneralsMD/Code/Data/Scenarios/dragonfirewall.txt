@@ -1,0 +1,18 @@
+# The Dragon Tank's fire wall from its button. The Dragon stands 100 west of the spot and has to
+# close to the fire wall's 25 range first.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover
+#     -side 0 FactionChina -side 1 FactionAmerica -seed 1 -maxframes 600
+#     -scenario dragonfirewall -logPrefix dragonfirewall_
+#
+# Measured 2026-10-06 with a temporary log of every flame's detonation and every FireWallSegment's
+# position when DeletionUpdate removed it. The Dragon stops at (676,904), 24 short of the spot, and
+# sweeps; 201 flames burst 68 to 85 from it (mean 70), each lighting one segment, 143 in all.
+#
+#   segment end, distance from the Dragon     min    max    mean
+#   OCL INHERIT_VELOCITY as addVelocityTo     155   1047     807    9 units a frame inherited whole
+#   OCL INHERIT_VELOCITY as applyForce (EA)   123    179     164    the same / mass 50
+
+30    spawn         0  ChinaTankDragon       1   600 920
+60    weaponat      0  ChinaTankDragon           700 920 secondary

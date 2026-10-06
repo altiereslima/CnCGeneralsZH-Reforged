@@ -358,6 +358,9 @@ public:
 
 	/// the draw method
 	virtual void doDrawModule(const Matrix3D* transformMtx);
+	/// Hands the frame's lit headlights to the Direct3D 11 frame, nearest the camera first.  Once a
+	/// frame, after the smooth motion has placed every model and before anything is drawn.
+	static void lightHeadlights(const Vector3& cameraPosition);
 	virtual void setShadowsEnabled(Bool enable);
 	virtual void releaseShadows(void);	///< frees all shadow resources used by this module - used by Options screen.
 	virtual void allocateShadows(void); ///< create shadow resources if not already present. Used by Options screen.
@@ -527,6 +530,9 @@ private:
 	ParticleSystemIDVec						m_particleSystemIDs;							///< The ID numbers of the particle systems currently running.
 	std::vector<ModelConditionInfo::HideShowSubObjInfo>		m_subObjectVec;
 	Bool													m_hideHeadlights;
+	Bool													m_hasHeadlights;	///< the model has a HEADLIGHT sub-object, counted by hideAllHeadlights
+	Bool													m_headlightQueued;	///< on lightHeadlights' list of lit models
+	UnsignedInt										m_headlightPass;	///< the draw pass that last found its lights on
 	Bool													m_pauseAnimation;
 	Int														m_animationMode;
 	SmoothMotionTrack							m_smoothMotion;										///< R1: the render object's last two logic transforms
@@ -542,6 +548,7 @@ private:
 	void adjustAnimSpeedToMovementSpeed();
 	static void hideAllMuzzleFlashes(const ModelConditionInfo* state, RenderObjClass* renderObject);
 	void hideAllHeadlights(Bool hide);
+	Bool headlightBeam(Vector3& origin, Vector3& direction, Real& reach) const;
 #if defined(_DEBUG) || defined(_INTERNAL)	//art wants to see buildings without flags as a test.
 	void hideGarrisonFlags(Bool hide);
 #endif

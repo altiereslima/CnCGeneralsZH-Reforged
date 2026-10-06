@@ -211,6 +211,7 @@ private:
 	Bool											m_hasDamageWeapon;
 
 	Bool isAnyWithinTargetPitch(const Object* obj, const Object* victim) const;
+	void recountWeapons();
 
 protected:
 	// snapshot methods

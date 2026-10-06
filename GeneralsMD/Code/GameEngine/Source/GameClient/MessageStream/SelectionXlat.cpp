@@ -432,7 +432,9 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			// with attack move or guard armed a left drag draws the order line over in CommandXlat, so
 			// no selection box grows under it.  Search and destroy has no line to draw, and its drag
 			// is no box either: the key stays armed for the click that aims it
-			const Bool leftDragIsOrder = (TheInGameUI->isLineOrderArmed()
+			// Classic draws no lines: its left drag is always the box
+			const Bool leftDragIsOrder = !TheGlobalData->isClassicUI()
+																	&& (TheInGameUI->isLineOrderArmed()
 																		|| TheInGameUI->getAreaOrderArmed() != InGameUI::AREA_ORDER_NONE)
 																	 && TheInGameUI->getSelectCount() > 0;
 			if (m_leftMouseButtonIsDown && !leftDragIsOrder)
@@ -714,8 +716,8 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 				 was a way to take things back out and a way to leave the base staff behind: Alt keeps
 				 only what can shoot, Ctrl removes the box from the selection instead of replacing it.
 				 Both are drag-only.  A point click has to stay exactly what it was - a filter that eats
-				 single clicks reads as a broken mouse. */
-			if (!isPoint)
+				 single clicks reads as a broken mouse.  Classic has neither: its Ctrl is force fire. */
+			if (!isPoint && !TheGlobalData->isClassicUI())
 			{
 				if (TheKeyboard->isAlt())
 				{
@@ -774,8 +776,9 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			}
 
 			// A box with an army in it takes the army and leaves the dozers and trucks standing among
-			// it; a box of workers alone still takes the workers.  Drag-only, like the filters above.
-			if (!isPoint)
+			// it; a box of workers alone still takes the workers.  Drag-only, like the filters above,
+			// and not in Classic, which is the 2003 box.
+			if (!isPoint && !TheGlobalData->isClassicUI())
 				prioritizeMilitaryBoxSelection(drawablesThatWillSelect, isSelectableMilitaryInBox);
 
 			SelectionInfo si;
@@ -812,16 +815,55 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			
 			Bool addToGroup = TheInGameUI->isInPreferSelectionMode();
 
-			if (si.currentCountEnemies > 0 || 
-					si.currentCountCivilians > 0 || 
-					si.currentCountFriends > 0) 
+			const Bool classic = TheGlobalData->isClassicUI();
+			if (si.currentCountEnemies > 0 ||
+					si.currentCountCivilians > 0 ||
+					si.currentCountFriends > 0 ||
+					(classic && si.currentCountMineBuildings > 0))
 			{
 				// force a new group creation
 				addToGroup = FALSE;
 			}
 
+			// Classic is the game as shipped: a structure is only ever selected on its own, when it is the
+			// one thing clicked or the only selectable thing in the box (EA's Firebase case)
+			if (si.newCountMine > 0 && classic)
+			{
+				si.selectMine = TRUE;
+				if ( si.newCountMineBuildings == 1 && si.newCountMine == 1 )
+				{
+					addToGroup = FALSE;
+					si.selectMineBuildings = TRUE;
+				}
+				else if ( si.newCountMineBuildings > 0 )
+				{
+					Bool onlyTheOneBuildingIsSelectableAnyway = TRUE;
+					DrawableID buildingID = INVALID_DRAWABLE_ID;
+					for (DrawableListIt it = drawablesThatWillSelect.begin(); it != drawablesThatWillSelect.end(); ++it)
+					{
+						const Drawable *d = *it;
+						if ( d->isKindOf( KINDOF_STRUCTURE ) )
+						{
+							if ( buildingID == INVALID_DRAWABLE_ID )
+								buildingID = d->getID();
+							else if ( buildingID != d->getID() )
+								onlyTheOneBuildingIsSelectableAnyway = FALSE;
+						}
+						else if ( d->isSelectable() )
+							onlyTheOneBuildingIsSelectableAnyway = FALSE;
+
+						if ( ! onlyTheOneBuildingIsSelectableAnyway )
+							break;
+					}
+					if ( onlyTheOneBuildingIsSelectableAnyway )
+					{
+						addToGroup = FALSE;
+						si.selectMineBuildings = TRUE;
+					}
+				}
+			}
 			// If there are any of my units, then select those.
-			if (si.newCountMine > 0) 
+			else if (si.newCountMine > 0)
 			{
 				si.selectMine = TRUE;
 
@@ -1144,8 +1186,9 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 				if( !TheInGameUI->getGUICommand() && !TheInGameUI->isOrderKeyArmed()
 						&& !TheKeyboard->isShift() && !TheKeyboard->isCtrl() && !TheKeyboard->isAlt() )
 				{
-					//No GUI command mode, so a click on empty ground deselects everyone.
-					if( TheInGameUI->getPendingPlaceSourceObjectID() == INVALID_ID )
+					//No GUI command mode, so a click on empty ground deselects everyone.  Not in Classic's
+					//default mouse, where that click is a move order and the right button is what deselects.
+					if( TheInGameUI->getPendingPlaceSourceObjectID() == INVALID_ID && !TheGlobalData->leftButtonOrders() )
 					{
 						if( !TheInGameUI->getPreventLeftClickDeselectionInAlternateMouseModeForOneClick() )
 						{
@@ -1176,6 +1219,18 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			if( TheInGameUI->isSignalArmed() )
 			{
 				TheInGameUI->disarmSignal();
+				break;
+			}
+
+			// Classic is the game as shipped: a right click with nothing armed deselects everyone, and
+			// with something armed it only takes that back, below.  A right drag panned and is gone above.
+			// Under EA's Alternate Mouse Setup that click is the order instead (CommandXlat) and
+			// deselects nothing.
+			if( TheGlobalData->isClassicUI() && TheInGameUI->getGUICommand() == NULL
+					&& TheInGameUI->getPendingPlaceType() == NULL )
+			{
+				if( TheGlobalData->leftButtonOrders() )
+					deselectAll();
 				break;
 			}
 
@@ -1267,7 +1322,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			// A screen that fills the middle of the display and answers nothing on the keyboard is
 			// the thing being fixed, so group selection gives way for as long as it is up.
 			//
-			if( TheControlBar && TheControlBar->isPurchaseScienceVisible()
+			if( TheControlBar && TheControlBar->isPurchaseScienceVisible() && !TheGlobalData->isClassicUI()
 					&& group >= 1 && group <= PURCHASE_SCIENCE_COLUMNS )
 			{
 				TheControlBar->pressPurchaseScienceColumn( group - 1 );
@@ -1340,6 +1395,50 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			// logic only fills a squad from scratch, so the squad goes out again whole as a create: its
 			// members as the logic will hold them when this lands, then the selection after them.
 			Int group = t - GameMessage::MSG_META_ADD_TEAM0;
+
+			// Classic keeps the key the way the game shipped it: the squad joins the selection, and a
+			// second press jumps the camera to it
+			if ( TheGlobalData->isClassicUI() )
+			{
+				if ( isValidHotkeySquadIndex( group ) )
+				{
+					UnsignedInt now = TheGameLogic->getFrame();
+					if ( m_lastGroupSelTime == 0 )
+						m_lastGroupSelTime = now;
+
+					if ( now - m_lastGroupSelTime < 20 && group == m_lastGroupSelGroup )
+					{
+						Player *player = ThePlayerList->getLocalPlayer();
+						Squad *selectedSquad = player ? player->getHotkeySquad(group) : NULL;
+						if (selectedSquad != NULL)
+						{
+							VecObjectPtr objlist = selectedSquad->getLiveObjects();
+							Int numObjs = objlist.size();
+							if (numObjs > 0)
+								TheTacticalView->lookAt( objlist[numObjs-1]->getDrawable()->getPosition() );
+						}
+					}
+					else
+					{
+						//Kris: Jan 12, 2005
+						//Can't select other units if you have a structure selected. So deselect the structure to prevent
+						//group force attack exploit.
+						Drawable *draw = TheInGameUI->getFirstSelectedDrawable();
+						if( draw && draw->isKindOf( KINDOF_STRUCTURE ) )
+							TheInGameUI->deselectAllDrawables();
+
+						TheMessageStream->appendMessage((GameMessage::Type)(GameMessage::MSG_ADD_TEAM0 + group));
+						Player *player = ThePlayerList->getLocalPlayer();
+						if (player)
+							selectHotkeySquad( player, group, FALSE );
+					}
+					m_lastGroupSelTime = now;
+					m_lastGroupSelGroup = group;
+				}
+				disp = DESTROY_MESSAGE;
+				break;
+			}
+
 			if ( isValidHotkeySquadIndex( group ) )
 			{
 				std::vector<ObjectID> members;

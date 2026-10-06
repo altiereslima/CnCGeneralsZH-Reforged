@@ -84,6 +84,40 @@ UnsignedByte Win32Mouse::getMouseEvent( MouseIO *result, Bool flush )
 }  // end getMouseEvent
 
 //-------------------------------------------------------------------------------------------------
+/** Windows reports the pointer in the window's pixels and the game works in its own.  They are the
+	* same thing until a fullscreen picture smaller than the monitor is scaled up onto it, when the
+	* window is the monitor's size (or the largest part of it of the picture's shape) and the picture
+	* is not.  Scale by the two sizes, so every mode that does not scale comes out unchanged. */
+//-------------------------------------------------------------------------------------------------
+static void windowToGame( Int &x, Int &y )
+{
+	RECT client;
+	if( TheDisplay == NULL || !::GetClientRect( ApplicationHWnd, &client ) || client.right <= 0 || client.bottom <= 0 )
+		return;
+	const Int width = TheDisplay->getWidth();
+	const Int height = TheDisplay->getHeight();
+	if( client.right != width )
+		x = (Int)( ( (Int64)x * width ) / client.right );
+	if( client.bottom != height )
+		y = (Int)( ( (Int64)y * height ) / client.bottom );
+}
+
+static void gameToWindow( Int &x, Int &y )
+{
+	RECT client;
+	if( TheDisplay == NULL || !::GetClientRect( ApplicationHWnd, &client ) )
+		return;
+	const Int width = TheDisplay->getWidth();
+	const Int height = TheDisplay->getHeight();
+	// rounded up, so windowToGame brings the point back to where it started while the window is the
+	// larger of the two; the freecam re-centres the pointer every frame and reads the difference
+	if( width > 0 && client.right != width )
+		x = (Int)( ( (Int64)x * client.right + width - 1 ) / width );
+	if( height > 0 && client.bottom != height )
+		y = (Int)( ( (Int64)y * client.bottom + height - 1 ) / height );
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Translate a win32 mouse event to our own event info */
 //-------------------------------------------------------------------------------------------------
 void Win32Mouse::translateEvent( UnsignedInt eventIndex, MouseIO *result )
@@ -262,6 +296,8 @@ void Win32Mouse::translateEvent( UnsignedInt eventIndex, MouseIO *result )
 
 	}  // end switch on message at event index in buffer
 
+	windowToGame( result->pos.x, result->pos.y );
+
 }  // end translateEvent
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -359,7 +395,11 @@ void Win32Mouse::update( void )
 	// until the first window message tells us where the pointer is, Windows is the only one who
 	// knows, and the (0,0) we were given at init is a corner nobody put the mouse in.
 	if( m_positionReported == FALSE && m_cursorInWindow )
-		setPosition( clientPos.x, clientPos.y );
+	{
+		Int x = clientPos.x, y = clientPos.y;
+		windowToGame( x, y );
+		setPosition( x, y );
+	}
 
 	//
 	// A window that covers a screen, borderless or fullscreen, keeps the pointer while it has the
@@ -435,6 +475,21 @@ void Win32Mouse::setVisibility(Bool visible)
 	Mouse::setVisibility(visible);
 	//Maybe need to set cursor to force hiding of some cursors.
 	Win32Mouse::setCursor(getMouseCursor());
+}
+
+/** The freecam's mouse look puts the pointer back in the middle of the window every frame.  Never
+		while another window is in front: the pointer is that window's then. */
+Bool Win32Mouse::warpCursor( Int x, Int y )
+{
+	if( ::GetForegroundWindow() != ApplicationHWnd )
+		return FALSE;
+	Int windowX = x, windowY = y;
+	gameToWindow( windowX, windowY );
+	POINT screen = { windowX, windowY };
+	if( !::ClientToScreen( ApplicationHWnd, &screen ) || !::SetCursorPos( screen.x, screen.y ) )
+		return FALSE;
+	setPosition( x, y );
+	return TRUE;
 }
 
 /**Preload all the cursors we may need during the game.  This must be done before the D3D device

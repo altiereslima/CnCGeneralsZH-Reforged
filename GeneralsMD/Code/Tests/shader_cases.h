@@ -22,13 +22,13 @@
  * target's text unchanged) and test_shader_sdl (the SDL3 GPU target through glslang, SPIR-V and
  * MSL).
  *
- * The reference set is the 49 programs decision 4 was measured on (PORTING.md):
+ * The reference set is the 49 programs decision 4 was measured on (PORTING.md), less the three
+ * bumped terrain programs that went with the normal maps, so 46:
  *   - 19 pixel programs: every case test_ffshadercompile compiles,
  *   - 14 vertex programs: every case test_ffvertexcompile compiles,
- *   - 16 engine programs: every program engineshader.cpp transcribes, the three bumped terrain
- *     variants included.
+ *   - 13 engine programs: every program engineshader.cpp transcribes.
  * Each is copied from the test that owns it, field for field.  The rest are marked Reference = false:
- * the normal mapped, shadow receiving and pre-transformed programs those tests never asked for,
+ * the shadow receiving and pre-transformed programs those tests never asked for,
  * which are exactly the branches a new target has to get right.
  */
 #pragma once
@@ -69,7 +69,6 @@ struct ShaderCase
 	VertexPipelineDescription Vertex;
 	EngineShaderProgram Engine;
 	PixelPipelineDescription EnginePipeline;
-	bool EngineBumped;
 };
 
 inline const char *Shader_Case_Target_Name(ShaderCaseTarget target)
@@ -106,19 +105,17 @@ inline ShaderCase combiner(const std::string &name, bool reference)
 	memset(&c.Combiner.Stages, 0, sizeof(c.Combiner.Stages));
 	c.Combiner.StageCount = 0;
 	memset(&c.Combiner.PixelPipeline, 0, sizeof(c.Combiner.PixelPipeline));
-	c.Combiner.NormalMapped = false;
 	c.Combiner.ShadowReceiving = false;
 	c.Vertex = VertexPipelineDescription();
 	c.Engine = ENGINE_SHADER_NONE;
 	memset(&c.EnginePipeline, 0, sizeof(c.EnginePipeline));
-	c.EngineBumped = false;
 	return c;
 }
 
 // test_ffvertexcompile's plain_description.
 inline VertexPipelineDescription plain_vertex()
 {
-	// Value-initialised: zero, and NormalMapped its declared false.  A memset over a structure with a
+	// Value-initialised: zero, and the flags their declared false.  A memset over a structure with a
 	// default member initialiser is what gcc's -Wclass-memaccess warns about.
 	VertexPipelineDescription description = VertexPipelineDescription();
 	description.FVF = FF_FVF_XYZ | FF_FVF_NORMAL | FF_FVF_TEX2 | FF_FVF_DIFFUSE;
@@ -208,29 +205,11 @@ inline std::vector<ShaderCase> Shader_Cases()
 
 	// ---- beyond the reference set: the pixel branches the compile tests never reached ----
 	{
-		ShaderCase c = combiner("ps_extra_normal_mapped", false);
-		c.Combiner.StageCount = 1;
-		c.Combiner.Stages[0] = one_stage(FF_TOP_MODULATE, FF_TA_TEXTURE, FF_TA_DIFFUSE, FF_TOP_MODULATE, FF_TA_TEXTURE, FF_TA_DIFFUSE, 0, true);
-		c.Combiner.NormalMapped = true;
-		cases.push_back(c);
-	}
-	{
 		ShaderCase c = combiner("ps_extra_shadow_receiving", false);
 		c.Combiner.StageCount = 1;
 		c.Combiner.Stages[0] = one_stage(FF_TOP_MODULATE, FF_TA_TEXTURE, FF_TA_DIFFUSE, FF_TOP_MODULATE, FF_TA_TEXTURE, FF_TA_DIFFUSE, 0, true);
 		c.Combiner.ShadowReceiving = true;
 		c.Combiner.PixelPipeline.FogEnabled = true;
-		cases.push_back(c);
-	}
-	{
-		ShaderCase c = combiner("ps_extra_normal_mapped_shadow_receiving", false);
-		c.Combiner.StageCount = 2;
-		c.Combiner.Stages[0] = one_stage(FF_TOP_MODULATE, FF_TA_TEXTURE, FF_TA_DIFFUSE, FF_TOP_MODULATE, FF_TA_TEXTURE, FF_TA_DIFFUSE, 0, true);
-		c.Combiner.Stages[1] = one_stage(FF_TOP_BLENDCURRENTALPHA, FF_TA_TEXTURE, FF_TA_CURRENT, FF_TOP_DISABLE, FF_TA_TEXTURE, FF_TA_CURRENT, 1, true);
-		c.Combiner.NormalMapped = true;
-		c.Combiner.ShadowReceiving = true;
-		c.Combiner.PixelPipeline.AlphaTestEnabled = true;
-		c.Combiner.PixelPipeline.AlphaFunction = FF_CMP_GREATEREQUAL;
 		cases.push_back(c);
 	}
 
@@ -294,21 +273,6 @@ inline std::vector<ShaderCase> Shader_Cases()
 	// ---- beyond the reference set: the vertex branches the compile tests never reached ----
 	{
 		VertexPipelineDescription description = plain_vertex();
-		description.LightingEnabled = true;
-		description.LightCount = 1;
-		description.Lights[0].Type = FF_LIGHT_DIRECTIONAL;
-		description.NormalMapped = true;
-		cases.push_back(vertex("vs_extra_normal_mapped_lit", false, description));
-	}
-	{
-		VertexPipelineDescription description = plain_vertex();
-		description.NormalMapped = true;
-		description.FogEnabled = true;
-		description.FogVertexMode = FF_FOG_LINEAR;
-		cases.push_back(vertex("vs_extra_normal_mapped_unlit", false, description));
-	}
-	{
-		VertexPipelineDescription description = plain_vertex();
 		description.FVF = FF_FVF_XYZRHW | FF_FVF_DIFFUSE | FF_FVF_TEX1;
 		cases.push_back(vertex("vs_extra_pretransformed", false, description));
 	}
@@ -361,7 +325,7 @@ inline std::vector<ShaderCase> Shader_Cases()
 		cases.push_back(vertex("vs_extra_passthrough_count2", false, description));
 	}
 
-	// ---- engineshader.cpp: every program, pixel and vertex, bumped where it can be ----
+	// ---- engineshader.cpp: every program, pixel and vertex ----
 	for (int program = ENGINE_SHADER_TREES; program <= ENGINE_SHADER_MONOCHROME; ++program) {
 		const EngineShaderProgram which = (EngineShaderProgram)program;
 		std::string name = EngineShader_Name(which);
@@ -382,12 +346,6 @@ inline std::vector<ShaderCase> Shader_Cases()
 		if (EngineShader_Pixel_Program(which, c.EnginePipeline, scratch)) {
 			c.Name = "ps_es_" + name;
 			cases.push_back(c);
-			if (EngineShader_Can_Bump(which)) {
-				c.Name = "ps_es_" + name + "_bumped";
-				c.EngineBumped = true;
-				cases.push_back(c);
-				c.EngineBumped = false;
-			}
 			// Beyond the reference set: the alpha test and the fog, which the engine's pixel programs
 			// take from the render state the way ffshader's do.
 			c.Name = "ps_es_" + name + "_extra_alphatest_fog";
@@ -403,7 +361,7 @@ inline std::vector<ShaderCase> Shader_Cases()
 	return cases;
 }
 
-// One case for one target.  False when the generator refuses it (a normal map on D3D9) or when the
+// One case for one target.  False when the generator refuses it or when the
 // target does not apply (the engine programs exist only on the shader model 4 profiles).
 inline bool Shader_Case_Generate(const ShaderCase &c, ShaderCaseTarget target, std::string &hlsl)
 {
@@ -428,11 +386,11 @@ inline bool Shader_Case_Generate(const ShaderCase &c, ShaderCaseTarget target, s
 #if !defined(SHADER_CASES_BEFORE_SDL3_TARGET)
 			if (target == SHADER_CASE_SDL3_GPU) {
 				return c.VertexStage ? EngineShader_Vertex_Program(c.Engine, hlsl, VERTEX_SHADER_TARGET_SDL3_GPU)
-					: EngineShader_Pixel_Program(c.Engine, c.EnginePipeline, hlsl, c.EngineBumped, COMBINER_SHADER_TARGET_SDL3_GPU);
+					: EngineShader_Pixel_Program(c.Engine, c.EnginePipeline, hlsl, COMBINER_SHADER_TARGET_SDL3_GPU);
 			}
 #endif
 			return c.VertexStage ? EngineShader_Vertex_Program(c.Engine, hlsl)
-				: EngineShader_Pixel_Program(c.Engine, c.EnginePipeline, hlsl, c.EngineBumped);
+				: EngineShader_Pixel_Program(c.Engine, c.EnginePipeline, hlsl);
 	}
 	return false;
 }

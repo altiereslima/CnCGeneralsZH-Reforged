@@ -101,6 +101,7 @@ public:
 	
 	AsciiString searchHotKey( const AsciiString& label);
 	AsciiString searchHotKey( const UnicodeString& uStr );
+	static AsciiString nameOf( WideChar c );	///< the map key for a letter: lower case, UTF-8
 
 	/** The window this key is bound to at the moment, or NULL for a key nothing
 		* claims.  When there is one, pressable comes back with the answer

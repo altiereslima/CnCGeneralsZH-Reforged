@@ -189,7 +189,8 @@ static Int nearestGameSpeedIndex( Int framesPerSecond )
 static Int selectedGameSpeed( void )
 {
 	GameWindow *comboBoxGameSpeed = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, comboBoxGameSpeedID );
-	Int selected = 0;
+	// a layout without the dropdown plays at x1, not at the first entry's x0.5
+	Int selected = nearestGameSpeedIndex( LOGICFRAMES_PER_SECOND );
 	GadgetComboBoxGetSelectedPos( comboBoxGameSpeed, &selected );
 	return SKIRMISH_GAME_SPEEDS[ selected ];
 }
@@ -1452,12 +1453,17 @@ void SkirmishGameOptionsMenuInit( WindowLayout *layout, void *userData )
 	//updateSkirmishGameOptions();
 	//initSkirmishGameOptions();
 
-	// set up the game speed dropdown
+	// set up the game speed dropdown. It is the fork's control, so a stock or modded
+	// SkirmishGameOptionsMenu.wnd that wins over Run/Window has none, like the combo boxes in
+	// InitSkirmishGameGadgets
 	GameWindow *comboBoxGameSpeed = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, comboBoxGameSpeedID );
-	GadgetComboBoxReset( comboBoxGameSpeed );
-	for( Int i = 0; i < SKIRMISH_GAME_SPEED_COUNT; ++i )
-		GadgetComboBoxAddEntry( comboBoxGameSpeed, UnicodeString( SKIRMISH_GAME_SPEED_CAPTIONS[ i ] ), comboBoxGameSpeed->winGetEnabledTextColor() );
-	GadgetComboBoxSetSelectedPos( comboBoxGameSpeed, nearestGameSpeedIndex( prefs.getInt( "FPS", LOGICFRAMES_PER_SECOND ) ) );
+	if ( comboBoxGameSpeed )
+	{
+		GadgetComboBoxReset( comboBoxGameSpeed );
+		for( Int i = 0; i < SKIRMISH_GAME_SPEED_COUNT; ++i )
+			GadgetComboBoxAddEntry( comboBoxGameSpeed, UnicodeString( SKIRMISH_GAME_SPEED_CAPTIONS[ i ] ), comboBoxGameSpeed->winGetEnabledTextColor() );
+		GadgetComboBoxSetSelectedPos( comboBoxGameSpeed, nearestGameSpeedIndex( prefs.getInt( "FPS", LOGICFRAMES_PER_SECOND ) ) );
+	}
 	buttonStart->winSetText(TheGameText->fetch("GUI:Start"));
 	/* hey, for now we're also going to disable the map select button until it doesn't crash */
 	//buttonSelectMap->winEnable( FALSE );

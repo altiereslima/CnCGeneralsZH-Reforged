@@ -1,0 +1,26 @@
+# Tanks dying on open ground, for the wreckage in ObjectCreationListReforged.ini: six Crusaders and
+# two Paladins against three Overlords and four Battlemasters east of Twilight Flame's middle, so
+# the Crusader's 19 plates, the Paladin's, the Battlemaster's and the Overlord's scrap all land in
+# one view. Two seats, everyone hostile.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario wreckcheck -maxframes 900
+#     -logPrefix wreckcheck_
+#
+# Drawn, with Cinema/wreckcheck.txt: swap -headless for -win -xres 1920 -yres 1080 -msaa 0 -turbo
+# -cinema wreckcheck. The KILLXP lines in the log give the frame each tank died on.
+
+20    spawn       0  AmericaTankCrusader     6   1380 3800    0
+20    spawn       0  AmericaTankPaladin      2   1360 3740    0
+20    spawn       1  ChinaTankOverlord       3   1600 3800  180
+20    spawn       1  ChinaTankBattleMaster   4   1590 3740  180
+40    attackmove  0  AmericaTankCrusader         1600 3800
+40    attackmove  0  AmericaTankPaladin          1600 3800
+40    attackmove  1  ChinaTankOverlord           1380 3800
+40    attackmove  1  ChinaTankBattleMaster       1380 3800
+
+120   tally       0  *
+240   tally       0  *
+360   tally       0  *
+480   tally       1  *

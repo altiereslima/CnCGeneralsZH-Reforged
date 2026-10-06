@@ -139,6 +139,11 @@ extern Bool contextCommandForNewSelection(const DrawableList *currentlySelectedD
 		}
 	}
 
+	Drawable *newMine = NULL;
+	Drawable *newFriendly = NULL;
+	Drawable *newEnemy = NULL;
+	Drawable *newCivilian = NULL;
+
 	for (it = newlySelectedDrawables->begin(); it != newlySelectedDrawables->end(); ++it) {
 		if (!(*it)) {
 			continue;
@@ -158,16 +163,20 @@ extern Bool contextCommandForNewSelection(const DrawableList *currentlySelectedD
 
 		if (obj->isLocallyControlled()) {
 			++outSelectionInfo->newCountMine;
+			newMine = *it;
 			if (obj->isKindOf(KINDOF_STRUCTURE)) {
 				++outSelectionInfo->newCountMineBuildings;
 			}
 		} else {
 			Relationship rel = localPlayer->getRelationship(obj->getTeam());
 			if (rel == ALLIES) {
+				newFriendly = *it;
 				++outSelectionInfo->newCountFriends;
 			} else if (rel == ENEMIES) {
+				newEnemy = *it;
 				++outSelectionInfo->newCountEnemies;
 			} else if (rel == NEUTRAL) {
+				newCivilian = *it;
 				++outSelectionInfo->newCountCivilians;
 			}
 		}
@@ -177,10 +186,67 @@ extern Bool contextCommandForNewSelection(const DrawableList *currentlySelectedD
 	DEBUG_ASSERTCRASH(outSelectionInfo->currentCountFriends <= 1, ("Selection bug. jkmcd"));
 	DEBUG_ASSERTCRASH(outSelectionInfo->currentCountCivilians <= 1, ("Selection bug. jkmcd"));
 
-	// The left button selects and the right button orders, so a left click never commands.  The
-	// counting above is still wanted - the caller reads the counts for the cursor and the selection
-	// filters.
-	return FALSE;
+	// In Reforged the left button selects and the right button orders, so a left click never
+	// commands.  The counting above is still wanted - the caller reads the counts for the cursor and
+	// the selection filters.  Classic's alternate mouse is EA's, where the left button never
+	// commanded either.
+	if (!TheGlobalData->leftButtonOrders()) {
+		return FALSE;
+	}
+
+	if (outSelectionInfo->currentCountEnemies > 0 || outSelectionInfo->currentCountFriends > 0
+			|| outSelectionInfo->currentCountCivilians > 0) {
+		// with somebody else's unit selected there are no context sensitive commands
+		return FALSE;
+	}
+
+	// In Classic the left button is both, and this is the game's own rule for which one a click on
+	// an enemy, an ally, a garrisonable building or a crate is.
+	if (outSelectionInfo->currentCountMine > 0) {
+		if (outSelectionInfo->newCountEnemies > 0) {
+			if (outSelectionInfo->newCountEnemies == 1 && selectionIsPoint) {
+				return TheGameClient->evaluateContextCommand(newEnemy, newEnemy->getPosition(), CommandTranslator::EVALUATE_ONLY) != GameMessage::MSG_INVALID;
+			}
+
+			return selectionIsPoint;
+		}
+
+		if (outSelectionInfo->newCountMine > 0) {
+			if (outSelectionInfo->newCountMine == 1 && selectionIsPoint && !TheInGameUI->isInPreferSelectionMode()) {
+				return TheGameClient->evaluateContextCommand(newMine, newMine->getPosition(), CommandTranslator::EVALUATE_ONLY) != GameMessage::MSG_INVALID;
+			}
+
+			return FALSE;
+		}
+
+		if (outSelectionInfo->newCountFriends > 0) {
+			if (outSelectionInfo->newCountFriends == 1 && selectionIsPoint) {
+				return TheGameClient->evaluateContextCommand(newFriendly, newFriendly->getPosition(), CommandTranslator::EVALUATE_ONLY) != GameMessage::MSG_INVALID;
+			}
+			return FALSE;
+		}
+
+		if (outSelectionInfo->currentCountMineInfantry > 0 && outSelectionInfo->newCountGarrisonableBuildings == 1) {
+			return TRUE;
+		}
+
+		if (outSelectionInfo->newCountCivilians > 0) {
+			if (outSelectionInfo->newCountCivilians == 1 && selectionIsPoint) {
+				return TheGameClient->evaluateContextCommand(newCivilian, newCivilian->getPosition(), CommandTranslator::EVALUATE_ONLY) != GameMessage::MSG_INVALID;
+			}
+			return FALSE;
+		}
+
+		if (outSelectionInfo->newCountCrates > 0) {
+			return (outSelectionInfo->newCountCrates == 1 && selectionIsPoint);
+		}
+	}
+
+	if (outSelectionInfo->currentCountMine == 0) {
+		return FALSE;
+	}
+
+	return selectionIsPoint;
 }
 
 //-------------------------------------------------------------------------------------------------

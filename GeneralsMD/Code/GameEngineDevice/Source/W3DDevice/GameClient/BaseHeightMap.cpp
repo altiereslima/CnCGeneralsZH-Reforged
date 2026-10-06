@@ -88,6 +88,7 @@
 #include "WW3D2/dx8wrapper.h"
 #include "WW3D2/light.h"
 #include "WW3D2/scene.h"
+#include "WW3D2/ww3d.h"
 #include "W3DDevice/GameClient/W3DPoly.h"
 #include "W3DDevice/GameClient/W3DCustomScene.h"
 
@@ -291,6 +292,10 @@ BaseHeightMapRenderObjClass::BaseHeightMapRenderObjClass(void)
 	m_depthFade.Y = 0.0f;
 	m_depthFade.Z = 0.0f;
 	m_useDepthFade = false;
+	m_staticDiffuseGeneration = 1;
+	m_staticDiffuseStale = true;
+	m_staticDiffuseFrame = 0;
+	m_terrainContentVersion = 0;
 	m_disableTextures = false;
 	TheTerrainRenderObject = this;
 	m_treeBuffer = NULL; 
@@ -1080,6 +1085,16 @@ void BaseHeightMapRenderObjClass::Get_Obj_Space_Bounding_Box(AABoxClass & box) c
 	a volume enclosing things that can float above terrain.
  */
 //-------------------------------------------------------------------------------------------------
+/** TerrainLogic::getExtent is the playable map from 0,0; the terrain draws every cell of the
+		heightmap, the border ring around it too, and that is what the freecam can see. */
+void BaseHeightMapRenderObjClass::getDrawnExtent(Region3D *extent)
+{
+	const Int border = m_map->getBorderSizeInline();
+	extent->lo.set( -border * MAP_XY_FACTOR, -border * MAP_XY_FACTOR, m_minHeight );
+	extent->hi.set( (m_map->getXExtent() - 1 - border) * MAP_XY_FACTOR,
+		(m_map->getYExtent() - 1 - border) * MAP_XY_FACTOR, m_maxHeight );
+}
+
 Bool BaseHeightMapRenderObjClass::getMaximumVisibleBox(const FrustumClass &frustum, AABoxClass *box, Bool ignoreMaxHeight)
 {
 	//create a plane from the lowest point on the terrain
@@ -1474,6 +1489,8 @@ Int BaseHeightMapRenderObjClass::initHeightData(Int x, Int y, WorldHeightMap *pM
 {	
 
 	REF_PTR_SET(m_map, pMap);	//update our heightmap pointer in case it changed since last call.
+	m_staticDiffuseStale = true;
+	m_terrainContentVersion++;
 
 	if (m_shroud)
 		m_shroud->init(m_map,TheGlobalData->m_partitionCellSize,TheGlobalData->m_partitionCellSize);
@@ -1590,7 +1607,9 @@ void BaseHeightMapRenderObjClass::allocateScorchBuffers(void)
 //=============================================================================
 void BaseHeightMapRenderObjClass::updateScorches(void)
 {
-	if (m_scorchesInBuffer > 1) {
+	// Built already.  This read "> 1", so a map with exactly one scorch rebuilt it on every render
+	// pass, through two whole-buffer locks: 900 KB copied twice to draw one crater.
+	if (m_scorchesInBuffer > 0) {
 		return;
 	}
 	if (m_numScorches==0) {
@@ -1844,6 +1863,15 @@ Int BaseHeightMapRenderObjClass::getStaticDiffuse(Int x, Int y)
 	if (up1 >= m_map->getXExtent())
 		up1=m_map->getXExtent()-1;
 
+	const UnsignedByte heights[5] = { m_map->getHeight(x, y), m_map->getHeight(un0, y),
+		m_map->getHeight(up1, y), m_map->getHeight(x, vn0), m_map->getHeight(x, vp1) };
+	if (m_staticDiffuseStale || m_staticDiffuseFrame != WW3D::Get_Frame_Count() ||
+			m_staticDiffuseCells.size() != (size_t)m_map->getXExtent()*m_map->getYExtent())
+		refreshStaticDiffuseInputs();
+	StaticDiffuseCell &cell = m_staticDiffuseCells[y*m_map->getXExtent() + x];
+	if (cell.generation == m_staticDiffuseGeneration && memcmp(cell.heights, heights, sizeof(heights)) == 0)
+		return cell.diffuse;
+
 	Vector3 lightRay[MAX_GLOBAL_LIGHTS];
 	const Coord3D *lightPos;
 
@@ -1854,16 +1882,16 @@ Int BaseHeightMapRenderObjClass::getStaticDiffuse(Int x, Int y)
 	}
 
 	//top-left sample
-	l2r.Set(2*MAP_XY_FACTOR,0,MAP_HEIGHT_SCALE*(m_map->getHeight(up1, y) - m_map->getHeight(un0, y)));
-	n2f.Set(0,2*MAP_XY_FACTOR,MAP_HEIGHT_SCALE*(m_map->getHeight(x, vp1) - m_map->getHeight(x, vn0)));
-	
+	l2r.Set(2*MAP_XY_FACTOR,0,MAP_HEIGHT_SCALE*(heights[2] - heights[1]));
+	n2f.Set(0,2*MAP_XY_FACTOR,MAP_HEIGHT_SCALE*(heights[4] - heights[3]));
+
 	Vector3::Normalized_Cross_Product(l2r,n2f, &normalAtTexel);
 
 	VERTEX_FORMAT vertex;
 	vertex.x=ADJUST_FROM_INDEX_TO_REAL(x);
 	vertex.y=ADJUST_FROM_INDEX_TO_REAL(y);
 
-	vertex.z=  ((float)m_map->getHeight(x,y))*MAP_HEIGHT_SCALE;
+	vertex.z=  ((float)heights[0])*MAP_HEIGHT_SCALE;
 	vertex.u1=0;
 	vertex.v1=0;
 	vertex.u2=1;
@@ -1878,7 +1906,99 @@ Int BaseHeightMapRenderObjClass::getStaticDiffuse(Int x, Int y)
 	} else {
 		doTheLight(&vertex, lightRay, &normalAtTexel, NULL, 1.0f);
 	}
+	cell.diffuse = vertex.diffuse;
+	cell.generation = m_staticDiffuseGeneration;
+	memcpy(cell.heights, heights, sizeof(heights));
 	return vertex.diffuse;
+}
+
+//=============================================================================
+// BaseHeightMapRenderObjClass::refreshStaticDiffuseInputs
+//=============================================================================
+/** Walks everything getStaticDiffuse reads apart from the heights, as raw 32-bit words, against
+the copy taken when the cached cells were filled.  The first word that differs turns the rest of
+the walk into the new copy and retires every cell.  Bits rather than values, because equal bits
+in are what guarantee an equal answer out.  getStaticDiffuse walks it once a render frame, and the
+3-way pass at its start; the frame count alone is not enough, because a map loading changes the
+lighting while no frame is drawn (the time of day is set after the roads have asked for theirs),
+so staticLightingChanged, initHeightData and Notify_Added mark it stale as well. */
+//=============================================================================
+namespace
+{
+	struct StaticDiffuseInputWalk
+	{
+		std::vector<UnsignedInt> &row;
+		size_t pos;
+		Bool changed;
+
+		StaticDiffuseInputWalk(std::vector<UnsignedInt> &r) : row(r), pos(0), changed(false) {}
+
+		void bits(const void *p, size_t bytes)	// bytes is a multiple of four
+		{
+			for (size_t i = 0; i < bytes; i += sizeof(UnsignedInt)) {
+				UnsignedInt word;
+				memcpy(&word, (const unsigned char *)p + i, sizeof(word));
+				if (!changed && pos < row.size() && row[pos] == word) {
+					++pos;
+					continue;
+				}
+				if (!changed) {
+					row.resize(pos);
+					changed = true;
+				}
+				row.push_back(word);
+				++pos;
+			}
+		}
+	};
+}
+
+void BaseHeightMapRenderObjClass::refreshStaticDiffuseInputs(void)
+{
+	StaticDiffuseInputWalk walk(m_staticDiffuseInputs);
+
+	const Int numLights = TheGlobalData->m_numGlobalLights;
+	const Int useDepthFade = m_useDepthFade;
+	const Int shape[4] = { m_map->getXExtent(), m_map->getYExtent(), m_map->getBorderSizeInline(), numLights };
+	walk.bits(shape, sizeof(shape));
+	walk.bits(TheGlobalData->m_terrainLightPos, numLights*sizeof(Coord3D));
+	walk.bits(TheGlobalData->m_terrainDiffuse, numLights*sizeof(RGBColor));
+	walk.bits(&TheGlobalData->m_terrainAmbient[0], sizeof(RGBColor));
+	walk.bits(&TheGlobalData->m_waterPositionZ, sizeof(Real));
+	walk.bits(&useDepthFade, sizeof(useDepthFade));
+	walk.bits(&m_depthFade, sizeof(m_depthFade));
+	walk.bits(&Scene, sizeof(Scene));
+	if (Scene) {
+		// the same list, in the same order, that doTheLight walks
+		RefRenderObjListIterator it(((RTS3DScene *)Scene)->getLightList());
+		for (it.First(); !it.Is_Done(); it.Next()) {
+			LightClass *pLight = (LightClass*)it.Peek_Obj();
+			const Int type = pLight->Get_Type();
+			double range[2];
+			Vector3 diffuse, ambient;
+			pLight->Get_Far_Attenuation_Range(range[0], range[1]);
+			pLight->Get_Diffuse(&diffuse);
+			pLight->Get_Ambient(&ambient);
+			walk.bits(&type, sizeof(type));
+			walk.bits(&pLight->Get_Transform(), sizeof(Matrix3D));
+			walk.bits(range, sizeof(range));
+			walk.bits(&diffuse, sizeof(diffuse));
+			walk.bits(&ambient, sizeof(ambient));
+		}
+	}
+
+	m_staticDiffuseStale = false;
+	m_staticDiffuseFrame = WW3D::Get_Frame_Count();
+	if (!walk.changed && walk.pos == m_staticDiffuseInputs.size())
+		return;
+
+	m_terrainContentVersion++;
+	m_staticDiffuseInputs.resize(walk.pos);
+	const size_t cells = (size_t)shape[0]*shape[1];
+	if (++m_staticDiffuseGeneration == 0 || m_staticDiffuseCells.size() != cells) {
+		m_staticDiffuseCells.assign(cells, StaticDiffuseCell());
+		m_staticDiffuseGeneration = 1;
+	}
 }
 
 //=============================================================================
@@ -2116,6 +2236,8 @@ void BaseHeightMapRenderObjClass::staticLightingChanged( void )
 {
 	// Cause the terrain to get updated with new lighting.
 	m_needFullUpdate = true;
+	m_staticDiffuseStale = true;	// before the roads below ask for theirs
+	m_terrainContentVersion++;
 
 	// Cause the scorches to get updated with new lighting.
 	m_scorchesInBuffer = 0; // If we just allocated the buffers, we got no scorches in the buffer.
@@ -2137,6 +2259,7 @@ void BaseHeightMapRenderObjClass::terrainHeightChanged( Int x, Int y )
 	/* One cell either side.  A vertex's lighting and normal are computed from its neighbours, so
 		 rebuilding only the cell that moved leaves a seam of stale shading around it. */
 	const Int PAD = 2;
+	m_terrainContentVersion++;
 	if (!m_hasDirtyRegion)
 	{
 		m_dirtyRegion.lo.x = x - PAD;
@@ -2222,6 +2345,7 @@ void BaseHeightMapRenderObjClass::Notify_Added(SceneClass * scene)
 {
 	RenderObjClass::Notify_Added(scene);
 	scene->Register(this,SceneClass::ON_FRAME_UPDATE);
+	m_staticDiffuseStale = true;	// getStaticDiffuse lights through this scene's lights now
 }
 
 //=============================================================================

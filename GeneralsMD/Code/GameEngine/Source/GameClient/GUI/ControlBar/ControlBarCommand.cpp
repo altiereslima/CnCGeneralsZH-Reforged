@@ -722,6 +722,87 @@ void ControlBar::resetBuildQueueButtons( void )
 
 }  // end resetBuildQueueButtons
 
+//-------------------------------------------------------------------------------------------------
+UnsignedInt getQueueCap( const ProductionUpdateInterface *pu )
+{
+	const UnsignedInt cap = pu->getMaxQueueEntries();
+	return TheGlobalData->isClassicUI() ? MIN( cap, (UnsignedInt)MAX_BUILD_QUEUE_BUTTONS ) : cap;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Classic's build queue, EA's: the first MAX_BUILD_QUEUE_BUTTONS entries of the producer's queue
+	* on the queue buttons, each a cancel of its own entry. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::populateBuildQueue( Object *producer )
+{
+	static const CommandButton *cancelUnitCommand = findCommandButton( "Command_CancelUnitCreate" );
+	static const CommandButton *cancelUpgradeCommand = findCommandButton( "Command_CancelUpgradeCreate" );
+
+	resetBuildQueueButtons();
+
+	ProductionUpdateInterface *pu = producer->getProductionUpdateInterface();
+	Int windowIndex = 0;
+	for( const ProductionEntry *production = pu->firstProduction();
+			 production && windowIndex < MAX_BUILD_QUEUE_BUTTONS;
+			 production = pu->nextProduction( production ), windowIndex++ )
+	{
+		GameWindow *control = m_queueData[ windowIndex ].control;
+		control->winEnable( TRUE );
+		control->winSetStatus( WIN_STATUS_USE_OVERLAY_STATES );
+		if( production->getProductionType() == PRODUCTION_UNIT )
+		{
+			setControlCommand( control, cancelUnitCommand );
+			m_queueData[ windowIndex ].type = PRODUCTION_UNIT;
+			m_queueData[ windowIndex ].productionID = production->getProductionID();
+			GadgetButtonSetEnabledImage( control, production->getProductionObject()->getButtonImage() );
+			GadgetButtonDrawOverlayImage( control, calculateVeterancyOverlayForThing( production->getProductionObject() ) );
+		}
+		else
+		{
+			setControlCommand( control, cancelUpgradeCommand );
+			m_queueData[ windowIndex ].type = PRODUCTION_UPGRADE;
+			m_queueData[ windowIndex ].upgradeToResearch = production->getProductionUpgrade();
+			GadgetButtonSetEnabledImage( control, production->getProductionUpgrade()->getButtonImage() );
+		}
+	}
+
+	m_displayedQueueCount = pu->getProductionCount();
+
+}  // end populateBuildQueue
+
+//-------------------------------------------------------------------------------------------------
+/** Classic: the queue stands where the portrait does while the producer has anything in it, the
+	* first entry's build clock on its button, and the portrait comes back when it empties. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::updateClassicBuildQueue( Object *obj, ProductionUpdateInterface *pu )
+{
+	GameWindow *queue = m_contextParent[ CP_BUILD_QUEUE ];
+	const Bool busy = pu && pu->firstProduction() != NULL;
+	if( !busy )
+	{
+		if( queue->winIsHidden() == FALSE )
+		{
+			queue->winHide( TRUE );
+			setPortraitByObject( obj );
+		}
+		return;
+	}
+
+	// the portrait is put back by anything that re-evaluates the selection, so it is taken off
+	// every frame the queue stands in its place, as EA did
+	setPortraitByObject( NULL );
+	if( queue->winIsHidden() )
+	{
+		queue->winHide( FALSE );
+		populateBuildQueue( obj );
+	}
+	else if( pu->getProductionCount() != m_displayedQueueCount )
+		populateBuildQueue( obj );
+
+	GadgetButtonDrawInverseClock( m_queueData[ 0 ].control, pu->firstProduction()->getPercentComplete(), m_buildUpClockColor );
+
+}  // end updateClassicBuildQueue
+
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
@@ -757,9 +838,13 @@ void ControlBar::updateContextCommand( void )
 	//
 	// the right HUD always belongs to the selection, so the build queue panel is never shown
 	// over it: a unit build button carries its own queue (radial progress, count badge,
-	// right-click cancels the last one) and the producer's world bar shows the rest
+	// right-click cancels the last one) and the producer's world bar shows the rest.  Classic
+	// has none of that, so a lone producer with something queued shows its queue where its
+	// portrait was, as the game shipped
 	//
-	if( m_contextParent[ CP_BUILD_QUEUE ]->winIsHidden() == FALSE )
+	if( TheGlobalData->isClassicUI() && m_currContext == CB_CONTEXT_COMMAND )
+		updateClassicBuildQueue( obj, pu );
+	else if( m_contextParent[ CP_BUILD_QUEUE ]->winIsHidden() == FALSE )
 	{
 		m_contextParent[ CP_BUILD_QUEUE ]->winHide( TRUE );
 		setPortraitByObject( obj );
@@ -820,7 +905,8 @@ void ControlBar::updateContextCommand( void )
 					if( p->getProductionType() == PRODUCTION_UNIT &&
 							p->getProductionObject() == command->getThingTemplate() )
 						queued++;
-				GadgetButtonSetCount( win, queued );
+				// Classic counts its queue on the queue buttons over the portrait, not on the button
+				GadgetButtonSetCount( win, TheGlobalData->isClassicUI() ? 0 : queued );
 				if( queued > 0 && obj->isLocallyControlled() )
 					win->winSetStatus( WIN_STATUS_CANCEL_WHEN_DISABLED );
 
@@ -847,7 +933,9 @@ void ControlBar::updateContextCommand( void )
 		{
 			const ThingTemplate *tmpl = command->getThingTemplate();
 			Player *localPlayer = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
-			if( tmpl && localPlayer )
+			// Classic's cameos are EA's pictures alone: no seconds, price or power on them.  The
+			// seconds were wall-clock ones, so they crept up whenever the match ran under 30 frames
+			if( tmpl && localPlayer && !TheGlobalData->isClassicUI() )
 			{
 				GadgetButtonSetSeconds( win, ControlBar_secondsFromFrames( (Real)tmpl->calcTimeToBuild( localPlayer ) ) );
 				//
@@ -886,7 +974,7 @@ void ControlBar::updateContextCommand( void )
 
 			const UpgradeTemplate *ut = command->getUpgradeTemplate();
 			Player *localPlayer = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
-			if( ut && localPlayer )
+			if( ut && localPlayer && !TheGlobalData->isClassicUI() )
 			{
 				GadgetButtonSetSeconds( win, ControlBar_secondsFromFrames( (Real)ut->calcTimeToBuild( localPlayer ) ) );
 				GadgetButtonSetCost( win, ut->calcCostToBuild( localPlayer ) );
@@ -1307,12 +1395,13 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 	//
 	// The cap is the queue's own depth (INI MaxQueueEntries, 100 by default here), not the number
 	// of buttons the build-queue strip happens to have room for - those nine buttons are a display
-	// limit and were greying every build button out at nine units.
+	// limit and were greying every build button out at nine units.  Classic shows its queue on
+	// those nine buttons, so there they are the cap (getQueueCap).
 	//
 	// >=, not ==: a shift-click queues several at once, so an exact-equality test stopped firing
 	// once the count stepped past the cap.
 	//
-	Bool queueMaxed = pu ? ( pu->getProductionCount() >= pu->getMaxQueueEntries() ) : FALSE;
+	Bool queueMaxed = pu ? ( pu->getProductionCount() >= getQueueCap( pu ) ) : FALSE;
 
 	switch( command->getCommandType() )
 	{
@@ -1634,7 +1723,8 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 				if( frames <= 0.0f && spTemplate )
 					frames = (Real)spTemplate->getReloadTime();
 
-				GadgetButtonSetSeconds( applyToWin, ControlBar_secondsFromFrames( frames ) );
+				// Classic's power buttons are EA's pictures alone, like its build buttons
+				GadgetButtonSetSeconds( applyToWin, TheGlobalData->isClassicUI() ? 0 : ControlBar_secondsFromFrames( frames ) );
 			}
 
 			// Pro Rules: the power is there and the button stays dead

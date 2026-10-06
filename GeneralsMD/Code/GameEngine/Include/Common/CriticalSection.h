@@ -36,11 +36,19 @@
 
 #include <mutex>
 
+#include <atomic>
+#include <stdint.h>
+
 #if defined(__APPLE__)
 #include <os/lock.h>
 #include <pthread.h>
-#include <atomic>
-#include <stdint.h>
+#else
+#include <condition_variable>
+#include <cstdlib>
+#include <thread>
+#if defined(_MSC_VER)
+#include <intrin.h>	// _mm_pause, __yield
+#endif
 #endif
 
 #ifdef PERF_TIMERS
@@ -48,44 +56,23 @@ extern PerfGather TheCritSecPerfGather;
 #endif
 
 /*
-	This was a raw Win32 CRITICAL_SECTION.  It is a std::recursive_mutex now (B11), and the
-	"recursive" is not conservatism - it is required, by one caller, unconditionally:
+	This was a raw Win32 CRITICAL_SECTION, then std::recursive_mutex (B11), and is now an owner and
+	a count over a platform word: RecursiveUnfairLock on Apple, RecursiveLock everywhere else.  It
+	stays recursive, as CRITICAL_SECTION was.  The one caller that re-entered, UnicodeString::set
+	through releaseBuffer, takes no lock since its count went atomic (2026-10-05), so no caller
+	needs the recursion now; keeping it costs one compare per enter.  TheUnicodeStringCriticalSection
+	is still declared because WinMain, PosixMain and the tests assign it.  Nothing takes it.
 
-	    UnicodeString::set( const UnicodeString & )    UnicodeString.cpp:155
-	        takes TheUnicodeStringCriticalSection      UnicodeString.cpp:157
-	        calls releaseBuffer()                      UnicodeString.cpp:162
-	            takes TheUnicodeStringCriticalSection  UnicodeString.cpp:130   <- again, same lock
+	The three locks in use:
 
-	The scoped lock taken at :157 is still in scope when :162 runs, and the branch it sits in is
-	`if (&stringSrc != this)` - which is the ordinary case, not an edge one.  A Win32
-	CRITICAL_SECTION is recursive, so this has always been well-defined; a std::mutex is not, and
-	re-locking one you already hold is undefined behaviour rather than a deadlock you would
-	notice in a debugger.  So std::mutex is not available to us here, and a future reader who
-	thinks the "recursive" looks unnecessary should re-read those four lines before removing it.
+	  TheMemoryPoolCriticalSection  MemoryPool's allocate, free, releaseEmpties and reset in
+	                                GameMemory.cpp.  What they call under it takes no lock.
+	  TheDmaCriticalSection         DynamicMemoryAllocator's allocate and free.  Nests into the pool
+	                                lock, a different object.
+	  TheDebugLogCriticalSection    DebugLog in Debug.cpp, under DEBUG_THREADSAFE.  A leaf.
 
-	The other three locks this class backs do not recurse - checked, not assumed:
-
-	  TheMemoryPoolCriticalSection  GameMemory.cpp 1644, 1734, 1793, 1814.  The functions reached
-	                                under it - createBlob, freeBlob, init, sysAllocateDoNotZero,
-	                                sysFree - take no lock of their own.
-	  TheDmaCriticalSection         GameMemory.cpp 2182, 2298.  Nests into the pool lock, which is
-	                                a different object.
-	  TheDebugLogCriticalSection    Debug.cpp 451.  doLogOutput is a leaf: fprintf and
-	                                OutputDebugString, no allocation and no way back into DebugLog.
-
-	They share one class, so they get the recursive one too.  The cost of that over a plain mutex
-	is an owner check on an uncontended acquire, which is also exactly what CRITICAL_SECTION was
-	doing before - this is the mapping that keeps behaviour identical, not a concession.
-
-	Lock ordering, since three of the four nest: Unicode -> Dma -> Pool, in that direction only.
-	UnicodeString::releaseBuffer calls TheDynamicMemoryAllocator->freeBytes under the Unicode
-	lock, and DynamicMemoryAllocator::allocateBytesDoNotZeroImplementation calls into the pool
-	under the Dma lock.  Nothing in GameMemory.cpp takes the Unicode lock, so there is no cycle.
-	Keep it that way.
-
-	No spin count is lost in the move.  InitializeCriticalSectionAndSpinCount,
-	SetCriticalSectionSpinCount and TryEnterCriticalSection appear nowhere in this tree, so every
-	one of these locks was already a plain InitializeCriticalSection with the system default.
+	Lock order: Dma -> Pool, that direction only.  Nothing in GameMemory.cpp takes the Dma lock
+	under the pool lock.  Keep it that way.
 
 	On Apple the lock is os_unfair_lock with an owner and a count (PERF1, 2026-09-27), not libc++'s
 	std::recursive_mutex, which is a recursive pthread mutex there.  The allocator takes these locks
@@ -102,10 +89,114 @@ extern PerfGather TheCritSecPerfGather;
 	Without it a non-owner exit at depth above one would quietly count down someone else's depth.  A
 	thread that ends while holding the lock is a bug on every platform too; here a later thread given
 	the same pthread_t would find itself the owner.
-	Windows and Linux keep std::recursive_mutex: Linux's glibc mutex is to be measured before it is
-	replaced, and Windows is not ours to measure.
+
+	Everywhere else (2026-10-05) the lock is RecursiveLock below, the same owner and count over a
+	three-state word in place of os_unfair_lock.  MSVC's std::recursive_mutex went through
+	msvcp140's _Mtx_lock and mtx_do_lock into ntdll's SRW lock on every allocation:
+	RtlAcquire/ReleaseSRWLockExclusive were 2.3% and mtx_do_lock 0.6% of the main thread in a
+	530-unit fight.  Uncontended, this is one compare-exchange to enter and one exchange to leave,
+	inline, the same two locked instructions the SRW lock executes; what goes is the calls around
+	them and the second owner check.  A thread that finds the lock taken spins on a CPU pause for a
+	short while, as SRW does (JobSystem workers hold the pool lock for well under a microsecond),
+	then yields a few times, then sleeps on a condition variable until the holder's exit wakes it,
+	so a long hold costs a waiter no CPU.  The owner tag is the address of a thread_local, which costs no call; as with pthread_t
+	on Apple, a later thread can be given the address of one that ended, which matters only if that
+	one ended holding the lock.  Linux's glibc mutex was never measured against this.  It takes the
+	same path because nothing in it is Windows.
 */
-#if defined(__APPLE__)
+#if !defined(__APPLE__)
+class RecursiveLock
+{
+	std::atomic<unsigned int> m_state{ 0 };	///< 0 free, 1 held, 2 held and someone may be asleep
+	std::atomic<uintptr_t> m_owner{ 0 };		///< the holder's tag, 0 when free
+	unsigned int m_depth = 0;					///< read and written by the holder only
+	std::mutex m_parkMutex;						///< guards the sleep, not the lock
+	std::condition_variable m_parkCv;
+
+	static uintptr_t self()
+	{
+		static thread_local char tag;
+		return reinterpret_cast<uintptr_t>( &tag );
+	}
+
+	bool tryTake()
+	{
+		unsigned int expected = 0;
+		return m_state.compare_exchange_strong( expected, 1, std::memory_order_acquire, std::memory_order_relaxed );
+	}
+
+	static void cpuRelax()
+	{
+	#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+		_mm_pause();
+	#elif defined(_MSC_VER) && defined(_M_ARM64)
+		__yield();
+	#elif defined(__x86_64__) || defined(__i386__)
+		__builtin_ia32_pause();
+	#elif defined(__aarch64__)
+		__asm__ __volatile__( "yield" );
+	#endif
+	}
+
+	void lockContended()
+	{
+		for (int spin = 0; spin < 128; ++spin)
+		{
+			cpuRelax();
+			if (m_state.load( std::memory_order_relaxed ) == 0 && tryTake())
+				return;
+		}
+		for (int spin = 0; spin < 16; ++spin)
+		{
+			std::this_thread::yield();
+			if (m_state.load( std::memory_order_relaxed ) == 0 && tryTake())
+				return;
+		}
+		// Marking the word 2 before sleeping is what makes the holder's exit wake someone.  The mark
+		// and the check happen under m_parkMutex, and the waker takes m_parkMutex before it notifies,
+		// so a wake cannot fall between this thread's check and its wait.  Whoever gets the lock out
+		// of here leaves it at 2, which at worst costs one wake nobody needed.
+		std::unique_lock<std::mutex> park( m_parkMutex );
+		while (m_state.exchange( 2, std::memory_order_acquire ) != 0)
+			m_parkCv.wait( park );
+	}
+
+	void wake()
+	{
+		{ std::lock_guard<std::mutex> park( m_parkMutex ); }
+		m_parkCv.notify_all();
+	}
+
+public:
+	void lock()
+	{
+		const uintptr_t me = self();
+		// Only this thread ever stores its own tag, so a relaxed load that sees it is this thread's own
+		// earlier store: the lock is ours already.
+		if (m_owner.load( std::memory_order_relaxed ) == me)
+		{
+			++m_depth;
+			return;
+		}
+		if (!tryTake())
+			lockContended();
+		m_owner.store( me, std::memory_order_relaxed );
+		m_depth = 1;
+	}
+
+	void unlock()
+	{
+		if (m_owner.load( std::memory_order_relaxed ) != self())
+			std::abort();		// CriticalSection::exit by a thread that does not hold it
+		if (--m_depth == 0)
+		{
+			m_owner.store( 0, std::memory_order_relaxed );
+			if (m_state.exchange( 0, std::memory_order_release ) == 2)
+				wake();
+		}
+	}
+};
+#else
 class RecursiveUnfairLock
 {
 	os_unfair_lock m_lock = OS_UNFAIR_LOCK_INIT;
@@ -148,7 +239,7 @@ class CriticalSection
 #if defined(__APPLE__)
 	RecursiveUnfairLock m_mutex;
 #else
-	std::recursive_mutex m_mutex;
+	RecursiveLock m_mutex;
 #endif
 
 	public:
@@ -209,9 +300,8 @@ class ScopedCriticalSection
 // TheAsciiStringCriticalSection used to sit at the top of this list, a FastCriticalSectionClass
 // from WWVegas' mutex.h rather than one of these.  It is gone, and so is the #include of mutex.h
 // that only it needed: its three uses in AsciiString.h (:378, :389, :450) are all commented out,
-// nothing else in the tree named it, and WinMain never assigned it.  mutex.h reaches <intrin.h>
-// and _interlockedbittestandset, so a dead extern was keeping MSVC intrinsics in the header that
-// the allocator and both string classes compile against.
+// nothing else in the tree named it, and WinMain never assigned it.  The <intrin.h> at the top is
+// RecursiveLock's own, for the pause in its contended spin, not a leftover of mutex.h.
 extern CriticalSection *TheUnicodeStringCriticalSection;
 extern CriticalSection *TheDmaCriticalSection;
 extern CriticalSection *TheMemoryPoolCriticalSection;

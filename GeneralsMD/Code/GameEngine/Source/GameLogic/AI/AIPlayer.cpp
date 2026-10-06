@@ -74,6 +74,7 @@
 #include "GameLogic/PartitionManager.h"
 #include "Common/ActionManager.h"				// canCaptureBuilding, for the tech buildings
 #include "GameLogic/Module/SpecialPowerModule.h"	// ... and the module that does it
+#include "GameLogic/Module/SpecialAbilityUpdate.h"	// ending a raider's bomb run
 #include "GameLogic/Module/CollideModule.h"	// ... and the collide that takes a vehicle by touching it
 #include "GameLogic/Module/ContainModule.h"
 #include "GameLogic/Module/OpenContain.h"			// a seat's own shoot-out flag, asked before a rider exists
@@ -3033,6 +3034,20 @@ static Int countOwnedNear( Player *player, const ThingTemplate *tmpl, const Coor
 	return search.count;
 }
 
+/** The nearest standing structure of another side, ally or enemy, beside a dock: whoever built it
+	* has the pile already, or sits on it.  Civilian buildings are neutral and do not count. */
+static Object *otherSideStructureNear( Player *player, const Object *dock )
+{
+	PartitionFilterAcceptByKindOf fStructure(MAKE_KINDOF_MASK(KINDOF_STRUCTURE), KINDOFMASK_NONE);
+	PartitionFilterPlayer fNotMine(player, false);
+	PartitionFilterPlayerAffiliation fSide(player, ALLOW_ALLIES | ALLOW_ENEMIES, true);
+	PartitionFilterAlive fAlive;
+	PartitionFilterOnMap fOnMap;
+	PartitionFilter *filters[] = { &fStructure, &fNotMine, &fSide, &fAlive, &fOnMap, 0 };
+	return ThePartitionManager->getClosestObject( dock->getPosition(),
+		SUPPLY_CENTER_CLOSE_DIST + dock->getGeometryInfo().getBoundingCircleRadius(), FROM_BOUNDINGSPHERE_2D, filters );
+}
+
 // ------------------------------------------------------------------------------------------------
 /** Build a supply center near a supply source with minimumCash or more resources. */
 // ------------------------------------------------------------------------------------------------
@@ -3170,10 +3185,11 @@ void AIPlayer::buildBySupplies(Int minimumCash, const AsciiString& thingName, Bo
 			return;
 		}
 		location.z = 0; // All build list locations are ground relative.
-		DEBUG_LOG(("AI EXPAND frame %d player %d builds '%s' at (%.0f,%.0f) by dock %d, %d in the bank, %.0f from a base of radius %.0f%s\n",
+		const Object *claimant = otherSideStructureNear( m_player, bestSupplyWarehouse );
+		DEBUG_LOG(("AI EXPAND frame %d player %d builds '%s' at (%.0f,%.0f) by dock %d, %d in the bank, %.0f from a base of radius %.0f%s, held by player %d\n",
 			TheGameLogic->getFrame(), m_player->getPlayerIndex(), thingName.str(), location.x, location.y, bestSupplyWarehouse->getID(),
 			m_player->getMoney()->countMoney(), sqrt( sqr( location.x - m_baseCenter.x ) + sqr( location.y - m_baseCenter.y ) ), m_baseRadius,
-			holdableOnly ? ", its own choice" : ""));
+			holdableOnly ? ", its own choice" : "", claimant ? claimant->getControllingPlayer()->getPlayerIndex() : -1));
 		m_player->addToPriorityBuildList(thingName, &location, angle);
 		m_curWarehouseID = bestSupplyWarehouse->getID();
 	}
@@ -3425,22 +3441,20 @@ Object *AIPlayer::findSupplyCenter(Int minimumCash, Bool holdableOnly)
 				Real radius = SUPPLY_CENTER_CLOSE_DIST + obj->getGeometryInfo().getBoundingCircleRadius();
 
 				PartitionFilterAcceptByKindOf f1(MAKE_KINDOF_MASK(KINDOF_CASH_GENERATOR), KINDOFMASK_NONE);
-				//
-				// "Do I already have a centre here" - and, for a supportive AI, "does my ally".  Two
-				// allied AIs racing each other to the same warehouse is one of the most visibly
-				// stupid things AI teammates do, and this filter is the whole of the fix.
-				//
 				PartitionFilterPlayer f2(m_player, true);	// Only find your own units.
-				PartitionFilterPlayerAffiliation f2Ally(m_player, ALLOW_SAME_PLAYER | ALLOW_ALLIES, true);
 				PartitionFilterOnMap filterMapStatus;
-
-				PartitionFilter *mine[] = { &f1, &f2, &filterMapStatus, 0 };
-				PartitionFilter *ours[] = { &f1, &f2Ally, &filterMapStatus, 0 };
-				PartitionFilter **filters = (m_role == AIROLE_SUPPORTIVE || TheGameLogic->getIncomeSharing() == INCOME_SHARING_ALL) ? ours : mine;
+				PartitionFilter *filters[] = { &f1, &f2, &filterMapStatus, 0 };
 
 				Object *supplyCenter = ThePartitionManager->getClosestObject(&center, radius, FROM_BOUNDINGSPHERE_2D, filters);
 				if (supplyCenter) {
 					// We already have a supply center.
+					continue;
+				}
+				// Another side's pile: its supply center works it, or its base stands round it.  Only
+				// our own center was looked for (an ally's too, for a supportive AI), so a dock inside
+				// an ally's base or a second enemy's read as free and the AI put a center, then guns
+				// and factories, against theirs.
+				if (otherSideStructureNear(m_player, obj)) {
 					continue;
 				}
 
@@ -8068,6 +8082,10 @@ static const Int MAX_RAIDERS = 2;
 static const Real HEALER_PATIENT_HEALTH = 0.9f;	///< a unit below this share of its health is worth hovering over
 static const UnsignedInt HEALER_HIT_FRAMES = 3 * LOGICFRAMES_PER_SECOND;	///< a healer hit this recently pulls back
 static const UnsignedInt HEALER_REPORT_FRAMES = 60 * LOGICFRAMES_PER_SECOND;
+/** The reach of a Helix's propaganda tower, ChinaHelixPropagandaTower's Radius in retail ChinaAir.ini.
+	* A unit inside two towers heals as fast as inside one (Object::attemptHealingFromSoleBenefactor),
+	* so a healer keeps its spot this far from every other healer's. */
+static const Real HEALER_TOWER_RADIUS = 150.0f;
 
 /** How far past a known gun's reach a Helix keeps, for the gun's own step forward. */
 static const Real HELIX_GUN_MARGIN = 80.0f;
@@ -8397,10 +8415,21 @@ Coord3D AIPlayer::rearOf( const Coord3D *from, const std::vector<AIKnownGun> &gu
 	return spot;
 }
 
+static Bool insideAnotherTower( const std::vector<Coord3D> &taken, Real x, Real y )
+{
+	for( size_t t = 0; t < taken.size(); ++t )
+		if( sqr( taken[ t ].x - x ) + sqr( taken[ t ].y - y ) < sqr( HEALER_TOWER_RADIUS ) )
+			return TRUE;
+	return FALSE;
+}
+
 /** A healer goes over the most hurt of ours that stands clear of every known gun, out with the army
 	* when the army is out; with nobody hurt it hangs behind the middle of whoever is out, at the first
 	* point toward home no known gun reaches.  Hit, or with a known anti-air gun in reach, it pulls back
-	* the same way.  It carries nobody and is in no wave. */
+	* the same way.  It carries nobody and is in no wave.
+	* Healers in lower slots choose first, and a later one leaves alone whatever already stands inside
+	* their towers: it takes the most hurt unit outside them, and its place behind the wave moves
+	* sideways across the way home until it clears them. */
 void AIPlayer::steerHealer( Int slot, const std::vector<AIKnownGun> &guns )
 {
 	DutyHelix &duty = m_dutyHelix[ slot ];
@@ -8446,6 +8475,14 @@ void AIPlayer::steerHealer( Int slot, const std::vector<AIKnownGun> &guns )
 	}
 	else if( helix->hasUpgrade( tower ) )
 	{
+		// the spots the healers in lower slots took this pass, the slots being steered in order
+		std::vector<Coord3D> taken;
+		for( Int s = 0; s < slot; ++s )
+		{
+			const DutyHelix &other = m_dutyHelix[ s ];
+			if( other.id != INVALID_ID && other.role == HELIX_HEALER && (other.phase == HEAL_PATIENT || other.phase == HEAL_REAR) )
+				taken.push_back( other.spot );
+		}
 		std::vector<Object *> owned;
 		m_player->iterateObjects( collectOwned, &owned );
 		Object *hurtOut = NULL;
@@ -8470,7 +8507,8 @@ void AIPlayer::steerHealer( Int slot, const std::vector<AIKnownGun> &guns )
 			}
 			const BodyModuleInterface *body = obj->getBodyModule();
 			const Real missing = body->getMaxHealth() - body->getHealth();
-			if( body->getHealth() >= HEALER_PATIENT_HEALTH * body->getMaxHealth() || deepestReach( guns, at->x, at->y, FALSE ) >= -HELIX_GUN_MARGIN )
+			if( body->getHealth() >= HEALER_PATIENT_HEALTH * body->getMaxHealth() || deepestReach( guns, at->x, at->y, FALSE ) >= -HELIX_GUN_MARGIN ||
+					insideAnotherTower( taken, at->x, at->y ) )
 				continue;
 			if( !home && missing > missingOut )
 			{
@@ -8495,6 +8533,29 @@ void AIPlayer::steerHealer( Int slot, const std::vector<AIKnownGun> &guns )
 			middle.x /= out;
 			middle.y /= out;
 			spot = rearOf( &middle, guns );
+			// sideways, alternately right and left, by a tower's reach plus the slack a lower slot's spot
+			// keeps before it is re-ordered, so a step always clears the spot it stepped away from
+			const Real dx = m_baseCenter.x - middle.x;
+			const Real dy = m_baseCenter.y - middle.y;
+			const Real length = (Real)sqrt( dx * dx + dy * dy );
+			if( length > 0.0f && insideAnotherTower( taken, spot.x, spot.y ) )
+			{
+				Region3D extent;
+				TheTerrainLogic->getExtent( &extent );
+				for( Int step = 1; step <= 4; ++step )
+				{
+					const Real side = (HEALER_TOWER_RADIUS + HELIX_REORDER_DISTANCE) * ((step + 1) / 2) * ((step & 1) ? 1.0f : -1.0f);
+					const Real x = spot.x - dy / length * side;
+					const Real y = spot.y + dx / length * side;
+					if( x >= extent.lo.x && x <= extent.hi.x && y >= extent.lo.y && y <= extent.hi.y &&
+							!insideAnotherTower( taken, x, y ) && deepestReach( guns, x, y, FALSE ) < -HELIX_GUN_MARGIN )
+					{
+						spot.x = x;
+						spot.y = y;
+						break;
+					}
+				}
+			}
 		}
 	}
 	if( phase == HEAL_HOME && isAtHome( pos ) )
@@ -8685,6 +8746,12 @@ void AIPlayer::flyRaid( Int slot, const std::vector<AIKnownGun> &guns )
 				abort = "the run took too long";
 			if( abort )
 				ai->aiMoveToPosition( &duty.spot, CMD_FROM_AI );
+			// The bomb is a persistent ability: it drops again under the Helix every time it recharges, and
+			// an aborted one flies back to its spot the moment the Helix is idle.  Only an order from
+			// outside the AI ends it, and these are all the AI's own, so a raider bombed its way home and
+			// went on bombing its own base every ten seconds.
+			if( duty.phase == RAID_BACK || abort )
+				helix->findSpecialAbilityUpdate( SPECIAL_HELIX_NAPALM_BOMB )->onExit( FALSE );
 			break;
 
 		case RAID_BACK:

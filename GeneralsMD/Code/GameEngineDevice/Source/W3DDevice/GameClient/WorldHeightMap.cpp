@@ -54,7 +54,6 @@
 #include "W3DDevice/GameClient/HeightMap.h"
 #include "W3DDevice/GameClient/TerrainTex.h"
 #include "W3DDevice/GameClient/W3DShadow.h"
-#include "dx11runtime.h"
 
 #include "Common/file.h"
 
@@ -148,7 +147,8 @@ WorldHeightMap::WorldHeightMap():
 	m_tileMode(TILE_4x4),
 #endif
 	m_numCliffInfo(1),
-	m_terrainTex(NULL), m_alphaTerrainTex(NULL), m_numBitmapTiles(0), m_numBlendedTiles(1)
+	m_terrainTex(NULL), m_alphaTerrainTex(NULL), m_numBitmapTiles(0), m_numBlendedTiles(1),
+	m_extraBlendUVGeneration(1)
 {
 	Int i;
 	for (i=0; i<NUM_SOURCE_TILES; i++) {
@@ -186,7 +186,8 @@ WorldHeightMap::WorldHeightMap(ChunkInputStream *pStrm, Bool logicalDataOnly):
 	m_tileMode(TILE_4x4),
 #endif
 	m_numCliffInfo(1),
-	m_terrainTex(NULL), m_alphaTerrainTex(NULL), m_numBitmapTiles(0), m_numBlendedTiles(1)
+	m_terrainTex(NULL), m_alphaTerrainTex(NULL), m_numBitmapTiles(0), m_numBlendedTiles(1),
+	m_extraBlendUVGeneration(1)
 {
 
 	int i;
@@ -1379,6 +1380,21 @@ Bool WorldHeightMap::getExtraAlphaUVData(Int xIndex, Int yIndex, float U[4], flo
 		if (blendNdx == 0) {
 			return FALSE;
 		} else {
+			if (m_extraBlendUV.empty())
+				m_extraBlendUV.resize(NUM_BLEND_TILES);	// zeroed, so generation 0: nothing valid yet
+			ExtraBlendUV &memo = m_extraBlendUV[blendNdx];
+			const Short cliffInfoNdx = m_cliffInfoNdxes[ndx];
+			const Bool adjustCliff = !TheGlobalData || TheGlobalData->m_adjustCliffTextures;
+			if (memo.generation == m_extraBlendUVGeneration && memo.cliffInfoNdx == cliffInfoNdx &&
+					memo.adjustCliff == adjustCliff) {
+				memcpy(U, memo.U, sizeof(memo.U));
+				memcpy(V, memo.V, sizeof(memo.V));
+				memcpy(alpha, memo.alpha, sizeof(memo.alpha));
+				*needFlip = memo.flip;
+				*cliff = memo.cliff;
+				return TRUE;
+			}
+
 			*cliff = getUVForTileIndex(ndx, m_blendedTiles[blendNdx].blendNdx, U, V, FALSE);
 			alpha[0] = alpha[1] = alpha[2] = alpha[3] = 0;
 			if (m_blendedTiles[blendNdx].horiz) {
@@ -1440,6 +1456,15 @@ Bool WorldHeightMap::getExtraAlphaUVData(Int xIndex, Int yIndex, float U[4], flo
 				// No alpha blend, so never need to flip.
 				*needFlip = FALSE;
 			}
+
+			memcpy(memo.U, U, sizeof(memo.U));
+			memcpy(memo.V, V, sizeof(memo.V));
+			memcpy(memo.alpha, alpha, sizeof(memo.alpha));
+			memo.flip = *needFlip;
+			memo.cliff = *cliff;
+			memo.cliffInfoNdx = cliffInfoNdx;
+			memo.adjustCliff = adjustCliff;
+			memo.generation = m_extraBlendUVGeneration;
 		}
 	}
 
@@ -1566,15 +1591,7 @@ TextureClass *WorldHeightMap::getTerrainTexture(void)
 		REF_PTR_RELEASE(m_terrainTex);
 		m_terrainTex = MSGNEW("WorldHeightMap_getTerrainTexture") TerrainTextureClass(pow2Height);
 		m_terrainTexHeight = m_terrainTex->update(this);
-		if (Direct3D11_Normal_Maps_Active()) {
-			// The ground's normals, laid out exactly as its colours, so the pixel program
-			// reads both at the same coordinate.  Built from the tiles every load; nothing ships one.
-			TerrainTextureClass *normalTex = MSGNEW("WorldHeightMap_getTerrainTexture")
-				TerrainTextureClass(pow2Height, WW3D_FORMAT_A8R8G8B8);
-			normalTex->updateNormals(this);
-			m_terrainTex->Set_Normal_Map(normalTex);
-			REF_PTR_RELEASE(normalTex);
-		}
+		m_extraBlendUVGeneration++;	// the tiles just moved in the texture, and its height may have changed
 		char buf[64];
 		sprintf(buf, "Base tex height %d\n", pow2Height);
 		DEBUG_LOG((buf));

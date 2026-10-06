@@ -274,9 +274,9 @@ void GameLogic::setDefaults( Bool loadingSaveGame )
 #ifdef ALLOW_NONSLEEPY_UPDATES
 	m_normalUpdates.clear();
 #endif
-	for (std::vector<UpdateModulePtr>::iterator it = m_sleepyUpdates.begin(); it != m_sleepyUpdates.end(); ++it)
+	for (std::vector<SleepyEntry>::iterator it = m_sleepyUpdates.begin(); it != m_sleepyUpdates.end(); ++it)
 	{
-		(*it)->friend_setIndexInLogic(-1);
+		it->module->friend_setIndexInLogic(-1);
 	}
 	m_sleepyUpdates.clear();
 	m_curUpdateModule = NULL;
@@ -2143,13 +2143,8 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 	updateLoadProgress(LOAD_PROGRESS_POST_PRELOAD_ASSETS);
 
 	TheTacticalView->setAngleAndPitchToDefault();
-	//StartAtMaxZoom: open the map as far out as the wheel itself may go rather than at the map's
-	//own default height, which is the tighter of the two.  Not the shell map behind the menus:
-	//that one is framed as a set piece and its own default framing is the point of it.
-	if( TheGlobalData->m_startAtMaxZoom && !isInShellGame() )
-		TheTacticalView->setZoomToMax();
-	else
-		TheTacticalView->setZoomToDefault();
+	// the opening zoom is the view's to pick from client settings (View::setZoomToStart)
+	TheTacticalView->setZoomToStart( isInShellGame() );
 
 	if( TheRecorder )
 		TheRecorder->initControls();
@@ -2207,13 +2202,8 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 	// Set up the camera height based on the map height & globalData.
 	TheTacticalView->initHeightForMap();
 	TheTacticalView->setAngleAndPitchToDefault();
-	//StartAtMaxZoom: open the map as far out as the wheel itself may go rather than at the map's
-	//own default height, which is the tighter of the two.  Not the shell map behind the menus:
-	//that one is framed as a set piece and its own default framing is the point of it.
-	if( TheGlobalData->m_startAtMaxZoom && !isInShellGame() )
-		TheTacticalView->setZoomToMax();
-	else
-		TheTacticalView->setZoomToDefault();
+	// the opening zoom is the view's to pick from client settings (View::setZoomToStart)
+	TheTacticalView->setZoomToStart( isInShellGame() );
 
 	// update the loadscreen 
 	updateLoadProgress(LOAD_PROGRESS_POST_STARTING_CAMERA_2);
@@ -2658,9 +2648,9 @@ void GameLogic::processDestroyList( void )
 		UpdateModulePtr sleepyUpdatesForThisObject[MAX_SUO];
 		Int numSUO = 0;
 
-		for (std::vector<UpdateModulePtr>::iterator it2 = m_sleepyUpdates.begin(); it2 != m_sleepyUpdates.end(); ++it2)
+		for (std::vector<SleepyEntry>::iterator it2 = m_sleepyUpdates.begin(); it2 != m_sleepyUpdates.end(); ++it2)
 		{
-			UpdateModulePtr u = *it2;
+			UpdateModulePtr u = it2->module;
 			if (u->friend_getObject() == currentObject && numSUO < MAX_SUO)
 			{
 				sleepyUpdatesForThisObject[numSUO++] = u;
@@ -2671,7 +2661,7 @@ void GameLogic::processDestroyList( void )
 		{
 			// have to re-get idx each time since each call to erase might change others.
 			Int idx = sleepyUpdatesForThisObject[numSUO]->friend_getIndexInLogic();
-			DEBUG_ASSERTCRASH(m_sleepyUpdates[idx] == sleepyUpdatesForThisObject[numSUO], ("Hmm, expected update mismatch here"));
+			DEBUG_ASSERTCRASH(m_sleepyUpdates[idx].module == sleepyUpdatesForThisObject[numSUO], ("Hmm, expected update mismatch here"));
 			eraseSleepyUpdate(idx);
 			DEBUG_ASSERTCRASH(sleepyUpdatesForThisObject[numSUO]->friend_getIndexInLogic() == -1, ("Hmm, expected index to be -1 here"));
 		}
@@ -3020,28 +3010,29 @@ inline void GameLogic::validateSleepyUpdate() const
 	//DEBUG_LOG(("\n\n"));
 	//for (i = 0; i < sz; ++i)
 	//{
-	//	DEBUG_LOG(("u %04d: %08lx %08lx\n",i,m_sleepyUpdates[i],m_sleepyUpdates[i]->friend_getNextCallFrame()));
+	//	DEBUG_LOG(("u %04d: %08lx %08lx\n",i,m_sleepyUpdates[i].module,m_sleepyUpdates[i].module->friend_getNextCallFrame()));
 	//}
 	for (i = 0; i < sz; ++i)
 	{
-		DEBUG_ASSERTCRASH(m_sleepyUpdates[i]->friend_getIndexInLogic() == i, ("index mismatch: expected %d, got %d\n",i,m_sleepyUpdates[i]->friend_getIndexInLogic()));
-		UnsignedInt pri = m_sleepyUpdates[i]->friend_getPriority();
+		DEBUG_ASSERTCRASH(m_sleepyUpdates[i].module->friend_getIndexInLogic() == i, ("index mismatch: expected %d, got %d\n",i,m_sleepyUpdates[i].module->friend_getIndexInLogic()));
+		DEBUG_ASSERTCRASH(m_sleepyUpdates[i].priority == m_sleepyUpdates[i].module->friend_getPriority(), ("sleepy priority copy is stale at %d\n",i));
+		UnsignedInt pri = m_sleepyUpdates[i].priority;
 		if (i > 0)
 		{
 			Int i0 = (i+1)/2-1;
-			UnsignedInt pri0 = m_sleepyUpdates[i0]->friend_getPriority();
+			UnsignedInt pri0 = m_sleepyUpdates[i0].priority;
 			DEBUG_ASSERTCRASH(pri >= pri0, ("sleepyUpdates are munged (0)"));
 		}
 		Int i1 = 2*(i+1)-1;
 		Int i2 = 2*(i+1);
 		if (i1 < sz)
 		{
-			UnsignedInt pri1 = m_sleepyUpdates[i1]->friend_getPriority();
+			UnsignedInt pri1 = m_sleepyUpdates[i1].priority;
 			DEBUG_ASSERTCRASH(pri <= pri1, ("sleepyUpdates are munged (1)"));
 		}
 		if (i2 < sz)
 		{
-			UnsignedInt pri2 = m_sleepyUpdates[i2]->friend_getPriority();
+			UnsignedInt pri2 = m_sleepyUpdates[i2].priority;
 			DEBUG_ASSERTCRASH(pri <= pri2, ("sleepyUpdates are munged (2)"));
 		}
 	}
@@ -3056,13 +3047,13 @@ void GameLogic::eraseSleepyUpdate(Int i)
 	DEBUG_ASSERTCRASH(i >= 0 && i < m_sleepyUpdates.size(), ("bad sleepy idx"));
 
 	// swap with the final item, toss the final item, then rebalance
-	m_sleepyUpdates[i]->friend_setIndexInLogic(-1);
+	m_sleepyUpdates[i].module->friend_setIndexInLogic(-1);
 
 	Int final = m_sleepyUpdates.size() - 1;
 	if (i < final)
 	{
 		m_sleepyUpdates[i] = m_sleepyUpdates[final];
-		m_sleepyUpdates[i]->friend_setIndexInLogic(i);
+		m_sleepyUpdates[i].module->friend_setIndexInLogic(i);
 		m_sleepyUpdates.pop_back();
 		rebalanceSleepyUpdate(i);
 	}
@@ -3073,15 +3064,12 @@ void GameLogic::eraseSleepyUpdate(Int i)
 }
 
 // ------------------------------------------------------------------------------------------------
-inline Bool isLowerPriority(const UpdateModulePtr a, const UpdateModulePtr b)
+inline Bool isLowerPriority(const SleepyEntry& a, const SleepyEntry& b)
 {
 	// return true iff a is lower pri than b.
 	// remember: lower ordinal value means higher priority.
 	// therefore, higher ordinal value means lower priority.
-	DEBUG_ASSERTCRASH(a && b, ("these may no longer be null"));
-	UnsignedInt f1 = a->friend_getPriority();
-	UnsignedInt f2 = b->friend_getPriority();
-	return f1 > f2;
+	return a.priority > b.priority;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -3094,14 +3082,14 @@ Int GameLogic::rebalanceParentSleepyUpdate(Int i)
 	Int parent = ((i+1)>>1)-1;
 	while (parent >= 0 && isLowerPriority(m_sleepyUpdates[parent], m_sleepyUpdates[i]))
 	{
-		UpdateModulePtr a = m_sleepyUpdates[parent];
-		UpdateModulePtr b = m_sleepyUpdates[i];
+		SleepyEntry a = m_sleepyUpdates[parent];
+		SleepyEntry b = m_sleepyUpdates[i];
 
 		m_sleepyUpdates[i] = a;
 		m_sleepyUpdates[parent] = b;
 
-		a->friend_setIndexInLogic(i);
-		b->friend_setIndexInLogic(parent);
+		a.module->friend_setIndexInLogic(i);
+		b.module->friend_setIndexInLogic(parent);
 
 		i = parent;
 		parent = ((parent+1)>>1)-1;
@@ -3122,15 +3110,15 @@ Int GameLogic::rebalanceChildSleepyUpdate(Int i)
 // max efficiency. I have left the pristine non-unrolled
 // version present for clarity. (Yes, this is worth doing.) (srj) 
 #if 1
-	UpdateModulePtr* pI = &m_sleepyUpdates[i];
+	SleepyEntry* pI = &m_sleepyUpdates[i];
 
 	// our children are i*2 and i*2+1
   Int child = ((i+1)<<1)-1;
 	// data() + n, not &m_sleepyUpdates[n]: both are only addresses until the loop below has checked
 	// them against pSZ, and the same addresses in a release build, but a Debug build's checked
 	// operator[] aborts on any n past the end, which child and size() often are (W3).
-	UpdateModulePtr* pChild = m_sleepyUpdates.data() + child;
-	UpdateModulePtr* pSZ = m_sleepyUpdates.data() + m_sleepyUpdates.size();	// yes, this is off the end.
+	SleepyEntry* pChild = m_sleepyUpdates.data() + child;
+	SleepyEntry* pSZ = m_sleepyUpdates.data() + m_sleepyUpdates.size();	// yes, this is off the end.
 
   while (pChild < pSZ) 
 	{
@@ -3148,14 +3136,14 @@ Int GameLogic::rebalanceChildSleepyUpdate(Int i)
 		}
 
 		// doh. swap with the highest-pri child we have.
-		UpdateModulePtr a = *pChild;
-		UpdateModulePtr b = *pI;
+		SleepyEntry a = *pChild;
+		SleepyEntry b = *pI;
 
 		*pI = a;
 		*pChild = b;
 
-		a->friend_setIndexInLogic(i);
-		b->friend_setIndexInLogic(child);
+		a.module->friend_setIndexInLogic(i);
+		b.module->friend_setIndexInLogic(child);
 
 		i = child;
 		pI = pChild;
@@ -3180,14 +3168,14 @@ Int GameLogic::rebalanceChildSleepyUpdate(Int i)
 		}
 
 		// doh. swap with the highest-pri child we have.
-		UpdateModulePtr a = m_sleepyUpdates[child];
-		UpdateModulePtr b = m_sleepyUpdates[i];
+		SleepyEntry a = m_sleepyUpdates[child];
+		SleepyEntry b = m_sleepyUpdates[i];
 
 		m_sleepyUpdates[i] = a;
 		m_sleepyUpdates[child] = b;
 
-		a->friend_setIndexInLogic(i);
-		b->friend_setIndexInLogic(child);
+		a.module->friend_setIndexInLogic(i);
+		b.module->friend_setIndexInLogic(child);
 		i = child;
 		child = ((i+1)<<1)-1;
   }
@@ -3228,9 +3216,10 @@ void GameLogic::pushSleepyUpdate(UpdateModulePtr u)
 
 	DEBUG_ASSERTCRASH(u != NULL, ("You may not pass null for sleepy update info"));
 
-	m_sleepyUpdates.push_back(u);
+	SleepyEntry e = { u->friend_getPriority(), u };
+	m_sleepyUpdates.push_back(e);
 	u->friend_setIndexInLogic(m_sleepyUpdates.size() - 1);
-	
+
 	rebalanceParentSleepyUpdate(m_sleepyUpdates.size()-1);
 }
 
@@ -3239,7 +3228,7 @@ UpdateModulePtr GameLogic::peekSleepyUpdate() const
 {
 	USE_PERF_TIMER(SleepyMaintenance)
 
-	UpdateModulePtr u = m_sleepyUpdates.front();
+	UpdateModulePtr u = m_sleepyUpdates.front().module;
 	DEBUG_ASSERTCRASH(u->friend_getIndexInLogic() == 0, ("index mismatch: expected %d, got %d\n",0,u->friend_getIndexInLogic()));
 	return u;
 }
@@ -3256,11 +3245,11 @@ void GameLogic::popSleepyUpdate()
 		return;
 	}
 
-	m_sleepyUpdates[0]->friend_setIndexInLogic(-1);
+	m_sleepyUpdates[0].module->friend_setIndexInLogic(-1);
 	if (sz > 1)
 	{
 		m_sleepyUpdates[0] = m_sleepyUpdates[sz-1];
-		m_sleepyUpdates[0]->friend_setIndexInLogic(0);
+		m_sleepyUpdates[0].module->friend_setIndexInLogic(0);
 		m_sleepyUpdates.pop_back();
 		rebalanceChildSleepyUpdate(0);
 	}
@@ -3308,7 +3297,7 @@ void GameLogic::friend_awakenUpdateModule(Object* obj, UpdateModulePtr u, Unsign
 			return;
 		}
 
-		if (m_sleepyUpdates[idx] != u)
+		if (m_sleepyUpdates[idx].module != u)
 		{
 			RELEASE_CRASH("fatal error! sleepy update module index mismatch.\n");
 			return;
@@ -3316,6 +3305,7 @@ void GameLogic::friend_awakenUpdateModule(Object* obj, UpdateModulePtr u, Unsign
 
 		// update the value.
 		u->friend_setNextCallFrame(whenToWakeUp);
+		m_sleepyUpdates[idx].priority = u->friend_getPriority();
 
 		// rebalance.
 		rebalanceSleepyUpdate(idx);
@@ -3879,9 +3869,14 @@ static Real logicElapsedMS( const Int64 &from, const Int64 &to )
 //
 // Which update module ate the frame.  The `objects` figure in the slow-frame line is the whole
 // sleepy-update sweep, thousands of modules deep, and that alone never says which one.  Two
-// QueryPerformanceCounter reads per module cost about 0.2ms over a busy frame - they sit inside
-// the `objects` window, so the sweep's own total carries that and the per-module figures do not.
+// QueryPerformanceCounter reads and a kind lookup per module cost about 0.2ms over a busy frame, so
+// they run on one logic frame in MODULE_PROFILE_EVERY and on every frame after a slow one: a fight
+// that runs slow is slow for many frames in a row, and from its second frame on every one is timed.
+// A lone spike on an untimed frame says so in its line.
 //
+enum { MODULE_PROFILE_EVERY = 8 };
+static Bool								theModulesTimed = FALSE;
+static Bool								theLastLogicFrameSlow = FALSE;
 static Int64							theWorstModuleTicks = 0;
 static NameKeyType					theWorstModuleKey = NAMEKEY_INVALID;
 static const ThingTemplate *theWorstModuleThing = NULL;
@@ -3901,8 +3896,9 @@ static Int					theModuleKindCount[ MODULE_PROFILE_MAX ];
 static Int					theModuleKindQueries[ MODULE_PROFILE_MAX ];
 static Int					theModuleKindsUsed = 0;
 
-static void resetModuleProfile( void )
+static void resetModuleProfile( UnsignedInt now )
 {
+	theModulesTimed = theLastLogicFrameSlow || ( now % MODULE_PROFILE_EVERY ) == 0;
 	theWorstModuleTicks = 0;
 	theWorstModuleKey = NAMEKEY_INVALID;
 	theWorstModuleThing = NULL;
@@ -3945,7 +3941,7 @@ static const char *getModuleQueryReport( void )
 	static char report[ 256 ];
 	Bool taken[ MODULE_PROFILE_MAX ];
 
-	Int used = snprintf( report, ARRAY_SIZE(report), "queries by module:" );
+	Int used = snprintf( report, ARRAY_SIZE(report), theModulesTimed ? "queries by module:" : "queries by module: not counted this frame" );
 	if( used < 0 || used >= (Int)ARRAY_SIZE(report) )
 		return report;
 
@@ -3982,6 +3978,12 @@ static const char *getModuleProfileReport( void )
 	static char report[ 512 ];
 	Int64 freq = 0;
 	freq = Clock_Ticks_Per_Second();
+
+	if( !theModulesTimed )
+	{
+		snprintf( report, ARRAY_SIZE(report), "%d updates, modules not timed this frame", theModuleUpdateCount );
+		return report;
+	}
 
 	if( theWorstModuleKey == NAMEKEY_INVALID )
 	{
@@ -4518,7 +4520,7 @@ void GameLogic::update( void )
 	AI::resetEnemyScanCount();
 	Pathfinder::resetProfile();
 #ifdef DEBUG_LOGGING
-	resetModuleProfile();
+	resetModuleProfile( now );
 #endif
 
 	// update (execute) scripts
@@ -4687,22 +4689,30 @@ void GameLogic::update( void )
 				m_curUpdateModule = u;
 
 #ifdef DEBUG_LOGGING
-				// read the identity before the update - a module may kill its own object
-				const NameKeyType profModuleKey = u->getModuleNameKey();
-				const ThingTemplate *profModuleThing = u->friend_getObject() ? u->friend_getObject()->getTemplate() : NULL;
-				const ObjectID profModuleObjID = u->friend_getObject() ? u->friend_getObject()->getID() : INVALID_ID;
-				const Int profModuleQueriesBefore = PartitionManager::getQueryCountThisFrame();
-				Int64 profModuleStart;
-				profModuleStart = Clock_Ticks();
+				theModuleUpdateCount++;
+				NameKeyType profModuleKey = NAMEKEY_INVALID;
+				const ThingTemplate *profModuleThing = NULL;
+				ObjectID profModuleObjID = INVALID_ID;
+				Int profModuleQueriesBefore = 0;
+				Int64 profModuleStart = 0;
+				if( theModulesTimed )
+				{
+					// read the identity before the update - a module may kill its own object
+					profModuleKey = u->getModuleNameKey();
+					profModuleThing = u->friend_getObject() ? u->friend_getObject()->getTemplate() : NULL;
+					profModuleObjID = u->friend_getObject() ? u->friend_getObject()->getID() : INVALID_ID;
+					profModuleQueriesBefore = PartitionManager::getQueryCountThisFrame();
+					profModuleStart = Clock_Ticks();
+				}
 #endif
 
 				sleepLen = u->update();
 
 #ifdef DEBUG_LOGGING
+				if( theModulesTimed )
 				{
 					Int64 profModuleEnd;
 					profModuleEnd = Clock_Ticks();
-					theModuleUpdateCount++;
 					const Int64 profModuleTicks = profModuleEnd - profModuleStart;
 					addModuleProfile( profModuleKey, profModuleTicks,
 														PartitionManager::getQueryCountThisFrame() - profModuleQueriesBefore );
@@ -4737,6 +4747,9 @@ void GameLogic::update( void )
 
 			// else defer it till next frame and re-push it
 			u->friend_setNextCallFrame(now + sleepLen);
+			// u's own slot, which is not slot 0 when its update pushed or woke a module that sorts ahead
+			// of it; the rebalance stays at 0 as it always was.
+			m_sleepyUpdates[u->friend_getIndexInLogic()].priority = u->friend_getPriority();
 			rebalanceSleepyUpdate(0);
 		}
 	}
@@ -4820,6 +4833,9 @@ void GameLogic::update( void )
 		// the logic gets 1/30th of a second, 33ms, per frame; -slowframe lowers the bar for a hunt
 		const Real SLOW_FRAME_MS = TheGlobalData ? TheGlobalData->m_slowFrameMS : 20.0f;
 		const Real total = logicElapsedMS( tFrameStart, tFrameEnd );
+#ifdef DEBUG_LOGGING
+		theLastLogicFrameSlow = total > SLOW_FRAME_MS;
+#endif
 		if( total > SLOW_FRAME_MS && now > 60 && getGameMode() != GAME_SHELL && getGameMode() != GAME_NONE )
 		{
 			const Real scripts = logicElapsedMS( tFrameStart, tScripts );
@@ -6210,9 +6226,9 @@ void GameLogic::loadPostProcess( void )
 			m_nextObjID = (ObjectID)((UnsignedInt)obj->getID() + 1);
 
 	// blow away the sleepy update and normal update module lists
-	for (std::vector<UpdateModulePtr>::iterator it = m_sleepyUpdates.begin(); it != m_sleepyUpdates.end(); ++it)
+	for (std::vector<SleepyEntry>::iterator it = m_sleepyUpdates.begin(); it != m_sleepyUpdates.end(); ++it)
 	{
-		(*it)->friend_setIndexInLogic(-1);
+		it->module->friend_setIndexInLogic(-1);
 	}
 	m_sleepyUpdates.clear();
 #ifdef ALLOW_NONSLEEPY_UPDATES
@@ -6256,7 +6272,8 @@ void GameLogic::loadPostProcess( void )
 				u->friend_setNextCallFrame(now);
 #endif
 			{
-				m_sleepyUpdates.push_back(u);
+				SleepyEntry e = { u->friend_getPriority(), u };
+				m_sleepyUpdates.push_back(e);
 				u->friend_setIndexInLogic(m_sleepyUpdates.size() - 1);
 			}
 				

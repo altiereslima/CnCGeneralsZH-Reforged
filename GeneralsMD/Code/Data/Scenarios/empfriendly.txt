@@ -1,0 +1,27 @@
+# The Superweapon General's EMP Patriot shooting at an enemy Helix with three of its own Comanches
+# hovering on the same spot. Every missile leaves an EMP sphere where it bursts, and the question is
+# who the sphere takes: the Helix should go down, the Comanches should not.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmericaSuperWeaponGeneral -side 1 FactionChina -seed 7 -maxframes 900
+#     -scenario empfriendly -logPrefix empfriendly_
+#
+# Measured 2026-10-05, seed 7, with a temporary log of every victim the sphere killed or disabled.
+# Before, EA's sphere spared only its own side's buildings, and an airborne aircraft it touched was
+# killed whoever owned it (a god mode player's dropped to the ground and lifted off again, which is
+# how the report came in): the four bursts on frames 79 to 92 killed the Helix and all three
+# Comanches, and the frame 600 tally had none of either. After, the same four bursts killed the Helix
+# and nothing else, and two Comanches were alive at 62 of 440 health. The one lost and the damage are
+# not the sphere's, which named no Comanche; the likely cause, not checked, is the missiles' own
+# blast, which hits allies on every Patriot, with three Comanches stacked on the target.
+
+30    spawn      0  SupW_AmericaPowerPlant        1   2600 3150
+30    spawn      0  SupW_AmericaPatriotBattery    1   2600 3000
+30    spawn      1  ChinaVehicleHelix             1   2850 3000
+30    spawn      0  SupW_AmericaVehicleComanche   3   2850 3000  15
+
+600   tally      0  SupW_AmericaVehicleComanche
+600   tally      1  ChinaVehicleHelix
+880   tally      0  SupW_AmericaVehicleComanche
+880   tally      1  ChinaVehicleHelix

@@ -39,22 +39,6 @@ static const char * const ENTRY_POINT = "main";
 static const char * const VERTEX_PROFILE = "vs_4_0";
 static const char * const PIXEL_PROFILE = "ps_4_0";
 
-// How far a normal map tilts the normal (1 is as the map is written), the exponent of the
-// highlight it adds, and how bright that highlight is where the map's alpha is one.  Picked by eye
-// on four tanks and a desert base.
-static const float NORMAL_MAP_STRENGTH = 1.0f;
-// The power was 24, which is a lobe narrow enough that a top-down camera over a fixed sun almost
-// never catches it: the gloss map decided what could shine and then nothing did.  Ten is wide
-// enough to catch a hull at the angles this game is actually played at.
-static const float NORMAL_MAP_HIGHLIGHT_POWER = 10.0f;
-static const float NORMAL_MAP_HIGHLIGHT_SCALE = 0.9f;
-
-// How much of the sky a metal surface returns, and how dark the horizon is against straight up.
-// The sun's own dot on a hull is one small spot; the flank of a tank reads as metal because of what
-// it mirrors over its whole area, and from this camera that is nearly all sky.
-static const float SKY_REFLECTION_STRENGTH = 0.35f;
-static const float SKY_HORIZON_SHARE = 0.45f;
-
 // The three stage counts are one count in three headers.  The vertex constant block is copied
 // wholesale out of the backend's own texture transforms, the generated pixel shader declares one
 // sampler per texture the backend binds, and a mismatch is a silent overrun rather than a build
@@ -242,7 +226,6 @@ DX11BackendClass::DX11BackendClass()
 	, CurrentTargetResource(NULL)
 	, TargetCopy(NULL)
 	, TargetCopyView(NULL)
-	, NormalMap(NULL)
 	, ShadowMapSurface(NULL)
 	, ShadowMapDepth(NULL)
 	, ShadowMapTexture(NULL)
@@ -261,7 +244,6 @@ DX11BackendClass::DX11BackendClass()
 	, ShadowSkyFill(0.0f)
 	, ShadowReceiving(false)
 	, SmokeGlow(false)
-	, NormalMappedDraws(0)
 	, DrawsMade(0)
 	, DrawsRefused(0)
 	, RefusedNoBuffer(0)
@@ -285,6 +267,9 @@ DX11BackendClass::DX11BackendClass()
 	PixelConstantsHeld = false;
 	EngineConstantsHeld = false;
 	ConstantsChanged = true;
+	VertexConstantsChanged = false;
+	PixelConstantsChanged = false;
+	TexturesChanged = true;
 	PipelineChanged = true;
 	StateObjectsChanged = true;
 	for (unsigned sampler = 0; sampler < DX11_BACKEND_TEXTURE_STAGES; ++sampler) {
@@ -296,7 +281,6 @@ DX11BackendClass::DX11BackendClass()
 	memset(EngineConstants, 0, sizeof(EngineConstants));
 	memset(MissingTexture, 0, sizeof(MissingTexture));
 	memset(Lights, 0, sizeof(Lights));
-	memset(TerrainSun, 0, sizeof(TerrainSun));
 	memset(MaterialAmbient, 0, sizeof(MaterialAmbient));
 	memset(MaterialDiffuse, 0, sizeof(MaterialDiffuse));
 	memset(MaterialSpecular, 0, sizeof(MaterialSpecular));
@@ -321,6 +305,19 @@ DX11BackendClass::DX11BackendClass()
 	SmokeMapRefused = false;
 	SmokeMapFilled = false;
 	SmokeStrength = 0.0f;
+	memset(Headlights, 0, sizeof(Headlights));
+	HeadlightCount = 0;
+	memset(HeadlightGain, 0, sizeof(HeadlightGain));
+	memset(BlastLights, 0, sizeof(BlastLights));
+	BlastLightCount = 0;
+	SoftParticles = false;
+	SoftParticlesAllowed = true;
+	SceneDepthCopy = NULL;
+	SceneDepthCopyView = NULL;
+	SceneDepthStale = true;
+	SceneDepthRefused = false;
+	FrameDepthCopies = 0;
+	set_identity(WorldFromClip);
 	for (unsigned stage = 0; stage < DX11_BACKEND_TEXTURE_STAGES; ++stage) {
 		set_identity(TextureTransforms[stage]);
 	}
@@ -383,6 +380,7 @@ void DX11BackendClass::Release_Cached()
 	LastMemo = 0;
 	NextMemo = 0;
 	LastResolveHeld = false;
+	Resolutions.clear();
 	Forget_Last_State_Objects();
 
 	for (std::map<std::string, Pipeline>::iterator entry = Pipelines.begin();
@@ -478,6 +476,7 @@ void DX11BackendClass::Shutdown()
 	ShadowMapSize = 0;
 	ShadowMapBound = false;
 	Release_Smoke_Map();
+	Release_Scene_Depth();
 	RenderStates.Set_Shadow_Caster_Pass(false);
 	Note_Shadow_State_Changed();
 	Device = NULL;
@@ -485,11 +484,24 @@ void DX11BackendClass::Shutdown()
 
 /** The sun's depth buffer.  One surface with two views of it, because a depth buffer that is also
 		sampled cannot be made as a depth format: the surface is typeless and each view says how its
-		bits are to be read.  Made at the first size asked for and kept at that size. */
+		bits are to be read.  Made at the size asked for and kept while that is what is asked for; the
+		console's freecam asks for a larger one over the whole map, and the surface is made again at
+		whichever size the frame wants.  The views are dropped with it; a draw that still has the old
+		texture view bound holds its own reference until the unbind below. */
 bool DX11BackendClass::Begin_Shadow_Map(unsigned size)
 {
 	if (Device == NULL || size == 0 || ShadowMapBound) {
 		return false;
+	}
+
+	if (ShadowMapSurface != NULL && ShadowMapSize != size) {
+		ShadowMapTexture->Release();
+		ShadowMapTexture = NULL;
+		ShadowMapDepth->Release();
+		ShadowMapDepth = NULL;
+		ShadowMapSurface->Release();
+		ShadowMapSurface = NULL;
+		ShadowMapSize = 0;
 	}
 
 	if (ShadowMapSurface == NULL) {
@@ -621,6 +633,15 @@ static const unsigned SMOKE_MOST_CASTERS = 16384;
 // side, and at 32 soot went flat.
 static const float SMOKE_SELF_SHADOW_GAIN = 0.8f;
 static const float SMOKE_SELF_SHADOW_CURVE = 16.0f;
+// How far in front of what is behind it a particle sprite has fully faded in, in world units.  A
+// tank is about thirty long; a smoke puff is ten to forty across.  At two, a sprite still met the
+// ground over a pixel or two at the default zoom: a nuke's haze and the Scud's grey smoke came out as
+// stacked stair-stepped terraces and every toxin puff as a hard-rimmed island, the posterized
+// blastcheck frames of 2026-10-06, and at zero it is the unfaded game's cut lines outright.  Twelve
+// on the smoothstep (SOFT_PARTICLE_SAMPLING) is smooth in both and keeps the toxin carpet whole; the
+// islands once blamed on twelve were the straight ramp's creases, which the smoothstep took away.
+// Twenty starts to thin the carpet.
+static const float SOFT_PARTICLE_FADE_UNITS = 12.0f;
 
 // Each caster is a disc facing the sun, drawn as a four corner strip whose corners come from the
 // vertex number, so the only buffer is the one holding the casters.
@@ -936,6 +957,138 @@ bool DX11BackendClass::Smoke_Glow() const
 		&& (VertexFormat & D3DFVF_NORMAL) != 0 && (VertexFormat & D3DFVF_XYZRHW) == 0;
 }
 
+void DX11BackendClass::Set_Soft_Particles(bool soft)
+{
+	if (SoftParticles != soft) {
+		SoftParticles = soft;
+		PipelineChanged = true;
+		ConstantsChanged = true;
+	}
+}
+
+/** Which fade a draw takes.  Only the sorted billboards, which the sorting pool marks, and only
+		while the depth being tested against is the scene's own: a mirror or a filter target of another
+		size has a depth buffer of its own that nothing here copies.  A multiplicative blend is left
+		hard, because faded towards zero it would darken rather than vanish. */
+unsigned DX11BackendClass::Soft_Particle() const
+{
+	if (!SoftParticles || !SoftParticlesAllowed || SceneDepthCopyView == NULL || ShadowMapBound) {
+		return SOFT_PARTICLE_NONE;
+	}
+	if (VertexProgram != ENGINE_SHADER_NONE || PixelProgram != ENGINE_SHADER_NONE
+		|| (VertexFormat & D3DFVF_XYZRHW) != 0 || !Camera_Space_Draw()) {
+		return SOFT_PARTICLE_NONE;
+	}
+	if (CurrentTarget != NULL && CurrentDepth != Device->Get_Depth_Stencil_View()) {
+		return SOFT_PARTICLE_NONE;
+	}
+	if (Device->Get_Depth_Texture() == NULL
+		|| RenderStates.Get_Render_State(D3DRS_ALPHABLENDENABLE) == FALSE) {
+		return SOFT_PARTICLE_NONE;
+	}
+	const DWORD source = RenderStates.Get_Render_State(D3DRS_SRCBLEND);
+	const DWORD destination = RenderStates.Get_Render_State(D3DRS_DESTBLEND);
+	if (source == D3DBLEND_DESTCOLOR || source == D3DBLEND_ZERO || destination == D3DBLEND_SRCCOLOR) {
+		return SOFT_PARTICLE_NONE;
+	}
+	return (source == D3DBLEND_ONE) ? SOFT_PARTICLE_COLOUR : SOFT_PARTICLE_ALPHA;
+}
+
+void DX11BackendClass::Release_Scene_Depth()
+{
+	if (SceneDepthCopyView != NULL) {
+		SceneDepthCopyView->Release();
+		SceneDepthCopyView = NULL;
+	}
+	if (SceneDepthCopy != NULL) {
+		SceneDepthCopy->Release();
+		SceneDepthCopy = NULL;
+	}
+	SceneDepthStale = true;
+}
+
+/** The scene's depth as the soft particles read it, taken once at the top of each sorted flush and
+		before any of its draws resolves a pipeline: a sorted mesh that writes depth between two
+		particle runs would otherwise cost a full copy per run, and a copy the device refuses would be
+		found only after a fading program was chosen, which then read nothing and drew nothing.  The
+		copy is made at the depth buffer's own size and typeless format, made again when a resize
+		changes either, and refreshed only when a draw has written depth since the last one. */
+void DX11BackendClass::Take_Scene_Depth()
+{
+	if (SceneDepthRefused || !SoftParticlesAllowed || Device == NULL) {
+		return;
+	}
+	ID3D11ShaderResourceView * const source_view = Device->Get_Depth_Texture();
+	if (source_view == NULL) {
+		return;
+	}
+	ID3D11Resource * source = NULL;
+	source_view->GetResource(&source);
+	if (source == NULL) {
+		return;
+	}
+
+	D3D11_TEXTURE2D_DESC description;
+	static_cast<ID3D11Texture2D *>(source)->GetDesc(&description);
+	if (SceneDepthCopy != NULL) {
+		D3D11_TEXTURE2D_DESC held;
+		SceneDepthCopy->GetDesc(&held);
+		if (held.Width != description.Width || held.Height != description.Height
+				|| held.Format != description.Format) {
+			Release_Scene_Depth();
+		}
+	}
+	if (SceneDepthCopy == NULL) {
+		description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		description.MiscFlags = 0;
+		description.Usage = D3D11_USAGE_DEFAULT;
+		description.CPUAccessFlags = 0;
+		D3D11_SHADER_RESOURCE_VIEW_DESC view;
+		source_view->GetDesc(&view);
+		if (FAILED(Device->Get_Device()->CreateTexture2D(&description, NULL, &SceneDepthCopy))
+			|| FAILED(Device->Get_Device()->CreateShaderResourceView(SceneDepthCopy, &view,
+				&SceneDepthCopyView))) {
+			Note_Refusal("the device refused a copy of the scene's depth for the soft particles");
+			Release_Scene_Depth();
+			SceneDepthRefused = true;
+			PipelineChanged = true;
+			source->Release();
+			return;
+		}
+		SceneDepthStale = true;
+		PipelineChanged = true;		// Soft_Particle reads whether the copy exists
+	}
+	if (SceneDepthStale) {
+		Device->Get_Context()->CopyResource(SceneDepthCopy, source);
+		SceneDepthStale = false;
+		++FrameDepthCopies;
+	}
+	source->Release();
+}
+
+unsigned DX11BackendClass::Take_Frame_Depth_Copies()
+{
+	const unsigned copies = FrameDepthCopies;
+	FrameDepthCopies = 0;
+	return copies;
+}
+
+void DX11BackendClass::Set_Blast_Lights(const float * lights, unsigned count)
+{
+	if (count > BLAST_LIGHT_SLOTS) {
+		count = BLAST_LIGHT_SLOTS;
+	}
+	if (count == BlastLightCount
+		&& (count == 0 || memcmp(BlastLights, lights, sizeof(float) * BLAST_LIGHT_FLOATS * count) == 0)) {
+		return;
+	}
+	if (count > 0) {
+		memcpy(BlastLights, lights, sizeof(float) * BLAST_LIGHT_FLOATS * count);
+	}
+	BlastLightCount = count;
+	ConstantsChanged = true;
+}
+
 bool DX11BackendClass::Views_Current_Target(unsigned stage, ID3D11ShaderResourceView * texture) const
 {
 	if (texture == NULL || CurrentTarget == NULL) {
@@ -1077,7 +1230,28 @@ void DX11BackendClass::Set_Render_State(D3DRENDERSTATETYPE state, DWORD value)
 	// The raw value, not Get_Render_State: that one answers for the caster pass while it runs.
 	if (RenderStates.Get_Stored_Render_State(state) != value) {
 		RenderStates.Set_Render_State(state, value);
-		ConstantsChanged = true;
+		// Only these reach the constant blocks; see Upload_Vertex_Constants and
+		// Upload_Pixel_Constants.  The blend switch is there because the caster pass's alpha
+		// reference depends on it.  A blend, depth or cull change used to rebuild and compare both
+		// blocks to find the same bytes.
+		switch (state) {
+		case D3DRS_AMBIENT:
+		case D3DRS_FOGSTART:
+		case D3DRS_FOGEND:
+		case D3DRS_FOGDENSITY:
+			VertexConstantsChanged = true;
+			break;
+		case D3DRS_FOGCOLOR:
+		case D3DRS_TEXTUREFACTOR:
+		case D3DRS_ALPHAREF:
+		case D3DRS_ALPHABLENDENABLE:
+		case D3DRS_SRCBLEND:		// a multiply pass takes no blast light (Upload_Pixel_Constants)
+		case D3DRS_DESTBLEND:
+			PixelConstantsChanged = true;
+			break;
+		default:
+			break;
+		}
 		PipelineChanged = true;
 		StateObjectsChanged = true;
 	}
@@ -1119,39 +1293,27 @@ void DX11BackendClass::Set_Texture(unsigned stage, ID3D11ShaderResourceView * te
 				PipelineChanged = true;
 			}
 		}
+		if (texture != Textures[stage]) {
+			TexturesChanged = true;
+		}
 		Textures[stage] = texture;
 	}
 }
 
-void DX11BackendClass::Set_Normal_Map(ID3D11ShaderResourceView * normal_map)
+void DX11BackendClass::Set_Headlights(const float * lights, unsigned count, const float gain[3])
 {
-	if ((NormalMap == NULL) != (normal_map == NULL)) {
-		PipelineChanged = true;
+	if (count > HEADLIGHT_SLOTS) {
+		count = HEADLIGHT_SLOTS;
 	}
-	NormalMap = normal_map;
-}
-
-// The pixel half bumps the directional lights; a point or spot light is summed per vertex into the
-// base it adds to (ffvertex.cpp).  It used to turn the whole draw back to per-vertex lighting, so a
-// tank lost its relief every time its own gun flashed, and anything next to an explosion or a fire
-// went flat with it.  A transcribed program is its own lighting.
-bool DX11BackendClass::Normal_Mapped() const
-{
-	return NormalMap != NULL && Textures[0] != NULL
-		&& VertexProgram == ENGINE_SHADER_NONE && PixelProgram == ENGINE_SHADER_NONE
-		&& RenderStates.Get_Render_State(D3DRS_LIGHTING) != FALSE
-		&& (VertexFormat & D3DFVF_NORMAL) != 0;
-}
-
-bool DX11BackendClass::Terrain_Bumped() const
-{
-	return NormalMap != NULL && Textures[0] != NULL && VertexProgram == ENGINE_SHADER_NONE
-		&& EngineShader_Can_Bump(PixelProgram) && (VertexFormat & D3DFVF_XYZRHW) == 0;
-}
-
-void DX11BackendClass::Set_Terrain_Sun(const float direction[3])
-{
-	memcpy(TerrainSun, direction, sizeof(TerrainSun));
+	if (count == HeadlightCount && memcmp(HeadlightGain, gain, sizeof(HeadlightGain)) == 0
+		&& (count == 0 || memcmp(Headlights, lights, sizeof(float) * 8 * count) == 0)) {
+		return;
+	}
+	if (count > 0) {
+		memcpy(Headlights, lights, sizeof(float) * 8 * count);
+	}
+	memcpy(HeadlightGain, gain, sizeof(HeadlightGain));
+	HeadlightCount = count;
 	ConstantsChanged = true;
 }
 
@@ -1261,19 +1423,33 @@ void DX11BackendClass::Set_Transform(D3DTRANSFORMSTATETYPE state, const float ma
 	}
 	if (held != NULL && memcmp(held, matrix, sizeof(float) * 16) != 0) {
 		memcpy(held, matrix, sizeof(float) * 16);
-		ConstantsChanged = true;
+		// The pixel block reads the view and the projection; the world and the texture transforms
+		// are the vertex block's alone.
+		if (held == View || held == Projection) {
+			ConstantsChanged = true;
+		} else {
+			VertexConstantsChanged = true;
+		}
 	}
 }
 
 void DX11BackendClass::Set_Material(const float ambient[4], const float diffuse[4],
 	const float specular[4], const float emissive[4], float power)
 {
+	// The wrapper reapplies the material on every mesh whether or not it changed.
+	if (memcmp(MaterialAmbient, ambient, sizeof(MaterialAmbient)) == 0
+		&& memcmp(MaterialDiffuse, diffuse, sizeof(MaterialDiffuse)) == 0
+		&& memcmp(MaterialSpecular, specular, sizeof(MaterialSpecular)) == 0
+		&& memcmp(MaterialEmissive, emissive, sizeof(MaterialEmissive)) == 0
+		&& memcmp(&MaterialPower, &power, sizeof(MaterialPower)) == 0) {
+		return;
+	}
 	memcpy(MaterialAmbient, ambient, sizeof(MaterialAmbient));
 	memcpy(MaterialDiffuse, diffuse, sizeof(MaterialDiffuse));
 	memcpy(MaterialSpecular, specular, sizeof(MaterialSpecular));
 	memcpy(MaterialEmissive, emissive, sizeof(MaterialEmissive));
 	MaterialPower = power;
-	ConstantsChanged = true;
+	VertexConstantsChanged = true;
 }
 
 void DX11BackendClass::Set_Light(unsigned index, DWORD type, const float position[4],
@@ -1284,7 +1460,20 @@ void DX11BackendClass::Set_Light(unsigned index, DWORD type, const float positio
 		return;
 	}
 
+	// Set_Light_Environment marks all four lights on every object it lights, so most of these
+	// arrive unchanged.  Only whether a light is on and its type reach the pipeline description.
 	Light & light = Lights[index];
+	const bool pipeline_changed = !light.Enabled || light.Type != type;
+	if (!pipeline_changed
+		&& memcmp(light.Position, position, sizeof(light.Position)) == 0
+		&& memcmp(light.Direction, direction, sizeof(light.Direction)) == 0
+		&& memcmp(light.Diffuse, diffuse, sizeof(light.Diffuse)) == 0
+		&& memcmp(light.Specular, specular, sizeof(light.Specular)) == 0
+		&& memcmp(light.Attenuation, attenuation, sizeof(light.Attenuation)) == 0
+		&& memcmp(light.Spot, spot, sizeof(light.Spot)) == 0
+		&& memcmp(light.Ambient, ambient, sizeof(light.Ambient)) == 0) {
+		return;
+	}
 	light.Enabled = true;
 	light.Type = type;
 	memcpy(light.Position, position, sizeof(light.Position));
@@ -1295,7 +1484,9 @@ void DX11BackendClass::Set_Light(unsigned index, DWORD type, const float positio
 	memcpy(light.Spot, spot, sizeof(light.Spot));
 	memcpy(light.Ambient, ambient, sizeof(light.Ambient));
 	ConstantsChanged = true;
-	PipelineChanged = true;
+	if (pipeline_changed) {
+		PipelineChanged = true;
+	}
 }
 
 void DX11BackendClass::Disable_Light(unsigned index)
@@ -1457,6 +1648,8 @@ void DX11BackendClass::Dump_Program(const std::string & key, const std::string &
 
 void DX11BackendClass::Begin_Scene()
 {
+	SceneDepthStale = true;
+
 	// A scene can begin with a render target already set: the water's reflection and the shadow
 	// projector both set theirs and then call WW3D::Begin_Render, and forcing the back buffer here
 	// sent the reflection scene, and its clear, over the picture that was already drawn.
@@ -1628,6 +1821,7 @@ void DX11BackendClass::Clear(bool colour, bool depth, const float colour_value[4
 	if (depth && depth_view != NULL) {
 		Device->Get_Context()->ClearDepthStencilView(depth_view,
 			D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+		SceneDepthStale = true;
 	}
 }
 
@@ -1662,9 +1856,9 @@ bool DX11BackendClass::Build_Combiner_Description(CombinerDescription & descript
 		target.TextureBound = Textures[stage] != NULL;
 		description.StageCount = stage + 1;
 	}
-	description.NormalMapped = description.StageCount > 0 && Normal_Mapped();
 	description.ShadowReceiving = description.StageCount > 0 && Shadow_Receiving();
 	description.SmokeGlow = Smoke_Glow();
+	description.SoftParticle = Soft_Particle();
 	return description.StageCount > 0;
 }
 
@@ -1698,6 +1892,9 @@ bool DX11BackendClass::Shadow_Receiving() const
 		if (destination == D3DBLEND_ONE || source == D3DBLEND_ONE
 			|| destination == D3DBLEND_DESTCOLOR || source == D3DBLEND_DESTCOLOR) {
 			return false;	// additive and multiplicative passes: fire, glow, the shadows themselves
+		}
+		if (destination == D3DBLEND_INVSRCCOLOR) {
+			return false;	// the toxin field's stain: its colour is light taken away, and shaded it ran backwards
 		}
 	}
 	return true;
@@ -1745,8 +1942,6 @@ bool DX11BackendClass::Build_Vertex_Description(VertexPipelineDescription & desc
 
 	description.FogEnabled = RenderStates.Get_Render_State(D3DRS_FOGENABLE) != FALSE;
 	description.FogVertexMode = RenderStates.Get_Render_State(D3DRS_FOGVERTEXMODE);
-	description.NormalMapped = (Normal_Mapped()
-		&& StageStates[0][D3DTSS_COLOROP] != D3DTOP_DISABLE) || Terrain_Bumped();
 	description.SmokeGlow = Smoke_Glow();
 	return true;
 }
@@ -1796,6 +1991,25 @@ bool DX11BackendClass::Resolve(Pipeline & pipeline)
 		}
 	}
 
+	ResolveKey resolve_key;
+	memset(&resolve_key, 0, sizeof(resolve_key));
+	resolve_key.Format = VertexFormat;
+	resolve_key.VertexProgram = VertexProgram;
+	resolve_key.PixelProgram = PixelProgram;
+	memcpy(&resolve_key.Vertex, &vertex_description, sizeof(vertex_description));
+	memcpy(&resolve_key.Combiner, &combiner_description, sizeof(combiner_description));
+	ResolutionMap::iterator resolved = Resolutions.find(resolve_key);
+	if (resolved != Resolutions.end()) {
+		if (resolved->second.Refused) {
+			Refuse(resolved->second.Key, static_cast<RefusalReason>(resolved->second.Reason));
+			return false;
+		}
+		pipeline = resolved->second.Resolved;
+		++resolved->second.Use->Draws;
+		Remember_Resolution(resolved->second.Use, pipeline, vertex_description, combiner_description);
+		return true;
+	}
+
 	char format[32];
 	snprintf(format, sizeof(format), "|%lu", VertexFormat);
 
@@ -1806,22 +2020,28 @@ bool DX11BackendClass::Resolve(Pipeline & pipeline)
 	const std::string vertex_key = (VertexProgram != ENGINE_SHADER_NONE)
 		? std::string(EngineShader_Name(VertexProgram))
 		: VertexShader_Key(vertex_description);
-	const bool terrain_bumped = vertex_description.NormalMapped && PixelProgram != ENGINE_SHADER_NONE;
 	const std::string pixel_key = (PixelProgram != ENGINE_SHADER_NONE)
 		? EngineShader_Name(PixelProgram)
 			+ CombinerShader_Pipeline_Key(combiner_description.PixelPipeline)
-			+ (terrain_bumped ? ":N" : "")
 		: CombinerShader_Key(combiner_description);
 	const std::string key = vertex_key + pixel_key + format;
 
 	std::map<std::string, Pipeline>::const_iterator existing = Pipelines.find(key);
 	if (existing != Pipelines.end()) {
 		pipeline = existing->second;
-		Remember_Resolution(key, pipeline, vertex_description, combiner_description);
+		PipelineUse * const use = Record_Use(key);
+		const Resolution resolution = { false, 0, pipeline, use, key };
+		Resolutions[resolve_key] = resolution;
+		Remember_Resolution(use, pipeline, vertex_description, combiner_description);
 		return true;
 	}
 	std::map<std::string, unsigned>::const_iterator refused = RefusedPipelines.find(key);
 	if (refused != RefusedPipelines.end()) {
+		// A refusal is kept once it has been seen here, not where it is first made: the paths
+		// below refuse in several places and the next draw of the same state lands here anyway.
+		const Pipeline none = { NULL, NULL, NULL };
+		const Resolution resolution = { true, refused->second, none, NULL, key };
+		Resolutions[resolve_key] = resolution;
 		Refuse(key, static_cast<RefusalReason>(refused->second));
 		return false;
 	}
@@ -1838,8 +2058,7 @@ bool DX11BackendClass::Resolve(Pipeline & pipeline)
 		return false;
 	}
 	const bool wrote_pixel = (PixelProgram != ENGINE_SHADER_NONE)
-		? EngineShader_Pixel_Program(PixelProgram, combiner_description.PixelPipeline, pixel_hlsl,
-			terrain_bumped)
+		? EngineShader_Pixel_Program(PixelProgram, combiner_description.PixelPipeline, pixel_hlsl)
 		: CombinerShader_Generate(combiner_description, COMBINER_SHADER_TARGET_D3D11, pixel_hlsl);
 	if (!wrote_pixel) {
 		Note_Refusal("the pixel half would not generate this description");
@@ -1898,11 +2117,27 @@ bool DX11BackendClass::Resolve(Pipeline & pipeline)
 	FrameBuildMilliseconds += DX11Resource_Milliseconds_Now() - build_started;
 	++FrameBuildCount;
 	pipeline = built;
-	Remember_Resolution(key, pipeline, vertex_description, combiner_description);
+	PipelineUse * const use = Record_Use(key);
+	const Resolution resolution = { false, 0, pipeline, use, key };
+	Resolutions[resolve_key] = resolution;
+	Remember_Resolution(use, pipeline, vertex_description, combiner_description);
 	return true;
 }
 
-void DX11BackendClass::Remember_Resolution(const std::string & key, const Pipeline & resolved,
+size_t DX11BackendClass::ResolveKey_Hash::operator()(const ResolveKey & key) const
+{
+	// FNV-1a a word at a time; the key is all four byte fields and zeroed padding.
+	static_assert(sizeof(ResolveKey) % sizeof(unsigned) == 0, "the key hashes whole words");
+	unsigned words[sizeof(ResolveKey) / sizeof(unsigned)];
+	memcpy(words, &key, sizeof(words));
+	unsigned long long hash = 14695981039346656037ULL;
+	for (unsigned index = 0; index < sizeof(words) / sizeof(words[0]); ++index) {
+		hash = (hash ^ words[index]) * 1099511628211ULL;
+	}
+	return static_cast<size_t>(hash);
+}
+
+void DX11BackendClass::Remember_Resolution(PipelineUse * use, const Pipeline & resolved,
 	const VertexPipelineDescription & vertex, const CombinerDescription & combiner)
 {
 	ResolveMemo & memo = Memos[NextMemo];
@@ -1913,7 +2148,7 @@ void DX11BackendClass::Remember_Resolution(const std::string & key, const Pipeli
 	memo.VertexProgram = VertexProgram;
 	memo.PixelProgram = PixelProgram;
 	memo.Resolved = resolved;
-	memo.Use = Record_Use(key);
+	memo.Use = use;
 	LastResolveHeld = true;
 	LastMemo = NextMemo;
 	NextMemo = (NextMemo + 1) % RESOLVE_MEMO_ENTRIES;
@@ -1989,11 +2224,25 @@ void DX11BackendClass::Upload_Constants()
 		EngineConstantsHeld = true;
 	}
 
-	// Nothing either block is built from has been set since both buffers were last written.
-	if (!ConstantsChanged && VertexConstantsHeld && PixelConstantsHeld) {
-		return;
-	}
+	// Each block is built only when something it is built from has been set since its buffer was
+	// last written.
+	const bool vertex_due = ConstantsChanged || VertexConstantsChanged || !VertexConstantsHeld;
+	const bool pixel_due = ConstantsChanged || PixelConstantsChanged || !PixelConstantsHeld;
 	ConstantsChanged = false;
+	VertexConstantsChanged = false;
+	PixelConstantsChanged = false;
+	if (vertex_due) {
+		Upload_Vertex_Constants();
+	}
+	if (pixel_due) {
+		Upload_Pixel_Constants();
+	}
+}
+
+void DX11BackendClass::Upload_Vertex_Constants()
+{
+	ID3D11DeviceContext * context = Device->Get_Context();
+	D3D11_MAPPED_SUBRESOURCE mapped;
 
 	VertexConstantBlock vertex_block;
 	memset(&vertex_block, 0, sizeof(vertex_block));
@@ -2059,6 +2308,12 @@ void DX11BackendClass::Upload_Constants()
 			VertexConstantsHeld = true;
 		}
 	}
+}
+
+void DX11BackendClass::Upload_Pixel_Constants()
+{
+	ID3D11DeviceContext * context = Device->Get_Context();
+	D3D11_MAPPED_SUBRESOURCE mapped;
 
 	PixelConstantBlock pixel_block;
 	memset(&pixel_block, 0, sizeof(pixel_block));
@@ -2076,45 +2331,6 @@ void DX11BackendClass::Upload_Constants()
 	pixel_block.AlphaReference[0] =
 		static_cast<float>(RenderStates.Get_Render_State(D3DRS_ALPHAREF) & 0xff);
 
-	// The normal mapped program's lights, the enabled directional ones first and in camera space
-	// like the vertex block's; a point or spot light is already in the vertex colour it adds to.  A
-	// slot with no light gets a direction anyway: the highlight normalises the half vector, and a
-	// zero direction there is a NaN that no zero colour cancels.
-	unsigned normal_slot = 0;
-	for (unsigned index = 0; index < MAXIMUM_VERTEX_LIGHTS && normal_slot < NORMAL_MAPPED_LIGHTS;
-			++index) {
-		if (!Lights[index].Enabled || Lights[index].Type != D3DLIGHT_DIRECTIONAL) {
-			continue;
-		}
-		float * direction = pixel_block.NormalLightDirection[normal_slot];
-		transform_direction(Lights[index].Direction, View, direction);
-		const float length = sqrtf(direction[0] * direction[0] + direction[1] * direction[1]
-			+ direction[2] * direction[2]);
-		if (length > 0.0f) {
-			direction[0] /= length;
-			direction[1] /= length;
-			direction[2] /= length;
-		}
-		memcpy(pixel_block.NormalLightDiffuse[normal_slot], Lights[index].Diffuse, sizeof(float) * 4);
-		++normal_slot;
-	}
-	for (; normal_slot < NORMAL_MAPPED_LIGHTS; ++normal_slot) {
-		pixel_block.NormalLightDirection[normal_slot][2] = 1.0f;
-	}
-	pixel_block.NormalMapParameters[0] = NORMAL_MAP_STRENGTH;
-	pixel_block.NormalMapParameters[1] = NORMAL_MAP_HIGHLIGHT_POWER;
-	pixel_block.NormalMapParameters[2] = NORMAL_MAP_HIGHLIGHT_SCALE;
-	const float sun[4] = { TerrainSun[0], TerrainSun[1], TerrainSun[2], 0.0f };
-	transform_direction(sun, View, pixel_block.TerrainSunDirection);
-	const float sun_length = sqrtf(pixel_block.TerrainSunDirection[0] * pixel_block.TerrainSunDirection[0]
-		+ pixel_block.TerrainSunDirection[1] * pixel_block.TerrainSunDirection[1]
-		+ pixel_block.TerrainSunDirection[2] * pixel_block.TerrainSunDirection[2]);
-	if (sun_length > 0.0f) {
-		for (unsigned axis = 0; axis < 3; ++axis) {
-			pixel_block.TerrainSunDirection[axis] /= sun_length;
-		}
-	}
-
 	// A camera space draw's pixels go back to the world through the scene camera's view, not through
 	// the identity it was drawn with; see Set_Scene_View in the header.
 	const bool camera_space = Camera_Space_Draw();
@@ -2129,6 +2345,7 @@ void DX11BackendClass::Upload_Constants()
 			multiply(world_to_camera, Projection, scene_clip);
 			if (invert(scene_clip, clip_to_world)) {
 				multiply(clip_to_world, SunViewProjection, ShadowFromClip);
+				memcpy(WorldFromClip, clip_to_world, sizeof(WorldFromClip));
 				memcpy(ShadowFromClipView, world_to_camera, sizeof(View));
 				memcpy(ShadowFromClipProjection, Projection, sizeof(Projection));
 				ShadowFromClipValid = true;
@@ -2152,26 +2369,37 @@ void DX11BackendClass::Upload_Constants()
 		pixel_block.ShadowSoftness[1] = ShadowTexelsPerGap;
 		pixel_block.ShadowSoftness[2] = ShadowUnitsPerDepth;
 		pixel_block.ShadowSoftness[3] = ShadowSkyFill;
-	}
-
-	/* The sky a metal surface mirrors.  There is no cubemap: the colour is the map's own sunlight,
-		 which is what makes a night map's metal cold and a desert's warm without anything being
-		 authored, and the direction it is brightest in is straight up in camera space. */
-	const float * sun_colour = Lights[0].Enabled ? Lights[0].Diffuse : NULL;
-	for (unsigned channel = 0; channel < 3; ++channel) {
-		pixel_block.Sky[channel] = (sun_colour != NULL) ? sun_colour[channel] : 1.0f;
-	}
-	pixel_block.Sky[3] = SKY_REFLECTION_STRENGTH;
-	const float world_up[4] = { 0.0f, 0.0f, 1.0f, 0.0f };
-	transform_direction(world_up, View, pixel_block.SkyUp);
-	const float up_length = sqrtf(pixel_block.SkyUp[0] * pixel_block.SkyUp[0]
-		+ pixel_block.SkyUp[1] * pixel_block.SkyUp[1] + pixel_block.SkyUp[2] * pixel_block.SkyUp[2]);
-	if (up_length > 0.0f) {
-		for (unsigned axis = 0; axis < 3; ++axis) {
-			pixel_block.SkyUp[axis] /= up_length;
+		memcpy(pixel_block.WorldFromClip, WorldFromClip, sizeof(pixel_block.WorldFromClip));
+		pixel_block.HeadlightParameters[0] = static_cast<float>(HeadlightCount);
+		memcpy(&pixel_block.HeadlightParameters[1], HeadlightGain, sizeof(HeadlightGain));
+		for (unsigned slot = 0; slot < HeadlightCount; ++slot) {
+			memcpy(pixel_block.HeadlightPosition[slot], &Headlights[slot][0], sizeof(float) * 4);
+			memcpy(pixel_block.HeadlightDirection[slot], &Headlights[slot][4], sizeof(float) * 4);
+		}
+		// None for a particle: the smoke takes these lights on the CPU (BLAST_LIGHT_SAMPLING).  None
+		// for a pass that multiplies what is under it (ZERO, SRCCOLOR): the base pass took the light
+		// already, and gained again the surface came out lit twice.
+		const bool multiplies = RenderStates.Get_Render_State(D3DRS_ALPHABLENDENABLE) != FALSE
+			&& (RenderStates.Get_Render_State(D3DRS_SRCBLEND) == D3DBLEND_ZERO
+				|| RenderStates.Get_Render_State(D3DRS_DESTBLEND) == D3DBLEND_SRCCOLOR);
+		const unsigned blasts = (camera_space || multiplies) ? 0 : BlastLightCount;
+		pixel_block.BlastLightParameters[0] = static_cast<float>(blasts);
+		for (unsigned slot = 0; slot < blasts; ++slot) {
+			memcpy(pixel_block.BlastLightPosition[slot], &BlastLights[slot][0], sizeof(float) * 4);
+			memcpy(pixel_block.BlastLightDiffuse[slot], &BlastLights[slot][4], sizeof(float) * 4);
+			memcpy(pixel_block.BlastLightAmbient[slot], &BlastLights[slot][8], sizeof(float) * 4);
 		}
 	}
-	pixel_block.SkyUp[3] = SKY_HORIZON_SHARE;
+
+	// The particles' projection, the one the world behind them was drawn with: the distance from a
+	// depth is SoftParticleDepth.x / (depth * .y - .z) (SOFT_PARTICLE_SAMPLING).  Written only around
+	// the sorted billboards, so every other draw keeps the bytes it had.
+	if (SoftParticles && camera_space) {
+		pixel_block.SoftParticleDepth[0] = Projection[11] * Projection[14];
+		pixel_block.SoftParticleDepth[1] = Projection[11];
+		pixel_block.SoftParticleDepth[2] = Projection[10];
+		pixel_block.SoftParticleDepth[3] = 1.0f / SOFT_PARTICLE_FADE_UNITS;
+	}
 
 	if (!PixelConstantsHeld
 			|| memcmp(&HeldPixelConstants, &pixel_block, sizeof(pixel_block)) != 0) {
@@ -2365,24 +2593,31 @@ void DX11BackendClass::Bind_State_Objects()
 		Bound.Rasterizer = rasterizer;
 	}
 
-	ID3D11SamplerState * samplers[DX11_BACKEND_TEXTURE_STAGES];
-	ID3D11ShaderResourceView * textures[DX11_BACKEND_TEXTURE_STAGES];
-	for (unsigned sampler = 0; sampler < DX11_BACKEND_TEXTURE_STAGES; ++sampler) {
-		samplers[sampler] = Sampler_State(sampler);
-		textures[sampler] = Readable_Texture(sampler, Textures[sampler]);
+	// The stages are what the last draw bound unless a texture or a sampler state was set since, or
+	// that draw read a copy of the target, which has to be taken again for this one.
+	bool stages_changed = !known || TexturesChanged;
+	for (unsigned sampler = 0; sampler < DX11_BACKEND_TEXTURE_STAGES && !stages_changed; ++sampler) {
+		stages_changed = SamplerChanged[sampler];
 	}
-	if (!known || memcmp(samplers, Bound.Samplers, sizeof(samplers)) != 0) {
-		context->PSSetSamplers(0, DX11_BACKEND_TEXTURE_STAGES, samplers);
-		memcpy(Bound.Samplers, samplers, sizeof(samplers));
-	}
-	if (!known || memcmp(textures, Bound.Textures, sizeof(textures)) != 0) {
-		context->PSSetShaderResources(0, DX11_BACKEND_TEXTURE_STAGES, textures);
-		memcpy(Bound.Textures, textures, sizeof(textures));
-	}
-	// Left bound when the draw does not read it, since only a normal mapped program declares t4.
-	if (NormalMap != NULL && (!known || NormalMap != Bound.NormalMap)) {
-		context->PSSetShaderResources(DX11_BACKEND_TEXTURE_STAGES, 1, &NormalMap);
-		Bound.NormalMap = NormalMap;
+	if (stages_changed) {
+		TexturesChanged = false;
+		ID3D11SamplerState * samplers[DX11_BACKEND_TEXTURE_STAGES];
+		ID3D11ShaderResourceView * textures[DX11_BACKEND_TEXTURE_STAGES];
+		for (unsigned sampler = 0; sampler < DX11_BACKEND_TEXTURE_STAGES; ++sampler) {
+			samplers[sampler] = Sampler_State(sampler);
+			textures[sampler] = Readable_Texture(sampler, Textures[sampler]);
+			if (textures[sampler] != Textures[sampler]) {
+				TexturesChanged = true;
+			}
+		}
+		if (!known || memcmp(samplers, Bound.Samplers, sizeof(samplers)) != 0) {
+			context->PSSetSamplers(0, DX11_BACKEND_TEXTURE_STAGES, samplers);
+			memcpy(Bound.Samplers, samplers, sizeof(samplers));
+		}
+		if (!known || memcmp(textures, Bound.Textures, sizeof(textures)) != 0) {
+			context->PSSetShaderResources(0, DX11_BACKEND_TEXTURE_STAGES, textures);
+			memcpy(Bound.Textures, textures, sizeof(textures));
+		}
 	}
 
 	// The sun's map at t5 with a sampler of its own at s5, clamped so a pixel past the edge of the
@@ -2401,12 +2636,32 @@ void DX11BackendClass::Bind_State_Objects()
 		}
 		// The smoke's map beside it at t6 and s6, or nothing on a frame without smoke, which the
 		// program never reads: its strength is zero then.
+		// Both were bound again on every receiving draw, which is most of the frame.
 		ID3D11ShaderResourceView * const maps[2] = { ShadowMapTexture, Smoke_Map() };
-		context->PSSetShaderResources(DX11_BACKEND_TEXTURE_STAGES + 1, 2, maps);
+		if (!known || maps[0] != Bound.Maps[0] || maps[1] != Bound.Maps[1]) {
+			context->PSSetShaderResources(DX11_BACKEND_TEXTURE_STAGES + 1, 2, maps);
+			Bound.Maps[0] = maps[0];
+			Bound.Maps[1] = maps[1];
+		}
 		if (ShadowMapSampler != NULL) {
 			ID3D11SamplerState * const samplers_of_maps[2] = { ShadowMapSampler, SmokeMapSampler };
-			context->PSSetSamplers(DX11_BACKEND_TEXTURE_STAGES + 1, (SmokeMapSampler != NULL) ? 2 : 1,
-				samplers_of_maps);
+			if (!known || samplers_of_maps[0] != Bound.MapSamplers[0]
+					|| samplers_of_maps[1] != Bound.MapSamplers[1]) {
+				context->PSSetSamplers(DX11_BACKEND_TEXTURE_STAGES + 1,
+					(SmokeMapSampler != NULL) ? 2 : 1, samplers_of_maps);
+				Bound.MapSamplers[0] = samplers_of_maps[0];
+				Bound.MapSamplers[1] = samplers_of_maps[1];
+			}
+		}
+	}
+
+	// The scene's depth at t7 for a soft particle, read with Load, so it wants no sampler.  The copy
+	// was taken at the top of the sorted flush (Take_Scene_Depth) and is refreshed in place.
+	if (SoftParticles && Soft_Particle() != SOFT_PARTICLE_NONE) {
+		ID3D11ShaderResourceView * const depth = SceneDepthCopyView;
+		if (!known || depth != Bound.SceneDepth) {
+			context->PSSetShaderResources(DX11_BACKEND_TEXTURE_STAGES + 3, 1, &depth);
+			Bound.SceneDepth = depth;
 		}
 	}
 }
@@ -2548,8 +2803,11 @@ bool DX11BackendClass::Draw_Indexed(unsigned index_count, unsigned start_index,
 	context->DrawIndexed(index_count, start_index, base_vertex);
 
 	++DrawsMade;
-	if (Normal_Mapped() || Terrain_Bumped()) {
-		++NormalMappedDraws;
+	// The soft particles' copy of the depth is behind whatever this wrote into the scene's depth
+	// (Take_Scene_Depth); a mirror or a filter target's own depth is not what they read.
+	if (RenderStates.Get_Render_State(D3DRS_ZWRITEENABLE) != FALSE
+		&& (CurrentTarget == NULL || CurrentDepth == Device->Get_Depth_Stencil_View())) {
+		SceneDepthStale = true;
 	}
 	if (CurrentTarget != NULL) {
 		++DrawsIntoTargets;
@@ -2591,6 +2849,12 @@ bool DX11BackendClass::Draw_Triangles(unsigned vertex_count, unsigned start_vert
 	context->Draw(vertex_count, start_vertex);
 
 	++DrawsMade;
+	// The soft particles' copy of the depth is behind whatever this wrote into the scene's depth
+	// (Take_Scene_Depth); a mirror or a filter target's own depth is not what they read.
+	if (RenderStates.Get_Render_State(D3DRS_ZWRITEENABLE) != FALSE
+		&& (CurrentTarget == NULL || CurrentDepth == Device->Get_Depth_Stencil_View())) {
+		SceneDepthStale = true;
+	}
 	if (CurrentTarget != NULL) {
 		++DrawsIntoTargets;
 		MaskWhileTargeted |= RenderStates.Get_Render_State(D3DRS_COLORWRITEENABLE);
@@ -2753,6 +3017,12 @@ bool DX11BackendClass::Draw_User_Strip(const void * vertices, unsigned primitive
 	context->Draw(list_vertex_count, 0);
 
 	++DrawsMade;
+	// The soft particles' copy of the depth is behind whatever this wrote into the scene's depth
+	// (Take_Scene_Depth); a mirror or a filter target's own depth is not what they read.
+	if (RenderStates.Get_Render_State(D3DRS_ZWRITEENABLE) != FALSE
+		&& (CurrentTarget == NULL || CurrentDepth == Device->Get_Depth_Stencil_View())) {
+		SceneDepthStale = true;
+	}
 	if (CurrentTarget != NULL) {
 		++DrawsIntoTargets;
 		MaskWhileTargeted |= RenderStates.Get_Render_State(D3DRS_COLORWRITEENABLE);

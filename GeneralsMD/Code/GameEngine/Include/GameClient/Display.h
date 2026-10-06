@@ -185,6 +185,8 @@ public:
 #endif
 	virtual void preloadModelAssets( AsciiString model ) = 0;	///< preload model asset
 	virtual void preloadTextureAssets( AsciiString texture ) = 0;	///< preload texture asset
+	/// preload a texture drawImage draws: one level, never reduced, the way drawImage asks for it
+	virtual void preloadImageTexture( AsciiString texture ) {}
 
 	virtual void takeScreenShot(void) = 0;										///< saves screenshot to a file
 	virtual void toggleMovieCapture(void) = 0;							///< starts saving frames to an avi or frame sequence
@@ -263,6 +265,33 @@ inline Real UIScaleForScreen( Int screenWidth, Int screenHeight )
 
 	return scale < 1.0f ? 1.0f : scale;
 }
+
+//-------------------------------------------------------------------------------------------------
+/** The Classic interface's box: the 800x600 layouts at one scale, the smaller of the two, centred.
+	* On a screen wider than 4:3 it is the full height with the world showing down both sides; at
+	* 4:3 it is the screen.  This is the rectangle parseScreenRect fits a layout into, except on a
+	* screen taller than 4:3 (1280x1024), where it stands on the bottom edge as the command bar does
+	* and the fitted dialogs stay centred. */
+//-------------------------------------------------------------------------------------------------
+struct UIRect { Int x, y, w, h; };
+
+inline UIRect UIRectForScreen( Int screenWidth, Int screenHeight )
+{
+	UIRect r = { 0, 0, screenWidth, screenHeight };
+	if( screenWidth <= 0 || screenHeight <= 0 )
+		return r;
+	Real scale = screenWidth / 800.0f;
+	if( screenHeight / 600.0f < scale )
+		scale = screenHeight / 600.0f;
+	r.w = (Int)( 800.0f * scale + 0.5f );
+	r.h = (Int)( 600.0f * scale + 0.5f );
+	r.x = ( screenWidth - r.w ) / 2;
+	r.y = screenHeight - r.h;
+	return r;
+}
+
+/// Where the 2D interface lives: the 4:3 box in the Classic interface, the whole screen in Reforged.
+UIRect TheUIRect( void );
 
 //-------------------------------------------------------------------------------------------------
 inline Real TheUIScale( void )

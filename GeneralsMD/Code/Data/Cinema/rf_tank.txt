@@ -1,0 +1,12 @@
+# Zero Hour Reforged trailer, beats 10 and 11 (MV_TANK, MV_TURRET): Scenarios/s240_tank.txt on
+# Fortress Avalanche. The Marauder driving up the frame past the Troop Crawlers it shells, then the
+# lone Crusader pulling away, braking and backing up, closer than the 2.4.0 Shorts had them.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Fortress Avalanche\Fortress Avalanche.map" -autoskirmish 2
+#     -takeover -observer -side 0 FactionAmerica -side 1 FactionChina -seed 1 -scenario s240_tank
+#     -cinema rf_tank -video 175 710 rf_tank -maxframes 720
+
+3.0   cut     1000 2040 0.3 -70 8
+13.3  cut     905 2400 0.25 45 6
+24.2  end
