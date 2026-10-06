@@ -4486,6 +4486,10 @@ GUI:AlternateMouse
 "Interface Alternativa do Mouse"
 END
 
+GUI:AmbientVolume
+"Volume - Ambiente"
+END
+
 GUI:AmericaAllies
 "Aliados - EUA"
 END
@@ -5362,6 +5366,10 @@ GUI:CheatOneHitKill
 "Abate com um golpe"
 END
 
+GUI:CheatPanelClose
+"Fechar"
+END
+
 GUI:CheatPanelTitle
 "Trapaças"
 END
@@ -5444,10 +5452,6 @@ END
 
 GUI:CloseExpScreen
 "OK"
-END
-
-GUI:CloserZoom
-"Zoom Mais Próximo"
 END
 
 GUI:CloudShadows
@@ -6144,6 +6148,18 @@ END
 
 GUI:FollowDescription
 "Faz com que as unidades sigam o(s) objeto(s) selecionado(s)."
+END
+
+GUI:FullscreenScaling
+"Ajuste da Tela Cheia"
+END
+
+GUI:FullscreenScaling0
+"Esticar para preencher"
+END
+
+GUI:FullscreenScaling1
+"Manter proporção, com barras"
 END
 
 GUI:GameInfo
@@ -7206,18 +7222,6 @@ GUI:MediumGameSpeed
 "Médio"
 END
 
-GUI:MenuLayout
-"Layout dos Menus"
-END
-
-GUI:MenuLayout0
-"Esticar"
-END
-
-GUI:MenuLayout1
-"Ajustar"
-END
-
 GUI:MessagesOn
 "Mensagens ativadas."
 END
@@ -7339,7 +7343,7 @@ GUI:NeedMorePlayers
 END
 
 GUI:NetBox
-"Caixa de Relógio e FPS"
+"Caixa de Informações"
 END
 
 GUI:NetgearDelay
@@ -7482,6 +7486,10 @@ GUI:OptionsGroupBattlefield
 "Campo de Batalha"
 END
 
+GUI:OptionsGroupCamera
+"Câmera"
+END
+
 GUI:OptionsGroupDetail
 "Qualidade"
 END
@@ -7514,6 +7522,10 @@ GUI:OptionsGroupLanguage
 "Idioma"
 END
 
+GUI:OptionsGroupLighting
+"Luz e Brilho"
+END
+
 GUI:OptionsGroupOrders
 "Ordens"
 END
@@ -7526,6 +7538,10 @@ GUI:OptionsGroupPicture
 "Imagem"
 END
 
+GUI:OptionsGroupPlacement
+"Posicionamento de Construções"
+END
+
 GUI:OptionsGroupProxy
 "Proxy"
 END
@@ -7534,16 +7550,8 @@ GUI:OptionsGroupScreen
 "Tela"
 END
 
-GUI:OptionsGroupScrolling
-"Movimento da Câmera"
-END
-
 GUI:OptionsGroupShadows
 "Sombras"
-END
-
-GUI:OptionsGroupTerrain
-"Terreno"
 END
 
 GUI:OptionsGroupVolume
@@ -7566,12 +7574,12 @@ GUI:OptionsTabEffects
 "Efeitos"
 END
 
-GUI:OptionsTabGameplay
-"Jogabilidade"
-END
-
 GUI:OptionsTabGraphics
 "Gráficos"
+END
+
+GUI:OptionsTabInterface
+"Interface"
 END
 
 GUI:OptionsTabNetwork
@@ -7998,6 +8006,10 @@ GUI:Resolution2
 "640x480"
 END
 
+GUI:ResolutionNote0
+"O monitor suporta este modo"
+END
+
 GUI:ResourcesCollected
 "Supts.\ncoletados"
 END
@@ -8191,7 +8203,7 @@ GUI:ScreenshotCaptureDescription
 END
 
 GUI:ScrollSpeed
-"VELOCIDADE DE ROLAGEM"
+"Velocidade de Rolagem da Câmera"
 END
 
 GUI:SelectAGame
@@ -8632,6 +8644,10 @@ END
 
 GUI:SnapBuild45
 "Rotação de Construção em 45°"
+END
+
+GUI:SnapBuildNeighbour
+"Encaixar em Construções Próximas"
 END
 
 GUI:SnapCamera45
@@ -9380,6 +9396,10 @@ END
 
 GUI:YouHaveBeenDefeated
 "Você foi Derrotado."
+END
+
+GUI:ZoomSpeed
+"Velocidade do Zoom"
 END
 
 GUI:ZoomToCursor
@@ -15210,6 +15230,10 @@ TOOLTIP:AlternateMouse
 "O botão direito do mouse passa a iniciar as ações das unidades no campo de batalha (atacar, mover, etc)."
 END
 
+TOOLTIP:AmbientVolume
+"Pássaros, vento, água e o burburinho de uma cidade. O volume dos efeitos sonoros não mexe mais nesses sons, então a batalha pode continuar alta enquanto o mundo ao redor fica quieto."
+END
+
 TOOLTIP:Anisotropy
 "Define quantas amostras a filtragem anisotrópica pode usar. Automático deixa a placa de vídeo decidir, até 16. Só é usado quando a filtragem de texturas está em Anisotrópica. Entra em vigor na próxima vez que o jogo iniciar."
 END
@@ -15646,10 +15670,6 @@ TOOLTIP:CloseExpScreen
 "Volta para o Jogo"
 END
 
-TOOLTIP:CloserZoom
-"Quanto a roda do mouse pode aproximar a câmera do chão além do normal. 0% é o limite do próprio jogo."
-END
-
 TOOLTIP:CloudShadows
 "As sombras das nuvens passam sobre o terreno. Custa pouco. Entra em vigor ao clicar em Aceitar."
 END
@@ -15782,6 +15802,10 @@ TOOLTIP:FreeForAll
 "Livre Para Todos. Não são permitidas equipes/alianças."
 END
 
+TOOLTIP:FullscreenScaling
+"Como a tela cheia preenche um monitor cujo formato a sua resolução não tem, como 1920x1080 numa tela de 1920x1200 ou 1024x768 numa tela larga. Esticar preenche todos os pixels; a outra opção mantém as proporções da imagem, com barras pretas."
+END
+
 TOOLTIP:GameAcceptance
 "Aceitar Opções"
 END
@@ -15831,7 +15855,7 @@ TOOLTIP:GetUpdate
 END
 
 TOOLTIP:GridBuild
-"Posiciona estruturas na grade de 10 unidades usada pelo sistema de rotas, facilitando alinhar edifícios sem deixar espaços estreitos demais para passagem."
+"Posiciona as estruturas na grade de 10 unidades usada pelo sistema de rotas, desenhada sob o edifício enquanto você o posiciona, para que dois edifícios colocados a olho fiquem encostados em vez de deixar um vão estreito demais para passar. Desligado, só ficam marcadas as células onde nada pode ser construído."
 END
 
 TOOLTIP:GroundLighting
@@ -15996,10 +16020,6 @@ END
 
 TOOLTIP:matchingprogress
 "Mostra o progresso enquanto o QuickMatch procura um oponente."
-END
-
-TOOLTIP:MenuLayout
-"Ajustar mantém os menus no formato em que foram desenhados e os centraliza numa tela larga. Esticar os alarga até as bordas da tela, como o jogo sempre fez."
 END
 
 TOOLTIP:MiddleMousePans
@@ -16243,7 +16263,7 @@ TOOLTIP:ScienceCostUnavailable
 END
 
 TOOLTIP:ScrollSpeed
-"Ajuste a velocidade de rolagem do mapa."
+"A velocidade com que a câmera se desloca: na borda da tela, com as setas do teclado e ao arrastar com o botão direito do mouse. A roda do mouse tem a própria Velocidade do Zoom. Entra em vigor ao clicar em Aceitar."
 END
 
 TOOLTIP:SelectAll
@@ -16302,6 +16322,10 @@ TOOLTIP:SnapBuild45
 "Ao arrastar para girar, encaixa a construção nas oito direções de 45 graus, útil para muros e defesas alinhados à borda da base."
 END
 
+TOOLTIP:SnapBuildNeighbour
+"Uma estrutura colocada a mais ou menos uma célula de outra é puxada até encostar na borda dela, para que as duas não deixem vão."
+END
+
 TOOLTIP:SnapCamera45
 "Faz a rotação da câmera encaixar nas oito direções de 45 graus em vez de parar em qualquer ângulo."
 END
@@ -16323,7 +16347,7 @@ TOOLTIP:StagingPlayerInfo
 END
 
 TOOLTIP:StartAtMaxZoom
-"A partida começa com a câmera no ponto mais distante que a roda do mouse alcança. Desligado, ela começa na altura para a qual o mapa foi enquadrado."
+"A partida começa com a câmera no ponto mais distante que a roda do mouse alcança. Desligado, ela começa de perto, na altura que o jogo original usava."
 END
 
 TOOLTIP:StartGame
@@ -16406,8 +16430,24 @@ TOOLTIP:StatSeconds
 "%ds"
 END
 
+TOOLTIP:StatShortDamagePerSecond
+"DPS"
+END
+
 TOOLTIP:StatTime
 "Tempo de construção"
+END
+
+TOOLTIP:StatVsGuns
+"Bala"
+END
+
+TOOLTIP:StatVsRockets
+"Míssil"
+END
+
+TOOLTIP:StatVsShells
+"Canhão"
 END
 
 TOOLTIP:StopSearch
@@ -16567,15 +16607,19 @@ TOOLTIP:WidenSearch
 END
 
 TOOLTIP:WindowMode
-"Tela Cheia assume o modo de vídeo; Sem Bordas cobre a tela com uma janela e permite alternar rapidamente entre aplicativos. Sem Bordas usa a resolução do próprio monitor; nos outros dois modos, vale a lista de resoluções acima."
+"Tela Cheia cobre o monitor na resolução acima, ampliada até preenchê-lo quando for menor, e sai da frente ao alternar com Alt+Tab. Sem Bordas sempre desenha na resolução do próprio monitor e continua no lugar atrás das outras janelas."
 END
 
 TOOLTIP:WorkersReturn
 "Um Trabalhador que termina uma construção volta a coletar suprimentos em vez de permanecer parado no local."
 END
 
+TOOLTIP:ZoomSpeed
+"Quanto um giro da roda do mouse aproxima ou afasta a câmera. Em 100, ela se move tanto quanto no jogo original. Entra em vigor ao clicar em Aceitar."
+END
+
 TOOLTIP:ZoomToCursor
-"A roda do mouse aproxima a câmera do ponto sob o cursor, em vez do centro da tela. Apenas nos controles modernos."
+"A roda do mouse aproxima a câmera do ponto sob o cursor, em vez do centro da tela."
 END
 
 TOOTIP:Password
