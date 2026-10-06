@@ -170,7 +170,8 @@ jobs:
           Requires a legally owned Zero Hour installation: copy these files over a Reforged
           install, or put Zero Hour's *.big next to generals.exe and the base game's *.big
           in ZH_Generals\. Start generals.exe directly: this edition does not go through the
-          Reforged launcher. No game data ships here. Sound and video run through the FFmpeg
+          Reforged launcher. It opens in the Classic interface; add -interface reforged to the
+          shortcut for the Reforged one. No game data ships here. Sound and video run through the FFmpeg
           DLLs included; mss32.dll and binkw32.dll are not used by the 64-bit build.
           The opening splash is the Install_Final.bmp your Zero Hour install came with. If an
           earlier Reforged build replaced it, copy the original back next to generals.exe.
