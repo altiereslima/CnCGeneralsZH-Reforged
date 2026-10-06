@@ -26,7 +26,7 @@ def main():
 
     h=(code/"GameEngine/Include/Common/GlobalData.h").read_text(encoding="utf-8")
     need(h,"TEXT_LANGUAGE_PORTUGUESE_BRAZIL","PTBR enum")
-    need(h,"TEXT_LANGUAGE_COUNT\t\t\t\t\t= 3","count 3")
+    need(h,"TEXT_LANGUAGE_COUNT\t\t\t\t\t= 4","count 4")
     need(h,"AsciiString GetTextLanguageDirectory( void );","resolver declaration")
     checks["globaldata_h"]="PASS"
 
@@ -41,11 +41,12 @@ def main():
 
     opt=(code/"GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp").read_text(encoding="utf-8")
     need(opt,"ReforgedPTBRLanguageInitialized","one-shot migration")
-    need(opt,'(*this)["TextLanguage"] = "2";',"PTBR preference")
+    need(opt,'(*this)["TextLanguage"] = "3";',"PTBR preference")
+    need(opt,'else if (migrated->second == "1")',"PT-BR 2 from before German carried over to 3")
     checks["options_migration"]="PASS"
 
     patch=(code/"Data/Patch.str").read_text(encoding="utf-8")
-    need(patch,'GUI:Language2\n"Português (Brasil)"\nEND',"Portuguese UI choice")
+    need(patch,'GUI:Language3\n"Português (Brasil)"\nEND',"Portuguese UI choice")
     need(patch,"briefings, subtitles and localized videos","updated tooltip")
     checks["patch_str"]="PASS"
 
@@ -85,25 +86,14 @@ def main():
         need(ptbr,f"\n{label}\n",f"{label} translation")
     checks["ai_rung_names"]="PASS"
 
-    need(h,"Bool m_classicInterface;","classic interface member")
-    need(cpp,"m_classicInterface = TRUE;","classic interface default")
-    unconditional(cpp,"\tm_classicInterface = TRUE;\n","classic interface default in every build")
-    need(catalog,'{ "ClassicInterface",',"ClassicInterface Options.ini key")
-    ui=(code/"GameEngine/Source/GameClient/InGameUI.cpp").read_text(encoding="utf-8")
-    need(ui,"m_controlBarPage.empty() || TheGlobalData->m_classicInterface","plates unless the page is asked for")
-    need(ui,"m_quitMenuPage.empty() || TheGlobalData->m_classicInterface","original Esc menu unless the page is asked for")
-    need(ui,"( TheGlobalData->m_showHudOverlay || TheGlobalData->m_classicInterface )\n\t\t&& TheGlobalData->m_showNetBox","classic bar's corner box follows the menu option")
-    quit_menu=(code/"GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/QuitMenu.cpp").read_text(encoding="utf-8")
-    need(quit_menu,'TheTransitionHandler->reverse( "QuitFullBack" );',"original Esc menu closing transition")
+    # the Classic interface is upstream's (Classic without -interface); the edition adds the markings
+    unconditional(cpp,"\tm_interfaceStyle = INTERFACE_STYLE_CLASSIC;\n","Classic interface by default in every build")
+    if '{ "ClassicInterface",' in catalog:
+        raise RuntimeError("the edition's own ClassicInterface key is back beside upstream's Classic")
     button=(code/"GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DPushButton.cpp").read_text(encoding="utf-8")
-    need(button,"TheGlobalData->m_classicInterface )\n\t\treturn ControlBarUniformScale();","classic bar's markings at the uniform scale")
+    need(button,"TheGlobalData->isClassicUI() )\n\t\treturn ControlBarUniformScale();","Classic bar's markings at the uniform scale")
     if "designPoints * ControlBarHudScale()" in button or "designPoints * badgeBarScale()" not in button:
         raise RuntimeError("missing postcondition: every marking measured by badgeBarScale")
-    bar_cpp=(code/"GameEngine/Source/GameClient/GUI/ControlBar/ControlBar.cpp").read_text(encoding="utf-8")
-    radar=(code/"GameEngine/Source/Common/System/Radar.cpp").read_text(encoding="utf-8")
-    need(bar_cpp,"if(win && TheGlobalData->m_classicInterface)\n\t\t\tm_radarAttackGlowWindow = win;","classic bar keeps WinUAttack")
-    need(bar_cpp,"\t\tupdateRadarAttackGlow();\n","blink advanced on the logic frame")
-    need(radar,"TheControlBar->triggerRadarAttackGlow();","radar sets the blink off")
     checks["classic_interface"]="PASS"
 
     winmain=(code/"Main/WinMain.cpp").read_text(encoding="utf-8")

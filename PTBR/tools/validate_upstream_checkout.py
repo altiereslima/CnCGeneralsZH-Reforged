@@ -4,20 +4,20 @@ import json
 import sys
 
 EXPECTED_SNAPSHOT = {
-    "head_commit": "ebdbd6be8bd26e19c38ad8cd5bd07fcf477d54b8",
+    "head_commit": "fa7bf2f47403924eb58b49d2c8a7fb400ac1840d",
     "files": {
-        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "35367c34bd6c511de82f47fa82e690cd1207f8f4",
-        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "788d14e511c1a14affe6d62bb862723f91714c02",
-        "GeneralsMD/Code/GameEngine/Source/GameClient/GameText.cpp": "6c777176e3249c44a60bc1df7c8fb23030450f12",
-        "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "f6deb6995e855459936662e8d0e44c4330ba253a",
-        "GeneralsMD/Code/Data/Patch.str": "4789660b040997a9ed5955f7f9d334a93407e46d",
-        "GeneralsMD/Code/GameEngine/Source/GameClient/GlobalLanguage.cpp": "1b991cf2edcdd94e4508e886106cb33398426caf",
+        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "157cfa98f31d014162213263cc42eb58dd2480ac",
+        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "f5a9b22ce3cd9a4c1252c444bc2f872769846dd4",
+        "GeneralsMD/Code/GameEngine/Source/GameClient/GameText.cpp": "f719f81e6cb6692218643b53a73b74a2cd2900b4",
+        "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "bf71a99673c5a64d93d954bcd350902becb0c199",
+        "GeneralsMD/Code/Data/Patch.str": "9ba1732cb5bcf32b0f163e69a9cf3aedd08b55c2",
+        "GeneralsMD/Code/GameEngine/Source/GameClient/GlobalLanguage.cpp": "02e3fd0fc5c8da55e8b6097ebc25aad51fcd7673",
         "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DFileSystem.cpp": "61b3a14c2a46b3f297a1535f04b9f581d2d26269",
         "GeneralsMD/Code/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp": "725e18cc231d4d75ab2df60231132fef95e4c05e",
-        "GeneralsMD/Code/CMakeLists.txt": "e02b2181bc4b5876acab4c9284869ad35788c59e",
+        "GeneralsMD/Code/CMakeLists.txt": "250b2870e5fc6a4699a54d1707f8039b90053d30",
         "GeneralsMD/Code/GameEngine/Include/Common/AsciiString.h": "3b58ca6b46023845e48daa5d0afc4488f2a2e066",
         "GeneralsMD/Code/GameEngine/Include/Common/Debug.h": "c097a75346d7f14e1288b3d36636c9ada3ded623",
-        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "4943faa6bd51c88eb7607067fe14613372b3476e",
+        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "b66ad81ada30d07129c7e8e32d2a9975954aff14",
     }
 }
 
@@ -68,7 +68,7 @@ def validate(repo):
 
     h = (code/"GameEngine/Include/Common/GlobalData.h").read_text(encoding="utf-8-sig")
     need(h,
-        "\tTEXT_LANGUAGE_ENGLISH\t= 0,\n\tTEXT_LANGUAGE_TURKISH\t= 1,\n\n\tTEXT_LANGUAGE_COUNT\t\t= 2,\n",
+        "\tTEXT_LANGUAGE_ENGLISH\t= 0,\n\tTEXT_LANGUAGE_TURKISH\t= 1,\n\tTEXT_LANGUAGE_GERMAN\t= 2,\n\n\tTEXT_LANGUAGE_COUNT\t\t= 3,\n",
         "GlobalData.h enum")
     result["checks"]["language_enum_anchor"] = "PASS"
 
@@ -78,7 +78,7 @@ def validate(repo):
 
     gt = (code/"GameEngine/Source/GameClient/GameText.cpp").read_text(encoding="utf-8-sig")
     need(gt,
-        "static const char *const TheTextLanguageOverlays[ TEXT_LANGUAGE_COUNT ] =\n{\n\tNULL,\n\t\"Data\\\\Turkish\\\\Generals.str\",\n};\n",
+        "static const char *const TheTextLanguageOverlays[ TEXT_LANGUAGE_COUNT ] =\n{\n\tNULL,\n\t\"Data\\\\Turkish\\\\Generals.str\",\n\t\"Data\\\\German\\\\Generals.str\",\n};\n",
         "GameText.cpp overlay table")
     if '"Data\\\\Patch.str"' not in gt:
         raise RuntimeError("GameText.cpp: Patch.str overlay ausente")
@@ -91,7 +91,7 @@ def validate(repo):
     result["checks"]["options_migration_anchor"] = "PASS"
 
     pc = (code/"Data/Patch.str").read_text(encoding="utf-8-sig")
-    need(pc, 'GUI:Language1\n"Türkçe"\nEND\n\nTOOLTIP:Language\n', "Patch.str language")
+    need(pc, 'GUI:Language2\n"Deutsch"\nEND\n\nTOOLTIP:Language\n', "Patch.str language")
     result["checks"]["patch_language_anchor"] = "PASS"
 
     gl = (code/"GameEngine/Source/GameClient/GlobalLanguage.cpp").read_text(encoding="utf-8-sig")
@@ -151,40 +151,20 @@ def validate(repo):
     need(info, "\t\tcase SLOT_BRUTAL_AI:\t\treturn UnicodeString( u\"Hard AI\" );\n", "GameInfo.cpp Hard AI")
     result["checks"]["ai_rung_name_anchors"] = "PASS"
 
-    # Stage 16: textured command bar plates by default.
-    need(h, "\tBool m_showHudOverlay;\t\t\t\t///< draw the fps / elapsed time / income line in the corner\n", "GlobalData.h HUD overlay member")
-    need(catalog, "OPTION_BOOL_ACCESSORS( m_showSuperweaponStrip )\n", "OptionsCatalog.cpp accessors")
-    need(catalog, "\t\tget_m_showSuperweaponStrip, set_m_showSuperweaponStrip },\n\n\t{ NULL, NULL, NULL, OPTION_BOOL, APPLY_LIVE, 0, 0, NULL, NULL }\n", "OptionsCatalog.cpp terminator")
+    # Stage 16: the Classic interface is upstream's now; check it still does what the edition had
+    # done for itself up to 2.4, and anchor the one thing it still adds, the button markings.
+    unconditional(cpp, "\tm_interfaceStyle = INTERFACE_STYLE_CLASSIC;\n", "GlobalData.cpp Classic is the interface without -interface")
     ui = (code/"GameEngine/Source/GameClient/InGameUI.cpp").read_text(encoding="utf-8-sig")
-    need(ui, "\tif( m_controlBarPage.empty() )\n\t{\n\t\tTheControlBar->setPageSolids( NULL );\n\t\treturn FALSE;\n\t}\n", "InGameUI.cpp command bar page fallback")
-    w3dbar = (code/"GameEngineDevice/Source/W3DDevice/GameClient/GUI/GUICallbacks/W3DControlBar.cpp").read_text(encoding="utf-8-sig")
-    need(w3dbar, "TheInGameUI->drawControlBarPage( panels, shown, ControlBar::CB_PANEL_COUNT ) )\n\t\treturn;\n", "W3DControlBar.cpp plates drawn when the page is not")
-    need(ui, "\tconst Bool plate = TheGlobalData->m_showHudOverlay && TheGlobalData->m_showNetBox && !m_controlBarPageShown;\n", "InGameUI.cpp corner plate switch")
-    need(ui, "\t\treadHtmlPage( QUIT_MENU_PAGE, m_quitMenuPage );\n\t}\n\tif( m_quitMenuPage.empty() )\n\t\treturn;\n", "InGameUI.cpp Esc menu page fallback")
+    need(ui, "\t// the Classic interface is EA's, and every page here has EA's windows, or nothing, to fall back on\n\tif( TheGlobalData->isClassicUI() )\n\t\treturn;\n", "InGameUI.cpp Classic skips every HTML page")
     quit_menu = (code/"GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/QuitMenu.cpp").read_text(encoding="utf-8-sig")
-    need(quit_menu, "\tTheTransitionHandler->setGroup( group );\n\tTheTransitionHandler->remove( group, TRUE );\n}\n", "QuitMenu.cpp showQuitMenuLayout")
-    need(quit_menu, "static void hideQuitMenuLayout( void )\n{\n\tif( quitMenuLayout )\n\t\tquitMenuLayout->hide( TRUE );\n}\n", "QuitMenu.cpp hideQuitMenuLayout")
+    need(quit_menu, 'TheTransitionHandler->reverse( quitMenuLayout == noSaveLoadQuitMenuLayout ? "QuitNoSaveBack" : "QuitFullBack" );', "QuitMenu.cpp EA's closing transitions")
+    radar = (code/"GameEngine/Source/Common/System/Radar.cpp").read_text(encoding="utf-8-sig")
+    need(radar, "TheControlBar->triggerRadarAttackGlow();", "Radar.cpp Classic under-attack blink")
     button = (code/"GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DPushButton.cpp").read_text(encoding="utf-8-sig")
-    need(button, "// USER INCLUDES //////////////////////////////////////////////////////////////\n#include \"GameClient/Gadget.h\"\n", "W3DPushButton.cpp includes")
+    need(button, "#include \"Common/GlobalData.h\"\n", "W3DPushButton.cpp GlobalData include")
     need(button, "extern Real ControlBarHudScale( void );\n", "W3DPushButton.cpp HUD scale declaration")
     from apply_stage16 import BADGE_SCALE_USES
     need(button, "designPoints * ControlBarHudScale()", "W3DPushButton.cpp markings measured by the bar's scale", BADGE_SCALE_USES)
-    bar_cpp = (code/"GameEngine/Source/GameClient/GUI/ControlBar/ControlBar.cpp").read_text(encoding="utf-8-sig")
-    bar_h = (code/"GameEngine/Include/GameClient/ControlBar.h").read_text(encoding="utf-8-sig")
-    radar = (code/"GameEngine/Source/Common/System/Radar.cpp").read_text(encoding="utf-8-sig")
-    need(bar_h, "\tvoid drawSpecialPowerShortcutMultiplierText();\n", "ControlBar.h public block")
-    need(bar_h, "\tvoid setDefaultControlBarConfig( void );\n", "ControlBar.h protected block")
-    need(bar_h, "\tICoord2D m_controlBarBackgroundMarkerPos;\n", "ControlBar.h private block")
-    need(bar_cpp, "\tm_pageSolidsActive = FALSE;\n", "ControlBar.cpp constructor")
-    need(bar_cpp, "\tm_communicatorButton = NULL;\n\tm_animateDownWindow = NULL;\n", "ControlBar.cpp shutdownWindows")
-    need(bar_cpp, "\t\twin = TheWindowManager->winGetWindowFromId(NULL, TheNameKeyGenerator->nameToKey(\"ControlBar.wnd:WinUAttack\"));\n\t\tif(win)\n\t\t\twin->winHide(TRUE);\n", "ControlBar.cpp WinUAttack hidden at init")
-    need(bar_cpp, "\t// do not destroy the rally drawable, it will get destroyed with everythign else during a reset\n\tm_rallyPointDrawableID = INVALID_DRAWABLE_ID;\n", "ControlBar.cpp reset")
-    need(bar_cpp, "\t\tgetStarImage();\n\t}\n", "ControlBar.cpp logic-frame latch")
-    need(bar_cpp, "void ControlBar::initSpecialPowershortcutBar( Player *player)\n", "ControlBar.cpp definitions")
-    need(radar, "#include \"GameClient/InGameUI.h\"\n", "Radar.cpp includes")
-    need(radar, "\tif( eventCreated )\n\t{\n", "Radar.cpp under-attack event")
-    if "triggerRadarAttackGlow" in bar_cpp + bar_h + radar:
-        raise RuntimeError("ControlBar: triggerRadarAttackGlow voltou ao upstream; o passo 9 do estágio 16 duplicaria")
     result["checks"]["classic_interface_anchors"] = "PASS"
 
     # Stage 17: generals.exe starts without upstream's launcher.

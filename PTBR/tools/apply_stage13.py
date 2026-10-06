@@ -6,9 +6,10 @@ import sys
 # vem ligada para todos no upstream. A edição PT-BR começa com ela escondida.
 #
 # Desde a v2.3.0 o upstream deu à caixa uma chave própria, com controle no menu de opções:
-# ShowNetBox ("Clock And Frame Rate Box"). Sem a página da barra de comando, que é o caso da
-# interface clássica, é ela que liga a plaquinha do canto. A edição PT-BR só muda o padrão para
-# desligado; marcar a opção no menu, ou "ShowNetBox = yes" no Options.ini, traz a caixa de volta.
+# ShowNetBox ("Clock And Frame Rate Box"). A edição PT-BR só muda o padrão para desligado;
+# marcar a opção no menu, ou "ShowNetBox = yes" no Options.ini, traz a caixa de volta. Desde a
+# 2.5 isso vale para a interface Reforged (-interface reforged): a Classic do upstream, a que a
+# edição abre, segue o HUD da EA, sem caixa no canto e sem essa opção no menu dela.
 #
 # Até a v2.2.1 a edição fazia isso com ShowHudOverlay = FALSE e uma linha ShowHudOverlay própria
 # no catálogo. O upstream agora exige que essa linha não exista (ela voltaria a ler um "no" antigo

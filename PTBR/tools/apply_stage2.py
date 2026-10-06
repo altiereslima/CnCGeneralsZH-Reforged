@@ -26,16 +26,17 @@ def main():
     p = code / "GameEngine" / "Include" / "Common" / "GlobalData.h"
     replace_once(
         p,
-        "\tTEXT_LANGUAGE_ENGLISH\t= 0,\n\tTEXT_LANGUAGE_TURKISH\t= 1,\n\n\tTEXT_LANGUAGE_COUNT\t\t= 2,\n",
+        "\tTEXT_LANGUAGE_ENGLISH\t= 0,\n\tTEXT_LANGUAGE_TURKISH\t= 1,\n\tTEXT_LANGUAGE_GERMAN\t= 2,\n\n\tTEXT_LANGUAGE_COUNT\t\t= 3,\n",
         "\tTEXT_LANGUAGE_ENGLISH\t\t\t\t= 0,\n"
         "\tTEXT_LANGUAGE_TURKISH\t\t\t\t= 1,\n"
-        "\tTEXT_LANGUAGE_PORTUGUESE_BRAZIL\t= 2,\n\n"
-        "\tTEXT_LANGUAGE_COUNT\t\t\t\t\t= 3,\n"
+        "\tTEXT_LANGUAGE_GERMAN\t\t\t\t= 2,\n"
+        "\tTEXT_LANGUAGE_PORTUGUESE_BRAZIL\t= 3,\n\n"
+        "\tTEXT_LANGUAGE_COUNT\t\t\t\t\t= 4,\n"
     )
     replace_once(
         p,
-        "\tTEXT_LANGUAGE_COUNT\t\t\t\t\t= 3,\n};\n",
-        "\tTEXT_LANGUAGE_COUNT\t\t\t\t\t= 3,\n};\n\n"
+        "\tTEXT_LANGUAGE_COUNT\t\t\t\t\t= 4,\n};\n",
+        "\tTEXT_LANGUAGE_COUNT\t\t\t\t\t= 4,\n};\n\n"
         "// Selected text-language directory for localized loose assets.\n"
         "AsciiString GetTextLanguageDirectory( void );\n"
     )
@@ -53,6 +54,7 @@ def main():
         "\t\tswitch (TheGlobalData->m_textLanguage)\n"
         "\t\t{\n"
         "\t\t\tcase TEXT_LANGUAGE_TURKISH: return AsciiString(\"Turkish\");\n"
+        "\t\t\tcase TEXT_LANGUAGE_GERMAN: return AsciiString(\"German\");\n"
         "\t\t\tcase TEXT_LANGUAGE_PORTUGUESE_BRAZIL: return AsciiString(\"PortugueseBrazil\");\n"
         "\t\t\tdefault: break;\n"
         "\t\t}\n"
@@ -76,11 +78,13 @@ def main():
         "{\n"
         "\tNULL,\n"
         "\t\"Data\\\\Turkish\\\\Generals.str\",\n"
+        "\t\"Data\\\\German\\\\Generals.str\",\n"
         "};\n",
         "static const char *const TheTextLanguageOverlays[ TEXT_LANGUAGE_COUNT ] =\n"
         "{\n"
         "\tNULL,\n"
         "\t\"Data\\\\Turkish\\\\Generals.str\",\n"
+        "\t\"Data\\\\German\\\\Generals.str\",\n"
         "\t\"Data\\\\PortugueseBrazil\\\\Generals.str\",\n"
         "};\n"
     )
@@ -100,10 +104,20 @@ def main():
         "\t// note, the superclass will put this in the right dir automatically, this is just a leaf name\n"
         "\tload(\"Options.ini\");\n\n"
         "\t// PT-BR edition migration. Do this once, then leave future language changes alone.\n"
-        f"\tif (find(AsciiString(\"{MARKER}\")) == end())\n"
+        "\t// Marker 1 was written while Portuguese (Brazil) was language 2; upstream 2.6 put German\n"
+        "\t// there and moved it to 3, so a 2 from then is carried over and the marker becomes 2.\n"
+        f"\tOptionPreferences::iterator migrated = find(AsciiString(\"{MARKER}\"));\n"
+        "\tif (migrated == end())\n"
         "\t{\n"
-        "\t\t(*this)[\"TextLanguage\"] = \"2\";\n"
-        f"\t\t(*this)[\"{MARKER}\"] = \"1\";\n"
+        "\t\t(*this)[\"TextLanguage\"] = \"3\";\n"
+        f"\t\t(*this)[\"{MARKER}\"] = \"2\";\n"
+        "\t\twrite();\n"
+        "\t}\n"
+        "\telse if (migrated->second == \"1\")\n"
+        "\t{\n"
+        "\t\tif ((*this)[\"TextLanguage\"] == \"2\")\n"
+        "\t\t\t(*this)[\"TextLanguage\"] = \"3\";\n"
+        f"\t\t(*this)[\"{MARKER}\"] = \"2\";\n"
         "\t\twrite();\n"
         "\t}\n"
         "}\n"
@@ -114,9 +128,9 @@ def main():
     p = code / "Data" / "Patch.str"
     replace_once(
         p,
-        "GUI:Language1\n\"Türkçe\"\nEND\n\nTOOLTIP:Language\n",
-        "GUI:Language1\n\"Türkçe\"\nEND\n\n"
-        "GUI:Language2\n\"Português (Brasil)\"\nEND\n\n"
+        "GUI:Language2\n\"Deutsch\"\nEND\n\nTOOLTIP:Language\n",
+        "GUI:Language2\n\"Deutsch\"\nEND\n\n"
+        "GUI:Language3\n\"Português (Brasil)\"\nEND\n\n"
         "TOOLTIP:Language\n"
     )
 

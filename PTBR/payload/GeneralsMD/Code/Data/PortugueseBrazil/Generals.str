@@ -7019,6 +7019,10 @@ GUI:Language1
 END
 
 GUI:Language2
+"Deutsch"
+END
+
+GUI:Language3
 "Português (Brasil)"
 END
 

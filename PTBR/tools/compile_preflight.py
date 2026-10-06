@@ -45,19 +45,6 @@ def main():
     need(button,'extern Real ControlBarUniformScale( void );','W3DPushButton uniform scale declaration')
     out['checks']['push_button_scale_contracts']='PASS'
 
-    # The classic bar's under-attack blink: declared once, defined once, and the radar sees the bar.
-    bar_h=(code/'GameEngine/Include/GameClient/ControlBar.h').read_text(encoding='utf-8-sig')
-    bar_cpp=(code/'GameEngine/Source/GameClient/GUI/ControlBar/ControlBar.cpp').read_text(encoding='utf-8-sig')
-    radar=(code/'GameEngine/Source/Common/System/Radar.cpp').read_text(encoding='utf-8-sig')
-    for name in ('triggerRadarAttackGlow','updateRadarAttackGlow'):
-        if bar_h.count(f'void {name}( void );') != 1 or bar_cpp.count(f'void ControlBar::{name}( void )') != 1:
-            raise RuntimeError(f'ControlBar: {name} declarado ou definido fora do esperado')
-    for member in ('Bool m_radarAttackGlowOn;','Int m_remainingRadarAttackGlowFrames;','GameWindow *m_radarAttackGlowWindow;'):
-        if bar_h.count(member) != 1:
-            raise RuntimeError(f'ControlBar.h: {member} fora do esperado')
-    need(radar,'#include "GameClient/ControlBar.h"','Radar ControlBar include')
-    out['checks']['radar_attack_glow_contracts']='PASS'
-
     # Options migration uses public UserPreferences APIs and PreferenceMap operations.
     opt=(code/'GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp').read_text(encoding='utf-8-sig')
     need(opt,'#include "Common/UserPreferences.h"','Options UserPreferences include')

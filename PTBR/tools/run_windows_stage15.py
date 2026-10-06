@@ -12,7 +12,7 @@ import subprocess
 import sys
 import traceback
 
-EXPECTED_UPSTREAM_HEAD = "ebdbd6be8bd26e19c38ad8cd5bd07fcf477d54b8"
+EXPECTED_UPSTREAM_HEAD = "fa7bf2f47403924eb58b49d2c8a7fb400ac1840d"
 
 PATCHED_SOURCE_FILES = [
     "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h",
@@ -24,16 +24,10 @@ PATCHED_SOURCE_FILES = [
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DFileSystem.cpp",
     "GeneralsMD/Code/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp",
     "GeneralsMD/Code/CMakeLists.txt",
-    "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp",
     "GeneralsMD/Code/Tests/test_gameengine.cpp",
     "GeneralsMD/Code/GameEngine/Source/GameNetwork/GameInfo.cpp",
-    "GeneralsMD/Code/GameEngine/Source/GameClient/InGameUI.cpp",
-    "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/QuitMenu.cpp",
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DPushButton.cpp",
     "GeneralsMD/Code/Main/WinMain.cpp",
-    "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/ControlBar/ControlBar.cpp",
-    "GeneralsMD/Code/GameEngine/Include/GameClient/ControlBar.h",
-    "GeneralsMD/Code/GameEngine/Source/Common/System/Radar.cpp",
 ]
 
 # Casos de teste que falham sem culpa do patch PT-BR. Só estes nomes são tolerados;
