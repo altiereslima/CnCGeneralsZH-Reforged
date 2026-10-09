@@ -38,13 +38,14 @@ O build é x64 (o upstream removeu o Win32 na v2.0.0). Som e vídeo usam XAudio2
 do FFmpeg já vêm versionadas no repositório e entram no artifact. Miles e Bink não são mais usados.
 A arte ampliada do Reforged (`art-latest`, mais de 1 GB) não é baixada no CI.
 
-A mídia localizada é opcional. Para incluí-la no artifact, configure:
+A mídia localizada da edição brasileira da EA (os vídeos `EA_LOGO` e `sizzle_review`, nas duas
+resoluções, e as telas de vitória, derrota e fim de jogo) fica em
+`PTBR/payload/GeneralsMD/Code/Data/PortugueseBrazil/Movies/` e `.../Art/Textures/`. O build a copia
+para `Data\PortugueseBrazil\`, onde o jogo procura primeiro, e o artifact a leva junto.
 
-- `PTBR_MEDIA_URL`
-- `PTBR_MEDIA_SHA256`
-- `PTBR_MEDIA_TOKEN` (opcional)
-
-Se URL e SHA estiverem ambos vazios, o build continua normalmente e o runtime usa fallback de mídia.
-Se somente um deles estiver configurado, o workflow para para denunciar configuração incompleta.
+Os segredos `PTBR_MEDIA_URL`, `PTBR_MEDIA_SHA256` e `PTBR_MEDIA_TOKEN` (opcional) continuam
+valendo para trocar essa mídia por um ZIP externo: com os dois primeiros configurados, o workflow
+baixa o ZIP, confere o SHA-256 e põe os arquivos dele no lugar dos do repositório. Se só um deles
+estiver configurado, o workflow para para denunciar configuração incompleta.
 
 Todo push no `main` dispara o build automaticamente.

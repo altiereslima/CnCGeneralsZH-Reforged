@@ -83,7 +83,7 @@ jobs:
           $hasHash = -not [string]::IsNullOrWhiteSpace($env:MEDIA_SHA256)
           if (-not $hasUrl -and -not $hasHash) {
             "enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-            Write-Host "::notice::PT-BR media not configured; build continues with text and runtime media fallback."
+            Write-Host "::notice::No external PT-BR media configured; the build uses the media in the repository."
           } elseif ($hasUrl -xor $hasHash) {
             throw "Configure both PTBR_MEDIA_URL and PTBR_MEDIA_SHA256, or leave both empty."
           } else {
@@ -171,7 +171,8 @@ jobs:
           install, or put Zero Hour's *.big next to generals.exe and the base game's *.big
           in ZH_Generals\. Start generals.exe directly: this edition does not go through the
           Reforged launcher. It opens in the Classic interface; add -interface reforged to the
-          shortcut for the Reforged one. No game data ships here. Sound and video run through the FFmpeg
+          shortcut for the Reforged one. Of the game's data only the PT-BR text and the Brazilian
+          edition's videos and victory/defeat screens ship here. Sound and video run through the FFmpeg
           DLLs included; mss32.dll and binkw32.dll are not used by the 64-bit build.
           The opening splash is the Install_Final.bmp your Zero Hour install came with. If an
           earlier Reforged build replaced it, copy the original back next to generals.exe.

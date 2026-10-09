@@ -29,3 +29,9 @@ GeneralsMD/Code/Data/dx11shaders.shipped -text
 # LF checkout computes another CRC and cannot join a Windows player's game. Tools/stage-overlay.sh makes
 # them CRLF as well, for a checkout made before this line, whose files git does not rewrite.
 GeneralsMD/Code/Data/INI/** text eol=crlf
+
+# The PT-BR edition's localized videos and textures: bytes, never text.
+PTBR/payload/**/*.bik binary
+PTBR/payload/**/*.BIK binary
+PTBR/payload/**/*.dds binary
+PTBR/payload/**/*.tga binary
