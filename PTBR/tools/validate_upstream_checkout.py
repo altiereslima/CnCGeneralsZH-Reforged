@@ -4,20 +4,20 @@ import json
 import sys
 
 EXPECTED_SNAPSHOT = {
-    "head_commit": "fa7bf2f47403924eb58b49d2c8a7fb400ac1840d",
+    "head_commit": "9e8c16a9d71b3c474db0316f9bdd553b0fb83b4d",
     "files": {
-        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "157cfa98f31d014162213263cc42eb58dd2480ac",
-        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "f5a9b22ce3cd9a4c1252c444bc2f872769846dd4",
+        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "1648b675ce4fd5a6e3fd21c6f0992c3dcf4de1b7",
+        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "28bbaf40b334f1e74dded8e8ca701ee9842c4db6",
         "GeneralsMD/Code/GameEngine/Source/GameClient/GameText.cpp": "f719f81e6cb6692218643b53a73b74a2cd2900b4",
         "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "bf71a99673c5a64d93d954bcd350902becb0c199",
-        "GeneralsMD/Code/Data/Patch.str": "9ba1732cb5bcf32b0f163e69a9cf3aedd08b55c2",
+        "GeneralsMD/Code/Data/Patch.str": "7f24144a9e2cbf221d548338c6e0747b87cacb6e",
         "GeneralsMD/Code/GameEngine/Source/GameClient/GlobalLanguage.cpp": "02e3fd0fc5c8da55e8b6097ebc25aad51fcd7673",
         "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DFileSystem.cpp": "61b3a14c2a46b3f297a1535f04b9f581d2d26269",
         "GeneralsMD/Code/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp": "725e18cc231d4d75ab2df60231132fef95e4c05e",
-        "GeneralsMD/Code/CMakeLists.txt": "250b2870e5fc6a4699a54d1707f8039b90053d30",
+        "GeneralsMD/Code/CMakeLists.txt": "11bdfdb0735a8e58dcd2ee77581ea3bf366fe5ce",
         "GeneralsMD/Code/GameEngine/Include/Common/AsciiString.h": "3b58ca6b46023845e48daa5d0afc4488f2a2e066",
         "GeneralsMD/Code/GameEngine/Include/Common/Debug.h": "c097a75346d7f14e1288b3d36636c9ada3ded623",
-        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "b66ad81ada30d07129c7e8e32d2a9975954aff14",
+        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "883df15d19200d27e6042a0d8475979a7956ee18",
     }
 }
 
