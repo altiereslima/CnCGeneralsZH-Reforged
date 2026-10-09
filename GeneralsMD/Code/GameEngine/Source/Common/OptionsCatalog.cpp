@@ -92,7 +92,6 @@ OPTION_BOOL_ACCESSORS( m_formationDrag )
 OPTION_BOOL_ACCESSORS( m_showAllyCursors )
 OPTION_BOOL_ACCESSORS( m_chromaLighting )
 OPTION_INT_ACCESSORS( m_bloomIntensity )
-OPTION_INT_ACCESSORS( m_bloomThreshold )
 OPTION_INT_ACCESSORS( m_menuTransitionSpeed )
 OPTION_INT_ACCESSORS( m_textureFilterMode )
 OPTION_INT_ACCESSORS( m_anisotropyLevel )
@@ -142,16 +141,12 @@ Int msaaLevelForSamples( unsigned samples )
 }
 
 //-----------------------------------------------------------------------------
-// Bloom, as levels.  GlobalData keeps the two percentages the shader reads and GameData.ini keeps
-// setting them directly, so nothing downstream of here knows the levels exist; what changed is
-// Options.ini and the menu, which now hold the index of one of these entries.
-//
-// The strengths are spread over the useful half of the range: past about 85 the whole picture
-// washes out, and below 30 the effect is only visible on the muzzle flashes.  The thresholds run
-// the other way round on purpose - a low number means more of the picture is bright enough to
-// glow - so the entry a player picks reads as "how much glows", which is the thing they can see.
-static const Int TheBloomPercents[ BLOOM_LEVEL_COUNT ] = { 0, 35, 60, 85 };
-static const Int TheBloomThresholdPercents[ BLOOM_THRESHOLD_LEVEL_COUNT ] = { 85, 65, 45 };
+// Glow, as levels.  GlobalData keeps the percentage the renderer reads and GameData.ini can still
+// set it directly, so nothing downstream of here knows the levels exist; Options.ini and the menu
+// hold the index of one of these entries.  The index kept its meaning when Ultra was added: an
+// Options.ini saved with the four old levels (off, subtle, normal, strong) reads 0 to 3 as Off,
+// Low, Medium and High.  The renderer scales every one of its numbers off the percentage.
+static const Int TheBloomPercents[ BLOOM_LEVEL_COUNT ] = { 0, 25, 50, 75, 100 };
 
 static Int clampLevel( Int level, Int count )
 {
@@ -201,18 +196,6 @@ static Int get_bloomLevel( void )
 static void set_bloomLevel( Int level )
 {
 	TheWritableGlobalData->m_bloomIntensity = TheBloomPercents[ clampLevel( level, BLOOM_LEVEL_COUNT ) ];
-}
-
-static Int get_bloomThresholdLevel( void )
-{
-	return nearestLevel( TheBloomThresholdPercents, BLOOM_THRESHOLD_LEVEL_COUNT,
-											 TheGlobalData->m_bloomThreshold );
-}
-
-static void set_bloomThresholdLevel( Int level )
-{
-	TheWritableGlobalData->m_bloomThreshold =
-		TheBloomThresholdPercents[ clampLevel( level, BLOOM_THRESHOLD_LEVEL_COUNT ) ];
 }
 
 //-----------------------------------------------------------------------------
@@ -381,19 +364,14 @@ const OptionDef TheOptionCatalog[] =
 	// Grid placement, snap-to-45 building rotation and the nudge left with them and came back to
 	// Options > Controls, above, off until ticked.
 
-	// Off, subtle, normal, strong.  Normal (60, the menu's Medium) is the default, set in
-	// GlobalData's constructor: it is the strength the Direct3D 11 frame applied before there was a
-	// setting at all, so a fresh install looks the way it did.  The key is "Bloom", not "BloomLevel" - it predates
-	// the levels and an Options.ini in the wild already spells it this way.
+	// Glow: off, low, medium, high, ultra.  Medium (50) is the default, set in GlobalData's
+	// constructor.  The key is "Bloom", not "Glow" or "BloomLevel" - it predates the levels and an
+	// Options.ini in the wild already spells it this way.  The "What Glows" threshold row that sat
+	// under it is gone: a lower threshold only ever bloomed the buildings and the sand, so the
+	// level decides it, and a BloomThreshold line an older Options.ini kept is ignored.
 	{ "Bloom",										OPT_WND( "ComboBoxBloom" ), "GUI:Bloom",
 		OPTION_ENUM, APPLY_LIVE, 0, BLOOM_LEVEL_COUNT - 1,
 		get_bloomLevel, set_bloomLevel },
-
-	// How much of the picture is bright enough to glow at all.  Three answers, because the number
-	// underneath is a brightness that runs backwards and nobody could be expected to guess that.
-	{ "BloomThreshold",						OPT_WND( "ComboBoxBloomThreshold" ), "GUI:BloomThreshold",
-		OPTION_ENUM, APPLY_LIVE, 0, BLOOM_THRESHOLD_LEVEL_COUNT - 1,
-		get_bloomThresholdLevel, set_bloomThresholdLevel },
 
 	// Fullscreen, borderless or windowed.  The old Windowed flag in GameData.ini seeds this and is
 	// then derived back from it, so the device layer keeps reading the boolean it always read.

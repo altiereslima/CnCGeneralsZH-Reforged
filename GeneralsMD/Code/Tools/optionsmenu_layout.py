@@ -147,8 +147,6 @@ NEW_CONTROLS = [
     (COMBO,  "ComboBoxMSAA",           None),
     (LABEL,  "LabelBloom",             "GUI:Bloom"),
     (COMBO,  "ComboBoxBloom",          None),
-    (LABEL,  "LabelBloomThreshold",    "GUI:BloomThreshold"),
-    (COMBO,  "ComboBoxBloomThreshold", None),
     (LABEL,  "LabelTextureFilter",     "GUI:TextureFilter"),
     (COMBO,  "ComboBoxTextureFilter",  None),
     (LABEL,  "LabelAnisotropy",        "GUI:Anisotropy"),
@@ -294,7 +292,6 @@ GROUP_LAYOUT = [
             setting("LabelAnisotropy", "SliderAnisotropy", "ValueAnisotropy")]),
         ("GUI:OptionsGroupLighting", [
             setting("LabelBloom", "ComboBoxBloom"),
-            setting("LabelBloomThreshold", "ComboBoxBloomThreshold"),
             ("check", "CheckGroundLighting"),
             ("check", "CheckHeatEffects")])]),
 

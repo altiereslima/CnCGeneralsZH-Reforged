@@ -1,0 +1,44 @@
+# The nuke and the Scud Storm on Twilight Flame, each on its own American town, far enough apart
+# that neither touches the other's, for a side by side of the two blasts. The nuke's town is laid
+# out in rings round 1500,3450 (command centre, then power plants at 130, barracks and Patriots at
+# 240, a strategy centre and a supply centre at 340) so destruction spreading outward has something
+# to reach at each distance. The Scud Storm's block sits round 950,3850, about 690 from the nuke.
+#
+# Nuke called at 100, lands about 264. Scud Storm called at 700, lands from about 1080 to 1155
+# (blastcheck and explreel measured 378 to 455 frames from call to first impact).
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -particlecap 5000 -fps 120
+#     -noFPSLimit -quickstart -noshellmap -observer -multiInstance
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 3 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA -seed 7 -scenario swpair
+#     -cinema swpair_nuke -video 200 650 swpair_nuke -maxframes 660 -logPrefix swpair_nuke_
+#   the same with -cinema swpair_scud -video 1000 1450 swpair_scud -maxframes 1460 -logPrefix swpair_scud_
+
+# the superweapons at the starts, the silo powered
+10    spawn      1  ChinaNuclearMissileLauncher     1   start1:0:200
+10    spawn      1  ChinaPowerPlant                 3   start1:260:-40    90
+10    spawn      2  GLAScudStorm                    1   start2:0:200
+
+# the nuke's town, ring by ring
+20    spawn      0  AmericaCommandCenter            1   1500 3450
+20    spawn      0  AmericaPowerPlant               1   1630 3450
+20    spawn      0  AmericaPowerPlant               1   1370 3450
+20    spawn      0  AmericaPowerPlant               1   1500 3580
+20    spawn      0  AmericaPowerPlant               1   1500 3320
+20    spawn      0  AmericaBarracks                 1   1670 3620
+20    spawn      0  AmericaBarracks                 1   1330 3620
+20    spawn      0  AmericaBarracks                 1   1670 3280
+20    spawn      0  AmericaBarracks                 1   1330 3280
+20    spawn      0  AmericaPatriotBattery           1   1740 3450
+20    spawn      0  AmericaPatriotBattery           1   1260 3450
+20    spawn      0  AmericaStrategyCenter           1   1500 3110
+20    spawn      0  AmericaSupplyCenter             1   1160 3450
+
+# the Scud Storm's block
+20    spawn      0  AmericaWarFactory               1   950 3850
+20    spawn      0  AmericaPowerPlant               1   830 3800
+20    spawn      0  AmericaPowerPlant               1   950 3720
+20    spawn      0  AmericaBarracks                 1   1070 3920
+
+100   power      1  ChinaNuclearMissileLauncher         1500 3450
+700   power      2  GLAScudStorm                        950 3850

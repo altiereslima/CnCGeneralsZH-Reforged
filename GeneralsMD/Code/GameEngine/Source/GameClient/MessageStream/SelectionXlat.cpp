@@ -287,6 +287,10 @@ SelectionTranslator::SelectionTranslator()
 	m_lastGroupSelGroup = -1;
 	m_selectFeedbackAnchor.x = 0;
 	m_selectFeedbackAnchor.y = 0;
+	m_deselectFeedbackAnchor.x = 0;
+	m_deselectFeedbackAnchor.y = 0;
+	m_lastClick = 0;
+	m_deselectDownCameraPosition.zero();
 	m_displayedMaxWarning = FALSE;
 	m_selectCountMap.clear();
 	forgetPendingSquads();
@@ -430,12 +434,9 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			}
 
 			// with attack move or guard armed a left drag draws the order line over in CommandXlat, so
-			// no selection box grows under it.  Search and destroy has no line to draw, and its drag
-			// is no box either: the key stays armed for the click that aims it
-			// Classic draws no lines: its left drag is always the box
+			// no selection box grows under it.  Classic draws no lines: its left drag is always the box
 			const Bool leftDragIsOrder = !TheGlobalData->isClassicUI()
-																	&& (TheInGameUI->isLineOrderArmed()
-																		|| TheInGameUI->getAreaOrderArmed() != InGameUI::AREA_ORDER_NONE)
+																	&& TheInGameUI->isLineOrderArmed()
 																	 && TheInGameUI->getSelectCount() > 0;
 			if (m_leftMouseButtonIsDown && !leftDragIsOrder)
 			{
@@ -578,8 +579,11 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 						Drawable *draw = *it;
 						// buildings and units stay in separate selections, and a double click that
 						// gathers everything of a kind may only gather what a box would - things
-						// you can click one at a time but never sweep up used to come along
-						if (draw && draw->isMassSelectable() && draw->isKindOf( KINDOF_STRUCTURE ) == picked->isKindOf( KINDOF_STRUCTURE )) {
+						// you can click one at a time but never sweep up used to come along.  Classic keeps
+						// 1.04's rule, which put back everything that was selected
+						const Bool keep = TheGlobalData->isClassicUI() ? (draw && draw->isSelectable())
+							: (draw && draw->isMassSelectable() && draw->isKindOf( KINDOF_STRUCTURE ) == picked->isKindOf( KINDOF_STRUCTURE ));
+						if (keep) {
 							TheInGameUI->selectDrawable(draw);
 							selectMore->appendObjectIDArgument(draw->getObject()->getID());
 						}
@@ -1208,8 +1212,48 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 		}
 
 		//-----------------------------------------------------------------------------
+		// Classic measures a right click the way 1.04 did, from this press to the release below
+		case GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN:
+		{
+			m_deselectFeedbackAnchor = msg->getArgument( 0 )->pixel;
+			m_lastClick = (UnsignedInt) msg->getArgument( 2 )->integer;
+			TheTacticalView->getPosition( &m_deselectDownCameraPosition );
+			break;
+		}
+
+		//-----------------------------------------------------------------------------
 		case GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP:
 		{
+			// Classic is 1.04's right release.  Only a click counts: the press is the scroll as well
+			// (LookAtXlat), so a release that travelled, was held, or rode the camera too far is not one.
+			// The click takes back a waiting GUI command and nothing else, and eats the release, which
+			// leaves CommandXlat measuring the alternate mouse's right click against the last release
+			// instead, so that click gives no order either.  Otherwise it deselects everyone: always in
+			// the default mouse, where it is the cancel button, and under the Alternate Mouse Setup only
+			// with a dozer's structure on the cursor.  The structure itself comes off in CommandXlat.
+			if( TheGlobalData->isClassicUI() )
+			{
+				Coord3D cameraAtRelease;
+				TheTacticalView->getPosition( &cameraAtRelease );
+				const ICoord2D release = msg->getArgument( 0 )->pixel;
+				if( !TheMouse->isClick( &m_deselectFeedbackAnchor, &release,
+																&m_deselectDownCameraPosition, &cameraAtRelease,
+																m_lastClick, (UnsignedInt) msg->getArgument( 2 )->integer ) )
+					break;
+
+				if( TheInGameUI->getGUICommand() )
+				{
+					TheInGameUI->setGUICommand( NULL );
+					disp = DESTROY_MESSAGE;
+					TheInGameUI->setScrolling( FALSE );
+				}
+				else if( TheGlobalData->leftButtonOrders() || TheInGameUI->getPendingPlaceSourceObjectID() != INVALID_ID )
+				{
+					deselectAll();
+				}
+				break;
+			}
+
 			// a right drag panned the camera, and a pan takes nothing back: a player can look around
 			// with a structure on the cursor or a GUI command waiting and still have it on release
 			if( TheLookAtTranslator->isRightDragPanning() )
@@ -1219,18 +1263,6 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			if( TheInGameUI->isSignalArmed() )
 			{
 				TheInGameUI->disarmSignal();
-				break;
-			}
-
-			// Classic is the game as shipped: a right click with nothing armed deselects everyone, and
-			// with something armed it only takes that back, below.  A right drag panned and is gone above.
-			// Under EA's Alternate Mouse Setup that click is the order instead (CommandXlat) and
-			// deselects nothing.
-			if( TheGlobalData->isClassicUI() && TheInGameUI->getGUICommand() == NULL
-					&& TheInGameUI->getPendingPlaceType() == NULL )
-			{
-				if( TheGlobalData->leftButtonOrders() )
-					deselectAll();
 				break;
 			}
 

@@ -1,0 +1,7 @@
+# Scenarios/swpair.txt, the Scud Storm on the block round 950,3850, framed like nukewarp (zoom 1.0,
+# pitch -10, heading -45) so the pull and the ring wave sit over buildings and the nine impacts
+# spread inside the frame. Held, no move, so a side by side lines up.
+#
+#   ...the scenario's switches... -cinema swpair_scud -video 1000 1450 swpair_scud -maxframes 1460
+
+0.5   cut     950 3850 1.0 -45 -10

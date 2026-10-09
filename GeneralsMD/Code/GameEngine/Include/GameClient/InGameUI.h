@@ -73,6 +73,8 @@ class Image;
 class GameFont;
 class GameSlot;
 class Player;
+struct SpectatorStats;
+struct BroadcastLayout;
 enum LegalBuildCode : Int;
 enum KindOfType : Int;
 enum ShadowType : Int;
@@ -687,6 +689,8 @@ public:  // ********************************************************************
 		* build grid, so that structures put down by eye line up with each other and with the cells
 		* the pathfinder actually reasons about. */
 	virtual void snapPlacementToGrid( Coord3D *world, const ThingTemplate *what, Real angle ) const;
+	/// is that snap on right now: the option, turned the other way while ctrl is held (not in Classic)
+	Bool gridPlacementOn( void ) const;
 
 	/** Where the pathfinder's cell boundaries actually are.  It files a world position under
 		* floor( (v + 0.5) / PATHFIND_CELL_SIZE ) (see Pathfinder::internal_classifyObjectFootprint),
@@ -1100,6 +1104,13 @@ public:  // ********************************************************************
 	virtual void preDraw( void );														///< Logic which needs to occur before the UI renders
 	virtual void draw( void ) = 0;													///< Render the in-game user interface
 	virtual void postDraw( void );													///< Logic which needs to occur after the UI renders
+	/// -directorrecord's broadcast over the director's picture: a score bar along the top with every
+	/// player's name, side, cash and army and the match clock, the armies' tug of war under it, and a
+	/// label in each pane of a split.  Pane 0's draw alone; the recording takes these pixels from it
+	void drawDirectorBroadcast( void );
+	/// the opening's plate over the command centre of the player in the pane being drawn, in every
+	/// pane's own draw
+	void drawDirectorIntroPlate( void );
 
 	//
 	// One cameo of the global production strip: which producer it belongs to, which entry of that
@@ -1253,9 +1264,9 @@ public:  // ********************************************************************
 	void setForceAttackMode( Bool enabled )		{ m_forceAttackMode = enabled; }
 	void setPreferSelectionMode( Bool enabled )		{ m_preferSelection = enabled; }
 	
-	void toggleAttackMoveToMode( void )				{ m_attackMoveToMode = !m_attackMoveToMode; m_forceAttackArmed = FALSE; m_guardArmed = FALSE; m_moveArmed = FALSE; m_areaOrder = AREA_ORDER_NONE; }
+	void toggleAttackMoveToMode( void )				{ m_attackMoveToMode = !m_attackMoveToMode; m_forceAttackArmed = FALSE; m_guardArmed = FALSE; m_moveArmed = FALSE; }
 	Bool isInAttackMoveToMode( void ) const		{ return m_attackMoveToMode; }
-	void clearAttackMoveToMode( void )				{ m_attackMoveToMode = FALSE; m_forceAttackArmed = FALSE; m_guardArmed = FALSE; m_moveArmed = FALSE; m_areaOrder = AREA_ORDER_NONE; m_orderKeyKeptByShift = FALSE; }
+	void clearAttackMoveToMode( void )				{ m_attackMoveToMode = FALSE; m_forceAttackArmed = FALSE; m_guardArmed = FALSE; m_moveArmed = FALSE; m_orderKeyKeptByShift = FALSE; }
 
 	// an order click with one of the three keys armed spends the key, unless shift is down: then it
 	// stays armed for the next click, so a row of targets is one key and a row of clicks, and it drops
@@ -1265,28 +1276,20 @@ public:  // ********************************************************************
 	// the attack key arms force fire the way the attack move key arms an attack move: the next
 	// order click shoots whatever is under it, ground included, and the mode drops again with the
 	// same call that drops attack move
-	void toggleForceAttackArmed( void )				{ m_forceAttackArmed = !m_forceAttackArmed; m_attackMoveToMode = FALSE; m_guardArmed = FALSE; m_moveArmed = FALSE; m_areaOrder = AREA_ORDER_NONE; }
+	void toggleForceAttackArmed( void )				{ m_forceAttackArmed = !m_forceAttackArmed; m_attackMoveToMode = FALSE; m_guardArmed = FALSE; m_moveArmed = FALSE; }
 	Bool isForceAttackArmed( void ) const			{ return m_forceAttackArmed; }
-	Bool isOrderKeyArmed( void ) const				{ return m_forceAttackArmed || m_attackMoveToMode || m_guardArmed || m_moveArmed || m_areaOrder != AREA_ORDER_NONE; }	///< the next left click is an attack, an attack move, a guard, a move or a sweep
+	Bool isOrderKeyArmed( void ) const				{ return m_forceAttackArmed || m_attackMoveToMode || m_guardArmed || m_moveArmed; }	///< the next left click is an attack, an attack move, a guard or a move
 	Bool isForceFireOn( void ) const;					///< the next order click force fires: the attack key armed it
 
 	// and the guard key arms guard the same way: the next order click posts the selection on that
 	// spot, or on that object, and a drag posts them along the line instead of stacking them all
 	// on one point.  All the armed keys are one mode at a time
-	void toggleGuardArmed( void )							{ m_guardArmed = !m_guardArmed; m_attackMoveToMode = FALSE; m_forceAttackArmed = FALSE; m_moveArmed = FALSE; m_areaOrder = AREA_ORDER_NONE; }
+	void toggleGuardArmed( void )							{ m_guardArmed = !m_guardArmed; m_attackMoveToMode = FALSE; m_forceAttackArmed = FALSE; m_moveArmed = FALSE; }
 	Bool isGuardArmed( void ) const						{ return m_guardArmed; }
 
-	// The search and destroy key (fork) arms a sweep the same way: the next order click is the centre
-	// of a circle, sized with the wheel like a guard's, and the selection attack moves round it and
-	// then guards the whole circle.  It skips the ring's points the player already sees
-	enum AreaOrder { AREA_ORDER_NONE, AREA_ORDER_HUNT };
-	void toggleAreaOrderArmed( AreaOrder order );
-	AreaOrder getAreaOrderArmed( void ) const	{ return m_areaOrder; }
-	void issueAreaSweep( const Coord3D &center );		///< the armed sweep's messages, round `center`
-
 	/** One of the page's keys past attack, hold position and move, an OrderKeyExtra (ControlBar.h),
-		* pressed with the mouse or its grid key: search and destroy arms its sweep, the
-		* stance key puts the selection on the other stance from the first unit's */
+		* pressed with the mouse or its grid key: the stance key puts the selection on the other
+		* stance from the first unit's */
 	void pressOrderKey( Int key );
 
 	// An order that covers a circle around the point it is given on (the guard key, EA's guard
@@ -1299,7 +1302,7 @@ public:  // ********************************************************************
 
 	// the move key arms the order a right click gives, for the left button: the next order click is
 	// that move, and a left drag draws the formation line
-	void toggleMoveArmed( void )							{ m_moveArmed = !m_moveArmed; m_attackMoveToMode = FALSE; m_forceAttackArmed = FALSE; m_guardArmed = FALSE; m_areaOrder = AREA_ORDER_NONE; }
+	void toggleMoveArmed( void )							{ m_moveArmed = !m_moveArmed; m_attackMoveToMode = FALSE; m_forceAttackArmed = FALSE; m_guardArmed = FALSE; }
 	Bool isMoveArmed( void ) const						{ return m_moveArmed; }
 	Bool isLineOrderArmed( void ) const				{ return m_attackMoveToMode || m_guardArmed || m_moveArmed; }	///< a left drag draws a move, attack move or guard line; force fire's left drag is the attack circle
 	
@@ -1571,6 +1574,7 @@ protected:
 	void drawPeaceTimer( void );					///< the lobby's peace time, counting down at the top of the screen
 	void drawPeaceCountdown( UnsignedInt framesLeft );	///< the last seconds of it, one big digit in the middle of the screen
 	void drawHudOverlay( void );					///< the small elapsed-time / fps plate (ShowHudOverlay)
+	void drawWireframeNotice( void );			///< "the interface is a draft" bouncing round the command bar's band
 	void drawProductionStrip( void );			///< the production queue rows above the control bar
 	///< the run of cells, a column, with its left edge at 'left' and its first cell's top edge at 'bottomY'
 	void drawProductionStripColumn( Int left, Int bottomY );
@@ -1646,7 +1650,7 @@ protected:
 	HtmlOverlay *								m_promotionFrontOverlay;		///< the grid's frames, drawn over the promotions
 	HtmlOverlay *								m_cellFrontOverlay[ CELL_GRID_COUNT ];
 	std::vector< HtmlValues >		m_cellFrontCells[ CELL_GRID_COUNT ];	///< each grid's cells as the bar's page last placed them
-	enum { ORDER_KEYS = 5 };																				///< the page's attack, hold position and move keys, then the OrderKeyExtra ones
+	enum { ORDER_KEYS = 4 };																				///< the page's attack, hold position and move keys, then the OrderKeyExtra ones
 	IRegion2D										m_orderKeyCell[ ORDER_KEYS ];					///< where the page last put each, screen pixels
 	Int													m_orderKeyPlace[ ORDER_KEYS ];				///< the CommandPlace each stands on, -1 while it is not shown
 	DisplayString *							m_orderKeyString[ ORDER_KEYS ];				///< each one's letter, on the command buttons' plate
@@ -1755,6 +1759,16 @@ protected:
 	DisplayString *							m_hudDisplayString;			///< the ShowHudOverlay line (fps / clock)
 	HtmlValues									m_hudValues;						///< that line's readings one by one, for Window/Html/Net.html
 	DisplayString *							m_peaceTimeDisplayString;	///< the peace time clock at the top of the screen
+	/// the broadcast's string for what key names, in font at points, holding text: one string per
+	/// thing written, so a text is laid out again only when it changes
+	DisplayString *broadcastText( const std::string &key, const UnicodeString &text, const char *font, Int points, Bool bold );
+	/// broadcastText of what the broadcast calls player, at points, his own name cut with an ellipsis
+	/// past widest (both for a 720 line picture)
+	DisplayString *broadcastNameText( const std::string &key, Player *player, Int points, Real widest );
+	std::map< std::string, DisplayString * > m_broadcastTexts;
+	/// the score bar laid out for players, under the clock's tab, team letters taken from named
+	void layOutBroadcast( const std::vector< SpectatorStats > &players, const std::vector< SpectatorStats > &named,
+		const std::string &tag, Int clockBox, Int clockBoxHeight, BroadcastLayout &layout );
 	DisplayString *							m_peaceTimeLabelDisplayString;	///< the word written over that clock
 	DisplayString *							m_peaceCountdownDisplayString;	///< the big digit of its last ten seconds
 	Int													m_lastMoneyDisplayed;		///< so the money gadget is only written when the amount changes
@@ -1770,6 +1784,11 @@ protected:
 	UnsignedInt									m_hudRealClockBaseMs;		///< wall clock the two elapsed-time readouts were aligned at
 	UnsignedInt									m_hudLastDrawMs;				///< wall clock of the previous overlay draw, so a pause can be taken back out of it
 	Int													m_hudOverlayBottom;			///< bottom of everything drawn in the top right corner, so the superweapon timers start under it
+	enum { WIREFRAME_LINES = 2 };
+	DisplayString *							m_wireframeNotice[ WIREFRAME_LINES ];	///< the draft notice drawWireframeNotice bounces, a string a line
+	Coord2D											m_wireframePos;					///< its top left corner on screen
+	Coord2D											m_wireframeDir;					///< which way it is going, each axis +1 or -1
+	UnsignedInt									m_wireframeLastMs;			///< wall clock of its previous draw, 0 before the first
 	// A script time freeze stops the logic clock, and the military subtitle's counters are
 	// logic frames, so they have to be stepped by hand while it lasts.  These two turn the
 	// wall clock into that step without drift: every update works out how many 30Hz frames
@@ -1926,8 +1945,7 @@ protected:
 	Bool												m_attackMoveToMode;	///< are we in attack move mode?
 	Bool												m_forceAttackArmed;	///< is the attack key holding force fire for the next click?
 	Bool												m_guardArmed;				///< is the guard key holding a guard order for the next click?
-	AreaOrder										m_areaOrder;				///< the sweep the search and destroy key holds for the next click
-	Real												m_areaPickScale;		///< what the wheel has made of the armed area order's default radius
+	Real												m_areaPickScale;		///< what the wheel has made of the armed guard's default radius
 	Bool												m_moveArmed;				///< is the move key holding a move for the next click?
 	Bool												m_orderKeyKeptByShift;	///< an armed key was clicked with under shift, and drops when shift comes up
 	Bool												m_preferSelection;		///< the shift key has been depressed.

@@ -1,0 +1,28 @@
+# Orders given to units still driving out of the structure that built them.
+#
+# A dozer from the command center is told to build on the far side of that command center the frame
+# after it appears, and a Crusader from the war factory is told to drive behind the war factory, with
+# a shift move queued after it.  Both orders are kept while the exit path runs and carried out once
+# the unit is out, so neither should cross its producer's footprint: the dozer comes out of the door
+# and goes round, where it used to drive straight through the walls to the site.
+#
+# The starting dozer is put on a power plant of its own first, so the construct click below picks
+# the new dozer (the idle builder nearest the site).  On this map and seed the command center stands
+# at 1450,640, the dozer appears on frame 180 and leaves its exit path on 307, the Crusader appears
+# on 360 and leaves on 476.  The EXITTRACE lines this was measured with were a temporary log.
+#
+#   generals.exe -headless -quickstart -noshellmap -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 1600
+#     -scenario exitorders -logPrefix exitorders_
+
+1     spawn       0  AmericaPowerPlant   1 start0:-200:200
+1     spawn       0  AmericaWarFactory   1 start0:250:0
+30    produce     0  AmericaCommandCenter AmericaVehicleDozer 1
+60    produce     0  AmericaWarFactory   AmericaTankCrusader 1
+150   construct   0  AmericaPowerPlant   1150 640
+181   construct   0  AmericaPowerPlant   1510 880
+361   playermove  0  AmericaTankCrusader 1600 700
+362   shiftmove   0  AmericaTankCrusader 1600 900
+1590  tally       0  AmericaPowerPlant
+1590  tally       0  AmericaTankCrusader

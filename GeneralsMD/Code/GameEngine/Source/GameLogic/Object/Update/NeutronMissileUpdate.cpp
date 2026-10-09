@@ -46,6 +46,7 @@
 #include "GameClient/Drawable.h"
 #include "GameClient/FXList.h"
 #include "GameClient/InGameUI.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameClient/ParticleSys.h"
 
 static const Real STRAIGHT_DOWN_SLOW_FACTOR = 0.5f;
@@ -458,6 +459,8 @@ void NeutronMissileUpdate::detonate()
 {
 	m_deliveryDecal.clear();
 	Object* obj = getObject();
+	// the observer's director camera stays for the blast; this only tells the client
+	TheObserverCamera.noteSuperweaponHit( obj->getControllingPlayer(), obj->getPosition(), FALSE );
 	// kill it (vs destroying it) so that its Die modules are called
 	obj->kill();
 	m_state = DEAD;

@@ -14829,12 +14829,8 @@ GUI:OrderMoveDescription
 "Zemine bir sonraki tıklama seçili birlikleri oraya gönderir. Bunun yerine sürüklerseniz birlikler çizdiğiniz çizgi boyunca dizilir."
 END
 
-GUI:OrderSearchAndDestroy
-"Ara ve Yok Et"
-END
-
-GUI:OrderSearchAndDestroyDescription
-"Bir noktaya tıklayın; seçili birlikler çevresinde saldırarak ilerler, karşılarına çıkanla savaşır, sonra kalıp bütün daireyi korur. Daireyi boyutlandırmak için tıklamadan önce fare tekerleğini çevirin."
+GUI:SelectionTypeDescription
+"Tıklayın, seçimde yalnızca bunlar kalsın. Shift ile tıklayın, bunlar seçimden çıksın."
 END
 
 GUI:OrderStanceDefensive
@@ -15246,39 +15242,23 @@ GUI:Bloom0
 END
 
 GUI:Bloom1
-"Hafif"
+"Düşük"
 END
 
 GUI:Bloom2
-"Normal"
+"Orta"
 END
 
 GUI:Bloom3
-"Güçlü"
+"Yüksek"
+END
+
+GUI:Bloom4
+"Ultra"
 END
 
 TOOLTIP:Bloom
-"Parlak yüzeylerin çevrelerine ne kadar ışık saçtığı. Orijinal oyunda bunların hiçbiri yoktu; çizimler Kapalı ayarına göre yapıldı."
-END
-
-GUI:BloomThreshold
-"Neler Parlasın"
-END
-
-GUI:BloomThreshold0
-"Yalnızca en parlaklar"
-END
-
-GUI:BloomThreshold1
-"Parlak nesneler"
-END
-
-GUI:BloomThreshold2
-"Görüntünün çoğu"
-END
-
-TOOLTIP:BloomThreshold
-"Ekranın ne kadarının parlayacak kadar aydınlık sayıldığı. Yalnızca en parlaklar, parlamayı namlu alevleri ve lambalarla sınırlar; görüntünün çoğu, bütün savaş alanını bir pusla örter."
+"Ateşin, patlamaların, namlu alevlerinin ve lazerlerin ne kadar parlak yandığı ve ışıklarının çevreye ne kadar taştığı. Binalar, gökyüzü, kar ve kum hiçbir zaman parlamaz. Çizimler Kapalı ayarına göre yapıldı. Direct3D 9 çizicisi bunun daha yumuşak bir sürümünü gösterir; Klasik Grafikler açıkken bu ayara yalnızca lazer haleleri uyar."
 END
 
 GUI:VSync
@@ -15659,6 +15639,14 @@ END
 
 GUI:PeaceTimeHudLabel
 "BARIŞ"
+END
+
+GUI:WireframeNotice
+"Reforged arayüz: ön sürüm"
+END
+
+GUI:WireframeNotice2
+"Son tasarım yolda"
 END
 
 GUI:LobbyTabChat

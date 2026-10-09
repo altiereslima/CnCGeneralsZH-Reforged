@@ -204,6 +204,7 @@ public:
 	virtual void setZoomToDefault( void );									///< Set zoom to default value
 	virtual void setZoomToMax( void );												///< Set zoom as far out as the player may zoom by hand
 	virtual void setZoomToHeight( Real heightAboveGround );				///< Frame the camera at this height above the terrain
+	virtual Real getZoomForHeight( Real heightAboveGround );				///< the zoom setZoomToHeight would set, without setting it
 	virtual void anchorZoomAt( const ICoord2D *pixel );
 
 	virtual void setFieldOfView( Real angle );							///< Set the horizontal field of view angle
@@ -222,8 +223,13 @@ public:
 
 	/// Add an impulse force to shake the camera
 	virtual void shake( const Coord3D *epicenter, CameraShakeType shakeType );
-	
+
+	virtual void addScreenDistortion( const Coord3D *epicenter, const ScreenDistortionInfo &info );
+
 	virtual Real getFXPitch( void ) const { return m_FXPitch; }					///< returns the FX pitch angle
+	/// the camera transform setCameraTransform builds, without moving the terrain's drawn window or
+	/// telling the radar
+	virtual void aimCamera( void );
 
 	virtual Bool setViewFilterMode(enum FilterModes filterMode);			///< Turns on viewport special effect (black & white mode)
 	virtual Bool setViewFilter(enum FilterTypes filter);			///< Turns on viewport special effect (black & white mode)
@@ -235,6 +241,7 @@ public:
 
 	Bool updateCameraMovements(void); 
 	virtual void forceCameraConstraintRecalc(void) { calcCameraConstraints(); }
+	virtual void applyCameraConstraint( void );
 
 	virtual void setGuardBandBias( const Coord2D *gb ) { m_guardBandBias.x = gb->x; m_guardBandBias.y = gb->y; }
 
@@ -271,6 +278,17 @@ private:
 	Real m_shakeAngleSin;														///< the sine of the orientation of the oscillation
 	Real m_shakeIntensity;													///< the intensity of the oscillation
 	Vector3 m_shakerAngles;													//WST 11/12/2002 new multiple instance camera shaker system
+
+	enum { MAX_SCREEN_DISTORTIONS = 4 };						///< the post chain's warp limit
+	struct ScreenDistortion
+	{
+		Coord3D m_epicenter;
+		UnsignedInt m_startFrame;											///< client frame the blast went off on
+		ScreenDistortionInfo m_info;
+	};
+	ScreenDistortion m_distortions[MAX_SCREEN_DISTORTIONS];
+	Int m_distortionCount;
+	void updateScreenDistortions( void );						///< age the blasts and hand the live ones to the post chain in screen terms
 
 	TRotateCameraInfo	m_rcInfo;
 	Bool		m_doingRotateCamera;										///< True if we are doing a camera rotate.

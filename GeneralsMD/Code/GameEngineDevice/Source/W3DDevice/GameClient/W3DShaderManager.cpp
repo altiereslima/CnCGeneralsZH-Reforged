@@ -194,9 +194,10 @@ W3DFilterInterface *ScreenDefaultFilterList[]=
 
 /*=========  Bloom	=============================================================*/
 /// Retail had no bloom and every texture in the game is LDR, so this is tunable rather than a
-/// fixed look: m_bloomIntensity is the strength in percent (0 is off, 60 the default) and
-/// m_bloomThreshold the brightness, in percent, below which nothing glows.  The
-/// options screen sets both from one of a handful of named levels; nothing here knows that.
+/// fixed look: m_bloomIntensity is the strength in percent, 0 off, and the options screen's Glow
+/// levels set it to 0, 25, 50, 75 or 100 (OptionsCatalog.cpp); nothing here knows the levels.
+/// Every number the two renderers use is drawn out of that one percentage, in glowTuning below.
+/// On Direct3D 9 the bloom is the fixed function one here.
 /// It rides on ScreenDefaultFilter, which already renders the scene into a full-screen texture
 /// on the frames the smudge effects need one, so the only new work is a quarter-size bright
 /// pass, two 4-tap blur passes and one additive composite.  All fixed function on purpose - no
@@ -209,25 +210,54 @@ static IDirect3DTexture9 *s_bloomTexture[2];	///< ping-pong render targets for t
 static IDirect3DSurface9 *s_bloomSurface[2];
 static Int s_bloomWidth, s_bloomHeight;
 
-/** Bloom strength in percent - Options.ini's "Bloom" - 60 when it was never set.  Read every
-	frame rather than cached, so editing the key and reloading the options takes effect. */
+/** Glow strength in percent - Options.ini's "Bloom" level, through OptionsCatalog.cpp - 50 when it
+	was never set.  Read every frame rather than cached, so the options screen shows at once. */
 static Int bloomIntensity(void)
 {
 	if (TheGlobalData == NULL) return 0;
 	Int intensity = TheGlobalData->m_bloomIntensity;
 	if (intensity < 0) return 0;
-	if (intensity > 100) return 100;	//the composite is a single additive draw, so 100% is all there is
+	if (intensity > 100) return 100;
 	return intensity;
 }
 
-/** Brightness below which nothing blooms, as a 0..255 channel value - Options.ini's
-	"BloomThreshold", which is in percent. */
-static Int bloomThreshold(void)
+/** Everything the Glow option sets, out of its one percentage p (0..1).  Low, Medium, High and
+	Ultra are p = 0.25, 0.5, 0.75 and 1.
+
+	Direct3D 11 works in the half float scene, where 1.0 is white.  Nothing the artists painted
+	passes white: buildings, the sky and pale sand stop at it, so the bright pass starts at 1.0
+	and keeps none of them at any level.  What is meant to glow is what the engine adds: fire,
+	explosions, muzzle flashes and laser cores are all ONE, ONE blends, and the gain multiplies
+	each of them as it lands (DX11BackendClass::Set_Additive_Gain), so a fire passes white and its
+	excess blooms.  Gain 1.15 to 1.6 and strength 0.55 to 1.6 from Low to Ultra; more gain than
+	that turned every fireball into a white disc.  Two blur pairs at Low, three at Medium and four
+	at High and Ultra, each pair a step wider than the last.
+
+	Direct3D 9 draws the scene in eight bits and has nothing past white to find, so its bloom keeps
+	what is over 88% of white, four times over, at 25 to 100% strength: the white centres of fire
+	and laser cores, and nothing of a building in daylight.  Snow can reach that; it is the price
+	of a glow on the old renderer at all. */
+struct GlowTuning
 {
-	const Int threshold = (TheGlobalData != NULL ? TheGlobalData->m_bloomThreshold : 65) * 255 / 100;
-	if (threshold < 0) return 0;
-	if (threshold > 255) return 255;
-	return threshold;
+	Real threshold;			///< D3D11: the bright pass's start, 1.0 is white
+	Real intensity;			///< D3D11: what the blurred excess is worth when added back
+	Real additiveGain;	///< D3D11: what an additive draw into the scene is multiplied by
+	UnsignedInt blurPasses;	///< D3D11: pairs of blur passes, each a step wider
+	Int fixedThreshold;	///< D3D9: 0..255 below which nothing blooms
+	Int fixedIntensity;	///< D3D9: composite strength in percent
+};
+
+static GlowTuning glowTuning(void)
+{
+	const Real p = (Real)bloomIntensity() / 100.0f;
+	GlowTuning tuning;
+	tuning.threshold = 1.0f;
+	tuning.intensity = (p > 0.0f) ? 0.2f + 1.4f * p : 0.0f;
+	tuning.additiveGain = 1.0f + 0.6f * p;
+	tuning.blurPasses = (p > 0.5f) ? 4 : (p > 0.25f) ? 3 : 2;
+	tuning.fixedThreshold = 224;
+	tuning.fixedIntensity = bloomIntensity();
+	return tuning;
 }
 
 /** The fixed-function bloom's strength, which is zero on Direct3D 11: there the post chain's own
@@ -238,12 +268,9 @@ static Int fixedFunctionBloomIntensity(void)
 	if (Direct3D11_Is_Active())
 	{
 #if defined(_WIN32)
-		//The option in the post chain's units, where 1.0 is white.  The chain was tuned at a
-		//threshold of 1.0 and an intensity of 1.5, so the default threshold (65%) lands on 1.0 and
-		//the middle level (60%) on 1.5; 35% and 85% fall either side, 45% and 85% thresholds at
-		//0.69 and 1.31.  Pushed every frame, so a change on the options screen shows at once.
-		const Int percent = TheGlobalData != NULL ? TheGlobalData->m_bloomThreshold : 65;
-		DX11Post_Set_Bloom((Real)percent / 65.0f, (Real)bloomIntensity() * 0.025f);
+		//Pushed every frame, so a change on the options screen shows at once.
+		const GlowTuning tuning = glowTuning();
+		DX11Post_Set_Bloom(tuning.threshold, tuning.intensity, tuning.additiveGain, tuning.blurPasses);
 #endif
 		return 0;
 	}
@@ -285,7 +312,7 @@ static Bool createBloomTargets(IDirect3DTexture9 *sceneTexture)
 		}
 	}
 	DEBUG_LOG(("Bloom: %dx%d, intensity %d%%, threshold %d/255\n",
-						 s_bloomWidth, s_bloomHeight, bloomIntensity(), bloomThreshold()));
+						 s_bloomWidth, s_bloomHeight, glowTuning().fixedIntensity, glowTuning().fixedThreshold));
 	return TRUE;
 }
 
@@ -329,16 +356,27 @@ static void renderBloom(IDirect3DTexture9 *sceneTexture, Real x, Real y, Real w,
 
 	//Bright pass.  Anything darker than the threshold subtracts away to black and what survives
 	//is how far above it the pixel was - a soft knee rather than a hard cut, which is what stops
-	//sunlit sand from popping in and out of the effect as the camera moves.
-	const Int t = bloomThreshold();
+	//sunlit sand from popping in and out of the effect as the camera moves.  The second stage
+	//takes that excess four times over: the threshold sits near white, so the excess is small.
+	const GlowTuning tuning = glowTuning();
+	const Int t = tuning.fixedThreshold;
 	DX8Wrapper::_Set_DX8_Render_Target(s_bloomSurface[0], NULL);	//no depth buffer: none of this is depth tested
 	DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE, FALSE);
 	DX8Wrapper::Set_DX8_Render_State(D3DRS_TEXTUREFACTOR, D3DCOLOR_ARGB(255, t, t, t));
 	DX8Wrapper::Set_DX8_Texture_Stage_State(0, D3DTSS_COLOROP, D3DTOP_SUBTRACT);
 	DX8Wrapper::Set_DX8_Texture_Stage_State(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
 	DX8Wrapper::Set_DX8_Texture_Stage_State(0, D3DTSS_COLORARG2, D3DTA_TFACTOR);
+	DX8Wrapper::Set_DX8_Texture_Stage_State(1, D3DTSS_COLOROP, D3DTOP_MODULATE4X);
+	DX8Wrapper::Set_DX8_Texture_Stage_State(1, D3DTSS_COLORARG1, D3DTA_CURRENT);
+	DX8Wrapper::Set_DX8_Texture_Stage_State(1, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
+	//a stage with its colour on may not have its alpha off: D3D9 leaves that undefined
+	DX8Wrapper::Set_DX8_Texture_Stage_State(1, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+	DX8Wrapper::Set_DX8_Texture_Stage_State(1, D3DTSS_ALPHAARG1, D3DTA_CURRENT);
 	DX8Wrapper::Set_DX8_Texture(0, sceneTexture);
+	DX8Wrapper::Set_DX8_Texture(1, NULL);
 	drawBloomQuad(0.0f, 0.0f, (Real)s_bloomWidth, (Real)s_bloomHeight, u0, v0, u1, v1, 0xffffffff);
+	DX8Wrapper::Set_DX8_Texture_Stage_State(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+	DX8Wrapper::Set_DX8_Texture_Stage_State(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
 
 	//Blur: two 4-tap box passes ping-ponging between the targets, the second one twice as wide.
 	//Each tap is a quarter weight carried in the diffuse colour, the first writing and the other
@@ -366,7 +404,7 @@ static void renderBloom(IDirect3DTexture9 *sceneTexture, Real x, Real y, Real w,
 	}
 
 	//Composite: add the blurred highlights back over the scene.
-	const Int i = bloomIntensity() * 255 / 100;
+	const Int i = tuning.fixedIntensity * 255 / 100;
 	DX8Wrapper::_Set_DX8_Render_Target(oldTarget, oldDepth);
 	DX8Wrapper::Set_DX8_Texture(0, s_bloomTexture[0]);	//the second blur pass wrote target 0
 	DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE, TRUE);
@@ -419,7 +457,7 @@ Bool ScreenDefaultFilter::preRender(Bool &skipRender, CustomScenePassModes &scen
 	{	if (((W3DSmudgeManager *)TheSmudgeManager)->getSmudgeCountLastFrame() == 0)
 			return FALSE;
 	}
-	W3DShaderManager::startRenderToTexture();
+	W3DShaderManager::startRenderToTexture(TRUE);	//the smudges only sample it, mid-scene
 	return true;
 }
 
@@ -428,6 +466,9 @@ Bool ScreenDefaultFilter::postRender(enum FilterModes mode, Coord2D &scrollDelta
 	IDirect3DTexture9 * tex =	W3DShaderManager::endRenderToTexture();
 	DEBUG_ASSERTCRASH(tex, ("Require rendered texture."));
 	if (!tex) return false;
+	// Direct3D 11 never left its own scene target (Direct3D11_Set_Scene_Stand_In): there is nothing
+	// to copy back, and the copy would clip the Glow option's fires at white.
+	if (Direct3D11_Is_Active()) return true;
 	if (!set(mode)) return false;
 
 
@@ -2894,7 +2935,6 @@ void W3DShaderManager::init(void)
 			}
 		}
 	}
-
 	W3DShaderInterface **shaders;
 
 	for (i=0; MasterShaderList[i] != NULL; i++)
@@ -2926,6 +2966,7 @@ void W3DShaderManager::init(void)
 //=============================================================================
 void W3DShaderManager::shutdown(void)
 {
+	Direct3D11_Set_Scene_Stand_In(NULL, NULL);
 	if (m_newRenderSurface) m_newRenderSurface->Release();
 	if (m_renderTexture) m_renderTexture->Release();
 	if (m_oldRenderSurface) m_oldRenderSurface->Release();
@@ -3096,8 +3137,8 @@ void W3DShaderManager::drawViewport(Int color)
 /** Starts rendering to a texture.
  */
 //=============================================================================
-void W3DShaderManager::startRenderToTexture(void)
-{	
+void W3DShaderManager::startRenderToTexture(Bool sceneStandIn)
+{
 	DEBUG_ASSERTCRASH(!m_renderingToTexture, ("Already rendering to texture - cannot nest calls."));
 
 	if (m_renderingToTexture || m_newRenderSurface==NULL || m_oldDepthSurface==NULL)
@@ -3114,6 +3155,8 @@ void W3DShaderManager::startRenderToTexture(void)
 	//texture.  Ask the wrapper for a matching one (NULL = not multisampling, nothing to do).
 	IDirect3DSurface9 *depthSurface = DX8Wrapper::_Get_Non_MultiSampled_Depth_Buffer();
 	if (depthSurface == NULL) depthSurface = m_oldDepthSurface;
+	if (sceneStandIn)
+		Direct3D11_Set_Scene_Stand_In(m_renderTexture, m_newRenderSurface);
 	DX8Wrapper::_Set_DX8_Render_Target(m_newRenderSurface,depthSurface);
 	RenderResult hr = D3D_OK;
 	DEBUG_ASSERTCRASH(hr==D3D_OK, ("Set target failed unexpectedly."));
@@ -3173,6 +3216,7 @@ IDirect3DTexture9 *W3DShaderManager::endRenderToTexture(void)
 		return NULL;
 	}
 	DX8Wrapper::_Set_DX8_Render_Target(m_oldRenderSurface,m_oldDepthSurface);	//restore original render target
+	Direct3D11_Set_Scene_Stand_In(NULL, NULL);
 	RenderResult hr = D3D_OK;
 	DEBUG_ASSERTCRASH(hr==D3D_OK, ("Set target failed unexpectedly."));
 	if (hr != D3D_OK)

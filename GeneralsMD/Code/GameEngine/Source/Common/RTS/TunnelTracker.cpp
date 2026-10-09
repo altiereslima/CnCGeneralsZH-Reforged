@@ -280,8 +280,14 @@ void TunnelTracker::onTunnelDestroyed( const Object *deadTunnel )
 // into whatever is shooting at it.
 static const UnsignedInt TUNNEL_UNDER_FIRE_FRAMES = 2 * LOGICFRAMES_PER_SECOND;
 
-Object *TunnelTracker::findQuietTunnelNear( const Coord3D *pos ) const
+// With a walker, a mouth that is on the other side of a cliff or a river from reachPos (pos when
+// none is given) is no mouth at all.  The question is asked in terrain zones, which read a structure
+// as the ground under it: the mouth is one, and a base wall is not what keeps a walk from getting
+// somewhere.
+Object *TunnelTracker::findQuietTunnelNear( const Coord3D *pos, const Object *walker, const Coord3D *reachPos ) const
 {
+	if( reachPos == NULL )
+		reachPos = pos;
 	const UnsignedInt now = TheGameLogic->getFrame();
 	Object *nearest = NULL;
 	Real nearestSqr = 0.0f;
@@ -299,11 +305,15 @@ Object *TunnelTracker::findQuietTunnelNear( const Coord3D *pos ) const
 			continue;
 
 		const Real distSqr = ThePartitionManager->getDistanceSquared( tunnel, pos, FROM_CENTER_2D );
-		if( nearest == NULL || distSqr < nearestSqr )
-		{
-			nearest = tunnel;
-			nearestSqr = distSqr;
-		}
+		if( nearest != NULL && distSqr >= nearestSqr )
+			continue;
+
+		if( walker != NULL &&
+				!TheAI->pathfinder()->clientSafeQuickDoesPathExistForUI( walker->getAI()->getLocomotorSet(), tunnel->getPosition(), reachPos ) )
+			continue;
+
+		nearest = tunnel;
+		nearestSqr = distSqr;
 	}
 	return nearest;
 }
@@ -343,19 +353,33 @@ Int TunnelTracker::getResidentCount() const
 
 		Any way through that is shorter than the walk is taken.  It used to have to come in under 70% of
 		it, and a rally point with a tunnel beside the factory and another beside the point still walked.
-		The legs to and from the tunnels are straight lines.  `walk` is the caller's to measure: the
-		straight line for a move order, the length of the path for a wave that follows one.
+		The mouths are the nearest ones the walker's feet reach: the way in nearest `from`, the way out
+		nearest `to`.  The ground is asked about from where the walker stands, not from `from`: the
+		middle of a group can fall on a cliff face, which belongs to no walk at all.  When there is no walk at all - the goal up a cliff, across water with no bridge, the GLA
+		campaign's plateaus - any such pair wins, and before that the order walked into the wall while the
+		tunnels it was meant to use stood on both sides of it.  Otherwise the legs to and from the tunnels
+		are straight lines, and `walk` is the caller's to measure: the straight line for a move order, the
+		length of the path for a wave that follows one.  The trip leaves by the same far mouth
+		(AIUpdateInterface::update asks findQuietTunnelNear the same question).
 		ponytail: straight lines, not path lengths; a tunnel across a river the walk has to go round
-		looks no better than one across open ground.  A path search when that matters. */
-Object *TunnelTracker::findTunnelShortcut( const Coord3D *from, const Coord3D *to, Real walk ) const
+		looks no better than one across open ground.  A path search when that matters.  The walker is
+		one member of a group, so a mixed group is judged by that member's feet. */
+Object *TunnelTracker::findTunnelShortcut( const Object *walker, const Coord3D *from, const Coord3D *to, Real walk ) const
 {
 	if( (Int)getContainCount() >= getContainMax() )
 		return NULL;
 
-	Object *entrance = findQuietTunnelNear( from );
-	Object *exit = findQuietTunnelNear( to );
-	if( entrance == NULL || exit == entrance )
+	Object *entrance = findQuietTunnelNear( from, walker, walker->getPosition() );
+	Object *exit = findQuietTunnelNear( to, walker );
+	if( entrance == NULL || exit == NULL || exit == entrance )
 		return NULL;
+
+	if( !TheAI->pathfinder()->clientSafeQuickDoesPathExistForUI( walker->getAI()->getLocomotorSet(), walker->getPosition(), to ) )
+	{
+		DEBUG_LOG(("TUNNELSHORTCUT frame %d: %d cannot walk to (%.0f,%.0f), goes down %d and up %d\n", TheGameLogic->getFrame(),
+			walker->getID(), to->x, to->y, entrance->getID(), exit->getID()));
+		return entrance;
+	}
 
 	const Real toEntrance = (Real)sqrt( ThePartitionManager->getDistanceSquared( entrance, from, FROM_CENTER_2D ) );
 	const Real fromExit = (Real)sqrt( ThePartitionManager->getDistanceSquared( exit, to, FROM_CENTER_2D ) );

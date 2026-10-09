@@ -22,9 +22,6 @@
 
 #include "Common/DrawnPath.h"
 #include "GameLogic/Object.h"
-#include "GameLogic/PartitionManager.h"
-#include "GameLogic/TerrainLogic.h"
-#include "Lib/Trig.h"
 
 //-------------------------------------------------------------------------------------------------
 void buildPathArcLengths( const std::vector<Coord3D>& path, std::vector<Real>& arc )
@@ -271,69 +268,4 @@ void assignAttacks( Int attackerCount, Int targetCount, std::vector<AttackAssign
 			pairs.push_back( pair );
 		}
 	}
-}
-
-static const Real SWEEP_RING_SHARE = 0.7f;		///< the ring's radius as a share of the circle's
-static const Real SWEEP_SPACING = 300.0f;			///< about how far apart two points stand along the ring
-enum { SWEEP_POINTS_LEAST = 4, SWEEP_POINTS_MOST = 8 };
-
-//-------------------------------------------------------------------------------------------------
-void sweepPoints( Real centerX, Real centerY, Real radius, Real fromX, Real fromY,
-									Real loX, Real loY, Real hiX, Real hiY, std::vector<Coord3D>& out )
-{
-	out.clear();
-	const Real ring = radius * SWEEP_RING_SHARE;
-	const Int count = min( max( (Int)REAL_TO_INT_CEIL( TWO_PI * ring / SWEEP_SPACING ), (Int)SWEEP_POINTS_LEAST ),
-												 (Int)SWEEP_POINTS_MOST );
-
-	// a unit vector from the centre towards the selection, turned by one step for each point.  A
-	// selection standing on the centre starts east
-	Real dx = fromX - centerX;
-	Real dy = fromY - centerY;
-	const Real length = sqrtf( dx * dx + dy * dy );
-	if( length < 1.0f )
-	{
-		dx = 1.0f;
-		dy = 0.0f;
-	}
-	else
-	{
-		dx /= length;
-		dy /= length;
-	}
-	const Real step = -TWO_PI / count;
-	const Real c = Cos( step );
-	const Real s = Sin( step );
-	for( Int i = 0; i < count; i++ )
-	{
-		Coord3D point;
-		point.x = min( max( centerX + dx * ring, loX ), hiX );
-		point.y = min( max( centerY + dy * ring, loY ), hiY );
-		point.z = 0.0f;
-		out.push_back( point );
-
-		const Real turnedX = dx * c - dy * s;
-		dy = dx * s + dy * c;
-		dx = turnedX;
-	}
-}
-
-//-------------------------------------------------------------------------------------------------
-void sweepRoute( Int playerIndex, const Coord3D& center, Real radius, const Coord3D& from,
-								 std::vector<Coord3D>& route )
-{
-	Region3D extent;
-	TheTerrainLogic->getExtent( &extent );
-	std::vector<Coord3D> ring;
-	sweepPoints( center.x, center.y, radius, from.x, from.y, extent.lo.x, extent.lo.y, extent.hi.x, extent.hi.y, ring );
-
-	route.clear();
-	for( std::vector<Coord3D>::iterator it = ring.begin(); it != ring.end(); ++it )
-	{
-		it->z = TheTerrainLogic->getGroundHeight( it->x, it->y );
-		if( ThePartitionManager->getShroudStatusForPlayer( playerIndex, &(*it) ) != CELLSHROUD_CLEAR )
-			route.push_back( *it );
-	}
-	if( route.empty() )
-		route = ring;
 }

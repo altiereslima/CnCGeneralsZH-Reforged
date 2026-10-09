@@ -1,0 +1,18 @@
+# A quiet American base on the open snow in the middle of Winter Wolf, for the Glow option's check
+# that nothing painted blooms: white and grey buildings and the brightest ground in the game, nothing
+# firing. Draws, so -win:
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -fps 120 -noFPSLimit -particlecap 2500 -map "Maps\Winter Wolf\Winter Wolf.map"
+#     -autoskirmish 2 -takeover -side 0 FactionAmerica -side 1 FactionChina -seed 7
+#     -scenario glowbase -cinema nohud -freecam 800 1120 230 0 -16 -screenshot 120 -maxframes 130
+#
+# with Bloom = 0 and 4 (Ultra) in the Options.ini of a ZH_USER_DATA_DIR of its own for each run.
+
+20    spawn      0  AmericaCommandCenter          1   1100 1120
+20    spawn      0  AmericaParticleCannonUplink   1   1100 940
+20    spawn      0  AmericaStrategyCenter         1   1100 1300
+20    spawn      0  AmericaWarFactory             1   1320 1000
+20    spawn      0  AmericaBarracks               1   1320 1240
+20    spawn      0  AmericaPowerPlant             3   950 980  90
+20    spawn      0  AmericaSupplyCenter           1   1500 1120

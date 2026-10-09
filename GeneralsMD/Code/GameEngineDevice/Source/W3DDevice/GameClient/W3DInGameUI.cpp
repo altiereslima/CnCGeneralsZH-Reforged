@@ -35,6 +35,7 @@
 #include "Common/GlobalData.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
+#include "Common/Radar.h"
 #include "Common/ThingTemplate.h"
 #include "Common/ThingFactory.h"
 #include "GameLogic/AI.h"
@@ -56,6 +57,7 @@
 #include "GameClient/ControlBar.h"
 #include "GameClient/Image.h"
 #include "GameClient/Mouse.h"
+#include "GameClient/ObserverCamera.h"
 #include "W3DDevice/GameClient/W3DAssetManager.h"
 #include "W3DDevice/GameClient/W3DGUICallbacks.h"
 #include "W3DDevice/GameClient/W3DInGameUI.h"
@@ -421,6 +423,130 @@ void W3DInGameUI::reset( void )
 
 static void drawGroundRing( const Coord3D& center, Real radius, UnsignedInt color, Real width );
 
+/// -directorrecord's lines between panes and the radar's frame: the brand's gold (zerohour.gg's
+/// --gold, #f2c230) between two edges of its ground (--bg, #0c1220), so they read on snow and on
+/// night maps alike
+static const Color PANE_GOLD = GameMakeColor( 0xf2, 0xc2, 0x30, 255 );
+static const Color PANE_EDGE = GameMakeColor( 0x0c, 0x12, 0x20, 255 );
+/// the band under the lines is the site's text blue, --blue #8095ea, the brand's second colour: a
+/// wide faint layer and a narrower stronger one, fading out along the ray
+static const UnsignedByte PANE_BAND_RGB[ 3 ] = { 0x80, 0x95, 0xea };
+static const Real PANE_BAND_OUTER_ALPHA = 0.3f;
+static const Real PANE_BAND_INNER_ALPHA = 0.55f;
+static const Real PANE_BAND_FAR_SHARE = 0.35f;
+/// the corner radar's dark edge is a pixel this many rows of the picture
+static const Real CORNER_EDGE_ROWS_A_PIXEL = 720.0f;
+/// the light that runs along the gold: --gold most of the way to white, as wide as the edged line and
+/// this share of its length, fading out to both ends.  At --gold half way to white and the gold's
+/// own width nobody saw it at 720p
+static const UnsignedByte PANE_SHIMMER_RGB[ 3 ] = { 0xff, 0xf6, 0xd8 };
+static const Real PANE_SHIMMER_SHARE = 0.18f;
+
+static Color paneShimmer( UnsignedByte alpha )
+{
+	return GameMakeColor( PANE_SHIMMER_RGB[ 0 ], PANE_SHIMMER_RGB[ 1 ], PANE_SHIMMER_RGB[ 2 ], alpha );
+}
+
+static Color paneBand( Real alpha )
+{
+	return GameMakeColor( PANE_BAND_RGB[ 0 ], PANE_BAND_RGB[ 1 ], PANE_BAND_RGB[ 2 ], (UnsignedByte)REAL_TO_INT( 255.0f * alpha ) );
+}
+
+/** The rays between the panes, from their meeting point out: the dark edge whole from the start, so
+	* the seams read as the panes slide in, and the band and the gold as far as they have drawn out on
+	* the settled panes.  Every ray's band first, then every edge, then the gold, so the gold runs on
+	* unbroken where they meet.  Drawn, a light runs out along the gold now and then. */
+static void drawPaneRays( void )
+{
+	const Real gold = (Real)ObserverCamera_paneLineWidth( TheDisplay->getHeight() );
+	const Real edged = gold + 2 * OBSERVER_PANE_LINE_EDGE;
+	const Real band = (Real)ObserverCamera_paneBandWidth( TheDisplay->getHeight() );
+	const Coord2D origin = TheObserverCamera.getPaneOrigin();
+	const Real *rays = TheObserverCamera.getPaneRays();
+	const Int count = TheObserverCamera.getDrawnPaneCount();
+	const Real progress = TheObserverCamera.getLineProgress();
+	const Real bandShown = ObserverCamera_bandShown( progress );
+	const Real drawn = ObserverCamera_lineDrawn( progress );
+	// the far end is past the farthest corner from the meeting point, wherever that has slid to
+	const Real width = (Real)TheDisplay->getWidth();
+	const Real height = (Real)TheDisplay->getHeight();
+	const Real farX = max( fabsf( origin.x ), fabsf( width - origin.x ) );
+	const Real farY = max( fabsf( origin.y ), fabsf( height - origin.y ) );
+	const Real whole = sqrtf( farX * farX + farY * farY );
+	const Real length = whole * drawn;
+	const Int fromX = REAL_TO_INT( origin.x );
+	const Int fromY = REAL_TO_INT( origin.y );
+	for( Int pass = 0; pass < 4; pass++ )
+	{
+		for( Int ray = 0; ray < count; ray++ )
+		{
+			const Real angle = rays[ ray ] * PI / 180.0f;
+			const Real reach = pass == 2 ? whole : length;
+			const Int toX = REAL_TO_INT( origin.x + cosf( angle ) * reach );
+			const Int toY = REAL_TO_INT( origin.y - sinf( angle ) * reach );
+			if( pass == 0 && bandShown > 0.0f )
+				TheDisplay->drawLine( fromX, fromY, toX, toY, band, paneBand( PANE_BAND_OUTER_ALPHA * bandShown ),
+					paneBand( PANE_BAND_OUTER_ALPHA * bandShown * PANE_BAND_FAR_SHARE ) );
+			else if( pass == 1 && bandShown > 0.0f )
+				TheDisplay->drawLine( fromX, fromY, toX, toY, ( band + edged ) * 0.5f, paneBand( PANE_BAND_INNER_ALPHA * bandShown ),
+					paneBand( PANE_BAND_INNER_ALPHA * bandShown * PANE_BAND_FAR_SHARE ) );
+			else if( pass == 2 )
+				TheDisplay->drawLine( fromX, fromY, toX, toY, edged, PANE_EDGE );
+			else if( pass == 3 && drawn > 0.0f )
+				TheDisplay->drawLine( fromX, fromY, toX, toY, gold, PANE_GOLD );
+		}
+	}
+
+	const Real shimmer = ObserverCamera_shimmerAt( TheGameLogic->getFrame() );
+	if( drawn < 1.0f || shimmer < 0.0f )
+		return;
+	const Real half = length * PANE_SHIMMER_SHARE * 0.5f;
+	const Real middle = length * shimmer;
+	for( Int ray = 0; ray < count; ray++ )
+	{
+		const Real angle = rays[ ray ] * PI / 180.0f;
+		const Real alongX = cosf( angle );
+		const Real alongY = -sinf( angle );
+		const Real start = max( middle - half, 0.0f );
+		const Real end = min( middle + half, length );
+		const Int middleX = REAL_TO_INT( origin.x + alongX * middle );
+		const Int middleY = REAL_TO_INT( origin.y + alongY * middle );
+		TheDisplay->drawLine( REAL_TO_INT( origin.x + alongX * start ), REAL_TO_INT( origin.y + alongY * start ), middleX, middleY, edged,
+			paneShimmer( 0 ), paneShimmer( 255 ) );
+		TheDisplay->drawLine( middleX, middleY, REAL_TO_INT( origin.x + alongX * end ), REAL_TO_INT( origin.y + alongY * end ), edged,
+			paneShimmer( 255 ), paneShimmer( 0 ) );
+	}
+}
+
+/** The radar's frame drawing its gold in round the window, clockwise from the top left corner, drawn
+	* share of the way; the edge is under all of it from the start. */
+static void drawFrameGold( const IRegion2D &window, Int gold, Real drawn )
+{
+	const Int left = window.lo.x - gold;
+	const Int top = window.lo.y - gold;
+	const Int across = window.hi.x - window.lo.x + 2 * gold;
+	const Int down = window.hi.y - window.lo.y + 2 * gold;
+	Int remaining = REAL_TO_INT( drawn * 2 * ( across + down ) );
+	const Int topRun = min( remaining, across );
+	TheDisplay->drawFillRect( left, top, topRun, gold, PANE_GOLD );
+	remaining -= topRun;
+	const Int rightRun = min( remaining, down );
+	TheDisplay->drawFillRect( left + across - gold, top, gold, rightRun, PANE_GOLD );
+	remaining -= rightRun;
+	const Int bottomRun = min( remaining, across );
+	TheDisplay->drawFillRect( left + across - bottomRun, top + down - gold, bottomRun, gold, PANE_GOLD );
+	remaining -= bottomRun;
+	const Int leftRun = min( remaining, down );
+	TheDisplay->drawFillRect( left, top + down - leftRun, gold, leftRun, PANE_GOLD );
+}
+
+/// a rectangle the given pixels larger than window on every side, filled
+static void fillAround( const IRegion2D &window, Int outside, Color color )
+{
+	TheDisplay->drawFillRect( window.lo.x - outside, window.lo.y - outside,
+		window.hi.x - window.lo.x + 2 * outside, window.hi.y - window.lo.y + 2 * outside, color );
+}
+
 //-------------------------------------------------------------------------------------------------
 /** Draw member for the W3D implemenation of the game user interface */
 //-------------------------------------------------------------------------------------------------
@@ -430,7 +556,127 @@ void W3DInGameUI::draw( void )
 	// star banner slide in at the top right of an observer's footage (twice in trailer_chaos, frames
 	// 930 and 1230), and nothing on the list belongs in a shot.  The letterbox is the display's own.
 	if( CinemaDirector_hidesHud() )
+	{
+		const Bool framed = TheObserverCamera.isRadarFramed();
+		IRegion2D noFrame;
+		noFrame.lo.x = noFrame.lo.y = noFrame.hi.x = noFrame.hi.y = 0;
+		TheObserverCamera.setRadarFrame( noFrame );
+
+		// -directorrecord's panes: the rays between them, under the radar, drawn in every pane's draw so
+		// each pane's half of a line's band lies over its own picture.  Kept from pane 0 alone, the band
+		// showed pane 0's ground on the far side of the seam, the black past its map in an eight-pane
+		// opening
+		if( framed )
+			drawPaneRays();
+
+		// the console's 'hidehud showmap=true': the bar is hidden, so its radar window is put in the
+		// corner by hand, where the radar's own pixel maths find it too, and painted.  Under
+		// -directorrecord it slides out of the corner to the left before panes come and back after
+		// them, and while they are up it sits in a frame of the rays' own line where they meet.  Every
+		// pane draws the frame and its halo, for the same reason as the rays; the map in it is pane 0's
+		// alone, and the recording takes the framed map from pane 0
+		const Bool secondPane = TheObserverCamera.isDrawingSecond();
+		if( CinemaDirector_showsMap() && ( framed || !secondPane ) )
+		{
+			GameWindow *radarWindow = TheWindowManager->winGetWindowFromId( NULL, TheNameKeyGenerator->nameToKey( "ControlBar.wnd:LeftHUD" ) );
+			// W3DLeftHUDDraw paints one pixel inside the window, and the radar keeps the map's shape
+			// inside that, with black bars for the rest.  The window is cut to the map's own shape,
+			// a pixel larger each side and one pixel over the screen's edges, so the map is flush
+			enum { RADAR_BEZEL = 1 };
+			ICoord2D size, ul, lr;
+			radarWindow->winGetSize( &size.x, &size.y );
+			TheRadar->findDrawPositions( 0, 0, size.x - 2 * RADAR_BEZEL, size.y - 2 * RADAR_BEZEL, &ul, &lr );
+			IRegion2D corner;
+			corner.lo.x = -RADAR_BEZEL;
+			corner.hi.x = corner.lo.x + ( lr.x - ul.x ) + 2 * RADAR_BEZEL;
+			corner.hi.y = TheDisplay->getHeight() + RADAR_BEZEL;
+			corner.lo.y = corner.hi.y - ( lr.y - ul.y ) - 2 * RADAR_BEZEL;
+			const Int mapWidth = corner.hi.x - corner.lo.x;
+			const Int mapHeight = corner.hi.y - corner.lo.y;
+			// the frame is the rays' gold and outer edge laid round the window, the gold on the bezel
+			const Int frameGold = ObserverCamera_paneLineWidth( TheDisplay->getHeight() );
+			const Int frameOutside = frameGold + OBSERVER_PANE_LINE_EDGE;
+			// -directorrecord frames the radar in its corner as well; the console's showmap alone keeps
+			// it bare and flush with the corner
+			const Bool cornerFramed = !framed && TheGlobalData->m_directorRecord;
+			if( framed )
+			{
+				const Real diagonal = sqrtf( (Real)( mapWidth * mapWidth + mapHeight * mapHeight ) ) + 2 * frameOutside;
+				const Coord2D middle = TheObserverCamera.getFramedRadarMiddle( diagonal );
+				corner.lo.x = REAL_TO_INT( middle.x ) - mapWidth / 2;
+				corner.hi.x = corner.lo.x + mapWidth;
+				corner.lo.y = REAL_TO_INT( middle.y ) - mapHeight / 2;
+				corner.hi.y = corner.lo.y + mapHeight;
+			}
+			// in its corner the radar stays flush with the screen's left and bottom edges and its frame is
+			// half the rays' gold on a pixel of edge a 720 rows, so only its top and right show: the
+			// owner found the full frame, inset by its width, too heavy for a corner
+			const Int halo = max( ( ObserverCamera_paneBandWidth( TheDisplay->getHeight() ) - frameGold ) / 2 - OBSERVER_PANE_LINE_EDGE, 0 );
+			const Int cornerGold = max( frameGold / 2, 1 );
+			const Int cornerOutside = cornerGold + max( REAL_TO_INT( TheDisplay->getHeight() / CORNER_EDGE_ROWS_A_PIXEL ), 1 );
+			const Int cornerHalo = halo / 2;
+			if( cornerFramed )
+			{
+				// slid out left far enough to take the frame and its halo off the screen too
+				const Int slide = REAL_TO_INT( TheObserverCamera.getCornerRadarSlide() * ( mapWidth + cornerOutside + cornerHalo ) );
+				corner.lo.x -= slide;
+				corner.hi.x -= slide;
+			}
+
+			// two filled rectangles under the radar, square at the corners: the edge, then the gold up
+			// to the window, so the map sits on the gold with no gap.  Between the panes the frame wears the lines' blue band as a halo and draws its gold in round
+			// the window as the lines grow; until the gold is whole the map sits on the edge.  In the
+			// corner the same rectangles run off the screen's left and bottom, which leaves the top and
+			// the right
+			if( framed )
+			{
+				const Real progress = TheObserverCamera.getLineProgress();
+				const Real bandShown = ObserverCamera_bandShown( progress );
+				const Real drawn = ObserverCamera_frameTraced( progress );
+				if( bandShown > 0.0f )
+				{
+					fillAround( corner, frameOutside + halo, paneBand( PANE_BAND_OUTER_ALPHA * bandShown ) );
+					fillAround( corner, frameOutside + halo / 2, paneBand( PANE_BAND_INNER_ALPHA * bandShown ) );
+				}
+				fillAround( corner, frameOutside, PANE_EDGE );
+				if( drawn >= 1.0f )
+					fillAround( corner, frameGold, PANE_GOLD );
+				else
+					drawFrameGold( corner, frameGold, drawn );
+			}
+			else if( cornerFramed )
+			{
+				fillAround( corner, cornerOutside + cornerHalo, paneBand( PANE_BAND_OUTER_ALPHA ) );
+				fillAround( corner, cornerOutside + cornerHalo / 2, paneBand( PANE_BAND_INNER_ALPHA ) );
+				fillAround( corner, cornerOutside, PANE_EDGE );
+				fillAround( corner, cornerGold, PANE_GOLD );
+			}
+			if( !secondPane )
+			{
+				if( framed )
+				{
+					IRegion2D taken = corner;
+					taken.lo.x -= frameOutside;
+					taken.lo.y -= frameOutside;
+					taken.hi.x += frameOutside;
+					taken.hi.y += frameOutside;
+					TheObserverCamera.setRadarFrame( taken );
+				}
+				TheControlBar->placeWindowAt( radarWindow, corner );
+				W3DLeftHUDDraw( radarWindow, NULL );
+			}
+		}
+
+		// -directorrecord's opening plates, each pane's own, then the score bar and a split's labels over
+		// everything and pane 0's alone like the lines
+		if( TheGlobalData->m_directorRecord )
+		{
+			drawDirectorIntroPlate();
+			if( !TheObserverCamera.isDrawingSecond() )
+				drawDirectorBroadcast();
+		}
 		return;
+	}
 
 	preDraw();
 
@@ -469,15 +715,12 @@ void W3DInGameUI::draw( void )
 		drawGuardMarkers();
 
 	// the circle an armed guard will hold, under the cursor, at the size the wheel left it.  A drag
-	// is drawing a guard line instead, where every unit holds its own station.  A search and
-	// destroy's circle is the attack move colour, as its hint is
+	// is drawing a guard line instead, where every unit holds its own station
 	if( isAreaPicking() && !m_isFormationDragging )
 	{
 		Coord3D center;
 		TheTacticalView->screenToTerrain( &TheMouse->getMouseStatus()->pos, &center );
-		const UnsignedInt color = getAreaOrderArmed() == AREA_ORDER_HUNT ? 0xCCFF66CC
-														: 0xCC55CCFF;		// the guard blue the hints use
-		drawGroundRing( center, getAreaPickRadius(), color, 2.0f );
+		drawGroundRing( center, getAreaPickRadius(), 0xCC55CCFF, 2.0f );		// the guard blue the hints use
 	}
 
 	// for each view draw hints
@@ -562,6 +805,7 @@ void W3DInGameUI::draw( void )
 	{
 		drawPeaceTimer();
 		drawHudOverlay();
+		drawWireframeNotice();
 		drawScoreboard();
 	}
 
@@ -727,7 +971,7 @@ void W3DInGameUI::drawBuildGrid( void )
 		return;
 	// the grid you see is the grid you snap to: with the snap off the lines would mean nothing, but
 	// the cells nothing can stand on still do
-	const Bool drawLines = TheGlobalData->m_gridBuildPlacement;
+	const Bool drawLines = gridPlacementOn();
 	if( m_placeIcon == NULL || m_placeIcon[ 0 ] == NULL )
 		return;
 	if( TheTerrainLogic == NULL || TheAI == NULL )
@@ -1367,40 +1611,73 @@ void W3DInGameUI::drawBuildPlanNumbers( void )
 }  // end drawBuildPlanNumbers
 
 //-------------------------------------------------------------------------------------------------
-/** A heater shield filled one screen row at a time: straight sides for the upper part, then a
-	* curve closing to the point at the bottom. */
+/** One screen row from `left` to `right`, the two end pixels at the share of them the span covers,
+	* so a slanted edge fades across a pixel instead of stepping. */
 //-------------------------------------------------------------------------------------------------
-static void drawShieldShape( Int x, Int y, Int width, Int height, UnsignedInt color )
+static void drawCoveredSpan( Real left, Real right, Int y, UnsignedInt color )
 {
-	const Real SHOULDER = 0.45f;		// share of the height above the taper
+	if( right <= left )
+		return;
+	const UnsignedInt rgb = color & 0x00FFFFFF;
+	const Real alpha = (Real)( color >> 24 );
+	const Int first = (Int)floorf( left );
+	const Int last = (Int)floorf( right );
+	if( first == last )
+	{
+		TheDisplay->drawFillRect( first, y, 1, 1, rgb | ( REAL_TO_INT( alpha * ( right - left ) ) << 24 ) );
+		return;
+	}
+	TheDisplay->drawFillRect( first, y, 1, 1, rgb | ( REAL_TO_INT( alpha * ( first + 1 - left ) ) << 24 ) );
+	if( last > first + 1 )
+		TheDisplay->drawFillRect( first + 1, y, last - first - 1, 1, color );
+	if( right > last )
+		TheDisplay->drawFillRect( last, y, 1, 1, rgb | ( REAL_TO_INT( alpha * ( right - last ) ) << 24 ) );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A heater shield centred on `centreX`, filled one screen row at a time: straight sides for the
+	* upper part, then a curve closing to the point at the bottom.  The left half takes `leftColor`
+	* and the right half `rightColor`, which with a light and a darker steel reads as a raised
+	* centre ridge with the light from the left. */
+//-------------------------------------------------------------------------------------------------
+static void drawShieldShape( Real centreX, Int top, Real width, Int height, UnsignedInt leftColor, UnsignedInt rightColor )
+{
+	const Real SHOULDER = 0.4f;		// share of the height above the taper
 	for( Int row = 0; row < height; ++row )
 	{
 		const Real t = ( row + 0.5f ) / height;
 		Real half = width * 0.5f;
 		if( t > SHOULDER )
 			half *= sqrtf( ( 1.0f - t ) / ( 1.0f - SHOULDER ) );
-		const Int span = REAL_TO_INT( half * 2.0f + 0.5f );
-		if( span > 0 )
-			TheDisplay->drawFillRect( x + ( width - span ) / 2, y + row, span, 1, color );
+		drawCoveredSpan( centreX - half, centreX, top + row, leftColor );
+		drawCoveredSpan( centreX, centreX + half, top + row, rightColor );
 	}
 }
 
 //-------------------------------------------------------------------------------------------------
 /** A guarding unit looks like an idle one until something walks into its circle, so each of the
 	* local player's guards wears a small shield over its head, selected or not.  Two groups on
-	* overlapping posts can then be told apart from the ones simply standing about. */
+	* overlapping posts can then be told apart from the ones simply standing about.
+	*
+	* It follows the zoom like the health bar does, so it stays in proportion to the unit, between a
+	* floor that still reads as a shield and a ceiling that does not cover a close-up infantryman. */
 //-------------------------------------------------------------------------------------------------
 void W3DInGameUI::drawGuardMarkers( void )
 {
-	const Real MARKER_HEIGHT = 14.0f;
-	const Real MARKER_LIFT = 6.0f;		// clear of the health bar's line over the model's top
-	const UnsignedInt EDGE_COLOR = 0xDD101418;
-	const UnsignedInt FACE_COLOR = 0xDDC8D2DC;		// the command bar's steel
+	const Real MARKER_HEIGHT = 10.0f;		// at 800x600 and zoom 1, a little closer than the opening camera
+	const Real MARKER_MIN_HEIGHT = 6.0f;
+	const Real MARKER_MAX_HEIGHT = 10.0f;
+	const UnsignedInt SHADOW_COLOR = 0x60000000;		// lifts it off snow and sand alike
+	const UnsignedInt EDGE_COLOR = 0xE00C1014;
+	const UnsignedInt LIT_COLOR = 0xF0E8EEF4;		// the command bar's steel, the side facing the light
+	const UnsignedInt SHADED_COLOR = 0xF0939FAC;
 
-	const Real scale = orderStepScale();
-	const Int height = max( REAL_TO_INT( MARKER_HEIGHT * scale ), 6 );
-	const Int width = height * 4 / 5;
-	const Int lift = REAL_TO_INT( MARKER_LIFT * scale );
+	const Real uiScale = TheUIScale();
+	const Real size = MARKER_HEIGHT * uiScale / TheTacticalView->getZoom();
+	const Int height = REAL_TO_INT( max( MARKER_MIN_HEIGHT * uiScale, min( MARKER_MAX_HEIGHT * uiScale, size ) ) );
+	const Real width = height * 0.8f;
+	const Int lift = height / 2;		// clear of the health bar's line over the model's top
+	const Real rim = max( 1.0f, height / 10.0f );
 
 	// ponytail: walks every object each frame, like drawBuildPlanNumbers; share one walk if it shows
 	for( Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
@@ -1420,10 +1697,12 @@ void W3DInGameUI::drawGuardMarkers( void )
 		if( !TheTacticalView->worldToScreen( &top, &spot ) )
 			continue;
 
-		const Int x = spot.x - width / 2;
+		const Real centreX = spot.x + 0.5f;
 		const Int y = spot.y - lift - height;
-		drawShieldShape( x, y, width, height, EDGE_COLOR );
-		drawShieldShape( x + 1, y + 1, width - 2, height - 3, FACE_COLOR );
+		const Int inset = REAL_TO_INT( rim );
+		drawShieldShape( centreX + rim, y + inset, width, height, SHADOW_COLOR, SHADOW_COLOR );
+		drawShieldShape( centreX, y, width, height, EDGE_COLOR, EDGE_COLOR );
+		drawShieldShape( centreX, y + inset, width - 2.0f * rim, height - 3 * inset, LIT_COLOR, SHADED_COLOR );
 	}
 
 }  // end drawGuardMarkers

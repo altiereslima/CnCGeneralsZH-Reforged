@@ -1,0 +1,17 @@
+# Scenarios/aurorafog.txt: the two Aurora bombs on Twilight Flame. Each time is a pair of shots, the
+# Alpha Aurora's bomb (2200 3700) and then the Air Force Aurora's (2200 3200), from just after the
+# impacts to a minute in, when EA's effects are long gone.
+
+11.0  cut     2200 3700 1.2 -45 8
+12.0  shot
+12.5  cut     2200 3200 1.2 -45 8
+13.5  shot
+26.0  cut     2200 3700 1.2 -45 8
+27.0  shot
+27.5  cut     2200 3200 1.2 -45 8
+28.5  shot
+59.0  cut     2200 3700 1.2 -45 8
+60.0  shot
+60.5  cut     2200 3200 1.2 -45 8
+61.5  shot
+62.0  end

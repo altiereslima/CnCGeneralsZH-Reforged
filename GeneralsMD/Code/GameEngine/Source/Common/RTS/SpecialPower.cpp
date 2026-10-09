@@ -355,7 +355,12 @@ Bool SpecialPowerStore::canUseSpecialPower( Object *obj, const SpecialPowerTempl
 
 	}  // end if
 
-	
+	// a silo silenced by No Superweapons or Pro Rules, or a Pro Rules Carpet Bomb below rank 3, is
+	// refused when fired; saying so here keeps the skirmish script's "special power is ready" false,
+	// or the computer player scores the whole map for a target on every frame the silo is charged
+	if( ProRulesRefuseSpecialPower( obj->getControllingPlayer(), specialPowerTemplate->getSpecialPowerType() ) )
+		return FALSE;
+
 	// I THINK THIS IS WHERE WE BAIL OUT IF A DIFFERENT CONYARD IS ALREADY CHARGIN THIS SPECIAL RIGHT NOW //LORENZEN
 
 

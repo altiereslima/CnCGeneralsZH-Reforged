@@ -1,0 +1,17 @@
+# One China nuke on an American outpost on the open ground east of the Twilight Flame fight, nothing
+# else on the field, to film the heat rings and the shockwave fading out over their last frames.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -particlecap 5000 -fps 120
+#     -noFPSLimit -quickstart -noshellmap -observer -multiInstance
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario nukefade -cinema nukefade
+#     -video 240 1560 nukefade -maxframes 1580 -logPrefix nukefade_
+
+10    spawn      1  ChinaNuclearMissileLauncher     1   start1:0:200
+10    spawn      1  ChinaPowerPlant                 3   start1:260:-40    90
+
+20    spawn      0  AmericaCommandCenter            1   1500 3450
+20    spawn      0  AmericaPowerPlant               2   1380 3520   140
+20    spawn      0  AmericaTankCrusader           4   1600 3380   200
+
+100   power      1  ChinaNuclearMissileLauncher         1500 3450

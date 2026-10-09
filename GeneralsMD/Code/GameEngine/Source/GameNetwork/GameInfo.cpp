@@ -1025,6 +1025,11 @@ Bool GameInfo::isMultiPlayer(void)
 Bool GameInfo::isSandbox(void)
 {
 	Int localSlotNum = getLocalSlotNum();
+	// -observer with -takeover watches the match from no seat at all: nobody here plays, so there is
+	// no team to be against and no result to record.  The score screen asked this on Alt-F4 out of
+	// such a match and read slot -1.
+	if (localSlotNum < 0)
+		return TRUE;
 	Int localTeam = getConstSlot(localSlotNum)->getTeamNumber();
 	for (Int i=0; i<MAX_SLOTS; ++i)
 	{

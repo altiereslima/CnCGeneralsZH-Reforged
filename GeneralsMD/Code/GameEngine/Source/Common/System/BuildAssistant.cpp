@@ -385,7 +385,15 @@ Object *BuildAssistant::buildObjectNow( Object *constructorObject, const ThingTe
 			DozerAIInterface *dozer = ai->getDozerAIInterface();
 			Bool keepsCurrentJob = owningPlayer->getPlayerType() == PLAYER_HUMAN &&
 														 dozer && dozer->isTaskPending( DOZER_TASK_BUILD );
-			if( !keepsCurrentJob )
+			if( ai->isExitingProducer() )
+			{
+				// a builder still leaving the structure that made it finishes leaving before it takes up
+				// the job (DozerAIUpdate::update); idling it here dropped the exit path and it walked to
+				// the site through the walls.  The job takes the place of the rally point and of any
+				// order given on the way out, which would cancel it when it came due.
+				ai->friend_dropOrdersAfterExit();
+			}
+			else if( !keepsCurrentJob )
 			{
 				// a tunnel trip to the last order's goal with it, or the builder walks there first
 				ai->endTunnelTrip();

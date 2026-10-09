@@ -115,6 +115,7 @@ class SegmentedLineClass : public RenderObjClass
 		//performance impact will result!
 		void					Set_Texture_Tile_Factor(float factor);
 		void					Set_UV_Offset_Rate(const Vector2 &rate);
+		void					Set_Current_UV_Offset(const Vector2 &offset)		{ LineRenderer.Set_Current_UV_Offset(offset); }
 		void					Set_Merge_Intersections(int onoff);
 		void					Set_Freeze_Random(int onoff);
 		void					Set_Disable_Sorting(int onoff);

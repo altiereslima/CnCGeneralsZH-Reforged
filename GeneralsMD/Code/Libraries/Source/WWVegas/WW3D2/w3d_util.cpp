@@ -124,6 +124,12 @@ void W3dUtilityClass::Convert_Shader(const W3dShaderStruct & shader,ShaderClass 
 //	set->Set_Post_Detail_Alpha_Func ((ShaderClass::DetailAlphaFuncType) W3d_Shader_Get_Post_Detail_Alpha_Func (&shader));
 	set->Set_Post_Detail_Color_Func ((ShaderClass::DetailColorFuncType) W3d_Shader_Get_Detail_Color_Func (&shader));
 	set->Set_Post_Detail_Alpha_Func ((ShaderClass::DetailAlphaFuncType) W3d_Shader_Get_Detail_Alpha_Func (&shader));
+	// An additive surface in the art is a light: a muzzle flash, a glow card, an explosion's shell.
+	// It takes the Glow option's gain (ShaderClass::GLOW_ENABLE).
+	if (set->Get_Src_Blend_Func() == ShaderClass::SRCBLEND_ONE
+			&& set->Get_Dst_Blend_Func() == ShaderClass::DSTBLEND_ONE) {
+		set->Set_Glow(ShaderClass::GLOW_ENABLE);
+	}
 }
 
 void W3dUtilityClass::Convert_Shader(const ShaderClass & shader,W3dShaderStruct * set)

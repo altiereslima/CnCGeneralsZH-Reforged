@@ -1067,6 +1067,118 @@ static LONG WINAPI dumpUnhandledException( EXCEPTION_POINTERS *e_info )
 	return EXCEPTION_EXECUTE_HANDLER;
 }
 
+/** One argument on the end of a command line, in quotes when it holds a space. */
+static void appendArgument( char *line, size_t size, const char *argument )
+{
+	const Bool spaced = strchr( argument, ' ' ) != NULL;
+	strlcat( line, spaced ? " \"" : " ", size );
+	strlcat( line, argument, size );
+	if (spaced)
+		strlcat( line, "\"", size );
+}
+
+/** -directorrecord films a match the director has already seen.  Before this process makes its
+	window it plays the same match in a copy of itself, -headless and as fast as the machine goes,
+	with -directorscout naming a file for what the copy saw: where each fight begins, when each
+	superweapon fires, and the logic's CRC every 30 seconds.  Then this process plays the match for the
+	camera with -directortimeline naming that file.  The same switches and the same seed play the same
+	match, so a skirmish with no -seed is given one here, the same to both.  The copy is in a job that
+	dies with this process, so a script that stops this one by its id stops both. */
+static void runDirectorScout( int &argc, char **argv, int capacity )
+{
+	Bool recording = FALSE;
+	Bool seeded = FALSE;
+	for (int index = 1; index < argc; ++index)
+	{
+		if (strcasecmp( argv[index], "-directorrecord" ) == 0)
+			recording = TRUE;
+		if (strcasecmp( argv[index], "-seed" ) == 0 || strcasecmp( argv[index], "-replay" ) == 0)
+			seeded = TRUE;
+		if (strcasecmp( argv[index], "-headless" ) == 0 || strcasecmp( argv[index], "-directortimeline" ) == 0)
+			return;
+	}
+	if (!recording)
+		return;
+	const int addedArguments = 4;
+	if (argc + addedArguments > capacity)
+	{
+		DEBUG_LOG(("-directorrecord: no room on the command line for the scouting pass, the director films live\n"));
+		return;
+	}
+
+	static char seedSwitch[] = "-seed";
+	static char seedText[ 16 ];
+	if (!seeded)
+	{
+		const DWORD seedRange = 1000000;	// well inside the Int -seed is read into
+		snprintf( seedText, sizeof( seedText ), "%lu", GetTickCount() % seedRange );
+		argv[argc++] = seedSwitch;
+		argv[argc++] = seedText;
+	}
+
+	char exePath[ _MAX_PATH ];
+	GetModuleFileNameA( NULL, exePath, sizeof( exePath ) );
+	char logPrefix[ 32 ] = "";
+	findEarlyCommandLineValue( L"-logPrefix", logPrefix, sizeof( logPrefix ) );
+	char scoutPrefix[ 32 ];
+	snprintf( scoutPrefix, sizeof( scoutPrefix ), "scout_%s", logPrefix );
+	char tempDirectory[ _MAX_PATH ];
+	GetTempPathA( sizeof( tempDirectory ), tempDirectory );
+	static char timelinePath[ _MAX_PATH ];
+	snprintf( timelinePath, sizeof( timelinePath ), "%szhr_directorscout_%lu.txt", tempDirectory, GetCurrentProcessId() );
+
+	static char commandLine[ 32768 ];
+	snprintf( commandLine, sizeof( commandLine ), "\"%s\"", exePath );
+	for (int index = 1; index < argc; ++index)
+	{
+		// the copy films nothing, and its log is its own
+		if (strcasecmp( argv[index], "-directorrecord" ) == 0 || strcasecmp( argv[index], "-logPrefix" ) == 0)
+		{
+			if (index + 1 < argc && argv[index + 1][0] != '-')
+				++index;
+			continue;
+		}
+		appendArgument( commandLine, sizeof( commandLine ), argv[index] );
+	}
+	// -headless, -multiInstance and -logPrefix are read word by word off the raw line, so never quoted
+	strlcat( commandLine, " -observer -headless -multiInstance -logPrefix ", sizeof( commandLine ) );
+	strlcat( commandLine, scoutPrefix, sizeof( commandLine ) );
+	strlcat( commandLine, " -directorscout", sizeof( commandLine ) );
+	appendArgument( commandLine, sizeof( commandLine ), timelinePath );
+
+	STARTUPINFOA startup;
+	memset( &startup, 0, sizeof( startup ) );
+	startup.cb = sizeof( startup );
+	PROCESS_INFORMATION process;
+	const DWORD started = GetTickCount();
+	if (!CreateProcessA( exePath, commandLine, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &startup, &process ))
+	{
+		DEBUG_LOG(("-directorrecord: the scouting pass did not start, error %lu, the director films live\n", GetLastError()));
+		return;
+	}
+	HANDLE job = CreateJobObjectA( NULL, NULL );
+	JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits;
+	memset( &limits, 0, sizeof( limits ) );
+	limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+	SetInformationJobObject( job, JobObjectExtendedLimitInformation, &limits, sizeof( limits ) );
+	if (!AssignProcessToJobObject( job, process.hProcess ))
+		DEBUG_LOG(("-directorrecord: the scouting pass is not in a job, error %lu: it outlives this process if this one is stopped\n", GetLastError()));
+	ResumeThread( process.hThread );
+	DEBUG_LOG(("-directorrecord: scouting pass %lu started: %s\n", process.dwProcessId, commandLine));
+	WaitForSingleObject( process.hProcess, INFINITE );
+	DWORD exitCode = 0;
+	GetExitCodeProcess( process.hProcess, &exitCode );
+	CloseHandle( process.hThread );
+	CloseHandle( process.hProcess );
+	CloseHandle( job );
+	DEBUG_LOG(("-directorrecord: scouting pass took %lu ms, exit code %lu, its log is %sDebugLogFile.txt\n",
+		GetTickCount() - started, exitCode, scoutPrefix));
+
+	static char timelineSwitch[] = "-directortimeline";
+	argv[argc++] = timelineSwitch;
+	argv[argc++] = timelinePath;
+}
+
 // WinMain ====================================================================
 /** Application entry point */
 //=============================================================================
@@ -1222,6 +1334,8 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 			DEBUG_LOG(("\n--- END OF DX STACK DUMP\n"));
 			return 0;
 		}
+
+		runDirectorScout( argc, argv, MAXIMUM_ARGUMENTS );
 
 		#ifdef _DEBUG
 			// Turn on Memory heap tracking

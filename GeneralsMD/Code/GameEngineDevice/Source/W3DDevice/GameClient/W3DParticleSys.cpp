@@ -40,6 +40,7 @@
 #include "W3DDevice/GameClient/W3DScene.h"
 #include "W3DDevice/GameClient/W3DDynamicLight.h"
 #include "WW3D2/camera.h"
+#include "W3DDevice/GameClient/W3DSmoothMotion.h"
 #include "WW3D2/dx8wrapper.h"
 #include "WW3D2/dx11runtime.h"
 #include "Common/JobSystem.h"
@@ -610,8 +611,21 @@ static void addFieldPuddle( FieldChunk &chunk, Real cx, Real cy, Real flatZ, Boo
 // fades in over FIELD_FADE_IN and out over the last FIELD_FADE_OUT frames of the field object's
 // life, read off its LifetimeUpdate; a field with no such object (a one-off contamination) fades
 // with its last particle instead.  This reads the logic's objects and writes nothing back.
+//
+// Held dead still the pool looked painted on, so each puddle stays where it is and breathes: it
+// fades down by up to FIELD_PULSE and back, and swells and shrinks by FIELD_BREATHE, every puddle
+// on its own period and phase, on the logic clock blended between ticks as the models are.  The
+// puddles fall out of step with each other, so the pool shimmers and never throbs as a whole.
 //-------------------------------------------------------------------------------------------------
 
+static const Real	FIELD_PULSE_PERIOD		= 2.5f;		///< seconds, from 0.6 to 1.4 of it per puddle
+static const Real	FIELD_PULSE						= 0.55f;	///< share of a puddle's brightness it fades by
+static const Real	FIELD_BREATHE					= 0.04f;	///< share of a puddle's size it swings by
+static const Real	FIELD_BUBBLE_SPACING	= 30.0f;	///< radius per bubble slot on a radiation pool
+static const Int	FIELD_MAX_BUBBLES			= 8;
+static const Real	FIELD_BUBBLE_PERIOD		= 1.5f;		///< seconds a bubble lives, from 0.7 to 1.3 of it per slot
+static const Real	FIELD_BUBBLE_SIZE			= 5.0f;		///< half width at the pop
+static const Real	FIELD_BUBBLE_GAIN			= 0.6f;
 static const Real	FIELD_COVER						= 2.0f;		///< puddles per (radius / puddle size) squared
 static const Int	FIELD_MAX_PUDDLES			= 48;
 static const Real	FIELD_GAIN						= 0.7f;		///< of the template's brightest colour, a puddle
@@ -677,6 +691,9 @@ struct FieldDraw
 	RGBColor color;
 	AsciiString texture;
 	Int firstPuddle, puddleCount;
+	Bool glowing;				///< a warm hue, radiation: lit rather than stained, and it bubbles
+	Real radius;
+	UnsignedInt seed;		///< the place's hash, for its bubbles
 };
 
 static std::vector<FieldPuddle>	s_fieldPuddles;
@@ -761,6 +778,8 @@ static Real fieldFade( FieldState &state, Int now )
 static Int collectGroundFields( ParticleSystemManager::ParticleSystemList &systems, const AABoxClass &view )
 {
 	const Int now = (Int)TheGameLogic->getFrame();
+	// between the last two logic ticks, as the models are, so a pulse does not step at the logic rate
+	const Real seconds = ((Real)now + (TheSmoothMotionActive ? TheSmoothMotionAlpha : 0.0f)) / LOGICFRAMES_PER_SECOND;
 	s_fieldPuddles.clear();
 	s_fieldDraws.clear();
 
@@ -887,11 +906,26 @@ static Int collectGroundFields( ParticleSystemManager::ParticleSystemList &syste
 		draw.color.green = (key_color.green - low) * lift;
 		draw.color.blue = (key_color.blue - low) * lift;
 
+		// Radiation is the one warm field.  Its orange stained the ground brown and glowed at 0.7 of a
+		// dim keyframe, which read as a scorch; it is lit to full strength instead and leaves the
+		// ground under it alone.
+		draw.glowing = draw.color.red >= draw.color.green && draw.color.red >= draw.color.blue;
+		if (draw.glowing)
+		{
+			const Real full = WWMath::Max( draw.color.red, 1.0f / 255.0f );
+			draw.color.red = 1.0f;
+			draw.color.green /= full;
+			draw.color.blue /= full;
+			draw.batch.stained = FALSE;
+		}
+		draw.radius = state.radius;
+
 		const Real spread = state.radius / size;
 		const Int count = WWMath::Clamp_Int( (Int)ceilf( FIELD_COVER * spread * spread ), 1, FIELD_MAX_PUDDLES );
 
 		// the same scatter every frame: a little generator seeded by the place
 		UnsignedInt seed = (UnsignedInt)key.x * 73856093u ^ (UnsignedInt)key.y * 19349663u ^ 0x9E3779B9u;
+		draw.seed = seed;
 		draw.firstPuddle = (Int)s_fieldPuddles.size();
 		draw.puddleCount = count;
 		for (Int i = 0; i < count; ++i)
@@ -905,11 +939,22 @@ static Int collectGroundFields( ParticleSystemManager::ParticleSystemList &syste
 			const Real r = count == 1 ? 0.0f : state.radius * sqrtf( u[ 0 ] );
 			const Real a = u[ 1 ] * 2.0f * PI;
 			FieldPuddle puddle;
+			// its own beat, from a second generator so the scatter stays where it was
+			UnsignedInt h = seed * 2654435761u;
+			Real w[ 3 ];
+			for (Int k = 0; k < 3; ++k)
+			{
+				h = h * 1664525u + 1013904223u;
+				w[ k ] = (Real)(h >> 8) * (1.0f / 16777216.0f);
+			}
+			const Real phase = w[ 0 ] * 2.0f * PI;
+			const Real cycle = 2.0f * PI * seconds / (FIELD_PULSE_PERIOD * (0.6f + 0.8f * w[ 1 ]));
+			const Real pulse = 0.5f + 0.5f * WWMath::Sin( cycle + phase );
 			puddle.x = state.centre.x + r * WWMath::Cos( a );
 			puddle.y = state.centre.y + r * WWMath::Sin( a );
-			puddle.size = size;
+			puddle.size = size * (1.0f + FIELD_BREATHE * WWMath::Sin( 0.7f * cycle + w[ 2 ] * 2.0f * PI ));
 			puddle.angle = u[ 2 ] * 2.0f * PI;
-			puddle.bright = 0.8f + 0.2f * u[ 3 ];
+			puddle.bright = (0.8f + 0.2f * u[ 3 ]) * (1.0f - FIELD_PULSE * pulse);
 			puddle.fade = fade;
 			puddle.overlap = 0.0f;
 			s_fieldPuddles.push_back( puddle );
@@ -970,6 +1015,39 @@ static Int collectGroundFields( ParticleSystemManager::ParticleSystemList &syste
 			addFieldPuddle( chunk, puddle.x, puddle.y, draw.centre.z, draw.onGround, puddle.size, puddle.angle,
 				glowColor, stainColor );
 			++laid;
+		}
+
+		// Radiation bubbles: a few small light blobs that swell out of the pool and pop, each slot on
+		// its own beat and somewhere new every time.  They take no part in the overlap above.
+		if (draw.glowing)
+		{
+			const Int bubbles = WWMath::Clamp_Int( (Int)(draw.radius / FIELD_BUBBLE_SPACING), 1, FIELD_MAX_BUBBLES );
+			for (Int b = 0; b < bubbles; ++b)
+			{
+				UnsignedInt h = draw.seed ^ ((UnsignedInt)b * 2246822519u);
+				h = h * 1664525u + 1013904223u;
+				const Real period = FIELD_BUBBLE_PERIOD * (0.7f + 0.6f * (Real)(h >> 8) * (1.0f / 16777216.0f));
+				h = h * 1664525u + 1013904223u;
+				const Real t = seconds / period + (Real)(h >> 8) * (1.0f / 16777216.0f);
+				const Real round = floorf( t );
+				const Real life = t - round;
+
+				// where this round's bubble comes up
+				UnsignedInt p = h ^ ((UnsignedInt)(Int)round * 3266489917u);
+				p = p * 1664525u + 1013904223u;
+				const Real r = draw.radius * 0.9f * sqrtf( (Real)(p >> 8) * (1.0f / 16777216.0f) );
+				p = p * 1664525u + 1013904223u;
+				const Real a = (Real)(p >> 8) * (1.0f / 16777216.0f) * 2.0f * PI;
+
+				// up over most of its life, gone in the last fifth; lighter and yellower than the pool
+				const Real swell = life < 0.8f ? life / 0.8f : (1.0f - life) / 0.2f;
+				const Real bright = FIELD_BUBBLE_GAIN * draw.fade * swell;
+				const unsigned bubbleColor = DX8Wrapper::Convert_Color_Clamp( Vector4( bright,
+					bright * (0.5f + 0.5f * draw.color.green), bright * (0.3f + 0.7f * draw.color.blue), 1.0f ) );
+				addFieldPuddle( chunk, draw.centre.x + r * WWMath::Cos( a ), draw.centre.y + r * WWMath::Sin( a ),
+					draw.centre.z, draw.onGround, FIELD_BUBBLE_SIZE * (0.4f + 0.6f * life), a, bubbleColor, 0 );
+				++laid;
+			}
 		}
 		s_fieldChunks.push_back( chunk );
 

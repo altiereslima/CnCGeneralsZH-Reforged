@@ -267,6 +267,37 @@ static CommandStatus doGuardCommand( const CommandButton *command, GuardMode gua
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Do the attack move command: Classic's attack move button, a GUI command as in 1.04 */
+//-------------------------------------------------------------------------------------------------
+static CommandStatus doAttackMoveCommand( const CommandButton *command, const ICoord2D *mouse )
+{
+
+	// sanity
+	if( command == NULL || mouse == NULL )
+		return COMMAND_COMPLETE;
+
+	Drawable *draw = TheInGameUI->getFirstSelectedDrawable();
+	DEBUG_ASSERTCRASH( draw, ("doAttackMoveCommand: No selected object(s)\n") );
+
+	// sanity
+	if( draw == NULL || draw->getObject() == NULL )
+		return COMMAND_COMPLETE;
+
+	// convert mouse point to world coords
+	Coord3D world;
+	TheTacticalView->screenToTerrain( mouse, &world );
+
+	GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_DO_ATTACKMOVETO );
+	msg->appendLocationArgument( world );
+
+	// Play the unit voice response
+	pickAndPlayUnitVoiceResponse(TheInGameUI->getAllSelectedDrawables(), GameMessage::MSG_DO_ATTACKMOVETO);
+
+	return COMMAND_COMPLETE;
+
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Do the set rally point command */
 //-------------------------------------------------------------------------------------------------
 static CommandStatus doSetRallyPointCommand( const CommandButton *command, const ICoord2D *mouse )
@@ -439,6 +470,12 @@ GameMessageDisposition GUICommandTranslator::translateGameMessage(const GameMess
 						break;
 
 					}  // end special power
+
+					case GUI_COMMAND_ATTACK_MOVE:
+					{
+						commandStatus = doAttackMoveCommand( command, &mouse );
+						break;
+					}
 
 					//---------------------------------------------------------------------------------------
 					case GUI_COMMAND_SET_RALLY_POINT:

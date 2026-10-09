@@ -333,8 +333,9 @@ UpdateSleepTime WorkerAIUpdate::update( void )
 
 		}  // end if
 
-		// update dozer behavior
-		m_dozerMachine->updateStateMachine();
+		// update dozer behavior, once out of the structure that built us (DozerAIUpdate::update)
+		if( !isExitingProducer() )
+			m_dozerMachine->updateStateMachine();
 
 	}  // end if
 	else

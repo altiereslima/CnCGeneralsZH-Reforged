@@ -1221,6 +1221,27 @@ Int parseNoTactics(char *args[], int num)
 	return 2;
 }
 
+/** -aiknobsoff even|odd|all engagegate,answerarmy,massunit: those slots keep their rung with these knobs
+	* of its profile off, so a batch can play Hard against Hard without them, or a scenario against the AI
+	* as it was.  A measuring aid like -notactics: read only in a single-player skirmish, never in a
+	* network game, and a replay made with it is played back with it given again. */
+Int parseAIKnobsOff(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 2)
+	{
+		AsciiString parity = args[1];
+		TheWritableGlobalData->m_aiKnobsOffParity = parity.compareNoCase("even") == 0 ? 0 : (parity.compareNoCase("odd") == 0 ? 1 : 2);
+		AsciiString names = args[2];
+		names.toLower();
+		Int mask = 0;
+		if (strstr(names.str(), "engagegate")) mask |= AIKNOB_ENGAGE_GATE;
+		if (strstr(names.str(), "answerarmy")) mask |= AIKNOB_ANSWER_ARMY;
+		if (strstr(names.str(), "massunit")) mask |= AIKNOB_MASS_UNIT;
+		TheWritableGlobalData->m_aiKnobsOffMask = mask;
+	}
+	return 3;
+}
+
 Int parseObserver(char *args[], int num)
 {
 	if (TheWritableGlobalData)
@@ -1530,6 +1551,60 @@ Int parseVideo(char *args[], int num)
 		TheWritableGlobalData->m_videoName = name;
 	}
 	return consumed;
+}
+
+/* -directorrecord [name]: film a whole match with the director camera, as Videos\<name>.mp4.
+	 *
+	 * -video records a range of frames from wherever the camera happens to be.  This hands the camera
+	 * to the observer's director from the first frame, takes the interface off but for the radar, and
+	 * records from frame 1 until the match is decided or the replay runs out, then quits.  When two
+	 * fights far apart are both worth watching, the picture splits down a leaning line, one fight a
+	 * half.  It sets -observer, so an -autoskirmish run is watched rather than played; with -replay the
+	 * watcher is the replay's own.  The name defaults to "director" and takes -video's rules. */
+Int parseDirectorRecord(char *args[], int num)
+{
+	AsciiString name = "director";
+	Int consumed = 1;
+	if (num > 1 && args[1][0] != '-')
+	{
+		consumed = 2;
+		if (isVideoNameUsable(args[1]))
+			name = args[1];
+		else
+			DEBUG_LOG(("-directorrecord: '%s' is not a usable name (letters, digits, '-' and '_'), recording as %s\n",
+				args[1], name.str()));
+	}
+
+	if (TheWritableGlobalData)
+	{
+		// no last frame: the run ends with the match, and the display's teardown finishes the movie
+		const Int NO_LAST_FRAME = 0x3FFFFFFF;
+		TheWritableGlobalData->m_directorRecord = TRUE;
+		TheWritableGlobalData->m_videoStartFrame = 1;
+		TheWritableGlobalData->m_videoEndFrame = NO_LAST_FRAME;
+		TheWritableGlobalData->m_videoName = name;
+		TheWritableGlobalData->m_autoSkirmishObserver = TRUE;
+	}
+	return consumed;
+}
+
+/* -directorscout <file> and -directortimeline <file>: the two passes of -directorrecord.  WinMain
+	 starts the same match again headless with -directorscout before it films anything, and that run
+	 writes down where and when every fight starts and every special power is used; the filming run
+	 is handed the file with -directortimeline and arrives at each fight before it starts.  Neither is
+	 a switch for a person: WinMain names the file and passes both. */
+Int parseDirectorScout(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+		TheWritableGlobalData->m_directorScoutFile = args[1];
+	return 2;
+}
+
+Int parseDirectorTimeline(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+		TheWritableGlobalData->m_directorTimelineFile = args[1];
+	return 2;
 }
 
 /* -wav <from> <to> [name]: record what the game sounds like over logic frames <from> to <to>.
@@ -2008,18 +2083,61 @@ Int parseSide(char *args[], int num)
 	return 1;
 }
 
+/* -team <slot> <n> puts one -autoskirmish slot on team n, -1 for none, over whatever -teams gave
+	 it.  -teams only splits evenly into blocks; this stages any layout, 4v1, 2v1 or three players
+	 alone beside a pair (-team 3 0 -team 4 0 with the rest -1). */
+Int parseTeam(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 2 && args[1] && args[2])
+	{
+		const Int slot = atoi(args[1]);
+		if (slot >= 0 && slot < MAX_SLOTS)
+			TheWritableGlobalData->m_autoSkirmishTeam[slot] = max(atoi(args[2]), -1);
+		else
+			DEBUG_LOG(("-team: slot %d is outside 0..%d\n", slot, MAX_SLOTS - 1));
+		return 3;
+	}
+	return 1;
+}
+
+/* -seatname <slot> <name> calls one -autoskirmish seat by a name instead of its difficulty, the way a
+	 player's own name stands on his seat: a cup's bots by their entrants' names, or a long one to see
+	 the director's score bar cut it.  ASCII only; it is read before the game text is. */
+Int parseSeatName(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 2 && args[1] && args[2])
+	{
+		const Int slot = atoi(args[1]);
+		if (slot >= 0 && slot < MAX_SLOTS)
+			TheWritableGlobalData->m_autoSkirmishSeatName[slot] = args[2];
+		else
+			DEBUG_LOG(("-seatname: slot %d is outside 0..%d\n", slot, MAX_SLOTS - 1));
+		return 3;
+	}
+	return 1;
+}
+
 /* -takeover empties every -autoskirmish seat instead of filling it with an AI.
 
 	 SLOT_TAKEOVER is an occupied seat with nothing behind it: startNewGame writes playerIsHuman for
 	 it, so Player::setPlayerType never news an AIPlayer and that player sits waiting to be told what
 	 to do. For a measurement that is exactly the point. An AI that builds, expands and attacks costs
 	 more of the frame than whatever is under test, and it costs a different amount every run; with
-	 the seats empty, nothing happens at all unless -scenario says it does. */
+	 the seats empty, nothing happens at all unless -scenario says it does.
+
+	 -takeover <slot> empties that one seat and leaves the AI in the others: a scenario then plays one
+	 side by hand against a computer that plays the whole game, which is how an AI is asked what it
+	 does about a given army. */
 Int parseTakeover(char *args[], int num)
 {
 	if (TheWritableGlobalData)
 	{
 		TheWritableGlobalData->m_autoSkirmishTakeover = TRUE;
+		if (num > 1 && args[1][0] >= '0' && args[1][0] <= '9')
+		{
+			TheWritableGlobalData->m_autoSkirmishTakeoverSlot = atoi(args[1]);
+			return 2;
+		}
 	}
 	return 1;
 }
@@ -2537,6 +2655,7 @@ static CommandLineParam params[] =
 	{ "-aidiff", parseAIDifficulty },
 	{ "-aidiff2", parseAIDifficulty2 },
 	{ "-notactics", parseNoTactics },
+	{ "-aiknobsoff", parseAIKnobsOff },
 	{ "-observer", parseObserver },
 	{ "-headless", parseHeadless },
 	/* -noaudio was in the Debug/Internal block above, so a Release build ignored it and a windowed run
@@ -2546,6 +2665,9 @@ static CommandLineParam params[] =
 	{ "-screenshot", parseScreenShot },
 	{ "-showHudOverlay", parseShowHudOverlay },
 	{ "-video", parseVideo },
+	{ "-directorrecord", parseDirectorRecord },
+	{ "-directorscout", parseDirectorScout },
+	{ "-directortimeline", parseDirectorTimeline },
 	{ "-wav", parseWav },
 	{ "-turbo", parseTurbo },
 	{ "-msaa", parseMSAA },
@@ -2576,6 +2698,8 @@ static CommandLineParam params[] =
 	{ "-cinema", parseCinema },
 	{ "-freecam", parseFreeCamera },
 	{ "-side", parseSide },
+	{ "-team", parseTeam },
+	{ "-seatname", parseSeatName },
 	{ "-takeover", parseTakeover },
 	{ "-replay", parseReplay },
 	{ "-loadsave", parseLoadSave },

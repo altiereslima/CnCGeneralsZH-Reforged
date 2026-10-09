@@ -630,6 +630,7 @@ TEST(shader_every_field_round_trips_over_its_whole_range)
 	CHECK_FIELD(Set_Src_Blend_Func, Get_Src_Blend_Func, SrcBlendFuncType, SRCBLEND_MAX);
 	CHECK_FIELD(Set_Texturing, Get_Texturing, TexturingType, TEXTURING_MAX);
 	CHECK_FIELD(Set_NPatch_Enable, Get_NPatch_Enable, NPatchEnableType, NPATCH_TYPE_MAX);
+	CHECK_FIELD(Set_Glow, Get_Glow, GlowType, GLOW_MAX);
 	CHECK_FIELD(Set_Alpha_Test, Get_Alpha_Test, AlphaTestType, ALPHATEST_MAX);
 	CHECK_FIELD(Set_Cull_Mode, Get_Cull_Mode, CullModeType, CULL_MODE_MAX);
 	CHECK_FIELD(Set_Post_Detail_Color_Func, Get_Post_Detail_Color_Func, DetailColorFuncType, DETAILCOLOR_MAX);
@@ -1184,8 +1185,8 @@ TEST(no_preset_enables_fog_or_npatches)
 		CHECK_EQ(presets[i]->Get_Color_Mask(), ShaderClass::COLOR_WRITE_ENABLE);
 		CHECK_EQ(presets[i]->Get_Cull_Mode(), ShaderClass::CULL_MODE_ENABLE);
 		CHECK_EQ(presets[i]->Get_Secondary_Gradient(), ShaderClass::SECONDARY_GRADIENT_DISABLE);
-		/* Unallocated high bits stay clear. */
-		CHECK_EQ(presets[i]->Get_Bits() & 0xf8000000u, 0u);
+		/* Unallocated high bits stay clear; bit 27 is the Glow option's opt-in. */
+		CHECK_EQ(presets[i]->Get_Bits() & 0xf0000000u, 0u);
 	}
 }
 
@@ -1527,6 +1528,28 @@ TEST(convert_shader_round_trips_the_carried_fields)
 	CHECK_EQ(loaded.Get_Src_Blend_Func(), ShaderClass::SRCBLEND_SRC_ALPHA);
 	CHECK_EQ(loaded.Get_Texturing(), ShaderClass::TEXTURING_ENABLE);
 	CHECK_EQ(loaded.Get_Alpha_Test(), ShaderClass::ALPHATEST_ENABLE);
+}
+
+/* The Glow option brightens the art's additive surfaces (muzzle flashes, glow cards) and the
+   particles' additive preset, and nothing else that blends ONE, ONE: water, waypoint lines and
+   decals use the plain additive preset. */
+TEST(additive_art_and_particles_opt_into_the_glow_and_nothing_else_does)
+{
+	W3dShaderStruct file;
+	ShaderClass loaded;
+
+	W3dUtilityClass::Convert_Shader(ShaderClass::_PresetAdditiveShader, &file);
+	W3dUtilityClass::Convert_Shader(file, &loaded);
+	CHECK_EQ(loaded.Get_Glow(), ShaderClass::GLOW_ENABLE);
+
+	ShaderClass alpha;
+	W3dUtilityClass::Convert_Shader(ShaderClass::_PresetAlphaShader, &file);
+	W3dUtilityClass::Convert_Shader(file, &alpha);
+	CHECK_EQ(alpha.Get_Glow(), ShaderClass::GLOW_DISABLE);
+
+	CHECK_EQ(ShaderClass::_PresetAdditiveSpriteShader.Get_Glow(), ShaderClass::GLOW_ENABLE);
+	CHECK_EQ(ShaderClass::_PresetAdditiveShader.Get_Glow(), ShaderClass::GLOW_DISABLE);
+	CHECK_EQ(ShaderClass::_PresetAdditiveSolidShader.Get_Glow(), ShaderClass::GLOW_DISABLE);
 }
 
 TEST(convert_shader_drops_the_fields_the_file_format_has_no_room_for)

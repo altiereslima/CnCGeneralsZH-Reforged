@@ -3385,11 +3385,10 @@ void Drawable::drawContained( const IRegion2D *healthBarRegion )
 		return;
 
 	//
-	// ...and a building you can garrison shows them whoever holds it. How many rooms are left in
-	// that civilian block is the question you ask before sending a squad at it, and how many are
-	// occupied is the question you ask before shooting at it - both were answerable only by
-	// garrisoning it yourself. A vehicle's load stays private: an enemy transport's contents are
-	// real intelligence, a building's occupancy is what you can already see out of its windows.
+	// ...and a building you can garrison shows them whoever holds it. How many are occupied is the
+	// question you ask before shooting at it, answerable before only by garrisoning it yourself.
+	// A vehicle's load stays private: an enemy transport's contents are real intelligence, a
+	// building's occupancy is what you can already see out of its windows.
 	//
 	if (obj->getControllingPlayer() != ThePlayerList->getLocalPlayer() &&
 			!(obj->isKindOf( KINDOF_STRUCTURE ) && container->isGarrisonable()))
@@ -3404,6 +3403,15 @@ void Drawable::drawContained( const IRegion2D *healthBarRegion )
 	// buildings: a Barracks wears ten empty boxes for the whole match otherwise
 	if (numFull == 0 && !TheGlobalData->m_showEmptyBuildingPips && obj->isKindOf( KINDOF_STRUCTURE ))
 		return;
+
+	// a garrisonable building draws only its occupied slots: a city full of empty rows over every
+	// house is clutter, and an empty one draws nothing at all. Vehicles keep their empty boxes.
+	if (obj->isKindOf( KINDOF_STRUCTURE ) && container->isGarrisonable())
+	{
+		if (numFull == 0)
+			return;
+		numTotal = numFull;
+	}
 
 	Int numInfantry = 0;
 	const ContainedItemsList* contained = container->getContainedItemsList();

@@ -220,12 +220,8 @@ GUI:OrderMoveDescription
 "The next click on the ground sends the selected units there. Drag instead and they spread out along the line you draw."
 END
 
-GUI:OrderSearchAndDestroy
-"Search and Destroy"
-END
-
-GUI:OrderSearchAndDestroyDescription
-"Click a spot and the selected units attack move round it, fighting whatever they run into, then stay and guard the whole circle. Roll the mouse wheel before you click to size the circle."
+GUI:SelectionTypeDescription
+"Click to keep only these selected. Shift-click to take them out of the selection."
 END
 
 GUI:OrderStanceDefensive
@@ -758,39 +754,23 @@ GUI:Bloom0
 END
 
 GUI:Bloom1
-"Subtle"
+"Low"
 END
 
 GUI:Bloom2
-"Normal"
+"Medium"
 END
 
 GUI:Bloom3
-"Strong"
+"High"
+END
+
+GUI:Bloom4
+"Ultra"
 END
 
 TOOLTIP:Bloom
-"How far bright surfaces bleed light into what is around them. Retail had none of this, so Off is what the artwork was painted for."
-END
-
-GUI:BloomThreshold
-"What Glows"
-END
-
-GUI:BloomThreshold0
-"Only the brightest"
-END
-
-GUI:BloomThreshold1
-"Bright things"
-END
-
-GUI:BloomThreshold2
-"Most of the picture"
-END
-
-TOOLTIP:BloomThreshold
-"How much of the screen is bright enough to glow at all. Only the brightest keeps it to muzzle flashes and lamps; most of the picture puts a haze over the whole battlefield."
+"How hard fire, explosions, muzzle flashes and lasers burn and how far their light spills over what is around them. Buildings, the sky, snow and sand never glow. Off is the look the artwork was painted for. The Direct3D 9 renderer gets a softer version, and under Classic Graphics only the laser halos follow it."
 END
 
 GUI:VSync
@@ -1332,6 +1312,14 @@ END
 
 GUI:PeaceTimeHudLabel
 "PEACE"
+END
+
+GUI:WireframeNotice
+"Reforged HUD: early preview"
+END
+
+GUI:WireframeNotice2
+"Final artwork is on the way"
 END
 
 GUI:LobbyTabChat

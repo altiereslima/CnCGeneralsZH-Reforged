@@ -92,6 +92,7 @@
 #include "GameClient/DisplayStringManager.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Damage.h"
+#include "GameLogic/Module/FireWeaponWhenDeadBehavior.h"
 #include "GameLogic/Module/MaxHealthUpgrade.h"
 #include "GameLogic/Module/OverchargeBehavior.h"
 #include "GameLogic/Module/ProductionUpdate.h"
@@ -186,14 +187,48 @@ static void findUpgradeEffects( const ThingTemplate *thing, UpgradeEffects &effe
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The bomb `thing` sets off when it kills itself: the largest death weapon of a FireWeaponWhenDead
+	* module that is on from the start and fires on a SUICIDED death.  The Terrorist, and a bike with one
+	* riding it, shoot TerroristSuicideWeapon, 999999 damage that reaches nobody but the shooter, so that
+	* his death fires the real bomb. */
+// ponytail: a bomb an upgrade swaps in (Demo's fire pack, Anthrax Beta and Gamma) is not read; the object's live modules would have it
+//-------------------------------------------------------------------------------------------------
+static const WeaponTemplate *suicideBomb( const ThingTemplate *thing )
+{
+	const WeaponTemplate *best = NULL;
+	const ModuleInfo &modules = thing->getBehaviorModuleInfo();
+	for( Int m = 0; m < modules.getCount(); ++m )
+	{
+		if( modules.getNthName( m ).compareNoCase( "FireWeaponWhenDeadBehavior" ) != 0 )
+			continue;
+		const FireWeaponWhenDeadBehaviorModuleData *data = static_cast< const FireWeaponWhenDeadBehaviorModuleData * >( modules.getNthData( m ) );
+		if( !data->m_initiallyActive || !data->m_upgradeMuxData.m_activationUpgradeNames.empty() || data->m_deathWeapon == NULL
+				|| !getDeathTypeFlag( data->m_dieMuxData.m_deathTypes, DEATH_SUICIDED ) )
+			continue;
+		const WeaponBonus none;
+		if( best == NULL || data->m_deathWeapon->getPrimaryDamage( none ) > best->getPrimaryDamage( none ) )
+			best = data->m_deathWeapon;
+	}
+	return best;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** A clip fires its shots a delay apart and then reloads in place of the last delay.  A weapon that
 	* does no damage, the dummies that hold a slot until an upgrade fills it, is none, and so is one
 	* that heals, clears or unloads: a dozer's mine disarming "weapon" does 1 damage at a range of 5
-	* so that it can be aimed, and an Ambulance's cleanup is the same. */
+	* so that it can be aimed, and an Ambulance's cleanup is the same.  A weapon that reaches nobody but
+	* its user stands for the bomb his death fires, and one whose blast kills its user goes off once,
+	* so it has no rate and no damage a second. */
 //-------------------------------------------------------------------------------------------------
-WeaponFigures ControlBarWeaponFigures( const WeaponTemplate *weapon, const WeaponBonus &bonus )
+WeaponFigures ControlBarWeaponFigures( const ThingTemplate *thing, const WeaponTemplate *weapon, const WeaponBonus &bonus )
 {
 	WeaponFigures figure = {};
+	if( ( weapon->getAffectsMask() & ( WEAPON_AFFECTS_ALLIES | WEAPON_AFFECTS_ENEMIES | WEAPON_AFFECTS_NEUTRALS ) ) == 0 )
+	{
+		weapon = suicideBomb( thing );
+		if( weapon == NULL )
+			return figure;
+	}
 	const DamageType type = weapon->getDamageType();
 	if( type == DAMAGE_HEALING || type == DAMAGE_DISARM || type == DAMAGE_HAZARD_CLEANUP || type == DAMAGE_DEPLOY
 			|| !IsHealthDamagingDamage( type ) )
@@ -210,7 +245,7 @@ WeaponFigures ControlBarWeaponFigures( const WeaponTemplate *weapon, const Weapo
 	figure.weapon = weapon;
 	figure.damage = damage;
 	figure.range = weapon->getAttackRange( bonus );
-	figure.attacksPerSecond = ( clip > 0 ? clip : 1 ) * LOGICFRAMES_PER_SECOND / cycle;
+	figure.attacksPerSecond = weapon->getAffectsMask() & WEAPON_KILLS_SELF ? 0.0f : ( clip > 0 ? clip : 1 ) * LOGICFRAMES_PER_SECOND / cycle;
 	return figure;
 }
 
@@ -235,7 +270,7 @@ void ControlBarTemplateWeaponFigures( const ThingTemplate *thing, const WeaponSe
 		TheGlobalData->m_weaponBonusSet->appendBonuses( bonusFlags, bonus );
 		if( weapon->getExtraBonus() )
 			weapon->getExtraBonus()->appendBonuses( bonusFlags, bonus );
-		figures.slots[ slot ] = ControlBarWeaponFigures( weapon, bonus );
+		figures.slots[ slot ] = ControlBarWeaponFigures( thing, weapon, bonus );
 	}
 }
 

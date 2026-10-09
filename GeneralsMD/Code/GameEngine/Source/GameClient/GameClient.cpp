@@ -934,6 +934,15 @@ void GameClient::update( void )
 			Int64 drawStart, drawEnd;
 			drawStart = Clock_Ticks();
 #endif
+			/* -directorrecord's panes: every pane past the first is drawn first, for the recording only
+				 and never presented, then the frame everybody sees.  W3D's clock stands still for every
+				 draw after the first on one client frame, so nothing animates twice. */
+			for( Int pane = 1; pane < TheObserverCamera.getDrawnPaneCount(); pane++ )
+			{
+				TheObserverCamera.beginPanePass( pane );
+				TheDisplay->DRAW();
+				TheObserverCamera.endPanePass();
+			}
 			TheDisplay->DRAW();
 #ifdef DEBUG_LOGGING
 			drawEnd = Clock_Ticks();

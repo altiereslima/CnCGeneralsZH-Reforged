@@ -593,6 +593,13 @@ void ControlBarScheme::init(void)
 			win->winSetPosition( ( TheDisplay->getWidth() - w ) / 2,
 													 REAL_TO_INT_FLOOR( GEN_EXP_DESIGN_TOP * s ) );
 		}
+		else if( TheGlobalData->isClassicUI() )
+		{
+			// the shipped painting at its shipped size, in the middle of the screen
+			Int w = 0, h = 0;
+			win->winGetSize( &w, &h );
+			win->winSetPosition( ( (Int)TheDisplay->getWidth() - w ) / 2, ( (Int)TheDisplay->getHeight() - h ) / 2 );
+		}
 	}
 
 	//
@@ -959,6 +966,8 @@ void ControlBarSchemeManager::init( void )
 	// Read from INI all the ControlBarSchemes
 	ini.load( AsciiString( "Data\\INI\\Default\\ControlBarScheme.ini" ), INI_LOAD_OVERWRITE, NULL );
 	ini.load( AsciiString( "Data\\INI\\ControlBarScheme.ini" ), INI_LOAD_OVERWRITE, NULL );
+	// the fork's edits to EA's schemes, each block naming only what it changes
+	ini.load( AsciiString( "Data\\INI\\ControlBarSchemeReforged.ini" ), INI_LOAD_MULTIFILE, NULL );
 
 //	//Load the user modified control bar schemes
 //	WIN32_FIND_DATA findData;

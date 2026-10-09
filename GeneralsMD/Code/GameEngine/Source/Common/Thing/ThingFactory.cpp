@@ -394,11 +394,17 @@ AsciiString TheThingTemplateBeingParsedName;
 	ThingTemplate *thingTemplate = TheThingFactory->findTemplateInternal( name, FALSE );
 	if( !thingTemplate && ini->getLoadType() == INI_LOAD_MULTIFILE && reskinFrom.isEmpty() )
 	{
-		// a patch names an object EA's files built; a name that finds nothing is a typo, and a new
-		// template made from it would change no unit and still land in the INI CRC.  An ObjectReskin
-		// is the exception: it is new by design and names its original, which has to exist.
-		DEBUG_CRASH(( "[LINE: %d in '%s'] %s patches an object that does not exist", ini->getLineNum(), ini->getFilename().str(), name.str() ));
-		throw INI_INVALID_DATA;
+		/* A patch names an object EA's files built, and a new template made from a name that finds
+			 nothing would change no unit.  The name is missing when a mod's archives replaced EA's object
+			 files, and BalanceReforged.ini's price for Nuke_ChinaGattlingCannon stopped the game at start
+			 on an install carrying AlternateINI's archives.  The block is read into a
+			 template that is thrown away, so the parse stays in step and the rest of the file still applies.
+			 An ObjectReskin is new by design and still names an original that has to exist. */
+		DEBUG_LOG(( "[LINE: %d in '%s'] %s patches an object that does not exist; the block is skipped.\n", ini->getLineNum(), ini->getFilename().str(), name.str() ));
+		ThingTemplate *scratch = newInstance(ThingTemplate);
+		ini->initFromINI( scratch, scratch->getFieldParse() );
+		scratch->deleteInstance();
+		return;
 	}
 	else if( !thingTemplate )
 	{

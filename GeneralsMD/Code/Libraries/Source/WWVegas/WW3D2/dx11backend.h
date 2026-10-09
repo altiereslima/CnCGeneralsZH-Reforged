@@ -233,6 +233,27 @@ public:
 	// the smoke billboards' runs.  An unlit draw with a normal takes it; any other ignores it.
 	void Set_Smoke_Glow(bool glow);
 
+	// What an additive draw (ONE, ONE) into the scene is worth, for the Glow option: the blend
+	// takes the draw's colour times this through the blend factor, so fire, muzzle flashes and
+	// laser cores pass white in the half float scene and the bloom's bright pass finds them, where
+	// LDR art on its own never gets there.  One is off.  Only the scene target takes it: the
+	// runtime sets it while the scene goes into the post chain's float texture and puts it back to
+	// one when the frame goes to the screen, and a draw into a render target of its own (the
+	// water's reflection), a screen space draw and any other blend keep their colour.
+	void Set_Additive_Gain(float gain);
+	float Additive_Gain() const { return AdditiveGain; }
+
+	// Whether the draws that follow opted into that gain (ShaderClass::GLOW_ENABLE, sent by
+	// ShaderClass::Apply).  Additive water, waypoint lines, decals and heat vision are ONE, ONE as
+	// well and stay as they were painted.
+	void Set_Glow_Draw(bool glow) { GlowDraw = glow; }
+
+	// The texture the engine draws the scene into for its screen filters (W3DShaderManager's render
+	// texture).  Here the scene stays in the scene target, where the gain and the bloom work: a
+	// redirect into this texture's 8-bit twin would clip every fire at white.  A draw that samples
+	// the view samples a copy of the scene instead (Readable_Texture).  NULL when there is none.
+	void Set_Scene_Stand_In(ID3D11ShaderResourceView * view) { SceneStandIn = view; }
+
 	// What is in the map, read back through a staging copy: how much of it was drawn into and how
 	// near the nearest thing is.  A caster pass that drew nothing leaves a map that is all one
 	// value, and no draw count tells that apart from a pass that drew the world.
@@ -403,7 +424,7 @@ private:
 	void Bind_State_Objects();
 	void Release_Cached();
 
-	ID3D11BlendState * Blend_State();
+	ID3D11BlendState * Blend_State(bool glow);
 	ID3D11DepthStencilState * Depth_Stencil_State();
 	ID3D11RasterizerState * Rasterizer_State();
 	ID3D11SamplerState * Sampler_State(unsigned sampler);
@@ -473,6 +494,10 @@ private:
 	bool Camera_Space_Draw() const;
 	bool SmokeGlow;
 	bool Smoke_Glow() const;
+	float AdditiveGain;
+	bool GlowDraw;
+	bool Additive_Glow() const;
+	ID3D11ShaderResourceView * SceneStandIn;
 	// A stage samples the target the draw is going into: the heat haze, which bends a picture that
 	// already took its shadows, and would take them a second time.
 	bool Samples_Current_Target() const;
@@ -758,6 +783,7 @@ private:
 	// build would find and the draw skips building and comparing them.
 	D3D11_BLEND_DESC LastBlendDescription;
 	ID3D11BlendState * LastBlendState;
+	bool LastBlendGlow;
 	D3D11_DEPTH_STENCIL_DESC LastDepthStencilDescription;
 	ID3D11DepthStencilState * LastDepthStencilState;
 	D3D11_RASTERIZER_DESC LastRasterizerDescription;

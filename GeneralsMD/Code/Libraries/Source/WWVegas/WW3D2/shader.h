@@ -73,7 +73,8 @@ enum ShaderShiftConstants
 	SHIFT_ALPHATEST				= 18,	// bit shift for alpha test setting
 	SHIFT_CULLMODE					= 19,	// bit shift for cullmode setting
 	SHIFT_POSTDETAILCOLORFUNC	= 20,	// bit shift for post-detail color function setting
-	SHIFT_POSTDETAILALPHAFUNC	= 24	// bit shift for post-detail alpha function setting
+	SHIFT_POSTDETAILALPHAFUNC	= 24,	// bit shift for post-detail alpha function setting
+	SHIFT_GLOW						= 27	// bit shift for the Glow option's opt-in (1 bit)
 };
 
 #define SHADE_CNST(depth_compare, depth_mask, color_mask, src_blend, dst_blend, fog, pri_grad, sec_grad, texture, alpha_test, cullmode, post_det_color, post_det_alpha) \
@@ -170,6 +171,16 @@ public:
 		NPATCH_TYPE_MAX
 	};
 
+	/** Whether an additive draw is a light the Glow option brightens: fire, explosions, muzzle
+		flashes, laser beams.  Only the Direct3D 11 frame reads it (DX11BackendClass::Additive_Glow);
+		water, waypoint lines, decals and heat vision are additive too and leave it off. */
+	enum GlowType
+	{
+		GLOW_DISABLE=0,
+		GLOW_ENABLE,
+		GLOW_MAX
+	};
+
   	enum DstBlendFuncType
   	{
   		DSTBLEND_ZERO=0,					// destination pixel doesn't affect blending (default)
@@ -248,7 +259,8 @@ public:
 		MASK_ALPHATEST				= (1<<18),			// mask for alpha test enable
 		MASK_CULLMODE				= (1<<19),			// mask for cullmode setting
 		MASK_POSTDETAILCOLORFUNC= (15<<20),			// mask for post detail color function setting
-		MASK_POSTDETAILALPHAFUNC= (7<<24)			// mask for post detail alpha function setting
+		MASK_POSTDETAILALPHAFUNC= (7<<24),			// mask for post detail alpha function setting
+		MASK_GLOW					= (1<<27)			// mask for the Glow option's opt-in
 	};
 
 	ShaderClass(void)
@@ -322,6 +334,7 @@ public:
 	inline SrcBlendFuncType		Get_Src_Blend_Func(void) const							{ return (SrcBlendFuncType)((ShaderBits&MASK_SRCBLEND)>>SHIFT_SRCBLEND); }
 	inline TexturingType			Get_Texturing(void) const									{ return (TexturingType)((ShaderBits&MASK_TEXTURING)>>SHIFT_TEXTURING); }
 	inline NPatchEnableType		Get_NPatch_Enable(void) const								{ return (NPatchEnableType)((ShaderBits&MASK_NPATCHENABLE)>>SHIFT_NPATCHENABLE); }
+	inline GlowType				Get_Glow(void) const											{ return (GlowType)((ShaderBits&MASK_GLOW)>>SHIFT_GLOW); }
 
 	inline	void	Set_Depth_Compare(DepthCompareType x)					{ ShaderBits&=~MASK_DEPTHCOMPARE;ShaderBits|=(x<<SHIFT_DEPTHCOMPARE);	}
 	inline	void	Set_Depth_Mask(DepthMaskType x)							{ ShaderBits&=~MASK_DEPTHMASK; ShaderBits|=(x<<SHIFT_DEPTHMASK);	}
@@ -337,6 +350,7 @@ public:
 	inline	void	Set_Src_Blend_Func(SrcBlendFuncType x)					{ ShaderBits&=~MASK_SRCBLEND;ShaderBits|=(x<<SHIFT_SRCBLEND);		}
 	inline	void	Set_Texturing(TexturingType x)							{ ShaderBits&=~MASK_TEXTURING; ShaderBits|=(x<<SHIFT_TEXTURING);	}
 	inline	void	Set_NPatch_Enable(NPatchEnableType x)					{ ShaderBits&=~MASK_NPATCHENABLE; ShaderBits|=(x<<SHIFT_NPATCHENABLE);	}
+	inline	void	Set_Glow(GlowType x)											{ ShaderBits&=~MASK_GLOW; ShaderBits|=(x<<SHIFT_GLOW);	}
 
 	void	Init_From_Material3(const W3dMaterial3Struct & mat3);
 	void	Enable_Fog (const char *source);

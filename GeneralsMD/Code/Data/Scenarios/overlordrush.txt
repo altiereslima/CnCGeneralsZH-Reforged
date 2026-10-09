@@ -1,0 +1,47 @@
+# Overlord rush: a player who builds nothing but Overlords, against a Hard AI playing a whole game.
+#
+# The owner's complaint, staged: a player with ten Overlords walks into a Hard AI and wins, because the
+# AI never answers an army made of one unit. Seat 0 is driverless (-takeover 0) and gets its Overlords
+# from this file, a few at a time beside its own base, where they stay and guard it the way a player's
+# would until there are ten; then all of them go at the AI's start together, and the ones built after
+# follow in groups. Seat 1 is a Hard AI that builds, scouts and attacks as in any match. The AI wins by
+# taking seat 0's base, which it only reaches by beating the Overlords and the tanks left at home.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Winter Wolf\Winter Wolf.map" -autoskirmish 2 -takeover 0 -aidiff hard
+#     -side 0 FactionChina -side 1 FactionAmerica -seed 1 -maxframes 36000
+#     -scenario overlordrush -logPrefix orush_
+#
+# or through the batch: .\ai-batch.ps1 -Scenario overlordrush -Takeover 0 -Map "Winter Wolf"
+#   -Sides FactionChina,FactionGLA -MaxFrames 36000
+#
+# HEADLESS VALUE says what each side's units cost and what they killed; AI ENGAGE and AI LOSS lines
+# say what the AI sent and what died alone. Twenty Overlords by frame 12000, ten more at 18000 and ten
+# at 24000: 80,000 of army, and ten tanks at home worth 8,000.
+#
+# The AI wins this every time, and the file is kept for what the AI pays to win it, not whether it
+# does. On 2026-10-09, two seeds a faction on Winter Wolf and Tournament Desert, the Hard AI before the
+# fight-choosing changes won 12 of 12 at every size tried: batches of 5, 7, 9 and 11 sent 4000 frames
+# apart, a fist of 10 then two of 6, a fist of 16 then two of 8, and this one. Its base defences
+# stop an attack-move on its start, which no player would make twice. Here it lost 0.49 to 0.75 of
+# what it killed, and 13 to 27% of its team deaths were units dying away from a team still alive.
+
+# a few tanks at home, so the AI has to beat the Overlords to win rather than walk round them
+30     spawn       0  ChinaTankBattleMaster  6  start0:0:200  50
+30     spawn       0  ChinaTankGattling      4  start0:0:200  50
+
+# the fist, built at home
+3000   spawn       0  ChinaTankOverlord   4  start0:0:260  60
+6000   spawn       0  ChinaTankOverlord   5  start0:0:260  60
+9000   spawn       0  ChinaTankOverlord   5  start0:0:260  60
+12000  spawn       0  ChinaTankOverlord   6  start0:0:260  60
+12030  attackmove  0  ChinaTankOverlord      start1
+
+18000  spawn       0  ChinaTankOverlord  10  start0:0:260  60
+18030  attackmove  0  ChinaTankOverlord      start1
+
+24000  spawn       0  ChinaTankOverlord  10  start0:0:260  60
+24030  attackmove  0  ChinaTankOverlord      start1
+
+# survivors sitting in the ruins of the AI's base go on to whatever is left of it
+30000  attackmove  0  ChinaTankOverlord      start1

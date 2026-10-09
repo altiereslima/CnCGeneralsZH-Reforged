@@ -1,6 +1,7 @@
-# Missile defence, four fights at once, far enough apart not to meet: two King Raptors flying seven
-# passes over a Stinger Site, an Avenger under five Tank Hunters, a Paladin under four Rocket Buggies
-# and a Paladin rushed by six Terrorists.
+# Missile defence, five fights at once, far enough apart not to meet: two King Raptors flying seven
+# passes over a Stinger Site, an Avenger under five Tank Hunters, a Paladin under four Rocket Buggies,
+# a Paladin rushed by six Terrorists and an Air Force Chinook on the ground under three Tunnel
+# Defenders.
 #
 #   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
 #     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
@@ -39,8 +40,16 @@
 # and 258; Paladin under buggies 4 and 4, dead on 381 and 376; Paladin under Terrorists dead on 386
 # and 396, one Terrorist killed by the Paladin on frame 337 of seed 8.
 #
-# Worth filming: flares come off a Raptor and Stingers turn onto them around 2620,3005 at about 95
-# high on frames 250 to 256 (seed 7); the Avenger at 2195,3906 bursts Tank Hunter missiles about 90
+# 2026-10-07 the flares went and the aircraft took EA's lasers back, with no clip; every point
+# defense laser plays FX_PointDefenseLaserBurst where it hits, and the Paladin's infantry laser moved
+# from AirF_RaptorPointDefenseLaser to WatchTowerMachineGun. A Chinook on the ground under three
+# Tunnel Defenders joined the file. Seeds 7 and 8, counted with a temporary log of every shot: the
+# King Raptors shot down 52 and 54 Stingers (each fires both its lasers) and ended on 360 and 390 of
+# 480; the Avenger shot down 8 and 8, dead on 258 and 258; the Paladin under buggies 4 and 3, dead on
+# 382 and 376; the Paladin under Terrorists dead on 419 and 395, one Terrorist killed each time; the
+# Chinook shot down 221 rockets and died on frame 2291 both times.
+#
+# Worth filming: the Avenger at 2195,3906 bursts Tank Hunter missiles about 90
 # north of it on frames 150 to 190, and the Paladin at 3300,3800 a buggy rocket 60 north on 146.
 
 30    spawn      1  GLAStingerSite                1   2600 3000
@@ -66,6 +75,10 @@
 30    spawn      1  GLAInfantryTerrorist          6   1100 3950  18
 60    attackmove 1  GLAInfantryTerrorist              1100 3700
 
+30    spawn      0  AirF_AmericaVehicleChinook    1   2200 2300
+30    spawn      1  GLAInfantryTunnelDefender     3   2200 2500  18
+60    attack     1  GLAInfantryTunnelDefender     0  AirF_AmericaVehicleChinook
+
 60    tally      0  AirF_AmericaJetRaptor
 60    tally      0  AmericaTankAvenger
 60    tally      0  AmericaTankPaladin
@@ -88,3 +101,6 @@
 2350  tally      1  GLAInfantryTerrorist
 2350  tally      1  ChinaInfantryTankHunter
 2350  tally      1  GLAStingerSite
+600   tally      0  AirF_AmericaVehicleChinook
+2350  tally      0  AirF_AmericaVehicleChinook
+2350  tally      1  GLAInfantryTunnelDefender

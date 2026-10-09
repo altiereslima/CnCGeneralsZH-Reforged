@@ -75,6 +75,8 @@ void Direct3D11_Clear_Shadow_Parameters() {}
 bool Direct3D11_Fill_Smoke_Map(const float *, unsigned, float) { return false; }
 void Direct3D11_Set_Scene_View(const float [16]) {}
 void Direct3D11_Set_Smoke_Glow(bool) {}
+void Direct3D11_Set_Glow_Draw(bool) {}
+void Direct3D11_Set_Scene_Stand_In(struct IDirect3DBaseTexture9 *, struct IDirect3DSurface9 *) {}
 
 void Direct3D11_Mark_Surface_Dirty(struct IDirect3DSurface9 *) {}
 void Direct3D11_Mirror_Render_Target(struct IDirect3DSurface9 *) {}
@@ -106,6 +108,17 @@ unsigned char * Direct3D11_Capture_Back_Buffer(unsigned & width, unsigned & heig
 	return NULL;
 }
 void Direct3D11_Release_Capture(unsigned char * pixels) { delete [] pixels; }
+
+bool Direct3D11_Queue_Frame_Copy(unsigned) { return false; }
+const unsigned char * Direct3D11_Map_Frame_Copy(unsigned, unsigned & width, unsigned & height, unsigned & pitch)
+{
+	width = 0;
+	height = 0;
+	pitch = 0;
+	return NULL;
+}
+void Direct3D11_Unmap_Frame_Copy(unsigned) {}
+void Direct3D11_Release_Frame_Copies() {}
 
 void Direct3D11_Mirror_Stream_Source(DX11BufferTwinClass *, unsigned, unsigned) {}
 void Direct3D11_Mirror_Indices(DX11BufferTwinClass *) {}

@@ -128,13 +128,12 @@ extern unsigned msaaSamplesForLevel( Int level );
 extern Int msaaLevelForSamples( unsigned samples );
 
 //-----------------------------------------------------------------------------
-// Bloom is two percentages the shader wants and neither of them is a question a player can answer.
-// "Bloom = 60" is a strength somebody has to find by experiment, and "BloomThreshold = 65" is worse:
-// it is a brightness, it runs backwards - lower means more of the screen glows - and nothing on the
-// screen tells you which way to push it.  So Options.ini stores a level, the menu offers those
-// levels by name, and the percentages the levels stand for are in OptionsCatalog.cpp.
-enum { BLOOM_LEVEL_COUNT = 4 };						///< off, subtle, normal, strong
-enum { BLOOM_THRESHOLD_LEVEL_COUNT = 3 };	///< only the brightest, bright things, most of the picture
+// Glow (the Bloom key) is a strength in percent the renderer wants, and "Bloom = 60" is not a
+// question a player can answer.  So Options.ini stores a level, the menu offers those levels by
+// name, and the percentage each level stands for is in OptionsCatalog.cpp.  What glows is not a
+// setting: fire, explosions, muzzle flashes and lasers do and the painted world does not, at every
+// level (W3DShaderManager.cpp, glowTuning).
+enum { BLOOM_LEVEL_COUNT = 5 };						///< off, low, medium, high, ultra
 
 // Texture filtering is a mode too - bilinear, trilinear, anisotropic - and the combo box offers it
 // by those names.  The number in Options.ini is the same 0..2 it was when the key had no control.

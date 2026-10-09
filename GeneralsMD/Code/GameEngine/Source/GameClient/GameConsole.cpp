@@ -38,6 +38,7 @@
 #include "GameLogic/GameLogic.h"
 #include "GameNetwork/GameSpy/ThreadUtils.h"
 
+#include "GameClient/CinemaDirector.h"
 #include "GameClient/Color.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/ControlBarScheme.h"
@@ -47,6 +48,8 @@
 #include "GameClient/GameFont.h"
 #include "GameClient/Gadget.h"
 #include "GameClient/GadgetListBox.h"
+#include "GameClient/GUICallbacks.h"
+#include "GameClient/InGameUI.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/WindowLayout.h"
 #include "Common/GlobalData.h"
@@ -57,6 +60,7 @@
 #include "GameClient/KeyDefs.h"
 #include "GameClient/Keyboard.h"
 #include "GameClient/Mouse.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameClient/View.h"
 
 GameConsole *TheGameConsole = NULL;
@@ -263,6 +267,88 @@ static AsciiString describeFreeCameraPose( void )
 	TheTacticalView->getFreeCameraPose( &eye, &heading, &tilt );
 	AsciiString result;
 	result.format( "%.0f %.0f %.0f %.1f %.1f", eye.x, eye.y, eye.z, heading * 180.0f / PI, tilt * 180.0f / PI );
+	return result;
+}
+
+/** The observer's director camera, for the Classic interface that has no spectator page to pick it
+	* from: 'director' hands the camera to it, again gives it back. */
+static AsciiString runDirector( void )
+{
+	AsciiString result;
+	const Player *local = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
+	if( !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() || local == NULL || local->isPlayerActive() )
+	{
+		result = "director: for an observer or a replay only";
+		return result;
+	}
+
+	const Bool on = TheObserverCamera.getMode() != OBSERVER_CAMERA_DIRECTOR;
+	TheObserverCamera.setMode( on ? OBSERVER_CAMERA_DIRECTOR : OBSERVER_CAMERA_FREE );
+	result = on ? "director camera on; scrolling takes the camera back, 'director' again hands it over" : "director camera off";
+	return result;
+}
+
+/** 'hidehud' toggles the interface; 'hidehud showmap=true' (or 'showmap true', or 'showmap') hides it
+	* with the radar left in the bottom left corner, and 'showmap=false' is the plain hide. */
+static AsciiString runHideHud( AsciiString arguments )
+{
+	AsciiString result;
+	if( !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+	{
+		result = "hidehud: in a match or a replay only";
+		return result;
+	}
+
+	Bool showMap = FALSE;
+	if( !arguments.isEmpty() )
+	{
+		char text[ 64 ];
+		strncpy( text, arguments.str(), sizeof( text ) - 1 );
+		text[ sizeof( text ) - 1 ] = '\0';
+		for( char *c = text; *c; ++c )
+			if( *c == '=' )
+				*c = ' ';
+
+		char name[ 16 ], value[ 16 ] = "true";
+		const Int given = sscanf( text, "%15s %15s", name, value );
+		const AsciiString word( value );
+		const Bool isTrue = word.compareNoCase( "true" ) == 0 || word.compareNoCase( "1" ) == 0;
+		const Bool isFalse = word.compareNoCase( "false" ) == 0 || word.compareNoCase( "0" ) == 0;
+		if( given < 1 || AsciiString( name ).compareNoCase( "showmap" ) != 0 || !( isTrue || isFalse ) )
+		{
+			result = "hidehud: takes nothing, or showmap=true to keep the radar in the bottom left corner";
+			return result;
+		}
+		showMap = isTrue;
+	}
+
+	// with an argument it hides (again) with that setting, bare it toggles
+	const Bool hide = arguments.isEmpty() ? !CinemaDirector_isHudHidden() : TRUE;
+	CinemaDirector_setHudHidden( hide, showMap );
+	result = hide ? "hud hidden; 'hidehud' again brings it back" : "hud shown";
+	return result;
+}
+
+/** 'pause' opens the Esc menu, which stops the game, and 'resume' closes it again.  Not in a LAN or
+	* internet game, where the Esc menu stops nothing. */
+static AsciiString runPause( Bool pause )
+{
+	AsciiString result;
+	const char *name = pause ? "pause" : "resume";
+	if( !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() || TheGameLogic->isInMultiplayerGame() )
+	{
+		result.format( "%s: in a single player match or a replay only", name );
+		return result;
+	}
+
+	if( TheInGameUI->isQuitMenuVisible() == pause )
+	{
+		result.format( "%s: already %s", name, pause ? "paused" : "running" );
+		return result;
+	}
+
+	ToggleQuitMenu();
+	result = pause ? "paused; 'resume' closes the menu" : "resumed";
 	return result;
 }
 
@@ -490,6 +576,9 @@ void GameConsole::runCommand( AsciiString commandLine )
 		printLine( AsciiString( "              W/S forward and back, A/D left and right, R up, F down, mouse turns," ) );
 		printLine( AsciiString( "              Shift faster; Esc or 'freecam' again lands.  'freecam x y z heading tilt'" ) );
 		printLine( AsciiString( "              flies to a pose, angles in degrees" ) );
+		printLine( AsciiString( "director      observer: the director camera on, again gives the camera back" ) );
+		printLine( AsciiString( "pause, resume open and close the Esc menu, single player only" ) );
+		printLine( AsciiString( "hidehud       the interface off, again brings it back; showmap=true keeps the radar" ) );
 		if( areCheatsAvailable() )
 		{
 			printLine( AsciiString( "cheats        single-player cheats" ) );
@@ -550,6 +639,27 @@ void GameConsole::runCommand( AsciiString commandLine )
 		// out of the way of the picture, and of the keys the camera now takes
 		if( TheTacticalView && TheTacticalView->isFreeCamera() )
 			close();
+		return;
+	}
+
+	if( command == "pause" || command == "resume" )
+	{
+		printLine( runPause( command == "pause" ) );
+		// out of the way of the menu it opens
+		if( TheInGameUI->isQuitMenuVisible() )
+			close();
+		return;
+	}
+
+	if( command == "director" )
+	{
+		printLine( runDirector() );
+		return;
+	}
+
+	if( command == "hidehud" )
+	{
+		printLine( runHideHud( arguments ) );
 		return;
 	}
 

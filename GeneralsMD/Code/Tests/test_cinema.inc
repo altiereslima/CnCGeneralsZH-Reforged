@@ -48,6 +48,10 @@ TEST(cinema_parses_a_route_follow_and_switches)
 	CHECK_EQ( (Int)shot.verb, (Int)CINEMA_VERB_HUD );
 	CHECK( shot.on );
 
+	CHECK( CinemaDirector_parseLine( "4 filter blur", &shot, &isShot, &reason ) );
+	CHECK_EQ( (Int)shot.verb, (Int)CINEMA_VERB_FILTER );
+	CHECK_STR( shot.name.str(), "blur" );
+
 	CHECK( CinemaDirector_parseLine( "   # only a comment", &shot, &isShot, &reason ) );
 	CHECK( !isShot );
 }
@@ -66,6 +70,7 @@ TEST(cinema_refuses_what_it_cannot_read)
 	CHECK( !CinemaDirector_parseLine( "3 pitch 50 2", &shot, &isShot, &reason ) );
 	CHECK( !CinemaDirector_parseLine( "3 route 5 100", &shot, &isShot, &reason ) );
 	CHECK( !CinemaDirector_parseLine( "3 hud maybe", &shot, &isShot, &reason ) );
+	CHECK( !CinemaDirector_parseLine( "3 filter sepia", &shot, &isShot, &reason ) );
 	CHECK( !CinemaDirector_parseLine( "3 dolly 1 2", &shot, &isShot, &reason ) );
 	CHECK( !CinemaDirector_parseLine( "-1 shot", &shot, &isShot, &reason ) );
 }

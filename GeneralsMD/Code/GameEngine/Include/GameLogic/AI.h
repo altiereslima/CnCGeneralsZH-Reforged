@@ -209,6 +209,11 @@ struct AIDifficultyProfile
 
 	// Fighting: decisions only, from what it knows can shoot where
 	Bool	m_tacticalMicro;								///< kite what it outranges, take the high ground, pull hurt units out
+
+	// Choosing fights: what it remembers of the enemy army, not only what is in sight
+	Bool	m_engageGate;										///< weigh a fight by unit against unit, not money alone; nothing leaves home on its own
+	Bool	m_answerArmy;										///< remember the enemy army it has seen, and train the answer to the biggest part of it
+	Bool	m_massUnit;											///< pick one unit the enemy has no answer to, build a fist of it and hit with it
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -291,6 +296,12 @@ Real aiFramesToKill( Real targetHealth, const AIShotPattern &shots );
 	* faster for its price (or cannot be hurt back), 0 when it cannot hurt the other side. */
 Real aiMatchupScore( Real myFramesToKill, Real theirFramesToKill, Real myCost, Real theirCost );
 
+/** How one army's mix trades against another's, money for money: 1 an even trade, above 1 when my
+	* money kills theirs faster than theirs kills mine, clamped to 1/16..16.  score holds myKinds rows of
+	* theirKinds entries, aiMatchupScore of my kind i against their kind j, and each side's values weigh
+	* its kinds.  Ten Overlords against ten Crusaders cost the same and are not the same fight. */
+Real aiArmyAdvantage( const Real *myValue, Int myKinds, const Real *theirValue, Int theirKinds, const Real *score );
+
 /** How the exchange is going, as the ratio of how long this force lasts to how long it needs to
 	* kill what is shooting at it.  Below 1 it is losing; below the rung's retreatTtkRatio it should
 	* break off.  This is Sins of a Solar Empire's aiRetreatThreshold, and it is the right metric
@@ -336,6 +347,30 @@ static const Int AI_TECH_BUILDING_COPIES = 3;
 
 /** Another of those, when fewer than AI_TECH_BUILDING_COPIES are standing and none is already on the way. */
 Bool aiWantsAnotherTechBuilding( Int standing, Int onTheWay );
+
+/** Base defences a Hard computer may stand: one per AI_ARMY_PER_DEFENSE fighting units, and however
+	* small the army, one more every AI_DEFENSE_PACE_SECONDS of the match until two superweapons' worth
+	* stand.  The army ration alone left a 1v1 base on two or three guns, short of the
+	* DEFENSES_PER_SUPERWEAPON a superweapon asks for.  At 30 seconds the clock allows the twelfth
+	* gun at six minutes, under the seven a Hard-against-Hard 1v1 lasts on average; 40 seconds and
+	* four units a gun, the first try, put a superweapon up on 5 of 96 Hard sides. */
+static const Int AI_ARMY_PER_DEFENSE = 3;
+static const Int AI_DEFENSE_PACE_SECONDS = 30;
+Int aiDefenseAllowance( Int army, UnsignedInt frame );
+
+/** Which of the base defences a dozer can build goes up next, as an index into the candidates: the
+	* one with the fewest standing, so a side's guns come as a mix rather than a row of whatever button
+	* sits first.  A defence with no gun or spawn of its own (an empty bunker, a speaker tower) counts
+	* AI_SUPPORT_DEFENSE_WEIGHT times what it has standing.  Ties go to an armed one, then to the first
+	* candidate.  -1 when there are none. */
+/** What one point of open ground inside a defence's reach is worth to the spot it is scored for:
+	* how much nearer the enemy it lies than the middle of the base does, in reaches, never below
+	* zero, plus a tenth for lying outside the base.  Ground behind the base counts only that tenth,
+	* so a spot at the back scores a fraction of one at the front, and none inside the base. */
+Real aiFireSampleWeight( Real baseToThreat, Real sampleToThreat, Real reach, Bool outsideBase );
+
+static const Int AI_SUPPORT_DEFENSE_WEIGHT = 3;
+Int aiPickBaseDefense( const Int *standing, const Bool *armed, Int count );
 
 /** How badly one place wants looking at, per step walked there.  A3's scouting is never a search -
 	* the start positions are public, the lobby shows them - so the question is not "where is he" but

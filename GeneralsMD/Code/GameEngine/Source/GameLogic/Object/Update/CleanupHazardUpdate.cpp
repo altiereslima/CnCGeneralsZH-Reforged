@@ -34,6 +34,7 @@
 
 #define DEFINE_WEAPONSLOTTYPE_NAMES
 
+#include "Common/Player.h"
 #include "Common/RandomValue.h"
 #include "Common/ThingTemplate.h"
 #include "Common/Xfer.h"
@@ -53,6 +54,9 @@
 //#pragma optimize("", off)
 //#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
 #endif
+
+/** Scans in a row an area cleaner stands out of reach of its hazard before it gives the area up. */
+static const Int MAX_CLEANUP_APPROACHES = 5;
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
@@ -88,6 +92,10 @@ CleanupHazardUpdate::CleanupHazardUpdate( Thing *thing, const ModuleData* module
 	m_weaponTemplate						= NULL;
 	m_moveRange									= 0.0f;
 	m_pos.zero();
+	m_resumeGuard								= FALSE;
+	m_resumeGuardMode						= GUARDMODE_NORMAL;
+	m_returning									= FALSE;
+	m_approaches								= 0;
 
 } 
 
@@ -152,6 +160,9 @@ UpdateSleepTime CleanupHazardUpdate::update()
 			{
 				//Either the player or a script gave a NEW order so abandon the cleanup area cause.
 				m_moveRange = 0.0f;
+				m_resumeGuard = FALSE;
+				m_returning = FALSE;
+				m_approaches = 0;
 				return UPDATE_SLEEP_NONE;
 			}
 		}
@@ -166,9 +177,32 @@ UpdateSleepTime CleanupHazardUpdate::update()
 	}
 	m_nextScanFrames = data->m_scanFrames;
 
+	if( m_moveRange == 0.0f )
+		startAutoCleanup();
+
 	//Periodic scanning (expensive)
-	if( scanClosestTarget() )
+	Object *found = scanClosestTarget();
+	if( found )
 	{
+		m_returning = FALSE;
+		// Cleaning an area: standing still out of the weapon's reach on a scan, scan after scan, is a hazard
+		// it cannot drive up to. It gives the area up rather than order the same drive for good.
+		// ponytail: it may notice the same hazard again from home and try once more, bounded by the
+		// hazard's own lifetime; a list of hazards given up on would end that
+		AIUpdateInterface *ai = obj->getAI();
+		WeaponBonus bonus;
+		bonus.clear();
+		if( m_moveRange > 0.0f && ai && (ai->isIdle() || ai->isBusy()) &&
+				ThePartitionManager->getDistanceSquared( obj, found, FROM_CENTER_2D ) > sqr( m_weaponTemplate->getAttackRange( bonus ) ) )
+		{
+			if( ++m_approaches > MAX_CLEANUP_APPROACHES )
+			{
+				finishArea( "gave up on a hazard it cannot reach", TRUE );
+				return UPDATE_SLEEP_NONE;
+			}
+		}
+		else
+			m_approaches = 0;
 		//1 frame can make a big difference so fire ASAP!
 		fireWhenReady();
 	}
@@ -180,15 +214,18 @@ UpdateSleepTime CleanupHazardUpdate::update()
 		if( ai && (ai->isIdle() || ai->isBusy()) )
 		{
 			Real fDist = sqrt( ThePartitionManager->getDistanceSquared( obj, &m_pos, FROM_CENTER_2D ) );
-			if( fDist < 25.0f )
+			// the walk back counts as done once it has stopped: a unit parked on the spot used to send it
+			// back there every second for good
+			if( fDist < 25.0f || m_returning )
 			{
 				//Abort clean area because there's nothing left to clean!
-				m_moveRange = 0.0f;
+				finishArea( "area clean", FALSE );
 			}
 			else
 			{
 				//Abort clean area AFTER we move back to our initial position!
 				ai->aiMoveToPosition( &m_pos, CMD_FROM_AI );
+				m_returning = TRUE;
 			}
 		}
 	}
@@ -254,7 +291,19 @@ void CleanupHazardUpdate::fireWhenReady()
 		AIUpdateInterface *ai = self->getAI();
 		if( ai )
 		{
-			if( ai->isIdle() || ai->isBusy() )
+			WeaponBonus bonus;
+			bonus.clear();
+			if( (ai->isIdle() || ai->isBusy()) && m_moveRange > 0.0f &&
+					ThePartitionManager->getDistanceSquared( self, target, FROM_CENTER_2D ) > sqr( m_weaponTemplate->getAttackRange( bonus ) ) )
+			{
+				// cleaning an area, with the hazard out of reach: drive up to it first, since the attack's own
+				// approach never moved the unit and it stood shooting at nothing until the area was given up.
+				// Out of the busy state first: an AI move given to a busy unit is only a temporary state laid
+				// over it, ordered again every frame, and the unit crept at a step a frame
+				ai->aiIdle( CMD_FROM_AI );
+				ai->aiMoveToPosition( target->getPosition(), CMD_FROM_AI );
+			}
+			else if( ai->isIdle() || ai->isBusy() )
 			{
 				// lock it just till the weapon is empty or the attack is "done"
 				self->setWeaponLock( data->m_weaponSlot, LOCKED_TEMPORARILY );
@@ -296,6 +345,71 @@ Object* CleanupHazardUpdate::scanClosestTarget()
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The area is done with: back on guard if a cleanup it started took it off guard, otherwise out of
+	the busy state the area kept it in, which has no way out of its own. Left busy, it never read as
+	idle again, so scripts waiting on it stalled and it never noticed another hazard. goHome walks it
+	back to where the area started, for an area given up away from there. */
+void CleanupHazardUpdate::finishArea( const char *why, Bool goHome )
+{
+	Object *obj = getObject();
+	AIUpdateInterface *ai = obj->getAI();
+	DEBUG_LOG(("CLEANUP frame %d '%s' %d %s%s\n", TheGameLogic->getFrame(), obj->getTemplate()->getName().str(), obj->getID(),
+		why, m_resumeGuard ? ", back on guard" : ""));
+	m_moveRange = 0.0f;
+	m_returning = FALSE;
+	m_approaches = 0;
+	if( m_resumeGuard )
+	{
+		m_resumeGuard = FALSE;
+		ai->aiGuardPosition( &m_pos, (GuardMode)m_resumeGuardMode, CMD_FROM_AI );
+	}
+	else if( goHome )
+		ai->aiMoveToPosition( &m_pos, CMD_FROM_AI );
+	else
+		ai->aiIdle( CMD_FROM_AI );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** How far past its own scan range a cleaner standing idle or on guard goes for a hazard by itself.
+	The scan range is the weapon's reach, so before this an Ambulance cleaned only what it was parked
+	on and watched a toxin field a truck's length away. With the Ambulance's 100 it notices up to 300,
+	the reach its cleanup ability is given around the point it is sent to. */
+static const Real AUTO_CLEANUP_MOVE_RANGE = 200.0f;
+
+/** Idle, or on a guard order, with a hazard in reach: clean the area round where it stands the way the
+	cleanup ability does, which brings it back here when nothing is left, and guard here again if it
+	was guarding. Any other order, the player's or a script's, is left alone, and one given while it is
+	cleaning ends the cleanup as it ends the ability's. */
+void CleanupHazardUpdate::startAutoCleanup()
+{
+	const CleanupHazardUpdateModuleData *data = getCleanupHazardUpdateModuleData();
+	Object *obj = getObject();
+	AIUpdateInterface *ai = obj->getAI();
+	if( !ai || obj->isContained() )
+		return;
+	const Bool guarding = ai->getCurrentStateID() == AI_GUARD;
+	if( !guarding && !ai->isIdle() )
+		return;
+
+	PartitionFilterAcceptByKindOf kindFilter(MAKE_KINDOF_MASK(KINDOF_CLEANUP_HAZARD), KINDOFMASK_NONE);
+	PartitionFilterSameMapStatus filterMapStatus(obj);
+	PartitionFilter* filters[] = { &kindFilter, &filterMapStatus, NULL };
+	if( !ThePartitionManager->getClosestObject( obj->getPosition(), data->m_scanRange + AUTO_CLEANUP_MOVE_RANGE, FROM_CENTER_2D, filters ) )
+		return;
+
+	m_pos = *obj->getPosition();
+	m_moveRange = AUTO_CLEANUP_MOVE_RANGE;
+	// ponytail: an object guard comes back as a guard on the spot it stood, since EA's guard target type
+	// keeps the first guard order ever given rather than the current one
+	m_resumeGuard = guarding;
+	m_resumeGuardMode = ai->getGuardMode();
+	ai->aiBusy( CMD_FROM_AI );
+	DEBUG_LOG(("CLEANUP frame %d '%s' %d of player %d goes to clean by itself round (%.0f,%.0f)%s\n", TheGameLogic->getFrame(),
+		obj->getTemplate()->getName().str(), obj->getID(), obj->getControllingPlayer() ? obj->getControllingPlayer()->getPlayerIndex() : -1,
+		m_pos.x, m_pos.y, guarding ? ", off guard" : ""));
+}
+
+//-------------------------------------------------------------------------------------------------
 //This allows the unit to cleanup an area until clean, then the AI goes idle.
 //-------------------------------------------------------------------------------------------------
 void CleanupHazardUpdate::setCleanupAreaParameters( const Coord3D *pos, Real range )
@@ -307,6 +421,9 @@ void CleanupHazardUpdate::setCleanupAreaParameters( const Coord3D *pos, Real ran
 	//from the specified position.
 	m_moveRange = range;
 	m_pos = *pos;
+	m_resumeGuard = FALSE;
+	m_returning = FALSE;
+	m_approaches = 0;
 
 	if( ai )
 	{
@@ -331,13 +448,14 @@ void CleanupHazardUpdate::crc( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
-	* 1: Initial version */
+	* 1: Initial version
+	* 2: the guard a cleanup it started by itself gives back, the walk back, the drives toward a hazard */
 // ------------------------------------------------------------------------------------------------
 void CleanupHazardUpdate::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 1;
+	XferVersion currentVersion = 2;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -364,6 +482,14 @@ void CleanupHazardUpdate::xfer( Xfer *xfer )
 
 	// move range
 	xfer->xferReal( &m_moveRange );
+
+	if( version >= 2 )
+	{
+		xfer->xferBool( &m_resumeGuard );
+		xfer->xferInt( &m_resumeGuardMode );
+		xfer->xferBool( &m_returning );
+		xfer->xferInt( &m_approaches );
+	}
 
 }  // end xfer
 

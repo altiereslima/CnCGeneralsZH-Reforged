@@ -236,6 +236,7 @@ Int TransitionWindow::getTotalFrames( void )
 TransitionGroup::TransitionGroup( void )
 {
 	m_currentFrame = 0;
+	m_directionMultiplier = 1;
 	m_fireOnce = FALSE;
 	m_lastStepMs = 0;
 	m_stepAccumMs = 0.0f;
@@ -293,6 +294,14 @@ void TransitionGroup::update( void )
 
 Bool TransitionGroup::isFinished( void )
 {
+	// Past its last frame (or, reversed, before its first) no window takes another update, so
+	// nothing left in the group can still change.  A window that has not called itself finished by
+	// then never will: a button the layout lacks (ButtonCustomMission, only in the 1.04 patch's
+	// MainMenu.wnd) stops a flash short of its end.  Waiting on it held the group open for good, and
+	// the main menu refuses every click while a group runs.
+	if (m_directionMultiplier > 0 ? m_currentFrame > getTotalFrames() : m_currentFrame < 0)
+		return TRUE;
+
 	TransitionWindowList::iterator it = m_transitionWindowList.begin();
 	while (it != m_transitionWindowList.end())
 	{
@@ -305,11 +314,9 @@ Bool TransitionGroup::isFinished( void )
 	return TRUE;
 }
 
-void TransitionGroup::reverse( void )
+Int TransitionGroup::getTotalFrames( void )
 {
-	Int totalFrames =0;
-	m_directionMultiplier = -1;
-	
+	Int totalFrames = 0;
 	TransitionWindowList::iterator it = m_transitionWindowList.begin();
 	while (it != m_transitionWindowList.end())
 	{
@@ -319,7 +326,15 @@ void TransitionGroup::reverse( void )
 			totalFrames = winFrames;
 		it++;
 	}
-	it = m_transitionWindowList.begin();
+	return totalFrames;
+}
+
+void TransitionGroup::reverse( void )
+{
+	Int totalFrames = getTotalFrames();
+	m_directionMultiplier = -1;
+
+	TransitionWindowList::iterator it = m_transitionWindowList.begin();
 	while (it != m_transitionWindowList.end())
 	{
 		TransitionWindow *tWin = *it;

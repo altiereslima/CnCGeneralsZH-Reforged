@@ -2,6 +2,7 @@ CMakeLists.txt
 Data/Art/Textures/ReforgedBarAmericaCenter.tga
 Data/Art/Textures/ReforgedBarAmericaLeft.tga
 Data/Art/Textures/ReforgedBarAmericaRight.tga
+Data/Art/Textures/ReforgedBarChinaBeacon.tga
 Data/Art/Textures/ReforgedBarChinaCenter.tga
 Data/Art/Textures/ReforgedBarChinaLeft.tga
 Data/Art/Textures/ReforgedBarChinaRight.tga
@@ -13,9 +14,12 @@ Data/Art/Textures/ReforgedOrders.tga
 Data/Art/Textures/ReforgedSignalAttack.tga
 Data/Art/Textures/ReforgedSignalDefend.tga
 Data/Art/Textures/ReforgedSignalLook.tga
+Data/Cinema/aurorafog.txt
 Data/Cinema/blastcheck.txt
 Data/Cinema/demo.txt
 Data/Cinema/explreel.txt
+Data/Cinema/filterblur.txt
+Data/Cinema/filterbw.txt
 Data/Cinema/headlights.txt
 Data/Cinema/hero_loop.txt
 Data/Cinema/hero_loop_01.txt
@@ -37,6 +41,9 @@ Data/Cinema/lsv_spam2.txt
 Data/Cinema/missileapex_film.txt
 Data/Cinema/mobwatch.txt
 Data/Cinema/nohud.txt
+Data/Cinema/nukedome.txt
+Data/Cinema/nukefade.txt
+Data/Cinema/nukewarp.txt
 Data/Cinema/rf_ai.txt
 Data/Cinema/rf_ai_wave.txt
 Data/Cinema/rf_beach.txt
@@ -69,6 +76,10 @@ Data/Cinema/s240_snow.txt
 Data/Cinema/s240_tank.txt
 Data/Cinema/s240_town.txt
 Data/Cinema/scudlaunch_film.txt
+Data/Cinema/swpair_nuke.txt
+Data/Cinema/swpair_scud.txt
+Data/Cinema/thumb_chaos_a.txt
+Data/Cinema/thumb_chaos_b.txt
 Data/Cinema/tr_arrival.txt
 Data/Cinema/tr_chaos.txt
 Data/Cinema/tr_clash.txt
@@ -87,8 +98,10 @@ Data/German/Generals.str
 Data/INI/BalanceReforged.ini
 Data/INI/CommandMapReforged.ini
 Data/INI/CommandSetReforged.ini
+Data/INI/ControlBarSchemeReforged.ini
 Data/INI/FXListReforged.ini
 Data/INI/FixesReforged.ini
+Data/INI/MappedImages/HandCreated/ReforgedBarChinaBeacon.ini
 Data/INI/MappedImages/HandCreated/ReforgedOrders.ini
 Data/INI/ObjectCreationListReforged.ini
 Data/INI/ParticleSystemReforged.ini
@@ -100,9 +113,12 @@ Data/Patch.str
 Data/Scenarios/airbelow.txt
 Data/Scenarios/airbelowfar.txt
 Data/Scenarios/alphaaurora.txt
+Data/Scenarios/aurorafog.txt
+Data/Scenarios/avengerlasers.txt
 Data/Scenarios/blastcheck.txt
 Data/Scenarios/bridgecross.txt
 Data/Scenarios/bridgelong.txt
+Data/Scenarios/broadcastend.txt
 Data/Scenarios/chokeprobe.txt
 Data/Scenarios/comanchepods.txt
 Data/Scenarios/comturret.txt
@@ -113,6 +129,9 @@ Data/Scenarios/dragonflame.txt
 Data/Scenarios/driveby.txt
 Data/Scenarios/empfriendly.txt
 Data/Scenarios/explreel.txt
+Data/Scenarios/glowbase.txt
+Data/Scenarios/glowfight.txt
+Data/Scenarios/glowmicrowave.txt
 Data/Scenarios/guardradius.txt
 Data/Scenarios/headlights.txt
 Data/Scenarios/helislide.txt
@@ -157,6 +176,7 @@ Data/Scenarios/mobopen.txt
 Data/Scenarios/mobstress.txt
 Data/Scenarios/mobwin.txt
 Data/Scenarios/netstance.txt
+Data/Scenarios/nukefade.txt
 Data/Scenarios/obeyorders.txt
 Data/Scenarios/overlordbridge.txt
 Data/Scenarios/overlordlong.txt
@@ -194,8 +214,8 @@ Data/Scenarios/standinbuild.txt
 Data/Scenarios/standinfake.txt
 Data/Scenarios/stashbeside.txt
 Data/Scenarios/statues.txt
-Data/Scenarios/sweep.txt
 Data/Scenarios/swhole.txt
+Data/Scenarios/swpair.txt
 Data/Scenarios/techrespawn.txt
 Data/Scenarios/towncross.txt
 Data/Scenarios/toxinslope.txt
@@ -246,6 +266,7 @@ Data/Window/Menus/LanGameOptionsMenu.wnd
 Data/Window/Menus/OptionsMenu.wnd
 Data/Window/Menus/OptionsMenuClassic.wnd
 Data/Window/Menus/SkirmishGameOptionsMenu.wnd
+Data/Window/Trainer.wnd
 Data/dx11shaders.shipped
 GameEngine/GameEngine.dsp
 GameEngine/Include/Common/AcademyStats.h
@@ -3715,6 +3736,7 @@ Tools/build-posix.sh
 Tools/buildVersionUpdate/buildVersionUpdate.cpp
 Tools/buildVersionUpdate/buildVersionUpdate.dsp
 Tools/cheat_check.py
+Tools/china_beacon.py
 Tools/control_client.py
 Tools/d3d9posix_check.py
 Tools/ffmpeg-build-posix.sh

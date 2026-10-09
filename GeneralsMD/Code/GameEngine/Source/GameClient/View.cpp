@@ -85,6 +85,7 @@ View::View( void )
 	m_minHeightAboveGround = 0.0f;
 	m_next = NULL;
 	m_okToAdjustHeight = TRUE;
+	m_heightSettleSeconds = 0.0f;
 	m_originX = 0;
 	m_originY = 0;
 	m_snapImmediate = FALSE;

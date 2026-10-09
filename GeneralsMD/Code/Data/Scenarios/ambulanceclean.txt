@@ -1,0 +1,34 @@
+# Does an Ambulance clean a toxin field near it without being told to?
+#
+# Three Ambulances on the open middle of the small generated map mobopen.txt uses, each with medium
+# poison fields (30 seconds of life, 900 frames) put down 150 to 250 from it, past the 100 its
+# cleanup weapon reaches.  The north one stands idle, the middle one has a guard order on its own
+# spot, and the south one is ordered across to 1500,1800 past a field 100 off its road.  The first
+# two should drive over, clean every field, and come back (the middle one on guard again); the
+# third should arrive without stopping and leave its field alone.  The tallies at 120 and 600 count
+# the fields left, the second well before any could have run out on its own.  The log's CLEANUP
+# lines say who went and when its area was clean.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 900
+#     -scenario ambulanceclean -logPrefix ambulanceclean_
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn       0  AmericaVehicleMedic        1  700 500
+30    spawn       0  AirF_AmericaVehicleMedic   1  700 1200
+30    spawn       0  SupW_AmericaVehicleMedic   1  700 1800
+
+60    shiftguard  0  AirF_AmericaVehicleMedic   700 1200
+
+90    spawn       1  PoisonFieldMedium          1  900 500
+90    spawn       1  PoisonFieldMedium          1  850 650
+90    spawn       1  PoisonFieldMedium          1  920 1250
+90    spawn       1  PoisonFieldMedium          1  1000 1900
+
+90    move        0  SupW_AmericaVehicleMedic   1500 1800
+91    arrive      0  SupW_AmericaVehicleMedic   1500 1800 80
+
+120   tally       1  PoisonFieldMedium
+600   tally       1  PoisonFieldMedium

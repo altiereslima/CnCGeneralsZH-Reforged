@@ -164,7 +164,7 @@ WindowMsgHandledType LeftHUDInput( GameWindow *window, UnsignedInt msg,
 
 				if (!(drawableList->empty() || msg == GWM_MOUSE_LEAVING))
 				{
-					if (TheInGameUI->isInAttackMoveToMode())
+					if (TheInGameUI->isInAttackMoveToMode() || (command && command->getCommandType() == GUI_COMMAND_ATTACK_MOVE))
 					{
 						cur = Mouse::ATTACKMOVETO;
 					}
@@ -247,7 +247,7 @@ WindowMsgHandledType LeftHUDInput( GameWindow *window, UnsignedInt msg,
 
 					if (!(drawableList->empty() || msg == GWM_MOUSE_LEAVING))
 					{
-						if (TheInGameUI->isInAttackMoveToMode())
+						if (TheInGameUI->isInAttackMoveToMode() || (command && command->getCommandType() == GUI_COMMAND_ATTACK_MOVE))
 						{
 							cur = Mouse::ATTACKMOVETO;
 						}
@@ -340,10 +340,38 @@ WindowMsgHandledType LeftHUDInput( GameWindow *window, UnsignedInt msg,
 				// divides the world the other way round, and so did the radar in the game as shipped,
 				// except under EA's Alternate Mouse Setup, which looked with the left.
 				const UnsignedInt lookButton = TheGlobalData->leftButtonOrders() ? GWM_RIGHT_DOWN : GWM_LEFT_DOWN;
+				// Classic's look is 1.04's, the press alone: a drag on the radar left the camera where it was
 				if( drawableList->empty() || msg == lookButton )
 				{
 					radarLookAt( &world );
-					s_radarLookDrag = (msg == GWM_LEFT_DOWN) ? GWM_LEFT_DRAG : GWM_RIGHT_DRAG;
+					if( !TheGlobalData->isClassicUI() )
+						s_radarLookDrag = (msg == GWM_LEFT_DOWN) ? GWM_LEFT_DRAG : GWM_RIGHT_DRAG;
+					break;
+				}
+
+				// Classic orders what 1.04's radar ordered: a targeted special power, the attack move
+				// command, and otherwise a move, whatever the keys held or the units selected
+				if( TheGlobalData->isClassicUI() )
+				{
+					const CommandButton *command = TheInGameUI->getGUICommand();
+					if( command
+							&& (command->getCommandType() == GUI_COMMAND_SPECIAL_POWER || command->getCommandType() == GUI_COMMAND_SPECIAL_POWER_FROM_SHORTCUT)
+							&& BitTest( command->getOptions(), NEED_TARGET_POS ) )
+					{
+						TheGameClient->evaluateContextCommand( NULL, &world, CommandTranslator::DO_COMMAND );
+					}
+					else if( command && command->getCommandType() == GUI_COMMAND_ATTACK_MOVE )
+					{
+						GameMessage *order = TheMessageStream->appendMessage( GameMessage::MSG_DO_ATTACKMOVETO );
+						order->appendLocationArgument( world );
+						pickAndPlayUnitVoiceResponse( TheInGameUI->getAllSelectedDrawables(), GameMessage::MSG_DO_ATTACKMOVETO );
+					}
+					else
+					{
+						GameMessage *order = TheMessageStream->appendMessage( GameMessage::MSG_DO_MOVETO );
+						order->appendLocationArgument( world );
+						pickAndPlayUnitVoiceResponse( drawableList, GameMessage::MSG_DO_MOVETO );
+					}
 					break;
 				}
 

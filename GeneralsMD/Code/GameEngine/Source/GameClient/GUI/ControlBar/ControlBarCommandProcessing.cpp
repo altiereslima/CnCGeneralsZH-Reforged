@@ -343,11 +343,13 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 		TheAudio->addAudioEvent( &sound );
 	}
 
-	if( commandButton->getCommandType() == GUI_COMMAND_ATTACK_MOVE )
+	if( commandButton->getCommandType() == GUI_COMMAND_ATTACK_MOVE && !TheGlobalData->isClassicUI() )
 	{
 		// The attack move button arms the same key its hotkey does, rather than becoming a pending
 		// GUI command that one click uses up: shift then keeps it armed for a row of points.  It
 		// takes the place of whatever command was waiting for a target, as any other button would.
+		// Classic's is 1.04's, a GUI command like guard: the left button aims it in either mouse
+		// setup and the right one takes it back.
 		TheInGameUI->setGUICommand( NULL );
 		TheMessageStream->appendMessage( GameMessage::MSG_META_TOGGLE_ATTACKMOVE );
 	}

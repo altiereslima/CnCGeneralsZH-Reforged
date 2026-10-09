@@ -51,7 +51,9 @@
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "Common/MessageStream.h"
+#include "Common/NameKeyGenerator.h"
 #include "Common/Radar.h"
+#include "GameClient/ControlBar.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/WindowXlat.h"
 #include "GameClient/LookAtXlat.h"
@@ -160,7 +162,7 @@ static GameWindowMessage rawMouseToWindowMessage( const GameMessage *msg )
 ///////////////////////////////////////////////////////////////////////////////
 
 //=============================================================================
-WindowTranslator::WindowTranslator() : m_rightClickTaken(FALSE)
+WindowTranslator::WindowTranslator() : m_rightClickTaken(FALSE), m_promotionClickTaken(FALSE)
 {
 }
 
@@ -194,6 +196,50 @@ GameMessageDisposition WindowTranslator::translateGameMessage(const GameMessage 
 			TheWindowManager->winProcessMouseEvent(GWM_RIGHT_UP, &mousePos, NULL);
 		}
 		return DESTROY_MESSAGE;
+	}
+
+	// The promotion screen is modal.  A press anywhere off it closes it and goes no further, to the
+	// battlefield or the bar, and neither do that press's drags and release.
+	switch( msg->getType() )
+	{
+		case GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN:
+		case GameMessage::MSG_RAW_MOUSE_LEFT_DOUBLE_CLICK:
+		case GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_DOWN:
+		case GameMessage::MSG_RAW_MOUSE_MIDDLE_DOUBLE_CLICK:
+		case GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN:
+		case GameMessage::MSG_RAW_MOUSE_RIGHT_DOUBLE_CLICK:
+		{
+			if( TheControlBar == NULL || !TheControlBar->isPurchaseScienceVisible() )
+				break;
+			static const NameKeyType screenID = NAMEKEY( "GeneralsExpPoints.wnd:GenExpParent" );
+			GameWindow *screen = TheWindowManager->winGetWindowFromId( NULL, screenID );
+			ICoord2D origin, size;
+			screen->winGetScreenPosition( &origin.x, &origin.y );
+			screen->winGetSize( &size.x, &size.y );
+			const ICoord2D mousePos = msg->getArgument( 0 )->pixel;
+			if( mousePos.x >= origin.x && mousePos.x < origin.x + size.x && mousePos.y >= origin.y && mousePos.y < origin.y + size.y )
+				break;
+			TheControlBar->hidePurchaseScience();
+			m_promotionClickTaken = TRUE;
+			return DESTROY_MESSAGE;
+		}
+		case GameMessage::MSG_RAW_MOUSE_LEFT_DRAG:
+		case GameMessage::MSG_RAW_MOUSE_MIDDLE_DRAG:
+		case GameMessage::MSG_RAW_MOUSE_RIGHT_DRAG:
+			if( m_promotionClickTaken )
+				return DESTROY_MESSAGE;
+			break;
+		case GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP:
+		case GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_UP:
+		case GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP:
+			if( m_promotionClickTaken )
+			{
+				m_promotionClickTaken = FALSE;
+				return DESTROY_MESSAGE;
+			}
+			break;
+		default:
+			break;
 	}
 
 	// A minimap press already owns its drag and its release, even if keyboard scrolling has locked

@@ -483,9 +483,11 @@ TEST(right_drag_pans_past_the_drag_tolerance_and_middle_drag_turns)
 	mouse(GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_UP, 350, 300);
 	CHECK(!f.camera.isMovingCamera());
 
-	// Classic's right drag is the same retail scroll
+	// Classic's right drag is the same retail scroll, started by the press itself as 1.04 started it
 	f.global->m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
 	mouse(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN, 300, 300);
+	CHECK(f.ui->scrolling);
+	CHECK(f.camera.isRightDragPanning());
 	mouse(GameMessage::MSG_RAW_MOUSE_POSITION, 340, 300);
 	CHECK(f.camera.isRightDragPanning());
 	mouse(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP, 340, 300);

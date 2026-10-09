@@ -34,7 +34,7 @@
 	rather than desyncing partway through it. The fingerprint test in
 	test_gameengine.cpp fails until the version and the recorded CRCs agree, so
 	the bump cannot be forgotten. */
-#define RANDOM_MAP_GENERATOR_VERSION 11
+#define RANDOM_MAP_GENERATOR_VERSION 14
 
 /// How much ground the map gives everybody, before the per-player share.
 enum RandomMapSize
@@ -91,13 +91,14 @@ public:
 	map. On success mapPathOut is what -map wants. */
 extern Bool stageRandomMap( const RandomMapSettings& settings, AsciiString& mapPathOut );
 
-/** Is this the path of a generated map or its preview? The settings are in the
-	name, which is what lets a replay, a save or a joining machine rebuild the
-	same bytes from the name alone. A name carrying another generator version is
-	not one this build can rebuild, so it is not one of ours. */
+/** Is this the path of a generated map or its preview, or the map.ini beside a
+	map that snows? The settings are in the name, which is what lets a replay, a
+	save or a joining machine rebuild the same bytes from the name alone. A name
+	carrying another generator version is not one this build can rebuild, so it
+	is not one of ours. */
 extern Bool isGeneratedMapPath( const AsciiString& path );
 
-/** The bytes of a generated map or preview, generated on the spot if this path
+/** The bytes of a generated map, preview or map.ini, generated on the spot if this path
 	has not been staged in this run - which is how a replay of a generated map
 	plays back without the map having been kept anywhere. FALSE when the path is
 	not a generated one. The bytes belong to the store and stay valid until it

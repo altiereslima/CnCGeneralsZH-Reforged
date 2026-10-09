@@ -87,9 +87,11 @@ void INI::parseControlBarSchemeDefinition( INI *ini )
 	if( !CBSchemeManager )
 		return;
 
-	// If we have a previously allocated control bar, this will return a cleared out pointer to it so we
-	// can overwrite it	
-	CBScheme = CBSchemeManager->newControlBarScheme( name );
+	// A multifile load edits the scheme already there; anything else gets a cleared out scheme, a
+	// previously allocated one included, to overwrite
+	CBScheme = ini->getLoadType() == INI_LOAD_MULTIFILE ? CBSchemeManager->findControlBarScheme( name ) : NULL;
+	if( CBScheme == NULL )
+		CBScheme = CBSchemeManager->newControlBarScheme( name );
 
 	// sanity
 	DEBUG_ASSERTCRASH( CBScheme, ("parseControlBarSchemeDefinition: Unable to allocate Scheme '%s'\n", name.str()) );

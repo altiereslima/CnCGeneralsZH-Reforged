@@ -1,0 +1,8 @@
+# A map script's motion blur zoom over the Glow option's fight, for checking that the screen
+# filters still draw on Direct3D 11. Use with -scenario glowfight, -freecam 3150 3660 420 45 -40 and
+# -screenshot 172. The list's clock starts about eleven frames into the match, so the blur starts
+# near frame 161; it builds for twelve logic frames and ends by itself, and frame 172 is near its
+# peak.
+
+0 hud off
+4.9 filter blur

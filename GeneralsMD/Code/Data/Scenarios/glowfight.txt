@@ -1,0 +1,35 @@
+# The Glow option's fight: laser beams, flame, muzzle flashes and burning wrecks in one view, for
+# Off against High against Ultra pictures of the same frame. laserglow.txt's point defence lasers (a
+# Paladin under Rocket Buggies, an Avenger under Tank Hunters), three Laser General Crusaders on the
+# Battlemasters, and Dragon Tanks, Battlemasters and Inferno Cannons of seat 1 on a Crusader group
+# beside them. Draws, so -win:
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap -observer -multiInstance
+#     -fps 120 -noFPSLimit -particlecap 2500 -map "Maps\Twilight Flame\Twilight Flame.map"
+#     -autoskirmish 2 -takeover -side 0 FactionAmerica -side 1 FactionGLA -seed 7
+#     -scenario glowfight -cinema nohud -freecam 3150 3660 420 45 -40 -screenshot 172 -maxframes 182
+#
+# with Bloom = 0 to 4 in the Options.ini of a ZH_USER_DATA_DIR of its own for each run, and -d3d9
+# for the old renderer. The particles differ from run to run; the units and the camera do not.
+
+30    spawn      0  AmericaTankPaladin            1   3260 3820
+30    spawn      1  GLAVehicleRocketBuggy         4   3260 4100  30
+60    attackmove 1  GLAVehicleRocketBuggy             3260 3820
+
+30    spawn      0  AmericaTankAvenger            1   3400 3820
+30    spawn      1  ChinaInfantryTankHunter       5   3400 4060  18
+60    attack     1  ChinaInfantryTankHunter       0  AmericaTankAvenger
+
+30    spawn      0  Lazr_AmericaTankCrusader      3   3420 3800  30
+30    spawn      0  Lazr_AmericaTankAvenger       1   3360 3740
+60    attack     0  Lazr_AmericaTankCrusader      1  ChinaTankBattleMaster
+60    attack     0  Lazr_AmericaTankAvenger       1  ChinaInfantryTankHunter
+
+30    spawn      0  AmericaTankCrusader           4   3480 3860  30
+30    spawn      1  ChinaTankDragon               3   3500 3990  30
+30    spawn      1  ChinaTankBattleMaster         3   3560 3960  30
+30    spawn      1  ChinaVehicleInfernoCannon     4   3440 4200  40
+60    attack     1  ChinaTankDragon               0  AmericaTankCrusader
+60    attack     1  ChinaTankBattleMaster         0  AmericaTankCrusader
+60    attack     1  ChinaVehicleInfernoCannon     0  AmericaTankCrusader
+60    attack     0  AmericaTankCrusader           1  ChinaTankBattleMaster

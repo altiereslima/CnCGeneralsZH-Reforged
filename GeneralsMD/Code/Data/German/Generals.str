@@ -14233,12 +14233,8 @@ GUI:OrderMoveDescription
 "Der nächste Klick auf den Boden schickt die ausgewählten Einheiten dorthin. Ziehe stattdessen, und sie verteilen sich entlang der gezogenen Linie."
 END
 
-GUI:OrderSearchAndDestroy
-"Suchen und Zerstören"
-END
-
-GUI:OrderSearchAndDestroyDescription
-"Klicke auf eine Stelle, und die ausgewählten Einheiten gehen im Angriffsmarsch um sie herum, bekämpfen alles auf ihrem Weg und bewachen dann den ganzen Kreis. Drehe vor dem Klick das Mausrad, um den Kreis einzustellen."
+GUI:SelectionTypeDescription
+"Klicke, um nur diese ausgewählt zu lassen. Mit Umschalt und Klick nimmst du sie aus der Auswahl."
 END
 
 GUI:OrderStanceDefensive
@@ -14590,35 +14586,23 @@ GUI:Bloom0
 END
 
 GUI:Bloom1
-"Dezent"
+"Niedrig"
+END
+
+GUI:Bloom2
+"Mittel"
 END
 
 GUI:Bloom3
-"Stark"
+"Hoch"
+END
+
+GUI:Bloom4
+"Ultra"
 END
 
 TOOLTIP:Bloom
-"Wie weit helle Flächen Licht in ihre Umgebung abgeben. Das Original hatte nichts davon, also ist Aus das, wofür die Grafiken gemalt wurden."
-END
-
-GUI:BloomThreshold
-"Was leuchtet"
-END
-
-GUI:BloomThreshold0
-"Nur das Hellste"
-END
-
-GUI:BloomThreshold1
-"Helle Dinge"
-END
-
-GUI:BloomThreshold2
-"Das meiste Bild"
-END
-
-TOOLTIP:BloomThreshold
-"Wie viel vom Bildschirm hell genug ist, um zu leuchten. Nur das Hellste beschränkt es auf Mündungsfeuer und Lampen; das meiste Bild legt einen Dunst über das ganze Schlachtfeld."
+"Wie stark Feuer, Explosionen, Mündungsfeuer und Laser leuchten und wie weit ihr Licht auf die Umgebung übergreift. Gebäude, Himmel, Schnee und Sand leuchten nie. Aus ist das, wofür die Grafiken gemalt wurden. Der Direct3D-9-Renderer zeigt eine weichere Fassung, und mit Klassischer Grafik richten sich nur die Laserschimmer danach."
 END
 
 GUI:VSync

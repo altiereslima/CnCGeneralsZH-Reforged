@@ -79,6 +79,15 @@ static UnsignedInt particleTimerFrames( Real value )
 }
 
 //-------------------------------------------------------------------------------------------------
+/* A particle whose keys never reach zero alpha (or black, or white for MULTIPLY) would vanish with
+	 whatever it showed on its last frame.  Over the last frames of its life its strength is capped by
+	 an envelope falling linearly to zero, so it fades instead.  The window is a quarter of the
+	 lifetime, at most eight frames.  A cap rather than a multiplier: a particle already fading below
+	 the envelope is left exactly as authored. */
+static const UnsignedInt PARTICLE_FADE_MAX_FRAMES = 8;
+static const UnsignedInt PARTICLE_FADE_LIFETIME_DIVISOR = 4;
+
+//-------------------------------------------------------------------------------------------------
 
 // the singleton
 ParticleSystemManager *TheParticleSystemManager = NULL;
@@ -705,9 +714,60 @@ Bool Particle::update( const ParticleUpdateContext &context )
 	// reset the acceleration for accumulation next frame
 	m_accel.z=m_accel.y=m_accel.x= 0.0f;
 
-	// monitor lifetime
-	if (m_lifetimeLeft && --m_lifetimeLeft == 0)
-		return false;
+	// monitor lifetime, and fade out over the last frames of it
+	if (m_lifetimeLeft)
+	{
+		if (--m_lifetimeLeft == 0)
+			return false;
+
+		UnsignedInt fadeFrames = m_lifetime / PARTICLE_FADE_LIFETIME_DIVISOR;
+		if (fadeFrames > PARTICLE_FADE_MAX_FRAMES)
+			fadeFrames = PARTICLE_FADE_MAX_FRAMES;
+		else if (fadeFrames == 0)
+			fadeFrames = 1;
+
+		if (m_lifetimeLeft <= fadeFrames)
+		{
+			// zero on the last frame, so isInvisible below retires it on the frame it would die anyway
+			const Real envelope = (Real)(m_lifetimeLeft - 1) / (Real)fadeFrames;
+			switch (context.shaderType)
+			{
+				case ParticleSystemInfo::ALPHA:
+				case ParticleSystemInfo::ALPHA_TEST:
+					if (m_alpha > envelope)
+						m_alpha = envelope;
+					break;
+
+				case ParticleSystemInfo::ADDITIVE:
+				{
+					// scale the brightest channel down to the envelope, keeping the hue
+					const Real brightest = max( m_color.red, max( m_color.green, m_color.blue ) );
+					if (brightest > envelope)
+					{
+						const Real k = envelope / brightest;
+						m_color.red *= k;
+						m_color.green *= k;
+						m_color.blue *= k;
+					}
+					break;
+				}
+
+				case ParticleSystemInfo::MULTIPLY:
+				{
+					// the same toward white, which multiplies to nothing
+					const Real darkest = 1.0f - min( m_color.red, min( m_color.green, m_color.blue ) );
+					if (darkest > envelope)
+					{
+						const Real k = envelope / darkest;
+						m_color.red = 1.0f - (1.0f - m_color.red) * k;
+						m_color.green = 1.0f - (1.0f - m_color.green) * k;
+						m_color.blue = 1.0f - (1.0f - m_color.blue) * k;
+					}
+					break;
+				}
+			}
+		}
+	}
 
 	DEBUG_ASSERTCRASH( m_lifetimeLeft, ( "A particle has an infinite lifetime..." ));
 

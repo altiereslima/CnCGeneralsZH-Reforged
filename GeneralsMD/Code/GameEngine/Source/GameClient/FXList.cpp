@@ -441,6 +441,55 @@ private:
 EMPTY_DTOR(ViewShakeFXNugget)
 
 //-------------------------------------------------------------------------------------------------
+/** The picture drawn in toward the blast and then pushed out by a ring, for a nuke.  A client-only
+	* picture: it goes to the tactical view, which hands it to the Direct3D 11 post chain, and does
+	* nothing on a device without one. */
+//-------------------------------------------------------------------------------------------------
+class ScreenDistortionFXNugget : public FXNugget
+{
+	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(ScreenDistortionFXNugget, "ScreenDistortionFXNugget")
+public:
+
+	ScreenDistortionFXNugget()
+	{
+		m_info.m_radius = 0.0f;
+		m_info.m_pullFrames = 0;
+		m_info.m_waveFrames = 0;
+		m_info.m_pullStrength = 0.0f;
+		m_info.m_waveStrength = 0.0f;
+		m_info.m_waveWidth = 0.0f;
+	}
+
+	virtual void doFXPos(const Coord3D *primary, const Matrix3D* /*primaryMtx*/, const Real /*primarySpeed*/, const Coord3D * /*secondary*/, const Real /*overrideRadius*/ ) const
+	{
+		if (TheTacticalView)
+			TheTacticalView->addScreenDistortion(primary, m_info);
+	}
+
+	static void parse(INI *ini, void *instance, void* /*store*/, const void* /*userData*/)
+	{
+		static const FieldParse myFieldParse[] =
+		{
+			{ "Radius",					INI::parseReal,									NULL, offsetof( ScreenDistortionFXNugget, m_info.m_radius ) },
+			{ "PullTime",				INI::parseDurationUnsignedInt,	NULL, offsetof( ScreenDistortionFXNugget, m_info.m_pullFrames ) },
+			{ "WaveTime",				INI::parseDurationUnsignedInt,	NULL, offsetof( ScreenDistortionFXNugget, m_info.m_waveFrames ) },
+			{ "PullStrength",		INI::parsePercentToReal,				NULL, offsetof( ScreenDistortionFXNugget, m_info.m_pullStrength ) },
+			{ "WaveStrength",		INI::parsePercentToReal,				NULL, offsetof( ScreenDistortionFXNugget, m_info.m_waveStrength ) },
+			{ "WaveWidth",			INI::parsePercentToReal,				NULL, offsetof( ScreenDistortionFXNugget, m_info.m_waveWidth ) },
+			{ 0, 0, 0, 0 }
+		};
+
+		ScreenDistortionFXNugget* nugget = newInstance( ScreenDistortionFXNugget );
+		ini->initFromINI(nugget, myFieldParse);
+		((FXList*)instance)->addFXNugget(nugget);
+	}
+
+private:
+	ScreenDistortionInfo m_info;
+};
+EMPTY_DTOR(ScreenDistortionFXNugget)
+
+//-------------------------------------------------------------------------------------------------
 class TerrainScorchFXNugget : public FXNugget
 {
 	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(TerrainScorchFXNugget, "TerrainScorchFXNugget")		
@@ -777,7 +826,8 @@ static const FieldParse TheFXListFieldParse[] =
 	{ "RayEffect",									RayEffectFXNugget::parse, 0, 0},		
 	{ "Tracer",											TracerFXNugget::parse, 0, 0},		
 	{ "LightPulse",									LightPulseFXNugget::parse, 0, 0},		
-	{ "ViewShake",									ViewShakeFXNugget::parse, 0, 0},		
+	{ "ViewShake",									ViewShakeFXNugget::parse, 0, 0},
+	{ "ScreenDistortion",						ScreenDistortionFXNugget::parse, 0, 0},
 	{ "TerrainScorch",							TerrainScorchFXNugget::parse, 0, 0},		
 	{ "ParticleSystem",							ParticleSystemFXNugget::parse, 0, 0},		
 	{ "FXListAtBonePos",						FXListAtBonePosFXNugget::parse, 0, 0},		

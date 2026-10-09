@@ -645,6 +645,7 @@ public:
 	Bool isFireOnce( void ) { return m_fireOnce; }
 	Bool m_fireOnce;
 private:
+	Int getTotalFrames( void );	///< the frame the last window ends on
 	typedef std::list<TransitionWindow *> TransitionWindowList;
 	TransitionWindowList m_transitionWindowList;
 	Int m_directionMultiplier;

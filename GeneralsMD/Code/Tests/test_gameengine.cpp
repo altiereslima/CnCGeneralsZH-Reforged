@@ -647,10 +647,14 @@ TEST(balance_patch_edits_a_weapon_in_place)
 	CHECK_NEAR( gun->getPrimaryDamage( noBonus ), 45.0f, 0.01f );
 	CHECK_NEAR( gun->getUnmodifiedAttackRange(), 150.0f, 0.01f );
 
-	/* a patch that names a weapon nobody defined is a typo, and has to stop the load */
+	/* a patch that names a weapon the loaded data lacks (a mod's Weapon.ini without it) is read and
+		 dropped: no weapon is made for the name, and the block after it still applies */
 	writeFile( TEST_INI,
 		"Weapon BalancePatchProbeGunTypo\r\n"
 		"  PrimaryDamage = 45.0\r\n"
+		"End\r\n"
+		"Weapon BalancePatchProbeGun\r\n"
+		"  PrimaryDamage = 30.0\r\n"
 		"End\r\n" );
 	Bool threw = FALSE;
 	try
@@ -662,8 +666,9 @@ TEST(balance_patch_edits_a_weapon_in_place)
 	{
 		threw = TRUE;
 	}
-	CHECK( threw );
+	CHECK( threw == FALSE );
 	CHECK( TheWeaponStore->findWeaponTemplate( "BalancePatchProbeGunTypo" ) == NULL );
+	CHECK_NEAR( gun->getPrimaryDamage( noBonus ), 30.0f, 0.01f );
 
 	remove( TEST_INI );
 }
@@ -754,6 +759,68 @@ TEST(replace_module_of_another_type_is_skipped)
 	}
 }
 
+/* BalanceReforged.ini prices Nuke_ChinaGattlingCannon, and an install whose mod archives had no such
+	 object threw in ThingFactory::parseObjectDefinition and stopped the game at start.  The block is
+	 read and dropped now: no template is made for the name, and the object after it is still edited. */
+TEST(patch_of_a_missing_object_is_skipped)
+{
+	CHECK( bootOnce() );
+
+	GlobalData *savedGlobals = TheWritableGlobalData;
+	if( savedGlobals == NULL )
+		TheWritableGlobalData = NEW GlobalData;
+	if( TheModuleFactory == NULL )
+	{
+		TheModuleFactory = NEW ModuleFactory;
+		TheModuleFactory->init();
+	}
+	if( TheThingFactory == NULL )
+		TheThingFactory = NEW ThingFactory;
+
+	writeFile( TEST_INI,
+		"Object MissingObjectProbe\r\n"
+		"  BuildCost = 1200\r\n"
+		"End\r\n" );
+	CHECK( loadIni( TEST_INI ) );
+
+	writeFile( TEST_INI,
+		"Object MissingObjectProbeAbsent\r\n"
+		"  BuildCost = 1000\r\n"
+		"  ReplaceModule ModuleTag_04\r\n"
+		"    Body = StructureBody ModuleTag_04_Reforged\r\n"
+		"      MaxHealth = 1500.0\r\n"
+		"    End\r\n"
+		"  End\r\n"
+		"End\r\n"
+		"Object MissingObjectProbe\r\n"
+		"  BuildCost = 1000\r\n"
+		"End\r\n" );
+	Bool threw = FALSE;
+	try
+	{
+		INI patch;
+		patch.load( AsciiString( TEST_INI ), INI_LOAD_MULTIFILE, NULL );
+	}
+	catch( ... )
+	{
+		threw = TRUE;
+	}
+	CHECK( threw == FALSE );
+	CHECK( TheThingFactory->findTemplate( "MissingObjectProbeAbsent", FALSE ) == NULL );
+
+	const ThingTemplate *probe = TheThingFactory->findTemplate( "MissingObjectProbe" );
+	CHECK( probe != NULL );
+	if( probe != NULL )
+		CHECK_EQ( probe->friend_getBuildCost(), 1000 );
+
+	remove( TEST_INI );
+	if( savedGlobals == NULL )
+	{
+		delete TheWritableGlobalData;
+		TheWritableGlobalData = NULL;
+	}
+}
+
 /* Data\INI\FXListReforged.ini is the fork's own explosion light: 89 of EA's FXLists, each repeated
 	 whole with one LightPulse added.  Whole, because FXListStore::parseFXListDefinition clears an
 	 entry before re-reading it - a half-copied block does not add a light, it deletes an explosion.
@@ -765,7 +832,7 @@ TEST(replace_module_of_another_type_is_skipped)
 	 pink death, which has none and is the one block the count leaves out.  The Paladin's and the
 	 Avenger's hard-kill charge added two of the fork's own, its launch and its blast, lit too.
 	 The explosion pass added 22 more of EA's, from the structure deaths to the nukes, each with
-	 the light it lacked. */
+	 the light it lacked, and the point defense lasers' missile burst one of the fork's own. */
 static const char *const s_unlitReforgedFXList = "FXList SupW_FX_ParticleUplinkDeathInitial";
 
 TEST(fxlist_reforged_ini_parses_and_keeps_its_light)
@@ -814,7 +881,7 @@ TEST(fxlist_reforged_ini_parses_and_keeps_its_light)
 	}
 	fclose( fp );
 
-	CHECK_EQ( blocks, 112 );
+	CHECK_EQ( blocks, 113 );
 	CHECK_EQ( lit, blocks );
 }
 
@@ -3718,7 +3785,7 @@ TEST(controlbar_command_places_go_in_rows_by_what_they_are_for)
 		CHECK_EQ( places[ slot ], manyPlaces[ slot ] );
 }
 
-TEST(controlbar_hunt_and_stance_keys_take_what_the_buttons_leave)
+TEST(controlbar_stance_key_takes_what_the_buttons_leave)
 {
 	enum { SLOTS = 14 };
 	Int places[ SLOTS ];
@@ -3726,34 +3793,30 @@ TEST(controlbar_hunt_and_stance_keys_take_what_the_buttons_leave)
 	const Int N = GUI_COMMAND_NONE, ab = COMMAND_GROUP_ABILITY, pa = COMMAND_GROUP_PASSENGER;
 	const Int nothingPinned[ SLOTS ] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
 
-	/* a Ranger: two abilities, attack move, guard, stop.  Search and destroy on F and the stance on H,
-	   their own places */
+	/* a Ranger: two abilities, attack move, guard, stop.  The stance on H, its own place */
 	const Int ranger[ SLOTS ] = { GUI_COMMAND_FIRE_WEAPON, GUI_COMMAND_SPECIAL_POWER, N, N, N, N, N, N, N, N,
 		GUI_COMMAND_ATTACK_MOVE, N, GUI_COMMAND_GUARD, GUI_COMMAND_STOP };
 	const Int rangerGroups[ SLOTS ] = { ab, ab, ab, ab, ab, ab, ab, ab, ab, ab, ab, ab, ab, ab };
 	Bool fights = ControlBar_commandPlaces( ranger, rangerGroups, nothingPinned, SLOTS, places );
 	CHECK( fights );
 	ControlBar_orderKeyPlaces( places, SLOTS, fights, keys );
-	CHECK_EQ( keys[ ORDER_KEY_HUNT ], (Int)COMMAND_PLACE_F );
 	CHECK_EQ( keys[ ORDER_KEY_STANCE ], (Int)COMMAND_PLACE_H );
 
 	/* the Humvee's set, as in the test above: passengers hold F G H B N and the drones Q W E, so the
-	   two go on in reading order, R T, and never move a button */
+	   stance goes on in reading order, R, and never moves a button */
 	const Int humvee[ SLOTS ] = { GUI_COMMAND_OBJECT_UPGRADE, GUI_COMMAND_OBJECT_UPGRADE, GUI_COMMAND_OBJECT_UPGRADE,
 		GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EXIT_CONTAINER,
 		GUI_COMMAND_EXIT_CONTAINER, GUI_COMMAND_EVACUATE, N, GUI_COMMAND_ATTACK_MOVE, N, GUI_COMMAND_GUARD, GUI_COMMAND_STOP };
 	const Int humveeGroups[ SLOTS ] = { ab, ab, ab, pa, pa, pa, pa, pa, ab, ab, ab, ab, ab, ab };
 	fights = ControlBar_commandPlaces( humvee, humveeGroups, nothingPinned, SLOTS, places );
 	ControlBar_orderKeyPlaces( places, SLOTS, fights, keys );
-	CHECK_EQ( keys[ ORDER_KEY_HUNT ], (Int)COMMAND_PLACE_R );
-	CHECK_EQ( keys[ ORDER_KEY_STANCE ], (Int)COMMAND_PLACE_T );
+	CHECK_EQ( keys[ ORDER_KEY_STANCE ], (Int)COMMAND_PLACE_R );
 
-	/* a Radar Van: a scan and an upgrade, nothing to attack move with, so neither key */
+	/* a Radar Van: a scan and an upgrade, nothing to attack move with, so no stance key */
 	const Int van[ SLOTS ] = { GUI_COMMAND_SPECIAL_POWER, GUI_COMMAND_OBJECT_UPGRADE, N, N, N, N, N, N, N, N, N, N, N, GUI_COMMAND_STOP };
 	fights = ControlBar_commandPlaces( van, rangerGroups, nothingPinned, SLOTS, places );
 	CHECK( !fights );
 	ControlBar_orderKeyPlaces( places, SLOTS, fights, keys );
-	CHECK_EQ( keys[ ORDER_KEY_HUNT ], -1 );
 	CHECK_EQ( keys[ ORDER_KEY_STANCE ], -1 );
 
 	/* a grid with no room: every key stays off it */
@@ -3763,35 +3826,6 @@ TEST(controlbar_hunt_and_stance_keys_take_what_the_buttons_leave)
 	ControlBar_orderKeyPlaces( full, COMMAND_PLACE_COUNT, TRUE, keys );
 	for( Int key = 0; key < ORDER_KEY_EXTRAS; key++ )
 		CHECK_EQ( keys[ key ], -1 );
-}
-
-/* The search and destroy key walks a ring at seven tenths of the circle, starting on the
-   side the selection stands and going round clockwise, four to eight points by size, never off the map. */
-TEST(sweep_points_go_round_the_ring_from_the_selection_side)
-{
-	std::vector<Coord3D> points;
-	sweepPoints( 1000.0f, 1000.0f, 300.0f, 1000.0f, 0.0f, 0.0f, 0.0f, 4000.0f, 4000.0f, points );
-	CHECK_EQ( (Int)points.size(), 5 );		// 2 pi 210 / 300 is 4.4
-	CHECK_NEAR( points[ 0 ].x, 1000.0f, 0.01f );
-	CHECK_NEAR( points[ 0 ].y, 790.0f, 0.01f );
-	// clockwise from six o'clock is towards nine
-	CHECK( points[ 1 ].x < 1000.0f - 150.0f );
-	for( size_t i = 0; i < points.size(); i++ )
-	{
-		const Real dx = points[ i ].x - 1000.0f, dy = points[ i ].y - 1000.0f;
-		CHECK_NEAR( (Real)sqrt( dx * dx + dy * dy ), 210.0f, 0.5f );
-	}
-
-	sweepPoints( 1000.0f, 1000.0f, 50.0f, 1000.0f, 1000.0f, 0.0f, 0.0f, 4000.0f, 4000.0f, points );
-	CHECK_EQ( (Int)points.size(), 4 );
-	CHECK_NEAR( points[ 0 ].x, 1035.0f, 0.01f );		// standing on the centre starts east
-	sweepPoints( 1000.0f, 1000.0f, 800.0f, 0.0f, 0.0f, 0.0f, 0.0f, 4000.0f, 4000.0f, points );
-	CHECK_EQ( (Int)points.size(), 8 );
-
-	// a circle on the map's corner keeps every point on the map
-	sweepPoints( 50.0f, 50.0f, 400.0f, 500.0f, 500.0f, 0.0f, 0.0f, 4000.0f, 4000.0f, points );
-	for( size_t i = 0; i < points.size(); i++ )
-		CHECK( points[ i ].x >= 0.0f && points[ i ].y >= 0.0f );
 }
 
 /* The money plate follows its figure's width: wider at once, narrower only once the narrower figure
@@ -7985,16 +8019,20 @@ struct RMGParse
 	Int m_numTextureClasses, m_firstTile, m_numTiles, m_tileWidth;
 	Int m_numSides, m_numTeams, m_numObjects, m_numWaterAreas;
 	Int m_weather, m_compression, m_timeOfDay, m_lightingBytesLeftOver, m_blendBytesLeftOver;
-	Real m_terrainAmbient[3];
+	Real m_terrainAmbient[4][3];		///< per hour, morning first, as the chunk orders them
+	Real m_terrainDiffuse[4][3];
 	AsciiString m_textureName;
 	std::vector<AsciiString> m_textureNames;
 	std::vector<Int> m_firstTiles;
 	std::vector<AsciiString> m_waypointNames;
 	std::vector<Coord3D> m_waypointPositions;
+	std::vector<AsciiString> m_pathWaypointNames;		///< the approach paths' waypoints, "Center2_from1_0"
+	std::vector<Coord3D> m_pathWaypointPositions;
 	std::vector<AsciiString> m_objectNames;
 	std::vector<UnsignedByte> m_heights;
 	std::vector<Short> m_tiles;
 	std::vector<Short> m_blendIndexes;			///< per cell, into m_blends; 0 is no blend
+	std::vector<Short> m_extraBlendIndexes;		///< the layer drawn over that one, the same way
 	std::vector<RMGBlendEntry> m_blends;		///< the table itself, entry 0 excepted
 	std::vector<Coord3D> m_waterPoints;			///< first point of each water area
 	std::vector< std::vector<Coord3D> > m_waterPolygons;	///< and every point of it
@@ -8010,7 +8048,8 @@ struct RMGParse
 		m_weather(-1), m_compression(-1), m_timeOfDay(-1), m_lightingBytesLeftOver(-1),
 		m_blendBytesLeftOver(-1)
 	{
-		m_terrainAmbient[0] = m_terrainAmbient[1] = m_terrainAmbient[2] = 0.0f;
+		memset( m_terrainAmbient, 0, sizeof(m_terrainAmbient) );
+		memset( m_terrainDiffuse, 0, sizeof(m_terrainDiffuse) );
 	}
 };
 static RMGParse theRMGParse;
@@ -8045,8 +8084,10 @@ static Bool RMGParseBlendTile( DataChunkInput &file, DataChunkInfo *info, void *
 	theRMGParse.m_blendIndexes.resize( len );
 	file.readArrayOfBytes( (char *)&theRMGParse.m_blendIndexes[0], len * sizeof(Short) );
 
+	theRMGParse.m_extraBlendIndexes.resize( len );
+	file.readArrayOfBytes( (char *)&theRMGParse.m_extraBlendIndexes[0], len * sizeof(Short) );
+
 	std::vector<Short> scratch( len );
-	file.readArrayOfBytes( (char *)&scratch[0], len * sizeof(Short) );	// extra blend tiles
 	file.readArrayOfBytes( (char *)&scratch[0], len * sizeof(Short) );	// cliff info
 
 	theRMGParse.m_numBitmapTiles = file.readInt();
@@ -8107,8 +8148,10 @@ static Bool RMGParseLighting( DataChunkInput &file, DataChunkInfo *info, void * 
 		for( Int value = 0; value < 54; value++ )
 		{
 			Real read = file.readReal();
-			if( timeOfDay == 0 && value < 3 )
-				theRMGParse.m_terrainAmbient[value] = read;
+			if( value < 3 )
+				theRMGParse.m_terrainAmbient[timeOfDay][value] = read;
+			else if( value < 6 )
+				theRMGParse.m_terrainDiffuse[timeOfDay][value - 3] = read;
 		}
 	}
 
@@ -8206,6 +8249,11 @@ static Bool RMGParseObject( DataChunkInput &file, DataChunkInfo *info, void * )
 	{
 		theRMGParse.m_waypointNames.push_back( d.getAsciiString( NAMEKEY( "waypointName" ) ) );
 		theRMGParse.m_waypointPositions.push_back( loc );
+	}
+	else if( d.getType( NAMEKEY( "waypointID" ) ) == Dict::DICT_INT )
+	{
+		theRMGParse.m_pathWaypointNames.push_back( d.getAsciiString( NAMEKEY( "waypointName" ) ) );
+		theRMGParse.m_pathWaypointPositions.push_back( loc );
 	}
 	return TRUE;
 }
@@ -8344,10 +8392,91 @@ TEST(a_generated_map_reads_back_through_the_engines_own_chunk_reader)
 	CHECK_EQ( (Int)theRMGParse.m_waterPoints.size(), theRMGParse.m_numWaterAreas );
 	CHECK( theRMGParse.m_waterPoints[0].z > 0.0f );
 
-	// Daylight, written into the map rather than left to whatever GameData.ini holds.
-	CHECK_EQ( theRMGParse.m_timeOfDay, (Int)TIME_OF_DAY_AFTERNOON );
+	// The light, written into the map rather than left to whatever GameData.ini holds.
+	CHECK( theRMGParse.m_timeOfDay >= (Int)TIME_OF_DAY_FIRST );
+	CHECK( theRMGParse.m_timeOfDay < (Int)TIME_OF_DAY_COUNT );
 	CHECK_EQ( theRMGParse.m_lightingBytesLeftOver, 0 );
-	CHECK( theRMGParse.m_terrainAmbient[0] > 0.2f );
+	CHECK( theRMGParse.m_terrainAmbient[TIME_OF_DAY_AFTERNOON - TIME_OF_DAY_FIRST][0] > 0.2f );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The seed rolls the hour as well as the ground: all four come up, each lit as itself, and a
+	winter map snows - snowed roofs from the WorldInfo weather, falling snow from a map.ini the
+	store serves beside it. No other ground snows, and no other map has a map.ini. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_seed_rolls_its_hour_and_a_winter_map_snows)
+{
+	CHECK( bootOnce() );
+
+	Int hours[TIME_OF_DAY_COUNT] = { 0 };
+	Int winterMaps = 0, otherMaps = 0, plainShopsAfterDark = 0;
+	const Int seeds = 120;
+	for( Int seed = 1; seed <= seeds; seed++ )
+	{
+		RandomMapSettings settings;
+		settings.m_seed = seed;
+		settings.m_playableCells = 64;
+		settings.m_numPlayers = 2;
+
+		std::vector<char> bytes;
+		RandomMapGenerator::generate( settings, bytes );
+		parseGeneratedMap( bytes );
+
+		const Int hour = theRMGParse.m_timeOfDay;
+		CHECK( hour >= (Int)TIME_OF_DAY_FIRST && hour < (Int)TIME_OF_DAY_COUNT );
+		if( hour >= (Int)TIME_OF_DAY_FIRST && hour < (Int)TIME_OF_DAY_COUNT )
+			hours[hour]++;
+
+		const Bool winter = theRMGParse.m_textureNames[0].compare( "SnowType1" ) == 0;
+		CHECK_EQ( theRMGParse.m_weather, winter ? (Int)WEATHER_SNOWY : (Int)WEATHER_NORMAL );
+		winter ? winterMaps++ : otherMaps++;
+
+		AsciiString rules;
+		rules.format( "Maps\\RMG_v%d_%d_2p_64c\\map.ini", RANDOM_MAP_GENERATOR_VERSION, seed );
+		const char *rulesBytes = NULL;
+		Int rulesSize = 0;
+		CHECK_EQ( isGeneratedMapPath( rules ), winter );
+		CHECK_EQ( generatedMapBytes( rules, &rulesBytes, &rulesSize ), winter );
+		if( winter && rulesBytes )
+		{
+			CHECK( std::string( rulesBytes, rulesSize ).find( "SnowEnabled = Yes" ) != std::string::npos );
+		}
+
+		// the one shop with no night or snow model stays off a map that would show it bare
+		if( winter || hour == (Int)TIME_OF_DAY_NIGHT )
+		{
+			for( Int i = 0; i < (Int)theRMGParse.m_objectNames.size(); i++ )
+			{
+				if( theRMGParse.m_objectNames[i].compare( "StanSmallRetail03" ) == 0 )
+					plainShopsAfterDark++;
+			}
+		}
+
+		// Each hour lit as itself: the evening redder and dimmer than the afternoon, the night blue
+		// and dim but not black.
+		const Real *noonDiffuse = theRMGParse.m_terrainDiffuse[TIME_OF_DAY_AFTERNOON - TIME_OF_DAY_FIRST];
+		const Real *eveningDiffuse = theRMGParse.m_terrainDiffuse[TIME_OF_DAY_EVENING - TIME_OF_DAY_FIRST];
+		const Real *nightDiffuse = theRMGParse.m_terrainDiffuse[TIME_OF_DAY_NIGHT - TIME_OF_DAY_FIRST];
+		const Real *nightAmbient = theRMGParse.m_terrainAmbient[TIME_OF_DAY_NIGHT - TIME_OF_DAY_FIRST];
+		CHECK( eveningDiffuse[2] < noonDiffuse[2] );
+		CHECK( eveningDiffuse[0] / eveningDiffuse[2] > noonDiffuse[0] / noonDiffuse[2] );
+		CHECK( nightDiffuse[0] < noonDiffuse[0] * 0.5f );
+		CHECK( nightAmbient[2] > nightAmbient[0] );
+		for( Int channel = 0; channel < 3; channel++ )
+		{
+			CHECK( nightDiffuse[channel] > 0.15f && nightAmbient[channel] > 0.08f );
+		}
+	}
+
+	for( Int hour = TIME_OF_DAY_FIRST; hour < TIME_OF_DAY_COUNT; hour++ )
+	{
+		if( hours[hour] < seeds / 8 )
+			printf( "  hour %d came up %d times in %d seeds\n", hour, hours[hour], seeds );
+		CHECK( hours[hour] >= seeds / 8 );
+	}
+	CHECK( winterMaps > 0 );
+	CHECK( otherMaps > 0 );
+	CHECK_EQ( plainShopsAfterDark, 0 );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -8465,6 +8594,11 @@ TEST(the_cliffs_are_where_the_layout_put_them_and_never_between_two_players)
 
 	RandomMapSettings settings;
 
+	/* Rolling ground is the default and only some peaks sit on a shelf, so one seed may have no
+		cliff at all now that a base's blend ring no longer leaves a rim. Across the sixteen maps the
+		shelves have to show up somewhere. */
+	Int totalCliffCells = 0;
+
 	for( Int players = 2; players <= 8; players += 2 )
 	{
 		settings.m_numPlayers = players;
@@ -8497,7 +8631,7 @@ TEST(the_cliffs_are_where_the_layout_put_them_and_never_between_two_players)
 			}
 
 			CHECK( highest > lowest + 8 );				// terrain, not a parade ground
-			CHECK( numCliffCells > 0 );					// the ridge is supposed to be a cliff
+			totalCliffCells += numCliffCells;
 
 			// Nothing steep within a base radius of a start, or the base cannot be laid out.
 			for( Int i = 0; i < players; i++ )
@@ -8576,6 +8710,8 @@ TEST(the_cliffs_are_where_the_layout_put_them_and_never_between_two_players)
 			}
 		}
 	}
+
+	CHECK( totalCliffCells > 0 );						// the ridges are supposed to be cliffs
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -8676,92 +8812,203 @@ TEST(each_start_position_gets_flat_ground_to_build_on)
 	}
 }
 
+/* The corner alpha a blend entry draws, read the way WorldHeightMap::getAlphaUVData and
+	getExtraAlphaUVData read it (GameEngineDevice, which this binary does not link): corners in the
+	order (x,y), (x+1,y), (x+1,y+1), (x,y+1), and whether the cell's two triangles are cut from
+	corner 1 to corner 3 instead of 0 to 2. */
+static void RMGBlendCorners( const RMGBlendEntry& entry, Bool alpha[4], Bool *flip )
+{
+	const UnsignedByte inverted = entry.m_inverted & 0x1;		// INVERTED_MASK
+	const UnsignedByte flipped = entry.m_inverted & 0x2;		// FLIPPED_MASK
+	alpha[0] = alpha[1] = alpha[2] = alpha[3] = FALSE;
+	*flip = FALSE;
+	if( entry.m_horizontal )
+	{
+		*flip = flipped != 0;
+		if( inverted ) alpha[0] = alpha[3] = TRUE;
+		else alpha[1] = alpha[2] = TRUE;
+	}
+	if( entry.m_vertical )
+	{
+		*flip = flipped != 0;
+		if( inverted ) alpha[0] = alpha[1] = TRUE;
+		else alpha[2] = alpha[3] = TRUE;
+	}
+	if( entry.m_rightDiagonal )
+	{
+		if( inverted )
+		{
+			alpha[1] = TRUE;
+			if( entry.m_longDiagonal ) alpha[0] = alpha[2] = TRUE;
+		}
+		else
+		{
+			*flip = TRUE;
+			alpha[2] = TRUE;
+			if( entry.m_longDiagonal ) alpha[1] = alpha[3] = TRUE;
+		}
+	}
+	if( entry.m_leftDiagonal )
+	{
+		if( inverted )
+		{
+			*flip = TRUE;
+			alpha[0] = TRUE;
+			if( entry.m_longDiagonal ) alpha[1] = alpha[3] = TRUE;
+		}
+		else
+		{
+			alpha[3] = TRUE;
+			if( entry.m_longDiagonal ) alpha[0] = alpha[2] = TRUE;
+		}
+	}
+}
+
 //-------------------------------------------------------------------------------------------------
-/** A texture class change from one cell to the next is a hard edge on screen unless the cell on
-	the low side of it carries a blend of the other texture over the corners they share.  Walk the
-	map, find every boundary, and check the cell that is supposed to carry the blend does. */
+/** A texture class change from one cell to the next is a hard edge on screen unless the blends on
+	either side of it meet. The game draws a cell as its own ground, the blend layer over it and the
+	extra layer over that, each with an alpha of 0 or 1 at a corner and interpolated across the two
+	triangles. So the picture is seamless when, for every ground a cell paints, the alpha at a corner
+	is the same whichever of the four cells round the corner is drawing it - 1 exactly when one of
+	those four cells is that ground or above - and when the two layers of a cell cut it the same
+	way. Version 12 asked for three-corner shapes the renderer drew with one or two corners, could
+	not draw two opposite corners at all and blended only the strongest neighbour: on the first seed
+	here 8551 corner checks failed against 8155 cells on a boundary. */
 //-------------------------------------------------------------------------------------------------
 TEST(every_texture_boundary_is_blended_rather_than_cut)
 {
 	CHECK( bootOnce() );
 
-	RandomMapSettings settings;
-	settings.m_seed = 31337;
-	settings.m_playableCells = 128;
-	settings.m_numPlayers = 4;
-
-	std::vector<char> bytes;
-	RandomMapGenerator::generate( settings, bytes );
-	parseGeneratedMap( bytes );
-
-	Int width = theRMGParse.m_width;
-	Int height = theRMGParse.m_height;
-
-	CHECK_EQ( (Int)theRMGParse.m_blendIndexes.size(), theRMGParse.m_dataSize );
-	CHECK_EQ( (Int)theRMGParse.m_blends.size(), theRMGParse.m_numBlendedTiles - 1 );
-	CHECK( theRMGParse.m_numBlendedTiles < 16193 );		// NUM_BLEND_TILES, the reader's ceiling
-
-	// Every entry has to be one the reader will take: a real tile, the alpha blend rather than a
-	// custom edge class this map never declares, and the sentinel it asserts on.
-	Int i;
-	for( i = 0; i < (Int)theRMGParse.m_blends.size(); i++ )
+	static const Int seeds[] = { 31337, 271, 5150 };
+	for( Int s = 0; s < 3; s++ )
 	{
-		const RMGBlendEntry& entry = theRMGParse.m_blends[i];
-		Int source = entry.m_blendTileIndex >> 2;
+		RandomMapSettings settings;
+		settings.m_seed = seeds[s];
+		settings.m_playableCells = 128;
+		settings.m_numPlayers = 4;
 
-		CHECK( source >= 0 );
-		CHECK( source < theRMGParse.m_numBitmapTiles );
-		CHECK_EQ( entry.m_customBlendEdgeClass, -1 );
-		CHECK_EQ( entry.m_flag, 0x7ADA0000 );
+		std::vector<char> bytes;
+		RandomMapGenerator::generate( settings, bytes );
+		parseGeneratedMap( bytes );
 
-		// A blend that asks for nothing is a table row nothing can draw.
-		CHECK( entry.m_horizontal || entry.m_vertical || entry.m_rightDiagonal ||
-					 entry.m_leftDiagonal );
-	}
+		Int width = theRMGParse.m_width;
+		Int height = theRMGParse.m_height;
 
-	Int boundaries = 0;
-	Int blended = 0;
+		CHECK_EQ( (Int)theRMGParse.m_blendIndexes.size(), theRMGParse.m_dataSize );
+		CHECK_EQ( (Int)theRMGParse.m_extraBlendIndexes.size(), theRMGParse.m_dataSize );
+		CHECK_EQ( (Int)theRMGParse.m_blends.size(), theRMGParse.m_numBlendedTiles - 1 );
+		CHECK( theRMGParse.m_numBlendedTiles < 16193 );		// NUM_BLEND_TILES, the reader's ceiling
 
-	for( Int y = 1; y < height - 1; y++ )
-	{
-		for( Int x = 1; x < width - 1; x++ )
+		// Every entry has to be one the reader will take: a real tile, the alpha blend rather than a
+		// custom edge class this map never declares, and the sentinel it asserts on.
+		Int i;
+		for( i = 0; i < (Int)theRMGParse.m_blends.size(); i++ )
 		{
-			Int mine = (theRMGParse.m_tiles[y * width + x] >> 2) / 4;
+			const RMGBlendEntry& entry = theRMGParse.m_blends[i];
+			Int source = entry.m_blendTileIndex >> 2;
 
-			/* The strongest of the eight neighbours is the one whose texture bleeds in, and the
-				low side of the boundary is the cell that has to carry it.  Diagonals count: a
-				corner touching a rock cell is a corner of rock. */
-			Int strongest = mine;
-			for( Int dy = -1; dy <= 1; dy++ )
+			CHECK( source >= 0 );
+			CHECK( source < theRMGParse.m_numBitmapTiles );
+			CHECK_EQ( entry.m_customBlendEdgeClass, -1 );
+			CHECK_EQ( entry.m_flag, 0x7ADA0000 );
+
+			// A blend that asks for nothing is a table row nothing can draw.
+			CHECK( entry.m_horizontal || entry.m_vertical || entry.m_rightDiagonal ||
+						 entry.m_leftDiagonal );
+		}
+
+		std::vector<Int> ground( width * height );
+		for( i = 0; i < width * height; i++ )
+			ground[i] = (theRMGParse.m_tiles[i] >> 2) / 4;
+
+		Int boundaries = 0;
+		Int extraLayers = 0;
+		Int wrongCorners = 0;
+		Int wrongCuts = 0;
+		Int badIndexes = 0;
+
+		for( Int y = 1; y < height - 1; y++ )
+		{
+			for( Int x = 1; x < width - 1; x++ )
 			{
-				for( Int dx = -1; dx <= 1; dx++ )
+				Int mine = ground[y * width + x];
+
+				// What the four cells round each corner reach: the highest ground among them.
+				static const Int cornerDX[4] = { 0, 1, 1, 0 };
+				static const Int cornerDY[4] = { 0, 0, 1, 1 };
+				Int highest[4];
+				Bool boundary = FALSE;
+				for( Int c = 0; c < 4; c++ )
 				{
-					Int theirs = (theRMGParse.m_tiles[(y + dy) * width + x + dx] >> 2) / 4;
-					if( theirs > strongest )
-						strongest = theirs;
+					highest[c] = mine;
+					for( Int oy = -1; oy <= 0; oy++ )
+					{
+						for( Int ox = -1; ox <= 0; ox++ )
+						{
+							Int theirs = ground[(y + cornerDY[c] + oy) * width + x + cornerDX[c] + ox];
+							if( theirs > highest[c] )
+								highest[c] = theirs;
+						}
+					}
+					if( highest[c] != mine )
+						boundary = TRUE;
+				}
+				if( boundary )
+					boundaries++;
+
+				// The layers this cell draws, lowest first, and the ground it ends up showing.
+				Int shown[4] = { mine, mine, mine, mine };
+				Int cut = -1;
+				Int previousClass = mine;
+				Short layers[2] = { theRMGParse.m_blendIndexes[y * width + x],
+														theRMGParse.m_extraBlendIndexes[y * width + x] };
+				for( Int layer = 0; layer < 2; layer++ )
+				{
+					if( layers[layer] == 0 )
+						continue;
+					if( layers[layer] < 0 || layers[layer] >= theRMGParse.m_numBlendedTiles || (layer == 1 && layers[0] == 0) )
+					{
+						badIndexes++;
+						continue;
+					}
+					if( layer == 1 )
+						extraLayers++;
+
+					const RMGBlendEntry& entry = theRMGParse.m_blends[layers[layer] - 1];
+					Int layerClass = (entry.m_blendTileIndex >> 2) / 4;
+					if( layerClass <= previousClass )
+						badIndexes++;			// a layer has to be a higher ground than what it covers
+					previousClass = layerClass;
+
+					Bool alpha[4];
+					Bool flip;
+					RMGBlendCorners( entry, alpha, &flip );
+					for( Int c = 0; c < 4; c++ )
+					{
+						if( alpha[c] != (highest[c] >= layerClass) )
+							wrongCorners++;
+						if( alpha[c] )
+							shown[c] = layerClass;
+					}
+					if( cut >= 0 && cut != (flip ? 1 : 0) )
+						wrongCuts++;
+					cut = flip ? 1 : 0;
+				}
+
+				for( Int c = 0; c < 4; c++ )
+				{
+					if( shown[c] != highest[c] )
+						wrongCorners++;
 				}
 			}
-
-			if( strongest == mine )
-				continue;
-
-			boundaries++;
-
-			Int blendIndex = theRMGParse.m_blendIndexes[y * width + x];
-			if( blendIndex <= 0 )
-				continue;
-
-			CHECK( blendIndex < theRMGParse.m_numBlendedTiles );
-
-			// and the texture painted over it is the neighbour's, not some third one
-			Int blendClass = (theRMGParse.m_blends[blendIndex - 1].m_blendTileIndex >> 2) / 4;
-			CHECK_EQ( blendClass, strongest );
-			blended++;
 		}
-	}
 
-	CHECK( boundaries > 100 );
-	CHECK_EQ( blended, boundaries );
+		CHECK( boundaries > 100 );
+		CHECK( extraLayers > 0 );
+		CHECK_EQ( badIndexes, 0 );
+		CHECK_EQ( wrongCorners, 0 );
+		CHECK_EQ( wrongCuts, 0 );
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -9690,6 +9937,53 @@ TEST(a_generated_map_carries_an_attack_path_to_every_start)
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The approach paths flooded from a start's playable cell read as a map cell, twenty cells short on
+	both axes, so a "Center" path set off from ground twenty-odd cells beside the base it named. Every
+	path waypoint has to stand on ground the starts can walk to, and the first "Center" waypoint lies
+	one waypoint spacing (twelve steps) out from the base the path leaves. The flank points once
+	snapped onto lake beds the flood counts as flat ground; seed 42 at four players had ten of them. */
+//-------------------------------------------------------------------------------------------------
+TEST(an_attack_path_leaves_from_its_own_base_over_walkable_ground)
+{
+	CHECK( bootOnce() );
+
+	RandomMapSettings settings;
+	settings.m_seed = 42;
+	settings.m_numPlayers = 4;
+	settings.m_playableCells = RandomMapGenerator::cellsFor( RANDOM_MAP_SIZE_NORMAL, 4 );
+	std::vector<char> bytes;
+	RandomMapGenerator::generate( settings, bytes );
+	parseGeneratedMap( bytes );
+
+	CHECK_EQ( (Int)theRMGParse.m_waypointPositions.size(), settings.m_numPlayers );
+	CHECK( !theRMGParse.m_pathWaypointPositions.empty() );
+
+	Int startX, startY;
+	RMGWorldToCell( theRMGParse.m_waypointPositions[0], &startX, &startY );
+	std::vector<char> seen;
+	RMGFloodFillWalkable( startX, startY, seen );
+
+	Int firstSteps = 0;
+	for( UnsignedInt w = 0; w < theRMGParse.m_pathWaypointPositions.size(); w++ )
+	{
+		const Coord3D& at = theRMGParse.m_pathWaypointPositions[w];
+		CHECK( RMGSeenHasObjectAt( seen, at ) );
+
+		Int target = 0, from = 0, step = -1;
+		if( sscanf( theRMGParse.m_pathWaypointNames[w].str(), "Center%d_from%d_%d", &target, &from, &step ) != 3 ||
+				step != 0 )
+			continue;
+		CHECK( from >= 1 && from <= settings.m_numPlayers );
+		const Coord3D& base = theRMGParse.m_waypointPositions[from - 1];
+		Real dx = ( at.x - base.x ) / MAP_XY_FACTOR;
+		Real dy = ( at.y - base.y ) / MAP_XY_FACTOR;
+		CHECK( dx * dx + dy * dy <= 13.0f * 13.0f );
+		firstSteps++;
+	}
+	CHECK_EQ( firstSteps, settings.m_numPlayers * ( settings.m_numPlayers - 1 ) );
+}
+
+//-------------------------------------------------------------------------------------------------
 /** The seed is worthless across two builds unless both builds turn it into the same bytes, and
 	nothing warns anybody when they stop doing so.  These numbers are that warning: change the
 	generator and this test fails until RANDOM_MAP_GENERATOR_VERSION and the recorded fingerprints
@@ -9699,14 +9993,14 @@ TEST(the_generator_still_turns_a_seed_into_the_bytes_it_used_to)
 {
 	CHECK( bootOnce() );
 
-	CHECK_EQ( RANDOM_MAP_GENERATOR_VERSION, 11 );
+	CHECK_EQ( RANDOM_MAP_GENERATOR_VERSION, 14 );
 
 	struct RMGFingerprint { Int m_seed, m_players, m_cells; UnsignedInt m_crc; };
 	static const RMGFingerprint theFingerprints[] =
 	{
-		{ 0, 2, 64, 0x2D2AF5EF },
-		{ 12345, 4, 96, 0xD1B4AB2D },
-		{ 7, 8, 128, 0x5A40EFA4 },
+		{ 0, 2, 64, 0x47855C63 },
+		{ 12345, 4, 96, 0x2863C7C9 },
+		{ 7, 8, 128, 0x297288D3 },
 	};
 	const Int numFingerprints = sizeof(theFingerprints) / sizeof(theFingerprints[0]);
 
@@ -9911,8 +10205,10 @@ TEST(the_ground_is_textured_by_what_the_ground_is_doing)
 
 	/* Rock starts at under half the cliff slope, so since the rolling maps of generator version 10
 		most of it is hillside a tank drives up. 72 maps over twelve seeds, two sizes and 2/4/6
-		players painted 17.8% of the ground rock on average and 23.6% at most; this seed paints 22%.
-		What must stay small is the ground nobody can cross, and that is under 2.3% on all 72. */
+		players painted 17.8% of the ground rock on average and 23.6% at most in version 12, a good
+		part of it single cells. Version 13 reads the slope over 3x3 cells and votes the strays out:
+		12.1% on average, 34.0% at most, in patches; this seed paints 11%. What must stay small is
+		the ground nobody can cross, and that was under 2.3% on all 72. */
 	CHECK( cellsPerClass[3] < total / 4 );
 
 	const Real cliffLimit = 9.8f;						// PATHFIND_CLIFF_SLOPE_LIMIT_F
@@ -9928,6 +10224,175 @@ TEST(the_ground_is_textured_by_what_the_ground_is_doing)
 		}
 	}
 	CHECK( numCliffCells < numCells / 20 );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The seed picks a kind of map and what it is made of, the way an Age of Empires seed picks
+	Arabia or a river map and a desert or a forest. Over a couple of dozen seeds every ground set
+	has to turn up, and the water has to differ in kind as well as in place: a river map is cut
+	into several stretches at its fords, a plain has a pond or two.
+
+	Two of the kinds are told apart by what stands on them and how high the middle is. A black
+	forest has trees in nearly every patch of ground away from the bases, and none on the ride from
+	a base to the middle. A massif lifts the middle well above the ring the bases stand on, and the
+	top is ground a unit from player one's base can drive onto. Forty seeds hold three forests and
+	six massifs; on 128 cells the thresholds pick out all three forests and four of the massifs, and
+	no seed of another kind. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_seed_picks_its_map_type_and_its_ground)
+{
+	CHECK( bootOnce() );
+
+	std::set<std::string> groundSets;
+	std::set<Int> waterCounts;
+	Int woodedMaps = 0;
+	Int massifMaps = 0;
+
+	for( Int seed = 1; seed <= 40; seed++ )
+	{
+		RandomMapSettings settings;
+		settings.m_seed = seed;
+		settings.m_playableCells = 128;
+		settings.m_numPlayers = 2;
+
+		std::vector<char> bytes;
+		RandomMapGenerator::generate( settings, bytes );
+		parseGeneratedMap( bytes );
+
+		CHECK_EQ( theRMGParse.m_numTextureClasses, 4 );
+		std::string ground;
+		for( Int i = 0; i < 4 && i < (Int)theRMGParse.m_textureNames.size(); i++ )
+		{
+			ground += theRMGParse.m_textureNames[i].str();
+			ground += ";";
+		}
+		groundSets.insert( ground );
+		waterCounts.insert( theRMGParse.m_numWaterAreas );
+
+		const Real playable = (Real)settings.m_playableCells;
+		const Real centre = playable * 0.5f;
+		Real startX[2], startY[2];
+		for( Int i = 0; i < 2; i++ )
+		{
+			startX[i] = theRMGParse.m_waypointPositions[i].x / MAP_XY_FACTOR;
+			startY[i] = theRMGParse.m_waypointPositions[i].y / MAP_XY_FACTOR;
+		}
+
+		// Patches of 16 cells with a tree in them, out of those clear of both bases.
+		const Int patch = 16;
+		const Int patches = settings.m_playableCells / patch;
+		std::vector<char> wooded( patches * patches, 0 );
+		Int rideTrees = 0;
+		for( Int i = 0; i < (Int)theRMGParse.m_objectNames.size(); i++ )
+		{
+			if( strncmp( theRMGParse.m_objectNames[i].str(), "Tree", 4 ) != 0 )
+				continue;
+			Real tx = theRMGParse.m_objectPositions[i].x / MAP_XY_FACTOR;
+			Real ty = theRMGParse.m_objectPositions[i].y / MAP_XY_FACTOR;
+			Int px = (Int)tx / patch;
+			Int py = (Int)ty / patch;
+			if( px >= 0 && py >= 0 && px < patches && py < patches )
+				wooded[py * patches + px] = 1;
+
+			for( Int s = 0; s < 2; s++ )
+			{
+				Real sx = startX[s] - centre;
+				Real sy = startY[s] - centre;
+				Real length2 = sx * sx + sy * sy;
+				if( length2 < 1.0f )
+					continue;
+				Real t = ( ( tx - centre ) * sx + ( ty - centre ) * sy ) / length2;
+				if( t < 0.0f || t > 1.0f )
+					continue;
+				Real ex = tx - centre - sx * t;
+				Real ey = ty - centre - sy * t;
+				if( ex * ex + ey * ey < 1.5f * 1.5f )
+					rideTrees++;
+			}
+		}
+		Int open = 0, covered = 0;
+		for( Int py = 0; py < patches; py++ )
+		{
+			for( Int px = 0; px < patches; px++ )
+			{
+				Real cx = ( (Real)px + 0.5f ) * (Real)patch;
+				Real cy = ( (Real)py + 0.5f ) * (Real)patch;
+				Bool nearBase = FALSE;
+				for( Int s = 0; s < 2; s++ )
+				{
+					Real dx = cx - startX[s];
+					Real dy = cy - startY[s];
+					if( dx * dx + dy * dy < 44.0f * 44.0f )
+						nearBase = TRUE;
+				}
+				if( nearBase )
+					continue;
+				open++;
+				if( wooded[py * patches + px] )
+					covered++;
+			}
+		}
+		if( open > 0 && covered * 10 >= open * 8 )
+		{
+			woodedMaps++;
+			CHECK_EQ( rideTrees, 0 );
+		}
+
+		// The middle against the ring the bases stand on.
+		const Int width = theRMGParse.m_width;
+		const Int border = theRMGParse.m_border;
+		Real middle = 0.0f;
+		Int middleSamples = 0;
+		for( Int dy = -6; dy <= 6; dy++ )
+		{
+			for( Int dx = -6; dx <= 6; dx++ )
+			{
+				if( dx * dx + dy * dy > 36 )
+					continue;
+				middle += (Real)theRMGParse.m_heights[( (Int)centre + dy + border ) * width + (Int)centre + dx + border];
+				middleSamples++;
+			}
+		}
+		middle /= (Real)middleSamples;
+		Real ring = 0.0f;
+		for( Int k = 0; k < 32; k++ )
+		{
+			Real angle = 2.0f * PI * (Real)k / 32.0f;
+			Int x = (Int)( centre + playable * 0.32f * Cos( angle ) ) + border;
+			Int y = (Int)( centre + playable * 0.32f * Sin( angle ) ) + border;
+			ring += (Real)theRMGParse.m_heights[y * width + x];
+		}
+		ring /= 32.0f;
+
+		// And how many bearings out of the middle run into a cliff before they reach that ring.
+		Int walled = 0;
+		for( Int k = 0; k < 64; k++ )
+		{
+			Real angle = 2.0f * PI * (Real)k / 64.0f;
+			for( Real r = 0.0f; r < playable * 0.30f; r += 1.0f )
+			{
+				Int x = (Int)( centre + r * Cos( angle ) ) + border;
+				Int y = (Int)( centre + r * Sin( angle ) ) + border;
+				if( RMGCellSpan( x, y ) > 9.8f )
+				{
+					walled++;
+					break;
+				}
+			}
+		}
+		if( middle > ring + 45.0f && walled >= 48 )
+		{
+			massifMaps++;
+			std::vector<char> seen;
+			RMGFloodFillFromFirstStart( seen );
+			CHECK( seen[( (Int)centre + border ) * width + (Int)centre + border] );
+		}
+	}
+
+	CHECK_EQ( (Int)groundSets.size(), 4 );
+	CHECK( waterCounts.size() >= 3 );
+	CHECK( woodedMaps >= 1 );
+	CHECK( massifMaps >= 1 );
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -10597,6 +11062,35 @@ TEST(matchup_score_is_money_for_money)
 	CHECK_NEAR( 0.625f, faster, 0.00001f );
 }
 
+/** The exchange between two mixed armies: the value-weighted mean of their pairings, as an advantage. */
+TEST(army_advantage_weighs_the_mix)
+{
+	// one kind a side, an even pairing: an even trade
+	const Real even = 0.5f;
+	const Real one = 1000.0f;
+	CHECK_NEAR( 1.0f, aiArmyAdvantage( &one, 1, &one, 1, &even ), 0.0001f );
+
+	// four times better reads as three, and the other side of it as a third
+	const Real better = 0.75f;
+	const Real worse = 0.25f;
+	CHECK_NEAR( 3.0f, aiArmyAdvantage( &one, 1, &one, 1, &better ), 0.0001f );
+	CHECK_NEAR( 1.0f / 3.0f, aiArmyAdvantage( &one, 1, &one, 1, &worse ), 0.0001f );
+
+	// nothing to hurt, or nothing to hurt it with, saturates at sixteen either way
+	const Real none = 0.0f;
+	const Real all = 1.0f;
+	CHECK_NEAR( 16.0f, aiArmyAdvantage( &one, 1, &one, 1, &all ), 0.0001f );
+	CHECK_NEAR( 1.0f / 16.0f, aiArmyAdvantage( &one, 1, &one, 1, &none ), 0.0001f );
+
+	// an empty side is no exchange
+	CHECK_NEAR( 1.0f, aiArmyAdvantage( &one, 1, NULL, 0, NULL ), 0.0001f );
+
+	// two kinds of mine against one of theirs: the dearer kind weighs three times as much
+	const Real mine[ 2 ] = { 3000.0f, 1000.0f };
+	const Real scores[ 2 ] = { 0.75f, 0.25f };		// (0.75 * 3 + 0.25) / 4 = 0.625
+	CHECK_NEAR( 0.625f / 0.375f, aiArmyAdvantage( mine, 2, &one, 1, scores ), 0.0001f );
+}
+
 
 /** C1's arithmetic: the ratio of how long a force lasts to how long it needs to finish what is
 	 shooting at it.  The word "retreat" did not appear anywhere in the AI before this - teams fought
@@ -10704,6 +11198,61 @@ TEST(the_retreat_never_orders_an_aircraft_home)
 	CHECK( !AIRetreat_canBeOrderedHome( true, true, false ) );
 	CHECK( !AIRetreat_canBeOrderedHome( false, false, false ) );
 	CHECK( !AIRetreat_canBeOrderedHome( false, true, true ) );
+}
+
+
+/** AIPlayer.cpp: a ranked unit leaves a fight on its own health and before its team does, the higher
+	 the rank the sooner, and counts for more in every weighing of forces. */
+extern Bool AIRetreat_rankPullsOut( Int rank, Real healthFraction, Bool inFight, Real ratio, Real retreatRatio );
+extern Real AIRank_valueScale( Int rank );
+
+TEST(the_ai_pulls_ranked_units_out_sooner_the_higher_the_rank)
+{
+	// a regular soldier is the team retreat's, however hurt or however the fight goes
+	CHECK( !AIRetreat_rankPullsOut( 0, 0.05f, true, 0.1f, 0.5f ) );
+
+	// on its own health, fight or no fight: a veteran at 30%, an elite at 40%, a heroic at 50%
+	CHECK( AIRetreat_rankPullsOut( 1, 0.30f, false, 1.0f, 0.5f ) );
+	CHECK( !AIRetreat_rankPullsOut( 1, 0.40f, false, 1.0f, 0.5f ) );
+	CHECK( AIRetreat_rankPullsOut( 2, 0.40f, false, 1.0f, 0.5f ) );
+	CHECK( AIRetreat_rankPullsOut( 3, 0.50f, false, 1.0f, 0.5f ) );
+	CHECK( !AIRetreat_rankPullsOut( 3, 0.60f, false, 1.0f, 0.5f ) );
+
+	// a fight read at 0.7, which a team quitting at 0.5 stays in: the veteran stays, the elite goes
+	CHECK( !AIRetreat_rankPullsOut( 1, 1.0f, true, 0.7f, 0.5f ) );
+	CHECK( AIRetreat_rankPullsOut( 2, 1.0f, true, 0.7f, 0.5f ) );
+	// a fight read the same with no enemy in it is no reason to go
+	CHECK( !AIRetreat_rankPullsOut( 3, 1.0f, false, 0.7f, 0.5f ) );
+	// and nobody leaves a fight it is even in or winning, at any rank
+	CHECK( !AIRetreat_rankPullsOut( 3, 1.0f, true, 1.0f, 0.9f ) );
+
+	CHECK_NEAR( 1.0f, AIRank_valueScale( 0 ), 0.0001f );
+	CHECK( AIRank_valueScale( 3 ) > AIRank_valueScale( 2 ) );
+	CHECK( AIRank_valueScale( 2 ) > AIRank_valueScale( 1 ) );
+	CHECK( AIRank_valueScale( 1 ) > 1.0f );
+}
+
+
+/** AIPlayer.cpp: the computer buys its first Ambulance once it has an army and a second once the army
+	 is big, and calls in the badly hurt from near it only. */
+extern Int AIAmbulance_wanted( Int army );
+extern Bool AIAmbulance_callsPatient( Real healthFraction, Real distance );
+
+TEST(the_ai_buys_ambulances_by_army_and_calls_in_the_hurt_nearby)
+{
+	CHECK_EQ( 0, AIAmbulance_wanted( 0 ) );
+	CHECK_EQ( 0, AIAmbulance_wanted( 7 ) );
+	CHECK_EQ( 1, AIAmbulance_wanted( 8 ) );
+	CHECK_EQ( 1, AIAmbulance_wanted( 19 ) );
+	CHECK_EQ( 2, AIAmbulance_wanted( 20 ) );
+	CHECK_EQ( 2, AIAmbulance_wanted( 200 ) );
+
+	CHECK( AIAmbulance_callsPatient( 0.3f, 100.0f ) );
+	CHECK( AIAmbulance_callsPatient( 0.49f, 450.0f ) );
+	// half health or more stays in the fight
+	CHECK( !AIAmbulance_callsPatient( 0.5f, 100.0f ) );
+	// too far off to walk over
+	CHECK( !AIAmbulance_callsPatient( 0.1f, 451.0f ) );
 }
 
 
@@ -10909,6 +11458,56 @@ TEST(massing_waits_for_a_force_but_never_waits_for_ever)
 }
 
 
+/** A computer's base defences come as a mix: the type it has fewest of goes up next, and a bunker or
+	 a speaker tower, which shoots at nothing on its own, counts three times what it has standing. */
+TEST(ai_base_defenses_rotate_through_the_sides_types)
+{
+	CHECK_EQ( aiPickBaseDefense( NULL, NULL, 0 ), -1 );
+
+	// USA: Patriot first on the bar, then Fire Base.  Twelve picks go six and six, never two alike running
+	{
+		Int standing[ 2 ] = { 0, 0 };
+		const Bool armed[ 2 ] = { TRUE, TRUE };
+		Int last = -1;
+		for( Int n = 0; n < 12; ++n )
+		{
+			const Int pick = aiPickBaseDefense( standing, armed, 2 );
+			CHECK( pick != last );
+			last = pick;
+			++standing[ pick ];
+		}
+		CHECK_EQ( standing[ 0 ], 6 );
+		CHECK_EQ( standing[ 1 ], 6 );
+	}
+
+	// China: Bunker, Speaker Tower and Gattling Cannon on the bar, in that order.  The cannon goes up
+	// first although the bunker's button comes first, and twelve end seven guns, three bunkers, two towers
+	{
+		Int standing[ 3 ] = { 0, 0, 0 };
+		const Bool armed[ 3 ] = { FALSE, FALSE, TRUE };
+		CHECK_EQ( aiPickBaseDefense( standing, armed, 3 ), 2 );
+		for( Int n = 0; n < 12; ++n )
+			++standing[ aiPickBaseDefense( standing, armed, 3 ) ];
+		CHECK_EQ( standing[ 2 ], 7 );
+		CHECK_EQ( standing[ 0 ], 3 );
+		CHECK_EQ( standing[ 1 ], 2 );
+	}
+
+	// a spot is scored by the ground it sees toward the enemy: ground half a reach nearer him than the
+	// middle of the base is worth a half, ground behind the base nothing, and outside the base a tenth on top
+	CHECK_NEAR( aiFireSampleWeight( 1000.0f, 850.0f, 300.0f, FALSE ), 0.5f, 0.001f );
+	CHECK_NEAR( aiFireSampleWeight( 1000.0f, 1200.0f, 300.0f, FALSE ), 0.0f, 0.001f );
+	CHECK_NEAR( aiFireSampleWeight( 1000.0f, 1200.0f, 300.0f, TRUE ), 0.1f, 0.001f );
+	CHECK_NEAR( aiFireSampleWeight( 1000.0f, 700.0f, 300.0f, TRUE ), 1.1f, 0.001f );
+
+	// one type lost in a raid is the one put back
+	{
+		const Int standing[ 2 ] = { 5, 2 };
+		const Bool armed[ 2 ] = { TRUE, TRUE };
+		CHECK_EQ( aiPickBaseDefense( standing, armed, 2 ), 1 );
+	}
+}
+
 /** Another factory when the queue is backing up, and another tech building until three are standing.
 	 Easy and Normal never reach the caller: economy buildings stay off below Brutal. */
 TEST(extra_factory_follows_the_queue_and_tech_stops_at_three)
@@ -10938,6 +11537,16 @@ TEST(extra_factory_follows_the_queue_and_tech_stops_at_three)
 	CHECK( aiWantsAnotherTechBuilding( AI_TECH_BUILDING_COPIES - 1, 0 ) );
 	CHECK( !aiWantsAnotherTechBuilding( 2, 1 ) );
 	CHECK( !aiWantsAnotherTechBuilding( AI_TECH_BUILDING_COPIES, 0 ) );
+
+	// defences: a big army earns them, and the clock earns one per pace up to two superweapons' worth
+	const UnsignedInt pace = AI_DEFENSE_PACE_SECONDS * LOGICFRAMES_PER_SECOND;
+	CHECK_EQ( aiDefenseAllowance( 0, 0 ), 0 );
+	CHECK_EQ( aiDefenseAllowance( 0, pace - 1 ), 0 );
+	CHECK_EQ( aiDefenseAllowance( 0, pace ), 1 );
+	CHECK_EQ( aiDefenseAllowance( 0, DEFENSES_PER_SUPERWEAPON * pace ), (Int)DEFENSES_PER_SUPERWEAPON );
+	CHECK_EQ( aiDefenseAllowance( 0, 1000 * pace ), 2 * (Int)DEFENSES_PER_SUPERWEAPON );
+	CHECK_EQ( aiDefenseAllowance( 40, pace ), 40 / AI_ARMY_PER_DEFENSE );
+	CHECK_EQ( aiDefenseAllowance( 200, 1000 * pace ), 200 / AI_ARMY_PER_DEFENSE );
 
 	TAiData ladder;
 	CHECK( !ladder.m_skill[ AISKILL_EASY ].m_economyBuildings );
@@ -13033,18 +13642,20 @@ TEST(option_catalog_clamps_and_leaves_an_absent_key_alone)
 	TheWritableGlobalData = saved;
 }
 
-/** Bloom is picked as a level and stored as one, and the shader still reads the percentage it
-	 always read.  The mapping is the whole setting: get the two directions out of step and the combo
-	 box shows one thing while the screen does another, which nothing at build time would notice. */
+/** Glow (the Bloom key) is picked as a level and stored as one, and the renderer still reads the
+	 percentage it always read.  The mapping is the whole setting: get the two directions out of step
+	 and the combo box shows one thing while the screen does another, which nothing at build time
+	 would notice. */
 TEST(bloom_levels_carry_the_percentages_the_shader_reads)
 {
 	const OptionDef *bloom = findOptionDef( "Bloom" );
-	const OptionDef *threshold = findOptionDef( "BloomThreshold" );
-	CHECK( bloom != NULL && threshold != NULL );
+	CHECK( bloom != NULL );
 	CHECK_EQ( (Int)bloom->kind, (Int)OPTION_ENUM );
-	CHECK_EQ( (Int)threshold->kind, (Int)OPTION_ENUM );
+	CHECK_EQ( BLOOM_LEVEL_COUNT, 5 );		// off, low, medium, high, ultra
 	CHECK_EQ( bloom->hi, BLOOM_LEVEL_COUNT - 1 );
-	CHECK_EQ( threshold->hi, BLOOM_THRESHOLD_LEVEL_COUNT - 1 );
+
+	// what glows is the level's business now, and a second row deciding it would contradict it
+	CHECK( findOptionDef( "BloomThreshold" ) == NULL );
 
 	GlobalData *saved = TheWritableGlobalData;
 	GlobalData *scratch = NEW GlobalData;
@@ -13052,7 +13663,6 @@ TEST(bloom_levels_carry_the_percentages_the_shader_reads)
 
 	// what GlobalData's constructor put there, before anything below scribbles on it
 	const Int shippedIntensity = TheGlobalData->m_bloomIntensity;
-	const Int shippedThreshold = TheGlobalData->m_bloomThreshold;
 	CHECK_EQ( bloom->get(), 2 );		// a fresh install starts on Medium, not Off
 
 	// off is off, and nothing else is: a level that mapped to 0 would be a silent second Off entry
@@ -13074,33 +13684,30 @@ TEST(bloom_levels_carry_the_percentages_the_shader_reads)
 		previous = TheGlobalData->m_bloomIntensity;
 	}
 
-	/* The threshold is a brightness, so it runs the other way: later entries mean more of the
-		 picture glows, which is a lower number.  This is the pair that was worth a dropdown. */
-	previous = 101;
-	for( Int level = 0; level < BLOOM_THRESHOLD_LEVEL_COUNT; ++level )
+	/* An Options.ini saved before Ultra was added holds 0 to 3 for off, subtle, normal and strong,
+		 and has to come back as Off, Low, Medium and High: the index kept its meaning. */
+	UserPreferences pref;
+	for( Int old = 0; old < 4; ++old )
 	{
-		threshold->set( level );
-		CHECK( TheGlobalData->m_bloomThreshold < previous );
-		previous = TheGlobalData->m_bloomThreshold;
-		CHECK_EQ( threshold->get(), level );
+		AsciiString value;
+		value.format( "%d", old );
+		pref[ AsciiString( "Bloom" ) ] = value;
+		loadOptionsFromPreferences( pref );
+		CHECK_EQ( bloom->get(), old );
 	}
 
-	/* GameData.ini writes these fields as raw percentages and never learns about levels, so the
-		 combo box has to answer with the nearest entry rather than the first one. */
-	TheWritableGlobalData->m_bloomIntensity = 62;
+	/* GameData.ini writes the field as a raw percentage and never learns about levels, so the
+		 combo box has to answer with the nearest entry rather than the first one.  60 is the old
+		 default Medium. */
+	TheWritableGlobalData->m_bloomIntensity = 60;
 	CHECK_EQ( bloom->get(), 2 );
-	TheWritableGlobalData->m_bloomThreshold = 66;
-	CHECK_EQ( threshold->get(), 1 );
 
 	/* The shipped default has to be one of the entries, not something between two of them.  Opening
 		 the options screen and pressing Accept without touching anything must leave the picture where
 		 it was, and it only does that if the default round trips through a level exactly. */
 	TheWritableGlobalData->m_bloomIntensity = shippedIntensity;
-	TheWritableGlobalData->m_bloomThreshold = shippedThreshold;
 	bloom->set( bloom->get() );
-	threshold->set( threshold->get() );
 	CHECK_EQ( TheGlobalData->m_bloomIntensity, shippedIntensity );
-	CHECK_EQ( TheGlobalData->m_bloomThreshold, shippedThreshold );
 
 	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
@@ -14838,26 +15445,29 @@ TEST(an_open_dropdown_owns_the_rows_that_hang_past_its_panel)
 	CHECK( !OpenWindowOwnsPoint( TRUE, boxX, boxY, boxWidth, boxHeightOpen, 900, 660 ) );
 }
 
-/* Four finished base defences buy one superweapon, eight buy two, whatever mix of silo, uplink and
-	 storm they go to.  Player::canBuildMoreOfType counts and asks this; the lobby's cap is checked
-	 beside it and still refuses on its own. */
-TEST(four_finished_defenses_pay_for_each_superweapon)
+/* Twelve finished base defences buy one superweapon, twenty-four buy two, whatever mix of silo,
+	 uplink and storm they go to.  Player::canBuildMoreOfType counts and asks this; the lobby's cap is
+	 checked beside it and still refuses on its own. */
+TEST(twelve_finished_defenses_pay_for_each_superweapon)
 {
-	// fewer than four buys nothing
+	CHECK_EQ( (Int)DEFENSES_PER_SUPERWEAPON, 12 );
+
+	// fewer than twelve buys nothing, four included, which bought one before
 	CHECK( SuperweaponDefenseCapRefuses( 0, 0 ) );
-	CHECK( SuperweaponDefenseCapRefuses( 3, 0 ) );
+	CHECK( SuperweaponDefenseCapRefuses( 4, 0 ) );
+	CHECK( SuperweaponDefenseCapRefuses( 11, 0 ) );
 
-	// four buy the first, and a foundation already down spends it
-	CHECK( !SuperweaponDefenseCapRefuses( 4, 0 ) );
-	CHECK( SuperweaponDefenseCapRefuses( 4, 1 ) );
-	CHECK( SuperweaponDefenseCapRefuses( 7, 1 ) );
+	// twelve buy the first, and a foundation already down spends it
+	CHECK( !SuperweaponDefenseCapRefuses( 12, 0 ) );
+	CHECK( SuperweaponDefenseCapRefuses( 12, 1 ) );
+	CHECK( SuperweaponDefenseCapRefuses( 23, 1 ) );
 
-	// eight the second
-	CHECK( !SuperweaponDefenseCapRefuses( 8, 1 ) );
-	CHECK( SuperweaponDefenseCapRefuses( 8, 2 ) );
+	// twenty-four the second
+	CHECK( !SuperweaponDefenseCapRefuses( 24, 1 ) );
+	CHECK( SuperweaponDefenseCapRefuses( 24, 2 ) );
 
 	// losing defences never pulls a standing superweapon down, it only stops the next one
-	CHECK( SuperweaponDefenseCapRefuses( 4, 2 ) );
+	CHECK( SuperweaponDefenseCapRefuses( 12, 2 ) );
 
 	// a Sneak Attack tunnel costs nothing and buys nothing; a Tunnel Network at 800 does
 	CHECK( !DefenseCountsForSuperweapons( 0 ) );
@@ -14869,12 +15479,34 @@ TEST(four_finished_defenses_pay_for_each_superweapon)
 	CHECK( !RebuildHoleHoldsSuperweapon( TRUE, TRUE ) );
 	CHECK( !RebuildHoleHoldsSuperweapon( FALSE, FALSE ) );
 
-	// a silo whose missile is silenced sells China's upgrades and asks for no defences
-	CHECK( !SuperweaponNeedsDefenses( AsciiString( "ChinaNuclearMissileLauncher" ), FALSE, SUPERWEAPONS_NONE ) );
-	CHECK( !SuperweaponNeedsDefenses( AsciiString( "Tank_ChinaNuclearMissileLauncher" ), TRUE, SUPERWEAPONS_ALLOW ) );
-	CHECK( SuperweaponNeedsDefenses( AsciiString( "ChinaNuclearMissileLauncher" ), FALSE, SUPERWEAPONS_LIMIT ) );
-	CHECK( SuperweaponNeedsDefenses( AsciiString( "SupW_AmericaParticleCannonUplink" ), FALSE, SUPERWEAPONS_NONE ) );
-	CHECK( SuperweaponNeedsDefenses( AsciiString( "GLAScudStorm" ), TRUE, SUPERWEAPONS_ALLOW ) );
+	// a computer's silo whose missile is silenced sells China's upgrades and asks for no defences
+	CHECK( !SuperweaponNeedsDefenses( AsciiString( "ChinaNuclearMissileLauncher" ), FALSE, SUPERWEAPONS_NONE, TRUE ) );
+	CHECK( !SuperweaponNeedsDefenses( AsciiString( "Tank_ChinaNuclearMissileLauncher" ), TRUE, SUPERWEAPONS_ALLOW, TRUE ) );
+	CHECK( SuperweaponNeedsDefenses( AsciiString( "ChinaNuclearMissileLauncher" ), FALSE, SUPERWEAPONS_LIMIT, TRUE ) );
+	CHECK( SuperweaponNeedsDefenses( AsciiString( "SupW_AmericaParticleCannonUplink" ), FALSE, SUPERWEAPONS_NONE, TRUE ) );
+	CHECK( SuperweaponNeedsDefenses( AsciiString( "GLAScudStorm" ), TRUE, SUPERWEAPONS_ALLOW, TRUE ) );
+}
+
+/* The defence allowance is the computer's rule only.  A human builds a superweapon against the
+	 lobby's limit and Pro Rules alone, so no superweapon of his is ever asked for towers, whatever
+	 mode the lobby picked. */
+TEST(superweapon_defense_allowance_binds_computer_players_only)
+{
+	const char *const superweapons[] = { "ChinaNuclearMissileLauncher", "SupW_AmericaParticleCannonUplink",
+	                                     "AmericaParticleCannonUplink", "GLAScudStorm" };
+	const Int restrictions[] = { SUPERWEAPONS_ALLOW, SUPERWEAPONS_LIMIT, SUPERWEAPONS_NONE };
+	for ( Int s = 0; s < ARRAY_SIZE( superweapons ); ++s )
+		for ( Int r = 0; r < ARRAY_SIZE( restrictions ); ++r )
+			for ( Int pro = 0; pro < 2; ++pro )
+				CHECK( !SuperweaponNeedsDefenses( AsciiString( superweapons[ s ] ), (Bool)pro, restrictions[ r ], FALSE ) );
+
+	// the same Scud Storm under the same lobby asks a computer for its towers
+	CHECK( SuperweaponNeedsDefenses( AsciiString( "GLAScudStorm" ), FALSE, SUPERWEAPONS_ALLOW, TRUE ) );
+	CHECK( SuperweaponNeedsDefenses( AsciiString( "AmericaParticleCannonUplink" ), FALSE, SUPERWEAPONS_LIMIT, TRUE ) );
+
+	// and for a computer a storm's waiting hole still spends the twelve towers it stood on
+	CHECK( SuperweaponDefenseCapRefuses( 12, RebuildHoleHoldsSuperweapon( TRUE, FALSE ) ? 1 : 0 ) );
+	CHECK( !SuperweaponDefenseCapRefuses( 12, RebuildHoleHoldsSuperweapon( FALSE, FALSE ) ? 1 : 0 ) );
 }
 
 /* The superweapon rule is a mode, and what a mode leaves you depends on who you are playing.  The
@@ -15318,18 +15950,13 @@ TEST(scenario_parses_the_order_lines)
 	CHECK_STR( action.selector.str(), "ChinaGattlingCannon" );
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "1800 tally 1", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
 
-	// the stance key, and the sweep with the key's own circle unless the line sizes it
+	// the stance key
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "60 stance 0 AmericaTankCrusader aggressive", &action ), (Int)SCENARIO_PARSE_OK );
 	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_STANCE );
 	CHECK_STR( action.name.str(), "aggressive" );
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "60 stance 0 * bold", &action ), (Int)SCENARIO_PARSE_BAD_ACTION );
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "60 stance 0 *", &action ), (Int)SCENARIO_PARSE_MISSING_ARGS );
-	CHECK_EQ( (Int)ScenarioDrill_parseLine( "60 hunt 0 * 900 700", &action ), (Int)SCENARIO_PARSE_OK );
-	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_HUNT );
-	CHECK( action.radius == 300.0f );
-	CHECK_EQ( (Int)ScenarioDrill_parseLine( "60 hunt 0 * 900 700 450", &action ), (Int)SCENARIO_PARSE_OK );
-	CHECK_EQ( (Int)action.action, (Int)SCENARIO_ACTION_HUNT );
-	CHECK( action.radius == 450.0f );
+	CHECK_EQ( (Int)ScenarioDrill_parseLine( "60 hunt 0 * 900 700", &action ), (Int)SCENARIO_PARSE_BAD_ACTION );
 
 	CHECK_EQ( (Int)ScenarioDrill_parseLine( "700 power 1 GLAScudStorm start0:0:300", &action ),
 						(Int)SCENARIO_PARSE_OK );
@@ -15574,6 +16201,7 @@ public:
 	};
 
 	Int drawState( void ) const { return m_drawState; }
+	void start( void ) { m_isFinished = FALSE; m_isForward = TRUE; }	// init() without the gradient lookup
 };
 
 TEST(button_flash_draws_nothing_for_a_button_the_layout_lacks)
@@ -15584,6 +16212,29 @@ TEST(button_flash_draws_nothing_for_a_button_the_layout_lacks)
 		flash.update( frame );
 		CHECK_EQ( flash.drawState(), (Int)ButtonFlashWithoutWindow::NOTHING_TO_DRAW );
 	}
+}
+
+/* The same flash never reaches its own end, so the group holding it has to call itself finished
+ * once it is past the last frame. It waited on the flash for good instead, and the main menu
+ * refuses every click while a group runs: issue 86, Single Player and then nothing. The group
+ * steps on the wall clock, 30 a second, so this takes about 0.6 seconds of real time. */
+#include "Lib/Clock.h"
+
+TEST(transition_group_finishes_past_a_flash_for_a_button_the_layout_lacks)
+{
+	ButtonFlashWithoutWindow *flash = NEW ButtonFlashWithoutWindow;
+	flash->start();
+	TransitionWindow *window = NEW TransitionWindow;
+	window->m_transition = flash;
+	TransitionGroup group;
+	group.addWindow( window );	// the group deletes it, and it deletes the flash
+
+	UnsignedInt start = Clock_Milliseconds();
+	while( !group.isFinished() && Clock_Milliseconds() - start < 3000 )
+		group.update();
+
+	CHECK( group.isFinished() );
+	CHECK( !flash->isFinished() );
 }
 
 // Camera scroll timing must advance during stationary frames as well as moving frames.

@@ -37,6 +37,7 @@ static void drawFramerateBar(void);
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include <stdlib.h>
+#include <algorithm>
 #include "Lib/Clock.h"
 #if defined(_WIN32)
 #include <windows.h>
@@ -83,6 +84,7 @@ static void drawFramerateBar(void);
 #include "GameClient/GraphDraw.h"
 #include "GameClient/Line2D.h"
 #include "GameClient/Mouse.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameClient/GlobalLanguage.h"
 #include "GameClient/Water.h"
 
@@ -2155,6 +2157,7 @@ DECLARE_PERF_TIMER(W3DDisplay_draw)
 static Bool s_screenShotPending = FALSE;	// F12 pressed: save the frame at the end of the next draw()
 static void saveScreenShot(void);
 static void captureVideoFrame(void);
+static Bool videoRecordingFrame(void);
 
 #ifdef DEBUG_LOGGING
 //
@@ -2448,6 +2451,10 @@ AGAIN:
 		prevSyncMs = nowSyncMs;
 		if (deltaMs > TheW3DFrameLengthInMsec * 4)
 			deltaMs = TheW3DFrameLengthInMsec * 4;	// a level load must not fast-forward everything
+		// a recorded picture is one logic frame however long it took to draw and save, so the clock
+		// moves one logic frame too, or the footage plays every animation fast
+		if (videoRecordingFrame())
+			deltaMs = TheW3DFrameLengthInMsec;
 
 		syncTime += deltaMs;
 		// allow W3D to update its internals
@@ -2704,8 +2711,9 @@ AGAIN:
 					saveScreenShot();
 				}
 				captureVideoFrame();
-				// render is all done!
-				WW3D::End_Render();
+				// render is all done!  -directorrecord's second fight is for the recording only and is
+				// never presented: the frame drawn next over it is
+				WW3D::End_Render(!TheObserverCamera.isDrawingSecond());
 
 				/* A pipeline is compiled and a texture copied the first time it reaches a Direct3D 11
 					 draw, which is the frame a new explosion first shows up on.  A frame that spent more
@@ -3784,7 +3792,8 @@ static void CreateBMPFile(char *pszFile, char *image, Int width, Int height)
 	// the image's own 3 * width * height bytes are read.  The Windows writer this replaces sized the image
 	// (width + 7) / 8 * height * 24 bytes and wrote that many out of a 3 * width * height buffer: past its
 	// end whenever the width is not a multiple of 8 (a 1366-wide screen), and with unpadded rows, so a
-	// skewed picture, whenever it is not a multiple of 4 (port defect 18).
+	// skewed picture, whenever it is not a multiple of 4 (port defect 18).  The image comes top row
+	// first, the way the screen is read, and the file takes the bottom row first.
 	FILE *fp = zh_fopen(pszFile, "wb");
 	if (fp == NULL)
 		return;
@@ -3809,27 +3818,29 @@ static void CreateBMPFile(char *pszFile, char *image, Int width, Int height)
 	Put::u32(header + 34, imageBytes);
 	fwrite(header, 1, sizeof(header), fp);
 	static const unsigned char pad[3] = { 0, 0, 0 };
-	for (Int row = 0; row < height; ++row) {
+	for (Int row = height - 1; row >= 0; --row) {
 		fwrite(image + row * rowBytes, 1, rowBytes, fp);
 		fwrite(pad, 1, stride - rowBytes, fp);
 	}
 	fclose(fp);
 }
 
-// A system-memory copy of the back buffer (32-bit, not multisampled), NULL when that is
-// not possible.  Taken at the end of draw(), before Present: the front-buffer path is a
-// desktop capture, and a window presented through a DXGI flip swap chain is one that
-// desktop captures do not see - the old code saved black.
-static IDirect3DSurface9 *captureBackBuffer(void)
+// The back buffer (32-bit, not multisampled) copied into *copy, a system-memory surface kept from
+// call to call and made again when the size or the format changes.  The copy may still be on its
+// way when this returns: locking *copy is what waits for it.  FALSE when the back buffer could not
+// be read.  Taken at the end of draw(), before Present: the front-buffer path is a desktop
+// capture, and a window presented through a DXGI flip swap chain is one that desktop captures do
+// not see - the old code saved black.
+static Bool copyBackBuffer(IDirect3DSurface9 **copy)
 {
 	IDirect3DDevice9 *dev = DX8Wrapper::_Get_D3D_Device();
 	IDirect3DSurface9 *bb = NULL;
 	if (dev == NULL || Render_Failed(dev->GetBackBuffer(PRIMARY_SWAP_CHAIN, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || bb == NULL)
-		return NULL;
+		return FALSE;
 
 	D3DSURFACE_DESC desc;
 	bb->GetDesc(&desc);
-	IDirect3DSurface9 *copy = NULL;
+	Bool copied = FALSE;
 	if (desc.Format == D3DFMT_X8R8G8B8 || desc.Format == D3DFMT_A8R8G8B8)
 	{
 		// GetRenderTargetData refuses a multisampled source, and with -msaa or the options menu's
@@ -3848,22 +3859,41 @@ static IDirect3DSurface9 *captureBackBuffer(void)
 			source = resolved;
 		}
 
-		if (Render_Succeeded(source->GetDesc(&desc)) && desc.MultiSampleType == D3DMULTISAMPLE_NONE
-			&& Render_Succeeded(dev->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format,
-					D3DPOOL_SYSTEMMEM, &copy, NULL)) && copy != NULL
-			&& Render_Failed(dev->GetRenderTargetData(source, copy)))
+		if (Render_Succeeded(source->GetDesc(&desc)) && desc.MultiSampleType == D3DMULTISAMPLE_NONE)
 		{
-			copy->Release();
-			copy = NULL;
+			if (*copy != NULL)
+			{
+				D3DSURFACE_DESC held;
+				(*copy)->GetDesc(&held);
+				if (held.Width != desc.Width || held.Height != desc.Height || held.Format != desc.Format)
+				{
+					(*copy)->Release();
+					*copy = NULL;
+				}
+			}
+			if (*copy == NULL && Render_Failed(dev->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format,
+					D3DPOOL_SYSTEMMEM, copy, NULL)))
+				*copy = NULL;
+			copied = *copy != NULL && Render_Succeeded(dev->GetRenderTargetData(source, *copy));
 		}
 
 		if (resolved != NULL)
 			resolved->Release();
 	}
 	bb->Release();
-	if (copy == NULL)
-		DEBUG_LOG(("takeScreenShot - the back buffer could not be read, falling back to a desktop capture\n"));
-	return copy;
+	return copied;
+}
+
+// A system-memory copy of the back buffer, NULL when that is not possible.
+static IDirect3DSurface9 *captureBackBuffer(void)
+{
+	IDirect3DSurface9 *copy = NULL;
+	if (copyBackBuffer(&copy))
+		return copy;
+	if (copy != NULL)
+		copy->Release();
+	DEBUG_LOG(("takeScreenShot - the back buffer could not be read, falling back to a desktop capture\n"));
+	return NULL;
 }
 
 ///Save Screen Capture to a file - deferred to the end of the next rendered frame
@@ -3872,9 +3902,10 @@ void W3DDisplay::takeScreenShot(void)
 	s_screenShotPending = TRUE;
 }
 
-/** Write the frame being drawn to pathname.  FALSE when there was no picture to read, which is what
-	* a device that has gone away gives.  Runs before End_Render, while the back buffers still hold it. */
-static Bool writeFrameBMP(char *pathname)
+/** The frame being drawn, as blue-green-red bytes, top row first, width * 3 bytes a row, in a buffer
+	* the caller deletes.  NULL when there was no picture to read, which is what a device that has gone
+	* away gives.  Runs before End_Render, while the back buffers still hold it. */
+static char *captureFrameRows(Int *rowsWidth, Int *rowsHeight)
 {
 	// With -dx11present the picture on the screen is the Direct3D 11 one, so that is what a
 	// screenshot has to be: reading the D3D9 back buffer here would photograph a frame nobody saw
@@ -3888,13 +3919,12 @@ static Bool writeFrameBMP(char *pathname)
 		unsigned char *captured =
 			Direct3D11_Capture_Back_Buffer(captureWidth, captureHeight, capturePitch);
 		if (captured == NULL)
-			return FALSE;
+			return NULL;
 
 		char *rows = NEW char[3*captureWidth*captureHeight];
 		for (unsigned row = 0; row < captureHeight; row++)
 		{
-			// Bottom row first, which is the order a .bmp stores them.
-			const unsigned char *in = captured + (captureHeight-1-row)*capturePitch;
+			const unsigned char *in = captured + row*capturePitch;
 			char *out = rows + row*captureWidth*3;
 			for (unsigned column = 0; column < captureWidth; column++)
 			{
@@ -3903,10 +3933,10 @@ static Bool writeFrameBMP(char *pathname)
 				out[column*3+2] = (char)in[column*4+2];
 			}
 		}
-		CreateBMPFile(pathname, rows, captureWidth, captureHeight);
-		delete [] rows;
 		Direct3D11_Release_Capture(captured);
-		return TRUE;
+		*rowsWidth = (Int)captureWidth;
+		*rowsHeight = (Int)captureHeight;
+		return rows;
 	}
 
 	RenderRect bounds;
@@ -3962,7 +3992,7 @@ static Bool writeFrameBMP(char *pathname)
 		{
 			if (fb != NULL)
 				fb->Release();
-			return FALSE;		// nothing to save; better than a fault
+			return NULL;		// nothing to save; better than a fault
 		}
 	}
 
@@ -3976,36 +4006,6 @@ static Bool writeFrameBMP(char *pathname)
 	height=bounds.bottom-bounds.top;
 
 	char *image=NEW char[3*width*height];
-#ifdef CAPTURE_TO_TARGA
-	//bytes are mixed in targa files, not rgb order.
-	for (y=0; y<height; y++)
-	{
-		for (x=0; x<width; x++)
-		{
-			// index for image
-			index=3*(x+y*width);
-			// index for fb
-			index2=y*lrect.Pitch+4*x;
-
-			image[index]=*((char *) lrect.pBits + index2+2);
-			image[index+1]=*((char *) lrect.pBits + index2+1);
-			image[index+2]=*((char *) lrect.pBits + index2+0);
-		}
-	}
-
-	fb->Release();
-
-	Targa targ;
-	memset(&targ.Header,0,sizeof(targ.Header));
-	targ.Header.Width=width;
-	targ.Header.Height=height;
-	targ.Header.PixelDepth=24;
-	targ.Header.ImageType=TGA_TRUECOLOR;
-	targ.SetImage(image);
-	targ.YFlip();
-
-	targ.Save(pathname,TGAF_IMAGE,false);
-#else	//capturing to bmp file
 	//bmp is same byte order
 	for (y=0; y<height; y++)
 	{
@@ -4024,31 +4024,20 @@ static Bool writeFrameBMP(char *pathname)
 
 	fb->Release();
 
-	//Flip the image
-	char *ptr,*ptr1;
-	char  v,v1;
+	*rowsWidth = (Int)width;
+	*rowsHeight = (Int)height;
+	return image;
+}
 
-	for (y = 0; y < (height >> 1); y++)
-	{
-		/* Compute address of lines to exchange. */
-		ptr = (image + ((width * y) * 3));
-		ptr1 = (image + ((width * (height - 1)) * 3));
-		ptr1 -= ((width * y) * 3);
-
-		/* Exchange all the pixels on this scan line. */
-		for (x = 0; x < (width * 3); x++)
-			{
-			v = *ptr;
-			v1 = *ptr1;
-			*ptr = v1;
-			*ptr1 = v;
-			ptr++;
-			ptr1++;
-			}
-	}
+/** Write the frame being drawn to pathname.  FALSE when there was no picture to read. */
+static Bool writeFrameBMP(char *pathname)
+{
+	Int width = 0;
+	Int height = 0;
+	char *image = captureFrameRows(&width, &height);
+	if (image == NULL)
+		return FALSE;
 	CreateBMPFile(pathname, image, width, height);
-#endif
-
 	delete [] image;
 	return TRUE;
 }
@@ -4096,6 +4085,77 @@ static UnsignedInt s_videoLastFrame = 0;
 static Int s_videoFramesWritten = 0;
 static Int s_videoFramesMissed = 0;
 static char s_videoDirectory[_MAX_PATH];
+/* Every picture of the recording is copied off the GPU into a slot of the record its frame is drawn
+	 into, and read back a frame later while the next frame is drawn into the other record: reading the
+	 copy as soon as it is asked for waits for the GPU to finish the frame.  -directorrecord's panes past
+	 the first are drawn before pane 0 on the same logic frame and have slots of their own; the record
+	 keeps where the panes lay when pane 0 was drawn, which is what its picture shows. */
+enum { VIDEO_RECORDS = 2 };
+enum { VIDEO_PIXEL_BYTES = 4 };		// blue, green, red and a byte nothing reads
+static_assert(VIDEO_RECORDS * OBSERVER_MOST_PANES <= DX11_FRAME_COPY_SLOTS,
+	"every pane of both records has a Direct3D 11 slot");
+struct VideoRecord
+{
+	Bool pending;			///< pane 0's copy is made and the frame is still to be written
+	UnsignedInt frame;
+	Bool paneCopied[OBSERVER_MOST_PANES];
+	UnsignedInt paneFrame[OBSERVER_MOST_PANES];
+	Int paneCount;
+	Real paneRays[OBSERVER_MOST_PANES];
+	Coord2D paneOrigin;
+	IRegion2D radarFrame;
+	std::vector<IRegion2D> broadcast;
+};
+static VideoRecord s_videoRecords[VIDEO_RECORDS];
+static Int s_videoDrawingRecord = 0;
+static IDirect3DSurface9 *s_videoSystemCopies[VIDEO_RECORDS * OBSERVER_MOST_PANES] = { NULL };
+static std::vector<UnsignedByte> s_videoJoined;
+/* the panes' runs are worked out again only when the picture or where its panes lie changes, which is
+	 only while they slide in or out */
+struct VideoPaneShape
+{
+	Int width;
+	Int height;
+	Int count;
+	Coord2D origin;
+	Real rays[OBSERVER_MOST_PANES];
+};
+static VideoPaneShape s_videoPaneRunsShape;
+static std::vector<ObserverPaneRun> s_videoPaneRuns;
+static std::vector<IRegion2D> s_videoRowKept;
+#if defined(_WIN32)
+/* -directorrecord writes no frames to disk: they go down a pipe into ffmpeg as they are drawn, which a
+	 whole match of 1080p bitmaps would need tens of gigabytes for.  With no ffmpeg it records nothing
+	 and quits. */
+static Bool s_videoPipeTried = FALSE;
+static HANDLE s_videoPipe = NULL;
+static HANDLE s_videoEncoder = NULL;
+static Int s_videoPipeWidth = 0;
+static Int s_videoPipeHeight = 0;
+
+// the directory with its trailing backslash taken off is the movie's own name
+static void buildVideoMoviePath(char *moviePath, size_t size)
+{
+	strlcpy(moviePath, s_videoDirectory, size);
+	moviePath[strlen(moviePath) - 1] = '\0';
+	strlcat(moviePath, ".mp4", size);
+}
+
+// ffmpeg.exe beside generals.exe first, then off the PATH.  FALSE when neither has one
+static Bool findVideoEncoder(char *encoderPath, DWORD size)
+{
+	const DWORD length = GetModuleFileNameA(NULL, encoderPath, size);
+	char *slash = strrchr(encoderPath, '\\');
+	if (length > 0 && length < size && slash != NULL)
+	{
+		slash[1] = '\0';
+		strlcat(encoderPath, VIDEO_ENCODER, size);
+		if (GetFileAttributesA(encoderPath) != INVALID_FILE_ATTRIBUTES)
+			return TRUE;
+	}
+	return SearchPathA(NULL, VIDEO_ENCODER, NULL, size, encoderPath, NULL) != 0;
+}
+#endif
 
 static void buildVideoFramePath(char *pathname, size_t size, Int index)
 {
@@ -4122,14 +4182,61 @@ static void deleteVideoFrames(void)
 	}
 }
 
+static void writeVideoRecord(Int recordIndex);
+
+static void releaseFrameCopies(void)
+{
+	Direct3D11_Release_Frame_Copies();
+	for (Int slot = 0; slot < VIDEO_RECORDS * OBSERVER_MOST_PANES; ++slot)
+	{
+		if (s_videoSystemCopies[slot] != NULL)
+			s_videoSystemCopies[slot]->Release();
+		s_videoSystemCopies[slot] = NULL;
+	}
+}
+
 static void finishVideo(void)
 {
 	if (!s_videoStarted || s_videoFinished)
+	{
+		// a recording that never started, or stopped for want of ffmpeg, can still hold copies
+		releaseFrameCopies();
 		return;
+	}
 	s_videoFinished = TRUE;
 
+	// the last frame drawn is still waiting on its copy
+	writeVideoRecord(1 - s_videoDrawingRecord);
 	DEBUG_LOG(("VIDEO: %d frames written to %s, %d logic frames went by without a picture\n",
 		s_videoFramesWritten, s_videoDirectory, s_videoFramesMissed));
+	releaseFrameCopies();
+	std::vector<UnsignedByte>().swap(s_videoJoined);
+	std::vector<ObserverPaneRun>().swap(s_videoPaneRuns);
+
+#if defined(_WIN32)
+	// the end of the pipe is the end of the stream: ffmpeg finishes the movie and exits
+	if (s_videoEncoder != NULL)
+	{
+		CloseHandle(s_videoPipe);
+		s_videoPipe = NULL;
+		WaitForSingleObject(s_videoEncoder, INFINITE);
+		DWORD pipedExitCode = 0;
+		GetExitCodeProcess(s_videoEncoder, &pipedExitCode);
+		CloseHandle(s_videoEncoder);
+		s_videoEncoder = NULL;
+		RemoveDirectoryA(s_videoDirectory);
+
+		char pipedMoviePath[_MAX_PATH];
+		buildVideoMoviePath(pipedMoviePath, ARRAY_SIZE(pipedMoviePath));
+		if (pipedExitCode != 0)
+			DEBUG_LOG(("VIDEO: %s exited with %u, so %s may be short or missing\n",
+				VIDEO_ENCODER, (unsigned)pipedExitCode, pipedMoviePath));
+		else
+			DEBUG_LOG(("VIDEO: wrote %s\n", pipedMoviePath));
+		return;
+	}
+#endif
+
 	if (s_videoFramesWritten == 0)
 		return;
 
@@ -4139,17 +4246,14 @@ static void finishVideo(void)
 		LOGICFRAMES_PER_SECOND, s_videoDirectory, VIDEO_FRAME_PATTERN));
 #else
 	char encoderPath[_MAX_PATH];
-	if (SearchPathA(NULL, VIDEO_ENCODER, NULL, ARRAY_SIZE(encoderPath), encoderPath, NULL) == 0)
+	if (!findVideoEncoder(encoderPath, ARRAY_SIZE(encoderPath)))
 	{
-		DEBUG_LOG(("VIDEO: %s is not on the PATH, so the frames stay where they are\n", VIDEO_ENCODER));
+		DEBUG_LOG(("VIDEO: no %s beside the game or on the PATH, so the frames stay where they are\n", VIDEO_ENCODER));
 		return;
 	}
 
-	// the directory with its trailing backslash taken off is the movie's own name
 	char moviePath[_MAX_PATH];
-	strlcpy(moviePath, s_videoDirectory, ARRAY_SIZE(moviePath));
-	moviePath[strlen(moviePath) - 1] = '\0';
-	strlcat(moviePath, ".mp4", ARRAY_SIZE(moviePath));
+	buildVideoMoviePath(moviePath, ARRAY_SIZE(moviePath));
 
 	// yuv420p is what every player opens and it wants even dimensions, which a window need not have
 	char commandLine[4 * _MAX_PATH];
@@ -4189,6 +4293,305 @@ static void finishVideo(void)
 #endif
 }
 
+/** A -video range is being recorded and this logic frame is inside it. */
+static Bool videoRecordingFrame(void)
+{
+	if (TheGlobalData->m_videoEndFrame <= 0 || s_videoFinished || TheGameLogic == NULL
+			|| !TheGameLogic->isInGame() || TheGameLogic->isInShellGame())
+		return FALSE;
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	return frame >= (UnsignedInt)TheGlobalData->m_videoStartFrame && frame <= (UnsignedInt)TheGlobalData->m_videoEndFrame;
+}
+
+#if defined(_WIN32)
+/** ffmpeg started with its stdin a pipe this end writes raw frames of this size into.  FALSE when
+	* there is no ffmpeg or it would not start. */
+static Bool openVideoPipe(Int width, Int height)
+{
+	char encoderPath[_MAX_PATH];
+	if (!findVideoEncoder(encoderPath, ARRAY_SIZE(encoderPath)))
+	{
+		DEBUG_LOG(("VIDEO: no %s beside the game or on the PATH\n", VIDEO_ENCODER));
+		return FALSE;
+	}
+
+	SECURITY_ATTRIBUTES inherited;
+	memset(&inherited, 0, sizeof(inherited));
+	inherited.nLength = sizeof(inherited);
+	inherited.bInheritHandle = TRUE;
+	HANDLE readEnd = NULL;
+	HANDLE writeEnd = NULL;
+	if (!CreatePipe(&readEnd, &writeEnd, &inherited, 0))
+	{
+		DEBUG_LOG(("VIDEO: no pipe to %s (error %u)\n", VIDEO_ENCODER, (unsigned)GetLastError()));
+		return FALSE;
+	}
+	// ffmpeg holding the end written to as well would never see the stream end
+	SetHandleInformation(writeEnd, HANDLE_FLAG_INHERIT, 0);
+
+	char moviePath[_MAX_PATH];
+	buildVideoMoviePath(moviePath, ARRAY_SIZE(moviePath));
+	char commandLine[4 * _MAX_PATH];
+	snprintf(commandLine, ARRAY_SIZE(commandLine),
+		"\"%s\" -y -loglevel error -f rawvideo -pix_fmt bgr0 -s %dx%d -framerate %d -i - "
+		"-vf pad=ceil(iw/2)*2:ceil(ih/2)*2 -c:v libx264 -pix_fmt yuv420p -crf 18 \"%s\"",
+		encoderPath, width, height, LOGICFRAMES_PER_SECOND, moviePath);
+
+	STARTUPINFOA startup;
+	memset(&startup, 0, sizeof(startup));
+	startup.cb = sizeof(startup);
+	startup.dwFlags = STARTF_USESTDHANDLES;
+	startup.hStdInput = readEnd;
+	PROCESS_INFORMATION process;
+	const BOOL started = CreateProcessA(encoderPath, commandLine, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL,
+		&startup, &process);
+	CloseHandle(readEnd);
+	if (!started)
+	{
+		CloseHandle(writeEnd);
+		DEBUG_LOG(("VIDEO: %s would not start (error %u)\n",
+			encoderPath, (unsigned)GetLastError()));
+		return FALSE;
+	}
+
+	CloseHandle(process.hThread);
+	s_videoPipe = writeEnd;
+	s_videoEncoder = process.hProcess;
+	s_videoPipeWidth = width;
+	s_videoPipeHeight = height;
+	DEBUG_LOG(("VIDEO: %dx%d frames go straight into %s for %s\n", width, height, encoderPath, moviePath));
+	return TRUE;
+}
+#endif
+
+static Int videoCopySlot(Int recordIndex, Int pane)
+{
+	return recordIndex * OBSERVER_MOST_PANES + pane;
+}
+
+/** Start copying the frame being drawn off the GPU into slot, without waiting for it.  FALSE when there
+	* was no picture to copy, which is what a device that has gone away gives. */
+static Bool queueFrameCopy(Int slot)
+{
+	if (Direct3D11_Present_Is_Enabled())
+		return Direct3D11_Queue_Frame_Copy((unsigned)slot);
+	return copyBackBuffer(&s_videoSystemCopies[slot]);
+}
+
+/** slot's copy, VIDEO_PIXEL_BYTES a pixel, top row first, until unmapFrameCopy; NULL when it cannot be read. */
+static const UnsignedByte *mapFrameCopy(Int slot, Int *width, Int *height, Int *pitch)
+{
+	if (Direct3D11_Present_Is_Enabled())
+	{
+		unsigned mappedWidth = 0;
+		unsigned mappedHeight = 0;
+		unsigned mappedPitch = 0;
+		const unsigned char *pixels = Direct3D11_Map_Frame_Copy((unsigned)slot, mappedWidth, mappedHeight, mappedPitch);
+		*width = (Int)mappedWidth;
+		*height = (Int)mappedHeight;
+		*pitch = (Int)mappedPitch;
+		return pixels;
+	}
+	IDirect3DSurface9 *copy = s_videoSystemCopies[slot];
+	D3DLOCKED_RECT locked;
+	if (copy == NULL || Render_Failed(copy->LockRect(&locked, NULL, D3DLOCK_READONLY)))
+		return NULL;
+	D3DSURFACE_DESC desc;
+	copy->GetDesc(&desc);
+	*width = (Int)desc.Width;
+	*height = (Int)desc.Height;
+	*pitch = (Int)locked.Pitch;
+	return (const UnsignedByte *)locked.pBits;
+}
+
+static void unmapFrameCopy(Int slot)
+{
+	if (Direct3D11_Present_Is_Enabled())
+		Direct3D11_Unmap_Frame_Copy((unsigned)slot);
+	else
+		s_videoSystemCopies[slot]->UnlockRect();
+}
+
+static bool keptLeftOf(const IRegion2D &first, const IRegion2D &second)
+{
+	return first.lo.x < second.lo.x;
+}
+
+/** The rectangles that stay pane 0's on row y, the radar's frame and the broadcast's, left to right. */
+static void collectRowKept(const VideoRecord &record, Int y)
+{
+	s_videoRowKept.clear();
+	for (size_t index = 0; index <= record.broadcast.size(); ++index)
+	{
+		const IRegion2D &region = index < record.broadcast.size() ? record.broadcast[index] : record.radarFrame;
+		if (y >= region.lo.y && y < region.hi.y && region.lo.x < region.hi.x)
+			s_videoRowKept.push_back(region);
+	}
+	std::sort(s_videoRowKept.begin(), s_videoRowKept.end(), keptLeftOf);
+}
+
+static void copyVideoSpan(UnsignedByte *joined, Int width, const UnsignedByte *pane, Int panePitch, Int y, Int x0, Int x1)
+{
+	if (x1 > x0)
+		memcpy(joined + ((size_t)y * width + x0) * VIDEO_PIXEL_BYTES, pane + (size_t)y * panePitch + (size_t)x0 * VIDEO_PIXEL_BYTES,
+			(size_t)(x1 - x0) * VIDEO_PIXEL_BYTES);
+}
+
+/** -directorrecord's panes joined into pane 0's picture: each pixel is taken from the pane whose wedge
+	* it lies in, a row's stretch of one pane at a time.  A pane's camera already slid its picture with the
+	* rays' meeting point, so the copy is pixel for pixel; moving the pixels instead read past a picture's
+	* edge and smeared it.  Every pane draws the lines and the radar's frame, so a seam needs nothing of its
+	* own.  Pane 0 keeps the framed radar and the broadcast's score bar and labels, which only its draw has.
+	* A pane with no picture of this frame and size stays pane 0's. */
+static void joinVideoPanes(const VideoRecord &record, Int recordIndex, UnsignedByte *joined, Int width, Int height)
+{
+	VideoPaneShape shape = {};
+	shape.width = width;
+	shape.height = height;
+	shape.count = record.paneCount;
+	shape.origin = record.paneOrigin;
+	memcpy(shape.rays, record.paneRays, sizeof(Real) * record.paneCount);
+	if (memcmp(&shape, &s_videoPaneRunsShape, sizeof(shape)) != 0)
+	{
+		s_videoPaneRunsShape = shape;
+		ObserverCamera_paneRuns(width, height, shape.origin.x, shape.origin.y, shape.rays, shape.count, s_videoPaneRuns);
+	}
+
+	const UnsignedByte *panes[OBSERVER_MOST_PANES] = { NULL };
+	Int panePitches[OBSERVER_MOST_PANES] = { 0 };
+	for (Int pane = 1; pane < record.paneCount; ++pane)
+	{
+		if (!record.paneCopied[pane] || record.paneFrame[pane] != record.frame)
+			continue;
+		Int paneWidth = 0;
+		Int paneHeight = 0;
+		panes[pane] = mapFrameCopy(videoCopySlot(recordIndex, pane), &paneWidth, &paneHeight, &panePitches[pane]);
+		if (panes[pane] != NULL && (paneWidth != width || paneHeight != height))
+		{
+			unmapFrameCopy(videoCopySlot(recordIndex, pane));
+			panes[pane] = NULL;
+		}
+	}
+
+	Int keptRow = -1;
+	for (size_t index = 0; index < s_videoPaneRuns.size(); ++index)
+	{
+		const ObserverPaneRun &run = s_videoPaneRuns[index];
+		const UnsignedByte *pane = panes[run.pane];
+		if (pane == NULL)
+			continue;
+		if (run.y != keptRow)
+		{
+			keptRow = run.y;
+			collectRowKept(record, run.y);
+		}
+		Int start = run.x0;
+		for (size_t kept = 0; kept < s_videoRowKept.size() && start < run.x1; ++kept)
+		{
+			const IRegion2D &region = s_videoRowKept[kept];
+			if (region.hi.x <= start)
+				continue;
+			if (region.lo.x >= run.x1)
+				break;
+			copyVideoSpan(joined, width, pane, panePitches[run.pane], run.y, start, region.lo.x);
+			start = region.hi.x;
+		}
+		copyVideoSpan(joined, width, pane, panePitches[run.pane], run.y, start, run.x1);
+	}
+
+	for (Int pane = 1; pane < record.paneCount; ++pane)
+	{
+		if (panes[pane] != NULL)
+			unmapFrameCopy(videoCopySlot(recordIndex, pane));
+	}
+}
+
+/** One picture of the recording, VIDEO_PIXEL_BYTES a pixel with no gap between rows, into ffmpeg's pipe
+	* under -directorrecord, as the next numbered .bmp otherwise. */
+static Bool writeVideoFrame(const UnsignedByte *pixels, Int width, Int height, UnsignedInt frame)
+{
+#if defined(_WIN32)
+	if (TheGlobalData->m_directorRecord && !s_videoPipeTried)
+	{
+		s_videoPipeTried = TRUE;
+		openVideoPipe(width, height);
+	}
+	if (s_videoPipe != NULL)
+	{
+		// ffmpeg was told one size; a picture of another would shear every frame after it
+		if (width != s_videoPipeWidth || height != s_videoPipeHeight)
+			return FALSE;
+		const DWORD bytes = (DWORD)(VIDEO_PIXEL_BYTES * width * height);
+		DWORD written = 0;
+		if (WriteFile(s_videoPipe, pixels, bytes, &written, NULL) && written == bytes)
+			return TRUE;
+		DEBUG_LOG(("VIDEO: %s stopped taking frames (error %u) at logic frame %u\n", VIDEO_ENCODER,
+			(unsigned)GetLastError(), frame));
+		return FALSE;
+	}
+#endif
+	// a whole match as bitmaps is tens of gigabytes, and one run filled a disk with 13 GB before it
+	// was stopped, so without the encoder there is no recording at all
+	if (TheGlobalData->m_directorRecord)
+	{
+		DEBUG_LOG(("VIDEO: -directorrecord records only through %s, beside the game or on the PATH; nothing recorded, quitting\n",
+			VIDEO_ENCODER));
+		s_videoFinished = TRUE;
+#if defined(_WIN32)
+		RemoveDirectoryA(s_videoDirectory);
+#endif
+		TheGameEngine->setQuitting(TRUE);
+		return FALSE;
+	}
+	char pathname[_MAX_PATH];
+	buildVideoFramePath(pathname, ARRAY_SIZE(pathname), s_videoFramesWritten);
+	char *rows = NEW char[3 * width * height];
+	for (Int pixel = 0; pixel < width * height; ++pixel)
+		memcpy(rows + pixel * 3, pixels + pixel * VIDEO_PIXEL_BYTES, 3);
+	CreateBMPFile(pathname, rows, width, height);
+	delete [] rows;
+	return TRUE;
+}
+
+/** The frame held in a record, pane 0's picture with the other panes' wedges taken into it, written out
+	* once. */
+static void writeVideoRecord(Int recordIndex)
+{
+	VideoRecord &record = s_videoRecords[recordIndex];
+	if (!record.pending)
+		return;
+	record.pending = FALSE;
+
+	const Int slot = videoCopySlot(recordIndex, 0);
+	Int width = 0;
+	Int height = 0;
+	Int pitch = 0;
+	const UnsignedByte *picture = mapFrameCopy(slot, &width, &height, &pitch);
+	if (picture == NULL)
+	{
+		++s_videoFramesMissed;
+		return;
+	}
+
+	const Int rowBytes = width * VIDEO_PIXEL_BYTES;
+	const UnsignedByte *pixels = picture;
+	if (record.paneCount >= 2 || pitch != rowBytes)
+	{
+		s_videoJoined.resize((size_t)rowBytes * height);
+		for (Int y = 0; y < height; ++y)
+			memcpy(&s_videoJoined[(size_t)y * rowBytes], picture + (size_t)y * pitch, rowBytes);
+		if (record.paneCount >= 2)
+			joinVideoPanes(record, recordIndex, &s_videoJoined[0], width, height);
+		pixels = &s_videoJoined[0];
+	}
+
+	if (writeVideoFrame(pixels, width, height, record.frame))
+		++s_videoFramesWritten;
+	else
+		++s_videoFramesMissed;
+	unmapFrameCopy(slot);
+}
+
 static void captureVideoFrame(void)
 {
 	if (TheGlobalData->m_videoEndFrame <= 0 || s_videoFinished || TheGameLogic == NULL
@@ -4202,6 +4605,16 @@ static void captureVideoFrame(void)
 	if (frame > (UnsignedInt)TheGlobalData->m_videoEndFrame)
 	{
 		finishVideo();
+		return;
+	}
+
+	// -directorrecord's panes past the first: kept for pane 0's draw, the last on this logic frame
+	if (TheObserverCamera.isDrawingSecond())
+	{
+		const Int pane = TheObserverCamera.getDrawingPane();
+		VideoRecord &drawing = s_videoRecords[s_videoDrawingRecord];
+		drawing.paneCopied[pane] = queueFrameCopy(videoCopySlot(s_videoDrawingRecord, pane));
+		drawing.paneFrame[pane] = frame;
 		return;
 	}
 
@@ -4238,12 +4651,24 @@ static void captureVideoFrame(void)
 	}
 	s_videoLastFrame = frame;
 
-	char pathname[_MAX_PATH];
-	buildVideoFramePath(pathname, ARRAY_SIZE(pathname), s_videoFramesWritten);
-	if (writeFrameBMP(pathname))
-		++s_videoFramesWritten;
-	else
+	const Int drawingIndex = s_videoDrawingRecord;
+	VideoRecord &drawing = s_videoRecords[drawingIndex];
+	if (!queueFrameCopy(videoCopySlot(drawingIndex, 0)))
+	{
 		++s_videoFramesMissed;
+		return;
+	}
+	drawing.pending = TRUE;
+	drawing.frame = frame;
+	drawing.paneCount = TheObserverCamera.getDrawnPaneCount();
+	memcpy(drawing.paneRays, TheObserverCamera.getPaneRays(), sizeof(drawing.paneRays));
+	drawing.paneOrigin = TheObserverCamera.getPaneOrigin();
+	drawing.radarFrame = TheObserverCamera.getRadarFrame();
+	drawing.broadcast = TheObserverCamera.getBroadcast();
+
+	// the frame before this one is long drawn, so reading its copies waits on nothing
+	s_videoDrawingRecord = 1 - drawingIndex;
+	writeVideoRecord(s_videoDrawingRecord);
 }
 
 /** Start/Stop campturing an AVI movie*/

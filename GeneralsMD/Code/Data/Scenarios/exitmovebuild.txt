@@ -1,0 +1,20 @@
+# A dozer told to move and then to build while it is still driving out of the command center.  The
+# build is the newer order and has to win: the move is held until the dozer is out, and if it were
+# still held when the build came it would cancel the job on the way out.  The tally reads two power
+# plants at 1600 health, the spawned one and the one this dozer built; a lost job leaves the second
+# at 1 health, placed and never started.
+#
+# The starting dozer is sent off west first and the move below sends it further, so the build click
+# picks the new dozer, the idle builder nearest the site.  Same map, seed and frames as exitorders.
+#
+#   generals.exe -headless -quickstart -noshellmap -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 1600
+#     -scenario exitmovebuild -logPrefix exitmovebuild_
+
+1     spawn       0  AmericaPowerPlant   1 start0:-200:200
+2     playermove  0  AmericaVehicleDozer 1100 400
+30    produce     0  AmericaCommandCenter AmericaVehicleDozer 1
+181   playermove  0  AmericaVehicleDozer 1100 400
+183   construct   0  AmericaPowerPlant   1510 880
+1590  tally       0  AmericaPowerPlant

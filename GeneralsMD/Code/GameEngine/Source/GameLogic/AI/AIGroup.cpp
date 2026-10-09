@@ -1978,6 +1978,16 @@ static void crowdSeedLanesAlongWaypoint( AIGroup *group, std::list<Object *>& me
 	crowdSeedLanes( members, center, crowdWaypointAim( center, way ) );
 }
 
+/** The member whose feet decide a tunnel shortcut for the group (TunnelTracker::findTunnelShortcut):
+		the first that moves at all, since a selection can hold a structure. */
+static const Object *tunnelWalker( const std::list<Object *> &members )
+{
+	for( std::list<Object *>::const_iterator it = members.begin(); it != members.end(); ++it )
+		if( (*it)->getAI() != NULL && !(*it)->isKindOf( KINDOF_IMMOBILE ) )
+			return *it;
+	return NULL;
+}
+
 /**
  * Move to given position(s)
  */
@@ -2371,11 +2381,12 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 
 	// through the tunnel network when that is shorter; see TunnelTracker::findTunnelShortcut
 	Object *tunnelEntrance = NULL;
-	if (gatherOnPoint && iter->first() != NULL)
+	const Object *walker = gatherOnPoint ? tunnelWalker( m_memberList ) : NULL;
+	if (walker != NULL)
 	{
 		const Real walkX = goalPos.x - groupCenter.x;
 		const Real walkY = goalPos.y - groupCenter.y;
-		tunnelEntrance = iter->first()->getControllingPlayer()->getTunnelSystem()->findTunnelShortcut( &groupCenter, &goalPos,
+		tunnelEntrance = walker->getControllingPlayer()->getTunnelSystem()->findTunnelShortcut( walker, &groupCenter, &goalPos,
 			(Real)sqrt( walkX * walkX + walkY * walkY ) );
 	}
 
@@ -3064,11 +3075,12 @@ void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire,
 	// TunnelTracker::findTunnelShortcut.  A player's order or a computer's, never a script's: a mission
 	// script sends its units the way the mission was written for.
 	Object *tunnelEntrance = NULL;
-	if ((cmdSource == CMD_FROM_PLAYER || cmdSource == CMD_FROM_AI) && !m_memberList.empty())
+	const Object *walker = (cmdSource == CMD_FROM_PLAYER || cmdSource == CMD_FROM_AI) ? tunnelWalker( m_memberList ) : NULL;
+	if (walker != NULL)
 	{
 		const Real walkX = pos->x - center.x;
 		const Real walkY = pos->y - center.y;
-		tunnelEntrance = m_memberList.front()->getControllingPlayer()->getTunnelSystem()->findTunnelShortcut( &center, pos,
+		tunnelEntrance = walker->getControllingPlayer()->getTunnelSystem()->findTunnelShortcut( walker, &center, pos,
 			(Real)sqrt( walkX * walkX + walkY * walkY ) );
 	}
 

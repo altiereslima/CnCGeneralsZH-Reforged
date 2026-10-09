@@ -68,6 +68,22 @@ enum PickType
 };
 
 // ------------------------------------------------------------------------------------------------
+/** A blast bending the picture around it, as the ScreenDistortion FX nugget describes it: the frame
+	* drawn in toward the point for PullFrames, then a ring travelling out to Radius over WaveFrames
+	* and pushing the picture outward as it passes.  Radius is in world units; the strengths and the
+	* ring's width are fractions of it. */
+// ------------------------------------------------------------------------------------------------
+struct ScreenDistortionInfo
+{
+	Real m_radius;
+	UnsignedInt m_pullFrames;
+	UnsignedInt m_waveFrames;
+	Real m_pullStrength;
+	Real m_waveStrength;
+	Real m_waveWidth;
+};
+
+// ------------------------------------------------------------------------------------------------
 /** The implementation of common view functionality. */
 // ------------------------------------------------------------------------------------------------
 class View : public Snapshot
@@ -192,8 +208,10 @@ public:
 	virtual void setZoomToDefault( void ) { }														///< Set zoom to default value
 	virtual void setZoomToMax( void ) { }																///< Set zoom as far out as the player may zoom by hand
 	virtual void setZoomToHeight( Real heightAboveGround ) { }								///< Frame the camera at this height above the terrain
+	virtual Real getZoomForHeight( Real heightAboveGround ) { return m_zoom; }		///< the zoom setZoomToHeight would set, without setting it
 	void setZoomToStart( Bool shellMap );																	///< the zoom a match opens at: max under StartAtMaxZoom, else START_CAMERA_HEIGHT
 	virtual void setOkToAdjustHeight( Bool val ) { m_okToAdjustHeight = val; }	///< Set this to adjust camera height
+	void setHeightSettleSeconds( Real seconds ) { m_heightSettleSeconds = seconds; }	///< settle the height on this time constant, 0 for CameraAdjustSpeed
 
 	// for debugging
 	virtual Real getTerrainHeightUnderCamera() { return m_terrainHeightUnderCamera; }
@@ -238,8 +256,15 @@ public:
 	/// Add an impulse force to shake the camera
 	virtual void shake( const Coord3D *epicenter, CameraShakeType shakeType ) { };
 
+	/// Bend the picture around a blast; only the Direct3D 11 post chain draws it
+	virtual void addScreenDistortion( const Coord3D *epicenter, const ScreenDistortionInfo &info ) { }
+
 	virtual Real getFXPitch( void ) const { return 1.0f; }					///< returns the FX pitch angle
+	/// build the camera from the view's location now rather than at the next draw, so picks and
+	/// projections answer for where it was just put
+	virtual void aimCamera( void ) {}
 	virtual void forceCameraConstraintRecalc(void) {}
+	virtual void applyCameraConstraint( void ) {}										///< move the look point inside the camera constraint now, where the next draw would
 	virtual void setGuardBandBias( const Coord2D *gb ) = 0;
 
 	/** The console's freecam, a photo mode: the camera flies on its own from an eye point with a
@@ -312,6 +337,7 @@ protected:
 	Bool m_mouseLocked;																					///< is the mouse input locked to the tactical view?
 
 	Bool m_okToAdjustHeight;																		///< Should we attempt to adjust camera height?
+	Real m_heightSettleSeconds;																	///< the director's slower height settle, 0 when nobody asked for one
 	Bool m_snapImmediate;																				///< Should we immediately snap to the object we're following?
 
 	Coord2D m_guardBandBias; ///< Exttra beefy margins so huge thins can stay "on-screen"

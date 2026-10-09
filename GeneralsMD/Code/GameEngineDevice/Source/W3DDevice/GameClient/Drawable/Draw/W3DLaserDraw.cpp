@@ -33,6 +33,7 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include <stdlib.h>
 
+#include "Common/GlobalData.h"
 #include "Common/Thing.h"
 #include "Common/ThingTemplate.h"
 #include "Common/Xfer.h"
@@ -65,45 +66,69 @@
 // own hue and a narrow core run toward white. Both draw through one texture made here, a falloff
 // across the width that reaches zero at the edge, so the halo has no visible border. The core
 // stacks past white on top of EA's layers, which the Direct3D 11 bloom then picks up; under -d3d9
-// the halo alone is the glow. Draw side only: nothing here is read by GameLogic or parsed from INI.
+// the halo alone is the glow. Both follow the Glow option (glowStrength). Draw side only: nothing
+// here is read by GameLogic or parsed from INI.
 static const Real GLOW_HALO_WIDTH_SCALE	= 2.8f;		// halo width over the beam's widest layer
 static const Real GLOW_HALO_MIN_WIDTH		= 16.0f;
 static const Real GLOW_HALO_INTENSITY		= 0.75f;
+static const Real GLOW_HALO_SPREAD			= 0.5f;		// halo width gained per unit of strength past Medium
 static const Real GLOW_CORE_WIDTH_SCALE	= 0.3f;
 static const Real GLOW_CORE_MIN_WIDTH		= 3.0f;
 static const Real GLOW_CORE_WHITEN			= 0.7f;		// how far the core's hue is run toward white
 static const Int GLOW_LAYERS						= 2;			// [0] halo, [1] core
 static const Int GLOW_TEXTURE_SIZE			= 64;
+static const Int GLOW_LINE_POINTS				= 4;			// cap tip, start, end, cap tip
 
 static TextureClass *s_glowTexture = NULL;
 
 // ponytail: chosen by template name so no INI field and no checksum change; a "Glow" field in
 // W3DLaserDraw is the upgrade if a mod ever wants it per beam. Every weapon laser in ZH ends in
-// LaserBeam; the data streams, the waypoint line and the Particle Cannon's beams do not.
+// LaserBeam; the data streams, the waypoint line and the Particle Cannon's beams do not. The
+// Avenger's target designator is a marker, not a weapon, and keeps EA's thin blue line.
 static Bool beamGlows( const Thing *thing )
 {
-	return thing && thing->getTemplate() && thing->getTemplate()->getName().endsWith( "LaserBeam" );
+	if( !thing || !thing->getTemplate() )
+		return FALSE;
+	const AsciiString &name = thing->getTemplate()->getName();
+	return name.endsWith( "LaserBeam" ) && name != "AvengerTargetingLaserBeam";
 }
 
+// The falloff from one at the middle (0) to zero at the edge (1), across the width and over a cap.
+static Real glowFalloff( Real distance )
+{
+	const Real edge = expf( -4.0f );
+	return MAX( ( expf( -4.0f * distance * distance ) - edge ) / ( 1.0f - edge ), 0.0f );
+}
+
+// u runs across the beam. v runs along a glow line of four points (glowLinePoints): the first third
+// is the cap behind the start, fading in, the middle third the beam at full, the last third the cap
+// past the end, fading out. A cap as long as half the width with the width's own falloff rounds the
+// end, where a line stopping at its last point left a straight cut through the halo.
 static TextureClass *acquireGlowTexture()
 {
 	if( !s_glowTexture )
 	{
-		s_glowTexture = MSGNEW("TextureClass") TextureClass( GLOW_TEXTURE_SIZE, 1, WW3D_FORMAT_A8R8G8B8, MIP_LEVELS_1 );
+		s_glowTexture = MSGNEW("TextureClass") TextureClass( GLOW_TEXTURE_SIZE, GLOW_TEXTURE_SIZE, WW3D_FORMAT_A8R8G8B8, MIP_LEVELS_1 );
 		SurfaceClass *surf = s_glowTexture->Get_Surface_Level();
 		if( surf )
 		{
 			Int pitch;
-			UnsignedInt *pData = (UnsignedInt*)surf->Lock( &pitch );
+			UnsignedByte *pData = (UnsignedByte*)surf->Lock( &pitch );
 			if( pData )
 			{
-				const Real edge = expf( -4.0f );
-				for( Int x = 0; x < GLOW_TEXTURE_SIZE; x++ )
+				const Real third = 1.0f / 3.0f;
+				for( Int y = 0; y < GLOW_TEXTURE_SIZE; y++ )
 				{
-					Real d = ( x + 0.5f ) / GLOW_TEXTURE_SIZE * 2.0f - 1.0f;	// -1..1 across the beam
-					Real v = ( expf( -4.0f * d * d ) - edge ) / ( 1.0f - edge );
-					UnsignedInt c = (UnsignedInt)( MAX( v, 0.0f ) * 255.0f + 0.5f );
-					pData[ x ] = ( c << 24 ) | ( c << 16 ) | ( c << 8 ) | c;
+					Real along = ( y + 0.5f ) / GLOW_TEXTURE_SIZE;
+					Real cap = MAX( third - along, along - 2.0f * third ) * 3.0f;	// 0 at a beam end, 1 at a cap's tip
+					Real lengthFalloff = glowFalloff( MAX( cap, 0.0f ) );
+					UnsignedInt *row = (UnsignedInt*)( pData + y * pitch );
+					for( Int x = 0; x < GLOW_TEXTURE_SIZE; x++ )
+					{
+						Real across = ( x + 0.5f ) / GLOW_TEXTURE_SIZE * 2.0f - 1.0f;	// -1..1 across the beam
+						UnsignedInt c = (UnsignedInt)( glowFalloff( across ) * lengthFalloff * 255.0f + 0.5f );
+						row[ x ] = ( c << 24 ) | ( c << 16 ) | ( c << 8 ) | c;
+					}
 				}
 				surf->Unlock();
 			}
@@ -150,6 +175,37 @@ static Vector3 glowHue( Color inner, Color outer )
 	if( hi <= 0.0f )
 		return Vector3( 1.0f, 1.0f, 1.0f );
 	return Vector3( c[best][0] / hi, c[best][1] / hi, c[best][2] / hi );
+}
+
+// What the Glow option makes of the two glow lines: nothing at Off, which leaves EA's beams alone,
+// and the look they were tuned at for Medium, twice it at Ultra.  A line's colour goes to the device
+// as eight bits a channel and wraps past one, so the brightness stops at Medium's; past it the halo
+// widens instead, and the Direct3D 11 gain takes the lines over white (GLOW_ENABLE below).
+static Real glowStrength()
+{
+	return TheGlobalData->m_bloomIntensity / 50.0f;
+}
+
+// The plain additive preset, opted into the Glow option's gain: EA's beam layers and the glow
+// lines alike are light.
+static ShaderClass glowingAdditiveShader()
+{
+	ShaderClass shader = ShaderClass::_PresetAdditiveShader;
+	shader.Set_Glow( ShaderClass::GLOW_ENABLE );
+	return shader;
+}
+
+// A Tile = Yes beam with a TilingScalar of zero or less (every EA laser: -3) asks for a negative tile
+// factor, which the line clamps to zero, so the whole beam samples one row of its texture and the
+// ScrollRate only picks which row. At -2500 a 33 ms frame moves it 82.5 rows' worth, half a texture,
+// and EXLaser4's rows alternate between the lit band and the dark border: at a steady 30 pictures a
+// second, retail's clock included, the beam was there on every other frame. Such a beam holds the
+// texture's middle row instead; a beam that does tile still scrolls.
+static const Real BEAM_TEXTURE_ROW = 0.5f;
+
+static Bool holdsOneTextureRow( const W3DLaserDrawModuleData *data )
+{
+	return data->m_tile && data->m_tilingScalar <= 0.0f && !data->m_textureName.isEmpty();
 }
 
 // PUBLIC FUNCTIONS ///////////////////////////////////////////////////////////////////////////////
@@ -290,13 +346,18 @@ W3DLaserDraw::W3DLaserDraw( Thing *thing, const ModuleData* moduleData ) :
 			if( line )
 			{
 				line->Set_Texture( m_texture );
-				line->Set_Shader( ShaderClass::_PresetAdditiveShader );	//pick the alpha blending mode you want - see shader.h for others.
+				line->Set_Shader( glowingAdditiveShader() );	//pick the alpha blending mode you want - see shader.h for others.
 				line->Set_Width( width );
 				line->Set_Color( Vector3( red, green, blue ) );
 				line->Set_UV_Offset_Rate( Vector2(0.0f, data->m_scrollRate) );	//amount to scroll texture on each draw
 				if( m_texture )
 				{
 					line->Set_Texture_Mapping_Mode(SegLineRendererClass::TILED_TEXTURE_MAP);	//this tiles the texture across the line
+				}
+				if( holdsOneTextureRow( data ) )
+				{
+					line->Set_UV_Offset_Rate( Vector2( 0.0f, 0.0f ) );
+					line->Set_Current_UV_Offset( Vector2( 0.0f, BEAM_TEXTURE_ROW ) );
 				}
 
 				// add to scene
@@ -315,9 +376,6 @@ W3DLaserDraw::W3DLaserDraw( Thing *thing, const ModuleData* moduleData ) :
 	if( beamGlows( thing ) )
 	{
 		TextureClass *glowTexture = acquireGlowTexture();
-		Vector3 hue = glowHue( data->m_innerColor, data->m_outerColor );
-		Vector3 white( 1.0f, 1.0f, 1.0f );
-		Vector3 colors[ GLOW_LAYERS ] = { hue * GLOW_HALO_INTENSITY, hue * ( 1.0f - GLOW_CORE_WHITEN ) + white * GLOW_CORE_WHITEN };
 
 		const Int glowCount = (Int)data->m_segments * GLOW_LAYERS;
 		m_glow3D = NEW SegmentedLineClass *[ glowCount ];
@@ -326,9 +384,10 @@ W3DLaserDraw::W3DLaserDraw( Thing *thing, const ModuleData* moduleData ) :
 			SegmentedLineClass *line = NEW SegmentedLineClass;
 			m_glow3D[ g ] = line;
 			line->Set_Texture( glowTexture );
-			line->Set_Shader( ShaderClass::_PresetAdditiveShader );
-			line->Set_Color( colors[ g % GLOW_LAYERS ] );
-			line->Set_Texture_Mapping_Mode( SegLineRendererClass::UNIFORM_WIDTH_TEXTURE_MAP );	// u runs across the width
+			line->Set_Shader( glowingAdditiveShader() );
+			// u across the width, v a third further at each of the four points (acquireGlowTexture)
+			line->Set_Texture_Mapping_Mode( SegLineRendererClass::TILED_TEXTURE_MAP );
+			line->Set_Texture_Tile_Factor( 1.0f / ( GLOW_LINE_POINTS - 1 ) );
 			W3DDisplay::m_3DScene->Add_Render_Object( line );
 			line->Set_Visible( 0 );
 		}
@@ -555,18 +614,48 @@ void W3DLaserDraw::doDrawModule(const Matrix3D* transformMtx)
 
 			if( m_glow3D )
 			{
+				// set with the points rather than once, so a change of the Glow option reaches the
+				// next beam drawn
+				const Real strength = glowStrength();
+				const Real brightness = MIN( strength, 1.0f );
+				const Real spread = 1.0f + GLOW_HALO_SPREAD * MAX( strength - 1.0f, 0.0f );
 				Real widest = MAX( data->m_innerBeamWidth, data->m_outerBeamWidth );
 				Real widthScale = update->getWidthScale();
 				Real widths[ GLOW_LAYERS ] =
 				{
-					MAX( widest * GLOW_HALO_WIDTH_SCALE, GLOW_HALO_MIN_WIDTH ) * widthScale,
+					MAX( widest * GLOW_HALO_WIDTH_SCALE, GLOW_HALO_MIN_WIDTH ) * widthScale * spread,
 					MAX( widest * GLOW_CORE_WIDTH_SCALE, GLOW_CORE_MIN_WIDTH ) * widthScale
 				};
+				// glowHue's brightest channel is one, so neither colour passes one
+				Vector3 hue = glowHue( data->m_innerColor, data->m_outerColor );
+				Vector3 white( 1.0f, 1.0f, 1.0f );
+				Vector3 colors[ GLOW_LAYERS ] =
+				{
+					hue * ( GLOW_HALO_INTENSITY * brightness ),
+					( hue * ( 1.0f - GLOW_CORE_WHITEN ) + white * GLOW_CORE_WHITEN ) * brightness
+				};
+				// ponytail: every segment gets its own caps, so an arc of several segments would double
+				// up at its joints; no glowing laser in the data has more than one
+				Vector3 direction = laserPoints[ 1 ] - laserPoints[ 0 ];
+				const Real length = direction.Length();
 				for( Int g = 0; g < GLOW_LAYERS; g++ )
 				{
 					SegmentedLineClass *line = m_glow3D[ segment * GLOW_LAYERS + g ];
+					line->Set_Color( colors[ g ] );
 					line->Set_Width( widths[ g ] );
-					line->Set_Points( 2, &laserPoints[0] );
+					if( length > 0.0f )
+					{
+						Vector3 cap = direction * ( widths[ g ] * 0.5f / length );
+						Vector3 glowPoints[ GLOW_LINE_POINTS ] =
+						{
+							laserPoints[ 0 ] - cap, laserPoints[ 0 ], laserPoints[ 1 ], laserPoints[ 1 ] + cap
+						};
+						line->Set_Points( GLOW_LINE_POINTS, glowPoints );
+					}
+					else
+					{
+						line->Set_Points( 2, &laserPoints[0] );
+					}
 				}
 			}
 		}

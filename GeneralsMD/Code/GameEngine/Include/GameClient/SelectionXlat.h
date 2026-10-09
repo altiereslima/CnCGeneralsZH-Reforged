@@ -53,6 +53,9 @@ private:
 	UnsignedInt m_lastGroupSelTime;
 	Int m_lastGroupSelGroup;
 	ICoord2D m_selectFeedbackAnchor;		// Note: Used for drawing feedback only.
+	ICoord2D m_deselectFeedbackAnchor;	///< where Classic's right press went down, for 1.04's click test on its release
+	UnsignedInt m_lastClick;						///< when it went down
+	Coord3D m_deselectDownCameraPosition;	///< and where the camera stood then
 	Bool m_displayedMaxWarning;	// did we already display a warning about selecting too many units?
 
 	SelectCountMap m_selectCountMap;
@@ -83,6 +86,7 @@ public:
 	//changes the mode of drag selecting to it's opposite
 	void setDragSelecting(Bool dragSelect);
 	void setLeftMouseButton(Bool state);
+	Bool isLeftMouseButtonDown( void ) const { return m_leftMouseButtonIsDown; }	///< the left button went down on the world, not on a window
 	void forgetPendingSquads();	///< a match is over: what its team keys sent will never land
 
 #if defined(_DEBUG) || defined(_INTERNAL) || defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)

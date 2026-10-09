@@ -10,7 +10,7 @@ disable renamed to match.
 
 usage: infantry_drop.py <in.scb> <out.scb>
 
-The master is the retail file through opening.py H 1 4 5 6, then through this.
+The master is the retail file through opening.py H 1 4 5 6, then through this, then ai_bonus.py.
 """
 import copy
 import sys

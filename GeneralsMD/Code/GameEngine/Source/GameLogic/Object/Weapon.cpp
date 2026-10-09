@@ -1937,8 +1937,13 @@ void WeaponStore::postProcessLoad()
 	}
 	else if (ini->getLoadType() == INI_LOAD_MULTIFILE)
 	{
-		DEBUG_CRASH(("Weapon '%s' is patched but was never defined", c));
-		throw INI_INVALID_DATA;
+		// A mod's Weapon.ini without this weapon: the block is read into a scratch template and
+		// dropped, as ThingFactory::parseObjectDefinition does for a missing object.
+		DEBUG_LOG(("[LINE: %d in '%s'] Weapon '%s' is patched but was never defined; the block is skipped.\n", ini->getLineNum(), ini->getFilename().str(), c));
+		WeaponTemplate *scratch = newInstance(WeaponTemplate);
+		ini->initFromINI(scratch, scratch->getFieldParse());
+		scratch->deleteInstance();
+		return;
 	}
 	else
 	{

@@ -153,11 +153,13 @@ Int UnitLimitPerPlayer( Int nonObserverPlayers );
 // Whether a build that adds unitsItAdds (a transport and its payload) goes past the share.  0 is no cap.
 Bool UnitCapRefuses( Int unitsTowardCap, Int unitsItAdds, UnsignedInt unitCap );
 
-// Superweapons are paid for in base defences: every DEFENSES_PER_SUPERWEAPON finished defences a
-// player stands allow him one superweapon, counted across every type.  Whether one more is refused,
+// A computer player's superweapons are paid for in base defences: every DEFENSES_PER_SUPERWEAPON
+// finished defences it stands allow it one superweapon, counted across every type (four until
+// the owner raised it to twelve).  A human is held
+// only by the lobby's rule and Pro Rules.  Whether one more is refused,
 // given the finished defences and the superweapons he already has, foundations included.  It sits
 // on top of the lobby's rule and never loosens it.
-enum { DEFENSES_PER_SUPERWEAPON = 4 };
+enum { DEFENSES_PER_SUPERWEAPON = 12 };
 Bool SuperweaponDefenseCapRefuses( Int finishedDefenses, Int superweapons );
 // Only a defence somebody paid for counts.  The Sneak Attack tunnel, its Start and every general's
 // copy are the only FS_BASE_DEFENSE templates with no BuildCost: a power drops them for free.
@@ -167,8 +169,10 @@ Bool DefenseCountsForSuperweapons( Int buildCost );
 // down on the same allowance in those 20 seconds and the hole would make it two.
 Bool RebuildHoleHoldsSuperweapon( Bool rebuildsSuperweapon, Bool rebuildStanding );
 // The silo whose missile No Superweapons or Pro Rules silences is a shop for China's upgrades, not a
-// weapon, and is not asked for defences.
-Bool SuperweaponNeedsDefenses( const AsciiString &buildingName, Bool proRules, Int superweaponRestriction );
+// weapon, and is not asked for defences.  Neither is anything a human builds: computerPlayer is
+// getPlayerType() == PLAYER_COMPUTER, which every machine and the replay hold alike.
+Bool SuperweaponNeedsDefenses( const AsciiString &buildingName, Bool proRules, Int superweaponRestriction,
+                               Bool computerPlayer );
 
 // The lobby's income sharing, an IncomeSharing from GameInfo.h: whether a payment is split in this
 // match, and each ally's cut when it is split evenly between sharers players.  The earner keeps what
@@ -201,6 +205,8 @@ Bool ProRulesRefuseSpecialPower( const Player *player, SpecialPowerType specialP
 // no fire button, no shortcut.  Both read game setup only, the same on every machine.
 Bool SuperweaponMissileSilenced( SpecialPowerType specialPowerType, Bool proRules, Int superweaponRestriction );
 Bool SuperweaponMissileSilencedInMatch( SpecialPowerType specialPowerType );
+// the silo of a missile the one above silences: no banner, no feed line, announced as a building
+Bool SuperweaponSiloSilencedInMatch( const Object *structure );
 
 // Rule 9: no foundation this close to an enemy building, edge to edge.  The same 300 world units
 // the derrick cluster rules measure with, which is also more than a Patriot or a Stinger Site
@@ -616,6 +622,12 @@ public:
 
 	/// TRUE when the AI parks this team to go out with the rest of its wave instead of on its own.
 	Bool holdTeamForWave(Team *team, const AsciiString &approach, Int pathSuffix);
+
+	/// TRUE when the AI parks this team instead of letting a script send it hunting or at an area from home.
+	Bool gateTeamAttack(Team *team, const char *cause);
+
+	/// One of this player's units died; the AI keeps count of the ones that died alone.
+	void onUnitLost(const Object *obj);
 
 	/// Get the center of the ai's base.
 	virtual Bool getAiBaseCenter(Coord3D *pos);

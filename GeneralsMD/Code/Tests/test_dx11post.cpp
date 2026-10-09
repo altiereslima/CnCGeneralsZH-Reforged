@@ -325,6 +325,54 @@ TEST(dx11post_copy_gives_every_pixel_back_unchanged)
 	delete [] picture;
 }
 
+TEST(dx11post_a_warp_bends_the_edge_its_ring_crosses_and_clearing_it_gives_the_frame_back)
+{
+	DeviceFixture fixture;
+	if (!fixture.Create()) {
+		printf("skip: no Direct3D 11 device on this machine\n");
+		return;
+	}
+
+	unsigned char * picture = new unsigned char[SURFACE_SIZE * SURFACE_SIZE * BYTES_A_PIXEL];
+	fill_diagonal(picture);
+
+	// The blast sits in the dark half and its ring touches the diagonal square on, where pushing
+	// the picture outward moves the edge rather than sliding it along itself.
+	DX11PostWarp warp;
+	warp.CentreX = 0.3f;
+	warp.CentreY = 0.7f;
+	warp.Radius = 0.4f;
+	warp.Pull = 0.0f;
+	warp.RingRadius = 0.28f;
+	warp.RingWidth = 0.05f;
+	warp.RingStrength = 0.1f;
+	warp.RingSquash = 1.0f;
+	DX11Post_Set_Warps(&warp, 1);
+
+	const DX11PostEffect chain[] = { DX11_POST_COPY };
+	unsigned pitch = 0;
+	unsigned char * result = run_chain(fixture, chain, 1, picture, pitch);
+	CHECK(result != NULL);
+	if (result != NULL) {
+		CHECK(differing_pixels(picture, result, pitch) > 8u);
+		// Far from the ring nothing moves.
+		CHECK_EQ(DARK_LEVEL, pixel_level(result, pitch, 1, SURFACE_SIZE - 2));
+		CHECK_EQ(LIGHT_LEVEL, pixel_level(result, pitch, SURFACE_SIZE - 2, 1));
+		delete [] result;
+	}
+
+	// The game clears the warps on the frame after the last blast ends, and that frame has to be
+	// the copy pass's exact one again, not a frame with a last trace of the ring in it.
+	DX11Post_Set_Warps(NULL, 0);
+	result = run_chain(fixture, chain, 1, picture, pitch);
+	CHECK(result != NULL);
+	if (result != NULL) {
+		CHECK_EQ(0u, differing_pixels(picture, result, pitch));
+		delete [] result;
+	}
+	delete [] picture;
+}
+
 TEST(dx11post_fxaa_leaves_a_flat_picture_alone)
 {
 	DeviceFixture fixture;

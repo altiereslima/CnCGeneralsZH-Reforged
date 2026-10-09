@@ -328,6 +328,20 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 		{
 			m_lastMouseMoveFrame = TheGameLogic->getFrame();
 			m_anchor = msg->getArgument( 0 )->pixel;
+
+			// Classic is 1.04's scroll, which starts on the press itself, so a click that wobbles
+			// nudges the camera.  Its second press of a quick pair started nothing, as there.
+			if (TheGlobalData->isClassicUI())
+			{
+				if (msg->getType() == GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN)
+				{
+					m_currentPos = m_anchor;
+					if (!TheInGameUI->isSelecting() && !m_isScrolling)
+						setScrolling(SCROLL_RMB);
+				}
+				break;
+			}
+
 			m_rightPanArmed = true;
 			break;
 		}

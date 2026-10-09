@@ -1416,6 +1416,10 @@ void ScriptActions::doTeamAttackArea(const AsciiString& teamName, const AsciiStr
 	if (!theTeam) {
 		return;
 	}
+	// a skirmish AI may keep a team still at home for its next wave rather than send it on its own
+	if (theTeam->getControllingPlayer() && theTeam->getControllingPlayer()->gateTeamAttack(theTeam, "attackarea")) {
+		return;
+	}
 
 	AIGroup* theGroup = TheAI->createGroup();
 	if (!theGroup) {
@@ -2044,6 +2048,10 @@ void ScriptActions::doTeamHunt(const AsciiString& teamName)
 {
 	Team *theTeam = TheScriptEngine->getTeamNamed( teamName );
 	if (!theTeam) {
+		return;
+	}
+	// a skirmish AI may keep a team still at home for its next wave rather than let it hunt alone
+	if (theTeam->getControllingPlayer() && theTeam->getControllingPlayer()->gateTeamAttack(theTeam, "hunt")) {
 		return;
 	}
 

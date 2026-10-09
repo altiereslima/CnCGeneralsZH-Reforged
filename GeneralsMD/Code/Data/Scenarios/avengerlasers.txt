@@ -1,0 +1,26 @@
+# The Avenger's three lasers, one station each, 500 apart on Twilight Flame so no beam crosses into
+# another's frame. Seat 0 America, seat 1 GLA, -takeover so only these fire.
+#
+#   A 3150,3600: the target designator (AvengerTargetingLaserBeam) painting an unarmed Radar Van.
+#     Ordered at 40, before the other two Avengers exist, so the order cannot land on them.
+#   B 2900,3800: the anti-air laser (AvengerLaserBeam) on Helixes hovering over it, one every 4 s.
+#   C 3400,3800: the point defense lasers (AvengerPointDefenseLaserBeam) on Rocket Buggy rockets.
+#     The buggies stand 260 away and pick the Avenger up on their own (range 300), outside the
+#     designator's 200.
+
+30    spawn      0  AmericaTankAvenger            1   3150 3600
+30    spawn      1  GLAVehicleRadarVan            1   3040 3560
+40    attack     0  AmericaTankAvenger            1  GLAVehicleRadarVan
+
+50    spawn      0  AmericaTankAvenger            1   2900 3800
+50    spawn      1  ChinaVehicleHelix             1   2900 4150
+60    move       1  ChinaVehicleHelix                 2950 3880
+170   spawn      1  ChinaVehicleHelix             1   2900 4150
+180   move       1  ChinaVehicleHelix                 2950 3880
+290   spawn      1  ChinaVehicleHelix             1   2900 4150
+300   move       1  ChinaVehicleHelix                 2950 3880
+410   spawn      1  ChinaVehicleHelix             1   2900 4150
+420   move       1  ChinaVehicleHelix                 2950 3880
+
+50    spawn      0  AmericaTankAvenger            1   3400 3800
+50    spawn      1  GLAVehicleRocketBuggy         1   3400 4060

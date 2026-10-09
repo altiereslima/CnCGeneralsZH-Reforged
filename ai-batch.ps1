@@ -63,6 +63,13 @@ param(
 	# extra arguments handed to every run, for sweeping a knob the game reads from the command line
 	# (e.g. -ExtraArgs "-unitlimit") without a rebuild between batches
 	[string[]] $ExtraArgs = @(),
+	# a scenario file from Run/Scenarios played in every match, e.g. overlordrush. With -Takeover the
+	# scenario plays that seat by hand and the AI plays the others
+	[string] $Scenario = "",
+	# the one seat left without an AI (-takeover <slot>); -1 leaves every seat to the AI
+	[int] $Takeover = -1,
+	# faction per seat, in seat order, e.g. FactionChina,FactionGLA; empty lets the seed draw
+	[string[]] $Sides = @(),
 	# minutes before a wedged run is killed rather than waited on forever
 	[int] $TimeoutMinutes = 20,
 	# matches played at once. A headless match is one logic thread, so one a core runs the batch
@@ -127,6 +134,9 @@ for ($i = 0; $i -lt $Runs; $i++) {
 	# a second rung for the odd slots, so one rung can be played against another
 	if ($Difficulty2) { $args += "-aidiff2"; $args += $Difficulty2 }
 	if ($Teams -gt 1) { $args += "-teams"; $args += $Teams }
+	if ($Scenario) { $args += "-scenario"; $args += $Scenario }
+	if ($Takeover -ge 0) { $args += "-takeover"; $args += $Takeover }
+	for ($s = 0; $s -lt $Sides.Count; $s++) { if ($Sides[$s]) { $args += @("-side", $s, $Sides[$s]) } }
 	if ($ExtraArgs.Count) { $args += $ExtraArgs }
 
 	while (@($started | Where-Object { -not $_.Proc.HasExited }).Count -ge $Parallel) {
@@ -184,8 +194,35 @@ foreach ($run in $started) {
 	# and the count of frames that missed a 60Hz budget. Present in every build.
 	$ft = $null
 	$spikes = 0
+	# the AI's own account of its fights, per player index: what it lost and killed in money, its team
+	# deaths by how alone each one died, what it sent out and why, and the economy lines that say the
+	# match was played at all
+	$value = @{}
+	$loss = @{}
+	$engage = @{}
+	$econ = [pscustomobject]@{ Reattach = 0; Waves = 0; Counter = 0 }
 
 	foreach ($line in Get-Content $log) {
+		if ($line -match "^AI LOSS frame \d+ player (\d+) .* (straggling|grouped|last), ") {
+			$p = [int]$Matches[1]
+			if (-not $loss.ContainsKey($p)) { $loss[$p] = @{ straggling = 0; grouped = 0; last = 0 } }
+			$loss[$p][$Matches[2]]++
+			continue
+		}
+		if ($line -match "^AI ENGAGE frame \d+ player (\d+) (\w+): (\d+) units, ([\d.]+) power against ([\d.]+) remembered, cost ([\d.]+) matchup ([\d.]+)") {
+			$p = [int]$Matches[1]
+			if (-not $engage.ContainsKey($p)) { $engage[$p] = @() }
+			$engage[$p] += [pscustomobject]@{ Cause = $Matches[2]; Units = [int]$Matches[3]; Power = [double]$Matches[4]
+				Theirs = [double]$Matches[5]; Cost = [double]$Matches[6]; Matchup = [double]$Matches[7] }
+			continue
+		}
+		if ($line -match "Re-attaching supply truck") { $econ.Reattach++; continue }
+		if ($line -match "^AI WAVE .* sends \d+ teams") { $econ.Waves++; continue }
+		if ($line -match "^AI COUNTER") { $econ.Counter++; continue }
+		if ($line -match "HEADLESS VALUE (\d+): units worth (\d+) lost, (\d+) killed") {
+			$value[[int]$Matches[1]] = [pscustomobject]@{ Lost = [int]$Matches[2]; Killed = [int]$Matches[3] }
+			continue
+		}
 		if ($line -match "HEADLESS PERF (\S+): ([\d.]+) \(([\d.]+)\) x([\d.]+) worst ([\d.]+)") {
 			$perf[$Matches[1]] = [pscustomobject]@{
 				Net = [double]$Matches[2]; Gross = [double]$Matches[3]; Calls = [double]$Matches[4]
@@ -249,7 +286,8 @@ foreach ($run in $started) {
 	$winnerText = if ($null -ne $winner) { "player $winner" } else { "no winner" }
 	Write-Host ("{0}, {1}, frame {2}, {3:n0}s" -f $why, $winnerText, $frames, $wall)
 
-	$rows += [pscustomobject]@{ Seed = $seed; Cells = $cells; Why = $why; Frames = $frames; Wall = $wall; Slots = $slots; Pf = $pf; Perf = $perf; Jobs = $jobs; Ft = $ft; Spikes = $spikes }
+	$rows += [pscustomobject]@{ Seed = $seed; Cells = $cells; Why = $why; Frames = $frames; Wall = $wall; Slots = $slots; Pf = $pf; Perf = $perf; Jobs = $jobs; Ft = $ft; Spikes = $spikes
+		Value = $value; Loss = $loss; Engage = $engage; Econ = $econ; Winner = $winner }
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -287,6 +325,40 @@ $summary = foreach ($p in $slotIds) {
 	}
 }
 if ($summary) { $summary | Format-Table -AutoSize | Out-String | Write-Host }
+
+# The exchange each side made, in money: lost over killed below 1 is a side that trades well. Team
+# deaths by how alone each one died, straggling being the one the AI could have prevented. What it
+# sent out and why, with the two odds it set off on.
+$played = @($rows | Where-Object { $_.Value -and $_.Value.Count -gt 0 })
+$fightIds = $played | ForEach-Object { $_.Value.Keys } | Sort-Object -Unique
+$fights = foreach ($p in $fightIds) {
+	$vals = @($played | Where-Object { $_.Value.ContainsKey($p) } | ForEach-Object { $_.Value[$p] })
+	$lost = ($vals | Measure-Object Lost -Sum).Sum
+	$killed = ($vals | Measure-Object Killed -Sum).Sum
+	$deaths = @($played | Where-Object { $_.Loss.ContainsKey($p) } | ForEach-Object { $_.Loss[$p] })
+	$strag = ($deaths | ForEach-Object { $_.straggling } | Measure-Object -Sum).Sum
+	$all = ($deaths | ForEach-Object { $_.straggling + $_.grouped + $_.last } | Measure-Object -Sum).Sum
+	$sent = @($played | Where-Object { $_.Engage.ContainsKey($p) } | ForEach-Object { $_.Engage[$p] })
+	[pscustomobject]@{
+		Player      = $p
+		AvgValLost  = [math]::Round($lost / $vals.Count, 0)
+		AvgValKill  = [math]::Round($killed / $vals.Count, 0)
+		"Lost/Kill" = if ($killed -gt 0) { [math]::Round($lost / $killed, 2) } else { "-" }
+		"Strag%"    = if ($all -gt 0) { [math]::Round(100.0 * $strag / $all, 1) } else { "-" }
+		TeamDeaths  = $all
+		Sent        = $sent.Count
+		Causes      = (($sent | Group-Object Cause | Sort-Object Count -Descending | ForEach-Object { "$($_.Name) $($_.Count)" }) -join ", ")
+		"Matchup<1" = if ($sent.Count) { [math]::Round(100.0 * @($sent | Where-Object { $_.Matchup -lt 1 -and $_.Theirs -gt 0 }).Count / $sent.Count, 1) } else { "-" }
+	}
+}
+if ($fights) {
+	Write-Host "fights (money; Strag% = team deaths with 2+ teammates alive and at most one within 300):"
+	$fights | Format-Table -AutoSize | Out-String -Width 400 | Write-Host
+	Write-Host ("economy per match: {0:n1} supply truck re-attaches, {1:n1} AI WAVE sends, {2:n1} AI COUNTER picks" -f
+		(($played | ForEach-Object { $_.Econ.Reattach } | Measure-Object -Average).Average),
+		(($played | ForEach-Object { $_.Econ.Waves } | Measure-Object -Average).Average),
+		(($played | ForEach-Object { $_.Econ.Counter } | Measure-Object -Average).Average))
+}
 
 # With -Teams the question is which block won, not which seat: allies share a victory, so a team
 # is counted once per match it won, and its kills and losses are the sum over its members.
@@ -394,6 +466,8 @@ if ($perfRows.Count -gt 0) {
 # the per-match detail, for whoever wants to look at one game rather than the average
 $csv = Join-Path $RunDir "$Tag-batch.csv"
 $rows | Select-Object Seed, Cells, Why, Frames, Wall,
+	@{n="Winner";e={ $_.Winner }},
+	@{n="ValueLostKilled";e={ $v = $_.Value; if ($v) { ($v.Keys | Sort-Object | ForEach-Object { "{0}:{1}/{2}" -f $_, $v[$_].Lost, $v[$_].Killed }) -join " " } }},
 	@{n="Searches";e={ if ($_.Pf) { $_.Pf.Finds } }},
 	@{n="SearchMs";e={ if ($_.Pf) { [math]::Round($_.Pf.FindMs, 1) } }},
 	@{n="Expands";e={ if ($_.Pf) { $_.Pf.Expands } }},

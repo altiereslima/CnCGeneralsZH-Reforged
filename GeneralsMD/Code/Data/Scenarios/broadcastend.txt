@@ -1,0 +1,29 @@
+# -directorrecord's broadcast moments in about a minute of film: power flags under two players'
+# cards, one queued behind another, a defeat that slides the score bar, and the defeat that decides
+# the match with the winner's banner after it. Three easy AIs on Twilight Flame, every seat an enemy
+# of every other. Not -takeover: that puts the local player in a seat, and the director never runs.
+#
+#   generals.exe -win -xres 1280 -yres 720 -quickstart -noshellmap -multiInstance
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 3 -aidiff easy
+#     -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA -seed 7
+#     -scenario broadcastend -directorrecord broadcastend -maxframes 4000 -logPrefix bcast_
+#
+# America's Crusaders take the GLA base, America's A-10s and particle cannon and China's carpet bomb
+# land on it, and America's Paladins then take the Chinese base.
+
+# --- America's particle cannon, powered, at home ------------------------------------------
+10    spawn      0  AmericaParticleCannonUplink     1   start0:0:-200
+10    spawn      0  AmericaPowerPlant               3   start0:-260:40    90
+
+# --- the GLA base goes first ----------------------------------------------------------------
+60    spawn      0  AmericaTankCrusader             20  start2:-350:0     36
+90    attack     0  AmericaTankCrusader  2  *
+
+# a general's power for each of two players, and America's particle cannon queued behind its A-10s
+300   power      0  AmericaCommandCenter  start2:0:0    SuperweaponA10ThunderboltMissileStrike
+340   power      1  ChinaCommandCenter    start2:80:40  Early_SuperweaponChinaCarpetBomb
+360   power      0  AmericaParticleCannonUplink  start2:0:0
+
+# --- then the Chinese base, which decides it ----------------------------------------------
+1000  spawn      0  AmericaTankPaladin              16  start1:-350:0     40
+1030  attack     0  AmericaTankPaladin  1  *

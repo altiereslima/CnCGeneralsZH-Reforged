@@ -1239,6 +1239,29 @@ UpdateSleepTime AIUpdateInterface::update( void )
 
 	StateReturnType stRet = getStateMachine()->updateStateMachine();
 
+	// Orders the player gave while the unit was still on its exit path (isAllowedToRespondToAiCommands
+	// kept them), now that it is out: given in the order they came, as they would have been had it been
+	// listening, and the first one drops the trip to the producer's rally point like any order does.
+	// One that is now inside something was put there by somebody else, and an order whose target is
+	// gone has nothing left to do.
+	if (!m_ordersAfterExit.empty() && !isExitingProducer())
+	{
+		std::vector<AICommandParmsStorage> orders;
+		orders.swap( m_ordersAfterExit );
+		if (getObject()->getContainedBy() == NULL)
+		{
+			for (std::vector<AICommandParmsStorage>::const_iterator it = orders.begin(); it != orders.end(); ++it)
+			{
+				AICommandParms parms( AICMD_NO_COMMAND, CMD_FROM_PLAYER );
+				it->reconstitute( parms );
+				if (it->getTargetObjectID() != INVALID_ID && parms.m_obj == NULL)
+					continue;
+				aiDoCommand( &parms );
+			}
+			stRet = STATE_CONTINUE;
+		}
+	}
+
 	// A unit that was just built walks a short exit path out of its producer and then, if the player
 	// set a rally point, attack moves to it - so it stops and fights whatever it runs into on the way
 	// instead of taking the shots and walking on.  This is checked right after the machine ran,
@@ -1256,7 +1279,7 @@ UpdateSleepTime AIUpdateInterface::update( void )
 		// a rally point across the map is reached through the tunnels when they are shorter
 		const Real walkX = rallyPoint.x - getObject()->getPosition()->x;
 		const Real walkY = rallyPoint.y - getObject()->getPosition()->y;
-		Object *entrance = getObject()->getControllingPlayer()->getTunnelSystem()->findTunnelShortcut( getObject()->getPosition(),
+		Object *entrance = getObject()->getControllingPlayer()->getTunnelSystem()->findTunnelShortcut( getObject(), getObject()->getPosition(),
 			&rallyPoint, (Real)sqrt( walkX * walkX + walkY * walkY ) );
 		const Bool tunnelled = entrance != NULL
 			&& takeTunnelTrip( entrance, &rallyPoint, fights ? TUNNEL_TRIP_ATTACK_MOVE : TUNNEL_TRIP_MOVE, CMD_FROM_AI );
@@ -1283,15 +1306,16 @@ UpdateSleepTime AIUpdateInterface::update( void )
 	}
 
 	// A move order that a tunnel shortened: idle inside the network means the enter just finished, so
-	// leave by the mouth nearest the goal; idle outside means the exit is done, or the enter gave up,
-	// and either way what is left is the walk to the goal.
+	// leave by the mouth nearest the goal that the goal can be walked to from, the one the shortcut was
+	// chosen for; idle outside means the exit is done, or the enter gave up, and either way what is left
+	// is the walk to the goal.
 	if (m_hasTunnelTrip && getAIStateType() == AI_IDLE)
 	{
 		Object *me = getObject();
 		Object *tunnel = me->getContainedBy();
 		if (tunnel != NULL && tunnel->getContain()->isTunnelContain())
 		{
-			Object *exit = me->getControllingPlayer()->getTunnelSystem()->findQuietTunnelNear( &m_tunnelTripGoal );
+			Object *exit = me->getControllingPlayer()->getTunnelSystem()->findQuietTunnelNear( &m_tunnelTripGoal, me );
 			privateExit( exit != NULL ? exit : tunnel, CMD_FROM_AI );
 		}
 		else
@@ -4605,18 +4629,34 @@ Bool AIUpdateInterface::isAllowedToRespondToAiCommands(const AICommandParms* par
 
 	//
 	// A unit that is still walking the exit path out of the thing that produced it finishes that
-	// step before it will listen to anyone.  Taking an order mid-doorway leaves it turning around
-	// inside the building's footprint, which blocks the next unit off the line and, with
-	// setCanPathThroughUnits on for the exit path, lets it be shoved back through the wall.
-	// Aircraft are left alone: their "exit path" is the taxi and takeoff run off a helipad or
-	// airfield, which the player is expected to be able to redirect.
+	// step before it carries out a player's order.  Taking the order mid-doorway leaves it turning
+	// around inside the building's footprint, which blocks the next unit off the line and, with
+	// setCanPathThroughUnits on for the exit path, lets it cut back through the walls.  The order is
+	// kept instead, and update() gives it once the unit is out, so it can be told what to do from the
+	// moment it appears.  Every derived aiDoCommand asks here first, which is why the keeping is done
+	// in this const query.  Aircraft are left alone: their "exit path" is the taxi and takeoff run
+	// off a helipad or airfield, which the player is expected to be able to redirect.
 	//
-	if ( parms->m_cmdSource == CMD_FROM_PLAYER
-			 && getStateMachine()->getCurrentStateID() == AI_FOLLOW_EXITPRODUCTION_PATH
-			 && isDoingGroundMovement() )
+	if ( parms->m_cmdSource == CMD_FROM_PLAYER && isExitingProducer() )
+	{
+		AICommandParmsStorage order;
+		order.store( *parms );
+		m_ordersAfterExit.push_back( order );
 		return FALSE;
+	}
+
+	// Anything else that takes the unit off its exit path - a script, the computer, a capture, which
+	// idles it - is newer than the held orders and ends the wait for them.
+	if ( parms->m_cmd != AICMD_FOLLOW_EXITPRODUCTION_PATH && isExitingProducer() )
+		m_ordersAfterExit.clear();
 
 	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool AIUpdateInterface::isExitingProducer() const
+{
+	return getStateMachine()->getCurrentStateID() == AI_FOLLOW_EXITPRODUCTION_PATH && isDoingGroundMovement();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -7418,12 +7458,13 @@ void AIUpdateInterface::crc( Xfer *x )
 	* 17: how the tunnel trip's last leg is walked
 	* 18: the target a helicopter keeps shooting while it moves away
 	* 19: the radius a player's guard order set
-	* 20: the aggressive stance */
+	* 20: the aggressive stance
+	* 21: the player's orders held until the exit path is done */
 // ------------------------------------------------------------------------------------------------
 void AIUpdateInterface::xfer( Xfer *xfer )
 {
   // version
-  const XferVersion currentVersion = 20;
+  const XferVersion currentVersion = 21;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
  
@@ -7767,6 +7808,15 @@ void AIUpdateInterface::xfer( Xfer *xfer )
 
 	if (version >= 20)
 		xfer->xferBool(&m_aggressiveStance);
+
+	if (version >= 21)
+	{
+		Int count = (Int)m_ordersAfterExit.size();
+		xfer->xferInt(&count);
+		m_ordersAfterExit.resize(count);
+		for (Int i = 0; i < count; ++i)
+			m_ordersAfterExit[i].doXfer(xfer);
+	}
 
 }  // end xfer
 

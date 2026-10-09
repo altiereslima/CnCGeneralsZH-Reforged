@@ -3197,6 +3197,7 @@ void Object::scoreTheKill( const Object *victim )
 	if (victimController)
 	{
 		victimController->getScoreKeeper()->addObjectLost(victim);
+		victimController->onUnitLost(victim);
 	}
 
 	Relationship r = getRelationship(victim);

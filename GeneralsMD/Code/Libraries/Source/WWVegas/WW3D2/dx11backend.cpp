@@ -244,6 +244,9 @@ DX11BackendClass::DX11BackendClass()
 	, ShadowSkyFill(0.0f)
 	, ShadowReceiving(false)
 	, SmokeGlow(false)
+	, AdditiveGain(1.0f)
+	, GlowDraw(false)
+	, SceneStandIn(NULL)
 	, DrawsMade(0)
 	, DrawsRefused(0)
 	, RefusedNoBuffer(0)
@@ -457,6 +460,7 @@ void DX11BackendClass::Shutdown()
 		TargetCopyView = NULL;
 		TargetCopy = NULL;
 	}
+	SceneStandIn = NULL;
 	if (ShadowMapTexture != NULL) {
 		ShadowMapTexture->Release();
 		ShadowMapTexture = NULL;
@@ -950,6 +954,30 @@ void DX11BackendClass::Set_Smoke_Glow(bool glow)
 	}
 }
 
+void DX11BackendClass::Set_Additive_Gain(float gain)
+{
+	if (AdditiveGain != gain) {
+		AdditiveGain = gain;
+		// The factor goes with the blend state when it is bound, so the next draw binds again.
+		StateObjectsChanged = true;
+		Bound.Blend = NULL;
+	}
+}
+
+/** An additive draw into the scene that opted in, the one blend the Glow option boosts: fire and
+		explosion particles, laser lines, and the additive meshes the art ships (muzzle flashes, glows).
+		A source alpha blend into ONE is left alone, since the blend factor would replace the alpha it
+		weighs by. */
+bool DX11BackendClass::Additive_Glow() const
+{
+	return AdditiveGain != 1.0f && GlowDraw && CurrentTarget == NULL && !ShadowMapBound
+		&& (VertexFormat & D3DFVF_XYZRHW) == 0
+		&& RenderStates.Get_Render_State(D3DRS_ALPHABLENDENABLE) != FALSE
+		&& RenderStates.Get_Render_State(D3DRS_SRCBLEND) == D3DBLEND_ONE
+		&& RenderStates.Get_Render_State(D3DRS_DESTBLEND) == D3DBLEND_ONE
+		&& RenderStates.Get_Render_State(D3DRS_BLENDOP) == D3DBLENDOP_ADD;
+}
+
 bool DX11BackendClass::Smoke_Glow() const
 {
 	return SmokeGlow && VertexProgram == ENGINE_SHADER_NONE && PixelProgram == ENGINE_SHADER_NONE
@@ -1091,6 +1119,9 @@ void DX11BackendClass::Set_Blast_Lights(const float * lights, unsigned count)
 
 bool DX11BackendClass::Views_Current_Target(unsigned stage, ID3D11ShaderResourceView * texture) const
 {
+	if (texture != NULL && texture == SceneStandIn) {
+		return true;
+	}
 	if (texture == NULL || CurrentTarget == NULL) {
 		return false;
 	}
@@ -1286,7 +1317,8 @@ void DX11BackendClass::Set_Texture(unsigned stage, ID3D11ShaderResourceView * te
 		// Sampling the current target takes a draw off the shadow receivers (Shadow_Receiving), so a
 		// change into or out of that is a change of pipeline.  The old view's answer is in the cache
 		// when it was drawn with; when it is not, it is taken as yes.
-		else if (texture != Textures[stage] && CurrentTarget != NULL) {
+		else if (texture != Textures[stage] && (CurrentTarget != NULL || texture == SceneStandIn
+				|| Textures[stage] == SceneStandIn)) {
 			const bool was_target = (TargetCheckedViews[stage] == Textures[stage])
 				? TargetCheckedIsTarget[stage] : true;
 			if (was_target || Views_Current_Target(stage, texture)) {
@@ -2420,6 +2452,7 @@ void DX11BackendClass::Forget_Last_State_Objects()
 	memset(&LastRasterizerDescription, 0, sizeof(LastRasterizerDescription));
 	memset(LastSamplerDescriptions, 0, sizeof(LastSamplerDescriptions));
 	LastBlendState = NULL;
+	LastBlendGlow = false;
 	LastDepthStencilState = NULL;
 	LastRasterizerState = NULL;
 	memset(LastSamplerStates, 0, sizeof(LastSamplerStates));
@@ -2427,10 +2460,16 @@ void DX11BackendClass::Forget_Last_State_Objects()
 	Forget_Bindings();
 }
 
-ID3D11BlendState * DX11BackendClass::Blend_State()
+ID3D11BlendState * DX11BackendClass::Blend_State(bool glow)
 {
 	D3D11_BLEND_DESC description;
 	RenderStates.Build_Blend_Description(description);
+	if (glow) {
+		// The source term becomes the blend factor, which Bind_State_Objects passes as the gain.
+		// A float target takes a factor past one unclamped; that is the whole of the boost.
+		description.RenderTarget[0].SrcBlend = D3D11_BLEND_BLEND_FACTOR;
+		description.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_BLEND_FACTOR;
+	}
 	if (LastBlendState != NULL
 		&& memcmp(&LastBlendDescription, &description, sizeof(description)) == 0) {
 		return LastBlendState;
@@ -2571,15 +2610,21 @@ void DX11BackendClass::Bind_State_Objects()
 	ID3D11BlendState * blend = LastBlendState;
 	ID3D11DepthStencilState * depth_stencil = LastDepthStencilState;
 	ID3D11RasterizerState * rasterizer = LastRasterizerState;
-	if (StateObjectsChanged || blend == NULL || depth_stencil == NULL || rasterizer == NULL) {
-		blend = Blend_State();
+	// Whether the glow applies hangs on the target and the vertex format as well as the render
+	// states, and neither of those raises StateObjectsChanged, so it is asked every draw.
+	const bool glow = Additive_Glow();
+	if (StateObjectsChanged || glow != LastBlendGlow || blend == NULL || depth_stencil == NULL
+			|| rasterizer == NULL) {
+		blend = Blend_State(glow);
+		LastBlendGlow = glow;
 		depth_stencil = Depth_Stencil_State();
 		rasterizer = Rasterizer_State();
 		StateObjectsChanged = blend == NULL || depth_stencil == NULL || rasterizer == NULL;
 	}
 
 	if (!known || blend != Bound.Blend) {
-		context->OMSetBlendState(blend, NULL, 0xffffffff);
+		const float gain[4] = { AdditiveGain, AdditiveGain, AdditiveGain, 1.0f };
+		context->OMSetBlendState(blend, glow ? gain : NULL, 0xffffffff);
 		Bound.Blend = blend;
 	}
 	const UINT stencil_reference = RenderStates.Get_Stencil_Reference();
@@ -2720,6 +2765,10 @@ ID3D11ShaderResourceView * DX11BackendClass::Readable_Texture(unsigned stage,
 		return texture;
 	}
 	ID3D11Resource * resource = CurrentTargetResource;
+	if (texture == SceneStandIn) {
+		Device->Get_Scene_View()->GetResource(&resource);
+		resource->Release();	// the device holds the scene target for as long as it lives
+	}
 
 	// Set_Render_Target keeps only a target that is a two dimensional texture.
 	D3D11_TEXTURE2D_DESC description;

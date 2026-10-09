@@ -223,7 +223,6 @@ static void parseIgnoredField( INI *, void *, void *, const void * )
 	{ "DetailedBuildTooltips",		INI::parseBool,				NULL,			offsetof( GlobalData, m_detailedBuildTooltips ) },
 	{ "ArchiveReplays",						INI::parseBool,				NULL,			offsetof( GlobalData, m_archiveReplays ) },
 	{ "Bloom",										INI::parseInt,				NULL,			offsetof( GlobalData, m_bloomIntensity ) },
-	{ "BloomThreshold",						INI::parseInt,				NULL,			offsetof( GlobalData, m_bloomThreshold ) },
 	{ "MinCameraHeight",						INI::parseReal,				NULL,			offsetof( GlobalData, m_minCameraHeight ) },
 	{ "TerrainHeightAtEdgeOfMap",					INI::parseReal,				NULL,			offsetof( GlobalData, m_terrainHeightAtEdgeOfMap ) },
 	{ "UnitDamagedThreshold",				INI::parseReal,				NULL,			offsetof( GlobalData, m_unitDamagedThresh ) },
@@ -717,6 +716,8 @@ GlobalData::GlobalData()
 	m_autoSkirmishAIState = SLOT_BRUTAL_AI;
 	m_autoSkirmishAIStateOdd = 0;		// 0 = not set: every slot plays at -aidiff
 	m_noTacticsSlotParity = -1;
+	m_aiKnobsOffParity = -1;
+	m_aiKnobsOffMask = 0;
 	m_autoSkirmishTeams = 0;				// 0 = not set: every slot fights every other slot
 	m_peaceTime = 0;								// no truce unless -peacetime asks for one
 	m_unitLimit = FALSE;						// no unit limit unless -unitlimit asks for one
@@ -732,6 +733,9 @@ GlobalData::GlobalData()
 	m_videoStartFrame = 0;
 	m_videoEndFrame = 0; // record nothing unless -video asks for a range
 	m_videoName.clear();
+	m_directorRecord = FALSE;
+	m_directorScoutFile.clear();
+	m_directorTimelineFile.clear();
 	m_wavStartFrame = 0;
 	m_wavEndFrame = 0; // record no sound unless -wav asks for a range
 	m_wavName.clear();
@@ -753,8 +757,13 @@ GlobalData::GlobalData()
 	m_scenarioFile.clear(); // nothing is scripted; -scenario is a measuring tool and ruins the match it runs in
 	m_cinemaScript.clear(); // the interface is on and the camera belongs to the player
 	m_autoSkirmishTakeover = FALSE; // the AI plays the opponents unless -takeover empties their seats
+	m_autoSkirmishTakeoverSlot = -1;
 	for( Int slot = 0; slot < MAX_PLAYER_COUNT; slot++ )
+	{
 		m_autoSkirmishSide[ slot ].clear(); // every faction still comes out of the seed unless -side names one
+		m_autoSkirmishTeam[ slot ] = AUTO_SKIRMISH_TEAM_UNSET; // and every team out of -teams unless -team names one
+		m_autoSkirmishSeatName[ slot ].clear(); // and every computer seat is called by its difficulty unless -seatname names it
+	}
 	m_netGameHosts.clear(); // no network game from the command line
 	m_netGameStarted = FALSE;
 	m_netGameLocalSlot = 0;
@@ -1198,14 +1207,11 @@ GlobalData::GlobalData()
 	m_detailedBuildTooltips = TRUE;
 	m_archiveReplays = TRUE;
 
-	// Bloom defaults to the options screen's Medium: 60 percent, which the Direct3D 11 post chain
-	// turns into the 1.5 strength it used to apply unconditionally.  Both fields are percentages and
-	// GameData.ini sets them as such - the strength, and the brightness below which nothing glows.
-	// The options screen offers levels instead and stores one of those in Options.ini;
-	// OptionsCatalog.cpp holds the percentage each level stands for, and 60 and 65 here are two of
-	// them.
-	m_bloomIntensity = 60;
-	m_bloomThreshold = 65;
+	// Glow defaults to the options screen's Medium, 50 percent.  GameData.ini sets the field as a
+	// percentage; the options screen offers levels and stores one of those in Options.ini, and
+	// OptionsCatalog.cpp holds the percentage each level stands for.  W3DShaderManager.cpp turns
+	// the percentage into the additive gain, the bloom strength and the blur width.
+	m_bloomIntensity = 50;
 	
 	m_animateWindows = TRUE;
 	

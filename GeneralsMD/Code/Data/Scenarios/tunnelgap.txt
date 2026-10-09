@@ -1,0 +1,23 @@
+# Tunnel across a gap: a GLA move order onto ground the selection cannot walk to, with a tunnel on
+# each side.
+#
+# Dark Night has a pocket of open ground round 1300,1740, about 200 across, that a Rebel's
+# pathfinding puts in a terrain zone apart from the GLA start's: nothing on the start's side walks
+# into it.  A tunnel stands in it and another behind the GLA start, and Rebels standing 710 from the
+# pocket are sent to a spot in it beside the tunnel.  In straight lines the walk (710) is shorter
+# than the trip back to the start tunnel and out (about 980), so the old compare walked them at the
+# wall; arriving at all means the order went through the network.  TunnelTracker::findTunnelShortcut
+# logs TUNNELSHORTCUT when it takes the tunnels because there is no walk.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Dark Night\Dark Night.map" -autoskirmish 2 -takeover
+#     -side 0 FactionGLA -side 1 FactionAmerica -seed 1 -maxframes 3000
+#     -scenario tunnelgap -logPrefix tunnelgap_
+
+30    spawn       0  GLATunnelNetwork       1  start0:-200:0
+30    spawn       0  GLATunnelNetwork       1  1285 1725
+30    spawn       0  GLAInfantryRebel       4  900 1200  25
+# the order waits for the pathfinder's zones to take the tunnels in, which happens up to 300 frames
+# after a structure is placed; a mouth not yet in a zone answers yes to every reachability question
+400   playermove  0  GLAInfantryRebel          1330 1770
+400   arrive      0  GLAInfantryRebel          1330 1770  40

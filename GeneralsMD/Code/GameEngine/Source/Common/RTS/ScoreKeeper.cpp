@@ -59,6 +59,7 @@
 #include "Common/GameState.h"
 #include "Common/KindOf.h"
 #include "Common/Player.h"
+#include "Common/PlayerList.h"
 #include "Common/ScoreKeeper.h"
 #include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
@@ -408,6 +409,32 @@ Int ScoreKeeper::getTotalBuildingsDestroyed( void )
 	}
 	return count;
 }
+/** The build cost of every unit in one of the count maps, at its owner's price; a building is not
+	* army.  For the HEADLESS VALUE line an AI batch reads the exchange from. */
+Int ScoreKeeper::unitValueOf( const ObjectCountMap &map, Int ownerIdx )
+{
+	const Player *owner = ThePlayerList->getNthPlayer( ownerIdx );
+	Int value = 0;
+	for( ObjectCountMap::const_iterator it = map.begin(); it != map.end(); ++it )
+		if( !it->first->isKindOf( KINDOF_STRUCTURE ) )
+			value += it->second * it->first->calcCostToBuild( owner );
+	return value;
+}
+
+Int ScoreKeeper::getUnitValueLost( void ) const
+{
+	return unitValueOf( m_objectsLost, m_myPlayerIdx );
+}
+
+Int ScoreKeeper::getUnitValueDestroyed( void ) const
+{
+	Int value = 0;
+	for( Int i = 0; i < MAX_PLAYER_COUNT; ++i )
+		if( ThePlayerList->getNthPlayer( i ) )
+			value += unitValueOf( m_objectsDestroyed[ i ], i );
+	return value;
+}
+
 Int ScoreKeeper::getTotalUnitsDestroyed( void )
 {
 	int count = 0;

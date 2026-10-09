@@ -1624,16 +1624,6 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 																														 const Coord3D *pos, 
 																														 CommandEvaluateType type )
 {
-	// the search and destroy key sweeps a circle round the point, whatever stands on it
-	if( TheInGameUI->getAreaOrderArmed() != InGameUI::AREA_ORDER_NONE && TheInGameUI->areSelectedObjectsControllable() )
-	{
-		if( type == DO_COMMAND )
-			TheInGameUI->issueAreaSweep( *pos );
-		else if( type == DO_HINT )
-			TheMessageStream->appendMessage( GameMessage::MSG_DO_MOVETO_HINT )->appendLocationArgument( *pos );
-		return type == DO_COMMAND ? GameMessage::MSG_DO_MOVETO : GameMessage::MSG_DO_MOVETO_HINT;
-	}
-
 	Object *obj = draw ? draw->getObject() : NULL;
 	Drawable *drawableInWay = draw;
 
@@ -4171,7 +4161,11 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			m_mouseRightUp = (UnsignedInt) msg->getArgument( 2 )->integer;
 
 			// a structure waiting to be placed is dropped by the same release, over in
-			// SelectionXlat, unless the release ended a pan
+			// SelectionXlat, unless the release ended a pan.  Classic drops it here on a click, as 1.04
+			// did, which is also what takes a shortcut bar's sneak attack off the cursor.
+			if( TheGlobalData->isClassicUI()
+					&& TheMouse->isClick( &m_mouseRightDragAnchor, &m_mouseRightDragLift, NULL, NULL, m_mouseRightDown, m_mouseRightUp ) )
+				TheInGameUI->placeBuildAvailable( NULL, NULL );
 
 			break;
 		}

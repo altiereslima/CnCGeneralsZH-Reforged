@@ -6,6 +6,8 @@
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/WindowXlat.h"
 #include "GameClient/GUICallbacks.h"
+#include "GameClient/ControlBar.h"
+#include "GameClient/SelectionXlat.h"
 #include "Common/Radar.h"
 #include "Common/StatsCollector.h"
 #include "Common/PlayerList.h"
@@ -221,7 +223,9 @@ class MinimapTestUI : public MinimapInputUI
 {
 public:
 	DrawableList selected;
+	const CommandButton *command = NULL;
 	const DrawableList *getAllSelectedLocalDrawables() { return &selected; }
+	const CommandButton *getGUICommand() const { return command; }
 };
 
 struct MinimapInputFixture
@@ -243,6 +247,7 @@ struct MinimapInputFixture
 		radar.configure(window);
 		static MinimapTestUI *ui = NEW MinimapTestUI;
 		ui->selected.clear();
+		ui->command = NULL;
 		ui->scrolling = ui->selecting = FALSE;
 		ui->enabled = TRUE;
 		TheInGameUI = ui;
@@ -267,7 +272,7 @@ struct MinimapInputFixture
 		GameMessage *message = messages.stream.appendMessage(type);
 		ICoord2D pixel = {x, y};
 		message->appendPixelArgument(pixel);
-		if(type == GameMessage::MSG_RAW_MOUSE_LEFT_DRAG)
+		if(type == GameMessage::MSG_RAW_MOUSE_LEFT_DRAG || type == GameMessage::MSG_RAW_MOUSE_RIGHT_DRAG)
 		{
 			ICoord2D delta = {1, 1};
 			message->appendPixelArgument(delta);
@@ -384,4 +389,136 @@ TEST(minimap_drag_works_during_keyboard_scroll_and_pins_to_a_letterboxed_picture
 	CHECK(f.engine.view.getPosition()->y > 600);
 	f.event(messages, GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP, 300, 400);
 	CHECK(f.windows.winGetGrabWindow() == NULL);
+}
+
+/* 1.04's radar in both of its mouse setups: the look button moves the camera on the press and a drag
+   after it leaves the camera alone, and the other button with units selected gives 1.04's orders - the
+   attack move command when it is waiting, a plain move otherwise. */
+TEST(minimap_classic_looks_on_the_press_and_orders_attack_move_in_both_mouse_setups)
+{
+	CHECK(bootOnce());
+	CommandButton *attackMove = newInstance(CommandButton);
+	attackMove->friend_setCommandType(GUI_COMMAND_ATTACK_MOVE);
+	for (Int alternate = 0; alternate < 2; ++alternate)
+	{
+		MinimapInputFixture f;
+		MinimapMessages messages;
+		messages.stream.attachTranslator(NEW WindowTranslator, 10);
+		TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
+		TheWritableGlobalData->m_useAlternateMouse = alternate ? TRUE : FALSE;
+		MinimapTestUI *ui = (MinimapTestUI*)TheInGameUI;
+		ui->selected.push_back(NULL);
+
+		const GameMessage::Type lookDown = alternate ? GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN : GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN;
+		const GameMessage::Type lookDrag = alternate ? GameMessage::MSG_RAW_MOUSE_LEFT_DRAG : GameMessage::MSG_RAW_MOUSE_RIGHT_DRAG;
+		const GameMessage::Type lookUp = alternate ? GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP : GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP;
+		const GameMessage::Type orderDown = alternate ? GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN : GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN;
+		const GameMessage::Type orderUp = alternate ? GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP : GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP;
+
+		f.event(messages, lookDown, 120, 220);
+		CHECK(f.engine.view.lookAtCalls == 1);
+		f.event(messages, lookDrag, 150, 250);
+		CHECK(f.engine.view.lookAtCalls == 1);
+		f.event(messages, lookUp, 150, 250);
+		CHECK(messages.commands.getFirstMessage() == NULL);
+
+		ui->command = attackMove;
+		f.event(messages, orderDown, 120, 220);
+		f.event(messages, orderUp, 120, 220);
+		CHECK(f.engine.view.lookAtCalls == 1);
+		const GameMessage *order = messages.commands.getFirstMessage();
+		CHECK(order != NULL && order->getType() == GameMessage::MSG_DO_ATTACKMOVETO);
+	}
+	attackMove->deleteInstance();
+}
+
+namespace
+{
+class ClassicRightClickUI : public MinimapInputUI
+{
+public:
+	const CommandButton *command = NULL;
+	ObjectID placeSource = INVALID_ID;
+	Int deselects = 0;
+	const CommandButton *getGUICommand() const { return command; }
+	void setGUICommand(const CommandButton *c) { command = c; }
+	const ObjectID getPendingPlaceSourceObjectID() { return placeSource; }
+	void deselectAllDrawables() { ++deselects; }
+};
+}
+
+/* 1.04's right release in Classic: only a click counts, measured on screen, in time and by how far the
+   camera rode, since the press scrolls as well.  A click takes back a waiting command and is eaten, so
+   the alternate mouse's order does not follow it; otherwise it deselects, which under the alternate
+   mouse it does only with a dozer's structure on the cursor. */
+TEST(classic_right_click_deselects_or_takes_back_a_command_as_1_04_did)
+{
+	CHECK(bootOnce());
+	MinimapEngineFixture f;
+	static ClassicRightClickUI *ui = NEW ClassicRightClickUI;
+	TheInGameUI = ui;
+	SelectionTranslator *savedSelection = TheSelectionTranslator;
+	f.mouse.m_dragTolerance = 25;
+	f.mouse.m_dragTolerance3D = 25;
+	f.mouse.m_dragToleranceMS = 250;
+	f.global->m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
+	CommandButton *guard = newInstance(CommandButton);
+	guard->friend_setCommandType(GUI_COMMAND_GUARD);
+	{
+		SelectionTranslator selection;
+		const auto mouse = [&selection](GameMessage::Type type, Int x, Int y, Int time)
+		{
+			GameMessage *message = newInstance(GameMessage)(type);
+			const ICoord2D pixel = {x, y};
+			message->appendPixelArgument(pixel);
+			message->appendIntegerArgument(0);
+			message->appendIntegerArgument(time);
+			const GameMessageDisposition disp = selection.translateGameMessage(message);
+			message->deleteInstance();
+			return disp;
+		};
+		const auto click = [&mouse](Int dx, Int heldMs)
+		{
+			mouse(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN, 300, 300, 1000);
+			return mouse(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP, 300 + dx, 300, 1000 + heldMs);
+		};
+
+		for (Int alternate = 0; alternate < 2; ++alternate)
+		{
+			f.global->m_useAlternateMouse = alternate ? TRUE : FALSE;
+			ui->deselects = 0;
+			ui->command = NULL;
+			ui->placeSource = INVALID_ID;
+
+			// a click with nothing waiting deselects in the default mouse and not in the alternate one
+			CHECK(click(10, 100) == KEEP_MESSAGE);
+			CHECK_EQ(ui->deselects, alternate ? 0 : 1);
+
+			// a drag or a held press is no click at all
+			click(60, 100);
+			click(0, 400);
+			CHECK_EQ(ui->deselects, alternate ? 0 : 1);
+
+			// nor is a press the camera rode away from
+			mouse(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN, 300, 300, 1000);
+			Coord3D moved = *f.view.getPosition();
+			moved.x += 100.0f;
+			f.view.setPosition(&moved);
+			mouse(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP, 300, 300, 1100);
+			CHECK_EQ(ui->deselects, alternate ? 0 : 1);
+
+			// a waiting command is taken back, the units stay, and the release is eaten
+			ui->command = guard;
+			CHECK(click(0, 100) == DESTROY_MESSAGE);
+			CHECK(ui->command == NULL);
+			CHECK_EQ(ui->deselects, alternate ? 0 : 1);
+
+			// a dozer's structure on the cursor deselects the dozer in both
+			ui->placeSource = (ObjectID)7;
+			click(0, 100);
+			CHECK_EQ(ui->deselects, alternate ? 1 : 2);
+		}
+	}
+	guard->deleteInstance();
+	TheSelectionTranslator = savedSelection;
 }

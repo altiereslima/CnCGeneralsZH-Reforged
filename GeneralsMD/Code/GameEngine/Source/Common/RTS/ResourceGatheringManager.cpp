@@ -33,6 +33,7 @@
 #include "Common/ResourceGatheringManager.h"
 
 #include "Common/ActionManager.h"
+#include "Common/PlayerList.h"
 #include "Common/Xfer.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
@@ -147,6 +148,26 @@ static Real computeRelativeCost( Object *queryObject, Object *destObject, Real *
 	return distSquared;
 }
 
+/** A pile whose nearest supply center, within a short walk of it, belongs to another player is
+	* that player's pile.  A gatherer sent there either queues behind the owner's trucks or finds no
+	* center of its own to carry to and stands idle beside the pile. */
+Bool ResourceGatheringManager::isPileOfAnotherPlayer( const Player *player, const Object *warehouse )
+{
+	// as far as AIPlayer's SUPPLY_CENTER_CLOSE_DIST, which is where the AI puts a center beside a pile
+	const Real PILE_CLAIM_DISTANCE = 200.0f;
+
+	PartitionFilterAcceptByKindOf fCenter( MAKE_KINDOF_MASK( KINDOF_FS_SUPPLY_CENTER ), KINDOFMASK_NONE );
+	PartitionFilterAlive fAlive;
+	PartitionFilterOnMap fOnMap;
+	PartitionFilter *filters[] = { &fCenter, &fAlive, &fOnMap, NULL };
+	Object *center = ThePartitionManager->getClosestObject( warehouse, PILE_CLAIM_DISTANCE, FROM_BOUNDINGSPHERE_2D, filters );
+	if( center == NULL )
+		return FALSE;
+
+	const Player *owner = center->getControllingPlayer();
+	return owner != player && owner != ThePlayerList->getNeutralPlayer();
+}
+
 Object *ResourceGatheringManager::findBestSupplyWarehouse( Object *queryObject )
 {
 	Object *bestWarehouse = NULL;
@@ -195,7 +216,8 @@ Object *ResourceGatheringManager::findBestSupplyWarehouse( Object *queryObject )
 		{
 			Real distanceSquared;
 			Real currentCost = computeRelativeCost( queryObject, currentWarehouse, &distanceSquared );
-			if( (currentCost < bestCost) && (distanceSquared < maxDistanceSquared) )
+			if( (currentCost < bestCost) && (distanceSquared < maxDistanceSquared) &&
+					!isPileOfAnotherPlayer( queryObject->getControllingPlayer(), currentWarehouse ) )
 			{
 				bestWarehouse = currentWarehouse;
 				bestCost = currentCost;

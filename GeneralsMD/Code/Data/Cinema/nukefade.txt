@@ -1,0 +1,10 @@
+# Scenarios/nukefade.txt: the nuke called at frame 100 on 1500,3450 lands about frame 264 and the
+# burning ground under it is out by about 1260. Held wide and steep, so the ground rings stay whole
+# inside the frame and read as rings over the smoke, with a slow small turn so the frame is not dead.
+# At zoom 1.1 and pitch 14 the ring left the frame within half a second and the smoke covered the
+# rest; pitch +30 is the flat end, not the steep one, and showed the rings edge-on under black sky.
+#
+#   ...the scenario's switches... -cinema nukefade -video 200 1440 nukefade -maxframes 1450
+
+0.5   cut     1500 3450 1.7 -45 -24
+6.0   orbit   12 40

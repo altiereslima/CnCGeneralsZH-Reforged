@@ -47,6 +47,7 @@
 #include "wwdebug.h"
 #include "dx8wrapper.h"
 #include "dx8caps.h"
+#include "dx11runtime.h"
 
 
 bool ShaderClass::ShaderDirty=true;
@@ -134,7 +135,9 @@ ShaderClass ShaderClass::_PresetAlpha2DShader(SC_ALPHA_2D);
 	SRCBLEND_ONE, DSTBLEND_ONE, FOG_DISABLE, GRADIENT_DISABLE, SECONDARY_GRADIENT_DISABLE, \
 	TEXTURING_ENABLE, ALPHATEST_DISABLE, CULL_MODE_ENABLE, \
 	DETAILCOLOR_DISABLE, DETAILALPHA_DISABLE) )
-ShaderClass ShaderClass::_PresetAdditiveSpriteShader(SC_ADD_SPRITE);
+// Every additive particle, streak and projectile stream draws with this one, so it carries the
+// Glow option's opt-in; the plain additive preset (water, waypoint lines, decals) does not.
+ShaderClass ShaderClass::_PresetAdditiveSpriteShader(SC_ADD_SPRITE | (ShaderClass::GLOW_ENABLE << SHIFT_GLOW));
 
 // Texturing, default zbuffer reading, no zbuffer writing, no gradients,
 // alpha blending, no fogging - mostly for use in alpha-blended sprite
@@ -428,6 +431,10 @@ void ShaderClass::Apply()
 
 	CurrentShader=ShaderBits;
 	ShaderDirty=false;
+
+	if (diff & ShaderClass::MASK_GLOW)
+		Direct3D11_Set_Glow_Draw(Get_Glow() == ShaderClass::GLOW_ENABLE);
+
 	// COLOR MASK
 
 	if(diff & (ShaderClass::MASK_COLORMASK | ShaderClass::MASK_SRCBLEND | ShaderClass::MASK_DSTBLEND | ShaderClass::MASK_ALPHATEST))

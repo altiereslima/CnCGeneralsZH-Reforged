@@ -77,6 +77,9 @@ enum HealthBarModeType
 /** The HudScale option's steps, 100/115/130/150% of the bottom HUD's own size (ControlBarHudScale). */
 enum { HUD_SCALE_COUNT = 4 };
 
+/// -team left a slot alone: its team comes from -teams, or none
+enum { AUTO_SKIRMISH_TEAM_UNSET = -2 };
+
 /** The interface: the HUD, mouse and keys of Zero Hour 1.04, or this fork's own.  Picked for each
 	* run by -interface (the launcher passes it), Classic without it; Options.ini has no say.  Client
 	* only, and never read by GameLogic: two players on different styles are still in the same game. */
@@ -105,6 +108,14 @@ enum TextLanguageType
 	TEXT_LANGUAGE_GERMAN	= 2,
 
 	TEXT_LANGUAGE_COUNT		= 3,
+};
+
+/** The AI profile knobs -aiknobsoff can switch off for a measurement. */
+enum
+{
+	AIKNOB_ENGAGE_GATE	= 1,
+	AIKNOB_ANSWER_ARMY	= 2,
+	AIKNOB_MASS_UNIT		= 4,
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -453,8 +464,7 @@ public:
 	Bool m_workersReturnToSupply;		///< a worker that finishes a build job goes back to the dock it left
 	Bool m_detailedBuildTooltips;		///< put build time, weapon range and damage in the build tooltip
 	Bool m_archiveReplays;					///< keep a timestamped copy of every replay, instead of only the last one
-	Int m_bloomIntensity;				///< bloom strength in percent, 0 = off
-	Int m_bloomThreshold;				///< brightness in percent below which nothing blooms
+	Int m_bloomIntensity;				///< Glow strength in percent, 0 = off; the renderer derives the rest
 	Bool m_buildMapCache;
 	AsciiString m_initialFile;				///< If this is specified, load a specific map/replay from the command-line
 	AsciiString m_pendingFile;				///< If this is specified, use this map at the next game start
@@ -465,6 +475,8 @@ public:
 	Bool m_turbo;									///< -turbo: draw, but run one logic frame a pass instead of pacing it to the wall clock
 	Int m_autoSkirmishAIStateOdd;		///< -aidiff2 <name>: rung for the odd-numbered slots (0 = same as -aidiff)
 	Int m_noTacticsSlotParity;			///< -notactics even|odd: those slots of a skirmish fight without Hard's unit tactics; -1 none
+	Int m_aiKnobsOffParity;				///< -aiknobsoff even|odd|all <names>: those slots of a skirmish play with these profile knobs off; -1 none, 2 all
+	Int m_aiKnobsOffMask;					///< ... which knobs: AIKNOB_* bits
 	Int m_autoSkirmishTeams;				///< -teams <n>: split the auto-skirmish slots into n allied teams (0 or 1 = free-for-all)
 	Int m_peaceTime;								///< -peacetime <n>: the lobby's peace time, in minutes, for an -autoskirmish run
 	Bool m_unitLimit;								///< -unitlimit: the lobby's unit limit for an -autoskirmish run
@@ -477,6 +489,9 @@ public:
 	Int m_videoStartFrame;					///< -video <from> <to> [name]: the first logic frame recorded
 	Int m_videoEndFrame;						///< -video: the last logic frame recorded (0 = no video)
 	AsciiString m_videoName;				///< -video: the recording is Videos\<name>.mp4 next to the save games
+	Bool m_directorRecord;					///< -directorrecord [name]: the director films the whole match, split for two fights, and the run quits at its end
+	AsciiString m_directorScoutFile;	///< -directorscout <file>: -directorrecord's first pass, headless, writes the match's fights and special powers here
+	AsciiString m_directorTimelineFile;	///< -directortimeline <file>: what the first pass wrote, which the filming pass reads to arrive before each fight
 	Int m_wavStartFrame;						///< -wav <from> <to> [name]: the first logic frame of the sound recording
 	Int m_wavEndFrame;							///< -wav: the last logic frame recorded (0 = no sound recording)
 	AsciiString m_wavName;					///< -wav: the recording is Videos\<name>.wav next to the save games
@@ -498,7 +513,10 @@ public:
 	AsciiString m_scenarioFile;			///< -scenario <name>: play Run/Scenarios/<name>.txt instead of leaving the match to a person or an AI (empty = off)
 	AsciiString m_cinemaScript;			///< -cinema <name>: interface off, camera flown by Run/Cinema/<name>.txt (empty = off)
 	Bool m_autoSkirmishTakeover;		///< -takeover: give every -autoskirmish slot a driverless human seat, so nothing thinks unless a scenario says so
+	Int m_autoSkirmishTakeoverSlot;	///< -takeover <slot>: only that seat is driverless and the AI plays the rest; -1 for every seat
 	AsciiString m_autoSkirmishSide[ MAX_PLAYER_COUNT ];	///< -side <slot> <faction>: name that slot's faction instead of drawing it from the seed
+	Int m_autoSkirmishTeam[ MAX_PLAYER_COUNT ];	///< -team <slot> <n>: that slot's team, -1 for none; AUTO_SKIRMISH_TEAM_UNSET leaves it to -teams
+	AsciiString m_autoSkirmishSeatName[ MAX_PLAYER_COUNT ];	///< -seatname <slot> <name>: what that seat is called instead of its difficulty
 	AsciiString m_netGameHosts;				///< -netgame <ip>[,<ip>...]: the slot list of a LAN game started from the command line (empty = off)
 	Bool m_netGameStarted;						///< that -netgame passed its checks and StartAutomatedGame ran, so every seat has this command line
 	Int m_netGameLocalSlot;						///< -netslot <n>: which of those addresses this copy of the game is

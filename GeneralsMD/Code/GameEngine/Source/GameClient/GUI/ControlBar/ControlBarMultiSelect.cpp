@@ -33,6 +33,7 @@
 // USER INCLUDES //////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
+#include "Common/MessageStream.h"
 #include "Common/ThingTemplate.h"
 #include "Common/Upgrade.h"
 #include "GameClient/GameText.h"
@@ -43,6 +44,9 @@
 #include "GameClient/GameWindow.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/InGameUI.h"
+#include "GameClient/Keyboard.h"
+#include "GameClient/Mouse.h"
+#include "GameClient/SelectionXlat.h"
 #include "GameLogic/Object.h"
 
 #ifdef _INTERNAL
@@ -226,6 +230,61 @@ static void portraitBarTooltip( GameWindow *window, WinInstanceData *instData, U
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The right HUD's input.  A tile that is not the focused type is disabled to wear its darkened
+	* look, so its clicks land here on the parent and never on the tile; the focused tile ignores
+	* them and they come here too.  A press that went down in the world is the selection translator's,
+	* which holds it until some release lets it go, so while it holds one the release here ends a box
+	* dragged onto the HUD and is no click on a tile.  Nothing is kept here between a press and its
+	* release, so nothing can go stale.  Everything else goes on to the wall the .wnd gave the HUD,
+	* which lets go of that world press. */
+//-------------------------------------------------------------------------------------------------
+static WindowMsgHandledType portraitBarInput( GameWindow *window, UnsignedInt msg, WindowMsgData mData1, WindowMsgData mData2 )
+{
+	if( msg == GWM_LEFT_UP && !TheSelectionTranslator->isLeftMouseButtonDown() )
+	{
+		const ICoord2D &mouse = TheMouse->getMouseStatus()->pos;
+		TheControlBar->clickMultiSelectTile( mouse.x, mouse.y );
+	}
+	return GameWinBlockInput( window, msg, mData1, mData2 );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Takes units out of the selection the way a shift-click on a selected unit in the world does:
+	* MSG_REMOVE_FROM_SELECTED_GROUP for the logic's group and deselectDrawable for the client's.
+	* A plain click removes every other type, shift and a click removes the clicked one. */
+//-------------------------------------------------------------------------------------------------
+Bool ControlBar::clickMultiSelectTile( Int x, Int y )
+{
+	if( m_currContext != CB_CONTEXT_MULTI_SELECT )
+		return FALSE;
+
+	for( Int group = 0; group < m_multiSelectGroupCount && group < (Int)m_multiSelectTiles.size(); group++ )
+	{
+		GameWindow *tile = m_multiSelectTiles[ group ];
+		if( tile == NULL || tile->winIsHidden() || !tile->winPointInWindow( x, y ) )
+			continue;
+
+		const ThingTemplate *clicked = m_multiSelectGroupTemplate[ group ];
+		const Bool dropClicked = TheKeyboard->isShift();
+		// a copy: deselectDrawable takes each one out of the list being walked
+		const DrawableList selected = *TheInGameUI->getAllSelectedDrawables();
+		GameMessage *remove = NULL;
+		for( DrawableListCIt it = selected.begin(); it != selected.end(); ++it )
+		{
+			Drawable *draw = *it;
+			if( ( draw->getTemplate() == clicked ) != dropClicked )
+				continue;
+			if( remove == NULL )
+				remove = TheMessageStream->appendMessage( GameMessage::MSG_REMOVE_FROM_SELECTED_GROUP );
+			remove->appendObjectIDArgument( draw->getObject()->getID() );
+			TheInGameUI->deselectDrawable( draw );
+		}
+		return TRUE;
+	}
+	return FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
 Bool ControlBar::describePortraitBarWindow( GameWindow *window, UnicodeString &name, UnicodeString &description ) const
 {
 	for( Int upgrade = 0; upgrade < MAX_RIGHT_HUD_UPGRADE_CAMEOS; upgrade++ )
@@ -254,7 +313,7 @@ Bool ControlBar::describePortraitBarWindow( GameWindow *window, UnicodeString &n
 			continue;
 
 		name.format( u"%ls (%d)", m_multiSelectGroupTemplate[ tile ]->getDisplayName().str(), m_multiSelectGroupSize[ tile ] );
-		description.clear();
+		description = TheGameText->fetch( "GUI:SelectionTypeDescription" );
 		return TRUE;
 	}
 	return FALSE;
@@ -280,6 +339,9 @@ void ControlBar::layoutMultiSelectTiles( Int count )
 	m_rightHUDWindow->winGetSize( &hudSize.x, &hudSize.y );
 	Int cellW = hudSize.x / n;
 	Int cellH = hudSize.y / n;
+
+	// the tiles' clicks reach the HUD itself, see portraitBarInput
+	m_rightHUDWindow->winSetInputFunc( portraitBarInput );
 
 	for( Int i = 0; i < count; i++ )
 	{

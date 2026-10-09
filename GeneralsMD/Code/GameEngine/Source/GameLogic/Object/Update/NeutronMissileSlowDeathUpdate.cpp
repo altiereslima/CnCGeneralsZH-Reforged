@@ -71,6 +71,7 @@ NeutronMissileSlowDeathBehaviorModuleData::NeutronMissileSlowDeathBehaviorModule
 	}  // end for i
 	m_scorchSize = 0.0f;
 	m_fxList		 = NULL;
+	m_blastFrontSpeed = 0.0f;
 
 }  // end NeutronMissileSlowDeathBehaviorModuleData
 
@@ -85,6 +86,7 @@ NeutronMissileSlowDeathBehaviorModuleData::NeutronMissileSlowDeathBehaviorModule
 	{
 		{ "ScorchMarkSize", INI::parseReal, NULL, offsetof( NeutronMissileSlowDeathBehaviorModuleData, m_scorchSize ) },	
 		{ "FXList",					INI::parseFXList, NULL, offsetof( NeutronMissileSlowDeathBehaviorModuleData, m_fxList ) },
+		{ "BlastFrontSpeed", INI::parseVelocityReal, NULL, offsetof( NeutronMissileSlowDeathBehaviorModuleData, m_blastFrontSpeed ) },
 
 		{ "Blast1Enabled", INI::parseBool, NULL, offsetof( NeutronMissileSlowDeathBehaviorModuleData, m_blastInfo[ NEUTRON_BLAST_1 ].enabled ) },	
 		{ "Blast1Delay", INI::parseDurationReal, NULL, offsetof( NeutronMissileSlowDeathBehaviorModuleData, m_blastInfo[ NEUTRON_BLAST_1 ].delay ) },	
@@ -257,15 +259,34 @@ UpdateSleepTime NeutronMissileSlowDeathBehavior::update( void )
 			continue;
 
 		// has the time of this blast come
-		if( m_completedBlasts[ i ] == FALSE &&
-				(currFrame - m_activationFrame > modData->m_blastInfo[ i ].delay) ) 
+		Real sinceBlast = (Real)(currFrame - m_activationFrame) - modData->m_blastInfo[ i ].delay;
+		if( m_completedBlasts[ i ] == FALSE && sinceBlast > 0.0f )
 		{
 
+			//
+			// With no front speed the blast takes its whole radius on one frame, as EA had it.  With
+			// one, its ring leaves the centre at the blast's delay and grows each frame, and hits
+			// whatever is inside it that it has not hit yet, so the middle of a town goes first.  The
+			// ids already hit are kept, so a tank driving out ahead of the front is hit once when the
+			// front catches it, or on the last frame, and never twice.
+			//
+			Real ringOuter = 1.0e9f;
+			Bool finished = TRUE;
+			if( modData->m_blastFrontSpeed > 0.0f )
+			{
+				ringOuter = modData->m_blastFrontSpeed * sinceBlast;
+				finished = ringOuter >= modData->m_blastInfo[ i ].outerRadius;
+				if( finished )
+					ringOuter = 1.0e9f;	// the last frame also takes a big structure whose middle sits past the outer radius
+			}
+
 			// do the blast
-			doBlast( &modData->m_blastInfo[ i ] );
+			doBlast( &modData->m_blastInfo[ i ], ringOuter, &m_hitObjects[ i ] );
 
 			// mark this blast as complete now
-			m_completedBlasts[ i ] = TRUE;
+			m_completedBlasts[ i ] = finished;
+			if( finished )
+				m_hitObjects[ i ].clear();
 
 		}  // end if
 
@@ -291,7 +312,7 @@ UpdateSleepTime NeutronMissileSlowDeathBehavior::update( void )
 // ------------------------------------------------------------------------------------------------
 /** Do a single blast for the bomb */
 // ------------------------------------------------------------------------------------------------
-void NeutronMissileSlowDeathBehavior::doBlast( const BlastInfo *blastInfo )
+void NeutronMissileSlowDeathBehavior::doBlast( const BlastInfo *blastInfo, Real ringOuter, ObjectIDVector *hit )
 {
 
 	// sanity
@@ -316,7 +337,7 @@ void NeutronMissileSlowDeathBehavior::doBlast( const BlastInfo *blastInfo )
 	if( blastInfo->outerRadius )
 	{
 		ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange( missilePos,
-																																			 blastInfo->outerRadius,
+																																			 min( ringOuter, blastInfo->outerRadius ),
 																																			 FROM_BOUNDINGSPHERE_3D,
 																																			 NULL );
 		MemoryPoolObjectHolder hold( iter );
@@ -342,6 +363,15 @@ void NeutronMissileSlowDeathBehavior::doBlast( const BlastInfo *blastInfo )
 			forceVector.y = ( (otherPos->y - missilePos->y) - edgeToMissile.y ) * 0.5f;
 			forceVector.z = ( (otherPos->z - missilePos->z) - edgeToMissile.z ) * 0.5f;
 
+			// only what the front has reached and has not hit before; the list stays sorted by id
+			dist = forceVector.length();
+			if( dist > ringOuter )
+				continue;
+			ObjectIDVectorIterator slot = std::lower_bound( hit->begin(), hit->end(), other->getID() );
+			if( slot != hit->end() && *slot == other->getID() )
+				continue;
+			hit->insert( slot, other->getID() );
+
 			// try to topple other object
 			other->topple( &forceVector, blastInfo->toppleSpeed, TOPPLE_OPTIONS_NO_BOUNCE | 
 																													 TOPPLE_OPTIONS_NO_FX );
@@ -352,7 +382,6 @@ void NeutronMissileSlowDeathBehavior::doBlast( const BlastInfo *blastInfo )
 			// we do a percentage based on how far away from the inner radius it is, but we
 			// will always do at least blastInfo->minDamage amount of damage
 			//
-			dist = forceVector.length();
 			if( dist <= blastInfo->innerRadius )
 				damageInfo.in.m_amount = blastInfo->maxDamage;
 			else
@@ -483,13 +512,14 @@ void NeutronMissileSlowDeathBehavior::crc( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
-	* 1: Initial version */
+	* 1: Initial version
+	* 2: the ids each moving blast front has hit */
 // ------------------------------------------------------------------------------------------------
 void NeutronMissileSlowDeathBehavior::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 1;
+	XferVersion currentVersion = 2;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -521,6 +551,11 @@ void NeutronMissileSlowDeathBehavior::xfer( Xfer *xfer )
 
 	// scorch placed
 	xfer->xferBool( &m_scorchPlaced );
+
+	// what each blast front has hit
+	if( version >= 2 )
+		for( i = 0; i < maxNeutronBlasts; ++i )
+			xfer->xferSTLObjectIDVector( &m_hitObjects[ i ] );
 
 }  // end xfer
 

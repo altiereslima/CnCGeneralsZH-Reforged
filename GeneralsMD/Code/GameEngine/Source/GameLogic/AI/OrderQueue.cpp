@@ -215,7 +215,7 @@ static Bool OrderQueue_isUsingAbility( const Object *obj )
 	* about is not one: the group is done, and the next order takes it off that fight.  Nor is a
 	* guard, which never ends.  A fight an attack move stopped for is the order itself, though it
 	* marks itself the AI's while it lasts: without this a queued attack move ended the moment it met
-	* anybody, and a search and destroy skipped the rest of its ring at the first enemy. */
+	* anybody. */
 //-------------------------------------------------------------------------------------------------
 static Bool OrderQueue_isWorking( const Object *obj, const AIUpdateInterface *ai )
 {
@@ -224,6 +224,12 @@ static Bool OrderQueue_isWorking( const Object *obj, const AIUpdateInterface *ai
 
 	if( ai->isIdle() )
 		return FALSE;
+
+	// a unit still driving out of the structure that built it holds the player's orders until it is
+	// out (AIUpdateInterface::isAllowedToRespondToAiCommands); a queued one handed over now would be
+	// held with them and replace the order in front of it
+	if( ai->isExitingProducer() )
+		return TRUE;
 
 	if( ai->getCurrentStateID() == AI_ATTACK_MOVE_TO )
 		return TRUE;

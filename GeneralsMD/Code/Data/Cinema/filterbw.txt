@@ -1,0 +1,6 @@
+# A map script's black and white view over the Glow option's fight, for checking that the screen
+# filters still draw on Direct3D 11. Use with -scenario glowfight, -freecam 3150 3660 420 45 -40 and
+# -screenshot 172; the view goes black and white at 4 seconds on the list's clock, near frame 131.
+
+0 hud off
+4 filter bw

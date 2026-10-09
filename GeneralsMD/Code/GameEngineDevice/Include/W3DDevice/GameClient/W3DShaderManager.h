@@ -117,7 +117,11 @@ public:
 
 	// Support routines for filter methods.
 	static Bool canRenderToTexture(void) { return (m_oldRenderSurface && m_newRenderSurface);}
-	static void startRenderToTexture(void); ///< Sets render target to texture.
+	/// Sets render target to texture.  sceneStandIn: the texture is only sampled while the scene goes
+	/// into it (heat haze) and never shown afterwards, so Direct3D 11 may keep the scene in its own
+	/// float target (Direct3D11_Set_Scene_Stand_In).  A filter that shows the texture on a later
+	/// frame (motion blur, cross fade) needs the real copy and passes FALSE.
+	static void startRenderToTexture(Bool sceneStandIn = FALSE);
 	static IDirect3DTexture9 * endRenderToTexture(void); ///< Ends render to texture, & returns texture.
 	static IDirect3DTexture9 * getRenderTexture(void);	///< returns last used render target texture
 	static Bool isRenderingToTexture(void) {return m_renderingToTexture; }

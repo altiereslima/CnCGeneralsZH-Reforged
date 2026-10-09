@@ -171,6 +171,17 @@ void Direct3D11_Set_Scene_View(const float view[16]);
 // (DX11BackendClass::Set_Smoke_Glow).  The sorting pool sets it around the smoke billboards' runs.
 void Direct3D11_Set_Smoke_Glow(bool glow);
 
+// Whether the draws that follow take the Glow option's additive gain (DX11BackendClass::
+// Set_Glow_Draw).  ShaderClass::Apply sends it from the shader's GLOW_ENABLE bit.
+void Direct3D11_Set_Glow_Draw(bool glow);
+
+// The texture and its level-zero surface the engine redirects the scene into for its screen
+// filters (W3DShaderManager's render texture), or both NULL.  The Direct3D 11 frame keeps the scene
+// in its own target while that surface is bound, and a draw sampling the texture samples a copy of
+// the scene (DX11BackendClass::Set_Scene_Stand_In).
+void Direct3D11_Set_Scene_Stand_In(struct IDirect3DBaseTexture9 * texture,
+	struct IDirect3DSurface9 * surface);
+
 // The CPU has just written this surface.  The next bind of its texture fills the Direct3D 11 copy
 // again.  A no-op when the backend is not running.
 void Direct3D11_Mark_Surface_Dirty(struct IDirect3DSurface9 * surface);
@@ -244,6 +255,17 @@ void Direct3D11_Finish_Frame();
 unsigned char * Direct3D11_Capture_Back_Buffer(unsigned & width, unsigned & height,
 	unsigned & pitch);
 void Direct3D11_Release_Capture(unsigned char * pixels);
+
+// The same back buffer for a recording, without waiting for it.  Queue copies it into one of
+// DX11_FRAME_COPY_SLOTS staging textures kept from call to call; Map hands that copy back a frame
+// later, by when the GPU has long made it, and is null for a slot that holds nothing.  A Map is
+// followed by an Unmap of the same slot before the slot is queued again.
+enum { DX11_FRAME_COPY_SLOTS = 16 };
+bool Direct3D11_Queue_Frame_Copy(unsigned slot);
+const unsigned char * Direct3D11_Map_Frame_Copy(unsigned slot, unsigned & width, unsigned & height,
+	unsigned & pitch);
+void Direct3D11_Unmap_Frame_Copy(unsigned slot);
+void Direct3D11_Release_Frame_Copies();
 
 // The buffers and the vertex format a draw is about to read, mirrored as DX8Wrapper binds them.
 // A null twin unbinds, which is what a stream with no buffer means.  Index buffers in this engine

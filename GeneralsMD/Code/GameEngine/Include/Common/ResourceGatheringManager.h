@@ -38,6 +38,7 @@
 #include "Common/Snapshot.h"
 
 class Object;
+class Player;
 
 // ------------------------------------------------------------------------------------------------
 class ResourceGatheringManager : public MemoryPoolObject,
@@ -58,6 +59,8 @@ public:
 	void removeSupplyWarehouse( Object *oldWarehouse );	///< Warehouse that doesn't replinish has run out of Supply
 
 	Bool claimSuppliesDepletedVoice();	///< TRUE only the first time a gatherer asks, so the depleted voice plays once a game
+
+	static Bool isPileOfAnotherPlayer( const Player *player, const Object *warehouse );	///< Is the supply center nearest this pile someone else's?
 
 protected:
 

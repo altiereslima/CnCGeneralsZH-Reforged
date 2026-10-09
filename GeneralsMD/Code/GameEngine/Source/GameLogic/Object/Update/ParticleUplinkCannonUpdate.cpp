@@ -46,6 +46,7 @@
 #include "GameClient/Drawable.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/FXList.h"
+#include "GameClient/ObserverCamera.h"
 
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/PartitionManager.h"
@@ -659,6 +660,9 @@ UpdateSleepTime ParticleUplinkCannonUpdate::update()
 				audioPos.z += ORBITAL_BEAM_AUDIO_Z_OFFSET;
 				beam->setPosition( &audioPos );
 			}
+
+			// the observer's director camera follows the beam along its sweep; this only tells the client
+			TheObserverCamera.noteSuperweaponHit( me->getControllingPlayer(), &m_currentTargetPosition, TRUE );
 
 			//Create scorch marks periodically
 			if( m_nextScorchMarkFrame <= now )

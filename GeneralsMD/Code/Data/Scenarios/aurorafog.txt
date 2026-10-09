@@ -1,0 +1,17 @@
+# The pale green fuel-air haze an Alpha Aurora bomb left behind. An Alpha Aurora and an Air Force
+# Aurora, each ordered onto its own parked target, the two bombs landing about 500 apart, so EA's
+# own route for the same FXList (the Air Force bomb's FXListDie) sits in the same picture.
+#
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -turbo -quickstart -noshellmap -observer
+#     -multiInstance -noFPSLimit -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2
+#     -takeover -side 0 FactionAmerica -side 1 FactionGLA -seed 7 -scenario aurorafog
+#     -cinema aurorafog -maxframes 1860 -logPrefix aurorafog_
+
+30    spawn      1  GLATankScorpion              1   2200 3700
+30    spawn      0  SupW_AmericaJetAurora        1   1000 3820
+31    move       0  SupW_AmericaJetAurora            4400 3820
+30    spawn      1  GLAVehicleTechnical          1   2200 3200
+30    spawn      0  AirF_AmericaJetAurora        1   1000 3320
+31    move       0  AirF_AmericaJetAurora            4400 3320
+250   attack     0  SupW_AmericaJetAurora        1  GLATankScorpion
+250   attack     0  AirF_AmericaJetAurora        1  GLAVehicleTechnical*

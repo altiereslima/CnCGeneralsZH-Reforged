@@ -101,12 +101,51 @@ bool DX11Post_Parse_Chain(const char * text, DX11PostEffect effects[DX11_POST_CH
 // The name a parsed effect goes back to, for the report line.
 const char * DX11Post_Effect_Name(DX11PostEffect effect);
 
-// Bloom's threshold and strength in the scene's own units, where one is white.  The game's Bloom
+// Bloom's threshold and strength in the scene's own units, where one is white, what an additive
+// draw into the scene is multiplied by (DX11BackendClass::Set_Additive_Gain) and how many pairs
+// of blur passes spread the glow, each pair a step wider than the one before.  The game's Glow
 // option sets them every frame through W3DShaderManager, since nothing in this library may read
 // GlobalData.  An intensity of zero skips the bright pass and the blur and leaves only the tone
-// curve, so the half float scene still reaches eight bits.  Until somebody calls this the chain
-// runs at the values it was tuned at, which is what the tests measure.
-void DX11Post_Set_Bloom(float threshold, float intensity);
+// curve, so the half float scene still reaches eight bits, and it takes the gain back to one.
+// Until somebody calls this the chain runs at the values it was tuned at, which is what the tests
+// measure.
+void DX11Post_Set_Bloom(float threshold, float intensity, float additive_gain, unsigned blur_passes);
+
+// The gain the scene's additive draws take this frame: one whenever the glow is off.
+float DX11Post_Additive_Gain();
+
+// A blast warping the picture around it: the frame drawn toward a point and then pushed out by a
+// ring that travels away from it.  Not an effect in the chain and not a switch: whatever chain is
+// set, one more pass goes on its end for every frame that has a warp in it, and a frame with none
+// costs a branch.  With no chain at all there is no scene texture to bend and nothing happens.
+//
+// Everything is in screen terms, because the game has already done the projecting.  The centre is
+// in texture coordinates, nought to one across the frame and down it, and may lie off the screen.
+// The radii are fractions of the frame's height, so a circle stays round on a wide screen.  Pull
+// is how far, as a fraction of Radius, the picture is drawn in at its strongest; RingStrength is how
+// far the ring pushes it out at its crest, a fraction of Radius as well.
+struct DX11PostWarp
+{
+	float CentreX;
+	float CentreY;
+	float Radius;
+	float Pull;
+	float RingRadius;
+	float RingWidth;
+	float RingStrength;
+	// The ring is the outline of a dome standing on the ground, not a circle on the glass.  Above
+	// the centre it is the dome's own round silhouette, rising as high as it is wide; below it, it
+	// is the dome's footprint on the ground, which the camera's pitch flattens.  This is how far it
+	// is flattened there: the footprint's depth on screen over its width, one looking straight down.
+	float RingSquash;
+};
+
+// Four blasts on one screen at once is already more than anyone can read.
+const unsigned DX11_POST_WARP_LIMIT = 4;
+
+// The game sets the frame's warps every frame, and a count of zero clears them.  A count past the
+// limit keeps the first four.
+void DX11Post_Set_Warps(const DX11PostWarp * warps, unsigned count);
 
 class DX11PostProcessClass
 {
@@ -197,6 +236,7 @@ private:
 	ID3D11PixelShader * BloomExtractShader;
 	ID3D11PixelShader * BloomBlurShader;
 	ID3D11PixelShader * BloomCompositeShader;
+	ID3D11PixelShader * WarpShader;
 	ID3D11SamplerState * Sampler;
 	ID3D11BlendState * BlendState;
 	ID3D11DepthStencilState * DepthState;

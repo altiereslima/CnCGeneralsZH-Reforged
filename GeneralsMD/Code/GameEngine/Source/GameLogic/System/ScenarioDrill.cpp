@@ -26,7 +26,6 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
 #include "Common/BuildAssistant.h"
-#include "Common/DrawnPath.h"
 #include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "Common/GlobalData.h"
@@ -94,9 +93,6 @@ static const Int SCENARIO_TOKENS_STANCE = 5;
 static const Int SCENARIO_SHIFTPOWER_NAME_TOKEN = 6;
 static const Int SCENARIO_SHIFTUPGRADE_NAME_TOKEN = 4;
 static const Int SCENARIO_STANCE_NAME_TOKEN = 4;
-
-/// a hunt's circle when the line does not say, the key's own before the wheel
-static const Real SCENARIO_DEFAULT_SWEEP_RADIUS = 300.0f;
 
 // where the position starts in each line that has one
 static const Int SCENARIO_SPAWN_POSITION_TOKEN = 5;
@@ -217,14 +213,14 @@ static Bool parseActionType( const AsciiString &token, ScenarioActionType *actio
 		*action = SCENARIO_ACTION_CONSTRUCT;
 	else if (token == "stance")
 		*action = SCENARIO_ACTION_STANCE;
-	else if (token == "hunt")
-		*action = SCENARIO_ACTION_HUNT;
 	else if (token == "forceattack")
 		*action = SCENARIO_ACTION_FORCEATTACK;
 	else if (token == "weaponat")
 		*action = SCENARIO_ACTION_WEAPONAT;
 	else if (token == "forceground")
 		*action = SCENARIO_ACTION_FORCEGROUND;
+	else if (token == "reaim")
+		*action = SCENARIO_ACTION_REAIM;
 	else if (token == "respond")
 		*action = SCENARIO_ACTION_RESPOND;
 	else
@@ -309,9 +305,9 @@ static Int tokensNeededFor( ScenarioActionType action )
 		case SCENARIO_ACTION_SHIFTATTACKMOVE:	return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_SHIFTGUARD:	return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_CONSTRUCT:		return SCENARIO_TOKENS_MOVE;
-		case SCENARIO_ACTION_HUNT:				return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_WEAPONAT:		return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_FORCEGROUND:	return SCENARIO_TOKENS_MOVE;
+		case SCENARIO_ACTION_REAIM:				return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_RESPOND:			return SCENARIO_TOKENS_MOVE;
 		case SCENARIO_ACTION_STANCE:			return SCENARIO_TOKENS_STANCE;
 		case SCENARIO_ACTION_SHIFTATTACK:	return SCENARIO_TOKENS_ATTACK;
@@ -395,9 +391,9 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 		case SCENARIO_ACTION_SHIFTATTACKMOVE:
 		case SCENARIO_ACTION_SHIFTGUARD:
 		case SCENARIO_ACTION_CONSTRUCT:
-		case SCENARIO_ACTION_HUNT:
 		case SCENARIO_ACTION_WEAPONAT:
 		case SCENARIO_ACTION_FORCEGROUND:
+		case SCENARIO_ACTION_REAIM:
 		case SCENARIO_ACTION_RESPOND:
 		{
 			Int next = SCENARIO_ORDER_POSITION_TOKEN;
@@ -410,8 +406,6 @@ ScenarioParseResult ScenarioDrill_parseLine( const char *line, ScenarioAction *a
 				if (action->name != "primary" && action->name != "secondary" && action->name != "tertiary")
 					return SCENARIO_PARSE_BAD_ACTION;
 			}
-			if (actionType == SCENARIO_ACTION_HUNT)
-				action->radius = (count > next) ? (Real)atof( tokens[ next ].str() ) : SCENARIO_DEFAULT_SWEEP_RADIUS;
 			if (actionType == SCENARIO_ACTION_ARRIVE && count > next)
 				action->radius = (Real)atof( tokens[ next ].str() );
 			if (actionType == SCENARIO_ACTION_SHIFTGUARD)
@@ -1517,57 +1511,6 @@ static Bool executeWeaponAt( const ScenarioAction &action, Player *player, const
 	return TRUE;
 }
 
-/** The search and destroy key: the ring sweepRoute gives this seat round the point, from where the
-	  units stand, each point handed to the order queue the way the key's messages arrive - the first
-	  fresh, the rest behind it - and then a guard of the whole circle.  Each message gets a group of
-	  its own, because the queue destroys the one it takes. */
-static Bool executeSweep( const ScenarioAction &action, Player *player, const Coord3D &center, AIGroup *group, Int taken )
-{
-	Coord3D from;
-	from.zero();
-	const VecObjectID ids = group->getAllIDs();
-	for( VecObjectID::const_iterator it = ids.begin(); it != ids.end(); ++it )
-	{
-		const Object *obj = TheGameLogic->findObjectByID( *it );
-		from.x += obj->getPosition()->x;
-		from.y += obj->getPosition()->y;
-	}
-	from.x /= taken;
-	from.y /= taken;
-	TheAI->destroyGroup( group );
-
-	std::vector<Coord3D> route;
-	sweepRoute( player->getPlayerIndex(), center, action.radius, from, route );
-	route.push_back( center );
-
-	for( size_t i = 0; i < route.size(); i++ )
-	{
-		const Bool last = i + 1 == route.size();
-		const GameMessage::Type type = last ? GameMessage::MSG_DO_GUARD_POSITION : GameMessage::MSG_DO_ATTACKMOVETO;
-		GameMessage *msg = newInstance( GameMessage )( type );
-		msg->friend_setPlayerIndex( player->getPlayerIndex() );
-		msg->appendLocationArgument( route[ i ] );
-		if( type == GameMessage::MSG_DO_GUARD_POSITION )
-		{
-			msg->appendIntegerArgument( GUARDMODE_NORMAL );
-			msg->appendRealArgument( action.radius );
-		}
-
-		AIGroup *members = TheAI->createGroup();
-		gatherIntoGroup( player, action.selector, members );
-		player->getOrderQueue()->setNextOrderMode( i == 0 ? ORDER_QUEUE_FRESH : ORDER_QUEUE_APPEND );
-		player->getOrderQueue()->takeMessage( msg, members, player );
-		msg->deleteInstance();
-
-		DEBUG_LOG(("SCENARIO: frame %d hunt slot %d '%s' step %d of %d at (%.0f,%.0f)\n", action.frame,
-							 action.slot, action.selector.str(), (Int)i + 1, (Int)route.size(), route[ i ].x, route[ i ].y));
-	}
-
-	DEBUG_LOG(("SCENARIO: frame %d hunt slot %d '%s' x%d round (%.0f,%.0f) radius %.0f\n", action.frame,
-						 action.slot, action.selector.str(), taken, center.x, center.y, action.radius));
-	return TRUE;
-}
-
 static Bool executeOrder( const ScenarioAction &action, Player *player, const Coord3D &dest )
 {
 	if (action.action == SCENARIO_ACTION_SHIFTUPGRADE)
@@ -1671,8 +1614,20 @@ static Bool executeOrder( const ScenarioAction &action, Player *player, const Co
 			return TRUE;
 		}
 
-		case SCENARIO_ACTION_HUNT:
-			return executeSweep( action, player, dest, group, taken );		// and so does this
+		case SCENARIO_ACTION_REAIM:
+		{
+			// the right click CommandXlat sends while a power's aim can be moved; the dispatcher destroys the group
+			GameMessage *msg = newInstance( GameMessage )( GameMessage::MSG_DO_SPECIAL_POWER_OVERRIDE_DESTINATION );
+			msg->friend_setPlayerIndex( player->getPlayerIndex() );
+			msg->appendLocationArgument( dest );
+			msg->appendIntegerArgument( SPECIAL_INVALID );
+			msg->appendObjectIDArgument( INVALID_ID );
+			TheGameLogic->logicMessageDispatcher( msg, group );
+			msg->deleteInstance();
+			DEBUG_LOG(("SCENARIO: frame %d reaim slot %d '%s' x%d at (%.0f,%.0f)\n",
+								 action.frame, action.slot, action.selector.str(), taken, dest.x, dest.y));
+			return TRUE;
+		}
 
 		case SCENARIO_ACTION_STOP:
 		{

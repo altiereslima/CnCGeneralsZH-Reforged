@@ -83,6 +83,7 @@ public:
 	BlastInfo m_blastInfo[ MAX_NEUTRON_BLASTS ];		///< blast information
 	Real m_scorchSize;															///< size of scorch mark
 	const FXList *m_fxList;													///< the actual fx list that creates all the visuals.
+	Real m_blastFrontSpeed;													///< dist/frame a blast's ring travels out from the centre, 0 hits the whole radius at once
 
 };
 
@@ -103,13 +104,14 @@ public:
 
 protected:
 
-	void doBlast( const BlastInfo *blastInfo );				 ///< do blast
+	void doBlast( const BlastInfo *blastInfo, Real ringOuter, ObjectIDVector *hit );	///< do blast to objects within ringOuter not already in hit
 	void doScorchBlast( const BlastInfo *blastInfo );  ///< do a scorch blast ring
 
 	UnsignedInt m_activationFrame;									///< frame we were activated on
 	Bool m_completedBlasts[ MAX_NEUTRON_BLASTS ];		///< blasts indexes we've already done
 	Bool m_completedScorchBlasts[ MAX_NEUTRON_BLASTS ];		///< scorch blast indexes we've already done
 	Bool m_scorchPlaced;														///< TRUE once we've placed the scorch mark
+	ObjectIDVector m_hitObjects[ MAX_NEUTRON_BLASTS ];	///< sorted ids a moving blast front has already hit, emptied when the blast completes
 
 };
 

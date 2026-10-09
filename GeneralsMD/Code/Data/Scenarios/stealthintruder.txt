@@ -1,0 +1,52 @@
+# Issue #64: a stealthed Colonel Burton nobody has detected walks around inside the computer's
+# base. The computer must not send its army at him until something detects him; then it should.
+#
+# Slot 0 is taken over by the file, slot 1 is a USA computer: China's Gattling Cannon detects
+# stealth, so a China computer would find him by the game's own rules. Burton walks from his own
+# base into the computer's and paces back and forth past a guard of four Crusaders, always under
+# a move order, since an idle Burton shoots and a shot gives him away. The USA computer's first
+# Patriot Battery, which does detect, goes up near frame 2550 on seeds 20-23, and from there on
+# chasing him is fair. The Listening Outpost at 7000 is a second detector for a seed where no
+# Patriot comes.
+#
+# Read the first "AI DEFEND ... sends N idle units at the intruder" against the first STATUE line
+# naming Burton as a unit's enemy (the first moment the game itself lets anyone shoot him).
+# On 2026-10-09: before the fix the computer sent its guard at him from frame 2029-2149 on all
+# four seeds, before anything could see him; after it, nothing went at him before frame 2629, and
+# no unit had him as a target before 2551. Seeds 0 and 1 end at frame 2400 with the computer
+# marked defeated for a reason not found; 20 onward play.
+#
+#   ai-batch.ps1 -Runs 4 -SeedStart 20 -Map 'Tournament Desert' -Scenario stealthintruder
+#     -Takeover 0 -Sides FactionAmerica,FactionAmerica -MaxFrames 9000 -Difficulty hard
+
+30    spawn  0  AmericaInfantryColonelBurton  1  start0:0:200
+30    spawn  1  AmericaTankCrusader           4  start1:0:-250  50
+300   move   0  AmericaInfantryColonelBurton     start1:-200:-400
+300   arrive 0  AmericaInfantryColonelBurton     start1:-200:-400  150
+
+1000  move   0  AmericaInfantryColonelBurton     start1:200:-400
+1300  move   0  AmericaInfantryColonelBurton     start1:-200:-400
+1600  move   0  AmericaInfantryColonelBurton     start1:200:-400
+1900  move   0  AmericaInfantryColonelBurton     start1:-200:-400
+2200  move   0  AmericaInfantryColonelBurton     start1:200:-400
+2500  move   0  AmericaInfantryColonelBurton     start1:-200:-400
+2800  move   0  AmericaInfantryColonelBurton     start1:200:-400
+3100  move   0  AmericaInfantryColonelBurton     start1:-200:-400
+3400  move   0  AmericaInfantryColonelBurton     start1:200:-400
+3700  move   0  AmericaInfantryColonelBurton     start1:-200:-400
+4000  move   0  AmericaInfantryColonelBurton     start1:200:-400
+4300  move   0  AmericaInfantryColonelBurton     start1:-200:-400
+4600  move   0  AmericaInfantryColonelBurton     start1:200:-400
+4900  move   0  AmericaInfantryColonelBurton     start1:-200:-400
+5200  move   0  AmericaInfantryColonelBurton     start1:200:-400
+5500  move   0  AmericaInfantryColonelBurton     start1:-200:-400
+5800  move   0  AmericaInfantryColonelBurton     start1:200:-400
+6100  move   0  AmericaInfantryColonelBurton     start1:-200:-400
+6400  move   0  AmericaInfantryColonelBurton     start1:200:-400
+6700  move   0  AmericaInfantryColonelBurton     start1:-200:-400
+
+7000  tally  0  AmericaInfantryColonelBurton
+7000  spawn  1  ChinaVehicleListeningOutpost  1  start1:0:-400
+7000  move   0  AmericaInfantryColonelBurton     start1:200:-400
+7300  move   0  AmericaInfantryColonelBurton     start1:-200:-400
+8900  tally  0  AmericaInfantryColonelBurton

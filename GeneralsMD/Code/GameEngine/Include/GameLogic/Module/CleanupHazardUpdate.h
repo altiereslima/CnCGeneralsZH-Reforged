@@ -78,8 +78,12 @@ public:
 	void fireWhenReady();
 
 	void setCleanupAreaParameters( const Coord3D *pos, Real range ); //This allows the unit to cleanup an area until clean, then the AI goes idle.
+	Bool isCleaningArea() const { return m_moveRange > 0.0f; }	///< out cleaning an area, the cleanup ability's or one it noticed by itself
 
 protected:
+
+	void startAutoCleanup();	///< idle or on guard with a hazard near: clean it, then come back
+	void finishArea( const char *why, Bool goHome );	///< the area is done with: back on guard, home, or idle
 
 	ObjectID m_bestTargetID;
 	Bool m_inRange;
@@ -90,6 +94,12 @@ protected:
 	//Cleanup area (temporary values).
 	Coord3D m_pos;
 	Real		m_moveRange;
+
+	//A cleanup it started by itself took the unit off guard: it guards m_pos again when the area is clean.
+	Bool		m_resumeGuard;
+	Int			m_resumeGuardMode;	///< a GuardMode
+	Bool		m_returning;				///< the area is clean and the walk back to m_pos has been ordered
+	Int			m_approaches;				///< scans in a row standing out of reach of the hazard it is after
 };
 
 

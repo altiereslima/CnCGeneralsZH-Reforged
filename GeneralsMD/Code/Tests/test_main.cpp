@@ -15,7 +15,7 @@ namespace
 	/* Fixed-capacity registry: static-init order is unspecified, so a
 	   std::vector here would risk being constructed after the first
 	   registrar runs.  A POD array is zero-initialised before any of it. */
-	const int MAX_TESTS = 512;
+	const int MAX_TESTS = 1024;
 
 	struct Entry
 	{

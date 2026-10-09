@@ -53,9 +53,17 @@ static const DXGI_FORMAT FLOAT_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;
 // sixteenth of the samples.
 static const unsigned BLOOM_DIVISOR = 4;
 
-// Two horizontal and two vertical, which at a quarter resolution reaches about sixteen pixels of
-// the finished frame.  A third pair was tried and the glow got wider without getting better.
+// Pairs of blur passes, one horizontal and one vertical, the n-th pair stepping n texels between
+// its taps.  Two reach about fifteen pixels of the finished frame; the Glow option's Medium asks
+// for three, High and Ultra for four, about twenty five and thirty five.  More than four and a
+// fire's halo covers the units fighting in it.
 static const unsigned BLOOM_BLUR_PASSES = 2;
+static const unsigned BLOOM_BLUR_PASS_LIMIT = 4;
+
+// How far past the threshold the bright pass takes to reach full strength.  A pixel just over it
+// keeps the square of its excess, so a flame flickering across the threshold fades its glow in
+// and out instead of switching it.
+static const float BLOOM_KNEE = 0.5f;
 
 // What counts as bright enough to bleed, what the bleed is worth when it is added back, and where
 // the tone curve starts bending.
@@ -72,18 +80,41 @@ static const unsigned BLOOM_BLUR_PASSES = 2;
 // An intensity of 1.5 against a quiet frame with nothing burning costs half a level a channel,
 // which is the cost of having this on when there is nothing for it to do.
 //
-// Those two are the defaults.  The game replaces them every frame from its Bloom option.
+// Those two are the defaults.  The game replaces them every frame from its Glow option, which
+// also raises what an additive draw is worth (DX11Post_Additive_Gain): that, and not a lower
+// threshold, is what gets fire and lasers past white while the art stays under it.
 static const float BLOOM_THRESHOLD = 1.0f;
 static const float BLOOM_INTENSITY = 1.5f;
 static const float TONE_CURVE_KNEE = 0.8f;
 
 static float BloomThreshold = BLOOM_THRESHOLD;
 static float BloomIntensity = BLOOM_INTENSITY;
+static float BloomAdditiveGain = 1.0f;
+static unsigned BloomBlurPasses = BLOOM_BLUR_PASSES;
 
-void DX11Post_Set_Bloom(float threshold, float intensity)
+void DX11Post_Set_Bloom(float threshold, float intensity, float additive_gain, unsigned blur_passes)
 {
 	BloomThreshold = (threshold > 0.0f) ? threshold : 0.0f;
 	BloomIntensity = (intensity > 0.0f) ? intensity : 0.0f;
+	BloomAdditiveGain = (additive_gain > 1.0f) ? additive_gain : 1.0f;
+	BloomBlurPasses = (blur_passes < 1) ? 1
+		: (blur_passes > BLOOM_BLUR_PASS_LIMIT) ? BLOOM_BLUR_PASS_LIMIT : blur_passes;
+}
+
+float DX11Post_Additive_Gain()
+{
+	return (BloomIntensity > 0.0f) ? BloomAdditiveGain : 1.0f;
+}
+
+static DX11PostWarp Warps[DX11_POST_WARP_LIMIT];
+static unsigned WarpCount = 0;
+
+void DX11Post_Set_Warps(const DX11PostWarp * warps, unsigned count)
+{
+	WarpCount = (count > DX11_POST_WARP_LIMIT) ? DX11_POST_WARP_LIMIT : count;
+	for (unsigned index = 0; index < WarpCount; ++index) {
+		Warps[index] = warps[index];
+	}
 }
 
 // How dark a fully occluded pixel goes, how far a neighbour may be in front before it counts as a
@@ -104,6 +135,12 @@ struct PostConstantBlock
 
 	// Threshold, intensity, knee.
 	float Tuning[4];
+
+	// How many warps, and the width of the frame over its height.  Then per warp the centre, the
+	// radius and the pull, and the ring's radius, width and strength.
+	float WarpInfo[4];
+	float WarpCentre[DX11_POST_WARP_LIMIT][4];
+	float WarpRing[DX11_POST_WARP_LIMIT][4];
 };
 
 // A triangle big enough to cover the screen, made out of nothing.  No vertex buffer and no input
@@ -141,6 +178,9 @@ static const char * const PIXEL_SHADER_PROLOGUE =
 	"    float4 TexelSize;\n"
 	"    float4 BlurDirection;\n"
 	"    float4 Tuning;\n"
+	"    float4 WarpInfo;\n"
+	"    float4 WarpCentre[4];\n"
+	"    float4 WarpRing[4];\n"
 	"};\n"
 	"\n"
 	// Below the knee nothing moves, so a frame with nothing overbright in it comes back out as the
@@ -311,9 +351,11 @@ static const char * const AO_SHADER_BODY =
 	"}\n";
 
 // The bright pass, downsampling as it goes: four taps of the full size frame averaged into one
-// quarter size texel, then the threshold taken off what is left.  What survives is the amount by
-// which something was brighter than white, which is a quantity an eight bit scene target could not
-// have held.
+// quarter size texel, then the threshold taken off its brightest channel.  What survives is the
+// amount by which something was brighter than white, which is a quantity an eight bit scene target
+// could not have held, carried in the pixel's own hue so an orange fire glows orange.  Over the
+// first Tuning.w past the threshold it keeps the square of that excess (the soft knee), so it
+// starts at nothing with no step and the art, which never passes white, keeps nothing.
 static const char * const BLOOM_EXTRACT_SHADER_BODY =
 	"float4 main(VertexOutput input) : SV_TARGET\n"
 	"{\n"
@@ -322,7 +364,12 @@ static const char * const BLOOM_EXTRACT_SHADER_BODY =
 	"        + Source.Sample(Sampler, input.Texture + float2(texel.x, -texel.y)).rgb\n"
 	"        + Source.Sample(Sampler, input.Texture + float2(-texel.x, texel.y)).rgb\n"
 	"        + Source.Sample(Sampler, input.Texture + float2(texel.x, texel.y)).rgb;\n"
-	"    return float4(max(sum * 0.25 - Tuning.x, 0.0), 1.0);\n"
+	"    float3 colour = sum * 0.25;\n"
+	"    float bright = max(colour.r, max(colour.g, colour.b));\n"
+	"    float over = max(bright - Tuning.x, 0.0);\n"
+	"    float knee = max(Tuning.w, 0.0001);\n"
+	"    float kept = (over < knee) ? over * over / (2.0 * knee) : over - knee * 0.5;\n"
+	"    return float4(colour * (kept / max(bright, 0.0001)), 1.0);\n"
 	"}\n";
 
 // One half of a separable gaussian.  The direction comes in as a constant, so the same program is
@@ -352,6 +399,57 @@ static const char * const BLOOM_COMPOSITE_SHADER_BODY =
 	"    float3 scene = Source.Sample(Sampler, input.Texture).rgb;\n"
 	"    float3 glow = Extra.Sample(Sampler, input.Texture).rgb;\n"
 	"    return float4(tone_curve(scene + glow * Tuning.y), 1.0);\n"
+	"}\n";
+
+// A blast bending the picture, one read per pixel whatever the number of warps: every warp adds
+// to where the pixel reads from, and the frame is sampled once at the sum.
+//
+// The pull reads from further out than the pixel is, so the picture slides toward the centre.  Its
+// shape is nothing at the centre, where the direction is undefined, and nothing at the radius, so
+// there is no seam; in between it peaks a third of the way out at the strength asked for.  The ring
+// reads from nearer the centre, so what was inside it is carried outward on its crest, and across
+// its width it falls off as a gaussian, which keeps the band soft rather than a cut line.
+//
+// The ring is a dome's outline rather than a circle.  Above the centre a hemisphere seen from a
+// raised camera shows its round top, as tall as it is wide; below the centre what shows is its
+// footprint on the ground nearest the camera, flattened by the pitch.  So the lower half of the
+// ring is measured with the vertical squeezed by RingSquash, and it pushes along that ellipse's
+// normal, which is what makes the wave run flat across the ground in front of the blast and stand
+// up behind it.
+//
+// The whole shift dies away over the last 8% of the frame toward every edge.  A read past the edge
+// comes back as the edge's own texel, and on film that drew the border out into streaks thirty to
+// forty pixels long; held to zero at the edge, a pixel near it never reads further out than it is
+// from the edge, as long as no warp moves the picture by more than 8% of the frame.
+static const char * const WARP_SHADER_BODY =
+	"float4 main(VertexOutput input) : SV_TARGET\n"
+	"{\n"
+	"    float aspect = WarpInfo.y;\n"
+	"    float2 shift = float2(0.0, 0.0);\n"
+	"    for (int index = 0; index < 4; ++index)\n"
+	"    {\n"
+	"        if (index >= (int)WarpInfo.x) break;\n"
+	"        float4 centre = WarpCentre[index];\n"
+	"        float4 ring = WarpRing[index];\n"
+	"        float2 away = (input.Texture - centre.xy) * float2(aspect, 1.0);\n"
+	"        float span = length(away);\n"
+	"        float2 outward = away / max(span, 0.0001);\n"
+	"        float reach = saturate(span / max(centre.z, 0.0001));\n"
+	"        float inward = centre.w * centre.z * 6.75 * reach * (1.0 - reach) * (1.0 - reach);\n"
+	"        float squash = (away.y > 0.0) ? max(ring.w, 0.05) : 1.0;\n"
+	"        float2 domed = float2(away.x, away.y / squash);\n"
+	"        float domeSpan = length(domed);\n"
+	"        float2 domeNormal = float2(domed.x, domed.y / squash);\n"
+	"        domeNormal /= max(length(domeNormal), 0.0001);\n"
+	"        float across = (domeSpan - ring.x) / max(ring.y, 0.0001);\n"
+	"        float push = ring.z * centre.z * exp(-across * across);\n"
+	"        shift += outward * inward - domeNormal * push;\n"
+	"    }\n"
+	"    shift.x /= aspect;\n"
+	"    float2 border = min(input.Texture, 1.0 - input.Texture);\n"
+	"    float2 settle = saturate(border / 0.08);\n"
+	"    shift *= settle.x * settle.y;\n"
+	"    return float4(Source.Sample(Sampler, input.Texture + shift).rgb, 1.0);\n"
 	"}\n";
 
 static D3DCompileFunction compiler_function()
@@ -472,6 +570,7 @@ DX11PostProcessClass::DX11PostProcessClass()
 	, FarPlane(1200.0f)
 	, BloomBlurShader(NULL)
 	, BloomCompositeShader(NULL)
+	, WarpShader(NULL)
 	, Sampler(NULL)
 	, BlendState(NULL)
 	, DepthState(NULL)
@@ -527,6 +626,7 @@ void DX11PostProcessClass::Shutdown()
 	release_interface(reinterpret_cast<IUnknown **>(&DepthState));
 	release_interface(reinterpret_cast<IUnknown **>(&BlendState));
 	release_interface(reinterpret_cast<IUnknown **>(&Sampler));
+	release_interface(reinterpret_cast<IUnknown **>(&WarpShader));
 	release_interface(reinterpret_cast<IUnknown **>(&BloomCompositeShader));
 	release_interface(reinterpret_cast<IUnknown **>(&BloomBlurShader));
 	release_interface(reinterpret_cast<IUnknown **>(&BloomExtractShader));
@@ -608,7 +708,8 @@ bool DX11PostProcessClass::Create_Shaders()
 		&& compile_pixel_shader(compiler, device, BLOOM_EXTRACT_SHADER_BODY, &BloomExtractShader)
 		&& compile_pixel_shader(compiler, device, BLOOM_BLUR_SHADER_BODY, &BloomBlurShader)
 		&& compile_pixel_shader(compiler, device, BLOOM_COMPOSITE_SHADER_BODY,
-			&BloomCompositeShader);
+			&BloomCompositeShader)
+		&& compile_pixel_shader(compiler, device, WARP_SHADER_BODY, &WarpShader);
 }
 
 bool DX11PostProcessClass::Create_States()
@@ -808,12 +909,27 @@ void DX11PostProcessClass::Draw_Pass(const PassSetup & pass)
 	block.Tuning[0] = BloomThreshold;
 	block.Tuning[1] = BloomIntensity;
 	block.Tuning[2] = TONE_CURVE_KNEE;
-	block.Tuning[3] = 0.0f;
+	block.Tuning[3] = BLOOM_KNEE;
 	if (pass.Occlusion) {
 		block.Tuning[0] = NearPlane;
 		block.Tuning[1] = FarPlane;
 		block.Tuning[2] = AO_RADIUS;
 		block.Tuning[3] = AO_SPREAD;
+	}
+	block.WarpInfo[0] = static_cast<float>(WarpCount);
+	block.WarpInfo[1] = static_cast<float>(pass.SourceWidth) / static_cast<float>(pass.SourceHeight);
+	block.WarpInfo[2] = 0.0f;
+	block.WarpInfo[3] = 0.0f;
+	for (unsigned index = 0; index < DX11_POST_WARP_LIMIT; ++index) {
+		const DX11PostWarp & warp = Warps[index];
+		block.WarpCentre[index][0] = warp.CentreX;
+		block.WarpCentre[index][1] = warp.CentreY;
+		block.WarpCentre[index][2] = warp.Radius;
+		block.WarpCentre[index][3] = warp.Pull;
+		block.WarpRing[index][0] = warp.RingRadius;
+		block.WarpRing[index][1] = warp.RingWidth;
+		block.WarpRing[index][2] = warp.RingStrength;
+		block.WarpRing[index][3] = warp.RingSquash;
 	}
 	memcpy(mapped.pData, &block, sizeof(block));
 	context->Unmap(ConstantBuffer, 0);
@@ -877,13 +993,17 @@ ID3D11ShaderResourceView * DX11PostProcessClass::Run_Bloom(ID3D11RenderTargetVie
 	pass.SourceWidth = BloomWidth;
 	pass.SourceHeight = BloomHeight;
 	unsigned source = 0;
-	for (unsigned iteration = 0; iteration < BLOOM_BLUR_PASSES; ++iteration) {
+	for (unsigned iteration = 0; iteration < BloomBlurPasses; ++iteration) {
+		// Each pair steps a texel wider than the last.  What the earlier pairs left is smooth
+		// enough by then that the taps landing between texels miss nothing, and the widths add
+		// up in squares, which is how four pairs reach twice as far as two.
+		const float spread = static_cast<float>(iteration + 1);
 		for (unsigned axis = 0; axis < 2; ++axis) {
 			const unsigned other = 1 - source;
 			pass.Source = BloomTargets[source].Resource;
 			pass.Destination = BloomTargets[other].View;
-			pass.BlurX = (axis == 0) ? bloom_texel_x : 0.0f;
-			pass.BlurY = (axis == 0) ? 0.0f : bloom_texel_y;
+			pass.BlurX = (axis == 0) ? bloom_texel_x * spread : 0.0f;
+			pass.BlurY = (axis == 0) ? 0.0f : bloom_texel_y * spread;
 			Draw_Pass(pass);
 			source = other;
 		}
@@ -915,12 +1035,16 @@ bool DX11PostProcessClass::Finish(const DX11PostEffect * effects, unsigned count
 		return false;
 	}
 
+	// A blast on screen puts one more pass on the end of the chain, so whatever was last writes a
+	// chain target instead of the screen and the warp writes the screen from it.
+	const bool warp = (WarpCount > 0);
+
 	unsigned first = 0;
 	ID3D11ShaderResourceView * source = SceneTarget.Resource;
 	if (effects[0] == DX11_POST_BLOOM) {
 		// Bloom is the only effect that reads the half float scene, and the frame is eight bits by
 		// the time it hands over. If it is also the last thing in the chain it writes the screen.
-		const bool alone = (count == 1);
+		const bool alone = (count == 1) && !warp;
 		ID3D11RenderTargetView * bloom_destination = alone ? back_buffer : ChainTargets[0].View;
 		if (BloomIntensity > 0.0f) {
 			source = Run_Bloom(bloom_destination);
@@ -957,7 +1081,7 @@ bool DX11PostProcessClass::Finish(const DX11PostEffect * effects, unsigned count
 	pass.SourceWidth = Width;
 	pass.SourceHeight = Height;
 	for (unsigned index = first; index < count; ++index) {
-		const bool last = (index + 1 == count);
+		const bool last = (index + 1 == count) && !warp;
 		pass.Shader = PixelShaders[effects[index]];
 		// The occlusion pass is the one effect that reads something other than the frame: the
 		// frame's own depth, which the device keeps as a texture as well as a depth buffer.
@@ -968,6 +1092,15 @@ bool DX11PostProcessClass::Finish(const DX11PostEffect * effects, unsigned count
 		Draw_Pass(pass);
 		source = ChainTargets[destination].Resource;
 		destination = 1 - destination;
+	}
+
+	if (warp) {
+		pass.Shader = WarpShader;
+		pass.Extra = NULL;
+		pass.Occlusion = false;
+		pass.Source = source;
+		pass.Destination = back_buffer;
+		Draw_Pass(pass);
 	}
 
 	Resolved = true;

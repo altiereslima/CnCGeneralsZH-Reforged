@@ -51,8 +51,7 @@
     {{holdkey.x}} ...      stand, data-click="order:attack", "order:hold" and "order:move", for a
     {{movekey.x}} ...      selection that attack moves; no command set has a button for any of
                            them.  The game letters each with the key bound to its place
-    {{huntkey.x}} ...      the search and destroy and stance keys, data-click="order:hunt" and
-    {{stancekey.x}} ...    "order:stance", wherever the grid has room for them; {{stance}} is "aggressive" or "defensive", the first selected unit's
+    {{stancekey.x}} ...    the stance key, data-click="order:stance", wherever the grid has room for it; {{stance}} is "aggressive" or "defensive", the first selected unit's
     data-each="portraitcells" the selection's cells, the portrait's first and then only what it
                            holds, each {{cell.x}} .y .w .h
     {{selinfo.x}} ...      beside a lone unit's portrait: {{sel.name}}, data-each="selstars" a star
@@ -316,7 +315,6 @@
   .order.attack { background-image: url(ReforgedOrderAttack); }
   .order.hold { background-image: url(ReforgedOrderHold); }
   .order.move { background-image: url(ReforgedOrderMove); }
-  .order.hunt { background-image: url(ReforgedOrderHunt); }
   .order.aggressive { background-image: url(ReforgedOrderAggressive); }
   .order.defensive { background-image: url(ReforgedOrderDefensive); }
   .order .glow { position: absolute; left: 0; top: 0; right: 0; bottom: 0; background-size: 100% 100%; background-repeat: no-repeat; }
@@ -452,7 +450,6 @@
   <div class="piece order attack {{attackkey.shown}}" data-click="order:attack" style="left: {{attackkey.x}}px; top: {{attackkey.y}}px; width: {{attackkey.w}}px; height: {{attackkey.h}}px"><div class="glow"></div></div>
   <div class="piece order hold {{holdkey.shown}}" data-click="order:hold" style="left: {{holdkey.x}}px; top: {{holdkey.y}}px; width: {{holdkey.w}}px; height: {{holdkey.h}}px"><div class="glow"></div></div>
   <div class="piece order move {{movekey.shown}}" data-click="order:move" style="left: {{movekey.x}}px; top: {{movekey.y}}px; width: {{movekey.w}}px; height: {{movekey.h}}px"><div class="glow"></div></div>
-  <div class="piece order hunt {{huntkey.shown}}" data-click="order:hunt" style="left: {{huntkey.x}}px; top: {{huntkey.y}}px; width: {{huntkey.w}}px; height: {{huntkey.h}}px"><div class="glow"></div></div>
   <div class="piece order {{stance}} {{stancekey.shown}}" data-click="order:stance" style="left: {{stancekey.x}}px; top: {{stancekey.y}}px; width: {{stancekey.w}}px; height: {{stancekey.h}}px"><div class="glow"></div></div>
 
   <div class="piece commandcell" data-each="skillcells" style="left: {{cell.x}}px; top: {{cell.y}}px; width: {{cell.w}}px; height: {{cell.h}}px"><div class="edge" style="left: -{{ring}}px; top: -{{ring}}px; right: -{{ring}}px; bottom: -{{ring}}px; border-width: {{ring}}px"></div><div class="bevel"></div></div>

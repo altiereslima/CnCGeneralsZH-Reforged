@@ -97,6 +97,8 @@ public:
 	Int getTotalFactionBuildingsCaptured( void ) { return m_totalFactionBuildingsCaptured; }
 	Int getTotalObjectsBuilt( const ThingTemplate *pTemplate ); // get a count of objects built matching a specific thing template
 	const ThingTemplate *getMostBuiltUnit( void ) const;	///< the fighting unit built most often, or NULL before the first
+	Int getUnitValueLost( void ) const;				///< what the units this player lost cost it, buildings left out
+	Int getUnitValueDestroyed( void ) const;	///< what the enemy units it killed cost their owners
 
 	// for battle honor calculation.  done once at the end of each online game
 	Int getTotalUnitsBuilt( KindOfMaskType validMask, KindOfMaskType invalidMask );
@@ -131,7 +133,8 @@ private:
 	ObjectCountMap m_objectsLost;				///< how many and what kinds of objects did we loose
 	ObjectCountMap m_objectsCaptured;
 	void xferObjectCountMap( Xfer *xfer, ObjectCountMap *map );
-		
+	static Int unitValueOf( const ObjectCountMap &map, Int ownerIdx );
+
 };
 
 //-----------------------------------------------------------------------------

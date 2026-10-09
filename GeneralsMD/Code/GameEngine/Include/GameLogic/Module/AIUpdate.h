@@ -757,6 +757,7 @@ public:
 
 	// this is intended for use ONLY by the production exit modules.
 	void friend_setExitProductionRallyPoint( const Coord3D *pos );
+	void friend_dropOrdersAfterExit() { m_hasExitProductionRallyPoint = FALSE; m_ordersAfterExit.clear(); }	///< a newer order replaces the rally point and the held ones
 
 	// this is intended for use ONLY by the salvage collection pass in GameLogic.
 	void friend_setSalvageReturnPosition( const Coord3D *pos );
@@ -767,6 +768,7 @@ public:
 	Bool hasTunnelTrip() const { return m_hasTunnelTrip; }	///< on its way through the tunnel network to a move order's goal
 	void endTunnelTrip();	///< what the trip was for is gone: forget it, unless the unit is already underground
 	const Coord3D *getTunnelTripGoal() const { return &m_tunnelTripGoal; }	///< where the trip ends, once out of the far mouth
+	Bool isExitingProducer() const;	///< still driving the exit path out of the structure that built it
 	TunnelTripEnd getTunnelTripEnd() const { return m_tunnelTripEnd; }	///< how the leg from the far mouth is walked
 #if defined(_DEBUG) || defined(_INTERNAL)	
 	inline const Coord3D *friend_getRequestedDestination() const { return &m_requestedDestination; }
@@ -954,6 +956,7 @@ private:
 	ObjectID		m_moveOutOfWay2;
 	Coord3D			m_exitProductionRallyPoint;	///< Rally point to attack-move to once we are clear of the producer that just built us.
 	Bool				m_hasExitProductionRallyPoint;	///< True while m_exitProductionRallyPoint is still waiting to be ordered.
+	mutable std::vector<AICommandParmsStorage> m_ordersAfterExit;	///< Player orders given while still on the exit path, carried out in order once off it.
 	Coord3D			m_salvageReturnPosition;		///< Where we stood when we were sent to fetch a salvage crate.
 	Bool				m_hasSalvageReturnPosition;	///< True while the walk back to m_salvageReturnPosition is still owed.
 	Coord3D			m_tunnelTripGoal;						///< Where a move order sent us before a tunnel shortened the way there.

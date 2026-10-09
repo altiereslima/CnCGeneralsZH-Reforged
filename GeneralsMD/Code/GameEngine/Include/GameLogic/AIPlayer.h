@@ -37,6 +37,7 @@
 #include "GameLogic/AI.h"			// AISkillLevel, AIRole and the difficulty profile the ladder reads
 #include "Common/GameCommon.h"		// MAX_PLAYER_COUNT, for the per-enemy scouting stamps
 #include "GameLogic/AIInfluenceMap.h"
+#include <map>
 
 enum { INVALID_SKILLSET_SELECTION = -1 };
 
@@ -227,8 +228,13 @@ public: // AIPlayer interface, may be overridden by AISkirmishPlayer.  jba.
 		* The script's own label when the rung does not read the map, or the label is not one of the three. */
 	AsciiString chooseApproachLabel(const Coord3D *from, const AsciiString &requested, Int pathSuffix);
 	/** C2: park an attack team that is not a wave on its own until the rest of the wave is in hand.
-		* TRUE when it is parked, and the caller's own order must not go out. */
-	Bool holdTeamForWave(Team *team, const AsciiString &approach, Int pathSuffix);
+		* TRUE when it is parked, and the caller's own order must not go out.  logRefusal writes the AI
+		* ENGAGE line for a team that goes on its own instead; a caller that logs its own passes FALSE. */
+	Bool holdTeamForWave(Team *team, const AsciiString &approach, Int pathSuffix, Bool logRefusal = TRUE);
+	/** A script sends this team hunting or at an area: logged, and with EngageGate a team still at
+		* home parks for the next wave instead.  TRUE when it is parked, and the script's order must not go out. */
+	Bool gateTeamAttack(Team *team, const char *cause);
+	void onUnitLost(const Object *obj);		///< one of ours died: was it alone, away from a team that is still alive?
 	virtual void repairStructure(ObjectID structure);
 
 	virtual void selectSkillset(Int skillset);
@@ -345,10 +351,13 @@ protected:
 	Bool hasEnoughMoneyUnitsFor(TeamPrototype *proto) const;	///< this team is all hackers and there is no room for more
 	Bool placeNear(const ThingTemplate *tmpl, const Coord3D *center, Real innerRadius, Bool walkOutward);	///< a legal, safe spot on a ring round center, queued for a dozer. walkOutward keeps searching further out as the inner rings fill
 	Bool queueExtraFactory(Object *dozer, KindOfType kind, Bool unlimited);	///< one more of this factory, beside a held expansion or around the base
+	const ThingTemplate *nextBaseDefense(Object *dozer);	///< the base defence off this dozer's buttons that the base has fewest of, NULL for none
+	Bool placeDefense(const ThingTemplate *defense);	///< queue it on the ring spot whose clear field of fire covers the most ground toward the enemy
 	Real knownFirepowerAlongPath(Waypoint *way);	///< what this AI has seen that can shoot, along an approach
 	AsciiString secondApproachLabel(const Coord3D *from, const AsciiString &taken, Int pathSuffix);	///< the quietest other road, or empty
 	Bool loadGunships(void);	///< infantry boards the transports it can shoot out of: the wave's anything at home, a team's its own; TRUE while a firing gunship is still filling
 	Int buyGunshipRiders(Int freeSeats);	///< Medium and up train the men for the firing seats nobody fills; how many are in training
+	void garrisonBuildings(void);	///< the home guard's infantry into our own buildings it shoots out of and the empty ones at home
 	void buyGunshipChinook(void);	///< Medium and up buy a supply-center transport the riders shoot out of, as a gunship
 	void doShuttles(void);	///< the transport Chinooks load at home, fly the wave's ground units to its road and come back
 	void buyTransportChinook(void);	///< one more transport Chinook while the last wave needs more lift than there is
@@ -360,6 +369,8 @@ protected:
 	void buyDutyHelix(void);	///< Medium and up buy the healers and raiders their Helixes' buttons allow
 	Int helixRoleWanted(const ThingTemplate *tmpl) const;	///< the job a Helix of this kind would take now, -1 for none
 	void takeDutyHelix(Object *helix);	///< a Helix buyDutyHelix ordered comes out and takes its job
+	void doAmbulances(void);	///< the USA's Ambulances: bought once there is an army, kept behind it, taking in the hurt and cleaning our side
+	void steerAmbulance(Int slot, const std::vector<AIKnownGun> &guns);	///< one Ambulance's job this pass
 	void upgradeHelix(Object *helix, Int role, AIEnemyComposition *enemy, Bool *enemyRead);	///< the upgrade this Helix's job or the enemy army calls for
 	void collectKnownGuns(std::vector<AIKnownGun> *guns) const;	///< every enemy gun this AI knows of, in object list order
 	void steerHealer(Int slot, const std::vector<AIKnownGun> &guns);	///< a healer over our hurt behind the line, clear of every known gun
@@ -371,7 +382,12 @@ protected:
 	Real addHomeStrays(AIGroup *wave) const;	///< the default team's fighters idle at home go with the wave
 	Real knownFirepowerNear(const Coord3D *pos);	///< what this AI has seen that can shoot, near a point
 	Bool forwardHoldPoint(const AsciiString &approach, Int pathSuffix, const Coord3D *enemyPos, Coord3D *hold);	///< where a wave gathers on its road
-	void sendWave(AIGroup *wave, const AsciiString &approach, Int pathSuffix, Int teams, Real power, UnsignedInt heldFrames);
+	void sendWave(AIGroup *wave, const AsciiString &approach, Int pathSuffix, Int teams, Real power, UnsignedInt heldFrames, const char *cause);
+	void logEngage(const char *cause, const std::vector<Object *> &units);	///< AI ENGAGE: what goes out, and how it weighs against the army it remembers
+	Bool refuseHold(Team *team, const char *why, Bool logIt);	///< FALSE, after logging the team holdTeamForWave lets go
+	Bool holdReinforcement(Object *obj);	///< a top-up for a team out on the map waits for the next wave instead of walking out alone
+	void rememberEnemies(void);					///< bring the seen-enemy ledger up to date with what is in sight now
+	void rememberedArmy(std::vector<AIVisibleEnemy> *army) const;	///< the ledger, one entry a kind, weighed by combat power
 	void sendWaveThroughTunnels(AIGroup *wave, const Coord3D *center, Waypoint *way);	///< whoever can goes by tunnel when the path is the long way round
 
 	virtual void doBaseBuilding(void);
@@ -425,6 +441,7 @@ public:
 	Bool isTransportChinook( const Object *obj ) const;	///< a plain Chinook this AI bought to fly its wave, not to gather
 	Bool isDutyChinook( const Object *obj ) const;	///< either of those, which the gatherer counts leave out
 	Bool isDutyHelix( const Object *obj ) const;	///< a Helix this AI bought to heal or to raid, which nothing else gives orders
+	Bool isDutyAmbulance( const Object *obj ) const;	///< an Ambulance this AI bought to follow the army, which nothing else gives orders
 protected:
 
 	/**
@@ -457,6 +474,7 @@ protected:
 	Player *m_player;									///< the Player we represent
 
 	AISkillLevel m_skillLevel;				///< rung of the ladder: how well this AI plays
+	mutable AIDifficultyProfile m_measuredProfile;	///< the rung's profile less the knobs -aiknobsoff turns off for this slot
 	AIRole		m_role;									///< what it is trying to do; rolled once, kept for the match
 
 	enum { MAX_AI_SCOUTS = 2 };				///< the ladder's maxScouts never asks for more than this
@@ -508,6 +526,14 @@ protected:
 	};
 	enum { MAX_DUTY_HELIXES = 5 };
 	DutyHelix		m_dutyHelix[ MAX_DUTY_HELIXES ];
+	/// An Ambulance bought to follow the army: the hurt infantry climb in, and it cleans hazards on our side
+	struct DutyAmbulance
+	{
+		ObjectID		id;					///< INVALID_ID for a free slot
+		Coord3D			spot;				///< where it was last sent
+	};
+	enum { MAX_DUTY_AMBULANCES = 2 };
+	DutyAmbulance	m_ambulance[ MAX_DUTY_AMBULANCES ];
 	Int					m_healerSeconds;		///< for the log only, not saved: healer seconds counted, and those clear of the nearest gun's reach
 	Int					m_healerClearSeconds;
 	Int				m_captureTimer;					///< frames until the next look for something to capture
@@ -586,6 +612,30 @@ protected:
 	void sendIdleUnitsHunting(void);							///< attack units idle at the end of their road, and the guards once the enemy is finished
 	Bool holdsTeamsForWaves(void) const;					///< this rung parks attack teams at the current level
 	Bool leavesToFinish(const Object *obj) const;	///< a fighter the last push takes off guard, as against a worker or a scout
+	/** Every enemy unit this AI has seen and not since lost track of: what it was, whose, and where and
+		* when it was last in sight.  An army that walks back into the fog is still an army.  A row goes when
+		* it has not been seen for LEDGER_FORGET_FRAMES, or when the ground it was last seen on is in sight
+		* and it is not there and no longer exists: the AI looked and it was gone. */
+	struct SeenEnemy
+	{
+		const ThingTemplate	*tmpl;
+		Int					owner;			///< player index
+		UnsignedInt	seen;				///< last frame it was in sight
+		Coord3D			pos;				///< where
+		Bool				stealth;		///< it can go invisible
+	};
+	std::map<ObjectID, SeenEnemy> m_seenEnemies;
+	void answerArmy(void);	///< train the answer to the biggest part of the remembered enemy army nothing of ours answers
+
+	/** The fist: one unit picked because the army it remembers has no answer to it, built from the idle
+		* factories, held together at the staging point and sent as one. */
+	void doMass(void);
+	const ThingTemplate *pickMassUnit(const std::vector<AIVisibleEnemy> &army, Real *efficiency) const;
+	Bool isMassUnit(ObjectID id) const;
+	const ThingTemplate	*m_massTemplate;	///< NULL while no unit is picked
+	UnsignedInt					m_massPickFrame;	///< when it was picked, or dropped; 0 for never
+	UnsignedInt					m_massSince;			///< when the first of the fist now waiting joined it
+	std::vector<ObjectID>	m_massUnits;	///< the fist so far, in the order they came out
 	AIPressure	m_pressure;
 	Real				m_knownEnemyPower;								///< his army as this AI believes it: what is in sight at least, less for each look at his base that does not find it, more for each look not taken
 	Int					m_pressureEnemy;									///< the player index that figure is about, -1 for nobody yet
@@ -629,8 +679,10 @@ protected:
 	void leaveTacticsAlone(ObjectID unit);
 	Bool isFallingBack(ObjectID unit);		///< holding at a safe spot after a lost fight, for doRetreats to send back
 	void measureFight(const Coord3D *centre, Bool countHolders, Real *myHealth, Real *myPower,
-		Real *enemyHealth, Real *enemyPower, std::vector<Real> *enemyGuns);
+		Real *enemyHealth, Real *enemyPower, std::vector<Real> *enemyGuns, Real *advantage = NULL);
+	Real fightRatio(const Coord3D *centre, Bool countHolders, Real *enemyHealth, Real *enemyPower, std::vector<Real> *enemyGuns);	///< the exchange around centre, by the units in it when the rung weighs them
 	Bool doFallback(Team *team);		///< TRUE when it sent the team's holders back or home on this pass
+	void pullOutRanked(Team *team, Bool inFight, Real ratio);	///< veterans and up leave earlier than the team, to a repair or heal pad
 	void stepCalmly(Object *obj, TacticalStep *step, const Coord3D *spot);	///< a move the unit's mood cannot turn into an attack move
 	void restoreMood(Object *obj, TacticalStep *step);
 	Bool pickTacticalSpot(const Object *obj, const Coord3D *from, const Coord3D *awayFrom, Real distance,

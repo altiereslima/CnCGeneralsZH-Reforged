@@ -1,0 +1,20 @@
+# YouTube thumbnail stills over Scenarios/trailer_chaos.txt on Twilight Flame, camera B: the
+# website's crowd-front view (heading -45, American line left, Chinese right), held still.
+# Rendered at 2560x1440 and cropped to 1920x1080 afterwards, as thumb_chaos_a.txt.
+#
+#   generals.exe -win -xres 2560 -yres 1440 -msaa 0 -fps 120 -noFPSLimit -quickstart -noshellmap
+#     -observer -multiInstance -particlecap 2500 -map "Maps\Twilight Flame\Twilight Flame.map"
+#     -autoskirmish 3 -takeover -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA
+#     -seed 7 -scenario trailer_chaos -cinema thumb_chaos_b -maxframes 1110
+
+3.0   cut     1075 3775 0.7 -45 6
+27.0  shot
+28.5  shot
+30.0  shot
+31.0  shot
+32.0  shot
+33.0  shot
+34.0  shot
+34.7  shot
+35.3  shot
+36.0  shot

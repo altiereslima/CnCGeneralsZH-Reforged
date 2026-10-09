@@ -1661,6 +1661,19 @@ Bool Player::holdTeamForWave(Team *team, const AsciiString &approach, Int pathSu
 }
 
 //-------------------------------------------------------------------------------------------------
+Bool Player::gateTeamAttack(Team *team, const char *cause)
+{
+	return m_ai ? m_ai->gateTeamAttack(team, cause) : FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
+void Player::onUnitLost(const Object *obj)
+{
+	if (m_ai)
+		m_ai->onUnitLost(obj);
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Do any bridges need repair, and if so repair them. */
 //-------------------------------------------------------------------------------------------------
 Bool Player::getAiBaseCenter(Coord3D *pos)
@@ -3154,6 +3167,14 @@ Bool SuperweaponMissileSilencedInMatch( SpecialPowerType specialPowerType )
                                      TheGameLogic->getSuperweaponRestriction() );
 }
 
+Bool SuperweaponSiloSilencedInMatch( const Object *structure )
+{
+  return ( structure->hasSpecialPower( SPECIAL_NEUTRON_MISSILE )
+           || structure->hasSpecialPower( NUKE_SPECIAL_NEUTRON_MISSILE )
+           || structure->hasSpecialPower( SUPW_SPECIAL_NEUTRON_MISSILE ) )
+         && SuperweaponMissileSilencedInMatch( SPECIAL_NEUTRON_MISSILE );
+}
+
 Bool ProRulesRefuseSpecialPower( const Player *player, SpecialPowerType specialPowerType )
 {
   return SuperweaponMissileSilencedInMatch( specialPowerType )
@@ -3297,9 +3318,10 @@ Bool DefenseCountsForSuperweapons( Int buildCost )
   return buildCost > 0;
 }
 
-Bool SuperweaponNeedsDefenses( const AsciiString &buildingName, Bool proRules, Int superweaponRestriction )
+Bool SuperweaponNeedsDefenses( const AsciiString &buildingName, Bool proRules, Int superweaponRestriction,
+                               Bool computerPlayer )
 {
-  return !( ProRulesExemptSuperweapon( buildingName )
+  return computerPlayer && !( ProRulesExemptSuperweapon( buildingName )
             && SuperweaponMissileSilenced( SPECIAL_NEUTRON_MISSILE, proRules, superweaponRestriction ) );
 }
 
@@ -3448,10 +3470,11 @@ Bool Player::canBuildMoreOfType( const ThingTemplate *whatToBuild, Int unitsPerO
     maxSimultaneousOfType = (UnsignedInt)cap;
   }
 
-  // the defence allowance holds in skirmish and network matches and their replays; a campaign or
-  // Generals Challenge mission was laid out without it and keeps EA's rules
+  // the defence allowance binds computer players in skirmish and network matches and their replays;
+  // humans, and a campaign or Generals Challenge mission, keep EA's rules
   if ( whatToBuild->isKindOf( KINDOF_FS_SUPERWEAPON ) && TheGameLogic && !TheGameLogic->isInSinglePlayerGame()
-    && SuperweaponNeedsDefenses( whatToBuild->getName(), proRules, (Int)TheGameLogic->getSuperweaponRestriction() ) )
+    && SuperweaponNeedsDefenses( whatToBuild->getName(), proRules, (Int)TheGameLogic->getSuperweaponRestriction(),
+                                 getPlayerType() == PLAYER_COMPUTER ) )
   {
     SuperweaponDefenseCount count = { 0, 0 };
     iterateObjects( countSuperweaponDefenses, &count );

@@ -104,6 +104,9 @@
 #include "WW3D2/predlod.h"
 #include "WW3D2/ww3d.h"
 #include "WW3D2/dx11runtime.h"
+#if defined(_WIN32)
+#include "dx11post.h"	//DX11Post_Set_Warps; the library is not built off Windows
+#endif
 
 #include "W3DDevice/GameClient/camerashakesystem.h"
 
@@ -205,6 +208,7 @@ W3DView::W3DView()
 	m_shakerAngles.X =0.0f;							// Proper camera shake generator & sources
 	m_shakerAngles.Y =0.0f;
 	m_shakerAngles.Z =0.0f;
+	m_distortionCount = 0;
 
 	m_recalcCamera = false;
 	m_isometricApplied = false;
@@ -574,6 +578,33 @@ void W3DView::buildCameraTransform( Matrix3D *transform )
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The look point inside the constraint, built first if a zoom, a pitch or a move of the ground
+	* threw it away.  The draw does this every frame; the observer camera does it as soon as it has
+	* moved the view, to know where the draw will put it. */
+//-------------------------------------------------------------------------------------------------
+void W3DView::applyCameraConstraint( void )
+{
+	// the freecam owns the camera and is held to no constraint, as in setCameraTransform
+	if (m_freeCamera || !(TheGlobalData->m_useCameraConstraints || TheGlobalData->isClassicUI()))
+		return;
+
+	if (!m_cameraConstraintValid)
+	{
+		Matrix3D cameraTransform;
+		buildCameraTransform(&cameraTransform);
+		m_3DCamera->Set_Transform( cameraTransform );
+		calcCameraConstraints();
+	}
+	DEBUG_ASSERTLOG(m_cameraConstraintValid,("*** cam constraints are not valid!!!\n"));
+
+	if (m_cameraConstraintValid)
+	{
+		Coord3D pos = constrainCameraPosition(*getPosition(), m_cameraConstraint);
+		setPosition(&pos);
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 void W3DView::calcCameraConstraints()
 {
@@ -869,6 +900,33 @@ Bool W3DView::wantsIsometric( void ) const
 //-------------------------------------------------------------------------------------------------
 void W3DView::setCameraTransform( void )
 {
+	aimCamera();
+	if (m_freeCamera)
+		return;
+
+	if (TheTerrainRenderObject)
+	{
+		RefRenderObjListIterator *it = W3DDisplay::m_3DScene->createLightsIterator();
+		TheTerrainRenderObject->updateCenter(m_3DCamera, it);
+		if (it)
+		{
+		 W3DDisplay::m_3DScene->destroyLightsIterator(it);
+		 it = NULL;
+		}
+	}
+
+	// tell the radar its view box is stale, whatever it was that moved - it used to work that out
+	// itself by comparing the zoom and the angle, so panning left the box behind
+	if (TheRadar)
+		TheRadar->notifyViewChanged();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The camera itself, built from the location now.  The observer camera aims the view at a pane's
+	* place and asks it where things land before the draw does this for real. */
+//-------------------------------------------------------------------------------------------------
+void W3DView::aimCamera( void )
+{
 	m_cameraHasMovedSinceRequest = true;
 	if (m_freeCamera)
 	{
@@ -886,10 +944,16 @@ void W3DView::setCameraTransform( void )
 	// 1200 was a number, not a distance: at the stock ceiling and pitch the far plane already cuts
 	// the terrain the game means to draw, and this fork zooms further out than the stock game did.
 	// Take the distance the terrain is actually drawn over instead, and open it with the height -
-	// at twice the height you see twice as far.
+	// at twice the height you see twice as far.  -directorrecord's panes set the zoom outright with
+	// the height's settling held off, so there the eye's own height opens it as well: a pane twice
+	// as high as the held height cut the far ground off in a black band.  Only there, so every
+	// other camera keeps the far plane it had.
 	static const Real VIEW_DEFAULT_MAX_HEIGHT_ABOVE_TERRAIN = 310.0f;
 	farZ = (WorldHeightMap::NORMAL_DRAW_WIDTH * 1.08f) * MAP_XY_FACTOR;
-	const Real heightMultiplier = m_heightAboveGround / VIEW_DEFAULT_MAX_HEIGHT_ABOVE_TERRAIN;
+	Real height = m_heightAboveGround;
+	if (TheGlobalData->m_directorRecord && !m_okToAdjustHeight)
+		height = max(height, m_cameraOffset.z * getZoom() - m_groundLevel);
+	const Real heightMultiplier = height / VIEW_DEFAULT_MAX_HEIGHT_ABOVE_TERRAIN;
 	if (heightMultiplier > 1.0f)
 		farZ *= heightMultiplier;
 
@@ -909,22 +973,7 @@ void W3DView::setCameraTransform( void )
 	}
 
 	m_3DCamera->Set_Clip_Planes(nearZ, farZ);
-	if (TheGlobalData->m_useCameraConstraints || TheGlobalData->isClassicUI())
-	{
-		if (!m_cameraConstraintValid)
-		{
-			buildCameraTransform(&cameraTransform);
-			m_3DCamera->Set_Transform( cameraTransform );
-			calcCameraConstraints();
-		}
-		DEBUG_ASSERTLOG(m_cameraConstraintValid,("*** cam constraints are not valid!!!\n"));
-
-		if (m_cameraConstraintValid)
-		{
-			Coord3D pos = constrainCameraPosition(*getPosition(), m_cameraConstraint);
-			setPosition(&pos);
-		}
-	}
+	applyCameraConstraint();
 
 #if defined(_DEBUG) || defined(_INTERNAL)
 	m_3DCamera->Set_View_Plane( m_FOV, -1 );
@@ -963,22 +1012,6 @@ void W3DView::setCameraTransform( void )
 	}
 
 	m_3DCamera->Set_Transform( cameraTransform );
-
-	if (TheTerrainRenderObject)
-	{
-		RefRenderObjListIterator *it = W3DDisplay::m_3DScene->createLightsIterator();
-		TheTerrainRenderObject->updateCenter(m_3DCamera, it);
-		if (it)
-		{
-		 W3DDisplay::m_3DScene->destroyLightsIterator(it);
-		 it = NULL;
-		}
-	}
-
-	// tell the radar its view box is stale, whatever it was that moved - it used to work that out
-	// itself by comparing the zoom and the angle, so panning left the box behind
-	if (TheRadar)
-		TheRadar->notifyViewChanged();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1218,6 +1251,9 @@ void W3DView::reset( void )
 
 	Coord2D gb = { 0,0 };
 	setGuardBandBias( &gb );
+
+	// a blast from the last game must not come back on the first frames of the next one
+	m_distortionCount = 0;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1992,6 +2028,10 @@ void W3DView::update(void)
 	if (zoomSteps <= 0.0f || zoomSteps > 10.0f)
 		zoomSteps = 1.0f;		// first frame ever, or a hitch: take one plain step
 	Real cameraAdjustSpeed = 1.0f - (Real)pow(1.0f - TheGlobalData->m_cameraAdjustSpeed, zoomSteps);
+	// The director asks for a slower settle: at CameraAdjustSpeed's third of a second every ridge
+	// the five height samples crossed during a glide stepped the picture in and out.
+	if (m_heightSettleSeconds > 0.0f)
+		cameraAdjustSpeed = 1.0f - expf(-zoomSteps * TheW3DFrameLengthInMsec / (1000.0f * m_heightSettleSeconds));
 	if (TheTerrainLogic && TheGlobalData && TheInGameUI && m_okToAdjustHeight && !TheGameLogic->isGamePaused())
 	{
 		Real desiredHeight = (m_terrainHeightUnderCamera + m_heightAboveGround);
@@ -2586,6 +2626,7 @@ void W3DView::draw( void )
 	Int64 tPostChainStart, tPostChainEnd, tIconStart, tIconEnd;
 	tPostChainStart = Clock_Ticks();
 #endif
+	updateScreenDistortions();
 	Direct3D11_Finish_Scene();
 #ifdef DEBUG_LOGGING
 	tPostChainEnd = Clock_Ticks();
@@ -2818,6 +2859,13 @@ void W3DView::setZoomToHeight( Real heightAboveGround )
 	stopDoingScriptedCamera();
 	m_cameraConstraintValid = false; // recalc it.
 	m_recalcCamera = true;
+}
+
+//-------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+Real W3DView::getZoomForHeight( Real heightAboveGround )
+{
+	return (getHeightAroundPos(m_pos.x, m_pos.y) + heightAboveGround) / m_cameraOffset.z;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -4215,6 +4263,162 @@ void W3DView::shake( const Coord3D *epicenter, CameraShakeType shakeType )
 	// the hit that took a barrage over the top shook the camera less than the one before it.
 	if (m_shakeIntensity > TheGlobalData->m_maxShakeIntensity)
 		m_shakeIntensity = TheGlobalData->m_maxShakeIntensity;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A blast that bends the picture.  Only the Direct3D 11 post chain draws it: under Direct3D 9 the
+	* warps are handed over all the same and no pass reads them, and off Windows the list is dropped
+	* at the next draw.  A fifth blast on a full list pushes the oldest off. */
+//-------------------------------------------------------------------------------------------------
+void W3DView::addScreenDistortion( const Coord3D *epicenter, const ScreenDistortionInfo &info )
+{
+	// A Scud Storm missile plays its detonation FX twice, once from the missile and once from the
+	// damage weapon it fires, and the Chemical general's adds a Scud launcher's on top.  One blast
+	// in one place on one frame bends the picture once: the first to arrive is kept.
+	const UnsignedInt now = TheGameClient->getFrame();
+	for (Int i = 0; i < m_distortionCount; ++i)
+	{
+		const ScreenDistortion &other = m_distortions[i];
+		const Real dx = other.m_epicenter.x - epicenter->x;
+		const Real dy = other.m_epicenter.y - epicenter->y;
+		const Real sameSpot = 0.25f * other.m_info.m_radius;
+		if (now - other.m_startFrame <= 1 && dx * dx + dy * dy < sameSpot * sameSpot)
+			return;
+	}
+
+	if (m_distortionCount == MAX_SCREEN_DISTORTIONS)
+	{
+		for (Int i = 1; i < MAX_SCREEN_DISTORTIONS; ++i)
+			m_distortions[i - 1] = m_distortions[i];
+		--m_distortionCount;
+	}
+	ScreenDistortion &added = m_distortions[m_distortionCount++];
+	added.m_epicenter = *epicenter;
+	added.m_startFrame = now;
+	added.m_info = info;
+}
+
+static const Real MAX_DISTORTION_SCREEN_RADIUS = 0.35f;	///< fraction of the screen's height
+
+/** How far past the radius the ring runs.  Stopping at the radius it spent most of its strength
+	* under the fireball, where nothing behind it shows the bend; carried half as far again it rolls
+	* out over open ground while it still has the strength to be seen. */
+static const Real RING_TRAVEL = 1.5f;
+
+static Real distortionEase( Real x )
+{
+	return x * x * (3.0f - 2.0f * x);
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Ages the blasts on client frames, so a paused game holds the ring where it is, and blends into
+	* the next frame the way smooth motion blends the units, so at 120 fps the ring grows every frame
+	* rather than in thirtieths of a second.  The pull rises over the first 70% of its time and lets
+	* go over the rest, then the ring runs out past the radius, decelerating and widening, its
+	* strength falling off in a straight line so it is still there when it reaches clear ground.
+	* The world radius becomes a screen one by projecting the blast and a point a radius away along
+	* the camera's right vector, which is square to the line of sight and so gives the same size
+	* whichever way the camera is turned. */
+//-------------------------------------------------------------------------------------------------
+void W3DView::updateScreenDistortions( void )
+{
+#if defined(_WIN32)
+	DX11PostWarp warps[MAX_SCREEN_DISTORTIONS];
+	Int warpCount = 0;
+	const Real displayWidth = (Real)TheDisplay->getWidth();
+	const Real displayHeight = (Real)TheDisplay->getHeight();
+	const UnsignedInt frame = TheGameClient->getFrame();
+
+	Int kept = 0;
+	for (Int i = 0; i < m_distortionCount; ++i)
+	{
+		const ScreenDistortion &blast = m_distortions[i];
+		const ScreenDistortionInfo &info = blast.m_info;
+		const Real pullFrames = (Real)info.m_pullFrames;
+		const Real waveFrames = (Real)info.m_waveFrames;
+		Real age = (Real)(frame - blast.m_startFrame) + TheSmoothMotionAlpha - 1.0f;
+		if (age < 0.0f)
+			age = 0.0f;
+		if (age >= pullFrames + waveFrames)
+			continue;		// spent, or from a game before this one
+		m_distortions[kept++] = blast;
+
+		Real pull = 0.0f;
+		Real ringReach = 0.0f;
+		Real ringWidth = info.m_waveWidth;
+		Real ringStrength = 0.0f;
+		if (age < pullFrames)
+		{
+			const Real s = age / pullFrames;
+			pull = info.m_pullStrength * (s < 0.7f ? distortionEase(s / 0.7f) : 1.0f - distortionEase((s - 0.7f) / 0.3f));
+		}
+		else
+		{
+			const Real u = (age - pullFrames) / waveFrames;
+			const Real left = 1.0f - u;
+			ringReach = RING_TRAVEL * (1.0f - left * left);
+			ringWidth = info.m_waveWidth * (0.5f + u);
+			ringStrength = info.m_waveStrength * left * (u < 0.06f ? u / 0.06f : 1.0f);
+		}
+
+		ICoord2D centre;
+		if (worldToScreenTriReturn(&blast.m_epicenter, &centre) == WTS_INVALID)
+			continue;
+		const Vector3 right = m_3DCamera->Get_Transform().Get_X_Vector();
+		Coord3D edge = blast.m_epicenter;
+		edge.x += right.X * info.m_radius;
+		edge.y += right.Y * info.m_radius;
+		edge.z += right.Z * info.m_radius;
+		ICoord2D edgeScreen;
+		if (worldToScreenTriReturn(&edge, &edgeScreen) == WTS_INVALID)
+			continue;
+		const Real dx = (Real)(edgeScreen.x - centre.x);
+		const Real dy = (Real)(edgeScreen.y - centre.y);
+		const Real screenRadius = sqrtf(dx * dx + dy * dy);
+		if (screenRadius < 1.0f)
+			continue;
+
+		// The dome's footprint on the ground toward the camera: a radius along the camera's
+		// backward direction laid flat, which the pitch shortens on screen.  Looking straight down
+		// there is no such direction and the footprint is as deep as it is wide.
+		Real squash = 1.0f;
+		const Vector3 back = m_3DCamera->Get_Transform().Get_Z_Vector();
+		const Real flatLength = sqrtf(back.X * back.X + back.Y * back.Y);
+		if (flatLength > 0.01f)
+		{
+			Coord3D front = blast.m_epicenter;
+			front.x += back.X / flatLength * info.m_radius;
+			front.y += back.Y / flatLength * info.m_radius;
+			ICoord2D frontScreen;
+			if (worldToScreenTriReturn(&front, &frontScreen) != WTS_INVALID)
+			{
+				const Real fx = (Real)(frontScreen.x - centre.x);
+				const Real fy = (Real)(frontScreen.y - centre.y);
+				squash = sqrtf(fx * fx + fy * fy) / screenRadius;
+				if (squash > 1.0f)
+					squash = 1.0f;
+			}
+		}
+
+		DX11PostWarp &warp = warps[warpCount++];
+		warp.CentreX = (Real)centre.x / displayWidth;
+		warp.CentreY = (Real)centre.y / displayHeight;
+		// Zoomed in, a nuke's radius is wider than the screen and the pull moved the whole picture;
+		// held to about a third of the height it stays a blast in the frame rather than the frame.
+		warp.Radius = screenRadius / displayHeight;
+		if (warp.Radius > MAX_DISTORTION_SCREEN_RADIUS)
+			warp.Radius = MAX_DISTORTION_SCREEN_RADIUS;
+		warp.Pull = pull;
+		warp.RingRadius = warp.Radius * ringReach;
+		warp.RingWidth = warp.Radius * ringWidth;
+		warp.RingStrength = ringStrength;
+		warp.RingSquash = squash;
+	}
+	m_distortionCount = kept;
+	DX11Post_Set_Warps(warps, (unsigned)warpCount);
+#else
+	m_distortionCount = 0;
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------
