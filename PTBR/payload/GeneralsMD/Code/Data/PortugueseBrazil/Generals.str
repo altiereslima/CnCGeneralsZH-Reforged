@@ -5155,31 +5155,19 @@ GUI:Bloom0
 END
 
 GUI:Bloom1
-"Sutil"
+"Baixo"
 END
 
 GUI:Bloom2
-"Normal"
+"Médio"
 END
 
 GUI:Bloom3
-"Forte"
+"Alto"
 END
 
-GUI:BloomThreshold
-"Intensidade que Brilha"
-END
-
-GUI:BloomThreshold0
-"Apenas as mais intensas"
-END
-
-GUI:BloomThreshold1
-"Elementos brilhantes"
-END
-
-GUI:BloomThreshold2
-"Grande parte da imagem"
+GUI:Bloom4
+"Ultra"
 END
 
 GUI:BookmarkXSet
@@ -7614,14 +7602,6 @@ GUI:OrderMoveDescription
 "O próximo clique no chão manda as unidades selecionadas para lá. Se arrastar, elas se espalham ao longo da linha que você desenhar."
 END
 
-GUI:OrderSearchAndDestroy
-"Procurar e Destruir"
-END
-
-GUI:OrderSearchAndDestroyDescription
-"Clique num ponto e as unidades selecionadas fazem Mover e Atacar ao redor dele, combatendo o que encontrarem, e depois ficam guardando todo o círculo. Gire a roda do mouse antes de clicar para ajustar o tamanho do círculo."
-END
-
 GUI:OrderStanceAggressive
 "Postura: Agressiva"
 END
@@ -8288,6 +8268,10 @@ END
 
 GUI:SELECTION
 "Selection"
+END
+
+GUI:SelectionTypeDescription
+"Clique para manter só estes selecionados. Shift+clique para tirá-los da seleção."
 END
 
 GUI:SelectMap
@@ -9348,6 +9332,14 @@ END
 
 GUI:WinStreak
 "Série de Vitórias"
+END
+
+GUI:WireframeNotice
+"Interface Reforged: prévia"
+END
+
+GUI:WireframeNotice2
+"A arte final está a caminho"
 END
 
 GUI:WOLIconKey
@@ -15583,11 +15575,7 @@ TOOLTIP:BioStrategyLong_USA
 END
 
 TOOLTIP:Bloom
-"Define quanto as superfícies brilhantes espalham luz ao redor. O jogo original não tinha esse efeito; Desativado preserva a aparência original."
-END
-
-TOOLTIP:BloomThreshold
-"Define quanto da tela precisa ser brilhante para receber o efeito. Apenas as mais intensas limita o brilho a flashes e luzes; Grande parte da imagem cria uma névoa luminosa sobre o campo de batalha."
+"Define com que força fogo, explosões, clarões de disparo e lasers brilham e até onde a luz deles se espalha ao redor. Edifícios, céu, neve e areia nunca brilham. Desativado é o visual para o qual a arte foi pintada. O renderizador Direct3D 9 mostra uma versão mais suave e, com Gráficos Clássicos, só os halos dos lasers seguem esta opção."
 END
 
 TOOLTIP:Brightness
