@@ -267,8 +267,8 @@ def main():
         if state == "clean":
             backup = backup_sources(repo, result_dir)
             result["backup"] = str(backup)
-            run([sys.executable, str(pkg/"tools/apply_stage17.py"), str(repo)],
-                log=logs/"01_apply_stage17.log")
+            run([sys.executable, str(pkg/"tools/apply_stage18.py"), str(repo)],
+                log=logs/"01_apply_stage18.log")
             result["steps"]["apply_patch"] = "PASS"
         elif state == "patched":
             result["steps"]["apply_patch"] = "SKIPPED_ALREADY_PATCHED"

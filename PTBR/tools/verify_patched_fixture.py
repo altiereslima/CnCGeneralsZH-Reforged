@@ -114,6 +114,13 @@ def main():
         raise RuntimeError("missing postcondition: generals.exe still refuses to start without the launcher")
     need(winmain,"PT-BR edition: started straight from generals.exe","launcher check removed")
     checks["starts_without_launcher"]="PASS"
+    need(winmain,"::BitBlt(dc, 0, 0, splashWidth, splashHeight, tmpDC, 0, 0, SRCCOPY);","splash blit at its own size")
+    need(winmain,"if (runWindowed && gLoadScreenBitmap == NULL) {","windowed 800x600 only without a splash")
+    need(winmain,"if (!runWindowed && !ApplicationIsBorderless) {","borderless keeps painting the splash")
+    need(winmain,"if (!ApplicationIsWindowed && !ApplicationIsBorderless && gLoadScreenBitmap != NULL) {","splash kept until WM_SIZE")
+    if winmain.count("::DeleteObject(gLoadScreenBitmap);") != 3:
+        raise RuntimeError("splash: esperado liberar a imagem em 3 lugares (WM_SIZE, tela cheia, saída)")
+    checks["splash_own_size"]="PASS"
 
     loc=code/"Data/PortugueseBrazil"
     miss_core=[x for x in CORE_LOCALE_FILES if not (loc/x).is_file()]

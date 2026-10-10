@@ -25,6 +25,8 @@ O que a edição PT-BR muda no jogo, e a chave do `Options.ini` que volta ao com
 - nomes das IAs do lobby traduzidos;
 - abre direto pelo `generals.exe`: desde a 2.4.0 o executável do upstream só abre pelo launcher
   dele, que o build PT-BR não inclui.
+- tela de abertura no tamanho do `Install_Final.bmp` e mostrada também em tela cheia sem bordas e
+  em janela até o jogo assumir (do commit ce074230 do fork 600rr, que o upstream não tem).
 
 Os resultados do runner ficam em `PTBR/PTBR_STAGE15_RESULTS/`.
 

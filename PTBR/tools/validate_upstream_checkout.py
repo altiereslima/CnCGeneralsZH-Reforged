@@ -178,6 +178,12 @@ def validate(repo):
     need(winmain, LAUNCHER_CHECK, "WinMain.cpp launcher start check")
     result["checks"]["launcher_check_anchor"] = "PASS"
 
+    # Stage 18: the splash at its own size, and kept up in borderless and windowed.
+    from apply_stage18 import ANCHORS
+    for name, anchor in ANCHORS.items():
+        need(winmain, anchor, f"WinMain.cpp splash: {name}")
+    result["checks"]["splash_anchors"] = "PASS"
+
     result["status"] = "PASS"
     return result
 
