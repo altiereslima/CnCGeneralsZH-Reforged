@@ -182,6 +182,9 @@ def validate(repo):
     from apply_stage18 import ANCHORS
     for name, anchor in ANCHORS.items():
         need(winmain, anchor, f"WinMain.cpp splash: {name}")
+    from apply_stage18 import CMAKE_SPLASH_COPY
+    cmake = (code/"CMakeLists.txt").read_text(encoding="utf-8-sig")
+    need(cmake, CMAKE_SPLASH_COPY, "CMakeLists.txt copies Install_Final.bmp next to the exe")
     result["checks"]["splash_anchors"] = "PASS"
 
     result["status"] = "PASS"

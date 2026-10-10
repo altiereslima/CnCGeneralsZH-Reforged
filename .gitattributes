@@ -35,3 +35,4 @@ PTBR/payload/**/*.bik binary
 PTBR/payload/**/*.BIK binary
 PTBR/payload/**/*.dds binary
 PTBR/payload/**/*.tga binary
+PTBR/payload/**/*.bmp binary

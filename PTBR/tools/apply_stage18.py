@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import shutil
 import sys
 
 # Tela de abertura (o splash do Install_Final.bmp), trazida do commit ce074230 do fork 600rr
@@ -11,6 +12,9 @@ import sys
 #   Install_Final.bmp maior que o original;
 # - mantém o splash pintado também no modo sem bordas e em janela até o WM_SIZE em que o motor toma
 #   a janela, e só então solta a imagem (ou ao sair, se o motor nunca chegou a redimensionar).
+#
+# A imagem é a da edição: PTBR/payload/GeneralsMD/Code/Data/Install_Final.bmp, widescreen, entra
+# no lugar da do upstream em Data/, de onde o CMake a copia para o lado do generals.exe.
 
 def fail(msg):
     raise SystemExit("STAGE18: " + msg)
@@ -21,6 +25,13 @@ def replace_once(path, old, new):
     if n != 1:
         fail(f"{path}: esperado 1 bloco, encontrado {n}")
     path.write_text(text.replace(old, new, 1), encoding="utf-8", newline="")
+
+# A cópia do CMake que leva Data/Install_Final.bmp para o Run; o validador confere.
+CMAKE_SPLASH_COPY = (
+    "  COMMAND ${CMAKE_COMMAND} -E copy_if_different\n"
+    "          ${CMAKE_CURRENT_SOURCE_DIR}/Data/Install_Final.bmp\n"
+    "          ${CMAKE_CURRENT_SOURCE_DIR}/../Run/\n"
+)
 
 # Âncoras do WinMain.cpp do upstream; o validador confere cada uma.
 RESIZE = (
@@ -149,8 +160,14 @@ def main():
         "\n"
         "}  // end WinMain\n")
 
+    # 8) A imagem da edição no lugar da do upstream.
+    src = Path(__file__).resolve().parents[1] / "payload" / "GeneralsMD" / "Code" / "Data" / "Install_Final.bmp"
+    if not src.is_file():
+        fail(f"{src}: imagem de abertura da edição ausente")
+    shutil.copyfile(src, code / "Data" / "Install_Final.bmp")
+
     print("STAGE18 APPLY PASS")
-    print("Splash at Install_Final.bmp's own size, kept up in borderless and windowed until W3D takes over.")
+    print("The edition's widescreen splash, at its own size, kept up in borderless and windowed until W3D takes over.")
 
 if __name__ == "__main__":
     main()

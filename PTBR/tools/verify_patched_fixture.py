@@ -120,6 +120,9 @@ def main():
     need(winmain,"if (!ApplicationIsWindowed && !ApplicationIsBorderless && gLoadScreenBitmap != NULL) {","splash kept until WM_SIZE")
     if winmain.count("::DeleteObject(gLoadScreenBitmap);") != 3:
         raise RuntimeError("splash: esperado liberar a imagem em 3 lugares (WM_SIZE, tela cheia, saída)")
+    splash=Path(__file__).resolve().parents[1]/"payload/GeneralsMD/Code/Data/Install_Final.bmp"
+    if (code/"Data/Install_Final.bmp").read_bytes()!=splash.read_bytes():
+        raise RuntimeError("missing postcondition: Data/Install_Final.bmp is not the edition's splash")
     checks["splash_own_size"]="PASS"
 
     loc=code/"Data/PortugueseBrazil"
