@@ -4,20 +4,20 @@ import json
 import sys
 
 EXPECTED_SNAPSHOT = {
-    "head_commit": "9e8c16a9d71b3c474db0316f9bdd553b0fb83b4d",
+    "head_commit": "b37515b18ab42d8f0de2dffd0677139ea521730a",
     "files": {
-        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "1648b675ce4fd5a6e3fd21c6f0992c3dcf4de1b7",
-        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "28bbaf40b334f1e74dded8e8ca701ee9842c4db6",
-        "GeneralsMD/Code/GameEngine/Source/GameClient/GameText.cpp": "f719f81e6cb6692218643b53a73b74a2cd2900b4",
-        "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "bf71a99673c5a64d93d954bcd350902becb0c199",
-        "GeneralsMD/Code/Data/Patch.str": "7f24144a9e2cbf221d548338c6e0747b87cacb6e",
-        "GeneralsMD/Code/GameEngine/Source/GameClient/GlobalLanguage.cpp": "02e3fd0fc5c8da55e8b6097ebc25aad51fcd7673",
+        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h": "cf0d0f7a8973a1d7ca6a36cf3976fb7d815f796d",
+        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp": "71d6ee0abdeff73a40d9d441c541cc713c377027",
+        "GeneralsMD/Code/GameEngine/Source/GameClient/GameText.cpp": "65b9ba48b394d50d73e8d5680820025a25eaad42",
+        "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/OptionsMenu.cpp": "0129b74c930e3538ff47aee72800b2eb27dc0117",
+        "GeneralsMD/Code/Data/Patch.str": "8bc1ecb0f0e53e44a8d07cca5df55b75e01aa932",
+        "GeneralsMD/Code/GameEngine/Source/GameClient/GlobalLanguage.cpp": "1af8f15c265e1204b74b087bab3f9d16d9821224",
         "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DFileSystem.cpp": "61b3a14c2a46b3f297a1535f04b9f581d2d26269",
-        "GeneralsMD/Code/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp": "725e18cc231d4d75ab2df60231132fef95e4c05e",
-        "GeneralsMD/Code/CMakeLists.txt": "11bdfdb0735a8e58dcd2ee77581ea3bf366fe5ce",
+        "GeneralsMD/Code/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp": "58f7fc0edbffd43a88b280fb28356fc77af67fe7",
+        "GeneralsMD/Code/CMakeLists.txt": "02ff9ab366d0a4114b298977c0c71265f0714432",
         "GeneralsMD/Code/GameEngine/Include/Common/AsciiString.h": "3b58ca6b46023845e48daa5d0afc4488f2a2e066",
         "GeneralsMD/Code/GameEngine/Include/Common/Debug.h": "c097a75346d7f14e1288b3d36636c9ada3ded623",
-        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "883df15d19200d27e6042a0d8475979a7956ee18",
+        "GeneralsMD/Code/GameEngine/Source/Common/OptionsCatalog.cpp": "9a9e1cb21b77dc022d02b05d4dff408db560b49d",
     }
 }
 
@@ -145,7 +145,8 @@ def validate(repo):
     if '{ "ShowNetBox",' not in catalog or "OPT_WND( \"CheckNetBox\" )" not in catalog:
         raise RuntimeError("OptionsCatalog.cpp: ShowNetBox sem a caixa de seleção CheckNetBox no menu")
     test = (code/"Tests/test_gameengine.cpp").read_text(encoding="utf-8-sig")
-    need(test, "\tCHECK( scratch->m_showNetBox );\n\t// the older plate's own switch", "test_gameengine net box default check")
+    from apply_stage13 import NETBOX_TEST
+    need(test, NETBOX_TEST, "test_gameengine net box default check")
     result["checks"]["net_box_anchors"] = "PASS"
 
     # Stage 14: lobby AI difficulty names.
@@ -156,20 +157,21 @@ def validate(repo):
     need(info, "\t\tcase SLOT_BRUTAL_AI:\t\treturn UnicodeString( u\"Hard AI\" );\n", "GameInfo.cpp Hard AI")
     result["checks"]["ai_rung_name_anchors"] = "PASS"
 
-    # Stage 16: the Classic interface is upstream's now; check it still does what the edition had
-    # done for itself up to 2.4, and anchor the one thing it still adds, the button markings.
-    unconditional(cpp, "\tm_interfaceStyle = INTERFACE_STYLE_CLASSIC;\n", "GlobalData.cpp Classic is the interface without -interface")
-    ui = (code/"GameEngine/Source/GameClient/InGameUI.cpp").read_text(encoding="utf-8-sig")
-    need(ui, "\t// the Classic interface is EA's, and every page here has EA's windows, or nothing, to fall back on\n\tif( TheGlobalData->isClassicUI() )\n\t\treturn;\n", "InGameUI.cpp Classic skips every HTML page")
+    # The edition's classic look. Up to 2.4 the edition built it itself, in 2.5 and 2.6 it was
+    # upstream's Classic interface plus stage 16's button markings, and since 3.0 upstream has one
+    # interface only, laid out as Zero Hour shipped, with no HTML pages. Check it stays that way: an
+    # interface choice coming back would need the edition to pick the classic one again.
+    header = (code/"GameEngine/Include/Common/GlobalData.h").read_text(encoding="utf-8-sig")
+    if "INTERFACE_STYLE" in header or "isClassicUI" in header:
+        raise RuntimeError("GlobalData.h: o upstream voltou a ter escolha de interface; a edição precisa escolher a clássica de novo")
+    if (code/"GameEngine/Include/GameClient/HtmlOverlay.h").exists():
+        raise RuntimeError("HtmlOverlay.h: as páginas HTML voltaram ao upstream")
+    # and 1.04's mouse when generals.exe starts without the launcher's -mouse
+    unconditional(cpp, "\tm_mouseStyle = MOUSE_STYLE_CLASSIC;\n", "GlobalData.cpp Classic mouse without -mouse")
     quit_menu = (code/"GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/QuitMenu.cpp").read_text(encoding="utf-8-sig")
     need(quit_menu, 'TheTransitionHandler->reverse( quitMenuLayout == noSaveLoadQuitMenuLayout ? "QuitNoSaveBack" : "QuitFullBack" );', "QuitMenu.cpp EA's closing transitions")
     radar = (code/"GameEngine/Source/Common/System/Radar.cpp").read_text(encoding="utf-8-sig")
-    need(radar, "TheControlBar->triggerRadarAttackGlow();", "Radar.cpp Classic under-attack blink")
-    button = (code/"GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DPushButton.cpp").read_text(encoding="utf-8-sig")
-    need(button, "#include \"Common/GlobalData.h\"\n", "W3DPushButton.cpp GlobalData include")
-    need(button, "extern Real ControlBarHudScale( void );\n", "W3DPushButton.cpp HUD scale declaration")
-    from apply_stage16 import BADGE_SCALE_USES
-    need(button, "designPoints * ControlBarHudScale()", "W3DPushButton.cpp markings measured by the bar's scale", BADGE_SCALE_USES)
+    need(radar, "TheControlBar->triggerRadarAttackGlow();", "Radar.cpp EA's under-attack blink")
     result["checks"]["classic_interface_anchors"] = "PASS"
 
     # Stage 17: generals.exe starts without upstream's launcher.

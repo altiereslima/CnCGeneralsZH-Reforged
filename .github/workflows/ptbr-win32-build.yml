@@ -170,8 +170,7 @@ jobs:
           Requires a legally owned Zero Hour installation: copy these files over a Reforged
           install, or put Zero Hour's *.big next to generals.exe and the base game's *.big
           in ZH_Generals\. Start generals.exe directly: this edition does not go through the
-          Reforged launcher. It opens in the Classic interface; add -interface reforged to the
-          shortcut for the Reforged one. Of the game's data only the PT-BR text and the Brazilian
+          Reforged launcher. The interface is Zero Hour's own layout. Of the game's data only the PT-BR text and the Brazilian
           edition's videos and victory/defeat screens ship here. Sound and video run through the FFmpeg
           DLLs included; mss32.dll and binkw32.dll are not used by the 64-bit build.
           Install_Final.bmp is the edition's widescreen opening splash; it replaces the one

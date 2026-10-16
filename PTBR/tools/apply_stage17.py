@@ -34,12 +34,14 @@ def main():
     if not code.exists():
         fail("aponte para a raiz de CnCGeneralsZH-Reforged")
 
+    # Vem depois do 14: o 15 é o runner, e o 16 (os números dos botões da barra Classic) saiu na
+    # 3.0, quando o upstream ficou com uma interface só.
     sys.path.insert(0, str(Path(__file__).parent))
-    import apply_stage16
+    import apply_stage14
     old_argv = sys.argv[:]
     try:
         sys.argv = [str(Path(__file__)), str(repo)]
-        apply_stage16.main()
+        apply_stage14.main()
     finally:
         sys.argv = old_argv
 

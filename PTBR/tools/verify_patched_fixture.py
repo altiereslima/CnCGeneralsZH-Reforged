@@ -99,14 +99,9 @@ def main():
         need(ptbr,f"\n{label}\n",f"{label} translation")
     checks["ai_rung_names"]="PASS"
 
-    # the Classic interface is upstream's (Classic without -interface); the edition adds the markings
-    unconditional(cpp,"\tm_interfaceStyle = INTERFACE_STYLE_CLASSIC;\n","Classic interface by default in every build")
+    # one interface since upstream 3.0, laid out as Zero Hour shipped; nothing of the edition's own
     if '{ "ClassicInterface",' in catalog:
-        raise RuntimeError("the edition's own ClassicInterface key is back beside upstream's Classic")
-    button=(code/"GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DPushButton.cpp").read_text(encoding="utf-8")
-    need(button,"TheGlobalData->isClassicUI() )\n\t\treturn ControlBarUniformScale();","Classic bar's markings at the uniform scale")
-    if "designPoints * ControlBarHudScale()" in button or "designPoints * badgeBarScale()" not in button:
-        raise RuntimeError("missing postcondition: every marking measured by badgeBarScale")
+        raise RuntimeError("the edition's own ClassicInterface key is back")
     checks["classic_interface"]="PASS"
 
     winmain=(code/"Main/WinMain.cpp").read_text(encoding="utf-8")

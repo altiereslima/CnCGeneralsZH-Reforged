@@ -8,12 +8,18 @@ import sys
 # Desde a v2.3.0 o upstream deu à caixa uma chave própria, com controle no menu de opções:
 # ShowNetBox ("Info Box" desde a 2.6). A edição PT-BR só muda o padrão para desligado;
 # marcar a opção no menu, ou "ShowNetBox = yes" no Options.ini, traz a caixa de volta. Desde a
-# 2.5 isso vale para a interface Reforged (-interface reforged): a Classic do upstream, a que a
-# edição abre, segue o HUD da EA, sem caixa no canto e sem essa opção no menu dela.
+# 3.0 o upstream tem uma interface só, no layout do Zero Hour, e ela desenha a caixa.
 #
 # Até a v2.2.1 a edição fazia isso com ShowHudOverlay = FALSE e uma linha ShowHudOverlay própria
 # no catálogo. O upstream agora exige que essa linha não exista (ela voltaria a ler um "no" antigo
 # do Options.ini), e com ela o menu mostraria a opção nova marcada sem caixa nenhuma na tela.
+
+# O teste do upstream que lê o padrão da caixa e a desliga pela opção; o validador confere.
+NETBOX_TEST = (
+    "\tCHECK( scratch->m_showNetBox );\n"
+    "\tdef->set( 0 );\n"
+    "\tCHECK( !scratch->m_showNetBox );\n"
+)
 
 def fail(msg):
     raise SystemExit("STAGE13: " + msg)
@@ -53,10 +59,12 @@ def main():
     test = code / "Tests" / "test_gameengine.cpp"
     replace_once(
         test,
-        "\tCHECK( scratch->m_showNetBox );\n"
-        "\t// the older plate's own switch",
+        NETBOX_TEST,
         "\tCHECK( !scratch->m_showNetBox );\t// PT-BR edition: off until the player ticks it\n"
-        "\t// the older plate's own switch",
+        "\tdef->set( 1 );\n"
+        "\tCHECK( scratch->m_showNetBox );\n"
+        "\tdef->set( 0 );\n"
+        "\tCHECK( !scratch->m_showNetBox );\n",
     )
 
     print("STAGE13 APPLY PASS")
