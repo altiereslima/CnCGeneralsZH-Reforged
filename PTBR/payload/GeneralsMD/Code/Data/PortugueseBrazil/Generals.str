@@ -95,7 +95,7 @@ ACADEMY:ResearchUpgrades
 END
 
 ACADEMY:SpendGeneralsPoints
-"Derrotar inimigos rende experiência e libera Pontos dos Generais. Abra o painel de promoções e use esses pontos para desbloquear novos poderes e habilidades estratégicas."
+"A guerra traz espólios. Cada inimigo destruído aproxima você de novos Pontos dos Generais. Gaste-os clicando no botão de estrela à direita da barra de comando. Abra o menu de Pontos dos Generais e invista os pontos conquistados com tanto esforço em novos brinquedos de guerra."
 END
 
 ACADEMY:StealthUpgrade
@@ -135,11 +135,11 @@ ACADEMY:UseGuardAbility
 END
 
 ACADEMY:UseSecondaryIncomeMethods
-"Quando os suprimentos do mapa começam a acabar, use as fontes alternativas de renda da sua facção. A China pode usar Hackers e a Central da Internet, o E.L.G. conta com Mercados Negros e os EUA podem construir estruturas de abastecimento aéreo."
+"General, conseguir suprimentos pode ficar difícil mais adiante na missão. Cada facção tem o seu jeito de ganhar dinheiro em batalhas longas. A China pode construir Hackers e uma Central da Internet: os Hackers podem roubar dinheiro da internet em qualquer lugar, ou ir para a Central da Internet para ganhar dinheiro ainda mais rápido. O E.L.G. conta com o Mercado Negro e os EUA, com a Zona de Abastecimento Aéreo. Quem não planeja com antecedência corre o risco de ficar sem recursos."
 END
 
 ACADEMY:UseSelectionHotkeys
-"As teclas de seleção permitem comandar o exército com mais rapidez. Use os atalhos disponíveis para selecionar unidades do mesmo tipo ou grandes grupos de combate sem precisar procurá-los manualmente pelo mapa."
+"General, as teclas de atalho são uma ótima forma de controlar melhor suas tropas. \"E\" seleciona todas as unidades do mesmo tipo na tela. Pressione \"E\" duas vezes rapidamente para selecionar todas as unidades do mesmo tipo em todo o campo de batalha. \"Q\" seleciona todas as suas unidades de combate no mapa. \"W\" seleciona todas as suas unidades aéreas no mapa. Experimente: elas vão ajudar."
 END
 
 ACADEMY:UseTunnelNetwork
@@ -371,7 +371,7 @@ CONTROLBAR:AirF_ToolTipUSABuildAurora
 END
 
 CONTROLBAR:AirF_ToolTipUSABUildChinook
-"Helicóptero de Transporte de Assalto. Coleta suprimentos. Trabalho com os Soldados em Lançamentos de Combate"
+"Helicóptero de Transporte de Assalto. Coleta suprimentos. Realiza a Invasão de Combate com os Rangers"
 END
 
 CONTROLBAR:AirF_ToolTipUSABuildStealthFighter
@@ -1403,7 +1403,7 @@ CONTROLBAR:Lazr_ConstructAmericaTankCrusader
 END
 
 CONTROLBAR:Lazr_ToolTipUSABuildCrusader
-"Eficiente contra veículos e edifícios \n Vulnerável a aeronaves e infantarias armadas com mísseis"
+"Eficiente contra veículos e edifícios \n Vulnerável a aeronaves e infantaria com mísseis"
 END
 
 CONTROLBAR:Lazr_ToolTipUSABuildPatriotBattery
@@ -1479,7 +1479,7 @@ CONTROLBAR:Nuke_ConstructChinaVehicleListeningOutpost
 END
 
 CONTROLBAR:Nuke_TooltipCarpetBomb
-"Lança bombas nucleares em uma área-alvo \n \n contagem Regressiva: 3:00"
+"Lança bombas nucleares em uma área-alvo \n \n Contagem Regressiva: 3:00"
 END
 
 CONTROLBAR:Nuke_ToolTipChinaBuildHelix
@@ -1827,7 +1827,7 @@ CONTROLBAR:ToolTipChinaBuildECM
 END
 
 CONTROLBAR:ToolTipChinaBuildEmperor
-"Eficiente contra veículos e edifícios \n Vulnerável a aeronaves e infantarias armadas com mísseis"
+"Eficiente contra veículos e edifícios \n Vulnerável a mísseis e aeronaves"
 END
 
 CONTROLBAR:ToolTipChinaBuildGattlingCannon
@@ -1919,7 +1919,7 @@ CONTROLBAR:ToolTipChinaBuildTankHunter
 END
 
 CONTROLBAR:ToolTipChinaBuildTroopCrawler
-"Unidade de transporte. É construído com 8 Guardas Vermelhos em seu interior. Detecta unidades camufladas. \n \n Eficiente contra Infantaria, Estruturas \n Vulnerável contra Tanques, Aeronaves"
+"Veículo de transporte. Vem com 8 Guardas Vermelhos. Detecta unidades camufladas. \n \n Eficiente contra Infantaria, Estruturas \n Vulnerável contra Tanques, Aeronaves"
 END
 
 CONTROLBAR:ToolTipChinaBuildWarFactory
@@ -2011,11 +2011,11 @@ CONTROLBAR:ToolTipChinaScienceEMPPulse
 END
 
 CONTROLBAR:ToolTipChinaScienceFrenzy
-"Suas unidades causam mais danos por algum tempo quando miram o alvo. \n \n Patente 1: 10% para 10 segundos Patente 2: 20% para 20 segundos \n Patente 3: 30% para 30 segundos \n \n Ordenado por: Centro de Comando"
+"Suas unidades causam mais danos por algum tempo quando miram o alvo. \n \n Patente 1: 10% por 10 segundos \n Patente 2: 20% por 20 segundos \n Patente 3: 30% por 30 segundos \n \n Ordenado por: Centro de Comando"
 END
 
 CONTROLBAR:ToolTipChinaScienceGattlingTankTraining
-"Todos os Tanques Gattlin são criados como armas de elite"
+"Todos os Tanques Gattling são produzidos como unidades de elite"
 END
 
 CONTROLBAR:ToolTipChinaScienceInfantryParadrop
@@ -2043,11 +2043,11 @@ CONTROLBAR:ToolTipChinaScienceTankHunterTraining
 END
 
 CONTROLBAR:ToolTipChinaScienceTankParadrop
-"Lança Battlemasters pelo ar. \n \n Patente 1: 1 Battlemasters \n Patente 2: 2 Battlemasters \n Patente 3: 4 Battlemasters \n \n Ordenado por: Centro de Comando"
+"Lança Battlemasters pelo ar. \n \n Patente 1: 1 Battlemaster \n Patente 2: 2 Battlemasters \n Patente 3: 4 Battlemasters \n \n Ordenado por: Centro de Comando"
 END
 
 CONTROLBAR:TooltipChinaUpgradeAircraftArmor
-"Aumenta em +25% a blindagem dos MiG."
+"+25% de vida para os MiGs."
 END
 
 CONTROLBAR:TooltipChinaUpgradeBlackNapalm
@@ -2239,7 +2239,7 @@ CONTROLBAR:TooltipFireSpyDrone
 END
 
 CONTROLBAR:TooltipFireSpySatScan
-"Revela a área selecionada e unidades camufladas. \n \n Contagem Regressiva: 1:30"
+"Revela a área selecionada e unidades camufladas. \n \n Contagem Regressiva: 1:00"
 END
 
 CONTROLBAR:TooltipFireSuperWeaponCashHack
@@ -2343,7 +2343,7 @@ CONTROLBAR:ToolTipGLABuildRebel
 END
 
 CONTROLBAR:ToolTipGLABuildRocketBuggy
-"Veículo veloz para ataques em qualquer terreno. \n \n Eficiente contra Estruturas, Infantaria \n Vulnerável contra Tanques, Aeronaves"
+"Veículo veloz para ataques em qualquer terreno. \n \n Eficiente contra Estruturas \n Vulnerável contra Tanques, Aeronaves"
 END
 
 CONTROLBAR:ToolTipGLABuildRPGTrooper
@@ -2811,11 +2811,11 @@ CONTROLBAR:ToolTipUSABuildDozer
 END
 
 CONTROLBAR:ToolTipUSABuildFireBase
-"Sistema de defesa terrestre. Protegido por quatro infantarias"
+"Sistema de defesa terrestre. Pode abrigar quatro soldados de infantaria"
 END
 
 CONTROLBAR:ToolTipUSABuildFuelAirAurora
-"O ataque supersônico torna o Aurora imune aos disparos inimigos enquanto lança uma pequena bomba termobárica. Após o ataque supersônico, o Aurora reduz em 50% a velocidade \n \n Eficiente contra estruturas \n Vulnerável contra bombardeiros e unidades antiaéreas"
+"O ataque supersônico torna o Aurora imune aos disparos inimigos enquanto lança uma pequena bomba termobárica. Após o ataque supersônico, a velocidade do Aurora cai para 50% \n \n Eficiente contra estruturas \n Vulnerável contra bombardeiros e unidades antiaéreas"
 END
 
 CONTROLBAR:ToolTipUSABuildHellfireDrone
@@ -3047,7 +3047,7 @@ CONTROLBAR:TooltipUSAUpgradeSentryDroneGun
 END
 
 CONTROLBAR:TooltipUSAUpgradeSupplyLines
-"Os recursos reúnem mecanismos para produzir um adicional de 10%"
+"Os coletores de suprimentos trazem 10% a mais"
 END
 
 CONTROLBAR:TooltipUSAUpgradeTOW
@@ -4278,6 +4278,10 @@ CREDITS:Writer
 "Escritor"
 END
 
+DIALOGEVENT:01_AllCheerSoundSubtitle
+"<Comemoração>"
+END
+
 DOZER:ConstructionComplete
 "Construção Concluída: %s"
 END
@@ -4367,7 +4371,7 @@ FTP:UnknownError
 END
 
 GC_CHINABOSS:Hint
-"RECEBENDO TRANSMISSÃO: \n Destruindo os bunkers com armas do inimigo todos os contadores das Superarmas serão zerados."
+"RECEBENDO TRANSMISSÃO: \n Destruir os bunkers de armas inimigos zera os contadores de todas as superarmas."
 END
 
 GC_CHINABOSS:Loc
@@ -4543,7 +4547,7 @@ GUI:ArchiveReplays
 END
 
 GUI:AreYouSureCopy
-"Você tem certeza de que deseja copiar este arquivo para sua Área de Trabalho? Esta ação reescreverá qualquer arquivo com o mesmo nome no local."
+"Você tem certeza de que deseja copiar este arquivo para sua Área de Trabalho? Um arquivo com o mesmo nome será substituído."
 END
 
 GUI:AreYouSureDelete
@@ -5515,7 +5519,7 @@ GUI:ControlOptions
 END
 
 GUI:CopyFileToDesktop
-"Copiar Replay?"
+"Copiar Replay para a Área de Trabalho?"
 END
 
 GUI:CopyReplay
@@ -5739,7 +5743,7 @@ GUI:Description
 END
 
 GUI:DesyncText
-"O C&C Generals Zero Hour perdeu a sincronização com os outros participantes. É possível que algum jogador esteja usando uma versão diferente ou modificada do jogo. A partida não pode continuar."
+"O C&C Generals Zero Hour perdeu a sincronização com os outros participantes. É possível que algum jogador esteja usando uma versão diferente ou modificada do jogo. A partida não pode continuar, mas você pode colocar esses jogadores na sua Lista de Ignorados pelo Comunicador, se não quiser mais jogar com eles."
 END
 
 GUI:DesyncTitle
@@ -5911,7 +5915,7 @@ GUI:ErrorStartingGame
 END
 
 GUI:ESRB_Bottom
-"*"
+"A experiência de jogo pode \n mudar no jogo online"
 END
 
 GUI:ESRB_Top
@@ -7203,7 +7207,7 @@ GUI:MaxPing
 END
 
 GUI:MaxPointPercent
-"Vitórias Permitidas:"
+"Taxa Máxima de Vitórias Permitida:"
 END
 
 GUI:MaxSelectionSize
@@ -7487,7 +7491,7 @@ GUI:Options
 END
 
 GUI:OptionsDescription
-"Configurações do jogo"
+"Abre a janela de opções do jogo."
 END
 
 GUI:OptionsGroupAddresses
@@ -8051,11 +8055,11 @@ GUI:ReturnToGame
 END
 
 GUI:SandboxMode
-"Entrando no modo tanque de areia..."
+"Entrando no modo de testes..."
 END
 
 GUI:SandboxWarning
-"Clicar em Iniciar novamente iniciará uma partida no modo tanque de areia."
+"Clicar em Iniciar novamente iniciará uma partida no modo de testes."
 END
 
 GUI:Save
@@ -8715,7 +8719,7 @@ GUI:Surrender
 END
 
 GUI:SurrenderConfirmation
-"Você tem certeza de que deseja Render-se?"
+"Você tem certeza de que deseja se render?"
 END
 
 GUI:SurrenderConfirmationTitle
@@ -9251,7 +9255,7 @@ HELP:AdvancedNuclearPower-01
 END
 
 HELP:AdvancedRods-01
-"DICA: \n Barras Avançadas fornecem mais força do que as Barras de Controle normais"
+"DICA: \n Barras de Controle Avançadas fornecem mais energia do que as Barras de Controle normais"
 END
 
 HELP:AdvancedTrap-01
@@ -9711,7 +9715,7 @@ LAN:ErrorBusy
 END
 
 LAN:ErrorCRCMismatch
-"A partida perdeu a sincronização entre os jogadores. É possível que um participante esteja usando uma versão diferente ou modificada do jogo."
+"A partida perdeu a sincronização entre os jogadores. É possível que o seu oponente tenha modificado a versão dele; talvez seja melhor colocá-lo na sua Lista de Ignorados."
 END
 
 LAN:ErrorDuplicateName
@@ -10459,11 +10463,11 @@ MAP:Demo48Open
 END
 
 MAP:Demo58End1
-"Battle Control Off-Line..."
+"Controle de Batalha Desativado..."
 END
 
 MAP:Demo58End2
-"COMMAND AND CONQUER GENERALS \n COMING: CHRISTMAS 2002"
+"COMMAND AND CONQUER GENERALS \n LANÇAMENTO: NATAL DE 2002"
 END
 
 MAP:Demo58Open
@@ -11195,7 +11199,7 @@ MAP:MD_CHI04MissionInfo5
 END
 
 MAP:MD_CHI04MissionInfo6
-"RECEBENDO TRANSMISSÃO: \n Nosso agente foi interceptado. Novos grupos estão chegando \n por duas direções, mas ainda não sabemos onde estão"
+"RECEBENDO TRANSMISSÃO: \n Nosso reconhecimento está sofrendo interferência. Novas ondas estão chegando \n por duas direções, mas ainda não sabemos onde estão"
 END
 
 MAP:MD_CHI04MissionLoseText
@@ -11283,7 +11287,7 @@ MAP:MD_GLA04Objective4
 END
 
 MAP:MD_GLA04Objective5
-"OBJETIVO DA MISSÃO: \n Destrua as Centrais de Energia"
+"OBJETIVO DA MISSÃO: \n Equipe 2: Destrua as Centrais de Energia"
 END
 
 MAP:MD_GLA04Objective6
@@ -14823,7 +14827,7 @@ SCRIPT:GLA05Directive04
 END
 
 SCRIPT:GLA05Directive05
-"ATENÇÃO: \n Aeronaves dos EUA estão a caminho. \n Use unidades antiaéreas para derrubá-las."
+"ATENÇÃO: \n Aeronaves dos EUA estão a caminho. \n Use Baterias Stinger e Canhões Quádruplos para derrubar as aeronaves inimigas."
 END
 
 SCRIPT:GLA05Objective01
@@ -14899,7 +14903,7 @@ SCRIPT:TrainingDozer
 END
 
 SCRIPT:TrainingExplor
-"A área escurecida do mapa é eliminada a medida que é explorada por suas unidades. Ela mostra por quais áreas suas forças já passaram. Explore novas áreas para encontrar as forças inimigas e também recursos para expandir seu exército."
+"A névoa de guerra ao redor das suas unidades recua à medida que você avança por áreas novas e inexploradas. A névoa mostra onde você já esteve e onde ainda não esteve. Explore novas áreas para encontrar as forças inimigas e recursos para expandir seu exército."
 END
 
 SCRIPT:TrainingMissionObjective
@@ -15163,7 +15167,7 @@ TOOLTIP:BattleHonorCampaignChallengeDisabled
 END
 
 TOOLTIP:BattleHonorCampaignChina
-"Medalha de Campanha da China\nO jogador completou a Campanha da China."
+"Medalha de Campanha da China\nConclua a Campanha da China para receber esta medalha.\nVença a campanha no Difícil para receber a medalha máxima."
 END
 
 TOOLTIP:BattleHonorCampaignChinaDisabled
@@ -15171,7 +15175,7 @@ TOOLTIP:BattleHonorCampaignChinaDisabled
 END
 
 TOOLTIP:BattleHonorCampaignGLA
-"Medalha de Campanha do E.L.G.\nO jogador completou a Campanha do E.L.G."
+"Medalha de Campanha do E.L.G.\nConclua a Campanha do E.L.G. para receber esta medalha.\nVença a campanha no Difícil para receber a medalha máxima."
 END
 
 TOOLTIP:BattleHonorCampaignGLADisabled
@@ -15179,7 +15183,7 @@ TOOLTIP:BattleHonorCampaignGLADisabled
 END
 
 TOOLTIP:BattleHonorCampaignUSA
-"Medalha de Campanha dos EUA\nO jogador completou a Campanha dos EUA"
+"Medalha de Campanha dos EUA\nConclua a Campanha dos EUA para receber esta medalha.\nVença a campanha no Difícil para receber a medalha máxima."
 END
 
 TOOLTIP:BattleHonorCampaignUSADisabled
@@ -15487,7 +15491,7 @@ TOOLTIP:ChallengeButton
 END
 
 TOOLTIP:ChatWindow
-"Digite sua mensagem no campo de texto abaixo e pressione Enter para enviá-la ao chat."
+"Digite sua mensagem no campo de texto abaixo e pressione Enter para enviá-la ao chat. Os outros jogadores podem lê-la e responder."
 END
 
 TOOLTIP:CheckAudioHardware
@@ -15591,7 +15595,7 @@ TOOLTIP:DontUseAccount
 END
 
 TOOLTIP:DoubleClickAttackMove
-"As unidades do jogador irão mover em ataque e defender a área de destino quando o botão de ação for clicado duas vezes"
+"Ao clicar duas vezes com o botão de ação, suas unidades avançam até o destino e passam a proteger a área"
 END
 
 TOOLTIP:DownloadProgress
@@ -17043,7 +17047,7 @@ WOL:CreatingChannel
 END
 
 WOL:DisconnectedError
-"Sua conta foi desconectada do C&C Generals Zero Hour Online."
+"Você foi banido do C&C Generals Zero Hour Online. Consulte os Termos de Serviço."
 END
 
 WOL:DownloadPatchNow
@@ -17323,7 +17327,7 @@ WOL:NoWOLAPI
 END
 
 WOL:OldWOLAPI
-"Os componentes de rede instalados precisam ser atualizados."
+"Os componentes de internet compartilhados precisam ser atualizados. Instale-os a partir do disco do C&C Generals Zero Hour."
 END
 
 WOL:ServerBan
