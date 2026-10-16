@@ -61,7 +61,7 @@ BunkerBusterBehaviorModuleData::BunkerBusterBehaviorModuleData( void )
 	m_upgradeRequired = NULL;
 	m_detonationFX = NULL;
   m_crashThroughBunkerFX = NULL;
-  m_crashThroughBunkerFXFrequency = 4; 
+  m_crashThroughBunkerFXFrequency = ConvertRetailFrames(4u);
   
   m_seismicEffectRadius = 140.0f;
   m_seismicEffectMagnitude = 6.0f;

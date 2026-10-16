@@ -111,15 +111,21 @@ void Upgrade::loadPostProcess( void )
 // UPGRADE TEMPLATE ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+// A map's rules file can set these.  A time past an Int of frames was a float-to-int conversion the
+// platforms answer differently (see ThingTemplate's BuildTimeRange), and a cost past an Int was
+// sscanf's undefined overflow.  Both are refused, the same way on every machine.
+static const INI::RealRange UpgradeBuildTimeRange = { 0.0f, 86400.0f };
+static const INI::IntRange UpgradeBuildCostRange = { 0, 1000000 };
+
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
-const FieldParse UpgradeTemplate::m_upgradeFieldParseTable[] = 
+const FieldParse UpgradeTemplate::m_upgradeFieldParseTable[] =
 {
 
 	{ "DisplayName",				INI::parseAsciiString,		NULL, offsetof( UpgradeTemplate, m_displayNameLabel ) },
 	{ "Type",								INI::parseIndexList,			TheUpgradeTypeNames, offsetof( UpgradeTemplate, m_type ) },
-	{ "BuildTime",					INI::parseReal,						NULL, offsetof( UpgradeTemplate, m_buildTime ) },
-	{ "BuildCost",					INI::parseInt,						NULL, offsetof( UpgradeTemplate, m_cost ) },
+	{ "BuildTime",					INI::parseRealInRange,		&UpgradeBuildTimeRange, offsetof( UpgradeTemplate, m_buildTime ) },
+	{ "BuildCost",					INI::parseIntInRange,			&UpgradeBuildCostRange, offsetof( UpgradeTemplate, m_cost ) },
 	{ "ButtonImage",				INI::parseAsciiString,		NULL, offsetof( UpgradeTemplate, m_buttonImageName ) },
 	{ "ResearchSound",			INI::parseAudioEventRTS,	NULL, offsetof( UpgradeTemplate, m_researchSound ) }, 
 	{ "UnitSpecificSound",	INI::parseAudioEventRTS,	NULL, offsetof( UpgradeTemplate, m_unitSpecificSound ) }, 
@@ -374,6 +380,9 @@ const UpgradeTemplate *UpgradeCenter::findUpgradeByKey( NameKeyType key ) const
 		if( upgrade->getUpgradeNameKey() == key )
 			return upgrade;
 
+	NameKeyType retailKey;
+	if( TheModNamespace.findRetailKey( key, MODNAME_UPGRADE, &retailKey ) )
+		return findUpgradeByKey( retailKey );
 	// item not found
 	return NULL;
 }
@@ -393,6 +402,12 @@ const UpgradeTemplate *UpgradeCenter::findUpgrade( const AsciiString& name ) con
 //-------------------------------------------------------------------------------------------------
 UpgradeTemplate *UpgradeCenter::newUpgrade( const AsciiString& name )
 {
+	// every upgrade is one bit of UpgradeMaskType; -modfactions puts every mod's beside retail's
+	if( m_nextTemplateMaskBit >= UPGRADE_MAX_COUNT )
+	{
+		DEBUG_LOG(( "Upgrade %s would be upgrade number %d, and UPGRADE_MAX_COUNT is %d\n", name.str(), m_nextTemplateMaskBit + 1, UPGRADE_MAX_COUNT ));
+		throw INI_INVALID_DATA;
+	}
 	UpgradeTemplate *newUpgrade = newInstance(UpgradeTemplate);
 
 	// copy data from the default upgrade
@@ -410,7 +425,6 @@ UpgradeTemplate *UpgradeCenter::newUpgrade( const AsciiString& name )
 	newMask.set( m_nextTemplateMaskBit );
 	//Int64 newMask = 1i64 << m_nextTemplateMaskBit;
 	m_nextTemplateMaskBit++;
-	DEBUG_ASSERTCRASH( m_nextTemplateMaskBit < UPGRADE_MAX_COUNT, ("Can't have over %d types of Upgrades and have a Bitfield function.", UPGRADE_MAX_COUNT) );
 	newUpgrade->friend_setUpgradeMask( newMask );
 
 	// link upgrade

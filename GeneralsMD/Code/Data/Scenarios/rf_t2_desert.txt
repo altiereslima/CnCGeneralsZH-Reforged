@@ -1,0 +1,45 @@
+# Trailer 2, shots 6 and 7 on Tournament Desert: hero_loop_01.txt's crossroads fight cut down to one
+# wave a side, the anthrax bomb on the crossroads, and a shop south-west of it that eight GLA Tunnel
+# Defenders hold, firing out of its windows at the American column driving south past it.
+#
+# Until 2026-10-11 the shop stood at 880,1180 on the slope down to the crossroads (its 80x80
+# footprint spanned 16.9 in height; a player could not have built there). It now stands at 1000,1150
+# (span 8.75), nothing of the map's own within 80, beside the route the American column takes from 1080,940
+# to the crossroads at 1020,1350; the map's garage at 805,1262 would have been the natural building to
+# hold, but the scenario's enter verb only finds a building a player slot owns.
+#
+#   generals.exe -win -xres 2560 -yres 1440 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Tournament Desert\Tournament Desert.map" -autoskirmish 2 -takeover
+#     -observer -side 0 FactionAmerica -side 1 FactionGLA -seed 7 -scenario rf_t2_desert
+#     -cinema rf_t2_desert -video <from> <to> rt_t2_desert -recordfps 60
+
+10    spawn  0  AmericaCommandCenter            1   start0:240:60
+10    spawn  1  GLACommandCenter                1   start1:-260:0
+
+# --- the held shop ------------------------------------------------------------------------------
+10    spawn  1  StanSmallRetail01               1   1000 1150
+20    spawn  1  GLAInfantryTunnelDefender       8   930 1150  14
+40    enter  1  GLAInfantryTunnelDefender       1   StanSmallRetail01
+
+# --- America, from the south ---------------------------------------------------------------------
+150   spawn  0  AmericaTankCrusader             14  1080 940   34
+150   spawn  0  AmericaTankPaladin              8   980 860    38
+150   spawn  0  AmericaInfantryRanger           20  1180 940   14
+150   spawn  0  AmericaVehicleHumvee            8   900 900    36
+160   attackmove 0  *  1020 1350
+
+# --- the GLA, from the north ---------------------------------------------------------------------
+150   spawn  1  GLATankScorpion                 14  1080 1720  34
+150   spawn  1  GLATankMarauder                 8   980 1800   40
+150   spawn  1  GLAVehicleRocketBuggy           8   1180 1800  32
+150   spawn  1  GLAVehicleQuadCannon            6   900 1760   36
+150   spawn  1  GLAInfantryRebel                20  1020 1880  14
+160   attackmove 1  GLATankScorpion          1020 1350
+160   attackmove 1  GLATankMarauder          1020 1350
+160   attackmove 1  GLAVehicleRocketBuggy    1020 1350
+160   attackmove 1  GLAVehicleQuadCannon     1020 1350
+160   attackmove 1  GLAInfantryRebel         1020 1350
+
+# --- powers --------------------------------------------------------------------------------------
+300   power  1  GLACommandCenter      1040 1400  SuperweaponAnthraxBomb
+420   power  0  AmericaCommandCenter  990 1330   SuperweaponA10ThunderboltMissileStrike

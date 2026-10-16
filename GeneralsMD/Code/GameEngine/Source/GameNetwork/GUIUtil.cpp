@@ -48,6 +48,8 @@
 #include "Common/PlayerTemplate.h"
 #include "GameNetwork/LANAPICallbacks.h" // for acceptTrueColor, etc
 #include "GameClient/ChallengeGenerals.h"
+#include "Common/GlobalData.h"
+#include "Lib/WideCharFns.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -326,12 +328,35 @@ void PopulatePlayerTemplateComboBox(Int comboBox, GameWindow *comboArray[], Game
 
 		AsciiString side;
 		side.format("SIDE:%s", fac->getSide().str());
-		if (seenSides.find(side) != seenSides.end())
+		// -modfactions: each mod's America is a side of its own, "<mod name> - USA"
+		AsciiString seenKey;
+		seenKey.format("%d:%s", fac->getModIndex(), side.str());
+		if (seenSides.find(seenKey) != seenSides.end())
 			continue;
 
-		seenSides.insert(side);
+		seenSides.insert(seenKey);
 
-		newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], TheGameText->fetch(side), def->getColor());
+		UnicodeString label = TheGameText->fetch(side);
+		if (fac->getModIndex() >= 0)
+		{
+			WideChar modName[128];
+			WideCharFromUtf8(TheGlobalData->m_modNames[fac->getModIndex()].str(), modName, ARRAY_SIZE(modName));
+			// the mod's own name for the faction: The End of Days' Russia sits on our China Nuke General's side
+			static const WideChar MissingLabel[] = u"MISSING";
+			const Int missingLength = ARRAY_SIZE(MissingLabel) - 1;
+			UnicodeString sideLabel = fac->getDisplayName();
+			if (sideLabel.isEmpty() || (sideLabel.getLength() >= missingLength
+				&& std::char_traits<WideChar>::compare(sideLabel.str(), MissingLabel, missingLength) == 0))
+			{
+				AsciiString modSide;
+				modSide.format("M%d~%s", fac->getModIndex() + 1, side.str());
+				sideLabel = TheGameText->fetch(modSide);
+			}
+			label = UnicodeString(modName);
+			label.concat(UnicodeString(u" - "));
+			label.concat(sideLabel);
+		}
+		newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], label, def->getColor());
 		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)(intptr_t)c);
 	}
 	seenSides.clear();
@@ -380,6 +405,8 @@ void PopulateTeamComboBox(Int comboBox, GameWindow *comboArray[], GameInfo *myGa
 // -----------------------------------------------------------------------------
 static UnicodeString formatMoneyForStartingCashComboBox( const Money & moneyAmount )
 {
+  if ( moneyAmount.countMoney() == Money::UNLIMITED )
+    return TheGameText->fetch( "GUI:StartingMoneyUnlimited" );
   UnicodeString rtn;
   rtn.format( TheGameText->fetch( "GUI:StartingMoneyFormat" ), moneyAmount.countMoney() );
   return rtn;

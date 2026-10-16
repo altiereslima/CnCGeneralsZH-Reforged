@@ -300,7 +300,7 @@ TEST(ffshadercompile_a_soft_particle_fades_into_the_scene_depth_on_d3d11_only)
 	CHECK(additive.find("SoftParticleDepth") > additive.find("BlastLightAmbient"));
 	CHECK(additive.find("register(t5)") == std::string::npos);
 	const size_t clip = additive.find("clip(");
-	const size_t fade = additive.find("current *= soft_particle_fade(input.Position);");
+	const size_t fade = additive.find("current *= soft_particle_fade(input.Position, input.Specular.a);");
 	CHECK(clip != std::string::npos);
 	CHECK(fade != std::string::npos);
 	CHECK(clip < fade);
@@ -317,7 +317,7 @@ TEST(ffshadercompile_a_soft_particle_fades_into_the_scene_depth_on_d3d11_only)
 	description.SoftParticle = SOFT_PARTICLE_ALPHA;
 	std::string smoke;
 	CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_D3D11, smoke));
-	CHECK(smoke.find("current.a *= soft_particle_fade(input.Position);") != std::string::npos);
+	CHECK(smoke.find("current.a *= soft_particle_fade(input.Position, input.Specular.a);") != std::string::npos);
 	CHECK(smoke.find("blast_reaching(input.Position)") > smoke.find("light_reaching(input.Position)"));
 
 	D3DCompileFunction compile = load_compiler();
@@ -327,4 +327,56 @@ TEST(ffshadercompile_a_soft_particle_fades_into_the_scene_depth_on_d3d11_only)
 	}
 	CHECK(compiles(compile, additive, D3D11_PROFILE));
 	CHECK(compiles(compile, smoke, D3D11_PROFILE));
+}
+
+// Each per-object look is its own program on Direct3D 11, written after the fog and declaring the
+// whole constant block up to its own field, with or without the sun's map.  Only the cloak calls
+// the function that reads the scene's copy at t8.  SDL3 and D3D9 get none of it.
+TEST(ffshadercompile_each_draw_effect_compiles_on_d3d11_only)
+{
+	D3DCompileFunction compile = load_compiler();
+	for (unsigned shadow = 0; shadow < 2; ++shadow) {
+		for (unsigned effect = DRAW_EFFECT_OUTAGE; effect < DRAW_EFFECT_COUNT; ++effect) {
+			CombinerDescription description;
+			memset(&description, 0, sizeof(description));
+			description.StageCount = 1;
+			description.Stages[0] = one_stage(D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE,
+				D3DTOP_MODULATE, D3DTA_TEXTURE, D3DTA_DIFFUSE, 0, true);
+			description.PixelPipeline.FogEnabled = true;
+			description.ShadowReceiving = shadow != 0;
+			const std::string plain_key = CombinerShader_Key(description);
+			description.DrawEffect = effect;
+			char suffix[8];
+			snprintf(suffix, sizeof(suffix), ":X%u", effect);
+			CHECK(CombinerShader_Key(description) == plain_key + suffix);
+
+			std::string eleven;
+			CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_D3D11, eleven));
+			CHECK(eleven.find("DrawEffectParameters;") > eleven.find("SoftParticleDepth;"));
+			const size_t fog = eleven.find("FogColour.rgb, current.rgb");
+			const size_t call = eleven.find("current = effect_");
+			CHECK(fog != std::string::npos);
+			CHECK(call != std::string::npos);
+			CHECK(fog < call);
+			CHECK((eleven.find("current = effect_cloak(") != std::string::npos) == (effect == DRAW_EFFECT_CLOAK));
+			if (effect == DRAW_EFFECT_CLOAK) {
+				// solid=1 must be the unit's own paint, or cloak-in pops to a muted body
+				CHECK(eleven.find("lerp(muted, current.rgb, solid)") != std::string::npos);
+			}
+
+			std::string sdl;
+			std::string nine;
+			CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_SDL3_GPU, sdl));
+			CHECK(CombinerShader_Generate(description, COMBINER_SHADER_TARGET_D3D9, nine));
+			CHECK(sdl.find("effect_") == std::string::npos);
+			CHECK(nine.find("effect_") == std::string::npos);
+
+			if (compile != NULL) {
+				CHECK(compiles(compile, eleven, D3D11_PROFILE));
+			}
+		}
+	}
+	if (compile == NULL) {
+		printf("  d3dcompiler_47.dll not present, skipping the compile\n");
+	}
 }

@@ -1,0 +1,13 @@
+# Scenarios/looks4.txt, the amber half of the cloak: the GLA Radar Van spawned at frame 360 reaches
+# the own Colonel Burton near 1250,3690 around frame 790 (he ends his walk at 1337,3668), so this
+# list stays on him from 18 s to 30 s. -video 540 900.
+
+17.5  cut      1195 3664 0.5 180 2
+17.5  follow   SupW_AmericaInfantryColonelBurton
+21.0  shot
+24.0  shot
+26.0  shot
+27.0  shot
+28.0  shot
+29.0  shot
+30.0  end

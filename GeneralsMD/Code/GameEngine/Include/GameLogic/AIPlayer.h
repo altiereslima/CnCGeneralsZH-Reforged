@@ -45,6 +45,7 @@ class BuildListInfo;
 // this header used to compile only behind whoever happened to include Team.h first
 class TeamPrototype;
 class TeamTemplateInfo;
+class ProductionUpdateInterface;
 
 /// the skirmish scripts send this team at the enemy at some point, rather than keeping it home on guard
 Bool aiTeamAttacks(const TeamTemplateInfo *info);
@@ -179,6 +180,11 @@ public:
 		* frame by AI::update; empty outside a logging build. */
 	static void resetFrameProfile( void );
 	static const char *getProfileReport( void );
+
+	/** Empty the unit-against-unit tables from the last match and, when a skirmish AI plays this one,
+		* fill them for every unit the sides in it can build, so the first team choice does not pay for
+		* them mid-match.  Called by GameLogic::startNewGame once the map's INI and the players are in. */
+	static void prepareMatchupTables( void );
 
 	/** Base building is the expensive job once the expansion convoy is out of the way, and it is a
 		* loop over the build list that calls several searches per entry. These name which one.
@@ -338,6 +344,36 @@ protected:
 		* that, with no clock; as many superweapons as the game's rules allow, and a few copies of the
 		* tech building so one of them blowing up leaves the tree standing. */
 	virtual void doSuperweapons(void);
+	void doParticleBeams(void);	///< drive a firing Particle Cannon's beam onto the richest ground within reach of it
+	Bool richestGroundNear(const Coord3D *spot, Real radius, Coord3D *aim);	///< that ground, FALSE when there is nothing worth moving to
+
+	/** The purchase queue (AIPurchaseQueue): every skirmish spender asks before it pays, on every rung
+		* with a bank target, and the thing at the top that cannot be afforded yet has the money saved for
+		* it.  Off, every ask is yes and the engine's own money check decides, as before. */
+	Bool purchaseQueueOn(void);
+
+	/** The spend rule, on every rung with a bank target.  Measures the income, and with the bank past
+		* aiBankTarget spends what is over it: upgrades at half the payoff, extra units from idle factories
+		* within aiSurplusBudget, and another factory when the bank has not come down over an income window
+		* (aiWantsMoreProduction).  Upgrades that pay for the army are bought below the target as well,
+		* through the purchase queue. */
+	void doSpending(void);
+	Int bankTarget(void);																	///< what the bank keeps, from the income measured last
+	void buyUpgradesForArmy(Bool overTarget);								///< the player upgrade the standing army gets the most out of
+	void addProductionForIncome(Int bank, Int bankWindowAgo, Int target);	///< another factory, while what stands does not bring the bank down
+	void trainSurplus(Int budget);												///< a unit from each idle factory, within budget
+	Int					m_incomeMark;						///< money earned in all, when the income was last measured ...
+	UnsignedInt	m_incomeMarkFrame;			///< ... and the frame, 0 for never
+	Int					m_bankMark;							///< ... and the bank then
+	Real				m_incomePerSecond;			///< smoothed over the windows measured so far
+	Int					m_startFortune;					///< what the match started with over the default starting cash, 0 at the default
+	Bool purchaseAllowed(Int key, Int cost, AIPurchaseKind kind, Bool startable, const AsciiString &what);
+	void purchased(Int key, Int cost, AIPurchaseKind kind, const AsciiString &what);
+	Bool buyUnit(ProductionUpdateInterface *pu, const ThingTemplate *unit, AIPurchaseKind kind);	///< queueCreateUnit through the queue
+	Bool buyUpgrade(ProductionUpdateInterface *pu, const UpgradeTemplate *upgrade);								///< queueUpgrade through the queue
+	static AIPurchaseKind purchaseKindOf(const ThingTemplate *tmpl);
+	AIPurchaseQueue	m_purchases;
+	AsciiString			m_purchaseSavingFor;	///< the reserved item's name, for the log only
 
 	Bool enemyDirection(Coord3D *dir);	///< unit vector from this base towards the nearest enemy's best known address
 	Bool isHeldExpansion(const Object *warehouse);	///< our supply center stands at it, and it is nearer our base than any enemy's
@@ -357,7 +393,8 @@ protected:
 	AsciiString secondApproachLabel(const Coord3D *from, const AsciiString &taken, Int pathSuffix);	///< the quietest other road, or empty
 	Bool loadGunships(void);	///< infantry boards the transports it can shoot out of: the wave's anything at home, a team's its own; TRUE while a firing gunship is still filling
 	Int buyGunshipRiders(Int freeSeats);	///< Medium and up train the men for the firing seats nobody fills; how many are in training
-	void garrisonBuildings(void);	///< the home guard's infantry into our own buildings it shoots out of and the empty ones at home
+	void garrisonBuildings(void);	///< infantry into our own buildings it shoots out of, and into empty ones with an enemy near, at home and at the front
+	void evacuateBuildings(void);	///< our men out of a building about to fall, and out of a neutral one once no enemy is near
 	void buyGunshipChinook(void);	///< Medium and up buy a supply-center transport the riders shoot out of, as a gunship
 	void doShuttles(void);	///< the transport Chinooks load at home, fly the wave's ground units to its road and come back
 	void buyTransportChinook(void);	///< one more transport Chinook while the last wave needs more lift than there is
@@ -376,7 +413,7 @@ protected:
 	void steerHealer(Int slot, const std::vector<AIKnownGun> &guns);	///< a healer over our hurt behind the line, clear of every known gun
 	void flyRaid(Int slot, const std::vector<AIKnownGun> &guns);	///< a raider's bomb run on an enemy building, in and out the quiet side
 	Bool pickRaidTarget(const Object *raider, const std::vector<AIKnownGun> &guns, Object **target, Coord3D *entry, Int *gunsOnRun) const;
-	Coord3D rearOf(const Coord3D *from, const std::vector<AIKnownGun> &guns) const;	///< the nearest point toward home no known gun reaches
+	Coord3D rearOf(const Coord3D *from, const std::vector<AIKnownGun> &guns, Real margin) const;	///< the nearest point toward home no known gun reaches by margin
 	Bool isGunshipRider(const Object *obj) const;	///< infantry loadGunships may put in a transport
 	void sendIdleAttackTeams(void);	///< attack teams standing at home join the next wave instead of waiting for the script's signal
 	Real addHomeStrays(AIGroup *wave) const;	///< the default team's fighters idle at home go with the wave
@@ -410,7 +447,8 @@ protected:
  	/** These two read another player's estate.  observerNdx is who is allowed to know: pass a
  		* player index and only what that player can see (or, for a building, has ever seen) is
  		* counted; -1 keeps the omniscient answer for a caller that is not a player's own thinking. */
- 	static Int getPlayerSuperweaponValue( Coord3D *center, Int playerNdx, Real radius, Bool includeMilitaryUnits = TRUE, Int observerNdx = -1 );
+ 	static Int getPlayerSuperweaponValue( Coord3D *center, Int playerNdx, Real radius, Bool includeMilitaryUnits = TRUE, Int observerNdx = -1,
+																				Real economyWeight = 0.0f );
 // End of aiplayer interface. 
 
 protected:
@@ -421,6 +459,7 @@ protected:
 protected:
 	Int computeStructureDelay( void );	///< frames to wait before trying the next structure
 	Int computeTeamDelay( void );				///< frames to wait before trying the next team
+	Int hoardThreshold( void );					///< bank that speeds the two delays up; skirmish AI only
 
 public:
 	/// the arithmetic behind the two above, free of the Player so a test can reach it
@@ -442,6 +481,8 @@ public:
 	Bool isDutyChinook( const Object *obj ) const;	///< either of those, which the gatherer counts leave out
 	Bool isDutyHelix( const Object *obj ) const;	///< a Helix this AI bought to heal or to raid, which nothing else gives orders
 	Bool isDutyAmbulance( const Object *obj ) const;	///< an Ambulance this AI bought to follow the army, which nothing else gives orders
+	Bool isWalkingToAmbulance( const Object *obj ) const;	///< a patient on its way into a duty Ambulance, which nothing else gives orders either
+	Bool isOutToMend( const Object *obj ) const;	///< a pulled-out veteran or a patient, out of its team until releaseMended frees it
 protected:
 
 	/**
@@ -467,6 +508,7 @@ protected:
 
 	/// what a superweapon aimed here is worth, with the shots already on their way taken off
 	Int superweaponScore( Coord3D *center, Int playerNdx, Real radius, Bool targetMilitaryUnits );
+	Real strikeEconomyWeight( void );	///< the rung's m_strikeEconomyWeight for a skirmish AI, 0 for a campaign one
 	void noteSuperweaponAim( const Coord3D *pos );	///< remember a spot, so the next shot goes elsewhere
 
 protected:
@@ -531,9 +573,28 @@ protected:
 	{
 		ObjectID		id;					///< INVALID_ID for a free slot
 		Coord3D			spot;				///< where it was last sent
+		Coord3D			seen;				///< for the log only, not saved: where it stood on the last pass
+		Real				seenHealth;	///< for the log only, not saved: its health share on the last pass
+		Real				seenReach;	///< for the log only, not saved: how deep inside a known gun's reach it stood, negative when clear
+		Int					pullbacks;	///< for the log only, not saved: pull-back orders this one was given
+		Int					holds;			///< for the log only, not saved: looks it wanted to pull back and found no clearer ground
 	};
 	enum { MAX_DUTY_AMBULANCES = 2 };
 	DutyAmbulance	m_ambulance[ MAX_DUTY_AMBULANCES ];
+	UnsignedInt		m_ambulanceLost;		///< the frame the last duty Ambulance was lost, 0 for never
+	Int				m_ambulancesBought;	///< duty Ambulances that came out this match
+	/// for the log only, not saved: each patient an Ambulance called in, until it is let out, dies or walks off
+	struct CalledPatient
+	{
+		ObjectID		id;
+		ObjectID		ambulance;
+		UnsignedInt	frame;
+		Real				health;
+		Real				distance;
+		Bool				inside;
+	};
+	std::vector<CalledPatient>	m_calledPatients;
+	void followPatients(void);
 	Int					m_healerSeconds;		///< for the log only, not saved: healer seconds counted, and those clear of the nearest gun's reach
 	Int					m_healerClearSeconds;
 	Int				m_captureTimer;					///< frames until the next look for something to capture
@@ -611,6 +672,10 @@ protected:
 	void updatePressure(void);
 	void sendIdleUnitsHunting(void);							///< attack units idle at the end of their road, and the guards once the enemy is finished
 	Bool holdsTeamsForWaves(void) const;					///< this rung parks attack teams at the current level
+	Bool readyToPush(void);												///< the economy is in and the opening is over: attack teams may leave home
+	Bool waveGoes(Real power, UnsignedInt heldFrames);	///< what is parked, worth this, leaves now
+	void buyEarlyIncome(void);										///< the first drop zone and black market, ahead of the army
+	void keepSiegeBehind(void);										///< artillery out with a wave trails its front unit
 	Bool leavesToFinish(const Object *obj) const;	///< a fighter the last push takes off guard, as against a worker or a scout
 	/** Every enemy unit this AI has seen and not since lost track of: what it was, whose, and where and
 		* when it was last in sight.  An army that walks back into the fog is still an army.  A row goes when
@@ -683,6 +748,7 @@ protected:
 	Real fightRatio(const Coord3D *centre, Bool countHolders, Real *enemyHealth, Real *enemyPower, std::vector<Real> *enemyGuns);	///< the exchange around centre, by the units in it when the rung weighs them
 	Bool doFallback(Team *team);		///< TRUE when it sent the team's holders back or home on this pass
 	void pullOutRanked(Team *team, Bool inFight, Real ratio);	///< veterans and up leave earlier than the team, to a repair or heal pad
+	void releaseMended(void);		///< pulled-out veterans and let-out patients standing idle again become recruitable
 	void stepCalmly(Object *obj, TacticalStep *step, const Coord3D *spot);	///< a move the unit's mood cannot turn into an attack move
 	void restoreMood(Object *obj, TacticalStep *step);
 	Bool pickTacticalSpot(const Object *obj, const Coord3D *from, const Coord3D *awayFrom, Real distance,

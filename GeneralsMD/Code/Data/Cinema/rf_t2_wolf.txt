@@ -1,0 +1,14 @@
+# Trailer 2, timeline.t2.js rows 03 and 04: Scenarios/rf_t2_wolf.txt on Winter Wolf (command line
+# there). Zoom is relative to the observer's opening view, about 1.17 absolute on this build.
+#
+# Row 03, frames 100 to 330: low and close on the road at 1110,650, six Overlords and four Gattlings
+# filling the frame as they spread off the road toward the fight, firing from about 270. Until
+# 2026-10-11 the column stopped at 1100,930 and sat along the top of the frame while one Crusader
+# crossed the bare road; aimed at 1100,820 the new column still sat in the top third over empty snow.
+# Row 04, frames 330 to 540: rf_snow's fight from the north-east, heading 135, the A-10 strike
+# (called on frame 300) bursting across the line from about frame 376.
+
+3.0   cut     1110 650 0.45 180 16
+3.5   shot
+11.0  cut     1100 1120 0.6 135 12
+11.5  shot

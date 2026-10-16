@@ -62,13 +62,35 @@ class Money : public Snapshot
 
 public:
 
-	inline Money() : m_money(0), m_playerIndex(0)
+	/** The lobby's "Unlimited" starting cash rides the game options as this amount, and a player who
+		starts with it holds it for the whole match: withdraw pays without taking and deposit adds
+		nothing. */
+	enum { UNLIMITED = 10000000 };
+
+	inline Money() : m_money(0), m_playerIndex(0), m_unlimited(FALSE)
+	{
+	}
+
+	/// an amount with no audio or player behind it, for lists built before either exists
+	explicit Money( UnsignedInt amount ) : m_money(amount), m_playerIndex(0), m_unlimited(FALSE)
 	{
 	}
 
 	void init()
 	{
 		m_money = 0;
+		m_unlimited = FALSE;
+	}
+
+	/// a starting cash of UNLIMITED becomes a purse that never runs out
+	void applyUnlimited()
+	{
+		m_unlimited = ( m_money == UNLIMITED );
+	}
+
+	inline Bool isUnlimited() const
+	{
+		return m_unlimited;
 	}
 
 	inline UnsignedInt countMoney() const 
@@ -100,6 +122,7 @@ private:
 
 	UnsignedInt m_money;	///< amount of money
 	Int m_playerIndex;	///< what is my player index?
+	Bool m_unlimited;	///< the match's starting cash was Unlimited: m_money never moves
 };
 
 #endif // _MONEY_H_

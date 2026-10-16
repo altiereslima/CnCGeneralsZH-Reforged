@@ -1,0 +1,20 @@
+# Trailer 2, shots 11, 12 and 15: Scenarios/rf_t2_wall.txt on Fallen Empire (command line there).
+# Zoom is relative to the observer's opening view, about 1.28 absolute on this build.
+#
+# The Great Wall has no gap to drive through: it runs unbroken across the map at y 1250, so the
+# Overlords drive along its north foot instead. hero_loop_02's wide cut (1390,1250 at relative 4.2)
+# drew nothing at all, and relative 3.0 at pitch -8 put black sky past the map edge over the top half,
+# so every view here stands on the ground beside the wall.
+#
+# 3 s, frames 90 to 350: the wall's north foot from the west, low, looking east along it, Chinese
+#   infantry and armour on the left, the wall across the frame on the right.
+# 12 s, frames 360 to 470: the wall from the north-east, higher, China's napalm (called on 330)
+#   burning on the American side of it.
+# 16 s, frames 480 to 590: the foot again, closer, for the Overlords driving west along it.
+# 20 s, frames 600 to 710: China's carpet bomb (called on 200) going off along the wall.
+
+3.0   cut     1300 1330 1.0 -90 20
+3.5   shot
+12.0  cut     1650 1250 2.0 135 -12
+16.0  cut     1350 1340 0.8 -90 22
+20.0  cut     1200 1330 1.2 -90 20

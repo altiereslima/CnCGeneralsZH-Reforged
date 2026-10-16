@@ -611,7 +611,7 @@ public:
 	Real calcMaxHealth( void ) const;
 
 	/// Used only by Skirmish AI. Everyone else should call calcCostToBuild.
-	Int friend_getBuildCost() const { return m_buildCost; }
+	Int friend_getBuildCost() const { return getBuildCost(); }
 
 	const AsciiString& getDefaultOwningSide() const { return m_defaultOwningSide; }
 
@@ -654,8 +654,10 @@ protected:
 	// these are NOT publicly available; you should call calcCostToBuild() or calcTimeToBuild() 
 	// instead, because they will take player handicaps into account.
 	//
-	Int getBuildCost() const { return m_buildCost; }
-	Real getBuildTime() const { return m_buildTime; }
+	// Through the final override: a command button and a build list hold the base template, and a
+	// map.ini's BuildCost showed in the tooltip and the sell price but was never charged.
+	Int getBuildCost() const { return ((const ThingTemplate *)getFinalOverride())->m_buildCost; }
+	Real getBuildTime() const { return ((const ThingTemplate *)getFinalOverride())->m_buildTime; }
 	const PerUnitSoundMap* getAllPerUnitSounds( void ) const { return &m_perUnitSounds; }
 	void validateAudio();
 	const AudioEventRTS* getAudio(ThingTemplateAudioType t) const { return m_audioarray.m_audio[t] ? &m_audioarray.m_audio[t]->m_event : &s_audioEventNoSound; }

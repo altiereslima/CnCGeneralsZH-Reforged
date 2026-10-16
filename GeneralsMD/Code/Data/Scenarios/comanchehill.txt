@@ -1,0 +1,35 @@
+# A Comanche over the edge of a plateau firing down on a tank column below it, the way a player
+# reported losing armies: the Comanche saw and shot the tanks, and the tanks could neither see nor
+# shoot it, because the plateau hid the ground cells it hovered over from anything below them and
+# the attack states ran the terrain line of sight to a flyer. Two Gattling tanks are the anti-air
+# that should take it down; the Battlemasters are what it kills meanwhile.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -maxframes 2400
+#     -scenario comanchehill -logPrefix comanchehill_
+#
+# Seat 0's base plateau on this map ends at x 1100 (UI-MAP.md, the looks4 row); the Comanche spawns
+# 150 back from the edge over it and the column 200 out from the edge on the low ground. Read the
+# Comanche's tally against the Gattlings': before the fix the Comanche ends at full health with the
+# Battlemasters dead and the Gattlings never firing; after it the Gattlings shoot it down. If the
+# spawns refuse as cliff or the Comanche closes out over the low ground, move the two x values
+# along the edge before trusting either result.
+
+30    spawn      1  ChinaTankBattleMaster     3   1300 3200  40
+30    spawn      1  ChinaTankGattling         2   1300 3300  40
+30    spawn      0  AmericaVehicleComanche    1   950 3250
+31    stance     1  *                             aggressive
+60    attack     0  AmericaVehicleComanche    1  ChinaTankBattleMaster
+60    tally      0  AmericaVehicleComanche
+60    tally      1  ChinaTankBattleMaster
+60    tally      1  ChinaTankGattling
+300   tally      0  AmericaVehicleComanche
+300   tally      1  ChinaTankBattleMaster
+300   tally      1  ChinaTankGattling
+600   tally      0  AmericaVehicleComanche
+600   tally      1  ChinaTankBattleMaster
+600   tally      1  ChinaTankGattling
+1150  tally      0  AmericaVehicleComanche
+1150  tally      1  ChinaTankBattleMaster
+1150  tally      1  ChinaTankGattling

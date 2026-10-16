@@ -127,6 +127,7 @@ struct MouseIO
 
 	Int wheelPos;  /**< mouse wheel position, 0 is no event, + is up/away from
 								 user while - is down/toward user */
+	Int sideButton;  ///< a side button went down: +1 forward (X2), -1 back (X1), 0 none
 	ICoord2D deltaPos;  ///< overall change in mouse pointer this frame
 
 	MouseButtonState leftState;					// button state: Up, Down, DoubleClick (Which is also down)
@@ -411,8 +412,6 @@ protected:
 	UnsignedInt m_stillTime;
 	RGBAColorInt m_tooltipTextColor;
 	RGBAColorInt m_tooltipBackColor;
-	Bool m_tooltipHasAccent;												///< the tooltip came with a colour, its owner's
-	RGBColor m_tooltipAccent;												///< that colour as it came, before the INI's alt colour rules
 
 	Int m_eventsThisFrame;
 

@@ -38,6 +38,7 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "GameLogic/Module/CreateModule.h"
 #include "GameLogic/Module/OpenContain.h"
+#include "GameLogic/CaveSystem.h"
 
 struct Sound;
 class Team;
@@ -53,13 +54,15 @@ public:
 		m_caveIndexData = 0;// By default, all Caves will be grouped together as number 0
 	}
 
-	static void buildFieldParse(MultiIniFieldParse& p) 
+	static void buildFieldParse(MultiIniFieldParse& p)
 	{
     OpenContainModuleData::buildFieldParse(p);
 
-		static const FieldParse dataFieldParse[] = 
+		// a map's rules file can redefine a cave, and the index becomes a vector slot
+		static const INI::IntRange caveIndexRange = { 0, MAX_CAVE_INDEX_COUNT - 1 };
+		static const FieldParse dataFieldParse[] =
 		{
-			{ "CaveIndex", INI::parseInt, NULL, offsetof( CaveContainModuleData, m_caveIndexData ) },
+			{ "CaveIndex", INI::parseIntInRange, &caveIndexRange, offsetof( CaveContainModuleData, m_caveIndexData ) },
 			{ 0, 0, 0, 0 }
 		};
     p.add(dataFieldParse);

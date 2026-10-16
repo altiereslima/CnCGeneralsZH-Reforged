@@ -237,6 +237,12 @@ void AudioManager::init()
 	ini.load( AsciiString( "Data\\INI\\Default\\Voice.ini" ), INI_LOAD_OVERWRITE, NULL );
 	ini.load( AsciiString( "Data\\INI\\Voice.ini" ), INI_LOAD_OVERWRITE, NULL );
 
+	// -modfactions: each mod's own events under "M<n>~" names; AudioSettings and MiscAudio stay ours
+	INI::loadModPasses( "Data\\INI\\Music.ini", NULL );
+	INI::loadModPasses( "Data\\INI\\SoundEffects.ini", NULL );
+	INI::loadModPasses( "Data\\INI\\Speech.ini", NULL );
+	INI::loadModPasses( "Data\\INI\\Voice.ini", NULL );
+
 	// do the miscellaneous sound files last so that we find the audioeventrts associated with the events.
 	ini.load( AsciiString( "Data\\INI\\MiscAudio.ini" ), INI_LOAD_OVERWRITE, NULL);
 	
@@ -288,6 +294,18 @@ void AudioManager::postProcessLoad()
 //-------------------------------------------------------------------------------------------------
 void AudioManager::reset()
 {
+	// Sounds, dialogue and music a map.ini redefined go back to the game's own, in place, because
+	// every AudioEventRTS that played one holds the pointer; backwards, so map.ini then solo.ini on
+	// the same event ends at the first.  A voice line's length is what a script waiting on it counts,
+	// so this is not only what the next match sounds like.  An event the map added stays: the next
+	// definition starts again from the default event, as a new one would.
+	for (Int i = (Int)m_beforeMapOverrides.size() - 1; i >= 0; --i)
+	{
+		*m_beforeMapOverrides[i].first = *m_beforeMapOverrides[i].second;
+		m_beforeMapOverrides[i].second->deleteInstance();
+	}
+	m_beforeMapOverrides.clear();
+
 	// clear out any adjusted volumes we might have set.
 	m_adjustedVolumes.clear();
 
@@ -882,6 +900,20 @@ AudioEventInfo *AudioManager::newAudioEventInfo( AsciiString audioName )
 }
 
 //-------------------------------------------------------------------------------------------------
+Bool AudioManager::rememberEventBeforeMapINI( AsciiString eventName )
+{
+	// the same lookup newAudioEventInfo makes, so this keeps the event the parse will write over
+	AudioEventInfo *live = findAudioEventInfo(eventName);
+	if (live == NULL)
+		return FALSE;
+
+	AudioEventInfo *copy = newInstance(AudioEventInfo);
+	*copy = *live;
+	m_beforeMapOverrides.push_back(std::make_pair(live, copy));
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
 // Add an AudioEventInfo structure allocated elsewhere to the audio event list
 void AudioManager::addAudioEventInfo( AudioEventInfo * newEvent )
 {
@@ -904,7 +936,8 @@ AudioEventInfo *AudioManager::findAudioEventInfo( AsciiString eventName ) const
 	AudioEventInfoHash::const_iterator it;
 	it = m_allAudioEventInfo.find(eventName);
 	if (it == m_allAudioEventInfo.end()) {
-		return NULL;
+		AsciiString retailName;
+		return TheModNamespace.findRetailName(eventName, MODNAME_AUDIOEVENT, &retailName) ? findAudioEventInfo(retailName) : NULL;
 	}
 
 	return (*it).second;

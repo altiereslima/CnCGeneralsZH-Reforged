@@ -43,6 +43,7 @@ XferLoad::XferLoad( void )
 
 	m_xferMode = XFER_LOAD;
 	m_fileFP = NULL;
+	m_fileSize = 0;
 
 }  // end XferLoad
 
@@ -91,7 +92,27 @@ void XferLoad::open( AsciiString identifier )
 
 	}  // end if
 
+	fseek( m_fileFP, 0, SEEK_END );
+	m_fileSize = ftell( m_fileFP );
+	fseek( m_fileFP, 0, SEEK_SET );
+
 }  // end open
+
+//-------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+void XferLoad::requireBytesLeft( Int dataSize )
+{
+
+	if( dataSize < 0 || dataSize > m_fileSize - ftell( m_fileFP ) )
+	{
+
+		DEBUG_LOG(( "XferLoad - %d bytes asked for at offset %ld of the %ld in '%s'\n",
+								dataSize, ftell( m_fileFP ), m_fileSize, m_identifier.str() ));
+		throw XFER_READ_ERROR;
+
+	}  // end if
+
+}  // end requireBytesLeft
 
 //-------------------------------------------------------------------------------------------------
 /** Close our current file */
@@ -129,13 +150,10 @@ Int XferLoad::beginBlock( void )
 
 	// read block size
 	XferBlockSize blockSize;
-	if( fread( &blockSize, sizeof( XferBlockSize ), 1, m_fileFP ) != 1 )
-	{
-		
-		DEBUG_CRASH(( "Xfer - Error reading block size for '%s'\n", m_identifier.str() ));
-		return 0;
+	xferImplementation( &blockSize, sizeof( XferBlockSize ) );
 
-	}  // end if
+	// callers allocate and skip by it, so a block reaching past the end of the file is a broken save
+	requireBytesLeft( blockSize );
 
 	// return the block size
 	return blockSize;
@@ -160,9 +178,7 @@ void XferLoad::skip( Int dataSize )
 	DEBUG_ASSERTCRASH( m_fileFP != NULL, ("XferLoad::skip - file pointer for '%s' is NULL\n",
 										 m_identifier.str()) );
 
-	// sanity
-	DEBUG_ASSERTCRASH( dataSize >=0, ("XferLoad::skip - dataSize '%d' must be greater than 0\n",
-										 dataSize) );
+	requireBytesLeft( dataSize );
 
 	// skip datasize in the file from the current position
 	if( fseek( m_fileFP, dataSize, SEEK_CUR ) != 0 )

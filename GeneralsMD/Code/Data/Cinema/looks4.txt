@@ -1,0 +1,50 @@
+# Scenarios/looks4.txt on Twilight Flame: the four Direct3D 11 object looks of 528b9054 in one GLA
+# raid on the Superweapon General's base, paired with the same run under -d3d9 for the before.
+# -video 45 1650. Heading 135 looks south-west: screen up is about (-0.6,-0.8) on the map and
+# screen right (-0.8,0.6). Heading 180 looks along -y, so Burton walking east crosses to the left.
+# Negative pitch looks further down; zoom 0.28 at pitch 12 put Burton's legs alone in the frame.
+#
+#  1.5 s  the own Colonel Burton walking out of the base, close; he cloaks about 2.7 s
+#  8.0 s  out to play zoom on him
+# 12.5 s  back in; the GLA Radar Van driving in finds him, the amber rim
+# 18.5 s  Jarmen Kell along the north edge of the base, found by the Spy Drone
+# 27.0 s  the raid from the south-east into the EMP Patriots
+# 37.5 s  the power plant at 857,2708 as the RPG troopers bring it down
+# 43.0 s  the Patriots without power
+# 46.0 s  the second wave sitting disabled near 1250,3480 after the spheres stopped
+
+1.5   cut      760 3668 0.5 180 2
+1.5   follow   SupW_AmericaInfantryColonelBurton
+4.0   shot
+7.0   shot
+8.0   zoom     1.1 2
+8.0   pitch    0 2
+11.0  shot
+12.5  zoom     0.5 2
+12.5  pitch    2 2
+15.0  shot
+16.5  shot
+18.0  shot
+18.5  follow   GLAInfantryJarmenKell
+18.5  zoom     0.42 1
+18.5  pitch    6 1
+18.5  angle    135 1
+21.0  shot
+24.0  shot
+27.0  unfollow
+27.0  cut      1150 3420 0.6 135 12
+32.5  shot
+34.5  shot
+37.5  cut      930 2930 0.8 135 10
+40.0  shot
+42.5  shot
+43.0  cut      1025 3360 0.45 135 14
+43.0  orbit    10 3
+44.5  shot
+46.0  cut      1190 3545 0.45 135 10
+46.0  orbit    8 9
+47.0  shot
+49.0  shot
+51.0  shot
+53.0  shot
+55.0  end

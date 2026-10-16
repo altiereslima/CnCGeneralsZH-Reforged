@@ -548,6 +548,11 @@ void DataChunkTableOfContents::read( ChunkInputStream &s)
 
 	for( i=0; i<count; i++ )
 	{
+		// the count is the file's word; a table that runs off the end of the file leaves the
+		// header unopened below either way, so stop instead of allocating up to two billion names
+		if (s.eof())
+			break;
+
 		// allocate new id mapping
 		m = newInstance(Mapping);
 
@@ -751,6 +756,10 @@ AsciiString DataChunkInput::openDataChunk(DataChunkVersionType *ver )
 	if (this->atEndOfFile()) {
 		return (AsciiString(""));
 	}
+	// A chunk is nested whole inside its parent.  One that claims more than the parent has left, or
+	// a negative size, would have every read past it land in the parent's next chunk.
+	if (c->dataSize < 0 || (c->next && c->next->dataLeft < c->dataSize))
+		throw ERROR_CORRUPT_FILE_FORMAT;
 	return m_contents.getName( c->id );
 }
 
@@ -858,38 +867,53 @@ void DataChunkInput::decrementDataLeft( Int size )
 	// The sizes of the parent chunks on the stack are adjusted in closeDataChunk.
 }
 
-Real DataChunkInput::readReal(void) 
-{ 
-	Real r;
-	DEBUG_ASSERTCRASH(m_chunkStack->dataLeft>=sizeof(Real), ("Read past end of chunk."));
-	m_file->read( (char *)&r, sizeof(Real) ); 
-	decrementDataLeft( sizeof(Real) );
-	return r; 
-}
-
-Int DataChunkInput::readInt(void) 
-{ 
-	Int i;
-	DEBUG_ASSERTCRASH(m_chunkStack->dataLeft>=sizeof(Int), ("Read past end of chunk."));
-	m_file->read( (char *)&i, sizeof(Int) ); 
-	decrementDataLeft( sizeof(Int) );
-	return i; 
-}
-
-Byte DataChunkInput::readByte(void) 
-{ 
-	Byte b;
-	DEBUG_ASSERTCRASH(m_chunkStack->dataLeft>=sizeof(Byte), ("Read past end of chunk."));
-	m_file->read( (char *)&b, sizeof(Byte) ); 
-	decrementDataLeft( sizeof(Byte) );
-	return b; 
-}
-
-void DataChunkInput::readArrayOfBytes(char *ptr, Int len) 
-{ 
-	DEBUG_ASSERTCRASH(m_chunkStack->dataLeft>=len, ("Read past end of chunk."));
-	m_file->read( ptr, len ); 
+// A map is a file anyone can hand the game.  EA only asserted here, so a release build read on past
+// the chunk into the next one, or past the end of the file, where the read copies nothing and the
+// value is whatever the stack held: a different number on every machine.  A field the chunk does
+// not have, or a file that stops short, is corrupt in every build.
+void DataChunkInput::readFromChunk( void *ptr, Int len )
+{
+	if (len < 0 || m_chunkStack->dataLeft < len)
+		throw ERROR_CORRUPT_FILE_FORMAT;
+	if (m_file->read( ptr, len ) != len)
+		throw ERROR_CORRUPT_FILE_FORMAT;
 	decrementDataLeft( len );
+}
+
+Real DataChunkInput::readReal(void)
+{
+	Real r;
+	readFromChunk( &r, sizeof(Real) );
+	return r;
+}
+
+Int DataChunkInput::readInt(void)
+{
+	Int i;
+	readFromChunk( &i, sizeof(Int) );
+	return i;
+}
+
+Byte DataChunkInput::readByte(void)
+{
+	Byte b;
+	readFromChunk( &b, sizeof(Byte) );
+	return b;
+}
+
+void DataChunkInput::readArrayOfBytes(char *ptr, Int len)
+{
+	readFromChunk( ptr, len );
+}
+
+// A count is what a parser sizes an allocation from before it reads the items, so a count the
+// chunk cannot hold is refused before anything is allocated for it.
+Int DataChunkInput::readCount(Int bytesEach)
+{
+	Int count = readInt();
+	if (count < 0 || count > m_chunkStack->dataLeft / bytesEach)
+		throw ERROR_CORRUPT_FILE_FORMAT;
+	return count;
 }
 
 NameKeyType DataChunkInput::readNameKey(void)
@@ -908,11 +932,8 @@ NameKeyType DataChunkInput::readNameKey(void)
 
 Dict DataChunkInput::readDict() 
 { 
-	UnsignedShort len;	
-	DEBUG_ASSERTCRASH(m_chunkStack->dataLeft>=sizeof(UnsignedShort), ("Read past end of chunk."));
-	m_file->read( &len, sizeof(UnsignedShort) );
-	decrementDataLeft( sizeof(UnsignedShort) );
-	DEBUG_ASSERTCRASH(m_chunkStack->dataLeft>=len, ("Read past end of chunk."));
+	UnsignedShort len;
+	readFromChunk( &len, sizeof(UnsignedShort) );
 
 	Dict d(len);
 
@@ -953,16 +974,12 @@ Dict DataChunkInput::readDict()
 
 AsciiString DataChunkInput::readAsciiString(void) 
 { 
-	UnsignedShort len;	
-	DEBUG_ASSERTCRASH(m_chunkStack->dataLeft>=sizeof(UnsignedShort), ("Read past end of chunk."));
-	m_file->read( &len, sizeof(UnsignedShort) );
-	decrementDataLeft( sizeof(UnsignedShort) );
-	DEBUG_ASSERTCRASH(m_chunkStack->dataLeft>=len, ("Read past end of chunk."));
+	UnsignedShort len;
+	readFromChunk( &len, sizeof(UnsignedShort) );
 	AsciiString theString;
 	if (len>0) {
 		char *str = theString.getBufferForRead(len);
-		m_file->read( str, len );
-		decrementDataLeft( len );
+		readFromChunk( str, len );
 		// add null delimiter to string.  Note that getBufferForRead allocates space for terminating null.
 		str[len] = '\000';
 	}
@@ -972,16 +989,12 @@ AsciiString DataChunkInput::readAsciiString(void)
 
 UnicodeString DataChunkInput::readUnicodeString(void) 
 { 
-	UnsignedShort len;	
-	DEBUG_ASSERTCRASH(m_chunkStack->dataLeft>=sizeof(UnsignedShort), ("Read past end of chunk."));
-	m_file->read( &len, sizeof(UnsignedShort) );
-	decrementDataLeft( sizeof(UnsignedShort) );
-	DEBUG_ASSERTCRASH(m_chunkStack->dataLeft>=len, ("Read past end of chunk."));
+	UnsignedShort len;
+	readFromChunk( &len, sizeof(UnsignedShort) );
 	UnicodeString theString;
 	if (len>0) {
 		WideChar *str = theString.getBufferForRead(len);
-		m_file->read( (char*)str, len*sizeof(WideChar) );
-		decrementDataLeft( len*sizeof(WideChar) );
+		readFromChunk( str, len*sizeof(WideChar) );
 		// add null delimiter to string.  Note that getBufferForRead allocates space for terminating null.
 		str[len] = '\000';
 	}

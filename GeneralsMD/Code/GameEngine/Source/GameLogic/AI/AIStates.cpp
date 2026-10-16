@@ -906,8 +906,12 @@ StateReturnType AIStateMachine::updateStateMachine()
 
 			return status;
 		}
-		m_temporaryState->onExit(EXIT_NORMAL);
-		m_temporaryState = NULL;
+		// the state's own update can clear() the machine, which already exited and dropped it
+		if (m_temporaryState)
+		{
+			m_temporaryState->onExit(EXIT_NORMAL);
+			m_temporaryState = NULL;
+		}
 	}
 	StateReturnType retType = StateMachine::updateStateMachine();
 
@@ -1557,7 +1561,7 @@ StateReturnType AIDeadState::update()
 		{
 			// we want 'em to stop, but looks wonky if they stop dead in their tracks in onEnter.
 			// this slows 'em down quickly 
-			const Real FACTOR = 0.8f;	// 0.8 ^ 30 == 0.012, so they slow to 4% of speed over 1 sec
+			const Real FACTOR = ConvertRetailPerFrameFactor( 0.8f );	// 0.8 ^ 30 == 0.012 a second, so they slow to 4% of speed over 1 sec
 			Real vel = phys->getVelocityMagnitude();
 			phys->scrubVelocity2D(vel * FACTOR);
 		}
@@ -3278,7 +3282,7 @@ StateReturnType AIPickUpCrateState::onEnter()
 	}
 	setAdjustsDestination(true);
 	m_goalPosition = *goalObj->getPosition();
-	m_delayCounter = 3;
+	m_delayCounter = ConvertRetailFrames( 3 );
 	return STATE_CONTINUE;
 
 }
@@ -5124,7 +5128,7 @@ StateReturnType AIWanderState::onEnter()
 		m_groupOffset.y = GameLogicRandomValue(-delta, delta)*PATHFIND_CELL_SIZE_F;
 	}
 	m_timer = 0;
-	m_waitFrames = 10 + (getMachineOwner()->getID() & 0x7);
+	m_waitFrames = ConvertRetailFrames( (Int)(10 + (getMachineOwner()->getID() & 0x7)) );
 	// set initial movement goal
 	computeGoal(false);
 	StateReturnType ret = AIInternalMoveToState::onEnter();
@@ -5249,7 +5253,7 @@ StateReturnType AIWanderInPlaceState::onEnter()
 	m_goalPosition.x += offset.x;
 	m_goalPosition.y += offset.y;
 	m_timer = 0;
-	m_waitFrames = 10 + (getMachineOwner()->getID() & 0x7);
+	m_waitFrames = ConvertRetailFrames( (Int)(10 + (getMachineOwner()->getID() & 0x7)) );
 	StateReturnType ret = AIInternalMoveToState::onEnter();
 	return ret;
 }
@@ -5360,7 +5364,7 @@ StateReturnType AIPanicState::onEnter()
 	StateReturnType ret = AIInternalMoveToState::onEnter();
 
 	m_timer = 0;
-	m_waitFrames = 10 + (getMachineOwner()->getID() & 0x7);
+	m_waitFrames = ConvertRetailFrames( (Int)(10 + (getMachineOwner()->getID() & 0x7)) );
 	// Update the extra path distance.   AIInternalMoveToState::onEnter resets it.
 	ai->setPathExtraDistance(calcExtraPathDistance());
 	if (obj)
@@ -5929,6 +5933,40 @@ static Bool isWaitingForPassengerTurn(const Object *passenger, const Weapon *wea
 
 //----------------------------------------------------------------------------------------------------------
 /**
+ * After a shot this state hands back to aiming, which hands back here a frame later, and a weapon not
+ * ready yet goes round again: a shot can only come on every second frame after the last.  Retail ran
+ * that loop at 30 Hz, so its weapons fired on a grid of two retail frames, and a 100 msec Quad Cannon
+ * (3 frames) fired every 4, 0.133 s.  At 60 Hz the same loop is a grid of two logic frames, half as
+ * coarse, and the gun fired every 0.100 s.  Holding the next shot to the next point of the retail grid
+ * puts every weapon this state fires back on its retail frames.  Weapons fired elsewhere (FireWeaponUpdate,
+ * a point defense laser) never had the loop and keep their delays as they are.
+ */
+static void holdToRetailFireCycle( Object *obj, const Weapon *fired )
+{
+	const UnsignedInt now = TheGameLogic->getFrame();
+	if( fired->getLastShotFrame() != now )
+		return;
+
+	// every slot that fired this frame (linked turrets fire them all), and every slot a shared reload
+	// stamped; rounding a frame already on the grid leaves it there, so a slot met twice is no matter
+	const UnsignedInt CYCLE = 2 * LOGICFRAMES_PER_RETAIL_FRAME;
+	const Bool shared = obj->isReloadTimeShared();
+	for( Int slot = PRIMARY_WEAPON; slot < WEAPONSLOT_COUNT; ++slot )
+	{
+		Weapon *each = obj->getWeaponInWeaponSlot( (WeaponSlotType)slot );
+		if( !each || ( !shared && each->getLastShotFrame() != now ) )
+			continue;
+		const UnsignedInt next = each->getPossibleNextShotFrame();
+		// empty for good: privateFireWeapon parks it at 0x7fffffff
+		if( next >= 0x7fffffff )
+			continue;
+		const UnsignedInt wait = next > now ? next - now : 0;
+		each->setPossibleNextShotFrame( now + max( CYCLE, ( wait + CYCLE - 1 ) / CYCLE * CYCLE ) );
+	}
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
  * Fire the owner's weapon once and exit.
  */
 
@@ -6071,7 +6109,9 @@ StateReturnType AIAttackFireWeaponState::update()
 		// clear this, just in case.
 		obj->clearStatus( MAKE_OBJECT_STATUS_MASK( OBJECT_STATUS_IGNORING_STEALTH ) );
 	}
-		
+
+	holdToRetailFireCycle( obj, weapon );
+
 	m_att->notifyFired();
 
 	return STATE_SUCCESS;

@@ -39,6 +39,11 @@ class TunnelTracker; // The player owns one such object for his Tunnels, so inst
 #include "Common/Snapshot.h"
 #include "Common/SubsystemInterface.h"
 
+// The index is a slot in a vector that registerNewCave pads with NULLs up to it, so a map's
+// CaveIndex or SET_CAVE_INDEX of a million allocates a million slots, and a negative one never
+// stops padding.  Retail uses a handful; xfer writes the count as an UnsignedShort.
+enum { MAX_CAVE_INDEX_COUNT = 1024 };
+
 /** 
 		System responsible for Crates as code objects - ini, new/delete etc
 */

@@ -40,13 +40,18 @@ GameMessageParser::GameMessageParser(GameMessage *msg)
 	m_first = NULL;
 	m_argTypeCount = 0;
 
-	UnsignedByte argCount = msg->getArgumentCount();
+	Int argCount = msg->getArgumentCount();
 	GameMessageArgumentDataType lasttype = ARGUMENTDATATYPE_UNKNOWN;
 	Int thisTypeCount = 0;
 
-	for (UnsignedByte i = 0; i < argCount; ++i) {
+	// The packet and the replay both write each run's count in one byte, so a run of more than
+	// 255 arguments of one type (a big selection is one ObjectID per unit) is cut into runs of
+	// 255.  Readers already walk the runs one after another, so the bytes on the wire keep
+	// their old meaning and old replays still read.
+	const Int MAX_RUN = 255;
+	for (Int i = 0; i < argCount; ++i) {
 		GameMessageArgumentDataType type = msg->getArgumentDataType(i);
-		if (type != lasttype) {
+		if (type != lasttype || thisTypeCount == MAX_RUN) {
 			if (thisTypeCount > 0) {
 				addArgType(lasttype, thisTypeCount);
 				++m_argTypeCount;

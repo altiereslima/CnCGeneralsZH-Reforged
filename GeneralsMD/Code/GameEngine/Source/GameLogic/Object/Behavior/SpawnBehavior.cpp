@@ -60,7 +60,7 @@
 
 
 
-#define SPAWN_DELAY_MIN_FRAMES (16) // about as rapidly as you'd expect people to successively exit through the same door
+#define SPAWN_DELAY_MIN_FRAMES (ConvertRetailFrames(16))// about as rapidly as you'd expect people to successively exit through the same door
 //-------------------------------------------------------------------------------------------------
 SpawnBehavior::SpawnBehavior( Thing *thing, const ModuleData* moduleData ) 
 						 : UpdateModule( thing, moduleData )
@@ -218,7 +218,7 @@ UpdateSleepTime SpawnBehavior::update( void )
 		 bar and on click-one-select-all, neither of which anybody can see. The offset is an object
 		 id, which is assigned in creation order and is identical on every machine, so this stays
 		 inside the CRC. */
-	const Int AGGREGATE_STATE_RATE = 6;
+	const Int AGGREGATE_STATE_RATE = ConvertRetailFrames(6);
 	if ( m_aggregateHealth &&
 			 ((TheGameLogic->getFrame() + (UnsignedInt)getObject()->getID()) % AGGREGATE_STATE_RATE) == 0 )
 	{

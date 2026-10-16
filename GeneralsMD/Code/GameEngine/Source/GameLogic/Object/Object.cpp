@@ -941,6 +941,9 @@ void Object::setOrRestoreTeam( Team* team, Bool restoring )
 		
 	// Switch //////////////////////////
 	m_team = team;
+	// the partition counts every cell's objects per player; move ours before anything searches
+	if (m_partitionData)
+		m_partitionData->refreshCountedPlayer();
 
 	// After Switch //////////////////////////
 	if (m_team)
@@ -1077,6 +1080,11 @@ void Object::setStatus( ObjectStatusMaskType objectStatus, Bool set )
 			}
 		}
 
+
+		// a hill hides the ground under an aircraft, not the aircraft, so taking off or landing in place
+		// changes who sees it without touching a cell
+		if( m_partitionData && m_status.test( OBJECT_STATUS_AIRBORNE_TARGET ) != oldStatus.test( OBJECT_STATUS_AIRBORNE_TARGET ) )
+			m_partitionData->invalidateShroudedStatusForAllPlayers();
 
 		// when an object's construction status changes, it needs to have its partition data updated,
 		// in order to maintain the shroud correctly.
@@ -1798,7 +1806,8 @@ inline Bool isPosDifferent(const Coord3D* a, const Coord3D* b)
 	// "standing still", due to roundoff errors. It's important that we only invalidate
 	// the PartitionManager stuff when the pos/orientation really changes (for efficiency purposes)
 	// so we must put in some cleverness...
-	const Real THRESH = 0.01f;
+	// a move per frame: scaled with the frame so the slowest mover that dirties its cells is unchanged
+	const Real THRESH = ConvertRetailPerFrameRate(0.01f);
 
 	if (fabs(a->x - b->x) > THRESH)
 		return true;
@@ -1820,7 +1829,7 @@ inline Bool isAngleDifferent(Real a, Real b)
 	// the PartitionManager stuff when the pos/orientation really changes (for efficiency purposes)
 	// so we must put in some cleverness...
 
-	const Real THRESH = 0.01f;	// in radians, this is approx 1/2 degree.
+	const Real THRESH = ConvertRetailPerFrameRate(0.01f);	// radians turned in one frame; 0.01 is approx 1/2 degree.
 
 	if (fabs(a - b) > THRESH)
 		return true;
@@ -3390,6 +3399,10 @@ void Object::setConstructionPercent( Real percent )
 																									 TheGameLogic->findObjectByID( m_builderID ) );
 
 		TheAI->pathfinder()->addObjectToPathfindMap( this );
+
+		// the plan looked with no range when it was placed and nothing re-looks a structure that does
+		// not move, so without this the site stayed blind until the last percent went in
+		handleShroud();
 
 		//
 		// and the building starts putting itself up.  This is the same frame the silhouette goes
@@ -5059,7 +5072,7 @@ void Object::onDie( DamageInfo *damageInfo )
 	// Just in case I have been sporting one of thise fancy Terrain Decals,
 	//I naturally lose it now, because I'm dead.
 	Drawable *draw = getDrawable();
-	if (draw) draw->setTerrainDecalFadeTarget(0.0f, -0.03f);//fade...
+	if (draw) draw->setTerrainDecalFadeTarget(0.0f, ConvertRetailPerFrameRate(-0.03f));//fade...
 	//if (draw) draw->setTerrainDecal(TERRAIN_DECAL_NONE);//pop!
 
 
@@ -6096,6 +6109,7 @@ void Object::doCommandButton( const CommandButton *commandButton, CommandSourceT
 			case GUI_COMMAND_CANCEL_UNIT_BUILD:
 			case GUI_COMMAND_CANCEL_UPGRADE:
 			case GUI_COMMAND_ATTACK_MOVE:
+			case GUI_COMMAND_FORCE_ATTACK:
 			case GUI_COMMAND_GUARD:
 			case GUI_COMMAND_GUARD_WITHOUT_PURSUIT:
 			case GUI_COMMAND_GUARD_FLYING_UNITS_ONLY:
@@ -6211,6 +6225,7 @@ void Object::doCommandButtonAtObject( const CommandButton *commandButton, Object
 			case GUI_COMMAND_OBJECT_UPGRADE:
 			case GUI_COMMAND_CANCEL_UPGRADE:
 			case GUI_COMMAND_ATTACK_MOVE:
+			case GUI_COMMAND_FORCE_ATTACK:
 			case GUI_COMMAND_GUARD:
 			case GUI_COMMAND_GUARD_WITHOUT_PURSUIT:
 			case GUI_COMMAND_GUARD_FLYING_UNITS_ONLY:
@@ -6305,6 +6320,7 @@ void Object::doCommandButtonAtPosition( const CommandButton *commandButton, cons
 			case GUI_COMMAND_PLAYER_UPGRADE:
 			case GUI_COMMAND_OBJECT_UPGRADE:
 			case GUI_COMMAND_CANCEL_UPGRADE:
+			case GUI_COMMAND_FORCE_ATTACK:
 			case GUI_COMMAND_GUARD:
 			case GUI_COMMAND_GUARD_WITHOUT_PURSUIT:
 			case GUI_COMMAND_GUARD_FLYING_UNITS_ONLY:
@@ -6363,6 +6379,7 @@ void Object::doCommandButtonUsingWaypoints( const CommandButton *commandButton, 
 				break;
 			}
 			case GUI_COMMAND_ATTACK_MOVE:
+			case GUI_COMMAND_FORCE_ATTACK:
 			case GUI_COMMAND_STOP:
 			case GUI_COMMAND_DOZER_CONSTRUCT:
 			case GUI_COMMAND_DOZER_CONSTRUCT_CANCEL:
@@ -6728,6 +6745,8 @@ Bool Object::canProduceUpgrade( const UpgradeTemplate *upgrade )
 {
 	// We need to have the button to make the upgrade.  CommandSets are a weird Logic/Client hybrid.
 	const CommandSet *set = TheControlBar->findCommandSet(getCommandSetString());
+	if( set == NULL )
+		return FALSE;	// a Supply Drop Zone, a GLA hole or a captured Oil Derrick has no command set
 
 	for( Int buttonIndex = 0; buttonIndex < MAX_COMMANDS_PER_SET; buttonIndex++ )
 	{

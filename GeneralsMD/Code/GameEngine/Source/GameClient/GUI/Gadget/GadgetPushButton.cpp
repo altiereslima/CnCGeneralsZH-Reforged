@@ -605,11 +605,7 @@ PushButtonData * getNewPushButtonData( void )
 	p->drawBorder = FALSE;
 	p->drawClock = NO_CLOCK;
 	p->drawCount = 0;
-	p->drawSeconds = 0;
-	p->drawCost = 0;
-	p->drawPower = 0;
-	p->barPercent = -1;
-	p->barColor = GAME_COLOR_UNDEFINED;
+	p->drawRepeat = FALSE;
 	p->overlayImage = NULL;
 	return p;
 }
@@ -628,6 +624,20 @@ void GadgetButtonSetCount( GameWindow *g, Int count )
 		pData = getNewPushButtonData();
 	}
 	pData->drawCount = count;
+	g->winSetUserData(pData);
+}
+
+// GadgetButtonSetRepeat ======================================================
+/** Show or take off the spinning repeat mark in the button's top right corner */
+//=============================================================================
+void GadgetButtonSetRepeat( GameWindow *g, Bool repeat )
+{
+	PushButtonData *pData = (PushButtonData *)g->winGetUserData();
+	if(!pData)
+	{
+		pData = getNewPushButtonData();
+	}
+	pData->drawRepeat = repeat;
 	g->winSetUserData(pData);
 }
 
@@ -712,95 +722,7 @@ void GadgetButtonClearClock( GameWindow *g )
 		return;
 
 	pData->drawClock = NO_CLOCK;
-	// the seconds label is the same per-frame overlay as the clock, and everyone who puts one on
-	// puts a clock on with it, so it comes off here too
-	pData->drawSeconds = 0;
 
-}
-
-// GadgetButtonSetSeconds =====================================================
-/** Set the seconds label drawn in the button's bottom left corner, 0 for none.
-	* Cleared by GadgetButtonClearClock, so it must be re-set every frame. */
-//=============================================================================
-void GadgetButtonSetSeconds( GameWindow *g, Int seconds )
-{
-	if( g == NULL )
-		return;
-
-	PushButtonData *pData = (PushButtonData *)g->winGetUserData();
-	if(!pData)
-	{
-		pData = getNewPushButtonData();
-		if(!pData)
-			return;
-	}
-	pData->drawSeconds = seconds;
-	g->winSetUserData(pData);
-}
-
-// GadgetButtonSetCost ========================================================
-/** Set the price drawn in the button's top right corner, 0 for none.  What one
-	* of these costs is the other half of what a build decision needs, next to
-	* the seconds already in the opposite corner.  Unlike the seconds it is not
-	* cleared by GadgetButtonClearClock - a price does not change per frame. */
-//=============================================================================
-void GadgetButtonSetCost( GameWindow *g, Int cost )
-{
-	if( g == NULL )
-		return;
-
-	PushButtonData *pData = (PushButtonData *)g->winGetUserData();
-	if(!pData)
-	{
-		pData = getNewPushButtonData();
-		if(!pData)
-			return;
-	}
-	pData->drawCost = cost;
-	g->winSetUserData(pData);
-}
-
-// GadgetButtonSetPower =======================================================
-/** Set the power figure drawn in the button's bottom right corner, 0 for none.
-	* Negative is what the structure draws off the grid, positive what it puts on
-	* it - the sign the game's own templates use.  Money and time are already in
-	* the other three corners; power is the third thing a base has to spend and
-	* the only one you had to remember from the tooltip. */
-//=============================================================================
-void GadgetButtonSetPower( GameWindow *g, Int power )
-{
-	if( g == NULL )
-		return;
-
-	PushButtonData *pData = (PushButtonData *)g->winGetUserData();
-	if(!pData)
-	{
-		pData = getNewPushButtonData();
-		if(!pData)
-			return;
-	}
-	pData->drawPower = power;
-	g->winSetUserData(pData);
-}
-
-// GadgetButtonSetBar =========================================================
-/** Set a thin progress bar along the button's bottom edge, percent < 0 for none */
-//=============================================================================
-void GadgetButtonSetBar( GameWindow *g, Int percent, Color color )
-{
-	if( g == NULL )
-		return;
-
-	PushButtonData *pData = (PushButtonData *)g->winGetUserData();
-	if(!pData)
-	{
-		pData = getNewPushButtonData();
-		if(!pData)
-			return;
-	}
-	pData->barPercent = percent;
-	pData->barColor = color;
-	g->winSetUserData(pData);
 }
 
 void GadgetButtonDrawOverlayImage( GameWindow *g, const Image *image )

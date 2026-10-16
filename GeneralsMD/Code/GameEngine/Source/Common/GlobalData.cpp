@@ -72,11 +72,15 @@ GlobalData* TheWritableGlobalData = NULL;				///< The global data singleton
 //-------------------------------------------------------------------------------------------------
 GlobalData* GlobalData::m_theOriginal = NULL;
 
-// A key the shipped GameData.ini still carries but nothing reads. It has to stay in the table,
-// because an unknown key throws, so it is parsed into nothing.
+// A key the shipped GameData.ini, or an older player's own, still carries but nothing reads. It has to
+// stay in the table, because an unknown key throws, so it is parsed into nothing.
 static void parseIgnoredField( INI *, void *, void *, const void * )
 {
 }
+
+// A map's map.ini can carry a GameData block.  Retail is 40; a tiny cell makes the partition grid
+// millions of cells on a large map, a huge one leaves the whole map in a handful of cells.
+static const INI::RealRange PARTITION_CELL_SIZE_RANGE = { 20.0f, 400.0f };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
@@ -91,7 +95,7 @@ static void parseIgnoredField( INI *, void *, void *, const void * )
 	{ "UseTrees",									INI::parseBool,				NULL,			offsetof( GlobalData, m_useTrees ) },
 	{ "UseFPSLimit",							INI::parseBool,				NULL,			offsetof( GlobalData, m_useFpsLimit ) },
 	{ "DumpAssetUsage",						INI::parseBool,				NULL,			offsetof( GlobalData, m_dumpAssetUsage ) },
-	{ "FramesPerSecondLimit",			INI::parseInt,				NULL,			offsetof( GlobalData, m_framesPerSecondLimit ) },
+	{ "FramesPerSecondLimit",			INI::parseRetailFramesInt,	NULL,			offsetof( GlobalData, m_framesPerSecondLimit ) },	// retail 30 is normal speed: LOGICFRAMES_PER_SECOND
 	{ "ChipsetType",							INI::parseInt,				NULL,			offsetof( GlobalData, m_chipSetType ) },
 	{ "MaxShellScreens",					INI::parseInt,				NULL,			offsetof( GlobalData, m_maxShellScreens ) },
 	{ "UseCloudMap",							INI::parseBool,				NULL,			offsetof( GlobalData, m_useCloudMap ) },
@@ -215,12 +219,9 @@ static void parseIgnoredField( INI *, void *, void *, const void * )
 	{ "ZoomToCursor",							INI::parseBool,				NULL,			offsetof( GlobalData, m_zoomToCursor ) },
 	{ "IsometricCamera",					INI::parseBool,				NULL,			offsetof( GlobalData, m_isometricCamera ) },
 	{ "FormationDrag",						INI::parseBool,				NULL,			offsetof( GlobalData, m_formationDrag ) },
-	{ "ShowAllyCursors",					INI::parseBool,				NULL,			offsetof( GlobalData, m_showAllyCursors ) },
 	{ "ChromaLighting",						INI::parseBool,				NULL,			offsetof( GlobalData, m_chromaLighting ) },
-	{ "ShowHudOverlay",						INI::parseBool,				NULL,			offsetof( GlobalData, m_showHudOverlay ) },
-	{ "ShowPlacementRangeRing",		INI::parseBool,				NULL,			offsetof( GlobalData, m_showPlacementRangeRing ) },
+	{ "ShowHudOverlay",						parseIgnoredField,		NULL,			0 },
 	{ "WorkersReturnToSupply",		INI::parseBool,				NULL,			offsetof( GlobalData, m_workersReturnToSupply ) },
-	{ "DetailedBuildTooltips",		INI::parseBool,				NULL,			offsetof( GlobalData, m_detailedBuildTooltips ) },
 	{ "ArchiveReplays",						INI::parseBool,				NULL,			offsetof( GlobalData, m_archiveReplays ) },
 	{ "Bloom",										INI::parseInt,				NULL,			offsetof( GlobalData, m_bloomIntensity ) },
 	{ "MinCameraHeight",						INI::parseReal,				NULL,			offsetof( GlobalData, m_minCameraHeight ) },
@@ -233,7 +234,7 @@ static void parseIgnoredField( INI *, void *, void *, const void * )
 	{ "StealthFriendlyOpacity",		INI::parsePercentToReal,				NULL,				offsetof( GlobalData, m_stealthFriendlyOpacity ) },
 	{ "DefaultOcclusionDelay",				INI::parseDurationUnsignedInt,				NULL,			offsetof( GlobalData, m_defaultOcclusionDelay ) },
 	
-	{ "PartitionCellSize",				INI::parseReal,				NULL,			offsetof( GlobalData, m_partitionCellSize ) },
+	{ "PartitionCellSize",				INI::parseRealInRange,				&PARTITION_CELL_SIZE_RANGE,			offsetof( GlobalData, m_partitionCellSize ) },
 
 	{ "AmmoPipScaleFactor",				INI::parseReal,				NULL,			offsetof( GlobalData, m_ammoPipScaleFactor ) },
 	{ "ContainerPipScaleFactor",	INI::parseReal,				NULL,			offsetof( GlobalData, m_containerPipScaleFactor ) },
@@ -694,7 +695,10 @@ GlobalData::GlobalData()
 	m_shadowsForParticles = TRUE;	//on by default: the shipped INI has no entry for it
 	m_volumetricSmokeShadows = TRUE;
 	m_smokeFireLighting = TRUE;
+	m_explosionDebrisTrails = TRUE;
+	m_shadowQuality = 1;					//medium, the 2048 map the shadows always had
 	m_classicGraphics = FALSE;
+	m_lightingStyle = LIGHTING_STYLE_REFORGED;
 	m_shadowMap = TRUE;						//the sun's own shadows are what the game draws with now
 	m_shadowMapOnly = TRUE;				//and they replace the stencil volumes rather than joining them
 	m_shadowMapReport = FALSE;
@@ -725,6 +729,7 @@ GlobalData::GlobalData()
 	m_techRespawn = 0;							// a destroyed tech building stays destroyed unless -techrespawn asks
 	m_supplyPileLimit = 0;					// a supply pile takes any number of players unless -supplypilelimit asks
 	m_superweapons = 0;							// SUPERWEAPONS_ALLOW unless -superweapons asks
+	m_startingCash = 0;							// the INI's DefaultStartingCash unless -startingcash asks
 	m_autoSkirmishObserver = FALSE;
 	m_headless = FALSE;
 	m_turbo = FALSE;
@@ -733,6 +738,7 @@ GlobalData::GlobalData()
 	m_videoStartFrame = 0;
 	m_videoEndFrame = 0; // record nothing unless -video asks for a range
 	m_videoName.clear();
+	m_videoPictures = 1; // a picture a logic frame, 30 a second, unless -recordfps asks for more
 	m_directorRecord = FALSE;
 	m_directorScoutFile.clear();
 	m_directorTimelineFile.clear();
@@ -961,9 +967,9 @@ GlobalData::GlobalData()
 	m_showObjectHealth = FALSE;
 	// what this fork has always done, so nobody's game changes until they say so
 	m_healthBarMode = HEALTH_BAR_ALWAYS;
-	m_hudScale = 0;
-	// the game as it shipped unless the launcher passes -interface reforged
-	m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
+	m_healthBarColors = 0;
+	// the game's own mouse unless the launcher passes -mouse reforged
+	m_mouseStyle = MOUSE_STYLE_CLASSIC;
 	// the lobby's own colours until somebody asks for something else
 	m_playerColorScheme = PLAYER_COLORS_ORIGINAL;
 	// the words the game shipped with until somebody picks a translation
@@ -1078,7 +1084,7 @@ GlobalData::GlobalData()
 
 	// By default, show all asserts.
 
-	m_unlookPersistDuration		= 30;
+	m_unlookPersistDuration		= ConvertRetailFrames(30);
 
 	//-----------------------------------------------------------------------------------------------
 
@@ -1103,6 +1109,7 @@ GlobalData::GlobalData()
 
 	m_isBreakableMovie = FALSE;
 	m_breakTheMovie = FALSE;
+	m_modFactions = FALSE;
 
 	setTimeOfDay( m_timeOfDay );
 
@@ -1165,18 +1172,10 @@ GlobalData::GlobalData()
 	m_zoomToCursor = FALSE;		// the wheel zooms on the middle of the screen, as 1.04 did, until ticked
 	m_zoomSpeed = 100;				// a notch moves the camera the 60 units it always did
 	m_isometricCamera = FALSE;
-	// R1, smooth motion: the picture only, one logic tick behind, and never the game (W3DSmoothMotion.h).
-	// On by default off Windows, where 120 and 144 Hz panels are the common case; Windows keeps its
-	// picture as it was unless a player opts in.
-#if defined(_WIN32)
-	m_smoothMotion = FALSE;
-#else
-	m_smoothMotion = TRUE;
-#endif
 	m_dragTolerance = 25;		// what Mouse.ini in INIZH.big says, so nothing moves until the slider does
 	// a left drag with the move, attack move or guard key armed draws a formation line
 	m_formationDrag = TRUE;
-	m_showAllyCursors = TRUE;
+	m_buildWithoutWorker = TRUE;
 	m_chromaLighting = TRUE;	//costs nothing on a machine with no Razer server: the handshake fails once
 	m_menuTransitionSpeed = 100;
 	m_textureFilterMode = 2;	// anisotropic; retail shipped bilinear on a 2003 fill-rate budget
@@ -1189,22 +1188,9 @@ GlobalData::GlobalData()
 	m_moneyPerMinute = 0;
 	m_buildPlacementOpacity = PLACEMENT_SILHOUETTE_OPACITY;
 	m_buildPlacementShadows = TRUE;
-	// The corner readout (InGameUI::drawHudOverlay): on in the developer builds (Debug, _INTERNAL), off in
-	// Release, RELEASE_DEBUG_LOGGING included, which is a Release build that also logs.  A player turns it on
-	// with "ShowHudOverlay = Yes" in GameData.ini; a harness whose pictures must show it passes -showHudOverlay.
-#if defined(_DEBUG) || defined(_INTERNAL)
-	m_showHudOverlay = TRUE;
-#else
-	m_showHudOverlay = FALSE;
-#endif
 	m_showNetBox = TRUE;
-	m_incomeRateMode = INCOME_RATE_PER_SECOND;
 	m_showEmptyBuildingPips = TRUE;
-	m_showPlacementRangeRing = TRUE;
-	m_showSkillStrip = TRUE;
-	m_showSuperweaponStrip = TRUE;
 	m_workersReturnToSupply = TRUE;
-	m_detailedBuildTooltips = TRUE;
 	m_archiveReplays = TRUE;
 
 	// Glow defaults to the options screen's Medium, 50 percent.  GameData.ini sets the field as a
@@ -1227,43 +1213,9 @@ GlobalData::GlobalData()
 		 a binary modified after the build.  Its four bytes go in as the platform stores them, which is the
 		 same on every platform the game builds for (little-endian).  The version and the two multiplayer
 		 scripts follow, as before. */
-	const Int blockSize = 65536;
-	CRC exeCRC;
-	const UnsignedInt buildFingerprint = ZH_BUILD_FINGERPRINT;
-	exeCRC.computeCRC( &buildFingerprint, sizeof( buildFingerprint ) );
-	File *fp = NULL;
-	if (TheVersion)
-	{
-		UnsignedInt version = TheVersion->getVersionNumber();
-		exeCRC.computeCRC( &version, sizeof(UnsignedInt) );
-	}
-	// Add in MP scripts to the EXE CRC, since the game will go out of sync if they change
-	fp = TheFileSystem->openFile("Data\\Scripts\\SkirmishScripts.scb", File::READ | File::BINARY);
-	if (fp != NULL) {
-		unsigned char crcBlock[blockSize];
-		Int amtRead = 0;
-		while ( (amtRead=fp->read(crcBlock, blockSize)) > 0 )
-		{
-			exeCRC.computeCRC(crcBlock, amtRead);
-		}
-		fp->close();
-		fp = NULL;
-	}
-	fp = TheFileSystem->openFile("Data\\Scripts\\MultiplayerScripts.scb", File::READ | File::BINARY);
-	if (fp != NULL) {
-		unsigned char crcBlock[blockSize];
-		Int amtRead = 0;
-		while ( (amtRead=fp->read(crcBlock, blockSize)) > 0 )
-		{
-			exeCRC.computeCRC(crcBlock, amtRead);
-		}
-		fp->close();
-		fp = NULL;
-	}
+	computeExeCRC();
+	m_baseExeCRC = m_exeCRC;
 
-	m_exeCRC = exeCRC.get();
-	DEBUG_LOG(("EXE CRC: 0x%8.8X\n", m_exeCRC));
-	
 	m_movementPenaltyDamageState = BODY_REALLYDAMAGED;
 	
 	m_shouldUpdateTGAToDDS = FALSE;
@@ -1347,6 +1299,89 @@ Bool GlobalData::setTimeOfDay( TimeOfDay tod )
 }
 
 //-------------------------------------------------------------------------------------------------
+static Real lightLuminance( const RGBColor &c )
+{
+	return 0.299f * c.red + 0.587f * c.green + 0.114f * c.blue;
+}
+
+/** Multiply a colour by a tint and bring it back to the luminance it had, so the tint moves the hue
+	* and never the brightness. */
+static void tintLight( RGBColor &c, Real r, Real g, Real b )
+{
+	const Real before = lightLuminance( c );
+	c.red *= r;
+	c.green *= g;
+	c.blue *= b;
+	const Real after = lightLuminance( c );
+	if( after > 0.0001f )
+	{
+		const Real keep = before / after;
+		c.red *= keep;
+		c.green *= keep;
+		c.blue *= keep;
+	}
+}
+
+static void scaleLight( RGBColor &c, Real s )
+{
+	c.red *= s;
+	c.green *= s;
+	c.blue *= s;
+}
+
+/* What makes the shipped maps read washed out is the share of their light that has no direction.
+	A typical afternoon gives the ground an ambient of about half the sun and two fill lights from the
+	other sides, so the shadow side of a tank is two thirds as bright as its lit side and nothing has
+	a form.  The style moves weight from the ambient and the fills to the sun and leaves the sum a
+	sunlit surface receives where it was, so the picture keeps its exposure and gains its contrast.
+	The ambient goes a little toward the sky's blue and the sun a little toward late light's yellow,
+	by how much of a sun there is: a moonlit night keeps its own cast. */
+static const Real REFORGED_AMBIENT_SHARE = 0.72f;	// what is left of the flat ambient under a full sun
+static const Real REFORGED_NIGHT_AMBIENT_KEPT = 0.16f;	// how much more of it a sunless map keeps
+static const Real REFORGED_FILL_SHARE = 0.6f;			// what is left of the two fill lights
+static const Real REFORGED_SUN_PUNCH = 1.04f;			// the lit side ends a touch brighter than it was
+static const Real REFORGED_SUN_MOST = 1.35f;			// never more than this much more sun
+
+void reforgeLighting( GlobalData::TerrainLighting lights[MAX_GLOBAL_LIGHTS] )
+{
+	GlobalData::TerrainLighting &sun = lights[0];
+	const Real ambient = lightLuminance( sun.ambient );
+	const Real diffuse = lightLuminance( sun.diffuse );
+
+	// How square the sun stands to flat ground; a map whose sun skims the horizon keeps a floor.
+	const Real length = (Real)sqrt( sun.lightPos.x * sun.lightPos.x + sun.lightPos.y * sun.lightPos.y
+		+ sun.lightPos.z * sun.lightPos.z );
+	Real incidence = (length > 0.0001f) ? -sun.lightPos.z / length : 1.0f;
+	if( incidence < 0.3f )
+		incidence = 0.3f;
+
+	const Real daylight = (diffuse - 0.25f) / 0.5f;
+	const Real warmth = (daylight < 0.0f) ? 0.0f : (daylight > 1.0f) ? 1.0f : daylight;
+
+	// A night map's light is mostly ambient already and its moon cannot make up a cut, so the less
+	// sun there is the less of the ambient goes.
+	const Real ambientShare = REFORGED_AMBIENT_SHARE + (1.0f - warmth) * REFORGED_NIGHT_AMBIENT_KEPT;
+	scaleLight( sun.ambient, ambientShare );
+	tintLight( sun.ambient, 1.0f - 0.06f * warmth, 1.0f, 1.0f + 0.10f * warmth );
+
+	const Real sunlit = diffuse * incidence;
+	if( sunlit > 0.001f )
+	{
+		Real gain = (sunlit + ambient * (1.0f - ambientShare)) / sunlit * REFORGED_SUN_PUNCH;
+		if( gain > REFORGED_SUN_MOST )
+			gain = REFORGED_SUN_MOST;
+		scaleLight( sun.diffuse, gain );
+	}
+	tintLight( sun.diffuse, 1.0f + 0.06f * warmth, 1.0f, 1.0f - 0.10f * warmth );
+
+	for( Int i = 1; i < MAX_GLOBAL_LIGHTS; ++i )
+	{
+		scaleLight( lights[i].ambient, REFORGED_AMBIENT_SHARE );
+		scaleLight( lights[i].diffuse, REFORGED_FILL_SHARE );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Create a new global data instance to override the existing data set.  The
 	* initial values of the newly created instance will be a copy of the current
 	* data (or the most recently created override) */
@@ -1372,6 +1407,59 @@ GlobalData *GlobalData::newOverride( void )
 	return override;
 
 }  // end newOveride
+
+//-------------------------------------------------------------------------------------------------
+/** The build fingerprint, the version and the two multiplayer scripts as they resolve now: once at
+	* construction, and again after -mod mounts its archives (parseCommandLine), since a mod's
+	* SkirmishScripts.scb or MultiplayerScripts.scb is the one the match runs.  Without -mod it runs once
+	* and the value is what it always was. */
+//-------------------------------------------------------------------------------------------------
+void GlobalData::computeExeCRC( void )
+{
+	const Int blockSize = 65536;
+	CRC exeCRC;
+	const UnsignedInt buildFingerprint = ZH_BUILD_FINGERPRINT;
+	exeCRC.computeCRC( &buildFingerprint, sizeof( buildFingerprint ) );
+	if (TheVersion)
+	{
+		UnsignedInt version = TheVersion->getVersionNumber();
+		exeCRC.computeCRC( &version, sizeof(UnsignedInt) );
+	}
+	// Add in MP scripts to the EXE CRC, since the game will go out of sync if they change
+	// -modfactions: then each mod's own SkirmishScripts.scb, which its factions' computer players run
+	// (SidesList::loadModSkirmishScripts)
+	std::vector<Int> focus( 2, FILE_FOCUS_ALL );
+	for (Int mod = 0; m_modFactions && mod < (Int)m_mods.size(); ++mod)
+		focus.push_back( mod );
+	for (size_t s = 0; s < focus.size(); ++s)
+	{
+		const char *script = s == 1 ? "Data\\Scripts\\MultiplayerScripts.scb" : "Data\\Scripts\\SkirmishScripts.scb";
+		File *fp = NULL;
+		if (focus[s] == FILE_FOCUS_ALL)
+		{
+			fp = TheFileSystem->openFile( script, File::READ | File::BINARY );
+		}
+		else
+		{
+			TheFileSystem->setFocus( focus[s] );
+			if (TheFileSystem->doesFileExist( script ))
+				fp = TheFileSystem->openFile( script, File::READ | File::BINARY );
+			TheFileSystem->setFocus( FILE_FOCUS_ALL );
+		}
+		if (fp == NULL)
+			continue;
+		unsigned char crcBlock[blockSize];
+		Int amtRead = 0;
+		while ( (amtRead=fp->read(crcBlock, blockSize)) > 0 )
+		{
+			exeCRC.computeCRC(crcBlock, amtRead);
+		}
+		fp->close();
+	}
+
+	m_exeCRC = exeCRC.get();
+	DEBUG_LOG(("EXE CRC: 0x%8.8X\n", m_exeCRC));
+}
 
 //-------------------------------------------------------------------------------------------------
 void GlobalData::init( void )
@@ -1522,6 +1610,7 @@ void GlobalData::parseGameDataDefinition( INI* ini )
 	{
 		TheWritableGlobalData->m_shadowMap = FALSE;
 		TheWritableGlobalData->m_volumetricSmokeShadows = FALSE;
+		TheWritableGlobalData->m_lightingStyle = LIGHTING_STYLE_CLASSIC;
 		TheWritableGlobalData->m_direct3D11PostChain = "off";
 	}
 

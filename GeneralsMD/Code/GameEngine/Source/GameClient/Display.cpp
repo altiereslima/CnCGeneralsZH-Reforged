@@ -51,10 +51,7 @@ UIRect TheUIRect( void )
 		UIRect none = { 0, 0, 800, 600 };
 		return none;
 	}
-	if( TheGlobalData && TheGlobalData->isClassicUI() )
-		return UIRectForScreen( TheDisplay->getWidth(), TheDisplay->getHeight() );
-	UIRect screen = { 0, 0, (Int)TheDisplay->getWidth(), (Int)TheDisplay->getHeight() };
-	return screen;
+	return UIRectForScreen( TheDisplay->getWidth(), TheDisplay->getHeight() );
 }
 
 

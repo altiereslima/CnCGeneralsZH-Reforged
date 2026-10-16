@@ -629,6 +629,9 @@ public:
 	/// One of this player's units died; the AI keeps count of the ones that died alone.
 	void onUnitLost(const Object *obj);
 
+	/// TRUE for an Ambulance the AI drives behind its army; it cleans only the hazards the AI sends it to.
+	Bool isAIDutyAmbulance(const Object *obj) const;
+
 	/// Get the center of the ai's base.
 	virtual Bool getAiBaseCenter(Coord3D *pos);
 
@@ -718,6 +721,7 @@ public:
 
 	/// get the relationship between this->that. 
 	Relationship getRelationship(const Team *that) const;
+	Bool hasTeamRelationships() const;		///< does any single team get a relationship of its own?
 
 	/// set the relationship between this->that. (note that this doesn't affect the that->this relationship.)
 	void setPlayerRelationship(const Player *that, Relationship r);
@@ -744,6 +748,10 @@ public:
 
 	/// Destroy all of the teams for this player, causing him to DIE.
 	void killPlayer(void);
+
+	/// Give up: hand everything to a living ally when giveToAlly and one exists, then die.  A
+	/// human's surrender message and a hopeless skirmish AI both end here.
+	void surrender(Bool giveToAlly);
 
 	/// Enabled/Disable all objects of type templateTypeToAffect
 	void setObjectsEnabled(AsciiString templateTypeToAffect, Bool enable);

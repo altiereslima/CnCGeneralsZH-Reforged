@@ -88,6 +88,7 @@
 #include "GameClient/GameText.h"
 #include "GameClient/GUICallbacks.h"
 #include "GameClient/InGameUI.h"
+#include "GameClient/MetaEvent.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/DisplayStringManager.h"
 #include "GameLogic/GameLogic.h"
@@ -100,7 +101,7 @@
 
 #include "GameNetwork/NetworkInterface.h"
 #include "GameNetwork/GameSpy/ThreadUtils.h"		// WideCharStringToMultiByte
-#include "GameLogic/Weapon.h"		// WeaponTemplate/WeaponBonus for the detailed build tooltip
+#include "GameLogic/Weapon.h"		// WeaponTemplate/WeaponBonus for the build tooltip's figures
 #ifdef _INTERNAL
 // for occasional debugging...
 //#pragma optimize("", off)
@@ -113,26 +114,100 @@ static AnimateWindowManager *theAnimateWindowManager = NULL;
 static GameWindow *prevWindow = NULL;
 static Bool useAnimation = FALSE;
 
-static void drawNothing( GameWindow *window, WinInstanceData *instData )
+//-------------------------------------------------------------------------------------------------
+/** " (Ctrl+Shift+I)" for the key the player's command map gives a meta event in a match, empty for
+	* one with no key.  The Idle Worker button has no letter of its own: its key is a chord in the
+	* command map, so the tooltip is the only place the button can say what it is. */
+//-------------------------------------------------------------------------------------------------
+static UnicodeString metaKeySuffix( GameMessage::Type meta )
 {
+	UnicodeString suffix;
+	for( const MetaMapRec *rec = TheMetaMap->getFirstMetaMapRec(); rec; rec = rec->m_next )
+	{
+		if( rec->m_meta != meta || rec->m_transition != DOWN || !( rec->m_usableIn & COMMANDUSABLE_GAME ) )
+			continue;
+
+		const char *keyName = NULL;
+		for( const LookupListRec *k = KeyNames; k->name; ++k )
+			if( k->value == rec->m_key )
+				keyName = k->name + 4;	// past "KEY_"
+		if( keyName == NULL || rec->m_key == MK_NONE )
+			continue;
+
+		AsciiString text( " (" );
+		if( rec->m_modState & CTRL )
+			text.concat( "Ctrl+" );
+		if( rec->m_modState & ALT )
+			text.concat( "Alt+" );
+		if( rec->m_modState & SHIFT )
+			text.concat( "Shift+" );
+		text.concat( keyName );
+		text.concat( ")" );
+		suffix.translate( text );
+		break;
+	}
+	return suffix;
 }
 
-/** `window` and every child of it, down, draw nothing from now on. */
-static void silenceWindowTree( GameWindow *window )
+//-------------------------------------------------------------------------------------------------
+/** What the build tooltip says beyond retail's name, price and description, piece by piece, the
+	* way Reforged's card laid it out; ControlBarPopupDescription.wnd gets it as lines of its text. */
+//-------------------------------------------------------------------------------------------------
+/** One line of what an upgrade does: the figure under `label`, a string table label, goes from `from` to `to`. */
+struct BuildTooltipChange
 {
-	window->winSetDrawFunc( drawNothing );
-	for( GameWindow *child = window->winGetChild(); child; child = child->winGetNext() )
-		silenceWindowTree( child );
-}
+	const char *label;
+	std::string from;
+	std::string to;
+};
 
-/** Every window of `layout` draws nothing from now on.  The layout's own list, not the windows'
-	* sibling chain: a top level window's next is the next window on screen, and walking that silenced
-	* the command bar and everything else the moment a build tooltip came up. */
-static void silenceLayout( WindowLayout *layout )
+/** An upgrade and what it does to one unit.  On a unit's card `name` is the upgrade's; on an
+	* upgrade's card it is the unit's. */
+struct BuildTooltipUpgrade
 {
-	for( GameWindow *window = layout->getFirstWindow(); window; window = window->winGetNextInLayout() )
-		silenceWindowTree( window );
-}
+	UnicodeString name;
+	Bool owned;										///< the player has it already
+	std::vector< BuildTooltipChange > changes;
+};
+
+struct BuildTooltipCard
+{
+	Bool hasStats;								///< a unit's card: the figures below are there
+	Int buildSeconds;
+	Int health;										///< 0 for a body that cannot be hurt
+	Int damage;										///< the main weapon's, with the upgrades the player owns; 0 for no weapon
+	Int range;
+	Real attacksPerSecond;				///< shots a second over a whole clip and its reload
+	Int damagePerSecond;
+	std::vector< BuildTooltipUpgrade > upgrades;	///< a unit's upgrades, or the units an upgrade changes
+};
+
+/** One weapon slot's figures; `weapon` NULL for a slot with nothing in it that hurts. */
+struct WeaponFigures
+{
+	const WeaponTemplate *weapon;
+	Real damage;
+	Real range;
+	Real attacksPerSecond;
+};
+
+/** A unit's health and its weapons, slot by slot. */
+struct UnitFigures
+{
+	Real health;
+	WeaponFigures slots[ WEAPONSLOT_COUNT ];
+
+	/** The slot with the most damage a second, WEAPONSLOT_COUNT for an unarmed unit. */
+	Int mainSlot( void ) const
+	{
+		Int best = WEAPONSLOT_COUNT;
+		for( Int slot = PRIMARY_WEAPON; slot < WEAPONSLOT_COUNT; ++slot )
+			if( slots[ slot ].weapon && ( best == WEAPONSLOT_COUNT || slots[ slot ].damage * slots[ slot ].attacksPerSecond
+																																> slots[ best ].damage * slots[ best ].attacksPerSecond ) )
+				best = slot;
+		return best;
+	}
+};
 
 //-------------------------------------------------------------------------------------------------
 /** What an upgrade does to a unit, as far as the build tooltip counts it: the modules it triggers
@@ -220,7 +295,7 @@ static const WeaponTemplate *suicideBomb( const ThingTemplate *thing )
 	* its user stands for the bomb his death fires, and one whose blast kills its user goes off once,
 	* so it has no rate and no damage a second. */
 //-------------------------------------------------------------------------------------------------
-WeaponFigures ControlBarWeaponFigures( const ThingTemplate *thing, const WeaponTemplate *weapon, const WeaponBonus &bonus )
+static WeaponFigures weaponFigures( const ThingTemplate *thing, const WeaponTemplate *weapon, const WeaponBonus &bonus )
 {
 	WeaponFigures figure = {};
 	if( ( weapon->getAffectsMask() & ( WEAPON_AFFECTS_ALLIES | WEAPON_AFFECTS_ENEMIES | WEAPON_AFFECTS_NEUTRALS ) ) == 0 )
@@ -250,32 +325,8 @@ WeaponFigures ControlBarWeaponFigures( const ThingTemplate *thing, const WeaponT
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Read off the template the way Weapon::computeBonus reads an object: the game's own weapon
-	* bonuses and the weapon's extra ones for the conditions set. */
-//-------------------------------------------------------------------------------------------------
-void ControlBarTemplateWeaponFigures( const ThingTemplate *thing, const WeaponSetFlags &setFlags,
-																			WeaponBonusConditionFlags bonusFlags, UnitFigures &figures )
-{
-	const WeaponTemplateSet *set = thing->findWeaponTemplateSet( setFlags );
-	if( set == NULL )
-		return;
-
-	for( Int slot = PRIMARY_WEAPON; slot < WEAPONSLOT_COUNT; ++slot )
-	{
-		const WeaponTemplate *weapon = set->getNth( (WeaponSlotType)slot );
-		if( weapon == NULL )
-			continue;
-
-		WeaponBonus bonus;
-		TheGlobalData->m_weaponBonusSet->appendBonuses( bonusFlags, bonus );
-		if( weapon->getExtraBonus() )
-			weapon->getExtraBonus()->appendBonuses( bonusFlags, bonus );
-		figures.slots[ slot ] = ControlBarWeaponFigures( thing, weapon, bonus );
-	}
-}
-
-//-------------------------------------------------------------------------------------------------
-/** `thing`'s figures with `effect` applied. */
+/** `thing`'s figures with `effect` applied, read off the template the way Weapon::computeBonus
+	* reads an object: the game's own weapon bonuses and the weapon's extra ones. */
 //-------------------------------------------------------------------------------------------------
 static UnitFigures figuresOf( const ThingTemplate *thing, const UpgradeEffect &effect )
 {
@@ -286,7 +337,19 @@ static UnitFigures figuresOf( const ThingTemplate *thing, const UpgradeEffect &e
 	if( effect.weaponSet )
 		setFlags.set( WEAPONSET_PLAYER_UPGRADE );
 	const WeaponBonusConditionFlags bonusFlags = effect.weaponBonus ? ( 1 << WEAPONBONUSCONDITION_PLAYER_UPGRADE ) : 0;
-	ControlBarTemplateWeaponFigures( thing, setFlags, bonusFlags, figures );
+	const WeaponTemplateSet *set = thing->findWeaponTemplateSet( setFlags );
+	for( Int slot = PRIMARY_WEAPON; set && slot < WEAPONSLOT_COUNT; ++slot )
+	{
+		const WeaponTemplate *weapon = set->getNth( (WeaponSlotType)slot );
+		if( weapon == NULL )
+			continue;
+
+		WeaponBonus bonus;
+		TheGlobalData->m_weaponBonusSet->appendBonuses( bonusFlags, bonus );
+		if( weapon->getExtraBonus() )
+			weapon->getExtraBonus()->appendBonuses( bonusFlags, bonus );
+		figures.slots[ slot ] = weaponFigures( thing, weapon, bonus );
+	}
 	return figures;
 }
 
@@ -326,7 +389,7 @@ static void putChanges( const UnitFigures &from, const UnitFigures &to, const Up
 		const BuildTooltipChange damage = { "TOOLTIP:StatDamage", wholeFigure( before.damage ), wholeFigure( after.damage ) };
 		const BuildTooltipChange speed = { "TOOLTIP:StatAttackSpeed", rateFigure( before.attacksPerSecond ), rateFigure( after.attacksPerSecond ) };
 		const BuildTooltipChange perSecond = { "TOOLTIP:StatDamagePerSecond", wholeFigure( before.damage * before.attacksPerSecond ),
-																					 wholeFigure( after.damage * after.attacksPerSecond ) };
+																				 wholeFigure( after.damage * after.attacksPerSecond ) };
 		const BuildTooltipChange range = { "TOOLTIP:StatRange", wholeFigure( before.range ), wholeFigure( after.range ) };
 
 		const BuildTooltipChange *candidates[] = { &damage, &speed, &perSecond, &range };
@@ -633,59 +696,6 @@ void ControlBar::showBuildTooltipLayout( GameWindow *cmdButton )
 }
 
 
-void ControlBar::showBoardCard( const CommandButton *button, Player *owner, const IRegion2D &anchor )
-{
-	if( button != m_boardCardButton || owner != m_boardCardOwner || !m_boardCardWasShown )
-	{
-		populateBuildTooltipLayout( button, NULL, owner );
-		m_boardCard = m_buildTooltipCard;
-		// the money short and the buildings missing are the buyer's, and on the board nobody is buying
-		m_boardCard.warning.clear();
-		m_boardCard.requires.clear();
-		m_boardCardButton = button;
-		m_boardCardOwner = owner;
-	}
-	m_boardCard.anchor = anchor;
-	m_boardCardShown = TRUE;
-}
-
-void ControlBar::hideBoardCard( void )
-{
-	m_boardCardWasShown = m_boardCardShown;
-	m_boardCardShown = FALSE;
-}
-
-const BuildTooltipCard *ControlBar::getBuildTooltipCard( void )
-{
-	// the pointer is on the page, over whatever window was pointed at last
-	if( m_boardCardShown )
-		return &m_boardCard;
-	if( m_buildToolTipLayout == NULL || m_buildToolTipLayout->isHidden() || prevWindow == NULL )
-		return NULL;
-
-	Int width, height;
-	prevWindow->winGetScreenPosition( &m_buildTooltipCard.anchor.lo.x, &m_buildTooltipCard.anchor.lo.y );
-	prevWindow->winGetSize( &width, &height );
-	m_buildTooltipCard.anchor.hi.x = m_buildTooltipCard.anchor.lo.x + width;
-	m_buildTooltipCard.anchor.hi.y = m_buildTooltipCard.anchor.lo.y + height;
-
-	// a command button's card stands over the whole grid, the top row's top, so a bottom row
-	// button's card does not come down over the buttons above it
-	static const NameKeyType commandWindowKey = TheNameKeyGenerator->nameToKey( "ControlBar.wnd:CommandWindow" );
-	GameWindow *grid = prevWindow->winGetParent();
-	if( grid && grid->winGetWindowId() == commandWindowKey )
-	{
-		for( GameWindow *button = grid->winGetChild(); button; button = button->winGetNext() )
-		{
-			Int buttonX, buttonY;
-			button->winGetScreenPosition( &buttonX, &buttonY );
-			if( !button->winIsHidden() )
-				m_buildTooltipCard.anchor.lo.y = min( m_buildTooltipCard.anchor.lo.y, buttonY );
-		}
-	}
-	return &m_buildTooltipCard;
-}
-
 void ControlBar::repopulateBuildTooltipLayout( void )
 {
 	if(!prevWindow || !m_buildToolTipLayout)
@@ -712,8 +722,9 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 	const ProductionPrerequisite *prereq;
 	Bool fireScienceButton = false;
 	UnsignedInt costToBuild = 0;
-	BuildTooltipCard &card = m_buildTooltipCard;
-	card = BuildTooltipCard();
+	UnicodeString cardWarning;		// why it cannot be bought right now, empty when it can
+	UnicodeString cardRequires;		// "Requires: ..." naming what is still missing
+	BuildTooltipCard card = BuildTooltipCard();
 
 	if(commandButton)
 	{
@@ -802,22 +813,22 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 					switch( makeType )
 					{
 						case CANMAKE_NO_MONEY:
-							card.warning = TheGameText->fetch( "TOOLTIP:TooltipNotEnoughMoneyToBuild" );
+							cardWarning = TheGameText->fetch( "TOOLTIP:TooltipNotEnoughMoneyToBuild" );
 							break;
 						case CANMAKE_QUEUE_FULL:
-							card.warning = TheGameText->fetch( "TOOLTIP:TooltipCannotPurchaseBecauseQueueFull" );
+							cardWarning = TheGameText->fetch( "TOOLTIP:TooltipCannotPurchaseBecauseQueueFull" );
 							break;
 						case CANMAKE_PARKING_PLACES_FULL:
-							card.warning = TheGameText->fetch( "TOOLTIP:TooltipCannotBuildUnitBecauseParkingFull" );
+							cardWarning = TheGameText->fetch( "TOOLTIP:TooltipCannotBuildUnitBecauseParkingFull" );
 							break;
 						case CANMAKE_MAXED_OUT_FOR_PLAYER:
               if ( thingTemplate->isKindOf( KINDOF_STRUCTURE ) )
               {
-                card.warning = TheGameText->fetch( "TOOLTIP:TooltipCannotBuildBuildingBecauseMaximumNumber" );
+                cardWarning = TheGameText->fetch( "TOOLTIP:TooltipCannotBuildBuildingBecauseMaximumNumber" );
               }
               else
               {
-  							card.warning = TheGameText->fetch( "TOOLTIP:TooltipCannotBuildUnitBecauseMaximumNumber" );
+  							cardWarning = TheGameText->fetch( "TOOLTIP:TooltipCannotBuildUnitBecauseMaximumNumber" );
               }
 							break;
 						//case CANMAKE_NO_PREREQ:
@@ -836,11 +847,11 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 						ProductionUpdateInterface *pui = selectedObject->getProductionUpdateInterface();
 						if( pui && pui->getProductionCount() >= getQueueCap( pui ) )
 						{
-							card.warning = TheGameText->fetch( "TOOLTIP:TooltipCannotPurchaseBecauseQueueFull" );
+							cardWarning = TheGameText->fetch( "TOOLTIP:TooltipCannotPurchaseBecauseQueueFull" );
 						}
 						else if( !TheUpgradeCenter->canAffordUpgrade( ThePlayerList->getLocalPlayer(), upgradeTemplate, FALSE ) )
 						{
-							card.warning = TheGameText->fetch( "TOOLTIP:TooltipNotEnoughMoneyToBuild" );
+							cardWarning = TheGameText->fetch( "TOOLTIP:TooltipNotEnoughMoneyToBuild" );
 						}
 					}
 				}
@@ -863,20 +874,14 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 				cost.format( TheGameText->fetch("TOOLTIP:Cost"), costToBuild );
 			}
 
-			//
-			// DetailedBuildTooltips: retail tells you the price and nothing about what you get.
-			// Append build time, health, and the best weapon's range and damage, all read off the
-			// template - there is no Object yet to ask.
-			//
-			if( TheGlobalData->m_detailedBuildTooltips && !TheGlobalData->isClassicUI() )
-			{
-				card.hasStats = TRUE;
-				card.buildSeconds = ControlBar_secondsFromFrames( (Real)thingTemplate->calcTimeToBuild( player ) );
-				putUnitFigures( card, thingTemplate, player );
-			}
+			// retail tells you the price and nothing about what you get: the card adds the build time,
+			// health and the main weapon's figures, all read off the template, there is no Object yet
+			card.hasStats = TRUE;
+			card.buildSeconds = ControlBar_secondsFromFrames( (Real)thingTemplate->calcTimeToBuild( player ) );
+			putUnitFigures( card, thingTemplate, player );
 
 			// ask each prerequisite to give us a list of the non satisfied prerequisites
-			for( Int i=0; i<thingTemplate->getPrereqCount(); i++ ) 
+			for( Int i=0; i<thingTemplate->getPrereqCount(); i++ )
 			{
 				prereq = thingTemplate->getNthPrereq(i);
 				requiresList = prereq->getRequiresList(player);
@@ -892,12 +897,11 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 				requires.concat(requiresList);
 			}
 			if( !requires.isEmpty() )
-				card.requires.format( TheGameText->fetch( "CONTROLBAR:Requirements" ).str(), requires.str() );
+				cardRequires.format( TheGameText->fetch( "CONTROLBAR:Requirements" ).str(), requires.str() );
 		}
 		else if( upgradeTemplate )
 		{
-			if( TheGlobalData->m_detailedBuildTooltips && !TheGlobalData->isClassicUI() )
-				putUpgradeTargets( card, upgradeTemplate, player );
+			putUpgradeTargets( card, upgradeTemplate, player );
 
 			//We are looking at an upgrade purchase icon. Maybe we already purchased it?
 
@@ -928,11 +932,11 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 			{
 				if( commandButton->getConflictingLabel().isNotEmpty() )
 				{
-					card.warning = TheGameText->fetch( commandButton->getConflictingLabel() );
+					cardWarning = TheGameText->fetch( commandButton->getConflictingLabel() );
 				}
 				else
 				{
-					card.warning = TheGameText->fetch( "TOOLTIP:HasConflictingUpgradeDefault" );
+					cardWarning = TheGameText->fetch( "TOOLTIP:HasConflictingUpgradeDefault" );
 				}
 			}
 			else if( hasUpgradeAlready && ( playerUpgradeButton || objectUpgradeButton ) )
@@ -942,11 +946,11 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 				//description, so a bought upgrade no longer said what it does.
 				if( commandButton->getPurchasedLabel().isNotEmpty() )
 				{
-					card.warning = TheGameText->fetch( commandButton->getPurchasedLabel() );
+					cardWarning = TheGameText->fetch( commandButton->getPurchasedLabel() );
 				}
 				else
 				{
-					card.warning = TheGameText->fetch( "TOOLTIP:AlreadyUpgradedDefault" );
+					cardWarning = TheGameText->fetch( "TOOLTIP:AlreadyUpgradedDefault" );
 				}
 			}
 			else if( !hasUpgradeAlready )
@@ -971,7 +975,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 				}
 
 				if( missingScience )
-					card.requires.format( TheGameText->fetch( "CONTROLBAR:Requirements" ).str(), TheGameText->fetch( "CONTROLBAR:GeneralsPromotion" ).str() );
+					cardRequires.format( TheGameText->fetch( "CONTROLBAR:Requirements" ).str(), TheGameText->fetch( "CONTROLBAR:GeneralsPromotion" ).str() );
 			}
 		}	
 		else if( st != SCIENCE_INVALID && !fireScienceButton )
@@ -979,7 +983,6 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 			TheScienceStore->getNameAndDescription(st, name, descrip);
 			
 			costToBuild = TheScienceStore->getSciencePurchaseCost( st );
-			card.costsScience = TRUE;
 			if( costToBuild > 0 )
 			{
 				cost.format( TheGameText->fetch("TOOLTIP:ScienceCost"), costToBuild );
@@ -1004,7 +1007,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 					requires.concat(requiresList);
 				}
 				if( !requires.isEmpty() )
-					card.requires.format( TheGameText->fetch( "CONTROLBAR:Requirements" ).str(), requires.str() );
+					cardRequires.format( TheGameText->fetch( "CONTROLBAR:Requirements" ).str(), requires.str() );
 			}
 
 		}
@@ -1055,46 +1058,95 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 
 	}
 
-	card.name = name;
-	card.description = descrip;
-	card.cost = costToBuild;
-
-	// the layout's one text: the description, then why it cannot be bought, the figures and what it
-	// still needs
-	if( !card.warning.isEmpty() )
-	{
-		descrip.concat( u"\n\n" );
-		descrip.concat( card.warning );
-	}
+	// the layout's one text, in the order Reforged's card had it: the description, the unit's figures
+	// counted with the upgrades the player owns, every upgrade that moves one of them and by how much
+	// (on an upgrade's own button, the units it changes), then why it cannot be bought now and what
+	// it still needs
 	if( card.hasStats )
 	{
-		UnicodeString stats;
-		stats.format( TheGameText->fetch( "TOOLTIP:BuildTimeSeconds" ), card.buildSeconds );
+		UnicodeString figures;
+		auto row = [&]( const char *label, const UnicodeString &value )
+		{
+			figures.concat( u"\n" );
+			figures.concat( TheGameText->fetch( label ) );
+			figures.concat( u": " );
+			figures.concat( value );
+		};
+		auto number = []( Int value )
+		{
+			UnicodeString text;
+			text.format( u"%d", value );
+			return text;
+		};
+		if( card.health > 0 )
+			row( "TOOLTIP:StatHealth", number( card.health ) );
 		if( card.damage > 0 )
 		{
-			UnicodeString weapon;
-			// the gap is here rather than in the string: the string table collapses runs of spaces
-			weapon.format( TheGameText->fetch( "TOOLTIP:WeaponStats" ), card.damage, card.range );
-			stats.concat( u"   " );
-			stats.concat( weapon );
+			// a bomb that kills its carrier goes off once, so it has no rate
+			const Bool once = card.attacksPerSecond <= 0.0f;
+			row( "TOOLTIP:StatDamage", number( card.damage ) );
+			row( "TOOLTIP:StatAttackSpeed", once ? UnicodeString( u"-" ) : UnicodeString( MultiByteToWideCharSingleLine( rateFigure( card.attacksPerSecond ).c_str() ).c_str() ) );
+			row( "TOOLTIP:StatDamagePerSecond", once ? UnicodeString( u"-" ) : number( card.damagePerSecond ) );
+			row( "TOOLTIP:StatRange", number( card.range ) );
 		}
-		descrip.concat( stats );
+		UnicodeString seconds;
+		seconds.format( TheGameText->fetch( "TOOLTIP:StatSeconds" ), card.buildSeconds );
+		row( "TOOLTIP:StatTime", seconds );
+		if( !descrip.isEmpty() )
+			descrip.concat( u"\n" );
+		descrip.concat( figures );
 	}
-	if( !card.requires.isEmpty() )
+	if( !card.upgrades.empty() )
+	{
+		descrip.concat( u"\n\n" );
+		descrip.concat( TheGameText->fetch( card.hasStats ? "TOOLTIP:Upgrades" : "TOOLTIP:UpgradeChanges" ) );
+		for( size_t each = 0; each < card.upgrades.size(); ++each )
+		{
+			const BuildTooltipUpgrade &upgrade = card.upgrades[ each ];
+			WideCharString upgradeName = upgrade.name.str();
+			const size_t marker = upgradeName.find( u'&' );
+			if( marker != WideCharString::npos )
+				upgradeName.erase( marker, 1 );
+			descrip.concat( u"\n" );
+			descrip.concat( upgradeName.c_str() );
+			if( upgrade.owned )
+			{
+				descrip.concat( u" (" );
+				descrip.concat( TheGameText->fetch( "TOOLTIP:UpgradeOwned" ) );
+				descrip.concat( u")" );
+			}
+			for( size_t change = 0; change < upgrade.changes.size(); ++change )
+			{
+				const BuildTooltipChange &line = upgrade.changes[ change ];
+				descrip.concat( u"\n   " );
+				descrip.concat( TheGameText->fetch( line.label ) );
+				descrip.concat( u": " );
+				if( !line.from.empty() )
+				{
+					descrip.concat( MultiByteToWideCharSingleLine( line.from.c_str() ).c_str() );
+					descrip.concat( u" → " );
+				}
+				descrip.concat( MultiByteToWideCharSingleLine( line.to.c_str() ).c_str() );
+			}
+		}
+	}
+	if( !cardWarning.isEmpty() )
+	{
+		descrip.concat( u"\n\n" );
+		descrip.concat( cardWarning );
+	}
+	if( !cardRequires.isEmpty() )
 	{
 		if( !descrip.isEmpty() )
 			descrip.concat( u"\n" );
-		descrip.concat( card.requires );
+		descrip.concat( cardRequires );
 	}
-
-	// with the tooltip page in a match the layout stays up for the show and hide logic above, and the
-	// page draws what it says
-	if( TheInGameUI->isTooltipPageReady() )
-		silenceLayout( m_buildToolTipLayout );
 
 	GameWindow *win = TheWindowManager->winGetWindowFromId(m_buildToolTipLayout->getFirstWindow(), TheNameKeyGenerator->nameToKey("ControlBarPopupDescription.wnd:StaticTextName"));
 	if(win)
 	{
+		if( commandButton && commandButton->getName() == "NonCommand_IdleWorker" )
+			name.concat( metaKeySuffix( GameMessage::MSG_META_SELECT_NEXT_IDLE_WORKER ) );
 		GadgetStaticTextSetText(win, name);
 	}
 

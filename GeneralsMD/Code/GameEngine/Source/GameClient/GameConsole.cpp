@@ -55,8 +55,6 @@
 #include "Common/GlobalData.h"
 #include "Common/NameKeyGenerator.h"
 #include "GameClient/GameText.h"
-#include "GameClient/HtmlOverlay.h"
-#include "GameClient/HtmlTemplate.h"
 #include "GameClient/KeyDefs.h"
 #include "GameClient/Keyboard.h"
 #include "GameClient/Mouse.h"
@@ -82,10 +80,8 @@ static const WideChar *CONSOLE_PROMPT = u"> ";
 static const WideChar *CONSOLE_CURSOR = u"_";
 static const WideChar CONSOLE_FIRST_PRINTABLE_CHAR = u' ';
 
-static const Color CONSOLE_PANEL_COLOR = GameMakeColor( 0, 0, 0, 225 );
-static const Color CONSOLE_EDGE_COLOR = GameMakeColor( 90, 90, 90, 255 );
-static const Color CONSOLE_CLASSIC_PANEL_COLOR = GameMakeColor( 0, 0, 0, 190 );	///< Diplomacy.wnd's parent
-static const Color CONSOLE_CLASSIC_EDGE_COLOR = GameMakeColor( 47, 55, 168, 255 );
+static const Color CONSOLE_PANEL_COLOR = GameMakeColor( 0, 0, 0, 190 );	///< Diplomacy.wnd's parent
+static const Color CONSOLE_EDGE_COLOR = GameMakeColor( 47, 55, 168, 255 );
 static const Color CONSOLE_INPUT_COLOR = GameMakeColor( 255, 255, 255, 255 );
 static const Color CONSOLE_TEXT_COLOR = GameMakeColor( 190, 190, 190, 255 );
 static const Color CONSOLE_SHADOW_COLOR = GameMakeColor( 0, 0, 0, 0 );
@@ -115,10 +111,6 @@ static const ConsoleCheat CONSOLE_CHEATS[] =
 	{ "instantbuild",	CHEAT_INSTANT_BUILD,		0,			"instantbuild    build, train and upgrade in one frame",	"GUI:CheatInstantBuild",	{ 0 } },
 	{ "onehitkill",		CHEAT_ONE_HIT_KILL,			0,			"onehitkill      every hit you land kills",	"GUI:CheatOneHitKill",	{ 0 } },
 };
-
-static const char *const CHEAT_PANEL_PAGE = "Window\\Html\\Cheats.html";
-static const char *const CHEAT_PANEL_FONT = "Arial";	///< what the page's text is where its CSS names no font
-static const std::string CHEAT_PANEL_CLOSE = "close";
 
 static const Int CONSOLE_CHEAT_COUNT = sizeof( CONSOLE_CHEATS ) / sizeof( CONSOLE_CHEATS[ 0 ] );
 
@@ -154,12 +146,12 @@ static AsciiString runCheat( const ConsoleCheat &cheat, AsciiString arguments )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The game speed as a share of normal, the same thing numpad plus and minus move.  It changes how
+/** The game speed as a share of normal, 50 to 100 in a skirmish or mission, 17 to 666 in a replay.  It changes how
 	* often a logic frame runs and nothing inside one, so a network game, which runs at the pace the
 	* whole room agrees on, is the one place it is refused. */
 //-------------------------------------------------------------------------------------------------
-static const Int SPEED_MIN_PERCENT = 17;		///< 5 logic frames a second
-static const Int SPEED_MAX_PERCENT = 666;		///< 200 logic frames a second
+static const Int SPEED_MIN_PERCENT = 17;		///< 10 logic frames a second
+static const Int SPEED_MAX_PERCENT = 666;		///< 400 logic frames a second
 static const Int SPEED_NORMAL_PERCENT = 100;
 
 static AsciiString runSpeed( AsciiString arguments )
@@ -176,7 +168,12 @@ static AsciiString runSpeed( AsciiString arguments )
 		Int percent = arguments.compareNoCase( "reset" ) == 0 ? SPEED_NORMAL_PERCENT : atoi( arguments.str() );
 		if( percent < SPEED_MIN_PERCENT ) percent = SPEED_MIN_PERCENT;
 		if( percent > SPEED_MAX_PERCENT ) percent = SPEED_MAX_PERCENT;
-		TheGameEngine->setFramesPerSecondLimit( percent * LOGICFRAMES_PER_SECOND / SPEED_NORMAL_PERCENT );
+		Int fps = percent * LOGICFRAMES_PER_SECOND / SPEED_NORMAL_PERCENT;
+		// a match someone plays goes no faster than normal and no slower than half; a replay keeps the
+		// whole range
+		if( TheGameLogic->isInSkirmishGame() || TheGameLogic->isInSinglePlayerGame() )
+			fps = ClampPlayerGameSpeed( fps );
+		TheGameEngine->setFramesPerSecondLimit( fps );
 	}
 
 	result.format( "speed %d%%", TheGameEngine->getFramesPerSecondLimit() * SPEED_NORMAL_PERCENT / LOGICFRAMES_PER_SECOND );
@@ -270,8 +267,8 @@ static AsciiString describeFreeCameraPose( void )
 	return result;
 }
 
-/** The observer's director camera, for the Classic interface that has no spectator page to pick it
-	* from: 'director' hands the camera to it, again gives it back. */
+/** The observer's director camera, for an interface that has no spectator page to pick it from:
+	* 'director' hands the camera to it, again gives it back. */
 static AsciiString runDirector( void )
 {
 	AsciiString result;
@@ -403,9 +400,6 @@ GameConsole::GameConsole()
 		m_lineStrings( NULL ),
 		m_lineStringCount( 0 ),
 		m_cheatPanelOpen( FALSE ),
-		m_cheatPanelShown( FALSE ),
-		m_cheatPanelLogged( FALSE ),
-		m_cheatOverlay( NULL ),
 		m_cheatLayout( NULL ),
 		m_cheatList( NULL ),
 		m_cheatListState( -1 )
@@ -434,9 +428,6 @@ GameConsole::~GameConsole()
 	delete [] m_lineStrings;
 	m_lineStrings = NULL;
 	m_lineStringCount = 0;
-
-	delete m_cheatOverlay;
-	m_cheatOverlay = NULL;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -571,7 +562,7 @@ void GameConsole::runCommand( AsciiString commandLine )
 		printLine( AsciiString( "speed [n]     game speed in percent, 100 is normal, 'reset' goes back" ) );
 		printLine( AsciiString( "get [key]     a setting by its Options.ini key; no key lists them all" ) );
 		printLine( AsciiString( "set <key> <v> change a setting and save it, e.g. 'set ShowNetBox no' hides the" ) );
-		printLine( AsciiString( "              top right info box, 'set ShowSuperweaponStrip no' the superweapon timers" ) );
+		printLine( AsciiString( "              top right info strip" ) );
 		printLine( AsciiString( "freecam       photo mode: fly the camera anywhere, the whole map drawn, no interface." ) );
 		printLine( AsciiString( "              W/S forward and back, A/D left and right, R up, F down, mouse turns," ) );
 		printLine( AsciiString( "              Shift faster; Esc or 'freecam' again lands.  'freecam x y z heading tilt'" ) );
@@ -600,7 +591,6 @@ void GameConsole::runCommand( AsciiString commandLine )
 	if( cheatsAvailable && command == "trainer" )
 	{
 		m_cheatPanelOpen = !m_cheatPanelOpen;
-		m_cheatPanelLogged = FALSE;
 		if( m_cheatPanelOpen )
 			close();
 		return;
@@ -710,11 +700,10 @@ void GameConsole::render( void )
 	const Int panelHeight = REAL_TO_INT( TheDisplay->getHeight() * CONSOLE_HEIGHT_FRACTION );
 	const Int lineHeight = m_font->height + CONSOLE_LINE_GAP;
 
-	// Classic wears EA's diplomacy and chat frame: its see-through black over a blue edge
-	const Bool classic = TheGlobalData->isClassicUI();
-	TheDisplay->drawFillRect( 0, 0, screenWidth, panelHeight, classic ? CONSOLE_CLASSIC_PANEL_COLOR : CONSOLE_PANEL_COLOR );
+	// EA's diplomacy and chat frame: its see-through black over a blue edge
+	TheDisplay->drawFillRect( 0, 0, screenWidth, panelHeight, CONSOLE_PANEL_COLOR );
 	TheDisplay->drawFillRect( 0, panelHeight - CONSOLE_EDGE_THICKNESS,
-														screenWidth, CONSOLE_EDGE_THICKNESS, classic ? CONSOLE_CLASSIC_EDGE_COLOR : CONSOLE_EDGE_COLOR );
+														screenWidth, CONSOLE_EDGE_THICKNESS, CONSOLE_EDGE_COLOR );
 
 	Int y = panelHeight - CONSOLE_EDGE_THICKNESS - CONSOLE_PADDING - lineHeight;
 
@@ -741,161 +730,19 @@ void GameConsole::render( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The side whose command bar is on screen, for the panel's steel: the same three the other pages
-	* under Window/Html are drawn in. */
-//-------------------------------------------------------------------------------------------------
-static std::string cheatPanelSide( void )
-{
-	ControlBarSchemeManager *schemes = TheControlBar ? TheControlBar->getControlBarSchemeManager() : NULL;
-	const AsciiString side = schemes ? schemes->getCurrentSide() : AsciiString::TheEmptyString;
-	if( side.startsWith( "China" ) || side == "Boss" )
-		return "china";
-	if( side.startsWith( "GLA" ) )
-		return "gla";
-	return "america";
-}
-
-static std::string gameText( const char *label )
-{
-	return WideCharStringToMultiByte( TheGameText->fetch( label ).str() );
-}
-
-/** {{text:Label}}: a string table label, in the player's language. */
-static Bool lookupCheatPanelText( const std::string &name, std::string &value )
-{
-	static const std::string TEXT_LOOKUP = "text:";
-	if( name.compare( 0, TEXT_LOOKUP.size(), TEXT_LOOKUP ) != 0 )
-		return FALSE;
-	value = gameText( name.substr( TEXT_LOOKUP.size() ).c_str() );
-	return TRUE;
-}
-
-//-------------------------------------------------------------------------------------------------
-/** Every cheat a row: its name, then a toggle's one key, lit while it is on, or an amount cheat's
-	* ready amounts.  `clicks` gets what each key sends, in the order the page lays the keys out. */
-//-------------------------------------------------------------------------------------------------
-static void fillCheatPanelCells( std::vector< HtmlValues > &cells, std::vector< std::string > &clicks )
-{
-	const Player *local = ThePlayerList->getLocalPlayer();
-	clicks.push_back( CHEAT_PANEL_CLOSE );
-
-	for( Int i = 0; i < CONSOLE_CHEAT_COUNT; ++i )
-	{
-		const ConsoleCheat &cheat = CONSOLE_CHEATS[ i ];
-		HtmlValues name;
-		name[ "kind" ] = "name";
-		name[ "label" ] = gameText( cheat.label );
-		cells.push_back( name );
-
-		if( cheat.defaultAmount == 0 )
-		{
-			const Bool on = local->hasCheat( cheat.kind );
-			HtmlValues key;
-			key[ "kind" ] = on ? "key on" : "key";
-			key[ "label" ] = gameText( on ? "GUI:CheatOn" : "GUI:CheatOff" );
-			key[ "click" ] = cheat.name;
-			cells.push_back( key );
-			clicks.push_back( key[ "click" ] );
-			continue;
-		}
-
-		const Bool oneAmount = cheat.amounts[ 1 ] == 0;
-		for( Int each = 0; each < CHEAT_PANEL_AMOUNTS && cheat.amounts[ each ] != 0; ++each )
-		{
-			char text[ 64 ];
-			HtmlValues key;
-			key[ "kind" ] = "key";
-			sprintf( text, "+%d", cheat.amounts[ each ] );
-			key[ "label" ] = oneAmount ? gameText( "GUI:CheatApply" ) : std::string( text );
-			sprintf( text, "%s %d", cheat.name, cheat.amounts[ each ] );
-			key[ "click" ] = text;
-			cells.push_back( key );
-			clicks.push_back( key[ "click" ] );
-		}
-	}
-}
-
-//-------------------------------------------------------------------------------------------------
-/** Window/Html/Cheats.html over the battlefield while it is open.  It shuts itself wherever the
-	* cheats are refused, so a panel left open does not follow the player into a replay. */
+/** The trainer's window while it is open.  It shuts itself wherever the cheats are refused, so a
+	* panel left open does not follow the player into a replay. */
 //-------------------------------------------------------------------------------------------------
 void GameConsole::renderCheatPanel( void )
 {
-	m_cheatPanelShown = FALSE;
 	if( m_cheatPanelOpen && !areCheatsAvailable() )
 		m_cheatPanelOpen = FALSE;
-	if( TheGlobalData->isClassicUI() )
-	{
-		updateCheatWindow();
-		return;
-	}
-	if( !m_cheatPanelOpen )
-		return;
-
-	if( m_cheatPage.empty() )
-	{
-		File *file = TheFileSystem->openFile( CHEAT_PANEL_PAGE, File::READ | File::BINARY );
-		if( file == NULL )
-		{
-			printLine( AsciiString( "trainer: Window/Html/Cheats.html is missing" ) );
-			m_cheatPanelOpen = FALSE;
-			return;
-		}
-		const Int size = file->size();
-		char *text = file->readEntireAndClose();
-		m_cheatPage.assign( text, size );
-		delete [] text;
-	}
-	if( m_cheatOverlay == NULL )
-		m_cheatOverlay = new HtmlOverlay( AsciiString( CHEAT_PANEL_FONT ) );
-
-	HtmlValues values;
-	values[ "side" ] = cheatPanelSide();
-	HtmlLists lists;
-	std::vector< std::string > clicks;
-	fillCheatPanelCells( lists[ "cells" ], clicks );
-
-	m_cheatOverlay->setPage( m_cheatPage, values, lists, lookupCheatPanelText );
-	m_cheatOverlay->hover( TheMouse->getMouseStatus()->pos );
-	m_cheatOverlay->draw();
-	m_cheatPanelShown = TRUE;
-
-	// where each key landed, so a script driving the game over -control knows where to click
-	if( !m_cheatPanelLogged )
-	{
-		m_cheatPanelLogged = TRUE;
-		std::vector< IRegion2D > keys;
-		m_cheatOverlay->rectsOf( ".key", keys );
-		for( size_t each = 0; each < keys.size() && each < clicks.size(); ++each )
-			DEBUG_LOG(( "Cheat panel: \"%s\" at %d %d\n", clicks[ each ].c_str(),
-									( keys[ each ].lo.x + keys[ each ].hi.x ) / 2, ( keys[ each ].lo.y + keys[ each ].hi.y ) / 2 ));
-	}
-}
-
-//-------------------------------------------------------------------------------------------------
-/** A press anywhere on the panel is the panel's, so it never turns into an order for the ground
-	* under it.  Only a left press does anything: it runs the key's cheat the way typing it would. */
-//-------------------------------------------------------------------------------------------------
-Bool GameConsole::handleCheatPanelMouse( const ICoord2D &mouse, Bool act )
-{
-	if( !m_cheatPanelShown || !m_cheatOverlay->hover( mouse ) )
-		return FALSE;
-	if( !act )
-		return TRUE;
-
-	runCheatPanelAction( m_cheatOverlay->click( mouse ) );
-	return TRUE;
+	updateCheatWindow();
 }
 
 //-------------------------------------------------------------------------------------------------
 void GameConsole::runCheatPanelAction( const std::string &action )
 {
-	if( action == CHEAT_PANEL_CLOSE )
-	{
-		closeCheatPanel();
-		return;
-	}
-
 	AsciiString arguments( action.c_str() );
 	AsciiString name;
 	arguments.nextToken( &name );
@@ -912,7 +759,7 @@ void GameConsole::runCheatPanelAction( const std::string &action )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The Classic panel's rows: a toggle is one row, an amount cheat one row for each ready amount. */
+/** The trainer's rows: a toggle is one row, an amount cheat one row for each ready amount. */
 //-------------------------------------------------------------------------------------------------
 struct CheatWindowRow
 {
@@ -994,7 +841,7 @@ void GameConsole::resetCheatWindow( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The Classic interface's panel: Window/Trainer.wnd, EA's diplomacy frame with one list row for
+/** The trainer: Window/Trainer.wnd, EA's diplomacy frame with one list row for
 	* each click, and a toggle's row green while it is on.  The windows are thrown away when it
 	* shuts, never from inside their own callback. */
 //-------------------------------------------------------------------------------------------------
@@ -1174,32 +1021,6 @@ GameMessageDisposition GameConsoleTranslator::translateGameMessage( const GameMe
 	// orders or scrolls anything while it flies
 	if( freeCamera && msg->getType() > GameMessage::MSG_RAW_MOUSE_BEGIN && msg->getType() < GameMessage::MSG_RAW_MOUSE_END )
 		return DESTROY_MESSAGE;
-
-	// A press on the cheat panel is the panel's, and so is everything that button does until it is
-	// let go, wherever the pointer has gone by then: nothing after this sees a press it never saw
-	// start.  A press that started off the panel is left alone to its release, so a drag box pulled
-	// over the panel still ends.
-	static Bool pressTaken = FALSE;
-	const GameMessage::Type type = msg->getType();
-	if( type > GameMessage::MSG_RAW_MOUSE_BEGIN && type < GameMessage::MSG_RAW_MOUSE_END )
-	{
-		const Bool left = type == GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN || type == GameMessage::MSG_RAW_MOUSE_LEFT_DOUBLE_CLICK;
-		const Bool press = left
-			|| type == GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN || type == GameMessage::MSG_RAW_MOUSE_RIGHT_DOUBLE_CLICK
-			|| type == GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_DOWN || type == GameMessage::MSG_RAW_MOUSE_MIDDLE_DOUBLE_CLICK;
-		if( press )
-		{
-			pressTaken = TheGameConsole->handleCheatPanelMouse( msg->getArgument( 0 )->pixel, left );
-			return pressTaken ? DESTROY_MESSAGE : KEEP_MESSAGE;
-		}
-		if( pressTaken )
-		{
-			if( type == GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP || type == GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP
-					|| type == GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_UP )
-				pressTaken = FALSE;
-			return DESTROY_MESSAGE;
-		}
-	}
 
 	return KEEP_MESSAGE;
 }

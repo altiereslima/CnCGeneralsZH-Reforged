@@ -73,7 +73,7 @@ void ControlBar::populateMultiSelect( void )
 	//
 	// group the selection by unit type for the right HUD, then let the focused type drive
 	// the whole context: its portrait, its command set (build pages included) and the strip
-	// of type cameos.  Tab/Shift-Tab move the focus.
+	// of type cameos.
 	//
 	populateMultiSelectUnitList();
 
@@ -81,8 +81,8 @@ void ControlBar::populateMultiSelect( void )
 
 //-------------------------------------------------------------------------------------------------
 /** Show what a multi-selection holds in the right HUD: one cameo per selected unit type on the
-	* small strip windows, each with a count badge.  Tab/Shift-Tab move the focus between the
-	* types; the focused type gets the portrait window and its cameo is the lit one. */
+	* small strip windows, each with a count badge.  The focused type gets the portrait window
+	* and its cameo is the lit one. */
 //-------------------------------------------------------------------------------------------------
 void ControlBar::populateMultiSelectUnitList( void )
 {
@@ -122,6 +122,12 @@ void ControlBar::populateMultiSelectUnitList( void )
 			m_multiSelectGroupSize[ g ] = 0;
 			m_multiSelectGroupFirst[ g ] = draw->getID();
 			m_multiSelectGroupCount++;
+		}
+		else if( !obj->getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ) &&
+						 TheGameClient->findDrawableByID( m_multiSelectGroupFirst[ g ] )->getObject()->getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
+		{
+			// a finished building speaks for its type, so the bar shows the upgrades it can take
+			m_multiSelectGroupFirst[ g ] = draw->getID();
 		}
 		m_multiSelectGroupSize[ g ]++;
 
@@ -368,19 +374,6 @@ void ControlBar::layoutMultiSelectTiles( Int count )
 	}
 
 }  // end layoutMultiSelectTiles
-
-//-------------------------------------------------------------------------------------------------
-/** Tab (+1) / Shift-Tab (-1): walk the focus through the multi-selected units */
-//-------------------------------------------------------------------------------------------------
-void ControlBar::cycleMultiSelectFocus( Int direction )
-{
-
-	if( m_currContext != CB_CONTEXT_MULTI_SELECT )
-		return;
-
-	setMultiSelectFocus( m_multiSelectFocus + direction );
-
-}  // end cycleMultiSelectFocus
 
 //-------------------------------------------------------------------------------------------------
 /** Update logic for the multi select context sensitive GUI.  The command area mirrors the

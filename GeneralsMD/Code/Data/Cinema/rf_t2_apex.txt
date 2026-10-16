@@ -1,0 +1,10 @@
+# Trailer 2, timeline.t2.js row 17: Scenarios/missileapex_film.txt on Twilight Flame, the Scud
+# Storm's missiles and the nuke leaving the top of the picture (command line in the scenario, seed 1,
+# four seats). missileapex_film.txt's own cut, relative 1.0, was written against a base of 3.58; the
+# same absolute view here, relative 2.8 at pitch 0, drew the top 60% of the frame black on
+# 2026-10-10 (the far ground past the draw distance), so the missiles climbed into black. Relative
+# 1.4 (about 1.7 absolute) at pitch 4 is under that limit. The Scuds rise from about frame 160, the
+# nuke from about 295.
+
+3.0   cut     2450 3557 1.4 180 4
+3.5   shot

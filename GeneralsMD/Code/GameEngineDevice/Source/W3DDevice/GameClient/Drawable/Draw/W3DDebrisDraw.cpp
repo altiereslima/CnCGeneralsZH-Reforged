@@ -235,7 +235,7 @@ void W3DDebrisDraw::doDrawModule(const Matrix3D* transformMtx)
 		
 		Int oldState = m_state;
 		Object* obj = getDrawable()->getObject();
-		const Int MIN_FINAL_FRAMES = 3;
+		const Int MIN_FINAL_FRAMES = ConvertRetailFrames(3);
 		if (m_state != FINAL && obj != NULL && !obj->isAboveTerrain() && m_frames > MIN_FINAL_FRAMES)
 		{
 			m_state = FINAL;

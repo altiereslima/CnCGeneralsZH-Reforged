@@ -1,0 +1,32 @@
+# Trailer 2, the climax, timeline.t2.js rows 19 to 23: Scenarios/rf_t2_night.txt on Dark Night
+# (command line there). Five views of the village square at 2000,1750, each from its own heading and
+# height. Zoom is relative to the observer's opening view, about 1.34 absolute on this map; a view
+# near 5 absolute draws nothing but black, so the highest here is 3.2.
+#
+# Times follow the scenario of 2026-10-11: the beam is called on 960 (lands about 1041, burns until
+# about 1390) and the nuke on 1264 (lands about 1440, after the beam is out). In match order, which
+# is not the edit's:
+#   29.0 s, frames 870 to 1005, row 21: from the east, low, the carpet bomb (called on 730) going off
+#     through the village from about frame 880. 4.5 s, as the short needs 2.67 s of it with handles.
+#   33.5 s, frames 1005 to 1120, row 19: from the north-east, lower still and close, the particle
+#     beam coming down by the stone tower at about 1041, a second of handle before it.
+#   37.33 s, frames 1120 to 1300, row 20: low from the south-west, the beam's foot walking the square.
+#   43.33 s, frames 1300 to 1410, row 22: from the west, high, the beam's last seconds and then the
+#     nuke's trail coming down at the top of the frame, with the beam already out.
+#   47.0 s, frames 1410 to 1560, row 23: from the north-west, steep and a little closer than before
+#     (2.2 where it was 2.4), the impact at about 1440, the pull and the fireball.
+# The high view from the south (2.5 0 -14) left a black wedge over the top left at 2560x1440, and
+# still at -20: past about 3 absolute and at a shallow tilt the far ground is beyond the draw distance.
+
+3.0   cut     2000 1750 2.5 0 -14
+3.5   shot
+29.0  cut     2000 1750 1.5 90 6
+29.5  shot
+33.5  cut     2000 1750 1.0 135 12
+34.0  shot
+37.33 cut     2000 1750 1.1 -45 10
+37.83 shot
+43.33 cut     2000 1750 2.0 -90 -16
+43.83 shot
+47.0  cut     2000 1750 2.2 -135 -26
+47.5  shot

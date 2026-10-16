@@ -351,9 +351,9 @@ void CountermeasuresBehavior::launchVolley()
 		vel.z = 0.0f;
 
 		Real velocity = physics->getVelocityMagnitude();
-		if( velocity < 1.0f )
+		if( velocity < ConvertRetailPerFrameRate(1.0f) )
 		{
-			velocity = -10.0f;
+			velocity = ConvertRetailPerFrameRate(-10.0f);
 		}
 		vel.scale( velocity * data->m_volleyVelocityFactor );
 

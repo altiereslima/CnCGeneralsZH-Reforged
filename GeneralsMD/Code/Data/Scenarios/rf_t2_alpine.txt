@@ -1,0 +1,24 @@
+# Trailer 2, timeline.t2.js rows 13 and 14 on Alpine Assault: spectre_reaim.txt's gunship circling
+# the town crossroads (1310,1290), re-aimed onto the Battlemasters at 1210,1210 and then onto
+# 1420,1380, with Red Guard and armour standing in the streets so the shells land on something.
+# Shells reach the crossroads from about frame 324, 1210,1210 from about 414 and 1420,1380 from 594.
+#
+# On 2026-10-11 the blocks moved off the houses they had been spawned into (GermanPub01,
+# GermanTownHouse1, GermanPubBib2; legal.py --audit) onto the streets beside them, and a block of
+# Battlemasters joined the crossroads so the first salvo hits armour.
+#
+#   generals.exe -win -xres 2560 -yres 1440 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover
+#     -observer -side 0 FactionAmerica -side 1 FactionChina -seed 1 -scenario rf_t2_alpine
+#     -cinema rf_t2_alpine -video <from> <to> rt_t2_alpine -recordfps 60
+
+10    spawn      0  AmericaCommandCenter     1   start0:240:60
+10    spawn      1  ChinaCommandCenter       1   start1:-260:0
+10    spawn      1  ChinaTankBattleMaster    4   1310 1290  30
+10    spawn      1  ChinaInfantryRedguard    12  1320 1330  16
+10    spawn      1  ChinaTankBattleMaster    4   1210 1210  30
+10    spawn      1  ChinaTankBattleMaster    3   1420 1380  30
+10    spawn      1  ChinaInfantryRedguard    10  1380 1320  16
+20    power      0  AmericaCommandCenter     1310 1290  SuperweaponSpectreGunship
+360   reaim      0  AmericaJetSpectreGunship  1210 1210
+480   reaim      0  AmericaJetSpectreGunship  1420 1380

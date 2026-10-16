@@ -154,11 +154,11 @@ UpdateSleepTime CheckpointUpdate::update()
 		
 		if ( open )
 		{
-			if ( radius > 0 ) geom.setMinorRadius( radius - 0.333f );
+			if ( radius > 0 ) geom.setMinorRadius( radius - ConvertRetailPerFrameRate( 0.333f ) );
 		}
 		else //closed
 		{
-			if ( radius < m_maxMinorRadius ) geom.setMinorRadius( radius + 0.333f );
+			if ( radius < m_maxMinorRadius ) geom.setMinorRadius( radius + ConvertRetailPerFrameRate( 0.333f ) );
 		}
 		
 

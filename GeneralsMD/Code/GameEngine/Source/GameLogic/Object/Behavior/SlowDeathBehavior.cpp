@@ -145,8 +145,8 @@ static void parseWeapon( INI* ini, void *instance, void * /*store*/, const void*
 		{ "FX",																parseFX,													NULL, 0 },
 		{ "OCL",															parseOCL,													NULL, 0 },
 		{ "Weapon",														parseWeapon,											NULL, 0 },
-		{ "FlingForce",												INI::parseReal,										NULL, offsetof( SlowDeathBehaviorModuleData, m_flingForce) },
-		{ "FlingForceVariance",								INI::parseReal,										NULL, offsetof( SlowDeathBehaviorModuleData, m_flingForceVariance) },
+		{ "FlingForce",												INI::parseRetailPerFrameReal,			NULL, offsetof( SlowDeathBehaviorModuleData, m_flingForce) },
+		{ "FlingForceVariance",								INI::parseRetailPerFrameReal,									NULL, offsetof( SlowDeathBehaviorModuleData, m_flingForceVariance) },
 		{ "FlingPitch",												INI::parseAngleReal,							NULL, offsetof( SlowDeathBehaviorModuleData, m_flingPitch) },
 		{ "FlingPitchVariance",								INI::parseAngleReal,							NULL, offsetof( SlowDeathBehaviorModuleData, m_flingPitchVariance) },
 		{ 0, 0, 0, 0 }
@@ -233,7 +233,7 @@ void SlowDeathBehavior::beginSlowDeath(const DamageInfo *damageInfo)
 				// this object sinks slowly after it dies so don't draw a
 				// floating shadow decal on the ground above it.
 				obj->getDrawable()->setShadowsEnabled(false);
-				draw->setTerrainDecalFadeTarget( 0.0f, -0.2f );
+				draw->setTerrainDecalFadeTarget( 0.0f, ConvertRetailPerFrameRate(-0.2f) );
 			}
 
 
@@ -308,7 +308,7 @@ void SlowDeathBehavior::beginSlowDeath(const DamageInfo *damageInfo)
 				physics->setAllowToFall(true);
 				physics->applyForce(&force);
 				physics->setExtraBounciness(-1.0);					// we don't want this guy to bounce at all
-				physics->setExtraFriction(-3 * SECONDS_PER_LOGICFRAME_REAL);							// reduce his ground friction a bit
+				physics->setExtraFriction(-3.0f / RETAIL_LOGICFRAMES_PER_SECOND);							// reduce his ground friction a bit
 				physics->setAllowBouncing(true);
 				Real orientation = ATan2(force.y, force.x);
 				physics->setAngles(orientation, 0, 0);

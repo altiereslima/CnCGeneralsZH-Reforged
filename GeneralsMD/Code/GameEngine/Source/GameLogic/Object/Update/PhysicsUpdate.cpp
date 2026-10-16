@@ -53,10 +53,12 @@
 
 const Real DEFAULT_MASS = 1.0f;
 
-const Real DEFAULT_SHOCK_YAW = 0.05f;
-const Real DEFAULT_SHOCK_PITCH = 0.025f;
-const Real DEFAULT_SHOCK_ROLL = 0.025f;
+const Real DEFAULT_SHOCK_YAW = ConvertRetailPerFrameRate(0.05f);
+const Real DEFAULT_SHOCK_PITCH = ConvertRetailPerFrameRate(0.025f);
+const Real DEFAULT_SHOCK_ROLL = ConvertRetailPerFrameRate(0.025f);
 
+// Every friction below, the clamps and m_extraFriction are the share of speed lost per retail (30 Hz)
+// frame; retailFrictionToFrame turns one into the share per frame now, so a second loses the same.
 const Real DEFAULT_FORWARD_FRICTION = 0.15f;
 const Real DEFAULT_LATERAL_FRICTION = 0.15f;
 const Real DEFAULT_Z_FRICTION = 0.8f;
@@ -68,7 +70,12 @@ const Real MIN_AERO_FRICTION = 0.00f;
 const Real MIN_NON_AERO_FRICTION = 0.01f;
 const Real MAX_FRICTION = 0.99f;
 
-const Real STUN_RELIEF_EPSILON = 0.5f;
+static Real retailFrictionToFrame(Real f)
+{
+	return 1.0f - ConvertRetailPerFrameFactor(1.0f - f);
+}
+
+const Real STUN_RELIEF_EPSILON = ConvertRetailPerFrameRate(0.5f);
 
 #include "Common/CRCDebug.h"
 
@@ -161,12 +168,12 @@ static void parseHeightToSpeed( INI* ini, void * /*instance*/, void *store, cons
 static void parseFrictionPerSec( INI* ini, void * /*instance*/, void *store, const void* /*userData*/ )
 {
 	Real fricPerSec = INI::scanReal(ini->getNextToken());
-	Real fricPerFrame = fricPerSec * SECONDS_PER_LOGICFRAME_REAL;
-	*(Real *)store = fricPerFrame;
-} 
+	Real fricPerRetailFrame = fricPerSec / RETAIL_LOGICFRAMES_PER_SECOND;
+	*(Real *)store = fricPerRetailFrame;
+}
 
 //-------------------------------------------------------------------------------------------------
-/*static*/ void PhysicsBehaviorModuleData::buildFieldParse(MultiIniFieldParse& p) 
+/*static*/ void PhysicsBehaviorModuleData::buildFieldParse(MultiIniFieldParse& p)
 {
   UpdateModuleData::buildFieldParse(p);
 
@@ -175,9 +182,9 @@ static void parseFrictionPerSec( INI* ini, void * /*instance*/, void *store, con
 		{ "Mass",								INI::parsePositiveNonZeroReal,		NULL, offsetof( PhysicsBehaviorModuleData, m_mass ) },
 
 		{ "ShockResistance",		INI::parsePositiveNonZeroReal,		NULL, offsetof( PhysicsBehaviorModuleData, m_shockResistance ) },
-		{ "ShockMaxYaw",				INI::parsePositiveNonZeroReal,		NULL, offsetof( PhysicsBehaviorModuleData, m_shockMaxYaw ) },
-		{ "ShockMaxPitch",			INI::parsePositiveNonZeroReal,		NULL, offsetof( PhysicsBehaviorModuleData, m_shockMaxPitch ) },
-		{ "ShockMaxRoll",				INI::parsePositiveNonZeroReal,		NULL, offsetof( PhysicsBehaviorModuleData, m_shockMaxRoll ) },
+		{ "ShockMaxYaw",				INI::parseRetailPerFrameReal,		NULL, offsetof( PhysicsBehaviorModuleData, m_shockMaxYaw ) },
+		{ "ShockMaxPitch",			INI::parseRetailPerFrameReal,		NULL, offsetof( PhysicsBehaviorModuleData, m_shockMaxPitch ) },
+		{ "ShockMaxRoll",				INI::parseRetailPerFrameReal,		NULL, offsetof( PhysicsBehaviorModuleData, m_shockMaxRoll ) },
 
 		{ "ForwardFriction",			parseFrictionPerSec,		NULL, offsetof( PhysicsBehaviorModuleData, m_forwardFriction ) },
 		{ "LateralFriction",			parseFrictionPerSec,		NULL, offsetof( PhysicsBehaviorModuleData, m_lateralFriction ) },
@@ -292,7 +299,7 @@ Real PhysicsBehavior::getAerodynamicFriction() const
 	Real f = getPhysicsBehaviorModuleData()->m_aerodynamicFriction + m_extraFriction;
 	if (f < MIN_AERO_FRICTION) f = MIN_AERO_FRICTION;
 	if (f > MAX_FRICTION) f = MAX_FRICTION;
-	return f;
+	return retailFrictionToFrame(f);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -301,7 +308,7 @@ Real PhysicsBehavior::getForwardFriction() const
 	Real f = getPhysicsBehaviorModuleData()->m_forwardFriction + m_extraFriction;
 	if (f < MIN_NON_AERO_FRICTION) f = MIN_NON_AERO_FRICTION;
 	if (f > MAX_FRICTION) f = MAX_FRICTION;
-	return f;
+	return retailFrictionToFrame(f);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -310,7 +317,7 @@ Real PhysicsBehavior::getLateralFriction() const
 	Real f = getPhysicsBehaviorModuleData()->m_lateralFriction + m_extraFriction;
 	if (f < MIN_NON_AERO_FRICTION) f = MIN_NON_AERO_FRICTION;
 	if (f > MAX_FRICTION) f = MAX_FRICTION;
-	return f;
+	return retailFrictionToFrame(f);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -319,7 +326,7 @@ Real PhysicsBehavior::getZFriction() const
 	Real f = getPhysicsBehaviorModuleData()->m_ZFriction + m_extraFriction;
 	if (f < MIN_NON_AERO_FRICTION) f = MIN_NON_AERO_FRICTION;
 	if (f > MAX_FRICTION) f = MAX_FRICTION;
-	return f;
+	return retailFrictionToFrame(f);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -464,7 +471,7 @@ void PhysicsBehavior::applyFrictionalForces()
 
 	if (getFlag(APPLY_FRICTION2D_WHEN_AIRBORNE) || !getObject()->isSignificantlyAboveTerrain() || deckTaxiing ) 
 	{
-		applyYPRDamping(1.0f - DEFAULT_LATERAL_FRICTION);
+		applyYPRDamping(1.0f - retailFrictionToFrame(DEFAULT_LATERAL_FRICTION));
 
 		if (m_vel.x || m_vel.y)
 		{
@@ -533,7 +540,7 @@ Bool PhysicsBehavior::handleBounce(Real oldZ, Real newZ, Real groundZ, Coord3D* 
 		bounceForce->y = 0.0f;
 		bounceForce->z = getMass() * desiredAccelZ;
 
-		const Real DAMPING = 0.7f;
+		const Real DAMPING = 0.7f;	// once per impact, which lasts one frame at any rate
 		applyYPRDamping(DAMPING);
 
 		if (vz < 0.0f)
@@ -567,7 +574,7 @@ Bool PhysicsBehavior::handleBounce(Real oldZ, Real newZ, Real groundZ, Coord3D* 
 //-------------------------------------------------------------------------------------------------
 inline Bool isVerySmall3D(const Coord3D& v)
 {
-	const Real THRESH = 0.01f;
+	const Real THRESH = ConvertRetailPerFrameRate(0.01f);
 	return (fabs(v.x) < THRESH && fabs(v.y) < THRESH && fabs(v.z) < THRESH);
 }
 
@@ -670,7 +677,7 @@ UpdateSleepTime PhysicsBehavior::update()
 		m_vel.z += m_accel.z;
 
 		// when vel gets tiny, just clamp to zero
-		const Real THRESH = 0.001f;
+		const Real THRESH = ConvertRetailPerFrameRate(0.001f);
 		if (fabsf(m_vel.x) < THRESH) m_vel.x = 0.0f;
 		if (fabsf(m_vel.y) < THRESH) m_vel.y = 0.0f;
 		if (fabsf(m_vel.z) < THRESH) m_vel.z = 0.0f;
@@ -887,11 +894,12 @@ UpdateSleepTime PhysicsBehavior::update()
 			// only apply force if it's a pretty steep fall, so that things
 			// going down hills don't injure themselves (unless the hill is really steep)
 			const Real MIN_ANGLE_TAN = 3.0f;	//	roughly 71 degrees
-			const Real TINY_DELTA = 0.01f;
-			if ((fabs(m_vel.x) <= TINY_DELTA || fabs(activeVelZ / m_vel.x) >= MIN_ANGLE_TAN) && 
+			const Real TINY_DELTA = ConvertRetailPerFrameRate(0.01f);
+			if ((fabs(m_vel.x) <= TINY_DELTA || fabs(activeVelZ / m_vel.x) >= MIN_ANGLE_TAN) &&
 				(fabs(m_vel.y) <= TINY_DELTA || fabs(activeVelZ / m_vel.y) >= MIN_ANGLE_TAN))
 			{
-				Real damageAmt = netSpeed * getMass() * d->m_fallHeightDamageFactor;
+				// the damage factors were tuned against the speed per retail frame
+				Real damageAmt = netSpeed * LOGICFRAMES_PER_RETAIL_FRAME * getMass() * d->m_fallHeightDamageFactor;
 
 				DamageInfo damageInfo;
 				damageInfo.in.m_damageType = DAMAGE_FALLING;
@@ -1032,7 +1040,7 @@ Bool PhysicsBehavior::wasPreviouslyOverlapped(Object *obj) const
 //-------------------------------------------------------------------------------------------------
 void PhysicsBehavior::scrubVelocityZ( Real desiredVelocity ) 
 { 	 
-	if (fabs(desiredVelocity) < 0.001f) 
+	if (fabs(desiredVelocity) < ConvertRetailPerFrameRate(0.001f))
 	{
 		m_vel.z = 0; 
 	} 
@@ -1049,7 +1057,7 @@ void PhysicsBehavior::scrubVelocityZ( Real desiredVelocity )
 //-------------------------------------------------------------------------------------------------
 void PhysicsBehavior::scrubVelocity2D( Real desiredVelocity ) 
 { 	 
-	if (desiredVelocity < 0.001f) 
+	if (desiredVelocity < ConvertRetailPerFrameRate(0.001f))
 	{
 		m_vel.x = 0; 
 		m_vel.y = 0;
@@ -1135,7 +1143,7 @@ void PhysicsBehavior::doBounceSound(const Coord3D& prevPos)
 	if (!m_bounceSound)
 		return;
 
-	const Real NORMAL_VEL_Z	= 0.25f;
+	const Real NORMAL_VEL_Z	= ConvertRetailPerFrameRate(0.25f);
 	const Real NORMAL_MASS	= 50.0f;
 
 	// get the per-unit sound for the collision which was stuffed in on Object creation.
@@ -1372,7 +1380,7 @@ void PhysicsBehavior::onCollide( Object *other, const Coord3D *loc, const Coord3
 				while (objToBounce->getContainedBy() != NULL)
 					objToBounce = objToBounce->getContainedBy();
 				
-				Real bounceOutDist = usRadius * 0.1f;
+				Real bounceOutDist = usRadius * ConvertRetailPerFrameRate(0.1f);	// every frame it touches
 				Coord3D tmp = *objToBounce->getPosition();
 				tmp.x -= bounceOutDist * delta.x / dist;
 				tmp.y -= bounceOutDist * delta.y / dist;
@@ -1441,7 +1449,8 @@ void PhysicsBehavior::onCollide( Object *other, const Coord3D *loc, const Coord3
 						// this used to fire a temp weapon at the crash site, which hits everything in the
 						// weapon's radius - and the collision is re-evaluated for every object in the pile,
 						// so a vehicle landing among five units damaged all five, five times over.  Damage
-						// the thing actually collided with, once.
+						// the thing actually collided with, once.  It still repeats every frame of contact,
+						// so each frame deals a retail frame's share; the effect plays on retail frames only.
 						const WeaponTemplate *weaponTemplate = getPhysicsBehaviorModuleData()->m_vehicleCrashesIntoNonBuildingWeaponTemplate;
 						if (weaponTemplate)
 						{
@@ -1452,10 +1461,11 @@ void PhysicsBehavior::onCollide( Object *other, const Coord3D *loc, const Coord3
 							damageInfo.in.m_deathType = weaponTemplate->getDeathType();
 							damageInfo.in.m_sourceID = obj->getID();
 							damageInfo.in.m_sourcePlayerMask = obj->getControllingPlayer() ? obj->getControllingPlayer()->getPlayerMask() : 0;
-							damageInfo.in.m_amount = weaponTemplate->getPrimaryDamage(nullBonus);
+							damageInfo.in.m_amount = weaponTemplate->getPrimaryDamage(nullBonus) / LOGICFRAMES_PER_RETAIL_FRAME;
 
 							other->attemptDamage(&damageInfo);
-							FXList::doFXObj(weaponTemplate->getFireFX(obj->getVeterancyLevel()), obj);
+							if (TheGameLogic->getFrame() % LOGICFRAMES_PER_RETAIL_FRAME == 0)
+								FXList::doFXObj(weaponTemplate->getFireFX(obj->getVeterancyLevel()), obj);
 						}
 					}
 				}
@@ -1472,9 +1482,9 @@ void PhysicsBehavior::onCollide( Object *other, const Coord3D *loc, const Coord3
 		}
 		else
 		{
-			if (overlap > 5.0f) 
+			if (overlap > 5.0f)
 				overlap = 5.0f;
-			factor = -overlap;
+			factor = -ConvertRetailPerFrameSquared(overlap);	// a spring, pushing every frame they overlap
 		}
 
 		force.x = factor * delta.x / dist;

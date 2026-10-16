@@ -74,30 +74,13 @@ enum HealthBarModeType
 	HEALTH_BAR_MODE_COUNT	= 4,
 };
 
-/** The HudScale option's steps, 100/115/130/150% of the bottom HUD's own size (ControlBarHudScale). */
-enum { HUD_SCALE_COUNT = 4 };
-
 /// -team left a slot alone: its team comes from -teams, or none
 enum { AUTO_SKIRMISH_TEAM_UNSET = -2 };
 
-/** The interface: the HUD, mouse and keys of Zero Hour 1.04, or this fork's own.  Picked for each
-	* run by -interface (the launcher passes it), Classic without it; Options.ini has no say.  Client
-	* only, and never read by GameLogic: two players on different styles are still in the same game. */
-enum { INTERFACE_STYLE_CLASSIC = 0, INTERFACE_STYLE_REFORGED = 1, INTERFACE_STYLE_COUNT = 2 };
-
-/** The IncomeRate option: what the income beside the money is counted over.  Automatic is per
-	* minute below INCOME_RATE_AUTOMATIC_PER_SECOND_FROM dollars a second and per second from there
-	* up: under that a whole number of dollars a second rounds most of the income away, which is
-	* what "+2/s" for $135 a minute does. */
-enum IncomeRateModeType
-{
-	INCOME_RATE_PER_SECOND	= 0,	///< "+40/s", what the bar has always shown
-	INCOME_RATE_PER_MINUTE	= 1,	///< "+2400/min"
-	INCOME_RATE_AUTOMATIC		= 2,
-
-	INCOME_RATE_MODE_COUNT	= 3,
-};
-enum { INCOME_RATE_AUTOMATIC_PER_SECOND_FROM = 10 };
+/** The mouse: Zero Hour 1.04's clicks, drags and edge scroll, or this fork's own (right button orders,
+	* left drag selects with shift adding, the camera drag and the wider edge band).  Picked for each run
+	* by -mouse, Classic without it.  Client only, and never read by GameLogic. */
+enum { MOUSE_STYLE_CLASSIC = 0, MOUSE_STYLE_REFORGED = 1, MOUSE_STYLE_COUNT = 2 };
 
 /** The language the game's words are shown in.  English is the string table EA shipped; every other
 	* entry names a translation GameText lays over it.  Speech and video stay what the install has. */
@@ -108,6 +91,18 @@ enum TextLanguageType
 	TEXT_LANGUAGE_GERMAN	= 2,
 
 	TEXT_LANGUAGE_COUNT		= 3,
+};
+
+/** The LightingStyle option.  Classic draws a map's lights as the map gives them; Reforged takes
+	* the same lights and moves weight from the flat ambient and the fill lights to the sun, warms the
+	* sun and cools the ambient (reforgeLighting), deepens the sun's shadow to match, and grades the
+	* Direct3D 11 picture.  Client only: nothing in GameLogic reads a light. */
+enum LightingStyleType
+{
+	LIGHTING_STYLE_CLASSIC	= 0,
+	LIGHTING_STYLE_REFORGED	= 1,
+
+	LIGHTING_STYLE_COUNT		= 2,
 };
 
 /** The AI profile knobs -aiknobsoff can switch off for a measurement. */
@@ -213,7 +208,10 @@ public:
 	Bool m_shadowsForParticles;		// "ShadowsForParticles": big alpha-blended particle clouds drop a soft blob on the ground
 	Bool m_volumetricSmokeShadows;	// "VolumetricSmokeShadows": smoke and dust shade the world and themselves through the sun's map (Direct3D 11)
 	Bool m_smokeFireLighting;		// "SmokeFireLighting": smoke takes light from the fire beside it
+	Bool m_explosionDebrisTrails;	// "DebrisTrails": blasts throw smoke-trailing fragments and burning shrapnel
+	Int m_shadowQuality;				// "ShadowQuality": the sun's depth map at 1024, 2048 or 4096 texels a side (Direct3D 11)
 	Bool m_classicGraphics;				// "ClassicGraphics": the game's own art, tile, shadows and picture; read at startup
+	Int m_lightingStyle;					// "LightingStyle": LightingStyleType; the map's lights are rebalanced as each map loads
 	Bool m_shadowMap;							// "-shadowmap": draw the casters into the sun's depth buffer as well
 	Bool m_shadowMapReport;				// "-shadowmapreport": log what ended up in that buffer, once a second
 	Bool m_shadowMapOnly;					// "-shadowmaponly": the map's shadows with the stencil volumes' own darkening off
@@ -352,12 +350,12 @@ public:
 	Bool m_debugAIObstacles;			///< Used to display AI obstacle debug information
 	Bool m_showObjectHealth;			///< debug display object health
 	Int m_healthBarMode;					///< HealthBarModeType: which units wear a bar at all
-	Int m_hudScale;								///< HUD size step, 0 = 100%; see ControlBarHudScale (client only)
-	Int m_interfaceStyle;					///< INTERFACE_STYLE_CLASSIC or INTERFACE_STYLE_REFORGED, set by -interface only (client only, never GameLogic)
-	Bool isClassicUI() const { return m_interfaceStyle == INTERFACE_STYLE_CLASSIC; }
-	/// which button gives a click on the ground its order.  Reforged: the right.  Classic: the left, as
-	/// 1.04 shipped, or the right under EA's Alternate Mouse Setup, where the left only selects
-	Bool leftButtonOrders() const { return isClassicUI() && !m_useAlternateMouse; }
+	Int m_healthBarColors;				///< 0 the green-to-red health ramp, 1 the owner's player colour (client only)
+	Int m_mouseStyle;							///< MOUSE_STYLE_CLASSIC or MOUSE_STYLE_REFORGED, set by -mouse only (client only, never GameLogic)
+	Bool isClassicMouse() const { return m_mouseStyle == MOUSE_STYLE_CLASSIC; }
+	/// which button gives a click on the ground its order.  Reforged mouse: the right.  Classic: the left,
+	/// as 1.04 shipped, or the right under EA's Alternate Mouse Setup, where the left only selects
+	Bool leftButtonOrders() const { return isClassicMouse() && !m_useAlternateMouse; }
 	Bool rightButtonOrders() const { return !leftButtonOrders(); }
 	Int m_playerColorScheme;			///< PlayerColorSchemeType: whose colour the client draws (client only)
 	Int m_textLanguage;						///< TextLanguageType: the translation GameText lays over the CSF, read once at startup (client only)
@@ -446,23 +444,16 @@ public:
 	Bool m_zoomToCursor;				///< the mouse wheel zooms toward whatever the cursor is over
 	Int m_zoomSpeed;					///< "ZoomSpeed" in Options.ini: percent of the height one wheel notch moves the camera; 100 is the game's own
 	Bool m_isometricCamera;				///< the tactical view from far off down a narrow cone, near enough orthographic
-	Bool m_smoothMotion;				///< R1: models shown between their last two logic states each render frame (W3DSmoothMotion.h)
 	Int m_dragTolerance;				///< pixels the pointer may travel with a button held before the press is a drag; replaces Mouse.ini's DragTolerance
 	Bool m_formationDrag;				///< with the move, attack move or guard key armed, a left drag spreads the selection along the line drawn
-	Bool m_showAllyCursors;				///< in a network game, draw where each ally's mouse is pointing
+	Bool m_buildWithoutWorker;			///< with nothing selected the command bar shows a builder's buildings; off, an empty bar as 1.04 had it
 	Bool m_chromaLighting;				///< put the state of the match on Razer hardware
 	Int m_menuTransitionSpeed;			///< percent of the authored speed the menus slide and fade at; 100 = as drawn
 	Int m_textureFilterMode;			///< 0 bilinear, 1 trilinear, 2 anisotropic
 	Int m_anisotropyLevel;				///< samples anisotropic filtering may take; 0 = whatever the card offers
-	Bool m_showHudOverlay;				///< draw the fps / elapsed time / income line in the corner
-	Bool m_showNetBox;					///< the player's own switch for that corner: the network box, or the plate where the bar has no page
-	Int m_incomeRateMode;				///< IncomeRateModeType: the income beside the money per second, per minute or whichever reads better
+	Bool m_showNetBox;					///< the player's own switch for the top right info strip (InGameUI::drawHudOverlay)
 	Bool m_showEmptyBuildingPips;		///< the row of empty slots over a building nobody is in
-	Bool m_showPlacementRangeRing;		///< while placing a structure, ring its weapon range
-	Bool m_showSkillStrip;					///< watching, every general's bought promotions, bottom right
-	Bool m_showSuperweaponStrip;		///< the superweapon countdown cameos, top right
 	Bool m_workersReturnToSupply;		///< a worker that finishes a build job goes back to the dock it left
-	Bool m_detailedBuildTooltips;		///< put build time, weapon range and damage in the build tooltip
 	Bool m_archiveReplays;					///< keep a timestamped copy of every replay, instead of only the last one
 	Int m_bloomIntensity;				///< Glow strength in percent, 0 = off; the renderer derives the rest
 	Bool m_buildMapCache;
@@ -484,11 +475,13 @@ public:
 	Int m_techRespawn;							///< -techrespawn <n>: the lobby's tech building respawn, in minutes, for an -autoskirmish run
 	Int m_supplyPileLimit;					///< -supplypilelimit <n>: the lobby's supply pile limit, in players a pile, for an -autoskirmish run
 	Int m_superweapons;							///< -superweapons <n>: the lobby's superweapon rule, a SUPERWEAPONS_ mode, for an -autoskirmish run
+	Int m_startingCash;							///< -startingcash <n>: the lobby's starting cash for an -autoskirmish run (0 = DefaultStartingCash)
 	Int m_maxGameFrames;						///< -maxframes <n>: quit after n logic frames however the match is going (0 = no limit)
 	Int m_screenShotFrame;					///< -screenshot <n>: save one picture when the run reaches logic frame n (0 = never)
 	Int m_videoStartFrame;					///< -video <from> <to> [name]: the first logic frame recorded
 	Int m_videoEndFrame;						///< -video: the last logic frame recorded (0 = no video)
 	AsciiString m_videoName;				///< -video: the recording is Videos\<name>.mp4 next to the save games
+	Int m_videoPictures;						///< -recordfps <n>: pictures recorded of each logic frame, n over LOGICFRAMES_PER_SECOND (1 = a picture a logic frame)
 	Bool m_directorRecord;					///< -directorrecord [name]: the director films the whole match, split for two fights, and the run quits at its end
 	AsciiString m_directorScoutFile;	///< -directorscout <file>: -directorrecord's first pass, headless, writes the match's fights and special powers here
 	AsciiString m_directorTimelineFile;	///< -directortimeline <file>: what the first pass wrote, which the filming pass reads to arrive before each fight
@@ -557,6 +550,8 @@ public:
 	
 	UnsignedInt m_iniCRC;							///< CRC of important INI files
 	UnsignedInt m_exeCRC;							///< CRC of the executable
+	void computeExeCRC( void );				///< m_exeCRC from the build fingerprint, the version and the two scb as they resolve now
+	UnsignedInt m_baseExeCRC;					///< m_exeCRC before any -mod mounted: the build without its mods, for the LAN mod check
 
 	BodyDamageType m_movementPenaltyDamageState;	///< at this body damage state, we have movement penalties
 
@@ -723,8 +718,13 @@ public:
 
 	Bool				m_isBreakableMovie;							///< if we enter a breakable movie, set this flag
 	Bool				m_breakTheMovie;								///< The user has hit escape!
-	AsciiString m_modDir;
-	AsciiString m_modBIG;
+	std::vector<AsciiString> m_mods;	///< every -mod in command-line order, later wins: a folder ends in '\', anything else is a .big
+	AsciiString m_modName;	///< UTF-8, each mod's "<name> <version>" from its mod.json (else the folder or archive name), joined by ", " in m_mods order; empty without -mod
+	std::vector<AsciiString> m_modNames;	///< UTF-8, each mod's mod.json "name" (else the folder or archive name), in m_mods order
+	std::vector<Bool> m_modIsPatch;	///< -modpatch: TRUE for each m_mods entry given as a patch; without -modfactions a patch is a plain -mod
+	std::vector< std::vector<AsciiString> > m_modPatches;	///< -modfactions: the -modpatch folders over each m_mods[n], later wins
+	std::vector<AsciiString> m_retailPatches;	///< -modfactions: the -modpatch folders given before any -mod, over retail's files
+	Bool m_modFactions;	///< -modfactions: every mod's factions load beside retail's under "M<n>~" names (ModNamespace)
 
 	//-allAdvice feature
 	//Bool m_allAdvice;
@@ -763,5 +763,11 @@ extern GlobalData* TheWritableGlobalData;
 	* line switch that picks a mode.  Keeping the derivation in one place is what stops -borderless and
 	* a borderless Options.ini from disagreeing about what borderless entails. */
 extern void applyWindowMode( void );
+
+/** The Reforged lighting style applied to one time of day's lights, in place: the first light is
+	* the sun, the other two the map's fills.  Derived from the values the map gave, so a dusk map
+	* stays a dusk map; WorldHeightMap calls it on the tables it has just read, which is why it can
+	* never be applied twice to the same numbers. */
+extern void reforgeLighting( GlobalData::TerrainLighting lights[MAX_GLOBAL_LIGHTS] );
 
 #endif

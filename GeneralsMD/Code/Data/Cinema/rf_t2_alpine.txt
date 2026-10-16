@@ -1,0 +1,18 @@
+# Trailer 2, timeline.t2.js rows 13 and 14: Scenarios/rf_t2_alpine.txt on Alpine Assault (command
+# line there). Zoom is relative to the observer's opening view, which measured 1.27 absolute on this
+# map, so the spectre_reaim list's 2.6 is 3.31 here and its top quarter is black past the map edge.
+#
+# 3 s, frames 300 to 410, row 13: the crossroads at 1310,1290 from the south-east over the roofs,
+#   the gunship's first salvo bursting on the Battlemasters and Red Guard there from about 324. Until
+#   2026-10-11 this view looked at 1200,1215, where nothing landed before 414, so the row had only
+#   the gunship crossing the top of the frame.
+# 14 s, frames 420 to 520, row 14: the Battlemasters at 1210,1210 from the north-west, the shells
+#   bursting between the houses after the re-aim on frame 360.
+# 17.5 s, frames 525 to 630: the whole orbit from high up, the gunship at the top of its circle.
+
+3.0   cut     1310 1290 0.9 45 10
+3.5   shot
+14.0  cut     1210 1210 0.9 -135 10
+14.5  shot
+17.5  cut     1300 1290 2.4 -45 -16
+18.0  shot

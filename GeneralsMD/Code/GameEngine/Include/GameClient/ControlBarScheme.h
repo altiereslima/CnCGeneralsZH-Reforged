@@ -51,10 +51,6 @@
 #define __CONTROL_BAR_SCHEME_H_
 
 //-----------------------------------------------------------------------------
-// SYSTEM INCLUDES ////////////////////////////////////////////////////////////
-//-----------------------------------------------------------------------------
-
-//-----------------------------------------------------------------------------
 // USER INCLUDES //////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 #include "GameClient/Color.h"
@@ -145,7 +141,8 @@ public:
 
 	AsciiString m_name;												///< it's name
 	ICoord2D m_ScreenCreationRes;							///< Used to determine what screen res this will look the best on
-	AsciiString m_side;												///< contain what faction type this command bar was made for (used when selecting command bar by template	
+	AsciiString m_side;												///< contain what faction type this command bar was made for (used when selecting command bar by template
+	Bool m_controlBarPro;											///< read from ControlBarProReforged.ini, the bar every side wears
 	Image *m_buttonQueueImage;								///< We'll probably want each one to have it's own image.
 	Image *m_rightHUDImage;										///< We'll probably want each one to have it's own right HUD image.
 	Color m_buildUpClockColor;								///< we can setup the color for the buildup clock if we want
@@ -276,6 +273,11 @@ public:
 		* is really showing.  Empty when nothing else shares it. */
 	AsciiString getCurrentArtTwinSide( void ) const;
 
+	/// the bar on screen wears its scheme's own painting, ControlBar Pro's
+	Bool isCurrentSchemePainted( void ) const;
+	/// the scheme's painting, cut at the panel seams and each piece drawn where its panel stands
+	void drawPainting( ICoord2D offset, Bool foreground );
+
 
 	// parse Functions for the INI file
 	const FieldParse *getFieldParse() const { return m_controlBarSchemeFieldParseTable; }								///< returns the parsing fields
@@ -290,9 +292,11 @@ public:
 	void preloadAssets( TimeOfDay timeOfDay );									///< preload the assets
 
 private:
-	ControlBarScheme *findSchemeForSide( const AsciiString& side ) const;	///< the widest of that side's schemes the screen can wear
+	ControlBarScheme *findSchemeForSide( const AsciiString& side, Bool controlBarProOnly = FALSE ) const;	///< the widest of that side's schemes the screen can wear
+	ControlBarScheme *findSchemeForFaction( const AsciiString& side ) const;	///< the side's own ControlBar Pro scheme, else its country's, else America's
 
 	ControlBarScheme *m_currentScheme;													///< the current scheme that everythign uses
+	Bool m_loadingControlBarPro;														///< newControlBarScheme marks what it makes as ControlBar Pro's
 	Coord2D m_multiplyer;																	
 	
 	typedef std::list< ControlBarScheme* > ControlBarSchemeList;			///< list of control bar schemes
@@ -307,5 +311,7 @@ private:
 //-----------------------------------------------------------------------------
 // EXTERNALS //////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
+/// a mod's faction, which gets our American power tray and our science layout (owner's call)
+Bool ControlBarIsModFaction( const PlayerTemplate *pt );
 
 #endif // __CONTROL_BAR_SCHEME_H_

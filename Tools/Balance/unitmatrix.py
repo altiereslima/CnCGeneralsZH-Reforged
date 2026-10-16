@@ -9,20 +9,28 @@ unconditioned ArmorSet and body MaxHealth, frames to kill both ways. The page di
 can weigh them by price; the AI's aiMatchupScore is the same ratio on a log scale.
 
     python unitmatrix.py --out <page.html>
+    python unitmatrix.py --mod ShockWave --out <page.html>
+    python unitmatrix.py --all <dir>
     python unitmatrix.py --selfcheck
 
 The game data comes from Run beside the source; ZHR_RUN_DIR points it at another Run, as siege.py does.
+--mod mounts one mod over it the way -mod does (a folder, or its name under the user data's Mods), and
+the sides and their units then come from that data: the lobby's PlayerTemplates and what their
+buildings build. --all writes birim-matrisi.html and one birim-matrisi-<mod>.html per installed mod,
+each page linking the others.
 """
 
 import argparse
 import collections
 import copy
+import html
 import json
 import math
 import os
 import re
 import struct
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -34,7 +42,7 @@ sys.path.insert(0, str(GENERALS / "Code" / "Tools"))
 import bigfile  # noqa: E402
 import gametext  # noqa: E402
 
-LOGIC_FPS = 30
+LOGIC_FPS = 60  # LOGICFRAMES_PER_SECOND
 SORTIE_MSEC = 20000
 SORTIE_FRAMES = SORTIE_MSEC * LOGIC_FPS / 1000.0      # AI_SORTIE_FRAMES
 OVERKILL_TOLERANCE = 0.0001
@@ -48,14 +56,29 @@ BODIES_WITH_HEALTH = {"activebody", "structurebody", "hivestructurebody", "undea
 NOT_HEALTH_DAMAGE = {"STATUS", "SUBDUAL_MISSILE", "SUBDUAL_VEHICLE", "SUBDUAL_BUILDING", "SUBDUAL_UNRESISTABLE",
                      "KILL_PILOT", "KILL_GARRISONED", "HEALING"}
 UNRESISTED = {"UNRESISTABLE", "SUBDUAL_UNRESISTABLE"}
+MODULE_KEYS = ("body", "behavior", "draw", "clientupdate")
 SHOWN_KINDS = ("INFANTRY", "VEHICLE", "AIRCRAFT")
-# the page's SIDES table names these and nothing else; Boss_ units have a side of their own, and the
-# Generals Challenge copies (GC_) borrow a general's side but are never built in a skirmish
+# the Generals Challenge copies (GC_) borrow a general's side but are never built in a skirmish
 CHALLENGE_PREFIX = "gc_"
-SIDES = ("America", "AmericaAirForceGeneral", "AmericaLaserGeneral", "AmericaSuperWeaponGeneral",
-         "China", "ChinaTankGeneral", "ChinaInfantryGeneral", "ChinaNukeGeneral",
-         "GLA", "GLAToxinGeneral", "GLADemolitionGeneral", "GLAStealthGeneral")
+# the sides the game itself ships, with the page's Turkish label and tag; a mod's side keeps these only
+# while its lobby name (SIDE:<side>) is still the retail one
+VANILLA_SIDES = {
+    "America": ("USA", "ABD", "ABD"),
+    "AmericaAirForceGeneral": ("USA Air Force General", "ABD Hava Kuvvetleri", "HVK"),
+    "AmericaLaserGeneral": ("USA Laser General", "ABD Lazer", "LZR"),
+    "AmericaSuperWeaponGeneral": ("USA Super Weapon General", "ABD Süper Silah", "SSL"),
+    "China": ("China", "Çin", "ÇİN"),
+    "ChinaTankGeneral": ("China Tank General", "Çin Tank", "TNK"),
+    "ChinaInfantryGeneral": ("China Infantry General", "Çin Piyade", "PYD"),
+    "ChinaNukeGeneral": ("China Nuke General", "Çin Nükleer", "NÜK"),
+    "GLA": ("GLA", "GLA", "GLA"),
+    "GLAToxinGeneral": ("GLA Toxin General", "GLA Toksin", "TKS"),
+    "GLADemolitionGeneral": ("GLA Demolition General", "GLA Yıkım", "YKM"),
+    "GLAStealthGeneral": ("GLA Stealth General", "GLA Gizlilik", "GZL"),
+}
+VANILLA_FACTIONS = {"usa": "ABD", "china": "Çin", "gla": "GLA"}
 PATCH_FILES = ("Data/INI/BalanceReforged.ini", "Data/INI/FixesReforged.ini")
+MODS_DIR = Path(os.environ.get("ZH_USER_DATA_DIR", Path.home() / "Documents" / "Command and Conquer Generals Zero Hour Data")) / "Mods"
 
 Shots = collections.namedtuple("Shots", "damage delay clip reload opening")
 
@@ -74,14 +97,44 @@ def msec_to_frames(msec):
 
 # ---- files -----------------------------------------------------------------------------------------
 
-class GameFiles:
-    """Data/... paths resolved like the game: Code/Data master, then loose under Run, then the archives."""
+def is_reforged_archive(big):
+    """ArchiveFileSystem.cpp isReforgedArchiveName: the fork's upscaled art goes by its file name."""
+    return big.name.lower().startswith("reforged")
 
-    def __init__(self):
+
+def is_fork_owned(path):
+    """FileSystem::isForkOwnedPath: what the fork installs loose next to the exe, which no mod replaces."""
+    p = path.lower().replace("/", "\\")
+    if p.startswith("data\\ini\\") and "\\" not in p[len("data\\ini\\"):] and p.endswith("reforged.ini"):
+        return True
+    if p.startswith("data\\ini\\mappedimages\\handcreated\\reforged") and p.endswith(".ini"):
+        return True
+    return (p == "data\\patch.str" or p.startswith(("data\\turkish\\", "data\\german\\", "art\\textures\\reforged",
+                                                     "window\\")) or p == "install_final.bmp")
+
+
+class GameFiles:
+    """Data/... paths resolved like the game: Code/Data master, then loose under Run, then the archives.
+
+    With a mod (one -mod folder): its loose file or its archive's copy goes in front of all of that
+    (FileSystem::modLooseFile), except over a path the fork ships loose; its archives go over the retail
+    ones, and the fork's Reforged*.big go back on top (ArchiveFileSystem::loadMods)."""
+
+    def __init__(self, mod=None):
         self.members = {}
+        self.mod = mod
         bigs = sorted(RUN_DIR.glob("*.big"), key=lambda big: big.name.lower())
         for big in bigs:
             self._index(big, big.name.lower().startswith("patch"))
+        if mod:
+            # a folder's archives against FilenameList order (case-insensitive, subfolders too), each with
+            # overwrite, so the first name wins as in retail's own pass ("!!" or "00_" is the mod's patch)
+            for big in sorted(mod.rglob("*.big"), key=lambda big: str(big).lower(), reverse=True):
+                if not is_reforged_archive(big):
+                    self._index(big, True)
+            for big in bigs:
+                if is_reforged_archive(big):
+                    self._index(big, True)
 
     def _index(self, big, overwrite):
         with open(big, "rb") as f:
@@ -90,25 +143,35 @@ class GameFiles:
                 if overwrite or path.lower() not in self.members:
                     self.members[path.lower()] = (path, big, offset, size)
 
-    def read(self, path):
-        for loose in (CODE_DATA / path.split("/", 1)[1], RUN_DIR / path):
-            if loose.is_file():
-                return loose.read_bytes()
-        if path.lower() not in self.members:
-            return None
+    def _fork_loose(self, path):
+        return [loose for loose in (CODE_DATA / path.split("/", 1)[1], RUN_DIR / path) if loose.is_file()]
+
+    def _archived(self, path):
         _, big, offset, size = self.members[path.lower()]
         with open(big, "rb") as f:
             f.seek(offset)
             return f.read(size)
 
+    def read(self, path):
+        if self.mod:
+            loose = self.mod / path
+            archived = path.lower() in self.members and self.mod in self.members[path.lower()][1].parents
+            if (loose.is_file() or archived) and not (is_fork_owned(path) and self._fork_loose(path)):
+                return loose.read_bytes() if loose.is_file() else self._archived(path)
+        for loose in self._fork_loose(path):
+            return loose.read_bytes()
+        return self._archived(path) if path.lower() in self.members else None
+
     def list_dir(self, directory):
         """Every *.ini under a Data/... directory, sorted as INI::loadDirectory loads them."""
         found = {path for path, _, _, _ in self.members.values()
                  if path.lower().startswith(directory.lower() + "/") and path.lower().endswith(".ini")}
-        for root in (CODE_DATA / directory.split("/", 1)[1], RUN_DIR / directory):
+        for root in (CODE_DATA / directory.split("/", 1)[1], RUN_DIR / directory) + ((self.mod / directory,) if self.mod else ()):
             if root.is_dir():
                 found |= {directory + "/" + p.relative_to(root).as_posix() for p in root.rglob("*.ini")}
-        return sorted(found)
+        # FilenameList is a case-insensitive set of backslashed paths, and the files in subfolders load last
+        return sorted({path.lower(): path for path in sorted(found)}.values(),
+                      key=lambda path: ("/" in path[len(directory) + 1:], path.lower().replace("/", "\\")))
 
     def text(self, path):
         return self.read(path).decode("latin-1")
@@ -159,8 +222,16 @@ def yes(token):
     return token.lower() in ("yes", "true", "1")
 
 
+LEADING_NUMBER = re.compile(r"[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?")
+
+
+def real(token):
+    """INI::scanReal is sscanf %f: the number at the front, and whatever follows it ("75.0.") is ignored."""
+    return float(LEADING_NUMBER.match(token).group(0))
+
+
 def percent(token):
-    return float(token.rstrip("%")) / 100.0
+    return real(token) / 100.0
 
 
 # ---- weapons, armor, locomotors ------------------------------------------------------------------------
@@ -175,22 +246,22 @@ def apply_weapon(weapon, children):
     for line, _ in children:
         key, value = field(line)
         if key == "primarydamage":
-            weapon["damage"] = float(value[0])
+            weapon["damage"] = real(value[0])
         elif key == "damagetype":
             weapon["type"] = value[0].upper()
         elif key == "attackrange":
-            weapon["range"] = float(value[0])
+            weapon["range"] = real(value[0])
         elif key == "delaybetweenshots":
             # WeaponTemplate::parseShotDelay: one number, or Min:a Max:b
             parts = re.split(r"[\s:=]+", " ".join(value))
-            low = high = int(float(parts[1] if parts[0].lower() == "min" else parts[0]))
+            low = high = int(real(parts[1] if parts[0].lower() == "min" else parts[0]))
             if parts[0].lower() == "min" and len(parts) > 3 and parts[2].lower() == "max":
-                high = int(float(parts[3]))
+                high = int(real(parts[3]))
             weapon["delay"] = (msec_to_frames(low), msec_to_frames(high))
         elif key == "clipsize":
-            weapon["clip"] = int(value[0])
+            weapon["clip"] = int(real(value[0]))
         elif key == "clipreloadtime":
-            weapon["reload"] = msec_to_frames(int(float(value[0])))
+            weapon["reload"] = msec_to_frames(int(real(value[0])))
         elif key == "antiairbornevehicle":
             weapon["anti_air"] = yes(value[0])
         elif key == "antiground":
@@ -198,13 +269,13 @@ def apply_weapon(weapon, children):
         elif key == "autoreloadsclip":
             weapon["reload_type"] = value[0].upper()
         elif key == "preattackdelay":
-            weapon["pre_attack"] = msec_to_frames(int(float(value[0])))
+            weapon["pre_attack"] = msec_to_frames(int(real(value[0])))
         elif key == "preattacktype":
             weapon["prefire"] = value[0].upper()
         elif key == "continuousfireone":
-            weapon["fire_one"] = int(value[0])
+            weapon["fire_one"] = int(real(value[0]))
         elif key == "continuousfiretwo":
-            weapon["fire_two"] = int(value[0])
+            weapon["fire_two"] = int(real(value[0]))
         elif key == "weaponbonus":
             weapon["bonus"].setdefault(value[0].upper(), {})[value[1].upper()] = percent(value[2])
 
@@ -239,7 +310,9 @@ class Thing:
         self.display = ""
         self.locomotor = None
         self.variations = []                # BuildVariations: what the factory really makes
+        self.command_sets = [""]            # its CommandSet, then any a CommandSetUpgrade switches to
         self.body = None                   # (tag, MaxHealth or 0 for a body that cannot be hurt)
+        self.modules = {}                  # module tag -> module name, for ReplaceModule
         self.sets = {"weapon": [], "armor": []}
         self.sets_copied = {"weapon": True, "armor": True}
 
@@ -265,24 +338,30 @@ class Thing:
             elif key == "side":
                 self.side = value[0]
             elif key == "buildcost":
-                self.cost = float(value[0])
+                self.cost = real(value[0])
             elif key == "displayname":
                 self.display = value[0]
             elif key == "locomotor" and value[0].upper() == "SET_NORMAL":
                 self.locomotor = value[1].lower()
             elif key == "buildvariations":
                 self.variations = [name.lower() for name in value]
+            elif key == "commandset":
+                self.command_sets = [value[0].lower()] + self.command_sets[1:]
             elif key in ("weaponset", "armorset"):
                 self.add_set(key[:-3], nested, multifile)
             elif key == "removemodule":
                 self.drop_module(value[0])
             elif key == "replacemodule":
-                self.drop_module(value[0])
-                self.apply_modules(nested)
+                # ThingTemplate::parseModuleName: a tag that holds a module of another type means the data
+                # numbered the modules differently, and the block is dropped (Shockwave's Tank_ChinaBunker)
+                replaced = self.modules.get(value[0].lower())
+                if replaced is None or not nested or field(nested[0][0])[1][0].lower() == replaced:
+                    self.drop_module(value[0])
+                    self.apply_modules(nested)
             elif key in ("addmodule", "inheritablemodule", "overrideablebylikekind"):
                 self.apply_modules(nested)
-            elif key == "body":
-                self.set_body(value, nested)
+            elif key in MODULE_KEYS:
+                self.add_module(key, value, nested)
 
     def apply_kinds(self, tokens):
         if tokens[0][0] not in "+-":
@@ -318,14 +397,24 @@ class Thing:
         sets.append((conditions, content))
 
     def drop_module(self, tag):
+        self.modules.pop(tag.lower(), None)
         if self.body and self.body[0].lower() == tag.lower():
             self.body = None
 
     def apply_modules(self, children):
         for line, nested in children:
             key, value = field(line)
-            if key == "body":
-                self.set_body(value, nested)
+            if key in MODULE_KEYS:
+                self.add_module(key, value, nested)
+
+    def add_module(self, key, value, nested):
+        if len(value) > 1:
+            self.modules[value[1].lower()] = value[0].lower()
+        if value[0].lower() == "commandsetupgrade":
+            self.command_sets += [words[0].lower() for name, words in (field(line) for line, _ in nested)
+                                  if name in ("commandset", "commandsetalt") and words]
+        if key == "body":
+            self.set_body(value, nested)
 
     def set_body(self, value, children):
         health = 0.0
@@ -333,7 +422,7 @@ class Thing:
             for line, _ in children:
                 key, number = field(line)
                 if key == "maxhealth":
-                    health = float(number[0])
+                    health = real(number[0])
         self.body = (value[1] if len(value) > 1 else "", health)
 
 
@@ -343,14 +432,17 @@ class GameData:
         self.armors = {}
         self.locomotors = {}
         self.things = {}
+        self.skipped = []                  # patch blocks naming what this data does not have
 
-        for keyword, args, children in ini_blocks(files.text("Data/INI/Weapon.ini")):
-            if keyword.lower() == "weapon" and args[0].lower() not in self.weapons:
-                self.weapons[args[0].lower()] = new_weapon(args[0])
-                apply_weapon(self.weapons[args[0].lower()], children)
+        # WeaponReforged.ini right after Weapon.ini, as GameEngine::init loads it: the fork's own names
+        for path in ("Data/INI/Weapon.ini", "Data/INI/WeaponReforged.ini"):
+            for keyword, args, children in ini_blocks(files.text(path)):
+                if keyword.lower() == "weapon" and args[0].lower() not in self.weapons:
+                    self.weapons[args[0].lower()] = new_weapon(args[0])
+                    apply_weapon(self.weapons[args[0].lower()], children)
         for keyword, args, children in ini_blocks(files.text("Data/INI/Locomotor.ini")):
             if keyword.lower() == "locomotor":
-                speeds = [float(value[0]) for key, value in (field(line) for line, _ in children) if key == "speed"]
+                speeds = [real(value[0]) for key, value in (field(line) for line, _ in children) if key == "speed"]
                 self.locomotors[args[0].lower()] = speeds[-1] if speeds else 0.0
         self.armor_names = {}
         for keyword, args, children in ini_blocks(files.text("Data/INI/Armor.ini")):
@@ -373,18 +465,50 @@ class GameData:
                     buttons.setdefault(args[0].lower(), {}).update(field(line) for line, _ in children)
         self.buildable = {button["object"][0].lower() for button in buttons.values()
                           if button.get("command", [""])[0].upper() == "UNIT_BUILD" and "object" in button}
+        # CommandSet blocks: a later one, CommandSetReforged.ini's included, replaces the whole set
+        self.command_sets = {}
+        for path in ("Data/INI/CommandSet.ini", "Data/INI/CommandSetReforged.ini"):
+            for keyword, args, children in ini_blocks(files.text(path)):
+                if keyword.lower() == "commandset":
+                    self.command_sets[args[0].lower()] = [buttons[value[0].lower()] for key, value in map(field, (
+                        line for line, _ in children)) if value and value[0].lower() in buttons]
+
+    def reachable(self, starts):
+        """Every object a player starting with these can build: the command sets of what it has, the
+        buttons in them that build or construct, and the sets of what those make, until nothing is new."""
+        seen, units, todo = set(), set(), [name.lower() for name in starts]
+        while todo:
+            name = todo.pop()
+            if name in seen or name not in self.things:
+                continue
+            seen.add(name)
+            for command_set in self.things[name].command_sets:
+                for button in self.command_sets.get(command_set, ()):
+                    command = button.get("command", [""])[0].upper()
+                    if command in ("UNIT_BUILD", "DOZER_CONSTRUCT") and "object" in button:
+                        todo.append(button["object"][0].lower())
+                        if command == "UNIT_BUILD":
+                            units.add(button["object"][0].lower())
+        return units
 
     def load_objects(self, text, multifile):
+        # a patch of an Object, Weapon or Armor the data never built, and a reskin of a missing original,
+        # is read and dropped (ThingFactory::parseObjectDefinition, WeaponStore, ArmorStore): a mod's
+        # archives replaced EA's files
         for keyword, args, children in ini_blocks(text):
             keyword = keyword.lower()
             if keyword == "objectreskin":
+                if args[1].lower() not in self.things:
+                    self.skipped.append(" ".join([keyword] + args))
+                    continue
                 thing = self.things[args[1].lower()].copy_as(args[0])
                 self.things[args[0].lower()] = thing
                 thing.apply(children, False)
+            elif keyword in ("object", "weapon", "armor") and multifile and args[0].lower() not in (
+                    self.things if keyword == "object" else self.weapons if keyword == "weapon" else self.armors):
+                self.skipped.append(" ".join([keyword] + args))
             elif keyword == "object":
                 if args[0].lower() not in self.things:
-                    if multifile:
-                        raise ValueError("%s patches an object that does not exist" % args[0])
                     self.things[args[0].lower()] = self.default.copy_as(args[0])
                 self.things[args[0].lower()].apply(children, multifile)
             elif keyword == "weapon" and multifile:
@@ -465,14 +589,87 @@ def best_attack(data, attacker, target):
 
 # ---- the page ------------------------------------------------------------------------------------------
 
+def game_strings(files):
+    """GameTextManager::init: Data/Generals.str when there is one, the English CSF otherwise."""
+    names = {}
+    table = files.read("Data/Generals.str")
+    if table is None:
+        entries = gametext.read_csf(files.read("Data/English/generals.csf"))
+    else:
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "Generals.str"
+            path.write_bytes(table)
+            entries = gametext.parse_str(path, strict=False)
+    for label, text in entries:
+        names.setdefault(label.lower(), text)
+    return names
+
+
+def playable_sides(files, names):
+    """The sides the skirmish lobby offers (PopulatePlayerTemplateComboBox): a PlayerTemplate with a
+    StartingBuilding whose general is not locked in ChallengeMode.ini, one per Side, in file order."""
+    locked = set()
+    for persona in re.split(r"GeneralPersona\d+", files.text("Data/INI/ChallengeMode.ini"))[1:]:
+        template = re.search(r"^\s*PlayerTemplate\s*=\s*(\S+)", persona, re.M | re.I)
+        enabled = re.search(r"^\s*StartsEnabled\s*=\s*(\S+)", persona, re.M | re.I)
+        if template and enabled and not yes(enabled.group(1)):
+            locked.add(template.group(1).lower())
+    templates = {}
+    for path in ("Data/INI/Default/PlayerTemplate.ini", "Data/INI/PlayerTemplate.ini"):
+        for keyword, args, children in ini_blocks(files.text(path)) if files.read(path) else ():
+            if keyword.lower() == "playertemplate":
+                templates.setdefault(args[0].lower(), {}).update(field(line) for line, _ in children)
+
+    sides = {}
+    factions = []
+    starts = {}
+    for template, fields in templates.items():
+        if not fields.get("startingbuilding") or template in locked or fields["side"][0] in sides:
+            continue
+        side = fields["side"][0]
+        starts[side] = [words[0] for key, words in fields.items()
+                        if words and (key == "startingbuilding" or key.startswith("startingunit"))]
+        faction = fields.get("baseside", [side])[0].lower()
+        lobby = names.get("side:" + side.lower()) or names.get(fields.get("displayname", [""])[0].lower(), side)
+        vanilla = VANILLA_SIDES.get(side)
+        if vanilla and vanilla[0] == lobby:
+            label, tag = vanilla[1], vanilla[2]
+        else:
+            # the mod's own name, tagged by the word that tells it from its faction's other sides
+            words = [word for word in re.findall(r"\w+", lobby) if word.lower() not in ("general", faction)]
+            label, tag = lobby, (words[0] if words else lobby)[:3].upper()
+        if faction not in factions:
+            factions.append(faction)
+        sides[side] = {"label": label, "tag": tag, "faction": faction, "main": not any(
+            info["faction"] == faction for info in sides.values())}
+    vanilla_order = list(VANILLA_SIDES)
+    ordered = sorted(sides, key=lambda side: (factions.index(sides[side]["faction"]),
+                                              vanilla_order.index(side) if side in vanilla_order else len(vanilla_order)))
+    for order, side in enumerate(ordered):
+        sides[side]["order"] = order
+    faction_labels = [{"value": faction, "label": VANILLA_FACTIONS.get(faction) or next(
+        info["label"] for info in sides.values() if info["faction"] == faction)} for faction in factions]
+    return sides, faction_labels, starts
+
+
 def build(files):
     data = GameData(files)
-    names = {}
-    for label, text in gametext.read_csf(files.read("Data/English/generals.csf")):
-        names.setdefault(label.lower(), text)
+    names = game_strings(files)
+    sides, factions, starts = playable_sides(files, names)
 
-    candidates = sorted((data.things[name] for name in data.buildable
-                         if name in data.things and data.things[name].side in SIDES and not name.startswith(CHALLENGE_PREFIX)),
+    # what each side's buildings and dozers offer; a unit keeps its own Side when that is one of the
+    # lobby's, and takes the first side that builds it otherwise (The End of Days' Russia units say
+    # Side = Russia under the ChinaNukeGeneral template)
+    owner = {}
+    for side in sorted(sides, key=lambda side: sides[side]["order"]):
+        for name in data.reachable(starts[side]):
+            owner.setdefault(name, data.things[name].side if data.things[name].side in sides else side)
+    # ...and every build button whose object says it is a lobby side's, in no set or not: the page has always
+    # carried those (Lazr_AmericaTankPaladin, Slth_GLAVehicleScudLauncher), so the retail page stays as it was
+    for name in data.buildable:
+        if name in data.things and data.things[name].side in sides:
+            owner.setdefault(name, data.things[name].side)
+    candidates = sorted((data.things[name] for name in owner if not name.startswith(CHALLENGE_PREFIX)),
                         key=lambda thing: thing.name)
     # the Technical's button builds a random chassis; the first one stands for all three, as it does in EA's data
     fighters = [data.things[thing.variations[0]] if thing.variations else thing for thing in candidates]
@@ -483,7 +680,7 @@ def build(files):
     def describe(index):
         thing = candidates[index]
         label = (thing.display or fighters[index].display).lower()
-        return {"id": thing.name, "name": names.get(label, thing.name), "side": thing.side}
+        return {"id": thing.name, "name": names.get(label, thing.name), "side": owner[thing.name.lower()]}
 
     def unit(index):
         fighter = fighters[index]
@@ -500,13 +697,18 @@ def build(files):
         frames, weapon = fight
         return {"frames": round(frames, 3), "weapon": weapon["name"], "range": weapon["range"]}
 
+    # what the reader could not make a fighter of: a body with no health it knows
+    unread = ["%s (%s)" % (fighter.name, fighter.modules.get(fighter.body[0].lower(), "?") if fighter.body else "no body")
+              for fighter in fighters if fighter.health() <= 0.0]
     return {
         "units": [unit(index) for index in kept],
         "attacks": [[attack(fights[a][t]) if fights[a][t] else None for t in kept] for a in kept],
         "excluded": [describe(index) for index in range(len(candidates)) if index not in kept],
         "fps": LOGIC_FPS,
         "sortieMsec": SORTIE_MSEC,
-    }
+        "sides": sides,
+        "factions": factions,
+    }, {"skipped": data.skipped, "unread": unread}
 
 
 def selfcheck():
@@ -519,34 +721,83 @@ def selfcheck():
     assert kill_frames(150.0, clip._replace(opening=15.0)) == 135.0
     assert kill_frames(10.0, gun) == 60.0
     assert kill_frames(480.0, Shots(0.0, 30.0, 0, 0.0, 0.0)) == CANNOT_KILL
-    assert msec_to_frames(2000) == 60 and msec_to_frames(100) == 3 and msec_to_frames(1) == 1
+    assert msec_to_frames(2000) == 120 and msec_to_frames(100) == 6 and msec_to_frames(1) == 1
+    assert real("75.0.") == 75.0 and real("-2e1x") == -20.0 and percent("50%") == 0.5
+    assert is_fork_owned("Data/INI/BalanceReforged.ini") and is_fork_owned("Window/Menus/MainMenu.wnd")
+    assert not is_fork_owned("Data/INI/Object/Reforged.ini") and not is_fork_owned("Data/INI/Weapon.ini")
     print("unitmatrix selfcheck: ok")
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    parser.add_argument("--out", type=Path, help="where to write the HTML page")
-    parser.add_argument("--selfcheck", action="store_true", help="check the frames-to-kill arithmetic and stop")
-    args = parser.parse_args()
-    if args.selfcheck:
-        selfcheck()
-        return
-    if args.out is None:
-        parser.error("--out is required")
+def installed_mods():
+    return sorted((folder.resolve() for folder in MODS_DIR.iterdir() if (folder / "mod.json").is_file()),
+                  key=lambda folder: folder.name.lower()) if MODS_DIR.is_dir() else []
 
+
+def page_name(mod):
+    return "birim-matrisi.html" if mod is None else "birim-matrisi-%s.html" % mod.name.lower()
+
+
+def game_title(mod):
+    if mod is None:
+        return "Zero Hour Reforged"
+    info = json.loads((mod / "mod.json").read_text(encoding="utf-8")) if (mod / "mod.json").is_file() else {}
+    return ("%s %s" % (info.get("name", mod.name), info.get("version", ""))).strip()
+
+
+def write_page(mod, out, games):
     started = time.time()
-    files = GameFiles()
+    files = GameFiles(mod)
     if files.read("Data/INI/Weapon.ini") is None or not files.list_dir("Data/INI/Object"):
         sys.exit("unitmatrix: no game data in %s. Put a Zero Hour install's *.big there (INIZH.big carries "
                  "the INIs, EnglishZH.big the names) or point ZHR_RUN_DIR at a Run that has them." % RUN_DIR)
     if files.read("Data/English/generals.csf") is None:
         sys.exit("unitmatrix: %s has no EnglishZH.big, which carries the unit names." % RUN_DIR)
 
-    page = build(files)
-    args.out.write_text(TEMPLATE.replace("__UNIT_DATA__", json.dumps(page, ensure_ascii=False)),
-                        encoding="utf-8", newline="\n")
-    print("%d units, %d without a weapon that kills, %s in %.1f s"
-          % (len(page["units"]), len(page["excluded"]), args.out, time.time() - started))
+    page, report = build(files)
+    title = game_title(mod)
+    switcher = "".join('<a href="%s"%s>%s</a>' % (page_name(game), ' aria-current="page"' if game == mod else "",
+                                                  html.escape(game_title(game))) for game in games)
+    text = (TEMPLATE.replace("__TITLE__", "Zero Hour" if mod is None else html.escape(title))
+            .replace("__SOURCE__", "INIZH.big" if mod is None else "modun arşivleri")
+            .replace("__GAME__", html.escape(title))
+            .replace("__GAMES__", switcher)
+            .replace("__UNIT_DATA__", json.dumps(page, ensure_ascii=False)))
+    out.write_text(text, encoding="utf-8", newline="\n")
+    print("%s: %d units over %d sides, %d without a weapon that kills, %d patch blocks skipped, %s in %.1f s"
+          % (title, len(page["units"]), len({unit["side"] for unit in page["units"]}), len(page["excluded"]),
+             len(report["skipped"]), out, time.time() - started))
+    if report["unread"]:
+        print("  no health read: " + ", ".join(report["unread"]))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    parser.add_argument("--out", type=Path, help="where to write the HTML page")
+    parser.add_argument("--mod", help="a mod folder, or its name under %s" % MODS_DIR)
+    parser.add_argument("--all", type=Path, metavar="DIR",
+                        help="write the page for Zero Hour Reforged and for every installed mod into DIR")
+    parser.add_argument("--selfcheck", action="store_true", help="check the frames-to-kill arithmetic and stop")
+    args = parser.parse_args()
+    if args.selfcheck:
+        selfcheck()
+        return
+
+    games = [None] + installed_mods()
+    if args.all is not None:
+        for game in games:
+            write_page(game, args.all / page_name(game), games)
+        return
+    if args.out is None:
+        parser.error("--out or --all is required")
+    mod = None
+    if args.mod:
+        mod = Path(args.mod) if Path(args.mod).is_dir() else MODS_DIR / args.mod
+        if not mod.is_dir():
+            parser.error("no mod folder %s" % mod)
+        mod = mod.resolve()
+        if mod not in games:
+            games.append(mod)
+    write_page(mod, args.out, games)
 
 
 TEMPLATE = r'''<!doctype html>
@@ -554,7 +805,7 @@ TEMPLATE = r'''<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Zero Hour Karşılaşma Matrisi</title>
+<title>__TITLE__ Karşılaşma Matrisi</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Semi+Condensed:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -665,6 +916,11 @@ h1 {
   text-wrap: balance;
 }
 .lede { margin: 8px 0 0; color: var(--ink-2); max-width: 68ch; }
+.games { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 10px; font-size: 13px; }
+.games a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--rule-strong); padding-block: 2px; }
+.games a:hover { color: var(--ink); border-color: var(--ink); }
+.games a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.games a[aria-current] { color: var(--ink); font-weight: 600; border-bottom: 2px solid var(--ink); }
 .readout {
   font-family: var(--font-data);
   font-size: 12px;
@@ -964,7 +1220,8 @@ table.matrix {
 <div class="page">
   <header class="masthead">
     <div>
-      <p class="eyebrow">Zero Hour Reforged · INIZH.big ve BalanceReforged.ini · birebir çarpışma</p>
+      <nav class="games" aria-label="Oyun">__GAMES__</nav>
+      <p class="eyebrow">__GAME__ · __SOURCE__ ve BalanceReforged.ini · birebir çarpışma</p>
       <h1>Kim kime karşı</h1>
       <p class="lede">Satırdaki birim, sütundaki birimle tek başına karşılaşıyor. Hücre kaç kat üstün olunduğunu söylüyor: 2, saldıranın hedefi hedefin onu öldürdüğü sürenin yarısında öldürdüğü demek. −2 tersi, hedef saldıranı yarı sürede öldürüyor. Köşegen kendi kendine karşı, yani 1; Comanche gibi kendi türünü vuramayan birimlerde taralı.</p>
     </div>
@@ -1046,27 +1303,13 @@ const UNITS = DATA.units;
 const ATTACKS = DATA.attacks;
 const FPS = DATA.fps;
 
-const SIDES = {
-  America:                   { label: "ABD",              tag: "ABD", faction: "usa",   order: 0 },
-  AmericaAirForceGeneral:    { label: "ABD Hava Kuvvetleri", tag: "HVK", faction: "usa", order: 1 },
-  AmericaLaserGeneral:       { label: "ABD Lazer",        tag: "LZR", faction: "usa",   order: 2 },
-  AmericaSuperWeaponGeneral: { label: "ABD Süper Silah",  tag: "SSL", faction: "usa",   order: 3 },
-  China:                     { label: "Çin",              tag: "ÇİN", faction: "china", order: 4 },
-  ChinaTankGeneral:          { label: "Çin Tank",         tag: "TNK", faction: "china", order: 5 },
-  ChinaInfantryGeneral:      { label: "Çin Piyade",       tag: "PYD", faction: "china", order: 6 },
-  ChinaNukeGeneral:          { label: "Çin Nükleer",      tag: "NÜK", faction: "china", order: 7 },
-  GLA:                       { label: "GLA",              tag: "GLA", faction: "gla",   order: 8 },
-  GLAToxinGeneral:           { label: "GLA Toksin",       tag: "TKS", faction: "gla",   order: 9 },
-  GLADemolitionGeneral:      { label: "GLA Yıkım",        tag: "YKM", faction: "gla",   order: 10 },
-  GLAStealthGeneral:         { label: "GLA Gizlilik",     tag: "GZL", faction: "gla",   order: 11 },
-};
+// the sides the game's lobby offers, read from its PlayerTemplate.ini; "main" is each faction's first
+const SIDES = DATA.sides;
 const FILTERS = [
-  { value: "base", label: "Ana taraflar (ABD, Çin, GLA)", test: u => ["America", "China", "GLA"].includes(u.side) },
+  { value: "base", label: `Ana taraflar (${DATA.factions.map(f => f.label).join(", ")})`, test: u => SIDES[u.side].main },
   { value: "all", label: "Bütün birimler, generaller dahil", test: () => true },
-  { value: "usa", label: "ABD, bütün generaller", test: u => SIDES[u.side].faction === "usa" },
-  { value: "china", label: "Çin, bütün generaller", test: u => SIDES[u.side].faction === "china" },
-  { value: "gla", label: "GLA, bütün generaller", test: u => SIDES[u.side].faction === "gla" },
-  ...Object.entries(SIDES).map(([side, info]) => ({ value: side, label: info.label, test: u => u.side === side })),
+  ...DATA.factions.map(f => ({ value: "faction:" + f.value, label: `${f.label}, bütün generaller`, test: u => SIDES[u.side].faction === f.value })),
+  ...Object.entries(SIDES).sort((a, b) => a[1].order - b[1].order).map(([side, info]) => ({ value: side, label: info.label, test: u => u.side === side })),
 ];
 const KIND_ORDER = { INFANTRY: 0, VEHICLE: 1, AIRCRAFT: 2 };
 const LOG_STEPS = [0.15, 0.5, 1, 1.585, 2.322, 3.322, 4.322];

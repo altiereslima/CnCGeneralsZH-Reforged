@@ -115,6 +115,11 @@ public:
 	SaveFileType saveFileType;				// type of save file we're dealing with
 	AsciiString missionMapName;				// used for mission saves
 	Int framesPerSecond;							// game speed the match was playing at, 0 in saves older than that
+	Int version;											// GameState block version the file was written with, read with the header
+
+	/// FALSE for a save written by the original game or by a build from before logic ran at 60
+	/// ticks a second: none of them loads in this one.
+	Bool isLoadable( void ) const;
 
 };
 
@@ -175,6 +180,9 @@ public:
 										 SnapshotType which = SNAPSHOT_SAVELOAD  );  ///< save a game
 	SaveCode missionSave( void );																	 ///< do a in between mission save
 	SaveCode loadGame( AvailableGameInfo gameInfo );							 ///< load a save file
+	/// TRUE, having told the player why, when this save cannot load here (SaveGameInfo::isLoadable).
+	/// Asked before anything is torn down, so the game or menu the player is in stays.
+	Bool refuseUnloadableSave( const SaveGameInfo &saveGameInfo );
 	/// A replay's rewind checkpoint: the whole world into a file at this path, and back out of it.
 	/// Nothing on screen says so, and the load calls afterReset once the engine is empty and before
 	/// the world goes back in, which is where the recorder picks its file up again.

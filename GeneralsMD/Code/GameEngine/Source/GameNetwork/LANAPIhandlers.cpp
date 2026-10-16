@@ -145,6 +145,14 @@ void LANAPI::handleGameAnnounce( LANMessage *msg, UnsignedInt senderIP )
 	else
 	{
 		LANGameInfo *game = LookupGame(UnicodeString(msg->GameInfo.gameName));
+		// Games are listed by name, so an announce under a name already listed used to rewrite that
+		// game, or remove it when the options did not parse, whoever sent it.  Only its host may.
+		if (game && game->getIP(0) != senderIP)
+		{
+			DEBUG_LOG(("LANAPI::handleGameAnnounce - 0x%08x announced game '%s' hosted by 0x%08x, ignored\n",
+				senderIP, WideCharAsUtf8( msg->GameInfo.gameName ).str(), game->getIP(0)));
+			return;
+		}
 		if (!game)
 		{
 			game = NEW LANGameInfo;
@@ -259,8 +267,21 @@ void LANAPI::handleRequestJoin( LANMessage *msg, UnsignedInt senderIP )
 					gameDataMatchName(dataMatch),
 					msg->GameToJoin.iniCRC, TheGlobalData->m_iniCRC,
 					msg->GameToJoin.exeCRC, TheGlobalData->m_exeCRC));
+				// The same build under different -mod lists: a mod changes the INI set and, with its own
+				// skirmish or multiplayer scripts, the exe CRC too (GlobalData::computeExeCRC), so the build is
+				// compared as it was before the mods mounted.  Then the player is told the host's mods rather
+				// than the bare mismatch.
+				WideChar joinerMod[g_lanModNameLength+1];
+				WideCharNCpy(joinerMod, msg->GameToJoin.modName, g_lanModNameLength);
+				joinerMod[g_lanModNameLength] = 0;
+				WideCharFromUtf8(TheGlobalData->m_modName.str(), reply.GameNotJoined.modName, ARRAY_SIZE(reply.GameNotJoined.modName));
+				const Bool modsDiffer = msg->GameToJoin.baseExeCRC == TheGlobalData->m_baseExeCRC &&
+					WideCharCmp(joinerMod, reply.GameNotJoined.modName) != 0;
+				DEBUG_LOG(("LANAPI::handleRequestJoin - mods them/us '%s'/'%s'\n",
+					WideCharAsUtf8(joinerMod).str(), TheGlobalData->m_modName.str()));
+
 				reply.LANMessageType = LANMessage::MSG_JOIN_DENY;
-				reply.GameNotJoined.reason = LANAPIInterface::RET_CRC_MISMATCH;
+				reply.GameNotJoined.reason = modsDiffer ? LANAPIInterface::RET_MOD_MISMATCH : LANAPIInterface::RET_CRC_MISMATCH;
 				reply.GameNotJoined.gameIP = m_localIP;
 				reply.GameNotJoined.playerIP = senderIP;
 				canJoin = false;
@@ -403,10 +424,22 @@ void LANAPI::handleJoinAccept( LANMessage *msg, UnsignedInt senderIP )
 {
 	if (msg->GameJoined.playerIP == m_localIP) // Is it for us?
 	{
+		// The slot is the sender's number and indexes our slot array, and the accept has to come from
+		// the game's own host; anyone else could seat us in a game, or past the end of one.  A direct
+		// connect host behind a router lists his inside address, so the address we dialled counts too.
+		LANGameInfo *joined = LookupGame(UnicodeString(msg->GameJoined.gameName));
+		const Int pos = msg->GameJoined.slotPosition;
+		const Bool fromHost = joined && (joined->getIP(0) == senderIP || senderIP == m_directConnectRemoteIP);
+		if (joined && (!fromHost || pos <= 0 || pos >= MAX_SLOTS))
+		{
+			DEBUG_LOG(("LANAPI::handleJoinAccept - accept from 0x%08x for slot %d is not the host's, ignored\n", senderIP, pos));
+			return;
+		}
+
 		if (m_pendingAction == ACT_JOIN) // Are we trying to join?
 		{
-			m_currentGame = LookupGame(UnicodeString(msg->GameJoined.gameName));
-		
+			m_currentGame = joined;
+
 			if (!m_currentGame)
 			{
 				DEBUG_ASSERTCRASH(false, ("Could not find game to join!"));
@@ -455,6 +488,11 @@ void LANAPI::handleJoinDeny( LANMessage *msg, UnsignedInt senderIP )
 	{
 		if (m_pendingAction == ACT_JOIN) // Are we trying to join?
 		{
+			if (msg->GameNotJoined.reason == RET_MOD_MISMATCH)
+			{
+				msg->GameNotJoined.modName[g_lanModNameLength] = 0;
+				m_joinDeniedHostMod = UnicodeString(msg->GameNotJoined.modName);
+			}
 			OnGameJoin(msg->GameNotJoined.reason, LookupGame(UnicodeString(msg->GameNotJoined.gameName)));
 			m_pendingAction = ACT_NONE;
 			m_expiration = 0;
@@ -522,7 +560,8 @@ void LANAPI::handleRequestGameLeave( LANMessage *msg, UnsignedInt senderIP )
 		LANGameInfo *game = m_games;
 		while (game)
 		{
-			if (game->getName().compare(msg->GameToLeave.gameName) == 0)
+			// only the host closing his own game takes it off the list, not anyone who names it
+			if (game->getName().compare(msg->GameToLeave.gameName) == 0 && game->getIP(0) == senderIP)
 			{
 				removeGame(game);
 				delete game;

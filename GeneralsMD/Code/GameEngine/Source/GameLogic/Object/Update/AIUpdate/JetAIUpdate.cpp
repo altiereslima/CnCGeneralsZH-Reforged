@@ -1706,7 +1706,7 @@ JetAIUpdateModuleData::JetAIUpdateModuleData()
 	m_lockonTime = 0;
 	m_lockonCursor.clear();
 	m_lockonInitialDist = 100;
-	m_lockonFreq = 0.5;
+	m_lockonFreq = ConvertRetailPerFrameRate(0.5f);
 	m_lockonAngleSpin = 720;
 	m_returnToBaseIdleTime = 0;
 }
@@ -1733,7 +1733,8 @@ JetAIUpdateModuleData::JetAIUpdateModuleData()
 		{ "LockonTime",										INI::parseDurationUnsignedInt, NULL, offsetof( JetAIUpdateModuleData, m_lockonTime ) },
 		{ "LockonCursor",									INI::parseAsciiString, NULL, offsetof( JetAIUpdateModuleData, m_lockonCursor ) },
 		{ "LockonInitialDist",						INI::parseReal, NULL, offsetof( JetAIUpdateModuleData, m_lockonInitialDist ) },
-		{ "LockonFreq",										INI::parseReal, NULL, offsetof( JetAIUpdateModuleData, m_lockonFreq ) },
+		// ticks scale with frames squared over LockonTime, so per frame it halves
+		{ "LockonFreq",										INI::parseRetailPerFrameReal, NULL, offsetof( JetAIUpdateModuleData, m_lockonFreq ) },
 		{ "LockonAngleSpin",							INI::parseAngleReal, NULL, offsetof( JetAIUpdateModuleData, m_lockonAngleSpin ) },
 		{ "LockonBlinky",									INI::parseBool, NULL, offsetof( JetAIUpdateModuleData, m_lockonBlinky ) },
 		{ "ReturnToBaseIdleTime",					INI::parseDurationUnsignedInt, NULL, offsetof( JetAIUpdateModuleData, m_returnToBaseIdleTime ) },

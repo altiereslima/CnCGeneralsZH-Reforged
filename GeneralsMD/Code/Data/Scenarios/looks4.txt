@@ -1,0 +1,82 @@
+# The four Direct3D 11 object looks of 528b9054 (cloak, revealed, EMP, power outage) as one GLA raid
+# on an American base on Twilight Flame, for a before/after against -d3d9. Seat 0 is the Superweapon
+# General and the local player (no -observer, so its own stealth draws see-through and its
+# detectors reveal), seat 1 the GLA. Seat 0 starts at 537,3188, seat 1 at 1733,4205. The base sits
+# on a plateau that ends at x 1100; 1337,2708 beyond it is a separate shelf whose path runs south.
+#
+# In order:
+#   frames 60..560   cloak: the own Colonel Burton walks east out of the base along y 3668; GLA
+#                    workers walk the other way, and a Radar Van driving in from frame 360 finds
+#                    him (the amber rim). Workers detect mines only.
+#   frames 300..800  revealed: Jarmen Kell walks west along the north edge of the base under a Spy
+#                    Drone, which finds him. The dozer's detector takes mines only and the Strategy
+#                    Center's is off without its battle plan, so neither does.
+#   frames 790..1150 EMP: Technicals, Rocket Buggies and Scorpions come in from the south-east and
+#                    the EMP Patriots' spheres stop them.
+#   frames 1150..    outage: RPG troopers kill the power plant at 857,2708, outside the Patriots'
+#                    275 reach, near frame 1250, and the base drops from +15 against -13 to +10;
+#                    the three Patriots (the only POWERED kind here) go dark.
+#
+#   generals.exe -win -borderless -xres 1280 -yres 720 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 2500 -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmericaSuperWeaponGeneral -side 1 FactionGLA -seed 7 -scenario looks4
+#     -cinema looks4 -video 45 1650 looks4_d3d11 -control 8861
+#   and the same with -d3d9; "reveal" typed over the socket on frame 10 (the console line, not a
+#   switch), since the camera visits ground seat 0 has not seen.
+
+# the base
+20    spawn      0  SupW_AmericaPowerPlant        1  697 3348
+20    spawn      0  SupW_AmericaPowerPlant        1  537 3508
+# spawned last, so the attack line's first match (newest first) is this plant
+20    spawn      0  SupW_AmericaPowerPlant        1  857 2708
+20    spawn      0  SupW_AmericaPatriotBattery    1  1017 3188
+20    spawn      0  SupW_AmericaPatriotBattery    1  1017 3348
+20    spawn      0  SupW_AmericaPatriotBattery    1  857 3508
+20    spawn      0  SupW_AmericaStrategyCenter    1  537 2868
+20    spawn      0  SupW_AmericaBarracks          1  217 2868
+20    spawn      0  SupW_AmericaWarFactory        1  377 3348
+20    spawn      0  SupW_AmericaSupplyCenter      1  377 3028
+20    spawn      0  SupW_AmericaInfantryRanger    5  600 3100 16
+40    move       0  SupW_AmericaInfantryRanger       880 3620
+300   move       0  SupW_AmericaVehicleDozer         700 2900
+1000  move       0  SupW_AmericaVehicleDozer         537 3000
+
+# cloak: Burton out of the base, the workers coming the other way
+20    spawn      0  SupW_AmericaInfantryColonelBurton  1  697 3668
+20    spawn      1  GLAInfantryWorker             3  1573 3725 20
+30    move       0  SupW_AmericaInfantryColonelBurton     1337 3668
+200   move       1  GLAInfantryWorker                1000 3668
+# workers detect mines only, so the amber rim comes from a Radar Van (range 250) driving in
+360   spawn      1  GLAVehicleRadarVan            1  1573 3725
+361   move       1  GLAVehicleRadarVan               1250 3690
+
+# revealed: Jarmen Kell along the north edge
+20    spawn      1  GLAInfantryJarmenKell         1  1017 2708
+250   spawn      0  SupW_AmericaVehicleSpyDrone   1  760 2770
+300   move       1  GLAInfantryJarmenKell            380 2770
+
+# EMP: the raid from the south-east
+780   spawn      1  GLAVehicleTechnical           3  1573 3725 40
+780   spawn      1  GLAVehicleRocketBuggy         3  1733 3725 40
+780   spawn      1  GLATankScorpion               2  1653 3885 50
+790   attackmove 1  GLAVehicleTechnical*             700 3250
+790   attackmove 1  GLAVehicleRocketBuggy            700 3250
+790   attackmove 1  GLATankScorpion                  700 3250
+
+# EMP after the sphere: a second wave drives to the edge of the Patriot at 1017,3348 (268 away),
+# is hit from about frame 1200 and stays disabled for 10 s each hit; the outage near 1250 stops
+# the Patriots, so from then on the arcs run with no new sphere over them
+1060  spawn      1  GLAVehicleTechnical           2  1573 3725 40
+1060  spawn      1  GLAVehicleRocketBuggy         2  1653 3725 40
+1065  move       1  GLAVehicleTechnical*             1250 3480
+1065  move       1  GLAVehicleRocketBuggy            1250 3480
+
+# outage: RPG troopers on the plant at 857,2708
+1150  spawn      1  GLAInfantryTunnelDefender     10  1017 2708 16
+1160  attack     1  GLAInfantryTunnelDefender     0  SupW_AmericaPowerPlant
+
+600   tally      0  SupW_AmericaInfantryColonelBurton
+800   tally      1  GLAInfantryJarmenKell
+1300  tally      0  SupW_AmericaPowerPlant
+1650  tally      0  SupW_AmericaPowerPlant
+1650  tally      1  GLAVehicleTechnical*

@@ -36,6 +36,9 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include <stddef.h>	// for offsetof, which we don't use but everyone who includes us does
+#include <set>
+#include <string>
+#include <vector>
 #include "Common/STLTypedefs.h"
 #include "Common/AsciiString.h"
 #include "Common/GameCommon.h"
@@ -165,6 +168,74 @@ typedef void (*INIBlockParse)( INI *ini );
 typedef void (*BuildMultiIniFieldProc)(MultiIniFieldParse& p);
 
 //-------------------------------------------------------------------------------------------------
+/** -modfactions: every name a mod defines is read as "M<n>~name" while that mod's files load, so two
+	* mods and retail can each have their own FactionAmerica, Ranger and Command_ConstructBarracks side
+	* by side.  A name the mod does not define stays retail's.  The rewrite is of the text, before the
+	* INI checksum sees it, so it is the same on every machine that has the same mods in the same order. */
+//-------------------------------------------------------------------------------------------------
+enum ModNameType
+{
+	MODNAME_OBJECT, MODNAME_WEAPON, MODNAME_ARMOR, MODNAME_DAMAGEFX, MODNAME_UPGRADE, MODNAME_SCIENCE,
+	MODNAME_SPECIALPOWER, MODNAME_COMMANDSET, MODNAME_COMMANDBUTTON, MODNAME_FXLIST, MODNAME_OCL,
+	MODNAME_PARTICLESYSTEM, MODNAME_LOCOMOTOR, MODNAME_PLAYERTEMPLATE, MODNAME_MAPPEDIMAGE,
+	MODNAME_AUDIOEVENT,
+	MODNAME_COUNT
+};
+
+class ModNamespace
+{
+public:
+	ModNamespace() : m_active( -1 ) {}
+
+	void scanMods( void );															///< every -mod's faction files, each under its own FileSystem focus
+	void scanLine( Int mod, const char *line );					///< a block header names one of the mod's own; "Side = X" keeps X out
+	void finishScan( Int mod );													///< drop the side names, which the engine compares as text
+	/// a file the mod ships under Art\W3D, Art\Textures or Data\Audio; a word naming it gets the prefix too,
+	/// and the FileSystem and WW3D then serve the mod's own copy
+	void addAsset( Int mod, const char *fileName );
+	void setActive( Int mod ) { m_active = mod; }				///< -1: nothing is rewritten
+	Int getActive( void ) const { return m_active; }
+	Int getNameCount( Int mod ) const { return (Int)m_mods[ mod ].all.size(); }
+
+	/// rewrite the active mod's names, and in a file field the files it ships, in a comment-free line in
+	/// place, every word but the first; FALSE when the result would not fit capacity bytes
+	Bool rewriteLine( char *line, size_t capacity ) const;
+	/// the same for the labels in the mod's own string table.  This runs after the INI checksum: the table
+	/// is the player's language, and two installs in different languages must still agree.
+	Bool rewriteLabels( char *line, size_t capacity ) const;
+	/// "M<n>~X" where mod n has no `type` called X is a reference to retail's X: TRUE and *retailName
+	/// set.  Finders ask this on a miss, so a definition of the mod's own X never falls through to retail's.
+	Bool findRetailName( const AsciiString &name, ModNameType type, AsciiString *retailName ) const;
+	Bool findRetailKey( NameKeyType key, ModNameType type, NameKeyType *retailKey ) const;
+	/// "M<n>~name" when mod n defines a `type` called name, else name: how a mod's own data that is not INI
+	/// (its SkirmishScripts.scb) names its things
+	AsciiString modName( Int mod, ModNameType type, const AsciiString &name ) const;
+	/// where the file name in a path-shaped word starts, past its last '\\' or '/': "Sub\\x.mp3" gives 4.
+	/// The prefix goes there, since FileSystem::splitModName reads it on the last part only
+	static size_t lastPathPart( const std::string &word );
+
+	static const char *const FactionFiles[];		///< what scanMods reads and the mod passes load, NULL-ended; no ".ini" is a directory
+
+private:
+	struct Names
+	{
+		std::set<std::string> all;
+		std::set<std::string> byType[ MODNAME_COUNT ];
+		std::set<std::string> sides;
+		std::set<std::string> assets;		///< lowercase: w3d and audio by base name, textures by file name
+	};
+	static Bool isAsset( const Names &names, const std::string &word );
+	static Bool isAssetField( const std::string &field );	///< a field whose value names a model, animation, texture or sound file
+	typedef Bool (ModNamespace::*WordTest)( const std::string &word, Bool assetField ) const;
+	Bool isNameOrAsset( const std::string &word, Bool assetField ) const;
+	Bool isModLabel( const std::string &word, Bool assetField ) const;
+	Bool prefixWords( char *line, size_t capacity, WordTest test ) const;
+	std::vector<Names> m_mods;
+	Int m_active;
+};
+extern ModNamespace TheModNamespace;
+
+//-------------------------------------------------------------------------------------------------
 /** INI Reader interface */
 //-------------------------------------------------------------------------------------------------
 class INI
@@ -179,6 +250,8 @@ public:
 
 	void loadDirectory( AsciiString dirName, Bool subdirs, INILoadType loadType, Xfer *pXfer );  ///< load directory of INI files
 	void load( AsciiString filename, INILoadType loadType, Xfer *pXfer );		///< load INI file
+	/// -modfactions: load path (a directory when directory) from each -mod in turn, under its focus and its names
+	static void loadModPasses( const char *path, Xfer *pXfer, Bool directory = FALSE );
 
 	static Bool isDeclarationOfType( AsciiString blockType, AsciiString blockName, char *bufferToCheck );
 	static Bool isEndOfBlock( char *bufferToCheck );
@@ -213,6 +286,8 @@ public:
 	static void parseTerrainRoadDefinition( INI *ini );
 	static void parseTerrainBridgeDefinition( INI *ini );
 	static void parseMetaMapDefinition( INI *ini );
+	static void parseCommandButtonHotKeyDefinition( INI *ini );
+	static void parseCommandBarGridDefinition( INI *ini );
 	static void parseFXListDefinition( INI *ini );
 	static void parseObjectCreationListDefinition( INI* ini );
 	static void parseMultiplayerSettingsDefinition( INI* ini );
@@ -253,6 +328,25 @@ public:
 		this game does not know used to end the match before it started. Set, an unknown field
 		name is logged and its line skipped instead of throwing. */
 	inline void setSkipUnknownFields( Bool skip ) { m_skipUnknownFields = skip; }
+
+	/** A patch INI loaded over a mod can name a special power the mod does not have. The reference
+		raises this, and ThingTemplate::parseModuleName drops the module it was read into. */
+	inline void setMissingSpecialPower( Bool missing ) { m_missingSpecialPower = missing; }
+	inline Bool hasMissingSpecialPower( void ) const { return m_missingSpecialPower; }
+
+	/** -modfactions prefixes every word a mod names a block with, and a mod can name one after an
+		engine word: The Power of the West has a ParticleSystem "Explosion", so "DamageType = Explosion"
+		arrived as "M2~Explosion".  A fixed list of names (an enum, Yes/No) is never a mod's, so its
+		scanners read past the prefix.  No retail name holds a '~'. */
+	static const char *withoutModPrefix( const char *token )
+	{
+		const char *p = token;
+		if (*p++ != 'M' || *p < '0' || *p > '9')
+			return token;
+		while (*p >= '0' && *p <= '9')
+			++p;
+		return *p == '~' ? p + 1 : token;
+	}
 	inline const char *getSeps( void ) const { return m_seps; }
 	inline const char *getSepsPercent( void ) const { return m_sepsPercent; }
 	inline const char *getSepsColon( void ) const { return m_sepsColon; }
@@ -270,6 +364,13 @@ public:
 	static void parseUnsignedInt( INI *ini, void *instance, void *store, const void* userData );
 	static void parseReal( INI *ini, void *instance, void *store, const void* userData );
 	static void parsePositiveNonZeroReal( INI *ini, void *instance, void *store, const void* userData );
+	/// userData is a const RealRange*; a value outside it, or NaN, is ignored in a map's rules file
+	/// (INI_LOAD_CREATE_OVERRIDES) and throws INI_INVALID_DATA anywhere else
+	struct RealRange { Real lo, hi; };
+	static void parseRealInRange( INI *ini, void *instance, void *store, const void* userData );
+	/// userData is a const IntRange*; out of range (past an Int included) is treated as parseRealInRange does
+	struct IntRange { Int lo, hi; };
+	static void parseIntInRange( INI *ini, void *instance, void *store, const void* userData );
 	static void parseBool( INI *ini, void *instance, void *store, const void* userData );
 	static void parseBitInInt32( INI *ini, void *instance, void *store, const void* userData );
 	static void parseAsciiString( INI *ini, void *instance, void *store, const void* userData );
@@ -314,6 +415,12 @@ public:
 	static void parseVelocityReal( INI *ini, void *instance, void *store, const void* userData );
 	// parse acceleration in (dist/sec^2) and convert to (dist/frame^2)
 	static void parseAccelerationReal( INI *ini, void *instance, void *store, const void* userData );
+	// parse a count of retail (30 Hz) frames, or a per-retail-frame amount or factor, into current frames (GameCommon.h)
+	static void parseRetailFramesUnsignedInt( INI *ini, void *instance, void *store, const void* userData );
+	static void parseRetailFramesInt( INI *ini, void *instance, void *store, const void* userData );
+	static void parseRetailFramesReal( INI *ini, void *instance, void *store, const void* userData );
+	static void parseRetailPerFrameReal( INI *ini, void *instance, void *store, const void* userData );
+	static void parseRetailPerFrameFactorReal( INI *ini, void *instance, void *store, const void* userData );
 	// parse angle in degrees and convert to radians
 	static void parseAngleReal( INI *ini, void *instance, void *store, const void *userData );
 	// note that this parses in degrees/sec, and converts to rads/frame!
@@ -360,9 +467,10 @@ public:
 
 	/**
 		utility routine that does a sscanf() on the string to get the Science, and throws
-		an exception if not of the right form.
+		an exception if not of the right form.  Under a multifile load an unknown name
+		returns SCIENCE_INVALID instead, and the caller skips the reference.
 	*/
-	static ScienceType scanScience(const char* token);
+	static ScienceType scanScience(INI* ini, const char* token);
 
 	/**
 		utility routine that does a sscanf() on the string to get the int, and throws
@@ -418,6 +526,7 @@ protected:
 	const char *m_blockEndToken;							///< token to represent end of data block
 	Bool m_endOfFile;													///< TRUE when we've hit EOF
 	Bool m_skipUnknownFields;									///< log and skip an unknown field instead of throwing
+	Bool m_missingSpecialPower;								///< a patch named a special power that does not exist
 #if defined(_DEBUG) || defined(_INTERNAL)
 	char m_curBlockStart[ INI_MAX_CHARS_PER_LINE ];	///< first line of cur block
 #endif

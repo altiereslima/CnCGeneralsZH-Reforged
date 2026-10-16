@@ -74,6 +74,7 @@
 #include "WW3D2/dx11runtime.h"
 #include "WW3D2/ffshader.h"
 #include "Platform/RenderTypes.h"
+#include "W3DDevice/GameClient/Module/W3DModelDraw.h"
 
 #include <algorithm>
 #include <vector>
@@ -90,6 +91,31 @@
 extern void DoTrees(RenderInfoClass & rinfo);
 extern void DoShadows(RenderInfoClass & rinfo, Bool stencilPass);
 extern void DoParticles(RenderInfoClass & rinfo);
+
+// The Direct3D 11 cloak goes by the stealthed state, not by the opacity, which a friendly stealth
+// unit swings between about a half and one: drawn by the opacity it blinked on and off.  Such a
+// unit always goes in the translucent pass, after the opaque world, because the cloak bends a copy
+// of the scene taken at its first draw.  theTranslucentPass is up while that pass draws.
+static Bool theTranslucentPass = FALSE;
+
+static Bool wearsCloak( const Drawable *draw )
+{
+	if( !Direct3D11_Draw_Effects() )
+		return FALSE;
+	const StealthLookType look = draw->getStealthDrawnLook();
+	const Real fade = draw->getStealthFade();
+	if( look == STEALTHLOOK_VISIBLE_FRIENDLY || look == STEALTHLOOK_VISIBLE_FRIENDLY_DETECTED )
+	{
+		// mines force opacity 0 and must not become a lens on the ground
+		if( draw->isKindOf( KINDOF_MINE ) )
+			return FALSE;
+		return TRUE;
+	}
+	// revealed fades in the translucent pass so the heat can come up from nothing
+	if( look == STEALTHLOOK_VISIBLE_DETECTED && fade < 0.99f )
+		return TRUE;
+	return FALSE;
+}
 
 // No texturing, no zbuffer reading/writing, primary gradient, no
 // blending, no fogging - mostly for use in solid-colored opaque objects.
@@ -415,6 +441,18 @@ Bool RTS3DScene::castRay(RayCollisionTestClass & raytest, Bool testAll, Int coll
 }
 
 //=============================================================================
+// posedPartsInView
+//=============================================================================
+/** A model whose animation carries it out of its bind pose (W3DModelDraw's animLeavesBindPose) is
+  * in view when its parts are, as they stand now. */
+//=============================================================================
+static Bool posedPartsInView(RenderObjClass *robj, CameraClass *camera)
+{
+	SphereClass posed;
+	return W3DModelDraw::getPosedBoundingSphere(robj, posed) && !camera->Cull_Sphere(posed);
+}
+
+//=============================================================================
 // RTS3DScene::Visibility_Check
 //=============================================================================
 /** Custom visibility check method for the RTS3DScene, we can put optimized
@@ -469,7 +507,7 @@ void RTS3DScene::Visibility_Check(CameraClass * camera)
 					// The same test the main pass hides a drawable by, or a unit under the fog of war,
 					// or a building standing in for its own ghost, shows up in the water and nowhere else.
 					Bool hidden = robj->Is_Hidden() || draw->isDrawableEffectivelyHidden() || draw->getFullyObscuredByShroud();
-					robj->Set_Visible(!hidden && draw->getDrawsInMirror() && !camera->Cull_Sphere(robj->Get_Bounding_Sphere()));
+					robj->Set_Visible(!hidden && draw->getDrawsInMirror() && (!camera->Cull_Sphere(robj->Get_Bounding_Sphere()) || posedPartsInView(robj, camera)));
 				}
 			}
 			else
@@ -497,7 +535,7 @@ void RTS3DScene::Visibility_Check(CameraClass * camera)
 				robj->Set_Visible(false);
 			} else {
 
-				bool isVisible=!camera->Cull_Sphere(robj->Get_Bounding_Sphere());
+				bool isVisible=!camera->Cull_Sphere(robj->Get_Bounding_Sphere()) || posedPartsInView(robj, camera);
 
 				if (isVisible)
 				{	//need to keep track of occluders and ocludees for subsequent code.
@@ -515,7 +553,7 @@ void RTS3DScene::Visibility_Check(CameraClass * camera)
             if ( ! isVisible )
               continue;
 
-						if (draw->getEffectiveOpacity() != 1.0f && m_translucentObjectsCount < TheGlobalData->m_maxVisibleTranslucentObjects)
+						if ((draw->getEffectiveOpacity() != 1.0f || wearsCloak(draw)) && m_translucentObjectsCount < TheGlobalData->m_maxVisibleTranslucentObjects)
 						{	drawInfo->m_flags |= DrawableInfo::ERF_IS_TRANSLUCENT;	//object is translucent
 							m_translucentObjectsBuffer[m_translucentObjectsCount++] = robj;
 						}
@@ -615,6 +653,67 @@ void RTS3DScene::renderSpecificDrawables(RenderInfoClass &rinfo, Int numDrawable
 	}
 }
 
+//=============================================================================
+/** Which of the Direct3D 11 frame's own looks a drawable wears this frame, and its four numbers
+	* (DRAW_EFFECT_SAMPLING in ffshader.h): seconds, strength, a seed from the drawable's id and the
+	* drawable's opacity.  Only reads the object, which the renderer is allowed to do; nothing here
+	* goes back into the logic.  None under -d3d9, -headless or Classic graphics, where the heat
+	* vision pass and the disabled tint draw what they always drew.
+	*
+	* An enemy a detector found is revealed, and an own stealthed unit is cloaked whatever its opacity
+	* (wearsCloak), with the detector's pulse in the strength of both.  The cloak only in the
+	* translucent pass: the scene's copy it bends is taken at its first draw, and the behind-building
+	* markers draw an occluded unit early, mid-way through the opaque world.  Mines keep the heat vision's old exception.
+	* An EMP takes precedence over power: an EMP'd building is out of power as well. */
+//=============================================================================
+static unsigned chooseDrawEffect( const Drawable *draw, const Object *obj, Bool translucentPass, float parameters[4] )
+{
+	if ( !Direct3D11_Draw_Effects() )
+		return DRAW_EFFECT_NONE;
+
+	unsigned effect = DRAW_EFFECT_NONE;
+	const StealthLookType look = draw->getStealthDrawnLook();
+	const Real pulse = draw->getSecondMaterialPassOpacity();
+	const Real fade = draw->getStealthFade();
+	Real opacity = draw->getStealthSolid();
+	Real strength = 1.0f;
+
+	if ( look == STEALTHLOOK_VISIBLE_DETECTED && !draw->isKindOf( KINDOF_MINE )
+		&& ( translucentPass || fade >= 0.99f ) )
+	{
+		effect = DRAW_EFFECT_REVEALED;
+		strength = pulse;
+		opacity = fade;
+	}
+	else if ( translucentPass && wearsCloak( draw )
+		&& look != STEALTHLOOK_VISIBLE_DETECTED )
+	{
+		// Detected, the amber stays on and the detector's sweep brightens it; on the pulse alone it
+		// showed for a few frames a sweep and was never seen.
+		effect = DRAW_EFFECT_CLOAK;
+		strength = ( look == STEALTHLOOK_VISIBLE_FRIENDLY_DETECTED ) ? MAX( 0.6f, pulse ) : 0.0f;
+	}
+	else if ( obj && !obj->isEffectivelyDead() )
+	{
+		if ( obj->isDisabledByType( DISABLED_EMP ) )
+			effect = DRAW_EFFECT_EMP;
+		else if ( obj->isKindOf( KINDOF_STRUCTURE )
+			&& ( obj->isDisabledByType( DISABLED_UNDERPOWERED ) || obj->isDisabledByType( DISABLED_SCRIPT_UNDERPOWERED )
+				|| obj->isDisabledByType( DISABLED_HACKED ) ) )
+			effect = DRAW_EFFECT_OUTAGE;
+	}
+
+	if ( effect != DRAW_EFFECT_NONE )
+	{
+		// an hour of seconds keeps the sines' arguments small enough for single precision
+		parameters[0] = (float)( WW3D::Get_Sync_Time() % 3600000u ) * 0.001f;
+		parameters[1] = strength;
+		parameters[2] = (float)fmod( (double)draw->getID() * 0.6180339887, 1.0 );
+		parameters[3] = opacity;
+	}
+	return effect;
+}
+
 //============================================================================
 // RTS3DScene::renderOneObject
 //=============================================================================
@@ -703,12 +802,18 @@ void RTS3DScene::renderOneObject(RenderInfoClass &rinfo, RenderObjClass *robj, I
 		lightEnv.Reset(sph.Center, ambient);
 
 
+		// The Direct3D 11 frame's own look for this object, if it is in one of the four states that
+		// have one.  The two that replace the disabled tint skip it: the dark grey under them only
+		// muddied the cold grey they draw.
+		rinfo.drawEffect = chooseDrawEffect( draw, obj, theTranslucentPass, rinfo.drawEffectParameters );
+
 		// HANDLE THE SPECIAL DRAWABLE-LEVEL COLORING SETTINGS FIRST
 
 		const Vector3 *tintColor = NULL;
 		const Vector3 *selectionColor = NULL;
 
-		tintColor			 = draw->getTintColor();
+		if ( rinfo.drawEffect != DRAW_EFFECT_OUTAGE && rinfo.drawEffect != DRAW_EFFECT_EMP )
+			tintColor = draw->getTintColor();
 		selectionColor = draw->getSelectionColor();
 
 		if ( tintColor || selectionColor )
@@ -749,8 +854,10 @@ void RTS3DScene::renderOneObject(RenderInfoClass &rinfo, RenderObjClass *robj, I
 			}
 		}
 
-		//Apply custom render pass for any drawables with heatvision enabled
-		if (draw->getSecondMaterialPassOpacity() != 0 ) 
+		//Apply custom render pass for any drawables with heatvision enabled.  The cloak and the
+		//revealed look draw the detector's pulse themselves, over the unit's own paint.
+		if (draw->getSecondMaterialPassOpacity() != 0
+			&& rinfo.drawEffect != DRAW_EFFECT_CLOAK && rinfo.drawEffect != DRAW_EFFECT_REVEALED )
 		{
 			rinfo.materialPassEmissiveOverride = draw->getSecondMaterialPassOpacity();
 
@@ -869,6 +976,7 @@ void RTS3DScene::renderOneObject(RenderInfoClass &rinfo, RenderObjClass *robj, I
 	}//drawable or robj is not hidden
 
 	rinfo.light_environment = NULL;
+	rinfo.drawEffect = DRAW_EFFECT_NONE;
 	if (doExtraMaterialPop)	//check if there is an extra material on the stack from the add'l material effect.
 		rinfo.Pop_Material_Pass();
 	if (doExtraFlagsPop)
@@ -1675,10 +1783,14 @@ void RTS3DScene::flushOccludedObjectsIntoStencil(RenderInfoClass & rinfo)
 	{	//no occluded objects so don't need to render anything special.  Just draw the queued up
 		//objects like normal because they were skipped in the main scene traversal.
 
+		// A translucent occludee is drawn by the translucent pass; drawn here as well it came out
+		// solid, a stealthed unit under its own see-through copy, whenever no building was in view.
 		RenderObjClass **occludeeList=m_potentialOccludees;
 		for (i=0; i<m_numPotentialOccludees; i++)
 		{
-			renderOneObject(rinfo, (*occludeeList), localPlayerIndex);
+			const DrawableInfo *occludeeInfo = (const DrawableInfo *)(*occludeeList)->Get_User_Data();
+			if (!(occludeeInfo->m_flags & DrawableInfo::ERF_IS_TRANSLUCENT))
+				renderOneObject(rinfo, (*occludeeList), localPlayerIndex);
 			occludeeList++;	//advance to next one
 		}
 
@@ -1793,7 +1905,9 @@ void RTS3DScene::flushTranslucentObjects(RenderInfoClass & rinfo)
 
 			rinfo.alphaOverride = draw->getEffectiveOpacity();
 
+			theTranslucentPass = TRUE;
 			renderOneObject(rinfo, robj, localPlayerIndex);//WW3D::Render(*robj,rinfo);
+			theTranslucentPass = FALSE;
 		}
 
 		//Flush all the submitted translucent objects.
@@ -2116,7 +2230,7 @@ void RTS3DScene::Visibility_Check(CameraClass * camera)
 						drawInfo->m_flags = DrawableInfo::ERF_IS_NORMAL;	//clear any rendering flags that may be in effect.
 
 
-						if (draw->getEffectiveOpacity() != 1.0f && m_translucentObjectsCount < TheGlobalData->m_maxVisibleTranslucentObjects)
+						if ((draw->getEffectiveOpacity() != 1.0f || wearsCloak(draw)) && m_translucentObjectsCount < TheGlobalData->m_maxVisibleTranslucentObjects)
 						{	drawInfo->m_flags |= DrawableInfo::ERF_IS_TRANSLUCENT;	//object is translucent
 							m_translucentObjectsBuffer[m_translucentObjectsCount++] = robj;
 						}

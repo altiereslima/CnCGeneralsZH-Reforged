@@ -1,0 +1,16 @@
+# Low sun at full zoom-out: the Heartland Shield village under its morning sun at the player's own
+# farthest zoom (factor 1 is the StartAtMaxZoom opening, logs 1.34), looking both ways, to see
+# whether the shadow map's depth range carries the long shadows to the top of the screen. Plain
+# map, nothing spawned. Factor 2.5 (logs 3.3) puts the horizon and black sky in the top half and
+# factor 5 draws nothing at all, so neither says anything about the shadows.
+#
+#   generals.exe -win -xres 1280 -yres 720 -msaa 0 -fps 120 -noFPSLimit -quickstart -noshellmap
+#     -multiInstance -observer -map "Maps\Heartland Shield\Heartland Shield.map" -autoskirmish 2
+#     -takeover -seed 1 -cinema shadowfar -maxframes 450
+
+0     cut        950 1950 1 0 0
+2     cut        950 1950 1 0 0
+4     shot
+4.5   cut        950 1950 1 180 0
+6     shot
+6.5   end

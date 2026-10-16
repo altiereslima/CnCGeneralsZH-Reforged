@@ -35,6 +35,7 @@
 #include "Common/XferSave.h"
 #include "Common/Snapshot.h"
 #include "Common/GameMemory.h"
+#include "Common/LocalFileSystem.h"
 
 // PRIVATE TYPES //////////////////////////////////////////////////////////////////////////////////
 class XferBlockData : public MemoryPoolObject
@@ -48,6 +49,16 @@ public:
 
 };
 EMPTY_DTOR(XferBlockData)
+
+// ------------------------------------------------------------------------------------------------
+/** Where the file is written before it replaces 'identifier' */
+// ------------------------------------------------------------------------------------------------
+static AsciiString tempPathOf( const AsciiString &identifier )
+{
+	AsciiString temp = identifier;
+	temp.concat( ".tmp" );
+	return temp;
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // PUBLIC METHDOS /////////////////////////////////////////////////////////////////////////////////
@@ -69,14 +80,9 @@ XferSave::XferSave( void )
 XferSave::~XferSave( void )
 {
 
-	// warn the user if a file was left open
-	if( m_fileFP != NULL )
-	{
-
-		DEBUG_CRASH(( "Warning: Xfer file '%s' was left open\n", m_identifier.str() ));
-		close();
-
-	}  // end if
+	// a file still open here was left by an exception part way through the save: what was written
+	// is incomplete, so it never replaces the file already there
+	discard();
 
 	//
 	// the block stack should be empty, if it's not that means we started blocks but never
@@ -122,11 +128,11 @@ void XferSave::open( AsciiString identifier )
 	// call base class
 	Xfer::open( identifier );
 
-	// open the file
-	m_fileFP = zh_fopen( identifier.str(), "w+b" );
+	// open the file it is written to first; close puts it in place
+	m_fileFP = zh_fopen( tempPathOf( identifier ).str(), "wb" );
 	if( m_fileFP == NULL )
 	{
-		
+
 		DEBUG_CRASH(( "File '%s' not found\n", identifier.str() ));
 		throw XFER_FILE_NOT_FOUND;
 
@@ -149,15 +155,20 @@ void XferSave::close( void )
 
 	}  // end if
 
-	// write the file and close it
+	// write the file and close it; fclose flushes, so a full disk can show first there
 	const size_t size = m_data.size();
 	const Bool written = size == 0 || fwrite( &m_data[ 0 ], size, 1, m_fileFP ) == 1;
-	fclose( m_fileFP );
+	const Bool closed = fclose( m_fileFP ) == 0;
 	m_fileFP = NULL;
 	m_data.clear();
-	if( !written )
+
+	// only a complete file replaces the one there
+	const AsciiString temp = tempPathOf( m_identifier );
+	if( !written || !closed || !TheLocalFileSystem->moveFileReplacing( temp.str(), m_identifier.str() ) )
 	{
 		DEBUG_LOG(( "XferSave - Error writing %u bytes to file '%s'\n", (UnsignedInt)size, m_identifier.str() ));
+		zh_remove( temp.str() );
+		m_identifier.clear();
 		throw XFER_WRITE_ERROR;
 	}
 
@@ -165,6 +176,23 @@ void XferSave::close( void )
 	m_identifier.clear();
 
 }  // end close
+
+//-------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+void XferSave::discard( void )
+{
+
+	// closed already: by close, which cleaned up after itself if it failed
+	if( m_fileFP == NULL )
+		return;
+
+	fclose( m_fileFP );
+	m_fileFP = NULL;
+	m_data.clear();
+	zh_remove( tempPathOf( m_identifier ).str() );
+	m_identifier.clear();
+
+}  // end discard
 
 //-------------------------------------------------------------------------------------------------
 /** Write a placeholder at the current location in the file and store this location

@@ -76,6 +76,7 @@
 #include "GameClient/InGameUI.h"
 #include "GameClient/LoadScreen.h"
 #include "GameClient/MapUtil.h"
+#include "GameClient/MessageBox.h"
 #include "GameClient/Mouse.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/TerrainVisual.h"
@@ -242,6 +243,9 @@ GameLogic::GameLogic( void )
 	m_gameMode = GAME_NONE;
 	m_rankLevelLimit = 1000;
 	m_peaceTimeEndFrame = 0;
+	m_kickVoteTarget = -1;
+	m_kickVoteEndFrame = 0;
+	m_kickVoteYesMask = 0;
 	m_unitCap = 0;
 	m_proRules = FALSE;
 	m_incomeSharing = INCOME_SHARING_OFF;
@@ -426,6 +430,10 @@ void GameLogic::init( void )
 	m_rankPointsToAddAtGameStart = 0;
 }
 
+// the water table as it was before a map.ini's WaterSet blocks, put back by reset()
+static WaterSetting s_waterSettingsBeforeMapINI[ TIME_OF_DAY_COUNT ];
+static Bool s_waterSettingsSaved = FALSE;
+
 //-------------------------------------------------------------------------------------------------
 /** Reset the game logic systems */
 //-------------------------------------------------------------------------------------------------
@@ -497,6 +505,17 @@ void GameLogic::reset( void )
 	// Clean up any weather overrides that were generated for this map.
 	WeatherSetting *ws = (WeatherSetting*) TheWeatherSetting.getNonOverloadedPointer();
 	TheWeatherSetting = (WeatherSetting*) ws->deleteOverrides();
+	// the snow manager copied the map's numbers when the Weather block was read
+	if (TheSnowManager)
+		TheSnowManager->updateIniSettings();
+
+	// WaterSet has no override chain: the block writes straight into the time-of-day table
+	if (s_waterSettingsSaved)
+	{
+		for (Int i = 0; i < TIME_OF_DAY_COUNT; ++i)
+			WaterSettings[ i ] = s_waterSettingsBeforeMapINI[ i ];
+		s_waterSettingsSaved = FALSE;
+	}
 
 	m_rankPointsToAddAtGameStart = 0;
 }  // end reset
@@ -1111,11 +1130,43 @@ void GameLogic::deleteLoadScreen( void )
 }  // end deleteLoadScreen
 
 // ------------------------------------------------------------------------------------------------
+/** startNewGame threw ERROR_CORRUPT_FILE_FORMAT part-way through the map.  Take down what the start
+	* had put up, as a failed save load does, and say why on the menu it was started from. */
+// ------------------------------------------------------------------------------------------------
+void GameLogic::refuseCorruptMap( void )
+{
+	DEBUG_LOG(("GameLogic::refuseCorruptMap - '%s' does not load, back to the menus\n", TheGlobalData->m_mapName.str()));
+
+	UnicodeString mapName;
+	mapName.translate( TheGlobalData->m_mapName );
+
+	deleteLoadScreen();
+	TheWritableGlobalData->m_loadScreenRender = FALSE;
+	setLoadingMap( FALSE );
+	TheMouse->setVisibility( TRUE );
+
+	if( TheRecorder->getMode() == RECORDERMODETYPE_RECORD )
+		TheRecorder->stopRecording();
+
+	clearGameData( FALSE );
+	TheShell->showShell( TRUE );
+
+	UnicodeString msg;
+	msg.format( TheGameText->fetch( "GUI:MapCorrupt" ), mapName.str() );
+	MessageBoxOk( TheGameText->fetch( "GUI:Error" ), msg, NULL );
+
+}  // end refuseCorruptMap
+
+// ------------------------------------------------------------------------------------------------
 /** Entry point for starting a new game, the engine is already in clean state at this
 	* point and ready to load up with all the data */
 // ------------------------------------------------------------------------------------------------
 void GameLogic::startNewGame( Bool loadingSaveGame )
 {
+	// a vote is about one match; none carries into the next, or into a loaded one
+	m_kickVoteTarget = -1;
+	m_kickVoteEndFrame = 0;
+	m_kickVoteYesMask = 0;
 
 	#ifdef DUMP_PERF_STATS
 	__int64 startTime64;
@@ -1592,7 +1643,10 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 	TheTeamFactory->reset();
 	ThePlayerList->newGame();
 
-	// update the loadscreen 
+	// the AI's unit-against-unit tables, here on the loading screen rather than at its first team choice
+	AIPlayer::prepareMatchupTables();
+
+	// update the loadscreen
 	updateLoadProgress(LOAD_PROGRESS_POST_PLAYER_LIST_RESET);
 
 	// Tell the script engine that a newe set of scripts is loaded.
@@ -2553,6 +2607,18 @@ void GameLogic::loadMapINI( AsciiString mapName )
 	// Keep what parsed up to the bad line and play on: every machine in a match has the same file,
 	// the map CRC sees to that, so each stops at the same line and the rules still agree.
 	//
+	//
+	// Everything below is undone when the match ends: each store a map's rules file may write to
+	// keeps what it overwrote and its reset() puts it back (INI.cpp's isMapINIBlock names them), so
+	// the next match plays the game's own rules whatever map came before, on every machine alike.
+	//
+	if (!s_waterSettingsSaved)
+	{
+		for (Int i = 0; i < TIME_OF_DAY_COUNT; ++i)
+			s_waterSettingsBeforeMapINI[ i ] = WaterSettings[ i ];
+		s_waterSettingsSaved = TRUE;
+	}
+
 	snprintf(fullFledgeFilename, _MAX_PATH, "%s\\map.ini", filename); fullFledgeFilename[_MAX_PATH-1] = 0;
 	if (TheFileSystem->doesFileExist(fullFledgeFilename)) {
 		DEBUG_LOG(("Loading map.ini\n"));
@@ -4049,6 +4115,117 @@ Bool GameLogic::peaceTimeForbids( const Object *attacker, const Object *victim )
 	return attacker->getRelationship( victim ) == ENEMIES;
 }
 
+/* The vote kick.  Whoever may vote is a human side still in the match, other than the one on the
+	 block: not an observer, not a beaten player, not the computer.  All of it is asked of the player
+	 list, which is logic state, so every machine counts the same people on the same frame.  A vote
+	 needs two such voters at least, or in a one-on-one the one asking would decide alone, and the
+	 kick there is a free win. */
+static const Int KICK_VOTE_SECONDS = 30;
+static const Int MIN_KICK_VOTERS = 2;
+
+static Bool mayVoteToKick( Player *player, Int targetIndex )
+{
+	return player->getPlayerType() == PLAYER_HUMAN && player->isPlayableSide() && player->isPlayerActive()
+		&& player->getPlayerIndex() != targetIndex;
+}
+
+Int GameLogic::countKickVoters( void ) const
+{
+	Int voters = 0;
+	for( Int i = 0; i < ThePlayerList->getPlayerCount(); ++i )
+		if( mayVoteToKick( ThePlayerList->getNthPlayer( i ), m_kickVoteTarget ) )
+			++voters;
+	return voters;
+}
+
+Int GameLogic::countKickVotes( void ) const
+{
+	Int votes = 0;
+	for( Int i = 0; i < ThePlayerList->getPlayerCount(); ++i )
+		if( ( m_kickVoteYesMask & ( 1u << i ) ) && mayVoteToKick( ThePlayerList->getNthPlayer( i ), m_kickVoteTarget ) )
+			++votes;
+	return votes;
+}
+
+void GameLogic::endKickVote( const char *label )
+{
+	if( TheInGameUI && label )
+		TheInGameUI->message( label, ThePlayerList->getNthPlayer( m_kickVoteTarget )->getPlayerDisplayName().str() );
+	m_kickVoteTarget = -1;
+	m_kickVoteEndFrame = 0;
+	m_kickVoteYesMask = 0;
+}
+
+/* Kicked is beaten: his side is killed the way a player who quits to watch is, so he stays in the
+	 match as a watcher and leaves the way anybody does.  Called whenever the count may have moved,
+	 since a voter who leaves can complete a vote as surely as one who says yes. */
+static Bool kickVoteAgreed( Int votes, Int voters )
+{
+	return voters >= MIN_KICK_VOTERS && votes >= voters;
+}
+
+void GameLogic::processKickVote( Player *voter, Int targetIndex, Bool yes )
+{
+	if( !mayVoteToKick( voter, targetIndex ) )
+		return;
+
+	if( m_kickVoteTarget < 0 )
+	{
+		// a no opens nothing; a yes opens a vote about a human side still playing
+		Player *target = ThePlayerList->getNthPlayer( targetIndex );
+		if( !yes || target == NULL || target->getPlayerType() != PLAYER_HUMAN || !target->isPlayableSide() || !target->isPlayerActive() )
+			return;
+
+		m_kickVoteTarget = targetIndex;
+		if( countKickVoters() < MIN_KICK_VOTERS )
+		{
+			m_kickVoteTarget = -1;
+			if( TheInGameUI && voter == ThePlayerList->getLocalPlayer() )
+				TheInGameUI->message( "GUI:KickVoteTooFew" );
+			return;
+		}
+		m_kickVoteEndFrame = m_frame + KICK_VOTE_SECONDS * LOGICFRAMES_PER_SECOND;
+		m_kickVoteYesMask = 1u << voter->getPlayerIndex();
+		if( TheInGameUI )
+			TheInGameUI->message( "GUI:KickVoteStarted", voter->getPlayerDisplayName().str(), target->getPlayerDisplayName().str() );
+		return;
+	}
+
+	// one vote at a time, and only about the one it is about
+	if( targetIndex != m_kickVoteTarget )
+		return;
+
+	if( !yes )
+	{
+		endKickVote( "GUI:KickVoteFailed" );
+		return;
+	}
+
+	m_kickVoteYesMask |= 1u << voter->getPlayerIndex();
+	if( kickVoteAgreed( countKickVotes(), countKickVoters() ) )
+	{
+		ThePlayerList->getNthPlayer( m_kickVoteTarget )->killPlayer();
+		endKickVote( "GUI:KickVoteKicked" );
+	}
+}
+
+void GameLogic::expireKickVote( void )
+{
+	if( m_kickVoteTarget < 0 )
+		return;
+
+	// he left, or lost, before the vote was done with him
+	if( !ThePlayerList->getNthPlayer( m_kickVoteTarget )->isPlayerActive() )
+		endKickVote( NULL );
+	else if( m_frame >= m_kickVoteEndFrame )
+		endKickVote( "GUI:KickVoteFailed" );
+	else if( kickVoteAgreed( countKickVotes(), countKickVoters() ) )
+	{
+		ThePlayerList->getNthPlayer( m_kickVoteTarget )->killPlayer();
+		endKickVote( "GUI:KickVoteKicked" );
+	}
+}
+
 /* Peace time, the half of the rule that is not a refusal.  Object::getAbleToAttackSpecificObject
 	 and ActiveBody::attemptDamage between them stop anybody shooting anybody until the clock runs
 	 out; without this, the truce would just be free reconnaissance and a place to park an army one
@@ -4474,7 +4651,22 @@ void GameLogic::update( void )
 #ifdef _PROFILE
     Profile::StartRange("map_load");
 #endif
-		startNewGame( FALSE );
+		/* The map cache reads only a map's size, world info and objects, so a map damaged in its
+			 sides, triggers or blend tiles is listed, picked and sent, and first fails here. Every
+			 machine in the match has the same bytes, the map CRC sees to that, so each one fails on the
+			 same chunk and each goes back to the menus the same way, instead of ending the program. */
+		try
+		{
+			startNewGame( FALSE );
+		}
+		catch (ErrorCode ec)
+		{
+			if (ec != ERROR_CORRUPT_FILE_FORMAT)
+				throw;
+			m_startNewGame = FALSE;
+			refuseCorruptMap();
+			return;
+		}
 #ifdef _PROFILE
     Profile::StopRange("map_load");
 #endif
@@ -4557,6 +4749,9 @@ void GameLogic::update( void )
 
 	// the lobby's peace time, if the host set one
 	peaceTimeTick();
+
+	// a vote kick that ran out of time
+	expireKickVote();
 
 	// and the buildings nobody repairs
 	neutralBuildingRepairTick();
@@ -5165,6 +5360,14 @@ UnsignedInt GameLogic::getCRC( Int mode, AsciiString deepCRCFileName )
 	if (isInGameLogicUpdate())
 	{
 		CRCGEN_LOG(("CRC after AI for frame %d is 0x%8.8X\n", m_frame, xferCRC->getCRC()));
+	}
+
+	marker = "MARKER:TheScriptEngine";
+	xferCRC->xferAsciiString(&marker);
+	xferCRC->xferSnapshot( TheScriptEngine );
+	if (isInGameLogicUpdate())
+	{
+		CRCGEN_LOG(("CRC after ScriptEngine for frame %d is 0x%8.8X\n", m_frame, xferCRC->getCRC()));
 	}
 
 	if (xferCRC->getXferMode() == XFER_SAVE)

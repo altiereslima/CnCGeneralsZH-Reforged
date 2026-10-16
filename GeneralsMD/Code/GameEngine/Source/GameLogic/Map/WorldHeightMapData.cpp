@@ -173,6 +173,10 @@ Bool WorldHeightMapData::ParseHeightMapData(DataChunkInput &file, DataChunkInfo 
 {
 	m_width = file.readInt();
 	m_height = file.readInt();
+	// everything below is sized from these, so a map file's word for them is checked first
+	if (m_width < 1 || m_width > K_MAX_HEIGHT_MAP_SIDE || m_height < 1 || m_height > K_MAX_HEIGHT_MAP_SIDE) {
+		throw ERROR_CORRUPT_FILE_FORMAT;
+	}
 	if (info->version >= K_HEIGHT_MAP_VERSION_3) {
 		m_borderSize = file.readInt();
 	} else {
@@ -180,7 +184,7 @@ Bool WorldHeightMapData::ParseHeightMapData(DataChunkInput &file, DataChunkInfo 
 	}
 
 	if (info->version >= K_HEIGHT_MAP_VERSION_4) {
-		Int numBorders = file.readInt();
+		Int numBorders = file.readCount(2 * sizeof(Int));
 		m_boundaries.resize(numBorders);
 		for (int i = 0; i < numBorders; ++i) {
 			m_boundaries[i].x = file.readInt();
@@ -193,10 +197,10 @@ Bool WorldHeightMapData::ParseHeightMapData(DataChunkInput &file, DataChunkInfo 
 	}
 
 	m_dataSize = file.readInt();
-	m_data = MSGNEW("WorldHeightMap_ParseHeightMapData") UnsignedByte[m_dataSize];
-	if (m_dataSize <= 0 || (m_dataSize != (m_width*m_height))) {
+	if (m_dataSize != m_width*m_height) {
 		throw ERROR_CORRUPT_FILE_FORMAT	;
 	}
+	m_data = MSGNEW("WorldHeightMap_ParseHeightMapData") UnsignedByte[m_dataSize];
 
 	Int numBytesX = (m_width+7)/8;	//how many bytes to fit all bitflags
 	Int numBytesY = m_height;	
@@ -234,6 +238,10 @@ Bool WorldHeightMapData::ParseSizeOnly(DataChunkInput &file, DataChunkInfo *info
 {
 	m_width = file.readInt();
 	m_height = file.readInt();
+	// as in ParseHeightMapData
+	if (m_width < 1 || m_width > K_MAX_HEIGHT_MAP_SIDE || m_height < 1 || m_height > K_MAX_HEIGHT_MAP_SIDE) {
+		throw ERROR_CORRUPT_FILE_FORMAT;
+	}
 	if (info->version >= K_HEIGHT_MAP_VERSION_3) {
 		m_borderSize = file.readInt();
 	} else {
@@ -241,7 +249,7 @@ Bool WorldHeightMapData::ParseSizeOnly(DataChunkInput &file, DataChunkInfo *info
 	}
 
 	if (info->version >= K_HEIGHT_MAP_VERSION_4) {
-		Int numBorders = file.readInt();
+		Int numBorders = file.readCount(2 * sizeof(Int));
 		m_boundaries.resize(numBorders);
 		for (int i = 0; i < numBorders; ++i) {
 			m_boundaries[i].x = file.readInt();
@@ -254,10 +262,10 @@ Bool WorldHeightMapData::ParseSizeOnly(DataChunkInput &file, DataChunkInfo *info
 	}
 
 	m_dataSize = file.readInt();
-	m_data = MSGNEW("WorldHeightMap_ParseSizeOnly") UnsignedByte[m_dataSize];
-	if (m_dataSize <= 0 || (m_dataSize != (m_width*m_height))) {
+	if (m_dataSize != m_width*m_height) {
 		throw ERROR_CORRUPT_FILE_FORMAT	;
 	}
+	m_data = MSGNEW("WorldHeightMap_ParseSizeOnly") UnsignedByte[m_dataSize];
 	file.readArrayOfBytes((char *)m_data, m_dataSize);
 	// Resize me. 
 	if (info->version == K_HEIGHT_MAP_VERSION_1) {
@@ -551,8 +559,22 @@ Bool WorldHeightMapData::parseLogicalMap(ChunkInputStream *pStrm)
 	PolygonTrigger::deleteTriggers(); // just in case.
 	TheSidesList->emptySides();
 	file.registerParser(AsciiString("SidesList"), AsciiString::TheEmptyString,	SidesList::ParseSidesDataChunk );
-	if (!file.parse(this))
+	// a map that fails halfway leaves the globals empty rather than half filled, as WorldHeightMap's does
+	Bool parsed;
+	try {
+		parsed = file.parse(this);
+	} catch (...) {
+		freeListOfMapObjects();
+		PolygonTrigger::deleteTriggers();
+		TheSidesList->emptySides();
+		throw;
+	}
+	if (!parsed) {
+		freeListOfMapObjects();
+		PolygonTrigger::deleteTriggers();
+		TheSidesList->emptySides();
 		return FALSE;
+	}
 	TheSidesList->validateSides();
 	return TRUE;
 }

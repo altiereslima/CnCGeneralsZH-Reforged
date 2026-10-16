@@ -142,6 +142,7 @@ public:
 		MSG_RAW_MOUSE_RIGHT_BUTTON_UP,							///< (pixel, modifiers, time)
 		MSG_RAW_MOUSE_RIGHT_DRAG,										///< drag of the mouse with a button held down
 		MSG_RAW_MOUSE_WHEEL,												///< (Real spin in notches, + is away, - is toward user)
+		MSG_RAW_MOUSE_SIDE_BUTTON,									///< (pixel, Int +1 forward/X2 or -1 back/X1, modifiers) a side button went down (fork)
 		MSG_RAW_MOUSE_END,
 
 		MSG_RAW_KEY_DOWN,														///< (KeyDefType) the given key was pressed (uses Microsoft VK_ codes)
@@ -659,6 +660,8 @@ public:
 		MSG_QUEUE_NEXT_ORDER,												///< (Int OrderQueueMode) the order right after this one is a shift-queued one (fork)
 		MSG_CLEAR_RALLY_POINT,											///< (objectID) the building forgets its rally point (fork)
 		MSG_SET_STANCE,															///< (Int 0 defensive, 1 aggressive) how far the selected units go after what they see (fork)
+		MSG_VOTE_KICK,															///< (Int player index, Bool yes) a vote kick: opens one, or answers the open one (fork)
+		MSG_SET_REPEAT_UNIT,												///< (Int template ID, objectID producer, Bool on) the factory builds that unit on repeat, or stops (fork)
 
 		MSG_BEGIN_DEBUG_NETWORK_MESSAGES = 1900,		///< network messages that exist only in debug/internal builds. all grouped separately.
 
@@ -696,7 +699,7 @@ public:
 	const GameMessage *prev( void ) const { return m_prev; }		///< Return prev message in the stream
 
 	Type getType( void ) const { return m_type; }					///< Return the message type
-	UnsignedByte getArgumentCount( void ) const { return (UnsignedByte)m_argList.size(); }	///< Return the number of arguments for this msg
+	Int getArgumentCount( void ) const { return (Int)m_argList.size(); }	///< Return the number of arguments for this msg; a selection of 1000 units carries 1001
 
 	AsciiString getCommandAsAsciiString( void ); ///< returns a string representation of the command type.
 	static AsciiString getCommandTypeAsAsciiString(GameMessage::Type t);

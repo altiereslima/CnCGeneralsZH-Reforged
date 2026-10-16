@@ -17,7 +17,7 @@ import sys
 import siege
 
 BUDGET = 4800
-MAX_FRAMES = 3000
+MAX_FRAMES = 3000 * siege.LOGIC_FPS // siege.SCENARIO_FPS  # logic frames; the rest are scenario frames
 TALLY_FRAME = 2950
 SPAWN_FRAME = 30
 ATTACK_FRAME = 60

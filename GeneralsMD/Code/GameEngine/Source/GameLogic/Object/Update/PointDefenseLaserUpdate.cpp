@@ -72,7 +72,7 @@ PointDefenseLaserUpdateModuleData::PointDefenseLaserUpdateModuleData()
 		{ "SecondaryTargetTypes",	KindOfMaskType::parseFromINI,								NULL, offsetof( PointDefenseLaserUpdateModuleData, m_secondaryTargetKindOf ) },
 		{ "ScanRate",							INI::parseDurationUnsignedInt,	NULL, offsetof( PointDefenseLaserUpdateModuleData, m_scanFrames ) },
 		{ "ScanRange",						INI::parseReal,									NULL, offsetof( PointDefenseLaserUpdateModuleData, m_scanRange ) },
-		{ "PredictTargetVelocityFactor", INI::parseReal,					NULL, offsetof( PointDefenseLaserUpdateModuleData, m_velocityFactor ) },
+		{ "PredictTargetVelocityFactor", INI::parseRetailFramesReal,					NULL, offsetof( PointDefenseLaserUpdateModuleData, m_velocityFactor ) },
 		{ 0, 0, 0, 0 }
 	};
 	p.add(dataFieldParse);
@@ -183,7 +183,7 @@ void PointDefenseLaserUpdate::fireWhenReady()
 			{
 				//We were in range last frame, but the target has moved out of firing range, so 
 				//re-evaluate by forcing a new scan.
-				m_nextScanFrames = GameLogicRandomValue( 0, 3 );
+				m_nextScanFrames = GameLogicRandomValue( 0, ConvertRetailFrames( 3 ) );
 				m_bestTargetID = INVALID_ID;
 				m_inRange = false;	// the fire block below needs it, or a non-zero rescan delay shoots out of range
 				if( !m_nextScanFrames )
@@ -241,7 +241,7 @@ void PointDefenseLaserUpdate::fireWhenReady()
 
 			if( target->isEffectivelyDead() )
 			{
-				m_nextScanFrames = GameLogicRandomValue( 0, 3 );
+				m_nextScanFrames = GameLogicRandomValue( 0, ConvertRetailFrames( 3 ) );
 				m_bestTargetID = INVALID_ID;
 				if( !m_nextScanFrames )
 				{

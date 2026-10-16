@@ -55,6 +55,7 @@ NetCommandWrapperListNode::NetCommandWrapperListNode(NetWrapperCommandMsg *msg)
 	m_data = NEW UnsignedByte[m_dataLength];	// pool[]ify
 
 	m_commandID = msg->getWrappedCommandID();
+	m_playerID = msg->getPlayerID();
 }
 
 NetCommandWrapperListNode::~NetCommandWrapperListNode() {
@@ -188,15 +189,54 @@ Int NetCommandWrapperList::getPercentComplete(UnsignedShort wrappedCommandID)
 	return temp->getPercentComplete();
 }
 
+// The first chunk of a wrapped command makes us allocate the whole command's buffer at once, at a
+// size the sender names, and an unfinished command is never let go.  So one peer could make us
+// hold any amount of memory by opening commands it never completes.  A sender gets this many open
+// at a time and this many bytes across them.  A 65 KB map transfer is one command; normal play
+// never comes near either figure.
+static const Int MAX_WRAPPED_COMMANDS_PER_SENDER = 64;
+static const UnsignedInt MAX_WRAPPED_BYTES_PER_SENDER = 16 * 1024 * 1024;
+
+Bool NetCommandWrapperList::isWithinSenderCap(NetWrapperCommandMsg *msg) {
+	const UnsignedInt totalLength = msg->getTotalDataLength();
+	const UnsignedInt numChunks = msg->getNumChunks();
+
+	// every chunk carries at least one byte, and an empty command has nothing to rebuild
+	if (numChunks == 0 || totalLength == 0 || numChunks > totalLength || totalLength > MAX_WRAPPED_BYTES_PER_SENDER) {
+		DEBUG_LOG(("NetCommandWrapperList - refused a wrapped command of %u bytes in %u chunks from player %d\n",
+			totalLength, numChunks, msg->getPlayerID()));
+		return FALSE;
+	}
+
+	Int openCommands = 0;
+	UnsignedInt openBytes = 0;
+	for (NetCommandWrapperListNode *node = m_list; node != NULL; node = node->m_next) {
+		if (node->getPlayerID() == msg->getPlayerID()) {
+			++openCommands;
+			openBytes += node->getRawDataLength();
+		}
+	}
+
+	if (openCommands >= MAX_WRAPPED_COMMANDS_PER_SENDER || totalLength > MAX_WRAPPED_BYTES_PER_SENDER - openBytes) {
+		DEBUG_LOG(("NetCommandWrapperList - player %d already has %d wrapped commands of %u bytes open, refused one more of %u\n",
+			msg->getPlayerID(), openCommands, openBytes, totalLength));
+		return FALSE;
+	}
+	return TRUE;
+}
+
 void NetCommandWrapperList::processWrapper(NetCommandRef *ref) {
 	NetCommandWrapperListNode *temp = m_list;
 	NetWrapperCommandMsg *msg = (NetWrapperCommandMsg *)(ref->getCommand());
 
-	while ((temp != NULL) && (temp->getCommandID() != msg->getWrappedCommandID())) {
+	while ((temp != NULL) && ((temp->getCommandID() != msg->getWrappedCommandID()) || (temp->getPlayerID() != msg->getPlayerID()))) {
 		temp = temp->m_next;
 	}
 
 	if (temp == NULL) {
+		if (!isWithinSenderCap(msg)) {
+			return;
+		}
 		temp = newInstance(NetCommandWrapperListNode)(msg);
 		temp->m_next = m_list;
 		m_list = temp;
@@ -217,11 +257,21 @@ NetCommandList * NetCommandWrapperList::getReadyCommands()
 		next = temp->m_next;
 		if (temp->isComplete()) {
 			NetCommandRef *msg = NetPacket::ConstructNetCommandMsgFromRawData(temp->getRawData(), temp->getRawDataLength());
-			NetCommandRef *ret = retlist->addMessage(msg->getCommand());
-			ret->setRelay(msg->getRelay());
+			// NULL when the rebuilt bytes do not read as a command; the sender's problem, not ours.  And
+			// the chunks carry their sender, so the command inside cannot claim to be somebody else's.
+			if (msg != NULL && msg->getCommand()->getPlayerID() != temp->getPlayerID()) {
+				DEBUG_LOG(("NetCommandWrapperList - player %d wrapped a command from player %d, dropped\n",
+					temp->getPlayerID(), msg->getCommand()->getPlayerID()));
+				msg->deleteInstance();
+				msg = NULL;
+			}
+			if (msg != NULL) {
+				NetCommandRef *ret = retlist->addMessage(msg->getCommand());
+				ret->setRelay(msg->getRelay());
 
-			msg->deleteInstance();
-			msg = NULL;
+				msg->deleteInstance();
+				msg = NULL;
+			}
 
 			removeFromList(temp);
 			temp = NULL;
@@ -240,7 +290,7 @@ void NetCommandWrapperList::removeFromList(NetCommandWrapperListNode *node) {
 	NetCommandWrapperListNode *temp = m_list;
 	NetCommandWrapperListNode *prev = NULL;
 
-	while ((temp != NULL) && (temp->getCommandID() != node->getCommandID())) {
+	while ((temp != NULL) && (temp != node)) {
 		prev = temp;
 		temp = temp->m_next;
 	}

@@ -1,0 +1,8 @@
+# Scenarios/debristrails3.txt, the tank fight from the south side, low, so the fire line between
+# the Americans at x 1380 and the Chinese at x 1600 runs across the frame and the direction a hit's
+# fragments open toward can be read against the shooter. Heading 135 kept the map edge out of the
+# side views of the town. Run with -video 120 1000.
+
+0.5   cut     1430 3780 0.7 -45 18
+2.5   shot
+17.0  end

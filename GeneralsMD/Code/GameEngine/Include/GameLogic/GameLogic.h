@@ -181,6 +181,7 @@ public:
 
 	// super hack
 	void startNewGame( Bool loadSaveGame );
+	void refuseCorruptMap( void );									///< a start whose map turned out unreadable goes back to the menus
 	void loadMapINI( AsciiString mapName );
 
 	void updateLoadProgress( Int progress );
@@ -269,6 +270,15 @@ public:
 	Bool isPeaceTime( void ) const { return m_peaceTimeEndFrame > m_frame; }
 	/// TRUE while the truce forbids these two hurting each other; the one question both gates ask
 	Bool peaceTimeForbids( const Object *attacker, const Object *victim ) const;
+
+	/** The vote kick (MSG_VOTE_KICK, "/kick name" in chat).  One vote at a time, open for 30 seconds;
+			it passes when every living human player but the one on the block has voted yes, and one no
+			ends it.  It is logic state, moved only by commands, so every machine decides it alike. */
+	void processKickVote( Player *voter, Int targetIndex, Bool yes );
+	Int getKickVoteTarget( void ) const { return m_kickVoteTarget; }	///< player index on the block, -1 when no vote is open
+	UnsignedInt getKickVoteEndFrame( void ) const { return m_kickVoteEndFrame; }
+	Int countKickVoters( void ) const;										///< the players whose yes the open vote needs
+	Int countKickVotes( void ) const;											///< how many of them have given it
 
 	/** Each player's share of the lobby's unit limit, the same number for everybody.  0 when the
 			limit is off, which is every campaign mission and every game it was not ticked for. */
@@ -415,6 +425,11 @@ private:
 	Int m_rankLevelLimit;
   UnsignedShort m_superweaponRestriction;
 	UnsignedInt m_peaceTimeEndFrame;	///< logic frame the lobby's peace time runs out on, 0 = no peace time
+	Int m_kickVoteTarget;							///< player index an open vote kick is about, -1 = none
+	UnsignedInt m_kickVoteEndFrame;		///< frame that vote runs out on
+	UnsignedInt m_kickVoteYesMask;		///< player indices that have voted yes in it
+	void expireKickVote( void );			///< closes the vote once its 30 seconds are up
+	void endKickVote( const char *label );
 	UnsignedInt m_unitCap;						///< units each player may have standing and queued, 0 = no limit
 	Bool m_proRules;									///< this match refuses what PRO-RULES.md bans
 	Int m_incomeSharing;							///< which earnings allies split, an IncomeSharing

@@ -1,0 +1,21 @@
+# Scenarios/minefx_blast.txt on Alpine Assault: the field close with the Red Guard walking through
+# it, the field at play distance, then the American column driving into it, held close enough that
+# a blast's earth column and the EMP ring fill a good part of the frame. The blast stills are frames
+# of the -video dump.
+
+0     hud     off
+# close, the Red Guard crossing the field
+6.5   cut     780 885 0.17 -45 12
+7.5   shot
+8.1   shot
+8.7   shot
+# play distance
+9.5   cut     780 900 1.0 -45 0
+10.0  shot
+10.6  shot
+11.2  shot
+11.8  shot
+# the column hits the field
+12.5  cut     780 890 0.4 -45 14
+13.0  orbit   8 10
+24.5  end

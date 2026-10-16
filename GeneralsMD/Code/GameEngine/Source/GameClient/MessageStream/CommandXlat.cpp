@@ -66,6 +66,7 @@
 #include "GameClient/ParticleSys.h"
 #include "GameClient/GUICallbacks.h"
 #include "GameClient/KeyDefs.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameClient/Shell.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/SelectionInfo.h"
@@ -177,10 +178,6 @@ SignalKind Command_signalKindForMeta( GameMessage::Type meta )
 
 static Bool isFormationDragArmed( void )
 {
-	// Classic's left drag is the selection box it always was
-	if( TheGlobalData->isClassicUI() )
-		return FALSE;
-
 	return Command_formationDragArmed( TheGlobalData->m_formationDrag,
 																		 TheInGameUI->getSelectCount() > 0
 																			&& TheInGameUI->areSelectedObjectsControllable(),
@@ -264,7 +261,7 @@ static Bool canSelectionSalvage( const Object *targetObj)
 }
 
 //-------------------------------------------------------------------------------------------------
-static CanAttackResult canObjectForceAttack( Object *obj, const Object *victim, const Coord3D *pos )
+static CanAttackResult canObjectItselfForceAttack( Object *obj, const Object *victim, const Coord3D *pos )
 {
 	CanAttackResult result;
 	result = obj->isAbleToAttack() ? ATTACKRESULT_POSSIBLE : ATTACKRESULT_NOT_POSSIBLE;
@@ -356,6 +353,30 @@ static CanAttackResult canObjectForceAttack( Object *obj, const Object *victim, 
 		}
 	}
 	return ATTACKRESULT_NOT_POSSIBLE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A container whose passengers shoot (a Bunker, a Combat Chinook) has no gun of its own, so its
+	* force fire is its closest rider's. The order itself already reaches the riders:
+	* AIGroup::groupAttackObjectPrivate and groupAttackPosition hand it to every passenger that can fire. */
+static CanAttackResult canObjectForceAttack( Object *obj, const Object *victim, const Coord3D *pos )
+{
+	const CanAttackResult result = canObjectItselfForceAttack( obj, victim, pos );
+	if( result == ATTACKRESULT_POSSIBLE || result == ATTACKRESULT_POSSIBLE_AFTER_MOVING || ( !victim && !pos ) )
+		return result;
+
+	ContainModuleInterface *contain = obj->getContain();
+	if( !contain || !contain->isPassengerAllowedToFire() || !obj->isAbleToAttack() )
+		return result;
+
+	Object *rider = contain->getClosestRider( victim ? victim->getPosition() : pos );
+	if( !rider )
+		return result;
+
+	const CanAttackResult riderResult = victim
+		? rider->getAbleToAttackSpecificObject( ATTACK_NEW_TARGET_FORCED, victim, CMD_FROM_PLAYER )
+		: rider->getAbleToUseWeaponAgainstTarget( ATTACK_NEW_TARGET, NULL, pos, CMD_FROM_PLAYER );
+	return riderResult != ATTACKRESULT_NOT_POSSIBLE ? riderResult : result;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -981,14 +1002,9 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 	{
 		Bool forceAttackHere = isForceAttackTargeting() && isForceAttackable;
 
-		// the guard key posts the selection where it is pointed.  Under shift it joins the list as its
-		// last order: clear this, then sit there.  Classic's waypoint key is the game's own: Alt held
-		// adds a point to the path instead of queueing an order
-		if( TheGlobalData->isClassicUI() && TheInGameUI->isInWaypointMode() )
-		{
-			msgType = GameMessage::MSG_ADD_WAYPOINT;
-		}
-		else if( TheInGameUI->isGuardArmed() )
+		// the guard key posts the selection where it is pointed.  Under the waypoint key it joins the
+		// list as its last order: clear this, then sit there
+		if( TheInGameUI->isGuardArmed() )
 		{
 			msgType = GameMessage::MSG_DO_GUARD_POSITION;
 		}
@@ -1017,14 +1033,9 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 				movemsg->appendLocationArgument( *pos );
 
 			// a posted unit holds its spot and shoots what walks into range, rather than chasing it
-			// off the post the player put it on
+			// off the post the player put it on.  EA's guard button armed it with its own mode
 			if (msgType == GameMessage::MSG_DO_GUARD_POSITION)
-			{
-				movemsg->appendIntegerArgument( GUARDMODE_GUARD_WITHOUT_PURSUIT );
-				// Classic sends the game's own two arguments and the logic guards its standard range
-				if( !TheGlobalData->isClassicUI() )
-					movemsg->appendRealArgument( TheInGameUI->getAreaPickRadius() );
-			}
+				movemsg->appendIntegerArgument( TheInGameUI->getGuardArmedMode() );
 
 		}  // end if
 	}
@@ -1492,14 +1503,18 @@ void CommandTranslator::finishFormationDrag( const ICoord2D& lift )
 															TheInGameUI->isGuardArmed() );
 
 	// the traced curve becomes world points; who stands where along it is decided on
-	// the logic side, where every machine decides it the same way
+	// the logic side, where every machine decides it the same way.  A point past the horizon
+	// reaches no ground and comes back as the map's corner, so it is left out
 	std::vector<Coord3D> line;
 	for( std::vector<ICoord2D>::const_iterator it = curve.begin(); it != curve.end(); ++it )
 	{
 		Coord3D world;
-		TheTacticalView->screenToTerrain( &(*it), &world );
-		line.push_back( world );
+		if( TheTacticalView->screenToTerrain( &(*it), &world ) )
+			line.push_back( world );
 	}
+
+	if( line.size() < 2 )
+		return;
 
 	// a line drawn with the attack key across enemies is aimed at them: the units that can shoot
 	// share those enemies along the stroke, and the ground under the line is not shot at.  Only a
@@ -1677,24 +1692,7 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 	{
 		GameMessage *hintMessage;
 
-		// Classic keeps the game's waypoint mode: with Alt held every click is a point on the path
-		if( TheGlobalData->isClassicUI() && TheInGameUI->isInWaypointMode() )
-		{
-			if( type == DO_COMMAND || type == EVALUATE_ONLY )
-			{
-				if( TheTerrainLogic )
-					msgType = issueMoveToLocationCommand( pos, draw, type );
-			}
-			else
-			{
-				msgType = GameMessage::MSG_ADD_WAYPOINT_HINT;
-				hintMessage = TheMessageStream->appendMessage( msgType );
-				hintMessage->appendLocationArgument( *pos );
-			}
-			return msgType;
-		}
-
-		// shift used to turn every click into a point on the path.  Now whatever the click orders - an
+		// the waypoint key used to turn every click into a point on the path.  Now whatever the click orders - an
 		// attack, a capture, a ride in a transport - goes on the end of the units' list, and the logic
 		// keeps it there (OrderQueue.h).  A click that orders nothing is dropped by the logic with it
 		if( TheInGameUI->isInWaypointMode() && type == DO_COMMAND )
@@ -2411,8 +2409,8 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 		// A right click on a selected building takes the rally point away from everything selected.
 		// Only the click is answered: the hover and SelectionXlat's EVALUATE_ONLY fall through as
 		// they always did, so the building keeps its selection cursor.  The game as shipped had no
-		// such order, and Classic sends none.
-		else if( type == DO_COMMAND && draw && draw->isSelected() && !TheGlobalData->isClassicUI()
+		// such order, and the Classic mouse sends none.
+		else if( type == DO_COMMAND && draw && draw->isSelected() && !TheGlobalData->isClassicMouse()
 						 && TheInGameUI->canSelectedObjectsDoAction( InGameUI::ACTIONTYPE_SET_RALLY_POINT, NULL, InGameUI::SELECTION_ALL, FALSE ) )
 		{
 			msgType = GameMessage::MSG_CLEAR_RALLY_POINT;
@@ -2604,11 +2602,6 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 {
 	GameMessage::Type t = msg->getType();
 	GameMessageDisposition disp = KEEP_MESSAGE;
-
-	// letting go of Tab puts the scoreboard away, input or no input; the press is the command map's
-	// DIPLOMACY
-	if (t == GameMessage::MSG_RAW_KEY_UP && msg->getArgument( 0 )->integer == KEY_TAB)
-		TheInGameUI->closeScoreboard();
 
 	// We want to always be able to get to the options menu even during no input times and a clear game data message should always go through
 	if (t != GameMessage::MSG_META_OPTIONS && t != GameMessage::MSG_CLEAR_GAME_DATA &&
@@ -2917,11 +2910,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_COMMAND_SLOT17:
 		case GameMessage::MSG_META_COMMAND_SLOT18:
 		{
-			// a watcher has no commands to press, and the top row picks the spectator's stat instead,
-			// the keys Dota's spectator uses for the same list
-			const Int slot = t - GameMessage::MSG_META_COMMAND_SLOT01;
-			if( !TheInGameUI->pickSpectatorStat( slot ) )
-				TheControlBar->pressCommandButton( slot );
+			TheControlBar->pressCommandButton( t - GameMessage::MSG_META_COMMAND_SLOT01 );
 			disp = DESTROY_MESSAGE;
 			break;
 		}		// end command bar grid slots
@@ -3394,13 +3383,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_DIPLOMACY:
-			// Tab is the scoreboard in any game that has seats, up while the key is held; the diplomacy
-			// screen, with its mute buttons, stays on the command bar's own button
-			if (TheGameLogic->isInGame() && !TheGameLogic->isInShellGame() && TheGameInfo)
-			{
-				TheInGameUI->openScoreboard();
-			}
-			else if (TheGameLogic->isInGame() && !TheGameLogic->isInShellGame())
+			if (TheGameLogic->isInGame() && !TheGameLogic->isInShellGame())
 			{
 				ToggleDiplomacy( FALSE );
 			}
@@ -3495,6 +3478,13 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			if( TheInGameUI->isSignalArmed() )
 			{
 				TheInGameUI->disarmSignal();
+				cancelledSomething = TRUE;
+			}
+
+			// a watcher looking through one player's eyes gets the whole map back, menu shut first
+			if( cancelledSomething == FALSE && !TheInGameUI->isQuitMenuVisible() && TheObserverCamera.stopLooking() )
+			{
+				TheControlBar->watchPlayer( NULL );
 				cancelledSomething = TRUE;
 			}
 
@@ -3688,7 +3678,10 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			TheInGameUI->setCameraZoomOut( false );
 			break;
 		case GameMessage::MSG_META_CAMERA_RESET:
-			TheInGameUI->resetCamera();
+			// the same home view as a middle click: InGameUI::resetCamera eased the scripted pitch
+			// factor back but left the player's own tilt where Alt+drag or Alt+wheel put it.
+			TheTacticalView->setAngleAndPitchToDefault();
+			TheTacticalView->setZoomToDefault();
 			break;
 		case GameMessage::MSG_META_TOGGLE_CAMERA_TRACKING_DRAWABLE:
 			TheInGameUI->setCameraTrackingDrawable( true );
@@ -4161,9 +4154,9 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			m_mouseRightUp = (UnsignedInt) msg->getArgument( 2 )->integer;
 
 			// a structure waiting to be placed is dropped by the same release, over in
-			// SelectionXlat, unless the release ended a pan.  Classic drops it here on a click, as 1.04
-			// did, which is also what takes a shortcut bar's sneak attack off the cursor.
-			if( TheGlobalData->isClassicUI()
+			// SelectionXlat, unless the release ended a pan.  The Classic mouse drops it here on a click,
+			// as 1.04 did, which is also what takes a shortcut bar's sneak attack off the cursor.
+			if( TheGlobalData->isClassicMouse()
 					&& TheMouse->isClick( &m_mouseRightDragAnchor, &m_mouseRightDragLift, NULL, NULL, m_mouseRightDown, m_mouseRightUp ) )
 				TheInGameUI->placeBuildAvailable( NULL, NULL );
 
@@ -4197,7 +4190,6 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			// which LookAtXlat and SelectionXlat do, as the game shipped.
 			if( !TheGlobalData->rightButtonOrders() )
 				break;
-			const Bool classic = TheGlobalData->isClassicUI();
 
 			// A right click is an order.  A right drag pans the camera (LookAtXlat), so a release that
 			// travelled past the drag tolerance, or was held too long, gives no order at all.
@@ -4205,11 +4197,11 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 					NULL, NULL,
 					m_mouseRightDown, m_mouseRightUp);
 
-			// The one exception is the move, attack, attack move or guard key.  Those orders are aimed
-			// with the left button, so a right click while one is armed puts the key down and gives no
-			// order.  A pan leaves the key armed.  Classic's alternate mouse aims its attack move with
-			// this click, as 1.04 did.
-			if( !classic && TheInGameUI->isOrderKeyArmed() )
+			// The exceptions are the move, attack, attack move and guard keys and Ctrl's force fire.
+			// Those are aimed with the left button in every mouse, so a right click while a key is armed
+			// puts the key down and gives no order, and a right click with Ctrl held gives none either.
+			// A pan leaves the key armed.
+			if( TheInGameUI->isOrderKeyArmed() || TheInGameUI->isInForceAttackMode() )
 			{
 				if( isRightClick )
 					TheInGameUI->clearAttackMoveToMode();
@@ -4238,18 +4230,14 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 														|| (command && command->getCommandType() == GUI_COMMAND_SPECIAL_POWER_FROM_SHORTCUT);
 				if (isPoint && controllable)
 				{
-					UnsignedInt pickType = getPickTypesForContext( isForceAttackTargeting() );
-					Drawable *draw = TheTacticalView->pickDrawable(&msg->getArgument(0)->pixelRegion.lo, 
-																													isForceAttackTargeting(), 
+					// force fire never reaches here: it is aimed with the left button, above
+					UnsignedInt pickType = getPickTypesForContext( FALSE );
+					Drawable *draw = TheTacticalView->pickDrawable(&msg->getArgument(0)->pixelRegion.lo,
+																													FALSE,
 																													(PickType) pickType);
-					if (isForceAttackTargeting()) {
-						evaluateForceAttack( draw, &pos, DO_COMMAND );
-					} else {
-						evaluateContextCommand( draw, &pos, DO_COMMAND );
-					}
+					evaluateContextCommand( draw, &pos, DO_COMMAND );
 
 					disp = DESTROY_MESSAGE;
-					TheInGameUI->clearAttackMoveToMode();
 				}
 			}
 
@@ -4303,15 +4291,14 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 												|| command->getCommandType() == GUICOMMANDMODE_HIJACK_VEHICLE
 												|| command->getCommandType() == GUICOMMANDMODE_CONVERT_TO_CARBOMB));
 
-			// The left button selects and nothing else.  The exceptions are a GUI command that is
-			// already armed and waiting for a target, and the attack, attack move and guard keys: all of
-			// them are aimed with the left button, because the right one cancels them.  In Classic the
-			// left button is the order button as well, as it was in the game as shipped, unless EA's
-			// Alternate Mouse Setup is on: then only a GUI command waiting for a target fires here.
-			const Bool classic = TheGlobalData->isClassicUI();
-			const Bool isOrderKey = TheInGameUI->isOrderKeyArmed();
-			if( classic ? !TheGlobalData->leftButtonOrders() && !isFiringGUICommand
-									: !isFiringGUICommand && !isOrderKey )
+			// Where the right button gives the orders (Reforged, and Classic under EA's Alternate Mouse
+			// Setup) the left button selects and nothing else.  The exceptions are a GUI command that is
+			// already armed and waiting for a target, the move, attack, attack move and guard keys, and
+			// Ctrl's force fire: every mouse aims those with the left button, because the right one
+			// cancels them.  Classic's default mouse orders with the left button anyway, as it shipped.
+			const Bool classic = TheGlobalData->isClassicMouse();
+			if( !TheGlobalData->leftButtonOrders() && !isFiringGUICommand
+					&& !TheInGameUI->isOrderKeyArmed() && !TheInGameUI->isInForceAttackMode() )
 				break;
 
 			Bool controllable = TheInGameUI->areSelectedObjectsControllable()

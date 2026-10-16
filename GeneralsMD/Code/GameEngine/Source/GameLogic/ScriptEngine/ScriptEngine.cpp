@@ -152,9 +152,9 @@ enum { K_SCRIPTS_DATA_VERSION_1 = 1 };
 enum { MAX_SPIN_COUNT = 20 };
 #define NONE_STRING "<none>"
 
-static const Int FRAMES_TO_SHOW_WIN_LOSE_MESSAGE = 120;
+static const Int FRAMES_TO_SHOW_WIN_LOSE_MESSAGE = ConvertRetailFrames(120);
 
-static const Int FRAMES_TO_FADE_IN_AT_START = 33;
+static const Int FRAMES_TO_FADE_IN_AT_START = ConvertRetailFrames(33);
 
 
 //------------------------------------------------------------------------------ Performance Timers 
@@ -5704,10 +5704,12 @@ void ScriptEngine::update( void )
 		TheScriptConditions->update();
 	}
 	SCRIPT_PHASE_END( SCRIPT_PHASE_CONDITIONS );
-	// Update any countdown timers.
+	// Update any countdown timers.  They count retail 30 Hz frames, one every other logic frame,
+	// because maps compare a running timer's value with numbers written for 30 Hz ("timer < 1700").
 	Int i;
+	const Bool retailTick = (TheGameLogic->getFrame() % LOGICFRAMES_PER_RETAIL_FRAME) == 0;
 	// Note - counters start at 1.  0 means not assigned.
-	for (i=1; i<m_numCounters; i++) {
+	for (i=1; retailTick && i<m_numCounters; i++) {
 		if (m_counters[i].isCountdownTimer) {
 			// If counter has any time left, decrement.  Counters go to -1 and stop.
 			if (m_counters[i].value >= 0) {
@@ -6551,9 +6553,10 @@ void ScriptEngine::setFade( ScriptAction *pAction )
 	m_curFadeFrame = 0;
 	m_minFade = pAction->getParameter(0)->getReal();
 	m_maxFade = pAction->getParameter(1)->getReal();
-	m_fadeFramesIncrease = pAction->getParameter(2)->getInt();
-	m_fadeFramesHold = pAction->getParameter(3)->getInt();
-	m_fadeFramesDecrease = pAction->getParameter(4)->getInt();
+	// the map's frame counts are 30 Hz frames
+	m_fadeFramesIncrease = ConvertRetailFrames(pAction->getParameter(2)->getInt());
+	m_fadeFramesHold = ConvertRetailFrames(pAction->getParameter(3)->getInt());
+	m_fadeFramesDecrease = ConvertRetailFrames(pAction->getParameter(4)->getInt());
 	m_curFadeValue = m_minFade;
 	if( m_fadeFramesIncrease == 0 )
 	{
@@ -6573,9 +6576,13 @@ void ScriptEngine::setSway( ScriptAction *pAction )
 	m_breezeInfo.m_directionVec.y = Cos(m_breezeInfo.m_direction);
 	m_breezeInfo.m_intensity = pAction->getParameter(1)->getReal();
 	m_breezeInfo.m_lean = pAction->getParameter(2)->getReal();
-	m_breezeInfo.m_breezePeriod = pAction->getParameter(3)->getInt();
-	if (m_breezeInfo.m_breezePeriod<1) 
-		m_breezeInfo.m_breezePeriod = 1;
+	// 30 Hz frames in the map; the period is a Short, so clamp before it narrows
+	Int breezePeriod = ConvertRetailFrames(pAction->getParameter(3)->getInt());
+	if (breezePeriod > SHRT_MAX)
+		breezePeriod = SHRT_MAX;
+	if (breezePeriod < 1)
+		breezePeriod = 1;
+	m_breezeInfo.m_breezePeriod = (Short)breezePeriod;
 	m_breezeInfo.m_randomness = pAction->getParameter(4)->getReal();
 
 }
@@ -6887,6 +6894,13 @@ Bool ScriptEngine::evaluateTimer( Condition *pCondition )
 	return (value < 1);
 }
 
+/** Seconds to timer frames.  Script timers count retail 30 Hz frames (see update), and this is
+	* retail's own msec-to-frames sum, so a timer holds the number EA's maps compare it with. */
+static Int retailTimerFrames( Real seconds )
+{
+	return REAL_TO_INT_CEIL( seconds * 1000.0f * ((Real)RETAIL_LOGICFRAMES_PER_SECOND / (Real)MSEC_PER_SECOND) );
+}
+
 //-------------------------------------------------------------------------------------------------
 /** Starts a timer. */
 //-------------------------------------------------------------------------------------------------
@@ -6904,14 +6918,14 @@ void ScriptEngine::setTimer( ScriptAction *pAction, Bool millisecondTimer, Bool 
 			Real randomValue = pAction->getParameter(2)->getReal();
 			value = GameLogicRandomValue(value, randomValue);
 		}
-		m_counters[counterNdx].value = REAL_TO_INT_CEIL(ConvertDurationFromMsecsToFrames(value*1000));
+		m_counters[counterNdx].value = retailTimerFrames(value);
 	} else {
 		Int value = pAction->getParameter(1)->getInt();
 		if (random) {
 			Int randomValue = pAction->getParameter(2)->getInt();
 			value = GameLogicRandomValue(value, randomValue);
 		}
-		m_counters[counterNdx].value = value;
+		m_counters[counterNdx].value = value;	// 30 Hz frames in the map, and timers tick at 30 Hz
 	}
 	m_counters[counterNdx].isCountdownTimer = true;
 }
@@ -6961,7 +6975,7 @@ void ScriptEngine::adjustTimer( ScriptAction *pAction, Bool millisecondTimer, Bo
 		Real value = pAction->getParameter(0)->getReal();
 		if (!add)
 			value = -value;
-		m_counters[counterNdx].value += REAL_TO_INT_CEIL(ConvertDurationFromMsecsToFrames(value*1000));
+		m_counters[counterNdx].value += retailTimerFrames(value);
 	} else {
 		Int value = pAction->getParameter(0)->getInt();
 		if (!add)
@@ -8751,6 +8765,12 @@ void ScriptEngine::AdjustDebugVariableData(const AsciiString& variableName, Int 
 // ------------------------------------------------------------------------------------------------
 void ScriptEngine::crc( Xfer *xfer )
 {
+	// Nothing, as in retail.  The script counters and flags are not the same on every machine: the
+	// scripts a network game runs follow the local player: MultiplayerScripts.scb sets the _FACTION
+	// counter from <Local Player>'s faction, and the music, speech and victory timers key off it.  Two
+	// players of different factions hold different values from the first frames on, and none of it
+	// reaches an object (retail never CRCed it).  CRCing them
+	// (v3.0.0) put every mixed-faction network game out of sync at the first CRC frame.
 
 }  // end crc
 

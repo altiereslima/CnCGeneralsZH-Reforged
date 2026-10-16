@@ -39,9 +39,9 @@
 
 // How long everyone in a chain has to have been off its order before the next one goes out.  A unit
 // that has just been given an order can read as idle for a frame while it is still being set up, and
-// an aircraft taxiing out holds its order rather than being on it; four frames is an eighth of a
-// second, which is invisible at a corner and longer than either of those.
-static const UnsignedInt STEP_SETTLE_FRAMES = 4;
+// an aircraft taxiing out holds its order rather than being on it; four retail frames is an eighth of
+// a second, which is invisible at a corner and longer than either of those.
+static const UnsignedInt STEP_SETTLE_FRAMES = 4 * LOGICFRAMES_PER_RETAIL_FRAME;
 
 //-------------------------------------------------------------------------------------------------
 QueuedOrder::QueuedOrder( void ) : m_type( GameMessage::MSG_INVALID )

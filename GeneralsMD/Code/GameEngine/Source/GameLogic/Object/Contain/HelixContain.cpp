@@ -180,6 +180,7 @@ void HelixContain::createPayload()
 			  else
 			  {
 				  DEBUG_CRASH( ( "HelixContain::createPayload: %s is full, or not valid for the payload %s!", object->getName().str(), self->m_initialPayload.name.str() ) );
+				  TheGameLogic->destroyObject( payload );
 			  }
 
       }

@@ -110,6 +110,7 @@ protected:
 	void adjustBuildList(BuildListInfo *list);
 	Int getMyEnemyPlayerIndex(void);
 	void acquireEnemy(void);
+	void doSurrender(void);			///< say GG and give up once the match is lost beyond recovery
 
 protected:
 	Int m_curFrontBaseDefense; // First is 0.
@@ -123,6 +124,9 @@ protected:
 
 	UnsignedInt m_frameToCheckEnemy;
 	Player			*m_currentEnemy;
+
+	UnsignedInt m_hopelessSinceFrame;		///< first check of the current hopeless stretch, 0 while there is hope
+	UnsignedInt m_surrenderFrame;				///< GG said; give up on this frame.  0 until then
 
 };
 

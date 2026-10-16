@@ -80,6 +80,11 @@ static const Char *SAVE_GAME_EXTENSION = ".sav";
 static const Char *ZERO_NAME_ONLY      = "00000000";
 static const Int MAX_SAVE_FILE_NUMBER  =  99999999;
 
+// The GameState block's version.  4 adds nothing to the block: it marks the build where logic went
+// to 60 ticks a second, and a file written before that cannot load in this one.  The original
+// game's files are 2, as were this fork's until 3 added the game speed.
+static const XferVersion GAME_STATE_VERSION = 4;
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 #define GAME_STATE_BLOCK_STRING "CHUNK_GameState"  // block of save game data with game info data
 #define CAMPAIGN_BLOCK_STRING "CHUNK_Campaign"		 // block of game data that has campaign info
@@ -100,6 +105,7 @@ SaveGameInfo::SaveGameInfo( void )
 	missionNumber			= 0;
 	saveFileType			= SAVE_FILE_TYPE_NORMAL;
 	framesPerSecond		= 0;
+	version						= 0;
 
 }  // end SaveGameInfo
 
@@ -109,6 +115,16 @@ SaveGameInfo::~SaveGameInfo( void )
 {
 
 }  // end ~SaveGameInfo
+
+// ------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
+Bool SaveGameInfo::isLoadable( void ) const
+{
+
+	// a newer one never gets this far: xferVersion refuses it while the header is read
+	return version >= GAME_STATE_VERSION;
+
+}  // end isLoadable
 
 // ------------------------------------------------------------------------------------------------
 /** Is this date newer than the other one passed in? */
@@ -647,16 +663,20 @@ SaveCode GameState::saveGame( AsciiString filename, UnicodeString desc,
 	// this is now done during startNewGame()
 //	gameInfo->pristineMapName = TheCampaignManager->getCurrentMap();
 
-	// write the save file
+	// write the save file.  Close is in here too: it is where the bytes reach the disk, and where a
+	// full disk shows.  Either failing leaves the slot's earlier save as it was.
 	try
 	{
 
 		// save file
 		xferSaveData( &xferSave, which );
+		xferSave.close();
 
 	}  // end try
 	catch( ... )
 	{
+
+		xferSave.discard();
 
 		UnicodeString ufilepath;
 		ufilepath.translate(filepath);
@@ -666,14 +686,9 @@ SaveCode GameState::saveGame( AsciiString filename, UnicodeString desc,
 
 		MessageBoxOk(TheGameText->fetch("GUI:Error"), msg, NULL);
 
-		// close the file and get out of here
-		xferSave.close();
 		return SC_ERROR;
-		
-	}  // end catch
 
-	// close the file
-	xferSave.close();
+	}  // end catch
 
 	// print message to the user for game successfully saved
 	UnicodeString msg = TheGameText->fetch( "GUI:GameSaveComplete" );
@@ -756,6 +771,10 @@ SaveCode GameState::loadGame( AvailableGameInfo gameInfo )
 	// sanity check for file
 	if( doesSaveGameExist( gameInfo.filename ) == FALSE )
 		return SC_FILE_NOT_FOUND;
+
+	// the original game's saves and this fork's older ones read as garbage here
+	if( refuseUnloadableSave( gameInfo.saveGameInfo ) )
+		return SC_INVALID_DATA;
 
 	// clear game data just like loading from the debug map load screen for mission saves
 	if( gameInfo.saveGameInfo.saveFileType == SAVE_FILE_TYPE_MISSION )
@@ -844,9 +863,10 @@ SaveCode GameState::loadGame( AvailableGameInfo gameInfo )
 	}  // end if
 
 	// A loaded match played at the default 30 whatever speed it was saved at: the reset during the
-	// load puts the default back, and nothing kept the speed. A mission save starts its map afresh.
+	// load puts the default back, and nothing kept the speed. A mission save starts its map afresh. A
+	// save from when the speed went past normal comes back at normal.
 	if( getSaveGameInfo()->saveFileType != SAVE_FILE_TYPE_MISSION && getSaveGameInfo()->framesPerSecond > 0 )
-		TheGameEngine->setFramesPerSecondLimit( getSaveGameInfo()->framesPerSecond );
+		TheGameEngine->setFramesPerSecondLimit( ClampPlayerGameSpeed( getSaveGameInfo()->framesPerSecond ) );
 
 	//
 	// when loading a mission save, we want to do as much normal loading stuff as we
@@ -874,6 +894,21 @@ SaveCode GameState::loadGame( AvailableGameInfo gameInfo )
 	return SC_OK;
 
 }  // end loadGame
+
+// ------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
+Bool GameState::refuseUnloadableSave( const SaveGameInfo &saveGameInfo )
+{
+
+	if( saveGameInfo.isLoadable() )
+		return FALSE;
+
+	DEBUG_LOG(( "GameState - refused a save with GameState version %d, this build loads %d\n",
+							saveGameInfo.version, GAME_STATE_VERSION ));
+	MessageBoxOk( TheGameText->fetch( "GUI:Error" ), TheGameText->fetch( "GUI:SaveFromOlderGame" ), NULL );
+	return TRUE;
+
+}  // end refuseUnloadableSave
 
 //-------------------------------------------------------------------------------------------------
 AsciiString GameState::getSaveDirectory() const
@@ -1627,18 +1662,21 @@ void GameState::gameStatePostProcessLoad( void )
 /** Xfer method for the game state itself 
 	* Version Info:
 	* 1: Initial version 
-	* 2: Added save file type and mission map name (regular save vs automatic mission save) */
+	* 2: Added save file type and mission map name (regular save vs automatic mission save)
+	* 3: Added the game speed
+	* 4: Nothing new in the block; see GAME_STATE_VERSION */
 // ------------------------------------------------------------------------------------------------
 void GameState::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 3;
+	XferVersion currentVersion = GAME_STATE_VERSION;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
 	// get structure for our current game info
 	SaveGameInfo *saveGameInfo = getSaveGameInfo();
+	saveGameInfo->version = version;
 
 	// version 3: the game speed, read back by loadGame. It goes first because the rest of this
 	// block ends in branches.

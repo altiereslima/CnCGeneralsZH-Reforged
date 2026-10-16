@@ -46,7 +46,10 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
+#include <algorithm>
+
 #include "Common/DataChunk.h"
+#include "Common/FileSystem.h"
 #include "Common/GameState.h"
 #include "Common/PlayerTemplate.h"
 #include "Common/WellKnownKeys.h"
@@ -422,6 +425,8 @@ SidesInfo *SidesList::findSkirmishSideInfo(AsciiString name, Int* index /*= NULL
 }
 
 static AsciiString static_readPlayerNames[MAX_PLAYER_COUNT];
+static Dict static_readPlayerDicts[MAX_PLAYER_COUNT];	///< beside the names, for a mod's scripts (loadModSkirmishScripts)
+static TeamsInfoRec static_readModTeams;								///< a mod's ScriptTeams, before its players are renamed
 
 /**
 * ParsePlayersDataChunk - read players names data chunk.
@@ -443,37 +448,235 @@ static Bool ParsePlayersDataChunk(DataChunkInput &file, DataChunkInfo *info, voi
 	for (i=0; i<numNames; i++) {
 		if (i>=MAX_PLAYER_COUNT) break;
 		static_readPlayerNames[i] = file.readAsciiString();
+		static_readPlayerDicts[i].clear();
 		if (readDicts) {
-			Dict sideDict = file.readDict();
+			static_readPlayerDicts[i] = file.readDict();
 		}
 	}
 	DEBUG_ASSERTCRASH(file.atEndOfChunk(), ("Unexpected data left over."));
 	return true;
 }
 
-/**
-* ParseTeamsDataChunk - read teams data chunk.
-* Format is the newer CHUNKY format.
-*	Input: DataChunkInput 
-*		
-*/
-static Bool ParseTeamsDataChunk(DataChunkInput &file, DataChunkInfo *info, void *userData)
+/// a SkirmishScripts.scb's ScriptTeams, kept whole until its players are known
+/// (loadModSkirmishScripts, prepareForMP_or_Skirmish)
+static Bool ParseModTeamsDataChunk(DataChunkInput &file, DataChunkInfo *info, void *userData)
 {
-	SidesList *sides = (SidesList *)userData;
 	while (!file.atEndOfChunk()) {
 		Dict teamDict = file.readDict();
-		AsciiString teamName = teamDict.getAsciiString(TheKey_teamName);
-		AsciiString player = teamDict.getAsciiString(TheKey_teamOwner);
-		if (sides->findSkirmishSideInfo(player)) {
-			// player exists, so just add it.
-			sides->addSkirmishTeam(&teamDict);
-			//DEBUG_LOG(("Adding team %s\n", teamName.str()));
-		} else {
-			//DEBUG_LOG(("Couldn't add team %s, no player %s\n", teamName.str(), player.str()));
+		static_readModTeams.addTeam(&teamDict);
+	}
+	return true;
+}
+
+/** What a mod's skirmish scripts call its own: its kept players and their default teams under
+	* "M<n>~", and what they build, upgrade, research, fire or press read as the mod's where it defines
+	* one.  Script, flag and counter names stay, Player::initFromDict qualifies those per player. */
+struct ModScriptNames
+{
+	Int mod;
+	AsciiString prefix;
+	std::vector<AsciiString> players;
+
+	Bool isPlayer(const AsciiString& name) const
+	{
+		return std::find(players.begin(), players.end(), name) != players.end();
+	}
+	AsciiString player(const AsciiString& name) const
+	{
+		if (!isPlayer(name))
+			return name;
+		AsciiString renamed = prefix;
+		renamed.concat(name);
+		return renamed;
+	}
+	/// a player's default team is "team<player>" (Player::setDefaultTeam), so it follows the player
+	AsciiString team(const AsciiString& name) const
+	{
+		if (!name.startsWith("team") || !isPlayer(AsciiString(name.str() + 4)))
+			return name;
+		AsciiString renamed = "team";
+		renamed.concat(player(AsciiString(name.str() + 4)));
+		return renamed;
+	}
+	void parameter(Parameter *parm) const
+	{
+		ModNameType type;
+		switch (parm->getParameterType())
+		{
+			case Parameter::SIDE: parm->friend_setString(player(parm->getString())); return;
+			case Parameter::TEAM: parm->friend_setString(team(parm->getString())); return;
+			case Parameter::OBJECT_TYPE: type = MODNAME_OBJECT; break;
+			case Parameter::UPGRADE: type = MODNAME_UPGRADE; break;
+			case Parameter::SCIENCE: type = MODNAME_SCIENCE; break;
+			case Parameter::SPECIAL_POWER: type = MODNAME_SPECIALPOWER; break;
+			case Parameter::COMMAND_BUTTON: type = MODNAME_COMMANDBUTTON; break;
+			default: return;
+		}
+		parm->friend_setString(TheModNamespace.modName(mod, type, parm->getString()));
+	}
+	void script(Script *s) const
+	{
+		for (OrCondition *orCondition = s->getOrCondition(); orCondition; orCondition = orCondition->getNextOrCondition())
+		{
+			for (Condition *condition = orCondition->getFirstAndCondition(); condition; condition = condition->getNext())
+			{
+				for (Int i = 0; i < condition->getNumParameters(); ++i)
+					parameter(condition->getParameter(i));
+			}
+		}
+		ScriptAction *const actions[] = { s->getAction(), s->getFalseAction() };
+		for (Int list = 0; list < 2; ++list)
+		{
+			for (ScriptAction *action = actions[list]; action; action = action->getNext())
+			{
+				for (Int i = 0; i < action->getNumParameters(); ++i)
+					parameter(action->getParameter(i));
+			}
 		}
 	}
-	DEBUG_ASSERTCRASH(file.atEndOfChunk(), ("Unexpected data left over."));
-	return true;
+	void scripts(ScriptList *list) const
+	{
+		for (Script *s = list->getScript(); s; s = s->getNext())
+			script(s);
+		for (ScriptGroup *group = list->getScriptGroup(); group; group = group->getNext())
+		{
+			for (Script *s = group->getScript(); s; s = s->getNext())
+				script(s);
+		}
+	}
+};
+
+/** -modfactions: each mod's own SkirmishScripts.scb, for its factions' computer players.  A player of
+	* the file whose faction the mod defines (FactionAmerica read as M<n>~FactionAmerica) is kept with
+	* its scripts and teams, renamed so it never meets retail's player of the same name. */
+void SidesList::loadModSkirmishScripts(void)
+{
+	m_modSkirmishSides.clear();
+	m_modSkirmishTeamrec.clear();
+	if (TheGlobalData == NULL || !TheGlobalData->m_modFactions)
+		return;
+
+	const AsciiString path = "data\\Scripts\\SkirmishScripts.scb";
+	for (Int mod = 0; mod < (Int)TheGlobalData->m_mods.size(); ++mod)
+	{
+		// the stream reads the whole file as it opens, so the focus is back before the parse
+		TheFileSystem->setFocus(mod);
+		CachedFileInputStream theInputStream;
+		const Bool opened = TheFileSystem->doesFileExist(path.str()) && theInputStream.open(path);
+		TheFileSystem->setFocus(FILE_FOCUS_ALL);
+		if (!opened)
+			continue;
+
+		DataChunkInput file(&theInputStream);
+		file.registerParser( AsciiString("PlayerScriptsList"), AsciiString::TheEmptyString, ScriptList::ParseScriptsDataChunk );
+		file.registerParser( AsciiString("ScriptsPlayers"), AsciiString::TheEmptyString, ParsePlayersDataChunk );
+		file.registerParser( AsciiString("ScriptTeams"), AsciiString::TheEmptyString, ParseModTeamsDataChunk );
+		const Bool parsed = file.parse(this);
+		ScriptList *scripts[MAX_PLAYER_COUNT];
+		const Int count = ScriptList::getReadScripts(scripts);
+
+		ModScriptNames names;
+		names.mod = mod;
+		names.prefix.format("M%d~", mod + 1);
+		const size_t firstSide = m_modSkirmishSides.size();
+		for (Int i = 0; i < count; ++i)
+		{
+			// a file written without the players' dicts names its factions only through the map's player of that name
+			AsciiString fileFaction = static_readPlayerDicts[i].getAsciiString(TheKey_playerFaction);
+			SidesInfo *mapSide = findSkirmishSideInfo(static_readPlayerNames[i]);
+			if (fileFaction.isEmpty() && mapSide != NULL)
+				fileFaction = mapSide->getDict()->getAsciiString(TheKey_playerFaction);
+			const AsciiString faction = TheModNamespace.modName(mod, MODNAME_PLAYERTEMPLATE, fileFaction);
+			const PlayerTemplate *pt = ThePlayerTemplateStore->findPlayerTemplate(NAMEKEY(faction));
+			if (!parsed || scripts[i] == NULL || pt == NULL || pt->getModIndex() != mod || !pt->isPlayableSide())
+			{
+				if (scripts[i])
+					scripts[i]->deleteInstance();
+				continue;
+			}
+			names.players.push_back(static_readPlayerNames[i]);
+			Dict sideDict(static_readPlayerDicts[i]);
+			sideDict.setAsciiString(TheKey_playerName, names.player(static_readPlayerNames[i]));
+			sideDict.setAsciiString(TheKey_playerFaction, pt->getName());
+			m_modSkirmishSides.push_back(SidesInfo());
+			m_modSkirmishSides.back().init(&sideDict);
+			m_modSkirmishSides.back().setScriptList(scripts[i]);
+		}
+		for (size_t s = firstSide; s < m_modSkirmishSides.size(); ++s)
+			names.scripts(m_modSkirmishSides[s].getScriptList());
+
+		const NameKeyType unitKeys[] = { TheKey_teamUnitType1, TheKey_teamUnitType2, TheKey_teamUnitType3,
+			TheKey_teamUnitType4, TheKey_teamUnitType5, TheKey_teamUnitType6, TheKey_teamUnitType7, TheKey_teamTransport };
+		Int teams = 0;
+		for (Int t = 0; t < static_readModTeams.getNumTeams(); ++t)
+		{
+			Dict teamDict(*static_readModTeams.getTeamInfo(t)->getDict());
+			const AsciiString owner = teamDict.getAsciiString(TheKey_teamOwner);
+			if (!names.isPlayer(owner))
+				continue;
+			teamDict.setAsciiString(TheKey_teamOwner, names.player(owner));
+			teamDict.setAsciiString(TheKey_teamName, names.team(teamDict.getAsciiString(TheKey_teamName)));
+			for (size_t k = 0; k < ARRAY_SIZE(unitKeys); ++k)
+			{
+				Bool exists = FALSE;
+				const AsciiString unit = teamDict.getAsciiString(unitKeys[k], &exists);
+				if (exists)
+					teamDict.setAsciiString(unitKeys[k], TheModNamespace.modName(mod, MODNAME_OBJECT, unit));
+			}
+			m_modSkirmishTeamrec.addTeam(&teamDict);
+			++teams;
+		}
+		DEBUG_LOG(("MODNS M%d~ SkirmishScripts.scb: %d of %d players kept, %d teams%s\n", mod + 1,
+			(Int)(m_modSkirmishSides.size() - firstSide), count, teams, parsed ? "" : ", unreadable"));
+
+		static_readModTeams.clear();
+		for (Int i = 0; i < MAX_PLAYER_COUNT; ++i)
+		{
+			static_readPlayerNames[i].clear();
+			static_readPlayerDicts[i].clear();
+		}
+	}
+}
+
+Int SidesList::skirmishSideFit(const AsciiString& candidateSide, Int candidateMod, const AsciiString& side, Int mod)
+{
+	if (candidateSide != side)
+		return 0;
+	if (candidateMod == mod)
+		return 2;
+	return candidateMod < 0 ? 1 : 0;
+}
+
+SidesInfo *SidesList::findSkirmishSideFor(const PlayerTemplate *pt, TeamsInfoRec **teams)
+{
+	const AsciiString side = pt->getSide();
+	const Int mod = pt->getModIndex();
+	SidesInfo *best = NULL;
+	Int bestFit = 0;
+	for (size_t i = 0; i < m_modSkirmishSides.size() && bestFit < 2; ++i)
+	{
+		const PlayerTemplate *spt = ThePlayerTemplateStore->findPlayerTemplate(NAMEKEY(m_modSkirmishSides[i].getDict()->getAsciiString(TheKey_playerFaction)));
+		if (skirmishSideFit(spt->getSide(), spt->getModIndex(), side, mod) == 2)
+		{
+			best = &m_modSkirmishSides[i];
+			bestFit = 2;
+			if (teams)
+				*teams = &m_modSkirmishTeamrec;
+		}
+	}
+	for (Int i = 0; i < m_numSkirmishSides && bestFit < 2; ++i)
+	{
+		const PlayerTemplate *spt = ThePlayerTemplateStore->findPlayerTemplate(NAMEKEY(m_skirmishSides[i].getDict()->getAsciiString(TheKey_playerFaction)));
+		const Int fit = spt ? skirmishSideFit(spt->getSide(), spt->getModIndex(), side, mod) : 0;
+		if (fit > bestFit)
+		{
+			best = &m_skirmishSides[i];
+			bestFit = fit;
+			if (teams)
+				*teams = &m_skirmishTeamrec;
+		}
+	}
+	return best;
 }
 
 void SidesList::prepareForMP_or_Skirmish(void)
@@ -516,6 +719,7 @@ void SidesList::prepareForMP_or_Skirmish(void)
 			gotScripts = true;
 		}
 	}
+	loadModSkirmishScripts();
 	if (!gotScripts) {
 		AsciiString path = "data\\Scripts\\SkirmishScripts.scb";
 		DEBUG_LOG(("Skirmish map using standard scripts\n"));
@@ -526,9 +730,10 @@ void SidesList::prepareForMP_or_Skirmish(void)
 				DataChunkInput file( pStrm );
 				file.registerParser( AsciiString("PlayerScriptsList"), AsciiString::TheEmptyString, ScriptList::ParseScriptsDataChunk );
 				file.registerParser( AsciiString("ScriptsPlayers"), AsciiString::TheEmptyString, ParsePlayersDataChunk );
-				file.registerParser( AsciiString("ScriptTeams"), AsciiString::TheEmptyString, ParseTeamsDataChunk );
+				file.registerParser( AsciiString("ScriptTeams"), AsciiString::TheEmptyString, ParseModTeamsDataChunk );
 				if (!file.parse(this)) {
 					DEBUG_LOG(("ERROR - Unable to read in skirmish scripts.\n"));
+					static_readModTeams.clear();
 					return;
 				}
 				ScriptList *scripts[MAX_PLAYER_COUNT];
@@ -544,17 +749,50 @@ void SidesList::prepareForMP_or_Skirmish(void)
 							break;
 						}
 					}
-					if (curSide == -1) continue;
+					if (curSide == -1) {
+						/* A map saved before a faction existed has no skirmish player for it: every retail map
+							 lacks ShockWave's Armor, Special Weapons and Salvage generals.  Player::initFromDict then
+							 found no scripts, made the seat human with no AI, and the base stood idle - and the
+							 takeover click handed it to whoever clicked it.  The file's own player for that side
+							 stands in, kept beside the map's, which nearly fill m_skirmishSides. */
+						const PlayerTemplate *pt = ThePlayerTemplateStore->findPlayerTemplate(NAMEKEY(static_readPlayerDicts[i].getAsciiString(TheKey_playerFaction)));
+						if (scripts[i] && pt && pt->isPlayableSide() && findSkirmishSideFor(pt, NULL) == NULL) {
+							DEBUG_LOG(("Skirmish map has no player for %s, using %s from the standard scripts\n", pt->getSide().str(), static_readPlayerNames[i].str()));
+							m_modSkirmishSides.push_back(SidesInfo());
+							m_modSkirmishSides.back().init(&static_readPlayerDicts[i]);
+							m_modSkirmishSides.back().setScriptList(scripts[i]);
+							scripts[i] = NULL;
+						}
+						if (scripts[i])
+							scripts[i]->deleteInstance();
+						continue;
+					}
 
 					ScriptList *pSL = getSkirmishSideInfo(curSide)->getScriptList();
 					getSkirmishSideInfo(curSide)->setScriptList(scripts[i]);
 					scripts[i] = NULL;
-					if (pSL) 
+					if (pSL)
 						pSL->deleteInstance();
 					scripts[i] = NULL;
 				}
+				for (Int t = 0; t < static_readModTeams.getNumTeams(); ++t) {
+					const Dict *teamDict = static_readModTeams.getTeamInfo(t)->getDict();
+					const AsciiString owner = teamDict->getAsciiString(TheKey_teamOwner);
+					if (findSkirmishSideInfo(owner)) {
+						addSkirmishTeam(teamDict);
+						continue;
+					}
+					for (size_t s = 0; s < m_modSkirmishSides.size(); ++s) {
+						if (m_modSkirmishSides[s].getDict()->getAsciiString(TheKey_playerName) == owner) {
+							m_modSkirmishTeamrec.addTeam(teamDict);
+							break;
+						}
+					}
+				}
+				static_readModTeams.clear();
 				for (i=0; i<MAX_PLAYER_COUNT; i++) {
 					static_readPlayerNames[i].clear();
+					static_readPlayerDicts[i].clear();
 				}
 		}
 
@@ -586,18 +824,20 @@ void SidesList::emptySides()
 { 
 	Int i;
 
-	m_numSides = 0; 
-	m_numSkirmishSides = 0; 
+	m_numSides = 0;
+	m_numSkirmishSides = 0;
 	for (i = 0; i < MAX_PLAYER_COUNT; i++) {
-		m_sides[i].clear(); 
+		m_sides[i].clear();
 		m_skirmishSides[i].clear();
 	}
+	m_modSkirmishSides.clear();
 }
 
-void SidesList::emptyTeams() 
-{ 
+void SidesList::emptyTeams()
+{
 	m_teamrec.clear();
 	m_skirmishTeamrec.clear();
+	m_modSkirmishTeamrec.clear();
 }
 
 void SidesList::addSide(const Dict* d)

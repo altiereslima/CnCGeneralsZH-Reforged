@@ -607,7 +607,7 @@ void AIDockProcessDockState::setNextDockActionFrame()
 	{
 		UnsignedInt delay = supplyTruck->getActionDelayForDock( getMachineGoalObject() );
 		m_nextDockActionFrame = TheGameLogic->getFrame() + delay;
-		// ... and let the docker publish that window, so a bar can fill over it while it works
+		// ... and let the docker keep where that window ends, which times its next leg
 		supplyTruck->noteDockActionWindow( delay );
 		return;
 	}

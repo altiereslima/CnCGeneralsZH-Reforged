@@ -82,6 +82,7 @@
 #include "GameLogic/Module/TransportContain.h"	// ... and a template's hold, before one exists
 #include "GameLogic/Module/JetAIUpdate.h"		// a Comanche is a jet with no runway
 #include "GameLogic/Module/CleanupHazardUpdate.h"	// an Ambulance out cleaning is left to it
+#include "GameLogic/Module/ParticleUplinkCannonUpdate.h"	// driving the beam
 #include <map>
 #include "Platform/MsvcFloatCasts.h"
 
@@ -300,8 +301,9 @@ static Int64 theAIBaseSubStart;
 	 templateFramesToKill). selectTeamToBuild asks it for every unit of every candidate team against
 	 every kind of enemy in sight, both ways round, and each answer walks module names, weapon sets and
 	 armour: an eight-player match spent 84ms of one frame there. Nothing it reads changes during a
-	 match, so the answer is kept. The destructor empties it, because the next match can free a template
-	 and hand its address to another. */
+	 match, so the answer is kept. prepareMatchupTables empties it at the start of every match, because
+	 the next match can free a template and hand its address to another, and fills it on the loading
+	 screen when a skirmish AI is playing. */
 typedef std::pair<const ThingTemplate *, const ThingTemplate *> AITemplatePair;
 static std::map<AITemplatePair, Real> theFramesToKillCache;
 // the two questions under it that walk a template's module list by name, kept the same way: the first
@@ -378,7 +380,19 @@ m_role(AIROLE_AGGRESSIVE)
 	{
 		m_ambulance[ slot ].id = INVALID_ID;
 		m_ambulance[ slot ].spot.zero();
+		m_ambulance[ slot ].seen.zero();
+		m_ambulance[ slot ].seenHealth = 1.0f;
+		m_ambulance[ slot ].seenReach = 0.0f;
+		m_ambulance[ slot ].pullbacks = 0;
+		m_ambulance[ slot ].holds = 0;
 	}
+	m_ambulanceLost = 0;
+	m_ambulancesBought = 0;
+	m_incomeMark = 0;
+	m_incomeMarkFrame = 0;
+	m_bankMark = 0;
+	m_incomePerSecond = 0.0f;
+	m_startFortune = 0;
 	m_healerSeconds = 0;
 	m_healerClearSeconds = 0;
 	m_captureTimer = 1;
@@ -420,14 +434,8 @@ m_role(AIROLE_AGGRESSIVE)
 	m_placementRing = 0;
 	m_difficulty = TheScriptEngine->getGlobalDifficulty(); 
 	m_skillLevel = skillLevelForDifficulty( m_difficulty );
-
-	//
-	// Role is rolled once and kept for the whole match.  Sins is explicit that its AI does not flip
-	// personality mid-game, and that consistency is what makes an opponent readable and therefore
-	// counterable - an AI that turtles for ten minutes and then rushes is not deep, it is noise.
-	// GameLogicRandomValue, so a replay rolls the same one.
-	//
-	m_role = (GameLogicRandomValue( 0, AIROLE_COUNT - 1 ) == 0) ? AIROLE_AGGRESSIVE : AIROLE_DEFENSIVE;
+	// m_role is rolled in AISkirmishPlayer's constructor: a script-driven opponent must not draw
+	// from the logic random stream where retail did not.
 
 	m_teamSeconds = TheAI->getAiData()->m_teamSeconds;
 
@@ -481,9 +489,6 @@ m_role(AIROLE_AGGRESSIVE)
 AIPlayer::~AIPlayer()
 {
 	clearTeamsInQueue();
-	theFramesToKillCache.clear();
-	theMaxHealthCache.clear();
-	theDetectsStealthCache.clear();
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -577,21 +582,18 @@ void AIPlayer::checkForSupplyCenter( BuildListInfo *info, Object *bldg )
 	{
 		info->setSupplyBuilding(true);
 		Int desiredGatherers = 0;
-		const AISideInfo *resInfo = TheAI->getAiData()->m_sideInfo;
-		while (resInfo) {
-			if (resInfo->m_side == m_player->getSide()) {
-				GameDifficulty difficulty = m_difficulty;
-				if (difficulty == DIFFICULTY_EASY) {
-					desiredGatherers = resInfo->m_easy;
-				}
-				if (difficulty == DIFFICULTY_NORMAL) {
-					desiredGatherers = resInfo->m_normal;
-				}
-				if (difficulty == DIFFICULTY_HARD) {
-					desiredGatherers = resInfo->m_hard;	 
-				}
+		const AISideInfo *resInfo = TheAI->getAiData()->findSideInfo( m_player );
+		if (resInfo) {
+			GameDifficulty difficulty = m_difficulty;
+			if (difficulty == DIFFICULTY_EASY) {
+				desiredGatherers = resInfo->m_easy;
 			}
-			resInfo = resInfo->m_next;
+			if (difficulty == DIFFICULTY_NORMAL) {
+				desiredGatherers = resInfo->m_normal;
+			}
+			if (difficulty == DIFFICULTY_HARD) {
+				desiredGatherers = resInfo->m_hard;
+			}
 		}
 		//
 		// Adaptive harvesters (B6): the three INI numbers do not know how much supply is actually
@@ -599,7 +601,7 @@ void AIPlayer::checkForSupplyCenter( BuildListInfo *info, Object *bldg )
 		// safe radius, capped at two extra - a centre with three piles beside it can keep more
 		// trucks busy, and one with a single pile cannot.
 		//
-		if( getSkillProfile()->m_adaptiveHarvesters )
+		if( isSkirmishAI() && getSkillProfile()->m_adaptiveHarvesters )
 		{
 			Int warehouses = 0;
 			PartitionFilterAcceptByKindOf supplyOnly( MAKE_KINDOF_MASK( KINDOF_SUPPLY_SOURCE ), KINDOFMASK_NONE );
@@ -1022,8 +1024,9 @@ Object *AIPlayer::buildStructureNow(const ThingTemplate *bldgPlan, BuildListInfo
 	* cells either way: half the width of the square rings it replaced. */
 static const Int BUILD_SEARCH_CELLS = 5;
 static const Int SKIRMISH_BUILD_SEARCH_CELLS = 60;
-static const Int BUILD_PROBES_PER_FRAME = 32;			///< isLocationLegalToBuild calls one frame may spend
-static const Int BUILD_EXPANSIONS_PER_FRAME = 512;	///< cells one frame may take off the flood's queue
+/// Budgets fitted at 30 logic frames a second, halved at 60 so a search runs at the same pace per second.
+static const Int BUILD_PROBES_PER_FRAME = 32 / LOGICFRAMES_PER_RETAIL_FRAME;			///< isLocationLegalToBuild calls one frame may spend
+static const Int BUILD_EXPANSIONS_PER_FRAME = 512 / LOGICFRAMES_PER_RETAIL_FRAME;	///< cells one frame may take off the flood's queue
 
 /** How far from the base center, in base radii, a building that stays home may stand.  Two, the
 	* reach the home guard already answers to (the 2.0f * m_baseRadius lists).  1.25 was tried first:
@@ -1096,7 +1099,7 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 {
 	// Find a dozer.
 	Object *dozer = findDozer(info->getLocation());
-	if (dozer==NULL && getSkillProfile()->m_economyBuildings && isPowerThin() &&
+	if (dozer==NULL && isSkirmishAI() && getSkillProfile()->m_economyBuildings && isPowerThin() &&
 			bldgPlan->isKindOf(KINDOF_FS_POWER) && !bldgPlan->isKindOf(KINDOF_CASH_GENERATOR)) {
 		// every dozer busy and the power running out: a Hard AI takes one off whatever it is doing. A China
 		// asked for a plant with 26,000 in the bank and waited 95 seconds, going dark half way, because
@@ -1107,9 +1110,13 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 	if (dozer==NULL) {
 		return NULL;
 	}
-	// Check available funds.
+	// Check available funds, and with a Hard AI whether the money is saved for something better.
 	Money *money = m_player->getMoney();
-	if (money->countMoney()<bldgPlan->calcCostToBuild(m_player)) {
+	const Int cost = bldgPlan->calcCostToBuild(m_player);
+	if (!purchaseAllowed(bldgPlan->getTemplateID(), cost, purchaseKindOf(bldgPlan), TRUE, bldgPlan->getName())) {
+		return NULL;
+	}
+	if ((Int)money->countMoney()<cost) {
 		return NULL;
 	}
 
@@ -1121,7 +1128,7 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 		 landing together, because a completed building shortcuts the timer that was meant to keep
 		 the players apart.
 
-		 The loser waits exactly one frame - a thirtieth of a second on a building that takes half a
+		 The loser waits exactly one frame - a sixtieth of a second on a building that takes half a
 		 minute to put up. The order is the player list order, so every machine defers the same
 		 player on the same frame and a replay still matches. */
 	if (!TheAI->claimBuildingPlacement(TheGameLogic->getFrame())) {
@@ -1331,6 +1338,7 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 		info->setObjectID( bldg->getID() );
 		info->setObjectTimestamp( TheGameLogic->getFrame()+1 );	// Has to be non-zero, so add 1.
 		info->setUnderConstruction(true);
+		purchased( bldgPlan->getTemplateID(), cost, purchaseKindOf(bldgPlan), bldgPlan->getName() );
 
 		if (TheGlobalData->m_debugAI) {
 			AsciiString bldgName = bldgPlan->getName();
@@ -1806,8 +1814,14 @@ void AIPlayer::onUnitProduced( Object *factory, Object *unit )
 						if (m_ambulance[slot].id == INVALID_ID) {
 							m_ambulance[slot].id = unit->getID();
 							m_ambulance[slot].spot = *unit->getPosition();
-							DEBUG_LOG(("AI AMBULANCE frame %d player %d '%s' %d comes out\n", TheGameLogic->getFrame(),
-								m_player->getPlayerIndex(), unit->getTemplate()->getName().str(), unit->getID()));
+							m_ambulance[slot].seen = *unit->getPosition();
+							m_ambulance[slot].seenHealth = 1.0f;
+							m_ambulance[slot].seenReach = 0.0f;
+							m_ambulance[slot].pullbacks = 0;
+							m_ambulance[slot].holds = 0;
+							++m_ambulancesBought;
+							DEBUG_LOG(("AI AMBULANCE frame %d player %d '%s' %d comes out, %d bought this match\n", TheGameLogic->getFrame(),
+								m_player->getPlayerIndex(), unit->getTemplate()->getName().str(), unit->getID(), m_ambulancesBought));
 							break;
 						}
 					}
@@ -1852,14 +1866,16 @@ enum { SUPERWEAPON_REAIM_FRAMES = 600 * LOGICFRAMES_PER_SECOND };
 //----------------------------------------------------------------------------------------------------------
 /** What a superweapon aimed at this spot is worth to this player right now.
  *
- * The score itself is EA's - the price of everything inside the blast - and the fade on top of it
+ * The score itself is EA's - the price of everything inside the blast, with the threat weight and
+ * the rung's economy weight on top (getPlayerSuperweaponValue) - and the fade on top of it
  * is what stops the salvo. A negative score belongs to a sneak attack, which reads defended ground
  * as a cost rather than a prize; fading that would flatter exactly the ground it is avoiding.
  */
 //----------------------------------------------------------------------------------------------------------
 Int AIPlayer::superweaponScore( Coord3D *center, Int playerNdx, Real radius, Bool targetMilitaryUnits )
 {
-	const Int value = getPlayerSuperweaponValue( center, playerNdx, radius, targetMilitaryUnits, m_player->getPlayerIndex() );
+	const Int value = getPlayerSuperweaponValue( center, playerNdx, radius, targetMilitaryUnits, m_player->getPlayerIndex(),
+																							 strikeEconomyWeight() );
 	if( value <= 0 )
 		return value;
 
@@ -1879,6 +1895,14 @@ Int AIPlayer::superweaponScore( Coord3D *center, Int playerNdx, Real radius, Boo
 	}
 
 	return REAL_TO_INT( value * worth );
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** A Challenge or mission opponent aims as the map script was written for: price and threat alone. */
+//----------------------------------------------------------------------------------------------------------
+Real AIPlayer::strikeEconomyWeight( void )
+{
+	return isSkirmishAI() ? getSkillProfile()->m_strikeEconomyWeight : 0.0f;
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -2098,11 +2122,27 @@ Bool AIPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *power, Coord
 /** How much an armed target is worth on top of its price, so the shot goes where the threat is. */
 const Real SUPERWEAPON_THREAT_WEIGHT = 2.0f;
 
+/** The least an economy target counts for before the rung's weight: a captured derrick's build price
+	* is next to nothing and it pays for the whole match.
+	* ponytail: one flat floor for every kind; a per-kind income estimate if derricks still go unhit. */
+const Real SUPERWEAPON_ECONOMY_FLOOR = 1000.0f;
+
+/** What pays for his army or opens his tech: a strike there is felt for the rest of the match. */
+static Bool isEconomyOrTechTarget( const Object *obj )
+{
+	return obj->isKindOf( KINDOF_CASH_GENERATOR ) || obj->isKindOf( KINDOF_FS_SUPPLY_CENTER ) ||
+				 obj->isKindOf( KINDOF_FS_BLACK_MARKET ) || obj->isKindOf( KINDOF_MONEY_HACKER ) ||
+				 obj->isKindOf( KINDOF_FS_INTERNET_CENTER ) || obj->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) ||
+				 obj->isKindOf( KINDOF_FS_STRATEGY_CENTER ) || obj->isKindOf( KINDOF_FS_ADVANCED_TECH );
+}
+
 //----------------------------------------------------------------------------------------------------------
 /**
- * Get the target value for structures in an area.
+ * Get the target value for structures in an area.  economyWeight is what an economy or tech target
+ * (isEconomyOrTechTarget) adds on top of its price, in prices.
  */
-Int AIPlayer::getPlayerSuperweaponValue(Coord3D *center, Int playerNdx, Real radius, Bool includeMilitaryUnits, Int observerNdx )
+Int AIPlayer::getPlayerSuperweaponValue(Coord3D *center, Int playerNdx, Real radius, Bool includeMilitaryUnits, Int observerNdx,
+																				Real economyWeight )
 {
 	if (radius < 4*PATHFIND_CELL_SIZE_F) 
 	{
@@ -2124,8 +2164,10 @@ Int AIPlayer::getPlayerSuperweaponValue(Coord3D *center, Int playerNdx, Real rad
 			for (DLINK_ITERATOR<Object> iter = team->iterate_TeamMemberList(); !iter.done(); iter.advance()) 
 			{
 				Object *pObj = iter.cur();
-				if (!pObj) 
+				if (!pObj)
 					continue;
+				if (pObj->isEffectivelyDead())
+					continue;			// a tank in its death throes stays on the team for seconds and held a steered beam on its wreck
 				if (!observerKnowsAbout(pObj, observerNdx))
 					continue;			// a superweapon is aimed at what has been scouted, not at the object list
 
@@ -2185,6 +2227,11 @@ Int AIPlayer::getPlayerSuperweaponValue(Coord3D *center, Int playerNdx, Real rad
 					if( includeMilitaryUnits )
 						value += aiCombatPower( pObj ) * SUPERWEAPON_THREAT_WEIGHT;
 
+					// ... and the threat weight alone sent every strike at the army. What pays for
+					// it, and the building that opens the next tier, is the hit felt all match.
+					if( economyWeight > 0.0f && !applyNegValue && isEconomyOrTechTarget( pObj ) )
+						value += economyWeight * max( (Real)pObj->getTemplate()->calcCostToBuild( pPlayer ), SUPERWEAPON_ECONOMY_FLOOR );
+
 					if( applyNegValue )
 					{
 						cash -= factor * value * 5.0f; //Extremely undesired
@@ -2211,8 +2258,8 @@ Bool AIPlayer::startTraining( WorkOrder *order, Bool busyOK, AsciiString teamNam
 	if( factory )
 	{
 		ProductionUpdateInterface *pu = factory->getProductionUpdateInterface();
-		if (pu && pu->queueCreateUnit( order->m_thing, pu->requestUniqueUnitID() )) {
-			order->m_factoryID = factory->getID(); 
+		if (pu && buyUnit( pu, order->m_thing, purchaseKindOf( order->m_thing ) )) {
+			order->m_factoryID = factory->getID();
 			if (TheGlobalData->m_debugAI) {
 				AsciiString teamStr = "Queuing ";
 				teamStr.concat(order->m_thing->getName());
@@ -2288,11 +2335,14 @@ Bool AIPlayer::isPossibleToBuildTeam( TeamPrototype *proto, Bool requireIdleFact
 		const ThingTemplate *thing = TheThingFactory->findTemplate( unitInfo[i].unitThingName );
 		if (thing) {
 			Int thingCost = thing->calcCostToBuild(m_player);
-			if (NULL == findFactory(thing, true)) {
+			// One walk of the build list, not two: findFactory hands back the first idle factory
+			// when there is one and a busy one only when none is idle, so its queue says which.
+			Object *factory = findFactory(thing, true);
+			if (NULL == factory) {
 				// Couldn't find a factory.
 				return false;
 			}
-			if (NULL != findFactory(thing, false)) {
+			if (factory->getProductionUpdateInterface()->getProductionCount() == 0) {
 				// Found an idle factory.
 				anyIdle = true;
 			}
@@ -2642,6 +2692,51 @@ static Real templateFramesToKill( const ThingTemplate *attacker, const ThingTemp
 	return frames;
 }
 
+/*static*/ void AIPlayer::prepareMatchupTables( void )
+{
+	theFramesToKillCache.clear();
+	theMaxHealthCache.clear();
+	theDetectsStealthCache.clear();
+
+	Bool skirmishAI = FALSE;
+	std::vector<AsciiString> sides;
+	for( Int i = 0; i < ThePlayerList->getPlayerCount(); ++i )
+	{
+		Player *player = ThePlayerList->getNthPlayer( i );
+		if( player->isSkirmishAIPlayer() )
+			skirmishAI = TRUE;
+		if( std::find( sides.begin(), sides.end(), player->getSide() ) == sides.end() )
+			sides.push_back( player->getSide() );
+	}
+	if( !skirmishAI )
+		return;
+
+#ifdef DEBUG_LOGGING
+	const Int64 start = Clock_Ticks();
+#endif
+	// ponytail: units only, the ones a side in the match can buy; a captured or scripted unit, a
+	// defence, an override from map.ini is still answered the first time it is asked
+	std::vector<const ThingTemplate *> units;
+	for( const ThingTemplate *tmpl = TheThingFactory->firstTemplate(); tmpl; tmpl = tmpl->friend_getNextTemplate() )
+	{
+		if( tmpl->friend_getBuildCost() <= 0 || tmpl->isKindOf( KINDOF_STRUCTURE ) || tmpl->getBuildable() == BSTATUS_NO )
+			continue;
+		if( std::find( sides.begin(), sides.end(), tmpl->getDefaultOwningSide() ) != sides.end() )
+			units.push_back( tmpl );
+	}
+	for( size_t a = 0; a < units.size(); ++a )
+	{
+		templateDetectsStealth( units[ a ] );
+		for( size_t t = 0; t < units.size(); ++t )
+			templateFramesToKill( units[ a ], units[ t ] );
+	}
+#ifdef DEBUG_LOGGING
+	const Int64 end = Clock_Ticks();
+	DEBUG_LOG(( "AI MATCHUP PREFILL %d units, %d pairs, %.1fms\n", (Int)units.size(),
+		(Int)theFramesToKillCache.size(), aiPlayerElapsedMS( start, end ) ));
+#endif
+}
+
 //-------------------------------------------------------------------------------------------------
 /** Count one visible enemy unit into the army: one entry per kind of unit, in the order first seen. */
 //-------------------------------------------------------------------------------------------------
@@ -2801,6 +2896,28 @@ void AIPlayer::logEngage( const char *cause, const std::vector<Object *> &units 
 void AIPlayer::onUnitLost( const Object *obj )
 {
 	const Team *team = obj->getTeam();
+	// AI DEFLOSS: killed by a building's gun or its garrison, for the count of units thrown at defences
+	const DamageInfo *last = obj->getBodyModule()->getLastDamageInfo();
+	const Object *killer = last ? TheGameLogic->findObjectByID( last->in.m_sourceID ) : NULL;
+	if( killer && killer->getContainedBy() )
+		killer = killer->getContainedBy();
+	if( isSkirmishAI() && !obj->isKindOf( KINDOF_STRUCTURE ) && killer && killer->isKindOf( KINDOF_STRUCTURE ) &&
+			m_player->getRelationship( killer->getTeam() ) == ENEMIES )
+		DEBUG_LOG(("AI DEFLOSS frame %d player %d '%s' worth %.0f to '%s'; team '%s' state %d source %d, %.0f from home\n", TheGameLogic->getFrame(),
+			m_player->getPlayerIndex(), obj->getTemplate()->getName().str(), aiCombatPower( obj ), killer->getTemplate()->getName().str(),
+			team ? team->getName().str() : "", obj->getAI() ? (Int)obj->getAI()->getCurrentStateID() : -1,
+			obj->getAI() ? (Int)obj->getAI()->getLastCommandSource() : -1,
+			(Real)sqrt( sqr( obj->getPosition()->x - m_baseCenter.x ) + sqr( obj->getPosition()->y - m_baseCenter.y ) )));
+	// what killed a duty Ambulance, from how far, and whether this AI knew of it
+	if( isSkirmishAI() && isDutyAmbulance( obj ) )
+		DEBUG_LOG(("AI AMBULANCE frame %d player %d %d killed by '%s' %.0f away, %s, %s\n", TheGameLogic->getFrame(), m_player->getPlayerIndex(),
+			obj->getID(), killer ? killer->getTemplate()->getName().str() : "nothing known",
+			killer ? (Real)sqrt( sqr( killer->getPosition()->x - obj->getPosition()->x ) + sqr( killer->getPosition()->y - obj->getPosition()->y ) ) : -1.0f,
+			killer && observerKnowsAbout( killer, m_player->getPlayerIndex() ) ? "known" : "unseen",
+			killer && killer->isKindOf( KINDOF_AIRCRAFT ) ? "aircraft" : killer && killer->isKindOf( KINDOF_STRUCTURE ) ? "building" : "ground"));
+	if( isSkirmishAI() && obj->isKindOf( KINDOF_STRUCTURE ) && aiCombatPower( obj ) > 0.0f )
+		DEBUG_LOG(("AI DEFDEAD frame %d player %d '%s' worth %.0f\n", TheGameLogic->getFrame(), m_player->getPlayerIndex(),
+			obj->getTemplate()->getName().str(), aiCombatPower( obj )));
 	if( !isSkirmishAI() || obj->isKindOf( KINDOF_STRUCTURE ) || team == NULL || team == m_player->getDefaultTeam() )
 		return;
 	const Real NEAR_SQR = 300.0f * 300.0f;
@@ -3044,7 +3161,8 @@ Bool AIPlayer::selectTeamToBuild( void )
 	const AIDifficultyProfile *profile = getSkillProfile();
 	AIEnemyComposition enemy;
 	std::vector<AIVisibleEnemy> army;
-	if (profile->m_counterCompositionWeight > 0.0f)
+	const Bool skirmish = isSkirmishAI();		// a Challenge or mission opponent picks by priority alone, as EA's did
+	if (skirmish && profile->m_counterCompositionWeight > 0.0f)
 		computeEnemyComposition( &enemy, &army );
 
 	// what a perfect counter, and the role preference, are worth in units of production priority
@@ -3057,7 +3175,7 @@ Bool AIPlayer::selectTeamToBuild( void )
 	const Real DOMINANT_SHARE = 0.3f;
 	const Real HARD_COUNTERED = 0.25f;
 	std::vector<AIVisibleEnemy> dominant;
-	if( profile->m_answerArmy && enemy.m_totalThreat > 0.0f )
+	if( skirmish && profile->m_answerArmy && enemy.m_totalThreat > 0.0f )
 	{
 		size_t top = 0;
 		for( size_t k = 1; k < army.size(); ++k )
@@ -3077,10 +3195,13 @@ Bool AIPlayer::selectTeamToBuild( void )
 		const Bool isDefenceTeam = info->m_isBaseDefense || info->m_isPerimeterDefense;
 
 		Real score = INT_TO_REAL( info->m_productionPriority );
-		score += profile->m_counterCompositionWeight * COUNTER_SPAN *
-						 aiCounterScore( enemy, teamCapability( *t, m_player, army ) );
-		if( (m_role == AIROLE_DEFENSIVE) == (isDefenceTeam != FALSE) )
-			score += ROLE_SPAN;
+		if( skirmish )
+		{
+			score += profile->m_counterCompositionWeight * COUNTER_SPAN *
+							 aiCounterScore( enemy, teamCapability( *t, m_player, army ) );
+			if( (m_role == AIROLE_DEFENSIVE) == (isDefenceTeam != FALSE) )
+				score += ROLE_SPAN;
+		}
 		if( !dominant.empty() && !isDefenceTeam && teamCapability( *t, m_player, dominant ).m_answer < HARD_COUNTERED )
 			score -= COUNTER_SPAN;
 
@@ -3224,7 +3345,7 @@ void AIPlayer::buildUpgrade(const AsciiString &upgrade)
 			// If it doesn't produce, continue.
 			if (!pu) continue;
 			// Try to queue it.
-			if (pu->queueUpgrade(curUpgrade)) {
+			if (buyUpgrade(pu, curUpgrade)) {
 				AsciiString msg = TheNameKeyGenerator->keyToName(m_player->getPlayerNameKey());
 				msg.concat(" queues ");
 				msg.concat(curUpgrade->getUpgradeName());
@@ -3661,6 +3782,8 @@ Object *AIPlayer::findSupplyCenter(Int minimumCash, Bool holdableOnly)
 {
 	Object *bestSupplyWarehouse = NULL;
 	Real bestDistSqr = 0;
+	Object *bestSafeWarehouse = NULL;
+	Real bestSafeDistSqr = 0;
 	Object *obj;
 	Coord3D enemyCenter;
 	enemyCenter.zero();
@@ -3739,8 +3862,19 @@ Object *AIPlayer::findSupplyCenter(Int minimumCash, Bool holdableOnly)
 					bestSupplyWarehouse = obj;
 					bestDistSqr = distSqr;
 				}
+				// The scripts ask "is the supply source safe" of this same pick and wait while it is
+				// not, putting guns down beside it: one enemy tank parked by the nearest pile held a
+				// Hard AI's expansion for ten minutes with a free pile one valley over.  A safe dock
+				// is preferred, the nearest of them, and the unsafe nearest only when none is safe.
+				// A mission's script picked its piles by hand and keeps EA's nearest.
+				if (!holdableOnly && isSkirmishAI() && (bestSafeWarehouse==NULL || bestSafeDistSqr>distSqr) &&
+						isLocationSafe(obj->getPosition(), obj->getTemplate())) {
+					bestSafeWarehouse = obj;
+					bestSafeDistSqr = distSqr;
+				}
 			}
 		}
+		if (bestSafeWarehouse) return bestSafeWarehouse;
 		if (bestSupplyWarehouse) break;
 		minimumCash /= 2;
  	} while (minimumCash > 100);
@@ -4229,7 +4363,17 @@ Int AIPlayer::computeStructureDelay( void )
 													  TheAI->getAiData()->m_structuresWealthyMod,
 													  getBuildRateScale() ),
 															 m_player->getMoney()->countMoney(),
-															 getSkillProfile()->m_cashHoardThreshold );
+															 hoardThreshold() );
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * The bank at which a skirmish AI starts building faster.  A Challenge or mission opponent is handed
+ * its fortune by the map script and builds at the pace that script was written for.
+ */
+Int AIPlayer::hoardThreshold( void )
+{
+	return isSkirmishAI() ? getSkillProfile()->m_cashHoardThreshold : 0;
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -4277,7 +4421,7 @@ Int AIPlayer::computeTeamDelay( void )
 													  TheAI->getAiData()->m_teamWealthyMod,
 													  getBuildRateScale() ),
 															 m_player->getMoney()->countMoney(),
-															 getSkillProfile()->m_cashHoardThreshold );
+															 hoardThreshold() );
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -4422,6 +4566,7 @@ void AIPlayer::checkReadyTeams( void )
 					Object *obj = iter.cur();	
 					if (obj->getAI() && obj->getAI()->isIdle()) {
 						anyIdle = true;
+						break;
 					}
 				}
 			}
@@ -4541,9 +4686,10 @@ void AIPlayer::checkQueuedTeams( void )
 			}
 			Bool anyIdle = false;
 			for (DLINK_ITERATOR<Object> iter = team->m_team->iterate_TeamMemberList(); !iter.done(); iter.advance()) {
-				Object *obj = iter.cur();	
+				Object *obj = iter.cur();
 				if (obj && obj->getAI() && obj->getAI()->isIdle()) {
 					anyIdle = true;
+					break;		// one is the answer, and this runs every frame for every team in the queue
 				}
 			}
 			if (anyIdle) {
@@ -4604,13 +4750,7 @@ void AIPlayer::doUpgradesAndSkills( void )
 	if (!checkScience) {
 		return;
 	}
-	const AISideInfo *sideInfo = TheAI->getAiData()->m_sideInfo;
-	while (sideInfo) {
-		if (sideInfo->m_side == m_player->getSide()) {
-			break;
-		}
-		sideInfo = sideInfo->m_next;
-	}
+	const AISideInfo *sideInfo = TheAI->getAiData()->findSideInfo( m_player );
 	if (sideInfo == NULL) return;
 
 	if (m_skillsetSelector == INVALID_SKILLSET_SELECTION) {
@@ -4661,7 +4801,7 @@ void AIPlayer::doUpgradesAndSkills( void )
 			case 3: skillset = &sideInfo->m_skillSet4; break;
 			case 4: skillset = &sideInfo->m_skillSet5; break;
 		}
-		const Bool saves = getSkillProfile()->m_savesSciencePoints;
+		const Bool saves = isSkirmishAI() && getSkillProfile()->m_savesSciencePoints;
 		Int i;
 		for (i=0; i<skillset->m_numSkills; i++) {
 			ScienceType science = skillset->m_skills[i];
@@ -4780,23 +4920,31 @@ void AIPlayer::update( void )
 	AI_PHASE( AIP_TEAM,    doTeamBuilding() );			// See if it's time to start another team.
 	AI_PHASE( AIP_UPGRADE, doUpgradesAndSkills() );	// See if it's time to build an upgrade or buy a skill.
 	AI_PHASE( AIP_BRIDGE,  updateBridgeRepair() );	// Handle any bridge repairs.
-	AI_PHASE( AIP_SCOUT,   doScouting() );					// Keep one unit looking at the map.
-	AI_PHASE( AIP_RETREAT, doRetreats() );					// Break off the fights we are losing.
-	AI_PHASE( AIP_EXPAND,  doExpansion() );					// Go and take the money that is lying around.
-	AI_PHASE( AIP_CAPTURE, doCapture() );						// ... and the money that is standing around.
-	AI_PHASE( AIP_CAPTURE, doHijack() );						// Take the enemy's tanks rather than shoot them.
-	AI_PHASE( AIP_ECONOMY, doEconomy() );						// ... and the money sitting in the bank.
-	AI_PHASE( AIP_POWER,   doPower() );							// Keep the lights on, and out of reach.
-	AI_PHASE( AIP_ECONOMY, doSuperweapons() );			// The big guns, as soon as they can be bought.
-	AI_PHASE( AIP_WAVE,    rememberEnemies() );			// Write down the enemy army in sight.
-	AI_PHASE( AIP_WAVE,    answerArmy() );					// Train the answer to the part of it nothing answers.
-	AI_PHASE( AIP_WAVE,    doMass() );							// Build the fist, and send it when it is one.
-	AI_PHASE( AIP_WAVE,    doWaves() );							// Send the parked attack teams out together.
-	AI_PHASE( AIP_TACTICS, doTactics() );						// Fight each unit from where it is strongest.
-	AI_PHASE( AIP_TACTICS, doTransports() );				// Put the helicopters' riders down at the fight.
-	AI_PHASE( AIP_TACTICS, doShuttles() );					// Fly the wave's ground units up its road.
-	AI_PHASE( AIP_TACTICS, doHelixes() );					// Helix upgrades by the enemy army, healers, bomb raids.
-	AI_PHASE( AIP_TACTICS, doAmbulances() );				// Ambulances behind the army, for the hurt and the hazards.
+	// Everything below is the skirmish AI's own. A Challenge or mission opponent is handed its money,
+	// its base, its attacks and its superweapon by the map script, which is the whole of its difficulty:
+	// run on top of that, Kwai's $30000 stood three nuclear silos a minute into the match.
+	if( isSkirmishAI() )
+	{
+		AI_PHASE( AIP_SCOUT,   doScouting() );					// Keep one unit looking at the map.
+		AI_PHASE( AIP_RETREAT, doRetreats() );					// Break off the fights we are losing.
+		AI_PHASE( AIP_EXPAND,  doExpansion() );					// Go and take the money that is lying around.
+		AI_PHASE( AIP_CAPTURE, doCapture() );						// ... and the money that is standing around.
+		AI_PHASE( AIP_CAPTURE, doHijack() );						// Take the enemy's tanks rather than shoot them.
+		AI_PHASE( AIP_ECONOMY, doEconomy() );						// ... and the money sitting in the bank.
+		AI_PHASE( AIP_ECONOMY, doSpending() );					// Upgrades for the army, and whatever is over the bank target.
+		AI_PHASE( AIP_POWER,   doPower() );							// Keep the lights on, and out of reach.
+		AI_PHASE( AIP_ECONOMY, doSuperweapons() );			// The big guns, as soon as they can be bought.
+		AI_PHASE( AIP_TACTICS, doParticleBeams() );			// ... and the Particle Cannon's beam driven across his base.
+		AI_PHASE( AIP_WAVE,    rememberEnemies() );			// Write down the enemy army in sight.
+		AI_PHASE( AIP_WAVE,    answerArmy() );					// Train the answer to the part of it nothing answers.
+		AI_PHASE( AIP_WAVE,    doMass() );							// Build the fist, and send it when it is one.
+		AI_PHASE( AIP_WAVE,    doWaves() );							// Send the parked attack teams out together.
+		AI_PHASE( AIP_TACTICS, doTactics() );						// Fight each unit from where it is strongest.
+		AI_PHASE( AIP_TACTICS, doTransports() );				// Put the helicopters' riders down at the fight.
+		AI_PHASE( AIP_TACTICS, doShuttles() );					// Fly the wave's ground units up its road.
+		AI_PHASE( AIP_TACTICS, doHelixes() );					// Helix upgrades by the enemy army, healers, bomb raids.
+		AI_PHASE( AIP_TACTICS, doAmbulances() );				// Ambulances behind the army, for the hurt and the hazards.
+	}
 
 #ifdef DEBUG_LOGGING
 	Int64 playerEnd;
@@ -5060,10 +5208,9 @@ void AIPlayer::doExpansion( void )
 	* on the build list and this player can build it. */
 Bool AIPlayer::buildExpansionDefense( void )
 {
-	for( const AISideInfo *resInfo = TheAI->getAiData()->m_sideInfo; resInfo; resInfo = resInfo->m_next )
+	const AISideInfo *resInfo = TheAI->getAiData()->findSideInfo( m_player );
+	if( resInfo != NULL )
 	{
-		if( resInfo->m_side != m_player->getSide() )
-			continue;
 		const ThingTemplate *defense = TheThingFactory->findTemplate( resInfo->m_baseDefenseStructure1, FALSE );
 		if( defense == NULL )
 			return FALSE;
@@ -5144,8 +5291,9 @@ static Bool groundLineClear( const Coord3D *from, const Coord3D *to )
 }
 
 /** Something of this kind the builder can make right now, off the builder's own buttons, so the
-	* answer is right for every faction and general without a table of names. */
-static const ThingTemplate *buildableOfKind( Object *builder, GUICommandType commandType, KindOfType kind )
+	* answer is right for every faction and general without a table of names.  moneyLater also takes one
+	* the bank cannot pay for yet, for a request the purchase queue saves up for. */
+static const ThingTemplate *buildableOfKind( Object *builder, GUICommandType commandType, KindOfType kind, Bool moneyLater = FALSE )
 {
 	const CommandSet *commandSet = TheControlBar->findCommandSet( builder->getCommandSetString() );
 	if( commandSet == NULL )
@@ -5157,7 +5305,10 @@ static const ThingTemplate *buildableOfKind( Object *builder, GUICommandType com
 		if( button == NULL || button->getCommandType() != commandType )
 			continue;
 		const ThingTemplate *tmpl = button->getThingTemplate();
-		if( tmpl && tmpl->isKindOf( kind ) && TheBuildAssistant->canMakeUnit( builder, tmpl ) == CANMAKE_OK )
+		if( tmpl == NULL || !tmpl->isKindOf( kind ) )
+			continue;
+		const CanMakeType canMake = TheBuildAssistant->canMakeUnit( builder, tmpl );
+		if( canMake == CANMAKE_OK || (moneyLater && canMake == CANMAKE_NO_MONEY) )
 			return tmpl;
 	}
 	return NULL;
@@ -5782,7 +5933,8 @@ void AIPlayer::doPower( void )
 	if( dozer == NULL )
 		return;
 
-	const ThingTemplate *tmpl = buildableOfKind( dozer, GUI_COMMAND_DOZER_CONSTRUCT, KINDOF_FS_POWER );
+	// with the purchase queue the plant is asked for before the bank can pay, and the queue saves for it
+	const ThingTemplate *tmpl = buildableOfKind( dozer, GUI_COMMAND_DOZER_CONSTRUCT, KINDOF_FS_POWER, purchaseQueueOn() );
 	if( tmpl == NULL || tmpl->isKindOf( KINDOF_CASH_GENERATOR ) || priorityBuildPending( m_player, tmpl ) )
 		return;
 
@@ -5801,6 +5953,78 @@ void AIPlayer::doPower( void )
 }
 
 //----------------------------------------------------------------------------------------------------------
+/** The drop zone and the black market: what the opening buys before the army leaves home. */
+static const Int EARLY_INCOME_KINDS = 2;
+static const KindOfType EARLY_INCOME[ EARLY_INCOME_KINDS ] = { KINDOF_FS_SUPPLY_DROPZONE, KINDOF_FS_BLACK_MARKET };
+
+/** Early in the match the first drop zone and the first black market do not wait for the hoard: they
+	* are asked for when none stands, and the purchase queue ranks them over the army and saves for them.
+	* Behind the hoard alone a Hard AI went out to fight on two gatherers before it owned either. */
+void AIPlayer::buyEarlyIncome( void )
+{
+	if( !purchaseQueueOn() || TheGameLogic->getFrame() >= AI_PURCHASE_EARLY_FRAMES || !m_player->getCanBuildBase() ||
+			!m_baseCenterSet || isBaseUnderAttack() )
+		return;
+	Object *dozer = NULL;
+	m_player->iterateObjects( findAnyDozer, &dozer );
+	for( Int i = 0; dozer && i < EARLY_INCOME_KINDS; ++i )
+	{
+		const ThingTemplate *tmpl = buildableOfKind( dozer, GUI_COMMAND_DOZER_CONSTRUCT, EARLY_INCOME[ i ], TRUE );
+		if( tmpl == NULL || priorityBuildPending( m_player, tmpl ) )
+			continue;
+		TechCount owned;
+		owned.kind = EARLY_INCOME[ i ];
+		owned.standing = 0;
+		owned.onTheWay = 0;
+		m_player->iterateObjects( countTechBuildings, &owned );
+		if( owned.standing + owned.onTheWay == 0 )
+			placeNear( tmpl, &m_baseCenter, 0.5f * m_baseRadius, FALSE );
+	}
+}
+
+/** Players said the computer attacks too early and too often.  A Hard USA on Twilight Flame sent two
+	* units at frame 5,873 and its first drop zone stood at 10,438.  So no attack team leaves home before
+	* m_firstPushSeconds, nor before a drop zone or black market stands when the side has one to build.
+	* That wait ends with the opening buyEarlyIncome buys in, whatever stands, so a base that cannot
+	* build one still plays.  China has neither and waits for the clock alone. */
+Bool AIPlayer::readyToPush( void )
+{
+	const UnsignedInt now = TheGameLogic->getFrame();
+	if( now < (UnsignedInt)(getSkillProfile()->m_firstPushSeconds * LOGICFRAMES_PER_SECOND) )
+		return FALSE;
+	if( now >= AI_PURCHASE_EARLY_FRAMES || !m_player->getCanBuildBase() )
+		return TRUE;
+	Object *dozer = NULL;
+	m_player->iterateObjects( findAnyDozer, &dozer );
+	const CommandSet *commandSet = dozer ? TheControlBar->findCommandSet( dozer->getCommandSetString() ) : NULL;
+	if( commandSet == NULL )
+		return TRUE;
+	// one the dozer has the prerequisites for, whatever else stops it this moment: asking for one it
+	// could make now, a Hard USA went out at 4.7 minutes, a minute before its drop zone stood.  A USA
+	// drop zone needs the Strategy Center, which Medium puts up late, and is not waited for before it
+	Bool hasButton = FALSE;
+	for( Int i = 0; i < EARLY_INCOME_KINDS; ++i )
+	{
+		for( Int b = 0; b < MAX_COMMANDS_PER_SET; ++b )
+		{
+			const CommandButton *button = commandSet->getCommandButton( b );
+			if( button && button->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT && button->getThingTemplate() &&
+					button->getThingTemplate()->isKindOf( EARLY_INCOME[ i ] ) &&
+					TheBuildAssistant->canMakeUnit( dozer, button->getThingTemplate() ) != CANMAKE_NO_PREREQ )
+				hasButton = TRUE;
+		}
+		TechCount owned;
+		owned.kind = EARLY_INCOME[ i ];
+		owned.standing = 0;
+		owned.onTheWay = 0;
+		m_player->iterateObjects( countTechBuildings, &owned );
+		if( owned.standing > 0 )
+			return TRUE;
+	}
+	return !hasButton;
+}
+
+//----------------------------------------------------------------------------------------------------------
 /** A bank of a hundred thousand is an army and an economy that were never bought.  The skirmish build
 	* list is a fixed plan - two war factories and a barracks - and the scripts never add to it, so
 	* once the plan stood the money had nowhere to go.
@@ -5815,11 +6039,16 @@ void AIPlayer::doPower( void )
 void AIPlayer::doEconomy( void )
 {
 	const AIDifficultyProfile *profile = getSkillProfile();
-	if( !profile->m_economyBuildings )
-		return;
 	const Int phase = computeUpdatePhase( m_player->getPlayerIndex(), ECONOMY_CHECK_RATE );
 	if( (TheGameLogic->getFrame() + phase) % ECONOMY_CHECK_RATE != 0 )
 		return;
+	// a rung that buys nothing else past its build list still puts its first income up before it pushes
+	if( !profile->m_economyBuildings )
+	{
+		if( m_player->getEnergy()->hasSufficientPower() )
+			buyEarlyIncome();
+		return;
+	}
 
 	if( m_baseCenterSet )
 	{
@@ -5851,6 +6080,8 @@ void AIPlayer::doEconomy( void )
 		if( dozer )
 			doTunnels( dozer );
 	}
+
+	buyEarlyIncome();
 
 	// hackers and the buildings that pay out on a timer earn their price back, so they only wait for
 	// the hoard threshold, and each of them is bought on every pass the bank allows one ...
@@ -6206,8 +6437,9 @@ void AIPlayer::doSuperweapons( void )
 	if( dozer == NULL )
 		return;
 
-	const ThingTemplate *superweapon = buildableOfKind( dozer, GUI_COMMAND_DOZER_CONSTRUCT, KINDOF_FS_SUPERWEAPON );
-	const ThingTemplate *techBuilding = buildableOfKind( dozer, GUI_COMMAND_DOZER_CONSTRUCT, KINDOF_FS_ADVANCED_TECH );
+	// with the purchase queue they are asked for before the bank can pay, and the queue saves for them
+	const ThingTemplate *superweapon = buildableOfKind( dozer, GUI_COMMAND_DOZER_CONSTRUCT, KINDOF_FS_SUPERWEAPON, purchaseQueueOn() );
+	const ThingTemplate *techBuilding = buildableOfKind( dozer, GUI_COMMAND_DOZER_CONSTRUCT, KINDOF_FS_ADVANCED_TECH, purchaseQueueOn() );
 
 	TechCount tech;
 	tech.kind = KINDOF_FS_ADVANCED_TECH;
@@ -6233,6 +6465,202 @@ void AIPlayer::doSuperweapons( void )
 	// buildableOfKind already asked canMakeUnit, which holds the defence ration
 	if( superweapon && !priorityBuildPending( m_player, superweapon ) )
 		buildAsap( superweapon );
+}
+
+static void findParticleCannons( Object *obj, void *userData )
+{
+	static const NameKeyType key = NAMEKEY( "ParticleUplinkCannonUpdate" );
+	if( !obj->isKindOf( KINDOF_FS_SUPERWEAPON ) )
+		return;
+	ParticleUplinkCannonUpdate *cannon = (ParticleUplinkCannonUpdate *)obj->findUpdateModule( key );
+	if( cannon )
+		((std::vector<ParticleUplinkCannonUpdate *> *)userData)->push_back( cannon );
+}
+
+/** How far from the burning spot a steer looks, about four seconds of the beam's fast drive. */
+const Real BEAM_STEER_REACH = 150.0f;
+/** The look is a square of this many steps each side of the burning spot. */
+const Int BEAM_STEER_STEPS = 3;
+
+//----------------------------------------------------------------------------------------------------------
+/** A computer player's Particle Cannon used to draw EA's S curve: 200 feet along the line from the
+	* uplink to the aim point, 50 either side of it, whatever stood there.  The aim was the richest
+	* spot in his base, and most of the ten seconds of beam burned the ground on either side of it.
+	* A player drives the beam instead, from one building to the next.  So does this: every
+	* m_beamSteerSeconds it looks around the spot the beam is burning, and sends it to the ground
+	* worth most with the same score the aim used, nearer ground preferred.  What the beam has killed
+	* drops out of that score, so it moves on from a dead cluster to the next one by itself.
+	* Hard steers more often than the game's double click delay, which makes the cannon drive at its
+	* fast speed; Medium drives at the walking speed; Easy keeps the S curve. */
+//----------------------------------------------------------------------------------------------------------
+void AIPlayer::doParticleBeams( void )
+{
+	const Real every = getSkillProfile()->m_beamSteerSeconds;
+	if( every <= 0.0f )
+		return;
+	const Int rate = REAL_TO_INT_CEIL( every * LOGICFRAMES_PER_SECOND );
+	if( TheGameLogic->getFrame() % rate != 0 )
+		return;
+
+	std::vector<ParticleUplinkCannonUpdate *> cannons;
+	m_player->iterateObjects( findParticleCannons, &cannons );
+	for( size_t i = 0; i < cannons.size(); ++i )
+	{
+		Coord3D spot;
+		Real radius;
+		if( !cannons[ i ]->getBurningSpot( &spot, &radius ) )
+			continue;
+		Coord3D aim;
+		if( richestGroundNear( &spot, radius, &aim ) )
+			cannons[ i ]->setSpecialPowerOverridableDestination( &aim );
+	}
+}
+
+//----------------------------------------------------------------------------------------------------------
+Bool AIPlayer::richestGroundNear( const Coord3D *spot, Real radius, Coord3D *aim )
+{
+	const Int me = m_player->getPlayerIndex();
+	const Real step = BEAM_STEER_REACH / BEAM_STEER_STEPS;
+	Real best = 0.0f;
+	for( Int x = -BEAM_STEER_STEPS; x <= BEAM_STEER_STEPS; ++x )
+	{
+		for( Int y = -BEAM_STEER_STEPS; y <= BEAM_STEER_STEPS; ++y )
+		{
+			Coord3D pos;
+			pos.x = spot->x + x * step;
+			pos.y = spot->y + y * step;
+			pos.z = 0.0f;
+			Int value = 0;
+			for( Int p = 0; p < ThePlayerList->getPlayerCount(); ++p )
+			{
+				Player *other = ThePlayerList->getNthPlayer( p );
+				if( other != m_player && m_player->getRelationship( other->getDefaultTeam() ) == ENEMIES )
+					value += getPlayerSuperweaponValue( &pos, p, radius, TRUE, me );
+			}
+			const Real distance = sqrt( (Real)(x * x + y * y) ) * step;
+			const Real worth = value * (1.0f - 0.5f * distance / BEAM_STEER_REACH);
+			if( worth > best )
+			{
+				best = worth;
+				*aim = pos;
+			}
+		}
+	}
+	if( best <= 0.0f )
+		return FALSE;
+	aim->z = TheTerrainLogic->getGroundHeight( aim->x, aim->y );
+	DEBUG_LOG(("AI BEAM frame %d player %d drives the beam from (%.0f,%.0f) to (%.0f,%.0f), worth %.0f, radius %.0f\n",
+		TheGameLogic->getFrame(), me, spot->x, spot->y, aim->x, aim->y, best, radius));
+	return TRUE;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** The purchase queue.  Every skirmish rung with a bank target, each saving below its own target; every
+	* campaign AI buys exactly as it did. */
+//----------------------------------------------------------------------------------------------------------
+Bool AIPlayer::purchaseQueueOn( void )
+{
+	return isSkirmishAI() && getSkillProfile()->m_bankTargetSeconds > 0.0f;
+}
+
+Int AIPlayer::bankTarget( void )
+{
+	const AIDifficultyProfile *profile = getSkillProfile();
+	return aiBankTarget( m_incomePerSecond, profile->m_bankTargetSeconds, profile->m_bankTargetFloor );
+}
+
+AIPurchaseKind AIPlayer::purchaseKindOf( const ThingTemplate *tmpl )
+{
+	if( tmpl->isKindOf( KINDOF_DOZER ) )
+		return AIBUY_DOZER;
+	if( tmpl->isKindOf( KINDOF_FS_POWER ) && !tmpl->isKindOf( KINDOF_CASH_GENERATOR ) )
+		return AIBUY_POWER;
+	if( tmpl->isKindOf( KINDOF_HARVESTER ) || tmpl->isKindOf( KINDOF_MONEY_HACKER ) || tmpl->isKindOf( KINDOF_FS_SUPPLY_CENTER ) ||
+			tmpl->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) || tmpl->isKindOf( KINDOF_FS_BLACK_MARKET ) || tmpl->isKindOf( KINDOF_FS_INTERNET_CENTER ) )
+		return AIBUY_ECONOMY;
+	if( tmpl->isKindOf( KINDOF_FS_SUPERWEAPON ) || tmpl->isKindOf( KINDOF_FS_ADVANCED_TECH ) )
+		return AIBUY_SUPERWEAPON;
+	if( tmpl->isKindOf( KINDOF_FS_BASE_DEFENSE ) )
+		return AIBUY_DEFENSE;
+	if( tmpl->isKindOf( KINDOF_STRUCTURE ) )
+		return AIBUY_BASE;
+	return AIBUY_ARMY;
+}
+
+Bool AIPlayer::purchaseAllowed( Int key, Int cost, AIPurchaseKind kind, Bool startable, const AsciiString &what )
+{
+	if( !purchaseQueueOn() )
+		return TRUE;
+
+	const UnsignedInt now = TheGameLogic->getFrame();
+	const Int money = (Int)m_player->getMoney()->countMoney();
+	const Int held = m_purchases.m_held;
+	const AIPurchaseQueue::Lapse lapse = m_purchases.expire( now );
+	if( lapse != AIPurchaseQueue::KEPT )
+		DEBUG_LOG(("AI QUEUE frame %d player %d stops saving for '%s', %s, %d held back for it, %d in the bank\n", now,
+			m_player->getPlayerIndex(), m_purchaseSavingFor.str(), lapse == AIPurchaseQueue::STALE ? "no longer asked for" : "timed out",
+			held, money));
+
+	const Int score = aiPurchaseScore( kind, now < AI_PURCHASE_EARLY_FRAMES );
+	const Int target = bankTarget();
+	const AIPurchaseQueue::Verdict verdict = m_purchases.ask( key, cost, score, startable, money, target, now );
+	if( verdict == AIPurchaseQueue::RESERVED )
+	{
+		m_purchaseSavingFor = what;
+		DEBUG_LOG(("AI QUEUE frame %d player %d saves for '%s', %d of %d in the bank, score %d, bank target %d\n", now,
+			m_player->getPlayerIndex(), what.str(), money, cost, score, target));
+	}
+	return verdict == AIPurchaseQueue::BUY;
+}
+
+void AIPlayer::purchased( Int key, Int cost, AIPurchaseKind kind, const AsciiString &what )
+{
+	if( !purchaseQueueOn() )
+		return;
+	const UnsignedInt now = TheGameLogic->getFrame();
+	if( key == m_purchases.m_key )
+		DEBUG_LOG(("AI QUEUE frame %d player %d buys '%s' for %d, score %d, %d left in the bank, saved for over %d frames and %d held buys\n",
+			now, m_player->getPlayerIndex(), what.str(), cost, aiPurchaseScore( kind, now < AI_PURCHASE_EARLY_FRAMES ),
+			m_player->getMoney()->countMoney(), now - m_purchases.m_since, m_purchases.m_held));
+	else
+		DEBUG_LOG(("AI QUEUE frame %d player %d buys '%s' for %d, score %d, %d left in the bank\n", now,
+			m_player->getPlayerIndex(), what.str(), cost, aiPurchaseScore( kind, now < AI_PURCHASE_EARLY_FRAMES ),
+			m_player->getMoney()->countMoney()));
+	m_purchases.bought( key );
+}
+
+Bool AIPlayer::buyUnit( ProductionUpdateInterface *pu, const ThingTemplate *unit, AIPurchaseKind kind )
+{
+	const Int cost = unit->calcCostToBuild( m_player );
+	if( !purchaseAllowed( unit->getTemplateID(), cost, kind, pu->getProductionCount() == 0, unit->getName() ) )
+		return FALSE;
+	if( !pu->queueCreateUnit( unit, pu->requestUniqueUnitID() ) )
+		return FALSE;
+	purchased( unit->getTemplateID(), cost, kind, unit->getName() );
+	return TRUE;
+}
+
+/** An upgrade's key: its bit in the upgrade mask, which the upgrade center hands out in INI order,
+	* past every template id. */
+static Int upgradePurchaseKey( const UpgradeTemplate *upgrade )
+{
+	const UpgradeMaskType mask = upgrade->getUpgradeMask();
+	for( Int i = 0; i < UPGRADE_MAX_COUNT; ++i )
+		if( mask.test( i ) )
+			return 0x10000 + i;
+	return 0x10000 + UPGRADE_MAX_COUNT;
+}
+
+Bool AIPlayer::buyUpgrade( ProductionUpdateInterface *pu, const UpgradeTemplate *upgrade )
+{
+	const Int key = upgradePurchaseKey( upgrade );
+	const Int cost = upgrade->calcCostToBuild( m_player );
+	if( !purchaseAllowed( key, cost, AIBUY_UPGRADE, pu->getProductionCount() == 0, upgrade->getUpgradeName() ) )
+		return FALSE;
+	if( !pu->queueUpgrade( upgrade ) )
+		return FALSE;
+	purchased( key, cost, AIBUY_UPGRADE, upgrade->getUpgradeName() );
+	return TRUE;
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -6261,7 +6689,7 @@ void AIPlayer::buyMoneyUnits( void )
 		if( pu == NULL || pu->getProductionCount() > MAX_QUEUED_AHEAD )
 			continue;
 		const ThingTemplate *moneyUnit = buildableOfKind( factory, GUI_COMMAND_UNIT_BUILD, KINDOF_MONEY_HACKER );
-		if( moneyUnit && pu->queueCreateUnit( moneyUnit, pu->requestUniqueUnitID() ) )
+		if( moneyUnit && buyUnit( pu, moneyUnit, AIBUY_ECONOMY ) )
 		{
 			DEBUG_LOG(("AI ECONOMY frame %d player %d trains '%s', %d in the bank, room for %d more\n",
 				TheGameLogic->getFrame(), m_player->getPlayerIndex(), moneyUnit->getName().str(),
@@ -6392,7 +6820,7 @@ Bool AIPlayer::placeNear( const ThingTemplate *tmpl, const Coord3D *center, Real
 //----------------------------------------------------------------------------------------------------------
 AsciiString AIPlayer::chooseApproachLabel( const Coord3D *from, const AsciiString &requested, Int pathSuffix )
 {
-	if( !getSkillProfile()->m_useInfluenceMapForAttackLane || from == NULL )
+	if( !isSkirmishAI() || !getSkillProfile()->m_useInfluenceMapForAttackLane || from == NULL )
 		return requested;
 
 	const Int LANE_COUNT = 3;
@@ -6428,7 +6856,7 @@ AsciiString AIPlayer::chooseApproachLabel( const Coord3D *from, const AsciiStrin
 //----------------------------------------------------------------------------------------------------------
 AsciiString AIPlayer::secondApproachLabel( const Coord3D *from, const AsciiString &taken, Int pathSuffix )
 {
-	if( !getSkillProfile()->m_useInfluenceMapForAttackLane )
+	if( !isSkirmishAI() || !getSkillProfile()->m_useInfluenceMapForAttackLane )
 		return AsciiString::TheEmptyString;
 
 	const Int LANE_COUNT = 3;
@@ -6878,7 +7306,7 @@ void AIPlayer::defendHome( void )
 				if( army[ k ].m_weight - answered[ k ] > army[ kind ].m_weight - answered[ kind ] )
 					kind = k;
 			const ThingTemplate *unit = bestDefender( *f, m_player, army[ kind ] );
-			if( unit == NULL || !pu->queueCreateUnit( unit, pu->requestUniqueUnitID() ) )
+			if( unit == NULL || !buyUnit( pu, unit, AIBUY_EMERGENCY ) )
 				break;
 			answered[ kind ] += INT_TO_REAL( unit->calcCostToBuild( m_player ) );
 			DEBUG_LOG(("AI DEFEND frame %d player %d trains '%s' at '%s' against %d intruders, %d in the bank\n",
@@ -6937,6 +7365,16 @@ void AIPlayer::defendHome( void )
 		homePower *= (Real)sqrt( armyAdvantage( home, army ) );
 	if( homePower < 0.5f * intruderWorth )
 		return;
+	// A gun standing still outside the base itself is not coming in: on a small map the enemy's own towers
+	// and an expansion's Patriots sit within two base radii, and idle units sent at them one or two at a
+	// time were the biggest loss to defences in 32 Hard against Medium matches.  They go only with odds
+	// that win, Easy the least careful.  A unit that can move is still met wherever it stands at home:
+	// gating those too slowed the quick wins on small maps and lost more over the longer matches.
+	static const Real OUTSIDE_BASE_ODDS[ AISKILL_COUNT ] = { 1.0f, 1.5f, 2.0f };
+	if( intruder->isKindOf( KINDOF_IMMOBILE ) &&
+			sqr( intruder->getPosition()->x - m_baseCenter.x ) + sqr( intruder->getPosition()->y - m_baseCenter.y ) > sqr( m_baseRadius ) &&
+			homePower < OUTSIDE_BASE_ODDS[ m_skillLevel ] * intruderWorth )
+		return;
 
 	Int sent = 0;
 	for( std::vector<Object *>::const_iterator o = owned.begin(); o != owned.end(); ++o )
@@ -6952,8 +7390,8 @@ void AIPlayer::defendHome( void )
 		++sent;
 	}
 	if( sent > 0 )
-		DEBUG_LOG(("AI DEFEND frame %d player %d sends %d idle units at the intruder at (%.0f,%.0f)\n", TheGameLogic->getFrame(),
-			m_player->getPlayerIndex(), sent, intruder->getPosition()->x, intruder->getPosition()->y));
+		DEBUG_LOG(("AI DEFEND frame %d player %d sends %d idle units at the intruder '%s' at (%.0f,%.0f)\n", TheGameLogic->getFrame(),
+			m_player->getPlayerIndex(), sent, intruder->getTemplate()->getName().str(), intruder->getPosition()->x, intruder->getPosition()->y));
 }
 
 /** How often the army is looked at for a part of the enemy's nothing answers, how big a part has to be
@@ -7042,12 +7480,332 @@ void AIPlayer::answerArmy( void )
 		if( unit == NULL || score < ANSWER_SCORE )
 			continue;
 		const Int cost = unit->calcCostToBuild( m_player );
-		if( m_player->getMoney()->countMoney() < (UnsignedInt)(cost + ANSWER_RESERVE) || !pu->queueCreateUnit( unit, pu->requestUniqueUnitID() ) )
+		if( m_player->getMoney()->countMoney() < (UnsignedInt)(cost + ANSWER_RESERVE) || !buyUnit( pu, unit, AIBUY_ARMY ) )
 			continue;
 		answered[ kind ] += INT_TO_REAL( cost );
 		DEBUG_LOG(("AI ANSWER frame %d player %d trains '%s' at '%s' against '%s', %.0f of %.0f unanswered, score %.2f, %d in the bank\n",
 			TheGameLogic->getFrame(), m_player->getPlayerIndex(), unit->getName().str(), (*f)->getTemplate()->getName().str(),
 			army[ kind ].m_template->getName().str(), gap, army[ kind ].m_weight, score, m_player->getMoney()->countMoney()));
+	}
+}
+
+/** How a unit of ours trades with the enemy army this AI remembers, money for money: the value-weighted
+	* mean of aiMatchupScore over every kind in it, 0.5 with nothing remembered. */
+static Real armyMatchup( const ThingTemplate *tmpl, const Player *owner, const std::vector<AIVisibleEnemy> &army )
+{
+	const Real cost = INT_TO_REAL( tmpl->calcCostToBuild( owner ) );
+	Real weighed = 0.0f;
+	Real scored = 0.0f;
+	for( size_t k = 0; k < army.size(); ++k )
+	{
+		weighed += army[ k ].m_weight;
+		scored += army[ k ].m_weight * aiMatchupScore( templateFramesToKill( tmpl, army[ k ].m_template ),
+			templateFramesToKill( army[ k ].m_template, tmpl ), cost, army[ k ].m_cost );
+	}
+	return weighed > 0.0f ? scored / weighed : 0.5f;
+}
+
+/** The fighting unit off this factory's buttons a bank over its target goes on: the best trade against
+	* the remembered enemy army as far as the rung counters at all (aiCounterFit), and the dearer of two
+	* that score the same, so a rung that never counters buys the heaviest thing the factory makes.  Not a
+	* worker, a gatherer, a hacker or a jet; a helicopter stays with the army, so it may. */
+static const ThingTemplate *surplusUnit( Object *factory, const Player *owner, const std::vector<AIVisibleEnemy> &army, Real weight )
+{
+	const CommandSet *commandSet = TheControlBar->findCommandSet( factory->getCommandSetString() );
+	if( commandSet == NULL )
+		return NULL;
+
+	const ThingTemplate *best = NULL;
+	Real bestFit = 0.0f;
+	Int bestCost = 0;
+	for( Int i = 0; i < MAX_COMMANDS_PER_SET; ++i )
+	{
+		const CommandButton *button = commandSet->getCommandButton( i );
+		if( button == NULL || button->getCommandType() != GUI_COMMAND_UNIT_BUILD )
+			continue;
+		const ThingTemplate *tmpl = button->getThingTemplate();
+		if( tmpl == NULL || !tmpl->canPossiblyHaveAnyWeapon() || tmpl->isKindOf( KINDOF_DOZER ) || tmpl->isKindOf( KINDOF_HARVESTER ) ||
+				tmpl->isKindOf( KINDOF_MONEY_HACKER ) || (tmpl->isKindOf( KINDOF_AIRCRAFT ) && !tmpl->isKindOf( KINDOF_PRODUCED_AT_HELIPAD )) ||
+				TheBuildAssistant->canMakeUnit( factory, tmpl ) != CANMAKE_OK )
+			continue;
+		const Int cost = tmpl->calcCostToBuild( owner );
+		const Real fit = aiCounterFit( armyMatchup( tmpl, owner, army ), weight );
+		if( best == NULL || fit > bestFit || (fit == bestFit && cost > bestCost) )
+		{
+			best = tmpl;
+			bestFit = fit;
+			bestCost = cost;
+		}
+	}
+	return best;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** The bank a computer kept was the part of its income nothing was ever bought with: a Hard AI facing
+	* Medium ended its matches on 12,300 on average, a Medium one on up to 62,000.  So every rung
+	* keeps a bank of so many seconds of what it actually earns (m_bankTargetSeconds, aiBankTarget), and
+	* what is over that goes on upgrades, on extra units within the rung's share (aiSurplusBudget), and
+	* on another factory once an income window shows the bank is not coming down (aiWantsMoreProduction).
+	* The upgrades that pay for the standing army are bought below the target as well, each rung from
+	* its own point in the match, and all of it goes through the purchase queue, which keeps below the
+	* same target. */
+//----------------------------------------------------------------------------------------------------------
+void AIPlayer::doSpending( void )
+{
+	if( !purchaseQueueOn() )
+		return;
+	const UnsignedInt now = TheGameLogic->getFrame();
+	if( (now + computeUpdatePhase( m_player->getPlayerIndex(), ECONOMY_CHECK_RATE )) % ECONOMY_CHECK_RATE != 0 )
+		return;
+
+	// the income, off what the score screen counts as earned: gathered, hacked, captured and given
+	const Int bank = (Int)m_player->getMoney()->countMoney();
+	const Int earned = m_player->getScoreKeeper()->getTotalMoneyEarned();
+	Bool windowEnded = FALSE;
+	Int bankWindowAgo = bank;
+	if( now - m_incomeMarkFrame >= AI_INCOME_WINDOW_FRAMES )
+	{
+		const Real window = INT_TO_REAL( earned - m_incomeMark ) * LOGICFRAMES_PER_SECOND / INT_TO_REAL( now - m_incomeMarkFrame );
+		windowEnded = m_incomeMarkFrame != 0;		// the first window has no bank before it to compare with
+		bankWindowAgo = m_bankMark;
+		m_incomePerSecond = m_incomeMarkFrame == 0 ? window : 0.5f * (m_incomePerSecond + window);
+		m_incomeMark = earned;
+		m_incomeMarkFrame = now;
+		m_bankMark = bank;
+		DEBUG_LOG(("AI ECONOMY frame %d player %d earns %.0f a second, %d in the bank (%d a window ago), bank target %d, %s\n", now,
+			m_player->getPlayerIndex(), m_incomePerSecond, bank, bankWindowAgo, bankTarget(), bank > bankTarget() ? "spends the rest" : "keeps it"));
+	}
+
+	if( isBaseUnderAttack() )
+		return;		// defendHome's
+	const Int target = bankTarget();
+	const Bool overTarget = bank > target;
+	buyUpgradesForArmy( overTarget );
+	if( !overTarget )
+		return;
+	//
+	// A match that starts on 50,000 handed every AI a bank no income window ever saw coming: the
+	// surplus is a share of what it earns, and in the first minutes it earns nothing, so the fortune
+	// sat there while the build list ticked along. What is over the default starting cash, up to
+	// what the start gave over it, goes out at the rung's share a pass, and factories go up for it
+	// without waiting on a window. At the default cash the fortune is 0 and nothing here changes.
+	//
+	const Int keep = max( target, (Int)TheGlobalData->m_defaultStartingCash.countMoney() );
+	const Int fortune = aiFortuneBudget( bank, keep, m_startFortune, getSkillProfile()->m_surplusShare );
+	if( windowEnded || fortune > 0 )
+		addProductionForIncome( bank, bankWindowAgo, target );		// between windows bankWindowAgo is the bank itself
+	const Int surplus = aiSurplusBudget( (Int)m_player->getMoney()->countMoney(), target, m_incomePerSecond, getSkillProfile()->m_surplusShare );
+	if( fortune > surplus )
+		DEBUG_LOG(("AI ECONOMY frame %d player %d spends its starting fortune, %d of it this pass, %d in the bank, %d kept\n", now,
+			m_player->getPlayerIndex(), fortune, bank, keep));
+	trainSurplus( max( surplus, fortune ) );
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** Only the scripts ever bought an upgrade, from a list written before anyone knew what the AI would
+	* field.  This buys the one player upgrade, of every one a standing building offers, that the army on
+	* the field gets the most out of for its price: every fighting unit the upgrade would change counts
+	* at its price weighed by how it trades with the enemy army this AI remembers (aiCounterFit, as far
+	* as the rung counters), a building or an unarmed unit at m_upgradeNonCombatWeight of its price (at
+	* full price a GLA base made Fortified Structure the first upgrade of every match), and it is bought when that sum is m_upgradePayoff times
+	* the price, half that when the bank is over its target.  One a pass, not before m_upgradeStartSeconds,
+	* at the building with the shortest queue that offers it, through the purchase queue like everything
+	* else. */
+//----------------------------------------------------------------------------------------------------------
+void AIPlayer::buyUpgradesForArmy( Bool overTarget )
+{
+	const AIDifficultyProfile *profile = getSkillProfile();
+	const UnsignedInt now = TheGameLogic->getFrame();
+	if( INT_TO_REAL( now ) < profile->m_upgradeStartSeconds * LOGICFRAMES_PER_SECOND )
+		return;
+
+	// every player upgrade a building of ours offers and we could start: not owned, not on order, every
+	// science its button asks for held
+	std::vector<Object *> factories;
+	m_player->iterateObjects( collectFactories, &factories );
+	std::vector<const UpgradeTemplate *> upgrades;
+	std::vector<Object *> where;
+	for( std::vector<Object *>::const_iterator f = factories.begin(); f != factories.end(); ++f )
+	{
+		const CommandSet *commandSet = TheControlBar->findCommandSet( (*f)->getCommandSetString() );
+		if( commandSet == NULL )
+			continue;
+		const UnsignedInt queued = (*f)->getProductionUpdateInterface()->getProductionCount();
+		for( Int i = 0; i < MAX_COMMANDS_PER_SET; ++i )
+		{
+			const CommandButton *button = commandSet->getCommandButton( i );
+			if( button == NULL || button->getCommandType() != GUI_COMMAND_PLAYER_UPGRADE || button->getUpgradeTemplate() == NULL )
+				continue;
+			const UpgradeTemplate *upgrade = button->getUpgradeTemplate();
+			if( m_player->hasUpgradeComplete( upgrade ) || m_player->hasUpgradeInProduction( upgrade ) )
+				continue;
+			Bool sciences = TRUE;
+			for( size_t s = 0; s < button->getScienceVec().size(); ++s )
+				if( !m_player->hasScience( button->getScienceVec()[ s ] ) )
+					sciences = FALSE;
+			if( !sciences )
+				continue;
+			size_t u = 0;
+			while( u < upgrades.size() && upgrades[ u ] != upgrade )
+				++u;
+			if( u == upgrades.size() )
+			{
+				upgrades.push_back( upgrade );
+				where.push_back( *f );
+			}
+			else if( queued < where[ u ]->getProductionUpdateInterface()->getProductionCount() )
+				where[ u ] = *f;
+		}
+	}
+	if( upgrades.empty() )
+		return;
+
+	// what each would improve, a fighting unit at its price times how it trades
+	std::vector<AIVisibleEnemy> army;
+	rememberedArmy( &army );
+	std::vector<Object *> owned;
+	m_player->iterateObjects( collectOwned, &owned );
+	std::vector<Real> covered( upgrades.size(), 0.0f );
+	std::vector<const ThingTemplate *> fitTemplate;		// the fit by template, worked out once a pass
+	std::vector<Real> fitValue;
+	for( std::vector<Object *>::const_iterator o = owned.begin(); o != owned.end(); ++o )
+	{
+		const Object *obj = *o;
+		if( obj->isEffectivelyDead() || obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
+			continue;
+		const ThingTemplate *tmpl = obj->getTemplate();
+		const Bool fights = !obj->isKindOf( KINDOF_STRUCTURE ) && tmpl->canPossiblyHaveAnyWeapon();
+		Real fit = 1.0f;
+		if( fights && !army.empty() )
+		{
+			size_t t = 0;
+			while( t < fitTemplate.size() && fitTemplate[ t ] != tmpl )
+				++t;
+			if( t == fitTemplate.size() )
+			{
+				fitTemplate.push_back( tmpl );
+				fitValue.push_back( aiCounterFit( armyMatchup( tmpl, m_player, army ), profile->m_counterCompositionWeight ) );
+			}
+			fit = fitValue[ t ];
+		}
+		const Real value = aiUpgradeWeight( fights, fit, profile->m_upgradeNonCombatWeight ) * INT_TO_REAL( tmpl->calcCostToBuild( m_player ) );
+		for( size_t u = 0; u < upgrades.size(); ++u )
+			if( obj->affectedByUpgrade( upgrades[ u ] ) )
+				covered[ u ] += value;
+	}
+
+	std::vector<Int> cost( upgrades.size(), 0 );
+	for( size_t u = 0; u < upgrades.size(); ++u )
+		cost[ u ] = upgrades[ u ]->calcCostToBuild( m_player );
+	const Int pick = aiPickUpgrade( &covered[ 0 ], &cost[ 0 ], (Int)upgrades.size(), profile->m_upgradePayoff, overTarget );
+	if( pick < 0 )
+		return;
+	if( buyUpgrade( where[ pick ]->getProductionUpdateInterface(), upgrades[ pick ] ) )
+		DEBUG_LOG(("AI UPGRADE frame %d player %d queues '%s' at '%s' for %d, improves %.0f of what it owns, %.1f times the price where %.1f will do, %d in the bank, bank target %d, %d enemy kinds known\n",
+			now, m_player->getPlayerIndex(), upgrades[ pick ]->getUpgradeName().str(), where[ pick ]->getTemplate()->getName().str(),
+			cost[ pick ], covered[ pick ], covered[ pick ] / INT_TO_REAL( cost[ pick ] ),
+			overTarget ? 0.5f * profile->m_upgradePayoff : profile->m_upgradePayoff, m_player->getMoney()->countMoney(), bankTarget(),
+			(Int)army.size()));
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** Another tank factory or barracks, whichever the base has fewer of, when an income window ends with
+	* the bank over its target and no lower than a window before, or past m_factoryBankMultiple times the
+	* target (aiWantsMoreProduction): what stands is not spending what comes in.  One at a time, and no more than the rung's m_maxProduction war
+	* factories, barracks and airfields together.  A guessed spend rate a factory stood here first: a
+	* Hard AI earning 93 a second wanted the two factories it had.  Unbuilt plan entries count as standing,
+	* or the rule adds the factory the plan is about to put up. */
+//----------------------------------------------------------------------------------------------------------
+void AIPlayer::addProductionForIncome( Int bank, Int bankWindowAgo, Int target )
+{
+	if( !m_player->getCanBuildBase() || !m_baseCenterSet )
+		return;
+
+	const Int KINDS = 3;
+	const KindOfType PRODUCTION[ KINDS ] = { KINDOF_FS_WARFACTORY, KINDOF_FS_BARRACKS, KINDOF_FS_AIRFIELD };
+	Int standing[ KINDS ];
+	Int total = 0;
+	for( Int k = 0; k < KINDS; ++k )
+	{
+		FactoryLoad load;
+		load.kind = PRODUCTION[ k ];
+		load.finished = 0;
+		load.constructing = 0;
+		load.idle = 0;
+		load.deepest = 0;
+		m_player->iterateObjects( readFactoryLoad, &load );
+		if( load.constructing > 0 )
+			return;		// one at a time
+		standing[ k ] = load.finished;
+		total += load.finished;
+	}
+	// ... and the ones the plan has yet to put up count as standing: early on a Medium plan of two war
+	// factories and a barracks had two up, and the rule added the third the plan was about to build
+	Int planned = 0;
+	for( BuildListInfo *info = m_player->getBuildList(); info; info = info->getNext() )
+	{
+		if( info->getObjectID() != INVALID_ID || !info->isBuildable() )
+			continue;
+		const ThingTemplate *tmpl = TheThingFactory->findTemplate( info->getTemplateName(), FALSE );
+		for( Int k = 0; tmpl && k < KINDS; ++k )
+			if( tmpl->isKindOf( PRODUCTION[ k ] ) )
+			{
+				++planned;
+				break;
+			}
+	}
+	total += planned;
+	const Int cap = getSkillProfile()->m_maxProduction;
+	if( !aiWantsMoreProduction( bank, bankWindowAgo, target, total, cap, getSkillProfile()->m_factoryBankMultiple ) )
+		return;
+
+	Object *dozer = NULL;
+	m_player->iterateObjects( findAnyDozer, &dozer );
+	if( dozer == NULL )
+		return;
+	const Int first = standing[ 1 ] < standing[ 0 ] ? 1 : 0;
+	for( Int k = 0; k < 2; ++k )
+	{
+		const KindOfType kind = PRODUCTION[ k == 0 ? first : 1 - first ];
+		if( queueExtraFactory( dozer, kind, TRUE ) )
+		{
+			DEBUG_LOG(("AI ECONOMY frame %d player %d puts up another %s, %d of at most %d standing (%d of them planned), %d in the bank (%d a window ago), bank target %d, %.0f a second of income\n",
+				TheGameLogic->getFrame(), m_player->getPlayerIndex(), kind == KINDOF_FS_WARFACTORY ? "war factory" : "barracks",
+				total, cap, planned, bank, bankWindowAgo, target, m_incomePerSecond));
+			return;
+		}
+	}
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** A unit from each factory with nothing in its queue, while the budget (aiSurplusBudget) covers it.  It
+	* joins the default team, and the next wave takes it along with the other strays.  Spending every idle
+	* factory's worth on every rung lifted Medium's peak army from 67 to 99 and Easy's from 34 to 67, and
+	* Hard against Medium went from 3-0 to 1-1, so each rung's share of its income sets the budget. */
+//----------------------------------------------------------------------------------------------------------
+void AIPlayer::trainSurplus( Int budget )
+{
+	if( budget <= 0 )
+		return;
+	std::vector<AIVisibleEnemy> army;
+	rememberedArmy( &army );
+	std::vector<Object *> factories;
+	m_player->iterateObjects( collectFactories, &factories );
+	for( std::vector<Object *>::const_iterator f = factories.begin(); f != factories.end(); ++f )
+	{
+		ProductionUpdateInterface *pu = (*f)->getProductionUpdateInterface();
+		if( pu->getProductionCount() > 0 )
+			continue;
+		const ThingTemplate *unit = surplusUnit( *f, m_player, army, getSkillProfile()->m_counterCompositionWeight );
+		if( unit == NULL )
+			continue;
+		const Int cost = unit->calcCostToBuild( m_player );
+		if( cost > budget || !buyUnit( pu, unit, AIBUY_ARMY ) )
+			continue;
+		budget -= cost;
+		DEBUG_LOG(("AI ECONOMY frame %d player %d trains '%s' at '%s' out of the surplus, %d of the budget left, %d in the bank\n",
+			TheGameLogic->getFrame(), m_player->getPlayerIndex(), unit->getName().str(), (*f)->getTemplate()->getName().str(),
+			budget, m_player->getMoney()->countMoney()));
 	}
 }
 
@@ -7242,7 +8000,7 @@ void AIPlayer::doMass( void )
 					TheBuildAssistant->canMakeUnit( *f, m_massTemplate ) != CANMAKE_OK ||
 					m_player->getMoney()->countMoney() < (UnsignedInt)(cost + MASS_RESERVE) )
 				continue;
-			if( pu->queueCreateUnit( m_massTemplate, pu->requestUniqueUnitID() ) )
+			if( buyUnit( pu, m_massTemplate, AIBUY_ARMY ) )
 				DEBUG_LOG(("AI MASS frame %d player %d trains '%s' at '%s', %d in the fist, %d in the bank\n", now,
 					m_player->getPlayerIndex(), m_massTemplate->getName().str(), (*f)->getTemplate()->getName().str(),
 					(Int)m_massUnits.size(), m_player->getMoney()->countMoney()));
@@ -7460,8 +8218,6 @@ Bool AIPlayer::holdTeamForWave( Team *team, const AsciiString &approach, Int pat
 	if( info->m_isBaseDefense || info->m_isPerimeterDefense )
 		return FALSE;
 	const Bool underAttack = isBaseUnderAttack();
-	if( !underAttack && !holdsTeamsForWaves() )
-		return refuseHold( team, "press", logRefusal );
 
 	Int freeSlot = -1;
 	Bool anyParked = FALSE;
@@ -7477,10 +8233,15 @@ Bool AIPlayer::holdTeamForWave( Team *team, const AsciiString &approach, Int pat
 			return TRUE;		// already parked; the script asking again changes nothing
 		anyParked = TRUE;
 	}
+	// a wave on its own waits for nobody, and a rung that does not mass sends what is worth sending
+	if( !underAttack && waveGoes( waitingPower( team, NULL ), 0 ) )
+		return refuseHold( team, holdsTeamsForWaves() ? "alone" : "press", logRefusal );
 	if( freeSlot < 0 )
+	{
+		if( !readyToPush() )
+			return TRUE;		// the opening keeps it at home, parked or not
 		return refuseHold( team, "full", logRefusal );		// the staging point is full, so this one goes as the script said
-	if( !underAttack && aiReleaseWaveAt( m_pressure, waitingPower( team, NULL ), WAVE_POWER, 0, WAVE_MAX_HOLD_FRAMES ) )
-		return refuseHold( team, "alone", logRefusal );		// a wave on its own waits for nobody
+	}
 
 	m_heldUsed[ freeSlot ] = TRUE;
 	m_heldTeam[ freeSlot ] = team->getID();
@@ -7534,8 +8295,8 @@ Bool AIPlayer::holdTeamForWave( Team *team, const AsciiString &approach, Int pat
 //----------------------------------------------------------------------------------------------------------
 /** A skirmish script sends a team hunting, or at an area.  Both go from wherever the team stands, on
 	* their own, the moment the script fires: a team just out of the factory walks across the map alone,
-	* past the wave parked at the staging point.  With EngageGate a team still mostly at home parks with
-	* that wave instead, and goes out with it. */
+	* past the wave parked at the staging point.  A team still mostly at home parks with that wave
+	* instead, and goes out with it, unless it is worth sending on its own (waveGoes). */
 //----------------------------------------------------------------------------------------------------------
 Bool AIPlayer::gateTeamAttack( Team *team, const char *cause )
 {
@@ -7553,7 +8314,8 @@ Bool AIPlayer::gateTeamAttack( Team *team, const char *cause )
 		if( isAtHome( (*u)->getPosition() ) )
 			++home;
 	Player *enemy = getAiEnemy();
-	if( getSkillProfile()->m_engageGate && enemy && m_baseCenterSet && 2 * home >= (Int)units.size() &&
+	// every rung: holdTeamForWave lets a team worth sending go, and keeps the rest for the next wave
+	if( enemy && m_baseCenterSet && 2 * home >= (Int)units.size() &&
 			holdTeamForWave( team, AsciiString( "Center" ), enemy->getMpStartIndex() + 1, FALSE ) )
 	{
 		DEBUG_LOG(("AI ENGAGE frame %d player %d parks '%s' for the next wave instead of its script's %s\n",
@@ -7615,6 +8377,20 @@ Bool AIPlayer::holdsTeamsForWaves( void ) const
 	if( profile->m_massBeforeAttacking )
 		return m_pressure <= AIPRESSURE_NORMAL;
 	return m_pressure == AIPRESSURE_DEFEND && profile->m_retreatTtkRatio > 0.0f;
+}
+
+/** Whether parked teams worth power, the oldest parked heldFrames ago, leave now.  Not before the
+	* opening is over (readyToPush).  A trickle under m_minAttackPower waits for company however long it
+	* takes and whatever the pressure: in one 18,000-frame Twilight Flame match each, 43 of the 47
+	* attacks two Hard AIs made were one to four units, and 14 of Medium's 19.  Letting it go after the
+	* wave's longest wait still sent two-unit Hard waves. */
+Bool AIPlayer::waveGoes( Real power, UnsignedInt heldFrames )
+{
+	if( !readyToPush() || power < getSkillProfile()->m_minAttackPower )
+		return FALSE;
+	if( !holdsTeamsForWaves() )
+		return power > 0.0f;
+	return aiReleaseWaveAt( m_pressure, power, WAVE_POWER, heldFrames, WAVE_MAX_HOLD_FRAMES );
 }
 
 /** Who the last push takes out of a team the scripts keep at home.  The workers, the hackers, the
@@ -7745,6 +8521,7 @@ void AIPlayer::doWaves( void )
 	defendHome();
 	sendIdleAttackTeams();
 	sendIdleUnitsHunting();
+	keepSiegeBehind();
 
 	Real power = 0.0f;
 	Int first = -1;
@@ -7765,6 +8542,7 @@ void AIPlayer::doWaves( void )
 		++teams;
 	}
 	const Bool gunshipFilling = loadGunships();
+	evacuateBuildings();
 	garrisonBuildings();		// after the gunships: the wave's riders first, the home guard's leftovers into buildings
 	if( first < 0 )
 		return;
@@ -7778,8 +8556,8 @@ void AIPlayer::doWaves( void )
 	const UnsignedInt heldFrames = TheGameLogic->getFrame() - m_heldSince;
 	// a full staging point goes whatever it adds up to: sixteen GLA teams of one man each are 3,200, and
 	// every team formed behind them would leave alone
-	// and a rung that does not mass lets go the moment the fight at home is over
-	if( teams < MAX_HELD_TEAMS && holdsTeamsForWaves() && !aiReleaseWaveAt( m_pressure, power, WAVE_POWER, heldFrames, WAVE_MAX_HOLD_FRAMES ) )
+	// and a rung that does not mass lets go the moment what is parked is worth sending
+	if( teams < MAX_HELD_TEAMS ? !waveGoes( power, heldFrames ) : !readyToPush() )
 		return;
 	const char *cause = !holdsTeamsForWaves() ? "press" : teams >= MAX_HELD_TEAMS ? "full" : power >= WAVE_POWER ? "wave" : "timeout";
 
@@ -8145,25 +8923,129 @@ Bool AIPlayer::loadGunships( void )
 }
 
 /** One of our own buildings whose men shoot out of it - a Bunker, a Fire Base, a Palace - finished, not
-	* knocked out by an EMP or a hacker, and with a seat free.  Not a tunnel or a heal bay. */
+	* knocked out by an EMP or a hacker, and with a seat free.  Not a tunnel or a heal bay, and not a map
+	* building we hold, which stays a neutral seat: counted as ours, a farmhouse taken while the base was
+	* hit went on taking men and buying them in a quiet base. */
+static Bool isMapBuilding( const Object *obj );
 static void findFiringBuilding( Object *obj, void *userData )
 {
 	ContainModuleInterface *contain = obj->getContain();
-	if( obj->isKindOf( KINDOF_STRUCTURE ) && contain && !contain->isTunnelContain() && !contain->isHealContain() &&
+	if( obj->isKindOf( KINDOF_STRUCTURE ) && contain && !contain->isTunnelContain() && !contain->isHealContain() && !isMapBuilding( obj ) &&
 			(Int)contain->getContainCount() < contain->getContainMax() && contain->isPassengerAllowedToFire() &&
 			!obj->isEffectivelyDead() && !obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) && !obj->testStatus( OBJECT_STATUS_SOLD ) )
 		((std::vector<Object *> *)userData)->push_back( obj );
 }
 
+/** How near an enemy has to be to a neutral building for our men to go in, and how far off the last one
+	* has to be before they come out again.  The gap keeps them from stepping in and out of the same house
+	* while a fight drifts along its edge. */
+static const Real GARRISON_ENEMY_NEAR = 350.0f;
+static const Real GARRISON_ENEMY_GONE = 500.0f;
+
+/** How far from where he stands a man out in the field goes for a building, by skill.  Easy takes none:
+	* its men stay with their team, as they always did. */
+static const Real GARRISON_FRONT_REACH[] = { 0.0f, 150.0f, 250.0f };
+
+/** The health share under which our men leave a building before it comes down on them, by skill.  A
+	* civilian building hurts its men when it falls (DamagePercentToUnits).  Easy stays to the end. */
+static const Real GARRISON_LEAVE_HEALTH[] = { 0.0f, 0.25f, 0.4f };
+
+/** The nearest visible enemy unit within radius of pos that is not a worker, or NULL. */
+static Object *enemyWithin( Player *player, const Coord3D *pos, Real radius )
+{
+	PartitionFilterPlayerAffiliation filterTeam( player, (ALLOW_ALLIES|ALLOW_NEUTRAL), false );
+	PartitionFilterAlive filterAlive;
+	PartitionFilterRejectByObjectStatus filterStealth( MAKE_OBJECT_STATUS_MASK( OBJECT_STATUS_STEALTHED ),
+		MAKE_OBJECT_STATUS_MASK2( OBJECT_STATUS_DETECTED, OBJECT_STATUS_DISGUISED ) );
+	PartitionFilterRejectByKindOf filterHarvesters( MAKE_KINDOF_MASK( KINDOF_HARVESTER ), KINDOFMASK_NONE );
+	PartitionFilterRejectByKindOf filterDozers( MAKE_KINDOF_MASK( KINDOF_DOZER ), KINDOFMASK_NONE );
+	PartitionFilter *filters[] = { &filterTeam, &filterAlive, &filterStealth, &filterHarvesters, &filterDozers, NULL };
+	MemoryPoolObjectHolder hold;
+	SimpleObjectIterator *around = ThePartitionManager->iterateObjectsInRange( pos, radius, FROM_BOUNDINGSPHERE_2D, filters, ITER_SORTED_NEAR_TO_FAR );
+	hold.hold( around );
+	// a man or a vehicle: the first version filled a farmhouse at home for an enemy Bunker standing near it
+	// from the second minute, and others for an Inferno Cannon's shell and a pool of toxin
+	for( Object *obj = around->first(); obj; obj = around->next() )
+		if( obj->isKindOf( KINDOF_INFANTRY ) || obj->isKindOf( KINDOF_VEHICLE ) )
+			return obj;
+	return NULL;
+}
+
+/** A civilian building, a farmhouse or a church, which no faction builds: ours once we are in it.  Its
+	* template names no side, or the civilian one; a Bunker names its faction's. */
+static Bool isMapBuilding( const Object *obj )
+{
+	const AsciiString &side = obj->getTemplate()->getDefaultOwningSide();
+	return obj->getContain()->isGarrisonable() && (side.isEmpty() || side.compareNoCase( "Civilian" ) == 0);
+}
+
+/** The structure each of our men is inside, once each, in the order the men come. */
+static void collectOccupiedBuildings( Object *obj, void *userData )
+{
+	Object *building = obj->getContainedBy();
+	std::vector<Object *> *list = (std::vector<Object *> *)userData;
+	if( obj->isKindOf( KINDOF_INFANTRY ) && building && building->isKindOf( KINDOF_STRUCTURE ) &&
+			std::find( list->begin(), list->end(), building ) == list->end() )
+		list->push_back( building );
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** The men garrisonBuildings put in a building stayed there for the rest of the match: a farmhouse taken
+	* while the base was hit kept the next wave's infantry when the fight was long over, and a house at
+	* the front kept its men while the front moved on.  They come out of a map building once no enemy is
+	* near it, and Medium and Hard take them out of any building, our own Bunker as well, before it falls. */
+//----------------------------------------------------------------------------------------------------------
+void AIPlayer::evacuateBuildings( void )
+{
+	if( !isSkirmishAI() )
+		return;
+	std::vector<Object *> buildings;
+	m_player->iterateObjects( collectOccupiedBuildings, &buildings );
+	for( std::vector<Object *>::const_iterator b = buildings.begin(); b != buildings.end(); ++b )
+	{
+		Object *building = *b;
+		const BodyModuleInterface *body = building->getBodyModule();
+		const Real health = body->getHealth() / body->getMaxHealth();
+		const char *why = NULL;
+		if( health < GARRISON_LEAVE_HEALTH[ m_skillLevel ] )
+			why = "falling";
+		else if( isMapBuilding( building ) && !enemyWithin( m_player, building->getPosition(), GARRISON_ENEMY_GONE ) )
+			why = "quiet";
+		if( why == NULL )
+			continue;
+		DEBUG_LOG(("AI GARRISON frame %d player %d empties '%s' %d, %d men, %s, %.0f%% health\n", TheGameLogic->getFrame(),
+			m_player->getPlayerIndex(), building->getTemplate()->getName().str(), building->getID(),
+			building->getContain()->getContainCount(), why, health * 100.0f));
+		building->getContain()->orderAllPassengersToExit( CMD_FROM_AI, FALSE );
+	}
+}
+
+/** Add the map's empty garrisonable buildings within radius of pos to seats, each once. */
+static void addMapSeats( Player *player, const Coord3D *pos, Real radius, std::vector<Object *> *seats )
+{
+	PartitionFilterAlive filterAlive;
+	PartitionFilterOnMap filterOnMap;
+	PartitionFilterGarrisonableByPlayer filterGarrison( player, TRUE, CMD_FROM_AI );
+	PartitionFilter *filters[] = { &filterAlive, &filterOnMap, &filterGarrison, 0 };
+	MemoryPoolObjectHolder hold;
+	SimpleObjectIterator *nearby = ThePartitionManager->iterateObjectsInRange( pos, radius, FROM_CENTER_2D, filters );
+	hold.hold( nearby );
+	for( Object *b = nearby->first(); b; b = nearby->next() )
+		if( isMapBuilding( b ) && b->getContain()->isPassengerAllowedToFire() &&
+				std::find( seats->begin(), seats->end(), b ) == seats->end() )
+			seats->push_back( b );
+}
+
 //----------------------------------------------------------------------------------------------------------
 /** The computer built Bunkers and Fire Bases and never put a man in one, and walked past every empty
-	* farmhouse in its own base while the enemy's rebels moved in.  The home guard fills them: the
-	* default team's infantry standing at home and the base defence teams'.  Our own firing buildings take
-	* both, and Medium and up train men for their empty seats out of the bank (buyGunshipRiders).  An empty
-	* neutral building at home takes the base defence teams' men, and the default team's only while the
-	* base is hit: the default team's idle men at home are the next wave's (addHomeStrays), and a farmhouse
-	* in a quiet base is not worth a wave's infantry.  A wave's own men and an attack team's are never taken.
-	* Runs after loadGunships on the same pass, so a man it has sent to a gunship is no longer idle here. */
+	* farmhouse while the enemy's rebels moved in.  Our own firing buildings take the default team's
+	* infantry standing at home, wherever the building is, so a Bunker at an expansion is manned from home;
+	* a base defence team's men take those at home only.  Medium and up train men for the empty seats out
+	* of the bank (buyGunshipRiders).  A map building takes our men only while an enemy is near it: at home
+	* that is the base being hit, and in the field, for Medium and Hard, it is the front, where a team's
+	* men standing idle or on guard go into the empty houses within their reach.  evacuateBuildings lets
+	* them out again.  A wave's own men are never taken.  Runs after loadGunships on the same pass, so a
+	* man it has sent to a gunship is no longer idle here. */
 //----------------------------------------------------------------------------------------------------------
 void AIPlayer::garrisonBuildings( void )
 {
@@ -8173,30 +9055,9 @@ void AIPlayer::garrisonBuildings( void )
 	m_player->iterateObjects( findFiringBuilding, &seats );
 	const size_t own = seats.size();
 	const Real reach = 2.0f * m_baseRadius;
-	{
-		PartitionFilterAlive filterAlive;
-		PartitionFilterOnMap filterOnMap;
-		PartitionFilterGarrisonableByPlayer filterGarrison( m_player, TRUE, CMD_FROM_AI );
-		PartitionFilter *filters[] = { &filterAlive, &filterOnMap, &filterGarrison, 0 };
-		MemoryPoolObjectHolder hold;
-		SimpleObjectIterator *nearby = ThePartitionManager->iterateObjectsInRange( &m_baseCenter, reach, FROM_CENTER_2D, filters );
-		hold.hold( nearby );
-		for( Object *b = nearby->first(); b; b = nearby->next() )
-			if( b->getControllingPlayer() != m_player && b->getContain()->isPassengerAllowedToFire() )
-				seats.push_back( b );
-	}
-	if( seats.empty() )
-		return;
+	const Real frontReach = GARRISON_FRONT_REACH[ m_skillLevel ];
+	addMapSeats( m_player, &m_baseCenter, reach, &seats );
 
-	// seats nobody is walking to, as loadGunships counts them
-	std::vector<ObjectID> goals;
-	m_player->iterateObjects( collectBoardingGoals, &goals );
-	std::vector<Int> free;
-	for( std::vector<Object *>::const_iterator s = seats.begin(); s != seats.end(); ++s )
-		free.push_back( (*s)->getContain()->getContainMax() - (Int)(*s)->getContain()->getContainCount() -
-			(Int)std::count( goals.begin(), goals.end(), (*s)->getID() ) );
-
-	const Bool underAttack = isBaseUnderAttack();
 	const Team *defaultTeam = m_player->getDefaultTeam();
 	std::vector<GunshipRider> riders;
 	for( Player::PlayerTeamList::const_iterator t = m_player->getPlayerTeams()->begin(); t != m_player->getPlayerTeams()->end(); ++t )
@@ -8207,38 +9068,71 @@ void AIPlayer::garrisonBuildings( void )
 		{
 			Team *team = iter.cur();
 			const Bool isDefault = team == defaultTeam;
-			if( !isDefault && (!guard || !team->isActive()) )
+			if( !isDefault && !team->isActive() )
 				continue;
+			Bool parked = FALSE;
+			for( Int i = 0; i < MAX_HELD_TEAMS; ++i )
+				if( m_heldUsed[ i ] && m_heldTeam[ i ] == team->getID() )
+					parked = TRUE;
+			if( parked )
+				continue;		// a wave's
 			for( DLINK_ITERATOR<Object> m = team->iterate_TeamMemberList(); !m.done(); m.advance() )
 			{
 				Object *rider = m.cur();
-				if( !isGunshipRider( rider ) || isFallingBack( rider->getID() ) || !isAtHome( rider->getPosition() ) )
+				if( !isGunshipRider( rider ) || isFallingBack( rider->getID() ) )
 					continue;
 				const StateID state = rider->getAI()->getCurrentStateID();
 				if( state != AI_IDLE && state != AI_GUARD && state != AI_GUARD_RETALIATE )
 					continue;
-				GunshipRider entry = { rider, isDefault ? "default" : "guard" };
+				const Bool home = isAtHome( rider->getPosition() );
+				if( home ? !isDefault && !guard : frontReach <= 0.0f )
+					continue;
+				if( !home )
+					addMapSeats( m_player, rider->getPosition(), frontReach, &seats );
+				GunshipRider entry = { rider, !home ? "front" : isDefault ? "default" : "guard" };
 				riders.push_back( entry );
 			}
 		}
+	}
+	if( seats.empty() )
+		return;
+
+	// seats nobody is walking to, as loadGunships counts them, and whether a map building has an enemy
+	// near enough to be worth going in
+	std::vector<ObjectID> goals;
+	m_player->iterateObjects( collectBoardingGoals, &goals );
+	std::vector<Int> free;
+	std::vector<const Object *> threat;		// what makes a map building worth it; our own is its own reason
+	for( size_t s = 0; s < seats.size(); ++s )
+	{
+		const BodyModuleInterface *body = seats[ s ]->getBodyModule();
+		free.push_back( seats[ s ]->getContain()->getContainMax() - (Int)seats[ s ]->getContain()->getContainCount() -
+			(Int)std::count( goals.begin(), goals.end(), seats[ s ]->getID() ) );
+		// nobody goes into a building evacuateBuildings would take him out of again
+		if( body->getHealth() < body->getMaxHealth() * GARRISON_LEAVE_HEALTH[ m_skillLevel ] )
+			free.back() = 0;
+		threat.push_back( s < own ? seats[ s ] : enemyWithin( m_player, seats[ s ]->getPosition(), GARRISON_ENEMY_NEAR ) );
 	}
 
 	for( std::vector<GunshipRider>::const_iterator r = riders.begin(); r != riders.end(); ++r )
 	{
 		Object *rider = r->obj;
 		const Bool stray = strcmp( r->from, "default" ) == 0;
+		const Bool front = strcmp( r->from, "front" ) == 0;
 		Int nearest = -1;
 		Real nearestSqr = 0.0f;
 		for( size_t g = 0; g < seats.size(); ++g )
 		{
 			const Bool mine = g < own;
-			if( free[ g ] <= 0 || (!mine && stray && !underAttack) )
+			if( free[ g ] <= 0 || threat[ g ] == NULL )
 				continue;
 			ContainModuleInterface *contain = seats[ g ]->getContain();
 			if( !contain->isValidContainerFor( rider, TRUE ) || !contain->isPassengerAllowedToFire( rider->getID() ) )
 				continue;
 			const Real distSqr = sqr( seats[ g ]->getPosition()->x - rider->getPosition()->x ) + sqr( seats[ g ]->getPosition()->y - rider->getPosition()->y );
-			if( distSqr > sqr( reach ) )
+			// a man at the front only within his reach; one at home to any building at home, and a stray
+			// to our own anywhere: an expansion's Bunker is manned from home
+			if( front ? distSqr > sqr( frontReach ) : !(mine && stray) && !isAtHome( seats[ g ]->getPosition() ) )
 				continue;
 			// our own building before a neutral one, then the nearest; a tie goes to the first in list order
 			const Bool nearestMine = nearest >= 0 && (size_t)nearest < own;
@@ -8252,23 +9146,23 @@ void AIPlayer::garrisonBuildings( void )
 			continue;
 		Object *building = seats[ nearest ];
 		--free[ nearest ];
-		DEBUG_LOG(("AI GARRISON frame %d player %d puts '%s' %d into '%s' %d, %d of %d seats taken, %s, %s%s\n", TheGameLogic->getFrame(),
+		DEBUG_LOG(("AI GARRISON frame %d player %d puts '%s' %d into '%s' %d, %d of %d seats taken, %s, %s, %s, for '%s'\n", TheGameLogic->getFrame(),
 			m_player->getPlayerIndex(), rider->getTemplate()->getName().str(), rider->getID(), building->getTemplate()->getName().str(), building->getID(),
 			building->getContain()->getContainCount(), building->getContain()->getContainMax(), (size_t)nearest < own ? "own" : "neutral",
-			r->from, underAttack ? ", base under attack" : ""));
+			r->from, isAtHome( building->getPosition() ) ? "home" : "field", threat[ nearest ]->getTemplate()->getName().str()));
 		rider->getAI()->aiEnter( building, CMD_FROM_AI );
 	}
 
-	// men for our own empty firing seats at home: a trained rider comes out at home, and one for a Bunker at
-	// an expansion would stand at home with nothing to walk to.  Only out of money above the cash hoard: the
-	// first version bought five Red Guards for China's first Bunker a minute in, and the skirmish script,
-	// finding the bank and the trucks short a few seconds later, sold the whole base in two of eight matches.
-	// The script's own Bunker team fills the Bunker anyway, in time
+	// men for our own empty firing seats, at home and at the expansions: a trained rider comes out at home
+	// and a stray walks from there to any of them.  Only out of money above the cash hoard: the first
+	// version bought five Red Guards for China's first Bunker a minute in, and the skirmish script, finding
+	// the bank and the trucks short a few seconds later, sold the whole base in two of eight matches.  The
+	// script's own Bunker team fills the Bunker anyway, in time
 	if( (Int)m_player->getMoney()->countMoney() <= getSkillProfile()->m_cashHoardThreshold )
 		return;
 	Int freeSeats = 0;
 	for( size_t g = 0; g < own; ++g )
-		if( free[ g ] > 0 && isAtHome( seats[ g ]->getPosition() ) )
+		if( free[ g ] > 0 )
 			freeSeats += free[ g ];
 	buyGunshipRiders( freeSeats );
 }
@@ -8379,7 +9273,7 @@ Int AIPlayer::buyGunshipRiders( Int freeSeats )
 
 	ProductionUpdateInterface *pu = barracks->getProductionUpdateInterface();
 	Int queued = 0;
-	while( queued < wanted && pu->queueCreateUnit( rider, pu->requestUniqueUnitID() ) )
+	while( queued < wanted && buyUnit( pu, rider, AIBUY_ARMY ) )
 		++queued;
 	if( queued > 0 )
 		DEBUG_LOG(("AI GUNSHIP frame %d player %d trains %d '%s' at '%s' for %d free seats, %d in the bank, against %s (%d infantry, %d vehicles known)\n",
@@ -8473,8 +9367,27 @@ void AIPlayer::sendWave( AIGroup *wave, const AsciiString &approach, Int pathSuf
 	AsciiString pathLabel;
 	pathLabel.format( "%s%d", approach.str(), pathSuffix );
 	Waypoint *way = TheTerrainLogic->getClosestWaypointOnPath( &center, pathLabel );
-	DEBUG_LOG(("AI WAVE frame %d player %d sends %d teams, %d units, %.0f power, after %d s, down %s\n", TheGameLogic->getFrame(),
-		m_player->getPlayerIndex(), teams, wave->getCount(), power, heldFrames / LOGICFRAMES_PER_SECOND, pathLabel.str()));
+	// the ranked units pullOutRanked has out of their teams, mending or on the way, against the whole army
+	Int rankedOut = 0;
+	Real rankedOutPower = 0.0f;
+	Real armyPower = 0.0f;
+	std::vector<Object *> owned;
+	m_player->iterateObjects( collectOwned, &owned );
+	for( size_t o = 0; o < owned.size(); ++o )
+	{
+		const Object *obj = owned[ o ];
+		if( obj->isEffectivelyDead() || obj->isKindOf( KINDOF_STRUCTURE ) || obj->getAI() == NULL )
+			continue;
+		const Real unitPower = aiCombatPower( obj );
+		armyPower += unitPower;
+		if( obj->getVeterancyLevel() > LEVEL_REGULAR && !obj->getAI()->isRecruitable() && obj->getTeam() == m_player->getDefaultTeam() )
+		{
+			++rankedOut;
+			rankedOutPower += unitPower;
+		}
+	}
+	DEBUG_LOG(("AI WAVE frame %d player %d sends %d teams, %d units, %.0f power, after %d s, down %s; %d ranked out mending, %.0f of %.0f army power\n", TheGameLogic->getFrame(),
+		m_player->getPlayerIndex(), teams, wave->getCount(), power, heldFrames / LOGICFRAMES_PER_SECOND, pathLabel.str(), rankedOut, rankedOutPower, armyPower));
 	if( way == NULL )
 		return;
 	std::vector<Object *> units;
@@ -8614,7 +9527,7 @@ Real AIPlayer::addHomeStrays( AIGroup *wave ) const
 //----------------------------------------------------------------------------------------------------------
 void AIPlayer::sendIdleUnitsHunting( void )
 {
-	if( !isSkirmishAI() || !m_baseCenterSet || m_pressure == AIPRESSURE_DEFEND )
+	if( !isSkirmishAI() || !m_baseCenterSet || m_pressure == AIPRESSURE_DEFEND || !readyToPush() )
 		return;
 	const Bool finish = m_pressure == AIPRESSURE_FINISH;
 	const Bool guardsGo = finish &&
@@ -9559,14 +10472,14 @@ void AIPlayer::upgradeHelix( Object *helix, Int role, AIEnemyComposition *enemy,
 		return;
 	if( role < 0 && (Int)m_player->getMoney()->countMoney() <= getSkillProfile()->m_cashHoardThreshold + next->calcCostToBuild( m_player ) )
 		return;
-	if( pu->queueUpgrade( next ) )
+	if( buyUpgrade( pu, next ) )
 		DEBUG_LOG(("AI HELIX frame %d player %d upgrades '%s' %d with '%s' as a %s, enemy known: %d infantry, %d vehicles, threat %.0f%% infantry %.0f%% ground vehicles\n",
 			TheGameLogic->getFrame(), m_player->getPlayerIndex(), helix->getTemplate()->getName().str(), helix->getID(),
 			next->getUpgradeName().str(), role < 0 ? "team gunship" : HELIX_ROLE_NAME[ role ], enemy->m_infantryCount, enemy->m_vehicleCount,
 			enemy->m_infantry * 100.0f, (enemy->m_armour - enemy->m_air) * 100.0f));
 }
 
-Coord3D AIPlayer::rearOf( const Coord3D *from, const std::vector<AIKnownGun> &guns ) const
+Coord3D AIPlayer::rearOf( const Coord3D *from, const std::vector<AIKnownGun> &guns, Real margin ) const
 {
 	const Real dx = m_baseCenter.x - from->x;
 	const Real dy = m_baseCenter.y - from->y;
@@ -9577,7 +10490,7 @@ Coord3D AIPlayer::rearOf( const Coord3D *from, const std::vector<AIKnownGun> &gu
 	{
 		const Real x = from->x + dx * along / length;
 		const Real y = from->y + dy * along / length;
-		if( deepestReach( guns, x, y, FALSE ) < -HELIX_GUN_MARGIN )
+		if( deepestReach( guns, x, y, FALSE ) < -margin )
 		{
 			spot.set( x, y, TheTerrainLogic->getGroundHeight( x, y ) );
 			return spot;
@@ -9594,7 +10507,7 @@ Coord3D AIPlayer::rearOf( const Coord3D *from, const std::vector<AIKnownGun> &gu
 			const Real x = from->x + RAID_SIDE[ side ][ 0 ] * reach;
 			const Real y = from->y + RAID_SIDE[ side ][ 1 ] * reach;
 			if( x >= extent.lo.x && x <= extent.hi.x && y >= extent.lo.y && y <= extent.hi.y &&
-					deepestReach( guns, x, y, FALSE ) < -HELIX_GUN_MARGIN )
+					deepestReach( guns, x, y, FALSE ) < -margin )
 			{
 				spot.set( x, y, TheTerrainLogic->getGroundHeight( x, y ) );
 				return spot;
@@ -9660,7 +10573,7 @@ void AIPlayer::steerHealer( Int slot, const std::vector<AIKnownGun> &guns )
 	if( hit || antiAirNear || inReach )
 	{
 		phase = HEAL_PULLBACK;
-		spot = rearOf( pos, guns );
+		spot = rearOf( pos, guns, HELIX_GUN_MARGIN );
 	}
 	else if( helix->hasUpgrade( tower ) )
 	{
@@ -9721,7 +10634,7 @@ void AIPlayer::steerHealer( Int slot, const std::vector<AIKnownGun> &guns )
 			phase = HEAL_REAR;
 			middle.x /= out;
 			middle.y /= out;
-			spot = rearOf( &middle, guns );
+			spot = rearOf( &middle, guns, HELIX_GUN_MARGIN );
 			// sideways, alternately right and left, by a tower's reach plus the slack a lower slot's spot
 			// keeps before it is re-ordered, so a step always clears the spot it stepped away from
 			const Real dx = m_baseCenter.x - middle.x;
@@ -9842,7 +10755,7 @@ void AIPlayer::flyRaid( Int slot, const std::vector<AIKnownGun> &guns )
 			const UnsignedInt lastHit = body->getLastDamageTimestamp();
 			if( (lastHit != 0 && now - lastHit < HEALER_HIT_FRAMES) || deepestReach( guns, pos->x, pos->y, TRUE ) > -HELIX_GUN_MARGIN )
 			{
-				const Coord3D clear = rearOf( pos, guns );
+				const Coord3D clear = rearOf( pos, guns, HELIX_GUN_MARGIN );
 				ai->aiMoveToPosition( &clear, CMD_FROM_AI );
 				break;
 			}
@@ -10038,33 +10951,119 @@ void AIPlayer::doHelixes( void )
 	* through the support-unit queue.  An Ambulance waits
 	* AMBULANCE_BEHIND back from the middle of whoever is out, toward home and clear of every known gun,
 	* or at home with nobody out.  The cash hoard does not hold it back, since a USA at war banks under
-	* the hoard all match.  Our infantry within AMBULANCE_CALL_REACH of it and under half health
-	* walk over and climb in, and it lets them out once they are whole.  It drives to the nearest hazard
+	* the hoard all match.  Our infantry within AMBULANCE_CALL_REACH of it, under half health and not hit lately,
+	* walk over and climb in, and each is let out once it is whole.  It drives to the nearest hazard
 	* on our side of the map that no known gun covers; one beside it it notices by itself
-	* (CleanupHazardUpdate::startAutoCleanup).  Split out with plain values so the rules are testable
-	* without a running game. */
+	* (CleanupHazardUpdate::startAutoCleanup).
+	*
+	* It is a 240-health truck with no gun.  Hit in the last AMBULANCE_HIT_FRAMES or within the margin of a
+	* known gun's reach (AIAmbulance_gunMargin, scaled to the map), it drops whatever it was doing, the
+	* cleanup included, and drives AMBULANCE_PULLBACK toward home to the first ground the margin clears,
+	* but only when that ground is clearer than where it stands; otherwise it holds.  Under
+	* AMBULANCE_REPAIR_HEALTH it goes to be repaired.
+	* Before that it parked 150 from the middle of the army and kept cleaning the toxins of the fight it
+	* stood in: 90 of 112 bought in eight 2v2 matches died, each bought again once the bank allowed.
+	* A lost one is now replaced after AMBULANCE_REBUY_FRAMES.
+	*
+	* A patient leaves its team for the default one until it is let out, as a pulled-out veteran does
+	* (pullOutRanked): left in its team, the team's next script order walked it away from the door, and
+	* 23 of 93 called in were ever let out.
+	*
+	* Split out with plain values so the rules are testable without a running game. */
 //----------------------------------------------------------------------------------------------------------
 static const Int AMBULANCE_CHECK_RATE = LOGICFRAMES_PER_SECOND;
 static const Int AMBULANCE_FIRST_ARMY = 8;
 static const Int AMBULANCE_SECOND_ARMY = 20;
 static const Real AMBULANCE_PATIENT_HEALTH = 0.5f;
-static const Real AMBULANCE_CALL_REACH = 450.0f;
-static const Real AMBULANCE_BEHIND = 150.0f;
+static const Real AMBULANCE_CALL_REACH = 900.0f;
+static const UnsignedInt AMBULANCE_PATIENT_QUIET = 2 * LOGICFRAMES_PER_SECOND;
+static const Real AMBULANCE_BEHIND = 300.0f;
 static const Real AMBULANCE_HAZARD_REACH = 1500.0f;
 /** The cleanup ability's MaxMoveDistanceFromLocation in retail AmericaVehicle.ini. */
 static const Real AMBULANCE_CLEANUP_RANGE = 300.0f;
 static const Real AMBULANCE_REORDER_DISTANCE = 100.0f;
+/** By rung (Easy, Medium, Hard; Easy fields none, its values keep the table whole).  How long after a
+	* hit it stays back.  How far clear of every known gun it keeps: a share of the distance between the
+	* two bases, held between a floor and a cap.  A fixed 160 or 200 broke on the small generated maps,
+	* where its own base stood that close to known enemy guns: no ground was clear, and on 32 such matches
+	* the Hard USA pulled back 312 times against 116, at full health and unhit for minutes, cycling between
+	* its wait spot and its base.  On Twilight Flame the share reaches the cap. */
+static const UnsignedInt AMBULANCE_HIT_FRAMES[ AISKILL_COUNT ] = { 4 * LOGICFRAMES_PER_SECOND, 6 * LOGICFRAMES_PER_SECOND, 8 * LOGICFRAMES_PER_SECOND };
+static const Real AMBULANCE_MARGIN_SHARE[ AISKILL_COUNT ] = { 0.04f, 0.06f, 0.08f };
+static const Real AMBULANCE_MARGIN_MIN[ AISKILL_COUNT ] = { 40.0f, 60.0f, 80.0f };
+static const Real AMBULANCE_MARGIN_MAX[ AISKILL_COUNT ] = { 120.0f, 160.0f, 200.0f };
+/** A spot it waits at stands this share of the margin farther clear again, so a gun a step closer does
+	* not send it back the moment it gets there. */
+static const Real AMBULANCE_WAIT_SLACK = 0.5f;
+static const Real AMBULANCE_PULLBACK = 400.0f;
+static const Real AMBULANCE_REPAIR_HEALTH = 0.5f;
+static const UnsignedInt AMBULANCE_REBUY_FRAMES = 90 * LOGICFRAMES_PER_SECOND;
+/** Medium keeps one at a time, waits twice as long to replace it and buys half as many in a match.
+	* Each lost one was bought again on Hard every 90 seconds: eight came out of two USA seats in one
+	* 16-minute match (ambA4_700), and a player counted dozens over a long game. */
+static const Int AMBULANCE_MATCH_CAP[ AISKILL_COUNT ] = { 0, 3, 6 };
 
-Int AIAmbulance_wanted( Int army )
+Int AIAmbulance_wanted( Int army, Int skill )
 {
-	if( army >= AMBULANCE_SECOND_ARMY )
+	if( skill == AISKILL_EASY )
+		return 0;
+	if( army >= AMBULANCE_SECOND_ARMY && skill >= AISKILL_BRUTAL )
 		return 2;
 	return army >= AMBULANCE_FIRST_ARMY ? 1 : 0;
 }
 
-Bool AIAmbulance_callsPatient( Real healthFraction, Real distance )
+Bool AIAmbulance_rebuyWaits( UnsignedInt now, UnsignedInt lost, Int skill )
 {
-	return healthFraction < AMBULANCE_PATIENT_HEALTH && distance <= AMBULANCE_CALL_REACH;
+	const UnsignedInt wait = skill >= AISKILL_BRUTAL ? AMBULANCE_REBUY_FRAMES : 2 * AMBULANCE_REBUY_FRAMES;
+	return lost != 0 && now - lost < wait;
+}
+
+Bool AIAmbulance_mayBuyMore( Int bought, Int skill )
+{
+	return bought < AMBULANCE_MATCH_CAP[ skill ];
+}
+
+/** How far clear of every known gun it keeps, for bases baseDistance apart. */
+Real AIAmbulance_gunMargin( Real baseDistance, Int skill )
+{
+	return clamp( AMBULANCE_MARGIN_MIN[ skill ], AMBULANCE_MARGIN_SHARE[ skill ] * baseDistance, AMBULANCE_MARGIN_MAX[ skill ] );
+}
+
+/** Hit lately, or a known gun within the margin.  clear is how far outside the reach of the gun that
+	* reaches deepest it stands, below zero when inside it. */
+Bool AIAmbulance_pullsBack( UnsignedInt now, UnsignedInt lastHit, Real clear, Real margin, Int skill )
+{
+	return clear < margin || (lastHit != 0 && now - lastHit < AMBULANCE_HIT_FRAMES[ skill ]);
+}
+
+/** Whether a pull-back moves it to ground clear by spotClear from where it stands clear by hereClear.
+	* Only to ground clearer by a reorder step: on ground no clearer, it holds where it is, which is what
+	* stops the cycle.  Hit since its last look by something it does not know of, it goes back regardless,
+	* since the known guns cannot say where the fire came from. */
+Bool AIAmbulance_movesBack( Real hereClear, Real spotClear, Bool hitSinceLook )
+{
+	return hitSinceLook || spotClear >= hereClear + AMBULANCE_REORDER_DISTANCE;
+}
+
+/** Whether it goes forward to a wait spot clear by spotClear: clear by the margin and the slack, or at
+	* least clearer than where it stands; otherwise it stays put. */
+Bool AIAmbulance_waitsAt( Real hereClear, Real spotClear, Real margin )
+{
+	return spotClear >= margin * (1.0f + AMBULANCE_WAIT_SLACK) || spotClear >= hereClear + AMBULANCE_REORDER_DISTANCE;
+}
+
+/** What becomes of each one called is in the AI PATIENT lines.  In one Hard and one Medium match (ambC,
+	* 2026-10-11) 10 of 15 died on the way, every one within three seconds of the call, so in the fight
+	* that hurt it; every one that lived to climb in was let out whole.  Leaving out whoever was hit in the
+	* last four seconds called nobody at all in the same two matches.
+	*
+	* So one still being shot is not called, and one left alone for AMBULANCE_PATIENT_QUIET is, from twice
+	* the old 450.  In six Hard USA mirrors on Twilight Flame (2026-10-11) every hurt soldier within 450 had
+	* been hit in the last two seconds; the quiet ones, out of the fight, stood 450 to 1,500 away for ten
+	* seconds and more, which is the walk back toward an Ambulance waiting behind the army. */
+Bool AIAmbulance_callsPatient( Real healthFraction, Real distance, UnsignedInt sinceHit )
+{
+	return healthFraction < AMBULANCE_PATIENT_HEALTH && distance <= AMBULANCE_CALL_REACH && sinceHit >= AMBULANCE_PATIENT_QUIET;
 }
 
 /** A vehicle with a hold that cleans hazards: the Ambulance, and each general's copy of it. */
@@ -10087,6 +11086,74 @@ Bool AIPlayer::isDutyAmbulance( const Object *obj ) const
 	return FALSE;
 }
 
+Bool AIPlayer::isWalkingToAmbulance( const Object *obj ) const
+{
+	AIUpdateInterface *ai = const_cast<Object *>( obj )->getAI();		// getGoalObject is not const
+	return ai && ai->getCurrentStateID() == AI_ENTER && ai->getGoalObject() && isDutyAmbulance( ai->getGoalObject() );
+}
+
+Bool AIPlayer::isOutToMend( const Object *obj ) const
+{
+	const AIUpdateInterface *ai = obj->getAI();
+	return ai && !ai->isRecruitable() && obj->getTeam() == m_player->getDefaultTeam();
+}
+
+/** For the log only: what became of each patient an Ambulance called in.  It climbs in, then is let out
+	* or dies inside; or it dies on the way; or something else gives it an order first and it walks off. */
+void AIPlayer::followPatients( void )
+{
+	const UnsignedInt now = TheGameLogic->getFrame();
+	for( size_t p = 0; p < m_calledPatients.size(); )
+	{
+		CalledPatient &patient = m_calledPatients[ p ];
+		Object *obj = TheGameLogic->findObjectByID( patient.id );
+		const Object *ambulance = TheGameLogic->findObjectByID( patient.ambulance );
+		const Bool ambulanceUp = ambulance && !ambulance->isEffectivelyDead();
+		const char *outcome = NULL;
+		Real health = 0.0f;
+		Real away = 0.0f;
+		if( obj && !obj->isEffectivelyDead() )
+		{
+			health = obj->getBodyModule()->getHealth() / obj->getBodyModule()->getMaxHealth();
+			if( ambulance )
+				away = (Real)sqrt( sqr( obj->getPosition()->x - ambulance->getPosition()->x ) + sqr( obj->getPosition()->y - ambulance->getPosition()->y ) );
+		}
+		if( obj == NULL || obj->isEffectivelyDead() )
+			outcome = patient.inside ? (ambulanceUp ? "dies inside" : "dies with the ambulance") : "dies on the way";
+		else if( obj->isContained() )
+		{
+			if( !patient.inside )
+			{
+				patient.inside = TRUE;
+				DEBUG_LOG(("AI PATIENT frame %d player %d '%s' %d climbs in after %d s at %.0f%% health\n", now, m_player->getPlayerIndex(),
+					obj->getTemplate()->getName().str(), patient.id, (now - patient.frame) / LOGICFRAMES_PER_SECOND, health * 100.0f));
+			}
+		}
+		else if( patient.inside )
+			outcome = ambulanceUp ? "is let out" : "is let out by the wreck";
+		else if( obj->getAI()->getCurrentStateID() != AI_ENTER || obj->getAI()->getGoalObject() != ambulance )
+			outcome = ambulanceUp ? "walks off" : "walks off, the ambulance lost";
+		if( outcome == NULL )
+		{
+			++p;
+			continue;
+		}
+		DEBUG_LOG(("AI PATIENT frame %d player %d %d %s after %d s at %.0f%% health, %.0f from the ambulance; called at %.0f%% health from %.0f\n", now,
+			m_player->getPlayerIndex(), patient.id, outcome, (now - patient.frame) / LOGICFRAMES_PER_SECOND, health * 100.0f, away,
+			patient.health * 100.0f, patient.distance));
+		if( obj && !obj->isEffectivelyDead() && !patient.inside )
+		{
+			const Object *goal = obj->getAI()->getGoalObject();
+			DEBUG_LOG(("AI PATIENT frame %d player %d %d walk-off state %d source %d goal %d team '%s' recruitable %d hit %d s ago; ambulance state %d moving %d\n", now,
+				m_player->getPlayerIndex(), patient.id, (Int)obj->getAI()->getCurrentStateID(), (Int)obj->getAI()->getLastCommandSource(),
+				goal ? (Int)goal->getID() : 0, obj->getTeam() ? obj->getTeam()->getName().str() : "", (Int)obj->getAI()->isRecruitable(),
+				(now - obj->getBodyModule()->getLastDamageTimestamp()) / LOGICFRAMES_PER_SECOND,
+				ambulanceUp ? (Int)ambulance->getAI()->getCurrentStateID() : -1, ambulanceUp ? (Int)ambulance->getAI()->isMoving() : -1));
+		}
+		m_calledPatients.erase( m_calledPatients.begin() + p );
+	}
+}
+
 void AIPlayer::doAmbulances( void )
 {
 	if( !isSkirmishAI() || !m_baseCenterSet || m_skillLevel == AISKILL_EASY || measuringWithoutTactics() )
@@ -10105,14 +11172,21 @@ void AIPlayer::doAmbulances( void )
 			++owned;
 			continue;
 		}
-		DEBUG_LOG(("AI AMBULANCE frame %d player %d loses %d\n", TheGameLogic->getFrame(), m_player->getPlayerIndex(), duty.id));
+		DEBUG_LOG(("AI AMBULANCE frame %d player %d loses %d at (%.0f,%.0f), %.0f from home, last seen at %.0f%% health %s a known gun's reach by %.0f, last sent to (%.0f,%.0f), %d pull-backs %d holds\n",
+			TheGameLogic->getFrame(), m_player->getPlayerIndex(), duty.id, duty.seen.x, duty.seen.y,
+			(Real)sqrt( sqr( duty.seen.x - m_baseCenter.x ) + sqr( duty.seen.y - m_baseCenter.y ) ), duty.seenHealth * 100.0f,
+			duty.seenReach > 0.0f ? "inside" : "clear of", fabs( duty.seenReach ), duty.spot.x, duty.spot.y, duty.pullbacks, duty.holds));
 		duty.id = INVALID_ID;
+		m_ambulanceLost = TheGameLogic->getFrame();
 	}
+	releaseMended();
+	followPatients();
 
-	const Int wanted = AIAmbulance_wanted( tallyBase( m_player ).army );
+	const Int wanted = AIAmbulance_wanted( tallyBase( m_player ).army, m_skillLevel );
 	// no cash hoard to clear: an Ambulance is 600, and a USA at war banks under the hoard all match long.
 	// queueSupportUnit still waits for twice its price
-	if( owned < wanted && !isBaseUnderAttack() && !scoutInQueue() )
+	if( owned < wanted && AIAmbulance_mayBuyMore( m_ambulancesBought, m_skillLevel ) &&
+			!AIAmbulance_rebuyWaits( TheGameLogic->getFrame(), m_ambulanceLost, m_skillLevel ) && !isBaseUnderAttack() && !scoutInQueue() )
 	{
 		std::vector<Object *> factories;
 		m_player->iterateObjects( collectFactories, &factories );
@@ -10152,6 +11226,8 @@ void AIPlayer::doAmbulances( void )
 	}
 }
 
+static Object *findMender( Player *player, Object *unit );
+
 void AIPlayer::steerAmbulance( Int slot, const std::vector<AIKnownGun> &guns )
 {
 	DutyAmbulance &duty = m_ambulance[ slot ];
@@ -10164,25 +11240,114 @@ void AIPlayer::steerAmbulance( Int slot, const std::vector<AIKnownGun> &guns )
 	ContainModuleInterface *hold = ambulance->getContain();
 	const Coord3D *pos = ambulance->getPosition();
 	const UnsignedInt now = TheGameLogic->getFrame();
+	const Real reach = deepestReach( guns, pos->x, pos->y, FALSE );
+	duty.seen = *pos;
+	duty.seenHealth = ambulance->getBodyModule()->getHealth() / ambulance->getBodyModule()->getMaxHealth();
+	duty.seenReach = reach;
 
-	// whole again: out they get
-	if( hold->getContainCount() > 0 )
+	// each one whole again gets out; one still hurt stays in and goes on healing
+	const ContainedItemsList *riders = hold->getContainedItemsList();
+	for( ContainedItemsList::const_iterator r = riders->begin(); r != riders->end(); ++r )
 	{
-		Bool whole = TRUE;
-		const ContainedItemsList *riders = hold->getContainedItemsList();
-		for( ContainedItemsList::const_iterator r = riders->begin(); r != riders->end(); ++r )
-			if( (*r)->getBodyModule()->getHealth() < (*r)->getBodyModule()->getMaxHealth() )
-				whole = FALSE;
-		if( whole )
+		Object *rider = *r;
+		if( rider->getBodyModule()->getHealth() < rider->getBodyModule()->getMaxHealth() || rider->getAI() == NULL ||
+				rider->getAI()->getCurrentStateID() == AI_EXIT )
+			continue;
+		DEBUG_LOG(("AI AMBULANCE frame %d player %d '%s' %d lets 1 out whole, '%s' %d, at (%.0f,%.0f)\n", now, m_player->getPlayerIndex(),
+			ambulance->getTemplate()->getName().str(), duty.id, rider->getTemplate()->getName().str(), rider->getID(), pos->x, pos->y));
+		rider->getAI()->aiExit( ambulance, CMD_FROM_AI );
+	}
+
+	const StateID state = ai->getCurrentStateID();
+	const BodyModuleInterface *body = ambulance->getBodyModule();
+
+	// shot at, or inside a gun's reach: back toward home, out of every known gun's reach, whatever it was
+	// doing, a trip to be repaired included.  Sent to be repaired first, it drove the pathfinder's way to
+	// the War Factory, through whatever reached that way: 20 of 31 lost in eight matches (ambA4) died on
+	// that trip, most within a few seconds of the order and inside a known gun's reach
+	//
+	// How clear it keeps scales with the map (AIAmbulance_gunMargin), and it only ever moves to clearer
+	// ground: with no clearer ground to go to it holds where it is, and it goes forward again only to a
+	// spot clear by the margin and a slack, or clearer than where it stands (AIAmbulance_waitsAt)
+	Player *enemy = getAiEnemy();
+	Coord3D enemyPos;
+	const Bool enemyPlaced = enemy && enemyStartGuess( enemy->getPlayerIndex(), &enemyPos );
+	const Real margin = enemyPlaced ?
+		AIAmbulance_gunMargin( (Real)sqrt( sqr( enemyPos.x - m_baseCenter.x ) + sqr( enemyPos.y - m_baseCenter.y ) ), m_skillLevel ) :
+		AMBULANCE_MARGIN_MAX[ m_skillLevel ];
+	const Real spotMargin = margin * (1.0f + AMBULANCE_WAIT_SLACK);
+	const Real hereClear = -reach;
+	const UnsignedInt lastHit = body->getLastDamageTimestamp();
+	if( AIAmbulance_pullsBack( now, lastHit, hereClear, margin, m_skillLevel ) )
+	{
+		const Bool hitSinceLook = lastHit != 0 && now - lastHit < (UnsignedInt)AMBULANCE_CHECK_RATE;
+		const Real sentClear = -deepestReach( guns, duty.spot.x, duty.spot.y, FALSE );
+		// on its way to clearer ground already, a repair trip included, and not hit since: it keeps going
+		if( !hitSinceLook && !cleaner->isCleaningArea() && ai->isMoving() && AIAmbulance_movesBack( hereClear, sentClear, FALSE ) )
+			return;
+		Coord3D back = *pos;
+		const Real dx = m_baseCenter.x - pos->x;
+		const Real dy = m_baseCenter.y - pos->y;
+		const Real length = (Real)sqrt( dx * dx + dy * dy );
+		if( length > AMBULANCE_PULLBACK )
 		{
-			DEBUG_LOG(("AI AMBULANCE frame %d player %d '%s' %d lets %d out whole at (%.0f,%.0f)\n", now, m_player->getPlayerIndex(),
-				ambulance->getTemplate()->getName().str(), duty.id, (Int)hold->getContainCount(), pos->x, pos->y));
-			ai->aiEvacuate( FALSE, CMD_FROM_AI );
+			back.x += dx * AMBULANCE_PULLBACK / length;
+			back.y += dy * AMBULANCE_PULLBACK / length;
+		}
+		else
+			back = m_baseCenter;
+		Coord3D spot = rearOf( &back, guns, spotMargin );
+		const Real spotClear = -deepestReach( guns, spot.x, spot.y, FALSE );
+		if( !AIAmbulance_movesBack( hereClear, spotClear, hitSinceLook ) )
+		{
+			// no clearer ground than this: it holds here.  Driving on into worse, or cleaning, it stops
+			++duty.holds;
+			if( cleaner->isCleaningArea() || (ai->isMoving() && !AIAmbulance_movesBack( hereClear, sentClear, FALSE )) )
+			{
+				DEBUG_LOG(("AI AMBULANCE frame %d player %d '%s' %d holds at (%.0f,%.0f), %.0f clear against a margin of %.0f, no clearer ground; %d holds\n",
+					now, m_player->getPlayerIndex(), ambulance->getTemplate()->getName().str(), duty.id, pos->x, pos->y, hereClear, margin, duty.holds));
+				if( cleaner->isCleaningArea() )
+					cleaner->giveUpArea();
+				const Coord3D stop = *pos;
+				ai->aiMoveToPosition( &stop, CMD_FROM_SCRIPT );
+				duty.spot = stop;
+			}
+			return;
+		}
+		++duty.pullbacks;
+		DEBUG_LOG(("AI AMBULANCE frame %d player %d '%s' %d pulls back to (%.0f,%.0f) at %.0f%% health, %.0f clear against a margin of %.0f, to %.0f clear, hit %d s ago%s; %d pull-backs\n",
+			now, m_player->getPlayerIndex(), ambulance->getTemplate()->getName().str(), duty.id, spot.x, spot.y,
+			body->getHealth() * 100.0f / body->getMaxHealth(), hereClear, margin, spotClear,
+			lastHit != 0 ? (Int)((now - lastHit) / LOGICFRAMES_PER_SECOND) : -1, cleaner->isCleaningArea() ? ", off its cleanup" : "", duty.pullbacks));
+		// pulled off a cleanup, it leaves that ground alone from now on: the spill it was sent to was
+		// picked again the next look, and the cleanup drove it back after the same hazard under the guns
+		if( cleaner->isCleaningArea() )
+			cleaner->giveUpArea();
+		ai->aiMoveToPosition( &spot, CMD_FROM_SCRIPT );		// not CMD_FROM_AI, which a cleanup under way would keep
+		duty.spot = spot;
+		return;
+	}
+
+	// badly hurt, and out of reach now: to be repaired, riders and all, who go on healing inside
+	if( body->getHealth() < AMBULANCE_REPAIR_HEALTH * body->getMaxHealth() )
+	{
+		Object *mender = findMender( m_player, ambulance );
+		if( mender && TheActionManager->canGetRepairedAt( ambulance, mender, CMD_FROM_AI ) )
+		{
+			if( state != AI_DOCK && state != AI_ENTER && state < 1000 )
+			{
+				DEBUG_LOG(("AI AMBULANCE frame %d player %d '%s' %d goes to be repaired at '%s' %d, %.0f%% health\n", now, m_player->getPlayerIndex(),
+					ambulance->getTemplate()->getName().str(), duty.id, mender->getTemplate()->getName().str(), mender->getID(),
+					body->getHealth() * 100.0f / body->getMaxHealth()));
+				ai->aiGetRepaired( mender, CMD_FROM_SCRIPT );		// not CMD_FROM_AI, which a cleanup under way would keep
+				duty.spot = *mender->getPosition();
+			}
 			return;
 		}
 	}
-	if( cleaner->isCleaningArea() )
-		return;		// its own module drives it until the ground is clean and brings it back
+
+	if( cleaner->isCleaningArea() || state == AI_DOCK )
+		return;		// its own module drives it until the ground is clean and brings it back; or it is being repaired
 
 	// the hurt nearby climb in, while there is room, and the middle of whoever is out
 	BoardingSearch boarding;
@@ -10208,18 +11373,33 @@ void AIPlayer::steerAmbulance( Int slot, const std::vector<AIKnownGun> &guns )
 			middle.y += obj->getPosition()->y;
 			++out;
 		}
-		if( room <= 0 || !obj->isKindOf( KINDOF_INFANTRY ) )
-			continue;
 		const StateID state = obj->getAI()->getCurrentStateID();
+		if( state == AI_ENTER && obj->getAI()->getGoalObject() == ambulance )
+			--room;		// a seat already taken by one on its way
+		// not a burning man running about, which is infantry with no gun and dies in seconds
+		if( room <= 0 || !obj->isKindOf( KINDOF_INFANTRY ) || aiCombatPower( obj ) <= 0.0f )
+			continue;
 		const BodyModuleInterface *body = obj->getBodyModule();
 		const Real distance = (Real)sqrt( sqr( obj->getPosition()->x - pos->x ) + sqr( obj->getPosition()->y - pos->y ) );
-		if( state == AI_ENTER || state == AI_DOCK || state >= 1000 || !hold->isValidContainerFor( obj, TRUE ) ||
-				!AIAmbulance_callsPatient( body->getHealth() / body->getMaxHealth(), distance ) )
+		if( state == AI_ENTER || state == AI_DOCK || state >= 1000 || !hold->isValidContainerFor( obj, TRUE ) )
+			continue;
+		if( !AIAmbulance_callsPatient( body->getHealth() / body->getMaxHealth(), distance, now - body->getLastDamageTimestamp() ) )
 			continue;
 		leaveTacticsAlone( obj->getID() );
+		// out of its team until it is let out, or the team's next script order walks it off (see releaseMended)
+		obj->setTeam( m_player->getDefaultTeam() );
+		obj->getAI()->setIsRecruitable( FALSE );
 		obj->getAI()->aiEnter( ambulance, CMD_FROM_AI );
 		--room;
 		++called;
+		CalledPatient patient;
+		patient.id = obj->getID();
+		patient.ambulance = duty.id;
+		patient.frame = now;
+		patient.health = body->getHealth() / body->getMaxHealth();
+		patient.distance = distance;
+		patient.inside = FALSE;
+		m_calledPatients.push_back( patient );
 		DEBUG_LOG(("AI AMBULANCE frame %d player %d '%s' %d calls in '%s' %d at %.0f%% health, %.0f away\n", now, m_player->getPlayerIndex(),
 			ambulance->getTemplate()->getName().str(), duty.id, obj->getTemplate()->getName().str(), obj->getID(),
 			body->getHealth() * 100.0f / body->getMaxHealth(), distance));
@@ -10227,18 +11407,24 @@ void AIPlayer::steerAmbulance( Int slot, const std::vector<AIKnownGun> &guns )
 	if( called > 0 || boarding.found )
 		return;		// no new spot while they walk over
 
-	// the nearest hazard, if it is on our side and out of every known gun's reach
-	PartitionFilterAcceptByKindOf kindFilter( MAKE_KINDOF_MASK( KINDOF_CLEANUP_HAZARD ), KINDOFMASK_NONE );
-	PartitionFilterSameMapStatus filterMapStatus( ambulance );
-	PartitionFilter *filters[] = { &kindFilter, &filterMapStatus, NULL };
-	Object *hazard = ThePartitionManager->getClosestObject( pos, AMBULANCE_HAZARD_REACH, FROM_CENTER_2D, filters );
-	if( hazard && isOurSideOfMap( hazard->getPosition() ) && deepestReach( guns, hazard->getPosition()->x, hazard->getPosition()->y, FALSE ) < 0.0f )
+	// the nearest hazard, if it is on our side and clear of every known gun's reach by the healer's margin,
+	// and not on ground it gave up on
+	Object *hazard = cleaner->closestHazard( pos, AMBULANCE_HAZARD_REACH );
+	// and no farther from home than where it waits behind the army, or at home with nobody out.  Three of
+	// four lost in one Hard match (ambD) died on or after a cleanup 1,400 out, 2,100 to 2,800 from home
+	Real hazardLimit = 0.0f;
+	if( out > 0 )
+		hazardLimit = (Real)sqrt( sqr( middle.x / out - m_baseCenter.x ) + sqr( middle.y / out - m_baseCenter.y ) ) - AMBULANCE_BEHIND;
+	if( hazard && isOurSideOfMap( hazard->getPosition() ) &&
+			(isAtHome( hazard->getPosition() ) ||
+				sqr( hazard->getPosition()->x - m_baseCenter.x ) + sqr( hazard->getPosition()->y - m_baseCenter.y ) <= sqr( max( hazardLimit, 0.0f ) )) &&
+			deepestReach( guns, hazard->getPosition()->x, hazard->getPosition()->y, FALSE ) < -spotMargin )
 	{
 		DEBUG_LOG(("AI AMBULANCE frame %d player %d '%s' %d goes to clean '%s' %d at (%.0f,%.0f), %.0f away\n", now, m_player->getPlayerIndex(),
 			ambulance->getTemplate()->getName().str(), duty.id, hazard->getTemplate()->getName().str(), hazard->getID(),
 			hazard->getPosition()->x, hazard->getPosition()->y,
 			(Real)sqrt( sqr( hazard->getPosition()->x - pos->x ) + sqr( hazard->getPosition()->y - pos->y ) )));
-		cleaner->setCleanupAreaParameters( hazard->getPosition(), AMBULANCE_CLEANUP_RANGE );
+		cleaner->setCleanupAreaParameters( hazard->getPosition(), AMBULANCE_CLEANUP_RANGE, FALSE );
 		duty.spot = *hazard->getPosition();
 		return;
 	}
@@ -10256,7 +11442,7 @@ void AIPlayer::steerAmbulance( Int slot, const std::vector<AIKnownGun> &guns )
 		{
 			middle.x += dx * AMBULANCE_BEHIND / length;
 			middle.y += dy * AMBULANCE_BEHIND / length;
-			spot = rearOf( &middle, guns );
+			spot = rearOf( &middle, guns, spotMargin );
 		}
 	}
 	else if( isAtHome( pos ) )
@@ -10265,6 +11451,10 @@ void AIPlayer::steerAmbulance( Int slot, const std::vector<AIKnownGun> &guns )
 	const Bool moved = sqr( spot.x - duty.spot.x ) + sqr( spot.y - duty.spot.y ) > sqr( AMBULANCE_REORDER_DISTANCE );
 	const Bool away = sqr( spot.x - pos->x ) + sqr( spot.y - pos->y ) > sqr( AMBULANCE_REORDER_DISTANCE );
 	if( !moved && !(ai->isIdle() && away) )
+		return;
+	// not forward onto ground the margin does not clear: rearOf falls back to the base center when nothing
+	// is clear, and on a small map that sent it back and forth between there and its pull-back spot
+	if( !AIAmbulance_waitsAt( hereClear, -deepestReach( guns, spot.x, spot.y, FALSE ), margin ) )
 		return;
 	if( moved )
 		DEBUG_LOG(("AI AMBULANCE frame %d player %d '%s' %d waits at (%.0f,%.0f), %d units out\n", now, m_player->getPlayerIndex(),
@@ -10344,6 +11534,9 @@ static Bool retreatCanOrderHome( const Object *obj )
 static const Real RANK_HEALTH_BASE = 0.25f;
 static const Real RANK_HEALTH_STEP = 0.1f;
 static const Real RANK_RATIO_STEP = 0.25f;
+/** A losing fight pulls only one that has been hurt in it.  Colonel Burton was walked out of one at full
+	* health, and a whole one has nothing to mend: canGetRepairedAt and canGetHealedAt refuse it. */
+static const Real RANK_UNHURT = 0.9f;
 /** How near a unit's own goal has to be to where pullOutRanked would send it to count as on its way. */
 static const Real RANK_GOAL_SLACK = 50.0f;
 
@@ -10353,7 +11546,7 @@ Bool AIRetreat_rankPullsOut( Int rank, Real healthFraction, Bool inFight, Real r
 		return FALSE;
 	if( healthFraction < RANK_HEALTH_BASE + RANK_HEALTH_STEP * rank )
 		return TRUE;
-	return inFight && ratio < min( retreatRatio * (1.0f + RANK_RATIO_STEP * rank), 1.0f );
+	return inFight && healthFraction < RANK_UNHURT && ratio < min( retreatRatio * (1.0f + RANK_RATIO_STEP * rank), 1.0f );
 }
 
 /** The nearest of our own buildings that mends this unit - a repair pad for a vehicle, a heal pad for
@@ -10381,10 +11574,16 @@ static Object *findMender( Player *player, Object *unit )
 
 /** The ranked members of a team that AIRetreat_rankPullsOut says go, to the nearest building that mends
 	* them, or home when there is none.  Marked as a walk home, so neither this nor the team's retreat
-	* turns them round for RETREAT_HOME_WALK_FRAMES. */
+	* turns them round for RETREAT_HOME_WALK_FRAMES.
+	*
+	* A pulled unit leaves its team for the default one and is kept from being recruited until it stands
+	* idle again, mended or home.  Left in its team, the team's next script order (a waypoint path, an
+	* attack move) took it off the repair pad on the way: one Tomahawk was sent to its War Factory at 4%,
+	* 2% and 2% health thirty seconds apart and never reached it.  Once idle, any team recruits it back. */
 void AIPlayer::pullOutRanked( Team *team, Bool inFight, Real ratio )
 {
 	const UnsignedInt now = TheGameLogic->getFrame();
+	std::vector<Object *> pulled;
 	for( DLINK_ITERATOR<Object> objIter = team->iterate_TeamMemberList(); !objIter.done(); objIter.advance() )
 	{
 		Object *obj = objIter.cur();
@@ -10394,6 +11593,11 @@ void AIPlayer::pullOutRanked( Team *team, Bool inFight, Real ratio )
 			continue;
 		const TacticalStep *row = findTacticalStep( obj->getID() );
 		if( row && (row->fallingBack || (row->fallbackFrame != 0 && now - row->fallbackFrame < RETREAT_HOME_WALK_FRAMES)) )
+			continue;
+		// one already out stays out until releaseMended frees it.  Out of its team it is in the default
+		// one, which doRetreats walks too, and every RETREAT_HOME_WALK_FRAMES it was sent again from
+		// wherever it stood: an Angry Mob member that its mob kept walking was pulled 8 times, every 30 s
+		if( isOutToMend( obj ) )
 			continue;
 		// one already on its way into a dock or a building is being mended, or will be.  So is one in a state
 		// of its own module's (1000 and up): a Helix sent to its airfield flies there in ChinookAIUpdate's
@@ -10427,6 +11631,35 @@ void AIPlayer::pullOutRanked( Team *team, Bool inFight, Real ratio )
 			inFight ? ratio : 0.0f, inFight ? "" : " (none)", (Int)state,
 			(Real)sqrt( sqr( to->x - obj->getPosition()->x ) + sqr( to->y - obj->getPosition()->y ) ),
 			mender ? mender->getTemplate()->getName().str() : "base", (Int)obj->getAI()->getCurrentStateID()));
+		pulled.push_back( obj );
+	}
+	// out of the member walk above, which setTeam would break
+	for( std::vector<Object *>::const_iterator p = pulled.begin(); p != pulled.end(); ++p )
+	{
+		(*p)->setTeam( m_player->getDefaultTeam() );
+		(*p)->getAI()->setIsRecruitable( FALSE );
+	}
+}
+
+/** Pulled-out ranked units and Ambulance patients that stand idle again, mended, home or let out, go back
+	* to being recruitable.  A patient still inside stays out of reach.
+	* ponytail: any ranked or infantry default-team unit not recruitable counts as one of ours; a script that
+	* marks such a unit unrecruitable would see it undone. */
+void AIPlayer::releaseMended( void )
+{
+	for( DLINK_ITERATOR<Object> m = m_player->getDefaultTeam()->iterate_TeamMemberList(); !m.done(); m.advance() )
+	{
+		Object *obj = m.cur();
+		AIUpdateInterface *ai = obj->getAI();
+		if( ai == NULL || ai->isRecruitable() || obj->isEffectivelyDead() || obj->isContained() ||
+				(obj->getVeterancyLevel() <= LEVEL_REGULAR && !obj->isKindOf( KINDOF_INFANTRY )) )
+			continue;
+		const StateID state = ai->getCurrentStateID();
+		if( state == AI_DOCK || state == AI_ENTER || state >= 1000 || ai->isMoving() )
+			continue;
+		ai->setIsRecruitable( TRUE );
+		DEBUG_LOG(("AI VETERAN frame %d player %d frees '%s' %d at %.0f%% health\n", TheGameLogic->getFrame(), m_player->getPlayerIndex(),
+			obj->getTemplate()->getName().str(), obj->getID(), obj->getBodyModule()->getHealth() / obj->getBodyModule()->getMaxHealth() * 100.0f));
 	}
 }
 
@@ -10450,6 +11683,8 @@ void AIPlayer::doRetreats( void )
 	m_retreatTimer = REAL_TO_INT_CEIL( profile->m_decisionIntervalSeconds * LOGICFRAMES_PER_SECOND );
 	if( m_retreatTimer < 1 )
 		m_retreatTimer = 1;
+
+	releaseMended();
 
 	if( !m_baseCenterSet )
 		return;			// nowhere to fall back to
@@ -10561,6 +11796,10 @@ void AIPlayer::doRetreats( void )
 				// one already on its way down a tunnel is on its way home; ordering it again would turn it
 				// round at the mouth
 				if( obj->getAI()->hasTunnelTrip() )
+					continue;
+				// nor one walking to an Ambulance that called it in: sent home instead, it left the Ambulance
+				// hurt (the other 2 of the 4 walk-offs in six Hard USA mirrors)
+				if( isWalkingToAmbulance( obj ) || isOutToMend( obj ) )
 					continue;
 				// one that is kiting the fight is winning its own share of it however the totals read: a
 				// Rocket Buggy turned for home in front of four tanks it outran and outranged died turning
@@ -10800,8 +12039,10 @@ Bool AIPlayer::doFallback( Team *team )
 		// its safe spot when the hold ran out kept that walk, unmarked, and the same pass pulled it out
 		// again for another full hold.  One with no gun has no fight to go back to: a Dozer pulled out of
 		// a fight was walked back into it.
+		// One walking to an Ambulance that called it in carries on too: walked home instead, it had left
+		// the Ambulance's enter order still hurt.
 		const Bool givesUp = what == AIFALLBACK_GO_HOME && !fightOver;
-		if( (!givesUp && obj->getAI()->isMoving()) || (what == AIFALLBACK_RESUME && aiCombatPower( obj ) <= 0.0f) )
+		if( isWalkingToAmbulance( obj ) || (!givesUp && obj->getAI()->isMoving()) || (what == AIFALLBACK_RESUME && aiCombatPower( obj ) <= 0.0f) )
 			restoreMood( obj, step );
 		else if( what == AIFALLBACK_RESUME )
 		{
@@ -10877,6 +12118,83 @@ static Real groundAttackRange( const Object *obj )
 			best = range;
 	}
 	return best;
+}
+
+/** A ground vehicle whose gun outreaches the line: the Tomahawk, the Scud Launcher, the Nuke and Inferno
+	* Cannons, the Rocket Buggy.  Not one that carries anybody: the Battle Bus's dummy gun reaches 320. */
+static const Real SIEGE_RANGE = 300.0f;
+static Bool isSiegeGun( const Object *obj )
+{
+	return obj->isKindOf( KINDOF_VEHICLE ) && !obj->isKindOf( KINDOF_AIRCRAFT ) && obj->getContain() == NULL &&
+		groundAttackRange( obj ) >= SIEGE_RANGE;
+}
+
+/** How far a trailing siege gun may stray from its place before it is sent back to it. */
+static const Real SIEGE_SLACK = 60.0f;
+
+/** A wave walks its road at the pace of the slowest and nobody keeps an order in it, so a Tomahawk or
+	* a Nuke Cannon can be first round the corner, where it dies to the first tank it meets before its
+	* long gun is any use.  Each wave tick a siege gun out with a group and not firing is sent to a spot
+	* m_siegeTrail behind the group's front unit, the line unit farthest from home, on the side towards
+	* home.  It attack-moves there, so whatever comes into its reach on the way is shot.  When the group
+	* has no line unit left it is left alone.  The front is not the unit nearest the enemy's start: on
+	* Twilight Flame that start was a guess, and a Paladin driving at the real enemy drove away from it.
+	* ponytail: home is a straight line from the front, not the road; take the path's previous waypoint
+	* if guns end up behind a cliff. */
+void AIPlayer::keepSiegeBehind( void )
+{
+	const Real trail = getSkillProfile()->m_siegeTrail;
+	if( !isSkirmishAI() || !m_baseCenterSet || trail <= 0.0f )
+		return;
+	const Coord3D &base = m_baseCenter;
+	std::vector<Object *> owned;
+	m_player->iterateObjects( collectObject, &owned );
+	Int sent = 0;
+	Int ahead = 0;
+	for( std::vector<Object *>::const_iterator o = owned.begin(); o != owned.end(); ++o )
+	{
+		Object *gun = *o;
+		if( gun->isEffectivelyDead() || gun->isContained() || gun->getAI() == NULL || gun->getGroup() == NULL ||
+				!isSiegeGun( gun ) || gun->getAI()->isAttacking() || isAtHome( gun->getPosition() ) || isFallingBack( gun->getID() ) )
+			continue;
+		const Object *front = NULL;
+		Real frontSqr = 0.0f;
+		const VecObjectID &ids = gun->getGroup()->getAllIDs();
+		for( VecObjectID::const_iterator it = ids.begin(); it != ids.end(); ++it )
+		{
+			const Object *mate = TheGameLogic->findObjectByID( *it );
+			if( mate == NULL || mate == gun || mate->isEffectivelyDead() || mate->isContained() || mate->isKindOf( KINDOF_AIRCRAFT ) ||
+					isSiegeGun( mate ) || aiCombatPower( mate ) <= 0.0f )
+				continue;
+			const Real d = sqr( mate->getPosition()->x - base.x ) + sqr( mate->getPosition()->y - base.y );
+			if( front == NULL || d > frontSqr )
+			{
+				front = mate;
+				frontSqr = d;
+			}
+		}
+		if( front == NULL )
+			continue;
+		Coord2D home;
+		home.x = base.x - front->getPosition()->x;
+		home.y = base.y - front->getPosition()->y;
+		if( home.x == 0.0f && home.y == 0.0f )
+			continue;
+		home.normalize();
+		Coord3D spot = *front->getPosition();
+		spot.x += home.x * trail;
+		spot.y += home.y * trail;
+		spot.z = TheTerrainLogic->getGroundHeight( spot.x, spot.y );
+		if( sqr( gun->getPosition()->x - spot.x ) + sqr( gun->getPosition()->y - spot.y ) <= sqr( SIEGE_SLACK ) )
+			continue;
+		gun->getAI()->aiAttackMoveToPosition( &spot, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+		++sent;
+		if( sqr( gun->getPosition()->x - base.x ) + sqr( gun->getPosition()->y - base.y ) > frontSqr )
+			++ahead;
+	}
+	if( sent > 0 )
+		DEBUG_LOG(("AI SIEGE frame %d player %d puts %d siege guns %.0f behind their front, %d of them were ahead of it\n",
+			TheGameLogic->getFrame(), m_player->getPlayerIndex(), sent, trail, ahead));
 }
 
 /** Where a gun fires from, for the high ground's reach: an aircraft's range is flat
@@ -11262,7 +12580,12 @@ void AIPlayer::tacticsFor( Object *obj )
 	const TeamTemplateInfo *info = team->getPrototype()->getTemplateInfo();
 	if( info && (info->m_isBaseDefense || info->m_isPerimeterDefense) )
 		return;
-	if( obj->getID() == m_capturerID || obj->getID() == m_hijackerID || isDutyHelix( obj ) || isDutyAmbulance( obj ) )
+	// nor a patient on its way into an Ambulance: past leaveTacticsAlone's ten seconds the pull-out and the
+	// rejoin walked 2 of 4 such patients off in six Hard USA mirrors on Twilight Flame (2026-10-11)
+	// nor one pulled out to be mended: waiting its turn at an Arms Dealer's dock it stood still, and the
+	// rejoin walked it back to the fight still hurt
+	if( obj->getID() == m_capturerID || obj->getID() == m_hijackerID || isDutyHelix( obj ) || isDutyAmbulance( obj ) ||
+			isWalkingToAmbulance( obj ) || isOutToMend( obj ) )
 		return;
 	for( Int i = 0; i < MAX_AI_SCOUTS; ++i )
 	{
@@ -12195,7 +13518,10 @@ void AIPlayer::doCapture( void )
 	if( capturer )
 		from = *capturer->getPosition();
 
-	Object *target = nearestTechBuilding( &from, FALSE );
+	// The next derrick is the one nearest home, not nearest the capturer: from where it stood each
+	// capture led to the next one further out, so the round walked into the middle of the map and the
+	// derricks behind the base waited on it for minutes, or were never taken.
+	Object *target = nearestTechBuilding( &m_baseCenter, FALSE );
 
 	if( capturer == NULL )
 	{
@@ -12937,7 +14263,7 @@ void AIPlayer::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 19;		// 2: scout  3: rung and role  4: scouting stamps  5: the capturer  6: parked waves  7: superweapon aims  8: the hijacker  9: tactical steps  10: the ferry and dropped riders  11: the outward placement ring  12: the pressure level  13: falling back  14: gunship Chinooks and the boarding wait  15: transport Chinooks and the lent one  16: healer and raider Helixes  17: the seen-enemy ledger  18: the fist  19: the Ambulances
+	XferVersion currentVersion = 24;		// 2: scout  3: rung and role  4: scouting stamps  5: the capturer  6: parked waves  7: superweapon aims  8: the hijacker  9: tactical steps  10: the ferry and dropped riders  11: the outward placement ring  12: the pressure level  13: falling back  14: gunship Chinooks and the boarding wait  15: transport Chinooks and the lent one  16: healer and raider Helixes  17: the seen-enemy ledger  18: the fist  19: the Ambulances  20: the last Ambulance lost  21: the purchase queue's reservation  22: the measured income  23: the Ambulances bought  24: the starting fortune
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -13317,6 +14643,31 @@ void AIPlayer::xfer( Xfer *xfer )
 			xfer->xferCoord3D( &m_ambulance[ slot ].spot );
 		}
 	}
+	if( version >= 20 )
+		xfer->xferUnsignedInt( &m_ambulanceLost );
+	if( version >= 21 )
+	{
+		xfer->xferInt( &m_purchases.m_key );
+		xfer->xferInt( &m_purchases.m_cost );
+		xfer->xferInt( &m_purchases.m_score );
+		xfer->xferUnsignedInt( &m_purchases.m_since );
+		xfer->xferUnsignedInt( &m_purchases.m_seen );
+		xfer->xferInt( &m_purchases.m_held );
+		xfer->xferInt( &m_purchases.m_lapsedKey );
+		xfer->xferUnsignedInt( &m_purchases.m_lapsedUntil );
+		xfer->xferAsciiString( &m_purchaseSavingFor );
+	}
+	if( version >= 22 )
+	{
+		xfer->xferInt( &m_incomeMark );
+		xfer->xferUnsignedInt( &m_incomeMarkFrame );
+		xfer->xferInt( &m_bankMark );
+		xfer->xferReal( &m_incomePerSecond );
+	}
+	if( version >= 23 )
+		xfer->xferInt( &m_ambulancesBought );
+	if( version >= 24 )
+		xfer->xferInt( &m_startFortune );
 
 	// the ladder rung and the role, which are rolled once and must come back the same way
 	if( version >= 3 )

@@ -913,12 +913,12 @@ WindowLayout *Shell::getPopupReplayLayout( void )
 }  // end getSaveLoadMenuLayout
 
 // ------------------------------------------------------------------------------------------------
-/** Classic's options screen leaves out the settings the Classic interface overrules, and flows
-	* what is left so no page has a gap (Tools/optionsmenu_layout.py writes both files). */
+/** The options screen leaves out the settings the interface overrules, and flows what is left so
+	* no page has a gap (Tools/optionsmenu_layout.py writes the file). */
 // ------------------------------------------------------------------------------------------------
 const char *Shell::optionsLayoutFile( void )
 {
-	return TheGlobalData->isClassicUI() ? "Menus/OptionsMenuClassic.wnd" : "Menus/OptionsMenu.wnd";
+	return "Menus/OptionsMenuClassic.wnd";
 }
 
 // ------------------------------------------------------------------------------------------------

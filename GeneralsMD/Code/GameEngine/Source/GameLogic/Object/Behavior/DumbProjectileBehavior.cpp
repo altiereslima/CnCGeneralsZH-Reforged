@@ -71,7 +71,8 @@ DumbProjectileBehaviorModuleData::DumbProjectileBehaviorModuleData() :
 	m_firstHeight(0.0f),
 	m_secondHeight(0.0f),
 	m_firstPercentIndent(0.0f),
-	m_secondPercentIndent(0.0f),	
+	m_secondPercentIndent(0.0f),
+	m_straightWhenClear(FALSE),
 	m_garrisonHitKillCount(0),
 	m_garrisonHitKillFX(NULL),
 	m_flightPathAdjustDistPerFrame(0.0f)
@@ -94,6 +95,7 @@ void DumbProjectileBehaviorModuleData::buildFieldParse(MultiIniFieldParse& p)
 		{ "SecondHeight",					INI::parseReal,						NULL, offsetof( DumbProjectileBehaviorModuleData, m_secondHeight ) },
 		{ "FirstPercentIndent",		INI::parsePercentToReal,	NULL, offsetof( DumbProjectileBehaviorModuleData, m_firstPercentIndent ) },
 		{ "SecondPercentIndent",	INI::parsePercentToReal,	NULL, offsetof( DumbProjectileBehaviorModuleData, m_secondPercentIndent ) },
+		{ "StraightWhenClear",		INI::parseBool,						NULL, offsetof( DumbProjectileBehaviorModuleData, m_straightWhenClear ) },
 
 		{ "GarrisonHitKillRequiredKindOf", KindOfMaskType::parseFromINI, NULL, offsetof( DumbProjectileBehaviorModuleData, m_garrisonHitKillKindof ) },
 		{ "GarrisonHitKillForbiddenKindOf", KindOfMaskType::parseFromINI, NULL, offsetof( DumbProjectileBehaviorModuleData, m_garrisonHitKillKindofNot ) },
@@ -123,6 +125,7 @@ DumbProjectileBehavior::DumbProjectileBehavior( Thing *thing, const ModuleData* 
 	m_flightPath.clear();
 	m_flightPathSegments = 0;
 	m_flightPathSpeed = 0;
+	m_launchSlope = 0;
 	m_flightPathStart.zero();
 	m_flightPathEnd.zero();
 	m_currentFlightPathStep = 0;
@@ -394,13 +397,19 @@ void DumbProjectileBehavior::projectileFireAtObjectOrPosition( const Object *vic
  	PhysicsBehavior* physics = projectile->getPhysics();
  	if ( d->m_tumbleRandomly && physics)
 	{
-		physics->setPitchRate( GameLogicRandomValueReal( -1.0f/PI, 1.0f/PI ) );
-		physics->setYawRate( GameLogicRandomValueReal( -1.0f/PI, 1.0f/PI ) );
-		physics->setRollRate( GameLogicRandomValueReal( -1.0f/PI, 1.0f/PI ) );
+		const Real maxTumbleRate = ConvertRetailPerFrameRate( 1.0f/PI );
+		physics->setPitchRate( GameLogicRandomValueReal( -maxTumbleRate, maxTumbleRate ) );
+		physics->setYawRate( GameLogicRandomValueReal( -maxTumbleRate, maxTumbleRate ) );
+		physics->setRollRate( GameLogicRandomValueReal( -maxTumbleRate, maxTumbleRate ) );
 	}
 
 	m_flightPathStart = *getObject()->getPosition();
 	m_flightPathEnd = victimPosToUse;
+
+	// the shell sits on the barrel here, pointing where the barrel points
+	Vector3 barrel = getObject()->getTransformMatrix()->Get_X_Vector();
+	Real barrelRun = sqrtf(sqr(barrel.X) + sqr(barrel.Y));
+	m_launchSlope = (barrel.Z > 0.0f && barrelRun > 0.0f) ? barrel.Z / barrelRun : 0.0f;
 	if (!calcFlightPath(true))
 	{
 		//Can only fail if wildly incorrect points
@@ -451,16 +460,63 @@ Bool DumbProjectileBehavior::calcFlightPath(Bool recalcNumSegments)
 	controlPoints[1].z = highestInterveningTerrain + d->m_firstHeight;
 	controlPoints[2].z = highestInterveningTerrain + d->m_secondHeight;
 
+	if( d->m_straightWhenClear && ThePartitionManager->isClearLineOfSightTerrain( NULL, controlPoints[0], NULL, controlPoints[3] ) )
+	{
+		// A cannon shell flies the line to its victim. The arc above was ten over the highest ground on the
+		// way, so on flat ground a Crusader's shell climbed twelve degrees off the barrel and came down on
+		// the target at twenty five; with the glowing trail on it, every shot read as a lob. Only a hill
+		// in the way still lifts it.
+		controlPoints[1].z = controlPoints[0].z + targetVector.Z * targetDistance * d->m_firstPercentIndent;
+		controlPoints[2].z = controlPoints[0].z + targetVector.Z * targetDistance * d->m_secondPercentIndent;
+	}
+	else if( m_launchSlope > 0.0f && d->m_orientToFlightPath && !d->m_tumbleRandomly )
+	{
+		// A lobbed shell leaves along its raised barrel. The first control point sets the curve's first
+		// direction, and over the highest ground it pointed off the barrel: a Nuke Cannon's shell left
+		// six and a half degrees under its 39 degree barrel and jinked at the muzzle.
+		controlPoints[1].z = controlPoints[0].z + m_launchSlope * sqrtf( sqr(firstPointAlongLine.X) + sqr(firstPointAlongLine.Y) );
+	}
+
 	// With four control points, we have a curve.  We will decide how many frames we want to take to get to the target,
 	// and fill our vector with those curve points.
+	//
+	// The curve is sampled where a retail (30 Hz) frame put the shell, and the frames in between fly the
+	// straight line to the next sample, so a path looks and lasts as it did. Sampled at every frame, a
+	// fast shot met points of the curve retail never visited: mods give an instant tracer FirstHeight 300
+	// and WeaponSpeed 9999, which retail sampled at its two ends only, and at 60 Hz the third of four
+	// samples flew it 200 into the air.
 	BezierSegment flightCurve( controlPoints );
+	Int retailSegments;
 	if (recalcNumSegments)
 	{
 		Real flightDistance = flightCurve.getApproximateLength();
-		m_flightPathSegments = floatToIntAsMsvc( (float)ceil( flightDistance / m_flightPathSpeed ) );
+		retailSegments = floatToIntAsMsvc( (float)ceil( flightDistance / (m_flightPathSpeed * LOGICFRAMES_PER_RETAIL_FRAME) ) );
+		// One sample is no path: the iterator hands back its zeroed point, not the muzzle, and EA's
+		// point-blank shell flew to the map's corner and went off there. Two are the muzzle and the target.
+		if (retailSegments == 1)
+			retailSegments = 2;
 	}
-	flightCurve.getSegmentPoints( m_flightPathSegments, &m_flightPath );
-	DEBUG_ASSERTCRASH(m_flightPathSegments == m_flightPath.size(), ("m_flightPathSegments mismatch"));
+	else
+	{
+		retailSegments = m_flightPathSegments > 1 ? (m_flightPathSegments - 1) / LOGICFRAMES_PER_RETAIL_FRAME + 1 : m_flightPathSegments;
+	}
+	VecCoord3D retailPath;
+	flightCurve.getSegmentPoints( retailSegments, &retailPath );
+	m_flightPathSegments = retailSegments > 1 ? (retailSegments - 1) * LOGICFRAMES_PER_RETAIL_FRAME + 1 : retailSegments;
+	m_flightPath.resize( m_flightPathSegments );
+	for (Int i = 0; i < m_flightPathSegments; ++i)
+	{
+		Int sample = i / LOGICFRAMES_PER_RETAIL_FRAME;
+		Int between = i % LOGICFRAMES_PER_RETAIL_FRAME;
+		m_flightPath[i] = retailPath[sample];
+		if (between != 0)
+		{
+			Real t = (Real)between / LOGICFRAMES_PER_RETAIL_FRAME;
+			m_flightPath[i].x += t * (retailPath[sample + 1].x - retailPath[sample].x);
+			m_flightPath[i].y += t * (retailPath[sample + 1].y - retailPath[sample].y);
+			m_flightPath[i].z += t * (retailPath[sample + 1].z - retailPath[sample].z);
+		}
+	}
 
 #if defined(_DEBUG) || defined(_INTERNAL)
 	if( TheGlobalData->m_debugProjectilePath )
@@ -748,7 +804,8 @@ void DumbProjectileBehavior::xfer( Xfer *xfer )
 	// version 3 adds the launcher's weapon bonus flags, lost on load so a shell in flight detonated
 	// without veterancy or horde bonus, and the detonated flag, so a DetonateCallsKill shell cannot
 	// go off a second time
-	XferVersion currentVersion = 3;
+	// version 4 adds the barrel's slope at launch, which a lobbed shell's path starts along
+	XferVersion currentVersion = 4;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -807,6 +864,9 @@ void DumbProjectileBehavior::xfer( Xfer *xfer )
 		xfer->xferUnsignedInt( &m_extraBonusFlags );
 		xfer->xferBool( &m_hasDetonated );
 	}
+
+	if( version >= 4 )
+		xfer->xferReal( &m_launchSlope );
 
 	// the path itself is a vector of points that is not saved; rebuild it from the start, end and
 	// segment count that are, so the step we just read means something

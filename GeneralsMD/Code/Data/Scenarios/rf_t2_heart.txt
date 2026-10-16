@@ -1,0 +1,40 @@
+# Trailer 2, the morning, timeline.t2.js rows 01 and 02: Run/Scenarios/sp_village.txt (the social
+# preview's fight, which has no master under Code/Data) on Heartland Shield. America and China
+# attack-move on the stream village at 950,1950 from the north and the south, an A-10 strike, a carpet
+# bomb and the Spectre called early so they arrive while the fight is in the streets.
+#
+# On 2026-10-11 every block was moved onto ground a unit can stand on (t2check.py, legal.py --audit):
+# the Crusaders and Paladins had stood partly on the stream and its cliff at 1150,1380 and 1250,1300,
+# the BattleMasters and Dragons in the stream at 760,2620 and 700,2540, the Infernos on a pub. The
+# Dragons are gone; there is no clear ground for them beside the other Chinese blocks, and the
+# Gattlings are one more instead.
+#
+#   generals.exe -win -xres 2560 -yres 1440 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Heartland Shield\Heartland Shield.map" -autoskirmish 2 -takeover
+#     -observer -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario rf_t2_heart
+#     -cinema rf_t2_heart -video <from> <to> rt_t2_heart -recordfps 60
+
+10    spawn      0  AmericaCommandCenter            1   start0:260:0
+10    spawn      1  ChinaCommandCenter              1   start1:-260:0
+
+30    spawn      0  AmericaTankCrusader             12  1170 1320  36
+30    spawn      0  AmericaTankPaladin              6   1270 1220  40
+30    spawn      0  AmericaVehicleTomahawk          4   1050 1280  40
+30    spawn      0  AmericaInfantryRanger           16  1115 1430  18
+30    spawn      0  AmericaVehicleComanche          6   1250 1200  60
+30    spawn      0  AmericaJetRaptor                4   1300 1100  70
+
+30    spawn      1  ChinaTankOverlord               5   850 2560   50
+30    spawn      1  ChinaTankBattleMaster           10  820 2660   40
+30    spawn      1  ChinaTankGattling               6   900 2480   36
+30    spawn      1  ChinaVehicleInfernoCannon       4   820 2790   40
+30    spawn      1  ChinaInfantryRedguard           16  950 2440   18
+30    spawn      1  ChinaVehicleHelix               3   700 2720   60
+30    spawn      1  ChinaJetMIG                     4   650 2800   70
+
+60    attackmove 0  *  950 1950
+60    attackmove 1  *  950 1950
+
+300   power      0  AmericaCommandCenter  980 2150  SuperweaponA10ThunderboltMissileStrike
+360   power      1  ChinaCommandCenter    1000 1750  Early_SuperweaponChinaCarpetBomb
+420   power      0  AmericaCommandCenter  950 1950  SuperweaponSpectreGunship

@@ -259,10 +259,14 @@ VideoStreamInterface*	BinkVideoPlayer::open( AsciiString movieTitle )
 	if (pVideo) {
 		DEBUG_LOG(("BinkVideoPlayer::createStream() - About to open bink file\n"));
 		
-		if (TheGlobalData->m_modDir.isNotEmpty())
+		// the last -mod folder with the movie wins, like every other file (FileSystem::modLooseFile)
+		for (size_t i = TheGlobalData->m_mods.size(); i-- > 0; )
 		{
+			const AsciiString &modDir = TheGlobalData->m_mods[i];
+			if (!modDir.endsWith("\\") && !modDir.endsWith("/"))
+				continue;
 			char filePath[ _MAX_PATH ];
-			snprintf( filePath, ARRAY_SIZE(filePath), "%s%s\\%s.%s", TheGlobalData->m_modDir.str(), VIDEO_PATH, pVideo->m_filename.str(), VIDEO_EXT );
+			snprintf( filePath, ARRAY_SIZE(filePath), "%s%s\\%s.%s", modDir.str(), VIDEO_PATH, pVideo->m_filename.str(), VIDEO_EXT );
 			HBINK handle = BinkOpen(filePath , BINKPRELOADALL );
 			DEBUG_ASSERTLOG(!handle, ("opened bink file %s\n", filePath));
 			if (handle)

@@ -52,6 +52,10 @@ void INI::parseParticleSystemDefinition( INI* ini )
 		sysTemplate = TheParticleSystemManager->newTemplate( name );
 	}
 
+	// a map's rules file edits the template every system of that name is made from
+	if (ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES)
+		TheParticleSystemManager->rememberTemplateBeforeMapINI( sysTemplate );
+
 	// parse the ini definition
 	ini->initFromINI( sysTemplate, sysTemplate->getFieldParse() );
 }

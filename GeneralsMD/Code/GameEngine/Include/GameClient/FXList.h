@@ -141,6 +141,12 @@ public:
 		m_nuggets.push_back(fxn);
 	}
 
+	/// trade contents; the nuggets are owned, so a list cannot be copied
+	void swap(FXList &that)
+	{
+		m_nuggets.swap(that.m_nuggets);
+	}
+
 	/// inline convenience method to avoid having to check for null.
 	inline static void doFXPos(const FXList* fx, const Coord3D *primary, const Matrix3D* primaryMtx = NULL, const Real primarySpeed = 0.0f, const Coord3D *secondary = NULL, const Real overrideRadius = 0.0f)
 	{
@@ -198,7 +204,7 @@ public:
 	~FXListStore();
 
 	void init() { }
-	void reset() { }
+	void reset();
 	void update() { }
 
 	/**
@@ -215,6 +221,9 @@ private:
 	typedef std::hash_map< NameKeyType, FXList, rts::hash<NameKeyType>, rts::equal_to<NameKeyType> > FXListMap;
 
 	FXListMap m_fxmap;
+
+	FXListMap m_beforeMapOverrides;					///< a map.ini's edited lists, as they were before it
+	std::vector<NameKeyType> m_addedByMap;	///< names a map.ini brought
 
 };
 

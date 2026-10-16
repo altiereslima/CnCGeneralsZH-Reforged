@@ -1,0 +1,7 @@
+# China mine field for the MineFX flare check (soft particles, D3D11 against -d3d9), Alpine Assault.
+# Seat 0 owns the mines, so the local player sees its own stealthed mines and their blink.
+30    spawn      0  ChinaStandardMine   1  700 900
+30    spawn      0  ChinaEMPMine        1  820 900
+30    spawn      0  ChinaStandardMine   1  760 860
+30    spawn      0  ChinaEMPMine        1  760 940
+30    spawn      0  ChinaInfantryRedguard 1 760 1010

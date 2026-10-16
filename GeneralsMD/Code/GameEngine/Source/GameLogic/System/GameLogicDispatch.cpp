@@ -760,6 +760,19 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 		}
 
 		//---------------------------------------------------------------------------------------------
+		// A vote kick (fork): (Int player index, Bool yes) from "/kick", "/yes" or "/no" in chat.  The
+		// arguments came over the network, so their shape is checked; GameLogic::processKickVote
+		// decides the rest from logic state alone.
+		case GameMessage::MSG_VOTE_KICK:
+		{
+			if( msg->getArgumentCount() < 2 || msg->getArgumentDataType( 0 ) != ARGUMENTDATATYPE_INTEGER
+					|| msg->getArgumentDataType( 1 ) != ARGUMENTDATATYPE_BOOLEAN )
+				break;
+			processKickVote( thisPlayer, msg->getArgument( 0 )->integer, msg->getArgument( 1 )->boolean );
+			break;
+		}
+
+		//---------------------------------------------------------------------------------------------
 		// The stance key (fork): every selected unit of the sender's takes the stance.  The number came
 		// over the network, so only 0 and 1 mean anything
 		case GameMessage::MSG_SET_STANCE:
@@ -1203,6 +1216,10 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 				if (!obj || obj->getControllingPlayer() != thisPlayer)
 					continue;
 				if (obj->isKindOf( KINDOF_IMMOBILE ) || obj->getAIUpdateInterface() == NULL)
+					continue;
+				// a rider cannot walk to a station; groupMoveToPosition and groupAttackMoveToPosition
+				// leave held members out too, while a garrison may still fire at or guard its own
+				if (obj->isDisabledByType( DISABLED_HELD ) && !fireAlong && !guardAlong)
 					continue;
 				movers.push_back( obj );
 			}
@@ -1902,6 +1919,37 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 
 		}  // end GameMessage::MSG_CANCEL_UNIT_CREATE
 
+		//-------------------------------------------------------------------------------------------------
+		// Production repeat (fork): (Int template ID, objectID producer, Bool on).  The arguments came
+		// over the network, so their shape is checked, the producer must be the sender's, and a unit
+		// goes on repeat only where the factory could build it.  Turning one off is always allowed.
+		case GameMessage::MSG_SET_REPEAT_UNIT:
+		{
+			if( msg->getArgumentCount() < 3 || msg->getArgumentDataType( 0 ) != ARGUMENTDATATYPE_INTEGER
+					|| msg->getArgumentDataType( 1 ) != ARGUMENTDATATYPE_OBJECTID
+					|| msg->getArgumentDataType( 2 ) != ARGUMENTDATATYPE_BOOLEAN )
+				break;
+
+			const ThingTemplate *unit = TheThingFactory->findByTemplateID( msg->getArgument( 0 )->integer );
+			Object *producer = TheGameLogic->findObjectByID( msg->getArgument( 1 )->objectID );
+			const Bool on = msg->getArgument( 2 )->boolean;
+			if( unit == NULL || producer == NULL || producer->getControllingPlayer() != thisPlayer )
+				break;
+
+			ProductionUpdateInterface *pu = producer->getProductionUpdateInterface();
+			if( pu == NULL )
+				break;
+			if( on && !TheBuildAssistant->isPossibleToMakeUnit( producer, unit ) )
+				break;
+
+			pu->setRepeatUnit( unit, on );
+			DEBUG_LOG(( "REPEAT: frame %d player %d %s %s on %s (%d)\n", TheGameLogic->getFrame(), msg->getPlayerIndex(),
+									on ? "repeats" : "stops repeating", unit->getName().str(),
+									producer->getTemplate()->getName().str(), producer->getID() ));
+			break;
+
+		}  // end GameMessage::MSG_SET_REPEAT_UNIT
+
 		//---------------------------------------------------------------------------------------------
 		case GameMessage::MSG_DOZER_CONSTRUCT:
 		case GameMessage::MSG_DOZER_CONSTRUCT_LINE:
@@ -2482,39 +2530,7 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, AIGroup *orderedGroup 
 		// --------------------------------------------------------------------------------------------
 		case GameMessage::MSG_SELF_DESTRUCT:
 		{
-			if (msg->getArgument(0)->boolean)
-			{
-				// transfer control to any living ally
-				// i is used after the loop; VC6 for-scope let it escape.
-				Int i;
-				for (i =0; i<ThePlayerList->getPlayerCount(); ++i)
-				{
-					if (i != msg->getPlayerIndex())
-					{
-						Player *otherPlayer = ThePlayerList->getNthPlayer(i);
-						if (thisPlayer->getRelationship(otherPlayer->getDefaultTeam()) == ALLIES &&
-							otherPlayer->getRelationship(thisPlayer->getDefaultTeam()) == ALLIES)
-						{
-							if (TheVictoryConditions->hasSinglePlayerBeenDefeated(otherPlayer))
-								continue;
-
-							// a living ally!  hooray!
-							otherPlayer->transferAssetsFromThat(thisPlayer);
-							thisPlayer->killPlayer(); // just to be safe (and to kill beacons etc that don't transfer)
-							break;
-						}
-					}
-				}
-				if (i == ThePlayerList->getPlayerCount())
-				{
-					// didn't find any allies.  die, loner!
-					thisPlayer->killPlayer();
-				}
-			}
-			else
-			{
-				thisPlayer->killPlayer();
-			}
+			thisPlayer->surrender(msg->getArgument(0)->boolean);
 			// There is no reason to do any notification here, it now takes place in the victory conditions.
 			// bonehead.
 			break;

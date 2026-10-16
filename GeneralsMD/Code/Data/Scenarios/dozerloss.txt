@@ -1,0 +1,28 @@
+# Does a skirmish AI that loses every dozer build a new one and go on building?
+#
+# Seat 1 is a computer America on Twilight Flame. Six Scorpions put down beside its start kill its
+# starting dozer, and any second one already out, in the first 15 seconds, then drive home to seat
+# 0's start out of the way. The tallies count seat 1's dozers and everything it owns: none at 450
+# means the base was really left without one; one or more later, with the worth climbing, means it
+# trained a replacement at the command center and went back to building.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -aidiff hard
+#     -side 0 FactionGLA -side 1 FactionAmerica -seed 1 -maxframes 3600
+#     -scenario dozerloss -logPrefix dozerloss_
+#
+# See mobstress.txt for the line grammar.
+
+20    spawn       0  GLATankScorpion      6  start1:-200:0   30
+
+40    attack      0  GLATankScorpion      1  AmericaVehicleDozer
+160   attack      0  GLATankScorpion      1  AmericaVehicleDozer
+280   attack      0  GLATankScorpion      1  AmericaVehicleDozer
+400   move        0  GLATankScorpion      start0
+
+450   tally       1  AmericaVehicleDozer
+450   tally       1  *
+1800  tally       1  AmericaVehicleDozer
+1800  tally       1  *
+3500  tally       1  AmericaVehicleDozer
+3500  tally       1  *

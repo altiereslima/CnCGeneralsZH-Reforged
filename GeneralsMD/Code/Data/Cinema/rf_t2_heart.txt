@@ -1,0 +1,22 @@
+# Trailer 2, the morning, timeline.t2.js rows 01 and 02: Scenarios/rf_t2_heart.txt (sp_village's
+# fight) on Heartland Shield, command line there. Zoom is relative to the observer's opening view,
+# about 1.28 absolute. Pitch is kept at 4 or below on the wide view: at 2.8 relative and pitch 10 the
+# probe's top half was black past the draw distance.
+#
+# 3 s: the village wide from the south, looking north up the stream.
+# 26 s, frames 780 to 930, row 01: low from the west at street level, houses burning, the A-10 low
+#   over the street from about 870.
+# 31 s, frames 930 to 1110, row 02: from the south-east, the carpet bomb walking through the village
+#   from about 960 and the houses burning after it.
+# 37 s, frames 1110 to 1180: the village wide again, the Spectre's fire over it.
+# The graphics side's build section (2026-10-11) wants about 5 s of unbroken action under rows 01 to
+# 03, so the two street views run 5 and 6 s where they ran 4 each.
+
+3.0   cut     950 1950 1.95 0 4
+3.5   shot
+26.0  cut     950 1950 0.95 -90 12
+26.5  shot
+31.0  cut     950 1950 1.4 45 6
+31.5  shot
+37.0  cut     950 1950 1.95 0 -6
+37.5  shot

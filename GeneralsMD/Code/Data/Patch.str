@@ -3,9 +3,7 @@
 // gitignored, so edit THIS file and rebuild (or copy it across by hand).
 //
 // Patch.str is the 1.04 string overlay from PatchData.big.  The two original
-// strings are kept; everything after them is this fork's, and every command
-// added to Data/INI/CommandMapReforged.ini needs a pair here or Options > Keyboard
-// shows a blank row.
+// strings are kept; everything after them is this fork's.
 //
 // Comments are '//' - GameText.cpp parseStringFile skips exactly that.
 
@@ -15,174 +13,6 @@ END
 
 GUI:StartCustomMission
 "START GAME"
-END
-
-GUI:SelectNextIdleWorker
-"Select Next Idle Worker"
-END
-
-GUI:SelectNextIdleWorkerDescription
-"Selects the next dozer or worker that has nothing to do and centers the view on it."
-END
-
-GUI:SelectNextIdleUnit
-"Select Next Idle Unit"
-END
-
-GUI:SelectNextIdleUnitDescription
-"Selects the next combat unit that has no orders and centers the view on it."
-END
-
-GUI:CommandSlot01
-"Command Bar Slot 01"
-END
-
-GUI:CommandSlot01Description
-"Presses command bar slot 01 (column 1, top row, 'Q' in the default grid layout)."
-END
-
-GUI:CommandSlot02
-"Command Bar Slot 02"
-END
-
-GUI:CommandSlot02Description
-"Presses command bar slot 02 (column 2, top row, 'W' in the default grid layout)."
-END
-
-GUI:CommandSlot03
-"Command Bar Slot 03"
-END
-
-GUI:CommandSlot03Description
-"Presses command bar slot 03 (column 3, top row, 'E' in the default grid layout)."
-END
-
-GUI:CommandSlot04
-"Command Bar Slot 04"
-END
-
-GUI:CommandSlot04Description
-"Presses command bar slot 04 (column 4, top row, 'R' in the default grid layout)."
-END
-
-GUI:CommandSlot05
-"Command Bar Slot 05"
-END
-
-GUI:CommandSlot05Description
-"Presses command bar slot 05 (column 5, top row, 'T' in the default grid layout)."
-END
-
-GUI:CommandSlot06
-"Command Bar Slot 06"
-END
-
-GUI:CommandSlot06Description
-"Presses command bar slot 06 (column 6, top row, 'Y' in the default grid layout)."
-END
-
-GUI:CommandSlot07
-"Command Bar Slot 07"
-END
-
-GUI:CommandSlot07Description
-"Presses command bar slot 07 (column 1, middle row, 'A' in the default grid layout), where a unit's Attack sits."
-END
-
-GUI:CommandSlot08
-"Command Bar Slot 08"
-END
-
-GUI:CommandSlot08Description
-"Presses command bar slot 08 (column 2, middle row, 'S' in the default grid layout), where a unit's Stop sits."
-END
-
-GUI:CommandSlot09
-"Command Bar Slot 09"
-END
-
-GUI:CommandSlot09Description
-"Presses command bar slot 09 (column 3, middle row, 'D' in the default grid layout), where Attack Move sits."
-END
-
-GUI:CommandSlot10
-"Command Bar Slot 10"
-END
-
-GUI:CommandSlot10Description
-"Presses command bar slot 10 (column 4, middle row, 'F' in the default grid layout)."
-END
-
-GUI:CommandSlot11
-"Command Bar Slot 11"
-END
-
-GUI:CommandSlot11Description
-"Presses command bar slot 11 (column 5, middle row, 'G' in the default grid layout)."
-END
-
-GUI:CommandSlot12
-"Command Bar Slot 12"
-END
-
-GUI:CommandSlot12Description
-"Presses command bar slot 12 (column 6, middle row, 'H' in the default grid layout)."
-END
-
-GUI:CommandSlot13
-"Command Bar Slot 13"
-END
-
-GUI:CommandSlot13Description
-"Presses command bar slot 13 (column 1, bottom row, 'Z' in the default grid layout), where Eject sits, for a unit's passengers or a building's garrison."
-END
-
-GUI:CommandSlot14
-"Command Bar Slot 14"
-END
-
-GUI:CommandSlot14Description
-"Presses command bar slot 14 (column 2, bottom row, 'X' in the default grid layout), where Guard sits."
-END
-
-GUI:CommandSlot15
-"Command Bar Slot 15"
-END
-
-GUI:CommandSlot15Description
-"Presses command bar slot 15 (column 3, bottom row, 'C' in the default grid layout), where Hold Position sits."
-END
-
-GUI:CommandSlot16
-"Command Bar Slot 16"
-END
-
-GUI:CommandSlot16Description
-"Presses command bar slot 16 (column 4, bottom row, 'V' in the default grid layout)."
-END
-
-GUI:CommandSlot17
-"Command Bar Slot 17"
-END
-
-GUI:CommandSlot17Description
-"Presses command bar slot 17 (column 5, bottom row, 'B' in the default grid layout), where a building's rally point sits."
-END
-
-GUI:CommandSlot18
-"Command Bar Slot 18"
-END
-
-GUI:CommandSlot18Description
-"Presses command bar slot 18 (column 6, bottom row, 'N' in the default grid layout), where Sell sits."
-END
-
-GUI:TogglePurchaseScience
-"Generals Promotions"
-END
-
-GUI:TogglePurchaseScienceDescription
-"Opens and closes the general's promotion screen."
 END
 
 GUI:Stop
@@ -196,24 +26,20 @@ END
 // The command grid's own attack, hold position and move keys, which stand in no command set:
 // the cards they show under the pointer.
 
-GUI:OrderForceAttack
-"Force Attack"
-END
-
 GUI:OrderForceAttackDescription
 "The next click attacks whatever is under the pointer, the ground and your own side included. Click the key again to call it off."
 END
 
-GUI:OrderHoldPosition
-"Hold Position"
+CONTROLBAR:ForceAttack
+"&Force Attack"
+END
+
+CONTROLBAR:ToolTipForceAttack
+"The next click attacks whatever is under the pointer, the ground and your own side included. Click the button again to call it off."
 END
 
 GUI:OrderHoldPositionDescription
 "The selected units guard the spot they stand on and fight whatever comes near, without chasing it out of the area."
-END
-
-GUI:OrderMove
-"Move"
 END
 
 GUI:OrderMoveDescription
@@ -224,16 +50,8 @@ GUI:SelectionTypeDescription
 "Click to keep only these selected. Shift-click to take them out of the selection."
 END
 
-GUI:OrderStanceDefensive
-"Stance: Defensive"
-END
-
 GUI:OrderStanceDefensiveDescription
 "The selected units shoot what comes into range and hold the ground you put them on. Click to make them aggressive: they go after any enemy they see."
-END
-
-GUI:OrderStanceAggressive
-"Stance: Aggressive"
 END
 
 GUI:OrderStanceAggressiveDescription
@@ -246,24 +64,12 @@ GUI:SignalAttack
 "Signal: Attack"
 END
 
-GUI:SignalAttackDescription
-"Smoke in your colour and crossed swords on the ground for ten seconds, where the cursor is or on the radar spot under it. Only your allies see it."
-END
-
 GUI:SignalDefend
 "Signal: Defend"
 END
 
-GUI:SignalDefendDescription
-"Smoke in your colour and a shield on the ground for ten seconds, where the cursor is or on the radar spot under it. Only your allies see it."
-END
-
 GUI:SignalAttention
 "Signal: Look Here"
-END
-
-GUI:SignalAttentionDescription
-"Smoke in your colour and an eye on the ground for ten seconds, where the cursor is or on the radar spot under it. Only your allies see it."
 END
 
 GUI:SignalAttackPlaced
@@ -278,14 +84,6 @@ GUI:SignalAttentionPlaced
 "%s: look here!"
 END
 
-GUI:TogglePause
-"Pause"
-END
-
-GUI:TogglePauseDescription
-"Pauses and resumes the game. Single player and replays only."
-END
-
 GUI:GamePaused
 "Game paused."
 END
@@ -294,108 +92,9 @@ GUI:GameResumed
 "Game resumed."
 END
 
-GUI:SelectAllMilitary
-"Select Military Units"
-END
-
-GUI:SelectAllMilitaryDescription
-"Selects your armed units on screen. Press again to select them across the whole map."
-END
-
-GUI:SelectAllVehicles
-"Select Vehicles"
-END
-
-GUI:SelectAllVehiclesDescription
-"Selects your ground vehicles on screen, dozers and workers excluded. Press again for the whole map."
-END
-
-GUI:SelectAllBarracks
-"Select Barracks"
-END
-
-GUI:SelectAllBarracksDescription
-"Selects your infantry-producing buildings on screen. Press again to select them across the whole map."
-END
-
-GUI:SelectAllWarFactories
-"Select War Factories"
-END
-
-GUI:SelectAllWarFactoriesDescription
-"Selects your vehicle-producing buildings on screen. Press again to select them across the whole map."
-END
-
-GUI:SelectAllAirfields
-"Select Airfields"
-END
-
-GUI:SelectAllAirfieldsDescription
-"Selects your airfields and helipads on screen. Press again to select them across the whole map."
-END
-
-GUI:ShortcutSlot01
-"General's Power 1"
-END
-
-GUI:ShortcutSlot01Description
-"Presses the first button of the general's power bar in the top right corner."
-END
-
-GUI:ShortcutSlot02
-"General's Power 2"
-END
-
-GUI:ShortcutSlot02Description
-"Presses the second button of the general's power bar in the top right corner."
-END
-
-GUI:ShortcutSlot03
-"General's Power 3"
-END
-
-GUI:ShortcutSlot03Description
-"Presses the third button of the general's power bar in the top right corner."
-END
-
-GUI:ShortcutSlot04
-"General's Power 4"
-END
-
-GUI:ShortcutSlot04Description
-"Presses the fourth button of the general's power bar in the top right corner."
-END
-
-GUI:ShortcutSlot05
-"General's Power 5"
-END
-
-GUI:ShortcutSlot05Description
-"Presses the fifth button of the general's power bar in the top right corner."
-END
-
-GUI:ShortcutSlot06
-"General's Power 6"
-END
-
-GUI:ShortcutSlot06Description
-"Presses the sixth button of the general's power bar in the top right corner."
-END
-
-GUI:ShortcutSlot07
-"General's Power 7"
-END
-
-GUI:ShortcutSlot07Description
-"Presses the seventh button of the general's power bar in the top right corner."
-END
-
-GUI:ShortcutSlot08
-"General's Power 8"
-END
-
-GUI:ShortcutSlot08Description
-"Presses the eighth button of the general's power bar in the top right corner."
+// The replay strip's pause button while the replay is paused.
+GUI:ReplayResume
+"Resume"
 END
 
 // Skirmish lobby: an opponent seat with no AI behind it (Shift-Ctrl-T takes it over).
@@ -632,7 +331,7 @@ GUI:OptionsGroupLighting
 END
 
 GUI:OptionsGroupOrders
-"Orders"
+"Mouse And Orders"
 END
 
 GUI:OptionsGroupBattlefield
@@ -913,14 +612,6 @@ TOOLTIP:IsometricCamera
 "The battlefield seen from far off, so a unit is the same size at the top of the screen as at the bottom. You still turn and zoom the camera."
 END
 
-GUI:SmoothMotion
-"Smooth Motion"
-END
-
-TOOLTIP:SmoothMotion
-"Units are drawn between the game's 30 steps a second, so they move smoothly on a fast display. The picture is one step (33 ms) behind; the game itself is unchanged."
-END
-
 GUI:EdgeScrollWindowed
 "Edge Scroll In A Window"
 END
@@ -1013,26 +704,6 @@ GUI:OptionsGroupHud
 "HUD"
 END
 
-GUI:IncomeRate
-"Income Shown"
-END
-
-GUI:IncomeRate0
-"Per Second"
-END
-
-GUI:IncomeRate1
-"Per Minute"
-END
-
-GUI:IncomeRate2
-"Automatic"
-END
-
-TOOLTIP:IncomeRate
-"What the income beside your money is counted over. Automatic shows it per minute while you earn less than $10 a second, where a whole number per second hides most of the change, and per second above that."
-END
-
 GUI:EmptyBuildingPips
 "Empty Building Slots"
 END
@@ -1071,30 +742,6 @@ END
 
 TOOLTIP:HealthBars
 "Smart shows a bar over anything hurt, plus the selection and whatever is under the cursor. Selection only is what retail did."
-END
-
-GUI:HudScale
-"HUD Size"
-END
-
-GUI:HudScale0
-"100%"
-END
-
-GUI:HudScale1
-"115%"
-END
-
-GUI:HudScale2
-"130%"
-END
-
-GUI:HudScale3
-"150%"
-END
-
-TOOLTIP:HudScale
-"Draws the command bar and the rest of the bottom HUD larger than your resolution would."
 END
 
 GUI:OptionsGroupInput
@@ -1164,31 +811,13 @@ TOOLTIP:Language
 "The language of menus, orders, briefings and subtitles. Voices and videos stay as installed. Takes effect the next time the game starts."
 END
 
-// Hovering a supply pile: EA's TOOLTIP:SupplyWarehouse line with the share of the pile's starting
-// cash that is left.  The cash first, then the percentage.
-
-TOOLTIP:SupplyWarehousePercent
-"\n $%d remain (%d%%)"
-END
-
 // The line under it when the lobby's Pile Limit has the pile closed to the player looking at it.
 
 TOOLTIP:SupplyPileFull
 "\n Taken: the pile limit keeps your gatherers out"
 END
 
-// The numbers the build tooltip adds under a unit's description: its build time, then its best
-// weapon's damage and range.  ControlBarPopupDescription.cpp puts the gap between the two.
-
-TOOLTIP:BuildTimeSeconds
-"\nTime %ds"
-END
-
-TOOLTIP:WeaponStats
-"Dmg %d  Range %d"
-END
-
-// The same figures as rows of Window/Html/Tooltip.html, a label and its value each.
+// The build tooltip card's figures, a label and its value each.
 
 TOOLTIP:StatTime
 "Build time"
@@ -1246,25 +875,6 @@ TOOLTIP:StatNewWeaponFigures
 "%d damage, %d range"
 END
 
-// Beside a lone unit's portrait, short enough for a column of a third of it: damage a second,
-// and the armour's change to three kinds of damage.
-
-TOOLTIP:StatShortDamagePerSecond
-"DPS"
-END
-
-TOOLTIP:StatVsGuns
-"Gun"
-END
-
-TOOLTIP:StatVsShells
-"Shell"
-END
-
-TOOLTIP:StatVsRockets
-"Rocket"
-END
-
 // Under the figures: a unit's upgrades, or on an upgrade's card the units it changes.
 
 TOOLTIP:Upgrades
@@ -1314,12 +924,8 @@ GUI:PeaceTimeHudLabel
 "PEACE"
 END
 
-GUI:WireframeNotice
-"Reforged HUD: early preview"
-END
-
-GUI:WireframeNotice2
-"Final artwork is on the way"
+GUI:ListMore
+"+%d more"
 END
 
 GUI:LobbyTabChat
@@ -1436,89 +1042,11 @@ GUI:CantBuildTooManyDerrickDefenses
 "You already have two defenses round these oil derricks."
 END
 
-GUI:HudSkillStrip
-"Generals' promotions"
-END
-
-GUI:HudSuperweaponStrip
-"Superweapon timers"
-END
-
-// the spectator's list of every player's cash plus what everything he has standing cost
-GUI:HudNetWorth
-"Net worth"
-END
-
-// the heading of the spectator's stat drop-down, and the other numbers it can rank every player by
-GUI:HudGameStats
-"Game stats"
-END
-
-GUI:HudStatCash
-"Cash"
-END
-
-GUI:HudStatIncome
-"Income per minute"
-END
-
 GUI:HudStatArmy
 "Army value"
 END
 
-GUI:HudStatKills
-"Kills / losses"
-END
-
-GUI:HudStatRank
-"General's rank"
-END
-
-GUI:HudStatPower
-"Power"
-END
-
-// each player's most expensive units, with how many he has
-GUI:HudArmies
-"Armies"
-END
-
-// the spectator's camera drop-down, "Camera: Director"
-GUI:HudCamera
-"Camera"
-END
-
-// the camera goes to the biggest fight on the map by itself
-GUI:HudCameraDirector
-"Director"
-END
-
-// the camera is the spectator's own again
-GUI:HudCameraFree
-"Free"
-END
-
-// the camera shows what the followed player's own screen shows
-GUI:HudCameraPlayer
-"Player camera"
-END
-
-// the spectator's second drop-down, "Player: Nova", the player the camera and the fog follow
-GUI:HudFollow
-"Player"
-END
-
-// in that drop-down, following nobody
-GUI:HudFollowNobody
-"None"
-END
-
-// draw the followed player's fog of war, so the spectator sees only what he sees
-GUI:HudFog
-"Fog of war"
-END
-
-// The cheat panel the console's "trainer" command opens, Window/Html/Cheats.html.
+// The cheat panel the console's "trainer" command opens.
 GUI:CheatPanelTitle
 "Cheats"
 END
@@ -1551,6 +1079,10 @@ GUI:CheatPower
 "Unlimited power"
 END
 
+GUI:StartingMoneyUnlimited
+"Unlimited"
+END
+
 GUI:CheatNoCooldown
 "No cooldowns"
 END
@@ -1579,48 +1111,6 @@ GUI:CheatApply
 "GO"
 END
 
-// after a superweapon's name in the event feed over the radar, the moment it can fire
-GUI:HudSuperweaponReady
-"ready to fire"
-END
-
-// after a superweapon's name in the event feed, the moment it is fired
-GUI:HudSuperweaponLaunched
-"launched"
-END
-
-// the superweapon banner under the clock: %s is the superweapon's own name, "Nuclear Missile"
-GUI:HudAlertBuilt
-"%s built"
-END
-
-GUI:HudAlertReady
-"%s ready"
-END
-
-GUI:HudAlertLaunched
-"%s launched"
-END
-
-// after a general's power's name in the event feed, the moment it is used
-GUI:HudPowerUsed
-"used"
-END
-
-// after a promotion's name in the event feed, the moment it is bought
-GUI:HudPromotionBought
-"unlocked"
-END
-
-// after a superweapon's or an advanced tech building's name in the event feed
-GUI:HudStructureStarted
-"construction started"
-END
-
-GUI:HudStructureBuilt
-"built"
-END
-
 // a line of the event feed when a player's last dozer or worker is gone; %s is his name
 GUI:HudNoDozerLeft
 "%s has no dozer left"
@@ -1635,75 +1125,12 @@ GUI:BarIdleWorker
 "Worker"
 END
 
-// the network box in the top right corner: frames ready out of the input delay, the room's frame
-// rate, and the traffic in and out in kilobytes a second
-GUI:BarNetReady
-"ready"
-END
-
-GUI:BarNetRoom
-"room"
-END
-
-GUI:BarNetUnits
-"units"
-END
-
-// the scoreboard on Tab
-GUI:ScoreboardAllies
-"YOUR SIDE"
-END
-
-GUI:ScoreboardEnemies
-"ENEMIES"
-END
-
-GUI:ScoreboardPlayer
-"PLAYER"
-END
-
-GUI:ScoreboardTeam
-"TEAM"
-END
-
-GUI:ScoreboardLevel
-"RANK"
-END
-
-GUI:ScoreboardMoney
-"MONEY"
-END
-
-GUI:ScoreboardPerMinute
-"PER MIN"
-END
-
-GUI:ScoreboardPerSecond
-"PER SEC"
-END
-
-GUI:ControlBarMoneyEarning
-"$ %d  +%d/s"
-END
-
-GUI:ControlBarMoneyEarningMinute
-"$ %d  +%d/min"
-END
-
 CONTROLBAR:MoneyDescription
 "The money you have, and what you earned a second over the last half minute"
 END
 
-GUI:ScoreboardKills
-"K"
-END
-
-GUI:ScoreboardDeaths
-"D"
-END
-
-GUI:ScoreboardPowers
-"POWERS"
+CONTROLBAR:ObsLookingThrough
+"Watching through %ls's eyes. Esc brings back the whole map."
 END
 
 GUI:ScoreboardFavourite
@@ -1737,4 +1164,446 @@ END
 
 CONTROLBAR:Demo_ToolTipGLAScienceRebelAmbush
 "Allows you to create a surprise ambush of Rebels anywhere \n \n Rank 1: 4 Rebels \n Rank 2: 6 Rebels \n Rank 3: 10 Rebels \n \n Deploy from: Command Center"
+END
+
+LAN:ErrorModMismatch
+"This game runs different mods. The host's mods: %s. Start the game with the same mods, in the same order, to join."
+END
+
+LAN:NoMod
+"none"
+END
+
+GUI:SaveFromOlderGame
+"This save was made by the original game or by an older version of Reforged, and cannot be loaded."
+END
+
+GUI:MapCorrupt
+"The map %ls is damaged and cannot be played."
+END
+
+GUI:KickVoteStarted
+"%ls wants %ls out of the match. Type /yes or /no in chat: every other player has 30 seconds to agree."
+END
+
+GUI:KickVoteBanner
+"Kick %ls?   Yes %d of %d   /yes or /no   %d s"
+END
+
+GUI:KickVoteFailed
+"The vote to kick %ls failed."
+END
+
+GUI:KickVoteKicked
+"%ls was voted out of the match."
+END
+
+GUI:KickVoteTooFew
+"A vote kick needs at least two other players besides the one you want out."
+END
+
+GUI:KickVoteNoPlayer
+"No player called %ls is in the match."
+END
+
+GUI:KickVoteNone
+"No vote is open. Type /kick and a player's name to start one."
+END
+
+GUI:ShadowQuality
+"Shadow Quality"
+END
+
+GUI:ShadowQuality0
+"Low"
+END
+
+GUI:ShadowQuality1
+"Medium"
+END
+
+GUI:ShadowQuality2
+"High"
+END
+
+TOOLTIP:ShadowQuality
+"How sharp unit and building shadows are. High takes about 64 MB of video memory, Low frees memory on a weak card. Direct3D 11 only, and not with Classic Graphics. Applies when you press Accept."
+END
+
+GUI:VolumetricSmoke
+"Volumetric Smoke"
+END
+
+TOOLTIP:VolumetricSmoke
+"Smoke and dust shade the ground, the units and the smoke behind them by how thick they are. Direct3D 11 only, with a small cost in big fights. Applies when you press Accept."
+END
+
+GUI:LightingStyle
+"Lighting"
+END
+
+GUI:LightingStyle0
+"Classic"
+END
+
+GUI:LightingStyle1
+"Reforged"
+END
+
+TOOLTIP:LightingStyle
+"Reforged gives each map a stronger, warmer sun, darker shade and deeper shadows, keeping its time of day. Classic is the flat light of 2003, and Classic Graphics always uses it. Applies from the next map."
+END
+
+GUI:SmokeFireLighting
+"Smoke Lit By Fire"
+END
+
+TOOLTIP:SmokeFireLighting
+"Smoke beside a fire takes on its orange light. Applies when you press Accept."
+END
+
+GUI:DebrisTrails
+"Explosion Debris Trails"
+END
+
+TOOLTIP:DebrisTrails
+"Blasts throw fragments that trail smoke, and wrecks shed burning shrapnel. Off keeps the original explosions. Applies when you press Accept."
+END
+
+GUI:FormationDrag
+"Drag Out A Formation"
+END
+
+TOOLTIP:FormationDrag
+"Dragging with a move, attack move or guard order armed spreads the units along the line you draw."
+END
+
+GUI:BuildWithoutWorker
+"Build Without A Worker"
+END
+
+TOOLTIP:BuildWithoutWorker
+"With nothing selected the command bar shows your workers' buildings, and the idle worker nearest the spot goes to build. Off, the bar stays empty until you select a worker, as in 2003."
+END
+
+GUI:HealthBarColors
+"Health Bar Color"
+END
+
+GUI:HealthBarColors0
+"Green To Red"
+END
+
+GUI:HealthBarColors1
+"Player Color"
+END
+
+TOOLTIP:HealthBarColors
+"Green at full health through yellow to red, or every bar in its owner's color so you see whose it is. Disabled units stay blue."
+END
+
+GUI:MenuTransitionSpeed
+"Menu Transition Speed"
+END
+
+TOOLTIP:MenuTransitionSpeed
+"How fast menus slide and fade. 100 is the original speed."
+END
+
+GUI:OptionsGroupMenus
+"Menus"
+END
+
+GUI:OptionsGroupReplays
+"Replays"
+END
+
+GUI:SaveCamera
+"Record My Camera"
+END
+
+TOOLTIP:SaveCamera
+"Your camera movements are recorded into your replays of single player and skirmish games."
+END
+
+GUI:UseCamera
+"Follow Recorded Camera"
+END
+
+TOOLTIP:UseCamera
+"A replay follows the camera its player recorded instead of leaving you a free camera."
+END
+
+GUI:DrawScrollAnchor
+"Draw Scroll Anchor"
+END
+
+TOOLTIP:DrawScrollAnchor
+"Puts a marker where a right-drag scroll started."
+END
+
+GUI:MoveScrollAnchor
+"Move Scroll Anchor"
+END
+
+TOOLTIP:MoveScrollAnchor
+"The scroll marker trails the cursor, never more than half a screen behind, so a long drag does not keep speeding up."
+END
+
+// The options menu's Hotkeys page (OptionsMenuHotkeys.cpp), the launcher's Hotkeys page in the game.
+// GUI:HotkeysClash takes the key and the buttons' names; the family lines take a number.
+GUI:OptionsTabHotkeys
+"Hotkeys"
+END
+
+GUI:HotkeysCommands
+"Commands"
+END
+
+GUI:HotkeysCommandBar
+"Command bar"
+END
+
+GUI:HotkeysChange
+"Change"
+END
+
+GUI:HotkeysClear
+"No key"
+END
+
+GUI:HotkeysDefault
+"Game's key"
+END
+
+TOOLTIP:HotkeyChange
+"Wait for a new key for the selected command or button. A double click or Enter on it does the same."
+END
+
+TOOLTIP:HotkeyClear
+"Take the key off the selected command or button."
+END
+
+TOOLTIP:HotkeyDefault
+"Put back the game's own key. Keys are written when you press Accept."
+END
+
+GUI:HotkeysNone
+"none"
+END
+
+GUI:HotkeysPressKey
+"Press a key, or Esc to cancel"
+END
+
+GUI:HotkeysPressLetter
+"Press a letter, or Esc to cancel"
+END
+
+GUI:HotkeysPressForceAttack
+"Press a key, or Ctrl or Alt alone. Shift cannot be the hold. Esc cancels."
+END
+
+GUI:HotkeysClash
+"%s: %s share this key. Only one of them gets it in the game, and a fixed order keeps its own."
+END
+
+GUI:HotkeysAlsoOn
+"Same key as %s."
+END
+
+GUI:HotkeysFixed
+"A fixed key on every bar: A attack move, S stop, G guard, Y rally point, V evacuate, C combat drop, N sell, H mines, camo netting and the fake switch."
+END
+
+GUI:HotkeysGameKey
+"The game's own key is %s."
+END
+
+GUI:HotkeysMoved
+"Moved off the command bar's keys; the game's key is %s."
+END
+
+GUI:HotkeysButtonMoved
+"The game gave it the letter of a fixed key, so the launcher moved it."
+END
+
+GUI:HotkeysForceAttack
+"Hold to fire on whatever is under the pointer. Shift plus this key still draws a selection box. Default is Ctrl."
+END
+
+GUI:HotkeysPick
+"Pick a command or a button, then double-click it or press Change."
+END
+
+GUI:HotkeysOnFixedKey
+"A command bar key too: it fires with the button that has it."
+END
+
+GUI:HotkeysCategorySELECTION
+"Selection"
+END
+
+GUI:HotkeysCategoryTEAM
+"Teams"
+END
+
+GUI:HotkeysCategoryINFORMATION
+"Signals and beacons"
+END
+
+GUI:HotkeysCategoryCONTROL
+"Orders"
+END
+
+GUI:HotkeysCategoryINTERFACE
+"Interface"
+END
+
+GUI:HotkeysCategorySHORTCUTS
+"General's powers"
+END
+
+GUI:HotkeysCategoryGRID
+"Command bar by place"
+END
+
+GUI:HotkeysCategoryMISC
+"Camera and chat"
+END
+
+GUI:HotkeysFamilySaveView
+"Set bookmark %d"
+END
+
+GUI:HotkeysFamilyViewView
+"Go to bookmark %d"
+END
+
+GUI:HotkeysFamilyAddTeam
+"Add selection to team %d"
+END
+
+GUI:HotkeysFamilyShortcut
+"General's power %d"
+END
+
+GUI:HotkeysFamilySlot
+"Command bar place %d"
+END
+
+GUI:HotkeysCommandSELECT_HERO
+"Select hero"
+END
+
+GUI:HotkeysCommandSELECT_NEXT_WORKER
+"Next worker"
+END
+
+GUI:HotkeysCommandSELECT_PREV_WORKER
+"Previous worker"
+END
+
+GUI:HotkeysCommandCHAT_ALLIES
+"Chat to allies"
+END
+
+GUI:HotkeysCommandCHAT_EVERYONE
+"Chat to everyone"
+END
+
+GUI:HotkeysCommandDIPLOMACY
+"Diplomacy"
+END
+
+GUI:HotkeysCommandPLACE_BEACON
+"Place beacon"
+END
+
+GUI:HotkeysCommandDELETE_BEACON
+"Delete beacon"
+END
+
+GUI:HotkeysCommandBEGIN_CAMERA_ROTATE_LEFT
+"Turn camera left"
+END
+
+GUI:HotkeysCommandBEGIN_CAMERA_ROTATE_RIGHT
+"Turn camera right"
+END
+
+GUI:HotkeysCommandBEGIN_CAMERA_ZOOM_IN
+"Zoom in"
+END
+
+GUI:HotkeysCommandBEGIN_CAMERA_ZOOM_OUT
+"Zoom out"
+END
+
+GUI:HotkeysCommandCAMERA_RESET
+"Reset camera"
+END
+
+GUI:HotkeysCommandTOGGLE_CAMERA_TRACKING_DRAWABLE
+"Camera follows selection"
+END
+
+GUI:HotkeysCommandTOGGLE_FAST_FORWARD_REPLAY
+"Fast forward replay"
+END
+
+GUI:HotkeysCommandSELECT_ALL
+"Select all units"
+END
+
+GUI:HotkeysCommandSELECT_ALL_MILITARY
+"Select all fighting units"
+END
+
+GUI:HotkeysCommandSELECT_ALL_VEHICLES
+"Select all vehicles"
+END
+
+GUI:HotkeysCommandSELECT_ALL_AIRCRAFT
+"Select all aircraft"
+END
+
+GUI:HotkeysCommandSELECT_ALL_BARRACKS
+"Select all barracks"
+END
+
+GUI:HotkeysCommandSELECT_ALL_WARFACTORIES
+"Select all war factories"
+END
+
+GUI:HotkeysCommandSELECT_ALL_AIRFIELDS
+"Select all airfields"
+END
+
+GUI:HotkeysCommandSELECT_NEXT_IDLE_WORKER
+"Next idle worker"
+END
+
+GUI:HotkeysCommandSELECT_NEXT_IDLE_UNIT
+"Next idle unit"
+END
+
+GUI:HotkeysCommandTOGGLE_PAUSE
+"Pause (single player and replays)"
+END
+
+GUI:HotkeysCommandTOGGLE_PURCHASE_SCIENCE
+"General's promotions"
+END
+
+GUI:HotkeysCommandSIGNAL_ATTACK
+"Signal: attack here"
+END
+
+GUI:HotkeysCommandSIGNAL_DEFEND
+"Signal: defend here"
+END
+
+GUI:HotkeysCommandSIGNAL_ATTENTION
+"Signal: look here"
 END

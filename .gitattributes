@@ -4,10 +4,8 @@
 # the same.
 *.sh text eol=lf
 
-# litehtml's sources are LF, and a patch for them in CRLF matches none of their lines.
-GeneralsMD/Code/Libraries/Source/litehtml-*.patch text eol=lf
-
-# So are LZH-Light's (the fetched archive), and the same holds for its patch.
+# LZH-Light's sources (the fetched archive) are LF, and a patch for them in CRLF matches none of
+# their lines.
 GeneralsMD/Code/Libraries/Source/lzhl-*.patch text eol=lf
 
 # So are SDL3's, and the same holds for its patches.

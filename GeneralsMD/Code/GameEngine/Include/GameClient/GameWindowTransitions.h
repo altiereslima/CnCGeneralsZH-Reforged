@@ -125,7 +125,10 @@ public:
 	virtual void draw( void ) = 0;
 	
 	virtual void skip( void ) = 0;
-	
+
+	/// does this transition hold `win`, so that it must not run once `win` is destroyed
+	virtual Bool usesWindow( const GameWindow *win ) const { return m_win == win; }
+
 	Bool isFinished( void ) { return m_isFinished;	}
 	Int getFrameLength( void ){ return m_frameLength;	}
 protected:
@@ -349,6 +352,8 @@ protected:
 	ICoord2D m_incrementPos;
 	ICoord2D m_incrementSize;
 	GameWindow *m_growWin;
+public:
+	virtual Bool usesWindow( const GameWindow *win ) const { return m_win == win || m_growWin == win; }
 };
 
 
@@ -378,6 +383,8 @@ protected:
 	ICoord2D m_growSize;
 	ICoord2D m_incrementSize;
 	GameWindow *m_growWin;
+public:
+	virtual Bool usesWindow( const GameWindow *win ) const { return m_win == win || m_growWin == win; }
 };
 
 //-----------------------------------------------------------------------------
@@ -402,7 +409,7 @@ protected:
 	MAINMENUSMALLSCALEDOWNTRANSITION_3 = 3,
 	MAINMENUSMALLSCALEDOWNTRANSITION_4 = 4,
 	MAINMENUSMALLSCALEDOWNTRANSITION_5 = 5,
-	MAINMENUSMALLSCALEDOWNTRANSITION_END 
+	MAINMENUSMALLSCALEDOWNTRANSITION_END
 	};
 	ICoord2D m_pos;
 	ICoord2D m_size;
@@ -411,6 +418,8 @@ protected:
 	ICoord2D m_growSize;
 	ICoord2D m_incrementSize;
 	GameWindow *m_growWin;
+public:
+	virtual Bool usesWindow( const GameWindow *win ) const { return m_win == win || m_growWin == win; }
 };
 
 //-----------------------------------------------------------------------------
@@ -611,6 +620,7 @@ public:
 	Int  getTotalFrames( void );
 	void skip( void );
 		void draw( void );
+	void forgetWindow( const GameWindow *win );
 
 // INI parsed vars
 	AsciiString m_winName;
@@ -641,6 +651,7 @@ public:
 	AsciiString getName( void ) { return m_name; }
 	void setName( AsciiString name){ m_name = name;	}
 	void addWindow( TransitionWindow *transWin );
+	void forgetWindow( const GameWindow *win );
 	Bool isReversed( void );
 	Bool isFireOnce( void ) { return m_fireOnce; }
 	Bool m_fireOnce;
@@ -675,6 +686,7 @@ public:
 	void setGroup(AsciiString groupName, Bool immidiate = FALSE);		// THis will be the next group to fire off.
 	void reverse( AsciiString groupName );// reverse the animations for the current group.
 	void remove( AsciiString groupName, Bool skipPending = FALSE );// remove the animation from the current or pending groups.
+	void forgetWindow( const GameWindow *win );	///< a window is being destroyed: no transition may touch it again
 	TransitionGroup *getNewGroup( AsciiString name );
 private:
 	TransitionGroup *findGroup( AsciiString groupName );

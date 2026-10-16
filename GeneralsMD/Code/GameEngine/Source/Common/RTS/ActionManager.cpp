@@ -656,6 +656,21 @@ Bool ActionManager::canResumeConstructionOf( const Object *obj,
 
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
+/** A structure the map made unselectable (Fallen Empire's great wall: its towers carry a garrison
+	* module, but the map switches them off for selection) never took a garrison in 1.04, because no
+	* click can land on it.  The skirmish computer's own garrison pass goes by position, not by click,
+	* and filled the towers with soldiers nothing could shoot out of an indestructible wall.  With that
+	* pass refused, a Hard GLA still put men into a tower in a Hard match on Fallen Empire through the
+	* skirmish scripts (CMD_FROM_SCRIPT, logged by nothing).  So only a mission's or the shell map's own script
+	* may still send men into one; in a skirmish, a network game and its replays nobody can. */
+static Bool canGarrisonMapStructure( const Object *structure, CommandSourceType commandSource )
+{
+	const Int mode = TheGameLogic->getGameMode();
+	const Bool missionScript = commandSource == CMD_FROM_SCRIPT && (mode == GAME_SINGLE_PLAYER || mode == GAME_SHELL);
+	return missionScript || !structure->isKindOf( KINDOF_STRUCTURE )
+		|| structure->getContain() == NULL || !structure->getContain()->isGarrisonable() || structure->isSelectable();
+}
+
 Bool ActionManager::canEnterObject( const Object *obj, const Object *objectToEnter, CommandSourceType commandSource, CanEnterType mode )
 {
 
@@ -698,6 +713,9 @@ Bool ActionManager::canEnterObject( const Object *obj, const Object *objectToEnt
 
   if (objectToEnter->isDisabledByType( DISABLED_SUBDUED ))
     return FALSE; // a microwave tank has soldered the doors shut
+
+	if( !canGarrisonMapStructure( objectToEnter, commandSource ) )
+		return FALSE;
 
 
 	if( obj->isKindOf( KINDOF_STRUCTURE ) || obj->isKindOf( KINDOF_IMMOBILE ) )
@@ -2251,6 +2269,9 @@ Bool ActionManager::canPlayerGarrison( const Player *player, const Object *targe
 		return false;
 
 	if (cmi->isGarrisonable() == false)
+		return false;
+
+	if (!canGarrisonMapStructure( target, commandSource ))
 		return false;
 
 	if (player == target->getControllingPlayer())

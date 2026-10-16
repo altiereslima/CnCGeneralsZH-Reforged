@@ -168,11 +168,13 @@ static Bool buttonPushed = FALSE;
 static Bool stillNeedsToSetOptions = FALSE;
 void skirmishUpdateSlotList( void );
 static void populateSkirmishBattleHonors( void );
-// The game speed dropdown, as logic frames a second against the normal 30.  Half speed to double.
-// x0.75 is 22.5, which a whole frame rate cannot hold, so it runs at 23.  The preference keeps the
-// frame rate, so one saved by the old 15 to 60 slider lands on the nearest entry.
-static const Int SKIRMISH_GAME_SPEEDS[] = { 15, 23, 30, 45, 60 };
-static const WideChar *SKIRMISH_GAME_SPEED_CAPTIONS[] = { u"x0.5", u"x0.75", u"x1", u"x1.5", u"x2" };
+// The game speed dropdown, as logic frames a second against the normal LOGICFRAMES_PER_SECOND.  Half
+// speed to normal (ClampPlayerGameSpeed), nothing faster.  The preference keeps the frame rate in
+// retail 30 Hz frames, as it always did, so one saved by an older build, the old 15 to 60 slider or
+// the x1.5 and x2 entries this list used to have, lands on the nearest entry.
+static const Int SKIRMISH_GAME_SPEEDS[] = { PLAYER_GAME_SPEED_MIN_FPS, LOGICFRAMES_PER_SECOND * 3 / 4,
+	PLAYER_GAME_SPEED_MAX_FPS };
+static const WideChar *SKIRMISH_GAME_SPEED_CAPTIONS[] = { u"x0.5", u"x0.75", u"x1" };
 static const Int SKIRMISH_GAME_SPEED_COUNT = sizeof( SKIRMISH_GAME_SPEEDS ) / sizeof( SKIRMISH_GAME_SPEEDS[ 0 ] );
 
 static Int nearestGameSpeedIndex( Int framesPerSecond )
@@ -400,7 +402,7 @@ Bool SkirmishPreferences::write(void)
 
 	setSlotList();
 
-	setInt("FPS", selectedGameSpeed());
+	setInt("FPS", selectedGameSpeed() / LOGICFRAMES_PER_RETAIL_FRAME);
 
 	return UserPreferences::write();
 }
@@ -1462,7 +1464,7 @@ void SkirmishGameOptionsMenuInit( WindowLayout *layout, void *userData )
 		GadgetComboBoxReset( comboBoxGameSpeed );
 		for( Int i = 0; i < SKIRMISH_GAME_SPEED_COUNT; ++i )
 			GadgetComboBoxAddEntry( comboBoxGameSpeed, UnicodeString( SKIRMISH_GAME_SPEED_CAPTIONS[ i ] ), comboBoxGameSpeed->winGetEnabledTextColor() );
-		GadgetComboBoxSetSelectedPos( comboBoxGameSpeed, nearestGameSpeedIndex( prefs.getInt( "FPS", LOGICFRAMES_PER_SECOND ) ) );
+		GadgetComboBoxSetSelectedPos( comboBoxGameSpeed, nearestGameSpeedIndex( ConvertRetailFrames( prefs.getInt( "FPS", RETAIL_LOGICFRAMES_PER_SECOND ) ) ) );
 	}
 	buttonStart->winSetText(TheGameText->fetch("GUI:Start"));
 	/* hey, for now we're also going to disable the map select button until it doesn't crash */

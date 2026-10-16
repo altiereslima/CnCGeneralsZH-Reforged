@@ -1,0 +1,44 @@
+# Trailer 2, shots 11, 12 and 15 on Fallen Empire, along the Great Wall that runs east-west through
+# y 1250. America holds the south side round 1300,1050, China the north round 1450,1480, and they
+# shoot across the wall (hero_loop_02.txt's layout, two armies instead of four). China's carpet bomb
+# is called onto the wall at 1390,1250, its napalm onto 1650,1250, and five Overlords drive west
+# along the north foot of the wall past a camera standing in their way. Seat 1 is a GLA command
+# centre and nothing else: three seats put China on start 2, north of the wall.
+#
+#   generals.exe -win -xres 2560 -yres 1440 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Fallen Empire\Fallen Empire.map" -autoskirmish 3 -takeover
+#     -observer -side 0 FactionAmerica -side 1 FactionGLA -side 2 FactionChina -seed 7
+#     -scenario rf_t2_wall -cinema rf_t2_wall -video <from> <to> rt_t2_wall -recordfps 60
+
+10    spawn  0  AmericaCommandCenter            1   start0:240:200
+10    spawn  1  GLACommandCenter                1   start1:-240:200
+10    spawn  2  ChinaCommandCenter              1   start2:-240:-200
+
+# --- America, south of the wall ------------------------------------------------------------------
+30    spawn  0  AmericaTankCrusader             14  1250 1050  34
+30    spawn  0  AmericaTankPaladin              8   1150 960   38
+30    spawn  0  AmericaInfantryRanger           20  1400 1080  14
+30    spawn  0  AmericaVehicleTomahawk          5   1300 900   40
+60    attackmove 0  AmericaTankCrusader      1350 1130
+60    attackmove 0  AmericaTankPaladin       1300 1100
+60    attackmove 0  AmericaInfantryRanger    1450 1140
+60    attackmove 0  AmericaVehicleTomahawk   1350 1050
+
+# --- China, north of the wall --------------------------------------------------------------------
+30    spawn  2  ChinaTankBattleMaster           14  1450 1500  36
+30    spawn  2  ChinaTankGattling               6   1550 1550  36
+30    spawn  2  ChinaInfantryRedguard           20  1350 1480  14
+30    spawn  2  ChinaVehicleInfernoCannon       4   1500 1650  40
+60    attackmove 2  ChinaTankBattleMaster    1450 1360
+60    attackmove 2  ChinaTankGattling        1550 1380
+60    attackmove 2  ChinaInfantryRedguard    1350 1360
+60    attackmove 2  ChinaVehicleInfernoCannon 1450 1450
+
+# --- the Overlords along the north foot of the wall ----------------------------------------------
+30    spawn  2  ChinaTankOverlord               5   1600 1345  60
+200   move   2  ChinaTankOverlord                   900 1330
+
+# --- powers --------------------------------------------------------------------------------------
+200   power  2  ChinaCommandCenter    1390 1250  Early_SuperweaponChinaCarpetBomb
+240   power  0  AmericaCommandCenter  1400 1450  SuperweaponA10ThunderboltMissileStrike
+330   power  2  ChinaCommandCenter    1650 1250  SuperweaponNapalmStrike

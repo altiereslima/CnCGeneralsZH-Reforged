@@ -94,7 +94,7 @@ UpdateSleepTime ObjectDefectionHelper::update()
 	{
 		Bool lastPhase = ( ((Int)m_defectionDetectionFlashPhase) & 1 );// were we in a flashy phase last frame?
 		UnsignedInt timeLeft = m_defectionDetectionEnd - now;
-		m_defectionDetectionFlashPhase += 0.5f * ( 1.0f - ((Real)timeLeft / DEFECTION_DETECTION_TIME_MAX ) );
+		m_defectionDetectionFlashPhase += ConvertRetailPerFrameRate(0.5f) * ( 1.0f - ((Real)timeLeft / DEFECTION_DETECTION_TIME_MAX ) );
 		Bool thisPhase = ( ((Int)m_defectionDetectionFlashPhase) & 1 );// are we in a flashy phase this frame?
 
 		if ( lastPhase && ( ! thisPhase ) ) 

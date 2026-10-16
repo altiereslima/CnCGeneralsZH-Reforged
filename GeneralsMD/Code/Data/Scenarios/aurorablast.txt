@@ -1,0 +1,38 @@
+# The plain Aurora's bomb against a Scud Launcher's missile, for FX_AuroraBombDetonate
+# (FXListReforged.ini). Three blasts on Twilight Flame, one after another, each filmed at the same
+# zoom, heading and tilt by Cinema/aurorablast.txt: an Aurora on a Battlemaster column setting off
+# from 1400,3860 (blast about 5.8 s), an Aurora on a War Factory at 1250,3800 (from 11 s) and two
+# Scud Launchers on the Battlemasters, reinforced, driving on through 1500,3700 (from 21 s).
+# Seat 1 owns every vehicle target and seat 0 the base; seat 2 shoots the second and third, so
+# the second Aurora's order cannot reach the first. Since structures get the placement check,
+# 1100,3700 refuses a War Factory (LBC_RESTRICTED_TERRAIN) and 1250,3800, 1600,3800, 1350,3950
+# and 1050,3500 take one. 1580,3640 to 1760,3460 is a cliff top, a poor frame for a blast.
+#
+#   generals.exe -win -xres 1280 -yres 720 -msaa 0 -particlecap 2500 -fps 120 -noFPSLimit
+#     -quickstart -noshellmap -observer -multiInstance -map "Maps\Twilight Flame\Twilight Flame.map"
+#     -autoskirmish 3 -takeover -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA
+#     -seed 7 -scenario aurorablast -cinema aurorablast -video 60 1980 aurorablast -maxframes 2000
+
+# the base the second Aurora bombs, standing from the start
+20    spawn      0  AmericaWarFactory            1   1250 3800
+20    spawn      0  AmericaPowerPlant            1   1230 3640
+
+# 1: Aurora on a Battlemaster column driving north-east
+30    spawn      1  ChinaTankBattleMaster        3   1400 3860   45
+31    move       1  ChinaTankBattleMaster            1500 3700
+30    spawn      0  AmericaJetAurora             1   700 3780
+32    attack     0  AmericaJetAurora             1   ChinaTankBattleMaster
+
+# 2: Aurora on the War Factory, two Humvees driving past it
+290   spawn      0  AmericaVehicleHumvee         2   1430 3700   40
+291   move       0  AmericaVehicleHumvee             1000 3640
+300   spawn      2  AmericaJetAurora             1   400 3700
+302   attack     2  AmericaJetAurora             0   AmericaWarFactory
+
+# 3: Scud Launchers on the Battlemasters, two more joining, all driving on
+590   spawn      1  ChinaTankBattleMaster        2   1460 3880   45
+600   move       1  ChinaTankBattleMaster            1540 3640
+600   spawn      2  GLAVehicleScudLauncher       2   1150 3950   40
+602   attack     2  GLAVehicleScudLauncher       1   ChinaTankBattleMaster
+
+990   tally      1  *

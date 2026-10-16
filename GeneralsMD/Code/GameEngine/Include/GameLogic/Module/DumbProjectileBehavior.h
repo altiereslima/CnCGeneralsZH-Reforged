@@ -57,6 +57,7 @@ public:
 	Real m_secondHeight;				///< And the second, this.
 	Real m_firstPercentIndent;	///< The first point will be this percent along the target line
 	Real m_secondPercentIndent;	///< And the second, this.
+	Bool m_straightWhenClear;		///< Fly the straight line instead when no terrain rises into it (direct-fire shells)
 	UnsignedInt m_maxLifespan;
 	Bool m_tumbleRandomly;
 	Bool m_orientToFlightPath;
@@ -114,6 +115,7 @@ private:
 	Coord3D								m_flightPathStart;				///< where flight path started (in case we must regen it)
 	Coord3D								m_flightPathEnd;					///< where flight path ends (in case we must regen it)
 	Real									m_flightPathSpeed;				///< flight path speed (in case we must regen it)
+	Real									m_launchSlope;						///< rise over run of the barrel at launch, 0 for a level or lowered barrel
 	Int										m_flightPathSegments;			///< number of segments in the flightpath (in case we must regen it)
 	Int										m_currentFlightPathStep;	///< Our current index in the flight path vector.  Quicker than popping off.
 	WeaponBonusConditionFlags		m_extraBonusFlags;

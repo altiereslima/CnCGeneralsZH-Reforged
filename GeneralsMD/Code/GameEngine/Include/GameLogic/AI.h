@@ -37,6 +37,7 @@
 #include "Common/SubsystemInterface.h"
 #include "Common/GameMemory.h"
 #include "Common/GameType.h"
+#include "Common/GameCommon.h"		// LOGICFRAMES_PER_SECOND
 #include "GameLogic/Damage.h"
 #include "Common/STLTypedefs.h"
 
@@ -214,6 +215,25 @@ struct AIDifficultyProfile
 	Bool	m_engageGate;										///< weigh a fight by unit against unit, not money alone; nothing leaves home on its own
 	Bool	m_answerArmy;										///< remember the enemy army it has seen, and train the answer to the biggest part of it
 	Bool	m_massUnit;											///< pick one unit the enemy has no answer to, build a fist of it and hit with it
+
+	// Spending: how big a bank it keeps, and what it buys past it (AIPlayer::doSpending)
+	Real	m_bankTargetSeconds;						///< the bank it keeps, in seconds of its own income; 0 = no purchase queue and no spend rule
+	Int		m_bankTargetFloor;							///< ... and never less than this, which is all of it before any income is measured
+	Real	m_upgradePayoff;								///< an upgrade is bought when what it improves is worth this many times its price, half that past the bank target
+	Real	m_upgradeStartSeconds;					///< and not before this far into the match
+	Real	m_upgradeNonCombatWeight;				///< what a building or an unarmed unit counts for next to a fighting unit when an upgrade is weighed
+	Real	m_surplusShare;									///< of the income over aiSurplusBudget's window, how much a bank over target may train as extra units
+	Int		m_maxProduction;								///< war factories, barracks and airfields together, beyond which the spend rule adds none
+	Real	m_factoryBankMultiple;					///< past this many times the bank target a factory is added whatever the bank's trend; 0 = only on the trend
+
+	// Pushing: when the army first leaves home, and how small a force may go
+	Real	m_firstPushSeconds;							///< no attack before this, nor before the first drop zone or black market stands (AI_PURCHASE_EARLY_FRAMES at most)
+	Real	m_minAttackPower;								///< parked teams worth less than this wait for company, up to the wave's longest wait
+	Real	m_siegeTrail;										///< artillery out with a wave keeps this far behind its front unit; 0 = walks with it
+
+	// Superweapons
+	Real	m_beamSteerSeconds;							///< how often a firing Particle Cannon's beam is driven onto the richest ground near it; 0 = the retail S curve
+	Real	m_strikeEconomyWeight;					///< what a supply centre, black market, hacker or strategy centre is worth to a strike on top of its price, in prices; 0 = price alone
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -452,6 +472,112 @@ Int aiHoardAdjustedDelay( Int frames, Int money, Int hoardAt );
 	* at zero, and no threshold leaves EA's limit alone. */
 Int aiHoardAllowedTeamInstances( Int maxInstances, Int money, Int hoardAt );
 
+/** What a computer player's money can go to, as the purchase queue ranks it. */
+enum AIPurchaseKind
+{
+	AIBUY_POWER = 0,			///< a power plant
+	AIBUY_DOZER,
+	AIBUY_ECONOMY,				///< supply center, gatherer, drop zone, black market, internet center, hacker
+	AIBUY_BASE,						///< a factory or anything else on the build list
+	AIBUY_SUPERWEAPON,		///< a superweapon, or the tech building it needs
+	AIBUY_DEFENSE,				///< a base defense
+	AIBUY_ARMY,
+	AIBUY_UPGRADE,
+	AIBUY_EMERGENCY,			///< fighters trained against enemies already standing in the base
+	AIBUY_KIND_COUNT
+};
+
+/** The first minutes of a match, while economy and power outrank the army. */
+const UnsignedInt AI_PURCHASE_EARLY_FRAMES = 6 * 60 * LOGICFRAMES_PER_SECOND;
+
+/** How much a purchase of this kind matters next to the others; the higher wins the money.  Early in a
+	* match income and power come before the army, which is how a Hard AI kept attacking with two
+	* gatherers and no drop zone. */
+Int aiPurchaseScore( AIPurchaseKind kind, Bool earlyGame );
+
+/** A skirmish AI's purchase queue, on every rung with a bank target.  Every spender asks it before it pays, with a stable key (a
+	* template id), the price, its score and whether the thing could start right now (an idle factory,
+	* a dozer).  It remembers one request: the best one it could not afford.  That one has the money
+	* saved for it, and nothing that ranks below it is bought while the purchase would take the bank
+	* under its price.
+	*
+	* The reservation is bounded every way, since the skirmish scripts keep seven to twenty priority
+	* builds waiting all match and a queue that waits on all of them never buys anything.  Only a
+	* request that could start now reserves.  A reservation whose spender stops asking goes after
+	* AI_PURCHASE_STALE_FRAMES, one that is not met in AI_PURCHASE_HOLD_FRAMES goes and may not reserve
+	* again for as long, and above hoardAt, the bank target (or the reserved price, if that is more) nothing
+	* is held back at all, so the queue never makes the bank grow past one reserved price.  Ties go to
+	* the lower key. */
+struct AIPurchaseQueue
+{
+	enum { NONE = -1 };
+	enum Verdict
+	{
+		BUY,				///< pay for it
+		SHORT,			///< cannot afford it, and nothing was saved for it
+		SAVING,			///< cannot afford it, and the money is being saved for it
+		RESERVED,		///< ... from this request on
+		HELD				///< could afford it, but it would eat the money saved for something better
+	};
+	enum Lapse { KEPT, STALE, TIMED_OUT };
+
+	Int					m_key;					///< what the money is saved for, NONE for nothing
+	Int					m_cost;
+	Int					m_score;
+	UnsignedInt	m_since;				///< frame the reservation was made
+	UnsignedInt	m_seen;					///< last frame its spender asked
+	Int					m_held;					///< purchases held back for it so far
+	Int					m_lapsedKey;		///< the last reservation that timed out ...
+	UnsignedInt	m_lapsedUntil;	///< ... and the frame it may reserve again
+
+	AIPurchaseQueue() : m_key( NONE ), m_cost( 0 ), m_score( 0 ), m_since( 0 ), m_seen( 0 ), m_held( 0 ),
+											m_lapsedKey( NONE ), m_lapsedUntil( 0 ) {}
+
+	Lapse expire( UnsignedInt frame );
+	Verdict ask( Int key, Int cost, Int score, Bool startable, Int money, Int hoardAt, UnsignedInt frame );
+	void bought( Int key ) { if( key == m_key ) m_key = NONE; }
+};
+
+const UnsignedInt AI_PURCHASE_STALE_FRAMES = 20 * LOGICFRAMES_PER_SECOND;
+const UnsignedInt AI_PURCHASE_HOLD_FRAMES = 40 * LOGICFRAMES_PER_SECOND;
+
+/** How long a stretch of income is measured over before the rate is taken again. */
+const UnsignedInt AI_INCOME_WINDOW_FRAMES = 30 * LOGICFRAMES_PER_SECOND;
+
+/** The bank a computer player keeps: seconds of its income, and never under the floor. */
+Int aiBankTarget( Real incomePerSecond, Real seconds, Int floor );
+
+/** Another factory, measured rather than guessed: fewer than cap stand, and the bank is over its target
+	* and no lower than it was an income window ago, so what stands is not spending what comes in, or it is
+	* past multiple times the target whatever its trend (a busy Hard AI's bank swings, and the trend alone
+	* almost never fired).  multiple 0 leaves only the trend. */
+Bool aiWantsMoreProduction( Int bank, Int bankWindowAgo, Int target, Int standing, Int cap, Real multiple );
+
+/** How much a bank over its target may put into extra units on one spend pass: share of the income of
+	* AI_SURPLUS_INCOME_SECONDS, and never what takes the bank under target.  At share 1 that is three
+	* passes' income a pass, which drains a pile; a rung with a small share only tops its plan up. */
+Int aiSurplusBudget( Int bank, Int target, Real incomePerSecond, Real share );
+
+/** The same for a match that started rich: share of what the bank holds over keep (the bank target or
+	* the default starting cash, whichever is more), never more than fortune, what the start handed over
+	* the default.  0 in a match at the default cash, which then plays as it did. */
+Int aiFortuneBudget( Int bank, Int keep, Int fortune, Real share );
+const Real AI_SURPLUS_INCOME_SECONDS = 30.0f;
+
+/** What a unit counts for when an upgrade is weighed: 1 with nothing known of the enemy or no weight
+	* on it, up to 2 for a unit that wins every trade against what the enemy fields and down to 0 for
+	* one that loses them all.  matchup is its value-weighted aiMatchupScore against the enemy army. */
+Real aiCounterFit( Real matchup, Real weight );
+
+/** What one thing an upgrade would change counts for, as a share of its price: a fighting unit its
+	* aiCounterFit, a building or an unarmed unit the rung's nonCombatWeight. */
+Real aiUpgradeWeight( Bool fights, Real fit, Real nonCombatWeight );
+
+/** The upgrade to buy out of count candidates: the one whose covered value (what of the army it
+	* improves, each thing weighed by aiUpgradeWeight) is the most times its price, if that is at least
+	* payoff, or half of payoff when the bank is past its target.  -1 for none.  Ties go to the first. */
+Int aiPickUpgrade( const Real *covered, const Int *cost, Int count, Real payoff, Bool overTarget );
+
 /** Which approach a team takes: the lane with the least known enemy firepower along it.  A negative
 	* entry is a lane this map does not have.  A tie, or nothing known anywhere, keeps the lane the
 	* script asked for, so an AI that has not scouted plays exactly as the script wrote it. */
@@ -498,6 +624,14 @@ public:
 
 	void addSideInfo(AISideInfo *info);
 	void addFactionBuildList(AISideBuildList *buildList);
+
+	/** A side's resource, defence and skill set entry, and its skirmish build list.  Under -modfactions a
+		* mod faction's own mod's AIData.ini is loaded under "M<n>~<side>" (AI::parseAiDataDefinition), so
+		* modIndex asks for that first and falls back on retail's entry of the side when the mod has none.
+		* NULL when neither has one. */
+	const AISideInfo *findSideInfo( const AsciiString &side, Int modIndex ) const;
+	const AISideBuildList *findBuildList( const AsciiString &side, Int modIndex ) const;
+	const AISideInfo *findSideInfo( const Player *player ) const;	///< by the player's side and template's mod
 
 	// --------------- inherited from Snapshot interface --------------
 	void crc( Xfer *xfer );
@@ -655,6 +789,8 @@ public:
 	enum FormationID getNextFormationID(void);
 
 	static void parseAiDataDefinition( INI* ini );
+	/// the key a mod's AIData entries are filed under: "M<n>~America" for mod index n-1, the side itself for retail (-1)
+	static AsciiString modSideKey( const AsciiString &side, Int modIndex );
 
 	static Int s_enemyScans;								///< see getEnemyScanCountThisFrame
 	static Real s_lastPathfindMS;						///< see getLastPathfindMS

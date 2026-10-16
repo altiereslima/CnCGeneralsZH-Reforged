@@ -6,7 +6,7 @@ travels through the network, so these become orders both machines execute on a s
 World commands (spawn, move) run on one machine only, which is what --prove uses to force a
 desync and show the check is looking.
 
-    python net_check.py                                   # two copies, 3000 frames
+    python net_check.py                                   # two copies, 6000 frames (100 s)
     python net_check.py --copies 3 --teams 2
     python net_check.py --each "-latAvg 120 -latNoise 60 -packetloss 5"
     python net_check.py --slot-args 1 "-drawdelay 100"    # one slow renderer
@@ -35,7 +35,8 @@ MATCH_START_TIMEOUT_SECONDS = 180.0
 PRESS_INTERVAL_SECONDS = 0.5
 PRESSES = ("KEY_A CTRL", "KEY_X", "KEY_S", "KEY_X")
 MISMATCH_LINE = "CRC Mismatch"
-PROVE_FRAME = 300
+LOGIC_FPS = 60  # LOGICFRAMES_PER_SECOND: frame numbers here and in the logs count these
+PROVE_FRAME = 10 * LOGIC_FPS
 PROVE_SPAWN = "spawn 0 AmericaVehicleHumvee 2 %s"
 QUIT_GRACE_SECONDS = 10.0
 
@@ -46,12 +47,13 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--teams", type=int, default=0, help="-teams for the slot list; 0 is free for all")
     parser.add_argument("--map", default="Maps\\Golden Oasis\\Golden Oasis.map")
     parser.add_argument("--seed", type=int, default=3)
-    parser.add_argument("--frames", type=int, default=3000, help="stop once every copy has passed this frame")
+    parser.add_argument("--frames", type=int, default=100 * LOGIC_FPS,
+                        help="stop once every copy has passed this logic frame (%d a second)" % LOGIC_FPS)
     parser.add_argument("--each", default="", help="extra switches for every copy")
     parser.add_argument("--slot-args", nargs=2, action="append", default=[], metavar=("SLOT", "SWITCHES"),
                         help="extra switches for one copy, repeatable")
     parser.add_argument("--tag", default="net", help="log prefix; copy n logs to Run/<tag><n>_DebugLogFile.txt")
-    parser.add_argument("--prove", action="store_true", help="spawn on copy 0 alone at frame 300")
+    parser.add_argument("--prove", action="store_true", help="spawn on copy 0 alone at frame %d" % PROVE_FRAME)
     parser.add_argument("--prove-at", default="2192 3537", help="map position for --prove")
     parser.add_argument("--keys", default=",".join(PRESSES),
                         help="the presses, comma separated, each as the control socket's key command takes it")

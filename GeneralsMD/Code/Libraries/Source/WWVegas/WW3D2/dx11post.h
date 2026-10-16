@@ -114,6 +114,14 @@ void DX11Post_Set_Bloom(float threshold, float intensity, float additive_gain, u
 // The gain the scene's additive draws take this frame: one whenever the glow is off.
 float DX11Post_Additive_Gain();
 
+// The Reforged lighting style's grade, laid on wherever the half float scene comes down to eight
+// bits (after the tone curve, in the bloom composite and the plain tone pass): a gentle S that
+// sinks the darks and lifts the lights, a little colour taken out, and the lights pushed warm and
+// the shade cool around mid grey.  Zero, the default and what the tests measure, is no grade; one
+// is the whole of it.  The game sets it every frame from the LightingStyle option.  A chain that
+// does not start with bloom keeps its scene in eight bits and is never graded.
+void DX11Post_Set_Grade(float amount);
+
 // A blast warping the picture around it: the frame drawn toward a point and then pushed out by a
 // ring that travels away from it.  Not an effect in the chain and not a switch: whatever chain is
 // set, one more pass goes on its end for every frame that has a warp in it, and a frame with none
@@ -215,6 +223,9 @@ private:
 		float BlurY;
 		// This pass reads the frame's depth rather than the frame, and wants the clip planes with it.
 		bool Occlusion;
+		// The scene came down without a match finishing it (the loading screen, interface and all
+		// drawn into the scene target): the tone curve, but never the lighting style's grade.
+		bool Ungraded;
 	};
 
 	bool Create_Shaders();

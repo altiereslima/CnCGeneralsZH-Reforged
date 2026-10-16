@@ -59,6 +59,7 @@
 #include "GameClient/SelectionPriority.h"
 #include "GameClient/SelectionXlat.h"
 #include "GameClient/TerrainVisual.h"
+#include "GameNetwork/GameInfo.h"
 #include "GameNetwork/NetworkInterface.h"
 
 #ifdef _INTERNAL
@@ -80,6 +81,26 @@
 static Bool TheHurtSelectionMode = false;
 static Bool TheDebugSelectionMode = false;
 #endif
+
+//-----------------------------------------------------------------------------
+/** The takeover click is for the seats the skirmish screen gave a person: your own and the Human
+	* (takeover) opponents.  A computer seat can be human too, when no skirmish scripts were found for
+	* its general, and clicking one of those used to hand you the enemy's base. */
+static Bool isHumanSeat( const Player *p )
+{
+	if (TheGameInfo == NULL)
+		return FALSE;
+	for (Int i = 0; i < MAX_SLOTS; ++i)
+	{
+		AsciiString name;
+		name.format("player%d", i);
+		if (p->getPlayerNameKey() != NAMEKEY(name))
+			continue;
+		const GameSlot *slot = TheGameInfo->getConstSlot(i);
+		return slot != NULL && (slot->isHuman() || slot->isTakeover());
+	}
+	return FALSE;
+}
 
 //-----------------------------------------------------------------------------
 static Bool currentlyLookingForSelection( )
@@ -434,10 +455,9 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			}
 
 			// with attack move or guard armed a left drag draws the order line over in CommandXlat, so
-			// no selection box grows under it.  Classic draws no lines: its left drag is always the box
-			const Bool leftDragIsOrder = !TheGlobalData->isClassicUI()
-																	&& TheInGameUI->isLineOrderArmed()
-																	 && TheInGameUI->getSelectCount() > 0;
+			// no selection box grows under it, whichever mouse is set.  A drag with no key armed is the box
+			const Bool leftDragIsOrder = TheInGameUI->isLineOrderArmed()
+																	&& TheInGameUI->getSelectCount() > 0;
 			if (m_leftMouseButtonIsDown && !leftDragIsOrder)
 			{
 				ICoord2D delta;
@@ -580,9 +600,9 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 						// buildings and units stay in separate selections, and a double click that
 						// gathers everything of a kind may only gather what a box would - things
 						// you can click one at a time but never sweep up used to come along.  Classic keeps
-						// 1.04's rule, which put back everything that was selected
-						const Bool keep = TheGlobalData->isClassicUI() ? (draw && draw->isSelectable())
-							: (draw && draw->isMassSelectable() && draw->isKindOf( KINDOF_STRUCTURE ) == picked->isKindOf( KINDOF_STRUCTURE ));
+						// 1.04's rule, which put back everything that was selected of the same kind
+						const Bool keep = draw && draw->isKindOf( KINDOF_STRUCTURE ) == picked->isKindOf( KINDOF_STRUCTURE )
+							&& ( TheGlobalData->isClassicMouse() ? draw->isSelectable() : draw->isMassSelectable() );
 						if (keep) {
 							TheInGameUI->selectDrawable(draw);
 							selectMore->appendObjectIDArgument(draw->getObject()->getID());
@@ -629,10 +649,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 
 				if( command )
 				{
-					if( command->getCommandType() == GUI_COMMAND_ATTACK_MOVE ||
-							command->getCommandType() == GUI_COMMAND_GUARD ||
-							command->getCommandType() == GUI_COMMAND_GUARD_WITHOUT_PURSUIT ||
-							command->getCommandType() == GUI_COMMAND_GUARD_FLYING_UNITS_ONLY )
+					if( command->getCommandType() == GUI_COMMAND_ATTACK_MOVE )
 					{
 						//These GUI commands can take care of themselves -- don't let
 						//the selection translator meddle.
@@ -719,9 +736,12 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 				 between a selection and the right selection.  Shift already adds, so what was missing
 				 was a way to take things back out and a way to leave the base staff behind: Alt keeps
 				 only what can shoot, Ctrl removes the box from the selection instead of replacing it.
-				 Both are drag-only.  A point click has to stay exactly what it was - a filter that eats
-				 single clicks reads as a broken mouse.  Classic has neither: its Ctrl is force fire. */
-			if (!isPoint && !TheGlobalData->isClassicUI())
+				 Ctrl+Shift selects the box: both meta modes drop when the second modifier goes
+				 down, the fire circle never starts, and this Ctrl-remove used to eat the click.
+				 Both filters are drag-only.  A point click has to stay exactly what it was - a filter
+				 that eats single clicks reads as a broken mouse.  Classic has neither: its Ctrl is
+				 force fire. */
+			if (!isPoint && !TheGlobalData->isClassicMouse())
 			{
 				if (TheKeyboard->isAlt())
 				{
@@ -745,7 +765,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 					}
 				}
 
-				if (TheKeyboard->isCtrl())
+				if (TheKeyboard->isCtrl() && !TheKeyboard->isShift())
 				{
 					GameMessage *removeMsg = NULL;
 					DrawableListIt rit;
@@ -782,7 +802,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			// A box with an army in it takes the army and leaves the dozers and trucks standing among
 			// it; a box of workers alone still takes the workers.  Drag-only, like the filters above,
 			// and not in Classic, which is the 2003 box.
-			if (!isPoint && !TheGlobalData->isClassicUI())
+			if (!isPoint && !TheGlobalData->isClassicMouse())
 				prioritizeMilitaryBoxSelection(drawablesThatWillSelect, isSelectableMilitaryInBox);
 
 			SelectionInfo si;
@@ -793,14 +813,16 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 
 			/* Single-player test hook: a click that is not a command (nothing of yours selected, or
 				 nothing to do to it) on a base that nobody is driving - a Human seat from the skirmish
-				 screen, or a player you already took over - hands you that player, so the command bar,
-				 the money and the shroud become its own.  Computer opponents are left alone; only
-				 Shift-Ctrl-T takes one of those. */
+				 screen, or your own seat after you left it - hands you that player, so the command bar,
+				 the money and the shroud become its own.  Computer seats are left alone, one you took
+				 and left again and one that ended up human for want of scripts included (isHumanSeat);
+				 only Shift-Ctrl-T takes those.  takeControlOfPlayer refuses network games and replays, and the logic
+				 drops the message in a network game whoever sends it. */
 			for (DrawableListIt cit = drawablesThatWillSelect.begin(); cit != drawablesThatWillSelect.end(); ++cit)
 			{
 				Object *clicked = (*cit) ? (*cit)->getObject() : NULL;
 				Player *owner = clicked ? clicked->getControllingPlayer() : NULL;
-				if (owner == NULL || owner->getPlayerType() != PLAYER_HUMAN)
+				if (owner == NULL || owner->getPlayerType() != PLAYER_HUMAN || !isHumanSeat(owner))
 					continue;
 
 				if (takeControlOfPlayer(owner))
@@ -819,55 +841,16 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			
 			Bool addToGroup = TheInGameUI->isInPreferSelectionMode();
 
-			const Bool classic = TheGlobalData->isClassicUI();
 			if (si.currentCountEnemies > 0 ||
 					si.currentCountCivilians > 0 ||
-					si.currentCountFriends > 0 ||
-					(classic && si.currentCountMineBuildings > 0))
+					si.currentCountFriends > 0)
 			{
 				// force a new group creation
 				addToGroup = FALSE;
 			}
 
-			// Classic is the game as shipped: a structure is only ever selected on its own, when it is the
-			// one thing clicked or the only selectable thing in the box (EA's Firebase case)
-			if (si.newCountMine > 0 && classic)
-			{
-				si.selectMine = TRUE;
-				if ( si.newCountMineBuildings == 1 && si.newCountMine == 1 )
-				{
-					addToGroup = FALSE;
-					si.selectMineBuildings = TRUE;
-				}
-				else if ( si.newCountMineBuildings > 0 )
-				{
-					Bool onlyTheOneBuildingIsSelectableAnyway = TRUE;
-					DrawableID buildingID = INVALID_DRAWABLE_ID;
-					for (DrawableListIt it = drawablesThatWillSelect.begin(); it != drawablesThatWillSelect.end(); ++it)
-					{
-						const Drawable *d = *it;
-						if ( d->isKindOf( KINDOF_STRUCTURE ) )
-						{
-							if ( buildingID == INVALID_DRAWABLE_ID )
-								buildingID = d->getID();
-							else if ( buildingID != d->getID() )
-								onlyTheOneBuildingIsSelectableAnyway = FALSE;
-						}
-						else if ( d->isSelectable() )
-							onlyTheOneBuildingIsSelectableAnyway = FALSE;
-
-						if ( ! onlyTheOneBuildingIsSelectableAnyway )
-							break;
-					}
-					if ( onlyTheOneBuildingIsSelectableAnyway )
-					{
-						addToGroup = FALSE;
-						si.selectMineBuildings = TRUE;
-					}
-				}
-			}
 			// If there are any of my units, then select those.
-			else if (si.newCountMine > 0)
+			if (si.newCountMine > 0)
 			{
 				si.selectMine = TRUE;
 
@@ -1119,9 +1102,14 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			m_leftMouseButtonIsDown = true;
 			m_selectFeedbackAnchor = msg->getArgument( 0 )->pixel;
 
-			// with the attack key armed the left button draws a circle instead of a selection box,
-			// and everything hostile inside it becomes a target list
-			if( TheInGameUI->isForceAttackArmed() && TheInGameUI->getSelectCount() > 0 )
+			// with the attack key armed or the Force Attack hold down the left button draws a circle
+			// instead of a selection box, and everything hostile inside it becomes a target list.  An
+			// armed line key (move, attack move, guard) keeps its line under the hold.  Hold+Shift is
+			// the box: you can pick units without dropping force-fire.  Shift with the attack key
+			// armed still queues a circle.
+			if( TheInGameUI->isForceFireOn() && !TheInGameUI->isLineOrderArmed() && TheInGameUI->getSelectCount() > 0
+					&& TheInGameUI->getGUICommand() == NULL && TheInGameUI->getPendingPlaceType() == NULL
+					&& !( TheInGameUI->isInForceAttackMode() && TheKeyboard->isShift() ) )
 				TheInGameUI->beginAttackCircle( m_selectFeedbackAnchor );
 			break;
 		}
@@ -1138,22 +1126,27 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			// click that follows this release has to be eaten or it would reselect under the anchor
 			if( TheInGameUI->isAttackCircling() )
 			{
+				// a circle Ctrl started belongs to no key: undragged, the press was an ordinary Ctrl click
+				const Bool keyed = TheInGameUI->isOrderKeyArmed() || TheInGameUI->getGUICommand() != NULL;
+
 				// a press with the attack key that never became a drag is an ordinary attack click,
 				// and the click that follows this release is the order.  Only a real circle eats it
 				if( TheInGameUI->issueAttackCircle() )
 				{
 					TheInGameUI->spendOrderKey();
 					m_dragOrderJustIssued = TRUE;
+					break;
 				}
 
 				//
-				// Either way this press belonged to the attack key rather than to selection, so the
+				// A press under an armed key belonged to that key rather than to selection, so the
 				// release stops here.  Falling through reaches the deselect that ends an ordinary left
 				// click, and for a press that was not a drag - a plain attack click, or a circle small
 				// enough to have no radius - that threw the group away a moment before the click behind
 				// it arrived as the order, leaving the order with nobody to give it to.
 				//
-				break;
+				if( keyed )
+					break;
 			}
 
 			// a left drag that drew an attack move or guard line is turned into its order by CommandXlat,
@@ -1231,7 +1224,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			// instead, so that click gives no order either.  Otherwise it deselects everyone: always in
 			// the default mouse, where it is the cancel button, and under the Alternate Mouse Setup only
 			// with a dozer's structure on the cursor.  The structure itself comes off in CommandXlat.
-			if( TheGlobalData->isClassicUI() )
+			if( TheGlobalData->isClassicMouse() )
 			{
 				Coord3D cameraAtRelease;
 				TheTacticalView->getPosition( &cameraAtRelease );
@@ -1354,7 +1347,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			// A screen that fills the middle of the display and answers nothing on the keyboard is
 			// the thing being fixed, so group selection gives way for as long as it is up.
 			//
-			if( TheControlBar && TheControlBar->isPurchaseScienceVisible() && !TheGlobalData->isClassicUI()
+			if( TheControlBar && TheControlBar->isPurchaseScienceVisible()
 					&& group >= 1 && group <= PURCHASE_SCIENCE_COLUMNS )
 			{
 				TheControlBar->pressPurchaseScienceColumn( group - 1 );
@@ -1373,7 +1366,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 				}
 
 				// check for double-press to jump view
-				if ( now - m_lastGroupSelTime < 20 && group == m_lastGroupSelGroup )
+				if ( now - m_lastGroupSelTime < ConvertRetailFrames( 20U ) && group == m_lastGroupSelGroup )
 				{
 					DEBUG_LOG(("META: DOUBLETAP select team %d\n",group));
 					Player *player = ThePlayerList->getLocalPlayer();
@@ -1427,49 +1420,6 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			// logic only fills a squad from scratch, so the squad goes out again whole as a create: its
 			// members as the logic will hold them when this lands, then the selection after them.
 			Int group = t - GameMessage::MSG_META_ADD_TEAM0;
-
-			// Classic keeps the key the way the game shipped it: the squad joins the selection, and a
-			// second press jumps the camera to it
-			if ( TheGlobalData->isClassicUI() )
-			{
-				if ( isValidHotkeySquadIndex( group ) )
-				{
-					UnsignedInt now = TheGameLogic->getFrame();
-					if ( m_lastGroupSelTime == 0 )
-						m_lastGroupSelTime = now;
-
-					if ( now - m_lastGroupSelTime < 20 && group == m_lastGroupSelGroup )
-					{
-						Player *player = ThePlayerList->getLocalPlayer();
-						Squad *selectedSquad = player ? player->getHotkeySquad(group) : NULL;
-						if (selectedSquad != NULL)
-						{
-							VecObjectPtr objlist = selectedSquad->getLiveObjects();
-							Int numObjs = objlist.size();
-							if (numObjs > 0)
-								TheTacticalView->lookAt( objlist[numObjs-1]->getDrawable()->getPosition() );
-						}
-					}
-					else
-					{
-						//Kris: Jan 12, 2005
-						//Can't select other units if you have a structure selected. So deselect the structure to prevent
-						//group force attack exploit.
-						Drawable *draw = TheInGameUI->getFirstSelectedDrawable();
-						if( draw && draw->isKindOf( KINDOF_STRUCTURE ) )
-							TheInGameUI->deselectAllDrawables();
-
-						TheMessageStream->appendMessage((GameMessage::Type)(GameMessage::MSG_ADD_TEAM0 + group));
-						Player *player = ThePlayerList->getLocalPlayer();
-						if (player)
-							selectHotkeySquad( player, group, FALSE );
-					}
-					m_lastGroupSelTime = now;
-					m_lastGroupSelGroup = group;
-				}
-				disp = DESTROY_MESSAGE;
-				break;
-			}
 
 			if ( isValidHotkeySquadIndex( group ) )
 			{

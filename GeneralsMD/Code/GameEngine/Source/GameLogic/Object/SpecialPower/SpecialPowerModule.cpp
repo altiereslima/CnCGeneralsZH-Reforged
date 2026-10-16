@@ -571,10 +571,10 @@ void SpecialPowerModule::aboutToDoSpecialPower( const Coord3D *location )
 		getSpecialPowerModuleData()->m_specialPowerTemplate->getName(),
 		getObject()->getID());
 
-	// the observer's director camera goes to see it; this only tells the client
-	if( location != NULL )
-		TheObserverCamera.noteSpecialPower( getObject()->getControllingPlayer(), getObject()->getPosition(), location,
-			getObject()->isKindOf( KINDOF_FS_SUPERWEAPON ), getSpecialPowerModuleData()->m_specialPowerTemplate, getObject()->getTemplate() );
+	// the observer's director camera goes to see it, a power aimed at a unit or at nothing included
+	// (location NULL); this only tells the client
+	TheObserverCamera.noteSpecialPower( getObject()->getControllingPlayer(), getObject()->getPosition(), location,
+		getObject()->isKindOf( KINDOF_FS_SUPERWEAPON ), getSpecialPowerModuleData()->m_specialPowerTemplate, getObject()->getTemplate() );
 
 	// Let EVA do her thing
 	SpecialPowerType type = getSpecialPowerModuleData()->m_specialPowerTemplate->getSpecialPowerType();
@@ -685,8 +685,6 @@ void SpecialPowerModule::aboutToDoSpecialPower( const Coord3D *location )
 		// the same place so the two can never end up describing different events.
 		// It stamps a frame on the client side and returns; nothing here changes.
 		chromaSuperweaponLaunched( type );
-		// and the event feed, which writes a line for a superweapon and a general's power, not a unit's
-		TheInGameUI->feedSpecialPower( getObject(), getPowerName(), getSpecialPowerModuleData()->m_specialPowerTemplate );
 	}
 
 	// get module data

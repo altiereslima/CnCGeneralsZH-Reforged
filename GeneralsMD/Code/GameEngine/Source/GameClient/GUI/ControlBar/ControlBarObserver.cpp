@@ -66,6 +66,8 @@
 #include "GameClient/GadgetPushButton.h"
 #include "GameClient/GadgetStaticText.h"
 #include "GameClient/GameText.h"
+#include "GameClient/InGameUI.h"
+#include "GameClient/ObserverCamera.h"
 #include "GameNetwork/NetworkDefs.h"
 //-----------------------------------------------------------------------------
 // DEFINES ////////////////////////////////////////////////////////////////////
@@ -163,6 +165,7 @@ WindowMsgHandledType ControlBarObserverSystem( GameWindow *window, UnsignedInt m
 			Int controlID = control->winGetWindowId();
 			if( controlID == buttonCancelID)
 			{
+				TheObserverCamera.stopLooking();
 				TheControlBar->setObserverLookAtPlayer(NULL);
 				ObserverPlayerInfoWindow->winHide(TRUE);
 				ObserverPlayerListWindow->winHide(FALSE);
@@ -173,11 +176,24 @@ WindowMsgHandledType ControlBarObserverSystem( GameWindow *window, UnsignedInt m
 			{
 				if( controlID == buttonPlayerID[i])
 				{
+					// his button is a look through his eyes: his fog, his camera; the same button again,
+					// the cancel button or Esc gives the whole map back.  All of it is this screen's
+					// picture, nothing reaches the logic
+					Player *picked = (Player *) GadgetButtonGetData( buttonPlayer[i] );
+					if( TheObserverCamera.isFogOn() && TheObserverCamera.getFollowedPlayerIndex() == picked->getPlayerIndex() )
+					{
+						TheObserverCamera.stopLooking();
+						TheControlBar->watchPlayer( NULL );
+						return MSG_HANDLED;
+					}
+					TheInGameUI->deselectAllDrawables();
+					TheObserverCamera.lookThrough( picked->getPlayerIndex() );
+					TheInGameUI->message( AsciiString( "CONTROLBAR:ObsLookingThrough" ), picked->getPlayerDisplayName().str() );
+
 					ObserverPlayerInfoWindow->winHide(FALSE);
 					ObserverPlayerListWindow->winHide(TRUE);
-					TheControlBar->setObserverLookAtPlayer((Player *) GadgetButtonGetData( buttonPlayer[i]));
-					if(TheControlBar->getObserverLookAtPlayer())
-						TheControlBar->populateObserverInfoWindow();
+					TheControlBar->setObserverLookAtPlayer(picked);
+					TheControlBar->populateObserverInfoWindow();
 					return MSG_HANDLED;
 				}
 			}

@@ -50,6 +50,7 @@
 #include "dx8fvf.h"
 #include "dx8caps.h"
 #include "dx8rendererdebugger.h"
+#include "dx11runtime.h"
 #include "wwdebug.h"
 #include "wwprofile.h"
 #include "wwmemlog.h"
@@ -62,6 +63,7 @@
 #include "camera.h"
 #include "stripoptimizer.h"
 #include "meshgeometry.h"
+#include "sortingrenderer.h"
 
 /*
 ** Global Instance of the DX8MeshRender
@@ -72,6 +74,7 @@ bool DX8TextureCategoryClass::m_gForceMultiply = false; // Forces opaque materia
 
 static DynamicVectorClass<Vector3>				_TempVertexBuffer;
 static DynamicVectorClass<Vector3>				_TempNormalBuffer;
+static DynamicVectorClass<MeshClass *>			_SkinFillMeshes;
 
 static MultiListClass<MeshModelClass>			_RegisteredMeshList;
 static TextureCategoryList							texture_category_delete_list;
@@ -1296,6 +1299,75 @@ void DX8SkinFVFCategoryContainer::Log(bool only_visible)
 
 // ----------------------------------------------------------------------------
 
+// Skins a thread claims at once; a skinned mesh is a few hundred vertices.
+static const int SKINS_PER_CLAIM=2;
+
+struct SkinFillJob
+{
+	MeshClass **meshes;
+	VertexFormatXYZNDUV2 *dest_verts;
+	Vector3 *loc;
+	Vector3 *norm;
+};
+
+// One skin, deformed and written into its slice of the vertex buffer.  Runs on the job pool: it
+// reads the mesh and its pose, writes only from its base vertex offset on, and allocates nothing,
+// so the bytes are the ones the single-threaded fill wrote.
+static void Fill_Skin(int index,void *context)
+{
+	SkinFillJob *job=(SkinFillJob *)context;
+	MeshClass *mesh=job->meshes[index];
+	MeshModelClass *mmc=mesh->Peek_Model();
+	const int mesh_vertex_count=mmc->Get_Vertex_Count();
+	const int vertex_offset=mesh->Get_Base_Vertex_Offset();
+
+	Vector3* loc=job->loc+vertex_offset;
+	Vector3* norm=job->norm+vertex_offset;
+	const Vector2* uv0=mmc->Get_UV_Array_By_Index(0);
+	const Vector2* uv1=mmc->Get_UV_Array_By_Index(1);
+	const unsigned* diffuse=mmc->Get_Color_Array(0,false);
+
+	VertexFormatXYZNDUV2* verts=job->dest_verts+vertex_offset;
+
+	mesh->Get_Deformed_Vertices(loc,norm);
+
+	for (int v=0;v<mesh_vertex_count;++v) {
+		verts[v].x=(*loc)[0];
+		verts[v].y=(*loc)[1];
+		verts[v].z=(*loc)[2];
+		verts[v].nx=(*norm)[0];
+		verts[v].ny=(*norm)[1];
+		verts[v].nz=(*norm)[2];
+		if (diffuse) {
+			verts[v].diffuse=*diffuse++;
+		}
+		else {
+			verts[v].diffuse=0;
+		}
+		if (uv0) {
+			verts[v].u1=(*uv0)[0];
+			verts[v].v1=(*uv0)[1];
+			uv0++;
+		}
+		else {
+			verts[v].u1=0.0f;
+			verts[v].v1=0.0f;
+		}
+		if (uv1) {
+			verts[v].u2=(*uv1)[0];
+			verts[v].v2=(*uv1)[1];
+			uv1++;
+		}
+		else {
+			verts[v].u2=0.0f;
+			verts[v].v2=0.0f;
+		}
+
+		loc++;
+		norm++;
+	}
+}
+
 void DX8SkinFVFCategoryContainer::Render(void)
 {
 	SNAPSHOT_SAY(("DX8SkinFVFCategoryContainer::Render()\n"));
@@ -1323,6 +1395,11 @@ void DX8SkinFVFCategoryContainer::Render(void)
 
 	unsigned int renderedVertexCount=0;
 
+	// Every mesh deforms into its own slice of the scratch buffers, so the fill can run on the job
+	// pool; sized here because a job must not allocate.
+	if (_TempVertexBuffer.Length() < (int)maxVertexCount) _TempVertexBuffer.Resize(maxVertexCount);
+	if (_TempNormalBuffer.Length() < (int)maxVertexCount) _TempNormalBuffer.Resize(maxVertexCount);
+
 	MeshClass * mesh = VisibleSkinHead;
 	MeshClass * remainingMesh = VisibleSkinHead;
 	while (renderedVertexCount < VisibleVertexCount)
@@ -1331,6 +1408,7 @@ void DX8SkinFVFCategoryContainer::Render(void)
 			VertexFormatXYZNDUV2 * dest_verts = l.Get_Formatted_Vertex_Array();
 			unsigned vertex_offset=0;
 			remainingMesh = NULL;
+			_SkinFillMeshes.Reset_Active();
 
 			while (mesh != NULL) {
 
@@ -1352,61 +1430,20 @@ void DX8SkinFVFCategoryContainer::Render(void)
 		WWASSERT((vertex_offset+mesh_vertex_count)<=VisibleVertexCount);
 			DX8_RECORD_SKIN_RENDER(mesh->Get_Num_Polys(),mesh_vertex_count);
 
-				if (_TempVertexBuffer.Length() < mesh_vertex_count) _TempVertexBuffer.Resize(mesh_vertex_count); 
-				if (_TempNormalBuffer.Length() < mesh_vertex_count) _TempNormalBuffer.Resize(mesh_vertex_count);
-
-				Vector3* loc=&(_TempVertexBuffer[0]);
-				Vector3* norm=&(_TempNormalBuffer[0]);
-				const Vector2* uv0=mmc->Get_UV_Array_By_Index(0);
-				const Vector2* uv1=mmc->Get_UV_Array_By_Index(1);
-				const unsigned* diffuse=mmc->Get_Color_Array(0,false);
-
-				VertexFormatXYZNDUV2* verts=dest_verts+vertex_offset;
-
-				mesh->Get_Deformed_Vertices(loc,norm);
-
-				for (int v=0;v<mesh_vertex_count;++v) {
-					verts[v].x=(*loc)[0];
-					verts[v].y=(*loc)[1];
-					verts[v].z=(*loc)[2];
-					verts[v].nx=(*norm)[0];
-					verts[v].ny=(*norm)[1];
-					verts[v].nz=(*norm)[2];
-					if (diffuse) {
-						verts[v].diffuse=*diffuse++;
-					}
-					else {
-						verts[v].diffuse=0;
-					}
-					if (uv0) {
-						verts[v].u1=(*uv0)[0];
-						verts[v].v1=(*uv0)[1];
-						uv0++;
-					}
-					else {
-						verts[v].u1=0.0f;
-						verts[v].v1=0.0f;
-					}
-					if (uv1) {
-						verts[v].u2=(*uv1)[0];
-						verts[v].v2=(*uv1)[1];
-						uv1++;
-					}
-					else {
-						verts[v].u2=0.0f;
-						verts[v].v2=0.0f;
-					}
-
-					loc++;
-					norm++;
-				}
-
 				mesh->Set_Base_Vertex_Offset(vertex_offset);
+				_SkinFillMeshes.Add(mesh);
 				vertex_offset+=mesh_vertex_count;
 				renderedVertexCount += mesh_vertex_count;
-				
+
 				mesh = mesh->Peek_Next_Visible_Skin();
 			}	//while
+
+			SkinFillJob job;
+			job.meshes=&_SkinFillMeshes[0];
+			job.dest_verts=dest_verts;
+			job.loc=&_TempVertexBuffer[0];
+			job.norm=&_TempNormalBuffer[0];
+			SortingRendererClass::Parallel_For(_SkinFillMeshes.Count(),SKINS_PER_CLAIM,Fill_Skin,&job);
 		}//lock
 
 		SNAPSHOT_SAY(("Set vb: %x ib: %x\n",vb,index_buffer));
@@ -1879,6 +1916,13 @@ void DX8TextureCategoryClass::Render(void)
 		//(gth) this if statement's contents are not tabbed to avoid perforce merge problems...
 		if (!DX8RendererDebugger::Is_Enabled() || !mesh->Is_Disabled_By_Debugger()) {
 
+		// The object's look on the Direct3D 11 frame (RTS3DScene::renderOneObject picks it), for this
+		// mesh's draws only.  A sorted mesh draws later, from the sorting pool, and goes without.
+		const unsigned draw_effect = mesh->Get_Draw_Effect();
+		if (draw_effect != 0) {
+			Direct3D11_Set_Draw_Effect(draw_effect, mesh->Get_Draw_Effect_Parameters());
+		}
+
 		if ((!!mesh->Peek_Model()->Get_Flag(MeshGeometryClass::SORT)) && WW3D::Is_Sorting_Enabled()) {
 			renderer->Render_Sorted(mesh->Get_Base_Vertex_Offset(),mesh->Get_Bounding_Sphere());
 		} else {
@@ -1932,6 +1976,10 @@ void DX8TextureCategoryClass::Render(void)
 			} 
 			else
 				renderer->Render(mesh->Get_Base_Vertex_Offset());
+		}
+		if (draw_effect != 0) {
+			static const float no_effect[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			Direct3D11_Set_Draw_Effect(0, no_effect);
 		}
 //--------------------------------------------------------------------
 		if (mesh->Get_ObjectScale() != 1.0f)
@@ -1997,6 +2045,7 @@ void DX8MeshRendererClass::Shutdown(void)
 	Clear_Pending_Delete_Lists();
 	_TempVertexBuffer.Clear();	//free memory
 	_TempNormalBuffer.Clear();
+	_SkinFillMeshes.Clear();
 }
 
 // ----------------------------------------------------------------------------

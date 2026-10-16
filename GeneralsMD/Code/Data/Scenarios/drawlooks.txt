@@ -1,0 +1,99 @@
+# The four Direct3D 11 object looks of 528b9054 (power outage, EMP, cloak, revealed) as match
+# scenes on Twilight Flame, for a before/after against -d3d9. Seat 0 is China and the local player
+# (no -observer, so its own stealth draws see-through and its detectors reveal), seat 1 America.
+# Two-seat starts: seat 0 at 537,3188, seat 1 at 1733,4205. A selector matches every unit of that
+# template in the seat, so each place has its own templates, and `attack` takes the seat's newest
+# match, which is why the forward power plant is spawned second.
+#
+# Three places, filmed one after another by Cinema/drawlooks.txt:
+#   A  seat 0's base at start0, frames 10..600: two power plants carry it (+20 against -11).
+#      Tomahawks and Paladins come in from the east and kill the forward plant (837,2908), and the
+#      base drops to +10 against -11 and goes dark while trucks, a troop crawler and Gattling
+#      tanks move through it.
+#   B  the open field 1300..1700, 3500..4000, frames 450..950: an American Microwave column
+#      drives into three Chinese EMP mines (first blast about frame 590) and stops, disabled,
+#      while Battlemasters and Red Guard fight a line of Crusaders below it.
+#   C  the open ground 2150..2750, 3650..4000, frames 900..1450: the own Black Lotus walks east
+#      under her cloak beside a Listening Outpost, finds Colonel Burton walking west (revealed),
+#      and an American dozer driving past finds her (amber pulse); Tank Hunters go after Burton.
+#
+# Headless check (frames from the log): HEADLESS TALLY on ChinaPowerPlant, AmericaTankMicrowave
+# (an EMP-disabled unit drops out of the alive count) and ChinaEMPMine (each blast costs a mine
+# health), lines at the end of this file.
+#
+#   generals.exe -win -borderless -xres 1280 -yres 720 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -fps 120 -noFPSLimit -particlecap 2500 -map "Maps\Twilight Flame\Twilight Flame.map"
+#     -autoskirmish 2 -takeover -side 0 FactionChina -side 1 FactionAmerica -seed 7
+#     -scenario drawlooks -cinema drawlooks -video 60 1440 drawlooks_d3d11 -maxframes 1450
+#   and the same with -d3d9 for the before.
+
+# A: seat 0's base
+10    spawn      0  ChinaPowerPlant               1  start0:-240:160
+10    spawn      0  ChinaPowerPlant               1  start0:300:-280
+10    spawn      0  ChinaWarFactory               1  start0:40:-340
+10    spawn      0  ChinaBarracks                 1  start0:60:320
+10    spawn      0  ChinaSupplyCenter             1  start0:-260:440
+10    spawn      0  ChinaPropagandaCenter         1  start0:-240:-200
+10    spawn      0  ChinaSpeakerTower             1  start0:280:160
+10    spawn      0  ChinaGattlingCannon           1  start0:420:300
+10    spawn      0  ChinaGattlingCannon           1  start0:-60:520
+20    spawn      0  ChinaVehicleSupplyTruck       2  start0:-160:380 60
+20    spawn      0  ChinaVehicleTroopCrawler      1  start0:-200:-320
+20    spawn      0  ChinaTankGattling             3  start0:120:-120 50
+30    move       0  ChinaVehicleSupplyTruck          start0:420:-300
+30    move       0  ChinaVehicleTroopCrawler         start0:300:320
+40    move       0  ChinaTankGattling                start0:-120:-60
+20    spawn      1  AmericaVehicleTomahawk        4  1130 3260 40
+20    spawn      1  AmericaTankPaladin            4  1100 3150 50
+40    move       1  AmericaVehicleTomahawk           start0:460:-290
+40    move       1  AmericaTankPaladin               start0:420:-180
+150   forceattack 1 AmericaVehicleTomahawk        0  ChinaPowerPlant
+200   forceattack 1 AmericaTankPaladin            0  ChinaPowerPlant
+300   forceattack 1 AmericaVehicleTomahawk        0  ChinaPowerPlant
+300   forceattack 1 AmericaTankPaladin            0  ChinaPowerPlant
+330   move       0  ChinaVehicleSupplyTruck          start0:-160:380
+330   move       0  ChinaVehicleTroopCrawler         start0:-200:-320
+330   attackmove 0  ChinaTankGattling                start0:600:-200
+
+# B: the field
+450   spawn      0  ChinaEMPMine                  1  1530 3660
+450   spawn      0  ChinaEMPMine                  1  1565 3625
+450   spawn      0  ChinaEMPMine                  1  1495 3695
+450   spawn      1  AmericaTankCrusader           4  1560 3800 50
+450   spawn      1  AmericaTankMicrowave          3  1700 3520 50
+460   move       1  AmericaTankMicrowave             1350 3800
+540   spawn      0  ChinaTankBattleMaster         4  1200 3980 50
+540   spawn      0  ChinaInfantryRedguard         6  1150 3900 18
+550   attackmove 0  ChinaTankBattleMaster            1400 3850
+550   attackmove 0  ChinaInfantryRedguard            1380 3880
+550   attackmove 1  AmericaTankCrusader              1200 4000
+
+# C: the scouts
+900   spawn      0  ChinaInfantryBlackLotus       1  2150 3720
+900   spawn      0  ChinaVehicleListeningOutpost  1  2120 3800
+900   spawn      0  ChinaInfantryTankHunter       5  2050 3900 18
+900   spawn      1  AmericaInfantryColonelBurton  1  2780 3780
+900   spawn      1  AmericaVehicleDozer           1  2700 4000
+920   move       0  ChinaInfantryBlackLotus          2650 3700
+920   move       0  ChinaVehicleListeningOutpost     2600 3820
+920   move       1  AmericaInfantryColonelBurton     2100 3800
+1100  move       1  AmericaVehicleDozer              2250 3700
+1250  attackmove 0  ChinaInfantryTankHunter          2300 3800
+
+# timing checks, read headless
+100   tally      0  ChinaPowerPlant
+300   tally      0  ChinaPowerPlant
+400   tally      0  ChinaPowerPlant
+500   tally      0  ChinaPowerPlant
+600   tally      0  ChinaPowerPlant
+600   tally      1  AmericaVehicleTomahawk
+560   tally      1  AmericaTankMicrowave
+600   tally      1  AmericaTankMicrowave
+650   tally      1  AmericaTankMicrowave
+700   tally      1  AmericaTankMicrowave
+800   tally      1  AmericaTankMicrowave
+900   tally      1  AmericaTankMicrowave
+900   tally      0  ChinaEMPMine
+1200  tally      1  AmericaInfantryColonelBurton
+1440  tally      1  AmericaInfantryColonelBurton
+1440  tally      0  ChinaInfantryBlackLotus

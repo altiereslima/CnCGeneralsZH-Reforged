@@ -39,7 +39,7 @@
   the farm is made and again after the runs, and a difference fails the check. Symbolic links need an
   elevated session or Developer Mode.
 
-  -ExpectCrc "0@1200:0xE5C34BF3","1@12000:0xA631761E" fails the check when a run's recorded CRC is another
+  -ExpectCrc "0@2400:0x67F86891","1@24000:0x90B6D230" fails the check when a run's recorded CRC is another
   one: that is the cross-platform comparison ("seed:crc" means that seed at -MaxFrames). Without it the
   check only asks that each replay plays back to the same world. Pin -ExpectCrc to the commit the numbers
   were made on: upstream gameplay data moves them.
@@ -51,9 +51,9 @@
   one, with the same arguments, and exits with its status.
 
 .EXAMPLE
-  .\windows-ci.ps1 -DataDir D:\ZeroHourData -Runs "0@1200","0@12000","1@12000" -ExpectCrc "0@1200:0xE5C34BF3","0@12000:0x0C1B85E4","1@12000:0xA631761E"
+  .\windows-ci.ps1 -DataDir D:\ZeroHourData -Runs "0@2400","0@24000","1@24000" -ExpectCrc "0@2400:0x67F86891","0@24000:0x6404352D","1@24000:0x90B6D230"
     (the E1 pins PORTING.md gives; upstream gameplay data changes move them)
-  .\windows-ci.ps1 -DataDir D:\ZeroHourData -SkipBuild -Seeds 0 -MaxFrames 1200
+  .\windows-ci.ps1 -DataDir D:\ZeroHourData -SkipBuild -Seeds 0 -MaxFrames 2400
   .\windows-ci.ps1 -Bundle D:\bundles\branch.bundle -Ref my-branch -DataDir D:\ZeroHourData
 
   Exit status: 0 when everything passed, 1 otherwise. The summary says which part failed.
@@ -65,7 +65,7 @@ param(
 	[string] $Config = "Release",
 	[switch] $SkipBuild,
 	[string[]] $Seeds = @("0", "1"),
-	[int] $MaxFrames = 12000,
+	[int] $MaxFrames = 24000,
 	# "seed@frames" pairs, in place of -Seeds at -MaxFrames
 	[string[]] $Runs = @(),
 	# "seed:0xCRC" pairs the recorded CRCs must equal

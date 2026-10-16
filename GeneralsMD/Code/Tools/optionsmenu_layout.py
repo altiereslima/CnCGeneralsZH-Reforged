@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Rebuild OptionsMenu.wnd as seven tabbed pages on one grid.
+"""Rebuild OptionsMenu.wnd as eight tabbed pages on one grid.
 
 EA's options screen is one 800x600 panel with everything on it at once, and it was already full
 when it shipped: the language filter, the keyboard button and the four camera checkboxes are all
 still in the file, parked off the right edge with HIDDEN set, because there was nowhere left to put
 them.  Seventeen settings later there is no version of "find room" that works.
 
-So the screen becomes seven pages behind seven buttons: Display, Graphics, Effects, Audio, Controls,
-Interface and Network.  Every graphics setting is on Graphics or Effects, including the ones EA hid in
+So the screen becomes eight pages behind eight buttons: Display, Graphics, Effects, Audio, Controls,
+Interface, Network and Hotkeys, the last two lists rather than settings (build_hotkeys_page).  Every graphics setting is on Graphics or Effects, including the ones EA hid in
 a popup that only opened when Custom was picked from a combo box on another page.  Each page is a list
 of titled groups, sorted by what a setting does, flowed into three columns on one grid, so a heading,
 a label and a box start in the same place whichever tab is open, and every slider has a readout
@@ -15,27 +15,24 @@ beside it.  Nothing is redrawn: the controls keep the images and tooltips they s
 or a check box takes the lettering of the one next to it, and what is new is cloned from a control
 that is already there.
 
-Two layouts come out of one run.  OptionsMenu.wnd is the Reforged interface's; OptionsMenuClassic.wnd
-leaves out every control the Classic interface overrules (REFORGED_ONLY) and flows what is left again,
-so no page shows a hole where a setting would have been.  Shell.cpp opens whichever one the run's
-interface wants.
+The result is OptionsMenuClassic.wnd, which Shell.cpp opens.
 
-    python optionsmenu_layout.py <shipped OptionsMenu.wnd> <Reforged .wnd> <Classic .wnd>
+    python optionsmenu_layout.py <shipped OptionsMenu.wnd> <output .wnd>
 
 The input is the file out of WindowZH.big:
 
     python bigfile.py extract ../../Run/WindowZH.big "*/OptionsMenu.wnd" -o wnd
-    python optionsmenu_layout.py wnd/Window/Menus/OptionsMenu.wnd ../Data/Window/Menus/OptionsMenu.wnd ../Data/Window/Menus/OptionsMenuClassic.wnd
+    python optionsmenu_layout.py wnd/Window/Menus/OptionsMenu.wnd ../Data/Window/Menus/OptionsMenuClassic.wnd
 
-The outputs are the tracked masters under Code/Data; the build copies them to Run/Window/Menus/, where
-a loose file beats the archive.  Layouts are not in the multiplayer INI checksum, so these do not have
-to match across a network game.
+The output is the tracked master under Code/Data; the build copies it to Run/Window/Menus/, where a
+loose file beats the archive.  Layouts are not in the multiplayer INI checksum, so it does not have to
+match across a network game.
 
     python optionsmenu_layout.py selfcheck
 
 reads the tracked files back and checks they still agree: every widget TheOptionCatalog names exists
-in the Reforged layout and, unless the Classic interface overrules it, in the Classic one, and every
-label, tooltip and combo box entry it needs is in Patch.str.  Run by CTest as optionsmenu_selfcheck.
+in the layout, and every label, tooltip and combo box entry it needs is in Patch.str.  Run by CTest as
+optionsmenu_selfcheck.
 """
 
 import os
@@ -49,9 +46,10 @@ from wndlayout import clone
 # The panel and everything on it, in the layout's own 800x600 creation resolution.  One inner edge,
 # 16 pixels in from the panel on both sides, is where the title, the tabs, the pages, the buttons
 # and the version line all start and stop.  The frame is as tall as the tallest group column needs -
-# Graphics' Effects column ends 308 pixels below its heading, its Image column 304 - plus the title,
-# the tabs and the buttons, and it is centred on the 600 line: 58 above it, 58 below.  Seven tabs
-# still fit the inner width at 100 pixels each.
+# Effects' Shadows column and Graphics' Quality column both end 312 pixels below their heading, on the
+# page's last pixel - plus the title, the tabs and the buttons, and it is centred on the 600 line: 58
+# above it, 58 below.  A column that runs past the page is refused when the layout is built.  Eight tabs
+# still fit the inner width at 87 pixels each.
 PANEL = (20, 58, 760, 484)          # left, top, width, height
 INNER_LEFT, INNER_WIDTH = 36, 728
 TITLE = (INNER_LEFT, 64, 400, 32)
@@ -69,7 +67,36 @@ TABS = [
     ("PageControls", "TabControls", "GUI:OptionsTabControls"),
     ("PageInterface", "TabInterface", "GUI:OptionsTabInterface"),
     ("PageNetwork",  "TabNetwork",  "GUI:OptionsTabNetwork"),
+    ("PageHotkeys",  "TabHotkeys",  "GUI:OptionsTabHotkeys"),
 ]
+
+# The Hotkeys page is two lists rather than groups of settings: every command on the left, and on the
+# right the command bar of one building or unit, picked by general and object.  Its lists are cloned
+# from the LAN lobby's chat list, the one scrolling list box with EA's art that is two layouts away,
+# and its buttons from the Network page's Refresh.  OptionsMenuHotkeys.cpp fills all of it in.
+#   (name, left, top, width, height)
+HOTKEY_LIST_SOURCE = "ListboxChatWindowLanGame"
+HOTKEY_COMMANDS = ("ListboxHotkeyCommands", 40, 182, 344, 220)
+HOTKEY_FACTION = ("ComboBoxHotkeyFaction", 408, 182, 352, 24)
+HOTKEY_OBJECT = ("ComboBoxHotkeyObject", 408, 214, 352, 24)
+HOTKEY_BUTTONS = ("ListboxHotkeyButtons", 408, 246, 352, 156)
+# four lines of the notes' 10 point lettering: a clash names every button on the letter
+HOTKEY_NOTE = ("HotkeyNote", 34, 408, 398, 54)
+HOTKEY_HEADINGS = [("GUI:HotkeysCommands", 40), ("GUI:HotkeysCommandBar", 408)]
+#   (name, caption key, left)
+HOTKEY_BUTTON_ROW = [("ButtonHotkeyChange", "GUI:HotkeysChange", 440),
+                     ("ButtonHotkeyClear", "GUI:HotkeysClear", 548),
+                     ("ButtonHotkeyDefault", "GUI:HotkeysDefault", 656)]
+HOTKEY_BUTTON_TOP, HOTKEY_BUTTON_WIDTH = 412, 104
+# the share of each list's width a column takes: name and key, and on the bar a cameo first
+HOTKEY_COMMAND_COLUMNS = (68, 32)
+HOTKEY_BUTTON_COLUMNS = (12, 66, 22)
+# strings OptionsMenuHotkeys.cpp shows besides the captions above
+HOTKEY_STRINGS = ["GUI:HotkeysNone", "GUI:HotkeysPressKey", "GUI:HotkeysPressLetter", "GUI:HotkeysPressForceAttack",
+                  "GUI:HotkeysClash", "GUI:HotkeysAlsoOn", "GUI:HotkeysFixed", "GUI:HotkeysGameKey",
+                  "GUI:HotkeysMoved", "GUI:HotkeysForceAttack", "GUI:HotkeysPick", "GUI:HotkeysOnFixedKey",
+                  "GUI:HotkeysButtonMoved", "TOOLTIP:HotkeyChange", "TOOLTIP:HotkeyClear",
+                  "TOOLTIP:HotkeyDefault"]
 
 # EA's four group panels.  Each drew a framed box of its own inside the page, sized for a heading
 # and a row that are gone, so no two pages had their first control in the same place.  The panels
@@ -124,11 +151,6 @@ NAME_THE_UNNAMED = [
     ("GUI:Options", "LabelTitle"),
 ]
 
-# EA's controls that only the Classic page keeps.  CheckAlternateMouse is EA's Alternate Mouse Setup:
-# Classic plays 1.04's mouse and offers its alternate one too, Reforged has one mouse and ignores the
-# setting, so its page drops the box.  OptionsMenu.cpp finds it by name and does without it.
-CLASSIC_ONLY = ["CheckAlternateMouse"]
-
 # The templates new controls are cloned from, and whose lettering the moved ones take.
 CHECK, LABEL, COMBO, SLIDER = "Retaliation", "DetailLabel", "ComboBoxDetail", "SliderGamma"
 
@@ -155,18 +177,13 @@ NEW_CONTROLS = [
     (COMBO,  "ComboBoxHealthBars",     None),
     (LABEL,  "LabelPlayerColors",      "GUI:PlayerColors"),
     (COMBO,  "ComboBoxPlayerColors",   None),
-    (LABEL,  "LabelHudScale",          "GUI:HudScale"),
-    (COMBO,  "ComboBoxHudScale",       None),
     (LABEL,  "LabelLanguage",          "GUI:Language"),
     (COMBO,  "ComboBoxLanguage",       None),
     (CHECK,  "CheckOrderLines",        "GUI:OrderLines"),
     (CHECK,  "CheckNetBox",            "GUI:NetBox"),
-    (LABEL,  "LabelIncomeRate",        "GUI:IncomeRate"),
-    (COMBO,  "ComboBoxIncomeRate",     None),
     (CHECK,  "CheckEmptyBuildingPips", "GUI:EmptyBuildingPips"),
     (CHECK,  "CheckZoomToCursor",      "GUI:ZoomToCursor"),
     (CHECK,  "CheckIsometricCamera",   "GUI:IsometricCamera"),
-    (CHECK,  "CheckSmoothMotion",      "GUI:SmoothMotion"),
     (CHECK,  "CheckStartAtMaxZoom",    "GUI:StartAtMaxZoom"),
     (CHECK,  "CheckSnapCamera45",      "GUI:SnapCamera45"),
     (CHECK,  "CheckGridBuild",         "GUI:GridBuild"),
@@ -188,6 +205,31 @@ NEW_CONTROLS = [
     (SLIDER, "SliderAmbientVolume",    None),
     (LABEL,  "LabelZoomSpeed",         "GUI:ZoomSpeed"),
     (SLIDER, "SliderZoomSpeed",        None),
+    (LABEL,  "LabelShadowQuality",     "GUI:ShadowQuality"),
+    (COMBO,  "ComboBoxShadowQuality",  None),
+    (CHECK,  "CheckVolumetricSmoke",   "GUI:VolumetricSmoke"),
+    (LABEL,  "LabelLightingStyle",     "GUI:LightingStyle"),
+    (COMBO,  "ComboBoxLightingStyle",  None),
+    (CHECK,  "CheckSmokeFireLighting", "GUI:SmokeFireLighting"),
+    (CHECK,  "CheckDebrisTrails",      "GUI:DebrisTrails"),
+    (CHECK,  "CheckEdgeScrollWindowed", "GUI:EdgeScrollWindowed"),
+    (CHECK,  "CheckFormationDrag",     "GUI:FormationDrag"),
+    (CHECK,  "CheckBuildWithoutWorker", "GUI:BuildWithoutWorker"),
+    (LABEL,  "LabelHealthBarColors",   "GUI:HealthBarColors"),
+    (COMBO,  "ComboBoxHealthBarColors", None),
+    (LABEL,  "LabelMenuTransitionSpeed", "GUI:MenuTransitionSpeed"),
+    (SLIDER, "SliderMenuTransitionSpeed", None),
+]
+
+# EA's check boxes that shipped HIDDEN off the panel's right edge with working code behind them in
+# OptionsMenu.cpp, which saves each one the moment it is clicked.  They come onto the pages with a
+# tooltip each; their captions are EA's labels, retitled in Patch.str.
+#   (name, tooltip key)
+EA_PARKED = [
+    ("CheckBoxDrawAnchor", "TOOLTIP:DrawScrollAnchor"),
+    ("CheckBoxMoveAnchor", "TOOLTIP:MoveScrollAnchor"),
+    ("CheckBoxSaveCamera", "TOOLTIP:SaveCamera"),
+    ("CheckBoxUseCamera",  "TOOLTIP:UseCamera"),
 ]
 
 # A slider on its own says nothing about where it stands, so each one has a readout beside it that
@@ -195,7 +237,7 @@ NEW_CONTROLS = [
 READOUTS = [
     "ValueGamma", "ValueTextureResolution", "ValueParticleCap", "ValueAnisotropy",
     "ValueMusicVolume", "ValueSFXVolume", "ValueVoiceVolume", "ValueScrollSpeed",
-    "ValueDragTolerance", "ValueAmbientVolume", "ValueZoomSpeed",
+    "ValueDragTolerance", "ValueAmbientVolume", "ValueZoomSpeed", "ValueMenuTransitionSpeed",
 ]
 
 # Lines of small grey text under a control that say what its current choice does, written by
@@ -218,7 +260,8 @@ NOTE_COLOR = ("ENABLED:  192 192 192 255, ENABLEDBORDER:  0 0 0 255, "
 # a cloned slider keeps its template's range unless it is given one; selfcheck holds these to the
 # catalog row's own bounds
 SLIDER_RANGES = [("SliderAnisotropy", 0, 16), ("SliderDragTolerance", 2, 50),
-                 ("SliderAmbientVolume", 0, 100), ("SliderZoomSpeed", 25, 300)]
+                 ("SliderAmbientVolume", 0, 100), ("SliderZoomSpeed", 25, 300),
+                 ("SliderMenuTransitionSpeed", 25, 400)]
 
 # EA's captions that do not fit the page: two popup headings written in capitals, and a check box
 # caption that ran 20 pixels past the panel's right edge once it stood in a 268 pixel column.
@@ -275,8 +318,7 @@ GROUP_LAYOUT = [
             setting("LabelFullscreenScaling", "ComboBoxFullscreenScaling"),
             ("check", "CheckVSync")]),
         ("GUI:OptionsGroupPicture", [
-            setting("GammaLabel", "SliderGamma", "ValueGamma"),
-            ("check", "CheckSmoothMotion")])]),
+            setting("GammaLabel", "SliderGamma", "ValueGamma")])]),
 
     ("PageGraphics", [
         ("GUI:OptionsGroupDetail", [
@@ -291,12 +333,16 @@ GROUP_LAYOUT = [
             setting("LabelTextureFilter", "ComboBoxTextureFilter"),
             setting("LabelAnisotropy", "SliderAnisotropy", "ValueAnisotropy")]),
         ("GUI:OptionsGroupLighting", [
+            setting("LabelLightingStyle", "ComboBoxLightingStyle"),
             setting("LabelBloom", "ComboBoxBloom"),
             ("check", "CheckGroundLighting"),
             ("check", "CheckHeatEffects")])]),
 
     ("PageEffects", [
-        ("GUI:OptionsGroupShadows", [("check", name) for name in SHADOW_CHECKS]),
+        ("GUI:OptionsGroupShadows",
+            [setting("LabelShadowQuality", "ComboBoxShadowQuality")]
+            + [("check", name) for name in SHADOW_CHECKS]
+            + [("check", "CheckVolumetricSmoke")]),
         ("GUI:OptionsGroupExtras", [
             ("check", "CheckShowProps"),
             ("check", "CheckSmoothWater"),
@@ -305,7 +351,9 @@ GROUP_LAYOUT = [
             ("check", "CheckBehindBuilding")]),
         ("GUI:OptionsGroupParticles", [
             setting("LabelSmoke", "ComboBoxSmoke"),
-            ("check", "CheckParticleBounce")])]),
+            ("check", "CheckParticleBounce"),
+            ("check", "CheckSmokeFireLighting"),
+            ("check", "CheckDebrisTrails")])]),
 
     ("PageAudio", [
         ("GUI:OptionsGroupVolume", [
@@ -321,32 +369,41 @@ GROUP_LAYOUT = [
             ("check", "CheckIsometricCamera"),
             ("check", "CheckZoomToCursor"),
             ("check", "CheckStartAtMaxZoom"),
-            ("check", "CheckSnapCamera45")]),
+            ("check", "CheckSnapCamera45"),
+            ("check", "CheckEdgeScrollWindowed")]),
         ("GUI:OptionsGroupOrders", [
+            setting("LabelDragTolerance", "SliderDragTolerance", "ValueDragTolerance"),
             ("check", "CheckAlternateMouse"),
             ("check", "Retaliation"),
-            ("check", "CheckDoubleClickAttackMove")]),
+            ("check", "CheckDoubleClickAttackMove"),
+            ("check", "CheckFormationDrag"),
+            ("check", "CheckBoxDrawAnchor"),
+            ("check", "CheckBoxMoveAnchor")]),
         ("GUI:OptionsGroupPlacement", [
             ("check", "CheckGridBuild"),
             ("check", "CheckSnapBuild45"),
             ("check", "CheckSnapBuildNeighbour"),
-            ("check", "CheckNudgeBuild")]),
+            ("check", "CheckNudgeBuild"),
+            ("check", "CheckBuildWithoutWorker")]),
         ("GUI:OptionsGroupInput", [
-            setting("LabelDragTolerance", "SliderDragTolerance", "ValueDragTolerance"),
             ("check", "CheckChromaLighting")])]),
 
     ("PageInterface", [
         ("GUI:OptionsGroupHud", [
-            setting("LabelHudScale", "ComboBoxHudScale"),
-            setting("LabelIncomeRate", "ComboBoxIncomeRate"),
             ("check", "CheckNetBox")]),
+        ("GUI:OptionsGroupMenus", [
+            setting("LabelMenuTransitionSpeed", "SliderMenuTransitionSpeed", "ValueMenuTransitionSpeed")]),
         ("GUI:OptionsGroupBattlefield", [
             setting("LabelHealthBars", "ComboBoxHealthBars"),
+            setting("LabelHealthBarColors", "ComboBoxHealthBarColors"),
             setting("LabelPlayerColors", "ComboBoxPlayerColors"),
             ("check", "CheckOrderLines"),
             ("check", "CheckEmptyBuildingPips")]),
         ("GUI:OptionsGroupLanguage", [
-            setting("LabelLanguage", "ComboBoxLanguage")])]),
+            setting("LabelLanguage", "ComboBoxLanguage")]),
+        ("GUI:OptionsGroupReplays", [
+            ("check", "CheckBoxSaveCamera"),
+            ("check", "CheckBoxUseCamera")])]),
 
     ("PageNetwork", [
         ("GUI:OptionsGroupAddresses", [
@@ -359,19 +416,6 @@ GROUP_LAYOUT = [
         ("GUI:OptionsGroupProxy", [
             setting("StaticTextHTTPProxy", "TextEntryHTTPProxy")])]),
 ]
-
-# Settings the Classic interface overrules whatever Options.ini says, each behind an isClassicUI()
-# gate where the value is read: smooth motion (W3DDisplay.cpp), the HUD scale (ControlBar.cpp), the
-# corner net box (InGameUI.cpp, no HTML pages in Classic), the income beside the money (InGameUI.cpp),
-# health bar mode and empty garrison pips (Drawable.cpp) and order lines (W3DInGameUI.cpp).  Every one
-# is a catalog row, whose menu passes skip a control the layout does not carry, so the Classic layout
-# leaves them out and keeps the value.  Zoom to cursor, the opening zoom, the camera's 45 degree steps
-# the three placement snaps and the nudge are not here: they start off, which is how 1.04 played, and Classic
-# honours them once ticked.
-REFORGED_ONLY = [
-    "CheckSmoothMotion", "ComboBoxHudScale", "CheckNetBox", "ComboBoxIncomeRate", "CheckOrderLines",
-]
-
 
 def item_height(item):
     if item[0] == "note":
@@ -398,17 +442,6 @@ def flow(groups):
                 best = (tallest, columns)
     return best[1]
 
-
-def without(groups, names):
-    """A page with these controls out, and a group left with nothing in it out too.  The Classic page
-    leaves out REFORGED_ONLY, the Reforged page CLASSIC_ONLY."""
-    kept = []
-    for heading, items in groups:
-        items = [item for item in items if (item[2] if item[0] == "setting" else item[1])
-                 not in names]
-        if items:
-            kept.append((heading, items))
-    return kept
 
 # EA controls that ship hidden and stay hidden, parked on a page rather than off the panel
 #   (page, name, column, top)
@@ -541,14 +574,6 @@ def drawn_text(window):
     return match.group(1) if match else None
 
 
-def drop_by_name(root, names):
-    """Delete every window with one of these names, wherever it sits."""
-    wanted = set(names)
-    for node in list(root.walk()):
-        node.children = [child for child in node.children
-                         if (child.name or "").split(":")[-1] not in wanted]
-
-
 def drop_by_text(root, texts):
     """Delete every window drawing one of these strings, wherever it sits."""
     wanted = set(texts)
@@ -557,10 +582,63 @@ def drop_by_text(root, texts):
                          if drawn_text(child) not in wanted]
 
 
-def build(layout, classic=False):
+def make_heading(templates, name, key):
+    """A group's heading: a label in the buttons' lettering and the heading green."""
+    heading = clone(templates[LABEL], _named(name))
+    heading.children = []
+    heading.put_prop("TEXT", '"%s"' % key)
+    drop_prop(heading, "TOOLTIPTEXT")
+    restyle(heading, templates["ButtonDefaults"], keys=("FONT", "HEADERTEMPLATE"))
+    heading.set_prop("TEXTCOLOR", GROUP_HEADING_COLOR)
+    heading.put_prop("STATICTEXTDATA", "CENTERED: 0")
+    return heading
+
+
+def make_list(templates, spec, columns):
+    """A scrolling list cloned from the LAN lobby's chat, which takes the focus so the arrow keys
+    walk it, and keeps no more rows than it is given."""
+    name, left, top, width, height = spec
+    listbox = clone(templates[HOTKEY_LIST_SOURCE], _named(name))
+    listbox.place(left, top, width, height)
+    listbox.set_prop("STATUS", "ENABLED")
+    widths = "".join("COLUMNSWIDTH: %d, " % share for share in columns)
+    listbox.set_prop("LISTBOXDATA", "LENGTH: 300, AUTOSCROLL: 0, SCROLLIFATEND: 0, AUTOPURGE: 0, SCROLLBAR: 1, "
+                     "MULTISELECT: 0, COLUMNS: %d, %sFORCESELECT: 0" % (len(columns), widths))
+    return listbox
+
+
+def build_hotkeys_page(page, templates):
+    for index, (key, left) in enumerate(HOTKEY_HEADINGS):
+        heading = make_heading(templates, "GroupHeadingHotkeys%d" % index, key)
+        heading.place(left - TEXT_NUDGE, HEADING_TOP, 344, ROW_HEIGHT)
+        page.children.append(heading)
+    page.children.append(make_list(templates, HOTKEY_COMMANDS, HOTKEY_COMMAND_COLUMNS))
+    for name, left, top, width, height in (HOTKEY_FACTION, HOTKEY_OBJECT):
+        combo = clone(templates[COMBO], _named(name))
+        combo.place(left, top, width, height)
+        drop_prop(combo, "TOOLTIPTEXT")
+        combo.set_prop("COMBOBOXDATA", "ISEDITABLE: 0, MAXCHARS: 64, MAXDISPLAY: 12, ASCIIONLY: 0, LETTERSANDNUMBERS: 0")
+        page.children.append(combo)
+    page.children.append(make_list(templates, HOTKEY_BUTTONS, HOTKEY_BUTTON_COLUMNS))
+    name, left, top, width, height = HOTKEY_NOTE
+    note = make_note(templates[LABEL], name)
+    note.place(left, top, width, height)
+    page.children.append(note)
+    for name, key, left in HOTKEY_BUTTON_ROW:
+        button = clone(templates["ButtonFirewallRefresh"], _named(name))
+        button.children = []
+        button.place(left, HOTKEY_BUTTON_TOP, HOTKEY_BUTTON_WIDTH, ROW_HEIGHT)
+        button.put_prop("TEXT", '"%s"' % key)
+        button.put_prop("TOOLTIPTEXT", '"TOOLTIP:%s"' % name[len("Button"):])
+        page.children.append(button)
+
+
+def build(layout):
     old = layout.find("OptionsMenuParentOld")
     templates = dict((name, layout.find(name))
-                     for name in (CHECK, LABEL, COMBO, SLIDER, "VideoParent", "ButtonDefaults"))
+                     for name in (CHECK, LABEL, COMBO, SLIDER, "VideoParent", "ButtonDefaults",
+                                  "ButtonFirewallRefresh"))
+    templates[HOTKEY_LIST_SOURCE] = wndlayout.load(LAN_LAYOUT).find(HOTKEY_LIST_SOURCE)
 
     for text, name in NAME_THE_UNNAMED:
         for node in layout.root.walk():
@@ -569,8 +647,6 @@ def build(layout, classic=False):
                 node.name = _named(name)
 
     drop_by_text(layout.root, HEADINGS)
-    if not classic:
-        drop_by_name(layout.root, CLASSIC_ONLY)
     for name in RULES + DROP:
         detach(old, name)
 
@@ -582,6 +658,11 @@ def build(layout, classic=False):
             waiting[short(child)] = child
     for name in LOOSE:
         waiting[name] = detach(old, name)
+    for name, tooltip in EA_PARKED:
+        control = detach(old, name)
+        control.set_prop("STATUS", "ENABLED+IMAGE+BORDER")   # the page's own check boxes', not HIDDEN
+        control.put_prop("TOOLTIPTEXT", '"%s"' % tooltip)
+        waiting[name] = control
     for node in detach(old, ADVANCED).walk():
         if short(node) in ADVANCED_KEEP:
             waiting[short(node)] = node
@@ -609,23 +690,8 @@ def build(layout, classic=False):
             control.put_prop("STATICTEXTDATA", "CENTERED: 0")
         pages[page_name].children.append(control)
 
-    if classic:
-        # the control and the label or readout that go with it
-        for _page, groups in GROUP_LAYOUT:
-            for _heading, items in groups:
-                for item in items:
-                    if item[0] == "setting" and item[2] in REFORGED_ONLY:
-                        for name in item[1:]:
-                            if name:
-                                waiting.pop(name)
-                    elif item[0] != "setting" and item[1] in REFORGED_ONLY:
-                        waiting.pop(item[1])
-
     page_bottom = PAGE[1] + PAGE[3]
     for page_name, groups in GROUP_LAYOUT:
-        groups = without(groups, REFORGED_ONLY if classic else CLASSIC_ONLY)
-        if not groups:
-            raise ValueError("%s has nothing left on it" % page_name)
         index = 0
         for column, stack in enumerate(flow(groups)):
             left = COLUMNS[column]
@@ -633,14 +699,7 @@ def build(layout, classic=False):
             for heading_key, items in stack:
                 heading_name = "GroupHeading%s%d" % (page_name[len("Page"):], index)
                 index += 1
-                heading = clone(templates[LABEL], _named(heading_name))
-                heading.children = []
-                heading.put_prop("TEXT", '"%s"' % heading_key)
-                drop_prop(heading, "TOOLTIPTEXT")
-                restyle(heading, templates["ButtonDefaults"], keys=("FONT", "HEADERTEMPLATE"))
-                heading.set_prop("TEXTCOLOR", GROUP_HEADING_COLOR)
-                heading.put_prop("STATICTEXTDATA", "CENTERED: 0")
-                waiting[heading_name] = heading
+                waiting[heading_name] = make_heading(templates, heading_name, heading_key)
                 put(page_name, heading_name, left - TEXT_NUDGE, heading_top, COLUMN_WIDTH, ROW_HEIGHT)
 
                 top = heading_top + HEADING_PITCH
@@ -666,6 +725,7 @@ def build(layout, classic=False):
                 heading_top = top + GROUP_GAP
     for page_name, name, column, top in HIDDEN_PARKED:
         put(page_name, name, COLUMNS[column], top, COLUMN_WIDTH, ROW_HEIGHT)
+    build_hotkeys_page(pages["PageHotkeys"], templates)
     if waiting:
         raise KeyError("given no place on a page: %s" % ", ".join(sorted(waiting)))
 
@@ -705,8 +765,8 @@ _CODE = os.path.dirname(_HERE)
 
 CATALOG = os.path.join(_CODE, "GameEngine", "Source", "Common", "OptionsCatalog.cpp")
 STRINGS = os.path.join(_CODE, "Data", "Patch.str")
-LAYOUT = os.path.join(_CODE, "Data", "Window", "Menus", "OptionsMenu.wnd")
-LAYOUT_CLASSIC = os.path.join(_CODE, "Data", "Window", "Menus", "OptionsMenuClassic.wnd")
+LAYOUT = os.path.join(_CODE, "Data", "Window", "Menus", "OptionsMenuClassic.wnd")
+LAN_LAYOUT = os.path.join(_CODE, "Data", "Window", "Menus", "LanGameOptionsMenu.wnd")
 INCLUDE = os.path.join(_CODE, "GameEngine", "Include")
 
 _ROW = re.compile(
@@ -771,31 +831,8 @@ def selfcheck():
     keys = read_strings()
     layout = wndlayout.load(LAYOUT)
     controls = set((node.name or "").split(":")[-1] for node in layout.root.walk())
-    classic = wndlayout.load(LAYOUT_CLASSIC)
-    classic_controls = set((node.name or "").split(":")[-1] for node in classic.root.walk())
 
     problems = []
-
-    # the Classic layout is the Reforged one less REFORGED_ONLY, and only catalog controls may be
-    # left out: the menu's catalog passes skip a missing control, the hand-written code does not
-    widgets = set(row["widget"] for row in rows if row["widget"])
-    for name in REFORGED_ONLY:
-        if name not in widgets:
-            problems.append("%s is in REFORGED_ONLY and is no catalog row's widget" % name)
-        if name in classic_controls:
-            problems.append("OptionsMenuClassic.wnd still carries %s" % name)
-    for name in sorted(widgets - set(REFORGED_ONLY)):
-        if name not in classic_controls:
-            problems.append("OptionsMenuClassic.wnd has no %s" % name)
-    for name in CLASSIC_ONLY:
-        if name in controls:
-            problems.append("OptionsMenu.wnd still carries %s, which only Classic has" % name)
-        if name not in classic_controls:
-            problems.append("OptionsMenuClassic.wnd has no %s" % name)
-    for page_name, _tab, _text in TABS:
-        if classic.find(page_name) is None:
-            problems.append("OptionsMenuClassic.wnd has no %s" % page_name)
-
     if len(rows) < 9:
         problems.append("only %d catalog rows parsed, the regex has stopped matching" % len(rows))
 
@@ -812,7 +849,7 @@ def selfcheck():
             continue
 
         if widget not in controls:
-            problems.append("%s names %s, which is not in OptionsMenu.wnd" % (row["ini"], widget))
+            problems.append("%s names %s, which is not in %s" % (row["ini"], widget, os.path.basename(LAYOUT)))
         if not label:
             problems.append("%s has a widget and no label key" % row["ini"])
             continue
@@ -844,14 +881,23 @@ def selfcheck():
         if key not in keys:
             problems.append("caption %s is not in Patch.str" % key)
 
-    for name in READOUTS + GRAPHICS_CHECKS + MENU_CHECKS + MENU_COMBOS + [n for n, _k, _c in NOTES]:
+    for name, tooltip in EA_PARKED:
+        if tooltip not in keys:
+            problems.append("%s tooltip %s is not in Patch.str" % (name, tooltip))
+    for name in (READOUTS + GRAPHICS_CHECKS + MENU_CHECKS + MENU_COMBOS + [n for n, _k, _c in NOTES]
+                 + [n for n, _t in EA_PARKED]):
         if name not in controls:
-            problems.append("OptionsMenu.wnd has no %s, which OptionsMenu.cpp fills in" % name)
-        if name not in classic_controls:
-            problems.append("OptionsMenuClassic.wnd has no %s, which OptionsMenu.cpp fills in" % name)
+            problems.append("%s has no %s, which OptionsMenu.cpp fills in" % (os.path.basename(LAYOUT), name))
     for group in [g for _page, groups in GROUP_LAYOUT for g in groups]:
         if group[0] not in keys:
             problems.append("group heading %s is not in Patch.str" % group[0])
+    hotkey_controls = [spec[0] for spec in (HOTKEY_COMMANDS, HOTKEY_FACTION, HOTKEY_OBJECT, HOTKEY_BUTTONS, HOTKEY_NOTE)]
+    for name in hotkey_controls + [name for name, _key, _left in HOTKEY_BUTTON_ROW]:
+        if name not in controls:
+            problems.append("%s has no %s, which OptionsMenuHotkeys.cpp fills in" % (os.path.basename(LAYOUT), name))
+    for key in [key for key, _left in HOTKEY_HEADINGS] + [key for _n, key, _l in HOTKEY_BUTTON_ROW] + HOTKEY_STRINGS:
+        if key not in keys:
+            problems.append("the Hotkeys page needs %s in Patch.str" % key)
     for name, key, count in NOTES:
         for entry in range(count):
             if "%s%d" % (key, entry) not in keys:
@@ -861,19 +907,17 @@ def selfcheck():
             if key not in keys:
                 problems.append("%s needs %s in Patch.str" % (name, key))
     if ADVANCED in controls:
-        problems.append("OptionsMenu.wnd still carries %s; its controls are on the Graphics page"
-                        % ADVANCED)
+        problems.append("%s still carries %s; its controls are on the Graphics page"
+                        % (os.path.basename(LAYOUT), ADVANCED))
     problems.extend(overlaps(layout))
-    problems.extend("Classic: " + found for found in overlaps(classic))
 
     for problem in problems:
         print("optionsmenu: %s" % problem)
     if problems:
         return 1
 
-    print("optionsmenu: %d catalog rows agree with %s, %s and %s"
-          % (len(rows), os.path.basename(LAYOUT), os.path.basename(LAYOUT_CLASSIC),
-             os.path.basename(STRINGS)))
+    print("optionsmenu: %d catalog rows agree with %s and %s"
+          % (len(rows), os.path.basename(LAYOUT), os.path.basename(STRINGS)))
     return 0
 
 
@@ -881,14 +925,13 @@ def main(argv):
     if len(argv) == 2 and argv[1] == "selfcheck":
         return selfcheck()
 
-    if len(argv) != 4:
+    if len(argv) != 3:
         print(__doc__)
         return 2
 
-    for output, classic in ((argv[2], False), (argv[3], True)):
-        layout = wndlayout.load(argv[1])
-        wndlayout.save(build(layout, classic), output)
-        print("%s: %d windows" % (output, sum(1 for _ in layout.root.walk())))
+    layout = wndlayout.load(argv[1])
+    wndlayout.save(build(layout), argv[2])
+    print("%s: %d windows" % (argv[2], sum(1 for _ in layout.root.walk())))
     return 0
 
 

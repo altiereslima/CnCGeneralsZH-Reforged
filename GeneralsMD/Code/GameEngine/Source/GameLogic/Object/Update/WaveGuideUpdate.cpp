@@ -97,7 +97,7 @@ WaveGuideUpdateModuleData::WaveGuideUpdateModuleData( void )
 		{ "ShorelineEffectDistance", INI::parseReal, NULL, offsetof( WaveGuideUpdateModuleData, m_shorelineEffectDistance ) },
 		{ "DamageRadius", INI::parseReal, NULL, offsetof( WaveGuideUpdateModuleData, m_damageRadius ) },
 		{ "DamageAmount", INI::parseReal, NULL, offsetof( WaveGuideUpdateModuleData, m_damageAmount ) },
-		{ "ToppleForce", INI::parseReal, NULL, offsetof( WaveGuideUpdateModuleData, m_toppleForce ) },
+		{ "ToppleForce", INI::parseRetailPerFrameReal, NULL, offsetof( WaveGuideUpdateModuleData, m_toppleForce ) },
 		{ "RandomSplashSound", INI::parseAudioEventRTS, NULL, offsetof( WaveGuideUpdateModuleData, m_randomSplashSound ) },
 		{ "RandomSplashSoundFrequency", INI::parseInt, NULL, offsetof( WaveGuideUpdateModuleData, m_randomSplashSoundFrequency ) },
 		{ "BridgeParticle",	INI::parseParticleSystemTemplate, NULL, offsetof( WaveGuideUpdateModuleData, m_bridgeParticle ) },
@@ -453,7 +453,7 @@ void WaveGuideUpdate::doShoreEffects( void )
 {
 
 	// this is expensive to do *all* the time
-	if( TheGameLogic->getFrame() & 0x1 )
+	if( TheGameLogic->getFrame() % ConvertRetailFrames( 2u ) )
 		return;
 
 	Object *waveGuide = getObject();

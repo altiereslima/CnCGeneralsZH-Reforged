@@ -78,7 +78,7 @@ const char *TheAcademyClassificationTypeNames[] =
 	NULL
 };
 
-#define FRAMES_BETWEEN_UPDATES 30
+#define FRAMES_BETWEEN_UPDATES LOGICFRAMES_PER_SECOND
 
 
 //------------------------------------------------------------------------------------------------

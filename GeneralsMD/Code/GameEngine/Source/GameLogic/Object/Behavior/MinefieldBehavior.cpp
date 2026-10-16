@@ -223,7 +223,7 @@ UpdateSleepTime MinefieldBehavior::update()
 			continue;
 
 		if (TheGameLogic->findObjectByID(m_immunes[i].id) == NULL ||
-				now > m_immunes[i].collideTime + 2)
+				now > m_immunes[i].collideTime + ConvertRetailFrames(2u) + 1)
 		{
 			//DEBUG_LOG(("expiring an immunity %d\n",m_immunes[i].id));
 			m_immunes[i].id = INVALID_ID;	// he's dead, jim.

@@ -165,7 +165,7 @@ void DynamicShroudClearingRangeUpdate::animateGridDecals( void )
 	Coord3D pos;
 	pos.z = 0;
 
-	Real radius = m_currentClearingRange + ((m_totalFrames - m_stateCountDown) * 2);
+	Real radius = m_currentClearingRange + ((m_totalFrames - m_stateCountDown) * ConvertRetailPerFrameRate( 2.0f ));
 	Real angle = 0.0f;
 	Real angleInc = (PI*2.0f) / (Real)GRID_FX_DECAL_COUNT;
 	Real opacity = 1.0f - (m_currentClearingRange / m_nativeClearingRange);

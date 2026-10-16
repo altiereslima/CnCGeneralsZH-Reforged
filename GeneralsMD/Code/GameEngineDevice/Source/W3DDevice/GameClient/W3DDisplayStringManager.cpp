@@ -186,7 +186,7 @@ void W3DDisplayStringManager::update( void )
 	}
 
 	UnsignedInt currFrame = TheGameClient->getFrame();
-	const UnsignedInt w3dCleanupTime = 60;  /** any string not rendered after
+	const UnsignedInt w3dCleanupTime = LOGICFRAMES_PER_SECOND * 2;  /** any string not rendered after
 																					this many frames will have its
 																					render resources freed */
 

@@ -132,7 +132,6 @@ public:
 
 	void sendChat(UnicodeString text, Int playerMask);
 	void sendDisconnectChat(UnicodeString text);
-	void sendAllyCursor(Real x, Real y, Int playerMask);
 
 	void sendFile(AsciiString path, UnsignedByte playerMask, UnsignedShort commandID);
 	UnsignedShort sendFileAnnounce(AsciiString path, UnsignedByte playerMask);
@@ -343,8 +342,8 @@ void Network::init()
 	m_conMgr->init();
 
 	m_lastFrame = 0;
-	m_runAhead = min(max(30, MIN_RUNAHEAD), MAX_FRAMES_AHEAD/2); ///< @todo: don't hard-code the run-ahead.
-	m_frameRate = 30;
+	m_runAhead = min(max((Int)LOGICFRAMES_PER_SECOND, MIN_RUNAHEAD), MAX_FRAMES_AHEAD/2); ///< a second, until the router's first run-ahead command
+	m_frameRate = LOGICFRAMES_PER_SECOND;
 	m_lastExecutionFrame = m_runAhead - 1; // subtract 1 since we're starting on frame 0
 	m_lastFrameCompleted = m_runAhead - 1; // subtract 1 since we're starting on frame 0
 	m_frameDataReady = FALSE;
@@ -963,13 +962,6 @@ void Network::sendChat(UnicodeString text, Int playerMask) {
  */
 void Network::sendDisconnectChat(UnicodeString text) {
 	m_conMgr->sendDisconnectChat(text);
-}
-
-/**
- * Tells the players in the mask where the local mouse is pointing.
- */
-void Network::sendAllyCursor(Real x, Real y, Int playerMask) {
-	m_conMgr->sendAllyCursor(x, y, playerMask);
 }
 
 // send a file.  woohoo.

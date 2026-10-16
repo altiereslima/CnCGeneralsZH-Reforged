@@ -555,11 +555,6 @@ Bool ConnectionManager::processNetCommand(NetCommandRef *ref) {
 		return FALSE;
 	}
 
-	if (msg->getNetCommandType() == NETCOMMANDTYPE_ALLYCURSOR) {
-		processAllyCursor((NetAllyCursorCommandMsg *)msg);
-		return FALSE;
-	}
-
 	if (msg->getNetCommandType() == NETCOMMANDTYPE_CHAT) {
 		processChat((NetChatCommandMsg *)msg);
 		return FALSE;
@@ -660,11 +655,11 @@ void ConnectionManager::processRunAheadMetrics(NetRunAheadMetricsCommandMsg *msg
 		m_latencyAverages[player] = msg->getAverageLatency();
 		m_fpsAverages[player] = msg->getAverageFps();
 		//DEBUG_LOG(("ConnectionManager::processRunAheadMetrics - player %d, fps = %d, latency = %f\n", player, msg->getAverageFps(), msg->getAverageLatency()));
-		if (m_fpsAverages[player] > 100) {
-			// limit the reported frame rate average to 100.  This is done because if a
+		if (m_fpsAverages[player] > ConvertRetailFrames(100)) {
+			// limit the reported frame rate average to 100 retail frames.  This is done because if a
 			// user alt-tab's out of the game their frame rate climbs to in the neighborhood of
 			// 300, that was deemed "ugly" by the powers that be.
-			m_fpsAverages[player] = 100;
+			m_fpsAverages[player] = ConvertRetailFrames(100);
 		}
 	}
 }
@@ -736,6 +731,19 @@ void ConnectionManager::processFile(NetFileCommandMsg *msg)
 #endif
 
 	AsciiString realFileName = msg->getRealFilename();
+
+	// Only the host sends map files, and only after announcing each one to the players who need it
+	// (FileTransfer.cpp).  A file nobody announced, under another name, or for somebody else, is a
+	// peer writing to our disk on its own say-so.
+	FileCommandMap::iterator announced = s_fileCommandMap.find(msg->getID());
+	FileMaskMap::iterator recipients = s_fileRecipientMaskMap.find(msg->getID());
+	if (msg->getPlayerID() != 0 || announced == s_fileCommandMap.end() || announced->second != realFileName ||
+			recipients == s_fileRecipientMaskMap.end() || (recipients->second & (1 << m_localSlot)) == 0)
+	{
+		DEBUG_LOG(("ConnectionManager::processFile - '%s' from player %d was never announced to us, dropped\n",
+			realFileName.str(), msg->getPlayerID()));
+		return;
+	}
 
 	if (!IsSafeTransferPath(msg->getPortableFilename()) || !IsSafeTransferPath(realFileName))
 	{
@@ -837,6 +845,12 @@ void ConnectionManager::processFile(NetFileCommandMsg *msg)
 void ConnectionManager::processFileAnnounce(NetFileAnnounceCommandMsg *msg) 
 {
 	DEBUG_LOG(("ConnectionManager::processFileAnnounce() - expecting '%s' (%s) in command %d\n", msg->getPortableFilename().str(), msg->getRealFilename().str(), msg->getFileID()));
+	// the host (slot 0) is the one who transfers maps; an announce from anyone else would let
+	// processFile accept a file the host never sent
+	if (msg->getPlayerID() != 0) {
+		DEBUG_LOG(("ConnectionManager::processFileAnnounce() - player %d is not the host, ignored\n", msg->getPlayerID()));
+		return;
+	}
 	s_fileCommandMap[msg->getFileID()] = msg->getRealFilename();
 	s_fileRecipientMaskMap[msg->getFileID()] = msg->getPlayerMask();
 	for (Int i=0; i<MAX_SLOTS; ++i)
@@ -1338,6 +1352,9 @@ void ConnectionManager::updateRunAhead(Int oldRunAhead, Int frameRate, Bool didS
 				 on the settled rate rather than this one: it is the room's honest measured speed, and
 				 sizing a safety window on the rate we are hoping for is how the window comes up short. */
 			Int commandedFps = probeRoomFrameRate(minFps, TheGlobalData->m_framesPerSecondLimit);
+			// the rate crosses the wire as an UnsignedByte, and -fps is in logic frames now (twice retail)
+			if (commandedFps > UCHAR_MAX)
+				commandedFps = UCHAR_MAX;
 			Int newRunAhead = computeRunAhead(getMaximumLatency(), minFps,
 				TheGlobalData->m_networkRunAheadSlack, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2);
 
@@ -2247,45 +2264,6 @@ void ConnectionManager::sendChat(UnicodeString text, Int playerMask, UnsignedInt
 	processChat(msg);
 
 	msg->detach();
-}
-
-/**
- * Tell the players in the mask where the local mouse is pointing.  Nothing acks this and nothing
- * resends it: a lost one is replaced by the next, a tenth of a second later.  The mask is built by
- * the caller from the local player's own alliances, so an enemy is never sent one at all.
- */
-void ConnectionManager::sendAllyCursor(Real x, Real y, Int playerMask)
-{
-	NetAllyCursorCommandMsg *msg = newInstance(NetAllyCursorCommandMsg);
-	msg->setPosition(x, y);
-	msg->setPlayerID(m_localSlot);
-	msg->setID(0);
-	msg->setExecutionFrame(0);
-
-	sendLocalCommand(msg, (UnsignedByte)(playerMask & (0xff ^ (1 << m_localSlot))));
-
-	msg->detach();
-}
-
-/**
- * Remember where an ally says their cursor is.  The height is not on the wire - the terrain both
- * machines loaded answers that - and the name and colour come from the player the slot belongs to.
- */
-void ConnectionManager::processAllyCursor(NetAllyCursorCommandMsg *msg)
-{
-	const UnsignedByte playerID = msg->getPlayerID();
-	if (playerID >= MAX_SLOTS) {
-		return;
-	}
-
-	AsciiString playerName;
-	playerName.format("player%d", playerID);
-	const Player *player = ThePlayerList->findPlayerWithNameKey( TheNameKeyGenerator->nameToKey( playerName ) );
-	if (player == NULL) {
-		return;
-	}
-
-	TheInGameUI->noteAllyCursor( player->getPlayerIndex(), msg->getX(), msg->getY() );
 }
 
 void ConnectionManager::sendDisconnectChat(UnicodeString text) {

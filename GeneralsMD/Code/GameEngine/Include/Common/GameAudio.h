@@ -257,6 +257,8 @@ class AudioManager : public SubsystemInterface
 		virtual void processRequestList( void );
 	
 		virtual AudioEventInfo *newAudioEventInfo( AsciiString newEventName );
+		/// a map.ini is about to define this event; keep the game's own copy for reset().  TRUE if it existed
+		Bool rememberEventBeforeMapINI( AsciiString eventName );
     virtual void addAudioEventInfo( AudioEventInfo * newEventInfo );
 		virtual AudioEventInfo *findAudioEventInfo( AsciiString eventName ) const;
 
@@ -342,6 +344,7 @@ class AudioManager : public SubsystemInterface
 		std::vector<AsciiString> m_musicTracks;
 
 		AudioEventInfoHash m_allAudioEventInfo;
+		std::vector< std::pair<AudioEventInfo *, AudioEventInfo *> > m_beforeMapOverrides;	///< live event, its copy from before the map
 		AudioHandle theAudioHandlePool;
 		std::list<std::pair<AsciiString, Real> > m_adjustedVolumes;
 

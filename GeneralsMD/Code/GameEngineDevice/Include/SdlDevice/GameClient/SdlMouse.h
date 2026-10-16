@@ -65,7 +65,7 @@ public:
 
 	/// What SdlInput_dispatch hands over, already in game pixels
 	enum EventKind { EVENT_NONE = 0, EVENT_MOVE, EVENT_BUTTON_DOWN, EVENT_BUTTON_UP, EVENT_WHEEL };
-	enum Button { BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT };
+	enum Button { BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2 };
 	void addEvent( EventKind kind, Int x, Int y, Button button, Int clicks, Int wheelDelta, UnsignedInt timeMs );
 
 	void lostFocus( Bool state ) { m_lostFocus = state; }	///< Win32Mouse's, for the focus handling

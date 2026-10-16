@@ -66,8 +66,8 @@ Source: https://github.com/olcayseygan/CnCGeneralsZH-Reforged
 
 The game: GPL-3.0-or-later, with additional terms under its section 7 (Zero-Hour-Reforged-LICENSE.md).
 Built into it, each under its own licence: FFmpeg (LGPL-2.1-or-later, an LGPL-only build), SDL3, FreeType
-(its GPL-2.0-or-later option), glslang, SPIRV-Cross, SDL_shadercross, litehtml and gumbo, miniaudio, zlib,
-LZH-Light, nanosvg and the GameSpy SDK.  The full texts are in
+(its GPL-2.0-or-later option), glslang, SPIRV-Cross, SDL_shadercross, miniaudio, zlib,
+LZH-Light and the GameSpy SDK.  The full texts are in
 /usr/lib/zero-hour-reforged/share/zero-hour-reforged/licenses/ and /usr/share/licenses/zero-hour-reforged/:
   ${_zh_license_list}
 

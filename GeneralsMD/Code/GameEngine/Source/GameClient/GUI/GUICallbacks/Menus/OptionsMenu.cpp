@@ -113,7 +113,6 @@ static Int							menuModeCount = 0;
 static NameKeyType    comboBoxDetailID      = NAMEKEY_INVALID;
 static GameWindow *   comboBoxDetail        = NULL; 
 
-// only OptionsMenuClassic.wnd carries it: Reforged has one mouse and no box, so this stays NULL there
 static NameKeyType		checkAlternateMouseID	= NAMEKEY_INVALID;
 static GameWindow *		checkAlternateMouse		= NULL;
 
@@ -244,11 +243,9 @@ WindowLayout *OptionsLayout = NULL;
 // in the layout, parked off the right edge with HIDDEN set because there was nowhere to put them.
 // The layout now sorts the same controls into seven pages on one grid (Tools/optionsmenu_layout.py);
 // this is the two arrays that name them and the one function that decides which one you are
-// looking at.  The Classic interface opens OptionsMenuClassic.wnd instead (Shell::getOptionsLayout),
-// the same pages without the settings Classic overrules; their catalog rows find no control there
-// and keep their value.
+// looking at.  Shell::optionsLayoutFile names the file, OptionsMenuClassic.wnd.
 //-------------------------------------------------------------------------------------------------
-enum { OPTIONS_PAGE_COUNT = 7 };
+enum { OPTIONS_PAGE_COUNT = 8 };
 
 static const char *TheOptionsPageNames[ OPTIONS_PAGE_COUNT ] =
 {
@@ -259,6 +256,7 @@ static const char *TheOptionsPageNames[ OPTIONS_PAGE_COUNT ] =
 	"OptionsMenu.wnd:PageControls",
 	"OptionsMenu.wnd:PageInterface",
 	"OptionsMenu.wnd:PageNetwork",
+	"OptionsMenu.wnd:PageHotkeys",
 };
 
 static const char *TheOptionsTabNames[ OPTIONS_PAGE_COUNT ] =
@@ -270,6 +268,7 @@ static const char *TheOptionsTabNames[ OPTIONS_PAGE_COUNT ] =
 	"OptionsMenu.wnd:TabControls",
 	"OptionsMenu.wnd:TabInterface",
 	"OptionsMenu.wnd:TabNetwork",
+	"OptionsMenu.wnd:TabHotkeys",
 };
 
 static GameWindow *		optionsPage[ OPTIONS_PAGE_COUNT ]	= { NULL };
@@ -277,8 +276,15 @@ static GameWindow *		optionsTab[ OPTIONS_PAGE_COUNT ]	= { NULL };
 static NameKeyType		optionsTabID[ OPTIONS_PAGE_COUNT ] =
 {
 	NAMEKEY_INVALID, NAMEKEY_INVALID, NAMEKEY_INVALID, NAMEKEY_INVALID, NAMEKEY_INVALID, NAMEKEY_INVALID,
-	NAMEKEY_INVALID
+	NAMEKEY_INVALID, NAMEKEY_INVALID
 };
+
+// The Hotkeys page, OptionsMenuHotkeys.cpp.  Its keys are written on Accept like the rest.
+void OptionsHotkeysInit( void );
+Bool OptionsHotkeysSystem( UnsignedInt msg, GameWindow *control, WindowMsgData row );
+Bool OptionsHotkeysKey( UnsignedByte key, Int state );
+void OptionsHotkeysSave( void );
+void OptionsHotkeysClose( void );
 
 //-------------------------------------------------------------------------------------------------
 /** Show one page and hide the rest.
@@ -917,8 +923,7 @@ static void setDefaults( void )
 	
 	//-------------------------------------------------------------------------------------------------
 	// Mouse Mode
-	if( checkAlternateMouse )
-		GadgetCheckBoxSetChecked(checkAlternateMouse, FALSE);
+	GadgetCheckBoxSetChecked(checkAlternateMouse, FALSE);
 	GadgetCheckBoxSetChecked(checkRetaliation, TRUE );
 	GadgetCheckBoxSetChecked( checkDoubleClickAttackMove, FALSE );
 
@@ -1087,12 +1092,14 @@ static void fillCatalogWidgets( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The controls -> GlobalData, for every catalog row that has one.
+/** The controls -> GlobalData and Options.ini, for every catalog row whose control the player moved.
 	*
-	* Runs before saveOptionsToPreferences, which writes GlobalData out; a row with no control keeps
-	* whatever was loaded and is written back unchanged. */
+	* A control shows the value GlobalData held as the menu opened, and that can be something
+	* Options.ini does not say: the launcher's -language, a -lighting switch, or ClassicGraphics
+	* forcing the light to Classic.  So only a row whose control now says something else is written;
+	* every other key stays as the launcher or the last Accept left it on disk. */
 //-------------------------------------------------------------------------------------------------
-static void readCatalogWidgets( void )
+static void readCatalogWidgets( OptionPreferences &out )
 {
 	for( Int i = 0; i < TheOptionCatalogCount; ++i )
 	{
@@ -1101,10 +1108,11 @@ static void readCatalogWidgets( void )
 		if( widget == NULL )
 			continue;
 
+		Int value;
 		switch( def.kind )
 		{
 			case OPTION_BOOL:
-				def.set( GadgetCheckBoxIsChecked( widget ) ? 1 : 0 );
+				value = GadgetCheckBoxIsChecked( widget ) ? 1 : 0;
 				break;
 
 			case OPTION_ENUM:
@@ -1112,21 +1120,25 @@ static void readCatalogWidgets( void )
 				Int selected = -1;
 				GadgetComboBoxGetSelectedPos( widget, &selected );
 				// -1 is a combo box with nothing picked, which is not a value to write anywhere
-				if( selected >= 0 )
-				{
-					const Int value = clampOptionValue( def, def.lo + selected );
-					// a layout read as the menus were built shows only once they are built again
-					if( def.apply == APPLY_SHELL_REBUILD && value != def.get() )
-						pendingShellRebuild = TRUE;
-					def.set( value );
-				}
+				if( selected < 0 )
+					continue;
+				value = clampOptionValue( def, def.lo + selected );
 				break;
 			}
 
-			case OPTION_INT:
-				def.set( clampOptionValue( def, GadgetSliderGetPosition( widget ) ) );
+			default:
+				value = clampOptionValue( def, GadgetSliderGetPosition( widget ) );
 				break;
 		}
+
+		if( value == def.get() )
+			continue;
+
+		// a layout read as the menus were built shows only once they are built again
+		if( def.apply == APPLY_SHELL_REBUILD )
+			pendingShellRebuild = TRUE;
+		def.set( value );
+		out[ AsciiString( def.iniKey ) ] = formatOptionValue( def, value );
 	}
 }
 
@@ -1248,6 +1260,73 @@ static void updateResolutionNote( void )
 	GadgetStaticTextSetText( note, supported ? TheGameText->fetch( "GUI:ResolutionNote0" ) : UnicodeString::TheEmptyString );
 }
 
+//-------------------------------------------------------------------------------------------------
+/** Music, effects and voice: from their sliders into GlobalData, the audio manager and out. */
+//-------------------------------------------------------------------------------------------------
+static void saveVolumeOptions( OptionPreferences &out )
+{
+	Int val;
+
+	//-------------------------------------------------------------------------------------------------
+	// slider music volume
+	val = GadgetSliderGetPosition(sliderMusicVolume);
+	if(val != -1)
+	{
+	  TheWritableGlobalData->m_musicVolumeFactor = val;
+    AsciiString prefString;
+    prefString.format("%d", val);
+    out["MusicVolume"] = prefString;
+    TheAudio->setVolume(val / 100.0f, (AudioAffect) (AudioAffect_Music | AudioAffect_SystemSetting));
+	}
+
+	//-------------------------------------------------------------------------------------------------
+	// slider SFX volume
+	val = GadgetSliderGetPosition(sliderSFXVolume);
+	if(val != -1)
+	{
+		//Both 2D and 3D sound effects are sharing the same slider. However, there is a
+		//relative slider that gets applied to one of these values to lower that sound volume.
+		Real sound2DVolume = val / 100.0f;
+		Real sound3DVolume = val / 100.0f;
+		Real relative2DVolume = TheAudio->getAudioSettings()->m_relative2DVolume;
+		relative2DVolume = MIN( 1.0f, MAX( -1.0, relative2DVolume ) );
+		if( relative2DVolume < 0.0f )
+		{
+			//Lower the 2D volume
+			sound2DVolume *= 1.0f + relative2DVolume;
+		}
+		else
+		{
+			//Lower the 3D volume
+			sound3DVolume *= 1.0f - relative2DVolume;
+		}
+
+		//Apply the sound volumes in the audio system now.
+    TheAudio->setVolume( sound2DVolume, (AudioAffect) (AudioAffect_Sound | AudioAffect_SystemSetting) );
+		TheAudio->setVolume( sound3DVolume, (AudioAffect) (AudioAffect_Sound3D | AudioAffect_SystemSetting) );
+
+		//Save the settings in the options.ini.
+    TheWritableGlobalData->m_SFXVolumeFactor = val;
+    AsciiString prefString;
+    prefString.format("%d", REAL_TO_INT( sound2DVolume * 100.0f ) );
+    out["SFXVolume"] = prefString;
+    prefString.format("%d", REAL_TO_INT( sound3DVolume * 100.0f ) );
+		out["SFX3DVolume"] = prefString;
+	}
+
+	//-------------------------------------------------------------------------------------------------
+	// slider Voice volume
+	val = GadgetSliderGetPosition(sliderVoiceVolume);
+	if(val != -1)
+	{
+    TheWritableGlobalData->m_voiceVolumeFactor = val;
+    AsciiString prefString;
+    prefString.format("%d", val);
+    out["VoiceVolume"] = prefString;
+    TheAudio->setVolume(val / 100.0f, (AudioAffect) (AudioAffect_Speech | AudioAffect_SystemSetting));
+	}
+}
+
 static void saveOptions( void )
 {
 	Int index;
@@ -1260,9 +1339,9 @@ static void saveOptions( void )
 	const MonitorEntry oldMonitor = findMonitor( TheGlobalData->m_monitor.str() );
 
 	//-------------------------------------------------------------------------------------------------
-	// The catalog's controls, read back into GlobalData before the pass below writes GlobalData out.
-	// The monitor goes in with them, because a borderless window takes its size from it.
-	readCatalogWidgets();
+	// The catalog's controls, read back into GlobalData and onto Options.ini where the player changed
+	// them.  The monitor goes in with them, because a borderless window takes its size from it.
+	readCatalogWidgets( *pref );
 	const MonitorEntry monitor = selectedMonitor();
 	TheWritableGlobalData->m_monitor = monitor.device;
 
@@ -1273,13 +1352,6 @@ static void saveOptions( void )
 	// resolution block further down then hands all of it to the display in one change.
 	//
 	applyWindowMode();
-
-	//-------------------------------------------------------------------------------------------------
-	// Everything in TheOptionCatalog, written back from GlobalData in one pass.  A catalog setting
-	// with a widget has put its value into GlobalData by the time Accept runs; one without a widget
-	// writes back what it loaded, which normalizes the spelling and the range of a hand-edited key
-	// without changing what it means.
-	saveOptionsToPreferences( *pref );
 
 	//-------------------------------------------------------------------------------------------------
 //	// provider type
@@ -1566,12 +1638,9 @@ static void saveOptions( void )
 
 
 	//-------------------------------------------------------------------------------------------------
-	// mouse mode.  Saved only from the Classic screen, so an Accept in Reforged keeps what Classic chose
-	if( checkAlternateMouse )
-	{
-		TheWritableGlobalData->m_useAlternateMouse = GadgetCheckBoxIsChecked(checkAlternateMouse);
-		(*pref)["UseAlternateMouse"] = TheWritableGlobalData->m_useAlternateMouse ? AsciiString("yes") : AsciiString("no");
-	}
+	// mouse mode
+	TheWritableGlobalData->m_useAlternateMouse = GadgetCheckBoxIsChecked(checkAlternateMouse);
+	(*pref)["UseAlternateMouse"] = TheWritableGlobalData->m_useAlternateMouse ? AsciiString("yes") : AsciiString("no");
 
 	TheWritableGlobalData->m_clientRetaliationModeEnabled = GadgetCheckBoxIsChecked(checkRetaliation);
 	(*pref)["Retaliation"] = TheWritableGlobalData->m_clientRetaliationModeEnabled? AsciiString("yes") : AsciiString("no");
@@ -1591,64 +1660,7 @@ static void saveOptions( void )
 		(*pref)["ScrollFactor"] = prefString;
 	}
 	
-	//-------------------------------------------------------------------------------------------------
-	// slider music volume
-	val = GadgetSliderGetPosition(sliderMusicVolume);
-	if(val != -1)
-	{
-	  TheWritableGlobalData->m_musicVolumeFactor = val;
-    AsciiString prefString;
-    prefString.format("%d", val);
-    (*pref)["MusicVolume"] = prefString;
-    TheAudio->setVolume(val / 100.0f, (AudioAffect) (AudioAffect_Music | AudioAffect_SystemSetting));
-	}
-	
-	//-------------------------------------------------------------------------------------------------
-	// slider SFX volume
-	val = GadgetSliderGetPosition(sliderSFXVolume);
-	if(val != -1)
-	{
-		//Both 2D and 3D sound effects are sharing the same slider. However, there is a 
-		//relative slider that gets applied to one of these values to lower that sound volume.
-		Real sound2DVolume = val / 100.0f;
-		Real sound3DVolume = val / 100.0f;
-		Real relative2DVolume = TheAudio->getAudioSettings()->m_relative2DVolume;
-		relative2DVolume = MIN( 1.0f, MAX( -1.0, relative2DVolume ) );
-		if( relative2DVolume < 0.0f )
-		{
-			//Lower the 2D volume
-			sound2DVolume *= 1.0f + relative2DVolume;
-		}
-		else
-		{
-			//Lower the 3D volume
-			sound3DVolume *= 1.0f - relative2DVolume;
-		}
-
-		//Apply the sound volumes in the audio system now.
-    TheAudio->setVolume( sound2DVolume, (AudioAffect) (AudioAffect_Sound | AudioAffect_SystemSetting) );
-		TheAudio->setVolume( sound3DVolume, (AudioAffect) (AudioAffect_Sound3D | AudioAffect_SystemSetting) );
-
-		//Save the settings in the options.ini.
-    TheWritableGlobalData->m_SFXVolumeFactor = val;
-    AsciiString prefString;
-    prefString.format("%d", REAL_TO_INT( sound2DVolume * 100.0f ) );
-    (*pref)["SFXVolume"] = prefString;
-    prefString.format("%d", REAL_TO_INT( sound3DVolume * 100.0f ) );
-		(*pref)["SFX3DVolume"] = prefString;
-	}
-
-	//-------------------------------------------------------------------------------------------------
-	// slider Voice volume
-	val = GadgetSliderGetPosition(sliderVoiceVolume);
-	if(val != -1)
-	{
-    TheWritableGlobalData->m_voiceVolumeFactor = val;
-    AsciiString prefString;
-    prefString.format("%d", val);
-    (*pref)["VoiceVolume"] = prefString;
-    TheAudio->setVolume(val / 100.0f, (AudioAffect) (AudioAffect_Speech | AudioAffect_SystemSetting));
-	}
+	saveVolumeOptions( *pref );
 
  	//-------------------------------------------------------------------------------------------------
  	// slider Gamma
@@ -2093,6 +2105,7 @@ static const SliderReadout TheSliderReadouts[] =
 	{ "OptionsMenu.wnd:SliderScrollSpeed",	"OptionsMenu.wnd:ValueScrollSpeed",				READOUT_NUMBER },
 	{ "OptionsMenu.wnd:SliderZoomSpeed",		"OptionsMenu.wnd:ValueZoomSpeed",					READOUT_PERCENT },
 	{ "OptionsMenu.wnd:SliderDragTolerance",	"OptionsMenu.wnd:ValueDragTolerance",			READOUT_NUMBER },
+	{ "OptionsMenu.wnd:SliderMenuTransitionSpeed",	"OptionsMenu.wnd:ValueMenuTransitionSpeed",	READOUT_PERCENT },
 };
 
 static const char *const TheTextureResolutionCaptions[] = { "GUI:Low", "GUI:Medium", "GUI:High" };
@@ -2341,6 +2354,23 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 	UnicodeString releaseVersion;
 	releaseVersion.translate( TheVersion->getReleaseVersion() );
 	versionString.concat( releaseVersion );
+	if (TheGlobalData->m_modName.isNotEmpty())
+	{
+		// the label is one line under the menu; a long -mod list keeps its start, the replay keeps all of it
+		const Int MAX_MOD_CHARS = 48;
+		UnicodeString mods = TheVersion->getUnicodeModName();
+		if (mods.getLength() > MAX_MOD_CHARS)
+		{
+			UnicodeString cut;
+			for (Int i = 0; i < MAX_MOD_CHARS - 3; ++i)
+				cut.concat( mods.getCharAt( i ) );
+			cut.concat( u"..." );
+			mods = cut;
+		}
+		versionString.concat( u" [" );
+		versionString.concat( mods );
+		versionString.concat( u"]" );
+	}
 
 	if (TheVersion->showFullVersion())
 	{
@@ -2609,8 +2639,7 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 //	GadgetCheckBoxSetChecked(checkAudioSurround, TheAudio->getSpeakerSurround());
 
 	// set the mouse mode
-	if( checkAlternateMouse )
-		GadgetCheckBoxSetChecked(checkAlternateMouse, TheGlobalData->m_useAlternateMouse);
+	GadgetCheckBoxSetChecked(checkAlternateMouse, TheGlobalData->m_useAlternateMouse);
 	GadgetCheckBoxSetChecked(checkRetaliation, TheGlobalData->m_clientRetaliationModeEnabled);
 	GadgetCheckBoxSetChecked( checkDoubleClickAttackMove, TheGlobalData->m_doubleClickAttackMove );
 
@@ -2650,6 +2679,7 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 	fillCatalogWidgets();
 	updateSliderReadouts();
 	updateDetailNote();
+	OptionsHotkeysInit();
 	showOptionsPage( 0 );
 
 	// show menu
@@ -2749,6 +2779,10 @@ WindowMsgHandledType OptionsMenuInput( GameWindow *window, UnsignedInt msg,
 			UnsignedByte key = mData1;
 			UnsignedByte state = mData2;
 
+			// the Hotkeys page waiting for a key takes every key, Esc included
+			if( OptionsHotkeysKey( key, (Int)mData2 ) )
+				return MSG_HANDLED;
+
 			switch( key )
 			{
 
@@ -2840,7 +2874,9 @@ WindowMsgHandledType OptionsMenuSystem( GameWindow *window, UnsignedInt msg,
 					break;
 				GameWindow *control = (GameWindow *)mData1;
 				Int controlID = control->winGetWindowId();
-		
+				if( OptionsHotkeysSystem( msg, control, mData2 ) )
+					break;
+
 				if (controlID == comboBoxDetailID)
 				{
 					Int index = CUSTOMDETAIL;
@@ -2866,6 +2902,15 @@ WindowMsgHandledType OptionsMenuSystem( GameWindow *window, UnsignedInt msg,
 				// picking borderless greys the resolution list out, the other two hand it back
 				updateResolutionEnabled();
 				updateResolutionNote();
+			break;
+		}
+
+		//---------------------------------------------------------------------------------------------
+		case GLM_SELECTED:
+		case GLM_DOUBLE_CLICKED:
+		{
+			if( ignoreSelected || !OptionsHotkeysSystem( msg, (GameWindow *)mData1, mData2 ) )
+				return MSG_IGNORED;
 			break;
 		}
 
@@ -2896,9 +2941,12 @@ WindowMsgHandledType OptionsMenuSystem( GameWindow *window, UnsignedInt msg,
 					showOptionsPage( page );
 					return MSG_HANDLED;
 				}
+			if( OptionsHotkeysSystem( msg, control, mData2 ) )
+				return MSG_HANDLED;
 
 			if( controlID == buttonBack )
 			{
+				OptionsHotkeysClose();
 				// go back one screen
 				//TheShell->pop();
 				if (pref)
@@ -2921,6 +2969,8 @@ WindowMsgHandledType OptionsMenuSystem( GameWindow *window, UnsignedInt msg,
 			else if (controlID == buttonAccept )
 			{
 				saveOptions();
+				// Hotkeys.ini, and every key read again from it
+				OptionsHotkeysSave();
 
 				// the command bar rebuilds its grid letters on its next update
 				if( TheControlBar )

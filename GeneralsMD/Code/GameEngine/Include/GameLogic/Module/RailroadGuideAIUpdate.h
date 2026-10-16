@@ -62,16 +62,17 @@ public:
 			{ "BigMetalBounceSound",			INI::parseAudioEventRTS,	NULL,	offsetof( RailroadBehaviorModuleData, m_bigMetalImpactDefaultSound) },
 			{ "SmallMetalBounceSound",			INI::parseAudioEventRTS,	NULL,	offsetof( RailroadBehaviorModuleData, m_smallMetalImpactDefaultSound) },
 			{ "MeatyBounceSound",			INI::parseAudioEventRTS,	NULL,	offsetof( RailroadBehaviorModuleData, m_meatyImpactDefaultSound) },
-			{ "RunningGarrisonSpeedMax",			INI::parseReal,	NULL,	offsetof( RailroadBehaviorModuleData, m_runningGarrisonSpeedMax) },
-			{ "KillSpeedMin",			INI::parseReal,	NULL,	offsetof( RailroadBehaviorModuleData, m_killSpeedMin) },
-			{ "SpeedMax",			INI::parseReal,	NULL,	offsetof( RailroadBehaviorModuleData, m_speedMax) },
-			{ "Acceleration",			INI::parseReal,	NULL,	offsetof( RailroadBehaviorModuleData, m_acceleration) },
-			{ "Braking",			INI::parseReal,	NULL,	offsetof( RailroadBehaviorModuleData, m_braking) },
+			// speeds are distance per frame, and the three multipliers below are applied to the speed every frame
+			{ "RunningGarrisonSpeedMax",			INI::parseRetailPerFrameReal,	NULL,	offsetof( RailroadBehaviorModuleData, m_runningGarrisonSpeedMax) },
+			{ "KillSpeedMin",			INI::parseRetailPerFrameReal,	NULL,	offsetof( RailroadBehaviorModuleData, m_killSpeedMin) },
+			{ "SpeedMax",			INI::parseRetailPerFrameReal,	NULL,	offsetof( RailroadBehaviorModuleData, m_speedMax) },
+			{ "Acceleration",			INI::parseRetailPerFrameFactorReal,	NULL,	offsetof( RailroadBehaviorModuleData, m_acceleration) },
+			{ "Braking",			INI::parseRetailPerFrameFactorReal,	NULL,	offsetof( RailroadBehaviorModuleData, m_braking) },
 			{ "WaitAtStationTime",			INI::parseDurationUnsignedInt,	NULL,	offsetof( RailroadBehaviorModuleData, m_waitAtStationTime) },
 			{ "RunningSound",			INI::parseAudioEventRTS,	NULL,	offsetof( RailroadBehaviorModuleData, m_runningSound) },
 			{ "ClicketyClackSound",			INI::parseAudioEventRTS,	NULL,	offsetof( RailroadBehaviorModuleData, m_clicketyClackSound) },
 			{ "WhistleSound",			INI::parseAudioEventRTS,	NULL,	offsetof( RailroadBehaviorModuleData, m_whistleSound) },
-			{ "Friction",			INI::parseReal,	NULL,	offsetof( RailroadBehaviorModuleData, m_friction) },
+			{ "Friction",			INI::parseRetailPerFrameFactorReal,	NULL,	offsetof( RailroadBehaviorModuleData, m_friction) },
 			{ 0, 0, 0, 0 }
 		};
 

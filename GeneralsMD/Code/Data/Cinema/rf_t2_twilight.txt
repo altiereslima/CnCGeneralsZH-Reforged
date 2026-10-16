@@ -1,0 +1,27 @@
+# Trailer 2, timeline.t2.js rows 16, 17 and 18: Scenarios/rf_t2_twilight.txt on Twilight Flame
+# (command line there). Zoom is relative to the observer's opening view, which measured 1.23 absolute.
+# Every view is tilted down to -20 or steeper where it is wide, as the far ground is past the draw
+# distance above about 3 absolute.
+#
+# 3 s: the American town at 500,3250 from the south-west, the nuke (called on 100) rising over it.
+# 23 s, frames 690 to 795, row 16: high over the radiation pools round the town, the Chinese column
+#   driving west into them from about 690. The pools are expensive to draw: at 1280x720 a low view
+#   over them took 1.5 to 5.4 s a picture, so this one stays high.
+# 26.5 s, frames 795 to 940, row 17: low beside the GLA Scud Storm (spawned at 3196,4303), the
+#   launcher in the frame's lower third and its missiles climbing up through the frame from about
+#   820 to 955; the Storm is called on 700. The look-at point is 170 past the Storm along the view,
+#   since aiming at it put the empty sand in front of it in the middle; at pitch 20 a quarter of the
+#   frame's top was beyond the draw distance, at 10 only a thin strip. Until 2026-10-11 this row came
+#   from missileapex_film, a separate scenario, at a wide high view with the launchers at the
+#   frame's right edge.
+# 35 s, frames 1050 to 1250, row 18: the Scud Storm's block at 450,4200, closer than before (1.6
+#   where it was 2.2) and centred on the block, the first Scud landing at about 1107.
+
+3.0   cut     500 3250 2.2 -45 -24
+3.5   shot
+23.0  cut     480 3230 1.8 0 -26
+23.5  shot
+26.5  cut     3320 4425 0.85 -45 10
+27.0  shot
+35.0  cut     450 4200 1.6 -45 -22
+35.5  shot

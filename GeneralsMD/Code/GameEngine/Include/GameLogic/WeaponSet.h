@@ -133,6 +133,7 @@ private:
 	KindOfMaskType					m_preferredAgainst[WEAPONSLOT_COUNT];
 	Bool										m_isReloadTimeShared;
 	Bool										m_isWeaponLockSharedAcrossSets; ///< A weapon set so similar that it is safe to hold locks across
+	Bool										m_namesMissingWeapon;	///< a Weapon line named a weapon the store does not have
 
 	static void parseWeapon(INI* ini, void *instance, void *store, const void* userData);
 	static void parseAutoChoose(INI* ini, void *instance, void *store, const void* userData);
@@ -152,6 +153,7 @@ public:
 	Bool testWeaponSetFlag( WeaponSetType wst ) const;
 	Bool isSharedReloadTime( void ) const { return m_isReloadTimeShared; }
 	Bool isWeaponLockSharedAcrossSets() const {return m_isWeaponLockSharedAcrossSets; }
+	Bool namesMissingWeapon() const { return m_namesMissingWeapon; }
 
 	Bool hasAnyWeapons() const;
 	inline const WeaponTemplate* getNth(WeaponSlotType n) const { return m_template[n]; } 

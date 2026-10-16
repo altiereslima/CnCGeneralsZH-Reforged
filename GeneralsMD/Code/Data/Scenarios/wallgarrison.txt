@@ -1,0 +1,32 @@
+# Rangers are ordered into a tower of Fallen Empire's great wall, and the tower takes nobody.
+#
+# The towers (FortressWallBuilding) carry a ten-man garrison, but the map switches every wall piece
+# off for selection, so in 1.04 no click could land on one and no player ever got a man inside. The
+# skirmish computer's garrison pass picks buildings by position instead and filled them, and since
+# the map also makes the wall indestructible, nothing could shoot those men out. A garrison order on
+# an unselectable structure is now refused for a player, the computer and, outside a mission or the
+# shell map, a script too: the skirmish scripts were still putting GLA men into a tower.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Fallen Empire\Fallen Empire.map" -autoskirmish 2 -takeover
+#     -side 0 FactionChina -side 1 FactionAmerica -seed 1 -maxframes 2400
+#     -scenario wallgarrison -logPrefix wallgarrison_
+#
+# Read the HEADLESS TALLY lines. At 600, after the player's click: seat 1 owns no FortressWallBuilding
+# and all 5 Rangers stand outside. At 1100, after a script's enter (this is a skirmish): the same,
+# no tower, 5 Rangers outside. A SCENARIO line naming the tower's id under each order proves the
+# order went out and was refused, not that no tower was found.
+# "civilian" as the target seat is what the map's neutral or civilian player owns (or owned at an
+# earlier lookup), nearest the group.
+
+30    spawn       1  AmericaInfantryRanger   5  1500 1150  20
+
+60    clickenter  1  AmericaInfantryRanger   civilian FortressWallBuilding
+
+600   tally       1  FortressWallBuilding
+600   tally       1  AmericaInfantryRanger
+
+700   enter       1  AmericaInfantryRanger   civilian FortressWallBuilding
+
+1100  tally       1  FortressWallBuilding
+1100  tally       1  AmericaInfantryRanger

@@ -242,3 +242,35 @@ TEST(ffvertexcompile_the_smoke_glow_rides_the_specular_slot)
 	CHECK(VertexShader_Generate(glow, VERTEX_SHADER_TARGET_D3D11, glow_hlsl));
 	CHECK(compiles(compile, glow_hlsl, D3D11_PROFILE));
 }
+
+// A soft billboard's half width rides the specular alpha out of the second coordinate set, after
+// the glow wrote the colour, so the pixel half's fade can read it.  Keyed apart, and refused on a
+// format with one coordinate set.
+TEST(ffvertexcompile_a_soft_billboard_hands_its_half_width_on)
+{
+	VertexPipelineDescription glow = plain_description();
+	glow.SmokeGlow = true;
+	VertexPipelineDescription soft = glow;
+	soft.SoftParticle = true;
+
+	std::string hlsl;
+	CHECK(VertexShader_Generate(soft, VERTEX_SHADER_TARGET_D3D11, hlsl));
+	const size_t colour = hlsl.find("output.Specular = float4(input.Normal, 0.0);");
+	const size_t width = hlsl.find("output.Specular.a = input.TexCoord1.x;");
+	CHECK(colour != std::string::npos);
+	CHECK(width != std::string::npos);
+	CHECK(colour < width);
+	CHECK(VertexShader_Key(soft) == VertexShader_Key(glow) + ":Z");
+
+	VertexPipelineDescription one_set = soft;
+	one_set.FVF = D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_TEX1|D3DFVF_DIFFUSE;
+	CHECK(!VertexShader_Generate(one_set, VERTEX_SHADER_TARGET_D3D11, hlsl));
+
+	D3DCompileFunction compile = load_compiler();
+	if (compile == NULL) {
+		printf("  d3dcompiler_47.dll not present, skipping the compile\n");
+		return;
+	}
+	CHECK(VertexShader_Generate(soft, VERTEX_SHADER_TARGET_D3D11, hlsl));
+	CHECK(compiles(compile, hlsl, D3D11_PROFILE));
+}

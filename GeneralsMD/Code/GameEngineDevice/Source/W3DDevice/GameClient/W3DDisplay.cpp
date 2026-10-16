@@ -41,6 +41,8 @@ static void drawFramerateBar(void);
 #include "Lib/Clock.h"
 #if defined(_WIN32)
 #include <windows.h>
+#include <condition_variable>
+#include <mutex>
 #endif
 #if defined(_WIN32)
 #include <io.h>
@@ -834,6 +836,8 @@ static void pushDirect3D11PostChain( void )
 {
 	// Classic graphics is the game's own picture, which is what -d3d9 draws: hard edged sprites.
 	Direct3D11_Allow_Soft_Particles( !TheGlobalData->m_classicGraphics );
+	// and its own looks for the power outage, the EMP and the two stealth states
+	Direct3D11_Allow_Draw_Effects( !TheGlobalData->m_classicGraphics );
 	const AsciiString & requested = TheGlobalData->m_direct3D11PostChain;
 	if( !Direct3D11_Post_Chain( requested.str() ) && !requested.isEmpty() )
 	{
@@ -2186,7 +2190,9 @@ static Bool s_smoothApplied = FALSE;
 
 static void smoothMotionBegin()
 {
-	TheSmoothMotionActive = TheGlobalData->m_smoothMotion && !TheGlobalData->m_headless && !TheGlobalData->isClassicUI();
+	// only -recordfps's pictures between two logic frames blend, from the frame before the first so
+	// that one is captured
+	TheSmoothMotionActive = !TheGlobalData->m_headless && GameEngine_videoBlends();
 	TheSmoothMotionAlpha = TheSmoothMotionActive ? GameEngine_logicTickFraction() : 1.0f;
 	if (!TheSmoothMotionActive)
 		return;
@@ -2395,15 +2401,25 @@ AGAIN:
 	freezeTime = freezeTime || TheGameLogic->isGamePaused();
 
 	// hack to let client spin fast in network games but still do effects at the same pace. -MDC
+	// A -recordfps picture is a step of its own: the clock moves on each picture of a logic frame and
+	// stands still on a pane's second draw of one
 	static UnsignedInt lastFrame = ~0;
-	freezeTime = freezeTime || (lastFrame == TheGameClient->getFrame());
-	lastFrame = TheGameClient->getFrame();
+	const UnsignedInt picture = TheGameClient->getFrame() * GameEngine_videoPictures() + GameEngine_videoPicture();
+	freezeTime = freezeTime || (lastFrame == picture);
+	lastFrame = picture;
 
 	/// @todo: I'm assuming the first view is our main 3D view.
 	W3DView *primaryW3DView=(W3DView *)getFirstView();
 	if (!freezeTime && TheScriptEngine->isTimeFast())
 	{
-		primaryW3DView->updateCameraMovements();  // Update camera motion effects.
+		// the scripted camera moves step once a retail frame, as everywhere else
+		static UnsignedInt lastCameraRetailFrame = ~0u;
+		const UnsignedInt cameraRetailFrame = TheGameClient->getFrame() / LOGICFRAMES_PER_RETAIL_FRAME;
+		if (cameraRetailFrame != lastCameraRetailFrame)
+		{
+			lastCameraRetailFrame = cameraRetailFrame;
+			primaryW3DView->updateCameraMovements();  // Update camera motion effects.
+		}
 		syncTime += TheW3DFrameLengthInMsec;
 		return;
 	}
@@ -2449,12 +2465,23 @@ AGAIN:
 
 		UnsignedInt deltaMs = nowSyncMs - prevSyncMs;
 		prevSyncMs = nowSyncMs;
-		if (deltaMs > TheW3DFrameLengthInMsec * 4)
-			deltaMs = TheW3DFrameLengthInMsec * 4;	// a level load must not fast-forward everything
-		// a recorded picture is one logic frame however long it took to draw and save, so the clock
-		// moves one logic frame too, or the footage plays every animation fast
+		// a level load must not fast-forward everything; four retail frames, as it was at 30
+		const UnsignedInt MAX_SYNC_STEP_MS = TheW3DFrameLengthInMsec * 4 * LOGICFRAMES_PER_RETAIL_FRAME;
+		if (deltaMs > MAX_SYNC_STEP_MS)
+			deltaMs = MAX_SYNC_STEP_MS;
+		// a recorded picture is its share of a logic frame however long it took to draw and save, so the
+		// clock moves that much too, or the footage plays every animation fast.  Read off the pictures'
+		// own clock rather than added up: a 60 Hz frame is not a whole number of milliseconds, and
+		// TheW3DFrameLengthInMsec's 16 played the footage 4% slow
 		if (videoRecordingFrame())
-			deltaMs = TheW3DFrameLengthInMsec;
+		{
+			static UnsignedInt prevPictureMs = 0;
+			const UnsignedInt pictureMs = GameEngine_pictureMilliseconds();
+			deltaMs = pictureMs - prevPictureMs;
+			if (pictureMs < prevPictureMs || deltaMs > MAX_SYNC_STEP_MS)
+				deltaMs = TheW3DFrameLengthInMsec / GameEngine_videoPictures();	// the first recorded picture
+			prevPictureMs = pictureMs;
+		}
 
 		syncTime += deltaMs;
 		// allow W3D to update its internals
@@ -2572,9 +2599,9 @@ AGAIN:
 
 		// start render block
 		#if defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
-    if ( (TheGameLogic->getFrame() % 30 == 1) || ( ! ( !TheGameLogic->isGamePaused() && TheGlobalData->m_TiVOFastMode) ) )
+    if ( (TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND == 1) || ( ! ( !TheGameLogic->isGamePaused() && TheGlobalData->m_TiVOFastMode) ) )
 		#else
-	    if ( (TheGameLogic->getFrame() % 30 == 1) || ( ! (!TheGameLogic->isGamePaused() && TheGlobalData->m_TiVOFastMode && TheGameLogic->isInReplayGame())) )
+	    if ( (TheGameLogic->getFrame() % LOGICFRAMES_PER_SECOND == 1) || ( ! (!TheGameLogic->isGamePaused() && TheGlobalData->m_TiVOFastMode && TheGameLogic->isInReplayGame())) )
     #endif
 		{
 			USE_PERF_TIMER(BigAssRenderLoop)
@@ -4071,17 +4098,24 @@ static void saveScreenShot(void)
 }
 
 //=============================================================================
-// -video <from> <to> [name]: one picture per logic frame across the range, written as numbered
-// .bmp files under Videos\<name>\ and then handed to ffmpeg for Videos\<name>.mp4.  GameEngine runs
+// -video <from> <to> [name]: one picture per logic frame across the range, piped raw into ffmpeg for
+// Videos\<name>.mp4 (numbered .bmp files under Videos\<name>\ where there is no ffmpeg).  GameEngine runs
 // one logic frame a pass over the range, so a picture is a logic frame and a second of video is
-// LOGICFRAMES_PER_SECOND of them.
+// LOGICFRAMES_PER_SECOND of them.  -recordfps 60 draws each frame twice before the next one runs, and
+// a second is twice as many pictures; a picture is numbered by its logic frame times the pictures a
+// frame plus which of them it is.
 //=============================================================================
 static const char VIDEO_FRAME_PATTERN[] = "frame%06d.bmp";
 static const char VIDEO_ENCODER[] = "ffmpeg.exe";
 
+static Int videoFramesPerSecond(void)
+{
+	return GameEngine_videoFramesPerSecond();
+}
+
 static Bool s_videoStarted = FALSE;
 static Bool s_videoFinished = FALSE;
-static UnsignedInt s_videoLastFrame = 0;
+static UnsignedInt s_videoLastPicture = 0;
 static Int s_videoFramesWritten = 0;
 static Int s_videoFramesMissed = 0;
 static char s_videoDirectory[_MAX_PATH];
@@ -4097,9 +4131,9 @@ static_assert(VIDEO_RECORDS * OBSERVER_MOST_PANES <= DX11_FRAME_COPY_SLOTS,
 struct VideoRecord
 {
 	Bool pending;			///< pane 0's copy is made and the frame is still to be written
-	UnsignedInt frame;
+	UnsignedInt picture;
 	Bool paneCopied[OBSERVER_MOST_PANES];
-	UnsignedInt paneFrame[OBSERVER_MOST_PANES];
+	UnsignedInt panePicture[OBSERVER_MOST_PANES];
 	Int paneCount;
 	Real paneRays[OBSERVER_MOST_PANES];
 	Coord2D paneOrigin;
@@ -4124,14 +4158,26 @@ static VideoPaneShape s_videoPaneRunsShape;
 static std::vector<ObserverPaneRun> s_videoPaneRuns;
 static std::vector<IRegion2D> s_videoRowKept;
 #if defined(_WIN32)
-/* -directorrecord writes no frames to disk: they go down a pipe into ffmpeg as they are drawn, which a
-	 whole match of 1080p bitmaps would need tens of gigabytes for.  With no ffmpeg it records nothing
-	 and quits. */
+/* A recording writes no frames to disk: they go down a pipe into ffmpeg as they are drawn.  A whole
+	 match of 1080p bitmaps needs tens of gigabytes, and -video writing a 1440p bitmap a picture to the
+	 disk and reading them all back at the end cost 0.85 s a picture against a 26 ms draw.  A thread of
+	 its own writes the pipe, so the draw waits on the encoder only once VIDEO_QUEUED_FRAMES pictures are
+	 waiting for it.  With no ffmpeg -directorrecord records nothing and quits, and -video falls back to
+	 numbered bitmaps it leaves where they are. */
 static Bool s_videoPipeTried = FALSE;
 static HANDLE s_videoPipe = NULL;
 static HANDLE s_videoEncoder = NULL;
 static Int s_videoPipeWidth = 0;
 static Int s_videoPipeHeight = 0;
+enum { VIDEO_QUEUED_FRAMES = 8 };
+static std::vector<UnsignedByte> s_videoQueue[VIDEO_QUEUED_FRAMES];
+static Int s_videoQueueHead = 0;			///< the oldest picture still to go down the pipe
+static Int s_videoQueueCount = 0;
+static Bool s_videoQueueClosed = FALSE;	///< the recording is over: the writer empties the queue and stops
+static Bool s_videoPipeBroken = FALSE;		///< ffmpeg stopped taking pictures
+static std::mutex s_videoQueueLock;
+static std::condition_variable s_videoQueueChanged;
+static HANDLE s_videoWriter = NULL;
 
 // the directory with its trailing backslash taken off is the movie's own name
 static void buildVideoMoviePath(char *moviePath, size_t size)
@@ -4207,8 +4253,8 @@ static void finishVideo(void)
 
 	// the last frame drawn is still waiting on its copy
 	writeVideoRecord(1 - s_videoDrawingRecord);
-	DEBUG_LOG(("VIDEO: %d frames written to %s, %d logic frames went by without a picture\n",
-		s_videoFramesWritten, s_videoDirectory, s_videoFramesMissed));
+	DEBUG_LOG(("VIDEO: %d frames written to %s at %d a second, %d pictures went by unrecorded\n",
+		s_videoFramesWritten, s_videoDirectory, videoFramesPerSecond(), s_videoFramesMissed));
 	releaseFrameCopies();
 	std::vector<UnsignedByte>().swap(s_videoJoined);
 	std::vector<ObserverPaneRun>().swap(s_videoPaneRuns);
@@ -4217,6 +4263,16 @@ static void finishVideo(void)
 	// the end of the pipe is the end of the stream: ffmpeg finishes the movie and exits
 	if (s_videoEncoder != NULL)
 	{
+		{
+			std::lock_guard<std::mutex> lock(s_videoQueueLock);
+			s_videoQueueClosed = TRUE;
+		}
+		s_videoQueueChanged.notify_all();
+		WaitForSingleObject(s_videoWriter, INFINITE);
+		CloseHandle(s_videoWriter);
+		s_videoWriter = NULL;
+		for (Int index = 0; index < VIDEO_QUEUED_FRAMES; ++index)
+			std::vector<UnsignedByte>().swap(s_videoQueue[index]);
 		CloseHandle(s_videoPipe);
 		s_videoPipe = NULL;
 		WaitForSingleObject(s_videoEncoder, INFINITE);
@@ -4240,57 +4296,9 @@ static void finishVideo(void)
 	if (s_videoFramesWritten == 0)
 		return;
 
-#if !defined(_WIN32)
-	// Off Windows the encoder is not started for you: the frames stay, and this is how to make the movie.
+	// No ffmpeg was there to pipe into, so the frames stay, and this is how to make the movie.
 	DEBUG_LOG(("VIDEO: encode with: ffmpeg -framerate %d -i \"%s%s\" -c:v libx264 -pix_fmt yuv420p out.mp4\n",
-		LOGICFRAMES_PER_SECOND, s_videoDirectory, VIDEO_FRAME_PATTERN));
-#else
-	char encoderPath[_MAX_PATH];
-	if (!findVideoEncoder(encoderPath, ARRAY_SIZE(encoderPath)))
-	{
-		DEBUG_LOG(("VIDEO: no %s beside the game or on the PATH, so the frames stay where they are\n", VIDEO_ENCODER));
-		return;
-	}
-
-	char moviePath[_MAX_PATH];
-	buildVideoMoviePath(moviePath, ARRAY_SIZE(moviePath));
-
-	// yuv420p is what every player opens and it wants even dimensions, which a window need not have
-	char commandLine[4 * _MAX_PATH];
-	snprintf(commandLine, ARRAY_SIZE(commandLine),
-		"\"%s\" -y -loglevel error -framerate %d -i \"%s%s\" -vf pad=ceil(iw/2)*2:ceil(ih/2)*2 "
-		"-c:v libx264 -pix_fmt yuv420p -crf 18 \"%s\"",
-		encoderPath, LOGICFRAMES_PER_SECOND, s_videoDirectory, VIDEO_FRAME_PATTERN, moviePath);
-
-	STARTUPINFOA startup;
-	memset(&startup, 0, sizeof(startup));
-	startup.cb = sizeof(startup);
-	PROCESS_INFORMATION process;
-	if (!CreateProcessA(encoderPath, commandLine, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL,
-			&startup, &process))
-	{
-		DEBUG_LOG(("VIDEO: %s would not start (error %u), so the frames stay where they are\n",
-			encoderPath, (unsigned)GetLastError()));
-		return;
-	}
-
-	WaitForSingleObject(process.hProcess, INFINITE);
-	DWORD exitCode = 0;
-	GetExitCodeProcess(process.hProcess, &exitCode);
-	CloseHandle(process.hThread);
-	CloseHandle(process.hProcess);
-
-	if (exitCode != 0)
-	{
-		DEBUG_LOG(("VIDEO: %s exited with %u, so the frames stay where they are\n",
-			encoderPath, (unsigned)exitCode));
-		return;
-	}
-
-	deleteVideoFrames();
-	RemoveDirectoryA(s_videoDirectory);
-	DEBUG_LOG(("VIDEO: wrote %s\n", moviePath));
-#endif
+		videoFramesPerSecond(), s_videoDirectory, VIDEO_FRAME_PATTERN));
 }
 
 /** A -video range is being recorded and this logic frame is inside it. */
@@ -4304,8 +4312,69 @@ static Bool videoRecordingFrame(void)
 }
 
 #if defined(_WIN32)
-/** ffmpeg started with its stdin a pipe this end writes raw frames of this size into.  FALSE when
-	* there is no ffmpeg or it would not start. */
+/** -video is footage for an edit, so it is encoded close to lossless: on NVIDIA's encoder where the card
+	* has one, which costs the machine next to nothing, and on x264 everywhere else.  -directorrecord's
+	* whole match keeps x264 at a size a match can be kept at.  The probe opens the encoder with these
+	* very arguments, so a card or an ffmpeg that refuses one of them falls back here and not after the
+	* first picture has gone down the pipe. */
+static const char *videoCodecArguments(const char *encoderPath)
+{
+	static const char NVENC[] = "-c:v h264_nvenc -preset p5 -tune hq -profile:v high -rc vbr -cq 17 -b:v 0";
+	static const char X264[] = "-c:v libx264 -preset fast -crf 16";
+	if (TheGlobalData->m_directorRecord)
+		return "-c:v libx264 -crf 18";
+
+	char commandLine[2 * _MAX_PATH];
+	snprintf(commandLine, ARRAY_SIZE(commandLine),
+		"\"%s\" -hide_banner -loglevel quiet -nostdin -f lavfi -i nullsrc=s=256x256 -frames:v 1 %s "
+		"-pix_fmt yuv420p -f null -", encoderPath, NVENC);
+	STARTUPINFOA startup;
+	memset(&startup, 0, sizeof(startup));
+	startup.cb = sizeof(startup);
+	PROCESS_INFORMATION process;
+	if (!CreateProcessA(encoderPath, commandLine, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL,
+			&startup, &process))
+		return X264;
+	WaitForSingleObject(process.hProcess, INFINITE);
+	DWORD exitCode = 1;
+	GetExitCodeProcess(process.hProcess, &exitCode);
+	CloseHandle(process.hThread);
+	CloseHandle(process.hProcess);
+	return exitCode == 0 ? NVENC : X264;
+}
+
+/** The pipe's writer: every queued picture down to ffmpeg in turn, until the queue is closed and empty
+	* or ffmpeg stops taking them. */
+static DWORD WINAPI writeVideoQueue(LPVOID)
+{
+	std::unique_lock<std::mutex> lock(s_videoQueueLock);
+	for (;;)
+	{
+		s_videoQueueChanged.wait(lock, [] { return s_videoQueueCount > 0 || s_videoQueueClosed; });
+		if (s_videoQueueCount == 0)
+			return 0;
+		const std::vector<UnsignedByte> &frame = s_videoQueue[s_videoQueueHead];
+		lock.unlock();
+		DWORD written = 0;
+		const Bool wrote = WriteFile(s_videoPipe, &frame[0], (DWORD)frame.size(), &written, NULL)
+			&& written == frame.size();
+		const DWORD error = GetLastError();
+		lock.lock();
+		if (!wrote)
+		{
+			DEBUG_LOG(("VIDEO: %s stopped taking frames (error %u)\n", VIDEO_ENCODER, (unsigned)error));
+			s_videoPipeBroken = TRUE;
+			s_videoQueueChanged.notify_all();
+			return 0;
+		}
+		s_videoQueueHead = (s_videoQueueHead + 1) % VIDEO_QUEUED_FRAMES;
+		--s_videoQueueCount;
+		s_videoQueueChanged.notify_all();
+	}
+}
+
+/** ffmpeg started with its stdin a pipe this end writes raw frames of this size into, and the thread
+	* that writes them.  FALSE when there is no ffmpeg or it would not start. */
 static Bool openVideoPipe(Int width, Int height)
 {
 	char encoderPath[_MAX_PATH];
@@ -4314,6 +4383,7 @@ static Bool openVideoPipe(Int width, Int height)
 		DEBUG_LOG(("VIDEO: no %s beside the game or on the PATH\n", VIDEO_ENCODER));
 		return FALSE;
 	}
+	const char *codec = videoCodecArguments(encoderPath);
 
 	SECURITY_ATTRIBUTES inherited;
 	memset(&inherited, 0, sizeof(inherited));
@@ -4334,8 +4404,8 @@ static Bool openVideoPipe(Int width, Int height)
 	char commandLine[4 * _MAX_PATH];
 	snprintf(commandLine, ARRAY_SIZE(commandLine),
 		"\"%s\" -y -loglevel error -f rawvideo -pix_fmt bgr0 -s %dx%d -framerate %d -i - "
-		"-vf pad=ceil(iw/2)*2:ceil(ih/2)*2 -c:v libx264 -pix_fmt yuv420p -crf 18 \"%s\"",
-		encoderPath, width, height, LOGICFRAMES_PER_SECOND, moviePath);
+		"-vf pad=ceil(iw/2)*2:ceil(ih/2)*2 %s -pix_fmt yuv420p \"%s\"",
+		encoderPath, width, height, videoFramesPerSecond(), codec, moviePath);
 
 	STARTUPINFOA startup;
 	memset(&startup, 0, sizeof(startup));
@@ -4359,7 +4429,8 @@ static Bool openVideoPipe(Int width, Int height)
 	s_videoEncoder = process.hProcess;
 	s_videoPipeWidth = width;
 	s_videoPipeHeight = height;
-	DEBUG_LOG(("VIDEO: %dx%d frames go straight into %s for %s\n", width, height, encoderPath, moviePath));
+	s_videoWriter = CreateThread(NULL, 0, writeVideoQueue, NULL, 0, NULL);
+	DEBUG_LOG(("VIDEO: %dx%d frames go straight into %s (%s) for %s\n", width, height, encoderPath, codec, moviePath));
 	return TRUE;
 }
 #endif
@@ -4461,7 +4532,7 @@ static void joinVideoPanes(const VideoRecord &record, Int recordIndex, UnsignedB
 	Int panePitches[OBSERVER_MOST_PANES] = { 0 };
 	for (Int pane = 1; pane < record.paneCount; ++pane)
 	{
-		if (!record.paneCopied[pane] || record.paneFrame[pane] != record.frame)
+		if (!record.paneCopied[pane] || record.panePicture[pane] != record.picture)
 			continue;
 		Int paneWidth = 0;
 		Int paneHeight = 0;
@@ -4506,12 +4577,13 @@ static void joinVideoPanes(const VideoRecord &record, Int recordIndex, UnsignedB
 	}
 }
 
-/** One picture of the recording, VIDEO_PIXEL_BYTES a pixel with no gap between rows, into ffmpeg's pipe
-	* under -directorrecord, as the next numbered .bmp otherwise. */
-static Bool writeVideoFrame(const UnsignedByte *pixels, Int width, Int height, UnsignedInt frame)
+/** One picture of the recording, VIDEO_PIXEL_BYTES a pixel with no gap between rows, queued for ffmpeg's
+	* pipe, or as the next numbered .bmp where there is no ffmpeg.  The picture is copied, so pixels may go
+	* as soon as this returns. */
+static Bool writeVideoFrame(const UnsignedByte *pixels, Int width, Int height)
 {
 #if defined(_WIN32)
-	if (TheGlobalData->m_directorRecord && !s_videoPipeTried)
+	if (!s_videoPipeTried)
 	{
 		s_videoPipeTried = TRUE;
 		openVideoPipe(width, height);
@@ -4521,13 +4593,18 @@ static Bool writeVideoFrame(const UnsignedByte *pixels, Int width, Int height, U
 		// ffmpeg was told one size; a picture of another would shear every frame after it
 		if (width != s_videoPipeWidth || height != s_videoPipeHeight)
 			return FALSE;
-		const DWORD bytes = (DWORD)(VIDEO_PIXEL_BYTES * width * height);
-		DWORD written = 0;
-		if (WriteFile(s_videoPipe, pixels, bytes, &written, NULL) && written == bytes)
-			return TRUE;
-		DEBUG_LOG(("VIDEO: %s stopped taking frames (error %u) at logic frame %u\n", VIDEO_ENCODER,
-			(unsigned)GetLastError(), frame));
-		return FALSE;
+		std::unique_lock<std::mutex> lock(s_videoQueueLock);
+		s_videoQueueChanged.wait(lock, [] { return s_videoQueueCount < VIDEO_QUEUED_FRAMES || s_videoPipeBroken; });
+		if (s_videoPipeBroken)
+			return FALSE;
+		// the writer reads only the pictures already counted, so the free one is filled without the lock
+		std::vector<UnsignedByte> &frame = s_videoQueue[(s_videoQueueHead + s_videoQueueCount) % VIDEO_QUEUED_FRAMES];
+		lock.unlock();
+		frame.assign(pixels, pixels + (size_t)VIDEO_PIXEL_BYTES * width * height);
+		lock.lock();
+		++s_videoQueueCount;
+		s_videoQueueChanged.notify_all();
+		return TRUE;
 	}
 #endif
 	// a whole match as bitmaps is tens of gigabytes, and one run filled a disk with 13 GB before it
@@ -4585,7 +4662,7 @@ static void writeVideoRecord(Int recordIndex)
 		pixels = &s_videoJoined[0];
 	}
 
-	if (writeVideoFrame(pixels, width, height, record.frame))
+	if (writeVideoFrame(pixels, width, height))
 		++s_videoFramesWritten;
 	else
 		++s_videoFramesMissed;
@@ -4608,13 +4685,16 @@ static void captureVideoFrame(void)
 		return;
 	}
 
-	// -directorrecord's panes past the first: kept for pane 0's draw, the last on this logic frame
+	// a picture is a logic frame and which of its -recordfps pictures it is
+	const UnsignedInt picture = frame * GameEngine_videoPictures() + GameEngine_videoPicture();
+
+	// -directorrecord's panes past the first: kept for pane 0's draw, the last of this picture
 	if (TheObserverCamera.isDrawingSecond())
 	{
 		const Int pane = TheObserverCamera.getDrawingPane();
 		VideoRecord &drawing = s_videoRecords[s_videoDrawingRecord];
 		drawing.paneCopied[pane] = queueFrameCopy(videoCopySlot(s_videoDrawingRecord, pane));
-		drawing.paneFrame[pane] = frame;
+		drawing.panePicture[pane] = picture;
 		return;
 	}
 
@@ -4641,15 +4721,15 @@ static void captureVideoFrame(void)
 		DEBUG_LOG(("VIDEO: recording logic frames %d to %d into %s\n",
 			TheGlobalData->m_videoStartFrame, TheGlobalData->m_videoEndFrame, s_videoDirectory));
 	}
-	else if (frame == s_videoLastFrame)
+	else if (picture <= s_videoLastPicture)
 	{
 		return;
 	}
-	else if (frame > s_videoLastFrame + 1)
+	else if (picture > s_videoLastPicture + 1)
 	{
-		s_videoFramesMissed += frame - s_videoLastFrame - 1;
+		s_videoFramesMissed += picture - s_videoLastPicture - 1;
 	}
-	s_videoLastFrame = frame;
+	s_videoLastPicture = picture;
 
 	const Int drawingIndex = s_videoDrawingRecord;
 	VideoRecord &drawing = s_videoRecords[drawingIndex];
@@ -4659,7 +4739,7 @@ static void captureVideoFrame(void)
 		return;
 	}
 	drawing.pending = TRUE;
-	drawing.frame = frame;
+	drawing.picture = picture;
 	drawing.paneCount = TheObserverCamera.getDrawnPaneCount();
 	memcpy(drawing.paneRays, TheObserverCamera.getPaneRays(), sizeof(drawing.paneRays));
 	drawing.paneOrigin = TheObserverCamera.getPaneOrigin();

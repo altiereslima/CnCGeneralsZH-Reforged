@@ -41,6 +41,7 @@ public:
 
 	Bool isComplete();
 	UnsignedShort getCommandID();
+	UnsignedByte getPlayerID() const { return m_playerID; }
 	UnsignedInt getRawDataLength();
 	void copyChunkData(NetWrapperCommandMsg *msg);
 	UnsignedByte * getRawData();
@@ -51,6 +52,7 @@ public:
 
 protected:
 	UnsignedShort m_commandID;
+	UnsignedByte m_playerID;		///< who is sending it; two senders' command ids are separate counters
 	UnsignedByte *m_data;
 	UnsignedInt m_dataLength;
 	Bool *m_chunksPresent;
@@ -76,6 +78,7 @@ public:
 
 protected:
 	void removeFromList(NetCommandWrapperListNode *node);
+	Bool isWithinSenderCap(NetWrapperCommandMsg *msg);
 
 	NetCommandWrapperListNode *m_list;
 };

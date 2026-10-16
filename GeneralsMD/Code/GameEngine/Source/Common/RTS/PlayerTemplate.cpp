@@ -197,6 +197,7 @@ AsciiString PlayerTemplate::getStartingUnit( Int i ) const
 //-----------------------------------------------------------------------------
 PlayerTemplate::PlayerTemplate() : 
 	m_nameKey(NAMEKEY_INVALID),
+	m_modIndex(-1),
 	m_observer(false),
 	m_playableSide(false),
   m_oldFaction(false),
@@ -355,7 +356,8 @@ const PlayerTemplate* PlayerTemplateStore::findPlayerTemplate(NameKeyType nameke
 		if ((*it).getNameKey() == namekey)
 			return &(*it);
 	}
-	return NULL;
+	NameKeyType retailKey;
+	return TheModNamespace.findRetailKey(namekey, MODNAME_PLAYERTEMPLATE, &retailKey) ? findPlayerTemplate(retailKey) : NULL;
 }
 
 //-----------------------------------------------------------------------------
@@ -423,6 +425,7 @@ void PlayerTemplateStore::getAllSideStrings(AsciiStringList *outStringList)
 		PlayerTemplate npt;
 		ini->initFromINI( &npt, npt.getFieldParse() );
 		npt.setNameKey(namekey);
+		npt.setModIndex(TheModNamespace.getActive());
 		ThePlayerTemplateStore->m_playerTemplates.push_back(npt);
 	}
 

@@ -1,0 +1,47 @@
+# Trailer 2, shots 8 to 10 on Bombardment Beach: hero_loop_03.txt's meeting on the grass between the
+# rock ridges at 1946,1376, cut down to one wave a side. Four Overlords stand off on the north edge of
+# it and shell the American line from frame 60, close enough for a camera beside their barrels, and
+# four Comanches come in low from the west over the ridge at 1500..1780 x, 1130..1480 y.
+#
+# On 2026-10-11 the Crusaders moved from 1900,1100 (12 of 16 on the rock ridge's cliff cells,
+# t2check.py) to the open ground at 2040,960, the Paladins, Battlemasters and Overlords a few dozen
+# units each off single cliff cells. The engine's own check then refused 26 more, on the map's
+# painted cliff bits grown by a cell, so every block moved again by 20 to 60 (legal.py --block).
+#
+#   generals.exe -win -xres 2560 -yres 1440 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Bombardment Beach\Bombardment Beach.map" -autoskirmish 2 -takeover
+#     -observer -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario rf_t2_beach
+#     -cinema rf_t2_beach -video <from> <to> rt_t2_beach -recordfps 60
+
+10    spawn  0  AmericaCommandCenter            1   start0:240:60
+10    spawn  1  ChinaCommandCenter              1   start1:-260:60
+
+# --- the two lines -------------------------------------------------------------------------------
+30    spawn  0  AmericaTankCrusader             16  2080 960   34
+30    spawn  0  AmericaTankPaladin              8   1740 940   38
+30    spawn  0  AmericaInfantryRanger           20  2070 1050  14
+30    spawn  0  AmericaVehicleTomahawk          4   1880 900   40
+30    spawn  1  ChinaTankBattleMaster           16  2080 1760  36
+30    spawn  1  ChinaTankGattling               6   2250 1700  36
+30    spawn  1  ChinaInfantryRedguard           20  2200 1560  14
+30    spawn  1  ChinaVehicleInfernoCannon       4   2150 1850  40
+60    attackmove 0  AmericaTankCrusader      1946 1376
+60    attackmove 0  AmericaTankPaladin       1946 1376
+60    attackmove 0  AmericaInfantryRanger    1946 1376
+60    attackmove 0  AmericaVehicleTomahawk   1946 1376
+60    attackmove 1  ChinaTankBattleMaster    1946 1376
+60    attackmove 1  ChinaTankGattling        1946 1376
+60    attackmove 1  ChinaInfantryRedguard    1946 1376
+60    attackmove 1  ChinaVehicleInfernoCannon 1946 1376
+
+# --- the Overlords, standing off north of the meeting point --------------------------------------
+30    spawn  1  ChinaTankOverlord               4   1970 1660  60
+200   attackmove 1  ChinaTankOverlord        2000 1450
+
+# --- the Comanches over the ridge ----------------------------------------------------------------
+300   spawn  0  AmericaVehicleComanche          4   1350 1260  60
+310   attackmove 0  AmericaVehicleComanche   2000 1380
+
+# --- powers --------------------------------------------------------------------------------------
+240   power  0  AmericaCommandCenter  1946 1376  SuperweaponA10ThunderboltMissileStrike
+300   power  1  ChinaCommandCenter    1900 1330  Early_SuperweaponChinaCarpetBomb

@@ -28,9 +28,13 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 #include "zhio.h"
 
+#include <algorithm>
+#include <string>
+
 #include "Common/ArchiveFileSystem.h"
 #include "Common/CommandLine.h"
 #include "Common/CRCDebug.h"
+#include "Common/file.h"
 #include "Common/LocalFileSystem.h"
 #include "Common/OptionsCatalog.h"
 #include "Common/version.h"
@@ -1010,6 +1014,23 @@ Int parseNoSmokeFireLight(char *args[], int)
 	return 1;
 }
 
+/* -lighting <classic|reforged>: the LightingStyle option for one run, the before and after of any
+	 picture of it. */
+Int parseLightingStyle(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+	{
+		if (strcasecmp(args[1], "classic") == 0)
+			TheWritableGlobalData->m_lightingStyle = LIGHTING_STYLE_CLASSIC;
+		else if (strcasecmp(args[1], "reforged") == 0)
+			TheWritableGlobalData->m_lightingStyle = LIGHTING_STYLE_REFORGED;
+		else
+			DEBUG_LOG(("-lighting: '%s' is neither classic nor reforged, keeping the saved style\n", args[1]));
+		return 2;
+	}
+	return 1;
+}
+
 Int parseNoShaders(char *args[], int)
 {
 	if (TheWritableGlobalData)
@@ -1385,13 +1406,14 @@ Int parseIgnoreStackTrace(char *args[], int num)
 #endif
 
 /* -fps <n> is the game speed itself: the rate the logic tick is paced at, the command-line twin of
-	 the skirmish menu's game speed slider.  MSG_NEW_GAME only honours 1..1000. */
+	 the skirmish menu's game speed slider.  MSG_NEW_GAME only honours 1..1000.  n is in retail 30 Hz
+	 frames, so -fps 30 is still normal speed and every script that passes it keeps its meaning. */
 
 Int parseFPSLimit(char *args[], int num)
 {
 	if (TheWritableGlobalData && num > 1)
 	{
-		TheWritableGlobalData->m_framesPerSecondLimit = atoi(args[1]);
+		TheWritableGlobalData->m_framesPerSecondLimit = ConvertRetailFrames(atoi(args[1]));
 	}
 	return 2;
 }
@@ -1467,16 +1489,6 @@ Int parseMaxGameFrames(char *args[], int num)
 	 * graphics work in the upstream ledger sits unclosed - not because the code is hard, because
 	 * nobody could see the result. Combine with -autoskirmish, -map and -maxframes; -headless draws
 	 * nothing and says so. The file goes next to the save games, as sshotNNN.bmp. */
-/** -showHudOverlay: the corner readout on, whatever the build's default (off in Release) and GameData.ini
-	* say.  The harnesses whose screenshots are evidence pass it, so every picture names its renderer, clock
-	* and frame; the command line is read after GameData.ini, so nothing there turns it back off. */
-Int parseShowHudOverlay(char *args[], int)
-{
-	if (TheWritableGlobalData)
-		TheWritableGlobalData->m_showHudOverlay = TRUE;
-	return 1;
-}
-
 Int parseScreenShot(char *args[], int num)
 {
 	if (TheWritableGlobalData && num > 1)
@@ -1586,6 +1598,34 @@ Int parseDirectorRecord(char *args[], int num)
 		TheWritableGlobalData->m_autoSkirmishObserver = TRUE;
 	}
 	return consumed;
+}
+
+/* -recordfps <n>: the frame rate -video and -directorrecord record at, a multiple of the logic's
+	 * LOGICFRAMES_PER_SECOND (60).
+	 *
+	 * At 60 a picture is a logic frame.  At 120 each recorded logic frame is drawn twice before the next
+	 * one runs, the first picture blended half way from the frame before (smooth motion, on for it
+	 * whatever the option says), and ffmpeg is told 120.  The logic runs the same frames either way. */
+Int parseRecordFps(char *args[], int num)
+{
+	if (num < 2)
+	{
+		DEBUG_LOG(("-recordfps: wants a frame rate, a multiple of %d\n", LOGICFRAMES_PER_SECOND));
+		return num;
+	}
+	// four pictures a frame at most: W3D's clock moves in whole milliseconds, and a picture's share of a
+	// 16 ms frame has to be one at least or the drawables are never drawn
+	const Int MOST_PICTURES = 4;
+	const Int fps = atoi(args[1]);
+	if (fps < LOGICFRAMES_PER_SECOND || fps % LOGICFRAMES_PER_SECOND != 0 || fps > MOST_PICTURES * LOGICFRAMES_PER_SECOND)
+	{
+		DEBUG_LOG(("-recordfps: %s is not a multiple of %d up to %d, recording at %d\n", args[1], LOGICFRAMES_PER_SECOND,
+			MOST_PICTURES * LOGICFRAMES_PER_SECOND, LOGICFRAMES_PER_SECOND));
+		return 2;
+	}
+	if (TheWritableGlobalData)
+		TheWritableGlobalData->m_videoPictures = fps / LOGICFRAMES_PER_SECOND;
+	return 2;
 }
 
 /* -directorscout <file> and -directortimeline <file>: the two passes of -directorrecord.  WinMain
@@ -1745,17 +1785,17 @@ Int parseTextLanguage(char *args[], int num)
 	return 1;
 }
 
-/* -interface <classic|reforged>: the interface for this run, the only way to pick it; the launcher
-	 * passes it, and without it the run is Classic.  Client only. */
-Int parseInterfaceStyle(char *args[], int num)
+/* -mouse <classic|reforged>: the mouse for this run, the only way to pick it; the launcher passes
+	 * it, and without it the run is Classic.  Client only. */
+Int parseMouseStyle(char *args[], int num)
 {
 	if (TheWritableGlobalData && num > 1)
 	{
 		if (strcasecmp(args[1], "classic") == 0)
-			TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
+			TheWritableGlobalData->m_mouseStyle = MOUSE_STYLE_CLASSIC;
 		else if (strcasecmp(args[1], "reforged") == 0)
-			TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_REFORGED;
-		DEBUG_LOG(("-interface: %s\n", TheWritableGlobalData->m_interfaceStyle == INTERFACE_STYLE_CLASSIC ? "classic" : "reforged"));
+			TheWritableGlobalData->m_mouseStyle = MOUSE_STYLE_REFORGED;
+		DEBUG_LOG(("-mouse: %s\n", TheWritableGlobalData->m_mouseStyle == MOUSE_STYLE_CLASSIC ? "classic" : "reforged"));
 		return 2;
 	}
 	return 1;
@@ -2235,6 +2275,18 @@ Int parseTechRespawn(char *args[], int num)
 	return 1;
 }
 
+/* -startingcash <n>: the lobby's starting cash for an -autoskirmish run, any amount rather than the
+	 lobby's list, carried the same way as -incomesharing. */
+Int parseStartingCash(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1 && args[1])
+	{
+		TheWritableGlobalData->m_startingCash = atoi(args[1]);
+		return 2;
+	}
+	return 1;
+}
+
 /* -supplypilelimit <players>: the lobby's supply pile limit for an -autoskirmish run, carried the
 	 same way as -incomesharing. */
 Int parseSupplyPileLimit(char *args[], int num)
@@ -2486,11 +2538,98 @@ Int parseUpdateImages(char *args[], int num)
 	return 1;
 }
 
-Int parseMod(char *args[], Int num)
+/** The string value of "key" in mod.json, or empty.  ponytail: a flat object of string values is
+	* all the launcher writes, so this finds the key and reads to the closing quote, honouring only a
+	* backslash escape; a real parser is for the day mod.json grows nesting. */
+static AsciiString modJsonString( const std::string &json, const char *key )
+{
+	const char *space = " \t\r\n";
+	std::string quoted = std::string( "\"" ) + key + "\"";
+	size_t at = std::string::npos;
+	// the key is the quoted name followed by a colon; the same text as somebody's value is not
+	for (size_t found = json.find( quoted ); found != std::string::npos; found = json.find( quoted, found + 1 ))
+	{
+		size_t colon = json.find_first_not_of( space, found + quoted.size() );
+		if (colon != std::string::npos && json[colon] == ':')
+		{
+			at = json.find_first_not_of( space, colon + 1 );
+			break;
+		}
+	}
+	// a number or anything else that is not a string is no name
+	if (at == std::string::npos || json[at] != '"')
+		return AsciiString();
+
+	AsciiString value;
+	for (++at; at < json.size() && json[at] != '"'; ++at)
+	{
+		if (json[at] == '\\' && at + 1 < json.size())
+			++at;
+		value.concat( json[at] );
+	}
+	return value;
+}
+
+/** What the mod is called on the version line, in the replay and in a refused join: "<name> <version>"
+	* from the folder's mod.json, else the folder's or the archive's own name.  *bareName is the same
+	* without the version, which is what -modfactions puts in front of a faction. */
+static AsciiString modIdentity( const AsciiString &modPath, Bool isDir, AsciiString *bareName )
+{
+	AsciiString name;
+	if (isDir)
+	{
+		AsciiString jsonPath = modPath;
+		jsonPath.concat( "mod.json" );
+		File *file = TheLocalFileSystem->openFile( jsonPath.str(), File::READ | File::BINARY );
+		if (file != NULL)
+		{
+			Int size = file->size();
+			char *contents = file->readEntireAndClose();
+			std::string json( contents, size );
+			delete [] contents;
+
+			name = modJsonString( json, "name" );
+			*bareName = name;
+			AsciiString version = modJsonString( json, "version" );
+			if (name.isNotEmpty() && version.isNotEmpty())
+			{
+				name.concat( ' ' );
+				name.concat( version );
+			}
+		}
+	}
+	if (name.isEmpty())
+	{
+		// the last path component, without the trailing separator a folder was given and without ".big"
+		std::string path( modPath.str() );
+		while (!path.empty() && (path.back() == '\\' || path.back() == '/'))
+			path.pop_back();
+		size_t slash = path.find_last_of( "\\/" );
+		if (slash != std::string::npos)
+			path.erase( 0, slash + 1 );
+		if (!isDir && path.size() > 4 && strcasecmp( path.c_str() + path.size() - 4, ".big" ) == 0)
+			path.erase( path.size() - 4 );
+		name = path.c_str();
+		*bareName = name;
+	}
+	return name;
+}
+
+static Int addMod(char *args[], Int num, Bool isPatch)
 {
 	if (TheWritableGlobalData && num > 1)
 	{
 		AsciiString modPath = args[1];
+		// "." or ".." as a part would let a relative -mod climb out of the user folder, and give one
+		// folder two names that the file system's prefix and archive checks read as two mods
+		std::string parts( modPath.str() );
+		std::replace( parts.begin(), parts.end(), '/', '\\' );
+		parts = "\\" + parts + "\\";
+		if (parts.find( "\\.\\" ) != std::string::npos || parts.find( "\\..\\" ) != std::string::npos)
+		{
+			DEBUG_LOG(("Mod path '%s' is refused: it holds a '.' or '..' part.\n", modPath.str()));
+			return 2;
+		}
 		if (strchr(modPath.str(), ':') || modPath.startsWith("/") || modPath.startsWith("\\"))
 		{
 			// full path passed in.  Don't append base path.
@@ -2520,15 +2659,72 @@ Int parseMod(char *args[], Int num)
 			if (!modPath.endsWith("\\") && !modPath.endsWith("/"))
 				modPath.concat('\\');
 			DEBUG_LOG(("Mod dir is '%s'.\n", modPath.str()));
-			TheWritableGlobalData->m_modDir = modPath;
 		}
 		else
 		{
 			DEBUG_LOG(("Mod file is '%s'.\n", modPath.str()));
-			TheWritableGlobalData->m_modBIG = modPath;
 		}
+		// repeatable: each -mod goes after the ones before it and wins over them (loadMods, FileSystem::modLooseFile)
+		TheWritableGlobalData->m_mods.push_back( modPath );
+		TheWritableGlobalData->m_modIsPatch.push_back( isPatch );
+
+		AsciiString bareName;
+		AsciiString name = modIdentity( modPath, (statBuf.st_mode & S_IFDIR) != 0, &bareName );
+		TheWritableGlobalData->m_modNames.push_back( bareName );
+		// a patch reads "ShockWave 1.201 + Tweak 1.0" in the version line, a replay and a refused join
+		if (TheGlobalData->m_modName.isNotEmpty())
+			TheWritableGlobalData->m_modName.concat( isPatch ? " + " : ", " );
+		TheWritableGlobalData->m_modName.concat( name );
+		DEBUG_LOG(("MOD %d name='%s' path='%s'%s\n", (Int)TheGlobalData->m_mods.size(), name.str(), modPath.str(), isPatch ? " patch" : ""));
 
 		return 2;
+	}
+	return 1;
+}
+
+Int parseMod(char *args[], Int num)
+{
+	return addMod( args, num, FALSE );
+}
+
+/** -modpatch <folder>: a mod that changes the one given before it file by file rather than bringing
+	* armies of its own, or retail's files when it comes first.  Without -modfactions it is a plain -mod. */
+Int parseModPatch(char *args[], Int num)
+{
+	return addMod( args, num, TRUE );
+}
+
+/** -modfactions keeps each full mod's files apart, so a patch joins the full mod before it (retail's
+	* files when none is) and the full mods alone are the faction sets, M1, M2 and so on. */
+static void foldModPatches()
+{
+	GlobalData *data = TheWritableGlobalData;
+	std::vector<AsciiString> mods;
+	std::vector<AsciiString> names;
+	for (size_t i = 0; i < data->m_mods.size(); ++i)
+	{
+		if (!data->m_modIsPatch[i])
+		{
+			mods.push_back( data->m_mods[i] );
+			names.push_back( data->m_modNames[i] );
+			data->m_modPatches.push_back( std::vector<AsciiString>() );
+			continue;
+		}
+		if (mods.empty())
+			data->m_retailPatches.push_back( data->m_mods[i] );
+		else
+			data->m_modPatches.back().push_back( data->m_mods[i] );
+		DEBUG_LOG(("MODPATCH '%s' over %s\n", data->m_modNames[i].str(), mods.empty() ? "retail" : names.back().str()));
+	}
+	data->m_mods = mods;
+	data->m_modNames = names;
+}
+
+Int parseModFactions(char *args[], Int)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_modFactions = TRUE;
 	}
 	return 1;
 }
@@ -2546,6 +2742,8 @@ static CommandLineParam params[] =
 	{ "-scriptDebug", parseScriptDebug },
 	{ "-playStats", parsePlayStats },
 	{ "-mod", parseMod },
+	{ "-modfactions", parseModFactions },
+	{ "-modpatch", parseModPatch },
 	{ "-noshaders", parseNoShaders },
 	{ "-particlebounce", parseParticleBounce },
 	{ "-smoke", parseSmoke },
@@ -2557,6 +2755,7 @@ static CommandLineParam params[] =
 	{ "-noparticleshadows", parseNoParticleShadows },
 	{ "-novolumetricsmoke", parseNoVolumetricSmoke },
 	{ "-nosmokefirelight", parseNoSmokeFireLight },
+	{ "-lighting", parseLightingStyle },
 	{ "-quickstart", parseQuickStart },
 	/* In every build: EA kept them to Debug and Internal, so a Release run could not skip the logo or the
 		 movies. */
@@ -2663,9 +2862,9 @@ static CommandLineParam params[] =
 	{ "-noaudio", parseNoAudio },
 	{ "-maxframes", parseMaxGameFrames },
 	{ "-screenshot", parseScreenShot },
-	{ "-showHudOverlay", parseShowHudOverlay },
 	{ "-video", parseVideo },
 	{ "-directorrecord", parseDirectorRecord },
+	{ "-recordfps", parseRecordFps },
 	{ "-directorscout", parseDirectorScout },
 	{ "-directortimeline", parseDirectorTimeline },
 	{ "-wav", parseWav },
@@ -2673,7 +2872,7 @@ static CommandLineParam params[] =
 	{ "-msaa", parseMSAA },
 	{ "-d3d9", parseDirect3D9 },
 	{ "-language", parseTextLanguage },
-	{ "-interface", parseInterfaceStyle },
+	{ "-mouse", parseMouseStyle },
 	{ "-dx11dump", parseDirect3D11Dump },
 	{ "-dx11post", parseDirect3D11Post },
 	{ "-autocamera", parseAutoCamera },
@@ -2688,6 +2887,7 @@ static CommandLineParam params[] =
 	{ "-techrespawn", parseTechRespawn },
 	{ "-superweapons", parseSuperweapons },
 	{ "-supplypilelimit", parseSupplyPileLimit },
+	{ "-startingcash", parseStartingCash },
 	{ "-showlanes", parseShowLanes },
 	{ "-uidrill", parseUIDrill },
 	{ "-resdrill", parseResDrill },
@@ -2767,7 +2967,23 @@ void parseCommandLine(int argc, char *argv[])
 		}
 	}
 
+	// with no full -mod there is nothing to keep apart, and the retail focus would have no tree to read;
+	// patches alone then stack as plain mods
+	const std::vector<Bool> &isPatch = TheGlobalData->m_modIsPatch;
+	if (std::find( isPatch.begin(), isPatch.end(), FALSE ) == isPatch.end())
+		TheWritableGlobalData->m_modFactions = FALSE;
+	if (TheGlobalData->m_modFactions)
+		foldModPatches();
 	TheArchiveFileSystem->loadMods();
+
+	// GameData.ini and the language check have already asked about files the mod may now supply
+	if (TheGlobalData->m_modName.isNotEmpty())
+	{
+		DEBUG_LOG(("MODS %d loaded, last wins: %s\n", (Int)TheGlobalData->m_mods.size(), TheGlobalData->m_modName.str()));
+		TheFileSystem->reset();
+		// the mod's skirmish and multiplayer scripts are the ones the match runs, so they are the ones the join compares
+		TheWritableGlobalData->computeExeCRC();
+	}
 }
 
 

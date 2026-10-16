@@ -48,7 +48,12 @@ void INI::parseMusicTrackDefinition( INI* ini )
 
 	// read the name
 	const char* c = ini->getNextToken();
-	name.set( c );	
+	name.set( c );
+
+	// a map's music track is put back after the match; listed again it would play twice as often
+	Bool existed = FALSE;
+	if (ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES)
+		existed = TheAudio->rememberEventBeforeMapINI( name );
 
 	track = TheAudio->newAudioEventInfo( name );
 	if (!track) {
@@ -58,7 +63,8 @@ void INI::parseMusicTrackDefinition( INI* ini )
 	AudioEventInfo *defaultInfo = TheAudio->findAudioEventInfo("DefaultMusicTrack");
 	if (defaultInfo) {
 		(*track) = (*defaultInfo);
-		TheAudio->addTrackName( name );
+		if (!existed)
+			TheAudio->addTrackName( name );
 	}
 
 	track->m_audioName = name;
@@ -76,7 +82,10 @@ void INI::parseAudioEventDefinition( INI* ini )
 
 	// read the name
 	const char* c = ini->getNextToken();
-	name.set( c );	
+	name.set( c );
+
+	if (ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES)
+		TheAudio->rememberEventBeforeMapINI( name );
 
 	track = TheAudio->newAudioEventInfo( name );
 	if (!track) {
@@ -103,7 +112,10 @@ void INI::parseDialogDefinition( INI* ini )
 
 	// read the name
 	const char* c = ini->getNextToken();
-	name.set( c );	
+	name.set( c );
+
+	if (ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES)
+		TheAudio->rememberEventBeforeMapINI( name );
 
 	track = TheAudio->newAudioEventInfo( name );
 	if (!track) {

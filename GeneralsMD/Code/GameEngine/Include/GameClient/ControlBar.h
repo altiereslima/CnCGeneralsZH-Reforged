@@ -221,7 +221,7 @@ enum GUICommandType : Int
 	GUI_COMMAND_SPECIAL_POWER_CONSTRUCT_FROM_SHORTCUT, ///< do a shortcut special power using the construct building interface
 	
 	GUI_COMMAND_SELECT_ALL_UNITS_OF_TYPE,
-	GUI_COMMAND_BUILD_PAGE,								///< switch the command bar between the builder's structure pages
+	GUI_COMMAND_FORCE_ATTACK,							///< arm force-fire; the next click attacks whatever is under the pointer
 
 	// add more commands here, don't forget to update the string command list below too ...
 
@@ -272,7 +272,7 @@ static const char *TheGuiCommandNames[] =
 	"SPECIAL_POWER_CONSTRUCT",					
 	"SPECIAL_POWER_CONSTRUCT_FROM_SHORTCUT", 
 	"SELECT_ALL_UNITS_OF_TYPE",
-	"BUILD_PAGE",
+	"FORCE_ATTACK",
 
 	NULL
 };
@@ -426,8 +426,8 @@ enum { CTRL_SHIFT_BUILD_QUEUE_COUNT = 100 };
 // the count the modifiers currently held ask for; 1 with nothing held
 Int getBuildBatchCount( void );
 
-// how deep a producer's queue may go from the bar: its own MaxQueueEntries, and in Classic no
-// deeper than the nine queue buttons that show it
+// how deep a producer's queue may go from the bar: its own MaxQueueEntries, and no deeper than
+// the nine queue buttons that show it
 UnsignedInt getQueueCap( const ProductionUpdateInterface *pu );
 
 enum { MAX_COMMANDS_PER_SET = 18 };  // user interface max is 14 (but internally it's 18 for script only buttons!)
@@ -501,6 +501,31 @@ Int ControlBar_commandGroup( const class CommandButton *command );
 	* what does not fit goes on in the next row down with room, then in the rows above. */
 Bool ControlBar_commandPlaces( const Int *types, const Int *groups, const Int *pinned, Int count, Int *places );
 
+/** Which command set slot each of `count` bar windows shows, -1 for none: `types` is what each slot
+	* holds, GUI_COMMAND_NONE for an empty one, and `windowed` whether ControlBar.wnd has that slot's
+	* window.  A slot with a window shows itself.  A mod drawn for a bigger bar (Contra's eighteen, whose
+	* units keep attack move, guard and stop in 15, 17 and 18) names slots our fourteen have no window
+	* for; such a button moves to an empty window, the three orders to Zero Hour's own 11, 13 and 14
+	* when free, anything else to the first empty one. */
+void ControlBar_fitCommandSlots( const Int *types, const Bool *windowed, Int count, Int *shown );
+
+/** Slot 12 (0-based 11) when the set already has Attack Move and that hole is empty: left of Stop,
+	* under Attack Move. An object ControlBar_forceFires names takes 12 too, or 11 above it when 12 is
+	* taken (Gattling Cannon's mines, Stinger Site's camo net, Fire Base's Sell). -1 when neither
+	* applies, or the place is used (China CC mines, a Tunnel Network's full bar). */
+Int ControlBar_forceAttackSlot( const Int *types, Int count, Bool forceFires );
+
+/** Whether Force Attack belongs on a bar without Attack Move. A base defence (FS_BASE_DEFENSE) with its
+	* own gun (CAN_ATTACK: Patriot, Gattling Cannon, Fire Base, Tunnel Network), soldiers for a gun
+	* (SPAWNS_ARE_THE_WEAPONS: Stinger Site) or a garrison that shoots out (GARRISONABLE_UNTIL_DESTROYED:
+	* Bunker), and a transport whose riders shoot (TRANSPORT with CAN_ATTACK: Combat Chinook; the
+	* plain Chinook lacks CAN_ATTACK). A Speaker Tower is none of them. The launcher's Hotkeys page
+	* reads KindOf the same way. */
+Bool ControlBar_forceFires( const Object *obj );
+/// The same asked of a template, for the options menu's Hotkeys page, which has no object to ask.
+Bool ControlBar_forceFires( const ThingTemplate *thing );
+
+
 /** The page's keys past attack, hold position and move, which no command set has a button for either. */
 enum OrderKeyExtra
 {
@@ -514,7 +539,7 @@ enum OrderKeyExtra
 	* finds its own taken goes on B, then N, then the first free place in reading order. */
 void ControlBar_orderKeyPlaces( const Int *places, Int count, Bool fights, Int *keys );
 enum { MAX_RIGHT_HUD_UPGRADE_CAMEOS = 5};
-enum { MAX_MULTI_SELECT_GROUPS = 36 };	///< unit types a multi-selection tells apart (6x6 grid, Tab focus)
+enum { MAX_MULTI_SELECT_GROUPS = 36 };	///< unit types a multi-selection tells apart (6x6 grid)
 enum { 
 			 MAX_PURCHASE_SCIENCE_RANK_1 = 4,
 			 MAX_PURCHASE_SCIENCE_RANK_3 = 15,
@@ -768,83 +793,6 @@ enum ControlBarStages
 };
 
 //-------------------------------------------------------------------------------------------------
-/** What the build tooltip says, piece by piece, so Window/Html/Tooltip.html can lay each piece out
-	* on its own: ControlBarPopupDescription.wnd gets the same pieces run together into one text. */
-//-------------------------------------------------------------------------------------------------
-/** One line of what an upgrade does: the figure under `label`, a string table label, goes from `from` to `to`. */
-struct BuildTooltipChange
-{
-	const char *label;
-	std::string from;
-	std::string to;
-};
-
-/** An upgrade and what it does to one unit.  On a unit's card `name` is the upgrade's; on an
-	* upgrade's card it is the unit's. */
-struct BuildTooltipUpgrade
-{
-	UnicodeString name;
-	Bool owned;										///< the player has it already
-	std::vector< BuildTooltipChange > changes;
-};
-
-struct BuildTooltipCard
-{
-	UnicodeString name;
-	UnicodeString description;		///< the button's own text, its lines split by \n
-	UnicodeString warning;				///< why it cannot be bought right now, empty when it can
-	UnicodeString requires;				///< "Requires: ..." naming what is still missing
-	UnsignedInt cost;							///< 0 for nothing to pay
-	Bool costsScience;						///< the cost is promotion points rather than money
-	Bool hasStats;								///< DetailedBuildTooltips: the figures below are there
-	Int buildSeconds;
-	Int health;										///< 0 for a body that cannot be hurt
-	Int damage;										///< the main weapon's, with the upgrades the player owns; 0 for no weapon
-	Int range;
-	Real attacksPerSecond;				///< shots a second over a whole clip and its reload
-	Int damagePerSecond;
-	std::vector< BuildTooltipUpgrade > upgrades;	///< a unit's upgrades, or the units an upgrade changes
-	IRegion2D anchor;							///< the hovered window in screen pixels, its top the grid's top for a command button
-};
-
-/** One weapon slot's figures; `weapon` NULL for a slot with nothing in it that hurts. */
-struct WeaponFigures
-{
-	const WeaponTemplate *weapon;
-	Real damage;
-	Real range;
-	Real attacksPerSecond;
-};
-
-/** A unit's health and its weapons, slot by slot. */
-struct UnitFigures
-{
-	Real health;
-	WeaponFigures slots[ WEAPONSLOT_COUNT ];
-
-	/** The slot with the most damage a second, WEAPONSLOT_COUNT for an unarmed unit. */
-	Int mainSlot( void ) const
-	{
-		Int best = WEAPONSLOT_COUNT;
-		for( Int slot = PRIMARY_WEAPON; slot < WEAPONSLOT_COUNT; ++slot )
-			if( slots[ slot ].weapon && ( best == WEAPONSLOT_COUNT || slots[ slot ].damage * slots[ slot ].attacksPerSecond
-																																> slots[ best ].damage * slots[ best ].attacksPerSecond ) )
-				best = slot;
-		return best;
-	}
-};
-
-/** `weapon`'s figures under `bonus`, the build tooltip's and the selected unit's alike
-	* (ControlBarPopupDescription.cpp); `thing` carries it, and its death weapon stands in for a
-	* suicide dummy. */
-WeaponFigures ControlBarWeaponFigures( const ThingTemplate *thing, const WeaponTemplate *weapon, const WeaponBonus &bonus );
-
-/** `thing`'s weapons in the set `setFlags` picks, each under the bonuses `bonusFlags` give it, into
-	* `figures`' slots; a template with no such set leaves them as they are. */
-void ControlBarTemplateWeaponFigures( const ThingTemplate *thing, const WeaponSetFlags &setFlags,
-																			WeaponBonusConditionFlags bonusFlags, UnitFigures &figures );
-
-//-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 class ControlBar : public SubsystemInterface
 {
@@ -869,6 +817,8 @@ public:
 
 	/// mark the UI as dirty so the context of everything is re-evaluated
 	void markUIDirty( void );
+	Bool selectionRepeatsUnit( const ThingTemplate *thing );	///< a selected factory of ours builds it on repeat
+	void toggleRepeatUnit( const ThingTemplate *thing );		///< Ctrl+Alt on a build button: repeat on or off
 
 	/// a drawable has just become selected
 	void onDrawableSelected( Drawable *draw );
@@ -905,12 +855,6 @@ public:
 	/** Where the page's stance key stands for what is selected now,
 		ORDER_KEY_EXTRAS of them, -1 for one that is not offered.  See ControlBar_orderKeyPlaces. */
 	void getOrderKeyPlaces( Int *keys ) const;
-
-	/** paint each command window's key, its place's, in its top left corner; `places` as above */
-	void labelCommandPlaces( const Int *places );
-
-	/** paint `button`'s key, the one `place` is bound to.  `place` below 0 clears it. */
-	void labelPlaceButton( GameWindow *button, Int place );
 
 	/** The general's powers are laid out SPECIAL_POWER_SHORTCUT_COLS to a group, so one key press
 		cannot reach eleven of them.  The first press picks a group, which stands on the HUD as a
@@ -955,20 +899,8 @@ public:
 	/** forget a marked column.  TRUE when there was one to forget. */
 	Bool clearPurchaseScienceColumn( void );
 
-	/** A builder with more structures than BUILD_PAGE_ONE_SIZE does not show them all at once.
-		The command bar opens on two menu buttons instead - Q and W - and each one opens its
-		own page of structures, so a structure is two keystrokes away (Q-Q, Q-A, ... W-Q, ...)
-		instead of competing for the fourteen slots.  Page one holds the first
-		BUILD_PAGE_ONE_SIZE structures of the command set (the ones that sit on Q W E / A S D
-		without paging), page two holds the rest (the R T Y / F G H region). */
-	enum { BUILD_PAGE_ROOT = -1, BUILD_PAGE_COUNT = 2, BUILD_PAGE_ONE_SIZE = 6 };
-	void setBuildPage( Int page );
-
-	/** with multiple units selected the right HUD shows the unit types; Tab (+1) and
-		Shift-Tab (-1) walk the focus between them */
-	void cycleMultiSelectFocus( Int direction );
-
-	/** a left click at screen (x, y) on one of those type tiles keeps only that type selected, and
+	/** with multiple units selected the right HUD shows the unit types; a left click at
+		screen (x, y) on one of those type tiles keeps only that type selected, and
 		with shift drops that type from the selection; FALSE when (x, y) is on no tile */
 	Bool clickMultiSelectTile( Int x, Int y );
 
@@ -1069,24 +1001,6 @@ public:
 	Color getUpgradeBorderColor( void ){return m_commandButtonBorderUpgradeColor;}
 	void updateBorderColor( Color color) {m_commandBarBorderColor = color;	}
 
-	/** The tray one of the general's power shortcuts stands in, down in the corner - the tray of
-		* whichever side this bar is showing, taken off the bar itself rather than named, so a mod's
-		* bar brings its own.  Watching a match the bar has no side of its own to read, and the tray
-		* comes out of the layout of the player the bar is looking at instead. */
-	const Image *getSpecialPowerTrayImage( void );
-
-	/** That tray at the size the bar draws it, the hole in it the cameo fills, and the step a row of
-		* them runs at - measured off the same layout the tray came out of, so it is the size of the
-		* powers' own at any resolution.  Any out-parameter may be NULL; FALSE when there is no bar
-		* and no layout to borrow one from. */
-	Bool getSpecialPowerTrayLayout( ICoord2D *traySize, ICoord2D *cameoSize,
-																	ICoord2D *cameoOffset, Int *columnStep );
-
-	/** The tray geometry from one slot's size.  Public because it is the single home of the artwork's
-		* proportions: the bar itself, anything borrowing the look, and the tests all read it here. */
-	static Bool trayLayoutFromSlot( Int slotWidth, Int slotHeight, ICoord2D *traySize,
-																	ICoord2D *cameoSize, ICoord2D *cameoOffset, Int *columnStep );
-
 	/// set the command data into the button
 	void setControlCommand( GameWindow *button, const CommandButton *commandButton );
 
@@ -1138,29 +1052,12 @@ public:
 		* set - because it remembers both the authored rectangle and the one it last handed out. */
 	void layoutPanels( void );
 
-	/** Take the slide off and declare all three panels home.  Anything that reads a window's screen
-		* position and writes another window's position from it has to run after this, or it writes
-		* the answer for a bar that is on its way down and layoutPanels then reads that as the
-		* rectangle the window was authored at.  ControlBarScheme::init is that caller. */
-	void clearPanelSlide( void );
-
 	/// top edge of the highest visible window the bar owns, and where MoneyDisplay is; see -uidrill
 	void forEachPlacedWindow( Int *topOut, Int *moneyOut );
 	ControlBarContext getCurrentContext( void ) const { return m_currContext; }	///< for -uidrill's log
 
 	/// the window every other one on the bar hangs off, so -uidrill can walk it looking for a button
 	GameWindow *getMasterParent( void ) { return m_contextParent[ CP_MASTER ]; }
-
-	/** Send one whole panel off the bottom of the screen, or bring it back.  It slides: the panel is
-		* a picture of a thing, and a thing that is going away should be seen going.  'immediate' puts
-		* it where it is going this instant, which is what a rebuild wants. */
-	void showPanel( Int panel, Bool show, Bool immediate = FALSE );
-
-	/// is that panel all the way off screen?  the plate art asks before it paints
-	Bool isPanelHidden( Int panel ) const { return m_panelHidden[ panel ]; }
-
-	/// how far down that panel has slid, in pixels - the plate art travels with its windows
-	Int getPanelSlideOffset( Int panel ) const;
 
 	/** TRUE when a click at this screen point, over this window, belongs to the world after all: the
 		* window is one of the bar's input-blocking panes or CenterBackground, no window inside it is
@@ -1169,50 +1066,17 @@ public:
 		* went nowhere.  GameWindow::winPointInChild asks, so clicking and unit picking agree. */
 	Bool letsClickThrough( GameWindow *window, Int x, Int y );
 
-	/** The screen rectangles the bar's CSS page drew solid, which take the place of the plates in
-		* letsClickThrough while the page is drawing; NULL when it is not, and the plates decide again.
-		* `holes` are the page's own buttons: a click on one goes through to the page even inside a
-		* solid panel. */
-	void setPageSolids( const std::vector< IRegion2D > *solids, const std::vector< IRegion2D > *holes = NULL );
-
-	/// the radar's under-attack lamp, EA's: the Classic interface keeps it, Reforged hides the window
+	/// the radar's under-attack lamp, EA's
 	void triggerRadarAttackGlow( void );
-
-	/** The HUD page's place for the general's powers: the first in `corner`, the bottom left of the
-		* grid, each `cell` big with `gap` between them, a group of SPECIAL_POWER_SHORTCUT_COLS going
-		* up from it as a column and the next group the column right of it, the order the group keys
-		* count in.  The slots' own tray
-		* art is not drawn; the page draws their cells.  NULL hides the bar.  Screen pixels.  Asked every
-		* frame the page draws, so it holds against the bar's own layout.  Returns how many powers are
-		* shown, each in its place. */
-	Int placeSpecialPowerShortcutGrid( const ICoord2D *corner, const ICoord2D &cell, Int gap );
 
 	/** Puts one of the bar's windows on `rect`, screen pixels, and leaves its children standing where
 		* they were on screen.  The place layoutPanels recorded for it moves with it, so a rebuild of the
 		* layout reads the window as put there and not as moved in the loader's stretched space. */
 	void placeWindowAt( GameWindow *window, const IRegion2D &rect );
 
-	/** A context that hides the command group still has its own button, and it stands where that
-		command stands on a finished building: cancel on S, sell on N, the rally point on B.  The
-		countdown keeps the top row and a reinforcement pad's bar the middle one.  `cells` is one
-		screen rect per CommandPlace, and `taken` gains the button's place so the page draws its cell. */
-	void placeContextOnGrid( const IRegion2D &frame, const IRegion2D *cells, Bool *taken );
-	GameWindow *getSpecialPowerShortcutParent( void ) { return m_specialPowerShortcutParent; }
-	/// a multi-selection's type cells, one a selected type, shown or hidden; see updateMultiSelectStrip
-	const std::vector< GameWindow * > &getMultiSelectTiles( void ) const { return m_multiSelectTiles; }
 	/// the portrait bar's upgrade cameos and type tiles, which have no command button: TRUE and their
 	/// tooltip's name and description for one of them, FALSE for any other window
 	Bool describePortraitBarWindow( GameWindow *window, UnicodeString &name, UnicodeString &description ) const;
-
-	/// the general's stars are asking to be spent, so the button blinks; see getStarImage
-	Bool isGeneralStarFlashing( void ) const { return m_genStarFlash; }
-
-	/// the same journey as a fraction, 0 home and 1 gone.  Needs no display, which is why the test
-	/// for the rebuild ordering asks this one; see clearPanelSlide
-	Real getPanelSlideFraction( Int panel ) const
-	{
-		return ( panel < 0 || panel >= CB_PANEL_COUNT ) ? 0.0f : m_panelSlide[ panel ];
-	}
 
 	/// post process step, after all commands and command sets are loaded - and again after a map.ini
 	void postProcessCommands( void );
@@ -1265,15 +1129,15 @@ protected:
 	void resetContainData( void );			/// reset container data we use to tie controls to objects IDs for containment
 	void resetBuildQueueData( void );			/// reset the build queue data we use to die queue entires to control
 	void resetBuildQueueButtons( void );	/// attach the queue button windows and wipe them to empty
-	void populateBuildQueue( Object *producer );	///< Classic: the producer's queue into the queue buttons
-	void updateClassicBuildQueue( Object *obj, ProductionUpdateInterface *pu );	///< Classic: queue over the portrait while it holds anything
+	void populateBuildQueue( Object *producer );	///< the producer's queue into the queue buttons
+	void updateBuildQueue( Object *obj, ProductionUpdateInterface *pu );	///< the queue over the portrait while it holds anything
 
 	// the following methods are for populating the context GUI controls for a particular context
 	static void populateButtonProc( Object *obj, void *userData );
 	void populatePurchaseScience(Player* player);
+	/// one rank's section of the promotion screen: placed[i] goes on windows[i]
+	void populatePurchaseScienceRank( Player *player, const CommandButton *const *placed, GameWindow **windows, Int windowCount );
 	void populateCommand( Object *obj );
-	void buildCommandLayout( Object *obj, const CommandSet *commandSet, const CommandButton **slot );
-	void makeBuildPageButtons( void );
 	void populateMultiSelect( void );
 	void populateMultiSelectUnitList( void );
 	void setMultiSelectFocus( Int index );
@@ -1357,7 +1221,7 @@ public:
 	// get method for list of commandbuttons
 	const CommandButton *getCommandButtons( void ) { return m_commandButtons; }
 
-	Drawable *findStandInBuilder( Bool freeOnly );				///< the local player's free builder (or, unless freeOnly, any builder) to stand in for an empty selection
+	Drawable *findStandInBuilder( Bool freeOnly );				///< with BuildWithoutWorker on, the local player's free builder (or, unless freeOnly, any builder) to stand in for an empty selection
 
 protected:
 
@@ -1366,15 +1230,6 @@ protected:
 
 	IRegion2D m_panelRect[ CB_PANEL_COUNT ];				///< screen rect of each panel, filled by layoutPanels()
 	ICoord2D m_panelOrigin;													///< where the frame was put, so the plates can follow it
-	Bool m_panelHidden[ CB_PANEL_COUNT ];						///< minimised: the radar and the middle stand down
-	Real m_panelSlide[ CB_PANEL_COUNT ];						///< 0 home, 1 clear of the bottom edge
-	Real m_panelSlideTo[ CB_PANEL_COUNT ];					///< where each one is heading
-	Int m_panelDropCap[ CB_PANEL_COUNT ];						///< pixels a panel may travel; 0 = all the way off
-	UnsignedInt m_panelSlideMs;											///< wall clock of the last slide step
-
-	void updatePanelSlide( void );									///< step the slide and put the windows where it says
-	void applyPanelSlide( void );										///< the placing half of it, on its own so a rebuild can call it
-
 	Bool m_UIDirty;																///< the context UI must be re-evaluated
 
 	CommandButton *m_commandButtons;							///< list of possible commands to have
@@ -1386,7 +1241,8 @@ protected:
 	Drawable *m_currentSelectedDrawable;					///< currently selected drawable for the context sensitive interface
 	ControlBarContext m_currContext;							///< our current displayed context
 
-	DrawableID m_rallyPointDrawableID;						///< rally point drawable for visual rally point 
+	DrawableID m_rallyPointDrawableID;						///< rally point drawable for visual rally point
+	DrawableID m_standInBuilderID;								///< with nothing selected, the builder whose command bar is shown (INVALID_DRAWABLE_ID otherwise)
 
 	Real m_displayedConstructPercent;							///< construct percent last displayed to user
 	UnsignedInt m_displayedOCLTimerSeconds;				///< OCL Timer seconds remaining last displayed to user
@@ -1412,27 +1268,6 @@ protected:
 	Int m_specialPowerShortcutRow;					 ///< row a first key press picked, -1 when none is pending
 	UnsignedInt m_specialPowerShortcutRowMs;  ///< millisecond that row was picked on, for CHORD_TIMEOUT_MS
 
-	/** A tray taken out of a side's shortcut layout without standing that side's bar up: what the
-		* HUD needs while watching somebody else play.  The layout is created, measured and destroyed
-		* on the spot - the image itself belongs to the mapped image collection and outlives it - and
-		* the answer is kept, since a spectator's bar asks for the same side every frame. */
-	struct BorrowedTray
-	{
-		AsciiString layout;					///< the .wnd it came out of, and the key this is found by
-		const Image *image;					///< that layout's slot background, NULL when it has none
-		ICoord2D size;							///< the size the loader gave that slot
-	};
-	enum { MAX_BORROWED_TRAYS = 8 };
-	BorrowedTray m_borrowedTrays[ MAX_BORROWED_TRAYS ];
-	Int m_borrowedTrayCount;
-	const BorrowedTray *borrowTray( const PlayerTemplate *pt );
-
-	/// whose tray this bar shows when it has no bar of its own: the side the bar itself is wearing
-	const PlayerTemplate *specialPowerTraySide( void );
-
-	/// a template of this side that ships a general's power bar, so its tray can be read off it
-	const PlayerTemplate *templateForSide( AsciiString side );
-
 	Int m_purchaseScienceColumn;						 ///< promotion screen column a first key press marked, -1 when none
 	UnsignedInt m_purchaseScienceColumnMs;	 ///< millisecond it was marked on, for CHORD_TIMEOUT_MS
 
@@ -1452,11 +1287,6 @@ protected:
 
 	GameWindow *m_commandWindows[ MAX_COMMANDS_PER_SET ];			///< command window controls for easy access
 
-	CommandButton *m_buildPageButton[ BUILD_PAGE_COUNT ];	///< the two menu buttons a paged builder opens on
-	CommandButton *m_buildPageBackButton;									///< takes a page back to the menu buttons
-	Int m_buildPage;																			///< BUILD_PAGE_ROOT, or the page being shown
-	ObjectID m_buildPageObjectID;													///< builder the page belongs to; a new one starts at the menu
-	DrawableID m_standInBuilderID;												///< with nothing selected, the builder whose command bar is shown (INVALID_DRAWABLE_ID otherwise)
 
 	/** A player upgrade is researched once, so it goes to exactly one of the selected buildings -
 		* and the bar cannot see the queue an earlier click in this same frame just filled, because
@@ -1512,7 +1342,7 @@ protected:
 	Int m_multiSelectGroupSize[ MAX_MULTI_SELECT_GROUPS ];	///< how many of that type are selected
 	DrawableID m_multiSelectGroupFirst[ MAX_MULTI_SELECT_GROUPS ];	///< a member of the group, the context representative
 	Int m_multiSelectGroupCount;																///< number of type groups
-	Int m_multiSelectFocus;																			///< the group Tab currently focuses
+	Int m_multiSelectFocus;																			///< the group that drives the context
 
 	//cameo flash
 	Bool m_flash;                                       ///< tells update whether or not to check for flash
@@ -1529,30 +1359,13 @@ protected:
 
 	Bool m_isObserverCommandBar;												///< If this is true, the command bar behaves greatly differnt
 	Player *m_observerLookAtPlayer;											///< The current player we're looking at, Null if we're not looking at anyone.
-	AsciiString m_watchedSide;													///< the side the bar is wearing while watching, so a selection change only lays it out again when it really changes side
-	std::vector< IRegion2D > m_pageSolids;							///< what the CSS page drew solid, in screen pixels; see setPageSolids
-	std::vector< IRegion2D > m_pageHoles;								///< the page's own buttons, which let their clicks through
-	Bool m_pageSolidsActive;														///< the page is drawing, so m_pageSolids decides clicks and not the plates
-	GameWindow *m_radarAttackGlowWindow;										///< WinUAttack, Classic only; NULL in Reforged
+	GameWindow *m_radarAttackGlowWindow;										///< WinUAttack
 	Int m_remainingRadarAttackGlowFrames;										///< logic frames left on the lamp's flashing
 	Player *m_watchedSelection;													///< the player the selection last named while watching, NULL for nobody
 
 	WindowLayout *m_buildToolTipLayout;										///< The window that will slide on/display tooltips
 	Bool m_showBuildToolTipLayout;											///< every frame we test to see if we aregoing to continue showing this or not.
-	BuildTooltipCard m_buildTooltipCard;								///< what the layout says, piece by piece
-	BuildTooltipCard m_boardCard;												///< the card for what the pointer is on in a page, the Tab scoreboard's
-	const CommandButton *m_boardCardButton;							///< the button m_boardCard was filled in from
-	Player *m_boardCardOwner;														///< and the player its figures were counted for
-	Bool m_boardCardShown;															///< a page asked for m_boardCard this frame
-	Bool m_boardCardWasShown;														///< and the frame before, so a card pointed at again is filled in again
 public:
-	/** What the build tooltip up on screen says, NULL while none is. */
-	const BuildTooltipCard *getBuildTooltipCard( void );
-	/** The build card for a button a page draws rather than a window, its prices and figures counted
-		* for owner, standing against anchor, for this frame: a page calls hideBoardCard every frame and
-		* this while the pointer is on one. */
-	void showBoardCard( const CommandButton *button, Player *owner, const IRegion2D &anchor );
-	void hideBoardCard( void );
 	void showBuildTooltipLayout( GameWindow *cmdButton );
 	void hideBuildTooltipLayout( void );
 	void deleteBuildTooltipLayout( void );
@@ -1627,7 +1440,7 @@ private:
 extern ControlBar *TheControlBar;
 
 /// -uidrill: write one line saying where the bar's windows actually are, so a long run says whether
-/// they hold still.  See ControlBar::clearPanelSlide for what they used to do instead.
+/// they hold still.
 extern void ControlBar_logPlacement( const char *tag, Int frame );
 
 //-------------------------------------------------------------------------------------------------
@@ -1674,6 +1487,13 @@ extern Bool ControlBarPanelDesignToScreen( Int panel, const IRegion2D *design,
 																					 Int displayWidth, Int displayHeight,
 																					 IRegion2D *rectOut );
 
+/** ControlBar Pro's bar in three pieces, each at the screen's height alone and pinned to its own
+	* anchor: 800x600 design units to the screen for 'panel' (CB_PANEL_LEFT, _CENTER, _RIGHT). */
+extern void ControlBarHudPieceTransform( Int panel, Real dispW, Real dispH, Real *sx, Real *sy, Real *originX );
+
+/// which of those pieces a window whose middle is at this design x belongs to
+extern Int ControlBarHudPieceForDesignX( Real designCenterX );
+
 /** The one scale the whole HUD is drawn at: the display over the 800x600 everything was authored
 	* at, the smaller of the two axes so nothing is distorted.  The .wnd loader multiplies x and y
 	* separately, which on a 16:9 screen is a 1.33x horizontal smear; anything that wants to sit
@@ -1682,23 +1502,16 @@ extern Bool ControlBarPanelDesignToScreen( Int panel, const IRegion2D *design,
 extern Real ControlBarUniformScale( void );
 extern Real ControlBarUniformScaleFor( Int displayWidth, Int displayHeight );	///< ...for a screen you name
 
-/** The scale the bottom HUD's page and everything laid out on it are drawn at: the screen's height
-	* over 600, cut to CONTROL_BAR_HUD_PERCENT of itself, the owner's "too big" of 2026-09-28, with HUD
-	* Size on top, then fitted to the screen's width by ControlBarHudScaleFit.  It follows the height
+/** The scale the HUD's own drawing is done at: the screen's height over 600, cut to
+	* CONTROL_BAR_HUD_PERCENT of itself, the owner's "too big" of 2026-09-28.  It follows the height
 	* alone and is not rounded or floored, the owner's rule of 2026-10-01: the HUD covers the same part
 	* of the screen's height at every resolution, and a wider screen does not make it bigger.  1.26 at
-	* 1920x1080, as it was when it went by the narrower axis; 0.84 at 1280x720.  ControlBarHudScaleFor
-	* is the scale before HUD Size and the fit. */
+	* 1920x1080; 0.84 at 1280x720. */
 enum { CONTROL_BAR_HUD_PERCENT = 70 };
 extern Real ControlBarHudScale( void );
 extern Real ControlBarHudScaleFor( Int displayWidth, Int displayHeight );
-/** `scale` cut down until the console, InGameUI_consolePageWidth page pixels, fits `displayWidth`. */
-extern Real ControlBarHudScaleFit( Real scale, Int displayWidth );
-/** The in-match HUD's other pages - the event feed, the chat, the network box, the scoreboard, the
-	* build card, the observer's and the replay's strips - authored at the uniform scale's size: the HUD
-	* scale over CONTROL_BAR_HUD_PERCENT, so they keep their size beside the console at every
-	* resolution and HUD Size, and are what they were at 1920x1080.  The shell's pages, the quit menu
-	* and the promotion screen keep the uniform scale. */
+/** The text lists drawn over the battlefield, authored at the uniform scale's size: the HUD scale
+	* over CONTROL_BAR_HUD_PERCENT, so they are what they were at 1920x1080 at every resolution. */
 extern Real ControlBarHudPageScale( void );
 
 /** Undo the .wnd loader's separate-axis stretch over a whole layout: every window under 'root' is

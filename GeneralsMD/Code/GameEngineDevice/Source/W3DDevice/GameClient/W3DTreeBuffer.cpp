@@ -1673,7 +1673,7 @@ void W3DTreeBuffer::pushAsideTree(DrawableID id, const Coord3D *pusherPos,
 			UnsignedInt lastFrame = m_trees[i].lastFrameUpdated;
 			m_trees[i].lastFrameUpdated = TheGameLogic->getFrame();
 			if(m_trees[i].pushAsideSource == pusherID) {
-				if (m_trees[i].lastFrameUpdated - lastFrame < 3)
+				if (m_trees[i].lastFrameUpdated - lastFrame < ConvertRetailFrames(3u))
 					return; // already pushing. [5/28/2003]
 			}
 
@@ -2191,9 +2191,11 @@ void W3DTreeBuffer::drawTrees(CameraClass * camera, RefRenderObjListIterator *pD
 		TheW3DProjectedShadowManager->flushDecals(m_shadow->getTexture(0), SHADOW_DECAL);
 	}
 
-	// Update pushed aside and toppling trees.
+	// Update pushed aside and toppling trees, once a logic frame like the sway: the push and sink
+	// counts are logic frames, and the topple's speeds were converted to them.  Run every render
+	// pass, they went as much faster as the picture rate was over the logic's.
 	for (curTree=0; curTree<m_numTrees; curTree++) {
-		if (pause) {
+		if (!stepSway) {
 			break;
 		}
 		Int type = m_trees[curTree].treeType;
@@ -2498,17 +2500,21 @@ void W3DTreeBuffer::applyTopplingForce( TTree *tree, const Coord3D* toppleDirect
   // Having a low toppleSpeed is BAD. In particular, if the toppleSpeed is exactly 0, the
   // tree will stay upright forever, frozen in place (because the sway update is dead) 
   // but never dying
-  if ( toppleSpeed < d->m_minimumToppleSpeed )
+  // MinimumToppleSpeed is per retail frame and the tree steps once a logic frame
+  const Real minimumToppleSpeed = ConvertRetailPerFrameRate( d->m_minimumToppleSpeed );
+  if ( toppleSpeed < minimumToppleSpeed )
   {
-    toppleSpeed = d->m_minimumToppleSpeed;
+    toppleSpeed = minimumToppleSpeed;
   }
-  
+
 	tree->m_toppleDirection = *toppleDirection;
 	tree->m_toppleDirection.normalize();
 	tree->m_angularAccumulation = 0;
 
+	// toppleSpeed is per logic frame; the acceleration taken from it is per frame squared, so it
+	// halves once more, as in ToppleUpdate
 	tree->m_angularVelocity = toppleSpeed * d->m_initialVelocityPercent;
-	tree->m_angularAcceleration = toppleSpeed * d->m_initialAccelPercent;
+	tree->m_angularAcceleration = ConvertRetailPerFrameRate( toppleSpeed * d->m_initialAccelPercent );
 	tree->m_toppleState = TOPPLE_FALLING;
 	tree->m_options = options;
 	Coord3D pos;
@@ -2554,8 +2560,8 @@ void W3DTreeBuffer::updateTopplingTree(TTree *tree)
 		}
 		return;
 	}
-	const Real VELOCITY_BOUNCE_LIMIT = 0.01f;				// if the velocity after a bounce will be this or lower, just stop at zero
-	const Real VELOCITY_BOUNCE_SOUND_LIMIT = 0.03f;	// and if this low, then skip the bounce sound
+	const Real VELOCITY_BOUNCE_LIMIT = ConvertRetailPerFrameRate(0.01f);				// if the velocity after a bounce will be this or lower, just stop at zero
+	const Real VELOCITY_BOUNCE_SOUND_LIMIT = ConvertRetailPerFrameRate(0.03f);	// and if this low, then skip the bounce sound
 
 	Real curVelToUse = tree->m_angularVelocity;
 	if (tree->m_angularAccumulation + curVelToUse > ANGULAR_LIMIT)

@@ -65,7 +65,12 @@ protected:
 
 	virtual void xferImplementation( void *data, Int dataSize );		///< the xfer implementation
 
+	/// Throws XFER_READ_ERROR unless 'dataSize' bytes are left in the file: a size read from a
+	/// broken or tampered save is not trusted to allocate or skip by.
+	void requireBytesLeft( Int dataSize );
+
 	FILE * m_fileFP;																					///< pointer to file
+	long m_fileSize;																					///< bytes in the file, read on open
 
 };
 

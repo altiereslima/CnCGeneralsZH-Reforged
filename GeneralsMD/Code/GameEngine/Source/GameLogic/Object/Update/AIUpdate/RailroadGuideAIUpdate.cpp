@@ -93,13 +93,13 @@ RailroadBehaviorModuleData::RailroadBehaviorModuleData( void )
 	m_CrashFXTemplateName.clear();
 	
 	m_isLocomotive = FALSE;
-	m_runningGarrisonSpeedMax = 1.0f;
-	m_killSpeedMin = 1.0f;
-	m_speedMax = 4;
-	m_acceleration = 1.01f;
-	m_braking = 0.99f;
-	m_friction = 0.97f;
-	m_waitAtStationTime = 150;
+	m_runningGarrisonSpeedMax = ConvertRetailPerFrameRate(1.0f);
+	m_killSpeedMin = ConvertRetailPerFrameRate(1.0f);
+	m_speedMax = ConvertRetailPerFrameRate(4.0f);
+	m_acceleration = ConvertRetailPerFrameFactor(1.01f);
+	m_braking = ConvertRetailPerFrameFactor(0.99f);
+	m_friction = ConvertRetailPerFrameFactor(0.97f);
+	m_waitAtStationTime = LOGICFRAMES_PER_SECOND * 5;
 }  // end RailroadBehaviorModuleData
 
 
@@ -343,7 +343,8 @@ void RailroadBehavior::onCollide( Object *other, const Coord3D *loc, const Coord
 	dlt.normalize();
 	if ( ! victimIsInfantry )
 	{
-		overlap/= 4;
+		// a quarter of the overlap per retail frame, every frame of contact
+		overlap *= 1.0f - ConvertRetailPerFrameFactor(0.75f);
 
 	  dlt.scale( overlap);
 	  Coord3D newPos;
@@ -372,20 +373,22 @@ void RailroadBehavior::onCollide( Object *other, const Coord3D *loc, const Coord
 	delta.normalize();
 	Real dot = delta.x * myDir->x + delta.y * myDir->y + delta.z * myDir->z;
 
+	// the shove is added every frame of contact, so it is a per-frame^2 amount; the 0.66 turns
+	// a speed into one, which makes it a per-frame rate
 	if (other->isEffectivelyDead())
 	{// we just run over debris, instead of shoving it around
-		delta.scale( MIN(0.3f,m_pullInfo.speed * 0.66f) );
+		delta.scale( MIN(ConvertRetailPerFrameSquared(0.3f),m_pullInfo.speed * ConvertRetailPerFrameRate(0.66f)) );
 	}
 	else
 	{
-		delta.scale( MIN(1.4f,m_pullInfo.speed  * 0.66f) );// the faster I go, the harder I slam!
+		delta.scale( MIN(ConvertRetailPerFrameSquared(1.4f),m_pullInfo.speed  * ConvertRetailPerFrameRate(0.66f)) );// the faster I go, the harder I slam!
 
 		//Absolute death to be hit by a train, no survival
 		if ( m_pullInfo.speed >= modData->m_killSpeedMin ) // they can grab on safely
 		{
 			other->kill();
-			theirPhys->setPitchRate(GameLogicRandomValueReal(-0.03f, 0.03f));
-			theirPhys->setRollRate(GameLogicRandomValueReal(-0.03f, 0.03f));
+			theirPhys->setPitchRate(GameLogicRandomValueReal(ConvertRetailPerFrameRate(-0.03f), ConvertRetailPerFrameRate(0.03f)));
+			theirPhys->setRollRate(GameLogicRandomValueReal(ConvertRetailPerFrameRate(-0.03f), ConvertRetailPerFrameRate(0.03f)));
 		}
 		else
 		{
@@ -404,12 +407,12 @@ void RailroadBehavior::onCollide( Object *other, const Coord3D *loc, const Coord
 	heft.z = MAX(heft.z, TheTerrainLogic->getGroundHeight(heft.x, heft.y) + 2); // lift them off the ground
 	other->setPosition(&heft);
 
-	delta.z = GameLogicRandomValueReal(0.05f, m_pullInfo.speed/10);	// for some fake heft
+	delta.z = GameLogicRandomValueReal(ConvertRetailPerFrameSquared(0.05f), m_pullInfo.speed * ConvertRetailPerFrameRate(0.1f));	// for some fake heft
 	delta.scale(dot);
 
 
 	// This is a special check so that it wont hurl infantry clear across the map!
-	if( ! ( victimIsInfantry && theirPhys->getVelocityMagnitude() > 5.0f ) )
+	if( ! ( victimIsInfantry && theirPhys->getVelocityMagnitude() > ConvertRetailPerFrameRate(5.0f) ) )
 		theirPhys->addVelocityTo( &delta );
 
 
@@ -725,7 +728,7 @@ UpdateSleepTime RailroadBehavior::update( void )
 		if ( m_conductorState == APPLY_BRAKES )
 		{
 			conductorPullInfo.speed *= modData->m_braking;
-			if (fabs(conductorPullInfo.speed) < 0.1f)
+			if (fabs(conductorPullInfo.speed) < ConvertRetailPerFrameRate(0.1f))
 			{
 				conductorPullInfo.speed = 0;
 				///////////////////////////////////////( &m_hissySteamSound );
@@ -750,7 +753,7 @@ UpdateSleepTime RailroadBehavior::update( void )
 			if ( m_waitAtStationTimer <= 0 && (!m_held) )
 			{
 				m_conductorState = ACCELERATE;
-				conductorPullInfo.speed = 0.05f * conductorPullInfo.m_direction;
+				conductorPullInfo.speed = ConvertRetailPerFrameRate(0.05f) * conductorPullInfo.m_direction;
 
 				m_runningSound.setPlayingHandle(TheAudio->addAudioEvent( &m_runningSound ));
 
@@ -766,7 +769,7 @@ UpdateSleepTime RailroadBehavior::update( void )
 		}
 		else if ( m_conductorState == ACCELERATE )
 		{
-			conductorPullInfo.speed += 0.02f * conductorPullInfo.m_direction; // push start multiplier
+			conductorPullInfo.speed += ConvertRetailPerFrameSquared(0.02f) * conductorPullInfo.m_direction; // push start multiplier
 			conductorPullInfo.speed *= modData->m_acceleration;
 			if ( conductorPullInfo.speed > modData->m_speedMax)
 			{
@@ -1495,7 +1498,7 @@ void RailroadBehavior::FindPosByPathDistance( Coord3D *pos, const Real dist, con
 					if ( edge && ! m_inTunnel )
 					{//play my clickety clack sound, `cause I just rode over a join IN the tracks
 						m_clicketyClackSound.setPosition( getObject()->getPosition() );
-						m_clicketyClackSound.setVolume( (Real)conductorPullInfo.speed / 10.0f );//assumed max speed
+						m_clicketyClackSound.setVolume( (Real)conductorPullInfo.speed / ConvertRetailPerFrameRate(10.0f) );//assumed max speed
 						TheAudio->addAudioEvent( &m_clicketyClackSound );
 					}
 				}

@@ -1,0 +1,24 @@
+# Scenarios/minefx_scene.txt on Alpine Assault: the China mine field round 760,900 with the
+# outpost's own traffic crossing it, then the American column walking into it.
+# Stills 4 to 13 s (three per framing, 0.6 s apart, so one catches the blink), footage from 13 s.
+
+0     hud     off
+# close on the east half of the field (the EMP mine at 820,900), the Red Guard walking west through it
+3.5   cut     850 880 0.17 -45 12
+4.5   shot
+5.1   shot
+5.7   shot
+# close on the middle of the field as the Red Guard reach it
+6.5   cut     780 885 0.17 -45 12
+7.5   shot
+8.1   shot
+8.7   shot
+# play distance: the game's own zoom and tilt
+9.5   cut     780 910 1.0 -45 0
+10.5  shot
+11.1  shot
+11.7  shot
+# footage: medium, the field in the middle, the street the column comes down above it
+12.5  cut     790 920 0.42 -45 14
+13.0  orbit   20 12
+25.5  end

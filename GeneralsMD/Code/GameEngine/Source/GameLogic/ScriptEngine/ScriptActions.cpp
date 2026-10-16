@@ -2118,6 +2118,7 @@ void ScriptActions::doTeamHuntWithCommandButton(const AsciiString& teamName, con
 			case GUI_COMMAND_CANCEL_UNIT_BUILD:
 			case GUI_COMMAND_CANCEL_UPGRADE:
 			case GUI_COMMAND_ATTACK_MOVE:
+			case GUI_COMMAND_FORCE_ATTACK:
 			case GUI_COMMAND_GUARD:
 			case GUI_COMMAND_GUARD_WITHOUT_PURSUIT:
 			case GUI_COMMAND_GUARD_FLYING_UNITS_ONLY:
@@ -2588,7 +2589,8 @@ void ScriptActions::doPlayerKill(const AsciiString& playerName)
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doDisplayText(const AsciiString& displayText)
 {
-	TheInGameUI->message(displayText);	
+	// the map's text is the message, not a format: "HQ at 10%." read arguments nobody passed
+	TheInGameUI->message(UnicodeString(u"%ls"), TheGameText->fetch(displayText).str());
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -6148,6 +6150,8 @@ void ScriptActions::doC3CameraShake
 {
 	Waypoint *way = TheTerrainLogic->getWaypointByName(waypointName);
 	DEBUG_ASSERTLOG( (way != NULL), ("Camera shake with No Valid Waypoint\n") );
+	if( way == NULL )
+		return;	// the map names a waypoint it does not have; every other waypoint action skips it too
 	Coord3D pos = *way->getLocation();
 
 	TheTacticalView->Add_Camera_Shake(pos, radius, duration_seconds, amplitude);
@@ -7049,7 +7053,12 @@ void ScriptActions::executeAction( ScriptAction *pAction )
 			}
 			else
 			{
-				TheGameEngine->setFramesPerSecondLimit(pAction->getParameter(0)->getInt());
+				// the map asks for a 30 Hz logic rate; 30 is normal speed.  A mission or skirmish map gets
+				// half speed to normal like the player does, never faster
+				Int fps = ConvertRetailFrames(pAction->getParameter(0)->getInt());
+				if (TheGameLogic->isInSkirmishGame() || TheGameLogic->isInSinglePlayerGame())
+					fps = ClampPlayerGameSpeed(fps);
+				TheGameEngine->setFramesPerSecondLimit(fps);
 			}
 			// Setting the fps limit doesn't do much good if we don't use it.  jba.
 			TheWritableGlobalData->m_useFpsLimit = true; 
@@ -7274,20 +7283,21 @@ void ScriptActions::executeAction( ScriptAction *pAction )
 			doTeamStopSequentialScript(pAction->getParameter(0)->getString());
 			return;
 
+		// map frame counts are 30 Hz frames
 		case ScriptAction::UNIT_GUARD_FOR_FRAMECOUNT:
-			doUnitGuardForFramecount(pAction->getParameter(0)->getString(), pAction->getParameter(1)->getInt());
+			doUnitGuardForFramecount(pAction->getParameter(0)->getString(), ConvertRetailFrames(pAction->getParameter(1)->getInt()));
 			return;
 
 		case ScriptAction::UNIT_IDLE_FOR_FRAMECOUNT:
-			doUnitIdleForFramecount(pAction->getParameter(0)->getString(), pAction->getParameter(1)->getInt());
+			doUnitIdleForFramecount(pAction->getParameter(0)->getString(), ConvertRetailFrames(pAction->getParameter(1)->getInt()));
 			return;
-		
+
 		case ScriptAction::TEAM_GUARD_FOR_FRAMECOUNT:
-			doTeamIdleForFramecount(pAction->getParameter(0)->getString(), pAction->getParameter(1)->getInt());
+			doTeamIdleForFramecount(pAction->getParameter(0)->getString(), ConvertRetailFrames(pAction->getParameter(1)->getInt()));
 			return;
-		
+
 		case ScriptAction::TEAM_IDLE_FOR_FRAMECOUNT:
-			doTeamIdleForFramecount(pAction->getParameter(0)->getString(), pAction->getParameter(1)->getInt());
+			doTeamIdleForFramecount(pAction->getParameter(0)->getString(), ConvertRetailFrames(pAction->getParameter(1)->getInt()));
 			return;
 
 		case ScriptAction::WATER_CHANGE_HEIGHT:
@@ -7418,7 +7428,7 @@ void ScriptActions::executeAction( ScriptAction *pAction )
 			return;
 
 		case ScriptAction::TEAM_SPIN_FOR_FRAMECOUNT:
-			doTeamSpinForFramecount( pAction->getParameter(0)->getString(), pAction->getParameter(1)->getInt() );
+			doTeamSpinForFramecount( pAction->getParameter(0)->getString(), ConvertRetailFrames(pAction->getParameter(1)->getInt()) );
 			return;
 
 		case ScriptAction::TEAM_ALL_USE_COMMANDBUTTON_ON_NAMED:

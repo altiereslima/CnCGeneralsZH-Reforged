@@ -674,8 +674,8 @@ public:
 		static const FieldParse myFieldParse[] = 
 		{
 			{ "SpinRate",					INI::parseAngularVelocityReal,	NULL, offsetof(ApplyRandomForceNugget, m_spinRate) },
-			{ "MinForceMagnitude",	INI::parseReal,	NULL, offsetof(ApplyRandomForceNugget, m_minMag) },
-			{ "MaxForceMagnitude",	INI::parseReal,	NULL, offsetof(ApplyRandomForceNugget, m_maxMag) },
+			{ "MinForceMagnitude",	INI::parseRetailPerFrameReal,	NULL, offsetof(ApplyRandomForceNugget, m_minMag) },
+			{ "MaxForceMagnitude",	INI::parseRetailPerFrameReal,	NULL, offsetof(ApplyRandomForceNugget, m_maxMag) },
 			{ "MinForcePitch",	INI::parseAngleReal,	NULL, offsetof(ApplyRandomForceNugget, m_minPitch) },
 			{ "MaxForcePitch",	INI::parseAngleReal,	NULL, offsetof(ApplyRandomForceNugget, m_maxPitch) },
 			{ 0, 0, 0, 0 }
@@ -728,9 +728,10 @@ std::vector<AsciiString>	debrisModelNamesGlobalHack;
 //-------------------------------------------------------------------------------------------------
 static void parseFrictionPerSec( INI* ini, void * /*instance*/, void *store, const void* /*userData*/ )
 {
+	// in PhysicsBehavior::setExtraFriction's units, the share per retail frame; its friction getters
+	// add it to the base friction and convert the sum to the current rate once
 	Real fricPerSec = INI::scanReal(ini->getNextToken());
-	Real fricPerFrame = fricPerSec * SECONDS_PER_LOGICFRAME_REAL;
-	*(Real *)store = fricPerFrame;
+	*(Real *)store = fricPerSec / (Real)RETAIL_LOGICFRAMES_PER_SECOND;
 } 
 
 //-------------------------------------------------------------------------------------------------
@@ -837,13 +838,13 @@ public:
 			{ "ExtraFriction",				parseFrictionPerSec,						NULL, offsetof( GenericObjectCreationNugget, m_extraFriction ) },
 			{ "Offset",						INI::parseCoord3D,				NULL, offsetof( GenericObjectCreationNugget, m_offset ) },
 			{ "Disposition",			INI::parseBitString32,			DebrisDispositionNames, offsetof( GenericObjectCreationNugget, m_disposition ) },
-			{ "DispositionIntensity",	INI::parseReal,						NULL,	offsetof( GenericObjectCreationNugget, m_dispositionIntensity ) },
+			{ "DispositionIntensity",	INI::parseRetailPerFrameReal,	NULL,	offsetof( GenericObjectCreationNugget, m_dispositionIntensity ) },
 			{ "SpinRate",					INI::parseAngularVelocityReal,	NULL, offsetof(GenericObjectCreationNugget, m_spinRate) },
 			{ "YawRate",					INI::parseAngularVelocityReal,	NULL, offsetof(GenericObjectCreationNugget, m_yawRate) },
 			{ "RollRate",					INI::parseAngularVelocityReal,	NULL, offsetof(GenericObjectCreationNugget, m_rollRate) },
 			{ "PitchRate",				INI::parseAngularVelocityReal,	NULL, offsetof(GenericObjectCreationNugget, m_pitchRate) },
-			{ "MinForceMagnitude",	INI::parseReal,	NULL, offsetof(GenericObjectCreationNugget, m_minMag) },
-			{ "MaxForceMagnitude",	INI::parseReal,	NULL, offsetof(GenericObjectCreationNugget, m_maxMag) },
+			{ "MinForceMagnitude",	INI::parseRetailPerFrameReal,	NULL, offsetof(GenericObjectCreationNugget, m_minMag) },
+			{ "MaxForceMagnitude",	INI::parseRetailPerFrameReal,	NULL, offsetof(GenericObjectCreationNugget, m_maxMag) },
 			{ "MinForcePitch",	INI::parseAngleReal,	NULL, offsetof(GenericObjectCreationNugget, m_minPitch) },
 			{ "MaxForcePitch",	INI::parseAngleReal,	NULL, offsetof(GenericObjectCreationNugget, m_maxPitch) },
 			{ "MinLifetime",					INI::parseDurationUnsignedInt,		NULL, offsetof( GenericObjectCreationNugget, m_minFrames ) },
@@ -1615,9 +1616,10 @@ const ObjectCreationList *ObjectCreationListStore::findObjectCreationList(const 
 		return NULL;
 
   ObjectCreationListMap::const_iterator it = m_ocls.find(NAMEKEY(name));
-  if (it == m_ocls.end()) 
+  if (it == m_ocls.end())
 	{
-		return NULL;
+		AsciiString retailName;
+		return TheModNamespace.findRetailName(AsciiString(name), MODNAME_OCL, &retailName) ? findObjectCreationList(retailName.str()) : NULL;
 	}
 	else
 	{

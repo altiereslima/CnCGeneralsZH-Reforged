@@ -628,7 +628,10 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 		// (object pointer loses scope as soon as atteptdamage's caller ends)
 		// m_lastDamageTimestamp is initialized to FFFFFFFFFF, so doing a < compare is problematic.
 		// jba.
-		if (m_lastDamageTimestamp!=TheGameLogic->getFrame() && m_lastDamageTimestamp != TheGameLogic->getFrame()-1) {
+		// the "one/next frame" window below is retail's: two retail frames less one logic frame; the
+		// timestamp starts in the future
+		UnsignedInt now = TheGameLogic->getFrame();
+		if (m_lastDamageTimestamp > now || now - m_lastDamageTimestamp > ConvertRetailFrames(2u) - 1) {
 			m_lastDamageInfo = *damageInfo;
 			m_lastDamageCleared = false;
 			m_lastDamageTimestamp = TheGameLogic->getFrame();

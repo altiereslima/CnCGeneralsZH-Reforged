@@ -85,6 +85,12 @@ MultiplayerSettings::MultiplayerSettings()
 	m_randomColor;
 
   m_gotDefaultStartingMoney = false;
+
+  // The fork's starting cash choices, whatever Multiplayer.ini (retail's 5k, 10k, 20k, 50k, or a
+  // mod's) lists; the INI still names the default.
+  static const UnsignedInt choices[] = { 10000, 25000, 50000, 100000, 500000, 1000000, Money::UNLIMITED };
+  for ( size_t i = 0; i < sizeof( choices ) / sizeof( choices[0] ); ++i )
+    m_startingMoneyList.push_back( Money( choices[i] ) );
 }  // end MultiplayerSettings
 
 MultiplayerColorDefinition::MultiplayerColorDefinition()
@@ -142,7 +148,7 @@ MultiplayerColorDefinition * MultiplayerSettings::newMultiplayerColorDefinition(
 
 void MultiplayerSettings::addStartingMoneyChoice( const Money & money, Bool isDefault )
 {
-  m_startingMoneyList.push_back( money );
+  // the list is the fork's own (constructor); only the default comes from the INI
   if ( isDefault )
   {
     DEBUG_ASSERTCRASH( !m_gotDefaultStartingMoney, ("Cannot have more than one default MultiplayerStartingMoneyChoice") );

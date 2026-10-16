@@ -180,7 +180,9 @@ Bool RiderChangeContain::isValidContainerFor(const Object* rider, Bool checkCapa
 			if( thing->isEquivalentTo( rider->getTemplate() ) )
 			{
 				//We found a valid rider, so return success - unless Pro Rules refuse this one the saddle.
-				return !( TheGameLogic->isProRules() && ProRulesBanRider( thing->getName() ) );
+				//The bike's own initial payload is created before m_payloadCreated is set, so the
+				//rider the factory builds the bike with is never refused; only a later boarding is.
+				return !( TheGameLogic->isProRules() && m_payloadCreated && ProRulesBanRider( thing->getName() ) );
 			}
 		}
 	}

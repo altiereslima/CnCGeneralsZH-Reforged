@@ -66,9 +66,10 @@ enum BodyDamageType : Int;
 #define DIRTY_CONDITION_FLAGS
 
 #define DEFAULT_TINT_COLOR_FADE_RATE (0.6f) // fast fade
-#define DEF_ATTACK_FRAMES (1)
-#define DEF_SUSTAIN_FRAMES (1)
-#define DEF_DECAY_FRAMES (4)
+// logic frames; the retail 1, 1 and 4 at twice the rate
+#define DEF_ATTACK_FRAMES (1 * LOGICFRAMES_PER_RETAIL_FRAME)
+#define DEF_SUSTAIN_FRAMES (1 * LOGICFRAMES_PER_RETAIL_FRAME)
+#define DEF_DECAY_FRAMES (4 * LOGICFRAMES_PER_RETAIL_FRAME)
 #define SUSTAIN_INDEFINITELY (0xfffffffe) // forever and ever, amen.
 
 //
@@ -187,11 +188,14 @@ public:
 	Real m_wobble;							///< for wobbling
   Real m_yawModulator;        ///< for the swimmy soft hover of a helicopter
   Real m_pitchModulator;        ///< for the swimmy soft hover of a helicopter
-	Real m_leanPitch[2];				///< a helicopter's pitch target, smoothed through two stages once a logic frame
+	Real m_leanPitch[2];				///< a helicopter's pitch target, smoothed through two stages once a retail frame
 	Real m_leanRoll[2];					///< the same for roll
-	UnsignedInt m_leanFrame;		///< the logic frame the lean targets were last stepped on
-	Real m_groundLeanStages[2][3];	///< a ground vehicle's pitch and roll lean, smoothed through three stages once a logic frame
-	UnsignedInt m_groundFrame;	///< the logic frame those were last stepped on
+	UnsignedInt m_airFrame;			///< the retail frame (logic frame / LOGICFRAMES_PER_RETAIL_FRAME) hover, wings or thrust last stepped on
+	Real m_airPitch;						///< hover or wings pitch, roll and yaw from that frame, drawn until the next one
+	Real m_airRoll;
+	Real m_airYaw;
+	Real m_groundLeanStages[2][3];	///< a ground vehicle's pitch and roll lean, smoothed through three stages once a retail frame
+	UnsignedInt m_groundFrame;	///< the retail frame (logic frame / LOGICFRAMES_PER_RETAIL_FRAME) those were last stepped on
 	Real m_prevForwardSpeed;		///< a ground vehicle's forward speed on that frame
 	Real m_prevAngle;						///< and its heading
 	Real m_groundLeanPitch;			///< a ground vehicle's lean from starting, braking and turning, on top of terrain and recoil
@@ -372,7 +376,7 @@ public:
 
 	void setTerrainDecal(TerrainDecalType type);	///<decal that is to appear under the drawable
 	void setTerrainDecalSize(Real x, Real y);
-	void setTerrainDecalFadeTarget(Real target, Real rate = 0.1f);
+	void setTerrainDecalFadeTarget(Real target, Real rate = ConvertRetailPerFrameRate(0.1f));	///< rate is opacity per logic frame
 
 	inline Object *getObject( void ) { return m_object; }								///< return object ID bound to this drawble
 	inline const Object *getObject( void ) const { return m_object; }		///< return object ID bound to this drawble
@@ -393,6 +397,21 @@ public:
 
 	void setStealthLook(StealthLookType look);
 	StealthLookType getStealthLook() const { return m_stealthLook; }
+	StealthLookType getStealthDrawnLook() const { return m_stealthDrawnLook; }
+	Real getStealthFade() const { return m_stealthFade; }
+	// 1 is own paint with no bend, the stealth floor (about a half) is glass.  Cloak-in fade 0
+	// is solid.  The mix goes to that floor so the first frames still have travel while the
+	// pulse has not left 1.0; once faded, the 2003 breath owns it.  Decloak: fade 1 is the
+	// pulse, fade 0 is solid.  The shader keeps coverage: this is the mix, not alpha.
+	Real getStealthSolid() const
+	{
+		const Real breath = getEffectiveOpacity();
+		const Real fade = getStealthFade();
+		if( getStealthLook() == STEALTHLOOK_NONE )
+			return breath + ( 1.0f - breath ) * ( 1.0f - fade );
+		const Real dest = m_stealthOpacity + ( breath - m_stealthOpacity ) * fade;
+		return 1.0f - fade * ( 1.0f - dest );
+	}
 
 	void updateDrawableClipStatus( UnsignedInt shotsRemaining, UnsignedInt maxShots, WeaponSlotType slot ); ///< This will do the show/hide work if ProjectileBoneFeedbackEnabled is set.
 	void updateDrawableSupplyStatus( Int maxSupply, Int currentSupply ); ///< This will do visual feedback on Supplies carried
@@ -754,6 +773,8 @@ private:
 	Module** m_modules[NUM_DRAWABLE_MODULE_TYPES];
 
 	StealthLookType m_stealthLook;
+	StealthLookType m_stealthDrawnLook;	///< look the shader is fading, while m_stealthLook is the target
+	Real m_stealthFade;									///< 0 invisible / 1 fully the drawn look
 
 	Int m_flashCount;           ///< number of times to flash the drawable
 	Color m_flashColor;					///< color to flash the drawable

@@ -104,6 +104,14 @@ SnowManager::~SnowManager()
 
 OVERRIDE<WeatherSetting> TheWeatherSetting = NULL;
 
+/* A map's rules file can carry a Weather block.  A box under one unit made updateIniSettings take
+	 rand() modulo zero, a zero density or velocity divided by zero, and the snow drawn each frame is
+	 about (box * density) squared flakes, so a big box or density hung the frame.  Shipped data uses
+	 boxes of 100 and 200, density 1 to 4 and velocity 2.5 to 25; the limits leave room around that. */
+static const INI::RealRange SnowBoxRange = { 1.0f, 400.0f };
+static const INI::RealRange SnowDensityRange = { 0.05f, 4.0f };
+static const INI::RealRange SnowVelocityRange = { 0.1f, 500.0f };
+
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
 const FieldParse WeatherSetting::m_weatherSettingFieldParseTable[] = 
 {
@@ -115,9 +123,9 @@ const FieldParse WeatherSetting::m_weatherSettingFieldParseTable[] =
 	{ "SnowMaxPointSize",						INI::parseReal,NULL,			offsetof( WeatherSetting, m_snowMaxPointSize ) },
 	{ "SnowMinPointSize",						INI::parseReal,NULL,			offsetof( WeatherSetting, m_snowMinPointSize ) },
 	{ "SnowQuadSize",							INI::parseReal,NULL,			offsetof( WeatherSetting, m_snowQuadSize ) },
-	{ "SnowBoxDimensions",						INI::parseReal,NULL,			offsetof( WeatherSetting, m_snowBoxDimensions ) },
-	{ "SnowBoxDensity",							INI::parseReal,NULL,			offsetof( WeatherSetting, m_snowBoxDensity ) },
-	{ "SnowVelocity",							INI::parseReal,NULL,			offsetof( WeatherSetting, m_snowVelocity ) },
+	{ "SnowBoxDimensions",						INI::parseRealInRange,&SnowBoxRange,			offsetof( WeatherSetting, m_snowBoxDimensions ) },
+	{ "SnowBoxDensity",							INI::parseRealInRange,&SnowDensityRange,			offsetof( WeatherSetting, m_snowBoxDensity ) },
+	{ "SnowVelocity",							INI::parseRealInRange,&SnowVelocityRange,			offsetof( WeatherSetting, m_snowVelocity ) },
 	{ "SnowPointSprites",						INI::parseBool,NULL,			offsetof( WeatherSetting, m_usePointSprites ) },
 	{ "SnowEnabled",							INI::parseBool,NULL,			offsetof( WeatherSetting, m_snowEnabled ) },
 	{ 0, 0, 0, 0 },
@@ -132,6 +140,10 @@ void INI::parseWeatherDefinition( INI *ini )
 		WeatherSetting* ws = (WeatherSetting*) (TheWeatherSetting.getNonOverloadedPointer());
 		WeatherSetting* wsOverride = newInstance(WeatherSetting);
 		*wsOverride = *ws;
+		// the copy took the base's next-override pointer too; hung off the end of a chain that already
+		// has one (map.ini and solo.ini both with a Weather block) it pointed back into the chain, and
+		// every walk of it spun for ever
+		wsOverride->setNextOverride(NULL);
 
 		// Mark that it is an override.
 		wsOverride->markAsOverride();

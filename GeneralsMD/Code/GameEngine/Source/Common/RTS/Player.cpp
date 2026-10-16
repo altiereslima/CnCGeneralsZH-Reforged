@@ -495,7 +495,6 @@ void Player::init(const PlayerTemplate* pt)
 		m_nightColor = m_color;
 
 		m_money = *pt->getMoney();
-		m_money.setPlayerIndex(getPlayerIndex());
 
 		m_handicap = *pt->getHandicap();
 
@@ -504,12 +503,15 @@ void Player::init(const PlayerTemplate* pt)
       if ( TheGameInfo )
       {
         m_money = TheGameInfo->getStartingCash();
+        m_money.applyUnlimited();
       }
       else
       {
   			m_money = TheGlobalData->m_defaultStartingCash;
       }
 		}
+		// after the starting cash, whose copy would put every purse back on player 0's sounds and stats
+		m_money.setPlayerIndex(getPlayerIndex());
 
 		m_playerDisplayName.clear();
 		m_playerName.clear();
@@ -644,6 +646,12 @@ Relationship Player::getRelationship(const Team *that) const
 		}
 	}
 	return NEUTRAL;
+}
+
+//=============================================================================
+Bool Player::hasTeamRelationships() const
+{
+	return !m_teamRelations->m_map.empty();
 }
 
 //=============================================================================
@@ -856,11 +864,22 @@ void Player::setDefaultTeam(void) {
 	tname.set("team");
 	tname.concat(m_playerName);
 	Team *dt = TheTeamFactory->findTeam(tname);
-	DEBUG_ASSERTCRASH(dt, ("no team"));
-	if (dt) {
-		m_defaultTeam = dt;
-		dt->setActive();
+	if (dt == NULL) {
+		/* A skirmish slot takes the name of the skirmish side its general's scripts are written for
+			 (initFromDict), drops its own teamplayer<n>, and gets its teams from those scripts instead.  A
+			 general the skirmish scripts have no player for - a mod's, under the fork's SkirmishScripts.scb -
+			 is left with no team at all, and the AI read the NULL on its first pass.  Every player is given
+			 its default team here, so the singleton validateSides would have added is made now. */
+		DEBUG_LOG(("Player::setDefaultTeam - %s had no %s, making it\n", m_playerName.str(), tname.str()));
+		Dict d;
+		d.setAsciiString(TheKey_teamName, tname);
+		d.setAsciiString(TheKey_teamOwner, m_playerName);
+		d.setBool(TheKey_teamIsSingleton, true);
+		TheTeamFactory->initTeam(tname, m_playerName, TRUE, &d);
+		dt = TheTeamFactory->findTeam(tname);
 	}
+	m_defaultTeam = dt;
+	dt->setActive();
 }
 
 //=============================================================================
@@ -889,16 +908,8 @@ void Player::initFromDict(const Dict* d)
 		// poorly-formed user maps might not, which would be bad, and could crash us later. so if it doesn't
 		// actually have a skirmish player defined for this side, declare it nonskirmish... the player won't
 		// really work, but it's better than crashing.
-		for (Int spIdx = 0; spIdx < TheSidesList->getNumSkirmishSides(); ++spIdx)
-		{
-			AsciiString spTemplateName = TheSidesList->getSkirmishSideInfo(spIdx)->getDict()->getAsciiString(TheKey_playerFaction);
-			const PlayerTemplate* spt = ThePlayerTemplateStore->findPlayerTemplate(NAMEKEY(spTemplateName));
-			if (spt && spt->getSide() == getSide()) 
-			{
-				skirmish = true;
-				break;
-			}
-		}
+		// -modfactions: a mod faction may have a skirmish player of its own mod's scripts, or retail's of its side
+		skirmish = pt != NULL && TheSidesList->findSkirmishSideFor(pt, NULL) != NULL;
 
 		DEBUG_ASSERTCRASH(skirmish, ("Could not find skirmish player for side %s... quietly making into nonskirmish.", getSide().str()));
 		if (!skirmish)
@@ -954,17 +965,14 @@ void Player::initFromDict(const Dict* d)
 		// Copy and qualify scripts, and teams.
 
 		AsciiString mySide = getSide();
-		Int i, skirmishNdx;
-		Bool found = false;
+		Int i;
 		AsciiString  qualTemplatePlayerName;
-		for (skirmishNdx=0; skirmishNdx<TheSidesList->getNumSkirmishSides(); skirmishNdx++) {
-			AsciiString templateName = TheSidesList->getSkirmishSideInfo(skirmishNdx)->getDict()->getAsciiString(TheKey_playerFaction);
-			pt = ThePlayerTemplateStore->findPlayerTemplate(NAMEKEY(templateName));
-			if (pt && pt->getSide() == mySide) {
-				qualTemplatePlayerName.format("%s%d", TheSidesList->getSkirmishSideInfo(skirmishNdx)->getDict()->getAsciiString(TheKey_playerName).str(), m_mpStartIndex);
-				found = true;
-				break;
-			}
+		// -modfactions: a mod faction runs its own mod's skirmish scripts and teams when the mod ships them
+		TeamsInfoRec *skirmishTeams = NULL;
+		SidesInfo *skirmishSide = TheSidesList->findSkirmishSideFor(getPlayerTemplate(), &skirmishTeams);
+		const Bool found = skirmishSide != NULL;
+		if (found) {
+			qualTemplatePlayerName.format("%s%d", skirmishSide->getDict()->getAsciiString(TheKey_playerName).str(), m_mpStartIndex);
 		}
 		Int diffInt  = d->getInt(TheKey_skirmishDifficulty, &exists);
 		GameDifficulty difficulty = TheScriptEngine->getGlobalDifficulty();
@@ -995,7 +1003,7 @@ void Player::initFromDict(const Dict* d)
 			m_playerName = qualTemplatePlayerName;
 			AsciiString qualifier;
 			qualifier.format("%d", m_mpStartIndex);
-			ScriptList *scripts = TheSidesList->getSkirmishSideInfo(skirmishNdx)->getScriptList()->duplicateAndQualify(
+			ScriptList *scripts = skirmishSide->getScriptList()->duplicateAndQualify(
 						qualifier, qualTemplatePlayerName, pname);
 			ScriptList* slist = TheSidesList->getSideInfo(getPlayerIndex())->getScriptList();
 			if (slist) 
@@ -1013,11 +1021,11 @@ void Player::initFromDict(const Dict* d)
 			}
 			// Now add teams.
 
-			AsciiString originalPlayerName = TheSidesList->getSkirmishSideInfo(skirmishNdx)->getDict()->getAsciiString(TheKey_playerName);
-			for (i=0; i<TheSidesList->getNumSkirmishTeams(); i++) {
-				if (TheSidesList->getSkirmishTeamInfo(i)->getDict()->getAsciiString(TheKey_teamOwner) == originalPlayerName)
+			AsciiString originalPlayerName = skirmishSide->getDict()->getAsciiString(TheKey_playerName);
+			for (i=0; i<skirmishTeams->getNumTeams(); i++) {
+				if (skirmishTeams->getTeamInfo(i)->getDict()->getAsciiString(TheKey_teamOwner) == originalPlayerName)
 				{
-					Dict teamDict(*TheSidesList->getSkirmishTeamInfo(i)->getDict());
+					Dict teamDict(*skirmishTeams->getTeamInfo(i)->getDict());
 					AsciiString teamName = teamDict.getAsciiString(TheKey_teamName); 
 					AsciiString newName;
 					newName.format("%s%d", teamDict.getAsciiString(TheKey_teamName).str(), m_mpStartIndex);
@@ -1674,6 +1682,12 @@ void Player::onUnitLost(const Object *obj)
 }
 
 //-------------------------------------------------------------------------------------------------
+Bool Player::isAIDutyAmbulance(const Object *obj) const
+{
+	return m_ai ? m_ai->isDutyAmbulance(obj) : FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Do any bridges need repair, and if so repair them. */
 //-------------------------------------------------------------------------------------------------
 Bool Player::getAiBaseCenter(Coord3D *pos)
@@ -1767,7 +1781,6 @@ void Player::preTeamDestroy( const Team *team )
 //-------------------------------------------------------------------------------------------------
 void Player::onStructureCreated( Object *builder, Object *structure )
 {
-	TheInGameUI->feedStructure( structure, FALSE );
 }  // end onStructureCreated
 
 //-------------------------------------------------------------------------------------------------
@@ -1799,7 +1812,6 @@ void Player::onStructureConstructionComplete( Object *builder, Object *structure
 	// the GUI needs to re-evaluate the information being displayed to the user now
 	if( TheControlBar )
 		TheControlBar->markUIDirty();
-	TheInGameUI->feedStructure( structure, TRUE );
 
 	// This object may require us to play some EVA sounds.
 	Player *localPlayer = ThePlayerList->getLocalPlayer();
@@ -2160,6 +2172,31 @@ void Player::setUnitsShouldHunt(Bool unitsShouldHunt, CommandSourceType source)
 			}
 		}
 	}
+}
+
+//=============================================================================
+void Player::surrender(Bool giveToAlly)
+{
+	if (giveToAlly)
+	{
+		for (Int i = 0; i < ThePlayerList->getPlayerCount(); ++i)
+		{
+			Player *otherPlayer = ThePlayerList->getNthPlayer(i);
+			if (otherPlayer == this)
+				continue;
+			if (getRelationship(otherPlayer->getDefaultTeam()) != ALLIES ||
+				otherPlayer->getRelationship(getDefaultTeam()) != ALLIES)
+				continue;
+			if (TheVictoryConditions->hasSinglePlayerBeenDefeated(otherPlayer))
+				continue;
+
+			// a living ally!  hooray!
+			otherPlayer->transferAssetsFromThat(this);
+			break;
+		}
+	}
+	// Kills whatever did not transfer (beacons and the like), or everything when nobody took it.
+	killPlayer();
 }
 
 //=============================================================================
@@ -2629,6 +2666,14 @@ Bool Player::hasPrereqsForScience(ScienceType t) const
 }
 
 //=============================================================================
+/** The rank table a player climbs: under -modfactions a mod faction's is its own mod's Rank.ini, so
+	* it gets that mod's ranks, points and rank sciences ("M<n>~SCIENCE_Rank3") and nothing of retail's. */
+static Int rankMod(const Player *player)
+{
+	return player->getPlayerTemplate() ? player->getPlayerTemplate()->getModIndex() : -1;
+}
+
+//=============================================================================
 /// returns TRUE if the player gained/lost levels as a result.
 Bool Player::addSkillPoints(Int delta)
 {
@@ -2637,8 +2682,8 @@ Bool Player::addSkillPoints(Int delta)
 	if( delta == 0 )
 		return false;
 
-	Int levelCap = min( TheGameLogic->getRankLevelLimit(), TheRankInfoStore->getRankLevelCount() );
-	Int pointCap = TheRankInfoStore->getRankInfo(levelCap)->m_skillPointsNeeded; // Cap at lowest point of cap level, not highest.
+	Int levelCap = min( TheGameLogic->getRankLevelLimit(), TheRankInfoStore->getRankLevelCount(rankMod(this)) );
+	Int pointCap = TheRankInfoStore->getRankInfo(levelCap, rankMod(this))->m_skillPointsNeeded; // Cap at lowest point of cap level, not highest.
 
 	Bool levelGained = FALSE;
 	m_skillPoints = min( pointCap, (m_skillPoints + delta) );
@@ -2680,7 +2725,7 @@ void Player::resetSciences()
 
 	for (Int i = 1; i <= m_rankLevel; ++i)
 	{
-		const RankInfo* rank = TheRankInfoStore->getRankInfo(i);
+		const RankInfo* rank = TheRankInfoStore->getRankInfo(i, rankMod(this));
 		if (rank)
 		{
 			for (ScienceVec::const_iterator it = rank->m_sciencesGranted.begin(); it != rank->m_sciencesGranted.end(); ++it)
@@ -2775,7 +2820,6 @@ Bool Player::attemptToPurchaseScience(ScienceType science)
 	addScience(science);
 
 	getAcademyStats()->recordGeneralsPointsSpent( cost );
-	TheInGameUI->feedScience( this, science );
 
 	if( ThePlayerList->getLocalPlayer() == this )
 	{
@@ -2845,12 +2889,12 @@ void Player::resetRank()
 {
 	m_rankLevel = 1;
 	m_skillPoints = 0;
-	const RankInfo* nextRank = TheRankInfoStore->getRankInfo(m_rankLevel+1);
+	const RankInfo* nextRank = TheRankInfoStore->getRankInfo(m_rankLevel+1, rankMod(this));
 	m_levelUp = nextRank ? nextRank->m_skillPointsNeeded : INT_MAX;
 	m_levelDown = 0;
 	m_sciences.clear();
 	m_sciencePurchasePoints = getPlayerTemplate() ? getPlayerTemplate()->getIntrinsicSciencePurchasePoints() : 0;
-	const RankInfo* curRank = TheRankInfoStore->getRankInfo(m_rankLevel);
+	const RankInfo* curRank = TheRankInfoStore->getRankInfo(m_rankLevel, rankMod(this));
 	m_sciencePurchasePoints += curRank ? curRank->m_sciencePurchasePointsGranted : 0;
 	m_generalName = TheGameText? TheGameText->fetch("SCIENCE:GeneralName"):UnicodeString::TheEmptyString;
 	resetSciences();
@@ -2862,8 +2906,8 @@ Bool Player::setRankLevel(Int newLevel)
 {
 	if (newLevel < 1) 
 		newLevel = 1;
-	else if (newLevel > TheRankInfoStore->getRankLevelCount())
-		newLevel = TheRankInfoStore->getRankLevelCount();
+	else if (newLevel > TheRankInfoStore->getRankLevelCount(rankMod(this)))
+		newLevel = TheRankInfoStore->getRankLevelCount(rankMod(this));
 
 	if (newLevel > TheGameLogic->getRankLevelLimit())
 		newLevel = TheGameLogic->getRankLevelLimit();
@@ -2883,7 +2927,7 @@ Bool Player::setRankLevel(Int newLevel)
 
 	for (Int i = m_rankLevel + 1; i <= newLevel; ++i)
 	{
-		const RankInfo* rank = TheRankInfoStore->getRankInfo(i);
+		const RankInfo* rank = TheRankInfoStore->getRankInfo(i, rankMod(this));
 		DEBUG_ASSERTCRASH(rank, ("rank should never be null here"));
 		if (rank)
 		{
@@ -2905,7 +2949,7 @@ Bool Player::setRankLevel(Int newLevel)
 		}
 	}
 
-	const RankInfo* nextRank = TheRankInfoStore->getRankInfo(newLevel + 1);
+	const RankInfo* nextRank = TheRankInfoStore->getRankInfo(newLevel + 1, rankMod(this));
 	m_levelUp = nextRank ? nextRank->m_skillPointsNeeded : INT_MAX;
 	m_rankLevel = newLevel;
 
@@ -4284,8 +4328,8 @@ void Player::processCreateTeamGameMessage(Int hotkeyNum, GameMessage *msg) {
 
 	m_squads[hotkeyNum]->clearSquad();
 
-	UnsignedByte numArgs = msg->getArgumentCount();
-	for (UnsignedByte i = 0; i < numArgs; ++i) {
+	Int numArgs = msg->getArgumentCount();
+	for (Int i = 0; i < numArgs; ++i) {
 		ObjectID objID = msg->getArgument(i)->objectID;
 		Object *obj = TheGameLogic->findObjectByID(objID);
 		if (obj != NULL) {
@@ -4637,6 +4681,9 @@ void Player::crc( Xfer *xfer )
 	
 	xfer->xferInt( &m_skillPoints );
 	xfer->xferInt( &m_sciencePurchasePoints );
+
+	// The bank, so an income or a refund that drifted is caught before it buys something.
+	xfer->xferSnapshot( &m_money );
 
 }  // end crc
 

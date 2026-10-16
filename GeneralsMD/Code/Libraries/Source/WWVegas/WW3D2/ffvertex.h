@@ -137,6 +137,12 @@ struct VertexPipelineDescription
 	// shade (CombinerDescription::SmokeGlow).  Refused on a lit draw or a format with no normal.
 	// Initialised here for a caller that fills the rest field by field.
 	bool SmokeGlow = false;
+
+	// A sorted particle billboard that fades into the scene's depth: the sorting pool writes the
+	// sprite's half width into the first of the second coordinate set (sortingrenderer.cpp,
+	// Copy_Batch_Vertices), and the program hands it on in the specular colour's alpha, which the
+	// pixel half's fade reads (SOFT_PARTICLE_SAMPLING).  Refused on a format with one set or none.
+	bool SoftParticle = false;
 };
 
 // Which profile the generated text is for.  The two differ in the output semantic and in how the

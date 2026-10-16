@@ -32,7 +32,7 @@
  *     '\r' (armed: SDL's text never carries one); the composition and its cursor; nothing detached,
  *     nothing while composing.
  *   - Mouse: positions scaled to the game's pixels and held to its screen; the button states and the
- *     double click from SDL's click count; X1 and X2 ignored; the wheel at 120 a notch with fractions
+ *     double click from SDL's click count; X1 and X2 as side-button presses; the wheel at 120 a notch with fractions
  *     carried and the natural-scrolling direction left alone; a full ring drops; the confinement
  *     condition.
  *   - The double-click time on macOS against `defaults read -g com.apple.mouse.doubleClickThreshold`.
@@ -614,19 +614,22 @@ TEST(motion_and_buttons_translate_as_win32mouses_messages_did)
 	pushButton( SDL_BUTTON_LEFT, false, 1, 121, 46 );
 	pushButton( SDL_BUTTON_RIGHT, true, 1, 10, 10 );		// a trackpad's secondary click is this too
 	pushButton( SDL_BUTTON_MIDDLE, true, 1, 10, 10 );
-	pushButton( SDL_BUTTON_X1, true, 1, 10, 10 );				// WndProc takes no WM_XBUTTON
+	pushButton( SDL_BUTTON_X1, true, 1, 10, 10 );				// back: WM_XBUTTONDOWN with XBUTTON1
+	pushButton( SDL_BUTTON_X2, true, 1, 10, 10 );				// forward: XBUTTON2
 	pushMotion( -40, 9000 );
 	pump();
 	const std::vector<MouseIO> e = mouseEvents( mouse );
-	CHECK_EQ( (int)e.size(), 6 );
-	if (e.size() == 6)
+	CHECK_EQ( (int)e.size(), 8 );
+	if (e.size() == 8)
 	{
 		CHECK( e[0].pos.x == 120 && e[0].pos.y == 45 && e[0].leftState == MBS_Up && e[0].wheelPos == 0 );
 		CHECK( e[1].leftState == MBS_Down && e[1].pos.x == 121 && e[1].pos.y == 46 );
 		CHECK( e[2].leftState == MBS_Up );
 		CHECK( e[3].rightState == MBS_Down && e[3].leftState == MBS_Up );
-		CHECK( e[4].middleState == MBS_Down );
-		CHECK( e[5].pos.x == 0 && e[5].pos.y == 599 );
+		CHECK( e[4].middleState == MBS_Down && e[4].sideButton == 0 );
+		CHECK( e[5].sideButton == -1 && e[5].leftState == MBS_Up && e[5].middleState == MBS_Up );
+		CHECK( e[6].sideButton == 1 );
+		CHECK( e[7].pos.x == 0 && e[7].pos.y == 599 );
 	}
 }
 

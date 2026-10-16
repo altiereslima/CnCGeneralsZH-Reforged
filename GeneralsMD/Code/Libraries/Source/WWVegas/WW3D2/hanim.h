@@ -53,6 +53,7 @@
 #include <refcount.h>
 #include <slist.h>
 #include <Vector.H>
+#include "wwstring.h"
 
 struct NodeMotionStruct;
 class MotionChannelClass;
@@ -90,7 +91,11 @@ public:
 	virtual const char *		Get_Name(void) const = 0;
 	virtual const char *		Get_HName(void) const = 0;
 
-	virtual const char *		Get_Key( void )						{ return Get_Name(); }
+	virtual const char *		Get_Key( void )						{ return ModKey.Is_Empty() ? Get_Name() : (const char *)ModKey; }
+
+	// An animation read from a mod's file is filed under the mod's prefix and its name, so it and a
+	// retail animation of the same name stay apart. Get_Name stays as it is: the hierarchy matches it.
+	void							Set_Mod_Prefix(const char * prefix)	{ ModKey = prefix; ModKey += Get_Name(); }
 
 	virtual int					Get_Num_Frames(void) = 0;
 	virtual float				Get_Frame_Rate() = 0;
@@ -123,7 +128,8 @@ public:
 	virtual int					Get_Embedded_Sound_Bone_Index() {return EmbeddedSoundBoneIndex;}
 
 protected:
-	int EmbeddedSoundBoneIndex;					
+	int EmbeddedSoundBoneIndex;
+	StringClass ModKey;
 };
 
 

@@ -60,8 +60,10 @@ RenderInfoClass::RenderInfoClass(CameraClass & cam) :
 	Texture_Projector(NULL),
 	alphaOverride(1.0f),
 	materialPassAlphaOverride(1.0f),
-	materialPassEmissiveOverride(1.0f)
-{ 
+	materialPassEmissiveOverride(1.0f),
+	drawEffect(0)
+{
+	drawEffectParameters[0] = drawEffectParameters[1] = drawEffectParameters[2] = drawEffectParameters[3] = 0.0f;
 	// Need to have one entry in the override flags stack, initialize it to default values.
 	OverrideFlag[OverrideFlagLevel]=RINFO_OVERRIDE_DEFAULT;
 }

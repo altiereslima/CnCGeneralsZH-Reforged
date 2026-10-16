@@ -75,7 +75,7 @@ static const FieldParse TheGlobalLanguageDataFieldParseTable[] =
 	{ "UnicodeFontName",									INI::parseAsciiString,NULL,									offsetof( GlobalLanguage, m_unicodeFontName ) },
 	//{	"UnicodeFontFileName",							INI::parseAsciiString,NULL,									offsetof( GlobalLanguage, m_unicodeFontFileName ) },
 	{ "LocalFontFile",										GlobalLanguage::parseFontFileName,					NULL,			0},
-	{ "MilitaryCaptionSpeed",						INI::parseInt,					NULL,		offsetof( GlobalLanguage, m_militaryCaptionSpeed ) },
+	{ "MilitaryCaptionSpeed",						INI::parseRetailFramesInt,				NULL,		offsetof( GlobalLanguage, m_militaryCaptionSpeed ) },
 	{ "UseHardWordWrap",						INI::parseBool,					NULL,		offsetof( GlobalLanguage, m_useHardWrap) },
 	{ "ResolutionFontAdjustment",						INI::parseReal,					NULL,		offsetof( GlobalLanguage, m_resolutionFontSizeAdjustment) },
 	
@@ -187,14 +187,6 @@ void GlobalLanguage::init( void )
 
 	ini.load( fname, INI_LOAD_OVERWRITE, NULL );
 
-	// EA's Language.ini grows the lettering at 0.7 of the rate the screen grows.  The window layouts
-	// grow at the full rate, so on a 1920x1080 screen every label was drawn a size or two smaller than
-	// the box drawn for it, and on 2560x1440 a tooltip's text filled half its panel.  The text keeps
-	// pace with its panel now, which is also the size it was authored at on 800x600.
-	// The Classic interface is EA's and keeps EA's rate.
-	if( !TheGlobalData->isClassicUI() )
-		m_resolutionFontSizeAdjustment = TEXT_GROWS_WITH_LAYOUT;
-
 	StringListIt it = m_localFonts.begin();
 	while( it != m_localFonts.end())
 	{
@@ -228,17 +220,15 @@ void GlobalLanguage::parseFontFileName( INI *ini, void * instance, void *store, 
 	GlobalLanguage *monkey = (GlobalLanguage *)instance;
 	AsciiString asciiString = ini->getNextAsciiString();
 	monkey->m_localFonts.push_front(asciiString);
-}	 
-
-const Real GlobalLanguage::TEXT_GROWS_WITH_LAYOUT = 1.0f;
+}
 
 Int GlobalLanguage::adjustFontSize(Int theFontSize)
 {
 	const Int size = adjustFontSizeForScreen( theFontSize, TheGlobalData->m_xResolution,
 																						TheGlobalData->m_yResolution,
 																						m_resolutionFontSizeAdjustment );
-	// the Classic interface letters at EA's rate (init leaves Language.ini's damping) and EA's 2x cap
-	if( TheGlobalData->isClassicUI() && size > theFontSize * 2 )
+	// EA's rate (Language.ini's damping) and EA's 2x cap
+	if( size > theFontSize * 2 )
 		return theFontSize * 2;
 	return size;
 }

@@ -140,7 +140,7 @@ void Win32Mouse::translateEvent( UnsignedInt eventIndex, MouseIO *result )
 	// set these to defaults
 	result->leftState = result->middleState = result->rightState = MBS_Up;
 	result->leftFrame = result->middleFrame = result->rightFrame = 0;
-	result->pos.x = result->pos.y = result->wheelPos = 0;
+	result->pos.x = result->pos.y = result->wheelPos = result->sideButton = 0;
 
 	// Time is the same for all events
 	result->time = m_eventBuffer[ eventIndex ].time;
@@ -283,6 +283,17 @@ void Win32Mouse::translateEvent( UnsignedInt eventIndex, MouseIO *result )
 			break;
 
 		}  // end mouse wheel
+
+		// ------------------------------------------------------------------------
+		case WM_XBUTTONDOWN:
+		{
+
+			result->sideButton = GET_XBUTTON_WPARAM( wParam ) == XBUTTON2 ? 1 : -1;
+			result->pos.x = LOWORD( lParam );
+			result->pos.y = HIWORD( lParam );
+			break;
+
+		}  // end side button down
 
 		// ------------------------------------------------------------------------
 		default:

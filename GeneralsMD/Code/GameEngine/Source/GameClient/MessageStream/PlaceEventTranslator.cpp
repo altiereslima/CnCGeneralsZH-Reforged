@@ -92,10 +92,10 @@ static Bool getPlacementDrag( ICoord2D *start, ICoord2D *end )
 //-------------------------------------------------------------------------------------------------
 /** The object that is to do the building.  Normally the one the placement was started from, but
 	* with nothing selected the command bar is being driven by a stand-in builder that is not part of
-	* any selection - and that one is free to die between two clicks of a shift-held run of
-	* structures.  When it is gone, ask the command bar for the current stand-in rather than dropping
-	* out of placement mode: the logic picks the idle builder nearest the site anyway
-	* (MSG_DOZER_CONSTRUCT), so any builder will do to keep the ghost on the cursor. */
+	* any selection, and that one is free to die between two clicks of a shift-held run of structures.
+	* When it is gone the command bar's current stand-in keeps the ghost on the cursor: the logic picks
+	* the idle builder nearest the site anyway (MSG_DOZER_CONSTRUCT).  With BuildWithoutWorker off
+	* there is no stand-in, and a dead builder ends the placement as it always did. */
 //-------------------------------------------------------------------------------------------------
 static Object *resolvePlacementBuilder( void )
 {
@@ -103,12 +103,12 @@ static Object *resolvePlacementBuilder( void )
 	if( builder != NULL && !builder->isEffectivelyDead() )
 		return builder;
 
-	Drawable *standIn = TheControlBar ? TheControlBar->findStandInBuilder( FALSE ) : NULL;
+	Drawable *standIn = TheControlBar->findStandInBuilder( FALSE );
 	return standIn ? standIn->getObject() : NULL;
 }
 
 //-------------------------------------------------------------------------------------------------
-PlaceEventTranslator::PlaceEventTranslator() : m_frameOfUpButton(-1), m_stripClickTaken(FALSE), m_stripRightClickTaken(FALSE)
+PlaceEventTranslator::PlaceEventTranslator() : m_frameOfUpButton(-1)
 {
 }
 
@@ -123,30 +123,6 @@ PlaceEventTranslator::~PlaceEventTranslator()
 GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMessage *msg)
 {
 	GameMessageDisposition disp = KEEP_MESSAGE;
-
-	// MetaEvent runs before us and inserts a logical click after the raw release.
-	// Consume both: otherwise cancelling on the strip can also issue a world order.
-	if( m_stripClickTaken && (msg->getType() == GameMessage::MSG_MOUSE_LEFT_CLICK ||
-			msg->getType() == GameMessage::MSG_MOUSE_LEFT_DOUBLE_CLICK) )
-	{
-		m_stripClickTaken = FALSE;
-		return DESTROY_MESSAGE;
-	}
-	if( m_stripClickTaken && (msg->getType() == GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP ||
-			msg->getType() == GameMessage::MSG_RAW_MOUSE_LEFT_DRAG) )
-		return DESTROY_MESSAGE;
-	if( m_stripRightClickTaken )
-	{
-		if( msg->getType() == GameMessage::MSG_MOUSE_RIGHT_CLICK ||
-				msg->getType() == GameMessage::MSG_MOUSE_RIGHT_DOUBLE_CLICK )
-		{
-			m_stripRightClickTaken = FALSE;
-			return DESTROY_MESSAGE;
-		}
-		if( msg->getType() == GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP ||
-				msg->getType() == GameMessage::MSG_RAW_MOUSE_RIGHT_DRAG )
-			return DESTROY_MESSAGE;
-	}
 
 	switch(msg->getType())
 	{
@@ -165,24 +141,6 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 				TheInGameUI->adjustPlacementRowGap( msg->getArgument( 1 )->real );
 				return DESTROY_MESSAGE;
 			}
-			// and while a guard is armed it sizes the circle the guard will hold
-			if( TheInGameUI->isAreaPicking() )
-			{
-				TheInGameUI->adjustAreaPickRadius( msg->getArgument( 1 )->real );
-				return DESTROY_MESSAGE;
-			}
-			break;
-		}
-
-		case GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN:
-		case GameMessage::MSG_RAW_MOUSE_RIGHT_DOUBLE_CLICK:
-		{
-			m_stripRightClickTaken = FALSE;
-			if( TheInGameUI->handleProductionStripClick( &msg->getArgument(0)->pixel, TRUE ) )
-			{
-				m_stripRightClickTaken = TRUE;
-				return DESTROY_MESSAGE;
-			}
 			break;
 		}
 
@@ -198,20 +156,6 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 		case GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN:
 		case GameMessage::MSG_RAW_MOUSE_LEFT_DOUBLE_CLICK:
 		{
-			m_stripClickTaken = FALSE;
-			//
-			// The global production strip lies over the world rather than inside a window, so
-			// nothing above us has claimed a click on it. Take it here, before placement and long
-			// before selection turns it into a move order. Right-click (or Ctrl-click) cancels one, a plain click
-			// takes the camera to the building it is queued on.
-			//
-			if( TheInGameUI->handleProductionStripClick( &msg->getArgument(0)->pixel,
-																									 TheKeyboard && TheKeyboard->isCtrl() ) )
-			{
-				m_stripClickTaken = TRUE;
-				return DESTROY_MESSAGE;
-			}
-
 			// if we're in a building placement mode, do the place and send to all players
 			const ThingTemplate *build = TheInGameUI->getPendingPlaceType();
 			if( build && TheInGameUI->isPlacementAnchored() == FALSE )
@@ -534,7 +478,7 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 					Drawable *nextBuilder = builderObj ? builderObj->getDrawable() : NULL;
 					if( row )
 						TheInGameUI->placeBuildAvailable( NULL, NULL );
-					else if( TheKeyboard && TheKeyboard->isShift() && nextBuilder && !TheGlobalData->isClassicUI() )
+					else if( TheKeyboard && TheKeyboard->isShift() && nextBuilder )
 						TheInGameUI->placeBuildAvailable( build, nextBuilder );
 					else
 						TheInGameUI->placeBuildAvailable( NULL, NULL );

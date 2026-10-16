@@ -328,6 +328,10 @@ unsigned							DX8Wrapper::texture_stage_state_changes			= 0;
 unsigned							DX8Wrapper::draw_calls									= 0;
 unsigned							DX8Wrapper::_MainThreadID								= 0;
 bool								DX8Wrapper::CurrentDX8LightEnables[4];
+D3DMATERIAL9					DX8Wrapper::CurrentDX8Material;
+bool								DX8Wrapper::CurrentDX8MaterialValid					= false;
+D3DLIGHT9						DX8Wrapper::CurrentDX8Lights[4];
+unsigned							DX8Wrapper::CurrentDX8LightsValid						= 0;
 bool								DX8Wrapper::D3D9StatePending							= false;
 unsigned							DX8Wrapper::PendingRenderStates[256/32];
 unsigned							DX8Wrapper::PendingTextureStageStates[MAX_TEXTURE_STAGES];
@@ -714,6 +718,8 @@ void DX8Wrapper::Invalidate_Cached_Render_States(void)
 	// The caches below are about to stop holding the values the device is owed.
 	Flush_Deferred_D3D9_State();
 	render_state_changed=0;
+	CurrentDX8MaterialValid=false;
+	CurrentDX8LightsValid=0;
 
 	int a;
 	for (a=0;a<sizeof(RenderStates)/sizeof(unsigned);++a) {

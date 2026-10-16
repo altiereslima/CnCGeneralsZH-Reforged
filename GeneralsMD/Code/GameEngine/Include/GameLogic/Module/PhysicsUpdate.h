@@ -174,6 +174,7 @@ public:
 	// note that, unlike scrubVelocity2D(), this is a signed limit
 	void scrubVelocityZ( Real desiredVelocity );
 
+	/// radians a frame at the current logic rate (a retail figure goes through ConvertRetailPerFrameRate)
 	void setPitchRate(Real pitch);
 	void setRollRate(Real roll);
 	void setYawRate(Real yaw);
@@ -205,6 +206,7 @@ public:
 	Bool getIsStunned() const { return getFlag(IS_STUNNED); }
 
 	void setExtraBounciness(Real b) { m_extraBounciness = b; }
+	/// added to every friction as a share of speed lost per retail (30 Hz) frame: per second / RETAIL_LOGICFRAMES_PER_SECOND
 	void setExtraFriction(Real b) { m_extraFriction = b; }
 
 	void setBounceSound(const AudioEventRTS* bounceSound);

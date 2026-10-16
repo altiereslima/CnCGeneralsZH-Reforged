@@ -257,6 +257,8 @@ Bool AIGuardMachine::lookForInnerTarget(void)
 
 	PartitionFilter *filters[16];
 	Int count = 0;
+	// with f1 in the list only enemy players' cells can hold an answer
+	PlayerMaskType searchPlayers = PLAYERMASK_ALL;
 
 	// Enter Guard state
 	if (owner->getTemplate()->isEnterGuard())
@@ -268,6 +270,7 @@ Bool AIGuardMachine::lookForInnerTarget(void)
 		{
 			filters[count++] = &f1;
 			filters[count++] = &f7;
+			searchPlayers = owner->getTeam()->getEnemyPlayerMask();
 		}
 		else
 		{
@@ -279,6 +282,7 @@ Bool AIGuardMachine::lookForInnerTarget(void)
 	{
 		filters[count++] = &f1;
 		filters[count++] = &f2;
+		searchPlayers = owner->getTeam()->getEnemyPlayerMask();
 	}
 
 	filters[count++] = &filterMapStatus;
@@ -320,7 +324,7 @@ Bool AIGuardMachine::lookForInnerTarget(void)
 // just ask for that; the above has to find ALL objects in range, but we ignore all 
 // but the first (closest).
 //
-	Object* target = ThePartitionManager->getClosestObject(&pos, visionRange, FROM_CENTER_2D, filters);
+	Object* target = ThePartitionManager->getClosestObject(&pos, visionRange, FROM_CENTER_2D, filters, NULL, NULL, searchPlayers);
 	if (target) 
 	{
 		setNemesisID(target->getID());	
@@ -754,17 +758,19 @@ StateReturnType AIGuardIdleState::update( void )
 #endif
 	Object *owner = getMachineOwner();
 	AIUpdateInterface *ai = owner->getAIUpdateInterface();
-	// Check to see if we have created a crate we need to pick up.
-	if (ai->getCrateID() != INVALID_ID) 
+
+	// if anyone is in the inner area, return success.
+	if (getGuardMachine()->lookForInnerTarget())
+	{
+		return STATE_SUCCESS;	// Transitions to AIGuardInnerState.
+	}
+
+	// Check to see if we have created a crate we need to pick up. An enemy in the inner area
+	// comes first: the notice stays pending and the crate is fetched once the area is clear.
+	if (ai->getCrateID() != INVALID_ID)
 	{
 		getMachine()->setState(AI_GUARD_GET_CRATE);
 		return STATE_SLEEP(m_nextEnemyScanTime - now);
-	}
-
-	// if anyone is in the inner area, return success.
-	if (getGuardMachine()->lookForInnerTarget()) 
-	{
-		return STATE_SUCCESS;	// Transitions to AIGuardInnerState.
 	}
 
 	// See if the object we are guarding moved.

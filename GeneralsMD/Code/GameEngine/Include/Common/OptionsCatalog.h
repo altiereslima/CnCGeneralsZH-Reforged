@@ -143,12 +143,21 @@ enum { TEXTURE_FILTER_MODE_COUNT = 3 };
 // stores the level; the thickness each level stands for is in OptionsCatalog.cpp.
 enum { SMOKE_LEVEL_COUNT = 3 };
 
+// Shadow quality is the size of the sun's depth map, low, medium and high: 1024, 2048 and 4096
+// texels a side (W3DVolumetricShadow.cpp, renderShadowMap).  Medium is the size the map always had.
+enum { SHADOW_QUALITY_COUNT = 3 };
+
+// What colours a health bar: 0 the health, green through red, 1 the owner's player colour.
+enum { HEALTH_BAR_COLORS_COUNT = 2 };
+
 /** Options.ini -> TheWritableGlobalData, for every row.  A key that is absent leaves the field at
 	* whatever GlobalData's constructor put there, which is what makes an old Options.ini keep
 	* working when a row is added. */
 extern void loadOptionsFromPreferences( UserPreferences& pref );
 
-/** TheGlobalData -> Options.ini, for every row.  Called from the options menu's Accept. */
+/** TheGlobalData -> Options.ini, for every row.  The options menu's Accept writes only the rows the
+	* player changed instead, so a value the command line or ClassicGraphics put in GlobalData for one
+	* run does not end up on disk. */
 extern void saveOptionsToPreferences( UserPreferences& pref );
 
 #endif // __OPTIONSCATALOG_H_

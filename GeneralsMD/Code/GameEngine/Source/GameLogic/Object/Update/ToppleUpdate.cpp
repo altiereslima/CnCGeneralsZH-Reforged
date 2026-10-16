@@ -166,12 +166,13 @@ void ToppleUpdate::applyTopplingForce( const Coord3D* toppleDirection, Real topp
 	// a zero speed. That left both angular terms at zero: ANGULAR_LIMIT/(0*2) is infinity, which
 	// REAL_TO_INT_FLOOR turns into garbage below, and the object then sat in TOPPLE_FALLING
 	// forever, updating every frame and never dying. Floor it so it always actually falls.
-	const Real MIN_TOPPLE_SPEED = 0.01f;
+	const Real MIN_TOPPLE_SPEED = ConvertRetailPerFrameRate(0.01f);
 	if (toppleSpeed < MIN_TOPPLE_SPEED)
 		toppleSpeed = MIN_TOPPLE_SPEED;
 
+	// toppleSpeed is per frame; the acceleration taken from it is per frame squared, so it halves once more
 	m_angularVelocity = toppleSpeed * d->m_initialVelocityPercent;
-	m_angularAcceleration = toppleSpeed * d->m_initialAccelPercent;
+	m_angularAcceleration = ConvertRetailPerFrameRate(toppleSpeed * d->m_initialAccelPercent);
 	m_toppleState = TOPPLE_FALLING;
 	m_options = options;
 
@@ -282,8 +283,8 @@ UpdateSleepTime ToppleUpdate::update()
 		return UPDATE_SLEEP_FOREVER;
 
 	const ToppleUpdateModuleData* d = getToppleUpdateModuleData();
-	const Real VELOCITY_BOUNCE_LIMIT = 0.01f;				// if the velocity after a bounce will be this or lower, just stop at zero
-	const Real VELOCITY_BOUNCE_SOUND_LIMIT = 0.03f;	// and if this low, then skip the bounce sound
+	const Real VELOCITY_BOUNCE_LIMIT = ConvertRetailPerFrameRate(0.01f);				// if the velocity after a bounce will be this or lower, just stop at zero
+	const Real VELOCITY_BOUNCE_SOUND_LIMIT = ConvertRetailPerFrameRate(0.03f);	// and if this low, then skip the bounce sound
 
 	Object* obj = getObject();
 	if (m_numAngleDeltaX)

@@ -94,9 +94,9 @@ SpectreGunshipUpdateModuleData::SpectreGunshipUpdateModuleData()
 /*************/  m_orbitFrames                  = 0;
 /*************/  m_targetingReticleRadius       = 25.0f;
 /*************/  m_gunshipOrbitRadius           = 250.0f;
-  m_strafingIncrement = 20.0f;
+  m_strafingIncrement = ConvertRetailPerFrameRate( 20.0f );
   m_orbitInsertionSlope = 0.7f;
-  m_howitzerFiringRate = 10;
+  m_howitzerFiringRate = ConvertRetailFrames( 10 );
   m_howitzerFollowLag = 0;
   m_randomOffsetForHowitzer = 20.0f;
 }
@@ -115,7 +115,7 @@ static Real zero = 0.0f;
 		{ "OrbitTime",	                    INI::parseDurationUnsignedInt,		NULL, offsetof( SpectreGunshipUpdateModuleData, m_orbitFrames ) },
 		{ "HowitzerFollowLag",	            INI::parseDurationUnsignedInt,		NULL, offsetof( SpectreGunshipUpdateModuleData, m_howitzerFollowLag ) },
     { "AttackAreaRadius",	              INI::parseReal,				            NULL, offsetof( SpectreGunshipUpdateModuleData, m_attackAreaRadius ) },
-		{ "StrafingIncrement",	            INI::parseReal,				            NULL, offsetof( SpectreGunshipUpdateModuleData, m_strafingIncrement ) },
+		{ "StrafingIncrement",	            INI::parseRetailPerFrameReal,			            NULL, offsetof( SpectreGunshipUpdateModuleData, m_strafingIncrement ) },
 		{ "OrbitInsertionSlope",	          INI::parseReal,	  			          NULL, offsetof( SpectreGunshipUpdateModuleData, m_orbitInsertionSlope ) },
 		{ "RandomOffsetForHowitzer",        INI::parseReal,	                  NULL, offsetof( SpectreGunshipUpdateModuleData, m_randomOffsetForHowitzer ) },
 		{ "TargetingReticleRadius",	        INI::parseReal,				            NULL, offsetof( SpectreGunshipUpdateModuleData, m_targetingReticleRadius ) },

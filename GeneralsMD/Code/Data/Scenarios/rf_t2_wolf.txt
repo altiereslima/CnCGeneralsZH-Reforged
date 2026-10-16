@@ -1,0 +1,38 @@
+# Trailer 2, shots 3 and 4 on Winter Wolf. Six Overlords drive north up the road that runs along
+# x 1100 from China's side of the map, onto a camera standing on the road and looking south at them;
+# then rf_snow.txt's fight on the open snow at 1100,1120, America from the south-west and China from
+# the north-east, with the A-10 strike called into the middle on frame 300 for the music's drop.
+#
+#   generals.exe -win -xres 2560 -yres 1440 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Winter Wolf\Winter Wolf.map" -autoskirmish 2 -takeover
+#     -observer -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario rf_t2_wolf
+#     -cinema rf_t2_wolf -video <from> <to> rt_t2_wolf -recordfps 60
+
+10    spawn      0  AmericaCommandCenter            1   start0:240:60
+10    spawn      1  ChinaCommandCenter              1   start1:-260:0
+
+# --- the column, on the road --------------------------------------------------------------------
+# spawned after the list's first cut at 3 s. Until 2026-10-11 it was ordered to stop at 1100,930 and
+# parked along the top of row 03's frame; now it drives the whole road into the fight, through the
+# camera's spot, with four Gattlings behind it.
+90    spawn      1  ChinaTankOverlord               6   1110 560   50
+90    spawn      1  ChinaTankGattling               4   1150 470   40
+100   attackmove 1  ChinaTankOverlord                   1100 1120
+100   attackmove 1  ChinaTankGattling                   1100 1120
+
+# --- rf_snow.txt's fight ------------------------------------------------------------------------
+30    spawn      0  AmericaTankCrusader             8   990 1040  36
+30    spawn      0  AmericaTankPaladin              3   940 990   40
+30    spawn      0  AmericaInfantryRanger           10  1050 1070  18
+30    spawn      1  ChinaTankBattleMaster           8   1210 1200  40
+# rf_snow's two Overlords are Dragons here, so the column's orders move only the column
+30    spawn      1  ChinaTankDragon                 2   1260 1250  50
+30    spawn      1  ChinaTankGattling               3   1170 1250  36
+30    spawn      1  ChinaInfantryRedguard           10  1150 1170  18
+60    attackmove 0  *  1100 1120
+60    attackmove 1  ChinaTankBattleMaster  1100 1120
+60    attackmove 1  ChinaTankDragon        1100 1120
+60    attackmove 1  ChinaTankGattling      1100 1120
+60    attackmove 1  ChinaInfantryRedguard  1100 1120
+
+300   power      0  AmericaCommandCenter  1110 1130  SuperweaponA10ThunderboltMissileStrike

@@ -46,14 +46,14 @@
 # The install is listed (sizes, times, BLAKE2) before this script writes anything and again at the end,
 # and must be unchanged (Tools/install-guard.sh).
 #
-# Usage: overlay-crc-check.sh --generals <path> [--data <dir>] [--maxframes 600] [--keep]
+# Usage: overlay-crc-check.sh --generals <path> [--data <dir>] [--maxframes 1200] [--keep]
 # Exit status: 0 when W and P agree and the control differs; 1 otherwise; 77 without game data.
 
 set -u
 
 GENERALS=""
 DATA="${ZH_DATA_DIR:-}"
-MAXFRAMES=600
+MAXFRAMES=1200		# logic frames, 60 a second
 KEEP=0
 while [ $# -gt 0 ]; do
 	case "$1" in

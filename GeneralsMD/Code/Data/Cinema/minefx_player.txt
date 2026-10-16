@@ -1,0 +1,52 @@
+# Scenarios/minefx_player.txt (minefx_blast with every unit on the defensive) seen the way a player sees it: no camera verb at all, so the view keeps
+# the zoom, heading and tilt the match opened with (300 over the ground, the map's own heading, no
+# extra pitch, 50 degree field of view) and the HUD stays up. -camera 780 900 parks the look-at on
+# the field, which is what a player panning there would get. Only stills and log lines here.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap
+#     -multiInstance -fps 120 -noFPSLimit -particlecap 2500
+#     -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover
+#     -side 0 FactionChina -side 1 FactionAmerica -seed 1 -camera 780 900
+#     -scenario minefx_player -cinema minefx_player -video 120 720 minefx_player -maxframes 730
+
+# the supply trucks crossing, mines sitting; every 4 frames over 56 so each LED's 8-frame blink
+# lands in at least one still
+6.0   shot
+6.133 shot
+6.267 shot
+6.4   shot
+6.533 shot
+6.667 shot
+6.8   shot
+6.933 shot
+7.067 shot
+7.2   shot
+7.333 shot
+7.467 shot
+7.6   shot
+7.733 shot
+7.867 shot
+# the first EMP mines under the Crusaders, frames 500 to 516
+16.533 shot
+16.667 shot
+16.8  shot
+16.933 shot
+17.067 shot
+17.2  shot
+17.333 shot
+17.467 shot
+# standard mines under the Crusaders and the Humvee, frames 568 to 604
+18.933 shot
+19.067 shot
+19.2  shot
+19.333 shot
+19.467 shot
+19.6  shot
+19.733 shot
+19.867 shot
+20.0  shot
+20.133 shot
+20.267 shot
+# EMP under the Paladins, 660 to 672
+22.0  shot
+22.267 shot

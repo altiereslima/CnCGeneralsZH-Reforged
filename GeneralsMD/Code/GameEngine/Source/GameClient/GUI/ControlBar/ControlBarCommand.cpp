@@ -62,6 +62,7 @@
 #include "GameClient/GameWindow.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/GadgetPushButton.h"
+#include "GameClient/HotKey.h"
 #include "GameClient/Image.h"
 
 #ifdef _INTERNAL
@@ -346,22 +347,6 @@ void ControlBar::doTransportInventoryUI( Object *transport, const CommandSet *co
 }  // end doTransportInventoryUI
 
 //-------------------------------------------------------------------------------------------------
-/** Which command button belongs in each of the command bar's slots for this object: the
-	command set, slot for slot.  No paging - every structure shows at once and the ones the
-	player cannot afford or has no prerequisite for just grey out through the availability
-	pass.  (The BUILD_PAGE machinery is dormant, kept in case pages come back.) */
-//-------------------------------------------------------------------------------------------------
-void ControlBar::buildCommandLayout( Object *obj, const CommandSet *commandSet,
-																		 const CommandButton **slot )
-{
-	for( Int i = 0; i < MAX_COMMANDS_PER_SET; i++ )
-		slot[ i ] = commandSet->getCommandButton( i );
-
-	m_buildPage = BUILD_PAGE_ROOT;
-
-}  // end buildCommandLayout
-
-//-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 void ControlBar::populateCommand( Object *obj )
 {
@@ -398,21 +383,45 @@ void ControlBar::populateCommand( Object *obj )
 	if( obj->getContain()  &&  obj->getContain()->isDisplayedOnControlBar() )
 		doTransportInventoryUI( obj, commandSet );
 
-	// what goes in each slot; a builder's structures may be spread across pages
+	// what goes in each slot: the command set, slot for slot, and a button in a slot past our bar's
+	// windows into an empty one (ControlBar_fitCommandSlots)
 	const CommandButton *slot[ MAX_COMMANDS_PER_SET ];
-	buildCommandLayout( obj, commandSet, slot );
+	{
+		const CommandButton *set[ MAX_COMMANDS_PER_SET ];
+		Int types[ MAX_COMMANDS_PER_SET ];
+		Bool windowed[ MAX_COMMANDS_PER_SET ];
+		Int shown[ MAX_COMMANDS_PER_SET ];
+		for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
+		{
+			set[ i ] = commandSet->getCommandButton( i );
+			types[ i ] = ( set[ i ] && !BitTest( set[ i ]->getOptions(), SCRIPT_ONLY ) ) ? set[ i ]->getCommandType() : GUI_COMMAND_NONE;
+			windowed[ i ] = m_commandWindows[ i ] != NULL;
+		}
+		{
+			const Int forceSlot = ControlBar_forceAttackSlot( types, MAX_COMMANDS_PER_SET, ControlBar_forceFires( obj ) );
+			const CommandButton *force = forceSlot >= 0 ? findCommandButton( AsciiString( "Command_ForceAttack" ) ) : NULL;
+			if( force )
+			{
+				set[ forceSlot ] = force;
+				types[ forceSlot ] = force->getCommandType();
+			}
+		}
+		ControlBar_fitCommandSlots( types, windowed, MAX_COMMANDS_PER_SET, shown );
+
+		// a window nothing is fitted to stays empty: its own slot is empty or script only
+		for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
+			slot[ i ] = shown[ i ] >= 0 ? set[ shown[ i ] ] : NULL;
+	}
 
 	// a builder standing in for an empty selection offers its buildings, not its orders: nobody
-	// asked that dozer to go and clear mines, or a Demolition worker to blow itself up, the owner's call
+	// asked that dozer to go and clear mines
 	if( m_standInBuilderID != INVALID_DRAWABLE_ID && obj->getDrawable()
 			&& obj->getDrawable()->getID() == m_standInBuilderID )
 	{
 		for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
-		{
-			const Int place = slot[ i ] ? ControlBar_namedCommandPlace( slot[ i ]->getName().str() ) : -1;
-			if( place == COMMAND_PLACE_CLEAR_MINES || place == COMMAND_PLACE_EXPLOSIVE )
+			if( slot[ i ] && ControlBar_namedCommandPlace( slot[ i ]->getName().str() ) == COMMAND_PLACE_CLEAR_MINES )
 				slot[ i ] = NULL;
-		}	}
+	}
 
 	// populate the button with commands defined
 	const CommandButton *commandButton;
@@ -527,7 +536,7 @@ void ControlBar::populateCommand( Object *obj )
 									}
 
 									Bool found = FALSE;
-									for( i = 0; !found && i < MAX_PURCHASE_SCIENCE_RANK_1; i++ )
+									for( i = 0; !found && i < MAX_COMMANDS_PER_SET; i++ )
 									{
 										const CommandButton *command = commandSet1->getCommandButton( i );
 										if( command && command->getCommandType() == GUI_COMMAND_PURCHASE_SCIENCE )
@@ -546,7 +555,7 @@ void ControlBar::populateCommand( Object *obj )
 											}
 										}
 									}
-									for( i = 0; !found && i < MAX_PURCHASE_SCIENCE_RANK_3; i++ )
+									for( i = 0; !found && i < MAX_COMMANDS_PER_SET; i++ )
 									{
 										const CommandButton *command = commandSet3->getCommandButton( i );
 										if( command && command->getCommandType() == GUI_COMMAND_PURCHASE_SCIENCE )
@@ -565,7 +574,7 @@ void ControlBar::populateCommand( Object *obj )
 											}
 										}
 									}
-									for( i = 0; !found && i < MAX_PURCHASE_SCIENCE_RANK_8; i++ )
+									for( i = 0; !found && i < MAX_COMMANDS_PER_SET; i++ )
 									{
 										const CommandButton *command = commandSet8->getCommandButton( i );
 										if( command && command->getCommandType() == GUI_COMMAND_PURCHASE_SCIENCE )
@@ -725,12 +734,11 @@ void ControlBar::resetBuildQueueButtons( void )
 //-------------------------------------------------------------------------------------------------
 UnsignedInt getQueueCap( const ProductionUpdateInterface *pu )
 {
-	const UnsignedInt cap = pu->getMaxQueueEntries();
-	return TheGlobalData->isClassicUI() ? MIN( cap, (UnsignedInt)MAX_BUILD_QUEUE_BUTTONS ) : cap;
+	return MIN( pu->getMaxQueueEntries(), (UnsignedInt)MAX_BUILD_QUEUE_BUTTONS );
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Classic's build queue, EA's: the first MAX_BUILD_QUEUE_BUTTONS entries of the producer's queue
+/** The build queue, EA's: the first MAX_BUILD_QUEUE_BUTTONS entries of the producer's queue
 	* on the queue buttons, each a cancel of its own entry. */
 //-------------------------------------------------------------------------------------------------
 void ControlBar::populateBuildQueue( Object *producer )
@@ -771,10 +779,10 @@ void ControlBar::populateBuildQueue( Object *producer )
 }  // end populateBuildQueue
 
 //-------------------------------------------------------------------------------------------------
-/** Classic: the queue stands where the portrait does while the producer has anything in it, the
-	* first entry's build clock on its button, and the portrait comes back when it empties. */
+/** The queue stands where the portrait does while the producer has anything in it, the first
+	* entry's build clock on its button, and the portrait comes back when it empties. */
 //-------------------------------------------------------------------------------------------------
-void ControlBar::updateClassicBuildQueue( Object *obj, ProductionUpdateInterface *pu )
+void ControlBar::updateBuildQueue( Object *obj, ProductionUpdateInterface *pu )
 {
 	GameWindow *queue = m_contextParent[ CP_BUILD_QUEUE ];
 	const Bool busy = pu && pu->firstProduction() != NULL;
@@ -801,7 +809,7 @@ void ControlBar::updateClassicBuildQueue( Object *obj, ProductionUpdateInterface
 
 	GadgetButtonDrawInverseClock( m_queueData[ 0 ].control, pu->firstProduction()->getPercentComplete(), m_buildUpClockColor );
 
-}  // end updateClassicBuildQueue
+}  // end updateBuildQueue
 
 
 //-------------------------------------------------------------------------------------------------
@@ -835,15 +843,10 @@ void ControlBar::updateContextCommand( void )
 	// get production update for those objects that have one
 	ProductionUpdateInterface *pu = obj ? obj->getProductionUpdateInterface() : NULL;
 
-	//
-	// the right HUD always belongs to the selection, so the build queue panel is never shown
-	// over it: a unit build button carries its own queue (radial progress, count badge,
-	// right-click cancels the last one) and the producer's world bar shows the rest.  Classic
-	// has none of that, so a lone producer with something queued shows its queue where its
-	// portrait was, as the game shipped
-	//
-	if( TheGlobalData->isClassicUI() && m_currContext == CB_CONTEXT_COMMAND )
-		updateClassicBuildQueue( obj, pu );
+	// a lone producer with something queued shows its queue where its portrait was, as the game
+	// shipped
+	if( m_currContext == CB_CONTEXT_COMMAND )
+		updateBuildQueue( obj, pu );
 	else if( m_contextParent[ CP_BUILD_QUEUE ]->winIsHidden() == FALSE )
 	{
 		m_contextParent[ CP_BUILD_QUEUE ]->winHide( TRUE );
@@ -881,32 +884,31 @@ void ControlBar::updateContextCommand( void )
 		GadgetButtonClearClock( win );
 		win->winClearStatus( WIN_STATUS_CANCEL_WHEN_DISABLED );
 
+		// the spinning repeat mark: some selected factory builds this unit on repeat
+		const Bool repeating = command->getCommandType() == GUI_COMMAND_UNIT_BUILD &&
+													 selectionRepeatsUnit( command->getThingTemplate() );
+		GadgetButtonSetRepeat( win, repeating );
+
 		//
-		// a unit build button wears its own queue: a radial fill over the cameo while its unit
-		// is the one being built, and a corner badge with how many of it are queued
+		// a unit build button wears a radial fill over the cameo while its unit is the one being
+		// built, and right-click cancels the last one queued
 		//
 		if( command->getCommandType() == GUI_COMMAND_UNIT_BUILD && pu )
 		{
 			//
 			// a queue belongs to one building. With several producers selected the bar shows the
-			// representative's queue, which is a lie about the rest of the selection, so the badge
-			// and the radial fill stay off (and right-click cancel is refused, see
-			// ControlBar::cancelLastQueuedUnit). The clock clears itself after each draw; the
-			// count badge does not, so put it back to zero.
+			// representative's queue, which is a lie about the rest of the selection, so the radial
+			// fill stays off (and right-click cancel is refused, see
+			// ControlBar::cancelLastQueuedUnit).  The queue is counted on the queue buttons over the
+			// portrait, not on the button.
 			//
-			if( m_currContext == CB_CONTEXT_MULTI_SELECT )
-			{
-				GadgetButtonSetCount( win, 0 );
-			}
-			else
+			if( m_currContext != CB_CONTEXT_MULTI_SELECT )
 			{
 				Int queued = 0;
 				for( const ProductionEntry *p = pu->firstProduction(); p; p = pu->nextProduction( p ) )
 					if( p->getProductionType() == PRODUCTION_UNIT &&
 							p->getProductionObject() == command->getThingTemplate() )
 						queued++;
-				// Classic counts its queue on the queue buttons over the portrait, not on the button
-				GadgetButtonSetCount( win, TheGlobalData->isClassicUI() ? 0 : queued );
 				if( queued > 0 && obj->isLocallyControlled() )
 					win->winSetStatus( WIN_STATUS_CANCEL_WHEN_DISABLED );
 
@@ -914,47 +916,6 @@ void ControlBar::updateContextCommand( void )
 				if( first && first->getProductionType() == PRODUCTION_UNIT &&
 						first->getProductionObject() == command->getThingTemplate() )
 					GadgetButtonDrawInverseClock( win, first->getPercentComplete(), BuildClockColor );
-			}
-		}
-
-		//
-		// what this button costs in seconds. The radial fill says "some of the way there" and
-		// nothing about how long that is, which is the one number a build decision needs.
-		//
-		// It stays the build time while the thing is being built rather than counting down to it:
-		// the number on the button answers "what does one of these cost me", and that question does
-		// not stop being asked because one is already on the way - a counting number turns the one
-		// stable figure on the bar into something you cannot read off at a glance, and the queue's
-		// own progress is already on the cameo (the radial fill and the count badge) and over the
-		// producer itself.
-		//
-		if( command->getCommandType() == GUI_COMMAND_UNIT_BUILD ||
-				command->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT )
-		{
-			const ThingTemplate *tmpl = command->getThingTemplate();
-			Player *localPlayer = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
-			// Classic's cameos are EA's pictures alone: no seconds, price or power on them.  The
-			// seconds were wall-clock ones, so they crept up whenever the match ran under 30 frames
-			if( tmpl && localPlayer && !TheGlobalData->isClassicUI() )
-			{
-				GadgetButtonSetSeconds( win, ControlBar_secondsFromFrames( (Real)tmpl->calcTimeToBuild( localPlayer ) ) );
-				//
-				// ... and what it costs, in the opposite corner.  The price was only ever in the
-				// tooltip, which means hovering one button at a time to compare two of them - and
-				// it is the other half of the question the seconds answer.  It is this player's
-				// price, so a faction discount or a general's promotion shows in it.
-				//
-				GadgetButtonSetCost( win, tmpl->calcCostToBuild( localPlayer ) );
-
-				//
-				// ... and what it does to the power grid, in the fourth corner.  Money and time are
-				// the two numbers already on the button and power is the third thing a base spends;
-				// it was the only one you had to hover for, which is the wrong way round for the
-				// building you are putting up because the lights went out.  Structures only - a unit
-				// has no power line, and the bottom right corner is the queue count's on a unit.
-				//
-				if( command->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT )
-					GadgetButtonSetPower( win, tmpl->getEnergyProduction() );
 			}
 		}
 
@@ -971,14 +932,6 @@ void ControlBar::updateContextCommand( void )
 		{
 			const ProductionEntry *entry = NULL;
 			Bool queuedHere = findUpgradeInSelection( command->getUpgradeTemplate(), &entry );
-
-			const UpgradeTemplate *ut = command->getUpgradeTemplate();
-			Player *localPlayer = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
-			if( ut && localPlayer && !TheGlobalData->isClassicUI() )
-			{
-				GadgetButtonSetSeconds( win, ControlBar_secondsFromFrames( (Real)ut->calcTimeToBuild( localPlayer ) ) );
-				GadgetButtonSetCost( win, ut->calcCostToBuild( localPlayer ) );
-			}
 
 			if( queuedHere )
 			{
@@ -1044,6 +997,11 @@ void ControlBar::updateContextCommand( void )
 			win->winEnable( TRUE );
 			win->winSetStatus( WIN_STATUS_ALWAYS_COLOR );
 		}
+
+		// the same for a unit on repeat the bank cannot pay for right now: Ctrl+Alt click has to
+		// reach the button to stop it, and a plain click only says there is not enough money
+		if( repeating && availability == COMMAND_CANT_AFFORD )
+			win->winEnable( TRUE );
 
 		//Determine by the production type of this button, whether or not the created object
 		//will have a veterancy rank
@@ -1393,10 +1351,7 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 	}
 
 	//
-	// The cap is the queue's own depth (INI MaxQueueEntries, 100 by default here), not the number
-	// of buttons the build-queue strip happens to have room for - those nine buttons are a display
-	// limit and were greying every build button out at nine units.  Classic shows its queue on
-	// those nine buttons, so there they are the cap (getQueueCap).
+	// The queue is shown on the nine build-queue buttons, so they are the cap (getQueueCap).
 	//
 	// >=, not ==: a shift-click queues several at once, so an exact-equality test stopped firing
 	// once the count stepped past the cap.
@@ -1502,7 +1457,7 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 
 		case GUI_COMMAND_PLAYER_UPGRADE:
 		{
-			if( queueMaxed )
+			if( queueMaxed || !canResearchWithStatus( obj->getStatusBits() ) )
 			{
 				return COMMAND_RESTRICTED;
 			}
@@ -1528,7 +1483,7 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 
 		case GUI_COMMAND_OBJECT_UPGRADE:
 		{
-			if( queueMaxed )
+			if( queueMaxed || !canResearchWithStatus( obj->getStatusBits() ) )
 			{
 				return COMMAND_RESTRICTED;
 			}
@@ -1708,24 +1663,6 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 			// a silo whose missile can never fire has no fire button at all
 			if( SuperweaponMissileSilencedInMatch( command->getSpecialPowerTemplate()->getSpecialPowerType() ) )
 				return COMMAND_HIDDEN;
-
-			//
-			// the cooldown in seconds: what is left of it while the power charges, and the whole
-			// of it while the power is ready, so you can see what firing it will cost you
-			//
-			{
-				const SpecialPowerTemplate *spTemplate = command->getSpecialPowerTemplate();
-				UnsignedInt now = TheGameLogic->getFrame();
-				UnsignedInt readyFrame = mod->getReadyFrame();
-
-				// frame numbers are unsigned - a ready frame already behind us wraps if subtracted
-				Real frames = ( readyFrame > now ) ? (Real)( readyFrame - now ) : 0.0f;
-				if( frames <= 0.0f && spTemplate )
-					frames = (Real)spTemplate->getReloadTime();
-
-				// Classic's power buttons are EA's pictures alone, like its build buttons
-				GadgetButtonSetSeconds( applyToWin, TheGlobalData->isClassicUI() ? 0 : ControlBar_secondsFromFrames( frames ) );
-			}
 
 			// Pro Rules: the power is there and the button stays dead
 			if( ProRulesRefuseSpecialPower( obj->getControllingPlayer(), command->getSpecialPowerTemplate()->getSpecialPowerType() ) )

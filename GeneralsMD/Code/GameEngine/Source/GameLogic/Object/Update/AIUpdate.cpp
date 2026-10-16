@@ -261,6 +261,12 @@ static void AIUpdate_traceMove( const Object *obj, const Coord3D& framePos, Bool
 
 		NameKeyType locoKey = NAMEKEY(locoName);
 		const LocomotorTemplate* lt = TheLocomotorStore->findLocomotorTemplate(locoKey);
+		if (!lt && ini->getLoadType() == INI_LOAD_MULTIFILE)
+		{
+			// a patch INI loaded over a mod can name a locomotor the mod renamed or removed
+			DEBUG_LOG(("[LINE: %d in '%s'] locomotor '%s' does not exist; the reference is skipped.\n", ini->getLineNum(), ini->getFilename().str(), locoName));
+			continue;
+		}
 		if (!lt)
 		{
 			DEBUG_CRASH(("Locomotor %s not found!\n",locoName));
@@ -632,11 +638,11 @@ void AIUpdateInterface::requestPath( Coord3D *destination, Bool isFinalGoal )
 		return;
 	}
 	m_waitingForPath = TRUE;
-	if (m_pathTimestamp > TheGameLogic->getFrame()-3) {
+	if (m_pathTimestamp > TheGameLogic->getFrame()-ConvertRetailFrames(3)) {
 		/* Requesting path very quickly.  Can cause a spin. The spin needs a gap between two
 			 paths, not the one or two seconds EA waited here, which left a unit that had just been
 			 given a second order standing still or walking the old path until the timer ran out. So
-			 the request waits out the rest of the three frames and no longer. */
+			 the request waits out the rest of the tenth of a second and no longer. */
 		setQueueForPathTime(repathDebounceFrames());
 		// See if it has been too soon.
 		// jba intense debug
@@ -666,7 +672,7 @@ void AIUpdateInterface::requestAttackPath( ObjectID victimID, const Coord3D* vic
 	m_isApproachPath = FALSE;
 	m_isSafePath = FALSE;
 	m_waitingForPath = TRUE;
-	if (m_pathTimestamp > TheGameLogic->getFrame()-3) {
+	if (m_pathTimestamp > TheGameLogic->getFrame()-ConvertRetailFrames(3)) {
 		/* Requesting path very quickly.  Can cause a spin. */
 		setQueueForPathTime(repathDebounceFrames());
 		setLocomotorGoalNone();
@@ -689,7 +695,7 @@ void AIUpdateInterface::requestApproachPath( Coord3D *destination )
 	m_isApproachPath = TRUE;
 	m_isSafePath = FALSE;
 	m_waitingForPath = TRUE;
-	if (m_pathTimestamp > TheGameLogic->getFrame()-3) {
+	if (m_pathTimestamp > TheGameLogic->getFrame()-ConvertRetailFrames(3)) {
 		/* Requesting path very quickly.  Can cause a spin. */
 		setQueueForPathTime(repathDebounceFrames());
 		return;
@@ -712,7 +718,7 @@ void AIUpdateInterface::requestSafePath( ObjectID repulsor )
 	m_isApproachPath = FALSE;
 	m_isSafePath = TRUE;
 	m_waitingForPath = TRUE;
-	if (m_pathTimestamp > TheGameLogic->getFrame()-3) {
+	if (m_pathTimestamp > TheGameLogic->getFrame()-ConvertRetailFrames(3)) {
 		/* Requesting path very quickly.  Can cause a spin. */
 		setQueueForPathTime(repathDebounceFrames());
 		return;
@@ -1096,7 +1102,15 @@ Object* AIUpdateInterface::checkForCrateToPickup()
 	{
 		Object* crate = TheGameLogic->findObjectByID(m_crateCreated);
 		m_crateCreated = INVALID_ID; // we have processed it, so clear it.
-		if (crate) 
+		// The crate the victim dropped is the killer's to take only while it lies within sight: the
+		// notice waits until the killer's machine next looks, which for a unit busy with something
+		// else can be long after, and an artillery piece that killed at range would otherwise drive
+		// out across the front for it.  Never under the 150 that salvageCrateTick (GameLogic.cpp)
+		// calls a busy computer unit from, or a short-sighted rebel would drop the notice it was given.
+		const Real reach = max( getObject()->getVisionRange(), 150.0f );
+		if (crate && ThePartitionManager->getDistanceSquared( getObject(), crate, FROM_CENTER_2D ) > reach * reach)
+			crate = NULL;
+		if (crate)
 		{
 			for (BehaviorModule** m = crate->getBehaviorModules(); *m; ++m)
 			{
@@ -1609,7 +1623,8 @@ Real AIUpdateInterface::calculateMaxBlockedSpeed(Object *other) const
 
 //-------------------------------------------------------------------------------------------------
 static const Real HEAD_ON_DOT = -0.5f;					///< facing more than 120 degrees apart is driving at each other
-static const Int  HEAD_ON_PASS_FRAMES = 8;			///< held up head-on this long: pass through
+static const Int  HEAD_ON_PASS_FRAMES = ConvertRetailFrames(8);			///< held up head-on this long: pass through
+static const Real BUMP_RECOVERY = ConvertRetailPerFrameFactor(1.05f);	///< the bump speed limit grows by this every frame
 
 Bool AIUpdateInterface::blockedBy(Object *other)
 /* Returns TRUE if we are blocked from moving by the other object.*/
@@ -1775,37 +1790,39 @@ Bool AIUpdateInterface::needToRotate(void)
 // the crowd model: the constants the steering stack is made of, all in world units (a pathfind cell is 10).
 //-------------------------------------------------------------------------------------------------
 static const Real CROWD_AIR					= 4.0f;		///< air a body wants round it, on top of both radii
-static const Real CROWD_SEP_STEP		= 1.5f;		///< most one frame of separation may move a lane
+static const Real CROWD_SEP_STEP		= 1.5f;		///< most one retail frame of separation may move a lane
 static const Real CROWD_PASS_CLEAR	= 6.0f;		///< room a passing lane leaves beside the blocker
 static const Real CROWD_PASS_TIGHT	= 1.5f;		///< and the room it settles for rather than queue
-static const Int  CROWD_PASS_RETRY	= 10;			///< queued this long: ask to pass again, hold or no hold
+static const Int  CROWD_PASS_RETRY	= ConvertRetailFrames(10);			///< queued this long: ask to pass again, hold or no hold
 static const Real CROWD_TAPER_DIST	= PATHFIND_CELL_SIZE_F * 8.0f;	///< the band closes over the last of the route
 static const Real CROWD_PLAN_END_SLACK	= PATHFIND_CELL_SIZE_F * 3.0f;	///< how far the move state may move a planned route's end and it still be the same order
-static const Int  CROWD_BRAKE_FRAMES	= 8;		///< frames of closing time a brake is allowed to read
-static const Int  CROWD_FAN_FRAMES	= 12;			///< held up this long before spreading out
-static const Real CROWD_FAN_RATE		= 0.8f;		///< and then sideways at this much a frame
-static const Real CROWD_SEP_FILTER	= 0.13f;	///< how much of a frame's sideways push is believed (~4/sec)
-static const Real CROWD_RELEASE_FILTER	= 0.15f;	///< how fast the throttle comes back once a brake lifts (~half a second to full)
-static const Real CROWD_AIM_CRUISE	= 0.23f;	///< how fast the aim follows the route while driving (~7/sec)
-static const Real CROWD_AIM_URGENT	= 0.67f;	///< and while manoeuvring (~20/sec), where lag is worse than twitch
+static const Int  CROWD_BRAKE_FRAMES	= ConvertRetailFrames(8);		///< frames of closing time a brake is allowed to read
+static const Int  CROWD_FAN_FRAMES	= ConvertRetailFrames(12);			///< held up this long before spreading out
+static const Real CROWD_FAN_RATE		= ConvertRetailPerFrameRate(0.8f);		///< and then sideways at this much a frame
+static const Real CROWD_LANE_RATE_MIN	= ConvertRetailPerFrameRate(0.4f);	///< the slowest a lane change is taken, per frame
+// the filters below are lerp fractions per frame, written for 30 Hz
+static const Real CROWD_SEP_FILTER	= 1.0f - ConvertRetailPerFrameFactor(1.0f - 0.13f);	///< how much of a frame's sideways push is believed (~4/sec)
+static const Real CROWD_RELEASE_FILTER	= 1.0f - ConvertRetailPerFrameFactor(1.0f - 0.15f);	///< how fast the throttle comes back once a brake lifts (~half a second to full)
+static const Real CROWD_AIM_CRUISE	= 1.0f - ConvertRetailPerFrameFactor(1.0f - 0.23f);	///< how fast the aim follows the route while driving (~7/sec)
+static const Real CROWD_AIM_URGENT	= 1.0f - ConvertRetailPerFrameFactor(1.0f - 0.67f);	///< and while manoeuvring (~20/sec), where lag is worse than twitch
 static const Real CROWD_AIM_DEAD		= 0.035f;	///< two degrees: hold the wheel still rather than chase the noise
 //-------------------------------------------------------------------------------------------------
 /* Being stuck.  These are not crowd constants: every unit trying to drive somewhere is measured
 	 against them, whether or not the crowd model steers it.  The rungs of the ladder are spaced by continued lack of
 	 progress rather than by wall clock, so a unit that starts moving again drops off it at once. */
 //-------------------------------------------------------------------------------------------------
-static const Real STUCK_TURN_EPSILON	= 0.004f;	///< a quarter of a degree a frame: below this the hull is not turning
-static const Int  STUCK_PRESS_FRAMES	= 10;		///< a third of a second of getting nowhere: stop being polite
-static const Int  STUCK_REPATH_FRAMES	= 45;		///< a second and a half: the ladder's first rung, and the gap between rungs
-static const Int  STUCK_BACKOUT_FRAMES	= 66;	///< how long a backing-out manoeuvre is given before the route is tried again
-static const Int  STUCK_COOL_FRAMES	= 90;			///< no second drastic thing inside this, or a wedged pair rock forever
-static const Int  STUCK_CYCLE_FRAMES	= 150;	///< five seconds past the last rung: run the whole ladder again
-static const Int  STUCK_DITHER_FRAMES	= 90;		///< three seconds is long enough to tell a shuffle from a corner
+static const Real STUCK_TURN_EPSILON	= ConvertRetailPerFrameRate(0.004f);	///< a quarter of a degree a retail frame: below this the hull is not turning
+static const Int  STUCK_PRESS_FRAMES	= ConvertRetailFrames(10);		///< a third of a second of getting nowhere: stop being polite
+static const Int  STUCK_REPATH_FRAMES	= ConvertRetailFrames(45);		///< a second and a half: the ladder's first rung, and the gap between rungs
+static const Int  STUCK_BACKOUT_FRAMES	= ConvertRetailFrames(66);	///< how long a backing-out manoeuvre is given before the route is tried again
+static const Int  STUCK_COOL_FRAMES	= ConvertRetailFrames(90);			///< no second drastic thing inside this, or a wedged pair rock forever
+static const Int  STUCK_CYCLE_FRAMES	= ConvertRetailFrames(150);	///< five seconds past the last rung: run the whole ladder again
+static const Int  STUCK_DITHER_FRAMES	= ConvertRetailFrames(90);		///< three seconds is long enough to tell a shuffle from a corner
 static const Real STUCK_BRIDGE_NEAR	= PATHFIND_CELL_SIZE_F * 20.0f;	///< a unit shaking this close to a deck on its route is at the ramp
 static const Real STUCK_DITHER_RATIO	= 0.3f;	///< gained less than this much of the ground it covered
-static const Int  CROWD_MERGE_FRAMES	= 45;		///< a second and a half: how far ahead a merge is worth noticing
-static const Int  CROWD_TTC_FRAMES	= 21;			///< closing this fast on somebody counts as being in our way, wherever it sits
-static const Int  CROWD_REPATH_QUEUE	= 24;		///< queued behind traffic this long: stop steering round it and ask for a new route
+static const Int  CROWD_MERGE_FRAMES	= ConvertRetailFrames(45);		///< a second and a half: how far ahead a merge is worth noticing
+static const Int  CROWD_TTC_FRAMES	= ConvertRetailFrames(21);			///< closing this fast on somebody counts as being in our way, wherever it sits
+static const Int  CROWD_REPATH_QUEUE	= ConvertRetailFrames(24);		///< queued behind traffic this long: stop steering round it and ask for a new route
 
 //-------------------------------------------------------------------------------------------------
 /* Returns TRUE if the physics collide should apply the force.  Normally not.
@@ -2297,7 +2314,7 @@ Bool AIUpdateInterface::computeAttackPath( PathfindServicesInterface *pathServic
 {
 	//CRCDEBUG_LOG(("AIUpdateInterface::computeAttackPath() for object %d\n", getObject()->getID()));
 	// See if it has been too soon.
-	if (m_pathTimestamp >= TheGameLogic->getFrame()-2) 
+	if (m_pathTimestamp >= TheGameLogic->getFrame()-(ConvertRetailFrames(2)+1))
 	{
 		// jba intense debug
 		//CRCDEBUG_LOG(("Info - RePathing very quickly %d, %d.\n", m_pathTimestamp, TheGameLogic->getFrame()));
@@ -2765,7 +2782,7 @@ void AIUpdateInterface::updateProgress( void )
 	Real asked = m_curLocomotor->getMaxSpeedForCondition( damage );
 	if (m_desiredSpeed < asked)
 		asked = m_desiredSpeed;						// a unit told to go slowly is not a unit going nowhere
-	if (asked < 0.01f)
+	if (asked < ConvertRetailPerFrameRate(0.01f))
 	{
 		m_noProgress = 0;
 		m_rescueStage = 0;
@@ -3283,7 +3300,7 @@ void AIUpdateInterface::crowdSteer( Coord3D& goalPos, Real& speed )
 		const Real comfort = myR + hisR + CROWD_AIR;
 
 		PhysicsBehavior *hisPhys = o->getPhysics();
-		const Bool hisMoving = ai->isMoving() && hisPhys != NULL && hisPhys->getVelocityMagnitude() > 0.05f;
+		const Bool hisMoving = ai->isMoving() && hisPhys != NULL && hisPhys->getVelocityMagnitude() > ConvertRetailPerFrameRate(0.05f);
 
 		if (gap < 0.0f)
 			touching = TRUE;
@@ -3299,7 +3316,7 @@ void AIUpdateInterface::crowdSteer( Coord3D& goalPos, Real& speed )
 		{
 			const Coord3D *hv = hisPhys->getVelocity();
 			const Real hs = (Real)sqrt( hv->x * hv->x + hv->y * hv->y );
-			if (hs > 0.01f)
+			if (hs > ConvertRetailPerFrameRate(0.01f))
 			{
 				const Real align = (hv->x * here.tan.x + hv->y * here.tan.y) / hs;
 				// a merge comes in at an angle: parallel traffic is the stream itself, head-on is not a merge
@@ -3308,7 +3325,7 @@ void AIUpdateInterface::crowdSteer( Coord3D& goalPos, Real& speed )
 					const Real rvx = hv->x - myVel.x;
 					const Real rvy = hv->y - myVel.y;
 					const Real rvv = rvx * rvx + rvy * rvy;
-					if (rvv > 1.0e-6f)
+					if (rvv > ConvertRetailPerFrameSquared(1.0e-6f))		// a speed squared
 					{
 						const Real when = -(dx * rvx + dy * rvy) / rvv;			// frames to closest approach
 						if (when >= 0.0f && when < (Real)CROWD_MERGE_FRAMES && when < joinerWhen)
@@ -3410,7 +3427,7 @@ void AIUpdateInterface::crowdSteer( Coord3D& goalPos, Real& speed )
 			if (dist > 0.01f)
 			{
 				const Real closing = ((myVel.x - hv->x) * dx + (myVel.y - hv->y) * dy) / dist;
-				if (closing > 0.05f && gap < closing * (Real)CROWD_TTC_FRAMES)
+				if (closing > ConvertRetailPerFrameRate(0.05f) && gap < closing * (Real)CROWD_TTC_FRAMES)
 					crossing = TRUE;
 			}
 		}
@@ -3683,7 +3700,7 @@ void AIUpdateInterface::crowdSteer( Coord3D& goalPos, Real& speed )
 	sep = m_crowdSepSmooth;
 	if (sep > CROWD_SEP_STEP) sep = CROWD_SEP_STEP;
 	if (sep < -CROWD_SEP_STEP) sep = -CROWD_SEP_STEP;
-	lat += sep;
+	lat += ConvertRetailPerFrameRate(sep);		// it accumulates in the lane frame after frame
 
 	/* Everything above chose a lane; this is the only place the unit is allowed to move into one,
 		 and never faster than it drives.  Giving way and passing both name a lane a full body width
@@ -3692,7 +3709,7 @@ void AIUpdateInterface::crowdSteer( Coord3D& goalPos, Real& speed )
 		 spot, and by the time it is facing the new lane the rule that asked for it has moved on.  The
 		 spinning and the rocking back and forth are both this.  A quarter of forward speed sideways
 		 is about twenty degrees of steering, which a tank takes without stopping. */
-	const Real laneRate = (speed * 0.25f > 0.4f) ? speed * 0.25f : 0.4f;
+	const Real laneRate = (speed * 0.25f > CROWD_LANE_RATE_MIN) ? speed * 0.25f : CROWD_LANE_RATE_MIN;
 	Real move = m_corridor->clampLat( i, lat ) - m_crowdLat;
 	if (move > laneRate) move = laneRate;
 	if (move < -laneRate) move = -laneRate;
@@ -4164,7 +4181,7 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 								if (m_bumpSpeedLimit<speed*0.2f) {
 									m_bumpSpeedLimit = speed*0.2f;
 								}
-								m_bumpSpeedLimit *= 1.05f;
+								m_bumpSpeedLimit *= BUMP_RECOVERY;
 								if (m_bumpSpeedLimit>speed) {
 									m_bumpSpeedLimit = speed;
 								}
@@ -4178,7 +4195,7 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 								if (m_bumpSpeedLimit<speed*0.2f) {
 									m_bumpSpeedLimit = speed*0.2f;
 								}
-								m_bumpSpeedLimit *= 1.05f;
+								m_bumpSpeedLimit *= BUMP_RECOVERY;
 							}
 							if (speed>m_bumpSpeedLimit) {
 								speed = m_bumpSpeedLimit;
@@ -7837,7 +7854,9 @@ void AIUpdateInterface::loadPostProcess( void )
 		chooseLocomotorSet(lst);
 	}
 
-	if (!isMoving()) {
+	// A unit waiting for its path is on its way as much as one driving: it keeps the goal it holds,
+	// or another unit takes the spot it was ordered to.
+	if (!isMoving() && !m_waitingForPath) {
 		m_pathfindGoalCell.x = -1;
 		m_pathfindGoalCell.y = -1;
 		TheAI->pathfinder()->updateGoal(getObject(), getObject()->getPosition(), getObject()->getLayer());
@@ -7854,6 +7873,12 @@ void AIUpdateInterface::loadPostProcess( void )
 			TheAI->pathfinder()->updateGoal(getObject(), &goalPos, getObject()->getLayer());
 		}
 	}
+
+	// The pathfinder's queue is not saved, so a unit that was in it when the game was saved comes
+	// back waiting for a path nobody is going to look for, and stands for the rest of the match.
+	// One waiting on the retry timer is asked for again by update() and needs nothing here.
+	if (m_waitingForPath && m_queueForPathFrame == 0)
+		queueForPathOrRetry();
 
 }  // end loadPostProcess
 

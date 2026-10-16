@@ -366,11 +366,7 @@ class MetaMap : public SubsystemInterface
 	friend class MetaEventTranslator;
 
 private:
-	MetaMapRec *m_metaMaps;				///< Reforged: the language's CommandMap.ini with CommandMapReforged.ini over it
-	MetaMapRec *m_classicMaps;		///< Classic: the language's CommandMap.ini alone, the game's own keys
-	Bool m_parsingClassic;				///< parseMetaMap is filling m_classicMaps
-
-	static void freeList( MetaMapRec *&list );
+	MetaMapRec *m_metaMaps;				///< the language's CommandMap.ini, the game's own keys
 
 protected:
 	GameMessage::Type findGameMessageMetaType(const char* name);
@@ -386,17 +382,19 @@ public:
 	void update() { }
 
 	static void parseMetaMap(INI* ini);
+	void clear();		///< every record gone, for CommandMap.ini and Hotkeys.ini to be read again
 
-	/** Fill the Classic list from the language's CommandMap.ini alone, the game's own map out of its
-		* own archives.  Everything this fork binds is in CommandMapReforged.ini, and only the Reforged
-		* list reads that. */
-	void loadClassicBindings( const AsciiString& languageMapFile );
 
-	/// the bindings the interface style in use answers to
-	const MetaMapRec *getFirstMetaMapRec() const;
-	const MetaMapRec *getFirstMetaMapRec( Bool classic ) const { return classic ? m_classicMaps : m_metaMaps; }
+	const MetaMapRec *getFirstMetaMapRec() const { return m_metaMaps; }
 };
 
 extern MetaMap *TheMetaMap;
+
+/** The words a command bar button wears for this meta command's key plus modifiers, English, the
+	* same shape as the launcher's chord ("Ctrl", "Alt", "F", "Ctrl + F"). Empty when the command is
+	* off the keyboard (UseableIn NONE). "Ctrl" when the map is missing, so Force Attack still names
+	* its shipped hold. */
+UnicodeString MetaMap_formatChord( MappableKeyType key, MappableKeyModState mods, CommandUsableInType usable );
+UnicodeString MetaMap_chordLabel( GameMessage::Type meta );
 
 #endif

@@ -35,7 +35,7 @@
 	 of the last few CRC frames.  Nothing reads the ring unless a mismatch is found, and then the
 	 first object whose running CRC differs between two players' dumps is the object that diverged. */
 
-#define CRC_SNAPSHOT_RING_SIZE 16
+#define CRC_SNAPSHOT_RING_SIZE 32	// 16 at 30 Hz logic; the run-ahead doubles in frames at 60 Hz
 
 struct CRCObjectEntry
 {

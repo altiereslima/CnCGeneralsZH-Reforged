@@ -836,8 +836,8 @@ static void handleCommand( const AsciiString &command )
 	}
 
 	/* spectator <action>
-		 What a data-click on the spectator's page does, without finding its pixel: camera:director,
-		 follow:3, fog, flip:camera and the rest of the actions Window/Html/Spectator.html names. */
+		 One of the spectator's actions by name: camera:director, follow:3, fog, flip:camera and the
+		 rest that InGameUI::runSpectatorAction knows. */
 	if (strncmp( command.str(), "spectator ", 10 ) == 0)
 	{
 		TheInGameUI->runSpectatorAction( command.str() + 10 );

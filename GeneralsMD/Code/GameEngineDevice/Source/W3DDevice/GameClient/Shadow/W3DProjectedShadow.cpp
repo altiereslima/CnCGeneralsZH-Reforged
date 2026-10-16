@@ -128,18 +128,42 @@ int nShadowDecalIndicesInBuf=0;	//model vetices in vertex buffer
 int nShadowDecalStartBatchIndex=0;
 int	nShadowDecalPolysInBatch=0;
 int	nShadowDecalVertsInBatch=0;
-//A SHADOW_DECAL is alpha blended onto the terrain (see flushDecals), so its vertex colour is the
-//shadow itself - black at this alpha, faded by the texture's own alpha channel.  160 lands on the
-//darkness the multiplicative blob was asking for: shadow.dds is 45% grey at its centre with an
-//alpha of about 0.85 there, and 1 - 0.85*160/255 is the same 45%.
-#define DECAL_SHADOW_ALPHA 160
 //queueDecal lays the long axis of anything this high above the ground down the sun ray, and lets it
 //grow to at most this many times the decal's own length doing it.
 #define DECAL_AIRBORNE_HEIGHT 1.0f
 #define DECAL_AIRBORNE_BLEND 10.0f
 #define DECAL_MAX_STRETCH 4.0f
-int SHADOW_DECAL_VERTEX_SIZE=32768;
-int SHADOW_DECAL_INDEX_SIZE=65536;
+enum { SHADOW_DECAL_VERTEX_COUNT = 32768, SHADOW_DECAL_INDEX_COUNT = 65536 };
+int SHADOW_DECAL_VERTEX_SIZE=SHADOW_DECAL_VERTEX_COUNT;
+int SHADOW_DECAL_INDEX_SIZE=SHADOW_DECAL_INDEX_COUNT;
+
+/* A batch of decals is written here and goes to the buffers in one lock when flushDecals draws it.
+	 Locking the buffers once per decal, twice for each device, cost more than drawing them: a late
+	 game puts a few hundred blobs and markers on the ground in a handful of batches.  The batch holds
+	 the same vertices and indices the per-decal locks wrote, at the same places relative to its start,
+	 so what is drawn does not change. */
+static SHADOW_DECAL_VERTEX decalStageVertices[SHADOW_DECAL_VERTEX_COUNT];
+static UnsignedShort decalStageIndices[SHADOW_DECAL_INDEX_COUNT];
+
+/** Copy one staged range into a streaming buffer and its Direct3D 11 twin.  While Direct3D 11
+		presents, Direct3D 9 draws nothing indexed, so its buffer is left alone and the twin is written
+		in place; a twin the device refused keeps the Direct3D 9 copy, as the per-decal locks did. */
+template <class D3D9_BUFFER>
+static Bool uploadDecalRange(D3D9_BUFFER *d3d9Buffer, DX11BufferTwinClass *twin, const void *source,
+	UnsignedInt byteOffset, UnsignedInt byteCount, UnsignedInt lockFlags)
+{
+	const Bool d3d9Draws = !Direct3D11_Present_Is_Enabled() || twin == NULL;
+	void *d3d9Memory = NULL;
+	if (d3d9Draws && d3d9Buffer->Lock(byteOffset, byteCount, &d3d9Memory, lockFlags) != D3D_OK)
+		return FALSE;	//a lost device refuses the lock
+	DX11BufferLockClass lock;
+	void *target = lock.Begin(twin, d3d9Memory, byteOffset, byteCount, lockFlags, d3d9Draws);
+	memcpy(target != NULL ? target : d3d9Memory, source, byteCount);
+	lock.End();
+	if (d3d9Draws)
+		d3d9Buffer->Unlock();
+	return TRUE;
+}
 
 
 class W3DShadowTexture;	//forward reference
@@ -772,6 +796,30 @@ void W3DProjectedShadowManager::flushDecals(W3DShadowTexture *texture, ShadowTyp
 	LPDIRECT3DDEVICE9 m_pDev=DX8Wrapper::_Get_D3D_Device();
 	if (!m_pDev)	return;	//no D3D Device to render
 
+	//The staged batch goes after what this frame already drew, or to the front of a fresh buffer when
+	//it does not fit.  renderShadows starts each frame past the end, so its first batch discards.
+	const Int numIndex = nShadowDecalPolysInBatch*3;
+	UnsignedInt vertexFlags = D3DLOCK_NOOVERWRITE;
+	if (nShadowDecalVertsInBuf > (SHADOW_DECAL_VERTEX_SIZE-nShadowDecalVertsInBatch))
+	{	nShadowDecalVertsInBuf = 0;
+		vertexFlags = D3DLOCK_DISCARD;
+	}
+	UnsignedInt indexFlags = D3DLOCK_NOOVERWRITE;
+	if (nShadowDecalIndicesInBuf > (SHADOW_DECAL_INDEX_SIZE-numIndex))
+	{	nShadowDecalIndicesInBuf = 0;
+		indexFlags = D3DLOCK_DISCARD;
+	}
+	nShadowDecalStartBatchVertex = nShadowDecalVertsInBuf;
+	nShadowDecalStartBatchIndex = nShadowDecalIndicesInBuf;
+	const Bool uploaded =
+		uploadDecalRange(shadowDecalVertexBufferD3D, shadowDecalVertexTwin, decalStageVertices,
+			nShadowDecalVertsInBuf*sizeof(SHADOW_DECAL_VERTEX), nShadowDecalVertsInBatch*sizeof(SHADOW_DECAL_VERTEX),
+			vertexFlags)
+		&& uploadDecalRange(shadowDecalIndexBufferD3D, shadowDecalIndexTwin, decalStageIndices,
+			nShadowDecalIndicesInBuf*sizeof(UnsignedShort), numIndex*sizeof(UnsignedShort), indexFlags);
+	nShadowDecalVertsInBuf += nShadowDecalVertsInBatch;
+	nShadowDecalIndicesInBuf += numIndex;
+
 	VertexMaterialClass *vmat=VertexMaterialClass::Get_Preset(VertexMaterialClass::PRELIT_DIFFUSE);
 	DX8Wrapper::Set_Material(vmat);
 	REF_PTR_RELEASE(vmat);
@@ -781,14 +829,11 @@ void W3DProjectedShadowManager::flushDecals(W3DShadowTexture *texture, ShadowTyp
 	switch (type)
 	{
 		case SHADOW_DECAL:
-			//The blob used to be multiplied onto the ground (dest * texture).  That is right on
-			//paper and lands on nothing here: with the correct blend, the correct texture and the
-			//correct states - all read back off the device - a blob decal never changed a pixel,
-			//so no tree, prop or unit blob shadow in this port was ever visible.  Alpha blending
-			//the same texture does show, so the blob is now drawn the way its own alpha channel
-			//describes it: the shadow colour, faded by the texture (DECAL_SHADOW_ALPHA, set on the
-			//decal's diffuse where it is created).
-			DX8Wrapper::Set_Shader(ShaderClass::_PresetAlphaShader);
+			//Multiplied onto the ground (dest * texture), as EA drew it: the blob's shape is in its
+			//colour, white where the ground is left alone.  A mod's blob need not fade its alpha at
+			//all - Contra's shadowih.dds is opaque edge to edge - so alpha blending it laid a dark
+			//square under every unit that named it.
+			DX8Wrapper::Set_Shader(ShaderClass::_PresetMultiplicativeShader);
 			break;
 		case SHADOW_ALPHA_DECAL:
 			DX8Wrapper::Set_Shader(ShaderClass::_PresetAlphaShader);
@@ -846,7 +891,7 @@ void W3DProjectedShadowManager::flushDecals(W3DShadowTexture *texture, ShadowTyp
 */
 //m_pDev->SetRenderState( D3DRS_ALPHABLENDENABLE, FALSE );	//useful to see bounds
 
-	if (DX8Wrapper::_Is_Triangle_Draw_Enabled())
+	if (uploaded && DX8Wrapper::_Is_Triangle_Draw_Enabled())
 	{
 		Debug_Statistics::Record_DX8_Polys_And_Vertices(nShadowDecalPolysInBatch,nShadowDecalVertsInBatch,ShaderClass::_PresetOpaqueShader);
 		if (!Direct3D11_Present_Is_Enabled())
@@ -871,8 +916,6 @@ void W3DProjectedShadowManager::flushDecals(W3DShadowTexture *texture, ShadowTyp
 	m_pDev->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
 	m_pDev->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_CURRENT);
 */
-	nShadowDecalStartBatchVertex=nShadowDecalVertsInBuf;
-	nShadowDecalStartBatchIndex=nShadowDecalIndicesInBuf;
 	nShadowDecalPolysInBatch=0;	//reset number of polys in texture batch
 	nShadowDecalVertsInBatch=0;
 }
@@ -1190,37 +1233,13 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow, Bool sunC
 		Int numVerts = vertsPerRow *vertsPerColumn;	//number of terrain vertices
 		Int numIndex=(endX - startX) * (endY-startY)*6;	//6 indices per terrain cell (2 triangles).
 
-		SHADOW_DECAL_VERTEX* pvVertices;
-		UnsignedShort *pvIndices;
-
-		DX11BufferLockClass vertexLock;
-		const UnsignedInt vertexStride = sizeof(SHADOW_DECAL_VERTEX);
-		UnsignedInt vertexOffset;
-		UnsignedInt vertexFlags;
-		if (nShadowDecalVertsInBuf > (SHADOW_DECAL_VERTEX_SIZE-numVerts))	//check if room for model verts
-		{	//flush the buffer by drawing the contents and re-locking again
+		//a batch that cannot take this decal is drawn first
+		if (nShadowDecalVertsInBatch > (SHADOW_DECAL_VERTEX_SIZE-numVerts) ||
+			nShadowDecalPolysInBatch*3 > (SHADOW_DECAL_INDEX_SIZE-numIndex))
 			flushDecals(shadow->m_shadowTexture[0], shadow->m_type);
-			vertexOffset=0;
-			vertexFlags=D3DLOCK_DISCARD;
-			if (shadowDecalVertexBufferD3D->Lock(0,numVerts*vertexStride,(void**)&pvVertices,D3DLOCK_DISCARD) != D3D_OK)
-				return;
 
-			nShadowDecalStartBatchVertex=0;
-			nShadowDecalPolysInBatch=0;	//reset number of polys in texture batch
-			nShadowDecalVertsInBatch=0;
-			nShadowDecalVertsInBuf=0;
-		}
-		else
-		{	vertexOffset=nShadowDecalVertsInBuf*vertexStride;
-			vertexFlags=D3DLOCK_NOOVERWRITE;
-			if (shadowDecalVertexBufferD3D->Lock(vertexOffset,numVerts*vertexStride, (void**)&pvVertices,D3DLOCK_NOOVERWRITE) != D3D_OK)
-				return;
-		}
-
-		void *vertexTarget = vertexLock.Begin(shadowDecalVertexTwin, pvVertices, vertexOffset,
-			numVerts*vertexStride, vertexFlags);
-		if (vertexTarget != NULL)
-			pvVertices = (SHADOW_DECAL_VERTEX *)vertexTarget;
+		SHADOW_DECAL_VERTEX* pvVertices = decalStageVertices + nShadowDecalVertsInBatch;
+		UnsignedShort *pvIndices = decalStageIndices + nShadowDecalPolysInBatch*3;
 
 		//code to deal with rotated shadows based on sun direction, fix this later.  For now shadow rotates with object rotation.
 		//shadow->m_shadowTexture[0]->getDecalUVAxis(&uVector,&vVector);
@@ -1276,40 +1295,6 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow, Bool sunC
 			}
 		}
 
-		vertexLock.End();
-		shadowDecalVertexBufferD3D->Unlock();
-
-		DX11BufferLockClass indexLock;
-		UnsignedInt indexOffset;
-		UnsignedInt indexFlags;
-		if (nShadowDecalIndicesInBuf > (SHADOW_DECAL_INDEX_SIZE-numIndex))	//check if room for model verts
-		{	//flush the buffer by drawing the contents and re-locking again
-			flushDecals(shadow->m_shadowTexture[0], shadow->m_type);
-
-			indexOffset=0;
-			indexFlags=D3DLOCK_DISCARD;
-			if (shadowDecalIndexBufferD3D->Lock(0,numIndex*sizeof(short),(void**)&pvIndices,D3DLOCK_DISCARD) != D3D_OK)
-				return;
-
-			nShadowDecalStartBatchIndex=0;
-			nShadowDecalPolysInBatch=0;	//reset number of polys in texture batch
-			nShadowDecalVertsInBatch=0;
-			nShadowDecalIndicesInBuf=0;
-		}
-		else
-		{	indexOffset=nShadowDecalIndicesInBuf*sizeof(short);
-			indexFlags=D3DLOCK_NOOVERWRITE;
-			if (shadowDecalIndexBufferD3D->Lock(indexOffset,numIndex*sizeof(short), (void**)&pvIndices,D3DLOCK_NOOVERWRITE) != D3D_OK)
-				return;
-		}
-
-		void *indexTarget = indexLock.Begin(shadowDecalIndexTwin, pvIndices, indexOffset,
-			numIndex*sizeof(short), indexFlags);
-		if (indexTarget != NULL)
-			pvIndices = (UnsignedShort *)indexTarget;
-
-		try {
-		if(pvIndices)
 		{	//fill each cell's vertex indices
 			Int rowStart;
 			for (j=startY,rowStart=0; j<endY; j++,rowStart+=vertsPerRow)
@@ -1337,22 +1322,10 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow, Bool sunC
 				}
 			}
 		}
-		IndexBufferExceptionFunc();
-		} catch(...) {
-			IndexBufferExceptionFunc();
-		}
-		indexLock.End();
-		shadowDecalIndexBufferD3D->Unlock();
 
 		Int numPolys = (endX - startX)*(endY - startY)*2;	//2 triangles per cell
 		nShadowDecalPolysInBatch += numPolys;
-
-		nShadowDecalVertsInBuf += numVerts;
 		nShadowDecalVertsInBatch += numVerts;
-//		nShadowDecalStartBatchVertex=nShadowDecalVertsInBuf;
-
-		nShadowDecalIndicesInBuf += numIndex;
-//		nShadowDecalStartBatchIndex=nShadowDecalIndicesInBuf;
 		return;
 	}
 
@@ -1397,37 +1370,13 @@ void W3DProjectedShadowManager::queueSimpleDecal(W3DProjectedShadow *shadow)
 		Int numVerts = 4;	//number of decal vertices
 		Int numIndex=6;	//(2 triangles).
 
-		SHADOW_DECAL_VERTEX* pvVertices;
-		UnsignedShort *pvIndices;
-
-		DX11BufferLockClass vertexLock;
-		const UnsignedInt vertexStride = sizeof(SHADOW_DECAL_VERTEX);
-		UnsignedInt vertexOffset;
-		UnsignedInt vertexFlags;
-		if (nShadowDecalVertsInBuf > (SHADOW_DECAL_VERTEX_SIZE-numVerts))	//check if room for model verts
-		{	//flush the buffer by drawing the contents and re-locking again
+		//see queueDecal
+		if (nShadowDecalVertsInBatch > (SHADOW_DECAL_VERTEX_SIZE-numVerts) ||
+			nShadowDecalPolysInBatch*3 > (SHADOW_DECAL_INDEX_SIZE-numIndex))
 			flushDecals(shadow->m_shadowTexture[0], shadow->m_type);
-			vertexOffset=0;
-			vertexFlags=D3DLOCK_DISCARD;
-			if (shadowDecalVertexBufferD3D->Lock(0,numVerts*vertexStride,(void**)&pvVertices,D3DLOCK_DISCARD) != D3D_OK)
-				return;
 
-			nShadowDecalStartBatchVertex=0;
-			nShadowDecalPolysInBatch=0;	//reset number of polys in texture batch
-			nShadowDecalVertsInBatch=0;
-			nShadowDecalVertsInBuf=0;
-		}
-		else
-		{	vertexOffset=nShadowDecalVertsInBuf*vertexStride;
-			vertexFlags=D3DLOCK_NOOVERWRITE;
-			if (shadowDecalVertexBufferD3D->Lock(vertexOffset,numVerts*vertexStride, (void**)&pvVertices,D3DLOCK_NOOVERWRITE) != D3D_OK)
-				return;
-		}
-
-		void *vertexTarget = vertexLock.Begin(shadowDecalVertexTwin, pvVertices, vertexOffset,
-			numVerts*vertexStride, vertexFlags);
-		if (vertexTarget != NULL)
-			pvVertices = (SHADOW_DECAL_VERTEX *)vertexTarget;
+		SHADOW_DECAL_VERTEX* pvVertices = decalStageVertices + nShadowDecalVertsInBatch;
+		UnsignedShort *pvIndices = decalStageIndices + nShadowDecalPolysInBatch*3;
 
 		objPos.Z=groundHeight;	//force decal to ground level
 		objPos += groundNormal * 1.0f;	//offset decal slightly above terrain to reduce z-fighting.
@@ -1472,63 +1421,16 @@ void W3DProjectedShadowManager::queueSimpleDecal(W3DProjectedShadow *shadow)
 			pvVertices++;
 		}
 
-		vertexLock.End();
-		shadowDecalVertexBufferD3D->Unlock();
-
-		DX11BufferLockClass indexLock;
-		UnsignedInt indexOffset;
-		UnsignedInt indexFlags;
-		if (nShadowDecalIndicesInBuf > (SHADOW_DECAL_INDEX_SIZE-numIndex))	//check if room for model verts
-		{	//flush the buffer by drawing the contents and re-locking again
-			flushDecals(shadow->m_shadowTexture[0],shadow->m_type);
-
-			indexOffset=0;
-			indexFlags=D3DLOCK_DISCARD;
-			if (shadowDecalIndexBufferD3D->Lock(0,numIndex*sizeof(short),(void**)&pvIndices,D3DLOCK_DISCARD) != D3D_OK)
-				return;
-
-			nShadowDecalStartBatchIndex=0;
-			nShadowDecalPolysInBatch=0;	//reset number of polys in texture batch
-			nShadowDecalVertsInBatch=0;
-			nShadowDecalIndicesInBuf=0;
-		}
-		else
-		{	indexOffset=nShadowDecalIndicesInBuf*sizeof(short);
-			indexFlags=D3DLOCK_NOOVERWRITE;
-			if (shadowDecalIndexBufferD3D->Lock(indexOffset,numIndex*sizeof(short), (void**)&pvIndices,D3DLOCK_NOOVERWRITE) != D3D_OK)
-				return;
-		}
-
-		void *indexTarget = indexLock.Begin(shadowDecalIndexTwin, pvIndices, indexOffset,
-			numIndex*sizeof(short), indexFlags);
-		if (indexTarget != NULL)
-			pvIndices = (UnsignedShort *)indexTarget;
-
-		try {
-		if(pvIndices)
-		{	pvIndices[0]=nShadowDecalVertsInBatch;
-			pvIndices[1]=nShadowDecalVertsInBatch+1;
-			pvIndices[2]=nShadowDecalVertsInBatch+2;
-			pvIndices[3]=nShadowDecalVertsInBatch;
-			pvIndices[4]=nShadowDecalVertsInBatch+2;
-			pvIndices[5]=nShadowDecalVertsInBatch+3;
-			pvIndices += 6;
-		}
-		IndexBufferExceptionFunc();
-		} catch(...) {
-			IndexBufferExceptionFunc();
-		}
-
-		indexLock.End();
-		shadowDecalIndexBufferD3D->Unlock();
+		pvIndices[0]=nShadowDecalVertsInBatch;
+		pvIndices[1]=nShadowDecalVertsInBatch+1;
+		pvIndices[2]=nShadowDecalVertsInBatch+2;
+		pvIndices[3]=nShadowDecalVertsInBatch;
+		pvIndices[4]=nShadowDecalVertsInBatch+2;
+		pvIndices[5]=nShadowDecalVertsInBatch+3;
 
 		Int numPolys = 2;	//2 triangles per decal
 		nShadowDecalPolysInBatch += numPolys;
-
-		nShadowDecalVertsInBuf += numVerts;
 		nShadowDecalVertsInBatch += numVerts;
-
-		nShadowDecalIndicesInBuf += numIndex;
 		return;
 	}
 
@@ -2128,10 +2030,6 @@ W3DProjectedShadow* W3DProjectedShadowManager::addShadow(RenderObjClass *robj, S
 
 	shadow->m_flags	= allowSunDirection;
 
-	//Alpha blended, so the plain white a decal is born with would draw a white blob.
-	if (shadowType == SHADOW_DECAL)
-		shadow->m_diffuse = (Int)(DECAL_SHADOW_ALPHA << 24);
-
 	shadow->init();
 
 	// add to our shadow list through the shadow next links, insert next to other shadows using same texture
@@ -2269,10 +2167,6 @@ W3DProjectedShadow* W3DProjectedShadowManager::createDecalShadow(Shadow::ShadowT
 	shadow->m_decalOffsetV= decalOffsetY;
 
 	shadow->m_flags	= 0;
-
-	//Alpha blended, so the plain white a decal is born with would draw a white blob.
-	if (shadowType == SHADOW_DECAL)
-		shadow->m_diffuse = (Int)(DECAL_SHADOW_ALPHA << 24);
 
 	shadow->init();
 

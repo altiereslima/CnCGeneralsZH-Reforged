@@ -93,7 +93,7 @@ ParticleUplinkCannonUpdateModuleData::ParticleUplinkCannonUpdateModuleData()
 	m_damageRadiusScalar						= 1.0f;
 	m_groundHitFX										= NULL;
 	m_beamLaunchFX									= NULL;
-	m_framesBetweenLaunchFXRefresh  = 30;
+	m_framesBetweenLaunchFXRefresh  = LOGICFRAMES_PER_SECOND;
 	m_totalDamagePulses							= 0;
 	m_damagePerSecond								= 0.0f;
 	m_damageType										= DAMAGE_LASER;
@@ -101,7 +101,7 @@ ParticleUplinkCannonUpdateModuleData::ParticleUplinkCannonUpdateModuleData()
 	m_revealRange										= 0.0f;
   m_manualDrivingSpeed						= 0.0f;
   m_manualFastDrivingSpeed				= 0.0f;
-  m_doubleClickToFastDriveDelay		= 500;
+  m_doubleClickToFastDriveDelay		= ConvertRetailFrames( 500 );
 	//Added by Sadullah Nader
 	//Initializations inserted
 	m_swathOfDeathAmplitude					= 0.0f;
@@ -1130,6 +1130,24 @@ Bool ParticleUplinkCannonUpdate::findOrbitBeamRadius( Real &radius ) const
 			return TRUE;
 	}
 	radius = 0.0f;
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Where the beam is burning while it can still be driven: born, not yet decaying, not following a
+	* script's waypoints, and past its first damage pulse, which is when m_currentTargetPosition is the
+	* spot on the ground rather than whatever the last shot left in it.  The radius is the one the next
+	* pulse will use. */
+//-------------------------------------------------------------------------------------------------
+Bool ParticleUplinkCannonUpdate::getBurningSpot( Coord3D *spot, Real *damageRadius ) const
+{
+	if( m_laserStatus != LASERSTATUS_BORN || m_scriptedWaypointMode || m_damagePulsesMade == 0 )
+		return FALSE;
+	Real beamRadius = 0.0f;
+	if( !findOrbitBeamRadius( beamRadius ) )
+		return FALSE;
+	*spot = m_currentTargetPosition;
+	*damageRadius = beamRadius * computeOrbitBeamWidthScalar( TheGameLogic->getFrame() ) * getParticleUplinkCannonUpdateModuleData()->m_damageRadiusScalar;
 	return TRUE;
 }
 

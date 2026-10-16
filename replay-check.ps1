@@ -21,7 +21,7 @@
 
 .EXAMPLE
   .\replay-check.ps1
-  .\replay-check.ps1 -Seeds 0,1,2,3 -MaxFrames 6000
+  .\replay-check.ps1 -Seeds 0,1,2,3 -MaxFrames 12000
     Four seeds instead of two, shorter matches. Each seed costs two runs.
 #>
 param(
@@ -31,9 +31,10 @@ param(
 	[int] $Players = 2,
 	# easy | medium | brutal
 	[string] $Difficulty = "brutal",
-	# how long each match runs. Long enough to build and fight; a divergence in movement code needs
-	# units on the move, and the first thousand frames are two workers walking to a supply dock
-	[int] $MaxFrames = 12000,
+	# how long each match runs, in logic frames at 60 a second (24000 is 6 min 40 s of game time).
+	# Long enough to build and fight; a divergence in movement code needs units on the move, and the
+	# first two thousand frames are two workers walking to a supply dock
+	[int] $MaxFrames = 24000,
 	# playable cells a side of the generated map; 0 lets the generator size it for the player count.
 	# 128 used to be the default, below even the generator's small size for two players: seed 1 put
 	# the two starts 124 units apart, neither AI could build, and the match stayed idle

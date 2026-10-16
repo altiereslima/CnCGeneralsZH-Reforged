@@ -439,6 +439,11 @@ static void Run_Parallel(int count,int granularity,void (*work)(int,void*),void*
 	}
 }
 
+void SortingRendererClass::Parallel_For(int count,int granularity,void (*work)(int,void*),void* context)
+{
+	Run_Parallel(count,granularity,work,context);
+}
+
 // nodes a thread claims at once in the depth pass; a particle node is a few hundred quads
 static const int NODES_PER_CLAIM=4;
 // entries one job copies into a batch at once
@@ -597,7 +602,18 @@ static void Copy_Batch_Vertices(int chunk,void* context)
 		const VertexFormatXYZNDUV2* src_verts=overlapping_node_vertices[entry.idx];
 		VertexFormatXYZNDUV2* dest_verts=job->vertices+job->offsets[e].vertex;
 		if (Entry_Is_Quad(entry)) {
-			memcpy(dest_verts,src_verts+entry.tri.i,sizeof(VertexFormatXYZNDUV2)*4);
+			const VertexFormatXYZNDUV2* quad=src_verts+entry.tri.i;
+			memcpy(dest_verts,quad,sizeof(VertexFormatXYZNDUV2)*4);
+			// The billboard's half width, the longest its soft fade may take (SOFT_PARTICLE_SAMPLING):
+			// the first two corners are one side apart.  A billboard reads one coordinate set.
+			const float dx=quad[1].x-quad[0].x;
+			const float dy=quad[1].y-quad[0].y;
+			const float dz=quad[1].z-quad[0].z;
+			const float half_width=0.5f*sqrtf(dx*dx+dy*dy+dz*dz);
+			dest_verts[0].u2=half_width;
+			dest_verts[1].u2=half_width;
+			dest_verts[2].u2=half_width;
+			dest_verts[3].u2=half_width;
 		}
 		else {
 			dest_verts[0]=src_verts[entry.tri.i];

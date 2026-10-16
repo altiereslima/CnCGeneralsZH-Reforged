@@ -55,7 +55,6 @@
 #include "GameLogic/ExperienceTracker.h"
 #include "GameLogic/GameLogic.h"		// for logic frame count
 #include "GameLogic/Object.h"
-#include "GameLogic/Module/OCLUpdate.h"
 #include "GameLogic/Module/SpecialPowerModule.h"
 #include "Common/SpecialPower.h"
 		// countdown text over a building
@@ -65,9 +64,6 @@
 #include "GameLogic/Module/ContainModule.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
 #include "GameLogic/Module/ProductionUpdate.h"
-#include "GameLogic/Module/AutoDepositUpdate.h"
-#include "GameLogic/Module/HackInternetAIUpdate.h"
-#include "GameLogic/Module/SupplyTruckAIUpdate.h"
 #include "GameLogic/Module/SupplyWarehouseDockUpdate.h"
 #include "Common/Upgrade.h"
 #include "GameLogic/Module/StealthUpdate.h"
@@ -227,7 +223,10 @@ DrawableLocoInfo::DrawableLocoInfo()
   m_pitchModulator = 0.0f;
 	m_leanPitch[0] = m_leanPitch[1] = 0.0f;
 	m_leanRoll[0] = m_leanRoll[1] = 0.0f;
-	m_leanFrame = 0;
+	m_airFrame = 0;
+	m_airPitch = 0.0f;
+	m_airRoll = 0.0f;
+	m_airYaw = 0.0f;
 	for (Int i = 0; i < 3; ++i)
 		m_groundLeanStages[0][i] = m_groundLeanStages[1][i] = 0.0f;
 	m_groundFrame = 0;
@@ -617,6 +616,8 @@ Drawable::Drawable( const ThingTemplate *thingTemplate, DrawableStatus statusBit
 		m_modules[i] = NULL;
 
 	m_stealthLook = STEALTHLOOK_NONE;
+	m_stealthDrawnLook = STEALTHLOOK_NONE;
+	m_stealthFade = 0.0f;
 
 	m_flashCount = 0;
 
@@ -1372,6 +1373,8 @@ void Drawable::imitateStealthLook( Drawable& otherDraw )
   m_hidden = otherDraw.isDrawableEffectivelyHidden();
   m_hiddenByStealth = otherDraw.isDrawableEffectivelyHidden();
   m_stealthLook = otherDraw.getStealthLook();
+  m_stealthDrawnLook = otherDraw.getStealthDrawnLook();
+  m_stealthFade = otherDraw.getStealthFade();
   m_secondMaterialPassOpacity = otherDraw.getSecondMaterialPassOpacity();
 
 }
@@ -1480,14 +1483,14 @@ void Drawable::updateDrawable( void )
 		{
 			if (m_colorTintEnvelope == NULL)
 				m_colorTintEnvelope = newInstance(TintEnvelope);
-			m_colorTintEnvelope->play( &DARK_GRAY_DISABLED_COLOR, 30, 30, SUSTAIN_INDEFINITELY);
+			m_colorTintEnvelope->play( &DARK_GRAY_DISABLED_COLOR, ConvertRetailFrames(30), ConvertRetailFrames(30), SUSTAIN_INDEFINITELY);
 		}
 		else if( testTintStatus(TINT_STATUS_GAINING_SUBDUAL_DAMAGE) )
 		{
 			// Disabled has precendence, so it goes first
 			if (m_colorTintEnvelope == NULL)
 				m_colorTintEnvelope = newInstance(TintEnvelope);
-			m_colorTintEnvelope->play( &SUBDUAL_DAMAGE_COLOR, 150, 150, SUSTAIN_INDEFINITELY);
+			m_colorTintEnvelope->play( &SUBDUAL_DAMAGE_COLOR, ConvertRetailFrames(150), ConvertRetailFrames(150), SUSTAIN_INDEFINITELY);
 		}
 		else if( testTintStatus(TINT_STATUS_FRENZY) )
 		{
@@ -1495,7 +1498,7 @@ void Drawable::updateDrawable( void )
 			if (m_colorTintEnvelope == NULL)
 				m_colorTintEnvelope = newInstance(TintEnvelope);
 
-      m_colorTintEnvelope->play( isKindOf( KINDOF_INFANTRY) ? &FRENZY_COLOR_INFANTRY:&FRENZY_COLOR, 30, 30, SUSTAIN_INDEFINITELY);
+      m_colorTintEnvelope->play( isKindOf( KINDOF_INFANTRY) ? &FRENZY_COLOR_INFANTRY:&FRENZY_COLOR, ConvertRetailFrames(30), ConvertRetailFrames(30), SUSTAIN_INDEFINITELY);
 		
     }
 //		else if ( testTintStatus( TINT_STATUS_POISONED) )
@@ -1586,7 +1589,7 @@ void Drawable::flashAsSelected( const RGBColor *color ) ///< drawable takes care
 
 	if ( color )
 	{
-		m_selectionFlashEnvelope->play( color, 0, 4 );
+		m_selectionFlashEnvelope->play( color, 0, DEF_DECAY_FRAMES );
 	}
 	else
 	{
@@ -1601,7 +1604,7 @@ void Drawable::flashAsSelected( const RGBColor *color ) ///< drawable takes care
 
 			Real saturation = TheGlobalData->m_selectionFlashSaturationFactor;
 			saturateRGB( tempColor, saturation );
-			m_selectionFlashEnvelope->play( &tempColor, 0, 4 );
+			m_selectionFlashEnvelope->play( &tempColor, 0, DEF_DECAY_FRAMES );
 
 		}
 	}
@@ -1699,7 +1702,12 @@ void Drawable::calcPhysicsXformThrust( const Locomotor *locomotor, PhysicsXformI
 	// we deal with just adjusting pitch, yaw, and roll just a little bit
 	//
 
-	if( WOBBLE_RATE )
+	// stepped on the retail clock, every second logic frame, which the rates above were written for
+	UnsignedInt now = TheGameLogic->getFrame() / LOGICFRAMES_PER_RETAIL_FRAME;
+	Bool step = now != m_locoInfo->m_airFrame;
+	m_locoInfo->m_airFrame = now;
+
+	if( WOBBLE_RATE && step )
 	{
 
 		if( m_locoInfo->m_wobble >= 1.0f )
@@ -1746,15 +1754,21 @@ void Drawable::calcPhysicsXformThrust( const Locomotor *locomotor, PhysicsXformI
 
 		}  // end else
 
+	}  // end if, wobble exists
+
+	if( WOBBLE_RATE )
+	{
+
 		info.m_totalPitch = m_locoInfo->m_pitch;
 		info.m_totalYaw = m_locoInfo->m_yaw;
 
-	}  // end if, wobble exists
+	}  // end if
 
 	if( THRUST_ROLL )
 	{
 
-		m_locoInfo->m_roll += THRUST_ROLL;
+		if( step )
+			m_locoInfo->m_roll += THRUST_ROLL;
 		info.m_totalRoll = m_locoInfo->m_roll;
 
 	}  // end if
@@ -1802,6 +1816,20 @@ void Drawable::calcPhysicsXformHoverOrWings( const Locomotor *locomotor, Physics
 	const Coord3D* accel = physics->getAcceleration();
 	const Coord3D* vel = physics->getVelocity();
 
+	/* Stepped on the retail clock, every second logic frame, so the springs, the locomotor's stiffness,
+		 damping and correction rates and the lean's ease frames keep the timing they were tuned at; the
+		 logic frame in between draws the last result, as calcPhysicsXformGround does. */
+	UnsignedInt now = TheGameLogic->getFrame() / LOGICFRAMES_PER_RETAIL_FRAME;
+	if (now == m_locoInfo->m_airFrame)
+	{
+		info.m_totalPitch = m_locoInfo->m_airPitch;
+		info.m_totalRoll = m_locoInfo->m_airRoll;
+		info.m_totalYaw = m_locoInfo->m_airYaw;
+		info.m_totalZ = 0.0f;
+		return;
+	}
+	m_locoInfo->m_airFrame = now;
+
 	m_locoInfo->m_pitchRate += ((-PITCH_STIFFNESS * m_locoInfo->m_pitch) + (-PITCH_DAMPING * m_locoInfo->m_pitchRate));		// spring/damper
 	m_locoInfo->m_rollRate += ((-ROLL_STIFFNESS * m_locoInfo->m_roll) + (-ROLL_DAMPING * m_locoInfo->m_rollRate));		// spring/damper
 
@@ -1824,7 +1852,7 @@ void Drawable::calcPhysicsXformHoverOrWings( const Locomotor *locomotor, Physics
 		const Real LEAN_AT_FULL_ACCEL = 0.2f;	// radians, at the locomotor's own Acceleration
 		const Real LEAN_AT_FULL_SPEED = 0.12f;	// radians, held at the locomotor's own Speed
 		const Real SOFT_LEAN = 0.27f;					// the lean flattens out towards this, about 15 degrees
-		const Real LEAN_EASE_FRAMES = 5.0f;		// each of the two smoothing stages, in logic frames
+		const Real LEAN_EASE_FRAMES = 5.0f;		// each of the two smoothing stages, in retail frames
 		const Real MAX_LEAN = 0.4f;
 		if (accelPitchLimit == 0.0f)
 			accelPitchLimit = MAX_LEAN;
@@ -1848,18 +1876,12 @@ void Drawable::calcPhysicsXformHoverOrWings( const Locomotor *locomotor, Physics
 			rollTarget = SOFT_LEAN * tanh((lateralAccel * accelScale + lateralVel * speedScale) / SOFT_LEAN);
 		}
 
-		/* The acceleration jumps from one logic frame to the next, and the spring below runs once a
-			 drawn frame, which at 120 frames a second is fast enough to copy every jump. Two smoothing
-			 stages stepped once a logic frame ease the lean in and out over about half a second. */
-		UnsignedInt now = TheGameLogic->getFrame();
-		if (now != m_locoInfo->m_leanFrame)
-		{
-			m_locoInfo->m_leanFrame = now;
-			m_locoInfo->m_leanPitch[0] += (pitchTarget - m_locoInfo->m_leanPitch[0]) / LEAN_EASE_FRAMES;
-			m_locoInfo->m_leanPitch[1] += (m_locoInfo->m_leanPitch[0] - m_locoInfo->m_leanPitch[1]) / LEAN_EASE_FRAMES;
-			m_locoInfo->m_leanRoll[0] += (rollTarget - m_locoInfo->m_leanRoll[0]) / LEAN_EASE_FRAMES;
-			m_locoInfo->m_leanRoll[1] += (m_locoInfo->m_leanRoll[0] - m_locoInfo->m_leanRoll[1]) / LEAN_EASE_FRAMES;
-		}
+		/* The acceleration jumps from one logic frame to the next, and the spring below would copy
+			 every jump. Two smoothing stages ease the lean in and out over about half a second. */
+		m_locoInfo->m_leanPitch[0] += (pitchTarget - m_locoInfo->m_leanPitch[0]) / LEAN_EASE_FRAMES;
+		m_locoInfo->m_leanPitch[1] += (m_locoInfo->m_leanPitch[0] - m_locoInfo->m_leanPitch[1]) / LEAN_EASE_FRAMES;
+		m_locoInfo->m_leanRoll[0] += (rollTarget - m_locoInfo->m_leanRoll[0]) / LEAN_EASE_FRAMES;
+		m_locoInfo->m_leanRoll[1] += (m_locoInfo->m_leanRoll[0] - m_locoInfo->m_leanRoll[1]) / LEAN_EASE_FRAMES;
 		pitchTarget = m_locoInfo->m_leanPitch[1];
 		rollTarget = m_locoInfo->m_leanRoll[1];
 	}
@@ -1888,18 +1910,22 @@ void Drawable::calcPhysicsXformHoverOrWings( const Locomotor *locomotor, Physics
 			}
 		}
 
-		// cause the chassis to pitch & roll in reaction to current speed
-		Real forwardVel = dir->x * vel->x + dir->y * vel->y;
+		// cause the chassis to pitch & roll in reaction to current speed; the coefficients were tuned
+		// against speeds per retail frame and accelerations per retail frame squared, and physics
+		// keeps them per logic frame
+		const Real RETAIL_VEL = (Real)LOGICFRAMES_PER_RETAIL_FRAME;
+		const Real RETAIL_ACCEL = RETAIL_VEL * RETAIL_VEL;
+		Real forwardVel = (dir->x * vel->x + dir->y * vel->y) * RETAIL_VEL;
 		m_locoInfo->m_pitch += -(FORWARD_VEL_COEFF * forwardVel);
 
-		Real lateralVel = -dir->y * vel->x + dir->x * vel->y;
+		Real lateralVel = (-dir->y * vel->x + dir->x * vel->y) * RETAIL_VEL;
 		m_locoInfo->m_roll += -(LATERAL_VEL_COEFF * lateralVel);
 
 		// cause the chassis to pitch & roll in reaction to acceleration/deceleration
-		Real forwardAccel = dir->x * accel->x + dir->y * accel->y;
+		Real forwardAccel = (dir->x * accel->x + dir->y * accel->y) * RETAIL_ACCEL;
 		m_locoInfo->m_accelerationPitchRate += -(FORWARD_ACCEL_COEFF * forwardAccel);
 
-		Real lateralAccel = -dir->y * accel->x + dir->x * accel->y;
+		Real lateralAccel = (-dir->y * accel->x + dir->x * accel->y) * RETAIL_ACCEL;
 		m_locoInfo->m_accelerationRollRate += -(LATERAL_ACCEL_COEFF * lateralAccel);
 	}
 
@@ -1925,14 +1951,16 @@ void Drawable::calcPhysicsXformHoverOrWings( const Locomotor *locomotor, Physics
   info.m_totalYaw = RUDDER_CORRECTION_DEGREE * sin( m_locoInfo->m_yawModulator += RUDDER_CORRECTION_RATE );
   info.m_totalPitch += ELEVATOR_CORRECTION_DEGREE * cos( m_locoInfo->m_pitchModulator += ELEVATOR_CORRECTION_RATE );
 
-
+	m_locoInfo->m_airPitch = info.m_totalPitch;
+	m_locoInfo->m_airRoll = info.m_totalRoll;
+	m_locoInfo->m_airYaw = info.m_totalYaw;
 	info.m_totalZ = 0.0f;
 }
 
 //-------------------------------------------------------------------------------------------------
 /** Treads, wheels and motorcycles. EA stepped their springs once a drawn frame, which was once a
 	* logic frame at the 30 pictures a second the game was tuned at; at 120 the chassis bounced and
-	* settled four times as fast. They are stepped once a logic frame here, catching up when a slow
+	* settled four times as fast. They are stepped once a retail frame here, catching up when a slow
 	* picture let more than one go by, and the pictures in between show the last result: the unit's
 	* position does not move between logic frames either.
 	*
@@ -1951,11 +1979,15 @@ void Drawable::calcPhysicsXformGround( const Locomotor *locomotor, PhysicsXformI
 		m_locoInfo = newInstance(DrawableLocoInfo);
 
 	const UnsignedInt MAX_CATCH_UP_FRAMES = 4;	// more than this unseen and there is nothing to measure against
-	const Real LEAN_EASE_FRAMES = 3.0f;					// each of the three smoothing stages, in logic frames
+	const Real LEAN_EASE_FRAMES = 3.0f;					// each of the three smoothing stages, in retail frames
 	const Real START_GAIN = 11.0f;							// a one frame start from rest to top speed peaks at tanh(1.2) of the limit
 	const Real DEFAULT_LEAN_LIMIT = 0.07f;			// 4 degrees, for a locomotor that reacts but names no limit, like the Humvee's
 
-	UnsignedInt now = TheGameLogic->getFrame();
+	/* Stepped on the retail clock, every second logic frame, so the springs, the locomotor's
+		 stiffness and damping and the ease frames below keep the timing they were tuned at.  Speeds are
+		 per logic frame and only ever divided by the locomotor's own top speed, which cancels; the turn
+		 rate does not, so it is taken per retail frame. */
+	UnsignedInt now = TheGameLogic->getFrame() / LOGICFRAMES_PER_RETAIL_FRAME;
 	UnsignedInt steps = now - m_locoInfo->m_groundFrame;
 	if (steps != 0)
 	{
@@ -1989,7 +2021,7 @@ void Drawable::calcPhysicsXformGround( const Locomotor *locomotor, PhysicsXformI
 		if (locomotor->getForwardAccelCoef() != 0.0f || locomotor->getLateralAccelCoef() != 0.0f)
 		{
 			Real maxSpeed = locomotor->getMaxSpeedForCondition(bdt);
-			Real maxLateral = maxSpeed * locomotor->getMaxTurnRate(bdt);
+			Real maxLateral = maxSpeed * locomotor->getMaxTurnRate(bdt) * LOGICFRAMES_PER_RETAIL_FRAME;
 			pitchIn = maxSpeed > 0.0f ? -START_GAIN * forwardAccel / maxSpeed : 0.0f;
 			rollIn = maxLateral > 0.0f ? -lateralAccel / maxLateral : 0.0f;
 		}
@@ -2114,7 +2146,8 @@ void Drawable::calcPhysicsXformTreads( const Locomotor *locomotor, PhysicsXformI
 				amount = 1.0f;
 
 			// rough vibrations proportional to speed when we drive over something
-			Real rough = (vel->x*vel->x + vel->y*vel->y) * OVERLAP_ROUGH_VIBRATION_FACTOR;
+			// the speed per retail frame, which the factor was tuned for
+			Real rough = (vel->x*vel->x + vel->y*vel->y) * sqr((Real)LOGICFRAMES_PER_RETAIL_FRAME) * OVERLAP_ROUGH_VIBRATION_FACTOR;
 			if (rough > MAX_ROUGH_VIBRATION)
 				rough = MAX_ROUGH_VIBRATION;
 			
@@ -2286,7 +2319,7 @@ void Drawable::calcPhysicsXformWheels( const Locomotor *locomotor, PhysicsXformI
 
 	const Real ACCEL_PITCH_LIMIT = locomotor->getAccelPitchLimit();
 	const Real DECEL_PITCH_LIMIT = locomotor->getDecelPitchLimit();
-	const Real BOUNCE_ANGLE_KICK = locomotor->getBounceKick();
+	const Real BOUNCE_ANGLE_KICK = locomotor->getBounceKick() * LOGICFRAMES_PER_RETAIL_FRAME;	// parsed per logic frame, stepped per retail frame
 	const Real PITCH_STIFFNESS = locomotor->getPitchStiffness();
 	const Real ROLL_STIFFNESS =  locomotor->getRollStiffness();
 	const Real PITCH_DAMPING = locomotor->getPitchDamping();
@@ -2568,7 +2601,7 @@ void Drawable::calcPhysicsXformMotorcycle( const Locomotor *locomotor, PhysicsXf
 
 	const Real ACCEL_PITCH_LIMIT = locomotor->getAccelPitchLimit();
 	const Real DECEL_PITCH_LIMIT = locomotor->getDecelPitchLimit();
-	const Real BOUNCE_ANGLE_KICK = locomotor->getBounceKick();
+	const Real BOUNCE_ANGLE_KICK = locomotor->getBounceKick() * LOGICFRAMES_PER_RETAIL_FRAME;	// parsed per logic frame, stepped per retail frame
 	const Real PITCH_STIFFNESS = locomotor->getPitchStiffness();
 	const Real ROLL_STIFFNESS =  locomotor->getRollStiffness();
 	const Real PITCH_DAMPING = locomotor->getPitchDamping();
@@ -2885,6 +2918,8 @@ void Drawable::setStealthLook(StealthLookType look)
 {
 	if (look != m_stealthLook)
 	{
+		const StealthLookType previous = m_stealthLook;
+		const Bool wasHidden = m_hiddenByStealth;
 
 		m_stealthOpacity = 1.0f;	//assume not transparent
 		switch (look)
@@ -2953,11 +2988,36 @@ void Drawable::setStealthLook(StealthLookType look)
 				break;
 
 			case STEALTHLOOK_INVISIBLE:
-				m_hiddenByStealth = true;
 				m_secondMaterialPassOpacity = 0.0f;
+				// snap hide when the unit has never been drawn stealthed: an enemy spawning cloaked
+				// must not flash a frame of its body.  Classic and Direct3D 9 have no cloak shader
+				// to fade with, so they hide at once as they did in 2003.  The D3D11 path keeps
+				// drawing while draw() eases the fade out.
+				{
+					const Bool shaderFade = TheGlobalData
+						&& TheGlobalData->m_direct3D11
+						&& !TheGlobalData->m_classicGraphics;
+					if( ( previous == STEALTHLOOK_NONE && m_stealthFade <= 0.0f ) || !shaderFade )
+					{
+						m_hiddenByStealth = true;
+						m_stealthDrawnLook = STEALTHLOOK_INVISIBLE;
+						m_stealthFade = 0.0f;
+					}
+					else
+						m_hiddenByStealth = false;
+				}
 				break;
 		}
+
 		m_stealthLook = look;
+
+		if( look != STEALTHLOOK_INVISIBLE && look != STEALTHLOOK_NONE && look != STEALTHLOOK_DISGUISED_ENEMY )
+		{
+			m_stealthDrawnLook = look;
+			if( wasHidden )
+				m_stealthFade = 0.0f;
+		}
+
 		updateHiddenStatus();
 	}
 }
@@ -3005,6 +3065,32 @@ void Drawable::draw( View *view )
 		  m_secondMaterialPassOpacity = 0.0f;
   }
 
+	{
+		const Bool wantEffect = ( m_stealthLook == STEALTHLOOK_VISIBLE_FRIENDLY
+			|| m_stealthLook == STEALTHLOOK_VISIBLE_FRIENDLY_DETECTED
+			|| m_stealthLook == STEALTHLOOK_VISIBLE_DETECTED );
+		if( wantEffect )
+		{
+			m_stealthDrawnLook = m_stealthLook;
+			m_stealthFade = 1.0f - ( 1.0f - m_stealthFade ) * fadeScalar;
+			if( m_stealthFade > 0.999f )
+				m_stealthFade = 1.0f;
+		}
+		else
+		{
+			m_stealthFade *= fadeScalar;
+			if( m_stealthFade <= VERY_TRANSPARENT_MATERIAL_PASS_OPACITY )
+			{
+				m_stealthFade = 0.0f;
+				m_stealthDrawnLook = m_stealthLook;
+				if( m_stealthLook == STEALTHLOOK_INVISIBLE && !m_hiddenByStealth )
+				{
+					m_hiddenByStealth = true;
+					updateHiddenStatus();
+				}
+			}
+		}
+	}
 
 	if (m_hidden || m_hiddenByStealth || getFullyObscuredByShroud())
 		return;	// my, that was easy
@@ -3175,8 +3261,10 @@ void Drawable::drawIconUI( void )
 	/* -cinema takes the interface off, and these are interface: the health bar, the rank chevrons a
 		 promotion puts up, the healing cross, the ammo pips, the capture clock and the captions.  The
 		 gate is here rather than on TheGameLogic's own m_drawIconUI because that one is logic state,
-		 saved with the game and carried in the network snapshot; footage must not touch it. */
-	if( CinemaDirector_hidesHud() )
+		 saved with the game and carried in the network snapshot; footage must not touch it.
+		 -directorrecord keeps the health bar alone: a cup film has to show who is losing a fight. */
+	const Bool barOnly = CinemaDirector_hidesHud();
+	if( barOnly && !TheGlobalData->m_directorRecord )
 		return;
 
 	if( TheGameLogic->getDrawIconUI() && (TheScriptEngine->getFade()==ScriptEngine::FADE_NONE) )
@@ -3193,8 +3281,10 @@ void Drawable::drawIconUI( void )
 			return;
 
 		//Icons that can be drawn on dead things
-		drawHealthBar( healthBarRegion );                                        
-		drawEmoticon( healthBarRegion );                                         
+		drawHealthBar( healthBarRegion );
+		if( barOnly )
+			return;
+		drawEmoticon( healthBarRegion );                                       
 
 		drawCaption( healthBarRegion );
 		drawConstructPercent( healthBarRegion );
@@ -4645,29 +4735,21 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 			outlineColor = GameMakeColor( 0, healthRatio * 128.0f, 128, 255 );//dark blue to dark cyan
 
 		}
-		else if( obj->getControllingPlayer() != NULL &&
+		else if( TheGlobalData->m_healthBarColors == 1 &&
+						 obj->getControllingPlayer() != NULL &&
 						 obj->getControllingPlayer()->getPlayerColor() != 0 )
 		{
-			//
-			// The bar wears its owner's colour. Red-to-green said how hurt a thing was, which the
-			// length of the bar was already saying, and said nothing at all about whose it was -
-			// the one question a glance across a busy fight actually needs answered. Player colour
-			// is what the minimap, the selection rings and the unit tint all use, so a green bar
-			// means the same thing everywhere on screen.
-			//
-			// The outline stays a darkened version of the same colour, so a light player colour
-			// still reads against light terrain. A building going up fills its bar in the same
-			// colour as it builds - whose site it is answers a glance across the map, and the
-			// seconds written over it (drawConstructPercent) already say it is not finished. The
-			// disabled blue above keeps its own colour: that is a state nothing else signals.
-			//
+			// HealthBarColors 1: the bar wears its owner's colour, the one the minimap and the selection
+			// rings use, and the bar's length alone says how hurt it is.  The outline is the same colour
+			// darkened, so a light player colour still reads against light ground.  Civilians, crates
+			// and anything else with no colour to borrow keep the ramp below.
 			UnsignedByte r, g, b, a;
 			GameGetColorComponents( clientPlayerColor( obj->getControllingPlayer() ), &r, &g, &b, &a );
 
 			color = GameMakeColor( r, g, b, 255 );				// the stored colour's alpha is not ours to trust
 			outlineColor = GameDarkenColor( color, 60 );
 		}
-		else //red to green: civilians, crates, anything with no owning player to borrow a colour from
+		else //retail's ramp for every owner: green at full health, through yellow, to red
 		{
 
 			RGBColor inColor, outColor;
@@ -4803,8 +4885,8 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		}
 
 		//
-		// A superweapon charging, or a building on a timed payout (the supply drop zone), gets the
-		// same white bar the production queue uses - stacked above it rather than on top of it,
+		// A superweapon charging gets the same white bar the production queue uses - stacked above
+		// it rather than on top of it,
 		// which is what a Chinese nuclear silo researching an upgrade while its missile charges used
 		// to draw: two bars and two countdowns in the same row of pixels. Only powers that carry a public timer count -
 		// that is the flag the superweapon list in the corner goes by.
@@ -4859,72 +4941,6 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 				}
 			}
 
-			if( chargePct < 0.0f )
-			{
-				static const NameKeyType key_OCLUpdate = NAMEKEY( "OCLUpdate" );
-				OCLUpdate *ocl = (OCLUpdate*)obj->findUpdateModule( key_OCLUpdate );
-				if( ocl != NULL )
-				{
-					//
-					// Both OCLUpdate accessors subtract frame numbers as UnsignedInt, so once the
-					// creation frame is behind us they wrap to something enormous rather than going
-					// negative. Clamping the bar hides that; the seconds would print it, so take the
-					// frame count only while the raw percentage is still inside its own range.
-					//
-					const Real rawPct = ocl->getCountdownPercent();
-
-					chargePct = rawPct * 100.0f;
-					if( chargePct < 0.0f ) chargePct = 0.0f;
-					if( chargePct > 100.0f ) chargePct = 100.0f;
-
-					if( rawPct >= 0.0f && rawPct < 1.0f )
-						chargeFramesLeft = ocl->getRemainingFrames();
-				}
-			}
-
-			//
-			// Nothing charging?  Then show what the thing is doing for a living instead: a worker
-			// fetching or handing over a box of supplies, a hacker waiting out the delay before the
-			// next payout, a black market or oil derrick on its deposit clock.  All three of those
-			// are money arriving on a timer that the player had no way at all to see - the cash just
-			// appeared - and the worker one doubles as "yes, it really is working".
-			//
-			// No seconds are written over these: chargeFramesLeft is left at zero on purpose, the
-			// bar is the whole message.
-			//
-			if( chargePct < 0.0f )
-			{
-				Real workPct = -1.0f;
-
-				AIUpdateInterface *ai = obj->getAIUpdateInterface();
-				if( ai != NULL )
-				{
-					SupplyTruckAIInterface *supply = ai->getSupplyTruckAIInterface();
-					if( supply != NULL )
-						workPct = supply->getDockActionProgress();
-
-					if( workPct < 0.0f )
-					{
-						HackInternetAIInterface *hack = ai->getHackInternetAIInterface();
-						if( hack != NULL )
-							workPct = hack->getHackProgress();
-					}
-				}
-
-				if( workPct < 0.0f )
-				{
-					static const NameKeyType key_autoDeposit = NAMEKEY( "AutoDepositUpdate" );
-					AutoDepositUpdate *deposit = (AutoDepositUpdate*)obj->findUpdateModule( key_autoDeposit );
-					if( deposit != NULL )
-						workPct = deposit->getDepositProgress();
-				}
-
-				if( workPct > 1.0f )
-					workPct = 1.0f;
-				if( workPct >= 0.0f )
-					chargePct = workPct * 100.0f;
-			}
-
 			if( chargePct >= 0.0f )
 			{
 				Int chargeY = stackY - healthBoxHeight;
@@ -4934,18 +4950,10 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 																	(healthBoxWidth - 2) * chargePct * 0.01f, healthBoxHeight - 2,
 																	GameMakeColor( 255, 255, 255, 255 ) );
 
-				//
-				// ... and how long that is, the same way a production bar says it. A bar filling up
-				// tells you something is coming; it does not tell you whether to wait for it. The
-				// supply drop zone is the one this matters most for - its whole job is a payout on
-				// a clock.
-				//
-				if( chargeFramesLeft > 0 )
-					drawOwnCountdown( m_chargeTimeDisplayString,
-														ControlBar_secondsFromFrames( INT_TO_REAL( chargeFramesLeft ) ),
-														healthBarRegion->lo.x, chargeY );
-				else
-					freeOwnCountdown( m_chargeTimeDisplayString );
+				// ... and how long that is, the same way a production bar says it
+				drawOwnCountdown( m_chargeTimeDisplayString,
+													ControlBar_secondsFromFrames( INT_TO_REAL( chargeFramesLeft ) ),
+													healthBarRegion->lo.x, chargeY );
 			}
 			else
 				freeOwnCountdown( m_chargeTimeDisplayString );
@@ -5802,9 +5810,8 @@ Bool Drawable::isSelectable( void ) const
 //-------------------------------------------------------------------------------------------------
 Bool Drawable::isMassSelectable( void ) const
 {
-	// Classic is the game as shipped, where a structure was only ever selected on its own
-	return getObject() && getObject()->isMassSelectable()
-				 && !( TheGlobalData->isClassicUI() && getObject()->isKindOf( KINDOF_STRUCTURE ) );
+	// structures group too; SelectionXlat keeps them out of a selection of units
+	return getObject() && getObject()->isMassSelectable();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -6364,6 +6371,8 @@ void Drawable::xfer( Xfer *xfer )
 		// when it changes.  So in the next stealth update, it will be set to 
 		// it's correct value, and the drawable updated (hide shadows and such).  jba.
 		m_stealthLook = STEALTHLOOK_NONE;
+		m_stealthDrawnLook = STEALTHLOOK_NONE;
+		m_stealthFade = 0.0f;
 		// Also, need to update the hidden status for all sub-modules.
 		if (m_hidden || m_hiddenByStealth) {
 			updateHiddenStatus();

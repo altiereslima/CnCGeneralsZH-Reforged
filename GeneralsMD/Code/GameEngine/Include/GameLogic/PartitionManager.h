@@ -295,6 +295,13 @@ protected:
 extern void PartitionManager_findSightMargins( const Real *heights, Int cellRadius, Real cellSize, Real eyeZ,
 																							 Real *sightMargin );
 
+/** What a hill-blocked sighting records for one cell: SIGHT_CELL_GROUND when the ground there is in
+	sight, SIGHT_CELL_AIR when the air over it is. The air is in sight anywhere within the looker's flat
+	range, whatever hill or roof stands between: an aircraft behind a ridge sees down over it, so the
+	units it shoots at must see it back. */
+enum { SIGHT_CELL_GROUND = 0x01, SIGHT_CELL_AIR = 0x02 };
+extern UnsignedByte PartitionManager_sightCellFlags( Bool groundRevealed, Int offsetX, Int offsetY, Int flatCellRadius );
+
 //=====================================
 /**
 	We sometimes need to save whether or not an area was fogged or permanently revealed through a 
@@ -324,7 +331,8 @@ class PartitionCell : public Snapshot	// not MPO: allocated in an array
 {
 private:
 	CellAndObjectIntersection*		m_firstCoiInCell;	///< list of COIs in this cell (may be null).
-	ShroudLevel										m_shroudLevel[MAX_PLAYER_COUNT];	
+	ShroudLevel										m_shroudLevel[MAX_PLAYER_COUNT];
+	Short													m_airLookers[MAX_PLAYER_COUNT];	///< lookers whose circle takes in the air over this cell, hills and roofs or not
 #ifdef PM_CACHE_TERRAIN_HEIGHT
 	Real													m_loTerrainZ;			///< lowest terrain-pt in this cell
 	Real													m_hiTerrainZ;			///< highest terrain-pt in this cell
@@ -332,6 +340,8 @@ private:
 	Int														m_threatValue[MAX_PLAYER_COUNT];
 	Int														m_cashValue[MAX_PLAYER_COUNT];
 	Short													m_coiCount;					///< number of COIs in this cell.
+	UnsignedShort									m_playerCoiCount[MAX_PLAYER_COUNT];	///< COIs in this cell whose Object belongs to each player
+	PlayerMaskType								m_playerCoiMask;		///< players whose m_playerCoiCount is nonzero
 	Short													m_cellX;						///< x-coord of this cell within the Partition Mgr coords (NOT in world coords)
 	Short													m_cellY;						///< y-coord of this cell within the Partition Mgr coords (NOT in world coords)
 
@@ -352,6 +362,9 @@ public:
 	void loadPostProcess( void );
 
 	Int getCoiCount() const { return m_coiCount; }		///< return number of COIs touching this cell.
+	Bool hasCoiOfPlayers( PlayerMaskType players ) const { return (m_playerCoiMask & players) != 0; }	///< does any Object of these players touch this cell?
+	void addPlayerCoi( Int playerIndex );
+	void removePlayerCoi( Int playerIndex );
 	Int getCellX() const { return m_cellX; }
 	Int getCellY() const { return m_cellY; }
 
@@ -360,6 +373,9 @@ public:
 	void addShrouder( Int playerIndex );
 	void removeShrouder( Int playerIndex );
 	CellShroudStatus getShroudStatusForPlayer( Int playerIndex ) const;
+	void addAirLooker( Int playerIndex );
+	void removeAirLooker( Int playerIndex );
+	Bool isAirSeenByPlayer( Int playerIndex ) const { return m_airLookers[playerIndex] > 0; }
 
 	// @todo: All of these are inline candidates
 	UnsignedInt getThreatValue( Int playerIndex );
@@ -423,6 +439,7 @@ private:
 	Int													m_coiInUseCount;					///< number of COIs that are actually in use
 	CellAndObjectIntersection		*m_coiArray;							///< The array of COIs 
 	Int													m_doneFlag;
+	Int													m_countedPlayer;					///< player index this module's COIs are counted under in their cells, -1 for none
 	DirtyStatus									m_dirtyStatus;
 	ObjectShroudStatus					m_shroudedness[MAX_PLAYER_COUNT];						
 	ObjectShroudStatus					m_shroudednessPrevious[MAX_PLAYER_COUNT];	///<previous frames value of m_shroudedness						
@@ -587,6 +604,8 @@ public:
 	void friend_removeAllTouchedCells() { removeAllTouchedCells(); }	///< this is only for use by PartitionManager
 	void friend_updateCellsTouched()	{ updateCellsTouched(); } ///< this is only for use by PartitionManager
 	Int friend_getCoiInUseCount() { return m_coiInUseCount; } ///< this is only for use by PartitionManager
+	Int friend_getCountedPlayer() const { return m_countedPlayer; } ///< only for CellAndObjectIntersection
+	void refreshCountedPlayer();	///< move this module's per-player cell counts to its Object's current controlling player
 	Bool friend_collidesWith(const PartitionData *that, CollideLocAndNormal *cinfo) const { return collidesWith(that, cinfo); }	///< this is only for use by PartitionContactList
 
 	// these are only for use by getClosestObjects.
@@ -1312,7 +1331,8 @@ protected:
 		PartitionFilter **filters, 
 		SimpleObjectIterator *iter,	// if nonnull, append ALL satisfactory objects to the iterator (not just the single closest)
 		Real *closestDistArg,
-		Coord3D *closestVecArg
+		Coord3D *closestVecArg,
+		PlayerMaskType onlyPlayers = PLAYERMASK_ALL
 	);
 
 	void shutdown( void );
@@ -1435,13 +1455,17 @@ public:
 		Real *closestDist = NULL,
 		Coord3D *closestDistVec = NULL
 	);
+	/** onlyPlayers skips every cell no Object of those players touches. Pass it only when the filters
+		already reject every Object outside them (an ALLOW_ENEMIES relationship filter with the asker's
+		Team::getEnemyPlayerMask), so the answer is the one a full search gives. */
 	Object *getClosestObject(
-		const Coord3D *pos, 
-		Real maxDist, 
-		DistanceCalculationType dc, 
-		PartitionFilter **filters = NULL, 
+		const Coord3D *pos,
+		Real maxDist,
+		DistanceCalculationType dc,
+		PartitionFilter **filters = NULL,
 		Real *closestDist = NULL,
-		Coord3D *closestDistVec = NULL
+		Coord3D *closestDistVec = NULL,
+		PlayerMaskType onlyPlayers = PLAYERMASK_ALL
 	);
 
 	Real getRelativeAngle2D( const Object *obj, const Object *otherObj );
@@ -1613,7 +1637,20 @@ inline void PartitionManager::worldToCell(Real wx, Real wy, Int *cx, Int *cy)
 //-----------------------------------------------------------------------------
 inline Int PartitionManager::worldToCellDist(Real w)
 {
-	return REAL_TO_INT_CEIL(w  * m_cellSizeInv);
+	// A map object can carry any vision or shroud range, and a circle a million cells wide is a
+	// float-to-int overflow and then a loop over the square of it.  Twice the grid's width plus
+	// height reaches every cell from a centre well off the map, so a reveal that big touches
+	// exactly the cells it touched unclamped.  The threat and value falloff divides by the radius
+	// and would move, but the one retail object that sees 99999 (ChinaArtilleryCannon) has no
+	// shroud range and so never draws one.  NaN fails the first test and lands on the limit.
+	// Before init the counts are zero and so is m_cellSizeInv.
+	const Real limit = (Real)(2 * (m_cellCountX + m_cellCountY));
+	Real cells = w * m_cellSizeInv;
+	if (!(cells <= limit))
+		cells = limit;
+	else if (cells < -limit)
+		cells = -limit;
+	return REAL_TO_INT_CEIL(cells);
 }
 
 //-----------------------------------------------------------------------------

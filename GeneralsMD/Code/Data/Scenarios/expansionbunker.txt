@@ -1,0 +1,16 @@
+# A Bunker far from China's base and four idle Red Guards at home, with the AI playing around them.
+#
+# The skirmish AI used to man only the firing buildings within reach of where its men stood, so a
+# Bunker at an expansion stayed empty unless a team happened to pass it.  Look for
+# "AI GARRISON ... into 'ChinaBunker' ..., own, default, field" in the log: a man from home sent out
+# to it.  The three Bunker lines are candidates; whichever stand on legal ground are made.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Tournament Desert\Tournament Desert.map" -autoskirmish 2 -aidiff hard
+#     -side 0 FactionGLA -side 1 FactionChina -seed 1 -maxframes 3000
+#     -scenario expansionbunker -logPrefix expbunker_
+
+30    spawn      1  ChinaBunker              1  start1:-900:0
+30    spawn      1  ChinaBunker              1  start1:0:-900
+30    spawn      1  ChinaBunker              1  start1:-650:-650
+30    spawn      1  ChinaInfantryRedguard    4  start1:150:150   20

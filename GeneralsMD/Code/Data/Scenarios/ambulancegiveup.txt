@@ -1,0 +1,54 @@
+# Does an Ambulance give up on a toxin field it cannot drive up to, once, and leave that ground alone?
+#
+# Twilight Flame's cliff plateau from 2300,3775 to 2650,4175 (a headless probe grid of Ambulances,
+# 2026-10-14; the thin cliff strip near 850,3850 can be driven round) takes two
+# poison fields 50 apart in its middle, 2450,3975 and 2450,3925.  An idle Ambulance on the open ground at
+# 2700,3975, 250 east, notices them by itself (CleanupHazardUpdate::startAutoCleanup, 300 reach),
+# drives to the cliff foot and stalls there out of its hose's 100.  After eight scans in a row parked
+# no nearer it should log "CLEANUP ... gave up on a hazard it cannot reach" and drive back to where it
+# started, and never set off for that ground again: not for the two fields, and not for a fresh one
+# put on the same spot at 600.  A field at 2700,4200 on open ground at 750 proves it still cleans
+# what it can reach.
+#
+# The five probe spawns at 20 use the Ambulance's own locomotor: each must log "SCENARIO: ... refused
+# at (x,y): cell type ... (CLIFF)", the middle and four points 100 out from it.  If any of them is put
+# down, the Ambulance can reach that ground and the run proves nothing; move the fields.
+#
+# What to read (CLEANUP lines count logic frames, 60 a second; this file and the SCENARIO and TALLY
+# lines count 30 a second, so file frame 750 is logic frame 1500):
+#   grep "CLEANUP" <prefix>DebugLogFile.txt
+#     "goes to clean by itself round (2700,3975)" at 121, then exactly one "gave up on a hazard it
+#     cannot reach" at 1463, the eight-scan one (", no progress in time" is the 20 s fallback), and no
+#     "scan:" line on the plateau hazards after it.  The next "goes to clean by itself" is for the open
+#     field (2378 in the 2026-10-14 run), ending in "area clean" at 2805.  Each "scan:" line gives
+#     distance, reach, how far it drove since the last scan, the stall count, frames since progress
+#     and the AI state (1 move, 10 attack, 0 idle).
+#   grep "HEADLESS TALLY" <prefix>DebugLogFile.txt
+#     2 alive at 740 and 2 at 1100, all left alone or not yet reached (a field lives 900 file frames:
+#     the first two run out at 960); 1 at 1420, after the open-ground one is cleaned: only the 600 one
+#     on the plateau, which runs out at 1500.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 3600
+#     -scenario ambulancegiveup -logPrefix ambulancegiveup_
+#
+# Run 2026-10-14: give-up at 1463, open field cleaned at 2805.  See mobstress.txt for the line grammar.
+
+20    spawn       0  AmericaVehicleMedic        1  2450 3975
+20    spawn       0  AmericaVehicleMedic        1  2450 3875
+20    spawn       0  AmericaVehicleMedic        1  2450 4075
+20    spawn       0  AmericaVehicleMedic        1  2350 3975
+20    spawn       0  AmericaVehicleMedic        1  2550 3975
+
+30    spawn       0  AirF_AmericaVehicleMedic   1  2700 3975
+
+60    spawn       1  PoisonFieldMedium          1  2450 3975
+60    spawn       1  PoisonFieldMedium          1  2450 3925
+
+600   spawn       1  PoisonFieldMedium          1  2450 3975
+740   tally       1  PoisonFieldMedium
+
+750   spawn       1  PoisonFieldMedium          1  2700 4200
+1100  tally       1  PoisonFieldMedium
+1420  tally       1  PoisonFieldMedium

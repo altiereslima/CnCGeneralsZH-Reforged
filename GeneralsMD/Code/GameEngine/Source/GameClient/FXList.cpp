@@ -572,12 +572,21 @@ public:
 		m_attachToObject = false;
 		m_createAtGroundHeight = FALSE;
 		m_useCallersRadius = FALSE;
+		m_atTarget = FALSE;
 		m_rotateX = m_rotateY = m_rotateZ = 0;
 	}
 
-	virtual void doFXPos(const Coord3D *primary, const Matrix3D* primaryMtx, const Real /*primarySpeed*/, const Coord3D * /*secondary*/, const Real overrideRadius ) const
+	virtual void doFXPos(const Coord3D *primary, const Matrix3D* primaryMtx, const Real /*primarySpeed*/, const Coord3D *secondary, const Real overrideRadius ) const
 	{
-		if (primary)
+		// AtTarget plays the system where the shot lands rather than at the muzzle: a FireFX is
+		// played with the victim's position as its secondary, the same point a Tracer flies to,
+		// and an instant-hit gun has no projectile to carry a detonation FX there.
+		if (m_atTarget)
+		{
+			DEBUG_ASSERTCRASH(secondary, ("ParticleSystem %s is AtTarget but the FX has no target\n", m_name.str()));
+			reallyDoFX(secondary, NULL, NULL, overrideRadius);
+		}
+		else if (primary)
 		{
 			reallyDoFX(primary, primaryMtx, NULL, overrideRadius);
 		}
@@ -633,6 +642,7 @@ public:
 			{ "AttachToObject",				INI::parseBool,							NULL, offsetof( ParticleSystemFXNugget, m_attachToObject ) },
 			{ "CreateAtGroundHeight",	INI::parseBool,							NULL, offsetof( ParticleSystemFXNugget, m_createAtGroundHeight ) },
 			{ "UseCallersRadius",			INI::parseBool,							NULL, offsetof( ParticleSystemFXNugget, m_useCallersRadius ) },
+			{ "AtTarget",							INI::parseBool,							NULL, offsetof( ParticleSystemFXNugget, m_atTarget ) },
 			{ 0, 0, 0, 0 }
 		};
 
@@ -730,6 +740,7 @@ private:
 	Bool						m_attachToObject;
 	Bool						m_createAtGroundHeight;
 	Bool						m_useCallersRadius;
+	Bool						m_atTarget;
 	Bool						m_ricochet;
 };  
 EMPTY_DTOR(ParticleSystemFXNugget)
@@ -910,7 +921,8 @@ const FXList *FXListStore::findFXList(const char* name) const
 	{
 		return &(*it).second;
 	}
-	return NULL;
+	AsciiString retailName;
+	return TheModNamespace.findRetailName(AsciiString(name), MODNAME_FXLIST, &retailName) ? findFXList(retailName.str()) : NULL;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -919,9 +931,39 @@ const FXList *FXListStore::findFXList(const char* name) const
 	// read the FXList name
 	const char *c = ini->getNextToken();
 	NameKeyType key = TheNameKeyGenerator->nameToKey(c);
+	if (ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES)
+	{
+		FXListStore *store = TheFXListStore;
+		if (store->m_fxmap.find(key) == store->m_fxmap.end())
+			store->m_addedByMap.push_back(key);
+		else if (store->m_beforeMapOverrides.find(key) == store->m_beforeMapOverrides.end()
+			&& std::find(store->m_addedByMap.begin(), store->m_addedByMap.end(), key) == store->m_addedByMap.end())
+			store->m_beforeMapOverrides[key].swap(store->m_fxmap[key]);	// the game's own list, kept whole
+	}
 	FXList& fxl = TheFXListStore->m_fxmap[key];
 	fxl.clear();
 	ini->initFromINI(&fxl, TheFXListFieldParse);
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A map.ini rewrote FXLists in place and the next match played with them.  The game's own lists
+	* go back.  A list the map brought is emptied rather than removed: a weapon whose effect name
+	* found nothing at startup was pointed at it when the map loaded (WeaponStore::postProcessLoad),
+	* and an empty list draws what the missing one did, nothing. */
+//-------------------------------------------------------------------------------------------------
+void FXListStore::reset()
+{
+	for (FXListMap::iterator it = m_beforeMapOverrides.begin(); it != m_beforeMapOverrides.end(); ++it)
+	{
+		FXList &live = m_fxmap[it->first];
+		live.clear();
+		live.swap(it->second);
+	}
+	m_beforeMapOverrides.clear();
+
+	for (size_t i = 0; i < m_addedByMap.size(); ++i)
+		m_fxmap[m_addedByMap[i]].clear();
+	m_addedByMap.clear();
 }
 
 //-------------------------------------------------------------------------------------------------

@@ -1,0 +1,69 @@
+# Trailer 2, the climax, timeline.t2.js rows 19 to 23 on Dark Night: one attack on the village square
+# at 2000,1750, inside the river's bend, seen from five places. Both armies stand inside the bend
+# from the start, a few hundred units off the square, so the fight is where the camera is, and a
+# side sends a wave at 560 and at 860 so the square is still full at the climax. sp_night.txt's A-10,
+# carpet bomb and Spectre come first, then the superweapons: a second carpet bomb through the
+# village, the particle beam on the square (called on 960; on 2026-10-10 it landed 81 frames after its
+# call and burned about 350 frames, so until about 1390), and the nuke last, called on 1264 so it
+# lands about 1440, after the beam is out. The beam moved from 900 to 960 so row 21's carpet view
+# has its 4.5 s before the beam lands.
+#
+# Until 2026-10-11 America came from 1500,1250, which is the cliffs and the river north-west of the
+# bend (t2check.py: 7 of 12 Crusaders, 13 of 16 Rangers on cliff or water), and the nuke landed at
+# 1276 into a beam still burning, so the dome and the trail had the beam through them. The engine
+# then refused the Overlords at 2280,1940 (one on the east bridge's deck, BRIDGE_IMPASSABLE) and at
+# 2230,1990 (cliff), so they stand at 2050,1870, east of the square.
+#
+#   generals.exe -win -xres 2560 -yres 1440 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Dark Night\Dark Night.map" -autoskirmish 2 -takeover
+#     -observer -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario rf_t2_night
+#     -cinema rf_t2_night -video <from> <to> rt_t2_night -recordfps 60
+
+# --- the superweapons, at the starts, out of frame ------------------------------------------------
+10    spawn      0  AmericaCommandCenter            1   start0:260:0
+10    spawn      0  AmericaParticleCannonUplink     1   start0:0:260
+10    spawn      0  AmericaPowerPlant               4   start0:-240:40    90
+10    spawn      1  ChinaCommandCenter              1   start1:-260:0
+10    spawn      1  ChinaNuclearMissileLauncher     1   start1:0:260
+10    spawn      1  ChinaPowerPlant                 3   start1:240:40     90
+
+# --- the armies, inside the bend -----------------------------------------------------------------
+30    spawn      0  AmericaTankCrusader             12  1790 1880  36
+30    spawn      0  AmericaTankPaladin              6   1820 1810  40
+30    spawn      0  AmericaVehicleTomahawk          6   1450 1970  40
+30    spawn      0  AmericaInfantryRanger           16  1870 1860  18
+30    spawn      0  AmericaVehicleComanche          6   1700 1700  60
+30    spawn      1  ChinaTankOverlord               4   2050 1870  50
+30    spawn      1  ChinaTankBattleMaster           8   2200 1810  40
+30    spawn      1  ChinaTankDragon                 8   2520 1870  36
+30    spawn      1  ChinaVehicleInfernoCannon       6   2520 1700  40
+30    spawn      1  ChinaInfantryRedguard           16  2100 1770  18
+30    spawn      1  ChinaVehicleHelix               3   2450 2250  60
+60    attackmove 0  *  2000 1750
+60    attackmove 1  *  2000 1750
+
+# --- a wave a side at 560 and at 860, so the square is full at the climax --------------------------
+560   spawn      0  AmericaTankCrusader             10  1790 1880  36
+560   spawn      0  AmericaTankPaladin              4   1820 1810  40
+560   spawn      0  AmericaInfantryRanger           12  1870 1860  18
+560   spawn      1  ChinaTankBattleMaster           8   2200 1810  40
+560   spawn      1  ChinaTankOverlord               3   2050 1870  50
+560   spawn      1  ChinaInfantryRedguard           12  2100 1770  18
+580   attackmove 0  *  2000 1750
+580   attackmove 1  *  2000 1750
+860   spawn      0  AmericaTankCrusader             8   1790 1880  36
+860   spawn      0  AmericaInfantryRanger           12  1870 1860  18
+860   spawn      1  ChinaTankBattleMaster           6   2200 1810  40
+860   spawn      1  ChinaInfantryRedguard           12  2100 1770  18
+880   attackmove 0  *  2000 1750
+880   attackmove 1  *  2000 1750
+
+# --- sp_night.txt's powers -----------------------------------------------------------------------
+250   power      0  AmericaCommandCenter  2100 1900  SuperweaponA10ThunderboltMissileStrike
+320   power      1  ChinaCommandCenter    1900 1650  Early_SuperweaponChinaCarpetBomb
+400   power      0  AmericaCommandCenter  2000 1750  SuperweaponSpectreGunship
+
+# --- the climax ----------------------------------------------------------------------------------
+730   power      1  ChinaCommandCenter    2050 1800  Early_SuperweaponChinaCarpetBomb
+960   power      0  AmericaParticleCannonUplink  2000 1750
+1264  power      1  ChinaNuclearMissileLauncher  1980 1740

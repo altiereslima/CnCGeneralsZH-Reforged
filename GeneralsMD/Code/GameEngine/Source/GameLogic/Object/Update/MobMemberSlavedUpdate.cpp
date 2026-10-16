@@ -105,7 +105,7 @@ const UnsignedInt MOB_CATCH_UP_CRISIS_DIVISOR = 3;
 	 alive.  An Angry Mob is a nexus and ten members, so a match with several of them per player is
 	 hundreds of objects paying that for nothing.  Sleeping is what the `@todo srj use SLEEPY_UPDATE
 	 here` at the top of update() has been asking for. */
-const Int MOB_MEMBER_UPDATE_RATE = 16;
+const Int MOB_MEMBER_UPDATE_RATE = ConvertRetailFrames( 16 );	// also the tick of CatchUpCrisisBailTime, a count of these updates
 
 /* m_framesToWait was the counter that got ticked to sixteen.  It now carries the one-time stagger
 	 the constructor drew, and this once it has been spent. */
@@ -116,7 +116,7 @@ MobMemberSlavedUpdate::MobMemberSlavedUpdate( Thing *thing, const ModuleData* mo
 {
 
 	m_slaver = INVALID_ID;
-	m_framesToWait = GameLogicRandomValue(0,20);
+	m_framesToWait = GameLogicRandomValue(0,ConvertRetailFrames(20));
 
 	// MDC: moving to GameLogicRandomValue.  This does not need to be synced, but having it so makes searches *so* much nicer.
 	m_personalColor.red = GameLogicRandomValueReal( 0.2f, 0.4f );

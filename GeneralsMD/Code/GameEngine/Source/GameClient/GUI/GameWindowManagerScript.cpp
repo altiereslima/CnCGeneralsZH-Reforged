@@ -517,7 +517,8 @@ static LayoutPlacement theLayoutPlacement = LAYOUT_STRETCH;
 static Coord2D theLayoutAnchor = { 0.5f, 0.5f };
 
 // The dialogs a match opens over the battlefield are fitted in both interfaces, centred on a 4:3 panel
-// of their own; the shell's screens are stretched (layoutIsShellScreen).  In Reforged the rest of
+// of their own; a root authored as the whole 800x600 is that panel's veil and covers the display.
+// The shell's screens are stretched (layoutIsShellScreen).  In Reforged the rest of
 // Window/ is the battlefield's own furniture - the command bar, which scales itself
 // (ControlBarUniformScale), and windows that hold a screen edge (the general's powers bar, the build
 // tooltip) or follow the battlefield (chat, diplomacy, the general's promotion screen, replay
@@ -531,7 +532,7 @@ static Bool startsWithFolder( const char *path, const char *folder )
 	return *path == '/' || *path == '\\';
 }
 
-// The Classic interface fits everything at one scale, battlefield furniture and all, except the
+// Everything is fitted at one scale, battlefield furniture and all, except the
 // command bar's own layouts: layoutPanels and ControlBarLayoutUniform divide the loader's stretch
 // back out of those, so they must be given it.
 static Bool barLaysOutItself( const char *filename )
@@ -543,7 +544,7 @@ static Bool barLaysOutItself( const char *filename )
 	return FALSE;
 }
 
-// Where a fitted Classic layout stands.  The match's own furniture keeps the corner EA drew it in, as
+// Where a fitted layout stands.  The match's own furniture keeps the corner EA drew it in, as
 // the bar's radar and selection keep theirs: the build tooltip and the chat line over the radar in the
 // bottom left, diplomacy in the top left, the replay controls over the middle of the bar.  Every other
 // layout, the shell's and the dialogs a match opens, is centred.  Matched on the file's own name,
@@ -591,21 +592,15 @@ static Bool layoutIsShellScreen( const char *filename )
 static LayoutPlacement layoutPlacement( const char *filename )
 {
 	theLayoutAnchor.x = theLayoutAnchor.y = 0.5f;
-	if( TheGlobalData == NULL || filename == NULL )
+	if( filename == NULL )
 		return LAYOUT_STRETCH;
 	// "Menus/X.wnd" as the shell names them, or the whole "Window\\Menus\\X.wnd"
 	if( startsWithFolder( filename, "window" ) )
 		filename += 7;
-	if( layoutIsShellScreen( filename ) )
+	if( layoutIsShellScreen( filename ) || barLaysOutItself( filename ) )
 		return LAYOUT_STRETCH;
-	if( TheGlobalData->isClassicUI() )
-	{
-		if( barLaysOutItself( filename ) )
-			return LAYOUT_STRETCH;
-		theLayoutAnchor = classicLayoutAnchor( filename );
-		return LAYOUT_FIT;
-	}
-	return startsWithFolder( filename, "menus" ) ? LAYOUT_FIT : LAYOUT_STRETCH;
+	theLayoutAnchor = classicLayoutAnchor( filename );
+	return LAYOUT_FIT;
 }
 
 static Bool parseScreenRect( char *token, char *buffer,
@@ -644,23 +639,33 @@ static Bool parseScreenRect( char *token, char *buffer,
 
 	//
 	// Fit: one scale both ways, the smaller, with the layout's 4:3 area centred, so a
-	// panel, a logo or a medal keeps the shape it was drawn in.  A window that covers the whole
-	// layout - within two pixels, as a few parents are drawn - still fills the screen in Reforged: it
-	// is the backdrop, or the parent everything else sits in.  Classic keeps a match dialog's backdrop
-	// in the box with the rest, over the battlefield.  At 4:3 the scales are equal and the offsets
-	// nothing, and this is the stretch to the pixel.
+	// panel, a logo or a medal keeps the shape it was drawn in.  A root authored as the
+	// whole 800x600 is the veil behind that panel: stretch it to the display so a wide
+	// screen is covered, while the children stay fitted.  At 4:3 the scales are equal
+	// and the offsets nothing, and this is the stretch to the pixel.
 	//
-	const Bool fullScreen = screenRegion.lo.x <= 2 && screenRegion.lo.y <= 2 &&
-		screenRegion.hi.x >= createRes.x - 2 && screenRegion.hi.y >= createRes.y - 2;
-	if( theLayoutPlacement == LAYOUT_FIT && ( !fullScreen || TheGlobalData->isClassicUI() ) )
+	if( theLayoutPlacement == LAYOUT_FIT )
 	{
-		const Real scale = min( xScale, yScale );
-		const Real left = ((Real)TheDisplay->getWidth() - (Real)createRes.x * scale) * theLayoutAnchor.x;
-		const Real top = ((Real)TheDisplay->getHeight() - (Real)createRes.y * scale) * theLayoutAnchor.y;
-		screenRegion.lo.x = (Int)((Real)screenRegion.lo.x * scale + left);
-		screenRegion.lo.y = (Int)((Real)screenRegion.lo.y * scale + top);
-		screenRegion.hi.x = (Int)((Real)screenRegion.hi.x * scale + left);
-		screenRegion.hi.y = (Int)((Real)screenRegion.hi.y * scale + top);
+		const Bool fullAuthored = parent == NULL
+			&& screenRegion.lo.x <= 1 && screenRegion.lo.y <= 1
+			&& screenRegion.hi.x >= createRes.x - 2 && screenRegion.hi.y >= createRes.y - 2;
+		if( fullAuthored )
+		{
+			screenRegion.lo.x = 0;
+			screenRegion.lo.y = 0;
+			screenRegion.hi.x = TheDisplay->getWidth();
+			screenRegion.hi.y = TheDisplay->getHeight();
+		}
+		else
+		{
+			const Real scale = min( xScale, yScale );
+			const Real left = ((Real)TheDisplay->getWidth() - (Real)createRes.x * scale) * theLayoutAnchor.x;
+			const Real top = ((Real)TheDisplay->getHeight() - (Real)createRes.y * scale) * theLayoutAnchor.y;
+			screenRegion.lo.x = (Int)((Real)screenRegion.lo.x * scale + left);
+			screenRegion.lo.y = (Int)((Real)screenRegion.lo.y * scale + top);
+			screenRegion.hi.x = (Int)((Real)screenRegion.hi.x * scale + left);
+			screenRegion.hi.y = (Int)((Real)screenRegion.hi.y * scale + top);
+		}
 	}
 	else
 	{

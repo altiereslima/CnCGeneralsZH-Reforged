@@ -80,6 +80,30 @@ static const Int edgeScrollSize = 3;
 // farthest is about fifteen notches, so three of these cross it.
 static const Real CTRL_WHEEL_ZOOM_NOTCHES = 5.0f;
 
+// Alt+wheel tilts the camera this far a notch.
+static const Real TILT_PER_NOTCH = 2.0f * PI / 180.0f;
+
+// A mouse side button tilts this far a press: eight presses cross the 20 to 60 degree range.
+static const Real TILT_PER_SIDE_BUTTON = 5.0f * PI / 180.0f;
+
+//-----------------------------------------------------------------------------
+/** The player's tilt keeps the camera between 20 and 60 degrees above the ground.  The view's
+	* pitch is an offset from GameData's CameraPitch, and a larger pitch lays the camera flatter,
+	* so the elevation it gives is CameraPitch minus the pitch. */
+//-----------------------------------------------------------------------------
+Real LookAt_clampPlayerPitch( Real pitch )
+{
+	const Real DEGREES = PI / 180.0f;
+	const Real base = TheGlobalData->m_cameraPitch * DEGREES;
+	const Real flattest = base - 20.0f * DEGREES;
+	const Real steepest = base - 60.0f * DEGREES;
+	if (pitch > flattest)
+		return flattest;
+	if (pitch < steepest)
+		return steepest;
+	return pitch;
+}
+
 //-----------------------------------------------------------------------------
 Int EdgeScroll_bandForHeight( Int displayHeight )
 {
@@ -123,8 +147,8 @@ static Coord2D edgeScrollPull( const ICoord2D& pos )
 {
 	const Int width  = (Int)TheDisplay->getWidth();
 	const Int height = (Int)TheDisplay->getHeight();
-	// Classic is the game as shipped: the last three pixels, at full speed, and nothing deeper
-	const Int band = ( TheGlobalData->isClassicUI() || isOverWindow( pos ) ) ? edgeScrollSize : EdgeScroll_bandForHeight( height );
+	// the Classic mouse is the game as shipped: the last three pixels, at full speed, and nothing deeper
+	const Int band = ( TheGlobalData->isClassicMouse() || isOverWindow( pos ) ) ? edgeScrollSize : EdgeScroll_bandForHeight( height );
 
 	Coord2D pull;
 	pull.x = EdgeScroll_strength( width - 1 - pos.x, band ) - EdgeScroll_strength( pos.x, band );
@@ -152,7 +176,7 @@ void LookAtTranslator::setScrolling(Int x)
 	TheTacticalView->setMouseLock( TRUE );
 	m_scrollType = x;
 	// A manual pan restores map constraints widened by scripted camera paths.
-	if ((TheGlobalData->m_useCameraConstraints || TheGlobalData->isClassicUI()) && TheGlobalData->m_cameraBoundaryMargin > 0)
+	if (TheGlobalData->m_useCameraConstraints && TheGlobalData->m_cameraBoundaryMargin > 0)
 		TheTacticalView->forceCameraConstraintRecalc();
 	if(TheStatsCollector)
 		TheStatsCollector->startScrollTime();
@@ -239,8 +263,7 @@ static const UnsignedInt CAMERA_NETWORK_FRAMES = LOGICFRAMES_PER_SECOND / 5;
 	* machines, only from somebody still playing, and only when it moved since the last one went. */
 Bool LookAtTranslator::networkCameraDue( const ViewLocation &view )
 {
-	// Classic sends what the game as shipped sent, and that was no camera in a network game
-	if( TheGlobalData->isClassicUI() || !TheGameLogic->isInMultiplayerGame() || !ThePlayerList->getLocalPlayer()->isPlayerActive() )
+	if( !TheGameLogic->isInMultiplayerGame() || !ThePlayerList->getLocalPlayer()->isPlayerActive() )
 		return FALSE;
 
 	const UnsignedInt frame = TheGameLogic->getFrame();
@@ -329,9 +352,9 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			m_lastMouseMoveFrame = TheGameLogic->getFrame();
 			m_anchor = msg->getArgument( 0 )->pixel;
 
-			// Classic is 1.04's scroll, which starts on the press itself, so a click that wobbles
-			// nudges the camera.  Its second press of a quick pair started nothing, as there.
-			if (TheGlobalData->isClassicUI())
+			// the Classic mouse is 1.04's scroll, which starts on the press itself, so a click that
+			// wobbles nudges the camera.  Its second press of a quick pair started nothing, as there.
+			if (TheGlobalData->isClassicMouse())
 			{
 				if (msg->getType() == GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN)
 				{
@@ -367,7 +390,12 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 
 			// The middle button turns the camera: drag it sideways and the heading follows.  The pan
 			// is on the right button, so no modifier is needed.  A click without a drag puts the
-			// camera back, below.
+			// camera back, below.  With Alt held the drag tilts the camera up and down instead.
+			if (TheKeyboard->isAlt())
+			{
+				m_isPitching = true;
+				break;
+			}
 			m_isRotating = true;
 			// the drag turns this, and under SnapCameraRotateTo45 the camera stands on whichever
 			// eighth it is nearest - so start it where the camera already is.
@@ -380,10 +408,11 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 		{
 			m_lastMouseMoveFrame = TheGameLogic->getFrame();
 
-			const UnsignedInt CLICK_DURATION = 5;
+			const UnsignedInt CLICK_DURATION = ConvertRetailFrames( 5U );
 			const UnsignedInt PIXEL_OFFSET = 5;
 
 			m_isRotating = false;
+			m_isPitching = false;
 			Int dx = m_currentPos.x-m_originalAnchor.x;
 			if (dx<0) dx = -dx;
 			Int dy = m_currentPos.y-m_originalAnchor.y;
@@ -433,8 +462,9 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			// edge, so believing it would scroll the map for as long as the mouse sat on the desktop.
 			// Nor while a watcher's director or player camera drives: the spectator page stands on the
 			// top and right edges, and the pointer on its way to it took the camera away (ObserverCamera.h).
-			// Classic keeps retail's rule whatever Options.ini says.
-			const Bool edgeScrollAllowed = (!TheGlobalData->m_windowed || (TheGlobalData->m_edgeScrollInWindowedMode && !TheGlobalData->isClassicUI()))
+			// The Classic mouse honours the box too: it is every player's mouse since the launcher
+			// stopped passing -mouse, and a borderless window has no desktop around it to scroll from.
+			const Bool edgeScrollAllowed = (!TheGlobalData->m_windowed || TheGlobalData->m_edgeScrollInWindowedMode)
 																			&& TheMouse->isCursorInWindow() && !TheObserverCamera.isDriving();
 
 			if (m_isScrolling)
@@ -478,7 +508,7 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 				Real angle = FACTOR * (m_currentPos.y - m_anchor.y);
 
 				// Dragging down tips the camera down.  The sign used to be the other way round.
-				TheTacticalView->setPitch( TheTacticalView->getPitch() - angle );
+				TheTacticalView->setPitch( LookAt_clampPlayerPitch( TheTacticalView->getPitch() - angle ) );
 				m_anchor = msg->getArgument( 0 )->pixel;
 			}
 
@@ -511,12 +541,19 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			// cannot hit an exact eighth of a turn.  Eaten so the same notch does not also zoom.
 			//
 			// Whole notches only: half a touchpad swipe is not a 45 degree turn.
-			// Classic's wheel only ever zooms, as the game shipped, so none of the Ctrl uses below.
-			const Bool classic = TheGlobalData->isClassicUI();
+			// The Classic mouse's wheel only ever zooms, as the game shipped, so none of the Ctrl uses below.
+			const Bool classic = TheGlobalData->isClassicMouse();
 			const Int rotateSteps = (Int)spin;
 			if (!classic && TheKeyboard->isCtrl() && rotateSteps != 0 &&
 					TheInGameUI->rotatePendingPlacement( rotateSteps ))
 				return DESTROY_MESSAGE;
+
+			// Alt+wheel tilts instead of zooming: forward lays the camera flatter, toward the horizon.
+			if (!classic && TheKeyboard->isAlt())
+			{
+				TheTacticalView->setPitch( LookAt_clampPlayerPitch( TheTacticalView->getPitch() + spin * TILT_PER_NOTCH ) );
+				return DESTROY_MESSAGE;
+			}
 
 			// ZoomToCursor: the view holds the ground under the cursor while the zoom eases in.  It does
 			// it inside its own update, between the zoom moving and the frame being drawn; held from
@@ -541,6 +578,19 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			break;	// without this the case fell into MSG_META_OPTIONS below and every wheel
 					// notch called stopScrolling(), killing zoom-while-panning and leaving
 					// m_isScrolling/m_scrollType torn.
+		}
+
+		//-----------------------------------------------------------------------------
+		// The side buttons step the tilt: forward (X2) lays the camera flatter, as Alt+wheel forward
+		// does, back (X1) stands it up.  Not on the Classic mouse, which has no Alt+wheel tilt either.
+		case GameMessage::MSG_RAW_MOUSE_SIDE_BUTTON:
+		{
+			// nor in the menus or a cinematic, where WindowXlat eats the wheel before it gets here
+			if (TheGlobalData->isClassicMouse() || TheShell->isShellActive() || !TheInGameUI->getInputEnabled())
+				break;
+			const Real steps = (Real)msg->getArgument( 1 )->integer;
+			TheTacticalView->setPitch( LookAt_clampPlayerPitch( TheTacticalView->getPitch() + steps * TILT_PER_SIDE_BUTTON ) );
+			return DESTROY_MESSAGE;
 		}
 
 

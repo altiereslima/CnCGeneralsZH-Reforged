@@ -145,7 +145,7 @@ UpdateSleepTime EMPUpdate::update( void )
 	Drawable *dr = obj->getDrawable();
 	UnsignedInt now = TheGameLogic->getFrame();
 	
-	m_currentScale += ( m_targetScale - m_currentScale ) * 0.05f;
+	m_currentScale += ( m_targetScale - m_currentScale ) * ( 1.0f - ConvertRetailPerFrameFactor( 0.95f ) );
 	dr->setInstanceScale( m_currentScale );
 
 	if ( now < m_tintEnvPlayFrame)
@@ -353,9 +353,9 @@ void EMPUpdate::doDisableAttack( void )
 
 							sys->attachToObject(curVictim);
 							sys->setPosition( &offs );
-							sys->setSystemLifetime(MAX(0, data->m_disabledDuration - 30));
+							sys->setSystemLifetime(MAX(0, data->m_disabledDuration - LOGICFRAMES_PER_SECOND));
 							// Client stream too: this line runs only where the drawable and the particle system exist.
-							sys->setInitialDelay(GameClientRandomValue(1,100));
+							sys->setInitialDelay(GameClientRandomValue(1,ConvertRetailFrames(100)));
 						}
 					}
 				} 

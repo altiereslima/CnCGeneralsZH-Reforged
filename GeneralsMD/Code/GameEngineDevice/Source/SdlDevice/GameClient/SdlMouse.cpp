@@ -279,7 +279,7 @@ void SdlMouse::translateEvent( UnsignedInt eventIndex, MouseIO *result )
 
 	result->leftState = result->middleState = result->rightState = MBS_Up;
 	result->leftFrame = result->middleFrame = result->rightFrame = 0;
-	result->pos.x = result->pos.y = result->wheelPos = 0;
+	result->pos.x = result->pos.y = result->wheelPos = result->sideButton = 0;
 	result->time = event.time;
 	result->pos.x = event.x;
 	result->pos.y = event.y;
@@ -299,6 +299,9 @@ void SdlMouse::translateEvent( UnsignedInt eventIndex, MouseIO *result )
 				case BUTTON_LEFT:		result->leftState = state; result->leftFrame = frame; break;
 				case BUTTON_MIDDLE:	result->middleState = state; result->middleFrame = frame; break;
 				case BUTTON_RIGHT:	result->rightState = state; result->rightFrame = frame; break;
+				// the side buttons are a step on the press alone, as Win32's WM_XBUTTONDOWN
+				case BUTTON_X1:			result->sideButton = event.kind == EVENT_BUTTON_DOWN ? -1 : 0; break;
+				case BUTTON_X2:			result->sideButton = event.kind == EVENT_BUTTON_DOWN ? 1 : 0; break;
 			}
 			break;
 		}

@@ -1,0 +1,46 @@
+# The fragment, shrapnel and debris trails at three sizes in one run: debristrails.txt's tank fight
+# east of Twilight Flame's middle (medium shards on shell and rocket hits, shrapnel and burning OCL
+# parts on the vehicle deaths), then the nuke on swpair's ring town round 1500,3450 about 350 south
+# of the fight (huge shards, structure deaths). Frames here are retail 30 Hz frames, doubled as read:
+# the nuke is called at logic frame 1000 and lands about 1330. Two seats, everyone hostile.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -particlecap 2500 -fps 120
+#     -noFPSLimit -quickstart -noshellmap -observer -multiInstance
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario debristrails3
+#     -cinema debristrails3 -video 120 1680 debristrails3 -maxframes 1700
+
+# the nuke, back at China's start and powered
+10    spawn       1  ChinaNuclearMissileLauncher   1   start1:0:200
+10    spawn       1  ChinaPowerPlant               3   start1:260:-40    90
+
+# swpair's ring town, without the Patriots so the fight stays the fight
+20    spawn       0  AmericaCommandCenter          1   1500 3450
+20    spawn       0  AmericaPowerPlant             1   1630 3450
+20    spawn       0  AmericaPowerPlant             1   1370 3450
+20    spawn       0  AmericaPowerPlant             1   1500 3580
+20    spawn       0  AmericaPowerPlant             1   1500 3320
+20    spawn       0  AmericaBarracks               1   1670 3620
+20    spawn       0  AmericaBarracks               1   1330 3620
+20    spawn       0  AmericaBarracks               1   1670 3280
+20    spawn       0  AmericaBarracks               1   1330 3280
+20    spawn       0  AmericaStrategyCenter         1   1500 3110
+20    spawn       0  AmericaSupplyCenter           1   1160 3450
+
+# the tank fight
+20    spawn       0  AmericaTankCrusader     6   1380 3800    0
+20    spawn       0  AmericaTankPaladin      2   1360 3740    0
+20    spawn       0  AmericaVehicleTomahawk  2   1260 3820    0
+20    spawn       1  ChinaTankOverlord       3   1600 3800  180
+20    spawn       1  ChinaTankBattleMaster   4   1590 3740  180
+40    attackmove  0  AmericaTankCrusader         1600 3800
+40    attackmove  0  AmericaTankPaladin          1600 3800
+40    attackmove  0  AmericaVehicleTomahawk      1600 3800
+40    attackmove  1  ChinaTankOverlord           1380 3800
+40    attackmove  1  ChinaTankBattleMaster       1380 3800
+
+500   power       1  ChinaNuclearMissileLauncher         1500 3450
+
+120   tally       0  *
+480   tally       0  *
+800   tally       0  *

@@ -206,8 +206,8 @@ const FieldParse EvaSideSounds::s_evaSideSounds[] =
 EvaCheckInfo::EvaCheckInfo() :
 	m_message(EVA_COUNT),
 	m_priority(1), // lowest of all priorities
-	m_framesBetweenChecks(900),	// 30 seconds at 30 fps
-	m_framesToExpire(150) // 5 seconds at 30 fps
+	m_framesBetweenChecks(LOGICFRAMES_PER_SECOND * 30),	// 30 seconds
+	m_framesToExpire(LOGICFRAMES_PER_SECOND * 5) // 5 seconds
 {
 
 	

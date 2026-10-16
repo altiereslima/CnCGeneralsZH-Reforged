@@ -112,7 +112,7 @@ HelicopterSlowDeathBehaviorModuleData::HelicopterSlowDeathBehaviorModuleData( vo
 	{
 		{ "SpiralOrbitTurnRate",	INI::parseAngularVelocityReal, NULL, offsetof( HelicopterSlowDeathBehaviorModuleData, m_spiralOrbitTurnRate ) },
 		{ "SpiralOrbitForwardSpeed", INI::parseVelocityReal, NULL, offsetof( HelicopterSlowDeathBehaviorModuleData, m_spiralOrbitForwardSpeed ) },
-		{ "SpiralOrbitForwardSpeedDamping", INI::parseReal, NULL, offsetof( HelicopterSlowDeathBehaviorModuleData, m_spiralOrbitForwardSpeedDamping ) },
+		{ "SpiralOrbitForwardSpeedDamping", INI::parseRetailPerFrameFactorReal, NULL, offsetof( HelicopterSlowDeathBehaviorModuleData, m_spiralOrbitForwardSpeedDamping ) },
 		{ "MinSelfSpin", INI::parseAngularVelocityReal, NULL, offsetof( HelicopterSlowDeathBehaviorModuleData, m_minSelfSpin ) },
 		{ "MaxSelfSpin", INI::parseAngularVelocityReal, NULL, offsetof( HelicopterSlowDeathBehaviorModuleData, m_maxSelfSpin ) },
 		{ "SelfSpinUpdateDelay", INI::parseDurationReal, NULL, offsetof( HelicopterSlowDeathBehaviorModuleData, m_selfSpinUpdateDelay ) },
@@ -219,8 +219,9 @@ void HelicopterSlowDeathBehavior::beginSlowDeath( const DamageInfo *damageInfo )
 	//
 	m_forwardAngle = getObject()->getOrientation();
 
-	// set or forward speed in the spiral orbit speed to that specified
-	m_forwardSpeed = modData->m_spiralOrbitForwardSpeed;
+	// set or forward speed in the spiral orbit speed to that specified.  It is a force pushed every
+	// frame, so per frame squared: the velocity parse covers one of the two frames.
+	m_forwardSpeed = ConvertRetailPerFrameRate( modData->m_spiralOrbitForwardSpeed );
 
 	// start our self spinning at the min self spin rate
 	m_selfSpin = modData->m_minSelfSpin;

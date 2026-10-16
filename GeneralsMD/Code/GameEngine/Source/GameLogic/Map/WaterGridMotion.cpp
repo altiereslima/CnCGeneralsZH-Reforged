@@ -39,8 +39,9 @@ void WaterGridMotion::updateForLogicFrame( UnsignedInt currLogicFrame, Bool doWa
 		if( doWaterGrid && meshInMotion == TRUE )
 		{
 			const Real PREFERRED_HEIGHT_FUDGE = 1.0f;		///< this is close enough to at rest
-			const Real AT_REST_VELOCITY_FUDGE = 1.0f;		///< when we're close enought to at rest height and velocity we will stop
-			const Real WATER_DAMPENING = 0.93f;					///< use with up force of 15.0
+			// tuned per 30 Hz frame; velocity is per logic frame and gravity already per logic frame squared
+			const Real AT_REST_VELOCITY_FUDGE = ConvertRetailPerFrameRate( 1.0f );		///< when we're close enought to at rest height and velocity we will stop
+			const Real WATER_DAMPENING = ConvertRetailPerFrameFactor( 0.93f );					///< use with up force of 15.0
 			Int i, j;
 			Int	mx = gridCellsX+1;
 			Int my = gridCellsY+1;

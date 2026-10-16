@@ -86,7 +86,6 @@ SupplyTruckAIUpdate::SupplyTruckAIUpdate( Thing *thing, const ModuleData* module
 	m_numberBoxes = 0;
 	m_forcePending = FALSE;
 	m_forcedBusyPending = FALSE;
-	m_dockActionStartFrame = 0;
 	m_dockActionEndFrame = 0;
 	m_supplyTruckStateMachine = newInstance(SupplyTruckStateMachine)( getObject() );
 	m_supplyTruckStateMachine->initDefaultState();
@@ -250,18 +249,7 @@ UnsignedInt SupplyTruckAIUpdate::getActionDelayForDock( Object *dock )
 //----------------------------------------------------------------------------------------
 void SupplyTruckAIUpdate::noteDockActionWindow( UnsignedInt frames )
 {
-	m_dockActionStartFrame = TheGameLogic->getFrame();
-	m_dockActionEndFrame = m_dockActionStartFrame + frames;
-}
-
-//----------------------------------------------------------------------------------------
-/** How far through fetching or handing over the current box we are, for the bar drawn over the
-	* worker's head.  Negative once the window has run out, which is also what a worker that is not
-	* docked reads: nothing refreshes the window but the dock state. */
-//----------------------------------------------------------------------------------------
-Real SupplyTruckAIUpdate::getDockActionProgress() const
-{
-	return dockActionProgress( TheGameLogic->getFrame(), m_dockActionStartFrame, m_dockActionEndFrame );
+	m_dockActionEndFrame = TheGameLogic->getFrame() + frames;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -299,11 +287,12 @@ void SupplyTruckAIUpdate::crc( Xfer *xfer )
 /** Xfer method
 	* Version Info:
 	* 1: Initial version
-	* 2: The dock action window, which now times the shortest leg between two supply dockings */
+	* 2: The dock action window, which now times the shortest leg between two supply dockings
+	* 3: Only the window's end; its start fed nothing but a progress bar */
 // ------------------------------------------------------------------------------------------------
 void SupplyTruckAIUpdate::xfer( Xfer *xfer )
 {
-  XferVersion currentVersion = 2;
+  XferVersion currentVersion = 3;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
  
@@ -314,11 +303,13 @@ void SupplyTruckAIUpdate::xfer( Xfer *xfer )
 	xfer->xferObjectID(&m_preferredDock);
 	xfer->xferInt(&m_numberBoxes);
 	xfer->xferBool(&m_forcePending);
-	if( version >= 2 )
+	if( version == 2 )
 	{
-		xfer->xferUnsignedInt(&m_dockActionStartFrame);
-		xfer->xferUnsignedInt(&m_dockActionEndFrame);
+		UnsignedInt startFrame = 0;
+		xfer->xferUnsignedInt(&startFrame);
 	}
+	if( version >= 2 )
+		xfer->xferUnsignedInt(&m_dockActionEndFrame);
 
 }  // end xfer
 
@@ -570,6 +561,16 @@ StateReturnType SupplyTruckWantsToPickUpOrDeliverBoxesState::update()
 		DEBUG_CRASH(("SupplyTruckWantsToPickUpOrDeliverBoxesState: isAvailableForSupplying==false; should not get here"));
 		return STATE_FAILURE;
 	}
+
+	//
+	// We came here because the docking that sent us had ended and the truck stood idle.  The machine
+	// runs this update before it checks its transitions, so an order the player gave on the frame we
+	// arrived is already running, and docking now would throw it away: the truck that was told to go
+	// somewhere else as it pulled off the dock drove back to the supplies instead.  Busy is where the
+	// same order lands a frame earlier, through ownerNotDockingOrIdle.
+	//
+	if (!ownerAI->isIdle() && ownerAI->getLastCommandSource() != CMD_FROM_AI)
+		return STATE_SUCCESS;
 
 	Int numBoxes = update->getNumberBoxes();
 	if (numBoxes > 0)

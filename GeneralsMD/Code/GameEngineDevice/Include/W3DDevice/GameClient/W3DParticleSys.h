@@ -79,6 +79,7 @@ public:
 		ShaderClass															shader;
 		Int																			capacity;					///< quads reserved: the system's particles, at most MAX_POINTS_PER_GROUP
 		UnsignedInt															fieldIncrement;		///< 1 if every drawn particle counts against the field budget
+		Real																		fade;							///< ParticleSystem::getStealthFade, above zero
 		Int																			drawn;						///< written by the job
 		UnsignedInt															pastLimit;				///< written by the job: on-screen particles past capacity
 		Bool																		glow;							///< written by the job: the fire's glow is in the normals, not the colour

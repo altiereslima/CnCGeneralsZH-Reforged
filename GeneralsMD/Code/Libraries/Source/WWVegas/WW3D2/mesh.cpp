@@ -169,8 +169,10 @@ MeshClass::MeshClass(void) :
 	MeshDebugId(MeshDebugIdCount++),
 	m_alphaOverride(1.0f),
 	m_materialPassAlphaOverride(1.0f),
-	m_materialPassEmissiveOverride(1.0f)
+	m_materialPassEmissiveOverride(1.0f),
+	m_drawEffect(0)
 {
+	m_drawEffectParameters[0] = m_drawEffectParameters[1] = m_drawEffectParameters[2] = m_drawEffectParameters[3] = 0.0f;
 }
 
 
@@ -198,8 +200,10 @@ MeshClass::MeshClass(const MeshClass & that) :
 	MeshDebugId(MeshDebugIdCount++),
 	m_alphaOverride(1.0f),
 	m_materialPassAlphaOverride(1.0f),
-	m_materialPassEmissiveOverride(1.0f)
+	m_materialPassEmissiveOverride(1.0f),
+	m_drawEffect(0)
 {
+	m_drawEffectParameters[0] = m_drawEffectParameters[1] = m_drawEffectParameters[2] = m_drawEffectParameters[3] = 0.0f;
 	REF_PTR_SET(Model,that.Model);					// mesh instances share models by default
 }
 
@@ -688,6 +692,7 @@ void MeshClass::Render(RenderInfoClass & rinfo)
 		m_alphaOverride = rinfo.alphaOverride;
 		m_materialPassAlphaOverride = rinfo.materialPassAlphaOverride;
 		m_materialPassEmissiveOverride = rinfo.materialPassEmissiveOverride;
+		Take_Draw_Effect(rinfo);
 
 		WW3D::Add_To_Static_Sort_List(this, sort_level);
 	} else {
@@ -725,6 +730,7 @@ void MeshClass::Render(RenderInfoClass & rinfo)
 				m_alphaOverride = rinfo.alphaOverride;
 				m_materialPassAlphaOverride = rinfo.materialPassAlphaOverride;
 				m_materialPassEmissiveOverride = rinfo.materialPassEmissiveOverride;
+				Take_Draw_Effect(rinfo);
 			}
 
 			/*
@@ -817,6 +823,15 @@ void MeshClass::Render(RenderInfoClass & rinfo)
 
 			DX8RendererDebugger::Add_Mesh(this);
 		}
+	}
+}
+
+
+void MeshClass::Take_Draw_Effect(const RenderInfoClass & rinfo)
+{
+	m_drawEffect = rinfo.drawEffect;
+	for (int i = 0; i < 4; ++i) {
+		m_drawEffectParameters[i] = rinfo.drawEffectParameters[i];
 	}
 }
 

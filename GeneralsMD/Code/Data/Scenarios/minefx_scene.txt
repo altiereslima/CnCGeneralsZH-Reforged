@@ -1,0 +1,43 @@
+# The China mine field as a match scene on Alpine Assault (the MineFX bodies and blink): a small
+# Chinese outpost in the rail yard round 760,900 with four mine fields in front of it, its own
+# armour and infantry driving through the field, and an American column coming down the town
+# street from 1150,1150 that walks into it. Seat 0 owns the mines; minefx_scene_enemy.txt is the
+# same scene with the seats swapped, so the local player is the one walking in.
+#
+#   generals.exe -win -borderless -xres 1280 -yres 720 -quickstart -noshellmap -multiInstance
+#     -fps 120 -noFPSLimit -particlecap 2500 -map "Maps\Alpine Assault\Alpine Assault.map"
+#     -autoskirmish 2 -takeover -side 0 FactionChina -side 1 FactionAmerica -seed 1
+#     -scenario minefx_scene -cinema minefx_scene -video 390 750 minefx_scene -maxframes 760
+
+# the outpost
+30    spawn      0  ChinaPowerPlant         1  620 780
+30    spawn      0  ChinaBarracks           1  900 770
+30    spawn      0  ChinaBunker             1  880 1000
+30    spawn      0  ChinaGattlingCannon     1  1000 1060
+
+# the field
+30    spawn      0  ChinaStandardMine       1  700 900
+30    spawn      0  ChinaEMPMine            1  820 900
+30    spawn      0  ChinaStandardMine       1  760 860
+30    spawn      0  ChinaEMPMine            1  760 940
+
+# own traffic through the field, both ways
+30    spawn      0  ChinaTankBattleMaster   3  1040 900 28
+30    spawn      0  ChinaInfantryRedguard   6  960 860 14
+30    spawn      0  ChinaVehicleSupplyTruck 1  980 960
+40    move       0  ChinaTankBattleMaster      660 880
+40    move       0  ChinaInfantryRedguard      600 880
+40    move       0  ChinaVehicleSupplyTruck    620 940
+330   attackmove 0  ChinaTankBattleMaster      900 950
+330   move       0  ChinaVehicleSupplyTruck    980 940
+
+# the American column down the street into the field
+260   spawn      1  AmericaTankCrusader     4  1200 1160 30
+260   spawn      1  AmericaVehicleHumvee    2  1240 1240 30
+270   move       1  AmericaTankCrusader        700 880
+270   move       1  AmericaVehicleHumvee       700 880
+270   arrive     1  AmericaTankCrusader        760 900 90
+30    tally      0  ChinaStandardMine
+30    tally      0  ChinaEMPMine
+750   tally      0  ChinaStandardMine
+750   tally      0  ChinaEMPMine

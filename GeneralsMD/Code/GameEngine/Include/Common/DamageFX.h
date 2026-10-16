@@ -159,6 +159,7 @@ private:
 
 	typedef std::hash_map< NameKeyType, DamageFX, rts::hash<NameKeyType>, rts::equal_to<NameKeyType> > DamageFXMap;
 	DamageFXMap m_dfxmap;
+	std::vector< std::pair<NameKeyType, DamageFX> > m_beforeMapOverrides;	///< see reset()
 
 };
 

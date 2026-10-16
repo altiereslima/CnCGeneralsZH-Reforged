@@ -66,7 +66,7 @@ public:
 
 	NetCommandList *getCommandList();
 
-	static NetCommandRef * ConstructNetCommandMsgFromRawData(UnsignedByte *data, UnsignedShort dataLength);
+	static NetCommandRef * ConstructNetCommandMsgFromRawData(UnsignedByte *data, UnsignedInt dataLength);
 	static NetPacketList ConstructBigCommandPacketList(NetCommandRef *ref);
 
 	UnsignedByte *getData();
@@ -105,7 +105,6 @@ protected:
 	static UnsignedInt GetDisconnectFrameCommandSize(NetCommandMsg *msg);
 	static UnsignedInt GetDisconnectScreenOffCommandSize(NetCommandMsg *msg);
 	static UnsignedInt GetFrameResendRequestCommandSize(NetCommandMsg *msg);
-	static UnsignedInt GetAllyCursorCommandSize(NetCommandMsg *msg);
 
 	static void FillBufferWithGameCommand(UnsignedByte *buffer, NetCommandRef *msg);
 	static void FillBufferWithAckCommand(UnsignedByte *buffer, NetCommandRef *msg);
@@ -131,7 +130,6 @@ protected:
 	static void FillBufferWithDisconnectFrameMessage(UnsignedByte *buffer, NetCommandRef *msg);
 	static void FillBufferWithDisconnectScreenOffMessage(UnsignedByte *buffer, NetCommandRef *msg);
 	static void FillBufferWithFrameResendRequestMessage(UnsignedByte *buffer, NetCommandRef *msg);
-	static void FillBufferWithAllyCursorMessage(UnsignedByte *buffer, NetCommandRef *msg);
 
 	Bool addFrameCommand(NetCommandRef *msg);
 	Bool isRoomForFrameMessage(NetCommandRef *msg);
@@ -186,8 +184,6 @@ protected:
 	Bool isRoomForDisconnectScreenOffMessage(NetCommandRef *msg);
 	Bool addFrameResendRequestCommand(NetCommandRef *msg);
 	Bool isRoomForFrameResendRequestMessage(NetCommandRef *msg);
-	Bool addAllyCursorCommand(NetCommandRef *msg);
-	Bool isRoomForAllyCursorMessage(NetCommandRef *msg);
 
 	Bool isAckRepeat(NetCommandRef *msg);
 	Bool isAckBothRepeat(NetCommandRef *msg);
@@ -222,7 +218,6 @@ protected:
 	static NetCommandMsg * readDisconnectFrameMessage(UnsignedByte *data, Int &i);
 	static NetCommandMsg * readDisconnectScreenOffMessage(UnsignedByte *data, Int &i);
 	static NetCommandMsg * readFrameResendRequestMessage(UnsignedByte *data, Int &i);
-	static NetCommandMsg * readAllyCursorMessage(UnsignedByte *data, Int &i);
 
 	void writeGameMessageArgumentToPacket(GameMessageArgumentDataType type, GameMessageArgumentType arg);
 	static void readGameMessageArgumentFromPacket(GameMessageArgumentDataType type, NetGameCommandMsg *msg, UnsignedByte *data, Int &i);

@@ -85,7 +85,7 @@ PropagandaTowerBehaviorModuleData::PropagandaTowerBehaviorModuleData( void )
 {
 
 	m_scanRadius = 1.0f;
-	m_scanDelayInFrames = 100;
+	m_scanDelayInFrames = ConvertRetailFrames(100u);
 	m_autoHealPercentPerSecond = 0.01f;
 	m_upgradedAutoHealPercentPerSecond = 0.02f;
 	m_pulseFX = NULL;

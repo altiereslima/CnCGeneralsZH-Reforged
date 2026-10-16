@@ -1,0 +1,25 @@
+# Shadow map texel snap on a scroll, over Scenarios/shadowbase.txt (a USA base on the open scrub
+# of Golden Oasis, no water in frame): held still, then panned slowly sideways, so a shadow edge
+# that crawls or flickers while the camera moves shows against the same edge held still. Heading
+# 45 has the sun behind the camera and the lit walls facing it. Then a close look at those walls
+# for shadow acne and a wide view both ways round (factor 5 logged 5.81 and drew an all-black
+# frame on both builds, so the wide view is 1.4; Cinema/shadowfar.txt has the real far test).
+# Shoot it with TreeSway = no and UseCloudMap = no in Options.ini, so the held part changes only
+# where something animates. Measured 2026-10-14 against generals_new60.exe (before the snap fix).
+#
+#   generals.exe -win -xres 1280 -yres 720 -msaa 0 -fps 120 -noFPSLimit -quickstart -noshellmap
+#     -multiInstance -observer -map "Maps\Golden Oasis\Golden Oasis.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 1 -scenario shadowbase -cinema shadowpan
+#     -video 60 1040 shadowpan -maxframes 1100
+
+0     cut        2200 3540 0.8 45 0
+1     cut        2200 3540 0.8 45 0
+3     shot
+4     move       2300 3540 6
+11    cut        2250 3540 0.35 45 10
+12.5  shot
+13    cut        2250 3540 1.4 45 0
+14.5  shot
+15    cut        2250 3540 1.4 -45 0
+16.5  shot
+17.5  end

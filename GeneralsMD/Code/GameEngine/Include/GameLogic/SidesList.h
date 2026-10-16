@@ -43,6 +43,7 @@ class DataChunkInput;
 struct DataChunkInfo;
 class DataChunkOutput;
 class BuildListInfo;
+class PlayerTemplate;
 class RenderObjClass;
 class ScriptList;
 class Shadow;
@@ -162,6 +163,15 @@ public:
 
 	void prepareForMP_or_Skirmish(void); // After a map is loaded, save & clear any players.
 
+	/** The skirmish side a computer player on pt copies its scripts from, and in *teams (when asked) the
+		* record its teams are in.  Under -modfactions a mod faction takes its own mod's side of the same
+		* Side (that mod's SkirmishScripts.scb, loadModSkirmishScripts) and retail's when the mod ships
+		* none; a retail faction takes retail's.  NULL when there is none. */
+	SidesInfo *findSkirmishSideFor(const PlayerTemplate *pt, TeamsInfoRec **teams);
+	/// how well a skirmish side of candidateSide from candidateMod (-1 retail) fits a player of side from
+	/// mod: 2 the player's own, 1 retail's standing in for a mod faction, 0 not at all
+	static Int skirmishSideFit(const AsciiString& candidateSide, Int candidateMod, const AsciiString& side, Int mod);
+
 	Int getNumTeams() { return m_teamrec.getNumTeams(); }
 	void emptyTeams();
 	void addTeam(const Dict* d);
@@ -201,6 +211,12 @@ protected:
 
 	TeamsInfoRec	m_teamrec;
 	TeamsInfoRec	m_skirmishTeamrec;
+
+	/// -modfactions: each mod's SkirmishScripts.scb players and teams; and the standard file's players for
+	/// sides the map has none for.  Kept out of m_skirmishSides, which a map's own sides nearly fill
+	std::vector<SidesInfo>	m_modSkirmishSides;
+	TeamsInfoRec	m_modSkirmishTeamrec;
+	void loadModSkirmishScripts(void);
 
 	Bool validateAllyEnemyList(const AsciiString& tname, AsciiString& allies);
 };

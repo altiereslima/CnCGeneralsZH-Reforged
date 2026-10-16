@@ -296,7 +296,7 @@ protected:
 	virtual void loadPostProcess();
 
 private:
-	enum { MIN_REPATH_TIME = 10 };										///< minimum # of frames must elapse before re-pathing
+	enum { MIN_REPATH_TIME = 10 * LOGICFRAMES_PER_RETAIL_FRAME };									///< minimum # of frames must elapse before re-pathing
 protected:
 	Coord3D							m_goalPosition;											///< the goal position to move to
 	PathfindLayerEnum		m_goalLayer;										///< The layer we are moving towards.
@@ -478,7 +478,7 @@ protected:
 
 private:
 
-	enum { MIN_RECOMPUTE_TIME = 10 };
+	enum { MIN_RECOMPUTE_TIME = 10 * LOGICFRAMES_PER_RETAIL_FRAME };
 
 	StateReturnType updateInternal( void );
 
@@ -527,7 +527,7 @@ protected:
 
 private:
 
-	enum { MIN_RECOMPUTE_TIME = 10 };
+	enum { MIN_RECOMPUTE_TIME = 10 * LOGICFRAMES_PER_RETAIL_FRAME };
 
 	StateReturnType updateInternal( void );
 
@@ -595,11 +595,11 @@ protected:
 
 	enum {ATTACK_RETRY_COUNT=5};
 	enum {ATTACK_CLOSE_ENOUGH_CELLS=8};
-	enum {ATTACK_MOVE_SCAN_RATE=10};						///< frames between target scans (the idle mood clock is seconds apart)
+	enum {ATTACK_MOVE_SCAN_RATE=LOGICFRAMES_PER_SECOND/3};						///< frames between target scans (the idle mood clock is seconds apart)
 	enum {ATTACK_MOVE_LEASH_CELLS=12};					///< how far a victim may pull us off the attack move
-	enum {ATTACK_MOVE_DUD_ENGAGE_FRAMES=15};		///< a fight shorter than this, with the victim still alive, never started
-	enum {ATTACK_MOVE_REACQUIRE_DELAY=30};			///< frames of pure movement after a dud fight or a broken leash
-	enum {ATTACK_MOVE_RETALIATE_FRAMES=30};			///< how recently we must have been hit to turn on whoever hit us
+	enum {ATTACK_MOVE_DUD_ENGAGE_FRAMES=LOGICFRAMES_PER_SECOND/2};		///< a fight shorter than this, with the victim still alive, never started
+	enum {ATTACK_MOVE_REACQUIRE_DELAY=LOGICFRAMES_PER_SECOND};			///< frames of pure movement after a dud fight or a broken leash
+	enum {ATTACK_MOVE_RETALIATE_FRAMES=LOGICFRAMES_PER_SECOND};			///< how recently we must have been hit to turn on whoever hit us
 
 	void startEngaging( Object *victim, Bool allowChase );	///< stop here and hand the victim to the attack sub-machine
 	void stopEngaging( void );									///< the fight is over; put back what startEngaging changed

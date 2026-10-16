@@ -247,7 +247,8 @@ UpdateSleepTime DeployStyleAIUpdate::update( void )
 				Drawable *draw = self->getDrawable();
 				if( draw )
 				{
-					draw->setAnimationFrame( totalFrames - framesLeft );
+					// the deploy animations are authored at 30 frames a second, one per retail logic frame
+					draw->setAnimationFrame( ( totalFrames - framesLeft ) / LOGICFRAMES_PER_RETAIL_FRAME );
 				}
 			}
 			getStateMachine()->setTemporaryState( AI_BUSY, UPDATE_SLEEP_NONE );
@@ -260,7 +261,7 @@ UpdateSleepTime DeployStyleAIUpdate::update( void )
 				Drawable *draw = self->getDrawable();
 				if( draw )
 				{
-					draw->setAnimationFrame( framesLeft );
+					draw->setAnimationFrame( framesLeft / LOGICFRAMES_PER_RETAIL_FRAME );
 				}
 			}
 			getStateMachine()->setTemporaryState( AI_BUSY, UPDATE_SLEEP_NONE );
@@ -307,7 +308,7 @@ void DeployStyleAIUpdate::setMyState( DeployStateTypes stateID, Bool reverseDepl
 					Drawable *draw = self->getDrawable();
 					if( draw )
 					{
-						draw->setAnimationFrame( totalFrames - framesLeft );
+						draw->setAnimationFrame( ( totalFrames - framesLeft ) / LOGICFRAMES_PER_RETAIL_FRAME );
 					}
 				}
 			}
@@ -350,7 +351,7 @@ void DeployStyleAIUpdate::setMyState( DeployStateTypes stateID, Bool reverseDepl
 					Drawable *draw = self->getDrawable();
 					if( draw )
 					{
-						draw->setAnimationFrame( framesLeft );
+						draw->setAnimationFrame( framesLeft / LOGICFRAMES_PER_RETAIL_FRAME );
 					}
 				}
 			}

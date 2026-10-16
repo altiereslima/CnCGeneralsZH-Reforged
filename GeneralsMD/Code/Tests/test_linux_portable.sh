@@ -21,8 +21,8 @@
 #   1. the folder (no art, no archive): the launcher, generals stripped with its debuglink, the debug file,
 #      the overlay, the licences, the icon (a 48 px PNG), the .desktop file, README.txt, and VERSION naming
 #      this commit; generals needs nothing newer than GLIBC_2.31 and no libstdc++ symbol;
-#   2. armed controls, from the same build without rebuilding: an overlay file that forces the HUD overlay
-#      on (off by default in Release), and a static library on the link line that macos-app-licenses.txt does not name, are each refused;
+#   2. an armed control, from the same build without rebuilding: a static library on the link line that
+#      macos-app-licenses.txt does not name is refused;
 #   3. with ZH_DATA_DIR and the platform image: E1 through the packaged launcher (replay-check.sh --package),
 #      inside the platform image, no network - the recording, its playback and a second run agree.
 #
@@ -81,16 +81,12 @@ glibc="$(objdump -T "$OUT/bin/generals" | grep -o 'GLIBC_[0-9.]*' | sort -uV | t
 check '[ "$(printf "%s\n%s\n" "$glibc" GLIBC_2.31 | sort -V | tail -1)" = GLIBC_2.31 ] && ! objdump -T "$OUT/bin/generals" | grep -qE "GLIBCXX_|CXXABI_"' \
 	"generals needs $glibc at most GLIBC_2.31, and no libstdc++ symbol"
 
-# 2. armed controls: the same build, one thing wrong, --no-build
+# 2. an armed control: the same build, one thing wrong, --no-build
 fake="$T/fake-build"
 mkdir -p "$fake"
 for f in generals generated ffmpeg; do ln -s "$PB/$f" "$fake/$f"; done
-cp -R -L "$PB/overlay" "$fake/overlay" && printf 'ShowHudOverlay = Yes\n' > "$fake/overlay/HudOn.ini"
+cp -R -L "$PB/overlay" "$fake/overlay"
 cp "$PB/build.ninja" "$fake/build.ninja"
-out="$(bash "$CODE/Tools/linux-portable.sh" --build "$fake" --out "$T/hud-on" --no-build --no-art --no-tar 2>&1)"; status=$?
-check '[ $status -ne 0 ] && printf "%s" "$out" | grep -q "may force the HUD overlay on" && [ ! -e "$T/hud-on" ]' \
-	"armed: an overlay forcing the HUD on is refused, and no folder is left"
-rm -f "$fake/overlay/HudOn.ini"
 sed -i 's#libwwlib\.a#libwwlib.a libnotlicensed.a#' "$fake/build.ninja"
 out="$(bash "$CODE/Tools/linux-portable.sh" --build "$fake" --out "$T/unlicensed" --no-build --no-art --no-tar 2>&1)"; status=$?
 check '[ $status -ne 0 ] && printf "%s" "$out" | grep -q "does not cover: notlicensed"' \

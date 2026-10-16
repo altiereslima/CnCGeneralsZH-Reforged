@@ -53,6 +53,9 @@
 //-----------------------------------------------------------------------------
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
+#include <map>
+#include <string>
+#include <vector>
 
 //-----------------------------------------------------------------------------
 // USER INCLUDES //////////////////////////////////////////////////////////////
@@ -109,11 +112,90 @@ public:
 		* would land. */
 	GameWindow *findHotKey( const AsciiString& key, Bool *pressable ) const;
 
+	/** The key a command button gets: the one the player gave it in Hotkeys.ini (the launcher's
+		* Hotkeys page writes it, INI::parseCommandButtonHotKeyDefinition reads it), 0 where the player
+		* took the key away, and labelKey, the letter after the label's '&', where the player left the
+		* button alone; upper case.  Attack move, stop, guard, rally point, evacuate and sell have their
+		* fixed letters; another button gets one only from the player, and loses it to the fixed order
+		* on a bar holding both (addHotKey).  Force Attack is 0: it is Ctrl, painted on the
+		* cameo, never a letter. */
+	static WideChar playerButtonKey( const AsciiString& button, WideChar labelKey, Int commandType );
+	/// playerButtonKey over `keys` (lower case button name to letter, 0 for none) in place of the file's
+	static WideChar buttonKeyIn( const AsciiString& button, WideChar labelKey, Int commandType,
+		const std::map< std::string, WideChar >& keys );
+	static WideChar fixedKey( const AsciiString& button, Int commandType );	///< the bar's fixed letter, or 0
+	/** The name Hotkeys.ini gives a button: a mod's own (-modfactions' "M<n>~") or, under a plain
+		* -mod, the last mod's as "<scope>:<button>", retail's as it is; what findPlayerKey looks up. */
+	static std::string fileButtonName( const AsciiString& button );
+
+	/// Hotkeys.ini out of the user data folder: the button letters afresh, its CommandMap blocks over
+	/// the records the MetaMap holds.  A block that will not parse ends the file there.
+	static void loadPlayerKeys( void );
+	/// Every key as the engine started with them, from the language's CommandMap.ini and Hotkeys.ini
+	/// again, so a file the options menu has just written counts from the next key press.
+	static void reloadKeys( void );
+
 private:
 	typedef std::map<AsciiString, HotKey> HotKeyMap;
 	HotKeyMap m_hotKeyMap;
 };
 extern HotKeyManager *TheHotKeyManager;
+
+//-----------------------------------------------------------------------------
+/** Hotkeys.ini as the launcher's Hotkeys page writes it (launcher/hotkeys.js, formatOverrides and
+	* parseOverrides), so the options menu's Hotkeys page and the launcher each read what the other
+	* wrote.  The player's part comes first; from HOTKEYS_LAUNCHER_PART on are the launcher's own keys,
+	* which the game keeps as they stand except for a block naming a command or a button the player's
+	* part now names, whose later block would otherwise beat the player's choice. */
+//-----------------------------------------------------------------------------
+extern const char HOTKEYS_LAUNCHER_PART[];
+
+struct HotkeyBinding
+{
+	std::string key;				///< a KEY_ name, empty for no key
+	std::string modifiers;	///< a ModifierNames name, NONE for none
+	HotkeyBinding() : modifiers( "NONE" ) {}
+	HotkeyBinding( const std::string& k, const std::string& m ) : key( k ), modifiers( m ) {}
+	bool operator==( const HotkeyBinding& other ) const { return key == other.key && modifiers == other.modifiers; }
+	bool operator!=( const HotkeyBinding& other ) const { return !( *this == other ); }
+};
+
+/** One command a player can bind: the shipped CommandMap.ini's own entry, or one it binds to nothing. */
+struct HotkeyCommandRow
+{
+	std::string id;
+	HotkeyBinding binding;	///< the game's own key
+	std::string usableIn;		///< UseableIn as the file says it
+	std::string category;
+	std::string label;			///< DisplayName, empty for none
+	std::string pair;				///< END_ of a BEGIN_, empty otherwise
+	Bool barOnly;						///< Force Attack's hold, set on the command bar page only
+	Bool launcherDefault;		///< a key the launcher gives a command the game leaves unbound
+};
+
+struct HotkeysFile
+{
+	std::map< std::string, std::string > buttons;				///< button name to its letter, "" for none
+	std::map< std::string, HotkeyBinding > commands;		///< command to its key, key "" for none
+	std::string launcherPart;	///< what followed HOTKEYS_LAUNCHER_PART, verbatim; empty when the file had none
+};
+
+/** The rows of the shipped Data\<language>\CommandMap.ini text, then the commands it leaves unbound
+	* and Force Attack's hold (loadCommands in hotkeys.js). */
+std::vector< HotkeyCommandRow > Hotkeys_commandRows( const std::string& commandMapText );
+/** The player's part of a Hotkeys.ini text, and the launcher's part as it stands (parseOverrides). */
+HotkeysFile Hotkeys_parse( const std::string& text, const std::vector< HotkeyCommandRow >& rows );
+/** The file for these keys, byte for byte what the launcher writes for the same player part. */
+std::string Hotkeys_format( const HotkeysFile& file, const std::vector< HotkeyCommandRow >& rows );
+/** The launcher's part's own blocks, by name to its Key line (CommandMap) or letter (CommandButtonHotKey). */
+void Hotkeys_launcherKeys( const std::string& launcherPart, std::map< std::string, HotkeyBinding > *commands,
+	std::map< std::string, std::string > *buttons );
+/** Whether a KEY_ name is one the launcher reads (hotkeys.js, KEY_NAMES). */
+Bool Hotkeys_isKeyName( const std::string& key );
+/** English words for a binding, the launcher's chordText: "Ctrl + F", "Alt", "Num 4"; empty for none. */
+std::string Hotkeys_chordText( const HotkeyBinding& binding );
+/** The launcher's name order (String.localeCompare), for the blocks of one kind. */
+bool Hotkeys_nameLess( const std::string& left, const std::string& right );
 //-----------------------------------------------------------------------------
 // INLINING ///////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------

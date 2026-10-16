@@ -60,7 +60,7 @@ public:
 	{
 		m_finalRadius = 200.0f;
 		m_startRadius = 0.0f;
-    m_radiusGrowRate = 10.0f;
+    m_radiusGrowRate = ConvertRetailPerFrameRate(10.0f);
 		m_radiusParticleSystemTmpl = NULL;
 		SET_ALL_KINDOFMASK_BITS( m_kindOf );
 	}
@@ -73,7 +73,7 @@ public:
 		{
 			{ "StartRadius",						         INI::parseReal,									 NULL, offsetof( GrantStealthBehaviorModuleData, m_startRadius ) },
 			{ "FinalRadius",						         INI::parseReal,									 NULL, offsetof( GrantStealthBehaviorModuleData, m_finalRadius ) },
-			{ "RadiusGrowRate",						       INI::parseReal,									 NULL, offsetof( GrantStealthBehaviorModuleData, m_radiusGrowRate ) },
+			{ "RadiusGrowRate",						       INI::parseRetailPerFrameReal,								 NULL, offsetof( GrantStealthBehaviorModuleData, m_radiusGrowRate ) },
 			{ "KindOf",						    KindOfMaskType::parseFromINI,					       NULL, offsetof( GrantStealthBehaviorModuleData, m_kindOf ) },		
 			{ "RadiusParticleSystemName",				 INI::parseParticleSystemTemplate, NULL, offsetof( GrantStealthBehaviorModuleData, m_radiusParticleSystemTmpl ) },
 			{ 0, 0, 0, 0 }

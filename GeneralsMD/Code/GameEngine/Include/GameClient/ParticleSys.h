@@ -612,6 +612,12 @@ public:
 
 	AsciiString getName( void ) const { return m_name; }
 
+	/** "ExplosionDebrisTrail = Yes": one of the fork's smoke-trailing blast fragments, which the
+		* player's DebrisTrails option turns off.  A system built from it while the option is off is
+		* destroyed before it emits, so every FXList and object creation list stays the same for everyone. */
+	Bool isExplosionDebrisTrail( void ) const { return m_explosionDebrisTrail; }
+	void setExplosionDebrisTrail( Bool on ) { m_explosionDebrisTrail = on; }
+
 	// This function was made const because of update modules' module data being all const.
 	ParticleSystem *createSlaveSystem( Bool createSlaves = TRUE ) const ;					///< if returns non-NULL, it is a slave system for use
 
@@ -635,6 +641,7 @@ protected:
 
 protected:
 	AsciiString								m_name;													///< the name of this template
+	Bool											m_explosionDebrisTrail;						///< switched off with the DebrisTrails option (client only)
 
 	// This has to be mutable because of the delayed initialization thing in createSlaveSystem
 	mutable const ParticleSystemTemplate *m_slaveTemplate;		///< if non-NULL, use this to create a slave system
@@ -793,6 +800,9 @@ public:
 	/// TRUE if this system is the kind of big soft cloud that should shade the ground under it
 	Bool shouldCastGroundShadow( void ) const;
 
+	/// How much of this system the local player sees, for the stealth of what it is attached to.
+	Real getStealthFade( void ) const;
+
 protected:
 
 	// snapshot methods
@@ -910,6 +920,8 @@ public:
 	ParticleSystemTemplate *findTemplate( const AsciiString &name ) const;
 	ParticleSystemTemplate *findParentTemplate( const AsciiString &name, int parentNum ) const;
 	ParticleSystemTemplate *newTemplate( const AsciiString &name );
+	/// a map.ini is about to write over this template; reset() puts it back
+	void rememberTemplateBeforeMapINI( ParticleSystemTemplate *sysTemplate );
 
 	/// given a template, instantiate a particle system
 	ParticleSystem *createParticleSystem( const ParticleSystemTemplate *sysTemplate,
@@ -990,6 +1002,7 @@ protected:
 
 private:
 	TemplateMap m_templateMap;		///< a hash map of all particle system templates
+	std::vector< std::pair<ParticleSystemTemplate *, ParticleSystemInfo> > m_beforeMapOverrides;	///< see reset()
 };
 
 /// The particle system manager singleton

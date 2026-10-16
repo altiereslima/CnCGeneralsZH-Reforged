@@ -33,6 +33,7 @@
 
 #include "Lib/WideCharFns.h"
 
+#include "Common/ArchiveFileSystem.h"
 #include "Common/CRCDebug.h"
 #include "Common/file.h"
 #include "Common/FileSystem.h"
@@ -604,6 +605,7 @@ void GameInfo::setMap( AsciiString mapName )
 		const MapMetaData *mapData = TheMapCache->findMap( mapName );
 		if (mapData)
 		{
+			DEBUG_LOG(("GameInfo::setMap() - '%s' from '%s'\n", mapName.str(), TheArchiveFileSystem->getArchiveFilenameForFile(mapName).str()));
 			m_mapMask = 1;
 			AsciiString path = mapName;
 			path.removeLastChar();

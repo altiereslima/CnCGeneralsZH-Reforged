@@ -250,7 +250,7 @@ UpdateSleepTime TensileFormationUpdate::update( void )
 
 		}
 		else
-			return UPDATE_SLEEP(30);
+			return UPDATE_SLEEP(LOGICFRAMES_PER_SECOND);
 	}
 
 
@@ -258,7 +258,7 @@ UpdateSleepTime TensileFormationUpdate::update( void )
 	if ( ! draw )
 		return UPDATE_SLEEP_NONE;
 
-	if (++m_life > 300)
+	if (++m_life > ConvertRetailFrames(300u))
 	{
 		draw->clearModelConditionFlags(MAKE_MODELCONDITION_MASK(MODELCONDITION_MOVING));
 		draw->clearModelConditionFlags(MAKE_MODELCONDITION_MASK(MODELCONDITION_FREEFALL));
@@ -274,7 +274,7 @@ UpdateSleepTime TensileFormationUpdate::update( void )
 	}
 
 
-	if ( m_life%30 == 29 )		
+	if ( m_life%LOGICFRAMES_PER_SECOND == LOGICFRAMES_PER_SECOND - 1 )
 		propagateDislodgement( TRUE );
 
 
@@ -286,11 +286,11 @@ UpdateSleepTime TensileFormationUpdate::update( void )
 
 	Coord3D slope = { normal.x, normal.y, 0.0f};
 	Real steepness = 1.0f - normal.z;
-	slope.scale( 0.3f + steepness);
+	slope.scale( ConvertRetailPerFrameSquared( 0.3f + steepness ) );
 
 	m_inertia.add( &slope );
 
-	Real friction = 0.95f;
+	static const Real friction = ConvertRetailPerFrameFactor( 0.95f );
 	m_inertia.scale( friction );
 
 
@@ -310,6 +310,7 @@ UpdateSleepTime TensileFormationUpdate::update( void )
 
 	//APPLY TENSORS===========================
 	Coord3D tensorSum = { 0, 0, 0 };
+	static const Real tensorKeep = ConvertRetailPerFrameFactor( 0.93f );
 	for ( int t = 0; t < 4; ++t )
 	{
 		Object *other = TheGameLogic->findObjectByID( m_links[ t ].id );
@@ -324,8 +325,8 @@ UpdateSleepTime TensileFormationUpdate::update( void )
 
 			//Coord3D desiredPos = { theirPos->x - m_links[ t ].tensor.x, theirPos->y - m_links[ t ].tensor.y, theirPos->z - m_links[ t ].tensor.z };
 			
-			newPos.x = newPos.x*0.93f + desiredPos.x*0.07f;
-			newPos.y = newPos.y*0.93f + desiredPos.y*0.07f; 
+			newPos.x = newPos.x*tensorKeep + desiredPos.x*(1.0f - tensorKeep);
+			newPos.y = newPos.y*tensorKeep + desiredPos.y*(1.0f - tensorKeep);
 			newPos.z = MIN( m_lowestSlideElevation, TheTerrainLogic->getGroundHeight(newPos.x, newPos.y) );//rest on surface here
 
 			tensor.normalize();
@@ -350,12 +351,12 @@ UpdateSleepTime TensileFormationUpdate::update( void )
 
 	draw->setModelConditionFlags(MAKE_MODELCONDITION_MASK(MODELCONDITION_POST_COLLAPSE));
 			
-	if ( m_life < 200 )
+	if ( m_life < ConvertRetailFrames(200u) )
 		draw->setModelConditionFlags(MAKE_MODELCONDITION_MASK(MODELCONDITION_MOVING));
 	else
 		draw->clearModelConditionFlags(MAKE_MODELCONDITION_MASK(MODELCONDITION_MOVING));
 
-	if ( fabs( pos->z - newPos.z ) > 0.2f && m_life < 100)
+	if ( fabs( pos->z - newPos.z ) > ConvertRetailPerFrameRate( 0.2f ) && m_life < ConvertRetailFrames(100u))
 		draw->setModelConditionFlags(MAKE_MODELCONDITION_MASK(MODELCONDITION_FREEFALL));
 	else
 		draw->clearModelConditionFlags(MAKE_MODELCONDITION_MASK(MODELCONDITION_FREEFALL));

@@ -252,16 +252,16 @@ struct MinimapInputFixture
 		ui->enabled = TRUE;
 		TheInGameUI = ui;
 		// Reforged's radar: left looks, right orders.  Classic swaps them, and says so in its own test
-		savedStyle = TheGlobalData->m_interfaceStyle;
+		savedStyle = TheGlobalData->m_mouseStyle;
 		savedAlternateMouse = TheGlobalData->m_useAlternateMouse;
-		TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_REFORGED;
+		TheWritableGlobalData->m_mouseStyle = MOUSE_STYLE_REFORGED;
 		TheWritableGlobalData->m_useAlternateMouse = FALSE;
 	}
 	Int savedStyle;
 	Bool savedAlternateMouse;
 	~MinimapInputFixture()
 	{
-		TheWritableGlobalData->m_interfaceStyle = savedStyle;
+		TheWritableGlobalData->m_mouseStyle = savedStyle;
 		TheWritableGlobalData->m_useAlternateMouse = savedAlternateMouse;
 		windows.winDestroyAll();
 		TheRadar = savedRadar;
@@ -315,7 +315,7 @@ TEST(minimap_classic_right_button_looks_with_units_selected)
 	MinimapInputFixture f;
 	MinimapMessages messages;
 	messages.stream.attachTranslator(NEW WindowTranslator, 10);
-	TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
+	TheWritableGlobalData->m_mouseStyle = MOUSE_STYLE_CLASSIC;
 	((MinimapTestUI*)TheInGameUI)->selected.push_back(NULL);
 	f.event(messages, GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN, 120, 220);
 	CHECK(f.engine.view.lookAtCalls == 1);
@@ -328,13 +328,13 @@ TEST(minimap_classic_right_button_looks_with_units_selected)
 TEST(minimap_alternate_mouse_looks_on_the_left_in_classic_and_reforged_ignores_it)
 {
 	CHECK(bootOnce());
-	const Int styles[2] = { INTERFACE_STYLE_CLASSIC, INTERFACE_STYLE_REFORGED };
+	const Int styles[2] = { MOUSE_STYLE_CLASSIC, MOUSE_STYLE_REFORGED };
 	for (Int i = 0; i < 2; ++i)
 	{
 		MinimapInputFixture f;
 		MinimapMessages messages;
 		messages.stream.attachTranslator(NEW WindowTranslator, 10);
-		TheWritableGlobalData->m_interfaceStyle = styles[i];
+		TheWritableGlobalData->m_mouseStyle = styles[i];
 		TheWritableGlobalData->m_useAlternateMouse = TRUE;
 		((MinimapTestUI*)TheInGameUI)->selected.push_back(NULL);
 		f.event(messages, GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN, 120, 220);
@@ -392,28 +392,22 @@ TEST(minimap_drag_works_during_keyboard_scroll_and_pins_to_a_letterboxed_picture
 }
 
 /* 1.04's radar in both of its mouse setups: the look button moves the camera on the press and a drag
-   after it leaves the camera alone, and the other button with units selected gives 1.04's orders - the
-   attack move command when it is waiting, a plain move otherwise. */
-TEST(minimap_classic_looks_on_the_press_and_orders_attack_move_in_both_mouse_setups)
+   after it leaves the camera alone. */
+TEST(minimap_classic_looks_on_the_press_in_both_mouse_setups)
 {
 	CHECK(bootOnce());
-	CommandButton *attackMove = newInstance(CommandButton);
-	attackMove->friend_setCommandType(GUI_COMMAND_ATTACK_MOVE);
 	for (Int alternate = 0; alternate < 2; ++alternate)
 	{
 		MinimapInputFixture f;
 		MinimapMessages messages;
 		messages.stream.attachTranslator(NEW WindowTranslator, 10);
-		TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
+		TheWritableGlobalData->m_mouseStyle = MOUSE_STYLE_CLASSIC;
 		TheWritableGlobalData->m_useAlternateMouse = alternate ? TRUE : FALSE;
-		MinimapTestUI *ui = (MinimapTestUI*)TheInGameUI;
-		ui->selected.push_back(NULL);
+		((MinimapTestUI*)TheInGameUI)->selected.push_back(NULL);
 
 		const GameMessage::Type lookDown = alternate ? GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN : GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN;
 		const GameMessage::Type lookDrag = alternate ? GameMessage::MSG_RAW_MOUSE_LEFT_DRAG : GameMessage::MSG_RAW_MOUSE_RIGHT_DRAG;
 		const GameMessage::Type lookUp = alternate ? GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP : GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP;
-		const GameMessage::Type orderDown = alternate ? GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN : GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN;
-		const GameMessage::Type orderUp = alternate ? GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP : GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP;
 
 		f.event(messages, lookDown, 120, 220);
 		CHECK(f.engine.view.lookAtCalls == 1);
@@ -421,15 +415,7 @@ TEST(minimap_classic_looks_on_the_press_and_orders_attack_move_in_both_mouse_set
 		CHECK(f.engine.view.lookAtCalls == 1);
 		f.event(messages, lookUp, 150, 250);
 		CHECK(messages.commands.getFirstMessage() == NULL);
-
-		ui->command = attackMove;
-		f.event(messages, orderDown, 120, 220);
-		f.event(messages, orderUp, 120, 220);
-		CHECK(f.engine.view.lookAtCalls == 1);
-		const GameMessage *order = messages.commands.getFirstMessage();
-		CHECK(order != NULL && order->getType() == GameMessage::MSG_DO_ATTACKMOVETO);
 	}
-	attackMove->deleteInstance();
 }
 
 namespace
@@ -461,7 +447,7 @@ TEST(classic_right_click_deselects_or_takes_back_a_command_as_1_04_did)
 	f.mouse.m_dragTolerance = 25;
 	f.mouse.m_dragTolerance3D = 25;
 	f.mouse.m_dragToleranceMS = 250;
-	f.global->m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
+	f.global->m_mouseStyle = MOUSE_STYLE_CLASSIC;
 	CommandButton *guard = newInstance(CommandButton);
 	guard->friend_setCommandType(GUI_COMMAND_GUARD);
 	{

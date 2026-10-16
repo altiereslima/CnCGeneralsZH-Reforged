@@ -77,8 +77,12 @@ public:
 	Object* scanClosestTarget();
 	void fireWhenReady();
 
-	void setCleanupAreaParameters( const Coord3D *pos, Real range ); //This allows the unit to cleanup an area until clean, then the AI goes idle.
+	/// This allows the unit to cleanup an area until clean, then the AI goes idle.  forgetGivenUp: a player's
+	/// order, which tries the ground it gave up on again; the computer's leaves it given up
+	void setCleanupAreaParameters( const Coord3D *pos, Real range, Bool forgetGivenUp );
 	Bool isCleaningArea() const { return m_moveRange > 0.0f; }	///< out cleaning an area, the cleanup ability's or one it noticed by itself
+	Object *closestHazard( const Coord3D *from, Real range ) const;	///< the nearest hazard within range, none on the ground it gave up on
+	void giveUpArea();	///< leave the ground round the hazard it is after alone from now on, as if it could not reach it
 
 protected:
 
@@ -99,7 +103,16 @@ protected:
 	Bool		m_resumeGuard;
 	Int			m_resumeGuardMode;	///< a GuardMode
 	Bool		m_returning;				///< the area is clean and the walk back to m_pos has been ordered
-	Int			m_approaches;				///< scans in a row standing out of reach of the hazard it is after
+	Int			m_approaches;				///< scans in a row out of reach of its hazard, standing about, and no nearer to it
+	Bool		m_approaching;			///< m_approachPos holds the ground m_approaches counts for
+	Coord3D	m_approachPos;			///< where the hazard it is after stood when the count began; any within GIVEN_UP_RADIUS is the same ground
+	Coord3D	m_lastScanPos;			///< where it stood on the last scan that counted
+	Real		m_closestApproach;	///< the nearest it has come to a hazard on that ground
+	UnsignedInt	m_progressFrame;	///< the last frame of progress in the area: started, nearer, a hazard hosed or gone
+	ObjectID	m_lastTargetID;		///< the hazard the last scan found
+	ObjectID	m_resumeGuardObject;	///< the object it was guarding when a cleanup took it off guard, or INVALID_ID for a spot
+	Bool		m_hasGivenUp;				///< m_givenUpPos holds ground it gave up on
+	Coord3D	m_givenUpPos;				///< where the last hazard it gave up on as out of reach stood; none near it is gone for again
 };
 
 

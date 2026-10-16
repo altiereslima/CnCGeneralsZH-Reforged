@@ -57,7 +57,11 @@ public:
 
 	// Xfer methods
 	virtual void open( AsciiString identifier );		///< open file for writing
-	virtual void close( void );											///< close file
+	virtual void close( void );											///< write the file and put it in place
+	/// Drop what was written and leave any file already at the identifier as it was.  Close writes
+	/// into "<identifier>.tmp" and renames that over the identifier only once every byte is down, so
+	/// a full disk or a crash mid-save never costs the save that was there.
+	void discard( void );
 	virtual Int beginBlock( void );									///< write placeholder block size
 	virtual void endBlock( void );									///< backup to last begin block and write size
 	virtual void skip( Int dataSize );							///< skipping during a write is a no-op

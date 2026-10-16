@@ -320,6 +320,12 @@ DX11BackendClass::DX11BackendClass()
 	SceneDepthStale = true;
 	SceneDepthRefused = false;
 	FrameDepthCopies = 0;
+	DrawEffect = DRAW_EFFECT_NONE;
+	memset(DrawEffectNumbers, 0, sizeof(DrawEffectNumbers));
+	SceneColourCopy = NULL;
+	SceneColourCopyView = NULL;
+	SceneColourStale = true;
+	SceneColourRefused = false;
 	set_identity(WorldFromClip);
 	for (unsigned stage = 0; stage < DX11_BACKEND_TEXTURE_STAGES; ++stage) {
 		set_identity(TextureTransforms[stage]);
@@ -481,6 +487,7 @@ void DX11BackendClass::Shutdown()
 	ShadowMapBound = false;
 	Release_Smoke_Map();
 	Release_Scene_Depth();
+	Release_Scene_Colour();
 	RenderStates.Set_Shadow_Caster_Pass(false);
 	Note_Shadow_State_Changed();
 	Device = NULL;
@@ -644,7 +651,9 @@ static const float SMOKE_SELF_SHADOW_CURVE = 16.0f;
 // blastcheck frames of 2026-10-06, and at zero it is the unfaded game's cut lines outright.  Twelve
 // on the smoothstep (SOFT_PARTICLE_SAMPLING) is smooth in both and keeps the toxin carpet whole; the
 // islands once blamed on twelve were the straight ramp's creases, which the smoothstep took away.
-// Twenty starts to thin the carpet.
+// Twenty starts to thin the carpet.  It is the longest fade and not the only one: a sprite fades
+// over its own half width where that is shorter, so a mine's flare a few units across, hanging
+// under one unit above the ground, is not faded away entire.
 static const float SOFT_PARTICLE_FADE_UNITS = 12.0f;
 
 // Each caster is a disc facing the sun, drawn as a four corner strip whose corners come from the
@@ -976,6 +985,128 @@ bool DX11BackendClass::Additive_Glow() const
 		&& RenderStates.Get_Render_State(D3DRS_SRCBLEND) == D3DBLEND_ONE
 		&& RenderStates.Get_Render_State(D3DRS_DESTBLEND) == D3DBLEND_ONE
 		&& RenderStates.Get_Render_State(D3DRS_BLENDOP) == D3DBLENDOP_ADD;
+}
+
+void DX11BackendClass::Set_Draw_Effect(unsigned effect, const float parameters[4])
+{
+	if (effect >= DRAW_EFFECT_COUNT) {
+		effect = DRAW_EFFECT_NONE;
+	}
+	if (DrawEffect != effect) {
+		DrawEffect = effect;
+		PipelineChanged = true;
+		ConstantsChanged = true;
+		TexturesChanged = true;		// the cloak binds the scene's copy with the stages
+	}
+	if (effect != DRAW_EFFECT_NONE && memcmp(DrawEffectNumbers, parameters, sizeof(DrawEffectNumbers)) != 0) {
+		memcpy(DrawEffectNumbers, parameters, sizeof(DrawEffectNumbers));
+		ConstantsChanged = true;
+	}
+	// Before any of the object's draws resolves: a copy the device refuses has to be known before a
+	// cloak program is chosen, or that program reads nothing at t8 and draws the unit black.
+	if (effect == DRAW_EFFECT_CLOAK && CurrentTarget == NULL && !ShadowMapBound) {
+		Take_Scene_Colour();
+	}
+}
+
+/** Which look the current draw takes.  Only the scene's own world draws, and in the sun's map only
+		the cloak's thinned shadow: not a mirror or a filter target, not a screen space quad and not a transcribed program.  A draw
+		adding light (ONE as either factor) takes the outage alone, which puts a building's glow cards
+		out with it; dressed in arcs or a rim, the card's whole quad would show.  A multiplying pass
+		takes none.  The cloak needs the scene's copy, and without one the object keeps its plain
+		translucency. */
+unsigned DX11BackendClass::Draw_Effect() const
+{
+	// The cloak's shadow is the one look the sun's map takes, and the only place it is drawn.
+	if (ShadowMapBound != (DrawEffect == DRAW_EFFECT_CLOAK_SHADOW)) {
+		return DRAW_EFFECT_NONE;
+	}
+	if (DrawEffect == DRAW_EFFECT_NONE || CurrentTarget != NULL
+		|| (VertexFormat & D3DFVF_XYZRHW) != 0
+		|| VertexProgram != ENGINE_SHADER_NONE || PixelProgram != ENGINE_SHADER_NONE) {
+		return DRAW_EFFECT_NONE;
+	}
+	if (RenderStates.Get_Render_State(D3DRS_ALPHABLENDENABLE) != FALSE) {
+		const DWORD source = RenderStates.Get_Render_State(D3DRS_SRCBLEND);
+		const DWORD destination = RenderStates.Get_Render_State(D3DRS_DESTBLEND);
+		if (source == D3DBLEND_ZERO || source == D3DBLEND_DESTCOLOR || destination == D3DBLEND_SRCCOLOR) {
+			return DRAW_EFFECT_NONE;
+		}
+		if (source == D3DBLEND_ONE || destination == D3DBLEND_ONE) {
+			return (DrawEffect == DRAW_EFFECT_OUTAGE) ? DRAW_EFFECT_OUTAGE : DRAW_EFFECT_NONE;
+		}
+	}
+	if (DrawEffect == DRAW_EFFECT_CLOAK && SceneColourRefused) {
+		return DRAW_EFFECT_NONE;
+	}
+	return DrawEffect;
+}
+
+void DX11BackendClass::Release_Scene_Colour()
+{
+	if (SceneColourCopyView != NULL) {
+		SceneColourCopyView->Release();
+		SceneColourCopyView = NULL;
+	}
+	if (SceneColourCopy != NULL) {
+		SceneColourCopy->Release();
+		SceneColourCopy = NULL;
+	}
+	SceneColourStale = true;
+}
+
+/** The scene's colour for the cloak, copied once a frame at the first cloaked draw: made at the
+		scene target's own size and format and made again when a resize changes either.  A multisampled
+		target cannot be copied into a texture that is read by pixel, so that refuses the cloak. */
+bool DX11BackendClass::Take_Scene_Colour()
+{
+	if (SceneColourRefused) {
+		return false;
+	}
+	if (!SceneColourStale) {
+		return true;
+	}
+	ID3D11Resource * source = NULL;
+	Device->Get_Scene_View()->GetResource(&source);
+	D3D11_TEXTURE2D_DESC description;
+	static_cast<ID3D11Texture2D *>(source)->GetDesc(&description);
+	if (SceneColourCopy != NULL) {
+		D3D11_TEXTURE2D_DESC held;
+		SceneColourCopy->GetDesc(&held);
+		if (held.Width != description.Width || held.Height != description.Height
+				|| held.Format != description.Format) {
+			Release_Scene_Colour();
+		}
+	}
+	if (SceneColourCopy == NULL) {
+		description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		description.MiscFlags = 0;
+		description.Usage = D3D11_USAGE_DEFAULT;
+		description.CPUAccessFlags = 0;
+		// Read the copy the way the scene is written, which also covers a typeless surface.
+		D3D11_RENDER_TARGET_VIEW_DESC written;
+		Device->Get_Scene_View()->GetDesc(&written);
+		D3D11_SHADER_RESOURCE_VIEW_DESC view;
+		memset(&view, 0, sizeof(view));
+		view.Format = written.Format;
+		view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		view.Texture2D.MipLevels = 1;
+		if (description.SampleDesc.Count > 1
+			|| FAILED(Device->Get_Device()->CreateTexture2D(&description, NULL, &SceneColourCopy))
+			|| FAILED(Device->Get_Device()->CreateShaderResourceView(SceneColourCopy, &view,
+				&SceneColourCopyView))) {
+			Note_Refusal("the device refused a copy of the scene's colour for the cloak");
+			Release_Scene_Colour();
+			SceneColourRefused = true;
+			source->Release();
+			return false;
+		}
+	}
+	Device->Get_Context()->CopyResource(SceneColourCopy, source);
+	SceneColourStale = false;
+	++FrameDepthCopies;		// counted with the depth copies, so DX11 FRAME COST sees it
+	source->Release();
+	return true;
 }
 
 bool DX11BackendClass::Smoke_Glow() const
@@ -1681,6 +1812,7 @@ void DX11BackendClass::Dump_Program(const std::string & key, const std::string &
 void DX11BackendClass::Begin_Scene()
 {
 	SceneDepthStale = true;
+	SceneColourStale = true;
 
 	// A scene can begin with a render target already set: the water's reflection and the shadow
 	// projector both set theirs and then call WW3D::Begin_Render, and forcing the back buffer here
@@ -1891,6 +2023,7 @@ bool DX11BackendClass::Build_Combiner_Description(CombinerDescription & descript
 	description.ShadowReceiving = description.StageCount > 0 && Shadow_Receiving();
 	description.SmokeGlow = Smoke_Glow();
 	description.SoftParticle = Soft_Particle();
+	description.DrawEffect = Draw_Effect();
 	return description.StageCount > 0;
 }
 
@@ -1922,7 +2055,8 @@ bool DX11BackendClass::Shadow_Receiving() const
 		const DWORD source = RenderStates.Get_Render_State(D3DRS_SRCBLEND);
 		const DWORD destination = RenderStates.Get_Render_State(D3DRS_DESTBLEND);
 		if (destination == D3DBLEND_ONE || source == D3DBLEND_ONE
-			|| destination == D3DBLEND_DESTCOLOR || source == D3DBLEND_DESTCOLOR) {
+			|| destination == D3DBLEND_DESTCOLOR || source == D3DBLEND_DESTCOLOR
+			|| destination == D3DBLEND_SRCCOLOR) {
 			return false;	// additive and multiplicative passes: fire, glow, the shadows themselves
 		}
 		if (destination == D3DBLEND_INVSRCCOLOR) {
@@ -1975,6 +2109,7 @@ bool DX11BackendClass::Build_Vertex_Description(VertexPipelineDescription & desc
 	description.FogEnabled = RenderStates.Get_Render_State(D3DRS_FOGENABLE) != FALSE;
 	description.FogVertexMode = RenderStates.Get_Render_State(D3DRS_FOGVERTEXMODE);
 	description.SmokeGlow = Smoke_Glow();
+	description.SoftParticle = Soft_Particle() != SOFT_PARTICLE_NONE;
 	return true;
 }
 
@@ -2368,7 +2503,9 @@ void DX11BackendClass::Upload_Pixel_Constants()
 	const bool camera_space = Camera_Space_Draw();
 	const float * const world_to_camera = (camera_space && SceneViewKnown) ? SceneView : View;
 
-	if (ShadowReceiving) {
+	// A look takes its pixel back to the world the same way, with or without a sun's map.
+	const unsigned effect = Draw_Effect();
+	if (ShadowReceiving || effect != DRAW_EFFECT_NONE) {
 		if (!ShadowFromClipValid
 			|| memcmp(ShadowFromClipView, world_to_camera, sizeof(View)) != 0
 			|| memcmp(ShadowFromClipProjection, Projection, sizeof(Projection)) != 0) {
@@ -2383,6 +2520,17 @@ void DX11BackendClass::Upload_Pixel_Constants()
 				ShadowFromClipValid = true;
 			}
 		}
+	}
+	if (effect != DRAW_EFFECT_NONE) {
+		pixel_block.ShadowViewport[0] = (ViewportWidth > 0)
+			? 1.0f / static_cast<float>(ViewportWidth) : 0.0f;
+		pixel_block.ShadowViewport[1] = (ViewportHeight > 0)
+			? 1.0f / static_cast<float>(ViewportHeight) : 0.0f;
+		memcpy(pixel_block.WorldFromClip, WorldFromClip, sizeof(pixel_block.WorldFromClip));
+		memcpy(pixel_block.DrawEffectParameters, DrawEffectNumbers, sizeof(DrawEffectNumbers));
+	}
+
+	if (ShadowReceiving) {
 		pixel_block.VolumeParameters[0] = SmokeMapFilled ? SmokeStrength : 0.0f;
 		pixel_block.VolumeParameters[1] = SmokeMapFilled ? SMOKE_SELF_SHADOW_GAIN : 0.0f;
 		pixel_block.VolumeParameters[2] = camera_space ? 1.0f : 0.0f;
@@ -2707,6 +2855,15 @@ void DX11BackendClass::Bind_State_Objects()
 		if (!known || depth != Bound.SceneDepth) {
 			context->PSSetShaderResources(DX11_BACKEND_TEXTURE_STAGES + 3, 1, &depth);
 			Bound.SceneDepth = depth;
+		}
+	}
+
+	// The scene's colour at t8 for the cloak, read with Load.  Set_Draw_Effect took the copy.
+	if (Draw_Effect() == DRAW_EFFECT_CLOAK) {
+		ID3D11ShaderResourceView * const colour = SceneColourCopyView;
+		if (!known || colour != Bound.SceneColour) {
+			context->PSSetShaderResources(DX11_BACKEND_TEXTURE_STAGES + 4, 1, &colour);
+			Bound.SceneColour = colour;
 		}
 	}
 }

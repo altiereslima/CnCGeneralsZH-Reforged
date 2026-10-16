@@ -62,7 +62,7 @@ enum
 	CROWD_MAX_SAMPLES			= 160,
 
 	/// a lane taken to get round somebody is held this long, so it cannot flap side to side
-	CROWD_HOLD_FRAMES			= 45,
+	CROWD_HOLD_FRAMES			= 3 * LOGICFRAMES_PER_SECOND / 2,
 
 	/* How many samples either side of a bridge are held to the deck's width, so the approach funnels
 		 in.  Six cells and not four: a unit that is still a lane wide of the deck when the band shuts

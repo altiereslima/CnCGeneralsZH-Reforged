@@ -1,4 +1,5 @@
 #include "GameClient/SelectionPriority.h"
+#include "GameNetwork/GameMessageParser.h"
 
 namespace
 {
@@ -89,4 +90,50 @@ TEST(selection_priority_empty_box_and_military_support)
 	CHECK(isMilitaryBoxSelectionUnit(&aircraft));
 	CHECK(!isMilitaryBoxSelectionUnit(&cashUnit));
 	CHECK(!isMilitaryBoxSelectionUnit<SelectionPriorityUnit>(NULL));
+}
+
+TEST(selection_of_more_than_254_units_survives_the_one_byte_run_counts)
+{
+	CHECK(bootOnce());
+	// a GameMessage stamps itself with the local player's index, and a Player resets its rank and
+	// score from the global data and the rank store when it is built
+	GlobalData *savedGlobal = TheWritableGlobalData;
+	RankInfoStore *savedRanks = TheRankInfoStore;
+	PlayerList *savedPlayers = ThePlayerList;
+	GlobalData *global = NEW GlobalData;
+	TheWritableGlobalData = global;
+	static RankInfoStore *ranks = NEW RankInfoStore;
+	TheRankInfoStore = ranks;
+	static PlayerList *players = NEW PlayerList;
+	ThePlayerList = players;
+	// 255, 511, 767 and 1023 units used to arrive as none, 1000 as 232: the count was a byte, and so
+	// is each run's count in the packet and the replay.
+	const Int sizes[] = { 254, 255, 256, 511, 1000, 1023 };
+	for (Int s = 0; s < 6; ++s)
+	{
+		GameMessage *msg = newInstance(GameMessage)(GameMessage::MSG_CREATE_SELECTED_GROUP);
+		msg->appendBooleanArgument(TRUE);
+		for (Int i = 0; i < sizes[s]; ++i)
+			msg->appendObjectIDArgument((ObjectID)(i + 1));
+		CHECK_EQ(msg->getArgumentCount(), sizes[s] + 1);
+
+		GameMessageParser *parser = newInstance(GameMessageParser)(msg);
+		CHECK(parser->getNumTypes() <= 255);
+		Int read = 0;
+		for (GameMessageParserArgumentType *run = parser->getFirstArgumentType(); run; run = run->getNext())
+		{
+			// what a reader gets back from the byte the writer stored
+			const UnsignedByte count = (UnsignedByte)run->getArgCount();
+			CHECK_EQ((Int)count, run->getArgCount());
+			CHECK_EQ(run->getType(), read == 0 ? ARGUMENTDATATYPE_BOOLEAN : ARGUMENTDATATYPE_OBJECTID);
+			read += count;
+		}
+		CHECK_EQ(read, sizes[s] + 1);
+		parser->deleteInstance();
+		msg->deleteInstance();
+	}
+	ThePlayerList = savedPlayers;
+	TheRankInfoStore = savedRanks;
+	delete global;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
+	TheWritableGlobalData = savedGlobal;
 }

@@ -87,6 +87,10 @@ private:
 
 extern LookAtTranslator *TheLookAtTranslator;
 
+/** A view pitch kept where the player's own tilt (Alt+middle drag, Alt+wheel) may put it: the
+	* camera between 20 and 60 degrees above the ground. */
+extern Real LookAt_clampPlayerPitch( Real pitch );
+
 // EDGE SCROLL ////////////////////////////////////////////////////////////////////////////////////
 // The map scrolls while the pointer is in a band along the screen's edges, faster the deeper in
 // it goes.  Free functions so the arithmetic can be tested without a display.

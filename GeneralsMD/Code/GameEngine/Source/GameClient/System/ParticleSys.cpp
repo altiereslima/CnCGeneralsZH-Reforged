@@ -33,6 +33,7 @@
 
 #define DEFINE_PARTICLE_SYSTEM_NAMES
 
+#include "Common/FileSystem.h"
 #include "Common/GameState.h"
 #include "Common/INI.h"
 #include "Common/PerfTimer.h"
@@ -79,12 +80,68 @@ static UnsignedInt particleTimerFrames( Real value )
 }
 
 //-------------------------------------------------------------------------------------------------
+/* The particles step once a logic frame, and every number in a template was written for retail's 30
+	 of them a second.  So each is converted as it is read: a frame count doubled, an amount added every
+	 frame halved, gravity quartered, a factor multiplied in every frame square-rooted.  A burst comes
+	 BurstDelay + 1 frames after the last one, so the delay doubles plus one: BurstDelay 0, a burst
+	 every retail frame, becomes one every second frame and the particles a second stay what they were. */
+static void scaleRandomVariable( void *store, Real (*convert)( Real ) )
+{
+	GameClientRandomVariable *var = (GameClientRandomVariable *)store;
+	var->setRange( convert( var->getMinimumValue() ), convert( var->getMaximumValue() ), var->getDistributionType() );
+}
+
+static Real retailBurstDelay( Real delay )
+{
+	return ConvertRetailFrames( delay ) + (Real)(LOGICFRAMES_PER_RETAIL_FRAME - 1);
+}
+
+static void parseRetailFramesRandom( INI *ini, void *instance, void *store, const void *userData )
+{
+	INI::parseGameClientRandomVariable( ini, instance, store, userData );
+	scaleRandomVariable( store, ConvertRetailFrames );
+}
+
+static void parseRetailBurstDelayRandom( INI *ini, void *instance, void *store, const void *userData )
+{
+	INI::parseGameClientRandomVariable( ini, instance, store, userData );
+	scaleRandomVariable( store, retailBurstDelay );
+}
+
+static void parseRetailPerFrameRandom( INI *ini, void *instance, void *store, const void *userData )
+{
+	INI::parseGameClientRandomVariable( ini, instance, store, userData );
+	scaleRandomVariable( store, ConvertRetailPerFrameRate );
+}
+
+static void parseRetailPerFrameFactorRandom( INI *ini, void *instance, void *store, const void *userData )
+{
+	INI::parseGameClientRandomVariable( ini, instance, store, userData );
+	scaleRandomVariable( store, ConvertRetailPerFrameFactor );
+}
+
+static void parseRetailPerFrameSquaredReal( INI *ini, void *instance, void *store, const void *userData )
+{
+	INI::parseReal( ini, instance, store, userData );
+	*(Real *)store = ConvertRetailPerFrameSquared( *(Real *)store );
+}
+
+static void parseRetailPerFrameCoord3D( INI *ini, void *instance, void *store, const void *userData )
+{
+	INI::parseCoord3D( ini, instance, store, userData );
+	Coord3D *v = (Coord3D *)store;
+	v->x = ConvertRetailPerFrameRate( v->x );
+	v->y = ConvertRetailPerFrameRate( v->y );
+	v->z = ConvertRetailPerFrameRate( v->z );
+}
+
+//-------------------------------------------------------------------------------------------------
 /* A particle whose keys never reach zero alpha (or black, or white for MULTIPLY) would vanish with
 	 whatever it showed on its last frame.  Over the last frames of its life its strength is capped by
 	 an envelope falling linearly to zero, so it fades instead.  The window is a quarter of the
-	 lifetime, at most eight frames.  A cap rather than a multiplier: a particle already fading below
-	 the envelope is left exactly as authored. */
-static const UnsignedInt PARTICLE_FADE_MAX_FRAMES = 8;
+	 lifetime, at most eight retail frames.  A cap rather than a multiplier: a particle already fading
+	 below the envelope is left exactly as authored. */
+static const UnsignedInt PARTICLE_FADE_MAX_FRAMES = 8 * LOGICFRAMES_PER_RETAIL_FRAME;
 static const UnsignedInt PARTICLE_FADE_LIFETIME_DIVISOR = 4;
 
 //-------------------------------------------------------------------------------------------------
@@ -844,7 +901,7 @@ void Particle::doWindMotion( void )
 	Real distFromWind = v.length();
 	if( distFromWind < noForceDistance )
 	{
-		Real windForceStrength = 2.0f * m_windRandomness;
+		Real windForceStrength = ConvertRetailPerFrameRate( 2.0f ) * m_windRandomness;
 
 		// only apply force if still within the circle of influence
 		if( distFromWind > fullForceDistance )
@@ -1035,7 +1092,7 @@ ParticleSystemInfo::ParticleSystemInfo()
 	m_gravity = 0.0f;
 	m_groundCollision = FALSE;	// retail behaviour: particles pass through the terrain
 	m_groundBounce = 0.35f;			// only consulted once an INI sets GroundCollision = Yes
-	m_groundFriction = 0.6f;
+	m_groundFriction = ConvertRetailPerFrameFactor( 0.6f );	// as GroundFriction is parsed
 	m_isEmissionVolumeHollow = FALSE;
 	m_isOneShot = FALSE;
 	m_slavePosOffset.zero();
@@ -1045,9 +1102,9 @@ ParticleSystemInfo::ParticleSystemInfo()
 	// some default values for the wind motion values
 	m_windMotion = WIND_MOTION_NOT_USED;
 	m_windAngle = 0.0f;
-	m_windAngleChange = 0.15f;  // higher is ping pong faster
-	m_windAngleChangeMin = 0.15f;
-	m_windAngleChangeMax = 0.45f;
+	m_windAngleChange = ConvertRetailPerFrameRate( 0.15f );  // higher is ping pong faster
+	m_windAngleChangeMin = ConvertRetailPerFrameRate( 0.15f );
+	m_windAngleChangeMax = ConvertRetailPerFrameRate( 0.45f );
 	m_windMotionStartAngleMin = 0.0f;
 	m_windMotionStartAngleMax = PI / 4.0f;
 	m_windMotionStartAngle = m_windMotionStartAngleMin;
@@ -1502,6 +1559,12 @@ ParticleSystem::ParticleSystem( const ParticleSystemTemplate *sysTemplate,
 	// under nothing and every later lookup by id would miss it.
 	if (m_systemID != INVALID_PARTICLE_SYSTEM_ID)
 		TheParticleSystemManager->friend_addParticleSystem(this);
+
+	// DebrisTrails off: the fork's blast fragments never emit, so nothing of them, their trails or
+	// their slaves is drawn.  Destroyed rather than never built, so the FXList, the object creation
+	// list and every caller holding the pointer go on exactly as they do with the option on.
+	if (sysTemplate->m_explosionDebrisTrail && !TheGlobalData->m_explosionDebrisTrails)
+		destroy();
 
 	//DEBUG_ASSERTLOG(!(m_totalParticleSystemCount % 10 == 0), ( "TotalParticleSystemCount = %d\n", m_totalParticleSystemCount ));
 }
@@ -2634,7 +2697,54 @@ Bool ParticleSystem::shouldCastGroundShadow( void ) const
 	if (m_isGroundAligned)
 		return FALSE;
 
-	return TRUE;
+	return getStealthFade() > 0.0f;
+}
+
+// ------------------------------------------------------------------------------------------------
+/** The smoke and fire on a stealthed unit or building go with it.  An enemy's that the local player
+ * cannot see draw nothing: retail stopped only the model's own bone systems, and a hidden base still
+ * burned and smoked in plain view.  The player's own stealthed one breathes with its stealth
+ * opacity, a third of it for smoke and a little over half for fire, beside the glass the cloak draws.
+ * Detected by the enemy, or not stealthed at all, it draws whole.  A slave follows its master, which
+ * carries the attachment.  Client drawing only; nothing goes back into the logic. */
+// ------------------------------------------------------------------------------------------------
+Real ParticleSystem::getStealthFade( void ) const
+{
+	const ParticleSystem *sys = this;
+	while (sys->m_masterSystem)
+		sys = sys->m_masterSystem;
+
+	const Drawable *draw = NULL;
+	if (sys->m_attachedToDrawableID != INVALID_DRAWABLE_ID)
+		draw = TheGameClient->findDrawableByID( sys->m_attachedToDrawableID );
+	else if (sys->m_attachedToObjectID != INVALID_ID)
+	{
+		// gone since the last particle update, which then destroys the system
+		const Object *obj = TheGameLogic->findObjectByID( sys->m_attachedToObjectID );
+		if (obj)
+			draw = obj->getDrawable();
+	}
+	if (draw == NULL)
+		return 1.0f;
+
+	switch (draw->getStealthLook())
+	{
+		case STEALTHLOOK_INVISIBLE:
+			return 0.0f;
+		case STEALTHLOOK_VISIBLE_FRIENDLY:
+		case STEALTHLOOK_VISIBLE_FRIENDLY_DETECTED:
+			// Alpha tested particles take no fade (less alpha only cuts holes in them), and a
+			// multiplying one half faded is a grey smear, so those draw whole and not at all.
+			switch (m_shaderType)
+			{
+				case ADDITIVE:		return draw->getEffectiveOpacity() * 0.55f;
+				case ALPHA_TEST:	return 1.0f;
+				case MULTIPLY:		return 0.0f;
+				default:					return draw->getEffectiveOpacity() * 0.35f;
+			}
+		default:
+			return 1.0f;
+	}
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -2678,7 +2788,7 @@ void ParticleSystem::updateGroundShadow( const ParticleShadowBlob *blob )
 	m_groundShadow->setSize( sizeX, sizeY );
 	m_groundShadow->setPosition( centerX, centerY,
 															 TheTerrainLogic ? TheTerrainLogic->getGroundHeight( centerX, centerY ) : 0.0f );
-	m_groundShadow->setOpacity( opacity );
+	m_groundShadow->setOpacity( REAL_TO_INT( opacity * getStealthFade() ) );
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -2714,7 +2824,7 @@ void ParticleSystem::updateWindMotion( void )
 			Real change = (1.0f - (diffFromCenter / halfSpan)) * m_windAngleChange;
 
 			// we will always change a little bit
-			#define MINIMUM_CHANGE 0.005f  // lower #'s have softer swings at the edge angles
+			#define MINIMUM_CHANGE ConvertRetailPerFrameRate( 0.005f )  // lower #'s have softer swings at the edge angles
 			if( change < MINIMUM_CHANGE )
 				change = MINIMUM_CHANGE;
 			
@@ -3195,25 +3305,28 @@ const FieldParse ParticleSystemTemplate::m_fieldParseTable[] =
 	{ "VolumeParticleDepth",		INI::parseUnsignedInt,		NULL,		offsetof( ParticleSystemTemplate, m_volumeParticleDepth ) },
 	{ "ParticleName",						INI::parseAsciiString,		NULL,		offsetof( ParticleSystemTemplate, m_particleTypeName ) },
 	{ "AngleZ",									INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_angleZ ) },
-	{ "AngularRateZ",						INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_angularRateZ ) },
-	{ "AngularDamping",					INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_angularDamping ) },
+	{ "AngularRateZ",						parseRetailPerFrameRandom,	NULL,		offsetof( ParticleSystemTemplate, m_angularRateZ ) },
+	{ "AngularDamping",					parseRetailPerFrameFactorRandom,	NULL,		offsetof( ParticleSystemTemplate, m_angularDamping ) },
 
-	{ "VelocityDamping",				INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_velDamping ) },
-	{ "Gravity",								INI::parseReal,																NULL,		offsetof( ParticleSystemTemplate, m_gravity ) },
+	{ "VelocityDamping",				parseRetailPerFrameFactorRandom,	NULL,		offsetof( ParticleSystemTemplate, m_velDamping ) },
+	{ "Gravity",								parseRetailPerFrameSquaredReal,								NULL,		offsetof( ParticleSystemTemplate, m_gravity ) },
 	{ "GroundCollision",						INI::parseBool,																NULL,		offsetof( ParticleSystemTemplate, m_groundCollision ) },
 	{ "GroundBounce",							INI::parseReal,																NULL,		offsetof( ParticleSystemTemplate, m_groundBounce ) },
-	{ "GroundFriction",						INI::parseReal,																NULL,		offsetof( ParticleSystemTemplate, m_groundFriction ) },
+	// applied on every frame a particle comes down on the ground, which for one at rest is every frame
+	{ "GroundFriction",						INI::parseRetailPerFrameFactorReal,						NULL,		offsetof( ParticleSystemTemplate, m_groundFriction ) },
 	{ "SlaveSystem",						INI::parseAsciiString,												NULL,		offsetof( ParticleSystemTemplate, m_slaveSystemName ) },
 	{ "SlavePosOffset",					INI::parseCoord3D,														NULL,		offsetof( ParticleSystemTemplate, m_slavePosOffset ) },
 	{ "PerParticleAttachedSystem",		INI::parseAsciiString,								NULL,		offsetof( ParticleSystemTemplate, m_attachedSystemName ) },
+	{ "ExplosionDebrisTrail",				INI::parseBool,												NULL,		offsetof( ParticleSystemTemplate, m_explosionDebrisTrail ) },
 
-	{ "Lifetime",								INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_lifetime ) },
-	{ "SystemLifetime",					INI::parseUnsignedInt,												NULL,		offsetof( ParticleSystemTemplate, m_systemLifetime ) },
+	{ "Lifetime",								parseRetailFramesRandom,	NULL,		offsetof( ParticleSystemTemplate, m_lifetime ) },
+	{ "SystemLifetime",					INI::parseRetailFramesUnsignedInt,						NULL,		offsetof( ParticleSystemTemplate, m_systemLifetime ) },
 
 	{ "Size",										INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_startSize ) },
+	// per particle emitted, not per frame
 	{ "StartSizeRate",					INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_startSizeRate ) },
-	{ "SizeRate",								INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_sizeRate ) },
-	{ "SizeRateDamping",				INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_sizeRateDamping ) },
+	{ "SizeRate",								parseRetailPerFrameRandom,	NULL,		offsetof( ParticleSystemTemplate, m_sizeRate ) },
+	{ "SizeRateDamping",				parseRetailPerFrameFactorRandom,	NULL,		offsetof( ParticleSystemTemplate, m_sizeRateDamping ) },
 
 	{ "Alpha1",									ParticleSystemTemplate::parseRandomKeyframe,	NULL,		offsetof( ParticleSystemTemplate, m_alphaKey[0] ) },
 	{ "Alpha2",									ParticleSystemTemplate::parseRandomKeyframe,	NULL,		offsetof( ParticleSystemTemplate, m_alphaKey[1] ) },
@@ -3234,27 +3347,27 @@ const FieldParse ParticleSystemTemplate::m_fieldParseTable[] =
 	{ "Color8",									ParticleSystemTemplate::parseRGBColorKeyframe,NULL,		offsetof( ParticleSystemTemplate, m_colorKey[7] ) },
 
 //	{ "COLOR",									ParticleSystemTemplate::parseRandomRGBColor,	NULL,		offsetof( ParticleSystemTemplate, m_color ) },
-	{ "ColorScale",							INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_colorScale ) },
+	{ "ColorScale",							parseRetailPerFrameRandom,	NULL,		offsetof( ParticleSystemTemplate, m_colorScale ) },
 
-	{ "BurstDelay",							INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_burstDelay ) },
+	{ "BurstDelay",							parseRetailBurstDelayRandom,	NULL,		offsetof( ParticleSystemTemplate, m_burstDelay ) },
 	{ "BurstCount",							INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_burstCount ) },
 
-	{ "InitialDelay",						INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_initialDelay ) },
+	{ "InitialDelay",						parseRetailFramesRandom,	NULL,		offsetof( ParticleSystemTemplate, m_initialDelay ) },
 
-	{ "DriftVelocity",					INI::parseCoord3D,														NULL,		offsetof( ParticleSystemTemplate, m_driftVelocity ) },
+	{ "DriftVelocity",					parseRetailPerFrameCoord3D,										NULL,		offsetof( ParticleSystemTemplate, m_driftVelocity ) },
 	{ "VelocityType",						INI::parseIndexList,													EmissionVelocityTypeNames,		offsetof( ParticleSystemTemplate, m_emissionVelocityType ) },
-	{ "VelOrthoX",							INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.ortho.x ) },
-	{ "VelOrthoY",							INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.ortho.y ) },
-	{ "VelOrthoZ",							INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.ortho.z ) },
+	{ "VelOrthoX",							parseRetailPerFrameRandom,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.ortho.x ) },
+	{ "VelOrthoY",							parseRetailPerFrameRandom,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.ortho.y ) },
+	{ "VelOrthoZ",							parseRetailPerFrameRandom,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.ortho.z ) },
 
-	{ "VelSpherical",						INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.spherical.speed ) },
-	{ "VelHemispherical",				INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.hemispherical.speed ) },
+	{ "VelSpherical",						parseRetailPerFrameRandom,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.spherical.speed ) },
+	{ "VelHemispherical",				parseRetailPerFrameRandom,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.hemispherical.speed ) },
 
-	{ "VelCylindricalRadial",		INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.cylindrical.radial ) },
-	{ "VelCylindricalNormal",		INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.cylindrical.normal ) },
+	{ "VelCylindricalRadial",		parseRetailPerFrameRandom,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.cylindrical.radial ) },
+	{ "VelCylindricalNormal",		parseRetailPerFrameRandom,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.cylindrical.normal ) },
 
-	{ "VelOutward",							INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.outward.speed ) },
-	{ "VelOutwardOther",				INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.outward.otherSpeed ) },
+	{ "VelOutward",							parseRetailPerFrameRandom,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.outward.speed ) },
+	{ "VelOutwardOther",				parseRetailPerFrameRandom,	NULL,		offsetof( ParticleSystemTemplate, m_emissionVelocity.outward.otherSpeed ) },
 
 	{ "VolumeType",							INI::parseIndexList,													EmissionVolumeTypeNames,		offsetof( ParticleSystemTemplate, m_emissionVolumeType ) },
 	{ "VolLineStart",						INI::parseCoord3D,														NULL,		offsetof( ParticleSystemTemplate, m_emissionVolume.line.start ) },
@@ -3274,8 +3387,8 @@ const FieldParse ParticleSystemTemplate::m_fieldParseTable[] =
 
 	{ "WindMotion",					INI::parseIndexList, WindMotionNames, offsetof( ParticleSystemTemplate, m_windMotion ) },
 
-	{ "WindAngleChangeMin", INI::parseReal, NULL, offsetof( ParticleSystemTemplate, m_windAngleChangeMin ) },
-	{ "WindAngleChangeMax", INI::parseReal, NULL, offsetof( ParticleSystemTemplate, m_windAngleChangeMax ) },
+	{ "WindAngleChangeMin", INI::parseRetailPerFrameReal, NULL, offsetof( ParticleSystemTemplate, m_windAngleChangeMin ) },
+	{ "WindAngleChangeMax", INI::parseRetailPerFrameReal, NULL, offsetof( ParticleSystemTemplate, m_windAngleChangeMax ) },
 
 	{ "WindPingPongStartAngleMin",			INI::parseReal, NULL, offsetof( ParticleSystemTemplate, m_windMotionStartAngleMin ) },
 	{ "WindPingPongStartAngleMax",			INI::parseReal, NULL, offsetof( ParticleSystemTemplate, m_windMotionStartAngleMax ) },
@@ -3298,7 +3411,7 @@ void ParticleSystemTemplate::parseRandomKeyframe( INI* ini, void *instance,
 
 	Real low = ini->scanReal(ini->getNextToken());
 	Real high = ini->scanReal(ini->getNextToken());
-	key->frame = ini->scanUnsignedInt(ini->getNextToken());
+	key->frame = ConvertRetailFrames(ini->scanUnsignedInt(ini->getNextToken()));
 
 	// set the range of the random variable
 	key->var.setRange( low, high );
@@ -3314,7 +3427,7 @@ void ParticleSystemTemplate::parseRGBColorKeyframe( INI* ini, void *instance,
 	RGBColorKeyframe *key = static_cast<RGBColorKeyframe *>(store);
 
 	INI::parseRGBColor( ini, instance, &key->color, NULL );
-	INI::parseUnsignedInt( ini, instance, &key->frame, NULL );
+	INI::parseRetailFramesUnsignedInt( ini, instance, &key->frame, NULL );
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -3377,6 +3490,7 @@ ParticleSystemTemplate::ParticleSystemTemplate( const AsciiString &name ) :
 	//Initializations inserted
 	m_slaveTemplate = NULL;
 	//
+	m_explosionDebrisTrail = FALSE;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -3507,6 +3621,8 @@ void ParticleSystemManager::init( void )
 	/// Read INI data and build templates
 	INI ini;
 	ini.load( AsciiString( "Data\\INI\\ParticleSystem.ini" ), INI_LOAD_OVERWRITE, NULL );
+	// -modfactions: each mod's systems after retail's, under its names
+	INI::loadModPasses( "Data\\INI\\ParticleSystem.ini", NULL );
 	// The fork's own systems, beside EA's 1088 rather than in a loose copy of all of them
 	ini.load( AsciiString( "Data\\INI\\ParticleSystemReforged.ini" ), INI_LOAD_OVERWRITE, NULL );
 
@@ -3515,7 +3631,7 @@ void ParticleSystemManager::init( void )
 	if( TheGlobalData && TheGlobalData->m_particleGroundBounce )
 	{
 		for( TemplateMap::iterator it = m_templateMap.begin(); it != m_templateMap.end(); ++it )
-			it->second->forceGroundCollision( 0.35f, 0.6f );
+			it->second->forceGroundCollision( 0.35f, ConvertRetailPerFrameFactor( 0.6f ) );
 		DEBUG_LOG(("-particlebounce: terrain collision forced on for %d particle systems\n",
 							(Int)m_templateMap.size()));
 	}
@@ -3595,7 +3711,24 @@ void ParticleSystemManager::reset( void )
 	m_uniqueSystemID = INVALID_PARTICLE_SYSTEM_ID;
 	
 	m_lastLogicFrameUpdate = -1;
-	// leave templates as-is
+
+	// Templates stay, but not as a map.ini left them: each one it wrote over gets its state from
+	// before back, backwards so map.ini and solo.ini on the same system end at the first.  A system the
+	// map made from nothing goes back to a fresh template's defaults rather than away, since an FXList
+	// that named it may hold it.  The slave is looked up again from the restored name.
+	for( Int i = (Int)m_beforeMapOverrides.size() - 1; i >= 0; --i )
+	{
+		ParticleSystemTemplate *sysTemplate = m_beforeMapOverrides[ i ].first;
+		(ParticleSystemInfo &)*sysTemplate = m_beforeMapOverrides[ i ].second;
+		sysTemplate->m_slaveTemplate = NULL;
+	}
+	m_beforeMapOverrides.clear();
+}
+
+// ------------------------------------------------------------------------------------------------
+void ParticleSystemManager::rememberTemplateBeforeMapINI( ParticleSystemTemplate *sysTemplate )
+{
+	m_beforeMapOverrides.push_back( std::make_pair( sysTemplate, (const ParticleSystemInfo &)*sysTemplate ) );
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -3760,6 +3893,11 @@ ParticleSystemTemplate *ParticleSystemManager::findTemplate( const AsciiString &
 	TemplateMap::const_iterator find(m_templateMap.find(name));
 	if (find != m_templateMap.end()) {
 		sysTemplate = (*find).second;
+	}
+	else {
+		AsciiString retailName;
+		if (TheModNamespace.findRetailName(name, MODNAME_PARTICLESYSTEM, &retailName))
+			sysTemplate = findTemplate(retailName);
 	}
 
 	return sysTemplate;

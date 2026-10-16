@@ -105,17 +105,18 @@ void UndeadBody::attemptDamage( DamageInfo *damageInfo )
 	/* Whether this hit is lethal has to be asked of the damage that will actually land, not of the
 		 number the weapon carries.  Armour, damage type multipliers and the veterancy bonus all sit
 		 between the two, so a Battle Bus took its second life off shots that its armour would have
-		 shrugged off, and survived ones that were going to kill it. */
+		 shrugged off, and survived ones that were going to kill it.  The damage scalar belongs in the
+		 test too: under Hold the Line a bus gave up its first life to a hit it would have survived. */
+	const Real landed = estimateDamage( damageInfo->in ) * getDamageScalar();
 	if( damageInfo->in.m_damageType != DAMAGE_UNRESISTABLE
 			&& !m_isSecondLife
-			&& estimateDamage( damageInfo->in ) >= getHealth()
+			&& landed >= getHealth()
 			&& IsHealthDamagingDamage(damageInfo->in.m_damageType)
 			&& isSecondLifeDeath( getObject(), damageInfo )
 			)
 	{
 		// clamp what lands, for the same reason as the test above: armour applied after a raw clamp
 		// to health-1 still killed, ran the die modules, and then revived the bus anyway
-		Real landed = estimateDamage( damageInfo->in ) * getDamageScalar();
 		if( landed > getHealth() - 1 && landed > 0.0f )
 			damageInfo->in.m_amount *= ( getHealth() - 1 ) / landed;
 		shouldStartSecondLife = TRUE;

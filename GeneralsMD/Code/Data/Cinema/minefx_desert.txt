@@ -1,0 +1,13 @@
+# Scenarios/minefx_desert.txt from the player's own camera: no camera verb, so the view keeps the
+# zoom, heading and tilt the match opened with, parked on the field by -camera 1020 1250. Three stills
+# over two seconds once the mines sit; the -video range holds every frame between.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap
+#     -multiInstance -fps 120 -noFPSLimit -particlecap 2500
+#     -map "Maps\Tournament Desert\Tournament Desert.map" -autoskirmish 2 -takeover
+#     -side 0 FactionChina -side 1 FactionAmerica -seed 1 -camera 1020 1250
+#     -scenario minefx_desert -cinema minefx_desert -video 170 250 minefx_desert -maxframes 260
+
+6.0   shot
+7.0   shot
+8.0   shot

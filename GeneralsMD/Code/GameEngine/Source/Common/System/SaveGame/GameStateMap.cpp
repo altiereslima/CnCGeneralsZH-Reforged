@@ -193,10 +193,16 @@ static void embedInUseMap( AsciiString map, Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 static void extractAndSaveMap( AsciiString mapToSave, Xfer *xfer )
 {
-	UnsignedInt dataSize;
+	// read the whole map first: its size comes from the file, which XferLoad has checked holds that
+	// many bytes, and a read that fails then leaves no half-written map and nothing leaked
+	const Int dataSize = xfer->beginBlock();
+	std::vector< char > buffer( dataSize );
+	if( dataSize > 0 )
+		xfer->xferUser( &buffer[ 0 ], dataSize );
+	xfer->endBlock();
 
 	// open handle to output file
-	FILE *fp = zh_fopen( mapToSave.str(), "w+b" );
+	FILE *fp = zh_fopen( mapToSave.str(), "wb" );
 	if( fp == NULL )
 	{
 
@@ -205,39 +211,15 @@ static void extractAndSaveMap( AsciiString mapToSave, Xfer *xfer )
 
 	}  // en
 
-	// read data size from file
-	dataSize = xfer->beginBlock();
-
-	// allocate buffer big enough for the entire map file
-	char *buffer = new char[ dataSize ];
-	if( buffer == NULL )
-	{
-
-		DEBUG_CRASH(( "extractAndSaveMap - Unable to allocate buffer for file '%s'\n", mapToSave.str() ));
-		throw SC_INVALID_DATA;
-
-	}  // end if
-
-	// read map file
-	xfer->xferUser( buffer, dataSize );
-
 	// write contents of buffer to new file
-	if( fwrite( buffer, 1, dataSize, fp ) != dataSize )
+	const Bool written = dataSize == 0 || fwrite( &buffer[ 0 ], dataSize, 1, fp ) == 1;
+	if( fclose( fp ) != 0 || !written )
 	{
 
-		DEBUG_CRASH(( "extractAndSaveMap - Error writing to file '%s'\n", mapToSave.str() ));
+		DEBUG_LOG(( "extractAndSaveMap - Error writing to file '%s'\n", mapToSave.str() ));
 		throw SC_INVALID_DATA;
 
 	}  // end if
-
-	// close the new file
-	fclose( fp );
-
-	// end of data block
-	xfer->endBlock();
-
-	// delete the buffer
-	delete [] buffer;
 
 }  // end extractAndSaveMap
 
@@ -335,9 +317,15 @@ void GameStateMap::xfer( Xfer *xfer )
 
 		saveGameInfo->saveGameMapName = TheGameState->portableMapPathToRealMapPath(tmp);
 
-		if (!TheGameState->isInSaveDirectory(saveGameInfo->saveGameMapName))
+		// The embedded map is written out under this name, so it must be a .map straight in the save
+		// directory: a broken or tampered file named "save\../x" or "save\00000001.sav" would
+		// otherwise write past the directory or over another save.
+		AsciiString leaf = TheGameState->getMapLeafName(saveGameInfo->saveGameMapName);
+		const char *extension = strrchr(leaf.str(), '.');
+		if (!TheGameState->isInSaveDirectory(saveGameInfo->saveGameMapName) ||
+				strpbrk(leaf.str(), "/:") != NULL || extension == NULL || strcasecmp(extension, ".map") != 0)
 		{
-			DEBUG_CRASH(("GameState::xfer - The map filename read from the file '%s' is not in the SAVE directory, but should be\n",
+			DEBUG_LOG(("GameStateMap::xfer - The map filename read from the file '%s' is not a .map in the SAVE directory, but should be\n",
 												 saveGameInfo->saveGameMapName.str()) );
 			throw SC_INVALID_DATA;
 		}

@@ -85,7 +85,7 @@ void W3DTankTruckDrawModuleData::buildFieldParse(MultiIniFieldParse& p)
 		{ "MidLeftRearTireBone", INI::parseAsciiString, NULL, offsetof(W3DTankTruckDrawModuleData, m_midRearLeftTireBoneName) },
 		{ "MidRightRearTireBone", INI::parseAsciiString, NULL, offsetof(W3DTankTruckDrawModuleData, m_midRearRightTireBoneName) },
 		{ "TireRotationMultiplier", INI::parseReal, NULL, offsetof(W3DTankTruckDrawModuleData, m_rotationSpeedMultiplier) },
-		{ "PowerslideRotationAddition", INI::parseReal, NULL, offsetof(W3DTankTruckDrawModuleData, m_powerslideRotationAddition) },
+		{ "PowerslideRotationAddition", INI::parseRetailPerFrameReal, NULL, offsetof(W3DTankTruckDrawModuleData, m_powerslideRotationAddition) },
 		{ "TreadDebrisLeft", INI::parseAsciiString, NULL, offsetof(W3DTankTruckDrawModuleData, m_treadDebrisNameLeft) },
 		{ "TreadDebrisRight", INI::parseAsciiString, NULL, offsetof(W3DTankTruckDrawModuleData, m_treadDebrisNameRight) },
 		{ "TreadAnimationRate", INI::parseVelocityReal, NULL, offsetof(W3DTankTruckDrawModuleData, m_treadAnimationRate) },
@@ -494,7 +494,7 @@ void W3DTankTruckDraw::doDrawModule(const Matrix3D* transformMtx)
 	if (frozen)
 		return;
 
-	const Real ACCEL_THRESHOLD = 0.01f;
+	const Real ACCEL_THRESHOLD = ConvertRetailPerFrameSquared(0.01f);
 	const Real SIZE_CAP = 2.0f;
 	// get object from logic
 	Object *obj = getDrawable()->getObject();
@@ -512,7 +512,8 @@ void W3DTankTruckDraw::doDrawModule(const Matrix3D* transformMtx)
 		return;
 
 	const Coord3D *vel = physics->getVelocity();
-	Real speed = physics->getVelocityMagnitude();
+	// the dust sizes below were written for distance per 30 Hz frame
+	Real speed = physics->getVelocityMagnitude() * LOGICFRAMES_PER_RETAIL_FRAME;
 
 	// wheels and treads turn by the ground covered since the last picture, not by speed every picture
 	Real forward, turn;
@@ -614,6 +615,7 @@ void W3DTankTruckDraw::doDrawModule(const Matrix3D* transformMtx)
 			m_dustEffect->setSizeMultiplier(speed);	 
 		}
 		if (m_dirtEffect) {
+			// m_framesAirborne counts Drawable's ground steps, which are retail frames
 			if (wheelInfo && wheelInfo->m_framesAirborne>3) {
 				// See W3DTruckDraw: the landing puff is the dust system's, and this branch reached
 				// it while guarded on the dirt system - a null dereference for anything with a

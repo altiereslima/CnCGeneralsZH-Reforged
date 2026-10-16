@@ -3581,6 +3581,10 @@ CONTROLBAR:AttackMove
 "Angriffs&marsch"
 END
 
+CONTROLBAR:ForceAttack
+"Zwangangri&ff"
+END
+
 CONTROLBAR:Stop
 "&Stopp"
 END
@@ -6515,6 +6519,10 @@ END
 
 CONTROLBAR:ToolTipAttackMove
 "Einheit zieht zum Zielgebiet und stoppt, um unterwegs Feinde zu bekämpfen"
+END
+
+CONTROLBAR:ToolTipForceAttack
+"Der nächste Klick greift alles unter dem Zeiger an, auch den Boden und deine eigene Seite. Klicke die Schaltfläche erneut, um abzubrechen."
 END
 
 CONTROLBAR:ToolTipCommandStop
@@ -14037,196 +14045,16 @@ GUI:StartCustomMission
 "SPIEL STARTEN"
 END
 
-GUI:SelectNextIdleWorker
-"Nächsten untätigen Arbeiter wählen"
-END
-
-GUI:SelectNextIdleWorkerDescription
-"Wählt den nächsten Dozer oder Arbeiter ohne Aufgabe und zentriert die Ansicht auf ihn."
-END
-
-GUI:SelectNextIdleUnit
-"Nächste untätige Einheit wählen"
-END
-
-GUI:SelectNextIdleUnitDescription
-"Wählt die nächste Kampfeinheit ohne Befehle und zentriert die Ansicht auf sie."
-END
-
-GUI:CommandSlot01
-"Befehlsleiste Feld 01"
-END
-
-GUI:CommandSlot01Description
-"Drückt Feld 01 der Befehlsleiste (Spalte 1, obere Reihe, 'Q' im Standardraster)."
-END
-
-GUI:CommandSlot02
-"Befehlsleiste Feld 02"
-END
-
-GUI:CommandSlot02Description
-"Drückt Feld 02 der Befehlsleiste (Spalte 2, obere Reihe, 'W' im Standardraster)."
-END
-
-GUI:CommandSlot03
-"Befehlsleiste Feld 03"
-END
-
-GUI:CommandSlot03Description
-"Drückt Befehlsfeld 03 (Spalte 3, obere Reihe, 'E' im Standardlayout)."
-END
-
-GUI:CommandSlot04
-"Befehlsfeld 04"
-END
-
-GUI:CommandSlot04Description
-"Drückt Befehlsfeld 04 (Spalte 4, obere Reihe, 'R' im Standardlayout)."
-END
-
-GUI:CommandSlot05
-"Befehlsfeld 05"
-END
-
-GUI:CommandSlot05Description
-"Drückt Befehlsfeld 05 (Spalte 5, obere Reihe, 'T' im Standardlayout)."
-END
-
-GUI:CommandSlot06
-"Befehlsfeld 06"
-END
-
-GUI:CommandSlot06Description
-"Drückt Befehlsfeld 06 (Spalte 6, obere Reihe, 'Y' im Standardlayout)."
-END
-
-GUI:CommandSlot07
-"Befehlsfeld 07"
-END
-
-GUI:CommandSlot07Description
-"Drückt Befehlsfeld 07 (Spalte 1, mittlere Reihe, 'A' im Standardlayout), wo der Angriff einer Einheit liegt."
-END
-
-GUI:CommandSlot08
-"Befehlsfeld 08"
-END
-
-GUI:CommandSlot08Description
-"Drückt Befehlsfeld 08 (Spalte 2, mittlere Reihe, 'S' im Standardlayout), wo Stopp einer Einheit liegt."
-END
-
-GUI:CommandSlot09
-"Befehlsfeld 09"
-END
-
-GUI:CommandSlot09Description
-"Drückt Befehlsfeld 09 (Spalte 3, mittlere Reihe, 'D' im Standardlayout), wo Angriffsmarsch liegt."
-END
-
-GUI:CommandSlot10
-"Befehlsfeld 10"
-END
-
-GUI:CommandSlot10Description
-"Drückt Befehlsfeld 10 (Spalte 4, mittlere Reihe, 'F' im Standardlayout)."
-END
-
-GUI:CommandSlot11
-"Befehlsfeld 11"
-END
-
-GUI:CommandSlot11Description
-"Drückt Befehlsfeld 11 (Spalte 5, mittlere Reihe, 'G' im Standardlayout)."
-END
-
-GUI:CommandSlot12
-"Befehlsfeld 12"
-END
-
-GUI:CommandSlot12Description
-"Drückt Befehlsfeld 12 (Spalte 6, mittlere Reihe, 'H' im Standardlayout)."
-END
-
-GUI:CommandSlot13
-"Befehlsfeld 13"
-END
-
-GUI:CommandSlot13Description
-"Drückt Befehlsfeld 13 (Spalte 1, untere Reihe, 'Z' im Standardlayout), wo Aussteigen liegt, für Passagiere einer Einheit oder die Besatzung eines Gebäudes."
-END
-
-GUI:CommandSlot14
-"Befehlsfeld 14"
-END
-
-GUI:CommandSlot14Description
-"Drückt Befehlsfeld 14 (Spalte 2, untere Reihe, 'X' im Standardlayout), wo Bewachen liegt."
-END
-
-GUI:CommandSlot15
-"Befehlsfeld 15"
-END
-
-GUI:CommandSlot15Description
-"Drückt Befehlsfeld 15 (Spalte 3, untere Reihe, 'C' im Standardlayout), wo Position halten liegt."
-END
-
-GUI:CommandSlot16
-"Befehlsfeld 16"
-END
-
-GUI:CommandSlot16Description
-"Drückt Befehlsfeld 16 (Spalte 4, untere Reihe, 'V' im Standardlayout)."
-END
-
-GUI:CommandSlot17
-"Befehlsfeld 17"
-END
-
-GUI:CommandSlot17Description
-"Drückt Befehlsfeld 17 (Spalte 5, untere Reihe, 'B' im Standardlayout), wo der Sammelpunkt eines Gebäudes liegt."
-END
-
-GUI:CommandSlot18
-"Befehlsfeld 18"
-END
-
-GUI:CommandSlot18Description
-"Drückt Befehlsfeld 18 (Spalte 6, untere Reihe, 'N' im Standardlayout), wo Verkaufen liegt."
-END
-
-GUI:TogglePurchaseScience
-"General-Beförderungen"
-END
-
-GUI:TogglePurchaseScienceDescription
-"Öffnet und schließt den Beförderungsbildschirm des Generals."
-END
-
 GUI:StopDescription
 "Stoppt, was die ausgewählten Einheiten gerade tun."
-END
-
-GUI:OrderForceAttack
-"Angriff erzwingen"
 END
 
 GUI:OrderForceAttackDescription
 "Der nächste Klick greift alles unter dem Zeiger an, auch den Boden und deine eigene Seite. Drücke die Taste erneut, um abzubrechen."
 END
 
-GUI:OrderHoldPosition
-"Position halten"
-END
-
 GUI:OrderHoldPositionDescription
 "Die ausgewählten Einheiten bewachen ihren Standort und bekämpfen alles in der Nähe, ohne es aus dem Gebiet zu verfolgen."
-END
-
-GUI:OrderMove
-"Bewegen"
 END
 
 GUI:OrderMoveDescription
@@ -14237,16 +14065,8 @@ GUI:SelectionTypeDescription
 "Klicke, um nur diese ausgewählt zu lassen. Mit Umschalt und Klick nimmst du sie aus der Auswahl."
 END
 
-GUI:OrderStanceDefensive
-"Haltung: Defensiv"
-END
-
 GUI:OrderStanceDefensiveDescription
 "Die ausgewählten Einheiten schießen auf alles in Reichweite und halten ihre Stellung. Klicke, um sie aggressiv zu machen: Sie gehen auf jeden Feind los, den sie sehen."
-END
-
-GUI:OrderStanceAggressive
-"Haltung: Aggressiv"
 END
 
 GUI:OrderStanceAggressiveDescription
@@ -14257,24 +14077,12 @@ GUI:SignalAttack
 "Signal: Angriff"
 END
 
-GUI:SignalAttackDescription
-"Rauch in deiner Farbe und gekreuzte Schwerter am Boden für zehn Sekunden, am Cursor oder auf der Radarstelle darunter. Nur deine Verbündeten sehen es."
-END
-
 GUI:SignalDefend
 "Signal: Verteidigen"
 END
 
-GUI:SignalDefendDescription
-"Rauch in deiner Farbe und ein Schild am Boden für zehn Sekunden, am Cursor oder auf der Radarstelle darunter. Nur deine Verbündeten sehen es."
-END
-
 GUI:SignalAttention
 "Signal: Hierher schauen"
-END
-
-GUI:SignalAttentionDescription
-"Rauch in deiner Farbe und ein Auge am Boden für zehn Sekunden, am Cursor oder auf der Radarstelle darunter. Nur deine Verbündeten sehen es."
 END
 
 GUI:SignalAttackPlaced
@@ -14289,120 +14097,12 @@ GUI:SignalAttentionPlaced
 "%s: Schaut hierher!"
 END
 
-GUI:TogglePauseDescription
-"Pausiert und setzt das Spiel fort. Nur Einzelspieler und Replays."
-END
-
 GUI:GamePaused
 "Spiel pausiert."
 END
 
 GUI:GameResumed
 "Spiel fortgesetzt."
-END
-
-GUI:SelectAllMilitary
-"Kampfeinheiten auswählen"
-END
-
-GUI:SelectAllMilitaryDescription
-"Wählt deine bewaffneten Einheiten auf dem Bildschirm aus. Drücke erneut, um sie auf der ganzen Karte auszuwählen."
-END
-
-GUI:SelectAllVehicles
-"Fahrzeuge auswählen"
-END
-
-GUI:SelectAllVehiclesDescription
-"Wählt deine Bodenfahrzeuge auf dem Bildschirm aus, ohne Dozer und Arbeiter. Drücke erneut für die ganze Karte."
-END
-
-GUI:SelectAllBarracks
-"Kasernen auswählen"
-END
-
-GUI:SelectAllBarracksDescription
-"Wählt deine Gebäude zur Infanterieproduktion auf dem Bildschirm aus. Drücke erneut, um sie auf der ganzen Karte auszuwählen."
-END
-
-GUI:SelectAllWarFactories
-"Kriegsfabriken auswählen"
-END
-
-GUI:SelectAllWarFactoriesDescription
-"Wählt deine Gebäude zur Fahrzeugproduktion auf dem Bildschirm aus. Drücke erneut, um sie auf der ganzen Karte auszuwählen."
-END
-
-GUI:SelectAllAirfields
-"Flugfelder auswählen"
-END
-
-GUI:SelectAllAirfieldsDescription
-"Wählt deine Flugfelder und Hubschrauberlandeplätze auf dem Bildschirm aus. Drücke erneut, um sie auf der ganzen Karte auszuwählen."
-END
-
-GUI:ShortcutSlot01
-"Generalsfähigkeit 1"
-END
-
-GUI:ShortcutSlot01Description
-"Drückt die erste Taste der Fähigkeitenleiste des Generals oben rechts."
-END
-
-GUI:ShortcutSlot02
-"Generalsfähigkeit 2"
-END
-
-GUI:ShortcutSlot02Description
-"Drückt die zweite Taste der Fähigkeitenleiste des Generals oben rechts."
-END
-
-GUI:ShortcutSlot03
-"Generalsfähigkeit 3"
-END
-
-GUI:ShortcutSlot03Description
-"Drückt die dritte Taste der Fähigkeitenleiste des Generals oben rechts."
-END
-
-GUI:ShortcutSlot04
-"Generalsfähigkeit 4"
-END
-
-GUI:ShortcutSlot04Description
-"Drückt die vierte Taste der Fähigkeitenleiste des Generals oben rechts."
-END
-
-GUI:ShortcutSlot05
-"Generalsfähigkeit 5"
-END
-
-GUI:ShortcutSlot05Description
-"Drückt die fünfte Taste der Fähigkeitenleiste des Generals oben rechts."
-END
-
-GUI:ShortcutSlot06
-"Generalsfähigkeit 6"
-END
-
-GUI:ShortcutSlot06Description
-"Drückt die sechste Taste der Fähigkeitenleiste des Generals oben rechts."
-END
-
-GUI:ShortcutSlot07
-"Generalsfähigkeit 7"
-END
-
-GUI:ShortcutSlot07Description
-"Drückt die siebte Taste der Fähigkeitenleiste des Generals oben rechts."
-END
-
-GUI:ShortcutSlot08
-"Generalsfähigkeit 8"
-END
-
-GUI:ShortcutSlot08Description
-"Drückt die achte Taste der Fähigkeitenleiste des Generals oben rechts."
 END
 
 GUI:HumanSlot
@@ -14522,7 +14222,7 @@ GUI:OptionsGroupLighting
 END
 
 GUI:OptionsGroupOrders
-"Befehle"
+"Maus und Befehle"
 END
 
 GUI:OptionsGroupBattlefield
@@ -14717,14 +14417,6 @@ TOOLTIP:IsometricCamera
 "Das Schlachtfeld aus der Ferne gesehen, sodass eine Einheit oben auf dem Bildschirm so groß ist wie unten. Kamera drehen und zoomen kannst du weiterhin."
 END
 
-GUI:SmoothMotion
-"Flüssige Bewegung"
-END
-
-TOOLTIP:SmoothMotion
-"Einheiten werden zwischen den 30 Schritten des Spiels pro Sekunde gezeichnet und bewegen sich auf schnellen Displays flüssig. Das Bild hängt einen Schritt (33 ms) hinterher; das Spiel selbst bleibt unverändert."
-END
-
 GUI:EdgeScrollWindowed
 "Randscrollen im Fenster"
 END
@@ -14813,26 +14505,6 @@ TOOLTIP:NetBox
 "Das Feld oben rechts mit Spieluhr, Bildraten und Verbindung. Aus rücken die Superwaffen-Timer in die Ecke."
 END
 
-GUI:IncomeRate
-"Einkommensanzeige"
-END
-
-GUI:IncomeRate0
-"Pro Sekunde"
-END
-
-GUI:IncomeRate1
-"Pro Minute"
-END
-
-GUI:IncomeRate2
-"Automatisch"
-END
-
-TOOLTIP:IncomeRate
-"Worüber das Einkommen neben deinem Geld gezählt wird. Automatisch zeigt es pro Minute, solange du weniger als $10 pro Sekunde verdienst, wo eine ganze Zahl pro Sekunde das meiste der Änderung verbirgt, und darüber pro Sekunde."
-END
-
 GUI:EmptyBuildingPips
 "Leere Gebäudeplätze"
 END
@@ -14871,14 +14543,6 @@ END
 
 TOOLTIP:HealthBars
 "Intelligent zeigt einen Balken über allem Verletzten, plus Auswahl und was unter dem Cursor liegt. Nur Auswahl war im Original so."
-END
-
-GUI:HudScale
-"HUD-Größe"
-END
-
-TOOLTIP:HudScale
-"Zeichnet die Befehlsleiste und das übrige untere HUD größer, als deine Auflösung es täte."
 END
 
 GUI:OptionsGroupInput
@@ -14929,20 +14593,8 @@ TOOLTIP:Language
 "Die Sprache von Menüs, Befehlen, Einsatzbesprechungen und Untertiteln. Sprachausgabe und Videos bleiben wie installiert. Gilt ab dem nächsten Spielstart."
 END
 
-TOOLTIP:SupplyWarehousePercent
-"\n Noch $%d übrig (%d%%)"
-END
-
 TOOLTIP:SupplyPileFull
 "\n Belegt: Das Haufenlimit hält deine Sammler fern"
-END
-
-TOOLTIP:BuildTimeSeconds
-"\nZeit %ds"
-END
-
-TOOLTIP:WeaponStats
-"Schaden %d  Reichw. %d"
 END
 
 TOOLTIP:StatTime
@@ -15133,76 +14785,8 @@ GUI:CantBuildTooManyDerrickDefenses
 "Du hast schon zwei Verteidigungen an diesen Ölbohrtürmen."
 END
 
-GUI:HudSkillStrip
-"Beförderungen der Generäle"
-END
-
-GUI:HudSuperweaponStrip
-"Superwaffen-Timer"
-END
-
-GUI:HudNetWorth
-"Gesamtwert"
-END
-
-GUI:HudGameStats
-"Spielstatistik"
-END
-
-GUI:HudStatCash
-"Geld"
-END
-
-GUI:HudStatIncome
-"Einkommen pro Minute"
-END
-
 GUI:HudStatArmy
 "Armeewert"
-END
-
-GUI:HudStatKills
-"Abschüsse / Verluste"
-END
-
-GUI:HudStatRank
-"Rang des Generals"
-END
-
-GUI:HudStatPower
-"Energie"
-END
-
-GUI:HudArmies
-"Armeen"
-END
-
-GUI:HudCamera
-"Kamera"
-END
-
-GUI:HudCameraDirector
-"Regisseur"
-END
-
-GUI:HudCameraFree
-"Frei"
-END
-
-GUI:HudCameraPlayer
-"Spielerkamera"
-END
-
-GUI:HudFollow
-"Spieler"
-END
-
-GUI:HudFollowNobody
-"Keiner"
-END
-
-GUI:HudFog
-"Kriegsnebel"
 END
 
 GUI:CheatMoney
@@ -15257,42 +14841,6 @@ GUI:CheatApply
 "LOS"
 END
 
-GUI:HudSuperweaponReady
-"feuerbereit"
-END
-
-GUI:HudSuperweaponLaunched
-"abgefeuert"
-END
-
-GUI:HudAlertBuilt
-"%s gebaut"
-END
-
-GUI:HudAlertReady
-"%s bereit"
-END
-
-GUI:HudAlertLaunched
-"%s abgefeuert"
-END
-
-GUI:HudPowerUsed
-"genutzt"
-END
-
-GUI:HudPromotionBought
-"freigeschaltet"
-END
-
-GUI:HudStructureStarted
-"Bau begonnen"
-END
-
-GUI:HudStructureBuilt
-"gebaut"
-END
-
 GUI:HudNoDozerLeft
 "%s hat keinen Dozer mehr"
 END
@@ -15303,58 +14851,6 @@ END
 
 GUI:BarIdleWorker
 "Arbeiter"
-END
-
-GUI:BarNetReady
-"bereit"
-END
-
-GUI:BarNetRoom
-"Platz"
-END
-
-GUI:BarNetUnits
-"Einheiten"
-END
-
-GUI:ScoreboardAllies
-"DEINE SEITE"
-END
-
-GUI:ScoreboardEnemies
-"FEINDE"
-END
-
-GUI:ScoreboardPlayer
-"SPIELER"
-END
-
-GUI:ScoreboardLevel
-"RANG"
-END
-
-GUI:ScoreboardMoney
-"GELD"
-END
-
-GUI:ScoreboardPerMinute
-"PRO MIN"
-END
-
-GUI:ScoreboardPerSecond
-"PRO SEK"
-END
-
-GUI:ScoreboardKills
-"A"
-END
-
-GUI:ScoreboardDeaths
-"T"
-END
-
-GUI:ScoreboardPowers
-"KRÄFTE"
 END
 
 GUI:ScoreboardFavourite
@@ -15375,4 +14871,384 @@ END
 
 CONTROLBAR:Demo_ToolTipGLAScienceRebelAmbush
 "Erlaubt dir einen Überraschungshinterhalt aus Rebellen an beliebiger Stelle \n \n Rang 1: 4 Rebellen \n Rang 2: 6 Rebellen \n Rang 3: 10 Rebellen \n \n Einsatz von: Kommandozentrale"
+END
+
+GUI:ShadowQuality
+"Schattenqualität"
+END
+
+GUI:ShadowQuality0
+"Niedrig"
+END
+
+GUI:ShadowQuality1
+"Mittel"
+END
+
+GUI:ShadowQuality2
+"Hoch"
+END
+
+TOOLTIP:ShadowQuality
+"Wie scharf die Schatten von Einheiten und Gebäuden sind. Hoch belegt etwa 64 MB Grafikspeicher, Niedrig spart Speicher auf einer schwachen Karte. Nur mit Direct3D 11 und nicht mit Klassischer Grafik. Gilt, sobald du Annehmen drückst."
+END
+
+GUI:VolumetricSmoke
+"Volumetrischer Rauch"
+END
+
+TOOLTIP:VolumetricSmoke
+"Rauch und Staub verdunkeln je nach Dichte den Boden, die Einheiten und den Rauch dahinter. Nur mit Direct3D 11, kostet in großen Gefechten etwas Leistung. Gilt, sobald du Annehmen drückst."
+END
+
+GUI:LightingStyle
+"Beleuchtung"
+END
+
+GUI:LightingStyle0
+"Klassisch"
+END
+
+GUI:LightingStyle1
+"Reforged"
+END
+
+TOOLTIP:LightingStyle
+"Reforged gibt jeder Karte eine stärkere, wärmere Sonne, dunkleren Schatten und tiefere Schlagschatten, bei gleicher Tageszeit. Klassisch ist das flache Licht von 2003, und Klassische Grafik nutzt es immer. Gilt ab der nächsten Karte."
+END
+
+GUI:SmokeFireLighting
+"Feuer erhellt Rauch"
+END
+
+TOOLTIP:SmokeFireLighting
+"Rauch neben einem Feuer nimmt dessen orangefarbenes Licht an. Gilt, sobald du Annehmen drückst."
+END
+
+GUI:DebrisTrails
+"Rauchende Trümmer"
+END
+
+TOOLTIP:DebrisTrails
+"Explosionen schleudern Splitter mit Rauchfahnen, und Wracks werfen brennende Schrapnelle ab. Aus behält die Explosionen des Originals. Gilt, sobald du Annehmen drückst."
+END
+
+GUI:FormationDrag
+"Formation aufziehen"
+END
+
+TOOLTIP:FormationDrag
+"Ziehen mit gewähltem Bewegungs-, Angriffsmarsch- oder Bewachen-Befehl verteilt die Einheiten entlang der gezogenen Linie."
+END
+
+GUI:BuildWithoutWorker
+"Bauen ohne Arbeiter"
+END
+
+TOOLTIP:BuildWithoutWorker
+"Ist nichts ausgewählt, zeigt die Befehlsleiste die Gebäude deiner Arbeiter, und der nächste untätige Arbeiter geht bauen. Aus bleibt die Leiste leer, bis du einen Arbeiter auswählst, wie 2003."
+END
+
+GUI:HealthBarColors
+"Farbe der Lebensbalken"
+END
+
+GUI:HealthBarColors0
+"Grün bis Rot"
+END
+
+GUI:HealthBarColors1
+"Spielerfarbe"
+END
+
+TOOLTIP:HealthBarColors
+"Grün bei voller Gesundheit über Gelb bis Rot, oder jeder Balken in der Farbe seines Besitzers, damit du siehst, wem er gehört. Lahmgelegte Einheiten bleiben blau."
+END
+
+GUI:MenuTransitionSpeed
+"Menütempo"
+END
+
+TOOLTIP:MenuTransitionSpeed
+"Wie schnell Menüs gleiten und überblenden. 100 ist das Tempo des Originals."
+END
+
+GUI:OptionsGroupMenus
+"Menüs"
+END
+
+GUI:OptionsGroupReplays
+"Replays"
+END
+
+TOOLTIP:SaveCamera
+"Deine Kamerabewegungen werden in deinen Replays von Einzelspieler- und Gefechtspartien aufgezeichnet."
+END
+
+TOOLTIP:UseCamera
+"Ein Replay folgt der Kamera, die sein Spieler aufgezeichnet hat, statt dir eine freie Kamera zu lassen."
+END
+
+TOOLTIP:DrawScrollAnchor
+"Setzt eine Markierung dorthin, wo ein Scrollen mit gezogener rechter Maustaste begann."
+END
+
+TOOLTIP:MoveScrollAnchor
+"Die Scroll-Markierung folgt dem Mauszeiger, nie mehr als einen halben Bildschirm dahinter, sodass ein langes Ziehen nicht immer schneller wird."
+END
+
+GUI:OptionsTabHotkeys
+"Hotkeys"
+END
+
+GUI:HotkeysCommands
+"Befehle"
+END
+
+GUI:HotkeysCommandBar
+"Befehlsleiste"
+END
+
+GUI:HotkeysChange
+"Ändern"
+END
+
+GUI:HotkeysClear
+"Keine Taste"
+END
+
+GUI:HotkeysDefault
+"Standard"
+END
+
+TOOLTIP:HotkeyChange
+"Wartet auf eine neue Taste für den gewählten Befehl oder die gewählte Schaltfläche. Ein Doppelklick oder Enter darauf tut dasselbe."
+END
+
+TOOLTIP:HotkeyClear
+"Nimmt die Taste vom gewählten Befehl oder der gewählten Schaltfläche."
+END
+
+TOOLTIP:HotkeyDefault
+"Stellt die Taste des Spiels wieder her. Tasten werden gespeichert, sobald du Annehmen drückst."
+END
+
+GUI:HotkeysNone
+"keine"
+END
+
+GUI:HotkeysPressKey
+"Drücke eine Taste, oder Esc zum Abbrechen"
+END
+
+GUI:HotkeysPressLetter
+"Drücke einen Buchstaben, oder Esc zum Abbrechen"
+END
+
+GUI:HotkeysPressForceAttack
+"Drücke eine Taste, oder Strg oder Alt allein. Umschalt kann nicht die Haltetaste sein. Esc bricht ab."
+END
+
+GUI:HotkeysClash
+"%s: %s teilen sich diese Taste. Im Spiel bekommt sie nur einer davon, und ein fester Befehl behält seine eigene."
+END
+
+GUI:HotkeysAlsoOn
+"Dieselbe Taste wie %s."
+END
+
+GUI:HotkeysFixed
+"Feste Tasten auf jeder Leiste: A Angriffsmarsch, S Stopp, G Bewachen, Y Sammelpunkt, V Evakuieren, C Abseilen, N Verkaufen, H Minen, Tarnnetz und der Wechsel zur Attrappe."
+END
+
+GUI:HotkeysGameKey
+"Die Taste des Spiels ist %s."
+END
+
+GUI:HotkeysMoved
+"Von den Tasten der Befehlsleiste verlegt; die Taste des Spiels ist %s."
+END
+
+GUI:HotkeysButtonMoved
+"Das Spiel gab ihr den Buchstaben einer festen Taste, deshalb hat der Launcher sie verlegt."
+END
+
+GUI:HotkeysForceAttack
+"Gedrückt halten, um auf alles unter dem Zeiger zu feuern. Umschalt plus diese Taste zieht weiterhin einen Auswahlrahmen. Standard ist Strg."
+END
+
+GUI:HotkeysPick
+"Wähle einen Befehl oder eine Schaltfläche, dann doppelklicke darauf oder drücke Ändern."
+END
+
+GUI:HotkeysOnFixedKey
+"Auch eine Taste der Befehlsleiste: Sie löst zusammen mit der Schaltfläche aus, die sie trägt."
+END
+
+GUI:HotkeysCategorySELECTION
+"Auswahl"
+END
+
+GUI:HotkeysCategoryTEAM
+"Teams"
+END
+
+GUI:HotkeysCategoryINFORMATION
+"Signale und Signalfeuer"
+END
+
+GUI:HotkeysCategoryCONTROL
+"Befehle"
+END
+
+GUI:HotkeysCategoryINTERFACE
+"Oberfläche"
+END
+
+GUI:HotkeysCategorySHORTCUTS
+"Generalsfähigkeiten"
+END
+
+GUI:HotkeysCategoryGRID
+"Befehlsleiste nach Platz"
+END
+
+GUI:HotkeysCategoryMISC
+"Kamera und Chat"
+END
+
+GUI:HotkeysFamilySaveView
+"Lesezeichen %d setzen"
+END
+
+GUI:HotkeysFamilyViewView
+"Zu Lesezeichen %d"
+END
+
+GUI:HotkeysFamilyAddTeam
+"Auswahl zu Team %d hinzufügen"
+END
+
+GUI:HotkeysFamilyShortcut
+"Generalsfähigkeit %d"
+END
+
+GUI:HotkeysFamilySlot
+"Befehlsleiste, Platz %d"
+END
+
+GUI:HotkeysCommandSELECT_HERO
+"Held auswählen"
+END
+
+GUI:HotkeysCommandSELECT_NEXT_WORKER
+"Nächster Arbeiter"
+END
+
+GUI:HotkeysCommandSELECT_PREV_WORKER
+"Vorheriger Arbeiter"
+END
+
+GUI:HotkeysCommandCHAT_ALLIES
+"Chat an Verbündete"
+END
+
+GUI:HotkeysCommandCHAT_EVERYONE
+"Chat an alle"
+END
+
+GUI:HotkeysCommandDIPLOMACY
+"Diplomatie"
+END
+
+GUI:HotkeysCommandPLACE_BEACON
+"Signalfeuer setzen"
+END
+
+GUI:HotkeysCommandDELETE_BEACON
+"Signalfeuer entfernen"
+END
+
+GUI:HotkeysCommandBEGIN_CAMERA_ROTATE_LEFT
+"Kamera nach links drehen"
+END
+
+GUI:HotkeysCommandBEGIN_CAMERA_ROTATE_RIGHT
+"Kamera nach rechts drehen"
+END
+
+GUI:HotkeysCommandBEGIN_CAMERA_ZOOM_IN
+"Hineinzoomen"
+END
+
+GUI:HotkeysCommandBEGIN_CAMERA_ZOOM_OUT
+"Herauszoomen"
+END
+
+GUI:HotkeysCommandCAMERA_RESET
+"Kamera zurücksetzen"
+END
+
+GUI:HotkeysCommandTOGGLE_CAMERA_TRACKING_DRAWABLE
+"Kamera folgt Auswahl"
+END
+
+GUI:HotkeysCommandTOGGLE_FAST_FORWARD_REPLAY
+"Replay vorspulen"
+END
+
+GUI:HotkeysCommandSELECT_ALL
+"Alle Einheiten auswählen"
+END
+
+GUI:HotkeysCommandSELECT_ALL_MILITARY
+"Alle Kampfeinheiten auswählen"
+END
+
+GUI:HotkeysCommandSELECT_ALL_VEHICLES
+"Alle Fahrzeuge auswählen"
+END
+
+GUI:HotkeysCommandSELECT_ALL_AIRCRAFT
+"Alle Luftfahrzeuge auswählen"
+END
+
+GUI:HotkeysCommandSELECT_ALL_BARRACKS
+"Alle Kasernen auswählen"
+END
+
+GUI:HotkeysCommandSELECT_ALL_WARFACTORIES
+"Alle Kriegsfabriken auswählen"
+END
+
+GUI:HotkeysCommandSELECT_ALL_AIRFIELDS
+"Alle Flugfelder auswählen"
+END
+
+GUI:HotkeysCommandSELECT_NEXT_IDLE_WORKER
+"Nächster untätiger Arbeiter"
+END
+
+GUI:HotkeysCommandSELECT_NEXT_IDLE_UNIT
+"Nächste untätige Einheit"
+END
+
+GUI:HotkeysCommandTOGGLE_PAUSE
+"Pause (Einzelspieler und Replays)"
+END
+
+GUI:HotkeysCommandTOGGLE_PURCHASE_SCIENCE
+"Beförderungen des Generals"
+END
+
+GUI:HotkeysCommandSIGNAL_ATTACK
+"Signal: hier angreifen"
+END
+
+GUI:HotkeysCommandSIGNAL_DEFEND
+"Signal: hier verteidigen"
+END
+
+GUI:HotkeysCommandSIGNAL_ATTENTION
+"Signal: hierher schauen"
 END

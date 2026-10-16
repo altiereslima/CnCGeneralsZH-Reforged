@@ -1011,6 +1011,14 @@ protected:
 	static unsigned						draw_calls;
 	static bool								CurrentDX8LightEnables[4];
 
+	// The material and lights last handed to both devices.  VertexMaterialClass::Apply and
+	// Set_Light_Environment send the same values mesh after mesh, and a repeat is dropped before it
+	// reaches either device.  Invalidate_Cached_Render_States forgets them with the rest.
+	static D3DMATERIAL9					CurrentDX8Material;
+	static bool								CurrentDX8MaterialValid;
+	static D3DLIGHT9						CurrentDX8Lights[4];
+	static unsigned						CurrentDX8LightsValid;
+
 	// What the Direct3D 9 device has not been told yet, one bit per state, stage or light; the
 	// values are the caches above.  Defer_D3D9_State says whether a setter marks or calls.
 	static bool								Defer_D3D9_State();
@@ -1220,8 +1228,11 @@ WWINLINE bool DX8Wrapper::Defer_D3D9_State()
 
 WWINLINE void DX8Wrapper::Set_DX8_Material(const D3DMATERIAL9* mat)
 {
-	DX8_RECORD_MATERIAL_CHANGE();
 	WWASSERT(mat);
+	if (CurrentDX8MaterialValid && memcmp(&CurrentDX8Material, mat, sizeof(D3DMATERIAL9))==0) return;
+	DX8_RECORD_MATERIAL_CHANGE();
+	CurrentDX8Material=*mat;
+	CurrentDX8MaterialValid=true;
 	SNAPSHOT_SAY(("DX8 - SetMaterial\n"));
 	if (Defer_D3D9_State()) {
 		PendingMaterialValue=*mat;
@@ -1240,6 +1251,11 @@ WWINLINE void DX8Wrapper::Set_DX8_Material(const D3DMATERIAL9* mat)
 WWINLINE void DX8Wrapper::Set_DX8_Light(int index, D3DLIGHT9* light)
 {
 	if (light) {
+		// An enabled light holding these exact bits already: the device and the backend have it.
+		if (CurrentDX8LightEnables[index] && (CurrentDX8LightsValid&(1u<<index))
+				&& memcmp(&CurrentDX8Lights[index], light, sizeof(D3DLIGHT9))==0) return;
+		CurrentDX8Lights[index]=*light;
+		CurrentDX8LightsValid|=1u<<index;
 		DX8_RECORD_LIGHT_CHANGE();
 		if (Defer_D3D9_State()) {
 			PendingLightValues[index]=*light;

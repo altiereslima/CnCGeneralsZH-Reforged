@@ -1,0 +1,23 @@
+# Does an Ambulance guarding a tank come back to the tank after a cleanup?
+#
+# The Ambulance guards a Crusader, notices a medium poison field 200 from it, cleans it and should be
+# back on guard on the Crusader, not on the spot it left from.  The Crusader then drives 600 east, and
+# the "arrive" line says whether the Ambulance followed it.  Measured 2026-10-12: back on guard at
+# frame 340, at the Crusader 505 frames after it set off.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 1800
+#     -scenario ambulanceguard -logPrefix ambulanceguard_
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn       0  AirF_AmericaVehicleMedic   1  700 1500
+30    spawn       0  AmericaTankCrusader        1  760 1500
+
+60    guard       0  AirF_AmericaVehicleMedic   0  AmericaTankCrusader
+
+90    spawn       1  PoisonFieldMedium          1  700 1700
+
+600   move        0  AmericaTankCrusader        1360 1500
+601   arrive      0  AirF_AmericaVehicleMedic   1360 1500 200

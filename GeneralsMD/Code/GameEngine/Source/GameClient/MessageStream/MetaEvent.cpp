@@ -39,7 +39,6 @@
 #include "Common/Team.h"
 #include "Common/ThingTemplate.h"
 
-#include "GameClient/ControlBar.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/Mouse.h"
 #include "GameClient/GameClient.h"
@@ -456,8 +455,7 @@ static const char * findGameMessageNameByType(GameMessage::Type type)
 //-------------------------------------------------------------------------------------------------
 static Bool metaIgnoresShift(const MetaMapRec *map)
 {
-	return !TheGlobalData->isClassicUI() &&
-				 map->m_meta >= GameMessage::MSG_META_COMMAND_SLOT01 &&
+	return map->m_meta >=GameMessage::MSG_META_COMMAND_SLOT01 &&
 				 map->m_meta <= GameMessage::MSG_META_COMMAND_SLOT18 &&
 				 (map->m_modState & SHIFT) == 0;
 }
@@ -493,38 +491,17 @@ GameMessageDisposition MetaEventTranslator::translateGameMessage(const GameMessa
 		}
 
 		//
-		// Tab / Shift-Tab walks the focus through a multi-selection's units on the control bar.
-		// Handled here rather than through the MetaMap because CommandMap.ini lives in the
-		// shipped game data and has no slot for it.  The game as it shipped did nothing with Tab,
-		// and neither does Classic.
-		//
-		if( !TheGlobalData->isClassicUI() &&
-				t == GameMessage::MSG_RAW_KEY_DOWN && key == MK_TAB &&
-				( newModState & ( CTRL | ALT ) ) == 0 &&
-				!( keyState & KEY_STATE_AUTOREPEAT ) &&
-				TheGameClient->getFrame() >= 1 &&
-				!( TheShell && TheShell->isShellActive() ) &&
-				TheInGameUI && TheInGameUI->getSelectCount() > 1 &&
-				TheControlBar )
-		{
-			TheControlBar->cycleMultiSelectFocus( ( newModState & SHIFT ) ? -1 : 1 );
-			m_lastModState = newModState;
-			return DESTROY_MESSAGE;
-		}
-
-		//
 		// A command bound to a key plus a modifier, with an UP transition, used to fire only when
 		// the key came up while the modifier was still held.  Letting go of Ctrl first meant the
 		// key's own release carried no Ctrl, the record no longer matched, and whatever the DOWN
 		// had switched on stayed on.  Every key remembers the combinations it was pressed with, so
-		// a modifier release can finish them off in whatever order the player let go.  Classic keeps
-		// the game's own rule, where the order of letting go mattered.
+		// a modifier release can finish them off in whatever order the player let go.
 		//
 		const Bool isModifierKey = ( key == KEY_LCTRL || key == KEY_RCTRL ||
 																 key == KEY_LSHIFT || key == KEY_RSHIFT ||
 																 key == KEY_LALT || key == KEY_RALT );
 
-		if( isModifierKey && ( keyState & KEY_STATE_UP ) && !TheGlobalData->isClassicUI() )
+		if( isModifierKey && ( keyState & KEY_STATE_UP ) )
 		{
 			for( Int keyIndex = 0; keyIndex < NUM_MAPPABLE_KEYS; ++keyIndex )
 			{
@@ -601,10 +578,7 @@ GameMessageDisposition MetaEventTranslator::translateGameMessage(const GameMessa
 				disp = DESTROY_MESSAGE;
 				// every record on this modifier fires, not the first one found: shift is both "add to
 				// the selection" on the left button and "queue the order" on the right, and the two
-				// are separate records that have to come on and go off together.  Classic stops at the
-				// first, as the game did.
-				if( TheGlobalData->isClassicUI() )
-					break;
+				// are separate records that have to come on and go off together.
 				continue;
 			}
 
@@ -656,9 +630,41 @@ GameMessageDisposition MetaEventTranslator::translateGameMessage(const GameMessa
 				disp = DESTROY_MESSAGE;
 				break;
 			}
-		} 
+		}
 
+		// Home puts the camera back as well as CAMERA_RESET's own key (Numpad 5 in the shipped
+		// CommandMap.ini, which keyboards without a numpad lack), unless the player gave Home to
+		// something else.
+		if( disp == KEEP_MESSAGE && key == MK_HOME && newModState == NONE &&
+				( keyState & KEY_STATE_DOWN ) && !( keyState & KEY_STATE_AUTOREPEAT ) &&
+				TheGameClient->getFrame() >= 1 && !( TheShell && TheShell->isShellActive() ) )
+		{
+			TheMessageStream->appendMessage( GameMessage::MSG_META_CAMERA_RESET );
+			disp = DESTROY_MESSAGE;
+		}
 
+		// A replay's strip on the keyboard, unless CommandMap.ini gave the key to something else: P
+		// pauses and resumes, minus and plus step through the speed buttons.  Nobody gives orders in
+		// a replay, so the keys are free there.
+		if( disp == KEEP_MESSAGE && newModState == NONE && TheGameLogic->isInReplayGame() &&
+				( keyState & KEY_STATE_DOWN ) && !( keyState & KEY_STATE_AUTOREPEAT ) )
+		{
+			if( key == MK_P )
+			{
+				TheMessageStream->appendMessage( GameMessage::MSG_META_TOGGLE_PAUSE );
+				disp = DESTROY_MESSAGE;
+			}
+			else if( key == MK_MINUS || key == MK_KPMINUS )
+			{
+				ReplayControlStepSpeed( -1 );
+				disp = DESTROY_MESSAGE;
+			}
+			else if( key == MK_EQUAL || key == MK_KPPLUS )
+			{
+				ReplayControlStepSpeed( 1 );
+				disp = DESTROY_MESSAGE;
+			}
+		}
 
 		// remember, or forget, that this key is held with these modifiers
 		if( !isModifierKey && newModState != NONE && key >= 0 && key < NUM_MAPPABLE_KEYS )
@@ -795,43 +801,25 @@ GameMessageDisposition MetaEventTranslator::translateGameMessage(const GameMessa
 
 //-------------------------------------------------------------------------------------------------
 MetaMap::MetaMap() :
-	m_metaMaps(NULL),
-	m_classicMaps(NULL),
-	m_parsingClassic(FALSE)
+	m_metaMaps(NULL)
 {
-}
-
-//-------------------------------------------------------------------------------------------------
-void MetaMap::freeList( MetaMapRec *&list )
-{
-	while (list)
-	{
-		MetaMapRec *next = list->m_next;
-		list->deleteInstance();
-		list = next;
-	}
 }
 
 //-------------------------------------------------------------------------------------------------
 MetaMap::~MetaMap()
 {
-	freeList( m_metaMaps );
-	freeList( m_classicMaps );
+	clear();
 }
 
 //-------------------------------------------------------------------------------------------------
-const MetaMapRec *MetaMap::getFirstMetaMapRec() const
+void MetaMap::clear()
 {
-	return getFirstMetaMapRec( TheGlobalData->isClassicUI() );
-}
-
-//-------------------------------------------------------------------------------------------------
-void MetaMap::loadClassicBindings( const AsciiString& languageMapFile )
-{
-	m_parsingClassic = TRUE;
-	INI ini;
-	ini.load( languageMapFile, INI_LOAD_OVERWRITE, NULL );
-	m_parsingClassic = FALSE;
+	while (m_metaMaps)
+	{
+		MetaMapRec *next = m_metaMaps->m_next;
+		m_metaMaps->deleteInstance();
+		m_metaMaps = next;
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -848,8 +836,7 @@ GameMessage::Type MetaMap::findGameMessageMetaType(const char* name)
 //-------------------------------------------------------------------------------------------------
 MetaMapRec *MetaMap::getMetaMapRec(GameMessage::Type t)
 {
-	MetaMapRec *&list = m_parsingClassic ? m_classicMaps : m_metaMaps;
-	for (MetaMapRec *map = list; map; map = map->m_next)
+	for (MetaMapRec *map = m_metaMaps; map; map = map->m_next)
 	{
 		if (map->m_meta == t)
 			return map;
@@ -865,10 +852,85 @@ MetaMapRec *MetaMap::getMetaMapRec(GameMessage::Type t)
 	m->m_category = CATEGORY_MISC;
 	m->m_description.clear();
 	m->m_displayName.clear();
-	m->m_next = list;
-	list = m;
+	m->m_next = m_metaMaps;
+	m_metaMaps = m;
 	
 	return m;
+}
+
+//-------------------------------------------------------------------------------------------------
+UnicodeString MetaMap_formatChord( MappableKeyType key, MappableKeyModState mods, CommandUsableInType usable )
+{
+	if( usable == COMMANDUSABLE_NONE )
+		return UnicodeString::TheEmptyString;
+
+	UnicodeString text;
+	if( ( mods & CTRL ) != 0 )
+		text.concat( UnicodeString( u"Ctrl" ) );
+	if( ( mods & ALT ) != 0 )
+	{
+		if( !text.isEmpty() )
+			text.concat( UnicodeString( u" + " ) );
+		text.concat( UnicodeString( u"Alt" ) );
+	}
+	if( ( mods & SHIFT ) != 0 )
+	{
+		if( !text.isEmpty() )
+			text.concat( UnicodeString( u" + " ) );
+		text.concat( UnicodeString( u"Shift" ) );
+	}
+	if( key != MK_NONE )
+	{
+		const char *token = NULL;
+		for( const LookupListRec *rec = KeyNames; rec->name != NULL; ++rec )
+		{
+			if( rec->value == (Int)key )
+			{
+				token = rec->name;
+				break;
+			}
+		}
+		UnicodeString keyText;
+		if( token != NULL && strncmp( token, "KEY_", 4 ) == 0 )
+		{
+			const char *rest = token + 4;
+			if( strcmp( rest, "ESC" ) == 0 )
+				keyText = UnicodeString( u"Esc" );
+			else if( strcmp( rest, "SPACE" ) == 0 )
+				keyText = UnicodeString( u"Space" );
+			else if( strcmp( rest, "ENTER" ) == 0 )
+				keyText = UnicodeString( u"Enter" );
+			else if( strcmp( rest, "BACKSPACE" ) == 0 )
+				keyText = UnicodeString( u"Backspace" );
+			else if( strcmp( rest, "TAB" ) == 0 )
+				keyText = UnicodeString( u"Tab" );
+			else if( strcmp( rest, "PGUP" ) == 0 )
+				keyText = UnicodeString( u"Page Up" );
+			else if( strcmp( rest, "PGDN" ) == 0 )
+				keyText = UnicodeString( u"Page Down" );
+			else
+				keyText.translate( AsciiString( rest ) );
+		}
+		else
+			keyText = UnicodeString( u"Key" );
+		if( !text.isEmpty() )
+			text.concat( UnicodeString( u" + " ) );
+		text.concat( keyText );
+	}
+	return text;
+}
+
+//-------------------------------------------------------------------------------------------------
+UnicodeString MetaMap_chordLabel( GameMessage::Type meta )
+{
+	if( TheMetaMap == NULL )
+		return UnicodeString( u"Ctrl" );
+	for( const MetaMapRec *rec = TheMetaMap->getFirstMetaMapRec(); rec; rec = rec->m_next )
+	{
+		if( rec->m_meta == meta )
+			return MetaMap_formatChord( rec->m_key, rec->m_modState, rec->m_usableIn );
+	}
+	return UnicodeString( u"Ctrl" );
 }
 
 //-------------------------------------------------------------------------------------------------

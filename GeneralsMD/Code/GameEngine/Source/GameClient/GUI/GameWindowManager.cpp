@@ -1521,6 +1521,10 @@ Int GameWindowManager::winDestroy( GameWindow *window )
 	if( m_grabWindow == window )
 		m_grabWindow = NULL;
 
+	// a menu closed mid-transition: the transition must not run on the window once it is freed
+	if( TheTransitionHandler )
+		TheTransitionHandler->forgetWindow( window );
+
 	for( child = window->m_child; child; child = next )
 	{
 		next = child->m_next;

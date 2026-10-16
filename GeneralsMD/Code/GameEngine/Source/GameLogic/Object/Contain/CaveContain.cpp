@@ -272,6 +272,11 @@ void CaveContain::onBuildComplete( void )
 //-------------------------------------------------------------------------------------------------
 void CaveContain::tryToSetCaveIndex( Int newIndex )
 {
+	// The index comes from a map script, so one the cave system cannot hold is a failed try,
+	// the same as switching into a cave that has someone in it.
+	if( newIndex < 0 || newIndex >= MAX_CAVE_INDEX_COUNT )
+		return;
+
 	if( TheCaveSystem->canSwitchIndexToIndex( m_caveIndex, newIndex ) )
 	{
 		TunnelTracker *myOldTracker = TheCaveSystem->getTunnelTrackerForCaveIndex( m_caveIndex );

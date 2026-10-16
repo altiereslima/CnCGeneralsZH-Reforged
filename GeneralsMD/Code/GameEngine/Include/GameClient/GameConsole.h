@@ -36,7 +36,6 @@
 
 class DisplayString;
 class GameFont;
-class HtmlOverlay;
 class GameWindow;
 class WindowLayout;
 
@@ -65,17 +64,15 @@ public:
 	/// Draw the panel.  Called from the display's 2D overlay pass.
 	void render( void );
 
-	/// The cheat panel that "trainer" opens: every cheat a click away.  Window/Html/Cheats.html in
-	/// Reforged; in Classic Window/Trainer.wnd, drawn like EA's diplomacy screen.
+	/// The cheat panel that "trainer" opens: every cheat a click away.  Window/Trainer.wnd, drawn
+	/// like EA's diplomacy screen.
 	Bool isCheatPanelOpen( void ) const { return m_cheatPanelOpen; }
 	void closeCheatPanel( void ) { m_cheatPanelOpen = FALSE; }
-	/// TRUE when the pointer is on the panel; with `act`, a click there runs what it was on.
-	Bool handleCheatPanelMouse( const ICoord2D &mouse, Bool act );
-	/// What a key or a row of the panel sends: "close", or a cheat and its amount as typed.
+	/// What a row of the panel sends: a cheat and its amount as typed.
 	void runCheatPanelAction( const std::string &action );
-	/// Row `row` of the Classic panel's list was clicked.
+	/// Row `row` of the panel's list was clicked.
 	void runCheatWindowRow( Int row );
-	/// Throw the Classic panel's windows away now, where diplomacy's are thrown away.
+	/// Throw the panel's windows away now, where diplomacy's are thrown away.
 	void resetCheatWindow( void );
 
 private:
@@ -100,11 +97,7 @@ private:
 	Int m_lineStringCount;
 
 	Bool m_cheatPanelOpen;
-	Bool m_cheatPanelShown;				///< drawn this frame, so its clicks are real
-	Bool m_cheatPanelLogged;			///< its keys' places written to the log once for each opening
-	std::string m_cheatPage;			///< Window/Html/Cheats.html as read, empty until the first opening
-	HtmlOverlay *m_cheatOverlay;
-	WindowLayout *m_cheatLayout;	///< the Classic panel while it is up
+	WindowLayout *m_cheatLayout;	///< the panel while it is up
 	GameWindow *m_cheatList;			///< its list, one row for each thing a click does
 	Int m_cheatListState;					///< the toggles' bits its rows were last written for, -1 for none
 };

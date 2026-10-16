@@ -1,0 +1,26 @@
+# Trailer 2, shots 8 to 10: Scenarios/rf_t2_beach.txt on Bombardment Beach (command line there).
+# Zoom is relative to the observer's opening view, which measured 1.28 absolute on this map.
+#
+# 3 s: hero_loop_03's view from the north-east, the two lines coming at each other across the grass
+#   with the rock ridge behind. At relative 2.1 and pitch 12 the 2560x1440 take of 2026-10-10 had
+#   the top fifth black over the ridge (16 had been worse in the probe), so it is closer and steeper;
+#   at 1.7 the review of 2026-10-11 found the tanks too small to read, so it is 1.2 now.
+# 6.5 s, frames 195 to 285: beside the Chinese armour at 1970,1660, close, looking east.
+# 9.5 s, frames 285 to 360: the first view again, the lines still coming.
+# 12 s, frames 360 to 530: the first view's heading, closer (0.75): the Redguards in the middle, the
+#   Americans arriving top left, the first shots from about 495. From the east (1850,1300 1.0 90)
+#   the ridge's face filled the left half and the infantry read as dots.
+# 18 s, frames 540 to 650: the Comanches low over the Chinese armour, rockets going out.
+# 22 s, frames 660 to 780: the ridge wider, China's carpet bomb going off along the American line;
+#   a thin black strip along the top, which the edit crops.
+
+3.0   cut     1946 1376 1.2 135 4
+3.5   shot
+6.5   cut     1990 1620 0.7 -90 6
+9.5   cut     1946 1376 1.2 135 4
+10.0  shot
+12.0  cut     1946 1376 0.75 135 6
+12.5  shot
+18.0  cut     2050 1540 0.9 -60 6
+18.5  shot
+22.0  cut     1850 1300 1.4 90 12

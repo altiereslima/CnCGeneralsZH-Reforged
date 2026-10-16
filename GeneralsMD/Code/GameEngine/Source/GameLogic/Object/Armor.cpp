@@ -86,7 +86,7 @@ Real ArmorTemplate::adjustDamage(DamageType t, Real damage) const
 {
 	ArmorTemplate* self = (ArmorTemplate*) instance;
 
-	const char* damageName = ini->getNextToken();
+	const char* damageName = INI::withoutModPrefix(ini->getNextToken());
 	Real pct = INI::scanPercentToReal(ini->getNextToken());
 
 	if (strcasecmp(damageName, "Default") == 0)
@@ -98,7 +98,14 @@ Real ArmorTemplate::adjustDamage(DamageType t, Real damage) const
 		return;
 	}
 
-	DamageType dt = (DamageType)INI::scanIndexList(damageName, DamageTypeFlags::getBitNames());
+	// EA's parse let a misspelt type through (The Power of the West has INFANTRY_MISSIL) and wrote it at
+	// index -1; the line is skipped instead, as a mod's data written against retail expects
+	Int dt = DamageTypeFlags::getSingleBitFromName(damageName);
+	if (dt < 0)
+	{
+		DEBUG_LOG(("[LINE: %d in '%s'] damage type '%s' does not exist; the armor line is skipped.\n", ini->getLineNum(), ini->getFilename().str(), damageName));
+		return;
+	}
 	self->m_damageCoefficient[dt] = pct;
 }
 
@@ -122,9 +129,10 @@ const ArmorTemplate* ArmorStore::findArmorTemplate(AsciiString name) const
 {
 	NameKeyType namekey = TheNameKeyGenerator->nameToKey(name);
   ArmorTemplateMap::const_iterator it = m_armorTemplates.find(namekey);
-  if (it == m_armorTemplates.end()) 
+  if (it == m_armorTemplates.end())
 	{
-		return NULL;
+		AsciiString retailName;
+		return TheModNamespace.findRetailName(name, MODNAME_ARMOR, &retailName) ? findArmorTemplate(retailName) : NULL;
 	}
 	else
 	{

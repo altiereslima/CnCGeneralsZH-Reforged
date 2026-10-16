@@ -82,40 +82,6 @@ struct ProductionButtonFixture
 	WinInputReturnCode click(GameWindowMessage msg) { return windows.winProcessMouseEvent(msg, &pixel, NULL); }
 };
 
-class ProductionStripTestUI : public CameraTestUI
-{
-public:
-	void staleCameo()
-	{
-		m_productionStripCameoW = m_productionStripCameoH = 40;
-		m_productionStripCount = 1;
-		ProductionStripSlot &slot = m_productionStrip[0];
-		slot.producer = INVALID_ID; // producer died after the last draw; the strip still owns the click
-		slot.pos.x = slot.pos.y = 20;
-	}
-};
-
-struct ProductionStripFixture
-{
-	CameraInputFixture engine;
-	PlaceEventTranslator strip;
-	ProductionStripFixture()
-	{
-		static ProductionStripTestUI *ui = NEW ProductionStripTestUI;
-		ui->staleCameo();
-		TheInGameUI = ui;
-	}
-	GameMessageDisposition event(GameMessage::Type type, Int x = 30, Int y = 30)
-	{
-		GameMessage *message = newInstance(GameMessage)(type);
-		ICoord2D pixel = {x, y};
-		message->appendPixelArgument(pixel);
-		GameMessageDisposition result = strip.translateGameMessage(message);
-		message->deleteInstance();
-		return result;
-	}
-};
-
 struct ProductionMessageFixture
 {
 	MessageStream stream;
@@ -213,70 +179,6 @@ TEST(production_cancel_reusing_a_button_clears_disabled_cancellation)
 	CHECK(!(f.button->winGetStatus() & WIN_STATUS_CANCEL_WHEN_DISABLED));
 	f.click(GWM_RIGHT_DOWN); f.click(GWM_RIGHT_UP);
 	CHECK(f.count.right == 0);
-}
-
-TEST(production_cancel_strip_consumes_press_drag_release_and_double_click)
-{
-	CHECK(bootOnce());
-	ProductionStripFixture f;
-	CHECK(f.event(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN) == DESTROY_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_RAW_MOUSE_RIGHT_DRAG, 100, 100) == DESTROY_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP, 100, 100) == DESTROY_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_MOUSE_RIGHT_CLICK) == DESTROY_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP, 100, 100) == KEEP_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_RAW_MOUSE_RIGHT_DOUBLE_CLICK) == DESTROY_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP) == DESTROY_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_MOUSE_RIGHT_DOUBLE_CLICK) == DESTROY_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_MOUSE_RIGHT_CLICK) == KEEP_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN, 60, 30) == KEEP_MESSAGE);
-	CHECK(!TheInGameUI->handleProductionStripClick(NULL, TRUE));
-}
-
-TEST(production_cancel_strip_preserves_left_click_and_independent_button_releases)
-{
-	CHECK(bootOnce());
-	ProductionStripFixture f;
-	CHECK(f.event(GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN) == DESTROY_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN) == DESTROY_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP, 100, 100) == DESTROY_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_MOUSE_LEFT_CLICK) == DESTROY_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP, 100, 100) == DESTROY_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_MOUSE_RIGHT_CLICK) == DESTROY_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP) == KEEP_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_RAW_MOUSE_LEFT_DOUBLE_CLICK) == DESTROY_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP) == DESTROY_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_MOUSE_LEFT_DOUBLE_CLICK) == DESTROY_MESSAGE);
-}
-
-TEST(production_cancel_strip_new_press_recovers_when_gui_consumed_the_previous_release)
-{
-	CHECK(bootOnce());
-	ProductionStripFixture f;
-	CHECK(f.event(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN) == DESTROY_MESSAGE);
-	// The player released over a window, so WindowTranslator consumed the release before us.
-	CHECK(f.event(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN, 100, 100) == KEEP_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP, 100, 100) == KEEP_MESSAGE);
-	CHECK(f.event(GameMessage::MSG_MOUSE_RIGHT_CLICK) == KEEP_MESSAGE);
-}
-
-TEST(production_cancel_strip_filters_real_meta_clicks_without_blocking_world_clicks)
-{
-	CHECK(bootOnce());
-	ProductionStripFixture engine;
-	ProductionMessageFixture f;
-	f.append(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN, 30, 30);
-	f.append(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP, 30, 30);
-	f.append(GameMessage::MSG_RAW_MOUSE_RIGHT_DOUBLE_CLICK, 30, 30);
-	f.append(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP, 30, 30);
-	f.stream.propagateMessages();
-	CHECK(f.commands.getFirstMessage() == NULL);
-	f.append(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN, 100, 100);
-	f.append(GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP, 100, 100);
-	f.stream.propagateMessages();
-	Int worldClicks = 0;
-	for(GameMessage *m = f.commands.getFirstMessage(); m; m = m->next())
-		if(m->getType() == GameMessage::MSG_MOUSE_RIGHT_CLICK) ++worldClicks;
-	CHECK(worldClicks == 1);
 }
 
 TEST(production_cancel_disabled_button_release_outside_does_not_create_world_click)

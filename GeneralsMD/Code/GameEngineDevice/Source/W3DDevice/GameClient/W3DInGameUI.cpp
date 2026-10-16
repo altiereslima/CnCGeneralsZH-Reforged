@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include "Lib/Clock.h"
 
+#include "Common/GameEngine.h"
 #include "Common/GlobalData.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
@@ -296,12 +297,6 @@ W3DInGameUI::W3DInGameUI()
 	m_buildingPlacementAnchor = NULL;
 	m_buildingPlacementArrow = NULL;
 
-	for( Int i = 0; i < MAX_PLAYER_COUNT; ++i )
-		m_allyCursorNames[ i ] = NULL;
-
-	for( Int i = 0; i < MAX_ORDER_STEP_NUMBERS; ++i )
-		m_orderStepNumbers[ i ] = NULL;
-
 	for( Int i = 0; i < MAX_MOVE_HINTS; i++ )
 	{
 		m_moveHintRenderObj[ i ] = NULL;
@@ -316,20 +311,6 @@ W3DInGameUI::~W3DInGameUI()
 {
 	REF_PTR_RELEASE( m_buildingPlacementAnchor );
 	REF_PTR_RELEASE( m_buildingPlacementArrow );
-
-	for( Int i = 0; i < MAX_PLAYER_COUNT; ++i )
-		if( m_allyCursorNames[ i ] )
-		{
-			TheDisplayStringManager->freeDisplayString( m_allyCursorNames[ i ] );
-			m_allyCursorNames[ i ] = NULL;
-		}
-
-	for( Int i = 0; i < MAX_ORDER_STEP_NUMBERS; ++i )
-		if( m_orderStepNumbers[ i ] )
-		{
-			TheDisplayStringManager->freeDisplayString( m_orderStepNumbers[ i ] );
-			m_orderStepNumbers[ i ] = NULL;
-		}
 
 	for( Int i = 0; i < MAX_MOVE_HINTS; i++ )
 	{
@@ -497,7 +478,7 @@ static void drawPaneRays( void )
 		}
 	}
 
-	const Real shimmer = ObserverCamera_shimmerAt( TheGameLogic->getFrame() );
+	const Real shimmer = ObserverCamera_shimmerAt( GameEngine_pictureFrame() );
 	if( drawn < 1.0f || shimmer < 0.0f )
 		return;
 	const Real half = length * PANE_SHIMMER_SHARE * 0.5f;
@@ -516,28 +497,6 @@ static void drawPaneRays( void )
 		TheDisplay->drawLine( middleX, middleY, REAL_TO_INT( origin.x + alongX * end ), REAL_TO_INT( origin.y + alongY * end ), edged,
 			paneShimmer( 255 ), paneShimmer( 0 ) );
 	}
-}
-
-/** The radar's frame drawing its gold in round the window, clockwise from the top left corner, drawn
-	* share of the way; the edge is under all of it from the start. */
-static void drawFrameGold( const IRegion2D &window, Int gold, Real drawn )
-{
-	const Int left = window.lo.x - gold;
-	const Int top = window.lo.y - gold;
-	const Int across = window.hi.x - window.lo.x + 2 * gold;
-	const Int down = window.hi.y - window.lo.y + 2 * gold;
-	Int remaining = REAL_TO_INT( drawn * 2 * ( across + down ) );
-	const Int topRun = min( remaining, across );
-	TheDisplay->drawFillRect( left, top, topRun, gold, PANE_GOLD );
-	remaining -= topRun;
-	const Int rightRun = min( remaining, down );
-	TheDisplay->drawFillRect( left + across - gold, top, gold, rightRun, PANE_GOLD );
-	remaining -= rightRun;
-	const Int bottomRun = min( remaining, across );
-	TheDisplay->drawFillRect( left + across - bottomRun, top + down - gold, bottomRun, gold, PANE_GOLD );
-	remaining -= bottomRun;
-	const Int leftRun = min( remaining, down );
-	TheDisplay->drawFillRect( left, top + down - leftRun, gold, leftRun, PANE_GOLD );
 }
 
 /// a rectangle the given pixels larger than window on every side, filled
@@ -571,12 +530,10 @@ void W3DInGameUI::draw( void )
 
 		// the console's 'hidehud showmap=true': the bar is hidden, so its radar window is put in the
 		// corner by hand, where the radar's own pixel maths find it too, and painted.  Under
-		// -directorrecord it slides out of the corner to the left before panes come and back after
-		// them, and while they are up it sits in a frame of the rays' own line where they meet.  Every
-		// pane draws the frame and its halo, for the same reason as the rays; the map in it is pane 0's
-		// alone, and the recording takes the framed map from pane 0
-		const Bool secondPane = TheObserverCamera.isDrawingSecond();
-		if( CinemaDirector_showsMap() && ( framed || !secondPane ) )
+		// -directorrecord it sits in the middle of the bottom edge, slides down off the screen before
+		// panes come and back up after them, and is not drawn while they are up: framed where the rays
+		// met, its box for every pane was one more thing on a split screen the owner found too busy
+		if( CinemaDirector_showsMap() && !framed && !TheObserverCamera.isDrawingSecond() )
 		{
 			GameWindow *radarWindow = TheWindowManager->winGetWindowFromId( NULL, TheNameKeyGenerator->nameToKey( "ControlBar.wnd:LeftHUD" ) );
 			// W3DLeftHUDDraw paints one pixel inside the window, and the radar keeps the map's shape
@@ -593,78 +550,30 @@ void W3DInGameUI::draw( void )
 			corner.lo.y = corner.hi.y - ( lr.y - ul.y ) - 2 * RADAR_BEZEL;
 			const Int mapWidth = corner.hi.x - corner.lo.x;
 			const Int mapHeight = corner.hi.y - corner.lo.y;
-			// the frame is the rays' gold and outer edge laid round the window, the gold on the bezel
-			const Int frameGold = ObserverCamera_paneLineWidth( TheDisplay->getHeight() );
-			const Int frameOutside = frameGold + OBSERVER_PANE_LINE_EDGE;
-			// -directorrecord frames the radar in its corner as well; the console's showmap alone keeps
-			// it bare and flush with the corner
-			const Bool cornerFramed = !framed && TheGlobalData->m_directorRecord;
-			if( framed )
+			// -directorrecord frames it, half the rays' gold on a pixel of edge a 720 rows with the lines'
+			// band as a halo, flush with the bottom so only the top and the sides show; the console's
+			// showmap alone keeps it bare and flush with the corner
+			if( TheGlobalData->m_directorRecord )
 			{
-				const Real diagonal = sqrtf( (Real)( mapWidth * mapWidth + mapHeight * mapHeight ) ) + 2 * frameOutside;
-				const Coord2D middle = TheObserverCamera.getFramedRadarMiddle( diagonal );
-				corner.lo.x = REAL_TO_INT( middle.x ) - mapWidth / 2;
+				const Int frameGold = ObserverCamera_paneLineWidth( TheDisplay->getHeight() );
+				const Int halo = max( ( ObserverCamera_paneBandWidth( TheDisplay->getHeight() ) - frameGold ) / 2 - OBSERVER_PANE_LINE_EDGE, 0 ) / 2;
+				const Int gold = max( frameGold / 2, 1 );
+				const Int outside = gold + max( REAL_TO_INT( TheDisplay->getHeight() / CORNER_EDGE_ROWS_A_PIXEL ), 1 );
+				// slid down far enough to take the frame and its halo off the screen too
+				const Int slide = REAL_TO_INT( TheObserverCamera.getCornerRadarSlide() * ( mapHeight + outside + halo ) );
+				corner.lo.x = ( TheDisplay->getWidth() - mapWidth ) / 2;
 				corner.hi.x = corner.lo.x + mapWidth;
-				corner.lo.y = REAL_TO_INT( middle.y ) - mapHeight / 2;
-				corner.hi.y = corner.lo.y + mapHeight;
+				corner.lo.y += slide;
+				corner.hi.y += slide;
+				// filled rectangles under the radar, square at the corners: the halo, the edge, then the gold
+				// up to the window, so the map sits on the gold with no gap
+				fillAround( corner, outside + halo, paneBand( PANE_BAND_OUTER_ALPHA ) );
+				fillAround( corner, outside + halo / 2, paneBand( PANE_BAND_INNER_ALPHA ) );
+				fillAround( corner, outside, PANE_EDGE );
+				fillAround( corner, gold, PANE_GOLD );
 			}
-			// in its corner the radar stays flush with the screen's left and bottom edges and its frame is
-			// half the rays' gold on a pixel of edge a 720 rows, so only its top and right show: the
-			// owner found the full frame, inset by its width, too heavy for a corner
-			const Int halo = max( ( ObserverCamera_paneBandWidth( TheDisplay->getHeight() ) - frameGold ) / 2 - OBSERVER_PANE_LINE_EDGE, 0 );
-			const Int cornerGold = max( frameGold / 2, 1 );
-			const Int cornerOutside = cornerGold + max( REAL_TO_INT( TheDisplay->getHeight() / CORNER_EDGE_ROWS_A_PIXEL ), 1 );
-			const Int cornerHalo = halo / 2;
-			if( cornerFramed )
-			{
-				// slid out left far enough to take the frame and its halo off the screen too
-				const Int slide = REAL_TO_INT( TheObserverCamera.getCornerRadarSlide() * ( mapWidth + cornerOutside + cornerHalo ) );
-				corner.lo.x -= slide;
-				corner.hi.x -= slide;
-			}
-
-			// two filled rectangles under the radar, square at the corners: the edge, then the gold up
-			// to the window, so the map sits on the gold with no gap.  Between the panes the frame wears the lines' blue band as a halo and draws its gold in round
-			// the window as the lines grow; until the gold is whole the map sits on the edge.  In the
-			// corner the same rectangles run off the screen's left and bottom, which leaves the top and
-			// the right
-			if( framed )
-			{
-				const Real progress = TheObserverCamera.getLineProgress();
-				const Real bandShown = ObserverCamera_bandShown( progress );
-				const Real drawn = ObserverCamera_frameTraced( progress );
-				if( bandShown > 0.0f )
-				{
-					fillAround( corner, frameOutside + halo, paneBand( PANE_BAND_OUTER_ALPHA * bandShown ) );
-					fillAround( corner, frameOutside + halo / 2, paneBand( PANE_BAND_INNER_ALPHA * bandShown ) );
-				}
-				fillAround( corner, frameOutside, PANE_EDGE );
-				if( drawn >= 1.0f )
-					fillAround( corner, frameGold, PANE_GOLD );
-				else
-					drawFrameGold( corner, frameGold, drawn );
-			}
-			else if( cornerFramed )
-			{
-				fillAround( corner, cornerOutside + cornerHalo, paneBand( PANE_BAND_OUTER_ALPHA ) );
-				fillAround( corner, cornerOutside + cornerHalo / 2, paneBand( PANE_BAND_INNER_ALPHA ) );
-				fillAround( corner, cornerOutside, PANE_EDGE );
-				fillAround( corner, cornerGold, PANE_GOLD );
-			}
-			if( !secondPane )
-			{
-				if( framed )
-				{
-					IRegion2D taken = corner;
-					taken.lo.x -= frameOutside;
-					taken.lo.y -= frameOutside;
-					taken.hi.x += frameOutside;
-					taken.hi.y += frameOutside;
-					TheObserverCamera.setRadarFrame( taken );
-				}
-				TheControlBar->placeWindowAt( radarWindow, corner );
-				W3DLeftHUDDraw( radarWindow, NULL );
-			}
+			TheControlBar->placeWindowAt( radarWindow, corner );
+			W3DLeftHUDDraw( radarWindow, NULL );
 		}
 
 		// -directorrecord's opening plates, each pane's own, then the score bar and a split's labels over
@@ -688,40 +597,12 @@ void W3DInGameUI::draw( void )
 	if( m_isFormationDragging )
 		drawFormationLine();
 
-	// Classic draws what the game as shipped drew: none of the threads, plan numbers, ally pointers
-	// or guard shields below, and its waypoint path is W3DWaypointBuffer's.  A move order gets
-	// EA's animated ground ring (drawMoveHints) in place of the order markers
-	const Bool classic = TheGlobalData->isClassicUI();
-
-	// and where everything selected is headed, drag or no drag.  Classic has EA's ring instead,
-	// drawMoveHints below
-	if( !classic )
-		drawOrderHints();
-
-	// and which of the plans each builder puts up next
-	if( !classic )
-		drawBuildPlanNumbers();
-
-	// where the allies are pointing, which is the one thing on this screen somebody else is doing
-	if( !classic )
-		drawAllyCursors();
-
 	// the attack circle, while the left button is still sweeping it out
 	if( isAttackCircling() )
 		drawAttackCircle();
 
 	// which of the local player's units are holding a guard
-	if( !classic )
-		drawGuardMarkers();
-
-	// the circle an armed guard will hold, under the cursor, at the size the wheel left it.  A drag
-	// is drawing a guard line instead, where every unit holds its own station
-	if( isAreaPicking() && !m_isFormationDragging )
-	{
-		Coord3D center;
-		TheTacticalView->screenToTerrain( &TheMouse->getMouseStatus()->pos, &center );
-		drawGroundRing( center, getAreaPickRadius(), 0xCC55CCFF, 2.0f );		// the guard blue the hints use
-	}
+	drawGuardMarkers();
 
 	// for each view draw hints
 	/// @todo should the UI be iterating through views like this?
@@ -772,7 +653,7 @@ void W3DInGameUI::draw( void )
 
 	// While the map loads the display calls this every pass to paint the load screen's windows, and
 	// the match is already "in game" with its peace time set: the truce plate, the corner readout and
-	// the strips drew over the load screen.  Only the windows belong there.
+	// the lists drew over the load screen.  Only the windows belong there.
 	const Bool matchOnScreen = !TheGlobalData->m_loadScreenRender;
 	if( matchOnScreen )
 		postDraw();
@@ -794,20 +675,12 @@ void W3DInGameUI::draw( void )
 #endif
 
 	//
-	// The clock/rate plate goes on last, after every window has painted. In postDraw with the rest
-	// of the world overlays it was drawn before the window manager, so anything the manager put on
-	// top of it - a dialog, the menu, the control bar's own art at the top of the screen - covered
-	// the one reading you want visible exactly when something is going wrong.
+	// The info strip in the corner, peace time included, goes on last, after every window has
+	// painted: drawn before the window manager, a dialog, the menu or the control bar's own art
+	// covered it.
 	//
-	// the peace time clock across the top middle, and the clock plate in the corner beside it
-	// Classic's screen is EA's, which had neither plate
-	if( matchOnScreen && !TheGlobalData->isClassicUI() )
-	{
-		drawPeaceTimer();
+	if( matchOnScreen )
 		drawHudOverlay();
-		drawWireframeNotice();
-		drawScoreboard();
-	}
 
 #ifdef EXTENDED_STATS
 	}
@@ -940,6 +813,9 @@ static void setGroundOverlayState( void )
 	REF_PTR_RELEASE( material );
 	DX8Wrapper::Set_Texture( 0, NULL );
 	DX8Wrapper::Set_Shader( overlayShader );
+	// the quads are in world space; the terrain pass has rendered pucks and bridges since its own
+	// identity was set, and the sheet used to inherit whichever of their matrices came last
+	DX8Wrapper::Set_Transform( D3DTS_WORLD, Matrix3D( 1 ) );
 	DX8Wrapper::Apply_Render_State_Changes();
 }
 
@@ -1198,15 +1074,11 @@ void W3DInGameUI::drawFormationLine( void )
 		TheDisplay->drawLine( curve[ i - 1 ].x, curve[ i - 1 ].y, curve[ i ].x, curve[ i ].y,
 													width, color );
 
-	// no ticks along it any more.  Every station already carries the marker of the order it is about
-	// to receive, drawn by drawOrderHints off the same hints, and a tick beside a marker was the
-	// same fact said twice
-
 }  // end drawFormationLine
 
 //-------------------------------------------------------------------------------------------------
-/** A circle on the ground, not on the screen, so it follows the terrain the way the units it is
-	* about do */
+/** A circle in the plane of the press, not rayed onto the terrain: a hill under the rim used to
+	* jump the radius every frame. */
 //-------------------------------------------------------------------------------------------------
 static void drawGroundRing( const Coord3D& center, Real radius, UnsignedInt color, Real width )
 {
@@ -1220,7 +1092,7 @@ static void drawGroundRing( const Coord3D& center, Real radius, UnsignedInt colo
 		Coord3D world;
 		world.x = center.x + radius * (Real)cos( angle );
 		world.y = center.y + radius * (Real)sin( angle );
-		world.z = TheTerrainLogic->getGroundHeight( world.x, world.y );
+		world.z = center.z;
 
 		ICoord2D screen;
 		if( TheTacticalView->worldToScreenTriReturn( &world, &screen ) == View::WTS_INVALID )
@@ -1251,364 +1123,11 @@ void W3DInGameUI::drawAttackCircle( void )
 
 	// and the radius itself, so the drag reads as a radius rather than a rubber band
 	ICoord2D middle;
-	center.z = TheTerrainLogic->getGroundHeight( center.x, center.y );
 	if( TheTacticalView->worldToScreenTriReturn( &center, &middle ) != View::WTS_INVALID )
 		TheDisplay->drawLine( middle.x, middle.y, getAttackCircleCursor().x,
 													getAttackCircleCursor().y, 1.0f, 0x66FF5555 );
 
 }  // end drawAttackCircle
-
-//-------------------------------------------------------------------------------------------------
-/** An order's colour: anything that ends in a shot is red, an attack move is pink, a post to be
-	* held is blue, a building to be taken is gold, everything else is green.  The line itself is
-	* EA's rally line now; the colour is left on the guard circle and the step numbers. */
-//-------------------------------------------------------------------------------------------------
-static UnsignedInt orderHintLineColor( InGameUI::OrderHintKind kind )
-{
-	switch( kind )
-	{
-		case InGameUI::ORDER_HINT_ATTACK_MOVE:
-			return 0x66FF66CC;
-		case InGameUI::ORDER_HINT_ATTACK:
-		case InGameUI::ORDER_HINT_FORCE_ATTACK:
-		case InGameUI::ORDER_HINT_ATTACK_GROUND:
-			return 0x66FF5555;
-		case InGameUI::ORDER_HINT_GUARD:
-			return 0x6655CCFF;
-		case InGameUI::ORDER_HINT_CAPTURE:
-			return 0x66FFCC33;
-		default:
-			return 0x6655FF55;
-	}
-}
-
-static UnsignedInt orderHintMarkerColor( InGameUI::OrderHintKind kind )
-{
-	return orderHintLineColor( kind ) | 0xFF000000;
-}
-
-struct OrderCursorArt
-{
-	const Image *image;
-	ICoord2D hotSpot;
-	Bool tried;
-};
-static OrderCursorArt s_orderCursorArt[ Mouse::NUM_MOUSE_CURSORS ];
-
-//-------------------------------------------------------------------------------------------------
-/** Turn one Windows cursor into something the 2D renderer can draw.  Mouse.ini's Image entries
-	* name mapped images that do not exist in the shipped data, and the Texture entries name .ANI
-	* files rather than textures - so the art the player is actually holding only exists as an HCURSOR.
-	* Pull the first frame's bits out of it and keep them as a texture. */
-//-------------------------------------------------------------------------------------------------
-static const Image *loadOrderCursorImage( Mouse::MouseCursor cursor, ICoord2D *hotSpot )
-{
-#if defined(_WIN32)	// the .ANI cursor through Win32's cursor API; off Windows the cursor is C3's
-	const AsciiString& name = TheMouse->m_cursorInfo[ cursor ].textureName;
-	if( name.isEmpty() )
-		return NULL;
-
-	char path[ 256 ];
-	snprintf( path, ARRAY_SIZE(path), "data\\cursors\\%s.ANI", name.str() );
-
-	HCURSOR hcursor = LoadCursorFromFile( path );
-	if( hcursor == NULL )
-		return NULL;
-
-	ICONINFO info;
-	if( GetIconInfo( hcursor, &info ) == FALSE )
-		return NULL;
-
-	const Image *result = NULL;
-
-	BITMAP bm;
-	if( info.hbmColor && GetObject( info.hbmColor, sizeof( BITMAP ), &bm ) )
-	{
-		const Int w = bm.bmWidth;
-		const Int h = bm.bmHeight;
-
-		BITMAPINFO bi;
-		memset( &bi, 0, sizeof( bi ) );
-		bi.bmiHeader.biSize = sizeof( BITMAPINFOHEADER );
-		bi.bmiHeader.biWidth = w;
-		bi.bmiHeader.biHeight = -h;			// negative means top down, which is the order a texture wants
-		bi.bmiHeader.biPlanes = 1;
-		bi.bmiHeader.biBitCount = 32;
-		bi.bmiHeader.biCompression = BI_RGB;
-
-		UnsignedInt *color = NEW UnsignedInt[ w * h ];
-		UnsignedInt *mask = NEW UnsignedInt[ w * h ];
-
-		HDC dc = GetDC( NULL );
-		GetDIBits( dc, info.hbmColor, 0, h, color, &bi, DIB_RGB_COLORS );
-		GetDIBits( dc, info.hbmMask, 0, h, mask, &bi, DIB_RGB_COLORS );
-		ReleaseDC( NULL, dc );
-
-		//
-		// a 32-bit cursor carries its own alpha; an older one leaves it zero and says what is
-		// transparent in the AND mask instead, where a white pixel is a hole
-		//
-		Bool hasAlpha = FALSE;
-		for( Int i = 0; i < w * h; ++i )
-			if( color[ i ] & 0xFF000000 )
-			{
-				hasAlpha = TRUE;
-				break;
-			}
-
-		if( hasAlpha == FALSE )
-			for( Int i = 0; i < w * h; ++i )
-				color[ i ] |= (mask[ i ] & 0x00FFFFFF) ? 0x00000000 : 0xFF000000;
-
-		TextureClass *texture = MSGNEW("TextureClass") TextureClass( w, h, WW3D_FORMAT_A8R8G8B8, MIP_LEVELS_1 );
-		SurfaceClass *surface = texture->Get_Surface_Level();
-		Int pitch;
-		UnsignedByte *bits = (UnsignedByte *)surface->Lock( &pitch );
-		for( Int row = 0; row < h; ++row )
-			memcpy( bits + row * pitch, color + row * w, w * sizeof( UnsignedInt ) );
-		surface->Unlock();
-		REF_PTR_RELEASE( surface );
-
-		delete [] color;
-		delete [] mask;
-
-		Image *image = newInstance(Image);
-		Region2D uv;
-		uv.lo.x = 0.0f;
-		uv.lo.y = 0.0f;
-		uv.hi.x = 1.0f;
-		uv.hi.y = 1.0f;
-		image->setStatus( IMAGE_STATUS_RAW_TEXTURE );
-		image->setRawTextureData( texture );
-		image->setUV( &uv );
-		image->setTextureWidth( w );
-		image->setTextureHeight( h );
-		ICoord2D size;
-		size.x = w;
-		size.y = h;
-		image->setImageSize( &size );
-
-		hotSpot->x = info.xHotspot;
-		hotSpot->y = info.yHotspot;
-		result = image;
-	}
-
-	if( info.hbmColor )
-		DeleteObject( info.hbmColor );
-	if( info.hbmMask )
-		DeleteObject( info.hbmMask );
-
-	return result;
-#else
-	(void)cursor;
-	(void)hotSpot;
-	return NULL;
-#endif
-}
-
-//-------------------------------------------------------------------------------------------------
-/** The marker on a destination is the cursor the player would be holding if they were pointing at
-	* it.  Built once. */
-//-------------------------------------------------------------------------------------------------
-static const Image *orderCursorImage( Mouse::MouseCursor cursor, ICoord2D *hotSpot )
-{
-	OrderCursorArt& art = s_orderCursorArt[ cursor ];
-	if( art.tried == FALSE )
-	{
-		art.image = loadOrderCursorImage( cursor, &art.hotSpot );
-		art.tried = TRUE;
-	}
-
-	*hotSpot = art.hotSpot;
-	return art.image;
-}
-
-//-------------------------------------------------------------------------------------------------
-/** The cursor a kind of order is given with, for the kinds whose colour is the plain green and so
-	* says nothing on its own, and for a capture, whose gold is new enough to want saying twice.
-	* Mouse::NONE for the rest. */
-//-------------------------------------------------------------------------------------------------
-static Mouse::MouseCursor orderHintCursor( InGameUI::OrderHintKind kind )
-{
-	switch( kind )
-	{
-		case InGameUI::ORDER_HINT_ENTER:					return Mouse::ENTER_FRIENDLY;
-		case InGameUI::ORDER_HINT_DOCK:						return Mouse::DOCK;
-		case InGameUI::ORDER_HINT_GET_REPAIRED:		return Mouse::GET_REPAIRED;
-		case InGameUI::ORDER_HINT_GET_HEALED:			return Mouse::GET_HEALED;
-		case InGameUI::ORDER_HINT_DO_REPAIR:			return Mouse::DO_REPAIR;
-		case InGameUI::ORDER_HINT_CAPTURE:				return Mouse::CAPTUREBUILDING;
-		case InGameUI::ORDER_HINT_HACK:						return Mouse::HACK;
-		default:																	return Mouse::NONE;
-	}
-}
-
-static const Int ORDER_STEP_POINT_SIZE = 11;
-
-//-------------------------------------------------------------------------------------------------
-/** How much bigger the step numbers are drawn than at 800x600.  Their font grows with the screen,
-	* so everything laid out round them grows by the same factor or the number runs into the pointer
-	* at 1440p and into the marker beside it at 4K. */
-//-------------------------------------------------------------------------------------------------
-static Real orderStepScale( void )
-{
-	return (Real)TheGlobalLanguageData->adjustFontSize( ORDER_STEP_POINT_SIZE ) / (Real)ORDER_STEP_POINT_SIZE;
-}
-
-//-------------------------------------------------------------------------------------------------
-/** A step of a shift list carries its number, and beside it what the step is: the upgrade's own
-	* button art, or the cursor of an order the colour cannot tell apart from a move.  The row sits
-	* above and to the right of the pointer's tip, clear of the pointer itself, which hangs below it. */
-//-------------------------------------------------------------------------------------------------
-void W3DInGameUI::drawOrderStep( const OrderHint& hint, const ICoord2D& tip, UnsignedInt color )
-{
-	const Real NUMBER_OFFSET_X = 10.0f;
-	const Real ROW_HEIGHT = 22.0f;
-	const Real ICON_GAP = 2.0f;
-
-	const Real scale = orderStepScale();
-	const Int rowHeight = REAL_TO_INT( ROW_HEIGHT * scale );
-	const UnsignedInt alpha = color & 0xFF000000;
-	Int x = tip.x + REAL_TO_INT( NUMBER_OFFSET_X * scale );
-	const Int top = tip.y - rowHeight;
-
-	if( hint.step > 0 && hint.step <= MAX_ORDER_STEP_NUMBERS )
-	{
-		DisplayString *&number = m_orderStepNumbers[ hint.step - 1 ];
-		if( number == NULL )
-		{
-			number = TheDisplayStringManager->newDisplayString();
-			number->setFont( TheWindowManager->winFindFont( AsciiString( "Arial" ),
-																TheGlobalLanguageData->adjustFontSize( ORDER_STEP_POINT_SIZE ), TRUE ) );
-			UnicodeString text;
-			text.format( u"%d", hint.step );
-			number->setText( text );
-		}
-
-		Int width = 0, height = 0;
-		number->getSize( &width, &height );
-		number->draw( x, top + ( rowHeight - height ) / 2, (Color)color, (Color)alpha );
-		x += width + REAL_TO_INT( ICON_GAP * scale );
-	}
-
-	const Image *icon = hint.icon;
-	if( icon == NULL )
-	{
-		ICoord2D hotSpot;
-		icon = orderCursorImage( orderHintCursor( hint.kind ), &hotSpot );
-	}
-	if( icon == NULL )
-		return;
-
-	// the row's height, and the width the art's own proportions give it: a button cameo is wider
-	// than it is tall, and squeezed into a square it reads as a different picture
-	const Int iconWidth = rowHeight * icon->getImageWidth() / max( icon->getImageHeight(), 1 );
-	TheDisplay->drawImage( icon, x, top, x + iconWidth, top + rowHeight, alpha | 0x00FFFFFF );
-}
-
-//-------------------------------------------------------------------------------------------------
-/** The screen-space part of the order hints: a guard's circle and the numbers of a shift list.  The
-	* goals are read off the units every frame, so both last as long as the orders do. */
-//-------------------------------------------------------------------------------------------------
-void W3DInGameUI::drawOrderHints( void )
-{
-	const std::vector<OrderHint>& hints = getOrderHints();
-	if( hints.empty() )
-		return;
-
-	const Real width = 1.0f;
-
-	// how far right of the spot an upgrade or an ability stands: past the number of the step that
-	// ends there, which grows with the screen
-	const Real IN_PLACE_MARKER_OFFSET = 44.0f;
-	const Int inPlaceOffset = REAL_TO_INT( IN_PLACE_MARKER_OFFSET * orderStepScale() );
-
-	// a group on one guard order is one circle, not one per unit stacked into an opaque band
-	std::vector<const OrderHint *> ringsDrawn;
-
-	for( std::vector<OrderHint>::const_iterator it = hints.begin(); it != hints.end(); ++it )
-	{
-		const UnsignedInt lineColor = orderHintLineColor( it->kind );
-
-		if( it->radius > 0.0f )
-		{
-			Bool drawn = FALSE;
-			for( size_t r = 0; r < ringsDrawn.size() && !drawn; ++r )
-				drawn = ringsDrawn[ r ]->radius == it->radius && ringsDrawn[ r ]->to.x == it->to.x && ringsDrawn[ r ]->to.y == it->to.y;
-			if( !drawn )
-			{
-				drawGroundRing( it->to, it->radius, lineColor, width );
-				ringsDrawn.push_back( &(*it) );
-			}
-		}
-
-		// The line, the joint and the flag are EA's rally point art in the 3D scene
-		// (W3DWaypointBuffer::drawWaypoints and InGameUI::updateOrderFlags).  What is left here is
-		// the step number and the art of a step whose kind the line cannot tell apart from a move.
-		// WTS_OUTSIDE_FRUSTUM still gives usable pixels, so only points behind the camera are dropped
-		ICoord2D to;
-		if( TheTacticalView->worldToScreenTriReturn( &it->to, &to ) == View::WTS_INVALID )
-			continue;
-
-		// an upgrade or an ability is used on the spot the step before it ends on, whose number is
-		// already there, so this one stands beside it rather than on top of it
-		if( it->kind == ORDER_HINT_UPGRADE || it->kind == ORDER_HINT_ABILITY )
-			to.x += inPlaceOffset;
-
-		// a capture carries its cursor even alone: a lone one is the case that looked like a walk
-		if( it->step > 0 || it->icon || it->kind == ORDER_HINT_CAPTURE )
-			drawOrderStep( *it, to, orderHintMarkerColor( it->kind ) );
-	}
-
-}  // end drawOrderHints
-
-//-------------------------------------------------------------------------------------------------
-/** The local player's plans still waiting for a builder carry the number of their turn, so a
-	* string of shift-placed buildings reads in the order its dozer will put them up.  Read off the
-	* objects every frame; nothing here goes back to the logic. */
-//-------------------------------------------------------------------------------------------------
-void W3DInGameUI::drawBuildPlanNumbers( void )
-{
-	// ponytail: walks every object each frame; keep a list of plans if a big map shows it in a profile
-	std::vector<BuildPlanNumber> plans;
-	for( Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
-	{
-		if( !obj->isLocallyControlled() || obj->testStatus( OBJECT_STATUS_SOLD ) || obj->isEffectivelyDead() ||
-				!Object_isAwaitingBuilder( obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ), obj->getConstructionPercent() ) )
-			continue;
-
-		// a plan whose builder is gone is nobody's queue
-		Object *builder = TheGameLogic->findObjectByID( obj->getBuilderID() );
-		if( builder == NULL || builder->isEffectivelyDead() || builder->getAIUpdateInterface() == NULL )
-			continue;
-		DozerAIInterface *dozerAI = builder->getAIUpdateInterface()->getDozerAIInterface();
-		if( dozerAI == NULL )
-			continue;
-
-		BuildPlanNumber plan;
-		plan.plan = obj->getID();
-		plan.builder = builder->getID();
-		plan.current = dozerAI->isTaskPending( DOZER_TASK_BUILD ) && dozerAI->getTaskTarget( DOZER_TASK_BUILD ) == obj->getID();
-		plan.spot = *obj->getPosition();
-		plan.spot.z += obj->getGeometryInfo().getMaxHeightAbovePosition();
-		plan.step = 0;
-		plans.push_back( plan );
-	}
-
-	InGameUI_numberBuildPlans( plans );
-
-	for( std::vector<BuildPlanNumber>::const_iterator it = plans.begin(); it != plans.end(); ++it )
-	{
-		ICoord2D tip;
-		if( it->step == 0 || !TheTacticalView->worldToScreen( &it->spot, &tip ) )
-			continue;
-
-		OrderHint hint;
-		hint.step = it->step;
-		drawOrderStep( hint, tip, orderHintMarkerColor( ORDER_HINT_MOVE ) );
-	}
-
-}  // end drawBuildPlanNumbers
 
 //-------------------------------------------------------------------------------------------------
 /** One screen row from `left` to `right`, the two end pixels at the share of them the span covers,
@@ -1656,11 +1175,10 @@ static void drawShieldShape( Real centreX, Int top, Real width, Int height, Unsi
 
 //-------------------------------------------------------------------------------------------------
 /** A guarding unit looks like an idle one until something walks into its circle, so each of the
-	* local player's guards wears a small shield over its head, selected or not.  Two groups on
-	* overlapping posts can then be told apart from the ones simply standing about.
-	*
-	* It follows the zoom like the health bar does, so it stays in proportion to the unit, between a
-	* floor that still reads as a shield and a ceiling that does not cover a close-up infantryman. */
+	* local player's guards wears a small shield over its head, selected or not.  It follows the zoom
+	* like the health bar does, between a floor that still reads as a shield and a ceiling that does
+	* not cover a close-up infantryman.  The one-interface change took it out with the Reforged
+	* interface it was drawn under; it belongs to guard, not to that interface. */
 //-------------------------------------------------------------------------------------------------
 void W3DInGameUI::drawGuardMarkers( void )
 {
@@ -1672,6 +1190,9 @@ void W3DInGameUI::drawGuardMarkers( void )
 	const UnsignedInt LIT_COLOR = 0xF0E8EEF4;		// the command bar's steel, the side facing the light
 	const UnsignedInt SHADED_COLOR = 0xF0939FAC;
 
+	if( !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+		return;
+
 	const Real uiScale = TheUIScale();
 	const Real size = MARKER_HEIGHT * uiScale / TheTacticalView->getZoom();
 	const Int height = REAL_TO_INT( max( MARKER_MIN_HEIGHT * uiScale, min( MARKER_MAX_HEIGHT * uiScale, size ) ) );
@@ -1679,7 +1200,7 @@ void W3DInGameUI::drawGuardMarkers( void )
 	const Int lift = height / 2;		// clear of the health bar's line over the model's top
 	const Real rim = max( 1.0f, height / 10.0f );
 
-	// ponytail: walks every object each frame, like drawBuildPlanNumbers; share one walk if it shows
+	// ponytail: walks every object each frame; share one walk with another per-object overlay if it shows
 	for( Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() )
 	{
 		if( !obj->isLocallyControlled() || obj->isEffectivelyDead() || obj->getContainedBy() )
@@ -1708,163 +1229,16 @@ void W3DInGameUI::drawGuardMarkers( void )
 }  // end drawGuardMarkers
 
 //-------------------------------------------------------------------------------------------------
-/** A patch of the ally's own colour on the ground under their cursor.  It is a fan of rings whose
-	* alpha falls to nothing at the rim, drawn in the terrain pass like the attack circle's wash, so
-	* units and buildings stand on top of it and it reads as light on the map rather than as a disc
-	* hanging over it.
-	*
-	* Faint on purpose: seven of these at full strength would be seven holes in the map. */
-//-------------------------------------------------------------------------------------------------
-void W3DInGameUI::drawAllyCursorLights( void )
-{
-	if( !TheGlobalData->m_showAllyCursors || TheGlobalData->isClassicUI() )
-		return;
-
-	enum { LIGHT_SEGMENTS = 20, LIGHT_RINGS = 5 };
-	const Real LIGHT_RADIUS = 55.0f;		// about three tanks across, so it reads at the zoom people play at
-	const Real LIGHT_LIFT = 0.35f;			// the same hair off the dirt the attack circle's wash takes
-	const Real LIGHT_CENTRE_ALPHA = 0x78;
-
-	Bool stateSet = FALSE;
-
-	for( Int playerIndex = 0; playerIndex < MAX_PLAYER_COUNT; ++playerIndex )
-	{
-		const Real fade = getAllyCursorFade( playerIndex );
-		if( fade <= 0.0f )
-			continue;
-
-		// a cursor is only ever known for a player who was found and vouched for on the way in
-		Player *player = ThePlayerList->getNthPlayer( playerIndex );
-
-		const Coord3D& centre = getAllyCursor( playerIndex ).shown;
-		const UnsignedInt rgb = (UnsignedInt)clientPlayerColor( player ) & 0x00FFFFFF;
-
-		Vector3 ring[ LIGHT_RINGS + 1 ][ LIGHT_SEGMENTS + 1 ];
-		Int r, s;
-		for( r = 0; r <= LIGHT_RINGS; ++r )
-		{
-			const Real ringRadius = LIGHT_RADIUS * (Real)r / (Real)LIGHT_RINGS;
-			for( s = 0; s <= LIGHT_SEGMENTS; ++s )
-			{
-				const Real angle = 2.0f * PI * (Real)s / (Real)LIGHT_SEGMENTS;
-				const Real x = centre.x + ringRadius * (Real)cos( angle );
-				const Real y = centre.y + ringRadius * (Real)sin( angle );
-				ring[ r ][ s ].Set( x, y, TheTerrainLogic->getGroundHeight( x, y ) + LIGHT_LIFT );
-			}
-		}
-
-		// the alpha of ring r, so the patch is brightest under the pointer and gone at the rim.  The
-		// falloff holds its strength through the middle and then drops, which is what a pool of light
-		// looks like; a straight ramp reads as a flat disc with a hard edge
-		UnsignedInt ringColor[ LIGHT_RINGS + 1 ];
-		for( r = 0; r <= LIGHT_RINGS; ++r )
-		{
-			const Real across = (Real)r / (Real)LIGHT_RINGS;
-			const Real remaining = 1.0f - across;
-			ringColor[ r ] = overlayColor( rgb, LIGHT_CENTRE_ALPHA * fade * remaining * remaining * ( 3.0f - 2.0f * remaining ) );
-		}
-
-		// one render state for all of them, and only if there turned out to be something to draw
-		if( stateSet == FALSE )
-		{
-			setGroundOverlayState();
-			stateSet = TRUE;
-		}
-
-		GroundOverlayQuads &quads = theGroundOverlayQuads;
-
-		// the innermost band is a fan around the centre point, two segments to a quad - running it
-		// through the ring loop below would give every second triangle no area at all
-		for( s = 0; s < LIGHT_SEGMENTS; s += 2 )
-		{
-			quads.add( ring[ 0 ][ 0 ], ring[ 1 ][ s ], ring[ 1 ][ s + 1 ], ring[ 1 ][ s + 2 ],
-								 ringColor[ 0 ], ringColor[ 1 ], ringColor[ 1 ], ringColor[ 1 ] );
-		}
-
-		for( r = 1; r < LIGHT_RINGS; ++r )
-		{
-			for( s = 0; s < LIGHT_SEGMENTS; ++s )
-			{
-				quads.add( ring[ r ][ s ], ring[ r + 1 ][ s ], ring[ r + 1 ][ s + 1 ], ring[ r ][ s + 1 ],
-									 ringColor[ r ], ringColor[ r + 1 ], ringColor[ r + 1 ], ringColor[ r ] );
-			}
-		}
-	}
-
-	if( stateSet )
-		theGroundOverlayQuads.flush();
-
-}  // end drawAllyCursorLights
-
-//-------------------------------------------------------------------------------------------------
-/** Each ally's mouse, drawn as their name in their own colour sitting in the middle of the pool of
-	* light on the ground under it.  No pointer: a second arrow on screen is read as your own for the
-	* half second it takes to notice it is not, and the name is the part that says whose it is.
-	*
-	* An ally who stops sending - alt-tabbed, or dropped - fades out rather than vanishing, which is
-	* the difference between "they went away" and "the network hiccuped". */
-//-------------------------------------------------------------------------------------------------
-void W3DInGameUI::drawAllyCursors( void )
-{
-	if( !TheGlobalData->m_showAllyCursors )
-		return;
-
-	const Int NAME_POINT_SIZE = 10;
-
-	for( Int playerIndex = 0; playerIndex < MAX_PLAYER_COUNT; ++playerIndex )
-	{
-		const Real fade = getAllyCursorFade( playerIndex );
-		if( fade <= 0.0f )
-			continue;
-
-		// a cursor is only ever known for a player who was found and vouched for on the way in
-		Player *player = ThePlayerList->getNthPlayer( playerIndex );
-
-		// a cursor off the side of the screen still has a usable pixel; only one behind the camera
-		// has not, which is the one case worldToScreenTriReturn calls invalid
-		ICoord2D screen;
-		if( TheTacticalView->worldToScreenTriReturn( &getAllyCursor( playerIndex ).shown, &screen ) == View::WTS_INVALID )
-			continue;
-
-		const UnsignedInt alpha = (UnsignedInt)REAL_TO_INT( 255.0f * fade );
-		const UnsignedInt rgb = (UnsignedInt)clientPlayerColor( player ) & 0x00FFFFFF;
-		const Color tint = (Color)( rgb | ( alpha << 24 ) );
-		const Color dropColor = GameMakeColor( 0, 0, 0, (UnsignedByte)alpha );
-
-		if( m_allyCursorNames[ playerIndex ] == NULL )
-		{
-			m_allyCursorNames[ playerIndex ] = TheDisplayStringManager->newDisplayString();
-			m_allyCursorNames[ playerIndex ]->setFont( TheWindowManager->winFindFont(
-																AsciiString( "Arial" ),
-																TheGlobalLanguageData->adjustFontSize( NAME_POINT_SIZE ), TRUE ) );
-		}
-
-		// set every frame: a player who is destroyed or renamed mid-match should not keep a stale plate
-		m_allyCursorNames[ playerIndex ]->setText( player->getPlayerDisplayName() );
-
-		// centred on the reported spot in both directions, so the name sits in the middle of its own
-		// pool of light and the two together are the marker
-		Int nameWidth = 0, nameHeight = 0;
-		m_allyCursorNames[ playerIndex ]->getSize( &nameWidth, &nameHeight );
-		m_allyCursorNames[ playerIndex ]->draw( screen.x - nameWidth / 2,
-																						screen.y - nameHeight / 2,
-																						tint, dropColor );
-	}
-
-}  // end drawAllyCursors
-
-//-------------------------------------------------------------------------------------------------
-/** Classic: EA's animated ring on the ground where a move order landed, 40 client frames each.
-	* EA's own code, deleted by fec052cc, back for Classic only (InGameUI::createMoveHint fills it). */
+/** EA's animated ring on the ground where a move order landed, 40 client frames each.  EA's own
+	* code, deleted by fec052cc and brought back (InGameUI::createMoveHint fills it). */
 //-------------------------------------------------------------------------------------------------
 void W3DInGameUI::drawMoveHints( View *view )
 {
-	const Bool classic = TheGlobalData->isClassicUI();
 	for( Int i = 0; i < MAX_MOVE_HINTS; i++ )
 	{
 		Int elapsed = TheGameClient->getFrame() - m_moveHint[i].frame;
 
-		if( classic && m_moveHint[ i ].frame != 0 && elapsed <= 40 )
+		if( m_moveHint[ i ].frame != 0 && elapsed <= ConvertRetailFrames( 40 ) )
 		{
 			// create render object and add to scene of needed
 			if( m_moveHintRenderObj[ i ] == NULL )

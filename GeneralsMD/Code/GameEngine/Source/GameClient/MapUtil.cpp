@@ -226,6 +226,10 @@ static Bool ParseSizeOnly(DataChunkInput &file, DataChunkInfo *info, void *userD
 {
 	m_width = file.readInt();
 	m_height = file.readInt();
+	// the game's own reader refuses these (WorldHeightMapData::ParseHeightMapData), so the list does too
+	if (m_width < 1 || m_width > K_MAX_HEIGHT_MAP_SIDE || m_height < 1 || m_height > K_MAX_HEIGHT_MAP_SIDE) {
+		throw ERROR_CORRUPT_FILE_FORMAT;
+	}
 	if (info->version >= K_HEIGHT_MAP_VERSION_3) {
 		m_borderSize = file.readInt();
 	} else {
@@ -233,7 +237,7 @@ static Bool ParseSizeOnly(DataChunkInput &file, DataChunkInfo *info, void *userD
 	}
 
 	if (info->version >= K_HEIGHT_MAP_VERSION_4) {
-		Int numBorders = file.readInt();
+		Int numBorders = file.readCount(2 * sizeof(Int));
 		m_boundaries.resize(numBorders);
 		for (int i = 0; i < numBorders; ++i) {
 			m_boundaries[i].x = file.readInt();

@@ -182,6 +182,7 @@ public:
 	void createGroundHitParticleSystem( IntensityTypes intensity );
 
 	Bool findOrbitBeamRadius( Real &radius ) const;		///< the beam template's half width, FALSE without a beam
+	Bool getBurningSpot( Coord3D *spot, Real *damageRadius ) const;	///< where a live beam that can still be driven is burning, and how wide
 	Real computeOrbitBeamWidthScalar( UnsignedInt frame ) const;
 
 	Bool calculateDefaultInformation();

@@ -106,6 +106,11 @@ public:
 	float								alphaOverride;	//added for 'Generals' to allow variable alpha -MW
 	float								materialPassAlphaOverride;	////added for 'Generals' to allow variable alpha on additional render passes.-MW
 	float								materialPassEmissiveOverride;	////added for 'Generals' to allow variable emissive on additional render passes.-MW
+	// The look the scene asked for on this object (DRAW_EFFECT_* in ffshader.h) and its four
+	// numbers, carried to each mesh like the alpha above and handed to the Direct3D 11 backend
+	// around the mesh's draws.  Zero is none, and every other renderer ignores it.
+	unsigned							drawEffect;
+	float								drawEffectParameters[4];
 
 	LightEnvironmentClass*		light_environment;
 

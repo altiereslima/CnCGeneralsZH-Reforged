@@ -386,9 +386,9 @@ UpdateSleepTime HordeUpdate::update( void )
 		}
 
 		if ( ! wasInHorde && m_inHorde  )
-				draw->setTerrainDecalFadeTarget(1.0f, 0.03f);
+				draw->setTerrainDecalFadeTarget(1.0f, ConvertRetailPerFrameRate(0.03f));
 		else if ( wasInHorde && ! m_inHorde )
-				draw->setTerrainDecalFadeTarget(0.0f, -0.03f);
+				draw->setTerrainDecalFadeTarget(0.0f, ConvertRetailPerFrameRate(-0.03f));
 	}
 
 

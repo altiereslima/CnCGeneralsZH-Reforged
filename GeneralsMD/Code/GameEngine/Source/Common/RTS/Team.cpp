@@ -902,6 +902,18 @@ void TeamPrototype::setControllingPlayer(Player *newController)
 
 	// impossible to get here with a NULL pointer.
 	m_owningPlayer->addTeamToList(this);
+
+	// every member changed hands without changing team; the partition counts each cell's
+	// objects per player and has to hear of it now
+	for (DLINK_ITERATOR<Team> teamIt = iterate_TeamInstanceList(); !teamIt.done(); teamIt.advance())
+	{
+		for (DLINK_ITERATOR<Object> objIt = teamIt.cur()->iterate_TeamMemberList(); !objIt.done(); objIt.advance())
+		{
+			PartitionData *pd = objIt.cur()->friend_getPartitionData();
+			if (pd)
+				pd->refreshCountedPlayer();
+		}
+	}
 }
 
 // ------------------------------------------------------------------------
@@ -1503,6 +1515,24 @@ Relationship Team::getRelationship(const Team *that) const
 }
 
 // ------------------------------------------------------------------------
+PlayerMaskType Team::getEnemyPlayerMask() const
+{
+	// with no team-keyed override on either side, getRelationship depends only on the other
+	// team's player, so that player's default team answers for all of its teams
+	if (!m_teamRelations->m_map.empty() || getControllingPlayer()->hasTeamRelationships())
+		return PLAYERMASK_ALL;
+
+	PlayerMaskType mask = PLAYERMASK_NONE;
+	for (Int i = 0; i < ThePlayerList->getPlayerCount(); ++i)
+	{
+		Player *player = ThePlayerList->getNthPlayer(i);
+		if (getRelationship(player->getDefaultTeam()) == ENEMIES)
+			mask |= player->getPlayerMask();
+	}
+	return mask;
+}
+
+// ------------------------------------------------------------------------
 void Team::setTeamTargetObject(const Object *target)
 {
 	if (target==NULL) {
@@ -1515,9 +1545,14 @@ void Team::setTeamTargetObject(const Object *target)
 		// Whether a team fires together is a rung of the ladder now, not one of the three script
 		// tiers: the ladder has six steps and this is one of the capabilities that separates them
 		// (AI-ROADMAP.md D6). The bottom two rungs still do not do it, which is what the old
-		// DIFFICULTY_EASY test said.
+		// DIFFICULTY_EASY test said.  A script-driven opponent keeps that test itself, so the ladder's
+		// tuning never reaches a Challenge or mission.
 		//
-		if (!TheAI->getDifficultyProfile(getControllingPlayer()->getAISkillLevel())->m_focusFire) {
+		Player *player = getControllingPlayer();
+		const Bool focusFire = player->isSkirmishAIPlayer()
+			? TheAI->getDifficultyProfile(player->getAISkillLevel())->m_focusFire
+			: player->getPlayerDifficulty() != DIFFICULTY_EASY;
+		if (!focusFire) {
 			return;
 		}
 		m_commonAttackTarget = target->getID();

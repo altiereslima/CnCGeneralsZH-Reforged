@@ -320,7 +320,9 @@ Int GameSpyInfo::addText( UnicodeString message, Color c, GameWindow *win )
 		static AudioEventRTS messageFromChatSound("GUIMessageReceived");
 		TheAudio->addAudioEvent(&messageFromChatSound);
 
-		TheInGameUI->message(message);
+		// another player's words, so they are an argument and never the format: a "%s" in chat
+		// would have read a pointer that was never passed
+		TheInGameUI->message(UnicodeString(u"%ls"), message.str());
 	}
 
 	if (!win)

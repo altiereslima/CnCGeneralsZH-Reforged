@@ -189,11 +189,25 @@ Bool TransitionWindow::init( void )
 
 void TransitionWindow::update( Int frame )
 {
-	if(frame < m_currentFrameDelay || frame > (m_currentFrameDelay + m_transition->getFrameLength()))
+	if(!m_transition || frame < m_currentFrameDelay || frame > (m_currentFrameDelay + m_transition->getFrameLength()))
 		return;
-	
-	if(m_transition)
-		m_transition->update( frame - m_currentFrameDelay);
+
+	m_transition->update( frame - m_currentFrameDelay);
+}
+
+//-----------------------------------------------------------------------------
+/** A menu closed while its windows were still animating freed them, and the next
+	* GameWindowManager::update ran the transition on the freed window straight after the destroy
+	* pass.  The transition goes with its window; the group's next init builds it again from the
+	* window found by name then. */
+void TransitionWindow::forgetWindow( const GameWindow *win )
+{
+	if( m_transition && m_transition->usesWindow( win ) )
+	{
+		delete m_transition;
+		m_transition = NULL;
+		m_win = NULL;
+	}
 }
 
 Bool TransitionWindow::isFinished( void )
@@ -268,6 +282,12 @@ void TransitionGroup::init( void )
 		it++;
 	}
 
+}
+
+void TransitionGroup::forgetWindow( const GameWindow *win )
+{
+	for( TransitionWindowList::iterator it = m_transitionWindowList.begin(); it != m_transitionWindowList.end(); ++it )
+		(*it)->forgetWindow( win );
 }
 
 void TransitionGroup::update( void )
@@ -509,6 +529,8 @@ void GameWindowTransitionsHandler::setGroup(AsciiString groupName, Bool immidiat
 void GameWindowTransitionsHandler::reverse( AsciiString groupName )
 {
 	TransitionGroup *g = findGroup(groupName);
+	if(!g)
+		return;	// a group no WindowTransitions.ini names; with nothing playing this was a call through NULL
 	if( m_currentGroup == g )
 	{
 		m_currentGroup->reverse();
@@ -529,6 +551,12 @@ void GameWindowTransitionsHandler::reverse( AsciiString groupName )
 	m_currentGroup->skip();
 	m_currentGroup->reverse();
 	m_pendingGroup = NULL;
+}
+
+void GameWindowTransitionsHandler::forgetWindow( const GameWindow *win )
+{
+	for( TransitionGroupList::iterator it = m_transitionGroupList.begin(); it != m_transitionGroupList.end(); ++it )
+		(*it)->forgetWindow( win );
 }
 
 void GameWindowTransitionsHandler::remove( AsciiString groupName,  Bool skipPending )

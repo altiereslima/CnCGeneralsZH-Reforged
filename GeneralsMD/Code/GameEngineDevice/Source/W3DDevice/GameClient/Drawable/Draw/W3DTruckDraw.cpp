@@ -89,7 +89,7 @@ void W3DTruckDrawModuleData::buildFieldParse(MultiIniFieldParse& p)
 		{ "MidRightMidTireBone", INI::parseAsciiString, NULL, offsetof(W3DTruckDrawModuleData, m_midMidRightTireBoneName) },
 
 		{ "TireRotationMultiplier", INI::parseReal, NULL, offsetof(W3DTruckDrawModuleData, m_rotationSpeedMultiplier) },
-		{ "PowerslideRotationAddition", INI::parseReal, NULL, offsetof(W3DTruckDrawModuleData, m_powerslideRotationAddition) },
+		{ "PowerslideRotationAddition", INI::parseRetailPerFrameReal, NULL, offsetof(W3DTruckDrawModuleData, m_powerslideRotationAddition) },
 		{ "CabBone", INI::parseAsciiString, NULL, offsetof(W3DTruckDrawModuleData, m_cabBoneName) },
 		{ "TrailerBone", INI::parseAsciiString, NULL, offsetof(W3DTruckDrawModuleData, m_trailerBoneName) },
 		{ "CabRotationMultiplier", INI::parseReal, NULL, offsetof(W3DTruckDrawModuleData, m_cabRotationFactor) },
@@ -402,7 +402,7 @@ void W3DTruckDraw::doDrawModule(const Matrix3D* transformMtx)
 	if (frozen)
 		return;
 
-	const Real ACCEL_THRESHOLD = 0.01f;
+	const Real ACCEL_THRESHOLD = ConvertRetailPerFrameSquared(0.01f);
 	const Real SIZE_CAP = 2.0f;
 	// get object from logic
 	Object *obj = getDrawable()->getObject();
@@ -421,13 +421,15 @@ void W3DTruckDraw::doDrawModule(const Matrix3D* transformMtx)
 		return;
 
 	const Coord3D *vel = physics->getVelocity();
-	Real speed = physics->getVelocityMagnitude();
+	// the dust sizes below were written for distance per 30 Hz frame
+	Real speed = physics->getVelocityMagnitude() * LOGICFRAMES_PER_RETAIL_FRAME;
 
 	// wheels turn by the ground covered since the last picture, and the cab and trailer swing once a
-	// logic frame: both used to step every picture, four times as fast at 120 a second
+	// logic frame: both used to step every picture, four times as fast at 120 a second.  RotationDamping
+	// is a share per 30 Hz frame.
 	Real forward, turn;
 	UnsignedInt frames = stepGroundMotion(forward, turn);
-	Real swing = 1.0f - pow(1.0f - moduleData->m_rotationDampingFactor, (Real)frames);
+	Real swing = 1.0f - pow(1.0f - moduleData->m_rotationDampingFactor, (Real)frames / LOGICFRAMES_PER_RETAIL_FRAME);
 
 	const TWheelInfo *wheelInfo = getDrawable()->getWheelInfo();	// note, can return null!
 	AIUpdateInterface *ai = obj->getAI();
@@ -597,6 +599,7 @@ void W3DTruckDraw::doDrawModule(const Matrix3D* transformMtx)
 			m_dustEffect->setSizeMultiplier(speed);	 
 		}
 		if (m_dirtEffect) {
+			// m_framesAirborne counts Drawable's ground steps, which are retail frames
 			if (wheelInfo && wheelInfo->m_framesAirborne>3) {
 				// The landing puff belongs to the dust system, not the dirt system. This branch was
 				// guarded on m_dirtEffect and then went straight through m_dustEffect, which is a

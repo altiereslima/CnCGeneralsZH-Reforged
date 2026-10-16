@@ -490,6 +490,8 @@ private:
 	static void parseWeaponBonusSet( INI* ini, void *instance, void * /*store*/, const void* /*userData*/ );
 	static void parseScatterTarget( INI* ini, void *instance, void * /*store*/, const void* /*userData*/ );
 	static void parseShotDelay( INI* ini, void *instance, void * /*store*/, const void* /*userData*/ );
+	static void parseRetailDuration( INI* ini, void *instance, void *store, const void* /*userData*/ );
+	static Int retailFramesFromMsec( Int msec );
 
 	static const FieldParse TheWeaponTemplateFieldParseTable[];		///< the parse table for INI definition
 
@@ -900,6 +902,7 @@ private:
 	};
 
 	std::vector<WeaponTemplate*> m_weaponTemplateVector;
+	Int m_countBeforeMapOverrides;	///< templates before a map.ini added its own, -1 if it added none
 
 	// Looking a weapon up by name walked that whole vector.  The same templates are indexed here
 	// by name key; the vector stays because load order is what iterates it.

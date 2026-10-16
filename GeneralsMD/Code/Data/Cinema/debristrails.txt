@@ -1,0 +1,7 @@
+# Scenarios/debristrails.txt on Twilight Flame: the tank fight east of the middle held close and
+# still, so the fragments' and shrapnel's smoke trails read and a before/after pair of runs shares
+# one frame. Command line in the scenario's header.
+
+0.5   cut     1430 3780 0.8 -45 8
+2.5   shot
+14.0  end

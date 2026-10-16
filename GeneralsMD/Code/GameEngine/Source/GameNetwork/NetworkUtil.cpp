@@ -30,16 +30,18 @@
 #include "GameNetwork/NetworkUtil.h"
 #include "TARGA.H"
 
-Int MAX_FRAMES_AHEAD = 128;
+/* Frame counts, sized for the time they cover: 128 and 4 frames were EA's at 30 Hz, the same
+	 4.3 s and 133 ms at LOGICFRAMES_PER_SECOND are twice the frames. */
+Int MAX_FRAMES_AHEAD = ConvertRetailFrames(128);
 
-/* The shortest run-ahead the room is ever commanded to use: 133 ms of input delay at 30 Hz.  EA
+/* The shortest run-ahead the room is ever commanded to use: 133 ms of input delay.  EA
 	 shipped ten frames - a third of a second on every link, LAN included - and because the formula
 	 in computeRunAhead does not clear ten until the two worst average round trips add up to about
 	 600 ms, ten frames is what every game anyone actually played ran at.  The window can come down
 	 this far because computeRunAhead now rounds the trip up rather than down and carries a fixed
 	 jitter allowance on top (RUNAHEAD_JITTER_FRAMES), so a link that genuinely needs a wide window
 	 is given a wider one than the old floor ever gave it, and a link that does not stops paying. */
-Int MIN_RUNAHEAD = 4;
+Int MIN_RUNAHEAD = ConvertRetailFrames(4);
 Int FRAME_DATA_LENGTH = (MAX_FRAMES_AHEAD+1)*2;
 Int FRAMES_TO_KEEP = (MAX_FRAMES_AHEAD/2) + 1;
 
@@ -296,8 +298,6 @@ AsciiString GetAsciiNetCommandType(NetCommandType type) {
 		s.set("NETCOMMANDTYPE_DISCONNECTSCREENOFF");
 	} else if (type == NETCOMMANDTYPE_FRAMERESENDREQUEST) {
 		s.set("NETCOMMANDTYPE_FRAMERESENDREQUEST");
-	} else if (type == NETCOMMANDTYPE_ALLYCURSOR) {
-		s.set("NETCOMMANDTYPE_ALLYCURSOR");
 	} else {
 		s.set("UNKNOWN");
 	}

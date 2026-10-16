@@ -22,8 +22,6 @@
 #   package_license_entries <table> <names...>
 #       the licence entries those libraries need, with the table's "+" lines; status 1, printing the
 #       libraries the table does not name, when any is missing
-#   hud_check_files <dir>
-#       the files under <dir> that force the HUD overlay on (a project rule: off by default in Release), if any
 #   license_entry <entry> <folder>
 #       copies that entry's files into <folder>; CODE, REPO and BUILD are the caller's
 
@@ -54,13 +52,6 @@ package_license_entries() {
 	{ for lib in "$@"; do awk -v l="$lib" '$1 == l { print $2 }' "$table"; done; awk '$1 == "+" { print $2 }' "$table"; } | sort -u
 }
 
-hud_on='^[[:space:]]*ShowHudOverlay[[:space:]]*=[[:space:]]*(yes|true|1)([^[:alnum:]]|$)'
-hud_check_files() {
-	# find -L walks every file, symbolic links followed (the staged overlay links its art): a recursive
-	# grep may not follow them, and which grep is first in PATH varies (ugrep's -r does not)
-	find -L "$1" -type f -exec grep -a -i -l -E "$hud_on" -- {} + 2>/dev/null
-}
-
 license_entry() {
 	local L="$2" s="$CODE/Libraries/Source"
 	case "$1" in
@@ -83,8 +74,6 @@ license_entry() {
 				"(FreeType-GPLv2.txt), as NOTICE.md in the game's source says." > "$L/FreeType-OPTION.txt";;
 		glslang) cp "$s/glslang/LICENSE.txt" "$L/glslang-LICENSE.txt";;
 		spirv-cross) cp "$s/SPIRV-Cross/LICENSE" "$L/SPIRV-Cross-LICENSE.txt";;
-		litehtml) cp "$s/litehtml/LICENSE" "$L/litehtml-LICENSE.txt";;
-		gumbo) cp "$s/litehtml/src/gumbo/LICENSE" "$L/gumbo-LICENSE.txt";;
 		miniaudio) cp "$s/miniaudio/LICENSE" "$L/miniaudio-LICENSE.txt";;
 		gamespy) cp "$s/GameSpy/LICENSE" "$L/GameSpy-LICENSE.txt";;
 		lzhl)		# LZH-Light's notice is the comment that opens lzhl.h (inside libcompression, unaltered)
@@ -93,7 +82,6 @@ license_entry() {
 		zlib)		# zlib's licence is the comment that opens zlib.h
 			awk 'NR == 1 && !/^\/\*/ { exit 1 } { print } /\*\// { exit }' "$s/Compression/ZLib/zlib.h" > "$L/zlib-LICENSE.txt" &&
 			grep -q "This notice may not be removed" "$L/zlib-LICENSE.txt";;
-		nanosvg) cp "$s/nanosvg/LICENSE.txt" "$L/nanosvg-LICENSE.txt";;
 		*) echo "no license_entry named $1" >&2; return 1;;
 	esac
 }

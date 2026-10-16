@@ -278,6 +278,8 @@ Bool AIGuardRetaliateMachine::lookForInnerTarget(void)
 
 	PartitionFilter *filters[16];
 	Int count = 0;
+	// with f1 in the list only enemy players' cells can hold an answer
+	PlayerMaskType searchPlayers = PLAYERMASK_ALL;
 
 	// Enter Guard state
 	if (owner->getTemplate()->isEnterGuard())
@@ -289,6 +291,7 @@ Bool AIGuardRetaliateMachine::lookForInnerTarget(void)
 		{
 			filters[count++] = &f1;
 			filters[count++] = &f7;
+			searchPlayers = owner->getTeam()->getEnemyPlayerMask();
 		}
 		else
 		{
@@ -300,6 +303,7 @@ Bool AIGuardRetaliateMachine::lookForInnerTarget(void)
 	{
 		filters[count++] = &f1;
 		filters[count++] = &f2;
+		searchPlayers = owner->getTeam()->getEnemyPlayerMask();
 		filters[count++] = &f8; //Different than guard... we won't allow acquiring of structures (unless base defenses)
 		// see canRetaliateFromHere
 		if (attackNeedsSight(owner))
@@ -322,7 +326,7 @@ Bool AIGuardRetaliateMachine::lookForInnerTarget(void)
 // but the first (closest).
 //
 	const Coord3D *pos = getPositionToGuard();
-	Object* target = ThePartitionManager->getClosestObject(pos, visionRange, FROM_CENTER_2D, filters);
+	Object* target = ThePartitionManager->getClosestObject(pos, visionRange, FROM_CENTER_2D, filters, NULL, NULL, searchPlayers);
 	if (target) 
 	{
 		setNemesisID(target->getID());	
@@ -722,24 +726,21 @@ StateReturnType AIGuardRetaliateIdleState::update( void )
 #endif
 	Object *owner = getMachineOwner();
 	AIUpdateInterface *ai = owner->getAIUpdateInterface();
-	// Check to see if we have created a crate we need to pick up.
-	if (ai->getCrateID() != INVALID_ID) 
+
+	// if anyone is in the inner area, return success.
+	if (getGuardMachine()->lookForInnerTarget())
+	{
+		return STATE_SUCCESS;	// Transitions to AIGuardRetaliateInnerState.
+	}
+
+	// Check to see if we have created a crate we need to pick up, once no enemy stands in the area.
+	if (ai->getCrateID() != INVALID_ID)
 	{
 		getMachine()->setState(AI_GUARD_RETALIATE_GET_CRATE);
 		return STATE_SLEEP(m_nextEnemyScanTime - now);
 	}
 
-	// if anyone is in the inner area, return success.
-	if (getGuardMachine()->lookForInnerTarget()) 
-	{
-		return STATE_SUCCESS;	// Transitions to AIGuardRetaliateInnerState.
-	}
-	else
-	{
-		return STATE_FAILURE;
-	}
-
-	return STATE_SLEEP(m_nextEnemyScanTime - now);
+	return STATE_FAILURE;
 }
 
 //--------------------------------------------------------------------------------------

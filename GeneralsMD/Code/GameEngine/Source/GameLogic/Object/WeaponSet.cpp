@@ -105,6 +105,7 @@ void WeaponTemplateSet::clear()
 {
 	m_isReloadTimeShared = false;
 	m_isWeaponLockSharedAcrossSets = FALSE;
+	m_namesMissingWeapon = FALSE;
 	m_types.clear();
 	for (int i = 0; i < WEAPONSLOT_COUNT; ++i) 
 	{
@@ -130,7 +131,11 @@ void WeaponTemplateSet::parseWeapon(INI* ini, void *instance, void * /*store*/, 
 {
 	WeaponTemplateSet* self = (WeaponTemplateSet*)instance;
 	WeaponSlotType wslot = (WeaponSlotType)INI::scanIndexList(ini->getNextToken(), TheWeaponSlotTypeNames);
-	INI::parseWeaponTemplate(ini, instance, &self->m_template[wslot], NULL);
+	const char *name = ini->getNextToken();
+	self->m_template[wslot] = TheWeaponStore->findWeaponTemplate(name);
+	// ThingTemplate::parseWeaponTemplateSet passes over a patch file's set that names a weapon a mod dropped
+	if (self->m_template[wslot] == NULL && strcasecmp(name, "None") != 0)
+		self->m_namesMissingWeapon = TRUE;
 }
 
 //-------------------------------------------------------------------------------------------------

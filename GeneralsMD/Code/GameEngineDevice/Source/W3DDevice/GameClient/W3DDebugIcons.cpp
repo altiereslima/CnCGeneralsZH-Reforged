@@ -200,7 +200,8 @@ void W3DDebugIcons::addIcon(const Coord3D *pos, Real width, Int numFramesDuratio
 	m_debugIcons[m_numDebugIcons].position = *pos;
 	m_debugIcons[m_numDebugIcons].width = width;
 	m_debugIcons[m_numDebugIcons].color = color;
-	m_debugIcons[m_numDebugIcons].endFrame = TheGameLogic->getFrame()+numFramesDuration;
+	// the callers count the icon's life in 30 Hz frames, EA's literals and GlobalData's Debug*TileDuration alike
+	m_debugIcons[m_numDebugIcons].endFrame = TheGameLogic->getFrame()+ConvertRetailFrames(numFramesDuration);
 	m_numDebugIcons++;
 }
 
@@ -254,7 +255,7 @@ void W3DDebugIcons::Render(RenderInfoClass & rinfo)
 		try {
 		for(;  numVertex<numRect*4 && k<m_numDebugIcons; k++) {
 			Int theAlpha = 64;
-			const Int FADE_FRAMES = 100;
+			const Int FADE_FRAMES = ConvertRetailFrames(100);
 			Int framesLeft = m_debugIcons[k].endFrame - TheGameLogic->getFrame();
 			if (framesLeft < 1) {
 				anyVanished = true;

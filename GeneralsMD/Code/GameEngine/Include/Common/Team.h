@@ -360,6 +360,10 @@ public:
 	*/
 	Relationship getRelationship(const Team *that) const;
 
+	/** Every player at least one of whose Objects this team takes for an enemy. Exact while no single
+		team carries a relationship of its own; when one does, all players, which is still a superset. */
+	PlayerMaskType getEnemyPlayerMask() const;
+
 	/**
 		set a special relationship between this team and that team, that overrides
 		the one between our Players. (note that this doesn't imply anything about the

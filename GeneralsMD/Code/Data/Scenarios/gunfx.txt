@@ -1,0 +1,45 @@
+# Gunfire effects clip (5e2d6b8b and its follow-ups): rifles, machine gun vehicles and tanks of all
+# three factions in one fight on the open ground between the Twilight Flame starts, so tracers,
+# muzzle flashes, bullet impacts and tank shell tracers are all in one frame. Seat 0 (America with
+# GLA Rebels and Technicals) comes in from the left of a heading -45 camera on 1350,3850, seat 1
+# (China with GLA Quad Cannons and Scorpions) from the right; at heading -45 screen right is world
+# (+x,-y). Both attack-move past each other, and a second wave of each crosses the frame from frame
+# 200 so something is always closing.
+#
+# A headless grid of single Crusaders (2026-10-12) found the ground from x 1050 to 1650 and y 3550
+# to 4150 free of cliffs; the block from 700,3700 to 1000,4000 west of it is cliff, and so are
+# 1400 to 1650 at y 3400 to 3500.
+#
+#   generals.exe -borderless -win -xres 1280 -yres 720 -msaa 0 -quickstart -noshellmap -observer
+#     -multiInstance -particlecap 2500 -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2
+#     -takeover -side 0 FactionAmerica -side 1 FactionChina -seed 7
+#     -scenario gunfx -cinema gunfx -video 60 360 gunfx -maxframes 390
+
+20    spawn      0  AmericaInfantryRanger      8  1230 3990  16
+20    spawn      0  GLAInfantryRebel           8  1180 3950  16
+20    spawn      0  AmericaVehicleHumvee       2  1270 4060  34
+20    spawn      0  GLAVehicleTechnical        2  1130 3920  34
+20    spawn      0  AmericaTankCrusader        3  1160 4050  40
+20    spawn      0  AmericaTankPaladin         2  1110 4010  40
+
+20    spawn      1  ChinaInfantryRedguard     12  1470 3700  16
+20    spawn      1  ChinaTankGattling          2  1430 3650  36
+20    spawn      1  GLAVehicleQuadCannon       2  1560 3740  36
+20    spawn      1  ChinaTankBattleMaster      3  1540 3650  40
+20    spawn      1  ChinaTankOverlord          1  1580 3690  50
+20    spawn      1  GLATankScorpion            2  1500 3610  40
+
+40    attackmove 0  *  1640 3560
+40    attackmove 1  *  1060 4130
+
+200   spawn      0  AmericaInfantryRanger      6  1060 4110  16
+200   spawn      0  AmericaTankCrusader        2  1040 4060  40
+200   spawn      1  ChinaInfantryRedguard      6  1650 3560  16
+200   spawn      1  ChinaTankBattleMaster      2  1640 3610  40
+210   attackmove 0  *  1640 3560
+210   attackmove 1  *  1060 4130
+
+30    tally      0  *
+30    tally      1  *
+360   tally      0  *
+360   tally      1  *

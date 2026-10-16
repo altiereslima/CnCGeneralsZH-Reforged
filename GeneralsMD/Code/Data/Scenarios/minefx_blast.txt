@@ -1,0 +1,45 @@
+# The China mine field going off under an American column on Alpine Assault, seen from the owner's
+# side: minefx_scene.txt's outpost and field round 760,900, its own traffic leaving the field, and
+# from frame 300 three groups of American vehicles driven straight at the standard mines (700,900
+# and 760,860) and the EMP mines (820,900 and 760,940). No Gattling cannon and no attack order for
+# the Battlemasters, so the column reaches the field instead of dying on the way.
+#
+#   generals.exe -win -borderless -xres 1280 -yres 720 -msaa 0 -quickstart -noshellmap
+#     -multiInstance -fps 120 -noFPSLimit -particlecap 2500
+#     -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover
+#     -side 0 FactionChina -side 1 FactionAmerica -seed 1
+#     -scenario minefx_blast -cinema minefx_blast -video 390 720 minefx_blast -maxframes 730
+
+# the outpost
+30    spawn      0  ChinaPowerPlant         1  620 780
+30    spawn      0  ChinaBarracks           1  900 770
+30    spawn      0  ChinaBunker             1  880 1000
+
+# the field
+30    spawn      0  ChinaStandardMine       1  700 900
+30    spawn      0  ChinaEMPMine            1  820 900
+30    spawn      0  ChinaStandardMine       1  760 860
+30    spawn      0  ChinaEMPMine            1  760 940
+
+# own traffic through the field, then away from it before the Americans come
+30    spawn      0  ChinaTankBattleMaster   3  1040 900 28
+30    spawn      0  ChinaInfantryRedguard   6  960 860 14
+30    spawn      0  ChinaVehicleSupplyTruck 1  980 960
+40    move       0  ChinaTankBattleMaster      660 880
+40    move       0  ChinaInfantryRedguard      600 880
+40    move       0  ChinaVehicleSupplyTruck    620 940
+300   move       0  ChinaTankBattleMaster      560 680
+300   move       0  ChinaVehicleSupplyTruck    600 700
+300   move       0  ChinaInfantryRedguard      540 720
+
+# the American column: Crusaders and a Humvee along the north edge onto the standard mines, kept
+# 60 off the EMP field (an EMP blast disables a vehicle and it never reaches the next mine), then
+# Paladins and a Tomahawk through the EMP fields
+300   spawn      1  AmericaTankCrusader     3  1020 830 30
+300   spawn      1  AmericaVehicleHumvee    1  1080 830
+305   move       1  AmericaTankCrusader        680 870
+305   move       1  AmericaVehicleHumvee       680 870
+380   spawn      1  AmericaTankPaladin      2  1000 1040 30
+380   spawn      1  AmericaVehicleTomahawk  1  1060 1000
+385   move       1  AmericaTankPaladin         760 940
+385   move       1  AmericaVehicleTomahawk     820 900

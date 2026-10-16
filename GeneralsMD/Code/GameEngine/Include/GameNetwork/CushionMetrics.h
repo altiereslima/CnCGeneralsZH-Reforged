@@ -60,8 +60,9 @@ enum
 		 percentage of is small: MIN_RUNAHEAD is four frames, and computeRunAhead only clears that on
 		 links slower than about 240 ms round trip.  Ten percent of four is nothing, and a brake that
 		 engages with less than a frame of margin left is not a brake, it is the stall it was meant
-		 to prevent.  Two frames is 66 ms at 30 Hz. */
-	SELFSLUG_MIN_THRESHOLD_FRAMES = 2,
+		 to prevent.  Two frames was 66 ms at 30 Hz; logic runs at 60 now, so the same 66 ms is four.
+		 Every frame count in this enum is doubled from its 30 Hz value for that reason. */
+	SELFSLUG_MIN_THRESHOLD_FRAMES = 4,
 
 	/* The fixed part of the run-ahead's safety margin.  The transit term computeRunAhead sizes the
 		 window from is built out of *average* round trips, and an average is exceeded half the time;
@@ -74,11 +75,12 @@ enum
 		 Three since the router stopped being counted as a leg of the trip (roomLatencySum).  The
 		 window that came out of that was the honest one, and at 200 to 300 ms of ping with 30 to 60 ms
 		 of jitter two frames of allowance let the tail through: two players at 200 ms fell from 29
-		 logic frames a second to 26 on a 5-frame window.  A LAN still sits on MIN_RUNAHEAD. */
-	RUNAHEAD_JITTER_FRAMES = 3,
+		 logic frames a second to 26 on a 5-frame window.  A LAN still sits on MIN_RUNAHEAD.  Three
+		 30 Hz frames, 100 ms, is six at 60. */
+	RUNAHEAD_JITTER_FRAMES = 6,
 
-	/* The room never runs slower than this, whatever the metrics say. */
-	ROOM_FRAME_RATE_FLOOR = 5,
+	/* The room never runs slower than this, whatever the metrics say: a sixth of normal speed. */
+	ROOM_FRAME_RATE_FLOOR = 10,
 
 	/* How far above the slowest reported rate the room is actually told to run.  This is EA's own
 		 step - they applied it to the slowest player alone, "just in case they are able to" - given

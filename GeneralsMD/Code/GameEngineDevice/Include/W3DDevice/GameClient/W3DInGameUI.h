@@ -82,27 +82,13 @@ protected:
 	virtual void drawBuildGrid( void );						///< the pathfinder's build grid under a pending structure
 	virtual void drawAttackCircleFill( void );		///< the wash on the ground inside an attack circle
 	virtual void drawFormationLine( void );				///< the line an armed left drag is spreading the selection along
-	virtual void drawOrderHints( void );					///< a line from each selected unit to where its order sends it
 	virtual void drawAttackCircle( void );				///< the circle a left drag is sweeping targets out of
-	virtual void drawAllyCursorLights( void );		///< the patch of an ally's colour lying under their cursor
-	void drawAllyCursors( void );									///< each ally's pointer and name, over the world
-	void drawOrderStep( const OrderHint& hint, const ICoord2D& tip, UnsignedInt color );	///< a shift list step's number and what it is
-	void drawBuildPlanNumbers( void );						///< each waiting plan's turn in its builder's queue
-	void drawGuardMarkers( void );								///< the guard badge over each of the local player's guarding units
+	void drawGuardMarkers( void );								///< the shield over each of the local player's guarding units
 
 	RenderObjClass *m_buildingPlacementAnchor;
 	RenderObjClass *m_buildingPlacementArrow;
 
-	/// One name plate per player, built the first time that ally's cursor is drawn and kept, because
-	/// laying out the same string every frame for every ally is work nobody sees.
-	DisplayString *m_allyCursorNames[ MAX_PLAYER_COUNT ];
-
-	/// The numbers on the steps of a shift list, each laid out once.  A step past the last one has no
-	/// number, which on a list that long is no loss.
-	enum { MAX_ORDER_STEP_NUMBERS = 30 };
-	DisplayString *m_orderStepNumbers[ MAX_ORDER_STEP_NUMBERS ];
-
-	// Classic's move rings, EA's own
+	// the move rings, EA's own
 	void drawMoveHints( View *view );
 	RenderObjClass *m_moveHintRenderObj[ MAX_MOVE_HINTS ];
 	HAnimClass		 *m_moveHintAnim[ MAX_MOVE_HINTS ];

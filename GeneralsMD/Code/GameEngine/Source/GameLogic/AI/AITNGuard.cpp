@@ -379,7 +379,8 @@ static Object *TunnelNetworkScan(Object *owner)
 
 		filters[count++] = NULL;
 
-		Object* target = ThePartitionManager->getClosestObject(owner->getPosition(), visionRange, FROM_CENTER_2D, filters);
+		Object* target = ThePartitionManager->getClosestObject(owner->getPosition(), visionRange, FROM_CENTER_2D, filters, NULL, NULL,
+			owner->getTeam()->getEnemyPlayerMask());	// f1 lets only enemies through
 		return target;
 }
 
@@ -727,12 +728,6 @@ StateReturnType AITNGuardIdleState::update( void )
 #endif
 	Object *owner = getMachineOwner();
 	AIUpdateInterface *ai = owner->getAIUpdateInterface();
-	// Check to see if we have created a crate we need to pick up.
-	if (ai->getCrateID() != INVALID_ID) 
-	{
-		getMachine()->setState(AI_TN_GUARD_GET_CRATE);
-		return STATE_SLEEP(m_nextEnemyScanTime - now);
-	}
 
 	// if anyone is in the inner area, return success.
 	if (getGuardMachine()->lookForInnerTarget()) 
@@ -755,6 +750,13 @@ StateReturnType AITNGuardIdleState::update( void )
 			return STATE_SLEEP(0);
 		}
 		return STATE_SUCCESS;	// Transitions to AITNGuardInnerState.
+	}
+
+	// Check to see if we have created a crate we need to pick up, once no enemy stands in the area.
+	if (ai->getCrateID() != INVALID_ID)
+	{
+		getMachine()->setState(AI_TN_GUARD_GET_CRATE);
+		return STATE_SLEEP(m_nextEnemyScanTime - now);
 	}
 
 	if (!owner->getContainedBy() && findBestTunnel(owner->getControllingPlayer(), owner->getPosition())) {

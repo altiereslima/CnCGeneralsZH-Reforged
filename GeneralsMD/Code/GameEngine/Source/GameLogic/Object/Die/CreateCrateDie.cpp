@@ -244,7 +244,7 @@ Object *CreateCrateDie::createCrate( CrateTemplate const *currentCrateData )
 			crateDrawable->setTerrainDecal(TERRAIN_DECAL_CRATE);
 			crateDrawable->setTerrainDecalSize(2.5f * newCrate->getGeometryInfo().getMajorRadius(), 
 																2.5f * newCrate->getGeometryInfo().getMajorRadius() )	;
-			crateDrawable->setTerrainDecalFadeTarget(1.0f, 0.03f);
+			crateDrawable->setTerrainDecalFadeTarget(1.0f, ConvertRetailPerFrameRate(0.03f));
 		}
 
 		return newCrate;

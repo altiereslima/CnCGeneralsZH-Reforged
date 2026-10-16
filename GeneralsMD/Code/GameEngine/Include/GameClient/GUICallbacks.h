@@ -326,6 +326,8 @@ extern void ShowControlBar( Bool immediate = TRUE );
 // Replay Controls --------------------------------------------------------------------------------
 extern WindowMsgHandledType ReplayControlSystem( GameWindow *window, UnsignedInt msg, WindowMsgData mData1, WindowMsgData mData2 );
 extern WindowMsgHandledType ReplayControlInput( GameWindow *window, UnsignedInt msg, WindowMsgData mData1, WindowMsgData mData2 );
+extern void ReplayControlDraw( GameWindow *window, WinInstanceData *instData );
+extern void ReplayControlStepSpeed( Int step );	///< the replay one speed button faster (+1) or slower (-1)
 
 
 // InGame Chat Controls --------------------------------------------------------------------------------

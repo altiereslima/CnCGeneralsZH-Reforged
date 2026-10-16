@@ -58,6 +58,11 @@
 #define K_LIGHTING_VERSION_3	3	// Added 2 additional global lights for terrain.
 #define K_WORLDDICT_VERSION_1 1
 #define K_MAPPREVIEW_VERSION_1 1
+
+// The widest height map a map file may claim, border included.  Retail maps are a few hundred
+// cells a side; the bound is only there so that width times height, and the arrays sized from it,
+// are a number a corrupt or hostile file cannot overflow or exhaust memory with.
+#define K_MAX_HEIGHT_MAP_SIDE	4096
 /** Virtual helper class, so that we can write map data using FILE* or CFile. */
 class OutputStream {
 public:

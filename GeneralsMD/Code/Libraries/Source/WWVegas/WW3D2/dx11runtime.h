@@ -171,6 +171,16 @@ void Direct3D11_Set_Scene_View(const float view[16]);
 // (DX11BackendClass::Set_Smoke_Glow).  The sorting pool sets it around the smoke billboards' runs.
 void Direct3D11_Set_Smoke_Glow(bool glow);
 
+// The look one object's draws are dressed in (DRAW_EFFECT_* in ffshader.h) and its four numbers
+// (DX11BackendClass::Set_Draw_Effect).  The mesh renderer sets it around a mesh's draws and puts
+// zero back after them.  -d3d9, -headless and the SDL3 port draw the object as they always did.
+void Direct3D11_Set_Draw_Effect(unsigned effect, const float parameters[4]);
+
+// Whether the looks are drawn at all: a Direct3D 11 frame is presenting and the Classic graphics
+// setting is off.  The scene asks before it leaves the heat vision pass out for one of them.
+bool Direct3D11_Draw_Effects();
+void Direct3D11_Allow_Draw_Effects(bool allowed);
+
 // Whether the draws that follow take the Glow option's additive gain (DX11BackendClass::
 // Set_Glow_Draw).  ShaderClass::Apply sends it from the shader's GLOW_ENABLE bit.
 void Direct3D11_Set_Glow_Draw(bool glow);

@@ -22,9 +22,11 @@
 // The mode and the followed player are picked apart, from two lists.  Free is the camera in the
 // watcher's own hands.  Director goes to the fight of the last few seconds with the most at stake,
 // each hit counted by what the thing hit cost and more for a kill or a superweapon, and stays there
-// a while before it looks for a bigger fight.  A special power used anywhere outranks any fight: a
-// superweapon is shown leaving its silo, then where it lands until the dust settles, a laser
-// followed along its sweep.  The camera glides between places on a spring and only cuts across
+// a while before it looks for a bigger fight.  A special power used anywhere outranks any fight and
+// takes the camera at once: it is shown where it lands until the dust settles, for 30 seconds at the
+// most, a laser followed along its sweep, and two landing far apart at once split a recording's
+// picture a pane each.  Hits on infantry count for a quarter, so a skirmish of riflemen rarely
+// takes the camera from tanks or buildings.  The camera glides between places on a spring and only cuts across
 // most of a map, and stops short of a place that would put ground off the map on the screen.  Over
 // a wide fight it rises above the watcher's own height, which the wheel still moves, and comes back
 // down to it when the camera goes elsewhere or is taken back.  With no fight on it goes round the armies on the
@@ -73,9 +75,10 @@ struct DirectorHeat
 class Player;
 class SpecialPowerTemplate;
 class ThingTemplate;
+class UpgradeTemplate;
 
 /// a special power used lately: who used it, where it was fired from, where it lands, and until which
-/// logic frame it is worth watching.  A superweapon is shown leaving its silo before its target
+/// logic frame it is worth watching
 struct DirectorEvent
 {
 	UnsignedInt id;
@@ -91,10 +94,10 @@ struct DirectorEvent
 	const ThingTemplate *sourceThing;		///< what it was fired from
 };
 
-/// -directorrecord's broadcast shows some things one at a time from a queue: a special power's flag
-/// under its player's card in the score bar, and a defeated player's banner.  start is the logic frame
-/// it began to come in, 0 while it waits behind another; leaving the frame it began to go, 0 while it
-/// holds.  A defeat's banner has no power
+/// -directorrecord's broadcast shows some things one at a time from a queue: a special power's or a
+/// bought upgrade's flag under its player's card in the score bar, and a defeated player's banner.
+/// start is the logic frame it began to come in, 0 while it waits behind another; leaving the frame it
+/// began to go, 0 while it holds.  A defeat's banner has neither power nor upgrade
 struct DirectorShowing
 {
 	Int player;
@@ -103,6 +106,7 @@ struct DirectorShowing
 	Bool superweapon;
 	UnsignedInt start;
 	UnsignedInt leaving;
+	const UpgradeTemplate *upgrade;
 };
 
 /// one logic frame of such a queue: the first in it comes in over moveFrames, holds holdAlone frames
@@ -111,12 +115,14 @@ struct DirectorShowing
 /// this frame
 Bool ObserverCamera_advanceShowing( std::vector< DirectorShowing > &queue, UnsignedInt frame, UnsignedInt moveFrames, UnsignedInt holdAlone,
 	Bool keepLast );
-/// how far in a queued thing that comes and goes over moveFrames is on frame, 0 to 1, eased in and out
-Real ObserverCamera_showingShown( const DirectorShowing &showing, UnsignedInt frame, UnsignedInt moveFrames );
+/// how far in a queued thing that comes and goes over moveFrames is on frame, 0 to 1, eased in and out.
+/// frame and the frames below are a picture's time (GameEngine_pictureFrame), between two logic frames
+/// for a -recordfps picture
+Real ObserverCamera_showingShown( const DirectorShowing &showing, Real frame, UnsignedInt moveFrames );
 /// a defeated player's card on frame: how bright its red flash is, how far the line through it has
 /// drawn and how far it has collapsed, each 0 to 1.  defeated is the frame he lost on, collapseFrom the
 /// frame his card starts to go
-void ObserverCamera_cardExit( UnsignedInt frame, UnsignedInt defeated, UnsignedInt collapseFrom, Real *flash, Real *struck, Real *collapse );
+void ObserverCamera_cardExit( Real frame, UnsignedInt defeated, UnsignedInt collapseFrom, Real *flash, Real *struck, Real *collapse );
 /// the frame the card of a player who lost on defeated starts to collapse: once it has been seen struck,
 /// and not before the card that went before it, from lastCollapse, has gone, so the others slide for
 /// one card at a time
@@ -166,17 +172,18 @@ void ObserverCamera_markLandings( std::vector< DirectorMoment > &moments, const 
 /// it did not see, so a match it did not scout waits for the hits
 Bool ObserverCamera_powerLands( const std::vector< DirectorMoment > &timeline, UnsignedInt frame, const Coord2D &at );
 /// whether the timeline has a fight worth filming near place, going on at frame or beginning within
-/// the pre-roll, that lasts to until, leaving out any that is also near besides, the place another
-/// pane already shows (NULL for none)
+/// the pre-roll, that lasts to until and peaked at least leastPeak, leaving out any that is also near
+/// besides, the place another pane already shows (NULL for none)
 Bool ObserverCamera_fightLasts( const std::vector< DirectorMoment > &timeline, const Coord2D &place, UnsignedInt frame, UnsignedInt until,
-	const Coord2D *besides );
+	const Coord2D *besides, Real leastPeak = 0.0f );
 /// the scouting pass's fights as its run ends on frame end: one still going was cut short by the end
 /// of the match, not by itself, and is counted as lasting, so a last battle that got hot is filmed
 /// rather than skipped as a fizzle
 void ObserverCamera_closeTimeline( std::vector< DirectorMoment > &moments, UnsignedInt end );
-/// the moment the director goes to wait at on frame: of the fights worth filming and the superweapons
-/// that begin within the pre-roll after frame, a superweapon first and then the hottest, leaving out
-/// any within apart of taken, the place another pane already shows (NULL for none).  -1 for none
+/// the moment the director goes to wait at on frame: of the moments worth filming that begin within the
+/// pre-roll after frame, a superweapon first, then any other special power, then the hottest fight,
+/// leaving out any within apart of taken, the place another pane already shows (NULL for none).  A
+/// power is waited for where it lands.  -1 for none
 Int ObserverCamera_prerollMoment( const std::vector< DirectorMoment > &timeline, UnsignedInt frame, const Coord2D *taken, Real apart );
 /// whether the fight going on at place on frame is one the scouting pass saw fizzle, which the
 /// director does not cut to.  FALSE where the pass saw nothing, so a match it did not scout is
@@ -207,26 +214,26 @@ Real ObserverCamera_heatAround( const std::vector< DirectorHeat > &hits, const C
 /// peakHere is the hottest the place has been while held, and a place burnt down from it lets go sooner
 Bool ObserverCamera_shouldMove( Real heatHere, Real heatThere, UnsignedInt framesHere, Real peakHere );
 /// what one recent hit counts for: more the dearer the thing hit, more again if it died or is a
-/// superweapon
-Real ObserverCamera_hitWeight( Int cost, Bool killed, Bool superweapon );
+/// superweapon, and a quarter of that for infantry
+Real ObserverCamera_hitWeight( Int cost, Bool killed, Bool superweapon, Bool infantry );
 /// what one thing is worth looking at with no fight on: its cost, doubled while it marches or is
 /// being built, halved for a building that is only standing there, tripled for a superweapon
 Real ObserverCamera_sightWeight( Int cost, Bool structure, Bool busy, Bool superweapon );
 /// the best place among the sights away from the ones in seen; FALSE when every sight was seen
 Bool ObserverCamera_nextSight( const std::vector< DirectorHeat > &sights, const std::vector< Coord2D > &seen, Coord2D *place );
-/// where an event is best watched on a frame: a superweapon's silo for its first few seconds, then
-/// where it lands
-Coord2D ObserverCamera_eventPlace( const DirectorEvent &event, UnsignedInt frame );
 /// whether the director stays on the event it is showing, current, rather than go to best, the
-/// biggest one it may show now.  best is NULL when none may be shown: narrowed to a player whose
-/// things round the target are all gone, the current one is filtered out and is still kept
-Bool ObserverCamera_stayOnEvent( const DirectorEvent *current, const DirectorEvent *best, UnsignedInt held );
+/// biggest and latest one it may show now: it stays while best lands in the same picture or weighs
+/// less, and goes at once, settled or not, to a power as big landing anywhere else.  best is NULL when
+/// none may be shown: narrowed to a player whose things round the target are all gone, the current
+/// one is filtered out and is still kept
+Bool ObserverCamera_stayOnEvent( const DirectorEvent *current, const DirectorEvent *best );
 /// whether owner using power on target at frame is more of event, a use still shown, rather than a new one
 Bool ObserverCamera_sameUse( const DirectorEvent &event, const Player *owner, const SpecialPowerTemplate *power, const Coord2D &target,
 	UnsignedInt frame );
-/// whether an event takes the camera from a fight or a sight held for held frames.  A superweapon
-/// still on its way out of the silo goes at once, or the launch is over before the settle is
-Bool ObserverCamera_eventCutsIn( const DirectorEvent &event, UnsignedInt frame, UnsignedInt held );
+/// the frame an event shown until until is kept to when something more happens at it on frame: a few
+/// seconds past frame, never past EVENT_MOST_FRAMES after it began.  Kept going by every hit round its
+/// target, a particle cannon fired into the middle of a map held the camera there for eight minutes
+UnsignedInt ObserverCamera_eventKeptTo( const DirectorEvent &event, UnsignedInt frame, UnsignedInt more );
 /// how widely the hits within DIRECTOR_GATHER_RADIUS of a place lie round it, by weight
 Real ObserverCamera_spreadAround( const std::vector< DirectorHeat > &hits, const Coord2D &around );
 /// how much higher than the watcher's own the director takes the camera over a fight this spread
@@ -247,6 +254,16 @@ Real ObserverCamera_easeHeight( Real from, Real to, Real *velocity, Real elapsed
 /// -directorrecord's second fight: the hottest place among the hits more than needed from first, so
 /// the two halves of a split screen never show the same ground.  FALSE when nothing that far was hit
 Bool ObserverCamera_secondPlace( const std::vector< DirectorHeat > &hits, const Coord2D &first, Real needed, Coord2D *place, Real *heat );
+/// -directorrecord's split in a match of two, a pane each player: what one player is doing is the hits
+/// his own fire made (sources[] has him), and with none anywhere his own sights, his base and his army
+/// on the move.  fighting says which
+void ObserverCamera_sideCandidates( const std::vector< DirectorHeat > &hits, const std::vector< PlayerMaskType > &sources,
+	const std::vector< DirectorHeat > &sights, const std::vector< PlayerMaskType > &owners, PlayerMaskType side,
+	std::vector< DirectorHeat > *candidates, Bool *fighting );
+/// a place for each of the two players from his candidates, more than apart from each other.
+/// Whichever player's hottest place is taken first, the other's is the hottest of his beyond it; of
+/// the two ways round, the one whose cooler pane is hotter.  FALSE, both heats 0, when there are none
+Bool ObserverCamera_sidePlaces( const std::vector< DirectorHeat > *candidates, Real apart, Coord2D *places, Real *heats );
 /// whether the recording's picture is split, given whether it is now, how far apart the two places
 /// are against the needed distance, and how long ago it last went on or off: on, after a rest, for a
 /// second fight more than needed away that is big on its own and next to a first one; held through
@@ -254,6 +271,14 @@ Bool ObserverCamera_secondPlace( const std::vector< DirectorHeat > &hits, const 
 /// at once, however new, when the two places come within two thirds of needed and the two panes
 /// would show the same ground
 Bool ObserverCamera_holdSplit( Bool split, Real firstHeat, Real secondHeat, Real apart, Real needed, UnsignedInt framesSince );
+/// the same in a match of two, a pane each player, with apart 0 when no place was found for either.
+/// The opening's split goes on after SPLIT_REST_FRAMES whenever the two are further apart than needed
+/// and stays through SPLIT_LEAST_FRAMES, then up to SPLIT_MOST_FRAMES while fighting has either player
+/// in a fight and twice that while it has neither.  Past the opening it goes on only for big, each
+/// player in a big fight of his own, and only SIDE_SPLIT_REST_FRAMES after the last one went off; it
+/// stays through SIDE_SPLIT_LEAST_FRAMES whatever happens, then while both players fight, up to
+/// SIDE_SPLIT_MOST_FRAMES
+Bool ObserverCamera_holdSideSplit( Bool split, Bool opening, Bool big, Int fighting, Real apart, Real needed, UnsignedInt framesSince );
 
 /// -directorrecord's panes.  The picture is cut by rays from one point, and pane i is the wedge from
 /// ray i counterclockwise to ray i + 1.  Angles are degrees, 0 to the right and 90 up the screen
@@ -341,7 +366,7 @@ Real ObserverCamera_paneGround( Real screenGround, Real circleGround, Real reach
 Int ObserverCamera_panePolygon( const Real *rays, Int count, Int pane, const Coord2D &origin, Int width, Int height,
 	Coord2D *vertices );
 /// how far an animation of length frames that started on start is on frame, eased in and out, 0 to 1
-Real ObserverCamera_easeFrames( UnsignedInt frame, UnsignedInt start, UnsignedInt length );
+Real ObserverCamera_easeFrames( Real frame, UnsignedInt start, UnsignedInt length );
 /// the dark edge each side of the gold of a line between panes and of the radar's frame, in pixels
 enum { OBSERVER_PANE_LINE_EDGE = 2 };
 /// the gold of a line between panes, in pixels, for a picture height pixels high: 6 at 720, 9 at 1080
@@ -353,11 +378,9 @@ Int ObserverCamera_paneBandWidth( Int height );
 Real ObserverCamera_lineDrawn( Real progress );
 /// how far a line's band has faded in at progress, behind the line
 Real ObserverCamera_bandShown( Real progress );
-/// how much of the radar frame's gold has been traced round the map at progress
-Real ObserverCamera_frameTraced( Real progress );
 /// where along the gold lines the travelling light is on logic frame frame, 0 at the meeting point and
 /// 1 at the far end, eased; below 0 between two runs
-Real ObserverCamera_shimmerAt( UnsignedInt frame );
+Real ObserverCamera_shimmerAt( Real frame );
 
 class ObserverCamera
 {
@@ -383,6 +406,11 @@ public:
 	Bool isDriving( void ) const { return m_driving; }
 	Bool isFogOn( void ) const { return m_fog; }
 	void setFog( Bool fog ) { m_fog = fog; }
+	/// a player picked on the observer bar: his fog on the screen and his camera driving it, until
+	/// stopLooking puts back the whole map and the camera the watcher had before
+	void lookThrough( Int playerIndex );
+	/// FALSE when nobody was followed and no fog was on, so there was nothing to take back
+	Bool stopLooking( void );
 
 	/// the player whose fog the screen is drawn in: the local player, or whoever a watcher with fog
 	/// on is following
@@ -395,6 +423,9 @@ public:
 	/// a superweapon is hitting the ground here this frame, a beam or a warhead.  Keeps the event it
 	/// belongs to going a few seconds more, and with follow the event's target moves with it
 	void noteSuperweaponHit( const Player *owner, const Coord3D *at, Bool follow );
+	/// a player finished buying an upgrade, for himself or for one of his things: -directorrecord hangs
+	/// its flag under his card.  Logic tells, and never asks back
+	void noteUpgrade( const Player *owner, const UpgradeTemplate *upgrade );
 
 	/// the watcher's own height back on the view, if the director had raised it over a fight
 	void releaseHeight( void );
@@ -408,12 +439,10 @@ public:
 	const Real *getPaneRays( void ) const { return m_paneRays; }
 	/// where the rays meet on the screen, in pixels, which slides in from off the screen and back out
 	Coord2D getPaneOrigin( void ) const { return m_paneOrigin; }
-	/// how far the radar in the bottom left corner is slid out to the left, 0 to 1
+	/// how far the radar in the middle of the bottom edge is slid down off the screen, 0 to 1
 	Real getCornerRadarSlide( void ) const { return m_cornerRadarSlide; }
-	/// the radar framed on the rays' meeting point, pane 0's, while there are panes; its middle comes
-	/// with the meeting point and goes off the screen with it
+	/// whether there are panes on the screen, which the radar is not drawn over
 	Bool isRadarFramed( void ) const { return m_paneCount >= 2 && m_paneProgress > 0.0f; }
-	Coord2D getFramedRadarMiddle( Real radarDiagonal ) const;
 	/// the framed radar's rectangle as it was drawn, frame included: the recording takes it from pane 0
 	void setRadarFrame( const IRegion2D &frame ) { m_radarFrame = frame; }
 	const IRegion2D &getRadarFrame( void ) const { return m_radarFrame; }
@@ -430,7 +459,9 @@ public:
 	Real getPaneProgress( void ) const { return m_paneProgress; }
 	/// how far the gold lines have drawn out on the settled panes, 0 to 1, not eased
 	Real getLineProgress( void ) const { return m_lineProgress; }
-	/// who a split's pane shows: everybody dealing or taking hits in its fight; 0 when nobody is
+	/// who a split's pane shows: everybody dealing or taking hits in its fight, and in a match of two
+	/// the pane's own player whatever he does, or for a pane a special power holds the player who used
+	/// it; 0 when nobody is
 	PlayerMaskType getPaneSides( Int pane ) const;
 	/// the panes are the match's opening, each one player's: his index, and the point over his command
 	/// centre his plate hangs from, on the ground where his things crowd when he has none
@@ -481,12 +512,17 @@ private:
 	void logHandover( const ViewLocation &step, const ViewLocation &placed );
 	void pickIntroBases( void );
 	Region2D mapRegion( void ) const;
-	void updateSplit( void );
+	Bool updateSplit( void );
+	Bool updateEventSplit( void );
+	Bool updateSideSplit( void );
+	/// everybody dealing or taking the last scan's hits in the fight at subject
+	PlayerMaskType sidesAround( const Coord2D &subject ) const;
 	void measureScreenGround( void );
 	Real paneGround( const Coord2D &subject ) const;
 	Real splitApart( const Coord2D &second ) const;
 	void updateIntroPlaces( void );
 	void advancePanes( UnsignedInt frame );
+	void easePanes( Real at );
 	void fitPanes( UnsignedInt frame );
 	Real paneZoom( Int pane ) const;
 	void stepPaneCameras( const ViewLocation &step, Real elapsedSeconds );
@@ -520,6 +556,7 @@ private:
 	Coord2D m_skippedFight;											///< the last fizzling fight the director passed over, so it is logged once
 
 	ObserverCameraMode m_mode;
+	ObserverCameraMode m_modeBeforeLook;	///< what stopLooking gives back; kept across a rewind's reset
 	Int m_followed;
 	Bool m_fog;
 	Int m_shroudViewer;
@@ -542,6 +579,8 @@ private:
 	Bool m_survivorHandover;				///< the panes have just gone out on pane 1, whose camera the single view takes over this update
 	Coord3D m_drivenTo;							///< where this put the camera last frame, inside the view's constraint
 	UnsignedInt m_lastUpdate;
+	UnsignedInt m_directedFrame;		///< the logic frame -directorrecord's once-a-frame work last ran on; -recordfps updates a frame more than once
+	Bool m_directing;								///< this update is the logic frame's first, or there is no -directorrecord: the director decides on it
 	ObserverCameraVelocity m_velocity;
 
 	ViewLocation m_playerViews[ MAX_PLAYER_COUNT ];
@@ -555,6 +594,9 @@ private:
 	Real m_placeHeight;							///< how much higher than the watcher's own the place is watched from
 	Real m_placePeak;								///< the hottest the fight held has been since the director came to it
 	UnsignedInt m_placeEvent;				///< the id of the event the place is, while it is one
+	UnsignedInt m_eventSecond;			///< another event landing far from that one at the same time, 0 for none; the split's pane 1
+	Bool m_eventSplit;							///< the split up is the two events', which no rest or hold of a fight's split keeps down
+	PlayerMaskType m_eventPaneSides[ 2 ];	///< who used each of those two
 	std::vector< Coord2D > m_seen;	///< the last few sights, oldest first, not gone back to while there is another
 	std::vector< DirectorEvent > m_events;	///< the special powers still worth watching, oldest first
 	UnsignedInt m_nextEventId;
@@ -569,6 +611,12 @@ private:
 
 	std::vector< DirectorHeat > m_fights;	///< the last scan's hits one player dealt another he is at war with; the split counts only these
 	std::vector< PlayerMaskType > m_fightSides;	///< and the two players each of them was between
+	std::vector< PlayerMaskType > m_fightSources;	///< and the player who dealt each of them
+	std::vector< DirectorHeat > m_sights;	///< the last scan's things worth seeing, unhurt or not
+	std::vector< PlayerMaskType > m_sightOwners;	///< and whose each of them is, 0 for nobody's
+	const Player *m_sidePlayers[ 2 ];			///< a match of two: the opening's pane players, each split's pane 0 and pane 1 follow the same one
+	Coord2D m_sideFirst;									///< where pane 0's player is, the place the director holds while that split is up
+	Bool m_sideOpening;										///< the split up is the one the opening's panes went on as
 	std::vector< IRegion2D > m_broadcast;	///< the rectangles the broadcast drew over pane 0 this frame
 	Real m_broadcastTop;									///< the rows the score bar took
 	Real m_screenGround;									///< the ground the whole picture spans across its middle row, last measured with no panes up

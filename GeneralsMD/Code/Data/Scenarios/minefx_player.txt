@@ -1,0 +1,48 @@
+# minefx_blast.txt for the player's own camera (Cinema/minefx_player.txt): the same outpost, field
+# and American column. In minefx_blast the Battlemasters never got off the field (560,680 is not a
+# point they reach) and shot it out with the column in the middle of the mines, so at play distance a
+# mine going off could not be told from a dying tank. Here seat 0's only traffic is two supply trucks
+# that cross the field early and drive off west to 450,780 from frame 150. A headless tally keeps
+# both at full health to frame 700; sent to 600,700 at frame 300 instead, the Crusaders shot one
+# at about 440, and the Red Guard walked too slowly to leave the column's path at all. Every unit is
+# on the defensive stance, so what goes off in the field is the mines and the vehicles they kill.
+# Tallied at seed 1: EMP mines under the Crusaders 500 to 516 and 536 to 552, standard mines under
+# the Crusaders and the Humvee 568 to 604, EMP under the Paladins and the Tomahawk 660 to 672.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -quickstart -noshellmap
+#     -multiInstance -fps 120 -noFPSLimit -particlecap 2500
+#     -map "Maps\Alpine Assault\Alpine Assault.map" -autoskirmish 2 -takeover
+#     -side 0 FactionChina -side 1 FactionAmerica -seed 1 -camera 780 900
+#     -scenario minefx_player -cinema minefx_player -video 120 720 minefx_player -maxframes 730
+
+# the outpost
+30    spawn      0  ChinaPowerPlant         1  620 780
+30    spawn      0  ChinaBarracks           1  900 770
+30    spawn      0  ChinaBunker             1  880 1000
+
+# the field
+30    spawn      0  ChinaStandardMine       1  700 900
+30    spawn      0  ChinaEMPMine            1  820 900
+30    spawn      0  ChinaStandardMine       1  760 860
+30    spawn      0  ChinaEMPMine            1  760 940
+
+# own traffic through the field, then west and out of the column's way
+30    spawn      0  ChinaVehicleSupplyTruck 2  980 960 40
+40    move       0  ChinaVehicleSupplyTruck    620 940
+150   move       0  ChinaVehicleSupplyTruck    450 780
+
+# the American column: Crusaders and a Humvee along the north edge onto the standard mines, kept
+# 60 off the EMP field (an EMP blast disables a vehicle and it never reaches the next mine), then
+# Paladins and a Tomahawk through the EMP fields
+300   spawn      1  AmericaTankCrusader     3  1020 830 30
+300   spawn      1  AmericaVehicleHumvee    1  1080 830
+302   stance     1  AmericaTankCrusader        defensive
+302   stance     1  AmericaVehicleHumvee       defensive
+305   move       1  AmericaTankCrusader        680 870
+305   move       1  AmericaVehicleHumvee       680 870
+380   spawn      1  AmericaTankPaladin      2  1000 1040 30
+380   spawn      1  AmericaVehicleTomahawk  1  1060 1000
+382   stance     1  AmericaTankPaladin         defensive
+382   stance     1  AmericaVehicleTomahawk     defensive
+385   move       1  AmericaTankPaladin         760 940
+385   move       1  AmericaVehicleTomahawk     820 900

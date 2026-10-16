@@ -106,6 +106,20 @@ float DX11Post_Additive_Gain()
 	return (BloomIntensity > 0.0f) ? BloomAdditiveGain : 1.0f;
 }
 
+// How far the grade bends the picture at full strength: the power the S raises each side of its
+// pivot to, less one, what is left of the colour around its grey, and how far a channel moves warm
+// or cool for each step away from the pivot.
+static const float GRADE_CONTRAST = 0.18f;
+static const float GRADE_SATURATION = 0.86f;
+static const float GRADE_SPLIT = 0.05f;
+
+static float GradeAmount = 0.0f;
+
+void DX11Post_Set_Grade(float amount)
+{
+	GradeAmount = (amount < 0.0f) ? 0.0f : (amount > 1.0f) ? 1.0f : amount;
+}
+
 static DX11PostWarp Warps[DX11_POST_WARP_LIMIT];
 static unsigned WarpCount = 0;
 
@@ -141,6 +155,9 @@ struct PostConstantBlock
 	float WarpInfo[4];
 	float WarpCentre[DX11_POST_WARP_LIMIT][4];
 	float WarpRing[DX11_POST_WARP_LIMIT][4];
+
+	// The grade's amount, contrast, saturation and warm/cool split.
+	float Grade[4];
 };
 
 // A triangle big enough to cover the screen, made out of nothing.  No vertex buffer and no input
@@ -181,6 +198,7 @@ static const char * const PIXEL_SHADER_PROLOGUE =
 	"    float4 WarpInfo;\n"
 	"    float4 WarpCentre[4];\n"
 	"    float4 WarpRing[4];\n"
+	"    float4 Grade;\n"
 	"};\n"
 	"\n"
 	// Below the knee nothing moves, so a frame with nothing overbright in it comes back out as the
@@ -194,6 +212,28 @@ static const char * const PIXEL_SHADER_PROLOGUE =
 	"    float3 excess = max(colour - knee, 0.0);\n"
 	"    return min(colour, knee) + headroom * (1.0 - exp(-excess / headroom));\n"
 	"}\n"
+	"\n"
+	// The lighting style's grade, on the curve's output, so everything it sees is already between
+	// nought and one.  The S turns about the grey a battlefield frame averages (under a third of
+	// white, not a half, or the whole picture goes darker; at a third a forest and a snowed-in town
+	// still lost an eighth of their brightness): black, white and that grey stay where they
+	// are, what is below it sinks and what is above it rises.  Then the colour goes toward its own
+	// grey, and a pixel brighter than the pivot leans to red, a darker one to blue, by how far it is
+	// from it.
+	"static const float GRADE_PIVOT = 0.28;\n"
+	"float3 grade(float3 colour)\n"
+	"{\n"
+	"    if (Grade.x <= 0.0) return colour;\n"
+	"    float3 c = saturate(colour);\n"
+	"    float k = 1.0 + Grade.y;\n"
+	"    float3 low = GRADE_PIVOT * pow(max(c, 0.00001) / GRADE_PIVOT, k);\n"
+	"    float3 high = 1.0 - (1.0 - GRADE_PIVOT) * pow(max(1.0 - c, 0.00001) / (1.0 - GRADE_PIVOT), k);\n"
+	"    float3 graded = (c < GRADE_PIVOT) ? low : high;\n"
+	"    float grey = dot(graded, float3(0.299, 0.587, 0.114));\n"
+	"    graded = lerp(grey.xxx, graded, Grade.z);\n"
+	"    graded += float3(1.0, 0.25, -1.0) * (grey - GRADE_PIVOT) * Grade.w;\n"
+	"    return lerp(c, saturate(graded), Grade.x);\n"
+	"}\n"
 	"\n";
 
 static const char * const COPY_SHADER_BODY =
@@ -205,7 +245,7 @@ static const char * const COPY_SHADER_BODY =
 static const char * const TONE_MAP_SHADER_BODY =
 	"float4 main(VertexOutput input) : SV_TARGET\n"
 	"{\n"
-	"    return float4(tone_curve(Source.Sample(Sampler, input.Texture).rgb), 1.0);\n"
+	"    return float4(grade(tone_curve(Source.Sample(Sampler, input.Texture).rgb)), 1.0);\n"
 	"}\n";
 
 // FXAA, the 2009 shape of it: read the luminance of the four diagonal neighbours and the centre,
@@ -398,7 +438,7 @@ static const char * const BLOOM_COMPOSITE_SHADER_BODY =
 	"{\n"
 	"    float3 scene = Source.Sample(Sampler, input.Texture).rgb;\n"
 	"    float3 glow = Extra.Sample(Sampler, input.Texture).rgb;\n"
-	"    return float4(tone_curve(scene + glow * Tuning.y), 1.0);\n"
+	"    return float4(grade(tone_curve(scene + glow * Tuning.y)), 1.0);\n"
 	"}\n";
 
 // A blast bending the picture, one read per pixel whatever the number of warps: every warp adds
@@ -931,6 +971,10 @@ void DX11PostProcessClass::Draw_Pass(const PassSetup & pass)
 		block.WarpRing[index][2] = warp.RingStrength;
 		block.WarpRing[index][3] = warp.RingSquash;
 	}
+	block.Grade[0] = pass.Ungraded ? 0.0f : GradeAmount;
+	block.Grade[1] = GRADE_CONTRAST;
+	block.Grade[2] = GRADE_SATURATION;
+	block.Grade[3] = GRADE_SPLIT;
 	memcpy(mapped.pData, &block, sizeof(block));
 	context->Unmap(ConstantBuffer, 0);
 
@@ -1129,6 +1173,7 @@ bool DX11PostProcessClass::Copy_Through()
 	PassSetup pass;
 	memset(&pass, 0, sizeof(pass));
 	pass.Shader = TargetsAreFloat ? ToneMapShader : PixelShaders[DX11_POST_COPY];
+	pass.Ungraded = true;
 	pass.Source = SceneTarget.Resource;
 	pass.Destination = back_buffer;
 	pass.DestinationWidth = Width;

@@ -360,7 +360,6 @@ void GameLODManager::init(void)
 		TheWritableGlobalData->m_enableDynamicLOD = optionPref.getDynamicLODEnabled();
 		TheWritableGlobalData->m_useFpsLimit = optionPref.getFPSLimitEnabled();
 		TheWritableGlobalData->m_useLightMap = optionPref.getLightmapEnabled();
-		TheWritableGlobalData->m_useCloudMap = optionPref.getCloudShadowsEnabled();
 		TheWritableGlobalData->m_showSoftWaterEdge = optionPref.getSmoothWaterEnabled();
 		TheWritableGlobalData->m_useHeatEffects = optionPref.getUseHeatEffects();
 		TheWritableGlobalData->m_useDrawModuleLOD = optionPref.getExtraAnimationsDisabled();
@@ -585,7 +584,7 @@ void GameLODManager::applyStaticLODLevel(StaticGameLODLevel level)
 			}
 		}
 
-		TheWritableGlobalData->m_useCloudMap=lodInfo->m_useCloudMap;
+		// m_useCloudMap is not the preset's: cloud shadows are a catalog option of their own (OptionsCatalog.cpp)
 		TheWritableGlobalData->m_useLightMap=lodInfo->m_useLightMap;
 		TheWritableGlobalData->m_showSoftWaterEdge=lodInfo->m_showSoftWaterEdge;
 		//Check if shoreline blending mode has changed

@@ -1,0 +1,10 @@
+# Scenarios/spectre_reshoot.txt: the Spectre's whole circle over the Alpine Assault town, from
+# heading 135. Heading -45 (spectre_reaim.txt) put the map edge in the top left of the frame;
+# a 2026-10-14 probe at zoom 2.6 or 2.2 found a straight black band across the top at headings 45,
+# -135 and 135 alike, thinnest at 135 pitch -16, so this one sits closer and steeper.
+
+0     cut        1300 1290 1.9 135 -20
+1     cut        1300 1290 1.9 135 -20
+12    shot
+18    shot
+23    end

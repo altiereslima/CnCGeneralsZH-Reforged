@@ -348,6 +348,25 @@ void Direct3D11_Set_Smoke_Glow(bool glow)
 	}
 }
 
+static bool DrawEffectsAllowed = true;
+
+void Direct3D11_Set_Draw_Effect(unsigned effect, const float parameters[4])
+{
+	if (Active && DrawEffectsAllowed) {
+		Backend.Set_Draw_Effect(effect, parameters);
+	}
+}
+
+bool Direct3D11_Draw_Effects()
+{
+	return Active && DrawEffectsAllowed;
+}
+
+void Direct3D11_Allow_Draw_Effects(bool allowed)
+{
+	DrawEffectsAllowed = allowed;
+}
+
 void Direct3D11_Set_Glow_Draw(bool glow)
 {
 	if (Active) {

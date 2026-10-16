@@ -113,9 +113,9 @@ JetSlowDeathBehaviorModuleData::JetSlowDeathBehaviorModuleData( void )
 		{ "DeathLoopSound", INI::parseAudioEventRTS, NULL, offsetof( JetSlowDeathBehaviorModuleData, m_deathLoopSound ) },
 
 // @todo srj -- RollRate and RollRateDelta and PitchRate should use parseAngularVelocityReal
-		{ "RollRate",	INI::parseReal, NULL, offsetof( JetSlowDeathBehaviorModuleData, m_rollRate ) },
+		{ "RollRate",	INI::parseRetailPerFrameReal, NULL, offsetof( JetSlowDeathBehaviorModuleData, m_rollRate ) },
 		{ "RollRateDelta", INI::parsePercentToReal, NULL, offsetof( JetSlowDeathBehaviorModuleData, m_rollRateDelta ) },
-		{ "PitchRate", INI::parseReal, NULL, offsetof( JetSlowDeathBehaviorModuleData, m_pitchRate ) },
+		{ "PitchRate", INI::parseRetailPerFrameReal, NULL, offsetof( JetSlowDeathBehaviorModuleData, m_pitchRate ) },
 		{ "FallHowFast", INI::parsePercentToReal, NULL, offsetof( JetSlowDeathBehaviorModuleData, m_fallHowFast ) },
 
 		{ 0, 0, 0, 0 }
@@ -256,7 +256,7 @@ UpdateSleepTime JetSlowDeathBehavior::update( void )
 		physics->setRollRate( m_rollRate );
 
 	// adjust the roll rate over time
-	m_rollRate *= modData->m_rollRateDelta;
+	m_rollRate *= ConvertRetailPerFrameFactor( modData->m_rollRateDelta );
 
 	// do effects for death while in the air
 	if( m_timerOnGroundFrame == 0 )
@@ -274,7 +274,7 @@ UpdateSleepTime JetSlowDeathBehavior::update( void )
 		Locomotor *locomotor = ai ? ai->getCurLocomotor() : NULL;
 		if( locomotor )
 		{
-			const Real LIFT_BLEED_PER_FRAME = 0.1f;
+			const Real LIFT_BLEED_PER_FRAME = 1.0f - ConvertRetailPerFrameFactor( 1.0f - 0.1f );
 			const Real MIN_FALL_FRACTION = 0.5f;
 			const Real fallFraction = max( MIN_FALL_FRACTION, modData->m_fallHowFast );
 			const Real fallingLift = -TheGlobalData->m_gravity * (1.0f - fallFraction);

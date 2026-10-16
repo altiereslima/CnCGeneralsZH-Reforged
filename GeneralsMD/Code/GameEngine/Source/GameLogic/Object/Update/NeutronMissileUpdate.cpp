@@ -369,7 +369,14 @@ void NeutronMissileUpdate::doAttack( void )
 	// 
 	// Move forward along forward direction
 	//
-	Real damping = getNeutronMissileUpdateModuleData()->m_forwardDamping;
+	// ForwardDamping is a per-retail-frame lerp toward a top speed of RelativeSpeed / ForwardDamping;
+	// convert both so the top speed and the time to reach it stay what they were at 30 Hz
+	Real retailDamping = getNeutronMissileUpdateModuleData()->m_forwardDamping;
+	Real damping = 1.0f - ConvertRetailPerFrameFactor( 1.0f - retailDamping );
+	if( retailDamping > 0.0f )
+		speed = ConvertRetailPerFrameRate( speed ) * damping / retailDamping;
+	else
+		speed = ConvertRetailPerFrameSquared( speed );
 	m_accel.x = speed * trueDir.X - damping * m_vel.x;
 	m_accel.y = speed * trueDir.Y - damping * m_vel.y;
 	m_accel.z = speed * trueDir.Z - damping * m_vel.z;

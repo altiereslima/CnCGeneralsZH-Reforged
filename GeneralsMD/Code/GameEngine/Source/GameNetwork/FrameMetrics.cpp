@@ -86,14 +86,14 @@ FrameMetrics::~FrameMetrics() {
 }
 
 void FrameMetrics::init() {
-	m_averageFps = 30;
+	m_averageFps = LOGICFRAMES_PER_SECOND;
 	m_averageLatency = (Real)0.2;
 	m_minimumCushion = -1;
 
 	// i is used after the loop; VC6 for-scope let it escape.
 	Int i;
 	for (i = 0; i < TheGlobalData->m_networkFPSHistoryLength; ++i) {
-		m_fpsList[i] = 30.0;
+		m_fpsList[i] = (Real)LOGICFRAMES_PER_SECOND;
 	}
 	m_fpsListIndex = 0;
 	// The fps window has to open on a real time and a real frame.  Left at zero, the first sample

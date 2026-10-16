@@ -167,7 +167,7 @@ static UnsignedInt						s_fireLightsParticles;
 static UnsignedInt						s_fireLightsSystems;
 
 /** One additive system as a point light, if it is bright enough. */
-static void gatherFireLight( ParticleSystem *sys )
+static void gatherFireLight( ParticleSystem *sys, Real fade )
 {
 	Real w = 0.0f, x = 0.0f, y = 0.0f, z = 0.0f, sq = 0.0f;
 	for (Particle *p = sys->getFirstParticle(); p; p = p->m_systemNext)
@@ -202,7 +202,7 @@ static void gatherFireLight( ParticleSystem *sys )
 	fire.reach = reach;
 
 	// fire's own colour, and the strength from how much of the flames there is
-	light.strength = w < FIRE_LIGHT_FULL_WEIGHT ? w / FIRE_LIGHT_FULL_WEIGHT : 1.0f;
+	light.strength = (w < FIRE_LIGHT_FULL_WEIGHT ? w / FIRE_LIGHT_FULL_WEIGHT : 1.0f) * fade;
 	const Real scale = light.strength * FIRE_LIGHT_GAIN;
 	light.r = FIRE_LIGHT_RED * scale;
 	light.g = FIRE_LIGHT_GREEN * scale;
@@ -376,6 +376,22 @@ static inline void lightSmoke( const Coord3D *pos, Real alpha, const SmokeLight 
 	}
 }
 
+/** A particle of a stealthed thing's system, faded by ParticleSystem::getStealthFade, which only
+	* hands a partial fade to additive and alpha blended systems: an additive particle adds less
+	* light, an alpha blended one takes less alpha. */
+static inline void stealthFadeParticle( ParticleSystemInfo::ParticleShaderType type, Real fade,
+	Real &red, Real &green, Real &blue, Real &alpha )
+{
+	if (type == ParticleSystemInfo::ADDITIVE)
+	{
+		red *= fade;
+		green *= fade;
+		blue *= fade;
+	}
+	else
+		alpha *= fade;
+}
+
 /** What every job of one frame's billboard fill reads. */
 struct BillboardFillJob
 {
@@ -407,6 +423,7 @@ static void fillBillboards( Int index, void *context )
 	Int drawn = 0;
 	SmokeLight lights[ SMOKE_LIGHTS_PER_SYSTEM ];
 	const Int lightCount = pickSmokeLights( fill.system, job->lights, job->lightCount, lights );
+	const ParticleSystemInfo::ParticleShaderType shaderType = fill.system->getShaderType();
 
 	for (Particle *p = fill.system->getFirstParticle(); p; p = p->m_systemNext)
 	{
@@ -437,7 +454,10 @@ static void fillBillboards( Int index, void *context )
 				blue = color->blue;
 			}
 		}
-		const unsigned packed = DX8Wrapper::Convert_Color_Clamp( Vector4( red, green, blue, p->getAlpha() ) );
+		Real alpha = p->getAlpha();
+		if (fill.fade < 1.0f)
+			stealthFadeParticle( shaderType, fill.fade, red, green, blue, alpha );
+		const unsigned packed = DX8Wrapper::Convert_Color_Clamp( Vector4( red, green, blue, alpha ) );
 		// The orientation table's index wraps, as it did on Windows (Platform/MsvcFloatCasts.h).
 		const uint8 orientation = floatToByteAsMsvc( p->getAngle() * 255.0f / (2.0f * PI) );
 		PointGroupClass::Write_Billboard( quad, job->view, Vector3( pos->x, pos->y, pos->z ), psize,
@@ -629,8 +649,8 @@ static const Real	FIELD_BUBBLE_GAIN			= 0.6f;
 static const Real	FIELD_COVER						= 2.0f;		///< puddles per (radius / puddle size) squared
 static const Int	FIELD_MAX_PUDDLES			= 48;
 static const Real	FIELD_GAIN						= 0.7f;		///< of the template's brightest colour, a puddle
-static const Int	FIELD_FADE_IN					= 15;			///< logic frames
-static const Int	FIELD_FADE_OUT				= 90;			///< logic frames before the field object dies
+static const Int	FIELD_FADE_IN					= LOGICFRAMES_PER_SECOND / 2;			///< logic frames
+static const Int	FIELD_FADE_OUT				= 3 * LOGICFRAMES_PER_SECOND;			///< logic frames before the field object dies
 static const Int	FIELD_FADE_GONE				= FIELD_FADE_OUT;	///< logic frames, a field fogged over or whose object went early
 static const Real	FIELD_OBJECT_REACH		= 5.0f;		///< how near the field's centre its object stands
 
@@ -663,9 +683,10 @@ struct FieldState
 	RGBColor color;			///< the template's brightest keyframe
 	ParticleSystemInfo::ParticleShaderType shader;
 	AsciiString texture;
+	Real stealth;				///< ParticleSystem::getStealthFade of the last system seen at it
 };
 
-static const Int	FIELD_GRACE						= 30;			///< logic frames a field with no object outlives its systems
+static const Int	FIELD_GRACE						= LOGICFRAMES_PER_SECOND;			///< logic frames a field with no object outlives its systems
 static const Real	FIELD_STACK						= 2.5f;		///< puddles' worth of cover a spot may add up to
 static const Real	FIELD_SATURATE				= 0.6f;		///< share of the weakest channel taken out of the colour
 
@@ -845,6 +866,7 @@ static Int collectGroundFields( ParticleSystemManager::ParticleSystemList &syste
 			state.radius = WWMath::Max( state.radius, radius );
 			state.particleEnd = WWMath::Max( state.particleEnd, now + life );
 		}
+		st->second.stealth = sys->getStealthFade();
 	}
 
 	Int laid = 0;
@@ -855,15 +877,17 @@ static Int collectGroundFields( ParticleSystemManager::ParticleSystemList &syste
 
 		// Kept while its systems are, even faded out: the systems outlive the object by a few
 		// seconds, and a field forgotten under them would be found again as a new one.
-		const Real fade = fieldFade( state, now );
+		const Real lifeFade = fieldFade( state, now );
 		const Bool stale = now - state.seen > FIELD_GRACE;
-		if ((stale && fade <= 0.0f) || now < state.seen)
+		if ((stale && lifeFade <= 0.0f) || now < state.seen)
 		{
 			// out, or a frame count from before a load
 			s_fieldStates.erase( st++ );
 			continue;
 		}
 		++st;
+		// a field on a stealthed thing goes with it, as its other particles do
+		const Real fade = lifeFade * state.stealth;
 		if (fade <= 0.0f)
 			continue;
 
@@ -1243,6 +1267,10 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 		if (particles == 0)
 			continue;
 
+		fill.fade = sys->getStealthFade();
+		if (fill.fade <= 0.0f)
+			continue;
+
 		fill.system = sys;
 		fill.capacity = (particles < (Int)MAX_POINTS_PER_GROUP) ? particles : (Int)MAX_POINTS_PER_GROUP;
 		fill.fieldIncrement = ( sys->getPriority() == AREA_EFFECT && sys->m_isGroundAligned != FALSE ) ? 1 : 0;
@@ -1277,7 +1305,12 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 				ParticleSystem *sys = *it;
 				if (sys && !sys->isUsingDrawables() && sys->getShaderType() == ParticleSystemInfo::ADDITIVE
 						&& sys->getParticleCount() > 0)
-					gatherFireLight( sys );
+				{
+					// a hidden fire lights nothing, an own stealthed one only as much as it shows
+					const Real fade = sys->getStealthFade();
+					if (fade > 0.0f)
+						gatherFireLight( sys, fade );
+				}
 			}
 			s_fireLightsValid = TRUE;
 			s_fireLightsFrame = m_lastLogicFrameUpdate;
@@ -1316,6 +1349,11 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 		if (sys->isUsingDrawables())
 			continue;
 
+		// the same answer the billboard reservation above had, so a skipped system is skipped here too
+		const Real fade = sys->getStealthFade();
+		if (fade <= 0.0f)
+			continue;
+
 		//temporary hack that checks if texture name starts with "SMUD" - if so, we can assume it's a smudge type
 		if (/*sys->isUsingSmudge()*/ *((UnsignedInt *)sys->getParticleTypeName().str()) == 0x44554D53)
 		{
@@ -1345,7 +1383,7 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 					// for both - now that it reads .Y, a heat smudge pulled twice as far sideways.
 					smudge->m_offset.Set( GameClientRandomValueReal(-0.06f,0.06f), GameClientRandomValueReal(-0.06f,0.06f) );
 					smudge->m_size = psize;
-					smudge->m_opacity = p->getAlpha();
+					smudge->m_opacity = p->getAlpha() * fade;
 					visibleSmudgeCount++;
 				}
 			}
@@ -1422,7 +1460,9 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 			RGBAArray[count].W = p->getAlpha();
 			if (lightCount > 0)
 				lightSmoke( pos, RGBAArray[count].W, lights, lightCount, RGBAArray[count].X, RGBAArray[count].Y, RGBAArray[count].Z );
-		
+			if (fade < 1.0f)
+				stealthFadeParticle( sys->getShaderType(), fade, RGBAArray[count].X, RGBAArray[count].Y, RGBAArray[count].Z, RGBAArray[count].W );
+
 			angleArray[count] = floatToByteAsMsvc( p->getAngle() * 255.0f / (2.0f * PI) );
 			
 			if (++count == MAX_POINTS_PER_GROUP)

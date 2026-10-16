@@ -34,9 +34,12 @@
 
 #include "Common/StateMachine.h"
 #include "Common/GameMemory.h"
+#include "Common/GameCommon.h"
 
-const Real DEFAULT_TURN_RATE = 0.01f;
-const Real DEFAULT_PITCH_RATE = 0.01f;
+// radians a frame for a turret whose INI names no TurretTurnRate or TurretPitchRate; EA's 0.01 was a
+// retail (30 Hz) frame's, and left as it was every such barrel rose twice as fast at 60 Hz
+const Real DEFAULT_TURN_RATE = ConvertRetailPerFrameRate(0.01f);
+const Real DEFAULT_PITCH_RATE = ConvertRetailPerFrameRate(0.01f);
 
 /** 
  * The TurretAI state IDs.

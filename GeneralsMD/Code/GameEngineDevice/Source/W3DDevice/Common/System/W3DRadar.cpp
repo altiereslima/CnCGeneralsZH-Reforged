@@ -66,30 +66,7 @@
 
 
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
-enum { OVERLAY_REFRESH_RATE = 6 };  ///< over updates once this many frames
-
-//
-// The lobby map preview has marked the money with a dollar coin and the tech buildings with a star
-// since 2003 (`W3DControlBar.cpp`, "Cash" and "TecBuilding"), so the radar marks them with the same
-// two images and a player who has read the preview needs to learn nothing.
-//
-static const char *const LANDMARK_SUPPLY_IMAGE_NAME = "Cash";
-static const char *const LANDMARK_CAPTURE_IMAGE_NAME = "TecBuilding";
-
-//
-// The preview draws them at SUPPLY_TECH_SIZE, in a window several times the size of the radar.
-// Scaled to the radar, the same icon covers a fifth of the map, so it is sized against the radar
-// and clamped: below the minimum a dollar sign is a smudge, above the preview's own size there is
-// no more detail in the image to show.
-//
-enum { LANDMARK_ICON_RADAR_DIVISOR = 20 };
-enum { LANDMARK_ICON_MIN_SIZE = 9 };
-
-//
-// A supply dock is eight piles standing together and an icon is about six radar cells across, so
-// landmarks of one kind within this many cells of each other are drawn as the one place they are.
-//
-enum { LANDMARK_MERGE_CELLS = 6 };
+enum { OVERLAY_REFRESH_RATE = 6 * LOGICFRAMES_PER_RETAIL_FRAME };  ///< over updates once this many frames
 
 //-------------------------------------------------------------------------------------------------
 /** Is the point legal, that is, inside the resolution of the radar cells */
@@ -298,125 +275,6 @@ void W3DRadar::drawHeroIcon( Int pixelX, Int pixelY, Int width, Int height, cons
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Draw one landmark marker with the lobby preview's own icon: the dollar over the money, the star
-	* over a building somebody can walk into and take.  This runs after the shroud image, so the
-	* marker stays readable over ground the player has never been to. */
-//-------------------------------------------------------------------------------------------------
-void W3DRadar::drawLandmarkIcon( Int pixelX, Int pixelY, Int width, Int height,
-																 const RadarLandmark& landmark )
-{
-	static const Image *supplyImage =
-		TheMappedImageCollection->findImageByName( LANDMARK_SUPPLY_IMAGE_NAME );
-	static const Image *captureImage =
-		TheMappedImageCollection->findImageByName( LANDMARK_CAPTURE_IMAGE_NAME );
-
-	const Image *image = (landmark.type == RADAR_LANDMARK_SUPPLY) ? supplyImage : captureImage;
-	if( image == NULL )
-		return;
-
-	Int iconSize = width / LANDMARK_ICON_RADAR_DIVISOR;
-	if( iconSize < LANDMARK_ICON_MIN_SIZE )
-		iconSize = LANDMARK_ICON_MIN_SIZE;
-	if( iconSize > SUPPLY_TECH_SIZE )
-		iconSize = SUPPLY_TECH_SIZE;
-
-	// convert world to radar coords, then radar coords to the screen
-	ICoord2D radarPoint;
-	radarPoint.x = landmark.position.x / (m_mapExtent.width() / RADAR_CELL_WIDTH);
-	radarPoint.y = landmark.position.y / (m_mapExtent.height() / RADAR_CELL_HEIGHT);
-
-	ICoord2D screenPoint;
-	radarToPixel( &radarPoint, &screenPoint, pixelX, pixelY, width, height );
-
-	//
-	// centre the icon on the blip and keep the whole of it inside the radar image, so one standing
-	// at the edge of the map does not spill onto the HUD frame around it
-	//
-	Int left = screenPoint.x - (iconSize / 2);
-	Int top = screenPoint.y - (iconSize / 2);
-	const Int rightLimit = pixelX + width - iconSize;
-	const Int bottomLimit = pixelY + height - iconSize;
-
-	if( left < pixelX )
-		left = pixelX;
-	if( left > rightLimit )
-		left = rightLimit;
-	if( top < pixelY )
-		top = pixelY;
-	if( top > bottomLimit )
-		top = bottomLimit;
-
-	TheDisplay->drawImage( image, left, top, left + iconSize, top + iconSize );
-
-}  // end drawLandmarkIcon
-
-//-------------------------------------------------------------------------------------------------
-/** Collect the landmarks out of one radar object list.  Ground the player has never been to keeps
-	* its markers to itself: a dollar sign over unexplored country is a scouting report nobody paid
-	* for.  Once a place has been seen, its marker stays through the fog, because a supply pile and
-	* an oil derrick do not walk away. */
-//-------------------------------------------------------------------------------------------------
-void W3DRadar::collectLandmarks( const RadarObject *listHead )
-{
-	const Int localPlayerIndex = TheObserverCamera.getShroudPlayerIndex();
-
-	for( const RadarObject *rObj = listHead; rObj; rObj = rObj->friend_getNext() )
-	{
-
-		const Object *obj = rObj->friend_getObject();
-		const RadarLandmarkType type = Radar::landmarkTypeOf( obj );
-		if( type == RADAR_LANDMARK_NONE )
-			continue;
-
-		if( obj->getShroudedStatus( localPlayerIndex ) >= OBJECTSHROUD_SHROUDED )
-			continue;
-
-		RadarLandmark landmark;
-		landmark.position = *obj->getPosition();
-		landmark.type = type;
-
-		//
-		// A supply dock is eight piles standing together, and eight dollar signs on top of each
-		// other is a smear rather than a place.  One marker per spot: anything of the same kind
-		// this close is the same spot, and the radar has no room to say otherwise.
-		//
-		const Real mergeX = m_xSample * LANDMARK_MERGE_CELLS;
-		const Real mergeY = m_ySample * LANDMARK_MERGE_CELLS;
-		Bool alreadyMarked = FALSE;
-		for( std::list<RadarLandmark>::const_iterator marked = m_cachedLandmarkList.begin();
-				 marked != m_cachedLandmarkList.end(); ++marked )
-		{
-
-			if( marked->type == landmark.type &&
-					fabs( marked->position.x - landmark.position.x ) < mergeX &&
-					fabs( marked->position.y - landmark.position.y ) < mergeY )
-			{
-				alreadyMarked = TRUE;
-				break;
-			}
-
-		}  // end for
-
-		if( alreadyMarked == FALSE )
-			m_cachedLandmarkList.push_back( landmark );
-
-	}  // end for
-
-}  // end collectLandmarks
-
-//-------------------------------------------------------------------------------------------------
-/** Rebuild the landmark cache from both object lists */
-//-------------------------------------------------------------------------------------------------
-void W3DRadar::cacheLandmarks( void )
-{
-
-	m_cachedLandmarkList.clear();
-	collectLandmarks( getObjectList() );
-	collectLandmarks( getLocalObjectList() );
-
-}  // end cacheLandmarks
-
-//-------------------------------------------------------------------------------------------------
 /** Draw a "box" into the texture passed in that represents the viewable area for
 	* the tactical display into the game world */
 //-------------------------------------------------------------------------------------------------
@@ -426,24 +284,6 @@ void W3DRadar::drawViewBox( Int pixelX, Int pixelY, Int width, Int height )
 	ICoord2D ulRadar;
 	Coord3D ulWorld;
 	ICoord2D ulStart = { 0, 0 };
-	ICoord2D start, end;
-	ICoord2D clipStart, clipEnd;
-	Real lineWidth = 1.0f;
-	Color topColor = GameMakeColor( 225, 225, 0, 255 );
-	Color bottomColor = GameMakeColor( 158, 158, 0, 255 );
-
-	//
-	// setup the clipping region ... note that this clipping region is not over just the
-	// radar image area ... it's in the WHOLE window available for the radar
-	//
-	IRegion2D clipRegion;
-	ICoord2D radarWindowSize, radarWindowScreenPos;
-	m_radarWindow->winGetSize( &radarWindowSize.x, &radarWindowSize.y );
-	m_radarWindow->winGetScreenPosition( &radarWindowScreenPos.x, &radarWindowScreenPos.y );
-	clipRegion.lo.x = radarWindowScreenPos.x;
-	clipRegion.lo.y = radarWindowScreenPos.y;
-	clipRegion.hi.x = radarWindowScreenPos.x + radarWindowSize.x;
-	clipRegion.hi.y = radarWindowScreenPos.y + radarWindowSize.y;
 
 	// convert top left of screen into world position
 	TheTacticalView->getOrigin( &ulScreen.x, &ulScreen.y );
@@ -468,42 +308,50 @@ void W3DRadar::drawViewBox( Int pixelX, Int pixelY, Int width, Int height )
 	// (upper left, upper right, lower right, lower left)
 	//
 	ICoord2D radar;
-
-	// top line
-	start = ulStart;
-	radar.x = ulRadar.x + m_viewBox[ 1 ].x;
-	radar.y = ulRadar.y + m_viewBox[ 1 ].y;
-	radarToPixel( &radar, &end, pixelX, pixelY, width, height );
-	if( ClipLine2D( &start, &end, &clipStart, &clipEnd, &clipRegion ) )
-		TheDisplay->drawLine( clipStart.x, clipStart.y, clipEnd.x, clipEnd.y,
-													lineWidth, topColor );
-
-  // right line
-	start = end;
-	radar.x += m_viewBox[ 2 ].x;
-	radar.y += m_viewBox[ 2 ].y;
-	radarToPixel( &radar, &end, pixelX, pixelY, width, height );
-	if( ClipLine2D( &start, &end, &clipStart, &clipEnd, &clipRegion ) )
-		TheDisplay->drawLine( clipStart.x, clipStart.y, clipEnd.x, clipEnd.y,
-													lineWidth, topColor, bottomColor );
-
-  // bottom line
-	start = end;
-	radar.x += m_viewBox[ 3 ].x;
-	radar.y += m_viewBox[ 3 ].y;
-	radarToPixel( &radar, &end, pixelX, pixelY, width, height );
-	if( ClipLine2D( &start, &end, &clipStart, &clipEnd, &clipRegion ) )
-		TheDisplay->drawLine( clipStart.x, clipStart.y, clipEnd.x, clipEnd.y,
-													lineWidth, bottomColor );
-
-  // left line
-	start = end;
-	end = ulStart;
-	if( ClipLine2D( &start, &end, &clipStart, &clipEnd, &clipRegion ) )
-		TheDisplay->drawLine( clipStart.x, clipStart.y, clipEnd.x, clipEnd.y,
-													lineWidth, bottomColor, topColor );
+	ICoord2D corners[ 4 ];
+	corners[ 0 ] = ulStart;
+	radar = ulRadar;
+	for( Int corner = 1; corner < 4; corner++ )
+	{
+		radar.x += m_viewBox[ corner ].x;
+		radar.y += m_viewBox[ corner ].y;
+		radarToPixel( &radar, &corners[ corner ], pixelX, pixelY, width, height );
+	}
+	drawBoxLines( corners );
 
 }  // end drawViewBox
+
+//-------------------------------------------------------------------------------------------------
+/** The view box's four lines through corners in pixels, upper left, upper right, lower right and
+	* lower left, clipped to the whole window available for the radar and not just its image */
+//-------------------------------------------------------------------------------------------------
+void W3DRadar::drawBoxLines( const ICoord2D *corners )
+{
+	const Real lineWidth = 1.0f;
+	const Color topColor = GameMakeColor( 225, 225, 0, 255 );
+	const Color bottomColor = GameMakeColor( 158, 158, 0, 255 );
+	// each line's colour at its start and its end: the top light, the bottom dark, the sides between
+	const Color fromColor[ 4 ] = { topColor, topColor, bottomColor, bottomColor };
+	const Color toColor[ 4 ] = { topColor, bottomColor, bottomColor, topColor };
+
+	IRegion2D clipRegion;
+	ICoord2D radarWindowSize, radarWindowScreenPos;
+	m_radarWindow->winGetSize( &radarWindowSize.x, &radarWindowSize.y );
+	m_radarWindow->winGetScreenPosition( &radarWindowScreenPos.x, &radarWindowScreenPos.y );
+	clipRegion.lo.x = radarWindowScreenPos.x;
+	clipRegion.lo.y = radarWindowScreenPos.y;
+	clipRegion.hi.x = radarWindowScreenPos.x + radarWindowSize.x;
+	clipRegion.hi.y = radarWindowScreenPos.y + radarWindowSize.y;
+
+	for( Int line = 0; line < 4; line++ )
+	{
+		ICoord2D start = corners[ line ];
+		ICoord2D end = corners[ ( line + 1 ) % 4 ];
+		ICoord2D clipStart, clipEnd;
+		if( ClipLine2D( &start, &end, &clipStart, &clipEnd, &clipRegion ) )
+			TheDisplay->drawLine( clipStart.x, clipStart.y, clipEnd.x, clipEnd.y, lineWidth, fromColor[ line ], toColor[ line ] );
+	}
+}
 
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
@@ -744,14 +592,6 @@ void W3DRadar::drawEvents( Int pixelX, Int pixelY, Int width, Int height )
 //-------------------------------------------------------------------------------------------------
 void W3DRadar::drawIcons( Int pixelX, Int pixelY, Int width, Int height )
 {
-	// draw the money and the buildings worth capturing, under the heroes and over the shroud
-	std::list<RadarLandmark>::const_iterator landmark = m_cachedLandmarkList.begin();
-	while (landmark != m_cachedLandmarkList.end())
-	{
-		drawLandmarkIcon( pixelX, pixelY, width, height, *landmark );
-		++landmark;
-	}
-
 	// draw the hero icons
 	std::list<Coord3D>::const_iterator iter = m_cachedHeroPosList.begin();
 	while (iter != m_cachedHeroPosList.end())
@@ -1132,7 +972,6 @@ void W3DRadar::reset( void )
 	}
 
 	// the objects those positions belonged to are gone with the match that had them
-	m_cachedLandmarkList.clear();
 	m_cachedHeroPosList.clear();
 
 	// don't call Clear(); that wips to transparent. do this instead.
@@ -1560,9 +1399,6 @@ void W3DRadar::draw( Int pixelX, Int pixelY, Int width, Int height )
 		renderObjectList( getObjectList(), m_overlayTexture );
 		renderObjectList( getLocalObjectList(), m_overlayTexture, TRUE );
 
-		// and the landmarks the icon pass draws on top of the shroud
-		cacheLandmarks();
-
 	}  // end if
 
 	// draw the overlay image
@@ -1603,7 +1439,8 @@ void W3DRadar::draw( Int pixelX, Int pixelY, Int width, Int height )
 	if( m_reconstructViewBox )
 		reconstructViewBox();
 
-	// draw the view region on top of the radar reconstructing if necessary
+	// draw the view region on top of the radar reconstructing if necessary.  -directorrecord draws no
+	// radar while its panes are up, so there is one view to box
 	drawViewBox( ul.x, ul.y, scaledWidth, scaledHeight );
 
 }  // end draw

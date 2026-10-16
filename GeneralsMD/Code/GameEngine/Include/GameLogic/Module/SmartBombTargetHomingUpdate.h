@@ -43,7 +43,7 @@ public:
 
 	SmartBombTargetHomingUpdateModuleData()
 	{
-		m_courseCorrectionScalar = 0.99f;
+		m_courseCorrectionScalar = ConvertRetailPerFrameFactor( 0.99f );
 	}
 
 	static void buildFieldParse(MultiIniFieldParse& p) 
@@ -51,7 +51,7 @@ public:
     UpdateModuleData::buildFieldParse(p);
 		static const FieldParse dataFieldParse[] = 
 		{
-			{ "CourseCorrectionScalar",	INI::parseReal,		NULL, offsetof( SmartBombTargetHomingUpdateModuleData, m_courseCorrectionScalar ) },
+			{ "CourseCorrectionScalar",	INI::parseRetailPerFrameFactorReal,		NULL, offsetof( SmartBombTargetHomingUpdateModuleData, m_courseCorrectionScalar ) },
 			{ 0, 0, 0, 0 }
 		};
     p.add(dataFieldParse);

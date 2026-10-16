@@ -33,8 +33,9 @@
  * push, the frame counter moves on.  It returns one line: the hash of every point's bits after every
  * frame, the last frame's own hash, and how many of the frames ended with the mesh in motion.
  *
- * The gravity is the shipped one: GameData.ini's Gravity = -64.0, converted per logic frame as
- * INI::parseAccelerationReal does (test_water_grid checks that against the engine's own conversion).
+ * The gravity is the shipped one: GameData.ini's Gravity = -64.0, converted per 30 Hz frame, the rate
+ * the original ran at. The engine's INI::parseAccelerationReal now converts per 60 Hz frame, a quarter
+ * of this, which test_water_grid checks.
  */
 #ifndef WATER_GRID_SCENARIO_H
 #define WATER_GRID_SCENARIO_H

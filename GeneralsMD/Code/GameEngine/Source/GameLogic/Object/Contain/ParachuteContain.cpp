@@ -394,10 +394,12 @@ UpdateSleepTime ParachuteContain::update( void )
 
 			if (m_opened)
 			{
-				const Real PITCH_STIFFNESS = locomotor->getPitchStiffness();
-				const Real ROLL_STIFFNESS =  locomotor->getRollStiffness();
-				const Real PITCH_DAMPING = locomotor->getPitchDamping() + altitudeDamping;
-				const Real ROLL_DAMPING = locomotor->getRollDamping() + altitudeDamping;
+				// the locomotor's spring numbers and LowAltitudeDamping are retail per-frame values: the
+				// spring is an acceleration, the damping a fraction of the rate taken off every frame
+				const Real PITCH_STIFFNESS = ConvertRetailPerFrameSquared(locomotor->getPitchStiffness());
+				const Real ROLL_STIFFNESS =  ConvertRetailPerFrameSquared(locomotor->getRollStiffness());
+				const Real PITCH_DAMPING = 1.0f - ConvertRetailPerFrameFactor(1.0f - (locomotor->getPitchDamping() + altitudeDamping));
+				const Real ROLL_DAMPING = 1.0f - ConvertRetailPerFrameFactor(1.0f - (locomotor->getRollDamping() + altitudeDamping));
 				m_pitchRate += ((-PITCH_STIFFNESS * m_pitch) + (-PITCH_DAMPING * m_pitchRate));		// spring/damper
 				m_rollRate += ((-ROLL_STIFFNESS * m_roll) + (-ROLL_DAMPING * m_rollRate));		// spring/damper
 

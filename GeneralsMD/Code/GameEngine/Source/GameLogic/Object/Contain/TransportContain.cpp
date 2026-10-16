@@ -466,6 +466,7 @@ void TransportContain::createPayload()
 			else
 			{
 				DEBUG_CRASH( ( "DeliverPayload: PutInContainer %s is full, or not valid for the payload %s!", object->getName().str(), self->m_initialPayload.name.str() ) );
+				TheGameLogic->destroyObject( payload );
 			}
 		}
 		contain->enableLoadSounds( TRUE );

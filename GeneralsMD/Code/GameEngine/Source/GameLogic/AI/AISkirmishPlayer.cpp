@@ -34,13 +34,17 @@
 #include "Common/GlobalData.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
-#include "Common/Team.h" 
+#include "Common/PlayerTemplate.h"
+#include "Common/Team.h"
 #include "Common/ThingFactory.h"
 #include "Common/BuildAssistant.h"
 #include "Common/SpecialPower.h"
 #include "Common/ThingTemplate.h"
 #include "Common/WellKnownKeys.h"
 #include "Common/Xfer.h"
+#include "Common/Recorder.h"
+#include "GameClient/InGameUI.h"
+#include "GameLogic/VictoryConditions.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/AISkirmishPlayer.h"
@@ -81,11 +85,23 @@ m_curLeftFlankRightDefenseAngle(0),
 m_curRightFlankLeftDefenseAngle(0),
 m_curRightFlankRightDefenseAngle(0),
 m_frameToCheckEnemy(0),
-m_currentEnemy(NULL)
+m_currentEnemy(NULL),
+m_hopelessSinceFrame(0),
+m_surrenderFrame(0)
 
 {
 	m_frameLastBuildingBuilt = TheGameLogic->getFrame();
 	p->setCanBuildUnits(true); // turn on ai production by default.
+
+	//
+	// Role is rolled once and kept for the whole match.  Sins is explicit that its AI does not flip
+	// personality mid-game, and that consistency is what makes an opponent readable and therefore
+	// counterable - an AI that turtles for ten minutes and then rushes is not deep, it is noise.
+	// GameLogicRandomValue, so a replay rolls the same one.  Rolled here rather than in AIPlayer's
+	// constructor so a Challenge or mission opponent leaves the logic random stream as retail did;
+	// nothing between the two constructors draws, so a skirmish rolls on the same draw as before.
+	//
+	m_role = (GameLogicRandomValue( 0, AIROLE_COUNT - 1 ) == 0) ? AIROLE_AGGRESSIVE : AIROLE_DEFENSIVE;
 }
 
 AISkirmishPlayer::~AISkirmishPlayer()
@@ -115,6 +131,11 @@ void AISkirmishPlayer::processBaseBuilding( void )
 		Bool isPriority = false;
 		const Bool rushBigGuns = getSkillProfile()->m_economyBuildings;
 		Bool rushTaken = false;
+		// With the purchase queue the priority entries are taken by its score, the first of the best in
+		// list order, so an early drop zone does not wait behind the scripts' bunkers.
+		const Bool byScore = purchaseQueueOn();
+		const Bool earlyGame = TheGameLogic->getFrame() < AI_PURCHASE_EARLY_FRAMES;
+		Int bldgScore = 0;
 		Object *bldg = NULL;
 		const ThingTemplate *powerPlan=NULL;
 		BuildListInfo	*powerInfo = NULL;
@@ -228,7 +249,9 @@ void AISkirmishPlayer::processBaseBuilding( void )
 			// of an outage waited 45 seconds in that queue and the base went dark before it was started.
 			const Bool rushThis = rushBigGuns && (curPlan->isKindOf(KINDOF_FS_SUPERWEAPON) || curPlan->isKindOf(KINDOF_FS_ADVANCED_TECH) ||
 				(powerThin && curPlan->isKindOf(KINDOF_FS_POWER) && !curPlan->isKindOf(KINDOF_CASH_GENERATOR)));
-			const Bool couldBePriority = info->isPriorityBuild() && (!isPriority || (rushThis && !rushTaken)) && m_player->canBuild(curPlan);
+			const Int planScore = byScore ? aiPurchaseScore(purchaseKindOf(curPlan), earlyGame) : 0;
+			const Bool couldBePriority = info->isPriorityBuild() &&
+				(!isPriority || (rushThis && !rushTaken) || planScore > bldgScore) && m_player->canBuild(curPlan);
 			const Bool couldBePower = powerPlan==NULL && curPlan->isKindOf(KINDOF_FS_POWER) &&
 				!curPlan->isKindOf(KINDOF_CASH_GENERATOR) && (isUnderPowered || info->isAutomaticBuild());
 			const Bool couldBeBuilt = bldgPlan==NULL && info->isAutomaticBuild() && info->isBuildable();
@@ -248,6 +271,7 @@ void AISkirmishPlayer::processBaseBuilding( void )
 				bldgInfo = info;
 				isPriority = true;
 				rushTaken = rushThis;
+				bldgScore = planScore;
 			}
 			if (curPlan->isKindOf(KINDOF_FS_POWER)) {
 				if (powerPlan==NULL && !curPlan->isKindOf(KINDOF_CASH_GENERATOR)) {
@@ -377,7 +401,7 @@ Bool AISkirmishPlayer::startTraining( WorkOrder *order, Bool busyOK, AsciiString
 	if( factory )
 	{
 		ProductionUpdateInterface *pu = factory->getProductionUpdateInterface();
-		if (pu && pu->queueCreateUnit( order->m_thing, pu->requestUniqueUnitID() )) {
+		if (pu && buyUnit( pu, order->m_thing, purchaseKindOf( order->m_thing ) )) {
 			order->m_factoryID = factory->getID(); 
 			if (TheGlobalData->m_debugAI) {
 				AsciiString teamStr = "Queuing ";
@@ -667,14 +691,10 @@ Player *AISkirmishPlayer::getAiEnemy(void)
 */
 void AISkirmishPlayer::buildAIBaseDefense(Bool flank)
 {
-	const AISideInfo *resInfo = TheAI->getAiData()->m_sideInfo;
+	const AISideInfo *resInfo = TheAI->getAiData()->findSideInfo( m_player );
 	AsciiString defenseTemplateName;
-	while (resInfo) {
-		if (resInfo->m_side == m_player->getSide()) {
-			defenseTemplateName = resInfo->m_baseDefenseStructure1;
-			break;
-		}
-		resInfo = resInfo->m_next;
+	if (resInfo) {
+		defenseTemplateName = resInfo->m_baseDefenseStructure1;
 	}
 	// the data names one defence per side, so a script asking for ten got ten of it: the side's mix
 	// comes off a dozer's buttons instead, and the data's choice stands in when no dozer is left
@@ -1088,6 +1108,120 @@ void AISkirmishPlayer::doTeamBuilding( void )
 void AISkirmishPlayer::update( void )
 {
 	AIPlayer::update();
+	doSurrender();
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** What a player is worth on the field: the build cost of everything alive he owns, and how many of
+	* it can put a building up. */
+struct SurrenderTally
+{
+	Int64 value;		// an Unlimited bank alone is 10 million, and the check multiplies by 100
+	Int builders;
+};
+
+static void tallyForSurrender( Object *obj, void *userData )
+{
+	if( obj->isEffectivelyDead() )
+		return;
+	SurrenderTally *tally = (SurrenderTally *)userData;
+	tally->value += obj->getTemplate()->friend_getBuildCost();
+	if( obj->isKindOf( KINDOF_DOZER ) )
+		++tally->builders;
+}
+
+/// The bank counts toward worth, except an Unlimited one: every side holds the same bottomless 10
+/// million there, which would bury the field in the comparison and never let anyone fall behind.
+static Int64 bankForSurrender( Player *player )
+{
+	const Money *money = player->getMoney();
+	return money->isUnlimited() ? 0 : money->countMoney();
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * Give up the way a person does when the match is gone: say GG, and a moment later surrender, handing
+ * whatever is left to a living ally.  Lost means one of two things, held for a while so a dip in a
+ * fight or a base being rebuilt does not count:
+ *   - nothing left that builds and nothing that could put a builder back up, while behind on worth;
+ *   - worth (build cost of everything alive, plus the bank unless it is Unlimited) a small fraction of the strongest
+ *     living enemy's.
+ * Easy gives up soonest, Hard fights longest.  Only in skirmish and multiplayer, and their replays:
+ * a mission or Challenge opponent belongs to its script.  Every input is logic state, so every
+ * machine and the replay say GG on the same frame; the chat line is a write to the client.
+ */
+void AISkirmishPlayer::doSurrender( void )
+{
+	if( m_player->isPlayerDead() )
+		return;
+
+	const UnsignedInt now = TheGameLogic->getFrame();
+	if( m_surrenderFrame != 0 )
+	{
+		if( now >= m_surrenderFrame )
+		{
+			DEBUG_LOG(( "AI SURRENDER player %d frame %u\n", (Int)m_player->getPlayerIndex(), now ));
+			m_player->surrender( TRUE );
+		}
+		return;
+	}
+
+	// Every five seconds, players a few frames apart.
+	const UnsignedInt CHECK_FRAMES = 5 * LOGICFRAMES_PER_SECOND;
+	if( (now + 7 * (UnsignedInt)m_player->getPlayerIndex()) % CHECK_FRAMES != 0 )
+		return;
+	if( !TheRecorder->isMultiplayer() || !m_player->isPlayableSide() )
+		return;
+
+	// Easy, Medium, Hard.
+	static const Int EARLIEST_MINUTE[ DIFFICULTY_COUNT ] = { 6, 8, 10 };	// never before this
+	static const Int WORTH_PERCENT[ DIFFICULTY_COUNT ]   = { 20, 12, 8 };	// of the strongest enemy's
+	static const Int HOLD_SECONDS[ DIFFICULTY_COUNT ]    = { 30, 45, 60 };	// lost this long before GG
+	const Int difficulty = getAIDifficulty();
+
+	if( now < (UnsignedInt)( EARLIEST_MINUTE[ difficulty ] * 60 * LOGICFRAMES_PER_SECOND ) )
+		return;
+
+	SurrenderTally mine = { 0, 0 };
+	m_player->iterateObjects( tallyForSurrender, &mine );
+	mine.value += bankForSurrender( m_player );
+
+	Int64 strongestEnemy = 0;
+	for( Int i = 0; i < ThePlayerList->getPlayerCount(); ++i )
+	{
+		Player *other = ThePlayerList->getNthPlayer( i );
+		if( other == m_player || !other->isPlayableSide() || other->isPlayerObserver() )
+			continue;
+		if( m_player->getRelationship( other->getDefaultTeam() ) != ENEMIES )
+			continue;
+		if( TheVictoryConditions->hasSinglePlayerBeenDefeated( other ) )
+			continue;
+		SurrenderTally theirs = { 0, 0 };
+		other->iterateObjects( tallyForSurrender, &theirs );
+		theirs.value += bankForSurrender( other );
+		if( theirs.value > strongestEnemy )
+			strongestEnemy = theirs.value;
+	}
+
+	const Bool cannotRebuild = !m_player->hasAnyBuildFacility() && mine.builders == 0 && mine.value < strongestEnemy;
+	const Bool outweighed = mine.value * 100 < strongestEnemy * WORTH_PERCENT[ difficulty ];
+	if( !cannotRebuild && !outweighed )
+	{
+		m_hopelessSinceFrame = 0;
+		return;
+	}
+	if( m_hopelessSinceFrame == 0 )
+	{
+		m_hopelessSinceFrame = now;
+		return;
+	}
+	if( now - m_hopelessSinceFrame < (UnsignedInt)( HOLD_SECONDS[ difficulty ] * LOGICFRAMES_PER_SECOND ) )
+		return;
+
+	DEBUG_LOG(( "AI GG player %d frame %u worth %lld enemy %lld rebuild %d\n", (Int)m_player->getPlayerIndex(),
+		now, (long long)mine.value, (long long)strongestEnemy, (Int)!cannotRebuild ));
+	TheInGameUI->chatMessage( m_player, UnicodeString( u"GG" ) );
+	m_surrenderFrame = now + 2 * LOGICFRAMES_PER_SECOND;
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -1212,20 +1346,36 @@ void AISkirmishPlayer::adjustBuildList(BuildListInfo *list)
  */
 void AISkirmishPlayer::newMap( void )
 {
+	// what the setup handed out over the default, which doSpending spends as it would a hoard
+	m_startFortune = (Int)m_player->getMoney()->countMoney() - (Int)TheGlobalData->m_defaultStartingCash.countMoney();
+	if( m_startFortune < 0 )
+		m_startFortune = 0;
 
 	/* Get our proper build list. */
 	AsciiString mySide = m_player->getSide();
 	DEBUG_LOG(("AI Player side is %s\n", mySide.str()));
-	const AISideBuildList *build = TheAI->getAiData()->m_sideBuildLists;
-	while (build) {
-		if (build->m_side == mySide) {
-			BuildListInfo *buildList = build->m_buildList->duplicate();
-			adjustBuildList(buildList); // adjust to  our start position.
-			m_player->setBuildList(buildList);
-			computeCenterAndRadiusOfBase(&m_baseCenter, &m_baseRadius);
-			break;
+	// -modfactions: a mod faction's own mod's list ("M<n>~America", its AIData.ini), retail's of the side without one
+	const PlayerTemplate *pt = m_player->getPlayerTemplate();
+	const Int mod = pt != NULL ? pt->getModIndex() : -1;	// no template: a map whose faction is gone
+	const AISideBuildList *build = TheAI->getAiData()->findBuildList( mySide, mod );
+	if (build) {
+		BuildListInfo *buildList = build->m_buildList->duplicate();
+		// a mod without a list of its own gets retail's, read as the mod's own building of each name
+		// where the mod has one.  Before this its command center was torn down below and put back as
+		// retail's.
+		const Bool retailList = mod >= 0 && build->m_side == mySide;
+		for (BuildListInfo *info = buildList; retailList && info != NULL; info = info->getNext())
+		{
+			AsciiString modName;
+			modName.format("M%d~%s", mod + 1, info->getTemplateName().str());
+			const ThingTemplate *modPlan = TheThingFactory->findTemplate( modName );
+			if (modPlan != NULL)
+				info->setTemplateName( modPlan->getName() );
 		}
-		build = build->m_next;
+		adjustBuildList(buildList); // adjust to  our start position.
+		m_player->setBuildList(buildList);
+		computeCenterAndRadiusOfBase(&m_baseCenter, &m_baseRadius);
+		DEBUG_LOG(("AI Player build list is %s's\n", build->m_side.str()));
 	}
 	DEBUG_ASSERTLOG(build!=NULL, ("Couldn't find build list for skirmish player.\n"));
 
@@ -1337,7 +1487,8 @@ void AISkirmishPlayer::xfer( Xfer *xfer )
 	// version
 	// 2: the current enemy and the frame to look for one again.  Without them a loaded game picked
 	//    its enemy afresh on the first frame and played on differently from the one that was saved.
-	XferVersion currentVersion = 2;
+	// 3: the surrender clock.
+	XferVersion currentVersion = 3;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -1351,6 +1502,12 @@ void AISkirmishPlayer::xfer( Xfer *xfer )
 		xfer->xferInt( &enemyIndex );
 		if( xfer->getXferMode() == XFER_LOAD )
 			m_currentEnemy = enemyIndex >= 0 ? ThePlayerList->getNthPlayer( enemyIndex ) : NULL;
+	}
+
+	if( version >= 3 )
+	{
+		xfer->xferUnsignedInt( &m_hopelessSinceFrame );
+		xfer->xferUnsignedInt( &m_surrenderFrame );
 	}
 
 	// front base defense

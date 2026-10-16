@@ -284,7 +284,7 @@ void W3DTankDraw::onRenderObjRecreated(void)
 //-------------------------------------------------------------------------------------------------
 void W3DTankDraw::doDrawModule(const Matrix3D* transformMtx)
 {
-	const Real DEBRIS_THRESHOLD = 0.00001f;
+	const Real DEBRIS_THRESHOLD = ConvertRetailPerFrameSquared(0.00001f);
 
  	Bool frozen = TheTacticalView->isTimeFrozen() && !TheTacticalView->isCameraMovementFinished();
  	frozen = frozen || TheScriptEngine->isTimeFrozenDebug() || TheScriptEngine->isTimeFrozenScript();
@@ -315,9 +315,9 @@ void W3DTankDraw::doDrawModule(const Matrix3D* transformMtx)
 	else
 		stopMoveDebris();
 
-	// kick debris higher the faster we move
+	// kick debris higher the faster we move (the multipliers were written for distance per 30 Hz frame)
 	Coord3D velMult;
-	velMag = (Real)sqrt( velMag );
+	velMag = (Real)sqrt( velMag ) * LOGICFRAMES_PER_RETAIL_FRAME;
 
 	velMult.x = 0.5f * velMag + 0.1f;
 	if (velMult.x > 1.0f)

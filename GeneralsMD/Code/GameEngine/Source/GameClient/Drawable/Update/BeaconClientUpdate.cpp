@@ -41,8 +41,8 @@
 
 //-------------------------------------------------------------------------------------------------
 BeaconClientUpdateModuleData::BeaconClientUpdateModuleData() :
-	m_framesBetweenRadarPulses(30),
-	m_radarPulseDuration(15)
+	m_framesBetweenRadarPulses(ConvertRetailFrames(30u)),
+	m_radarPulseDuration(ConvertRetailFrames(15u))
 {
 }
 

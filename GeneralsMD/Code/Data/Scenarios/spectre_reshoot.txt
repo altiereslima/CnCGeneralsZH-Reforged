@@ -1,0 +1,20 @@
+# spectre_reaim.txt staged for footage: the same Spectre Gunship called on the Alpine Assault
+# crossroads (1310,1290) and re-aimed inside its circle, but the four Battlemasters drive through
+# the town instead of parking, and each re-aim follows them. Cinema/spectre_reshoot.txt films it
+# from heading 135, which keeps the map's far edge and the sky out of the top of the frame.
+#
+#   set ZH_USER_DATA_DIR to a folder on D: (the -video frames land under its Videos\)
+#   generals.exe -win -xres 1920 -yres 1080 -msaa 0 -fps 120 -noFPSLimit -quickstart -noshellmap
+#     -multiInstance -particlecap 2500 -map "Maps\Alpine Assault\Alpine Assault.map"
+#     -autoskirmish 2 -takeover -observer -side 0 FactionAmerica -side 1 FactionChina -seed 1
+#     -scenario spectre_reshoot -cinema spectre_reshoot -video 660 1380 spectre_reshoot
+#     -maxframes 1400
+10    spawn      0  AmericaCommandCenter     1   start0:240:60
+10    spawn      1  ChinaTankBattleMaster    4   1190 1210  30
+20    power      0  AmericaCommandCenter     1310 1290  SuperweaponSpectreGunship
+200   move       1  ChinaTankBattleMaster     1260 1250
+360   reaim      0  AmericaJetSpectreGunship  1250 1250
+400   move       1  ChinaTankBattleMaster     1420 1380
+480   reaim      0  AmericaJetSpectreGunship  1380 1350
+600   reaim      0  AmericaJetSpectreGunship  1420 1380
+690   tally      1  ChinaTankBattleMaster

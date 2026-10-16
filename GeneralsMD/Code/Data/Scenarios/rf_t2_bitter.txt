@@ -1,0 +1,34 @@
+# Trailer 2, timeline.t2.js row 05 on Bitter Winter: a Chinese artillery battery on the open snow
+# east of the frozen lake, six Nuke Cannons along x 1140 and five Inferno Cannons staggered between
+# them along x 1200, firing east at an American column parked on 1430,1750. forceground keeps every
+# gun firing whatever is left standing.
+#
+# Until 2026-10-11 the line stood along x 1050 with two of its seven guns on the lake (t2check.py:
+# 1050,1720 and 1055,1780 under the water polygon); it is now east of the lake's edge, and four guns
+# more, since the row read as too few guns. Along x 1090 the engine refused four of them: the map's
+# painted cliff bits (grown by one cell, as the pathfinder does) cover x up to 1120 from y 1660 to 1950.
+#
+#   generals.exe -win -xres 2560 -yres 1440 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Bitter Winter\Bitter Winter.map" -autoskirmish 2 -takeover
+#     -observer -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario rf_t2_bitter
+#     -cinema rf_t2_bitter -video <from> <to> rt_t2_bitter -recordfps 60
+
+10    spawn      0  AmericaCommandCenter            1   start0:240:60
+10    spawn      1  ChinaCommandCenter              1   start1:-260:0
+
+20    spawn      1  ChinaVehicleNukeLauncher        1   1140 1580
+20    spawn      1  ChinaVehicleInfernoCannon       1   1200 1615
+20    spawn      1  ChinaVehicleNukeLauncher        1   1140 1650
+20    spawn      1  ChinaVehicleInfernoCannon       1   1200 1685
+20    spawn      1  ChinaVehicleNukeLauncher        1   1140 1720
+20    spawn      1  ChinaVehicleInfernoCannon       1   1200 1755
+20    spawn      1  ChinaVehicleNukeLauncher        1   1140 1790
+20    spawn      1  ChinaVehicleInfernoCannon       1   1200 1825
+20    spawn      1  ChinaVehicleNukeLauncher        1   1140 1860
+20    spawn      1  ChinaVehicleInfernoCannon       1   1200 1895
+20    spawn      1  ChinaVehicleNukeLauncher        1   1140 1930
+20    spawn      0  AmericaTankCrusader             8   1430 1750  45
+20    spawn      0  AmericaTankPaladin              4   1500 1700  45
+20    spawn      0  AmericaVehicleHumvee            4   1500 1820  40
+60    forceground 1  ChinaVehicleNukeLauncher            1430 1750
+60    forceground 1  ChinaVehicleInfernoCannon           1450 1730

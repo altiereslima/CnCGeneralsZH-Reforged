@@ -39,8 +39,7 @@
 #   - generals needing a glibc symbol newer than GLIBC_2.31, or any libstdc++ symbol (GLIBCXX_, CXXABI_);
 #   - generals needing a shared library outside the ones every SteamOS and desktop Linux has (glibc's own,
 #     and fontconfig); everything else is static or loaded at run time by SDL and miniaudio;
-#   - a static library on generals' link line that macos-app-licenses.txt does not name;
-#   - a file in the folder that forces the HUD overlay on (off by default in Release: a project rule).
+#   - a static library on generals' link line that macos-app-licenses.txt does not name.
 #
 # Usage: linux-portable.sh --build <folder> --out <folder> --cmake <cmake>
 #          [--image <sdk image>] [--jobs <n>] [--no-art] [--no-tar] [--no-build]
@@ -130,10 +129,6 @@ ENTRIES="$(package_license_entries "$TABLE" $linked)" || fail "refused: generals
 if [ "$ART" -eq 1 ] && ! ls "$BUILD/overlay"/Reforged*.big >/dev/null 2>&1; then
 	fail "the staged overlay holds no Reforged*.big art: put the archives in GeneralsMD/Run and build again, or pass --no-art"
 fi
-
-# ---- the HUD rule, over the overlay that will be copied in ------------------------------------------
-found="$(hud_check_files "$BUILD/overlay")"
-[ -z "$found" ] || fail "refused: nothing shipped may force the HUD overlay on (ShowHudOverlay = Yes in: $(printf '%s ' $found))"
 
 # ---- what generals needs of the system ---------------------------------------------------------------------
 needs="$(in_sdk "readelf -d '$GENERALS' | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'; echo '--'; objdump -T '$GENERALS'")" \
@@ -307,10 +302,6 @@ UNINSTALL
   Delete this folder. Your settings and saves stay in ~/.local/share/Command and Conquer Generals Zero
   Hour Data until you delete them too.
 README_EOF
-
-# the HUD rule once more, over the finished folder
-found="$(hud_check_files "$OUT")"
-[ -z "$found" ] || fail "refused: nothing shipped may force the HUD overlay on (ShowHudOverlay = Yes in: $(printf '%s ' $found))"
 
 size="$(du -sh "$OUT" | cut -f1)"
 if [ "$TAR" -eq 1 ]; then

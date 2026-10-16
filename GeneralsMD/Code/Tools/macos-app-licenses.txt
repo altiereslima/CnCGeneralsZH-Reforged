@@ -48,12 +48,9 @@ spirv-cross-c         spirv-cross
 spirv-cross-core      spirv-cross
 spirv-cross-glsl      spirv-cross
 spirv-cross-msl       spirv-cross
-litehtml              litehtml
-gumbo                 gumbo
 miniaudio             miniaudio
 gamespy               gamespy
 
 # compiled into another library
 + zlib                # Compression/ZLib, inside libcompression
 + lzhl                # Compression/LZHCompress (LZH-Light, Sergey Ignatchenko), inside libcompression
-+ nanosvg             # compiled into HtmlOverlay.cpp, inside libgameengine

@@ -209,64 +209,6 @@ static CommandStatus doFireWeaponCommand( const CommandButton *command, const IC
 }  // end fire weapon
 
 //-------------------------------------------------------------------------------------------------
-//-------------------------------------------------------------------------------------------------
-static CommandStatus doGuardCommand( const CommandButton *command, GuardMode guardMode, const ICoord2D *mouse )
-{
-	// sanity
-	if( command == NULL || mouse == NULL )
-		return COMMAND_COMPLETE;
-
-	if( TheInGameUI->getSelectCount() == 0 )
-		return COMMAND_COMPLETE;
-
-	GameMessage *msg = NULL;
-
-	if ( msg == NULL && BitTest( command->getOptions(), COMMAND_OPTION_NEED_OBJECT_TARGET ) )
-	{
-		// get the target object under the cursor
-		Object* target = validUnderCursor( mouse, command, PICK_TYPE_SELECTABLE );
-		if( target )
-		{
-			msg = TheMessageStream->appendMessage( GameMessage::MSG_DO_GUARD_OBJECT );
-			msg->appendObjectIDArgument( target->getID() );
-			msg->appendIntegerArgument(guardMode);
-			// Classic sends the game's own guard and the logic guards its standard range
-			if( !TheGlobalData->isClassicUI() )
-				msg->appendRealArgument( TheInGameUI->getAreaPickRadius() );
-			pickAndPlayUnitVoiceResponse(TheInGameUI->getAllSelectedDrawables(), GameMessage::MSG_DO_GUARD_OBJECT);
-		}
-	}
-
-	if(  msg == NULL )
-	{
-		Coord3D world;
-		if (BitTest( command->getOptions(), NEED_TARGET_POS ))
-		{
-			// translate the mouse location into world coords
-			TheTacticalView->screenToTerrain( mouse, &world );
-		}
-		else
-		{
-			Drawable *draw = TheInGameUI->getFirstSelectedDrawable();
-			if( draw == NULL || draw->getObject() == NULL )
-				return COMMAND_COMPLETE;
-			world = *draw->getObject()->getPosition();
-		}
-			
-		// create the message and append arguments	
-		msg = TheMessageStream->appendMessage( GameMessage::MSG_DO_GUARD_POSITION );
-		msg->appendLocationArgument(world);
-		msg->appendIntegerArgument(guardMode);
-		if( !TheGlobalData->isClassicUI() )
-			msg->appendRealArgument( TheInGameUI->getAreaPickRadius() );
-		pickAndPlayUnitVoiceResponse(TheInGameUI->getAllSelectedDrawables(), GameMessage::MSG_DO_GUARD_POSITION);
-	}
-
-	return COMMAND_COMPLETE;
-
-}
-
-//-------------------------------------------------------------------------------------------------
 /** Do the attack move command: Classic's attack move button, a GUI command as in 1.04 */
 //-------------------------------------------------------------------------------------------------
 static CommandStatus doAttackMoveCommand( const CommandButton *command, const ICoord2D *mouse )
@@ -440,26 +382,7 @@ GameMessageDisposition GUICommandTranslator::translateGameMessage(const GameMess
 						break;
 					}
 
-					//---------------------------------------------------------------------------------------
-					case GUI_COMMAND_GUARD:
-					{
-						commandStatus = doGuardCommand( command, GUARDMODE_NORMAL, &mouse );
-						break;
-					}
-
-					//---------------------------------------------------------------------------------------
-					case GUI_COMMAND_GUARD_WITHOUT_PURSUIT:
-					{
-						commandStatus = doGuardCommand( command, GUARDMODE_GUARD_WITHOUT_PURSUIT, &mouse );
-						break;
-					}
-
-					//---------------------------------------------------------------------------------------
-					case GUI_COMMAND_GUARD_FLYING_UNITS_ONLY:
-					{
-						commandStatus = doGuardCommand( command, GUARDMODE_GUARD_FLYING_UNITS_ONLY, &mouse );
-						break;
-					}
+					// EA's guard buttons never wait here: setGUICommand arms the guard key instead
 
 					//Special weapons are now always context commands...
 					//---------------------------------------------------------------------------------------

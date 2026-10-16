@@ -120,7 +120,6 @@ WorkerAIUpdate::WorkerAIUpdate( Thing *thing, const ModuleData* moduleData ) :
 	m_dockBeforeBuilding = INVALID_ID;
 	m_forcePending = FALSE;
 	m_forcedBusyPending = FALSE;
-	m_dockActionStartFrame = 0;
 	m_dockActionEndFrame = 0;
 
 	m_workerMachine = NULL;
@@ -247,18 +246,7 @@ UnsignedInt WorkerAIUpdate::getActionDelayForDock( Object *dock )
 //----------------------------------------------------------------------------------------
 void WorkerAIUpdate::noteDockActionWindow( UnsignedInt frames )
 {
-	m_dockActionStartFrame = TheGameLogic->getFrame();
-	m_dockActionEndFrame = m_dockActionStartFrame + frames;
-}
-
-//----------------------------------------------------------------------------------------
-/** How far through fetching or handing over the current box we are, for the bar drawn over the
-	* worker's head.  Negative once the window has run out, which is also what a worker that is not
-	* docked reads: nothing refreshes the window but the dock state. */
-//----------------------------------------------------------------------------------------
-Real WorkerAIUpdate::getDockActionProgress() const
-{
-	return dockActionProgress( TheGameLogic->getFrame(), m_dockActionStartFrame, m_dockActionEndFrame );
+	m_dockActionEndFrame = TheGameLogic->getFrame() + frames;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1527,11 +1515,12 @@ void WorkerAIUpdate::crc( Xfer *xfer )
 /** Xfer method
 	* Version Info:
 	* 1: Initial version
-	* 2: The dock action window, which now times the shortest leg between two supply dockings */
+	* 2: The dock action window, which now times the shortest leg between two supply dockings
+	* 3: Only the window's end; its start fed nothing but a progress bar */
 // ------------------------------------------------------------------------------------------------
 void WorkerAIUpdate::xfer( Xfer *xfer )
 {
-  XferVersion currentVersion = 2;
+  XferVersion currentVersion = 3;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
  
@@ -1575,11 +1564,13 @@ void WorkerAIUpdate::xfer( Xfer *xfer )
 	xfer->xferObjectID(&m_preferredDock);
 	xfer->xferInt(&m_numberBoxes);
 	xfer->xferBool(&m_forcePending);
-	if( version >= 2 )
+	if( version == 2 )
 	{
-		xfer->xferUnsignedInt(&m_dockActionStartFrame);
-		xfer->xferUnsignedInt(&m_dockActionEndFrame);
+		UnsignedInt startFrame = 0;
+		xfer->xferUnsignedInt(&startFrame);
 	}
+	if( version >= 2 )
+		xfer->xferUnsignedInt(&m_dockActionEndFrame);
 
 	//-------------------------- xfer Worker info
 	xfer->xferSnapshot(m_workerMachine);

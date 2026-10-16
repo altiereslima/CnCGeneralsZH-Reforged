@@ -20,22 +20,19 @@
 #   1. it builds, and the bundle holds what P1 specifies: Info.plist (lints; the executable, the
 #      id, this build's version, the executable's minimum macOS, high resolution, the category), PkgInfo,
 #      a stripped arm64/x86_64 executable with its dSYM beside the bundle, the icon, the overlay, one
-#      licence file per entry the link line needs; its ad-hoc signature verifies --deep --strict; and no
-#      file in it forces the HUD overlay on (off by default in Release; so neither does the real staged overlay);
-#   2. the HUD rule's control: the same overlay with one INI line "ShowHudOverlay = Yes" planted in a
-#      copy is refused, naming the file, and leaves no bundle;
-#   3. the licence check's control: a link line with a library the table does not cover is refused,
+#      licence file per entry the link line needs; its ad-hoc signature verifies --deep --strict;
+#   2. the licence check's control: a link line with a library the table does not cover is refused,
 #      naming it, and leaves no bundle;
-#   4. the seal's control: a file written into the signed bundle makes codesign --verify --deep --strict
+#   3. the seal's control: a file written into the signed bundle makes codesign --verify --deep --strict
 #      fail, so a pass after a run means nothing was written;
-#   5. the oldest macOS (P2): the bundle's LSMinimumSystemVersion is the build's deployment target, and
+#   4. the oldest macOS (P2): the bundle's LSMinimumSystemVersion is the build's deployment target, and
 #      every object it ships is built for no newer one.  Two controls: a lower --min-macos than the
 #      build's is refused, naming libraries; a Mach-O built for a newer macOS planted in the overlay is
 #      refused by the bundle-side check, naming it;
-#   6. universal2 (option A's path, tested with tiny stand-ins, no second build): an x86_64 executable
+#   5. universal2 (option A's path, tested with tiny stand-ins, no second build): an x86_64 executable
 #      for the target lipo'd in makes a bundle whose executable holds both slices and still verifies;
 #      one built for a newer macOS is refused, and so is an arm64 file passed as the x86_64 one;
-#   7. the art, never bundled (a project rule: the app carries none): a fresh bundle built without --no-art
+#   6. the art, never bundled (a project rule: the app carries none): a fresh bundle built without --no-art
 #      holds no Reforged*.big, whatever the staged overlay links; and the bundle's game, started headless on an
 #      empty root with a ReforgedArt folder in its user data, reads that folder as an overlay and writes
 #      nothing into the bundle (its seal still verifies).
@@ -90,22 +87,12 @@ check '[ "$nlic" -ge 13 ] && [ -f "$APP/Contents/Resources/Licenses/Zero-Hour-Re
 check 'grep -q "this notice may not be removed or altered" "$APP/Contents/Resources/Licenses/LZH-Light-LICENSE.txt" && grep -q "GNU GPL option, version 2 or later" "$APP/Contents/Resources/Licenses/FreeType-OPTION.txt" && [ -f "$APP/Contents/Resources/Licenses/FreeType-GPLv2.txt" ]' \
 	"LZH-Light's notice, and FreeType's GPLv2-or-later option with its GPLv2 text"
 check 'codesign --verify --deep --strict "$APP" 2>/dev/null && codesign -dv "$APP" 2>&1 | grep -q "Signature=adhoc"' "signed ad hoc, and it verifies --deep --strict"
-check '[ -z "$(find -L "$APP" -type f -exec grep -a -i -l -E "^[[:space:]]*ShowHudOverlay[[:space:]]*=[[:space:]]*(yes|true|1)([^[:alnum:]]|$)" -- {} + 2>/dev/null)" ]' \
-	"and nothing in it forces the HUD overlay on"
 
-# 4. the seal's control, on that bundle
+# 3. the seal's control, on that bundle
 touch "$APP/Contents/Resources/written-after-signing"
 check '! codesign --verify --deep --strict "$APP" 2>/dev/null' "a file written after signing breaks the seal (so a clean verify after a run means nothing was written)"
 
-# 2. the HUD rule's control
-mkdir -p "$T/overlay"
-for e in "$OVERLAY"/*; do case "$e" in *.big) ;; *) cp -R -L "$e" "$T/overlay/";; esac; done
-printf '\nGameData\n  ShowHudOverlay = Yes\nEnd\n' > "$T/overlay/Data/INI/HudOn.ini"
-out="$(bash "$SCRIPT" --generals "$GENERALS" --overlay "$T/overlay" --build "$BUILD" --out "$T/two/Zero Hour Reforged.app" --bundle-id "$ID" --min-macos "$TARGET" --no-art 2>&1)"; status=$?
-check '[ $status -eq 1 ] && printf "%s" "$out" | grep -q "may force the HUD overlay on" && printf "%s" "$out" | grep -q "HudOn.ini" && [ ! -e "$T/two/Zero Hour Reforged.app" ]' \
-	"an overlay forcing the HUD on is refused, naming the file, and leaves no bundle (exit $status)"
-
-# 3. the licence check's control
+# 2. the licence check's control
 python3 - "$BUILD/build.ninja" "$T/build.ninja" <<'NINJA_EOF'
 import re, sys
 text = open(sys.argv[1]).read()
@@ -116,15 +103,16 @@ out="$(bash "$SCRIPT" --generals "$GENERALS" --overlay "$OVERLAY" --build "$BUIL
 check '[ $status -eq 1 ] && printf "%s" "$out" | grep -q "does not cover: nolicence" && [ ! -e "$T/three/Zero Hour Reforged.app" ]' \
 	"a linked library without a licence entry is refused, naming it, and leaves no bundle (exit $status)"
 
-# 5. the oldest macOS
+# 4. the oldest macOS
 check 'otool -l "$APP/Contents/MacOS/generals" | awk "/LC_BUILD_VERSION/ {f=1} f && \$1 == \"minos\" {print \$2; exit}" | grep -qx "$TARGET"' \
 	"the executable is stamped for $TARGET"
 out="$(bash "$SCRIPT" --generals "$GENERALS" --overlay "$OVERLAY" --build "$BUILD" --out "$T/four/Zero Hour Reforged.app" --bundle-id "$ID" --min-macos 11.0 --no-art 2>&1)"; status=$?
 check '[ $status -eq 1 ] && printf "%s" "$out" | grep -q "linked libraries built for a newer macOS than 11.0" && printf "%s" "$out" | grep -q "libgameengine.a: minimum macOS $TARGET" && [ ! -e "$T/four/Zero Hour Reforged.app" ]' \
 	"a minimum below the build's is refused, naming the libraries, and leaves no bundle (exit $status)"
 printf 'int main(void) { return 0; }\n' > "$T/newer.c"
+mkdir -p "$T/overlay"
+for e in "$OVERLAY"/*; do case "$e" in *.big) ;; *) cp -R -L "$e" "$T/overlay/";; esac; done
 if cc -mmacosx-version-min=26.0 -o "$T/overlay/newer-tool" "$T/newer.c" 2>/dev/null; then
-	rm -f "$T/overlay/Data/INI/HudOn.ini"
 	out="$(bash "$SCRIPT" --generals "$GENERALS" --overlay "$T/overlay" --build "$BUILD" --out "$T/five/Zero Hour Reforged.app" --bundle-id "$ID" --min-macos "$TARGET" --no-art 2>&1)"; status=$?
 	check '[ $status -eq 1 ] && printf "%s" "$out" | grep -q "the bundle.s executables built for a newer macOS" && printf "%s" "$out" | grep -q "newer-tool: minimum macOS 26.0" && [ ! -e "$T/five/Zero Hour Reforged.app" ]' \
 		"a Mach-O for a newer macOS inside the bundle is refused, naming it (exit $status)"
@@ -132,7 +120,7 @@ else
 	check 'false' "cc could not build the control's newer-macOS Mach-O"
 fi
 
-# 6. universal2
+# 5. universal2
 printf 'int main(void) { return 0; }\n' > "$T/x86.c"
 cc -arch x86_64 -mmacosx-version-min="$TARGET" -o "$T/x86-ok" "$T/x86.c" 2>/dev/null
 cc -arch x86_64 -mmacosx-version-min=26.0 -o "$T/x86-newer" "$T/x86.c" 2>/dev/null
@@ -150,7 +138,7 @@ check '[ $status -eq 1 ] && printf "%s" "$out" | grep -q "the x86_64 executable 
 out="$(bash "$SCRIPT" --generals "$GENERALS" --overlay "$OVERLAY" --build "$BUILD" --out "$T/eight/Zero Hour Reforged.app" --bundle-id "$ID" --min-macos "$TARGET" --no-art --x86-64-generals "$T/not-x86" 2>&1)"; status=$?
 check '[ $status -eq 1 ] && printf "%s" "$out" | grep -q "is not an x86_64 executable"' "an arm64 file passed as the x86_64 slice is refused (exit $status)"
 
-# 7. the art, never bundled, read from the user data folder
+# 6. the art, never bundled, read from the user data folder
 N="$T/nine/Zero Hour Reforged.app"
 out="$(bash "$SCRIPT" --generals "$GENERALS" --overlay "$OVERLAY" --build "$BUILD" --out "$N" --bundle-id "$ID" --min-macos "$TARGET" 2>&1)"; status=$?
 check '[ $status -eq 0 ] && [ -z "$(find "$N" -name "Reforged*.big")" ]' \

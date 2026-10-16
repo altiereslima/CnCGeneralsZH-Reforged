@@ -84,19 +84,4 @@ else
 		done
 	fi
 fi
-# The corner readout (InGameUI::drawHudOverlay) is off by default in Release and on in Debug, a project
-# rule (2026-09-29): a player turns it on in GameData.ini, and a harness whose pictures must show it passes
-# -showHudOverlay.  Nothing staged may force it on for every player: a GameData.ini line setting it Yes,
-# True or 1, loose or inside an archive the overlay carries, stops the staging here.
-# grep -a reads the archives' INI text as it is stored (0.4 s over the 1.6 GB of art).
-hud_on='^[[:space:]]*ShowHudOverlay[[:space:]]*=[[:space:]]*(yes|true|1)([^[:alnum:]]|$)'
-if found="$(grep -r -a -i -l -E "$hud_on" -- "$out" 2>/dev/null)" || \
-	found="$(find "$out" -maxdepth 1 -name '*.big' -exec grep -a -i -l -E "$hud_on" -- {} + 2>/dev/null)"; then
-	if [ -n "$found" ]; then
-		echo "stage-overlay: refused: a staged file forces the HUD overlay on (ShowHudOverlay = Yes):" >&2
-		printf '%s\n' "$found" | sed 's/^/  /' >&2
-		rm -rf -- "$out"
-		exit 1
-	fi
-fi
 touch "$out.staged"	# beside, not inside: the game would see a file inside as a loose file

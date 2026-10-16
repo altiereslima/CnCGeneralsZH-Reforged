@@ -168,7 +168,8 @@ Bool PolygonTrigger::ParsePolygonTriggersDataChunk(DataChunkInput &file, DataChu
 			riverStart = file.readInt();
 		}
 
-		numPoints = file.readInt(); 
+		// the points are allocated from this count before they are read, three Ints each
+		numPoints = file.readCount(3 * sizeof(Int));
 		PolygonTrigger *pTrig = newInstance(PolygonTrigger)(numPoints+1);	
 		pTrig->setTriggerName(triggerName);
 		if (info->version >= K_TRIGGERS_VERSION_4) {

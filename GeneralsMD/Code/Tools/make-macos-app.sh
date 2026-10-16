@@ -26,8 +26,6 @@
 #
 # Refused, before anything is written:
 #   - a static library on generals' link line (build.ninja) that macos-app-licenses.txt does not name;
-#   - a file in the overlay that forces the HUD overlay on (ShowHudOverlay = Yes: off by default in Release,
-#     a project rule, as Tools/stage-overlay.sh enforces), checked again over the finished bundle;
 #   - an object in any static library on the link line, or a Mach-O in the bundle, built for a newer
 #     macOS than --min-macos (P2): the final executable's own stamp would hide a vendored library built
 #     for the build machine's version, and the player's Mac would find it at the first call.
@@ -77,20 +75,12 @@ REPO="$(cd "$CODE/../.." && pwd)"
 TABLE="$CODE/Tools/macos-app-licenses.txt"
 
 # ---- the link line against the licence table ----------------------------------------------------------
-. "$CODE/Tools/package-common.sh"		# the link-line reader, the licence entries and the HUD check, shared with P3
+. "$CODE/Tools/package-common.sh"		# the link-line reader and the licence entries, shared with P3
 LIBPATHS="$(mktemp "${TMPDIR:-/tmp}/zh-link-libs.XXXXXX")"
 trap 'rm -f -- "$LIBPATHS"' EXIT
 linked="$(package_link_libraries "$NINJA" "$LIBPATHS")" || fail "cannot read generals' link line from $NINJA"
 [ -n "$linked" ] || fail "generals' link line in $NINJA names no static library"
 ENTRIES="$(package_license_entries "$TABLE" $linked)" || fail "refused: generals links libraries macos-app-licenses.txt does not cover:$ENTRIES"
-
-# ---- the HUD rule, over what will be staged in -------------------------------------------------------------
-hud_check() {	# hud_check <dir>: fails naming the files that force the HUD overlay on
-	local found
-	found="$(hud_check_files "$1")"
-	[ -z "$found" ] || fail "refused: nothing shipped may force the HUD overlay on (ShowHudOverlay = Yes in: $(printf '%s ' $found))"
-}
-hud_check "$OVERLAY"
 
 # ---- the oldest macOS, over everything that ships ----------------------------------------------------------
 minos_check() {	# minos_check <what> <files...>: fails naming every object built for a newer macOS than MIN_MACOS
@@ -234,9 +224,7 @@ for e in $ENTRIES; do
 	license_entry "$e" "$L" || fail "cannot write the licence entry '$e'"
 done
 
-# the directive once more, over the finished contents (the clones included)
-hud_check "$C"
-# and the oldest macOS, over every Mach-O the bundle holds
+# the oldest macOS, over every Mach-O the bundle holds
 machos=()
 while IFS= read -r f; do machos+=("$f"); done < <(find "$C" -type f -exec sh -c 'file -b "$1" | grep -q "^Mach-O" && echo "$1"' _ {} \;)
 [ "${#machos[@]}" -gt 0 ] || fail "no Mach-O in the bundle"

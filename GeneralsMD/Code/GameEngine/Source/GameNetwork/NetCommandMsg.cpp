@@ -516,8 +516,8 @@ Int NetRunAheadMetricsCommandMsg::getAverageFps() {
 // NetRunAheadCommandMsg
 //-------------------------
 NetRunAheadCommandMsg::NetRunAheadCommandMsg() : NetCommandMsg() {
-	m_runAhead = min(max(20, MIN_RUNAHEAD), MAX_FRAMES_AHEAD/2);
-	m_frameRate = 30;
+	m_runAhead = min(max(ConvertRetailFrames(20), MIN_RUNAHEAD), MAX_FRAMES_AHEAD/2);
+	m_frameRate = LOGICFRAMES_PER_SECOND;
 	m_commandType = NETCOMMANDTYPE_RUNAHEAD;
 }
 
@@ -761,36 +761,6 @@ Int NetChatCommandMsg::getPlayerMask()
 void NetChatCommandMsg::setPlayerMask( Int playerMask )
 {
 	m_playerMask = playerMask;
-}
-
-//-------------------------
-// NetAllyCursorCommandMsg
-//-------------------------
-NetAllyCursorCommandMsg::NetAllyCursorCommandMsg() : NetCommandMsg()
-{
-	m_commandType = NETCOMMANDTYPE_ALLYCURSOR;
-	m_x = 0.0f;
-	m_y = 0.0f;
-}
-
-NetAllyCursorCommandMsg::~NetAllyCursorCommandMsg()
-{
-}
-
-Real NetAllyCursorCommandMsg::getX()
-{
-	return m_x;
-}
-
-Real NetAllyCursorCommandMsg::getY()
-{
-	return m_y;
-}
-
-void NetAllyCursorCommandMsg::setPosition( Real x, Real y )
-{
-	m_x = x;
-	m_y = y;
 }
 
 //-------------------------

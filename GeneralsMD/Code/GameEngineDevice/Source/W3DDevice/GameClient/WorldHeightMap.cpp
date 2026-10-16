@@ -219,11 +219,22 @@ WorldHeightMap::WorldHeightMap(ChunkInputStream *pStrm, Bool logicalDataOnly):
 #endif
 		file.registerParser( AsciiString("GlobalLighting"), AsciiString::TheEmptyString, ParseLightingDataChunk );
 	}
-	if (!file.parse(this)) {
-    
-		throw(ERROR_CORRUPT_FILE_FORMAT);
+	// A map that turns out corrupt halfway has already put its first objects, triggers and sides
+	// into the globals the logical branch fills.  Leave them empty rather than half a map for
+	// whatever loads next.
+	try {
+		if (!file.parse(this)) {
+			throw(ERROR_CORRUPT_FILE_FORMAT);
+		}
+	} catch (...) {
+		if (logicalDataOnly) {
+			freeListOfMapObjects();
+			PolygonTrigger::deleteTriggers();
+			TheSidesList->emptySides();
+		}
+		throw;
 	}
-	// patch bad maps. 
+	// patch bad maps.
 	if (!logicalDataOnly) {
 		for(i=0; i<m_dataSize; i++) {
 			if (m_cliffInfoNdxes[i]<0 || m_cliffInfoNdxes[i]>= m_numCliffInfo) {
@@ -440,6 +451,23 @@ Bool WorldHeightMap::ParseLightingDataChunk(DataChunkInput &file, DataChunkInfo 
 				TheW3DShadowManager->setShadowColor(shadowColor);
 			}
 		}
+
+		// The tables were filled from the file just now, so this is always the map's own numbers it
+		// rebalances, however many maps came before.
+		if (TheGlobalData->m_lightingStyle == LIGHTING_STYLE_REFORGED) {
+			const Int tod = TheGlobalData->m_timeOfDay;
+			const GlobalData::TerrainLighting before = TheGlobalData->m_terrainObjectsLighting[tod][0];
+			for (i=TIME_OF_DAY_FIRST; i<TIME_OF_DAY_COUNT; i++) {
+				reforgeLighting(TheWritableGlobalData->m_terrainLighting[i]);
+				reforgeLighting(TheWritableGlobalData->m_terrainObjectsLighting[i]);
+			}
+			const GlobalData::TerrainLighting &after = TheGlobalData->m_terrainObjectsLighting[tod][0];
+			DEBUG_LOG(("LIGHTING reforged, time of day %d: object ambient %.2f %.2f %.2f -> %.2f %.2f %.2f, sun %.2f %.2f %.2f -> %.2f %.2f %.2f\n",
+				tod, before.ambient.red, before.ambient.green, before.ambient.blue,
+				after.ambient.red, after.ambient.green, after.ambient.blue,
+				before.diffuse.red, before.diffuse.green, before.diffuse.blue,
+				after.diffuse.red, after.diffuse.green, after.diffuse.blue));
+		}
 	DEBUG_ASSERTCRASH(file.atEndOfChunk(), ("Unexpected data left over."));
 	return true;
 }
@@ -559,6 +587,16 @@ void WorldHeightMap::readTexClass(TXTextureClass *texClass, TileData **tileData)
 *	Input: DataChunkInput 
 *		
 */
+/** readTexClass writes up to ten by ten tiles of a class from its firstTile on into a
+	NUM_SOURCE_TILES array, both numbers straight from the map file. */
+static void checkTexClassTiles(const TXTextureClass &texClass)
+{
+	const Int tilesWritten = min(texClass.numTiles, 100);
+	if (texClass.firstTile < 0 || texClass.numTiles < 0 || texClass.firstTile > NUM_SOURCE_TILES - tilesWritten) {
+		throw ERROR_CORRUPT_FILE_FORMAT;
+	}
+}
+
 Bool WorldHeightMap::ParseBlendTileData(DataChunkInput &file, DataChunkInfo *info, void *userData)
 {
 	// The cells - tile indexes, flip and cliff bits - are the data half's (GameLogic/WorldHeightMapData.cpp),
@@ -566,6 +604,8 @@ Bool WorldHeightMap::ParseBlendTileData(DataChunkInput &file, DataChunkInfo *inf
 	if (!parseBlendTileCells(file, info))
 		return false;
 	int i;		// and no j: the cell loop that used it is parseBlendTileCells' now (MSVC's C4101, W2)
+	// Every count below indexes a fixed array of this class, so a map file that claims more than
+	// the array holds is corrupt; EA only asserted, and a release build wrote past the array.
 	m_numBitmapTiles = file.readInt();
 	DEBUG_ASSERTCRASH(m_numBitmapTiles>0 && m_numBitmapTiles<2048, ("Unlikely numBitmapTiles."));
 	m_numBlendedTiles = file.readInt();
@@ -575,9 +615,20 @@ Bool WorldHeightMap::ParseBlendTileData(DataChunkInput &file, DataChunkInfo *inf
 	} else {
 		m_numCliffInfo = 1;	// cliffInfo[0] is the default info.
 	}
+	// Zero is a real count: seven retail maps (Tournament City, Tournament Desert, Fortress
+	// Avalanche among them) save no cliff info at all, and both loops below start at 1, while the
+	// patch after the parse sends every out-of-range cell index to entry 0, which is always there.
+	if (m_numBitmapTiles < 0 || m_numBitmapTiles > NUM_SOURCE_TILES
+		|| m_numBlendedTiles < 0 || m_numBlendedTiles > NUM_BLEND_TILES
+		|| m_numCliffInfo < 0 || m_numCliffInfo > NUM_CLIFF_INFO) {
+		throw ERROR_CORRUPT_FILE_FORMAT;
+	}
 // --> file loading here
 	m_numTextureClasses	= file.readInt();
 	DEBUG_ASSERTCRASH(m_numTextureClasses>0 && m_numTextureClasses<200, ("Unlikely m_numTextureClasses."));
+	if (m_numTextureClasses < 0 || m_numTextureClasses > NUM_TEXTURE_CLASSES) {
+		throw ERROR_CORRUPT_FILE_FORMAT;
+	}
 	for (i=0; i<m_numTextureClasses; i++) {
 		m_textureClasses[i].globalTextureClass = -1;
 		m_textureClasses[i].firstTile = file.readInt();
@@ -589,6 +640,7 @@ Bool WorldHeightMap::ParseBlendTileData(DataChunkInput &file, DataChunkInfo *inf
 	/*	Int legacy = */ file.readInt();
 
 		m_textureClasses[i].name = file.readAsciiString();
+		checkTexClassTiles(m_textureClasses[i]);
 		readTexClass(&m_textureClasses[i], m_sourceTiles);
 	}
 	m_numEdgeTextureClasses = 0;
@@ -596,12 +648,17 @@ Bool WorldHeightMap::ParseBlendTileData(DataChunkInput &file, DataChunkInfo *inf
 	if (info->version >= K_BLEND_TILE_VERSION_4) {
 		m_numEdgeTiles	= file.readInt();
 		m_numEdgeTextureClasses	= file.readInt();
+		if (m_numEdgeTiles < 0 || m_numEdgeTiles > NUM_SOURCE_TILES
+			|| m_numEdgeTextureClasses < 0 || m_numEdgeTextureClasses > NUM_TEXTURE_CLASSES) {
+			throw ERROR_CORRUPT_FILE_FORMAT;
+		}
 		for (i=0; i<m_numEdgeTextureClasses; i++) {
 			m_edgeTextureClasses[i].globalTextureClass = -1;
 			m_edgeTextureClasses[i].firstTile = file.readInt();
 			m_edgeTextureClasses[i].numTiles = file.readInt();
 			m_edgeTextureClasses[i].width = file.readInt();
 			m_edgeTextureClasses[i].name = file.readAsciiString();
+			checkTexClassTiles(m_edgeTextureClasses[i]);
 			readTexClass(&m_edgeTextureClasses[i], m_edgeTiles);
 		}
 	}

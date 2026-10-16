@@ -33,6 +33,7 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 #define DEFINE_OBJECT_STATUS_NAMES
 #include "Common/Xfer.h"
+#include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/Module/FireWeaponCollide.h"
 
@@ -61,6 +62,7 @@ FireWeaponCollide::FireWeaponCollide( Thing *thing, const ModuleData* moduleData
 {
 	m_collideWeapon = TheWeaponStore->allocateNewWeapon(getFireWeaponCollideModuleData()->m_collideWeaponTemplate, PRIMARY_WEAPON);
 	m_everFired = FALSE;
+	m_lastFireFrame = NEVER_FIRED;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -85,11 +87,17 @@ void FireWeaponCollide::onCollide( Object *other, const Coord3D *loc, const Coor
 	// to hurt them all.  Another solution would be to keep a Map of other->objetIDs and 
 	// delays for each individually.  However, this solution here is so quick and simple that it
 	// warrants the "do it eventually if we need it" clause.
+	// At most once a retail frame: the reload is bypassed, so at twice the rate the damage a second
+	// would double. The frame that fired keeps firing, for everyone else colliding in it.
+	UnsignedInt now = TheGameLogic->getFrame();
+	if( now != m_lastFireFrame && now < m_lastFireFrame + LOGICFRAMES_PER_RETAIL_FRAME )
+		return;
 	if( shouldFireWeapon() )
 	{
 		m_collideWeapon->loadAmmoNow( me );
 		m_collideWeapon->fireWeapon( me, other );
 		m_everFired = TRUE;	// never set, so FireOnce did nothing
+		m_lastFireFrame = now;
 	}
 }
 
@@ -128,13 +136,14 @@ void FireWeaponCollide::crc( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
-	* 1: Initial version */
+	* 1: Initial version
+	* 2: m_lastFireFrame */
 // ------------------------------------------------------------------------------------------------
 void FireWeaponCollide::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 1;
+	XferVersion currentVersion = 2;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -162,6 +171,10 @@ void FireWeaponCollide::xfer( Xfer *xfer )
 
 	// ever fired
 	xfer->xferBool( &m_everFired );
+
+	// last fire frame; an older save keeps the constructor's "never"
+	if( version >= 2 )
+		xfer->xferUnsignedInt( &m_lastFireFrame );
 
 }  // end xfer
 

@@ -32,6 +32,7 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 #include "Lib/Clock.h"
+#include "Common/MessageStream.h"
 
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
@@ -55,14 +56,6 @@ static GameWindow *chatTypeStaticText = NULL;
 static UnicodeString s_savedChat;
 static InGameChatType inGameChatType;
 static const UnsignedInt SAME_PRESS_MS = 150;	///< ToggleInGameChat: two calls this close are one Enter
-
-// ------------------------------------------------------------------------------------------------
-/** Window/Html/Chat.html draws the chat: the typed line with the lines over it.  The layout's
-	* windows keep the keys and draw nothing. */
-// ------------------------------------------------------------------------------------------------
-static void drawChatNothing( GameWindow *window, WinInstanceData *instData )
-{
-}
 
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
@@ -96,14 +89,6 @@ void ShowInGameChat( Bool immediate )
 
 		static NameKeyType chatTypeStaticTextID = TheNameKeyGenerator->nameToKey( "InGameChat.wnd:StaticTextChatType" );
 		chatTypeStaticText = TheWindowManager->winGetWindowFromId( NULL, chatTypeStaticTextID );
-
-		// the Classic interface has no page: EA's layout draws itself where InGameChat.wnd puts it
-		if( !TheGlobalData->isClassicUI() )
-		{
-			chatWindow->winSetDrawFunc( drawChatNothing );
-			for( GameWindow *child = chatWindow->winGetChild(); child; child = child->winGetNext() )
-				child->winSetDrawFunc( drawChatNothing );
-		}
 	}
 	TheWindowManager->winSetFocus( chatTextEntry );
 	SetInGameChatType( INGAME_CHAT_EVERYONE );
@@ -222,6 +207,41 @@ Bool handleInGameSlashCommands(UnicodeString uText)
 		s.format(u"Hosting qr2:%d thread:%d", getQR2HostingStatus(), isThreadHosting);
 		TheInGameUI->message(s);
 		return TRUE; // was a slash command
+	}
+
+	// The vote kick: "/kick name" opens one (and is a yes), "/yes" and "/no" answer the open one.
+	// This only asks; GameLogic::processKickVote decides on every machine alike whether it counts.
+	if (token == "kick" || token == "yes" || token == "no")
+	{
+		Int target = TheGameLogic->getKickVoteTarget();
+		if (token == "kick")
+		{
+			UnicodeString name(uText.str() + 5);	// what follows "/kick"
+			name.trim();
+			target = -1;
+			for (Int i = 0; i < ThePlayerList->getPlayerCount(); ++i)
+			{
+				Player *player = ThePlayerList->getNthPlayer(i);
+				if (player != ThePlayerList->getLocalPlayer() && player->getPlayerType() == PLAYER_HUMAN
+						&& player->isPlayerActive() && player->getPlayerDisplayName().compareNoCase(name) == 0)
+					target = i;
+			}
+			if (target < 0)
+			{
+				TheInGameUI->message("GUI:KickVoteNoPlayer", name.str());
+				return TRUE;
+			}
+		}
+		else if (target < 0)
+		{
+			TheInGameUI->message("GUI:KickVoteNone");
+			return TRUE;
+		}
+
+		GameMessage *vote = TheMessageStream->appendMessage(GameMessage::MSG_VOTE_KICK);
+		vote->appendIntegerArgument(target);
+		vote->appendBooleanArgument(token != "no");
+		return TRUE;
 	}
 
 	return FALSE; // not a slash command

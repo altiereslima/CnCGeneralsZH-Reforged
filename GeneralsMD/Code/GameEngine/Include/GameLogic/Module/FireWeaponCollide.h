@@ -76,8 +76,12 @@ protected:
 	virtual Bool shouldFireWeapon();
 
 private:
+	// "never": far enough back that the first contact, on any frame, fires
+	static const UnsignedInt NEVER_FIRED = 0u - LOGICFRAMES_PER_RETAIL_FRAME;
+
 	Weapon* m_collideWeapon;
 	Bool m_everFired;
+	UnsignedInt m_lastFireFrame;	///< logic frame of the last shot
 
 };
 

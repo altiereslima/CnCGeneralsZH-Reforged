@@ -123,7 +123,7 @@ static void parseAngleFX(INI* ini, void *instance, void * /* store */, const voi
 		{ "MinToppleBurstDelay",			INI::parseDurationUnsignedInt,		NULL, offsetof( StructureToppleUpdateModuleData, m_minToppleBurstDelay ) },
 		{ "MaxToppleBurstDelay",			INI::parseDurationUnsignedInt,		NULL, offsetof( StructureToppleUpdateModuleData, m_maxToppleBurstDelay ) },
 		{ "StructuralIntegrity",			INI::parseReal,										NULL, offsetof( StructureToppleUpdateModuleData, m_structuralIntegrity ) },
-		{ "StructuralDecay",					INI::parseReal,										NULL, offsetof( StructureToppleUpdateModuleData, m_structuralDecay ) },
+		{ "StructuralDecay",					INI::parseRetailPerFrameFactorReal,									NULL, offsetof( StructureToppleUpdateModuleData, m_structuralDecay ) },
 		{ "DamageFXTypes",						INI::parseDamageTypeFlags,				NULL, offsetof( StructureToppleUpdateModuleData, m_damageFXTypes ) },
 		{ "TopplingFX",								INI::parseFXList,									NULL, offsetof( StructureToppleUpdateModuleData, m_toppleFXList ) },
 		{ "ToppleDelayFX",						INI::parseFXList,									NULL, offsetof( StructureToppleUpdateModuleData, m_toppleDelayFXList ) },
@@ -211,7 +211,7 @@ void StructureToppleUpdate::onDie( const DamageInfo *damageInfo )
 //-------------------------------------------------------------------------------------------------
 UpdateSleepTime StructureToppleUpdate::update( void )
 {
-	static const Real TOPPLE_ACCELERATION_FACTOR = 0.02f;
+	static const Real TOPPLE_ACCELERATION_FACTOR = ConvertRetailPerFrameSquared(0.02f);
 
 	const StructureToppleUpdateModuleData *d = getStructureToppleUpdateModuleData();
 

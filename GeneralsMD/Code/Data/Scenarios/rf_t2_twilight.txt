@@ -1,0 +1,54 @@
+# Trailer 2, timeline.t2.js rows 16, 17 and 18 on Twilight Flame: swpair.txt's two superweapons, an
+# American town for the nuke and a block for the Scud Storm, and a Chinese column that drives
+# through the nuke's radiation pools. The nuke is called at 100 and lands about 164 frames later;
+# the Scud Storm (GLA, at its start at 3196,4303) is called at 700 and lands about 400 frames later.
+#
+# Until 2026-10-11 the town stood at 1500,3450 on the cliff and the ramps of the map's south-west
+# crossing (twilight check: the command centre's footprint spanned 60 in height over 33 cliff cells).
+# Everything now stands on the flat ground west of the north-south road, the town round 500,3250
+# and the Scud's block round 450,4200; every footprint spans 10 or less (t2check.py).
+#
+#   generals.exe -win -xres 2560 -yres 1440 -msaa 0 -quickstart -noshellmap -multiInstance
+#     -particlecap 5000 -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 3 -takeover
+#     -observer -side 0 FactionAmerica -side 1 FactionChina -side 2 FactionGLA -seed 7
+#     -scenario rf_t2_twilight -cinema rf_t2_twilight -video <from> <to> rt_t2_twilight -recordfps 60
+
+# --- the superweapons, at their owners' starts ------------------------------------------------
+10    spawn      1  ChinaNuclearMissileLauncher     1   start1:0:200
+10    spawn      1  ChinaPowerPlant                 3   start1:260:-40    90
+10    spawn      2  GLAScudStorm                    1   start2:0:200
+
+# --- the American town the nuke lands on, round 500,3250 ----------------------------------------
+# America's own start (the command centre the skirmish places at Player_1_Start, 537,3188) is the
+# town's middle. A second command centre at 500,3250 and a power plant at 500,3120 were refused by
+# the engine on 2026-10-11 (LBC_OBJECTS_IN_THE_WAY: that start building), so neither is spawned.
+20    spawn      0  AmericaPowerPlant               1   630 3250
+20    spawn      0  AmericaPowerPlant               1   370 3250
+20    spawn      0  AmericaPowerPlant               1   500 3380
+20    spawn      0  AmericaBarracks                 1   670 3420
+20    spawn      0  AmericaBarracks                 1   330 3420
+20    spawn      0  AmericaBarracks                 1   670 3080
+20    spawn      0  AmericaBarracks                 1   330 3080
+20    spawn      0  AmericaPatriotBattery           1   740 3250
+20    spawn      0  AmericaPatriotBattery           1   260 3250
+20    spawn      0  AmericaStrategyCenter           1   500 2910
+20    spawn      0  AmericaSupplyCenter             1   500 3560
+20    spawn      0  AmericaTankCrusader             6   850 3420  30
+20    spawn      0  AmericaTankPaladin              4   300 3540  30
+
+# --- the block the Scud Storm lands on, round 450,4200 ------------------------------------------
+20    spawn      0  AmericaWarFactory               1   450 4200
+20    spawn      0  AmericaPowerPlant               1   320 4150
+20    spawn      0  AmericaPowerPlant               1   600 4170
+20    spawn      0  AmericaBarracks                 1   640 4320
+20    spawn      0  AmericaTankCrusader             6   330 4300  30
+20    spawn      0  AmericaVehicleHumvee            4   450 4350  30
+
+100   power      1  ChinaNuclearMissileLauncher         500 3250
+700   power      2  GLAScudStorm                        450 4200
+
+# --- the column through the pools ----------------------------------------------------------------
+660   spawn      1  ChinaTankBattleMaster           8   1000 3250  40
+660   spawn      1  ChinaTankOverlord               3   1000 3130  50
+680   move       1  ChinaTankBattleMaster               150 3250
+680   move       1  ChinaTankOverlord                   150 3250

@@ -233,6 +233,12 @@ public:
 	// the smoke billboards' runs.  An unlit draw with a normal takes it; any other ignores it.
 	void Set_Smoke_Glow(bool glow);
 
+	// The look the draws that follow are dressed in (a DRAW_EFFECT_* value, ffshader.h) and its
+	// four numbers: wall clock seconds, strength, a per-object seed and the object's opacity.  The
+	// mesh renderer sets it around one object's draws and puts DRAW_EFFECT_NONE back after them.
+	// A draw it does not suit takes none (Draw_Effect).
+	void Set_Draw_Effect(unsigned effect, const float parameters[4]);
+
 	// What an additive draw (ONE, ONE) into the scene is worth, for the Glow option: the blend
 	// takes the draw's colour times this through the blend factor, so fire, muzzle flashes and
 	// laser cores pass white in the half float scene and the bloom's bright pass finds them, where
@@ -401,8 +407,11 @@ private:
 		float BlastLightDiffuse[BLAST_LIGHT_SLOTS][4];
 		float BlastLightAmbient[BLAST_LIGHT_SLOTS][4];
 		// A soft particle's way from a depth back to a distance, and one over the distance its fade
-		// takes (SOFT_PARTICLE_SAMPLING).  Last, so only a program that fades has to declare it.
+		// takes (SOFT_PARTICLE_SAMPLING).  Only a program that fades or wears a look declares it.
 		float SoftParticleDepth[4];
+		// A per-object look's numbers (DRAW_EFFECT_SAMPLING).  Last, so only such a program
+		// declares it.
+		float DrawEffectParameters[4];
 	};
 	// A draw that is painting the world and can take a shadow from the sun's map.
 	bool Shadow_Receiving() const;
@@ -494,6 +503,19 @@ private:
 	bool Camera_Space_Draw() const;
 	bool SmokeGlow;
 	bool Smoke_Glow() const;
+	// Set_Draw_Effect's look and numbers, and the look the current draw takes after the checks.
+	unsigned DrawEffect;
+	float DrawEffectNumbers[4];
+	unsigned Draw_Effect() const;
+	// The scene as it stood when the first cloaked draw of the frame needed it, at t8: one copy a
+	// frame, taken at Set_Draw_Effect.  The scene asks for the cloak only in its translucent pass,
+	// after the opaque world, so the copy holds what is behind them.  Refused for good when the device will not make it.
+	ID3D11Texture2D * SceneColourCopy;
+	ID3D11ShaderResourceView * SceneColourCopyView;
+	bool SceneColourStale;
+	bool SceneColourRefused;
+	bool Take_Scene_Colour();
+	void Release_Scene_Colour();
 	float AdditiveGain;
 	bool GlowDraw;
 	bool Additive_Glow() const;
@@ -812,6 +834,8 @@ private:
 		ID3D11SamplerState * MapSamplers[2];
 		// The scene's depth copy at t7, for the soft particles.
 		ID3D11ShaderResourceView * SceneDepth;
+		// The scene's colour copy at t8, for the cloak.
+		ID3D11ShaderResourceView * SceneColour;
 		ID3D11InputLayout * Layout;
 		ID3D11Buffer * VertexBuffer;
 		UINT VertexStride;

@@ -32,14 +32,14 @@
 #
 # RULE 9 still holds while this runs: the root is a farm, never the install.
 #
-# Usage: root-readonly-check.sh --generals <path> [--data <dir>] [--maxframes 600] [--keep]
+# Usage: root-readonly-check.sh --generals <path> [--data <dir>] [--maxframes 1200] [--keep]
 # Exit status: 0 on a pass; 1 otherwise; 77 without game data.
 
 set -u
 
 GENERALS=""
 DATA="${ZH_DATA_DIR:-}"
-MAXFRAMES=600
+MAXFRAMES=1200		# logic frames, 60 a second
 KEEP=0
 while [ $# -gt 0 ]; do
 	case "$1" in

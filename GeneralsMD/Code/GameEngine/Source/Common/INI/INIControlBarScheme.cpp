@@ -90,6 +90,16 @@ void INI::parseControlBarSchemeDefinition( INI *ini )
 	// A multifile load edits the scheme already there; anything else gets a cleared out scheme, a
 	// previously allocated one included, to overwrite
 	CBScheme = ini->getLoadType() == INI_LOAD_MULTIFILE ? CBSchemeManager->findControlBarScheme( name ) : NULL;
+	if( CBScheme == NULL && ini->getLoadType() == INI_LOAD_MULTIFILE )
+	{
+		// A mod that renamed or dropped the scheme leaves the edit nothing to apply to, and a new scheme
+		// holding only the edited fields has no ScreenCreationRes.  The block goes into a scheme that
+		// is thrown away, so the parse reaches its End.
+		DEBUG_LOG(( "[LINE: %d in '%s'] %s patches a control bar scheme that does not exist; the block is skipped.\n", ini->getLineNum(), ini->getFilename().str(), name.str() ));
+		ControlBarScheme scratch;
+		ini->initFromINI( &scratch, CBSchemeManager->getFieldParse() );
+		return;
+	}
 	if( CBScheme == NULL )
 		CBScheme = CBSchemeManager->newControlBarScheme( name );
 

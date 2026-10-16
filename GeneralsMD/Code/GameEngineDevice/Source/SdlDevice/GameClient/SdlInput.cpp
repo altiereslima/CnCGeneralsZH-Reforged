@@ -179,7 +179,9 @@ Bool SdlInput_dispatch( const SDL_Event &event )
 				case SDL_BUTTON_LEFT:		button = SdlMouse::BUTTON_LEFT; break;
 				case SDL_BUTTON_MIDDLE:	button = SdlMouse::BUTTON_MIDDLE; break;
 				case SDL_BUTTON_RIGHT:	button = SdlMouse::BUTTON_RIGHT; break;		// a trackpad's secondary click too
-				default:								return TRUE;		// X1 and X2: WndProc takes no WM_XBUTTON either
+				case SDL_BUTTON_X1:			button = SdlMouse::BUTTON_X1; break;		// back: a camera tilt step, as WM_XBUTTONDOWN
+				case SDL_BUTTON_X2:			button = SdlMouse::BUTTON_X2; break;
+				default:								return TRUE;
 			}
 			if (SdlMouse::active() == NULL)
 				return TRUE;

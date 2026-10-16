@@ -86,6 +86,8 @@ public:
 	/// the work runs inline.  The work never allocates and never touches the device.
 	typedef void (*ParallelForFunc)(int count, int granularity, void (*work)(int index, void *context), void *context);
 	static void Set_Parallel_For(ParallelForFunc parallel_for);
+	/// The same pool for the rest of WW3D2 (the skin fill), under the same rules.
+	static void Parallel_For(int count, int granularity, void (*work)(int index, void *context), void *context);
 
 	/// A depth as an unsigned key that orders the way the float does, negatives first and -0 just
 	/// below +0; the flush's radix sort buckets on it.  The bits come out through memcpy so no

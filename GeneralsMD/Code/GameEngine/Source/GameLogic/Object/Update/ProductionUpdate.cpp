@@ -48,6 +48,7 @@
 #include "GameClient/Eva.h"
 #include "GameClient/GameText.h"
 #include "GameClient/InGameUI.h"
+#include "GameClient/ObserverCamera.h"
 
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Module/CreateModule.h"
@@ -107,8 +108,8 @@ ProductionUpdateModuleData::ProductionUpdateModuleData( void )
 	m_doorClosingTime = 0;
 	m_constructionCompleteDuration = 0;
 	m_quantityModifiers.clear();
-	// deep queues; objects that must build one at a time still say MaxQueueEntries = 1 in INI
-	m_maxQueueEntries = 100;
+	// nine, matching the queue strip; objects that must build one at a time still say MaxQueueEntries = 1 in INI
+	m_maxQueueEntries = 9;
 	m_disabledTypesToProcess = MAKE_DISABLED_MASK(DISABLED_HELD);
 }
 
@@ -232,6 +233,9 @@ ProductionUpdate::~ProductionUpdate( void )
 //-------------------------------------------------------------------------------------------------
 CanMakeType ProductionUpdate::canQueueUpgrade( const UpgradeTemplate *upgrade ) const
 {
+	if( !canResearchWithStatus( getObject()->getStatusBits() ) )
+		return CANMAKE_FACTORY_IS_DISABLED;
+
 	if (m_productionCount >= getProductionUpdateModuleData()->m_maxQueueEntries)
 		return CANMAKE_QUEUE_FULL;
 
@@ -270,6 +274,10 @@ Bool ProductionUpdate::queueUpgrade( const UpgradeTemplate *upgrade )
 
 	// sanity
 	if( upgrade == NULL )
+		return FALSE;
+
+	// every path lands here (command bar, scripts, AI, a forged message), so refuse it here
+	if( !canResearchWithStatus( getObject()->getStatusBits() ) )
 		return FALSE;
 
 	// get the player
@@ -757,9 +765,12 @@ UpdateSleepTime ProductionUpdate::update( void )
 
 	}  // end if
 
-	// if nothing in the queue get outta here
-	if( production == NULL )	
+	// if nothing in the queue, a unit on repeat takes the empty queue; it starts next frame
+	if( production == NULL )
+	{
+		queueRepeatUnit();
 		return UPDATE_SLEEP_NONE;
+	}
 
 	//
 	// if we've become OBJECT_STATUS_SOLD, halt all production ... leave things in the
@@ -1026,6 +1037,9 @@ UpdateSleepTime ProductionUpdate::update( void )
 				upgrade->getUpgradeName(),
 				us->getID());
 
+			// a recording's broadcast hangs the upgrade's flag under the player's card; this only tells the client
+			TheObserverCamera.noteUpgrade( player, upgrade );
+
 			// print a message to the local player, if it wants one
 			if( us->isLocallyControlled() && !upgrade->getDisplayNameLabel().isEmpty() )
 			{
@@ -1255,11 +1269,70 @@ void ProductionUpdate::onDie( const DamageInfo *damageInfo )
 }
 
 // ------------------------------------------------------------------------------------------------
+/** A captured factory does not go on building for its old owner's orders, nor for its new owner's
+	* money on orders he never gave. */
+// ------------------------------------------------------------------------------------------------
+void ProductionUpdate::onCapture( Player *oldOwner, Player *newOwner )
+{
+	if( oldOwner != newOwner )
+		m_repeat.clear();
+}
+
+// ------------------------------------------------------------------------------------------------
+/** What a factory on repeat does with the unit whose turn it is, from what canMakeUnit says of it.
+	* Money, a full queue or parking, the unit cap and a factory out of action (unpowered, disabled,
+	* still going up) all pass, so it waits for them like a player at the button would.  A unit the
+	* factory can no longer make at all (its prerequisite gone, a script taking it away) leaves the
+	* repeat. */
+// ------------------------------------------------------------------------------------------------
+ProductionRepeatAction Production_repeatAction( CanMakeType canMake )
+{
+	if( canMake == CANMAKE_OK )
+		return REPEAT_QUEUE;
+	if( canMake == CANMAKE_NO_PREREQ )
+		return REPEAT_DROP;
+	return REPEAT_WAIT;
+}
+
+// ------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
+void ProductionUpdate::queueRepeatUnit( void )
+{
+	const ThingTemplate *unit = m_repeat.turn();
+	if( unit == NULL )
+		return;
+
+	switch( Production_repeatAction( TheBuildAssistant->canMakeUnit( getObject(), unit ) ) )
+	{
+		case REPEAT_QUEUE:
+			if( queueCreateUnit( unit, requestUniqueUnitID() ) )
+			{
+				DEBUG_LOG(( "REPEAT: frame %d %s (%d) queues %s\n", TheGameLogic->getFrame(),
+										getObject()->getTemplate()->getName().str(), getObject()->getID(), unit->getName().str() ));
+				m_repeat.advance();
+			}
+			break;
+
+		case REPEAT_DROP:
+			DEBUG_LOG(( "REPEAT: frame %d %s (%d) drops %s, no longer buildable\n", TheGameLogic->getFrame(),
+									getObject()->getTemplate()->getName().str(), getObject()->getID(), unit->getName().str() ));
+			m_repeat.set( unit, FALSE );
+			break;
+
+		case REPEAT_WAIT:
+			break;
+	}
+}
+
+// ------------------------------------------------------------------------------------------------
 /** Cancel each of the production items in the queue.  By going through the actual cancel
 	* methods, the cost of each of those items will be refunded to the player */
 // ------------------------------------------------------------------------------------------------
 void ProductionUpdate::cancelAndRefundAllProduction( void )
 {
+	// death, sale and defection all come through here, and none of them leaves a factory to repeat
+	m_repeat.clear();
+
 	//
 	// The old loop ran a fixed 100 passes whether or not the queue was empty, because
 	// cancelUpgrade could return without removing its entry (fixed above) and the head would
@@ -1363,7 +1436,8 @@ void ProductionUpdate::xfer( Xfer *xfer )
 	// version
 	// 2: each entry carries what was paid for it
 	// 3: each entry carries the build time its frame count was measured against
-	XferVersion currentVersion = 3;
+	// 4: the units on repeat and whose turn it is
+	XferVersion currentVersion = 4;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -1545,6 +1619,38 @@ void ProductionUpdate::xfer( Xfer *xfer )
 
 	// flags dirty
 	xfer->xferBool( &m_flagsDirty );
+
+	// units on repeat, by template name, and whose turn it is
+	if( version >= 4 )
+	{
+		UnsignedShort repeatCount = (UnsignedShort)m_repeat.m_units.size();
+		xfer->xferUnsignedShort( &repeatCount );
+		AsciiString name;
+		if( xfer->getXferMode() == XFER_SAVE )
+		{
+			for( UnsignedShort i = 0; i < repeatCount; ++i )
+			{
+				name = m_repeat.m_units[ i ]->getName();
+				xfer->xferAsciiString( &name );
+			}
+		}
+		else
+		{
+			m_repeat.m_units.clear();
+			for( UnsignedShort i = 0; i < repeatCount; ++i )
+			{
+				xfer->xferAsciiString( &name );
+				const ThingTemplate *unit = TheThingFactory->findTemplate( name );
+				if( unit == NULL )
+				{
+					DEBUG_CRASH(( "ProductionUpdate::xfer - Cannot find repeat template '%s'\n", name.str() ));
+					throw SC_INVALID_DATA;
+				}
+				m_repeat.m_units.push_back( unit );
+			}
+		}
+		xfer->xferUnsignedInt( &m_repeat.m_next );
+	}
 
 }  // end xfer
 

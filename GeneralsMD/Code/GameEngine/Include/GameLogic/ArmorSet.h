@@ -70,6 +70,9 @@ private:
 	ArmorSetFlags m_types;
 	const ArmorTemplate* m_template;
 	const DamageFX* m_fx;
+	Bool m_namesMissingArmor;	///< the Armor line named an armor the store does not have
+
+	static void parseArmor( INI* ini, void *instance, void *store, const void* userData );
 
 public:
 	inline ArmorTemplateSet()
@@ -82,9 +85,11 @@ public:
 		m_types.clear();
 		m_template = NULL;
 		m_fx = NULL;
+		m_namesMissingArmor = FALSE;
 	}
 
-	inline const ArmorTemplate* getArmorTemplate() const { return m_template; } 
+	inline const ArmorTemplate* getArmorTemplate() const { return m_template; }
+	inline Bool namesMissingArmor() const { return m_namesMissingArmor; }
 	inline const DamageFX* getDamageFX() const { return m_fx; } 
 
 	inline Int getConditionsYesCount() const { return 1; }

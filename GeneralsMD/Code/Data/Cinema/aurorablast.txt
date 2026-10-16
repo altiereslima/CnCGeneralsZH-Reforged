@@ -1,0 +1,12 @@
+# Scenarios/aurorablast.txt: the same zoom, heading and tilt on each of the three blasts, so the
+# Aurora's bomb on a vehicle, on a building and the Scud Launcher's missile on a vehicle read at
+# one size. Zoom 0.9 logs about 1.23 here.
+
+0     cut        1420 3830 0.9 -45 8
+1     cut        1420 3830 0.9 -45 8
+6     shot
+10    cut        1250 3800 0.9 -45 8
+16    shot
+20    cut        1510 3690 0.9 -45 8
+27    shot
+33    end

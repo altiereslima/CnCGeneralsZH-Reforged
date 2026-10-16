@@ -1,0 +1,19 @@
+# Production repeat: the Ctrl+Alt build key, sent as MSG_SET_REPEAT_UNIT onto the message stream, so
+# the replay records it and a network match sends it to every copy.  The command center builds
+# dozers on repeat from frame 60 and stops at frame 1200; each one queued writes a REPEAT line.  On
+# 2026-10-15 it queued four, one every 601 logic frames, and the tally read 5 alive and $6000 left;
+# the replay played back to the same 0xCEBBE5D2 at frame 3000.
+#
+# Nothing here bypasses the replay (no spawn), so the replay this run leaves plays back to the same
+# HEADLESS CRC with -replay and no -scenario.  Slot 0 is the local seat, so no -observer.
+#
+#   generals.exe -headless -quickstart -noshellmap -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 3000
+#     -scenario repeatbuild -logPrefix repeat_
+#
+# netrepeat.txt is the same over a network match.
+
+60    repeat  0  AmericaCommandCenter  AmericaVehicleDozer  on
+1200  repeat  0  AmericaCommandCenter  AmericaVehicleDozer  off
+1450  tally   0  AmericaVehicleDozer

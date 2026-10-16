@@ -1,0 +1,18 @@
+# Scenarios/drawlooks.txt on Twilight Flame: the four Direct3D 11 object looks of 528b9054 in
+# three places, one after another. Paired with the same run under -d3d9 for the before. Every
+# view faces east (heading -90), into the map, so the west edge behind seat 0's base stays out.
+# The clip is -video 60 1440; stills come out of the two clips, not from shot lines.
+#
+#  2 s  seat 0's base from the west, the forward power plant on the right; it falls and the
+#       base goes dark (outage)
+# 20 s  the field: the Microwave column on the EMP mines, Battlemasters against Crusaders below
+# 30.5 s close on the own Black Lotus (cloak), Burton crossing her (revealed), the dozer finding her
+
+2.0   cut      700 3080 0.75 -90 4
+2.0   orbit    -12 17
+
+20.0  cut      1430 3740 0.55 -90 6
+20.0  orbit    10 10
+
+30.5  cut      2280 3740 0.4 -90 8
+30.5  follow   ChinaInfantryBlackLotus

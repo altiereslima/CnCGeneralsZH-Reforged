@@ -35,6 +35,7 @@
 #include "Common/PerfTimer.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
+#include "Common/PlayerTemplate.h"
 #include "Common/ThingTemplate.h"
 #include "Common/Xfer.h"
 #include "Common/XferCRC.h"
@@ -86,6 +87,35 @@ void TAiData::addFactionBuildList(AISideBuildList *buildList)
 	}
 	buildList->m_next = m_sideBuildLists;
 	m_sideBuildLists = buildList;
+}
+
+const AISideInfo *TAiData::findSideInfo( const AsciiString &side, Int modIndex ) const
+{
+	const AsciiString own = AI::modSideKey( side, modIndex );
+	for (const AISideInfo *info = m_sideInfo; info != NULL; info = info->m_next)
+	{
+		if (info->m_side == own)
+			return info;
+	}
+	return modIndex >= 0 ? findSideInfo( side, -1 ) : NULL;
+}
+
+const AISideBuildList *TAiData::findBuildList( const AsciiString &side, Int modIndex ) const
+{
+	const AsciiString own = AI::modSideKey( side, modIndex );
+	for (const AISideBuildList *build = m_sideBuildLists; build != NULL; build = build->m_next)
+	{
+		if (build->m_side == own)
+			return build;
+	}
+	return modIndex >= 0 ? findBuildList( side, -1 ) : NULL;
+}
+
+const AISideInfo *TAiData::findSideInfo( const Player *player ) const
+{
+	// a map player whose faction is gone (an obsolete map) has no template, and plays retail's side
+	const PlayerTemplate *pt = player->getPlayerTemplate();
+	return findSideInfo( player->getSide(), pt != NULL ? pt->getModIndex() : -1 );
 }
 
 TAiData::~TAiData()
@@ -479,9 +509,65 @@ void AI::parseAiDataDefinition( INI* ini )
 
 	}  // end if
 
+	/* -modfactions: a mod's pass (INI::loadModPasses) takes only its sides' entries, filed under
+		 "M<n>~<side>" with its names already prefixed, so its factions build and train its own things.
+		 The tuning in the rest of the block stays the fork's, mods fit the fork. */
+	const Int mod = TheModNamespace.getActive();
+	if (mod >= 0)
+	{
+		TAiData *modData = NEW TAiData;
+		// the mod's AIData.ini goes over its Default\AIData.ini: what the first filed seeds this parse, so a
+		// SideInfo field the second leaves out keeps the first's value, as retail's two files merge
+		const AsciiString prefix = modSideKey( AsciiString::TheEmptyString, mod );
+		for (AISideInfo **link = &TheAI->m_aiData->m_sideInfo; *link != NULL; )
+		{
+			AISideInfo *info = *link;
+			if (!info->m_side.startsWith( prefix ))
+			{
+				link = &info->m_next;
+				continue;
+			}
+			*link = info->m_next;
+			const AsciiString side( info->m_side.str() + prefix.getLength() );
+			info->m_side = side;
+			modData->addSideInfo( info );
+		}
+		ini->initFromINI( modData, TheAIFieldParseTable );
+		Int sides = 0;
+		while (modData->m_sideInfo != NULL)
+		{
+			AISideInfo *info = modData->m_sideInfo;
+			modData->m_sideInfo = info->m_next;
+			info->m_side = modSideKey( info->m_side, mod );
+			TheAI->m_aiData->addSideInfo( info );
+			++sides;
+		}
+		Int buildLists = 0;
+		while (modData->m_sideBuildLists != NULL)
+		{
+			AISideBuildList *build = modData->m_sideBuildLists;
+			modData->m_sideBuildLists = build->m_next;
+			build->m_side = modSideKey( build->m_side, mod );
+			TheAI->m_aiData->addFactionBuildList( build );
+			++buildLists;
+		}
+		delete modData;
+		DEBUG_LOG(( "MODNS M%d~ AIData from %s: %d sides, %d skirmish build lists\n", mod + 1, ini->getFilename().str(), sides, buildLists ));
+		return;
+	}
+
 	// parse the ini weapon definition
 	ini->initFromINI( TheAI->m_aiData, TheAIFieldParseTable );
 
+}
+
+AsciiString AI::modSideKey( const AsciiString &side, Int modIndex )
+{
+	if (modIndex < 0)
+		return side;
+	AsciiString key;
+	key.format( "M%d~%s", modIndex + 1, side.str() );
+	return key;
 }
 
 
@@ -1108,12 +1194,59 @@ Real AI::getAdjustedVisionRangeForObject(const Object *object, Int factorsToCons
 	* from 48% to 40% and stragglers from 17% to 14% of deaths; massU on top shortened the matches
 	* and lost more for what it killed (0.70 against 0.64), so it stays off until it earns its place.
 	*
-	*                      scoutS maxSc decis  cntr  mass   ttk  indiv team infl focus save harv expand guard hoard econ micro  gate  answer massU */
+	*
+	* The last eight columns came in on 2026-10-10, on every rung.  bankS and floor are the bank each
+	* rung keeps before it spends past its plan: Hard holds thirty seconds of its income, Medium a
+	* minute, Easy two, and the floor is the whole target until an income is measured.  Below the
+	* target the purchase queue saves for the best thing it cannot afford; above it nothing is saved
+	* for and an upgrade needs half the payoff.  payoff and upgr are when an upgrade is worth its
+	* price: what it improves has to be worth that many times the price, and the match has to be that
+	* many seconds old.  nonc is what a building or an unarmed unit counts for there next to a fighting
+	* unit.  share is how much of thirty seconds' income an idle factory may turn into extra units on
+	* a pass with the bank over target, and maxF the most war factories, barracks and airfields the
+	* rule puts up, one an income window while the bank is over target and not falling, or past fMult
+	* times the target whatever it is doing (0 for never).
+	*
+	* The first cut counted buildings at full price, so Fortified Structure was every GLA's first
+	* upgrade; spent every idle factory's worth of surplus on every rung, so Medium's peak army rose
+	* from 67 to 99 and Hard against Medium went from 3-0 to 1-1; and sized production at a guessed 60
+	* a second a factory, so a Hard AI earning 93 a second wanted the two factories it had.  The second
+	* cut (share 0.10/0.25/1.00, maxF 3/4/8, the trend alone) took Fortified Structure off the top, but
+	* Medium had idle factories, took 62 surplus units and four factories a match, peaked at 112 against
+	* Hard's 112 and drew all six.  So Medium and Easy keep to their plan's two war factories and a
+	* barracks (maxF 3, with the plan's unbuilt ones counted, so the rule adds none), and their share is
+	* cut to 0.10 and 0.05: Medium's 62 surplus units at 0.25 become about 25, the 25 Easy took at 0.10
+	* when its army was fine, and Easy's half of that keeps it under Medium.  Hard alone adds factories,
+	* and also past twice its target whatever the trend (fMult).  With that Hard beat Medium 3-0 over
+	* 45,000 frames and Medium beat Easy 4-0.
+	*
+	* Hard's hoard was never there in the mirror.  The batch read the bank as starting money plus earned
+	* minus spent, and the score keeper's spent counts buildings and upgrades and never a unit: that sum
+	* said 52,000 to 59,000 where the bank itself ended between 10 and 4,000, before this rule and after
+	* it.  Against Medium it ended on 12,300 on average before and 1,600 after.  HEADLESS BANK prints the
+	* bank itself now.
+	*
+	* Medium's own hoard was real.  On Twilight Flame its five supply centres earn 300 a second and more
+	* by the middle of the match, and the plan's three factories with a tenth of it as surplus spent
+	* little of that: six Medium China matches against Easy to frame 45,000 ended on 125,000 to 230,000
+	* in the bank and Medium won one, the rest unfinished.  So Medium now takes a quarter of its surplus,
+	* puts up factories to five once the bank is past three times its target, and its minimum wave is
+	* 2,000 rather than 3,000.  The same six matches went 6-0 to Medium.  Hard against Medium stayed
+	* mostly unfinished at 45,000 on both builds, 1-0 with 5 draws before and 0-1 with 5 after, so a
+	* Hard that cannot close out Medium is still open.
+	*
+	* The last column, strikeE, came in on 2026-10-14: what a supply centre, black market, hacker,
+	* drop zone, captured derrick, strategy centre or palace adds to a superweapon's or a general
+	* power's score, in multiples of its price on top of the price.  Price alone and the threat weight
+	* on armed units sent every strike at the army; a strike on the economy is the one a player feels
+	* for the rest of the match.  Easy keeps price alone, Medium doubles it, Hard triples it.
+	*
+	*                      scoutS maxSc decis  cntr  mass   ttk  indiv team infl focus save harv expand guard hoard econ micro  gate  answer massU  bankS  floor payoff upgr    nonc  share maxF fMult push   minPow  siege  beam  strikeE */
 static const AIDifficultyProfile s_defaultSkillLadder[ AISKILL_COUNT ] =
 {
-	/* Easy      */ { 75.0f, 1,  7.0f,  0.00f, FALSE, 0.00f, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  FALSE, FALSE,     0, FALSE, FALSE, FALSE, FALSE, FALSE },
-	/* Medium    */ { 45.0f, 1,  3.0f,  0.50f, FALSE, 0.35f, TRUE,  FALSE, FALSE, TRUE,  TRUE,  TRUE,  TRUE,  FALSE,  6000, FALSE, FALSE, FALSE, FALSE, FALSE },
-	/* Brutal    */ { 25.0f, 2,  1.5f,  1.00f, TRUE,  0.50f, TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,   4000, TRUE,  TRUE,  TRUE,  TRUE,  FALSE }
+	/* Easy      */ { 75.0f, 1,  7.0f,  0.00f, FALSE, 0.00f, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  FALSE, FALSE,     0, FALSE, FALSE, FALSE, FALSE, FALSE, 120.0f, 6000, 4.0f, 720.0f, 0.05f, 0.05f, 3, 0.0f, 360.0f, 1500.0f,  80.0f, 0.00f, 0.0f },
+	/* Medium    */ { 45.0f, 1,  3.0f,  0.50f, FALSE, 0.35f, TRUE,  FALSE, FALSE, TRUE,  TRUE,  TRUE,  TRUE,  FALSE,  6000, FALSE, FALSE, FALSE, FALSE, FALSE,  60.0f, 5000, 2.5f, 420.0f, 0.05f, 0.25f, 5, 3.0f, 300.0f, 2000.0f, 120.0f, 1.00f, 1.0f },
+	/* Hard      */ { 25.0f, 2,  1.5f,  1.00f, TRUE,  0.50f, TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,   4000, TRUE,  TRUE,  TRUE,  TRUE,  FALSE,  30.0f, 4000, 1.5f, 180.0f, 0.05f, 1.00f, 8, 2.0f, 240.0f, 4500.0f, 160.0f, 0.25f, 2.0f }
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -1403,6 +1536,143 @@ Int aiHoardAllowedTeamInstances( Int maxInstances, Int money, Int hoardAt )
 }
 
 //-------------------------------------------------------------------------------------------------
+Int aiPurchaseScore( AIPurchaseKind kind, Bool earlyGame )
+{
+	switch( kind )
+	{
+		case AIBUY_EMERGENCY:		return 200;
+		case AIBUY_POWER:				return 100;
+		case AIBUY_DOZER:				return 90;
+		case AIBUY_ECONOMY:			return earlyGame ? 85 : 50;
+		case AIBUY_BASE:				return 70;
+		case AIBUY_SUPERWEAPON:	return 60;
+		case AIBUY_ARMY:				return earlyGame ? 30 : 55;
+		case AIBUY_DEFENSE:			return 45;
+		case AIBUY_UPGRADE:			return 35;
+		default:								return 0;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+AIPurchaseQueue::Lapse AIPurchaseQueue::expire( UnsignedInt frame )
+{
+	if( m_key == NONE )
+		return KEPT;
+	if( frame - m_since >= AI_PURCHASE_HOLD_FRAMES )
+	{
+		m_lapsedKey = m_key;
+		m_lapsedUntil = frame + AI_PURCHASE_HOLD_FRAMES;
+		m_key = NONE;
+		return TIMED_OUT;
+	}
+	if( frame - m_seen >= AI_PURCHASE_STALE_FRAMES )
+	{
+		m_key = NONE;
+		return STALE;
+	}
+	return KEPT;
+}
+
+//-------------------------------------------------------------------------------------------------
+AIPurchaseQueue::Verdict AIPurchaseQueue::ask( Int key, Int cost, Int score, Bool startable, Int money, Int hoardAt, UnsignedInt frame )
+{
+	if( key == m_key )
+	{
+		m_seen = frame;
+		m_cost = cost;
+		return cost <= money ? BUY : SAVING;
+	}
+
+	const Bool outranks = m_key == NONE || score > m_score || (score == m_score && key < m_key);
+	if( cost <= money )
+	{
+		const Int ceiling = hoardAt > m_cost ? hoardAt : m_cost;
+		if( outranks || money - cost >= m_cost || money > ceiling )
+			return BUY;
+		++m_held;
+		return HELD;
+	}
+
+	if( !startable || !outranks || money > hoardAt || (key == m_lapsedKey && frame < m_lapsedUntil) )
+		return SHORT;
+	m_key = key;
+	m_cost = cost;
+	m_score = score;
+	m_since = frame;
+	m_seen = frame;
+	m_held = 0;
+	return RESERVED;
+}
+
+//-------------------------------------------------------------------------------------------------
+Int aiBankTarget( Real incomePerSecond, Real seconds, Int floor )
+{
+	const Int byIncome = REAL_TO_INT_FLOOR( incomePerSecond * seconds );
+	return byIncome > floor ? byIncome : floor;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool aiWantsMoreProduction( Int bank, Int bankWindowAgo, Int target, Int standing, Int cap, Real multiple )
+{
+	if( standing >= cap || bank <= target )
+		return FALSE;
+	return bank >= bankWindowAgo || (multiple > 0.0f && INT_TO_REAL( bank ) > multiple * INT_TO_REAL( target ));
+}
+
+//-------------------------------------------------------------------------------------------------
+Int aiSurplusBudget( Int bank, Int target, Real incomePerSecond, Real share )
+{
+	const Int excess = bank - target;
+	if( excess <= 0 )
+		return 0;
+	const Int byIncome = REAL_TO_INT_FLOOR( share * incomePerSecond * AI_SURPLUS_INCOME_SECONDS );
+	return byIncome < excess ? byIncome : excess;
+}
+
+//-------------------------------------------------------------------------------------------------
+Int aiFortuneBudget( Int bank, Int keep, Int fortune, Real share )
+{
+	Int excess = bank - keep;
+	if( excess > fortune )
+		excess = fortune;
+	if( excess <= 0 )
+		return 0;
+	return REAL_TO_INT_FLOOR( share * INT_TO_REAL( excess ) );
+}
+
+//-------------------------------------------------------------------------------------------------
+Real aiCounterFit( Real matchup, Real weight )
+{
+	return 1.0f + weight * (2.0f * matchup - 1.0f);
+}
+
+//-------------------------------------------------------------------------------------------------
+Real aiUpgradeWeight( Bool fights, Real fit, Real nonCombatWeight )
+{
+	return fights ? fit : nonCombatWeight;
+}
+
+//-------------------------------------------------------------------------------------------------
+Int aiPickUpgrade( const Real *covered, const Int *cost, Int count, Real payoff, Bool overTarget )
+{
+	const Real needed = overTarget ? 0.5f * payoff : payoff;
+	Int best = -1;
+	Real bestTimes = 0.0f;
+	for( Int i = 0; i < count; ++i )
+	{
+		if( cost[ i ] <= 0 || covered[ i ] <= 0.0f )
+			continue;
+		const Real times = covered[ i ] / INT_TO_REAL( cost[ i ] );
+		if( times >= needed && (best < 0 || times > bestTimes) )
+		{
+			best = i;
+			bestTimes = times;
+		}
+	}
+	return best;
+}
+
+//-------------------------------------------------------------------------------------------------
 Int aiLeastDefendedLane( const Real *laneFirepower, Int laneCount, Int requestedLane )
 {
 	Int quietest = -1;
@@ -1623,6 +1893,19 @@ void AI::parseSkillLevel(INI *ini, void *instance, void* /*store*/, const void* 
 		{ "EngageGate",								INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_engageGate ) },
 		{ "AnswerArmy",								INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_answerArmy ) },
 		{ "MassUnit",									INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_massUnit ) },
+		{ "BankTargetSeconds",				INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_bankTargetSeconds ) },
+		{ "BankTargetFloor",					INI::parseInt,  NULL, offsetof( AIDifficultyProfile, m_bankTargetFloor ) },
+		{ "UpgradePayoff",						INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_upgradePayoff ) },
+		{ "UpgradeStartSeconds",			INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_upgradeStartSeconds ) },
+		{ "UpgradeNonCombatWeight",		INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_upgradeNonCombatWeight ) },
+		{ "SurplusShare",							INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_surplusShare ) },
+		{ "MaxProduction",						INI::parseInt,  NULL, offsetof( AIDifficultyProfile, m_maxProduction ) },
+		{ "FactoryBankMultiple",			INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_factoryBankMultiple ) },
+		{ "FirstPushSeconds",					INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_firstPushSeconds ) },
+		{ "MinAttackPower",						INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_minAttackPower ) },
+		{ "SiegeTrail",								INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_siegeTrail ) },
+		{ "BeamSteerSeconds",					INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_beamSteerSeconds ) },
+		{ "StrikeEconomyWeight",			INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_strikeEconomyWeight ) },
 		{ NULL, NULL, NULL, 0 }
 	};
 

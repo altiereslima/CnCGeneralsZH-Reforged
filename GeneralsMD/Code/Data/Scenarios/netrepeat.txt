@@ -1,0 +1,22 @@
+# Production repeat across a network match.  A -netgame seat gets a random general, so there is a
+# line for each of the twelve command centers; the eleven that slot 0 does not own are refused.
+# Every copy plays the file and only the copy whose local seat is slot 0 sends the message, so the
+# other copy learns of the repeat from the network alone.  Each copy's log carries the dispatcher's
+# REPEAT line and one REPEAT line per builder queued; the CRC covers the builders that come out.
+#
+#   python net_check.py --each "-scenario netrepeat" --tag netrepeat
+#
+# repeatbuild.txt is the same on one machine, for the replay.
+
+60    repeat  0  AmericaCommandCenter       AmericaVehicleDozer       on
+60    repeat  0  AirF_AmericaCommandCenter  AirF_AmericaVehicleDozer  on
+60    repeat  0  Lazr_AmericaCommandCenter  Lazr_AmericaVehicleDozer  on
+60    repeat  0  SupW_AmericaCommandCenter  SupW_AmericaVehicleDozer  on
+60    repeat  0  ChinaCommandCenter         ChinaVehicleDozer         on
+60    repeat  0  Tank_ChinaCommandCenter    Tank_ChinaVehicleDozer    on
+60    repeat  0  Infa_ChinaCommandCenter    Infa_ChinaVehicleDozer    on
+60    repeat  0  Nuke_ChinaCommandCenter    Nuke_ChinaVehicleDozer    on
+60    repeat  0  GLACommandCenter           GLAInfantryWorker         on
+60    repeat  0  Demo_GLACommandCenter      Demo_GLAInfantryWorker    on
+60    repeat  0  Slth_GLACommandCenter      Slth_GLAInfantryWorker    on
+60    repeat  0  Chem_GLACommandCenter      Chem_GLAInfantryWorker    on

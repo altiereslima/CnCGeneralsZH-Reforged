@@ -92,7 +92,7 @@ W3DPoliceCarDraw::~W3DPoliceCarDraw( void )
 	if( m_light )
 	{
 		// Have it fade out over 5 frames.
-		m_light->setFrameFade(0, 5);
+		m_light->setFrameFade(0, ConvertRetailFrames(5u));
 		m_light->setDecayRange();
 		m_light->setDecayColor();
 		m_light = NULL;
@@ -105,7 +105,7 @@ W3DPoliceCarDraw::~W3DPoliceCarDraw( void )
 void W3DPoliceCarDraw::doDrawModule(const Matrix3D* transformMtx)
 {
 	const Real floatAmt = 8.0f;
-	const Real animAmt = 0.25;
+	const Real animAmt = ConvertRetailPerFrameRate(0.25f);
 
 	// get pointers to our render objects that we'll need
 	RenderObjClass* policeCarRenderObj = getRenderObject();
@@ -117,7 +117,7 @@ void W3DPoliceCarDraw::doDrawModule(const Matrix3D* transformMtx)
 	{
 		Real frames = anim->Get_Num_Frames();
 		//
-		// animAmt is a quarter of an animation frame per LOGIC frame, but doDrawModule runs once
+		// animAmt is a quarter of an animation frame per 30 Hz LOGIC frame, but doDrawModule runs once
 		// per RENDER frame: uncapped, the light span through its cycle at (fps/30) times speed.
 		// Step it on the logic clock, the same way the tree sway does.
 		//

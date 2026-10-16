@@ -16,7 +16,9 @@
 
 #include "test_harness.h"
 
+#include <filesystem>
 #include <limits>
+#include <string>
 
 #include "Common/AsciiString.h"
 #include "Common/CommandLine.h"
@@ -27,6 +29,8 @@
 #include "Common/LocalFileSystem.h"
 #include "Common/LocalFile.h"
 #include "Common/INI.h"
+#include "Common/ArchiveFile.h"
+#include "Common/ArchiveFileSystem.h"
 #include "Common/INIException.h"
 #include "Common/STLTypedefs.h"
 #include "Common/DataChunk.h"
@@ -58,7 +62,6 @@
 #include "GameClient/HotKey.h"
 #include "GameClient/ClickTolerance.h"
 #include "Common/version.h"
-#include "GameClient/HtmlTemplate.h"
 #include "GameClient/KeyDownInfo.h"
 #include "GameClient/GameWindowTransitions.h"
 #include "GameLogic/ScenarioDrill.h"
@@ -69,6 +72,8 @@
 #include "Common/ThingTemplate.h"
 #include "Common/ThingFactory.h"
 #include "Common/ModuleFactory.h"
+#include "Common/SpecialPower.h"
+#include "GameLogic/Armor.h"
 #include "Common/SimulationMathCrc.h"
 #include "GameLogic/FPUControl.h"
 #include "GameLogic/ExperienceTracker.h"
@@ -244,7 +249,12 @@ public:
 	virtual Bool createDirectory( AsciiString ) { return FALSE; }
 	virtual Bool copyFile( const Char *, const Char *, Bool ) { return FALSE; }
 	virtual Bool deleteFile( const Char * ) { return FALSE; }
-	virtual Bool moveFileReplacing( const Char *, const Char * ) { return FALSE; }
+	// XferSave::close writes "<name>.tmp" and puts it in place through this
+	virtual Bool moveFileReplacing( const Char *from, const Char *to )
+	{
+		remove( to );
+		return rename( from, to ) == 0;
+	}
 	virtual void getFilesInDirectory( const AsciiString&, const AsciiString&, std::vector<AsciiString>& ) const {}
 	virtual AsciiString getCurrentDirectory() const { return AsciiString::TheEmptyString; }
 };
@@ -673,6 +683,206 @@ TEST(balance_patch_edits_a_weapon_in_place)
 	remove( TEST_INI );
 }
 
+#include "../Stubs/NullAudioManager.h"
+
+/* The Paladin's infantry laser, the second point defense module BalanceReforged.ini gives it, once
+	 borrowed EA's WatchTowerMachineGun.  Contra's Weapon.ini leaves that weapon out, the MULTIFILE
+	 block for it was dropped as the test above wants, the module got a null template and
+	 PointDefenseLaserUpdate::scanClosestTarget crashed on it.  The weapon is the fork's own now, in
+	 WeaponReforged.ini, loaded the way GameEngine::init loads it: it has to come out whole from a
+	 store that holds none of EA's weapons, which is what a mod's Weapon.ini can leave. */
+TEST(weapon_reforged_ini_makes_the_paladin_infantry_laser_without_eas_weapons)
+{
+	CHECK( bootOnce() );
+
+	if( TheWeaponStore == NULL )
+		TheWeaponStore = NEW WeaponStore;
+	if( TheFXListStore == NULL )
+		TheFXListStore = NEW FXListStore;
+
+	/* the fire FX the weapon names; retail has it, Contra does not, and a missing one reads as none */
+	writeFile( TEST_INI,
+		"FXList WeaponFX_PaladinPointDefenseLaser\r\n"
+		"End\r\n" );
+	CHECK( loadIni( TEST_INI ) );
+	remove( TEST_INI );
+
+	CHECK( TheWeaponStore->findWeaponTemplate( "WatchTowerMachineGun" ) == NULL );
+
+	/* EA's death weapons in the file carry a FireSound, which the parser looks up in TheAudio: the
+		 silent device answers with an empty event table, as the game's would for a sound it lacks */
+	AudioManager *savedAudio = TheAudio;
+	if( savedAudio == NULL )
+		TheAudio = NEW NullAudioManager;
+
+	Bool threw = FALSE;
+	try
+	{
+		INI ini;
+		ini.load( AsciiString( WEAPON_REFORGED_INI ), INI_LOAD_OVERWRITE, NULL );
+	}
+	catch( ... )
+	{
+		threw = TRUE;
+	}
+	CHECK( threw == FALSE );
+
+	if( savedAudio == NULL )
+	{
+		delete TheAudio;
+		TheAudio = NULL;
+	}
+
+	const WeaponTemplate *laser = TheWeaponStore->findWeaponTemplate( "Reforged_PaladinInfantryLaser" );
+	CHECK( laser != NULL );
+	if( laser == NULL )
+		return;
+	WeaponBonus noBonus;
+	CHECK_NEAR( laser->getPrimaryDamage( noBonus ), 100.0f, 0.01f );
+	CHECK_NEAR( laser->getUnmodifiedAttackRange(), 65.0f, 0.01f );
+	CHECK_EQ( laser->getClipSize(), 2 );
+	CHECK_STR( laser->getLaserName().str(), "PointDefenseLaserBeam" );
+}
+
+/* WeaponReforged.ini also keeps copies of EA weapons FixesReforged.ini hands out, under EA's names,
+	 for a mod whose Weapon.ini dropped them.  Where the weapon is already defined the copy is read and
+	 dropped and the first definition stands; this used to return mid-block, and the next field line
+	 threw as an unknown block. */
+TEST(weapon_defined_twice_keeps_the_first_and_reads_on)
+{
+	CHECK( bootOnce() );
+
+	if( TheWeaponStore == NULL )
+		TheWeaponStore = NEW WeaponStore;
+
+	writeFile( TEST_INI,
+		"Weapon TwiceDefinedProbeGun\r\n"
+		"  PrimaryDamage = 60.0\r\n"
+		"End\r\n" );
+	CHECK( loadIni( TEST_INI ) );
+
+	writeFile( TEST_INI,
+		"Weapon TwiceDefinedProbeGun\r\n"
+		"  PrimaryDamage = 5.0\r\n"
+		"  AttackRange = 999.0\r\n"
+		"End\r\n"
+		"Weapon TwiceDefinedProbeGunAfter\r\n"
+		"  PrimaryDamage = 7.0\r\n"
+		"End\r\n" );
+	CHECK( loadIni( TEST_INI ) );
+
+	WeaponBonus noBonus;
+	const WeaponTemplate *first = TheWeaponStore->findWeaponTemplate( "TwiceDefinedProbeGun" );
+	CHECK( first != NULL );
+	if( first != NULL )
+		CHECK_NEAR( first->getPrimaryDamage( noBonus ), 60.0f, 0.01f );
+	const WeaponTemplate *after = TheWeaponStore->findWeaponTemplate( "TwiceDefinedProbeGunAfter" );
+	CHECK( after != NULL );
+	if( after != NULL )
+		CHECK_NEAR( after->getPrimaryDamage( noBonus ), 7.0f, 0.01f );
+
+	remove( TEST_INI );
+}
+
+#include "GameLogic/ArmorSet.h"
+
+/* FixesReforged.ini's Toxin Tunnel Defender and Stinger sets name EA's Chem_ rockets and its Ranger
+	 armor set names ChemSuitHumanArmor; Contra keeps those objects and drops the weapons and the armor.
+	 Applied anyway, the set left a null in each slot: Contra's two went unarmed and its Rangers took
+	 every hit at full damage after Chemical Suits.  A patch set naming a missing weapon or armor is
+	 skipped now and the object keeps its own; a set that names what exists still applies. */
+TEST(patch_set_naming_a_missing_weapon_or_armor_is_skipped)
+{
+	CHECK( bootOnce() );
+
+	GlobalData *savedGlobals = TheWritableGlobalData;
+	if( savedGlobals == NULL )
+		TheWritableGlobalData = NEW GlobalData;
+	if( TheModuleFactory == NULL )
+	{
+		TheModuleFactory = NEW ModuleFactory;
+		TheModuleFactory->init();
+	}
+	if( TheThingFactory == NULL )
+		TheThingFactory = NEW ThingFactory;
+	if( TheWeaponStore == NULL )
+		TheWeaponStore = NEW WeaponStore;
+	if( TheArmorStore == NULL )
+		TheArmorStore = NEW ArmorStore;
+
+	writeFile( TEST_INI,
+		"Weapon MissingSetProbeGunA\r\n"
+		"  PrimaryDamage = 10.0\r\n"
+		"End\r\n"
+		"Weapon MissingSetProbeGunB\r\n"
+		"  PrimaryDamage = 20.0\r\n"
+		"End\r\n"
+		"Armor MissingSetProbeArmor\r\n"
+		"  Armor = SMALL_ARMS 50%\r\n"
+		"End\r\n"
+		"Object MissingSetProbe\r\n"
+		"  WeaponSet\r\n"
+		"    Conditions = None\r\n"
+		"    Weapon = PRIMARY MissingSetProbeGunA\r\n"
+		"  End\r\n"
+		"  ArmorSet\r\n"
+		"    Conditions = None\r\n"
+		"    Armor = MissingSetProbeArmor\r\n"
+		"  End\r\n"
+		"End\r\n" );
+	CHECK( loadIni( TEST_INI ) );
+
+	writeFile( TEST_INI,
+		"Object MissingSetProbe\r\n"
+		"  WeaponSet\r\n"
+		"    Conditions = None\r\n"
+		"    Weapon = PRIMARY MissingSetProbeGunNotDefined\r\n"
+		"  End\r\n"
+		"  WeaponSet\r\n"
+		"    Conditions = PLAYER_UPGRADE\r\n"
+		"    Weapon = PRIMARY MissingSetProbeGunB\r\n"
+		"  End\r\n"
+		"  ArmorSet\r\n"
+		"    Conditions = None\r\n"
+		"    Armor = MissingSetProbeArmorNotDefined\r\n"
+		"  End\r\n"
+		"End\r\n" );
+	Bool threw = FALSE;
+	try
+	{
+		INI patch;
+		patch.load( AsciiString( TEST_INI ), INI_LOAD_MULTIFILE, NULL );
+	}
+	catch( ... )
+	{
+		threw = TRUE;
+	}
+	CHECK( threw == FALSE );
+
+	const ThingTemplate *probe = TheThingFactory->findTemplate( "MissingSetProbe" );
+	CHECK( probe != NULL );
+	if( probe != NULL )
+	{
+		const WeaponTemplateSetVector &sets = probe->getWeaponTemplateSets();
+		CHECK_EQ( (Int)sets.size(), 2 );
+		CHECK( sets[ 0 ].getNth( PRIMARY_WEAPON ) == TheWeaponStore->findWeaponTemplate( "MissingSetProbeGunA" ) );
+		CHECK( sets[ 1 ].getNth( PRIMARY_WEAPON ) == TheWeaponStore->findWeaponTemplate( "MissingSetProbeGunB" ) );
+
+		ArmorSetFlags none;
+		const ArmorTemplateSet *armor = probe->findArmorTemplateSet( none );
+		CHECK( armor != NULL );
+		if( armor != NULL )
+			CHECK( armor->getArmorTemplate() == TheArmorStore->findArmorTemplate( "MissingSetProbeArmor" ) );
+	}
+
+	remove( TEST_INI );
+	if( savedGlobals == NULL )
+	{
+		delete TheWritableGlobalData;
+		TheWritableGlobalData = NULL;
+	}
+}
+
 /* BalanceReforged.ini replaces Tank_ChinaBunker's ModuleTag_05 with a StructureBody.  Under the
 	 Shockwave mod that tag holds another module, and the type check in ThingTemplate::parseModuleName
 	 threw and stopped the game at start.  The block is skipped now: the template keeps the module it
@@ -821,6 +1031,100 @@ TEST(patch_of_a_missing_object_is_skipped)
 	}
 }
 
+/* FixesReforged.ini gives every China Command Center the Nuke_ and Early_ carpet bombers.  Contra has
+	 no such special powers, the module kept a NULL template, and placing the start building faulted in
+	 SpecialPowerModule's constructor.  A patch's module naming a missing power is read and dropped. */
+TEST(patch_module_with_a_missing_special_power_is_skipped)
+{
+	CHECK( bootOnce() );
+
+	GlobalData *savedGlobals = TheWritableGlobalData;
+	if( savedGlobals == NULL )
+		TheWritableGlobalData = NEW GlobalData;
+	if( TheModuleFactory == NULL )
+	{
+		TheModuleFactory = NEW ModuleFactory;
+		TheModuleFactory->init();
+	}
+	if( TheThingFactory == NULL )
+		TheThingFactory = NEW ThingFactory;
+	if( TheSpecialPowerStore == NULL )
+		TheSpecialPowerStore = NEW SpecialPowerStore;
+
+	writeFile( TEST_INI,
+		"Object MissingPowerProbe\r\n"
+		"  Behavior = DestroyDie ModuleTag_01\r\n"
+		"  End\r\n"
+		"End\r\n" );
+	CHECK( loadIni( TEST_INI ) );
+
+	writeFile( TEST_INI,
+		"Object MissingPowerProbe\r\n"
+		"  AddModule\r\n"
+		"    Behavior = OCLSpecialPower ModuleTag_22Nuke_Fix\r\n"
+		"      SpecialPowerTemplate = Nuke_MissingPowerProbe\r\n"
+		"    End\r\n"
+		"  End\r\n"
+		"  BuildCost = 900\r\n"
+		"End\r\n" );
+	Bool threw = FALSE;
+	try
+	{
+		INI patch;
+		patch.load( AsciiString( TEST_INI ), INI_LOAD_MULTIFILE, NULL );
+	}
+	catch( ... )
+	{
+		threw = TRUE;
+	}
+	CHECK( threw == FALSE );
+
+	const ThingTemplate *probe = TheThingFactory->findTemplate( "MissingPowerProbe" );
+	CHECK( probe != NULL );
+	if( probe != NULL )
+	{
+		CHECK_EQ( probe->getBehaviorModuleInfo().getCount(), 1 );
+		CHECK_EQ( probe->friend_getBuildCost(), 900 );
+	}
+
+	remove( TEST_INI );
+	if( savedGlobals == NULL )
+	{
+		delete TheWritableGlobalData;
+		TheWritableGlobalData = NULL;
+	}
+}
+
+/* The Power of the West's Armor.ini has "Armor = INFANTRY_MISSIL 100%".  EA's parse let it through,
+	 264e2180 made it throw and the mod stopped at start.  An unknown damage type skips its line; a
+	 line with no percentage is still a syntax error. */
+TEST(armor_skips_an_unknown_damage_type)
+{
+	CHECK( bootOnce() );
+
+	if( TheArmorStore == NULL )
+		TheArmorStore = NEW ArmorStore;
+
+	writeFile( TEST_INI,
+		"Armor UnknownDamageProbe\r\n"
+		"  Armor = INFANTRY_MISSIL 100%\r\n"
+		"  Armor = SMALL_ARMS 50%\r\n"
+		"End\r\n" );
+	CHECK( loadIni( TEST_INI ) );
+	const ArmorTemplate *armor = TheArmorStore->findArmorTemplate( "UnknownDamageProbe" );
+	CHECK( armor != NULL );
+	if( armor != NULL )
+		CHECK_NEAR( armor->adjustDamage( DAMAGE_SMALL_ARMS, 100.0f ), 50.0f, 0.01f );
+
+	writeFile( TEST_INI,
+		"Armor UnknownDamageProbeBroken\r\n"
+		"  Armor = SMALL_ARMS\r\n"
+		"End\r\n" );
+	CHECK( loadIni( TEST_INI ) == FALSE );
+
+	remove( TEST_INI );
+}
+
 /* Data\INI\FXListReforged.ini is the fork's own explosion light: 89 of EA's FXLists, each repeated
 	 whole with one LightPulse added.  Whole, because FXListStore::parseFXListDefinition clears an
 	 entry before re-reading it - a half-copied block does not add a light, it deletes an explosion.
@@ -832,7 +1136,11 @@ TEST(patch_of_a_missing_object_is_skipped)
 	 pink death, which has none and is the one block the count leaves out.  The Paladin's and the
 	 Avenger's hard-kill charge added two of the fork's own, its launch and its blast, lit too.
 	 The explosion pass added 22 more of EA's, from the structure deaths to the nukes, each with
-	 the light it lacked, and the point defense lasers' missile burst one of the fork's own. */
+	 the light it lacked, and the point defense lasers' missile burst one of the fork's own.
+	 The gunfire pass added 13 of EA's gun FXLists, wider tracers and AtTarget impacts, all of
+	 which already had a muzzle light, and the faster tracers six more, each with EA's own light.
+	 The smoke-trail fragments added two of EA's blasts, the jet missile with its own light and the
+	 Particle Cannon's ground hit with one of the fork's. */
 static const char *const s_unlitReforgedFXList = "FXList SupW_FX_ParticleUplinkDeathInitial";
 
 TEST(fxlist_reforged_ini_parses_and_keeps_its_light)
@@ -881,7 +1189,7 @@ TEST(fxlist_reforged_ini_parses_and_keeps_its_light)
 	}
 	fclose( fp );
 
-	CHECK_EQ( blocks, 113 );
+	CHECK_EQ( blocks, 135 );
 	CHECK_EQ( lit, blocks );
 }
 
@@ -1353,26 +1661,231 @@ TEST(hotkey_names_fold_turkish_letters_and_case)
 	CHECK( HotKeyManager::nameOf( 0x015E ) != HotKeyManager::nameOf( L'^' ) );	// not its low byte
 }
 
-/* InGameUI.cpp: Classic is the game as shipped, where ctrl held was force fire. */
-extern Bool InGameUI_isForceFireOn( Bool forceAttackArmed, Bool ctrlHeld, Bool classicUI );
+/* HotKey.cpp, Hotkeys_*: the options menu's Hotkeys page writes Hotkeys.ini the way the launcher does.
+   HOTKEYS_FROM_LAUNCHER is what launcher/hotkeys.js formatOverrides wrote on 2026-10-15 for these keys
+   over the shipped game (its launcher part cut to three blocks), and HOTKEYS_COMMAND_MAP the shipped
+   CommandMap.ini's entries for the commands it names. */
+static const char HOTKEYS_COMMAND_MAP[] =
+	"; comments go\r\n"
+	"CommandMap DEMO_INSTANT_QUIT\r\n  Key = KEY_BACKSPACE\r\n  Modifiers = SHIFT_CTRL\r\n  UseableIn = GAME SHELL\r\nEnd\r\n"
+	"CommandMap SELECT_TEAM1\r\n  Key = KEY_1\r\n  Transition = DOWN\r\n  Modifiers = NONE\r\n  UseableIn = GAME\r\n"
+	"  Category = TEAM\r\n  DisplayName = GUI:SelectTeam1\r\nEnd\r\n"
+	"CommandMap VIEW_COMMAND_CENTER\r\n  Key = KEY_H\r\n  Modifiers = NONE\r\n  UseableIn = GAME\r\n  Category = SELECTION\r\nEnd\r\n"
+	"CommandMap VIEW_LAST_RADAR_EVENT\r\n  Key = KEY_SPACE\r\n  Modifiers = NONE\r\n  UseableIn = GAME\r\nEnd\r\n"
+	"CommandMap TAKE_SCREENSHOT\r\n  Key = KEY_F12\r\n  Modifiers = NONE\r\n  UseableIn = GAME SHELL\r\nEnd\r\n"
+	"CommandMap BEGIN_CAMERA_ROTATE_LEFT\r\n  Key = KEY_KP4\r\n  Modifiers = NONE\r\n  UseableIn = GAME\r\nEnd\r\n"
+	"CommandMap END_CAMERA_ROTATE_LEFT\r\n  Key = KEY_KP4\r\n  Transition = UP\r\n  Modifiers = NONE\r\n  UseableIn = GAME\r\nEnd\r\n"
+	"CommandMap BEGIN_FORCEATTACK\r\n  Key = KEY_NONE\r\n  Modifiers = CTRL\r\n  UseableIn = GAME\r\nEnd\r\n";
 
-TEST(ctrl_force_fires_in_classic_and_only_there)
+static const char HOTKEYS_FROM_LAUNCHER[] =
+	"; Zero Hour Reforged hotkeys, written by the launcher's Hotkeys page. Only what differs from the\r\n"
+	"; game is here. The game reads it at start; it is not part of the multiplayer checksum.\r\n"
+	"\r\n"
+	"CommandMap BEGIN_CAMERA_ROTATE_LEFT\r\n"
+	"  Key = KEY_LBRACKET\r\n"
+	"  Transition = DOWN\r\n"
+	"  Modifiers = NONE\r\n"
+	"  UseableIn = GAME\r\n"
+	"End\r\n"
+	"\r\n"
+	"CommandMap END_CAMERA_ROTATE_LEFT\r\n"
+	"  Key = KEY_LBRACKET\r\n"
+	"  Transition = UP\r\n"
+	"  Modifiers = NONE\r\n"
+	"  UseableIn = GAME\r\n"
+	"End\r\n"
+	"\r\n"
+	"CommandMap BEGIN_FORCEATTACK\r\n"
+	"  Key = KEY_NONE\r\n"
+	"  Transition = DOWN\r\n"
+	"  Modifiers = ALT\r\n"
+	"  UseableIn = GAME\r\n"
+	"End\r\n"
+	"\r\n"
+	"CommandMap END_FORCEATTACK\r\n"
+	"  Key = KEY_NONE\r\n"
+	"  Transition = UP\r\n"
+	"  Modifiers = ALT\r\n"
+	"  UseableIn = GAME\r\n"
+	"End\r\n"
+	"\r\n"
+	"CommandMap SELECT_ALL_MILITARY\r\n"
+	"  Key = KEY_Q\r\n"
+	"  Transition = DOWN\r\n"
+	"  Modifiers = CTRL\r\n"
+	"  UseableIn = GAME\r\n"
+	"End\r\n"
+	"\r\n"
+	"CommandMap SELECT_TEAM1\r\n"
+	"  Key = KEY_KP1\r\n"
+	"  Transition = DOWN\r\n"
+	"  Modifiers = SHIFT_ALT_CTRL\r\n"
+	"  UseableIn = GAME\r\n"
+	"End\r\n"
+	"\r\n"
+	"CommandMap TAKE_SCREENSHOT\r\n"
+	"  Key = KEY_F11\r\n"
+	"  Transition = DOWN\r\n"
+	"  Modifiers = CTRL\r\n"
+	"  UseableIn = GAME SHELL\r\n"
+	"End\r\n"
+	"\r\n"
+	"CommandMap VIEW_LAST_RADAR_EVENT\r\n"
+	"  Key = KEY_NONE\r\n"
+	"  Transition = DOWN\r\n"
+	"  Modifiers = NONE\r\n"
+	"  UseableIn = NONE\r\n"
+	"End\r\n"
+	"\r\n"
+	"CommandButtonHotKey Command_ConstructAmericaBarracks\r\n"
+	"  Key = B\r\n"
+	"End\r\n"
+	"\r\n"
+	"CommandButtonHotKey command_lowercase\r\n"
+	"  Key = NONE\r\n"
+	"End\r\n"
+	"\r\n"
+	"CommandButtonHotKey Command_Sell\r\n"
+	"  Key = S\r\n"
+	"End\r\n"
+	"\r\n"
+	"CommandButtonHotKey Command_UpgradeChinaMines\r\n"
+	"  Key = Q\r\n"
+	"End\r\n"
+	"\r\n"
+	"CommandButtonHotKey mymod:Command_Sell\r\n"
+	"  Key = K\r\n"
+	"End\r\n"
+	"\r\n"
+	"; the launcher's own keys from here on\r\n"
+	"\r\n"
+	"CommandMap SELECT_NEXT_IDLE_WORKER\r\n"
+	"  Key = KEY_I\r\n"
+	"  Transition = DOWN\r\n"
+	"  Modifiers = NONE\r\n"
+	"  UseableIn = GAME\r\n"
+	"End\r\n"
+	"\r\n"
+	"CommandMap VIEW_COMMAND_CENTER\r\n"
+	"  Key = KEY_P\r\n"
+	"  Transition = DOWN\r\n"
+	"  Modifiers = NONE\r\n"
+	"  UseableIn = GAME\r\n"
+	"End\r\n"
+	"\r\n"
+	"CommandButtonHotKey AirF_Command_A10ThunderboltMissileStrike\r\n"
+	"  Key = M\r\n"
+	"End\r\n";
+
+TEST(hotkeys_file_reads_the_launchers_rows_and_leaves_its_defaults_out)
 {
-	CHECK(  InGameUI_isForceFireOn( FALSE, TRUE,  TRUE ) );
-	CHECK( !InGameUI_isForceFireOn( FALSE, TRUE,  FALSE ) );
-	CHECK(  InGameUI_isForceFireOn( TRUE,  FALSE, FALSE ) );
-	CHECK( !InGameUI_isForceFireOn( FALSE, FALSE, TRUE ) );
+	const std::vector< HotkeyCommandRow > rows = Hotkeys_commandRows( HOTKEYS_COMMAND_MAP );
+	const HotkeyCommandRow *team = NULL, *hold = NULL, *idle = NULL;
+	Bool demo = FALSE, endHalf = FALSE;
+	for( size_t each = 0; each < rows.size(); each++ )
+	{
+		team = rows[ each ].id == "SELECT_TEAM1" ? &rows[ each ] : team;
+		hold = rows[ each ].id == "BEGIN_FORCEATTACK" ? &rows[ each ] : hold;
+		idle = rows[ each ].id == "SELECT_NEXT_IDLE_WORKER" ? &rows[ each ] : idle;
+		demo = demo || rows[ each ].id == "DEMO_INSTANT_QUIT";
+		endHalf = endHalf || rows[ each ].id == "END_CAMERA_ROTATE_LEFT";
+	}
+	CHECK( !demo );
+	CHECK( !endHalf );
+	CHECK( team != NULL && team->binding == HotkeyBinding( "KEY_1", "NONE" ) && team->category == "TEAM" && team->label == "GUI:SelectTeam1" );
+	// KEY_NONE is not a key the launcher shows, so the shipped hold comes back as its own bar-only row
+	CHECK( hold != NULL && hold->barOnly && hold->binding == HotkeyBinding( "", "CTRL" ) && hold->pair == "END_FORCEATTACK" );
+	CHECK( idle != NULL && idle->launcherDefault && idle->binding.key == "KEY_I" );
+
+	// the launcher's own defaults in the player's part are no change of his
+	const HotkeysFile mine = Hotkeys_parse(
+		"CommandMap SELECT_NEXT_IDLE_WORKER\r\n  Key = KEY_I\r\n  Modifiers = NONE\r\n  UseableIn = GAME\r\nEnd\r\n"
+		"CommandMap BEGIN_FORCEATTACK\r\n  Key = KEY_NONE\r\n  Modifiers = CTRL\r\n  UseableIn = GAME\r\nEnd\r\n"
+		"CommandMap SCATTER\r\n  Key = KEY_NOTAKEY\r\n  Modifiers = CTRL\r\n  UseableIn = GAME\r\nEnd\r\n", rows );
+	CHECK_EQ( (Int)mine.commands.size(), 1 );
+	CHECK( mine.commands.find( "SCATTER" )->second == HotkeyBinding( "", "NONE" ) );
+	CHECK( mine.launcherPart.empty() );
 }
 
-/* GlobalData.h: which button orders.  Classic is 1.04's left button, or the right under EA's Alternate
-   Mouse Setup (UseAlternateMouse, off out of the box); Reforged is the right whatever Options.ini says. */
+TEST(hotkeys_file_the_launcher_wrote_comes_back_byte_for_byte)
+{
+	const std::vector< HotkeyCommandRow > rows = Hotkeys_commandRows( HOTKEYS_COMMAND_MAP );
+	const HotkeysFile file = Hotkeys_parse( HOTKEYS_FROM_LAUNCHER, rows );
+	CHECK_EQ( (Int)file.commands.size(), 6 );
+	CHECK( file.commands.find( "BEGIN_FORCEATTACK" )->second == HotkeyBinding( "", "ALT" ) );
+	CHECK( file.commands.find( "VIEW_LAST_RADAR_EVENT" )->second == HotkeyBinding( "", "NONE" ) );
+	CHECK( file.commands.find( "SELECT_TEAM1" )->second == HotkeyBinding( "KEY_KP1", "SHIFT_ALT_CTRL" ) );
+	CHECK( file.commands.find( "VIEW_COMMAND_CENTER" ) == file.commands.end() );	// the launcher's, not his
+	CHECK_EQ( (Int)file.buttons.size(), 5 );
+	CHECK_STR( file.buttons.find( "mymod:Command_Sell" )->second.c_str(), "K" );
+	CHECK_STR( file.buttons.find( "command_lowercase" )->second.c_str(), "" );
+	CHECK( Hotkeys_format( file, rows ) == std::string( HOTKEYS_FROM_LAUNCHER ) );
+
+	std::map< std::string, HotkeyBinding > launcherCommands;
+	std::map< std::string, std::string > launcherButtons;
+	Hotkeys_launcherKeys( file.launcherPart, &launcherCommands, &launcherButtons );
+	CHECK( launcherCommands.find( "VIEW_COMMAND_CENTER" )->second == HotkeyBinding( "KEY_P", "NONE" ) );
+	CHECK_STR( launcherButtons.find( "AirF_Command_A10ThunderboltMissileStrike" )->second.c_str(), "M" );
+}
+
+TEST(hotkeys_file_drops_the_launchers_block_for_what_the_player_set)
+{
+	const std::vector< HotkeyCommandRow > rows = Hotkeys_commandRows( HOTKEYS_COMMAND_MAP );
+	HotkeysFile file = Hotkeys_parse( HOTKEYS_FROM_LAUNCHER, rows );
+	// a later block beats an earlier one in the game, so the launcher's move would undo these
+	file.buttons[ "AirF_Command_A10ThunderboltMissileStrike" ] = "Z";
+	file.commands[ "VIEW_COMMAND_CENTER" ] = HotkeyBinding( "KEY_H", "CTRL" );
+	const std::string text = Hotkeys_format( file, rows );
+	const size_t part = text.find( HOTKEYS_LAUNCHER_PART );
+	CHECK( part != std::string::npos );
+	const std::string launcher = text.substr( part );
+	CHECK( launcher.find( "AirF_Command_A10ThunderboltMissileStrike" ) == std::string::npos );
+	CHECK( launcher.find( "VIEW_COMMAND_CENTER" ) == std::string::npos );
+	CHECK( launcher.find( "SELECT_NEXT_IDLE_WORKER" ) != std::string::npos );
+	// the launcher's part still ends the way the launcher ends it, on End and one line break
+	CHECK( launcher.size() > 7 && launcher.compare( launcher.size() - 7, 7, "\r\nEnd\r\n" ) == 0 );
+	CHECK( launcher.find( "End\r\n\r\n\r\n" ) == std::string::npos );
+
+	const HotkeysFile back = Hotkeys_parse( text, rows );
+	CHECK_STR( back.buttons.find( "AirF_Command_A10ThunderboltMissileStrike" )->second.c_str(), "Z" );
+	CHECK( back.commands.find( "VIEW_COMMAND_CENTER" )->second == HotkeyBinding( "KEY_H", "CTRL" ) );
+
+	// a file nobody wrote gets the launcher's line and nothing after it
+	HotkeysFile fresh = Hotkeys_parse( "", rows );
+	fresh.buttons[ "Command_Sell" ] = "";
+	const std::string first = Hotkeys_format( fresh, rows );
+	CHECK( first.compare( first.size() - strlen( HOTKEYS_LAUNCHER_PART ) - 2, std::string::npos,
+		std::string( HOTKEYS_LAUNCHER_PART ) + "\r\n" ) == 0 );
+	CHECK( first.find( "CommandButtonHotKey Command_Sell\r\n  Key = NONE\r\nEnd\r\n\r\n" ) != std::string::npos );
+}
+
+TEST(hotkeys_names_sort_and_chords_read_as_the_launcher_has_them)
+{
+	// String.localeCompare: case aside, '_' before the letters, then lower case first
+	CHECK( Hotkeys_nameLess( "command_lowercase", "Command_Sell" ) );
+	CHECK( Hotkeys_nameLess( "Command_Sell", "Command_UpgradeChinaMines" ) );
+	CHECK( Hotkeys_nameLess( "Command_UpgradeChinaMines", "mymod:Command_Sell" ) );
+	CHECK( Hotkeys_nameLess( "SELECT_ALL", "SELECT_ALL_MILITARY" ) );
+	CHECK( Hotkeys_nameLess( "SELECT_ALL_MILITARY", "SELECT_TEAM1" ) );
+	CHECK( Hotkeys_nameLess( "command_sell", "Command_Sell" ) );
+	CHECK( !Hotkeys_nameLess( "Command_Sell", "Command_Sell" ) );
+
+	CHECK_STR( Hotkeys_chordText( HotkeyBinding( "KEY_KP1", "SHIFT_ALT_CTRL" ) ).c_str(), "Ctrl + Alt + Shift + Num 1" );
+	CHECK_STR( Hotkeys_chordText( HotkeyBinding( "", "ALT" ) ).c_str(), "Alt" );
+	CHECK_STR( Hotkeys_chordText( HotkeyBinding( "KEY_LBRACKET", "NONE" ) ).c_str(), "[" );
+	CHECK_STR( Hotkeys_chordText( HotkeyBinding( "", "NONE" ) ).c_str(), "" );
+	CHECK( Hotkeys_isKeyName( "KEY_PGDN" ) && !Hotkeys_isKeyName( "KEY_NONE" ) && !Hotkeys_isKeyName( "KEY_LCTRL" ) );
+}
+
+/* GlobalData.h: which button orders.  The classic mouse is 1.04's left button, or the right under EA's
+   Alternate Mouse Setup (UseAlternateMouse, off out of the box); Reforged is the right whatever Options.ini says. */
 TEST(alternate_mouse_moves_the_order_button_in_classic_only)
 {
 	GlobalData *saved = TheWritableGlobalData;
 	TheWritableGlobalData = NEW GlobalData;
 	CHECK( !TheGlobalData->m_useAlternateMouse );
 
-	TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
+	TheWritableGlobalData->m_mouseStyle = MOUSE_STYLE_CLASSIC;
 	CHECK(  TheGlobalData->leftButtonOrders() );
 	CHECK( !TheGlobalData->rightButtonOrders() );
 
@@ -1380,7 +1893,7 @@ TEST(alternate_mouse_moves_the_order_button_in_classic_only)
 	CHECK( !TheGlobalData->leftButtonOrders() );
 	CHECK(  TheGlobalData->rightButtonOrders() );
 
-	TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_REFORGED;
+	TheWritableGlobalData->m_mouseStyle = MOUSE_STYLE_REFORGED;
 	CHECK( !TheGlobalData->leftButtonOrders() );
 	CHECK(  TheGlobalData->rightButtonOrders() );
 	TheWritableGlobalData->m_useAlternateMouse = FALSE;
@@ -1550,8 +2063,8 @@ extern Bool Signal_isThrottled( UnsignedInt now, UnsignedInt lastSignalFrame );
 TEST(a_signal_waits_a_second_after_the_last_one)
 {
 	CHECK( Signal_isThrottled( 1000, 1000 ) );
-	CHECK( Signal_isThrottled( 1029, 1000 ) );
-	CHECK( !Signal_isThrottled( 1030, 1000 ) );
+	CHECK( Signal_isThrottled( 1000 + LOGICFRAMES_PER_SECOND - 1, 1000 ) );
+	CHECK( !Signal_isThrottled( 1000 + LOGICFRAMES_PER_SECOND, 1000 ) );
 
 	/* a frame left over from a longer earlier match does not silence the new one */
 	CHECK( !Signal_isThrottled( 40, 50000 ) );
@@ -1982,14 +2495,14 @@ extern Bool AIAttackMove_engageWasADud( Bool victimStillAlive, Int ammoAtEngage,
 
 TEST(attack_move_charges_the_reacquire_delay_only_for_a_fight_that_never_happened)
 {
-	const Int DUD = 15;		/* ATTACK_MOVE_DUD_ENGAGE_FRAMES, protected on the state */
+	const Int DUD = LOGICFRAMES_PER_SECOND / 2;		/* ATTACK_MOVE_DUD_ENGAGE_FRAMES, protected on the state */
 
 	/* stood next to it for a moment, fired nothing, it is still alive: a dud. */
 	CHECK( AIAttackMove_engageWasADud( true, 8, 8, 1000, 1000, DUD ) );
-	CHECK( AIAttackMove_engageWasADud( true, 8, 8, 1000, 1014, DUD ) );
+	CHECK( AIAttackMove_engageWasADud( true, 8, 8, 1000, 1000 + DUD - 1, DUD ) );
 
 	/* the same non-fight, but long enough that it was a real attempt, not a bounce. */
-	CHECK( !AIAttackMove_engageWasADud( true, 8, 8, 1000, 1015, DUD ) );
+	CHECK( !AIAttackMove_engageWasADud( true, 8, 8, 1000, 1000 + DUD, DUD ) );
 	CHECK( !AIAttackMove_engageWasADud( true, 8, 8, 1000, 9999, DUD ) );
 
 	/* it died. whatever we did worked, so go straight back to scanning. */
@@ -2007,7 +2520,7 @@ TEST(attack_move_charges_the_reacquire_delay_only_for_a_fight_that_never_happene
 	   the answer there is the conservative "dud", not whatever was in the block. */
 	CHECK( AIAttackMove_engageWasADud( true, 0, 0, 1000, 1000, DUD ) );
 	CHECK( AIAttackMove_engageWasADud( true, 0, 12, 1000, 1000, DUD ) );
-	CHECK( !AIAttackMove_engageWasADud( true, 0, 12, 1000, 1015, DUD ) );
+	CHECK( !AIAttackMove_engageWasADud( true, 0, 12, 1000, 1000 + DUD, DUD ) );
 
 	/* a unit with no ammunition at all on either side of a fight it could not start. */
 	CHECK( AIAttackMove_engageWasADud( true, 0, 0, 0, 0, DUD ) );
@@ -2025,15 +2538,15 @@ extern Bool AIAttackMove_shouldRetaliate( UnsignedInt lastDamageFrame, UnsignedI
 
 TEST(attack_move_turns_on_whoever_is_shooting_it)
 {
-	const Int WINDOW = 30;		/* ATTACK_MOVE_RETALIATE_FRAMES, protected on the state */
+	const Int WINDOW = LOGICFRAMES_PER_SECOND;		/* ATTACK_MOVE_RETALIATE_FRAMES, protected on the state */
 
 	/* hit this second, can shoot back, busy with somebody else: turn on the shooter. */
 	CHECK( AIAttackMove_shouldRetaliate( 1000, 1000, WINDOW, false, true ) );
-	CHECK( AIAttackMove_shouldRetaliate( 1000, 1029, WINDOW, false, true ) );
-	CHECK( AIAttackMove_shouldRetaliate( 1000, 1030, WINDOW, false, true ) );
+	CHECK( AIAttackMove_shouldRetaliate( 1000, 1000 + WINDOW - 1, WINDOW, false, true ) );
+	CHECK( AIAttackMove_shouldRetaliate( 1000, 1000 + WINDOW, WINDOW, false, true ) );
 
 	/* an old grudge is not a fight. */
-	CHECK( !AIAttackMove_shouldRetaliate( 1000, 1031, WINDOW, false, true ) );
+	CHECK( !AIAttackMove_shouldRetaliate( 1000, 1000 + WINDOW + 1, WINDOW, false, true ) );
 	CHECK( !AIAttackMove_shouldRetaliate( 1000, 9999, WINDOW, false, true ) );
 
 	/* already fighting them, or cannot touch them: leave the current target alone,
@@ -2129,6 +2642,23 @@ TEST(bitflags_types_keep_their_own_name_tables)
 	CHECK_STR( KindOfMaskType::getBitNames()[0], "OBSTACLE" );
 	CHECK_EQ( KindOfMaskType::getSingleBitFromName("STRUCTURE"), (Int)KINDOF_STRUCTURE );
 	CHECK_EQ( ModelConditionFlags::getSingleBitFromName("RUBBLE"), (Int)MODELCONDITION_RUBBLE );
+}
+
+/* Selecting a finished Cold Fusion Reactor with ones still going up let the control rods be
+   bought on the unfinished ones too.  ProductionUpdate now refuses research on a building that
+   is under construction or being sold, and the command bar greys the button the same way. */
+TEST(no_upgrade_research_on_unfinished_or_sold_buildings)
+{
+	ObjectStatusMaskType status;
+	CHECK( canResearchWithStatus( status ) );
+	status.set( OBJECT_STATUS_UNDER_CONSTRUCTION );
+	CHECK( !canResearchWithStatus( status ) );
+	status.set( OBJECT_STATUS_UNDER_CONSTRUCTION, 0 );
+	status.set( OBJECT_STATUS_SOLD );
+	CHECK( !canResearchWithStatus( status ) );
+	status.set( OBJECT_STATUS_SOLD, 0 );
+	status.set( OBJECT_STATUS_RECONSTRUCTING );
+	CHECK( canResearchWithStatus( status ) );
 }
 
 /* GameWindowManager.cpp: destroying a modal window that is not the top of the modal stack
@@ -3603,7 +4133,6 @@ TEST(pathfind_zone_flatten_collapses_a_deep_chain_in_one_pass)
    header carries the class, not these. */
 extern Int ControlBar_secondsFromFrames( Real frames );
 extern Int ControlBar_secondsFromFramesAt( Real frames, Int logicFps );
-extern Int ControlBar_experiencePercent( Int currentExp, Int levelExp, Int nextLevelExp );
 extern Int ControlBar_purchaseScienceRank( Int column, Int depth, Int *indexOut );
 
 TEST(controlbar_promotion_columns_map_to_the_screens_three_rows)
@@ -3785,6 +4314,104 @@ TEST(controlbar_command_places_go_in_rows_by_what_they_are_for)
 		CHECK_EQ( places[ slot ], manyPlaces[ slot ] );
 }
 
+TEST(controlbar_mod_slots_past_the_bar_fit_its_windows)
+{
+	enum { SLOTS = MAX_COMMANDS_PER_SET, WINDOWS = 14 };
+	const Int N = GUI_COMMAND_NONE, U = GUI_COMMAND_OBJECT_UPGRADE, W = GUI_COMMAND_SWITCH_WEAPON;
+	Bool windowed[ SLOTS ];
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		windowed[ slot ] = slot < WINDOWS;
+	Int shown[ SLOTS ];
+
+	/* Contra's Cybr_AmericaInfantryRangerCommandSet: five drones, capture, two weapon switches, and
+	   attack move, guard and stop in 15, 17 and 18, which our fourteen windows lack.  The orders go to
+	   Zero Hour's 11, 13 and 14, the rest stay put */
+	const Int ranger[ SLOTS ] = { U, U, U, U, U, N, GUI_COMMAND_SPECIAL_POWER, W, N, W, N, N, N, N,
+		GUI_COMMAND_ATTACK_MOVE, N, GUI_COMMAND_GUARD, GUI_COMMAND_STOP };
+	ControlBar_fitCommandSlots( ranger, windowed, SLOTS, shown );
+	const Int rangerShown[ SLOTS ] = { 0, 1, 2, 3, 4, -1, 6, 7, -1, 9, 14, -1, 16, 17, -1, -1, -1, -1 };
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		CHECK_EQ( shown[ slot ], rangerShown[ slot ] );
+
+	/* 11 taken by the mod's own button: attack move takes the first empty window, and a stray button
+	   past the bar comes after the orders */
+	const Int busy[ SLOTS ] = { U, N, N, N, N, N, N, N, N, N, U, N, N, N, U, GUI_COMMAND_ATTACK_MOVE, N, N };
+	ControlBar_fitCommandSlots( busy, windowed, SLOTS, shown );
+	CHECK_EQ( shown[ 0 ], 0 );
+	CHECK_EQ( shown[ 10 ], 10 );
+	CHECK_EQ( shown[ 1 ], 15 );
+	CHECK_EQ( shown[ 2 ], 14 );
+
+	/* a retail set never goes past fourteen and comes back slot for slot */
+	const Int humvee[ SLOTS ] = { U, U, U, N, N, N, N, N, GUI_COMMAND_EVACUATE, N, GUI_COMMAND_ATTACK_MOVE, N,
+		GUI_COMMAND_GUARD, GUI_COMMAND_STOP, N, N, N, N };
+	ControlBar_fitCommandSlots( humvee, windowed, SLOTS, shown );
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		CHECK_EQ( shown[ slot ], humvee[ slot ] != N && slot < WINDOWS ? slot : -1 );
+}
+
+TEST(controlbar_force_attack_slot_is_under_attack_move)
+{
+	enum { SLOTS = MAX_COMMANDS_PER_SET, WINDOWS = 14 };
+	const Int N = GUI_COMMAND_NONE, U = GUI_COMMAND_OBJECT_UPGRADE, W = GUI_COMMAND_SWITCH_WEAPON;
+	Int types[ SLOTS ];
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		types[ slot ] = N;
+	types[ 10 ] = GUI_COMMAND_ATTACK_MOVE;
+	types[ 12 ] = GUI_COMMAND_GUARD;
+	types[ 13 ] = GUI_COMMAND_STOP;
+	CHECK_EQ( ControlBar_forceAttackSlot( types, SLOTS, FALSE ), 11 );
+
+	types[ 11 ] = GUI_COMMAND_OBJECT_UPGRADE;
+	CHECK_EQ( ControlBar_forceAttackSlot( types, SLOTS, FALSE ), -1 );
+
+	types[ 11 ] = N;
+	types[ 10 ] = N;
+	CHECK_EQ( ControlBar_forceAttackSlot( types, SLOTS, FALSE ), -1 );
+
+	/* A base defence that shoots, or a Combat Chinook, has no Attack Move. Patriot (Stop 13, Sell 14)
+	   and the Chinook take 12; Gattling Cannon and Bunker (mines 12) take 11 above them; GLA Tunnel
+	   Network and the Infantry General's Bunker fill 1 to 14 and get none */
+	types[ 12 ] = GUI_COMMAND_STOP;
+	types[ 13 ] = GUI_COMMAND_SELL;
+	CHECK_EQ( ControlBar_forceAttackSlot( types, SLOTS, TRUE ), 11 );
+	types[ 11 ] = GUI_COMMAND_PLAYER_UPGRADE;
+	CHECK_EQ( ControlBar_forceAttackSlot( types, SLOTS, TRUE ), 10 );
+	for( Int slot = 0; slot < 14; slot++ )
+		types[ slot ] = GUI_COMMAND_EXIT_CONTAINER;
+	CHECK_EQ( ControlBar_forceAttackSlot( types, SLOTS, TRUE ), -1 );
+
+	/* Contra ranger: Attack Move in 15, slot 12 empty. Inject then fit keeps Force Attack in 12
+	   and still maps Attack Move, Guard and Stop to 11, 13 and 14 */
+	Bool windowed[ SLOTS ];
+	Int shown[ SLOTS ];
+	for( Int slot = 0; slot < SLOTS; slot++ )
+		windowed[ slot ] = slot < WINDOWS;
+	Int ranger[ SLOTS ] = { U, U, U, U, U, N, GUI_COMMAND_SPECIAL_POWER, W, N, W, N, N, N, N,
+		GUI_COMMAND_ATTACK_MOVE, N, GUI_COMMAND_GUARD, GUI_COMMAND_STOP };
+	CHECK_EQ( ControlBar_forceAttackSlot( ranger, SLOTS, FALSE ), 11 );
+	ranger[ 11 ] = GUI_COMMAND_FORCE_ATTACK;
+	ControlBar_fitCommandSlots( ranger, windowed, SLOTS, shown );
+	CHECK_EQ( shown[ 10 ], 14 );
+	CHECK_EQ( shown[ 11 ], 11 );
+	CHECK_EQ( shown[ 12 ], 16 );
+	CHECK_EQ( shown[ 13 ], 17 );
+
+	/* Force Attack is Ctrl: the English label's F stays off the button */
+	CHECK_EQ( HotKeyManager::playerButtonKey( AsciiString( "Command_ForceAttack" ), 'F',
+		GUI_COMMAND_FORCE_ATTACK ), 0 );
+}
+
+TEST(metamap_format_chord_names_the_hold)
+{
+	CHECK( MetaMap_formatChord( MK_NONE, CTRL, COMMANDUSABLE_GAME ) == UnicodeString( u"Ctrl" ) );
+	CHECK( MetaMap_formatChord( MK_F, NONE, COMMANDUSABLE_GAME ) == UnicodeString( u"F" ) );
+	CHECK( MetaMap_formatChord( MK_F, CTRL, COMMANDUSABLE_GAME ) == UnicodeString( u"Ctrl + F" ) );
+	CHECK( MetaMap_formatChord( MK_NONE, ALT, COMMANDUSABLE_GAME ) == UnicodeString( u"Alt" ) );
+	CHECK( MetaMap_formatChord( MK_NONE, CTRL, COMMANDUSABLE_NONE ).isEmpty() );
+	CHECK( MetaMap_chordLabel( GameMessage::MSG_META_BEGIN_FORCEATTACK ) == UnicodeString( u"Ctrl" ) );
+}
+
 TEST(controlbar_stance_key_takes_what_the_buttons_leave)
 {
 	enum { SLOTS = 14 };
@@ -3828,65 +4455,12 @@ TEST(controlbar_stance_key_takes_what_the_buttons_leave)
 		CHECK_EQ( keys[ key ], -1 );
 }
 
-/* The money plate follows its figure's width: wider at once, narrower only once the narrower figure
-   has held for MONEY_SHRINK_HOLD_MS, and then eased down over MONEY_SHRINK_EASE_MS. */
-TEST(the_money_plate_grows_at_once_and_shrinks_only_after_a_hold)
-{
-	const Int WIDE = 120, NARROW = 100;
-	const UnsignedInt START = 100000;
-
-	MoneyPlateWidth plate = MoneyPlateWidth();
-	CHECK_EQ( InGameUI_moneyPlateWidth( plate, NARROW, START ), NARROW );
-	CHECK_EQ( InGameUI_moneyPlateWidth( plate, WIDE, START + 16 ), WIDE );
-
-	// narrower: held until the hold is up, then eased, never under the figure, and settled at the end
-	UnsignedInt now = START + 1000;
-	CHECK_EQ( InGameUI_moneyPlateWidth( plate, NARROW, now ), WIDE );
-	CHECK_EQ( InGameUI_moneyPlateWidth( plate, NARROW, now + MONEY_SHRINK_HOLD_MS - 1 ), WIDE );
-	CHECK_EQ( InGameUI_moneyPlateWidth( plate, NARROW, now + MONEY_SHRINK_HOLD_MS ), WIDE );
-	Int last = WIDE;
-	for( UnsignedInt step = 16; step < MONEY_SHRINK_EASE_MS; step += 16 )
-	{
-		const Int width = InGameUI_moneyPlateWidth( plate, NARROW, now + MONEY_SHRINK_HOLD_MS + step );
-		CHECK( width <= last && width >= NARROW );
-		last = width;
-	}
-	CHECK_EQ( InGameUI_moneyPlateWidth( plate, NARROW, now + MONEY_SHRINK_HOLD_MS + MONEY_SHRINK_EASE_MS ), NARROW );
-
-	// a wider figure in the wait calls the shrink off, and the next narrower one starts the wait again
-	now += 10000;
-	CHECK_EQ( InGameUI_moneyPlateWidth( plate, WIDE, now ), WIDE );
-	CHECK_EQ( InGameUI_moneyPlateWidth( plate, NARROW, now + 1000 ), WIDE );
-	CHECK_EQ( InGameUI_moneyPlateWidth( plate, WIDE, now + 2500 ), WIDE );
-	CHECK_EQ( InGameUI_moneyPlateWidth( plate, NARROW, now + 3000 ), WIDE );
-	CHECK_EQ( InGameUI_moneyPlateWidth( plate, NARROW, now + 3000 + MONEY_SHRINK_HOLD_MS - 1 ), WIDE );
-
-	// 9990 and 10010 in turn every second while building: the plate never moves
-	now += 20000;
-	for( Int second = 0; second < 30; second++ )
-		for( UnsignedInt frame = 0; frame < 1000; frame += 16 )
-			CHECK_EQ( InGameUI_moneyPlateWidth( plate, second % 2 ? NARROW : WIDE, now + second * 1000 + frame ), WIDE );
-}
-
-/* CommandMapReforged.ini binds COMMAND_SLOTnn to the key of place nn - 1: the grid reads Q W E R T Y,
-   A S D F G H, Z X C V B N, so a place's key is where the owner put it on 2026-09-28 - a unit's attack
-   on A, stop on S, attack move on D, eject on Z, guard on X, hold on C, move on V; a building's sell
-   on N, rally point on B and evacuate on Z; a worker's disarm on N, its fakes on H and the Demolition
-   worker's charge on B.  No other record may hold one of those letters bare, or it comes first in the
-   list and steals the key. */
+/* The command grid reads Q W E R T Y, A S D F G H, Z X C V B N, so a place's key is where the owner
+   put it on 2026-09-28 - a unit's attack on A, stop on S, attack move on D, eject on Z, guard on X,
+   hold on C, move on V; a building's sell on N, rally point on B and evacuate on Z; a worker's disarm
+   on N, its fakes on H and the Demolition worker's charge on B. */
 TEST(the_command_grid_keys_are_the_places_and_n_sells_and_b_rallies)
 {
-	FILE *fp = fopen( COMMAND_MAP_REFORGED_INI, "rb" );
-	CHECK( fp != NULL );
-	if( fp == NULL )
-		return;
-	std::string text;
-	char chunk[ 1024 ];
-	size_t got = 0;
-	while( ( got = fread( chunk, 1, sizeof( chunk ), fp ) ) > 0 )
-		text.append( chunk, got );
-	fclose( fp );
-
 	static const char GRID_KEYS[] = "QWERTYASDFGHZXCVBN";
 	CHECK_EQ( (Int)strlen( GRID_KEYS ), (Int)COMMAND_PLACE_COUNT );
 	CHECK_EQ( GRID_KEYS[ COMMAND_PLACE_ATTACK ], 'A' );
@@ -3944,52 +4518,6 @@ TEST(the_command_grid_keys_are_the_places_and_n_sells_and_b_rallies)
 	CHECK_EQ( GRID_KEYS[ places[ 2 ] ], 'Z' );
 	CHECK_EQ( GRID_KEYS[ places[ 3 ] ], 'Q' );
 	CHECK_EQ( GRID_KEYS[ places[ 4 ] ], 'W' );
-
-	// every block as name, key and modifiers
-	Int slotsBound = 0;
-	std::string name, key, modifiers;
-	size_t at = 0;
-	while( at < text.size() )
-	{
-		size_t end = text.find( '\n', at );
-		if( end == std::string::npos )
-			end = text.size();
-		std::string line = text.substr( at, end - at );
-		at = end + 1;
-		const size_t comment = line.find( ';' );
-		if( comment != std::string::npos )
-			line.erase( comment );
-		char word[ 64 ] = { 0 };
-		char value[ 64 ] = { 0 };
-		if( sscanf( line.c_str(), " CommandMap %63s", word ) == 1 )
-		{
-			name = word;
-			key.clear();
-			modifiers = "NONE";
-		}
-		else if( sscanf( line.c_str(), " Key = %63s", value ) == 1 )
-			key = value;
-		else if( sscanf( line.c_str(), " Modifiers = %63s", value ) == 1 )
-			modifiers = value;
-		else if( sscanf( line.c_str(), " %63s", word ) == 1 && strcmp( word, "End" ) == 0 && !name.empty() )
-		{
-			Int slot = 0;
-			if( sscanf( name.c_str(), "COMMAND_SLOT%d", &slot ) == 1 )
-			{
-				CHECK( slot >= 1 && slot <= COMMAND_PLACE_COUNT );
-				if( slot >= 1 && slot <= COMMAND_PLACE_COUNT )
-				{
-					CHECK_STR( key.c_str(), ( std::string( "KEY_" ) + GRID_KEYS[ slot - 1 ] ).c_str() );
-					CHECK_STR( modifiers.c_str(), "NONE" );
-					slotsBound++;
-				}
-			}
-			else if( modifiers == "NONE" && key.size() == 5 && key.compare( 0, 4, "KEY_" ) == 0 )
-				CHECK( strchr( GRID_KEYS, key[ 4 ] ) == NULL );
-			name.clear();
-		}
-	}
-	CHECK_EQ( slotsBound, (Int)COMMAND_PLACE_COUNT );
 }
 
 TEST(controlbar_seconds_round_up_and_never_reach_zero_early)
@@ -4011,12 +4539,24 @@ TEST(controlbar_seconds_round_up_and_never_reach_zero_early)
 	CHECK_EQ( ControlBar_secondsFromFrames( 1.0f ), 1 );
 }
 
+TEST(player_game_speed_is_half_to_normal)
+{
+	/* A skirmish or mission runs from half speed to normal and never faster: the menu, the console,
+	   a saved game and a map script all clamp to this. An old x2 preference or save comes back at x1. */
+	CHECK_EQ( ClampPlayerGameSpeed( LOGICFRAMES_PER_SECOND * 2 ), LOGICFRAMES_PER_SECOND );
+	CHECK_EQ( ClampPlayerGameSpeed( LOGICFRAMES_PER_SECOND * 3 / 2 ), LOGICFRAMES_PER_SECOND );
+	CHECK_EQ( ClampPlayerGameSpeed( LOGICFRAMES_PER_SECOND ), LOGICFRAMES_PER_SECOND );
+	CHECK_EQ( ClampPlayerGameSpeed( LOGICFRAMES_PER_SECOND * 3 / 4 ), LOGICFRAMES_PER_SECOND * 3 / 4 );
+	CHECK_EQ( ClampPlayerGameSpeed( LOGICFRAMES_PER_SECOND / 2 ), LOGICFRAMES_PER_SECOND / 2 );
+	CHECK_EQ( ClampPlayerGameSpeed( ConvertRetailFrames( 5 ) ), LOGICFRAMES_PER_SECOND / 2 );
+}
+
 TEST(controlbar_seconds_are_real_seconds_at_the_current_game_speed)
 {
 	/* The number on a build button is a promise about how long you will be waiting, and the logic
-	   rate is a knob in this fork (the game speed keys move it between 5 and 200). The same 600
-	   frames of work is 20 seconds at the nominal rate and 10 at double speed. */
-	const Real frames = 600.0f;
+	   rate is a knob in this fork (the game speed keys move it between 5 and 200). The same
+	   work is 20 seconds at the nominal rate and 10 at double speed. */
+	const Real frames = 20.0f * LOGICFRAMES_PER_SECOND;
 	CHECK_EQ( ControlBar_secondsFromFramesAt( frames, LOGICFRAMES_PER_SECOND ), 20 );
 	CHECK_EQ( ControlBar_secondsFromFramesAt( frames, LOGICFRAMES_PER_SECOND * 2 ), 10 );
 	CHECK_EQ( ControlBar_secondsFromFramesAt( frames, LOGICFRAMES_PER_SECOND / 2 ), 40 );
@@ -4069,28 +4609,6 @@ TEST(rate_reading_holds_through_jitter_and_follows_a_real_drop)
 	CHECK_EQ( rate.shown, 20 );
 	rate.add( 60.0f );
 	CHECK_EQ( rate.shown, 60 );
-}
-
-TEST(controlbar_experience_percent_fills_the_rank_and_clamps)
-{
-	/* a fresh unit at the bottom of its rank */
-	CHECK_EQ( ControlBar_experiencePercent( 0, 0, 100 ), 0 );
-	CHECK_EQ( ControlBar_experiencePercent( 50, 0, 100 ), 50 );
-	CHECK_EQ( ControlBar_experiencePercent( 99, 0, 100 ), 99 );
-
-	/* the window is between two thresholds, not from zero: half way from 100 to 300 is 50% */
-	CHECK_EQ( ControlBar_experiencePercent( 200, 100, 300 ), 50 );
-
-	/* experience past the next threshold (the level has not been applied yet) pins the bar full
-	   rather than overflowing it, and a sink that took points away pins it empty */
-	CHECK_EQ( ControlBar_experiencePercent( 400, 100, 300 ), 100 );
-	CHECK_EQ( ControlBar_experiencePercent( 50, 100, 300 ), 0 );
-
-	/* no next rank to fill towards - top rank, or a template with no thresholds at all - is the
-	   "draw no bar" answer, and must not be a division by zero */
-	CHECK_EQ( ControlBar_experiencePercent( 500, 300, 300 ), -1 );
-	CHECK_EQ( ControlBar_experiencePercent( 0, 0, 0 ), -1 );
-	CHECK_EQ( ControlBar_experiencePercent( 10, 300, 100 ), -1 );
 }
 
 /* ---------------------------------------------------------------------------------------------
@@ -5016,6 +5534,91 @@ TEST(particlesys_find_answers_by_id_and_forgets_a_dead_system)
 	TheGameClient = savedClient;
 }
 
+/* The DebrisTrails option, on by default, round-trips through Options.ini.  Off, a system built from a
+	 template marked ExplosionDebrisTrail comes back already destroyed, so it never emits and the manager
+	 drops it, while every other system is untouched.  On, the marked one lives like any other. */
+TEST(particlesys_debris_trails_option_destroys_only_marked_systems)
+{
+	const OptionDef *def = findOptionDef( "DebrisTrails" );
+	CHECK( def != NULL );
+	CHECK_EQ( (Int)def->kind, (Int)OPTION_BOOL );
+	CHECK_EQ( (Int)def->apply, (Int)APPLY_LIVE );
+
+	GlobalData *savedData = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+	CHECK( TheGlobalData->m_explosionDebrisTrails );
+
+	UserPreferences pref;
+	TheWritableGlobalData->m_explosionDebrisTrails = FALSE;
+	saveOptionsToPreferences( pref );
+	CHECK_STR( pref[ AsciiString( "DebrisTrails" ) ].str(), "no" );
+	TheWritableGlobalData->m_explosionDebrisTrails = TRUE;
+	loadOptionsFromPreferences( pref );
+	CHECK( !TheGlobalData->m_explosionDebrisTrails );
+
+	GameClient *savedClient = TheGameClient;
+	TheGameClient = getTestGameClient();
+	ParticleSystemManager *savedManager = TheParticleSystemManager;
+
+	{
+		TestParticleSystemManager mgr;
+		TheParticleSystemManager = &mgr;
+
+		ParticleSystemTemplate *plain = mgr.newTemplate( AsciiString( "TestPlainSystem" ) );
+		ParticleSystemTemplate *debris = mgr.newTemplate( AsciiString( "TestDebrisSystem" ) );
+		debris->setExplosionDebrisTrail( TRUE );
+
+		ParticleSystem *plainOff = mgr.createParticleSystem( plain, FALSE );
+		ParticleSystem *debrisOff = mgr.createParticleSystem( debris, FALSE );
+		CHECK( !plainOff->isDestroyed() );
+		CHECK( debrisOff->isDestroyed() );
+
+		TheWritableGlobalData->m_explosionDebrisTrails = TRUE;
+		ParticleSystem *debrisOn = mgr.createParticleSystem( debris, FALSE );
+		CHECK( !debrisOn->isDestroyed() );
+
+		plainOff->deleteInstance();
+		debrisOff->deleteInstance();
+		debrisOn->deleteInstance();
+	}
+
+	TheParticleSystemManager = savedManager;
+	TheGameClient = savedClient;
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = savedData;
+}
+
+/* BuildWithoutWorker, on by default, is a live bool row with a check box on Options > Controls,
+	 and it round-trips through Options.ini. */
+TEST(options_build_without_worker_row_defaults_on_and_round_trips)
+{
+	const OptionDef *def = findOptionDef( "BuildWithoutWorker" );
+	CHECK( def != NULL );
+	CHECK_EQ( (Int)def->kind, (Int)OPTION_BOOL );
+	CHECK_EQ( (Int)def->apply, (Int)APPLY_LIVE );
+	CHECK_STR( def->widgetName, "OptionsMenu.wnd:CheckBuildWithoutWorker" );
+
+	GlobalData *savedData = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+	CHECK( TheGlobalData->m_buildWithoutWorker );
+	CHECK_EQ( def->get(), 1 );
+
+	UserPreferences pref;
+	TheWritableGlobalData->m_buildWithoutWorker = FALSE;
+	saveOptionsToPreferences( pref );
+	CHECK_STR( pref[ AsciiString( "BuildWithoutWorker" ) ].str(), "no" );
+	TheWritableGlobalData->m_buildWithoutWorker = TRUE;
+	loadOptionsFromPreferences( pref );
+	CHECK( !TheGlobalData->m_buildWithoutWorker );
+
+	pref[ AsciiString( "BuildWithoutWorker" ) ] = AsciiString( "yes" );
+	loadOptionsFromPreferences( pref );
+	CHECK( TheGlobalData->m_buildWithoutWorker );
+
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = savedData;
+}
+
 /* Loading a save has to put each system back under the id it was saved with.  It used to build the
 	 system through createParticleSystem, which hands out the next id in sequence and files the system
 	 under it, and only then read the saved id over the top - so the manager's index pointed at the
@@ -5148,44 +5751,44 @@ TEST(selfslug_does_not_fire_on_a_cushion_nobody_has_measured)
 
 TEST(selfslug_fires_once_the_margin_eats_into_the_slack)
 {
-	// run-ahead 20, slack 10% -> the threshold is 2 frames of margin
-	CHECK( shouldSelfSlug( 0, 20, 10 ) );
-	CHECK( shouldSelfSlug( 1, 20, 10 ) );
-	CHECK( !shouldSelfSlug( 2, 20, 10 ) );
-	CHECK( !shouldSelfSlug( 19, 20, 10 ) );
+	// run-ahead 40, slack 10% -> the threshold is 4 frames of margin
+	CHECK( shouldSelfSlug( 0, 40, 10 ) );
+	CHECK( shouldSelfSlug( 3, 40, 10 ) );
+	CHECK( !shouldSelfSlug( 4, 40, 10 ) );
+	CHECK( !shouldSelfSlug( 39, 40, 10 ) );
 
 	// a bigger run-ahead is given proportionally more margin before it worries
-	CHECK( shouldSelfSlug( 5, 60, 10 ) );
-	CHECK( !shouldSelfSlug( 6, 60, 10 ) );
+	CHECK( shouldSelfSlug( 11, 120, 10 ) );
+	CHECK( !shouldSelfSlug( 12, 120, 10 ) );
 
 	// a run-ahead too small for the slack to round to a whole frame still gets the brake: see
 	// selfslug_threshold_has_a_floor_the_shipped_run_ahead_cannot_undercut
 	CHECK( shouldSelfSlug( 0, 9, 10 ) );
-	CHECK( shouldSelfSlug( 1, 9, 10 ) );
-	CHECK( !shouldSelfSlug( 2, 9, 10 ) );
+	CHECK( shouldSelfSlug( SELFSLUG_MIN_THRESHOLD_FRAMES - 1, 9, 10 ) );
+	CHECK( !shouldSelfSlug( SELFSLUG_MIN_THRESHOLD_FRAMES, 9, 10 ) );
 }
 
 TEST(selfslug_threshold_has_a_floor_the_shipped_run_ahead_cannot_undercut)
 {
-	/* The run-ahead a real room plays on is a handful of frames - MIN_RUNAHEAD is four, and
+	/* The run-ahead a real room plays on is a handful of frames - MIN_RUNAHEAD is eight, and
 		 computeRunAhead only clears that above about 240 ms round trip - so NetworkRunAheadSlack's
 		 10 % of it is worth well under a frame.  A brake that waits until less than one frame of
-		 margin is left has already lost: at 30 Hz that is under 33 ms of warning for a hitch that
+		 margin is left has already lost: at 60 Hz that is under 17 ms of warning for a hitch that
 		 takes longer than that to signal, let alone correct.  Hence the floor. */
 	CHECK_EQ( selfSlugThreshold( 10, 10 ), SELFSLUG_MIN_THRESHOLD_FRAMES );
 
 	// the floor holds wherever the arithmetic would land under it, including at zero slack
 	CHECK_EQ( selfSlugThreshold( 10, 0 ), SELFSLUG_MIN_THRESHOLD_FRAMES );
 	CHECK_EQ( selfSlugThreshold( 1, 10 ), SELFSLUG_MIN_THRESHOLD_FRAMES );
-	CHECK_EQ( selfSlugThreshold( 19, 10 ), SELFSLUG_MIN_THRESHOLD_FRAMES );
+	CHECK_EQ( selfSlugThreshold( 39, 10 ), SELFSLUG_MIN_THRESHOLD_FRAMES );
 
 	// and gets out of the way as soon as the configured slack is worth more than it
-	CHECK_EQ( selfSlugThreshold( 30, 10 ), 3 );
-	CHECK_EQ( selfSlugThreshold( 64, 10 ), 6 );
+	CHECK_EQ( selfSlugThreshold( 60, 10 ), 6 );
+	CHECK_EQ( selfSlugThreshold( 128, 10 ), 12 );
 	CHECK_EQ( selfSlugThreshold( 20, 50 ), 10 );
 
 	// the floor is what shouldSelfSlug actually uses - no second copy of the arithmetic
-	for( Int runAhead = 1; runAhead <= 64; ++runAhead )
+	for( Int runAhead = 1; runAhead <= 128; ++runAhead )
 	{
 		Int threshold = selfSlugThreshold( runAhead, 10 );
 		CHECK( threshold >= SELFSLUG_MIN_THRESHOLD_FRAMES );
@@ -5213,7 +5816,7 @@ TEST(the_run_ahead_covers_the_trip_it_is_sized_for)
 	for( Int ms = 0; ms <= 800; ms += 5 )
 	{
 		Real latency = (Real)ms / 1000.0f;
-		for( Int fps = 5; fps <= 30; fps += 5 )
+		for( Int fps = 5; fps <= LOGICFRAMES_PER_SECOND; fps += 5 )
 		{
 			Int runAhead = computeRunAhead( latency, fps, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 );
 
@@ -5268,18 +5871,19 @@ TEST(a_stalled_frame_is_not_filed_as_round_trip_time)
 	CHECK_NEAR( sanitizeLatencySample( -3.0f, MAX_PLAUSIBLE_LATENCY_SECONDS ), 0.0f, 0.0001f );
 
 	/* and the point of all of it: what the run-ahead does with the clamped numbers.  Two players at
-		 the ceiling still cost far less than the 64 frames the raw samples bought. */
+		 the ceiling still cost far less than the 2.1 s the raw samples bought. */
 	Real clamped = sanitizeLatencySample( 7.636834f, MAX_PLAUSIBLE_LATENCY_SECONDS )
 								 + sanitizeLatencySample( 1.785224f, MAX_PLAUSIBLE_LATENCY_SECONDS );
-	Int runAhead = computeRunAhead( clamped, 30, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 );
-	CHECK( runAhead < 64 );
-	CHECK( runAhead <= 29 );			// 0.97 s at 30 Hz, and only with both players at the ceiling
-	CHECK( runAhead <= (Int)(MAX_PLAUSIBLE_LATENCY_SECONDS * 30.0f * 1.2f) + RUNAHEAD_JITTER_FRAMES );
+	const Int fps = LOGICFRAMES_PER_SECOND;
+	Int runAhead = computeRunAhead( clamped, fps, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 );
+	CHECK( runAhead < ConvertRetailFrames( 64 ) );
+	CHECK( runAhead <= 58 );			// 0.97 s at 60 Hz, and only with both players at the ceiling
+	CHECK( runAhead <= (Int)(MAX_PLAUSIBLE_LATENCY_SECONDS * (Real)fps * 1.2f) + RUNAHEAD_JITTER_FRAMES );
 
 	/* a LAN is untouched by any of this */
 	CHECK_EQ( computeRunAhead( sanitizeLatencySample( 0.051f, MAX_PLAUSIBLE_LATENCY_SECONDS ) * 2.0f,
-														 30, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 ),
-						computeRunAhead( 0.102f, 30, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 ) );
+														 fps, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 ),
+						computeRunAhead( 0.102f, fps, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 ) );
 }
 
 /* The other half of that match: nothing ever asked for the lost frame.  FrameData escalates to
@@ -5326,11 +5930,11 @@ TEST(the_run_ahead_carries_a_margin_the_percentage_alone_cannot_give)
 	for( Int ms = 0; ms <= 800; ms += 5 )
 	{
 		Real latency = (Real)ms / 1000.0f;
-		Int runAhead = computeRunAhead( latency, 30, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 );
+		Int runAhead = computeRunAhead( latency, LOGICFRAMES_PER_SECOND, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 );
 
 		// at least RUNAHEAD_JITTER_FRAMES of room beyond the trip itself, at every latency
-		Real slackSeconds = ( (Real)runAhead / 30.0f ) - ( latency / 2.0f );
-		CHECK( slackSeconds >= ( (Real)RUNAHEAD_JITTER_FRAMES / 30.0f ) - 0.0005f );
+		Real slackSeconds = ( (Real)runAhead / LOGICFRAMES_PER_SECONDS_REAL ) - ( latency / 2.0f );
+		CHECK( slackSeconds >= ( (Real)RUNAHEAD_JITTER_FRAMES / LOGICFRAMES_PER_SECONDS_REAL ) - 0.0005f );
 	}
 }
 
@@ -5339,21 +5943,22 @@ TEST(the_run_ahead_is_shorter_than_the_shipped_floor_on_the_links_that_do_not_ne
 	/* What the change is for.  A LAN game and a good broadband game used to be given the same third
 		 of a second of input delay as a transatlantic one, because the floor was ten frames and the
 		 formula never beat it. */
-	const Int shippedFloor = 10;			// EA's MIN_RUNAHEAD, 333 ms of input delay at 30 Hz
+	const Int shippedFloor = ConvertRetailFrames( 10 );	// EA's MIN_RUNAHEAD, 333 ms of input delay
+	const Int fps = LOGICFRAMES_PER_SECOND;
 
-	CHECK( computeRunAhead( 0.000f, 30, 10, MIN_RUNAHEAD, 64 ) < shippedFloor );		// LAN
-	CHECK( computeRunAhead( 0.040f, 30, 10, MIN_RUNAHEAD, 64 ) < shippedFloor );		// 40 ms
-	CHECK( computeRunAhead( 0.100f, 30, 10, MIN_RUNAHEAD, 64 ) < shippedFloor );		// 100 ms
-	CHECK( computeRunAhead( 0.160f, 30, 10, MIN_RUNAHEAD, 64 ) < shippedFloor );		// 160 ms
+	CHECK( computeRunAhead( 0.000f, fps, 10, MIN_RUNAHEAD, 64 ) < shippedFloor );		// LAN
+	CHECK( computeRunAhead( 0.040f, fps, 10, MIN_RUNAHEAD, 64 ) < shippedFloor );		// 40 ms
+	CHECK( computeRunAhead( 0.100f, fps, 10, MIN_RUNAHEAD, 64 ) < shippedFloor );		// 100 ms
+	CHECK( computeRunAhead( 0.160f, fps, 10, MIN_RUNAHEAD, 64 ) < shippedFloor );		// 160 ms
 
 	// and the shortest of them is the floor itself, not something under it
-	CHECK_EQ( computeRunAhead( 0.000f, 30, 10, MIN_RUNAHEAD, 64 ), MIN_RUNAHEAD );
+	CHECK_EQ( computeRunAhead( 0.000f, fps, 10, MIN_RUNAHEAD, 64 ), MIN_RUNAHEAD );
 
 	/* And what it is not: the links that were relying on the floor get more window than the floor
 		 gave them, not less.  600 ms summed round trip is where EA's formula finally reached ten. */
-	CHECK( computeRunAhead( 0.300f, 30, 10, MIN_RUNAHEAD, 64 ) >= 7 );
-	CHECK( computeRunAhead( 0.600f, 30, 10, MIN_RUNAHEAD, 64 ) > shippedFloor );
-	CHECK( computeRunAhead( 1.000f, 30, 10, MIN_RUNAHEAD, 64 ) > 16 );
+	CHECK( computeRunAhead( 0.300f, fps, 10, MIN_RUNAHEAD, 64 ) >= ConvertRetailFrames( 7 ) );
+	CHECK( computeRunAhead( 0.600f, fps, 10, MIN_RUNAHEAD, 64 ) > shippedFloor );
+	CHECK( computeRunAhead( 1.000f, fps, 10, MIN_RUNAHEAD, 64 ) > ConvertRetailFrames( 16 ) );
 }
 
 TEST(the_run_ahead_stays_inside_the_bounds_the_network_buffers_are_built_for)
@@ -5514,10 +6119,10 @@ TEST(room_frame_rate_still_pins_to_a_genuinely_slow_player_without_oscillating)
 TEST(resend_window_is_measured_from_the_start_of_the_match_not_four_billion)
 {
 	/* ConnectionManager::sendSingleFrameToPlayer refuses to resend a frame older than
-		 FRAMES_TO_KEEP, which is (MAX_FRAMES_AHEAD / 2) + 1 = 65 - about two seconds at 30 Hz, and
+		 FRAMES_TO_KEEP, which is (MAX_FRAMES_AHEAD / 2) + 1 = 129 - about two seconds at 60 Hz, and
 		 exactly the window a stalled player can be behind by, since nobody advances while the room
 		 is waiting for them. */
-	const Int KEEP = 65;
+	const Int KEEP = FRAMES_TO_KEEP;
 
 	// the frame we are on, and everything inside the window, is resendable
 	CHECK( !frameIsTooOldToResend( 1000, 1000, KEEP ) );
@@ -6003,8 +6608,6 @@ TEST(netcommand_list_orders_a_burst_of_acks_by_acknowledged_command)
 	 over the whole name, so everything after it in the message is still read from the right place. */
 struct NetPacketFileReader : public NetPacket
 {
-	using NetPacket::readFileMessage;
-	using NetPacket::readFileAnnounceMessage;
 	using NetPacket::GetBufferSizeNeededForCommand;
 	using NetPacket::FillBufferWithCommand;
 };
@@ -6080,8 +6683,11 @@ TEST(sizing_a_null_command_asks_for_no_bytes)
 TEST(an_overlong_transfer_filename_is_truncated_instead_of_overflowing)
 {
 	static const Int NAME_LEN = 400;					// _MAX_PATH is 260
-	UnsignedByte buf[NAME_LEN + 1 + sizeof(UnsignedInt) + 4];
+	UnsignedByte buf[3 + NAME_LEN + 1 + sizeof(UnsignedInt) + 4];
 	Int at = 0;
+	buf[at++] = 'T';
+	buf[at++] = NETCOMMANDTYPE_FILE;
+	buf[at++] = 'D';
 	Int k;
 	for( k = 0; k < NAME_LEN; ++k )
 		buf[at++] = (UnsignedByte)('a' + (k % 26));
@@ -6092,27 +6698,29 @@ TEST(an_overlong_transfer_filename_is_truncated_instead_of_overflowing)
 	at += sizeof(dataLength);
 	buf[at++] = 0xDE; buf[at++] = 0xAD; buf[at++] = 0xBE; buf[at++] = 0xEF;
 
-	Int i = 0;
-	NetCommandMsg *msg = NetPacketFileReader::readFileMessage( buf, i );
-	NetFileCommandMsg *fileMsg = (NetFileCommandMsg *)msg;
+	// through the entry point, which tells the readers how far the data reaches
+	NetCommandRef *ref = NetPacket::ConstructNetCommandMsgFromRawData( buf, (UnsignedInt)at );
+	NetFileCommandMsg *fileMsg = (NetFileCommandMsg *)ref->getCommand();
 
 	// the name is cut to the buffer rather than written past it
 	CHECK_EQ( fileMsg->getPortableFilename().getLength(), _MAX_PATH - 1 );
 
 	// ...but the offset walked the whole name, so what follows it still parses
-	CHECK_EQ( i, at );
 	CHECK_EQ( (Int)fileMsg->getFileLength(), 4 );
 	CHECK_EQ( (Int)fileMsg->getFileData()[0], 0xDE );
 	CHECK_EQ( (Int)fileMsg->getFileData()[3], 0xEF );
 
-	msg->detach();
+	ref->deleteInstance();
 }
 
 TEST(an_overlong_announced_filename_is_truncated_instead_of_overflowing)
 {
 	static const Int NAME_LEN = 400;
-	UnsignedByte buf[NAME_LEN + 1 + sizeof(UnsignedShort) + sizeof(UnsignedByte)];
+	UnsignedByte buf[3 + NAME_LEN + 1 + sizeof(UnsignedShort) + sizeof(UnsignedByte)];
 	Int at = 0;
+	buf[at++] = 'T';
+	buf[at++] = NETCOMMANDTYPE_FILEANNOUNCE;
+	buf[at++] = 'D';
 	Int k;
 	for( k = 0; k < NAME_LEN; ++k )
 		buf[at++] = (UnsignedByte)('a' + (k % 26));
@@ -6123,16 +6731,14 @@ TEST(an_overlong_announced_filename_is_truncated_instead_of_overflowing)
 	at += sizeof(fileID);
 	buf[at++] = 0x5A;									// player mask
 
-	Int i = 0;
-	NetCommandMsg *msg = NetPacketFileReader::readFileAnnounceMessage( buf, i );
-	NetFileAnnounceCommandMsg *announce = (NetFileAnnounceCommandMsg *)msg;
+	NetCommandRef *ref = NetPacket::ConstructNetCommandMsgFromRawData( buf, (UnsignedInt)at );
+	NetFileAnnounceCommandMsg *announce = (NetFileAnnounceCommandMsg *)ref->getCommand();
 
 	CHECK_EQ( announce->getPortableFilename().getLength(), _MAX_PATH - 1 );
-	CHECK_EQ( i, at );
 	CHECK_EQ( (Int)announce->getFileID(), 0x1234 );
 	CHECK_EQ( (Int)announce->getPlayerMask(), 0x5A );
 
-	msg->detach();
+	ref->deleteInstance();
 }
 
 /* A map transfer arrives as a filename and a block of bytes, both chosen by the other machine, and
@@ -6297,61 +6903,6 @@ TEST(an_overlong_chat_line_keeps_its_length_instead_of_wrapping_to_a_short_one)
 
 	packet->deleteInstance();
 	ref->deleteInstance();
-}
-
-/* An ally cursor is two floats on a command of its own, and the packet writer and the packet
-	 reader are two separate hand-written walks over the same bytes - a field added to one and not
-	 the other reads the next command's header as position data.  So the round trip is pinned: what
-	 goes in comes out, on the right slot, as the right command type. */
-TEST(an_ally_cursor_survives_the_round_trip_through_a_packet)
-{
-	const Real sentX = 1234.5f;
-	const Real sentY = -678.25f;
-
-	NetAllyCursorCommandMsg *cursor = newInstance( NetAllyCursorCommandMsg );
-	cursor->setPosition( sentX, sentY );
-	cursor->setPlayerID( 3 );
-	cursor->setID( 0 );
-	cursor->setExecutionFrame( 0 );
-
-	NetCommandRef *ref = newInstance( NetCommandRef )( cursor );
-	ref->setRelay( 0x0F );
-	cursor->detach();								// the ref holds it now
-
-	NetPacket *packet = newInstance( NetPacket );
-	packet->init();
-	CHECK( packet->addCommand( ref ) );
-	CHECK_EQ( packet->getNumCommands(), 1 );
-
-	NetCommandList *list = packet->getCommandList();
-	NetCommandRef *read = list->getFirstMessage();
-	CHECK( read != NULL );
-	if( read )
-	{
-		NetCommandMsg *msg = read->getCommand();
-		CHECK_EQ( (Int)msg->getNetCommandType(), (Int)NETCOMMANDTYPE_ALLYCURSOR );
-		CHECK_EQ( (Int)msg->getPlayerID(), 3 );
-		CHECK_EQ( ((NetAllyCursorCommandMsg *)msg)->getX(), sentX );
-		CHECK_EQ( ((NetAllyCursorCommandMsg *)msg)->getY(), sentY );
-	}
-
-	list->deleteInstance();
-	packet->deleteInstance();
-	ref->deleteInstance();
-}
-
-/* Nothing about an ally cursor may reach the simulation: it is not acked, not resent, not held for
-	 a frame and not written to a replay.  The three predicates the network layer sorts commands by
-	 are where that is decided, so they are the thing to pin. */
-TEST(an_ally_cursor_is_never_acked_resent_or_frame_synchronised)
-{
-	NetAllyCursorCommandMsg *cursor = newInstance( NetAllyCursorCommandMsg );
-
-	CHECK( !DoesCommandRequireACommandID( NETCOMMANDTYPE_ALLYCURSOR ) );
-	CHECK( !IsCommandSynchronized( NETCOMMANDTYPE_ALLYCURSOR ) );
-	CHECK( !CommandRequiresAck( cursor ) );
-
-	cursor->detach();								// the constructor's own reference is the only one
 }
 
 /* addCommand's own guard against a null reference sat below the line that followed it, so the one
@@ -7427,27 +7978,27 @@ TEST(a_strike_or_cargo_plane_wears_a_health_bar)
 }
 
 /** Only a slow gun wears the amber reload bar: over three seconds a shot, a clip's reload spread
-	 over the shots in it. Frames, at 30 a second. */
+	 over the shots in it. Frames written at the retail 30 a second, converted to the logic rate. */
 TEST(only_a_slow_firing_weapon_wears_a_reload_bar)
 {
-	CHECK( Drawable_weaponWearsReloadBar( 0, 300, 0, FALSE ) == TRUE );		// Nuke Cannon, 10 s
-	CHECK( Drawable_weaponWearsReloadBar( 0, 120, 0, FALSE ) == TRUE );		// Inferno Cannon, 4 s
-	CHECK( Drawable_weaponWearsReloadBar( 1, 0, 300, FALSE ) == TRUE );		// SCUD, one missile and a 10 s reload
-	CHECK( Drawable_weaponWearsReloadBar( 2, 6, 450, FALSE ) == TRUE );		// Scorpion's two missiles, 15 s reload
-	CHECK( Drawable_weaponWearsReloadBar( 0, 60, 0, FALSE ) == FALSE );		// a tank gun, 2 s
-	CHECK( Drawable_weaponWearsReloadBar( 0, 90, 0, FALSE ) == FALSE );		// exactly three seconds is not over three
-	CHECK( Drawable_weaponWearsReloadBar( 6, 6, 180, FALSE ) == FALSE );		// Rocket Buggy, six rockets, 6 s reload
-	CHECK( Drawable_weaponWearsReloadBar( 2, 7, 120, FALSE ) == FALSE );		// Paladin's point defence laser
-	CHECK( Drawable_weaponWearsReloadBar( 20, 6, 900, FALSE ) == FALSE );	// Comanche rocket pods
+	CHECK( Drawable_weaponWearsReloadBar( 0, ConvertRetailFrames( 300 ), 0, FALSE ) == TRUE );		// Nuke Cannon, 10 s
+	CHECK( Drawable_weaponWearsReloadBar( 0, ConvertRetailFrames( 120 ), 0, FALSE ) == TRUE );		// Inferno Cannon, 4 s
+	CHECK( Drawable_weaponWearsReloadBar( 1, 0, ConvertRetailFrames( 300 ), FALSE ) == TRUE );		// SCUD, one missile and a 10 s reload
+	CHECK( Drawable_weaponWearsReloadBar( 2, ConvertRetailFrames( 6 ), ConvertRetailFrames( 450 ), FALSE ) == TRUE );		// Scorpion's two missiles, 15 s reload
+	CHECK( Drawable_weaponWearsReloadBar( 0, ConvertRetailFrames( 60 ), 0, FALSE ) == FALSE );		// a tank gun, 2 s
+	CHECK( Drawable_weaponWearsReloadBar( 0, ConvertRetailFrames( 90 ), 0, FALSE ) == FALSE );		// exactly three seconds is not over three
+	CHECK( Drawable_weaponWearsReloadBar( 6, ConvertRetailFrames( 6 ), ConvertRetailFrames( 180 ), FALSE ) == FALSE );		// Rocket Buggy, six rockets, 6 s reload
+	CHECK( Drawable_weaponWearsReloadBar( 2, ConvertRetailFrames( 7 ), ConvertRetailFrames( 120 ), FALSE ) == FALSE );		// Paladin's point defence laser
+	CHECK( Drawable_weaponWearsReloadBar( 20, ConvertRetailFrames( 6 ), ConvertRetailFrames( 900 ), FALSE ) == FALSE );	// Comanche rocket pods
 }
 
 /** The Dozer's mine-clearing scoop is one shot and a 4 s reload, slow enough for the bar on the
 	 numbers alone, and the Dozer wore it after every mine. A DISARM weapon is not a gun. */
 TEST(a_mine_clearing_weapon_wears_no_reload_bar)
 {
-	CHECK( Drawable_weaponWearsReloadBar( 1, 0, 120, FALSE ) == TRUE );		// the same numbers on a gun
-	CHECK( Drawable_weaponWearsReloadBar( 1, 0, 120, TRUE ) == FALSE );		// DozerMineDisarmingWeapon
-	CHECK( Drawable_weaponWearsReloadBar( 0, 30, 0, TRUE ) == FALSE );		// WorkerMineDisarmingWeapon
+	CHECK( Drawable_weaponWearsReloadBar( 1, 0, ConvertRetailFrames( 120 ), FALSE ) == TRUE );		// the same numbers on a gun
+	CHECK( Drawable_weaponWearsReloadBar( 1, 0, ConvertRetailFrames( 120 ), TRUE ) == FALSE );		// DozerMineDisarmingWeapon
+	CHECK( Drawable_weaponWearsReloadBar( 0, ConvertRetailFrames( 30 ), 0, TRUE ) == FALSE );		// WorkerMineDisarmingWeapon
 }
 
 /** A launcher that shares its reload is told when it can fire next and keeps an old start frame;
@@ -7551,6 +8102,33 @@ TEST(health_bar_mode_round_trips_through_options_ini)
 	TheWritableGlobalData = saved;
 }
 
+/** Health bar colours are the launcher's row, not a menu control: green-to-red by default, the
+	 owner's colour at 1, and nothing past that. */
+TEST(health_bar_colors_round_trip_through_options_ini)
+{
+	const OptionDef *def = findOptionDef( "HealthBarColors" );
+	CHECK( def != NULL );
+	CHECK_EQ( (Int)def->apply, (Int)APPLY_LIVE );
+	CHECK_EQ( def->hi, 1 );
+
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+
+	CHECK_EQ( TheGlobalData->m_healthBarColors, 0 );
+
+	UserPreferences pref;
+	pref[ AsciiString( "HealthBarColors" ) ] = AsciiString( "1" );
+	loadOptionsFromPreferences( pref );
+	CHECK_EQ( TheGlobalData->m_healthBarColors, 1 );
+
+	pref[ AsciiString( "HealthBarColors" ) ] = AsciiString( "7" );
+	loadOptionsFromPreferences( pref );
+	CHECK_EQ( TheGlobalData->m_healthBarColors, 1 );
+
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = saved;
+}
+
 TEST(player_color_scheme_round_trips_through_options_ini)
 {
 	const OptionDef *def = findOptionDef( "PlayerColors" );
@@ -7582,32 +8160,6 @@ TEST(player_color_scheme_round_trips_through_options_ini)
 
 	TheWritableGlobalData->m_playerColorScheme = PLAYER_COLORS_ORIGINAL;
 	invalidatePlayerColorScheme();
-
-	delete TheWritableGlobalData;
-	TheWritableGlobalData = saved;
-}
-
-TEST(interface_style_is_classic_unless_the_switch_says_otherwise)
-{
-	/* The launcher picks the interface with -interface; Options.ini has no say, so an InterfaceStyle
-		 key an earlier build saved there cannot turn a run without the switch into Reforged.  MenuLayout
-		 went with it: every menu is fitted now. */
-	CHECK( findOptionDef( "InterfaceStyle" ) == NULL );
-	CHECK( findOptionDef( "MenuLayout" ) == NULL );
-
-	GlobalData *saved = TheWritableGlobalData;
-	TheWritableGlobalData = NEW GlobalData;
-
-	CHECK_EQ( TheGlobalData->m_interfaceStyle, (Int)INTERFACE_STYLE_CLASSIC );
-	CHECK( TheGlobalData->isClassicUI() );
-
-	UserPreferences pref;
-	pref[ AsciiString( "InterfaceStyle" ) ] = AsciiString( "1" );
-	loadOptionsFromPreferences( pref );
-	CHECK( TheGlobalData->isClassicUI() );
-
-	TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_REFORGED;
-	CHECK( !TheGlobalData->isClassicUI() );
 
 	delete TheWritableGlobalData;
 	TheWritableGlobalData = saved;
@@ -7842,6 +8394,20 @@ TEST(a_unit_does_not_see_over_a_hill)
 
 	PartitionManager_findSightMargins( heights, cellRadius, cellSize, aircraftEyeZ, sightMargin );
 	CHECK( sightMargin[ middleRow + side - 1 ] >= 0.0f );
+}
+
+/** A Comanche hovering behind a hill shot at tanks that could not see it. The hill hides the ground
+	 behind it, never the air over it: inside the looker's flat range the air is in sight wherever the
+	 ground is not, and past that range neither is. */
+TEST(a_hill_hides_the_ground_behind_it_not_the_aircraft_over_it)
+{
+	CHECK( PartitionManager_sightCellFlags( FALSE, 3, 0, 4 ) == SIGHT_CELL_AIR );
+	CHECK( PartitionManager_sightCellFlags( TRUE, 3, 0, 4 ) == ( SIGHT_CELL_GROUND | SIGHT_CELL_AIR ) );
+	CHECK( PartitionManager_sightCellFlags( FALSE, 4, 2, 4 ) == SIGHT_CELL_AIR );
+	CHECK( PartitionManager_sightCellFlags( FALSE, 5, 0, 4 ) == 0 );
+
+	// high ground stretches the ground sight past the flat range; the air stays at the flat range
+	CHECK( PartitionManager_sightCellFlags( TRUE, 6, 0, 4 ) == SIGHT_CELL_GROUND );
 }
 
 /** Since the plan reveals nothing, the fog it was placed in would swallow it - and there would be
@@ -10410,8 +10976,8 @@ TEST(headless_run_ends_on_a_decision_or_on_the_frame_limit)
 	// player owning nothing, which reads as eliminated, and VictoryConditions stores that as an end
 	// frame inside the settle window - an unattended run must not take it for a result.
 	CHECK( GameEngine_headlessRunResult( 40, 1, 0 ) == NULL );
-	CHECK( GameEngine_headlessRunResult( 40, 30, 0 ) == NULL );
-	CHECK_STR( GameEngine_headlessRunResult( 40, 31, 0 ), "decided" );
+	CHECK( GameEngine_headlessRunResult( 40, LOGICFRAMES_PER_SECOND, 0 ) == NULL );
+	CHECK_STR( GameEngine_headlessRunResult( 40, LOGICFRAMES_PER_SECOND + 1, 0 ), "decided" );
 
 	// -maxframes is the floor under a stalemate, and the comparison is >= so a limit that was
 	// already passed still ends the run rather than never matching
@@ -10712,39 +11278,13 @@ TEST(replay_crc_queue_aligns_to_either_kind_of_network_recording)
 }
 
 
-/** The build queue strip has nine buttons, and that number had become the production cap: every
-	 build button greyed out at nine units even though the queue itself is a hundred deep.  The two
-	 numbers are unrelated - one is how many entries fit on screen, the other is how many the factory
-	 will take (INI MaxQueueEntries). */
-TEST(a_factorys_queue_is_as_deep_as_its_ini_says_not_as_wide_as_the_button_strip)
+/** The build queue strip has nine buttons, and that is the production cap: a shift-click that
+	 would overshoot stops at nine, and so does the factory itself (INI MaxQueueEntries, default 9). */
+TEST(a_factorys_queue_is_as_deep_as_the_button_strip)
 {
 	ProductionUpdateModuleData data;
 
-	CHECK_EQ( 100, data.m_maxQueueEntries );
-	CHECK( data.m_maxQueueEntries > MAX_BUILD_QUEUE_BUTTONS );
-}
-
-/** The bar over a worker's head while it loads or unloads a box fills across the window the dock
-	 state announced.  Outside that window there is no bar at all - which is how a worker walking
-	 between the pile and the refinery reads, since nothing but the dock state ever moves the
-	 window - and the ends of the window are exclusive so a stale one cannot leave a full bar
-	 hanging over an idle worker. */
-TEST(a_dock_action_bar_fills_across_its_window_and_shows_nothing_outside_it)
-{
-	// half way through a thirty frame box
-	CHECK_NEAR( 0.5f, dockActionProgress( 115, 100, 130 ), 0.0001f );
-	CHECK_NEAR( 0.0f, dockActionProgress( 100, 100, 130 ), 0.0001f );
-
-	// the frame it lands on, and every frame after, is over: no bar
-	CHECK( dockActionProgress( 130, 100, 130 ) < 0.0f );
-	CHECK( dockActionProgress( 400, 100, 130 ) < 0.0f );
-
-	// before it starts, and a window that was never set, are both no bar
-	CHECK( dockActionProgress( 99, 100, 130 ) < 0.0f );
-	CHECK( dockActionProgress( 0, 0, 0 ) < 0.0f );
-
-	// a zero-length window is not a divide by zero
-	CHECK( dockActionProgress( 100, 100, 100 ) < 0.0f );
+	CHECK_EQ( MAX_BUILD_QUEUE_BUTTONS, data.m_maxQueueEntries );
 }
 
 /** A docking ends on the frame the last box changes hands, not one action delay later.  Both ends
@@ -11219,8 +11759,11 @@ TEST(the_ai_pulls_ranked_units_out_sooner_the_higher_the_rank)
 	CHECK( !AIRetreat_rankPullsOut( 3, 0.60f, false, 1.0f, 0.5f ) );
 
 	// a fight read at 0.7, which a team quitting at 0.5 stays in: the veteran stays, the elite goes
-	CHECK( !AIRetreat_rankPullsOut( 1, 1.0f, true, 0.7f, 0.5f ) );
-	CHECK( AIRetreat_rankPullsOut( 2, 1.0f, true, 0.7f, 0.5f ) );
+	CHECK( !AIRetreat_rankPullsOut( 1, 0.8f, true, 0.7f, 0.5f ) );
+	CHECK( AIRetreat_rankPullsOut( 2, 0.8f, true, 0.7f, 0.5f ) );
+	// but only once the fight has hurt it: Colonel Burton was walked out of one at full health
+	CHECK( !AIRetreat_rankPullsOut( 3, 1.0f, true, 0.1f, 0.5f ) );
+	CHECK( !AIRetreat_rankPullsOut( 2, 0.95f, true, 0.7f, 0.5f ) );
 	// a fight read the same with no enemy in it is no reason to go
 	CHECK( !AIRetreat_rankPullsOut( 3, 1.0f, false, 0.7f, 0.5f ) );
 	// and nobody leaves a fight it is even in or winning, at any rank
@@ -11235,24 +11778,108 @@ TEST(the_ai_pulls_ranked_units_out_sooner_the_higher_the_rank)
 
 /** AIPlayer.cpp: the computer buys its first Ambulance once it has an army and a second once the army
 	 is big, and calls in the badly hurt from near it only. */
-extern Int AIAmbulance_wanted( Int army );
-extern Bool AIAmbulance_callsPatient( Real healthFraction, Real distance );
+extern Int AIAmbulance_wanted( Int army, Int skill );
+extern Bool AIAmbulance_callsPatient( Real healthFraction, Real distance, UnsignedInt sinceHit );
+extern Bool AIAmbulance_mayBuyMore( Int bought, Int skill );
 
 TEST(the_ai_buys_ambulances_by_army_and_calls_in_the_hurt_nearby)
 {
-	CHECK_EQ( 0, AIAmbulance_wanted( 0 ) );
-	CHECK_EQ( 0, AIAmbulance_wanted( 7 ) );
-	CHECK_EQ( 1, AIAmbulance_wanted( 8 ) );
-	CHECK_EQ( 1, AIAmbulance_wanted( 19 ) );
-	CHECK_EQ( 2, AIAmbulance_wanted( 20 ) );
-	CHECK_EQ( 2, AIAmbulance_wanted( 200 ) );
+	CHECK_EQ( 0, AIAmbulance_wanted( 0, AISKILL_BRUTAL ) );
+	CHECK_EQ( 0, AIAmbulance_wanted( 7, AISKILL_BRUTAL ) );
+	CHECK_EQ( 1, AIAmbulance_wanted( 8, AISKILL_BRUTAL ) );
+	CHECK_EQ( 1, AIAmbulance_wanted( 19, AISKILL_BRUTAL ) );
+	CHECK_EQ( 2, AIAmbulance_wanted( 20, AISKILL_BRUTAL ) );
+	CHECK_EQ( 2, AIAmbulance_wanted( 200, AISKILL_BRUTAL ) );
+	// Medium keeps one, Easy none
+	CHECK_EQ( 1, AIAmbulance_wanted( 200, AISKILL_MEDIUM ) );
+	CHECK_EQ( 0, AIAmbulance_wanted( 200, AISKILL_EASY ) );
+	// and a match buys only so many
+	CHECK( AIAmbulance_mayBuyMore( 5, AISKILL_BRUTAL ) );
+	CHECK( !AIAmbulance_mayBuyMore( 6, AISKILL_BRUTAL ) );
+	CHECK( AIAmbulance_mayBuyMore( 2, AISKILL_MEDIUM ) );
+	CHECK( !AIAmbulance_mayBuyMore( 3, AISKILL_MEDIUM ) );
+	CHECK( !AIAmbulance_mayBuyMore( 0, AISKILL_EASY ) );
 
-	CHECK( AIAmbulance_callsPatient( 0.3f, 100.0f ) );
-	CHECK( AIAmbulance_callsPatient( 0.49f, 450.0f ) );
+	// two seconds since the last hit is quiet enough
+	const UnsignedInt quiet = 2 * LOGICFRAMES_PER_SECOND;
+	CHECK( AIAmbulance_callsPatient( 0.3f, 100.0f, quiet ) );
+	CHECK( AIAmbulance_callsPatient( 0.49f, 900.0f, quiet ) );
 	// half health or more stays in the fight
-	CHECK( !AIAmbulance_callsPatient( 0.5f, 100.0f ) );
+	CHECK( !AIAmbulance_callsPatient( 0.5f, 100.0f, quiet ) );
 	// too far off to walk over
-	CHECK( !AIAmbulance_callsPatient( 0.1f, 451.0f ) );
+	CHECK( !AIAmbulance_callsPatient( 0.1f, 901.0f, quiet ) );
+	// still being shot: it would die on the way
+	CHECK( !AIAmbulance_callsPatient( 0.3f, 100.0f, quiet - 1 ) );
+}
+
+/** AIPlayer.cpp: an Ambulance keeps clear of known guns by a margin scaled to the map, pulls back when
+	 shot at or within it, only ever to clearer ground, and a lost one is replaced only after a wait. */
+extern Real AIAmbulance_gunMargin( Real baseDistance, Int skill );
+extern Bool AIAmbulance_pullsBack( UnsignedInt now, UnsignedInt lastHit, Real clear, Real margin, Int skill );
+extern Bool AIAmbulance_movesBack( Real hereClear, Real spotClear, Bool hitSinceLook );
+extern Bool AIAmbulance_waitsAt( Real hereClear, Real spotClear, Real margin );
+extern Bool AIAmbulance_rebuyWaits( UnsignedInt now, UnsignedInt lost, Int skill );
+
+TEST(the_ai_ambulance_pulls_back_when_hit_and_is_not_rebought_at_once)
+{
+	const UnsignedInt second = LOGICFRAMES_PER_SECOND;
+	// the margin: Hard 8% of the base distance between 80 and 200, Medium 6% between 60 and 160
+	CHECK_NEAR( 80.0f, AIAmbulance_gunMargin( 700.0f, AISKILL_BRUTAL ), 0.01f );
+	CHECK_NEAR( 120.0f, AIAmbulance_gunMargin( 1500.0f, AISKILL_BRUTAL ), 0.01f );
+	CHECK_NEAR( 200.0f, AIAmbulance_gunMargin( 4000.0f, AISKILL_BRUTAL ), 0.01f );
+	CHECK_NEAR( 60.0f, AIAmbulance_gunMargin( 700.0f, AISKILL_MEDIUM ), 0.01f );
+	CHECK_NEAR( 160.0f, AIAmbulance_gunMargin( 4000.0f, AISKILL_MEDIUM ), 0.01f );
+	CHECK( AIAmbulance_gunMargin( 4000.0f, AISKILL_MEDIUM ) < AIAmbulance_gunMargin( 4000.0f, AISKILL_BRUTAL ) );
+
+	// within the margin, or inside the reach
+	CHECK( AIAmbulance_pullsBack( 1000, 0, 50.0f, 80.0f, AISKILL_BRUTAL ) );
+	CHECK( AIAmbulance_pullsBack( 1000, 0, -10.0f, 80.0f, AISKILL_BRUTAL ) );
+	CHECK( !AIAmbulance_pullsBack( 1000, 0, 90.0f, 80.0f, AISKILL_BRUTAL ) );
+	// hit lately: Hard stays back 8 s, Medium 6
+	CHECK( AIAmbulance_pullsBack( 1000 + 7 * second, 1000, 1.0e9f, 80.0f, AISKILL_BRUTAL ) );
+	CHECK( !AIAmbulance_pullsBack( 1000 + 8 * second, 1000, 1.0e9f, 80.0f, AISKILL_BRUTAL ) );
+	CHECK( !AIAmbulance_pullsBack( 1000 + 6 * second, 1000, 1.0e9f, 80.0f, AISKILL_MEDIUM ) );
+	CHECK( !AIAmbulance_pullsBack( 1000, 0, 1.0e9f, 80.0f, AISKILL_BRUTAL ) );
+
+	// only to ground a reorder step clearer: none such, it holds, which is what stops the cycle
+	CHECK( AIAmbulance_movesBack( 20.0f, 200.0f, FALSE ) );
+	CHECK( !AIAmbulance_movesBack( 20.0f, 60.0f, FALSE ) );
+	CHECK( !AIAmbulance_movesBack( 20.0f, -30.0f, FALSE ) );
+	// fire from something it does not know of: back regardless
+	CHECK( AIAmbulance_movesBack( 1.0e9f, 1.0e9f, TRUE ) );
+
+	// forward to a wait spot clear by one and a half margins, or clearer than here; else it stays put
+	CHECK( AIAmbulance_waitsAt( 50.0f, 120.0f, 80.0f ) );
+	CHECK( !AIAmbulance_waitsAt( 50.0f, 110.0f, 80.0f ) );
+	CHECK( AIAmbulance_waitsAt( -20.0f, 90.0f, 80.0f ) );
+
+	// Hard waits a minute and a half, Medium twice as long
+	CHECK( !AIAmbulance_rebuyWaits( 1000, 0, AISKILL_BRUTAL ) );
+	CHECK( AIAmbulance_rebuyWaits( 1000, 900, AISKILL_BRUTAL ) );
+	CHECK( !AIAmbulance_rebuyWaits( 900 + 90 * second, 900, AISKILL_BRUTAL ) );
+	CHECK( AIAmbulance_rebuyWaits( 900 + 170 * second, 900, AISKILL_MEDIUM ) );
+	CHECK( !AIAmbulance_rebuyWaits( 900 + 180 * second, 900, AISKILL_MEDIUM ) );
+}
+
+/** CleanupHazardUpdate.cpp: an area cleaner out of reach of its hazard counts a scan against it only when
+	 it got no nearer and stood about, so a long drive or a detour is not given up and a stalled one is. */
+extern Bool CleanupHazard_stalls( Real distance, Real driven, Real *closest );
+
+TEST(a_cleaner_counts_only_scans_that_find_it_stuck_short_of_its_hazard)
+{
+	Real closest = 500.0f;
+	// nearer: not stuck, and the new nearest
+	CHECK( !CleanupHazard_stalls( 450.0f, 0.0f, &closest ) );
+	CHECK_NEAR( 450.0f, closest, 0.001f );
+	// stuck at the pathfinder's nearest point, or a step either way: counts
+	CHECK( CleanupHazard_stalls( 450.0f, 0.0f, &closest ) );
+	CHECK( CleanupHazard_stalls( 445.0f, 5.0f, &closest ) );
+	// driving round a river, farther off for now: does not count
+	CHECK( !CleanupHazard_stalls( 600.0f, 80.0f, &closest ) );
+	CHECK_NEAR( 450.0f, closest, 0.001f );
+	// and once round, nearer than before
+	CHECK( !CleanupHazard_stalls( 430.0f, 80.0f, &closest ) );
+	CHECK_NEAR( 430.0f, closest, 0.001f );
 }
 
 
@@ -11658,6 +12285,225 @@ TEST(a_cash_hoard_allows_more_copies_of_a_team)
 }
 
 
+/** The purchase queue: a Hard AI saves for the best thing it cannot afford yet instead of buying
+	 whatever the bank covers, and every way the saving could turn into a hoard or a deadlock is
+	 bounded.  ask() changes the queue, so every verdict is taken into a local before it is checked. */
+TEST(the_purchase_queue_saves_for_the_best_thing_it_cannot_afford)
+{
+	const Int HOARD = 4000;
+	const Int ARMY = aiPurchaseScore( AIBUY_ARMY, TRUE );
+	const Int POWER = aiPurchaseScore( AIBUY_POWER, TRUE );
+	AIPurchaseQueue q;
+	AIPurchaseQueue::Verdict v;
+
+	// nothing saved for: whatever the bank covers is bought
+	v = q.ask( 10, 1000, ARMY, TRUE, 2000, HOARD, 100 );
+	CHECK_EQ( AIPurchaseQueue::BUY, v );
+
+	// a power plant it cannot pay for, with a dozer free, has the money saved for it
+	v = q.ask( 5, 1200, POWER, TRUE, 800, HOARD, 100 );
+	CHECK_EQ( AIPurchaseQueue::RESERVED, v );
+	CHECK_EQ( 5, q.m_key );
+
+	// a tank that would take the bank under the plant's price waits ...
+	v = q.ask( 10, 600, ARMY, TRUE, 800, HOARD, 110 );
+	CHECK_EQ( AIPurchaseQueue::HELD, v );
+	CHECK_EQ( 1, q.m_held );
+	// ... and one that leaves the price in the bank does not
+	v = q.ask( 10, 600, ARMY, TRUE, 2000, HOARD, 120 );
+	CHECK_EQ( AIPurchaseQueue::BUY, v );
+
+	// something that ranks above the plant is bought regardless
+	v = q.ask( 20, 500, aiPurchaseScore( AIBUY_EMERGENCY, TRUE ), TRUE, 800, HOARD, 130 );
+	CHECK_EQ( AIPurchaseQueue::BUY, v );
+
+	// a better thing that could not start now never takes the reservation
+	v = q.ask( 3, 5000, 150, FALSE, 800, HOARD, 140 );
+	CHECK_EQ( AIPurchaseQueue::SHORT, v );
+	CHECK_EQ( 5, q.m_key );
+
+	// the plant itself, once the bank covers it, and then nothing is saved for
+	v = q.ask( 5, 1200, POWER, TRUE, 800, HOARD, 150 );
+	CHECK_EQ( AIPurchaseQueue::SAVING, v );
+	v = q.ask( 5, 1200, POWER, TRUE, 1300, HOARD, 160 );
+	CHECK_EQ( AIPurchaseQueue::BUY, v );
+	q.bought( 5 );
+	CHECK_EQ( (Int)AIPurchaseQueue::NONE, q.m_key );
+
+	// above the hoard threshold nothing is saved for: the bank is already big enough
+	v = q.ask( 7, 6000, 60, TRUE, 4500, HOARD, 200 );
+	CHECK_EQ( AIPurchaseQueue::SHORT, v );
+	CHECK_EQ( (Int)AIPurchaseQueue::NONE, q.m_key );
+
+	// a price above the threshold is saved for from under it, and holds the bank only up to that price
+	v = q.ask( 7, 6000, 60, TRUE, 3000, HOARD, 210 );
+	CHECK_EQ( AIPurchaseQueue::RESERVED, v );
+	v = q.ask( 10, 1000, ARMY, TRUE, 5000, HOARD, 220 );
+	CHECK_EQ( AIPurchaseQueue::HELD, v );
+	v = q.ask( 10, 1000, ARMY, TRUE, 6500, HOARD, 230 );
+	CHECK_EQ( AIPurchaseQueue::BUY, v );
+
+	// a reservation its spender stops asking for goes
+	CHECK_EQ( AIPurchaseQueue::KEPT, q.expire( 210 + AI_PURCHASE_STALE_FRAMES - 1 ) );
+	CHECK_EQ( AIPurchaseQueue::STALE, q.expire( 210 + AI_PURCHASE_STALE_FRAMES ) );
+	CHECK_EQ( (Int)AIPurchaseQueue::NONE, q.m_key );
+
+	// one asked for all along but never met times out, and may not take the money again for as long
+	const UnsignedInt start = 1000;
+	v = q.ask( 8, 3000, 50, TRUE, 100, HOARD, start );
+	CHECK_EQ( AIPurchaseQueue::RESERVED, v );
+	UnsignedInt frame = start;
+	for( ; frame < start + AI_PURCHASE_HOLD_FRAMES; frame += 100 )
+	{
+		CHECK_EQ( AIPurchaseQueue::KEPT, q.expire( frame ) );
+		v = q.ask( 8, 3000, 50, TRUE, 100, HOARD, frame );
+		CHECK_EQ( AIPurchaseQueue::SAVING, v );
+	}
+	CHECK_EQ( AIPurchaseQueue::TIMED_OUT, q.expire( frame ) );
+	v = q.ask( 8, 3000, 50, TRUE, 100, HOARD, frame );
+	CHECK_EQ( AIPurchaseQueue::SHORT, v );
+	v = q.ask( 9, 3000, 50, TRUE, 100, HOARD, frame );
+	CHECK_EQ( AIPurchaseQueue::RESERVED, v );
+	q.bought( 9 );
+	v = q.ask( 8, 3000, 50, TRUE, 100, HOARD, frame + AI_PURCHASE_HOLD_FRAMES );
+	CHECK_EQ( AIPurchaseQueue::RESERVED, v );
+
+	// two of the same score: the lower key wins, whichever asked first, so the order is the same everywhere
+	v = q.ask( 4, 3000, 50, TRUE, 100, HOARD, frame + AI_PURCHASE_HOLD_FRAMES );
+	CHECK_EQ( AIPurchaseQueue::RESERVED, v );
+	CHECK_EQ( 4, q.m_key );
+	v = q.ask( 12, 3000, 50, TRUE, 100, HOARD, frame + AI_PURCHASE_HOLD_FRAMES );
+	CHECK_EQ( AIPurchaseQueue::SHORT, v );
+	v = q.ask( 12, 500, 50, TRUE, 1000, HOARD, frame + AI_PURCHASE_HOLD_FRAMES );
+	CHECK_EQ( AIPurchaseQueue::HELD, v );
+
+	// early on income and power outrank the army; later the army climbs past income
+	CHECK( aiPurchaseScore( AIBUY_ECONOMY, TRUE ) > aiPurchaseScore( AIBUY_ARMY, TRUE ) );
+	CHECK( aiPurchaseScore( AIBUY_POWER, TRUE ) > aiPurchaseScore( AIBUY_ARMY, TRUE ) );
+	CHECK( aiPurchaseScore( AIBUY_DOZER, TRUE ) > aiPurchaseScore( AIBUY_ARMY, TRUE ) );
+	CHECK( aiPurchaseScore( AIBUY_ARMY, FALSE ) > aiPurchaseScore( AIBUY_ECONOMY, FALSE ) );
+	CHECK( aiPurchaseScore( AIBUY_POWER, FALSE ) > aiPurchaseScore( AIBUY_ARMY, FALSE ) );
+}
+
+
+/** The spend rule and the upgrades: a bank of so many seconds of income, factories enough to spend the
+	 income, and the upgrade the army gets the most out of for its price.  Each rung has its own values,
+	 and the ladder has to climb: Hard keeps the smallest bank and buys upgrades soonest and cheapest. */
+TEST(the_bank_target_and_the_upgrade_the_army_pays_for)
+{
+	// seconds of income, never under the floor; nothing earned yet is the floor alone
+	CHECK_EQ( 4000, aiBankTarget( 0.0f, 30.0f, 4000 ) );
+	CHECK_EQ( 4000, aiBankTarget( 100.0f, 30.0f, 4000 ) );
+	CHECK_EQ( 6000, aiBankTarget( 200.0f, 30.0f, 4000 ) );
+	CHECK_EQ( 12000, aiBankTarget( 200.0f, 60.0f, 4000 ) );
+
+	// another factory only when the bank is over target and has not come down over the window, and the
+	// rung's cap is not reached: the first cut sized it from income and a Hard AI earning 93 a second
+	// never added one to the two it had
+	CHECK( aiWantsMoreProduction( 56700, 56000, 4000, 2, 8, 0.0f ) );					// over target and still rising
+	CHECK( aiWantsMoreProduction( 9000, 9000, 4000, 2, 8, 0.0f ) );						// over target and flat
+	CHECK( !aiWantsMoreProduction( 9000, 12000, 4000, 2, 8, 0.0f ) );					// coming down: what stands spends it
+	CHECK( !aiWantsMoreProduction( 3000, 1000, 4000, 2, 8, 2.0f ) );					// under target
+	CHECK( !aiWantsMoreProduction( 56700, 56000, 4000, 8, 8, 2.0f ) );				// at the cap
+	CHECK( !aiWantsMoreProduction( 56700, 56000, 4000, 3, 3, 2.0f ) );
+	// a busy Hard AI's bank swings, so past twice the target it adds one whatever the trend
+	CHECK( aiWantsMoreProduction( 52200, 60000, 4000, 4, 8, 2.0f ) );
+	CHECK( !aiWantsMoreProduction( 8000, 9000, 4000, 4, 8, 2.0f ) );					// at twice, not past it
+	CHECK( !aiWantsMoreProduction( 52200, 60000, 4000, 4, 8, 0.0f ) );				// a rung without the multiple
+
+	// the surplus budget: the rung's share of thirty seconds' income, never past the excess
+	CHECK_EQ( 0, aiSurplusBudget( 3000, 4000, 100.0f, 1.0f ) );					// under target, nothing
+	CHECK_EQ( 3000, aiSurplusBudget( 60000, 4000, 100.0f, 1.0f ) );				// Hard: a window's income a pass
+	CHECK_EQ( 300, aiSurplusBudget( 60000, 4000, 100.0f, 0.1f ) );				// Medium
+	CHECK_EQ( 150, aiSurplusBudget( 60000, 4000, 100.0f, 0.05f ) );				// Easy
+	CHECK_EQ( 500, aiSurplusBudget( 4500, 4000, 100.0f, 1.0f ) );				// the excess, when that is less
+	CHECK_EQ( 0, aiSurplusBudget( 60000, 4000, 0.0f, 1.0f ) );					// nothing earned, nothing extra
+
+	// a rich start: what is over the default cash, up to what the start handed over it, at the rung's share
+	CHECK_EQ( 0, aiFortuneBudget( 60000, 10000, 0, 1.0f ) );						// default cash: as before
+	CHECK_EQ( 40000, aiFortuneBudget( 50000, 10000, 40000, 1.0f ) );			// Hard, on the first pass
+	CHECK_EQ( 2000, aiFortuneBudget( 50000, 10000, 40000, 0.05f ) );			// Easy
+	CHECK_EQ( 40000, aiFortuneBudget( 90000, 10000, 40000, 1.0f ) );			// never past the fortune
+	CHECK_EQ( 0, aiFortuneBudget( 9000, 10000, 40000, 1.0f ) );					// spent down to the default
+
+	// what counts toward an upgrade: a fighting unit at its fit, anything else at the rung's small weight,
+	// so a base worth 20,000 is 1,000 of reason to fortify it and a 10,000 army is 10,000 of reason to arm it
+	CHECK_NEAR( 1.5f, aiUpgradeWeight( TRUE, 1.5f, 0.05f ), 0.0001f );
+	CHECK_NEAR( 0.05f, aiUpgradeWeight( FALSE, 1.5f, 0.05f ), 0.0001f );
+	const Real fortifyOrArm[ 2 ] = { 20000.0f * aiUpgradeWeight( FALSE, 1.0f, 0.05f ), 10000.0f * aiUpgradeWeight( TRUE, 1.0f, 0.05f ) };
+	const Int fortifyOrArmCost[ 2 ] = { 1000, 2000 };
+	CHECK_EQ( 1, aiPickUpgrade( fortifyOrArm, fortifyOrArmCost, 2, 1.5f, FALSE ) );
+
+	// how a unit counts: as it is when the rung does not counter or the trade is even, double when it
+	// wins every trade and nothing when it loses every one
+	CHECK_NEAR( 1.0f, aiCounterFit( 0.9f, 0.0f ), 0.0001f );
+	CHECK_NEAR( 1.0f, aiCounterFit( 0.5f, 1.0f ), 0.0001f );
+	CHECK_NEAR( 2.0f, aiCounterFit( 1.0f, 1.0f ), 0.0001f );
+	CHECK_NEAR( 0.0f, aiCounterFit( 0.0f, 1.0f ), 0.0001f );
+	CHECK_NEAR( 1.25f, aiCounterFit( 1.0f, 0.25f ), 0.0001f );
+
+	// the most army for the money wins, if it clears the payoff
+	const Real covered[ 4 ] = { 3000.0f, 9000.0f, 0.0f, 2400.0f };
+	const Int cost[ 4 ] = { 1000, 2000, 500, 800 };
+	CHECK_EQ( 1, aiPickUpgrade( covered, cost, 4, 1.5f, FALSE ) );			// 4.5 times its price beats 3
+	CHECK_EQ( -1, aiPickUpgrade( covered, cost, 4, 5.0f, FALSE ) );			// nothing pays five times over ...
+	CHECK_EQ( 1, aiPickUpgrade( covered, cost, 4, 9.0f, TRUE ) );				// ... and past the target half the payoff will do
+	CHECK_EQ( -1, aiPickUpgrade( covered, cost, 4, 9.5f, TRUE ) );
+
+	// an upgrade that improves nothing we own is never bought, however cheap
+	const Real nothing[ 1 ] = { 0.0f };
+	const Int cheap[ 1 ] = { 1 };
+	CHECK_EQ( -1, aiPickUpgrade( nothing, cheap, 1, 0.0f, TRUE ) );
+
+	// two that pay the same: the first, so the order is the buttons' and the same on every machine
+	const Real even[ 2 ] = { 4000.0f, 2000.0f };
+	const Int evenCost[ 2 ] = { 2000, 1000 };
+	CHECK_EQ( 0, aiPickUpgrade( even, evenCost, 2, 1.0f, FALSE ) );
+
+	// every rung has the queue and the rule, and each step up keeps a smaller bank and buys sooner
+	TAiData data;
+	for( Int i = 0; i < AISKILL_COUNT; ++i )
+	{
+		CHECK( data.m_skill[ i ].m_bankTargetSeconds > 0.0f );
+		CHECK( data.m_skill[ i ].m_bankTargetFloor > 0 );
+		CHECK( data.m_skill[ i ].m_upgradePayoff > 0.0f );
+		CHECK( data.m_skill[ i ].m_upgradeNonCombatWeight < 0.5f );
+		CHECK( data.m_skill[ i ].m_surplusShare > 0.0f && data.m_skill[ i ].m_surplusShare <= 1.0f );
+	}
+	CHECK_EQ( 1.0f, data.m_skill[ AISKILL_BRUTAL ].m_surplusShare );		// Hard spends all of it
+	for( Int i = 1; i < AISKILL_COUNT; ++i )
+	{
+		const AIDifficultyProfile &lower = data.m_skill[ i - 1 ];
+		const AIDifficultyProfile &upper = data.m_skill[ i ];
+		CHECK( upper.m_bankTargetSeconds < lower.m_bankTargetSeconds );
+		CHECK( upper.m_bankTargetFloor <= lower.m_bankTargetFloor );
+		CHECK( upper.m_upgradePayoff < lower.m_upgradePayoff );
+		CHECK( upper.m_upgradeStartSeconds < lower.m_upgradeStartSeconds );
+		CHECK( upper.m_surplusShare > lower.m_surplusShare );
+		CHECK( upper.m_maxProduction >= lower.m_maxProduction );
+		// every rung waits out an opening and sends no trickle, Hard the shortest wait and the biggest
+		// floor; every rung keeps its artillery behind the line, Hard the farthest
+		CHECK( lower.m_firstPushSeconds > 0.0f && upper.m_firstPushSeconds > 0.0f );
+		CHECK( upper.m_firstPushSeconds <= lower.m_firstPushSeconds );
+		CHECK( upper.m_minAttackPower > lower.m_minAttackPower && lower.m_minAttackPower > 0.0f );
+		CHECK( upper.m_siegeTrail > lower.m_siegeTrail && lower.m_siegeTrail > 0.0f );
+	}
+	// Hard builds past its plan with a bank past twice its target, Medium only past a bigger multiple and
+	// to a lower cap, Easy never; Medium out-armies Easy and Hard out-armies Medium, which an equal share
+	// and cap for the two lower rungs had undone
+	CHECK( data.m_skill[ AISKILL_BRUTAL ].m_maxProduction > data.m_skill[ AISKILL_MEDIUM ].m_maxProduction );
+	CHECK( data.m_skill[ AISKILL_BRUTAL ].m_factoryBankMultiple > 0.0f );
+	CHECK( data.m_skill[ AISKILL_MEDIUM ].m_factoryBankMultiple > data.m_skill[ AISKILL_BRUTAL ].m_factoryBankMultiple );
+	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_EASY ].m_factoryBankMultiple );
+	CHECK( data.m_skill[ AISKILL_BRUTAL ].m_surplusShare >= 4.0f * data.m_skill[ AISKILL_MEDIUM ].m_surplusShare );
+	// Easy fires the retail S curve; Medium drives the Particle Cannon's beam at walking pace, Hard
+	// steers it often enough to count as the double click that drives it fast
+	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_EASY ].m_beamSteerSeconds );
+	CHECK( data.m_skill[ AISKILL_MEDIUM ].m_beamSteerSeconds > data.m_skill[ AISKILL_BRUTAL ].m_beamSteerSeconds );
+	CHECK( data.m_skill[ AISKILL_BRUTAL ].m_beamSteerSeconds > 0.0f && data.m_skill[ AISKILL_BRUTAL ].m_beamSteerSeconds < 0.5f );
+}
+
+
 /** B4, second attempt.  The cash map aimed at the enemy's money and walked past his army, 7-9; this
 	 one counts the guns the AI knows about along each approach and takes the quietest. */
 TEST(an_attack_takes_the_least_defended_lane)
@@ -11998,216 +12844,6 @@ TEST(every_ai_rung_is_named_the_same_way_as_every_other)
 		for (Int b = a + 1; b < numRungs; ++b)
 			CHECK( WideCharCmp( SlotStateName( rungs[a] ).str(), SlotStateName( rungs[b] ).str() ) != 0 );
 }
-/* Nine is what the strip shows before the rest of the queue folds into the "+N" that closes it as a
-	 tenth cell: two rows of five standing on the console over the selection.  It used to be sixteen
-	 across the bottom of the screen, which at a busy war factory ran the cameos most of the way over
-	 the map. */
-TEST(the_production_strip_folds_a_long_queue_into_its_overflow)
-{
-	enum { ROW = 5 };
-	CHECK_EQ( 9, (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX );
-
-	//
-	// The rows, the overflow cell included, have to fill whole rows of five and stand inside the 600
-	// the layout is written in with room to spare for the console they stand on: they grow upward,
-	// and a cell drawn past the top of the screen is a cell nobody can read.
-	//
-	const Int cells = (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX + 1;
-	CHECK_EQ( 0, cells % ROW );
-	const Int height = cells / ROW * (Int)InGameUI::PRODUCTION_STRIP_TRAY_H;
-	CHECK( height < 600 / 2 );
-}
-
-/* Every cameo in the strip stands in the tray the general's powers stand in, down in the corner,
-	 and it stands in it at the size that bar draws it - stretched, the tray's rail and inner frame
-	 collapse into a coloured smudge and it stops reading as that bar at all.  So the strip does not
-	 get to pick its own numbers: it borrows that bar's, and these are the ones that make the borrowed
-	 art come out right.  Sliding the cameo out of the box painted for it, or over the rail, is the
-	 way this goes wrong quietly - it still draws, it just looks like a mistake. */
-TEST(a_queue_cameo_sits_in_the_general_power_tray_the_way_that_bar_sits_in_it)
-{
-	// the cameo is inside its tray, both ways, art and all
-	CHECK( (Int)InGameUI::PRODUCTION_STRIP_TRAY_X >= 0 );
-	CHECK( (Int)InGameUI::PRODUCTION_STRIP_TRAY_Y >= 0 );
-	CHECK( (Int)InGameUI::PRODUCTION_STRIP_TRAY_X + (Int)InGameUI::PRODUCTION_STRIP_QUEUE_W
-					<= (Int)InGameUI::PRODUCTION_STRIP_TRAY_W );
-	CHECK( (Int)InGameUI::PRODUCTION_STRIP_TRAY_Y + (Int)InGameUI::PRODUCTION_STRIP_QUEUE_H
-					<= (Int)InGameUI::PRODUCTION_STRIP_TRAY_H );
-
-	//
-	// Six whole trays side by side is what a row costs across - and that has to fit inside the 800
-	// the whole layout is written in, or the strip runs off the side of the screen before its
-	// overflow count is ever reached.
-	//
-	const Int rowWidth = (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX * (Int)InGameUI::PRODUCTION_STRIP_TRAY_W;
-	CHECK( rowWidth < 800 );
-}
-
-/* Both strips now ask the control bar for the tray, and the control bar works the whole geometry
-	 out of one number: the size the window loader gave a shortcut slot.  Everything downstream - the
-	 hole the cameo goes in, the step a row runs at - is a fraction of the artwork, so a bar the
-	 loader scaled to a widescreen resolution scales the strips with it instead of leaving 800x600
-	 cameos rattling around inside 1600x900 trays.
-
-	 The numbers checked here are the ones the strip's own constants were authored against: the
-	 shortcut slot is 48x41 in the 800x600 the layouts are written in. */
-TEST(the_strip_tray_geometry_is_a_fraction_of_whatever_size_the_bar_was_loaded_at)
-{
-	ICoord2D tray, cameo, hole;
-	Int step = 0;
-
-	// nothing to measure is FALSE rather than a division by zero
-	CHECK( !ControlBar::trayLayoutFromSlot( 0, 41, &tray, &cameo, &hole, &step ) );
-	CHECK( !ControlBar::trayLayoutFromSlot( 48, 0, &tray, &cameo, &hole, &step ) );
-	CHECK( !ControlBar::trayLayoutFromSlot( -48, -41, &tray, &cameo, &hole, &step ) );
-
-	// the slot the strip's own constants were written against
-	CHECK( ControlBar::trayLayoutFromSlot( (Int)InGameUI::PRODUCTION_STRIP_TRAY_W,
-																				 (Int)InGameUI::PRODUCTION_STRIP_TRAY_H,
-																				 &tray, &cameo, &hole, &step ) );
-
-	// the tray is the slot, whole: it is never squeezed to fit anything
-	CHECK_EQ( (Int)InGameUI::PRODUCTION_STRIP_TRAY_W, tray.x );
-	CHECK_EQ( (Int)InGameUI::PRODUCTION_STRIP_TRAY_H, tray.y );
-
-	// and the cameo is inside it, art and all, both ways
-	CHECK( hole.x >= 0 && hole.y >= 0 );
-	CHECK( hole.x + cameo.x <= tray.x );
-	CHECK( hole.y + cameo.y <= tray.y );
-	CHECK( cameo.x > 0 && cameo.y > 0 );
-
-	// a row steps a whole tray, so one tray never lies over the cameo in the next
-	CHECK_EQ( tray.x, step );
-
-	//
-	// Twice the bar, twice everything: an observer borrowing another side's tray gets that side's
-	// slot size, and every one of these has to follow it or the borrowed art comes out with the
-	// cameo hanging over its rail.
-	//
-	ICoord2D bigTray, bigCameo, bigHole;
-	Int bigStep = 0;
-	CHECK( ControlBar::trayLayoutFromSlot( 2 * (Int)InGameUI::PRODUCTION_STRIP_TRAY_W,
-																				 2 * (Int)InGameUI::PRODUCTION_STRIP_TRAY_H,
-																				 &bigTray, &bigCameo, &bigHole, &bigStep ) );
-	CHECK_EQ( 2 * tray.x, bigTray.x );
-	CHECK_EQ( 2 * tray.y, bigTray.y );
-	CHECK_EQ( 2 * step, bigStep );
-	CHECK( bigCameo.x >= 2 * cameo.x - 1 && bigCameo.x <= 2 * cameo.x + 1 );
-	CHECK( bigCameo.y >= 2 * cameo.y - 1 && bigCameo.y <= 2 * cameo.y + 1 );
-	CHECK( bigHole.x + bigCameo.x <= bigTray.x );
-	CHECK( bigHole.y + bigCameo.y <= bigTray.y );
-
-	// every out-parameter is optional: the layout pass only wants the step
-	Int stepOnly = 0;
-	CHECK( ControlBar::trayLayoutFromSlot( (Int)InGameUI::PRODUCTION_STRIP_TRAY_W,
-																				 (Int)InGameUI::PRODUCTION_STRIP_TRAY_H,
-																				 NULL, NULL, NULL, &stepOnly ) );
-	CHECK_EQ( step, stepOnly );
-}
-
-/* No tray lies over another, in either direction: a cell steps a whole tray sideways as well as
-	 upward.  A tray sliding under its neighbour cut the rail across the picture next to it, which is
-	 what the general's powers and the superweapon countdowns both looked like. */
-TEST(a_stacked_tray_does_not_lie_over_the_one_below_it)
-{
-	// upward: nothing is taken off, so a cell has to clear the whole picture that stands in it
-	CHECK( (Int)InGameUI::PRODUCTION_STRIP_TRAY_Y + (Int)InGameUI::PRODUCTION_STRIP_QUEUE_H
-					<= (Int)InGameUI::PRODUCTION_STRIP_TRAY_H );
-
-	//
-	// the superweapon strip stands in rows of six, as many as it is allowed to grow to, and that pile has
-	// to fit under the corner clock plate rather than run off the bottom of the 800x600 it is
-	// written in - at the full tray now, which is the taller pile of the two
-	//
-	const Int rows = (Int)InGameUI::SUPERWEAPON_STRIP_ROWS;
-	const Int pileHeight = rows * (Int)InGameUI::PRODUCTION_STRIP_TRAY_H;
-	CHECK( pileHeight < 600 / 2 );
-
-	const Int rowWidth = (Int)InGameUI::SUPERWEAPON_STRIP_COLS * (Int)InGameUI::PRODUCTION_STRIP_TRAY_W;
-	CHECK( rowWidth < 800 );
-}
-
-/* Buildings going up on the map are not in anybody's queue - they are objects standing on the
-	 ground with a percentage on them - but they land in the same column as the queued items, sorted
-	 against them on the one thing the two kinds share: how long each still has.  The comparison the
-	 column is built with is therefore blind to which kind a slot is. */
-TEST(the_buildings_going_up_stand_in_the_queue_column)
-{
-	// a site three seconds out goes in front of a tank ten seconds out, and not the other way round
-	CHECK( InGameUI::stripSlotGoesBefore( FALSE, 90, FALSE, 300 ) );
-	CHECK( !InGameUI::stripSlotGoesBefore( FALSE, 300, FALSE, 90 ) );
-}
-
-/* The building you have selected does not get a row of its own: its items lead the queue row, so
-	 the front of the strip is what the thing you are looking at is making and the rest of the base
-	 follows it.  Inside either block the soonest to finish is still first, and a tie never moves -
-	 an item only goes in front of one it beats, so a base full of identical barracks does not
-	 shuffle from frame to frame. */
-TEST(the_selected_buildings_items_lead_the_queue_row)
-{
-	// a selected item passes anything that is not selected, however long it has left
-	CHECK( InGameUI::stripSlotGoesBefore( TRUE, 9000, FALSE, 1 ) );
-	// and nothing that is not selected ever passes one
-	CHECK( !InGameUI::stripSlotGoesBefore( FALSE, 1, TRUE, 9000 ) );
-
-	// inside a block, soonest first
-	CHECK( InGameUI::stripSlotGoesBefore( FALSE, 100, FALSE, 200 ) );
-	CHECK( !InGameUI::stripSlotGoesBefore( FALSE, 200, FALSE, 100 ) );
-	CHECK( InGameUI::stripSlotGoesBefore( TRUE, 100, TRUE, 200 ) );
-	CHECK( !InGameUI::stripSlotGoesBefore( TRUE, 200, TRUE, 100 ) );
-
-	// a tie holds its place - in both blocks
-	CHECK( !InGameUI::stripSlotGoesBefore( FALSE, 100, FALSE, 100 ) );
-	CHECK( !InGameUI::stripSlotGoesBefore( TRUE, 100, TRUE, 100 ) );
-}
-
-/* That bar grows leftward out of the corner, so the heavy rail of its tray is on the right hand
-	 edge of the artwork.  A row running rightward from the left of the screen wants that rail on the
-	 other side, so the strip draws the tray mirrored - and it mirrors it in the UV rect alone, over
-	 the same texture page, rather than shipping a second copy of the art the other way round.  Every
-	 other field has to come across with it or the copy draws the wrong piece of the page at the wrong
-	 size, and the original has to be left alone, because the bar in the corner is still drawing it. */
-TEST(a_mirrored_image_is_the_same_piece_of_texture_the_other_way_round)
-{
-	Image *source = newInstance( Image );
-	source->setName( AsciiString( "SATraySmall" ) );
-	source->setFilename( AsciiString( "SAControlBar512_001.tga" ) );
-	source->setTextureWidth( 512 );
-	source->setTextureHeight( 512 );
-
-	ICoord2D size = { 60, 56 };
-	source->setImageSize( &size );
-
-	Region2D uv;
-	uv.lo.x = 413.0f / 512.0f;
-	uv.lo.y = 1.0f / 512.0f;
-	uv.hi.x = 473.0f / 512.0f;
-	uv.hi.y = 57.0f / 512.0f;
-	source->setUV( &uv );
-
-	Image *mirrored = newMirroredImage( source );
-
-	// the whole point: the horizontal run of the UV rect is reversed
-	CHECK_NEAR( 473.0f / 512.0f, mirrored->getUV()->lo.x, 0.0001f );
-	CHECK_NEAR( 413.0f / 512.0f, mirrored->getUV()->hi.x, 0.0001f );
-
-	// and nothing else about it moves
-	CHECK_NEAR( 1.0f / 512.0f, mirrored->getUV()->lo.y, 0.0001f );
-	CHECK_NEAR( 57.0f / 512.0f, mirrored->getUV()->hi.y, 0.0001f );
-	CHECK_STR( "SAControlBar512_001.tga", mirrored->getFilename().str() );
-	CHECK_EQ( 512, mirrored->getTextureSize()->x );
-	CHECK_EQ( 512, mirrored->getTextureSize()->y );
-	CHECK_EQ( 60, mirrored->getImageWidth() );
-	CHECK_EQ( 56, mirrored->getImageHeight() );
-
-	// the tray the control bar owns is left exactly as it was found
-	CHECK_NEAR( 413.0f / 512.0f, source->getUV()->lo.x, 0.0001f );
-	CHECK_NEAR( 473.0f / 512.0f, source->getUV()->hi.x, 0.0001f );
-
-	mirrored->deleteInstance();
-	source->deleteInstance();
-}
-
 //-------------------------------------------------------------------------------------------------
 // THREADING-ROADMAP.md 3.1 - the fork-join pool.
 //
@@ -12525,6 +13161,59 @@ TEST(a_door_stays_open_while_another_unit_is_still_coming)
 	CHECK( !Production_shouldCloseDoorNow( 31, 30, true, true ) );
 }
 
+/* ProductionUpdate.h: production repeat.  A factory keeps one unit on repeat.  Turning a second
+	 on takes the first off.  Turning the same one on again is a no-op, and off takes it out. */
+TEST(production_repeat_is_one_unit_at_a_time)
+{
+	static const char a = 0, b = 0, c = 0;
+	const ThingTemplate *tank = (const ThingTemplate *)&a;
+	const ThingTemplate *apc = (const ThingTemplate *)&b;
+	const ThingTemplate *jeep = (const ThingTemplate *)&c;
+
+	ProductionRepeat repeat;
+	CHECK( repeat.turn() == NULL );
+	repeat.advance();		// nothing on repeat: no turn to pass, and no division by zero
+	CHECK( repeat.turn() == NULL );
+
+	repeat.set( tank, TRUE );
+	repeat.set( tank, TRUE );		// already on: still one
+	CHECK_EQ( 1, (Int)repeat.m_units.size() );
+	CHECK( repeat.has( tank ) && !repeat.has( apc ) && !repeat.has( jeep ) );
+	CHECK( repeat.turn() == tank );
+
+	repeat.set( apc, TRUE );		// a second unit replaces the first
+	CHECK_EQ( 1, (Int)repeat.m_units.size() );
+	CHECK( repeat.has( apc ) && !repeat.has( tank ) );
+	CHECK( repeat.turn() == apc );
+	repeat.advance();
+	CHECK( repeat.turn() == apc );
+
+	repeat.set( jeep, TRUE );
+	CHECK( repeat.turn() == jeep );
+	repeat.set( jeep, FALSE );
+	CHECK( repeat.turn() == NULL );
+	repeat.set( jeep, FALSE );		// already off: nothing happens
+	CHECK_EQ( 0, (Int)repeat.m_units.size() );
+
+	repeat.set( tank, TRUE );
+	repeat.clear();
+	CHECK( repeat.turn() == NULL );
+	CHECK( !repeat.has( tank ) );
+}
+
+/* What a factory on repeat does when canMakeUnit answers: money, a full queue or parking, the unit
+	 cap and a factory out of action wait, a unit the factory can no longer make leaves the repeat. */
+TEST(production_repeat_waits_for_money_and_drops_a_unit_it_can_no_longer_make)
+{
+	CHECK_EQ( (Int)REPEAT_QUEUE, (Int)Production_repeatAction( CANMAKE_OK ) );
+	CHECK_EQ( (Int)REPEAT_WAIT, (Int)Production_repeatAction( CANMAKE_NO_MONEY ) );
+	CHECK_EQ( (Int)REPEAT_WAIT, (Int)Production_repeatAction( CANMAKE_QUEUE_FULL ) );
+	CHECK_EQ( (Int)REPEAT_WAIT, (Int)Production_repeatAction( CANMAKE_PARKING_PLACES_FULL ) );
+	CHECK_EQ( (Int)REPEAT_WAIT, (Int)Production_repeatAction( CANMAKE_MAXED_OUT_FOR_PLAYER ) );
+	CHECK_EQ( (Int)REPEAT_WAIT, (Int)Production_repeatAction( CANMAKE_FACTORY_IS_DISABLED ) );
+	CHECK_EQ( (Int)REPEAT_DROP, (Int)Production_repeatAction( CANMAKE_NO_PREREQ ) );
+}
+
 TEST(borderless_asks_for_a_windowed_device_the_size_of_the_desktop)
 {
 	/* -borderless is borderless fullscreen.  Half of it is the window itself, which WinMain creates
@@ -12605,58 +13294,101 @@ TEST(every_side_has_three_plates_and_every_general_wears_its_sides)
 	CHECK( ControlBarPlateForSide( AsciiString( "America" ), ControlBar::CB_PANEL_COUNT ) == NULL );
 }
 
-TEST(the_three_panels_are_one_bar_at_4x3_and_pull_apart_on_a_wide_screen)
+TEST(control_bar_pro_is_three_pieces_at_the_screens_height)
 {
-	/* Every window and every plate goes through this one piece of arithmetic, so it is where a
-		 misplaced money slot or a smeared cameo would come from.  Two things have to hold: at 4:3 it
-		 reproduces what the .wnd loader would have done, which is what makes the three plates slide
-		 back into the one strip EA drew; and above 4:3 it scales by one factor for both axes and
-		 opens the two gaps rather than stretching to fill them. */
-	IRegion2D whole;			// the whole authored bar
-	whole.lo.x = 0;
-	whole.lo.y = 408;
-	whole.hi.x = 800;
-	whole.hi.y = 600;
+	/* ControlBar Pro was painted at 1920x1080.  Its three pieces, measured off its ControlBar.wnd
+		 (radar 0,740-340,1080; command grid and money 592,870-1326,1080; selection, upgrades and the
+		 general's button 1625,794-1920,1080) and taken to 800x600 design units the way layoutPanels
+		 takes the loader's stretch back out: x times 800/1920, y times 600/1080.  On every screen
+		 each piece is drawn at the height over 1080 alone, so it keeps that shape, sits on its own
+		 anchor and stays clear of the others. */
+	static const IRegion2D pieces[ ControlBar::CB_PANEL_COUNT ] =
+	{
+		{ {   0, 411 }, { 142, 600 } },
+		{ { 247, 483 }, { 553, 600 } },
+		{ { 677, 441 }, { 800, 600 } },
+	};
+	struct Screen { Int w, h; };
+	static const Screen screens[] = { { 1280, 720 }, { 1920, 1080 }, { 2560, 1080 }, { 3840, 1080 }, { 1024, 768 } };
 
-	IRegion2D left, centre, right;
-	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_LEFT,   &whole, 800, 600, &left ) );
-	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_CENTER, &whole, 800, 600, &centre ) );
-	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_RIGHT,  &whole, 800, 600, &right ) );
+	// ControlBar.wnd's own rectangles and the American scheme's UL/LR, in the painting's pixels
+	struct PaintedWindow { const char *what; Int piece; Int x0, y0, x1, y1; };
+	static const PaintedWindow painted[] =
+	{
+		{ "LeftHUD",						ControlBar::CB_PANEL_LEFT,		   5, 753,  327, 1075 },
+		{ "WinUAttack",					ControlBar::CB_PANEL_LEFT,		 276, 740,  340,  804 },
+		{ "CommandWindow",			ControlBar::CB_PANEL_CENTER,	 592, 894, 1326, 1080 },
+		{ "BeaconWindow",				ControlBar::CB_PANEL_CENTER,	 600, 902, 1318, 1080 },
+		{ "MoneyDisplay",				ControlBar::CB_PANEL_CENTER,	 894, 879, 1026,  904 },
+		{ "PowerWindow",				ControlBar::CB_PANEL_CENTER,	 605, 906, 1313,  916 },
+		{ "ButtonOptions",			ControlBar::CB_PANEL_CENTER,	 609, 925,  663,  960 },
+		{ "ButtonIdleWorker",		ControlBar::CB_PANEL_CENTER,	 609, 962,  663,  997 },
+		{ "ButtonPlaceBeacon",	ControlBar::CB_PANEL_CENTER,	 609, 999,  663, 1034 },
+		{ "PopupCommunicator",	ControlBar::CB_PANEL_CENTER,	 609, 1036, 663, 1071 },
+		{ "RightHUD",						ControlBar::CB_PANEL_RIGHT,		1642, 887, 1871, 1071 },
+		{ "GeneralsExp",				ControlBar::CB_PANEL_RIGHT,		1880, 923, 1906, 1063 },
+		{ "ExpBarForeground",		ControlBar::CB_PANEL_RIGHT,		1875, 887, 1911, 1071 },
+		{ "ButtonGeneral",			ControlBar::CB_PANEL_RIGHT,		1829, 840, 1920,  871 },
+		{ "ButtonLarge",				ControlBar::CB_PANEL_RIGHT,		1829, 802, 1920,  833 },
+		{ NULL, 0, 0, 0, 0, 0 }
+	};
 
-	// at the authored size all three anchors land on the authored rectangle itself
-	CHECK_EQ( left.lo.x, 0 );		CHECK_EQ( left.hi.x, 800 );
-	CHECK_EQ( centre.lo.x, 0 );	CHECK_EQ( centre.hi.x, 800 );
-	CHECK_EQ( right.lo.x, 0 );	CHECK_EQ( right.hi.x, 800 );
-	CHECK_EQ( left.lo.y, 408 );	CHECK_EQ( left.hi.y, 600 );
+	for( Int i = 0; i < (Int)( sizeof( screens ) / sizeof( screens[ 0 ] ) ); i++ )
+	{
+		const Int w = screens[ i ].w;
+		const Int h = screens[ i ].h;
+		const Real k = h / 1080.0f;		// screen lines to one of the painting's
+		IRegion2D rect[ ControlBar::CB_PANEL_COUNT ];
+		for( Int p = 0; p < ControlBar::CB_PANEL_COUNT; p++ )
+		{
+			CHECK( ControlBarPanelDesignToScreen( p, &pieces[ p ], w, h, &rect[ p ] ) );
 
-	/* 1920x1080 is 1.8 times the authored height and 2.4 times its width; the smaller one wins, so
-		 a square cameo stays square instead of coming out a third wider than it is tall */
-	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_LEFT,   &whole, 1920, 1080, &left ) );
-	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_CENTER, &whole, 1920, 1080, &centre ) );
-	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_RIGHT,  &whole, 1920, 1080, &right ) );
+			// inside the screen, on its bottom edge
+			CHECK( rect[ p ].lo.x >= 0 && rect[ p ].hi.x <= w && rect[ p ].lo.y >= 0 );
+			CHECK_EQ( rect[ p ].hi.y, h );
 
-	CHECK_NEAR( (Real)left.width(), 800.0f * 1.8f, 1.5f );
-	CHECK_NEAR( (Real)left.height(), 192.0f * 1.8f, 1.5f );
+			// its painted shape at the screen's height: as many of the painting's pixels across as down
+			CHECK_NEAR( (Real)rect[ p ].width(), pieces[ p ].width() * 1920.0f / 800.0f * k, 2.0f );
+			CHECK_NEAR( (Real)rect[ p ].height(), pieces[ p ].height() * 1080.0f / 600.0f * k, 2.0f );
+		}
 
-	// left edge to left edge, right edge to right edge, and the middle one centred between them
-	CHECK_EQ( left.lo.x, 0 );
-	CHECK_EQ( right.hi.x, 1920 );
-	CHECK_NEAR( (Real)( centre.lo.x + centre.hi.x ) * 0.5f, 960.0f, 2.0f );
+		// radar on the left edge, selection on the right, grid on the middle of the screen
+		CHECK_EQ( rect[ ControlBar::CB_PANEL_LEFT ].lo.x, 0 );
+		CHECK_EQ( rect[ ControlBar::CB_PANEL_RIGHT ].hi.x, w );
+		CHECK_NEAR( ( rect[ ControlBar::CB_PANEL_CENTER ].lo.x + rect[ ControlBar::CB_PANEL_CENTER ].hi.x ) * 0.5f,
+								w * 0.5f + ( ( 247 + 553 ) * 0.5f - 400.0f ) * 1920.0f / 800.0f * k, 2.0f );
 
-	// and every panel still sits on the bottom edge of the screen
-	CHECK_EQ( left.hi.y, 1080 );
-	CHECK_EQ( centre.hi.y, 1080 );
-	CHECK_EQ( right.hi.y, 1080 );
+		// and the world between them, never one piece over another
+		CHECK( rect[ ControlBar::CB_PANEL_LEFT ].hi.x < rect[ ControlBar::CB_PANEL_CENTER ].lo.x );
+		CHECK( rect[ ControlBar::CB_PANEL_CENTER ].hi.x < rect[ ControlBar::CB_PANEL_RIGHT ].lo.x );
 
-	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_COUNT, &whole, 1920, 1080, &left ) == FALSE );
-	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_LEFT, &whole, 0, 0, &left ) == FALSE );
+		// every window the bar paints goes to the piece it was painted on, and stays inside it
+		for( const PaintedWindow *pw = painted; pw->what; pw++ )
+		{
+			IRegion2D design;
+			design.lo.x = ( pw->x0 * 800 + 960 ) / 1920;
+			design.lo.y = ( pw->y0 * 600 + 540 ) / 1080;
+			design.hi.x = ( pw->x1 * 800 + 960 ) / 1920;
+			design.hi.y = ( pw->y1 * 600 + 540 ) / 1080;
+			const Int piece = ControlBarHudPieceForDesignX( ( design.lo.x + design.hi.x ) * 0.5f );
+			CHECK_EQ( piece, pw->piece );
+
+			IRegion2D got;
+			CHECK( ControlBarPanelDesignToScreen( piece, &design, w, h, &got ) );
+			CHECK( got.lo.x >= rect[ piece ].lo.x - 1 && got.hi.x <= rect[ piece ].hi.x + 1 );
+			CHECK( got.lo.y >= rect[ piece ].lo.y - 1 && got.hi.y <= rect[ piece ].hi.y + 1 );
+		}
+	}
+
+	IRegion2D unused;
+	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_COUNT, &pieces[ 0 ], 1920, 1080, &unused ) == FALSE );
+	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_LEFT, &pieces[ 0 ], 0, 0, &unused ) == FALSE );
 }
 
-TEST(the_classic_bar_is_three_plates_on_the_screen_edges_at_one_scale)
+TEST(the_menus_keep_the_4x3_box)
 {
-	/* The menus keep the 4:3 box.  The Classic bar is the three plates Reforged's arithmetic puts on
-		 the screen's edges, at every shape of screen: radar on the left edge, grid centred, selection
-		 on the right edge, every one of them the same scale across as down. */
+	/* The menus keep the 4:3 box; the bar under them is ControlBar Pro's three pieces
+		 (control_bar_pro_is_three_pieces_at_the_screens_height). */
 	CHECK_EQ( UIRectForScreen( 1920, 1080 ).x, 240 );
 	CHECK_EQ( UIRectForScreen( 1920, 1080 ).w, 1440 );
 	CHECK_EQ( UIRectForScreen( 1920, 1080 ).h, 1080 );
@@ -12664,49 +13396,6 @@ TEST(the_classic_bar_is_three_plates_on_the_screen_edges_at_one_scale)
 	CHECK_EQ( UIRectForScreen( 1024, 768 ).x, 0 );
 	CHECK_EQ( UIRectForScreen( 1024, 768 ).w, 1024 );
 	CHECK_EQ( UIRectForScreen( 1280, 1024 ).y, 64 );		// narrower than 4:3: full width, on the bottom with the bar
-
-	GlobalData *saved = TheWritableGlobalData;
-	TheWritableGlobalData = NEW GlobalData;
-	TheWritableGlobalData->m_interfaceStyle = INTERFACE_STYLE_CLASSIC;
-
-	static const Int screens[][ 2 ] =
-	{
-		{ 1024, 768 }, { 1280, 1024 }, { 1680, 1050 }, { 1920, 1080 }, { 1920, 1200 }, { 2560, 1440 },
-		{ 3840, 2160 }, { 2560, 1080 }, { 3440, 1440 }, { 5120, 1440 }
-	};
-	const IRegion2D *radar = &ControlBarPlateForSide( "America", ControlBar::CB_PANEL_LEFT )->design;
-	const IRegion2D *grid = &ControlBarPlateForSide( "America", ControlBar::CB_PANEL_CENTER )->design;
-	const IRegion2D *selection = &ControlBarPlateForSide( "America", ControlBar::CB_PANEL_RIGHT )->design;
-	for( Int i = 0; i < (Int)( sizeof( screens ) / sizeof( screens[ 0 ] ) ); i++ )
-	{
-		const Int w = screens[ i ][ 0 ];
-		const Int h = screens[ i ][ 1 ];
-		const Real s = ControlBarUniformScaleFor( w, h );
-		IRegion2D left, centre, right;
-		CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_LEFT, radar, w, h, &left ) );
-		CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_CENTER, grid, w, h, &centre ) );
-		CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_RIGHT, selection, w, h, &right ) );
-
-		// the radar on the left edge, the selection on the right, the grid in the middle
-		CHECK_EQ( left.lo.x, 0 );
-		CHECK_EQ( right.hi.x, w );
-		CHECK_NEAR( ( centre.lo.x + centre.hi.x ) * 0.5f, w * 0.5f + ( ( grid->lo.x + grid->hi.x ) * 0.5f - 400.0f ) * s, 2.0f );
-		CHECK_EQ( left.hi.y, h );
-		CHECK_EQ( centre.hi.y, h );
-		CHECK_EQ( right.hi.y, h );
-
-		// nothing stretched: the grid plate is as many times its design width across as down, down
-		// being to the screen's bottom edge, which the plate is snapped onto
-		CHECK_NEAR( (Real)centre.width() / grid->width(), (Real)centre.height() / ( 600 - grid->lo.y ), 0.02f );
-		CHECK_NEAR( (Real)centre.width() / grid->width(), s, 0.02f );
-
-		// the three never overlap past the seams the art already shares at 4:3
-		CHECK( left.hi.x <= centre.lo.x + REAL_TO_INT_CEIL( 4.0f * s ) );
-		CHECK( centre.hi.x <= right.lo.x + REAL_TO_INT_CEIL( 14.0f * s ) );
-	}
-
-	delete TheWritableGlobalData;
-	TheWritableGlobalData = saved;
 }
 
 TEST(a_plate_covers_the_windows_its_panel_is_responsible_for)
@@ -13071,12 +13760,13 @@ TEST(the_hud_is_measured_at_the_command_bars_own_scale)
 		{ 800, 600 }, { 1024, 768 }, { 1280, 720 }, { 1920, 1080 }, { 2560, 1080 }, { 3840, 2160 },
 	};
 
-	// a design rectangle 100 units wide and 100 tall, so the width and height of what comes back
-	// out of the panel transform *is* the scale it was put through
+	// ControlBar Pro was drawn at 1920x1080 and loaded through the 800x600 design box, so one of its
+	// design units is a third wider than it is tall: 75 by 100 of them is a square on the screen,
+	// and its side *is* the scale it was put through
 	IRegion2D square;
 	square.lo.x = 300;
 	square.lo.y = 480;
-	square.hi.x = 400;
+	square.hi.x = 375;
 	square.hi.y = 580;
 
 	for( Int i = 0; i < (Int)( sizeof( screens ) / sizeof( screens[ 0 ] ) ); i++ )
@@ -13119,31 +13809,13 @@ TEST(controlbar_hud_scale_follows_the_screens_height)
 
 	struct Screen { Int w, h; };
 	const Screen screens[] = { { 1280, 720 }, { 1920, 1080 }, { 2560, 1440 } };
-	const Real reference = ControlBarHudScaleFit( ControlBarHudScaleFor( 1920, 1080 ), 1920 ) / 1080.0f;
+	const Real reference = ControlBarHudScaleFor( 1920, 1080 ) / 1080.0f;
 	for( Int i = 0; i < (Int)ARRAY_SIZE( screens ); i++ )
 	{
-		const Real covered = ControlBarHudScaleFit( ControlBarHudScaleFor( screens[ i ].w, screens[ i ].h ), screens[ i ].w ) / screens[ i ].h;
+		const Real covered = ControlBarHudScaleFor( screens[ i ].w, screens[ i ].h ) / screens[ i ].h;
 		CHECK_NEAR( covered, reference, 0.0001f );
 	}
-	CHECK_NEAR( ControlBarHudScaleFit( ControlBarHudScaleFor( 2560, 1080 ), 2560 ),
-							ControlBarHudScaleFit( ControlBarHudScaleFor( 1920, 1080 ), 1920 ), 0.0001f );
-}
-
-/* HUD Size grows the console until it would no longer fit the screen's width, and there it stops:
-	 at HUD Size 100% only a screen narrower than about 1.05:1, at 150% one narrower than about 1.57:1,
-	 which takes in 4:3 and 5:4. */
-TEST(controlbar_hud_size_stops_where_the_console_fills_the_width)
-{
-	const Int console = InGameUI_consolePageWidth();
-	CHECK( console > 800 && console < 1024 );
-	CHECK_NEAR( ControlBarHudScaleFit( 1.26f, 1920 ), 1.26f, 0.001f );
-	CHECK_NEAR( ControlBarHudScaleFit( 1.5f, 1280 ), 1280.0f / console, 0.001f );
-	CHECK( ControlBarHudScaleFit( 1.5f, 1280 ) * console <= 1280.0f );
-	CHECK_NEAR( ControlBarHudScaleFit( 1.0f, 1024 ), 1.0f, 0.001f );
-	CHECK( ControlBarHudScaleFit( 1.0f, 800 ) < 1.0f );
-	const Real narrow = ControlBarHudScaleFor( 1024, 768 );
-	CHECK_NEAR( ControlBarHudScaleFit( narrow, 1024 ), narrow, 0.0001f );
-	CHECK( ControlBarHudScaleFit( narrow * 1.5f, 1024 ) < narrow * 1.5f );
+	CHECK_NEAR( ControlBarHudScaleFor( 2560, 1080 ), ControlBarHudScaleFor( 1920, 1080 ), 0.0001f );
 }
 
 /* A health bar is drawn in raw pixels over a tank whose own size on screen is set by the camera,
@@ -13416,34 +14088,25 @@ TEST(gameplay_conveniences_are_forced_on_and_left_the_catalog)
 	GlobalData *scratch = NEW GlobalData;
 	TheWritableGlobalData = scratch;
 
-	CHECK( scratch->m_showPlacementRangeRing );
 	CHECK( scratch->m_workersReturnToSupply );
-	CHECK( scratch->m_detailedBuildTooltips );
 	CHECK( scratch->m_archiveReplays );
-	/* The HUD overlay is out of the catalog too, but its default is the build's: on in the developer
-		 builds, off in Release (a project rule; GameData.ini or -showHudOverlay turns it on). */
-#if defined(_DEBUG) || defined(_INTERNAL)
-	CHECK( scratch->m_showHudOverlay );
-#else
-	CHECK( !scratch->m_showHudOverlay );
-#endif
 
 	/* HealthBars is what is left, and it is still a menu row. */
 	const OptionDef *bars = findOptionDef( "HealthBars" );
 	CHECK( bars != NULL );
 	CHECK( bars->widgetName != NULL && bars->widgetName[ 0 ] != '\0' );
 
-	/* The camera and mouse habits went the other way: no control, but the row stays, so an
-		 Options.ini that names one still wins over the default.  ZoomToCursor came back to the menu. */
-	static const char *const hidden[] =
+	/* The two mouse habits are Controls check boxes again, on by default. */
+	static const char *const habits[] =
 	{
 		"FormationDrag", "EdgeScrollInWindowedMode", NULL
 	};
-	for( Int i = 0; hidden[ i ] != NULL; ++i )
+	for( Int i = 0; habits[ i ] != NULL; ++i )
 	{
-		const OptionDef *def = findOptionDef( hidden[ i ] );
+		const OptionDef *def = findOptionDef( habits[ i ] );
 		CHECK( def != NULL );
-		CHECK( def->widgetName == NULL || def->widgetName[ 0 ] == '\0' );
+		CHECK( def->widgetName != NULL && def->widgetName[ 0 ] != '\0' );
+		CHECK_EQ( def->get(), 1 );
 	}
 
 	/* The snaps, grid placement and the opening zoom are Controls check boxes, off by default, under
@@ -13841,12 +14504,8 @@ TEST(net_box_is_a_check_box_that_starts_on_under_its_own_key)
 	TheWritableGlobalData = scratch;
 
 	CHECK( scratch->m_showNetBox );
-	// the older plate's own switch is not this one's to move.  Its default is the build's (on in the
-	// developer builds, off in Release), so what is checked is that the net box leaves it as it was.
-	const Bool hudOverlayBefore = scratch->m_showHudOverlay;
 	def->set( 0 );
 	CHECK( !scratch->m_showNetBox );
-	CHECK_EQ( (Int)scratch->m_showHudOverlay, (Int)hudOverlayBefore );
 
 	TheWritableGlobalData = saved;
 	delete scratch;
@@ -13885,42 +14544,7 @@ TEST(console_set_parses_only_what_the_row_takes)
 
 	CHECK( formatOptionValue( *box, 0 ) == "no" );
 	CHECK( formatOptionValue( *drag, 12 ) == "12" );
-	CHECK( findOptionDef( "showsuperweaponstrip" ) != NULL );
-}
-
-/* The income beside the money, per second as it always was until the player picks otherwise.
-	 Automatic is the one with a rule in it: under ten dollars a second the whole number rounds most
-	 of the income away, $135 a minute reading "+2/s", so that is where it goes per minute. */
-TEST(income_rate_stays_per_second_until_picked_and_automatic_turns_at_ten_a_second)
-{
-	const OptionDef *def = findOptionDef( "IncomeRate" );
-	CHECK( def != NULL );
-	if( def == NULL )
-		return;
-	CHECK_EQ( (Int)def->kind, (Int)OPTION_ENUM );
-	CHECK_EQ( def->hi, (Int)INCOME_RATE_MODE_COUNT - 1 );
-	CHECK( strstr( def->widgetName, "ComboBoxIncomeRate" ) != NULL );
-
-	GlobalData *saved = TheWritableGlobalData;
-	GlobalData *scratch = NEW GlobalData;
-	TheWritableGlobalData = scratch;
-
-	CHECK_EQ( def->get(), (Int)INCOME_RATE_PER_SECOND );
-	def->set( INCOME_RATE_AUTOMATIC );
-	CHECK_EQ( scratch->m_incomeRateMode, (Int)INCOME_RATE_AUTOMATIC );
-
-	TheWritableGlobalData = saved;
-	delete scratch;
-
-	CHECK( !InGameUI_incomePerMinute( INCOME_RATE_PER_SECOND, 0 ) );
-	CHECK( !InGameUI_incomePerMinute( INCOME_RATE_PER_SECOND, 500 ) );
-	CHECK( InGameUI_incomePerMinute( INCOME_RATE_PER_MINUTE, 0 ) );
-	CHECK( InGameUI_incomePerMinute( INCOME_RATE_PER_MINUTE, 500 ) );
-	CHECK( InGameUI_incomePerMinute( INCOME_RATE_AUTOMATIC, 0 ) );
-	CHECK( InGameUI_incomePerMinute( INCOME_RATE_AUTOMATIC, 2 ) );
-	CHECK( InGameUI_incomePerMinute( INCOME_RATE_AUTOMATIC, 9 ) );
-	CHECK( !InGameUI_incomePerMinute( INCOME_RATE_AUTOMATIC, 10 ) );
-	CHECK( !InGameUI_incomePerMinute( INCOME_RATE_AUTOMATIC, 40 ) );
+	CHECK( findOptionDef( "shownetbox" ) != NULL );
 }
 
 TEST(build_plans_are_numbered_in_the_order_their_builder_takes_them)
@@ -15206,39 +15830,6 @@ TEST(map_path_conversion_terminates_on_a_path_with_no_map_file)
 	CHECK_STR( trailing.str(), "Maps\\Twilight\\" );
 }
 
-/* ControlBar.cpp: layoutPanels used to lift every window in a minimised panel by that panel's
-	 slide, including the ones applyPanelSlide never moved.  Each rebuild of the layout lifted them
-	 again, placeInPanel then recorded the lifted position as the authored one, and the bar walked
-	 off the top of its own strip - taking the build tooltip, which is placed against
-	 BackgroundMarker, off the screen with it. */
-extern Int ControlBar_slideToUndo( Int slideAppliedToWindow, Int panelSlideOffsetNow );
-
-TEST(the_bar_only_lifts_a_window_the_slide_actually_pushed_down)
-{
-	// a window the slide moved comes back by exactly what it was moved by
-	CHECK_EQ( ControlBar_slideToUndo( 48, 48 ), 48 );
-
-	//
-	// and one it skipped is left alone, however far its panel says it went.  A plate marker and
-	// anything in a panel that was minimised immediately are both in this case.
-	//
-	CHECK_EQ( ControlBar_slideToUndo( 0, 48 ), 0 );
-	CHECK_EQ( ControlBar_slideToUndo( 0, 121 ), 0 );
-
-	// a window that went down before the panel's slide changed underneath it still comes back whole
-	CHECK_EQ( ControlBar_slideToUndo( 30, 0 ), 30 );
-	CHECK_EQ( ControlBar_slideToUndo( 30, 90 ), 30 );
-
-	// the round trip is a round trip: pushed down by n, lifted by n, net zero
-	static const Int pushes[] = { 0, 1, 17, 48, 121 };
-	for( Int i = 0; i < 5; i++ )
-	{
-		const Int y = 400;
-		const Int down = y + pushes[ i ];
-		CHECK_EQ( down - ControlBar_slideToUndo( pushes[ i ], 121 ), y );
-	}
-}
-
 /* ControlBar.cpp: a resolution change throws every window away and builds it again, but the bar
 	 itself has to survive - a production queue, a hunt update and the academy all hold a
 	 const CommandButton * that would be left pointing at a freed one.  So the window half of init
@@ -15294,54 +15885,6 @@ TEST(command_set_slot_naming_an_unknown_button_is_skipped)
 
 	remove( TEST_INI );
 	TheControlBar = savedBar;
-}
-
-/* ControlBarScheme.cpp: the scheme places the money readout, the two general's tabs and the toolbar
-	 column by reading their parent's screen position and subtracting it, and layoutPanels then runs
-	 over the answer.  Asking for the panels back is not the same as having them back - the slide is
-	 wall-clocked over a fifth of a second - so a scheme rebuilt while the bar was on its way down
-	 read a parent that was still travelling, and every child it placed came out that far too high.
-	 layoutPanels lifted the parent back afterwards and dragged them up again, placeInPanel recorded
-	 the lifted position as the authored one, and it stuck. Measured in a match: 524 with the panels
-	 sent home first, 294 without. clearPanelSlide is the "first". */
-TEST(sending_the_panels_home_is_not_the_same_as_them_being_home)
-{
-	ControlBar bar;
-	const Int left = ControlBar::CB_PANEL_LEFT;
-	const Int right = ControlBar::CB_PANEL_RIGHT;
-	const Int count = ControlBar::CB_PANEL_COUNT;
-
-	// away, and all the way away this instant
-	bar.showPanel( left, FALSE, TRUE );
-	CHECK_NEAR( bar.getPanelSlideFraction( left ), 1.0f, 0.0001f );
-	CHECK( bar.isPanelHidden( left ) );
-
-	//
-	// what switchControlBarStage( CONTROL_BAR_STAGE_DEFAULT ) does: it asks. The panel is still down
-	// there, and anything reading a window's position on this frame reads it down there.
-	//
-	bar.showPanel( left, TRUE );
-	CHECK_NEAR( bar.getPanelSlideFraction( left ), 1.0f, 0.0001f );
-
-	// clearPanelSlide does not ask, it declares
-	bar.clearPanelSlide();
-	CHECK_NEAR( bar.getPanelSlideFraction( left ), 0.0f, 0.0001f );
-	CHECK( !bar.isPanelHidden( left ) );
-
-	// and it speaks for all three, not just the one that was asked about
-	Int p;
-	for( p = 0; p < count; p++ )
-		bar.showPanel( p, FALSE, TRUE );
-	bar.clearPanelSlide();
-	for( p = 0; p < count; p++ )
-	{
-		CHECK_NEAR( bar.getPanelSlideFraction( p ), 0.0f, 0.0001f );
-		CHECK( !bar.isPanelHidden( p ) );
-	}
-
-	// a panel that never left is left alone
-	bar.clearPanelSlide();
-	CHECK_NEAR( bar.getPanelSlideFraction( right ), 0.0f, 0.0001f );
 }
 
 /* Mouse.cpp: the tooltip box was placed by two flips and nothing else, under EA's own note that
@@ -16282,13 +16825,8 @@ TEST(camera_preferences_default_to_a_finite_map_margin)
 	TheWritableGlobalData = scratch;
 	CHECK(scratch->m_useCameraConstraints);
 	CHECK_EQ(scratch->m_cameraBoundaryMargin, 200);
-	const OptionDef *bounds = findOptionDef("UseCameraConstraints");
-	CHECK(bounds != NULL);
-	if (bounds)
-	{
-		bounds->set(0);
-		CHECK(!scratch->m_useCameraConstraints);
-	}
+	// -noViewLimit is the only way off, EA's switch; Options.ini has no row for it
+	CHECK(findOptionDef("UseCameraConstraints") == NULL);
 	delete scratch;					// while it is the current one: a Debug build's ~GlobalData reads TheWritableGlobalData
 	TheWritableGlobalData = saved;
 }
@@ -16474,210 +17012,9 @@ TEST(chroma_money_bar_is_a_thousand_credits_a_lamp)
 	CHECK_EQ(chromaMoneySegments(400000, 15), 15);
 }
 
-// A page's {{names}} take the entry's value first, then the page's, then the lookup's, and nothing
-// at all when none of them knows it; comments go; a data-each element is written once per entry, nested
-// elements of the same name inside it included, and a player's name cannot open a tag.
-TEST(html_template_fills_values_and_repeats_each)
-{
-	const std::string page =
-		"<!-- a comment may describe {{title}} and data-each=\"players\" -->"
-		"<p class=\"{{option:A}}\">{{ title }}</p>"
-		"<ul><li class=\"t{{team}}\" data-each=\"players\"><li>{{name}}</li>{{missing}}</li></ul>"
-		"<div data-each='nobody'>gone</div>{{text:Label}}";
-
-	HtmlValues values;
-	values[ "option:A" ] = "on";
-	values[ "title" ] = "T";
-	values[ "team" ] = "9";
-
-	HtmlLists lists;
-	HtmlValues first;
-	first[ "name" ] = "<b>&";
-	HtmlValues second;
-	second[ "name" ] = "Bo";
-	second[ "team" ] = "1";
-	lists[ "players" ].push_back( first );
-	lists[ "players" ].push_back( second );
-
-	const HtmlLookup lookup = []( const std::string &name, std::string &value ) -> Bool
-	{
-		if( name != "text:Label" )
-			return FALSE;
-		value = "looked";
-		return TRUE;
-	};
-
-	CHECK_STR( HtmlTemplate_expand( page, values, lists, lookup ).c_str(),
-		"<p class=\"on\">T</p>"
-		"<ul><li class=\"t9\" data-each=\"players\"><li>&lt;b&gt;&amp;</li></li>"
-		"<li class=\"t1\" data-each=\"players\"><li>Bo</li></li></ul>"
-		"looked" );
-	CHECK_STR( HtmlTemplate_escape( "a\"b'c" ).c_str(), "a&quot;b&#39;c" );
-
-	// the page is cut once and kept by its text: new values still come through on the next call,
-	// and a page with other text is cut on its own rather than served the first one's blocks
-	values[ "title" ] = "U";
-	lists[ "players" ].pop_back();
-	CHECK_STR( HtmlTemplate_expand( page, values, lists, lookup ).c_str(),
-		"<p class=\"on\">U</p>"
-		"<ul><li class=\"t9\" data-each=\"players\"><li>&lt;b&gt;&amp;</li></li></ul>"
-		"looked" );
-	CHECK_STR( HtmlTemplate_expand( page + "{{title}}", values, lists, lookup ).c_str(),
-		"<p class=\"on\">U</p>"
-		"<ul><li class=\"t9\" data-each=\"players\"><li>&lt;b&gt;&amp;</li></li></ul>"
-		"lookedU" );
-	CHECK_STR( HtmlTemplate_expand( "a {{ open", values, lists, lookup ).c_str(), "a {{ open" );
-}
-
-// HtmlOverlay skips filling a page in again when HtmlTemplate_matches says it would come out as the
-// page it already has, so matches has to say exactly what expand() == old would: a changed value,
-// list entry or lookup answer, and an old page longer or shorter than the new one, all differ.
-TEST(html_template_matches_says_what_expand_would)
-{
-	const std::string page =
-		"<p class=\"{{option:A}}\">{{title}}</p>"
-		"<ul><li class=\"t{{team}}\" data-each=\"players\">{{name}}</li></ul>{{text:Label}}";
-
-	HtmlValues values;
-	values[ "option:A" ] = "on";
-	values[ "title" ] = "T&";
-	values[ "team" ] = "9";
-	HtmlLists lists;
-	HtmlValues player;
-	player[ "name" ] = "<b>";
-	lists[ "players" ].push_back( player );
-	player[ "name" ] = "Bo";
-	player[ "team" ] = "1";
-	lists[ "players" ].push_back( player );
-
-	std::string answer = "looked";
-	const HtmlLookup lookup = [ &answer ]( const std::string &name, std::string &value ) -> Bool
-	{
-		if( name != "text:Label" )
-			return FALSE;
-		value = answer;
-		return TRUE;
-	};
-
-	const std::string old = HtmlTemplate_expand( page, values, lists, lookup );
-	CHECK( HtmlTemplate_matches( page, values, lists, lookup, old ) );
-	CHECK( !HtmlTemplate_matches( page, values, lists, lookup, old + "x" ) );
-	CHECK( !HtmlTemplate_matches( page, values, lists, lookup, old.substr( 0, old.size() - 1 ) ) );
-	CHECK( !HtmlTemplate_matches( page, values, lists, lookup, std::string() ) );
-
-	HtmlValues changedValues = values;
-	changedValues[ "title" ] = "U&";
-	CHECK( !HtmlTemplate_matches( page, changedValues, lists, lookup, old ) );
-	// a value the page never names changes nothing
-	changedValues = values;
-	changedValues[ "unused" ] = "x";
-	CHECK( HtmlTemplate_matches( page, changedValues, lists, lookup, old ) );
-
-	HtmlLists changedLists = lists;
-	changedLists[ "players" ][ 1 ][ "name" ] = "Bob";
-	CHECK( !HtmlTemplate_matches( page, values, changedLists, lookup, old ) );
-	changedLists = lists;
-	changedLists[ "players" ].pop_back();
-	CHECK( !HtmlTemplate_matches( page, values, changedLists, lookup, old ) );
-
-	answer = "other";
-	CHECK( !HtmlTemplate_matches( page, values, lists, lookup, old ) );
-	answer = "looked";
-
-	// against expand itself, over values that shift lengths and escaping from case to case
-	const char *const pieces[] = { "", "a", "&", "<>", "<b>", "T&", "9", "\"'", "Bo", "on" };
-	const UnsignedInt count = (UnsignedInt)( sizeof( pieces ) / sizeof( pieces[ 0 ] ) );
-	UnsignedInt seed = 12345;
-	Int agreed = 0;
-	for( Int round = 0; round < 64; round++ )
-	{
-		HtmlValues tryValues = values;
-		HtmlLists tryLists = lists;
-		seed = seed * 1103515245u + 12345u;
-		const char *const piece = pieces[ ( seed >> 8 ) % count ];
-		switch( ( seed >> 16 ) % 5 )
-		{
-			case 0:	break;	// the inputs it was made from
-			case 1:	tryValues[ "title" ] = piece; break;
-			case 2:	tryValues[ "team" ] = piece; break;
-			case 3:	tryLists[ "players" ][ 0 ][ "name" ] = piece; break;
-			case 4:	tryLists[ "players" ][ 1 ][ "team" ] = piece; break;
-		}
-		const Bool same = HtmlTemplate_expand( page, tryValues, tryLists, lookup ) == old;
-		CHECK_EQ( HtmlTemplate_matches( page, tryValues, tryLists, lookup, old ), same );
-		agreed += same ? 1 : 0;
-	}
-	// both answers came up, so the loop is not checking one side only
-	CHECK( agreed > 0 && agreed < 64 );
-}
-
-// litehtml builds an element for every word and every white space character, so the page it is
-// handed has its stylesheet taken out for the CSS parser and each run of white space between tags
-// cut to one; a tag's attribute values keep theirs, a '>' inside quotes included.
-TEST(a_page_goes_to_litehtml_with_its_style_apart_and_its_spaces_folded)
-{
-	std::string body;
-	std::string styles;
-	HtmlTemplate_compact( "<!DOCTYPE html>\r\n<html>\n  <head><style>\n  .a b { top: 1px; }\n</style></head>\n"
-												"  <body>\n\t<div class=\"x  y\" data-click='a > b'>one   two</div>\n  <span>3</span> <span>4</span>\n</body></html>",
-												body, styles );
-	CHECK_STR( styles.c_str(), "\n  .a b { top: 1px; }\n" );
-	CHECK_STR( body.c_str(), "<!DOCTYPE html> <html> <head></head> <body> <div class=\"x  y\" data-click='a > b'>one two</div> "
-													 "<span>3</span> <span>4</span> </body></html>" );
-
-	HtmlTemplate_compact( "<p>no end<style>.a{}", body, styles );
-	CHECK_STR( body.c_str(), "<p>no end<style>.a{}" );
-	CHECK_STR( styles.c_str(), "" );
-}
-
-// The spectator's page is the shipped one.  It switches no options any more - the strips drop-down
-// that did went with the shelves it switched - so an option: click is a box that does nothing, and
-// only a watched match would show it.
-TEST(the_spectator_page_has_its_pieces_and_no_option_clicks)
-{
-	FILE *fp = fopen( SPECTATOR_HTML, "rb" );
-	CHECK( fp != NULL );
-	if( fp == NULL )
-		return;
-
-	std::string page;
-	char chunk[ 1024 ];
-	size_t got = 0;
-	while( ( got = fread( chunk, 1, sizeof( chunk ), fp ) ) > 0 )
-		page.append( chunk, got );
-	fclose( fp );
-
-	CHECK( page.find( "data-click=\"option:" ) == std::string::npos );
-	// the superweapons coming ready are lines of the feed over the radar, Feed.html, for everybody
-	CHECK( page.find( "data-each=\"toasts\"" ) == std::string::npos );
-	CHECK( page.find( "data-each=\"players\"" ) != std::string::npos );
-	// the players are on the Tab scoreboard, not in a strip across the top
-	CHECK( page.find( "data-each=\"seats\"" ) == std::string::npos );
-	// a replay's timeline: InGameUI reads the pointer's place along the element with id track
-	CHECK( page.find( "id=\"track\" class=\"sunk\" data-click=\"replay:seek\"" ) != std::string::npos );
-	CHECK( page.find( "data-click=\"replay:pause\"" ) != std::string::npos );
-	CHECK( page.find( "data-click=\"replay:speed:100\"" ) != std::string::npos );
-}
-
 #include "test_camera_behavior.inc"
 #include "test_observer_camera.inc"
 #include "test_production_input.inc"
-// A defence's blind-spot grid is cut into rings half a pathfind cell wide.  A range longer than the map
-// asks for no more rings than the map is long corner to corner: a mod's AttackRange of 1e6 held hundreds of
-// megabytes and froze every platform, and inf gave ARM64 2^31 rings, whose 180-a-ring grid overflowed Int.
-TEST(blind_spot_rings_never_outgrow_the_map)
-{
-	const Real ring = PATHFIND_CELL_SIZE_F * 0.5f;
-	const Real span = 2.0f * 4000.0f;							// a 4,000-unit square map: width plus height
-	CHECK_EQ(blindSpotRingCount(0.0f, span), 0);
-	CHECK_EQ(blindSpotRingCount(ring, span), 1);
-	CHECK_EQ(blindSpotRingCount(300.0f, span), (Int)ceil(300.0f / ring));	// every real reach: as before
-	CHECK_EQ(blindSpotRingCount(1.0e6f, span), (Int)ceil(span / ring) + 1);	// capped by the map
-	CHECK_EQ(blindSpotRingCount(std::numeric_limits<float>::infinity(), span), 0);	// Windows' INT_MIN, floored
-	CHECK_EQ(blindSpotRingCount(std::numeric_limits<float>::quiet_NaN(), span), 0);
-	// no extent known: never a grid whose ring count times 180 rays overflows Int
-	CHECK((long long)blindSpotRingCount(1.0e9f, 0.0f) * 180 <= INT_MAX);
-}
 
 // The two cursor indexes a float decides.  Mouse.ini's FPS or GameData.ini's scroll speed of inf or NaN
 // made them INT_MIN on Windows and indexed a table with that; a negative FPS made a negative frame on
@@ -16836,6 +17173,41 @@ TEST(particle_cap_in_force_is_the_switch_else_the_slider)
 	TheWritableGlobalData = saved;
 }
 
+/** The Reforged lighting style keeps what a sunlit surface receives and takes it out of the shade:
+	 on an ordinary afternoon (ambient half the sun, a fill on each side) the lit side of flat ground
+	 lands within a few percent of where it was, the shadow side loses a quarter, the sun turns warmer
+	 than the ambient, and a dim moon keeps its blue. */
+TEST(reforged_lighting_keeps_the_lit_side_and_darkens_the_shade)
+{
+	GlobalData::TerrainLighting lights[MAX_GLOBAL_LIGHTS];
+	memset( lights, 0, sizeof(lights) );
+	lights[0].ambient.red = lights[0].ambient.green = lights[0].ambient.blue = 0.4f;
+	lights[0].diffuse.red = lights[0].diffuse.green = lights[0].diffuse.blue = 0.8f;
+	lights[0].lightPos.x = -0.5f; lights[0].lightPos.y = 0.0f; lights[0].lightPos.z = -0.866f;
+	lights[1].diffuse.red = lights[1].diffuse.green = lights[1].diffuse.blue = 0.3f;
+	const Real incidence = 0.866f;
+	const Real litBefore = 0.4f + 0.8f * incidence;
+
+	reforgeLighting( lights );
+
+	const Real ambient = 0.299f * lights[0].ambient.red + 0.587f * lights[0].ambient.green + 0.114f * lights[0].ambient.blue;
+	const Real sun = 0.299f * lights[0].diffuse.red + 0.587f * lights[0].diffuse.green + 0.114f * lights[0].diffuse.blue;
+	CHECK_NEAR( ambient, 0.4f * 0.72f, 0.01f );
+	CHECK( ambient + sun * incidence >= litBefore );
+	CHECK( ambient + sun * incidence <= litBefore * 1.06f );
+	CHECK( lights[0].diffuse.red > lights[0].diffuse.blue );
+	CHECK( lights[0].ambient.blue > lights[0].ambient.red );
+	CHECK_NEAR( lights[1].diffuse.green, 0.3f * 0.6f, 0.0001f );
+
+	GlobalData::TerrainLighting moon[MAX_GLOBAL_LIGHTS];
+	memset( moon, 0, sizeof(moon) );
+	moon[0].ambient.blue = 0.2f; moon[0].ambient.red = moon[0].ambient.green = 0.1f;
+	moon[0].diffuse.blue = 0.3f; moon[0].diffuse.red = moon[0].diffuse.green = 0.15f;
+	moon[0].lightPos.z = -1.0f;
+	reforgeLighting( moon );
+	CHECK( moon[0].diffuse.blue > 1.8f * moon[0].diffuse.red );
+}
+
 // A veterancy level's or death type's flag bit is bit (value - 1) with the count taken modulo 32, which is
 // what EA's `1UL << (dt - 1)` gave on Windows, where unsigned long is 32 bits and shl reads five bits of the
 // count.  REGULAR and NORMAL are 0: bit 31, inside ALL.  With a 64-bit unsigned long it was bit 63, outside
@@ -16887,9 +17259,388 @@ TEST(unsigned_text_parses_as_windows_32_bit_strtoul)
 	CHECK_EQ(strtoulAsWindows("-"), 0u);
 }
 
+// No -mod replaces what the fork ships.  The set is Code/Data as the build copies it into Run, less
+// the three trees that never ship, so a new master that FileSystem::isForkOwnedPath does not cover
+// fails here instead of letting a mod quietly win over it.  Retail's own loose files stay the mod's.
+TEST(every_shipped_master_is_fork_owned_and_retail_files_are_not)
+{
+	const std::filesystem::path data = std::filesystem::path(ZH_CODE_DIR) / "Data";
+	Int masters = 0;
+	for (std::filesystem::recursive_directory_iterator it(data), end; it != end; ++it)
+	{
+		if (!it->is_regular_file())
+			continue;
+		std::string relative = std::filesystem::relative(it->path(), data).generic_string();
+		if (relative.rfind("Scenarios/", 0) == 0 || relative.rfind("Cinema/", 0) == 0 || relative == "dx11shaders.shipped")
+			continue;
+		// shipped, but the one master a mod may replace: its skirmish AI is written for its own generals
+		if (relative == "Scripts/SkirmishScripts.scb")
+			continue;
+		// the post-build copy keeps Data\ in front of these and puts the rest at the top of Run
+		const char *underData[] = { "INI/", "Scripts/", "Turkish/", "German/" };
+		Bool keepsData = relative == "Patch.str";
+		for (const char *prefix : underData)
+			keepsData = keepsData || relative.rfind(prefix, 0) == 0;
+		const std::string runPath = keepsData ? "Data/" + relative : relative;
+		if (!FileSystem::isForkOwnedPath(AsciiString(runPath.c_str())))
+			printf("    not fork-owned: %s\n", runPath.c_str());
+		CHECK(FileSystem::isForkOwnedPath(AsciiString(runPath.c_str())));
+		++masters;
+	}
+	CHECK(masters > 20);
+
+	CHECK(FileSystem::isForkOwnedPath(AsciiString("Art\\Textures\\ReforgedBarGLALeft.tga")));
+	CHECK(!FileSystem::isForkOwnedPath(AsciiString("Data\\Scripts\\MultiplayerScripts.scb")));
+	CHECK(!FileSystem::isForkOwnedPath(AsciiString("Data\\Scripts\\SkirmishScripts.scb")));
+	CHECK(!FileSystem::isForkOwnedPath(AsciiString("Data\\Scripts\\Scripts.ini")));
+	CHECK(!FileSystem::isForkOwnedPath(AsciiString("Data\\INI\\GameData.ini")));
+	CHECK(!FileSystem::isForkOwnedPath(AsciiString("Data\\INI\\Object\\AmericaTankReforged.ini")));
+	CHECK(!FileSystem::isForkOwnedPath(AsciiString("Data\\English\\Movies\\EA_LOGO.bik")));
+	CHECK(!FileSystem::isForkOwnedPath(AsciiString("Art\\Textures\\AVPaladin.tga")));
+}
+
+// -modfactions: a mod's own names get its prefix everywhere but the line's first word, a name it does
+// not define stays retail's, and a side name stays text even when the mod also calls a block that.
+TEST(modfactions_prefix_only_the_mods_own_names)
+{
+	bootOnce();
+	ModNamespace names;
+	names.scanLine( 0, "Object AmericaRanger ; the mod's own" );
+	names.scanLine( 0, "Weapon RangerGun" );
+	names.scanLine( 0, "  Weapon = PRIMARY RetailGun" );		// a field, not a definition
+	names.scanLine( 0, "CommandSet GLA CommandSet" );				// The End of Days really has this line
+	names.scanLine( 0, "  Side = GLA" );
+	names.finishScan( 0 );
+	names.setActive( 0 );
+
+	char line[ 64 ];
+	strcpy( line, "Object AmericaRanger" );
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "Object M1~AmericaRanger" );
+	strcpy( line, "  Weapon = PRIMARY RangerGun" );
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  Weapon = PRIMARY M1~RangerGun" );
+	strcpy( line, "  Weapon = SECONDARY RetailGun" );
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  Weapon = SECONDARY RetailGun" );
+	strcpy( line, "  Side = GLA" );
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  Side = GLA" );
+	strcpy( line, "RangerGun = RangerGun" );						// the first word is the field
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "RangerGun = M1~RangerGun" );
+	strcpy( line, "Object AmericaRanger" );
+	CHECK( !names.rewriteLine( line, 23 ) );						// "Object M1~AmericaRanger" needs 24
+	CHECK_STR( line, "Object AmericaRanger" );
+
+	// a finder's miss: the mod's own name stays a miss, anything else is retail's
+	AsciiString retail;
+	CHECK( !names.findRetailName( AsciiString( "M1~AmericaRanger" ), MODNAME_OBJECT, &retail ) );
+	CHECK( names.findRetailName( AsciiString( "M1~RangerGun" ), MODNAME_OBJECT, &retail ) );
+	CHECK_STR( retail.str(), "RangerGun" );
+	CHECK( !names.findRetailName( AsciiString( "M1~RangerGun" ), MODNAME_WEAPON, &retail ) );
+	CHECK( !names.findRetailName( AsciiString( "M2~AmericaRanger" ), MODNAME_OBJECT, &retail ) );	// no second mod
+	CHECK( !names.findRetailName( AsciiString( "AmericaRanger" ), MODNAME_OBJECT, &retail ) );
+	NameKeyType key;
+	CHECK( names.findRetailKey( NAMEKEY( "M1~Upgrade_Retail" ), MODNAME_UPGRADE, &key ) );
+	CHECK_EQ( key, NAMEKEY( "Upgrade_Retail" ) );
+}
+
+// The Power of the West defines "FXList No", and -modfactions made every "IsGrantable = No" an
+// "M2~No" that parseBool refused: a word the parser reads for itself is never the mod's name.
+TEST(modfactions_never_prefix_a_reserved_word)
+{
+	bootOnce();
+	ModNamespace names;
+	names.scanLine( 0, "FXList No" );
+	names.scanLine( 0, "Upgrade None" );
+	names.scanLine( 0, "FXList FX_Nope" );
+	names.finishScan( 0 );
+	names.setActive( 0 );
+
+	char line[ 64 ];
+	strcpy( line, "  IsGrantable = No" );
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  IsGrantable = No" );
+	strcpy( line, "  PrerequisiteSciences = None" );
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  PrerequisiteSciences = None" );
+	strcpy( line, "  FX = FX_Nope" );
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  FX = M1~FX_Nope" );
+
+	// and a name it gave a block that is also an engine word ("ParticleSystem Explosion") still reads as
+	// that word where only engine words go
+	CHECK( INI::scanBool( "M2~Yes" ) );
+	CHECK_EQ( INI::scanIndexList( "M2~SMALL_ARMS", DamageTypeFlags::getBitNames() ), (Int)DAMAGE_SMALL_ARMS );
+	CHECK_STR( INI::withoutModPrefix( "M~Explosion" ), "M~Explosion" );
+	CHECK_STR( INI::withoutModPrefix( "MX2~Explosion" ), "MX2~Explosion" );
+}
+
+class ModTestArchiveFile : public ArchiveFile
+{
+public:
+	ModTestArchiveFile() { m_file = NULL; }	// the base leaves it to the device's archive to set
+	void add( const char *directory, const char *file )
+	{
+		ArchivedFileInfo info;
+		info.m_filename = file;
+		addFile( AsciiString( directory ), &info );
+	}
+	virtual Bool getFileInfo( const AsciiString&, FileInfo* ) const { return FALSE; }
+	virtual File* openFile( const Char*, Int ) { return NULL; }
+	virtual void closeAllFiles( void ) {}
+	virtual AsciiString getName( void ) { return AsciiString::TheEmptyString; }
+	virtual AsciiString getPath( void ) { return AsciiString::TheEmptyString; }
+	virtual void setSearchPriority( Int ) {}
+	virtual void close( void ) {}
+};
+
+class ModTestArchiveFileSystem : public ArchiveFileSystem
+{
+public:
+	virtual void init( void ) {}
+	virtual void update( void ) {}
+	virtual void reset( void ) {}
+	virtual void postProcessLoad( void ) {}
+	virtual ArchiveFile* openArchiveFile( const Char* ) { return NULL; }
+	virtual void closeArchiveFile( const Char* ) {}
+	virtual void closeAllArchiveFiles( void ) {}
+	virtual void closeAllFiles( void ) {}
+	virtual Bool loadBigFilesFromDirectory( AsciiString, AsciiString, Bool, Bool ) { return FALSE; }
+
+	void addRetail( ArchiveFile *archive, const char *name )
+	{
+		loadIntoDirectoryTree( archive, AsciiString( name ) );
+		m_archiveFileMap[ AsciiString( name ) ] = archive;
+	}
+	using ArchiveFileSystem::keepModsApart;
+	using ArchiveFileSystem::addModArchive;
+};
+
+// -modfactions' focus: retail sees the tree from before any -mod, a mod its own archives, nothing else
+TEST(modfactions_focus_sees_one_set_of_archives)
+{
+	bootOnce();
+	ModTestArchiveFileSystem archives;
+	ModTestArchiveFile *retail = new ModTestArchiveFile, *one = new ModTestArchiveFile, *two = new ModTestArchiveFile;
+	retail->add( "data\\ini\\", "weapon.ini" );
+	retail->add( "data\\ini\\object\\", "a.ini" );
+	one->add( "data\\ini\\", "weapon.ini" );
+	one->add( "data\\ini\\object\\", "b.ini" );
+	two->add( "data\\ini\\object\\", "c.ini" );
+	archives.addRetail( retail, "INIZH.big" );
+	archives.keepModsApart( 2 );
+	archives.addModArchive( 0, one, AsciiString( "Mods\\One\\!one.big" ) );
+	archives.addModArchive( 1, two, AsciiString( "Mods\\Two\\!two.big" ) );
+
+	const AsciiString weapon( "Data\\INI\\Weapon.ini" );
+	CHECK_STR( archives.getArchiveFilenameForFile( weapon ).str(), "INIZH.big" );	// the default view is retail's
+	archives.setFocus( FILE_FOCUS_RETAIL );
+	CHECK_STR( archives.getArchiveFilenameForFile( weapon ).str(), "INIZH.big" );
+	archives.setFocus( 0 );
+	CHECK_STR( archives.getArchiveFilenameForFile( weapon ).str(), "Mods\\One\\!one.big" );
+	archives.setFocus( 1 );
+	CHECK( !archives.doesFileExist( weapon.str() ) );
+
+	FilenameList listed;
+	archives.getFileListInDirectory( AsciiString( "" ), AsciiString( "Data\\INI\\Object\\" ), AsciiString( "*.ini" ), listed, TRUE );
+	CHECK_EQ( (Int)listed.size(), 1 );
+	CHECK( listed.begin()->endsWithNoCase( "c.ini" ) );
+	listed.clear();
+	archives.setFocus( FILE_FOCUS_RETAIL );
+	archives.getFileListInDirectory( AsciiString( "" ), AsciiString( "Data\\INI\\Object\\" ), AsciiString( "*.ini" ), listed, TRUE );
+	CHECK_EQ( (Int)listed.size(), 1 );
+	CHECK( listed.begin()->endsWithNoCase( "a.ini" ) );
+	listed.clear();
+	archives.setFocus( FILE_FOCUS_ALL );
+	archives.getFileListInDirectory( AsciiString( "" ), AsciiString( "Data\\INI\\Object\\" ), AsciiString( "*.ini" ), listed, TRUE );
+	CHECK_EQ( (Int)listed.size(), 1 );
+	CHECK( listed.begin()->endsWithNoCase( "a.ini" ) );
+
+	// a mod's own copy by index, whatever the focus: what an "M<n>~" file name asks for
+	archives.setFocus( 1 );
+	CHECK( archives.doesModFileExist( 0, weapon ) );
+	CHECK( !archives.doesModFileExist( 1, weapon ) );
+	CHECK( archives.doesModFileExist( 1, AsciiString( "Data\\INI\\Object\\c.ini" ) ) );
+	CHECK( !archives.doesModFileExist( 0, AsciiString( "Data\\INI\\Object\\a.ini" ) ) );
+	archives.setFocus( FILE_FOCUS_ALL );
+}
+
+// -modfactions: "M<n>~" on a file name's last part names mod n's copy, only with the switch and a mod n
+TEST(modfactions_split_a_mod_file_name)
+{
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+	TheWritableGlobalData->m_mods.assign( 2, AsciiString( "Mods\\X" ) );
+	Int mod = -1;
+	AsciiString bare;
+	TheWritableGlobalData->m_modFactions = FALSE;
+	CHECK( !FileSystem::splitModName( AsciiString( "Art\\W3D\\M1~AVRanger.w3d" ), &mod, &bare ) );
+	TheWritableGlobalData->m_modFactions = TRUE;
+	CHECK( FileSystem::splitModName( AsciiString( "Art\\W3D\\M1~AVRanger.w3d" ), &mod, &bare ) );
+	CHECK_EQ( mod, 0 );
+	CHECK_STR( bare.str(), "Art\\W3D\\AVRanger.w3d" );
+	CHECK( FileSystem::splitModName( AsciiString( "m2~exsmoke.tga" ), &mod, &bare ) );
+	CHECK_EQ( mod, 1 );
+	CHECK_STR( bare.str(), "exsmoke.tga" );
+	CHECK( !FileSystem::splitModName( AsciiString( "Art\\W3D\\M3~AVRanger.w3d" ), &mod, &bare ) );	// no third mod
+	CHECK( !FileSystem::splitModName( AsciiString( "M1~Art\\W3D\\AVRanger.w3d" ), &mod, &bare ) );	// not the last part
+	CHECK( !FileSystem::splitModName( AsciiString( "Art\\W3D\\Mx~AVRanger.w3d" ), &mod, &bare ) );
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = saved;
+}
+
+// -modfactions: a mod's skirmish scripts name its things as the mod's only where the mod defines that
+// kind of thing under that name
+TEST(modfactions_mod_name_by_type)
+{
+	bootOnce();
+	ModNamespace names;
+	names.scanLine( 0, "Object AmericaTankCrusader" );
+	names.scanLine( 0, "Upgrade Upgrade_AmericaTOWMissile" );
+	names.finishScan( 0 );
+	CHECK_STR( names.modName( 0, MODNAME_OBJECT, AsciiString( "AmericaTankCrusader" ) ).str(), "M1~AmericaTankCrusader" );
+	CHECK_STR( names.modName( 0, MODNAME_UPGRADE, AsciiString( "Upgrade_AmericaTOWMissile" ) ).str(), "M1~Upgrade_AmericaTOWMissile" );
+	CHECK_STR( names.modName( 0, MODNAME_UPGRADE, AsciiString( "AmericaTankCrusader" ) ).str(), "AmericaTankCrusader" );	// not an upgrade
+	CHECK_STR( names.modName( 0, MODNAME_OBJECT, AsciiString( "ChinaTankOverlord" ) ).str(), "ChinaTankOverlord" );		// retail's
+	CHECK_STR( names.modName( 1, MODNAME_OBJECT, AsciiString( "AmericaTankCrusader" ) ).str(), "AmericaTankCrusader" );	// no second mod
+}
+
+// -modfactions: an AI on a mod faction reads its own mod's AIData side, under "M<n>~<side>", and
+// retail's of the side when the mod has none; a retail AI never reads a mod's
+TEST(modfactions_ai_side_lookups_take_the_mods_own_first)
+{
+	bootOnce();
+	CHECK_STR( AI::modSideKey( AsciiString( "America" ), -1 ).str(), "America" );
+	CHECK_STR( AI::modSideKey( AsciiString( "America" ), 1 ).str(), "M2~America" );
+
+	TAiData data;
+	AISideInfo *retail = newInstance(AISideInfo);
+	retail->m_side = "America";
+	data.addSideInfo( retail );
+	AISideInfo *shockwave = newInstance(AISideInfo);
+	shockwave->m_side = AI::modSideKey( AsciiString( "America" ), 0 );
+	data.addSideInfo( shockwave );
+	CHECK( data.findSideInfo( AsciiString( "America" ), -1 ) == retail );
+	CHECK( data.findSideInfo( AsciiString( "America" ), 0 ) == shockwave );
+	CHECK( data.findSideInfo( AsciiString( "America" ), 1 ) == retail );		// a mod without its own entry
+	CHECK( data.findSideInfo( AsciiString( "Russia" ), 1 ) == NULL );
+
+	AISideBuildList *russia = newInstance(AISideBuildList)( AI::modSideKey( AsciiString( "Russia" ), 1 ) );
+	data.addFactionBuildList( russia );
+	CHECK( data.findBuildList( AsciiString( "Russia" ), 1 ) == russia );
+	CHECK( data.findBuildList( AsciiString( "Russia" ), 0 ) == NULL );			// another mod's
+	CHECK( data.findBuildList( AsciiString( "Russia" ), -1 ) == NULL );
+}
+
+// -modfactions: which skirmish player's scripts a computer player runs.  Its own mod's of its side
+// beats retail's, retail's stands in for a mod without any, and another mod's never fits
+TEST(modfactions_skirmish_side_fit)
+{
+	const AsciiString america( "America" );
+	CHECK_EQ( SidesList::skirmishSideFit( america, -1, america, -1 ), 2 );
+	CHECK_EQ( SidesList::skirmishSideFit( america, 0, america, 0 ), 2 );
+	CHECK_EQ( SidesList::skirmishSideFit( america, -1, america, 0 ), 1 );
+	CHECK_EQ( SidesList::skirmishSideFit( america, 1, america, 0 ), 0 );
+	CHECK_EQ( SidesList::skirmishSideFit( america, 0, america, -1 ), 0 );
+	CHECK_EQ( SidesList::skirmishSideFit( AsciiString( "China" ), -1, america, -1 ), 0 );
+}
+
+// -modfactions: a word naming a model, texture or sound the mod ships gets its prefix, so WW3D and the
+// FileSystem serve the mod's copy; art it does not ship stays retail's
+TEST(modfactions_prefix_the_mods_own_art)
+{
+	bootOnce();
+	ModNamespace names;
+	names.addAsset( 0, "Art\\W3D\\AVRanger.W3D" );
+	names.addAsset( 0, "Art\\W3D\\AVRanger_STND.w3d" );
+	names.addAsset( 0, "Art\\Textures\\exsmoke.dds" );
+	names.addAsset( 0, "Data\\Audio\\Sounds\\vrange01a.wav" );
+	names.finishScan( 0 );
+	names.setActive( 0 );
+
+	char line[ 96 ];
+	strcpy( line, "  Model = avranger" );
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  Model = M1~avranger" );
+	strcpy( line, "  Animation = AVRanger_SKL.AVRanger_STND" );
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  Animation = M1~AVRanger_SKL.AVRanger_STND" );
+	strcpy( line, "  ParticleName = EXSmoke.tga" );		// INI says .tga, the mod ships the .dds
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  ParticleName = M1~EXSmoke.tga" );
+	strcpy( line, "  ShadowTexture = EXSmoke" );			// a decal names its texture bare, the engine adds .tga
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  ShadowTexture = M1~EXSmoke" );
+	strcpy( line, "  Sounds = vrange01a vrange01b" );
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  Sounds = M1~vrange01a vrange01b" );
+	strcpy( line, "  Model = AVHumvee" );
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  Model = AVHumvee" );
+	strcpy( line, "  ShowSubObject = AVRanger" );			// a sub-object, not a file
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  ShowSubObject = AVRanger" );
+}
+
+// -modfactions: the file in a path-shaped word is its last part, past either slash
+TEST(modfactions_last_path_part)
+{
+	CHECK_EQ( (Int)ModNamespace::lastPathPart( "x.mp3" ), 0 );
+	CHECK_EQ( (Int)ModNamespace::lastPathPart( "Sub\\x.mp3" ), 4 );
+	CHECK_EQ( (Int)ModNamespace::lastPathPart( "A\\B/x.mp3" ), 4 );
+	CHECK_EQ( (Int)ModNamespace::lastPathPart( "Sub\\" ), 4 );
+	CHECK_EQ( (Int)ModNamespace::lastPathPart( "" ), 0 );
+}
+
+// -modfactions: a MusicTrack Filename names the whole file, maybe in a subfolder; the prefix goes on the
+// last part, where FileSystem::splitModName looks for it
+TEST(modfactions_prefix_the_last_part_of_a_file_path)
+{
+	bootOnce();
+	ModNamespace names;
+	names.addAsset( 0, "Data\\Audio\\Tracks\\Sub\\Score01.mp3" );
+	names.addAsset( 0, "Data\\Audio\\Tracks\\Score02.mp3" );
+	names.finishScan( 0 );
+	names.setActive( 0 );
+
+	char line[ 96 ];
+	strcpy( line, "  Filename = Sub\\Score01.mp3" );
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  Filename = Sub\\M1~Score01.mp3" );
+	strcpy( line, "  Filename = Score02.mp3" );
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  Filename = M1~Score02.mp3" );
+	strcpy( line, "  Filename = Sub/Score02.mp3" );
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  Filename = Sub/M1~Score02.mp3" );
+	strcpy( line, "  Filename = Sub\\Retail.mp3" );				// not the mod's: untouched
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  Filename = Sub\\Retail.mp3" );
+	strcpy( line, "  Sounds = Score01" );						// a sound event still names the base
+	CHECK( names.rewriteLine( line, sizeof( line ) ) );
+	CHECK_STR( line, "  Sounds = M1~Score01" );
+
+	// and the file system takes the prefix back off that part
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+	TheWritableGlobalData->m_mods.assign( 1, AsciiString( "Mods\\X" ) );
+	TheWritableGlobalData->m_modFactions = TRUE;
+	Int mod = -1;
+	AsciiString bare;
+	CHECK( FileSystem::splitModName( AsciiString( "Data\\Audio\\Tracks\\Sub\\M1~Score01.mp3" ), &mod, &bare ) );
+	CHECK_EQ( mod, 0 );
+	CHECK_STR( bare.str(), "Data\\Audio\\Tracks\\Sub\\Score01.mp3" );
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = saved;
+}
+
 #include "test_minimap_input.inc"
 #include "test_selection_priority.inc"
 #include "test_widechar_width.inc"
 #include "test_supply_center_save.inc"
 #include "test_cinema.inc"
 #include "test_game_results.inc"
+#include "test_map_ini_rollback.inc"
+#include "test_hostile_map.inc"

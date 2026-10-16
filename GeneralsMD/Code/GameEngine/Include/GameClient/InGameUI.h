@@ -46,12 +46,13 @@
 #include "Common/SubsystemInterface.h"
 #include "Common/UnicodeString.h"
 #include "GameClient/DisplayString.h"
-#include "GameClient/HtmlTemplate.h"
 #include "GameLogic/OrderQueue.h"		// the shift queue, which the logic keeps and the UI draws
 
+#include <map>
 #include <set>
+#include <string>
+#include <vector>
 
-class HtmlOverlay;
 #include "GameClient/Mouse.h"
 #include "GameClient/RadiusDecal.h"
 #include "GameClient/View.h"
@@ -343,45 +344,6 @@ public:
 typedef std::list< WorldAnimationData *> WorldAnimationList;
 typedef WorldAnimationList::iterator WorldAnimationListIterator;
 
-/** One superweapon countdown as the spectator page lists it: whose, and how long it still has. */
-struct SpectatorSuperweapon
-{
-	Int playerIndex;
-	const Image *cameo;
-	Int seconds;
-	Bool ready;
-	const CommandButton *button;	///< the power's own, for its tooltip card; NULL for a power with none
-};
-
-/** The money plate's width as it follows the figure's: see InGameUI_moneyPlateWidth.  All zero is a
-	* plate never drawn. */
-struct MoneyPlateWidth
-{
-	Int target;								///< the width the plate settles at
-	Int shown;								///< the width it was last drawn at
-	Int easeFrom;							///< the width a shrink eases down from
-	UnsignedInt easeStartMs;
-	Bool easing;
-	Int pendingWidth;					///< the widest a narrower figure has needed while a shrink waits
-	UnsignedInt pendingSinceMs;
-	Bool pending;
-};
-
-/** The width to draw the money plate at, `needed` the width the figure takes now, `nowMs` the
-	* client's clock.  A wider figure widens it at once; a narrower one has to hold for
-	* MONEY_SHRINK_HOLD_MS before the plate eases down to it over MONEY_SHRINK_EASE_MS, and anything
-	* wider in that wait calls the shrink off.  Never narrower than `needed`. */
-enum { MONEY_SHRINK_HOLD_MS = 3000, MONEY_SHRINK_EASE_MS = 200 };
-Int InGameUI_moneyPlateWidth( MoneyPlateWidth &plate, Int needed, UnsignedInt nowMs );
-
-/** The command bar's console at its widest, every well up and a margin each side, in page pixels at
-	* a HUD scale of 1: what ControlBarHudScale fits HUD Size to. */
-Int InGameUI_consolePageWidth( void );
-
-/** The IncomeRate option: TRUE when the income beside the money is written per minute, for a
-	* player earning `perSecond` dollars a second.  See IncomeRateModeType for what automatic picks. */
-Bool InGameUI_incomePerMinute( Int incomeRateMode, Int perSecond );
-
 /** A plan waiting for its builder, as the number over its silhouette is worked out. */
 struct BuildPlanNumber
 {
@@ -459,59 +421,11 @@ public:  // ********************************************************************
 	// srj sez: passing as const-ref screws up varargs for some reason. dunno why. just pass by value.
 	virtual void message( UnicodeString format, ... );				  ///< display a message to the user
 	virtual void message( AsciiString stringManagerLabel, ... );///< display a message to the user
-	void playerMessage( Player *player, const UnicodeString &text );	///< a message about that player, his flag at its head
-	void chatMessage( Player *player, const UnicodeString &text );		///< a line of chat, under the middle of the screen
-	/** The feed's lines for what a player did: a special power fired, a superweapon or advanced tech
-		* building started or `finished`, a promotion bought.  Each decides who is told. */
-	void feedSpecialPower( const Object *source, const AsciiString &powerName, const SpecialPowerTemplate *power );
-	void feedStructure( Object *structure, Bool finished );
-	void feedScience( Player *player, ScienceType science );
+	void playerMessage( Player *player, const UnicodeString &text );	///< a message about that player, in his colour
+	void chatMessage( Player *player, const UnicodeString &text );		///< a line of chat, "[name] text" in his colour
 	virtual void toggleMessages( void ) { m_messagesOn = 1 - m_messagesOn; }	///< toggle messages on/off
-	void openScoreboard( void );		///< the Tab scoreboard, up while Tab is held; EA's diplomacy screen in Classic
-	void closeScoreboard( void ) { m_scoreboardOpen = FALSE; }
-	Bool pickSpectatorStat( Int commandSlot );	///< a command bar key while watching: TRUE when it picked a stat
-	/** The command bar's page, Window/Html/ControlBar.html, under the bar's windows: its panels are
-		* where the plates would have gone, in screen pixels.  FALSE when there is no page to draw. */
-	Bool drawControlBarPage( const IRegion2D *panels, const Bool *shown, Int panelCount );
-	/** A click that reached the world, on one of that page's own buttons: TRUE when it was one, and
-		* when `act` is set the button it names is pressed. */
-	Bool handleControlBarPageClick( const ICoord2D *mouse, Bool act );
-	/** TRUE when `pointer` is on the page's steel, a .solid it drew and none of its keys: the HUD's,
-		* never the battlefield's, even where no window of the bar stands. */
-	Bool isOnControlBarSteel( const ICoord2D &pointer ) const;
-	/** The general's promotion screen, Window/Html/Promotion.html, drawn as `parent`'s picture: the
-		* screen's windows keep their clicks and the promotions' own cameos paint over it. */
-	void drawPromotionPage( GameWindow *parent, Bool front );
-	/** TRUE once the promotion screen is the page's, so the painted screen's own fade-in stays off. */
-	Bool isPromotionPageShown( void ) const { return m_promotionPageLoaded && !m_promotionPage.empty(); }
-	/** The promotion screen is coming up: its page and the dimmed screen under it fade in from now. */
-	void openPromotionPage( void );
-	/** The promotion screen is going: the page fades out and hides its window when it is gone. */
-	void closePromotionPage( void ) { m_promotionClosing = TRUE; }
-	/** The Esc menu hands its look to Window/Html/QuitMenu.html: `parent` draws the page and its keys
-		* draw nothing and keep their clicks.  Left as it is when there is no page. */
-	void themeQuitMenu( GameWindow *parent );
-	void drawQuitMenuPage( GameWindow *parent );
-	/** TRUE once the Esc menu is the page's, so the layout's own transitions stay off. */
-	Bool isQuitMenuPageShown( void ) const { return m_quitMenuPageLoaded && !m_quitMenuPage.empty(); }
-	/** The Esc menu is going: the page fades out and hides its window when it is gone. */
-	void closeQuitMenuPage( void ) { m_quitMenuClosingMs = 0; }
-	/** The command bar's grids of buttons whose cells the page frames in front of the buttons. */
-	enum CellGrid { CELL_GRID_COMMAND, CELL_GRID_QUEUE, CELL_GRID_POWERS, CELL_GRID_COUNT };
-	/** The steel frames over one grid's buttons, from Window/Html/ControlBar.html, drawn after them. */
-	void drawCellGridFront( Int grid );
-	void drawScoreboard( void );																						///< that scoreboard, over everything
-	void sampleEarnings( void );																						///< every player's money earned, once a game second
-	Int earnedOver( Int playerIndex, Int seconds ) const;										///< what that player earned in that many seconds, at the rate of the readings held
-	Int earnedPerSecond( Int playerIndex ) const { return earnedOver( playerIndex, 1 ); }
-	/** Window/Html/Tooltip.html is there to draw with, in a match. */
-	Bool isTooltipPageReady( void );
-	/** The tooltip page: the command bar's build tooltip over the hovered button while one is up,
-		* otherwise `cursorText` beside the pointer, edged in `accent` when it has one.  FALSE when the
-		* page is not ready, and the caller draws the old way. */
-	Bool drawTooltipPage( const UnicodeString &cursorText, const RGBColor *accent );
 	virtual Bool isMessagesOn( void ) { return m_messagesOn; }	///< are the display messages on
-	void freeMessageResources( void );				///< empty the event feed
+	void freeMessageResources( void );				///< empty the message list
 	Color getMessageColor(Bool altColor) { return (altColor)?m_messageColor2:m_messageColor1; }
 	
 	// interface for military style messages
@@ -579,7 +493,7 @@ public:  // ********************************************************************
 
 	struct OrderHint
 	{
-		OrderHint( void ) : kind( ORDER_HINT_MOVE ), owner( INVALID_ID ), bornMs( 0 ), step( 0 ), icon( NULL ), radius( 0.0f ),
+		OrderHint( void ) : kind( ORDER_HINT_MOVE ), owner( INVALID_ID ), bornMs( 0 ), step( 0 ), icon( NULL ),
 			onObject( FALSE ), mark( ORDER_MARK_NONE ) {}
 
 		Coord3D from;						///< where the unit is now
@@ -589,29 +503,14 @@ public:  // ********************************************************************
 		UnsignedInt bornMs;			///< when the marker first appeared, so it can be slid in
 		Int step;								///< its place in the order the unit will get to its points, from 1; 0 when it has only the one
 		const Image *icon;			///< the upgrade's own button art on an upgrade step, NULL otherwise
-		Real radius;						///< the circle a guard holds round 'to', 0 for every other kind
 		Bool onObject;					///< 'to' is a unit or building, read off it every frame
 		OrderHintMark mark;			///< what stands on 'to'
 	};
 	const std::vector<OrderHint>& getOrderHints( void ) const { return m_drawnOrderHints; }
 
-	// Where each ally's mouse is pointing.  A network game only: the position arrives about ten
-	// times a second on a side channel of its own, carries nothing the simulation reads, and is
-	// never acked or resent, so a lost one costs a tenth of a second of staleness and nothing else.
-	struct AllyCursor
-	{
-		Coord3D			position;			///< the last spot that ally reported
-		Coord3D			shown;				///< eased towards it, so ten updates a second do not read as ten steps
-		UnsignedInt	heardMs;			///< wall clock of that report, for the fade when an ally stops sending
-		Bool				known;				///< FALSE until the first report of the match arrives
-	};
-	void noteAllyCursor( Int playerIndex, Real x, Real y );		///< an ally said where their mouse is
-	const AllyCursor& getAllyCursor( Int playerIndex ) const { return m_allyCursors[ playerIndex ]; }
-	Real getAllyCursorFade( Int playerIndex ) const;					///< 0 when there is nothing to draw, 1 for a live cursor
-
-	// A circle dragged out with the left button while the attack key is armed.  The enemies inside
-	// it are shared across the units that can shoot, in the order both sides stand around the
-	// circle, and each unit works down its own share.
+	// A circle dragged out with the left button while the attack key is armed or Ctrl is held.  The
+	// enemies inside it are shared across the units that can shoot, in the order both sides stand
+	// around the circle, and each unit works down its own share.
 	void beginAttackCircle( const ICoord2D& pt );
 	void updateAttackCircle( const ICoord2D& pt );
 	Bool issueAttackCircle( void );		///< FALSE when the press never became a drag, so it was an ordinary attack click
@@ -888,7 +787,7 @@ public:  // ********************************************************************
 	// first structure really does exist by the time the second order arrives.
 	//
 	enum { PENDING_PLACEMENTS = 64 };						///< orders in flight at once, a whole shift-dragged row among them; the oldest is overwritten
-	enum { PENDING_PLACEMENT_FRAMES = 60 };			///< logic frames one is remembered for - two seconds,
+	enum { PENDING_PLACEMENT_FRAMES = LOGICFRAMES_PER_SECOND * 2 };			///< logic frames one is remembered for - two seconds,
 																							///  comfortably longer than any network delay
 
 	/// the ground a structure stands on: its box with the bib, turned to its heading
@@ -1113,77 +1012,21 @@ public:  // ********************************************************************
 	void drawDirectorIntroPlate( void );
 
 	//
-	// One cameo of the global production strip: which producer it belongs to, which entry of that
-	// producer's queue it is, and where it was drawn this frame.
+	// The production list on the left: one line per item the local player has coming, queued in a
+	// factory or going up on the map, soonest finished first.  Past PRODUCTION_LIST_LINES the rest is
+	// one "+N more" line.  The superweapon list in the top right stops at SUPERWEAPON_LIST_LINES the
+	// same way.
 	//
-	enum { PRODUCTION_STRIP_ROW_MAX = 9 };	///< cameos the strip will draw; whatever is left over closes
-																					///  it as a tenth cell wearing a "+N", two rows of five over the selection
-
-	//
-	// A queue slot is one slot of the general's power bar down in the corner, measurement for
-	// measurement: that bar is where a tray of cameos already lives in this game, so the strip is
-	// built out of the same tray instead of inventing a second look for the same job.  Every number
-	// here is read off GenPowersShortcutBar*.wnd, in the 800x600 the rest of the strip is written in.
-	//
-	enum
+	enum { PRODUCTION_LIST_LINES = 6 };
+	enum { SUPERWEAPON_LIST_LINES = 18 };
+	struct ProductionListSlot
 	{
-		PRODUCTION_STRIP_TRAY_W		= 48,	///< the tray, at the size that bar draws it - never stretched
-		PRODUCTION_STRIP_TRAY_H		= 41,
-		PRODUCTION_STRIP_TRAY_X		= 1,	///< where the cameo sits inside it
-		PRODUCTION_STRIP_TRAY_Y		= 7,
-		PRODUCTION_STRIP_QUEUE_W	= 39,	///< and how big it is there
-		PRODUCTION_STRIP_QUEUE_H	= 27		///< a cell steps a whole tray both ways, so no tray lies over the
-																		///  cameo in the one beside or below it
-	};
-
-	///< does an item go in front of one already in the row?  the selected building's items are a
-	///< block of their own at the head of it; inside a block, soonest finished first, ties keeping
-	///< the order they were met in so a base of identical barracks does not shuffle frame to frame
-	static Bool stripSlotGoesBefore( Bool leads, Int remaining,
-																	 Bool otherLeads, Int otherRemaining );
-	struct ProductionStripSlot
-	{
-		ObjectID			producer;						///< the building this item is queued on
-		Int						id;									///< a unit's ProductionID, or an upgrade's name key
-																			///  (kept as an Int so this header stays clear of GameLogic)
-		Bool					isUpgrade;					///< which of those two the id means
-		Int						typeKey;						///< what the item is rather than which order it is - a unit's template
-																			///  id, an upgrade's name key - so a run of the same thing queued
-																			///  back to back becomes one cameo
-		Bool					isStructure;				///< the slot is a building going up on the map, not an item in
-																			///  a queue: 'producer' is that building and there is no id
-		Bool					leads;							///< it belongs to the building you have selected, so it stands at the
-																			///  head of the row whatever the rest of the base is finishing
-		Int						remaining;					///< logic frames until this item pops, waiting time ahead of it included
-		Int						quantity;						///< how many of the same thing this cameo stands for: a queue of five
-																			///  Red Guards is one cameo wearing an "x5", not five cameos of
-																			///  the same picture pushing everything else off the row
-		ICoord2D			pos;								///< top left corner of the cameo on screen
-	};
-
-	/// a click landed on the strip: jump to that producer, or cancel the item when 'cancel' is set
-	Bool handleProductionStripClick( const ICoord2D *mouse, Bool cancel );
-	void foldSpectatorDropDowns( const ICoord2D &mouse );		///< a press off the spectator's page closes its drop-downs
-
-	//
-	// One superweapon countdown of the top right strip. The list is rebuilt every frame out of
-	// whatever timers are live, so nothing here outlives the draw that filled it in.
-	//
-	enum { SUPERWEAPON_STRIP_COLS = 6 };		///< cameos in one row, the soonest at the right hand end
-	enum { SUPERWEAPON_STRIP_ROWS = 7 };		///< rows the strip can grow to, past the top half of the screen from the fourth at 1280x720 and HUD Size 150%; past 42 the latest to land have no cell
-	enum { SUPERWEAPON_STRIP_MAX = SUPERWEAPON_STRIP_COLS * SUPERWEAPON_STRIP_ROWS };
-
-	enum { SKILL_STRIP_COLS = 6 };			///< bought promotions in one row, under the countdowns
-	enum { SKILL_STRIP_ROWS = 8 };			///< a row per player watching the whole match, or one
-																			///  player's promotions wrapped over as many as they need
-	enum { SKILL_STRIP_MAX = SKILL_STRIP_COLS * SKILL_STRIP_ROWS };
-	struct SuperweaponIconSlot
-	{
-		const Image *	image;							///< the cameo the command bar wears for this power
-		Int						seconds;						///< seconds until it can be fired, 0 once it is ready
-		Int						percent;						///< how much of the charge is done, for the radial sweep
-		Bool					ready;							///< charged: it flashes instead of counting
-		Color					color;							///< whose it is, the colour the timer was registered with
+		ObjectID			producer;						///< the building it is queued on, or the building going up
+		Int						typeKey;						///< what the item is, so a run of the same thing is one line
+		Bool					isUpgrade;
+		Int						remaining;					///< logic frames until it is done, waiting time ahead of it included
+		Int						quantity;						///< how many of the same thing the line stands for
+		UnicodeString	name;
 	};
 
 	/// Ingame video playback 
@@ -1284,21 +1127,14 @@ public:  // ********************************************************************
 	// and the guard key arms guard the same way: the next order click posts the selection on that
 	// spot, or on that object, and a drag posts them along the line instead of stacking them all
 	// on one point.  All the armed keys are one mode at a time
-	void toggleGuardArmed( void )							{ m_guardArmed = !m_guardArmed; m_attackMoveToMode = FALSE; m_forceAttackArmed = FALSE; m_moveArmed = FALSE; }
+	void toggleGuardArmed( void )							{ m_guardArmed = !m_guardArmed; m_guardArmedMode = GUARDMODE_GUARD_WITHOUT_PURSUIT; m_attackMoveToMode = FALSE; m_forceAttackArmed = FALSE; m_moveArmed = FALSE; }
 	Bool isGuardArmed( void ) const						{ return m_guardArmed; }
+	GuardMode getGuardArmedMode( void ) const	{ return m_guardArmedMode; }	///< what the armed guard's click gives: the key's, or the EA button's own
 
 	/** One of the page's keys past attack, hold position and move, an OrderKeyExtra (ControlBar.h),
 		* pressed with the mouse or its grid key: the stance key puts the selection on the other
 		* stance from the first unit's */
 	void pressOrderKey( Int key );
-
-	// An order that covers a circle around the point it is given on (the guard key, EA's guard
-	// buttons) is armed with a radius: the wheel grows and shrinks it instead of zooming, a ring
-	// under the cursor shows it, and the order carries it.  The scale drops back to 1 when nothing
-	// is armed any more.
-	Bool isAreaPicking( void ) const;
-	Real getAreaPickRadius( void ) const;			///< what the next area order covers, in world units
-	void adjustAreaPickRadius( Real notches );
 
 	// the move key arms the order a right click gives, for the left button: the next order click is
 	// that move, and a left drag draws the formation line
@@ -1401,7 +1237,8 @@ protected:
 		UnsignedInt blockBeginFrame;							///< The frame at which the block started it's current state
 		ICoord2D blockPos;												///< where the upper left of the block should begin
 		UnsignedInt incrementOnFrame;							///< if we're currently on a frame greater then this, increment our position
-		Color color;															///< what color should we display the military subtitles
+		UnsignedInt fadeStep;											///< retail frames past its lifetime when the fade was last applied
+		Color color;														///< what color should we display the military subtitles
 	};
 
 	typedef std::list<Object *> ObjectList;
@@ -1426,7 +1263,7 @@ protected:
 	void setMouseCursor(Mouse::MouseCursor c);
 
 	
-	void addMessageText( const UnicodeString& formattedMessage );  ///< a plain message, a line of the event feed
+	void addMessageText( const UnicodeString& formattedMessage );  ///< a plain message, a line of EA's list
 
 	void updateFloatingText( void );						///< Update function to move our floating text
 	void drawFloatingText( void );							///< Draw all our floating text
@@ -1442,12 +1279,8 @@ public:
 		* up stand on top of it instead of being painted over. */
 	virtual void drawAttackCircleFill( void ) { }
 
-	/** The patch of an ally's own colour lying under their cursor.  On the ground so that it reads
-		* as light falling on the map rather than as a disc floating over it. */
-	virtual void drawAllyCursorLights( void ) { }
-
-	/// what a data-click on the spectator's page does, by its text: a click on the page, or the
-	/// control socket's "spectator" verb, which a script uses instead of finding the pixel
+	/// the control socket's "spectator" verb: the camera, the followed player, the fog, and replay
+	/// pause, seek and speed
 	void runSpectatorAction( const std::string &action );
 protected:
 
@@ -1490,20 +1323,10 @@ protected:
 	std::vector<OrderHint>			m_orderHints;																	///< who is going where, one per unit and queued point
 	std::vector<OrderHint>			m_drawnOrderHints;														///< the same, units headed the same way bunched into one
 
-	AllyCursor									m_allyCursors[ MAX_PLAYER_COUNT ];						///< where every ally's mouse was last seen (fork)
-	UnsignedInt									m_allyCursorSentMs;														///< wall clock of the last position this machine sent
-	Coord3D											m_allyCursorSentPosition;											///< and what it said, so a still mouse sends nothing
-	UnsignedInt									m_allyCursorEasedMs;													///< wall clock of the last easing pass, which sets its step
-
-	void clearAllyCursors( void );															///< forget every ally's marker, for the start of a match
-	void updateAllyCursors( void );															///< ease every ally's marker towards where they said it was
-	void sendLocalAllyCursor( void );														///< tell the allies where this machine's mouse is, at most ten times a second
-	Int allyPlayerMask( void ) const;														///< the slots this machine is allied with
-	Bool isAllyOfLocalPlayer( Int playerIndex ) const;					///< is this player mutually allied with the one at this machine
-
 	Bool												m_isAttackCircling;														///< TRUE while an attack circle is being dragged (fork)
 	ICoord2D										m_attackCircleAnchor;													///< where the circle was started, in pixels
 	ICoord2D										m_attackCircleCursor;													///< where the cursor is now, which is the rim
+	Coord3D											m_attackCircleCenter;													///< the ground the press landed on, held while the camera moves
 
 	void updateFormationHints( void );													///< recompute who goes where from the curve being drawn
 	void updateOrderHints( void );															///< read the selection's own goals, once a frame
@@ -1515,8 +1338,6 @@ protected:
 	Bool getQueuedOrderHint( const QueuedOrder& order, OrderHint& hint ) const;	///< the marker a queued order draws, FALSE for none
 	void numberOrderHints( void );															///< a unit with more than one place to go numbers them
 	void markOrderHints( void );																///< flag or joint on each hint's end
-	void updateOrderFlags( void );															///< stand a rally flag on every flagged hint
-	std::vector<DrawableID>			m_orderFlagIDs;																///< the rally flags updateOrderFlags stands, reused frame to frame
 	Bool isHiddenByShroud( const Object *obj ) const;						///< is the shroud over this, for the player at this machine
 	Bool												m_displayedMaxWarning;                        ///< keeps the warning from being shown over and over
 	const CommandButton *				m_pendingGUICommand;										///< GUI command that needs additional interaction from the user
@@ -1563,143 +1384,12 @@ protected:
 	SuperweaponMap							m_superweapons[MAX_PLAYER_COUNT];
 	enum { HUD_OVERLAY_POINT_SIZE = 9 };	///< small: this sits over the battlefield, not in a panel
 	enum { HUD_CLOCK_POINT_SIZE = 7 };		///< smaller still, and bold: the clock/rate plate is a glance, not a read
-	enum { PEACE_TIMER_POINT_SIZE = 24 };	///< the peace time clock is the one number you watch, so it is read from across the room
-	enum { PEACE_TIMER_LABEL_POINT_SIZE = 12 };	///< the word over it, which is read once and then only glanced at
-	enum { PEACE_TIMER_TOP_PAD = 16 };	///< how far its plate hangs below the top edge, an 800x600 number like the strip's
-	enum { PEACE_COUNTDOWN_POINT_SIZE = 96 };	///< the last ten seconds, written across the middle of the battlefield
-	enum { PEACE_COUNTDOWN_SECONDS = 10 };	///< how much of the peace time is counted out in the middle of the screen
-	enum { PEACE_COUNTDOWN_SIZE_STEP = 12 };	///< the popping digit's point sizes are rounded to this, so the font library caches four of them rather than one per frame
-	enum { PEACE_COUNTDOWN_LABEL_SHARE = 4 };	///< the word over that digit is this fraction of it
 
-	void drawPeaceTimer( void );					///< the lobby's peace time, counting down at the top of the screen
-	void drawPeaceCountdown( UnsignedInt framesLeft );	///< the last seconds of it, one big digit in the middle of the screen
-	void drawHudOverlay( void );					///< the small elapsed-time / fps plate (ShowHudOverlay)
-	void drawWireframeNotice( void );			///< "the interface is a draft" bouncing round the command bar's band
-	void drawProductionStrip( void );			///< the production queue rows above the control bar
-	///< the run of cells, a column, with its left edge at 'left' and its first cell's top edge at 'bottomY'
-	void drawProductionStripColumn( Int left, Int bottomY );
-	void drawQueueTray( void );		///< the playing strip as a row in Window/Html/Queue.html's tray
-	void drawNetPage( void );			///< the network box, Window/Html/Net.html, with the command bar's page
-	void drawReadoutPage( const HtmlValues &values );	///< the clock and the health, Window/Html/Readout.html, over the bar's page
-	void alertSuperweapon( Player *owner, const UnicodeString &name, const char *label );	///< queue a banner: `name` and what happened to it
-	void drawAlertPage( void );		///< the superweapon banner, Window/Html/Alert.html, under the top page
-	std::string scoreboardHtml( void );	///< Window/Html/Scoreboard.html filled in for this frame
-	const Image *productionStripTray( void );	///< the bar's tray, mirrored, kept until the bar changes side
-	void stripTrayMetrics( ICoord2D *tray, ICoord2D *cameo, ICoord2D *hole, Int *step );	///< that tray's size, its cameo hole, and the column step
-	void drawStripSeconds( Int which, Int x, Int y, Int w, Int h, Int seconds );	///< countdown written inside a cameo
-	void drawStripQuantity( Int which, Int x, Int y, Int w, Int h, Int quantity );	///< the "xN" in a cameo's top right corner
-	///< one of the strips' own strings set to 'text', a point smaller at a time until a readout on 'cell' holds it
-	DisplayString *fitStripString( DisplayString *&string, const UnicodeString &text, Int points, const IRegion2D &cell );
-	void addSuperweaponIcon( const Image *image, Int seconds, Int percent, Bool ready, Color color );
-	void drawSuperweaponStrip( void );		///< those icons, top right, soonest at the right hand end
-	void drawSkillStrip( void );					///< the watched player's bought promotions, under those
+	void drawHudOverlay( void );					///< the top right info strip (ShowNetBox), peace time at its end
+	Int hudStripBottom( void ) const;			///< first screen row below that strip, 0 while it is not drawn
+	void drawKickVoteBanner( void );			///< the open vote kick, top middle, while there is one
+	void drawProductionList( void );			///< the production list, lines on the left above the control bar
 
-	//
-	// The scoreboard on Tab, Window/Html/Scoreboard.html: every seat in the match, your side in full
-	// and the other side as name and team only; watching, every seat in full.  Drawn over everything.
-	//
-	Bool												m_scoreboardOpen;
-	HtmlOverlay *								m_scoreboardOverlay;
-	Bool												m_scoreboardPageLoaded;		///< read once a match, like the spectator's page
-	std::string									m_scoreboardPage;
-	std::string									m_scoreboardHtml;					///< the page filled in, kept for NET_WORTH_REFRESH_FRAMES
-	UnsignedInt									m_scoreboardHtmlFrame;		///< the logic frame it was filled in on
-	// The last half minute of every player's money earned, one reading a game second, oldest first, so
-	// a seat can say what it earns now beside its average over the match.  The reading's own second
-	// goes with it: a pass that runs several logic frames at once skips seconds.
-	struct EarnedReading
-	{
-		UnsignedInt second;
-		Int earned[ MAX_PLAYER_COUNT ];
-	};
-	enum
-	{
-		EARNINGS_WINDOW_SECONDS = 30,											///< what the per second figure is measured over
-		EARNINGS_READINGS = EARNINGS_WINDOW_SECONDS + 1		///< a reading at each end of that window and every second between
-	};
-	EarnedReading								m_earnedReadings[ EARNINGS_READINGS ];
-	Int													m_earnedReadingCount;		///< how many of those hold a reading
-	HtmlOverlay *								m_controlBarOverlay;
-	Bool												m_controlBarPageLoaded;
-	Bool												m_controlBarPageShown;		///< drawn this frame, so its buttons can be clicked
-	std::string									m_controlBarPage;
-	HtmlValues									m_controlBarValues;				///< the page's values, every key written every frame, kept so the nodes are reused
-	HtmlLists										m_controlBarLists;				///< its lists the same way, each entry's keys the same every frame
-	Bool												m_controlBarPageHovered;	///< the pointer was on something the page drew, last frame
-	std::vector< IRegion2D >		m_controlBarSolids;				///< the page's .solid rectangles on screen, as last drawn
-	std::vector< IRegion2D >		m_controlBarKeys;					///< its data-click keys on screen, which stand in the solids
-	HtmlOverlay *								m_netOverlay;
-	Bool												m_netPageLoaded;
-	std::string									m_netPage;
-	HtmlOverlay *								m_readoutOverlay;					///< Window/Html/Readout.html, the clock and the health over the bar's page
-	Bool												m_readoutPageLoaded;
-	std::string									m_readoutPage;
-	/// one superweapon banner waiting or up: what happened, already lettered, and whose it is
-	struct SuperweaponAlert { std::string text; std::string whose; };
-	std::vector< SuperweaponAlert >	m_alerts;								///< the banner up first, then the ones queued behind it
-	UnsignedInt									m_alertStartMs;						///< when the first one went up, on the client's clock
-	HtmlOverlay *								m_alertOverlay;						///< Window/Html/Alert.html, the banner under the top page
-	Bool												m_alertPageLoaded;
-	std::string									m_alertPage;
-	Int													m_alertBottom;						///< the banner's bottom on screen while it is up, else 0: the scoreboard hangs under it
-	HtmlOverlay *								m_tooltipOverlay;
-	Bool												m_tooltipPageLoaded;
-	std::string									m_tooltipPage;
-	ICoord2D										m_tooltipSize;						///< the box as last laid out, in screen pixels, to place the next one by
-	HtmlOverlay *								m_promotionOverlay;
-	HtmlOverlay *								m_promotionFrontOverlay;		///< the grid's frames, drawn over the promotions
-	HtmlOverlay *								m_cellFrontOverlay[ CELL_GRID_COUNT ];
-	std::vector< HtmlValues >		m_cellFrontCells[ CELL_GRID_COUNT ];	///< each grid's cells as the bar's page last placed them
-	enum { ORDER_KEYS = 4 };																				///< the page's attack, hold position and move keys, then the OrderKeyExtra ones
-	IRegion2D										m_orderKeyCell[ ORDER_KEYS ];					///< where the page last put each, screen pixels
-	Int													m_orderKeyPlace[ ORDER_KEYS ];				///< the CommandPlace each stands on, -1 while it is not shown
-	DisplayString *							m_orderKeyString[ ORDER_KEYS ];				///< each one's letter, on the command buttons' plate
-	Int													m_orderKeyPoints;											///< the size those were last lettered at: HUD Size changes in a match
-	Bool												m_promotionPageLoaded;
-	std::string									m_promotionPage;
-	Int													m_promotionShownMs;				///< how far the promotion screen has come up, -1 before its first picture
-	UnsignedInt									m_promotionDrawnAt;				///< the wall clock at its last picture
-	Bool												m_promotionClosing;				///< fading out, m_promotionShownMs running back to 0
-	HtmlOverlay *								m_quitMenuOverlay;
-	std::vector< HtmlOverlay * >	m_quitMenuKeyOverlays;	///< one for each of the menu's keys, each fading in on its own
-	Bool												m_quitMenuPageLoaded;
-	std::string									m_quitMenuPage;
-	Int													m_quitMenuShownMs;			///< how far the menu's coming up has run, -1 until its first picture
-	UnsignedInt									m_quitMenuDrawnAt;			///< the wall clock at its last picture: the game is paused under it
-	Int													m_quitMenuClosingMs;		///< how far the menu's going has run, -1 while it is not going
-	Bool												m_signalsWereShown;				///< the smoke signal column was up last frame
-	UnsignedInt									m_signalsRiseStartMs;			///< when it last came up, the start of its buttons' rise
-
-	//
-	// The spectator's page over the battlefield, Window/Html/Spectator.html: the drop-down that
-	// switches the strips on and off, every player ranked by a chosen number, the net worth lead
-	// over time and what each army is made of.  Only while watching.
-	//
-	void drawSpectatorPage( void );
-	Bool handleSpectatorPageClick( const ICoord2D *mouse, Bool act );	///< TRUE when the click landed on it
-	HtmlOverlay *								m_spectatorOverlay;
-	Bool												m_spectatorPageLoaded;		///< read once a match, so an edited page shows in the next one
-	Bool												m_spectatorPageShown;			///< drawn this frame, so clicks are its to take
-	std::string									m_spectatorPage;					///< the page as written, before its {{values}} are filled
-	std::set< std::string >			m_spectatorFlipped;				///< names a data-click="flip:name" has flipped
-	std::map< std::string, std::string > m_spectatorPicked;	///< group to choice, from data-click="pick:group:choice"
-	HtmlLists										m_spectatorLists;
-	HtmlValues									m_spectatorTotals;				///< the page's values that are not per player, gathered with the lists
-	UnsignedInt									m_spectatorListsFrame;		///< the logic frame the lists were last gathered on
-	const Player								*m_spectatorListsWatched;	///< the player being watched when they were, whose seat they mark
-
-	std::vector< SpectatorSuperweapon > m_spectatorSuperweapons;	///< every countdown the superweapon pass found, rebuilt each pass
-
-	//
-	// The event feed over the radar, Window/Html/Feed.html: every message, a superweapon ready or
-	// fired, a player beaten or gone, the newest at the bottom.  A player's and a watcher's alike.
-	//
-	struct FeedLine
-	{
-		HtmlValues values;
-		UnsignedInt until;					///< the logic frame it leaves on
-	};
-	std::vector< FeedLine >			m_feedLines;
 	SignalKind									m_armedSignal;						///< the signal the next click drops; SIGNAL_KIND_COUNT for none
 	struct SignalMark
 	{
@@ -1709,12 +1399,10 @@ protected:
 	std::vector< SignalMark >		m_signalMarks;
 	void updateSignalMarks( void );
 	void clearSignalMarks( void );
-	void addFeedLine( HtmlValues line );
-	void feedAct( Player *player, const Image *cameo, const std::string &what, const char *tag, const char *label );
 
 	//
-	// The Classic interface's message list: EA's column of six lines in the top left corner, each in
-	// its own colour, fading out from the moment it is written.  Reforged writes the event feed.
+	// The message list: EA's column of six lines in the top left corner, each in its own colour,
+	// fading out from the moment it is written.
 	//
 	enum { CLASSIC_MESSAGES = 6 };
 	struct ClassicMessage
@@ -1724,7 +1412,7 @@ protected:
 		Color color;
 	};
 	ClassicMessage							m_classicMessages[ CLASSIC_MESSAGES ];	///< newest first
-	UnsignedInt									m_classicMessageFadeFrame;			///< the last logic frame the fade was stepped on
+	UnsignedInt									m_classicMessageFadeFrame;			///< the last retail 30 Hz frame the fade was stepped on
 	void addClassicMessage( const UnicodeString &text, const Color *color );
 	void fadeClassicMessages( void );
 	void drawClassicMessages( void );
@@ -1732,33 +1420,11 @@ protected:
 	void drawClassicSuperweapon( SuperweaponInfo *info, const AsciiString &templateName, Bool isReady, Int readySecs,
 															 Int x, Int *y );
 	void watchDozers( void );
-	void drawFeed( void );
-	Int feedTop( void ) const;
 	UnsignedInt									m_dozerCheckFrame;				///< the logic frame watchDozers last looked on
 	Bool												m_hadDozer[ MAX_PLAYER_COUNT ];	///< that player had a dozer or worker then
-	// the chat over the feed, Window/Html/Chat.html, the same lines kept a while
-	std::vector< FeedLine >			m_chatLines;
-	void drawChat( void );
-	HtmlOverlay *								m_chatOverlay;
-	Bool												m_chatPageLoaded;
-	std::string									m_chatPage;
-	HtmlOverlay *								m_feedOverlay;
-	Bool												m_feedPageLoaded;
-	std::string									m_feedPage;
-	Int													m_feedTop;								///< where the feed starts on screen, under the menu key, from the bar's page
-	ICoord2D										m_queueCorner;						///< the selection's well's left edge and the console's top on screen: the queue stands there
-	Int													m_consoleTop;							///< the console's top on screen, the build card stands over it
-	Int													m_topBarBottom;						///< the top page's bottom on screen, the scoreboard and the feed hang under it
-	Int													m_peacePlateBottom;				///< the top page's peace time plate's bottom on screen, 0 while it is not up; the last ten seconds hang under it
 
-	Bool												m_placementRangeRingUp;	///< the structure on the cursor is armed, so its reach is drawn
-	Real												m_placementRingRadius;	///< how far from its centre it hits
-	void drawPlacementReach( void );			///< while placing, the reach of every armed building in sight, as one outline
-	void drawBlindSpots( void );					///< shade the ground a placed or selected defence cannot shoot into
-
-	DisplayString *							m_hudDisplayString;			///< the ShowHudOverlay line (fps / clock)
-	HtmlValues									m_hudValues;						///< that line's readings one by one, for Window/Html/Net.html
-	DisplayString *							m_peaceTimeDisplayString;	///< the peace time clock at the top of the screen
+	DisplayString *							m_hudDisplayString;			///< the info strip's readout (clock / rates)
+	DisplayString *							m_peaceTimeDisplayString;	///< the info strip's red peace time segment
 	/// the broadcast's string for what key names, in font at points, holding text: one string per
 	/// thing written, so a text is laid out again only when it changes
 	DisplayString *broadcastText( const std::string &key, const UnicodeString &text, const char *font, Int points, Bool bold );
@@ -1769,12 +1435,7 @@ protected:
 	/// the score bar laid out for players, under the clock's tab, team letters taken from named
 	void layOutBroadcast( const std::vector< SpectatorStats > &players, const std::vector< SpectatorStats > &named,
 		const std::string &tag, Int clockBox, Int clockBoxHeight, BroadcastLayout &layout );
-	DisplayString *							m_peaceTimeLabelDisplayString;	///< the word written over that clock
-	DisplayString *							m_peaceCountdownDisplayString;	///< the big digit of its last ten seconds
 	Int													m_lastMoneyDisplayed;		///< so the money gadget is only written when the amount changes
-	Int													m_lastEarningDisplayed;	///< or the money earned a second beside it
-	Bool												m_lastEarningPerMinute;	///< or whether that was written per minute
-	MoneyPlateWidth							m_moneyPlate;						///< the money plate's width, following the figure's
 	UnsignedInt									m_hudDrawCount;					///< rendered frames counted by drawHudOverlay itself
 	UnsignedInt									m_hudLastSampleFrame;		///< m_hudDrawCount the fps sample was last refreshed on
 	UnsignedInt									m_hudLastSampleMs;			///< wall clock of that sample
@@ -1783,12 +1444,6 @@ protected:
 	RateReading									m_hudLogicHz;						///< logic frames actually simulated per real second
 	UnsignedInt									m_hudRealClockBaseMs;		///< wall clock the two elapsed-time readouts were aligned at
 	UnsignedInt									m_hudLastDrawMs;				///< wall clock of the previous overlay draw, so a pause can be taken back out of it
-	Int													m_hudOverlayBottom;			///< bottom of everything drawn in the top right corner, so the superweapon timers start under it
-	enum { WIREFRAME_LINES = 2 };
-	DisplayString *							m_wireframeNotice[ WIREFRAME_LINES ];	///< the draft notice drawWireframeNotice bounces, a string a line
-	Coord2D											m_wireframePos;					///< its top left corner on screen
-	Coord2D											m_wireframeDir;					///< which way it is going, each axis +1 or -1
-	UnsignedInt									m_wireframeLastMs;			///< wall clock of its previous draw, 0 before the first
 	// A script time freeze stops the logic clock, and the military subtitle's counters are
 	// logic frames, so they have to be stepped by hand while it lasts.  These two turn the
 	// wall clock into that step without drift: every update works out how many 30Hz frames
@@ -1797,61 +1452,15 @@ protected:
 	UnsignedInt									m_subtitleFreezeSteps;		///< frames already handed to the subtitle during it
 
 	//
-	// The global production strip: everything the local player has coming - queued in any factory,
-	// or going up on the ground - one cameo each, soonest to finish first, in a column standing on
-	// the corner above the control bar. drawProductionStrip() lays it out and records where each
-	// cameo landed; handleProductionStripClick() reads those back.  What a factory is turning out
-	// and what a dozer is raising stand in the same run, because the question is when the next thing
-	// lands and not which of the two kinds it is, and the building you have selected leads it.
-	// Watching, the queues are on the Tab scoreboard instead.
+	// The production list: everything the local player has coming, gathered once a logic frame, and
+	// one kept string per line plus the "+N more" one, so a line is laid out again only when its text
+	// changes.  The superweapon list keeps its own "+N more" string the same way.
 	//
-	ProductionStripSlot					m_productionStrip[ PRODUCTION_STRIP_ROW_MAX ];
-	Int													m_productionStripCount;		///< cameos drawn
-	Int													m_productionStripTotal;		///< items queued, drawn or not
-	Int													m_productionStripCameoW;		///< cameo size this frame, in the control bar's aspect
-	Int													m_productionStripCameoH;
-	Bool												m_productionStripThemed;		///< playing under the bar's page: a row in Queue.html's steel tray
-	Int													m_productionStripStep;			///< from one themed cameo to the next, across
-	HtmlOverlay *								m_queueOverlay;							///< Window/Html/Queue.html under the cameos
-	HtmlOverlay *								m_queueFrontOverlay;				///< and its frames over them
-	HtmlOverlay *								m_superweaponOverlay;				///< the same page under the superweapon strip's cameos, top right
-	Bool												m_queuePageLoaded;
-	std::string									m_queuePage;
-
-	//
-	// The strip's cameos face the other way from the power bar's, so the tray behind them is a
-	// mirrored copy of it.  The whole strip wears one side's metal - the side the bar underneath it
-	// is showing - so one is kept at a time and remade when the bar changes side, which watching a
-	// match it does every time the observer picks a different player out of the list.
-	//
-	Image *											m_productionStripTray;			///< our mirrored copy of the bar's tray
-	const Image *								m_productionStripTraySource;	///< the tray it was made from, so a side change remakes it
-	//
-	// One kept string per cameo, not one string walked across all of them.  A DisplayString
-	// rebuilds its sentence whenever the text it holds changes, and a rebuild is a fresh font
-	// surface, a fresh texture and a surface copy - so a single shared string paid that once per
-	// cameo per frame, and watching a match the strips cost more to draw than the terrain under
-	// them.  Kept per cameo, a countdown rebuilds when its own second changes: once a second.
-	//
-	enum { STRIP_SECONDS_STRINGS = PRODUCTION_STRIP_ROW_MAX + SUPERWEAPON_STRIP_MAX };
-	enum
-	{
-		STRIP_OVERFLOW_PRODUCTION = 0,		///< the "+N" closing the production column
-		STRIP_OVERFLOW_STRINGS
-	};
-
-	enum { STRIP_QUANTITY_STRINGS = PRODUCTION_STRIP_ROW_MAX };
-
-	DisplayString *							m_productionStripOverflow[ STRIP_OVERFLOW_STRINGS ];	///< the "+N" that stands for the rest of a row
-	DisplayString *							m_stripSecondsString[ STRIP_SECONDS_STRINGS ];			///< the countdown written inside a cameo, either strip's
-	DisplayString *							m_stripQuantityString[ STRIP_QUANTITY_STRINGS ];		///< the "xN" a run of the same item wears
-
-	//
-	// The superweapon strip: the same cameos the command bar fires them from, in the top right
-	// under the clock plate, rebuilt every frame from the timers below and laid out soonest first.
-	//
-	SuperweaponIconSlot					m_superweaponIcons[ SUPERWEAPON_STRIP_MAX ];
-	Int													m_superweaponIconCount;		///< icons drawn
+	ProductionListSlot					m_productionList[ PRODUCTION_LIST_LINES ];
+	Int													m_productionListCount;		///< lines filled
+	Int													m_productionListTotal;		///< items coming, listed or not
+	DisplayString *							m_productionListText[ PRODUCTION_LIST_LINES + 1 ];
+	DisplayString *							m_superweaponMoreText;
 
 	Coord2D											m_superweaponPosition;
 	Real												m_superweaponFlashDuration;
@@ -1945,7 +1554,7 @@ protected:
 	Bool												m_attackMoveToMode;	///< are we in attack move mode?
 	Bool												m_forceAttackArmed;	///< is the attack key holding force fire for the next click?
 	Bool												m_guardArmed;				///< is the guard key holding a guard order for the next click?
-	Real												m_areaPickScale;		///< what the wheel has made of the armed guard's default radius
+	GuardMode										m_guardArmedMode;		///< the mode that guard order carries
 	Bool												m_moveArmed;				///< is the move key holding a move for the next click?
 	Bool												m_orderKeyKeptByShift;	///< an armed key was clicked with under shift, and drops when shift comes up
 	Bool												m_preferSelection;		///< the shift key has been depressed.
@@ -1989,14 +1598,11 @@ protected:
 // the singleton
 extern InGameUI *TheInGameUI;
 
-/// How many rings of the blind-spot grid a defence's reach needs, capped by the map's width plus height.
-Int blindSpotRingCount( Real radius, Real mapSpan );
 //
 // A readout on a cell of the HUD: a countdown, a key, a price, a power figure, a count.  Every one
 // of them stands on a solid plate in a corner of the cell's inner rectangle, which is the cell less
-// the frame the page draws over its edge, so no plate lies under a border and no digit is cut by
-// one.  The strips in InGameUI.cpp and the command buttons' badges in W3DPushButton.cpp both draw
-// through these.
+// its frame, so no plate lies under a border and no digit is cut by one.  The command buttons'
+// badges in W3DPushButton.cpp draw through these.
 //
 enum HudReadoutCorner
 {

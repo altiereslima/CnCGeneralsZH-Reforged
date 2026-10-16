@@ -280,6 +280,9 @@ SpecialPowerTemplate* SpecialPowerStore::findSpecialPowerTemplatePrivate( AsciiS
 		if( m_specialPowerTemplates[ i ]->getName() == name )
 			return m_specialPowerTemplates[ i ];
 
+	AsciiString retailName;
+	if( TheModNamespace.findRetailName( name, MODNAME_SPECIALPOWER, &retailName ) )
+		return findSpecialPowerTemplatePrivate( retailName );
 	return NULL;  // not found
 
 }
@@ -387,4 +390,10 @@ void SpecialPowerStore::reset( void )
 			++it;
 		}
 	}
+
+	// A power a map adds takes the next id, and the id is what a special power command carries.  The
+	// counter went on climbing over the powers deleted above, so the same map's power got a different
+	// id on a machine that had played another custom map first.  The survivors are the game's own, in
+	// the order they were numbered.
+	m_nextSpecialPowerID = m_specialPowerTemplates.empty() ? 0 : m_specialPowerTemplates.back()->getID();
 }  // end reset

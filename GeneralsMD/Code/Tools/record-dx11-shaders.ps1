@@ -56,7 +56,8 @@ param(
 	[int[]] $Seeds = @(0, 1, 2),
 	# named skirmish maps played the same way, for the lighting the random maps do not have (night, snow)
 	[string[]] $Maps = @(),
-	[int] $Frames = 2400,
+	# logic frames, 60 a second
+	[int] $Frames = 4800,
 	[int] $TimeoutMinutes = 30,
 	# leave the shipped file in the farm: a check that a run with it compiles nothing it holds
 	[switch] $KeepShipped,

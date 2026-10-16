@@ -278,9 +278,10 @@ const DamageFX *DamageFXStore::findDamageFX(AsciiString name) const
 {
 	NameKeyType namekey = TheNameKeyGenerator->nameToKey(name);
   DamageFXMap::const_iterator it = m_dfxmap.find(namekey);
-  if (it == m_dfxmap.end()) 
+  if (it == m_dfxmap.end())
 	{
-		return NULL;
+		AsciiString retailName;
+		return TheModNamespace.findRetailName(name, MODNAME_DAMAGEFX, &retailName) ? findDamageFX(retailName) : NULL;
 	}
 	else
 	{
@@ -294,9 +295,15 @@ void DamageFXStore::init()
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Puts back what a map.ini changed, as ArmorStore::reset does: backwards, so a DamageFX both map.ini
+	* and solo.ini changed goes back to the first state, and in place, because body modules hold a
+	* pointer to it.  A name the map brought stays; a later definition clears it first anyway. */
 void DamageFXStore::reset()
 {
-} 
+	for (Int i = (Int)m_beforeMapOverrides.size() - 1; i >= 0; --i)
+		m_dfxmap[m_beforeMapOverrides[i].first] = m_beforeMapOverrides[i].second;
+	m_beforeMapOverrides.clear();
+}
 
 //-------------------------------------------------------------------------------------------------
 void DamageFXStore::update()
@@ -309,6 +316,9 @@ void DamageFXStore::update()
 
 	const char *c = ini->getNextToken();
 	NameKeyType key = TheNameKeyGenerator->nameToKey(c);
+	DamageFXMap::const_iterator existing = TheDamageFXStore->m_dfxmap.find(key);
+	if (ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES && existing != TheDamageFXStore->m_dfxmap.end())
+		TheDamageFXStore->m_beforeMapOverrides.push_back(std::make_pair(key, existing->second));
 	DamageFX& dfx = TheDamageFXStore->m_dfxmap[key];
 	dfx.clear();
 	ini->initFromINI(&dfx, dfx.getFieldParse());

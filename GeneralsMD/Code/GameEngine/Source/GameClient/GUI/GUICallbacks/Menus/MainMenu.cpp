@@ -570,7 +570,7 @@ void MainMenuInit( WindowLayout *layout, void *userData )
 		dropDownWindows[i]->winHide(TRUE);
 
 	initialHide();
-	
+
 	showSelectiveButtons(SHOW_NONE);
 	// Set up the version number
 #if defined _DEBUG || defined _INTERNAL || defined _PROFILE

@@ -146,6 +146,9 @@ public:
 	void								Set_Lighting_Environment(LightEnvironmentClass * light_env) { if (light_env) {m_localLightEnv=*light_env;LightEnvironment = &m_localLightEnv;} else {LightEnvironment = NULL;} }
 	LightEnvironmentClass *		Get_Lighting_Environment(void) { return LightEnvironment; }
 	inline float	Get_Alpha_Override(void) { return m_alphaOverride;}
+	inline unsigned	Get_Draw_Effect(void) const { return m_drawEffect;}
+	inline const float *	Get_Draw_Effect_Parameters(void) const { return m_drawEffectParameters;}
+	void				Take_Draw_Effect(const RenderInfoClass & rinfo);
 
 	void								Set_Next_Visible_Skin(MeshClass * next_visible) { NextVisibleSkin = next_visible; }
 	MeshClass *						Peek_Next_Visible_Skin(void) { return NextVisibleSkin; }
@@ -187,6 +190,8 @@ protected:
 	float					m_alphaOverride;	//added for 'Generals' to allow variable alpha on meshes.
 	float					m_materialPassEmissiveOverride;	//added for 'Generals' to allow variable emissive on additional passes.
 	float					m_materialPassAlphaOverride;	//added for 'Generals' to allow variable alpha on additional render passes.
+	unsigned				m_drawEffect;	// RenderInfoClass::drawEffect as the mesh was last submitted with it
+	float					m_drawEffectParameters[4];
 	int								BaseVertexOffset;		// offset to our first vertex in whatever vb this mesh is in.
 	MeshClass *						NextVisibleSkin;		// linked list of visible skins
 

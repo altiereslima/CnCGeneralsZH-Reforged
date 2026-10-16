@@ -96,7 +96,7 @@ void CleanupAreaPower::doSpecialPowerAtLocation( const Coord3D *loc, Real angle,
 	CleanupHazardUpdate *update = (CleanupHazardUpdate*)obj->findUpdateModule( key_CleanupHazardUpdate );
 	if( update )
 	{
-		update->setCleanupAreaParameters( loc, data->m_cleanupMoveRange );
+		update->setCleanupAreaParameters( loc, data->m_cleanupMoveRange, TRUE );
 	}
 	else
 	{

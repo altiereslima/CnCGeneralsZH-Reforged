@@ -124,7 +124,7 @@ void QueueProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoorType 
 			startingForce.z *= newObjectPhysics->getMass();
 			newObjectPhysics->applyMotiveForce( &startingForce );
 
-			const Real STARTING_PITCH_COEFF = 0.04f;
+			const Real STARTING_PITCH_COEFF = ConvertRetailPerFrameRate( 0.04f );	// a pitch rate, per frame
 			Real pitchRate = newObjectPhysics->getCenterOfMassOffset() * STARTING_PITCH_COEFF;
 			newObjectPhysics->setPitchRate( pitchRate );
 		}

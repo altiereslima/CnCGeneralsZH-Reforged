@@ -46,8 +46,8 @@ BridgeScaffoldBehavior::BridgeScaffoldBehavior( Thing *thing, const ModuleData *
 	m_riseToPos.zero();
 	m_buildPos.zero();
 	m_targetPos.zero();
-	m_lateralSpeed = 1.0f;
-	m_verticalSpeed = 1.0f;
+	m_lateralSpeed = ConvertRetailPerFrameRate(1.0f);
+	m_verticalSpeed = ConvertRetailPerFrameRate(1.0f);
 
 }  // end BridgeScaffoldBehavior
 
@@ -215,8 +215,8 @@ UpdateSleepTime BridgeScaffoldBehavior::update( void )
 	// make sure that speed can't get so incredibly small that we never finish our
 	// movement no matter what the speed and distance are
 	//
-	if( speed < 0.001f )
-		speed = 0.001f;
+	if( speed < ConvertRetailPerFrameRate(0.001f) )
+		speed = ConvertRetailPerFrameRate(0.001f);
 
 	// compute the new position given the speed
 	Coord3D newPos;

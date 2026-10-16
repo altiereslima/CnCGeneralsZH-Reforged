@@ -79,6 +79,9 @@ public:
 	PlayerTemplate();
 
 	inline void setNameKey(NameKeyType namekey) { m_nameKey = namekey; }
+	/// -modfactions: the -mod this template came from, -1 for retail's own
+	inline void setModIndex(Int mod) { m_modIndex = mod; }
+	inline Int getModIndex() const { return m_modIndex; }
 
 	inline NameKeyType getNameKey() const { DEBUG_ASSERTCRASH(m_nameKey != NAMEKEY_INVALID, ("bad namekey")); return m_nameKey; }
 	inline AsciiString getName() const { return KEYNAME(m_nameKey); }
@@ -153,6 +156,7 @@ protected:
 private:
 
 	NameKeyType			m_nameKey;
+	Int							m_modIndex;
 	UnicodeString		m_displayName;
 	AsciiString			m_side, m_baseSide;
 	Handicap				m_handicap;						///< initial baseline for Player capabilities

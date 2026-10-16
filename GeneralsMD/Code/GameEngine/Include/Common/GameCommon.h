@@ -60,6 +60,7 @@
 
 // ----------------------------------------------------------------------------------------------
 #include "Lib/BaseType.h"
+#include <limits.h>
 
 // ----------------------------------------------------------------------------------------------
 #if defined(_INTERNAL) || defined(_DEBUG)
@@ -71,13 +72,56 @@
 // ----------------------------------------------------------------------------------------------
 enum
 {
-	LOGICFRAMES_PER_SECOND = 30,
+	LOGICFRAMES_PER_SECOND = 60,
+	RETAIL_LOGICFRAMES_PER_SECOND = 30,	///< the rate every hard-coded frame count and per-frame amount in EA's code and data was written for
 	MSEC_PER_SECOND = 1000
 };
 const Real LOGICFRAMES_PER_MSEC_REAL = (((Real)LOGICFRAMES_PER_SECOND) / ((Real)MSEC_PER_SECOND));
 const Real MSEC_PER_LOGICFRAME_REAL = (((Real)MSEC_PER_SECOND) / ((Real)LOGICFRAMES_PER_SECOND));
 const Real LOGICFRAMES_PER_SECONDS_REAL = (Real)LOGICFRAMES_PER_SECOND;
 const Real SECONDS_PER_LOGICFRAME_REAL = 1.0f / LOGICFRAMES_PER_SECONDS_REAL;
+
+// ----------------------------------------------------------------------------------------------
+// Logic runs at twice the retail rate. A frame count written for 30 Hz is doubled, an amount added
+// every frame is halved, an acceleration quartered, and a factor multiplied in every frame becomes
+// its square root. Every one of those is exact in IEEE arithmetic (sqrt included), so all machines
+// agree; the factor conversion is only exact because the ratio is 2, hence the assert.
+enum { LOGICFRAMES_PER_RETAIL_FRAME = LOGICFRAMES_PER_SECOND / RETAIL_LOGICFRAMES_PER_SECOND };
+static_assert( LOGICFRAMES_PER_SECOND == 2 * RETAIL_LOGICFRAMES_PER_SECOND, "the Retail conversions assume logic runs at exactly twice the retail rate" );
+
+// a frame count past half the type's range is a sentinel (a "never" or "forever"), and stays one
+constexpr Int ConvertRetailFrames( Int frames )
+{
+	if( frames > INT_MAX / LOGICFRAMES_PER_RETAIL_FRAME ) return INT_MAX;
+	if( frames < INT_MIN / LOGICFRAMES_PER_RETAIL_FRAME ) return INT_MIN;
+	return frames * LOGICFRAMES_PER_RETAIL_FRAME;
+}
+constexpr UnsignedInt ConvertRetailFrames( UnsignedInt frames )
+{
+	if( frames > UINT_MAX / LOGICFRAMES_PER_RETAIL_FRAME ) return UINT_MAX;
+	return frames * LOGICFRAMES_PER_RETAIL_FRAME;
+}
+constexpr Real ConvertRetailFrames( Real frames ) { return frames * (Real)LOGICFRAMES_PER_RETAIL_FRAME; }
+
+constexpr Real ConvertRetailPerFrameRate( Real perFrame ) { return perFrame * 0.5f; }
+constexpr Real ConvertRetailPerFrameSquared( Real perFrameSqr ) { return perFrameSqr * 0.25f; }
+inline Real ConvertRetailPerFrameFactor( Real factor ) { return sqrtf( factor > 0.0f ? factor : 0.0f ); }
+
+// ----------------------------------------------------------------------------------------------
+// The speeds a skirmish or single-player match may run at: half speed to normal, never faster.  The
+// menu, the console, a saved game and a map script all pass through this; -fps, -turbo and a network
+// game do not.
+enum
+{
+	PLAYER_GAME_SPEED_MIN_FPS = LOGICFRAMES_PER_SECOND / 2,
+	PLAYER_GAME_SPEED_MAX_FPS = LOGICFRAMES_PER_SECOND
+};
+constexpr Int ClampPlayerGameSpeed( Int fps )
+{
+	if( fps < PLAYER_GAME_SPEED_MIN_FPS ) return PLAYER_GAME_SPEED_MIN_FPS;
+	if( fps > PLAYER_GAME_SPEED_MAX_FPS ) return PLAYER_GAME_SPEED_MAX_FPS;
+	return fps;
+}
 
 // ----------------------------------------------------------------------------------------------
 // note that this returns a REAL value, not an int... most callers will want to

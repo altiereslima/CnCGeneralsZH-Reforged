@@ -61,8 +61,8 @@
 BridgeBehaviorModuleData::BridgeBehaviorModuleData( void )
 {
 
-	m_lateralScaffoldSpeed = 1.0f;
-	m_verticalScaffoldSpeed = 1.0f;
+	m_lateralScaffoldSpeed = ConvertRetailPerFrameRate(1.0f);
+	m_verticalScaffoldSpeed = ConvertRetailPerFrameRate(1.0f);
 
 }  // end BridgeBehaviorModuleData
 

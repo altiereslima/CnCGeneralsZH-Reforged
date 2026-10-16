@@ -335,18 +335,14 @@ static void restartMissionMenu()
 }
 
 //-------------------------------------------------------------------------------------------------
-/** The menu's coming and going.  Drawn as the page, it fades itself in and out: the layout's
-	* transitions flash the rectangles each window had when they started, and
-	* InGameUI::themeQuitMenu lays the menu out compact only as it draws, so the flashes would light
-	* the old layout's places somewhere else on the screen.  Skipping the group leaves every window
-	* where the group's end puts it.  Classic draws the layout where it stands, so its own flashes
-	* play, as the game shipped. */
+/** The menu's coming and going: the layout's own transitions, as the game shipped, or none at all
+	* with window animation off. */
 //-------------------------------------------------------------------------------------------------
 static void showQuitMenuLayout( const char *group )
 {
 	TheTransitionHandler->remove( group );
 	TheTransitionHandler->setGroup( group );
-	if( !TheGlobalData->m_animateWindows || TheInGameUI->isQuitMenuPageShown() )
+	if( !TheGlobalData->m_animateWindows )
 		TheTransitionHandler->remove( group, TRUE );
 }
 
@@ -356,8 +352,6 @@ static void hideQuitMenuLayout( void )
 		return;
 	if( !TheGlobalData->m_animateWindows )
 		quitMenuLayout->hide( TRUE );
-	else if( TheInGameUI->isQuitMenuPageShown() )
-		TheInGameUI->closeQuitMenuPage();
 	else
 		TheTransitionHandler->reverse( quitMenuLayout == noSaveLoadQuitMenuLayout ? "QuitNoSaveBack" : "QuitFullBack" );
 }
@@ -477,8 +471,6 @@ void ToggleQuitMenu()
 			TheInGameUI->setQuitMenuVisible(FALSE);
 			return;
 		}
-		// themed first: whether the page draws it decides whether the layout's flashes play
-		TheInGameUI->themeQuitMenu( quitMenuLayout->getFirstWindow() );
 		showQuitMenuLayout( group );
 
 		//quitMenuLayout->hide(FALSE);

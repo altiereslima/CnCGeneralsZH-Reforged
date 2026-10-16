@@ -492,6 +492,10 @@ static void processLoadButtonPress(GameWindow *window)
 	if( selectedGameInfo )
 	{
 
+		// refused here, before the confirm and before the game or menu is torn down for the load
+		if( TheGameState->refuseUnloadableSave( selectedGameInfo->saveGameInfo ) )
+			return;
+
 		//
 		// if we're in the shell we do not need a confirmation dialog that states we will
 		// lose the current loaded game data cause we're not in a game

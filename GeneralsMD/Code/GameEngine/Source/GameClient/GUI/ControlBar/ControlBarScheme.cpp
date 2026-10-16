@@ -55,6 +55,8 @@
 //-----------------------------------------------------------------------------
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 #include "Lib/Clock.h"
+#include "Common/GlobalData.h"
+#include "Common/NameKeyGenerator.h"
 
 #include "Common/Player.h"
 #include "Common/PlayerTemplate.h"
@@ -78,9 +80,6 @@
 enum{
 	COMMAND_BAR_SIZE_OFFSET = 0
 };
-
-/// where GeneralsExpPoints.wnd hangs its panel from, in the 800x600 the layout was authored at
-static const Real GEN_EXP_DESIGN_TOP = 3.0f;
 
 const FieldParse ControlBarSchemeManager::m_controlBarSchemeFieldParseTable[] = 
 {
@@ -309,6 +308,7 @@ ControlBarScheme::ControlBarScheme(void)
 	m_name.clear();
 	m_ScreenCreationRes.x = m_ScreenCreationRes.y = 0;
 	m_side.clear();
+	m_controlBarPro = FALSE;
 	m_buttonQueueImage = NULL;
 	m_rightHUDImage = NULL;
 	m_buildUpClockColor = GameMakeColor(0,0,0,100);
@@ -461,14 +461,6 @@ void ControlBarScheme::init(void)
 {
 	if(TheControlBar)
 	{
-		//
-		// Before anything below asks a window where it is on screen.  switchControlBarStage sends
-		// the panels home but they travel there over a fifth of a second, so on its own it leaves
-		// every screen position read in this function reading a bar that is still on its way - and
-		// the money readout, the two tabs and the toolbar column are all placed from those reads.
-		// See ControlBar::clearPanelSlide.
-		//
-		TheControlBar->clearPanelSlide();
 		TheControlBar->switchControlBarStage(CONTROL_BAR_STAGE_DEFAULT);
 		TheControlBar->updateBuildQueueDisabledImages( m_buttonQueueImage );
 		TheControlBar->updateRightHUDImage(m_rightHUDImage);
@@ -572,34 +564,8 @@ void ControlBarScheme::init(void)
 	if(win)
 	{
 		win->winSetEnabledImage(0,m_powerPurchaseImage);
-		// Classic keeps the loader's stretch, as the game shipped, over the HUD frame (ControlBarLayoutUniform)
-		if( m_powerPurchaseImage && !TheGlobalData->isClassicUI() )
-		{
-			//
-			// The rank screen is one painting, and this line is what decides how big it is drawn -
-			// which is why laying the screen out uniformly at startup was not enough: every side
-			// change put the painting back at the loader's two separate scales, a third wider than
-			// tall at 16:9, over children that had been placed squarely.
-			//
-			// One scale, and then the panel is centred on the screen by its own width rather than
-			// left hanging off the anchor its authored rectangle had.  Its children are positioned
-			// relative to it, so the whole screen moves as one piece.
-			//
-			const Real s = ControlBarUniformScale();
-			const Int w = REAL_TO_INT_CEIL( m_powerPurchaseImage->getImageWidth() * s );
-			const Int h = REAL_TO_INT_CEIL( m_powerPurchaseImage->getImageHeight() * s );
-
-			win->winSetSize( w, h );
-			win->winSetPosition( ( TheDisplay->getWidth() - w ) / 2,
-													 REAL_TO_INT_FLOOR( GEN_EXP_DESIGN_TOP * s ) );
-		}
-		else if( TheGlobalData->isClassicUI() )
-		{
-			// the shipped painting at its shipped size, in the middle of the screen
-			Int w = 0, h = 0;
-			win->winGetSize( &w, &h );
-			win->winSetPosition( ( (Int)TheDisplay->getWidth() - w ) / 2, ( (Int)TheDisplay->getHeight() - h ) / 2 );
-		}
+		// where it stands is ControlBar Pro's GeneralsExpPoints.wnd at its pieces' scale, centred at the
+		// top (ControlBarLayoutUniform in ControlBar::initWindows), so nothing here moves it
 	}
 
 	//
@@ -770,6 +736,7 @@ void ControlBarScheme::drawBackground( Coord2D multi, ICoord2D offset )
 ControlBarSchemeManager::ControlBarSchemeManager( void )
 {
 	m_currentScheme = NULL;
+	m_loadingControlBarPro = FALSE;
 	m_schemeList.clear();
 	m_multiplyer.x = m_multiplyer.y = 1;
 }
@@ -869,7 +836,8 @@ ControlBarScheme *ControlBarSchemeManager::newControlBarScheme( AsciiString name
 		cbScheme->reset();
 		cbScheme->m_name.set( name );
 		cbScheme->m_name.toLower();
-		return cbScheme;		
+		cbScheme->m_controlBarPro = m_loadingControlBarPro;
+		return cbScheme;
 	}
 
 	cbScheme = NEW ControlBarScheme;
@@ -882,6 +850,7 @@ ControlBarScheme *ControlBarSchemeManager::newControlBarScheme( AsciiString name
 
 	cbScheme->m_name.set( name );
 	cbScheme->m_name.toLower();
+	cbScheme->m_controlBarPro = m_loadingControlBarPro;
 
 	m_schemeList.push_back(cbScheme);
 		
@@ -968,6 +937,14 @@ void ControlBarSchemeManager::init( void )
 	ini.load( AsciiString( "Data\\INI\\ControlBarScheme.ini" ), INI_LOAD_OVERWRITE, NULL );
 	// the fork's edits to EA's schemes, each block naming only what it changes
 	ini.load( AsciiString( "Data\\INI\\ControlBarSchemeReforged.ini" ), INI_LOAD_MULTIFILE, NULL );
+	// ControlBar Pro's schemes, the bar every side wears: each replaces EA's of the same name whole,
+	// and under a single -mod the mod's of that name, so nothing above reaches it (a Debug build
+	// asserts once a scheme, newControlBarScheme).  -modfactions loads no mod's schemes at all.
+	// A scheme of a name it does not have (a mod's ChinaSpecialWeaponsGeneral) stays the mod's, so the
+	// ones read here are marked and findSchemeForFaction picks among them only.
+	m_loadingControlBarPro = TRUE;
+	ini.load( AsciiString( "Data\\INI\\ControlBarProReforged.ini" ), INI_LOAD_OVERWRITE, NULL );
+	m_loadingControlBarPro = FALSE;
 
 //	//Load the user modified control bar schemes
 //	WIN32_FIND_DATA findData;
@@ -1025,7 +1002,8 @@ void ControlBarSchemeManager::update( void )
 	static UnsignedInt lastStepMs = 0;
 	static Real stepAccumMs = 0.0f;
 
-	if (!GameClient_isUiAnimStepDue(lastStepMs, stepAccumMs, Clock_Milliseconds(), UI_ANIM_STEPS_PER_SEC))
+	// Duration is parsed from ms into logic frames, so the steps are logic frames too
+	if (!GameClient_isUiAnimStepDue(lastStepMs, stepAccumMs, Clock_Milliseconds(), LOGICFRAMES_PER_SECONDS_REAL))
 		return;
 
 	if(m_currentScheme)
@@ -1076,13 +1054,13 @@ AsciiString ControlBarSchemeManager::getCurrentArtTwinSide( void ) const
 /** The side's widest scheme, as EA picked.  Neither interface draws a scheme's painting; the plates
 	* stand in for it (ControlBarPlateForSide), and the scheme only places the bar's own windows. */
 //-----------------------------------------------------------------------------
-ControlBarScheme *ControlBarSchemeManager::findSchemeForSide( const AsciiString& side ) const
+ControlBarScheme *ControlBarSchemeManager::findSchemeForSide( const AsciiString& side, Bool controlBarProOnly ) const
 {
 	ControlBarScheme *best = NULL;
 	for( ControlBarSchemeList::const_iterator it = m_schemeList.begin(); it != m_schemeList.end(); ++it )
 	{
 		ControlBarScheme *scheme = *it;
-		if( scheme->m_side.compareNoCase( side ) != 0 )
+		if( scheme->m_side.compareNoCase( side ) != 0 || ( controlBarProOnly && !scheme->m_controlBarPro ) )
 			continue;
 		if( best == NULL || scheme->m_ScreenCreationRes.x > best->m_ScreenCreationRes.x )
 			best = scheme;
@@ -1091,38 +1069,123 @@ ControlBarScheme *ControlBarSchemeManager::findSchemeForSide( const AsciiString&
 }
 
 //-----------------------------------------------------------------------------
+/** The owner's call: a mod's faction gets our American power tray and our science layout, whatever
+	* .wnd the mod names.  Its buttons, cameos and portrait are still the mod's.  Under -modfactions that
+	* is a faction with a mod index; under a single -mod every faction is the mod's.  The observer is
+	* none. */
+//-----------------------------------------------------------------------------
+Bool ControlBarIsModFaction( const PlayerTemplate *pt )
+{
+	if( pt == NULL || pt->getSide().isEmpty() || pt->getSide().compareNoCase( "Observer" ) == 0 )
+		return FALSE;
+	return pt->getModIndex() >= 0 || ( !TheGlobalData->m_mods.empty() && !TheGlobalData->m_modFactions );
+}
+
+//-----------------------------------------------------------------------------
+/** The bar follows the country, and is always ControlBar Pro's.  A side with a ControlBar Pro scheme of
+	* its own (Boss and Observer among them) wears it; any other wears its country's by name, the way
+	* ControlBarPlateForSide reads a side, so a mod's ChinaCyberGeneral gets China's and its
+	* AmericaCyberneticGeneral America's, whatever scheme the mod itself ships for that side (ShockWave's
+	* ChinaSpecialWeaponsGeneral is EA's red China bar).  A side of no country we know (Russia, ECA, the
+	* civilians) wears America's.  The squished bar does not come here. */
+//-----------------------------------------------------------------------------
+ControlBarScheme *ControlBarSchemeManager::findSchemeForFaction( const AsciiString& side ) const
+{
+	ControlBarScheme *scheme = findSchemeForSide( side, TRUE );
+	if( scheme != NULL )
+		return scheme;
+
+	if( side.startsWithNoCase( "China" ) )
+		return findSchemeForSide( AsciiString( "China" ), TRUE );
+	if( side.startsWithNoCase( "GLA" ) )
+		return findSchemeForSide( AsciiString( "GLA" ), TRUE );
+	return findSchemeForSide( AsciiString( "America" ), TRUE );
+}
+
+Bool ControlBarSchemeManager::isCurrentSchemePainted( void ) const
+{
+	return m_currentScheme != NULL;
+}
+
+//-----------------------------------------------------------------------------
+/** ControlBar Pro's painting, cut at the seams below and each piece drawn where its panel stands
+	* (ControlBarPanelDesignToScreen).  The seams fall in the gaps of every side's art. */
+//-----------------------------------------------------------------------------
+void ControlBarSchemeManager::drawPainting( ICoord2D offset, Bool foreground )
+{
+	// where the left and centre, and the centre and right panels meet, in 800x600 design units
+	static const Int seams[ ControlBar::CB_PANEL_COUNT + 1 ] = { 0, 182, 616, 800 };
+
+	const Real toDesignX = 800.0f / m_currentScheme->m_ScreenCreationRes.x;
+	const Real toDesignY = 600.0f / m_currentScheme->m_ScreenCreationRes.y;
+	const Int first = foreground ? 0 : CONTROL_BAR_SCHEME_FOREGROUND_IMAGE_LAYERS;
+	const Int last = foreground ? CONTROL_BAR_SCHEME_FOREGROUND_IMAGE_LAYERS : MAX_CONTROL_BAR_SCHEME_IMAGE_LAYERS;
+	const Int width = TheDisplay->getWidth();
+	const Int height = TheDisplay->getHeight();
+
+	for( Int p = 0; p < ControlBar::CB_PANEL_COUNT; p++ )
+	{
+		IRegion2D band, clip;
+		band.lo.x = seams[ p ];
+		band.hi.x = seams[ p + 1 ];
+		band.lo.y = 0;
+		band.hi.y = 600;
+		ControlBarPanelDesignToScreen( p, &band, width, height, &clip );
+		clip.lo.x += offset.x;
+		clip.hi.x += offset.x;
+		clip.lo.y += offset.y;
+		clip.hi.y += offset.y;
+		TheDisplay->setClipRegion( &clip );
+		TheDisplay->enableClipping( TRUE );
+
+		for( Int layer = last - 1; layer >= first; layer-- )
+		{
+			for( ControlBarScheme::ControlBarSchemeImageList::const_iterator it = m_currentScheme->m_layer[ layer ].begin();
+					 it != m_currentScheme->m_layer[ layer ].end(); ++it )
+			{
+				const ControlBarSchemeImage *schemeImage = *it;
+				if( schemeImage->m_image == NULL )
+					continue;
+				IRegion2D design, rect;
+				design.lo.x = REAL_TO_INT_FLOOR( schemeImage->m_position.x * toDesignX );
+				design.lo.y = REAL_TO_INT_FLOOR( schemeImage->m_position.y * toDesignY );
+				design.hi.x = REAL_TO_INT_CEIL( ( schemeImage->m_position.x + schemeImage->m_size.x ) * toDesignX );
+				design.hi.y = REAL_TO_INT_CEIL( ( schemeImage->m_position.y + schemeImage->m_size.y ) * toDesignY );
+				ControlBarPanelDesignToScreen( p, &design, width, height, &rect );
+				TheDisplay->drawImage( schemeImage->m_image, rect.lo.x + offset.x, rect.lo.y + offset.y,
+															 rect.hi.x + offset.x, rect.hi.y + offset.y );
+			}
+		}
+		TheDisplay->enableClipping( FALSE );
+	}
+}
+
+//-----------------------------------------------------------------------------
 void ControlBarSchemeManager::setControlBarSchemeByPlayerTemplate( const PlayerTemplate *pt, Bool useSmall)
 {
 	if(!pt)
 		return;
 	AsciiString side = pt->getSide();
-	if(useSmall)
-		side.concat("Small");
 
 	// if we don't have a side, set it to Observer shell
 	if(side.isEmpty())
 		side.set("Observer");
 	// picked again every time, even for the side on screen: a new resolution can want a different
 	// scheme for it (findSchemeForSide), and the multiplier below is the screen's
-	ControlBarScheme *tempScheme = findSchemeForSide( side );
-	DEBUG_LOG(("setControlBarSchemeByPlayer used %s as its side\n", side.str()));
-
+	// the squished bar keeps EA's pick: the side's Small scheme, and none ships, so "Default"
+	AsciiString smallSide = side;
+	smallSide.concat("Small");
+	ControlBarScheme *tempScheme = useSmall ? findSchemeForSide( smallSide ) : findSchemeForFaction( side );
 	if(tempScheme)
 	{
-		// setup the multiplyer value
- 		m_multiplyer.x = TheDisplay->getWidth() / (Real)tempScheme->m_ScreenCreationRes.x;
+		DEBUG_LOG(("setControlBarSchemeByPlayer gave side %s the scheme of %s\n", side.str(), tempScheme->m_side.str()));
+		m_multiplyer.x = TheDisplay->getWidth() / (Real)tempScheme->m_ScreenCreationRes.x;
 		m_multiplyer.y = TheDisplay->getHeight() / (Real)tempScheme->m_ScreenCreationRes.y;
 		m_currentScheme = tempScheme;
 	}
 	else
-	{
-		// well, we couldn't find
 		m_currentScheme = findControlBarScheme("Default");
-		DEBUG_LOG(("There's no ControlBarScheme with a side of %s", side.str()));
-//		m_currentScheme = NULL;
-	}
-	if(m_currentScheme)
-		m_currentScheme->init();
+	m_currentScheme->init();
 }
 //-----------------------------------------------------------------------------
 void ControlBarSchemeManager::setControlBarSchemeByPlayer(Player *p)
@@ -1145,26 +1208,13 @@ void ControlBarSchemeManager::setControlBarSchemeByPlayer(Player *p)
 		side.set("Observer");
 	// picked again every time, even for the side on screen: a new resolution can want a different
 	// scheme for it (findSchemeForSide), and the multiplier below is the screen's
-	ControlBarScheme *tempScheme = findSchemeForSide( side );
-	DEBUG_LOG(("setControlBarSchemeByPlayer used %s as its side\n", side.str()));
-
-	if(tempScheme)
-	{
-		// setup the multiplyer value
- 		m_multiplyer.x = TheDisplay->getWidth() / (Real)tempScheme->m_ScreenCreationRes.x;
-		m_multiplyer.y = TheDisplay->getHeight() / (Real)tempScheme->m_ScreenCreationRes.y;
-		m_currentScheme = tempScheme;
-	}
-	else
-	{
-		// well, we couldn't find
-		m_currentScheme = findControlBarScheme("Default");
-		DEBUG_LOG(("There's no ControlBarScheme with a side of %s", side.str()));
-//		m_currentScheme = NULL;
-	}
-	if(m_currentScheme)
-		m_currentScheme->init();
-}	
+	// the neutral and civilian players are of no country, and wear America's
+	m_currentScheme = findSchemeForFaction( side );
+	DEBUG_LOG(("setControlBarSchemeByPlayer gave side %s the scheme of %s\n", side.str(), m_currentScheme->m_side.str()));
+	m_multiplyer.x = TheDisplay->getWidth() / (Real)m_currentScheme->m_ScreenCreationRes.x;
+	m_multiplyer.y = TheDisplay->getHeight() / (Real)m_currentScheme->m_ScreenCreationRes.y;
+	m_currentScheme->init();
+}
 
 
 //-----------------------------------------------------------------------------

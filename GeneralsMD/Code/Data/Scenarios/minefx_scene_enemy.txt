@@ -1,0 +1,37 @@
+# minefx_scene.txt with the seats swapped: China and its mine field are seat 1, the American column
+# is seat 0 and the local player, with no detector. The field's mines and lights must not draw for
+# it until a mine goes off. Same frames as minefx_scene, so a still here pairs with the owner's
+# footage frame for frame.
+#
+#   generals.exe -win -borderless -xres 1280 -yres 720 -quickstart -noshellmap -multiInstance
+#     -fps 120 -noFPSLimit -particlecap 2500 -map "Maps\Alpine Assault\Alpine Assault.map"
+#     -autoskirmish 2 -takeover -side 0 FactionAmerica -side 1 FactionChina -seed 1
+#     -scenario minefx_scene_enemy -cinema minefx_scene_enemy -maxframes 560
+
+30    spawn      1  ChinaPowerPlant         1  620 780
+30    spawn      1  ChinaBarracks           1  900 770
+30    spawn      1  ChinaBunker             1  880 1000
+30    spawn      1  ChinaGattlingCannon     1  1000 1060
+
+30    spawn      1  ChinaStandardMine       1  700 900
+30    spawn      1  ChinaEMPMine            1  820 900
+30    spawn      1  ChinaStandardMine       1  760 860
+30    spawn      1  ChinaEMPMine            1  760 940
+
+30    spawn      1  ChinaTankBattleMaster   3  1040 900 28
+30    spawn      1  ChinaInfantryRedguard   6  960 860 14
+30    spawn      1  ChinaVehicleSupplyTruck 1  980 960
+40    move       1  ChinaTankBattleMaster      660 880
+40    move       1  ChinaInfantryRedguard      600 880
+40    move       1  ChinaVehicleSupplyTruck    620 940
+330   attackmove 1  ChinaTankBattleMaster      900 950
+330   move       1  ChinaVehicleSupplyTruck    980 940
+
+260   spawn      0  AmericaTankCrusader     4  1200 1160 30
+260   spawn      0  AmericaVehicleHumvee    2  1240 1240 30
+270   move       0  AmericaTankCrusader        700 880
+270   move       0  AmericaVehicleHumvee       700 880
+30    tally      1  ChinaStandardMine
+30    tally      1  ChinaEMPMine
+550   tally      1  ChinaStandardMine
+550   tally      1  ChinaEMPMine

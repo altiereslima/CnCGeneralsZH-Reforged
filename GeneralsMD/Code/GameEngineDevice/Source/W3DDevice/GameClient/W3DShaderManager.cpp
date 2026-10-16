@@ -271,6 +271,7 @@ static Int fixedFunctionBloomIntensity(void)
 		//Pushed every frame, so a change on the options screen shows at once.
 		const GlowTuning tuning = glowTuning();
 		DX11Post_Set_Bloom(tuning.threshold, tuning.intensity, tuning.additiveGain, tuning.blurPasses);
+		DX11Post_Set_Grade(TheGlobalData->m_lightingStyle == LIGHTING_STYLE_REFORGED ? 1.0f : 0.0f);
 #endif
 		return 0;
 	}
@@ -1315,7 +1316,9 @@ Bool ScreenMotionBlurFilter::postRender(enum FilterModes mode, Coord2D &scrollDe
 
 
 	m_skipRender = false;
-	if (!pan && m_lastFrame != TheGameLogic->getFrame()) {
+	// COUNT_STEP is a step per 30 Hz frame, so the count moves on the retail clock
+	const Int retailFrame = TheGameLogic->getFrame() / LOGICFRAMES_PER_RETAIL_FRAME;
+	if (!pan && m_lastFrame != retailFrame) {
 		if (m_decrement) {
 			m_maxCount-=COUNT_STEP;
 			if (m_maxCount<1) {
@@ -1382,7 +1385,7 @@ Bool ScreenMotionBlurFilter::postRender(enum FilterModes mode, Coord2D &scrollDe
 
 		}
 	}
-	m_lastFrame = TheGameLogic->getFrame();
+	m_lastFrame = retailFrame;
 	if (pan){
 		m_skipRender = false;
 	}

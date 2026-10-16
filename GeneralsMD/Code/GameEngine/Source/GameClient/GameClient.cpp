@@ -119,15 +119,8 @@ Real TheClientDrawMS = 0.0f;
 //
 Real TheSceneDrawMS = 0.0f;			///< W3DDisplay::drawViews() - the world
 Real TheUIDrawMS = 0.0f;				///< TheInGameUI->DRAW() - everything over the world
-Real TheUIPostDrawMS = 0.0f;		///< InGameUI::postDraw() - the strips and the world overlays
+Real TheUIPostDrawMS = 0.0f;		///< InGameUI::postDraw() - the text lists and the world overlays
 Real TheWindowRepaintMS = 0.0f;	///< TheWindowManager->winRepaint() - the control bar and dialogs
-//
-// postDraw is mostly the production strip, and the strip is two halves that fail for different
-// reasons: the sweep that reads every player's queues, and the 2D draw that puts the rows on the
-// screen.  A sweep that costs is a data problem; a draw that costs is a batching problem.
-//
-Real TheStripGatherMS = 0.0f;		///< InGameUI::drawProductionStrip() - reading the queues
-Real TheStripDrawMS = 0.0f;			///< InGameUI::drawProductionStrip() - drawing the rows
 //
 // Particles cost in three places that have nothing in common: the update that ages and emits them
 // once a logic frame, the fill that turns each system into quads, and the translucent flush that

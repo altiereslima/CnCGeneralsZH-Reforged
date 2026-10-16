@@ -184,6 +184,7 @@ protected:
 	void clearChunkStack( void );										// clear the stack
 
 	void decrementDataLeft( int size );							// update data left in chunk(s)
+	void readFromChunk( void *ptr, Int len );				// read len bytes of the current chunk, or throw ERROR_CORRUPT_FILE_FORMAT
 
 public:
 	void *m_currentObject;														// user parse routines can use this to allow one chunk
@@ -229,6 +230,9 @@ public:
 	UnicodeString readUnicodeString(void);
 	Dict readDict(void);
 	void readArrayOfBytes(char *ptr, Int len);
+	/// an Int count of items each at least bytesEach long, refused (ERROR_CORRUPT_FILE_FORMAT) when
+	/// negative or when that many could not fit in what is left of the chunk
+	Int readCount(Int bytesEach);
 
 	NameKeyType readNameKey(void);
 };

@@ -1,0 +1,24 @@
+# A skirmish AI's Particle Cannon on Twilight Flame, fired at the middle of a spread of GLA tanks.
+# Five clumps of six sit 150 apart across the line from the uplink to the aim point, so EA's S curve,
+# 200 along that line and 50 either side, only reaches the middle clump. A steered beam walks on to
+# the others. The cannon is fired with the power verb at frame 60; the beam lands about 75 frames
+# later and burns for 300. Compare the tally's worth at frame 50 and frame 600 between an Easy AI
+# (the retail S curve) and a Hard one (the beam is driven):
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -aidiff hard
+#     -side 0 FactionGLA -side 1 FactionAmerica -seed 7 -maxframes 620 -scenario beamsteer
+#     -logPrefix beamsteer_hard_
+
+10    spawn      1  AmericaParticleCannonUplink     1   start1:0:200
+10    spawn      1  AmericaPowerPlant               3   start1:-260:40    90
+
+20    spawn      0  GLATankScorpion                 6   1135 3696   30
+20    spawn      0  GLATankScorpion                 6   1250 3600   30
+20    spawn      0  GLATankScorpion                 6   1020 3793   30
+20    spawn      0  GLATankScorpion                 6   1365 3503   30
+20    spawn      0  GLATankScorpion                 6   905 3890    30
+
+50    tally      0  GLATankScorpion
+60    power      1  AmericaParticleCannonUplink     1135 3696
+600   tally      0  GLATankScorpion

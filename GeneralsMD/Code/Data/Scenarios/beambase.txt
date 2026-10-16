@@ -1,0 +1,44 @@
+# A skirmish AI's Particle Cannon fired into a GLA base on Twilight Flame: a Palace, an Arms Dealer, a
+# Barracks, two Supply Stashes and a Tunnel Network around the command centre, with a column of
+# Scorpions and Technicals driving through it, and the GLA AI building on. Where beamsteer.txt has
+# parked tanks only, here the beam meets buildings of 1000 to 3000 health and targets that move. The
+# cannon is fired at the command centre at frame 60, the beam lands about 75 frames later and burns
+# for 300. Compare the tallies at frame 50 and frame 600, and read the AI BEAM lines for where the
+# beam was driven. On 2026-10-11 (source after 35a2a156) Easy killed nothing, Medium the Palace, Hard
+# the Arms Dealer and seven Scorpions:
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -aidiff hard
+#     -side 0 FactionGLA -side 1 FactionAmerica -seed 7 -maxframes 620 -scenario beambase
+#     -logPrefix beambase_hard_
+
+10    spawn      1  AmericaParticleCannonUplink     1   start1:0:200
+10    spawn      1  AmericaPowerPlant               3   start1:-260:40    90
+
+20    spawn      0  GLAPalace                       1   start0:260:0
+20    spawn      0  GLAArmsDealer                   1   start0:0:260
+20    spawn      0  GLABarracks                     1   start0:0:-240
+20    spawn      0  GLASupplyStash                  2   start0:240:240    180
+20    spawn      0  GLATunnelNetwork                1   start0:-220:-220
+20    spawn      0  GLATankScorpion                 8   start0:-400:120   30
+20    spawn      0  GLAVehicleTechnical             6   start0:-400:-120  30
+
+50    tally      0  GLAPalace
+50    tally      0  GLAArmsDealer
+50    tally      0  GLABarracks
+50    tally      0  GLASupplyStash
+50    tally      0  GLATunnelNetwork
+50    tally      0  GLATankScorpion
+50    tally      0  GLAVehicleTechnical*
+50    tally      0  *
+60    move       0  GLATankScorpion                     start0:400:120
+60    move       0  GLAVehicleTechnical*                start0:400:-120
+60    power      1  AmericaParticleCannonUplink     start0
+600   tally      0  GLAPalace
+600   tally      0  GLAArmsDealer
+600   tally      0  GLABarracks
+600   tally      0  GLASupplyStash
+600   tally      0  GLATunnelNetwork
+600   tally      0  GLATankScorpion
+600   tally      0  GLAVehicleTechnical*
+600   tally      0  *

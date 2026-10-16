@@ -263,7 +263,7 @@ protected:
 	virtual void loadPostProcess();
 
 protected:
-	enum {MAX_CPOP=20};			///< Max times we will return the cached cpop.
+	enum {MAX_CPOP=20 * LOGICFRAMES_PER_RETAIL_FRAME};			///< Max times we will return the cached cpop (about once a frame, so two thirds of a second).
 	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE( Path, "PathPool" );							///< @todo Set real numbers for mem alloc
 
 	PathNode*		m_path;															///< The list of PathNode objects that define the path
@@ -711,23 +711,23 @@ enum
 	PF_WALLHUG_DEN						= 5,
 
 	PF_TRAFFIC_MAX						= 255,
-	PF_TRAFFIC_DEPOSIT				= 24,			///< one blocked unit-frame, at the centre cell
+	PF_TRAFFIC_DEPOSIT				= 24 / LOGICFRAMES_PER_RETAIL_FRAME,	///< one blocked unit-frame, at the centre cell; 24 a retail frame, so the same per second
 	PF_TRAFFIC_DECAY_NUM			= 54,			///< x54/64 every decay tick ~ the sandbox's x0.85 per 0.1s
 	PF_TRAFFIC_DECAY_DEN			= 64,
-	PF_TRAFFIC_DECAY_FRAMES		= 3,
+	PF_TRAFFIC_DECAY_FRAMES		= 3 * LOGICFRAMES_PER_RETAIL_FRAME,	///< a tenth of a second
 	PF_TRAFFIC_FULL						= 192,		///< traffic at or above this is as expensive as it gets
 	PF_TRAFFIC_NUM						= 4,			///< peak traffic penalty is NUM/DEN of a step - the sandbox's traffic weight
 	PF_TRAFFIC_DEN						= 1,
 	PF_TRAFFIC_CELLS					= 4096,		///< live traffic cells tracked; past this, deposits are dropped
 
-	PF_CLAIM_BUCKET_FRAMES		= 15,			///< half a second
+	PF_CLAIM_BUCKET_FRAMES		= LOGICFRAMES_PER_SECOND / 2,			///< half a second
 	PF_CLAIM_BUCKETS					= 24,			///< twelve seconds of horizon
-	PF_CLAIM_REFRESH_FRAMES		= 30,			///< a unit re-stamps its plan once a second
+	PF_CLAIM_REFRESH_FRAMES		= LOGICFRAMES_PER_SECOND,			///< a unit re-stamps its plan once a second
 	PF_CLAIM_TABLE_SIZE				= 32768,	///< power of two: the hash is masked, not divided
 	PF_CLAIM_PROBES						= 8,			///< linear probe depth; past it a claim is simply dropped
 	PF_CLAIM_UNITS_MAX				= 4,			///< claims beyond this on one cell-moment cost nothing more
 	PF_CLAIM_SAMPLES_MAX			= 32,			///< cells of its own plan one unit may stamp per refresh; 64 was 5% of a 530-unit battle
-	PF_CLEARANCE_REBUILD_FRAMES	= 30,		///< how often a dirty clearance field is actually rebuilt
+	PF_CLEARANCE_REBUILD_FRAMES	= LOGICFRAMES_PER_SECOND,		///< how often a dirty clearance field is actually rebuilt
 	PF_CROSSING_NUM						= 1,			///< peak crossing penalty is NUM/DEN of a step
 	PF_CROSSING_DEN						= 2,
 
@@ -771,7 +771,7 @@ enum
 		 it when it arrives, and a group ordered onto one point spreads out instead of gathering on
 		 it - which is what the ramp looked like in game. */
 	PF_LANE_CLOSE_CELLS				= 3,
-	PF_LANE_HOLD_FRAMES				= 45		///< a second and a half at 30 logic frames
+	PF_LANE_HOLD_FRAMES				= 3 * LOGICFRAMES_PER_SECOND / 2		///< a second and a half
 };
 
 /** How much extra a step into a cell with this clearance costs a body needing `needClearance`.
@@ -1278,6 +1278,9 @@ private:
 	ObjectID			m_queuedPathfindRequests[PATHFIND_QUEUE_LEN];
 	Int						m_queuePRHead;
 	Int						m_queuePRTail;
+	/* Which ids sit between head and tail, by ObjectID, so queueForPath answers "already queued"
+		 without walking up to 2048 slots on every request. Derived from the ring, never saved. */
+	std::vector<bool>	m_isQueuedForPath;
 	Int						m_cumulativeCellsAllocated;
 
 	/* diagnostics only - never read by the simulation, so it stays out of xfer().  Records

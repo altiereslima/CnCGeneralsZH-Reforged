@@ -1,0 +1,26 @@
+# Fragments and shrapnel with smoke trails (ReforgedBlastShards, ReforgedVehicleShrapnel in
+# ParticleSystemReforged.ini): wreckcheck.txt's tank fight east of Twilight Flame's middle, six
+# Crusaders and two Paladins against three Overlords and four Battlemasters, with two Tomahawks
+# behind the Crusaders so rocket hits land among the shell hits and the vehicle deaths. Two seats,
+# everyone hostile. Filmed with Cinema/debristrails.txt for a before/after of the INIs.
+#
+#   generals.exe -win -borderless -xres 1920 -yres 1080 -msaa 0 -particlecap 2500 -fps 120
+#     -noFPSLimit -quickstart -noshellmap -observer -multiInstance
+#     -map "Maps\Twilight Flame\Twilight Flame.map" -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionChina -seed 7 -scenario debristrails
+#     -cinema debristrails -video 120 840 debristrails -maxframes 860
+
+20    spawn       0  AmericaTankCrusader     6   1380 3800    0
+20    spawn       0  AmericaTankPaladin      2   1360 3740    0
+20    spawn       0  AmericaVehicleTomahawk  2   1260 3820    0
+20    spawn       1  ChinaTankOverlord       3   1600 3800  180
+20    spawn       1  ChinaTankBattleMaster   4   1590 3740  180
+40    attackmove  0  AmericaTankCrusader         1600 3800
+40    attackmove  0  AmericaTankPaladin          1600 3800
+40    attackmove  0  AmericaVehicleTomahawk      1600 3800
+40    attackmove  1  ChinaTankOverlord           1380 3800
+40    attackmove  1  ChinaTankBattleMaster       1380 3800
+
+120   tally       0  *
+240   tally       0  *
+360   tally       1  *

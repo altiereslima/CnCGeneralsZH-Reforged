@@ -145,7 +145,75 @@ public:
 };
 
 //-------------------------------------------------------------------------------------------------
+/** The unit a factory builds on repeat (fork).  The player turns one on and off with Ctrl+Alt and
+	* the button's key, or a Ctrl+Alt click on it.  Whenever the factory's queue is empty it queues
+	* that unit.  Only one unit at a time: turning a second on takes the first off.
+	* Logic state, set only by MSG_SET_REPEAT_UNIT; kept apart from the module so the test binary can
+	* drive it with no object behind it. */
+//-------------------------------------------------------------------------------------------------
+struct ProductionRepeat
+{
+	std::vector<const ThingTemplate *> m_units;	///< the unit on repeat, or empty
+	UnsignedInt m_next;													///< index into m_units of the one whose turn it is
+
+	ProductionRepeat() : m_next( 0 ) {}
+
+	Bool has( const ThingTemplate *unit ) const
+	{
+		for( size_t i = 0; i < m_units.size(); ++i )
+			if( m_units[ i ] == unit )
+				return TRUE;
+		return FALSE;
+	}
+
+	/// on replaces whatever was on repeat with this unit; off takes it out
+	void set( const ThingTemplate *unit, Bool on )
+	{
+		if( on )
+		{
+			if( m_units.size() == 1 && m_units[ 0 ] == unit )
+				return;
+			m_units.clear();
+			m_units.push_back( unit );
+			m_next = 0;
+			return;
+		}
+		for( size_t i = 0; i < m_units.size(); ++i )
+		{
+			if( m_units[ i ] != unit )
+				continue;
+			m_units.erase( m_units.begin() + i );
+			if( i < m_next )
+				--m_next;
+			if( m_next >= m_units.size() )
+				m_next = 0;
+			return;
+		}
+	}
+
+	const ThingTemplate *turn() const { return m_units.empty() ? NULL : m_units[ m_next ]; }
+	void advance() { if( !m_units.empty() ) m_next = ( m_next + 1 ) % m_units.size(); }
+	void clear() { m_units.clear(); m_next = 0; }
+};
+
+//-------------------------------------------------------------------------------------------------
 enum CanMakeType : Int;
+
+enum ProductionRepeatAction : Int
+{
+	REPEAT_QUEUE,		///< queue it now
+	REPEAT_WAIT,		///< not now (money, queue, cap, power): try again next frame
+	REPEAT_DROP			///< the factory can no longer make it: off the repeat
+};
+
+ProductionRepeatAction Production_repeatAction( CanMakeType canMake );
+
+/** A building still going up or being sold researches nothing. Its own command bar never offers an
+	* upgrade then, but a multi-selection that mixes it with finished ones did, and the logic took it. */
+inline Bool canResearchWithStatus( const ObjectStatusMaskType &status )
+{
+	return !status.testForAny( MAKE_OBJECT_STATUS_MASK2( OBJECT_STATUS_UNDER_CONSTRUCTION, OBJECT_STATUS_SOLD ) );
+}
 
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
@@ -170,6 +238,9 @@ public:
 	virtual void cancelAllUnitsOfType( const ThingTemplate *unitType) = 0;
 
 	virtual void cancelAndRefundAllProduction( void ) = 0;
+
+	virtual void setRepeatUnit( const ThingTemplate *unitType, Bool on ) = 0;	///< see ProductionRepeat
+	virtual Bool isRepeatUnit( const ThingTemplate *unitType ) const = 0;
 
 	virtual UnsignedInt getProductionCount( void ) const = 0;
 	virtual UnsignedInt getMaxQueueEntries( void ) const = 0;
@@ -229,6 +300,9 @@ public:
 
 	virtual void cancelAndRefundAllProduction( void );									///< cancel and refund anything in the production queue
 
+	virtual void setRepeatUnit( const ThingTemplate *unitType, Bool on ) { m_repeat.set( unitType, on ); }
+	virtual Bool isRepeatUnit( const ThingTemplate *unitType ) const { return m_repeat.has( unitType ); }
+
 	virtual UnsignedInt getProductionCount( void ) const { return m_productionCount; }    ///< return # of things in the production queue
 	virtual UnsignedInt getMaxQueueEntries( void ) const { return getProductionUpdateModuleData()->m_maxQueueEntries; }  ///< how deep the queue may go (INI MaxQueueEntries)
 
@@ -248,7 +322,11 @@ public:
 	// DieModuleInterface
 	virtual void onDie( const DamageInfo *damageInfo );
 
+	virtual void onCapture( Player *oldOwner, Player *newOwner );
+
 protected:
+
+	void queueRepeatUnit( void );										///< an empty queue takes the repeated unit whose turn it is
 
 
 	void addToProductionQueue( ProductionEntry *production );				///< add to *END* of production queue list
@@ -275,6 +353,7 @@ protected:
 	ModelConditionFlags m_clearFlags;										///< flags to clear from model
 	ModelConditionFlags m_setFlags;											///< flags to set in model
 	Bool								m_flagsDirty;										///< clearFlags/setFlags needs to be set into the model
+	ProductionRepeat		m_repeat;												///< the units built on repeat
 
 };
 

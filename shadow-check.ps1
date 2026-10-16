@@ -16,23 +16,23 @@ $out = Join-Path $env:TEMP "shadowcheck"
 if (-not (Test-Path $out)) { $null = New-Item -ItemType Directory $out }
 
 # The same views tree-check uses, for the same reason: they are the ones with something in them.
+# f is a logic frame at 60 a second.
 $cases = @(
-  @{map='Flash Effect';       x='1200'; y='945';  f=400},
-  @{map='Flash Effect';       x='1816'; y='1861'; f=1200},
-  @{map='Flash Effect';       x='1378'; y='1384'; f=2400},
-  @{map='ForgottenForestZH';  x='1620'; y='1470'; f=600},
-  @{map='ForgottenForestZH';  x='1543'; y='1636'; f=1800},
-  @{map='Golden Oasis';       x='2643'; y='3580'; f=900},
-  @{map='Alpine Assault';     x='760';  y='920';  f=700},
-  @{map='Killing Fields';     x='1024'; y='1024'; f=1500}
+  @{map='Flash Effect';       x='1200'; y='945';  f=800},
+  @{map='Flash Effect';       x='1816'; y='1861'; f=2400},
+  @{map='Flash Effect';       x='1378'; y='1384'; f=4800},
+  @{map='ForgottenForestZH';  x='1620'; y='1470'; f=1200},
+  @{map='ForgottenForestZH';  x='1543'; y='1636'; f=3600},
+  @{map='Golden Oasis';       x='2643'; y='3580'; f=1800},
+  @{map='Alpine Assault';     x='760';  y='920';  f=1400},
+  @{map='Killing Fields';     x='1024'; y='1024'; f=3000}
 )
 
 function Shoot($case, $tag, $extra) {
   Get-ChildItem "$shots\sshot*.bmp" -ErrorAction SilentlyContinue | Remove-Item -Force
-  # -showHudOverlay: off by default in Release, and every evidence picture shows the corner readout
-  $arguments = @('-win','-xres','1280','-yres','720','-quickstart','-noshellmap','-multiInstance','-showHudOverlay',
+  $arguments = @('-win','-xres','1280','-yres','720','-quickstart','-noshellmap','-multiInstance',
     '-msaa','0','-dx11post','off','-map',"`"Maps\$($case.map)\$($case.map).map`"",
-    '-autoskirmish','4','-aidiff','easy','-seed','5','-maxframes',($case.f+80),
+    '-autoskirmish','4','-aidiff','easy','-seed','5','-maxframes',($case.f+160),
     '-screenshot',$case.f,'-camera',$case.x,$case.y,'-logPrefix',"shd_$tag`_",'-turbo')
   if ($extra) { $arguments += $extra }
   $process = Start-Process (Join-Path $run "generals.exe") -ArgumentList $arguments `

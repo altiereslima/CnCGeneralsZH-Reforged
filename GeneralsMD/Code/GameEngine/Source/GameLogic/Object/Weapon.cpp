@@ -213,7 +213,7 @@ const FieldParse WeaponTemplate::TheWeaponTemplateFieldParseTable[] =
 	{ "PrimaryDamageRadius",			INI::parseReal,													NULL,							offsetof(WeaponTemplate, m_primaryDamageRadius) },		
 	{ "SecondaryDamage",					INI::parseReal,													NULL,							offsetof(WeaponTemplate, m_secondaryDamage) },		
 	{ "SecondaryDamageRadius",		INI::parseReal,													NULL,							offsetof(WeaponTemplate, m_secondaryDamageRadius) },		
-	{ "ShockWaveAmount",					INI::parseReal,													NULL,							offsetof(WeaponTemplate, m_shockWaveAmount) },		
+	{ "ShockWaveAmount",					INI::parseRetailPerFrameReal,									NULL,							offsetof(WeaponTemplate, m_shockWaveAmount) },		
 	{ "ShockWaveRadius",					INI::parseReal,													NULL,							offsetof(WeaponTemplate, m_shockWaveRadius) },		
 	{ "ShockWaveTaperOff",				INI::parseReal,													NULL,							offsetof(WeaponTemplate, m_shockWaveTaperOff) },		
 	{ "AttackRange",							INI::parseReal,													NULL,							offsetof(WeaponTemplate, m_attackRange) },		
@@ -251,7 +251,7 @@ const FieldParse WeaponTemplate::TheWeaponTemplateFieldParseTable[] =
 	{ "ContinuousFireTwo",				INI::parseInt,													NULL,							offsetof(WeaponTemplate, m_continuousFireTwoShotsNeeded) },		
 	{ "ContinuousFireCoast",			INI::parseDurationUnsignedInt,					NULL,							offsetof(WeaponTemplate, m_continuousFireCoastFrames) },		
  	{ "AutoReloadWhenIdle",				INI::parseDurationUnsignedInt,					NULL,							offsetof(WeaponTemplate, m_autoReloadWhenIdleFrames) },		
-	{ "ClipReloadTime",						INI::parseDurationUnsignedInt,					NULL,							offsetof(WeaponTemplate, m_clipReloadTime) },		
+	{ "ClipReloadTime",						WeaponTemplate::parseRetailDuration,		NULL,							offsetof(WeaponTemplate, m_clipReloadTime) },
 	{ "DelayBetweenShots",				WeaponTemplate::parseShotDelay,					NULL,							0 },
 	{ "ShotsPerBarrel",						INI::parseInt,													NULL,							offsetof(WeaponTemplate, m_shotsPerBarrel) },
 	{ "DamageDealtAtSelfPosition",INI::parseBool,													NULL,							offsetof(WeaponTemplate, m_damageDealtAtSelfPosition) },		
@@ -445,11 +445,27 @@ void WeaponTemplate::reset( void )
 		self->m_maxDelayBetweenShots = self->m_minDelayBetweenShots;
 	}
 
-	// No matter what we have now, we want to convert it to frames from msec. 
+	// No matter what we have now, we want to convert it to frames from msec.
 	// ShotDelay used to use parseDurationUnsignedInt, and we are expanding on that.
-	self->m_minDelayBetweenShots = ceilf(ConvertDurationFromMsecsToFrames((Real)self->m_minDelayBetweenShots));
-	self->m_maxDelayBetweenShots = ceilf(ConvertDurationFromMsecsToFrames((Real)self->m_maxDelayBetweenShots));
+	self->m_minDelayBetweenShots = retailFramesFromMsec(self->m_minDelayBetweenShots);
+	self->m_maxDelayBetweenShots = retailFramesFromMsec(self->m_maxDelayBetweenShots);
 
+}
+
+//-------------------------------------------------------------------------------------------------
+/* A shot delay or a reload in msec, rounded up to whole retail (30 Hz) frames as EA's were and then
+	 doubled, so it is always an even count of logic frames.  Rounded at 60 Hz instead, 25 msec was 2
+	 logic frames where retail had 1 of its own, and a rate-of-fire bonus floored a different count. */
+/*static*/ Int WeaponTemplate::retailFramesFromMsec( Int msec )
+{
+	const Real RETAIL_FRAMES_PER_MSEC = (Real)RETAIL_LOGICFRAMES_PER_SECOND / (Real)MSEC_PER_SECOND;
+	return ConvertRetailFrames( (Int)ceilf( (Real)msec * RETAIL_FRAMES_PER_MSEC ) );
+}
+
+//-------------------------------------------------------------------------------------------------
+/*static*/ void WeaponTemplate::parseRetailDuration( INI* ini, void * /*instance*/, void *store, const void* /*userData*/ )
+{
+	*(Int *)store = retailFramesFromMsec( INI::scanInt( ini->getNextToken() ) );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -537,26 +553,30 @@ Real WeaponTemplate::getUnmodifiedAttackRange() const
 Int WeaponTemplate::getDelayBetweenShots(const WeaponBonus& bonus) const 
 {
 	// yes, divide, not multiply; the larger the rate-of-fire bonus, the shorter
-	// we want the delay time to be.
+	// we want the delay time to be.  Drawn and floored in retail frames, as EA's were, then doubled
+	// (retailFramesFromMsec).
+	const Int minDelay = m_minDelayBetweenShots / LOGICFRAMES_PER_RETAIL_FRAME;
+	const Int maxDelay = m_maxDelayBetweenShots / LOGICFRAMES_PER_RETAIL_FRAME;
 	Int delayToUse;
-	if( m_minDelayBetweenShots == m_maxDelayBetweenShots )
-		delayToUse = m_minDelayBetweenShots; // Random number thing doesn't like this case
+	if( minDelay == maxDelay )
+		delayToUse = minDelay; // Random number thing doesn't like this case
 	else
-		delayToUse = GameLogicRandomValue( m_minDelayBetweenShots, m_maxDelayBetweenShots );
+		delayToUse = GameLogicRandomValue( minDelay, maxDelay );
 
 	Real bonusROF = bonus.getField(WeaponBonus::RATE_OF_FIRE);
 	//CRCDEBUG_LOG(("WeaponTemplate::getDelayBetweenShots() - min:%d max:%d val:%d, bonusROF=%g/%8.8X\n",
 		//m_minDelayBetweenShots, m_maxDelayBetweenShots, delayToUse, bonusROF, AS_INT(bonusROF)));
 
-	return REAL_TO_INT_FLOOR(delayToUse / bonusROF); 
+	return ConvertRetailFrames( REAL_TO_INT_FLOOR(delayToUse / bonusROF) );
 }
 
 //-------------------------------------------------------------------------------------------------
-Int WeaponTemplate::getClipReloadTime(const WeaponBonus& bonus) const 
+Int WeaponTemplate::getClipReloadTime(const WeaponBonus& bonus) const
 {
 	// yes, divide, not multiply; the larger the rate-of-fire bonus, the shorter
-	// we want the reload time to be.
-	return REAL_TO_INT_FLOOR(m_clipReloadTime / bonus.getField(WeaponBonus::RATE_OF_FIRE));	
+	// we want the reload time to be.  In retail frames, like getDelayBetweenShots.
+	const Int reload = m_clipReloadTime / LOGICFRAMES_PER_RETAIL_FRAME;
+	return ConvertRetailFrames( REAL_TO_INT_FLOOR(reload / bonus.getField(WeaponBonus::RATE_OF_FIRE)) );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1579,9 +1599,9 @@ void WeaponTemplate::dealDamageInternal(ObjectID sourceID, ObjectID victimID, co
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
-WeaponStore::WeaponStore()
+WeaponStore::WeaponStore() : m_countBeforeMapOverrides(-1)
 {
-} 
+}
 
 //-------------------------------------------------------------------------------------------------
 WeaponStore::~WeaponStore()
@@ -1648,6 +1668,9 @@ WeaponTemplate *WeaponStore::findWeaponTemplatePrivate( NameKeyType key ) const
 	if( it != m_weaponTemplateHashMap.end() )
 		return it->second;
 
+	NameKeyType retailKey;
+	if( TheModNamespace.findRetailKey( key, MODNAME_WEAPON, &retailKey ) )
+		return findWeaponTemplatePrivate( retailKey );
 	return NULL;
 
 }
@@ -1760,6 +1783,21 @@ void WeaponStore::reset()
 			pristine->m_extraBonus = NULL;	// wt owns it again
 			pristine->deleteInstance();
 		}
+	}
+
+	/* A weapon the map made from nothing goes too.  Left in the store, the next map that defined the
+		 same name edited this one, from the old map's values instead of a new weapon's defaults, and
+		 a machine that had not played the old map built a different weapon.  The templates that held
+		 it were the map's own and went with ThingFactory::reset. */
+	if (m_countBeforeMapOverrides >= 0)
+	{
+		for (size_t i = m_countBeforeMapOverrides; i < m_weaponTemplateVector.size(); ++i)
+		{
+			m_weaponTemplateHashMap.erase(m_weaponTemplateVector[i]->m_nameKey);
+			m_weaponTemplateVector[i]->deleteInstance();
+		}
+		m_weaponTemplateVector.resize(m_countBeforeMapOverrides);
+		m_countBeforeMapOverrides = -1;
 	}
 
 	deleteAllDelayedDamage();
@@ -1930,7 +1968,14 @@ void WeaponStore::postProcessLoad()
 		}
 		else
 		{
-			DEBUG_CRASH(("Weapon '%s' already exists, but OVERRIDE not specified", c));
+			/* The first definition stands and the block is read and dropped.  WeaponReforged.ini keeps
+				 copies of EA weapons FixesReforged.ini hands out, for a mod whose Weapon.ini leaves them out
+				 (Contra has no Demo_DestroyedWeapon); where the loaded data has the weapon, its own wins.
+				 This used to return mid-block, and the next field line stopped the load as an unknown block. */
+			DEBUG_LOG(("[LINE: %d in '%s'] Weapon '%s' is already defined; the block is skipped.\n", ini->getLineNum(), ini->getFilename().str(), c));
+			WeaponTemplate *scratch = newInstance(WeaponTemplate);
+			ini->initFromINI(scratch, scratch->getFieldParse());
+			scratch->deleteInstance();
 			return;
 		}
 
@@ -1948,6 +1993,8 @@ void WeaponStore::postProcessLoad()
 	else
 	{
 		// no item is present, create a new one
+		if (ini->getLoadType() == INI_LOAD_CREATE_OVERRIDES && TheWeaponStore->m_countBeforeMapOverrides < 0)
+			TheWeaponStore->m_countBeforeMapOverrides = (Int)TheWeaponStore->m_weaponTemplateVector.size();
 		weapon = TheWeaponStore->newWeaponTemplate(name);
 	}
 

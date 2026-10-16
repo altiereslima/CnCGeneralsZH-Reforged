@@ -255,6 +255,9 @@ static bool generate_combiners(const CombinerDescription & description,
 	// The soft particles ride on the Direct3D 11 text for the smoke's reason: the SDL3 backend binds
 	// nothing at t7 and uploads nothing past SkyUp.
 	const bool soft = volumetric && description.SoftParticle != SOFT_PARTICLE_NONE;
+	// The per-object looks likewise: nothing past SoftParticleDepth reaches the SDL3 programs.
+	const unsigned effect = (volumetric && description.DrawEffect < DRAW_EFFECT_COUNT)
+		? description.DrawEffect : DRAW_EFFECT_NONE;
 	volumetric = volumetric && description.ShadowReceiving;
 	if (description.StageCount == 0 || description.StageCount > MAXIMUM_COMBINER_STAGES) {
 		return false;
@@ -360,7 +363,7 @@ static bool generate_combiners(const CombinerDescription & description,
 		// ones and the terrain's sun, so a program that reads them has to declare those too, unused:
 		// without them a shadow matrix lands where the first light's direction is.  A soft particle's
 		// field closes the block, so a program that fades declares all of it.
-		if (description.ShadowReceiving || soft) {
+		if (description.ShadowReceiving || soft || effect != DRAW_EFFECT_NONE) {
 			char line[256];
 			snprintf(line, sizeof(line),
 				"    float4 NormalLightDirection[%u];\n"
@@ -381,8 +384,11 @@ static bool generate_combiners(const CombinerDescription & description,
 				"    float4 Sky;\n"
 				"    float4 SkyUp;\n";
 		}
-		if (volumetric || soft) {
+		if (volumetric || soft || effect != DRAW_EFFECT_NONE) {
 			hlsl += VOLUMETRIC_CONSTANTS;
+		}
+		if (effect != DRAW_EFFECT_NONE) {
+			hlsl += DRAW_EFFECT_CONSTANTS;
 		}
 		hlsl += "};\n";
 		if (description.ShadowReceiving) {
@@ -393,6 +399,9 @@ static bool generate_combiners(const CombinerDescription & description,
 		}
 		if (soft) {
 			hlsl += SOFT_PARTICLE_SAMPLING;
+		}
+		if (effect != DRAW_EFFECT_NONE) {
+			hlsl += DRAW_EFFECT_SAMPLING;
 		}
 	}
 	else {
@@ -461,12 +470,24 @@ static bool generate_combiners(const CombinerDescription & description,
 		return false;
 	}
 
+	// After the fog and the alpha test: the cloak bends a picture that is fogged already, and a
+	// texel the test threw away has no surface to dress.
+	static const char * const effect_calls[DRAW_EFFECT_COUNT] = {
+		"",
+		"    current = effect_outage(current, input.Position);\n",
+		"    current = effect_emp(current, input.Position);\n",
+		"    current = effect_cloak(current, input.Position);\n",
+		"    current = effect_revealed(current, input.Position);\n",
+		"    current = effect_cloak_shadow(current, input.Position);\n"
+	};
+	hlsl += effect_calls[effect];
+
 	// After the alpha test: faded before it, a sprite's edge against the ground would be clipped to
 	// a hard line again, only a little further out.
 	if (soft) {
 		hlsl += (description.SoftParticle == SOFT_PARTICLE_COLOUR)
-			? "    current *= soft_particle_fade(input.Position);\n"
-			: "    current.a *= soft_particle_fade(input.Position);\n";
+			? "    current *= soft_particle_fade(input.Position, input.Specular.a);\n"
+			: "    current.a *= soft_particle_fade(input.Position, input.Specular.a);\n";
 	}
 
 	hlsl +=
@@ -545,6 +566,10 @@ std::string CombinerShader_Key(const CombinerDescription & description)
 	}
 	if (description.SoftParticle != SOFT_PARTICLE_NONE) {
 		snprintf(field, sizeof(field), ":Z%u", description.SoftParticle);
+		key += field;
+	}
+	if (description.DrawEffect != DRAW_EFFECT_NONE) {
+		snprintf(field, sizeof(field), ":X%u", description.DrawEffect);
 		key += field;
 	}
 	return key;

@@ -203,7 +203,7 @@ UnsignedByte DirectInputMouse::getMouseEvent( MouseIO *result, Bool flush )
 	/* set these to defaults */
 	result->leftState = result->middleState = result->rightState = FALSE;
 	result->leftFrame = result->middleFrame = result->rightFrame = 0;
-	result->pos.x = result->pos.y = result->wheelPos = 0;
+	result->pos.x = result->pos.y = result->wheelPos = result->sideButton = 0;
 
 	if( m_pMouseDevice )
 	{

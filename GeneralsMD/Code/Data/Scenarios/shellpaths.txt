@@ -1,0 +1,35 @@
+# Projectile flight paths, one launcher per lane, each shooting an unarmed target: tank shell
+# (Crusader), lobbed shells (Inferno Cannon, Nuke Cannon) and missiles (Scud Launcher, Tomahawk,
+# Rocket Buggy). The paths are only in the log with a temporary per-frame trace of each projectile's
+# position and nose, a DEBUG_LOG in DumbProjectileBehavior::update and MissileAIUpdate::update.
+#
+#   generals.exe -headless -quickstart -noshellmap -observer -multiInstance -noFPSLimit
+#     -randommap 1 2 small -autoskirmish 2 -takeover
+#     -side 0 FactionAmerica -side 1 FactionGLA -seed 1 -maxframes 600
+#     -scenario shellpaths -logPrefix shellpaths_
+#
+# Sharpest nose turn in one frame, before and after straight tank shells, barrel-led lobs and the
+# cruise missiles' single curve (2026-10-13): tank shell 13.7 to 1.9 and 7.2 to 0 over the line, Nuke
+# Cannon 6.5 to 3.8, Inferno 5.4 to 5.5, Scud 6.0 to 4.6, Tomahawk 6.0 to 5.5, Rocket Buggy 3.3 both.
+#
+# See mobstress.txt for the line grammar.
+
+30    spawn      0  AmericaTankCrusader            1   500 500
+30    spawn      1  AmericaVehicleDozer            1   630 500
+30    spawn      0  ChinaVehicleInfernoCannon      1   560 650
+30    spawn      1  ChinaVehicleDozer              1   810 650
+30    spawn      0  ChinaVehicleNukeLauncher       1   500 800
+30    spawn      1  GLAVehicleDozer                1   780 800
+30    spawn      0  GLAVehicleScudLauncher         1   500 950
+30    spawn      1  ChinaVehicleSupplyTruck        1   800 950
+30    spawn      0  AmericaVehicleTomahawk         1   500 1100
+30    spawn      1  ChinaVehicleTroopCrawlerEmpty  1   800 1100
+30    spawn      0  GLAVehicleRocketBuggy          1   500 1250
+30    spawn      1  ChinaVehicleListeningOutpost   1   700 1250
+
+60    attack     0  AmericaTankCrusader            1  AmericaVehicleDozer
+60    attack     0  ChinaVehicleInfernoCannon      1  ChinaVehicleDozer
+60    attack     0  ChinaVehicleNukeLauncher       1  GLAVehicleDozer
+60    attack     0  GLAVehicleScudLauncher         1  ChinaVehicleSupplyTruck
+60    attack     0  AmericaVehicleTomahawk         1  ChinaVehicleTroopCrawlerEmpty
+60    attack     0  GLAVehicleRocketBuggy          1  ChinaVehicleListeningOutpost

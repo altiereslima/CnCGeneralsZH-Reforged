@@ -3913,6 +3913,12 @@ void AIGroup::setMineClearingDetail( Bool set )
 
 Bool AIGroup::setWeaponLockForGroup( WeaponSlotType weaponSlot, WeaponLockType lockType )
 {
+	// The slot comes from a player's command (MSG_DO_WEAPON*, MSG_SWITCH_WEAPONS), and every member
+	// indexes its weapon array with it.  Out of range is a doctored command, refused the same way on
+	// every machine since it is the command, not local state, that decides.
+	if( weaponSlot < PRIMARY_WEAPON || weaponSlot >= WEAPONSLOT_COUNT )
+		return false;
+
 	Bool any = false;
 	std::list<Object *>::iterator i;
 	for( i = m_memberList.begin(); i != m_memberList.end(); ++i )

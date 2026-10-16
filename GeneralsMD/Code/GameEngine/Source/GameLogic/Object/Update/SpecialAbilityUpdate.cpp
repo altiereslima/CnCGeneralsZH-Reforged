@@ -1274,7 +1274,7 @@ Bool SpecialAbilityUpdate::continuePreparation()
           
           Real denominator = MAX(1, data->m_preparationFrames);
           Real increment = 1.0f - ((Real)m_prepFrames / denominator );
-          m_captureFlashPhase += increment / 3.0f;
+          m_captureFlashPhase += ConvertRetailPerFrameRate( increment / 3.0f );
 
           Bool thisPhase = ( ((Int)m_captureFlashPhase) & 1 );// are we in a flashy phase this frame?
 
@@ -1516,7 +1516,7 @@ void SpecialAbilityUpdate::triggerAbilityEffect()
         TheEva->setShouldPlay( EVA_BuildingStolen );
       }
 
-      target->defect( object->getControllingPlayer()->getDefaultTeam(), 1); // one frame of flash! 
+      target->defect( object->getControllingPlayer()->getDefaultTeam(), ConvertRetailFrames( 1u ) ); // one retail frame of flash!
 
       SpecialPowerModuleInterface *spmInterface = getMySPM();
       if (spmInterface && spTemplate->getSpecialPowerType() == SPECIAL_BLACKLOTUS_CAPTURE_BUILDING )
@@ -1722,7 +1722,7 @@ Object* SpecialAbilityUpdate::createSpecialObject()
       PhysicsBehavior* specialObjectPhysics = specialObject->getPhysics();
       if (specialObjectPhysics)
       {
-        Real pitchRate = specialObjectPhysics->getCenterOfMassOffset();
+        Real pitchRate = ConvertRetailPerFrameRate( specialObjectPhysics->getCenterOfMassOffset() );	// EA's coefficient of 1 was radians a retail frame
         specialObjectPhysics->setPitchRate( pitchRate );
         specialObjectPhysics->setAllowAirborneFriction( false );
       }

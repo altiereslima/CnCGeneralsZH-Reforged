@@ -113,8 +113,15 @@ AudioEventRTS ThingTemplate::s_audioEventNoSound;
 
 */
 
+/* calcTimeToBuild turns seconds into an Int frame count and multiplies it by the handicap, the
+	 faction modifier and up to 100 for low power.  A map's rules file with a BuildTime past that, or
+	 below zero, or not a number, went through a float-to-int conversion the platforms answer
+	 differently (x64 a large negative, ARM64 saturated), and Windows and Mac players built at
+	 different speeds in the same match.  A day is far past any real object and safe in the Int. */
+static const INI::RealRange BuildTimeRange = { 0.0f, 86400.0f };
+
 // NOTE NOTE NOTE -- s_objectFieldParseTable and s_objectReskinFieldParseTable must be updated in tandem -- see comment above
-const FieldParse ThingTemplate::s_objectFieldParseTable[] = 
+const FieldParse ThingTemplate::s_objectFieldParseTable[] =
 {
 	{ "DisplayName",					INI::parseAndTranslateLabel,					NULL,								offsetof( ThingTemplate, m_displayName ) },
 	{ "RadarPriority",				INI::parseByteSizedIndexList,					RadarPriorityNames, offsetof( ThingTemplate, m_radarPriority ) },
@@ -146,7 +153,7 @@ const FieldParse ThingTemplate::s_objectFieldParseTable[] =
 	{ "Prerequisites",				ThingTemplate::parsePrerequisites,	0, 0 },
 	{ "Buildable",						INI::parseByteSizedIndexList,				BuildableStatusNames, offsetof( ThingTemplate, m_buildable) },
 	{ "BuildCost",						INI::parseUnsignedShort,						NULL,		offsetof( ThingTemplate, m_buildCost ) },
-	{ "BuildTime",						INI::parseReal,											NULL,		offsetof( ThingTemplate, m_buildTime ) },
+	{ "BuildTime",						INI::parseRealInRange,							&BuildTimeRange,		offsetof( ThingTemplate, m_buildTime ) },
 	{ "RefundValue",					INI::parseUnsignedShort,						NULL,   offsetof( ThingTemplate, m_refundValue ) },
 	{ "BuildCompletion",			INI::parseByteSizedIndexList,				BuildCompletionNames,		offsetof( ThingTemplate, m_buildCompletion ) },
 	{ "EnergyProduction",			INI::parseInt,											NULL,   offsetof( ThingTemplate, m_energyProduction ) },
@@ -618,7 +625,15 @@ void ThingTemplate::parseModuleName(INI* ini, void *instance, void* store, const
 		throw INI_INVALID_DATA;
 	}
 
+	ini->setMissingSpecialPower(FALSE);
 	ModuleData* data = TheModuleFactory->newModuleDataFromINI(ini, tokenStr, type, moduleTagStr);
+	if (ini->hasMissingSpecialPower())
+	{
+		// read to its End and dropped: a special power module with no template faults placing the object
+		DEBUG_LOG(("[LINE: %d - FILE: '%s'] %s %s on %s is skipped.\n",
+			ini->getLineNum(), ini->getFilename().str(), tokenStr.str(), moduleTagStr.str(), self->getName().str()));
+		return;
+	}
 
 	if (data->isAiModuleData())
 	{
@@ -669,8 +684,12 @@ static void parsePrerequisiteScience( INI* ini, void *instance, void * /*store*/
 {
 	std::vector<ProductionPrerequisite>* v = (std::vector<ProductionPrerequisite>*)instance;
 
+	ScienceType science = INI::scanScience(ini, ini->getNextToken());
+	if (science == SCIENCE_INVALID)
+		return;
+
 	ProductionPrerequisite prereq;
-	prereq.addSciencePrereq(INI::scanScience(ini->getNextToken()));
+	prereq.addSciencePrereq(science);
 
 	v->push_back(prereq);
 }
@@ -940,13 +959,28 @@ Bool ThingTemplate::removeModuleInfo(const AsciiString& moduleToRemove, AsciiStr
 }
 
 //-------------------------------------------------------------------------------------------------
+void ArmorTemplateSet::parseArmor( INI* ini, void *instance, void * /*store*/, const void* /*userData*/ )
+{
+	ArmorTemplateSet* self = (ArmorTemplateSet*)instance;
+	const char *name = ini->getNextToken();
+	if (strcasecmp(name, "None") == 0)
+	{
+		self->m_template = NULL;
+		return;
+	}
+	self->m_template = TheArmorStore->findArmorTemplate(name);
+	// ThingTemplate::parseArmorTemplateSet passes over a patch file's set that names an armor a mod dropped
+	self->m_namesMissingArmor = (self->m_template == NULL);
+}
+
+//-------------------------------------------------------------------------------------------------
 /// @todo srj -- move this to another file
 void ArmorTemplateSet::parseArmorTemplateSet( INI* ini )
 {
-	static const FieldParse myFieldParse[] = 
+	static const FieldParse myFieldParse[] =
 	{
 		{ "Conditions", ArmorSetFlags::parseFromINI, NULL, offsetof( ArmorTemplateSet, m_types ) },
-		{ "Armor", INI::parseArmorTemplate,	NULL, offsetof( ArmorTemplateSet, m_template ) },
+		{ "Armor", ArmorTemplateSet::parseArmor,	NULL, 0 },
 		{ "DamageFX",	INI::parseDamageFX,	NULL, offsetof( ArmorTemplateSet, m_fx ) },
 		{ 0, 0, 0, 0 }
 	};
@@ -958,14 +992,26 @@ void ArmorTemplateSet::parseArmorTemplateSet( INI* ini )
 void ThingTemplate::parseArmorTemplateSet( INI* ini, void *instance, void * /*store*/, const void* /*userData*/ )
 {
 	ThingTemplate* self = (ThingTemplate*)instance;
+	ArmorTemplateSet ws;
+	ws.parseArmorTemplateSet(ini);
+
+	/* A patch file's set naming an armor the loaded data lacks would leave the object with no armor
+		 at all under those conditions, every hit at full damage: Contra has no ChemSuitHumanArmor, so
+		 FixesReforged.ini stripped its Rangers' Chemical Suits.  The object keeps the set it had. */
+	if (ini->getLoadType() == INI_LOAD_MULTIFILE && ws.namesMissingArmor())
+	{
+		// a nameless template is ThingFactory's scratch for a patch of a missing object, logged there
+		if (self->getName().isNotEmpty())
+			DEBUG_LOG(("[LINE: %d - FILE: '%s'] ArmorSet on %s names an armor that is not defined; the set is skipped.\n",
+				ini->getLineNum(), ini->getFilename().str(), self->getName().str()));
+		return;
+	}
+
 	if (self->m_armorCopiedFromDefault == TRUE)
 	{
 		self->m_armorCopiedFromDefault = FALSE;
 		self->m_armorTemplateSets.clear();
 	}
-
-	ArmorTemplateSet ws;
-	ws.parseArmorTemplateSet(ini);
 	self->m_armorTemplateSetFinder.clear();
 	if (ini->getLoadType() == INI_LOAD_MULTIFILE)
 	{
@@ -998,14 +1044,28 @@ void ThingTemplate::parseArmorTemplateSet( INI* ini, void *instance, void * /*st
 void ThingTemplate::parseWeaponTemplateSet( INI* ini, void *instance, void * /*store*/, const void* /*userData*/ )
 {
 	ThingTemplate* self = (ThingTemplate*)instance;
+	WeaponTemplateSet ws;
+	ws.parseWeaponTemplateSet(ini, self);
+
+	/* A patch file's set naming a weapon the loaded data lacks would arm the object with nothing in
+		 that slot: FixesReforged.ini's Toxin Tunnel Defender and Stinger sets name EA's Chem_ rockets,
+		 which Contra's Weapon.ini leaves out, so Contra's own two went unarmed.  The object keeps the
+		 set it had, as a patch naming a missing object or module is passed over. */
+	if (ini->getLoadType() == INI_LOAD_MULTIFILE && ws.namesMissingWeapon())
+	{
+		// a nameless template is ThingFactory's scratch for a patch of a missing object, already logged
+		// there and thrown away with everything in it (GC_Chem_GLAScudStorm under Contra)
+		if (self->getName().isNotEmpty())
+			DEBUG_LOG(("[LINE: %d - FILE: '%s'] WeaponSet on %s names a weapon that is not defined; the set is skipped.\n",
+				ini->getLineNum(), ini->getFilename().str(), self->getName().str()));
+		return;
+	}
+
 	if (self->m_weaponsCopiedFromDefault == TRUE)
 	{
 		self->m_weaponsCopiedFromDefault = FALSE;
 		self->m_weaponTemplateSets.clear();
 	}
-
-	WeaponTemplateSet ws;
-	ws.parseWeaponTemplateSet(ini, self);
 	self->m_weaponTemplateSetFinder.clear();
 	if (ini->getLoadType() == INI_LOAD_MULTIFILE)
 	{

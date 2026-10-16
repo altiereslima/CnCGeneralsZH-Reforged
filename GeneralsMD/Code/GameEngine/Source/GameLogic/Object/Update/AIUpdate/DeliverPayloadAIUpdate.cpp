@@ -213,7 +213,7 @@ UpdateSleepTime DeliverPayloadAIUpdate::update( void )
 			{
 				//SHOOT!!
 				const Coord3D *velocity = getObject()->getPhysics()->getVelocity();
-				if( velocity->z < 5.0f )
+				if( velocity->z < ConvertRetailPerFrameRate(5.0f) )
 				{
 					//Calc strafe ratio
 					Real startDiveDistance = getData()->m_diveStartDistance;
@@ -239,7 +239,9 @@ UpdateSleepTime DeliverPayloadAIUpdate::update( void )
 					// lock it just till the weapon is empty or the attack is "done"
 					getObject()->setWeaponLock( m_data.m_strafingWeaponSlot, LOCKED_TEMPORARILY );
 					getObject()->fireCurrentWeapon( &strafePoint );
-					FXList::doFXPos( m_data.m_strafeFX, &strafePoint );
+					// once per retail frame, or the strafe trail is twice as dense as at 30 Hz
+					if( TheGameLogic->getFrame() % LOGICFRAMES_PER_RETAIL_FRAME == 0 )
+						FXList::doFXPos( m_data.m_strafeFX, &strafePoint );
 				}
 			}
 		}

@@ -112,7 +112,7 @@ run() {	# run <name> <user data folder> <switches...>: a fresh farm each time (t
 	farm "$WORK/root"
 	mkdir -p "$user"
 	( cd "$WORK/root" && ZH_USER_DATA_DIR="$user" "$GENERALS" -headless -root "$WORK/root" -overlay "$WORK/overlay" \
-		-quickstart -noshellmap -multiInstance -noFPSLimit -maxframes 30 -logPrefix "$TAG$name" \
+		-quickstart -noshellmap -multiInstance -noFPSLimit -maxframes 60 -logPrefix "$TAG$name" \
 		-randommap 0 2 128 -autoskirmish 2 -aidiff brutal -seed 0 -observer "$@" \
 		> "$WORK/$name.out" 2> "$WORK/$name.err" )
 	RUN_STATUS=$?

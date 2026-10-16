@@ -40,6 +40,7 @@
 #include <eh.h>
 #include <ole2.h>
 #include <dbt.h>
+#include <vector>
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "WinMain.h"
@@ -604,7 +605,9 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message,
 
 					ClipCursor( NULL );
 					isCursorClippedToWindow = false;
-					if (TheAudio)
+					// A -wav run is heard by its file, not a person: muting it here silenced the
+					// capture whenever another window took the focus.
+					if (TheAudio && TheGlobalData->m_wavEndFrame <= 0)
 						TheAudio->loseFocus();
 				}  // end if
 				else
@@ -668,6 +671,19 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message,
 				return 0;
 
 			}  // end WM_LBUTTONDOWN
+
+			//-------------------------------------------------------------------------
+			// the side buttons step the camera's tilt; only the press is an event, and a handled
+			// WM_XBUTTON returns TRUE or Windows also sends it on as browser back/forward
+			case WM_XBUTTONDOWN:
+			{
+
+				if( TheWin32Mouse )
+					TheWin32Mouse->addWin32Event( message, wParam, lParam, TheMessageTime );
+
+				return TRUE;
+
+			}  // end WM_XBUTTONDOWN
 
 			//-------------------------------------------------------------------------
 			case 0x020A: // WM_MOUSEWHEEL
@@ -1043,6 +1059,63 @@ char *nextParam(char *newSource, char *seps)
 // Necessary to allow memory managers and such to have useful critical sections
 static CriticalSection critSec1, critSec2, critSec3, critSec4, critSec5;
 
+/** AMD's X3D parts with two CCDs (7950X3D, 9950X3D) stack the extra L3 on one of them, and Windows
+	* puts the game on either.  GeneralsX measured a match at 29-32 fps on the plain CCD and 37-38 on the
+	* stacked one, so the whole process goes on the logical processors that share the largest L3.  One
+	* L3, or several of one size (Intel, a plain 9950X, EPYC), is left alone, and so are -multiInstance
+	* copies: a batch spreads one match a core over every CCD. */
+static void pinToLargestL3( void )
+{
+	if (findEarlyCommandLineOption( L"-multiInstance" ) != NULL)
+		return;
+
+	GROUP_AFFINITY ownGroup;
+	GetThreadGroupAffinity( GetCurrentThread(), &ownGroup );
+
+	DWORD length = 0;
+	GetLogicalProcessorInformationEx( RelationCache, NULL, &length );
+	std::vector<char> buffer( length );
+	if (!GetLogicalProcessorInformationEx( RelationCache, (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)&buffer[0], &length ))
+	{
+		DEBUG_LOG(("CPU: GetLogicalProcessorInformationEx failed (%u), no L3 pinning\n", GetLastError()));
+		return;
+	}
+
+	Int caches = 0;
+	DWORD largest = 0, smallest = MAXDWORD;
+	KAFFINITY largestMask = 0;
+	for (DWORD at = 0; at < length; )
+	{
+		const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *info = (const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)&buffer[at];
+		const CACHE_RELATIONSHIP &cache = info->Cache;
+		if (cache.Level == 3 && cache.GroupMask.Group == ownGroup.Group)
+		{
+			++caches;
+			if (cache.CacheSize < smallest)
+				smallest = cache.CacheSize;
+			if (cache.CacheSize > largest)
+			{
+				largest = cache.CacheSize;
+				largestMask = cache.GroupMask.Mask;
+			}
+		}
+		at += info->Size;
+	}
+
+	if (caches < 2 || largest == smallest)
+	{
+		DEBUG_LOG(("CPU: %d L3 cache(s) of %u KB in processor group %u, no pinning\n", caches, largest / 1024, ownGroup.Group));
+		return;
+	}
+	if (!SetProcessAffinityMask( GetCurrentProcess(), largestMask ))
+	{
+		DEBUG_LOG(("CPU: SetProcessAffinityMask(0x%llx) failed (%u)\n", (unsigned long long)largestMask, GetLastError()));
+		return;
+	}
+	DEBUG_LOG(("CPU: %d L3 caches, %u KB and %u KB; pinned to the %u KB one, mask 0x%llx\n",
+		caches, smallest / 1024, largest / 1024, largest / 1024, (unsigned long long)largestMask));
+}
+
 // _set_se_translator below only covers the thread that installs it, so a fault on one
 // of the engine's worker threads (WW3D's texture loader, the GameSpy threads) took the
 // process down with nothing in the log at all.  The unhandled-exception filter is
@@ -1392,6 +1465,7 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		// start the log
 		DEBUG_INIT(DEBUG_FLAGS_DEFAULT);
 		initMemoryManager();
+		pinToLargestL3();
 
  
 		// Set up version info

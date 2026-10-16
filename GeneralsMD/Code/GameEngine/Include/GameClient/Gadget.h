@@ -438,11 +438,7 @@ typedef struct _PushButtonData
 	Bool drawBorder;				///< We only want to draw the border if we want to
 	Color colorBorder;			///< The color for the border around the button
 	Int drawCount;					///< when > 0, a small number badge drawn in the bottom right corner
-	Int drawSeconds;				///< when > 0, a seconds label drawn in the bottom left corner
-	Int drawCost;						///< when > 0, a price drawn in the top right corner
-	Int drawPower;					///< when != 0, a power figure in the bottom right; < 0 draws, > 0 supplies
-	Int barPercent;					///< when >= 0, a thin bar drawn along the bottom edge (experience)
-	Color barColor;					///< colour of that bar
+	Bool drawRepeat;				///< a spinning repeat mark in the top right corner: the unit is built on repeat
 	void *userData;					///< random additional data we can set
 	const Image *overlayImage; ///< An overlay image (like a veterancy symbol)
 	AsciiString altSound;		///< use an alternitive sound if one is set

@@ -68,7 +68,8 @@ UnsignedInt Money::withdraw(UnsignedInt amountToWithdraw, Bool playSound)
 	if (playSound)
 		TheAudio->addAudioEvent(&event);
 
-	m_money -= amountToWithdraw;
+	if (!m_unlimited)
+		m_money -= amountToWithdraw;
 
 	return amountToWithdraw;
 }
@@ -87,7 +88,8 @@ void Money::deposit(UnsignedInt amountToDeposit, Bool playSound)
 	if (playSound)
 		TheAudio->addAudioEvent(&event);
 	
-	m_money += amountToDeposit;
+	if (!m_unlimited)
+		m_money += amountToDeposit;
 
 	if( amountToDeposit > 0 )
 	{
@@ -104,24 +106,28 @@ void Money::deposit(UnsignedInt amountToDeposit, Bool playSound)
 // ------------------------------------------------------------------------------------------------
 void Money::crc( Xfer *xfer )
 {
-
+	xfer->xferUnsignedInt( &m_money );
 }  // end crc
 
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
-	* 1: Initial version */
+	* 1: Initial version
+	* 2: m_unlimited */
 // ------------------------------------------------------------------------------------------------
 void Money::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 1;
+	XferVersion currentVersion = 2;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
 	// money value
 	xfer->xferUnsignedInt( &m_money );
+
+	if( version >= 2 )
+		xfer->xferBool( &m_unlimited );
 
 }  // end xfer
 

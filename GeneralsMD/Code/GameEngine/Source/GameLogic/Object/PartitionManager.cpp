@@ -1214,7 +1214,10 @@ void CellAndObjectIntersection::addCoverage(PartitionCell *cell, PartitionData *
 	}
 
 	if (m_cell == NULL)
+	{
 		cell->friend_addToCellList(this);
+		cell->addPlayerCoi(module->friend_getCountedPlayer());
+	}
 
 	m_cell = cell;
 	m_module = module;
@@ -1230,6 +1233,7 @@ void CellAndObjectIntersection::removeAllCoverage()
 	}
 
 	m_cell->friend_removeFromCellList(this);
+	m_cell->removePlayerCoi(m_module->friend_getCountedPlayer());
 	m_cell = NULL;
 	m_module = NULL;
 }
@@ -1247,6 +1251,7 @@ PartitionCell::PartitionCell()
 	//
 	m_firstCoiInCell = NULL;
 	m_coiCount = 0;
+	m_playerCoiMask = PLAYERMASK_NONE;
 #ifdef PM_CACHE_TERRAIN_HEIGHT
 	m_loTerrainZ = HUGE_DIST;		// huge positive
 	m_hiTerrainZ = -HUGE_DIST;	// huge negative
@@ -1262,6 +1267,8 @@ PartitionCell::PartitionCell()
 		// Default is "passive shroud".  1,0.
 		m_shroudLevel[i].m_currentShroud = 1;
 		m_shroudLevel[i].m_activeShroudLevel = 0;
+		m_airLookers[i] = 0;
+		m_playerCoiCount[i] = 0;
 
 		// default cash value is 0
 		m_cashValue[i] = 0;
@@ -1419,6 +1426,23 @@ void PartitionCell::removeShrouder( Int playerIndex )
 }
 
 //-----------------------------------------------------------------------------
+/** Only an aircraft reads the air count, and only where the ground is not in sight; the objects here
+	think again whenever the air over a cell comes into sight or goes out of it. */
+void PartitionCell::addAirLooker( Int playerIndex )
+{
+	if( m_airLookers[playerIndex]++ == 0 )
+		invalidateShroudedStatusForAllCois( playerIndex );
+}
+
+//-----------------------------------------------------------------------------
+void PartitionCell::removeAirLooker( Int playerIndex )
+{
+	DEBUG_ASSERTCRASH( m_airLookers[playerIndex] > 0, ("removeAirLooker on a cell nobody looks over") );
+	if( --m_airLookers[playerIndex] == 0 )
+		invalidateShroudedStatusForAllCois( playerIndex );
+}
+
+//-----------------------------------------------------------------------------
 //Bool PartitionCell::isShroudedForPlayer( Int playerIndex ) const
 //{
 	// There isn't an absolute answer.  This cell is only shrouded in regards to a person
@@ -1525,6 +1549,25 @@ void PartitionCell::friend_removeFromCellList(CellAndObjectIntersection *coi)
 }
 
 //-----------------------------------------------------------------------------
+void PartitionCell::addPlayerCoi(Int playerIndex)
+{
+	if (playerIndex < 0)
+		return;
+	if (m_playerCoiCount[playerIndex]++ == 0)
+		m_playerCoiMask |= (PlayerMaskType)(1 << playerIndex);
+}
+
+//-----------------------------------------------------------------------------
+void PartitionCell::removePlayerCoi(Int playerIndex)
+{
+	if (playerIndex < 0)
+		return;
+	DEBUG_ASSERTCRASH(m_playerCoiCount[playerIndex] > 0, ("player coi count underflow"));
+	if (--m_playerCoiCount[playerIndex] == 0)
+		m_playerCoiMask &= (PlayerMaskType)~(1 << playerIndex);
+}
+
+//-----------------------------------------------------------------------------
 void PartitionCell::getCellCenterPos(Real& x, Real& y)
 {
 	ThePartitionManager->getCellCenterPos(m_cellX, m_cellY, x, y);
@@ -1565,12 +1608,16 @@ void PartitionCell::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 1;
+	// 2: m_airLookers
+	XferVersion currentVersion = 2;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
 	// xfer shroud data
 	xfer->xferUser( &m_shroudLevel, sizeof( ShroudLevel ) * MAX_PLAYER_COUNT );
+
+	if( version >= 2 )
+		xfer->xferUser( &m_airLookers, sizeof( m_airLookers ) );
 
 }  // end xfer
 
@@ -1600,6 +1647,7 @@ PartitionData::PartitionData()
 	m_coiArray = NULL;
 	m_coiInUseCount = 0;
 	m_doneFlag = 0;
+	m_countedPlayer = -1;
 	m_dirtyStatus = NOT_DIRTY;
 	m_lastCell = NULL;
 	for (int i = 0; i < MAX_PLAYER_COUNT; ++i)
@@ -1713,9 +1761,14 @@ ObjectShroudStatus PartitionData::getShroudedStatus(Int playerIndex)
 #endif
 		Int shroudedCells = 0;
 		Int foggedCells = 0;
+		// a hill or a roof hides the ground behind it, not the aircraft flying over it: whoever it can
+		// see and shoot at sees it back
+		const Bool inTheAir = m_object && m_object->isAirborneTarget();
 		CellAndObjectIntersection* coi = m_coiArray;
 		for (Int i = m_coiInUseCount; i; --i, ++coi)
 		{
+			if( inTheAir && coi->getCell()->isAirSeenByPlayer(playerIndex) )
+				continue;
 			if( coi->getCell()->getShroudStatusForPlayer(playerIndex) == CELLSHROUD_SHROUDED )
 				++shroudedCells;
 			else if( coi->getCell()->getShroudStatusForPlayer(playerIndex) == CELLSHROUD_FOGGED )
@@ -2176,6 +2229,7 @@ void PartitionData::updateCellsTouched()
 	}
 
 	removeAllTouchedCells();
+	refreshCountedPlayer();
 	if (isSmall)
 	{
 		doSmallFill(pos.x, pos.y, majorRadius);
@@ -2231,7 +2285,31 @@ void PartitionData::updateCellsTouched()
 }
 
 //-----------------------------------------------------------------------------
-void PartitionData::invalidateShroudedStatusForPlayer(Int playerIndex) 
+/** Each cell counts the COIs of every player's Objects so a search for one side's units can pass
+	over cells holding none of them. The count follows this module's m_countedPlayer, never the
+	Object directly, so taking a COI out always undoes what putting it in did; a capture, a defection
+	or a team handed to another player moves the counts here before anything can search. */
+void PartitionData::refreshCountedPlayer()
+{
+	const Player *player = m_object ? m_object->getControllingPlayer() : NULL;
+	const Int newPlayer = player ? player->getPlayerIndex() : -1;
+	if (newPlayer == m_countedPlayer)
+		return;
+
+	CellAndObjectIntersection *coi = m_coiArray;
+	for (Int i = m_coiArrayCount; i > 0; --i, ++coi)
+	{
+		if (coi->getModule())
+		{
+			coi->getCell()->removePlayerCoi(m_countedPlayer);
+			coi->getCell()->addPlayerCoi(newPlayer);
+		}
+	}
+	m_countedPlayer = newPlayer;
+}
+
+//-----------------------------------------------------------------------------
+void PartitionData::invalidateShroudedStatusForPlayer(Int playerIndex)
 { 
 #ifndef DISABLE_INVALID_PREVENTION
 	if (m_shroudedness[playerIndex] != OBJECTSHROUD_INVALID && m_shroudedness[playerIndex] != OBJECTSHROUD_INVALID_BUT_PREVIOUS_VALID)
@@ -3328,7 +3406,8 @@ Object *PartitionManager::getClosestObjects(
 	PartitionFilter **filters, 
 	SimpleObjectIterator *iterArg,	// if nonnull, append ALL satisfactory objects to the iterator (not just the single closest)
 	Real *closestDistArg,
-	Coord3D *closestVecArg
+	Coord3D *closestVecArg,
+	PlayerMaskType onlyPlayers
 )
 {
 	//USE_PERF_TIMER(getClosestObjects)
@@ -3452,6 +3531,11 @@ Object *PartitionManager::getClosestObjects(
 		{
 			PartitionCell* thisCell = getCellAt(cellCenterX + it->x, cellCenterY + it->y);
 			if (thisCell == NULL)
+				continue;
+
+			// An idle guard asks this for enemies only, and most cells around it hold its own base
+			// or nothing; every Object there would fail the filters anyway, so the answer is the same.
+			if (onlyPlayers != PLAYERMASK_ALL && !thisCell->hasCoiOfPlayers(onlyPlayers))
 				continue;
 
 			for (CellAndObjectIntersection *thisCoi = thisCell->getFirstCoiInCell(); thisCoi; thisCoi = thisCoi->getNextCoi())
@@ -3625,10 +3709,11 @@ Object *PartitionManager::getClosestObject(
 	DistanceCalculationType dc, 
 	PartitionFilter **filters, 
 	Real *closestDist,
-	Coord3D *closestDistVec
+	Coord3D *closestDistVec,
+	PlayerMaskType onlyPlayers
 )
 {
-	return getClosestObjects(NULL, pos, maxDist, dc, filters, NULL, closestDist, closestDistVec);
+	return getClosestObjects(NULL, pos, maxDist, dc, filters, NULL, closestDist, closestDistVec, onlyPlayers);
 }
 
 //-----------------------------------------------------------------------------
@@ -4327,11 +4412,31 @@ static void hLineRecordedLooker( Int x1, Int x2, Int y, void *lookersVoid )
 			continue;
 
 		PartitionCell *cell = ThePartitionManager->getCellAt( x, y );
-		if( lookers->m_reveal )
-			cell->addLooker( lookers->m_playerIndex );
-		else
-			cell->removeLooker( lookers->m_playerIndex );
+		if( revealed[ x ] & SIGHT_CELL_GROUND )
+		{
+			if( lookers->m_reveal )
+				cell->addLooker( lookers->m_playerIndex );
+			else
+				cell->removeLooker( lookers->m_playerIndex );
+		}
+		if( revealed[ x ] & SIGHT_CELL_AIR )
+		{
+			if( lookers->m_reveal )
+				cell->addAirLooker( lookers->m_playerIndex );
+			else
+				cell->removeAirLooker( lookers->m_playerIndex );
+		}
 	}
+}
+
+//-----------------------------------------------------------------------------
+UnsignedByte PartitionManager_sightCellFlags( Bool groundRevealed, Int offsetX, Int offsetY, Int flatCellRadius )
+{
+	// r * ( r + 1 ) rather than r squared, as for the ground: the Bresenham circle keeps every cell of it
+	UnsignedByte flags = groundRevealed ? SIGHT_CELL_GROUND : 0;
+	if( offsetX * offsetX + offsetY * offsetY <= flatCellRadius * ( flatCellRadius + 1 ) )
+		flags |= SIGHT_CELL_AIR;
+	return flags;
 }
 
 //-----------------------------------------------------------------------------
@@ -4454,18 +4559,19 @@ void PartitionManager::doBlockedShroudReveal( SightingInfo *sighting, const Obje
 	// r * ( r + 1 ) rather than r squared: the circle the reveal is drawn with is a Bresenham one,
 	// and on flat ground this has to keep every cell of it
 	const Bool stretched = sighting->m_howFar > flatRange;
+	const Int flatCellRadius = sightCellRadius( flatRange );
 	sighting->m_revealedCells.resize( side * side );
 	for( Int cell = 0; cell < side * side; ++cell )
 	{
+		const Int offsetX = cell % side - cellRadius;
+		const Int offsetY = cell / side - cellRadius;
 		Bool revealed = sightMargin[ cell ] >= 0.0f;
 		if( revealed && stretched )
 		{
-			const Int offsetX = cell % side - cellRadius;
-			const Int offsetY = cell / side - cellRadius;
 			const Int reachCells = sightCellRadius( Weapon_elevatedRange( looker, flatRange, heights[ cell ] ) );
 			revealed = offsetX * offsetX + offsetY * offsetY <= reachCells * ( reachCells + 1 );
 		}
-		sighting->m_revealedCells[ cell ] = revealed;
+		sighting->m_revealedCells[ cell ] = PartitionManager_sightCellFlags( revealed, offsetX, offsetY, flatCellRadius );
 	}
 
 	applyRecordedReveal( sighting, TRUE );
@@ -5805,6 +5911,10 @@ PartitionFilterLineOfSight::PartitionFilterLineOfSight(const Object *obj)
 Bool PartitionFilterLineOfSight::allow(Object *objOther)
 {
 	// objOther is guaranteed to be non-null, so we don't need to check (srj)
+
+	// a hill or a roof does not hide what flies over it (see Pathfinder::isAttackViewBlockedByObstacle)
+	if (objOther->isSignificantlyAboveTerrain())
+		return true;
 
 	if (!ThePartitionManager->isClearLineOfSightTerrain(m_obj, *m_obj->getPosition(), objOther, *objOther->getPosition()))
 		return false;

@@ -334,6 +334,61 @@ void LANAPI::checkMOTD( void )
 #endif
 }
 
+/* A LAN message is a fixed struct read straight out of a datagram, and every string in it a fixed
+	 array that the sender is trusted to terminate.  Anyone on the network can send one, so zero what
+	 the datagram did not carry and cut each string this type uses at its last character: a short or
+	 hostile message then reads as short text instead of running off the end of its array.  The
+	 union's arms overlap, so only the arm the type names is touched. */
+static void terminateLANMessageStrings( LANMessage *msg, Int length )
+{
+	if (length < (Int)sizeof(LANMessage))
+		memset((char *)msg + length, 0, sizeof(LANMessage) - length);
+
+	msg->name[g_lanPlayerNameLength] = 0;
+	msg->userName[g_lanLoginNameLength] = 0;
+	msg->hostName[g_lanHostNameLength] = 0;
+
+	switch (msg->LANMessageType)
+	{
+		case LANMessage::MSG_GAME_ANNOUNCE:
+			msg->GameInfo.gameName[g_lanGameNameLength] = 0;
+			msg->GameInfo.options[m_lanMaxOptionsLength] = 0;
+			break;
+		case LANMessage::MSG_REQUEST_GAME_LEAVE:
+			msg->GameToLeave.gameName[g_lanGameNameLength] = 0;
+			break;
+		case LANMessage::MSG_REQUEST_GAME_INFO:
+			msg->PlayerInfo.playerName[g_lanPlayerNameLength] = 0;
+			break;
+		case LANMessage::MSG_REQUEST_JOIN:
+			msg->GameToJoin.modNamePad = 0;		// ends the serial, which has no room of its own for it
+			msg->GameToJoin.modName[g_lanModNameLength] = 0;
+			break;
+		case LANMessage::MSG_JOIN_ACCEPT:
+			msg->GameJoined.gameName[g_lanGameNameLength] = 0;
+			break;
+		case LANMessage::MSG_JOIN_DENY:
+			msg->GameNotJoined.gameName[g_lanGameNameLength] = 0;
+			msg->GameNotJoined.modName[g_lanModNameLength] = 0;
+			break;
+		case LANMessage::MSG_SET_ACCEPT:
+			msg->Accept.gameName[g_lanGameNameLength] = 0;
+			break;
+		case LANMessage::MSG_MAP_AVAILABILITY:
+			msg->MapStatus.gameName[g_lanGameNameLength] = 0;
+			break;
+		case LANMessage::MSG_CHAT:
+			msg->Chat.gameName[g_lanGameNameLength] = 0;
+			msg->Chat.message[g_lanMaxChatLength] = 0;
+			break;
+		case LANMessage::MSG_GAME_OPTIONS:
+			msg->GameOptions.options[m_lanMaxOptionsLength] = 0;
+			break;
+		default:
+			break;
+	}
+}
+
 extern Bool LANbuttonPushed;
 extern Bool LANSocketErrorDetected;
 void LANAPI::update( void )
@@ -377,6 +432,7 @@ void LANAPI::update( void )
 			}
 
 			LANMessage *msg = (LANMessage *)(m_transport->m_inBuffer[i].data);
+			terminateLANMessageStrings(msg, m_transport->m_inBuffer[i].length);
 			//DEBUG_LOG(("LAN message type %s from %ls (%s@%s)\n", GetMessageTypeString(msg->LANMessageType).str(),
 			//	msg->name, msg->userName, msg->hostName));
 			switch (msg->LANMessageType)
@@ -671,6 +727,9 @@ void LANAPI::RequestGameJoin( LANGameInfo *game, UnsignedInt ip /* = 0 */ )
 	// and the far end reads these as C strings out of the packet.
 	strlcpy(msg.GameToJoin.serial, s.str(), ARRAY_SIZE(msg.GameToJoin.serial));
 	msg.GameToJoin.serial[g_maxSerialLength-1] = '\0';
+	// so a host whose INI set differs can tell the player it is the mod and which one (handleRequestJoin)
+	WideCharFromUtf8(TheGlobalData->m_modName.str(), msg.GameToJoin.modName, ARRAY_SIZE(msg.GameToJoin.modName));
+	msg.GameToJoin.baseExeCRC = TheGlobalData->m_baseExeCRC;
 
 	sendMessage(&msg, ip);
 

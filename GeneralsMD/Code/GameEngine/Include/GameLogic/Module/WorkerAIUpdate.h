@@ -218,7 +218,6 @@ public:
 	virtual Int getMaxBoxes() const { return getWorkerAIUpdateModuleData()->m_maxBoxesData; }
 
 	virtual void noteDockActionWindow( UnsignedInt frames );
-	virtual Real getDockActionProgress() const;
 
 protected:
 
@@ -246,8 +245,7 @@ protected:
 
 // Supply Truck data
 	Int m_numberBoxes;
-	UnsignedInt								m_dockActionStartFrame;	///< when the box currently being moved started
-	UnsignedInt								m_dockActionEndFrame;		///< and when it lands; equal means "not docking"
+	UnsignedInt								m_dockActionEndFrame;		///< when the load currently being moved lands
 
 	ObjectID									m_preferredDock;			///< Instead of searching, try this one first
 	ObjectID									m_dockBeforeBuilding;	///< the dock we left to go build, so we can go back (WorkersReturnToSupply)

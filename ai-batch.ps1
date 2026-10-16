@@ -39,8 +39,9 @@ param(
 	# 4v4. Free-for-all spreads the fighting over the whole map; teams put every unit on one of two
 	# fronts, which is the load a player actually complains about
 	[int] $Teams = 0,
-	# a match that has not been decided by here is a result in itself: the AI cannot finish
-	[int] $MaxFrames = 30000,
+	# a match that has not been decided by here is a result in itself: the AI cannot finish.
+	# Logic frames, 60 a second: 60000 is 16.7 minutes of game time
+	[int] $MaxFrames = 60000,
 	# names this batch's logs, so two batches can be compared afterwards
 	[string] $Tag = "ai",
 	# map sizes to spread the batch over, in playable cells a side. Ignored when -Map is given.
@@ -80,6 +81,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# LOGICFRAMES_PER_SECOND: every frame number the log writes counts these
+$LogicFps = 60
 $env:ZH_UNATTENDED = "1"	# every game this starts is unattended: no box may wait on a person (EarlyCommandLine.h)
 
 # PowerShell variable names are case-insensitive, so this must not be called $exe: it would be the
@@ -140,6 +143,11 @@ for ($i = 0; $i -lt $Runs; $i++) {
 	if ($ExtraArgs.Count) { $args += $ExtraArgs }
 
 	while (@($started | Where-Object { -not $_.Proc.HasExited }).Count -ge $Parallel) {
+		# a run that never reaches its match (a bad -side, a missing map) sits in the shell for good, and
+		# the wait for a free slot would wait with it: the timeout applies here as well as below
+		foreach ($r in $started) {
+			if (-not $r.Proc.HasExited -and $r.Clock.Elapsed.TotalMinutes -gt $TimeoutMinutes) { $r.Proc.Kill() }
+		}
 		Start-Sleep -Milliseconds 200
 	}
 	$proc = Start-Process -FilePath $exePath -ArgumentList $args -WorkingDirectory $RunDir -PassThru
@@ -303,7 +311,7 @@ Write-Host ("decided {0}/{1}   frame-limited {2}   failed {3}" -f
 if ($decided.Count -gt 0) {
 	Write-Host ("average length {0:n0} frames ({1:n1} min of game time)" -f
 		($decided | Measure-Object Frames -Average).Average,
-		(($decided | Measure-Object Frames -Average).Average / 30 / 60))
+		(($decided | Measure-Object Frames -Average).Average / $LogicFps / 60))
 }
 
 # The player list carries the civilian and neutral sides before the playable ones, so the indices
@@ -408,7 +416,7 @@ if ($pfRows.Count -gt 0) {
 	$worstWedge = ($pfRows | ForEach-Object { $_.Pf.WedgeWorst } | Measure-Object -Maximum).Maximum
 	Write-Host ("wedged unit-frames per 1000 logic frames: {0:n1} | worst single wedge {1} frames ({2:n1}s) | escapes {3} repaths {4} dithers {5} per match" -f
 		(1000.0 * $totWedge / $totFrames),
-		$worstWedge, ($worstWedge / 30.0),
+		$worstWedge, ($worstWedge / $LogicFps),
 		(& $avg { param($p) $p.Escapes }),
 		(& $avg { param($p) $p.Repaths }),
 		(& $avg { param($p) $p.Dithers }))

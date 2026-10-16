@@ -1,0 +1,13 @@
+# Trailer 2, timeline.t2.js row 05: Scenarios/rf_t2_bitter.txt on Bitter Winter (command line there).
+# Zoom is relative to the observer's opening view, which measured 1.27 absolute on this map.
+#
+# Frames 170 to 330: looking east-north-east down the battery east of the frozen lake, eleven Nuke
+# and Inferno Cannons close, muzzle flashes from about frame 180. The look-at point moved from the
+# lake (1000,1750) onto the battery's middle when the guns moved off the ice on 2026-10-11, and the
+# view is closer, since the row read as too few guns. Frames 450 to 600, the receiving end: from the
+# American column looking west back at the guns, the shells landing in the foreground.
+
+3.0   cut     1170 1760 0.6 -60 8
+3.5   shot
+14.0  cut     1250 1750 1.4 90 6
+14.5  shot

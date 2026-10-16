@@ -65,7 +65,7 @@
 # as the app ships it, the user data in the work folder, the install hashed before and after
 # (Tools/install-guard.sh), exit 99 if it changed or could not be checked.
 #
-# Usage: net-check.sh --generals <path> [--peer1 <path>] [--data <dir>] [--seed 3] [--frames 3000]
+# Usage: net-check.sh --generals <path> [--peer1 <path>] [--data <dir>] [--seed 3] [--frames 6000]
 #          [--netai 2] [--map "Maps\Golden Oasis\Golden Oasis.map"] [--control] [--corrupt-at <frame>] [--legacy-replay]
 #          [--overshoot-control] [--keep]
 #   --peer1     the executable for the second copy (default: --generals); an x86_64 build runs under
@@ -115,7 +115,7 @@ GENERALS=""
 PEER1=""
 DATA="${ZH_DATA_DIR:-}"
 SEED=3
-FRAMES=3000
+FRAMES=6000		# logic frames, 60 a second: 100 s of game time
 NETAI=2
 MAP='Maps\Golden Oasis\Golden Oasis.map'
 CONTROL=0
@@ -127,7 +127,7 @@ PEER=""
 HOSTS_ARG=""
 REPLAY_OUT=""
 PLAY=""
-LIVE_TIMEOUT="${NET_CHECK_LIVE_TIMEOUT:-900}"		# seconds for the match; 3000 frames took 105 s
+LIVE_TIMEOUT="${NET_CHECK_LIVE_TIMEOUT:-900}"		# seconds for the match; 3000 frames at 30 a second took 105 s
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--generals) GENERALS="$2"; shift 2;;
