@@ -1246,6 +1246,10 @@ CONTROLBAR:FlashBangGrenadeMode
 "Granada de &Luz e Som"
 END
 
+CONTROLBAR:ForceAttack
+"Ataque &Forçado"
+END
+
 CONTROLBAR:Frenzy
 "Ataque Enfurecid&o"
 END
@@ -1500,6 +1504,10 @@ END
 
 CONTROLBAR:NukeWarhead
 "Ogiva &Nuclear"
+END
+
+CONTROLBAR:ObsLookingThrough
+"Assistindo pelos olhos de %ls. Esc traz de volta o mapa inteiro."
 END
 
 CONTROLBAR:ObsPlayerLabel
@@ -2248,6 +2256,10 @@ END
 
 CONTROLBAR:TooltipFireWall
 "Cria um arco de fogo na área desejada."
+END
+
+CONTROLBAR:ToolTipForceAttack
+"O próximo clique ataca o que estiver sob o cursor, incluindo o chão e o seu próprio lado. Clique no botão de novo para cancelar."
 END
 
 CONTROLBAR:TooltipFrenzy
@@ -4582,18 +4594,6 @@ GUI:BarIdleWorker
 "Trabalhador"
 END
 
-GUI:BarNetReady
-"pronto"
-END
-
-GUI:BarNetRoom
-"sala"
-END
-
-GUI:BarNetUnits
-"unidades"
-END
-
 GUI:BattleHonors
 "Condecorações de Batalha"
 END
@@ -5222,6 +5222,10 @@ GUI:BuildupAnimations
 "Animações de Construção"
 END
 
+GUI:BuildWithoutWorker
+"Construir sem Trabalhador"
+END
+
 GUI:Campaign
 "CAMPANHA"
 END
@@ -5470,150 +5474,6 @@ GUI:Commands
 "Comandos"
 END
 
-GUI:CommandSlot01
-"Posição 01 da Barra de Comandos"
-END
-
-GUI:CommandSlot01Description
-"Aciona a posição 01 da barra de comandos (coluna 1, linha superior, tecla 'Q' no layout de grade padrão)."
-END
-
-GUI:CommandSlot02
-"Posição 02 da Barra de Comandos"
-END
-
-GUI:CommandSlot02Description
-"Aciona a posição 02 da barra de comandos (coluna 2, linha superior, tecla 'W' no layout de grade padrão)."
-END
-
-GUI:CommandSlot03
-"Posição 03 da Barra de Comandos"
-END
-
-GUI:CommandSlot03Description
-"Aciona a posição 03 da barra de comandos (coluna 3, linha superior, tecla 'E' no layout de grade padrão)."
-END
-
-GUI:CommandSlot04
-"Posição 04 da Barra de Comandos"
-END
-
-GUI:CommandSlot04Description
-"Aciona a posição 04 da barra de comandos (coluna 4, linha superior, tecla 'R' no layout de grade padrão)."
-END
-
-GUI:CommandSlot05
-"Posição 05 da Barra de Comandos"
-END
-
-GUI:CommandSlot05Description
-"Aciona a posição 05 da barra de comandos (coluna 5, linha superior, tecla 'T' no layout de grade padrão)."
-END
-
-GUI:CommandSlot06
-"Posição 06 da Barra de Comandos"
-END
-
-GUI:CommandSlot06Description
-"Aciona a posição 06 da barra de comandos (coluna 6, linha superior, tecla 'Y' no layout de grade padrão)."
-END
-
-GUI:CommandSlot07
-"Posição 07 da Barra de Comandos"
-END
-
-GUI:CommandSlot07Description
-"Aciona a posição 07 da barra de comandos (coluna 1, linha do meio, tecla 'A' no layout de grade padrão), onde fica o comando Atacar de uma unidade."
-END
-
-GUI:CommandSlot08
-"Posição 08 da Barra de Comandos"
-END
-
-GUI:CommandSlot08Description
-"Aciona a posição 08 da barra de comandos (coluna 2, linha do meio, tecla 'S' no layout de grade padrão), onde fica o comando Parar de uma unidade."
-END
-
-GUI:CommandSlot09
-"Posição 09 da Barra de Comandos"
-END
-
-GUI:CommandSlot09Description
-"Aciona a posição 09 da barra de comandos (coluna 3, linha do meio, tecla 'D' no layout de grade padrão), onde fica o comando Mover e Atacar."
-END
-
-GUI:CommandSlot10
-"Posição 10 da Barra de Comandos"
-END
-
-GUI:CommandSlot10Description
-"Aciona a posição 10 da barra de comandos (coluna 4, linha do meio, tecla 'F' no layout de grade padrão)."
-END
-
-GUI:CommandSlot11
-"Posição 11 da Barra de Comandos"
-END
-
-GUI:CommandSlot11Description
-"Aciona a posição 11 da barra de comandos (coluna 5, linha do meio, tecla 'G' no layout de grade padrão)."
-END
-
-GUI:CommandSlot12
-"Posição 12 da Barra de Comandos"
-END
-
-GUI:CommandSlot12Description
-"Aciona a posição 12 da barra de comandos (coluna 6, linha do meio, tecla 'H' no layout de grade padrão)."
-END
-
-GUI:CommandSlot13
-"Posição 13 da Barra de Comandos"
-END
-
-GUI:CommandSlot13Description
-"Aciona a posição 13 da barra de comandos (coluna 1, linha inferior, tecla 'Z' no layout de grade padrão), onde fica o comando Evacuar, para os passageiros de uma unidade ou a guarnição de um edifício."
-END
-
-GUI:CommandSlot14
-"Posição 14 da Barra de Comandos"
-END
-
-GUI:CommandSlot14Description
-"Aciona a posição 14 da barra de comandos (coluna 2, linha inferior, tecla 'X' no layout de grade padrão), onde fica o comando Proteger."
-END
-
-GUI:CommandSlot15
-"Posição 15 da Barra de Comandos"
-END
-
-GUI:CommandSlot15Description
-"Aciona a posição 15 da barra de comandos (coluna 3, linha inferior, tecla 'C' no layout de grade padrão), onde fica o comando Manter Posição."
-END
-
-GUI:CommandSlot16
-"Posição 16 da Barra de Comandos"
-END
-
-GUI:CommandSlot16Description
-"Aciona a posição 16 da barra de comandos (coluna 4, linha inferior, tecla 'V' no layout de grade padrão)."
-END
-
-GUI:CommandSlot17
-"Posição 17 da Barra de Comandos"
-END
-
-GUI:CommandSlot17Description
-"Aciona a posição 17 da barra de comandos (coluna 5, linha inferior, tecla 'B' no layout de grade padrão), onde fica o Ponto de Encontro de um edifício."
-END
-
-GUI:CommandSlot18
-"Posição 18 da Barra de Comandos"
-END
-
-GUI:CommandSlot18Description
-"Aciona a posição 18 da barra de comandos (coluna 6, linha inferior, tecla 'N' no layout de grade padrão), onde fica o comando Vender."
-END
-
 GUI:Community
 "Porcentagem de vitórias do exército"
 END
@@ -5648,14 +5508,6 @@ END
 
 GUI:ControlBarMoneyDisplay
 "$ %d"
-END
-
-GUI:ControlBarMoneyEarning
-"$ %d  +%d/s"
-END
-
-GUI:ControlBarMoneyEarningMinute
-"$ %d  +%d/min"
 END
 
 GUI:ControlOptions
@@ -5812,6 +5664,10 @@ END
 
 GUI:Day
 "Dia (DD)"
+END
+
+GUI:DebrisTrails
+"Rastros de Destroços das Explosões"
 END
 
 GUI:DEBUG
@@ -5983,7 +5839,7 @@ GUI:DragTolerance
 END
 
 GUI:DrawScrollAnchor
-"Draw scroll anchor"
+"Mostrar Âncora de Rolagem"
 END
 
 GUI:EA
@@ -6136,6 +5992,10 @@ END
 
 GUI:FollowDescription
 "Faz com que as unidades sigam o(s) objeto(s) selecionado(s)."
+END
+
+GUI:FormationDrag
+"Arrastar uma Formação"
 END
 
 GUI:FullscreenScaling
@@ -6554,6 +6414,18 @@ GUI:HardCaps
 "DIFÍCIL"
 END
 
+GUI:HealthBarColors
+"Cor da Barra de Vida"
+END
+
+GUI:HealthBarColors0
+"Verde para Vermelho"
+END
+
+GUI:HealthBarColors1
+"Cor do Jogador"
+END
+
 GUI:HealthBars
 "Barras de Vida"
 END
@@ -6634,60 +6506,248 @@ GUI:HostWantsToStart
 "O host deseja iniciar a partida. Clique em Aceitar para confirmar."
 END
 
+GUI:HotkeysAlsoOn
+"Mesma tecla de %s."
+END
+
+GUI:HotkeysButtonMoved
+"O jogo deu a ele a letra de uma tecla fixa, então o launcher o mudou de tecla."
+END
+
+GUI:HotkeysCategoryCONTROL
+"Ordens"
+END
+
+GUI:HotkeysCategoryGRID
+"Barra de comando por posição"
+END
+
+GUI:HotkeysCategoryINFORMATION
+"Sinais e sinalizadores"
+END
+
+GUI:HotkeysCategoryINTERFACE
+"Interface"
+END
+
+GUI:HotkeysCategoryMISC
+"Câmera e chat"
+END
+
+GUI:HotkeysCategorySELECTION
+"Seleção"
+END
+
+GUI:HotkeysCategorySHORTCUTS
+"Poderes do general"
+END
+
+GUI:HotkeysCategoryTEAM
+"Times"
+END
+
+GUI:HotkeysChange
+"Alterar"
+END
+
+GUI:HotkeysClash
+"%s: %s usam esta mesma tecla. Só um deles fica com ela no jogo, e uma ordem fixa mantém a sua."
+END
+
+GUI:HotkeysClear
+"Sem tecla"
+END
+
+GUI:HotkeysCommandBar
+"Barra de comando"
+END
+
+GUI:HotkeysCommandBEGIN_CAMERA_ROTATE_LEFT
+"Girar a câmera para a esquerda"
+END
+
+GUI:HotkeysCommandBEGIN_CAMERA_ROTATE_RIGHT
+"Girar a câmera para a direita"
+END
+
+GUI:HotkeysCommandBEGIN_CAMERA_ZOOM_IN
+"Aproximar"
+END
+
+GUI:HotkeysCommandBEGIN_CAMERA_ZOOM_OUT
+"Afastar"
+END
+
+GUI:HotkeysCommandCAMERA_RESET
+"Redefinir a câmera"
+END
+
+GUI:HotkeysCommandCHAT_ALLIES
+"Chat com aliados"
+END
+
+GUI:HotkeysCommandCHAT_EVERYONE
+"Chat com todos"
+END
+
+GUI:HotkeysCommandDELETE_BEACON
+"Apagar sinalizador"
+END
+
+GUI:HotkeysCommandDIPLOMACY
+"Diplomacia"
+END
+
+GUI:HotkeysCommandPLACE_BEACON
+"Colocar sinalizador"
+END
+
+GUI:HotkeysCommands
+"Comandos"
+END
+
+GUI:HotkeysCommandSELECT_ALL
+"Selecionar todas as unidades"
+END
+
+GUI:HotkeysCommandSELECT_ALL_AIRCRAFT
+"Selecionar todas as aeronaves"
+END
+
+GUI:HotkeysCommandSELECT_ALL_AIRFIELDS
+"Selecionar todas as bases aéreas"
+END
+
+GUI:HotkeysCommandSELECT_ALL_BARRACKS
+"Selecionar todos os quartéis"
+END
+
+GUI:HotkeysCommandSELECT_ALL_MILITARY
+"Selecionar todas as unidades de combate"
+END
+
+GUI:HotkeysCommandSELECT_ALL_VEHICLES
+"Selecionar todos os veículos"
+END
+
+GUI:HotkeysCommandSELECT_ALL_WARFACTORIES
+"Selecionar todas as fábricas de armamentos"
+END
+
+GUI:HotkeysCommandSELECT_HERO
+"Selecionar herói"
+END
+
+GUI:HotkeysCommandSELECT_NEXT_IDLE_UNIT
+"Próxima unidade ociosa"
+END
+
+GUI:HotkeysCommandSELECT_NEXT_IDLE_WORKER
+"Próximo trabalhador ocioso"
+END
+
+GUI:HotkeysCommandSELECT_NEXT_WORKER
+"Próximo trabalhador"
+END
+
+GUI:HotkeysCommandSELECT_PREV_WORKER
+"Trabalhador anterior"
+END
+
+GUI:HotkeysCommandSIGNAL_ATTACK
+"Sinal: atacar aqui"
+END
+
+GUI:HotkeysCommandSIGNAL_ATTENTION
+"Sinal: olhar aqui"
+END
+
+GUI:HotkeysCommandSIGNAL_DEFEND
+"Sinal: defender aqui"
+END
+
+GUI:HotkeysCommandTOGGLE_CAMERA_TRACKING_DRAWABLE
+"Câmera segue a seleção"
+END
+
+GUI:HotkeysCommandTOGGLE_FAST_FORWARD_REPLAY
+"Acelerar o replay"
+END
+
+GUI:HotkeysCommandTOGGLE_PAUSE
+"Pausar (um jogador e replays)"
+END
+
+GUI:HotkeysCommandTOGGLE_PURCHASE_SCIENCE
+"Promoções do general"
+END
+
+GUI:HotkeysDefault
+"Tecla do jogo"
+END
+
+GUI:HotkeysFamilyAddTeam
+"Adicionar seleção ao time %d"
+END
+
+GUI:HotkeysFamilySaveView
+"Definir câmera %d"
+END
+
+GUI:HotkeysFamilyShortcut
+"Poder do general %d"
+END
+
+GUI:HotkeysFamilySlot
+"Posição %d da barra de comando"
+END
+
+GUI:HotkeysFamilyViewView
+"Ver câmera %d"
+END
+
+GUI:HotkeysFixed
+"Uma tecla fixa em toda barra: A mover e atacar, S parar, G proteger, Y ponto de encontro, V evacuar, C invasão de combate, N vender, H minas, rede de camuflagem e a troca da construção falsa."
+END
+
+GUI:HotkeysForceAttack
+"Segure para atirar no que estiver sob o cursor. Shift mais esta tecla ainda desenha uma caixa de seleção. O padrão é Ctrl."
+END
+
+GUI:HotkeysGameKey
+"A tecla original do jogo é %s."
+END
+
+GUI:HotkeysMoved
+"Tirada das teclas da barra de comando; a tecla do jogo é %s."
+END
+
+GUI:HotkeysNone
+"nenhuma"
+END
+
+GUI:HotkeysOnFixedKey
+"Também é uma tecla da barra de comando: dispara junto com o botão que a tem."
+END
+
+GUI:HotkeysPick
+"Escolha um comando ou um botão e depois clique duas vezes nele ou pressione Alterar."
+END
+
+GUI:HotkeysPressForceAttack
+"Pressione uma tecla, ou só Ctrl ou Alt. Shift não pode ser a tecla de segurar. Esc cancela."
+END
+
+GUI:HotkeysPressKey
+"Pressione uma tecla, ou Esc para cancelar"
+END
+
+GUI:HotkeysPressLetter
+"Pressione uma letra, ou Esc para cancelar"
+END
+
 GUI:HTTPProxy
 "Proxy HTTP:"
-END
-
-GUI:HudAlertBuilt
-"%s: construção concluída"
-END
-
-GUI:HudAlertLaunched
-"%s disparou"
-END
-
-GUI:HudAlertReady
-"%s pode disparar"
-END
-
-GUI:HudArmies
-"Exércitos"
-END
-
-GUI:HudCamera
-"Câmera"
-END
-
-GUI:HudCameraDirector
-"Diretor"
-END
-
-GUI:HudCameraFree
-"Livre"
-END
-
-GUI:HudCameraPlayer
-"Câmera do jogador"
-END
-
-GUI:HudFog
-"Névoa de guerra"
-END
-
-GUI:HudFollow
-"Jogador"
-END
-
-GUI:HudFollowNobody
-"Nenhum"
-END
-
-GUI:HudGameStats
-"Estatísticas"
-END
-
-GUI:HudNetWorth
-"Patrimônio"
 END
 
 GUI:HudNoDozerLeft
@@ -6702,84 +6762,12 @@ GUI:HudOverlay
 "Informações Extras da Interface"
 END
 
-GUI:HudPowerUsed
-"em ação"
-END
-
 GUI:HudProductionStrip
 "Fila de produção"
 END
 
-GUI:HudPromotionBought
-"agora disponível"
-END
-
-GUI:HudScale
-"Tamanho da Interface"
-END
-
-GUI:HudScale0
-"100%"
-END
-
-GUI:HudScale1
-"115%"
-END
-
-GUI:HudScale2
-"130%"
-END
-
-GUI:HudScale3
-"150%"
-END
-
-GUI:HudSkillStrip
-"Promoções dos Generais"
-END
-
 GUI:HudStatArmy
 "Valor do exército"
-END
-
-GUI:HudStatCash
-"Dinheiro"
-END
-
-GUI:HudStatIncome
-"Renda por minuto"
-END
-
-GUI:HudStatKills
-"Abates / perdas"
-END
-
-GUI:HudStatPower
-"Energia"
-END
-
-GUI:HudStatRank
-"Patente do General"
-END
-
-GUI:HudStructureBuilt
-"construção concluída"
-END
-
-GUI:HudStructureStarted
-"em construção"
-END
-
-GUI:HudSuperweaponLaunched
-"disparou"
-END
-
-GUI:HudSuperweaponReady
-"pode disparar"
-END
-
-GUI:HudSuperweaponStrip
-"Temporizadores de superarmas"
 END
 
 GUI:HudToggles
@@ -6796,22 +6784,6 @@ END
 
 GUI:IgnoreSm
 "Ignorar"
-END
-
-GUI:IncomeRate
-"Renda Exibida"
-END
-
-GUI:IncomeRate0
-"Por Segundo"
-END
-
-GUI:IncomeRate1
-"Por Minuto"
-END
-
-GUI:IncomeRate2
-"Automático"
 END
 
 GUI:IncomeSharing
@@ -6942,6 +6914,34 @@ GUI:KeyboardOptions
 "OPÇÕES DE TECLADO"
 END
 
+GUI:KickVoteBanner
+"Expulsar %ls?   Sim %d de %d   /yes ou /no   %d s"
+END
+
+GUI:KickVoteFailed
+"A votação para expulsar %ls fracassou."
+END
+
+GUI:KickVoteKicked
+"%ls foi expulso da partida por votação."
+END
+
+GUI:KickVoteNone
+"Não há votação aberta. Digite /kick e o nome de um jogador para iniciar uma."
+END
+
+GUI:KickVoteNoPlayer
+"Nenhum jogador chamado %ls está na partida."
+END
+
+GUI:KickVoteStarted
+"%ls quer %ls fora da partida. Digite /yes ou /no no chat: cada um dos outros jogadores tem 30 segundos para concordar."
+END
+
+GUI:KickVoteTooFew
+"Uma votação de expulsão precisa de pelo menos dois outros jogadores além de quem você quer expulsar."
+END
+
 GUI:Ladder
 "Competição"
 END
@@ -7054,12 +7054,28 @@ GUI:Level
 "Nível"
 END
 
+GUI:LightingStyle
+"Iluminação"
+END
+
+GUI:LightingStyle0
+"Clássica"
+END
+
+GUI:LightingStyle1
+"Reforged"
+END
+
 GUI:LimitArmies
 "Limite de Exércitos"
 END
 
 GUI:LimitSuperweapons
 "Limite de Superarmas"
+END
+
+GUI:ListMore
+"+%d mais"
 END
 
 GUI:Load
@@ -7162,6 +7178,10 @@ GUI:MainMenuLoadReplay
 "CARREGAR REPLAY"
 END
 
+GUI:MapCorrupt
+"O mapa %ls está danificado e não pode ser jogado."
+END
+
 GUI:MapName:
 "Mapa:"
 END
@@ -7208,6 +7228,10 @@ END
 
 GUI:MediumGameSpeed
 "Médio"
+END
+
+GUI:MenuTransitionSpeed
+"Velocidade de Transição dos Menus"
 END
 
 GUI:MessagesOn
@@ -7267,7 +7291,7 @@ GUI:MouseType
 END
 
 GUI:MoveScrollAnchor
-"Move scroll anchor"
+"Mover Âncora de Rolagem"
 END
 
 GUI:MSAA
@@ -7514,8 +7538,12 @@ GUI:OptionsGroupLighting
 "Luz e Brilho"
 END
 
+GUI:OptionsGroupMenus
+"Menus"
+END
+
 GUI:OptionsGroupOrders
-"Ordens"
+"Mouse e Ordens"
 END
 
 GUI:OptionsGroupParticles
@@ -7532,6 +7560,10 @@ END
 
 GUI:OptionsGroupProxy
 "Proxy"
+END
+
+GUI:OptionsGroupReplays
+"Replays"
 END
 
 GUI:OptionsGroupScreen
@@ -7566,6 +7598,10 @@ GUI:OptionsTabGraphics
 "Gráficos"
 END
 
+GUI:OptionsTabHotkeys
+"Atalhos"
+END
+
 GUI:OptionsTabInterface
 "Interface"
 END
@@ -7574,16 +7610,8 @@ GUI:OptionsTabNetwork
 "Rede"
 END
 
-GUI:OrderForceAttack
-"Ataque Forçado"
-END
-
 GUI:OrderForceAttackDescription
 "O próximo clique ataca o que estiver sob o cursor, inclusive o chão e o seu próprio lado. Clique no botão de novo para cancelar."
-END
-
-GUI:OrderHoldPosition
-"Manter Posição"
 END
 
 GUI:OrderHoldPositionDescription
@@ -7594,24 +7622,12 @@ GUI:OrderLines
 "Linhas de Ordens"
 END
 
-GUI:OrderMove
-"Mover"
-END
-
 GUI:OrderMoveDescription
 "O próximo clique no chão manda as unidades selecionadas para lá. Se arrastar, elas se espalham ao longo da linha que você desenhar."
 END
 
-GUI:OrderStanceAggressive
-"Postura: Agressiva"
-END
-
 GUI:OrderStanceAggressiveDescription
 "As unidades selecionadas vão atrás de qualquer inimigo que virem e o perseguem. Clique para deixá-las defensivas de novo: só atiram no que entrar no alcance e ficam onde estão."
-END
-
-GUI:OrderStanceDefensive
-"Postura: Defensiva"
 END
 
 GUI:OrderStanceDefensiveDescription
@@ -7954,6 +7970,10 @@ GUI:ReplayMenu
 "CARREGAR JOGO/REPLAY"
 END
 
+GUI:ReplayResume
+"Retomar"
+END
+
 GUI:ReplaySaved
 "Replay Salvo"
 END
@@ -8055,11 +8075,15 @@ GUI:SaveAndLoad
 END
 
 GUI:SaveCamera
-"Save camera in replays"
+"Gravar Minha Câmera"
 END
 
 GUI:SaveDate
 "Data"
+END
+
+GUI:SaveFromOlderGame
+"Este jogo salvo foi feito pelo jogo original ou por uma versão antiga do Reforged e não pode ser carregado."
 END
 
 GUI:SaveGame
@@ -8118,52 +8142,8 @@ GUI:Score
 "Pontuação"
 END
 
-GUI:ScoreboardAllies
-"SEU LADO"
-END
-
-GUI:ScoreboardDeaths
-"M"
-END
-
-GUI:ScoreboardEnemies
-"INIMIGOS"
-END
-
 GUI:ScoreboardFavourite
 "FAVORITO"
-END
-
-GUI:ScoreboardKills
-"A"
-END
-
-GUI:ScoreboardLevel
-"NÍVEL"
-END
-
-GUI:ScoreboardMoney
-"DINHEIRO"
-END
-
-GUI:ScoreboardPerMinute
-"POR MIN"
-END
-
-GUI:ScoreboardPerSecond
-"POR SEG"
-END
-
-GUI:ScoreboardPlayer
-"JOGADOR"
-END
-
-GUI:ScoreboardPowers
-"PODERES"
-END
-
-GUI:ScoreboardTeam
-"EQUIPE"
 END
 
 GUI:ScoreScreen
@@ -8202,48 +8182,8 @@ GUI:SelectAllAircraftDescription
 "Seleciona todas as Aeronaves"
 END
 
-GUI:SelectAllAirfields
-"Selecionar Bases Aéreas"
-END
-
-GUI:SelectAllAirfieldsDescription
-"Seleciona suas bases aéreas e helipontos visíveis na tela. Pressione novamente para selecioná-los no mapa inteiro."
-END
-
-GUI:SelectAllBarracks
-"Selecionar Quartéis"
-END
-
-GUI:SelectAllBarracksDescription
-"Seleciona os edifícios que produzem infantaria visíveis na tela. Pressione novamente para selecioná-los no mapa inteiro."
-END
-
 GUI:SelectAllDescription
 "Seleciona todas as unidades militares."
-END
-
-GUI:SelectAllMilitary
-"Selecionar Unidades Militares"
-END
-
-GUI:SelectAllMilitaryDescription
-"Seleciona suas unidades armadas visíveis na tela. Pressione novamente para selecioná-las no mapa inteiro."
-END
-
-GUI:SelectAllVehicles
-"Selecionar Veículos"
-END
-
-GUI:SelectAllVehiclesDescription
-"Seleciona seus veículos terrestres visíveis na tela, sem incluir Construtores e Trabalhadores. Pressione novamente para selecionar no mapa inteiro."
-END
-
-GUI:SelectAllWarFactories
-"Selecionar Fábricas de Armamentos"
-END
-
-GUI:SelectAllWarFactoriesDescription
-"Seleciona os edifícios que produzem veículos visíveis na tela. Pressione novamente para selecioná-los no mapa inteiro."
 END
 
 GUI:SelectAMap
@@ -8276,22 +8216,6 @@ END
 
 GUI:SelectMap
 "MAPAS"
-END
-
-GUI:SelectNextIdleUnit
-"Selecionar Próxima Unidade Ociosa"
-END
-
-GUI:SelectNextIdleUnitDescription
-"Seleciona a próxima unidade de combate sem ordens e centraliza a câmera nela."
-END
-
-GUI:SelectNextIdleWorker
-"Selecionar Próxima Unidade de Construção Ociosa"
-END
-
-GUI:SelectNextIdleWorkerDescription
-"Seleciona o próximo Construtor ou Trabalhador sem tarefa e centraliza a câmera nele."
 END
 
 GUI:SelectNextUnit
@@ -8430,6 +8354,22 @@ GUI:SFXVolume
 "Volume - Efeitos Sonoros"
 END
 
+GUI:ShadowQuality
+"Qualidade das Sombras"
+END
+
+GUI:ShadowQuality0
+"Baixa"
+END
+
+GUI:ShadowQuality1
+"Média"
+END
+
+GUI:ShadowQuality2
+"Alta"
+END
+
 GUI:Shadows
 "Sombras"
 END
@@ -8440,70 +8380,6 @@ END
 
 GUI:Shadows3D
 "Sombras Projetadas"
-END
-
-GUI:ShortcutSlot01
-"Poder do General 1"
-END
-
-GUI:ShortcutSlot01Description
-"Aciona o primeiro botão da barra de poderes do General, no canto superior direito."
-END
-
-GUI:ShortcutSlot02
-"Poder do General 2"
-END
-
-GUI:ShortcutSlot02Description
-"Aciona o segundo botão da barra de poderes do General, no canto superior direito."
-END
-
-GUI:ShortcutSlot03
-"Poder do General 3"
-END
-
-GUI:ShortcutSlot03Description
-"Aciona o terceiro botão da barra de poderes do General, no canto superior direito."
-END
-
-GUI:ShortcutSlot04
-"Poder do General 4"
-END
-
-GUI:ShortcutSlot04Description
-"Aciona o quarto botão da barra de poderes do General, no canto superior direito."
-END
-
-GUI:ShortcutSlot05
-"Poder do General 5"
-END
-
-GUI:ShortcutSlot05Description
-"Aciona o quinto botão da barra de poderes do General, no canto superior direito."
-END
-
-GUI:ShortcutSlot06
-"Poder do General 6"
-END
-
-GUI:ShortcutSlot06Description
-"Aciona o sexto botão da barra de poderes do General, no canto superior direito."
-END
-
-GUI:ShortcutSlot07
-"Poder do General 7"
-END
-
-GUI:ShortcutSlot07Description
-"Aciona o sétimo botão da barra de poderes do General, no canto superior direito."
-END
-
-GUI:ShortcutSlot08
-"Poder do General 8"
-END
-
-GUI:ShortcutSlot08Description
-"Aciona o oitavo botão da barra de poderes do General, no canto superior direito."
 END
 
 GUI:ShortDescription
@@ -8526,10 +8402,6 @@ GUI:SignalAttack
 "Sinal: Atacar"
 END
 
-GUI:SignalAttackDescription
-"Cria por dez segundos uma fumaça da sua cor e espadas cruzadas no chão, no ponto do cursor ou do radar. Apenas seus aliados os veem."
-END
-
 GUI:SignalAttackLabel
 "ATACAR"
 END
@@ -8542,10 +8414,6 @@ GUI:SignalAttention
 "Sinal: Olhe Aqui"
 END
 
-GUI:SignalAttentionDescription
-"Cria por dez segundos uma fumaça da sua cor e um olho no chão, no ponto do cursor ou do radar. Apenas seus aliados os veem."
-END
-
 GUI:SignalAttentionLabel
 "OLHE"
 END
@@ -8556,10 +8424,6 @@ END
 
 GUI:SignalDefend
 "Sinal: Defender"
-END
-
-GUI:SignalDefendDescription
-"Cria por dez segundos uma fumaça da sua cor e um escudo no chão, no ponto do cursor ou do radar. Apenas seus aliados os veem."
 END
 
 GUI:SignalDefendLabel
@@ -8618,8 +8482,8 @@ GUI:Smoke2
 "Muito Densa"
 END
 
-GUI:SmoothMotion
-"Movimento Suave"
+GUI:SmokeFireLighting
+"Fumaça Iluminada pelo Fogo"
 END
 
 GUI:SmoothWater
@@ -8684,6 +8548,10 @@ END
 
 GUI:StartingMoneyFormat
 "$%u"
+END
+
+GUI:StartingMoneyUnlimited
+"Ilimitado"
 END
 
 GUI:Stats
@@ -8978,22 +8846,6 @@ GUI:ToggleOnOff
 "Efeitos Visuais"
 END
 
-GUI:TogglePause
-"Pausar"
-END
-
-GUI:TogglePauseDescription
-"Pausa ou retoma o jogo. Apenas em um jogador e replays."
-END
-
-GUI:TogglePurchaseScience
-"Promoções do General"
-END
-
-GUI:TogglePurchaseScienceDescription
-"Abre e fecha a tela de promoções do General."
-END
-
 GUI:TooManyBeacons
 "Desculpe, você não pode colocar mais Sinalizadores"
 END
@@ -9111,7 +8963,7 @@ GUI:UseAccount
 END
 
 GUI:UseCamera
-"Use saved camera in replays"
+"Seguir a Câmera Gravada"
 END
 
 GUI:UserMaps
@@ -9246,6 +9098,10 @@ GUI:VoiceVolume
 "Volume - Vozes"
 END
 
+GUI:VolumetricSmoke
+"Fumaça Volumétrica"
+END
+
 GUI:VSync
 "Sincronização Vertical"
 END
@@ -9332,14 +9188,6 @@ END
 
 GUI:WinStreak
 "Série de Vitórias"
-END
-
-GUI:WireframeNotice
-"Interface Reforged: prévia"
-END
-
-GUI:WireframeNotice2
-"A arte final está a caminho"
 END
 
 GUI:WOLIconKey
@@ -9886,6 +9734,10 @@ LAN:ErrorGameStarted
 "Esta partida já foi iniciada."
 END
 
+LAN:ErrorModMismatch
+"Este jogo usa mods diferentes. Mods do host: %s. Inicie o jogo com os mesmos mods, na mesma ordem, para entrar."
+END
+
 LAN:ErrorNoGameSelected
 "Selecione uma partida primeiro."
 END
@@ -9920,6 +9772,10 @@ END
 
 LAN:NeedMoreTeams
 "São necessárias pelo menos 2 equipes para iniciar a partida."
+END
+
+LAN:NoMod
+"nenhum"
 END
 
 LAN:OK
@@ -15594,16 +15450,16 @@ TOOLTIP:BuddyPlayer
 "Seu Amigo %s"
 END
 
-TOOLTIP:BuildTimeSeconds
-"\nTempo %ds"
-END
-
 TOOLTIP:BuildTooltips
 "Os botões de construção mostram custo, tempo de construção e pré-requisitos."
 END
 
 TOOLTIP:BuildupAnimations
 "Exibe animações adicionais durante a construção de estruturas. Desative esta opção para melhorar o desempenho do jogo."
+END
+
+TOOLTIP:BuildWithoutWorker
+"Sem nada selecionado, a barra de comando mostra os edifícios dos seus trabalhadores, e o trabalhador ocioso mais próximo do local vai construir. Desativado, a barra fica vazia até você selecionar um trabalhador, como em 2003."
 END
 
 TOOLTIP:ButtonClear
@@ -15714,6 +15570,10 @@ TOOLTIP:CustomMatch
 "Clique aqui para conectar-se à Sala de Partida Personalizada, onde você poderá conhecer e conversar com outros jogadores."
 END
 
+TOOLTIP:DebrisTrails
+"Explosões lançam fragmentos que deixam rastro de fumaça, e os destroços soltam estilhaços em chamas. Desativado, as explosões ficam como as originais. Entra em vigor ao clicar em Aceitar."
+END
+
 TOOLTIP:DeleteAccount
 "Apagar sua conta atual."
 END
@@ -15740,6 +15600,10 @@ END
 
 TOOLTIP:DragTolerance
 "Quantos pixels o mouse pode se mover com um botão pressionado antes de um clique virar um arrasto. Aumente se caixas de seleção começarem sem querer; diminua se arrastos forem lidos como cliques."
+END
+
+TOOLTIP:DrawScrollAnchor
+"Coloca um marcador onde começou a rolagem arrastando com o botão direito."
 END
 
 TOOLTIP:EdgeScrollWindowed
@@ -15784,6 +15648,10 @@ END
 
 TOOLTIP:FireWallPort
 "Porta aberta no firewall:"
+END
+
+TOOLTIP:FormationDrag
+"Arrastar com uma ordem de mover, mover e atacar ou proteger armada espalha as unidades ao longo da linha que você desenhar."
 END
 
 TOOLTIP:FreeForAll
@@ -15854,6 +15722,10 @@ TOOLTIP:HasConflictingUpgradeDefault
 "Atualizações conflitantes não podem ser compradas."
 END
 
+TOOLTIP:HealthBarColors
+"Verde com a vida cheia, passando pelo amarelo até o vermelho, ou cada barra na cor do dono, para você ver de quem é. Unidades desativadas continuam azuis."
+END
+
 TOOLTIP:HealthBars
 "Inteligente mostra uma barra sobre qualquer unidade danificada, além da seleção e do objeto sob o cursor. Apenas Seleção reproduz o comportamento do jogo original."
 END
@@ -15866,6 +15738,18 @@ TOOLTIP:Help
 ""
 END
 
+TOOLTIP:HotkeyChange
+"Espera uma nova tecla para o comando ou botão selecionado. Um clique duplo ou Enter sobre ele faz o mesmo."
+END
+
+TOOLTIP:HotkeyClear
+"Tira a tecla do comando ou botão selecionado."
+END
+
+TOOLTIP:HotkeyDefault
+"Devolve a tecla original do jogo. As teclas são gravadas ao clicar em Aceitar."
+END
+
 TOOLTIP:HTTPProxy
 "Defina um Proxy HTTP para ser usado pelo C&C Generals Zero Hour Online"
 END
@@ -15874,20 +15758,12 @@ TOOLTIP:HudOverlay
 "Mostra informações adicionais no topo da tela, como energia, renda e a fila de produção."
 END
 
-TOOLTIP:HudScale
-"Desenha a barra de comando e o resto da interface inferior maiores do que a sua resolução faria. Na interface clássica, a barra de comando mantém o tamanho original."
-END
-
 TOOLTIP:IgnoreButton
 "Ignorar jogador"
 END
 
 TOOLTIP:IgnoredModifier
 "(ignorado)"
-END
-
-TOOLTIP:IncomeRate
-"Em que período é contada a renda ao lado dos seus recursos. Automático mostra por minuto enquanto você ganha menos de $10 por segundo, quando um número inteiro por segundo esconde a maior parte da variação, e por segundo acima disso."
 END
 
 TOOLTIP:IncomeSharing
@@ -15936,6 +15812,10 @@ END
 
 TOOLTIP:LANPlayer
 "%ls@%ls"
+END
+
+TOOLTIP:LightingStyle
+"Reforged dá a cada mapa um sol mais forte e mais quente, faces mais escuras na sombra e sombras mais profundas, mantendo a hora do dia. Clássica é a luz chapada de 2003, e os Gráficos Clássicos sempre a usam. Entra em vigor no próximo mapa."
 END
 
 TOOLTIP:LimitArmies
@@ -16010,6 +15890,10 @@ TOOLTIP:matchingprogress
 "Mostra o progresso enquanto o QuickMatch procura um oponente."
 END
 
+TOOLTIP:MenuTransitionSpeed
+"A velocidade com que os menus deslizam e se apagam. 100 é a velocidade original."
+END
+
 TOOLTIP:MiddleMousePans
 "Mantenha o botão do meio pressionado para arrastar o mapa sob o cursor."
 END
@@ -16032,6 +15916,10 @@ END
 
 TOOLTIP:Monitor
 "Define o monitor em que o jogo é exibido. A lista de resoluções abaixo mostra os tamanhos que este monitor suporta. Aplicado ao aceitar as alterações."
+END
+
+TOOLTIP:MoveScrollAnchor
+"O marcador de rolagem segue o cursor, nunca mais de meia tela atrás, para que um arrasto longo não fique acelerando sem parar."
 END
 
 TOOLTIP:MSAA
@@ -16238,6 +16126,10 @@ TOOLTIP:ReturnToGame
 "VOLTAR PARA O JOGO"
 END
 
+TOOLTIP:SaveCamera
+"Os movimentos da sua câmera são gravados nos seus replays de partidas de um jogador e de combate."
+END
+
 TOOLTIP:SaveGame
 "Clique aqui para salvar seu jogo em andamento."
 END
@@ -16274,6 +16166,10 @@ TOOLTIP:SetLocale
 "Alterar sua Localização atual."
 END
 
+TOOLTIP:ShadowQuality
+"A nitidez das sombras das unidades e dos edifícios. Alta usa cerca de 64 MB de memória de vídeo; Baixa libera memória numa placa fraca. Só no Direct3D 11, e não com Gráficos Clássicos. Entra em vigor ao clicar em Aceitar."
+END
+
 TOOLTIP:Shadows
 "Ativa/Desativa a exibição de sombras no jogo. Pode causar lentidão quando ativada."
 END
@@ -16298,8 +16194,8 @@ TOOLTIP:Smoke
 "Define por quanto tempo a fumaça permanece no ar e sua densidade. Entre os 1.088 efeitos do jogo, 175 são de fumaça. Muito Densa custou cerca de 0,7 ms por quadro em uma coluna em chamas durante os testes. Entra em vigor na próxima inicialização do jogo."
 END
 
-TOOLTIP:SmoothMotion
-"As unidades são desenhadas entre os 30 passos por segundo do jogo, para se moverem com suavidade numa tela rápida. A imagem fica um passo (33 ms) atrás; o jogo em si não muda."
+TOOLTIP:SmokeFireLighting
+"A fumaça ao lado de um fogo ganha a luz laranja dele. Entra em vigor ao clicar em Aceitar."
 END
 
 TOOLTIP:SmoothWater
@@ -16418,24 +16314,8 @@ TOOLTIP:StatSeconds
 "%ds"
 END
 
-TOOLTIP:StatShortDamagePerSecond
-"DPS"
-END
-
 TOOLTIP:StatTime
 "Tempo de construção"
-END
-
-TOOLTIP:StatVsGuns
-"Bala"
-END
-
-TOOLTIP:StatVsRockets
-"Míssil"
-END
-
-TOOLTIP:StatVsShells
-"Canhão"
 END
 
 TOOLTIP:StopSearch
@@ -16460,10 +16340,6 @@ END
 
 TOOLTIP:SupplyWarehouse
 "\n Restam $%d."
-END
-
-TOOLTIP:SupplyWarehousePercent
-"\n $%d restantes (%d%%)"
 END
 
 TOOLTIP:TankTreads
@@ -16554,6 +16430,10 @@ TOOLTIP:UseAccount
 "Entrar no C&C Generals Zero Hour Online"
 END
 
+TOOLTIP:UseCamera
+"Um replay segue a câmera que o jogador gravou, em vez de deixar a câmera livre para você."
+END
+
 TOOLTIP:UseStats
 "Define se as estatísticas desta partida serão registradas no servidor do C&C Generals Zero Hour."
 END
@@ -16564,6 +16444,10 @@ END
 
 TOOLTIP:UseStatsOn
 "As estatísticas desta partida SERÃO registradas no servidor do C&C Generals Zero Hour."
+END
+
+TOOLTIP:VolumetricSmoke
+"Fumaça e poeira sombreiam o chão, as unidades e a fumaça atrás delas conforme a espessura. Só no Direct3D 11, com um pequeno custo em batalhas grandes. Entra em vigor ao clicar em Aceitar."
 END
 
 TOOLTIP:Vote
@@ -16580,10 +16464,6 @@ END
 
 TOOLTIP:WaterWaves
 "Ativa/Desativa a animação de ondas nas margens. Desative esta opção para melhorar o desempenho do jogo."
-END
-
-TOOLTIP:WeaponStats
-"Dano %d  Alcance %d"
 END
 
 TOOLTIP:WeatherEffects
