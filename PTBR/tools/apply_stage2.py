@@ -5,6 +5,10 @@ import sys
 
 MARKER = "ReforgedPTBRLanguageInitialized"
 
+# Âncoras do upstream que o passo 12 estende; o validador confere as duas.
+FORK_OWNED_LANGUAGES = '\t\t|| starts("data\\\\turkish\\\\") || starts("data\\\\german\\\\")\n'
+TEST_UNDER_DATA = '\t\tconst char *underData[] = { "INI/", "Scripts/", "Turkish/", "German/" };\n'
+
 def die(msg):
     raise SystemExit("STAGE02: " + msg)
 
@@ -207,6 +211,16 @@ def main():
         "/* -language <english|turkish|german>: ",
         "/* -language <english|turkish|german|portuguese>: "
     )
+
+    # 12) Data\PortugueseBrazil is the edition's, as Data\Turkish and Data\German are upstream's: a -mod
+    #     never replaces the text, the videos or the screens there. Since 3.0 a test walks Code/Data,
+    #     where stage 3 puts that tree, and fails on a file outside FileSystem::isForkOwnedPath.
+    p = code / "GameEngine" / "Source" / "Common" / "System" / "FileSystem.cpp"
+    replace_once(p, FORK_OWNED_LANGUAGES, FORK_OWNED_LANGUAGES.replace(
+        'starts("data\\\\german\\\\")',
+        'starts("data\\\\german\\\\") || starts("data\\\\portuguesebrazil\\\\")'))
+    p = code / "Tests" / "test_gameengine.cpp"
+    replace_once(p, TEST_UNDER_DATA, TEST_UNDER_DATA.replace('"German/" };', '"German/", "PortugueseBrazil/" };'))
 
     # 11) Seed locale file.
     src = pkg / "payload" / "GeneralsMD" / "Code" / "Data" / "PortugueseBrazil" / "Generals.str"

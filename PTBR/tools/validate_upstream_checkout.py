@@ -149,6 +149,13 @@ def validate(repo):
     need(test, NETBOX_TEST, "test_gameengine net box default check")
     result["checks"]["net_box_anchors"] = "PASS"
 
+    # Stage 2, step 12: Data\PortugueseBrazil joins the trees a -mod never replaces.
+    from apply_stage2 import FORK_OWNED_LANGUAGES, TEST_UNDER_DATA
+    fs = (code/"GameEngine/Source/Common/System/FileSystem.cpp").read_text(encoding="utf-8-sig")
+    need(fs, FORK_OWNED_LANGUAGES, "FileSystem.cpp fork-owned language trees")
+    need((code/"Tests/test_gameengine.cpp").read_text(encoding="utf-8-sig"), TEST_UNDER_DATA, "test_gameengine shipped masters under Data")
+    result["checks"]["fork_owned_anchors"] = "PASS"
+
     # Stage 14: lobby AI difficulty names.
     info = (code/"GameEngine/Source/GameNetwork/GameInfo.cpp").read_text(encoding="utf-8-sig")
     need(info, "/** What a seat is called wherever one is listed: the lobby's drop-down, the seat itself, the game\n", "GameInfo.cpp SlotStateName comment")

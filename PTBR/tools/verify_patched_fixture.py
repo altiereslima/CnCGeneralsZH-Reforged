@@ -120,6 +120,12 @@ def main():
         raise RuntimeError("missing postcondition: Data/Install_Final.bmp is not the edition's splash")
     checks["splash_own_size"]="PASS"
 
+    fs=(code/"GameEngine/Source/Common/System/FileSystem.cpp").read_text(encoding="utf-8")
+    need(fs,'starts("data\\\\german\\\\") || starts("data\\\\portuguesebrazil\\\\")',"Data\\PortugueseBrazil is fork-owned")
+    test=(code/"Tests/test_gameengine.cpp").read_text(encoding="utf-8")
+    need(test,'"Turkish/", "German/", "PortugueseBrazil/" };',"shipped-masters test keeps Data\\ in front of PortugueseBrazil")
+    checks["fork_owned_locale"]="PASS"
+
     loc=code/"Data/PortugueseBrazil"
     miss_core=[x for x in CORE_LOCALE_FILES if not (loc/x).is_file()]
     if miss_core:

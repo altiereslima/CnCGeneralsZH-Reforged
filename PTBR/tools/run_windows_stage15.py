@@ -29,6 +29,7 @@ PATCHED_SOURCE_FILES = [
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DPushButton.cpp",
     "GeneralsMD/Code/Main/WinMain.cpp",
     "GeneralsMD/Code/GameEngine/Source/Common/CommandLine.cpp",
+    "GeneralsMD/Code/GameEngine/Source/Common/System/FileSystem.cpp",
 ]
 
 # Casos de teste que falham sem culpa do patch PT-BR. Só estes nomes são tolerados;
@@ -41,6 +42,10 @@ KNOWN_UPSTREAM_TEST_FAILURES = {
     # Compara o corte do alpha test entre Direct3D 9 e 11. Com GPU os dois usam o mesmo
     # driver; no runner sem GPU são dois rasterizadores de software e diferem em uma coluna.
     "pixelcentre_the_two_runtimes_cut_the_same_pixels",
+    # O upstream b9576a4e (3.1.0) fez a câmera seguir o cursor enquanto o botão segura o radar e
+    # não atualizou este teste, que ainda espera que o arrasto deixe a câmera parada. Nada do
+    # patch PT-BR toca no radar (ControlBarCallback.cpp) nem no teste.
+    "minimap_classic_looks_on_the_press_in_both_mouse_setups",
 }
 
 CORE_LOCALE_FILES=["Generals.str","Language.ini"]
