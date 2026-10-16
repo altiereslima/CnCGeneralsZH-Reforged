@@ -26,10 +26,12 @@ LZH_COMMIT = "dfd96e2ca64adaddb35dd4ebadd6add7d5586783"
 # Mesmo commit que GeneralsMD/Code/Tools/vendor.ps1 usa (min-dx8-sdk @ 7bddff8).
 DX8_REPO = "https://github.com/TheSuperHackers/min-dx8-sdk.git"
 DX8_COMMIT = "7bddff8c01f5fb931c3cb73d4aa8e66d303d97bc"
-LITEHTML_COMMIT = "9bc84b8b8d15a4e50f18b327aa30955048b441c2"
-NANOSVG_COMMIT = "239e102ec2c691f2902e20ace2ed36ee4a35cfe6"
-LITEHTML_URL = f"https://github.com/litehtml/litehtml/archive/{LITEHTML_COMMIT}.zip"
-NANOSVG_URL = f"https://github.com/memononen/nanosvg/archive/{NANOSVG_COMMIT}.zip"
+# miniaudio 0.11.25, o mesmo commit do vendor.ps1. Desde a 3.0 o CMake o exige também no Windows: o
+# som toca pelo XAudio2, mas a gravação -wav sai da mixagem do miniaudio. (A 3.0 tirou a interface
+# HTML, e com ela o litehtml e o nanosvg que o instalador baixava até a 2.7.)
+MINIAUDIO_COMMIT = "9634bedb5b5a2ca38c1ee7108a9358a4e233f14d"
+MINIAUDIO_URL = f"https://github.com/mackron/miniaudio/archive/{MINIAUDIO_COMMIT}.zip"
+MINIAUDIO_FILES = ["miniaudio.h", "miniaudio.c", "LICENSE"]
 # extra/ não pode ser copiado inteiro: basetsd.h, d3d.h, ddraw.h e dsound.h de lá
 # sombreiam o Windows SDK moderno e quebram winnt.h. Só estes três são usados.
 DX8_EXTRA_FILES = ["d3dxmath.h", "d3dxmath.inl", "d3dxerr.h"]
@@ -404,75 +406,31 @@ def archive_source(url: str, name: str, temp_root: Path) -> Path:
         raise RuntimeError(f"arquivo {name} não contém uma única árvore de código")
     return roots[0]
 
-def validate_litehtml(path: Path):
-    if not (path/"CMakeLists.txt").is_file():
-        raise RuntimeError("litehtml inválido: CMakeLists.txt ausente")
-
-def install_litehtml(repo: Path, source_override: Path|None):
-    dst=repo/"GeneralsMD/Code/Libraries/Source/litehtml"
-    if (dst/"CMakeLists.txt").is_file():
-        return {"status":"PRESENT","path":str(dst)}
-
-    if source_override:
-        validate_litehtml(source_override)
-        refill_vendored_dir(dst, lambda d: shutil.copytree(source_override,d,dirs_exist_ok=True))
-        return {"status":"INSTALLED_FROM_OVERRIDE","path":str(dst)}
-
-    with tempfile.TemporaryDirectory(prefix="zh-litehtml-") as td:
-        source=archive_source(LITEHTML_URL,"litehtml",Path(td))
-        validate_litehtml(source)
-        refill_vendored_dir(dst, lambda d: shutil.copytree(source,d,dirs_exist_ok=True))
-    validate_litehtml(dst)
-    return {"status":"INSTALLED","path":str(dst),"commit":LITEHTML_COMMIT}
-
-def apply_litehtml_patch(repo: Path):
-    # A única mudança do fork no litehtml, versionada ao lado dele: createFromString aceita folhas de
-    # estilo já analisadas, e o HtmlOverlay.cpp não compila sem isso. Uma cópia já corrigida tem o
-    # parâmetro master_parsed no document.h, como o vendor.ps1 do upstream confere.
-    source=repo/"GeneralsMD/Code/Libraries/Source"
-    dst=source/"litehtml"
-    header=dst/"include/litehtml/document.h"
-    if "master_parsed" in header.read_text(encoding="utf-8",errors="replace"):
-        return {"status":"PRESENT"}
-    git=shutil.which("git")
-    if not git:
-        raise RuntimeError("git não encontrado para aplicar litehtml-parsed-css.patch")
-    # Sem o teto o git acha o checkout em volta da pasta, trata cada arquivo do patch como fora
-    # dele e não aplica nada, sem avisar.
-    env=dict(os.environ, GIT_CEILING_DIRECTORIES=str(source))
-    cp=subprocess.run([git,"-c","core.autocrlf=false","apply",str(source/"litehtml-parsed-css.patch")],
-                      cwd=dst,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
-    if cp.returncode or "master_parsed" not in header.read_text(encoding="utf-8",errors="replace"):
-        raise RuntimeError("litehtml-parsed-css.patch não aplicou no litehtml: "+cp.stdout)
-    return {"status":"APPLIED"}
-
-def validate_nanosvg_source(path: Path):
-    required=["src/nanosvg.h","src/nanosvgrast.h","LICENSE.txt"]
-    missing=[name for name in required if not (path/name).is_file()]
+def validate_miniaudio_source(path: Path):
+    missing=[name for name in MINIAUDIO_FILES if not (path/name).is_file()]
     if missing:
-        raise RuntimeError("nanosvg inválido: "+", ".join(missing))
+        raise RuntimeError("miniaudio inválido: "+", ".join(missing))
 
-def install_nanosvg(repo: Path, source_override: Path|None):
-    dst=repo/"GeneralsMD/Code/Libraries/Source/nanosvg"
-    if all((dst/name).is_file() for name in ("nanosvg.h","nanosvgrast.h")):
+def install_miniaudio(repo: Path, source_override: Path|None):
+    dst=repo/"GeneralsMD/Code/Libraries/Source/miniaudio"
+    if (dst/"miniaudio.c").is_file() and (dst/"miniaudio.h").is_file():
         return {"status":"PRESENT","path":str(dst)}
 
-    def copy_headers(source: Path):
-        validate_nanosvg_source(source)
+    def copy_files(source: Path):
+        validate_miniaudio_source(source)
         def fill(d: Path):
-            for name in ("nanosvg.h","nanosvgrast.h"):
-                shutil.copy2(source/"src"/name,d/name)
-            shutil.copy2(source/"LICENSE.txt",d/"LICENSE.txt")
+            for name in MINIAUDIO_FILES:
+                shutil.copy2(source/name,d/name)
         refill_vendored_dir(dst,fill)
 
     if source_override:
-        copy_headers(source_override)
+        copy_files(source_override)
         return {"status":"INSTALLED_FROM_OVERRIDE","path":str(dst)}
 
-    with tempfile.TemporaryDirectory(prefix="zh-nanosvg-") as td:
-        source=archive_source(NANOSVG_URL,"nanosvg",Path(td))
-        copy_headers(source)
-    return {"status":"INSTALLED","path":str(dst),"commit":NANOSVG_COMMIT}
+    with tempfile.TemporaryDirectory(prefix="zh-miniaudio-") as td:
+        source=archive_source(MINIAUDIO_URL,"miniaudio",Path(td))
+        copy_files(source)
+    return {"status":"INSTALLED","path":str(dst),"commit":MINIAUDIO_COMMIT}
 
 def main():
     ap=argparse.ArgumentParser()
@@ -485,10 +443,8 @@ def main():
                     help="fixture/offline override for flat LZH-Light 1.0 source tree")
     ap.add_argument("--dx8-source",default=None,
                     help="fixture/offline override for an already extracted min-dx8-sdk tree")
-    ap.add_argument("--litehtml-source",default=None,
-                    help="fixture/offline override for an already extracted litehtml tree")
-    ap.add_argument("--nanosvg-source",default=None,
-                    help="fixture/offline override for an already extracted nanosvg tree")
+    ap.add_argument("--miniaudio-source",default=None,
+                    help="fixture/offline override for an already extracted miniaudio tree")
     args=ap.parse_args()
 
     repo=Path(args.repo).resolve()
@@ -501,9 +457,7 @@ def main():
         l=install_lzh(repo, Path(args.lzh_source).resolve() if args.lzh_source else None)
         lp=apply_lzh_patch(repo)
         d=install_directx(repo, Path(args.dx8_source).resolve() if args.dx8_source else None)
-        h=install_litehtml(repo, Path(args.litehtml_source).resolve() if args.litehtml_source else None)
-        hp=apply_litehtml_patch(repo)
-        n=install_nanosvg(repo, Path(args.nanosvg_source).resolve() if args.nanosvg_source else None)
+        m=install_miniaudio(repo, Path(args.miniaudio_source).resolve() if args.miniaudio_source else None)
     except Exception as exc:
         # No Actions vira anotação no resumo do run, que abre sem login.
         if os.environ.get("GITHUB_ACTIONS"):
@@ -517,9 +471,7 @@ def main():
     print("lzh:",l)
     print("lzh patch:",lp)
     print("directx:",d)
-    print("litehtml:",h)
-    print("litehtml patch:",hp)
-    print("nanosvg:",n)
+    print("miniaudio:",m)
 
 if __name__=="__main__":
     main()

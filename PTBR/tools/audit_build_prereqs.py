@@ -16,9 +16,8 @@ REQUIRED = [
     "GeneralsMD/Code/Libraries/Source/GameSpy/CMakeLists.txt",
     "GeneralsMD/Code/Libraries/DirectX/Include/d3d8.h",
     "GeneralsMD/Code/Libraries/DirectX/Include/d3dxmath.h",
-    "GeneralsMD/Code/Libraries/Source/litehtml/CMakeLists.txt",
-    "GeneralsMD/Code/Libraries/Source/nanosvg/nanosvg.h",
-    "GeneralsMD/Code/Libraries/Source/nanosvg/nanosvgrast.h",
+    "GeneralsMD/Code/Libraries/Source/miniaudio/miniaudio.c",
+    "GeneralsMD/Code/Libraries/Source/miniaudio/miniaudio.h",
 
     # Tracked backends used instead of the proprietary Miles/Bink SDKs (x64 build).
     "GeneralsMD/Code/Libraries/Source/WWVegas/Bink/ffmpeg/bink_ffmpeg.cpp",
@@ -38,7 +37,6 @@ REQUIRED = [
 # mensagem que fala do vendor.ps1 do upstream, não do instalador daqui.
 PATCHED = [
     ("GeneralsMD/Code/Libraries/Source/Compression/LZHCompress/CompLibHeader/_lz.h", "Zero Hour Reforged: altered"),
-    ("GeneralsMD/Code/Libraries/Source/litehtml/include/litehtml/document.h", "master_parsed"),
 ]
 
 def main():
