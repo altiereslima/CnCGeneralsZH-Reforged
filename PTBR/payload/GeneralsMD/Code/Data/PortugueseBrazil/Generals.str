@@ -4499,7 +4499,7 @@ GUI:AllTimeWins
 END
 
 GUI:AlternateMouse
-"Interface Alternativa do Mouse"
+"Mouse Alternativo"
 END
 
 GUI:AmbientVolume
@@ -4619,7 +4619,7 @@ GUI:BeaconPlacementFailed
 END
 
 GUI:BehindBuilding
-"Unidades Atrás de Estruturas"
+"Unidades Atrás de Prédios"
 END
 
 GUI:BestWinStreak
@@ -5227,7 +5227,7 @@ GUI:BuildupAnimations
 END
 
 GUI:BuildWithoutWorker
-"Construir sem Trabalhador"
+"Obra sem Trabalhador"
 END
 
 GUI:Campaign
@@ -5671,7 +5671,7 @@ GUI:Day
 END
 
 GUI:DebrisTrails
-"Rastros de Destroços das Explosões"
+"Rastros de Destroços"
 END
 
 GUI:DEBUG
@@ -5843,7 +5843,7 @@ GUI:DragTolerance
 END
 
 GUI:DrawScrollAnchor
-"Mostrar Âncora de Rolagem"
+"Mostrar Âncora"
 END
 
 GUI:EA
@@ -5867,7 +5867,7 @@ GUI:EasyCaps
 END
 
 GUI:EdgeScrollWindowed
-"Rolagem nas Bordas em Janela"
+"Rolar Bordas em Janela"
 END
 
 GUI:Email
@@ -5875,7 +5875,7 @@ GUI:Email
 END
 
 GUI:EmptyBuildingPips
-"Vagas Vazias nos Edifícios"
+"Vagas Vazias em Prédios"
 END
 
 GUI:EndCampaign
@@ -6163,7 +6163,7 @@ GUI:GPNoProfile
 END
 
 GUI:GridBuild
-"Posicionamento em Grade"
+"Construir em Grade"
 END
 
 GUI:GroundLighting
@@ -7235,7 +7235,7 @@ GUI:MediumGameSpeed
 END
 
 GUI:MenuTransitionSpeed
-"Velocidade de Transição dos Menus"
+"Velocidade dos Menus"
 END
 
 GUI:MessagesOn
@@ -7295,7 +7295,7 @@ GUI:MouseType
 END
 
 GUI:MoveScrollAnchor
-"Mover Âncora de Rolagem"
+"Mover Âncora"
 END
 
 GUI:MSAA
@@ -7439,7 +7439,7 @@ GUI:NotifiedStartIntent
 END
 
 GUI:NudgeBuild
-"Ajustar Posicionamento Bloqueado"
+"Ajustar Posição Bloqueada"
 END
 
 GUI:Nuke_SuperweaponNeutronMissile
@@ -7559,7 +7559,7 @@ GUI:OptionsGroupPicture
 END
 
 GUI:OptionsGroupPlacement
-"Posicionamento de Construções"
+"Posicionar Construções"
 END
 
 GUI:OptionsGroupProxy
@@ -7659,7 +7659,7 @@ GUI:ParkingPlacesFull
 END
 
 GUI:ParticleBounce
-"Partículas Colidem com o Solo"
+"Partículas Batem no Solo"
 END
 
 GUI:ParticleCap
@@ -8167,7 +8167,7 @@ GUI:ScreenshotCaptureDescription
 END
 
 GUI:ScrollSpeed
-"Velocidade de Rolagem da Câmera"
+"Velocidade de Rolagem"
 END
 
 GUI:SelectAGame
@@ -8487,7 +8487,7 @@ GUI:Smoke2
 END
 
 GUI:SmokeFireLighting
-"Fumaça Iluminada pelo Fogo"
+"Fogo Ilumina a Fumaça"
 END
 
 GUI:SmoothWater
@@ -8495,15 +8495,15 @@ GUI:SmoothWater
 END
 
 GUI:SnapBuild45
-"Rotação de Construção em 45°"
+"Girar Construção a 45°"
 END
 
 GUI:SnapBuildNeighbour
-"Encaixar em Construções Próximas"
+"Encaixar nas Vizinhas"
 END
 
 GUI:SnapCamera45
-"Rotação da Câmera em 45°"
+"Girar Câmera a 45°"
 END
 
 GUI:SocketError
@@ -8535,7 +8535,7 @@ GUI:Start
 END
 
 GUI:StartAtMaxZoom
-"Começar com Zoom Afastado"
+"Começar Afastado"
 END
 
 GUI:StartCustomMission
@@ -8967,7 +8967,7 @@ GUI:UseAccount
 END
 
 GUI:UseCamera
-"Seguir a Câmera Gravada"
+"Seguir Câmera Gravada"
 END
 
 GUI:UserMaps
