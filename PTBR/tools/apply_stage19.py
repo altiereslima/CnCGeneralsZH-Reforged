@@ -118,15 +118,23 @@ EXP_POINTS = (
     "\t\t// top (ControlBarLayoutUniform in ControlBar::initWindows), so nothing here moves it\n"
 )
 REPLAY_MONEY = "\"ControlBar.wnd:ControlBarProBlockInputMoney\""
+HUD_SQUARE = (
+    "\tsquare.lo.x = 300;\n"
+    "\tsquare.lo.y = 480;\n"
+    "\tsquare.hi.x = 375;\n"
+    "\tsquare.hi.y = 580;\n"
+)
 ANCHORS = {
     "ControlBar.cpp": [PIECE_TRANSFORM, PANEL_FOR_WINDOW, LAYOUT_UNIFORM, PLATE_GUARD, PLACE_IN_PANEL],
     "ControlBarScheme.cpp": [SCHEME_LOAD, FACTION_SCHEME, SCHEME_PAINTED, EXP_POINTS],
     "ReplayControls.cpp": [REPLAY_MONEY],
+    "test_gameengine.cpp": [HUD_SQUARE],
 }
 SOURCES = {
     "ControlBar.cpp": "GameEngine/Source/GameClient/GUI/ControlBar/ControlBar.cpp",
     "ControlBarScheme.cpp": "GameEngine/Source/GameClient/GUI/ControlBar/ControlBarScheme.cpp",
     "ReplayControls.cpp": "GameEngine/Source/GameClient/GUI/GUICallbacks/ReplayControls.cpp",
+    "test_gameengine.cpp": "Tests/test_gameengine.cpp",
 }
 
 def run_path(rel):
@@ -268,7 +276,16 @@ def main():
     # 10) O replay mede a faixa pelo dinheiro da EA.
     replace_once(code / SOURCES["ReplayControls.cpp"], REPLAY_MONEY, "\"ControlBar.wnd:MoneyDisplay\"")
 
-    # 11) As janelas, a arte e o esquema do ControlBar Pro saem do Code/Data e do manifesto.
+    # 11) O teste que mede a barra na escala dela (the_hud_is_measured_at_the_command_bars_own_scale)
+    #     mede o quadrado em unidades do ControlBar Pro, 75 por 100; nas placas um quadrado é 100 por 100.
+    replace_once(code / SOURCES["test_gameengine.cpp"], HUD_SQUARE,
+        "\t// PT-BR edition: the plates' bar is at one scale for both axes, so a square is 100 by 100\n"
+        "\tsquare.lo.x = 300;\n"
+        "\tsquare.lo.y = 480;\n"
+        "\tsquare.hi.x = 400;\n"
+        "\tsquare.hi.y = 580;\n")
+
+    # 12) As janelas, a arte e o esquema do ControlBar Pro saem do Code/Data e do manifesto.
     manifest = code / "BuildFingerprint.manifest"
     lines = manifest.read_text(encoding="utf-8").split("\n")
     for rel in CONTROL_BAR_PRO_FILES:
