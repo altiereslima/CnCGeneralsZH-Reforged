@@ -30,6 +30,10 @@ PATCHED_SOURCE_FILES = [
     "GeneralsMD/Code/Main/WinMain.cpp",
     "GeneralsMD/Code/GameEngine/Source/Common/CommandLine.cpp",
     "GeneralsMD/Code/GameEngine/Source/Common/System/FileSystem.cpp",
+    "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/ControlBar/ControlBar.cpp",
+    "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/ControlBar/ControlBarScheme.cpp",
+    "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/ReplayControls.cpp",
+    "GeneralsMD/Code/BuildFingerprint.manifest",
 ]
 
 # Casos de teste que falham sem culpa do patch PT-BR. Só estes nomes são tolerados;
@@ -46,6 +50,9 @@ KNOWN_UPSTREAM_TEST_FAILURES = {
     # não atualizou este teste, que ainda espera que o arrasto deixe a câmera parada. Nada do
     # patch PT-BR toca no radar (ControlBarCallback.cpp) nem no teste.
     "minimap_classic_looks_on_the_press_in_both_mouse_setups",
+    # Mede a barra do ControlBar Pro (os três pedaços na altura da tela com a proporção da pintura de
+    # 1080), que o estágio 19 tira de propósito para voltar às placas da 2.7.
+    "control_bar_pro_is_three_pieces_at_the_screens_height",
 }
 
 CORE_LOCALE_FILES=["Generals.str","Language.ini"]
@@ -272,8 +279,8 @@ def main():
         if state == "clean":
             backup = backup_sources(repo, result_dir)
             result["backup"] = str(backup)
-            run([sys.executable, str(pkg/"tools/apply_stage18.py"), str(repo)],
-                log=logs/"01_apply_stage18.log")
+            run([sys.executable, str(pkg/"tools/apply_stage19.py"), str(repo)],
+                log=logs/"01_apply_stage19.log")
             result["steps"]["apply_patch"] = "PASS"
         elif state == "patched":
             result["steps"]["apply_patch"] = "SKIPPED_ALREADY_PATCHED"

@@ -18,9 +18,11 @@ O que a edição PT-BR muda no jogo, e a chave do `Options.ini` que volta ao com
 - idioma inicial Português (Brasil), o idioma 3 desde que o upstream pôs o alemão no 2 (um
   `Options.ini` de antes, em PT-BR, continua em PT-BR); a opção de idioma do menu continua valendo,
   e `-language portuguese` também escolhe;
-- visual clássico: desde a 3.0 o upstream tem uma interface só, no layout do Zero Hour (placas
-  texturizadas, menu Esc e piscar de "sob ataque" da EA, sem páginas HTML), e o validador confere
-  que continua assim; a edição não precisa mais mudar nada nela;
+- visual clássico: desde a 3.0 o upstream tem uma interface só, sem páginas HTML, com o menu Esc,
+  a diplomacia e o piscar de "sob ataque" da EA, e o validador confere que continua assim. A barra
+  de comando dele é a do mod ControlBar Pro; o estágio 19 a tira do build e volta às placas
+  texturizadas da 2.7 sobre as janelas da EA (`LIMPAR_CONTROLBAR_PRO.bat`, no pacote, apaga os
+  arquivos soltos que os builds 40 e 41 deixaram na pasta do jogo);
 - caixa do relógio e FPS escondida: a opção "Caixa de Informações" do menu (`ShowNetBox = yes`)
   mostra;
 - nomes das IAs do lobby traduzidos;

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import argparse, json
+import argparse, json, sys
 from validate_upstream_checkout import unconditional
 
 CORE_LOCALE_FILES=["Generals.str","Language.ini"]
@@ -125,6 +125,26 @@ def main():
     test=(code/"Tests/test_gameengine.cpp").read_text(encoding="utf-8")
     need(test,'"Turkish/", "German/", "PortugueseBrazil/" };',"shipped-masters test keeps Data\\ in front of PortugueseBrazil")
     checks["fork_owned_locale"]="PASS"
+
+    # the plates' command bar, ControlBar Pro left out
+    bar=(code/"GameEngine/Source/GameClient/GUI/ControlBar/ControlBar.cpp").read_text(encoding="utf-8")
+    scheme=(code/"GameEngine/Source/GameClient/GUI/ControlBar/ControlBarScheme.cpp").read_text(encoding="utf-8")
+    need(bar,"*sx = *sy = loadScaleX < loadScaleY ? loadScaleX : loadScaleY;","panels at one scale")
+    need(bar,'"LeftHUD", "WinUAttack", "BackgroundMarker"',"windows to panels by name")
+    if "the plates are only the tests' to measure now" in bar:
+        raise RuntimeError("missing postcondition: the plates are still switched off")
+    need(scheme,"return m_currentScheme != NULL && m_currentScheme->m_controlBarPro;","EA's schemes leave the bar to the plates")
+    if 'ControlBarProReforged.ini" ), INI_LOAD_OVERWRITE' in scheme:
+        raise RuntimeError("missing postcondition: ControlBar Pro's schemes are still read")
+    if "ControlBarProBlockInputMoney" in (code/"GameEngine/Source/GameClient/GUI/GUICallbacks/ReplayControls.cpp").read_text(encoding="utf-8"):
+        raise RuntimeError("missing postcondition: the replay strip still looks for ControlBar Pro's money pane")
+    sys.path.insert(0,str(Path(__file__).parent))
+    import apply_stage19
+    manifest=(code/"BuildFingerprint.manifest").read_text(encoding="utf-8").split("\n")
+    left=[rel for rel in apply_stage19.CONTROL_BAR_PRO_FILES if (code/rel).exists() or rel in manifest]
+    if left:
+        raise RuntimeError("missing postcondition: ControlBar Pro still in the build: "+", ".join(left))
+    checks["plates_command_bar"]="PASS"
 
     loc=code/"Data/PortugueseBrazil"
     miss_core=[x for x in CORE_LOCALE_FILES if not (loc/x).is_file()]

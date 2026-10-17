@@ -196,6 +196,23 @@ def validate(repo):
     need(cmake, CMAKE_SPLASH_COPY, "CMakeLists.txt copies Install_Final.bmp next to the exe")
     result["checks"]["splash_anchors"] = "PASS"
 
+    # Stage 19: the plates' command bar in place of ControlBar Pro.
+    import apply_stage19
+    for name, anchors in apply_stage19.ANCHORS.items():
+        src = (code/apply_stage19.SOURCES[name]).read_text(encoding="utf-8-sig")
+        for i, anchor in enumerate(anchors):
+            need(src, anchor, f"{name} plates anchor {i + 1}")
+    manifest = (code/"BuildFingerprint.manifest").read_text(encoding="utf-8").split("\n")
+    for rel in apply_stage19.CONTROL_BAR_PRO_FILES:
+        if not (code/rel).is_file():
+            raise RuntimeError(f"{rel}: ausente, o upstream mudou o ControlBar Pro")
+        need(manifest, rel, f"BuildFingerprint.manifest {rel}")
+    for plate in ("America", "China", "GLA"):
+        for piece in ("Left", "Center", "Right"):
+            if not (code/f"Data/Art/Textures/ReforgedBar{plate}{piece}.tga").is_file():
+                raise RuntimeError(f"ReforgedBar{plate}{piece}.tga: a placa saiu do upstream")
+    result["checks"]["plates_bar_anchors"] = "PASS"
+
     result["status"] = "PASS"
     return result
 

@@ -175,7 +175,12 @@ jobs:
           DLLs included; mss32.dll and binkw32.dll are not used by the 64-bit build.
           Install_Final.bmp is the edition's widescreen opening splash; it replaces the one
           next to generals.exe.
+          The command bar is the textured plates over EA's windows, not ControlBar Pro. A folder
+          that held build 40 or 41 still has ControlBar Pro's loose files, which beat EA's:
+          run LIMPAR_CONTROLBAR_PRO.bat once, next to generals.exe, to remove them.
           "@ | Set-Content "$out\README_INSTALL.txt" -Encoding UTF8
+          python PTBR\tools\apply_stage19.py --cleanup-bat "$out\LIMPAR_CONTROLBAR_PRO.bat"
+          if ($LASTEXITCODE -ne 0) { throw "LIMPAR_CONTROLBAR_PRO.bat was not written" }
 
       - name: Upload PT-BR build
         uses: actions/upload-artifact@v6
